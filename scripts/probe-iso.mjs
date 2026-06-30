@@ -1,0 +1,12 @@
+import puppeteer from "puppeteer";
+const b=await puppeteer.launch({headless:"new",args:["--no-sandbox","--use-gl=swiftshader","--enable-unsafe-swiftshader"]});
+const p=await b.newPage(); await p.setViewport({width:1280,height:820,deviceScaleFactor:1});
+const errs=[]; p.on("pageerror",e=>errs.push(e.message));
+await p.goto("http://localhost:5173/",{waitUntil:"networkidle0",timeout:20000}).catch(()=>{});
+await new Promise(r=>setTimeout(r,700));
+const clickText=async t=>{const h=await p.evaluateHandle(t=>[...document.querySelectorAll("button")].find(b=>b.textContent.trim()===t),t);const el=h.asElement();if(el){await el.click();return true;}return false;};
+await clickText("Perspektive"); await new Promise(r=>setTimeout(r,500));
+await clickText("Isometrie"); await new Promise(r=>setTimeout(r,800));
+await p.screenshot({path:"scripts/probe-iso.png"});
+console.log("iso done, errs:", errs.join("|")||"none");
+await b.close();

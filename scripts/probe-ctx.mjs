@@ -1,0 +1,11 @@
+import puppeteer from "puppeteer";
+const b=await puppeteer.launch({headless:"new",args:["--no-sandbox","--use-gl=swiftshader","--enable-unsafe-swiftshader"]});
+const p=await b.newPage(); await p.setViewport({width:1280,height:820,deviceScaleFactor:1.5});
+await p.goto("http://localhost:5187/",{waitUntil:"networkidle0",timeout:20000}).catch(()=>{});
+await new Promise(r=>setTimeout(r,1200));
+const opened=await p.evaluate(()=>{const l=[...document.querySelectorAll(".nav-label")].find(e=>/Erdgeschoss|Obergeschoss|Detail|Ansicht|Schnitt/.test(e.textContent||""));if(!l)return "no-row";const row=l.parentElement;const r=row.getBoundingClientRect();const ev=new MouseEvent("contextmenu",{bubbles:true,cancelable:true,clientX:r.x+20,clientY:r.y+r.height/2,button:2});row.dispatchEvent(ev);return "dispatched";});
+await new Promise(r=>setTimeout(r,400));
+const info=await p.evaluate(()=>{const m=document.querySelector(".ctx-menu");if(!m)return{menu:false};const icons=[...m.querySelectorAll(".ctx-item-icon .material-symbols-outlined")];const cs=icons[0]?getComputedStyle(icons[0]):null;return{menu:true,nItems:m.querySelectorAll(".ctx-item").length,nIcons:icons.length,iconPx:cs?.fontSize,glyphFont:/Material Symbols/.test(cs?.fontFamily||""),ligature:icons[0]?.textContent,hoverBg:getComputedStyle(m.querySelector(".ctx-item")).getPropertyValue("--ctx-hover")};});
+await p.screenshot({path:"scripts/probe-ctx.png"});
+console.log("trigger:",opened,JSON.stringify(info));
+await b.close();

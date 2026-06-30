@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Probe / screenshot artifacts (regenerated)
+scripts/*.png
+
+# Editor / OS
+.DS_Store
+*.log

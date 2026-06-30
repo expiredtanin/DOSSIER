@@ -1,0 +1,2783 @@
+// Wurzel der App: ein semantisches Projekt im React-State; jede Ansicht wird
+// daraus abgeleitet. Die Oberfläche läuft auf dem Panel-System (src/panels):
+// links (und optional rechts) je ein Dock mit Tabs, dazwischen die Hauptansicht.
+// Die beiden dockbaren Kern-Panels (Zeichnungsebenen, Ebenen) registrieren sich
+// über den Import von builtinPanels und beziehen Zustand + Handler aus dem
+// PanelHostContext — kein Prop-Drilling mehr.
+//
+// „Ressourcen" ist KEIN Dock-Panel: der ResourceManager ist ein schwebendes
+// Fenster (Overlay über allem), das die Oberleiste öffnet und über X / Klick auf
+// den abgedunkelten Hintergrund / Esc schließt. Ein leeres Dock wird nicht
+// gerendert, damit die Mitte (Grundriss/Perspektive) die Breite voll nutzt.
+//
+// Bearbeitung läuft ausschließlich immutabel über setProject. Sichtbare
+// Kategorie-Codes (collectVisibleCodes) steuern, was Grundriss und 3D zeigen.
+// Der Darstellungsmodus je Panel (DisplayMode) verfeinert das zusätzlich (die
+// fünf DOSSIER-Modi): das Zeichnungsebenen-Panel steuert das 3D, das
+// Ebenen-Panel die Kategorie-Darstellung in Grundriss UND 3D.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  collectVisibleCodes,
+  flattenCategories,
+  formatM,
+  getWallType,
+  wallTypeThickness,
+} from "./model/types";
+import { wallCorners } from "./model/geometry";
+import { leftNormal, normalize, scale, sub } from "./model/geometry";
+import type {
+  DrawingLevel,
+  EdgeGrip,
+  LayerCategory,
+  Project,
+  Vec2,
+} from "./model/types";
+import { generatePlan } from "./plan/generatePlan";
+import type { CategoryDisplayResolver } from "./plan/generatePlan";
+import { parseDxf } from "./io/dxfParser";
+import type { DxfImportResult } from "./io/dxfParser";
+import { setDxfImportTrigger } from "./io/dxfImportHook";
+import { ImportDialog, buildDrawings } from "./ui/ImportDialog";
+import type { ImportDecision } from "./ui/ImportDialog";
+import { PlanView } from "./plan/PlanView";
+import type {
+  PlanViewHandle,
+  PlanSelection,
+  MarqueeSelection,
+  GripHandlers,
+} from "./plan/PlanView";
+import { Viewport3D } from "./viewport/Viewport3D";
+import type { DisplayResolver, ViewportContextInfo } from "./viewport/Viewport3D";
+import { ResourceManager } from "./ui/ResourceManager";
+import type { ResourceManagerHandlers } from "./ui/ResourceManager";
+import { TopBar } from "./ui/TopBar";
+import type { DetailLevel, RenderMode, View3d, ViewType } from "./ui/TopBar";
+import { StatusBar } from "./ui/StatusBar";
+import { TransformBar } from "./ui/TransformBar";
+import { getTool } from "./tools/tools";
+import { computeSnap } from "./tools/snapping";
+import {
+  requiredPoints,
+  transformPreview,
+} from "./tools/transform";
+import type { CopyMode, TransformOp, TransformSelection } from "./tools/transform";
+import { DEFAULT_SNAP } from "./tools/types";
+import type {
+  SnapSettings,
+  ToolContext,
+  ToolDraft,
+  ToolHandlers,
+  ToolId,
+  ToolMods,
+  ToolPointer,
+  ToolState,
+} from "./tools/types";
+import { ContextMenu, MenuIcon } from "./ui/ContextMenu";
+import type { ContextMenuItem } from "./ui/ContextMenu";
+import { CommandLine } from "./ui/CommandLine";
+import type { CommandLineHandle } from "./ui/CommandLine";
+import { CommandEngine } from "./commands/engine";
+import type { EngineHost } from "./commands/engine";
+import type { CommandContext } from "./commands/types";
+import { t, useT } from "./i18n";
+import {
+  cutSegment,
+  joinDrawings,
+  nearestEdgeIndex,
+  splitDrawing,
+  toPolyForm,
+} from "./editors/splitJoin";
+import type { PolyForm } from "./editors/splitJoin";
+
+// Globaler Store (Slices: project/selection/view/layout).
+import { useStore } from "./state/appStore";
+import {
+  categoryLabel,
+  drawingVertices,
+  findCategory,
+} from "./state/projectSlice";
+import { reconcileLayout } from "./state/layoutSlice";
+
+// Panel-System.
+import { Dock } from "./panels/Dock";
+import { FloatingPanel } from "./panels/FloatingPanel";
+import { DragOverlay, usePanelDrag } from "./panels/panelDrag";
+import { itemDisplay } from "./panels/displayMode";
+import { PanelHostContext } from "./panels/types";
+import type {
+  DisplayMode,
+  DockId,
+  LayoutState,
+  PanelHost,
+} from "./panels/types";
+import type { PanelHostValue } from "./panels/host";
+import { deriveSelection } from "./state/selectionInfo";
+import {
+  deleteNamedLayout,
+  listNamedLayouts,
+  loadNamedLayout,
+  saveLayout,
+  saveNamedLayout,
+} from "./panels/layout";
+import {
+  deleteDrawingCombo,
+  deleteLayerCombo,
+  listDrawingCombos,
+  listLayerCombos,
+  loadDrawingCombo,
+  loadLayerCombo,
+  saveDrawingCombo,
+  saveLayerCombo,
+} from "./state/visibilitySets";
+// Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
+import { BUILTIN_PANEL_IDS } from "./panels/builtinPanels";
+
+/**
+ * Offenes Kontextmenü — genau eine Quelle. `x/y` sind Viewport-Pixel (clientX/Y).
+ *   • "layer"    — Rechtsklick auf eine Ebenen-Zeile (Kategorie-Code).
+ *   • "level"    — Rechtsklick auf eine Zeichnungsebenen-Zeile (Ebenen-ID).
+ *   • "plan"     — Rechtsklick im Grundriss (optional getroffene Wand).
+ *   • "viewport" — Rechtsklick im 3D (optional getroffene Wand).
+ */
+type MenuState =
+  | { kind: "layer"; code: string; x: number; y: number }
+  | { kind: "level"; id: string; x: number; y: number }
+  | { kind: "plan"; wallId: string | null; x: number; y: number }
+  | { kind: "viewport"; wallId: string | null; x: number; y: number }
+  | null;
+
+/** Offener Inline-Editor (aus einem Menüpunkt). `x/y` = Anker in Viewport-Px. */
+type EditorState =
+  | { kind: "layer"; code: string; x: number; y: number }
+  | { kind: "level"; id: string; x: number; y: number }
+  | null;
+
+/** Fragt die Kopienanzahl (≥1) für die Modi O/P ab; null bei Abbruch/ungültig. */
+function promptCount(): number | null {
+  const s = window.prompt(t("transform.countPrompt"), "3");
+  if (s == null) return null;
+  const n = Math.round(Number(s));
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+export default function App() {
+  // Sprachwechsel abonnieren: re-rendert den gesamten Baum, wenn die Sprache
+  // umgeschaltet wird (alle Kinder lesen denselben modulweiten Zustand über t).
+  useT();
+
+  // ── Globaler Zustand aus dem Store (Slices: project/selection/view/layout) ─
+  // Pro useStore-Aufruf EIN Feld selektieren (Referenz-Gleichheit, sonst
+  // Endlosschleife). Actions leben ebenfalls im Zustand und sind referenzstabil.
+  const project = useStore((s) => s.project);
+  const setProject = useStore((s) => s.setProject);
+  const activeLevelId = useStore((s) => s.activeLevelId);
+  const setActiveLevelId = useStore((s) => s.setActiveLevelId);
+  const viewType = useStore((s) => s.viewType);
+  const setViewType = useStore((s) => s.setViewType);
+
+  // Schwebendes Ressourcen-Fenster (Overlay über allem). Transienter UI-State,
+  // bleibt lokal. Wird über die Oberleiste geöffnet und über X / Hintergrund-
+  // Klick / Esc geschlossen.
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+
+  // Modaler Import-Dialog (DXF/DWG). Offen, sobald eine Datei gewählt/fallen-
+  // gelassen wurde; hält Dateiname, geparstes Ergebnis (null bei DWG) und das
+  // DWG-Flag (kein Parser). null = kein Dialog offen. Transienter UI-State.
+  const [importState, setImportState] = useState<{
+    fileName: string;
+    isDwg: boolean;
+    parsed: DxfImportResult | null;
+    // true, solange DWG noch geparst wird (WASM lädt/läuft).
+    loading?: boolean;
+  } | null>(null);
+  // Visuelles Drop-Feedback (dezenter Rahmen), solange eine Datei über die App
+  // gezogen wird. Zählt dragenter/dragleave aus, um Flackern bei Kind-Elementen
+  // zu vermeiden.
+  const [dropActive, setDropActive] = useState(false);
+
+  // ── Oberleisten-/Status-Zustand (View-State, kein Modell) ─────────────────
+  // detail wirkt im Grundriss (Symbole + Schraffuren/Linien), renderMode in der
+  // 3D-Ansicht (3 Modi), referenceLines schaltet die Wand-Achslinien.
+  const detail = useStore((s) => s.detail);
+  const setDetail = useStore((s) => s.setDetail);
+  const renderMode = useStore((s) => s.renderMode);
+  const setRenderMode = useStore((s) => s.setRenderMode);
+  const view3d = useStore((s) => s.view3d);
+  const setView3d = useStore((s) => s.setView3d);
+  const fov = useStore((s) => s.fov);
+  const setFov = useStore((s) => s.setFov);
+  const planColorMode = useStore((s) => s.planColorMode);
+  const setPlanColorMode = useStore((s) => s.setPlanColorMode);
+  const referenceLines = useStore((s) => s.referenceLines);
+  const setReferenceLines = useStore((s) => s.setReferenceLines);
+  const lineMode = useStore((s) => s.lineMode);
+  const setLineMode = useStore((s) => s.setLineMode);
+  const scaleDenominator = useStore((s) => s.scaleDenominator);
+  const setScaleDenominator = useStore((s) => s.setScaleDenominator);
+  // LIVE Papier-Massstab-Nenner aus der View-Transform (PlanView meldet ihn);
+  // null = keine Plan-Ansicht aktiv. Transienter UI-State, bleibt lokal.
+  const [liveScale, setLiveScale] = useState<number | null>(null);
+  // Cursor in Modell-Metern (aus der Plan-Ansicht) bzw. null (nicht über Plan).
+  const [cursor, setCursor] = useState<Vec2 | null>(null);
+  // Live-Zoom der Plan-Ansicht in Prozent (eingepasst = 100 %).
+  const [zoomPercent, setZoomPercent] = useState(100);
+
+  // ── Zeichenwerkzeuge (transienter View-State; bleibt lokal) ───────────────
+  // Aktives Werkzeug, Werkzeug-Parameter (Wandtyp/Kategorie/Linienstil), Snap-
+  // Einstellungen sowie der laufende Werkzeug-Zustand (Ref, kein Re-Render je
+  // Mausbewegung) und die Live-Vorschau (Draft → Overlay in PlanView).
+  const [activeTool, setActiveTool] = useState<ToolId>("select");
+  const [activeWallTypeId, setActiveWallTypeId] = useState<string>(
+    project.wallTypes[0].id,
+  );
+  const activeCategoryCode = useStore((s) => s.activeCategoryCode);
+  const setActiveCategoryCode = useStore((s) => s.setActiveCategoryCode);
+  const [activeLineStyleId] = useState<string>(project.lineStyles[0].id);
+  const [snap, setSnap] = useState<SnapSettings>(DEFAULT_SNAP);
+  const toolStateRef = useRef<ToolState>(getTool("select").init());
+  const [draft, setDraft] = useState<ToolDraft | null>(null);
+  // Aktive Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl — Vectorworks-
+  // Stil mit U/I/O/P-Modusleiste. null = keine Transformation läuft.
+  const [activeTransform, setActiveTransform] = useState<{
+    op: TransformOp;
+    copyMode: CopyMode;
+    count: number;
+    points: Vec2[];
+  } | null>(null);
+
+  // ── Auswahl (Store-Slice) ─────────────────────────────────────────────────
+  const selectedWallIds = useStore((s) => s.selectedWallIds);
+  const setSelectedWallIds = useStore((s) => s.setSelectedWallIds);
+  // 2D-Auswahl ist jetzt eine MENGE (Marquee/Mehrfach). Für die bestehende
+  // Einzel-Element-Maschinerie (Grips, Edit, Attribute, Object-Info) wird lokal
+  // der „eine" gewählte Zeichnungs-ID abgeleitet (nur bei genau einem Element);
+  // `setSelectedDrawingId` bleibt als bequeme Einzel-Setter-Hülle erhalten.
+  const selectedDrawingIds = useStore((s) => s.selectedDrawingIds);
+  const setSelectedDrawingIds = useStore((s) => s.setSelectedDrawingIds);
+  const selectedDrawingId =
+    selectedDrawingIds.length === 1 ? selectedDrawingIds[0] : null;
+  const setSelectedDrawingId = (id: string | null) =>
+    setSelectedDrawingIds(id ? [id] : []);
+  // Bequemer Einzel-Selektor (erste gewählte Wand).
+  const selectedWallId = selectedWallIds[0] ?? null;
+
+  // ── Kontextmenüs (transienter UI-State, bleibt lokal) ─────────────────────
+  // Eigenschaften-Zwischenablage des Ebenen-Kontextmenüs (Farbe + Linienstärke).
+  const [layerClipboard, setLayerClipboard] = useState<{
+    color: string;
+    lw: number;
+  } | null>(null);
+  // Offenes Kontextmenü (genau eines) — Quelle bestimmt die Einträge.
+  const [menu, setMenu] = useState<MenuState>(null);
+  // Offener Inline-Editor (Ebene bzw. Geschoss) — aus einem Menüpunkt geöffnet.
+  const [editor, setEditor] = useState<EditorState>(null);
+
+  // Beim Geschosswechsel die Wand-Auswahl + offene Overlays zurücksetzen (die
+  // Wände eines anderen Geschosses sind eine andere Menge). Der Ansichtswechsel
+  // (Grundriss ↔ 3D) lässt die Auswahl bestehen — dieselbe wallId gilt in
+  // beiden Ansichten; nur die offenen Overlays werden geschlossen.
+  useEffect(() => {
+    setSelectedWallIds([]);
+    setSelectedDrawingId(null);
+    setMenu(null);
+    setEditor(null);
+  }, [activeLevelId]);
+  useEffect(() => {
+    setMenu(null);
+    setEditor(null);
+  }, [viewType]);
+
+  // Imperatives Handle der Plan-Ansicht (für die Zoom-Buttons der Oberleiste).
+  // useRef<T>(null) → RefObject<T> (current: T) — die für ein ref-Prop passende
+  // Form; .current bleibt zur Laufzeit null, solange PlanView nicht montiert ist
+  // (Optional-Chaining unten fängt das ab).
+  const planViewRef = useRef<PlanViewHandle>(null);
+
+  // Verstecktes Datei-Input für den DXF-Import (Site-Panel/„import"-Befehl).
+  // Der Klick auf „DXF importieren" triggert .click() dieses Inputs; onChange
+  // liest die Datei als Text und reicht sie durch parseDxf → addContextObjects.
+  const dxfInputRef = useRef<HTMLInputElement>(null);
+
+  // Den DXF-Datei-Dialog-Öffner für den „import"-Befehl registrieren (entkoppelt
+  // über den Modul-Hook). Beim Unmount wieder abmelden.
+  useEffect(() => {
+    setDxfImportTrigger(() => dxfInputRef.current?.click());
+    return () => setDxfImportTrigger(null);
+  }, []);
+
+  // Panel-Layout (Docks/Tabs/Größen) — aus dem Store-Slice (Init lädt aus
+  // localStorage + reconcile). Bei jeder Änderung zurückspeichern.
+  const layout = useStore((s) => s.layout);
+  const setLayout = useStore((s) => s.setLayout);
+  // Auf die Modus-Map abonnieren, damit App bei einer Moduswahl re-rendert und
+  // die abgeleiteten Resolver (floorDisplay/categoryDisplay) neu berechnet.
+  const displayModes = useStore((s) => s.displayModes);
+  const modeFor = useStore((s) => s.modeFor);
+  const setModeFor = useStore((s) => s.setModeFor);
+  useEffect(() => {
+    saveLayout(layout);
+  }, [layout]);
+
+  // Esc schließt das schwebende Ressourcen-Fenster (nur registriert, solange es
+  // offen ist).
+  useEffect(() => {
+    if (!resourcesOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setResourcesOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [resourcesOpen]);
+
+  const activeLevel =
+    project.drawingLevels.find((z) => z.id === activeLevelId) ??
+    project.drawingLevels[0];
+
+  // TEMP-PROBE-HOOK (split/join verification) — wird nach der Verifikation entfernt.
+  useEffect(() => {
+    (window as unknown as { __drawings2d?: unknown }).__drawings2d =
+      project.drawings2d.map((d) => ({ id: d.id, geom: d.geom }));
+  }, [project.drawings2d]);
+
+  // Sichtbare Kategorie-Codes — Basisfilter für Grundriss & 3D.
+  const visibleCodes = useMemo(
+    () => collectVisibleCodes(project.layers),
+    [project.layers],
+  );
+
+  // ── ToolController (Zeichenwerkzeuge) ─────────────────────────────────────
+  // PlanView meldet rohe Modellpunkte + Pixel/Meter hierher; wir snappen, fahren
+  // das aktive Werkzeug (Zustand in toolStateRef, kein Re-Render je Bewegung) und
+  // halten den Draft (Vorschau) im State. Commit läuft immutabel über setProject.
+  const toolCtx: ToolContext = useMemo(
+    () => ({
+      project,
+      level: activeLevel,
+      defaultCategoryCode: activeCategoryCode,
+      activeWallTypeId,
+      activeLineStyleId,
+    }),
+    [project, activeLevel, activeCategoryCode, activeWallTypeId, activeLineStyleId],
+  );
+
+  // Beim Werkzeugwechsel / Geschoss-/Ansichtswechsel: laufenden Entwurf +
+  // laufende Transformation verwerfen.
+  useEffect(() => {
+    toolStateRef.current = getTool(activeTool).init();
+    setDraft(null);
+    setActiveTransform(null);
+  }, [activeTool, activeLevelId, viewType]);
+
+  // Snap-Kandidaten brauchen die bereits gesetzten Punkte + den letzten Punkt aus
+  // dem laufenden Werkzeug-Zustand (Wand: points[], Linie: a).
+  const draftPointsFromState = (st: ToolState): Vec2[] => {
+    const s = st as { points?: Vec2[]; a?: Vec2 };
+    if (s.points) return s.points;
+    if (s.a) return [s.a];
+    return [];
+  };
+
+  const snapFor = (raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+    const pts = draftPointsFromState(toolStateRef.current);
+    return computeSnap({
+      raw,
+      project,
+      levelId: activeLevel.id,
+      visibleCodes,
+      settings: snap,
+      draftPoints: pts,
+      lastPoint: pts.length ? pts[pts.length - 1] : null,
+      pxPerMeter,
+      shift: mods.shift,
+      ctrl: mods.ctrl,
+    });
+  };
+
+  // Wendet ein ToolResult an: Draft (+ Snap-Marker) zeigen, ggf. committen/abschließen.
+  const applyToolResult = (
+    res: { draft: ToolDraft | null; commit?: (p: Project) => Project; done?: boolean },
+    snapResult: ReturnType<typeof snapFor>,
+  ) => {
+    if (res.draft) setDraft({ ...res.draft, snap: snapResult });
+    else if (snapResult) setDraft({ preview: [], vertices: [], snap: snapResult });
+    else setDraft(null);
+    if (res.commit) setProject(res.commit);
+    if (res.done) toolStateRef.current = getTool(activeTool).init();
+  };
+
+  const runToolStep = (
+    kind: "move" | "click",
+    raw: Vec2,
+    pxPerMeter: number,
+    mods: ToolMods,
+  ) => {
+    const tool = getTool(activeTool);
+    const snapResult = snapFor(raw, pxPerMeter, mods);
+    const p: ToolPointer = {
+      raw,
+      snap: snapResult,
+      point: snapResult?.point ?? raw,
+      shift: mods.shift,
+      ctrl: mods.ctrl,
+      alt: mods.alt,
+      button: 0,
+    };
+    const [st, res] =
+      kind === "click"
+        ? tool.onClick(toolStateRef.current, p, toolCtx)
+        : tool.onMove(toolStateRef.current, p, toolCtx);
+    toolStateRef.current = st;
+    applyToolResult(res, snapResult);
+  };
+
+  // ── Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl ──────────────
+  const transformSel: TransformSelection = {
+    wallIds: selectedWallIds,
+    drawingId: selectedDrawingId,
+  };
+  const snapForTransform = (raw: Vec2, pxPerMeter: number, mods: ToolMods, points: Vec2[]) =>
+    computeSnap({
+      raw,
+      project,
+      levelId: activeLevel.id,
+      visibleCodes,
+      settings: snap,
+      draftPoints: points,
+      lastPoint: points.length ? points[points.length - 1] : null,
+      pxPerMeter,
+      shift: mods.shift,
+      ctrl: mods.ctrl,
+    });
+  const transformMove = (raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+    const tr = activeTransform!;
+    const snapResult = snapForTransform(raw, pxPerMeter, mods, tr.points);
+    const cursor = snapResult?.point ?? raw;
+    const need = requiredPoints(tr.op);
+    const eff = [...tr.points, cursor].slice(0, need);
+    const preview =
+      eff.length === need
+        ? transformPreview(project, transformSel, tr.op, eff, tr.copyMode, tr.count)
+        : [];
+    setDraft({ preview, vertices: tr.points, snap: snapResult });
+  };
+  const transformClick = (raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+    const tr = activeTransform!;
+    const snapResult = snapForTransform(raw, pxPerMeter, mods, tr.points);
+    const pt = snapResult?.point ?? raw;
+    const points = [...tr.points, pt];
+    if (points.length >= requiredPoints(tr.op)) {
+      commitTransformOn(transformSel, tr.op, points, tr.copyMode, tr.count);
+      setActiveTransform(null);
+      setDraft(null);
+    } else {
+      setActiveTransform({ ...tr, points });
+    }
+  };
+
+  const toolHandlers: ToolHandlers = {
+    onToolMove: (raw, pxPerMeter, mods) => {
+      // Läuft ein Befehl, übernimmt die Engine die Plan-Eingabe (ein Eingabepfad).
+      if (engineRef.current?.isActive()) {
+        engineRef.current.move(raw);
+        return;
+      }
+      activeTransform
+        ? transformMove(raw, pxPerMeter, mods)
+        : runToolStep("move", raw, pxPerMeter, mods);
+    },
+    onToolClick: (raw, pxPerMeter, mods) => {
+      if (engineRef.current?.isActive()) {
+        engineRef.current.pick(raw);
+        return;
+      }
+      activeTransform
+        ? transformClick(raw, pxPerMeter, mods)
+        : runToolStep("click", raw, pxPerMeter, mods);
+    },
+    onToolCommit: () => {
+      // Rechtsklick im Viewport = Enter an die Engine (§2.3), wenn ein Befehl läuft.
+      if (engineRef.current?.isActive()) {
+        engineRef.current.confirm();
+        return;
+      }
+      if (activeTransform) {
+        // Rechts-/Doppelklick während einer Transformation = abbrechen.
+        setActiveTransform(null);
+        setDraft(null);
+        return;
+      }
+      const tool = getTool(activeTool);
+      const [st, res] = tool.onCommitGesture(toolStateRef.current, toolCtx);
+      toolStateRef.current = st;
+      if (res.commit) setProject(res.commit);
+      setDraft(null);
+      if (res.done) toolStateRef.current = tool.init();
+    },
+    draft,
+  };
+
+  // ── Command-Engine (Rhino-artiges Befehlssystem) ──────────────────────────
+  // Eine stabile Engine-Instanz; alle Live-Werte (Kontext/Snap/visibleCodes)
+  // liest der Host über einen jeweils aktualisierten `latest`-Ref, damit die
+  // Instanz nicht je Render neu gebaut werden muss. Die Engine speist Picks +
+  // getippte Eingabe in DENSELBEN Schritt (ein Eingabepfad). Koexistenz: läuft
+  // ein Befehl, übernimmt er die linke Maustaste der Plan-Ansicht über denselben
+  // toolHandlers-Pfad wie die Alt-Tools (siehe unten).
+  const cmdLatest = useRef({
+    project,
+    activeLevel,
+    activeCategoryCode,
+    activeLineStyleId,
+    visibleCodes,
+    snap,
+    selectedWallIds,
+    selectedDrawingId,
+    setProject,
+    setDraft,
+  });
+  cmdLatest.current = {
+    project,
+    activeLevel,
+    activeCategoryCode,
+    activeLineStyleId,
+    visibleCodes,
+    snap,
+    selectedWallIds,
+    selectedDrawingId,
+    setProject,
+    setDraft,
+  };
+  const commandLineRef = useRef<CommandLineHandle>(null);
+  const engineRef = useRef<CommandEngine | null>(null);
+  if (engineRef.current === null) {
+    const host: EngineHost = {
+      context: (lastPoint): CommandContext => {
+        const c = cmdLatest.current;
+        return {
+          project: c.project,
+          level: c.activeLevel,
+          defaultCategoryCode: c.activeCategoryCode,
+          activeLineStyleId: c.activeLineStyleId,
+          lastPoint,
+          // Vorab gesetzte Auswahl aus dem Store (Rhino: erst selektieren, dann
+          // Befehl). Move/Copy/Offset operieren darauf.
+          selection: {
+            wallIds: c.selectedWallIds,
+            drawingId: c.selectedDrawingId,
+          },
+        };
+      },
+      snap: (raw, draftPoints) => {
+        const c = cmdLatest.current;
+        return computeSnap({
+          raw,
+          project: c.project,
+          levelId: c.activeLevel.id,
+          visibleCodes: c.visibleCodes,
+          settings: c.snap,
+          draftPoints,
+          lastPoint: draftPoints.length ? draftPoints[draftPoints.length - 1] : null,
+          pxPerMeter: planViewRef.current?.pxPerMeter() ?? 90,
+          shift: false,
+          ctrl: false,
+        });
+      },
+      pxPerMeter: () => planViewRef.current?.pxPerMeter() ?? 90,
+      setDraft: (d) => cmdLatest.current.setDraft(d),
+      commit: (mutate) => cmdLatest.current.setProject(mutate),
+      isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
+    };
+    engineRef.current = new CommandEngine(host);
+  }
+  const engine = engineRef.current;
+
+  // Auf Engine-Zustandsänderungen re-rendern (Prompt/Optionen aktualisieren).
+  const [engineTick, setEngineTick] = useState(0);
+  useEffect(
+    () => engine.subscribe(() => setEngineTick((n) => n + 1)),
+    [engine],
+  );
+  // engineTick wird nur als Re-Render-Trigger gelesen (kein direkter Konsum).
+  void engineTick;
+  const engineView = engine.view();
+  const commandActive = engineView.active;
+
+  // Globaler Tab-Handler: läuft ein Befehl MIT Feldern (§2.7), zyklt Tab das
+  // aktive Feld (Präzisionseingabe), ohne den Fokus zu stehlen — so kann man bei
+  // der Maus bleiben. Sonst fokussiert/öffnet Tab die Command-Line. Gleicher
+  // INPUT/TEXTAREA/contentEditable-Guard wie die bestehenden keydown-Handler
+  // (das CommandLine-Input selbst behandelt Tab eigenständig).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      const eng = engineRef.current;
+      if (eng?.isActive() && eng.hasFields()) {
+        eng.cycleField();
+        return;
+      }
+      commandLineRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Tastatur für aktive Zeichenwerkzeuge: Esc verwirft den Entwurf (bzw. schaltet
+  // im Ruhezustand zurück auf Auswahl), Enter schließt mehrteilige Werkzeuge ab,
+  // Backspace nimmt den letzten Punkt zurück. In echten Eingaben inaktiv.
+  useEffect(() => {
+    if (activeTool === "select") return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      const tool = getTool(activeTool);
+      const drawing = toolStateRef.current.phase !== "idle";
+      if (e.key === "Escape") {
+        if (drawing) {
+          const [st] = tool.onCancel(toolStateRef.current);
+          toolStateRef.current = st;
+          setDraft(null);
+        } else {
+          setActiveTool("select");
+        }
+        e.preventDefault();
+      } else if (e.key === "Enter") {
+        const [st, res] = tool.onCommitGesture(toolStateRef.current, toolCtx);
+        toolStateRef.current = st;
+        if (res.commit) setProject(res.commit);
+        setDraft(null);
+        if (res.done) toolStateRef.current = tool.init();
+        e.preventDefault();
+      } else if (e.key === "Backspace" && tool.onUndoPoint) {
+        const [st, res] = tool.onUndoPoint(toolStateRef.current, toolCtx);
+        toolStateRef.current = st;
+        setDraft(res.draft);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeTool, toolCtx]);
+
+  // ── Editier-Griffe (Grips) des einzeln selektierten Elements ──────────────
+  // Genau eine Wand ODER ein 2D-Element → dessen Eckpunkte als ziehbare Griffe.
+  const selectedDrawing = useMemo(
+    () => project.drawings2d.find((d) => d.id === selectedDrawingId) ?? null,
+    [project.drawings2d, selectedDrawingId],
+  );
+  const grips: Vec2[] = useMemo(() => {
+    if (selectedDrawing) return drawingVertices(selectedDrawing);
+    if (selectedWallIds.length === 1 && !selectedDrawingId) {
+      const w = project.walls.find((x) => x.id === selectedWallIds[0]);
+      if (w) return [w.start, w.end];
+    }
+    return [];
+  }, [selectedDrawing, selectedWallIds, selectedDrawingId, project.walls]);
+
+  // ── Kanten-/Seiten-Griffe (Edge Grips) ───────────────────────────────────
+  // Pro Seite des selektierten Elements ein Griff: Kanten-Mittelpunkt + nach
+  // AUSSEN zeigende Einheitsnormale + die beiden Vertex-Indizes (passend zur
+  // `grips`-/`drawingVertices`-Reihenfolge). Die Außenrichtung wird über das
+  // Vorzeichen des Skalarprodukts der Kanten-Normale mit (mid − centroid)
+  // gewählt (vom Polygon-Schwerpunkt weg).
+  //  • rect: 4 Kanten (geschlossen).
+  //  • polyline mit `closed`: Kanten zwischen aufeinanderfolgenden Vertices
+  //    inkl. Schlusskante (letzter → erster).
+  //  • Wand: eine Kante [0,1]; Außennormale = leftNormal der Achse. Ziehen
+  //    verschiebt beide Enden (ganze Wand senkrecht).
+  //  • offene Polylinie/Linie: bewusst KEINE Kanten-Griffe (kein „außen"/„innen"
+  //    bei offener Geometrie; Eckpunkt-Griffe genügen dort).
+  const edgeGrips: EdgeGrip[] = useMemo(() => {
+    // Geschlossener Ring aus Vertices → Kanten-Griffe mit Außennormale.
+    const ringEdges = (verts: Vec2[]): EdgeGrip[] => {
+      const n = verts.length;
+      if (n < 3) return [];
+      // Schwerpunkt (Mittel der Eckpunkte) als Innenbezug.
+      let cx = 0, cy = 0;
+      for (const v of verts) { cx += v.x; cy += v.y; }
+      const centroid: Vec2 = { x: cx / n, y: cy / n };
+      const out: EdgeGrip[] = [];
+      for (let i = 0; i < n; i++) {
+        const a = verts[i];
+        const b = verts[(i + 1) % n];
+        const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const edge = sub(b, a);
+        let nrm = normalize(leftNormal(edge));
+        // Nach außen orientieren: Normale soll von centroid → mid weisen.
+        const outward = sub(mid, centroid);
+        if (nrm.x * outward.x + nrm.y * outward.y < 0) nrm = scale(nrm, -1);
+        out.push({ mid, normal: nrm, aIndex: i, bIndex: (i + 1) % n });
+      }
+      return out;
+    };
+    if (selectedDrawing) {
+      const g = selectedDrawing.geom;
+      if (g.shape === "rect") return ringEdges(grips);
+      if (g.shape === "polyline" && g.closed) return ringEdges(grips);
+      return [];
+    }
+    if (selectedWallIds.length === 1 && !selectedDrawingId) {
+      const w = project.walls.find((x) => x.id === selectedWallIds[0]);
+      if (w) {
+        const mid: Vec2 = { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 };
+        const nrm = normalize(leftNormal(sub(w.end, w.start)));
+        return [{ mid, normal: nrm, aIndex: 0, bIndex: 1 }];
+      }
+    }
+    return [];
+  }, [selectedDrawing, grips, selectedWallIds, selectedDrawingId, project.walls]);
+
+  // Snapping beim Griff-Ziehen: das gezogene Element selbst aus den Quellen
+  // nehmen (sonst fängt der Punkt an sich selbst). Live-Mutation über setProject.
+  // Zuletzt angewandter Kanten-Offset während eines Edge-Grip-Drags (Anker).
+  // null = kein laufender Drag; der erste Move-Event verankert nur (kein Sprung).
+  const edgeDragOffsetRef = useRef<number | null>(null);
+  const gripHandlers = {
+    onGripMove: (index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+      const snapProject: Project = selectedDrawingId
+        ? { ...project, drawings2d: project.drawings2d.filter((d) => d.id !== selectedDrawingId) }
+        : { ...project, walls: project.walls.filter((w) => w.id !== selectedWallId) };
+      // Bezugspunkt für Shift-Ortho: ein Nachbar-Griff (festes Ende), relativ zu
+      // dem die Bewegung auf H/V (bzw. Winkelraster) eingerastet wird.
+      const refIndex = index > 0 ? index - 1 : grips.length > 1 ? 1 : -1;
+      const lastPoint = refIndex >= 0 ? grips[refIndex] : null;
+      const snapResult = computeSnap({
+        raw,
+        project: snapProject,
+        levelId: activeLevel.id,
+        visibleCodes,
+        settings: snap,
+        draftPoints: [],
+        lastPoint,
+        pxPerMeter,
+        shift: mods.shift,
+        ctrl: mods.ctrl,
+      });
+      const pt = snapResult?.point ?? raw;
+      moveGripOf(selectedDrawingId, selectedWallId, index, pt);
+      setDraft({ preview: [], vertices: [], snap: snapResult });
+    },
+    onMoveBody: (delta: Vec2) => {
+      moveElementByOf(selectedDrawingId, selectedWallId, delta);
+    },
+    // Kanten-Griff ziehen: NUR die Komponente senkrecht zur Kante wird wirksam
+    // (die Seite verschiebt sich parallel nach außen/innen). Der Offset wird als
+    // Skalarprojektion von (raw − mid) auf die Außennormale gebildet und — wenn
+    // der Snap aktiv ist (kein Ctrl) — aufs Raster gerundet. So bleibt die
+    // Geste robust und achsentreu, ohne dass ein Eckpunkt verkantet.
+    onEdgeMove: (edge: EdgeGrip, raw: Vec2, _pxPerMeter: number, mods: ToolMods) => {
+      // Senkrechte Projektion von (raw − Grab-Mittelpunkt) auf die Außennormale.
+      const rel = sub(raw, edge.mid);
+      let offset = rel.x * edge.normal.x + rel.y * edge.normal.y;
+      // Raster-Schritt (Snap) anwenden, sofern Snap+Raster aktiv und nicht per
+      // Ctrl unterdrückt sind.
+      const step = snap.gridSize;
+      if (!mods.ctrl && snap.enabled && snap.grid && step > 0) {
+        offset = Math.round(offset / step) * step;
+      }
+      // INKREMENTELL + Grab-Anker: moveEdge verschiebt additiv, daher nur die
+      // Änderung seit dem letzten Event anwenden. Erster Event verankert nur
+      // (kein Sprung beim Greifen, da das Dreieck am Mittelpunkt sitzt).
+      const prev = edgeDragOffsetRef.current;
+      edgeDragOffsetRef.current = offset;
+      if (prev === null) return;
+      const inc = offset - prev;
+      if (inc === 0) return;
+      moveEdgeOf(selectedDrawingId, selectedWallId, edge.aIndex, edge.bIndex, scale(edge.normal, inc));
+      setDraft({ preview: [], vertices: [], snap: null });
+    },
+    onGripEnd: () => {
+      setDraft(null);
+      edgeDragOffsetRef.current = null; // Drag beendet → Anker zurücksetzen
+    },
+  };
+
+  // Tastatur im Auswahl-Werkzeug: Ctrl/Cmd+A = alles auf der aktiven Ebene
+  // wählen; Entf/Backspace = ALLE Selektierten (Wände + 2D-Elemente) löschen.
+  useEffect(() => {
+    if (activeTool !== "select") return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      // Alles auswählen (Wände + Zeichnungen des aktiven Geschosses/der Ebene).
+      if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+        const wallIds = project.walls
+          .filter((w) => w.floorId === activeLevel.id)
+          .map((w) => w.id);
+        const drawingIds = project.drawings2d
+          .filter((d) => d.levelId === activeLevel.id)
+          .map((d) => d.id);
+        if (wallIds.length || drawingIds.length) {
+          setSelectedWallIds(wallIds);
+          setSelectedDrawingIds(drawingIds);
+          e.preventDefault();
+        }
+        return;
+      }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (activeTransform) return; // während einer Transformation nicht löschen
+      if (selectedDrawingIds.length || selectedWallIds.length) {
+        const dids = new Set(selectedDrawingIds);
+        const wids = new Set(selectedWallIds);
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.filter((d) => !dids.has(d.id)),
+          walls: p.walls.filter((w) => !wids.has(w.id)),
+          doors: p.doors.filter((dr) => !wids.has(dr.hostWallId)),
+        }));
+        setSelectedDrawingIds([]);
+        setSelectedWallIds([]);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    activeTool,
+    activeTransform,
+    selectedDrawingIds,
+    selectedWallIds,
+    project.walls,
+    project.drawings2d,
+    activeLevel.id,
+  ]);
+
+  // Ctrl/Cmd+S = Split, Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente.
+  // Beide rufen preventDefault (sonst Browser-Speichern/-Lesezeichen). Wände sind
+  // ausgenommen (no-op). Tool-unabhängig, solange eine 2D-Auswahl besteht.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k !== "s" && k !== "j") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      const ids = selectedDrawingIds;
+      if (ids.length === 0) return; // nur 2D-Auswahl bedient; Wände → no-op
+      e.preventDefault();
+
+      if (k === "s") {
+        // Split: jedes gewählte Element gegen ALLE ANDEREN Elemente seiner Ebene
+        // schneiden (ohne Schnitt: Mittel-Fallback in splitDrawing). Ersetzt jedes
+        // Quell-Drawing durch ≥1 Ergebnis; neue Elemente werden ausgewählt.
+        const idSet = new Set(ids);
+        const newIds: string[] = [];
+        setProject((p) => {
+          const out: typeof p.drawings2d = [];
+          for (const d of p.drawings2d) {
+            if (!idSet.has(d.id)) {
+              out.push(d);
+              continue;
+            }
+            // Andere Elemente DERSELBEN Ebene (außer dem Ziel selbst) als Schneider.
+            const others: PolyForm[] = [];
+            for (const o of p.drawings2d) {
+              if (o.id === d.id || o.levelId !== d.levelId) continue;
+              const f = toPolyForm(o.geom);
+              if (f) others.push(f);
+            }
+            const pieces = splitDrawing(d, others);
+            for (const piece of pieces) newIds.push(piece.id);
+            out.push(...pieces);
+          }
+          return { ...p, drawings2d: out };
+        });
+        setSelectedDrawingIds(newIds);
+        setSelectedWallIds([]);
+        return;
+      }
+
+      // Join: gewählte Elemente an koinzidenten Endpunkten verschmelzen.
+      const idSet = new Set(ids);
+      const newIds: string[] = [];
+      setProject((p) => {
+        const srcs = p.drawings2d.filter((d) => idSet.has(d.id));
+        if (srcs.length === 0) return p;
+        const joined = joinDrawings(srcs);
+        for (const j of joined) newIds.push(j.id);
+        const rest = p.drawings2d.filter((d) => !idSet.has(d.id));
+        return { ...p, drawings2d: [...rest, ...joined] };
+      });
+      setSelectedDrawingIds(newIds);
+      setSelectedWallIds([]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedDrawingIds]);
+
+  // Alt+Klick im Grundriss = Segment löschen (Schere): PlanView meldet das
+  // getroffene Drawing2D + den Modellpunkt; App ermittelt daraus die nächst-
+  // gelegene Kante (nearestEdgeIndex) und entfernt sie. Geschlossene Form →
+  // offene Polylinie; bleiben <2 Punkte übrig, wird das Element gelöscht.
+  const onSegmentCut = (drawingId: string, model: Vec2) => {
+    const src = project.drawings2d.find((d) => d.id === drawingId);
+    if (!src) return;
+    const edgeIndex = nearestEdgeIndex(src.geom, model);
+    if (edgeIndex === null) return;
+    let removed = false;
+    setProject((p) => ({
+      ...p,
+      drawings2d: p.drawings2d.flatMap((d) => {
+        if (d.id !== drawingId) return [d];
+        const next = cutSegment(d, edgeIndex);
+        if (next === null) {
+          removed = true;
+          return [];
+        }
+        return [next];
+      }),
+    }));
+    if (removed) setSelectedDrawingIds([]);
+  };
+
+  // Transformations-Shortcuts (nur im Auswahl-Werkzeug):
+  //  m = Bewegen, s = Spiegeln, d = Drehen (startet auf der Auswahl);
+  //  während einer Transformation: u/i/o/p = Modus (move/copy/array/distribute),
+  //  Esc = abbrechen. O/P fragen die Kopienanzahl ab.
+  useEffect(() => {
+    if (activeTool !== "select") return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (activeTransform) {
+        const k = e.key.toLowerCase();
+        if (k === "u") setActiveTransform((t) => (t ? { ...t, copyMode: "move" } : t));
+        else if (k === "i") setActiveTransform((t) => (t ? { ...t, copyMode: "copy" } : t));
+        else if (k === "o") {
+          const n = promptCount();
+          if (n) setActiveTransform((t) => (t ? { ...t, copyMode: "array", count: n } : t));
+        } else if (k === "p") {
+          const n = promptCount();
+          if (n) setActiveTransform((t) => (t ? { ...t, copyMode: "distribute", count: n } : t));
+        } else if (e.key === "Escape") {
+          setActiveTransform(null);
+          setDraft(null);
+        } else return;
+        e.preventDefault();
+        return;
+      }
+      const hasSel = selectedWallIds.length > 0 || !!selectedDrawingId;
+      if (!hasSel) return;
+      const k = e.key.toLowerCase();
+      const op: TransformOp | null = k === "m" ? "move" : k === "d" ? "rotate" : k === "s" ? "mirror" : null;
+      if (op) {
+        setActiveTransform({ op, copyMode: "move", count: 1, points: [] });
+        setDraft(null);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeTool, activeTransform, selectedWallIds, selectedDrawingId]);
+
+  // ── Projekt-Mutationen (aus dem Store-Slice) ─────────────────────────────
+  // Sämtliche immutablen Projekt-Mutationen liegen jetzt in projectSlice. App
+  // liest sie als (referenzstabile) Store-Actions und reicht sie unverändert an
+  // Panels/Menüs/Editoren weiter.
+  const toggleLevelVisible = useStore((s) => s.toggleLevelVisible);
+  const toggleCategoryVisible = useStore((s) => s.toggleCategoryVisible);
+  const patchActiveFloor = useStore((s) => s.patchActiveFloor);
+  const addFloor = useStore((s) => s.addFloor);
+  const addDrawing = useStore((s) => s.addDrawing);
+  const addDrawingLevel = useStore((s) => s.addDrawingLevel);
+  const importDrawings = useStore((s) => s.importDrawings);
+  const addCategory = useStore((s) => s.addCategory);
+  const patchCategory = useStore((s) => s.patchCategory);
+  const addSubCategory = useStore((s) => s.addSubCategory);
+  const duplicateCategory = useStore((s) => s.duplicateCategory);
+  const deleteCategory = useStore((s) => s.deleteCategory);
+  const assignWallCategory = useStore((s) => s.assignWallCategory);
+  const snapshotLayerVisibility = useStore((s) => s.snapshotLayerVisibility);
+  const applyLayerVisibility = useStore((s) => s.applyLayerVisibility);
+  const snapshotDrawingVisibility = useStore((s) => s.snapshotDrawingVisibility);
+  const applyDrawingVisibility = useStore((s) => s.applyDrawingVisibility);
+  const patchLevel = useStore((s) => s.patchLevel);
+  const duplicateLevel = useStore((s) => s.duplicateLevel);
+  const deleteLevel = useStore((s) => s.deleteLevel);
+  const patchComponent = useStore((s) => s.patchComponent);
+  const addComponent = useStore((s) => s.addComponent);
+  const deleteComponent = useStore((s) => s.deleteComponent);
+  const patchHatch = useStore((s) => s.patchHatch);
+  const addHatch = useStore((s) => s.addHatch);
+  const deleteHatch = useStore((s) => s.deleteHatch);
+  const patchLineStyle = useStore((s) => s.patchLineStyle);
+  const addLineStyle = useStore((s) => s.addLineStyle);
+  const deleteLineStyle = useStore((s) => s.deleteLineStyle);
+  const importLineStyles = useStore((s) => s.importLineStyles);
+  const importHatches = useStore((s) => s.importHatches);
+  // Site-/Kontext-Schicht (siteSlice): Import/Entfernen/Gelände.
+  const addContextObjects = useStore((s) => s.addContextObjects);
+  const removeContextObject = useStore((s) => s.removeContextObject);
+  const generateTerrain = useStore((s) => s.generateTerrain);
+  const moveGripOf = useStore((s) => s.moveGripOf);
+  const moveElementByOf = useStore((s) => s.moveElementByOf);
+  const moveEdgeOf = useStore((s) => s.moveEdgeOf);
+  const commitTransformOn = useStore((s) => s.commitTransformOn);
+  const setElementColor = useStore((s) => s.setElementColor);
+  const setElementWeight = useStore((s) => s.setElementWeight);
+  const setElementFill = useStore((s) => s.setElementFill);
+  const setElementFillColor = useStore((s) => s.setElementFillColor);
+  const resizeElement = useStore((s) => s.resizeElement);
+  const updateWall = useStore((s) => s.updateWall);
+  const setWallThickness = useStore((s) => s.setWallThickness);
+
+  // ── Selektions-Attribut-Kontrakt (Attributes-/Object-Info-Paletten) ───────
+  // Normalisierte, effektiv aufgelöste Sicht auf das erste selektierte Element.
+  const selection = useMemo(
+    () => deriveSelection(project, selectedWallIds, selectedDrawingId),
+    [project, selectedWallIds, selectedDrawingId],
+  );
+
+  // ── DXF/DWG-Import (Dialog) ───────────────────────────────────────────────
+  // Eine Datei (Button ODER Drop) öffnet den modalen Import-Dialog. DXF wird als
+  // Text geparst, DWG als ArrayBuffer über LibreDWG-WASM (lazy, asynchron); beide
+  // münden in dasselbe {meshes, contours}-Format und denselben Dialog-Fluss.
+  // Parse-Fehler werden ruhig abgefangen: DWG fällt auf den ODA-Hinweis zurück.
+  const openImportForFile = (file: File) => {
+    const isDwg = /\.dwg$/i.test(file.name);
+    if (isDwg) {
+      // Async-Zustand: Dialog öffnet sofort und zeigt „DWG wird gelesen …",
+      // während WASM lädt/parst. Danach echte Zusammenfassung ODER ODA-Hinweis.
+      setImportState({
+        fileName: file.name,
+        isDwg: true,
+        parsed: null,
+        loading: true,
+      });
+      const r = new FileReader();
+      r.onload = () => {
+        const buf = r.result;
+        if (!(buf instanceof ArrayBuffer)) {
+          setImportState({
+            fileName: file.name,
+            isDwg: true,
+            parsed: null,
+            loading: false,
+          });
+          return;
+        }
+        // Dynamisch importieren, damit LibreDWG-WASM nicht im Initial-Bundle ist.
+        import("./io/dwgParser")
+          .then(({ parseDwg }) => parseDwg(buf))
+          .then((parsed) => {
+            setImportState({
+              fileName: file.name,
+              isDwg: false,
+              parsed,
+              loading: false,
+            });
+          })
+          .catch((err) => {
+            console.error("DWG-Import fehlgeschlagen:", err);
+            // Fallback: weiterhin DWG-Modus → Dialog zeigt den ODA-Hinweis.
+            setImportState({
+              fileName: file.name,
+              isDwg: true,
+              parsed: null,
+              loading: false,
+            });
+          });
+      };
+      r.readAsArrayBuffer(file);
+      return;
+    }
+    const r = new FileReader();
+    r.onload = () => {
+      let parsed: DxfImportResult | null = null;
+      try {
+        parsed = parseDxf(String(r.result ?? ""));
+      } catch (err) {
+        console.error("DXF-Import fehlgeschlagen:", err);
+        parsed = { meshes: [], contours: [] };
+      }
+      setImportState({ fileName: file.name, isDwg: false, parsed });
+    };
+    r.readAsText(file);
+  };
+
+  // Bestätigte Import-Entscheidung ausführen: ggf. neue Zeichnung anlegen, die
+  // 2D-Konturen als Drawing2D anhängen, optional die Meshes als Kontext
+  // übernehmen. Reihenfolge: erst Ebene (echte ID), dann Drawings/Kontext.
+  const runImport = (decision: ImportDecision) => {
+    const levelId =
+      decision.target.kind === "new"
+        ? addDrawingLevel(decision.target.name)
+        : decision.target.levelId;
+    const drawings = buildDrawings(
+      decision,
+      levelId,
+      project,
+      activeCategoryCode,
+    );
+    if (drawings.length) importDrawings(drawings);
+    if (decision.importMeshes && decision.parsed.meshes.length) {
+      addContextObjects(decision.parsed.meshes);
+    }
+    // Auf die Ziel-Ebene wechseln, damit die importierte Geometrie sichtbar ist.
+    setActiveLevelId(levelId);
+    setImportState(null);
+  };
+
+  // ── Host-Context für die Panels ───────────────────────────────────────────
+  // Alles außer dem (dock-spezifischen) Darstellungsmodus ist gemeinsam; den
+  // Modus hängt jedes Dock weiter unten passend zu seinem aktiven Tab an.
+  const baseHost = useMemo(() => {
+    const value: Omit<PanelHostValue, "displayMode"> = {
+      project,
+      activeLevelId,
+      activeTool,
+      onSelectTool: setActiveTool,
+      toolsEnabled: activeLevel.kind === "floor" && viewType === "grundriss",
+      activeWallTypeId,
+      onActiveWallTypeId: setActiveWallTypeId,
+      snap,
+      onSnapChange: setSnap,
+      onSelectLevel: setActiveLevelId,
+      onToggleLevel: toggleLevelVisible,
+      onAddFloor: addFloor,
+      onAddDrawing: addDrawing,
+      onLevelContextMenu: (id, x, y) =>
+        setMenu({ kind: "level", id, x, y }),
+      activeCategoryCode,
+      onSelectCategory: setActiveCategoryCode,
+      onToggleCategory: toggleCategoryVisible,
+      onAddCategory: addCategory,
+      onLayerContextMenu: (code, x, y) =>
+        setMenu({ kind: "layer", code, x, y }),
+      onPatchComponent: patchComponent,
+      onAddComponent: addComponent,
+      onDeleteComponent: deleteComponent,
+      onPatchHatch: patchHatch,
+      onAddHatch: addHatch,
+      onDeleteHatch: deleteHatch,
+      onPatchLineStyle: patchLineStyle,
+      onAddLineStyle: addLineStyle,
+      onDeleteLineStyle: deleteLineStyle,
+      onImportLineStyles: importLineStyles,
+      onImportHatches: importHatches,
+      selection,
+      onSetSelectionColor: (color) => {
+        if (!selection) return;
+        if (selection.kind === "wall" || selection.kind === "drawing2d")
+          setElementColor(selection.kind, selection.id, color);
+      },
+      onSetSelectionWeight: (weightMm) => {
+        // Strichstärke gibt es als direktes Feld nur bei Drawing2D.
+        if (selection?.kind === "drawing2d")
+          setElementWeight(selection.id, weightMm);
+      },
+      onSetSelectionFill: (hatchId) => {
+        // Füllschraffur nur bei Drawing2D (geschlossene Formen).
+        if (selection?.kind === "drawing2d")
+          setElementFill(selection.id, hatchId);
+      },
+      onSetSelectionFillColor: (color) => {
+        // Vollton-Füllfarbe nur bei Drawing2D (geschlossene Formen).
+        if (selection?.kind === "drawing2d")
+          setElementFillColor(selection.id, color);
+      },
+      onResizeSelection: (w, h, anchor) => {
+        if (selection?.kind === "wall" || selection?.kind === "drawing2d")
+          resizeElement(selection.kind, selection.id, w, h, anchor);
+      },
+      // ── Wand-Attribute (nur bei selektierter Wand) ─────────────────────────
+      onSetWallReferenceLine: (ref) => {
+        if (selection?.kind === "wall")
+          updateWall(selection.id, { referenceLine: ref });
+      },
+      onSetWallType: (wallTypeId) => {
+        if (selection?.kind === "wall")
+          updateWall(selection.id, { wallTypeId });
+      },
+      onSetWallThickness: (thickness) => {
+        if (selection?.kind === "wall")
+          setWallThickness(selection.id, thickness);
+      },
+      onSetWallBottom: (anchor) => {
+        if (selection?.kind === "wall")
+          updateWall(selection.id, { bottom: anchor ?? undefined });
+      },
+      onSetWallTop: (anchor) => {
+        if (selection?.kind === "wall")
+          updateWall(selection.id, { top: anchor ?? undefined });
+      },
+      // ── Site-/Kontext-Schicht ──────────────────────────────────────────────
+      contextObjects: project.context ?? [],
+      onAddContextObjects: addContextObjects,
+      onRemoveContextObject: removeContextObject,
+      onGenerateTerrain: generateTerrain,
+      onImportDxf: () => dxfInputRef.current?.click(),
+    };
+    return value;
+    // setProject-Closures sind stabil genug; Neuberechnung bei project/active.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    project,
+    activeLevelId,
+    activeCategoryCode,
+    activeTool,
+    activeWallTypeId,
+    snap,
+    viewType,
+    selection,
+  ]);
+
+  // ── Dock-/Float-Handler (aus dem Layout-Slice) ────────────────────────────
+  // Die Layout-Mutationen (Resize/Reorder/Stapeln/Lösen/Float) liegen jetzt im
+  // layoutSlice. App liest sie als Store-Actions und verdrahtet sie unverändert
+  // mit dem (transienten) Drag-Controller und den Panels.
+  const resizeDock = useStore((s) => s.resizeDock);
+  const resizeGroups = useStore((s) => s.resizeGroups);
+  const activateTab = useStore((s) => s.activateTab);
+  const joinGroup = useStore((s) => s.joinGroup);
+  const newGroup = useStore((s) => s.newGroup);
+  const dropFloat = useStore((s) => s.dropFloat);
+  const focusFloat = useStore((s) => s.focusFloat);
+  const moveFloat = useStore((s) => s.moveFloat);
+  const resizeFloat = useStore((s) => s.resizeFloat);
+  const closeFloat = useStore((s) => s.closeFloat);
+  const redockFloat = useStore((s) => s.redockFloat);
+  const dockFloatTo = useStore((s) => s.dockFloatTo);
+
+  // ── Tab-Drag-Steuerung (Reorder / Einreihen / Stapeln / Lösen) ────────────
+  // Der Controller (usePanelDrag) klärt anhand der Bewegung Klick vs. Ziehen
+  // und löst beim Loslassen das Ziel auf; die Auflösung selbst macht der Slice.
+  const { drag, startTabDrag } = usePanelDrag({
+    onActivate: activateTab,
+    onJoinGroup: joinGroup,
+    onNewGroup: newGroup,
+    onDropFloat: dropFloat,
+  });
+
+  // Zustand für die Rand-Zonen-Hervorhebung beim Titel-Drag eines Fensters.
+  // `floatDragging` schaltet die Zonen ein (sobald die Titelleiste gezogen
+  // wird), `floatDragHover` markiert die gerade überfahrene Zone.
+  const [floatDragging, setFloatDragging] = useState(false);
+  const [floatDragHover, setFloatDragHover] = useState<DockId | null>(null);
+
+  // Titel-Drag eines schwebenden Fensters über eine Rand-Zone: liefert true,
+  // wenn das Fenster angedockt wurde (dann unterbleibt das reine Verschieben).
+  // Trefferprüfung über die Datenattribute der Rand-Zonen (data-drop-zone).
+  const onFloatTitleDrop = (panelId: string, clientX: number, clientY: number): boolean => {
+    setFloatDragging(false);
+    setFloatDragHover(null);
+    const zone = document
+      .elementsFromPoint(clientX, clientY)
+      .find((el) => (el as HTMLElement).dataset?.dropZone !== undefined) as
+      | HTMLElement
+      | undefined;
+    if (!zone) return false;
+    const dock = zone.dataset.dropZone as DockId;
+    dockFloatTo(panelId, dock);
+    return true;
+  };
+
+  const onFloatTitleDrag = (_panelId: string, clientX: number, clientY: number) => {
+    if (!floatDragging) setFloatDragging(true);
+    const zone = document
+      .elementsFromPoint(clientX, clientY)
+      .find((el) => (el as HTMLElement).dataset?.dropZone !== undefined) as
+      | HTMLElement
+      | undefined;
+    setFloatDragHover(zone ? (zone.dataset.dropZone as DockId) : null);
+  };
+
+  // Ein Dock wird nur gerendert, wenn es Tabs hat — ein leeres Dock soll die
+  // Mitte nicht stauchen. (Rechtes Dock ist standardmäßig leer: Ressourcen ist
+  // ein schwebendes Fenster.)
+  const leftHasTabs = layout.left.groups.length > 0;
+  const rightHasTabs = layout.right.groups.length > 0;
+  // Rand-Andock-Zonen sind aktiv, solange irgendeine Drag-Geste läuft (Tab-Drag
+  // ODER Titel-Drag eines schwebenden Fensters). Die gerade überfahrene Zone
+  // (für die Hervorhebung) kommt aus dem Tab-Drag-Hover bzw. dem Float-Hover.
+  const dragActive = drag !== null || floatDragging;
+  const activeZone: DockId | null =
+    drag && drag.hover.kind === "zone" ? drag.hover.dock : floatDragHover;
+
+  // Handler-Bündel für das schwebende Ressourcen-Fenster (ResourceManager).
+  const resourceHandlers: ResourceManagerHandlers = {
+    onPatchComponent: patchComponent,
+    onAddComponent: addComponent,
+    onDeleteComponent: deleteComponent,
+    onPatchHatch: patchHatch,
+    onAddHatch: addHatch,
+    onDeleteHatch: deleteHatch,
+    onPatchLineStyle: patchLineStyle,
+    onAddLineStyle: addLineStyle,
+    onDeleteLineStyle: deleteLineStyle,
+    onImportLineStyles: importLineStyles,
+    onImportHatches: importHatches,
+  };
+
+  // ── Effektive Darstellung für die Hauptansicht ────────────────────────────
+  // 3D: Geschosse nach dem Modus des Zeichnungsebenen-Panels, Kategorien nach
+  // dem Modus des Ebenen-Panels. Grundriss: Kategorien nach dem Ebenen-Panel.
+  // Aus der abonnierten Map lesen (nicht über modeFor), damit ein Moduswechsel
+  // garantiert ein Re-Render auslöst und die Resolver neu rechnen.
+  const drawingLevelsMode =
+    displayModes[BUILTIN_PANEL_IDS.drawingLevels] ?? "all";
+  const layersMode = displayModes[BUILTIN_PANEL_IDS.layers] ?? "all";
+
+  // Sichtbarkeit je Kategorie-Code (für categoryDisplay), Baum berücksichtigt.
+  const codeVisible = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const c of flattenCategories(project.layers)) map.set(c.code, c.visible);
+    return map;
+  }, [project.layers]);
+
+  // Resolver: je Geschoss-ID die Render-Entscheidung (aktiv = Arbeitsfokus).
+  // Memoisiert, damit Plan/3D nicht bei jedem Render neu rechnen.
+  const floorDisplay: DisplayResolver = useMemo(() => {
+    const visible = new Map(
+      project.drawingLevels.map((z) => [z.id, z.visible]),
+    );
+    return (id) =>
+      itemDisplay(drawingLevelsMode, id === activeLevelId, visible.get(id) ?? false);
+  }, [project.drawingLevels, drawingLevelsMode, activeLevelId]);
+
+  // Resolver: je Kategorie-Code die Render-Entscheidung (Kategorien sind nie
+  // „aktiv"). Wirkt in Grundriss UND 3D.
+  const categoryDisplay: CategoryDisplayResolver & DisplayResolver = useMemo(
+    () => (code) => itemDisplay(layersMode, false, codeVisible.get(code) ?? false),
+    [layersMode, codeVisible],
+  );
+
+  // Stabiler Schlüssel der 3D-Display-Entscheidungen (Resolver sind nicht
+  // referenzstabil → triggert sonst keinen Neuaufbau).
+  const displayKey = `${drawingLevelsMode}|${layersMode}|${activeLevelId}`;
+
+  // ── Ableitungen für Oberleiste + Status-Leiste ────────────────────────────
+  // Eine zoom-/cursor-fähige Plan-Ansicht ist nur im Grundriss eines Geschosses
+  // aktiv. Sonst sind Cursor/Zoom bedeutungslos (PlanView ist nicht montiert →
+  // das Handle ist null, Aktionen sind No-Ops).
+  const planActive = activeLevel.kind === "floor" && viewType === "grundriss";
+  // Übernimmt ein Zeichenwerkzeug ODER eine laufende Transformation die linke
+  // Maustaste der Plan-Ansicht? Dann liegt der Pointer-Input beim Tool/Transform
+  // (statt Auswahl/Marquee), und die Editier-Griffe sind ausgeblendet.
+  // Ein laufender Befehl übernimmt ebenfalls die linke Maustaste der Plan-Ansicht
+  // (über denselben toolHandlers-Pfad) — daher hier mit einbeziehen.
+  const toolInputActive =
+    activeTool !== "select" || !!activeTransform || commandActive;
+
+  // Tatsächlich (noch) existierende gewählte Wände — IDs, die es nicht mehr gibt
+  // (z. B. nach Löschen/Geschosswechsel), fallen heraus.
+  const selectedWalls = useMemo(() => {
+    const ids = new Set(selectedWallIds);
+    return project.walls.filter((w) => ids.has(w.id));
+  }, [project.walls, selectedWallIds]);
+  const selectionCount = selectedWalls.length;
+  // Erste gewählte Wand (für Status-Leiste / Kontextmenü-Aktionen mit Einzelbezug).
+  const selectedWall = selectedWalls[0] ?? null;
+
+  // Aktive Ebene (Kategorie) der Status-Leiste: die Kategorie der (ersten)
+  // gewählten Wand, sonst „—" (es gibt keine eigenständige Kategorie-Selektion).
+  const activeLayerName =
+    selectionCount === 1 && selectedWall
+      ? categoryLabel(project.layers, selectedWall.categoryCode)
+      : categoryLabel(project.layers, activeCategoryCode);
+  // Kontextueller Werkzeug-Hinweis (links). Zeigt die Anzahl gewählter Wände:
+  // 0 → „Auswahl", 1 → „Auswahl: 1 Wand", n → „Auswahl: n Wände".
+  const toolHint =
+    selectionCount === 0
+      ? t("status.selection")
+      : t("status.selectionN", {
+          n: selectionCount,
+          noun: selectionCount === 1 ? t("status.wall") : t("status.walls"),
+        });
+
+  // Solange keine Plan-Ansicht montiert ist, gibt es keinen Live-Massstab.
+  // (PlanView meldet beim Montieren/Zoomen sofort wieder einen Wert.)
+  useEffect(() => {
+    if (!planActive) setLiveScale(null);
+  }, [planActive]);
+
+  // Zoom-Buttons der Oberleiste an die montierte Plan-Ansicht weiterreichen.
+  const fitPlan = () => planViewRef.current?.fit();
+  const fitSelection = () => planViewRef.current?.fitSelection();
+  // Papier-Massstab anwenden: gewählten Nenner merken UND den Plan-Zoom exakt
+  // auf 1:N setzen (PlanView rechnet die viewBox aus N + Canvas + dpi).
+  const applyScale = (n: number) => {
+    setScaleDenominator(n);
+    planViewRef.current?.applyScale(n);
+  };
+  // „100 %" = Zoom exakt auf den gewählten Massstab setzen.
+  const zoomToApplied = () => planViewRef.current?.applyScale(scaleDenominator);
+
+  // Modusleiste-Wechsel: array/distribute fragen die Kopienanzahl ab.
+  const onTransformMode = (mode: CopyMode) => {
+    if (mode === "array" || mode === "distribute") {
+      const n = promptCount();
+      if (n) setActiveTransform((tr) => (tr ? { ...tr, copyMode: mode, count: n } : tr));
+    } else {
+      setActiveTransform((tr) => (tr ? { ...tr, copyMode: mode } : tr));
+    }
+  };
+
+  // ── Maus-Schema: Auswahl + Kontextmenü aus Grundriss / 3D ─────────────────
+  // Links-Klick im Grundriss: genau eine Wand wählen (Menge ersetzen) bzw.
+  // Leerraum → Auswahl löschen.
+  const onPlanSelect = (sel: PlanSelection) => {
+    // Shift+Klick: Mehrfach-Auswahl — getroffenes Element zu-/abschalten, den
+    // Rest behalten (Wände und 2D-Zeichnungen unabhängig, gemischte Auswahl
+    // erlaubt). Leerraum-Klick mit Shift lässt die Auswahl unverändert.
+    if (sel.shift) {
+      if (sel.wallId) {
+        const id = sel.wallId;
+        setSelectedWallIds(
+          selectedWallIds.includes(id)
+            ? selectedWallIds.filter((w) => w !== id)
+            : [...selectedWallIds, id],
+        );
+      } else if (sel.drawingId) {
+        const id = sel.drawingId;
+        setSelectedDrawingIds(
+          selectedDrawingIds.includes(id)
+            ? selectedDrawingIds.filter((d) => d !== id)
+            : [...selectedDrawingIds, id],
+        );
+      }
+      return;
+    }
+    // Ohne Shift: ersetzen. Wand hat Vorrang; sonst 2D-Element; sonst leeren.
+    if (sel.wallId) {
+      setSelectedWallIds([sel.wallId]);
+      setSelectedDrawingId(null);
+    } else if (sel.drawingId) {
+      setSelectedDrawingId(sel.drawingId);
+      setSelectedWallIds([]);
+    } else {
+      setSelectedWallIds([]);
+      setSelectedDrawingId(null);
+    }
+  };
+  // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
+  // (nach CAD-Konvention von PlanView bestimmt). Ersetzt die bisherige Auswahl.
+  const onPlanMarquee = (sel: MarqueeSelection) => {
+    setSelectedWallIds(sel.wallIds);
+    setSelectedDrawingIds(sel.drawingIds ?? []);
+  };
+  // Rechts-Klick im Grundriss: Wand-Kontextmenü. Trifft der Klick eine Wand, die
+  // NICHT bereits in der Auswahl ist, wird die Auswahl auf sie gesetzt (damit die
+  // Aktionen einen Bezug haben); innerhalb einer bestehenden Mehrfachauswahl
+  // bleibt die Menge erhalten.
+  const onPlanContextMenu = (info: {
+    clientX: number;
+    clientY: number;
+    model: Vec2;
+  }) => {
+    const wallId = hitTestWall(project, activeLevel.id, visibleCodes, info.model);
+    if (wallId && !selectedWallIds.includes(wallId)) setSelectedWallIds([wallId]);
+    setMenu({ kind: "plan", x: info.clientX, y: info.clientY, wallId });
+  };
+  // Links-Klick im 3D: per Raycast getroffene Wand wählen (Einzelauswahl).
+  const onViewportSelectWall = (wallId: string | null) =>
+    setSelectedWallIds(wallId ? [wallId] : []);
+  // Rechts-Klick im 3D: Wand-Kontextmenü an der Cursorposition.
+  const onViewportContextMenu = (info: ViewportContextInfo) => {
+    if (info.wallId && !selectedWallIds.includes(info.wallId)) {
+      setSelectedWallIds([info.wallId]);
+    }
+    setMenu({
+      kind: "viewport",
+      x: info.clientX,
+      y: info.clientY,
+      wallId: info.wallId,
+    });
+  };
+
+  // ── App-weites Drag & Drop einer DXF/DWG-Datei ────────────────────────────
+  // dragover muss preventDefault rufen, sonst lässt der Browser nicht fallen.
+  // dragenter/leave wird ausgezählt (Kind-Elemente lösen sonst Flackern aus).
+  const dragDepthRef = useRef(0);
+  const hasFiles = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  const onAppDragEnter = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDropActive(true);
+  };
+  const onAppDragOver = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+  const onAppDragLeave = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDropActive(false);
+  };
+  const onAppDrop = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setDropActive(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) openImportForFile(f);
+  };
+
+  return (
+    <div
+      className="app"
+      onDragEnter={onAppDragEnter}
+      onDragOver={onAppDragOver}
+      onDragLeave={onAppDragLeave}
+      onDrop={onAppDrop}
+    >
+      {/* Verstecktes DXF-Datei-Input (Site-Panel/„import"-Befehl triggern es). */}
+      <input
+        ref={dxfInputRef}
+        type="file"
+        accept=".dxf,.dwg,text/plain"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) openImportForFile(f);
+          e.target.value = "";
+        }}
+      />
+      <TopBar
+        project={project}
+        viewToggleEnabled={activeLevel.kind === "floor"}
+        viewType={viewType}
+        onViewType={setViewType}
+        view3d={view3d}
+        onView3d={setView3d}
+        fov={fov}
+        onFov={setFov}
+        detail={detail}
+        onDetail={setDetail}
+        detailEnabled={planActive}
+        scaleDenominator={scaleDenominator}
+        onApplyScale={applyScale}
+        liveScale={planActive ? liveScale : null}
+        zoomPercent={zoomPercent}
+        zoomEnabled={planActive}
+        onFit={fitPlan}
+        onFitSelection={fitSelection}
+        onZoom100={zoomToApplied}
+        renderMode={renderMode}
+        onRenderMode={setRenderMode}
+        renderModeEnabled={viewType === "perspektive"}
+        planColorMode={planColorMode}
+        onPlanColorMode={setPlanColorMode}
+        referenceLines={referenceLines}
+        onReferenceLines={setReferenceLines}
+        referenceLinesEnabled={planActive}
+        lineMode={lineMode}
+        onLineMode={setLineMode}
+        lineModeEnabled={planActive}
+        combos={{
+          // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums →
+          // localStorage; Laden = Map lesen → Sichtbarkeits-Flags anwenden.
+          listLayerCombos,
+          saveLayerCombo: (name) =>
+            saveLayerCombo(name, snapshotLayerVisibility()),
+          loadLayerCombo: (name) => {
+            const codes = loadLayerCombo(name);
+            if (codes) applyLayerVisibility(codes);
+          },
+          deleteLayerCombo,
+          // Zeichnungs-Kombinationen: analog über drawingLevels[].visible.
+          listDrawingCombos,
+          saveDrawingCombo: (name) =>
+            saveDrawingCombo(name, snapshotDrawingVisibility()),
+          loadDrawingCombo: (name) => {
+            const ids = loadDrawingCombo(name);
+            if (ids) applyDrawingVisibility(ids);
+          },
+          deleteDrawingCombo,
+        }}
+        resourcesOpen={resourcesOpen}
+        onToggleResources={() => setResourcesOpen((v) => !v)}
+        layoutMenu={
+          <LayoutMenu
+            layout={layout}
+            onApply={(l) => setLayout(reconcileLayout(l))}
+          />
+        }
+      />
+
+      <div className="body">
+        {/* Linkes Dock: gestapelte Gruppen (Werkzeuge oben, Zeichnungsebenen/
+            Ebenen unten). Jede Gruppe baut über buildHost ihren eigenen
+            Host-Provider, damit der Darstellungsmodus dem aktiven Tab DIESER
+            Gruppe folgt. Nur gerendert, wenn das Dock Gruppen hat. */}
+        {leftHasTabs && (
+          <Dock
+            side="left"
+            dock={layout.left}
+            onStartTabDrag={startTabDrag}
+            onResize={(size) => resizeDock("left", size)}
+            onResizeGroups={(w) => resizeGroups("left", w)}
+            buildHost={(activeTab) =>
+              hostWithMode(baseHost, activeTab, modeFor, setModeFor)
+            }
+            displayModeFor={(activeTab) => modeFor(activeTab)}
+            onDisplayModeChange={(activeTab, m) => setModeFor(activeTab, m)}
+          />
+        )}
+
+        {/* Hauptansicht (Mitte) — füllt den verbleibenden Platz. Die Plan-
+            Ansicht meldet Cursor + Zoom an die Status-/Oberleiste und nimmt
+            das Zoom-Handle entgegen. */}
+        <Content
+          project={project}
+          level={activeLevel}
+          viewType={viewType}
+          visibleCodes={visibleCodes}
+          detail={detail}
+          referenceLines={referenceLines}
+          hairline={lineMode === "display"}
+          renderMode={renderMode}
+          view3d={view3d}
+          fov={fov}
+          mono={planColorMode === "mono"}
+          onPatchFloor={patchActiveFloor}
+          floorDisplay={floorDisplay}
+          categoryDisplay={categoryDisplay}
+          displayKey={displayKey}
+          planViewRef={planViewRef}
+          onCursor={setCursor}
+          onZoom={setZoomPercent}
+          onScale={setLiveScale}
+          selectedWallIds={selectedWallIds}
+          onPlanSelect={onPlanSelect}
+          onPlanMarquee={onPlanMarquee}
+          onSegmentCut={onSegmentCut}
+          onPlanContextMenu={onPlanContextMenu}
+          onViewportSelectWall={onViewportSelectWall}
+          onViewportContextMenu={onViewportContextMenu}
+          activeTool={activeTool}
+          toolInputActive={toolInputActive}
+          toolHandlers={toolHandlers}
+          grips={grips}
+          edgeGrips={edgeGrips}
+          selectedDrawingId={selectedDrawingId}
+          selectedDrawingIds={selectedDrawingIds}
+          gripHandlers={gripHandlers}
+        />
+
+        {/* Modusleiste der laufenden Transformation (über der Mitte). */}
+        {activeTransform && (
+          <TransformBar
+            op={activeTransform.op}
+            copyMode={activeTransform.copyMode}
+            count={activeTransform.count}
+            pointsLen={activeTransform.points.length}
+            onMode={onTransformMode}
+            onCancel={() => {
+              setActiveTransform(null);
+              setDraft(null);
+            }}
+          />
+        )}
+
+        {/* Rechtes Dock: standardmäßig leer (Ressourcen ist ein schwebendes
+            Fenster). Nur gerendert, wenn es Gruppen hat — sonst nutzt die Mitte
+            den freigewordenen Platz. */}
+        {rightHasTabs && (
+          <Dock
+            side="right"
+            dock={layout.right}
+            onStartTabDrag={startTabDrag}
+            onResize={(size) => resizeDock("right", size)}
+            onResizeGroups={(w) => resizeGroups("right", w)}
+            buildHost={(activeTab) =>
+              hostWithMode(baseHost, activeTab, modeFor, setModeFor)
+            }
+            displayModeFor={(activeTab) => modeFor(activeTab)}
+            onDisplayModeChange={(activeTab, m) => setModeFor(activeTab, m)}
+          />
+        )}
+
+        {/* Rand-Andock-Zonen (links/rechts) — nur während einer Drag-Geste
+            (Tab-Ziehen ODER Titel-Drag eines Fensters). Sie sind die
+            Trefferflächen für „hierher andocken"; data-drop-zone wird von der
+            Drag-Auflösung (panelDrag/onFloatTitleDrop) gelesen. */}
+        {dragActive && (
+          <>
+            <div
+              className={`drop-zone drop-zone-left${
+                activeZone === "left" ? " active" : ""
+              }`}
+              data-drop-zone="left"
+            />
+            <div
+              className={`drop-zone drop-zone-right${
+                activeZone === "right" ? " active" : ""
+              }`}
+              data-drop-zone="right"
+            />
+          </>
+        )}
+
+        {/* Schwebende Panels ÜBER der Mitte. Jedes bekommt einen eigenen
+            Host-Provider, damit sein Darstellungsmodus-Umschalter dem eigenen
+            Panel folgt (wie bei den Docks). Verschieben/Größe/Andocken/Schließen
+            schreiben das Layout fort (persistiert via useEffect). */}
+        {layout.floating.map((fp) => (
+          <PanelHostContext.Provider
+            key={fp.panelId}
+            value={hostWithMode(baseHost, fp.panelId, modeFor, setModeFor)}
+          >
+            <FloatingPanel
+              panel={fp}
+              displayMode={modeFor(fp.panelId)}
+              onDisplayModeChange={(m) => setModeFor(fp.panelId, m)}
+              onFocus={focusFloat}
+              onMove={moveFloat}
+              onResize={resizeFloat}
+              onRedock={redockFloat}
+              onClose={closeFloat}
+              onTitleDrag={onFloatTitleDrag}
+              onTitleDrop={onFloatTitleDrop}
+            />
+          </PanelHostContext.Provider>
+        ))}
+      </div>
+
+      {/* Drag-Overlay (Geist + Tab-Einfüge-Caret) während eines Tab-Ziehens. */}
+      <DragOverlay drag={drag} />
+
+      {/* Command-Line (Rhino-artig) ÜBER der Statusleiste: Prompt + klickbare
+          Inline-Optionen + Texteingabe + Autocomplete. Tab fokussiert sie. */}
+      <CommandLine
+        ref={commandLineRef}
+        active={engineView.active}
+        promptKey={engineView.promptKey}
+        options={engineView.options}
+        fields={engineView.fields}
+        onSubmit={(text) => engine.submitText(text)}
+        onOption={(id) => engine.chooseOption(id)}
+        onCycleField={() => engine.cycleField()}
+        onCancel={() => engine.cancel()}
+        suggest={(prefix) => engine.suggest(prefix)}
+      />
+
+      {/* Footer / Status-Leiste (unten). Werte rein aus Modell + View-State.
+          Cursor/Zoom nur, wenn eine Plan-Ansicht aktiv ist (sonst „—"). */}
+      <StatusBar
+        hint={toolHint}
+        cursor={planActive ? cursor : null}
+        unit="m"
+        scaleDenominator={planActive ? liveScale : null}
+        zoomPercent={planActive ? zoomPercent : null}
+        activeFloor={activeLevel.name}
+        activeLayer={activeLayerName}
+      />
+
+      {/* Schwebendes Ressourcen-Fenster ÜBER allem (hoher z-index, abgedunkelter
+          Hintergrund). Schließt über X / Klick auf den Hintergrund / Esc. */}
+      {resourcesOpen && (
+        <ResourceManager
+          project={project}
+          handlers={resourceHandlers}
+          onClose={() => setResourcesOpen(false)}
+        />
+      )}
+
+      {/* Modaler Import-Dialog (DXF/DWG) — offen, sobald eine Datei gewählt/
+          fallengelassen wurde. Liefert eine strukturierte Entscheidung an
+          runImport (Ebene anlegen / Drawings anhängen / Meshes als Kontext). */}
+      {importState && (
+        <ImportDialog
+          fileName={importState.fileName}
+          isDwg={importState.isDwg}
+          loading={importState.loading ?? false}
+          parsed={importState.parsed}
+          project={project}
+          activeCategoryCode={activeCategoryCode}
+          onImport={runImport}
+          onClose={() => setImportState(null)}
+        />
+      )}
+
+      {/* Dezenter Drop-Rahmen, solange eine Datei über die App gezogen wird. */}
+      {dropActive && (
+        <div className="drop-feedback" aria-hidden="true">
+          <div className="drop-feedback-inner">{t("drop.hint")}</div>
+        </div>
+      )}
+
+      {/* Aktives Kontextmenü (genau eines). Die Einträge baut buildMenuItems je
+          Quelle (Ebene / Zeichnungsebene / Grundriss / 3D) — alle verdrahtet
+          bzw. klar deaktiviert mit Tooltip. */}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          title={menuTitle(menu, project)}
+          items={buildMenuItems(menu, {
+            project,
+            selectedWallId,
+            layerClipboard,
+            openLayerEditor: (code) =>
+              setEditor({ kind: "layer", code, x: menu.x, y: menu.y }),
+            openLevelEditor: (id) =>
+              setEditor({ kind: "level", id, x: menu.x, y: menu.y }),
+            addSubCategory,
+            assignWallCategory,
+            duplicateCategory,
+            deleteCategory,
+            setLayerClipboard,
+            patchCategory,
+            duplicateLevel,
+            deleteLevel,
+            clearSelection: () => setSelectedWallIds([]),
+            fit: () => planViewRef.current?.fit(),
+            fitSelection: () => planViewRef.current?.fitSelection(),
+          })}
+          onClose={() => setMenu(null)}
+        />
+      )}
+
+      {/* Inline-Editor (Ebene bzw. Geschoss) — minimaler echter Editor, der live
+          auf den State wirkt. Aus einem Menüpunkt geöffnet. */}
+      {editor?.kind === "layer" &&
+        (() => {
+          const cat = findCategory(project.layers, editor.code);
+          if (!cat) return null;
+          return (
+            <InlineEditor
+              x={editor.x}
+              y={editor.y}
+              title={t("editor.layerTitle", { code: cat.code })}
+              onClose={() => setEditor(null)}
+            >
+              <EditorField label={t("editor.name")}>
+                <input
+                  type="text"
+                  value={cat.name}
+                  autoFocus
+                  onChange={(e) =>
+                    patchCategory(cat.code, { name: e.target.value })
+                  }
+                />
+              </EditorField>
+              <EditorField label={t("editor.color")}>
+                <input
+                  type="color"
+                  value={cat.color}
+                  onChange={(e) =>
+                    patchCategory(cat.code, { color: e.target.value })
+                  }
+                />
+              </EditorField>
+              <EditorField label={t("editor.lineWeight")}>
+                <span className="editor-num">
+                  <input
+                    type="number"
+                    step={0.01}
+                    min={0.01}
+                    value={cat.lw}
+                    onChange={(e) =>
+                      patchCategory(cat.code, { lw: Number(e.target.value) })
+                    }
+                  />
+                  <span className="editor-unit">{t("editor.unit.mm")}</span>
+                </span>
+              </EditorField>
+            </InlineEditor>
+          );
+        })()}
+
+      {editor?.kind === "level" &&
+        (() => {
+          const level = project.drawingLevels.find((z) => z.id === editor.id);
+          if (!level) return null;
+          const isFloor = level.kind === "floor";
+          return (
+            <InlineEditor
+              x={editor.x}
+              y={editor.y}
+              title={level.name}
+              onClose={() => setEditor(null)}
+            >
+              <EditorField label={t("editor.name")}>
+                <input
+                  type="text"
+                  value={level.name}
+                  autoFocus
+                  onChange={(e) => patchLevel(level.id, { name: e.target.value })}
+                />
+              </EditorField>
+              {isFloor && (
+                <>
+                  <EditorField label={t("editor.floorHeight")}>
+                    <span className="editor-num">
+                      <input
+                        type="number"
+                        step={0.05}
+                        min={0}
+                        value={level.floorHeight ?? 0}
+                        onChange={(e) =>
+                          patchLevel(level.id, {
+                            floorHeight: Number(e.target.value),
+                          })
+                        }
+                      />
+                      <span className="editor-unit">{t("editor.unit.m")}</span>
+                    </span>
+                  </EditorField>
+                  <EditorField label={t("editor.cutHeight")}>
+                    <span className="editor-num">
+                      <input
+                        type="number"
+                        step={0.05}
+                        min={0}
+                        value={level.cutHeight ?? 0}
+                        onChange={(e) =>
+                          patchLevel(level.id, {
+                            cutHeight: Number(e.target.value),
+                          })
+                        }
+                      />
+                      <span className="editor-unit">{t("editor.unit.m")}</span>
+                    </span>
+                  </EditorField>
+                </>
+              )}
+              {!isFloor && (
+                <div className="editor-note">
+                  {level.kind === "drawing"
+                    ? t("editor.noHeightDrawing")
+                    : t("editor.noHeightSection")}
+                </div>
+              )}
+            </InlineEditor>
+          );
+        })()}
+    </div>
+  );
+}
+
+// ── Host-Helfer ──────────────────────────────────────────────────────────────
+
+/**
+ * Baut den vollständigen Host-Wert für den Context, indem an den gemeinsamen
+ * `base` der zum aktiven Tab des Docks gehörende Darstellungsmodus angehängt
+ * wird. So liest das gerade gerenderte Panel über `usePanelHost().displayMode`
+ * genau seinen Modus. Rückgabe als `PanelHost` (Record), das der Context
+ * erwartet — die Verengung auf `PanelHostValue` macht `usePanelHost`.
+ */
+function hostWithMode(
+  base: Omit<PanelHostValue, "displayMode">,
+  activeTab: string | null,
+  modeFor: (id: string | null) => DisplayMode,
+  setModeFor: (id: string | null, mode: DisplayMode) => void,
+): PanelHost {
+  const value: PanelHostValue = {
+    ...base,
+    displayMode: {
+      mode: modeFor(activeTab),
+      setMode: (mode) => setModeFor(activeTab, mode),
+    },
+  };
+  return value as unknown as PanelHost;
+}
+
+// ── Wand-Trefferprüfung im Modellraum (für das Grundriss-Kontextmenü) ────────
+
+/**
+ * Liefert die ID der obersten Wand, deren (gehrtes) Band den Modellpunkt
+ * enthält — gefiltert auf das aktive Geschoss + sichtbare Kategorien, in
+ * umgekehrter Wand-Reihenfolge (zuletzt gezeichnet zuerst). Spiegelt die
+ * Trefferlogik der PlanView, arbeitet aber direkt auf den Wand-Polygonen, da
+ * das Grundriss-Kontextmenü nur den Modellpunkt kennt. `null` bei Leerraum.
+ */
+function hitTestWall(
+  project: Project,
+  floorId: string,
+  visibleCodes: Set<string>,
+  m: Vec2,
+): string | null {
+  const walls = project.walls.filter(
+    (w) => w.floorId === floorId && visibleCodes.has(w.categoryCode),
+  );
+  for (let i = walls.length - 1; i >= 0; i--) {
+    const w = walls[i];
+    const thickness = wallTypeThickness(getWallType(project, w));
+    const corners = wallCorners(w.start, w.end, thickness);
+    if (pointInPoly(m, corners)) return w.id;
+  }
+  return null;
+}
+
+/** Punkt-in-Polygon (Ray-Casting) im Modellraum — wie in der PlanView. */
+function pointInPoly(pt: Vec2, poly: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect =
+      yi > pt.y !== yj > pt.y &&
+      pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// ── Kontextmenü-Aufbau (Einträge je Quelle) ──────────────────────────────────
+
+/** Titel des Kontextmenüs je Quelle (Ebenenname/-code, Geschossname, „Wand"). */
+function menuTitle(menu: NonNullable<MenuState>, project: Project): string {
+  switch (menu.kind) {
+    case "layer": {
+      const c = findCategory(project.layers, menu.code);
+      return c ? `${c.code} · ${c.name}` : menu.code;
+    }
+    case "level": {
+      const l = project.drawingLevels.find((z) => z.id === menu.id);
+      return l ? l.name : t("ctx.title.level");
+    }
+    case "plan":
+    case "viewport":
+      return menu.wallId ? t("ctx.title.wall") : t("ctx.title.view");
+  }
+}
+
+/** Aktionen, die der Kontextmenü-Builder von App braucht (alle verdrahtet). */
+interface MenuActions {
+  project: Project;
+  selectedWallId: string | null;
+  layerClipboard: { color: string; lw: number } | null;
+  openLayerEditor: (code: string) => void;
+  openLevelEditor: (id: string) => void;
+  addSubCategory: (parentCode: string) => void;
+  assignWallCategory: (wallId: string, code: string) => void;
+  duplicateCategory: (code: string) => void;
+  deleteCategory: (code: string) => void;
+  setLayerClipboard: (clip: { color: string; lw: number } | null) => void;
+  patchCategory: (code: string, patch: Partial<LayerCategory>) => void;
+  duplicateLevel: (id: string) => void;
+  deleteLevel: (id: string) => void;
+  clearSelection: () => void;
+  fit: () => void;
+  fitSelection: () => void;
+}
+
+/**
+ * Baut die Kontextmenü-Einträge je Quelle — 1:1 nach docs/design/context-menu.md.
+ * JEDER Eintrag ist verdrahtet ODER klar deaktiviert mit Tooltip (`title`,
+ * nennt den Grund) — kein stiller No-Op.
+ */
+function buildMenuItems(
+  menu: NonNullable<MenuState>,
+  a: MenuActions,
+): ContextMenuItem[] {
+  switch (menu.kind) {
+    case "layer":
+      return layerMenuItems(menu.code, a);
+    case "level":
+      return levelMenuItems(menu.id, a);
+    case "plan":
+      return planMenuItems(menu.wallId, a);
+    case "viewport":
+      return viewportMenuItems(menu.wallId, a);
+  }
+}
+
+/** Ebenen-Kontextmenü (Rechtsklick auf Ebenen-Zeile). */
+function layerMenuItems(code: string, a: MenuActions): ContextMenuItem[] {
+  const total = flattenCategories(a.project.layers).length;
+  const hasSelection = a.selectedWallId !== null;
+  const hasClipboard = a.layerClipboard !== null;
+  return [
+    {
+      label: t("ctx.layerSettings"),
+      icon: <MenuIcon name="settings" />,
+      onClick: () => a.openLayerEditor(code),
+    },
+    { divider: true },
+    {
+      label: t("ctx.addSubLayer"),
+      icon: <MenuIcon name="add" />,
+      onClick: () => a.addSubCategory(code),
+    },
+    {
+      label: t("ctx.assignSelection"),
+      icon: <MenuIcon name="move_down" />,
+      disabled: !hasSelection,
+      title: hasSelection ? undefined : t("ctx.assignSelection.disabled"),
+      onClick: () => {
+        if (a.selectedWallId) a.assignWallCategory(a.selectedWallId, code);
+      },
+    },
+    { divider: true },
+    {
+      label: t("ctx.duplicate"),
+      icon: <MenuIcon name="content_copy" />,
+      onClick: () => a.duplicateCategory(code),
+    },
+    {
+      label: t("ctx.copyProps"),
+      icon: <MenuIcon name="colorize" />,
+      onClick: () => {
+        const c = findCategory(a.project.layers, code);
+        if (c) a.setLayerClipboard({ color: c.color, lw: c.lw });
+      },
+    },
+    {
+      label: t("ctx.pasteProps"),
+      icon: <MenuIcon name="format_paint" />,
+      disabled: !hasClipboard,
+      title: hasClipboard ? undefined : t("ctx.pasteProps.disabled"),
+      onClick: () => {
+        if (a.layerClipboard)
+          a.patchCategory(code, {
+            color: a.layerClipboard.color,
+            lw: a.layerClipboard.lw,
+          });
+      },
+    },
+    { divider: true },
+    {
+      label: t("ctx.delete"),
+      icon: <MenuIcon name="delete" />,
+      danger: true,
+      disabled: total <= 1,
+      title: total <= 1 ? t("ctx.delete.lastLayer") : undefined,
+      onClick: () => a.deleteCategory(code),
+    },
+  ];
+}
+
+/** Zeichnungsebenen-Kontextmenü (Rechtsklick auf Geschoss/Schnitt/Zeichnung). */
+function levelMenuItems(id: string, a: MenuActions): ContextMenuItem[] {
+  const total = a.project.drawingLevels.length;
+  return [
+    {
+      label: t("ctx.levelSettings"),
+      icon: <MenuIcon name="settings" />,
+      onClick: () => a.openLevelEditor(id),
+    },
+    { divider: true },
+    {
+      label: t("ctx.duplicate"),
+      icon: <MenuIcon name="content_copy" />,
+      onClick: () => a.duplicateLevel(id),
+    },
+    { divider: true },
+    {
+      label: t("ctx.delete"),
+      icon: <MenuIcon name="delete" />,
+      danger: true,
+      disabled: total <= 1,
+      title: total <= 1 ? t("ctx.delete.lastLevel") : undefined,
+      onClick: () => a.deleteLevel(id),
+    },
+  ];
+}
+
+/**
+ * Grundriss-Kontextmenü. Bezug ist die getroffene/gewählte Wand. Einträge sind
+ * verdrahtet: „Auf Auswahl einpassen" (PlanView-Handle) und „Auswahl aufheben".
+ * Ohne getroffene Wand bleibt nur „Einpassen". (Eigenschaften-Panel/Bemaßung
+ * folgen später — daher hier KEIN Schein-Eintrag.)
+ */
+function planMenuItems(
+  wallId: string | null,
+  a: MenuActions,
+): ContextMenuItem[] {
+  if (wallId) {
+    return [
+      {
+        label: t("ctx.fitSelection"),
+        icon: <MenuIcon name="center_focus_strong" />,
+        onClick: a.fitSelection,
+      },
+      {
+        label: t("ctx.clearSelection"),
+        icon: <MenuIcon name="deselect" />,
+        onClick: a.clearSelection,
+      },
+      { divider: true },
+      {
+        label: t("ctx.fit"),
+        icon: <MenuIcon name="fit_screen" />,
+        onClick: a.fit,
+      },
+    ];
+  }
+  return [
+    {
+      label: t("ctx.fit"),
+      icon: <MenuIcon name="fit_screen" />,
+      onClick: a.fit,
+    },
+  ];
+}
+
+/**
+ * 3D-Kontextmenü. Im 3D gibt es (noch) kein Einpassen-Handle wie im Grundriss;
+ * verdrahtet ist „Auswahl aufheben" (mit getroffener Wand). Ohne Wand ist das
+ * Menü leer-sinnvoll: ein deaktivierter Hinweis, kein stiller No-Op.
+ */
+function viewportMenuItems(
+  wallId: string | null,
+  a: MenuActions,
+): ContextMenuItem[] {
+  if (wallId) {
+    return [
+      {
+        label: t("ctx.clearSelection"),
+        icon: <MenuIcon name="deselect" />,
+        onClick: a.clearSelection,
+      },
+    ];
+  }
+  return [
+    {
+      label: t("ctx.noWallHit"),
+      disabled: true,
+      title: t("ctx.noWallHit.hint"),
+    },
+  ];
+}
+
+// ── Inline-Editor (Ebene / Geschoss) ─────────────────────────────────────────
+
+/**
+ * Kleiner schwebender Editor (dunkel, wie das Kontextmenü) am Anker. Schließt
+ * über Außenklick / Esc. Rein darstellend: die Felder rufen die übergebenen
+ * Patch-Handler, die live auf den State wirken (kein Bestätigen nötig).
+ */
+function InlineEditor({
+  x,
+  y,
+  title,
+  onClose,
+  children,
+}: {
+  x: number;
+  y: number;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // An die Viewport-Ränder klemmen (wie das Kontextmenü).
+  const [pos, setPos] = useState({ x, y });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    let nx = x;
+    let ny = y;
+    if (nx + r.width > window.innerWidth - 4) nx = window.innerWidth - r.width - 4;
+    if (ny + r.height > window.innerHeight - 4)
+      ny = window.innerHeight - r.height - 4;
+    setPos({ x: Math.max(4, nx), y: Math.max(4, ny) });
+  }, [x, y]);
+  // Schließen bei Außenklick / Esc.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="ctx-editor"
+      style={{ left: pos.x, top: pos.y }}
+      role="dialog"
+      aria-label={title}
+    >
+      <div className="ctx-editor-head">
+        <span className="ctx-editor-title">{title}</span>
+        <button
+          className="ctx-editor-close"
+          onClick={onClose}
+          aria-label={t("editor.close")}
+        >
+          ×
+        </button>
+      </div>
+      <div className="ctx-editor-body">{children}</div>
+    </div>
+  );
+}
+
+/** Eine Editor-Zeile: Beschriftung links, Steuerelement rechts. */
+function EditorField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="editor-field">
+      <span className="editor-label">{label}</span>
+      <span className="editor-control">{children}</span>
+    </label>
+  );
+}
+
+// ── Layout-Menü (Oberleiste) ─────────────────────────────────────────────────
+
+/**
+ * Kleines Layout-Menü: aktuelles Layout unter einem Namen sichern und ein
+ * gespeichertes Layout wählen (oder löschen). Liest die Namen frisch aus dem
+ * localStorage, sobald das Menü geöffnet wird.
+ */
+function LayoutMenu({
+  layout,
+  onApply,
+}: {
+  layout: LayoutState;
+  onApply: (layout: LayoutState) => void;
+}) {
+  const [names, setNames] = useState<string[]>([]);
+
+  const refresh = () => setNames(listNamedLayouts());
+
+  const onSave = () => {
+    const name = window.prompt(t("layout.savePrompt"));
+    if (!name) return;
+    saveNamedLayout(name.trim(), layout);
+    refresh();
+  };
+
+  const onPick = (value: string) => {
+    if (value === "__save__") {
+      onSave();
+      return;
+    }
+    if (value.startsWith("__del__:")) {
+      const name = value.slice("__del__:".length);
+      deleteNamedLayout(name);
+      refresh();
+      return;
+    }
+    const loaded = loadNamedLayout(value);
+    if (loaded) onApply(loaded);
+  };
+
+  return (
+    <select
+      className="layout-menu"
+      title={t("layout.title")}
+      aria-label={t("layout.title")}
+      value=""
+      onFocus={refresh}
+      onMouseDown={refresh}
+      onChange={(e) => {
+        onPick(e.target.value);
+        // Auswahl-Anzeige zurücksetzen (Menü ist ein Aktions-Trigger).
+        e.currentTarget.value = "";
+      }}
+    >
+      <option value="" disabled>
+        {t("layout.placeholder")}
+      </option>
+      <option value="__save__">{t("layout.saveCurrent")}</option>
+      {names.length > 0 && (
+        <optgroup label={t("layout.loadGroup")}>
+          {names.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {names.length > 0 && (
+        <optgroup label={t("layout.deleteGroup")}>
+          {names.map((n) => (
+            <option key={`del-${n}`} value={`__del__:${n}`}>
+              ✕ {n}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
+// ── Inhalt (Mitte) ───────────────────────────────────────────────────────────
+
+/** Hauptinhalt — abhängig von der aktiven Zeichnungsebene und dem Ansichtstyp. */
+function Content({
+  project,
+  level,
+  viewType,
+  visibleCodes,
+  detail,
+  referenceLines,
+  hairline,
+  renderMode,
+  view3d,
+  fov,
+  mono,
+  onPatchFloor,
+  floorDisplay,
+  categoryDisplay,
+  displayKey,
+  planViewRef,
+  onCursor,
+  onZoom,
+  onScale,
+  selectedWallIds,
+  onPlanSelect,
+  onPlanMarquee,
+  onSegmentCut,
+  onPlanContextMenu,
+  onViewportSelectWall,
+  onViewportContextMenu,
+  activeTool,
+  toolInputActive,
+  toolHandlers,
+  grips,
+  edgeGrips,
+  selectedDrawingId,
+  selectedDrawingIds,
+  gripHandlers,
+}: {
+  project: Project;
+  level: DrawingLevel;
+  viewType: ViewType;
+  visibleCodes: Set<string>;
+  detail: DetailLevel;
+  referenceLines: boolean;
+  hairline: boolean;
+  renderMode: RenderMode;
+  /** Kanonischer 3D-Blickwinkel (Preset) der Perspektive. */
+  view3d: View3d;
+  /** Sichtwinkel der 3D-Perspektivkamera in Grad. */
+  fov: number;
+  /** Grundriss in Schwarz-Weiss (mono) statt mit Kategorie-/Element-Farben. */
+  mono: boolean;
+  onPatchFloor: (patch: Partial<DrawingLevel>) => void;
+  floorDisplay: DisplayResolver;
+  categoryDisplay: CategoryDisplayResolver & DisplayResolver;
+  displayKey: string;
+  planViewRef: React.RefObject<PlanViewHandle>;
+  onCursor: (model: Vec2 | null) => void;
+  onZoom: (percent: number) => void;
+  onScale: (n: number) => void;
+  selectedWallIds: string[];
+  onPlanSelect: (sel: PlanSelection) => void;
+  onPlanMarquee: (sel: MarqueeSelection) => void;
+  onSegmentCut: (drawingId: string, model: Vec2) => void;
+  onPlanContextMenu: (info: {
+    clientX: number;
+    clientY: number;
+    model: Vec2;
+  }) => void;
+  onViewportSelectWall: (wallId: string | null) => void;
+  onViewportContextMenu: (info: ViewportContextInfo) => void;
+  activeTool: ToolId;
+  toolInputActive: boolean;
+  toolHandlers: ToolHandlers;
+  grips: Vec2[];
+  edgeGrips: EdgeGrip[];
+  selectedDrawingId: string | null;
+  selectedDrawingIds?: string[];
+  gripHandlers: GripHandlers;
+}) {
+  if (level.kind === "section" || level.kind === "elevation") {
+    return <StubView level={level} />;
+  }
+
+  // Freie Zeichnung: dieselbe Plan-Ansicht wie ein Geschoss (generatePlan filtert
+  // `drawings2d` nach `level.id`), nur OHNE Geschoss-Eigenschaftsleiste und ohne
+  // 3D-Umschaltung — eine Zeichnung hat keine Höhe/3D. So sind importierte
+  // DXF-Polylinien hier sofort sichtbar und mit den 2D-Werkzeugen bearbeitbar.
+  if (level.kind === "drawing") {
+    return (
+      <main className="content">
+        <LevelPlanView
+          project={project}
+          level={level}
+          visibleCodes={visibleCodes}
+          categoryDisplay={categoryDisplay}
+          detail={detail}
+          referenceLines={referenceLines}
+          hairline={hairline}
+          mono={mono}
+          planViewRef={planViewRef}
+          onCursor={onCursor}
+          onZoom={onZoom}
+          onScale={onScale}
+          selectedWallIds={selectedWallIds}
+          onPlanSelect={onPlanSelect}
+          onPlanMarquee={onPlanMarquee}
+          onSegmentCut={onSegmentCut}
+          onPlanContextMenu={onPlanContextMenu}
+          activeTool={activeTool}
+          toolInputActive={toolInputActive}
+          toolHandlers={toolHandlers}
+          grips={grips}
+          edgeGrips={edgeGrips}
+          selectedDrawingId={selectedDrawingId}
+          selectedDrawingIds={selectedDrawingIds}
+          gripHandlers={gripHandlers}
+        />
+      </main>
+    );
+  }
+
+  // Geschoss: Eigenschaften-Leiste + gewählte Ansicht.
+  return (
+    <main className="content">
+      <FloorProps level={level} onPatch={onPatchFloor} />
+      {viewType === "perspektive" ? (
+        <section className="pane">
+          <div className="pane-title">
+            {t("content.perspektiveTitle", { name: level.name })}
+          </div>
+          <Viewport3D
+            project={project}
+            visibleCodes={visibleCodes}
+            floorDisplay={floorDisplay}
+            categoryDisplay={categoryDisplay}
+            displayKey={displayKey}
+            renderMode={renderMode}
+            view3d={view3d}
+            fov={fov}
+            gridElevation={level.baseElevation ?? 0}
+            onSelectWall={onViewportSelectWall}
+            onContextMenu={onViewportContextMenu}
+          />
+        </section>
+      ) : (
+        <LevelPlanView
+          project={project}
+          level={level}
+          visibleCodes={visibleCodes}
+          categoryDisplay={categoryDisplay}
+          detail={detail}
+          referenceLines={referenceLines}
+          hairline={hairline}
+          mono={mono}
+          planViewRef={planViewRef}
+          onCursor={onCursor}
+          onZoom={onZoom}
+          onScale={onScale}
+          selectedWallIds={selectedWallIds}
+          onPlanSelect={onPlanSelect}
+          onPlanMarquee={onPlanMarquee}
+          onSegmentCut={onSegmentCut}
+          onPlanContextMenu={onPlanContextMenu}
+          activeTool={activeTool}
+          toolInputActive={toolInputActive}
+          toolHandlers={toolHandlers}
+          grips={grips}
+          edgeGrips={edgeGrips}
+          selectedDrawingId={selectedDrawingId}
+          selectedDrawingIds={selectedDrawingIds}
+          gripHandlers={gripHandlers}
+        />
+      )}
+    </main>
+  );
+}
+
+/** Kompakte Eigenschaften-Leiste eines Geschosses. */
+function FloorProps({
+  level,
+  onPatch,
+}: {
+  level: DrawingLevel;
+  onPatch: (patch: Partial<DrawingLevel>) => void;
+}) {
+  return (
+    <div className="props-strip">
+      <label className="prop">
+        <span className="prop-label">{t("props.floorHeight")}</span>
+        <span className="prop-input">
+          <input
+            type="number"
+            step={0.05}
+            min={0}
+            value={level.floorHeight ?? 0}
+            onChange={(e) => onPatch({ floorHeight: Number(e.target.value) })}
+          />
+          <span className="prop-unit">{t("editor.unit.m")}</span>
+        </span>
+      </label>
+      <label className="prop">
+        <span className="prop-label">{t("props.cutHeight")}</span>
+        <span className="prop-input">
+          <input
+            type="number"
+            step={0.05}
+            min={0}
+            value={level.cutHeight ?? 0}
+            onChange={(e) => onPatch({ cutHeight: Number(e.target.value) })}
+          />
+          <span className="prop-unit">{t("editor.unit.m")}</span>
+        </span>
+      </label>
+      <span className="prop prop-readonly">
+        <span className="prop-label">{t("props.okff")}</span>
+        <span className="prop-value">
+          {t("props.okffValue", { value: (level.baseElevation ?? 0).toFixed(2) })}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** Abgeleiteter Grundriss eines Geschosses. */
+function LevelPlanView({
+  project,
+  level,
+  visibleCodes,
+  categoryDisplay,
+  detail,
+  referenceLines,
+  hairline,
+  mono,
+  planViewRef,
+  onCursor,
+  onZoom,
+  onScale,
+  selectedWallIds,
+  onPlanSelect,
+  onPlanMarquee,
+  onSegmentCut,
+  onPlanContextMenu,
+  activeTool,
+  toolInputActive,
+  toolHandlers,
+  grips,
+  edgeGrips,
+  selectedDrawingId,
+  selectedDrawingIds,
+  gripHandlers,
+}: {
+  project: Project;
+  level: DrawingLevel;
+  visibleCodes: Set<string>;
+  categoryDisplay: CategoryDisplayResolver;
+  detail: DetailLevel;
+  referenceLines: boolean;
+  hairline: boolean;
+  mono: boolean;
+  planViewRef: React.RefObject<PlanViewHandle>;
+  onCursor: (model: Vec2 | null) => void;
+  onZoom: (percent: number) => void;
+  onScale: (n: number) => void;
+  selectedWallIds: string[];
+  onPlanSelect: (sel: PlanSelection) => void;
+  onPlanMarquee: (sel: MarqueeSelection) => void;
+  onSegmentCut: (drawingId: string, model: Vec2) => void;
+  onPlanContextMenu: (info: {
+    clientX: number;
+    clientY: number;
+    model: Vec2;
+  }) => void;
+  activeTool: ToolId;
+  toolInputActive: boolean;
+  toolHandlers: ToolHandlers;
+  grips: Vec2[];
+  edgeGrips: EdgeGrip[];
+  selectedDrawingId: string | null;
+  selectedDrawingIds?: string[];
+  gripHandlers: GripHandlers;
+}) {
+  // Detailgrad + Referenzlinien fließen in die Plan-Erzeugung ein (Symbole,
+  // Schraffuren/Linienfeinheit bzw. Wand-Achslinien).
+  const plan = useMemo(
+    () =>
+      generatePlan(
+        project,
+        level.id,
+        visibleCodes,
+        categoryDisplay,
+        detail,
+        referenceLines,
+        mono,
+      ),
+    [project, level.id, visibleCodes, categoryDisplay, detail, referenceLines, mono],
+  );
+
+  // Bei einer freien Zeichnung gibt es keine Schnitthöhe → eigene Legende/Titel.
+  const isDrawing = level.kind === "drawing";
+  const caption = isDrawing
+    ? t("content.drawingLegend")
+    : t("content.grundrissLegend", {
+        name: level.name,
+        cutHeight: formatM(level.cutHeight ?? 0),
+      });
+
+  return (
+    <section className="pane">
+      <div className="pane-title">
+        {isDrawing
+          ? t("content.drawingTitle", { name: level.name })
+          : t("content.grundrissTitle", { name: level.name })}
+      </div>
+      <PlanView
+        ref={planViewRef}
+        plan={plan}
+        resetKey={level.id}
+        onCursor={onCursor}
+        onZoom={onZoom}
+        onScale={onScale}
+        selectedWallIds={selectedWallIds}
+        onSelect={onPlanSelect}
+        onMarquee={onPlanMarquee}
+        onSegmentCut={onSegmentCut}
+        onContextMenu={onPlanContextMenu}
+        activeTool={activeTool}
+        toolInputActive={toolInputActive}
+        toolHandlers={toolHandlers}
+        grips={grips}
+        edgeGrips={edgeGrips}
+        hairline={hairline}
+        selectedDrawingId={selectedDrawingId}
+        selectedDrawingIds={selectedDrawingIds}
+        gripHandlers={gripHandlers}
+      />
+      <div className="plan-legend">{caption}</div>
+    </section>
+  );
+}
+
+/** Platzhalter für Schnitt/Ansicht (kommt in einer späteren Phase). */
+function StubView({ level }: { level: DrawingLevel }) {
+  return (
+    <main className="content">
+      <div className="placeholder">
+        <strong>{level.name}</strong>
+        <span>
+          {t("stub.note", {
+            kind: level.kind === "section" ? t("stub.section") : t("stub.elevation"),
+          })}
+        </span>
+      </div>
+    </main>
+  );
+}
