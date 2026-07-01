@@ -6,9 +6,14 @@ description = "Nativer wgpu-2D-Renderer fuer den CAD-Grundriss (Tessellierung + 
 
 # Bewusst NICHT Teil des src-tauri-Workspaces: die Tessellierungs-Bibliothek soll
 # unabhaengig von Tauri baubar/testbar bleiben (headless, ohne Webview-Toolchain).
-# Der leere [workspace]-Block schliesst die Crate aus einem uebergeordneten
-# Workspace aus, sodass `cargo test`/`cargo build` hier eigenstaendig laufen.
-[workspace]
+# Ausschluss laeuft ueber `exclude = ["render2d"]` im uebergeordneten
+# src-tauri/Cargo.toml. Standalone (`cd render2d && cargo test/build`) bildet die
+# Crate automatisch ihren eigenen Ein-Paket-Workspace (eigene Cargo.lock).
+#
+# KEIN eigener `[workspace]`-Block hier: sobald `cad-tauri` render2d per Pfad als
+# (optionale) Abhaengigkeit einbindet (Feature `native2d`), wuerde ein zweiter
+# Workspace-Root INNERHALB des src-tauri-Baums Cargo mit "multiple workspace
+# roots" abbrechen. Der Parent-`exclude` haelt die Crate trotzdem eigenstaendig.
 
 [features]
 # Standard: nur die reine Tessellierung + Szene + Ortho-Matrix + WGSL-Quellen.

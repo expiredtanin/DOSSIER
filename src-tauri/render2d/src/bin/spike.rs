@@ -13,77 +13,13 @@
 use std::sync::Arc;
 
 use render2d::gpu::Renderer;
-use render2d::types::{FillPolygon, Line, Outline, Scene, ViewBox};
-use render2d::PX_PER_M;
+use render2d::types::ViewBox;
+use render2d::{demo_scene, initial_view_box};
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
-
-/// Demo-Szene in Modell-Metern: ein L-foermiger Wand-Poche (konkav!), ein Raum
-/// und ein paar Striche — genug, um Fuellung, Umriss und Papier-mm-Linien zu sehen.
-fn demo_scene() -> Scene {
-    let wall_grey: [f32; 4] = [0.55, 0.55, 0.55, 1.0];
-    let room_blue: [f32; 4] = [0.20, 0.45, 0.85, 0.18];
-    let ink: [f32; 4] = [0.10, 0.10, 0.10, 1.0];
-
-    // Konkaves L (Wandflaeche).
-    let l = vec![
-        [0.0, 0.0],
-        [4.0, 0.0],
-        [4.0, 2.0],
-        [2.0, 2.0],
-        [2.0, 4.0],
-        [0.0, 4.0],
-    ];
-    // Ein transluzenter Raum daneben.
-    let room = vec![[5.0, 0.0], [9.0, 0.0], [9.0, 4.0], [5.0, 4.0]];
-
-    Scene {
-        fills: vec![
-            FillPolygon {
-                pts: l.clone(),
-                color: wall_grey,
-            },
-            FillPolygon {
-                pts: room.clone(),
-                color: room_blue,
-            },
-        ],
-        outlines: vec![
-            Outline {
-                pts: l,
-                color: ink,
-                width_mm: 0.35,
-            },
-            Outline {
-                pts: room,
-                color: ink,
-                width_mm: 0.18,
-            },
-        ],
-        lines: vec![Line {
-            a: [0.0, -1.0],
-            b: [9.0, -1.0],
-            color: ink,
-            width_mm: 0.25,
-        }],
-    }
-}
-
-/// viewBox so, dass die Szene mittig einpasst (Bildschirm-Raum = Meter*PX_PER_M).
-fn initial_view_box() -> ViewBox {
-    // Szene ~ x[0..9], y[-1..4] in Meter -> Bildschirm x[0..810], y[-360..90].
-    // Etwas Rand drumherum.
-    let pad = 90.0;
-    ViewBox::new(
-        -pad,
-        -4.0 * PX_PER_M - pad,
-        9.0 * PX_PER_M + 2.0 * pad,
-        5.0 * PX_PER_M + 2.0 * pad,
-    )
-}
 
 struct GpuState {
     surface: wgpu::Surface<'static>,

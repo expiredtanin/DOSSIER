@@ -1,5 +1,10 @@
 [workspace]
 members = [".", "geometry"]
+# render2d/render3d sind eigenstaendige Crates (jeweils eigener [workspace]), damit
+# sie headless ohne Tauri-Toolchain baubar/testbar bleiben. Sie liegen zwar im
+# src-tauri-Baum, gehoeren aber NICHT zum cad-tauri-Workspace — hier ausschliessen,
+# damit `cad-tauri` sie dennoch per Pfad als (optionale) Abhaengigkeit nutzen kann.
+exclude = ["render2d", "render3d"]
 
 [package]
 name = "cad-tauri"
@@ -11,6 +16,14 @@ edition = "2021"
 name = "cad_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Standard: reine Tauri-App (Webview + invoke). KEIN wgpu/winit.
+default = []
+# M2-Spike: nativer wgpu-2D-Viewport im Tauri-Prozess (eigenes winit-Fenster).
+# Zieht render2d(+window) sowie winit/wgpu/pollster. Bewusst OPT-IN, damit der
+# normale Build unveraendert schlank bleibt.
+native2d = ["dep:render2d", "dep:winit", "dep:wgpu", "dep:pollster"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -19,3 +32,12 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 geometry = { path = "geometry" }
+
+# --- M2-Spike (nur mit Feature "native2d") -----------------------------------
+# render2d ist eine eigenstaendige Crate (eigener leerer [workspace]); wir binden
+# sie hier per Pfad ein und aktivieren ihr GPU-Fenster-Feature "window".
+render2d = { path = "render2d", features = ["window"], optional = true }
+# Versionen an render2d gekoppelt (identische raw-window-handle 0.6-Kette).
+winit = { version = "0.30", optional = true }
+wgpu = { version = "22", optional = true }
+pollster = { version = "0.3", optional = true }
