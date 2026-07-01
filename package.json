@@ -6,14 +6,21 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.7",
     "delaunator": "^5.1.0",
     "dxf-parser": "^1.1.2",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
+    "opencascade.js": "^1.1.1",
+    "polygon-clipping": "^0.15.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "svg2pdf.js": "^2.7.0",
     "three": "^0.169.0"
   },
   "devDependencies": {
@@ -24,6 +31,7 @@
     "playwright": "^1.61.1",
     "puppeteer": "^25.2.1",
     "typescript": "^5.6.2",
-    "vite": "^5.4.8"
+    "vite": "^5.4.8",
+    "vitest": "^4.1.9"
   }
 }
