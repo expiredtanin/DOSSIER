@@ -24,6 +24,7 @@ import type {
 } from "../model/types";
 import { commitTransform } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
+import { centroid as roomCentroid } from "../geometry/roomArea";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
 
@@ -161,6 +162,74 @@ export interface ProjectSlice {
    * Dicke nur auf diese Wand und teilt keine Presets versehentlich.
    */
   setWallThickness: (wallId: string, thickness: number) => void;
+
+  // ── Decken-Editieren ──────────────────────────────────────────────────────
+  /** Verschiebt EINEN Umriss-Vertex (per Index) einer Decke. */
+  moveCeilingGrip: (ceilingId: string, index: number, pt: Vec2) => void;
+  /** Verschiebt eine Decke (ganzer Umriss) um `delta`. */
+  moveCeilingBy: (ceilingId: string, delta: Vec2) => void;
+  /** Verschiebt eine Umriss-KANTE (beide Vertices) einer Decke um `delta`. */
+  moveCeilingEdge: (
+    ceilingId: string,
+    aIndex: number,
+    bIndex: number,
+    delta: Vec2,
+  ) => void;
+  /** Generischer immutabler Patch auf eine Decke (per ID). */
+  updateCeiling: (
+    id: string,
+    patch: Partial<import("../model/types").Ceiling>,
+  ) => void;
+  /** Setzt die Gesamtdicke einer Decke (thickness-Übersteuerung, Meter). */
+  setCeilingThickness: (ceilingId: string, thickness: number) => void;
+
+  // ── Öffnungs-Editieren (Object-Info-Panel) ────────────────────────────────
+  /** Generischer immutabler Patch auf eine Öffnung (per ID). */
+  updateOpening: (
+    id: string,
+    patch: Partial<import("../model/types").Opening>,
+  ) => void;
+
+  // ── Treppen-Editieren ──────────────────────────────────────────────────────
+  /** Verschiebt eine Treppe (Antritt) um `delta`. */
+  moveStairBy: (stairId: string, delta: Vec2) => void;
+  /** Generischer immutabler Patch auf eine Treppe (per ID). */
+  updateStair: (
+    id: string,
+    patch: Partial<import("../model/types").Stair>,
+  ) => void;
+
+  // ── Raum-Editieren ──────────────────────────────────────────────────────────
+  /** Verschiebt einen Raum (ganzer Umriss + optionaler Stempel-Anker) um `delta`. */
+  moveRoomBy: (roomId: string, delta: Vec2) => void;
+  /** Verschiebt EINEN Umriss-Vertex (per Index) eines Raums. */
+  moveRoomGrip: (roomId: string, index: number, pt: Vec2) => void;
+  /** Verschiebt eine Umriss-KANTE (beide Vertices) eines Raums um `delta`. */
+  moveRoomEdge: (
+    roomId: string,
+    aIndex: number,
+    bIndex: number,
+    delta: Vec2,
+  ) => void;
+  /** Generischer immutabler Patch auf einen Raum (per ID). */
+  updateRoom: (
+    id: string,
+    patch: Partial<import("../model/types").Room>,
+  ) => void;
+  /** Verschiebt NUR den Stempel-Anker eines Raums um `delta` (Kontur bleibt). */
+  moveRoomStamp: (roomId: string, delta: Vec2) => void;
+  /** Setzt den Stempel-Anker eines Raums absolut. */
+  setRoomStampAnchor: (roomId: string, anchor: Vec2) => void;
+  /** Setzt den Rich-Text des Raum-Stempels. */
+  setRoomStampDoc: (
+    roomId: string,
+    doc: import("../model/types").RichTextDoc,
+  ) => void;
+  /** Setzt den strukturierten Raum-Stempel (Feldmodell). */
+  setRoomStamp: (
+    roomId: string,
+    stamp: import("../model/types").RoomStamp,
+  ) => void;
 }
 
 /**
@@ -309,7 +378,13 @@ export function createProjectSlice(
             p.drawingLevels.filter((z) => z.id !== id),
           ),
           walls: p.walls.filter((w) => w.floorId !== id),
+          ceilings: (p.ceilings ?? []).filter((c) => c.floorId !== id),
+          stairs: (p.stairs ?? []).filter((s) => s.floorId !== id),
+          rooms: (p.rooms ?? []).filter((r) => r.floorId !== id),
           doors: p.doors.filter((d) => !removedWallIds.has(d.hostWallId)),
+          openings: (p.openings ?? []).filter(
+            (o) => !removedWallIds.has(o.hostWallId),
+          ),
         };
       });
     },
@@ -376,7 +451,10 @@ export function createProjectSlice(
         const codes = new Set(flattenCategories([src]).map((c) => c.code));
         const usedByWall = p.walls.some((w) => codes.has(w.categoryCode));
         const usedByDoor = p.doors.some((d) => codes.has(d.categoryCode));
-        if (usedByWall || usedByDoor) {
+        const usedByOpening = (p.openings ?? []).some((o) =>
+          codes.has(o.categoryCode),
+        );
+        if (usedByWall || usedByDoor || usedByOpening) {
           window.alert(t("alert.layerInUse", { code: src.code, name: src.name }));
           return p;
         }
@@ -630,6 +708,158 @@ export function createProjectSlice(
 
     setWallThickness: (wallId, thickness) =>
       setProject((p) => setWallThickness(p, wallId, thickness)),
+
+    // ── Decken-Editieren ──────────────────────────────────────────────────
+    moveCeilingGrip: (ceilingId, index, pt) =>
+      setProject((p) => mapCeiling(p, ceilingId, (c) => ({
+        ...c,
+        outline: c.outline.map((v, i) => (i === index ? pt : v)),
+      }))),
+
+    moveCeilingBy: (ceilingId, delta) =>
+      setProject((p) => mapCeiling(p, ceilingId, (c) => ({
+        ...c,
+        outline: c.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
+      }))),
+
+    moveCeilingEdge: (ceilingId, aIndex, bIndex, delta) =>
+      setProject((p) => mapCeiling(p, ceilingId, (c) => ({
+        ...c,
+        outline: c.outline.map((v, i) =>
+          i === aIndex || i === bIndex ? { x: v.x + delta.x, y: v.y + delta.y } : v,
+        ),
+      }))),
+
+    updateCeiling: (id, patch) =>
+      setProject((p) => mapCeiling(p, id, (c) => ({ ...c, ...patch }))),
+
+    setCeilingThickness: (ceilingId, thickness) =>
+      setProject((p) =>
+        !isFinite(thickness) || thickness <= 0
+          ? p
+          : mapCeiling(p, ceilingId, (c) => ({ ...c, thickness })),
+      ),
+
+    // ── Öffnungs-Editieren ────────────────────────────────────────────────
+    updateOpening: (id, patch) =>
+      setProject((p) => ({
+        ...p,
+        openings: (p.openings ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)),
+      })),
+
+    // ── Treppen-Editieren ──────────────────────────────────────────────────
+    moveStairBy: (stairId, delta) =>
+      setProject((p) =>
+        mapStair(p, stairId, (s) => ({
+          ...s,
+          start: { x: s.start.x + delta.x, y: s.start.y + delta.y },
+          ...(s.center
+            ? { center: { x: s.center.x + delta.x, y: s.center.y + delta.y } }
+            : {}),
+        })),
+      ),
+
+    updateStair: (id, patch) =>
+      setProject((p) => mapStair(p, id, (s) => ({ ...s, ...patch }))),
+
+    // ── Raum-Editieren ──────────────────────────────────────────────────────
+    moveRoomBy: (roomId, delta) =>
+      setProject((p) =>
+        mapRoom(p, roomId, (r) => ({
+          ...r,
+          boundary: r.boundary.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
+          ...(r.stampAnchor
+            ? {
+                stampAnchor: {
+                  x: r.stampAnchor.x + delta.x,
+                  y: r.stampAnchor.y + delta.y,
+                },
+              }
+            : {}),
+        })),
+      ),
+
+    moveRoomGrip: (roomId, index, pt) =>
+      setProject((p) =>
+        mapRoom(p, roomId, (r) => ({
+          ...r,
+          boundary: r.boundary.map((v, i) => (i === index ? pt : v)),
+        })),
+      ),
+
+    moveRoomEdge: (roomId, aIndex, bIndex, delta) =>
+      setProject((p) =>
+        mapRoom(p, roomId, (r) => ({
+          ...r,
+          boundary: r.boundary.map((v, i) =>
+            i === aIndex || i === bIndex
+              ? { x: v.x + delta.x, y: v.y + delta.y }
+              : v,
+          ),
+        })),
+      ),
+
+    updateRoom: (id, patch) =>
+      setProject((p) => mapRoom(p, id, (r) => ({ ...r, ...patch }))),
+
+    moveRoomStamp: (roomId, delta) =>
+      setProject((p) =>
+        mapRoom(p, roomId, (r) => {
+          const base = r.stampAnchor ?? roomCentroid(r.boundary);
+          return {
+            ...r,
+            stampAnchor: { x: base.x + delta.x, y: base.y + delta.y },
+          };
+        }),
+      ),
+
+    setRoomStampAnchor: (roomId, anchor) =>
+      setProject((p) => mapRoom(p, roomId, (r) => ({ ...r, stampAnchor: anchor }))),
+
+    setRoomStampDoc: (roomId, doc) =>
+      setProject((p) => mapRoom(p, roomId, (r) => ({ ...r, stampDoc: doc }))),
+
+    setRoomStamp: (roomId, stamp) =>
+      setProject((p) => mapRoom(p, roomId, (r) => ({ ...r, stamp }))),
+  };
+}
+
+/** Immutabler Map über einen Raum (per ID); No-op ohne Treffer. */
+function mapRoom(
+  project: Project,
+  roomId: string,
+  fn: (r: import("../model/types").Room) => import("../model/types").Room,
+): Project {
+  const rooms = project.rooms ?? [];
+  return {
+    ...project,
+    rooms: rooms.map((r) => (r.id === roomId ? fn(r) : r)),
+  };
+}
+
+/** Immutabler Map über eine Treppe (per ID); No-op ohne Treffer. */
+function mapStair(
+  project: Project,
+  stairId: string,
+  fn: (s: import("../model/types").Stair) => import("../model/types").Stair,
+): Project {
+  const stairs = project.stairs ?? [];
+  return {
+    ...project,
+    stairs: stairs.map((s) => (s.id === stairId ? fn(s) : s)),
+  };
+}
+
+/** Immutabler Map über eine Decke (per ID); No-op ohne Treffer. */
+function mapCeiling(
+  project: Project,
+  ceilingId: string,
+  fn: (c: import("../model/types").Ceiling) => import("../model/types").Ceiling,
+): Project {
+  const ceilings = project.ceilings ?? [];
+  return {
+    ...project,
+    ceilings: ceilings.map((c) => (c.id === ceilingId ? fn(c) : c)),
   };
 }
 

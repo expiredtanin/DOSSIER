@@ -6,23 +6,41 @@
 import type { Command } from "./types";
 import { lineCommand } from "./cmds/line";
 import { polylineCommand } from "./cmds/polyline";
+import { wallCommand } from "./cmds/wall";
+import { ceilingCommand } from "./cmds/ceiling";
+import { openingCommand, fensterCommand, tuerCommand } from "./cmds/opening";
+import { stairCommand } from "./cmds/stair";
+import { roomCommand } from "./cmds/room";
 import { rectCommand } from "./cmds/rect";
 import { circleCommand } from "./cmds/circle";
 import { moveCommand } from "./cmds/move";
+import { mirrorCommand } from "./cmds/mirror";
+import { joinCommand } from "./cmds/join";
 import { copyCommand } from "./cmds/copy";
 import { offsetCommand } from "./cmds/offset";
+import { trimCommand } from "./cmds/trim";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
+  wall: wallCommand,
+  ceiling: ceilingCommand,
+  opening: openingCommand,
+  fenster: fensterCommand,
+  tuer: tuerCommand,
+  stair: stairCommand,
+  room: roomCommand,
   line: lineCommand,
   polyline: polylineCommand,
   rect: rectCommand,
   circle: circleCommand,
   move: moveCommand,
+  mirror: mirrorCommand,
+  join: joinCommand,
   copy: copyCommand,
   offset: offsetCommand,
+  trim: trimCommand,
   import: importCommand,
   terrain: terrainCommand,
 };
@@ -33,13 +51,30 @@ export const COMMANDS: Record<string, Command> = {
  * relativ-Koordinaten-Präfix `r5,3`).
  */
 export const ALIASES: Record<string, string> = {
+  w: "wall",
+  wand: "wall",
+  d: "ceiling",
+  decke: "ceiling",
+  f: "fenster",
+  t: "tuer",
+  tür: "tuer",
+  oe: "opening",
+  treppe: "stair",
+  tp: "stair",
+  raum: "room",
+  rm: "room",
   l: "line",
   pl: "polyline",
   rec: "rect",
   c: "circle",
   m: "move",
+  s: "mirror",
+  spiegeln: "mirror",
+  j: "join",
+  verbinden: "join",
   cp: "copy",
   o: "offset",
+  tr: "trim",
   imp: "import",
   ter: "terrain",
 };

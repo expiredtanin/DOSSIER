@@ -259,6 +259,157 @@ export function trimSegment(
   return pieces.filter((_, i) => i !== best);
 }
 
+/**
+ * Quick-Trim einer ganzen Kurve (offen ODER geschlossen) an einem Klickpunkt.
+ * Die Kurve `pts`/`closed` wird an ALLEN Schnittpunkten mit den Cuttern in
+ * Bögen zerlegt; der Bogen, der `pick` am nächsten liegt (das angeklickte „weg-
+ * zuschneidende" Stück), wird ENTFERNT. Liefert die verbleibenden Ketten als
+ * `{pts, closed}`-Liste (0..n Stücke):
+ *   • OFFEN: der getroffene Bogen fällt weg → 0, 1 oder 2 offene Reststücke.
+ *   • GESCHLOSSEN: der Ring wird am Schnitt aufgetrennt; das angeklickte Stück
+ *     entfällt → genau ein offenes Reststück (oder leer, wenn alles entfällt).
+ * Ohne Schnitt (oder nur randständige) bleibt die Kurve unverändert (eine Kette).
+ */
+export function trimPolyline(
+  pts: Vec2[],
+  closed: boolean,
+  cutters: { pts: Vec2[]; closed: boolean }[],
+  pick: Vec2,
+): { pts: Vec2[]; closed: boolean }[] {
+  const edges = polylineEdges(pts, closed);
+  if (edges.length === 0) return [{ pts: pts.slice(), closed }];
+
+  // Schnittpunkte je Kante (innen, t ∈ (0,1)) als globale „Knoten" sammeln —
+  // beschrieben durch (edgeIndex, t) und in Kettenreihenfolge sortiert.
+  interface Cut {
+    edge: number;
+    t: number;
+    point: Vec2;
+  }
+  const cuts: Cut[] = [];
+  for (let ei = 0; ei < edges.length; ei++) {
+    const [a1, a2] = edges[ei];
+    for (const c of cutters) {
+      for (const h of segmentPolylineHits(a1, a2, c.pts, c.closed)) {
+        if (h.t > EPS && h.t < 1 - EPS) {
+          cuts.push({ edge: ei, t: h.t, point: h.point });
+        }
+      }
+    }
+  }
+  cuts.sort((p, q) => (p.edge - q.edge) || (p.t - q.t));
+  // Dedup koinzidenter Schnitte (gleiche Kante+t).
+  const cut: Cut[] = [];
+  for (const h of cuts) {
+    const prev = cut[cut.length - 1];
+    if (prev && prev.edge === h.edge && Math.abs(prev.t - h.t) < 1e-6) continue;
+    cut.push(h);
+  }
+  if (cut.length === 0) return [{ pts: pts.slice(), closed }];
+
+  // Hilfsfunktion: Kette von Knoten X (auf Kante eX, tX) zu Knoten Y entlang der
+  // Kurve (vorwärts in Kantenrichtung) als Punktliste materialisieren.
+  const span = (eX: number, pX: Vec2, eY: number, pY: Vec2): Vec2[] => {
+    const out: Vec2[] = [pX];
+    let e = eX;
+    // Über die Vertices NACH dem Startknoten bis zum Endknoten laufen.
+    // Anzahl Kanten (modular über die Kettenlänge), damit auch der Wrap bei
+    // geschlossenen Kurven funktioniert.
+    const total = edges.length;
+    let steps = 0;
+    while (steps <= total) {
+      if (e === eY) break;
+      // Endpunkt der aktuellen Kante hinzufügen, dann zur nächsten Kante.
+      out.push(edges[e][1]);
+      e = (e + 1) % total;
+      steps++;
+    }
+    out.push(pY);
+    return dedupeConsecutive(out);
+  };
+
+  if (!closed) {
+    // Offen: der Pick liegt zwischen zwei Knoten ODER zwischen einem Knoten und
+    // einem Element-Ende. Wir finden das Intervall [lo, hi] der Knoten, die den
+    // Pick einklammern (lo = letzter Knoten vor dem Pick, hi = erster danach),
+    // bzw. das Element-Ende, wenn einseitig kein Schnitt liegt.
+    const pickPos = nearestParamOnChain(edges, pick); // globaler Lauf-Param
+    const cutPos = cut.map((c) => c.edge + c.t);
+    let loIdx = -1;
+    let hiIdx = cut.length;
+    for (let i = 0; i < cut.length; i++) {
+      if (cutPos[i] <= pickPos) loIdx = i;
+      else { hiIdx = i; break; }
+    }
+    // Reststück A: Anfang … loIdx-Knoten. Reststück B: hiIdx-Knoten … Ende.
+    const result: { pts: Vec2[]; closed: boolean }[] = [];
+    if (loIdx >= 0) {
+      const c = cut[loIdx];
+      const head = pts.slice(0, c.edge + 1);
+      head.push(c.point);
+      const d = dedupeConsecutive(head);
+      if (d.length >= 2) result.push({ pts: d, closed: false });
+    }
+    if (hiIdx < cut.length) {
+      const c = cut[hiIdx];
+      const tail: Vec2[] = [c.point];
+      for (let k = c.edge + 1; k < pts.length; k++) tail.push(pts[k]);
+      const d = dedupeConsecutive(tail);
+      if (d.length >= 2) result.push({ pts: d, closed: false });
+    }
+    return result;
+  }
+
+  // Geschlossen: der Pick liegt in einem Bogen zwischen zwei aufeinanderfolgenden
+  // Knoten (zyklisch). Diesen Bogen entfernen → der Rest ist EINE offene Kette,
+  // die vom Knoten NACH dem Pick einmal herum bis zum Knoten VOR dem Pick läuft.
+  if (cut.length === 1) {
+    // Nur ein Schnitt am Ring: am Schnitt auftrennen, Pick liegt auf der ganzen
+    // (nun offenen) Kette → nichts Sinnvolles zu entfernen; Ring bleibt.
+    return [{ pts: pts.slice(), closed: true }];
+  }
+  const pickPos = nearestParamOnChain(edges, pick);
+  const cutPos = cut.map((c) => c.edge + c.t);
+  // Bogenindex i: zwischen cut[i] und cut[i+1] (mod), der den Pick enthält.
+  let seg = -1;
+  for (let i = 0; i < cut.length; i++) {
+    const a = cutPos[i];
+    const b = cutPos[(i + 1) % cut.length];
+    const inside =
+      i === cut.length - 1
+        ? pickPos >= a || pickPos <= b // Wrap-Bogen über das Ketten-Ende
+        : pickPos >= a && pickPos <= b;
+    if (inside) { seg = i; break; }
+  }
+  if (seg < 0) seg = 0;
+  const from = cut[(seg + 1) % cut.length]; // Knoten NACH dem entfernten Bogen
+  const to = cut[seg]; // Knoten VOR dem entfernten Bogen
+  const chain = span(from.edge, from.point, to.edge, to.point);
+  if (chain.length < 2) return [];
+  return [{ pts: chain, closed: false }];
+}
+
+/**
+ * Globaler Lauf-Parameter (edgeIndex + t) des dem Punkt `p` nächstgelegenen
+ * Punktes auf der Kantenfolge — für Quick-Trim, um die Klick-Position entlang der
+ * Kurve zu lokalisieren.
+ */
+function nearestParamOnChain(edges: [Vec2, Vec2][], p: Vec2): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let ei = 0; ei < edges.length; ei++) {
+    const [a, b] = edges[ei];
+    const t = Math.max(0, Math.min(1, projectParam(p, a, b)));
+    const q = add(a, scale(sub(b, a), t));
+    const d = dist(p, q);
+    if (d < bestD) {
+      bestD = d;
+      best = ei + t;
+    }
+  }
+  return best;
+}
+
 // ── Extend ───────────────────────────────────────────────────────────────────
 
 /**

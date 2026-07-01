@@ -45,6 +45,50 @@ function ToolIcon({ id }: { id: ToolId }) {
           <line x1="2" y1="10.5" x2="14" y2="10.5" />
         </svg>
       );
+    case "ceiling":
+      // Deckenplatte: gefülltes Rechteck mit Diagonal-Schraffur (Slab-Symbol).
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="4" width="11" height="8" />
+          <line x1="4" y1="12" x2="8" y2="4" />
+          <line x1="8" y1="12" x2="12" y2="4" />
+        </svg>
+      );
+    case "window":
+      // Fenster: Rahmen-Rechteck mit Mittelsprosse (Verglasung).
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="4" width="11" height="8" />
+          <line x1="8" y1="4" x2="8" y2="12" />
+        </svg>
+      );
+    case "door":
+      // Tür: Pfosten + Türblatt mit Schwenkbogen.
+      return (
+        <svg {...common}>
+          <line x1="3" y1="13" x2="3" y2="4" />
+          <line x1="3" y1="4" x2="11" y2="4" />
+          <path d="M3 13 A9 9 0 0 0 11 4" />
+        </svg>
+      );
+    case "stair":
+      // Treppensymbol: gestufte Linie (Tritte) + Lauflinie mit Pfeil.
+      return (
+        <svg {...common}>
+          <polyline points="2,14 2,11 6,11 6,8 10,8 10,5 14,5 14,2" />
+          <line x1="4" y1="12.5" x2="12" y2="3.5" />
+          <polyline points="10.5,3 12,3.5 11.5,5" />
+        </svg>
+      );
+    case "room":
+      // Raum: umschlossene Fläche (Rechteck) mit Flächen-Marke (kleines Kreuz).
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="3.5" width="11" height="9" />
+          <line x1="6" y1="8" x2="10" y2="8" />
+          <line x1="8" y1="6" x2="8" y2="10" />
+        </svg>
+      );
     case "line":
       // Einzelne Diagonale.
       return (
@@ -125,6 +169,27 @@ export function ToolsPanel() {
       )}
 
       {host.activeTool === "wall" && <div className="tools-sep" />}
+
+      {/* Deckentyp-Auswahl — nur sichtbar, wenn das Decken-Werkzeug aktiv ist.
+          Nutzt denselben Aufbau-Typ (WallType) wie die Wand. */}
+      {host.activeTool === "ceiling" && (
+        <label className="tools-field">
+          <span>{t("tool.ceilingType")}</span>
+          <select
+            value={host.activeWallTypeId}
+            disabled={!host.toolsEnabled}
+            onChange={(e) => host.onActiveWallTypeId(e.target.value)}
+          >
+            {host.project.wallTypes.map((wt) => (
+              <option key={wt.id} value={wt.id}>
+                {wt.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {host.activeTool === "ceiling" && <div className="tools-sep" />}
 
       {/* Fang-Abschnitt. Master-Checkbox steuert die übrigen Fang-Optionen. */}
       <label className="tools-snap-row">

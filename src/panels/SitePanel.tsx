@@ -16,6 +16,7 @@ import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
 import type { ContextObject } from "../model/types";
+import { ContextImportDialog } from "../ui/ContextImportDialog";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -33,6 +34,9 @@ export function SitePanel() {
   const host = usePanelHost();
   const objects = host.contextObjects;
   const contourSets = objects.filter((o) => o.type === "contourSet");
+
+  // Standort-Import-Dialog (geo.admin/OSM) offen?
+  const [ctxImportOpen, setCtxImportOpen] = useState(false);
 
   // Gewählter Kontur-Satz für „Gelände erzeugen" (default: erster vorhandener).
   const [selectedSet, setSelectedSet] = useState<string>("");
@@ -62,7 +66,21 @@ export function SitePanel() {
         >
           {t("site.import")}
         </button>
+        <button
+          type="button"
+          className="site-btn"
+          onClick={() => setCtxImportOpen(true)}
+        >
+          {t("site.importLocation")}
+        </button>
       </div>
+
+      {ctxImportOpen && (
+        <ContextImportDialog
+          onImport={(objs) => host.onAddContextObjects(objs)}
+          onClose={() => setCtxImportOpen(false)}
+        />
+      )}
 
       {contourSets.length > 0 && (
         <div className="site-terrain-row">

@@ -22,6 +22,8 @@ import type {
   LayerCategory,
   LineStyle,
   Project,
+  SiaCategory,
+  StairShape,
   VerticalAnchor,
   WallReferenceLine,
 } from "../model/types";
@@ -155,6 +157,54 @@ export interface PanelHostValue {
   onSetWallBottom: (anchor: VerticalAnchor | null) => void;
   /** Setzt/entfernt die OK-Bindung (`null` = UK + height). */
   onSetWallTop: (anchor: VerticalAnchor | null) => void;
+
+  // ── Decken-Attribute (Object-Info-Panel; wirken NUR auf die selektierte Decke) ─
+  /** Weist der Decke einen Aufbau-Typ-Preset zu (wie WallType). */
+  onSetCeilingType: (wallTypeId: string) => void;
+  /** Setzt die Gesamtdicke der Decke (Meter, thickness-Übersteuerung). */
+  onSetCeilingThickness: (thickness: number) => void;
+  /** Setzt/entfernt die OK-Bindung der Decke (`null` = Geschoss-Oberkante). */
+  onSetCeilingTop: (anchor: VerticalAnchor | null) => void;
+
+  // ── Öffnungs-Attribute (Object-Info-Panel; nur die selektierte Öffnung) ─
+  /** Wechselt die Art (Fenster/Tür); setzt bei Tür die Tür-Defaults. */
+  onSetOpeningKind: (kind: "window" | "door") => void;
+  /** Setzt die Öffnungsbreite (Meter). */
+  onSetOpeningWidth: (width: number) => void;
+  /** Setzt die Öffnungshöhe (Meter). */
+  onSetOpeningHeight: (height: number) => void;
+  /** Setzt die Brüstungshöhe (Meter; nur Fenster sinnvoll). */
+  onSetOpeningSill: (sillHeight: number) => void;
+  /** Setzt die Position entlang der Wandachse (Meter ab Wandanfang). */
+  onSetOpeningPosition: (position: number) => void;
+  /** Setzt den Türöffnungswinkel (Grad). */
+  onSetOpeningSwingAngle: (swingAngle: number) => void;
+  /** Setzt den Anschlag-Pfosten der Tür. */
+  onSetOpeningHinge: (hinge: "start" | "end") => void;
+  /** Setzt die Aufschlagseite der Tür. */
+  onSetOpeningSwing: (swing: "left" | "right") => void;
+  /** Setzt die Aufschlagrichtung der Tür (innen/außen). */
+  onSetOpeningDir: (dir: "in" | "out") => void;
+
+  // ── Treppen-Attribute (Object-Info-Panel; nur die selektierte Treppe) ───
+  /** Setzt die Grundform (gerade/L/Wendel). */
+  onSetStairShape: (shape: StairShape) => void;
+  /** Setzt die Laufbreite (Meter). */
+  onSetStairWidth: (width: number) => void;
+  /** Setzt die Stufenanzahl (Setzstufen, ≥ 2). */
+  onSetStairSteps: (stepCount: number) => void;
+  /** Setzt die Gesamt-Steighöhe (Meter, OKFF → OKFF). */
+  onSetStairRise: (totalRise: number) => void;
+  /** Setzt die Laufrichtung (aufwärts/abwärts). */
+  onSetStairUp: (up: boolean) => void;
+
+  // ── Raum-Attribute (Object-Info-Panel; nur der selektierte Raum) ────────
+  /** Setzt den Raum-Namen. */
+  onSetRoomName: (name: string) => void;
+  /** Setzt die SIA-416-Blatt-Kategorie des Raums. */
+  onSetRoomSia: (category: SiaCategory) => void;
+  /** Öffnet den Rich-Text-Editor des Raum-Stempels (per ID). */
+  onEditRoomStamp: (roomId: string) => void;
 
   // ── Site-/Kontext-Schicht (SitePanel) ───────────────────────────────────
   /** Aktuelle Kontext-Objekte (Meshes/Konturen/Gelände) aus `project.context`. */

@@ -1,0 +1,209 @@
+// Geometrie-Helfer für Öffnungen (Fenster/Türen) — reine Funktionen, die eine
+// `Opening` relativ zu ihrer Wirts-Wand in konkrete Welt-Geometrie auflösen:
+//   • die Öffnungs-Lücke entlang der Wandachse (from/to in Metern),
+//   • das Türblatt (Scharnier → offenes/geschlossenes Ende) + Schwenkbogen,
+//   • die Fenster-Rahmen-/Glaslinien quer über die Lücke,
+//   • die vertikale Lage (UK/OK der Öffnung, absolut in Metern).
+//
+// Da JEDE Größe aus der aktuellen Wandachse (`wall.start`/`wall.end`) abgeleitet
+// wird, folgt eine Öffnung ihrer Wand automatisch, sobald die Wand bewegt wird —
+// es gibt keine eingebackenen Weltkoordinaten.
+//
+// Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
+
+import type { Opening, Project, Vec2, Wall } from "../model/types";
+import { getWallType, wallTypeThickness } from "../model/types";
+import { add, along, leftNormal, normalize, scale, sub } from "../model/geometry";
+import { wallReferenceOffset, wallVerticalExtent } from "../model/wall";
+
+const DEG = Math.PI / 180;
+
+/** Achslänge einer Wand (Meter). */
+export function wallAxisLength(wall: Wall): number {
+  return Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+}
+
+/**
+ * Öffnungs-Intervall entlang der Wandachse (from..to in Metern), auf die
+ * Achslänge geklemmt. Liefert null, wenn das Intervall entartet (Breite ≤ 0 oder
+ * vollständig außerhalb der Achse).
+ */
+export function openingInterval(
+  wall: Wall,
+  o: Opening,
+): { from: number; to: number } | null {
+  const axis = wallAxisLength(wall);
+  const from = Math.max(0, Math.min(o.position, axis));
+  const to = Math.max(from, Math.min(o.position + o.width, axis));
+  if (to - from < 1e-4) return null;
+  return { from, to };
+}
+
+/**
+ * Vertikale Lage einer Öffnung (absolute Z-Werte in Metern) relativ zur Wand-UK.
+ * Türen sitzen am Boden (sillHeight 0); Fenster ab Brüstung. Die OK wird auf die
+ * Wand-OK geklemmt, damit die Öffnung nie über den Wandkopf hinausragt.
+ */
+export function openingVerticalExtent(
+  project: Project,
+  wall: Wall,
+  o: Opening,
+): { zBottom: number; zTop: number } {
+  const { zBottom, zTop } = wallVerticalExtent(project, wall);
+  const sill = Math.max(0, o.sillHeight);
+  const oBottom = zBottom + sill;
+  const oTop = Math.min(zTop, oBottom + o.height);
+  return { zBottom: oBottom, zTop: oTop };
+}
+
+/** Einheits-Laufrichtung (u) und linke Normale (n) der Wandachse. */
+export function wallAxisFrame(wall: Wall): { u: Vec2; n: Vec2 } {
+  const u = normalize(sub(wall.end, wall.start));
+  return { u, n: leftNormal(u) };
+}
+
+/** Die beiden Pfosten-Punkte (auf der Achse) einer Öffnung im Grundriss. */
+export function openingJambs(
+  wall: Wall,
+  o: Opening,
+): { jambStart: Vec2; jambEnd: Vec2 } | null {
+  const iv = openingInterval(wall, o);
+  if (!iv) return null;
+  return {
+    jambStart: along(wall.start, wall.end, iv.from),
+    jambEnd: along(wall.start, wall.end, iv.to),
+  };
+}
+
+/**
+ * Die Lücken-Rechteck-Ecken (über die volle Wanddicke), z. B. um im Plan die
+ * Öffnung als Aussparung zu markieren (Auswahl-Highlight). Reihenfolge:
+ * jambStart(+n/2) → jambEnd(+n/2) → jambEnd(−n/2) → jambStart(−n/2).
+ */
+export function openingGapQuad(project: Project, wall: Wall, o: Opening): Vec2[] | null {
+  const jambs = openingJambs(wall, o);
+  if (!jambs) return null;
+  const { n } = wallAxisFrame(wall);
+  const total = wallTypeThickness(getWallType(project, wall));
+  const refOff = wallReferenceOffset(wall, total);
+  const outer = refOff + total / 2;
+  const inner = refOff - total / 2;
+  const { jambStart, jambEnd } = jambs;
+  return [
+    add(jambStart, scale(n, outer)),
+    add(jambEnd, scale(n, outer)),
+    add(jambEnd, scale(n, inner)),
+    add(jambStart, scale(n, inner)),
+  ];
+}
+
+/** Mittelpunkt einer Öffnung im Grundriss (Achse) — für HUD/Auswahl-Anker. */
+export function openingCenter(wall: Wall, o: Opening): Vec2 | null {
+  const iv = openingInterval(wall, o);
+  if (!iv) return null;
+  return along(wall.start, wall.end, (iv.from + iv.to) / 2);
+}
+
+// ── Tür-Symbol (Plan) ────────────────────────────────────────────────────────
+
+/** Aufgelöste Tür-Symbol-Geometrie im Grundriss (Weltkoordinaten). */
+export interface DoorSymbol {
+  /** Scharnierpunkt (auf der Achse). */
+  hinge: Vec2;
+  /** Ende des Blatts in GEÖFFNETER Stellung. */
+  openEnd: Vec2;
+  /** Ende des Blatts in GESCHLOSSENER Stellung (Bogen-Startpunkt). */
+  closedEnd: Vec2;
+  /** Radius (= Türbreite) des Schwenkbogens. */
+  radius: number;
+  /** Beide Pfosten-Punkte (für Rahmen-/Anschlagstriche). */
+  jambStart: Vec2;
+  jambEnd: Vec2;
+  /** Achs-Normale (für kurze Anschlagstriche quer zur Wand). */
+  normal: Vec2;
+}
+
+/**
+ * Löst die Tür-Symbolik auf. `swing` wählt die Aufschlagseite (linke/rechte
+ * Achs-Normale), `openingDir` ("out") spiegelt sie auf die andere Seite,
+ * `hinge` wählt den Scharnier-Pfosten, `swingAngle` (Grad, Default 90) bestimmt,
+ * wie weit das Blatt in der offenen Stellung aufsteht.
+ */
+export function doorSymbol(wall: Wall, o: Opening): DoorSymbol | null {
+  const jambs = openingJambs(wall, o);
+  if (!jambs) return null;
+  const { u, n } = wallAxisFrame(wall);
+  const { jambStart, jambEnd } = jambs;
+  const width = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
+
+  const swingSign = (o.swing ?? "left") === "left" ? 1 : -1;
+  const dirSign = (o.openingDir ?? "in") === "in" ? 1 : -1;
+  const swingDir = scale(n, swingSign * dirSign);
+
+  const hinge = (o.hinge ?? "start") === "start" ? jambStart : jambEnd;
+  // Geschlossene Richtung zeigt vom Scharnier zum GEGENüberliegenden Pfosten.
+  const closedDir = (o.hinge ?? "start") === "start" ? u : scale(u, -1);
+
+  const angle = (o.swingAngle ?? 90) * DEG;
+  // Offenes Blatt-Ende: um `angle` von der geschlossenen Richtung zur
+  // Schwenkrichtung gedreht (Interpolation über die Basis closedDir/swingDir).
+  const openDir = {
+    x: closedDir.x * Math.cos(angle) + swingDir.x * Math.sin(angle),
+    y: closedDir.y * Math.cos(angle) + swingDir.y * Math.sin(angle),
+  };
+  return {
+    hinge,
+    openEnd: add(hinge, scale(openDir, width)),
+    closedEnd: add(hinge, scale(closedDir, width)),
+    radius: width,
+    jambStart,
+    jambEnd,
+    normal: n,
+  };
+}
+
+// ── Fenster-Symbol (Plan) ────────────────────────────────────────────────────
+
+/** Aufgelöste Fenster-Linien im Grundriss (Weltkoordinaten). */
+export interface WindowSymbol {
+  /** Rahmen-Rechteck (volle Dicke) als Ecken. */
+  frame: Vec2[];
+  /** Glaslinien-Segmente quer über die Lücke (1–2 parallele Linien). */
+  glassLines: [Vec2, Vec2][];
+}
+
+/**
+ * Löst die Fenster-Symbolik auf: ein Rahmen-Rechteck über die Lücke (volle
+ * Wanddicke) plus 1–2 Glaslinien (dünne parallele Linien in der Wandmitte,
+ * `count` steuert die Anzahl je Detailgrad).
+ */
+export function windowSymbol(
+  project: Project,
+  wall: Wall,
+  o: Opening,
+  glassCount: number,
+): WindowSymbol | null {
+  const jambs = openingJambs(wall, o);
+  if (!jambs) return null;
+  const { n } = wallAxisFrame(wall);
+  const total = wallTypeThickness(getWallType(project, wall));
+  const refOff = wallReferenceOffset(wall, total);
+  const outer = refOff + total / 2;
+  const inner = refOff - total / 2;
+  const { jambStart, jambEnd } = jambs;
+  const frame = [
+    add(jambStart, scale(n, outer)),
+    add(jambEnd, scale(n, outer)),
+    add(jambEnd, scale(n, inner)),
+    add(jambStart, scale(n, inner)),
+  ];
+  const glassLines: [Vec2, Vec2][] = [];
+  const count = Math.max(1, glassCount);
+  for (let i = 0; i < count; i++) {
+    // Glaslinien symmetrisch um die Wandmitte verteilt (Abstand = Dicke/8).
+    const spread = total / 8;
+    const off = refOff + (count === 1 ? 0 : (i - (count - 1) / 2) * spread * 2);
+    glassLines.push([add(jambStart, scale(n, off)), add(jambEnd, scale(n, off))]);
+  }
+  return { frame, glassLines };
+}

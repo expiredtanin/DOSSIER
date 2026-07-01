@@ -1,5 +1,14 @@
 // Verifikation Split / Join / Segment-Löschen (Ctrl+S / Ctrl+J / Alt+Klick).
-// Liest das Modell über den TEMP-Hook window.__drawings2d (id + geom).
+// Liest das Modell über einen TEMP-Hook window.__drawings2d (id + geom). Dieser
+// Hook wurde nur für die Verifikation in App.tsx eingehängt und danach wieder
+// ENTFERNT — zum erneuten Lauf muss er kurzzeitig reaktiviert werden:
+//   useEffect(() => {
+//     (window).__drawings2d = project.drawings2d.map(d => ({id:d.id, geom:d.geom}));
+//   }, [project.drawings2d]);
+// Verifizierte Ergebnisse (siehe probe-splitjoin-*.png):
+//   Split Rechteck+Querlinie → 2 geschlossene Polylinien + Linie
+//   Join 2 Linien (gem. Endpunkt) → 1 Polylinie (3 Punkte)
+//   Alt-Klick auf Rechteck-Kante → offene Polylinie (4 Punkte, Segment weg)
 import puppeteer from "puppeteer";
 
 const b = await puppeteer.launch({
@@ -75,8 +84,8 @@ await endCommand();
 await sleep(150);
 
 const before = await drawings();
-// Rechteck wählen: auf eine Rechteck-Kante klicken (untere Kante y=0, x=1).
-let [cx, cy] = await modelToClient(1, 0);
+// Rechteck wählen: auf die linke Kante klicken (x=0, y=2) — eindeutig auf dem Rand.
+let [cx, cy] = await modelToClient(0, 2);
 await p.mouse.click(cx, cy);
 await sleep(150);
 await ctrlPress("s");
@@ -91,20 +100,20 @@ await p.reload({ waitUntil: "networkidle0" });
 await sleep(800);
 await focusCmd();
 await typeLine("line");
-await typeLine("-3,-3");
-await typeLine("0,-3");
+await typeLine("1,1");
+await typeLine("4,1");
 await focusCmd();
 await typeLine("line");
-await typeLine("0,-3");
-await typeLine("0,0");
+await typeLine("4,1");
+await typeLine("4,4");
 await endCommand();
 await sleep(150);
 const beforeJoin = await drawings();
-// Beide wählen: erste klicken, dann Shift+zweite.
-let [ax, ay] = await modelToClient(-1.5, -3);
+// Beide wählen: erste klicken (Mitte 2.5,1), dann Shift+zweite (Mitte 4,2.5).
+let [ax, ay] = await modelToClient(2.5, 1);
 await p.mouse.click(ax, ay);
-await sleep(100);
-let [bx2, by2] = await modelToClient(0, -1.5);
+await sleep(120);
+let [bx2, by2] = await modelToClient(4, 2.5);
 await p.keyboard.down("Shift");
 await p.mouse.click(bx2, by2);
 await p.keyboard.up("Shift");

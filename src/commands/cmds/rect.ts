@@ -1,9 +1,20 @@
-// Rectangle — zwei Ecken (portiert rectTool). Schritte:
-//   1) „Erste Ecke:"            → Punkt
-//   2) „Gegenüberliegende Ecke:" → Punkt → commit Drawing2D rect → done
+// Rectangle — mehrere Konstruktionsmethoden (portiert + erweitert rectTool).
+// Wählbar über die Option „Methode" (klickbar im Feld-Row, tippbar als „m",
+// zyklisch): 2-Punkt · 3-Punkt · Zentrum.
 //
-// Getippte Maße: die zweite Ecke kann als `r<breite>,<höhe>` relativ zur ersten
-// eingegeben werden (die Engine löst `r…` relativ zu lastPoint auf).
+//   • 2-Punkt (Default): zwei gegenüberliegende Ecken, achsparallel.
+//       1) „Erste Ecke:"            → Punkt
+//       2) „Gegenüberliegende Ecke:" → Punkt → commit (shape:"rect")
+//   • 3-Punkt (gedreht): Basiskante + Höhe → beliebig gedrehtes Rechteck.
+//       1) „Erste Ecke:"        → Punkt (Basis-Start)
+//       2) „Zweite Ecke:"       → Punkt (Basis-Ende, definiert Winkel+Breite)
+//       3) „Höhe:"              → Punkt → commit (geschlossene Polylinie)
+//   • Zentrum: Mittelpunkt + Ecke, achsparallel.
+//       1) „Mittelpunkt:"           → Punkt
+//       2) „Ecke:"                   → Punkt → commit (shape:"rect")
+//
+// Getippte Maße: die zweite/dritte Ecke kann relativ (`r<dx>,<dy>`) eingegeben
+// werden (die Engine löst `r…` relativ zu lastPoint auf).
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
@@ -13,19 +24,50 @@ import type {
   CommandField,
   CommandResult,
   CommandState,
+  CmdOption,
   DraftShape,
   Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import type { TranslationKey } from "../../i18n";
 
 const EPS = 1e-6;
 
-/** Tab-Felder des zweiten-Ecke-Schritts: Breite, Höhe. */
+/** Konstruktionsmethode. */
+type RectMethod = "corner" | "three" | "center";
+const METHOD_ORDER: RectMethod[] = ["corner", "three", "center"];
+const nextMethod = (m: RectMethod): RectMethod =>
+  METHOD_ORDER[(METHOD_ORDER.indexOf(m) + 1) % METHOD_ORDER.length];
+const methodValue = (m: RectMethod): string =>
+  m === "corner" ? "2pt" : m === "three" ? "3pt" : "center";
+
+/** Umschalt-Option für die Methode (im Feld-Row sichtbar, tippbar als „m"). */
+const methodOption = (m: RectMethod): CmdOption => ({
+  id: "method",
+  labelKey: "cmd.rect.method",
+  value: methodValue(m),
+});
+
+/** Tab-Felder des Breite/Höhe-Schritts (2-Punkt & Zentrum). */
 const RECT_FIELDS: CommandField[] = [
   { id: "width", labelKey: "cmd.field.width" },
   { id: "height", labelKey: "cmd.field.height" },
 ];
+/** Tab-Felder des Basis-Schritts (3-Punkt): Länge + Winkel der Basiskante. */
+const BASE_FIELDS: CommandField[] = [
+  { id: "length", labelKey: "cmd.field.length" },
+  { id: "angle", labelKey: "cmd.field.angle" },
+];
+/** Tab-Feld des Höhen-Schritts (3-Punkt): senkrechter Abstand. */
+const RISE_FIELDS: CommandField[] = [{ id: "height", labelKey: "cmd.field.height" }];
+
+const DEG = Math.PI / 180;
+const segLen = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
+const segAngleDeg = (a: Vec2, b: Vec2): number =>
+  (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+
+// ── 2-Punkt / Zentrum: achsparallele Ableitung ───────────────────────────────
 
 /**
  * Gegenüberliegende Ecke aus gelockten Feldern (width/height) + Cursor: eine
@@ -43,15 +85,107 @@ function rectCornerFromFields(a: Vec2, locks: Record<string, number>, cursor: Ve
   return { x: a.x + w, y: a.y + h };
 }
 
+// ── 3-Punkt: Basiskante + Höhe ───────────────────────────────────────────────
+
+/** Basis-Endpunkt aus gelockten Feldern (length/angle) + Cursor, relativ zu `a`. */
+function baseFromFields(a: Vec2, locks: Record<string, number>, cursor: Vec2 | null): Vec2 {
+  const ref = cursor ?? a;
+  const length = "length" in locks ? locks.length : segLen(a, ref);
+  const angleDeg = "angle" in locks ? locks.angle : segAngleDeg(a, ref);
+  const ang = angleDeg * DEG;
+  return { x: a.x + Math.cos(ang) * length, y: a.y + Math.sin(ang) * length };
+}
+
+/**
+ * Vier Ecken des gedrehten Rechtecks aus Basiskante (a→b) und einem dritten
+ * Punkt `p`: die Höhe ist der vorzeichenbehaftete senkrechte Abstand von `p` zur
+ * Basislinie; das Rechteck wird zu dieser Seite hin aufgespannt.
+ */
+function rotatedCorners(a: Vec2, b: Vec2, p: Vec2): Vec2[] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < EPS) return [a, b, b, a];
+  // Einheits-Normale (links der Basisrichtung).
+  const nx = -dy / len;
+  const ny = dx / len;
+  const h = (p.x - a.x) * nx + (p.y - a.y) * ny; // signierte Höhe
+  const c3 = { x: b.x + nx * h, y: b.y + ny * h };
+  const c4 = { x: a.x + nx * h, y: a.y + ny * h };
+  return [a, b, c3, c4];
+}
+
+/** Senkrechter (signierter) Abstand eines Punktes zur Basislinie a→b. */
+function riseFrom(a: Vec2, b: Vec2, p: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < EPS) return 0;
+  return (p.x - a.x) * (-dy / len) + (p.y - a.y) * (dx / len);
+}
+
+/** Dritten Punkt aus gelockter Höhe rekonstruieren (auf der Cursor-Seite). */
+function riseToPoint(a: Vec2, b: Vec2, height: number, cursor: Vec2 | null): Vec2 {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < EPS) return cursor ?? b;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const sign = cursor && riseFrom(a, b, cursor) < 0 ? -1 : 1;
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const h = sign * Math.abs(height);
+  return { x: mid.x + nx * h, y: mid.y + ny * h };
+}
+
+// ── Zentrum: Ecke aus Mittelpunkt ────────────────────────────────────────────
+
+/** Achsparallele Ecken aus Zentrum + einer Ecke. */
+function centerGeom(center: Vec2, corner: Vec2): { min: Vec2; max: Vec2 } {
+  const hx = Math.abs(corner.x - center.x);
+  const hy = Math.abs(corner.y - center.y);
+  return {
+    min: { x: center.x - hx, y: center.y - hy },
+    max: { x: center.x + hx, y: center.y + hy },
+  };
+}
+
+/** Ecke aus Zentrum + gelockten Halbmaßen (width/height als volle Kantenmaße). */
+function centerCornerFromFields(
+  center: Vec2,
+  locks: Record<string, number>,
+  cursor: Vec2 | null,
+): Vec2 {
+  const cur = cursor ?? center;
+  const dx = cur.x - center.x;
+  const dy = cur.y - center.y;
+  const sx = dx < 0 ? -1 : 1;
+  const sy = dy < 0 ? -1 : 1;
+  const hx = "width" in locks ? Math.abs(locks.width) / 2 : Math.abs(dx);
+  const hy = "height" in locks ? Math.abs(locks.height) / 2 : Math.abs(dy);
+  return { x: center.x + sx * hx, y: center.y + sy * hy };
+}
+
+// ── Zustand ──────────────────────────────────────────────────────────────────
+
 interface RectIdle extends CommandState {
   phase: "corner1";
+  method: RectMethod;
 }
-interface RectDrawing extends CommandState {
+interface RectCorner2 extends CommandState {
   phase: "corner2";
+  method: RectMethod;
   a: Vec2;
   cursor: Vec2 | null;
 }
-type RectState = RectIdle | RectDrawing;
+interface RectRise extends CommandState {
+  phase: "rise";
+  method: "three";
+  a: Vec2;
+  b: Vec2;
+  cursor: Vec2 | null;
+}
+type RectState = RectIdle | RectCorner2 | RectRise;
 
 function rectGeom(a: Vec2, b: Vec2): { min: Vec2; max: Vec2 } {
   return {
@@ -60,84 +194,231 @@ function rectGeom(a: Vec2, b: Vec2): { min: Vec2; max: Vec2 } {
   };
 }
 
-/** Vorschau (geschlossenes Rechteck) + HUD (Breite × Höhe). */
-function rectDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
-  if (!cursor) return { preview: [], vertices: [a] };
-  const g = rectGeom(a, cursor);
-  const pts: Vec2[] = [
-    g.min,
-    { x: g.max.x, y: g.min.y },
-    g.max,
-    { x: g.min.x, y: g.max.y },
-  ];
+// ── Vorschau ─────────────────────────────────────────────────────────────────
+
+function corners4Draft(pts: Vec2[], hudAt: Vec2 | null, hudText: string): ToolDraft {
   const preview: DraftShape[] = [{ kind: "poly", pts, closed: true }];
-  const w = g.max.x - g.min.x;
-  const h = g.max.y - g.min.y;
-  return {
-    preview,
-    vertices: [a],
-    hud: { at: cursor, text: `${w.toFixed(2)} × ${h.toFixed(2)} m` },
-  };
+  const draft: ToolDraft = { preview, vertices: [pts[0]] };
+  if (hudAt) draft.hud = { at: hudAt, text: hudText };
+  return draft;
 }
 
-function appendRect(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): Project {
-  const g = rectGeom(a, b);
-  if (g.max.x - g.min.x < EPS || g.max.y - g.min.y < EPS) return p; // Null-Rechteck
+/** Vorschau des 2-Punkt-Rechtecks (achsparallel). */
+function cornerDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
+  if (!cursor) return { preview: [], vertices: [a] };
+  const g = rectGeom(a, cursor);
+  const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
+  const w = g.max.x - g.min.x;
+  const h = g.max.y - g.min.y;
+  return corners4Draft(pts, cursor, `${w.toFixed(2)} × ${h.toFixed(2)} m`);
+}
+
+/** Vorschau des Zentrum-Rechtecks (achsparallel). */
+function centerDraft(center: Vec2, cursor: Vec2 | null): ToolDraft {
+  if (!cursor) return { preview: [], vertices: [center] };
+  const g = centerGeom(center, cursor);
+  const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
+  const w = g.max.x - g.min.x;
+  const h = g.max.y - g.min.y;
+  return corners4Draft(pts, cursor, `${w.toFixed(2)} × ${h.toFixed(2)} m`);
+}
+
+/** Vorschau der Basiskante (3-Punkt, erster Teil). */
+function baseDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
+  if (!cursor || segLen(a, cursor) < EPS) return { preview: [{ kind: "line", a, b: a }], vertices: [a] };
+  const draft: ToolDraft = { preview: [{ kind: "line", a, b: cursor }], vertices: [a] };
+  draft.hud = {
+    at: cursor,
+    text: `${segLen(a, cursor).toFixed(2)} m · ${Math.abs((segAngleDeg(a, cursor) + 360) % 360).toFixed(0)}°`,
+  };
+  return draft;
+}
+
+/** Vorschau des gedrehten Rechtecks (3-Punkt, zweiter Teil). */
+function riseDraft(a: Vec2, b: Vec2, cursor: Vec2 | null): ToolDraft {
+  if (!cursor) return { preview: [{ kind: "line", a, b }], vertices: [a] };
+  const pts = rotatedCorners(a, b, cursor);
+  const w = segLen(a, b);
+  const h = Math.abs(riseFrom(a, b, cursor));
+  return corners4Draft(pts, cursor, `${w.toFixed(2)} × ${h.toFixed(2)} m`);
+}
+
+// ── Commit ───────────────────────────────────────────────────────────────────
+
+/** Achsparalleles Rechteck als `shape:"rect"` (geschlossen behandelt). */
+function appendRect(p: Project, min: Vec2, max: Vec2, ctx: CommandContext): Project {
+  if (max.x - min.x < EPS || max.y - min.y < EPS) return p; // Null-Rechteck
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
     levelId: ctx.level.id,
     categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "rect", min: g.min, max: g.max },
+    geom: { shape: "rect", min, max },
   };
   return { ...p, drawings2d: [...p.drawings2d, d] };
 }
 
-const idle = (): [CommandState, CommandResult] => [
-  { phase: "corner1", lastPoint: null },
+/**
+ * Gedrehtes Rechteck als geschlossene Polylinie (`shape:"polyline", closed:true`)
+ * — `shape:"rect"` kann nur achsparallel, deshalb hier ein Ring aus vier Ecken.
+ * Downstream (Füllung/Offset) behandelt einen geschlossenen Polygonzug als Ring.
+ */
+function appendRotated(p: Project, pts: Vec2[], ctx: CommandContext): Project {
+  // Fläche prüfen: entartete Rechtecke verwerfen.
+  const w = segLen(pts[0], pts[1]);
+  const h = segLen(pts[1], pts[2]);
+  if (w < EPS || h < EPS) return p;
+  const d: Drawing2D = {
+    id: uniqueId("dr2d"),
+    type: "drawing2d",
+    levelId: ctx.level.id,
+    categoryCode: ctx.defaultCategoryCode,
+    geom: { shape: "polyline", pts, closed: true },
+  };
+  return { ...p, drawings2d: [...p.drawings2d, d] };
+}
+
+const idle = (method: RectMethod): [CommandState, CommandResult] => [
+  { phase: "corner1", lastPoint: null, method } as RectIdle,
   { draft: null, done: true },
 ];
+
+// ── Prompt je Schritt/Methode ────────────────────────────────────────────────
+
+function promptKey(s: RectState): TranslationKey {
+  if (s.phase === "corner1") return s.method === "center" ? "cmd.rect.center" : "cmd.rect.first";
+  if (s.phase === "rise") return "cmd.rect.rise";
+  // corner2
+  if (s.method === "three") return "cmd.rect.baseEnd";
+  if (s.method === "center") return "cmd.rect.corner";
+  return "cmd.rect.second";
+}
 
 export const rectCommand: Command = {
   name: "rect",
   labelKey: "cmd.rect.label",
-  prompt: (s) => ((s as RectState).phase === "corner2" ? "cmd.rect.second" : "cmd.rect.first"),
-  accepts: () => ["point", "number"],
-  options: () => [],
-  init: (): RectIdle => ({ phase: "corner1", lastPoint: null }),
+  prompt: (s) => promptKey(s as RectState),
+  accepts: () => ["point", "number", "option"],
+  options: (s) => [methodOption((s as RectState).method)],
+  init: (): RectIdle => ({ phase: "corner1", lastPoint: null, method: "corner" }),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as RectState;
+
+    if (input.kind === "option") {
+      if (input.id === "method") {
+        // Methode zyklisch umschalten; laufende Konstruktion verwerfen und den
+        // Befehl AKTIV lassen (kein done) — nur zum ersten Schritt zurück.
+        const m = nextMethod(s.method);
+        const ns: RectIdle = { phase: "corner1", lastPoint: null, method: m };
+        return [ns, { draft: null }];
+      }
+      return [s, { draft: null }];
+    }
+
     if (input.kind !== "point") {
-      return [s, { draft: s.phase === "corner2" ? rectDraft(s.a, s.cursor) : null }];
+      return [s, { draft: draftFor(s) }];
     }
     const pt = input.point;
-    if (s.phase !== "corner2") {
-      const ns: RectDrawing = { phase: "corner2", a: pt, cursor: pt, lastPoint: pt };
-      return [ns, { draft: rectDraft(pt, pt) }];
+
+    if (s.phase === "corner1") {
+      if (s.method === "three") {
+        const ns: RectCorner2 = { phase: "corner2", method: "three", a: pt, cursor: pt, lastPoint: pt };
+        return [ns, { draft: baseDraft(pt, pt) }];
+      }
+      const ns: RectCorner2 = { phase: "corner2", method: s.method, a: pt, cursor: pt, lastPoint: pt };
+      return [ns, { draft: draftFor(ns) }];
     }
-    const a = s.a;
+
+    if (s.phase === "corner2") {
+      if (s.method === "three") {
+        // Basiskante gesetzt → dritter Punkt bestimmt Höhe.
+        if (segLen(s.a, pt) < EPS) return [s, { draft: baseDraft(s.a, s.cursor) }];
+        const ns: RectRise = { phase: "rise", method: "three", a: s.a, b: pt, cursor: pt, lastPoint: pt };
+        return [ns, { draft: riseDraft(s.a, pt, pt) }];
+      }
+      const a = s.a;
+      const method = s.method;
+      return [
+        { phase: "corner1", lastPoint: null, method } as RectIdle,
+        {
+          draft: null,
+          done: true,
+          commit: (p) => {
+            if (method === "center") {
+              const g = centerGeom(a, pt);
+              return appendRect(p, g.min, g.max, ctx);
+            }
+            const g = rectGeom(a, pt);
+            return appendRect(p, g.min, g.max, ctx);
+          },
+        },
+      ];
+    }
+
+    // phase "rise" (3-Punkt) → committen als gedrehte, geschlossene Polylinie.
+    const { a, b } = s;
     return [
-      { phase: "corner1", lastPoint: null },
-      { draft: null, done: true, commit: (p) => appendRect(p, a, pt, ctx) },
+      { phase: "corner1", lastPoint: null, method: "three" } as RectIdle,
+      { draft: null, done: true, commit: (p) => appendRotated(p, rotatedCorners(a, b, pt), ctx) },
     ];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => {
     const s = state as RectState;
-    if (s.phase !== "corner2") return [s, { draft: null }];
-    const ns: RectDrawing = { ...s, cursor: point };
-    return [ns, { draft: rectDraft(s.a, point) }];
+    if (s.phase === "corner1") return [s, { draft: null }];
+    const ns = { ...s, cursor: point } as RectState;
+    return [ns, { draft: draftFor(ns) }];
   },
 
-  onConfirm: (): [CommandState, CommandResult] => idle(),
-  onCancel: (): [CommandState, CommandResult] => idle(),
+  onConfirm: (state): [CommandState, CommandResult] => idle((state as RectState).method),
+  onCancel: (state): [CommandState, CommandResult] => idle((state as RectState).method),
 
-  // Tab-Feld-Zyklus nur im „corner2"-Schritt: Breite + Höhe (signiert nach Cursor).
-  fields: (state) => ((state as RectState).phase === "corner2" ? RECT_FIELDS : []),
+  // Tab-Feld-Zyklus je Schritt/Methode.
+  fields: (state) => {
+    const s = state as RectState;
+    if (s.phase === "corner2") return s.method === "three" ? BASE_FIELDS : RECT_FIELDS;
+    if (s.phase === "rise") return RISE_FIELDS;
+    return [];
+  },
   pointFromFields: (state, locks, cursor) => {
     const s = state as RectState;
-    if (s.phase !== "corner2") return null;
-    return rectCornerFromFields(s.a, locks, cursor);
+    if (s.phase === "corner2") {
+      if (s.method === "three") return baseFromFields(s.a, locks, cursor);
+      if (s.method === "center") return centerCornerFromFields(s.a, locks, cursor);
+      return rectCornerFromFields(s.a, locks, cursor);
+    }
+    if (s.phase === "rise") {
+      if ("height" in locks) return riseToPoint(s.a, s.b, locks.height, cursor);
+      return cursor;
+    }
+    return null;
+  },
+  fieldValues: (state, _locks, cursor): Record<string, number> => {
+    const s = state as RectState;
+    if (!cursor) return {};
+    if (s.phase === "corner2") {
+      if (s.method === "three") {
+        return {
+          length: segLen(s.a, cursor),
+          angle: ((segAngleDeg(s.a, cursor) % 360) + 360) % 360,
+        };
+      }
+      return { width: Math.abs(cursor.x - s.a.x) * (s.method === "center" ? 2 : 1),
+               height: Math.abs(cursor.y - s.a.y) * (s.method === "center" ? 2 : 1) };
+    }
+    if (s.phase === "rise") return { height: Math.abs(riseFrom(s.a, s.b, cursor)) };
+    return {};
   },
 };
+
+/** Vorschau passend zum Zustand. */
+function draftFor(s: RectState): ToolDraft {
+  if (s.phase === "corner2") {
+    if (s.method === "three") return baseDraft(s.a, s.cursor);
+    if (s.method === "center") return centerDraft(s.a, s.cursor);
+    return cornerDraft(s.a, s.cursor);
+  }
+  if (s.phase === "rise") return riseDraft(s.a, s.b, s.cursor);
+  return { preview: [], vertices: [] };
+}

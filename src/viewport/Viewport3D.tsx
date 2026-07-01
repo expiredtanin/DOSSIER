@@ -8,24 +8,44 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type {
+  Ceiling,
   ContextObject,
   Drawing2D,
   DrawingLevel,
+  Opening,
   Project,
+  Stair,
   Vec2,
   Wall,
 } from "../model/types";
 import {
   flattenCategories,
+  getCeilingType,
   getComponent,
   getWallType,
+  stairsOfFloor,
   wallTypeThickness,
 } from "../model/types";
 import { along, clippedBand } from "../model/geometry";
+import { stairGeometry } from "../geometry/stair";
+import {
+  doorSymbol,
+  openingInterval,
+  openingVerticalExtent,
+  wallAxisFrame,
+} from "../geometry/opening";
 import { computeJoins } from "../model/joins";
 import type { WallCuts } from "../model/joins";
-import { wallReferenceOffset, wallVerticalExtent } from "../model/wall";
+import {
+  ceilingVerticalExtent,
+  stairVerticalExtent,
+  wallReferenceOffset,
+  wallVerticalExtent,
+} from "../model/wall";
+import { MaterialRuntime } from "../materials/runtime";
 import type { RenderMode, View3d } from "../ui/TopBar";
+import type { ToolDraft } from "../tools/types";
+import { applyAngleConstraint } from "../tools/snapping";
 
 /**
  * Render-Entscheidung je Element (Geschoss bzw. Kategorie) im 3D — gespiegelt
@@ -75,7 +95,20 @@ export function Viewport3D({
   fov = 50,
   gridElevation = 0,
   onSelectWall,
+  onSelectCeiling,
+  onSelectOpening,
+  onSelectStair,
   onContextMenu,
+  commandActive = false,
+  draft = null,
+  onWorkplanePoint,
+  onWorkplaneConfirm,
+  editWalls = [],
+  editDrawings = [],
+  onEditVertex,
+  onEditBody,
+  onEditWallTop,
+  onEditEnd,
 }: {
   project: Project;
   visibleCodes: Set<string>;
@@ -119,10 +152,73 @@ export function Viewport3D({
    */
   onSelectWall?: (wallId: string | null) => void;
   /**
+   * Links-Klick (Auswahl): meldet die per Raycast getroffene Decken-ID, oder
+   * null bei Klick in den Leerraum bzw. wenn eine Wand getroffen wurde. Optional.
+   */
+  onSelectCeiling?: (ceilingId: string | null) => void;
+  /**
+   * Links-Klick (Auswahl): meldet die per Raycast getroffene Öffnungs-ID
+   * (Fenster/Tür), oder null bei Leerraum bzw. wenn Wand/Decke getroffen wurde.
+   */
+  onSelectOpening?: (openingId: string | null) => void;
+  /**
+   * Links-Klick (Auswahl): meldet die per Raycast getroffene Treppen-ID, oder
+   * null bei Leerraum bzw. wenn Wand/Decke/Öffnung getroffen wurde.
+   */
+  onSelectStair?: (stairId: string | null) => void;
+  /**
    * Rechts-Klick: Kontextmenü an der Cursorposition. Das Standard-Browser-Menü
    * wird immer unterdrückt; ein Rechts-Drag-Pan ist deaktiviert. Optional.
    */
   onContextMenu?: (info: ViewportContextInfo) => void;
+  /**
+   * Läuft gerade ein zeichnender Befehl (CommandEngine aktiv)? Dann wird der
+   * 3D-Viewport zur Erstellungs-Fläche: Linksklick = Punkt auf der Arbeitsebene
+   * setzen (statt Wandauswahl), Pointer-Move = Vorschau, Rechtsklick/Doppelklick =
+   * bestätigen. Ohne aktiven Befehl bleibt das Verhalten unverändert (Orbit +
+   * Wandauswahl + Kontextmenü).
+   */
+  commandActive?: boolean;
+  /** Aktuelle Werkzeug-Vorschau (Rubber-Band) zum Spiegeln in 3D. */
+  draft?: ToolDraft | null;
+  /**
+   * Punkt-Eingang in die ansichts-agnostische CommandEngine. `kind="move"` =
+   * Hover-Vorschau, `kind="pick"` = Klick. `model` ist der auf die Geschoss-
+   * Arbeitsebene projizierte Modell-`Vec2` (Meter).
+   */
+  onWorkplanePoint?: (kind: "move" | "pick", model: Vec2) => void;
+  /** Befehl bestätigen/beenden (Rechtsklick/Enter/Doppelklick im 3D). */
+  onWorkplaneConfirm?: () => void;
+  /**
+   * Alle gewählten Wände — Quelle der 3D-Editier-Griffe (Endpunkt-Kugeln +
+   * Höhen-/Verschiebe-Griff). Bei Mehrfachauswahl erscheinen Griffe für ALLE,
+   * damit koinzidente Ecken gemeinsam gezogen werden können. Griffe nur bei
+   * inaktivem Befehl (!commandActive). Wände und 2D-Elemente schließen sich aus.
+   */
+  editWalls?: Wall[];
+  /** Alle gewählten 2D-Elemente — Vertex-Griffe in 3D (Mehrfachauswahl ⇒ alle). */
+  editDrawings?: Drawing2D[];
+  /**
+   * Endpunkt-/Vertex-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index`
+   * des durch `target` benannten Elements (Wand-ID ODER Drawing-ID). Optional
+   * `excludeWallIds`/`excludeDrawingIds` = Koinzidenz-Gruppe, die aus den
+   * Snap-Quellen genommen wird; nur dann snappt App den Punkt. Liefert den
+   * effektiv angewandten (gesnappten) Punkt zurück (für Marker + Mitführen).
+   * Wird auf dieselbe Store-Action (`moveGripOf`) gelegt wie die Plan-Griffe.
+   */
+  onEditVertex?: (
+    target: { wallId?: string; drawingId?: string },
+    index: number,
+    model: Vec2,
+    excludeWallIds?: Set<string>,
+    excludeDrawingIds?: Set<string>,
+  ) => Vec2;
+  /** Verschiebe-Griff gezogen: das `target`-Element um `delta` (XY) verschieben. */
+  onEditBody?: (target: { wallId?: string; drawingId?: string }, delta: Vec2) => void;
+  /** Höhen-Griff gezogen: neue absolute Oberkanten-Z der Wand. */
+  onEditWallTop?: (wallId: string, topZ: number) => void;
+  /** Ende eines Griff-Drags (Commit/Aufräumen). */
+  onEditEnd?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -130,9 +226,90 @@ export function Viewport3D({
   // Callbacks in Refs spiegeln, damit der (schwere) Aufbau-Effekt nicht von
   // referenzwechselnden Handlern abhängt — die Listener lesen stets aktuell.
   const onSelectWallRef = useRef(onSelectWall);
+  const onSelectCeilingRef = useRef(onSelectCeiling);
+  const onSelectOpeningRef = useRef(onSelectOpening);
+  const onSelectStairRef = useRef(onSelectStair);
   const onContextMenuRef = useRef(onContextMenu);
   onSelectWallRef.current = onSelectWall;
+  onSelectCeilingRef.current = onSelectCeiling;
+  onSelectOpeningRef.current = onSelectOpening;
+  onSelectStairRef.current = onSelectStair;
   onContextMenuRef.current = onContextMenu;
+
+  // Erstellungs-Modus (CommandEngine aktiv) + Punkt-Eingänge ebenfalls als Refs,
+  // damit die Pointer-Listener stets den aktuellen Zustand lesen, ohne dass der
+  // schwere Aufbau-Effekt neu läuft.
+  const commandActiveRef = useRef(commandActive);
+  const onWorkplanePointRef = useRef(onWorkplanePoint);
+  const onWorkplaneConfirmRef = useRef(onWorkplaneConfirm);
+  // Arbeitsebenen-Höhe (y) für den Raycast — gespiegelt, damit der Listener die
+  // aktuelle Geschoss-OKFF liest (gridElevation wird ohne Neuaufbau aktualisiert).
+  const gridElevationRef = useRef(gridElevation);
+  commandActiveRef.current = commandActive;
+  onWorkplanePointRef.current = onWorkplanePoint;
+  onWorkplaneConfirmRef.current = onWorkplaneConfirm;
+  gridElevationRef.current = gridElevation;
+
+  // ── 3D-Editier-Griffe: Auswahl + Callbacks in Refs ──────────────────────────
+  // Die Pointer-Listener (im schweren Aufbau-Effekt registriert) lesen die
+  // aktuelle Auswahl/Callbacks über diese Refs, ohne dass die Szene neu gebaut
+  // wird. Ein separater leichter Effekt zeichnet die Griff-Kugeln bei Auswahl-
+  // /Modelländerung neu (drawGripsRef).
+  const editWallsRef = useRef(editWalls);
+  const editDrawingsRef = useRef(editDrawings);
+  const onEditVertexRef = useRef(onEditVertex);
+  const onEditBodyRef = useRef(onEditBody);
+  const onEditWallTopRef = useRef(onEditWallTop);
+  const onEditEndRef = useRef(onEditEnd);
+  editWallsRef.current = editWalls;
+  editDrawingsRef.current = editDrawings;
+  onEditVertexRef.current = onEditVertex;
+  onEditBodyRef.current = onEditBody;
+  onEditWallTopRef.current = onEditWallTop;
+  onEditEndRef.current = onEditEnd;
+  // Vom schweren Aufbau-Effekt gesetzte Funktion, die die Griff-Kugeln aus der
+  // aktuellen Auswahl neu aufbaut (ohne Szenen-Neuaufbau). Von einem leichten
+  // Effekt bei Auswahl-/Modell-Änderung gerufen.
+  const drawGripsRef = useRef<(() => void) | null>(null);
+  // Laufender Griff-Drag — als KOMPONENTEN-Ref, damit er einen Szenen-Neuaufbau
+  // (Live-Mutation des Projekts während des Ziehens ⇒ heavy effect läuft neu)
+  // ÜBERLEBT. Sonst würde jeder pointermove den Drag abbrechen. Die (bei jedem
+  // Aufbau neu registrierten) Pointer-Listener lesen denselben Ref weiter.
+  const gripDragRef = useRef<{
+    kind: "vertex" | "height" | "move";
+    vertexIndex: number;
+    lastModel: Vec2 | null;
+    /**
+     * Ortho-Anker beim Vertex-Drag (Shift): die FIXE Bezugsecke, relativ zu der
+     * der gezogene Punkt auf H/V eingerastet wird (Original-Nachbarvertex bzw.
+     * das andere Wandende). null = kein Anker (keine Ortho-Beschränkung möglich).
+     */
+    anchor: Vec2 | null;
+    pointerId: number;
+    /** Element, dessen Griff gezogen wird (Wand-ID ODER Drawing-ID). */
+    target: { wallId?: string; drawingId?: string };
+    /** Für den Höhen-Griff: die Wand-ID (OK-Z setzen). */
+    wallId: string | null;
+    /**
+     * Koinzidente Endpunkt-Griffe ANDERER gewählter Elemente, die mitgeführt
+     * werden (gemeinsame Ecke). Beim Drag-Start einmal bestimmt.
+     */
+    coincident: Array<{ target: { wallId?: string; drawingId?: string }; index: number }>;
+    /**
+     * Beim KÖRPER-Verschieben (move): koinzidente Endpunkte ANDERER gewählter
+     * Elemente, die an einer Ecke des verschobenen Elements hängen. Sie wandern um
+     * dasselbe Delta mit (gemeinsame Ecke bleibt verbunden). `pos` ist die LIVE
+     * Position des Sibling-Vertex (inkrementell fortgeschrieben).
+     */
+    moveCoincident: Array<{
+      target: { wallId?: string; drawingId?: string };
+      index: number;
+      pos: Vec2;
+    }>;
+    /** IDs der gesamten Koinzidenz-Gruppe (Selbst + Mitgeführte) → Snap-Ausschluss. */
+    excludeWallIds: Set<string>;
+    excludeDrawingIds: Set<string>;
+  } | null>(null);
 
   // Kamera + Controls in Refs spiegeln, damit ein leichter Effekt (Blickwinkel-
   // Preset, FOV) sie ohne kompletten Szenen-Neuaufbau aktualisieren kann.
@@ -150,9 +327,28 @@ export function Viewport3D({
   // Neuaufbau (Initialwert) liest, ohne von ihnen abzuhängen.
   const view3dRef = useRef(view3d);
   const fovRef = useRef(fov);
+  // Gespiegelter Kamera-Zustand (Position + Target + Ortho-Zoom), der einen
+  // Szenen-Neuaufbau ÜBERLEBT. Bei jeder Projekt-Mutation läuft der schwere
+  // Aufbau-Effekt neu; ohne diesen Snapshot würde die frisch erzeugte Kamera auf
+  // den Preset-Standpunkt zurückspringen (Bug: „Kamera bewegt sich beim
+  // Editieren / springt in die Top-Ansicht"). Der Snapshot wird im Render-Loop
+  // laufend fortgeschrieben und beim Neuaufbau als Startzustand wiederhergestellt.
+  // null = noch kein Snapshot (erster Aufbau → Preset anwenden).
+  const camStateRef = useRef<{
+    position: THREE.Vector3;
+    target: THREE.Vector3;
+    up: THREE.Vector3;
+    perspective: boolean;
+    orthoZoom: number;
+  } | null>(null);
   // Bodenraster (separat gehalten, damit es ohne Szenen-Neuaufbau auf die Höhe
   // des aktiven Geschosses (OKFF) gehoben werden kann).
   const gridRef = useRef<THREE.GridHelper | null>(null);
+  // Funktion, die die 3D-Draft-Vorschau (Linien + Snap-Marker) aus einem
+  // ToolDraft neu aufbaut. Vom schweren Aufbau-Effekt gesetzt, von einem leichten
+  // Effekt bei `draft`-Änderung gerufen — so wird die Vorschau ohne Szenen-
+  // Neuaufbau aktualisiert.
+  const drawDraftRef = useRef<((d: ToolDraft | null) => void) | null>(null);
   view3dRef.current = view3d;
   fovRef.current = fov;
 
@@ -212,6 +408,9 @@ export function Viewport3D({
     };
     controls.enableZoom = true; // Rad-Zoom (Standard, explizit).
     controls.enablePan = true; // für Shift+Mitte.
+    // Top-Ansicht ohne Orbit (senkrechter Blick bleibt gesperrt); auch nach einem
+    // Szenen-Neuaufbau konsistent, da die Controls hier frisch entstehen.
+    controls.enableRotate = view3dRef.current !== "top";
 
     // Licht
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -248,7 +447,17 @@ export function Viewport3D({
       roughness: 0.85,
       metalness: 0,
     });
-    const opts: BuildOpts = { mats, renderMode, hiddenFace, edgeMat, whiteFace };
+    // Laufzeit für PBR-Texturen (Render-Modus „textured"). Lädt Karten lazy +
+    // gecacht; im Cleanup werden Texturen/Materialien freigegeben.
+    const matRuntime = new MaterialRuntime();
+    const opts: BuildOpts = {
+      mats,
+      renderMode,
+      hiddenFace,
+      edgeMat,
+      whiteFace,
+      matRuntime,
+    };
     const building = buildBuilding(
       project,
       visibleCodes,
@@ -304,15 +513,39 @@ export function Viewport3D({
       return w / h;
     };
 
-    applyView3d(
-      camera,
-      orthoCamera,
-      activeCameraRef,
-      controls,
-      bounds,
-      view3dRef.current,
-      currentAspect(),
-    );
+    // Kamera-Standpunkt bestimmen: Beim ERSTEN Aufbau (kein Snapshot) den
+    // Blickwinkel-Preset formatfüllend anwenden. Bei jedem NEUAUFBAU (z. B. weil
+    // eine Griff-Mutation die Szene neu baut) den zuvor gespiegelten Kamera-
+    // Zustand WIEDERHERSTELLEN, statt den Preset erneut anzuwenden — so bleibt
+    // die Kamera exakt stehen (der Nutzer steuert sie allein).
+    const snap = camStateRef.current;
+    if (snap) {
+      const active: THREE.PerspectiveCamera | THREE.OrthographicCamera =
+        snap.perspective ? camera : orthoCamera;
+      if (!snap.perspective) {
+        updateOrthoFrustum(orthoCamera, bounds, currentAspect());
+        orthoCamera.zoom = snap.orthoZoom;
+      } else {
+        camera.aspect = currentAspect();
+      }
+      active.position.copy(snap.position);
+      active.up.copy(snap.up);
+      active.updateProjectionMatrix();
+      if (controls.object !== active) controls.object = active;
+      controls.target.copy(snap.target);
+      controls.update();
+      activeCameraRef.current = active;
+    } else {
+      applyView3d(
+        camera,
+        orthoCamera,
+        activeCameraRef,
+        controls,
+        bounds,
+        view3dRef.current,
+        currentAspect(),
+      );
+    }
 
     // Resize handhaben. updateStyle=false: die CSS-Größe steuert das Layout,
     // wir setzen nur die Renderauflösung. Nur bei echter Änderung neu setzen,
@@ -342,6 +575,29 @@ export function Viewport3D({
     const animate = () => {
       controls.update();
       renderer.render(scene, activeCameraRef.current ?? camera);
+      // Kamera-Zustand fortlaufend spiegeln, damit ein Szenen-Neuaufbau (etwa
+      // durch eine Live-Mutation beim Griff-Drag) den aktuellen Standpunkt
+      // wiederherstellen kann, statt auf den Preset zurückzuspringen.
+      const active = (activeCameraRef.current ?? camera) as
+        | THREE.PerspectiveCamera
+        | THREE.OrthographicCamera;
+      const isPersp = active === camera;
+      const snap = camStateRef.current;
+      if (snap) {
+        snap.position.copy(active.position);
+        snap.target.copy(controls.target);
+        snap.up.copy(active.up);
+        snap.perspective = isPersp;
+        snap.orthoZoom = orthoCamera.zoom;
+      } else {
+        camStateRef.current = {
+          position: active.position.clone(),
+          target: controls.target.clone(),
+          up: active.up.clone(),
+          perspective: isPersp,
+          orthoZoom: orthoCamera.zoom,
+        };
+      }
       raf = requestAnimationFrame(animate);
     };
     animate();
@@ -349,6 +605,213 @@ export function Viewport3D({
     // ── Maus-Auswahl + Kontextmenü (Raycast) ────────────────────────────────
     const raycaster = new THREE.Raycaster();
     const ndc = new THREE.Vector2();
+
+    // ── Erstellungs-Modus: Raycast auf die Arbeitsebene ─────────────────────
+    // Horizontale Ebene bei y = gridElevation (OKFF des aktiven Geschosses).
+    // Pointer → NDC → Strahl der AKTIVEN Kamera → Schnitt mit der Ebene → Welt-
+    // punkt P → Modell-Vec2. Inverses Mapping aus addDrawing2DLines abgeleitet:
+    // dort Modell (x,y) → three (x, baseElevation, y); also model.x = P.x,
+    // model.y = P.z. Kein Vorzeichen-/Z-Flip.
+    const workplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hitVec = new THREE.Vector3();
+    const workplaneModel = (clientX: number, clientY: number): Vec2 | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, activeCameraRef.current ?? camera);
+      // Ebene auf die aktuelle Geschoss-Höhe heben: Plane n·x + d = 0 mit
+      // n=(0,1,0) → d = -y. constant = -gridElevation.
+      workplane.constant = -gridElevationRef.current;
+      const hit = raycaster.ray.intersectPlane(workplane, hitVec);
+      if (!hit) return null; // Strahl parallel zur Ebene (Blick exakt horizontal)
+      return { x: hit.x, y: hit.z };
+    };
+
+    // ── 3D-Draft-Vorschau (Linien + Snap-Marker auf der Arbeitsebene) ───────
+    const draftGroup = new THREE.Group();
+    draftGroup.frustumCulled = false;
+    scene.add(draftGroup);
+    const draftLineMat = new THREE.LineBasicMaterial({ color: 0x2f8fff });
+    // Draft-Stützpunkte + Snap-Marker „immer oben" (depthTest/Write aus), damit
+    // sie nie hinter Wänden verschwinden — wie die Editier-Griffe.
+    const draftVertMat = new THREE.MeshBasicMaterial({
+      color: 0x2f8fff,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const snapMarkMat = new THREE.MeshBasicMaterial({
+      color: 0xffcc44,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const draftSphereGeo = new THREE.SphereGeometry(0.045, 12, 10);
+    const clearDraftGroup = () => {
+      for (let i = draftGroup.children.length - 1; i >= 0; i--) {
+        const child = draftGroup.children[i];
+        const ls = child as THREE.LineSegments;
+        if (ls.isLineSegments || (child as THREE.Line).isLine) {
+          (child as THREE.Line).geometry.dispose();
+        }
+        const m = child as THREE.Mesh;
+        if (m.isMesh) m.geometry.dispose();
+        draftGroup.remove(child);
+      }
+    };
+    // Modell (x,y) → three (x, y_plane, y); y leicht über der Ebene gegen Z-Fighting.
+    const drawDraft = (d: ToolDraft | null) => {
+      clearDraftGroup();
+      if (!d) return;
+      const yPlane = gridElevationRef.current + 0.012;
+      const addSeg = (a: Vec2, b: Vec2) => {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute(
+          "position",
+          new THREE.BufferAttribute(
+            new Float32Array([a.x, yPlane, a.y, b.x, yPlane, b.y]),
+            3,
+          ),
+        );
+        const line = new THREE.Line(geo, draftLineMat);
+        line.frustumCulled = false;
+        draftGroup.add(line);
+      };
+      for (const shape of d.preview) {
+        if (shape.kind === "line") addSeg(shape.a, shape.b);
+        else if (shape.kind === "poly") {
+          for (let i = 0; i < shape.pts.length - 1; i++) addSeg(shape.pts[i], shape.pts[i + 1]);
+          if (shape.closed && shape.pts.length > 2)
+            addSeg(shape.pts[shape.pts.length - 1], shape.pts[0]);
+        }
+      }
+      // Gesetzte Stützpunkte als kleine Kugeln (immer oben).
+      for (const v of d.vertices) {
+        const m = new THREE.Mesh(draftSphereGeo, draftVertMat);
+        m.position.set(v.x, yPlane, v.y);
+        m.renderOrder = 1000;
+        draftGroup.add(m);
+      }
+      // Snap-Marker (orange Kugel) am gefangenen Punkt (immer oben).
+      if (d.snap) {
+        const m = new THREE.Mesh(draftSphereGeo, snapMarkMat);
+        m.position.set(d.snap.point.x, yPlane, d.snap.point.y);
+        m.renderOrder = 1001;
+        draftGroup.add(m);
+      }
+    };
+    drawDraftRef.current = drawDraft;
+    drawDraft(draft);
+
+    // ── 3D-Editier-Griffe (Endpunkt/Vertex, Höhe, Verschieben) ───────────────
+    // Eigene Gruppe in der Szene mit Griff-Kugeln. Jede Kugel trägt in userData
+    // ihren Griff-Deskriptor (kind + index + Element-ID). Wird per drawGrips aus
+    // der aktuellen Auswahl (editWallsRef/editDrawingsRef) neu aufgebaut — bei
+    // inaktivem Befehl. Bei Mehrfachauswahl bekommen ALLE Elemente Griffe (Basis
+    // fürs gemeinsame Ziehen koinzidenter Ecken). Re-Render ohne Szenen-Neuaufbau
+    // über drawGripsRef.
+    const gripGroup = new THREE.Group();
+    gripGroup.frustumCulled = false;
+    // „Immer oben": Griff-Gruppe nach dem Rest rendern; die Materialien deaktivieren
+    // den Tiefentest (s. u.), sodass die Kugeln nie hinter Wänden verschwinden.
+    gripGroup.renderOrder = 999;
+    scene.add(gripGroup);
+    // Akzentmaterialien: Endpunkt-/Vertex-Griffe (Endpunkt-Ziehen), Höhen-Griff
+    // (oben, andere Farbe) und Verschiebe-Griff (Achsmitte). depthTest=false +
+    // depthWrite=false → die Kugeln werden von KEINER Geometrie verdeckt (immer
+    // sichtbar, auch von hinter/unter der Wand).
+    const onTop = { depthTest: false, depthWrite: false } as const;
+    const gripVertMat = new THREE.MeshBasicMaterial({ color: 0xff8c1a, ...onTop });
+    const gripHeightMat = new THREE.MeshBasicMaterial({ color: 0x2f8fff, ...onTop });
+    const gripMoveMat = new THREE.MeshBasicMaterial({ color: 0x18b85a, ...onTop });
+    const gripGeo = new THREE.SphereGeometry(0.075, 16, 12);
+    // Griff-Deskriptor in userData der Kugel.
+    type GripKind = "vertex" | "height" | "move";
+    const clearGripGroup = () => {
+      for (let i = gripGroup.children.length - 1; i >= 0; i--) {
+        gripGroup.remove(gripGroup.children[i]);
+      }
+    };
+    // Ein Griff. `target` benennt das Element (Wand-ID ODER Drawing-ID), damit
+    // App den richtigen Vertex mutiert und der Drag die Koinzidenz-Gruppe findet.
+    const addGrip = (
+      kind: GripKind,
+      index: number,
+      pos: THREE.Vector3,
+      target: { wallId?: string; drawingId?: string },
+    ) => {
+      const mat =
+        kind === "height" ? gripHeightMat : kind === "move" ? gripMoveMat : gripVertMat;
+      const m = new THREE.Mesh(gripGeo, mat);
+      m.position.copy(pos);
+      m.userData.gripKind = kind;
+      m.userData.gripIndex = index;
+      m.userData.gripTarget = target;
+      m.frustumCulled = false;
+      m.renderOrder = 1000;
+      gripGroup.add(m);
+    };
+    // Baut die Griff-Kugeln aus der aktuellen Auswahl. Modell (x,y) → three
+    // (x, z, y). Bei aktivem Befehl: keine Griffe (Erstellungs-Fläche).
+    const drawGrips = () => {
+      clearGripGroup();
+      if (commandActiveRef.current) return;
+      const walls = editWallsRef.current ?? [];
+      const drawings = editDrawingsRef.current ?? [];
+      for (const wall of walls) {
+        // Wand-UK/OK absolut (Z) — Endpunkt-Griffe sitzen auf der UK (Boden der
+        // Wand), Höhen-Griff auf der OK in der Achsmitte.
+        const { zBottom, zTop } = wallVerticalExtent(project, wall);
+        const tgt = { wallId: wall.id };
+        addGrip("vertex", 0, new THREE.Vector3(wall.start.x, zBottom, wall.start.y), tgt);
+        addGrip("vertex", 1, new THREE.Vector3(wall.end.x, zBottom, wall.end.y), tgt);
+        const mid: Vec2 = {
+          x: (wall.start.x + wall.end.x) / 2,
+          y: (wall.start.y + wall.end.y) / 2,
+        };
+        addGrip("height", -1, new THREE.Vector3(mid.x, zTop, mid.y), tgt);
+        // Verschiebe-Griff etwas über der UK in der Achsmitte (vom Höhen-Griff
+        // farblich/​vertikal getrennt, damit die beiden nicht koinzidieren).
+        addGrip("move", -1, new THREE.Vector3(mid.x, zBottom + 0.05, mid.y), tgt);
+      }
+      for (const drawing of drawings) {
+        const verts = drawingGripVertices(drawing);
+        const yPlane = gridElevationRef.current + 0.02;
+        const tgt = { drawingId: drawing.id };
+        verts.forEach((v, i) =>
+          addGrip("vertex", i, new THREE.Vector3(v.x, yPlane, v.y), tgt),
+        );
+        // Verschiebe-Griff (ganzes 2D-Element bewegen) im Schwerpunkt der Ecken —
+        // analog zum Wand-Verschiebe-Griff, damit 2D-Elemente auch in 3D frei
+        // verschiebbar sind (nicht nur ihre einzelnen Vertices). Formen ohne
+        // Vertex-Griffe (circle/arc/text) bekommen ihren Anker aus dem Geometrie-
+        // Ursprung, damit auch sie einen Verschiebe-Griff erhalten.
+        const anchor = drawingMoveAnchor(drawing, verts);
+        if (anchor)
+          addGrip("move", -1, new THREE.Vector3(anchor.x, yPlane + 0.03, anchor.y), tgt);
+      }
+    };
+    drawGripsRef.current = drawGrips;
+    drawGrips();
+
+    // Snap-Marker für den 3D-Vertex-Drag (orange Kugel, immer oben). Wird beim
+    // Drag positioniert/ein- bzw. ausgeblendet; eigene Geometrie/Material, im
+    // Cleanup verworfen.
+    const gripSnapMat = new THREE.MeshBasicMaterial({ color: 0xffcc44, ...onTop });
+    const gripSnapGeo = new THREE.SphereGeometry(0.06, 14, 12);
+    const gripSnapMarker = new THREE.Mesh(gripSnapGeo, gripSnapMat);
+    gripSnapMarker.frustumCulled = false;
+    gripSnapMarker.renderOrder = 1001;
+    gripSnapMarker.visible = false;
+    gripGroup.add(gripSnapMarker);
+    // Zeigt den Snap-Marker am Modellpunkt (x,y) auf der Arbeitsebene, oder
+    // blendet ihn aus (p=null).
+    const showGripSnap = (p: Vec2 | null) => {
+      if (!p) {
+        gripSnapMarker.visible = false;
+        return;
+      }
+      gripSnapMarker.position.set(p.x, gridElevationRef.current + 0.02, p.y);
+      gripSnapMarker.visible = true;
+    };
 
     // Per Raycast die getroffene Wand-ID bestimmen (klettert von der Mesh zur
     // userData.wallId; null bei Leerraum/Boden/Raster).
@@ -360,6 +823,49 @@ export function Viewport3D({
       const hits = raycaster.intersectObjects(building.children, true);
       for (const hit of hits) {
         const id = hit.object.userData?.wallId;
+        if (typeof id === "string") return id;
+      }
+      return null;
+    };
+
+    // Per Raycast die getroffene Decken-ID bestimmen (userData.ceilingId). Wird
+    // nur ausgewertet, wenn keine Wand getroffen wurde (Wände haben Vorrang).
+    const pickCeiling = (clientX: number, clientY: number): string | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, activeCameraRef.current ?? camera);
+      const hits = raycaster.intersectObjects(building.children, true);
+      for (const hit of hits) {
+        const id = hit.object.userData?.ceilingId;
+        if (typeof id === "string") return id;
+      }
+      return null;
+    };
+
+    // Per Raycast die getroffene Öffnungs-ID bestimmen (userData.openingId).
+    const pickOpening = (clientX: number, clientY: number): string | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, activeCameraRef.current ?? camera);
+      const hits = raycaster.intersectObjects(building.children, true);
+      for (const hit of hits) {
+        const id = hit.object.userData?.openingId;
+        if (typeof id === "string") return id;
+      }
+      return null;
+    };
+
+    // Per Raycast die getroffene Treppen-ID bestimmen (userData.stairId).
+    const pickStair = (clientX: number, clientY: number): string | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, activeCameraRef.current ?? camera);
+      const hits = raycaster.intersectObjects(building.children, true);
+      for (const hit of hits) {
+        const id = hit.object.userData?.stairId;
         if (typeof id === "string") return id;
       }
       return null;
@@ -397,6 +903,299 @@ export function Viewport3D({
       }
       onSelectWallRef.current?.(wallId);
     };
+    // Auswahl-Hervorhebung einer Decke (analog selectWall, über userData.ceilingId).
+    const selectCeiling = (ceilingId: string | null) => {
+      restoreSelection();
+      if (ceilingId) {
+        building.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (mesh.isMesh && mesh.userData?.ceilingId === ceilingId) {
+            mesh.userData.origMaterial = mesh.material;
+            mesh.material = highlightMat;
+            selectedMeshes.push(mesh);
+          }
+        });
+      }
+      onSelectCeilingRef.current?.(ceilingId);
+    };
+    // Auswahl-Hervorhebung einer Öffnung (über userData.openingId).
+    const selectOpening = (openingId: string | null) => {
+      restoreSelection();
+      if (openingId) {
+        building.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (mesh.isMesh && mesh.userData?.openingId === openingId) {
+            mesh.userData.origMaterial = mesh.material;
+            mesh.material = highlightMat;
+            selectedMeshes.push(mesh);
+          }
+        });
+      }
+      onSelectOpeningRef.current?.(openingId);
+    };
+    // Auswahl-Hervorhebung einer Treppe (über userData.stairId).
+    const selectStair = (stairId: string | null) => {
+      restoreSelection();
+      if (stairId) {
+        building.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (mesh.isMesh && mesh.userData?.stairId === stairId) {
+            mesh.userData.origMaterial = mesh.material;
+            mesh.material = highlightMat;
+            selectedMeshes.push(mesh);
+          }
+        });
+      }
+      onSelectStairRef.current?.(stairId);
+    };
+    // Links-Klick-Auswahl: erst Öffnung, dann Wand, dann Decke, dann Treppe;
+    // Auswahlen schließen sich gegenseitig aus.
+    const selectAt = (clientX: number, clientY: number) => {
+      const openingId = pickOpening(clientX, clientY);
+      if (openingId) {
+        selectOpening(openingId);
+        onSelectWallRef.current?.(null);
+        onSelectCeilingRef.current?.(null);
+        onSelectStairRef.current?.(null);
+        return;
+      }
+      const wallId = pickWall(clientX, clientY);
+      if (wallId) {
+        selectWall(wallId);
+        onSelectCeilingRef.current?.(null);
+        onSelectOpeningRef.current?.(null);
+        onSelectStairRef.current?.(null);
+        return;
+      }
+      const ceilingId = pickCeiling(clientX, clientY);
+      if (ceilingId) {
+        selectCeiling(ceilingId);
+        onSelectOpeningRef.current?.(null);
+        onSelectStairRef.current?.(null);
+        return;
+      }
+      const stairId = pickStair(clientX, clientY);
+      if (stairId) {
+        selectStair(stairId);
+        onSelectWallRef.current?.(null);
+        onSelectCeilingRef.current?.(null);
+        onSelectOpeningRef.current?.(null);
+        return;
+      }
+      // Leerraum: alle Auswahlen leeren.
+      selectWall(null);
+      onSelectCeilingRef.current?.(null);
+      onSelectOpeningRef.current?.(null);
+      onSelectStairRef.current?.(null);
+    };
+
+    // ── Griff-Raycast + Drag-Zustand ─────────────────────────────────────────
+    // Der laufende Drag liegt im KOMPONENTEN-Ref gripDragRef (überlebt Neuaufbau).
+    // War beim (Re-)Aufbau bereits ein Drag aktiv, OrbitControls sofort sperren,
+    // damit die Geste nahtlos weiterläuft.
+    if (gripDragRef.current) controls.enabled = false;
+    // Vertikale Drag-Ebene durch die Wandachse (für den Höhen-Griff): die OK-Z
+    // wird aus dem Schnitt des Strahls mit dieser Ebene gelesen.
+    const heightPlane = new THREE.Plane();
+    const heightHit = new THREE.Vector3();
+
+    // Getroffene Griff-Kugel (oder null). Liefert ihren Deskriptor inkl. Element.
+    const pickGrip = (
+      clientX: number,
+      clientY: number,
+    ): {
+      kind: GripKind;
+      index: number;
+      target: { wallId?: string; drawingId?: string };
+    } | null => {
+      if (gripGroup.children.length === 0) return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, activeCameraRef.current ?? camera);
+      const hits = raycaster.intersectObjects(gripGroup.children, false);
+      for (const hit of hits) {
+        const kind = hit.object.userData?.gripKind as GripKind | undefined;
+        if (kind)
+          return {
+            kind,
+            index: hit.object.userData?.gripIndex ?? -1,
+            target: hit.object.userData?.gripTarget ?? {},
+          };
+      }
+      return null;
+    };
+
+    // Endpunkt eines gewählten Elements an Vertex-Index `index`. Wände: 0=start,
+    // 1=end. 2D-Elemente: via drawingGripVertices (gleiche Indizierung wie App).
+    const vertexPointOf = (
+      target: { wallId?: string; drawingId?: string },
+      index: number,
+    ): Vec2 | null => {
+      if (target.wallId) {
+        const w = (editWallsRef.current ?? []).find((x) => x.id === target.wallId);
+        if (!w) return null;
+        return index === 0 ? w.start : w.end;
+      }
+      if (target.drawingId) {
+        const d = (editDrawingsRef.current ?? []).find((x) => x.id === target.drawingId);
+        if (!d) return null;
+        return drawingGripVertices(d)[index] ?? null;
+      }
+      return null;
+    };
+
+    // Ortho-Anker eines Vertex-Griffs: die FIXE Nachbarecke DESSELBEN Elements,
+    // relativ zu der ein Shift-Drag auf H/V eingerastet wird. Wand: das andere
+    // Ende. 2D-Element: der vorige Vertex (sonst der nächste). null, wenn es
+    // keinen Nachbarn gibt.
+    const anchorFor = (
+      target: { wallId?: string; drawingId?: string },
+      index: number,
+    ): Vec2 | null => {
+      if (target.wallId) return vertexPointOf(target, index === 0 ? 1 : 0);
+      if (target.drawingId) {
+        const d = (editDrawingsRef.current ?? []).find((x) => x.id === target.drawingId);
+        if (!d) return null;
+        const verts = drawingGripVertices(d);
+        if (verts.length < 2) return null;
+        const ref = index > 0 ? index - 1 : 1;
+        return verts[ref] ?? null;
+      }
+      return null;
+    };
+
+    // Koinzidente Endpunkt-Griffe der ÜBRIGEN gewählten Elemente zum Punkt `p`
+    // bestimmen (gemeinsame Ecke). Scope: nur unter den GEWÄHLTEN Elementen.
+    // Toleranz: ~ Snap-Toleranz (tolerancePx/pxPerMeter); 2 mm Mindestabstand,
+    // damit minimale Float-Abweichungen einer geteilten Ecke greifen.
+    const COINCIDENT_TOL = 0.05; // m
+    const findCoincident = (
+      p: Vec2,
+      self: { wallId?: string; drawingId?: string },
+    ): Array<{ target: { wallId?: string; drawingId?: string }; index: number }> => {
+      const out: Array<{ target: { wallId?: string; drawingId?: string }; index: number }> = [];
+      const near = (q: Vec2) => Math.hypot(q.x - p.x, q.y - p.y) <= COINCIDENT_TOL;
+      for (const w of editWallsRef.current ?? []) {
+        if (w.id === self.wallId) continue;
+        if (near(w.start)) out.push({ target: { wallId: w.id }, index: 0 });
+        if (near(w.end)) out.push({ target: { wallId: w.id }, index: 1 });
+      }
+      for (const d of editDrawingsRef.current ?? []) {
+        if (d.id === self.drawingId) continue;
+        drawingGripVertices(d).forEach((v, i) => {
+          if (near(v)) out.push({ target: { drawingId: d.id }, index: i });
+        });
+      }
+      return out;
+    };
+
+    // Alle Eckpunkte eines Elements (Wand: start/end; 2D: Griff-Vertices) — Basis
+    // für die Koinzidenz-Erkennung beim Körper-Verschieben (jede Ecke prüfen).
+    const elementVertices = (target: { wallId?: string; drawingId?: string }): Vec2[] => {
+      if (target.wallId) {
+        const w = (editWallsRef.current ?? []).find((x) => x.id === target.wallId);
+        return w ? [w.start, w.end] : [];
+      }
+      if (target.drawingId) {
+        const d = (editDrawingsRef.current ?? []).find((x) => x.id === target.drawingId);
+        return d ? drawingGripVertices(d) : [];
+      }
+      return [];
+    };
+
+    // Koinzidente Sibling-Vertices für ALLE Ecken des verschobenen Elements
+    // sammeln (Körper-Drag). Dedupliziert je (target,index); die LIVE-Position
+    // wird mitgeführt, damit das Delta inkrementell aufaddiert werden kann.
+    const findMoveCoincident = (
+      self: { wallId?: string; drawingId?: string },
+    ): Array<{ target: { wallId?: string; drawingId?: string }; index: number; pos: Vec2 }> => {
+      const seen = new Set<string>();
+      const out: Array<{ target: { wallId?: string; drawingId?: string }; index: number; pos: Vec2 }> = [];
+      for (const corner of elementVertices(self)) {
+        for (const c of findCoincident(corner, self)) {
+          const key = `${c.target.wallId ?? ""}|${c.target.drawingId ?? ""}|${c.index}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const pos = vertexPointOf(c.target, c.index);
+          if (pos) out.push({ ...c, pos: { ...pos } });
+        }
+      }
+      return out;
+    };
+
+    // Strahl auf eine vertikale Ebene durch die Wandachse projizieren → Höhen-Z.
+    // Ebene: Normale waagerecht, senkrecht zur Achse, durch den Achsmittelpunkt
+    // (so liegt der Cursor „an der Wand" und die vertikale Bewegung steuert die OK).
+    const heightZAt = (clientX: number, clientY: number, wall: Wall): number | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, activeCameraRef.current ?? camera);
+      const ux = wall.end.x - wall.start.x;
+      const uy = wall.end.y - wall.start.y;
+      const len = Math.hypot(ux, uy) || 1;
+      // Achsrichtung in three (x,_,z) = Modell (x,_,y); Ebenen-Normale = Achse.
+      const nrm = new THREE.Vector3(ux / len, 0, uy / len);
+      const mid = new THREE.Vector3(
+        (wall.start.x + wall.end.x) / 2,
+        0,
+        (wall.start.y + wall.end.y) / 2,
+      );
+      heightPlane.setFromNormalAndCoplanarPoint(nrm, mid);
+      const hit = raycaster.ray.intersectPlane(heightPlane, heightHit);
+      return hit ? hit.y : null;
+    };
+
+    // Beginnt ein Griff-Drag, falls eine Griff-Kugel getroffen wurde (Links).
+    // OrbitControls bleibt ohnehin auf Links inaktiv; wir blockieren zusätzlich
+    // die Selektion/den Klick auf der pointerup-Seite, solange gripDrag aktiv ist.
+    const tryStartGripDrag = (e: PointerEvent): boolean => {
+      if (commandActiveRef.current) return false;
+      const g = pickGrip(e.clientX, e.clientY);
+      if (!g) return false;
+      // Koinzidenz-Gruppe nur bei Vertex-Drags: die Endpunkte der übrigen
+      // gewählten Elemente, die mit dem gezogenen Punkt zusammenfallen, werden
+      // mitgeführt (gemeinsame Ecke bleibt verbunden).
+      let coincident: Array<{
+        target: { wallId?: string; drawingId?: string };
+        index: number;
+      }> = [];
+      if (g.kind === "vertex") {
+        const self = vertexPointOf(g.target, g.index);
+        if (self) coincident = findCoincident(self, g.target);
+      }
+      // Körper-Drag: koinzidente Enden anderer GEWÄHLTER Elemente an JEDER Ecke
+      // des verschobenen Elements mitführen (gemeinsame Ecke bleibt verbunden).
+      const moveCoincident =
+        g.kind === "move" ? findMoveCoincident(g.target) : [];
+      // Snap-Ausschluss = gesamte Koinzidenz-Gruppe (Selbst + Mitgeführte), damit
+      // der Punkt nicht an sich selbst oder einem verbundenen Ende fängt.
+      const excludeWallIds = new Set<string>();
+      const excludeDrawingIds = new Set<string>();
+      const addExclude = (t: { wallId?: string; drawingId?: string }) => {
+        if (t.wallId) excludeWallIds.add(t.wallId);
+        if (t.drawingId) excludeDrawingIds.add(t.drawingId);
+      };
+      addExclude(g.target);
+      coincident.forEach((c) => addExclude(c.target));
+      gripDragRef.current = {
+        kind: g.kind,
+        vertexIndex: g.index,
+        lastModel: g.kind === "move" ? workplaneModel(e.clientX, e.clientY) : null,
+        anchor: g.kind === "vertex" ? anchorFor(g.target, g.index) : null,
+        wallId: g.kind === "height" ? g.target.wallId ?? null : null,
+        pointerId: e.pointerId,
+        target: g.target,
+        coincident,
+        moveCoincident,
+        excludeWallIds,
+        excludeDrawingIds,
+      };
+      controls.enabled = false; // OrbitControls aus, solange wir ziehen
+      dom.setPointerCapture?.(e.pointerId);
+      return true;
+    };
 
     // Klick-Erkennung ohne Drag: Position bei pointerdown merken, bei pointerup
     // nur als Klick werten, wenn der Zeiger kaum bewegt wurde.
@@ -408,21 +1207,121 @@ export function Viewport3D({
       downX = e.clientX;
       downY = e.clientY;
       downButton = e.button;
+      // Linksklick auf eine Griff-Kugel startet einen Editier-Drag (vor Auswahl).
+      if (e.button === 0) tryStartGripDrag(e);
     };
     const onPointerUpDom = (e: PointerEvent) => {
+      // Lief ein Griff-Drag, ist die Geste verbraucht: committen, KEINE Auswahl.
+      if (gripDragRef.current) {
+        gripDragRef.current = null;
+        controls.enabled = true;
+        showGripSnap(null); // Snap-Marker ausblenden
+        dom.releasePointerCapture?.(e.pointerId);
+        onEditEndRef.current?.();
+        return;
+      }
       const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
       if (moved > CLICK_SLOP) return;
-      // LINKS = Auswahl (kein Orbit links).
+      // LINKS = Punkt setzen (Erstellungs-Modus) bzw. Auswahl (Ruhe). Kein Orbit
+      // links (OrbitControls LEFT = -1), daher ist Links hier immer frei.
       if (e.button === 0 && downButton === 0) {
-        selectWall(pickWall(e.clientX, e.clientY));
+        if (commandActiveRef.current) {
+          const m = workplaneModel(e.clientX, e.clientY);
+          if (m) onWorkplanePointRef.current?.("pick", m);
+        } else {
+          selectAt(e.clientX, e.clientY);
+        }
       }
     };
-    // RECHTS = Kontextmenü; Browser-Menü unterdrücken, Rechts-Drag-Pan ist aus.
+    // Pointer-Move: laufender Griff-Drag hat Vorrang (Endpunkt/Vertex/Höhe/
+    // Verschieben). Sonst im Erstellungs-Modus Vorschau-Punkt an die Engine; ohne
+    // aktiven Befehl unverändert (OrbitControls behandelt Mitte/Rechts selbst).
+    const onPointerMoveDom = (e: PointerEvent) => {
+      const drag = gripDragRef.current;
+      if (drag) {
+        if (drag.kind === "vertex") {
+          const raw = workplaneModel(e.clientX, e.clientY);
+          if (raw) {
+            // Shift = Ortho-Lock: den gezogenen Punkt auf H/V gegenüber dem
+            // FIXEN Anker (Nachbarecke) zwingen — Achse = die, der der Cursor
+            // näher ist (applyAngleConstraint mit 90°, wie Ortho beim Zeichnen).
+            // Der Lock dominiert (kein Snap), damit die Endkoordinate garantiert
+            // eine Achse mit dem Anker teilt.
+            const orthoLock = e.shiftKey && drag.anchor;
+            const m = orthoLock
+              ? applyAngleConstraint(drag.anchor!, raw, 90)
+              : raw;
+            // Ohne Lock: DIESELBE Snap-Logik wie die Plan-Griffe (App:
+            // computeSnap mit Ausschluss der Koinzidenz-Gruppe). Mit Lock: den
+            // gezwungenen Punkt direkt anwenden (kein erneutes Snappen).
+            const applied = orthoLock
+              ? (onEditVertexRef.current?.(drag.target, drag.vertexIndex, m) ?? m)
+              : (onEditVertexRef.current?.(
+                  drag.target,
+                  drag.vertexIndex,
+                  m,
+                  drag.excludeWallIds,
+                  drag.excludeDrawingIds,
+                ) ?? m);
+            // Snap-Marker am gesnappten Punkt, falls vom rohen Punkt verschieden.
+            const snapped =
+              !orthoLock && Math.hypot(applied.x - raw.x, applied.y - raw.y) > 1e-6;
+            showGripSnap(snapped ? applied : null);
+            // Koinzidente Endpunkte der übrigen gewählten Elemente mitführen:
+            // exakt auf denselben gesnappten Punkt (snapped=false ⇒ direkt).
+            for (const c of drag.coincident) {
+              onEditVertexRef.current?.(c.target, c.index, applied);
+            }
+          }
+        } else if (drag.kind === "move") {
+          const m = workplaneModel(e.clientX, e.clientY);
+          if (m && drag.lastModel) {
+            const delta = { x: m.x - drag.lastModel.x, y: m.y - drag.lastModel.y };
+            if (delta.x !== 0 || delta.y !== 0) {
+              onEditBodyRef.current?.(drag.target, delta);
+              // Koinzidente Sibling-Ecken um dasselbe Delta mitführen: ihre LIVE
+              // Position fortschreiben und absolut neu setzen (kein Snap).
+              for (const c of drag.moveCoincident) {
+                c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
+                onEditVertexRef.current?.(c.target, c.index, c.pos);
+              }
+            }
+            drag.lastModel = m;
+          } else if (m) {
+            drag.lastModel = m;
+          }
+        } else if (drag.kind === "height") {
+          const wall = (editWallsRef.current ?? []).find((w) => w.id === drag.wallId);
+          if (wall && drag.wallId) {
+            const z = heightZAt(e.clientX, e.clientY, wall);
+            if (z !== null) onEditWallTopRef.current?.(drag.wallId, z);
+          }
+        }
+        return;
+      }
+      if (!commandActiveRef.current) return;
+      const m = workplaneModel(e.clientX, e.clientY);
+      if (m) onWorkplanePointRef.current?.("move", m);
+    };
+    // Doppelklick im Erstellungs-Modus = bestätigen/beenden (z. B. Polylinie).
+    const onDblClickDom = (e: MouseEvent) => {
+      if (!commandActiveRef.current) return;
+      e.preventDefault();
+      onWorkplaneConfirmRef.current?.();
+    };
+    // RECHTS: im Erstellungs-Modus = bestätigen (kein Kontextmenü); sonst
+    // Kontextmenü. Browser-Menü immer unterdrücken, Rechts-Drag-Pan ist aus.
     const onContextMenuDom = (e: MouseEvent) => {
       e.preventDefault();
+      const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
+      if (commandActiveRef.current) {
+        // Nach einem Rechts-Drag (Orbit/Pan) NICHT bestätigen.
+        if (moved > CLICK_SLOP && downButton === 2) return;
+        onWorkplaneConfirmRef.current?.();
+        return;
+      }
       const cb = onContextMenuRef.current;
       if (!cb) return;
-      const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
       // Nach einem Drag (falls doch) kein Menü öffnen.
       if (moved > CLICK_SLOP && downButton === 2) return;
       cb({ clientX: e.clientX, clientY: e.clientY, wallId: pickWall(e.clientX, e.clientY) });
@@ -430,13 +1329,34 @@ export function Viewport3D({
     const dom = renderer.domElement;
     dom.addEventListener("pointerdown", onPointerDownDom);
     dom.addEventListener("pointerup", onPointerUpDom);
+    dom.addEventListener("pointermove", onPointerMoveDom);
+    dom.addEventListener("dblclick", onDblClickDom);
     dom.addEventListener("contextmenu", onContextMenuDom);
 
     return () => {
       cancelAnimationFrame(raf);
       dom.removeEventListener("pointerdown", onPointerDownDom);
       dom.removeEventListener("pointerup", onPointerUpDom);
+      dom.removeEventListener("pointermove", onPointerMoveDom);
+      dom.removeEventListener("dblclick", onDblClickDom);
       dom.removeEventListener("contextmenu", onContextMenuDom);
+      drawDraftRef.current = null;
+      clearDraftGroup();
+      scene.remove(draftGroup);
+      draftLineMat.dispose();
+      draftVertMat.dispose();
+      snapMarkMat.dispose();
+      draftSphereGeo.dispose();
+      // Editier-Griffe abräumen.
+      drawGripsRef.current = null;
+      clearGripGroup();
+      scene.remove(gripGroup);
+      gripVertMat.dispose();
+      gripHeightMat.dispose();
+      gripMoveMat.dispose();
+      gripGeo.dispose();
+      gripSnapMat.dispose();
+      gripSnapGeo.dispose();
       restoreSelection();
       highlightMat.dispose();
       ro.disconnect();
@@ -453,6 +1373,7 @@ export function Viewport3D({
       hiddenFace.dispose();
       edgeMat.dispose();
       whiteFace.dispose();
+      matRuntime.dispose();
       // EdgesGeometry der Hidden-Line-Kanten freigeben (Faces teilen ihre Geo
       // mit dem Mesh und werden über die Mesh-Geo unten/ohnehin verworfen).
       building.traverse((o) => {
@@ -490,6 +1411,9 @@ export function Viewport3D({
   // die (teure) Szene neu zu bauen. Springt die Kamera auf den Standpunkt;
   // OrbitControls bleibt danach frei.
   useEffect(() => {
+    // Während eines laufenden Griff-Drags NIE die Kamera umsetzen (der Nutzer hat
+    // einen Punkt „in der Hand"); der Preset wird erst nach dem Drag wirksam.
+    if (gripDragRef.current) return;
     const camera = cameraRef.current;
     const orthoCamera = orthoCameraRef.current;
     const controls = controlsRef.current;
@@ -509,11 +1433,35 @@ export function Viewport3D({
     camera.updateProjectionMatrix();
   }, [fov]);
 
+  // Leichter Effekt: Top-Ansicht sperren — in der orthografischen Draufsicht kein
+  // Orbit (Rotieren), damit die Ansicht ruhig senkrecht von oben bleibt (Wunsch:
+  // „am liebsten Top-View gesperrt"). Pan (Shift+Mitte) + Zoom bleiben erlaubt,
+  // damit man den Ausschnitt in x/y noch verschieben kann. In allen anderen
+  // Ansichten ist der Orbit wieder frei.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    controls.enableRotate = view3d !== "top";
+  }, [view3d]);
+
   // Leichter Effekt: Bodenraster auf die Z-Höhe des aktiven Geschosses heben
   // (ohne Szenen-Neuaufbau), passend zu den 2D-Zeichnungen auf derselben Höhe.
   useEffect(() => {
     if (gridRef.current) gridRef.current.position.y = gridElevation;
   }, [gridElevation]);
+
+  // Leichter Effekt: 3D-Draft-Vorschau bei `draft`-Änderung neu zeichnen (ohne
+  // Szenen-Neuaufbau). Leert die Vorschau bei null.
+  useEffect(() => {
+    drawDraftRef.current?.(draft);
+  }, [draft]);
+
+  // Leichter Effekt: Editier-Griffe neu zeichnen, wenn sich die Auswahl, die
+  // gezogene Geometrie (Live-Mutation), der Befehlszustand oder die Geschoss-
+  // höhe ändert — ohne Szenen-Neuaufbau (die Kugeln folgen so dem Element).
+  useEffect(() => {
+    drawGripsRef.current?.();
+  }, [editWalls, editDrawings, commandActive, gridElevation]);
 
   return (
     <div className="viewport" ref={ref}>
@@ -549,6 +1497,8 @@ interface BuildOpts {
   edgeMat: THREE.LineBasicMaterial;
   /** Geteiltes mattes helles Material für den „Weiss"-Modus (Clay-Look). */
   whiteFace: THREE.MeshStandardMaterial;
+  /** Laufzeit für PBR-Texturen (Render-Modus „textured"); sonst ungenutzt. */
+  matRuntime: MaterialRuntime;
 }
 
 /** Stabiler Schlüssel der sichtbaren Geschosse (IDs in Dokumentreihenfolge). */
@@ -817,8 +1767,42 @@ function buildFloor(
     // Gedimmt, wenn das Geschoss ODER die Kategorie der Wand gedimmt ist.
     const greyed = floorGreyed || categoryDisplay(wall.categoryCode).greyed;
     const doors = project.doors.filter((d) => d.hostWallId === wall.id);
+    const wallOpenings = (project.openings ?? []).filter(
+      (o) => o.hostWallId === wall.id,
+    );
     const cuts = joins.get(wall.id) ?? { startCut: null, endCut: null };
-    addWallMeshes(group, project, wall, doors, cuts, baseElevation, greyed, opts);
+    addWallMeshes(group, project, wall, doors, wallOpenings, cuts, baseElevation, greyed, opts);
+    // Rahmen/Glas/Blatt der Öffnungen NUR, wenn die Öffnungs-Kategorie sichtbar ist.
+    for (const o of wallOpenings) {
+      const oGreyed = floorGreyed || categoryDisplay(o.categoryCode).greyed;
+      if (visibleCodes.has(o.categoryCode) && categoryDisplay(o.categoryCode).render) {
+        addOpeningMeshes(group, project, wall, o, oGreyed, opts);
+      }
+    }
+  }
+
+  // Decken dieses Geschosses als extrudierte Slabs (Umriss × Dicke) an der
+  // korrekten Z-Lage (OK = Geschoss-Oberkante, wächst nach unten).
+  const ceilings = (project.ceilings ?? []).filter(
+    (c) =>
+      c.floorId === floor.id &&
+      visibleCodes.has(c.categoryCode) &&
+      categoryDisplay(c.categoryCode).render,
+  );
+  for (const ceiling of ceilings) {
+    const greyed = floorGreyed || categoryDisplay(ceiling.categoryCode).greyed;
+    addCeilingMesh(group, project, ceiling, greyed, opts);
+  }
+
+  // Treppen dieses Geschosses als gestufte Boxen (Tritte + Setzstufen), von der
+  // Geschoss-UK bis zur nächsten Geschoss-OK aufsteigend.
+  const stairs = stairsOfFloor(project, floor.id).filter(
+    (s) =>
+      visibleCodes.has(s.categoryCode) && categoryDisplay(s.categoryCode).render,
+  );
+  for (const stair of stairs) {
+    const greyed = floorGreyed || categoryDisplay(stair.categoryCode).greyed;
+    addStairMeshes(group, project, stair, greyed, opts);
   }
 
   // Freie 2D-Zeichengeometrie dieses Geschosses flach auf der Geschossebene
@@ -844,6 +1828,49 @@ function drawing2DColor(project: Project, d: Drawing2D): string {
   if (ls?.color) return ls.color;
   const cat = flattenCategories(project.layers).find((c) => c.code === d.categoryCode);
   return cat?.color ?? "#888888";
+}
+
+/**
+ * Editierbare Eckpunkte eines 2D-Elements für die 3D-Vertex-Griffe — in genau
+ * derselben Reihenfolge/Indizierung wie `drawingVertices`/`moveGripOf` im
+ * Store, damit ein gezogener Griff den richtigen Vertex mutiert. line/polyline/
+ * rect liefern Punkte; andere Formen (circle/arc/text) → keine Vertex-Griffe.
+ */
+function drawingGripVertices(d: Drawing2D): Vec2[] {
+  const g = d.geom;
+  if (g.shape === "line") return [g.a, g.b];
+  if (g.shape === "polyline") return [...g.pts];
+  if (g.shape === "rect") {
+    return [
+      g.min,
+      { x: g.max.x, y: g.min.y },
+      g.max,
+      { x: g.min.x, y: g.max.y },
+    ];
+  }
+  return [];
+}
+
+/**
+ * Ankerpunkt für den Verschiebe-Griff eines 2D-Elements (Schwerpunkt der
+ * Vertex-Griffe). Formen ohne Vertex-Griffe (circle/arc/text) liefern ihren
+ * Geometrie-Ursprung (Mittelpunkt bzw. Textanker), damit auch sie einen
+ * Verschiebe-Griff bekommen. null, wenn kein sinnvoller Anker existiert.
+ */
+function drawingMoveAnchor(d: Drawing2D, verts: Vec2[]): Vec2 | null {
+  if (verts.length > 0) {
+    let sx = 0;
+    let sy = 0;
+    for (const v of verts) {
+      sx += v.x;
+      sy += v.y;
+    }
+    return { x: sx / verts.length, y: sy / verts.length };
+  }
+  const g = d.geom;
+  if (g.shape === "circle" || g.shape === "arc") return g.center;
+  if (g.shape === "text") return g.at;
+  return null;
 }
 
 /** Strecken eines 2D-Zeichenelements (line/polyline/rect); andere → leer. */
@@ -914,6 +1941,7 @@ function addWallMeshes(
   project: Project,
   wall: Wall,
   doors: Project["doors"],
+  wallOpenings: Opening[],
   cuts: WallCuts,
   // baseElevation wird jetzt über wallVerticalExtent (UK/OK-Auflösung) bezogen;
   // der Parameter bleibt für die Aufrufstelle erhalten, wird hier aber nicht
@@ -925,9 +1953,6 @@ function addWallMeshes(
   const wt = getWallType(project, wall);
   const total = wallTypeThickness(wt);
   const length = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
-  const openings = doors
-    .map((d) => ({ from: d.position, to: d.position + d.width, top: d.height }))
-    .sort((a, b) => a.from - b.from);
 
   // Vertikale Ausdehnung (absolute Z): UK/OK aus den Wand-Attributen, sonst
   // baseElevation des Geschosses … +height (= heutiges Verhalten). Wir geben
@@ -935,6 +1960,28 @@ function addWallMeshes(
   const { zBottom, zTop } = wallVerticalExtent(project, wall);
   // Tür-/Sturzhöhen sind relativ zur Wand-UK definiert (Türen sitzen am Boden).
   const wallTopRel = zTop - zBottom;
+
+  // Öffnungen (Legacy-Türen + neue Öffnungen) mit sill/head RELATIV zur Wand-UK:
+  //   • Tür    — sillRel 0 … headRel = height (Segment darunter entfällt).
+  //   • Fenster— sillRel = Brüstung … headRel = sillRel + height (Brüstungsmauer
+  //     UNTER dem Fenster bleibt stehen, Sturz DARÜBER ebenfalls).
+  const openings = [
+    ...doors.map((d) => ({
+      from: d.position,
+      to: d.position + d.width,
+      sillRel: 0,
+      headRel: Math.min(d.height, wallTopRel),
+    })),
+    ...wallOpenings
+      .map((o) => {
+        const iv = openingInterval(wall, o);
+        if (!iv) return null;
+        const sillRel = Math.max(0, Math.min(o.sillHeight, wallTopRel));
+        const headRel = Math.min(sillRel + o.height, wallTopRel);
+        return { from: iv.from, to: iv.to, sillRel, headRel };
+      })
+      .filter((x): x is { from: number; to: number; sillRel: number; headRel: number } => x != null),
+  ].sort((a, b) => a.from - b.from);
 
   // Referenzlinien-Versatz über die Dicke (center=0 → unverändert).
   const refOff = wallReferenceOffset(wall, total);
@@ -944,14 +1991,28 @@ function addWallMeshes(
   let off = refOff - total / 2;
   for (const layer of wt.layers) {
     // Material je Modus: Hidden-Line nutzt die geteilten flachen weißen Faces,
-    // „Weiss" das geteilte matte Clay-Material, shaded/wireframe das (ggf.
-    // gedimmte) Component-Material.
+    // „Weiss" das geteilte matte Clay-Material, „Texturiert" ein PBR-Material je
+    // Fläche (s. u., daher hier null), shaded/wireframe das (ggf. gedimmte)
+    // Component-Material.
+    const textured = opts.renderMode === "textured";
+    // Im Texturiert-Modus das (gecachte) PBR-Material des Bauteils (oder null →
+    // matte Default-Farbe). Da die Seitenwand-UVs in Welt-Metern liegen und das
+    // Material `repeat = 1/sizeM` trägt, gilt EIN Material für alle Flächen.
+    const textureMat = textured
+      ? opts.matRuntime.get(getComponent(project, layer.componentId).material)
+      : null;
+    // Material je Modus: Hidden-Line die geteilten flachen weißen Faces, „Weiss"
+    // das matte Clay-Material, „Texturiert" das PBR-Material (sonst Fallback auf
+    // das matte Component-Material — Wände ohne Textur bleiben sichtbar),
+    // shaded/wireframe das (ggf. gedimmte) Component-Material.
     const mat =
       opts.renderMode === "hidden"
         ? opts.hiddenFace
         : opts.renderMode === "white"
           ? opts.whiteFace
-          : layerMaterial(project, layer.componentId, greyed, opts);
+          : textured && textureMat
+            ? textureMat
+            : layerMaterial(project, layer.componentId, greyed, opts);
     const offA = off;
     const offB = off + layer.thickness;
 
@@ -962,9 +2023,12 @@ function addWallMeshes(
     for (const op of openings) {
       if (op.from > cursor)
         addLayerPrism(group, wall, cursor, op.from, zBottom, zTop, offA, offB, cuts, 0, mat, opts);
-      // Sturz über der Öffnung (türnahe Enden bleiben rechtwinklig).
-      if (op.top < wallTopRel)
-        addLayerPrism(group, wall, op.from, op.to, zBottom + op.top, zTop, offA, offB, cuts, 0, mat, opts);
+      // Brüstungsmauer UNTER der Öffnung (Fenster: sillRel > 0; Tür: sillRel 0 → nichts).
+      if (op.sillRel > 1e-4)
+        addLayerPrism(group, wall, op.from, op.to, zBottom, zBottom + op.sillRel, offA, offB, cuts, 0, mat, opts);
+      // Sturz ÜBER der Öffnung (türnahe Enden bleiben rechtwinklig).
+      if (op.headRel < wallTopRel)
+        addLayerPrism(group, wall, op.from, op.to, zBottom + op.headRel, zTop, offA, offB, cuts, 0, mat, opts);
       cursor = Math.max(cursor, op.to);
     }
     if (cursor < length)
@@ -972,6 +2036,136 @@ function addWallMeshes(
 
     off += layer.thickness;
   }
+}
+
+/**
+ * 3D-Geometrie einer Öffnung: Rahmen (dünne Box um die lichte Öffnung) + Glas
+ * (Fenster, halbtransparente Scheibe) bzw. Türblatt (Fenster: entfällt; Tür:
+ * flaches Panel in geöffneter Stellung, Winkel aus swingAngle). Alle Meshes
+ * tragen `userData.openingId` für die Raycast-Auswahl. Plan (x,y) → Three (x,z=y),
+ * Höhe entlang Three-Y. Materialien werden je Aufruf erzeugt (leichtgewichtig).
+ */
+function addOpeningMeshes(
+  group: THREE.Group,
+  project: Project,
+  wall: Wall,
+  o: Opening,
+  greyed: boolean,
+  opts: BuildOpts,
+): void {
+  const iv = openingInterval(wall, o);
+  if (!iv) return;
+  const { u, n } = wallAxisFrame(wall);
+  const total = wallTypeThickness(getWallType(project, wall));
+  const refOff = wallReferenceOffset(wall, total);
+  const { zBottom, zTop } = openingVerticalExtent(project, wall, o);
+  const h = zTop - zBottom;
+  if (h <= 1e-4) return;
+  const p0 = along(wall.start, wall.end, iv.from);
+  const width = iv.to - iv.from;
+  const frameDepth = Math.min(o.frameThickness ?? total, total);
+  const opacity = greyed ? 0.3 : 1;
+
+  // Ein Balken (Box) entlang (u, n, y): Länge len entlang `dir` in der XZ-Ebene,
+  // Querschnitt breadth×heightBox. `centerAlong` = Abstand vom p0 entlang `along`,
+  // `offN` = Versatz quer (n), `y0..y1` vertikale Lage. Rotiert um Y auf die
+  // Achsrichtung.
+  const angle = Math.atan2(u.y, u.x); // Achswinkel in der XZ-Ebene (Plan)
+  const addBar = (
+    mat: THREE.Material,
+    aFrom: number,
+    aTo: number,
+    offN: number,
+    breadthN: number,
+    y0: number,
+    y1: number,
+  ) => {
+    const lenA = aTo - aFrom;
+    const hy = y1 - y0;
+    if (lenA <= 1e-5 || hy <= 1e-5 || breadthN <= 1e-5) return;
+    const geo = new THREE.BoxGeometry(lenA, hy, breadthN);
+    const mesh = new THREE.Mesh(geo, mat);
+    // Mittelpunkt: entlang der Achse (aFrom+aTo)/2, quer offN, Höhe (y0+y1)/2.
+    const midA = (aFrom + aTo) / 2;
+    const cx = p0.x + u.x * midA + n.x * offN;
+    const cz = p0.y + u.y * midA + n.y * offN;
+    mesh.position.set(cx, (y0 + y1) / 2, cz);
+    // Box-Länge liegt auf lokaler X → um Y auf die Plan-Achsrichtung drehen.
+    // Plan-Y bildet auf Three-Z ab, daher −angle als Drehung um die Three-Y-Achse.
+    mesh.rotation.y = -angle;
+    mesh.userData.openingId = o.id;
+    if (opts.renderMode === "hidden") {
+      const edges = new THREE.EdgesGeometry(geo, 1);
+      mesh.add(new THREE.LineSegments(edges, opts.edgeMat));
+    }
+    group.add(mesh);
+  };
+
+  // Rahmen-Material (dunkelgrau) + Glas-Material (bläulich, transparent).
+  const frameMat = new THREE.MeshLambertMaterial({
+    color: greyed ? 0x9aa0a6 : 0x55606c,
+    transparent: greyed,
+    opacity,
+  });
+  const jambW = 0.05; // 5 cm Rahmenprofil
+  // Vertikale Rahmenprofile an beiden Pfosten + oben/unten (nur so breit wie die
+  // lichte Öffnung; sie sitzen INNERHALB der Lücke).
+  addBar(frameMat, 0, jambW, refOff, frameDepth, zBottom, zTop);
+  addBar(frameMat, width - jambW, width, refOff, frameDepth, zBottom, zTop);
+  addBar(frameMat, jambW, width - jambW, refOff, frameDepth, zTop - jambW, zTop);
+  addBar(frameMat, jambW, width - jambW, refOff, frameDepth, zBottom, zBottom + jambW);
+
+  if (o.kind === "window") {
+    // Glasscheibe in der Wandmitte, zwischen den Rahmenprofilen.
+    const glassMat = new THREE.MeshLambertMaterial({
+      color: 0x9fc4e8,
+      transparent: true,
+      opacity: greyed ? 0.18 : 0.35,
+      depthWrite: false,
+    });
+    addBar(
+      glassMat,
+      jambW,
+      width - jambW,
+      refOff,
+      Math.min(0.02, frameDepth * 0.4),
+      zBottom + jambW,
+      zTop - jambW,
+    );
+    return;
+  }
+
+  // Tür: flaches Blatt in geöffneter Stellung. Anschlag am Scharnier-Pfosten,
+  // gedreht um swingAngle in die Aufschlagrichtung. Das Blatt liegt VERTIKAL vom
+  // Boden (zBottom) bis zTop; sein Grundriss-Verlauf folgt der doorSymbol-Achse.
+  const sym = doorSymbol(wall, o);
+  if (!sym) return;
+  const leafMat = new THREE.MeshLambertMaterial({
+    color: greyed ? 0xb0b4b8 : 0x8a6f57,
+    transparent: greyed,
+    opacity,
+  });
+  // Blatt als dünne Box zwischen hinge und openEnd (im Grundriss), vertikal
+  // extrudiert. Länge = Türbreite, Dicke ~4 cm.
+  const dx = sym.openEnd.x - sym.hinge.x;
+  const dz = sym.openEnd.y - sym.hinge.y;
+  const leafLen = Math.hypot(dx, dz);
+  if (leafLen <= 1e-4) return;
+  const leafAngle = Math.atan2(dz, dx);
+  const leafGeo = new THREE.BoxGeometry(leafLen, zTop - zBottom, 0.04);
+  const leaf = new THREE.Mesh(leafGeo, leafMat);
+  leaf.position.set(
+    sym.hinge.x + dx / 2,
+    (zBottom + zTop) / 2,
+    sym.hinge.y + dz / 2,
+  );
+  leaf.rotation.y = -leafAngle;
+  leaf.userData.openingId = o.id;
+  if (opts.renderMode === "hidden") {
+    const edges = new THREE.EdgesGeometry(leafGeo, 1);
+    leaf.add(new THREE.LineSegments(edges, opts.edgeMat));
+  }
+  group.add(leaf);
 }
 
 /**
@@ -1052,6 +2246,20 @@ function addLayerPrism(
 
   const depth = topY - baseY;
   const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+
+  // Texturiert-Modus mit aoMap: die Ambient-Occlusion-Karte liest aus `uv2`.
+  // ExtrudeGeometry erzeugt nur `uv`; wir kopieren sie nach `uv2` (gleiche UV-
+  // Koordinaten in Welt-Metern → identische Kachelung wie die übrigen Karten).
+  const std = mat as THREE.MeshStandardMaterial;
+  if (opts.renderMode === "textured" && std.isMeshStandardMaterial && std.aoMap) {
+    const uv = geo.getAttribute("uv");
+    if (uv && !geo.getAttribute("uv2")) {
+      geo.setAttribute(
+        "uv2",
+        new THREE.BufferAttribute((uv as THREE.BufferAttribute).array, 2),
+      );
+    }
+  }
   const mesh = new THREE.Mesh(geo, mat);
   // Wand-ID für die Raycast-Auswahl mitführen (Links-Klick im Viewport).
   mesh.userData.wallId = wall.id;
@@ -1069,4 +2277,133 @@ function addLayerPrism(
     mesh.add(new THREE.LineSegments(edges, opts.edgeMat));
   }
   group.add(mesh);
+}
+
+/**
+ * Eine Decke als extrudierter Slab: das geschlossene Umriss-Polygon wird um die
+ * Deckendicke extrudiert und an die OK (zTop) der Decke gesetzt (wächst nach
+ * unten bis zBottom) — dieselbe Plan→Three-Abbildung und Extrusions-Konvention
+ * wie beim Wand-Schicht-Prisma. Das Material folgt dem Render-Modus (analog Wand)
+ * und wird aus dem BAUTEIL der ersten Schicht des Aufbau-Typs aufgelöst.
+ * `userData.ceilingId` trägt die Auswahl-ID für den Raycast.
+ */
+function addCeilingMesh(
+  group: THREE.Group,
+  project: Project,
+  ceiling: Ceiling,
+  greyed: boolean,
+  opts: BuildOpts,
+): void {
+  const outline = ceiling.outline;
+  if (outline.length < 3) return;
+  const wt = getCeilingType(project, ceiling);
+  if (wt.layers.length === 0) return;
+  const componentId = wt.layers[0].componentId;
+  const { zBottom, zTop } = ceilingVerticalExtent(project, ceiling);
+  const depth = zTop - zBottom;
+  if (depth <= 1e-6) return;
+
+  // Material je Render-Modus (wie addWallMeshes).
+  const textured = opts.renderMode === "textured";
+  const textureMat = textured
+    ? opts.matRuntime.get(getComponent(project, componentId).material)
+    : null;
+  const mat =
+    opts.renderMode === "hidden"
+      ? opts.hiddenFace
+      : opts.renderMode === "white"
+        ? opts.whiteFace
+        : textured && textureMat
+          ? textureMat
+          : layerMaterial(project, componentId, greyed, opts);
+
+  const shape = new THREE.Shape();
+  outline.forEach((v, i) => (i === 0 ? shape.moveTo(v.x, v.y) : shape.lineTo(v.x, v.y)));
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+
+  // aoMap-UV2-Kopie wie beim Wand-Prisma (Texturiert-Modus).
+  const std = mat as THREE.MeshStandardMaterial;
+  if (opts.renderMode === "textured" && std.isMeshStandardMaterial && std.aoMap) {
+    const uv = geo.getAttribute("uv");
+    if (uv && !geo.getAttribute("uv2")) {
+      geo.setAttribute(
+        "uv2",
+        new THREE.BufferAttribute((uv as THREE.BufferAttribute).array, 2),
+      );
+    }
+  }
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData.ceilingId = ceiling.id;
+  // Plan (x,y) → Three (x, z=y); Extrusion zeigt nach −Y, daher an OK setzen.
+  mesh.rotation.x = Math.PI / 2;
+  mesh.position.y = zTop;
+  if (opts.renderMode === "hidden") {
+    const edges = new THREE.EdgesGeometry(geo, 1);
+    mesh.add(new THREE.LineSegments(edges, opts.edgeMat));
+  }
+  group.add(mesh);
+}
+
+/**
+ * Eine Treppe als gestufte Boxen: jeder Tritt wird als Vollblock von der
+ * Treppen-UK (zBottom) bis zur Oberkante SEINER Setzstufe (zBottom + topRise)
+ * extrudiert — so entsteht das treppenartige Stufenprofil (Tritt + Setzstufe in
+ * einem). Das Zwischenpodest (L/Wendel) wird bis zu seiner Höhe extrudiert. Das
+ * Material folgt dem Render-Modus; ein neutraler Beton-Grauton dient als Default.
+ * `userData.stairId` trägt die Auswahl-ID für den Raycast.
+ */
+function addStairMeshes(
+  group: THREE.Group,
+  project: Project,
+  stair: Stair,
+  greyed: boolean,
+  opts: BuildOpts,
+): void {
+  const { zBottom, zTop } = stairVerticalExtent(project, stair);
+  const totalRise = zTop - zBottom;
+  if (totalRise <= 1e-6) return;
+  const geo = stairGeometry(stair, totalRise);
+
+  // Material je Render-Modus. Ohne Component-Referenz nutzen wir einen neutralen
+  // Beton-Grauton (gedimmt heller/transparent).
+  const baseMat =
+    opts.renderMode === "hidden"
+      ? opts.hiddenFace
+      : opts.renderMode === "white"
+        ? opts.whiteFace
+        : new THREE.MeshLambertMaterial({
+            color: greyed ? 0xb8bcc2 : 0x9aa0a6,
+            transparent: greyed,
+            opacity: greyed ? 0.35 : 1,
+          });
+
+  const extrudeBlock = (pts: Vec2[], top: number, idKey: string) => {
+    if (pts.length < 3 || top <= 1e-6) return;
+    const shape = new THREE.Shape();
+    pts.forEach((v, i) => (i === 0 ? shape.moveTo(v.x, v.y) : shape.lineTo(v.x, v.y)));
+    shape.closePath();
+    const g = new THREE.ExtrudeGeometry(shape, { depth: top, bevelEnabled: false });
+    const mesh = new THREE.Mesh(g, baseMat);
+    mesh.userData.stairId = stair.id;
+    void idKey;
+    // Plan (x,y) → Three (x, z=y); Extrusion nach −Y, daher an die Block-OK setzen.
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.y = zBottom + top;
+    if (opts.renderMode === "hidden") {
+      const edges = new THREE.EdgesGeometry(g, 1);
+      mesh.add(new THREE.LineSegments(edges, opts.edgeMat));
+    }
+    group.add(mesh);
+  };
+
+  for (const tr of geo.treads) extrudeBlock(tr.pts, tr.topRise, `t${tr.index}`);
+  // Podest (L/Wendel-Auge): bis zur mittleren Höhe extrudieren, damit es sichtbar
+  // als Absatz erscheint (halber Gesamt-Rise als sinnvoller Default).
+  if (geo.landing && geo.landing.length >= 3) {
+    // Höhe des Podests = Höhe des höchsten Tritts unter/an der Podestposition;
+    // wir nehmen die halbe Gesamt-Steighöhe als robusten Näherungswert.
+    extrudeBlock(geo.landing, totalRise * 0.5, "landing");
+  }
 }

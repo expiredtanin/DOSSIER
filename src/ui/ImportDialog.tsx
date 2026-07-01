@@ -11,14 +11,14 @@
 // eigentlichen Store-Mutationen (Ebene anlegen, Drawings anhängen, Kontext)
 // führt App in der richtigen Reihenfolge aus.
 //
-// Bezeichner englisch, UI-Text/Kommentare deutsch (CLAUDE.md). Alle sichtbaren
+// Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import type { DrawingLevelKind, ImportedMesh, Project } from "../model/types";
-import type { DxfImportResult } from "../io/dxfParser";
+import type { DxfImportResult, ImportDiagnostics } from "../io/dxfParser";
 import {
   contoursToDrawings,
   countContours,
@@ -50,6 +50,21 @@ function kindBadgeKey(kind: DrawingLevelKind): TranslationKey {
     case "drawing":
       return "import.badge.drawing";
   }
+}
+
+/**
+ * Formatiert das Entity-Typ-Histogramm der Import-Diagnose zu einer kompakten
+ * Daten-Zeile, z. B. „120 Entities — INSERT×80, ARC×30, LINE×10". Die Entity-
+ * Typ-Codes sind technische DWG-Bezeichner (keine übersetzbare UI-Prosa); nur
+ * die Gesamtzahl ist eine reine Zahl. Bei 0 Entities zeigt sie „0 Entities" —
+ * das deutet auf ein Encoding-/Versions-Problem (nicht auf eine Abdeckungslücke).
+ */
+function formatDiagnostics(d: ImportDiagnostics): string {
+  const parts = Object.entries(d.entityCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, n]) => `${type}×${n}`);
+  const head = `${d.total} Entities`;
+  return parts.length > 0 ? `${head} — ${parts.join(", ")}` : head;
 }
 
 export interface ImportDialogProps {
@@ -179,7 +194,19 @@ export function ImportDialog({
                   </li>
                 </ul>
                 {!hasDrawings && !hasMeshes && (
-                  <div className="imp-warn">{t("import.summary.empty")}</div>
+                  <div className="imp-warn">
+                    {t("import.summary.empty")}
+                    {/* Diagnose-Histogramm (vom DWG-Parser): macht sichtbar,
+                        WORAN es liegt — 0 Entities (Encoding/Version) vs.
+                        Abdeckungslücke (z. B. „500 ARC, 200 INSERT"). Entity-Typ-
+                        Codes + Zahlen sind technische DWG-Bezeichner (Daten,
+                        keine übersetzbare Prosa). */}
+                    {parsed?.diagnostics && (
+                      <div className="imp-diag">
+                        {formatDiagnostics(parsed.diagnostics)}
+                      </div>
+                    )}
+                  </div>
                 )}
               </section>
 

@@ -1,9 +1,10 @@
 // Konkrete Werkzeuge (Phase 1: select / wall / line) + Registry.
 // docs/design/drawing-tools.md §3, §4, §10.
 
-import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
+import type { Ceiling, Drawing2D, Project, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { wallCorners } from "../model/geometry";
+import { normalizeOutline, ceilingArea } from "../geometry/ceiling";
 import type { DraftShape, Tool, ToolContext, ToolDraft, ToolId } from "./types";
 import { uniqueId } from "./types";
 
@@ -135,6 +136,161 @@ const wallTool: Tool = {
     }
     return [{ phase: "idle" }, { draft: null, done: true }];
   },
+};
+
+// ── Ceiling ────────────────────────────────────────────────────────────────
+// Zeichnet einen GESCHLOSSENEN Umriss (wie eine geschlossene Polylinie) und
+// committet daraus eine `Ceiling`. Der reguläre Zeichenpfad läuft über den
+// gekoppelten `ceiling`-Befehl (TOOL_COMMAND); dieses Legacy-Tool ist eine
+// vollständige, funktionsfähige Alternative (kein Stub).
+
+interface CeilDrawing {
+  phase: "drawing";
+  points: Vec2[];
+  cursor: Vec2 | null;
+}
+type CeilState = { phase: "idle" } | CeilDrawing;
+
+function ceilDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
+  const all = cursor ? [...points, cursor] : points;
+  const preview: DraftShape[] = [{ kind: "poly", pts: all, closed: all.length >= 3 }];
+  const draft: ToolDraft = { preview, vertices: points };
+  if (cursor && points.length > 0) {
+    const a = points[points.length - 1];
+    if (segLen(a, cursor) >= EPS) {
+      draft.hud = {
+        at: cursor,
+        text: `${segLen(a, cursor).toFixed(2)} m · ${Math.abs(
+          (segAngleDeg(a, cursor) + 360) % 360,
+        ).toFixed(0)}°`,
+      };
+    }
+  }
+  return draft;
+}
+
+function appendCeiling(project: Project, pts: Vec2[], ctx: ToolContext): Project {
+  const outline = normalizeOutline(pts);
+  if (!outline || ceilingArea(outline) < 1e-4) return project;
+  const hasCat = project.layers.some((c) => c.code === "30");
+  const c: Ceiling = {
+    id: uniqueId("C"),
+    type: "ceiling",
+    floorId: ctx.level.id,
+    categoryCode: hasCat ? "30" : ctx.defaultCategoryCode,
+    outline,
+    wallTypeId: ctx.activeWallTypeId,
+  };
+  return { ...project, ceilings: project.ceilings ? [...project.ceilings, c] : [c] };
+}
+
+const ceilingTool: Tool = {
+  id: "ceiling",
+  labelKey: "tool.ceiling",
+  floorOnly: true,
+  hintKey: (s) =>
+    (s as CeilState).phase === "drawing"
+      ? "tool.ceiling.nextPoint"
+      : "tool.ceiling.firstPoint",
+  init: () => ({ phase: "idle" }),
+  onClick: (state, p, ctx) => {
+    const s = state as CeilState;
+    if (s.phase !== "drawing") {
+      return [{ phase: "drawing", points: [p.point], cursor: p.point }, { draft: ceilDraft([p.point], p.point) }];
+    }
+    // Klick auf den Startpunkt schließt den Umriss (ab 3 Punkten) und committet.
+    if (s.points.length >= 3 && segLen(p.point, s.points[0]) < EPS) {
+      const pts = s.points;
+      return [{ phase: "idle" }, { draft: null, done: true, commit: (proj) => appendCeiling(proj, pts, ctx) }];
+    }
+    const points = [...s.points, p.point];
+    return [{ phase: "drawing", points, cursor: p.point }, { draft: ceilDraft(points, p.point) }];
+  },
+  onMove: (state, p) => {
+    const s = state as CeilState;
+    if (s.phase !== "drawing") return [s, { draft: { preview: [], vertices: [] } }];
+    return [{ ...s, cursor: p.point }, { draft: ceilDraft(s.points, p.point) }];
+  },
+  onCommitGesture: (state, ctx) => {
+    const s = state as CeilState;
+    if (s.phase !== "drawing" || s.points.length < 3) {
+      return [{ phase: "idle" }, { draft: null, done: true }];
+    }
+    const pts = s.points;
+    return [{ phase: "idle" }, { draft: null, done: true, commit: (proj) => appendCeiling(proj, pts, ctx) }];
+  },
+  onCancel: () => [{ phase: "idle" }, { draft: null, done: true }],
+  onUndoPoint: (state) => {
+    const s = state as CeilState;
+    if (s.phase === "drawing" && s.points.length > 1) {
+      const points = s.points.slice(0, -1);
+      return [{ phase: "drawing", points, cursor: s.cursor }, { draft: ceilDraft(points, s.cursor) }];
+    }
+    return [{ phase: "idle" }, { draft: null, done: true }];
+  },
+};
+
+// ── Window / Door (Öffnungen) ─────────────────────────────────────────────────
+// Beide sind an den gekoppelten Befehl `fenster`/`tuer` (TOOL_COMMAND) gebunden:
+// der interaktive Ablauf (Host-Wand picken → Position → committen) läuft komplett
+// in der CommandEngine. Diese Tool-Objekte sind reine Platzhalter (wie `select`);
+// der Controller ruft sie nicht auf, sobald der gekoppelte Befehl läuft.
+const windowTool: Tool = {
+  id: "window",
+  labelKey: "tool.window",
+  floorOnly: true,
+  hintKey: () => "tool.window.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+const doorTool: Tool = {
+  id: "door",
+  labelKey: "tool.door",
+  floorOnly: true,
+  hintKey: () => "tool.door.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// ── Stair (Treppe) ───────────────────────────────────────────────────────────
+// An den gekoppelten Befehl `stair` (TOOL_COMMAND) gebunden: der interaktive
+// Ablauf (Startpunkt → Laufrichtung/Ende → committen) läuft komplett in der
+// CommandEngine. Dieses Tool-Objekt ist ein reiner Platzhalter (wie window/door);
+// der Controller ruft es nicht auf, sobald der gekoppelte Befehl läuft.
+const stairTool: Tool = {
+  id: "stair",
+  labelKey: "tool.stair",
+  floorOnly: true,
+  hintKey: () => "tool.stair.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// ── Room (Raum) ──────────────────────────────────────────────────────────────
+// An den gekoppelten Befehl `room` (TOOL_COMMAND) gebunden: der interaktive
+// Ablauf (Klick-innen zur Erkennung ODER manueller Umriss) läuft komplett in der
+// CommandEngine. Dieses Tool-Objekt ist ein reiner Platzhalter (wie stair/window);
+// der Controller ruft es nicht auf, sobald der gekoppelte Befehl läuft.
+const roomTool: Tool = {
+  id: "room",
+  labelKey: "tool.room",
+  floorOnly: true,
+  hintKey: () => "tool.room.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
 };
 
 // ── Line ─────────────────────────────────────────────────────────────────────
@@ -375,6 +531,11 @@ const rectTool: Tool = {
 const TOOLS: Record<ToolId, Tool> = {
   select: selectTool,
   wall: wallTool,
+  ceiling: ceilingTool,
+  window: windowTool,
+  door: doorTool,
+  stair: stairTool,
+  room: roomTool,
   line: lineTool,
   polyline: polylineTool,
   rect: rectTool,
@@ -386,4 +547,15 @@ export function getTool(id: ToolId): Tool {
 }
 
 /** Reihenfolge der Werkzeuge in der Werkzeugleiste. */
-export const TOOL_ORDER: ToolId[] = ["select", "wall", "line", "polyline", "rect"];
+export const TOOL_ORDER: ToolId[] = [
+  "select",
+  "wall",
+  "ceiling",
+  "window",
+  "door",
+  "stair",
+  "room",
+  "line",
+  "polyline",
+  "rect",
+];

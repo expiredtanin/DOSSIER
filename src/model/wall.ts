@@ -3,10 +3,10 @@
 // und die vertikale Ausdehnung (UK..OK). Alle Defaults entsprechen exakt dem
 // bisherigen Verhalten, sodass bestehende Wände unverändert rendern.
 //
-// Bezeichner englisch, Kommentare deutsch (CLAUDE.md).
+// Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Project, VerticalAnchor, Wall } from "./types";
-import { getFloor } from "./types";
+import type { Ceiling, Project, Stair, VerticalAnchor, Wall } from "./types";
+import { ceilingThickness, getFloor } from "./types";
 
 /**
  * Versatz der Schichtstapelung entlang der linken Normalen `+n` (leftNormal),
@@ -68,6 +68,60 @@ export function wallVerticalExtent(
   const zBottom = resolveAnchor(project, wall.bottom) ?? floorBase;
   const zTop = resolveAnchor(project, wall.top) ?? zBottom + wall.height;
   return { zBottom, zTop };
+}
+
+/**
+ * Vertikale Ausdehnung einer Decke (absolute Z-Werte in Metern).
+ *   • zTop:    aus `ceiling.top`, sonst Oberkante des Geschosses
+ *     (baseElevation + floorHeight) — also bündig mit dem Wandkopf.
+ *   • zBottom: zTop − Deckendicke (die Decke wächst nach UNTEN).
+ * Fehlt das Geschoss, dient 0 als sicherer Rückfall für die Oberkante.
+ */
+export function ceilingVerticalExtent(
+  project: Project,
+  ceiling: Ceiling,
+): { zBottom: number; zTop: number } {
+  let floorTop = 0;
+  try {
+    const floor = getFloor(project, ceiling.floorId);
+    floorTop = (floor.baseElevation ?? 0) + (floor.floorHeight ?? 0);
+  } catch {
+    floorTop = 0;
+  }
+  const zTop = resolveAnchor(project, ceiling.top) ?? floorTop;
+  const zBottom = zTop - ceilingThickness(project, ceiling);
+  return { zBottom, zTop };
+}
+
+/**
+ * Vertikale Ausdehnung einer Treppe (absolute Z-Werte in Metern).
+ *   • zBottom: OKFF (baseElevation) des zugehörigen Geschosses.
+ *   • zTop:    zBottom + Gesamt-Steighöhe. Fehlt `stair.totalRise`, gilt die
+ *     Geschosshöhe (floorHeight) des Geschosses — so steigt die Treppe genau ins
+ *     nächste Geschoss (OKFF → OKFF).
+ * Fehlt das Geschoss, dient 0 als sicherer Rückfall für die Unterkante.
+ */
+export function stairVerticalExtent(
+  project: Project,
+  stair: Stair,
+): { zBottom: number; zTop: number } {
+  let base = 0;
+  let floorHeight = 0;
+  try {
+    const floor = getFloor(project, stair.floorId);
+    base = floor.baseElevation ?? 0;
+    floorHeight = floor.floorHeight ?? 0;
+  } catch {
+    base = 0;
+    floorHeight = 0;
+  }
+  const rise =
+    stair.totalRise != null && stair.totalRise > 0
+      ? stair.totalRise
+      : floorHeight > 0
+        ? floorHeight
+        : 2.6;
+  return { zBottom: base, zTop: base + rise };
 }
 
 /**

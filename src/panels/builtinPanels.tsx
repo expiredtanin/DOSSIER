@@ -21,6 +21,7 @@ import { ToolsPanel } from "./ToolsPanel";
 import { AttributesPanel } from "./AttributesPanel";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";
 import { SitePanel } from "./SitePanel";
+import { RoomBalancePanel } from "./RoomBalancePanel";
 
 /** IDs der eingebauten Dock-Panels (auch für defaultLayout/Filter nutzbar). */
 export const BUILTIN_PANEL_IDS = {
@@ -30,6 +31,7 @@ export const BUILTIN_PANEL_IDS = {
   attributes: "attributes",
   objectInfo: "object-info",
   site: "site",
+  roomBalance: "room-balance",
 } as const;
 
 // Werkzeug-Palette (Symbol + Name je Werkzeug, ArchiCAD/Vectorworks-Stil).
@@ -78,4 +80,12 @@ registerPanel({
   title: "nav.site",
   hasDisplayMode: false,
   render: () => <SitePanel />,
+});
+
+// Flächenbilanz (SIA 416) — Raumliste + Kategorie-Summen + CSV-Export.
+registerPanel({
+  id: BUILTIN_PANEL_IDS.roomBalance,
+  title: "nav.roomBalance",
+  hasDisplayMode: false,
+  render: () => <RoomBalancePanel />,
 });

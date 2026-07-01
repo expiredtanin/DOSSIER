@@ -16,9 +16,10 @@
 // Rendering noch Persistenz. Bezeichner englisch, UI-Text deutsch
 // (CONVENTIONS.md).
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   Component,
+  ComponentMaterial,
   HatchPattern,
   HatchStyle,
   LineStyle,
@@ -27,6 +28,15 @@ import type {
 import { PEN_WEIGHTS } from "../model/types";
 import { parseLin } from "../io/linParser";
 import { parsePat } from "../io/patParser";
+import { MATERIAL_LIBRARY } from "../materials/library";
+import { materialFromAsset, DEFAULT_TILE_SIZE_M } from "../materials/runtime";
+import {
+  searchMaterials,
+  fetchMaterialMaps,
+  AMBIENT_CATEGORIES,
+  type AmbientMaterial,
+  type AmbientResolution,
+} from "../materials/ambientcg";
 import { EyeIcon } from "./EyeIcon";
 import { t } from "../i18n";
 
@@ -269,7 +279,7 @@ function ResCell({
 
 // ── Bauteile (Components) ──────────────────────────────────────────────────
 
-// Spalten: Name | Farbe | Schraffur | Prio | Textur | (löschen).
+// Spalten: Name | Farbe | Schraffur | Prio | Textur | Material | (löschen).
 const COMPONENT_COLUMNS: ResColumn[] = [
   { titleKey: "resources.col.name" },
   { titleKey: "resources.col.color" },
@@ -280,10 +290,465 @@ const COMPONENT_COLUMNS: ResColumn[] = [
     hintKey: "resources.col.prio.hint",
   },
   { titleKey: "resources.col.texture" },
+  { titleKey: "resources.col.material" },
   { titleKey: "" },
 ];
 const COMPONENT_TEMPLATE =
-  "minmax(120px, 1fr) auto minmax(120px, 0.8fr) 64px minmax(100px, 0.8fr) 36px";
+  "minmax(120px, 1fr) auto minmax(120px, 0.8fr) 64px minmax(90px, 0.7fr) minmax(130px, 0.9fr) 36px";
+
+/**
+ * Material-Zelle der Bauteil-Tabelle: ein Button, der den aktuellen Material-
+ * Namen zeigt (oder „ohne") und ein Auswahl-Modal öffnet. Die Zuweisung läuft
+ * über `onAssign`/`onClear` (immutabel via onPatchComponent).
+ */
+function MaterialCell({
+  material,
+  onAssign,
+  onClear,
+}: {
+  material: ComponentMaterial | undefined;
+  onAssign: (m: ComponentMaterial) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = materialLabel(material);
+  return (
+    <>
+      <button
+        className="res-select res-material-btn"
+        onClick={() => setOpen(true)}
+        title={t("material.assign")}
+      >
+        {material?.color && (
+          <span
+            className="res-material-swatch"
+            style={{ backgroundImage: `url(${material.color})` }}
+          />
+        )}
+        <span className="res-material-name">{label}</span>
+      </button>
+      {open && (
+        <MaterialPicker
+          material={material}
+          onAssign={(m) => {
+            onAssign(m);
+          }}
+          onClear={() => {
+            onClear();
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/** Anzeigename eines zugewiesenen Materials (Bibliothek → Name, sonst Upload). */
+function materialLabel(m: ComponentMaterial | undefined): string {
+  if (!m) return t("material.none");
+  if (m.libraryId) {
+    const asset = MATERIAL_LIBRARY.find((a) => a.id === m.libraryId);
+    if (asset) return asset.name;
+  }
+  return t("material.uploaded");
+}
+
+/**
+ * Material-Auswahl-Modal: oben die eingebaute Bibliothek als Vorschau-Grid
+ * (Farb-Karte als Thumbnail) — Klick weist sofort zu; darunter ein Upload-
+ * Bereich (Farbe/Normal/Rauheit/Höhe/AO als Bild-Dateien → ObjectURL) plus die
+ * physische Kachelgröße. „Zuweisen" übernimmt den Upload; „Material entfernen"
+ * setzt das Bauteil auf kein Material zurück.
+ */
+function MaterialPicker({
+  material,
+  onAssign,
+  onClear,
+  onClose,
+}: {
+  material: ComponentMaterial | undefined;
+  onAssign: (m: ComponentMaterial) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  // Upload-Zustand: gewählte Karten als ObjectURLs + Kachelgröße. Startwert aus
+  // einem bereits zugewiesenen Upload-Material (damit Größe/Karten sichtbar sind).
+  const [upload, setUpload] = useState<ComponentMaterial>(() =>
+    material && !material.libraryId ? { ...material } : { sizeM: DEFAULT_TILE_SIZE_M },
+  );
+  const [sizeM, setSizeM] = useState<number>(material?.sizeM ?? DEFAULT_TILE_SIZE_M);
+  // Modus des Pickers: Schnellauswahl (lokaler Starter, offline), Live-Browse
+  // der kompletten ambientCG-Bibliothek, oder Upload eigener Karten.
+  const [mode, setMode] = useState<"starter" | "browse" | "upload">("starter");
+
+  const pickFile = (kind: keyof ComponentMaterial) => (file: File | null) => {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    setUpload((u) => ({ ...u, [kind]: url }));
+  };
+
+  const uploadFields: { kind: keyof ComponentMaterial; labelKey: string }[] = [
+    { kind: "color", labelKey: "material.upload.color" },
+    { kind: "normal", labelKey: "material.upload.normal" },
+    { kind: "roughness", labelKey: "material.upload.roughness" },
+    { kind: "displacement", labelKey: "material.upload.displacement" },
+    { kind: "ao", labelKey: "material.upload.ao" },
+  ];
+
+  const applyUpload = () => {
+    if (!upload.color && !upload.normal && !upload.roughness && !upload.ao && !upload.displacement) {
+      return;
+    }
+    onAssign({ ...upload, libraryId: undefined, sizeM });
+    onClose();
+  };
+
+  return (
+    <div className="res-overlay mat-overlay" onClick={onClose}>
+      <div
+        className="mat-dialog"
+        role="dialog"
+        aria-label={t("material.dialog.title")}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="mat-head">
+          <span className="mat-title">{t("material.dialog.title")}</span>
+          <button className="res-close" onClick={onClose} aria-label={t("material.close")}>
+            ×
+          </button>
+        </header>
+        <div className="mat-hint">{t("material.dialog.hint")}</div>
+
+        {/* Modus-Umschalter: Schnellauswahl / Bibliothek durchsuchen / Upload. */}
+        <nav className="mat-modes" role="tablist">
+          <button
+            role="tab"
+            aria-selected={mode === "starter"}
+            className={`mat-mode-btn${mode === "starter" ? " active" : ""}`}
+            onClick={() => setMode("starter")}
+          >
+            {t("material.browse.starter")}
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === "browse"}
+            className={`mat-mode-btn${mode === "browse" ? " active" : ""}`}
+            onClick={() => setMode("browse")}
+          >
+            {t("material.browse")}
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === "upload"}
+            className={`mat-mode-btn${mode === "upload" ? " active" : ""}`}
+            onClick={() => setMode("upload")}
+          >
+            {t("material.upload")}
+          </button>
+        </nav>
+
+        {/* Schnellauswahl: lokaler 12er-Starter (offline verfügbar). */}
+        {mode === "starter" && (
+          <div className="mat-grid">
+            {MATERIAL_LIBRARY.map((asset) => (
+              <button
+                key={asset.id}
+                className={`mat-tile${material?.libraryId === asset.id ? " active" : ""}`}
+                title={asset.name}
+                onClick={() => {
+                  onAssign(materialFromAsset(asset, sizeM));
+                  onClose();
+                }}
+              >
+                <span
+                  className="mat-thumb"
+                  style={{ backgroundImage: `url(${asset.maps.color})` }}
+                />
+                <span className="mat-tile-name">{asset.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Live-Browse der kompletten ambientCG-Bibliothek. */}
+        {mode === "browse" && (
+          <AmbientBrowser
+            sizeM={sizeM}
+            activeId={material?.libraryId}
+            onAssign={(m) => {
+              onAssign(m);
+              onClose();
+            }}
+          />
+        )}
+
+        {/* Upload eigener Karten. */}
+        {mode === "upload" && (
+          <>
+            <div className="mat-hint">{t("material.upload.hint")}</div>
+            <div className="mat-upload-grid">
+              {uploadFields.map((f) => (
+                <label key={f.kind} className="mat-upload-row">
+                  <span className="mat-upload-label">{t(f.labelKey)}</span>
+                  <ImagePickButton onFile={pickFile(f.kind)} />
+                  {upload[f.kind] && <span className="mat-upload-ok">✓</span>}
+                </label>
+              ))}
+              <label className="mat-upload-row">
+                <span className="mat-upload-label">{t("material.size")}</span>
+                <input
+                  type="number"
+                  className="res-input mono num"
+                  value={sizeM}
+                  step={0.1}
+                  min={0.05}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (!Number.isNaN(v) && v > 0) setSizeM(v);
+                  }}
+                />
+              </label>
+            </div>
+            <div className="mat-actions">
+              <button className="res-add" onClick={applyUpload}>
+                {t("material.upload.apply")}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Kachelgröße (m) für Schnellauswahl + Browse, plus Material entfernen. */}
+        {mode !== "upload" && (
+          <div className="mat-actions mat-actions-browse">
+            <label className="mat-size-inline">
+              <span className="mat-upload-label">{t("material.size")}</span>
+              <input
+                type="number"
+                className="res-input mono num"
+                value={sizeM}
+                step={0.1}
+                min={0.05}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isNaN(v) && v > 0) setSizeM(v);
+                }}
+              />
+            </label>
+            <button
+              className="res-add mat-danger"
+              onClick={() => {
+                onClear();
+                onClose();
+              }}
+            >
+              {t("material.clear")}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Live-Browse der kompletten ambientCG-Bibliothek: Suchfeld + Kategorie-Filter
+ * + Auflösungswahl über der Trefferliste, Thumbnail-Grid (aus der API, direkt
+ * geladen — CORS `*`) mit Pagination („mehr laden"). Ein Klick lädt die Textur-
+ * Karten des Materials herunter (`fetchMaterialMaps`, über den Proxy), entpackt
+ * sie und weist das entstehende `ComponentMaterial` zu. Lade-/Fehlerzustände
+ * sauber (Spinner, Offline-/CORS-Hinweis).
+ */
+function AmbientBrowser({
+  sizeM,
+  activeId,
+  onAssign,
+}: {
+  sizeM: number;
+  activeId: string | undefined;
+  onAssign: (m: ComponentMaterial) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [committedQuery, setCommittedQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [resolution, setResolution] = useState<AmbientResolution>("1K");
+  const [items, setItems] = useState<AmbientMaterial[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // ID des gerade herunterladenden Materials (Spinner auf der Kachel).
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const LIMIT = 24;
+
+  // Suche (bei committedQuery/category-Wechsel neu laden — Seite 0).
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setLoading(true);
+    setError(null);
+    searchMaterials({
+      query: committedQuery,
+      category,
+      limit: LIMIT,
+      offset: 0,
+      signal: ctrl.signal,
+    })
+      .then((res) => {
+        setItems(res.items);
+        setTotal(res.total);
+        setOffset(0);
+      })
+      .catch((e) => {
+        if (ctrl.signal.aborted) return;
+        setError(t("material.browse.error"));
+        setItems([]);
+        setTotal(0);
+        console.error("[ambientcg] search failed:", e);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [committedQuery, category]);
+
+  const loadMore = () => {
+    const nextOffset = offset + LIMIT;
+    setLoading(true);
+    searchMaterials({ query: committedQuery, category, limit: LIMIT, offset: nextOffset })
+      .then((res) => {
+        setItems((prev) => [...prev, ...res.items]);
+        setTotal(res.total);
+        setOffset(nextOffset);
+      })
+      .catch((e) => {
+        setError(t("material.browse.error"));
+        console.error("[ambientcg] load more failed:", e);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  const pick = async (id: string) => {
+    setDownloadingId(id);
+    setError(null);
+    try {
+      const { material } = await fetchMaterialMaps(id, resolution, sizeM);
+      onAssign(material);
+    } catch (e) {
+      setError(t("material.browse.downloadError"));
+      console.error("[ambientcg] download failed:", e);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const submitSearch = () => setCommittedQuery(query);
+
+  return (
+    <div className="mat-browse">
+      <div className="mat-hint">{t("material.browse.hint")}</div>
+      <div className="mat-browse-bar">
+        <input
+          type="text"
+          className="res-input mat-search"
+          value={query}
+          placeholder={t("material.browse.searchPlaceholder")}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitSearch();
+          }}
+        />
+        <button className="res-add" onClick={submitSearch}>
+          {t("material.browse.search")}
+        </button>
+        <select
+          className="res-select"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        >
+          <option value="">{t("material.browse.category.all")}</option>
+          {AMBIENT_CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <select
+          className="res-select"
+          value={resolution}
+          title={t("material.browse.resolution")}
+          onChange={(e) => setResolution(e.target.value as AmbientResolution)}
+        >
+          <option value="1K">1K</option>
+          <option value="2K">2K</option>
+          <option value="4K">4K</option>
+        </select>
+      </div>
+
+      {error && <div className="mat-browse-error">{error}</div>}
+
+      <div className="mat-grid mat-browse-grid">
+        {items.map((it) => (
+          <button
+            key={it.id}
+            className={`mat-tile${activeId === it.id ? " active" : ""}${
+              downloadingId === it.id ? " loading" : ""
+            }`}
+            title={`${it.name}${it.category ? ` — ${it.category}` : ""}`}
+            disabled={downloadingId !== null}
+            onClick={() => pick(it.id)}
+          >
+            <span
+              className="mat-thumb"
+              style={{ backgroundImage: it.thumbUrl ? `url(${it.thumbUrl})` : undefined }}
+            />
+            {downloadingId === it.id && <span className="mat-tile-spinner" />}
+            <span className="mat-tile-name">{it.name}</span>
+          </button>
+        ))}
+      </div>
+
+      {!loading && items.length === 0 && !error && (
+        <div className="res-empty">{t("material.browse.empty")}</div>
+      )}
+
+      <div className="mat-browse-foot">
+        {loading && <span className="mat-browse-status">{t("material.browse.loading")}</span>}
+        {!loading && items.length > 0 && (
+          <span className="mat-browse-status">
+            {t("material.browse.count", { shown: items.length, total })}
+          </span>
+        )}
+        {!loading && items.length < total && (
+          <button className="res-add" onClick={loadMore}>
+            {t("material.browse.more")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Versteckter Bild-Datei-Picker mit sichtbarem Button. */
+function ImagePickButton({ onFile }: { onFile: (file: File | null) => void }) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <button className="res-add mat-pick" onClick={() => ref.current?.click()}>
+        {t("material.upload.choose")}
+      </button>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          onFile(e.target.files?.[0] ?? null);
+          e.target.value = "";
+        }}
+      />
+    </>
+  );
+}
 
 function ComponentRow({
   component,
@@ -333,6 +798,13 @@ function ComponentRow({
           onChange={(v) => onPatch({ texture3d: v || undefined })}
           placeholder={t("resources.texture.empty")}
           mono
+        />
+      </ResCell>
+      <ResCell>
+        <MaterialCell
+          material={component.material}
+          onAssign={(material) => onPatch({ material })}
+          onClear={() => onPatch({ material: undefined })}
         />
       </ResCell>
       <ResCell>

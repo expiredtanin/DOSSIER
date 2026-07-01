@@ -14,7 +14,7 @@
 //    bzw. den festen `placeholder`.
 //
 // Reine Darstellung + Callbacks; voll gesteuert. Identifier englisch, UI-Text
-// kommt als Props (i18n) herein (CLAUDE.md).
+// kommt als Props (i18n) herein (CONVENTIONS.md).
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";

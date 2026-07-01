@@ -60,6 +60,13 @@ export interface CmdOption {
 export interface CommandSelection {
   wallIds: string[];
   drawingId: string | null;
+  /**
+   * ALLE gewählten 2D-Elemente (Mehrfachauswahl). `drawingId` bleibt das einzeln
+   * selektierte Element (Move/Copy/Mirror operieren darauf); Mengen-Aktionen wie
+   * Join/Split lesen `drawingIds`. Optional/abwärtskompatibel: fehlt es, gilt
+   * `drawingId` (falls gesetzt) als einziges Element.
+   */
+  drawingIds?: string[];
 }
 
 /** Live-Kontext, den ein Befehl bei jedem Schritt erhält (analog ToolContext). */
@@ -71,6 +78,11 @@ export interface CommandContext {
   defaultCategoryCode: string;
   /** Aktiver Linienstil-Code für 2D-Primitive. */
   activeLineStyleId: string;
+  /**
+   * Aktiver Wandtyp (für den `wall`-Befehl). Liefert Schichtaufbau + Dicke neuer
+   * Wände. Aus dem Store gefüllt (analog ToolContext.activeWallTypeId).
+   */
+  activeWallTypeId: string;
   /**
    * Letzter gesetzter Punkt im laufenden Befehl (für `r`/polar-Auflösung); null
    * am ersten Punkt.
@@ -158,6 +170,17 @@ export interface Command {
   /** Esc: Entwurf verwerfen, Befehl beenden. */
   onCancel(state: CommandState): [CommandState, CommandResult];
 
+  /**
+   * Sofort-Befehl (optional): läuft direkt beim Start OHNE Punkt-Picken und liefert
+   * sein Ergebnis (i. d. R. commit + done). Für Aktionen auf der bestehenden
+   * Auswahl (z. B. Join/Split), die keine interaktive Geste brauchen. Ist diese
+   * Methode gesetzt, ruft die Engine sie unmittelbar nach `init()` auf und der
+   * Befehl kehrt (bei done) sofort in den Ruhezustand zurück. So ist „Ctrl+J" und
+   * getipptes „join" derselbe Pfad. Fehlt sie, verhält sich der Befehl wie gehabt
+   * (interaktiv, Punkt-getrieben).
+   */
+  autoRun?(ctx: CommandContext): CommandResult;
+
   // ── Optionaler Tab-Feld-Zyklus (additiv; Befehle ohne diese Methoden
   //    verhalten sich exakt wie bisher) ──────────────────────────────────────
 
@@ -177,6 +200,19 @@ export interface Command {
     locks: Record<string, number>,
     cursor: Vec2 | null,
   ): Vec2 | null;
+
+  /**
+   * LIVE-Zahlenwerte je Feld für die aktuelle Cursor-Position (Maus-Vorschau in
+   * der Befehlszeile). Gelockte Felder behalten ihren Lock; ungelockte Felder
+   * folgen der Maus — dieser Wert zeigt, was das Feld GERADE annimmt. Liefert die
+   * Werte je Feld-ID; fehlt ein Feld (oder kein Cursor), zeigt die UI „—".
+   * Additiv: Befehle ohne diese Methode zeigen ungelockte Felder als „—".
+   */
+  fieldValues?(
+    state: CommandState,
+    locks: Record<string, number>,
+    cursor: Vec2 | null,
+  ): Record<string, number>;
 }
 
 /** Convenience-Re-Export für Befehls-Module. */

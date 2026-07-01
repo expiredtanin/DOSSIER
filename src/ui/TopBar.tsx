@@ -14,6 +14,21 @@ import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem, DropdownOption } from "./Dropdown";
+import {
+  applyMark,
+  applyPreset,
+  commonMarkValue,
+  DEFAULT_PRESETS,
+  docLength,
+  isMarkActive,
+  toggleMark,
+} from "../text/richText";
+import type {
+  Align,
+  BoolMark,
+  RichTextDoc,
+  TextRange,
+} from "../text/richText";
 
 /** Ansichtstyp eines Geschosses (wie in App). */
 export type ViewType = "grundriss" | "perspektive";
@@ -27,9 +42,16 @@ export type DetailLevel = "grob" | "mittel" | "fein";
 
 /**
  * Render-/Anzeigemodus der 3D-Ansicht: schattiert, einheitlich weiss (Clay-Look),
- * Drahtgitter, Verdeckte Kanten (Hidden-Line). Wirkt nur in der Perspektive.
+ * texturiert (echte PBR-Materialien je Bauteil), Drahtgitter, Verdeckte Kanten
+ * (Hidden-Line). Wirkt nur in der Perspektive. Der Slot „section" (Schnitt-
+ * schraffur, Welle B) ist bewusst freigelassen.
  */
-export type RenderMode = "shaded" | "white" | "wireframe" | "hidden";
+export type RenderMode =
+  | "shaded"
+  | "white"
+  | "textured"
+  | "wireframe"
+  | "hidden";
 
 /**
  * Kanonischer Blickwinkel der 3D-Ansicht (Vectorworks/DOSSIER-Stil). „front",
@@ -97,6 +119,10 @@ export interface TopBarProps {
   onFit: () => void;
   onFitSelection: () => void;
   onZoom100: () => void;
+  /** Öffnet den PDF-Export-Dialog (nur im Grundriss sinnvoll). */
+  onExportPdf: () => void;
+  /** Öffnet den DXF-Export-Dialog (nur im Grundriss sinnvoll). */
+  onExportDxf: () => void;
 
   // Darstellungsart — kontextabhängig: Perspektive nutzt `renderMode`,
   // Grundriss nutzt `planColorMode`. Genau einer der beiden ist je View aktiv.
@@ -131,6 +157,30 @@ export interface TopBarProps {
 
   /** Layout-Menü (von App geliefert, damit dessen Logik dort bleibt). */
   layoutMenu: ReactNode;
+
+  // ── Text-Gruppe (Stempel-/Text-Formatierung) ───────────────────────────────
+  /**
+   * Ziel der Text-Formatierung: `null` = nichts Text-artiges selektiert (die
+   * Controls setzen nur Defaults für neuen Text). Sonst das aktuell selektierte
+   * Rich-Text-Dokument (z. B. Raumstempel) samt optionalem Bereich und einem
+   * Setter. Ist `range` `null`, wirken Aktionen auf das GANZE Doc.
+   */
+  textTarget: TextTarget | null;
+  /**
+   * Startet das Text-Werkzeug (neues Textobjekt platzieren). `null`, solange das
+   * Werkzeug noch nicht existiert → der „+ Text"-Knopf ist dann deaktiviert.
+   */
+  onAddText: (() => void) | null;
+}
+
+/**
+ * Beschreibt das aktuell formatierbare Rich-Text-Ziel der Oberleiste. `apply`
+ * schreibt das neue Dokument zurück in den App-State (z. B. via setRoomStampDoc).
+ */
+export interface TextTarget {
+  doc: RichTextDoc;
+  range: TextRange | null;
+  apply: (doc: RichTextDoc) => void;
 }
 
 /**
@@ -153,6 +203,19 @@ export interface ComboMenuHandlers {
 /** Kleiner vertikaler Trenner zwischen Gruppen. */
 function Sep() {
   return <span className="tb-sep" aria-hidden="true" />;
+}
+
+/**
+ * Material-Symbols-Icon für die Oberleiste (gleiche Icon-Font wie ContextMenu/
+ * MenuIcon). Rein dekorativ — der sprechende Text steckt im `title`/aria-label
+ * des umgebenden Buttons.
+ */
+function TbIcon({ name }: { name: string }) {
+  return (
+    <span className="material-symbols-outlined tb-ico" aria-hidden="true">
+      {name}
+    </span>
+  );
 }
 
 /**
@@ -392,6 +455,376 @@ function ViewIcon({ name }: { name: View3d | "camera" | "grundriss" }) {
   }
 }
 
+/** Eine Zelle einer Segmentpille. */
+interface SegmentCell {
+  /** Stabiler Schlüssel. */
+  key: string;
+  /** Material-Symbols-Icon-Name. */
+  icon: string;
+  /** Tooltip/aria-label (Klartext). */
+  title: string;
+  /** Aktiver Zustand (Akzentfüllung). */
+  active?: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+/**
+ * Segmentpille (DOSSIER-Look): ein Aussencontainer (radius 999, overflow hidden)
+ * mit gleich hohen Zellen; interne Trenner über `border-left`. Aktive Zelle in
+ * Akzentfarbe. Genutzt für Zoom-Aktionen, B/I/U und L/C/R. `accent` setzt einen
+ * Akzent-Rand am Container (Auswahl-Bewusstsein der Text-Gruppe).
+ */
+function Segment({
+  cells,
+  ariaLabel,
+  accent,
+  style,
+}: {
+  cells: SegmentCell[];
+  ariaLabel: string;
+  accent?: boolean;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className={`tb-seg${accent ? " tb-seg-accent" : ""}`}
+      role="group"
+      aria-label={ariaLabel}
+      style={style}
+    >
+      {cells.map((c) => (
+        <button
+          key={c.key}
+          type="button"
+          className={`tb-seg-cell${c.active ? " active" : ""}`}
+          onClick={c.onClick}
+          disabled={c.disabled}
+          aria-pressed={c.active}
+          title={c.title}
+          aria-label={c.title}
+        >
+          <span className="material-symbols-outlined tb-ico" aria-hidden="true">
+            {c.icon}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Systemfont-Auswahl der Text-Gruppe. */
+const TEXT_FONTS: string[] = [
+  "Helvetica",
+  "Arial",
+  "Inter",
+  "Times New Roman",
+  "Georgia",
+  "Courier New",
+];
+
+/** Grössen-Presets (pt) der Text-Gruppe. */
+const TEXT_SIZES: number[] = [8, 9, 10, 11, 12, 14, 18, 24, 36, 48];
+
+/**
+ * Text-Gruppe der Oberleiste (immer sichtbar, 3×2-Raster). Setzt Defaults für
+ * neuen Text (lokaler State) UND formatiert das aktuelle `textTarget` live. Ist
+ * `textTarget` gesetzt, tragen die Zeile-2-Pillen einen Akzent-Rand und alle
+ * Aktionen wirken auf `textTarget.doc` via `textTarget.apply`.
+ */
+function TextGroup({
+  textTarget,
+  onAddText,
+}: {
+  textTarget: TextTarget | null;
+  onAddText: (() => void) | null;
+}) {
+  // Defaults für neuen Text, solange nichts Text-artiges selektiert ist. Bei
+  // aktivem Ziel spiegeln die Controls die gemeinsamen Werte des Ziels wider.
+  const [defFont, setDefFont] = useState<string>("Helvetica");
+  const [defSize, setDefSize] = useState<number>(12);
+  const [defAlign, setDefAlign] = useState<Align>("left");
+  const [defBold, setDefBold] = useState(false);
+  const [defItalic, setDefItalic] = useState(false);
+  const [defUnderline, setDefUnderline] = useState(false);
+
+  // Effektiver Bereich am Ziel: expliziter Bereich oder — ohne Bereich — das
+  // ganze Dokument (mind. 1 Zeichen, damit isMarkActive/applyMark greifen).
+  const targetRange = (doc: RichTextDoc, range: TextRange | null): TextRange =>
+    range && range.start !== range.end
+      ? range
+      : { start: 0, end: Math.max(1, docLength(doc)) };
+
+  const active = textTarget !== null;
+
+  // Aktueller Anzeige-Zustand: vom Ziel abgeleitet, sonst aus den Defaults.
+  const rng = textTarget ? targetRange(textTarget.doc, textTarget.range) : null;
+  const isBold = textTarget && rng ? isMarkActive(textTarget.doc, rng, "bold") : defBold;
+  const isItalic = textTarget && rng ? isMarkActive(textTarget.doc, rng, "italic") : defItalic;
+  const isUnderline =
+    textTarget && rng ? isMarkActive(textTarget.doc, rng, "underline") : defUnderline;
+  const curFont =
+    textTarget && rng ? commonMarkValue(textTarget.doc, rng, "font") ?? "" : defFont;
+  const curSize =
+    textTarget && rng ? commonMarkValue(textTarget.doc, rng, "sizePt") ?? 0 : defSize;
+  // Ausrichtung: gemeinsamer Wert der berührten Absätze, sonst Default.
+  const curAlign: Align = textTarget
+    ? commonAlign(textTarget.doc, rng) ?? "left"
+    : defAlign;
+
+  // ── Aktions-Helfer (wirken auf das Ziel oder setzen Defaults) ──────────────
+  const toggle = (mark: BoolMark, setDefault: (v: boolean) => void, cur: boolean) => {
+    if (textTarget) {
+      const r = targetRange(textTarget.doc, textTarget.range);
+      textTarget.apply(toggleMark(textTarget.doc, r, mark));
+    } else {
+      setDefault(!cur);
+    }
+  };
+
+  const setFontValue = (font: string) => {
+    if (textTarget) {
+      const r = targetRange(textTarget.doc, textTarget.range);
+      textTarget.apply(applyMark(textTarget.doc, r, "font", font));
+    } else {
+      setDefFont(font);
+    }
+  };
+
+  const setSizeValue = (size: number) => {
+    if (!Number.isFinite(size) || size <= 0) return;
+    if (textTarget) {
+      const r = targetRange(textTarget.doc, textTarget.range);
+      textTarget.apply(applyMark(textTarget.doc, r, "sizePt", size));
+    } else {
+      setDefSize(size);
+    }
+  };
+
+  const setAlignValue = (align: Align) => {
+    if (textTarget) {
+      textTarget.apply(applyAlign(textTarget.doc, textTarget.range, align));
+    } else {
+      setDefAlign(align);
+    }
+  };
+
+  const applyPresetValue = (id: string) => {
+    const preset = DEFAULT_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    if (textTarget) {
+      const r = textTarget.range ?? { start: 0, end: 0 };
+      textTarget.apply(applyPreset(textTarget.doc, r, preset));
+    } else {
+      // Ohne Ziel: Preset-Defaults übernehmen (Font bleibt, Marks spiegeln).
+      if (preset.marks.sizePt != null) setDefSize(preset.marks.sizePt);
+      setDefBold(!!preset.marks.bold);
+      setDefItalic(!!preset.marks.italic);
+    }
+  };
+
+  // ── Options-Listen ─────────────────────────────────────────────────────────
+  const styleOptions: DropdownOption[] = [
+    { value: "__none__", label: t("text.style.none") },
+    ...DEFAULT_PRESETS.map((p) => ({ value: p.id, label: p.label })),
+  ];
+  const fontOptions: DropdownOption[] = TEXT_FONTS.map((f) => ({
+    value: f,
+    label: f,
+  }));
+  const sizeInPresets = TEXT_SIZES.includes(curSize);
+  const sizeOptions: DropdownOption[] = [
+    ...(sizeInPresets || curSize <= 0
+      ? []
+      : [{ value: "__current__", label: `${curSize} pt` }]),
+    ...TEXT_SIZES.map((n) => ({ value: String(n), label: `${n} pt` })),
+    { value: "__custom__", label: t("text.size.custom") },
+  ];
+
+  const onSizeChange = (value: string) => {
+    if (value === "__custom__") {
+      const input = window.prompt(
+        t("text.size.customPrompt"),
+        String(curSize > 0 ? curSize : 12),
+      );
+      const n = input == null ? NaN : Math.round(Number(input.trim()));
+      if (Number.isFinite(n) && n > 0) setSizeValue(n);
+      return;
+    }
+    if (value === "__current__") return;
+    setSizeValue(Number(value));
+  };
+
+  return (
+    <div className="tb-group tb-textgroup" role="group" aria-label={t("text.group")}>
+      {/* Zeile 1: Stil-Preset · Schrift · Grösse. */}
+      <div className="tb-textgroup-row">
+        <Dropdown
+          value="__none__"
+          onChange={applyPresetValue}
+          title={t("text.style")}
+          width={110}
+          options={styleOptions}
+        />
+        <Dropdown
+          value={curFont || "__none__"}
+          onChange={setFontValue}
+          title={t("text.font")}
+          width={130}
+          options={
+            curFont && !TEXT_FONTS.includes(curFont)
+              ? [{ value: curFont, label: curFont }, ...fontOptions]
+              : fontOptions
+          }
+        />
+        <Dropdown
+          value={
+            curSize <= 0
+              ? "__custom__"
+              : sizeInPresets
+                ? String(curSize)
+                : "__current__"
+          }
+          onChange={onSizeChange}
+          title={t("text.size")}
+          width={80}
+          triggerClassName="tb-dd-mono"
+          options={sizeOptions}
+        />
+      </div>
+
+      {/* Zeile 2: B/I/U · L/C/R · „+ Text". */}
+      <div className="tb-textgroup-row">
+        <Segment
+          ariaLabel={t("text.group")}
+          accent={active}
+          style={{ width: 110 }}
+          cells={[
+            {
+              key: "bold",
+              icon: "format_bold",
+              title: t("text.bold"),
+              active: !!isBold,
+              onClick: () => toggle("bold", setDefBold, defBold),
+            },
+            {
+              key: "italic",
+              icon: "format_italic",
+              title: t("text.italic"),
+              active: !!isItalic,
+              onClick: () => toggle("italic", setDefItalic, defItalic),
+            },
+            {
+              key: "underline",
+              icon: "format_underlined",
+              title: t("text.underline"),
+              active: !!isUnderline,
+              onClick: () => toggle("underline", setDefUnderline, defUnderline),
+            },
+          ]}
+        />
+        <Segment
+          ariaLabel={t("text.group")}
+          accent={active}
+          style={{ width: 130 }}
+          cells={[
+            {
+              key: "left",
+              icon: "format_align_left",
+              title: t("text.align.left"),
+              active: curAlign === "left",
+              onClick: () => setAlignValue("left"),
+            },
+            {
+              key: "center",
+              icon: "format_align_center",
+              title: t("text.align.center"),
+              active: curAlign === "center",
+              onClick: () => setAlignValue("center"),
+            },
+            {
+              key: "right",
+              icon: "format_align_right",
+              title: t("text.align.right"),
+              active: curAlign === "right",
+              onClick: () => setAlignValue("right"),
+            },
+          ]}
+        />
+        <button
+          type="button"
+          className="tb-addtext"
+          disabled={onAddText == null}
+          onClick={() => onAddText?.()}
+          title={onAddText ? t("text.add") : t("text.add.hint")}
+          aria-label={t("text.add")}
+        >
+          <span className="material-symbols-outlined tb-ico" aria-hidden="true">
+            add
+          </span>
+          <span className="tb-addtext-label">{t("text.add")}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Gemeinsame Absatz-Ausrichtung der vom Bereich berührten Absätze; `undefined`
+ * bei uneinheitlicher/leerer Auswahl. Ohne Bereich → Ausrichtung des ersten
+ * Absatzes (das ganze Doc als Ziel).
+ */
+function commonAlign(doc: RichTextDoc, range: TextRange | null): Align | undefined {
+  const paras = touchedParagraphs(doc, range);
+  if (paras.length === 0) return doc.paragraphs[0]?.align ?? "left";
+  let value: Align | undefined;
+  let first = true;
+  for (const idx of paras) {
+    const a = doc.paragraphs[idx]?.align ?? "left";
+    if (first) {
+      value = a;
+      first = false;
+    } else if (a !== value) {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+/**
+ * Setzt die Absatz-Ausrichtung auf alle vom Bereich berührten Absätze. Ohne
+ * Bereich (null) auf ALLE Absätze des Dokuments.
+ */
+function applyAlign(doc: RichTextDoc, range: TextRange | null, align: Align): RichTextDoc {
+  const touched = new Set(touchedParagraphs(doc, range));
+  const all = range == null;
+  return {
+    version: 1,
+    paragraphs: doc.paragraphs.map((p, i) =>
+      all || touched.has(i) ? { ...p, align } : p,
+    ),
+  };
+}
+
+/** Indizes der Absätze, die der Bereich [start,end) berührt. */
+function touchedParagraphs(doc: RichTextDoc, range: TextRange | null): number[] {
+  if (range == null || range.start === range.end) {
+    return doc.paragraphs.map((_, i) => i);
+  }
+  const start = Math.min(range.start, range.end);
+  const end = Math.max(range.start, range.end);
+  const out: number[] = [];
+  let cursor = 0;
+  doc.paragraphs.forEach((p, i) => {
+    const len = p.runs.reduce((n, r) => n + r.text.length, 0);
+    const pStart = cursor;
+    const pEnd = cursor + len;
+    if (!(pEnd < start || pStart > end)) out.push(i);
+    cursor += len + 1;
+  });
+  return out;
+}
+
 export function TopBar({
   project,
   viewToggleEnabled,
@@ -412,6 +845,8 @@ export function TopBar({
   onFit,
   onFitSelection,
   onZoom100,
+  onExportPdf,
+  onExportDxf,
   renderMode,
   onRenderMode,
   renderModeEnabled,
@@ -427,6 +862,8 @@ export function TopBar({
   resourcesOpen,
   onToggleResources,
   layoutMenu,
+  textTarget,
+  onAddText,
 }: TopBarProps) {
   // Dezente Scrollleiste: die Oberleiste scrollt horizontal (overflow-x). Statt
   // der prägnanten Standard-Leiste blenden wir eine eigene, sehr ruhige Leiste
@@ -578,8 +1015,10 @@ export function TopBar({
       {/* Detailgrad (grob/mittel/fein) — wirkt im Grundriss auf Symbole +
           Schraffuren/Linien. In der Perspektive (noch) ohne Wirkung → dort
           deaktiviert mit Tooltip statt stiller No-Op. */}
-      <div className="tb-group" role="group" aria-label={t("topbar.detailGroup")}>
-        <label className="tb-field">
+      {/* Detailgrad + Massstab gestapelt — eine Spalte, platzsparend (wie die
+          Ebenen-/Zeichnungs-Kombis). */}
+      <div className="tb-group tb-stack" role="group" aria-label={t("topbar.detailGroup")}>
+        <label className="tb-field tb-field-row">
           <span className="tb-label">{t("topbar.detail")}</span>
           <Dropdown
             value={detail}
@@ -597,16 +1036,7 @@ export function TopBar({
             ]}
           />
         </label>
-      </div>
-
-      <Sep />
-
-      {/* Massstab „1:N" (echter Papier-Massstab) + Zoom-Buttons. Das Dropdown
-          zeigt den gewählten/angewandten Massstab; rechts steht der LIVE 1:N
-          aus der View-Transform (ändert sich beim Zoomen). Nur aktiv, wenn ein
-          Plan gezeichnet wird (Perspektive zeigt „—"). */}
-      <div className="tb-group" role="group" aria-label={t("topbar.scaleGroup")}>
-        <label className="tb-field">
+        <label className="tb-field tb-field-row">
           <span className="tb-label">{t("topbar.scale")}</span>
           <Dropdown
             value={inPresets ? String(scaleDenominator) : "__current__"}
@@ -617,39 +1047,100 @@ export function TopBar({
             options={scaleOptions}
           />
         </label>
-        <span className="tb-live-scale" title={t("topbar.scale.live")}>
-          {zoomEnabled && liveScale != null ? `1:${Math.round(liveScale)}` : "—"}
-        </span>
-        <div className="tb-btns">
-          <button
-            className="tb-btn"
-            onClick={onZoom100}
-            disabled={!zoomEnabled}
-            title={t("topbar.zoom100.hint", { n: scaleDenominator })}
-          >
-            {t("topbar.zoom100")}
-          </button>
-          <button
-            className="tb-btn"
-            onClick={onFit}
-            disabled={!zoomEnabled}
-            title={t("topbar.fit.hint")}
-          >
-            {t("topbar.fit")}
-          </button>
-          <button
-            className="tb-btn"
-            onClick={onFitSelection}
-            disabled={!zoomEnabled}
-            title={t("topbar.fitSelection.hint")}
-          >
-            {t("topbar.fitSelection")}
-          </button>
-        </div>
-        <span className="tb-zoom" title={t("topbar.zoom.current")}>
-          {zoomEnabled ? `${Math.round(zoomPercent)}%` : "—"}
-        </span>
       </div>
+
+      <Sep />
+
+      {/* Massstab/Zoom-Cluster (DOSSIER, 2×2). Links über beide Zeilen die
+          kombinierte Stat-Pille (Live-Massstab 1:N oben / Zoom% unten); rechts
+          oben das Massstab-Dropdown, rechts unten die Zoom-Segmentpille. „am
+          Massstab" (Live-Massstab == gewählter Massstab) hebt die Stat-Pille im
+          Akzent hervor. */}
+      <div className="tb-group tb-zoomcluster" role="group" aria-label={t("topbar.scaleGroup")}>
+        <div
+          className={`tb-stat${
+            zoomEnabled && liveScale != null && Math.round(liveScale) === scaleDenominator
+              ? " tb-stat-atscale"
+              : ""
+          }`}
+          title={`${t("topbar.scale.live")} · ${t("topbar.zoom.current")}`}
+        >
+          <span className="tb-stat-scale">
+            {zoomEnabled && liveScale != null ? `1:${Math.round(liveScale)}` : "—"}
+          </span>
+          <span className="tb-stat-zoom">
+            {zoomEnabled ? `${Math.round(zoomPercent)}%` : "—"}
+          </span>
+        </div>
+        <div className="tb-zoomcluster-right">
+          <Dropdown
+            value={inPresets ? String(scaleDenominator) : "__current__"}
+            disabled={!zoomEnabled}
+            onChange={onScaleChange}
+            title={t("topbar.scale.apply")}
+            triggerClassName="tb-dd-mono"
+            width={140}
+            options={scaleOptions}
+          />
+          <Segment
+            ariaLabel={t("topbar.scaleGroup")}
+            cells={[
+              {
+                key: "zoom100",
+                icon: "straighten",
+                title: t("topbar.zoom100.hint", { n: scaleDenominator }),
+                onClick: onZoom100,
+                disabled: !zoomEnabled,
+              },
+              {
+                key: "fit",
+                icon: "fit_screen",
+                title: t("topbar.fit.hint"),
+                onClick: onFit,
+                disabled: !zoomEnabled,
+              },
+              {
+                key: "fitSelection",
+                icon: "center_focus_strong",
+                title: t("topbar.fitSelection.hint"),
+                onClick: onFitSelection,
+                disabled: !zoomEnabled,
+              },
+            ]}
+          />
+        </div>
+      </div>
+
+      {/* Export als eigene kleine Pillen-Reihe (nicht mehr Teil des Zoom-Blocks,
+          damit der Cluster ruhig bleibt). */}
+      <div className="tb-group tb-btns" role="group" aria-label={t("topbar.exportPdf")}>
+        <button
+          type="button"
+          className="tb-iconbtn"
+          onClick={onExportPdf}
+          disabled={!zoomEnabled}
+          title={t("topbar.exportPdf.hint")}
+          aria-label={t("topbar.exportPdf")}
+        >
+          <TbIcon name="picture_as_pdf" />
+        </button>
+        <button
+          type="button"
+          className="tb-iconbtn"
+          onClick={onExportDxf}
+          disabled={!zoomEnabled}
+          title={t("topbar.exportDxf.hint")}
+          aria-label={t("topbar.exportDxf")}
+        >
+          <TbIcon name="download" />
+        </button>
+      </div>
+
+      <Sep />
+
+      {/* Text-Gruppe (immer sichtbar) — Stil/Schrift/Grösse + B/I/U · L/C/R +
+          „+ Text". Formatiert das aktuelle Text-Ziel (Raumstempel) live. */}
+      <TextGroup textTarget={textTarget} onAddText={onAddText} />
 
       <Sep />
 
@@ -669,6 +1160,7 @@ export function TopBar({
               options={[
                 { value: "shaded", label: t("display.style.shaded") },
                 { value: "white", label: t("display.style.white") },
+                { value: "textured", label: t("display.style.textured") },
                 { value: "wireframe", label: t("display.style.wireframe") },
                 { value: "hidden", label: t("display.style.hidden") },
               ]}
@@ -693,54 +1185,58 @@ export function TopBar({
           Achslinien im Grundriss. Nur im Grundriss sinnvoll → sonst deaktiviert. */}
       <div className="tb-group" role="group" aria-label={t("topbar.referenceLinesGroup")}>
         <button
-          className={`tb-toggle${referenceLines ? " active" : ""}`}
+          className={`view-icon${referenceLines ? " active" : ""}`}
           onClick={() => onReferenceLines(!referenceLines)}
           disabled={!referenceLinesEnabled}
           aria-pressed={referenceLines}
+          aria-label={t("topbar.referenceLines")}
           title={
             referenceLinesEnabled
-              ? t("topbar.referenceLines.hint")
+              ? `${t("topbar.referenceLines")} — ${t("topbar.referenceLines.hint")}`
               : t("topbar.referenceLines.hintDisabled")
           }
         >
-          {t("topbar.referenceLines")}
+          <TbIcon name="straighten" />
         </button>
       </div>
 
       <Sep />
 
       {/* Linien-Darstellung: Display (alle Haarlinien) ↔ Print (echte mm-
-          Strichstärken). Nur im Grundriss sinnvoll. */}
+          Strichstärken). Eine Einfach-Auswahl → als Dropdown (Trigger-Pill +
+          Häkchen-Liste, wie Detailgrad/Massstab), nicht mehr als Segment-Pillen.
+          Optionen tragen ein Icon plus Klartext. Nur im Grundriss sinnvoll. */}
       <div className="tb-group" role="group" aria-label={t("topbar.lineModeGroup")}>
-        <div className="view-toggle">
-          <button
-            className={`view-btn${lineMode === "display" ? " active" : ""}`}
-            onClick={() => onLineMode("display")}
+        <label className="tb-field">
+          <span className="tb-label">{t("topbar.lineModeGroup")}</span>
+          <Dropdown
+            value={lineMode}
             disabled={!lineModeEnabled}
-            title={t("topbar.lineMode.display.hint")}
-          >
-            {t("topbar.lineMode.display")}
-          </button>
-          <button
-            className={`view-btn${lineMode === "print" ? " active" : ""}`}
-            onClick={() => onLineMode("print")}
-            disabled={!lineModeEnabled}
-            title={t("topbar.lineMode.print.hint")}
-          >
-            {t("topbar.lineMode.print")}
-          </button>
-        </div>
+            onChange={(v) => onLineMode(v as "display" | "print")}
+            title={
+              lineModeEnabled
+                ? `${t("topbar.lineMode.display.hint")} · ${t("topbar.lineMode.print.hint")}`
+                : t("topbar.lineModeGroup")
+            }
+            options={[
+              { value: "display", label: t("topbar.lineMode.display") },
+              { value: "print", label: t("topbar.lineMode.print") },
+            ]}
+          />
+        </label>
       </div>
 
       {/* Rechte Gruppe: Layout-Menü · Ressourcen · Projektname. */}
       <div className="topbar-right">
         {layoutMenu}
         <button
-          className={`res-trigger${resourcesOpen ? " active" : ""}`}
+          className={`view-icon${resourcesOpen ? " active" : ""}`}
           onClick={onToggleResources}
-          title={t("topbar.resources.hint")}
+          aria-pressed={resourcesOpen}
+          aria-label={t("topbar.resources")}
+          title={`${t("topbar.resources")} — ${t("topbar.resources.hint")}`}
         >
-          {t("topbar.resources")}
+          <TbIcon name="widgets" />
         </button>
         <span className="project-name">{project.name}</span>
       </div>

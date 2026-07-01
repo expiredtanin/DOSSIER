@@ -635,6 +635,35 @@ export interface Room {
    * Text. Die LIVE-Flächenzeile wird beim Rendern separat darunter gesetzt.
    */
   stampDoc?: RichTextDoc;
+  /**
+   * Strukturierter Raum-Stempel (Feldmodell). Ist er gesetzt, hat er Vorrang vor
+   * `stampDoc`/`name`: der Stempel-Text wird aus den Feldern gebaut, die Live-
+   * Zeilen (Bodenfläche/Nutzung) aus den Flags. Fehlt er, gilt der Alt-Pfad.
+   */
+  stamp?: RoomStamp;
+}
+
+/**
+ * Feldmodell des Raum-Stempels. Ersetzt den freien Text durch benannte Felder;
+ * daraus baut roomStamp.ts sowohl das gerenderte Rich-Text-Dokument als auch die
+ * Live-Zeilen. Minimal gehalten (MVP).
+ *
+ * Folge-Arbeit: Fensterfläche (braucht Öffnung-in-Raum-Geometrie) — hier bewusst
+ * NICHT enthalten.
+ */
+export interface RoomStamp {
+  /** Raumnummer (kleiner Präfix in Zeile 1). */
+  number?: string;
+  /** Raumname (Zeile 1). */
+  name: string;
+  /** Raumname Zeile 2 (in Listen mit `name` zu einem Namen zusammengezogen). */
+  nameLine2?: string;
+  /** Bodenfläche anzeigen (Live-Zeile). */
+  showFloorArea: boolean;
+  /** Präfix vor der Bodenfläche, z. B. "BF " (Default leer). */
+  floorAreaPrefix?: string;
+  /** Nutzung (HNF/… · Bezeichnung) anzeigen (Live-Zeile). */
+  showUsage: boolean;
 }
 
 /** Eine Tür, gehostet in einer Wand. Ihr Geschoss ergibt sich aus der Wand. */

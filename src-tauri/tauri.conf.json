@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "cad",
+  "version": "0.1.0",
+  "identifier": "ch.dossier.cad",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5187"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "cad",
+        "width": 1400,
+        "height": 900
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"]
+  }
+}

@@ -29,11 +29,21 @@ import type {
  * Brücke zur App: liefert den Live-Kontext + Snapping und wendet die Ergebnisse
  * an (Vorschau zeigen, committen). So bleibt die Engine frei von React/Store.
  */
+/** Modifikatoren (Shift=Ortho, Ctrl=Snap aus) beim Snap eines Befehlsschritts. */
+export interface EngineMods {
+  shift: boolean;
+  ctrl: boolean;
+}
+
 export interface EngineHost {
   /** Aktueller Befehls-Kontext (Projekt, aktive Ebene/Kategorie, lastPoint). */
   context(lastPoint: Vec2 | null): CommandContext;
-  /** Snap für einen rohen Cursor-Punkt (oder null), inkl. der Draft-Punkte. */
-  snap(raw: Vec2, draftPoints: Vec2[]): SnapResult | null;
+  /**
+   * Snap für einen rohen Cursor-Punkt (oder null), inkl. der Draft-Punkte. `mods`
+   * trägt Shift (Ortho) / Ctrl (Snap aus) durch — auch der ERSTE Punkt (ohne
+   * Draft) wird so gesnappt bzw. per Ctrl unterdrückt.
+   */
+  snap(raw: Vec2, draftPoints: Vec2[], mods?: EngineMods): SnapResult | null;
   /** Aktuelle Pixel/Meter-Skala (für Snap-Toleranz). */
   pxPerMeter(): number;
   /** Vorschau setzen (oder löschen). */
@@ -57,10 +67,17 @@ export interface EngineView {
   /**
    * Geordnete Zahlenfelder des aktuellen Schritts (Tab-Feld-Zyklus §2.7). Leer,
    * wenn der aktive Befehl/Schritt keine Felder anbietet. `value` ist der
-   * gelockte Wert (oder null = folgt der Maus), `active` markiert das aktuelle
-   * Tab-Ziel.
+   * gelockte Wert ODER — wenn ungelockt — der LIVE-Wert unter der Maus (oder null,
+   * wenn (noch) keiner bestimmbar ist). `locked` unterscheidet beide für die UI;
+   * `active` markiert das aktuelle Tab-Ziel.
    */
-  fields: { id: string; labelKey: string; value: number | null; active: boolean }[];
+  fields: {
+    id: string;
+    labelKey: string;
+    value: number | null;
+    locked: boolean;
+    active: boolean;
+  }[];
 }
 
 export class CommandEngine {
@@ -104,12 +121,26 @@ export class CommandEngine {
     }
     this.syncFields();
     const defs = this.currentFields();
-    const fields = defs.map((f, i) => ({
-      id: f.id,
-      labelKey: f.labelKey as string,
-      value: f.id in this.locks ? this.locks[f.id] : null,
-      active: i === this.activeFieldIndex,
-    }));
+    // Live-Werte (Maus-Vorschau) für ungelockte Felder, falls der Befehl sie
+    // liefert — so zeigt die Befehlszeile beim Zeichnen die folgende Länge/Winkel.
+    const live = this.command.fieldValues
+      ? this.command.fieldValues(this.state, this.locks, this.lastCursor)
+      : {};
+    const fields = defs.map((f, i) => {
+      const locked = f.id in this.locks;
+      const value = locked
+        ? this.locks[f.id]
+        : f.id in live
+          ? live[f.id]
+          : null;
+      return {
+        id: f.id,
+        labelKey: f.labelKey as string,
+        value,
+        locked,
+        active: i === this.activeFieldIndex,
+      };
+    });
     return {
       active: true,
       promptKey: this.command.prompt(this.state),
@@ -224,6 +255,13 @@ export class CommandEngine {
     this.lastCursor = null;
     this.resetFields();
     this.host.setDraft(null);
+    // Sofort-Befehl (Join/Split u. Ä.): direkt ausführen, ohne auf einen Pick zu
+    // warten. So sind Tastenkürzel und getippter Befehl EIN Pfad (§Task C).
+    if (cmd.autoRun) {
+      const res = cmd.autoRun(this.context());
+      this.applyResult(res);
+      return true;
+    }
     this.emit();
     return true;
   }
@@ -324,10 +362,10 @@ export class CommandEngine {
   }
 
   /** Maus-Pick aus PlanView (linker Klick) — gesnappter Modellpunkt. */
-  pick(raw: Vec2): void {
+  pick(raw: Vec2, mods?: EngineMods): void {
     if (!this.command || !this.state) return;
     if (!this.command.accepts(this.state).includes("point")) return;
-    const snap = this.host.snap(raw, this.draftPoints());
+    const snap = this.host.snap(raw, this.draftPoints(), mods);
     const point = snap?.point ?? raw;
     this.lastCursor = point;
     // Tab-Feld-Modus: gelockte Felder überschreiben den Klick (z. B. Länge fix,
@@ -341,9 +379,9 @@ export class CommandEngine {
   }
 
   /** Hover/Drag aus PlanView — nur Vorschau (kein Commit). */
-  move(raw: Vec2): void {
+  move(raw: Vec2, mods?: EngineMods): void {
     if (!this.command || !this.state) return;
-    const snap = this.host.snap(raw, this.draftPoints());
+    const snap = this.host.snap(raw, this.draftPoints(), mods);
     const point = snap?.point ?? raw;
     this.lastCursor = point;
     const ctx = this.context();
@@ -379,12 +417,18 @@ export class CommandEngine {
       this.repeatLast();
       return;
     }
-    // Tab-Feld-Modus (§2.7): existieren Felder, committet Enter den Schritt mit
-    // dem aus (Locks + Cursor) gebildeten Punkt — statt den Befehl abzubrechen.
-    const fieldPt = this.fieldResultPoint(this.lastCursor);
-    if (fieldPt) {
-      this.feed({ kind: "point", point: fieldPt });
-      return;
+    // Tab-Feld-Modus (§2.7): ist ein Feld GELOCKT (getippte Länge/Winkel/Dicke),
+    // committet Enter den Schritt mit dem aus (Locks + Cursor) gebildeten Punkt —
+    // statt den Befehl zu beenden. OHNE Lock ist Enter/Rechtsklick das normale
+    // Bestätigen: mehrteilige Befehle (Wand/Polylinie) beenden ihren Zug über
+    // onConfirm (sonst feuerte die Feld-Auflösung einen Cursor-Punkt und der Zug
+    // liesse sich nie abschliessen).
+    if (Object.keys(this.locks).length > 0) {
+      const fieldPt = this.fieldResultPoint(this.lastCursor);
+      if (fieldPt) {
+        this.feed({ kind: "point", point: fieldPt });
+        return;
+      }
     }
     const ctx = this.context();
     const [st, res] = this.command.onConfirm(this.state, ctx);

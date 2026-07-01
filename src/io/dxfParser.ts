@@ -21,10 +21,25 @@
 import DxfParser from "dxf-parser";
 import type { Contour, ContourSet, ImportedMesh, Vec2 } from "../model/types";
 
+/**
+ * Optionale Import-Diagnose: Histogramm der gelesenen Entity-Typen (Typ → Anzahl)
+ * und die Gesamtzahl. Wird vor allem vom DWG-Parser gefüllt, damit beim Fall
+ * „keine Geometrie gefunden" sichtbar wird, WORAN es liegt (z. B. „0 Entities" =
+ * Encoding-/Versions-Problem vs. „500 ARC, 200 INSERT" = Abdeckungslücke).
+ */
+export interface ImportDiagnostics {
+  /** Anzahl je (Modellraum-)Entity-Typ, inkl. expandierter Block-Entities. */
+  entityCounts: Record<string, number>;
+  /** Gesamtzahl betrachteter Entities. */
+  total: number;
+}
+
 /** Ergebnis eines DXF-Imports: rohe Meshes + Konturen-Sätze. */
 export interface DxfImportResult {
   meshes: ImportedMesh[];
   contours: ContourSet[];
+  /** Optionale Diagnose (Entity-Typ-Histogramm); vom DWG-Parser gefüllt. */
+  diagnostics?: ImportDiagnostics;
 }
 
 // Lose getippte Sicht auf die dxf-parser-Ausgabe (das Paket liefert keine engen

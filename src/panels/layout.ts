@@ -60,7 +60,7 @@ const DEFAULT_LEFT_GROUPS: DockGroup[] = [
   { tabs: ["attributes"], activeTab: "attributes", weight: 1.1 },
 ];
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
-  { tabs: ["object-info"], activeTab: "object-info", weight: 1 },
+  { tabs: ["object-info", "room-balance"], activeTab: "object-info", weight: 1 },
   {
     tabs: ["drawing-levels", "layers", "site"],
     activeTab: "drawing-levels",

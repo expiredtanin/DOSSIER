@@ -3,7 +3,7 @@
 // Kernel (`../geometry/kernel2d`) und liefern neue Drawing2D-Listen. Stil-,
 // Kategorie- und Level-Attribute der Quelle werden geerbt.
 //
-// Bezeichner englisch, Kommentare deutsch (CLAUDE.md).
+// Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom, Vec2 } from "../model/types";
 import {

@@ -8,7 +8,17 @@
 import type { DrawingLevel, Project, Vec2 } from "../model/types";
 
 /** Werkzeug-Identität. */
-export type ToolId = "select" | "wall" | "line" | "polyline" | "rect";
+export type ToolId =
+  | "select"
+  | "wall"
+  | "ceiling"
+  | "window"
+  | "door"
+  | "stair"
+  | "room"
+  | "line"
+  | "polyline"
+  | "rect";
 
 // ── Snapping ───────────────────────────────────────────────────────────────
 

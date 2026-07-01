@@ -133,6 +133,11 @@ export const circleCommand: Command = {
   // Tab-Feld-Zyklus nur im „radius"-Schritt: ein Radius-Feld; der gelockte Wert
   // committet direkt (Punkt liegt auf dem Kreis, dist(center,point)=radius).
   fields: (state) => ((state as CircleState).phase === "radius" ? CIRCLE_FIELDS : []),
+  fieldValues: (state, _locks, cursor): Record<string, number> => {
+    const s = state as CircleState;
+    if (s.phase !== "radius" || !cursor) return {};
+    return { radius: dist(s.center, cursor) };
+  },
   pointFromFields: (state, locks, cursor) => {
     const s = state as CircleState;
     if (s.phase !== "radius") return null;

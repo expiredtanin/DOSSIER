@@ -13,14 +13,20 @@ export interface CommandLineOption {
   id: string;
   labelKey: string;
   value?: string;
+  /** Aktuell gewählte Option (hervorgehoben)? */
+  active?: boolean;
+  /** Tastatur-Kürzel (z. B. „U"), wirkt AUCH bei fokussiertem Eingabefeld. */
+  key?: string;
 }
 
 /** Ein Zahlenfeld des Tab-Feld-Zyklus (§2.7). */
 export interface CommandLineField {
   id: string;
   labelKey: string;
-  /** Gelockter Wert (oder null = folgt der Maus). */
+  /** Gelockter ODER live (maus-folgender) Wert; null = (noch) keiner. */
   value: number | null;
+  /** Ist der Wert gelockt (getippt) statt live (folgt der Maus)? */
+  locked: boolean;
   /** Aktuelles Tab-Ziel? */
   active: boolean;
 }
@@ -73,6 +79,25 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
     };
 
     const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Options-Kürzel (z. B. U/I/O/P der Kopiermodi): auch bei fokussiertem Feld
+      // aktiv. Ein einzelner Buchstabe, der einer Option zugeordnet ist, löst die
+      // Option aus statt in die Zahleneingabe zu fallen (Ziffern bleiben Eingabe).
+      if (
+        active &&
+        e.key.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        const opt = options.find(
+          (o) => o.key && o.key.toLowerCase() === e.key.toLowerCase(),
+        );
+        if (opt) {
+          e.preventDefault();
+          onOption(opt.id);
+          return;
+        }
+      }
       // Tasten NICHT zum globalen App-Handler durchreichen (eigener Eingabefokus).
       if (e.key === "Enter") {
         e.preventDefault();
@@ -130,12 +155,13 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
               <button
                 key={o.id}
                 type="button"
-                className="cmdline-option"
+                className={`cmdline-option${o.active ? " active" : ""}`}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   onOption(o.id);
                 }}
               >
+                {o.key && <span className="cmdline-option-key">{o.key}</span>}
                 {t(o.labelKey as TranslationKey)}
                 {o.value != null && <span className="cmdline-option-val">={o.value}</span>}
               </button>
@@ -144,18 +170,30 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
         )}
         {hasFields && (
           <span className="cmdline-fields">
-            {fields.map((f) => (
-              <span
-                key={f.id}
-                className={`cmdline-field${f.active ? " active" : ""}`}
-                title={t(f.labelKey as TranslationKey)}
-              >
-                <span className="cmdline-field-label">{t(f.labelKey as TranslationKey)}</span>
-                <span className="cmdline-field-val">
-                  {f.value == null ? "—" : Number(f.value.toFixed(3)).toString()}
+            {fields.map((f) => {
+              // Winkelfeld in Grad, sonst Längen in Metern. Gelockte Werte fest
+              // (mehr Nachkommastellen), live (maus-folgende) Werte gerundet.
+              const isAngle = f.id === "angle";
+              const digits = isAngle ? (f.locked ? 1 : 0) : f.locked ? 3 : 2;
+              const unit = isAngle ? "°" : " m";
+              const text =
+                f.value == null
+                  ? "—"
+                  : `${Number(f.value.toFixed(digits)).toString()}${unit}`;
+              return (
+                <span
+                  key={f.id}
+                  className={
+                    `cmdline-field${f.active ? " active" : ""}` +
+                    (f.locked ? " locked" : f.value != null ? " live" : "")
+                  }
+                  title={t(f.labelKey as TranslationKey)}
+                >
+                  <span className="cmdline-field-label">{t(f.labelKey as TranslationKey)}</span>
+                  <span className="cmdline-field-val">{text}</span>
                 </span>
-              </span>
-            ))}
+              );
+            })}
           </span>
         )}
         <input

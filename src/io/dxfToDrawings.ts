@@ -13,7 +13,7 @@
 //                    `layerToCode` liefert (deterministisch) einen Code je
 //                    Layer-Name; unbekannte/leere Layer fallen auf `fallbackCode`.
 //
-// Bezeichner englisch, Kommentare deutsch (CLAUDE.md).
+// Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Contour, ContourSet, Drawing2D, Drawing2DGeom } from "../model/types";
 

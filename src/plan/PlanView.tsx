@@ -14,8 +14,10 @@ import {
   useState,
 } from "react";
 import type { HatchRender, Plan, Primitive } from "./generatePlan";
+import { docToLines, type SvgLine } from "../text/renderHtml";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { DraftShape, SnapResult, ToolHandlers, ToolId, ToolMods } from "../tools/types";
+import { useGlPlanRenderer } from "./useGlPlanRenderer";
 
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
@@ -43,9 +45,6 @@ function toScreen(p: Vec2): Vec2 {
 const dpi = (): number => 96 * (window.devicePixelRatio || 1);
 /** mm Papier → Bildschirm-Pixel (für non-scaling-stroke / dasharray). */
 const mmToPx = (mm: number): number => (mm / 25.4) * dpi();
-/** mm-Strichmuster → SVG dasharray in Bildschirm-Pixel (non-scaling). */
-const dashMm = (dash: number[] | null | undefined): string | undefined =>
-  dash && dash.length ? dash.map((d) => mmToPx(d)).join(" ") : undefined;
 
 // Zoom-Grenzen relativ zur eingepassten Default-Ansicht. Kleinere viewBox-
 // Breite = stärkerer Zoom. ZOOM_MAX → max. Hineinzoomen, ZOOM_MIN → Herauszoomen.
@@ -116,6 +115,29 @@ export interface PlanSelection {
    * dessen Linien lag und KEINE Wand getroffen wurde; sonst `null`.
    */
   drawingId: string | null;
+  /**
+   * ID der getroffenen Decke (aus dem Polygon-Primitiv), wenn der Klick eine
+   * Decken-Fläche traf und KEINE Wand/kein 2D-Element; sonst `null`.
+   */
+  ceilingId: string | null;
+  /**
+   * ID der getroffenen Öffnung (Fenster/Tür), wenn der Klick nahe an ihrem Symbol
+   * (Türblatt/Schwenkbogen/Fenster-Glaslinie/-Rahmen) lag und KEINE Wand/kein
+   * 2D-Element/keine Decke getroffen wurde; sonst `null`.
+   */
+  openingId: string | null;
+  /**
+   * ID der getroffenen Treppe (aus einem Tritt-/Podest-Polygon), wenn der Klick
+   * eine Treppe traf und KEINE Wand/kein 2D-Element/keine Decke/keine Öffnung;
+   * sonst `null`.
+   */
+  stairId: string | null;
+  /**
+   * ID des getroffenen Raums (aus einer Raum-Fläche), wenn der Klick einen Raum
+   * traf und KEIN Element höherer Priorität (Wand/2D/Decke/Öffnung/Treppe);
+   * sonst `null`.
+   */
+  roomId: string | null;
   /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
@@ -190,6 +212,36 @@ export interface PlanViewProps {
    */
   selectedWallIds?: string[];
   /**
+   * Aktuell ausgewählte Decken-IDs (kontrolliert von App). Die Ansicht markiert
+   * ALLE Polygone JEDER dieser Decken mit einer Akzentkontur.
+   */
+  selectedCeilingIds?: string[];
+  /**
+   * Aktuell ausgewählte Öffnungs-IDs (Fenster/Tür; kontrolliert von App). Die
+   * Ansicht markiert alle Symbol-Primitive JEDER dieser Öffnungen.
+   */
+  selectedOpeningIds?: string[];
+  /**
+   * Aktuell ausgewählte Treppen-IDs (kontrolliert von App). Die Ansicht markiert
+   * alle Tritt-/Symbol-Primitive JEDER dieser Treppen mit einer Akzentkontur.
+   */
+  selectedStairIds?: string[];
+  /**
+   * Aktuell ausgewählte Raum-IDs (kontrolliert von App). Die Ansicht markiert die
+   * Fläche JEDES dieser Räume mit einer Akzentkontur.
+   */
+  selectedRoomIds?: string[];
+  /**
+   * Der Stempel-Griff des (einzeln) gewählten Raums: sein Anker (Meter) + ID.
+   * PlanView zeichnet einen ziehbaren Griff und meldet Bewegung/Doppelklick.
+   * `null` = kein einzelner Raum gewählt.
+   */
+  roomStamp?: { roomId: string; anchor: Vec2 } | null;
+  /** Der Stempel-Griff wurde verschoben (inkrementelles Modell-Delta). */
+  onStampMove?: (roomId: string, delta: Vec2) => void;
+  /** Doppelklick auf einen Raum-Stempel: Editor öffnen. */
+  onStampEdit?: (roomId: string) => void;
+  /**
    * Links-Drag (Marquee): meldet die im Auswahl-Rechteck getroffenen Wände nach
    * der CAD-Konvention (siehe {@link MarqueeSelection}). Optional.
    */
@@ -247,8 +299,14 @@ export interface PlanViewProps {
 /** Treiber für das Ziehen von Editier-Griffen (von App bereitgestellt). */
 export interface GripHandlers {
   onGripMove(index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods): void;
-  /** Ganzes Element parallel verschieben (inkrementelles Delta in Metern). */
-  onMoveBody(delta: Vec2): void;
+  /**
+   * Ganzes Element parallel verschieben (inkrementelles Delta in Metern).
+   * `target` benennt das gegriffene Element (Wand-ID ODER Drawing-ID) — wichtig
+   * bei MEHRFACHAUSWAHL, wo das unter dem Cursor gegriffene Element verschoben
+   * wird und koinzidente Enden der übrigen gewählten Elemente mitwandern. Fehlt
+   * `target`, gilt das einzeln selektierte Element (Rückwärtskompatibilität).
+   */
+  onMoveBody(delta: Vec2, target?: { wallId?: string; drawingId?: string }): void;
   /**
    * Eine SEITE (Kante) ziehen: verschiebt beide Vertices der Kante senkrecht
    * (nur die Normal-Komponente von `raw` wirkt; siehe App). `raw` ist der rohe
@@ -271,6 +329,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onSegmentCut,
       onContextMenu,
       selectedWallIds,
+      selectedCeilingIds,
+      selectedOpeningIds,
+      selectedStairIds,
+      selectedRoomIds,
+      roomStamp,
+      onStampMove,
+      onStampEdit,
       activeTool,
       toolInputActive,
       toolHandlers,
@@ -316,6 +381,34 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   }, [resetKey]);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // WebGL2-GPU-Renderer ist der STANDARD-Pfad. Der SVG-Renderer bleibt als
+  // automatischer Fallback (nur falls WebGL2/Shader nicht verfügbar) — es gibt
+  // KEINE User-Umschaltung mehr. `?gl=0` erzwingt zu Debug-Zwecken reines SVG.
+  const wantGpu =
+    typeof window === "undefined"
+      ? true
+      : new URLSearchParams(window.location.search).get("gl") !== "0";
+  const { render: renderGl, updateGeometry, ready: glReady } = useGlPlanRenderer(
+    canvasRef,
+    wantGpu,
+  );
+  // GL WIRKLICH aktiv? Steuert das Umschalten SVG↔GL: bei false rendert der volle
+  // SVG-Pfad (Fallback), bei true übernimmt die GL-Ebene + Text-Overlay.
+  const useGpuRenderer = wantGpu && glReady;
+
+  // Stabiler Papier-Massstab-Nenner N (1:N) als REFERENZ für die Print-Strich-
+  // breiten. BEWUSST NICHT der live aus dem Zoom abgeleitete N (der sich beim
+  // Rad-Zoom ändert): Print-Strichbreiten sind echte Papier-mm, die beim Zoomen
+  // MIT der Geometrie skalieren (reinzoomen = dicker). Damit das funktioniert,
+  // muss die mm→Welt-Umrechnung an einem beim Rad-Zoom KONSTANTEN N hängen; er
+  // ändert sich nur, wenn die Oberleiste explizit einen Massstab setzt
+  // (applyScale) bzw. beim ersten Messen/Einpassen. So gilt: 1:10→1:100 = ×10
+  // dicker (halber Sprung des Nenners → 10× mehr Welt-Meter je Papier-mm).
+  const [paperScale, setPaperScale] = useState<number | null>(null);
+  const paperScaleRef = useRef(paperScale);
+  paperScaleRef.current = paperScale;
   // Frische Werte in Refs spiegeln, damit das (stabile) imperative Handle und
   // der Resize-Beobachter stets den aktuellen Stand lesen (Handle hat leere Deps).
   const viewRef = useRef(view);
@@ -326,6 +419,36 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   toScreenRef.current = toScreen;
   const planRef = useRef(plan);
   planRef.current = plan;
+
+  // Papier-Massstab-Nenner (1:N) für die GL-Strichbreiten — ECHTE mm im Massstab
+  // (0.35 mm bei 1:100). Bevorzugt der stabile `paperScale` (wie beim SVG-Print);
+  // solange der noch nicht gemessen ist, der live aus dem Ausschnitt abgeleitete N.
+  const paperScaleForGl = (v: ViewBox): number =>
+    paperScaleRef.current ?? scaleFromView(v, svgRef.current) ?? 100;
+
+  // GL-Geometrie beim Plan-Wechsel neu tessellieren + sofort neu zeichnen.
+  useEffect(() => {
+    if (!useGpuRenderer) return;
+    updateGeometry(plan);
+    renderGl(viewRef.current, paperScaleForGl(viewRef.current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useGpuRenderer, plan, updateGeometry, renderGl]);
+
+  // GL bei jeder Ausschnittsänderung (Pan/Zoom) neu zeichnen — nur Matrix-Uniform,
+  // keine Re-Tessellierung. Auch bei paperScale-Wechsel neu (Strichbreiten).
+  useEffect(() => {
+    if (useGpuRenderer) {
+      renderGl(view, paperScaleForGl(view));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useGpuRenderer, renderGl, view, paperScale]);
+
+  // Ausstehende imperative Pan-Aufräumung beim Unmount.
+  useEffect(() => {
+    return () => {
+      if (panRaf.current !== null) cancelAnimationFrame(panRaf.current);
+    };
+  }, []);
 
   // Zoom in Prozent (eingepasst = 100 %) nach oben melden: kleinere viewBox-
   // Breite = stärker hineingezoomt. Reiner Bericht; ändert die Ansicht nicht.
@@ -355,6 +478,25 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onScale]);
 
+  // Referenz-Papier-Massstab initialisieren, sobald das SVG messbar ist (bzw. der
+  // Plan/das Geschoss wechselt): aus dem AKTUELLEN Ausschnitt (der beim Wechsel
+  // eingepasst wird). Danach bleibt er beim Rad-Zoom stehen; applyScale setzt ihn
+  // explizit neu. Ohne Messung (SSR/erste Runde) bleibt er null → Fallback im
+  // Renderer auf live-N, damit Print nie „unsichtbar" wird.
+  useEffect(() => {
+    if (paperScaleRef.current != null) return;
+    const n = scaleFromView(viewRef.current, svgRef.current);
+    if (n != null && isFinite(n) && n > 0) setPaperScale(n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+  // Beim Plan-/Geschoss-Wechsel den Referenz-Massstab an den (frisch eingepassten)
+  // Ausschnitt angleichen.
+  useEffect(() => {
+    const n = scaleFromView(defaultViewRef.current, svgRef.current);
+    if (n != null && isFinite(n) && n > 0) setPaperScale(n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
+
   // Imperatives Steuerhandle für die Oberleiste (Einpassen / Auswahl / Massstab).
   // Stabil (leere Deps); liest den frischen Ausschnitt + die Auswahl aus Refs.
   useImperativeHandle(
@@ -373,6 +515,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       applyScale: (n: number) => {
         const target = viewForScale(n, viewRef.current, svgRef.current);
         if (target) setView(target);
+        // Diesen Massstab als stabile Referenz für die Print-Strichbreiten merken:
+        // ab jetzt skalieren die Papier-mm-Linien um genau dieses N (bis der
+        // nächste Massstab gewählt wird); Rad-Zoom lässt ihn unberührt.
+        if (n > 0) setPaperScale(n);
       },
       pxPerMeter: () => currentPxPerMeter(),
     }),
@@ -416,7 +562,27 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const edgeDrag = useRef<{ pointerId: number; edge: EdgeGrip } | null>(null);
   // Transiente „Körper verschieben"-Daten: letzter Modellpunkt, gegen den das
   // inkrementelle Delta gebildet wird (parallel-Verschiebung des Elements).
-  const moveDrag = useRef<{ pointerId: number; last: Vec2 } | null>(null);
+  const moveDrag = useRef<{
+    pointerId: number;
+    last: Vec2;
+    target: { wallId?: string; drawingId?: string };
+  } | null>(null);
+  // Transiente Stempel-Griff-Zieh-Daten: letzter Modellpunkt, gegen den das
+  // inkrementelle Delta gebildet wird (verschiebt NUR den Raum-Stempel-Anker).
+  const stampDrag = useRef<{ pointerId: number; roomId: string; last: Vec2 } | null>(
+    null,
+  );
+  // Letzter Links-Klick (Zeit + Bildschirmposition) für die manuelle Doppelklick-
+  // Erkennung auf Raum-Stempel (Pointer-Capture unterdrückt natives dblclick).
+  const lastClickRef = useRef<{ t: number; x: number; y: number } | null>(null);
+
+  /** Bildschirm-px-Distanz Cursor → Stempel-Griff; null = kein einzelner Raum. */
+  const stampHandleAt = (clientX: number, clientY: number): string | null => {
+    if (!roomStamp) return null;
+    const s = vbToClient(toScreen(roomStamp.anchor).x, toScreen(roomStamp.anchor).y);
+    const d = Math.hypot(clientX - s.x, clientY - s.y);
+    return d <= GRIP_HIT_PX ? roomStamp.roomId : null;
+  };
 
   // Lokale Auswahl: Index des hervorgehobenen Polygon-Primitivs (oder null).
   // Reine Darstellung; die eigentliche Wand-Auswahl meldet onSelect nach oben.
@@ -559,24 +725,135 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return bestId;
   };
 
-  // Liegt der Cursor auf dem KÖRPER des aktuell selektierten Elements (Wand-
-  // Poché bzw. 2D-Linie)? Dann startet ein Links-Drag das Parallel-Verschieben.
-  const onSelectedBody = (clientX: number, clientY: number): boolean => {
-    const selWall = selectedWallIds && selectedWallIds.length === 1 ? selectedWallIds[0] : null;
-    if (selWall) {
+  // Nächstgelegene Öffnung (Fenster/Tür) zum Cursor: Linien-/Bogen-Primitive mit
+  // `openingId` per Bildschirm-Nähe, plus getroffene Fenster-Rahmen (Polygon mit
+  // openingId, per Punkt-in-Polygon). Liefert die openingId oder null.
+  const pickOpening = (clientX: number, clientY: number): string | null => {
+    let bestId: string | null = null;
+    let bestDist = LINE_PICK_PX;
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (const p of plan.primitives) {
+      if (p.kind === "line" && p.openingId) {
+        const a = vbToClient(toScreen(p.a).x, toScreen(p.a).y);
+        const b = vbToClient(toScreen(p.b).x, toScreen(p.b).y);
+        const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
+        if (d < bestDist) {
+          bestDist = d;
+          bestId = p.openingId;
+        }
+      } else if (p.kind === "arc" && p.openingId) {
+        // Bogen: über from→to als Sehne annähern (ausreichend für die Auswahl).
+        const a = vbToClient(toScreen(p.from).x, toScreen(p.from).y);
+        const b = vbToClient(toScreen(p.to).x, toScreen(p.to).y);
+        const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
+        if (d < bestDist) {
+          bestDist = d;
+          bestId = p.openingId;
+        }
+      } else if (p.kind === "polygon" && p.openingId && pointInPolygon(m, p.pts)) {
+        return p.openingId;
+      }
+    }
+    return bestId;
+  };
+
+  // Nächstgelegene Treppe zum Cursor: getroffenes Tritt-/Podest-Polygon (per
+  // Punkt-in-Polygon), sonst eine nahe Symbollinie (Lauflinie/Pfeil) mit stairId.
+  const pickStair = (clientX: number, clientY: number): string | null => {
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (const p of plan.primitives) {
+      if (p.kind === "polygon" && p.stairId && pointInPolygon(m, p.pts)) {
+        return p.stairId;
+      }
+    }
+    let bestId: string | null = null;
+    let bestDist = LINE_PICK_PX;
+    for (const p of plan.primitives) {
+      if (p.kind === "line" && p.stairId) {
+        const a = vbToClient(toScreen(p.a).x, toScreen(p.a).y);
+        const b = vbToClient(toScreen(p.b).x, toScreen(p.b).y);
+        const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
+        if (d < bestDist) {
+          bestDist = d;
+          bestId = p.stairId;
+        }
+      }
+    }
+    return bestId;
+  };
+
+  // Getroffener Raum: die Raum-Fläche (Polygon mit `roomId`) per Punkt-in-Polygon.
+  // Bei überlappenden Räumen gewinnt der zuletzt gezeichnete (oberste).
+  const pickRoom = (clientX: number, clientY: number): string | null => {
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (let i = plan.primitives.length - 1; i >= 0; i--) {
+      const p = plan.primitives[i];
+      if (p.kind === "polygon" && p.roomId && pointInPolygon(m, p.pts)) {
+        return p.roomId;
+      }
+    }
+    return null;
+  };
+
+  // Liegt der Cursor auf dem KÖRPER eines GEWÄHLTEN Elements (Wand-Poché bzw.
+  // 2D-Linie)? Liefert das gegriffene Element (Wand-ID ODER Drawing-ID) für das
+  // Parallel-Verschieben — oder null. Bei MEHRFACHAUSWAHL wird das Element UNTER
+  // dem Cursor gegriffen; die übrigen gewählten Enden wandern (App) koinzident mit.
+  const grabbedBody = (
+    clientX: number,
+    clientY: number,
+  ): { wallId?: string; drawingId?: string } | null => {
+    const selWalls = new Set(selectedWallIds ?? []);
+    if (selWalls.size) {
       const hi = hitTest(clientX, clientY);
       if (hi !== null) {
         const p = plan.primitives[hi];
-        if (p.kind === "polygon" && p.wallId === selWall) return true;
+        if (p.kind === "polygon" && p.wallId && selWalls.has(p.wallId)) {
+          return { wallId: p.wallId };
+        }
       }
     }
-    if (selectedDrawingId && pickDrawing(clientX, clientY) === selectedDrawingId) return true;
-    return false;
+    const selDraws = selectedDrawingIds && selectedDrawingIds.length
+      ? new Set(selectedDrawingIds)
+      : selectedDrawingId
+        ? new Set([selectedDrawingId])
+        : null;
+    if (selDraws) {
+      const id = pickDrawing(clientX, clientY);
+      if (id && selDraws.has(id)) return { drawingId: id };
+    }
+    return null;
   };
 
   // Maus-Schema (docs/design/context-menu.md): MITTE = schwenken (Pan),
   // LINKS = Auswahl, RECHTS = Kontextmenü, RAD = Zoom.
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    // Doppelklick (zweiter Klick der Sequenz) auf einen Raum-Stempel/-Fläche →
+    // Stempel-Editor öffnen. Manuell über Zeit/Abstand erkannt, weil PlanView
+    // Pointer-Capture nutzt und der Browser dann kein natives `dblclick`
+    // synthetisiert (bzw. `detail` nicht zuverlässig füllt).
+    if (e.button === 0 && !toolActive && onStampEdit) {
+      const now = Date.now();
+      const prev = lastClickRef.current;
+      const isDbl =
+        prev &&
+        now - prev.t < 400 &&
+        Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 6;
+      lastClickRef.current = { t: now, x: e.clientX, y: e.clientY };
+      if (isDbl) {
+        const rid =
+          stampHandleAt(e.clientX, e.clientY) ?? pickRoom(e.clientX, e.clientY);
+        if (rid) {
+          e.preventDefault();
+          lastClickRef.current = null;
+          onStampEdit(rid);
+          return;
+        }
+      }
+    }
     if (e.button === 1) {
       // Mittlere Taste: Ausschnitt zum Ziehen einfrieren (Pan).
       e.preventDefault(); // verhindert Auto-Scroll-Modus im Browser.
@@ -614,6 +891,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       );
       return;
     }
+    if (e.button === 0 && !toolActive && roomStamp && onStampMove) {
+      // Linke Taste auf dem Stempel-Griff: NUR den Stempel-Anker verschieben.
+      const rid = stampHandleAt(e.clientX, e.clientY);
+      if (rid) {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        stampDrag.current = {
+          pointerId: e.pointerId,
+          roomId: rid,
+          last: rawModelAt(e.clientX, e.clientY),
+        };
+        return;
+      }
+    }
     if (e.button === 0 && gripsActive) {
       // Linke Taste auf einem Editier-Griff: Griff ziehen (Endpunkt verschieben).
       const gi = gripAt(e.clientX, e.clientY);
@@ -633,11 +924,24 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           return;
         }
       }
-      // Sonst: auf dem Körper des selektierten Elements? → Parallel-Verschieben.
-      if (onSelectedBody(e.clientX, e.clientY)) {
+      // Sonst: auf dem Körper eines gewählten Elements? → Parallel-Verschieben.
+      const body = grabbedBody(e.clientX, e.clientY);
+      if (body) {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
-        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY) };
+        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body };
+        return;
+      }
+    }
+    // Körper-Verschieben auch bei MEHRFACHAUSWAHL (dann sind die einzel-Element-
+    // Griffe inaktiv): Links-Drag auf einem gewählten Körper verschiebt es; die
+    // koinzidenten Enden der übrigen gewählten Elemente wandern mit (App).
+    if (e.button === 0 && !toolActive && !!gripHandlers && !gripsActive) {
+      const body = grabbedBody(e.clientX, e.clientY);
+      if (body) {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        moveDrag.current = { pointerId: e.pointerId, last: rawModelAt(e.clientX, e.clientY), target: body };
         return;
       }
     }
@@ -660,44 +964,144 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // Rechte Taste (button 2): Kontextmenü läuft über onContextMenu.
   };
 
+  // Perf: modell-mutierende Drags (Griff/Kante/Körper/Stempel) auf EIN Update je
+  // Animationsframe drosseln. Schnelles Ziehen feuert pointermove schneller, als
+  // der Plan neu gebaut/gezeichnet werden kann — ungebremst staut sich ein
+  // Rückstand ("kommt nicht hinterher"). Wir merken nur die NEUESTE Position und
+  // verarbeiten sie einmal pro Frame.
+  const dragMovePending = useRef<{
+    cx: number;
+    cy: number;
+    shift: boolean;
+    ctrl: boolean;
+    alt: boolean;
+    pointerId: number;
+  } | null>(null);
+  const dragMoveRaf = useRef<number | null>(null);
+
+  // Imperativer GL-Pan/Zoom: während der Geste NICHT setView pro Frame (das würde
+  // die ganze PlanView neu rendern). GL-Matrix wird pro Frame aktualisiert; das
+  // SVG-Overlay bekommt statt eines viewBox-Neusatzes (→ Cairo-Re-Raster in
+  // WebKitGTK, teuer!) einen GPU-komponierten CSS-`transform`. React-State (view)
+  // + echtes viewBox werden erst beim Loslassen abgeglichen → in WebKit KEIN
+  // SVG-Re-Raster je Frame mehr.
+  const panPending = useRef<ViewBox | null>(null);
+  const panStartView = useRef<ViewBox | null>(null); // viewBox bei Gestenbeginn (V0)
+  const panRaf = useRef<number | null>(null);
+
+  /**
+   * CSS-transform, der das SVG (fest gezeichnet mit viewBox V0) so verschiebt/
+   * skaliert, dass es exakt den Ziel-Ausschnitt V zeigt — deckungsgleich mit der
+   * GL-Ebene (beide nutzen xMidYMid meet in dieselbe Elementbox).
+   */
+  const applySvgTransform = (v0: ViewBox, v: ViewBox) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const m = Math.min(rect.width / v0.w, rect.height / v0.h); // meet-Skala bei V0
+    const A = v0.w / v.w; // Zoomfaktor (uniform)
+    const lbX = (rect.width - v0.w * m) / 2; // Letterbox-Offset (0 bei passendem Aspekt)
+    const lbY = (rect.height - v0.h * m) / 2;
+    const cx = m * A * (v0.x - v.x) + (1 - A) * lbX;
+    const cy = m * A * (v0.y - v.y) + (1 - A) * lbY;
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = `translate(${cx}px, ${cy}px) scale(${A})`;
+  };
+
+  const flushPan = () => {
+    panRaf.current = null;
+    const v = panPending.current;
+    const v0 = panStartView.current;
+    if (!v || !v0) return;
+    viewRef.current = v; // abgeleitete Reads (Snap-Toleranz etc.) frisch halten
+    applySvgTransform(v0, v); // SVG per GPU-Composit (kein Re-Raster)
+    renderGl(v, paperScaleForGl(v)); // GL exakt auf V (Strich in echten Papier-mm)
+  };
+  /** Pan-/Zoom-Ziel imperativ anwenden (rAF-gedrosselt), ohne React-Render. */
+  const enqueuePan = (v: ViewBox) => {
+    if (!panStartView.current) panStartView.current = { ...viewRef.current };
+    panPending.current = v;
+    if (panRaf.current === null) panRaf.current = requestAnimationFrame(flushPan);
+  };
+  /** Anhängigen imperativen Pan in React-State übernehmen (+ Transform lösen). */
+  const commitPan = () => {
+    if (panRaf.current !== null) {
+      cancelAnimationFrame(panRaf.current);
+      panRaf.current = null;
+    }
+    if (panPending.current) {
+      // SVG-Transform lösen; setView setzt das echte viewBox (ein einziger Re-Raster).
+      if (svgRef.current) svgRef.current.style.transform = "";
+      setView(panPending.current);
+      panPending.current = null;
+    }
+    panStartView.current = null;
+  };
+
+  const flushDragMove = () => {
+    dragMoveRaf.current = null;
+    const p = dragMovePending.current;
+    dragMovePending.current = null;
+    if (!p) return;
+    const mods = { shift: p.shift, ctrl: p.ctrl, alt: p.alt };
+    const raw = rawModelAt(p.cx, p.cy);
+    const ed = edgeDrag.current;
+    if (ed && ed.pointerId === p.pointerId) {
+      gripHandlers!.onEdgeMove(ed.edge, raw, currentPxPerMeter(), mods);
+      return;
+    }
+    const gd = gripDrag.current;
+    if (gd && gd.pointerId === p.pointerId) {
+      gripHandlers!.onGripMove(gd.index, raw, currentPxPerMeter(), mods);
+      return;
+    }
+    const sd = stampDrag.current;
+    if (sd && sd.pointerId === p.pointerId) {
+      const delta = { x: raw.x - sd.last.x, y: raw.y - sd.last.y };
+      if ((delta.x !== 0 || delta.y !== 0) && onStampMove) {
+        onStampMove(sd.roomId, delta);
+        sd.last = raw;
+      }
+      return;
+    }
+    const md = moveDrag.current;
+    if (md && md.pointerId === p.pointerId) {
+      const delta = { x: raw.x - md.last.x, y: raw.y - md.last.y };
+      if (delta.x !== 0 || delta.y !== 0) {
+        gripHandlers!.onMoveBody(delta, md.target);
+        md.last = raw;
+      }
+      return;
+    }
+  };
+  const enqueueDragMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    dragMovePending.current = {
+      cx: e.clientX,
+      cy: e.clientY,
+      shift: e.shiftKey,
+      ctrl: e.ctrlKey || e.metaKey,
+      alt: e.altKey,
+      pointerId: e.pointerId,
+    };
+    if (dragMoveRaf.current === null) {
+      dragMoveRaf.current = requestAnimationFrame(flushDragMove);
+    }
+  };
+
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     // Immer die Cursor-Position melden (auch ohne Ziehen), für die Statusleiste.
     reportCursor(e.clientX, e.clientY);
 
-    // Kanten-Griff ziehen: rohen Modellpunkt nach oben melden (App projiziert
-    // ihn auf die Kanten-Normale → Seite verschiebt sich senkrecht).
-    const ed = edgeDrag.current;
-    if (ed && ed.pointerId === e.pointerId) {
-      gripHandlers!.onEdgeMove(
-        ed.edge,
-        rawModelAt(e.clientX, e.clientY),
-        currentPxPerMeter(),
-        toolMods(e),
-      );
-      return;
-    }
-
-    // Editier-Griff ziehen: gesnappten Modellpunkt nach oben melden (live).
-    const gd = gripDrag.current;
-    if (gd && gd.pointerId === e.pointerId) {
-      gripHandlers!.onGripMove(
-        gd.index,
-        rawModelAt(e.clientX, e.clientY),
-        currentPxPerMeter(),
-        toolMods(e),
-      );
-      return;
-    }
-
-    // Element parallel verschieben: inkrementelles Delta gegen den letzten Punkt.
-    const md = moveDrag.current;
-    if (md && md.pointerId === e.pointerId) {
-      const cur = rawModelAt(e.clientX, e.clientY);
-      const delta = { x: cur.x - md.last.x, y: cur.y - md.last.y };
-      if (delta.x !== 0 || delta.y !== 0) {
-        gripHandlers!.onMoveBody(delta);
-        md.last = cur;
-      }
+    // Modell-mutierende Drags (Kante/Griff/Stempel/Körper): auf rAF drosseln —
+    // ein Update je Frame mit der jeweils neuesten Position (siehe flushDragMove).
+    if (
+      (edgeDrag.current && edgeDrag.current.pointerId === e.pointerId) ||
+      (gripDrag.current && gripDrag.current.pointerId === e.pointerId) ||
+      (stampDrag.current && stampDrag.current.pointerId === e.pointerId) ||
+      (moveDrag.current && moveDrag.current.pointerId === e.pointerId)
+    ) {
+      enqueueDragMove(e);
       return;
     }
 
@@ -742,15 +1146,52 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // verschiebt sich der Ausschnitt entgegengesetzt.
     const dx = (e.clientX - d.startClientX) / scale;
     const dy = (e.clientY - d.startClientY) / scale;
-    setView({
+    const next: ViewBox = {
       x: d.startView.x - dx,
       y: d.startView.y - dy,
       w: d.startView.w,
       h: d.startView.h,
-    });
+    };
+    // GL-Pfad: imperativ (rAF, kein React-Render pro Frame). SVG-Pfad: wie bisher
+    // über setView (das SVG muss über React neu rendern).
+    if (useGpuRenderer) enqueuePan(next);
+    else setView(next);
   };
 
   const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
+    // Perf: einen anhängigen (rAF-gedrosselten) Drag mit der FINALEN Position
+    // sofort anwenden, damit das Objekt exakt an der Loslass-Stelle landet, bevor
+    // committet wird.
+    if (dragMoveRaf.current !== null) {
+      cancelAnimationFrame(dragMoveRaf.current);
+      dragMoveRaf.current = null;
+    }
+    if (
+      (edgeDrag.current && edgeDrag.current.pointerId === e.pointerId) ||
+      (gripDrag.current && gripDrag.current.pointerId === e.pointerId) ||
+      (stampDrag.current && stampDrag.current.pointerId === e.pointerId) ||
+      (moveDrag.current && moveDrag.current.pointerId === e.pointerId)
+    ) {
+      dragMovePending.current = {
+        cx: e.clientX,
+        cy: e.clientY,
+        shift: e.shiftKey,
+        ctrl: e.ctrlKey || e.metaKey,
+        alt: e.altKey,
+        pointerId: e.pointerId,
+      };
+      flushDragMove();
+    }
+
+    // Stempel-Griff loslassen: Ziehen abschließen.
+    const sd = stampDrag.current;
+    if (sd && sd.pointerId === e.pointerId) {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      stampDrag.current = null;
+      return;
+    }
     // Kanten-Griff loslassen: Ziehen abschließen.
     const ed = edgeDrag.current;
     if (ed && ed.pointerId === e.pointerId) {
@@ -837,19 +1278,44 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (onSelect) {
         const v = clientToView(e.clientX, e.clientY, view);
         const hit = hitIndex !== null ? plan.primitives[hitIndex] : undefined;
-        const wallId = hit && hit.kind === "polygon" ? hit.wallId ?? null : null;
-        // Traf der Klick KEINE Wand: zuerst eine getroffene gefüllte 2D-Fläche
+        // Öffnung (Fenster/Tür) zuerst: ihr Symbol sitzt in der ausgesparten Lücke
+        // bzw. schlägt über die Wand — ein Klick nahe am Symbol wählt die Öffnung.
+        const openingId = pickOpening(e.clientX, e.clientY);
+        const wallId =
+          openingId ? null : hit && hit.kind === "polygon" ? hit.wallId ?? null : null;
+        // Traf der Klick KEINE Wand/Öffnung: zuerst eine getroffene gefüllte 2D-Fläche
         // (Polygon mit drawingId), sonst die 2D-Linien (Drawing2D) per Nähe.
         const polyDrawingId =
           hit && hit.kind === "polygon" ? hit.drawingId ?? null : null;
-        const drawingId = wallId
-          ? null
-          : polyDrawingId ?? pickDrawing(e.clientX, e.clientY);
+        const drawingId =
+          openingId || wallId
+            ? null
+            : polyDrawingId ?? pickDrawing(e.clientX, e.clientY);
+        // Decke nur, wenn weder Öffnung/Wand noch 2D-Element getroffen wurde. Da die
+        // Decken-Polygone UNTER der Wand-Poché liegen, trifft ein direkter Klick
+        // auf die Wand zuerst die Wand; freie Deckenfläche trifft die Decke.
+        const hitCeilingId =
+          hit && hit.kind === "polygon" ? hit.ceilingId ?? null : null;
+        const ceilingId = openingId || wallId || drawingId ? null : hitCeilingId;
+        // Treppe nur, wenn nichts anderes getroffen wurde (Tritte liegen frei).
+        const stairId =
+          openingId || wallId || drawingId || ceilingId
+            ? null
+            : pickStair(e.clientX, e.clientY);
+        // Raum als letzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
+        const roomId =
+          openingId || wallId || drawingId || ceilingId || stairId
+            ? null
+            : pickRoom(e.clientX, e.clientY);
         onSelect({
           model: viewToModel(v.x, v.y),
           hitIndex,
           wallId,
           drawingId,
+          ceilingId,
+          openingId,
+          stairId,
+          roomId,
           shift: e.shiftKey,
         });
       }
@@ -861,41 +1327,58 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
+    // Imperativen GL-Pan in React-State übernehmen (Ausschnitt final festschreiben).
+    commitPan();
     drag.current = null;
     setDragging(false);
   };
 
+  /** Rechnet aus einem Ausschnitt + Rad-Delta den neuen (geklemmten) Ausschnitt. */
+  const zoomedView = (prev: ViewBox, clientX: number, clientY: number, deltaY: number): ViewBox => {
+    // Punkt unter dem Cursor (bleibt nach dem Zoom ortsfest).
+    const anchor = clientToView(clientX, clientY, prev);
+    // Hochrollen (deltaY < 0) → hinein → kleinere viewBox.
+    let factor = Math.exp(deltaY * WHEEL_STEP);
+    // Zoom relativ zur Default-Breite begrenzen.
+    const minW = defaultView.w / ZOOM_MAX;
+    const maxW = defaultView.w / ZOOM_MIN;
+    const targetW = clamp(prev.w * factor, minW, maxW);
+    // Tatsächlich angewandter Faktor nach Klemmung (hält Seitenverhältnis).
+    factor = targetW / prev.w;
+    return {
+      x: anchor.x - (anchor.x - prev.x) * factor,
+      y: anchor.y - (anchor.y - prev.y) * factor,
+      w: prev.w * factor,
+      h: prev.h * factor,
+    };
+  };
+
   const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
     e.preventDefault();
-    setView((prev) => {
-      // Punkt unter dem Cursor (bleibt nach dem Zoom ortsfest).
-      const anchor = clientToView(e.clientX, e.clientY, prev);
-      // Hochrollen (deltaY < 0) → hinein → kleinere viewBox.
-      let factor = Math.exp(e.deltaY * WHEEL_STEP);
-      // Zoom relativ zur Default-Breite begrenzen.
-      const minW = defaultView.w / ZOOM_MAX;
-      const maxW = defaultView.w / ZOOM_MIN;
-      const targetW = clamp(prev.w * factor, minW, maxW);
-      // Tatsächlich angewandter Faktor nach Klemmung (hält Seitenverhältnis).
-      factor = targetW / prev.w;
-      const w = prev.w * factor;
-      const h = prev.h * factor;
-      // x/y so anpassen, dass der Anker auf demselben Pixel bleibt.
-      return {
-        x: anchor.x - (anchor.x - prev.x) * factor,
-        y: anchor.y - (anchor.y - prev.y) * factor,
-        w,
-        h,
-      };
-    });
+    // Zoom läuft IMMER über setView (React) — auch im GL-Pfad. Grund: der Zoom
+    // ändert den Massstab, und bildschirmkonstante SVG-Elemente (Auswahlrahmen,
+    // Griffe, Snap-Marker) müssen dabei NEU (in korrekter Grösse) gerendert
+    // werden. Ein imperativer CSS-scale würde sie fälschlich mitskalieren. In
+    // Chromium ist setView pro Rad-Schritt problemlos flüssig; der GL-Effekt auf
+    // `view` zeichnet die Ebene nur per Matrix-Uniform neu (keine Re-Tessellierung).
+    setView((prev) => zoomedView(prev, e.clientX, e.clientY, e.deltaY));
   };
 
   // Doppelklick → bei aktivem Werkzeug den mehrteiligen Entwurf abschließen,
   // sonst wieder auf die eingepasste Standard-Ansicht.
-  const onDoubleClick = () => {
+  const onDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (toolActive) {
       toolHandlers!.onToolCommit();
       return;
+    }
+    // Doppelklick auf einen Raum (Stempel-Griff ODER Fläche) → Stempel-Editor.
+    if (onStampEdit) {
+      const rid =
+        stampHandleAt(e.clientX, e.clientY) ?? pickRoom(e.clientX, e.clientY);
+      if (rid) {
+        onStampEdit(rid);
+        return;
+      }
     }
     setView(defaultView);
   };
@@ -956,6 +1439,69 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     );
   }, [plan, selectedDrawingIds]);
 
+  // Hervorhebung der selektierten Decken: alle Polygone JEDER gewählten Decke
+  // (Fläche + Umriss) mit Akzentkontur überzeichnen — analog zur Wand-Auswahl.
+  const highlightCeilingPolys = useMemo(() => {
+    const ids =
+      selectedCeilingIds && selectedCeilingIds.length
+        ? new Set(selectedCeilingIds)
+        : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "polygon" }> =>
+        p.kind === "polygon" && p.ceilingId != null && ids.has(p.ceilingId),
+    );
+  }, [plan, selectedCeilingIds]);
+
+  // Hervorhebung der selektierten Öffnungen: alle Symbol-Primitive (Linien/Bögen/
+  // Rahmen) mit der gewählten openingId mit Akzentkontur überzeichnen.
+  const highlightOpeningPrims = useMemo(() => {
+    const ids =
+      selectedOpeningIds && selectedOpeningIds.length
+        ? new Set(selectedOpeningIds)
+        : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "line" | "arc" | "polygon" }> =>
+        (p.kind === "line" || p.kind === "arc" || p.kind === "polygon") &&
+        p.openingId != null &&
+        ids.has(p.openingId),
+    );
+  }, [plan, selectedOpeningIds]);
+
+  // Hervorhebung der selektierten Treppen: alle Tritt-/Symbol-Primitive (Polygone
+  // + Linien) mit der gewählten stairId mit Akzentkontur überzeichnen.
+  const highlightStairPrims = useMemo(() => {
+    const ids =
+      selectedStairIds && selectedStairIds.length ? new Set(selectedStairIds) : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "line" | "polygon" }> =>
+        (p.kind === "line" || p.kind === "polygon") &&
+        p.stairId != null &&
+        ids.has(p.stairId),
+    );
+  }, [plan, selectedStairIds]);
+
+  // Hervorhebung der selektierten Räume: die Fläche JEDES gewählten Raums (Polygon
+  // mit roomId) mit Akzentkontur überzeichnen — analog zur Decken-Auswahl.
+  const highlightRoomPolys = useMemo(() => {
+    const ids =
+      selectedRoomIds && selectedRoomIds.length ? new Set(selectedRoomIds) : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "polygon" }> =>
+        p.kind === "polygon" && p.roomId != null && ids.has(p.roomId),
+    );
+  }, [plan, selectedRoomIds]);
+
+  // Zusammenhängende 2D-Zeichen-Linien (gleiche drawingId + Stil) zu Zügen
+  // bündeln, damit sie als EIN <polyline>/<polygon> gezeichnet werden können —
+  // so gehren dicke Ecken sauber (kein Butt-Cap-Sprung). generatePlan schiebt die
+  // Kanten eines Elements aufeinanderfolgend + End-an-Start verkettet ein, daher
+  // genügt greedy-Anhängen benachbarter Segmente.
+  const drawingRuns = useMemo(() => buildDrawingRuns(plan.primitives), [plan]);
+
   // Pro Polygon mit Linien-/Kreuz-Schraffur ein eigenes <pattern> sammeln.
   // Vollfüllung ("solid") und "none" brauchen kein Muster.
   const hatched = useMemo(() => {
@@ -968,48 +1514,138 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return list;
   }, [plan]);
 
+  // Perf: die Primitiv-Elemente hängen NUR am Plan (+ Haarlinie/Massstab), NICHT
+  // an `view`. Ohne Memo würde jedes Schwenken/Zoomen (das nur die viewBox ändert)
+  // den gesamten Element-Baum neu erzeugen und React ihn komplett abgleichen —
+  // auf WebKitGTK (Tauri-Desktop) der spürbare Ruckler. Memoisiert bleibt der Baum
+  // referenzstabil, Pan/Zoom aktualisiert nur noch das viewBox-Attribut.
+  const primitiveEls = useMemo(
+    () =>
+      plan.primitives.map((p, i) =>
+        // Bei aktivem GL zeichnet die WebGL-Ebene Poché/Linien/Bögen; das SVG wird
+        // zur reinen Text-Overlay-Ebene (scharfe Schrift, DOM-Hit-Test) → hier nur
+        // noch Text-Primitive. Sonst: alles außer den gebündelten 2D-Zeichenlinien.
+        (useGpuRenderer ? p.kind !== "text" : p.kind === "line" && p.drawingId) ? null : (
+          <PrimitiveShape
+            key={i}
+            p={p}
+            index={i}
+            toScreen={toScreen}
+            hairline={!!hairline}
+            paperScale={paperScale}
+          />
+        ),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
+    [plan, hairline, paperScale, useGpuRenderer],
+  );
+  const drawingRunEls = useMemo(
+    () =>
+      // Bei aktivem GL übernimmt die WebGL-Ebene die 2D-Zeichenlinien.
+      useGpuRenderer
+        ? []
+        : drawingRuns.map((run, i) => (
+            <DrawingRunShape
+              key={`run-${i}`}
+              run={run}
+              toScreen={toScreen}
+              hairline={!!hairline}
+              paperScale={paperScale}
+            />
+          )),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
+    [drawingRuns, hairline, paperScale, useGpuRenderer],
+  );
+
   return (
-    <svg
-      ref={svgRef}
-      className="plan-svg"
-      viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
-      preserveAspectRatio="xMidYMid meet"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onPointerLeave={() => onCursor?.(null)}
-      onWheel={onWheel}
-      onDoubleClick={onDoubleClick}
-      onContextMenu={onContextMenuHandler}
-      // Maus-Schema: MITTE schwenkt (grabbing), sonst Standard-Cursor (LINKS
-      // wählt aus). touchAction:none, damit das Schwenken nicht scrollt.
+    // Flex-Passthrough (wie das frühere .plan-svg direkt): flex:1 + min-height:0,
+    // damit die Fläche in WebKitGTK/Tauri NICHT auf Null-Höhe kollabiert (was
+    // height:100% dort täte). display:flex, damit das innere SVG (flex:1) füllt.
+    <div
       style={{
-        cursor: dragging
-          ? "grabbing"
-          : toolActive || marqueeRect
-            ? "crosshair"
-            : "default",
-        touchAction: "none",
+        position: "relative",
+        flex: 1,
+        minHeight: 0,
+        width: "100%",
+        display: "flex",
       }}
     >
+      {/* WebGL2-GPU-Ebene: liegt HINTER dem SVG (z-index 0). Zeichnet die schwere
+          Geometrie (Poché/Linien/Bögen); pointer-events aus, damit Klicks das SVG
+          darüber erreichen. An `wantGpu` (Absicht) montiert — NICHT an `useGpuRenderer`
+          (=wantGpu&&glReady), sonst könnte GL nie initialisieren (Canvas fehlt →
+          glReady bleibt false → Deadlock). Bei WebGL-Fehler bleibt es leer hinten
+          und der volle SVG-Pfad übernimmt sichtbar. */}
+      {wantGpu && (
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 0,
+            pointerEvents: "none",
+          }}
+        />
+      )}
+      {/* SVG-Ebene: bei GL transparent DARÜBER (Text/Griffe/Snap/Vorschau, scharf +
+          DOM-Hit-Test); ohne GL der vollständige Renderer (Fallback). */}
+      <svg
+        ref={svgRef}
+        className="plan-svg"
+        viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+        preserveAspectRatio="xMidYMid meet"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onPointerLeave={() => onCursor?.(null)}
+        onWheel={onWheel}
+        onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenuHandler}
+        // Maus-Schema: MITTE schwenkt (grabbing), sonst Standard-Cursor (LINKS
+        // wählt aus). touchAction:none, damit das Schwenken nicht scrollt.
+        style={{
+          position: useGpuRenderer ? "absolute" : undefined,
+          inset: useGpuRenderer ? 0 : undefined,
+          zIndex: useGpuRenderer ? 1 : undefined,
+          width: useGpuRenderer ? "100%" : undefined,
+          height: useGpuRenderer ? "100%" : undefined,
+          // Bei GL transparent, damit die WebGL-Ebene dahinter durchscheint.
+          background: useGpuRenderer ? "transparent" : undefined,
+          cursor: dragging
+            ? "grabbing"
+            : toolActive || marqueeRect
+              ? "crosshair"
+              : "default",
+          touchAction: "none",
+        }}
+      >
       <defs>
         {hatched.map((h) => (
           <HatchPattern key={h.patternId} id={h.patternId} hatch={h.hatch} />
         ))}
       </defs>
       {/* Zeichenblatt-Hintergrund: deckt den aktuellen Ausschnitt (viewBox)
-          vollständig — unabhängig von den Modell-Bounds (fixer Ursprung). */}
+          vollständig — unabhängig von den Modell-Bounds (fixer Ursprung). Bei
+          aktivem GL löscht die WebGL-Ebene das Blatt → hier transparent halten
+          (bleibt aber Klick-/Pan-Trefferfläche für Leerraum). */}
       <rect
         x={view.x}
         y={view.y}
         width={view.w}
         height={view.h}
-        className="plan-bg"
+        className={useGpuRenderer ? undefined : "plan-bg"}
+        fill={useGpuRenderer ? "transparent" : undefined}
       />
-      {plan.primitives.map((p, i) => (
-        <PrimitiveShape key={i} p={p} index={i} toScreen={toScreen} hairline={!!hairline} />
-      ))}
+      {/* 2D-Zeichen-Linien mit drawingId werden gemergt (drawingRuns) als EIN Zug
+          gezeichnet → gehrte Ecken statt Butt-Cap-Stufe; im Memo übersprungen. */}
+      {primitiveEls}
+      {/* Zusammenhängende 2D-Zeichen-Linienzüge als EIN <polyline>/<polygon>:
+          CAD-typische Gehrung an den Ecken (stroke-linejoin), keine Stufe bei
+          dicken Linien. Nach der Haupt-Ebene gezeichnet (2D liegt ohnehin oben). */}
+      {drawingRunEls}
       {/* Auswahl-Hervorhebung: alle Bänder der gewählten Wand (bzw. das lokal
           getroffene Polygon) mit Akzentkontur überzeichnen. */}
       {highlightPolys.map((poly, i) => (
@@ -1023,6 +1659,88 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           pointerEvents="none"
         />
       ))}
+      {/* Auswahl-Hervorhebung der gewählten Decken (Akzentkontur). */}
+      {highlightCeilingPolys.map((poly, i) => (
+        <polygon
+          key={`selc-${i}`}
+          className="plan-selected"
+          points={poly.pts
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
+      {/* Auswahl-Hervorhebung der gewählten Räume (Akzentkontur der Fläche). */}
+      {highlightRoomPolys.map((poly, i) => (
+        <polygon
+          key={`selrm-${i}`}
+          className="plan-selected"
+          points={poly.pts
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
+      {/* Hervorhebung der selektierten Öffnungen (Fenster/Tür-Symbole). */}
+      {highlightOpeningPrims.map((p, i) =>
+        p.kind === "line" ? (
+          <line
+            key={`selo-${i}`}
+            className="plan-sel-draw"
+            x1={toScreen(p.a).x}
+            y1={toScreen(p.a).y}
+            x2={toScreen(p.b).x}
+            y2={toScreen(p.b).y}
+            pointerEvents="none"
+          />
+        ) : p.kind === "arc" ? (
+          <line
+            key={`selo-${i}`}
+            className="plan-sel-draw"
+            x1={toScreen(p.from).x}
+            y1={toScreen(p.from).y}
+            x2={toScreen(p.to).x}
+            y2={toScreen(p.to).y}
+            pointerEvents="none"
+          />
+        ) : (
+          <polygon
+            key={`selo-${i}`}
+            className="plan-sel-draw"
+            points={p.pts
+              .map(toScreen)
+              .map((s) => `${s.x},${s.y}`)
+              .join(" ")}
+            pointerEvents="none"
+          />
+        ),
+      )}
+      {/* Hervorhebung der selektierten Treppen (Tritte + Symbollinien). */}
+      {highlightStairPrims.map((p, i) =>
+        p.kind === "line" ? (
+          <line
+            key={`selst-${i}`}
+            className="plan-sel-draw"
+            x1={toScreen(p.a).x}
+            y1={toScreen(p.a).y}
+            x2={toScreen(p.b).x}
+            y2={toScreen(p.b).y}
+            pointerEvents="none"
+          />
+        ) : (
+          <polygon
+            key={`selst-${i}`}
+            className="plan-selected"
+            points={p.pts
+              .map(toScreen)
+              .map((s) => `${s.x},${s.y}`)
+              .join(" ")}
+            pointerEvents="none"
+          />
+        ),
+      )}
       {/* Hervorhebung der selektierten 2D-Zeichenelemente (Akzentkontur). */}
       {highlightDrawPrims.map((p, i) =>
         p.kind === "line" ? (
@@ -1082,6 +1800,27 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             />
           );
         })}
+      {/* Raum-Stempel-Griff: eine ziehbare Raute am Anker des gewählten Raums.
+          Verschiebt NUR den Stempel (nicht die Kontur); Doppelklick öffnet den
+          Editor. Bildschirmkonstante Größe. */}
+      {roomStamp &&
+        (() => {
+          const s = toScreen(roomStamp.anchor);
+          const size = 5 / (meetScale(view, svgRef.current) ?? 1);
+          const pts = [
+            `${s.x},${s.y - size}`,
+            `${s.x + size},${s.y}`,
+            `${s.x},${s.y + size}`,
+            `${s.x - size},${s.y}`,
+          ].join(" ");
+          return (
+            <polygon
+              className="plan-grip plan-stamp-grip"
+              points={pts}
+              pointerEvents="none"
+            />
+          );
+        })()}
       {/* Kanten-/Seiten-Griffe: je Seite ein dreieckiger Anfasser, leicht nach
           AUSSEN entlang der (bildschirm-transformierten) Normale versetzt, mit
           der Spitze nach außen. Y wird gespiegelt (toScreen spiegelt Y), damit
@@ -1123,28 +1862,29 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           vbPerPx={1 / (meetScale(view, svgRef.current) ?? 1)}
         />
       )}
-    </svg>
+      </svg>
+    </div>
   );
 });
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /
- * halbtransparente Flächen), gesetzte Stützpunkte (kleine Quadrate), den aktiven
- * Snap-Marker und ein Maß-/Winkel-HUD. `vbPerPx` rechnet eine gewünschte
- * Bildschirm-Pixelgröße in viewBox-Einheiten um (bildschirmkonstante Marker).
+ * halbtransparente Flächen), gesetzte Stützpunkte (kleine Quadrate) und den
+ * aktiven Snap-Marker. `vbPerPx` rechnet eine gewünschte Bildschirm-Pixelgröße in
+ * viewBox-Einheiten um (bildschirmkonstante Marker). Das frühere Maß-/Winkel-HUD
+ * am Cursor entfällt — die Werte zeigt jetzt ausschließlich die Befehlszeile.
  */
 function DraftOverlay({
   draft,
   toScreen,
   vbPerPx,
 }: {
-  draft: { preview: DraftShape[]; vertices: Vec2[]; snap?: SnapResult | null; hud?: { at: Vec2; text: string } };
+  draft: { preview: DraftShape[]; vertices: Vec2[]; snap?: SnapResult | null };
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
 }) {
-  const vertSize = 7 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats
-  const markSize = 6 * vbPerPx; // halbe Kantenlänge des Snap-Markers
-  const fontPx = 13 * vbPerPx;
+  const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
+  const markSize = 4.5 * vbPerPx; // halbe Kantenlänge des Snap-Markers (gleich groß wie Stützpunkt)
   return (
     <g className="tool-overlay" pointerEvents="none">
       {/* Vorschau-Formen. */}
@@ -1187,17 +1927,6 @@ function DraftOverlay({
       {draft.snap && (
         <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} />
       )}
-      {/* HUD (Länge · Winkel) leicht versetzt über dem Cursor. */}
-      {draft.hud && (
-        <text
-          className="tool-hud"
-          x={toScreen(draft.hud.at).x + 12 * vbPerPx}
-          y={toScreen(draft.hud.at).y - 12 * vbPerPx}
-          fontSize={fontPx}
-        >
-          {draft.hud.text}
-        </text>
-      )}
     </g>
   );
 }
@@ -1230,9 +1959,12 @@ function SnapMarker({
         <circle className="snap-glyph snap-fill" cx={s.x} cy={s.y} r={r * 0.5} vectorEffect="non-scaling-stroke" />
       )}
       {snap.kind === "midpoint" && (
-        <polygon
+        <line
           className="snap-glyph"
-          points={`${s.x},${s.y - r} ${s.x + r},${s.y + r} ${s.x - r},${s.y + r}`}
+          x1={s.x - r}
+          y1={s.y}
+          x2={s.x + r}
+          y2={s.y}
           vectorEffect="non-scaling-stroke"
         />
       )}
@@ -1253,12 +1985,11 @@ function SnapMarker({
         />
       )}
       {(snap.kind === "endpoint" || snap.kind === "ortho" || snap.kind === "extension") && (
-        <rect
+        <circle
           className="snap-glyph"
-          x={s.x - r}
-          y={s.y - r}
-          width={r * 2}
-          height={r * 2}
+          cx={s.x}
+          cy={s.y}
+          r={r}
           vectorEffect="non-scaling-stroke"
         />
       )}
@@ -1628,23 +2359,156 @@ function HatchPattern({ id, hatch }: { id: string; hatch: HatchRender }) {
   );
 }
 
+/**
+ * Ein zusammenhängender 2D-Zeichen-Linienzug (aus gemergten line-Primitiven):
+ * verkettete Punkte + gemeinsamer Stil. `closed` ⇒ als Ring (polygon) zeichnen,
+ * damit auch die Schluss-Ecke gehrt. Reine Darstellung.
+ */
+interface DrawingRun {
+  pts: Vec2[];
+  closed: boolean;
+  cls: string;
+  weightMm: number;
+  dash: number[] | null | undefined;
+  color?: string;
+  greyed?: boolean;
+}
+
+/** Kleiner Toleranz-Test auf Punktgleichheit (Modell-Meter). */
+const samePt = (a: Vec2, b: Vec2): boolean =>
+  Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
+
+/** Ob zwei line-Primitive denselben Stil (für einen gemeinsamen Zug) tragen. */
+function sameLineStyle(
+  a: Extract<Primitive, { kind: "line" }>,
+  b: Extract<Primitive, { kind: "line" }>,
+): boolean {
+  return (
+    a.drawingId === b.drawingId &&
+    a.cls === b.cls &&
+    a.color === b.color &&
+    a.weightMm === b.weightMm &&
+    !!a.greyed === !!b.greyed &&
+    JSON.stringify(a.dash ?? null) === JSON.stringify(b.dash ?? null)
+  );
+}
+
+/**
+ * Bündelt aufeinanderfolgende 2D-Zeichen-Linien (mit drawingId) zu verketteten
+ * Zügen (End-an-Start). Erkennt Ringschluss (letzter == erster Punkt) → `closed`.
+ * Linien ohne drawingId (Wand-/Tür-/Kontext-Striche) bleiben unberührt (nicht
+ * enthalten). Reihenfolge-stabil in Auftreten der Primitive.
+ */
+function buildDrawingRuns(prims: Primitive[]): DrawingRun[] {
+  const runs: DrawingRun[] = [];
+  let curPts: Vec2[] | null = null;
+  let curSrc: Extract<Primitive, { kind: "line" }> | null = null;
+
+  const flush = () => {
+    if (curPts && curSrc && curPts.length >= 2) {
+      const closed = curPts.length > 2 && samePt(curPts[0], curPts[curPts.length - 1]);
+      runs.push({
+        pts: closed ? curPts.slice(0, -1) : curPts,
+        closed,
+        cls: curSrc.cls,
+        weightMm: curSrc.weightMm,
+        dash: curSrc.dash,
+        color: curSrc.color,
+        greyed: curSrc.greyed,
+      });
+    }
+    curPts = null;
+    curSrc = null;
+  };
+
+  for (const p of prims) {
+    if (p.kind !== "line" || !p.drawingId) {
+      flush();
+      continue;
+    }
+    if (curPts && curSrc && sameLineStyle(curSrc, p) && samePt(curPts[curPts.length - 1], p.a)) {
+      // An den laufenden Zug anhängen.
+      curPts.push(p.b);
+    } else {
+      // Neuen Zug beginnen.
+      flush();
+      curPts = [p.a, p.b];
+      curSrc = p;
+    }
+  }
+  flush();
+  return runs;
+}
+
 /** Opazität gedimmter („grau") Primitive im Darstellungsmodus „andere grau". */
 const GREYED_OPACITY = 0.3;
+
+/** Zeichnet einen gebündelten 2D-Zeichen-Zug als EIN Element (gehrte Ecken). */
+function DrawingRunShape({
+  run,
+  toScreen,
+  hairline,
+  paperScale,
+}: {
+  run: DrawingRun;
+  toScreen: (v: Vec2) => Vec2;
+  hairline: boolean;
+  paperScale: number | null;
+}) {
+  const print = !hairline && paperScale != null && paperScale > 0;
+  const sw = hairline
+    ? HAIRLINE_PX
+    : print
+      ? printStrokeVb(run.weightMm, paperScale!)
+      : mmToPx(run.weightMm);
+  const vfx = print ? undefined : ("non-scaling-stroke" as const);
+  const dashStr =
+    run.dash && run.dash.length
+      ? run.dash
+          .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
+          .join(" ")
+      : undefined;
+  const pts = run.pts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
+  const shape = run.closed ? (
+    <polygon
+      points={pts}
+      className={run.cls}
+      fill="none"
+      stroke={run.color}
+      strokeWidth={sw}
+      strokeDasharray={dashStr}
+      vectorEffect={vfx}
+    />
+  ) : (
+    <polyline
+      points={pts}
+      className={run.cls}
+      fill="none"
+      stroke={run.color}
+      strokeWidth={sw}
+      strokeDasharray={dashStr}
+      vectorEffect={vfx}
+    />
+  );
+  return run.greyed ? <g opacity={GREYED_OPACITY}>{shape}</g> : shape;
+}
 
 function PrimitiveShape({
   p,
   index,
   toScreen,
   hairline,
+  paperScale,
 }: {
   p: Primitive;
   index: number;
   toScreen: (v: Vec2) => Vec2;
   hairline: boolean;
+  paperScale: number | null;
 }) {
   // Gedimmte Elemente bekommen eine niedrige Gruppen-Opazität, sodass Strich
   // UND Füllung gleichmäßig zurücktreten (best-effort, ohne Farbumrechnung).
-  const shape = renderPrimitive(p, index, toScreen, hairline);
+  const shape = renderPrimitive(p, index, toScreen, hairline, paperScale);
   if (p.greyed) {
     return <g opacity={GREYED_OPACITY}>{shape}</g>;
   }
@@ -1654,20 +2518,55 @@ function PrimitiveShape({
 /** Konstante Haarlinien-Breite (Bildschirm-px) im Display-Modus. */
 const HAIRLINE_PX = 1;
 
+/**
+ * Print-Strichbreite: eine echte Papier-mm-Breite `mm` in VIEWBOX-EINHEITEN,
+ * bezogen auf den (beim Rad-Zoom stabilen) Papier-Massstab-Nenner `n` (1:N).
+ *   • Auf Papier 1:N bildet 1 Welt-Meter auf `1000/N` Papier-mm ab, d. h. eine
+ *     `mm`-Strichbreite belegt `mm·N/1000` Welt-Meter.
+ *   • toScreen bildet 1 Welt-Meter → PX_PER_M viewBox-Einheiten ab, also
+ *     `strokeVb = mm·N/1000·PX_PER_M`.
+ * Ohne non-scaling-stroke gezeichnet, skaliert dieser Wert MIT der Geometrie:
+ * reinzoomen (mehr px je viewBox-Einheit) = dicker, rauszoomen = dünner. Und
+ * von 1:10 auf 1:100 (N: 10→100) wird jede Linie bei gleichem Zoom ×10 dicker.
+ * Fällt `n` weg (noch nicht gemessen), bleibt es bei einer minimalen sichtbaren
+ * Breite (kein „unsichtbar").
+ */
+function printStrokeVb(mm: number, n: number): number {
+  return Math.max(1e-4, (mm * n) / 1000) * PX_PER_M;
+}
+
 /** Erzeugt das reine SVG eines Primitivs (ohne Dimm-Hülle). */
 function renderPrimitive(
   p: Primitive,
   index: number,
   toScreen: (v: Vec2) => Vec2,
   hairline: boolean,
+  paperScale: number | null,
 ) {
-  // Display-Modus: konstante Haarlinie statt echter mm-Strichstärke.
-  const weight = (mm: number) => (hairline ? HAIRLINE_PX : mmToPx(mm));
+  // Print-Modus nur, wenn ein Referenz-Massstab vorliegt; sonst (bzw. Display)
+  // gilt der bisherige non-scaling-Pfad. Beide Modi setzen die GLEICHEN
+  // Präsentationsattribute (nur Wert + vectorEffect unterscheiden sich).
+  const print = !hairline && paperScale != null && paperScale > 0;
+  // Strichstärke:
+  //  • Display  → konstante Haarlinie (Bildschirm-px), papierunabhängig.
+  //  • Print    → echte Papier-mm in viewBox-Einheiten (skaliert mit dem Zoom).
+  const weight = (mm: number): number =>
+    hairline ? HAIRLINE_PX : print ? printStrokeVb(mm, paperScale!) : mmToPx(mm);
+  // vectorEffect: non-scaling NUR, wenn NICHT im Print-Modus (Print skaliert die
+  // Linie bewusst mit der Geometrie). undefined ⇒ Attribut entfällt.
+  const vfx = print ? undefined : ("non-scaling-stroke" as const);
+  // Strichmuster: im Print-Modus ebenfalls in viewBox-Einheiten (skaliert mit),
+  // sonst wie bisher in Bildschirm-px (non-scaling).
+  const dashOf = (dash: number[] | null | undefined): string | undefined => {
+    if (!dash || !dash.length) return undefined;
+    return dash
+      .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
+      .join(" ");
+  };
   switch (p.kind) {
     case "polygon": {
       const pts = p.pts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
-      // Umriss-Strichstärke in mm Papier → konstante Bildschirm-px
-      // (non-scaling-stroke ⇒ papierkonstant beim Zoomen).
+      // Umriss-Strichstärke in mm Papier (Display: konstante px / Print: skaliert).
       const sw = weight(p.strokeWidthMm);
       // Ohne Schraffur: reine Component-Füllung bzw. „none" (nur Umriss).
       if (p.hatch.pattern === "none") {
@@ -1677,7 +2576,7 @@ function renderPrimitive(
             fill={p.fill}
             stroke={p.stroke}
             strokeWidth={sw}
-            vectorEffect="non-scaling-stroke"
+            vectorEffect={vfx}
           />
         );
       }
@@ -1689,7 +2588,7 @@ function renderPrimitive(
             fill={p.hatch.color}
             stroke={p.stroke}
             strokeWidth={sw}
-            vectorEffect="non-scaling-stroke"
+            vectorEffect={vfx}
           />
         );
       }
@@ -1702,7 +2601,7 @@ function renderPrimitive(
             fill={`url(#hatch-${index})`}
             stroke={p.stroke}
             strokeWidth={sw}
-            vectorEffect="non-scaling-stroke"
+            vectorEffect={vfx}
           />
         </g>
       );
@@ -1710,8 +2609,8 @@ function renderPrimitive(
     case "line": {
       const a = toScreen(p.a);
       const b = toScreen(p.b);
-      // Strichstärke + Strichmuster in mm Papier (non-scaling). Die Farbe kommt
-      // weiterhin aus der CSS-Klasse (z. B. .door-leaf / .wall-axis).
+      // Strichstärke + Strichmuster in mm Papier. Die Farbe kommt weiterhin aus
+      // der CSS-Klasse (z. B. .door-leaf / .wall-axis).
       return (
         <line
           x1={a.x}
@@ -1721,8 +2620,8 @@ function renderPrimitive(
           className={p.cls}
           stroke={p.color}
           strokeWidth={weight(p.weightMm)}
-          strokeDasharray={dashMm(p.dash)}
-          vectorEffect="non-scaling-stroke"
+          strokeDasharray={dashOf(p.dash)}
+          vectorEffect={vfx}
         />
       );
     }
@@ -1743,9 +2642,72 @@ function renderPrimitive(
           d={d}
           className={p.cls}
           strokeWidth={weight(p.weightMm)}
-          strokeDasharray={dashMm(p.dash)}
-          vectorEffect="non-scaling-stroke"
+          strokeDasharray={dashOf(p.dash)}
+          vectorEffect={vfx}
         />
+      );
+    }
+    case "text": {
+      const c = toScreen(p.at);
+      // Punkt → viewBox-Einheiten. Physisch: basePt pt bei Massstab 1:N belegt
+      // basePt/72·0.0254·N Modell-Meter; im Display-Modus gilt der Referenz-
+      // massstab 1:100 (der Stempel skaliert dann mit dem Zoom, am Modell
+      // verankert). unitPerPt bildet 1 pt auf viewBox-Einheiten ab.
+      const nRef = print ? paperScale! : 100;
+      const unitPerPt = (1 / 72) * 0.0254 * nRef * PX_PER_M;
+      const baseFs = p.basePt * unitPerPt;
+      const lineGap = baseFs * 1.3;
+      // Rich-Text-Zeilen (Stempel-Doc) + LIVE-Zusatzzeilen (Fläche/SIA) darunter.
+      const docLines: SvgLine[] = docToLines(p.doc, {
+        x: 0,
+        y: 0,
+        lineHeight: lineGap,
+        unitPerPt,
+        basePt: p.basePt,
+        color: p.color,
+      });
+      const extra: SvgLine[] = p.extraLines.map((line) => ({
+        align: "center" as const,
+        tspans: [{ text: line, fontSize: baseFs * 0.8, fill: p.color }],
+      }));
+      const lines = [...docLines, ...extra];
+      if (lines.length === 0) return null;
+      // Block vertikal um den Anker zentrieren.
+      const totalH = baseFs + (lines.length - 1) * lineGap;
+      const startY = c.y - totalH / 2 + baseFs * 0.8;
+      return (
+        <text style={{ pointerEvents: "none", userSelect: "none" }}>
+          {lines.map((line, k) => {
+            const anchor =
+              line.align === "center"
+                ? "middle"
+                : line.align === "right"
+                ? "end"
+                : "start";
+            return (
+              <tspan
+                key={k}
+                x={c.x}
+                y={startY + k * lineGap}
+                textAnchor={anchor}
+              >
+                {line.tspans.map((ts, j) => (
+                  <tspan
+                    key={j}
+                    fontSize={ts.fontSize}
+                    fontWeight={ts.fontWeight}
+                    fontStyle={ts.fontStyle}
+                    fontFamily={ts.fontFamily ?? "var(--font-ui, sans-serif)"}
+                    fill={ts.fill}
+                    textDecoration={ts.textDecoration}
+                  >
+                    {ts.text}
+                  </tspan>
+                ))}
+              </tspan>
+            );
+          })}
+        </text>
       );
     }
   }

@@ -133,9 +133,10 @@ export const sampleProject: Project = {
     },
     { code: "30", name: "Decken", color: "#605850", lw: 0.35, visible: true, locked: false },
     { code: "31", name: "Dächer", color: "#7a4a3a", lw: 0.35, visible: true, locked: false },
+    { code: "40", name: "Treppen", color: "#4a6a58", lw: 0.35, visible: true, locked: false },
     { code: "35", name: "Träger", color: "#a87858", lw: 0.5, visible: true, locked: false },
     { code: "50", name: "Text", color: "#d0d0d0", lw: 0.13, visible: true, locked: false },
-    { code: "60", name: "Plangrafik", color: "#c0a040", lw: 0.13, visible: true, locked: false },
+    { code: "60", name: "Räume", color: "#5a7a9a", lw: 0.13, visible: true, locked: false },
     { code: "90", name: "Referenzen", color: "#585860", lw: 0.13, visible: true, locked: false },
     { code: "99", name: "Konstruktion", color: "#404048", lw: 0.13, visible: true, locked: false },
   ],
@@ -171,6 +172,73 @@ export const sampleProject: Project = {
       height: 2.1,
       swing: "left", // schlägt nach innen (in den Raum) auf
       hinge: "start",
+    },
+  ],
+  // Öffnungen (Fenster/Türen) — ein Beispiel-Fenster in der EG-Südwand (W1,
+  // frei von der Tür) und in der EG-Nordwand (W3). Kategorie „21" (Türen/Fenster).
+  openings: [
+    {
+      id: "O1",
+      type: "opening",
+      hostWallId: "W1",
+      categoryCode: "21",
+      kind: "window",
+      position: 3.6, // hinter der Tür (2.0–2.9), noch innerhalb der 5-m-Wand
+      width: 1.0,
+      height: 1.2,
+      sillHeight: 0.9,
+    },
+    {
+      id: "O2",
+      type: "opening",
+      hostWallId: "W3",
+      categoryCode: "21",
+      kind: "window",
+      position: 1.8,
+      width: 1.4,
+      height: 1.3,
+      sillHeight: 0.9,
+    },
+  ],
+  // Decken (Slabs) — anfangs leer; werden mit dem Decken-Werkzeug gefüllt.
+  ceilings: [],
+  // Treppen — eine gerade Beispieltreppe im EG entlang der Ostwand, steigt ins OG
+  // (totalRise = Geschosshöhe). Kategorie „40 Treppen".
+  stairs: [
+    {
+      id: "ST1",
+      type: "stair",
+      floorId: "eg",
+      categoryCode: "40",
+      shape: "straight",
+      start: { x: 3.7, y: 0.4 },
+      dir: { x: 0, y: 1 },
+      runLength: 3.2,
+      width: 1.0,
+      totalRise: 2.6,
+      stepCount: 15,
+      up: true,
+    },
+  ],
+  // Räume (SIA-416-Flächen) — ein Beispielraum im EG (lichte Innenkontur des
+  // 5×4-m-Umrisses, Aussenwände 0.2 m → Innenmaß 4.8×3.8 m ≈ 18.24 m²).
+  // Kategorie „45 Räume", SIA-Blatt HNF (Hauptnutzfläche).
+  rooms: [
+    {
+      id: "R1",
+      type: "room",
+      floorId: "eg",
+      categoryCode: "60",
+      siaCategory: "HNF",
+      name: "Wohnen",
+      boundary: [
+        { x: 0.1, y: 0.1 },
+        { x: 4.9, y: 0.1 },
+        { x: 4.9, y: 3.9 },
+        { x: 0.1, y: 3.9 },
+      ],
+      color: "#5a7a9a",
+      stampAnchor: { x: 2.5, y: 2.0 },
     },
   ],
   // Freie 2D-Zeichengeometrie — anfangs leer; wird mit den Zeichenwerkzeugen

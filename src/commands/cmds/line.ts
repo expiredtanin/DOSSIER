@@ -137,4 +137,12 @@ export const lineCommand: Command = {
     if (s.phase !== "end") return null;
     return lineEndFromFields(s.a, locks, cursor);
   },
+  fieldValues: (state, _locks, cursor): Record<string, number> => {
+    const s = state as LineState;
+    if (s.phase !== "end" || !cursor) return {};
+    return {
+      length: segLen(s.a, cursor),
+      angle: ((segAngleDeg(s.a, cursor) % 360) + 360) % 360,
+    };
+  },
 };

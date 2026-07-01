@@ -6,22 +6,36 @@
 // Öffnungen) — exakt, schnell, sauber.
 
 import type {
+  Ceiling,
   Drawing2D,
   HatchPattern,
   LayerCategory,
+  Opening,
   Project,
+  Room,
+  Stair,
   Vec2,
   Wall,
 } from "../model/types";
 import {
   flattenCategories,
+  getCeilingType,
   getComponent,
   getHatch,
   getLineStyle,
   getWallType,
+  openingsOfWall,
+  roomsOfFloor,
+  stairsOfFloor,
   wallTypeThickness,
 } from "../model/types";
-import { wallReferenceOffset } from "../model/wall";
+import { evaluateRoom, siaLabel } from "../geometry/roomArea";
+import type { RichTextDoc } from "../text/richText";
+import { docFromText } from "../text/richText";
+import { roomStampToDoc, roomStampExtraLines } from "../model/roomStamp";
+import { stairVerticalExtent, wallReferenceOffset } from "../model/wall";
+import { stairGeometry, stairCut } from "../geometry/stair";
+import { doorSymbol, openingInterval, windowSymbol } from "../geometry/opening";
 import {
   add,
   along,
@@ -140,6 +154,17 @@ export type Primitive =
        * geschlossene 2D-Form ist (für die Links-Klick-Auswahl der Fläche).
        */
       drawingId?: string;
+      /**
+       * ID der Decke (Ceiling), falls dieses Polygon eine Decken-Fläche/-Umriss
+       * ist (für die Links-Klick-Auswahl der Decke).
+       */
+      ceilingId?: string;
+      /** ID der Öffnung (Fenster/Tür), z. B. der Fensterrahmen (Auswahl). */
+      openingId?: string;
+      /** ID der Treppe (Stair), falls dieses Polygon ein Tritt/Podest ist (Auswahl). */
+      stairId?: string;
+      /** ID des Raums (Room), falls dieses Polygon eine Raum-Fläche ist (Auswahl). */
+      roomId?: string;
     }
   | {
       kind: "line";
@@ -154,6 +179,10 @@ export type Primitive =
       color?: string;
       /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl von Drawing2D). */
       drawingId?: string;
+      /** ID der Öffnung (für Links-Klick-Auswahl von Fenster/Tür-Symbolen). */
+      openingId?: string;
+      /** ID der Treppe (für Links-Klick-Auswahl von Treppen-Symbollinien). */
+      stairId?: string;
       greyed?: boolean;
     }
   | {
@@ -167,6 +196,30 @@ export type Primitive =
       weightMm: number;
       /** Strichmuster in mm Papier; null/undefined = durchgezogen. */
       dash?: number[] | null;
+      /** ID der Öffnung (für Links-Klick-Auswahl von Tür-Schwenkbögen). */
+      openingId?: string;
+      greyed?: boolean;
+    }
+  | {
+      kind: "text";
+      /** Ankerpunkt im Modell (Meter). */
+      at: Vec2;
+      /**
+       * Frei editierbarer Stempel-Text (Rich-Text). Wird zuerst gezeichnet;
+       * `align` je Absatz steuert die Ausrichtung.
+       */
+      doc: RichTextDoc;
+      /**
+       * LIVE-Zusatzzeilen (z. B. Fläche „24.30 m²" + SIA-Tag), UNTER dem Doc
+       * gezeichnet — unabhängig vom editierten Text, stets aktuell.
+       */
+      extraLines: string[];
+      /** Basis-Schriftgrösse in PUNKT (für Runs ohne eigene Grösse + Zusatzzeilen). */
+      basePt: number;
+      /** Textfarbe (hex) als Default. */
+      color: string;
+      /** ID des Raums (Room), zu dem dieser Stempel gehört (Auswahl). */
+      roomId?: string;
       greyed?: boolean;
     };
 
@@ -211,6 +264,8 @@ export function generatePlan(
   mono = false,
 ): Plan {
   const primitives: Primitive[] = [];
+  // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
+  const floor = project.drawingLevels.find((z) => z.id === floorId);
   // Sichtbarkeit wie bisher; der Darstellungsmodus verfeinert sie zusätzlich:
   // render=false blendet die Wand aus, greyed=true dimmt sie.
   const walls = project.walls.filter(
@@ -235,20 +290,52 @@ export function generatePlan(
       categoryDisplay(d.categoryCode).render,
   );
 
+  // Decken dieses Geschosses (wie Wände nach sichtbaren Kategorien +
+  // Darstellungsmodus gefiltert). Eine Decke liegt (als Slab) über der
+  // Schnittebene → im Grundriss als gefüllter/schraffierter Umriss dargestellt,
+  // UNTER der Wand-Poché (damit die Wände darüber lesbar bleiben).
+  const ceilings = (project.ceilings ?? []).filter(
+    (c) =>
+      c.floorId === floorId &&
+      visibleCodes.has(c.categoryCode) &&
+      categoryDisplay(c.categoryCode).render,
+  );
+  for (const ceiling of ceilings) {
+    const greyed = categoryDisplay(ceiling.categoryCode).greyed;
+    const lwMm = lwByCode.get(ceiling.categoryCode) ?? WALL_FALLBACK_MM;
+    addCeilingPoche(primitives, project, ceiling, greyed, detail, lwMm);
+  }
+
+  // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
+  // (Name + Fläche + SIA-Tag). UNTER der Wand-Poché gezeichnet, damit die Wände
+  // lesbar bleiben. Der Stempel (Text) entfällt beim Detailgrad „grob".
+  const rooms = roomsOfFloor(project, floorId).filter(
+    (r) =>
+      visibleCodes.has(r.categoryCode) && categoryDisplay(r.categoryCode).render,
+  );
+  for (const room of rooms) {
+    const greyed = categoryDisplay(room.categoryCode).greyed;
+    addRoomArea(primitives, room, greyed, detail);
+  }
+
   // Gehrungs-Schnittlinien einmal pro Plan berechnen (auf der gefilterten Menge).
   const joins = computeJoins(project, walls);
 
   for (const wall of walls) {
     const wallGreyed = categoryDisplay(wall.categoryCode).greyed;
     const wallLwMm = lwByCode.get(wall.categoryCode) ?? WALL_FALLBACK_MM;
-    // Türen am Wandhost: die Öffnung bestimmt immer die Wandgeometrie.
+    // Türen (Legacy) + Öffnungen (Fenster/Türen) am Wandhost: BEIDE sparen die
+    // Wand-Poché aus. Aus beiden wird eine gemeinsame Lücken-Intervall-Liste.
     const doors = project.doors.filter((d) => d.hostWallId === wall.id);
+    const openings = openingsOfWall(project, wall.id);
+    const gaps = wallGaps(wall, doors, openings);
     const cuts = joins.get(wall.id) ?? { startCut: null, endCut: null };
-    addWallPoche(primitives, project, wall, doors, cuts, wallGreyed, detail, wallLwMm);
+    addWallPoche(primitives, project, wall, gaps, cuts, wallGreyed, detail, wallLwMm);
     // Referenzlinie: dünne gestrichelte Wand-Achslinie (von der Oberleiste
     // umschaltbar). Wird über der Poché gezeichnet, damit sie sichtbar bleibt.
     if (showReferenceLines) addReferenceLine(primitives, wall, wallGreyed);
-    // Tür-Symbol nur, wenn die Tür-Kategorie sichtbar ist und der Modus sie zeigt.
+    // Tür-Symbol (Legacy-Door) nur, wenn die Kategorie sichtbar ist und der Modus
+    // sie zeigt.
     for (const door of doors) {
       const d = categoryDisplay(door.categoryCode);
       if (visibleCodes.has(door.categoryCode) && d.render) {
@@ -256,6 +343,28 @@ export function generatePlan(
         addDoorSymbol(primitives, wall, door, d.greyed, detail, doorLwMm);
       }
     }
+    // Öffnungs-Symbole (Fenster/Tür) je Detailgrad + Auswahl-taggbar.
+    for (const o of openings) {
+      const d = categoryDisplay(o.categoryCode);
+      if (visibleCodes.has(o.categoryCode) && d.render) {
+        const oLwMm = lwByCode.get(o.categoryCode) ?? LAYER_LINE_MM;
+        addOpeningSymbol(primitives, project, wall, o, d.greyed, detail, oLwMm);
+      }
+    }
+  }
+
+  // Treppen dieses Geschosses: Tritte + Lauflinie + Auf-/Abpfeil, mit dem
+  // Grundriss-Schnitt (Tritte unter der Schnitthöhe durchgezogen, darüber
+  // gestrichelt/verdeckt + SIA-Bruchlinie). Über der Wand-Poché gezeichnet.
+  const cutHeight = floor?.cutHeight ?? 1.0;
+  const stairs = stairsOfFloor(project, floorId).filter(
+    (s) =>
+      visibleCodes.has(s.categoryCode) && categoryDisplay(s.categoryCode).render,
+  );
+  for (const stair of stairs) {
+    const greyed = categoryDisplay(stair.categoryCode).greyed;
+    const lwMm = lwByCode.get(stair.categoryCode) ?? WALL_FALLBACK_MM;
+    addStairSymbol(primitives, project, stair, greyed, lwMm, cutHeight);
   }
 
   // 2D-Zeichengeometrie zuletzt (über der Poché).
@@ -274,7 +383,10 @@ export function generatePlan(
   // Musterlinien/Striche schwarz — so entsteht ein reiner S/W-Plan.
   if (mono) toMono(primitives);
 
-  return { primitives, bounds: computeBounds(project, walls, drawings) };
+  return {
+    primitives,
+    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms),
+  };
 }
 
 /** Dezente Plan-Farbe der Kontext-Konturen (gedämpftes Grau). */
@@ -331,6 +443,8 @@ function toMono(primitives: Primitive[]): void {
       p.fill = p.fill === "none" ? "none" : "#ffffff";
       p.stroke = MONO_INK;
     } else if (p.kind === "line") {
+      p.color = MONO_INK;
+    } else if (p.kind === "text") {
       p.color = MONO_INK;
     }
   }
@@ -452,11 +566,40 @@ function addDrawing2D(
  *    joinPriority) mit dicker Umrisslinie. Bewusst vereinfacht (≙ DOSSIER
  *    „Einfach").
  */
+/**
+ * Ein Öffnungs-Intervall entlang der Wandachse (from..to in Metern). `headHeight`
+ * = Sturzhöhe (OK der Öffnung über der Wand-UK) für die 3D-Aussparung; im Plan
+ * ungenutzt, aber Teil des gemeinsamen Vertrags mit dem 3D-Pfad.
+ */
+export interface WallGap {
+  from: number;
+  to: number;
+}
+
+/**
+ * Vereint Legacy-Türen (`Door`) und Öffnungen (`Opening`) einer Wand zu einer
+ * sortierten Lücken-Intervall-Liste entlang der Wandachse. Entartete Intervalle
+ * (Breite ≤ 0 oder außerhalb der Achse) werden verworfen.
+ */
+export function wallGaps(
+  wall: Wall,
+  doors: Project["doors"],
+  openings: Opening[],
+): WallGap[] {
+  const gaps: WallGap[] = [];
+  for (const d of doors) gaps.push({ from: d.position, to: d.position + d.width });
+  for (const o of openings) {
+    const iv = openingInterval(wall, o);
+    if (iv) gaps.push(iv);
+  }
+  return gaps.sort((a, b) => a.from - b.from);
+}
+
 function addWallPoche(
   out: Primitive[],
   project: Project,
   wall: Wall,
-  doors: Project["doors"],
+  gaps: WallGap[],
   cuts: WallCuts,
   greyed: boolean,
   detail: DetailLevel,
@@ -477,10 +620,8 @@ function addWallPoche(
   // Schichtfugen), nicht die Schicht-Füllfarben/Schraffuren.
   const stroke = wall.color ?? POCHE_STROKE;
 
-  // Öffnungs-Intervalle entlang der Wandachse, sortiert.
-  const openings = doors
-    .map((d) => ({ from: d.position, to: d.position + d.width }))
-    .sort((a, b) => a.from - b.from);
+  // Öffnungs-Intervalle entlang der Wandachse, sortiert (bereits vereint).
+  const openings = gaps;
 
   // Wand in Segmente zwischen den Öffnungen zerlegen.
   let cursor = 0;
@@ -634,6 +775,105 @@ function addDoorSymbol(
   }
 }
 
+/**
+ * Öffnungs-Symbol (Fenster/Tür) je Detailgrad. Anders als das Legacy-`addDoorSymbol`
+ * arbeitet diese Funktion über die reinen Geometrie-Helfer (opening.ts) und taggt
+ * ihre Primitive mit `openingId`, sodass die Öffnung im Plan selektierbar ist.
+ *
+ * Tür:
+ *  • grob   — gerade Türblatt-Linie (die Lücke kommt aus der ausgesparten Poché).
+ *  • mittel — + Schwenkbogen (Öffnungswinkel).
+ *  • fein   — + Anschlag-Striche an beiden Pfosten.
+ * Fenster:
+ *  • grob   — eine einzelne Glaslinie über die Lücke.
+ *  • mittel — Rahmen-Rechteck (Umriss) + eine Glaslinie.
+ *  • fein   — Rahmen + zwei Glaslinien (Doppelverglasung angedeutet).
+ */
+function addOpeningSymbol(
+  out: Primitive[],
+  project: Project,
+  wall: Wall,
+  o: Opening,
+  greyed: boolean,
+  detail: DetailLevel,
+  lwMm: number,
+): void {
+  if (o.kind === "door") {
+    const sym = doorSymbol(wall, o);
+    if (!sym) return;
+    // Türblatt (alle Stufen).
+    out.push({
+      kind: "line",
+      a: sym.hinge,
+      b: sym.openEnd,
+      cls: "door-leaf",
+      weightMm: lwMm,
+      greyed,
+      openingId: o.id,
+    });
+    // mittel + fein: Schwenkbogen von geschlossen → offen.
+    if (detail !== "grob") {
+      out.push({
+        kind: "arc",
+        center: sym.hinge,
+        from: sym.closedEnd,
+        to: sym.openEnd,
+        r: sym.radius,
+        cls: "door-swing",
+        weightMm: lwMm * 0.6,
+        dash: [0.06, 0.04],
+        greyed,
+        openingId: o.id,
+      });
+    }
+    // fein: Anschlag-Striche an beiden Pfosten (quer zur Wand).
+    if (detail === "fein") {
+      const reveal = 0.06;
+      for (const jamb of [sym.jambStart, sym.jambEnd]) {
+        out.push({
+          kind: "line",
+          a: add(jamb, scale(sym.normal, reveal)),
+          b: add(jamb, scale(sym.normal, -reveal)),
+          cls: "door-frame",
+          weightMm: lwMm,
+          greyed,
+          openingId: o.id,
+        });
+      }
+    }
+    return;
+  }
+
+  // Fenster: Rahmen (mittel/fein) + Glaslinie(n) je Detailgrad.
+  const glassCount = detail === "fein" ? 2 : 1;
+  const sym = windowSymbol(project, wall, o, glassCount);
+  if (!sym) return;
+  if (detail !== "grob") {
+    // Rahmen-Rechteck als reine Umrisslinie (Poché-Stroke, keine Füllung).
+    out.push({
+      kind: "polygon",
+      pts: sym.frame,
+      fill: "none",
+      stroke: o.color ?? POCHE_STROKE,
+      strokeWidthMm: lwMm,
+      hatch: NO_HATCH,
+      greyed,
+      openingId: o.id,
+    });
+  }
+  for (const [a, b] of sym.glassLines) {
+    out.push({
+      kind: "line",
+      a,
+      b,
+      cls: "window-glass",
+      weightMm: lwMm * 0.7,
+      greyed,
+      openingId: o.id,
+    });
+  }
+}
+
 /** Schraffur-Platzhalter „ohne" (für reine Umriss-/Sammelflächen). */
 const NO_HATCH: HatchRender = {
   pattern: "none",
@@ -660,9 +900,248 @@ function addReferenceLine(out: Primitive[], wall: Wall, greyed: boolean): void {
   });
 }
 
+/**
+ * Decken-Poché im Grundriss: die Decke liegt als Slab ÜBER der Schnittebene und
+ * wird daher als geschlossener Umriss ihres Grundriss-Polygons gezeichnet — eine
+ * gefüllte + schraffierte Fläche plus eine kräftige Umrisslinie. Fill/Schraffur
+ * stammen aus dem BAUTEIL der ersten (obersten) Schicht des Aufbau-Typs (analog
+ * zur Wand-Schichtauflösung); die Umrissfarbe aus der optionalen Decken-Farbe
+ * bzw. dem Poché-Strich. Jedes Polygon trägt die `ceilingId` für die Auswahl.
+ *
+ * Im Detailgrad „grob" entfällt die Schraffur (nur Fläche + Umriss); „mittel"/
+ * „fein" zeigen die Component-Schraffur. `lwMm` ist die Kategorie-Strichstärke.
+ */
+function addCeilingPoche(
+  out: Primitive[],
+  project: Project,
+  ceiling: Ceiling,
+  greyed: boolean,
+  detail: DetailLevel,
+  lwMm: number,
+): void {
+  const pts = ceiling.outline;
+  if (pts.length < 3) return;
+  const wt = getCeilingType(project, ceiling);
+  const comp = wt.layers.length > 0 ? getComponent(project, wt.layers[0].componentId) : null;
+  const stroke = ceiling.color ?? POCHE_STROKE;
+  const outlineMm = lwMm * OUTLINE_DETAIL_FACTOR[detail];
+  const ceilingId = ceiling.id;
+
+  // Gefüllte + schraffierte Fläche (Component-Poché). Im Detailgrad „grob" ohne
+  // Schraffur (reine Füllung), sonst die Bauteil-Schraffur.
+  out.push({
+    kind: "polygon",
+    pts,
+    fill: comp ? comp.color : "none",
+    stroke,
+    strokeWidthMm: LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail],
+    hatch: comp && detail !== "grob" ? resolveHatch(project, comp.hatchId) : NO_HATCH,
+    greyed,
+    ceilingId,
+  });
+  // Kräftige Umrisslinie über die volle Decke (nur Kontur, keine Füllung).
+  out.push({
+    kind: "polygon",
+    pts,
+    fill: "none",
+    stroke,
+    strokeWidthMm: outlineMm,
+    hatch: NO_HATCH,
+    greyed,
+    ceilingId,
+  });
+}
+
+/** Deckkraft (0..255) der transluzenten Raum-Füllung → 2-stelliges Hex-Suffix. */
+const ROOM_FILL_ALPHA = "33"; // ~20 % Deckkraft
+/** Basis-Schriftgrösse des Raum-Stempels in Punkt (pt). */
+const ROOM_STAMP_PT = 10;
+
+/** Farbe mit Alpha-Suffix versehen (nur, wenn `color` ein 6-stelliges Hex ist). */
+function withAlpha(color: string, alphaHex: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? `${color}${alphaHex}` : color;
+}
+
+/**
+ * Raum (SIA-416-Fläche) im Grundriss: eine transluzente farbige Füllfläche über
+ * dem lichten Umriss + eine dünne Umrisslinie (beide `roomId`-getaggt für die
+ * Auswahl) + ein Raum-Stempel (Text) am Anker (Centroid oder `stampAnchor`) mit
+ * Name, Fläche „24.30 m²" und SIA-Kürzel. Der Stempel entfällt beim Detailgrad
+ * „grob"; Fläche/Umfang/Schwerpunkt werden aus `boundary` abgeleitet (nie
+ * gespeichert). Wird UNTER der Wand-Poché gezeichnet.
+ */
+function addRoomArea(
+  out: Primitive[],
+  room: Room,
+  greyed: boolean,
+  detail: DetailLevel,
+): void {
+  const pts = room.boundary;
+  if (pts.length < 3) return;
+  const res = evaluateRoom(pts, room.siaCategory);
+  const stroke = room.color;
+
+  // Transluzente Farbfüllung.
+  out.push({
+    kind: "polygon",
+    pts,
+    fill: withAlpha(room.color, ROOM_FILL_ALPHA),
+    stroke,
+    strokeWidthMm: LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail],
+    hatch: NO_HATCH,
+    greyed,
+    roomId: room.id,
+  });
+
+  // Raum-Stempel: frei editierbarer Rich-Text (Name/Notizen) + LIVE-Flächenzeile
+  // + SIA-Kürzel. Anker fix (stampAnchor, sonst Centroid). Nur ab Detailgrad
+  // „mittel". Die Flächenzeile aktualisiert sich unabhängig vom editierten Text.
+  if (detail !== "grob") {
+    const at = room.stampAnchor ?? res.centroid;
+    // Strukturierter Stempel (Feldmodell) hat Vorrang; sonst Alt-Pfad (Rich-Text
+    // bzw. Raum-Name als einfacher Text).
+    const doc = room.stamp
+      ? roomStampToDoc(room.stamp)
+      : room.stampDoc ?? docFromText(room.name);
+    const extraLines = room.stamp
+      ? roomStampExtraLines(room.stamp, {
+          netArea: res.netArea,
+          siaCategory: room.siaCategory,
+          siaLabel: siaLabel(room.siaCategory),
+        })
+      : [
+          `${res.netArea.toFixed(2)} m²`,
+          `${room.siaCategory} · ${siaLabel(room.siaCategory)}`,
+        ];
+    out.push({
+      kind: "text",
+      at,
+      doc,
+      extraLines,
+      basePt: ROOM_STAMP_PT,
+      color: stroke,
+      roomId: room.id,
+      greyed,
+    });
+  }
+}
+
+/**
+ * Treppen-Symbol im Grundriss (DOSSIER/SIA):
+ *  • Tritte als Rechtecke: die Tritt-Trennlinien werden gezeichnet — unter der
+ *    Schnittebene DURCHGEZOGEN (sichtbar), darüber GESTRICHELT (verdeckt).
+ *  • Der erste Tritt oberhalb der Schnittebene trägt die diagonale SIA-Bruchlinie
+ *    (Doppelstrich quer über den Lauf).
+ *  • Zwischenpodest (L/Wendel) als Umriss-Polygon.
+ *  • Lauflinie (Lauflinie) mit Auf-/Abpfeil (Auf-/Abpfeil) und Stufenanzahl-Label.
+ * Alle Primitive tragen `stairId` für die Auswahl.
+ */
+function addStairSymbol(
+  out: Primitive[],
+  project: Project,
+  stair: Stair,
+  greyed: boolean,
+  lwMm: number,
+  cutHeight: number,
+): void {
+  const { zBottom, zTop } = stairVerticalExtent(project, stair);
+  const totalRise = zTop - zBottom;
+  const geo = stairGeometry(stair, totalRise);
+  const cut = stairCut(geo, cutHeight);
+  const below = new Set(cut.belowIndices);
+  const stroke = stair.color ?? POCHE_STROKE;
+  const stairId = stair.id;
+
+  // Umriss + Tritt-Trennlinien je Stufe. Der letzte Punkt jedes Tritt-Rechtecks
+  // liefert die vordere Kante (Auftritt); wir zeichnen jede Tritt-Kante.
+  for (const tr of geo.treads) {
+    const isBelow = below.has(tr.index);
+    // Tritt-Rechteck als reine Umrisslinie (keine Füllung), durchgezogen wenn
+    // unter der Schnittebene, sonst gestrichelt (verdeckt).
+    out.push({
+      kind: "polygon",
+      pts: tr.pts,
+      fill: "none",
+      stroke,
+      strokeWidthMm: lwMm * 0.7,
+      hatch: NO_HATCH,
+      greyed,
+      stairId,
+    });
+    // Zusätzliche Auftrittskante (vordere Kante der Stufe) etwas kräftiger.
+    const front: [Vec2, Vec2] = [tr.pts[1], tr.pts[2]];
+    out.push({
+      kind: "line",
+      a: front[0],
+      b: front[1],
+      cls: "stair-tread",
+      weightMm: lwMm * (isBelow ? 1.0 : 0.6),
+      dash: isBelow ? null : [0.12, 0.08],
+      color: stroke,
+      greyed,
+      stairId,
+    });
+  }
+
+  // Zwischenpodest (L/Wendel-Auge): Umriss-Polygon.
+  if (geo.landing && geo.landing.length >= 3) {
+    out.push({
+      kind: "polygon",
+      pts: geo.landing,
+      fill: "none",
+      stroke,
+      strokeWidthMm: lwMm * 0.7,
+      hatch: NO_HATCH,
+      greyed,
+      stairId,
+    });
+  }
+
+  // SIA-Bruchlinie (Doppelstrich diagonal über den Schnitt-Tritt).
+  if (cut.breakLine) {
+    for (const [a, b] of cut.breakLine) {
+      out.push({
+        kind: "line",
+        a,
+        b,
+        cls: "stair-break",
+        weightMm: lwMm,
+        color: stroke,
+        greyed,
+        stairId,
+      });
+    }
+  }
+
+  // Lauflinie (Lauflinie) — kräftig, durchgezogen.
+  for (let i = 0; i < geo.runLine.length - 1; i++) {
+    out.push({
+      kind: "line",
+      a: geo.runLine[i],
+      b: geo.runLine[i + 1],
+      cls: "stair-run",
+      weightMm: lwMm,
+      color: stroke,
+      greyed,
+      stairId,
+    });
+  }
+  // Auf-/Abpfeil an der Spitze der Lauflinie.
+  const [h1, tip, h2] = geo.arrow.head;
+  out.push({ kind: "line", a: h1, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
+  out.push({ kind: "line", a: h2, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
+}
+
 const length = (w: Wall): number => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
 
-function computeBounds(project: Project, walls: Wall[], drawings: Drawing2D[] = []) {
+function computeBounds(
+  project: Project,
+  walls: Wall[],
+  drawings: Drawing2D[] = [],
+  ceilings: Ceiling[] = [],
+  stairs: Stair[] = [],
+  rooms: Room[] = [],
+) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const acc = (p: Vec2) => {
     minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
@@ -671,6 +1150,14 @@ function computeBounds(project: Project, walls: Wall[], drawings: Drawing2D[] = 
   for (const w of walls) {
     const t = wallTypeThickness(getWallType(project, w));
     for (const c of wallCorners(w.start, w.end, t)) acc(c);
+  }
+  for (const c of ceilings) for (const p of c.outline) acc(p);
+  for (const r of rooms) for (const p of r.boundary) acc(p);
+  for (const s of stairs) {
+    const { zBottom, zTop } = stairVerticalExtent(project, s);
+    const geo = stairGeometry(s, zTop - zBottom);
+    for (const tr of geo.treads) for (const p of tr.pts) acc(p);
+    if (geo.landing) for (const p of geo.landing) acc(p);
   }
   for (const d of drawings) {
     const g = d.geom;

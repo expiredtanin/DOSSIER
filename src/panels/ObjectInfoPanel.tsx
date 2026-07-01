@@ -17,10 +17,22 @@
 import { useState } from "react";
 import { t } from "../i18n";
 import { formatM } from "../model/types";
-import type { VerticalAnchor, WallReferenceLine } from "../model/types";
+import type {
+  SiaCategory,
+  StairShape,
+  VerticalAnchor,
+  WallReferenceLine,
+} from "../model/types";
+import { SIA_CATEGORIES, siaLabelFull } from "../geometry/roomArea";
 import { Dropdown } from "../ui/Dropdown";
 import { usePanelHost } from "./host";
-import type { WallInfo } from "../state/selectionInfo";
+import type {
+  CeilingInfo,
+  OpeningInfo,
+  RoomInfo,
+  StairInfo,
+  WallInfo,
+} from "../state/selectionInfo";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
 // Neun Anker als 3×3-Raster. Zeile 0 = oben (fy=0), Spalte 0 = links (fx=0).
@@ -71,6 +83,10 @@ export function ObjectInfoPanel() {
   }
 
   const wall = sel.wall;
+  const ceiling = sel.ceiling;
+  const opening = sel.opening;
+  const stair = sel.stair;
+  const room = sel.room;
 
   return (
     <div className="objinfo-panel">
@@ -161,7 +177,438 @@ export function ObjectInfoPanel() {
 
       {/* ── Wand-Abschnitt (nur bei genau einer Wand) ────────────────────── */}
       {wall && <WallSection wall={wall} host={host} />}
+
+      {/* ── Decken-Abschnitt (nur bei genau einer Decke) ─────────────────── */}
+      {ceiling && <CeilingSection ceiling={ceiling} host={host} />}
+
+      {/* ── Öffnungs-Abschnitt (nur bei genau einer Öffnung) ─────────────── */}
+      {opening && <OpeningSection opening={opening} host={host} />}
+
+      {/* ── Treppen-Abschnitt (nur bei genau einer Treppe) ───────────────── */}
+      {stair && <StairSection stair={stair} host={host} />}
+
+      {/* ── Raum-Abschnitt (nur bei genau einem Raum) ────────────────────── */}
+      {room && <RoomSection room={room} roomId={sel.id} host={host} />}
     </div>
+  );
+}
+
+// ── Raum-Attribut-Abschnitt ──────────────────────────────────────────────────
+// Editierbarer Name, SIA-416-Kategorie (5 Blatt-Kategorien), abgeleitete Fläche
+// + Umfang (read-only), Referenzgeschoss, sowie ein Button, der den Rich-Text-
+// Stempel-Editor öffnet. Alle Werte/Setter über den Host.
+function RoomSection({
+  room,
+  roomId,
+  host,
+}: {
+  room: RoomInfo;
+  roomId: string;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.room.section")}</div>
+
+      {/* Name (editierbar). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.room.name")}</span>
+        <input
+          type="text"
+          className="objinfo-text"
+          value={room.name}
+          onChange={(e) => host.onSetRoomName(e.target.value)}
+          title={t("objinfo.room.name")}
+        />
+      </div>
+
+      {/* SIA-416-Kategorie (5 Blatt-Kategorien). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.room.sia")}</span>
+        <Dropdown
+          value={room.siaCategory}
+          onChange={(v) => host.onSetRoomSia(v as SiaCategory)}
+          options={SIA_CATEGORIES.map((c) => ({
+            value: c,
+            label: siaLabelFull(c),
+          }))}
+          title={t("objinfo.room.sia")}
+          width={170}
+        />
+      </div>
+
+      {/* Fläche + Umfang (read-only, abgeleitet). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.room.area")}</span>
+        <span className="objinfo-fval">{room.area.toFixed(2)} m²</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.room.perimeter")}</span>
+        <span className="objinfo-fval">{formatM(room.perimeter)}</span>
+      </div>
+
+      {/* Referenzgeschoss (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.room.refFloor")}</span>
+        <span className="objinfo-fval">{room.floorName}</span>
+      </div>
+
+      {/* Stempel bearbeiten (öffnet den Rich-Text-Editor). */}
+      <button
+        type="button"
+        className="objinfo-btn"
+        onClick={() => host.onEditRoomStamp(roomId)}
+      >
+        {t("objinfo.room.editStamp")}
+      </button>
+    </>
+  );
+}
+
+// ── Treppen-Attribut-Abschnitt ───────────────────────────────────────────────
+// Grundform (gerade/L/Wendel), Laufbreite, Stufenanzahl, Steighöhe (+ abgeleitete
+// Steigungshöhe/Auftrittstiefe), Laufrichtung; Referenzgeschoss + UK/OK read-only.
+function StairSection({
+  stair,
+  host,
+}: {
+  stair: StairInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.stair.section")}</div>
+
+      {/* Grundform-Dropdown. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.shape")}</span>
+        <Dropdown
+          value={stair.shape}
+          onChange={(v) => host.onSetStairShape(v as StairShape)}
+          options={[
+            { value: "straight", label: t("objinfo.stair.shape.straight") },
+            { value: "L", label: t("objinfo.stair.shape.L") },
+            { value: "spiral", label: t("objinfo.stair.shape.spiral") },
+          ]}
+          title={t("objinfo.stair.shape")}
+          width={130}
+        />
+      </div>
+
+      {/* Laufrichtung (aufwärts/abwärts). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.direction")}</span>
+        <div className="objinfo-segment">
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + (stair.up ? " active" : "")}
+            onClick={() => host.onSetStairUp(true)}
+          >
+            {t("objinfo.stair.direction.up")}
+          </button>
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + (!stair.up ? " active" : "")}
+            onClick={() => host.onSetStairUp(false)}
+          >
+            {t("objinfo.stair.direction.down")}
+          </button>
+        </div>
+      </div>
+
+      {/* Editierbare Maße. */}
+      <DimensionField
+        label={t("objinfo.stair.width")}
+        value={stair.width}
+        onCommit={(v) => host.onSetStairWidth(v)}
+      />
+      <DimensionField
+        label={t("objinfo.stair.steps")}
+        value={stair.stepCount}
+        onCommit={(v) => host.onSetStairSteps(v)}
+      />
+      <DimensionField
+        label={t("objinfo.stair.rise")}
+        value={stair.totalRise}
+        onCommit={(v) => host.onSetStairRise(v)}
+      />
+
+      {/* Abgeleitete Werte (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.riser")}</span>
+        <span className="objinfo-fval">{formatM(stair.riserHeight)}</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.tread")}</span>
+        <span className="objinfo-fval">{formatM(stair.treadDepth)}</span>
+      </div>
+
+      {/* Referenzgeschoss (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.refFloor")}</span>
+        <span className="objinfo-fval">{stair.floorName}</span>
+      </div>
+
+      <div className="objinfo-sep" />
+
+      {/* UK/OK (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.bottom")}</span>
+        <span className="objinfo-fval">{formatM(stair.zBottom)}</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.top")}</span>
+        <span className="objinfo-fval">{formatM(stair.zTop)}</span>
+      </div>
+    </>
+  );
+}
+
+// ── Öffnungs-Attribut-Abschnitt ──────────────────────────────────────────────
+// Art (Fenster/Tür), Wirts-Wand, Position/Breite/Höhe/Brüstung, bei Türen
+// zusätzlich Anschlag/Aufschlag/Richtung/Winkel; UK/OK read-only.
+function OpeningSection({
+  opening,
+  host,
+}: {
+  opening: OpeningInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  const isDoor = opening.kind === "door";
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.opening.section")}</div>
+
+      {/* Art-Segment Fenster/Tür. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.kind")}</span>
+        <div className="objinfo-segment">
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + (!isDoor ? " active" : "")}
+            onClick={() => host.onSetOpeningKind("window")}
+          >
+            {t("objinfo.opening.kind.window")}
+          </button>
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + (isDoor ? " active" : "")}
+            onClick={() => host.onSetOpeningKind("door")}
+          >
+            {t("objinfo.opening.kind.door")}
+          </button>
+        </div>
+      </div>
+
+      {/* Wirts-Wand (read-only Anzeige des Geschosses/Wand-Bezugs). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.hostWall")}</span>
+        <span className="objinfo-fval">{opening.hostWallName}</span>
+      </div>
+
+      {/* Editierbare Maße. */}
+      <DimensionField
+        label={t("objinfo.opening.position")}
+        value={opening.position}
+        onCommit={(v) => host.onSetOpeningPosition(v)}
+      />
+      <DimensionField
+        label={t("objinfo.opening.width")}
+        value={opening.width}
+        onCommit={(v) => host.onSetOpeningWidth(v)}
+      />
+      <DimensionField
+        label={t("objinfo.opening.height")}
+        value={opening.height}
+        onCommit={(v) => host.onSetOpeningHeight(v)}
+      />
+      {!isDoor && (
+        <DimensionField
+          label={t("objinfo.opening.sill")}
+          value={opening.sillHeight}
+          onCommit={(v) => host.onSetOpeningSill(v)}
+        />
+      )}
+
+      {/* Tür-spezifisch: Anschlag / Aufschlagseite / Richtung / Winkel. */}
+      {isDoor && (
+        <>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.hinge")}</span>
+            <Dropdown
+              value={opening.hinge ?? "start"}
+              onChange={(v) => host.onSetOpeningHinge(v as "start" | "end")}
+              options={[
+                { value: "start", label: t("objinfo.opening.hinge.start") },
+                { value: "end", label: t("objinfo.opening.hinge.end") },
+              ]}
+              title={t("objinfo.opening.hinge")}
+              width={130}
+            />
+          </div>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.swing")}</span>
+            <Dropdown
+              value={opening.swing ?? "left"}
+              onChange={(v) => host.onSetOpeningSwing(v as "left" | "right")}
+              options={[
+                { value: "left", label: t("objinfo.opening.swing.left") },
+                { value: "right", label: t("objinfo.opening.swing.right") },
+              ]}
+              title={t("objinfo.opening.swing")}
+              width={130}
+            />
+          </div>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.dir")}</span>
+            <Dropdown
+              value={opening.openingDir ?? "in"}
+              onChange={(v) => host.onSetOpeningDir(v as "in" | "out")}
+              options={[
+                { value: "in", label: t("objinfo.opening.dir.in") },
+                { value: "out", label: t("objinfo.opening.dir.out") },
+              ]}
+              title={t("objinfo.opening.dir")}
+              width={130}
+            />
+          </div>
+          <DimensionField
+            label={t("objinfo.opening.swingAngle")}
+            value={opening.swingAngle ?? 90}
+            min={1}
+            onCommit={(v) => host.onSetOpeningSwingAngle(v)}
+          />
+        </>
+      )}
+
+      <div className="objinfo-sep" />
+
+      {/* UK/OK (read-only, aus der Wand-UK + Brüstung/Höhe abgeleitet). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.bottom")}</span>
+        <span className="objinfo-fval">{formatM(opening.zBottom)}</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.top")}</span>
+        <span className="objinfo-fval">{formatM(opening.zTop)}</span>
+      </div>
+    </>
+  );
+}
+
+// ── Decken-Attribut-Abschnitt ────────────────────────────────────────────────
+// Aufbau-Typ (einschichtig/mehrschichtig), Dicke/Preset, Referenzgeschoss +
+// OK-Bindung, Fläche. Alle Werte/Setter über den Host.
+function CeilingSection({
+  ceiling,
+  host,
+}: {
+  ceiling: CeilingInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  const isSingle = ceiling.singleLayer;
+  const multiPresets = ceiling.wallTypes.filter((wt) => wt.layerCount > 1);
+
+  function chooseSingle() {
+    if (isSingle) return;
+    host.onSetCeilingThickness(ceiling.thickness);
+  }
+  function chooseMulti() {
+    if (!isSingle) return;
+    const first = multiPresets[0];
+    if (first) host.onSetCeilingType(first.id);
+  }
+
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.ceiling.section")}</div>
+
+      {/* Aufbau-Typ-Segment. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.ceiling.buildup")}</span>
+        <div className="objinfo-segment">
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + (isSingle ? " active" : "")}
+            onClick={chooseSingle}
+          >
+            {t("objinfo.wall.single")}
+          </button>
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + (!isSingle ? " active" : "")}
+            onClick={chooseMulti}
+            disabled={isSingle && multiPresets.length === 0}
+          >
+            {t("objinfo.wall.multi")}
+          </button>
+        </div>
+      </div>
+
+      {/* Einschichtig → Dicke-Zahlfeld. Mehrschichtig → Preset-Dropdown. */}
+      {isSingle ? (
+        <DimensionField
+          label={t("objinfo.ceiling.thickness")}
+          value={ceiling.thickness}
+          onCommit={(v) => host.onSetCeilingThickness(v)}
+        />
+      ) : (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.ceiling.preset")}</span>
+          <Dropdown
+            value={ceiling.wallTypeId}
+            onChange={(id) => host.onSetCeilingType(id)}
+            options={ceiling.wallTypes.map((wt) => ({
+              value: wt.id,
+              label: t("objinfo.wall.presetLabel", {
+                name: wt.name,
+                thickness: wt.thickness.toFixed(2),
+              }),
+            }))}
+            title={t("objinfo.ceiling.preset")}
+            width={150}
+          />
+        </div>
+      )}
+
+      {/* Referenzgeschoss (read-only Anzeige). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.ceiling.refFloor")}</span>
+        <span className="objinfo-fval">{ceiling.floorName}</span>
+      </div>
+
+      {/* Fläche (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.ceiling.area")}</span>
+        <span className="objinfo-fval">{ceiling.area.toFixed(2)} m²</span>
+      </div>
+
+      <div className="objinfo-sep" />
+
+      {/* OK der Decke: an Geschoss gebunden ODER eigene Höhe. */}
+      <VerticalAnchorRow
+        label={t("objinfo.ceiling.top")}
+        anchor={ceiling.top}
+        defaultZ={ceiling.zTop}
+        floors={ceiling.floors}
+        defaultFloorId={ceiling.floorId}
+        onChange={(a) => host.onSetCeilingTop(a)}
+      />
+
+      {/* UK = OK − Dicke (abgeleitet, read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.ceiling.bottom")}</span>
+        <span className="objinfo-fval">{formatM(ceiling.zBottom)}</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.ceiling.height")}</span>
+        <span className="objinfo-fval">{formatM(ceiling.zTop - ceiling.zBottom)}</span>
+      </div>
+    </>
   );
 }
 
