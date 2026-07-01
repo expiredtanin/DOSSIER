@@ -35,6 +35,33 @@ function toScreen(p: Vec2): Vec2 {
 }
 
 /**
+ * Zerlegt den Rand eines Polygons in zusammenhängende OFFENE Linienzüge, wobei die
+ * Kanten in `noStroke` ausgelassen werden (Kante `i` = pts[i]→pts[i+1]). Genutzt,
+ * um die inneren Gehrungs-Stirnkanten an einer Wandecke NICHT zu stricheln (keine
+ * 45°-Naht, keine über den Apex schießende Barbe), während die Füllung das volle
+ * Polygon bleibt. Jeder Lauf beginnt an einer sichtbaren Kante, deren Vorgänger
+ * ausgelassen ist.
+ */
+function visibleEdgeRuns(scr: Vec2[], noStroke: number[]): Vec2[][] {
+  const n = scr.length;
+  const skip = new Set(noStroke.map((i) => ((i % n) + n) % n));
+  if (skip.size >= n || n < 2) return [];
+  const visible = (i: number) => !skip.has(((i % n) + n) % n);
+  const runs: Vec2[][] = [];
+  for (let s = 0; s < n; s++) {
+    if (!visible(s) || visible(s - 1 + n)) continue; // kein Lauf-Anfang
+    const run: Vec2[] = [scr[s]];
+    let j = s;
+    while (visible(j) && j - s < n) {
+      run.push(scr[(j + 1) % n]);
+      j++;
+    }
+    runs.push(run);
+  }
+  return runs;
+}
+
+/**
  * Papier-Massstab (docs/design/plans-output.md §3): Der Plan IST Papier-Space.
  * dpi = 96·devicePixelRatio (CSS definiert 1px = 1/96 inch). Strichstärken sind
  * in mm Papier definiert und werden über diese dpi in konstante Bildschirm-Pixel
@@ -2565,44 +2592,62 @@ function renderPrimitive(
   };
   switch (p.kind) {
     case "polygon": {
-      const pts = p.pts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
+      const scr = p.pts.map(toScreen);
+      const pts = scr.map((s) => `${s.x},${s.y}`).join(" ");
       // Umriss-Strichstärke in mm Papier (Display: konstante px / Print: skaliert).
       const sw = weight(p.strokeWidthMm);
+      // Innere Gehrungs-Stirnkanten am Wandknoten (noStrokeEdges) NICHT stricheln:
+      // die Füllung bleibt das volle Polygon, aber die Diagonale am Knoten (Naht)
+      // und die überschießende Eck-Barbe entfallen. Sichtbare Kanten werden als
+      // zusammenhängende offene <polyline>-Läufe gezeichnet (keine Gehrung über
+      // die weggelassene Kante). Leeres/kein noStrokeEdges ⇒ voller Umriss.
+      const noStroke = p.noStrokeEdges;
+      const outline = () => {
+        if (!noStroke || noStroke.length === 0) {
+          return (
+            <polygon points={pts} fill="none" stroke={p.stroke} strokeWidth={sw} vectorEffect={vfx} />
+          );
+        }
+        const runs = visibleEdgeRuns(scr, noStroke);
+        return (
+          <>
+            {runs.map((run, ri) => (
+              <polyline
+                key={`e${ri}`}
+                points={run.map((s) => `${s.x},${s.y}`).join(" ")}
+                fill="none"
+                stroke={p.stroke}
+                strokeWidth={sw}
+                vectorEffect={vfx}
+              />
+            ))}
+          </>
+        );
+      };
       // Ohne Schraffur: reine Component-Füllung bzw. „none" (nur Umriss).
       if (p.hatch.pattern === "none") {
         return (
-          <polygon
-            points={pts}
-            fill={p.fill}
-            stroke={p.stroke}
-            strokeWidth={sw}
-            vectorEffect={vfx}
-          />
+          <g>
+            <polygon points={pts} fill={p.fill} stroke="none" />
+            {outline()}
+          </g>
         );
       }
       // Vollfüllung: Schraffurfarbe deckt die Component-Füllung (Poché).
       if (p.hatch.pattern === "solid") {
         return (
-          <polygon
-            points={pts}
-            fill={p.hatch.color}
-            stroke={p.stroke}
-            strokeWidth={sw}
-            vectorEffect={vfx}
-          />
+          <g>
+            <polygon points={pts} fill={p.hatch.color} stroke="none" />
+            {outline()}
+          </g>
         );
       }
-      // Linien-/Kreuz-Schraffur: erst Grundfüllung, dann Muster darüber.
+      // Linien-/Kreuz-Schraffur: erst Grundfüllung, dann Muster, dann Umriss.
       return (
         <g>
           <polygon points={pts} fill={p.fill} stroke="none" />
-          <polygon
-            points={pts}
-            fill={`url(#hatch-${index})`}
-            stroke={p.stroke}
-            strokeWidth={sw}
-            vectorEffect={vfx}
-          />
+          <polygon points={pts} fill={`url(#hatch-${index})`} stroke="none" />
+          {outline()}
         </g>
       );
     }

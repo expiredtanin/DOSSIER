@@ -11,7 +11,7 @@
 import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
 import type { GpuGeometry, Rgba } from './glPlanTypes';
-import { applyDash, buildHatchSegments } from './glPlanHatch';
+import { applyDashRuns, buildHatchRuns } from './glPlanHatch';
 
 const PX_PER_M = 90;
 
@@ -247,6 +247,44 @@ export function compilePrimitivesToGpu(
   const pushLine = (aM: Vec2, bM: Vec2, color: Rgba, strokeMm: number) =>
     strokePolyline([aM, bM], false, color, strokeMm);
 
+  /**
+   * Strichelt den Umriss eines Polygons, wobei die Kanten in `noStroke`
+   * ÜBERSPRUNGEN werden (Kante `i` = pts[i]→pts[i+1]). Die Füllung bleibt das
+   * volle Polygon; nur innere Gehrungs-Stirnkanten am Wandknoten entfallen. Die
+   * sichtbaren Kanten werden als zusammenhängende OFFENE Züge gestrichelt → an
+   * den weggelassenen Kanten laufen die Enden gerade aus (keine Gehrung über die
+   * Naht = keine überschießende Barbe). Leeres `noStroke` ⇒ geschlossener,
+   * gehrter Umriss wie bisher.
+   */
+  const strokePolygonOutline = (
+    ptsM: Vec2[],
+    color: Rgba,
+    strokeMm: number,
+    noStroke: number[] | undefined,
+  ) => {
+    const n = ptsM.length;
+    if (!noStroke || noStroke.length === 0 || n < 2) {
+      strokePolyline(ptsM, true, color, strokeMm);
+      return;
+    }
+    const skip = new Set(noStroke.map((i) => ((i % n) + n) % n));
+    if (skip.size >= n) return; // alle Kanten unterdrückt → nichts zeichnen
+    // Sichtbare Kanten zu zusammenhängenden Läufen bündeln; ein Lauf beginnt an
+    // einer sichtbaren Kante, deren Vorgänger übersprungen ist.
+    const visible = (i: number) => !skip.has(((i % n) + n) % n);
+    for (let s = 0; s < n; s++) {
+      if (!visible(s) || visible(s - 1 + n)) continue; // kein Lauf-Anfang
+      const run: Vec2[] = [ptsM[s]];
+      let j = s;
+      while (visible(j)) {
+        run.push(ptsM[(j + 1) % n]);
+        j++;
+        if (j - s >= n) break; // voller Umlauf (kann bei skip.size≥1 nicht sein)
+      }
+      strokePolyline(run, false, color, strokeMm);
+    }
+  };
+
   for (const prim of primitives) {
     if (prim.kind === 'polygon') {
       // Füllung (falls vorhanden).
@@ -266,21 +304,23 @@ export function compilePrimitivesToGpu(
       }
       // Schraffur (nach der Füllung, vor/passend zum Umriss — wie der SVG stapelt):
       // das Muster wird in echte Linien-Geometrie (Modell-Meter) tesselliert und
-      // aufs Polygon geclippt (konkav-fähig, even-odd). Musterlinien in derselben
-      // Papier-mm-Breite wie der SVG-`<pattern>`; `hatch.dash` wird geometrisch
-      // (Strich/Lücke) aufgelöst, da die GL-Linien-Pipeline kein Dash kennt.
+      // aufs Polygon geclippt (konkav-fähig, even-odd). Musterlinien fließen als
+      // zusammenhängende Läufe in `strokePolyline` → GEHRTE, glatte Übergänge
+      // (insb. die Dämmungswelle bleibt spitzenfrei). Breite = dieselbe Papier-mm
+      // wie der SVG-`<pattern>`; `hatch.dash` wird geometrisch (Strich/Lücke)
+      // aufgelöst, da die GL-Linien-Pipeline kein Dash kennt.
       if (prim.hatch && prim.hatch.pattern !== 'none' && prim.hatch.pattern !== 'solid') {
         const hatchColor = parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1];
         const hatchMm = prim.hatch.lineWeight > 0 ? prim.hatch.lineWeight : 0.13;
-        const segs = applyDash(buildHatchSegments(prim.pts, prim.hatch), prim.hatch.dash);
-        for (const s of segs) pushLine(s.a, s.b, hatchColor, hatchMm);
+        const runs = applyDashRuns(buildHatchRuns(prim.pts, prim.hatch), prim.hatch.dash);
+        for (const run of runs) strokePolyline(run, false, hatchColor, hatchMm);
       }
       // Umriss (crispe Kante) — geschlossener Ring, GEHRT (kein Stufen-Cap an
       // Ecken). Breite = ECHTE Papier-mm; der Renderer rechnet massstabs-/
       // zoomrichtig in px (wie SVG-printStrokeVb → GL == SVG).
       const stroke = parseColor(prim.stroke);
       if (stroke && prim.strokeWidthMm > 0 && prim.pts.length >= 2) {
-        strokePolyline(prim.pts, true, stroke, prim.strokeWidthMm);
+        strokePolygonOutline(prim.pts, stroke, prim.strokeWidthMm, prim.noStrokeEdges);
       }
     } else if (prim.kind === 'line') {
       const color = parseColor(prim.color) ?? [0.1, 0.1, 0.1, 1];

@@ -35,6 +35,14 @@ export interface HatchSegment {
 }
 
 /**
+ * Ein zusammenhängender Linienzug in Modell-Metern (≥2 Punkte). Gerade
+ * Musterlinien (diagonal/crosshatch) sind 2-Punkt-Läufe; die Dämmungs-Welle ist
+ * ein langer, an den Polygonkanten geclippter Lauf. Läufe fließen als EIN gehrter
+ * Streifen in `strokePolyline` → glatte Übergänge statt Butt-Cap-Stufen.
+ */
+export type HatchRun = Vec2[];
+
+/**
  * Achsen-ausgerichtetes Bounding-Rechteck eines Polygons (Modell-Meter).
  * Leeres Polygon → degeneriert (min>max), der Aufrufer erzeugt dann keine Linien.
  */
@@ -152,6 +160,67 @@ export function clipSegmentToPolygon(a: Vec2, b: Vec2, poly: Vec2[]): HatchSegme
 }
 
 /**
+ * Schneidet eine ZUSAMMENHÄNGENDE Polylinie `pts` gegen ein (auch KONKAVES)
+ * einfaches Polygon und liefert die innenliegenden Teile als CONTINUOUS runs
+ * (jeder Lauf = Vec2[] mit ≥2 Punkten). Anders als segmentweises Clippen bleiben
+ * aufeinanderfolgende Innen-Segmente in EINEM Lauf verbunden — die interne
+ * Tessellierung (z. B. Sinus-Stützpunkte) wird NICHT an jedem Vertex zerrissen.
+ * Nur ein echtes Austreten aus dem Polygon (bzw. eine Lücke) beginnt einen neuen
+ * Lauf. Nutzt dieselbe Even-Odd-/halb-offene-Kanten-Konvention wie
+ * {@link clipLineToPolygon} via {@link clipSegmentToPolygon}.
+ *
+ * Verfahren: jede Polylinien-Kante wird geclippt; die (in Laufrichtung
+ * sortierten) Innenstücke werden an den laufenden Lauf angehängt, solange ihr
+ * Anfang bündig ans bisherige Lauf-Ende anschließt. Sobald ein Innenstück nicht
+ * am Lauf-Ende beginnt (Wiedereintritt nach einem Austritt) oder die Kante gar
+ * kein Innenstück liefert (komplett außen), wird der Lauf abgeschlossen.
+ */
+export function clipPolylineToPolygon(pts: Vec2[], poly: Vec2[]): HatchRun[] {
+  if (pts.length < 2 || poly.length < 3) return [];
+  const EPS = 1e-9;
+  const near = (p: Vec2, q: Vec2) => Math.abs(p.x - q.x) < EPS && Math.abs(p.y - q.y) < EPS;
+
+  const runs: HatchRun[] = [];
+  let cur: HatchRun | null = null;
+
+  const closeRun = () => {
+    if (cur && cur.length >= 2) runs.push(cur);
+    cur = null;
+  };
+
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    // Innenstücke dieser Kante, in Laufrichtung a→b sortiert (clipSegment liefert
+    // sie bereits entlang der Trägergeraden geordnet; a→b ist die positive Richtung).
+    const pieces = clipSegmentToPolygon(a, b, poly);
+    for (const seg of pieces) {
+      // Kante in Laufrichtung orientieren (clipSegment kann a/b vertauschen).
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const ta = (seg.a.x - a.x) * dx + (seg.a.y - a.y) * dy;
+      const tb = (seg.b.x - a.x) * dx + (seg.b.y - a.y) * dy;
+      const s = ta <= tb ? seg.a : seg.b;
+      const e = ta <= tb ? seg.b : seg.a;
+
+      if (cur && near(cur[cur.length - 1], s)) {
+        // Nahtloser Anschluss ans Lauf-Ende → nur den neuen Endpunkt anhängen.
+        cur.push(e);
+      } else {
+        // Neuer Lauf (erster Innenteil oder Wiedereintritt nach Austritt).
+        closeRun();
+        cur = [s, e];
+      }
+    }
+    // Endete diese Kante NICHT genau am Polygonrand-Innenstück bis b (d. h. das
+    // letzte Innenstück reicht nicht bis zum Kantenende b), so tritt der Lauf hier
+    // aus dem Polygon → beim nächsten Innenteil beginnt ein neuer Lauf.
+    if (cur && !near(cur[cur.length - 1], b)) closeRun();
+  }
+  closeRun();
+  return runs;
+}
+
+/**
  * Erzeugt eine Schar paralleler, aufs Polygon geclippter Linien-Segmente:
  * Richtung `angleRad` (Modell-Raum, gegen den Uhrzeigersinn), Abstand `spacingM`
  * (Meter) senkrecht zur Richtung, Phasen-Versatz `offsetM` (Meter, entlang der
@@ -209,43 +278,68 @@ function rotate(v: Vec2, rad: number): Vec2 {
 const DASH_MM_TO_M = (1 / 0.13) * PX_TO_M;
 
 /**
- * Zerlegt eine Segment-Schar entlang eines Strichmusters (`dash`, in mm-Papier)
- * in die durchgezogenen Teilstücke. `dash` ist eine Sequenz [an, aus, an, …];
- * ungerade Längen werden (wie SVG/Canvas) verdoppelt. Leeres/ungültiges Muster
- * → Segmente unverändert (durchgezogen). Die Phase läuft je Segment neu bei 0
- * (Segmente sind bereits kurze Musterlinien-Stücke → sichtbar konsistent).
+ * Zerlegt zusammenhängende Läufe entlang eines Strichmusters (`dash`, in mm-
+ * Papier) in die durchgezogenen Teil-Läufe. `dash` ist eine Sequenz
+ * [an, aus, an, …]; ungerade Längen werden (wie SVG/Canvas) verdoppelt. Leeres/
+ * ungültiges Muster → Läufe unverändert (durchgezogen). Die Phase läuft ENTLANG
+ * DES GESAMTEN LAUFS durch (über Stützpunkt-Ecken hinweg), sodass die Striche
+ * einer gekrümmten Musterlinie (Dämmungswelle) gleichmäßig und ecken-übergreifend
+ * verteilt sind. Jedes „an"-Stück wird als eigener (kurzer) Lauf ausgegeben und
+ * kann selbst über mehrere Stützpunkt-Segmente reichen.
  */
-export function applyDash(segs: HatchSegment[], dash: number[] | null): HatchSegment[] {
-  if (!dash || dash.length === 0) return segs;
+export function applyDashRuns(runs: HatchRun[], dash: number[] | null): HatchRun[] {
+  if (!dash || dash.length === 0) return runs;
   // Musterlängen in Meter; nicht-positive/ungültige Werte verwerfen.
   const pat = dash.map((d) => Math.max(0, d) * DASH_MM_TO_M).filter((d) => d > 0);
-  if (pat.length === 0) return segs;
+  if (pat.length === 0) return runs;
   // Ungerade Länge → verdoppeln (Standard-Dash-Semantik).
   const cycle = pat.length % 2 === 0 ? pat : pat.concat(pat);
   const total = cycle.reduce((s, d) => s + d, 0);
-  if (total <= 1e-9) return segs;
+  if (total <= 1e-9) return runs;
 
-  const out: HatchSegment[] = [];
-  for (const seg of segs) {
-    const dx = seg.b.x - seg.a.x;
-    const dy = seg.b.y - seg.a.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-12) continue;
-    const ux = dx / len, uy = dy / len;
-    let pos = 0;
+  const out: HatchRun[] = [];
+  for (const run of runs) {
+    if (run.length < 2) continue;
+    // Bogenlänge je Stützpunkt vorab, um Dash-Positionen auf Segmente abzubilden.
     let idx = 0; // gerade Index = „an", ungerade = „aus"
-    while (pos < len - 1e-9) {
-      const remain = cycle[idx % cycle.length];
-      const end = Math.min(len, pos + remain);
-      if (idx % 2 === 0 && end - pos > 1e-9) {
-        out.push({
-          a: { x: seg.a.x + ux * pos, y: seg.a.y + uy * pos },
-          b: { x: seg.a.x + ux * end, y: seg.a.y + uy * end },
-        });
+    let dashLeft = cycle[0]; // verbleibende Länge im aktuellen Dash-Zustand
+    let on = true;
+    let piece: Vec2[] | null = [run[0]]; // aktuell offenes „an"-Stück
+
+    const flush = () => {
+      if (piece && piece.length >= 2) out.push(piece);
+      piece = null;
+    };
+
+    for (let i = 0; i + 1 < run.length; i++) {
+      let a = run[i];
+      const b = run[i + 1];
+      let segLen = Math.hypot(b.x - a.x, b.y - a.y);
+      if (segLen < 1e-12) continue;
+      let ux = (b.x - a.x) / segLen, uy = (b.y - a.y) / segLen;
+      // Segment ggf. an Dash-Grenzen zerschneiden.
+      while (segLen > 1e-9) {
+        const step = Math.min(segLen, dashLeft);
+        const mid: Vec2 = { x: a.x + ux * step, y: a.y + uy * step };
+        if (on) {
+          if (!piece) piece = [a];
+          piece.push(mid);
+        }
+        // Vorrücken.
+        a = mid;
+        segLen -= step;
+        dashLeft -= step;
+        if (dashLeft <= 1e-9) {
+          // Dash-Zustand wechseln.
+          if (on) flush();
+          on = !on;
+          idx++;
+          dashLeft = cycle[idx % cycle.length];
+          if (on) piece = [a]; // neues „an"-Stück beginnt hier
+        }
       }
-      pos = end;
-      idx++;
     }
+    flush();
   }
   return out;
 }
@@ -262,19 +356,21 @@ function toModelAngleRad(screenDeg: number): number {
 }
 
 /**
- * Baut die Schraffur eines Polygons als Linien-Segmente (Modell-Meter). Bildet
- * die SVG-`<pattern>`-Geometrie 1:1 nach:
+ * Baut die Schraffur eines Polygons als zusammenhängende Läufe ({@link HatchRun},
+ * Modell-Meter). Bildet die SVG-`<pattern>`-Geometrie 1:1 nach:
  *  • diagonal   — eine Schar; SVG-Kachel 8·scale px mit senkrechter Musterlinie
- *                 (x-konstant), gedreht um `angle`. Abstand = 8·scale px.
+ *                 (x-konstant), gedreht um `angle`. Abstand = 8·scale px. Jede
+ *                 Musterlinie ist ein gerader 2-Punkt-Lauf.
  *  • crosshatch — zwei Scharen (90° versetzt), gleicher Abstand.
  *  • insulation — weiche Wellenlinie, Kachel 14×10·scale px, gedreht um `angle`;
- *                 als segmentierte Polylinie tesselliert und geclippt.
+ *                 als DURCHGEHENDE Polylinie tesselliert und in kontinuierliche
+ *                 Läufe geclippt (glatte gehrte Übergänge statt Butt-Cap-Stufen).
  *  • solid/none — keine Linien (Vollfüllung/Umriss übernimmt der Aufrufer).
  *
  * Skala 0/negativ wird auf 1 geklemmt (kein Division-durch-Null, keine leere
  * Kachel), damit degeneriert konfigurierte Hatches trotzdem sichtbar bleiben.
  */
-export function buildHatchSegments(poly: Vec2[], hatch: HatchRender): HatchSegment[] {
+export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
   if (poly.length < 3) return [];
   const pattern = hatch.pattern;
   if (pattern === 'none' || pattern === 'solid') return [];
@@ -282,7 +378,7 @@ export function buildHatchSegments(poly: Vec2[], hatch: HatchRender): HatchSegme
   const scale = hatch.scale > 1e-6 ? hatch.scale : 1;
 
   if (pattern === 'insulation') {
-    return insulationSegments(poly, hatch, scale);
+    return insulationRuns(poly, hatch, scale);
   }
 
   // diagonal / crosshatch: parallele Geradenscharen.
@@ -296,14 +392,15 @@ export function buildHatchSegments(poly: Vec2[], hatch: HatchRender): HatchSegme
   const rot = toModelAngleRad(hatch.angle);
   const dir1 = rotate({ x: 0, y: -1 }, rot);
   const a1 = Math.atan2(dir1.y, dir1.x);
-  const segs = hatchLineFamily(poly, a1, spacingM, 0);
+  // Gerade Musterlinien → 2-Punkt-Läufe (visuell identisch zu Butt-Cap-Segmenten).
+  const runs: HatchRun[] = hatchLineFamily(poly, a1, spacingM, 0).map((s) => [s.a, s.b]);
 
   if (pattern === 'crosshatch') {
     // Zweite Schar: die SVG-Kachel trägt zusätzlich eine horizontale Linie
     // (x-Achse der Kachel) → 90° zur ersten, gleicher Abstand.
-    for (const s of hatchLineFamily(poly, a1 + Math.PI / 2, spacingM, 0)) segs.push(s);
+    for (const s of hatchLineFamily(poly, a1 + Math.PI / 2, spacingM, 0)) runs.push([s.a, s.b]);
   }
-  return segs;
+  return runs;
 }
 
 /**
@@ -311,11 +408,13 @@ export function buildHatchSegments(poly: Vec2[], hatch: HatchRender): HatchSegme
  * pro Kachel eine weiche Bézier-Welle. Wir bilden sie als Scharwellen nach: eine
  * Schar paralleler „Musterachsen" im Abstand der Kachelhöhe (10·scale px), auf
  * jeder Achse eine tessellierte Sinuswelle mit Wellenlänge = Kachelbreite
- * (14·scale px) und weicher Amplitude. Jede Wellen-Polylinie wird Segment für
- * Segment aufs Polygon geclippt (even-odd), sodass die Welle exakt an den
- * Polygonkanten endet.
+ * (14·scale px) und weicher Amplitude. Jede Wellen-Polylinie wird als
+ * DURCHGEHENDER Zug aufs Polygon geclippt ({@link clipPolylineToPolygon}), sodass
+ * benachbarte Wellen-Stützpunkte in EINEM Lauf verbunden bleiben. Der Compiler
+ * strokt den Lauf als gehrten Streifen → glatte, spitzenfreie Welle. Die Welle
+ * endet exakt an den Polygonkanten (even-odd-Clipping, konkav-fähig).
  */
-function insulationSegments(poly: Vec2[], hatch: HatchRender, scale: number): HatchSegment[] {
+function insulationRuns(poly: Vec2[], hatch: HatchRender, scale: number): HatchRun[] {
   const bb = bbox(poly);
   const rot = toModelAngleRad(hatch.angle);
 
@@ -341,11 +440,12 @@ function insulationSegments(poly: Vec2[], hatch: HatchRender, scale: number): Ha
   }
   if (!(uMax > uMin) || !(vMax > vMin)) return [];
 
-  // Feinheit der Wellen-Tessellierung (Segmente je Wellenlänge).
-  const STEPS = 12;
+  // Feinheit der Wellen-Tessellierung (Segmente je Wellenlänge). Höher als beim
+  // segmentweisen Ansatz, da die Läufe jetzt glatt gehrt werden → weichere Welle.
+  const STEPS = 22;
   const du = wavelength / STEPS;
 
-  const out: HatchSegment[] = [];
+  const runs: HatchRun[] = [];
   const toWorld = (u: number, v: number): Vec2 => ({
     x: center.x + uDir.x * u + vDir.x * v,
     y: center.y + uDir.y * u + vDir.y * v,
@@ -358,16 +458,13 @@ function insulationSegments(poly: Vec2[], hatch: HatchRender, scale: number): Ha
 
   for (let r = firstRow; r <= lastRow; r++) {
     const vBase = r * rowGap;
-    // Eine Welle als Polylinie tessellieren, dann JEDES Segment clippen.
-    let prev: Vec2 | null = null;
+    // Ganze Welle als EINE Polylinie tessellieren, dann DURCHGEHEND clippen.
+    const wavePts: Vec2[] = [];
     for (let u = uStart; u <= uEnd + 1e-9; u += du) {
       const wave = amplitude * Math.sin((2 * Math.PI * u) / wavelength);
-      const pt = toWorld(u, vBase + wave);
-      if (prev) {
-        for (const s of clipSegmentToPolygon(prev, pt, poly)) out.push(s);
-      }
-      prev = pt;
+      wavePts.push(toWorld(u, vBase + wave));
     }
+    for (const run of clipPolylineToPolygon(wavePts, poly)) runs.push(run);
   }
-  return out;
+  return runs;
 }

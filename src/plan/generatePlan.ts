@@ -46,6 +46,7 @@ import {
   sub,
   wallCorners,
 } from "../model/geometry";
+import type { Line } from "../model/geometry";
 
 /**
  * Detailgrad der Plan-Darstellung (Oberleiste „grob/mittel/fein"). Steuert hier
@@ -142,6 +143,17 @@ export type Primitive =
       hatch: HatchRender;
       /** Gedimmt zeichnen (Darstellungsmodus „andere grau"). */
       greyed?: boolean;
+      /**
+       * Kanten-Indizes, die NICHT umrissen (gestrichen) werden dürfen — die Füllung
+       * bleibt das volle Polygon. Kante `i` läuft von `pts[i]` nach `pts[(i+1)%n]`.
+       * Damit werden die inneren Gehrungs-/Stoß-Stirnflächen an einer Wandecke
+       * unterdrückt: die Diagonale, an der GLEICHFARBIGE Schichten zweier Wände
+       * aneinanderstoßen, würde sonst als sichtbare 45°-Naht erscheinen und der
+       * Umriss würde als Barbe über den Eck-Apex hinausschießen (Gehrungs-Spitze).
+       * Längskanten (Schichtfugen zwischen VERSCHIEDENEN Materialien) bleiben
+       * gestrichen — nur die Stoß-Stirnkanten am Knoten entfallen.
+       */
+      noStrokeEdges?: number[];
       /**
        * ID der Wand, zu der dieses Schicht-/Umriss-Polygon gehört (für die
        * Links-Klick-Auswahl: die PlanView markiert ALLE Polygone derselben
@@ -638,6 +650,19 @@ function addWallPoche(
   // Vereinfachte Füllung (grob): Farbe des tragenden Bauteils (höchste Priorität).
   const simpleFill = backboneColor(project, wt);
 
+  // Kanten-Indizes der inneren Gehrungs-Stirnflächen (die Diagonalen am Knoten).
+  // clippedBand liefert [A.start, A.end, B.end, B.start] → Kante 1 (A.end→B.end)
+  // ist die endCut-Stirnfläche, Kante 3 (B.start→A.start) die startCut-Stirnfläche.
+  // Diese werden NICHT umrissen: sonst 45°-Naht zwischen gleichfarbigen Schichten
+  // + überschießende Gehrungs-Barbe am Eck-Apex. Freie Enden (kein Cut) bleiben
+  // rechtwinklig gestrichen. Die Längskanten (Schichtfugen) bleiben stets sichtbar.
+  const joinEdges = (startCut: Line | null, endCut: Line | null): number[] => {
+    const e: number[] = [];
+    if (endCut) e.push(1);
+    if (startCut) e.push(3);
+    return e;
+  };
+
   for (const [s, e] of segments) {
     const p1 = along(wall.start, wall.end, s);
     const p2 = along(wall.start, wall.end, e);
@@ -656,6 +681,7 @@ function addWallPoche(
         strokeWidthMm: outlineMm,
         hatch: NO_HATCH,
         greyed,
+        noStrokeEdges: joinEdges(startCut, endCut),
         wallId,
       });
       continue;
@@ -664,6 +690,7 @@ function addWallPoche(
     // mittel/fein: Schichten von außen (-T/2) nach innen (+T/2) stapeln. Jede
     // Schicht löst Bauteil (Füllfarbe) + Schraffur (Muster/Maßstab/Winkel/Farbe)
     // auf; die Schichtfugen werden dünn gestrichen.
+    const bandJoinEdges = joinEdges(startCut, endCut);
     let off = refOff - total / 2;
     for (const layer of wt.layers) {
       const comp = getComponent(project, layer.componentId);
@@ -675,12 +702,16 @@ function addWallPoche(
         strokeWidthMm: layerLineMm,
         hatch: resolveHatch(project, comp.hatchId),
         greyed,
+        // Die Diagonale am Knoten NICHT stricheln → keine 45°-Naht zwischen
+        // gleichfarbigen Schichten der beiden Wände.
+        noStrokeEdges: bandJoinEdges,
         wallId,
       });
       off += layer.thickness;
     }
     // Kräftige Wand-Umrisslinie über die volle Dicke (nur Kontur, keine Füllung),
-    // damit die Wand sich klar von den dünnen Schichtfugen abhebt.
+    // damit die Wand sich klar von den dünnen Schichtfugen abhebt. Die Gehrungs-
+    // Stirnkanten am Knoten entfallen → sauberer Eck-Apex ohne überschießende Barbe.
     out.push({
       kind: "polygon",
       pts: clippedBand(p1, p2, refOff - total / 2, refOff + total / 2, startCut, endCut),
@@ -689,6 +720,7 @@ function addWallPoche(
       strokeWidthMm: outlineMm,
       hatch: NO_HATCH,
       greyed,
+      noStrokeEdges: bandJoinEdges,
       wallId,
     });
   }
