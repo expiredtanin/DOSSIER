@@ -1,0 +1,54 @@
+[package]
+name = "render3d"
+version = "0.1.0"
+edition = "2021"
+description = "Nativer wgpu-3D-Renderer fuer die CAD-Modellsicht (Wand-Extrusion + Kamera + Pipeline)"
+
+# Bewusst NICHT Teil des src-tauri-Workspaces: die Mesh-Bibliothek soll unabhaengig
+# von Tauri baubar/testbar bleiben (headless, ohne Webview-Toolchain). Der leere
+# [workspace]-Block schliesst die Crate aus einem uebergeordneten Workspace aus,
+# sodass `cargo test`/`cargo build` hier eigenstaendig laufen (Muster: render2d).
+[workspace]
+
+[features]
+# Standard: nur Mesh-Erzeugung (Wand-Extrusion) + Kamera/Matrizen + WGSL-Quellen.
+# Diese Schicht ist serde-only, hat keine GPU-Abhaengigkeit und ist headless
+# vollstaendig per `cargo test` pruefbar.
+default = []
+
+# GPU-Pipeline (wgpu). Baut auch headless (wgpu laedt Vulkan/GL erst zur Laufzeit
+# dynamisch), rendert aber nur mit einer aktiven Grafik-Session. Enthaelt Tiefen-
+# puffer, View-Projektions-Uniform und ein Directional-Light im Fragment-Shader.
+render = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+
+# Fenster-Spike (winit) inkl. lauffaehigem Binary mit Orbit-Kamera. Braucht
+# Wayland/X11 + eine Display-Session zur visuellen Verifikation.
+window = ["render", "dep:winit", "dep:env_logger"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+# --- GPU (nur mit Feature "render") ------------------------------------------
+# Standard-Features von wgpu (wgsl, webgpu, dx12, metal). Die Linux-Backends
+# Vulkan/GLES aktiviert wgpu selbst ueber seine target-spezifischen Defaults —
+# es gibt in wgpu 22 keine expliziten `vulkan`/`gles`-Feature-Namen.
+wgpu = { version = "22", optional = true }
+bytemuck = { version = "1", optional = true, features = ["derive"] }
+pollster = { version = "0.3", optional = true }
+
+# --- Fenster (nur mit Feature "window") --------------------------------------
+winit = { version = "0.30", optional = true }
+env_logger = { version = "0.11", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+# naga validiert die WGSL-Quellen headless (Parser + Validator) im Test, ohne
+# GPU/Display. Version an wgpu 22 gekoppelt (transitiv ohnehin vorhanden).
+naga = { version = "22", features = ["wgsl-in"] }
+
+# Der Fenster-Spike ist nur mit Feature "window" verfuegbar; ohne das Feature
+# wird das Binary aus dem Build ausgeschlossen (required-features).
+[[bin]]
+name = "spike3d"
+path = "src/bin/spike3d.rs"
+required-features = ["window"]
