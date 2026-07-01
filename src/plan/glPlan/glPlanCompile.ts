@@ -11,6 +11,7 @@
 import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
 import type { GpuGeometry, Rgba } from './glPlanTypes';
+import { applyDash, buildHatchSegments } from './glPlanHatch';
 
 const PX_PER_M = 90;
 
@@ -262,6 +263,17 @@ export function compilePrimitivesToGpu(
           for (const t of tris) fillIdx.push(base + t);
           addFillBatch(tris.length, fill);
         }
+      }
+      // Schraffur (nach der Füllung, vor/passend zum Umriss — wie der SVG stapelt):
+      // das Muster wird in echte Linien-Geometrie (Modell-Meter) tesselliert und
+      // aufs Polygon geclippt (konkav-fähig, even-odd). Musterlinien in derselben
+      // Papier-mm-Breite wie der SVG-`<pattern>`; `hatch.dash` wird geometrisch
+      // (Strich/Lücke) aufgelöst, da die GL-Linien-Pipeline kein Dash kennt.
+      if (prim.hatch && prim.hatch.pattern !== 'none' && prim.hatch.pattern !== 'solid') {
+        const hatchColor = parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1];
+        const hatchMm = prim.hatch.lineWeight > 0 ? prim.hatch.lineWeight : 0.13;
+        const segs = applyDash(buildHatchSegments(prim.pts, prim.hatch), prim.hatch.dash);
+        for (const s of segs) pushLine(s.a, s.b, hatchColor, hatchMm);
       }
       // Umriss (crispe Kante) — geschlossener Ring, GEHRT (kein Stufen-Cap an
       // Ecken). Breite = ECHTE Papier-mm; der Renderer rechnet massstabs-/
