@@ -11,6 +11,14 @@
 
 export type Vec2 = { x: number; y: number };
 
+// SIA-416-Blatt-Kategorie eines Raums. Der reine Rechenkern (geometry/roomArea)
+// definiert den Typ; hier nur der Typ-Import (kein Zyklus zur Laufzeit).
+import type { SiaCategory } from "../geometry/roomArea";
+export type { SiaCategory } from "../geometry/roomArea";
+// Rich-Text-Dokument für den Raum-Stempel (frei editierbarer Teil).
+import type { RichTextDoc } from "../text/richText";
+export type { RichTextDoc } from "../text/richText";
+
 // ── Ressourcen-Bibliotheken (Vectorworks-/DOSSIER-Stil) ────────────────────
 // Verwaltete, per id verwiesene Stil-Ressourcen. Verweis-Kette:
 //   Component → Hatch → LineStyle.
@@ -57,6 +65,33 @@ export interface HatchStyle {
 }
 
 /**
+ * PBR-Material-Karten eines Bauteils (3D-Texturierung). Jede URL verweist auf
+ * ein Bild — entweder ein eingebautes Bibliotheks-Asset unter
+ * `/assets/materials/...` ODER eine per Nutzer-Upload erzeugte Object-/Data-URL.
+ * Fehlende Karten werden weggelassen (z. B. nur `color` bei einem Upload).
+ * `sizeM` ist die physische Kantenlänge EINER Texturkachel in Metern (für die
+ * korrekte Skalierung der Wiederholung), Default 1.0 m.
+ */
+export interface ComponentMaterial {
+  /** Optionaler Verweis auf ein Bibliotheks-Asset (`MaterialAsset.id`). */
+  libraryId?: string;
+  /** Albedo-/Farb-Karte (map). */
+  color?: string;
+  /** Normal-Karte (normalMap) — erzeugt die Oberflächentiefe. */
+  normal?: string;
+  /** Rauheits-Karte (roughnessMap). */
+  roughness?: string;
+  /** Metallizitäts-Karte (metalnessMap). */
+  metalness?: string;
+  /** Höhen-/Displacement-Karte (displacementMap, dezent angewandt). */
+  displacement?: string;
+  /** Ambient-Occlusion-Karte (aoMap). */
+  ao?: string;
+  /** Physische Kachelgröße in Metern (Default 1.0). */
+  sizeM?: number;
+}
+
+/**
  * Ein Bauteil-Material (Component Manager) — vereint Plan-Schnittdarstellung
  * (Schraffur) und 3D-Erscheinung. Ersetzt das frühere `Material`.
  */
@@ -69,6 +104,12 @@ export interface Component {
   hatchId: string;
   /** Optionale 3D-Textur (vorerst ignoriert). */
   texture3d?: string;
+  /**
+   * Optionales echtes PBR-Material für die 3D-Texturierung (Bibliothek ODER
+   * Upload). Fehlt es, bleibt das heutige Verhalten (matte Farbe). Wirkt nur im
+   * Render-Modus „textured".
+   */
+  material?: ComponentMaterial;
   /** Verschneidungs-Rang: höher läuft am Stoß durch (Backbone). */
   joinPriority: number;
 }
@@ -86,6 +127,182 @@ export interface WallType {
   id: string;
   name: string;
   layers: Layer[];
+}
+
+// ── Parametrische Wände (Parametric Walls) ────────────────────────────────
+// Parametrische Wand-Regeln generieren automatisch Wall[]-Arrays — analog zu
+// FreeCAD BIM. Sie leben in Project.resources.parametricWalls[] und werden
+// durch `resolveParametricWall()` in `src/model/parametricWalls.ts` aufgelöst.
+// Ausgabe: normale Wall[]-Objekte (kein neuer Elementtyp).
+
+/**
+ * Eine parametrische Wand-Regel — generiert automatisch Wall[]-Einträge für
+ * ein gegebenes Geschoss. Lebt in der Ressourcen-Bibliothek des Projekts.
+ * Wird über `resolveParametricWall()` aufgelöst, nicht zur Laufzeit gespeichert.
+ */
+export interface ParametricWall {
+  id: string;
+  /** Anzeigename, z. B. „Wohnbau-Raster 3m". */
+  name: string;
+  /** Optionale Beschreibung (für den Ressourcen-Manager). */
+  description?: string;
+  /**
+   * Geordnete Liste der anzuwendenden Regeln. Spätere Regeln können die
+   * Ausgabe früherer Regeln verfeinern (z. B. Dickenzuweisung nach Raster).
+   */
+  rules: ParametricRule[];
+  /**
+   * Rückfall-Wandtyp, falls eine Regel keinen eigenen `wallTypeId` nennt.
+   * Muss auf einen gültigen WallType im Projekt verweisen.
+   */
+  defaultWallTypeId: string;
+}
+
+/**
+ * Eine einzelne parametrische Regel — eine Strategie zur Wandplatzierung oder
+ * -verfeinerung. Regeln werden als Discriminated Union kodiert; der `type`-Tag
+ * bestimmt, welche Felder verfügbar sind.
+ */
+export type ParametricRule =
+  | GridRule
+  | ModuleRule
+  | ConditionalThicknessRule
+  | ReferenceLineRule
+  | SequenceRule;
+
+/**
+ * Raster-Regel: generiert Wände entlang gleichmäßiger X-/Y-Achsen.
+ * Typischer Anwendungsfall: Tragwerks-Achsraster (z. B. 3 m Abstand).
+ *
+ * Ablauf (Engine):
+ *   1. Rasterachsen aus `spacing` oder (später) verlinkter Grid-Ressource.
+ *   2. Je Achse eine Wand von Rand zu Rand (begrenzt durch `boundaryId`).
+ *   3. Wandtyp, Referenzlinie und Höhe gemäß Regelfelder.
+ */
+export interface GridRule {
+  type: "grid";
+  /**
+   * Optionaler Verweis auf eine Grid-Ressource (Phase 3). Für MVP wird
+   * stattdessen `spacing` genutzt.
+   */
+  gridId?: string;
+  /** Rasterabstand in Metern (Default: 3.0). Wird genutzt, wenn kein `gridId`. */
+  spacing?: number;
+  /**
+   * Achsrichtungen: „x" = nur horizontale Wände, „y" = nur vertikale,
+   * „both" = Vollraster.
+   */
+  directions: "x" | "y" | "both";
+  /**
+   * Optionaler Verweis auf eine Drawing2D-Grenze (als Clipping-Polygon).
+   * Fehlt er, reicht das Raster über den sichtbaren Bereich des Geschosses.
+   */
+  boundaryId?: string;
+  /** Optionale Wandtyp-Übersteuerung; sonst `defaultWallTypeId`. */
+  wallTypeId?: string;
+  /** Lage der Wandachse über die Dicke (Vectorworks-Stil). */
+  referenceLine?: WallReferenceLine;
+  /** Optionale Höhenübersteuerung in Metern; sonst Geschosshöhe. */
+  height?: number;
+}
+
+/**
+ * Modul-Regel: teilt eine Referenzspanne in proportionale Felder auf.
+ * Typischer Anwendungsfall: Tragwerks-Joche (z. B. 6 m-Module in einem Bauteil).
+ *
+ * Ablauf (Engine):
+ *   1. Gesamtspanne aus `referenceWallId` oder Geschossausdehnung ableiten.
+ *   2. In Module der Größe `moduleSize` unterteilen.
+ *   3. Querwände an jedem Modulteilungspunkt setzen.
+ */
+export interface ModuleRule {
+  type: "module";
+  /** Modulmaß in Metern (z. B. 6.0, 3.6). */
+  moduleSize: number;
+  /** Ausrichtung der Trennwände: „x" = quer zur X-Achse, „y" = quer zur Y-Achse. */
+  direction: "x" | "y";
+  /**
+   * Optionaler Verweis auf eine Referenzwand, die die Spannweite definiert.
+   * Fehlt er, wird die Geschoss-Ausdehnung genutzt (Phase 3: Achsen-Referenz).
+   */
+  referenceWallId?: string;
+  /** Optionale Wandtyp-Übersteuerung; sonst `defaultWallTypeId`. */
+  wallTypeId?: string;
+  /** Lage der Wandachse über die Dicke. */
+  referenceLine?: WallReferenceLine;
+  /** Optionale Höhenübersteuerung in Metern. */
+  height?: number;
+}
+
+/**
+ * Bedingte-Dicken-Regel: weist bereits generierten Wänden einen anderen
+ * Wandtyp zu, wenn eine Bedingung erfüllt ist.
+ * Typischer Anwendungsfall: Außenwände erhalten einen anderen Aufbau als Innenwände.
+ *
+ * Ablauf (Engine):
+ *   Bestehende Wände aus `existingWalls` filtern → `wallTypeId` ändern.
+ *   Gibt modifizierte Kopien zurück (keine Mutation).
+ */
+export interface ConditionalThicknessRule {
+  type: "conditional-thickness";
+  /**
+   * Bedingung für den Treffer:
+   *   • „exterior"  — Wand liegt am Außenrand (ermittelt via Grenzpolygon).
+   *   • „interior"  — Wand liegt im Inneren.
+   *   • „bearing"   — tragende Wand (über Tag oder Wandtyp-Rang).
+   *   • beliebiger String — benutzerdefiniertes Tag (Phase 3: Wall.tags[]).
+   */
+  condition: "exterior" | "interior" | "bearing" | string;
+  /** Ziel-Wandtyp, der bei Treffer gesetzt wird. */
+  wallTypeId: string;
+  /**
+   * Verknüpfungslogik für mehrere Bedingungen (Phase 3: mehrere `condition`-Felder).
+   * Vorerst ungenutzt; Default ist implizites „or".
+   */
+  logic?: "and" | "or";
+}
+
+/**
+ * Referenzlinien-Regel: setzt die `referenceLine`-Eigenschaft bei passenden
+ * Wänden einheitlich (Vectorworks-Stil).
+ * Typischer Anwendungsfall: Alle Außenwände auf „left" (linke Fläche = Fassade).
+ *
+ * Ablauf (Engine):
+ *   Bestehende Wände aus `existingWalls` filtern → `referenceLine` setzen.
+ *   Gibt modifizierte Kopien zurück.
+ */
+export interface ReferenceLineRule {
+  type: "reference-line";
+  /** Neue Lage der Wandachse, die einheitlich gesetzt wird. */
+  referenceLine: WallReferenceLine;
+  /**
+   * Filterziel:
+   *   • „all"      — alle Wände im aktuellen Satz.
+   *   • „exterior" — nur Außenwände (wie bei ConditionalThicknessRule).
+   *   • beliebiger String — benutzerdefiniertes Tag (Phase 3).
+   */
+  target: "all" | "exterior" | string;
+}
+
+/**
+ * Sequenz-Regel: fasst mehrere Unterregeln zusammen und wendet sie geordnet an.
+ * Jede Unterregel kann die Ausgabe der vorherigen verfeinern.
+ * Typischer Anwendungsfall: Raster → bedingte Dicke → Referenzlinie als atomare Einheit.
+ *
+ * Ablauf (Engine):
+ *   Regeln in `rules` werden sequenziell ausgeführt; das Ergebnis jeder Regel wird
+ *   als `existingWalls` der nächsten übergeben. `stopOnMatch` bricht ab, sobald
+ *   eine Unterregel mindestens eine Wand generiert hat.
+ */
+export interface SequenceRule {
+  type: "sequence";
+  /** Unterregeln, in Ausführungsreihenfolge. */
+  rules: ParametricRule[];
+  /**
+   * Wenn `true`: Abbruch nach der ersten Unterregel, die mindestens eine Wand
+   * generiert/verändert. Ähnlich wie ein Short-Circuit-Fallback.
+   */
+  stopOnMatch?: boolean;
 }
 
 /**
@@ -206,8 +423,219 @@ export interface Wall {
   top?: VerticalAnchor;
 }
 
+/**
+ * Eine Decke (Slab) — ein geschossgebundenes, mehrschichtiges Flächenbauteil,
+ * definiert über einen GESCHLOSSENEN Umriss (Polygon) im Grundriss und eine
+ * Dicke. Analog zur Wand trägt sie ihren Schichtaufbau über einen `wallTypeId`
+ * (die Bauteil-/Schraffur-/Materialauflösung ist identisch); eine optionale
+ * `thickness` übersteuert die Gesamtdicke des Typs (Meter).
+ *
+ * Vertikale Lage: die OBERKANTE (OK) der Decke. Fehlt `top`, liegt die OK an der
+ * Oberkante des Geschosses (baseElevation + floorHeight — also bündig mit dem
+ * Wandkopf); die Decke wächst um `thickness` nach UNTEN. `top: custom` setzt eine
+ * absolute Z-Höhe, `top: floor` bindet die OK an ein Geschoss.
+ */
+export interface Ceiling {
+  id: string;
+  type: "ceiling";
+  /** Zugehörige Zeichnungsebene (Geschoss). */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), z. B. "30" für Decken. */
+  categoryCode: string;
+  /**
+   * Geschlossener Umriss im Grundriss (Meter). Der Schlusspunkt wird NICHT
+   * dupliziert (die letzte Kante läuft von outline[n-1] zu outline[0]).
+   */
+  outline: Vec2[];
+  /** Verweis auf den (mehrschichtigen) Aufbau-Typ (wie WallType). */
+  wallTypeId: string;
+  /** Optionale Übersteuerung der Gesamtdicke in Metern (sonst Typ-Dicke). */
+  thickness?: number;
+  /**
+   * Optionale Übersteuerung der Strich-/Umrandungsfarbe; sonst gilt die
+   * Kategorie-Farbe.
+   */
+  color?: string;
+  /**
+   * Vertikale Bindung der OBERKANTE (OK). Fehlt sie, sitzt die OK an der
+   * Oberkante des Geschosses (baseElevation + floorHeight).
+   */
+  top?: VerticalAnchor;
+}
+
 /** Schwenkrichtung der Tür relativ zur Wandachse. */
 export type SwingSide = "left" | "right";
+
+/**
+ * Eine Öffnung (Fenster oder Tür), gehostet in einer Wand. Sie „kennt" ihre Wand
+ * (`hostWallId`) und liegt über `position` (Abstand vom Wand-Startpunkt entlang
+ * der Achse) relativ zur Wand — bewegt sich die Wand, folgt die Öffnung, weil die
+ * Weltkoordinaten beim Rendern IMMER aus der Wandachse abgeleitet werden.
+ *
+ * Vertikale Lage (relativ zur Wand-Unterkante, UK):
+ *   • Tür    — sitzt am Boden, `sillHeight` = 0, Höhe = lichte Türhöhe.
+ *   • Fenster— Brüstung `sillHeight` > 0, Öffnung reicht von sillHeight bis
+ *     sillHeight + height.
+ *
+ * Türspezifisch: `hinge` (Anschlagpfosten) + `swing` (Aufschlagseite) + optional
+ * `swingAngle` (Öffnungswinkel des Blatts in Grad, Default 90) + `openingDir`
+ * (Aufschlag nach innen/außen — kippt den Schwenkbogen auf die andere Achsseite).
+ * Fenster nutzen optional `frameDepth`/`frameThickness` für die 3D-Rahmenstärke.
+ */
+export interface Opening {
+  id: string;
+  type: "opening";
+  /** Wirts-Wand; das Geschoss ergibt sich aus der Wand. */
+  hostWallId: string;
+  /** Grafik-Kategorie (Ebene), z. B. "21" für Türen/Fenster. */
+  categoryCode: string;
+  /** Fenster oder Tür. */
+  kind: "window" | "door";
+  /** Abstand des ersten Pfostens vom Wand-Startpunkt entlang der Achse (Meter). */
+  position: number;
+  /** Lichte Öffnungsbreite in Metern. */
+  width: number;
+  /** Lichte Öffnungshöhe in Metern. */
+  height: number;
+  /** Brüstungshöhe (Unterkante der Öffnung) über der Wand-UK; 0 bei Türen. */
+  sillHeight: number;
+  /** Nur Tür: an welchem Pfosten das Scharnier sitzt. */
+  hinge?: "start" | "end";
+  /** Nur Tür: auf welche Seite der Wandachse das Blatt aufschlägt. */
+  swing?: SwingSide;
+  /** Nur Tür: Öffnungswinkel des Blatts in Grad (Default 90). */
+  swingAngle?: number;
+  /** Nur Tür: Aufschlagrichtung (nach innen/außen); Default "in". */
+  openingDir?: "in" | "out";
+  /** Optionale Rahmenstärke (quer zur Wand) in Metern für die 3D-Darstellung. */
+  frameThickness?: number;
+  /**
+   * Optionale Übersteuerung der Strich-/Symbolfarbe; sonst gilt die
+   * Kategorie-Farbe.
+   */
+  color?: string;
+}
+
+/**
+ * Grundform einer Treppe (DOSSIER: gerade / L / Wendel).
+ *   • "straight" — ein gerader Lauf (Lauflinie = Start → Richtung).
+ *   • "L"        — zwei rechtwinklige Läufe mit Zwischenpodest an der Ecke.
+ *   • "spiral"   — Wendeltreppe um ein Zentrum (keilförmige Tritte).
+ */
+export type StairShape = "straight" | "L" | "spiral";
+
+/**
+ * Eine Treppe (Treppe/Stair) — ein geschossübergreifendes Bauteil, das über die
+ * Geschosshöhe (OKFF → OKFF des nächsten Geschosses) steigt. Definiert über eine
+ * Grundform (gerade / L / Wendel), eine Basis-Geometrie, die Laufbreite und die
+ * Stufung (Steigungshöhe/Auftrittstiefe, aus der Stufenanzahl abgeleitet).
+ *
+ * Basis-Geometrie je Grundform:
+ *   • straight — `start` + `dir` (Einheitsrichtung) + `runLength` (Lauflänge).
+ *   • L        — `start` + `dir` (erster Lauf) + `runLength` (erster Lauf) +
+ *     `run2Length` (zweiter Lauf) + `turn` (+1 = links, −1 = rechts abbiegen).
+ *     Das Zwischenpodest sitzt am Ende des ersten Laufs (quadratisch, `width`).
+ *   • spiral   — `center` + `radius` (Innenradius zur Lauflinie) + `sweep`
+ *     (Gesamtwinkel in Grad, +/− = Drehrichtung) + `start` (Startpunkt des ersten
+ *     Tritts am äußeren Rand, definiert die Anfangsrichtung).
+ *
+ * Vertikale Lage: die UNTERKANTE (`baseZ`, abgeleitet aus dem Geschoss-OKFF) plus
+ * `totalRise` (Default = Geschosshöhe des zugehörigen Geschosses, sodass die
+ * Treppe genau ins nächste Geschoss steigt). `stepCount` Tritte/Setzstufen
+ * verteilen `totalRise` gleichmäßig; die Steigungshöhe = totalRise/stepCount, die
+ * Auftrittstiefe ergibt sich aus Lauflänge/(stepCount−1). Eine SIA-nahe
+ * Schrittregel (2·Steigung + Auftritt ≈ 0.63 m) liefert die Default-Stufenzahl.
+ */
+export interface Stair {
+  id: string;
+  type: "stair";
+  /** Zugehörige Zeichnungsebene (Geschoss), von dem die Treppe aufsteigt. */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), z. B. "40" für Treppen. */
+  categoryCode: string;
+  /** Grundform (gerade / L / Wendel). */
+  shape: StairShape;
+  /** Startpunkt der Lauflinie im Grundriss (Meter). */
+  start: Vec2;
+  /** Einheits-Laufrichtung des (ersten) Laufs im Grundriss. */
+  dir: Vec2;
+  /** Lauflänge des (ersten) Laufs in Metern (entlang `dir`). */
+  runLength: number;
+  /** Nur L: Lauflänge des zweiten Laufs in Metern. */
+  run2Length?: number;
+  /** Nur L: Abbiegerichtung des zweiten Laufs (+1 = links, −1 = rechts). */
+  turn?: 1 | -1;
+  /** Nur Wendel: Zentrum der Wendeltreppe (Meter). */
+  center?: Vec2;
+  /** Nur Wendel: Radius (Meter) von der Mitte zur Lauflinie. */
+  radius?: number;
+  /** Nur Wendel: Gesamt-Drehwinkel in Grad (+ = CCW, − = CW). */
+  sweep?: number;
+  /** Laufbreite in Metern (quer zur Laufrichtung). */
+  width: number;
+  /**
+   * Gesamt-Steighöhe in Metern (OKFF → OKFF nächstes Geschoss). Fehlt sie, gilt
+   * beim Auflösen die Geschosshöhe des zugehörigen Geschosses.
+   */
+  totalRise?: number;
+  /** Anzahl der Steigungen (Setzstufen). Die Trittanzahl = stepCount (letzte =
+   *  Austritt aufs obere Geschoss). Steigungshöhe = totalRise / stepCount. */
+  stepCount: number;
+  /**
+   * Laufrichtung „aufwärts": true = die Lauflinie steigt von `start` in Richtung
+   * `dir` (Default). false kehrt Auf-/Abpfeil um (Treppe steigt zum Start hin).
+   */
+  up?: boolean;
+  /**
+   * Optionale Übersteuerung der Strich-/Umrandungsfarbe; sonst gilt die
+   * Kategorie-Farbe.
+   */
+  color?: string;
+}
+
+/**
+ * Ein Raum (Raum/Room) — eine SIA-416-Fläche auf einem Geschoss, definiert über
+ * einen GESCHLOSSENEN Umriss (Polygon, lichte Innenkontur) im Grundriss. Trägt
+ * eine SIA-416-Blatt-Kategorie (HNF/NNF/VF/FF/KGF), einen Namen und eine Farbe.
+ *
+ * Fläche/Umfang/Schwerpunkt werden NICHT gespeichert, sondern bei jedem Rendern
+ * aus `boundary` über den reinen Rechenkern (geometry/roomArea) abgeleitet —
+ * so sind sie nie veraltet. `stampAnchor` (optional) setzt den Ankerpunkt des
+ * Raum-Stempels; fehlt er, gilt der Flächenschwerpunkt (Centroid).
+ */
+export interface Room {
+  id: string;
+  type: "room";
+  /** Zugehörige Zeichnungsebene (Geschoss). */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), z. B. "45" für Räume. */
+  categoryCode: string;
+  /** SIA-416-Blatt-Kategorie (HNF/NNF/VF/FF/KGF). */
+  siaCategory: SiaCategory;
+  /** Raum-Name, z. B. „Wohnen". */
+  name: string;
+  /**
+   * Geschlossener Umriss (lichte Innenkontur) im Grundriss (Meter). Der
+   * Schlusspunkt wird NICHT dupliziert (die letzte Kante läuft von boundary[n-1]
+   * zu boundary[0]).
+   */
+  boundary: Vec2[];
+  /** Strich-/Füllfarbe des Raums (hex). */
+  color: string;
+  /**
+   * Anker des Raum-Stempels (Meter). Wird bei der Erstellung EINMAL auf den
+   * Zentroid gesetzt und danach nie automatisch neu berechnet — der Stempel ist
+   * frei verschiebbar und bleibt beim Ändern der Kontur/Fläche an seiner Stelle.
+   * Fehlt er (Alt-Daten), gilt beim Rendern der Centroid.
+   */
+  stampAnchor?: Vec2;
+  /**
+   * Frei editierbarer Rich-Text des Raum-Stempels (Name + Notizen, mit Fett/
+   * Kursiv/Grösse/Farbe/Ausrichtung). Fehlt er, gilt der Raum-Name als einfacher
+   * Text. Die LIVE-Flächenzeile wird beim Rendern separat darunter gesetzt.
+   */
+  stampDoc?: RichTextDoc;
+}
 
 /** Eine Tür, gehostet in einer Wand. Ihr Geschoss ergibt sich aus der Wand. */
 export interface Door {
@@ -282,9 +710,17 @@ export interface EdgeGrip {
   normal: Vec2;
   aIndex: number;
   bIndex: number;
+  /**
+   * Freie Kanten-Verschiebung: gesetzt bei OFFENER Geometrie (Linie/offene
+   * Polylinie). Das Segment folgt dem vollen Cursor-Delta (nicht nur der Normale),
+   * beide Endpunkte wandern mit, die Nachbar-Segmente dehnen sich nach. Bei
+   * geschlossenen Formen/Wänden fehlt das Flag → senkrechte (parallel-)Verschiebung
+   * entlang der Außennormale wie bisher.
+   */
+  free?: boolean;
 }
 
-export type Element = Wall | Door | Drawing2D;
+export type Element = Wall | Ceiling | Opening | Door | Stair | Room | Drawing2D;
 
 // ── Kontext-Geometrie (importiert / abgeleitet, NICHT semantisch) ───────────
 // Importierte Geometrie ist „dumme" KONTEXT-Geometrie (Anzeige + späteres
@@ -362,7 +798,29 @@ export interface Project {
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
   layers: LayerCategory[];
   walls: Wall[];
+  /**
+   * Decken (Slabs) — geschossgebundene Flächenbauteile mit geschlossenem Umriss.
+   * Optional, damit bestehende Projekte/Tests ohne `ceilings` gültig bleiben
+   * (Default: leer behandeln).
+   */
+  ceilings?: Ceiling[];
   doors: Door[];
+  /**
+   * Öffnungen (Fenster/Türen), gehostet in Wänden. Optional, damit bestehende
+   * Projekte/Tests ohne `openings` gültig bleiben (Default: leer behandeln).
+   */
+  openings?: Opening[];
+  /**
+   * Treppen (Treppe) — geschossübergreifende Bauteile (gerade/L/Wendel). Optional,
+   * damit bestehende Projekte/Tests ohne `stairs` gültig bleiben (Default: leer).
+   */
+  stairs?: Stair[];
+  /**
+   * Räume (SIA-416-Flächen) — geschossgebundene Flächen mit geschlossenem Umriss.
+   * Optional, damit bestehende Projekte/Tests ohne `rooms` gültig bleiben
+   * (Default: leer behandeln).
+   */
+  rooms?: Room[];
   /** Freie 2D-Zeichengeometrie (Line/Polyline/Rect/Circle/Arc/Text). */
   drawings2d: Drawing2D[];
   /**
@@ -371,6 +829,13 @@ export interface Project {
    * Projekte/Tests ohne `context` gültig bleiben (Default: leer behandeln).
    */
   context?: ContextObject[];
+  /**
+   * Bibliothek parametrischer Wand-Regelwerke. Optional, damit bestehende
+   * Projekte ohne `parametricWalls` gültig bleiben (Default: leer behandeln).
+   * Wird durch `resolveParametricWall()` in `src/model/parametricWalls.ts`
+   * aufgelöst — generiert Wall[]-Objekte bei Bedarf.
+   */
+  parametricWalls?: ParametricWall[];
 }
 
 // ── Helfer ───────────────────────────────────────────────────────────────
@@ -380,6 +845,48 @@ export const getWallType = (project: Project, wall: Wall): WallType => {
   if (!wt) throw new Error(`Unbekannter Wandtyp: ${wall.wallTypeId}`);
   return wt;
 };
+
+/** Liefert den Aufbau-Typ (WallType) einer Decke oder wirft. */
+export const getCeilingType = (project: Project, ceiling: Ceiling): WallType => {
+  const wt = project.wallTypes.find((t) => t.id === ceiling.wallTypeId);
+  if (!wt) throw new Error(`Unbekannter Deckentyp: ${ceiling.wallTypeId}`);
+  return wt;
+};
+
+/**
+ * Gesamtdicke einer Decke (Meter): eine explizite `thickness`-Übersteuerung hat
+ * Vorrang, sonst die Summe der Schichtdicken ihres Aufbau-Typs.
+ */
+export const ceilingThickness = (project: Project, ceiling: Ceiling): number => {
+  if (ceiling.thickness != null && ceiling.thickness > 0) return ceiling.thickness;
+  const wt = project.wallTypes.find((t) => t.id === ceiling.wallTypeId);
+  return wt ? wallTypeThickness(wt) : 0.2;
+};
+
+/** Alle Öffnungen einer Wand (leere Liste, wenn keine oder `openings` fehlt). */
+export const openingsOfWall = (project: Project, wallId: string): Opening[] =>
+  (project.openings ?? []).filter((o) => o.hostWallId === wallId);
+
+/** Menschenlesbarer Standardname einer Öffnung (Fenster/Tür + Breite×Höhe). */
+export const openingLabel = (o: Opening): string =>
+  `${o.kind === "door" ? "Tür" : "Fenster"} ${(o.width * 100).toFixed(0)}×${(
+    o.height * 100
+  ).toFixed(0)}`;
+
+/** Alle Treppen eines Geschosses (leere Liste, wenn keine oder `stairs` fehlt). */
+export const stairsOfFloor = (project: Project, floorId: string): Stair[] =>
+  (project.stairs ?? []).filter((s) => s.floorId === floorId);
+
+/** Menschenlesbarer Standardname einer Treppe (Grundform + Stufenanzahl). */
+export const stairLabel = (s: Stair): string => {
+  const shape =
+    s.shape === "straight" ? "Gerade" : s.shape === "L" ? "L-Treppe" : "Wendel";
+  return `${shape} ${s.stepCount} STG`;
+};
+
+/** Alle Räume eines Geschosses (leere Liste, wenn keine oder `rooms` fehlt). */
+export const roomsOfFloor = (project: Project, floorId: string): Room[] =>
+  (project.rooms ?? []).filter((r) => r.floorId === floorId);
 
 /** Liefert ein Bauteil-Material (Component) per ID oder wirft. */
 export const getComponent = (project: Project, id: string): Component => {
