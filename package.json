@@ -14,6 +14,7 @@
     "tauri:build": "tauri build",
     "dump:native": "node scripts/dump-native-scene.mjs",
     "shell": "scripts/chromium-shell.sh",
+    "electron": "scripts/electron-shell.sh",
     "build:engine": "wasm-pack build src-tauri/render2d --release --target web --out-dir ../../src/engine/pkg --out-name render2d --no-default-features --features web"
   },
   "dependencies": {
@@ -36,6 +37,7 @@
     "@types/react-dom": "^18.3.0",
     "@types/three": "^0.169.0",
     "@vitejs/plugin-react": "^4.3.2",
+    "electron": "^43.0.0",
     "playwright": "^1.61.1",
     "puppeteer": "^25.2.1",
     "typescript": "^5.6.2",
