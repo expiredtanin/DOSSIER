@@ -65,7 +65,7 @@ import { TextEditorDialog } from "./ui/TextEditorDialog";
 import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "./ui/TopBar";
-import { StatusBar } from "./ui/StatusBar";
+import { StatusBar, type RendererMode } from "./ui/StatusBar";
 import { getTool } from "./tools/tools";
 import { applyAngleConstraint, computeSnap } from "./tools/snapping";
 import {
@@ -2187,6 +2187,20 @@ export default function App() {
   // aktiv. Sonst sind Cursor/Zoom bedeutungslos (PlanView ist nicht montiert →
   // das Handle ist null, Aktionen sind No-Ops).
   const planActive = activeLevel.kind === "floor" && viewType === "grundriss";
+  // Plan-Renderer-Umschalter (Statusleiste): reines Ableiten/Setzen des `engine`-
+  // URL-Params (siehe PlanView.tsx `wantWasm`); die Renderer-Auswahl selbst bleibt
+  // dort. Ein Wechsel lädt die Seite neu — kein Live-Remount der Renderer-Hooks.
+  const rendererMode: RendererMode =
+    new URLSearchParams(window.location.search).get("engine") === "wasm"
+      ? "wasm"
+      : "webgl2";
+  const webGpuAvailable = typeof navigator !== "undefined" && "gpu" in navigator;
+  const setRendererMode = (mode: RendererMode) => {
+    const url = new URL(window.location.href);
+    if (mode === "wasm") url.searchParams.set("engine", "wasm");
+    else url.searchParams.delete("engine");
+    window.location.assign(url.toString());
+  };
   // Übernimmt ein Zeichenwerkzeug ODER eine laufende Transformation die linke
   // Maustaste der Plan-Ansicht? Dann liegt der Pointer-Input beim Tool/Transform
   // (statt Auswahl/Marquee), und die Editier-Griffe sind ausgeblendet.
@@ -2932,6 +2946,9 @@ export default function App() {
         zoomPercent={planActive ? zoomPercent : null}
         activeFloor={activeLevel.name}
         activeLayer={activeLayerName}
+        rendererMode={rendererMode}
+        webGpuAvailable={webGpuAvailable}
+        onRendererModeChange={setRendererMode}
       />
 
       {/* Schwebendes Ressourcen-Fenster ÜBER allem (hoher z-index, abgedunkelter

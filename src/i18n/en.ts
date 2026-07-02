@@ -185,6 +185,10 @@ export const en: Record<TranslationKey, string> = {
   "status.floor": "Floor",
   "status.layer": "Layer",
   "status.none": "—",
+  "status.renderer": "Renderer",
+  "status.rendererWebgl": "WebGL2",
+  "status.rendererWasm": "Engine",
+  "status.rendererWasmUnavailable": "WebGPU unavailable",
 
   // Navigator panels.
   "nav.drawingLevels": "Drawing levels",

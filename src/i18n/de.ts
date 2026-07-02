@@ -186,6 +186,10 @@ export const de = {
   "status.floor": "Geschoss",
   "status.layer": "Ebene",
   "status.none": "—",
+  "status.renderer": "Renderer",
+  "status.rendererWebgl": "WebGL2",
+  "status.rendererWasm": "Engine",
+  "status.rendererWasmUnavailable": "WebGPU nicht verfügbar",
 
   // ── Navigator-Panels ─────────────────────────────────────────────────────
   "nav.drawingLevels": "Zeichnungsebenen",
