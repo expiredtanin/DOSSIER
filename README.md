@@ -15,43 +15,61 @@ kleinster gemeinsamer Nenner.
 ## Grundgedanke
 
 Es gibt **ein semantisches Modell** als einzige Wahrheit. Jede Ansicht — 3D,
-Grundriss, Schnitt, Ansicht — wird daraus **abgeleitet**. Darstellung
+Grundriss, Schnitt, Ansicht, PDF — wird daraus **abgeleitet**. Darstellung
 (Detailgrad, Linienstärken, Schraffuren) wird erst beim Rendern angewandt, nie
 in die Geometrie eingebacken. Wer eine Wand verschiebt, verschiebt sie überall.
 
 Konkret heißt das auch: Der Grundriss entsteht nicht aus einem zerschnittenen
 3D-Mesh, sondern **analytisch aus den Bauteil-Parametern** (Wandachsen + Dicken →
-Linien, Öffnungen → Lücken + Symbol). Schnitte und Ansichten brauchen später den
-zweiten Weg — echte 3D-Projektion mit verdeckten Kanten.
+Linien, Öffnungen → Lücken + Symbol). PDF-Export ist derselbe Plan, nur mit
+echten mm-Stiftstärken statt Bildschirm-Hairlines — kein zweites Rendering.
+Schnitte und Ansichten brauchen den zweiten Weg — echte 3D-Projektion mit
+verdeckten Kanten (HLR) —, dessen Machbarkeit per Spike bewiesen, aber noch
+nicht ans UI angebunden ist.
 
 ## Stand heute
 
 Ehrlich eingeordnet: aus dem Risiko-Spike ist ein **benutzbares 2D-CAD mit
-abgeleiteter 3D-Sicht** geworden. Der einfachere Teil steht und ist per
-Screenshot verifiziert; die schwierigen BIM-Kernrisiken sind bewusst noch offen.
+abgeleiteter 3D-Sicht, Vektor-PDF/DXF-Export und einer parametrischen
+Wand-Engine** geworden. Der einfachere Teil steht und ist per Screenshot/Probe
+verifiziert; die schwierigen BIM-Kernrisiken sind bewusst noch offen.
 
 **Funktioniert:**
 - Semantisches Modell mit **mehrschichtigen Wänden** und automatischer
   **L-Ecken-Gehrung** (`computeJoins`); dieselbe Logik speist Plan *und* 3D.
+- **Parametrische Wände** (`ParametricWall`-Regelwerke: Grid/Modul/Sequenz/
+  Referenzlinie/bedingte Dicke) lösen sich zu konkreten `Wall`-Objekten auf,
+  statt jede Wand einzeln von Hand zu ziehen.
 - **Dokumentmodell wie in DOSSIER:** Zeichnungsebenen (Geschosse + Schnitte/
   Ansichten/Zeichnungen) × Kategorie-Ebenen (Code-Baum 1:1, `20 Wände`, `30 Decken` …).
-- **Zeichnen & Editieren** im Grundriss: Wand, Linie, Polylinie, Rechteck, Kreis;
-  Snapping (Endpunkt/Mittelpunkt/Schnittpunkt/Lot/Raster/Ortho), Grips, Move/Copy/
-  Offset, Spiegeln/Drehen/Array.
+- **Zeichnen & Editieren** im Grundriss: Wand, Linie, Polylinie, Rechteck, Kreis,
+  Öffnungen, Treppen, Decken, Raumstempel; Snapping (Endpunkt/Mittelpunkt/
+  Schnittpunkt/Lot/Raster/Ortho), Grips, Move/Copy/Offset, Spiegeln/Drehen/Array,
+  Trim/Split/Join.
 - **Rhino-artiges Befehlssystem** mit getippten Koordinaten (`5,3` · `r5,3` ·
   `5<45`) und Tab-Feld-Zyklus (Länge → Winkel …).
+- **Vektor-Export:** PDF (A4/A3, Titelblock, echte mm-Stiftstärken nach ISO-Pen-
+  Steps, keine Rasterbilder) und DXF — beide aus derselben `Plan`-Struktur wie
+  der Bildschirm.
+- **PBR-Material-Bibliothek** (ambientCG-Import, `manifest.json`) für die
+  3D-Ansicht.
 - **Resource Manager** (Component / Hatch / Line) — alles per id referenziert,
   zentral änderbar.
 - **Panel-System** (dockbar, stapelbar, floatend), Top-Bar + Statusleiste
   (echter Maßstab 1:N, Cursor X/Y), eigenes Kontextmenü, **i18n** (de/en).
-- **Import:** DXF (Konturen/Mesh) → Terrain-TIN; `.lin`/`.pat` für Linien/Schraffuren.
+- **Import:** DXF/DWG (Konturen/Mesh) → Terrain-TIN, Swisstopo/LV95-Geokontext,
+  OSM-Kontextimport; `.lin`/`.pat` für Linien/Schraffuren.
 
 **Bewusst noch offen** (die eigentlich harten Teile):
 - Echte **3D-Booleans** für Öffnungen — Türen/Fenster sind im Plan eine Lücke,
   noch kein geschnittenes Volumen.
-- **HLR** (verdeckte Kanten) für Schnitte und Ansichten — diese Views sind Stubs.
+- **HLR** (verdeckte Kanten) für Schnitte und Ansichten: Machbarkeit per
+  OCCT-WASM-Spike bewiesen (`docs/welle-c-hlr-spike/`, `src/section/hlr.ts`),
+  aber noch nicht ans UI/Dokumentmodell verdrahtet — Views sind noch Stubs.
 - **Prioritäts-T-/X-Stöße** mehrschichtiger Wände (Beton läuft durch, Putz
   verbindet seitlich) — das berüchtigte Risiko #1.
+- **Multi-Page-Layouts/Ausschnitte** (mehrere Viewports pro Blatt) — PDF-Export
+  ist noch single-sheet.
 
 Details und die Begründungen stehen im
 [HANDOVER](HANDOVER.md) (laufendes Arbeitsprotokoll) und in der
@@ -69,40 +87,52 @@ Geometrie-Kernel verfrüht eingezogen.
 | 3D | Three.js, plus eigener nativer Rust/WASM/WebGPU-Renderer (`render3d`) |
 | 2D-Plan | eigener SVG-Renderer, plus eigener nativer Rust/WASM/WebGPU-Renderer (`render2d`) |
 | Geometrie | eigener 2D-Kernel (`src/geometry/kernel2d.ts`), `delaunator` fürs Terrain |
-| Import | `dxf-parser`, eigene `.lin`/`.pat`-Parser |
+| Export | `jspdf`/`svg2pdf.js` (Vektor-PDF), eigener DXF-Writer |
+| Import | `dxf-parser`, `@mlightcad/libredwg-web` (DWG), eigene `.lin`/`.pat`-Parser |
+| Schnitt/HLR-Spike | `opencascade.js` (OCCT-WASM) — isoliert, noch nicht verdrahtet |
 
 Geplant, aber noch nicht eingezogen: `rhino3dm` (NURBS / `.3dm`), web-ifc (IFC),
-OpenCascade/Manifold (exakte Booleans + HLR). Siehe ROADMAP §4.
+Manifold (exakte 3D-Booleans). OCCT-WASM ist für HLR bereits als Spike da (s.o.),
+aber noch nicht an Dokumentmodell/UI angebunden. Siehe ROADMAP §4.
 
 ## Entwicklung
 
 ```bash
 npm install
-npm run dev      # Vite, http://localhost:5173
+npm run dev      # Vite, http://localhost:5187
 npm run electron # Electron-Fenster (Dev-Server + randlose App-Shell)
 npx tsc -b       # Typecheck
 npm run build    # tsc -b && vite build
+npm test         # vitest run
 ```
 
 Verifiziert wird visuell: `node scripts/probe.mjs` rendert die App headless und
-schreibt `scripts/probe.png` — Screenshot ansehen, Geometrie prüfen. Für
-Firefox-Fälle gibt es `scripts/probe-ff*.mjs` (Playwright).
+schreibt `scripts/probe.png` — Screenshot ansehen, Geometrie prüfen. Weitere
+`scripts/probe-*.mjs` decken einzelne Features ab (PDF, Trim, Materialien,
+Theme, Boolean-Ops …); für Firefox-Fälle gibt es `scripts/probe-ff*.mjs`
+(Playwright).
 
 ## Aufbau
 
 ```
 src/
-  model/       semantisches Modell + Ableitungen (types, geometry, joins, terrain)
-  geometry/    2D-Kernel (offset/trim/fillet/intersect)
+  model/       semantisches Modell + Ableitungen (types, parametricWalls, roomStamp, joins, terrain)
+  geometry/    2D-Kernel (offset/trim/fillet/intersect, ceiling, opening, roomArea/-Boundary, stair)
   commands/    Rhino-artiges Befehlssystem (engine, parser, registry, cmds/)
   tools/       interaktive Zeichenwerkzeuge + Snapping + Transformationen
-  plan/        Grundriss-Ableitung (generatePlan) + PlanView (SVG)
+  plan/        Grundriss-Ableitung (generatePlan) + PlanView (SVG) + glPlan (WebGL2-Renderer)
   viewport/    Viewport3D (Three.js)
+  section/     HLR-Spike (OCCT-WASM) — Schnitte/Ansichten, noch nicht verdrahtet
+  export/      PDF- und DXF-Export aus derselben Plan-Struktur wie der Bildschirm
+  materials/   PBR-Material-Bibliothek (ambientCG-Import, Runtime)
+  text/        Rich-Text (Beschriftungen, Textobjekte)
   panels/      dockbares Panel-System + die einzelnen Paletten
   state/       Store + Slices (project/selection/view/layout)
   ui/          Top-Bar, Statusleiste, Kontextmenü, Resource Manager, Command-Line
-  io/          Import/Export (DXF, .lin, .pat)
+  io/          Import/Export (DXF, DWG, .lin, .pat), Swisstopo/LV95, OSM-Kontext
   i18n/        Wörterbücher de/en
+src-tauri/     Rust-Crates (render2d/render3d) — headless per wasm-pack zu WASM
+               gebaut (npm run build:engine), Tauri-Host selbst ist ausrangiert
 ```
 
 ## Konventionen
