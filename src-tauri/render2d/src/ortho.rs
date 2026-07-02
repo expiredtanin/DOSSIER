@@ -48,6 +48,17 @@ fn ortho(left: f32, right: f32, bottom: f32, top: f32) -> Mat4 {
 /// zusaetzliche Meter-Skalierung. Bildschirm-Y zeigt nach unten -> top = vb.y,
 /// bottom = vb.y + vb.h (kleineres Y oben -> Clip +1).
 pub fn compute_ortho_matrix(view_box: ViewBox, canvas_w: f32, canvas_h: f32) -> Mat4 {
+    let ViewBox { x, y, w, h } = corrected_view_box(view_box, canvas_w, canvas_h);
+    // top = y (Bildschirm-Y oben, kleiner), bottom = y + h.
+    ortho(x, x + w, y + h, y)
+}
+
+/// Der aufs Canvas-Seitenverhaeltnis gedehnte (zentrierte) viewBox — exakt die
+/// Korrektur, die auch in der Ortho-Matrix steckt. Mit ihm laesst sich ein
+/// Bildschirm-Raum-Punkt direkt in Fenster-Pixel projizieren:
+/// `px = (s - corrected.xy) * meet_scale(corrected, ...)` (der Textpass braucht
+/// genau das fuer die Glyphen-Anker).
+pub fn corrected_view_box(view_box: ViewBox, canvas_w: f32, canvas_h: f32) -> ViewBox {
     let ViewBox {
         mut x,
         mut y,
@@ -69,8 +80,7 @@ pub fn compute_ortho_matrix(view_box: ViewBox, canvas_w: f32, canvas_h: f32) -> 
             h = nh;
         }
     }
-    // top = y (Bildschirm-Y oben, kleiner), bottom = y + h.
-    ortho(x, x + w, y + h, y)
+    ViewBox::new(x, y, w, h)
 }
 
 /// meet-Skala: Geraete-px je viewBox-Einheit (SVG `xMidYMid meet`).

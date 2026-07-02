@@ -68,9 +68,42 @@ pub struct Polyline {
     pub width_mm: f32,
 }
 
+/// Horizontale Ausrichtung eines Textes relativ zu seinem Anker (deckungsgleich
+/// zur Absatz-Ausrichtung des Plan-Text-Primitivs: left/center/right).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// EINE Textzeile mit echter Papier-mm-Schriftgroesse. Der Web-Renderer flacht
+/// mehrzeilige Raumstempel (Rich-Text + Zusatzzeilen) zeilenweise auf dieses
+/// Format ab; gerendert wird mit ECHTEN TrueType-Glyphen ueber einen GPU-Atlas
+/// (glyphon/cosmic-text) — bewusst KEINE Einstrich-Vektorschrift.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Text {
+    /// Anker in Modell-Metern: X gemaess `align`, Y = BASELINE der Zeile.
+    pub pos: Point,
+    /// Zeileninhalt (bereits geflachte Runs, plain).
+    pub content: String,
+    /// Schriftgroesse in ECHTEN Papier-Millimetern (skaliert mit dem Zoom wie
+    /// die Strichbreiten, siehe `ortho::mm_to_device_px`).
+    #[serde(rename = "sizeMm")]
+    pub size_mm: f32,
+    /// Textfarbe (RGBA 0..1).
+    pub color: Rgba,
+    /// Ausrichtung relativ zu `pos` (Default: left).
+    #[serde(default)]
+    pub align: TextAlign,
+}
+
 /// Die vollstaendige Szene: alles, was ein Frame zeichnet. Reihenfolge ist
 /// signifikant (Z-/Alpha-Ueberlagerung): erst Fuellungen, dann Umrisse, dann
 /// offene Polylinien, dann freie Linien — analog zur Draw-Reihenfolge im WebGL-Pfad.
+/// Texte liegen zuoberst (eigener Glyphen-Pass nach der Geometrie).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Scene {
     #[serde(default)]
@@ -81,6 +114,8 @@ pub struct Scene {
     pub polylines: Vec<Polyline>,
     #[serde(default)]
     pub lines: Vec<Line>,
+    #[serde(default)]
+    pub texts: Vec<Text>,
 }
 
 /// Rechteckiger Ausschnitt in BILDSCHIRM-Einheiten (viewBox), analog `ViewBox`

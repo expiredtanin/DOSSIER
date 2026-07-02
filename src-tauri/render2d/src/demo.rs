@@ -6,7 +6,7 @@
 // noetig), damit die Szene auch headless testbar bleibt.
 
 use crate::tessellate::PX_PER_M;
-use crate::types::{FillPolygon, Line, Outline, Scene, ViewBox};
+use crate::types::{FillPolygon, Line, Outline, Scene, Text, TextAlign, ViewBox};
 
 /// Demo-Szene in Modell-Metern: ein L-foermiger Wand-Poche (konkav!), ein Raum
 /// und ein paar Striche — genug, um Fuellung, Umriss und Papier-mm-Linien zu sehen.
@@ -56,6 +56,14 @@ pub fn demo_scene() -> Scene {
             b: [9.0, -1.0],
             color: ink,
             width_mm: 0.25,
+        }],
+        // Ein Raumstempel-artiger Text (echte Glyphen via Atlas), mittig im Raum.
+        texts: vec![Text {
+            pos: [7.0, 2.0],
+            content: "Raum 16.00 m²".into(),
+            size_mm: 3.5,
+            color: ink,
+            align: TextAlign::Center,
         }],
     }
 }

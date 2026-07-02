@@ -2,8 +2,8 @@
 // die AKTUELL sichtbare 2D-Szene bzw. die geflachten 3D-Wände debounced per
 // Tauri-Command an die native Event-Loop. Es wird EXAKT dieselbe Ableitung
 // benutzt wie für die Browser-Ansicht (planToRenderScene auf dem sichtbaren
-// Plan, projectToWalls3d aufs Projekt) — 1:1-Parität inkl. Türschwenk und
-// Fenster-Symbolen (Text bleibt bewusst dem Browser-Overlay überlassen).
+// Plan, projectToWalls3d aufs Projekt) — 1:1-Parität inkl. Türschwenk,
+// Fenster-Symbolen und Raumstempel-Text (echte Glyphen via GPU-Atlas in Rust).
 //
 // Im reinen Browser (kein Tauri) sind beide Funktionen No-ops: erkannt wird
 // Tauri an `window.__TAURI_INTERNALS__`; Fehler beim Invoke werden still

@@ -1,6 +1,6 @@
 // Erzeugt aus dem echten Modell (sampleProject → generatePlan) die JSON-Dateien,
 // die die nativen wgpu-Fenster (render2d/render3d) beim Start laden:
-//   src-tauri/assets/native2d_scene.json   (RScene: fills/outlines/lines)
+//   src-tauri/assets/native2d_scene.json   (RScene: fills/outlines/lines/texts)
 //   src-tauri/assets/native3d_walls.json    (RWall[])
 // Wird via scripts/dump-native-scene.mjs (esbuild-Bundle) unter Node ausgeführt.
 
@@ -30,7 +30,7 @@ writeFileSync(scenePath, JSON.stringify(scene));
 writeFileSync(wallsPath, JSON.stringify(walls));
 
 console.log(
-  `native2d_scene.json: ${scene.fills.length} fills, ${scene.outlines.length} outlines, ${scene.lines.length} lines`,
+  `native2d_scene.json: ${scene.fills.length} fills, ${scene.outlines.length} outlines, ${scene.lines.length} lines, ${scene.texts.length} texts`,
 );
 console.log(`native3d_walls.json: ${walls.length} walls`);
 console.log(`→ ${outDir}`);

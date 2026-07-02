@@ -17,10 +17,10 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::ortho::{compute_ortho_matrix, mm_to_device_px, Mat4};
+use crate::ortho::{compute_ortho_matrix, corrected_view_box, meet_scale, mm_to_device_px, Mat4};
 use crate::shaders::{FILL_WGSL, LINE_WGSL};
-use crate::tessellate::{compile_scene, GpuGeometry};
-use crate::types::{Scene, ViewBox};
+use crate::tessellate::{compile_scene, to_screen, GpuGeometry};
+use crate::types::{Scene, Text, TextAlign, ViewBox};
 
 /// MSAA-Faktor: 4x Multisampling fuer glatte Linien-/Fuellkanten (wie im Browser).
 const SAMPLE_COUNT: u32 = 4;
@@ -64,7 +64,27 @@ struct SceneBuffers {
     line_vbo: Option<wgpu::Buffer>,
     line_ibo: Option<wgpu::Buffer>,
     geo: GpuGeometry,
+    /// Textzeilen der Szene (Modell-Anker + Papier-mm-Groesse). Werden nicht
+    /// tesselliert, sondern pro Frame ueber den Glyphen-Atlas gesetzt (die
+    /// Pixelgroesse haengt vom Zoom ab).
+    texts: Vec<Text>,
 }
+
+/// Zustand des Glyphen-Textpasses (glyphon): Systemfonts + Rasterizer-Cache +
+/// GPU-Atlas + Renderer. Lazily beim ersten Frame mit Texten erstellt (braucht
+/// die Queue, die `Renderer::new` nicht bekommt — Signatur bleibt stabil).
+struct TextState {
+    font_system: glyphon::FontSystem,
+    swash_cache: glyphon::SwashCache,
+    viewport: glyphon::Viewport,
+    atlas: glyphon::TextAtlas,
+    renderer: glyphon::TextRenderer,
+}
+
+/// Schrift des Plans: dieselbe Familie wie der Browser-Text (`--font` in
+/// styles.css beginnt mit "Inter"); cosmic-text laedt die Systemfonts und
+/// faellt bei fehlender Familie auf sans-serif zurueck.
+const TEXT_FAMILY: &str = "Inter";
 
 /// Der native 2D-Renderer: haelt beide Pipelines, den (dynamischen) Uniform-
 /// Puffer und die aktuell hochgeladene Szene. Pan/Zoom aktualisiert nur die
@@ -84,6 +104,8 @@ pub struct Renderer {
     msaa_view: Option<wgpu::TextureView>,
     /// Groesse, fuer die `msaa_view` angelegt wurde.
     msaa_size: (u32, u32),
+    /// Glyphen-Textpass (lazily beim ersten Frame mit Texten erstellt).
+    text: Option<TextState>,
     /// Loeschfarbe (Zeichenblatt), Default hell wie im WebGL-Pfad (#f0f0f0).
     pub clear_color: wgpu::Color,
     /// Papier-Massstab-Nenner (1:N) fuer echte mm-Strichbreiten.
@@ -229,6 +251,7 @@ impl Renderer {
             format: color_format,
             msaa_view: None,
             msaa_size: (0, 0),
+            text: None,
             // #f0f0f0 (== --sheet). 0.941 entspricht dem WebGL-clearColor.
             clear_color: wgpu::Color {
                 r: 0.941,
@@ -271,6 +294,37 @@ impl Renderer {
             line_vbo: mk_vbo(&geo.line_verts, "line.vbo"),
             line_ibo: mk_ibo(&geo.line_idx, "line.ibo"),
             geo,
+            texts: scene.texts.clone(),
+        });
+    }
+
+    /// Erstellt den Glyphen-Textpass beim ersten Bedarf (FontSystem laedt die
+    /// Systemfonts einmalig). Der TextRenderer MUSS mit demselben
+    /// MultisampleState wie die Geometrie-Pipelines gebaut werden (MSAA 4x),
+    /// sonst passt er nicht in den gemeinsamen Render-Pass.
+    fn ensure_text(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if self.text.is_some() {
+            return;
+        }
+        let cache = glyphon::Cache::new(device);
+        let viewport = glyphon::Viewport::new(device, &cache);
+        let mut atlas = glyphon::TextAtlas::new(device, queue, &cache, self.format);
+        let renderer = glyphon::TextRenderer::new(
+            &mut atlas,
+            device,
+            wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            None,
+        );
+        self.text = Some(TextState {
+            font_system: glyphon::FontSystem::new(),
+            swash_cache: glyphon::SwashCache::new(),
+            viewport,
+            atlas,
+            renderer,
         });
     }
 
@@ -374,6 +428,122 @@ impl Renderer {
 
         self.ensure_uniform_capacity(device, blocks.len() as u64);
 
+        // ── Textpass vorbereiten (echte Glyphen via Atlas) ────────────────────
+        // Pixelgroesse = Papier-mm * mm_px (dieselbe Formel wie die Strich-
+        // breiten) -> Text waechst beim Zoomen exakt wie im Browser. Die Anker
+        // werden ueber den aspekt-korrigierten viewBox in Fenster-Pixel
+        // projiziert; die Ausrichtung nutzt die gemessene Zeilenbreite.
+        let has_texts = self
+            .scene
+            .as_ref()
+            .map_or(false, |s| !s.texts.is_empty());
+        if has_texts || self.text.is_some() {
+            self.ensure_text(device, queue);
+            let ts = self.text.as_mut().expect("ensure_text");
+            let cvb = corrected_view_box(view_box, vw, vh);
+            let meet = meet_scale(view_box, vw, vh);
+
+            // Je sichtbarer Zeile ein geshapter Buffer + Platzierung.
+            struct Placed {
+                buffer: glyphon::Buffer,
+                left: f32,
+                top: f32,
+                color: glyphon::Color,
+            }
+            let mut placed: Vec<Placed> = Vec::new();
+            if let Some(scene) = &self.scene {
+                let attrs = glyphon::Attrs::new()
+                    .family(glyphon::Family::Name(TEXT_FAMILY));
+                for t in &scene.texts {
+                    let font_px = t.size_mm * mm_px;
+                    // Unlesbar kleine Glyphen ueberspringen (spart Shaping/Atlas).
+                    if !(font_px >= 1.0) || t.content.is_empty() {
+                        continue;
+                    }
+                    // Anker (Modell-Meter) -> Fenster-Pixel: erst Bildschirm-Raum
+                    // (to_screen), dann viewBox-Projektion (meet-Skala).
+                    let s = to_screen(t.pos);
+                    let ax = (s[0] - cvb.x) * meet;
+                    let ay = (s[1] - cvb.y) * meet;
+                    // Grober Sichtbarkeits-Test VOR dem Shaping (Buffer sparen):
+                    // grosszuegige Marge, da die Zeilenbreite noch unbekannt ist.
+                    let margin = font_px * (t.content.len() as f32 + 2.0);
+                    if ax < -margin || ax > vw + margin || ay < -2.0 * font_px || ay > vh + 2.0 * font_px {
+                        continue;
+                    }
+
+                    let mut buffer = glyphon::Buffer::new(
+                        &mut ts.font_system,
+                        glyphon::Metrics::new(font_px, font_px * 1.2),
+                    );
+                    // Unbegrenzt: eine Zeile, kein Umbruch (Zeilen sind vorgeflacht).
+                    buffer.set_size(&mut ts.font_system, None, None);
+                    buffer.set_text(&mut ts.font_system, &t.content, attrs, glyphon::Shaping::Advanced);
+
+                    // Gemessene Breite + Baseline fuer Ausrichtung/Anker.
+                    let (line_w, baseline) = buffer
+                        .layout_runs()
+                        .next()
+                        .map(|r| (r.line_w, r.line_y))
+                        .unwrap_or((0.0, font_px * 0.8));
+                    let left = match t.align {
+                        TextAlign::Left => ax,
+                        TextAlign::Center => ax - line_w / 2.0,
+                        TextAlign::Right => ax - line_w,
+                    };
+                    let top = ay - baseline; // Anker-Y ist die BASELINE der Zeile.
+                    // Praeziser Sichtbarkeits-Test mit gemessener Breite.
+                    if left > vw || left + line_w < 0.0 || top > vh || top + font_px * 1.4 < 0.0 {
+                        continue;
+                    }
+                    let c = t.color;
+                    let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    placed.push(Placed {
+                        buffer,
+                        left,
+                        top,
+                        color: glyphon::Color::rgba(to8(c[0]), to8(c[1]), to8(c[2]), to8(c[3])),
+                    });
+                }
+            }
+
+            ts.viewport.update(
+                queue,
+                glyphon::Resolution {
+                    width: viewport.0,
+                    height: viewport.1,
+                },
+            );
+            let bounds = glyphon::TextBounds {
+                left: 0,
+                top: 0,
+                right: viewport.0 as i32,
+                bottom: viewport.1 as i32,
+            };
+            let areas = placed.iter().map(|p| glyphon::TextArea {
+                buffer: &p.buffer,
+                left: p.left,
+                top: p.top,
+                scale: 1.0,
+                bounds,
+                default_color: p.color,
+                custom_glyphs: &[],
+            });
+            if let Err(e) = ts.renderer.prepare(
+                device,
+                queue,
+                &mut ts.font_system,
+                &mut ts.atlas,
+                &ts.viewport,
+                areas,
+                &mut ts.swash_cache,
+            ) {
+                eprintln!("render2d Text-prepare fehlgeschlagen: {e:?}");
+            }
+            // Nicht mehr benoetigte Glyphen aus dem Atlas werfen (haelt ihn klein).
+            ts.atlas.trim();
+        }
+
         // Alle Bloecke in den (auf uniform_stride gepolsterten) Puffer schreiben.
         if let Some(u) = &self.uniform {
             let stride = self.uniform_stride as usize;
@@ -442,6 +612,14 @@ impl Renderer {
                         pass.draw_indexed(start..start + b.index_count, 0, 0..1);
                         block += 1;
                     }
+                }
+            }
+
+            // 3) Text ZUOBERST im selben MSAA-Pass (der TextRenderer wurde mit
+            //    identischem MultisampleState erstellt, siehe ensure_text).
+            if let Some(ts) = &self.text {
+                if let Err(e) = ts.renderer.render(&ts.atlas, &ts.viewport, &mut pass) {
+                    eprintln!("render2d Text-render fehlgeschlagen: {e:?}");
                 }
             }
         }

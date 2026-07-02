@@ -23,7 +23,9 @@ default = []
 
 # GPU-Pipelines (wgpu). Baut auch headless (wgpu laedt Vulkan/GL erst zur
 # Laufzeit dynamisch), rendert aber nur mit einer aktiven Grafik-Session.
-render = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
+# glyphon = GPU-Glyphen-Atlas fuer ECHTE TrueType-Schrift (cosmic-text) —
+# gehoert bewusst in die GPU-Schicht, die serde-only-Default-Schicht bleibt fontfrei.
+render = ["dep:wgpu", "dep:bytemuck", "dep:pollster", "dep:glyphon"]
 
 # Fenster-Spike (winit) inkl. lauffaehigem Binary. Braucht Wayland/X11 + eine
 # Display-Session zur visuellen Verifikation.
@@ -39,6 +41,9 @@ serde = { version = "1", features = ["derive"] }
 wgpu = { version = "22", optional = true }
 bytemuck = { version = "1", optional = true, features = ["derive"] }
 pollster = { version = "0.3", optional = true }
+# Echte TrueType-Glyphen ueber einen GPU-Atlas (cosmic-text + etagere). Version
+# an wgpu gekoppelt: die 0.6er-Reihe ist die zu wgpu 22 passende.
+glyphon = { version = "0.6", optional = true }
 
 # --- Fenster (nur mit Feature "window") --------------------------------------
 winit = { version = "0.30", optional = true }

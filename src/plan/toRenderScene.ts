@@ -1,14 +1,17 @@
 // Flacht einen {@link Plan} (die eine Wahrheit aus generatePlan) auf das
 // GPU-nahe Szenenformat des nativen render2d-Renderers ab: Füllpolygone,
-// Umrisse und Linien. Hatch und Text bleiben (wie im Rust-Renderer, siehe
-// render2d/src/types.rs) vorerst außen vor — sie sind Overlay/späteres M3.
+// Umrisse, Linien und Textzeilen. Text wird zeilenweise geflacht (Rich-Text-Doc
+// + Live-Zusatzzeilen) — die echten Glyphen rastert der Rust-Renderer über
+// einen GPU-Glyphen-Atlas (glyphon/cosmic-text), keine Vektor-Ersatzschrift.
 //
 // Das erzeugte Objekt matcht 1:1 die serde-Structs render2d::types::Scene
-// { fills:[{pts,color}], outlines:[{pts,color,widthMm}], lines:[{a,b,color,widthMm}] }
+// { fills:[{pts,color}], outlines:[{pts,color,widthMm}], lines:[{a,b,color,widthMm}],
+//   texts:[{pos,content,sizeMm,color,align}] }
 // mit Point = [x,y] (Meter) und Rgba = [r,g,b,a] (0..1).
 
 import type { Plan, Primitive } from "./generatePlan";
 import { applyDashRuns, buildHatchRuns } from "./glPlan/glPlanHatch";
+import { docToLines } from "../text/renderHtml";
 
 type LinePrim = Extract<Primitive, { kind: "line" }>;
 
@@ -35,14 +38,38 @@ export interface RLine {
   color: RRgba;
   widthMm: number;
 }
+export type RTextAlign = "left" | "center" | "right";
+/** EINE Textzeile; serde-kompatibel zu render2d::types::Text. */
+export interface RText {
+  /** Anker in Modell-Metern: X gemäß align, Y = Baseline der Zeile. */
+  pos: RPoint;
+  content: string;
+  /** Schriftgröße in echten Papier-mm (skaliert mit Zoom wie Strichbreiten). */
+  sizeMm: number;
+  color: RRgba;
+  align: RTextAlign;
+}
 export interface RScene {
   fills: RFill[];
   outlines: ROutline[];
   polylines: RPolyline[];
   lines: RLine[];
+  texts: RText[];
 }
 
 const DEFAULT_LINE = "#1a1a1a";
+
+/** 1 Punkt (pt) in Papier-Millimetern. */
+const PT_TO_MM = 25.4 / 72;
+/**
+ * Referenzmaßstab des Display-Modus (1:100) — identisch zu PlanView (`nRef`):
+ * dort belegt 1 pt Schrift (1/72)·0.0254·100 Modell-Meter. Der native Renderer
+ * rechnet mit `paper_scale_n = 100`, damit ist `sizeMm = pt · PT_TO_MM` exakt
+ * die Browser-Darstellung.
+ */
+const STAMP_REF_N = 100;
+/** Papier-mm → Modell-Meter beim Referenzmaßstab. */
+const MM_TO_M = STAMP_REF_N / 1000;
 
 /** Wenige benannte Farben, die in Klassen/Defaults vorkommen können. */
 const NAMED: Record<string, string> = {
@@ -208,6 +235,7 @@ export function planToRenderScene(plan: Plan): RScene {
   const outlines: ROutline[] = [];
   const polylines: RPolyline[] = [];
   const lines: RLine[] = [];
+  const texts: RText[] = [];
 
   // Sichtbare Umriss-Läufe werden erst GESAMMELT (nach Stil gruppiert) und am
   // Ende über Polygon-Grenzen hinweg zusammengenäht — erst dadurch bekommen
@@ -303,10 +331,56 @@ export function planToRenderScene(plan: Plan): RScene {
       const poly = tessellateArc(p.center, p.from, p.to, p.r);
       if (poly.length >= 2) polylines.push({ pts: poly, color: col, widthMm: p.weightMm });
     } else {
-      // "text" wird bewusst NICHT nativ gerendert — eine Einstrich-Vektorschrift
-      // sieht neben dem echten Browser-Font schlecht aus. Der Raumstempel-Text
-      // bleibt dem Browser/Overlay überlassen.
+      // "text": zeilenweise flachen — die ECHTEN Glyphen rastert der Rust-
+      // Renderer über einen GPU-Glyphen-Atlas (glyphon, dieselbe Font-Familie
+      // wie im Browser). Layout identisch zum SVG-Pfad in PlanView (case
+      // "text"): Rich-Text-Zeilen + Live-Zusatzzeilen, Block vertikal um den
+      // Anker zentriert, Zeilenvorschub 1.3·Basisgröße.
       flushRun();
+      const defCol = toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1];
+      // unitPerPt = PT_TO_MM → tspan.fontSize ist direkt die Papier-mm-Größe.
+      const docLines = docToLines(p.doc, {
+        x: 0,
+        y: 0,
+        lineHeight: 0,
+        unitPerPt: PT_TO_MM,
+        basePt: p.basePt,
+        color: p.color,
+      });
+      const baseMm = p.basePt * PT_TO_MM;
+      const flat: { content: string; sizeMm: number; color: RRgba; align: RTextAlign }[] = [];
+      for (const line of docLines) {
+        flat.push({
+          // Runs einer Zeile werden zusammengelegt (ein Buffer je Zeile);
+          // Größe/Farbe des größten bzw. ersten Runs gelten für die Zeile.
+          content: line.tspans.map((t) => t.text).join(""),
+          sizeMm: line.tspans.length
+            ? Math.max(...line.tspans.map((t) => t.fontSize))
+            : baseMm,
+          color: toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol,
+          align: line.align,
+        });
+      }
+      for (const line of p.extraLines) {
+        flat.push({ content: line, sizeMm: baseMm * 0.8, color: defCol, align: "center" });
+      }
+      if (flat.length > 0) {
+        const baseH = baseMm * MM_TO_M; // Basisgröße in Modell-Metern
+        const lineGap = baseH * 1.3;
+        const totalH = baseH + (flat.length - 1) * lineGap;
+        flat.forEach((line, k) => {
+          if (!line.content.trim()) return; // Leerzeile: nur Vorschub
+          texts.push({
+            // Baseline der Zeile k (Modell-Y nach oben, deshalb minus):
+            // Browser: startY = c.y − H/2 + 0.8·fs (Bildschirm-Y nach unten).
+            pos: [p.at.x, p.at.y + totalH / 2 - baseH * 0.8 - k * lineGap],
+            content: line.content,
+            sizeMm: line.sizeMm,
+            color: line.color,
+            align: line.align,
+          });
+        });
+      }
     }
   }
   flushRun();
@@ -324,5 +398,5 @@ export function planToRenderScene(plan: Plan): RScene {
     }
   }
 
-  return { fills, outlines, polylines, lines };
+  return { fills, outlines, polylines, lines, texts };
 }

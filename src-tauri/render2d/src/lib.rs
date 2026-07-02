@@ -24,7 +24,7 @@ pub mod gpu;
 pub use demo::{demo_scene, initial_view_box};
 pub use ortho::{compute_ortho_matrix, meet_scale, mm_to_device_px, Mat4};
 pub use tessellate::{compile_scene, triangulate, GpuGeometry, PX_PER_M};
-pub use types::{FillPolygon, Line, Outline, Point, Rgba, Scene, ViewBox};
+pub use types::{FillPolygon, Line, Outline, Point, Rgba, Scene, Text, TextAlign, ViewBox};
 
 // --- Tests: Tessellierung (Muster wie glPlanCompile.test.ts) -----------------
 
