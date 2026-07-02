@@ -26,9 +26,9 @@ pub use math::{
     look_at, orbit_eye, orthographic, perspective, preset_camera, projection_matrix,
     view_matrix, view_projection, Mat4,
 };
-pub use mesh::{build_walls_mesh, extrude_wall};
+pub use mesh::{build_model_mesh, build_walls_mesh, extrude_slab, extrude_wall, triangulate};
 pub use types::{
-    Camera, CameraPreset, Mesh, Point2, Projection, Rgb, WallInput, FLOATS_PER_VERTEX,
+    Camera, CameraPreset, Mesh, Point2, Projection, Rgb, SlabInput, WallInput, FLOATS_PER_VERTEX,
 };
 
 // --- Tests: Mesh-Erzeugung (Muster wie render2d/tessellate) -------------------
@@ -181,6 +181,109 @@ mod tests {
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), 0);
         assert!(mesh.indices.is_empty());
+    }
+
+    // --- Deckenplatten (extrudierte Polygone) ---------------------------------
+
+    use super::mesh::{build_model_mesh, extrude_slab, triangulate};
+    use super::types::SlabInput;
+
+    /// Quadratischer Decken-Umriss (CCW) mit Kantenlaenge `s`, Ecke im Ursprung.
+    fn square_slab(s: f32, z_bottom: f32, z_top: f32) -> SlabInput {
+        SlabInput {
+            outline: vec![[0.0, 0.0], [s, 0.0], [s, s], [0.0, s]],
+            z_bottom,
+            z_top,
+            color: [0.86, 0.86, 0.88],
+        }
+    }
+
+    #[test]
+    fn triangulate_quadrat_gibt_zwei_dreiecke() {
+        let tris = triangulate(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        assert_eq!(tris.len(), 6, "Quadrat -> 2 Dreiecke = 6 Indizes");
+    }
+
+    #[test]
+    fn triangulate_cw_umriss_ebenfalls_zwei_dreiecke() {
+        // CW-Umriss (negative Flaeche) muss genauso trianguliert werden.
+        let tris = triangulate(&[[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]);
+        assert_eq!(tris.len(), 6);
+    }
+
+    #[test]
+    fn slab_deckel_und_boden_und_mantel() {
+        // Quadratische Platte: Deckel (2 Tri) + Boden (2 Tri) + 4 Mantel-Quads
+        // (je 2 Tri) = 4 + 8 = 12 Dreiecke = 36 Vertices (je Tri eigene Vertices).
+        let mut mesh = Mesh::default();
+        extrude_slab(&mut mesh, &square_slab(4.0, 2.4, 2.65));
+        assert_eq!(mesh.triangle_count(), 12, "2+2 Kappen + 8 Mantel");
+        assert_eq!(mesh.vertex_count(), 36);
+        // Z-Ausdehnung deckt die Deckendicke ab.
+        let (min, max) = mesh.bounds();
+        assert!((min[1] - 2.4).abs() < 1e-5, "UK 2.4");
+        assert!((max[1] - 2.65).abs() < 1e-5, "OK 2.65");
+    }
+
+    #[test]
+    fn slab_deckel_normale_zeigt_nach_oben_boden_nach_unten() {
+        let mut mesh = Mesh::default();
+        extrude_slab(&mut mesh, &square_slab(4.0, 0.0, 0.25));
+        // Fuer jedes Vertex mit y==0.25 (Deckel) muss die Normale +Y sein, fuer
+        // y==0.0 (Boden) −Y. Mantel-Vertices haben n.y ≈ 0.
+        let n = mesh.vertex_count();
+        for i in 0..n {
+            let b = i * FLOATS_PER_VERTEX;
+            let py = mesh.verts[b + 1];
+            let ny = mesh.verts[b + 4];
+            if (py - 0.25).abs() < 1e-6 && (mesh.verts[b + 3]).abs() < 1e-6 && (mesh.verts[b + 5]).abs() < 1e-6 {
+                assert!((ny - 1.0).abs() < 1e-5, "Deckel-Normale +Y");
+            }
+        }
+    }
+
+    #[test]
+    fn slab_mantel_normalen_zeigen_nach_aussen() {
+        // Zentriertes Quadrat um den Ursprung: jede Mantel-Normale muss vom
+        // Zentrum weg zeigen.
+        let slab = SlabInput {
+            outline: vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]],
+            z_bottom: 0.0,
+            z_top: 0.3,
+            color: [0.8, 0.8, 0.8],
+        };
+        let mut mesh = Mesh::default();
+        extrude_slab(&mut mesh, &slab);
+        let center = [0.0f32, 0.15, 0.0];
+        let n = mesh.vertex_count();
+        for i in 0..n {
+            let b = i * FLOATS_PER_VERTEX;
+            let p = [mesh.verts[b], mesh.verts[b + 1], mesh.verts[b + 2]];
+            let nor = [mesh.verts[b + 3], mesh.verts[b + 4], mesh.verts[b + 5]];
+            let out = [p[0] - center[0], p[1] - center[1], p[2] - center[2]];
+            let d = out[0] * nor[0] + out[1] * nor[1] + out[2] * nor[2];
+            assert!(d >= -1e-4, "Vertex {i}: Normale zeigt nach innen (dot={d})");
+        }
+    }
+
+    #[test]
+    fn build_model_mesh_haengt_slabs_an_waende() {
+        let wall = build_walls_mesh(&[wall_x(4.0, 0.2, 2.6)]);
+        let model = build_model_mesh(&[wall_x(4.0, 0.2, 2.6)], &[square_slab(4.0, 2.6, 2.85)]);
+        // Modell = Wand-Vertices + Slab-Vertices.
+        assert_eq!(model.vertex_count(), wall.vertex_count() + 36);
+        assert!(model.indices.len() > wall.indices.len());
+    }
+
+    #[test]
+    fn entarteter_slab_erzeugt_nichts() {
+        let mut mesh = Mesh::default();
+        // <3 Ecken.
+        extrude_slab(&mut mesh, &SlabInput { outline: vec![[0.0, 0.0], [1.0, 0.0]], z_bottom: 0.0, z_top: 0.2, color: [0.8, 0.8, 0.8] });
+        assert_eq!(mesh.vertex_count(), 0);
+        // Nullhoehe.
+        extrude_slab(&mut mesh, &square_slab(4.0, 2.6, 2.6));
+        assert_eq!(mesh.vertex_count(), 0);
     }
 
     // --- Kamera / Matrizen ----------------------------------------------------

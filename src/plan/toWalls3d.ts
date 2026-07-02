@@ -18,7 +18,7 @@
 // Polygon-Platten (SlabInput) mitgegeben — render3d trianguliert den Umriss und
 // zieht ihn über die Deckendicke hoch.
 
-import type { Project, Wall, Opening } from "../model/types";
+import type { Project, Wall } from "../model/types";
 import { getWallType, wallTypeThickness, openingsOfWall } from "../model/types";
 import { wallVerticalExtent, ceilingVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
@@ -104,33 +104,45 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
   const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
   if (axisLen < 1e-9 || zTop - zBottom <= EPS) return;
 
-  // Öffnungen der Wand als [from..to]-Intervalle (auf die Achse geklemmt),
-  // nach Startlage sortiert.
-  const openings = openingsOfWall(project, wall.id);
-  const items: Array<{ from: number; to: number; op: Opening }> = [];
-  for (const op of openings) {
+  // Aussparungen der Wand als vereinheitlichte Cutouts sammeln:
+  //   • Öffnungen (project.openings, Fenster mit Brüstung/Sturz),
+  //   • Legacy-Türen (project.doors, sitzen am Boden, nur Sturz).
+  // Jeweils [from..to] auf die Achse geklemmt + vertikale Öffnungs-Ausdehnung.
+  const cutouts: Array<{ from: number; to: number; oBottom: number; oTop: number }> = [];
+  for (const op of openingsOfWall(project, wall.id)) {
     const iv = openingInterval(wall, op);
-    if (iv) items.push({ from: iv.from, to: iv.to, op });
+    if (!iv) continue;
+    const v = openingVerticalExtent(project, wall, op);
+    cutouts.push({ from: iv.from, to: iv.to, oBottom: v.zBottom, oTop: v.zTop });
   }
-  items.sort((a, b) => a.from - b.from);
+  for (const d of project.doors ?? []) {
+    if (d.hostWallId !== wall.id) continue;
+    const from = Math.max(0, Math.min(d.position, axisLen));
+    const to = Math.max(from, Math.min(d.position + d.width, axisLen));
+    if (to - from < EPS) continue;
+    // Tür sitzt am Boden (UK der Wand), reicht bis zur lichten Türhöhe.
+    const oTop = Math.min(zTop, zBottom + d.height);
+    cutouts.push({ from, to, oBottom: zBottom, oTop });
+  }
+  cutouts.sort((a, b) => a.from - b.from);
 
-  // Ohne Öffnungen: ein durchgehender Quader (wie bisher).
-  if (items.length === 0) {
+  // Ohne Aussparungen: ein durchgehender Quader (wie bisher).
+  if (cutouts.length === 0) {
     pushSegment(out, wall, 0, axisLen, zBottom, zTop, thickness);
     return;
   }
 
-  // Wand entlang der Achse durchlaufen: volle Pfeiler zwischen den Öffnungen,
-  // Brüstung/Sturz im Öffnungsbereich.
+  // Wand entlang der Achse durchlaufen: volle Pfeiler zwischen den Aussparungen,
+  // Brüstung/Sturz im Öffnungsbereich. Überlappende Cutouts werden über `cursor`
+  // zusammengefasst.
   let cursor = 0;
-  for (const { from, to, op } of items) {
+  for (const { from, to, oBottom, oTop } of cutouts) {
     const segFrom = Math.max(cursor, from);
     if (from > cursor) {
-      // Voller Wandpfeiler bis zur Öffnung.
+      // Voller Wandpfeiler bis zur Aussparung.
       pushSegment(out, wall, cursor, from, zBottom, zTop, thickness);
     }
     if (to > segFrom) {
-      const { zBottom: oBottom, zTop: oTop } = openingVerticalExtent(project, wall, op);
       // Brüstung unter der Öffnung (bei Türen entfällt sie, da oBottom == zBottom).
       if (oBottom > zBottom + EPS) {
         pushSegment(out, wall, segFrom, to, zBottom, oBottom, thickness);

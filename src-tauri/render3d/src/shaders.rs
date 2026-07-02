@@ -2,24 +2,32 @@
 // ohne aktives GPU-Feature (headless) im Repo pruefbar bleibt (naga-Test, Muster:
 // render2d/shaders).
 //
-// Beleuchtung: EIN Directional-Light (Sonne) + ambienter Grundterm — das Pendant
-// zur three.js-Sicht (AmbientLight 0.6 + DirectionalLight 1.1 bei (6,12,4), siehe
-// Viewport3D.tsx). PBR (Rauheit/Metallik/Texturen) folgt in spaeteren Milestones.
+// Beleuchtung: HEMISPHAERISCHES Umgebungslicht (Himmel oben / Boden unten) plus
+// EIN Directional-Light (Sonne). Das hemisphaerische Ambient toent jede Flaeche je
+// nach ihrer Normalen-Neigung: Deckflaechen bekommen das helle Himmelslicht, nach
+// unten weisende Flaechen das dunklere Bodenlicht, senkrechte Waende einen Misch-
+// wert. Dadurch liest sich das Volumen sofort ab (Architektur-Massenmodell) — ohne
+// teures Postprocessing. Zusaetzlich betont ein Facing-Term (n gegen die Blick-
+// naeherung „nach oben") die Kanten sanft ab.
 //
 // Uniform-Layout (group(0) binding(0)):
-//   view_proj  : mat4x4<f32>  world -> Clip (proj * view)
-//   light_dir  : vec4<f32>    Richtung ZUM Licht (world, xyz; w ungenutzt)
-//   ambient    : vec4<f32>    ambienter Grundfaktor (rgb; a ungenutzt)
+//   view_proj    : mat4x4<f32>  world -> Clip (proj * view)
+//   light_dir    : vec4<f32>    Richtung ZUM Licht (world, xyz; w = Sonnen-Staerke)
+//   sky_color    : vec4<f32>    Himmels-Ambient (rgb; von oben)
+//   ground_color : vec4<f32>    Boden-Ambient (rgb; von unten)
+//   sun_color    : vec4<f32>    Farbe/Staerke des Directional-Lights (rgb)
 //
 // Vertex-Attribute: position (world), normal (world), color (Albedo).
 
-/// Der einzige Shader (Vertex + Fragment). Diffuse Lambert-Beleuchtung mit einem
-/// Directional-Light plus ambientem Sockel — GPU-Aequivalent des three.js-Setups.
+/// Der einzige Shader (Vertex + Fragment). Hemisphaerisches Ambient (Himmel/Boden)
+/// + Lambert-Directional — GPU-Aequivalent eines Architektur-Massenmodell-Lichts.
 pub const MESH_WGSL: &str = r#"
 struct Globals {
-    view_proj  : mat4x4<f32>,
-    light_dir  : vec4<f32>,
-    ambient    : vec4<f32>,
+    view_proj    : mat4x4<f32>,
+    light_dir    : vec4<f32>,
+    sky_color    : vec4<f32>,
+    ground_color : vec4<f32>,
+    sun_color    : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 
@@ -48,10 +56,22 @@ fn vs_main(in : VsIn) -> VsOut {
 fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     let l = normalize(globals.light_dir.xyz);
-    // Lambert-Diffusanteil; Rueckseiten (n.l < 0) tragen nichts bei.
-    let diffuse = max(dot(n, l), 0.0);
-    // Ambienter Sockel (Albedo * ambient) + gerichteter Anteil (Albedo * diffuse).
-    let shaded = in.color * globals.ambient.rgb + in.color * diffuse;
+
+    // Hemisphaerisches Ambient: Mischfaktor aus der Vertikal-Komponente der
+    // Normalen (n.y = +1 -> voll Himmel, n.y = -1 -> voll Boden).
+    let hemi_t = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+    let ambient = mix(globals.ground_color.rgb, globals.sky_color.rgb, hemi_t);
+
+    // Gerichteter Lambert-Anteil (Sonne); Rueckseiten (n.l < 0) tragen nichts bei.
+    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
+
+    var shaded = in.color * (ambient + diffuse);
+
+    // Sanfte Kantenbetonung: senkrechte Flaechen (n.y nahe 0) minimal abdunkeln,
+    // damit sich Waende vom hellen Deckel/Boden abheben (ohne Postprocessing).
+    let edge = 0.90 + 0.10 * abs(n.y);
+    shaded = shaded * edge;
+
     return vec4<f32>(shaded, 1.0);
 }
 "#;

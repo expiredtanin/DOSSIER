@@ -51,7 +51,7 @@ enum UserEvent {
     #[cfg(feature = "native2d")]
     Scene2d(Scene),
     #[cfg(feature = "native3d")]
-    Walls3d(Vec<WallInput>),
+    Model3d(Model3d),
 }
 
 /// Proxy in die laufende Event-Loop; wird beim Start (vor `run`) gesetzt.
@@ -71,15 +71,30 @@ pub fn push_scene(value: serde_json::Value) {
     }
 }
 
-/// Webview-Push der 3D-Waende (JSON = `Vec<render3d::types::WallInput>`).
+/// Webview-Push des 3D-Modells. Akzeptiert BEIDE Payload-Formen:
+///   • ein Objekt `{ walls: [...], slabs: [...] }` (neu, mit Deckenplatten),
+///   • ein blankes Array `[WallInput, …]` (alt / JSON-Snapshot) → nur Waende.
+/// So bleiben aeltere Pushes/Assets kompatibel.
 #[cfg(feature = "native3d")]
 pub fn push_walls(value: serde_json::Value) {
     let Some(proxy) = PROXY.get() else { return };
-    match serde_json::from_value::<Vec<WallInput>>(value) {
-        Ok(walls) => {
-            let _ = proxy.send_event(UserEvent::Walls3d(walls));
+    match parse_model3d(value) {
+        Ok(model) => {
+            let _ = proxy.send_event(UserEvent::Model3d(model));
         }
-        Err(e) => eprintln!("push_native_walls: ungueltige Waende: {e}"),
+        Err(e) => eprintln!("push_native_walls: ungueltiges Modell: {e}"),
+    }
+}
+
+/// Parst eine 3D-Modell-Payload tolerant (Objekt mit walls/slabs ODER blankes
+/// Wand-Array).
+#[cfg(feature = "native3d")]
+fn parse_model3d(value: serde_json::Value) -> Result<Model3d, serde_json::Error> {
+    if value.is_array() {
+        let walls = serde_json::from_value::<Vec<WallInput>>(value)?;
+        Ok(Model3d { walls, slabs: Vec::new() })
+    } else {
+        serde_json::from_value::<Model3d>(value)
     }
 }
 
@@ -213,7 +228,20 @@ use render3d::gpu::Renderer as Renderer3d;
 #[cfg(feature = "native3d")]
 use render3d::math::orbit_eye;
 #[cfg(feature = "native3d")]
-use render3d::types::{Camera, Projection, WallInput};
+use render3d::types::{Camera, Projection, SlabInput, WallInput};
+#[cfg(feature = "native3d")]
+use serde::Deserialize;
+
+/// Das an das 3D-Fenster gepushte Modell: Waende (mit Oeffnungs-Teilquadern) plus
+/// Deckenplatten. `#[serde(default)]` haelt aeltere Payloads ohne `slabs` gueltig.
+#[cfg(feature = "native3d")]
+#[derive(Debug, Clone, Default, Deserialize)]
+struct Model3d {
+    #[serde(default)]
+    walls: Vec<WallInput>,
+    #[serde(default)]
+    slabs: Vec<SlabInput>,
+}
 
 #[cfg(feature = "native3d")]
 struct GpuState3d {
@@ -227,11 +255,11 @@ struct GpuState3d {
 
 #[cfg(feature = "native3d")]
 impl GpuState3d {
-    fn new(window: Arc<Window>, walls: &[WallInput]) -> Self {
+    fn new(window: Arc<Window>, model: &Model3d) -> Self {
         let (surface, device, queue, config) = configure_surface(&window, "3d.device");
         let mut renderer = Renderer3d::new(&device, config.format);
-        renderer.upload_walls(&device, walls);
-        renderer.set_light([6.0, 12.0, 4.0], 0.6);
+        renderer.upload_model(&device, &model.walls, &model.slabs);
+        renderer.set_light([6.0, 12.0, 4.0]);
         Self { surface, device, queue, config, renderer, window }
     }
 
@@ -272,18 +300,20 @@ impl GpuState3d {
 const WALLS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/native3d_walls.json");
 
 #[cfg(feature = "native3d")]
-fn load_walls() -> Vec<WallInput> {
+fn load_model() -> Model3d {
     match std::fs::read_to_string(WALLS_PATH) {
-        Ok(text) => match serde_json::from_str::<Vec<WallInput>>(&text) {
-            Ok(walls) => walls,
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text)
+            .and_then(parse_model3d)
+        {
+            Ok(model) => model,
             Err(e) => {
-                eprintln!("native3d: Waende-Parse-Fehler ({WALLS_PATH}): {e} — nutze Demo-Waende");
-                demo_walls()
+                eprintln!("native3d: Modell-Parse-Fehler ({WALLS_PATH}): {e} — nutze Demo-Waende");
+                Model3d { walls: demo_walls(), slabs: Vec::new() }
             }
         },
         Err(e) => {
-            eprintln!("native3d: Waende nicht ladbar ({WALLS_PATH}): {e} — nutze Demo-Waende");
-            demo_walls()
+            eprintln!("native3d: Modell nicht ladbar ({WALLS_PATH}): {e} — nutze Demo-Waende");
+            Model3d { walls: demo_walls(), slabs: Vec::new() }
         }
     }
 }
@@ -314,8 +344,8 @@ fn demo_walls() -> Vec<WallInput> {
 /// Blickziel (world) + sinnvoller Start-Abstand, sodass alle Waende ins Bild
 /// passen. world: `x=model.x`, `z=model.y`, `y=Hoehe` (render3d-Konvention).
 #[cfg(feature = "native3d")]
-fn frame_walls(walls: &[WallInput]) -> ([f32; 3], f32) {
-    if walls.is_empty() {
+fn frame_model(model: &Model3d) -> ([f32; 3], f32) {
+    if model.walls.is_empty() && model.slabs.is_empty() {
         return ([3.0, 1.3, 2.0], 11.0);
     }
     let mut min = [f32::INFINITY; 3];
@@ -328,12 +358,18 @@ fn frame_walls(walls: &[WallInput]) -> ([f32; 3], f32) {
         max[1] = max[1].max(y);
         max[2] = max[2].max(z);
     };
-    for w in walls {
+    for w in &model.walls {
         let base = w.base_elevation;
         let top = w.base_elevation + w.height;
         for p in [w.start, w.end] {
             acc(p[0], base, p[1]);
             acc(p[0], top, p[1]);
+        }
+    }
+    for s in &model.slabs {
+        for p in &s.outline {
+            acc(p[0], s.z_bottom, p[1]);
+            acc(p[0], s.z_top, p[1]);
         }
     }
     if !(min[0].is_finite() && max[0] >= min[0]) {
@@ -365,8 +401,8 @@ struct Orbit {
 
 #[cfg(feature = "native3d")]
 impl Orbit {
-    fn framed(walls: &[WallInput]) -> Self {
-        let (target, dist) = frame_walls(walls);
+    fn framed(model: &Model3d) -> Self {
+        let (target, dist) = frame_model(model);
         Self { yaw: std::f32::consts::FRAC_PI_4, pitch: 0.5, dist, target }
     }
 
@@ -478,7 +514,7 @@ struct App {
     nav3d: bool,
     /// Live-Push vor Fenster-Erstellung (siehe `pending2d`).
     #[cfg(feature = "native3d")]
-    pending3d: Option<Vec<WallInput>>,
+    pending3d: Option<Model3d>,
 }
 
 impl App {
@@ -638,9 +674,9 @@ impl ApplicationHandler<UserEvent> for App {
                 .with_inner_size(LogicalSize::new(1000.0, 760.0));
             let window = Arc::new(event_loop.create_window(attrs).expect("3D-Fenster erstellen"));
             self.id3d = Some(window.id());
-            let walls = self.pending3d.take().unwrap_or_else(load_walls);
-            self.orbit = Some(Orbit::framed(&walls));
-            let state = GpuState3d::new(window, &walls);
+            let model = self.pending3d.take().unwrap_or_else(load_model);
+            self.orbit = Some(Orbit::framed(&model));
+            let state = GpuState3d::new(window, &model);
             state.window.request_redraw();
             self.s3d = Some(state);
         }
@@ -665,14 +701,14 @@ impl ApplicationHandler<UserEvent> for App {
                 state.window.request_redraw();
             }
             #[cfg(feature = "native3d")]
-            UserEvent::Walls3d(walls) => {
+            UserEvent::Model3d(model) => {
                 let Some(state) = self.s3d.as_mut() else {
-                    self.pending3d = Some(walls);
+                    self.pending3d = Some(model);
                     return;
                 };
-                state.renderer.upload_walls(&state.device, &walls);
+                state.renderer.upload_model(&state.device, &model.walls, &model.slabs);
                 if !self.nav3d {
-                    self.orbit = Some(Orbit::framed(&walls));
+                    self.orbit = Some(Orbit::framed(&model));
                 }
                 state.window.request_redraw();
             }

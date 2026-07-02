@@ -50,6 +50,32 @@ fn default_wall_color() -> Rgb {
     [0.82, 0.80, 0.76]
 }
 
+/// Eine geflachte Deckenplatte (Slab): ein GESCHLOSSENER Grundriss-Umriss (Polygon
+/// in Modell-Metern, Schlusspunkt NICHT dupliziert) plus die absolute vertikale
+/// Ausdehnung `z_bottom..z_top`. Aus diesen Feldern wird das Polygon trianguliert
+/// (Ear-Clipping) und ueber die Dicke zu einer Platte extrudiert.
+///
+/// KOORDINATEN wie WallInput: model `[x, y]` -> world `(x, elevation, y)`, d. h. der
+/// Umriss liegt in der XZ-Ebene, die Extrusion laeuft entlang +Y.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlabInput {
+    /// Geschlossener Umriss im Grundriss (Modell-Meter), CW oder CCW zulaessig.
+    pub outline: Vec<Point2>,
+    /// Unterkante (absolut, Meter).
+    #[serde(rename = "zBottom")]
+    pub z_bottom: f32,
+    /// Oberkante (absolut, Meter).
+    #[serde(rename = "zTop")]
+    pub z_top: f32,
+    /// Albedo-Farbe (RGB 0..1). Default heller Deckenton.
+    #[serde(default = "default_slab_color")]
+    pub color: Rgb,
+}
+
+fn default_slab_color() -> Rgb {
+    [0.86, 0.86, 0.88]
+}
+
 /// Projektionsart der Kamera. Die three.js-Sicht schaltet zwischen perspektivisch
 /// (freies Orbit) und orthografisch (die achsparallelen Presets front/top/side um).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

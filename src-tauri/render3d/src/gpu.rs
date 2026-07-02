@@ -13,9 +13,9 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::math::{view_projection, Mat4};
-use crate::mesh::build_walls_mesh;
+use crate::mesh::{build_model_mesh, build_walls_mesh};
 use crate::shaders::MESH_WGSL;
-use crate::types::{Camera, WallInput, FLOATS_PER_VERTEX};
+use crate::types::{Camera, Mesh, SlabInput, WallInput, FLOATS_PER_VERTEX};
 
 /// Tiefenformat des Z-Puffers (32 Bit Float, ueberall verfuegbar).
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -27,18 +27,23 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 struct Globals {
     view_proj: [f32; 16],
     light_dir: [f32; 4],
-    ambient: [f32; 4],
+    sky_color: [f32; 4],
+    ground_color: [f32; 4],
+    sun_color: [f32; 4],
 }
 
 impl Default for Globals {
     fn default() -> Self {
         Self {
             view_proj: crate::math::identity(),
-            // Richtung ZUM Licht (world), normiert. Entspricht der three.js-Sonne
-            // bei (6,12,4): das Licht kommt aus dieser Richtung.
+            // Richtung ZUM Licht (world), normiert. Sonne oben-vorne (6,12,4).
             light_dir: normalize4([6.0, 12.0, 4.0]),
-            // Ambienter Sockel 0.6 (wie three.js-AmbientLight(0.6)).
-            ambient: [0.6, 0.6, 0.6, 1.0],
+            // Himmels-Ambient (von oben): helles, leicht kuehles Licht.
+            sky_color: [0.66, 0.68, 0.72, 1.0],
+            // Boden-Ambient (von unten): dunkler, warmer Ton (Bounce/Schatten).
+            ground_color: [0.30, 0.29, 0.27, 1.0],
+            // Directional-Sonne: warmweiss, moderat.
+            sun_color: [0.55, 0.53, 0.49, 1.0],
         }
     }
 }
@@ -174,11 +179,11 @@ impl Renderer {
             mesh: None,
             depth: None,
             globals: Globals::default(),
-            // #e9e9e9 heller Hintergrund (wie die three.js-Modellsicht).
+            // #f5f5f5 heller Hintergrund (wie der 2D-Grundriss).
             clear_color: wgpu::Color {
-                r: 0.914,
-                g: 0.914,
-                b: 0.914,
+                r: 0.961,
+                g: 0.961,
+                b: 0.961,
                 a: 1.0,
             },
         }
@@ -186,7 +191,16 @@ impl Renderer {
 
     /// Erzeugt das Mesh aus geflachten Waenden und laedt die Puffer hoch.
     pub fn upload_walls(&mut self, device: &wgpu::Device, walls: &[WallInput]) {
-        let mesh = build_walls_mesh(walls);
+        self.upload_mesh(device, build_walls_mesh(walls));
+    }
+
+    /// Erzeugt das Mesh aus Waenden UND Deckenplatten und laedt die Puffer hoch.
+    pub fn upload_model(&mut self, device: &wgpu::Device, walls: &[WallInput], slabs: &[SlabInput]) {
+        self.upload_mesh(device, build_model_mesh(walls, slabs));
+    }
+
+    /// Laedt ein fertiges Mesh in die GPU-Puffer (oder loescht es bei leer).
+    fn upload_mesh(&mut self, device: &wgpu::Device, mesh: Mesh) {
         if mesh.indices.is_empty() {
             self.mesh = None;
             return;
@@ -208,10 +222,18 @@ impl Renderer {
         });
     }
 
-    /// Setzt die Lichtrichtung (Richtung ZUM Licht, world) und den ambienten Sockel.
-    pub fn set_light(&mut self, dir_to_light: [f32; 3], ambient: f32) {
+    /// Setzt die Richtung ZUM Directional-Light (Sonne, world). Das hemisphaerische
+    /// Ambient (Himmel/Boden) bleibt bei den Default-Farben.
+    pub fn set_light(&mut self, dir_to_light: [f32; 3]) {
         self.globals.light_dir = normalize4(dir_to_light);
-        self.globals.ambient = [ambient, ambient, ambient, 1.0];
+    }
+
+    /// Uebersteuert die hemisphaerischen Ambient-Farben (Himmel oben, Boden unten)
+    /// und die Sonnenfarbe. Fuer Feinabstimmung des Massenmodell-Looks.
+    pub fn set_ambient(&mut self, sky: [f32; 3], ground: [f32; 3], sun: [f32; 3]) {
+        self.globals.sky_color = [sky[0], sky[1], sky[2], 1.0];
+        self.globals.ground_color = [ground[0], ground[1], ground[2], 1.0];
+        self.globals.sun_color = [sun[0], sun[1], sun[2], 1.0];
     }
 
     /// Stellt sicher, dass ein Tiefenpuffer passend zur Ziel-Groesse existiert.

@@ -12,7 +12,7 @@
 import type { Plan } from "./generatePlan";
 import type { Project } from "../model/types";
 import { planToRenderScene } from "./toRenderScene";
-import { projectToWalls3d } from "./toWalls3d";
+import { projectToModel3d } from "./toWalls3d";
 
 /** Sammel-Fenster: Modelländerungen werden gebündelt gepusht (nicht je Frame). */
 const DEBOUNCE_MS = 200;
@@ -58,6 +58,6 @@ export function pushNativeWalls(project: Project): void {
   if (!isTauri()) return;
   clearTimeout(wallsTimer);
   wallsTimer = setTimeout(() => {
-    void invokeNative("push_native_walls", { walls: projectToWalls3d(project) });
+    void invokeNative("push_native_walls", { walls: projectToModel3d(project) });
   }, DEBOUNCE_MS);
 }

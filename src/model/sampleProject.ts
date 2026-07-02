@@ -200,8 +200,25 @@ export const sampleProject: Project = {
       sillHeight: 0.9,
     },
   ],
-  // Decken (Slabs) — anfangs leer; werden mit dem Decken-Werkzeug gefüllt.
-  ceilings: [],
+  // Decken (Slabs) — Geschossdecke über dem EG (= Boden des OG). Umriss = EG-
+  // Grundriss (5 × 4 m). Kategorie „30 Decken", 25 cm dick, OK bündig mit dem
+  // EG-Wandkopf (baseElevation + floorHeight = 2.6 m).
+  ceilings: [
+    {
+      id: "C1",
+      type: "ceiling",
+      floorId: "eg",
+      categoryCode: "30",
+      outline: [
+        { x: 0, y: 0 },
+        { x: 5, y: 0 },
+        { x: 5, y: 4 },
+        { x: 0, y: 4 },
+      ],
+      wallTypeId: "aw",
+      thickness: 0.25,
+    },
+  ],
   // Treppen — eine gerade Beispieltreppe im EG entlang der Ostwand, steigt ins OG
   // (totalRise = Geschosshöhe). Kategorie „40 Treppen".
   stairs: [
