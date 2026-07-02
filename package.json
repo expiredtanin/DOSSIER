@@ -12,7 +12,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "dump:native": "node scripts/dump-native-scene.mjs"
+    "dump:native": "node scripts/dump-native-scene.mjs",
+    "shell": "scripts/chromium-shell.sh"
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.7",
