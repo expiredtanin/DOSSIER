@@ -19,21 +19,69 @@
 // mit `RecreationAttempt` paniken.
 //
 // Die Renderer selbst werden NICHT reimplementiert: `render2d::gpu::Renderer` +
-// `render3d::gpu::Renderer` — exakt der Code der standalone-Spikes. Die echten
-// Szenen werden aus `assets/native2d_scene.json` bzw. `assets/native3d_walls.json`
-// geladen (aus dem echten Modell erzeugt); fehlen sie, greift die Demo-Szene.
+// `render3d::gpu::Renderer` — exakt der Code der standalone-Spikes.
+//
+// LIVE-Spiegelung: Die Webview schiebt bei jeder Modellaenderung (debounced)
+// die aktuelle 2D-Szene bzw. die 3D-Waende per Tauri-Command
+// (`push_native_scene`/`push_native_walls`, siehe lib.rs) hierher; ein
+// `EventLoopProxy<UserEvent>` stellt sie in die winit-Loop zu. Die JSON-Assets
+// `assets/native2d_scene.json`/`assets/native3d_walls.json` bleiben nur noch
+// Start-Fallback (bis der erste Push ankommt); fehlen sie, greift die Demo-Szene.
 //
 // Hinter den Cargo-Features `native2d`/`native3d` — der normale Tauri-Build zieht
 // weder winit noch wgpu und bleibt unveraendert. Beide Features sind
 // gleichzeitig aktivierbar (dann oeffnen sich beide Fenster).
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Live-Push aus der Webview
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Ereignisse, die die Webview (via Tauri-Command) in die native Event-Loop
+/// schiebt: die frisch erzeugte 2D-Szene bzw. die geflachten 3D-Waende. So
+/// spiegeln die nativen Fenster das LIVE-Modell statt des JSON-Snapshots.
+enum UserEvent {
+    #[cfg(feature = "native2d")]
+    Scene2d(Scene),
+    #[cfg(feature = "native3d")]
+    Walls3d(Vec<WallInput>),
+}
+
+/// Proxy in die laufende Event-Loop; wird beim Start (vor `run`) gesetzt.
+/// Solange die Loop noch nicht steht, verpuffen Pushes bewusst still.
+static PROXY: OnceLock<EventLoopProxy<UserEvent>> = OnceLock::new();
+
+/// Webview-Push der 2D-Szene (JSON = `render2d::types::Scene`). Parse-Fehler
+/// werden geloggt, ein fehlender Proxy still ignoriert (Loop startet noch).
+#[cfg(feature = "native2d")]
+pub fn push_scene(value: serde_json::Value) {
+    let Some(proxy) = PROXY.get() else { return };
+    match serde_json::from_value::<Scene>(value) {
+        Ok(scene) => {
+            let _ = proxy.send_event(UserEvent::Scene2d(scene));
+        }
+        Err(e) => eprintln!("push_native_scene: ungueltige Szene: {e}"),
+    }
+}
+
+/// Webview-Push der 3D-Waende (JSON = `Vec<render3d::types::WallInput>`).
+#[cfg(feature = "native3d")]
+pub fn push_walls(value: serde_json::Value) {
+    let Some(proxy) = PROXY.get() else { return };
+    match serde_json::from_value::<Vec<WallInput>>(value) {
+        Ok(walls) => {
+            let _ = proxy.send_event(UserEvent::Walls3d(walls));
+        }
+        Err(e) => eprintln!("push_native_walls: ungueltige Waende: {e}"),
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2D
@@ -406,6 +454,14 @@ struct App {
     drag2d: bool,
     #[cfg(feature = "native2d")]
     cur2d: (f64, f64),
+    /// Hat der Nutzer im 2D-Fenster schon gepannt/gezoomt? Solange NICHT, wird
+    /// die Ansicht bei jedem Live-Push neu eingepasst; danach bleibt sie stehen.
+    #[cfg(feature = "native2d")]
+    nav2d: bool,
+    /// Live-Push, der ankam, bevor das 2D-Fenster stand (wird in `resumed` statt
+    /// des JSON-Snapshots angewandt).
+    #[cfg(feature = "native2d")]
+    pending2d: Option<Scene>,
 
     #[cfg(feature = "native3d")]
     s3d: Option<GpuState3d>,
@@ -417,6 +473,12 @@ struct App {
     drag3d: bool,
     #[cfg(feature = "native3d")]
     cur3d: (f64, f64),
+    /// Hat der Nutzer im 3D-Fenster schon orbitiert/gezoomt? Analog `nav2d`.
+    #[cfg(feature = "native3d")]
+    nav3d: bool,
+    /// Live-Push vor Fenster-Erstellung (siehe `pending2d`).
+    #[cfg(feature = "native3d")]
+    pending3d: Option<Vec<WallInput>>,
 }
 
 impl App {
@@ -469,11 +531,13 @@ impl App {
                     let dy = (position.y - self.cur2d.1) as f32 / meet;
                     vb.x -= dx;
                     vb.y -= dy;
+                    self.nav2d = true;
                     state.window.request_redraw();
                 }
                 self.cur2d = (position.x, position.y);
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                self.nav2d = true;
                 let step = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => (p.y as f32) / 40.0,
@@ -526,11 +590,13 @@ impl App {
                     orbit.pitch += dy * 0.01;
                     let limit = std::f32::consts::FRAC_PI_2 - 0.01;
                     orbit.pitch = orbit.pitch.clamp(-limit, limit);
+                    self.nav3d = true;
                     state.window.request_redraw();
                 }
                 self.cur3d = (position.x, position.y);
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                self.nav3d = true;
                 let step = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => (p.y as f32) / 40.0,
@@ -548,7 +614,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(feature = "native2d")]
         if self.s2d.is_none() {
@@ -557,7 +623,8 @@ impl ApplicationHandler for App {
                 .with_inner_size(LogicalSize::new(1000.0, 760.0));
             let window = Arc::new(event_loop.create_window(attrs).expect("2D-Fenster erstellen"));
             self.id2d = Some(window.id());
-            let scene = load_scene();
+            // Kam schon ein Live-Push an, gewinnt der; sonst der JSON-Snapshot.
+            let scene = self.pending2d.take().unwrap_or_else(load_scene);
             self.view_box = Some(scene_view_box(&scene));
             let state = GpuState2d::new(window, &scene);
             state.window.request_redraw();
@@ -571,11 +638,44 @@ impl ApplicationHandler for App {
                 .with_inner_size(LogicalSize::new(1000.0, 760.0));
             let window = Arc::new(event_loop.create_window(attrs).expect("3D-Fenster erstellen"));
             self.id3d = Some(window.id());
-            let walls = load_walls();
+            let walls = self.pending3d.take().unwrap_or_else(load_walls);
             self.orbit = Some(Orbit::framed(&walls));
             let state = GpuState3d::new(window, &walls);
             state.window.request_redraw();
             self.s3d = Some(state);
+        }
+    }
+
+    /// Live-Push aus der Webview: Szene/Waende ersetzen, GPU-Buffer neu bauen,
+    /// neu zeichnen. Die Ansicht wird nur neu eingepasst, solange der Nutzer im
+    /// jeweiligen Fenster noch nicht selbst navigiert hat (kein Zuruckspringen
+    /// von Pan/Zoom/Orbit bei jeder Modellaenderung).
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            #[cfg(feature = "native2d")]
+            UserEvent::Scene2d(scene) => {
+                let Some(state) = self.s2d.as_mut() else {
+                    self.pending2d = Some(scene);
+                    return;
+                };
+                state.renderer.upload_scene(&state.device, &scene);
+                if !self.nav2d {
+                    self.view_box = Some(scene_view_box(&scene));
+                }
+                state.window.request_redraw();
+            }
+            #[cfg(feature = "native3d")]
+            UserEvent::Walls3d(walls) => {
+                let Some(state) = self.s3d.as_mut() else {
+                    self.pending3d = Some(walls);
+                    return;
+                };
+                state.renderer.upload_walls(&state.device, &walls);
+                if !self.nav3d {
+                    self.orbit = Some(Orbit::framed(&walls));
+                }
+                state.window.request_redraw();
+            }
         }
     }
 
@@ -597,9 +697,8 @@ impl ApplicationHandler for App {
 /// Baut die winit-Event-Loop so, dass sie auf DIESEM (Nicht-Haupt-)Thread laufen
 /// darf. Auf Linux/Wayland via `EventLoopBuilderExtWayland::with_any_thread`, auf
 /// X11 das Pendant. Ohne diese Freigabe panict winit (Event-Loop nur Hauptthread).
-fn build_event_loop() -> EventLoop<()> {
-    use winit::event_loop::EventLoopBuilder;
-    let mut builder = EventLoopBuilder::default();
+fn build_event_loop() -> EventLoop<UserEvent> {
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -619,6 +718,9 @@ fn build_event_loop() -> EventLoop<()> {
 fn run_blocking() {
     let event_loop = build_event_loop();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+    // Proxy VOR dem Lauf veroeffentlichen, damit die Tauri-Commands
+    // (`push_native_scene`/`push_native_walls`) sofort zustellen koennen.
+    let _ = PROXY.set(event_loop.create_proxy());
     let mut app = App::default();
     let _ = event_loop.run_app(&mut app);
 }

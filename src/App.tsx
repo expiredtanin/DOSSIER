@@ -37,6 +37,7 @@ import type {
 } from "./model/types";
 import { generatePlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
+import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { parseDxf } from "./io/dxfParser";
 import type { DxfImportResult } from "./io/dxfParser";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
@@ -4067,6 +4068,16 @@ function LevelPlanView({
       ),
     [project, level.id, visibleCodes, categoryDisplay, detail, referenceLines, mono],
   );
+
+  // Live-Spiegelung in die nativen wgpu-Fenster (No-op ohne Tauri, debounced):
+  // EXAKT der sichtbare Plan (gleiches Geschoss, gleicher Detailgrad) fürs
+  // 2D-Fenster, die Projekt-Wände fürs 3D-Fenster.
+  useEffect(() => {
+    pushNativeScene(plan);
+  }, [plan]);
+  useEffect(() => {
+    pushNativeWalls(project);
+  }, [project]);
 
   // Bei einer freien Zeichnung gibt es keine Schnitthöhe → eigene Legende/Titel.
   const isDrawing = level.kind === "drawing";
