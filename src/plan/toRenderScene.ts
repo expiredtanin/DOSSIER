@@ -141,6 +141,64 @@ function visibleEdgeRuns(pts: RPoint[], noStroke: number[]): RPoint[][] {
 }
 
 /**
+ * Näht sichtbare Kantenläufe ÜBER Polygon-Grenzen hinweg zusammen: Läufe mit
+ * koinzidenten Endpunkten (und GENAU zwei beteiligten Enden — T-Stösse bleiben
+ * unangetastet) werden zu einer Kette verbunden, ggf. mit Richtungsumkehr.
+ * Schliesst sich eine Kette, wird sie als geschlossener Ring markiert. So
+ * bekommt eine Wandecke, deren zwei Schenkel aus VERSCHIEDENEN Wand-Polygonen
+ * stammen, dieselbe Gehrung wie die inneren Ecken eines einzelnen Laufs
+ * (statt zweier Stumpfkappen, die eine Kerbe bilden).
+ */
+function stitchRuns(runs: RPoint[][]): { pts: RPoint[]; closed: boolean }[] {
+  const eps = 1e-5;
+  const key = (p: RPoint) => `${Math.round(p[0] / eps)},${Math.round(p[1] / eps)}`;
+  // Endpunkt-Belegung zählen: verkettet wird nur, wo genau ZWEI Enden liegen.
+  const endCount = new Map<string, number>();
+  for (const r of runs) {
+    for (const p of [r[0], r[r.length - 1]]) {
+      endCount.set(key(p), (endCount.get(key(p)) ?? 0) + 1);
+    }
+  }
+  const joinable = (p: RPoint) => endCount.get(key(p)) === 2;
+
+  const pool = runs.map((pts) => ({ pts, used: false }));
+  const out: { pts: RPoint[]; closed: boolean }[] = [];
+  for (const seed of pool) {
+    if (seed.used) continue;
+    seed.used = true;
+    let chain = seed.pts;
+    let extended = true;
+    while (extended && !(chain.length > 2 && samePt(chain[0], chain[chain.length - 1]))) {
+      extended = false;
+      const head = chain[0];
+      const tail = chain[chain.length - 1];
+      for (const cand of pool) {
+        if (cand.used) continue;
+        const cs = cand.pts[0];
+        const ce = cand.pts[cand.pts.length - 1];
+        if (joinable(tail) && samePt(tail, cs)) {
+          chain = chain.concat(cand.pts.slice(1));
+        } else if (joinable(tail) && samePt(tail, ce)) {
+          chain = chain.concat([...cand.pts].reverse().slice(1));
+        } else if (joinable(head) && samePt(head, ce)) {
+          chain = cand.pts.concat(chain.slice(1));
+        } else if (joinable(head) && samePt(head, cs)) {
+          chain = [...cand.pts].reverse().concat(chain.slice(1));
+        } else {
+          continue;
+        }
+        cand.used = true;
+        extended = true;
+        break;
+      }
+    }
+    const closed = chain.length > 3 && samePt(chain[0], chain[chain.length - 1]);
+    out.push({ pts: closed ? chain.slice(0, -1) : chain, closed });
+  }
+  return out;
+}
+
+/**
  * Wandelt einen Plan in eine native render2d-Szene um. Zusammenhängende Umriss-
  * und Zeichnungskanten werden zu OFFENEN Polylinien verkettet (gehrte Ecken);
  * nur genuin einzelne Segmente (Türblätter, Referenzlinien) bleiben `lines`.
@@ -150,6 +208,20 @@ export function planToRenderScene(plan: Plan): RScene {
   const outlines: ROutline[] = [];
   const polylines: RPolyline[] = [];
   const lines: RLine[] = [];
+
+  // Sichtbare Umriss-Läufe werden erst GESAMMELT (nach Stil gruppiert) und am
+  // Ende über Polygon-Grenzen hinweg zusammengenäht — erst dadurch bekommen
+  // Wand-zu-Wand-Ecken (zwei Polygone!) eine Gehrung statt einer Kerbe.
+  const edgeRunGroups = new Map<string, { color: RRgba; widthMm: number; runs: RPoint[][] }>();
+  const collectEdgeRun = (run: RPoint[], color: RRgba, widthMm: number) => {
+    const k = `${color.join(",")}|${widthMm}`;
+    let g = edgeRunGroups.get(k);
+    if (!g) {
+      g = { color, widthMm, runs: [] };
+      edgeRunGroups.set(k, g);
+    }
+    g.runs.push(run);
+  };
 
   // Laufender, verketteter 2D-Zeichnungs-Zug (gleiche drawingId + Stil, End-an-Start).
   let curPts: RPoint[] | null = null;
@@ -200,9 +272,9 @@ export function planToRenderScene(plan: Plan): RScene {
           // Ganzer Ring → geschlossener, gehrter Umriss.
           outlines.push({ pts, color: strokeCol, widthMm: p.strokeWidthMm });
         } else {
-          // Nur die sichtbaren Kanten, als zusammenhängende (offene) Läufe.
+          // Nur die sichtbaren Kanten — sammeln, die Naht ans Ende verschoben.
           for (const run of visibleEdgeRuns(pts, suppressed)) {
-            polylines.push({ pts: run, color: strokeCol, widthMm: p.strokeWidthMm });
+            collectEdgeRun(run, strokeCol, p.strokeWidthMm);
           }
         }
       }
@@ -238,6 +310,19 @@ export function planToRenderScene(plan: Plan): RScene {
     }
   }
   flushRun();
+
+  // Gesammelte Umriss-Läufe polygonübergreifend zusammennähen: geschlossene
+  // Ketten als Ring (Gehrung auch an der Naht), offene als Polylinie.
+  for (const g of edgeRunGroups.values()) {
+    for (const chain of stitchRuns(g.runs)) {
+      if (chain.pts.length < 2) continue;
+      if (chain.closed) {
+        outlines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm });
+      } else {
+        polylines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm });
+      }
+    }
+  }
 
   return { fills, outlines, polylines, lines };
 }
