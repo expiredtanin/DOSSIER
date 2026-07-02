@@ -22,6 +22,9 @@ use crate::shaders::{FILL_WGSL, LINE_WGSL};
 use crate::tessellate::{compile_scene, GpuGeometry};
 use crate::types::{Scene, ViewBox};
 
+/// MSAA-Faktor: 4x Multisampling fuer glatte Linien-/Fuellkanten (wie im Browser).
+const SAMPLE_COUNT: u32 = 4;
+
 /// Uniform-Block, 1:1 zum WGSL-`Globals`-Struct. std140-kompatibel ausgelegt
 /// (16-Byte-Alignment der mat4/vec4, Skalare am Ende gepackt).
 #[repr(C)]
@@ -75,6 +78,12 @@ pub struct Renderer {
     /// Aktuell allozierter Uniform-Puffer + zugehoerige Bind-Group (wachsen bei Bedarf).
     uniform: Option<UniformArena>,
     scene: Option<SceneBuffers>,
+    /// Farbformat der Ziel-Surface (auch Format der MSAA-Textur).
+    format: wgpu::TextureFormat,
+    /// Multisample-Farbtextur (4x), lazily an die Ziel-Groesse gebunden.
+    msaa_view: Option<wgpu::TextureView>,
+    /// Groesse, fuer die `msaa_view` angelegt wurde.
+    msaa_size: (u32, u32),
     /// Loeschfarbe (Zeichenblatt), Default hell wie im WebGL-Pfad (#f0f0f0).
     pub clear_color: wgpu::Color,
     /// Papier-Massstab-Nenner (1:N) fuer echte mm-Strichbreiten.
@@ -161,7 +170,11 @@ impl Renderer {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -193,7 +206,11 @@ impl Renderer {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -209,6 +226,9 @@ impl Renderer {
             uniform_stride,
             uniform: None,
             scene: None,
+            format: color_format,
+            msaa_view: None,
+            msaa_size: (0, 0),
             // #f0f0f0 (== --sheet). 0.941 entspricht dem WebGL-clearColor.
             clear_color: wgpu::Color {
                 r: 0.941,
@@ -289,6 +309,31 @@ impl Renderer {
         });
     }
 
+    /// Stellt sicher, dass eine 4x-MSAA-Farbtextur passend zur Ziel-Groesse
+    /// existiert; realloziert nur bei Groessenaenderung (analog ensure_depth in 3D).
+    fn ensure_msaa(&mut self, device: &wgpu::Device, w: u32, h: u32) {
+        let (w, h) = (w.max(1), h.max(1));
+        if self.msaa_view.is_some() && self.msaa_size == (w, h) {
+            return;
+        }
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("msaa.color"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        self.msaa_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.msaa_size = (w, h);
+    }
+
     /// Zeichnet einen Frame in `view` (Surface- oder Offscreen-Textur).
     /// Pan/Zoom kommt ueber `view_box`/`viewport`; nur die Ortho-Matrix aendert sich.
     pub fn render(
@@ -343,6 +388,11 @@ impl Renderer {
             }
         }
 
+        // In die 4x-MSAA-Textur zeichnen und in die Surface aufloesen (Resolve):
+        // das glaettet alle Fuell-/Linienkanten, die Aufrufer bleiben unveraendert.
+        self.ensure_msaa(device, viewport.0, viewport.1);
+        let msaa_view = self.msaa_view.as_ref().unwrap();
+
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("2d.encoder"),
         });
@@ -350,8 +400,8 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("2d.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
+                    view: msaa_view,
+                    resolve_target: Some(view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(self.clear_color),
                         store: wgpu::StoreOp::Store,
