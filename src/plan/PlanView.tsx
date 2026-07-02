@@ -1573,8 +1573,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       plan.primitives.map((p, i) =>
         // Bei aktivem GL zeichnet die WebGL-Ebene Poché/Linien/Bögen; das SVG wird
         // zur reinen Text-Overlay-Ebene (scharfe Schrift, DOM-Hit-Test) → hier nur
-        // noch Text-Primitive. Sonst: alles außer den gebündelten 2D-Zeichenlinien.
-        (useGpuRenderer ? p.kind !== "text" : p.kind === "line" && p.drawingId) ? null : (
+        // noch Text-Primitive. Bei aktiver WASM-Engine rastert render2d den
+        // Raum-Stempel selbst (glyphon) — das SVG darf ihn NICHT zusätzlich
+        // zeichnen (sonst doppelter Text), also entfällt dort auch das Textoverlay.
+        // Sonst (reines SVG): alles außer den gebündelten 2D-Zeichenlinien.
+        (useGpuRenderer ? wantWasm || p.kind !== "text" : p.kind === "line" && p.drawingId) ? null : (
           <PrimitiveShape
             key={i}
             p={p}
@@ -1586,7 +1589,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
-    [plan, hairline, paperScale, useGpuRenderer],
+    [plan, hairline, paperScale, useGpuRenderer, wantWasm],
   );
   const drawingRunEls = useMemo(
     () =>
