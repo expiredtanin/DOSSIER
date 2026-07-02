@@ -50,8 +50,9 @@ export function pushNativeScene(plan: Plan): void {
 }
 
 /**
- * Debounced: die Wände des Projekts (alle Geschosse, gestapelt) als
- * render3d-WallInputs ans native 3D-Fenster schieben. No-op ohne Tauri.
+ * Debounced: das 3D-Modell des Projekts (alle Geschosse, gestapelt) — Wände mit
+ * Öffnungs-Teilquadern plus Deckenplatten — ans native 3D-Fenster schieben.
+ * No-op ohne Tauri.
  */
 export function pushNativeWalls(project: Project): void {
   if (!isTauri()) return;
