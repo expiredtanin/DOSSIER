@@ -18,8 +18,8 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::ortho::{compute_ortho_matrix, corrected_view_box, meet_scale, mm_to_device_px, Mat4};
-use crate::shaders::{FILL_WGSL, LINE_WGSL};
-use crate::tessellate::{compile_scene_scaled, to_screen, GpuGeometry, PX_PER_M};
+use crate::shaders::{ARC_WGSL, FILL_WGSL, LINE_WGSL};
+use crate::tessellate::{compile_scene, to_screen, ArcInstanceData, GpuGeometry, MAX_ARC_DASH};
 use crate::types::{Scene, Text, TextAlign, ViewBox};
 
 /// MSAA-Faktor: 4x Multisampling fuer glatte Linien-/Fuellkanten (wie im Browser).
@@ -49,6 +49,49 @@ impl Default for Globals {
     }
 }
 
+/// Frame-Uniform der analytischen Bogen-Pipeline (1:1 zu `ArcGlobals` in WGSL).
+/// EIN Block je Frame (fuer ALLE Boegen gleich) — anders als die per-Batch-
+/// `Globals` braucht er keinen dynamischen Offset. std140: mat4 + vec2 + 2 Skalare
+/// = 80 Byte (16-Byte-Vielfaches).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ArcGlobals {
+    view_proj: [f32; 16],
+    viewport_px: [f32; 2],
+    px_per_screen: f32,
+    stroke_scale: f32,
+}
+
+/// EINE Bogen-Instanz fuer die GPU (Vertex-Puffer, step_mode Instance), 1:1 zum
+/// Instanz-Layout in `ARC_WGSL`. Zoom-invariant: Bildschirm-Raum-Geometrie +
+/// Dash in Modell-Metern. 18 f32 = 72 Byte.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ArcInstance {
+    center: [f32; 2],
+    /// (r_screen, a0, sweep, r_model)
+    geom: [f32; 4],
+    color: [f32; 4],
+    /// (width_mm, dash_total, dash_count, _pad)
+    wdash: [f32; 4],
+    /// bis zu MAX_ARC_DASH An/Aus-Laengen (Modell-Meter).
+    dash: [f32; 4],
+}
+
+impl ArcInstance {
+    fn from_data(a: &ArcInstanceData) -> Self {
+        // MAX_ARC_DASH ist 4 (== vec4 im Shader); Compile-Time abgesichert.
+        const _: () = assert!(MAX_ARC_DASH == 4);
+        Self {
+            center: a.center,
+            geom: [a.r_screen, a.a0, a.sweep, a.r_model],
+            color: a.color,
+            wdash: [a.width_mm, a.dash_total, a.dash_count as f32, 0.0],
+            dash: a.dash,
+        }
+    }
+}
+
 /// Rundet `size` auf das naechste Vielfache von `align` (>=1) auf.
 fn align_up(size: u64, align: u64) -> u64 {
     if align <= 1 {
@@ -63,6 +106,10 @@ struct SceneBuffers {
     fill_ibo: Option<wgpu::Buffer>,
     line_vbo: Option<wgpu::Buffer>,
     line_ibo: Option<wgpu::Buffer>,
+    /// Instanz-Puffer der analytischen Boegen (je Bogen EINE Instanz); None wenn leer.
+    arc_vbo: Option<wgpu::Buffer>,
+    /// Anzahl Bogen-Instanzen (Draw: 6 Vertices je Instanz).
+    arc_count: u32,
     geo: GpuGeometry,
     /// Textzeilen der Szene (Modell-Anker + Papier-mm-Groesse). Werden nicht
     /// tesselliert, sondern pro Frame ueber den Glyphen-Atlas gesetzt (die
@@ -93,16 +140,16 @@ pub struct Renderer {
     fill_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
+    /// Analytische Bogen-Pipeline (exakter Kreis-Shader, `ARC_WGSL`).
+    arc_pipeline: wgpu::RenderPipeline,
+    /// Frame-Uniform der Bogen-Pipeline (ein Block, kein dynamischer Offset).
+    arc_uniform: wgpu::Buffer,
+    arc_bind_group: wgpu::BindGroup,
     /// Ausgerichtete Groesse eines Globals-Blocks im dynamischen Uniform-Puffer.
     uniform_stride: u64,
     /// Aktuell allozierter Uniform-Puffer + zugehoerige Bind-Group (wachsen bei Bedarf).
     uniform: Option<UniformArena>,
     scene: Option<SceneBuffers>,
-    /// Die zuletzt hochgeladene Szene (fuer Re-Tessellierung bei Zoomaenderung,
-    /// siehe `maybe_retessellate` — nur relevant, wenn die Szene Boegen enthaelt).
-    last_scene: Option<Scene>,
-    /// Geraete-px je Modell-Meter, mit dem `last_scene` zuletzt tessellliert wurde.
-    arc_px_per_m: f32,
     /// Farbformat der Ziel-Surface (auch Format der MSAA-Textur).
     format: wgpu::TextureFormat,
     /// Multisample-Farbtextur (4x), lazily an die Ziel-Groesse gebunden.
@@ -242,6 +289,91 @@ impl Renderer {
             cache: None,
         });
 
+        // ── Analytische Bogen-Pipeline (exakter Kreis-Shader) ─────────────────
+        let arc_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("arc.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(ARC_WGSL.into()),
+        });
+        // Eigenes Layout: EIN Uniform-Block je Frame (kein dynamischer Offset).
+        let arc_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("arc.globals.layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(
+                            std::mem::size_of::<ArcGlobals>() as u64,
+                        ),
+                    },
+                    count: None,
+                }],
+            });
+        let arc_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("arc.pipeline.layout"),
+                bind_group_layouts: &[&arc_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        // Instanz-Layout: [center vec2, geom vec4, color vec4, wdash vec4, dash vec4],
+        // stride 18*4, step_mode Instance. Das Quad kommt aus @builtin(vertex_index).
+        let arc_instance_layout = wgpu::VertexBufferLayout {
+            array_stride: 18 * 4,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x2, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4
+            ],
+        };
+        let arc_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("arc.pipeline"),
+            layout: Some(&arc_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &arc_module,
+                entry_point: "vs_main",
+                buffers: &[arc_instance_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &arc_module,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+        let arc_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("arc.globals.buffer"),
+            size: std::mem::size_of::<ArcGlobals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let arc_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("arc.globals.bind"),
+            layout: &arc_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: arc_uniform.as_entire_binding(),
+            }],
+        });
+
         // Block-Stride = Globals auf die Dynamic-Offset-Ausrichtung des Geraets gepolstert.
         let min_align = device.limits().min_uniform_buffer_offset_alignment as u64;
         let uniform_stride = align_up(std::mem::size_of::<Globals>() as u64, min_align.max(1));
@@ -250,11 +382,12 @@ impl Renderer {
             fill_pipeline,
             line_pipeline,
             bind_group_layout,
+            arc_pipeline,
+            arc_uniform,
+            arc_bind_group,
             uniform_stride,
             uniform: None,
             scene: None,
-            last_scene: None,
-            arc_px_per_m: PX_PER_M,
             format: color_format,
             msaa_view: None,
             msaa_size: (0, 0),
@@ -270,12 +403,13 @@ impl Renderer {
         }
     }
 
-    /// Tessellliert eine Szene und laedt die Puffer hoch. `px_per_m` sind die
-    /// aktuellen Geraete-px je Modell-Meter (treibt nur die Bogen-Adaptivitaet,
-    /// siehe `tessellate::tessellate_arc`); wird gemerkt, damit `render` bei
-    /// Zoomaenderung automatisch neu tessellliert (`maybe_retessellate`).
-    pub fn upload_scene(&mut self, device: &wgpu::Device, scene: &Scene, px_per_m: f32) {
-        let geo = compile_scene_scaled(scene, px_per_m);
+    /// Kompiliert eine Szene und laedt die GPU-Puffer hoch. Alles ist zoom-
+    /// invariant — Papier-mm-Striche wie auch die analytischen Boegen werden erst
+    /// im Shader auf Geraete-px abgebildet. Daher KEIN Zoom-Parameter und keine
+    /// Neu-Tessellierung bei Zoomaenderung mehr (der frueher noetige Bogen-Re-Tess-
+    /// Trigger entfaellt: der Kreis-Shader rendert bei jeder Skala exakt rund).
+    pub fn upload_scene(&mut self, device: &wgpu::Device, scene: &Scene) {
+        let geo = compile_scene(scene);
 
         let mk_vbo = |data: &[f32], label: &str| -> Option<wgpu::Buffer> {
             if data.is_empty() {
@@ -298,37 +432,30 @@ impl Renderer {
             }))
         };
 
+        // Bogen-Instanzen (je Bogen EINE) in einen Instanz-Vertexpuffer packen.
+        let arc_instances: Vec<ArcInstance> =
+            geo.arcs.iter().map(ArcInstance::from_data).collect();
+        let arc_count = arc_instances.len() as u32;
+        let arc_vbo = if arc_instances.is_empty() {
+            None
+        } else {
+            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("arc.instances"),
+                contents: bytemuck::cast_slice(&arc_instances),
+                usage: wgpu::BufferUsages::VERTEX,
+            }))
+        };
+
         self.scene = Some(SceneBuffers {
             fill_vbo: mk_vbo(&geo.fill_pos, "fill.vbo"),
             fill_ibo: mk_ibo(&geo.fill_idx, "fill.ibo"),
             line_vbo: mk_vbo(&geo.line_verts, "line.vbo"),
             line_ibo: mk_ibo(&geo.line_idx, "line.ibo"),
+            arc_vbo,
+            arc_count,
             geo,
             texts: scene.texts.clone(),
         });
-        self.last_scene = Some(scene.clone());
-        self.arc_px_per_m = px_per_m;
-    }
-
-    /// Tessellliert die zuletzt hochgeladene Szene neu, wenn sich der Zoom seit
-    /// dem letzten Upload um mehr als den Faktor 1.3 veraendert hat UND die
-    /// Szene ueberhaupt Boegen enthaelt (bei anderen Primitiven ist Zoom-
-    /// invariant, kein Re-Tessellieren noetig). Haelt Boegen bei jeder
-    /// Zoomstufe glatt, ohne jeden Frame neu zu tessellieren (Szenen sind
-    /// klein, das Re-Tessellieren selbst ist billig — nur nicht JEDEN Frame).
-    fn maybe_retessellate(&mut self, device: &wgpu::Device, view_box: ViewBox, viewport: (u32, u32)) {
-        let Some(scene) = &self.last_scene else {
-            return;
-        };
-        if scene.arcs.is_empty() {
-            return;
-        }
-        let px_per_m = PX_PER_M * meet_scale(view_box, viewport.0 as f32, viewport.1 as f32);
-        let ratio = px_per_m / self.arc_px_per_m.max(1e-6);
-        if ratio > 1.3 || ratio < 1.0 / 1.3 {
-            let scene = scene.clone();
-            self.upload_scene(device, &scene, px_per_m);
-        }
     }
 
     /// Erstellt den Glyphen-Textpass beim ersten Bedarf (FontSystem laedt die
@@ -431,11 +558,25 @@ impl Renderer {
         view_box: ViewBox,
         viewport: (u32, u32),
     ) {
-        self.maybe_retessellate(device, view_box, viewport);
-
         let (vw, vh) = (viewport.0 as f32, viewport.1 as f32);
         let proj: Mat4 = compute_ortho_matrix(view_box, vw, vh);
         let mm_px = mm_to_device_px(view_box, vw, vh, self.paper_scale_n);
+        // Geraete-px je Bildschirm-Einheit (== meet-Skala) — der Bogen-Shader braucht
+        // beides: px_per_screen fuer Radial-/Kappen-/Dash-AA, stroke_scale fuer die
+        // Papier-mm-Breite (identisch zu den Linien).
+        let px_per_screen = meet_scale(view_box, vw, vh);
+
+        // Frame-Uniform der Bogen-Pipeline schreiben (ein Block fuer ALLE Boegen).
+        queue.write_buffer(
+            &self.arc_uniform,
+            0,
+            bytemuck::bytes_of(&ArcGlobals {
+                view_proj: proj,
+                viewport_px: [vw, vh],
+                px_per_screen,
+                stroke_scale: mm_px,
+            }),
+        );
 
         // Alle Globals-Bloecke der Reihenfolge nach (erst Fuell-, dann Linien-Batches)
         // sammeln, den Puffer einmal schreiben, danach nur noch dynamisch binden.
@@ -650,7 +791,22 @@ impl Renderer {
                 }
             }
 
-            // 3) Text ZUOBERST im selben MSAA-Pass (der TextRenderer wurde mit
+            // 3) Analytische Boegen: eigene Pipeline, EIN Frame-Uniform, je Bogen
+            //    EINE Instanz (6 Vertices, Quad aus vertex_index). Mathematisch
+            //    exakt rund per SDF — nach den Linien, damit der Schwenkbogen ueber
+            //    dem Tuerblatt liegt.
+            if let Some(scene) = &self.scene {
+                if let Some(arc_vbo) = &scene.arc_vbo {
+                    if scene.arc_count > 0 {
+                        pass.set_pipeline(&self.arc_pipeline);
+                        pass.set_bind_group(0, &self.arc_bind_group, &[]);
+                        pass.set_vertex_buffer(0, arc_vbo.slice(..));
+                        pass.draw(0..6, 0..scene.arc_count);
+                    }
+                }
+            }
+
+            // 4) Text ZUOBERST im selben MSAA-Pass (der TextRenderer wurde mit
             //    identischem MultisampleState erstellt, siehe ensure_text).
             if let Some(ts) = &self.text {
                 if let Err(e) = ts.renderer.render(&ts.atlas, &ts.viewport, &mut pass) {

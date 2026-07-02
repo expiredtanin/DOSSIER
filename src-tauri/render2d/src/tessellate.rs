@@ -27,44 +27,96 @@ pub fn to_screen(p: Point) -> Point {
     [p[0] * PX_PER_M, -p[1] * PX_PER_M]
 }
 
-/// Mindest-Sehnenabweichung (Sagitta) in Geraete-px, unter der ein Kreisbogen als
-/// glatt gilt. Kleiner -> mehr Segmente bei gleichem Radius/Zoom.
-const ARC_SAGITTA_TOL_PX: f32 = 0.3;
+/// Hoechstzahl Dash-Muster-Eintraege je Bogen (An/Aus-Laengen), die der analytische
+/// Bogen-Shader modulo rechnet. Deckt die real vorkommenden Muster (max. EIN An/Aus-
+/// Paar, z.B. Tuerschwenk [0.06,0.04]) mit Reserve; laengere Muster werden gekappt.
+pub const MAX_ARC_DASH: usize = 4;
 
-/// Kreisbogen (kuerzerer Sweep von `from` nach `to` um `center`, wie die alte
-/// JS-`tessellateArc`) zoomabhaengig in eine offene Punktfolge (Modell-Meter)
-/// zerlegen. Winkelschritt so klein, dass die Sehnen-Abweichung (Sagitta) bei der
-/// aktuellen Bildschirm-Skala `px_per_m` (Geraete-px je Modell-Meter) unter
-/// `ARC_SAGITTA_TOL_PX` bleibt: sagitta = r*(1-cos(dtheta/2)) <= tol
-/// => dtheta <= 2*acos(1 - tol/r_px), r_px = r*px_per_m. Segmentzahl auf 8..512
-/// geklemmt (nie zu grob, nie unnoetig fein). Erster/letzter Punkt werden EXAKT
-/// auf `from`/`to` gesetzt (kein Trig-Rundungsfehler an den Enden).
-pub(crate) fn tessellate_arc(center: Point, from: Point, to: Point, r: f32, px_per_m: f32) -> Vec<Point> {
-    let a0 = (from[1] - center[1]).atan2(from[0] - center[0]);
-    let a1_raw = (to[1] - center[1]).atan2(to[0] - center[0]);
-    // Kuerzeren Bogen waehlen (die Szene liefert keine largeArc-Info mit) — 1:1
-    // die Winkel-Normalisierung der alten JS-`tessellateArc`.
-    let mut delta = a1_raw - a0;
+/// GPU-fertige Beschreibung EINES analytisch (im Fragment-Shader) gezeichneten
+/// Bogens — bereits in BILDSCHIRM-Raum-Parametern, damit ihn die GPU pro Frame
+/// mathematisch exakt rund rendert (SDF), ohne Segment-Tessellierung. Alle Felder
+/// sind zoom-INVARIANT (haengen nicht von der aktuellen Skala ab): `center`/
+/// `r_screen` in Bildschirm-Einheiten, Winkel im Bildschirm-Raum, `dash` in
+/// Modell-Metern. Die Strichbreite (`width_mm`) mappt der Shader pro Frame mit
+/// derselben Formel wie die Linien (`ortho::mm_to_device_px`) auf Geraete-px.
+#[derive(Debug, Clone)]
+pub struct ArcInstanceData {
+    /// Mittelpunkt in Bildschirm-Raum-Einheiten (`to_screen(center)`).
+    pub center: Point,
+    /// Radius in Bildschirm-Raum-Einheiten (`r * PX_PER_M`).
+    pub r_screen: f32,
+    /// Radius in MODELL-Metern (fuer die Dash-Bogenlaenge).
+    pub r_model: f32,
+    /// Start-Winkel im Bildschirm-Raum (atan2 relativ `center`).
+    pub a0: f32,
+    /// Vorzeichenbehafteter Sweep (kuerzerer Bogen, |sweep| <= pi).
+    pub sweep: f32,
+    /// Strichfarbe (RGBA 0..1).
+    pub color: Rgba,
+    /// Strichbreite in echten Papier-Millimetern.
+    pub width_mm: f32,
+    /// Dash-Zyklus in MODELL-Metern (An/Aus-Laengen), ggf. verdoppelt bei ungerader
+    /// Laenge (Standard-Dash-Semantik, wie `split_dash`). Nur `dash_count` gueltig.
+    pub dash: [f32; MAX_ARC_DASH],
+    /// Anzahl gueltiger `dash`-Eintraege; 0 = durchgezogen.
+    pub dash_count: u32,
+    /// Summe der gueltigen `dash`-Eintraege (Zykluslaenge, Modell-Meter).
+    pub dash_total: f32,
+}
+
+/// Bildschirm-Raum-Parameter eines Bogens: Mittelpunkt + Radius (Bildschirm-
+/// Einheiten) sowie Start- und Sweep-Winkel IM BILDSCHIRM-RAUM. Der Sweep ist der
+/// KUERZERE Bogen (|sweep| <= pi) — exakt die Winkel-Normalisierung der frueheren
+/// `tessellate_arc` (dort im Modell-Raum). Die Bildschirm-Y-Spiegelung (`to_screen`)
+/// negiert lediglich beide Winkel; der BETRAG von `sweep` bleibt identisch, sodass
+/// weiterhin derselbe (kuerzere) Bogen entsteht.
+pub fn arc_screen_params(center: Point, from: Point, to: Point, r: f32) -> (Point, f32, f32, f32) {
+    let cs = to_screen(center);
+    let fs = to_screen(from);
+    let ts = to_screen(to);
+    let a0 = (fs[1] - cs[1]).atan2(fs[0] - cs[0]);
+    let a1 = (ts[1] - cs[1]).atan2(ts[0] - cs[0]);
+    let mut delta = a1 - a0;
     while delta > std::f32::consts::PI {
         delta -= 2.0 * std::f32::consts::PI;
     }
     while delta < -std::f32::consts::PI {
         delta += 2.0 * std::f32::consts::PI;
     }
+    (cs, r * PX_PER_M, a0, delta)
+}
 
-    let r_px = (r * px_per_m).max(1e-6);
-    let ratio = (1.0 - (ARC_SAGITTA_TOL_PX / r_px)).clamp(-1.0, 1.0);
-    let max_dtheta = (2.0 * ratio.acos()).max(1e-4);
-    let segs = ((delta.abs() / max_dtheta).ceil() as u32).clamp(8, 512);
-
-    let mut pts = Vec::with_capacity(segs as usize + 1);
-    pts.push(from);
-    for i in 1..segs {
-        let t = a0 + delta * (i as f32) / (segs as f32);
-        pts.push([center[0] + t.cos() * r, center[1] + t.sin() * r]);
+/// Wandelt ein Papier-mm-Dash-Muster in den Modell-Meter-Zyklus, den der Bogen-
+/// Shader modulo rechnet — IDENTISCHE Semantik zu `split_dash` (`DASH_MM_TO_M`-
+/// Referenz, Verdopplung bei ungerader Musterlaenge). Auf `MAX_ARC_DASH` Eintraege
+/// begrenzt; laengere Muster (kommen real nicht vor) werden gekappt. Rueckgabe:
+/// (Zyklus, Anzahl, Gesamtlaenge); Anzahl 0 = durchgezogen.
+pub fn prepare_arc_dash(dash: Option<&[f32]>) -> ([f32; MAX_ARC_DASH], u32, f32) {
+    let mut out = [0.0f32; MAX_ARC_DASH];
+    let Some(d) = dash else {
+        return (out, 0, 0.0);
+    };
+    let pat: Vec<f32> = d
+        .iter()
+        .copied()
+        .map(|v| v.max(0.0) * DASH_MM_TO_M)
+        .filter(|v| *v > 0.0)
+        .collect();
+    if pat.is_empty() {
+        return (out, 0, 0.0);
     }
-    pts.push(to);
-    pts
+    let cycle: Vec<f32> = if pat.len() % 2 == 0 {
+        pat
+    } else {
+        [pat.as_slice(), pat.as_slice()].concat()
+    };
+    let n = cycle.len().min(MAX_ARC_DASH);
+    let mut total = 0.0f32;
+    for (i, v) in cycle.iter().take(n).enumerate() {
+        out[i] = *v;
+        total += *v;
+    }
+    (out, n as u32, total)
 }
 
 /// Faktor Papier-mm -> Modell-Meter fuer ALLGEMEINE Linien-/Bogen-Striche, bei
@@ -330,6 +382,9 @@ pub struct GpuGeometry {
     pub line_verts: Vec<f32>,
     pub line_idx: Vec<u32>,
     pub line_batches: Vec<LineBatch>,
+    /// Analytisch gezeichnete Boegen (je EINE Instanz, kein Segment-Mesh mehr):
+    /// die GPU rendert sie pro Frame exakt rund per SDF-Fragment-Shader.
+    pub arcs: Vec<ArcInstanceData>,
     /// Modell-Bounds (Meter) fuer Debug/Einpassen; nicht render-kritisch.
     pub bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
 }
@@ -518,22 +573,13 @@ impl Bounds {
     }
 }
 
-/// Tessellliert eine ganze Szene zu GPU-Geometrie beim Standard-Massstab
-/// (`PX_PER_M`, kein Zoom beruecksichtigt) — Kompatibilitaets-Wrapper fuer
-/// bestehende Aufrufer (Tests, Demo, Fenster-Spike), die keinen aktuellen
-/// Geraete-px-je-Meter-Wert kennen. Der eigentliche (zoomabhaengige) Renderpfad
-/// nutzt `compile_scene_scaled` direkt (siehe `gpu::Renderer::upload_scene`).
+/// Kompiliert eine ganze Szene zu GPU-Geometrie: gefuellte Polygone +
+/// Papier-mm-Striche (tesselliert) + analytische Boegen (je EINE Instanz).
+/// Reihenfolge: Fuellungen -> Umrisse -> offene Polylinien -> freie Linien; die
+/// Boegen sammelt `geo.arcs` (eigene Pipeline, gezeichnet nach den Linien). ALLES
+/// ist zoom-INVARIANT: Papier-mm-Striche wie auch die Bogen-Kanten werden erst im
+/// Shader auf Geraete-px abgebildet — keine Neu-Tessellierung bei Zoom noetig.
 pub fn compile_scene(scene: &Scene) -> GpuGeometry {
-    compile_scene_scaled(scene, PX_PER_M)
-}
-
-/// Tessellliert eine ganze Szene zu GPU-Geometrie (gefuellte Polygone +
-/// Papier-mm-Striche). Reihenfolge: Fuellungen -> Umrisse -> offene Polylinien
-/// -> Boegen -> freie Linien (siehe `Scene`-Doc-Kommentar). `px_per_m` sind die
-/// aktuellen Geraete-px je Modell-Meter (aus der laufenden Zoom-Stufe) — treibt
-/// NUR die Bogen-Adaptivitaet (`tessellate_arc`); alles andere ist Zoom-invariant
-/// (Papier-mm-Striche werden erst im Shader auf Geraete-px abgebildet).
-pub fn compile_scene_scaled(scene: &Scene, px_per_m: f32) -> GpuGeometry {
     let mut geo = GpuGeometry::default();
     let mut bounds = Bounds::new();
 
@@ -556,14 +602,15 @@ pub fn compile_scene_scaled(scene: &Scene, px_per_m: f32) -> GpuGeometry {
             stroke_dashed_or_solid(&mut geo, &pl.pts, false, pl.color, pl.width_mm, pl.dash.as_deref(), &mut bounds);
         }
     }
-    // 4) Kreisboegen: zoomabhaengig in eine Punktfolge zerlegt (`tessellate_arc`),
-    //    dann wie eine offene Polylinie gestrichen (mit oder ohne Dash).
-    for a in &scene.arcs {
-        compile_arc(&mut geo, a, px_per_m, &mut bounds);
-    }
-    // 5) Freie Einzel-Linien (Tuerblaetter, Referenzlinien).
+    // 4) Freie Einzel-Linien (Tuerblaetter, Referenzlinien).
     for l in &scene.lines {
         compile_line(&mut geo, l, &mut bounds);
+    }
+    // 5) Kreisboegen: NICHT mehr in Segmente zerlegt — je Bogen eine analytische
+    //    Instanz (`ArcInstanceData`), die die GPU per SDF-Fragment-Shader exakt
+    //    rund rendert (siehe `gpu::Renderer` Arc-Pipeline).
+    for a in &scene.arcs {
+        compile_arc(&mut geo, a, &mut bounds);
     }
 
     geo.bounds = bounds.finish();
@@ -589,12 +636,33 @@ fn compile_fill(geo: &mut GpuGeometry, poly: &FillPolygon, bounds: &mut Bounds) 
     geo.add_fill_batch(count, poly.color);
 }
 
-fn compile_arc(geo: &mut GpuGeometry, a: &Arc, px_per_m: f32, bounds: &mut Bounds) {
-    if a.width_mm <= 0.0 {
+fn compile_arc(geo: &mut GpuGeometry, a: &Arc, bounds: &mut Bounds) {
+    if a.width_mm <= 0.0 || a.r <= 0.0 {
         return;
     }
-    let pts = tessellate_arc(a.center, a.from, a.to, a.r, px_per_m);
-    stroke_dashed_or_solid(geo, &pts, false, a.color, a.width_mm, a.dash.as_deref(), bounds);
+    let (center, r_screen, a0, sweep) = arc_screen_params(a.center, a.from, a.to, a.r);
+    // Degenerierter Bogen (from == to -> Sweep ~ 0): nichts zu zeichnen. Echte
+    // Vollkreise kommen als geschlossenes Polygon (siehe generatePlan `circle`).
+    if sweep.abs() < 1e-6 {
+        return;
+    }
+    let (dash, dash_count, dash_total) = prepare_arc_dash(a.dash.as_deref());
+    geo.arcs.push(ArcInstanceData {
+        center,
+        r_screen,
+        r_model: a.r,
+        a0,
+        sweep,
+        color: a.color,
+        width_mm: a.width_mm,
+        dash,
+        dash_count,
+        dash_total,
+    });
+    // Modell-Bounds: Bounding-Box des vollen Kreises (grosszuegig, aber sicher
+    // fuer "Einpassen"; der sichtbare Bogen liegt stets darin).
+    bounds.track([a.center[0] - a.r, a.center[1] - a.r]);
+    bounds.track([a.center[0] + a.r, a.center[1] + a.r]);
 }
 
 fn compile_line(geo: &mut GpuGeometry, l: &Line, bounds: &mut Bounds) {
@@ -607,44 +675,80 @@ mod tests {
     use super::*;
     use crate::types::{Arc, Outline};
 
-    // --- tessellate_arc: adaptive Bogen-Zerlegung ----------------------------
+    // --- arc_screen_params: analytische Bogen-Parameter ----------------------
 
-    #[test]
-    fn arc_endpunkte_exakt() {
-        let center = [1.0, 1.0];
-        let from = [2.0, 1.0]; // r=1, Winkel 0
-        let to = [1.0, 2.0]; // Winkel 90 Grad
-        let pts = tessellate_arc(center, from, to, 1.0, 100.0);
-        assert_eq!(*pts.first().unwrap(), from, "erster Punkt exakt = from");
-        assert_eq!(*pts.last().unwrap(), to, "letzter Punkt exakt = to");
+    /// Modell-Raum-Sweep (kuerzerer Bogen) — Referenz fuer die Winkel-Paritaet
+    /// (frueher die Winkellogik der `tessellate_arc`). Die Bildschirm-Y-Spiegelung
+    /// aendert nur das Vorzeichen, nicht den Betrag.
+    fn model_delta(center: Point, from: Point, to: Point) -> f32 {
+        let a0 = (from[1] - center[1]).atan2(from[0] - center[0]);
+        let a1 = (to[1] - center[1]).atan2(to[0] - center[0]);
+        let mut d = a1 - a0;
+        while d > std::f32::consts::PI {
+            d -= 2.0 * std::f32::consts::PI;
+        }
+        while d < -std::f32::consts::PI {
+            d += 2.0 * std::f32::consts::PI;
+        }
+        d
     }
 
     #[test]
-    fn arc_segmentzahl_waechst_mit_px_per_m() {
+    fn arc_screen_params_endpunkte_treffen_exakt() {
+        let center = [1.0, 1.0];
+        let from = [2.0, 1.0]; // r=1, Modell-Winkel 0
+        let to = [1.0, 2.0]; // Modell-Winkel 90 Grad
+        let (cs, r_s, a0, sweep) = arc_screen_params(center, from, to, 1.0);
+        // Punkt bei a0 == to_screen(from), Punkt bei a0+sweep == to_screen(to).
+        let p0 = [cs[0] + a0.cos() * r_s, cs[1] + a0.sin() * r_s];
+        let p1 = [cs[0] + (a0 + sweep).cos() * r_s, cs[1] + (a0 + sweep).sin() * r_s];
+        let fs = to_screen(from);
+        let ts = to_screen(to);
+        assert!((p0[0] - fs[0]).abs() < 1e-3 && (p0[1] - fs[1]).abs() < 1e-3, "Start trifft from");
+        assert!((p1[0] - ts[0]).abs() < 1e-3 && (p1[1] - ts[1]).abs() < 1e-3, "Ende trifft to");
+        assert!((r_s - PX_PER_M).abs() < 1e-3, "r_screen = r * PX_PER_M");
+    }
+
+    #[test]
+    fn arc_screen_params_kuerzerer_bogen_paritaet() {
         let center = [0.0, 0.0];
         let from = [1.0, 0.0];
-        let to = [0.0, 1.0]; // Viertelkreis, r=1
-        let low = tessellate_arc(center, from, to, 1.0, 10.0);
-        let high = tessellate_arc(center, from, to, 1.0, 1000.0);
-        let segs_low = low.len() - 1;
-        let segs_high = high.len() - 1;
+        // Ziel bei Modell-Winkel 200 Grad -> naiv 200 Grad, kuerzer aber -160 Grad.
+        let ang = 200.0_f32.to_radians();
+        let to = [ang.cos(), ang.sin()];
+        let (_, _, _, sweep) = arc_screen_params(center, from, to, 1.0);
+        assert!(sweep.abs() <= std::f32::consts::PI + 1e-4, "kuerzerer Bogen (|sweep|<=pi)");
+        // Betrag identisch zur Modell-Raum-Winkellogik (Y-Spiegelung nur Vorzeichen).
         assert!(
-            segs_high > segs_low,
-            "mehr Segmente bei hoeherem Zoom erwartet: {segs_low} vs {segs_high}"
+            (sweep.abs() - model_delta(center, from, to).abs()).abs() < 1e-4,
+            "Sweep-Betrag == Modell-Delta-Betrag (Paritaet zur alten tessellate_arc-Logik)"
         );
     }
 
+    // --- prepare_arc_dash: Papier-mm -> Modell-Meter-Zyklus -------------------
+
     #[test]
-    fn arc_segmentzahl_geklemmt_min_max() {
-        let center = [0.0, 0.0];
-        let from = [1.0, 0.0];
-        let to = [0.0, 1.0];
-        // Sehr grober Fall (winziger Radius/Zoom) -> trotzdem mindestens 8 Segmente.
-        let coarse = tessellate_arc(center, from, to, 0.001, 1.0);
-        assert!(coarse.len() - 1 >= 8, "min. 8 Segmente erwartet");
-        // Extremer Zoom -> nie mehr als 512 Segmente.
-        let fine = tessellate_arc(center, from, to, 1.0, 1.0e9);
-        assert!(fine.len() - 1 <= 512, "max. 512 Segmente erwartet");
+    fn prepare_arc_dash_tuerschwenk_mapping() {
+        // Tuerschwenk-Muster [0.06, 0.04] mm -> * DASH_MM_TO_M(0.1) = [0.006, 0.004] m.
+        let (cyc, n, total) = prepare_arc_dash(Some(&[0.06, 0.04]));
+        assert_eq!(n, 2, "ein An/Aus-Paar");
+        assert!((cyc[0] - 0.006).abs() < 1e-6 && (cyc[1] - 0.004).abs() < 1e-6);
+        assert!((total - 0.010).abs() < 1e-6, "Zykluslaenge 0.01 m");
+    }
+
+    #[test]
+    fn prepare_arc_dash_ungerade_wird_verdoppelt() {
+        // Einzelwert -> Standard-Dash-Semantik: verdoppelt auf [x, x].
+        let (cyc, n, total) = prepare_arc_dash(Some(&[10.0]));
+        assert_eq!(n, 2, "ungerade Laenge wird verdoppelt");
+        assert!((cyc[0] - 1.0).abs() < 1e-6 && (cyc[1] - 1.0).abs() < 1e-6);
+        assert!((total - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn prepare_arc_dash_leer_ist_durchgezogen() {
+        assert_eq!(prepare_arc_dash(None).1, 0);
+        assert_eq!(prepare_arc_dash(Some(&[])).1, 0);
     }
 
     // --- split_dash: geometrische Strichmuster-Zerlegung ---------------------
@@ -675,10 +779,10 @@ mod tests {
         assert_eq!(pieces[0], pts.to_vec());
     }
 
-    // --- compile_scene_scaled: End-zu-End-Verdrahtung -------------------------
+    // --- compile_scene: End-zu-End-Verdrahtung --------------------------------
 
     #[test]
-    fn compile_scene_mit_bogen_erzeugt_liniengeometrie() {
+    fn compile_scene_mit_bogen_erzeugt_arc_instanz() {
         let scene = Scene {
             arcs: vec![Arc {
                 center: [0.0, 0.0],
@@ -691,9 +795,15 @@ mod tests {
             }],
             ..Default::default()
         };
-        let geo = compile_scene_scaled(&scene, PX_PER_M);
-        assert!(!geo.line_verts.is_empty(), "Bogen sollte Linien-Vertices erzeugen");
-        assert!(!geo.line_idx.is_empty(), "Bogen sollte Linien-Indizes erzeugen");
+        let geo = compile_scene(&scene);
+        // Analytisch: EINE Instanz, KEINE tessellierte Liniengeometrie.
+        assert_eq!(geo.arcs.len(), 1, "genau eine Bogen-Instanz");
+        assert!(geo.line_verts.is_empty(), "Bogen erzeugt keine Linien-Vertices mehr");
+        let a = &geo.arcs[0];
+        assert_eq!(a.dash_count, 0, "durchgezogen");
+        assert!((a.r_screen - PX_PER_M).abs() < 1e-3);
+        // Bounds decken den vollen Kreis (center +- r).
+        assert!((geo.bounds[0] + 1.0).abs() < 1e-3 && (geo.bounds[2] - 1.0).abs() < 1e-3);
     }
 
     #[test]
@@ -717,8 +827,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let geo_solid = compile_scene_scaled(&solid, PX_PER_M);
-        let geo_dashed = compile_scene_scaled(&dashed, PX_PER_M);
+        let geo_solid = compile_scene(&solid);
+        let geo_dashed = compile_scene(&dashed);
         assert!(!geo_solid.line_idx.is_empty());
         assert!(!geo_dashed.line_idx.is_empty());
         assert_ne!(
@@ -728,15 +838,8 @@ mod tests {
         );
     }
 
-    /// Gesamtlaenge eines offenen Punktzugs (Modell-Meter).
-    fn polyline_len(pts: &[Point]) -> f32 {
-        pts.windows(2)
-            .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
-            .sum()
-    }
-
     #[test]
-    fn gestrichelter_tuerschwenk_bogen_kein_panic_und_kuerzere_deckung() {
+    fn gestrichelter_tuerschwenk_bogen_erzeugt_dash_instanz() {
         // Spiegelt den echten Anwendungsfall (Tuerschwenk-Boegen, dash 0.06/0.04mm).
         let center = [0.0, 0.0];
         let from = [1.0, 0.0];
@@ -754,20 +857,14 @@ mod tests {
             }],
             ..Default::default()
         };
-        // Rundlauf durch die volle Pipeline: darf nicht paniken, muss Geometrie liefern.
-        let geo = compile_scene_scaled(&scene, PX_PER_M);
-        assert!(!geo.line_idx.is_empty(), "gestrichelter Bogen sollte trotzdem Geometrie erzeugen");
-
-        // Geometrische Invariante an den Bausteinen selbst: die Summe der "an"-
-        // Stuecke deckt WENIGER Bogenlaenge ab als der volle (durchgezogene) Bogen.
-        let arc_pts = tessellate_arc(center, from, to, 1.0, PX_PER_M);
-        let full_len = polyline_len(&arc_pts);
-        let pieces = split_dash(&arc_pts, &dash);
-        assert!(pieces.len() > 1, "sollte in mehrere an-Stuecke gesplittet werden");
-        let on_len: f32 = pieces.iter().map(|p| polyline_len(p)).sum();
-        assert!(
-            on_len < full_len,
-            "gestrichelte Deckung ({on_len}) sollte kuerzer als der volle Bogen ({full_len}) sein"
-        );
+        // Rundlauf durch die volle Pipeline: eine analytische, GESTRICHELTE Instanz.
+        let geo = compile_scene(&scene);
+        assert_eq!(geo.arcs.len(), 1, "genau eine Bogen-Instanz");
+        let a = &geo.arcs[0];
+        assert_eq!(a.dash_count, 2, "ein An/Aus-Paar (dash-Zyklus)");
+        assert!((a.dash_total - 0.010).abs() < 1e-6, "Zykluslaenge 0.01 m");
+        // Sweep = Viertelkreis (Betrag pi/2), Radius exakt.
+        assert!((a.sweep.abs() - std::f32::consts::FRAC_PI_2).abs() < 1e-4);
+        assert!((a.r_screen - PX_PER_M).abs() < 1e-3);
     }
 }

@@ -10,9 +10,10 @@
 //   lines:[{a,b,color,widthMm,dash}], texts:[{pos,content,sizeMm,color,align}] }
 // mit Point = [x,y] (Meter) und Rgba = [r,g,b,a] (0..1).
 //
-// Bögen werden NICHT hier tessellliert (anders als früher): der Rust-Renderer
-// zerlegt sie zoomabhängig (`tessellate::tessellate_arc`), damit sie bei jeder
-// Vergrößerung glatt bleiben statt sichtbare Facetten zu zeigen. Strichmuster
+// Bögen werden NICHT hier tessellliert: der Rust-Renderer zeichnet sie
+// mathematisch exakt per SDF-Fragment-Shader (`shaders::ARC_WGSL`, eine
+// analytische Instanz je Bogen) — bei jeder Vergrößerung ein echter Kreis statt
+// eines Vielecks, ohne Neu-Tessellierung. Strichmuster
 // (`dash`, mm Papier) werden ebenfalls unverändert durchgereicht — das geometrische
 // Zerschneiden in Teilstücke (`applyDashRuns`-Algorithmus) passiert erst NACH der
 // Bogen-Tessellierung in Rust (`tessellate::split_dash`), damit die Phase über die
@@ -328,9 +329,9 @@ export function planToRenderScene(plan: Plan): RScene {
     } else if (p.kind === "arc") {
       flushRun();
       const col = toRgba(DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
-      // Bogen unvortessellliert an Rust übergeben (`RArc`) — die zoomabhängige
-      // Zerlegung (glatte Rundung bei jeder Vergrößerung) und ein evtl. Strich-
-      // muster übernimmt `tessellate::tessellate_arc`/`split_dash` drüben.
+      // Bogen unvortessellliert an Rust übergeben (`RArc`) — die exakte runde
+      // Darstellung (analytischer SDF-Shader, `ARC_WGSL`) und ein evtl. Strich-
+      // muster übernimmt der native Renderer (`compile_scene`) drüben.
       arcs.push({
         center: [p.center.x, p.center.y],
         from: [p.from.x, p.from.y],

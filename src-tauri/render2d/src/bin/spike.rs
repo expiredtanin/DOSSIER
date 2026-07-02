@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use render2d::gpu::Renderer;
 use render2d::types::ViewBox;
-use render2d::{demo_scene, initial_view_box, meet_scale, PX_PER_M};
+use render2d::{demo_scene, initial_view_box};
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -74,9 +74,7 @@ impl GpuState {
         surface.configure(&device, &config);
 
         let mut renderer = Renderer::new(&device, format);
-        let view_box = initial_view_box();
-        let px_per_m = PX_PER_M * meet_scale(view_box, config.width as f32, config.height as f32);
-        renderer.upload_scene(&device, &demo_scene(), px_per_m);
+        renderer.upload_scene(&device, &demo_scene());
 
         Self {
             surface,

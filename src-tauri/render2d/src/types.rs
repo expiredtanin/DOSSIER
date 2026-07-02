@@ -80,10 +80,10 @@ pub struct Polyline {
 }
 
 /// Ein Kreisbogen (kuerzerer Sweep von `from` nach `to` um `center`) in Modell-
-/// Metern — NICHT vortessellliert (anders als frueher, wo der Web-Renderer den
-/// Bogen einmalig in eine feste Facettenzahl zerlegte). Die Zerlegung passiert
-/// erst in `tessellate::tessellate_arc`, zoomabhaengig, damit der Bogen bei
-/// jeder Vergroesserung glatt bleibt statt sichtbare Facetten zu zeigen.
+/// Metern — MATHEMATISCH EXAKT gerendert: `compile_scene` verdichtet ihn nicht zu
+/// Segmenten, sondern zu EINER analytischen Instanz (`tessellate::ArcInstanceData`),
+/// die die GPU per SDF-Fragment-Shader (`shaders::ARC_WGSL`) bei JEDER Zoomstufe als
+/// echten Kreis zeichnet — kein Vieleck, keine Neu-Tessellierung.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Arc {
     /// Mittelpunkt in Modell-Metern.

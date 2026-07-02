@@ -23,7 +23,10 @@ pub mod gpu;
 
 pub use demo::{demo_scene, initial_view_box};
 pub use ortho::{compute_ortho_matrix, meet_scale, mm_to_device_px, Mat4};
-pub use tessellate::{compile_scene, compile_scene_scaled, triangulate, GpuGeometry, PX_PER_M};
+pub use tessellate::{
+    arc_screen_params, compile_scene, prepare_arc_dash, triangulate, ArcInstanceData, GpuGeometry,
+    MAX_ARC_DASH, PX_PER_M,
+};
 pub use types::{Arc, FillPolygon, Line, Outline, Point, Rgba, Scene, Text, TextAlign, ViewBox};
 
 // --- Tests: Tessellierung (Muster wie glPlanCompile.test.ts) -----------------
@@ -163,6 +166,7 @@ mod tests {
         for (name, src) in [
             ("fill", super::shaders::FILL_WGSL),
             ("line", super::shaders::LINE_WGSL),
+            ("arc", super::shaders::ARC_WGSL),
         ] {
             let module = naga::front::wgsl::parse_str(src)
                 .unwrap_or_else(|e| panic!("{name}: WGSL-Parse-Fehler: {e:?}"));

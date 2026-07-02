@@ -124,8 +124,8 @@ impl GpuState2d {
     fn new(window: Arc<Window>, scene: &Scene, view_box: ViewBox) -> Self {
         let (surface, device, queue, config) = configure_surface(&window, "2d.device");
         let mut renderer = Renderer2d::new(&device, config.format);
-        let px_per_m = PX_PER_M * meet_scale(view_box, config.width as f32, config.height as f32);
-        renderer.upload_scene(&device, scene, px_per_m);
+        let _ = view_box; // Szene-Upload ist zoom-invariant (Boegen analytisch im Shader).
+        renderer.upload_scene(&device, scene);
         Self { surface, device, queue, config, renderer, window }
     }
 
@@ -696,9 +696,8 @@ impl ApplicationHandler<UserEvent> for App {
                     self.pending2d = Some(scene);
                     return;
                 };
-                let vb = *self.view_box.get_or_insert_with(initial_view_box);
-                let px_per_m = PX_PER_M * meet_scale(vb, state.config.width as f32, state.config.height as f32);
-                state.renderer.upload_scene(&state.device, &scene, px_per_m);
+                let _ = self.view_box.get_or_insert_with(initial_view_box);
+                state.renderer.upload_scene(&state.device, &scene);
                 if !self.nav2d {
                     self.view_box = Some(scene_view_box(&scene));
                 }
