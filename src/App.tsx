@@ -2190,12 +2190,20 @@ export default function App() {
   // Plan-Renderer-Umschalter (Statusleiste): reines Ableiten/Setzen des `engine`-
   // URL-Params (siehe PlanView.tsx `wantWasm`); die Renderer-Auswahl selbst bleibt
   // dort. Ein Wechsel lädt die Seite neu — kein Live-Remount der Renderer-Hooks.
-  const rendererMode: RendererMode =
-    new URLSearchParams(window.location.search).get("engine") === "wasm"
+  // Persistiert in localStorage, damit die Wahl einen Neustart ohne URL-Param
+  // übersteht (z.B. die Electron-App startet immer auf der Basis-URL).
+  const RENDERER_STORAGE_KEY = "cad.rendererMode";
+  const rendererMode: RendererMode = (() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("engine");
+    if (fromUrl === "wasm") return "wasm";
+    if (fromUrl === "webgl2") return "webgl2";
+    return window.localStorage.getItem(RENDERER_STORAGE_KEY) === "wasm"
       ? "wasm"
       : "webgl2";
+  })();
   const webGpuAvailable = typeof navigator !== "undefined" && "gpu" in navigator;
   const setRendererMode = (mode: RendererMode) => {
+    window.localStorage.setItem(RENDERER_STORAGE_KEY, mode);
     const url = new URL(window.location.href);
     if (mode === "wasm") url.searchParams.set("engine", "wasm");
     else url.searchParams.delete("engine");
