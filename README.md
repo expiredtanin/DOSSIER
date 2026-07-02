@@ -1,13 +1,16 @@
 # DOSSIER Standalone
 
-Browser-BIM für Wohnbau. Ein Werkzeug, um ein Wohnhaus aus semantischen
-Bauteilen zu modellieren und daraus saubere, normgerechte 2D-Pläne zu ziehen —
-ohne Revit, ohne Installation, im Browser.
+Eigenständiges BIM-Werkzeug für Wohnbau. Modelliert ein Wohnhaus aus
+semantischen Bauteilen und zieht daraus saubere, normgerechte 2D-Pläne —
+ohne Revit.
 
-Das ist die eigenständige Browser-Variante des Rhino-Plugins
+Das ist die eigenständige Standalone-Variante des Rhino-Plugins
 [DOSSIER](https://git.kgva.ch/karim/DOSSIER): dieselbe Denkweise (Geschosse,
 Kategorie-Ebenen, mehrschichtige Bauteile, Prioritäts-Verschneidung), aber als
-React/Three.js-App statt als Rhino-Aufsatz.
+React/Three.js-App in einer Electron-Desktop-Shell statt als Rhino-Aufsatz.
+Kein Browser-Tab-Produkt: eigenes Fenster, eigene Rendering-Engine
+(Rust/WASM/WebGPU), gebaut für flüssiges CAD-Arbeiten statt für den Webview
+kleinster gemeinsamer Nenner.
 
 ## Grundgedanke
 
@@ -61,9 +64,10 @@ Geometrie-Kernel verfrüht eingezogen.
 
 | | |
 |---|---|
+| Shell | Electron (eigenes randloses App-Fenster, kein Browser-Tab) |
 | Frontend | React + TypeScript + Vite |
-| 3D | Three.js |
-| 2D-Plan | eigener SVG-Renderer |
+| 3D | Three.js, plus eigener nativer Rust/WASM/WebGPU-Renderer (`render3d`) |
+| 2D-Plan | eigener SVG-Renderer, plus eigener nativer Rust/WASM/WebGPU-Renderer (`render2d`) |
 | Geometrie | eigener 2D-Kernel (`src/geometry/kernel2d.ts`), `delaunator` fürs Terrain |
 | Import | `dxf-parser`, eigene `.lin`/`.pat`-Parser |
 
@@ -75,6 +79,7 @@ OpenCascade/Manifold (exakte Booleans + HLR). Siehe ROADMAP §4.
 ```bash
 npm install
 npm run dev      # Vite, http://localhost:5173
+npm run electron # Electron-Fenster (Dev-Server + randlose App-Shell)
 npx tsc -b       # Typecheck
 npm run build    # tsc -b && vite build
 ```
