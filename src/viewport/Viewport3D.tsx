@@ -7,6 +7,7 @@ import type { MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import type {
   Ceiling,
   ContextObject,
@@ -382,7 +383,24 @@ export function Viewport3D({
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Filmisches Tonemapping + sRGB-Ausgabe für einen fotorealistischeren,
+    // nicht ausgefressenen Kontrast (ACES komprimiert Lichter sanft, statt sie
+    // hart zu clippen). Belichtung leicht über 1, damit die PBR-Materialien
+    // (s. u.) nicht zu dunkel wirken.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
+
+    // Neutrale Raum-Umgebung (PMREMGenerator + RoomEnvironment) als IBL-Quelle:
+    // gibt MeshStandardMaterial weiche, plausible Reflexionen/Ambient-Licht,
+    // ohne eine externe HDR-Datei laden zu müssen. Nur `scene.environment`
+    // gesetzt (NICHT `scene.background`) — der helle Papier-Hintergrund bleibt
+    // wie bisher erhalten.
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const envRenderTarget = pmremGenerator.fromScene(new RoomEnvironment(), 0.04);
+    scene.environment = envRenderTarget.texture;
+    pmremGenerator.dispose();
 
     // OrbitControls startet an der Perspektivkamera; bei Preset-Wechsel wird
     // `.object` auf die aktive Kamera umgehängt (siehe applyView3d). Aktive
@@ -412,9 +430,11 @@ export function Viewport3D({
     // Szenen-Neuaufbau konsistent, da die Controls hier frisch entstehen.
     controls.enableRotate = view3dRef.current !== "top";
 
-    // Licht
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+    // Licht — mit der Raum-Umgebung (s. o.) als weichem IBL-Ambient reichen
+    // gedämpftes Umgebungslicht + eine gerichtete „Sonne" für Modellierung
+    // (Schlagschatten sind hier bewusst NICHT aktiv, wie zuvor).
+    scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.9);
     sun.position.set(6, 12, 4);
     scene.add(sun);
 
@@ -428,8 +448,8 @@ export function Viewport3D({
     // gestapelt; je Geschoss nur Wände mit sichtbarer Kategorie (categoryDisplay).
     // Normale und gedimmte Materialien getrennt cachen.
     const mats: MatCaches = {
-      normal: new Map<string, THREE.MeshLambertMaterial>(),
-      greyed: new Map<string, THREE.MeshLambertMaterial>(),
+      normal: new Map<string, THREE.MeshStandardMaterial>(),
+      greyed: new Map<string, THREE.MeshStandardMaterial>(),
       lines: new Map<string, THREE.LineBasicMaterial>(),
     };
     // Geteilte Materialien für den „Verdeckte Kanten"-Modus: flache weiße Faces
@@ -446,6 +466,7 @@ export function Viewport3D({
       color: 0xe8e8e8,
       roughness: 0.85,
       metalness: 0,
+      envMapIntensity: 0.6,
     });
     // Laufzeit für PBR-Texturen (Render-Modus „textured"). Lädt Karten lazy +
     // gecacht; im Cleanup werden Texturen/Materialien freigegeben.
@@ -481,6 +502,7 @@ export function Viewport3D({
         side: THREE.DoubleSide,
         wireframe: CONTEXT_WIREFRAME,
         flatShading: true,
+        envMapIntensity: 0.5,
       }),
       mesh: new THREE.MeshStandardMaterial({
         color: 0x9fa6ae, // neutrales Hellgrau für importierte Meshes
@@ -488,6 +510,7 @@ export function Viewport3D({
         metalness: 0,
         side: THREE.DoubleSide,
         wireframe: CONTEXT_WIREFRAME,
+        envMapIntensity: 0.5,
       }),
       contour: new THREE.LineBasicMaterial({ color: 0x6b7a5a }),
     };
@@ -874,10 +897,12 @@ export function Viewport3D({
     // Auswahl-Hervorhebung: die Meshes der gewählten Wand mit einem geteilten
     // Highlight-Material überziehen; Originale merken und beim Wechsel/Cleanup
     // wiederherstellen. Material wird im Cleanup verworfen.
-    const highlightMat = new THREE.MeshLambertMaterial({
+    const highlightMat = new THREE.MeshStandardMaterial({
       color: 0x5fa896,
       emissive: 0x1a655a,
       emissiveIntensity: 0.6,
+      roughness: 0.6,
+      metalness: 0,
       transparent: true,
       opacity: 0.92,
     });
@@ -1367,6 +1392,7 @@ export function Viewport3D({
       activeCameraRef.current = null;
       boundsRef.current = null;
       renderer.dispose();
+      envRenderTarget.dispose();
       for (const m of mats.normal.values()) m.dispose();
       for (const m of mats.greyed.values()) m.dispose();
       for (const m of mats.lines.values()) m.dispose();
@@ -1481,8 +1507,8 @@ export function Viewport3D({
 
 /** Getrennte Material-Caches: normal und gedimmt (je Component-ID). */
 interface MatCaches {
-  normal: Map<string, THREE.MeshLambertMaterial>;
-  greyed: Map<string, THREE.MeshLambertMaterial>;
+  normal: Map<string, THREE.MeshStandardMaterial>;
+  greyed: Map<string, THREE.MeshStandardMaterial>;
   /** Linien-Materialien der 2D-Zeichengeometrie (Schlüssel: `farbe|greyed`). */
   lines: Map<string, THREE.LineBasicMaterial>;
 }
@@ -2102,8 +2128,11 @@ function addOpeningMeshes(
   };
 
   // Rahmen-Material (dunkelgrau) + Glas-Material (bläulich, transparent).
-  const frameMat = new THREE.MeshLambertMaterial({
+  const frameMat = new THREE.MeshStandardMaterial({
     color: greyed ? 0x9aa0a6 : 0x55606c,
+    roughness: 0.55,
+    metalness: 0.15,
+    envMapIntensity: 0.7,
     transparent: greyed,
     opacity,
   });
@@ -2117,8 +2146,11 @@ function addOpeningMeshes(
 
   if (o.kind === "window") {
     // Glasscheibe in der Wandmitte, zwischen den Rahmenprofilen.
-    const glassMat = new THREE.MeshLambertMaterial({
+    const glassMat = new THREE.MeshStandardMaterial({
       color: 0x9fc4e8,
+      roughness: 0.08,
+      metalness: 0,
+      envMapIntensity: 1,
       transparent: true,
       opacity: greyed ? 0.18 : 0.35,
       depthWrite: false,
@@ -2140,8 +2172,11 @@ function addOpeningMeshes(
   // Boden (zBottom) bis zTop; sein Grundriss-Verlauf folgt der doorSymbol-Achse.
   const sym = doorSymbol(wall, o);
   if (!sym) return;
-  const leafMat = new THREE.MeshLambertMaterial({
+  const leafMat = new THREE.MeshStandardMaterial({
     color: greyed ? 0xb0b4b8 : 0x8a6f57,
+    roughness: 0.75,
+    metalness: 0,
+    envMapIntensity: 0.6,
     transparent: greyed,
     opacity,
   });
@@ -2169,16 +2204,18 @@ function addOpeningMeshes(
 }
 
 /**
- * MeshLambertMaterial pro Component-ID gecached (3D-Farbe = component.color).
- * Gedimmte Variante: Bauteilfarbe Richtung Grau gemischt + transparent, damit
- * gedimmte Geschosse/Kategorien als „andere" sichtbar, aber zurückgenommen sind.
+ * MeshStandardMaterial pro Component-ID gecached (3D-Farbe = component.color).
+ * Rauigkeit hoch (mattes Putz-/Wandbild), keine Metallizität — passend für
+ * Wände/Decken. Gedimmte Variante: Bauteilfarbe Richtung Grau gemischt +
+ * transparent, damit gedimmte Geschosse/Kategorien als „andere" sichtbar,
+ * aber zurückgenommen sind.
  */
 function layerMaterial(
   project: Project,
   componentId: string,
   greyed: boolean,
   opts: BuildOpts,
-): THREE.MeshLambertMaterial {
+): THREE.MeshStandardMaterial {
   const { mats } = opts;
   // Drahtgitter: Component-Material mit wireframe=true. Wird mitgecacht; da der
   // Render-Modus den gesamten Szenen-Neuaufbau auslöst, ist der Cache pro Modus
@@ -2191,15 +2228,24 @@ function layerMaterial(
     if (greyed) {
       // Zu mittlerem Grau hin mischen (entsättigen) und transparent machen.
       color.lerp(new THREE.Color(0x9aa0a6), 0.7);
-      mat = new THREE.MeshLambertMaterial({
+      mat = new THREE.MeshStandardMaterial({
         color,
         wireframe,
+        roughness: 0.9,
+        metalness: 0,
+        envMapIntensity: 0.6,
         transparent: true,
         opacity: 0.35,
         depthWrite: false,
       });
     } else {
-      mat = new THREE.MeshLambertMaterial({ color, wireframe });
+      mat = new THREE.MeshStandardMaterial({
+        color,
+        wireframe,
+        roughness: 0.9,
+        metalness: 0,
+        envMapIntensity: 0.6,
+      });
     }
     cache.set(componentId, mat);
   }
@@ -2373,8 +2419,11 @@ function addStairMeshes(
       ? opts.hiddenFace
       : opts.renderMode === "white"
         ? opts.whiteFace
-        : new THREE.MeshLambertMaterial({
+        : new THREE.MeshStandardMaterial({
             color: greyed ? 0xb8bcc2 : 0x9aa0a6,
+            roughness: 0.85,
+            metalness: 0,
+            envMapIntensity: 0.6,
             transparent: greyed,
             opacity: greyed ? 0.35 : 1,
           });
