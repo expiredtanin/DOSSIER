@@ -21,6 +21,12 @@ pub mod types;
 #[cfg(feature = "render")]
 pub mod gpu;
 
+// Browser-Bindings (wasm32 + WebGPU), nur mit Feature "web". Setzt "render" voraus
+// (dieselbe GPU-Schicht wie das native Fenster), fuegt aber KEINE winit-Abhaengigkeit
+// hinzu — die Canvas dient direkt als wgpu-Surface.
+#[cfg(feature = "web")]
+pub mod web;
+
 pub use demo::{demo_scene, initial_view_box};
 pub use ortho::{compute_ortho_matrix, meet_scale, mm_to_device_px, Mat4};
 pub use tessellate::{

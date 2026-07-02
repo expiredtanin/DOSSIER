@@ -77,11 +77,19 @@ trap cleanup EXIT
 
 mkdir -p "${PROFILE_DIR}"
 
-echo "chromium-shell: öffne ${URL} in ${BROWSER_BIN} (App-Modus) …"
+# WebGPU: Auf Linux liegt WebGPU in Chromium noch hinter Flags. Für den
+# render2d-WASM-Viewport (`?engine=wasm`, useWasmPlanRenderer) muss `navigator.gpu`
+# vorhanden sein — daher `--enable-unsafe-webgpu` (aktiviert die API auch ohne
+# volle Konformität) plus `--enable-features=Vulkan` (WebGPU nutzt unter Linux das
+# Vulkan-Backend). Ohne `?engine=wasm` sind die Flags folgenlos (der Standard-
+# WebGL2-Pfad läuft unverändert weiter).
+echo "chromium-shell: öffne ${URL} in ${BROWSER_BIN} (App-Modus, WebGPU aktiv) …"
 "${BROWSER_BIN}" \
   --app="${URL}" \
   --user-data-dir="${PROFILE_DIR}" \
   --window-size=1600,1000 \
+  --enable-unsafe-webgpu \
+  --enable-features=Vulkan \
   >/tmp/cad-chromium-shell-browser.log 2>&1
 
 # Läuft weiter, bis der Browserprozess (das App-Fenster) beendet wird; dann

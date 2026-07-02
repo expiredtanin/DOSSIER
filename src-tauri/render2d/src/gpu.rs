@@ -130,8 +130,10 @@ struct TextState {
 
 /// Schrift des Plans: dieselbe Familie wie der Browser-Text (`--font` in
 /// styles.css beginnt mit "Inter"); cosmic-text laedt die Systemfonts und
-/// faellt bei fehlender Familie auf sans-serif zurueck.
-const TEXT_FAMILY: &str = "Inter";
+/// faellt bei fehlender Familie auf sans-serif zurueck. Standardwert des
+/// `Renderer.text_family`-Feldes — im Web-Pfad (kein System-Font-Zugriff) wird
+/// er auf die Familie der eingebetteten Font-Bytes umgestellt (siehe `load_font`).
+const DEFAULT_TEXT_FAMILY: &str = "Inter";
 
 /// Der native 2D-Renderer: haelt beide Pipelines, den (dynamischen) Uniform-
 /// Puffer und die aktuell hochgeladene Szene. Pan/Zoom aktualisiert nur die
@@ -158,6 +160,12 @@ pub struct Renderer {
     msaa_size: (u32, u32),
     /// Glyphen-Textpass (lazily beim ersten Frame mit Texten erstellt).
     text: Option<TextState>,
+    /// Schriftfamilie fuer die Textzeilen (Default `DEFAULT_TEXT_FAMILY`). Wird im
+    /// Web-Pfad auf die Familie der eingebetteten Font-Bytes umgestellt.
+    text_family: String,
+    /// Noch nicht in die FontSystem-DB geladene Font-Bytes (Web-Pfad: es gibt
+    /// keine Systemfonts). Werden beim ersten `ensure_text` eingespielt.
+    pending_font: Option<Vec<u8>>,
     /// Loeschfarbe (Zeichenblatt), Default hell wie im WebGL-Pfad (#f0f0f0).
     pub clear_color: wgpu::Color,
     /// Papier-Massstab-Nenner (1:N) fuer echte mm-Strichbreiten.
@@ -392,6 +400,8 @@ impl Renderer {
             msaa_view: None,
             msaa_size: (0, 0),
             text: None,
+            text_family: DEFAULT_TEXT_FAMILY.to_string(),
+            pending_font: None,
             // #f0f0f0 (== --sheet). 0.941 entspricht dem WebGL-clearColor.
             clear_color: wgpu::Color {
                 r: 0.941,
@@ -458,6 +468,13 @@ impl Renderer {
         });
     }
 
+    /// Reicht Font-Bytes (TrueType/OpenType) nach, die beim ersten `ensure_text`
+    /// in die FontSystem-DB geladen werden. Noetig im Web-Pfad, wo cosmic-text
+    /// KEINE Systemfonts findet — ohne das bliebe der Grundriss textlos.
+    pub fn load_font(&mut self, bytes: Vec<u8>) {
+        self.pending_font = Some(bytes);
+    }
+
     /// Erstellt den Glyphen-Textpass beim ersten Bedarf (FontSystem laedt die
     /// Systemfonts einmalig). Der TextRenderer MUSS mit demselben
     /// MultisampleState wie die Geometrie-Pipelines gebaut werden (MSAA 4x),
@@ -465,6 +482,20 @@ impl Renderer {
     fn ensure_text(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         if self.text.is_some() {
             return;
+        }
+        let mut font_system = glyphon::FontSystem::new();
+        // Nachgereichte Font-Bytes (Web-Pfad) in die DB laden und die tatsaechlich
+        // registrierte Familie als Text-Familie uebernehmen (die Inter-Variable-
+        // Datei meldet sich z.B. als "Inter Variable", nicht "Inter").
+        if let Some(bytes) = self.pending_font.take() {
+            let db = font_system.db_mut();
+            let before: Vec<_> = db.faces().map(|f| f.id).collect();
+            db.load_font_data(bytes);
+            if let Some(face) = db.faces().find(|f| !before.contains(&f.id)) {
+                if let Some((name, _)) = face.families.first() {
+                    self.text_family = name.clone();
+                }
+            }
         }
         let cache = glyphon::Cache::new(device);
         let viewport = glyphon::Viewport::new(device, &cache);
@@ -480,7 +511,7 @@ impl Renderer {
             None,
         );
         self.text = Some(TextState {
-            font_system: glyphon::FontSystem::new(),
+            font_system,
             swash_cache: glyphon::SwashCache::new(),
             viewport,
             atlas,
@@ -615,6 +646,9 @@ impl Renderer {
             .map_or(false, |s| !s.texts.is_empty());
         if has_texts || self.text.is_some() {
             self.ensure_text(device, queue);
+            // Familie VOR dem mutablen Borrow von self.text kopieren (ensure_text
+            // hat sie ggf. auf die geladene Font-Familie umgestellt).
+            let family = self.text_family.clone();
             let ts = self.text.as_mut().expect("ensure_text");
             let cvb = corrected_view_box(view_box, vw, vh);
             let meet = meet_scale(view_box, vw, vh);
@@ -629,7 +663,7 @@ impl Renderer {
             let mut placed: Vec<Placed> = Vec::new();
             if let Some(scene) = &self.scene {
                 let attrs = glyphon::Attrs::new()
-                    .family(glyphon::Family::Name(TEXT_FAMILY));
+                    .family(glyphon::Family::Name(&family));
                 for t in &scene.texts {
                     let font_px = t.size_mm * mm_px;
                     // Unlesbar kleine Glyphen ueberspringen (spart Shaping/Atlas).

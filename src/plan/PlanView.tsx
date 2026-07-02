@@ -18,6 +18,7 @@ import { docToLines, type SvgLine } from "../text/renderHtml";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { DraftShape, SnapResult, ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
+import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
@@ -410,19 +411,40 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const svgRef = useRef<SVGSVGElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // WebGL2-GPU-Renderer ist der STANDARD-Pfad. Der SVG-Renderer bleibt als
-  // automatischer Fallback (nur falls WebGL2/Shader nicht verfügbar) — es gibt
-  // KEINE User-Umschaltung mehr. `?gl=0` erzwingt zu Debug-Zwecken reines SVG.
-  const wantGpu =
+  // Engine-Auswahl. STANDARD-Pfad: WebGL2 (useGlPlanRenderer); der SVG-Renderer
+  // bleibt automatischer Fallback (nur falls WebGL2/Shader nicht verfügbar), `?gl=0`
+  // erzwingt reines SVG. INTEGRATIONS-SPIKE: Mit `?engine=wasm` UND vorhandenem
+  // WebGPU (navigator.gpu) übernimmt statt WebGL2 der native render2d-Renderer als
+  // WASM/WebGPU-Viewport (useWasmPlanRenderer) — dieselbe Szene, dieselbe ViewBox,
+  // dasselbe SVG-Overlay (Text/Griffe/Auswahl) darüber. Fehlt WebGPU trotz Flag:
+  // stiller Fallback auf WebGL2 (+ Warnung).
+  const engineParam =
     typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("engine");
+  const hasWebGpu = typeof navigator !== "undefined" && "gpu" in navigator;
+  const wantWasm = engineParam === "wasm" && hasWebGpu;
+  useEffect(() => {
+    if (engineParam === "wasm" && !hasWebGpu) {
+      console.warn("engine=wasm angefragt, aber navigator.gpu fehlt → WebGL2-Fallback");
+    }
+  }, [engineParam, hasWebGpu]);
+  // WebGL2 nur, wenn NICHT der WASM-Pfad aktiv ist (und `?gl!=0`).
+  const wantGl =
+    !wantWasm &&
+    (typeof window === "undefined"
       ? true
-      : new URLSearchParams(window.location.search).get("gl") !== "0";
-  const { render: renderGl, updateGeometry, ready: glReady } = useGlPlanRenderer(
-    canvasRef,
-    wantGpu,
-  );
-  // GL WIRKLICH aktiv? Steuert das Umschalten SVG↔GL: bei false rendert der volle
-  // SVG-Pfad (Fallback), bei true übernimmt die GL-Ebene + Text-Overlay.
+      : new URLSearchParams(window.location.search).get("gl") !== "0");
+  // Beide Hooks unbedingt aufrufen (Hook-Regeln); je nach Flag ist genau einer aktiv.
+  const glHook = useGlPlanRenderer(canvasRef, wantGl);
+  const wasmHook = useWasmPlanRenderer(canvasRef, wantWasm);
+  const activeEngine = wantWasm ? wasmHook : glHook;
+  const { render: renderGl, updateGeometry, ready: glReady } = activeEngine;
+  // „GPU-Canvas montieren?" — beide GPU-Pfade brauchen das Canvas (an der ABSICHT
+  // montiert, nicht am ready, sonst könnte die Engine mangels Canvas nie starten).
+  const wantGpu = wantGl || wantWasm;
+  // Engine WIRKLICH aktiv? Steuert das Umschalten SVG↔GPU: bei false rendert der
+  // volle SVG-Pfad (Fallback), bei true übernimmt die GPU-Ebene + Text-Overlay.
   const useGpuRenderer = wantGpu && glReady;
 
   // Stabiler Papier-Massstab-Nenner N (1:N) als REFERENZ für die Print-Strich-

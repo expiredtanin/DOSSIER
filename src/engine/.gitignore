@@ -1,0 +1,4 @@
+# wasm-pack-Ausgabe des render2d-Browser-Renderers (Feature "web"). Wird per
+# `npm run build:engine` erzeugt und NICHT eingecheckt (Build-Artefakt, groß, an
+# Toolchain gebunden). Der Quellcode liegt in src-tauri/render2d/src/web.rs.
+pkg/

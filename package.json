@@ -13,7 +13,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "dump:native": "node scripts/dump-native-scene.mjs",
-    "shell": "scripts/chromium-shell.sh"
+    "shell": "scripts/chromium-shell.sh",
+    "build:engine": "wasm-pack build src-tauri/render2d --release --target web --out-dir ../../src/engine/pkg --out-name render2d --no-default-features --features web"
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.7",
@@ -39,6 +40,7 @@
     "puppeteer": "^25.2.1",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "wasm-pack": "^0.15.0"
   }
 }
