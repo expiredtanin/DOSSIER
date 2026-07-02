@@ -67,6 +67,120 @@ pub(crate) fn tessellate_arc(center: Point, from: Point, to: Point, r: f32, px_p
     pts
 }
 
+/// Faktor Papier-mm -> Modell-Meter fuer ALLGEMEINE Linien-/Bogen-Striche, bei
+/// der Referenz-Skala `paper_scale_n = 100` des Renderers (siehe `gpu::Renderer`
+/// und `toRenderScene.ts`s `MM_TO_M`): `N/1000`. Bewusst NICHT die Hatch-
+/// spezifische `DASH_MM_TO_M`-Konstante aus `glPlanHatch.ts` (die ist an die
+/// Musterkachel gekoppelt, nicht an den Papier-Massstab).
+const DASH_MM_TO_M: f32 = 100.0 / 1000.0;
+
+/// Portiert `applyDashRuns` (`src/plan/glPlan/glPlanHatch.ts`) auf Modell-Meter-
+/// Punktzuege: zerlegt EINEN zusammenhaengenden Lauf entlang eines Strichmusters
+/// (Papier-mm, `DASH_MM_TO_M`-Referenz) in seine durchgezogenen Teilstuecke. Die
+/// Phase laeuft ENTLANG DES GESAMTEN LAUFS durch (ueber Stuetzpunkt-Ecken
+/// hinweg) — wichtig fuer bereits verkettete Umriss-/Zeichnungszuege UND fuer
+/// die neu adaptiv tessellierten Boegen. Ungerade Musterlaenge wird verdoppelt
+/// (Standard-Dash-Semantik). Leeres/ungueltiges Muster oder <2 Punkte -> EIN
+/// Stueck (unveraendert, durchgezogen).
+fn split_dash(pts: &[Point], dash: &[f32]) -> Vec<Vec<Point>> {
+    let pat: Vec<f32> = dash
+        .iter()
+        .copied()
+        .map(|d| d.max(0.0) * DASH_MM_TO_M)
+        .filter(|d| *d > 0.0)
+        .collect();
+    if pat.is_empty() || pts.len() < 2 {
+        return vec![pts.to_vec()];
+    }
+    let cycle: Vec<f32> = if pat.len() % 2 == 0 {
+        pat.clone()
+    } else {
+        [pat.as_slice(), pat.as_slice()].concat()
+    };
+    let total: f32 = cycle.iter().sum();
+    if total <= 1e-9 {
+        return vec![pts.to_vec()];
+    }
+
+    let mut out: Vec<Vec<Point>> = Vec::new();
+    let mut idx = 0usize;
+    let mut dash_left = cycle[0];
+    let mut on = true;
+    let mut piece: Option<Vec<Point>> = Some(vec![pts[0]]);
+
+    for w in pts.windows(2) {
+        let mut a = w[0];
+        let b = w[1];
+        let mut seg_len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+        if seg_len < 1e-12 {
+            continue;
+        }
+        let ux = (b[0] - a[0]) / seg_len;
+        let uy = (b[1] - a[1]) / seg_len;
+        while seg_len > 1e-9 {
+            let step = seg_len.min(dash_left);
+            let mid = [a[0] + ux * step, a[1] + uy * step];
+            if on {
+                if piece.is_none() {
+                    piece = Some(vec![a]);
+                }
+                piece.as_mut().unwrap().push(mid);
+            }
+            a = mid;
+            seg_len -= step;
+            dash_left -= step;
+            if dash_left <= 1e-9 {
+                if on {
+                    if let Some(p) = piece.take() {
+                        if p.len() >= 2 {
+                            out.push(p);
+                        }
+                    }
+                }
+                on = !on;
+                idx += 1;
+                dash_left = cycle[idx % cycle.len()];
+                if on {
+                    piece = Some(vec![a]);
+                }
+            }
+        }
+    }
+    if let Some(p) = piece.take() {
+        if p.len() >= 2 {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Zeichnet einen Linienzug entweder als EINEN gehrten Streifen (kein/leeres
+/// Muster) oder — bei gesetztem `dash` — als seine durchgezogenen Teilstuecke
+/// (`split_dash`), je einzeln offen gestrichen. Vereinfachung: ein gestrichelter
+/// GESCHLOSSENER Umriss (`closed=true`) wird trotzdem als offene Teilstuecke
+/// gezeichnet — der Ring-Schluss braucht bei einer Dash-Luecke ohnehin keine
+/// durchgehende Gehrung.
+fn stroke_dashed_or_solid(
+    geo: &mut GpuGeometry,
+    pts: &[Point],
+    closed: bool,
+    color: Rgba,
+    stroke_mm: f32,
+    dash: Option<&[f32]>,
+    bounds: &mut Bounds,
+) {
+    match dash {
+        Some(d) if !d.is_empty() => {
+            for piece in split_dash(pts, d) {
+                if piece.len() >= 2 {
+                    geo.stroke_polyline(&piece, false, color, stroke_mm, bounds);
+                }
+            }
+        }
+        _ => geo.stroke_polyline(pts, closed, color, stroke_mm, bounds),
+    }
+}
+
 /// Signierte Flaeche (Shoelace); >0 = CCW (Modell-Y nach oben).
 fn signed_area(pts: &[Point]) -> f32 {
     let mut a = 0.0f32;
@@ -427,12 +541,11 @@ pub fn compile_scene_scaled(scene: &Scene, px_per_m: f32) -> GpuGeometry {
     for poly in &scene.fills {
         compile_fill(&mut geo, poly, &mut bounds);
     }
-    // 2) Umrisse (geschlossene Ringe als EIN gehrter Streifen, inkl. Schluss-Kante).
-    //    `dash` existiert bereits im Typ (siehe `types::Outline`), wird aber erst
-    //    mit der Dash-Zerlegung (Welle 2) beruecksichtigt.
+    // 2) Umrisse (geschlossene Ringe als EIN gehrter Streifen, inkl. Schluss-Kante
+    //    — ausser bei Dash, siehe `stroke_dashed_or_solid`).
     for o in &scene.outlines {
         if o.width_mm > 0.0 && o.pts.len() >= 2 {
-            geo.stroke_polyline(&o.pts, true, o.color, o.width_mm, &mut bounds);
+            stroke_dashed_or_solid(&mut geo, &o.pts, true, o.color, o.width_mm, o.dash.as_deref(), &mut bounds);
         }
     }
     // 3) Offene Polylinien (verbundene Umrisskanten / 2D-Zeichnungszuege) als EIN
@@ -440,12 +553,11 @@ pub fn compile_scene_scaled(scene: &Scene, px_per_m: f32) -> GpuGeometry {
     //    Stumpfkappen (closed=false).
     for pl in &scene.polylines {
         if pl.width_mm > 0.0 && pl.pts.len() >= 2 {
-            geo.stroke_polyline(&pl.pts, false, pl.color, pl.width_mm, &mut bounds);
+            stroke_dashed_or_solid(&mut geo, &pl.pts, false, pl.color, pl.width_mm, pl.dash.as_deref(), &mut bounds);
         }
     }
     // 4) Kreisboegen: zoomabhaengig in eine Punktfolge zerlegt (`tessellate_arc`),
-    //    dann wie eine offene Polylinie gestrichen. `dash` wird (noch) ignoriert
-    //    (durchgezogen gezeichnet) — die Zerlegung in Teilstriche folgt in Welle 2.
+    //    dann wie eine offene Polylinie gestrichen (mit oder ohne Dash).
     for a in &scene.arcs {
         compile_arc(&mut geo, a, px_per_m, &mut bounds);
     }
@@ -482,18 +594,18 @@ fn compile_arc(geo: &mut GpuGeometry, a: &Arc, px_per_m: f32, bounds: &mut Bound
         return;
     }
     let pts = tessellate_arc(a.center, a.from, a.to, a.r, px_per_m);
-    geo.stroke_polyline(&pts, false, a.color, a.width_mm, bounds);
+    stroke_dashed_or_solid(geo, &pts, false, a.color, a.width_mm, a.dash.as_deref(), bounds);
 }
 
 fn compile_line(geo: &mut GpuGeometry, l: &Line, bounds: &mut Bounds) {
     let w = if l.width_mm > 0.0 { l.width_mm } else { 0.18 };
-    geo.stroke_polyline(&[l.a, l.b], false, l.color, w, bounds);
+    stroke_dashed_or_solid(geo, &[l.a, l.b], false, l.color, w, l.dash.as_deref(), bounds);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Arc;
+    use crate::types::{Arc, Outline};
 
     // --- tessellate_arc: adaptive Bogen-Zerlegung ----------------------------
 
@@ -535,6 +647,34 @@ mod tests {
         assert!(fine.len() - 1 <= 512, "max. 512 Segmente erwartet");
     }
 
+    // --- split_dash: geometrische Strichmuster-Zerlegung ---------------------
+
+    #[test]
+    fn split_dash_gerade_linie_erwartete_stueckzahl_und_laenge() {
+        let pts = [[0.0, 0.0], [10.0, 0.0]];
+        // 10mm/10mm bei Referenz-Skala (DASH_MM_TO_M=0.1) -> 1m/1m Zyklus,
+        // 10m Gesamtlaenge -> 5 "an"-Stuecke a 1m (50% Tastverhaeltnis).
+        let pieces = split_dash(&pts, &[10.0, 10.0]);
+        assert_eq!(pieces.len(), 5, "5 an-Stuecke erwartet");
+        let total: f32 = pieces
+            .iter()
+            .map(|p| {
+                p.windows(2)
+                    .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
+                    .sum::<f32>()
+            })
+            .sum();
+        assert!((total - 5.0).abs() < 1e-3, "Gesamtlaenge der an-Stuecke ~5m, war {total}");
+    }
+
+    #[test]
+    fn split_dash_leeres_muster_unveraendert() {
+        let pts = [[0.0, 0.0], [3.0, 4.0], [10.0, 4.0]];
+        let pieces = split_dash(&pts, &[]);
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(pieces[0], pts.to_vec());
+    }
+
     // --- compile_scene_scaled: End-zu-End-Verdrahtung -------------------------
 
     #[test]
@@ -554,5 +694,80 @@ mod tests {
         let geo = compile_scene_scaled(&scene, PX_PER_M);
         assert!(!geo.line_verts.is_empty(), "Bogen sollte Linien-Vertices erzeugen");
         assert!(!geo.line_idx.is_empty(), "Bogen sollte Linien-Indizes erzeugen");
+    }
+
+    #[test]
+    fn dash_reduziert_indexanzahl_gegenueber_durchgezogenem_umriss() {
+        let ring = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+        let solid = Scene {
+            outlines: vec![Outline {
+                pts: ring.clone(),
+                color: [0.0, 0.0, 0.0, 1.0],
+                width_mm: 0.2,
+                dash: None,
+            }],
+            ..Default::default()
+        };
+        let dashed = Scene {
+            outlines: vec![Outline {
+                pts: ring,
+                color: [0.0, 0.0, 0.0, 1.0],
+                width_mm: 0.2,
+                dash: Some(vec![10.0, 10.0]),
+            }],
+            ..Default::default()
+        };
+        let geo_solid = compile_scene_scaled(&solid, PX_PER_M);
+        let geo_dashed = compile_scene_scaled(&dashed, PX_PER_M);
+        assert!(!geo_solid.line_idx.is_empty());
+        assert!(!geo_dashed.line_idx.is_empty());
+        assert_ne!(
+            geo_solid.line_idx.len(),
+            geo_dashed.line_idx.len(),
+            "gestrichelter Umriss sollte eine andere (geringere) Indexanzahl als der durchgezogene ergeben"
+        );
+    }
+
+    /// Gesamtlaenge eines offenen Punktzugs (Modell-Meter).
+    fn polyline_len(pts: &[Point]) -> f32 {
+        pts.windows(2)
+            .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
+            .sum()
+    }
+
+    #[test]
+    fn gestrichelter_tuerschwenk_bogen_kein_panic_und_kuerzere_deckung() {
+        // Spiegelt den echten Anwendungsfall (Tuerschwenk-Boegen, dash 0.06/0.04mm).
+        let center = [0.0, 0.0];
+        let from = [1.0, 0.0];
+        let to = [0.0, 1.0];
+        let dash = vec![0.06, 0.04];
+        let scene = Scene {
+            arcs: vec![Arc {
+                center,
+                from,
+                to,
+                r: 1.0,
+                color: [0.1, 0.1, 0.1, 1.0],
+                width_mm: 0.05,
+                dash: Some(dash.clone()),
+            }],
+            ..Default::default()
+        };
+        // Rundlauf durch die volle Pipeline: darf nicht paniken, muss Geometrie liefern.
+        let geo = compile_scene_scaled(&scene, PX_PER_M);
+        assert!(!geo.line_idx.is_empty(), "gestrichelter Bogen sollte trotzdem Geometrie erzeugen");
+
+        // Geometrische Invariante an den Bausteinen selbst: die Summe der "an"-
+        // Stuecke deckt WENIGER Bogenlaenge ab als der volle (durchgezogene) Bogen.
+        let arc_pts = tessellate_arc(center, from, to, 1.0, PX_PER_M);
+        let full_len = polyline_len(&arc_pts);
+        let pieces = split_dash(&arc_pts, &dash);
+        assert!(pieces.len() > 1, "sollte in mehrere an-Stuecke gesplittet werden");
+        let on_len: f32 = pieces.iter().map(|p| polyline_len(p)).sum();
+        assert!(
+            on_len < full_len,
+            "gestrichelte Deckung ({on_len}) sollte kuerzer als der volle Bogen ({full_len}) sein"
+        );
     }
 }

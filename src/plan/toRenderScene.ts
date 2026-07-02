@@ -5,14 +5,18 @@
 // einen GPU-Glyphen-Atlas (glyphon/cosmic-text), keine Vektor-Ersatzschrift.
 //
 // Das erzeugte Objekt matcht 1:1 die serde-Structs render2d::types::Scene
-// { fills:[{pts,color}], outlines:[{pts,color,widthMm}], polylines:[{pts,color,widthMm}],
-//   arcs:[{center,from,to,r,color,widthMm,dash}], lines:[{a,b,color,widthMm}],
-//   texts:[{pos,content,sizeMm,color,align}] }
+// { fills:[{pts,color}], outlines:[{pts,color,widthMm,dash}],
+//   polylines:[{pts,color,widthMm,dash}], arcs:[{center,from,to,r,color,widthMm,dash}],
+//   lines:[{a,b,color,widthMm,dash}], texts:[{pos,content,sizeMm,color,align}] }
 // mit Point = [x,y] (Meter) und Rgba = [r,g,b,a] (0..1).
 //
 // Bögen werden NICHT hier tessellliert (anders als früher): der Rust-Renderer
 // zerlegt sie zoomabhängig (`tessellate::tessellate_arc`), damit sie bei jeder
-// Vergrößerung glatt bleiben statt sichtbare Facetten zu zeigen.
+// Vergrößerung glatt bleiben statt sichtbare Facetten zu zeigen. Strichmuster
+// (`dash`, mm Papier) werden ebenfalls unverändert durchgereicht — das geometrische
+// Zerschneiden in Teilstücke (`applyDashRuns`-Algorithmus) passiert erst NACH der
+// Bogen-Tessellierung in Rust (`tessellate::split_dash`), damit die Phase über die
+// gesamte (ggf. verkettete oder adaptiv tessellierte) Strecke durchläuft.
 
 import type { Plan, Primitive } from "./generatePlan";
 import { applyDashRuns, buildHatchRuns } from "./glPlan/glPlanHatch";
@@ -254,10 +258,11 @@ export function planToRenderScene(plan: Plan): RScene {
     if (curPts && curSrc && curPts.length >= 2) {
       const col = toRgba(curSrc.color ?? DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
       const closed = curPts.length > 2 && samePt(curPts[0], curPts[curPts.length - 1]);
+      const dash = curSrc.dash ?? null;
       if (closed) {
-        outlines.push({ pts: curPts.slice(0, -1), color: col, widthMm: curSrc.weightMm });
+        outlines.push({ pts: curPts.slice(0, -1), color: col, widthMm: curSrc.weightMm, dash });
       } else {
-        polylines.push({ pts: curPts, color: col, widthMm: curSrc.weightMm });
+        polylines.push({ pts: curPts, color: col, widthMm: curSrc.weightMm, dash });
       }
     }
     curPts = null;
@@ -318,7 +323,7 @@ export function planToRenderScene(plan: Plan): RScene {
         // Genuin einzelnes Segment (Türblatt, Referenzlinie, Symbol) → Stumpfkappen ok.
         flushRun();
         const col = toRgba(p.color ?? DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
-        lines.push({ a: [p.a.x, p.a.y], b: [p.b.x, p.b.y], color: col, widthMm: p.weightMm });
+        lines.push({ a: [p.a.x, p.a.y], b: [p.b.x, p.b.y], color: col, widthMm: p.weightMm, dash: p.dash ?? null });
       }
     } else if (p.kind === "arc") {
       flushRun();
