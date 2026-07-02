@@ -9,14 +9,8 @@
 
 import type { Plan, Primitive } from "./generatePlan";
 import { applyDashRuns, buildHatchRuns } from "./glPlan/glPlanHatch";
-import { CAP, layoutLine } from "./strokeFont";
 
 type LinePrim = Extract<Primitive, { kind: "line" }>;
-
-/** Modell-Meter pro Schriftpunkt (Referenz-Massstab 1:100, wie im SVG-Pfad). */
-const METERS_PER_PT = (1 / 72) * 0.0254 * 100;
-/** Strichbreite der Text-Glyphen in Papier-mm (Haarlinie). */
-const TEXT_WIDTH_MM = 0.15;
 
 export type RPoint = [number, number];
 export type RRgba = [number, number, number, number];
@@ -236,49 +230,10 @@ export function planToRenderScene(plan: Plan): RScene {
       // Bogen als EINE zusammenhängende Polylinie (gehrte Sehnen-Ecken).
       const poly = tessellateArc(p.center, p.from, p.to, p.r);
       if (poly.length >= 2) polylines.push({ pts: poly, color: col, widthMm: p.weightMm });
-    } else if (p.kind === "text") {
-      flushRun();
-      // Raumstempel: Doc-Zeilen + Live-Zusatzzeilen als Einstrich-Glyph-Polylinien
-      // (Modell-Meter, vertikal um den Anker zentriert). Erste Fassung: Versalien.
-      const col = toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1];
-      const docLines = p.doc.paragraphs.map((par) => ({
-        text: par.runs.map((r) => r.text).join(""),
-        align: par.align ?? "left",
-        sizePt: p.basePt,
-      }));
-      const extraLines = p.extraLines.map((t) => ({
-        text: t,
-        align: "center" as const,
-        sizePt: p.basePt * 0.8,
-      }));
-      const allLines = [...docLines, ...extraLines].filter((l) => l.text.length > 0);
-      if (allLines.length > 0) {
-        const gaps = allLines.map((l) => l.sizePt * METERS_PER_PT * 1.3);
-        const totalH = gaps.reduce((a, b) => a + b, 0);
-        let cursorY = p.at.y + totalH / 2;
-        allLines.forEach((line, i) => {
-          const scale = (line.sizePt * METERS_PER_PT * 0.7) / CAP;
-          cursorY -= gaps[i];
-          const baseY = cursorY;
-          const { strokes, width } = layoutLine(line.text);
-          const wModel = width * scale;
-          const startX =
-            line.align === "center"
-              ? p.at.x - wModel / 2
-              : line.align === "right"
-              ? p.at.x - wModel
-              : p.at.x;
-          for (const s of strokes) {
-            if (s.length < 2) continue;
-            polylines.push({
-              pts: s.map(([x, y]) => [startX + x * scale, baseY + y * scale] as RPoint),
-              color: col,
-              widthMm: TEXT_WIDTH_MM,
-            });
-          }
-        });
-      }
     } else {
+      // "text" wird bewusst NICHT nativ gerendert — eine Einstrich-Vektorschrift
+      // sieht neben dem echten Browser-Font schlecht aus. Der Raumstempel-Text
+      // bleibt dem Browser/Overlay überlassen.
       flushRun();
     }
   }
