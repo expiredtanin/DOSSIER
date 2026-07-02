@@ -16,7 +16,7 @@
 //    Schicht, die ohne Display gruen bleiben muss.
 //  - Ergebnis ist byte-fuer-byte-vergleichbar mit dem WebGL-Referenzpfad.
 
-use crate::types::{FillPolygon, Line, Point, Rgba, Scene};
+use crate::types::{FillPolygon, Line, Point, Polyline, Rgba, Scene};
 
 /// viewBox-Einheiten je Meter (identisch zu PlanView/toScreen im Web-Pfad).
 pub const PX_PER_M: f32 = 90.0;
@@ -46,7 +46,7 @@ fn cross(a: Point, b: Point, c: Point) -> f32 {
 }
 
 /// Maximaler Miter-Laengenfaktor; darueber wird geklemmt (kein Spike an spitzen Ecken).
-const MITER_LIMIT: f32 = 4.0;
+const MITER_LIMIT: f32 = 8.0;
 
 /// Einheits-Links-Normale von `from` nach `to` (Bildschirm-Raum); None bei Nulllaenge.
 #[inline]
@@ -380,13 +380,25 @@ pub fn compile_scene(scene: &Scene) -> GpuGeometry {
             geo.stroke_polyline(&o.pts, true, o.color, o.width_mm, &mut bounds);
         }
     }
-    // 3) Freie Linien.
+    // 3) Offene Polylinien (verbundene Umrisskanten / 2D-Zeichnungszuege) als EIN
+    //    gehrter Streifen — die inneren Ecken bekommen so eine Gehrung statt
+    //    Stumpfkappen (closed=false).
+    for pl in &scene.polylines {
+        compile_polyline(&mut geo, pl, &mut bounds);
+    }
+    // 4) Freie Einzel-Linien (Tuerblaetter, Bogen-Sehnen, Referenzlinien).
     for l in &scene.lines {
         compile_line(&mut geo, l, &mut bounds);
     }
 
     geo.bounds = bounds.finish();
     geo
+}
+
+fn compile_polyline(geo: &mut GpuGeometry, pl: &Polyline, bounds: &mut Bounds) {
+    if pl.width_mm > 0.0 && pl.pts.len() >= 2 {
+        geo.stroke_polyline(&pl.pts, false, pl.color, pl.width_mm, bounds);
+    }
 }
 
 fn compile_fill(geo: &mut GpuGeometry, poly: &FillPolygon, bounds: &mut Bounds) {

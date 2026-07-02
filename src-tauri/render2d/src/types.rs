@@ -52,15 +52,33 @@ pub struct Outline {
     pub width_mm: f32,
 }
 
+/// Ein OFFENER Linienzug mit echter Papier-mm-Breite. Anders als `Outline`
+/// (geschlossener Ring) und `Line` (Einzelsegment) traegt er >=2 zusammenhaengende
+/// Punkte, deren INNERE Ecken korrekt gehrt (mitred) werden — genau das, was die
+/// nicht-unterdrueckten Umrisskanten einer Wandecke bzw. eine 2D-Zeichnungs-
+/// Polylinie brauchen (sonst Stumpfkappen statt Gehrung).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Polyline {
+    /// Zusammenhaengende Punkte in Modell-Metern (offen, nicht geschlossen).
+    pub pts: Vec<Point>,
+    /// Strichfarbe (RGBA 0..1).
+    pub color: Rgba,
+    /// Strichbreite in echten Papier-Millimetern.
+    #[serde(rename = "widthMm")]
+    pub width_mm: f32,
+}
+
 /// Die vollstaendige Szene: alles, was ein Frame zeichnet. Reihenfolge ist
 /// signifikant (Z-/Alpha-Ueberlagerung): erst Fuellungen, dann Umrisse, dann
-/// freie Linien — analog zur Draw-Reihenfolge im WebGL-Pfad.
+/// offene Polylinien, dann freie Linien — analog zur Draw-Reihenfolge im WebGL-Pfad.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Scene {
     #[serde(default)]
     pub fills: Vec<FillPolygon>,
     #[serde(default)]
     pub outlines: Vec<Outline>,
+    #[serde(default)]
+    pub polylines: Vec<Polyline>,
     #[serde(default)]
     pub lines: Vec<Line>,
 }

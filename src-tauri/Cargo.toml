@@ -23,6 +23,10 @@ default = []
 # Zieht render2d(+window) sowie winit/wgpu/pollster. Bewusst OPT-IN, damit der
 # normale Build unveraendert schlank bleibt.
 native2d = ["dep:render2d", "dep:winit", "dep:wgpu", "dep:pollster"]
+# M2-Spike: nativer wgpu-3D-Viewport im Tauri-Prozess (eigenes winit-Fenster).
+# Zieht render3d(+window) sowie winit/wgpu/pollster. Kann gemeinsam mit `native2d`
+# aktiviert werden (dann zwei native Fenster). Ebenfalls OPT-IN.
+native3d = ["dep:render3d", "dep:winit", "dep:wgpu", "dep:pollster"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -37,6 +41,10 @@ geometry = { path = "geometry" }
 # render2d ist eine eigenstaendige Crate (eigener leerer [workspace]); wir binden
 # sie hier per Pfad ein und aktivieren ihr GPU-Fenster-Feature "window".
 render2d = { path = "render2d", features = ["window"], optional = true }
+# render3d analog: eigenstaendige Crate (via Parent-`exclude` aus dem Workspace
+# genommen, ohne eigenen [workspace]-Block); per Pfad mit GPU-Fenster-Feature
+# "window" eingebunden.
+render3d = { path = "render3d", features = ["window"], optional = true }
 # Versionen an render2d gekoppelt (identische raw-window-handle 0.6-Kette).
 winit = { version = "0.30", optional = true }
 wgpu = { version = "22", optional = true }

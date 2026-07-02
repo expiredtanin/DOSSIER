@@ -50,6 +50,7 @@ pub fn demo_scene() -> Scene {
                 width_mm: 0.18,
             },
         ],
+        polylines: vec![],
         lines: vec![Line {
             a: [0.0, -1.0],
             b: [9.0, -1.0],

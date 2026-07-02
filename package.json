@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "dump:native": "node scripts/dump-native-scene.mjs"
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.7",

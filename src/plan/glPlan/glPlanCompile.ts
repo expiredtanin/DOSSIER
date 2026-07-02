@@ -174,8 +174,10 @@ export function compilePrimitivesToGpu(
     else lineBatches.push({ startIndex: lineIdx.length - count, indexCount: count, color, strokeMm });
   };
 
-  /** Maximaler Miter-Längenfaktor; darüber wird geklemmt (kein Spike an spitzen Ecken). */
-  const MITER_LIMIT = 4;
+  /** Maximaler Miter-Längenfaktor; darüber wird geklemmt (kein Spike an spitzen Ecken).
+   *  8 entspricht `stroke-miterlimit: 8` im SVG-Pfad (styles.css) und dem nativen
+   *  render2d (tessellate.rs) — so sehen spitze Ecken in allen drei Pfaden gleich aus. */
+  const MITER_LIMIT = 8;
 
   /**
    * Zeichnet einen zusammenhängenden Linienzug (Bildschirm-Raum) als EINEN

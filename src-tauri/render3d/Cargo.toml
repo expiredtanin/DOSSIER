@@ -5,10 +5,15 @@ edition = "2021"
 description = "Nativer wgpu-3D-Renderer fuer die CAD-Modellsicht (Wand-Extrusion + Kamera + Pipeline)"
 
 # Bewusst NICHT Teil des src-tauri-Workspaces: die Mesh-Bibliothek soll unabhaengig
-# von Tauri baubar/testbar bleiben (headless, ohne Webview-Toolchain). Der leere
-# [workspace]-Block schliesst die Crate aus einem uebergeordneten Workspace aus,
-# sodass `cargo test`/`cargo build` hier eigenstaendig laufen (Muster: render2d).
-[workspace]
+# von Tauri baubar/testbar bleiben (headless, ohne Webview-Toolchain). Ausschluss
+# laeuft ueber `exclude = ["render3d"]` im uebergeordneten src-tauri/Cargo.toml.
+# Standalone (`cd render3d && cargo test/build`) bildet die Crate automatisch ihren
+# eigenen Ein-Paket-Workspace (eigene Cargo.lock) — Muster: render2d.
+#
+# KEIN eigener `[workspace]`-Block hier: sobald `cad-tauri` render3d per Pfad als
+# (optionale) Abhaengigkeit einbindet (Feature `native3d`), wuerde ein zweiter
+# Workspace-Root INNERHALB des src-tauri-Baums Cargo mit "multiple workspace
+# roots" abbrechen. Der Parent-`exclude` haelt die Crate trotzdem eigenstaendig.
 
 [features]
 # Standard: nur Mesh-Erzeugung (Wand-Extrusion) + Kamera/Matrizen + WGSL-Quellen.

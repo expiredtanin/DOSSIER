@@ -381,6 +381,7 @@ dependencies = [
  "geometry",
  "pollster",
  "render2d",
+ "render3d",
  "serde",
  "serde_json",
  "tauri",
@@ -3484,6 +3485,20 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "render2d"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "env_logger",
+ "naga",
+ "pollster",
+ "serde",
+ "serde_json",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "render3d"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
