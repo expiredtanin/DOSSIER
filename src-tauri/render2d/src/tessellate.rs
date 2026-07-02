@@ -16,7 +16,7 @@
 //    Schicht, die ohne Display gruen bleiben muss.
 //  - Ergebnis ist byte-fuer-byte-vergleichbar mit dem WebGL-Referenzpfad.
 
-use crate::types::{FillPolygon, Line, Point, Polyline, Rgba, Scene};
+use crate::types::{Arc, FillPolygon, Line, Point, Rgba, Scene};
 
 /// viewBox-Einheiten je Meter (identisch zu PlanView/toScreen im Web-Pfad).
 pub const PX_PER_M: f32 = 90.0;
@@ -25,6 +25,46 @@ pub const PX_PER_M: f32 = 90.0;
 #[inline]
 pub fn to_screen(p: Point) -> Point {
     [p[0] * PX_PER_M, -p[1] * PX_PER_M]
+}
+
+/// Mindest-Sehnenabweichung (Sagitta) in Geraete-px, unter der ein Kreisbogen als
+/// glatt gilt. Kleiner -> mehr Segmente bei gleichem Radius/Zoom.
+const ARC_SAGITTA_TOL_PX: f32 = 0.3;
+
+/// Kreisbogen (kuerzerer Sweep von `from` nach `to` um `center`, wie die alte
+/// JS-`tessellateArc`) zoomabhaengig in eine offene Punktfolge (Modell-Meter)
+/// zerlegen. Winkelschritt so klein, dass die Sehnen-Abweichung (Sagitta) bei der
+/// aktuellen Bildschirm-Skala `px_per_m` (Geraete-px je Modell-Meter) unter
+/// `ARC_SAGITTA_TOL_PX` bleibt: sagitta = r*(1-cos(dtheta/2)) <= tol
+/// => dtheta <= 2*acos(1 - tol/r_px), r_px = r*px_per_m. Segmentzahl auf 8..512
+/// geklemmt (nie zu grob, nie unnoetig fein). Erster/letzter Punkt werden EXAKT
+/// auf `from`/`to` gesetzt (kein Trig-Rundungsfehler an den Enden).
+pub(crate) fn tessellate_arc(center: Point, from: Point, to: Point, r: f32, px_per_m: f32) -> Vec<Point> {
+    let a0 = (from[1] - center[1]).atan2(from[0] - center[0]);
+    let a1_raw = (to[1] - center[1]).atan2(to[0] - center[0]);
+    // Kuerzeren Bogen waehlen (die Szene liefert keine largeArc-Info mit) — 1:1
+    // die Winkel-Normalisierung der alten JS-`tessellateArc`.
+    let mut delta = a1_raw - a0;
+    while delta > std::f32::consts::PI {
+        delta -= 2.0 * std::f32::consts::PI;
+    }
+    while delta < -std::f32::consts::PI {
+        delta += 2.0 * std::f32::consts::PI;
+    }
+
+    let r_px = (r * px_per_m).max(1e-6);
+    let ratio = (1.0 - (ARC_SAGITTA_TOL_PX / r_px)).clamp(-1.0, 1.0);
+    let max_dtheta = (2.0 * ratio.acos()).max(1e-4);
+    let segs = ((delta.abs() / max_dtheta).ceil() as u32).clamp(8, 512);
+
+    let mut pts = Vec::with_capacity(segs as usize + 1);
+    pts.push(from);
+    for i in 1..segs {
+        let t = a0 + delta * (i as f32) / (segs as f32);
+        pts.push([center[0] + t.cos() * r, center[1] + t.sin() * r]);
+    }
+    pts.push(to);
+    pts
 }
 
 /// Signierte Flaeche (Shoelace); >0 = CCW (Modell-Y nach oben).
@@ -364,9 +404,22 @@ impl Bounds {
     }
 }
 
-/// Tessellliert eine ganze Szene zu GPU-Geometrie (gefuellte Polygone +
-/// Papier-mm-Striche). Reihenfolge: Fuellungen -> Umrisse -> freie Linien.
+/// Tessellliert eine ganze Szene zu GPU-Geometrie beim Standard-Massstab
+/// (`PX_PER_M`, kein Zoom beruecksichtigt) — Kompatibilitaets-Wrapper fuer
+/// bestehende Aufrufer (Tests, Demo, Fenster-Spike), die keinen aktuellen
+/// Geraete-px-je-Meter-Wert kennen. Der eigentliche (zoomabhaengige) Renderpfad
+/// nutzt `compile_scene_scaled` direkt (siehe `gpu::Renderer::upload_scene`).
 pub fn compile_scene(scene: &Scene) -> GpuGeometry {
+    compile_scene_scaled(scene, PX_PER_M)
+}
+
+/// Tessellliert eine ganze Szene zu GPU-Geometrie (gefuellte Polygone +
+/// Papier-mm-Striche). Reihenfolge: Fuellungen -> Umrisse -> offene Polylinien
+/// -> Boegen -> freie Linien (siehe `Scene`-Doc-Kommentar). `px_per_m` sind die
+/// aktuellen Geraete-px je Modell-Meter (aus der laufenden Zoom-Stufe) — treibt
+/// NUR die Bogen-Adaptivitaet (`tessellate_arc`); alles andere ist Zoom-invariant
+/// (Papier-mm-Striche werden erst im Shader auf Geraete-px abgebildet).
+pub fn compile_scene_scaled(scene: &Scene, px_per_m: f32) -> GpuGeometry {
     let mut geo = GpuGeometry::default();
     let mut bounds = Bounds::new();
 
@@ -375,6 +428,8 @@ pub fn compile_scene(scene: &Scene) -> GpuGeometry {
         compile_fill(&mut geo, poly, &mut bounds);
     }
     // 2) Umrisse (geschlossene Ringe als EIN gehrter Streifen, inkl. Schluss-Kante).
+    //    `dash` existiert bereits im Typ (siehe `types::Outline`), wird aber erst
+    //    mit der Dash-Zerlegung (Welle 2) beruecksichtigt.
     for o in &scene.outlines {
         if o.width_mm > 0.0 && o.pts.len() >= 2 {
             geo.stroke_polyline(&o.pts, true, o.color, o.width_mm, &mut bounds);
@@ -384,21 +439,23 @@ pub fn compile_scene(scene: &Scene) -> GpuGeometry {
     //    gehrter Streifen — die inneren Ecken bekommen so eine Gehrung statt
     //    Stumpfkappen (closed=false).
     for pl in &scene.polylines {
-        compile_polyline(&mut geo, pl, &mut bounds);
+        if pl.width_mm > 0.0 && pl.pts.len() >= 2 {
+            geo.stroke_polyline(&pl.pts, false, pl.color, pl.width_mm, &mut bounds);
+        }
     }
-    // 4) Freie Einzel-Linien (Tuerblaetter, Bogen-Sehnen, Referenzlinien).
+    // 4) Kreisboegen: zoomabhaengig in eine Punktfolge zerlegt (`tessellate_arc`),
+    //    dann wie eine offene Polylinie gestrichen. `dash` wird (noch) ignoriert
+    //    (durchgezogen gezeichnet) — die Zerlegung in Teilstriche folgt in Welle 2.
+    for a in &scene.arcs {
+        compile_arc(&mut geo, a, px_per_m, &mut bounds);
+    }
+    // 5) Freie Einzel-Linien (Tuerblaetter, Referenzlinien).
     for l in &scene.lines {
         compile_line(&mut geo, l, &mut bounds);
     }
 
     geo.bounds = bounds.finish();
     geo
-}
-
-fn compile_polyline(geo: &mut GpuGeometry, pl: &Polyline, bounds: &mut Bounds) {
-    if pl.width_mm > 0.0 && pl.pts.len() >= 2 {
-        geo.stroke_polyline(&pl.pts, false, pl.color, pl.width_mm, bounds);
-    }
 }
 
 fn compile_fill(geo: &mut GpuGeometry, poly: &FillPolygon, bounds: &mut Bounds) {
@@ -420,7 +477,82 @@ fn compile_fill(geo: &mut GpuGeometry, poly: &FillPolygon, bounds: &mut Bounds) 
     geo.add_fill_batch(count, poly.color);
 }
 
+fn compile_arc(geo: &mut GpuGeometry, a: &Arc, px_per_m: f32, bounds: &mut Bounds) {
+    if a.width_mm <= 0.0 {
+        return;
+    }
+    let pts = tessellate_arc(a.center, a.from, a.to, a.r, px_per_m);
+    geo.stroke_polyline(&pts, false, a.color, a.width_mm, bounds);
+}
+
 fn compile_line(geo: &mut GpuGeometry, l: &Line, bounds: &mut Bounds) {
     let w = if l.width_mm > 0.0 { l.width_mm } else { 0.18 };
     geo.stroke_polyline(&[l.a, l.b], false, l.color, w, bounds);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Arc;
+
+    // --- tessellate_arc: adaptive Bogen-Zerlegung ----------------------------
+
+    #[test]
+    fn arc_endpunkte_exakt() {
+        let center = [1.0, 1.0];
+        let from = [2.0, 1.0]; // r=1, Winkel 0
+        let to = [1.0, 2.0]; // Winkel 90 Grad
+        let pts = tessellate_arc(center, from, to, 1.0, 100.0);
+        assert_eq!(*pts.first().unwrap(), from, "erster Punkt exakt = from");
+        assert_eq!(*pts.last().unwrap(), to, "letzter Punkt exakt = to");
+    }
+
+    #[test]
+    fn arc_segmentzahl_waechst_mit_px_per_m() {
+        let center = [0.0, 0.0];
+        let from = [1.0, 0.0];
+        let to = [0.0, 1.0]; // Viertelkreis, r=1
+        let low = tessellate_arc(center, from, to, 1.0, 10.0);
+        let high = tessellate_arc(center, from, to, 1.0, 1000.0);
+        let segs_low = low.len() - 1;
+        let segs_high = high.len() - 1;
+        assert!(
+            segs_high > segs_low,
+            "mehr Segmente bei hoeherem Zoom erwartet: {segs_low} vs {segs_high}"
+        );
+    }
+
+    #[test]
+    fn arc_segmentzahl_geklemmt_min_max() {
+        let center = [0.0, 0.0];
+        let from = [1.0, 0.0];
+        let to = [0.0, 1.0];
+        // Sehr grober Fall (winziger Radius/Zoom) -> trotzdem mindestens 8 Segmente.
+        let coarse = tessellate_arc(center, from, to, 0.001, 1.0);
+        assert!(coarse.len() - 1 >= 8, "min. 8 Segmente erwartet");
+        // Extremer Zoom -> nie mehr als 512 Segmente.
+        let fine = tessellate_arc(center, from, to, 1.0, 1.0e9);
+        assert!(fine.len() - 1 <= 512, "max. 512 Segmente erwartet");
+    }
+
+    // --- compile_scene_scaled: End-zu-End-Verdrahtung -------------------------
+
+    #[test]
+    fn compile_scene_mit_bogen_erzeugt_liniengeometrie() {
+        let scene = Scene {
+            arcs: vec![Arc {
+                center: [0.0, 0.0],
+                from: [1.0, 0.0],
+                to: [0.0, 1.0],
+                r: 1.0,
+                color: [0.1, 0.1, 0.1, 1.0],
+                width_mm: 0.25,
+                dash: None,
+            }],
+            ..Default::default()
+        };
+        let geo = compile_scene_scaled(&scene, PX_PER_M);
+        assert!(!geo.line_verts.is_empty(), "Bogen sollte Linien-Vertices erzeugen");
+        assert!(!geo.line_idx.is_empty(), "Bogen sollte Linien-Indizes erzeugen");
+    }
 }

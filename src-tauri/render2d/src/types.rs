@@ -36,6 +36,9 @@ pub struct Line {
     /// Strichbreite in ECHTEN Papier-Millimetern (siehe `stroke::mm_to_device_px`).
     #[serde(rename = "widthMm")]
     pub width_mm: f32,
+    /// Strichmuster in Papier-mm; None/leer = durchgezogen (siehe `tessellate::split_dash`).
+    #[serde(default)]
+    pub dash: Option<Vec<f32>>,
 }
 
 /// Ein geschlossenes Polygon als Umriss (nur Kanten, keine Fuellung) — bequemer
@@ -50,6 +53,11 @@ pub struct Outline {
     /// Strichbreite in echten Papier-Millimetern.
     #[serde(rename = "widthMm")]
     pub width_mm: f32,
+    /// Strichmuster in Papier-mm; None/leer = durchgezogen. Ein gestrichelter
+    /// Umriss wird als offene Teilstuecke gezeichnet (kein gehrter Ring-Schluss
+    /// ueber die Dash-Luecke hinweg, siehe `tessellate::split_dash`).
+    #[serde(default)]
+    pub dash: Option<Vec<f32>>,
 }
 
 /// Ein OFFENER Linienzug mit echter Papier-mm-Breite. Anders als `Outline`
@@ -66,6 +74,34 @@ pub struct Polyline {
     /// Strichbreite in echten Papier-Millimetern.
     #[serde(rename = "widthMm")]
     pub width_mm: f32,
+    /// Strichmuster in Papier-mm; None/leer = durchgezogen.
+    #[serde(default)]
+    pub dash: Option<Vec<f32>>,
+}
+
+/// Ein Kreisbogen (kuerzerer Sweep von `from` nach `to` um `center`) in Modell-
+/// Metern — NICHT vortessellliert (anders als frueher, wo der Web-Renderer den
+/// Bogen einmalig in eine feste Facettenzahl zerlegte). Die Zerlegung passiert
+/// erst in `tessellate::tessellate_arc`, zoomabhaengig, damit der Bogen bei
+/// jeder Vergroesserung glatt bleibt statt sichtbare Facetten zu zeigen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Arc {
+    /// Mittelpunkt in Modell-Metern.
+    pub center: Point,
+    /// Anfangspunkt (auf dem Kreis) in Modell-Metern.
+    pub from: Point,
+    /// Endpunkt (auf dem Kreis) in Modell-Metern.
+    pub to: Point,
+    /// Radius in Modell-Metern.
+    pub r: f32,
+    /// Strichfarbe (RGBA 0..1).
+    pub color: Rgba,
+    /// Strichbreite in echten Papier-Millimetern.
+    #[serde(rename = "widthMm")]
+    pub width_mm: f32,
+    /// Strichmuster in Papier-mm; None = durchgezogen (siehe `tessellate::split_dash`).
+    #[serde(default)]
+    pub dash: Option<Vec<f32>>,
 }
 
 /// Horizontale Ausrichtung eines Textes relativ zu seinem Anker (deckungsgleich
@@ -102,8 +138,8 @@ pub struct Text {
 
 /// Die vollstaendige Szene: alles, was ein Frame zeichnet. Reihenfolge ist
 /// signifikant (Z-/Alpha-Ueberlagerung): erst Fuellungen, dann Umrisse, dann
-/// offene Polylinien, dann freie Linien — analog zur Draw-Reihenfolge im WebGL-Pfad.
-/// Texte liegen zuoberst (eigener Glyphen-Pass nach der Geometrie).
+/// offene Polylinien, dann Boegen, dann freie Linien — analog zur Draw-Reihenfolge
+/// im WebGL-Pfad. Texte liegen zuoberst (eigener Glyphen-Pass nach der Geometrie).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Scene {
     #[serde(default)]
@@ -112,6 +148,10 @@ pub struct Scene {
     pub outlines: Vec<Outline>,
     #[serde(default)]
     pub polylines: Vec<Polyline>,
+    /// Kreisboegen (unvortessellliert, siehe `Arc`); leer in aelteren Szenen
+    /// ohne Bogen-Unterstuetzung (`#[serde(default)]`).
+    #[serde(default)]
+    pub arcs: Vec<Arc>,
     #[serde(default)]
     pub lines: Vec<Line>,
     #[serde(default)]

@@ -19,7 +19,7 @@ use wgpu::util::DeviceExt;
 
 use crate::ortho::{compute_ortho_matrix, corrected_view_box, meet_scale, mm_to_device_px, Mat4};
 use crate::shaders::{FILL_WGSL, LINE_WGSL};
-use crate::tessellate::{compile_scene, to_screen, GpuGeometry};
+use crate::tessellate::{compile_scene_scaled, to_screen, GpuGeometry, PX_PER_M};
 use crate::types::{Scene, Text, TextAlign, ViewBox};
 
 /// MSAA-Faktor: 4x Multisampling fuer glatte Linien-/Fuellkanten (wie im Browser).
@@ -98,6 +98,11 @@ pub struct Renderer {
     /// Aktuell allozierter Uniform-Puffer + zugehoerige Bind-Group (wachsen bei Bedarf).
     uniform: Option<UniformArena>,
     scene: Option<SceneBuffers>,
+    /// Die zuletzt hochgeladene Szene (fuer Re-Tessellierung bei Zoomaenderung,
+    /// siehe `maybe_retessellate` — nur relevant, wenn die Szene Boegen enthaelt).
+    last_scene: Option<Scene>,
+    /// Geraete-px je Modell-Meter, mit dem `last_scene` zuletzt tessellliert wurde.
+    arc_px_per_m: f32,
     /// Farbformat der Ziel-Surface (auch Format der MSAA-Textur).
     format: wgpu::TextureFormat,
     /// Multisample-Farbtextur (4x), lazily an die Ziel-Groesse gebunden.
@@ -248,6 +253,8 @@ impl Renderer {
             uniform_stride,
             uniform: None,
             scene: None,
+            last_scene: None,
+            arc_px_per_m: PX_PER_M,
             format: color_format,
             msaa_view: None,
             msaa_size: (0, 0),
@@ -263,9 +270,12 @@ impl Renderer {
         }
     }
 
-    /// Tessellliert eine Szene und laedt die Puffer hoch (einmal je Szene).
-    pub fn upload_scene(&mut self, device: &wgpu::Device, scene: &Scene) {
-        let geo = compile_scene(scene);
+    /// Tessellliert eine Szene und laedt die Puffer hoch. `px_per_m` sind die
+    /// aktuellen Geraete-px je Modell-Meter (treibt nur die Bogen-Adaptivitaet,
+    /// siehe `tessellate::tessellate_arc`); wird gemerkt, damit `render` bei
+    /// Zoomaenderung automatisch neu tessellliert (`maybe_retessellate`).
+    pub fn upload_scene(&mut self, device: &wgpu::Device, scene: &Scene, px_per_m: f32) {
+        let geo = compile_scene_scaled(scene, px_per_m);
 
         let mk_vbo = |data: &[f32], label: &str| -> Option<wgpu::Buffer> {
             if data.is_empty() {
@@ -296,6 +306,29 @@ impl Renderer {
             geo,
             texts: scene.texts.clone(),
         });
+        self.last_scene = Some(scene.clone());
+        self.arc_px_per_m = px_per_m;
+    }
+
+    /// Tessellliert die zuletzt hochgeladene Szene neu, wenn sich der Zoom seit
+    /// dem letzten Upload um mehr als den Faktor 1.3 veraendert hat UND die
+    /// Szene ueberhaupt Boegen enthaelt (bei anderen Primitiven ist Zoom-
+    /// invariant, kein Re-Tessellieren noetig). Haelt Boegen bei jeder
+    /// Zoomstufe glatt, ohne jeden Frame neu zu tessellieren (Szenen sind
+    /// klein, das Re-Tessellieren selbst ist billig — nur nicht JEDEN Frame).
+    fn maybe_retessellate(&mut self, device: &wgpu::Device, view_box: ViewBox, viewport: (u32, u32)) {
+        let Some(scene) = &self.last_scene else {
+            return;
+        };
+        if scene.arcs.is_empty() {
+            return;
+        }
+        let px_per_m = PX_PER_M * meet_scale(view_box, viewport.0 as f32, viewport.1 as f32);
+        let ratio = px_per_m / self.arc_px_per_m.max(1e-6);
+        if ratio > 1.3 || ratio < 1.0 / 1.3 {
+            let scene = scene.clone();
+            self.upload_scene(device, &scene, px_per_m);
+        }
     }
 
     /// Erstellt den Glyphen-Textpass beim ersten Bedarf (FontSystem laedt die
@@ -398,6 +431,8 @@ impl Renderer {
         view_box: ViewBox,
         viewport: (u32, u32),
     ) {
+        self.maybe_retessellate(device, view_box, viewport);
+
         let (vw, vh) = (viewport.0 as f32, viewport.1 as f32);
         let proj: Mat4 = compute_ortho_matrix(view_box, vw, vh);
         let mm_px = mm_to_device_px(view_box, vw, vh, self.paper_scale_n);

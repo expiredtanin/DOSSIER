@@ -121,10 +121,11 @@ struct GpuState2d {
 
 #[cfg(feature = "native2d")]
 impl GpuState2d {
-    fn new(window: Arc<Window>, scene: &Scene) -> Self {
+    fn new(window: Arc<Window>, scene: &Scene, view_box: ViewBox) -> Self {
         let (surface, device, queue, config) = configure_surface(&window, "2d.device");
         let mut renderer = Renderer2d::new(&device, config.format);
-        renderer.upload_scene(&device, scene);
+        let px_per_m = PX_PER_M * meet_scale(view_box, config.width as f32, config.height as f32);
+        renderer.upload_scene(&device, scene, px_per_m);
         Self { surface, device, queue, config, renderer, window }
     }
 
@@ -661,8 +662,9 @@ impl ApplicationHandler<UserEvent> for App {
             self.id2d = Some(window.id());
             // Kam schon ein Live-Push an, gewinnt der; sonst der JSON-Snapshot.
             let scene = self.pending2d.take().unwrap_or_else(load_scene);
-            self.view_box = Some(scene_view_box(&scene));
-            let state = GpuState2d::new(window, &scene);
+            let view_box = scene_view_box(&scene);
+            self.view_box = Some(view_box);
+            let state = GpuState2d::new(window, &scene, view_box);
             state.window.request_redraw();
             self.s2d = Some(state);
         }
@@ -694,7 +696,9 @@ impl ApplicationHandler<UserEvent> for App {
                     self.pending2d = Some(scene);
                     return;
                 };
-                state.renderer.upload_scene(&state.device, &scene);
+                let vb = *self.view_box.get_or_insert_with(initial_view_box);
+                let px_per_m = PX_PER_M * meet_scale(vb, state.config.width as f32, state.config.height as f32);
+                state.renderer.upload_scene(&state.device, &scene, px_per_m);
                 if !self.nav2d {
                     self.view_box = Some(scene_view_box(&scene));
                 }

@@ -5,9 +5,14 @@
 // einen GPU-Glyphen-Atlas (glyphon/cosmic-text), keine Vektor-Ersatzschrift.
 //
 // Das erzeugte Objekt matcht 1:1 die serde-Structs render2d::types::Scene
-// { fills:[{pts,color}], outlines:[{pts,color,widthMm}], lines:[{a,b,color,widthMm}],
+// { fills:[{pts,color}], outlines:[{pts,color,widthMm}], polylines:[{pts,color,widthMm}],
+//   arcs:[{center,from,to,r,color,widthMm,dash}], lines:[{a,b,color,widthMm}],
 //   texts:[{pos,content,sizeMm,color,align}] }
 // mit Point = [x,y] (Meter) und Rgba = [r,g,b,a] (0..1).
+//
+// Bögen werden NICHT hier tessellliert (anders als früher): der Rust-Renderer
+// zerlegt sie zoomabhängig (`tessellate::tessellate_arc`), damit sie bei jeder
+// Vergrößerung glatt bleiben statt sichtbare Facetten zu zeigen.
 
 import type { Plan, Primitive } from "./generatePlan";
 import { applyDashRuns, buildHatchRuns } from "./glPlan/glPlanHatch";
@@ -26,17 +31,29 @@ export interface ROutline {
   pts: RPoint[];
   color: RRgba;
   widthMm: number;
+  dash?: number[] | null;
 }
 export interface RPolyline {
   pts: RPoint[];
   color: RRgba;
   widthMm: number;
+  dash?: number[] | null;
+}
+export interface RArc {
+  center: RPoint;
+  from: RPoint;
+  to: RPoint;
+  r: number;
+  color: RRgba;
+  widthMm: number;
+  dash?: number[] | null;
 }
 export interface RLine {
   a: RPoint;
   b: RPoint;
   color: RRgba;
   widthMm: number;
+  dash?: number[] | null;
 }
 export type RTextAlign = "left" | "center" | "right";
 /** EINE Textzeile; serde-kompatibel zu render2d::types::Text. */
@@ -53,6 +70,7 @@ export interface RScene {
   fills: RFill[];
   outlines: ROutline[];
   polylines: RPolyline[];
+  arcs: RArc[];
   lines: RLine[];
   texts: RText[];
 }
@@ -102,29 +120,6 @@ function toRgba(input: string | undefined, alpha = 1): RRgba | null {
   const a = h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : alpha;
   if (![r, g, b, a].every((v) => Number.isFinite(v))) return [0, 0, 0, alpha];
   return [r, g, b, a];
-}
-
-/** Kreisbogen in Liniensegmente zerlegen (kürzerer Sweep, ~24 Segmente). */
-function tessellateArc(
-  center: { x: number; y: number },
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  r: number,
-): RPoint[] {
-  const a0 = Math.atan2(from.y - center.y, from.x - center.x);
-  let a1 = Math.atan2(to.y - center.y, to.x - center.x);
-  // Kürzeren Bogen wählen (generatePlan liefert keine largeArc-Info mit).
-  let delta = a1 - a0;
-  while (delta > Math.PI) delta -= 2 * Math.PI;
-  while (delta < -Math.PI) delta += 2 * Math.PI;
-  a1 = a0 + delta;
-  const segs = Math.max(2, Math.ceil((Math.abs(delta) / (Math.PI * 2)) * 48));
-  const pts: RPoint[] = [];
-  for (let i = 0; i <= segs; i++) {
-    const t = a0 + (delta * i) / segs;
-    pts.push([center.x + Math.cos(t) * r, center.y + Math.sin(t) * r]);
-  }
-  return pts;
 }
 
 /** Zwei Modell-Punkte (Meter) als gleich behandeln (Verkettungs-Toleranz). */
@@ -234,6 +229,7 @@ export function planToRenderScene(plan: Plan): RScene {
   const fills: RFill[] = [];
   const outlines: ROutline[] = [];
   const polylines: RPolyline[] = [];
+  const arcs: RArc[] = [];
   const lines: RLine[] = [];
   const texts: RText[] = [];
 
@@ -327,9 +323,18 @@ export function planToRenderScene(plan: Plan): RScene {
     } else if (p.kind === "arc") {
       flushRun();
       const col = toRgba(DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
-      // Bogen als EINE zusammenhängende Polylinie (gehrte Sehnen-Ecken).
-      const poly = tessellateArc(p.center, p.from, p.to, p.r);
-      if (poly.length >= 2) polylines.push({ pts: poly, color: col, widthMm: p.weightMm });
+      // Bogen unvortessellliert an Rust übergeben (`RArc`) — die zoomabhängige
+      // Zerlegung (glatte Rundung bei jeder Vergrößerung) und ein evtl. Strich-
+      // muster übernimmt `tessellate::tessellate_arc`/`split_dash` drüben.
+      arcs.push({
+        center: [p.center.x, p.center.y],
+        from: [p.from.x, p.from.y],
+        to: [p.to.x, p.to.y],
+        r: p.r,
+        color: col,
+        widthMm: p.weightMm,
+        dash: p.dash ?? null,
+      });
     } else {
       // "text": zeilenweise flachen — die ECHTEN Glyphen rastert der Rust-
       // Renderer über einen GPU-Glyphen-Atlas (glyphon, dieselbe Font-Familie
@@ -398,5 +403,5 @@ export function planToRenderScene(plan: Plan): RScene {
     }
   }
 
-  return { fills, outlines, polylines, lines, texts };
+  return { fills, outlines, polylines, arcs, lines, texts };
 }

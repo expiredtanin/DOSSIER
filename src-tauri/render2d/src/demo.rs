@@ -43,19 +43,23 @@ pub fn demo_scene() -> Scene {
                 pts: l,
                 color: ink,
                 width_mm: 0.35,
+                dash: None,
             },
             Outline {
                 pts: room,
                 color: ink,
                 width_mm: 0.18,
+                dash: None,
             },
         ],
         polylines: vec![],
+        arcs: vec![],
         lines: vec![Line {
             a: [0.0, -1.0],
             b: [9.0, -1.0],
             color: ink,
             width_mm: 0.25,
+            dash: None,
         }],
         // Ein Raumstempel-artiger Text (echte Glyphen via Atlas), mittig im Raum.
         texts: vec![Text {
