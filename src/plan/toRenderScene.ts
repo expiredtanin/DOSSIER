@@ -8,6 +8,7 @@
 // mit Point = [x,y] (Meter) und Rgba = [r,g,b,a] (0..1).
 
 import type { Plan, Primitive } from "./generatePlan";
+import { applyDashRuns, buildHatchRuns } from "./glPlan/glPlanHatch";
 
 type LinePrim = Extract<Primitive, { kind: "line" }>;
 
@@ -176,6 +177,20 @@ export function planToRenderScene(plan: Plan): RScene {
       // Füllung
       const fillCol = toRgba(p.fill, 1);
       if (fillCol && pts.length >= 3) fills.push({ pts, color: fillCol });
+
+      // Schraffur: die aufs Polygon geclippten Musterlinien wie im Browser
+      // (glPlanHatch — identische Geometrie), als Polylinien. "none"/"solid"
+      // brauchen keine Linien (solid deckt die Füllung farbig ab).
+      if (p.hatch && p.hatch.pattern !== "none" && p.hatch.pattern !== "solid") {
+        const hatchCol = toRgba(p.hatch.color, 1) ?? [0.1, 0.1, 0.1, 1];
+        const hatchMm = p.hatch.lineWeight > 0 ? p.hatch.lineWeight : 0.13;
+        const runs = applyDashRuns(buildHatchRuns(p.pts, p.hatch), p.hatch.dash);
+        for (const run of runs) {
+          if (run.length >= 2) {
+            polylines.push({ pts: run.map((v) => [v.x, v.y]), color: hatchCol, widthMm: hatchMm });
+          }
+        }
+      }
 
       // Umriss
       const strokeCol = toRgba(p.stroke, 1);
