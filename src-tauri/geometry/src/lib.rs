@@ -82,6 +82,11 @@ fn cross(p: Vec2, q: Vec2) -> f64 {
     p.x * q.y - p.y * q.x
 }
 
+/// Skalarprodukt zweier 2D-Vektoren.
+fn dot(p: Vec2, q: Vec2) -> f64 {
+    p.x * q.x + p.y * q.y
+}
+
 /// Schnittpunkt der Geraden (a + t*da) mit (b + s*db).
 /// Liefert None bei (nahezu) parallelen Richtungen.
 fn line_intersect(a: Vec2, da: Vec2, b: Vec2, db: Vec2) -> Option<Vec2> {
@@ -204,9 +209,17 @@ fn set_cut(cuts: &mut WallCuts, end: WallEndKind, cut: Line) {
 
 /**
  * Gemeinsame Gehrungslinie zweier Waende A, B, die sich im Knoten J treffen.
- * Robust gegen beliebige Wicklung und ungleiche Dicken: A's Aussenflaeche wird
- * mit der NAECHSTGELEGENEN Flaeche von B verschnitten, A's Innenflaeche mit der
- * jeweils anderen. Die Gerade durch beide Eckpunkte ist die Gehrung.
+ * Robust gegen beliebige Wicklung, ungleiche Dicken und JEDEN Oeffnungswinkel
+ * (inkl. spitzer): Die Wandflaechen werden orientierungsbasiert (vorzeichen-
+ * richtig) gepaart -- A's Aussenflaeche verschneidet B's Aussenflaeche zum
+ * aeusseren Apex, A's Innenflaeche B's Innenflaeche zum inneren Apex. "Aussen"
+ * ist jeweils die vom Koerper der anderen Wand ABGEWANDTE Flaeche. Die Gerade
+ * durch beide Apexe ist die Gehrung; sie trennt beide Wandbaender ueberlappungs-
+ * frei.
+ *
+ * Die fruehere Distanz-Heuristik ("naechstgelegene B-Flaeche") kippt bei spitzen
+ * Winkeln -- dort wird die falsche Flaeche zur naeheren, sodass Aussen mit Innen
+ * gepaart wird und die Poche-Baender sich kreuzweise ueberlappen.
  *
  * Dicke und Referenzversatz kommen direkt aus WallInput (bereits flach).
  */
@@ -235,11 +248,29 @@ fn miter_line(a: &WallInput, a_end: WallEndKind, b: &WallInput) -> Option<Line> 
     let p_lb = add(j, scale(n_b, off_b + t_b / 2.0));
     let p_rb = add(j, scale(n_b, off_b - t_b / 2.0));
 
-    // Fuer A's linke Flaeche die naehere B-Flaeche waehlen; A's rechte die andere.
-    let lb_closer = len(sub(p_la, p_lb)) <= len(sub(p_la, p_rb));
-    let b_for_left = if lb_closer { p_lb } else { p_rb };
-    let b_for_right = if lb_closer { p_rb } else { p_lb };
+    // Auslauf-Richtungen der Achsen vom Knoten weg, in den jeweiligen Wandkoerper.
+    let d_a = match a_end {
+        WallEndKind::Start => u_a,
+        WallEndKind::End => scale(u_a, -1.0),
+    };
+    let b_at_start = len(sub(b.start, j)) <= len(sub(b.end, j));
+    let d_b = if b_at_start { u_b } else { scale(u_b, -1.0) };
 
+    // Orientierungsbasierte, vorzeichenrichtige Flaechen-Paarung. "Aussen" ist die
+    // vom Koerper der anderen Wand ABGEWANDTE Flaeche: A's +nA-Flaeche (p_la) liegt
+    // aussen, wenn nA*dB < 0; B's +nB-Flaeche (p_lb) aussen, wenn nB*dA < 0. Gepaart
+    // wird Aussen-mit-Aussen und Innen-mit-Innen -- nie ueber Kreuz. (nA*dB = 0 tritt
+    // nur bei kollinearen Achsen auf; dann sind die Flaechen parallel und
+    // line_intersect liefert unten ohnehin None.)
+    let b_outer = if dot(n_b, d_a) < 0.0 { p_lb } else { p_rb };
+    let b_inner = if dot(n_b, d_a) < 0.0 { p_rb } else { p_lb };
+    let a_left_is_outer = dot(n_a, d_b) < 0.0;
+    let b_for_left = if a_left_is_outer { b_outer } else { b_inner };
+    let b_for_right = if a_left_is_outer { b_inner } else { b_outer };
+
+    // c1 an A's linke Flaeche (p_la), c2 an A's rechte (p_ra) gebunden -- Reihenfolge
+    // wie zuvor, damit rechte/stumpfe Ecken bit-identisch bleiben; nur die
+    // B-Partnerwahl ist jetzt orientierungs- statt distanzbasiert.
     let c1 = line_intersect(p_la, u_a, b_for_left, u_b)?;
     let c2 = line_intersect(p_ra, u_a, b_for_right, u_b)?;
 
@@ -304,6 +335,34 @@ mod tests {
             (d.x.abs() - d.y.abs()).abs() < 1e-6,
             "45-Grad-Gehrung erwartet"
         );
+    }
+
+    #[test]
+    fn acute_corner_pairs_outer_with_outer() {
+        // Symmetrische V-Ecke, Knoten (0,0), Oeffnungswinkel 60 Grad (spitz),
+        // nach oben. Beide Wandkoerper laufen unter +/-30 Grad zur +y-Achse aus.
+        // WA endet im Knoten, WB startet dort. Erwartet: vertikale Gehrung durch
+        // Aussen-Apex (0,-0.4) und Innen-Apex (0,0.4). Die alte Distanz-Heuristik
+        // lieferte hier eine um 90 Grad verdrehte, horizontale Gehrung.
+        let s3 = 3.0_f64.sqrt() / 2.0;
+        let input = JoinInput {
+            walls: vec![
+                w("WA", -1.0, 2.0 * s3, 0.0, 0.0, 0.4),
+                w("WB", 0.0, 0.0, 1.0, 2.0 * s3, 0.4),
+            ],
+        };
+        let out = compute_joins(input);
+        let ca = find(&out, "WA");
+        let cb = find(&out, "WB");
+        let cut = ca.end_cut.or(cb.start_cut).expect("Gehrung gesetzt");
+
+        // Abstand Punkt->Gerade: |cross(dir, q - point)| / len(dir).
+        let dist = |q: Vec2| cross(cut.dir, sub(q, cut.point)).abs() / len(cut.dir);
+        assert!(dist(Vec2 { x: 0.0, y: -0.4 }) < 1e-6, "Aussen-Apex auf Gehrung");
+        assert!(dist(Vec2 { x: 0.0, y: 0.4 }) < 1e-6, "Innen-Apex auf Gehrung");
+        // Gehrung vertikal: dir.x ~ 0 (die falsche, horizontale Gehrung haette
+        // stattdessen dir.y ~ 0 gehabt).
+        assert!(cut.dir.x.abs() / len(cut.dir) < 1e-6, "vertikale Gehrung erwartet");
     }
 
     #[test]
