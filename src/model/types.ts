@@ -108,8 +108,15 @@ export interface Component {
   name: string;
   /** Füllfarbe im Grundriss (Poché) und 3D-Diffusfarbe. */
   color: string;
-  /** Schnitt-Schraffur → Hatch Manager. */
+  /** Schnitt-Schraffur → Hatch Manager. Gilt, wo das Bauteil echt geschnitten ist. */
   hatchId: string;
+  /**
+   * Ansichts-Schraffur → Hatch Manager. Gilt, wo das Bauteil frontal/ungeschnitten
+   * gesehen wird (z. B. Deckenpoché im Grundriss: die Decke liegt über der
+   * horizontalen Schnittebene und wird von unten gesehen, nicht aufgeschnitten).
+   * Leer/`undefined` ⇒ keine Schraffur (weiss).
+   */
+  viewHatchId?: string;
   /** Optionale 3D-Textur (vorerst ignoriert). */
   texture3d?: string;
   /**

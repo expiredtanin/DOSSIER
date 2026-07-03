@@ -317,8 +317,17 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.room.refFloor": "Reference floor",
   "objinfo.room.editStamp": "Edit stamp …",
   "levels.addFloor": "+ Floor",
+  "levels.addSection": "+ Section",
+  "levels.addElevation": "+ Elevation",
   "levels.addDrawing": "+ Drawing",
   "layers.addCategory": "+ Layer",
+
+  // Drawing levels: category titles (collapsible groups).
+  "levelCat.floor": "Floors",
+  "levelCat.section": "Sections",
+  "levelCat.elevation": "Elevations",
+  "levelCat.drawing": "2D drawings",
+  "levelCat.collapse": "Collapse/expand category",
   "nav.visibility": "Visibility",
   "nav.hide": "Hide",
   "nav.show": "Show",
@@ -414,6 +423,8 @@ export const en: Record<TranslationKey, string> = {
 
   // Default names.
   "default.floorName": "Floor {n}",
+  "default.sectionName": "Section {n}",
+  "default.elevationName": "Elevation {n}",
   "default.drawingName": "Drawing {n}",
   "default.categoryName": "New layer",
   "default.subCategoryName": "New sub-layer",
@@ -471,7 +482,9 @@ export const en: Record<TranslationKey, string> = {
   "resources.components.placeholder": "Component",
   "resources.col.name": "Name",
   "resources.col.color": "Color",
-  "resources.col.hatch": "Hatch",
+  "resources.col.hatch": "Section hatch",
+  "resources.col.viewHatch": "View hatch",
+  "resources.viewHatch.none": "(none)",
   "resources.col.prio": "Prio",
   "resources.col.prio.hint": "Higher priority runs through at the join",
   "resources.col.texture": "Texture",

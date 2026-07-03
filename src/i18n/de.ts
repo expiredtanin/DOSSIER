@@ -319,8 +319,17 @@ export const de = {
   "objinfo.room.editStamp": "Stempel bearbeiten …",
   "objinfo.wall.floorAboveNone": "Kein oberes Geschoss",
   "levels.addFloor": "+ Geschoss",
+  "levels.addSection": "+ Schnitt",
+  "levels.addElevation": "+ Ansicht",
   "levels.addDrawing": "+ Zeichnung",
   "layers.addCategory": "+ Ebene",
+
+  // ── Zeichnungsebenen: Kategorie-Titel (einklappbare Gruppen) ─────────────
+  "levelCat.floor": "Geschosse",
+  "levelCat.section": "Schnitte",
+  "levelCat.elevation": "Ansichten",
+  "levelCat.drawing": "2D-Zeichnungen",
+  "levelCat.collapse": "Kategorie ein-/ausklappen",
   "nav.visibility": "Sichtbarkeit",
   "nav.hide": "Ausblenden",
   "nav.show": "Einblenden",
@@ -417,6 +426,8 @@ export const de = {
 
   // ── Default-Namen neuer Elemente ─────────────────────────────────────────
   "default.floorName": "Geschoss {n}",
+  "default.sectionName": "Schnitt {n}",
+  "default.elevationName": "Ansicht {n}",
   "default.drawingName": "Zeichnung {n}",
   "default.categoryName": "Neue Ebene",
   "default.subCategoryName": "Neue Sub-Ebene",
@@ -475,7 +486,9 @@ export const de = {
   "resources.components.placeholder": "Bauteil",
   "resources.col.name": "Name",
   "resources.col.color": "Farbe",
-  "resources.col.hatch": "Schraffur",
+  "resources.col.hatch": "Schnittschraffur",
+  "resources.col.viewHatch": "Ansichtsschraffur",
+  "resources.viewHatch.none": "(keine)",
   "resources.col.prio": "Prio",
   "resources.col.prio.hint": "Höhere Priorität läuft am Stoß durch",
   "resources.col.texture": "Textur",

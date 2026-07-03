@@ -1200,8 +1200,9 @@ function addReferenceLine(out: Primitive[], wall: Wall, greyed: boolean): void {
  * Schichtaufbau einer Decke in Z (oben → unten) — von oben unsichtbar. Die
  * Schichtbänderung erscheint daher NUR im Schnitt (siehe `toSection.ts`), nicht
  * hier. Im Detailgrad „grob" entfällt die Schraffur (nur Fläche + Umriss);
- * „mittel"/„fein" zeigen die Component-Schraffur. `lwMm` ist die Kategorie-
- * Strichstärke.
+ * „mittel"/„fein" zeigen die Ansichts-Schraffur des Bauteils (`viewHatchId`,
+ * Default weiss) — die frontal gesehene Aufsicht ist kein Schnitt. `lwMm` ist
+ * die Kategorie-Strichstärke.
  */
 function addCeilingPoche(
   out: Primitive[],
@@ -1219,11 +1220,16 @@ function addCeilingPoche(
   const outlineMm = lwMm * OUTLINE_DETAIL_FACTOR[detail];
   const ceilingId = ceiling.id;
 
-  // Gefüllte Fläche, ohne Schraffur: die Decke wird im Grundriss frontal von
-  // oben gesehen, nicht aufgeschnitten — Bauteil-Schraffuren gehören nur auf
-  // Schnittflächen (siehe resolveCeilingSectionStyle/splitSlabLayers), nicht
-  // auf die Aufsicht.
-  const hatch = NO_HATCH;
+  // Gefüllte Fläche mit der Ansichts-Schraffur: die Decke wird im Grundriss
+  // frontal von unten gesehen, nicht aufgeschnitten — daher greift hier
+  // NICHT die Schnitt-Schraffur (die gehört auf echte Schnittflächen, siehe
+  // resolveCeilingSectionStyle/splitSlabLayers), sondern `viewHatchId`. Fehlt
+  // sie (Default), bleibt die Aufsicht weiss. Im Detailgrad „grob" entfällt
+  // die Schraffur ganz (nur Fläche + Umriss).
+  const hatch =
+    detail !== "grob" && comp?.viewHatchId
+      ? resolveHatch(project, comp.viewHatchId)
+      : NO_HATCH;
   const solid = hatch.pattern === "solid";
   out.push({
     kind: "polygon",

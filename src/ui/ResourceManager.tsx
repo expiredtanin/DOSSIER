@@ -283,11 +283,12 @@ function ResCell({
 
 // ── Bauteile (Components) ──────────────────────────────────────────────────
 
-// Spalten: Name | Farbe | Schraffur | Prio | Textur | Material | (löschen).
+// Spalten: Name | Farbe | Schnittschraffur | Ansichtsschraffur | Prio | Textur | Material | (löschen).
 const COMPONENT_COLUMNS: ResColumn[] = [
   { titleKey: "resources.col.name" },
   { titleKey: "resources.col.color" },
   { titleKey: "resources.col.hatch" },
+  { titleKey: "resources.col.viewHatch" },
   {
     titleKey: "resources.col.prio",
     align: "right",
@@ -298,7 +299,7 @@ const COMPONENT_COLUMNS: ResColumn[] = [
   { titleKey: "" },
 ];
 const COMPONENT_TEMPLATE =
-  "minmax(120px, 1fr) auto minmax(120px, 0.8fr) 64px minmax(90px, 0.7fr) minmax(130px, 0.9fr) 36px";
+  "minmax(120px, 1fr) auto minmax(120px, 0.8fr) minmax(120px, 0.8fr) 64px minmax(90px, 0.7fr) minmax(130px, 0.9fr) 36px";
 
 /**
  * Material-Zelle der Bauteil-Tabelle: ein Button, der den aktuellen Material-
@@ -766,6 +767,11 @@ function ComponentRow({
   onDelete: () => void;
 }) {
   const hatchOptions = hatches.map((h) => ({ value: h.id, label: h.name }));
+  // Ansichts-Schraffur ist optional; Leer-Eintrag = keine Schraffur (weiss).
+  const viewHatchOptions = [
+    { value: "", label: t("resources.viewHatch.none") },
+    ...hatchOptions,
+  ];
   return (
     <ResRow>
       <ResCell>
@@ -786,6 +792,13 @@ function ComponentRow({
           value={component.hatchId}
           onChange={(hatchId) => onPatch({ hatchId })}
           options={hatchOptions}
+        />
+      </ResCell>
+      <ResCell>
+        <SelectField
+          value={component.viewHatchId ?? ""}
+          onChange={(viewHatchId) => onPatch({ viewHatchId: viewHatchId || undefined })}
+          options={viewHatchOptions}
         />
       </ResCell>
       <ResCell align="right" emphasis>
