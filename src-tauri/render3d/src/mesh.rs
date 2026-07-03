@@ -23,8 +23,11 @@
 // werden durch einen Hoehen-Ueberlappungstest (`cluster_by_height_overlap`)
 // sauber getrennt (kein Verschneiden ueber Geschosse hinweg). T-/X-Stoesse
 // (mehr als zwei Enden an einem Knoten) bleiben — wie im Web-Pendant —
-// rechtwinklig. Das Schnitt-Modul (`section.rs`) bleibt UNVERAENDERT bei der
-// achsparallelen Bounding-Box-Naeherung (siehe dessen Moduldoc).
+// rechtwinklig. Das Schnitt-Modul (`section.rs`) nutzt fuer die WAND-CUT-Polygone
+// denselben gehrten Fussabdruck (`wall_mitered_footprints`), damit ein Schnitt an
+// einer Wandecke genau EINEN verschnittenen Querschnitt liefert statt zweier
+// ueberlappender Rechtecke; seine Verdeckungs-Naeherung bleibt achsparallel
+// (siehe dessen Moduldoc).
 //
 // SCHICHTEN (`WallInput::layers`): mehrschichtige Waende (Putz/Daemmung/
 // Mauerwerk/...) werden nicht als ein Vollkoerper, sondern als je EIN Prisma
@@ -486,6 +489,53 @@ fn compute_wall_miters(walls: &[WallInput]) -> Vec<WallMiters> {
         }
     }
     out
+}
+
+/// Grundriss-Fussabdruck EINER Wand (die vier Band-Eckpunkte g0..g3 in CCW),
+/// an ihren echten Achsenenden ggf. gehrt — bitgenau dieselbe Ecken-Konstruktion
+/// wie `extrude_layer_segment` fuer das Vollstueck (Einzel-Layer, keine
+/// Oeffnung): `off(start/end, +/-thickness/2)`, an Start/Ende gegen die jeweilige
+/// Gehrungslinie verschnitten. `None` fuer entartete Waende (Start == Ende, wie
+/// `extrude_wall`). Reihenfolge: start+n, end+n, end-n, start-n.
+fn wall_mitered_footprint(wall: &WallInput, miters: WallMiters) -> Option<[Point2; 4]> {
+    let n = left_normal(wall.start, wall.end);
+    if n == [0.0, 0.0] {
+        return None;
+    }
+    let h = wall.thickness * 0.5;
+    let ux = wall.end[0] - wall.start[0];
+    let uz = wall.end[1] - wall.start[1];
+    let ul = (ux * ux + uz * uz).sqrt().max(1e-9);
+    let u: Point2 = [ux / ul, uz / ul];
+    let off = |p: Point2, s: f32| -> Point2 { [p[0] + n[0] * s * h, p[1] + n[1] * s * h] };
+    let clip = |base: Point2, cut: Option<MiterLine>| -> Point2 {
+        match cut {
+            None => base,
+            Some(c) => line_intersect_2(base, u, c.point, c.dir).unwrap_or(base),
+        }
+    };
+    Some([
+        clip(off(wall.start, 1.0), miters.start),
+        clip(off(wall.end, 1.0), miters.end),
+        clip(off(wall.end, -1.0), miters.end),
+        clip(off(wall.start, -1.0), miters.start),
+    ])
+}
+
+/// Grundriss-Fussabdruecke ALLER Waende, an ihren echten Ecken verschnitten
+/// (siehe `wall_mitered_footprint`). Berechnet die Gehrung einmalig ueber die
+/// gesamte Wandkonnektivitaet (`compute_wall_miters`) und teilt so die
+/// Ecken-Verschneidungs-Wahrheit mit `section::cut_section` — damit der Schnitt
+/// an Wandecken denselben verschnittenen Wand-Querschnitt liefert wie die
+/// 3D-Extrusion, ohne die Gehrungslogik zu duplizieren. Reihenfolge/Anzahl
+/// deckungsgleich mit `walls` (`None` bei entarteter Wand).
+pub(crate) fn wall_mitered_footprints(walls: &[WallInput]) -> Vec<Option<[Point2; 4]>> {
+    let miters = compute_wall_miters(walls);
+    walls
+        .iter()
+        .zip(miters)
+        .map(|(w, m)| wall_mitered_footprint(w, m))
+        .collect()
 }
 
 /// Haengt ein Quad (vier Ecken in CCW von aussen) als zwei Dreiecke an, mit fester

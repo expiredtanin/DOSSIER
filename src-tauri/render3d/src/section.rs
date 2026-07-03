@@ -101,19 +101,22 @@
 //!   (Rechteck-Baender) und Decken (i.d.R. konvexe Rechtecke) ist das exakt;
 //!   fuer stark diagonale oder konkave Grundrisse kann es zu Ueberverdeckung
 //!   fuehren.
-//! - Keine Wandknoten-Verschneidung (T-/X-Stoesse): DIESES Modul behandelt
-//!   Waende weiterhin als eigenstaendige, stumpf abgeschlossene Quader, die
-//!   sich an Ecken UEBERLAPPEN (kein Miter-Join) — sowohl fuer die Cut-Polygone
-//!   als auch fuer die Verdeckungs-Bounding-Box. `mesh.rs` (die Vollkoerper-
-//!   Extrusion fuer die 3D-Ansicht) berechnet die Eck-Gehrung inzwischen SELBST
-//!   (`mesh::compute_wall_miters`, aus der Wandkonnektivitaet); dieses Modul
-//!   zieht davon bewusst KEINEN Nutzen, weil seine Verdeckungs-Bounding-Box
-//!   ohnehin nur die achsparallele Grundflaeche kennt (siehe oben) — eine
-//!   gehrte, nicht-achsparallele Kante wuerde dort keinen Praezisionsgewinn
-//!   bringen. Das kann in Ecknaehe dazu fuehren, dass eine Wand als "in eine
-//!   andere eingebettet" verdeckt erscheint (siehe Test
-//!   `eck_ueberlappung_verdeckt_kante_am_wandknoten` unten) — real, aber ein
-//!   Artefakt der fehlenden Verschneidungslogik DIESES Moduls, kein Bug.
+//! - Wandknoten-Verschneidung (Gehrung) — zwei Wege, je nach Zweck:
+//!   * CUT-Polygone (der eigentliche Schnitt-Querschnitt) nutzen den an den
+//!     echten Wandecken GEHRTEN Fussabdruck aus `mesh::wall_mitered_footprints`
+//!     — DIESELBE Ecken-Verschneidung wie die 3D-Vollkoerper-Extrusion
+//!     (`mesh::compute_wall_miters`). Dadurch liefert ein Schnitt an einer
+//!     Wandecke genau EINEN sauberen, verschnittenen Querschnitt statt zweier
+//!     ueberlappender Rechtecke (siehe `Prism::cut_footprint`, `cut_section` und
+//!     Test `schnitt_an_wandecke_liefert_verschnittene_querschnitte`).
+//!   * Verdeckung/Projektion (Bounding-Box + Ansichtskanten) bleiben bei der
+//!     ACHSPARALLELEN, ungehrten Grundflaeche (`Prism::footprint`): die
+//!     Verdeckungs-Bounding-Box kennt ohnehin nur die achsparallele Ausdehnung
+//!     (siehe naechster Punkt), eine gehrte Kante brächte dort keinen
+//!     Praezisionsgewinn. In Ecknaehe kann eine Wand deshalb als "in eine
+//!     andere eingebettet" verdeckt erscheinen (siehe Test
+//!     `ansicht_vor_dem_modell_hat_keine_cut_polygone_aber_verdeckung` unten) —
+//!     real, aber ein Artefakt der achsparallelen Verdeckungs-Naeherung, kein Bug.
 //! - Oeffnungen werden hier (Cut + Projektion) UND von der Vollkoerper-
 //!   Extrusion in `mesh.rs` ausgewertet (`mesh::wall_solid_segments`) — beide
 //!   nutzen dieselbe Bruestungs-/Sturz-Zerlegung (`crate::openings::
@@ -296,7 +299,16 @@ pub struct SectionOutput {
 struct Prism {
     kind: ComponentKind,
     index: usize,
+    /// Achsparalleles Band-/Umriss-Polygon (Modell-Meter). Basis fuer die
+    /// Verdeckungs-Bounding-Box und die Projektions-Kanten (siehe Moduldoc
+    /// "Bekannte Vereinfachungen").
     footprint: Vec<Point2>,
+    /// Grundriss-Polygon fuer die CUT-Polygone. Fuer Decken identisch zu
+    /// `footprint`; fuer Waende der an den Ecken GEHRTE Fussabdruck aus
+    /// `mesh::wall_mitered_footprints` (dieselbe Verschneidung wie das 3D-Mesh),
+    /// damit ein Schnitt an einer Wandecke genau EINEN verschnittenen Querschnitt
+    /// liefert statt zweier ueberlappender Rechtecke. Siehe `cut_section`.
+    cut_footprint: Vec<Point2>,
     z0: f32,
     z1: f32,
     color: Rgb,
@@ -378,6 +390,9 @@ fn wall_prism(index: usize, wall: &WallInput) -> Option<Prism> {
     Some(Prism {
         kind: ComponentKind::Wall,
         index,
+        // Standardmaessig ungehrt; `cut_section` ersetzt ihn durch den gehrten
+        // Fussabdruck aus `mesh::wall_mitered_footprints`.
+        cut_footprint: footprint.clone(),
         footprint,
         z0: wall.base_elevation,
         z1: wall.base_elevation + wall.height,
@@ -403,6 +418,7 @@ fn slab_prism(index: usize, slab: &SlabInput) -> Option<Prism> {
     Some(Prism {
         kind: ComponentKind::Slab,
         index,
+        cut_footprint: slab.outline.clone(),
         footprint: slab.outline.clone(),
         z0,
         z1,
@@ -928,8 +944,14 @@ fn compute_view_edges(
 /// Decken) aus. Siehe Moduldoc fuer Format/Konventionen.
 pub fn cut_section(plane: &SectionPlane, walls: &[WallInput], slabs: &[SlabInput]) -> SectionOutput {
     let mut prisms: Vec<Prism> = Vec::new();
+    // Gehrte Wand-Fussabdruecke einmalig ueber die gesamte Wandkonnektivitaet
+    // (dieselbe Verschneidung wie das 3D-Mesh, siehe `mesh::wall_mitered_footprints`).
+    let mitered = crate::mesh::wall_mitered_footprints(walls);
     for (i, w) in walls.iter().enumerate() {
-        if let Some(p) = wall_prism(i, w) {
+        if let Some(mut p) = wall_prism(i, w) {
+            if let Some(fp) = mitered[i] {
+                p.cut_footprint = fp.to_vec();
+            }
             prisms.push(p);
         }
     }
@@ -941,7 +963,7 @@ pub fn cut_section(plane: &SectionPlane, walls: &[WallInput], slabs: &[SlabInput
 
     let mut cut_polygons = Vec::new();
     for prism in &prisms {
-        for (u0, u1) in footprint_u_intervals(plane, &prism.footprint) {
+        for (u0, u1) in footprint_u_intervals(plane, &prism.cut_footprint) {
             let (lo, hi) = (u0.min(u1), u0.max(u1));
             for (rlo, rhi, rz0, rz1) in wall_cut_rectangles(plane, prism, lo, hi) {
                 cut_polygons.push(CutPolygon {
@@ -1196,6 +1218,46 @@ mod tests {
         for e in &out.visible_edges {
             assert!(e.a[1] >= -1e-4 && e.a[1] <= 2.5 + 1e-4);
         }
+    }
+
+    // --- Ecken-Gehrung im Schnitt --------------------------------------------
+
+    #[test]
+    fn schnitt_an_wandecke_liefert_verschnittene_querschnitte() {
+        // L-Ecke bei (0,3): Schenkel A (Achse (0,0)->(0,3)) und Schenkel B
+        // (Achse (0,3)->(3,3)), beide Dicke 0.2. Schnittebene bei Grundriss-X =
+        // 0.05 (knapp in der Ecke). Ohne Gehrung ueberlappten die beiden
+        // Wand-Cut-Rechtecke im u-Bereich [2.9, 3.0]; mit dem gehrten Fussabdruck
+        // (wie im 3D-Mesh) stossen sie exakt an der Gehrungslinie (u ~ 2.95)
+        // sauber aneinander, ohne Ueberlappung.
+        let (walls, _) = l_wall_scene();
+        let plane = SectionPlane::looking_plus_x(0.05);
+        let out = cut_section(&plane, &walls, &[]);
+
+        let wall_cuts: Vec<&CutPolygon> = out
+            .cut_polygons
+            .iter()
+            .filter(|c| c.component.kind == ComponentKind::Wall)
+            .collect();
+        assert_eq!(wall_cuts.len(), 2, "je ein Querschnitt fuer Schenkel A und B");
+
+        let u_bounds = |c: &CutPolygon| -> (f32, f32) {
+            let us: Vec<f32> = c.pts.iter().map(|p| p[0]).collect();
+            (
+                us.iter().cloned().fold(f32::INFINITY, f32::min),
+                us.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+            )
+        };
+        let a = wall_cuts.iter().find(|c| c.component.index == 0).expect("Schenkel A");
+        let b = wall_cuts.iter().find(|c| c.component.index == 1).expect("Schenkel B");
+        let (_a_lo, a_hi) = u_bounds(a);
+        let (b_lo, _b_hi) = u_bounds(b);
+
+        // Beide enden/beginnen an der Gehrungslinie (u ~ 2.95) statt sich zu
+        // ueberlappen (Schenkel A reichte ungehrt bis u=3.0, Schenkel B ab 2.9).
+        assert!((a_hi - 2.95).abs() < 1e-3, "Schenkel-A-Querschnitt endet an der Gehrung, u_hi={a_hi}");
+        assert!((b_lo - 2.95).abs() < 1e-3, "Schenkel-B-Querschnitt beginnt an der Gehrung, u_lo={b_lo}");
+        assert!(a_hi <= b_lo + 1e-4, "keine u-Ueberlappung der beiden Querschnitte");
     }
 
     // --- Oeffnungen (Tueren/Fenster) -----------------------------------------
