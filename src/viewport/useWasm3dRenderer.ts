@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
+import { loadEngine3d } from "../engine/engine3d";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
 export interface Camera3d {
@@ -55,23 +56,6 @@ interface WebModelRendererLike {
 }
 
 /**
- * WASM-Modul EINMAL laden + initialisieren (memoisiert). `mod.default()` darf
- * nur einmal laufen — ein zweiter Init (React-StrictMode-Doppelmount) verwirft
- * die Closures des ersten („closure invoked recursively or after being dropped").
- */
-let enginePromise: Promise<any> | null = null;
-function loadEngine(): Promise<any> {
-  if (!enginePromise) {
-    enginePromise = (async () => {
-      const mod: any = await import("../engine/pkg3d/render3d.js");
-      await mod.default(); // lädt render3d_bg.wasm
-      return mod;
-    })();
-  }
-  return enginePromise;
-}
-
-/**
  * Renderer je Canvas EINMAL erzeugen (memoisiert). Ein Canvas kann nur EINEN
  * WebGPU-Kontext tragen; ein zweiter `WebModelRenderer.new` auf demselben
  * Canvas (StrictMode-Remount) würde kollidieren — die gecachte Promise lässt
@@ -82,7 +66,7 @@ function getRenderer(canvas: HTMLCanvasElement): Promise<WebModelRendererLike> {
   let p = rendererCache.get(canvas);
   if (!p) {
     p = (async () => {
-      const mod = await loadEngine();
+      const mod = await loadEngine3d();
       // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;

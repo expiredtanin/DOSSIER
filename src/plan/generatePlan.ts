@@ -66,6 +66,7 @@ import type { Line } from "../model/geometry";
 export type DetailLevel = "grob" | "mittel" | "fein";
 import { computeJoins } from "../model/joins";
 import type { WallCuts } from "../model/joins";
+import type { SectionOutput } from "./toSection";
 
 /** Stroke-Farbe der Schicht-Polygone (dunkles Grau). */
 const POCHE_STROKE = "#2b3039";
@@ -399,6 +400,121 @@ export function generatePlan(
     primitives,
     bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms),
   };
+}
+
+// ── Schnitt/Ansicht (abgeleitete Projektion aus render3d::section) ──────────────
+// Die Rohdaten (Cut-Polygone + sichtbare/verdeckte projizierte Kanten) liefert
+// der WASM-Extraktor (plan/toSection.ts → section.rs). Hier werden sie 1:1 in
+// die BESTEHENDEN Plan-Primitive übersetzt — kein neues Primitiv nötig:
+//   • Cut-Polygon  → `polygon` (kräftige Poché-Umrisslinie + Schnitt-Schraffur),
+//   • sichtbare Kante → `line` (durchgezogen),
+//   • verdeckte Kante → `line` (gestrichelt).
+// Damit rendern PlanView (SVG) UND toRenderScene (Engine/WASM-2D) den Schnitt
+// ohne jede Sonderbehandlung, mit voller Papier-mm-/Parität-Infrastruktur.
+
+/** Tinte der Schnitt-Poché-Umrisslinie + Schraffur (dunkles Grau). */
+const SECTION_INK = "#1f242c";
+/** Tinte der sichtbaren Ansichtskanten. */
+const SECTION_VISIBLE_INK = "#2b3039";
+/** Tinte der verdeckten (gestrichelten) Ansichtskanten (etwas heller). */
+const SECTION_HIDDEN_INK = "#8a929c";
+/** Strichstärke der Cut-Poché-Umrisslinie (mm Papier, kräftig wie eine Wand). */
+const SECTION_CUT_OUTLINE_MM = 0.35;
+/** Strichstärke sichtbarer Ansichtskanten (mm Papier). */
+const SECTION_VISIBLE_MM = 0.18;
+/** Strichstärke verdeckter Ansichtskanten (mm Papier, dünner). */
+const SECTION_HIDDEN_MM = 0.13;
+/** Strichmuster verdeckter Kanten (mm Papier). */
+const SECTION_HIDDEN_DASH: number[] = [0.12, 0.08];
+
+/** Schnitt-Schraffur der Cut-Flächen (diagonale Poché wie ein Wandschnitt). */
+const SECTION_HATCH: HatchRender = {
+  pattern: "diagonal",
+  scale: 1,
+  angle: 45,
+  color: SECTION_INK,
+  lineWeight: 0.13,
+  dash: null,
+};
+
+/** RGB (0..1) → 6-stelliges Hex, für die Cut-Poché-Füllfarbe. */
+function rgbToHex(rgb: [number, number, number]): string {
+  const c = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v * 255)))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${c(rgb[0])}${c(rgb[1])}${c(rgb[2])}`;
+}
+
+/**
+ * Baut aus einem {@link SectionOutput} (render3d::section, (u, v)-Meter) den
+ * Plan eines Schnitts/einer Ansicht. `u` wird zur Plan-X, `v` (absolute Höhe)
+ * zur Plan-Y — die PlanView zeigt Y nach oben, also erscheint der Schnitt
+ * aufrecht. Rein darstellend; kennt das Projekt nicht.
+ */
+export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
+  const primitives: Primitive[] = [];
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  const acc = (x: number, y: number) => {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  };
+
+  // Cut-Polygone: gefüllte Poché-Fläche (Bauteilfarbe) + Schnitt-Schraffur +
+  // kräftige Umrisslinie — wie eine geschnittene Wand im Grundriss.
+  for (const cp of output.cutPolygons) {
+    if (cp.pts.length < 3) continue;
+    const pts: Vec2[] = cp.pts.map(([u, v]) => {
+      acc(u, v);
+      return { x: u, y: v };
+    });
+    // Mono: reines Weiss statt Bauteilfarbe (nur Umriss + Schraffur tragen).
+    primitives.push({
+      kind: "polygon",
+      pts,
+      fill: mono ? "#ffffff" : rgbToHex(cp.color),
+      stroke: SECTION_INK,
+      strokeWidthMm: SECTION_CUT_OUTLINE_MM,
+      hatch: SECTION_HATCH,
+    });
+  }
+
+  // Verdeckte Kanten zuerst (liegen unter den sichtbaren), gestrichelt.
+  for (const e of output.hiddenEdges) {
+    acc(e.a[0], e.a[1]);
+    acc(e.b[0], e.b[1]);
+    primitives.push({
+      kind: "line",
+      a: { x: e.a[0], y: e.a[1] },
+      b: { x: e.b[0], y: e.b[1] },
+      cls: "section-hidden",
+      weightMm: SECTION_HIDDEN_MM,
+      dash: SECTION_HIDDEN_DASH,
+      color: SECTION_HIDDEN_INK,
+    });
+  }
+
+  // Sichtbare Ansichtskanten, durchgezogen.
+  for (const e of output.visibleEdges) {
+    acc(e.a[0], e.a[1]);
+    acc(e.b[0], e.b[1]);
+    primitives.push({
+      kind: "line",
+      a: { x: e.a[0], y: e.a[1] },
+      b: { x: e.b[0], y: e.b[1] },
+      cls: "section-visible",
+      weightMm: SECTION_VISIBLE_MM,
+      color: SECTION_VISIBLE_INK,
+    });
+  }
+
+  if (!isFinite(minX)) return { primitives, bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
+  return { primitives, bounds: { minX, minY, maxX, maxY } };
 }
 
 /** Dezente Plan-Farbe der Kontext-Konturen (gedämpftes Grau). */

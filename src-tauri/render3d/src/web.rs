@@ -25,6 +25,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::gpu::Renderer;
+use crate::section::{cut_section, SectionPlane};
 use crate::types::{Camera, Projection, SlabInput, WallInput};
 
 /// JSON-Eingabe des Modells: Waende (bereits in Teilquader zerlegt, siehe
@@ -35,6 +36,41 @@ struct ModelInput {
     walls: Vec<WallInput>,
     #[serde(default)]
     slabs: Vec<SlabInput>,
+}
+
+/// Berechnet einen Schnitt/eine Ansicht (`section::cut_section`) gegen das Modell
+/// und gibt das `SectionOutput` als JSON-String zurueck. GPU-frei — reine
+/// Prismen-Arithmetik (siehe `section.rs`); braucht KEINEN `WebModelRenderer`
+/// (kein WebGPU-Kontext), nur das geladene WASM-Modul. Aufruf aus JS:
+///
+/// ```js
+/// const json = mod.cut_section_json(
+///   JSON.stringify({ walls, slabs }), // gleiches Format wie set_model
+///   px, py, pz,   // Punkt auf der Schnittebene (world-Meter, Y-up)
+///   nx, ny, nz,   // Ebenennormale = Blickrichtung (wird normalisiert)
+/// );
+/// const out = JSON.parse(json); // { cutPolygons, visibleEdges, hiddenEdges }
+/// ```
+///
+/// Koordinaten der Ausgabe: (u, v) in Metern — `u` horizontal entlang der
+/// Ebene, `v = world.y` (absolute Hoehe). Siehe `section.rs`-Moduldoc.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn cut_section_json(
+    model_json: &str,
+    px: f32,
+    py: f32,
+    pz: f32,
+    nx: f32,
+    ny: f32,
+    nz: f32,
+) -> Result<String, JsValue> {
+    let model: ModelInput = serde_json::from_str(model_json)
+        .map_err(|e| JsValue::from_str(&format!("Modell parsen: {e}")))?;
+    let plane = SectionPlane::new([px, py, pz], [nx, ny, nz]);
+    let out = cut_section(&plane, &model.walls, &model.slabs);
+    serde_json::to_string(&out)
+        .map_err(|e| JsValue::from_str(&format!("SectionOutput serialisieren: {e}")))
 }
 
 /// Der Browser-Renderer: haelt Surface + Device/Queue + den geteilten `Renderer`

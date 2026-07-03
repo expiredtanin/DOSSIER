@@ -35,8 +35,10 @@ import type {
   Vec2,
   Wall,
 } from "./model/types";
-import { generatePlan } from "./plan/generatePlan";
+import { generatePlan, generateSectionPlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
+import { computeSection } from "./plan/toSection";
+import type { SectionOutput } from "./plan/toSection";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { parseDxf } from "./io/dxfParser";
 import type { DxfImportResult } from "./io/dxfParser";
@@ -3836,7 +3838,40 @@ function Content({
   onEdit3dEnd: () => void;
 }) {
   if (level.kind === "section" || level.kind === "elevation") {
-    return <StubView level={level} />;
+    return (
+      <main className="content">
+        <SectionPlanView
+          project={project}
+          level={level}
+          hairline={hairline}
+          mono={mono}
+          planViewRef={planViewRef}
+          onCursor={onCursor}
+          onZoom={onZoom}
+          onScale={onScale}
+          selectedWallIds={selectedWallIds}
+          selectedCeilingIds={selectedCeilingIds}
+          selectedOpeningIds={selectedOpeningIds}
+          selectedStairIds={selectedStairIds}
+          selectedRoomIds={selectedRoomIds}
+          roomStamp={roomStamp}
+          onStampMove={onStampMove}
+          onStampEdit={onStampEdit}
+          onPlanSelect={onPlanSelect}
+          onPlanMarquee={onPlanMarquee}
+          onSegmentCut={onSegmentCut}
+          onPlanContextMenu={onPlanContextMenu}
+          activeTool={activeTool}
+          toolInputActive={toolInputActive}
+          toolHandlers={toolHandlers}
+          grips={grips}
+          edgeGrips={edgeGrips}
+          selectedDrawingId={selectedDrawingId}
+          selectedDrawingIds={selectedDrawingIds}
+          gripHandlers={gripHandlers}
+        />
+      </main>
+    );
   }
 
   // Freie Zeichnung: dieselbe Plan-Ansicht wie ein Geschoss (generatePlan filtert
@@ -4154,18 +4189,161 @@ function LevelPlanView({
   );
 }
 
-/** Platzhalter für Schnitt/Ansicht (kommt in einer späteren Phase). */
-function StubView({ level }: { level: DrawingLevel }) {
-  return (
-    <main className="content">
+/**
+ * Schnitt-/Ansichts-Ebene: der render3d-Schnitt-Extraktor (WASM, plan/toSection)
+ * durchschneidet das Modell entlang der Schnittlinie der Ebene und übersetzt das
+ * Ergebnis (Cut-Polygone + sichtbare/verdeckte Kanten) über generateSectionPlan
+ * in Plan-Primitive, die dieselbe PlanView wie ein Grundriss zeichnet.
+ *
+ * Die Berechnung ist asynchron (WASM lazy geladen); bis das Ergebnis da ist,
+ * bzw. wenn die Ebene keine Schnittlinie trägt oder das WASM-Modul den Export
+ * (noch) nicht kennt, wird ein Hinweis eingeblendet.
+ */
+function SectionPlanView({
+  project,
+  level,
+  hairline,
+  mono,
+  planViewRef,
+  onCursor,
+  onZoom,
+  onScale,
+  selectedWallIds,
+  selectedCeilingIds,
+  selectedOpeningIds,
+  selectedStairIds,
+  selectedRoomIds,
+  roomStamp,
+  onStampMove,
+  onStampEdit,
+  onPlanSelect,
+  onPlanMarquee,
+  onSegmentCut,
+  onPlanContextMenu,
+  activeTool,
+  toolInputActive,
+  toolHandlers,
+  grips,
+  edgeGrips,
+  selectedDrawingId,
+  selectedDrawingIds,
+  gripHandlers,
+}: {
+  project: Project;
+  level: DrawingLevel;
+  hairline: boolean;
+  mono: boolean;
+  planViewRef: React.RefObject<PlanViewHandle>;
+  onCursor: (model: Vec2 | null) => void;
+  onZoom: (percent: number) => void;
+  onScale: (n: number) => void;
+  selectedWallIds: string[];
+  selectedCeilingIds: string[];
+  selectedOpeningIds: string[];
+  selectedStairIds: string[];
+  selectedRoomIds: string[];
+  roomStamp: { roomId: string; anchor: Vec2 } | null;
+  onStampMove: (roomId: string, delta: Vec2) => void;
+  onStampEdit: (roomId: string) => void;
+  onPlanSelect: (sel: PlanSelection) => void;
+  onPlanMarquee: (sel: MarqueeSelection) => void;
+  onSegmentCut: (drawingId: string, model: Vec2) => void;
+  onPlanContextMenu: (info: { clientX: number; clientY: number; model: Vec2 }) => void;
+  activeTool: ToolId;
+  toolInputActive: boolean;
+  toolHandlers: ToolHandlers;
+  grips: Vec2[];
+  edgeGrips: EdgeGrip[];
+  selectedDrawingId: string | null;
+  selectedDrawingIds?: string[];
+  gripHandlers: GripHandlers;
+}) {
+  const [output, setOutput] = useState<SectionOutput | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">(
+    "loading",
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    setStatus("loading");
+    setOutput(null);
+    void (async () => {
+      try {
+        const out = await computeSection(project, level);
+        if (disposed) return;
+        if (!out) {
+          setStatus("empty");
+          return;
+        }
+        setOutput(out);
+        setStatus("ready");
+      } catch (e) {
+        console.warn("render3d-Schnitt fehlgeschlagen:", e);
+        if (!disposed) setStatus("error");
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [project, level]);
+
+  const plan = useMemo(
+    () => (output ? generateSectionPlan(output, mono) : null),
+    [output, mono],
+  );
+
+  const kindLabel = level.kind === "section" ? t("stub.section") : t("stub.elevation");
+
+  if (!plan || status !== "ready") {
+    const note =
+      status === "empty"
+        ? t("section.empty", { kind: kindLabel })
+        : status === "error"
+          ? t("section.error", { kind: kindLabel })
+          : t("section.loading", { kind: kindLabel });
+    return (
       <div className="placeholder">
         <strong>{level.name}</strong>
-        <span>
-          {t("stub.note", {
-            kind: level.kind === "section" ? t("stub.section") : t("stub.elevation"),
-          })}
-        </span>
+        <span>{note}</span>
       </div>
-    </main>
+    );
+  }
+
+  return (
+    <section className="pane">
+      <div className="pane-title">
+        {t("content.sectionTitle", { name: level.name, kind: kindLabel })}
+      </div>
+      <PlanView
+        ref={planViewRef}
+        plan={plan}
+        resetKey={level.id}
+        onCursor={onCursor}
+        onZoom={onZoom}
+        onScale={onScale}
+        selectedWallIds={selectedWallIds}
+        selectedCeilingIds={selectedCeilingIds}
+        selectedOpeningIds={selectedOpeningIds}
+        selectedStairIds={selectedStairIds}
+        selectedRoomIds={selectedRoomIds}
+        roomStamp={roomStamp}
+        onStampMove={onStampMove}
+        onStampEdit={onStampEdit}
+        onSelect={onPlanSelect}
+        onMarquee={onPlanMarquee}
+        onSegmentCut={onSegmentCut}
+        onContextMenu={onPlanContextMenu}
+        activeTool={activeTool}
+        toolInputActive={toolInputActive}
+        toolHandlers={toolHandlers}
+        grips={grips}
+        edgeGrips={edgeGrips}
+        hairline={hairline}
+        selectedDrawingId={selectedDrawingId}
+        selectedDrawingIds={selectedDrawingIds}
+        gripHandlers={gripHandlers}
+      />
+      <div className="plan-legend">{t("section.legend", { kind: kindLabel })}</div>
+    </section>
   );
 }
