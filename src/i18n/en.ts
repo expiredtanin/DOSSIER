@@ -443,12 +443,16 @@ export const en: Record<TranslationKey, string> = {
   "default.copySuffixLayer": "{name} COPY",
   "default.wallTypeSingle": "Wall {thickness} m",
   "default.ceilingTypeSingle": "Ceiling {thickness} m",
+  "default.wallTypeName": "New wall type",
+  "default.ceilingTypeName": "New ceiling type",
 
   // Alerts.
   "alert.layerInUse": "Layer “{code} {name}” is used by components and cannot be deleted.",
   "alert.componentInUse": "Component “{name}” is used by a wall type and cannot be deleted.",
   "alert.hatchInUse": "Hatch “{name}” is used by a component and cannot be deleted.",
   "alert.lineStyleInUse": "Line style “{name}” is used by a hatch and cannot be deleted.",
+  "alert.wallTypeInUse": "Wall type “{name}” is used by a wall and cannot be deleted.",
+  "alert.ceilingTypeInUse": "Ceiling type “{name}” is used by a ceiling and cannot be deleted.",
 
   // Resource manager.
   "resources.title": "Resources",
@@ -467,10 +471,17 @@ export const en: Record<TranslationKey, string> = {
   "resources.ceilingStyles.hint":
     "Per ceiling type (horizontal build-up, top → bottom), the layer joints as a selectable line style. Unassigned: 0.02 mm hairline.",
   "resources.ceilingStyles.empty": "No ceiling types yet.",
+  "resources.wallStyles.placeholder": "Wall type",
+  "resources.ceilingStyles.placeholder": "Ceiling type",
   "resources.col.layer": "Layer",
+  "resources.col.component": "Component",
   "resources.col.thickness": "Thickness (mm)",
   "resources.col.joint": "Joint",
   "resources.joint.default": "— (hairline)",
+  "resources.layer.add": "Add layer",
+  "resources.layer.remove": "Remove layer",
+  "resources.layer.moveUp": "Move layer up",
+  "resources.layer.moveDown": "Move layer down",
 
   "resources.materials.hint":
     "Sphere preview of the built-in PBR material library — browse and compare. Assign to a component still via its “Material …” column.",
@@ -551,6 +562,8 @@ export const en: Record<TranslationKey, string> = {
   "resources.col.lineStyle": "Line style",
   "resources.lineStyle.none": "— none —",
   "resources.delete.hatch": "Delete hatch “{name}”",
+  "resources.delete.wallType": "Delete wall type “{name}”",
+  "resources.delete.ceilingType": "Delete ceiling type “{name}”",
 
   // Hatch/line type (master-detail editor).
   "resources.field.type": "Type",

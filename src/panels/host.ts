@@ -120,8 +120,12 @@ export interface PanelHostValue {
   onDeleteLineStyle: (id: string) => void;
   /** Wandstile: immutable Änderung eines Wandtyps (Schichtfugen-Stile). */
   onPatchWallType: (id: string, patch: Partial<WallType>) => void;
+  onAddWallType: () => void;
+  onDeleteWallType: (id: string) => void;
   /** Deckenstile: immutable Änderung eines Deckentyps (Schichtfugen-Stile). */
   onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
+  onAddCeilingType: () => void;
+  onDeleteCeilingType: (id: string) => void;
   /** Import fertiger (id-loser) Linienstile/Schraffuren (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;

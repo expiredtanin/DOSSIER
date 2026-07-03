@@ -24,6 +24,7 @@ import type {
   ComponentMaterial,
   HatchPattern,
   HatchStyle,
+  Layer,
   LineStyle,
   Project,
   WallType,
@@ -43,7 +44,8 @@ import {
 } from "../materials/ambientcg";
 import { requestMaterialPreview, cancelMaterialPreview } from "../materials/spherePreview";
 import { EyeIcon } from "./EyeIcon";
-import { HatchSwatch, LineSwatch } from "./hatchPreview";
+import { HatchSwatch, LineSwatch, WallTypeSwatch } from "./hatchPreview";
+import type { SwatchLayer } from "./hatchPreview";
 import {
   segmentsToDash,
   dashToSegments,
@@ -1498,26 +1500,54 @@ function LinesTab({
   );
 }
 
-// ── Wandstile (Wall Styles) ────────────────────────────────────────────────
-// Pro Wandtyp die geordneten Schichten (Bauteil + Dicke) und je INNERER Fuge
-// (zwischen zwei aufeinanderfolgenden Schichten) ein LineStyle-Dropdown, das an
-// layer[i].jointLineStyleId hängt (i = Schicht, deren innere Kante die Fuge ist).
-// Die innerste Schicht hat keine innere Fuge (ihre Kante ist der Wand-Innenumriss).
+// ── Wandstile & Deckenstile (geschichteter Aufbau) ─────────────────────────
+// Beide Ressourcen teilen Struktur (WallType/CeilingType = {id,name,layers[]})
+// und Editor: ein Master-Detail-Layout wie bei Schraffuren/Linien. Liste links
+// = je Typ eine Zeile mit kleiner Querschnitt-Vorschau + Name; Detail rechts =
+// Aufbau-Editor (Schichten stapeln: Bauteil/Dicke/Fugenlinie, hinzufügen/
+// entfernen/umordnen) + großer Live-Querschnitt. Ein gemeinsames Detail-Panel
+// {@link LayeredStyleDetail}, parametrisiert über die Orientierung (Wand:
+// Bänder nebeneinander / Decke: liegend gestapelt) und die jeweiligen Handler.
+//
+// Fugen: `layer[i].jointLineStyleId` ist der Linienstil der INNEREN Kante der
+// Schicht i (Fuge zur nächst-inneren Schicht). Die innerste Schicht hat keine
+// innere Fuge (ihre Kante ist der Innenumriss) → dort kein Dropdown.
 
-// Spalten: Schicht | Dicke (mm) | Fuge (innere).
-const WALLSTYLE_COLUMNS: ResColumn[] = [
-  { titleKey: "resources.col.layer" },
-  { titleKey: "resources.col.thickness", align: "right" },
-  { titleKey: "resources.col.joint" },
-];
-const WALLSTYLE_TEMPLATE = "minmax(120px, 1fr) 72px minmax(140px, 1.2fr)";
+/** Wand- und Deckentyp teilen dieselbe Form (`{id,name,layers}`). */
+type LayeredStyle = WallType | CeilingType;
 
-function WallStylesTab({
+/**
+ * Baut die Querschnitt-Bänder (eine je Schicht) aus den Bauteil-Schnitt-
+ * schraffuren: Schicht → Bauteil → dessen `hatchId` → HatchStyle. Fehlt das
+ * Bauteil/die Schraffur, bleibt das Band leer (weiß).
+ */
+function swatchLayersOf(style: LayeredStyle, project: Project): SwatchLayer[] {
+  return style.layers.map((l) => {
+    const comp = project.components.find((c) => c.id === l.componentId);
+    const hatch = comp
+      ? project.hatches.find((hh) => hh.id === comp.hatchId)
+      : undefined;
+    return { hatch, thickness: l.thickness };
+  });
+}
+
+/** Detail-Panel EINES Wand-/Deckentyps (rechte Seite des Master-Detail-Layouts). */
+function LayeredStyleDetail({
+  style,
   project,
-  onPatchWallType,
+  orientation,
+  onPatch,
+  onDelete,
+  deleteTitle,
+  namePlaceholder,
 }: {
+  style: LayeredStyle;
   project: Project;
-  onPatchWallType: (id: string, patch: Partial<WallType>) => void;
+  orientation: "wall" | "ceiling";
+  onPatch: (patch: Partial<LayeredStyle>) => void;
+  onDelete: () => void;
+  deleteTitle: string;
+  namePlaceholder: string;
 }) {
   // Sentinel „— (Haarlinie)": kein Feld gesetzt → Standard-Haarlinie 0.02 mm.
   const DEFAULT = "__default__";
@@ -1525,111 +1555,266 @@ function WallStylesTab({
     { value: DEFAULT, label: t("resources.joint.default") },
     ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
   ];
-  const setJoint = (wt: WallType, li: number, styleId: string | undefined) => {
-    const layers = wt.layers.map((l, i) =>
-      i === li ? { ...l, jointLineStyleId: styleId } : l,
-    );
-    onPatchWallType(wt.id, { layers });
+  const compOptions =
+    project.components.length > 0
+      ? project.components.map((c) => ({ value: c.id, label: c.name }))
+      : [{ value: "", label: "—" }];
+
+  const layers = style.layers;
+  const setLayers = (next: Layer[]) => onPatch({ layers: next });
+  const patchLayer = (i: number, patch: Partial<Layer>) =>
+    setLayers(layers.map((l, k) => (k === i ? { ...l, ...patch } : l)));
+  const addLayer = () =>
+    setLayers([
+      ...layers,
+      { componentId: project.components[0]?.id ?? "", thickness: 0.1 },
+    ]);
+  const removeLayer = (i: number) => {
+    if (layers.length <= 1) return;
+    setLayers(layers.filter((_, k) => k !== i));
   };
+  const moveLayer = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= layers.length) return;
+    const next = layers.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    setLayers(next);
+  };
+
   return (
-    <div className="res-tab">
-      <div className="res-hint">{t("resources.wallStyles.hint")}</div>
-      {project.wallTypes.map((wt) => (
-        <div key={wt.id} className="res-wallstyle">
-          <div className="res-wallstyle-head">{wt.name}</div>
-          <ResTable columns={WALLSTYLE_COLUMNS} template={WALLSTYLE_TEMPLATE}>
-            {wt.layers.map((layer, li) => {
-              const comp = project.components.find((c) => c.id === layer.componentId);
-              const isInner = li === wt.layers.length - 1;
-              return (
-                <ResRow key={li}>
-                  <ResCell emphasis>{comp ? comp.name : layer.componentId}</ResCell>
-                  <ResCell align="right">{Math.round(layer.thickness * 1000)}</ResCell>
-                  <ResCell>
-                    {isInner ? (
-                      <span className="res-joint-none">–</span>
-                    ) : (
-                      <SelectField
-                        value={layer.jointLineStyleId ?? DEFAULT}
-                        onChange={(v) => setJoint(wt, li, v === DEFAULT ? undefined : v)}
-                        options={jointOptions}
-                      />
-                    )}
-                  </ResCell>
-                </ResRow>
-              );
-            })}
-          </ResTable>
-        </div>
-      ))}
-      {project.wallTypes.length === 0 && (
-        <EmptyState text={t("resources.wallStyles.empty")} />
-      )}
+    <div className="res-md-detail-inner">
+      <div className="res-md-head">
+        <input
+          className="res-input res-md-rename"
+          value={style.name}
+          placeholder={namePlaceholder}
+          onChange={(e) => onPatch({ name: e.target.value })}
+        />
+        <DeleteButton onClick={onDelete} title={deleteTitle} />
+      </div>
+
+      <div className="res-md-preview">
+        <WallTypeSwatch
+          layers={swatchLayersOf(style, project)}
+          width={orientation === "wall" ? 240 : 132}
+          height={orientation === "wall" ? 96 : 132}
+          orientation={orientation}
+        />
+      </div>
+
+      <div className="res-layers">
+        {layers.map((layer, i) => {
+          const isInner = i === layers.length - 1;
+          return (
+            <div key={i} className="res-layer">
+              <div className="res-layer-move">
+                <button
+                  type="button"
+                  className="res-layer-btn"
+                  title={t("resources.layer.moveUp")}
+                  disabled={i === 0}
+                  onClick={() => moveLayer(i, -1)}
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  className="res-layer-btn"
+                  title={t("resources.layer.moveDown")}
+                  disabled={isInner}
+                  onClick={() => moveLayer(i, 1)}
+                >
+                  ▼
+                </button>
+              </div>
+              <div className="res-layer-fields">
+                <FieldRow label={t("resources.col.component")}>
+                  <SelectField
+                    value={layer.componentId}
+                    onChange={(componentId) => patchLayer(i, { componentId })}
+                    options={compOptions}
+                  />
+                </FieldRow>
+                <FieldRow label={t("resources.col.thickness")}>
+                  <NumberField
+                    value={Math.round(layer.thickness * 1000)}
+                    onChange={(mm) =>
+                      patchLayer(i, { thickness: Math.max(0, mm) / 1000 })
+                    }
+                    step={5}
+                    min={0}
+                  />
+                </FieldRow>
+                <FieldRow label={t("resources.col.joint")}>
+                  {isInner ? (
+                    <span className="res-joint-none">–</span>
+                  ) : (
+                    <SelectField
+                      value={layer.jointLineStyleId ?? DEFAULT}
+                      onChange={(v) =>
+                        patchLayer(i, {
+                          jointLineStyleId: v === DEFAULT ? undefined : v,
+                        })
+                      }
+                      options={jointOptions}
+                    />
+                  )}
+                </FieldRow>
+              </div>
+              <DeleteButton
+                onClick={() => removeLayer(i)}
+                title={t("resources.layer.remove")}
+              />
+            </div>
+          );
+        })}
+        <button type="button" className="res-add" onClick={addLayer}>
+          <span className="res-add-plus">+</span> {t("resources.layer.add")}
+        </button>
+      </div>
     </div>
   );
 }
 
 /**
- * Tab „Deckenstile" — das liegende Gegenstück zu {@link WallStylesTab}: pro
- * Deckentyp (`project.ceilingTypes`) die Schichten mit Dicke + einem per-Fuge
- * wählbaren Linienstil (Line Manager). Gleiche Tabelle/Sentinel-Logik wie bei
- * den Wandstilen — nur die Ressource (`ceilingTypes` statt `wallTypes`) und der
- * Handler (`onPatchCeilingType`) unterscheiden sich.
+ * Gemeinsamer Master-Detail-Tab-Rumpf für Wand-/Deckenstile: Liste links
+ * (Querschnitt-Vorschau + Name, ＋-Neu in der Fusszeile), Detail rechts über
+ * {@link LayeredStyleDetail}. Parametrisiert über die Ressource + Orientierung.
+ */
+function LayeredStylesTab({
+  project,
+  types,
+  orientation,
+  hintKey,
+  emptyKey,
+  placeholderKey,
+  deleteKeyPrefix,
+  onPatch,
+  onAdd,
+  onDelete,
+}: {
+  project: Project;
+  types: LayeredStyle[];
+  orientation: "wall" | "ceiling";
+  hintKey: string;
+  emptyKey: string;
+  placeholderKey: string;
+  deleteKeyPrefix: string;
+  onPatch: (id: string, patch: Partial<LayeredStyle>) => void;
+  onAdd: () => void;
+  onDelete: (id: string) => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = types.find((s) => s.id === selectedId) ?? types[0];
+
+  return (
+    <div className="res-tab">
+      <div className="res-hint">{t(hintKey)}</div>
+      <div className="res-md">
+        <div className="res-md-list">
+          {types.map((s) => (
+            <button
+              key={s.id}
+              className={`res-md-row${selected?.id === s.id ? " active" : ""}`}
+              onClick={() => setSelectedId(s.id)}
+            >
+              <span className="res-md-row-thumb">
+                <WallTypeSwatch
+                  layers={swatchLayersOf(s, project)}
+                  width={46}
+                  height={28}
+                  orientation={orientation}
+                />
+              </span>
+              <span className="res-md-row-name">{s.name}</span>
+            </button>
+          ))}
+          {types.length === 0 && (
+            <div className="res-md-empty">{t(emptyKey)}</div>
+          )}
+          <div className="res-md-listfoot">
+            <button className="res-add" onClick={onAdd}>
+              <span className="res-add-plus">+</span> {t("resources.add")}
+            </button>
+          </div>
+        </div>
+        <div className="res-md-detail">
+          {selected ? (
+            <LayeredStyleDetail
+              key={selected.id}
+              style={selected}
+              project={project}
+              orientation={orientation}
+              onPatch={(patch) => onPatch(selected.id, patch)}
+              onDelete={() => onDelete(selected.id)}
+              deleteTitle={t(deleteKeyPrefix, { name: selected.name })}
+              namePlaceholder={t(placeholderKey)}
+            />
+          ) : (
+            <div className="res-md-empty">{t(emptyKey)}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WallStylesTab({
+  project,
+  onPatchWallType,
+  onAddWallType,
+  onDeleteWallType,
+}: {
+  project: Project;
+  onPatchWallType: (id: string, patch: Partial<WallType>) => void;
+  onAddWallType: () => void;
+  onDeleteWallType: (id: string) => void;
+}) {
+  return (
+    <LayeredStylesTab
+      project={project}
+      types={project.wallTypes}
+      orientation="wall"
+      hintKey="resources.wallStyles.hint"
+      emptyKey="resources.wallStyles.empty"
+      placeholderKey="resources.wallStyles.placeholder"
+      deleteKeyPrefix="resources.delete.wallType"
+      onPatch={onPatchWallType}
+      onAdd={onAddWallType}
+      onDelete={onDeleteWallType}
+    />
+  );
+}
+
+/**
+ * Tab „Deckenstile" — das liegende Gegenstück zu {@link WallStylesTab}: nutzt
+ * denselben {@link LayeredStylesTab}-Rumpf, nur die Ressource (`ceilingTypes`),
+ * die Orientierung (gestapelt) und die Handler unterscheiden sich.
  */
 function CeilingStylesTab({
   project,
   onPatchCeilingType,
+  onAddCeilingType,
+  onDeleteCeilingType,
 }: {
   project: Project;
   onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
+  onAddCeilingType: () => void;
+  onDeleteCeilingType: (id: string) => void;
 }) {
-  const DEFAULT = "__default__";
-  const jointOptions = [
-    { value: DEFAULT, label: t("resources.joint.default") },
-    ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
-  ];
-  const setJoint = (ct: CeilingType, li: number, styleId: string | undefined) => {
-    const layers = ct.layers.map((l, i) =>
-      i === li ? { ...l, jointLineStyleId: styleId } : l,
-    );
-    onPatchCeilingType(ct.id, { layers });
-  };
-  const ceilingTypes = project.ceilingTypes ?? [];
   return (
-    <div className="res-tab">
-      <div className="res-hint">{t("resources.ceilingStyles.hint")}</div>
-      {ceilingTypes.map((ct) => (
-        <div key={ct.id} className="res-wallstyle">
-          <div className="res-wallstyle-head">{ct.name}</div>
-          <ResTable columns={WALLSTYLE_COLUMNS} template={WALLSTYLE_TEMPLATE}>
-            {ct.layers.map((layer, li) => {
-              const comp = project.components.find((c) => c.id === layer.componentId);
-              const isInner = li === ct.layers.length - 1;
-              return (
-                <ResRow key={li}>
-                  <ResCell emphasis>{comp ? comp.name : layer.componentId}</ResCell>
-                  <ResCell align="right">{Math.round(layer.thickness * 1000)}</ResCell>
-                  <ResCell>
-                    {isInner ? (
-                      <span className="res-joint-none">–</span>
-                    ) : (
-                      <SelectField
-                        value={layer.jointLineStyleId ?? DEFAULT}
-                        onChange={(v) => setJoint(ct, li, v === DEFAULT ? undefined : v)}
-                        options={jointOptions}
-                      />
-                    )}
-                  </ResCell>
-                </ResRow>
-              );
-            })}
-          </ResTable>
-        </div>
-      ))}
-      {ceilingTypes.length === 0 && (
-        <EmptyState text={t("resources.ceilingStyles.empty")} />
-      )}
-    </div>
+    <LayeredStylesTab
+      project={project}
+      types={project.ceilingTypes ?? []}
+      orientation="ceiling"
+      hintKey="resources.ceilingStyles.hint"
+      emptyKey="resources.ceilingStyles.empty"
+      placeholderKey="resources.ceilingStyles.placeholder"
+      deleteKeyPrefix="resources.delete.ceilingType"
+      onPatch={onPatchCeilingType}
+      onAdd={onAddCeilingType}
+      onDelete={onDeleteCeilingType}
+    />
   );
 }
 
@@ -1911,8 +2096,12 @@ export interface ResourceManagerHandlers {
   onDeleteLineStyle: (id: string) => void;
   /** Wandstile: immutable Änderung eines Wandtyps (z. B. Schichtfugen-Stile). */
   onPatchWallType: (id: string, patch: Partial<WallType>) => void;
+  onAddWallType: () => void;
+  onDeleteWallType: (id: string) => void;
   /** Deckenstile: immutable Änderung eines Deckentyps (z. B. Schichtfugen-Stile). */
   onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
+  onAddCeilingType: () => void;
+  onDeleteCeilingType: (id: string) => void;
   /** Import: fügt fertige (id-lose) Linienstile/Schraffuren hinzu (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
@@ -2097,12 +2286,16 @@ export function ResourceManager({
             <WallStylesTab
               project={project}
               onPatchWallType={handlers.onPatchWallType}
+              onAddWallType={handlers.onAddWallType}
+              onDeleteWallType={handlers.onDeleteWallType}
             />
           )}
           {tab === "ceilingStyles" && (
             <CeilingStylesTab
               project={project}
               onPatchCeilingType={handlers.onPatchCeilingType}
+              onAddCeilingType={handlers.onAddCeilingType}
+              onDeleteCeilingType={handlers.onDeleteCeilingType}
             />
           )}
           {tab === "materials" && <MaterialsTab />}

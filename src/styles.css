@@ -2095,6 +2095,68 @@ body {
   padding-left: 4px;
 }
 
+/* ── Wand-/Deckenstil-Aufbau (Master-Detail) ────────────────────────────── */
+/* Der Querschnitt-Swatch (WallTypeSwatch) ist frei skalierbar. */
+.res-wallswatch {
+  border-radius: 3px;
+}
+
+/* Aufbau-Editor: die Schichten gestapelt, darunter „Schicht hinzufügen". */
+.res-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.res-layer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input);
+}
+.res-layer-move {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.res-layer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.res-layer-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+}
+.res-layer-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.res-layer-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.res-layer-fields .res-field {
+  grid-template-columns: 76px 1fr;
+  gap: 8px;
+}
+
 /* ── Tabelle (saubere Liste, CONVENTIONS.md) ──────────────────────────────────
    Ein CSS-Grid trägt die Spalten (gridTemplateColumns wird je Tab inline
    gesetzt). Kopfzeile und Datenzeilen sind `display:contents`, damit ihre

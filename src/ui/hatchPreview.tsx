@@ -70,25 +70,14 @@ function parallelLines(
 }
 
 /**
- * Live-SVG-Swatch einer Schraffur. Rendert:
- *   • Bild-Schraffur (`kind==="image"`) als gekachelten <pattern>/<image>-Fill
- *     mit unabhängiger Skalierung (scaleX/scaleY) und Rotation.
- *   • Vektor-Schraffur nach `pattern`: solid/none/diagonal/crosshatch/insulation.
- *     Untermodus `lines==="random"` verteilt kurze Striche zufällig (Kies/Splitt).
- * `scale` verdichtet/streckt das Muster, `angle` dreht es.
+ * Reine Muster-Füllung EINER Schraffur als SVG-Knoten für eine Box `w`×`h`
+ * (ohne Rahmen/Clip — die übernimmt der Aufrufer). Ausgelagert aus
+ * {@link HatchSwatch}, damit auch der geschichtete {@link WallTypeSwatch} pro
+ * Band DASSELBE Muster zeichnet. `uid` macht interne <pattern>-IDs eindeutig
+ * (mehrere Bänder je SVG).
  */
-export function HatchSwatch({
-  hatch,
-  size = 34,
-}: {
-  hatch: HatchStyle;
-  size?: number;
-}) {
-  const rawId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const clipId = `hsc_${rawId}`;
-  const patId = `hsp_${rawId}`;
-  const w = size;
-  const h = size;
+function hatchInner(hatch: HatchStyle, w: number, h: number, uid: string): React.ReactNode {
+  const patId = `hsp_${uid}`;
 
   // Grundabstand der Musterlinien (px), über den Maßstab moduliert.
   const scale = hatch.scale > 0 ? hatch.scale : 1;
@@ -101,7 +90,7 @@ export function HatchSwatch({
     // Bild-Kachel: Basiskachel skaliert mit scaleX/scaleY, gedreht via
     // patternTransform. Fehlt die Quelle, zeigen wir einen dezenten Rahmen.
     const src = hatch.image?.src;
-    const base = Math.max(6, size * 0.6);
+    const base = Math.max(6, Math.min(w, h) * 0.6);
     const tileW = Math.max(2, base * (hatch.image?.scaleX ?? 1));
     const tileH = Math.max(2, base * (hatch.image?.scaleY ?? 1));
     const rot = hatch.image?.rotation ?? 0;
@@ -217,6 +206,29 @@ export function HatchSwatch({
     inner = parallelLines(w, h, angle, spacing, 0.8, "d");
   }
 
+  return inner;
+}
+
+/**
+ * Live-SVG-Swatch einer Schraffur. Rendert:
+ *   • Bild-Schraffur (`kind==="image"`) als gekachelten <pattern>/<image>-Fill
+ *     mit unabhängiger Skalierung (scaleX/scaleY) und Rotation.
+ *   • Vektor-Schraffur nach `pattern`: solid/none/diagonal/crosshatch/insulation.
+ *     Untermodus `lines==="random"` verteilt kurze Striche zufällig (Kies/Splitt).
+ * `scale` verdichtet/streckt das Muster, `angle` dreht es.
+ */
+export function HatchSwatch({
+  hatch,
+  size = 34,
+}: {
+  hatch: HatchStyle;
+  size?: number;
+}) {
+  const rawId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const clipId = `hsc_${rawId}`;
+  const w = size;
+  const h = size;
+
   return (
     <svg
       className="res-swatch"
@@ -240,7 +252,138 @@ export function HatchSwatch({
         stroke="var(--border)"
         strokeWidth={1}
       />
-      <g clipPath={`url(#${clipId})`}>{inner}</g>
+      <g clipPath={`url(#${clipId})`}>{hatchInner(hatch, w, h, rawId)}</g>
+    </svg>
+  );
+}
+
+/**
+ * Eine Schicht für den geschichteten Wand-/Decken-Querschnitt: ihre
+ * Schnittschraffur (oder `undefined` = leer/weiß) und die relative Dicke
+ * (proportional zur Bandbreite). Farbe kommt wie sonst über `currentColor`.
+ */
+export interface SwatchLayer {
+  hatch: HatchStyle | undefined;
+  thickness: number;
+}
+
+/**
+ * Live-SVG-Querschnitt EINES Wand-/Deckentyps: die Schichten als aneinander-
+ * liegende Bänder, proportional zur Dicke, jedes Band mit der Schnittschraffur
+ * seines Bauteils. `orientation="wall"` legt die Bänder NEBENEINANDER (Blick
+ * entlang der Wand — Schichten quer über die Dicke), `"ceiling"` STAPELT sie
+ * (liegender Deckenaufbau, oben → innen). Dünne Trennlinien markieren die Fugen;
+ * ein gerundeter Rahmen fasst das Ganze wie die übrigen Swatches ein.
+ */
+export function WallTypeSwatch({
+  layers,
+  width = 128,
+  height = 64,
+  orientation = "wall",
+}: {
+  layers: SwatchLayer[];
+  width?: number;
+  height?: number;
+  orientation?: "wall" | "ceiling";
+}) {
+  const rawId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const clipId = `wtc_${rawId}`;
+  const w = width;
+  const h = height;
+
+  // Gewichte: 0-dicke Schichten dünn, aber sichtbar. Proportional zur Summe.
+  const weights = layers.map((l) => (l.thickness > 0 ? l.thickness : 0.01));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const along = orientation === "wall" ? w : h;
+
+  // Bänder entlang der Stapelachse aufsummieren (px-Offsets).
+  let acc = 0;
+  const bands = layers.map((l, i) => {
+    const len = (weights[i] / total) * along;
+    const start = acc;
+    acc += len;
+    const bx = orientation === "wall" ? start : 0;
+    const by = orientation === "wall" ? 0 : start;
+    const bw = orientation === "wall" ? len : w;
+    const bh = orientation === "wall" ? h : len;
+    return { hatch: l.hatch, bx, by, bw, bh, start, len };
+  });
+
+  return (
+    <svg
+      className="res-swatch res-wallswatch"
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ display: "block" }}
+    >
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={0} y={0} width={w} height={h} rx={3} />
+        </clipPath>
+        {bands.map((b, i) => (
+          <clipPath key={i} id={`${clipId}_b${i}`}>
+            <rect x={0} y={0} width={b.bw} height={b.bh} />
+          </clipPath>
+        ))}
+      </defs>
+      <rect
+        x={0.5}
+        y={0.5}
+        width={w - 1}
+        height={h - 1}
+        rx={3}
+        fill="var(--input)"
+        stroke="var(--border)"
+        strokeWidth={1}
+      />
+      <g clipPath={`url(#${clipId})`}>
+        {bands.map((b, i) => (
+          <g
+            key={i}
+            transform={`translate(${b.bx.toFixed(2)},${b.by.toFixed(2)})`}
+            clipPath={`url(#${clipId}_b${i})`}
+          >
+            {b.hatch && hatchInner(b.hatch, b.bw, b.bh, `${rawId}_${i}`)}
+          </g>
+        ))}
+        {/* Fugen: dünne Trennlinie an jeder INNEREN Bandgrenze. */}
+        {bands.slice(1).map((b, i) =>
+          orientation === "wall" ? (
+            <line
+              key={i}
+              x1={b.start}
+              y1={0}
+              x2={b.start}
+              y2={h}
+              stroke="currentColor"
+              strokeWidth={0.6}
+              opacity={0.5}
+            />
+          ) : (
+            <line
+              key={i}
+              x1={0}
+              y1={b.start}
+              x2={w}
+              y2={b.start}
+              stroke="currentColor"
+              strokeWidth={0.6}
+              opacity={0.5}
+            />
+          ),
+        )}
+      </g>
+      <rect
+        x={0.5}
+        y={0.5}
+        width={w - 1}
+        height={h - 1}
+        rx={3}
+        fill="none"
+        stroke="var(--border)"
+        strokeWidth={1}
+      />
     </svg>
   );
 }

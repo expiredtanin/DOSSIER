@@ -1706,6 +1706,53 @@ export default function App() {
         ct.id === id ? { ...ct, ...patch } : ct,
       ),
     }));
+  // Neuen Wandtyp anlegen: eine Default-Schicht (erstes Bauteil, 200 mm).
+  const addWallType = () =>
+    setProject((p) => {
+      const componentId = p.components[0]?.id ?? "";
+      const wallType: WallType = {
+        id: `wt-${Date.now()}`,
+        name: t("default.wallTypeName"),
+        layers: [{ componentId, thickness: 0.2 }],
+      };
+      return { ...p, wallTypes: [...p.wallTypes, wallType] };
+    });
+  // Wandtyp löschen — geschützt, solange ihn eine Wand verwendet.
+  const deleteWallType = (id: string) =>
+    setProject((p) => {
+      const used = p.walls.some((w) => w.wallTypeId === id);
+      if (used) {
+        const name = p.wallTypes.find((wt) => wt.id === id)?.name ?? id;
+        window.alert(t("alert.wallTypeInUse", { name }));
+        return p;
+      }
+      return { ...p, wallTypes: p.wallTypes.filter((wt) => wt.id !== id) };
+    });
+  // Neuen Deckentyp anlegen — analog `addWallType` (150 mm Default).
+  const addCeilingType = () =>
+    setProject((p) => {
+      const componentId = p.components[0]?.id ?? "";
+      const ceilingType: CeilingType = {
+        id: `ct-${Date.now()}`,
+        name: t("default.ceilingTypeName"),
+        layers: [{ componentId, thickness: 0.15 }],
+      };
+      return { ...p, ceilingTypes: [...(p.ceilingTypes ?? []), ceilingType] };
+    });
+  // Deckentyp löschen — geschützt, solange ihn eine Decke verwendet.
+  const deleteCeilingType = (id: string) =>
+    setProject((p) => {
+      const used = (p.ceilings ?? []).some((c) => c.ceilingTypeId === id);
+      if (used) {
+        const name = (p.ceilingTypes ?? []).find((ct) => ct.id === id)?.name ?? id;
+        window.alert(t("alert.ceilingTypeInUse", { name }));
+        return p;
+      }
+      return {
+        ...p,
+        ceilingTypes: (p.ceilingTypes ?? []).filter((ct) => ct.id !== id),
+      };
+    });
   const importLineStyles = useStore((s) => s.importLineStyles);
   const importHatches = useStore((s) => s.importHatches);
   // Site-/Kontext-Schicht (siteSlice): Import/Entfernen/Gelände.
@@ -1996,7 +2043,11 @@ export default function App() {
       onAddLineStyle: addLineStyle,
       onDeleteLineStyle: deleteLineStyle,
       onPatchWallType: patchWallType,
+      onAddWallType: addWallType,
+      onDeleteWallType: deleteWallType,
       onPatchCeilingType: patchCeilingType,
+      onAddCeilingType: addCeilingType,
+      onDeleteCeilingType: deleteCeilingType,
       onImportLineStyles: importLineStyles,
       onImportHatches: importHatches,
       selection,
@@ -2247,7 +2298,11 @@ export default function App() {
   const resourceHandlers: ResourceManagerHandlers = {
     onPatchComponent: patchComponent,
     onPatchWallType: patchWallType,
+    onAddWallType: addWallType,
+    onDeleteWallType: deleteWallType,
     onPatchCeilingType: patchCeilingType,
+    onAddCeilingType: addCeilingType,
+    onDeleteCeilingType: deleteCeilingType,
     onAddComponent: addComponent,
     onDeleteComponent: deleteComponent,
     onPatchHatch: patchHatch,

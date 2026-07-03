@@ -446,12 +446,16 @@ export const de = {
   "default.copySuffixLayer": "{name} KOPIE",
   "default.wallTypeSingle": "Wand {thickness} m",
   "default.ceilingTypeSingle": "Decke {thickness} m",
+  "default.wallTypeName": "Neuer Wandtyp",
+  "default.ceilingTypeName": "Neuer Deckentyp",
 
   // ── Warnungen (Lösch-Schutz) ─────────────────────────────────────────────
   "alert.layerInUse": "Ebene „{code} {name}\" wird von Bauteilen verwendet und kann nicht gelöscht werden.",
   "alert.componentInUse": "Bauteil „{name}\" wird von einem Wandtyp verwendet und kann nicht gelöscht werden.",
   "alert.hatchInUse": "Schraffur „{name}\" wird von einem Bauteil verwendet und kann nicht gelöscht werden.",
   "alert.lineStyleInUse": "Linienstil „{name}\" wird von einer Schraffur verwendet und kann nicht gelöscht werden.",
+  "alert.wallTypeInUse": "Wandtyp „{name}\" wird von einer Wand verwendet und kann nicht gelöscht werden.",
+  "alert.ceilingTypeInUse": "Deckentyp „{name}\" wird von einer Decke verwendet und kann nicht gelöscht werden.",
 
   // ── Ressourcen-Manager ───────────────────────────────────────────────────
   "resources.title": "Ressourcen",
@@ -470,10 +474,17 @@ export const de = {
   "resources.ceilingStyles.hint":
     "Je Deckentyp (liegender Schichtaufbau, oben → unten) die Schichtfugen als wählbaren Linienstil. Ohne Zuweisung: Haarlinie 0.02 mm.",
   "resources.ceilingStyles.empty": "Noch keine Deckentypen.",
+  "resources.wallStyles.placeholder": "Wandtyp",
+  "resources.ceilingStyles.placeholder": "Deckentyp",
   "resources.col.layer": "Schicht",
+  "resources.col.component": "Bauteil",
   "resources.col.thickness": "Dicke (mm)",
   "resources.col.joint": "Fuge",
   "resources.joint.default": "— (Haarlinie)",
+  "resources.layer.add": "Schicht hinzufügen",
+  "resources.layer.remove": "Schicht entfernen",
+  "resources.layer.moveUp": "Schicht nach oben",
+  "resources.layer.moveDown": "Schicht nach unten",
 
   "resources.materials.hint":
     "Kugel-Vorschau der eingebauten PBR-Materialbibliothek — durchsuchen und vergleichen. Zuweisen an ein Bauteil weiterhin über dessen Spalte „Material …\".",
@@ -556,6 +567,8 @@ export const de = {
   "resources.col.lineStyle": "Linienstil",
   "resources.lineStyle.none": "— ohne —",
   "resources.delete.hatch": "Schraffur „{name}\" löschen",
+  "resources.delete.wallType": "Wandtyp „{name}\" löschen",
+  "resources.delete.ceilingType": "Deckentyp „{name}\" löschen",
 
   // Schraffur-/Linien-Typ (Master-Detail-Editor).
   "resources.field.type": "Typ",
