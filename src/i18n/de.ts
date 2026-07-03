@@ -777,6 +777,11 @@ export const de = {
   "rt.color": "Farbe",
   "rt.preset": "Vorlage",
   "rt.preset.none": "— Vorlage —",
+
+  // ── 3D-Viewport (native Engine, WASM/WebGPU) ────────────────────────────────
+  "viewport3d.engineUnavailable": "3D-Engine nicht verfügbar",
+  "viewport3d.engineUnavailableHint":
+    "WebGPU konnte nicht initialisiert werden. In der Statusleiste auf WebGL2 umschalten, um die 3D-Ansicht weiter zu nutzen.",
 } as const;
 
 export type TranslationKey = keyof typeof de;

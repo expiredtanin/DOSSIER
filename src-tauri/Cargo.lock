@@ -3678,11 +3678,16 @@ name = "render3d"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "console_error_panic_hook",
  "env_logger",
+ "js-sys",
  "naga",
  "pollster",
  "serde",
  "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
  "winit",
 ]

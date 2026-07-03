@@ -2,3 +2,7 @@
 # `npm run build:engine` erzeugt und NICHT eingecheckt (Build-Artefakt, groß, an
 # Toolchain gebunden). Der Quellcode liegt in src-tauri/render2d/src/web.rs.
 pkg/
+
+# Dito für den render3d-Browser-Renderer (`npm run build:engine3d`); Quellcode
+# in src-tauri/render3d/src/web.rs.
+pkg3d/

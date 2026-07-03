@@ -44,6 +44,7 @@ import {
   wallVerticalExtent,
 } from "../model/wall";
 import { MaterialRuntime } from "../materials/runtime";
+import { Wasm3DViewport } from "./Wasm3DViewport";
 import type { RenderMode, View3d } from "../ui/TopBar";
 import type { ToolDraft } from "../tools/types";
 import { applyAngleConstraint } from "../tools/snapping";
@@ -85,7 +86,41 @@ export interface ViewportContextInfo {
   wallId: string | null;
 }
 
-export function Viewport3D({
+/**
+ * Engine-Umschalter (Gegenstück zu PlanView `wantWasm` / App `rendererMode`):
+ * `?engine=wasm` in der URL gewinnt; ohne Param zählt die in der Statusleiste
+ * persistierte Wahl (localStorage `cad.rendererMode`, siehe App.tsx). Zusätzlich
+ * muss WebGPU vorhanden sein — fehlt es trotz Flag, bleibt die three.js-Sicht
+ * (stiller Fallback + Warnung, wie in PlanView). Einmal je Seitenladung
+ * ausgewertet: ein Wechsel läuft ohnehin über einen Reload (setRendererMode).
+ */
+const WASM_ENGINE_ACTIVE: boolean = (() => {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const fromUrl = new URLSearchParams(window.location.search).get("engine");
+  const wanted = fromUrl
+    ? fromUrl === "wasm"
+    : window.localStorage.getItem("cad.rendererMode") === "wasm";
+  if (!wanted) return false;
+  if (!("gpu" in navigator)) {
+    console.warn("engine=wasm angefragt, aber navigator.gpu fehlt → three.js-Fallback (3D)");
+    return false;
+  }
+  return true;
+})();
+
+/**
+ * Öffentliche 3D-Sicht: wählt zwischen der nativen Engine (render3d als
+ * WASM/WebGPU, Wasm3DViewport) und der three.js-Szene (ThreeViewport3D,
+ * unveränderter Standardpfad). Der Engine-Pfad ist ein Integrations-Spike und
+ * nutzt vorerst nur das Projekt (Massenmodell + Orbit); alle weiteren Props
+ * (Auswahl, Render-Modi, Editier-Griffe) wirken nur im three.js-Pfad.
+ */
+export function Viewport3D(props: Parameters<typeof ThreeViewport3D>[0]) {
+  if (WASM_ENGINE_ACTIVE) return <Wasm3DViewport project={props.project} />;
+  return <ThreeViewport3D {...props} />;
+}
+
+function ThreeViewport3D({
   project,
   visibleCodes,
   floorDisplay = SHOW_ALL,

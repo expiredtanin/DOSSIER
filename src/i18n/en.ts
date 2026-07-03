@@ -768,4 +768,9 @@ export const en: Record<TranslationKey, string> = {
   "rt.color": "Color",
   "rt.preset": "Preset",
   "rt.preset.none": "— Preset —",
+
+  // ── 3D viewport (native engine, WASM/WebGPU) ────────────────────────────────
+  "viewport3d.engineUnavailable": "3D engine unavailable",
+  "viewport3d.engineUnavailableHint":
+    "WebGPU could not be initialized. Switch to WebGL2 in the status bar to keep using the 3D view.",
 };
