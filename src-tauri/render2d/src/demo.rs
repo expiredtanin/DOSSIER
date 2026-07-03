@@ -32,10 +32,12 @@ pub fn demo_scene() -> Scene {
             FillPolygon {
                 pts: l.clone(),
                 color: wall_grey,
+                z: 0,
             },
             FillPolygon {
                 pts: room.clone(),
                 color: room_blue,
+                z: 2,
             },
         ],
         outlines: vec![
@@ -44,12 +46,14 @@ pub fn demo_scene() -> Scene {
                 color: ink,
                 width_mm: 0.35,
                 dash: None,
+                z: 1,
             },
             Outline {
                 pts: room,
                 color: ink,
                 width_mm: 0.18,
                 dash: None,
+                z: 3,
             },
         ],
         polylines: vec![],
@@ -60,6 +64,7 @@ pub fn demo_scene() -> Scene {
             color: ink,
             width_mm: 0.25,
             dash: None,
+            z: 4,
         }],
         // Ein Raumstempel-artiger Text (echte Glyphen via Atlas), mittig im Raum.
         texts: vec![Text {

@@ -15,6 +15,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Plan } from "./generatePlan";
 import { planToRenderScene } from "./toRenderScene";
+// wgpu-22-Limit-Shim (maxInterStageShaderComponents), geteilt mit useWasm3dRenderer.
+import { patchRequestDeviceLimits } from "../engine/requestDeviceShim";
 
 interface ViewBox {
   x: number;
@@ -23,39 +25,12 @@ interface ViewBox {
   h: number;
 }
 
-/**
- * Kompatibilitäts-Shim: wgpu 22 sendet in `requestDevice` noch das Limit
- * `maxInterStageShaderComponents`, das AUS DER WebGPU-Spec ENTFERNT wurde. Neuere
- * Chromium-Builds lehnen ein nicht-`undefined`-Wert dafür mit `OperationError`
- * ab (→ Device-Erzeugung schlägt fehl). Wir entfernen den Schlüssel EINMAL global
- * aus dem Descriptor, bevor wgpu ihn stellt. Entfällt, sobald render2d auf ein
- * wgpu (+ glyphon) hochgezogen wird, das dieses Limit nicht mehr mitschickt.
- */
-let requestDevicePatched = false;
-function patchRequestDeviceLimits(): void {
-  if (requestDevicePatched) return;
-  const AdapterCtor = (globalThis as any).GPUAdapter;
-  if (!AdapterCtor?.prototype?.requestDevice) return;
-  const orig = AdapterCtor.prototype.requestDevice;
-  AdapterCtor.prototype.requestDevice = function (
-    this: unknown,
-    desc?: any,
-  ) {
-    if (desc?.requiredLimits && "maxInterStageShaderComponents" in desc.requiredLimits) {
-      const requiredLimits = { ...desc.requiredLimits };
-      delete requiredLimits.maxInterStageShaderComponents;
-      desc = { ...desc, requiredLimits };
-    }
-    return orig.call(this, desc);
-  };
-  requestDevicePatched = true;
-}
-
 /** Minimal-Typ des WASM-Exports (das echte .d.ts entsteht erst mit `build:engine`). */
 interface WebPlanRendererLike {
   set_scene(json: string): void;
   set_view_box(x: number, y: number, w: number, h: number): void;
   set_paper_scale(n: number): void;
+  set_text_scale(n: number): void;
   resize(w: number, h: number): void;
   render(): void;
 }
@@ -89,7 +64,7 @@ function getRenderer(canvas: HTMLCanvasElement): Promise<WebPlanRendererLike> {
   let p = rendererCache.get(canvas);
   if (!p) {
     p = (async () => {
-      patchRequestDeviceLimits(); // wgpu-22-Limit-Shim (siehe oben)
+      patchRequestDeviceLimits(); // wgpu-22-Limit-Shim (src/engine/requestDeviceShim)
       const mod = await loadEngine();
       // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
       const rect = canvas.getBoundingClientRect();
@@ -149,9 +124,15 @@ export function useWasmPlanRenderer(
     }
   }, []);
 
-  /** Einen Frame zeichnen (Canvas-Größe + dpr hier abgleichen). */
+  /**
+   * Einen Frame zeichnen (Canvas-Größe + dpr hier abgleichen). `textScaleN`
+   * bewusst getrennt von `paperScaleN`: er treibt NUR die Schriftgröße der
+   * Raumstempel (spiegelt die SVG-Formel — feste Referenzskala 1:100 im
+   * Anzeigemodus, siehe PlanView.tsx `textScaleForGl`), während `paperScaleN`
+   * weiter die echten Papier-mm-Strichbreiten der Geometrie treibt.
+   */
   const render = useCallback(
-    (viewBox: ViewBox, paperScaleN = 100) => {
+    (viewBox: ViewBox, paperScaleN = 100, textScaleN = 100) => {
       const r = rendererRef.current;
       const canvas = canvasRef.current;
       if (!r || !canvas) return;
@@ -166,6 +147,7 @@ export function useWasmPlanRenderer(
       try {
         r.resize(w, h);
         r.set_paper_scale(paperScaleN);
+        r.set_text_scale(textScaleN);
         r.set_view_box(viewBox.x, viewBox.y, viewBox.w, viewBox.h);
         r.render();
       } catch (e) {

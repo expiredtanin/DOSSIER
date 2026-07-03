@@ -240,10 +240,12 @@ export function hatchLineFamily(
   const nrm: Vec2 = { x: -dir.y, y: dir.x }; // Linien-Normale (Scan-Richtung)
 
   // Rechtwinklige Projektion aller Ecken auf die Normale → Abdeckungsbereich.
-  const center: Vec2 = {
-    x: (bb.minX + bb.maxX) / 2,
-    y: (bb.minY + bb.maxY) / 2,
-  };
+  // ANKER = MODELL-URSPRUNG (nicht die Polygon-Mitte): der SVG-`<pattern>` ist
+  // `userSpaceOnUse`, sein Kachelgitter liegt global im viewBox-Raum fest
+  // (Ursprung (0,0) = Modell-Ursprung). Nur mit demselben Anker liegen die
+  // Musterlinien deckungsgleich zum SVG-Referenzpfad — und benachbarte Polygone
+  // teilen dieselbe Muster-Phase statt je eigener (bbox-abhängiger) Versätze.
+  const center: Vec2 = { x: 0, y: 0 };
   let dMin = Infinity, dMax = -Infinity;
   for (const p of poly) {
     const d = (p.x - center.x) * nrm.x + (p.y - center.y) * nrm.y;
@@ -415,24 +417,24 @@ export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
  * endet exakt an den Polygonkanten (even-odd-Clipping, konkav-fähig).
  */
 function insulationRuns(poly: Vec2[], hatch: HatchRender, scale: number): HatchRun[] {
-  const bb = bbox(poly);
   const rot = toModelAngleRad(hatch.angle);
 
   // Muster-Parameter in Metern (aus den SVG-px-Werten der Kachel).
   const wavelength = 14 * scale * PX_TO_M; // Kachelbreite
   const rowGap = 10 * scale * PX_TO_M; // Kachelhöhe → Zeilenabstand
-  const amplitude = 3 * scale * PX_TO_M; // Wellen-Amplitude (weich)
 
   // Lokales Muster-Koordinatensystem: u entlang der Welle, v quer (Zeilen).
+  // ANKER = MODELL-URSPRUNG, wie beim SVG-`userSpaceOnUse`-Pattern (siehe
+  // hatchLineFamily): so liegen Wellen-Phase UND Zeilenraster deckungsgleich
+  // zum SVG-Referenzpfad und über alle Polygone hinweg in EINEM Gitter.
   const uDir = rotate({ x: 1, y: 0 }, rot);
   const vDir = rotate({ x: 0, y: 1 }, rot);
 
   // Abdeckungsbereich in (u,v) über die Polygon-Ecken bestimmen.
-  const center: Vec2 = { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
   let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
   for (const p of poly) {
-    const u = (p.x - center.x) * uDir.x + (p.y - center.y) * uDir.y;
-    const v = (p.x - center.x) * vDir.x + (p.y - center.y) * vDir.y;
+    const u = p.x * uDir.x + p.y * uDir.y;
+    const v = p.x * vDir.x + p.y * vDir.y;
     if (u < uMin) uMin = u;
     if (u > uMax) uMax = u;
     if (v < vMin) vMin = v;
@@ -447,22 +449,38 @@ function insulationRuns(poly: Vec2[], hatch: HatchRender, scale: number): HatchR
 
   const runs: HatchRun[] = [];
   const toWorld = (u: number, v: number): Vec2 => ({
-    x: center.x + uDir.x * u + vDir.x * v,
-    y: center.y + uDir.y * u + vDir.y * v,
+    x: uDir.x * u + vDir.x * v,
+    y: uDir.y * u + vDir.y * v,
   });
 
-  const firstRow = Math.floor(vMin / rowGap) - 1;
-  const lastRow = Math.ceil(vMax / rowGap) + 1;
+  // Die Wellen-Mittellinie liegt in der SVG-Kachel bei y = h/2 (my = 5·scale),
+  // die Zeilen also auf HALBEN Rasterlinien: v = (r + 0.5)·rowGap.
+  const firstRow = Math.floor(vMin / rowGap - 0.5) - 1;
+  const lastRow = Math.ceil(vMax / rowGap - 0.5) + 1;
   const uStart = Math.floor((uMin - wavelength) / du) * du;
   const uEnd = uMax + wavelength;
 
+  // EXAKT die SVG-Wellenform: die Kachel zeichnet zwei quadratische Béziers
+  // `M0 5s Q 3.5s -1s 7s 5s Q 10.5s 11s 14s 5s`. Deren x(t) ist LINEAR (7s·t je
+  // Halbwelle), die Auslenkung eine Parabel ±12s·t(1−t) (Scheitel ±3s) — also
+  // Halbwellen-Parabeln statt einer Sinuskurve (flachere Kämme, steilere
+  // Nulldurchgänge). Erste Halbwelle: Kamm nach OBEN (Bildschirm) = +v (Modell).
+  const half = wavelength / 2;
+  const waveAt = (u: number): number => {
+    const phase = ((u % wavelength) + wavelength) % wavelength;
+    const t = (phase % half) / half;
+    const mag = 12 * scale * PX_TO_M * t * (1 - t);
+    return phase < half ? mag : -mag;
+  };
+
   for (let r = firstRow; r <= lastRow; r++) {
-    const vBase = r * rowGap;
+    const vBase = (r + 0.5) * rowGap;
     // Ganze Welle als EINE Polylinie tessellieren, dann DURCHGEHEND clippen.
+    // Das u-Raster ist an Vielfachen von du = λ/22 ausgerichtet → die Null-
+    // durchgänge (Vielfache von λ/2 = 11·du) liegen exakt auf Stützpunkten.
     const wavePts: Vec2[] = [];
     for (let u = uStart; u <= uEnd + 1e-9; u += du) {
-      const wave = amplitude * Math.sin((2 * Math.PI * u) / wavelength);
-      wavePts.push(toWorld(u, vBase + wave));
+      wavePts.push(toWorld(u, vBase + waveAt(u)));
     }
     for (const run of clipPolylineToPolygon(wavePts, poly)) runs.push(run);
   }

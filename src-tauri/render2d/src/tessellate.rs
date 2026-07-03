@@ -218,6 +218,7 @@ fn stroke_dashed_or_solid(
     closed: bool,
     color: Rgba,
     stroke_mm: f32,
+    width_screen: bool,
     dash: Option<&[f32]>,
     bounds: &mut Bounds,
 ) {
@@ -225,11 +226,11 @@ fn stroke_dashed_or_solid(
         Some(d) if !d.is_empty() => {
             for piece in split_dash(pts, d) {
                 if piece.len() >= 2 {
-                    geo.stroke_polyline(&piece, false, color, stroke_mm, bounds);
+                    geo.stroke_polyline(&piece, false, color, stroke_mm, width_screen, bounds);
                 }
             }
         }
-        _ => geo.stroke_polyline(pts, closed, color, stroke_mm, bounds),
+        _ => geo.stroke_polyline(pts, closed, color, stroke_mm, width_screen, bounds),
     }
 }
 
@@ -351,6 +352,13 @@ pub fn triangulate(pts: &[Point]) -> Vec<u32> {
     tris
 }
 
+/// Pipeline-Art eines Batches in der Maler-Reihenfolge (`GpuGeometry::draw_sequence`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchKind {
+    Fill,
+    Line,
+}
+
 /// Ein zusammenhaengender Zeichen-Batch (Index-Bereich) mit einer Farbe.
 #[derive(Debug, Clone)]
 pub struct FillBatch {
@@ -365,8 +373,12 @@ pub struct LineBatch {
     pub start_index: u32,
     pub index_count: u32,
     pub color: Rgba,
-    /// ECHTE Strichbreite in Papier-Millimeter.
+    /// ECHTE Strichbreite in Papier-Millimeter — bzw. in Bildschirm-Einheiten
+    /// (viewBox-px), wenn `width_screen` gesetzt ist (Schraffur-Muster).
     pub stroke_mm: f32,
+    /// true: `stroke_mm` traegt Bildschirm-Einheiten (zoom-skalierend); der
+    /// Renderer nutzt dann die meet-Skala statt der mm->px-Umrechnung.
+    pub width_screen: bool,
 }
 
 /// GPU-fertige Geometrie: getrennte Puffer fuer Flaechen (Poche) und Striche.
@@ -385,6 +397,12 @@ pub struct GpuGeometry {
     /// Analytisch gezeichnete Boegen (je EINE Instanz, kein Segment-Mesh mehr):
     /// die GPU rendert sie pro Frame exakt rund per SDF-Fragment-Shader.
     pub arcs: Vec<ArcInstanceData>,
+    /// Maler-Reihenfolge ueber BEIDE Batch-Arten hinweg: (Art, Index in
+    /// `fill_batches` bzw. `line_batches`). Der Renderer zeichnet exakt in dieser
+    /// Reihenfolge (Pipeline-Wechsel pro Eintrag) — nur so deckt eine spaetere
+    /// Fuellung (Wand-Poche) einen frueheren Strich (Raum-Umriss) ab, wie im
+    /// SVG-Referenzpfad (Primitive strikt in Array-Reihenfolge).
+    pub draw_sequence: Vec<(BatchKind, u32)>,
     /// Modell-Bounds (Meter) fuer Debug/Einpassen; nicht render-kritisch.
     pub bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
 }
@@ -396,12 +414,18 @@ fn same_rgba(a: Rgba, b: Rgba) -> bool {
 
 impl GpuGeometry {
     /// Ordnungserhaltendes Batch-Merging fuer Fuellungen: aufeinanderfolgende
-    /// Indizes gleicher Farbe werden zu EINEM Draw-Call zusammengefasst.
+    /// Indizes gleicher Farbe werden zu EINEM Draw-Call zusammengefasst. Gemergt
+    /// wird nur, wenn der letzte Eintrag der MALER-Reihenfolge (`draw_sequence`)
+    /// derselbe Fuell-Batch ist — sonst wuerde ein dazwischenliegender Linien-
+    /// Batch uebersprungen und die Z-Reihenfolge verfaelscht.
     fn add_fill_batch(&mut self, count: u32, color: Rgba) {
-        if let Some(last) = self.fill_batches.last_mut() {
-            if same_rgba(last.color, color) {
-                last.index_count += count;
-                return;
+        let last_idx = self.fill_batches.len().wrapping_sub(1) as u32;
+        if self.draw_sequence.last() == Some(&(BatchKind::Fill, last_idx)) {
+            if let Some(last) = self.fill_batches.last_mut() {
+                if same_rgba(last.color, color) {
+                    last.index_count += count;
+                    return;
+                }
             }
         }
         self.fill_batches.push(FillBatch {
@@ -409,13 +433,21 @@ impl GpuGeometry {
             index_count: count,
             color,
         });
+        self.draw_sequence
+            .push((BatchKind::Fill, (self.fill_batches.len() - 1) as u32));
     }
 
-    fn add_line_batch(&mut self, count: u32, color: Rgba, stroke_mm: f32) {
-        if let Some(last) = self.line_batches.last_mut() {
-            if last.stroke_mm == stroke_mm && same_rgba(last.color, color) {
-                last.index_count += count;
-                return;
+    fn add_line_batch(&mut self, count: u32, color: Rgba, stroke_mm: f32, width_screen: bool) {
+        let last_idx = self.line_batches.len().wrapping_sub(1) as u32;
+        if self.draw_sequence.last() == Some(&(BatchKind::Line, last_idx)) {
+            if let Some(last) = self.line_batches.last_mut() {
+                if last.stroke_mm == stroke_mm
+                    && last.width_screen == width_screen
+                    && same_rgba(last.color, color)
+                {
+                    last.index_count += count;
+                    return;
+                }
             }
         }
         self.line_batches.push(LineBatch {
@@ -423,7 +455,10 @@ impl GpuGeometry {
             index_count: count,
             color,
             stroke_mm,
+            width_screen,
         });
+        self.draw_sequence
+            .push((BatchKind::Line, (self.line_batches.len() - 1) as u32));
     }
 
     /// Zeichnet einen zusammenhaengenden Linienzug (Modell-Meter) als EINEN
@@ -439,6 +474,7 @@ impl GpuGeometry {
         closed: bool,
         color: Rgba,
         stroke_mm: f32,
+        width_screen: bool,
         bounds: &mut Bounds,
     ) {
         // Auf Bildschirm-Raum abbilden + aufeinanderfolgende Duplikate entfernen.
@@ -527,7 +563,7 @@ impl GpuGeometry {
             self.line_idx
                 .extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
         }
-        self.add_line_batch((segs * 6) as u32, color, stroke_mm);
+        self.add_line_batch((segs * 6) as u32, color, stroke_mm, width_screen);
     }
 }
 
@@ -583,32 +619,63 @@ pub fn compile_scene(scene: &Scene) -> GpuGeometry {
     let mut geo = GpuGeometry::default();
     let mut bounds = Bounds::new();
 
-    // 1) Gefuellte Polygone.
-    for poly in &scene.fills {
-        compile_fill(&mut geo, poly, &mut bounds);
+    // Maler-Reihenfolge herstellen: alle Elemente (Fuellungen, Umrisse, offene
+    // Polylinien, freie Linien) stabil nach ihrem `z` sortieren. Bei gleichem z
+    // (insb. Alt-Szenen mit z=0 ueberall) gilt die bisherige Kategorien-
+    // Reihenfolge Fuellungen -> Umrisse -> Polylinien -> Linien (`seq`).
+    enum Item<'a> {
+        Fill(&'a crate::types::FillPolygon),
+        Outline(&'a crate::types::Outline),
+        Poly(&'a crate::types::Polyline),
+        Line(&'a Line),
     }
-    // 2) Umrisse (geschlossene Ringe als EIN gehrter Streifen, inkl. Schluss-Kante
-    //    — ausser bei Dash, siehe `stroke_dashed_or_solid`).
+    let mut items: Vec<(u32, usize, Item)> = Vec::with_capacity(
+        scene.fills.len() + scene.outlines.len() + scene.polylines.len() + scene.lines.len(),
+    );
+    let mut seq = 0usize;
+    for f in &scene.fills {
+        items.push((f.z, seq, Item::Fill(f)));
+        seq += 1;
+    }
     for o in &scene.outlines {
-        if o.width_mm > 0.0 && o.pts.len() >= 2 {
-            stroke_dashed_or_solid(&mut geo, &o.pts, true, o.color, o.width_mm, o.dash.as_deref(), &mut bounds);
-        }
+        items.push((o.z, seq, Item::Outline(o)));
+        seq += 1;
     }
-    // 3) Offene Polylinien (verbundene Umrisskanten / 2D-Zeichnungszuege) als EIN
-    //    gehrter Streifen — die inneren Ecken bekommen so eine Gehrung statt
-    //    Stumpfkappen (closed=false).
     for pl in &scene.polylines {
-        if pl.width_mm > 0.0 && pl.pts.len() >= 2 {
-            stroke_dashed_or_solid(&mut geo, &pl.pts, false, pl.color, pl.width_mm, pl.dash.as_deref(), &mut bounds);
+        items.push((pl.z, seq, Item::Poly(pl)));
+        seq += 1;
+    }
+    for l in &scene.lines {
+        items.push((l.z, seq, Item::Line(l)));
+        seq += 1;
+    }
+    items.sort_by_key(|(z, s, _)| (*z, *s));
+
+    for (_, _, item) in &items {
+        match item {
+            // Gefuellte Polygone.
+            Item::Fill(poly) => compile_fill(&mut geo, poly, &mut bounds),
+            // Umrisse (geschlossene Ringe als EIN gehrter Streifen, inkl.
+            // Schluss-Kante — ausser bei Dash, siehe `stroke_dashed_or_solid`).
+            Item::Outline(o) => {
+                if o.width_mm > 0.0 && o.pts.len() >= 2 {
+                    stroke_dashed_or_solid(&mut geo, &o.pts, true, o.color, o.width_mm, false, o.dash.as_deref(), &mut bounds);
+                }
+            }
+            // Offene Polylinien (verbundene Umrisskanten / 2D-Zeichnungszuege) als
+            // EIN gehrter Streifen — innere Ecken gehrt statt Stumpfkappen.
+            Item::Poly(pl) => {
+                if pl.width_mm > 0.0 && pl.pts.len() >= 2 {
+                    stroke_dashed_or_solid(&mut geo, &pl.pts, false, pl.color, pl.width_mm, pl.width_screen, pl.dash.as_deref(), &mut bounds);
+                }
+            }
+            // Freie Einzel-Linien (Tuerblaetter, Referenzlinien).
+            Item::Line(l) => compile_line(&mut geo, l, &mut bounds),
         }
     }
-    // 4) Freie Einzel-Linien (Tuerblaetter, Referenzlinien).
-    for l in &scene.lines {
-        compile_line(&mut geo, l, &mut bounds);
-    }
-    // 5) Kreisboegen: NICHT mehr in Segmente zerlegt — je Bogen eine analytische
-    //    Instanz (`ArcInstanceData`), die die GPU per SDF-Fragment-Shader exakt
-    //    rund rendert (siehe `gpu::Renderer` Arc-Pipeline).
+    // Kreisboegen: NICHT in Segmente zerlegt — je Bogen eine analytische Instanz
+    // (`ArcInstanceData`), die die GPU per SDF-Fragment-Shader exakt rund rendert
+    // (eigene Pipeline, nach der uebrigen Geometrie — Tuerschwenk liegt oben).
     for a in &scene.arcs {
         compile_arc(&mut geo, a, &mut bounds);
     }
@@ -667,7 +734,7 @@ fn compile_arc(geo: &mut GpuGeometry, a: &Arc, bounds: &mut Bounds) {
 
 fn compile_line(geo: &mut GpuGeometry, l: &Line, bounds: &mut Bounds) {
     let w = if l.width_mm > 0.0 { l.width_mm } else { 0.18 };
-    stroke_dashed_or_solid(geo, &[l.a, l.b], false, l.color, w, l.dash.as_deref(), bounds);
+    stroke_dashed_or_solid(geo, &[l.a, l.b], false, l.color, w, false, l.dash.as_deref(), bounds);
 }
 
 #[cfg(test)]
@@ -815,6 +882,7 @@ mod tests {
                 color: [0.0, 0.0, 0.0, 1.0],
                 width_mm: 0.2,
                 dash: None,
+                z: 0,
             }],
             ..Default::default()
         };
@@ -824,6 +892,7 @@ mod tests {
                 color: [0.0, 0.0, 0.0, 1.0],
                 width_mm: 0.2,
                 dash: Some(vec![10.0, 10.0]),
+                z: 0,
             }],
             ..Default::default()
         };

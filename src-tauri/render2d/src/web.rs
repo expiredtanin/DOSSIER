@@ -148,6 +148,14 @@ impl WebPlanRenderer {
         }
     }
 
+    /// Papier-Massstab-Nenner (1:N) NUR fuer die Text-Schriftgroesse setzen —
+    /// entkoppelt von `set_paper_scale` (siehe `Renderer::text_scale_n`-Doku).
+    pub fn set_text_scale(&mut self, n: f32) {
+        if n > 0.0 {
+            self.renderer.text_scale_n = n;
+        }
+    }
+
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));

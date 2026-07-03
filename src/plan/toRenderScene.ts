@@ -31,18 +31,36 @@ export type RRgba = [number, number, number, number];
 export interface RFill {
   pts: RPoint[];
   color: RRgba;
+  /**
+   * Maler-Reihenfolge (kleiner = früher/unten). Der SVG-Pfad zeichnet die
+   * Primitive strikt in Array-Reihenfolge (Füllung/Schraffur/Umriss
+   * interleaved) — eine spätere Wand-Poché deckt z. B. den früheren
+   * Raum-Umriss ab. Der native Renderer (`compile_scene`) stellt diese
+   * Reihenfolge über die getrennten Szenen-Arrays hinweg wieder her.
+   */
+  z: number;
 }
 export interface ROutline {
   pts: RPoint[];
   color: RRgba;
   widthMm: number;
   dash?: number[] | null;
+  /** Maler-Reihenfolge, siehe {@link RFill.z}. */
+  z: number;
 }
 export interface RPolyline {
   pts: RPoint[];
   color: RRgba;
   widthMm: number;
   dash?: number[] | null;
+  /** Maler-Reihenfolge, siehe {@link RFill.z}. */
+  z: number;
+  /**
+   * true: `widthMm` trägt BILDSCHIRM-Einheiten (viewBox-px, zoom-skalierend)
+   * statt Papier-mm — für Schraffur-Striche, deren Breite im SVG an die
+   * Musterkachel gekoppelt ist (`hatchStrokePx`), nicht an Papier-mm.
+   */
+  widthScreen?: boolean;
 }
 export interface RArc {
   center: RPoint;
@@ -59,6 +77,8 @@ export interface RLine {
   color: RRgba;
   widthMm: number;
   dash?: number[] | null;
+  /** Maler-Reihenfolge, siehe {@link RFill.z}. */
+  z: number;
 }
 export type RTextAlign = "left" | "center" | "right";
 /** EINE Textzeile; serde-kompatibel zu render2d::types::Text. */
@@ -81,6 +101,41 @@ export interface RScene {
 }
 
 const DEFAULT_LINE = "#1a1a1a";
+
+/**
+ * Strichfarben/-deckkraft je CSS-Klasse — Spiegel der `.plan-svg .<cls>`-Regeln
+ * in styles.css: Im SVG-Pfad ÜBERSTIMMT eine CSS-`stroke`-Property das inline
+ * gesetzte `stroke`-Attribut (Präsentationsattribut), d. h. für diese Klassen
+ * gilt IMMER die CSS-Farbe. Klassen ohne CSS-`stroke` (draw2d, stair-*,
+ * context-line) behalten die Modell-Farbe; context-line trägt zusätzlich
+ * `opacity: 0.7`, wall-axis `opacity: 0.85`.
+ */
+const CLS_STROKE: Record<string, string> = {
+  "door-leaf": "#2b3039",
+  "door-swing": "#6b7280",
+  "door-frame": "#2b3039",
+  "window-glass": "#4a86c7",
+  "wall-axis": "#2f5d54", // var(--accent) des hellen Standard-Themes
+};
+const CLS_OPACITY: Record<string, number> = {
+  "wall-axis": 0.85,
+  "context-line": 0.7,
+};
+
+/** Deckkraft gedimmter (greyed) Primitive — wie GREYED_OPACITY in PlanView. */
+const GREYED_ALPHA = 0.3;
+
+/** Farbe mit Klassen-Deckkraft und Greyed-Dimmung multiplizieren. */
+function withOpacity(col: RRgba, cls: string | undefined, greyed: boolean | undefined): RRgba {
+  const o = (cls ? CLS_OPACITY[cls] ?? 1 : 1) * (greyed ? GREYED_ALPHA : 1);
+  return o === 1 ? col : [col[0], col[1], col[2], col[3] * o];
+}
+
+/** Strichfarbe einer line/arc-Primitive: CSS-Klassen-Farbe > Modell-Farbe > Tinte. */
+function strokeColorFor(cls: string | undefined, color: string | undefined): RRgba {
+  const css = cls ? CLS_STROKE[cls] : undefined;
+  return toRgba(css ?? color ?? DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
+}
 
 /** 1 Punkt (pt) in Papier-Millimetern. */
 const PT_TO_MM = 25.4 / 72;
@@ -241,29 +296,36 @@ export function planToRenderScene(plan: Plan): RScene {
   // Sichtbare Umriss-Läufe werden erst GESAMMELT (nach Stil gruppiert) und am
   // Ende über Polygon-Grenzen hinweg zusammengenäht — erst dadurch bekommen
   // Wand-zu-Wand-Ecken (zwei Polygone!) eine Gehrung statt einer Kerbe.
-  const edgeRunGroups = new Map<string, { color: RRgba; widthMm: number; runs: RPoint[][] }>();
-  const collectEdgeRun = (run: RPoint[], color: RRgba, widthMm: number) => {
+  const edgeRunGroups = new Map<string, { color: RRgba; widthMm: number; runs: RPoint[][]; z: number }>();
+  const collectEdgeRun = (run: RPoint[], color: RRgba, widthMm: number, z: number) => {
     const k = `${color.join(",")}|${widthMm}`;
     let g = edgeRunGroups.get(k);
     if (!g) {
-      g = { color, widthMm, runs: [] };
+      g = { color, widthMm, runs: [], z };
       edgeRunGroups.set(k, g);
     }
     g.runs.push(run);
+    // Die Kette zeichnet, wenn ihr SPÄTESTER Beitrag im SVG zeichnen würde.
+    g.z = Math.max(g.z, z);
   };
+
+  // Maler-Reihenfolge: läuft in EXAKT der Reihenfolge mit, in der der SVG-Pfad
+  // die Elemente zeichnet (Primitive in Array-Reihenfolge; je Polygon Füllung →
+  // Schraffur → Umriss). Jedes emittierte Szenen-Element bekommt das nächste z.
+  let zc = 0;
 
   // Laufender, verketteter 2D-Zeichnungs-Zug (gleiche drawingId + Stil, End-an-Start).
   let curPts: RPoint[] | null = null;
   let curSrc: LinePrim | null = null;
   const flushRun = () => {
     if (curPts && curSrc && curPts.length >= 2) {
-      const col = toRgba(curSrc.color ?? DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
+      const col = withOpacity(strokeColorFor(curSrc.cls, curSrc.color), curSrc.cls, curSrc.greyed);
       const closed = curPts.length > 2 && samePt(curPts[0], curPts[curPts.length - 1]);
       const dash = curSrc.dash ?? null;
       if (closed) {
-        outlines.push({ pts: curPts.slice(0, -1), color: col, widthMm: curSrc.weightMm, dash });
+        outlines.push({ pts: curPts.slice(0, -1), color: col, widthMm: curSrc.weightMm, dash, z: zc++ });
       } else {
-        polylines.push({ pts: curPts, color: col, widthMm: curSrc.weightMm, dash });
+        polylines.push({ pts: curPts, color: col, widthMm: curSrc.weightMm, dash, z: zc++ });
       }
     }
     curPts = null;
@@ -278,33 +340,53 @@ export function planToRenderScene(plan: Plan): RScene {
 
       // Füllung
       const fillCol = toRgba(p.fill, 1);
-      if (fillCol && pts.length >= 3) fills.push({ pts, color: fillCol });
+      if (fillCol && pts.length >= 3) {
+        fills.push({ pts, color: withOpacity(fillCol, undefined, p.greyed), z: zc++ });
+      }
 
       // Schraffur: die aufs Polygon geclippten Musterlinien wie im Browser
       // (glPlanHatch — identische Geometrie), als Polylinien. "none"/"solid"
       // brauchen keine Linien (solid deckt die Füllung farbig ab).
       if (p.hatch && p.hatch.pattern !== "none" && p.hatch.pattern !== "solid") {
-        const hatchCol = toRgba(p.hatch.color, 1) ?? [0.1, 0.1, 0.1, 1];
+        const hatchCol = withOpacity(
+          toRgba(p.hatch.color, 1) ?? [0.1, 0.1, 0.1, 1],
+          undefined,
+          p.greyed,
+        );
+        // Strichbreite wie das SVG-Muster (`hatchStrokePx`): in viewBox-px, an
+        // die Kachel gekoppelt und mit dem Zoom skalierend — NICHT Papier-mm
+        // (sonst wird die Schraffur bei kleinen Masstäben zur Haarlinie).
         const hatchMm = p.hatch.lineWeight > 0 ? p.hatch.lineWeight : 0.13;
+        const hatchPx = Math.max(0.6, hatchMm * (1 / 0.13));
         const runs = applyDashRuns(buildHatchRuns(p.pts, p.hatch), p.hatch.dash);
+        // Alle Musterläufe eines Polygons teilen EIN z (überlappen einander nicht).
+        const hatchZ = zc++;
         for (const run of runs) {
           if (run.length >= 2) {
-            polylines.push({ pts: run.map((v) => [v.x, v.y]), color: hatchCol, widthMm: hatchMm });
+            polylines.push({
+              pts: run.map((v) => [v.x, v.y]),
+              color: hatchCol,
+              widthMm: hatchPx,
+              widthScreen: true,
+              z: hatchZ,
+            });
           }
         }
       }
 
       // Umriss
-      const strokeCol = toRgba(p.stroke, 1);
-      if (strokeCol && p.strokeWidthMm > 0) {
+      const strokeColRaw = toRgba(p.stroke, 1);
+      if (strokeColRaw && p.strokeWidthMm > 0) {
+        const strokeCol = withOpacity(strokeColRaw, undefined, p.greyed);
         const suppressed = p.noStrokeEdges ?? [];
         if (suppressed.length === 0) {
           // Ganzer Ring → geschlossener, gehrter Umriss.
-          outlines.push({ pts, color: strokeCol, widthMm: p.strokeWidthMm });
+          outlines.push({ pts, color: strokeCol, widthMm: p.strokeWidthMm, z: zc++ });
         } else {
           // Nur die sichtbaren Kanten — sammeln, die Naht ans Ende verschoben.
+          const runZ = zc++;
           for (const run of visibleEdgeRuns(pts, suppressed)) {
-            collectEdgeRun(run, strokeCol, p.strokeWidthMm);
+            collectEdgeRun(run, strokeCol, p.strokeWidthMm, runZ);
           }
         }
       }
@@ -323,12 +405,13 @@ export function planToRenderScene(plan: Plan): RScene {
       } else {
         // Genuin einzelnes Segment (Türblatt, Referenzlinie, Symbol) → Stumpfkappen ok.
         flushRun();
-        const col = toRgba(p.color ?? DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
-        lines.push({ a: [p.a.x, p.a.y], b: [p.b.x, p.b.y], color: col, widthMm: p.weightMm, dash: p.dash ?? null });
+        const col = withOpacity(strokeColorFor(p.cls, p.color), p.cls, p.greyed);
+        lines.push({ a: [p.a.x, p.a.y], b: [p.b.x, p.b.y], color: col, widthMm: p.weightMm, dash: p.dash ?? null, z: zc++ });
       }
     } else if (p.kind === "arc") {
       flushRun();
-      const col = toRgba(DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
+      // Farbe wie im SVG: CSS-Klassen-Regel (z. B. .door-swing → #6b7280).
+      const col = withOpacity(strokeColorFor(p.cls, undefined), p.cls, p.greyed);
       // Bogen unvortessellliert an Rust übergeben (`RArc`) — die exakte runde
       // Darstellung (analytischer SDF-Shader, `ARC_WGSL`) und ein evtl. Strich-
       // muster übernimmt der native Renderer (`compile_scene`) drüben.
@@ -348,7 +431,7 @@ export function planToRenderScene(plan: Plan): RScene {
       // "text"): Rich-Text-Zeilen + Live-Zusatzzeilen, Block vertikal um den
       // Anker zentriert, Zeilenvorschub 1.3·Basisgröße.
       flushRun();
-      const defCol = toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1];
+      const defCol = withOpacity(toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1], undefined, p.greyed);
       // unitPerPt = PT_TO_MM → tspan.fontSize ist direkt die Papier-mm-Größe.
       const docLines = docToLines(p.doc, {
         x: 0,
@@ -368,7 +451,11 @@ export function planToRenderScene(plan: Plan): RScene {
           sizeMm: line.tspans.length
             ? Math.max(...line.tspans.map((t) => t.fontSize))
             : baseMm,
-          color: toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol,
+          color: withOpacity(
+            toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol,
+            undefined,
+            p.greyed,
+          ),
           align: line.align,
         });
       }
@@ -402,9 +489,9 @@ export function planToRenderScene(plan: Plan): RScene {
     for (const chain of stitchRuns(g.runs)) {
       if (chain.pts.length < 2) continue;
       if (chain.closed) {
-        outlines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm });
+        outlines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm, z: g.z });
       } else {
-        polylines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm });
+        polylines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm, z: g.z });
       }
     }
   }

@@ -19,7 +19,7 @@ use wgpu::util::DeviceExt;
 
 use crate::ortho::{compute_ortho_matrix, corrected_view_box, meet_scale, mm_to_device_px, Mat4};
 use crate::shaders::{ARC_WGSL, FILL_WGSL, LINE_WGSL};
-use crate::tessellate::{compile_scene, to_screen, ArcInstanceData, GpuGeometry, MAX_ARC_DASH};
+use crate::tessellate::{compile_scene, to_screen, ArcInstanceData, BatchKind, GpuGeometry, MAX_ARC_DASH};
 use crate::types::{Scene, Text, TextAlign, ViewBox};
 
 /// MSAA-Faktor: 4x Multisampling fuer glatte Linien-/Fuellkanten (wie im Browser).
@@ -170,6 +170,16 @@ pub struct Renderer {
     pub clear_color: wgpu::Color,
     /// Papier-Massstab-Nenner (1:N) fuer echte mm-Strichbreiten.
     pub paper_scale_n: f32,
+    /// Papier-Massstab-Nenner (1:N) NUR fuer die Text-Schriftgroesse — bewusst
+    /// vom geometrischen `paper_scale_n` ENTKOPPELT: der SVG-Referenzpfad haelt
+    /// die Raumstempel-Schriftgroesse im normalen Anzeigemodus auf einer festen
+    /// Referenzskala 1:100 (lesbar, unabhaengig vom zufaelligen Einpass-Massstab
+    /// der aktuellen Ansicht) und wechselt erst im Druck-Modus auf den echten
+    /// gemessenen Massstab; siehe PlanView.tsx `textScaleForGl`/case "text". Ohne
+    /// diese Trennung wuerde Text hier mit dem live aus dem Ausschnitt
+    /// abgeleiteten `paper_scale_n` skalieren (z.B. 1:32 statt 1:100) und damit
+    /// sichtbar kleiner/groesser als im SVG-Pfad erscheinen.
+    pub text_scale_n: f32,
 }
 
 /// Ein Uniform-Puffer, der `capacity` Globals-Bloecke fasst, plus Bind-Group.
@@ -410,6 +420,7 @@ impl Renderer {
                 a: 1.0,
             },
             paper_scale_n: 100.0,
+            text_scale_n: 100.0,
         }
     }
 
@@ -499,7 +510,18 @@ impl Renderer {
         }
         let cache = glyphon::Cache::new(device);
         let viewport = glyphon::Viewport::new(device, &cache);
-        let mut atlas = glyphon::TextAtlas::new(device, queue, &cache, self.format);
+        // ColorMode::Web statt Default (Accurate): die Surface ist non-sRGB und
+        // ALLE Geometrie-Passes schreiben ihre sRGB-Farbwerte unkonvertiert —
+        // Accurate wuerde die Textfarbe nach linear wandeln und die Glyphen
+        // deutlich dunkler zeichnen als der SVG-Referenzpfad (z.B. #5a7a9a ->
+        // (26,50,82) statt (90,122,154)).
+        let mut atlas = glyphon::TextAtlas::with_color_mode(
+            device,
+            queue,
+            &cache,
+            self.format,
+            glyphon::ColorMode::Web,
+        );
         let renderer = glyphon::TextRenderer::new(
             &mut atlas,
             device,
@@ -592,6 +614,9 @@ impl Renderer {
         let (vw, vh) = (viewport.0 as f32, viewport.1 as f32);
         let proj: Mat4 = compute_ortho_matrix(view_box, vw, vh);
         let mm_px = mm_to_device_px(view_box, vw, vh, self.paper_scale_n);
+        // Eigene mm->px-Umrechnung fuer Text (siehe `text_scale_n`-Doku): gleiche
+        // Formel, aber am Text-Referenz-Massstab statt am Geometrie-Massstab.
+        let text_mm_px = mm_to_device_px(view_box, vw, vh, self.text_scale_n);
         // Geraete-px je Bildschirm-Einheit (== meet-Skala) — der Bogen-Shader braucht
         // beides: px_per_screen fuer Radial-/Kappen-/Dash-AA, stroke_scale fuer die
         // Papier-mm-Breite (identisch zu den Linien).
@@ -609,27 +634,38 @@ impl Renderer {
             }),
         );
 
-        // Alle Globals-Bloecke der Reihenfolge nach (erst Fuell-, dann Linien-Batches)
-        // sammeln, den Puffer einmal schreiben, danach nur noch dynamisch binden.
+        // Alle Globals-Bloecke in MALER-Reihenfolge (`draw_sequence`, interleaved
+        // Fuell-/Linien-Batches) sammeln, den Puffer einmal schreiben, danach nur
+        // noch dynamisch binden — Reihenfolge identisch zur Draw-Schleife unten.
         let mut blocks: Vec<Globals> = Vec::new();
         if let Some(scene) = &self.scene {
-            for b in &scene.geo.fill_batches {
-                blocks.push(Globals {
-                    view_proj: proj,
-                    color: b.color,
-                    viewport_px: [vw, vh],
-                    stroke_px: 0.0,
-                    stroke_scale: mm_px,
-                });
-            }
-            for b in &scene.geo.line_batches {
-                blocks.push(Globals {
-                    view_proj: proj,
-                    color: b.color,
-                    viewport_px: [vw, vh],
-                    stroke_px: b.stroke_mm,
-                    stroke_scale: mm_px,
-                });
+            for &(kind, idx) in &scene.geo.draw_sequence {
+                match kind {
+                    BatchKind::Fill => {
+                        let b = &scene.geo.fill_batches[idx as usize];
+                        blocks.push(Globals {
+                            view_proj: proj,
+                            color: b.color,
+                            viewport_px: [vw, vh],
+                            stroke_px: 0.0,
+                            stroke_scale: mm_px,
+                        });
+                    }
+                    BatchKind::Line => {
+                        let b = &scene.geo.line_batches[idx as usize];
+                        blocks.push(Globals {
+                            view_proj: proj,
+                            color: b.color,
+                            viewport_px: [vw, vh],
+                            stroke_px: b.stroke_mm,
+                            // Schraffur-Striche (`width_screen`) sind an die
+                            // Musterkachel gekoppelt (Bildschirm-Einheiten,
+                            // zoom-skalierend wie der SVG-`<pattern>`-Strich) —
+                            // Geraete-px = Breite * meet-Skala statt * mm->px.
+                            stroke_scale: if b.width_screen { px_per_screen } else { mm_px },
+                        });
+                    }
+                }
             }
         }
 
@@ -665,7 +701,7 @@ impl Renderer {
                 let attrs = glyphon::Attrs::new()
                     .family(glyphon::Family::Name(&family));
                 for t in &scene.texts {
-                    let font_px = t.size_mm * mm_px;
+                    let font_px = t.size_mm * text_mm_px;
                     // Unlesbar kleine Glyphen ueberspringen (spart Shaping/Atlas).
                     if !(font_px >= 1.0) || t.content.is_empty() {
                         continue;
@@ -794,33 +830,46 @@ impl Renderer {
 
             if let (Some(scene), Some(u)) = (&self.scene, &self.uniform) {
                 let stride = self.uniform_stride as u32;
-                let mut block = 0u32; // Laufindex ueber Fuell- dann Linien-Batches
 
-                // 1) Fuellungen.
-                if let (Some(vbo), Some(ibo)) = (&scene.fill_vbo, &scene.fill_ibo) {
-                    pass.set_pipeline(&self.fill_pipeline);
-                    pass.set_vertex_buffer(0, vbo.slice(..));
-                    pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
-                    for b in &scene.geo.fill_batches {
-                        pass.set_bind_group(0, &u.bind_group, &[block * stride]);
-                        let start = b.start_index;
-                        pass.draw_indexed(start..start + b.index_count, 0, 0..1);
-                        block += 1;
-                    }
-                } else {
-                    block += scene.geo.fill_batches.len() as u32;
-                }
-
-                // 2) Linien (Umrisse + freie Linien).
-                if let (Some(vbo), Some(ibo)) = (&scene.line_vbo, &scene.line_ibo) {
-                    pass.set_pipeline(&self.line_pipeline);
-                    pass.set_vertex_buffer(0, vbo.slice(..));
-                    pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
-                    for b in &scene.geo.line_batches {
-                        pass.set_bind_group(0, &u.bind_group, &[block * stride]);
-                        let start = b.start_index;
-                        pass.draw_indexed(start..start + b.index_count, 0, 0..1);
-                        block += 1;
+                // Geometrie in MALER-Reihenfolge (`draw_sequence`): Fuell- und
+                // Linien-Batches interleaved, Pipeline-/Puffer-Wechsel nur beim
+                // Wechsel der Batch-Art. Nur so deckt eine spaetere Fuellung
+                // einen frueheren Strich ab (SVG-Paritaet, Primitive-Reihenfolge).
+                let mut bound: Option<BatchKind> = None;
+                for (block, &(kind, idx)) in scene.geo.draw_sequence.iter().enumerate() {
+                    match kind {
+                        BatchKind::Fill => {
+                            let (Some(vbo), Some(ibo)) = (&scene.fill_vbo, &scene.fill_ibo)
+                            else {
+                                continue;
+                            };
+                            if bound != Some(BatchKind::Fill) {
+                                pass.set_pipeline(&self.fill_pipeline);
+                                pass.set_vertex_buffer(0, vbo.slice(..));
+                                pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
+                                bound = Some(BatchKind::Fill);
+                            }
+                            let b = &scene.geo.fill_batches[idx as usize];
+                            pass.set_bind_group(0, &u.bind_group, &[block as u32 * stride]);
+                            let start = b.start_index;
+                            pass.draw_indexed(start..start + b.index_count, 0, 0..1);
+                        }
+                        BatchKind::Line => {
+                            let (Some(vbo), Some(ibo)) = (&scene.line_vbo, &scene.line_ibo)
+                            else {
+                                continue;
+                            };
+                            if bound != Some(BatchKind::Line) {
+                                pass.set_pipeline(&self.line_pipeline);
+                                pass.set_vertex_buffer(0, vbo.slice(..));
+                                pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
+                                bound = Some(BatchKind::Line);
+                            }
+                            let b = &scene.geo.line_batches[idx as usize];
+                            pass.set_bind_group(0, &u.bind_group, &[block as u32 * stride]);
+                            let start = b.start_index;
+                            pass.draw_indexed(start..start + b.index_count, 0, 0..1);
+                        }
                     }
                 }
             }

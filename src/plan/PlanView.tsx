@@ -475,11 +475,23 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const paperScaleForGl = (v: ViewBox): number =>
     paperScaleRef.current ?? scaleFromView(v, svgRef.current) ?? 100;
 
+  // Referenz-Nenner (1:N) NUR für die Text-Schriftgröße der Engine — spiegelt
+  // EXAKT die SVG-Formel (case "text" unten, gleiche `print`-Bedingung): im
+  // normalen Anzeigemodus fest auf die Referenzskala 1:100 (Raumstempel bleibt
+  // lesbar, unabhängig vom zufälligen Einpass-Massstab der Ansicht), erst im
+  // Druck-Modus der echte gemessene `paperScale`. BEWUSST NICHT `paperScaleForGl`
+  // (das dort verwendete live abgeleitete N wäre für Text willkürlich/unlesbar
+  // und würde vom SVG-Referenzpfad abweichen — siehe Doku in `gpu::Renderer`).
+  const textScaleForGl = (): number => {
+    const print = !hairline && paperScale != null && paperScale > 0;
+    return print ? paperScale! : 100;
+  };
+
   // GL-Geometrie beim Plan-Wechsel neu tessellieren + sofort neu zeichnen.
   useEffect(() => {
     if (!useGpuRenderer) return;
     updateGeometry(plan);
-    renderGl(viewRef.current, paperScaleForGl(viewRef.current));
+    renderGl(viewRef.current, paperScaleForGl(viewRef.current), textScaleForGl());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useGpuRenderer, plan, updateGeometry, renderGl]);
 
@@ -487,7 +499,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // keine Re-Tessellierung. Auch bei paperScale-Wechsel neu (Strichbreiten).
   useEffect(() => {
     if (useGpuRenderer) {
-      renderGl(view, paperScaleForGl(view));
+      renderGl(view, paperScaleForGl(view), textScaleForGl());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useGpuRenderer, renderGl, view, paperScale]);
@@ -1065,7 +1077,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (!v || !v0) return;
     viewRef.current = v; // abgeleitete Reads (Snap-Toleranz etc.) frisch halten
     applySvgTransform(v0, v); // SVG per GPU-Composit (kein Re-Raster)
-    renderGl(v, paperScaleForGl(v)); // GL exakt auf V (Strich in echten Papier-mm)
+    renderGl(v, paperScaleForGl(v), textScaleForGl()); // GL exakt auf V (Strich in echten Papier-mm)
   };
   /** Pan-/Zoom-Ziel imperativ anwenden (rAF-gedrosselt), ohne React-Render. */
   const enqueuePan = (v: ViewBox) => {

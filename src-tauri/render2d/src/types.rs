@@ -22,6 +22,13 @@ pub struct FillPolygon {
     pub pts: Vec<Point>,
     /// Fuellfarbe (RGBA 0..1).
     pub color: Rgba,
+    /// Maler-Reihenfolge (kleiner = frueher/unten). Der SVG-Referenzpfad zeichnet
+    /// die Primitive strikt in Array-Reihenfolge (Fuellung/Umriss INTERLEAVED) —
+    /// ein spaeteres Fuellpolygon (Wand-Poche) deckt z.B. den frueheren Raum-
+    /// Umriss ab. `compile_scene` stellt diese Reihenfolge kategorien-uebergreifend
+    /// wieder her. Default 0 (Alt-Szenen: bisherige Kategorien-Reihenfolge).
+    #[serde(default)]
+    pub z: u32,
 }
 
 /// Ein Liniensegment mit echter Papier-mm-Breite.
@@ -39,6 +46,9 @@ pub struct Line {
     /// Strichmuster in Papier-mm; None/leer = durchgezogen (siehe `tessellate::split_dash`).
     #[serde(default)]
     pub dash: Option<Vec<f32>>,
+    /// Maler-Reihenfolge (kleiner = frueher/unten), siehe `FillPolygon::z`.
+    #[serde(default)]
+    pub z: u32,
 }
 
 /// Ein geschlossenes Polygon als Umriss (nur Kanten, keine Fuellung) — bequemer
@@ -58,6 +68,9 @@ pub struct Outline {
     /// ueber die Dash-Luecke hinweg, siehe `tessellate::split_dash`).
     #[serde(default)]
     pub dash: Option<Vec<f32>>,
+    /// Maler-Reihenfolge (kleiner = frueher/unten), siehe `FillPolygon::z`.
+    #[serde(default)]
+    pub z: u32,
 }
 
 /// Ein OFFENER Linienzug mit echter Papier-mm-Breite. Anders als `Outline`
@@ -71,12 +84,23 @@ pub struct Polyline {
     pub pts: Vec<Point>,
     /// Strichfarbe (RGBA 0..1).
     pub color: Rgba,
-    /// Strichbreite in echten Papier-Millimetern.
+    /// Strichbreite in echten Papier-Millimetern — bzw. in BILDSCHIRM-EinheITEN
+    /// (viewBox-px), wenn `width_screen` gesetzt ist.
     #[serde(rename = "widthMm")]
     pub width_mm: f32,
+    /// true: `width_mm` ist eine Breite in BILDSCHIRM-Einheiten (viewBox-px),
+    /// die MIT dem Zoom skaliert — wie die SVG-Schraffur-Muster: deren Strich
+    /// (`hatchStrokePx`) ist an die Musterkachel gekoppelt, nicht an Papier-mm.
+    /// Der Renderer rechnet dann Geraete-px = Breite * meet-Skala (statt
+    /// * mm->px). Default false (echte Papier-mm).
+    #[serde(default, rename = "widthScreen")]
+    pub width_screen: bool,
     /// Strichmuster in Papier-mm; None/leer = durchgezogen.
     #[serde(default)]
     pub dash: Option<Vec<f32>>,
+    /// Maler-Reihenfolge (kleiner = frueher/unten), siehe `FillPolygon::z`.
+    #[serde(default)]
+    pub z: u32,
 }
 
 /// Ein Kreisbogen (kuerzerer Sweep von `from` nach `to` um `center`) in Modell-
