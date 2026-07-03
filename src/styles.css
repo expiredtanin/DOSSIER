@@ -803,6 +803,97 @@ body {
   cursor: default;
 }
 
+/* Generische Segment-Pille für die Statusleiste (Linien-Darstellung, Fang) —
+   gleiche Masse/Optik wie .sb-renderer-toggle, aber nicht renderer-spezifisch. */
+.sb-seg {
+  display: inline-flex;
+  align-items: stretch;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--input);
+}
+.sb-seg.disabled {
+  opacity: 0.4;
+}
+.sb-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.sb-seg-btn:first-child {
+  border-left: none;
+}
+.sb-seg-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.sb-seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.sb-seg-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Caret-Segment (öffnet das Fang-Popover) — schmaler als die Text-Segmente. */
+.sb-seg-caret {
+  padding: 0 6px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Fang-Kontrolle: Wrapper ist relativ positioniert, damit das Popover NACH
+   OBEN öffnen kann (die Leiste sitzt ganz unten im App-Shell). */
+.sb-snap-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.sb-snap-popover {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin: 0 0 6px;
+  padding: 6px 0;
+  min-width: 170px;
+  background: var(--panel, #1c2128);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 200;
+}
+.sb-snap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.sb-snap-row input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+.sb-snap-row-num {
+  justify-content: space-between;
+  cursor: default;
+}
+.sb-snap-row-num input[type="number"] {
+  width: 64px;
+}
+
 /* ── Command-Line (Rhino-artig) — über der Statusleiste ──────────────────────
    Dunkle, ruhige Leiste mit Prompt links, klickbaren Inline-Optionen und einer
    monospace-Texteingabe rechts; das Autocomplete-Dropdown öffnet nach oben. */

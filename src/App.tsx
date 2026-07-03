@@ -2715,9 +2715,6 @@ export default function App() {
         referenceLines={referenceLines}
         onReferenceLines={setReferenceLines}
         referenceLinesEnabled={planActive}
-        lineMode={lineMode}
-        onLineMode={setLineMode}
-        lineModeEnabled={planActive}
         combos={{
           // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums →
           // localStorage; Laden = Map lesen → Sichtbarkeits-Flags anwenden.
@@ -2959,6 +2956,11 @@ export default function App() {
         rendererMode={rendererMode}
         webGpuAvailable={webGpuAvailable}
         onRendererModeChange={setRendererMode}
+        lineMode={lineMode}
+        onLineModeChange={setLineMode}
+        lineModeEnabled={planActive}
+        snap={snap}
+        onSnapChange={setSnap}
       />
 
       {/* Schwebendes Ressourcen-Fenster ÜBER allem (hoher z-index, abgedunkelter

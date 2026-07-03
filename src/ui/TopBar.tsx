@@ -141,12 +141,6 @@ export interface TopBarProps {
   /** Referenzlinien nur im Grundriss sinnvoll (sonst deaktiviert). */
   referenceLinesEnabled: boolean;
 
-  // Linien-Darstellung: Display (Haarlinien) ↔ Print (echte mm-Strichstärken).
-  lineMode: "display" | "print";
-  onLineMode: (m: "display" | "print") => void;
-  /** Nur im Grundriss sinnvoll. */
-  lineModeEnabled: boolean;
-
   // Sichtbarkeits-Kombinationen (Ebenen-/Zeichnungskombinationen).
   /** Handler-Satz für die beiden Kombinations-Dropdowns. */
   combos: ComboMenuHandlers;
@@ -855,9 +849,6 @@ export function TopBar({
   referenceLines,
   onReferenceLines,
   referenceLinesEnabled,
-  lineMode,
-  onLineMode,
-  lineModeEnabled,
   combos,
   resourcesOpen,
   onToggleResources,
@@ -1201,30 +1192,6 @@ export function TopBar({
       </div>
 
       <Sep />
-
-      {/* Linien-Darstellung: Display (alle Haarlinien) ↔ Print (echte mm-
-          Strichstärken). Eine Einfach-Auswahl → als Dropdown (Trigger-Pill +
-          Häkchen-Liste, wie Detailgrad/Massstab), nicht mehr als Segment-Pillen.
-          Optionen tragen ein Icon plus Klartext. Nur im Grundriss sinnvoll. */}
-      <div className="tb-group" role="group" aria-label={t("topbar.lineModeGroup")}>
-        <label className="tb-field">
-          <span className="tb-label">{t("topbar.lineModeGroup")}</span>
-          <Dropdown
-            value={lineMode}
-            disabled={!lineModeEnabled}
-            onChange={(v) => onLineMode(v as "display" | "print")}
-            title={
-              lineModeEnabled
-                ? `${t("topbar.lineMode.display.hint")} · ${t("topbar.lineMode.print.hint")}`
-                : t("topbar.lineModeGroup")
-            }
-            options={[
-              { value: "display", label: t("topbar.lineMode.display") },
-              { value: "print", label: t("topbar.lineMode.print") },
-            ]}
-          />
-        </label>
-      </div>
 
       {/* Rechte Gruppe: Layout-Menü · Ressourcen · Projektname. */}
       <div className="topbar-right">

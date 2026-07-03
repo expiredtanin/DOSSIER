@@ -119,7 +119,6 @@ function ToolIcon({ id }: { id: ToolId }) {
 
 export function ToolsPanel() {
   const host = usePanelHost();
-  const snap = host.snap;
 
   return (
     <div className="tools-panel">
@@ -190,91 +189,6 @@ export function ToolsPanel() {
       )}
 
       {host.activeTool === "ceiling" && <div className="tools-sep" />}
-
-      {/* Fang-Abschnitt. Master-Checkbox steuert die übrigen Fang-Optionen. */}
-      <label className="tools-snap-row">
-        <input
-          type="checkbox"
-          checked={snap.enabled}
-          onChange={(e) => host.onSnapChange({ ...snap, enabled: e.target.checked })}
-        />
-        <span>{t("snap.enabled")}</span>
-      </label>
-
-      <label className="tools-snap-row">
-        <input
-          type="checkbox"
-          checked={snap.endpoint}
-          disabled={!snap.enabled}
-          onChange={(e) => host.onSnapChange({ ...snap, endpoint: e.target.checked })}
-        />
-        <span>{t("snap.endpoint")}</span>
-      </label>
-
-      <label className="tools-snap-row">
-        <input
-          type="checkbox"
-          checked={snap.midpoint}
-          disabled={!snap.enabled}
-          onChange={(e) => host.onSnapChange({ ...snap, midpoint: e.target.checked })}
-        />
-        <span>{t("snap.midpoint")}</span>
-      </label>
-
-      <label className="tools-snap-row">
-        <input
-          type="checkbox"
-          checked={snap.intersection}
-          disabled={!snap.enabled}
-          onChange={(e) =>
-            host.onSnapChange({ ...snap, intersection: e.target.checked })
-          }
-        />
-        <span>{t("snap.intersection")}</span>
-      </label>
-
-      <label className="tools-snap-row">
-        <input
-          type="checkbox"
-          checked={snap.onEdge}
-          disabled={!snap.enabled}
-          onChange={(e) => host.onSnapChange({ ...snap, onEdge: e.target.checked })}
-        />
-        <span>{t("snap.onEdge")}</span>
-      </label>
-
-      <label className="tools-snap-row">
-        <input
-          type="checkbox"
-          checked={snap.grid}
-          disabled={!snap.enabled}
-          onChange={(e) => host.onSnapChange({ ...snap, grid: e.target.checked })}
-        />
-        <span>{t("snap.grid")}</span>
-      </label>
-
-      <label className="tools-snap-row">
-        <input
-          type="checkbox"
-          checked={snap.ortho}
-          disabled={!snap.enabled}
-          onChange={(e) => host.onSnapChange({ ...snap, ortho: e.target.checked })}
-        />
-        <span>{t("snap.ortho")}</span>
-      </label>
-
-      <label className="tools-field">
-        <span>{t("snap.gridSize")}</span>
-        <input
-          type="number"
-          step={0.05}
-          min={0.01}
-          value={snap.gridSize}
-          onChange={(e) =>
-            host.onSnapChange({ ...snap, gridSize: Number(e.target.value) })
-          }
-        />
-      </label>
     </div>
   );
 }
