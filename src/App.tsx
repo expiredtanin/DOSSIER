@@ -790,6 +790,50 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 2 Linie, 4
+  // Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum. Nur auf
+  // Geschoss-Tabs, nicht beim Tippen in Feldern und nicht mit Modifikator
+  // (Ctrl/Cmd/Alt bleiben frei). 1 (Text) und 3 (Kreis) sind bewusst noch
+  // unbelegt — dafür fehlt bislang ein Werkzeug. Der Handler wird einmal
+  // registriert und liest die aktuelle Auswahl-Funktion/Ebenen-Art über ein Ref.
+  const toolShortcutRef = useRef({
+    onSelectTool,
+    floor: activeLevel.kind === "floor",
+  });
+  toolShortcutRef.current = {
+    onSelectTool,
+    floor: activeLevel.kind === "floor",
+  };
+  useEffect(() => {
+    const MAP: Record<string, ToolId> = {
+      "2": "line",
+      "4": "rect",
+      "5": "polyline",
+      "6": "wall",
+      "7": "ceiling",
+      "8": "window",
+      "9": "door",
+      "0": "room",
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+      ) {
+        return;
+      }
+      const id = MAP[e.key];
+      if (!id) return;
+      if (!toolShortcutRef.current.floor) return; // Werkzeuge nur auf Geschossen
+      e.preventDefault();
+      toolShortcutRef.current.onSelectTool(id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Tastatur für aktive Zeichenwerkzeuge: Esc verwirft den Entwurf (bzw. schaltet
   // im Ruhezustand zurück auf Auswahl), Enter schließt mehrteilige Werkzeuge ab,
   // Backspace nimmt den letzten Punkt zurück. In echten Eingaben inaktiv.
