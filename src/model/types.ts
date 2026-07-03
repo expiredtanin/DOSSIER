@@ -42,7 +42,15 @@ export interface LineStyle {
   weight: number;
   /** Farbe (hex). */
   color: string;
-  /** Strichmuster in Millimetern; `null` = durchgezogen. */
+  /**
+   * Strichmuster in Millimetern, alternierend AN/AUS (`[on, off, on, off, …]`),
+   * loopend; `null` = durchgezogen (Volllinie). Konvention des modularen
+   * Segment-Systems (siehe `src/ui/lineSegments.ts`): ein AN-Wert von 0 bedeutet
+   * einen PUNKT (Dot) — er wird nur mit runder Strichkappe sichtbar (die
+   * betroffene Linie erhält dann `stroke-linecap: round`). So bilden sich
+   * Volllinie/Strichlinie/Punktlinie/Strich-Punkt und frei modulare Folgen aus
+   * Strich/Punkt/Lücke ab. Additiv — kein zusätzliches Feld nötig.
+   */
   dash: number[] | null;
   /**
    * Linien-Typ (additiv, Default `undefined` ⇒ "dash"):

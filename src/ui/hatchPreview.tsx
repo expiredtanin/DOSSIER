@@ -10,6 +10,7 @@
 
 import { useId } from "react";
 import type { HatchStyle, LineStyle } from "../model/types";
+import { dashHasDot } from "./lineSegments";
 
 // ── Kleiner deterministischer PRNG (mulberry32) ────────────────────────────
 // Für „random"-Striche: stabil pro Seed, damit die Vorschau bei gleichem
@@ -330,8 +331,8 @@ export function LineSwatch({
         strokeLinecap="round"
       />
     );
-  } else {
-    const dasharray = style.dash ? style.dash.map((d) => d * 4).join(" ") : undefined;
+  } else if (!style.dash || !style.dash.length) {
+    // Volllinie: durchgezogen, eine dunkle Linie.
     path = (
       <line
         x1={x0}
@@ -340,9 +341,47 @@ export function LineSwatch({
         y2={midY}
         stroke="currentColor"
         strokeWidth={px}
-        strokeDasharray={dasharray}
         strokeLinecap="butt"
       />
+    );
+  } else {
+    // Muster-Linie (Strich/Punkt/Lücke, loopend): den ERSTEN Loop in Ink-Farbe
+    // (currentColor), danach 2 weitere Loops in Grau (var(--muted)) — so sieht man
+    // den fortgesetzten Loop. Punkte (0-Längen-Segmente) brauchen runde Kappen.
+    const PX_PER_MM = 4;
+    const dpx = style.dash.map((d) => d * PX_PER_MM);
+    const dasharray = dpx.join(" ");
+    const loopLen = dpx.reduce((a, b) => a + b, 0) || PX_PER_MM;
+    const cap = dashHasDot(style.dash) ? "round" : "butt";
+    // Der graue Teil beginnt exakt an der Loop-Grenze (x0 + loopLen) → das Muster
+    // läuft phasengleich weiter (dash startet bei jedem Pfadanfang neu).
+    const darkEnd = Math.min(x1, x0 + loopLen);
+    const greyEnd = Math.min(x1, x0 + loopLen * 3);
+    path = (
+      <>
+        {greyEnd > darkEnd && (
+          <line
+            x1={darkEnd}
+            y1={midY}
+            x2={greyEnd}
+            y2={midY}
+            stroke="var(--muted)"
+            strokeWidth={px}
+            strokeDasharray={dasharray}
+            strokeLinecap={cap}
+          />
+        )}
+        <line
+          x1={x0}
+          y1={midY}
+          x2={darkEnd}
+          y2={midY}
+          stroke="currentColor"
+          strokeWidth={px}
+          strokeDasharray={dasharray}
+          strokeLinecap={cap}
+        />
+      </>
     );
   }
 

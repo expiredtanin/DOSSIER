@@ -2569,6 +2569,35 @@ body {
   border-radius: 3px;
 }
 
+/* Modularer Linien-Segment-Editor (Strich / Punkt / Lücke). */
+.line-seg-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.line-seg-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.line-seg-num {
+  width: 56px;
+  display: inline-flex;
+  align-items: center;
+}
+.line-seg-dotlabel {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  padding-left: 4px;
+}
+.line-seg-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
 /* ══ Panel-Chrome (Andockrahmen: Docks, Tabs, Panel-Rahmen) ═══════════════════
    Der erweiterbare Rahmen: links/rechts je ein Dock mit Tab-Leiste und dem
    aktiven Panel. Greift dieselben Tokens wie die nav- und res-Klassen (dunkles DOSSIER-

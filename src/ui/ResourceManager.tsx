@@ -43,6 +43,15 @@ import {
 import { requestMaterialPreview, cancelMaterialPreview } from "../materials/spherePreview";
 import { EyeIcon } from "./EyeIcon";
 import { HatchSwatch, LineSwatch } from "./hatchPreview";
+import {
+  segmentsToDash,
+  dashToSegments,
+  presetOfDash,
+  LINE_PRESETS,
+  type LineSegment,
+  type LineSegmentType,
+  type LinePresetKey,
+} from "./lineSegments";
 import { MotifEditor } from "./MotifEditor";
 import { t } from "../i18n";
 
@@ -1235,26 +1244,35 @@ function LineStyleDetail({
     onPatch({ zigzag: { ...cur, ...part } });
   };
 
-  // ── Strich (dash) ──────────────────────────────────────────────────────────
-  // „Vollinie" = `dash: null` (durchgezogen); „Strich" = editierbare Liste der
-  // Segmentlängen in mm (alternierend Strich/Lücke). Die Dicke gehört NICHT mehr
-  // hierher — sie wird per Element-Attribut aufgelöst (By-Object/By-Layer folgt).
+  // ── Modulares Segment-System (dash) ─────────────────────────────────────────
+  // Eine musterbasierte Linie ist eine geordnete, loopende Folge aus Segmenten
+  // (Strich / Punkt / Lücke). Die Folge wird aus `dash` abgeleitet und beim
+  // Editieren via `segmentsToDash` wieder nach `dash` geschrieben — `dash` bleibt
+  // die einzige Datenbasis. „Volllinie" = `dash: null`. Die Dicke gehört NICHT
+  // mehr hierher (sie wird per Element-Attribut aufgelöst; By-Object/By-Layer folgt).
   const dash = style.dash;
   const isSolid = dash === null;
-  const dashArr = dash ?? [];
-  const setStroke = (mode: "solid" | "dash") =>
-    onPatch({ dash: mode === "solid" ? null : dashArr.length ? dashArr : [1, 2] });
-  const setSeg = (i: number, v: number) => {
-    const next = dashArr.slice();
-    next[i] = Math.max(0, v);
-    onPatch({ dash: next });
+  const segments = dashToSegments(dash);
+  const preset = presetOfDash(dash);
+  const applyPreset = (p: LinePresetKey) => {
+    if (p === "custom") return;
+    onPatch({ dash: LINE_PRESETS[p] });
   };
-  const addSeg = () =>
-    onPatch({ dash: [...dashArr, dashArr.length ? dashArr[dashArr.length - 1] : 1] });
-  const removeSeg = (i: number) => {
-    const next = dashArr.filter((_, k) => k !== i);
-    onPatch({ dash: next.length ? next : null });
+  const commitSegments = (next: LineSegment[]) => onPatch({ dash: segmentsToDash(next) });
+  const setSegType = (i: number, type: LineSegmentType) => {
+    const next = segments.slice();
+    const cur = next[i];
+    next[i] = { type, length: type === "dot" ? 0 : cur.length > 0 ? cur.length : 2 };
+    commitSegments(next);
   };
+  const setSegLen = (i: number, v: number) => {
+    const next = segments.slice();
+    next[i] = { ...next[i], length: Math.max(0, v) };
+    commitSegments(next);
+  };
+  const addSegOf = (type: LineSegmentType) =>
+    commitSegments([...segments, { type, length: type === "dot" ? 0 : 2 }]);
+  const removeSeg = (i: number) => commitSegments(segments.filter((_, k) => k !== i));
 
   return (
     <div className="res-md-detail-inner">
@@ -1319,13 +1337,16 @@ function LineStyleDetail({
           </FieldRow>
         ) : (
           <>
-            <FieldRow label={t("resources.col.stroke")}>
-              <Segmented
-                value={isSolid ? "solid" : "dash"}
-                onChange={setStroke}
+            {/* Schnell-Presets: Volllinie / Strichlinie / Punktlinie / Strich-Punkt. */}
+            <FieldRow label={t("resources.linePreset.label")}>
+              <Segmented<string>
+                value={preset}
+                onChange={(p) => applyPreset(p as LinePresetKey)}
                 options={[
-                  { value: "solid", label: t("resources.stroke.solid") },
-                  { value: "dash", label: t("resources.stroke.dash") },
+                  { value: "solid", label: t("resources.linePreset.solid") },
+                  { value: "dash", label: t("resources.linePreset.dash") },
+                  { value: "dot", label: t("resources.linePreset.dot") },
+                  { value: "dashDot", label: t("resources.linePreset.dashDot") },
                 ]}
               />
             </FieldRow>
@@ -1334,26 +1355,29 @@ function LineStyleDetail({
                 label={t("resources.dash.segments")}
                 hint={t("resources.dash.hint")}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 4,
-                    alignItems: "center",
-                  }}
-                >
-                  {dashArr.map((v, i) => (
-                    <span
-                      key={i}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 2 }}
-                    >
-                      <span style={{ width: 46 }}>
-                        <NumberField
-                          value={v}
-                          onChange={(x) => setSeg(i, x)}
-                          step={0.5}
-                          min={0}
-                        />
+                <div className="line-seg-editor">
+                  {segments.map((seg, i) => (
+                    <div className="line-seg-row" key={i}>
+                      <SelectField
+                        value={seg.type}
+                        onChange={(type) => setSegType(i, type)}
+                        options={[
+                          { value: "dash", label: t("resources.seg.dash") },
+                          { value: "dot", label: t("resources.seg.dot") },
+                          { value: "gap", label: t("resources.seg.gap") },
+                        ]}
+                      />
+                      <span className="line-seg-num">
+                        {seg.type === "dot" ? (
+                          <span className="line-seg-dotlabel">0</span>
+                        ) : (
+                          <NumberField
+                            value={seg.length}
+                            onChange={(x) => setSegLen(i, x)}
+                            step={0.5}
+                            min={0}
+                          />
+                        )}
                       </span>
                       <button
                         type="button"
@@ -1364,17 +1388,34 @@ function LineStyleDetail({
                       >
                         ×
                       </button>
-                    </span>
+                    </div>
                   ))}
-                  <button
-                    type="button"
-                    className="res-seg-btn"
-                    title={t("resources.dash.add")}
-                    onClick={addSeg}
-                    style={{ padding: "2px 8px", lineHeight: 1 }}
-                  >
-                    + {t("resources.dash.add")}
-                  </button>
+                  <div className="line-seg-add">
+                    <button
+                      type="button"
+                      className="res-seg-btn"
+                      onClick={() => addSegOf("dash")}
+                      style={{ padding: "2px 8px", lineHeight: 1 }}
+                    >
+                      {t("resources.seg.addDash")}
+                    </button>
+                    <button
+                      type="button"
+                      className="res-seg-btn"
+                      onClick={() => addSegOf("dot")}
+                      style={{ padding: "2px 8px", lineHeight: 1 }}
+                    >
+                      {t("resources.seg.addDot")}
+                    </button>
+                    <button
+                      type="button"
+                      className="res-seg-btn"
+                      onClick={() => addSegOf("gap")}
+                      style={{ padding: "2px 8px", lineHeight: 1 }}
+                    >
+                      {t("resources.seg.addGap")}
+                    </button>
+                  </div>
                 </div>
               </FieldRow>
             )}

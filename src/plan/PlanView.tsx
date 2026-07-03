@@ -21,6 +21,7 @@ import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { quantizePen } from "../export/sceneToPrintSvg";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
+import { dashHasDot } from "../ui/lineSegments";
 
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
@@ -2423,6 +2424,8 @@ function HatchPattern({
         .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
         .join(" ")
     : undefined;
+  // Punktmuster in den Musterlinien: runde Kappe → Dots (Punkt/Strich-Punkt).
+  const dashCap = dashHasDot(hatch.dash) ? ("round" as const) : undefined;
 
   if (hatch.kind === "image" && hatch.image) {
     // Bild-Schraffur: gekacheltes <image>-Muster. Kachel-Basismaß in viewBox-
@@ -2468,6 +2471,7 @@ function HatchPattern({
           stroke={hatch.color}
           strokeWidth={sw}
           strokeDasharray={dashes}
+          strokeLinecap={dashCap}
           vectorEffect={vfx}
         />
       </pattern>
@@ -2493,6 +2497,7 @@ function HatchPattern({
         stroke={hatch.color}
         strokeWidth={sw}
         strokeDasharray={dashes}
+        strokeLinecap={dashCap}
         vectorEffect={vfx}
       />
       {hatch.pattern === "crosshatch" && (
@@ -2504,6 +2509,7 @@ function HatchPattern({
           stroke={hatch.color}
           strokeWidth={sw}
           strokeDasharray={dashes}
+          strokeLinecap={dashCap}
           vectorEffect={vfx}
         />
       )}
@@ -2668,6 +2674,9 @@ function DrawingRunShape({
       ? motifPoints(run.pts[0], run.pts[run.pts.length - 1], run.motif, DASH_MM_TO_M)
       : run.pts;
   const pts = modelPts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
+  // Punktmuster (dash enthält eine 0): runde Kappe, damit die 0-Längen-Segmente
+  // als Dots erscheinen (Punktlinie / Strich-Punkt).
+  const cap = dashHasDot(run.dash) ? ("round" as const) : undefined;
   const shape = run.closed ? (
     <polygon
       points={pts}
@@ -2676,6 +2685,7 @@ function DrawingRunShape({
       stroke={run.color}
       strokeWidth={sw}
       strokeDasharray={dashStr}
+      strokeLinecap={cap}
       vectorEffect={vfx}
     />
   ) : (
@@ -2686,6 +2696,7 @@ function DrawingRunShape({
       stroke={run.color}
       strokeWidth={sw}
       strokeDasharray={dashStr}
+      strokeLinecap={cap}
       vectorEffect={vfx}
     />
   );
@@ -2912,6 +2923,7 @@ function renderPrimitive(
           stroke={p.color}
           strokeWidth={weight(p.weightMm)}
           strokeDasharray={dashOf(p.dash)}
+          strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />
       );
@@ -2934,6 +2946,7 @@ function renderPrimitive(
           className={p.cls}
           strokeWidth={weight(p.weightMm)}
           strokeDasharray={dashOf(p.dash)}
+          strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />
       );

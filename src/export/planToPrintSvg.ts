@@ -24,6 +24,7 @@
 import type { HatchRender, Plan, Primitive } from "../plan/generatePlan";
 import type { Vec2 } from "../model/types";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints } from "../plan/glPlan/glPlanHatch";
+import { dashHasDot } from "../ui/lineSegments";
 
 /** SVG-Namespace für die programmatisch erzeugten Knoten. */
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -403,6 +404,8 @@ function arcNode(
   el.setAttribute("stroke-width", String(quantizePen(p.weightMm)));
   if (p.dash && p.dash.length) {
     el.setAttribute("stroke-dasharray", p.dash.map((x) => round(x)).join(" "));
+    // Punktmuster (dash enthält eine 0): runde Kappe → Dots am Bogen.
+    if (dashHasDot(p.dash)) el.setAttribute("stroke-linecap", "round");
   }
   return el;
 }
