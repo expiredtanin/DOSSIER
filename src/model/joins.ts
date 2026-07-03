@@ -8,6 +8,7 @@ import { getWallType, wallTypeThickness } from "./types";
 import { wallReferenceOffset } from "./wall";
 import {
   add,
+  dot,
   leftNormal,
   len,
   lineIntersect,
@@ -94,9 +95,16 @@ const dirOf = (w: Wall): Vec2 => normalize(sub(w.end, w.start));
 
 /**
  * Gemeinsame Gehrungslinie zweier Wände A, B, die sich im Knoten J treffen.
- * Robust gegen beliebige Wicklung und ungleiche Dicken: A's Außenfläche wird
- * mit der NÄCHSTGELEGENEN Fläche von B verschnitten, A's Innenfläche mit der
- * jeweils anderen. Die Gerade durch beide Eckpunkte ist die Gehrung.
+ * Robust gegen beliebige Wicklung, ungleiche Dicken und JEDEN Öffnungswinkel
+ * (inkl. spitzer): Die Wandflächen werden orientierungsbasiert (vorzeichen­
+ * richtig) gepaart — A's Außenfläche verschneidet B's Außenfläche zum äußeren
+ * Apex, A's Innenfläche B's Innenfläche zum inneren Apex. „Außen" ist jeweils
+ * die vom Körper der anderen Wand ABGEWANDTE Fläche. Die Gerade durch beide
+ * Apexe ist die Gehrung; sie trennt beide Wandbänder überlappungsfrei.
+ *
+ * Die frühere Distanz-Heuristik („nächstgelegene B-Fläche") kippt bei spitzen
+ * Winkeln — dort wird die falsche Fläche zur näheren, sodass Außen mit Innen
+ * gepaart wird und die Poché-Bänder sich kreuzweise überlappen.
  */
 function miterLine(
   project: Project,
@@ -119,18 +127,33 @@ function miterLine(
   const offA = wallReferenceOffset(a, tA);
   const offB = wallReferenceOffset(b, tB);
 
-  // Flächen-Stützpunkte am Knoten (linke/rechte Wandseite), inkl. Referenzversatz.
+  // Flächen-Stützpunkte am Knoten: linke Fläche liegt auf +n, rechte auf −n
+  // (inkl. Referenzversatz).
   const pLA = add(j, scale(nA, offA + tA / 2));
   const pRA = add(j, scale(nA, offA - tA / 2));
   const pLB = add(j, scale(nB, offB + tB / 2));
   const pRB = add(j, scale(nB, offB - tB / 2));
 
-  // Für A's linke Fläche die nähere B-Fläche wählen; A's rechte bekommt die andere.
-  const lbCloser =
-    len(sub(pLA, pLB)) <= len(sub(pLA, pRB));
-  const bForLeft = lbCloser ? pLB : pRB;
-  const bForRight = lbCloser ? pRB : pLB;
+  // Auslauf-Richtungen der Achsen vom Knoten weg, in den jeweiligen Wandkörper.
+  const dA = aEnd === "start" ? uA : scale(uA, -1);
+  const bAtStart = len(sub(b.start, j)) <= len(sub(b.end, j));
+  const dB = bAtStart ? uB : scale(uB, -1);
 
+  // Orientierungsbasierte, vorzeichenrichtige Flächen-Paarung. „Außen" ist die
+  // vom Körper der anderen Wand ABGEWANDTE Fläche: A's +nA-Fläche (pLA) liegt
+  // außen, wenn nA·dB < 0; B's +nB-Fläche (pLB) außen, wenn nB·dA < 0. Gepaart
+  // wird Außen-mit-Außen und Innen-mit-Innen — nie über Kreuz. (nA·dB = 0 tritt
+  // nur bei kollinearen Achsen auf; dann sind die Flächen parallel und
+  // lineIntersect liefert unten ohnehin null.)
+  const bOuter = dot(nB, dA) < 0 ? pLB : pRB;
+  const bInner = dot(nB, dA) < 0 ? pRB : pLB;
+  const aLeftIsOuter = dot(nA, dB) < 0;
+  const bForLeft = aLeftIsOuter ? bOuter : bInner;
+  const bForRight = aLeftIsOuter ? bInner : bOuter;
+
+  // c1 an A's linke Fläche (pLA), c2 an A's rechte (pRA) gebunden — Reihenfolge
+  // wie zuvor, damit rechte/stumpfe Ecken bit-identisch bleiben; nur die
+  // B-Partnerwahl ist jetzt orientierungs- statt distanzbasiert.
   const c1 = lineIntersect(pLA, uA, bForLeft, uB);
   const c2 = lineIntersect(pRA, uA, bForRight, uB);
   if (!c1 || !c2) return null;

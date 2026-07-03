@@ -19,6 +19,9 @@ export const leftNormal = (a: Vec2): Vec2 => ({ x: -a.y, y: a.x });
 /** Kreuzprodukt (Z-Komponente) zweier 2D-Vektoren. */
 export const cross = (p: Vec2, q: Vec2): number => p.x * q.y - p.y * q.x;
 
+/** Skalarprodukt zweier 2D-Vektoren. */
+export const dot = (p: Vec2, q: Vec2): number => p.x * q.x + p.y * q.y;
+
 /** Eine unendliche Gerade als Stützpunkt + Richtung. */
 export interface Line {
   point: Vec2;
