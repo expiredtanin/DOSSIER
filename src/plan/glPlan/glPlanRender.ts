@@ -193,13 +193,13 @@ export class PlanGpuRenderer {
 
   /**
    * Striche. Zwei Skalierungs-Regime pro Batch (siehe `LineBatch.screenPx`):
-   *  • Papier-mm (Standard) — Wand-/Objekt-Umrisse: massstabs- + zoomrichtig
-   *    über `mmToDevicePx`.
-   *  • Bildschirm-px (`screenPx`) — Schraffur-Musterlinien: NUR mit `meet`
-   *    (Zoom) skaliert, unabhängig vom Papier-Massstab N — exakt wie der SVG-
-   *    `hatchStrokePx`-Pfad (`patternUnits="userSpaceOnUse"`, keine
-   *    `printStrokeVb`-Umrechnung) und der PDF-Export (`toRenderScene.ts`,
-   *    `widthScreen: true`).
+   *  • Papier-mm (Standard) — Wand-/Objekt-Umrisse UND Schraffur-Musterlinien
+   *    (letztere seit dem Haarlinien-Fix ein gewöhnlicher 0.02-mm-Stift wie
+   *    die Wand-Schichtfugen): massstabs- + zoomrichtig über `mmToDevicePx`.
+   *  • Bildschirm-px (`screenPx`) — für etwaige künftige rein bildschirm-
+   *    gekoppelte Linien: NUR mit `meet` (Zoom) skaliert, unabhängig vom
+   *    Papier-Massstab N. Aktuell von keinem Batch mehr genutzt, Infrastruktur
+   *    bleibt erhalten.
    */
   private drawLines(
     geometry: GpuGeometry,

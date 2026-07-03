@@ -27,9 +27,9 @@ export const sampleProject: Project = {
     // Feinste Haarlinie für die SIA-Schnittschraffuren (Beton/Backstein/Dämmung):
     // Gewicht unter der Bildschirm-Untergrenze, damit die Musterlinien als dünnste
     // Haarlinie (Stroke-Minimum) rendern.
-    { id: "hatch-hair", name: "Schraffur-Haarlinie", weight: 0.05, color: "#1a1a1a", dash: null },
+    { id: "hatch-hair", name: "Schraffur-Haarlinie", weight: 0.02, color: "#1a1a1a", dash: null },
     // Gestrichelte Haarlinie für die Dämmung (Striche quer durch die Wanddicke).
-    { id: "hatch-dash", name: "Dämmungsstrich", weight: 0.05, color: "#1a1a1a", dash: [0.35, 0.3] },
+    { id: "hatch-dash", name: "Dämmungsstrich", weight: 0.02, color: "#1a1a1a", dash: [0.35, 0.3] },
   ],
   // Schraffuren: color = Linien-/Vollfüllfarbe des Musters; angle in Grad.
   // "none" = keine Schraffur (nur Component-Füllung).
@@ -164,7 +164,7 @@ export const sampleProject: Project = {
       code: "20",
       name: "Wände",
       color: "#0a0a0a",
-      lw: 0.5,
+      lw: 0.35,
       visible: true,
       locked: false,
       children: [

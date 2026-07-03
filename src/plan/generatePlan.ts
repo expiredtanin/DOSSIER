@@ -69,8 +69,8 @@ import { computeJoins } from "../model/joins";
 import type { WallCuts } from "../model/joins";
 import type { SectionOutput } from "./toSection";
 
-/** Stroke-Farbe der Schicht-Polygone (dunkles Grau). */
-const POCHE_STROKE = "#2b3039";
+/** Stroke-Farbe der Schicht-Polygone (neutrales Schwarz, geteilte Tinte mit der Schraffur). */
+const POCHE_STROKE = "#1a1a1a";
 
 /** Tinte für den Schwarz-Weiss-Modus: einheitliches Dunkel für alle Striche. */
 const MONO_INK = "#111111";
@@ -80,8 +80,8 @@ const MONO_INK = "#111111";
 // dpi = 96·devicePixelRatio in konstante Bildschirm-Pixel um (non-scaling-stroke),
 // damit Linien beim Zoomen ihre Papiergröße behalten und der Massstab stimmt.
 
-/** Dünne Trennlinie zwischen den Schichten (Schichtfugen) in mm. */
-const LAYER_LINE_MM = 0.13;
+/** Haarlinie zwischen den Schichten (Schichtfugen) in mm — gleiche Stärke wie die Schraffur-Tinte. */
+const LAYER_LINE_MM = 0.02;
 /** Stärke der Wand-Umrisslinie je Detailgrad, als Faktor auf die Ebenen-lw. */
 const OUTLINE_DETAIL_FACTOR: Record<DetailLevel, number> = {
   grob: 1.6, // dickere Sammellinie

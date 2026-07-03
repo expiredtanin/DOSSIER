@@ -57,8 +57,10 @@ export interface RPolyline {
   z: number;
   /**
    * true: `widthMm` trägt BILDSCHIRM-Einheiten (viewBox-px, zoom-skalierend)
-   * statt Papier-mm — für Schraffur-Striche, deren Breite im SVG an die
-   * Musterkachel gekoppelt ist (`hatchStrokePx`), nicht an Papier-mm.
+   * statt Papier-mm. Aktuell von keinem Primitiv mehr gesetzt — auch die
+   * Schraffur läuft inzwischen als gewöhnlicher Papier-mm-Stift (0.02 mm,
+   * gleiche Tinte wie die Wand-Schichtfugen). Feld bleibt für etwaige
+   * zukünftige Bildschirm-gekoppelte Linien erhalten.
    */
   widthScreen?: boolean;
 }
@@ -376,11 +378,10 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
           undefined,
           p.greyed,
         );
-        // Strichbreite wie das SVG-Muster (`hatchStrokePx`): in viewBox-px, an
-        // die Kachel gekoppelt und mit dem Zoom skalierend — NICHT Papier-mm
-        // (sonst wird die Schraffur bei kleinen Masstäben zur Haarlinie).
+        // Strichbreite: ein GEWÖHNLICHER Papier-mm-Stift (0.02 mm), wie jede
+        // andere Linie — nicht mehr an die Musterkachel/Bildschirm-px
+        // gekoppelt (siehe RPolyline.widthScreen-Kommentar).
         const hatchMm = p.hatch.lineWeight > 0 ? p.hatch.lineWeight : 0.13;
-        const hatchPx = Math.max(0.6, hatchMm * (1 / 0.13));
         const runs = applyDashRuns(buildHatchRuns(p.pts, p.hatch), p.hatch.dash);
         // Alle Musterläufe eines Polygons teilen EIN z (überlappen einander nicht).
         const hatchZ = zc++;
@@ -389,8 +390,7 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
             polylines.push({
               pts: run.map((v) => [v.x, v.y]),
               color: hatchCol,
-              widthMm: hatchPx,
-              widthScreen: true,
+              widthMm: hatchMm,
               z: hatchZ,
             });
           }

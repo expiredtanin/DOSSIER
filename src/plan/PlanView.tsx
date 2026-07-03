@@ -1699,7 +1699,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       >
       <defs>
         {hatched.map((h) => (
-          <HatchPattern key={h.patternId} id={h.patternId} hatch={h.hatch} />
+          <HatchPattern
+            key={h.patternId}
+            id={h.patternId}
+            hatch={h.hatch}
+            hairline={!!hairline}
+            paperScale={paperScale}
+          />
         ))}
       </defs>
       {/* Zeichenblatt-Hintergrund: deckt den aktuellen Ausschnitt (viewBox)
@@ -2348,27 +2354,36 @@ function needsPattern(pattern: HatchRender["pattern"]): boolean {
 }
 
 /**
- * Übersetzt eine Linienstärke (mm) in Bildschirm-Pixel für Musterlinien.
- * Bei 0.13 mm ergibt sich ~1 px (entspricht der bisherigen Dämmungs-/
- * Diagonal-Strichstärke), damit die Schraffuren wie zuvor aussehen.
- */
-const hatchStrokePx = (weightMm: number): number =>
-  Math.max(0.6, weightMm * (1 / 0.13));
-
-/** Strichmuster (mm) → SVG dasharray (px) oder undefined (durchgezogen). */
-function dashArray(dash: number[] | null): string | undefined {
-  if (!dash || dash.length === 0) return undefined;
-  return dash.map((d) => d * (1 / 0.13)).join(" ");
-}
-
-/**
  * Ein parametrisiertes Schraffur-<pattern>. Maßstab skaliert die Kachelgröße,
  * Winkel dreht das Muster (patternTransform), Farbe/Linienstärke kommen aus dem
- * aufgelösten Hatch/LineStyle.
+ * aufgelösten Hatch/LineStyle. Die Musterlinie ist ein GEWÖHNLICHER Papier-mm-
+ * Stift (wie jede andere Linie) — dieselbe Display-/Print-Logik wie
+ * `renderPrimitive`: Display = konstante Haarlinie (Bildschirm-px, via
+ * non-scaling-stroke), Print = echte, PEN_STEPS-gequantelte Papier-mm.
  */
-function HatchPattern({ id, hatch }: { id: string; hatch: HatchRender }) {
-  const sw = hatchStrokePx(hatch.lineWeight);
-  const dashes = dashArray(hatch.dash);
+function HatchPattern({
+  id,
+  hatch,
+  hairline,
+  paperScale,
+}: {
+  id: string;
+  hatch: HatchRender;
+  hairline: boolean;
+  paperScale: number | null;
+}) {
+  const print = !hairline && paperScale != null && paperScale > 0;
+  const sw = hairline
+    ? HAIRLINE_PX
+    : print
+      ? printStrokeVb(quantizePen(hatch.lineWeight), paperScale!)
+      : mmToPx(hatch.lineWeight);
+  const vfx = print ? undefined : ("non-scaling-stroke" as const);
+  const dashes = hatch.dash?.length
+    ? hatch.dash
+        .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
+        .join(" ")
+    : undefined;
 
   if (hatch.pattern === "insulation") {
     // Weiche Zickzack-/Wellenlinie (SIA-nah). Kachel 14×10 × Maßstab.
@@ -2394,6 +2409,7 @@ function HatchPattern({ id, hatch }: { id: string; hatch: HatchRender }) {
           stroke={hatch.color}
           strokeWidth={sw}
           strokeDasharray={dashes}
+          vectorEffect={vfx}
         />
       </pattern>
     );
@@ -2418,6 +2434,7 @@ function HatchPattern({ id, hatch }: { id: string; hatch: HatchRender }) {
         stroke={hatch.color}
         strokeWidth={sw}
         strokeDasharray={dashes}
+        vectorEffect={vfx}
       />
       {hatch.pattern === "crosshatch" && (
         <line
@@ -2428,6 +2445,7 @@ function HatchPattern({ id, hatch }: { id: string; hatch: HatchRender }) {
           stroke={hatch.color}
           strokeWidth={sw}
           strokeDasharray={dashes}
+          vectorEffect={vfx}
         />
       )}
     </pattern>

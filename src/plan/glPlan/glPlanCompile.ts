@@ -389,25 +389,21 @@ export function compilePrimitivesToGpu(
       // aufs Polygon geclippt (konkav-fähig, even-odd). Musterlinien fließen als
       // zusammenhängende Läufe in `strokePolyline` → glatte, RUND gekappte/
       // -verbundene Übergänge (insb. die Dämmungswelle bleibt spitzenfrei).
-      // BREITE — bewusst NICHT die Papier-mm-Pipeline (das ist Massstabs-N-
-      // abhängig, s. `strokeMm` unten): der SVG-Referenzpfad zeichnet die
-      // Musterlinie mit `hatchStrokePx` (PlanView.tsx) — einer FESTEN
-      // Bildschirm-Raum-Breite (`max(0.6, weightMm/0.13)` viewBox-px), die NUR
-      // mit dem Zoom (nicht mit dem Papier-Massstab N) skaliert. Die Papier-mm-
-      // Pipeline hier stattdessen zu verwenden multipliziert die Breite
-      // zusätzlich mit N/1000·PX_PER_M — bei grossen/live abgeleiteten N (siehe
-      // `paperScaleForGl` in PlanView) wird die Schraffur dadurch sichtbar zu
-      // DICK. `screenPx=true` markiert den Batch dafür, dass der Renderer NUR
-      // mit `meet` (Zoom) statt mit `mmToDevicePx` (Papier-Massstab) skaliert —
-      // exakt der SVG-Formel entsprechend (siehe glPlanRender.drawLines).
+      // BREITE — die Schraffur ist jetzt ein GEWÖHNLICHER Papier-mm-Stift, mit
+      // derselben LineStyle-Stärke (0.02 mm) wie die Wand-Schichtfugen, und
+      // läuft durch dieselbe STANDARD-Pipeline wie jede andere Linie
+      // (screenPx=false). `paperScaleForGl` liefert im Bildschirm-/Haarlinien-
+      // Modus den reziproken `meet`-Massstab, wodurch `mmToDevicePx` dort
+      // zoomunabhängig konstant bleibt — die Schraffur erscheint als konstante
+      // Haarlinie wie jede Wandlinie, und im Druckmodus als echte 0.02 mm,
+      // deckungsgleich mit den Schichtfugen in beiden Modi.
       // `hatch.dash` wird geometrisch (Strich/Lücke) aufgelöst, da die GL-
       // Linien-Pipeline kein Dash kennt.
       if (prim.hatch && prim.hatch.pattern !== 'none' && prim.hatch.pattern !== 'solid') {
         const hatchColor = parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1];
         const hatchMm = prim.hatch.lineWeight > 0 ? prim.hatch.lineWeight : 0.13;
-        const hatchStrokeVb = Math.max(0.6, hatchMm * (1 / 0.13));
         const runs = applyDashRuns(buildHatchRuns(prim.pts, prim.hatch), prim.hatch.dash);
-        for (const run of runs) strokePolyline(run, false, hatchColor, hatchStrokeVb, true);
+        for (const run of runs) strokePolyline(run, false, hatchColor, hatchMm, false);
       }
       // Umriss (crispe Kante) — geschlossener Ring, GEHRT (kein Stufen-Cap an
       // Ecken). Breite = ECHTE Papier-mm; der Renderer rechnet massstabs-/
