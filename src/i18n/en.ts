@@ -496,6 +496,10 @@ export const en: Record<TranslationKey, string> = {
   "resources.col.prio.hint": "Higher priority runs through at the join",
   "resources.col.texture": "Texture",
   "resources.col.material": "Material",
+  "resources.col.foreground": "Foreground",
+  "resources.col.foreground.hint": "Color of the pattern/hatch lines (foreground)",
+  "resources.col.background": "Background",
+  "resources.col.background.hint": "Fill color (poché/background)",
   "resources.delete.component": "Delete component “{name}”",
 
   // 3D material (PBR) — built-in library + upload.
@@ -547,6 +551,22 @@ export const en: Record<TranslationKey, string> = {
   "resources.col.lineStyle": "Line style",
   "resources.lineStyle.none": "— none —",
   "resources.delete.hatch": "Delete hatch “{name}”",
+
+  // Hatch/line type (master-detail editor).
+  "resources.field.type": "Type",
+  "resources.field.lines": "Lines",
+  "resources.field.image": "Image",
+  "resources.field.scaleX": "Scale X",
+  "resources.field.scaleY": "Scale Y",
+  "resources.field.rotation": "Rotation °",
+  "resources.field.amplitude": "Amplitude",
+  "resources.field.wavelength": "Wavelength",
+  "resources.hatchKind.vector": "Vector",
+  "resources.hatchKind.image": "Image",
+  "resources.lines.parallel": "Parallel",
+  "resources.lines.random": "Random",
+  "resources.lineKind.dash": "Dash",
+  "resources.lineKind.zigzag": "Zigzag",
 
   "pattern.none": "None",
   "pattern.solid": "Solid",

@@ -2315,6 +2315,178 @@ body {
   background: var(--panel-2);
 }
 
+/* ── Master-Detail (Schraffuren / Linien): Liste links, Detail rechts ──────── */
+.res-md {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 14px;
+  align-items: start;
+  min-height: 320px;
+}
+.res-md-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  max-height: 62vh;
+  overflow-y: auto;
+}
+.res-md-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.res-md-row:hover {
+  background: var(--accent-dim);
+}
+.res-md-row.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.res-md-row-thumb {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.res-md-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+/* Linien-Zeile: Name oben schmal, Swatch daneben rechts. */
+.res-md-row-line .res-line-preview {
+  flex: 0 0 auto;
+  width: 150px;
+  min-width: 0;
+}
+.res-md-listfoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 4px 2px;
+}
+.res-md-empty {
+  padding: 22px 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Detail-Panel (rechts). */
+.res-md-detail {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  min-height: 300px;
+}
+.res-md-detail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 18px;
+}
+.res-md-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.res-md-rename {
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 600;
+}
+.res-md-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--input);
+  color: var(--ink);
+}
+.res-md-preview .res-line-preview {
+  border: none;
+  background: transparent;
+}
+
+/* Detail-Felder: Label links, Steuerelement rechts. */
+.res-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.res-field {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.res-field-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.res-field-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.res-field-control > * {
+  min-width: 0;
+}
+
+/* Segmentierter Umschalter (Pillen-Gruppe). */
+.res-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input);
+}
+.res-seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 4px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.res-seg-btn:hover {
+  color: var(--ink);
+}
+.res-seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Schraffur-Swatch (kleine Vorschau in Liste + große im Detail). */
+.res-swatch {
+  border-radius: 3px;
+}
+
 /* ══ Panel-Chrome (Andockrahmen: Docks, Tabs, Panel-Rahmen) ═══════════════════
    Der erweiterbare Rahmen: links/rechts je ein Dock mit Tab-Leiste und dem
    aktiven Panel. Greift dieselben Tokens wie die nav- und res-Klassen (dunkles DOSSIER-

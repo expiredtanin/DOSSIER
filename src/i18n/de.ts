@@ -500,6 +500,10 @@ export const de = {
   "resources.col.prio.hint": "Höhere Priorität läuft am Stoß durch",
   "resources.col.texture": "Textur",
   "resources.col.material": "Material",
+  "resources.col.foreground": "Vordergrund",
+  "resources.col.foreground.hint": "Farbe der Muster-/Schraffurlinien (Vordergrund)",
+  "resources.col.background": "Hintergrund",
+  "resources.col.background.hint": "Füllfarbe (Poché/Hintergrund)",
   "resources.delete.component": "Bauteil „{name}\" löschen",
 
   // 3D-Material (PBR) — Bibliotheks-Auswahl + Upload.
@@ -552,6 +556,22 @@ export const de = {
   "resources.col.lineStyle": "Linienstil",
   "resources.lineStyle.none": "— ohne —",
   "resources.delete.hatch": "Schraffur „{name}\" löschen",
+
+  // Schraffur-/Linien-Typ (Master-Detail-Editor).
+  "resources.field.type": "Typ",
+  "resources.field.lines": "Striche",
+  "resources.field.image": "Bild",
+  "resources.field.scaleX": "Skalierung X",
+  "resources.field.scaleY": "Skalierung Y",
+  "resources.field.rotation": "Rotation °",
+  "resources.field.amplitude": "Amplitude",
+  "resources.field.wavelength": "Wellenlänge",
+  "resources.hatchKind.vector": "Vektor",
+  "resources.hatchKind.image": "Bild",
+  "resources.lines.parallel": "Parallel",
+  "resources.lines.random": "Zufällig",
+  "resources.lineKind.dash": "Strich",
+  "resources.lineKind.zigzag": "Zickzack",
 
   // Schraffur-Muster.
   "pattern.none": "Ohne",

@@ -42,6 +42,7 @@ import {
 } from "../materials/ambientcg";
 import { requestMaterialPreview, cancelMaterialPreview } from "../materials/spherePreview";
 import { EyeIcon } from "./EyeIcon";
+import { HatchSwatch, LineSwatch } from "./hatchPreview";
 import { t } from "../i18n";
 
 // ── Auswahl-Optionen (UI-Beschriftung übersetzt, Werte englisch) ───────────
@@ -210,6 +211,62 @@ function DeleteButton({ onClick, title }: { onClick: () => void; title: string }
   );
 }
 
+// ── Master-Detail-Bausteine (DOSSIER-Stil: Liste links, Detail rechts) ──────
+
+/**
+ * Segmentierter Umschalter (Pillen-Gruppe) für kleine, sich ausschließende
+ * Auswahlen — z. B. Schraffur-Typ Vektor/Bild oder Linien-Typ Strich/Zickzack.
+ */
+function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+}) {
+  return (
+    <div className="res-seg" role="group">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          className={`res-seg-btn${value === o.value ? " active" : ""}`}
+          aria-pressed={value === o.value}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Eine beschriftete Detail-Zeile (Label links, Steuerelement rechts). Bewusst
+ * ein <div> (kein <label>): Zeilen enthalten teils mehrere interaktive Elemente
+ * (Segmented-Buttons), und ein umschließendes <label> würde den Klick an das
+ * ERSTE labelbare Kind umleiten — das würde einen Segment-Klick sofort wieder
+ * zurücksetzen. Die Steuerelemente sind selbst klickbar; ein Label ist unnötig.
+ */
+function FieldRow({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="res-field" title={hint}>
+      <span className="res-field-label">{label}</span>
+      <span className="res-field-control">{children}</span>
+    </div>
+  );
+}
+
 // ── Tabellen-Gerüst ────────────────────────────────────────────────────────
 
 /** Eine Spaltendefinition: Titel-Key + optionale rechtsbündige Ausrichtung. */
@@ -283,10 +340,11 @@ function ResCell({
 
 // ── Bauteile (Components) ──────────────────────────────────────────────────
 
-// Spalten: Name | Farbe | Schnittschraffur | Ansichtsschraffur | Prio | Textur | Material | (löschen).
+// Spalten: Name | Vordergrund | Hintergrund | Schnittschraffur | Ansichtsschraffur | Prio | Textur | Material | (löschen).
 const COMPONENT_COLUMNS: ResColumn[] = [
   { titleKey: "resources.col.name" },
-  { titleKey: "resources.col.color" },
+  { titleKey: "resources.col.foreground", hintKey: "resources.col.foreground.hint" },
+  { titleKey: "resources.col.background", hintKey: "resources.col.background.hint" },
   { titleKey: "resources.col.hatch" },
   { titleKey: "resources.col.viewHatch" },
   {
@@ -299,7 +357,7 @@ const COMPONENT_COLUMNS: ResColumn[] = [
   { titleKey: "" },
 ];
 const COMPONENT_TEMPLATE =
-  "minmax(120px, 1fr) auto minmax(120px, 0.8fr) minmax(120px, 0.8fr) 64px minmax(90px, 0.7fr) minmax(130px, 0.9fr) 36px";
+  "minmax(120px, 1fr) auto auto minmax(120px, 0.8fr) minmax(120px, 0.8fr) 64px minmax(90px, 0.7fr) minmax(130px, 0.9fr) 36px";
 
 /**
  * Material-Zelle der Bauteil-Tabelle: ein Button, der den aktuellen Material-
@@ -782,9 +840,18 @@ function ComponentRow({
         />
       </ResCell>
       <ResCell>
+        {/* Vordergrund = Farbe der Muster-/Schraffurlinien. Fehlt sie, greift
+            als Anzeige-Fallback `color`; das Setzen definiert `foreground`. */}
         <ColorField
-          color={component.color}
-          onChange={(color) => onPatch({ color })}
+          color={component.foreground ?? component.color}
+          onChange={(foreground) => onPatch({ foreground })}
+        />
+      </ResCell>
+      <ResCell>
+        {/* Hintergrund = Füllung (Poché). Fehlt sie, gilt `color` als Fallback. */}
+        <ColorField
+          color={component.background ?? component.color}
+          onChange={(background) => onPatch({ background })}
         />
       </ResCell>
       <ResCell>
@@ -869,21 +936,8 @@ function ComponentsTab({
 
 // ── Schraffuren (Hatches) ──────────────────────────────────────────────────
 
-// Spalten: Name | Muster | Maßstab | Winkel | Farbe | Linienstil | (löschen).
-const HATCH_COLUMNS: ResColumn[] = [
-  { titleKey: "resources.col.name" },
-  { titleKey: "resources.col.pattern" },
-  { titleKey: "resources.col.scale", align: "right" },
-  { titleKey: "resources.col.angle", align: "right" },
-  { titleKey: "resources.col.relativeToWall" },
-  { titleKey: "resources.col.color" },
-  { titleKey: "resources.col.lineStyle" },
-  { titleKey: "" },
-];
-const HATCH_TEMPLATE =
-  "minmax(110px, 1fr) minmax(120px, 0.9fr) 64px 60px 64px auto minmax(120px, 0.9fr) 36px";
-
-function HatchRow({
+/** Detail-Panel EINER Schraffur (rechte Seite des Master-Detail-Layouts). */
+function HatchDetail({
   hatch,
   lineStyles,
   onPatch,
@@ -894,71 +948,155 @@ function HatchRow({
   onPatch: (patch: Partial<HatchStyle>) => void;
   onDelete: () => void;
 }) {
-  // Sentinel-Eintrag „— ohne —", da lineStyleId optional ist.
   const NONE = "__none__";
   const lineOptions = [
     { value: NONE, label: t("resources.lineStyle.none") },
     ...lineStyles.map((l) => ({ value: l.id, label: l.name })),
   ];
+  const kind = hatch.kind ?? "vector";
+  const lines = hatch.lines ?? "parallel";
+
+  /** Wechselt den Typ; beim Umschalten auf „Bild" Default-Bildparameter setzen. */
+  const setKind = (k: "vector" | "image") => {
+    if (k === "image" && !hatch.image) {
+      onPatch({ kind: k, image: { src: "", scaleX: 1, scaleY: 1, rotation: 0 } });
+    } else {
+      onPatch({ kind: k });
+    }
+  };
+
+  /** Merge-Patch für die Bild-Parameter (behält bestehende Werte). */
+  const patchImage = (part: Partial<NonNullable<HatchStyle["image"]>>) => {
+    const cur = hatch.image ?? { src: "", scaleX: 1, scaleY: 1, rotation: 0 };
+    onPatch({ image: { ...cur, ...part } });
+  };
+
+  /** Datei → Data-URL (readAsDataURL) → image.src. */
+  const loadImage = (file: File | null) => {
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => patchImage({ src: String(r.result ?? "") });
+    r.readAsDataURL(file);
+  };
+
   return (
-    <ResRow>
-      <ResCell>
-        <TextField
-          value={hatch.name}
-          onChange={(name) => onPatch({ name })}
-          placeholder={t("resources.hatches.placeholder")}
-        />
-      </ResCell>
-      <ResCell>
-        <SelectField
-          value={hatch.pattern}
-          onChange={(pattern) => onPatch({ pattern })}
-          options={PATTERN_OPTIONS.map((o) => ({
-            value: o.value,
-            label: t(o.labelKey),
-          }))}
-        />
-      </ResCell>
-      <ResCell align="right">
-        <NumberField
-          value={hatch.scale}
-          onChange={(scale) => onPatch({ scale })}
-          step={0.1}
-          min={0.01}
-        />
-      </ResCell>
-      <ResCell align="right">
-        <NumberField
-          value={hatch.angle}
-          onChange={(angle) => onPatch({ angle })}
-          step={5}
-        />
-      </ResCell>
-      <ResCell>
+    <div className="res-md-detail-inner">
+      <div className="res-md-head">
         <input
-          type="checkbox"
-          checked={!!hatch.relativeToWall}
-          onChange={(e) => onPatch({ relativeToWall: e.target.checked })}
-          title={t("resources.col.relativeToWall.hint")}
+          className="res-input res-md-rename"
+          value={hatch.name}
+          placeholder={t("resources.hatches.placeholder")}
+          onChange={(e) => onPatch({ name: e.target.value })}
         />
-      </ResCell>
-      <ResCell>
-        <ColorField color={hatch.color} onChange={(color) => onPatch({ color })} />
-      </ResCell>
-      <ResCell>
-        <SelectField
-          value={hatch.lineStyleId ?? NONE}
-          onChange={(v) => onPatch({ lineStyleId: v === NONE ? undefined : v })}
-          options={lineOptions}
-        />
-      </ResCell>
-      <ResCell>
         <DeleteButton
           onClick={onDelete}
           title={t("resources.delete.hatch", { name: hatch.name })}
         />
-      </ResCell>
-    </ResRow>
+      </div>
+
+      <div className="res-md-preview">
+        <HatchSwatch hatch={hatch} size={128} />
+      </div>
+
+      <div className="res-fields">
+        <FieldRow label={t("resources.field.type")}>
+          <Segmented
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: "vector", label: t("resources.hatchKind.vector") },
+              { value: "image", label: t("resources.hatchKind.image") },
+            ]}
+          />
+        </FieldRow>
+
+        {kind === "vector" ? (
+          <>
+            <FieldRow label={t("resources.field.lines")}>
+              <Segmented
+                value={lines}
+                onChange={(v) => onPatch({ lines: v })}
+                options={[
+                  { value: "parallel", label: t("resources.lines.parallel") },
+                  { value: "random", label: t("resources.lines.random") },
+                ]}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.col.pattern")}>
+              <SelectField
+                value={hatch.pattern}
+                onChange={(pattern) => onPatch({ pattern })}
+                options={PATTERN_OPTIONS.map((o) => ({
+                  value: o.value,
+                  label: t(o.labelKey),
+                }))}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.col.scale")}>
+              <NumberField
+                value={hatch.scale}
+                onChange={(scale) => onPatch({ scale })}
+                step={0.1}
+                min={0.01}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.col.angle")}>
+              <NumberField
+                value={hatch.angle}
+                onChange={(angle) => onPatch({ angle })}
+                step={5}
+              />
+            </FieldRow>
+            <FieldRow
+              label={t("resources.col.relativeToWall")}
+              hint={t("resources.col.relativeToWall.hint")}
+            >
+              <input
+                type="checkbox"
+                checked={!!hatch.relativeToWall}
+                onChange={(e) => onPatch({ relativeToWall: e.target.checked })}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.col.lineStyle")}>
+              <SelectField
+                value={hatch.lineStyleId ?? NONE}
+                onChange={(v) => onPatch({ lineStyleId: v === NONE ? undefined : v })}
+                options={lineOptions}
+              />
+            </FieldRow>
+          </>
+        ) : (
+          <>
+            <FieldRow label={t("resources.field.image")}>
+              <ImagePickButton onFile={loadImage} />
+            </FieldRow>
+            <FieldRow label={t("resources.field.scaleX")}>
+              <NumberField
+                value={hatch.image?.scaleX ?? 1}
+                onChange={(scaleX) => patchImage({ scaleX })}
+                step={0.1}
+                min={0.05}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.field.scaleY")}>
+              <NumberField
+                value={hatch.image?.scaleY ?? 1}
+                onChange={(scaleY) => patchImage({ scaleY })}
+                step={0.1}
+                min={0.05}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.field.rotation")}>
+              <NumberField
+                value={hatch.image?.rotation ?? 0}
+                onChange={(rotation) => patchImage({ rotation })}
+                step={5}
+              />
+            </FieldRow>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -975,32 +1113,55 @@ function HatchesTab({
   onDeleteHatch: (id: string) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const hatches = project.hatches;
+  // Auswahl gegen die Liste validieren (nach Delete/Add stabil bleiben).
+  const selected = hatches.find((h) => h.id === selectedId) ?? hatches[0];
+
   return (
     <div className="res-tab">
       <div className="res-hint">{t("resources.hatches.hint")}</div>
-      <ResTable columns={HATCH_COLUMNS} template={HATCH_TEMPLATE}>
-        {project.hatches.map((h) => (
-          <HatchRow
-            key={h.id}
-            hatch={h}
-            lineStyles={project.lineStyles}
-            onPatch={(patch) => onPatchHatch(h.id, patch)}
-            onDelete={() => onDeleteHatch(h.id)}
-          />
-        ))}
-        {project.hatches.length === 0 && (
-          <EmptyState text={t("resources.hatches.empty")} />
-        )}
-      </ResTable>
-      <div className="res-add-row">
-        <button className="res-add" onClick={onAddHatch}>
-          <span className="res-add-plus">+</span> {t("resources.add")}
-        </button>
-        <FileImportButton
-          accept=".pat,text/plain"
-          label={t("resources.import.pat")}
-          onText={(text) => onImportHatches(patToHatches(text))}
-        />
+      <div className="res-md">
+        <div className="res-md-list">
+          {hatches.map((h) => (
+            <button
+              key={h.id}
+              className={`res-md-row${selected?.id === h.id ? " active" : ""}`}
+              onClick={() => setSelectedId(h.id)}
+            >
+              <span className="res-md-row-thumb">
+                <HatchSwatch hatch={h} size={30} />
+              </span>
+              <span className="res-md-row-name">{h.name}</span>
+            </button>
+          ))}
+          {hatches.length === 0 && (
+            <div className="res-md-empty">{t("resources.hatches.empty")}</div>
+          )}
+          <div className="res-md-listfoot">
+            <button className="res-add" onClick={onAddHatch}>
+              <span className="res-add-plus">+</span> {t("resources.add")}
+            </button>
+            <FileImportButton
+              accept=".pat,text/plain"
+              label={t("resources.import.pat")}
+              onText={(text) => onImportHatches(patToHatches(text))}
+            />
+          </div>
+        </div>
+        <div className="res-md-detail">
+          {selected ? (
+            <HatchDetail
+              key={selected.id}
+              hatch={selected}
+              lineStyles={project.lineStyles}
+              onPatch={(patch) => onPatchHatch(selected.id, patch)}
+              onDelete={() => onDeleteHatch(selected.id)}
+            />
+          ) : (
+            <div className="res-md-empty">{t("resources.hatches.empty")}</div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1008,40 +1169,8 @@ function HatchesTab({
 
 // ── Linien (Line Styles) ───────────────────────────────────────────────────
 
-/** Kleine Vorschau eines Linienstils (Stärke + Strichmuster) als SVG. */
-function LinePreview({ style }: { style: LineStyle }) {
-  // Stärke (mm) optisch skaliert auf 1–6 px für die Vorschau.
-  const px = Math.max(1, Math.min(6, style.weight * 6));
-  const dasharray = style.dash ? style.dash.map((d) => d * 4).join(" ") : undefined;
-  return (
-    <svg className="res-line-preview" viewBox="0 0 120 12" preserveAspectRatio="none">
-      <line
-        x1={4}
-        y1={6}
-        x2={116}
-        y2={6}
-        stroke={style.color}
-        strokeWidth={px}
-        strokeDasharray={dasharray}
-        strokeLinecap="butt"
-      />
-    </svg>
-  );
-}
-
-// Spalten: Name | Stärke (mm) | Farbe | Strich | Vorschau | (löschen).
-const LINE_COLUMNS: ResColumn[] = [
-  { titleKey: "resources.col.name" },
-  { titleKey: "resources.col.weight", align: "right" },
-  { titleKey: "resources.col.color" },
-  { titleKey: "resources.col.stroke" },
-  { titleKey: "resources.col.preview" },
-  { titleKey: "" },
-];
-const LINE_TEMPLATE =
-  "minmax(110px, 1fr) 80px auto minmax(120px, 0.9fr) minmax(90px, 1fr) 36px";
-
-function LineStyleRow({
+/** Detail-Panel EINES Linienstils (rechte Seite des Master-Detail-Layouts). */
+function LineStyleDetail({
   style,
   onPatch,
   onDelete,
@@ -1050,48 +1179,99 @@ function LineStyleRow({
   onPatch: (patch: Partial<LineStyle>) => void;
   onDelete: () => void;
 }) {
+  const kind = style.kind ?? "dash";
+
+  /** Wechselt den Typ; beim Umschalten auf „Zickzack" Default-Parameter setzen. */
+  const setKind = (k: "dash" | "zigzag") => {
+    if (k === "zigzag" && !style.zigzag) {
+      onPatch({ kind: k, zigzag: { amplitude: 1, wavelength: 4 } });
+    } else {
+      onPatch({ kind: k });
+    }
+  };
+
+  /** Merge-Patch für die Zickzack-Parameter. */
+  const patchZig = (part: Partial<NonNullable<LineStyle["zigzag"]>>) => {
+    const cur = style.zigzag ?? { amplitude: 1, wavelength: 4 };
+    onPatch({ zigzag: { ...cur, ...part } });
+  };
+
   return (
-    <ResRow>
-      <ResCell>
-        <TextField
+    <div className="res-md-detail-inner">
+      <div className="res-md-head">
+        <input
+          className="res-input res-md-rename"
           value={style.name}
-          onChange={(name) => onPatch({ name })}
           placeholder={t("resources.lines.placeholder")}
+          onChange={(e) => onPatch({ name: e.target.value })}
         />
-      </ResCell>
-      <ResCell align="right">
-        <NumberField
-          value={style.weight}
-          onChange={(weight) => onPatch({ weight })}
-          step={0.05}
-          min={0.01}
-          max={2}
-          list="pen-weights"
-        />
-      </ResCell>
-      <ResCell>
-        <ColorField color={style.color} onChange={(color) => onPatch({ color })} />
-      </ResCell>
-      <ResCell>
-        <SelectField
-          value={dashKey(style.dash)}
-          onChange={(key) => {
-            const opt = DASH_OPTIONS.find((o) => o.key === key);
-            if (opt) onPatch({ dash: opt.dash });
-          }}
-          options={DASH_OPTIONS.map((o) => ({ value: o.key, label: t(o.labelKey) }))}
-        />
-      </ResCell>
-      <ResCell>
-        <LinePreview style={style} />
-      </ResCell>
-      <ResCell>
         <DeleteButton
           onClick={onDelete}
           title={t("resources.delete.lineStyle", { name: style.name })}
         />
-      </ResCell>
-    </ResRow>
+      </div>
+
+      <div className="res-md-preview">
+        <LineSwatch style={style} width={220} height={40} />
+      </div>
+
+      <div className="res-fields">
+        <FieldRow label={t("resources.field.type")}>
+          <Segmented
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: "dash", label: t("resources.lineKind.dash") },
+              { value: "zigzag", label: t("resources.lineKind.zigzag") },
+            ]}
+          />
+        </FieldRow>
+        <FieldRow label={t("resources.col.weight")}>
+          <NumberField
+            value={style.weight}
+            onChange={(weight) => onPatch({ weight })}
+            step={0.05}
+            min={0.01}
+            max={2}
+            list="pen-weights"
+          />
+        </FieldRow>
+        <FieldRow label={t("resources.col.color")}>
+          <ColorField color={style.color} onChange={(color) => onPatch({ color })} />
+        </FieldRow>
+        {kind === "zigzag" ? (
+          <>
+            <FieldRow label={t("resources.field.amplitude")}>
+              <NumberField
+                value={style.zigzag?.amplitude ?? 1}
+                onChange={(amplitude) => patchZig({ amplitude })}
+                step={0.1}
+                min={0.05}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.field.wavelength")}>
+              <NumberField
+                value={style.zigzag?.wavelength ?? 4}
+                onChange={(wavelength) => patchZig({ wavelength })}
+                step={0.5}
+                min={0.5}
+              />
+            </FieldRow>
+          </>
+        ) : (
+          <FieldRow label={t("resources.col.stroke")}>
+            <SelectField
+              value={dashKey(style.dash)}
+              onChange={(key) => {
+                const opt = DASH_OPTIONS.find((o) => o.key === key);
+                if (opt) onPatch({ dash: opt.dash });
+              }}
+              options={DASH_OPTIONS.map((o) => ({ value: o.key, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1108,6 +1288,10 @@ function LinesTab({
   onDeleteLineStyle: (id: string) => void;
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const styles = project.lineStyles;
+  const selected = styles.find((l) => l.id === selectedId) ?? styles[0];
+
   return (
     <div className="res-tab">
       {/* Vorschlagswerte für die Strichstärke (Standard-Stiftbreiten in mm). */}
@@ -1117,28 +1301,46 @@ function LinesTab({
         ))}
       </datalist>
       <div className="res-hint">{t("resources.lines.hint")}</div>
-      <ResTable columns={LINE_COLUMNS} template={LINE_TEMPLATE}>
-        {project.lineStyles.map((l) => (
-          <LineStyleRow
-            key={l.id}
-            style={l}
-            onPatch={(patch) => onPatchLineStyle(l.id, patch)}
-            onDelete={() => onDeleteLineStyle(l.id)}
-          />
-        ))}
-        {project.lineStyles.length === 0 && (
-          <EmptyState text={t("resources.lines.empty")} />
-        )}
-      </ResTable>
-      <div className="res-add-row">
-        <button className="res-add" onClick={onAddLineStyle}>
-          <span className="res-add-plus">+</span> {t("resources.add")}
-        </button>
-        <FileImportButton
-          accept=".lin,text/plain"
-          label={t("resources.import.lin")}
-          onText={(text) => onImportLineStyles(linToStyles(text))}
-        />
+      <div className="res-md">
+        <div className="res-md-list">
+          {styles.map((l) => (
+            <button
+              key={l.id}
+              className={`res-md-row res-md-row-line${
+                selected?.id === l.id ? " active" : ""
+              }`}
+              onClick={() => setSelectedId(l.id)}
+            >
+              <span className="res-md-row-name">{l.name}</span>
+              <LineSwatch style={l} width={150} height={14} />
+            </button>
+          ))}
+          {styles.length === 0 && (
+            <div className="res-md-empty">{t("resources.lines.empty")}</div>
+          )}
+          <div className="res-md-listfoot">
+            <button className="res-add" onClick={onAddLineStyle}>
+              <span className="res-add-plus">+</span> {t("resources.add")}
+            </button>
+            <FileImportButton
+              accept=".lin,text/plain"
+              label={t("resources.import.lin")}
+              onText={(text) => onImportLineStyles(linToStyles(text))}
+            />
+          </div>
+        </div>
+        <div className="res-md-detail">
+          {selected ? (
+            <LineStyleDetail
+              key={selected.id}
+              style={selected}
+              onPatch={(patch) => onPatchLineStyle(selected.id, patch)}
+              onDelete={() => onDeleteLineStyle(selected.id)}
+            />
+          ) : (
+            <div className="res-md-empty">{t("resources.lines.empty")}</div>
+          )}
+        </div>
       </div>
     </div>
   );
