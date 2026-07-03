@@ -505,6 +505,8 @@ export const en: Record<TranslationKey, string> = {
   "resources.col.pattern": "Pattern",
   "resources.col.scale": "Scale",
   "resources.col.angle": "Angle °",
+  "resources.col.relativeToWall": "Wall-rel.",
+  "resources.col.relativeToWall.hint": "Angle relative to the wall axis — the pattern rotates with the wall",
   "resources.col.lineStyle": "Line style",
   "resources.lineStyle.none": "— none —",
   "resources.delete.hatch": "Delete hatch “{name}”",

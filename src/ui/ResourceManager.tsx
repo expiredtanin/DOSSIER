@@ -860,12 +860,13 @@ const HATCH_COLUMNS: ResColumn[] = [
   { titleKey: "resources.col.pattern" },
   { titleKey: "resources.col.scale", align: "right" },
   { titleKey: "resources.col.angle", align: "right" },
+  { titleKey: "resources.col.relativeToWall" },
   { titleKey: "resources.col.color" },
   { titleKey: "resources.col.lineStyle" },
   { titleKey: "" },
 ];
 const HATCH_TEMPLATE =
-  "minmax(110px, 1fr) minmax(120px, 0.9fr) 64px 60px auto minmax(120px, 0.9fr) 36px";
+  "minmax(110px, 1fr) minmax(120px, 0.9fr) 64px 60px 64px auto minmax(120px, 0.9fr) 36px";
 
 function HatchRow({
   hatch,
@@ -916,6 +917,14 @@ function HatchRow({
           value={hatch.angle}
           onChange={(angle) => onPatch({ angle })}
           step={5}
+        />
+      </ResCell>
+      <ResCell>
+        <input
+          type="checkbox"
+          checked={!!hatch.relativeToWall}
+          onChange={(e) => onPatch({ relativeToWall: e.target.checked })}
+          title={t("resources.col.relativeToWall.hint")}
         />
       </ResCell>
       <ResCell>

@@ -56,6 +56,14 @@ export interface HatchStyle {
   /** Drehung des Musters in Grad. */
   angle: number;
   /**
+   * Wenn `true`, ist `angle` NICHT bildschirmfest, sondern relativ zur Achse der
+   * schraffierten Wand: das Muster dreht mit der Wandorientierung mit (z. B. eine
+   * Diagonale, die stets 45° zur Wand steht, oder Dämmungsstriche quer durch die
+   * Wanddicke). Nur die Wand-Poché wertet dies aus; ohne Wandkontext (z. B. Decke)
+   * degradiert es zu einem absoluten `angle`.
+   */
+  relativeToWall?: boolean;
+  /**
    * Farbe der Musterlinien bzw. der Vollfüllung (`pattern==="solid"`). Bei
    * `pattern==="none"` ungenutzt.
    */

@@ -24,6 +24,12 @@ export const sampleProject: Project = {
     { id: "thick", name: "Stark 0.5", weight: 0.5, color: "#0a0a0a", dash: null },
     // Schraffurlinie = schwarze Haarlinie (Grundeinstellung für alle Schraffuren).
     { id: "hatch-line", name: "Schraffurlinie", weight: 0.13, color: "#1a1a1a", dash: null },
+    // Feinste Haarlinie für die SIA-Schnittschraffuren (Beton/Backstein/Dämmung):
+    // Gewicht unter der Bildschirm-Untergrenze, damit die Musterlinien als dünnste
+    // Haarlinie (Stroke-Minimum) rendern.
+    { id: "hatch-hair", name: "Schraffur-Haarlinie", weight: 0.05, color: "#1a1a1a", dash: null },
+    // Gestrichelte Haarlinie für die Dämmung (Striche quer durch die Wanddicke).
+    { id: "hatch-dash", name: "Dämmungsstrich", weight: 0.05, color: "#1a1a1a", dash: [0.35, 0.3] },
   ],
   // Schraffuren: color = Linien-/Vollfüllfarbe des Musters; angle in Grad.
   // "none" = keine Schraffur (nur Component-Füllung).
@@ -67,17 +73,53 @@ export const sampleProject: Project = {
       color: "#9aa0a6",
       lineStyleId: "thin",
     },
+    // ── SIA-Schnittschraffuren (Haarlinie) ──────────────────────────────────
+    // Dichte Teilung (scale < 1; Muster-Kachel = 8·scale) für den SIA-Look.
+    // Beton: Kreuzschraffur, absolut 45° (bildschirmfest, NICHT wandbezogen).
+    {
+      id: "sia-concrete",
+      name: "Beton (Kreuz)",
+      pattern: "crosshatch",
+      scale: 0.5,
+      angle: 45,
+      color: "#1a1a1a",
+      lineStyleId: "hatch-hair",
+    },
+    // Backstein: Diagonale, 45° RELATIV zur Wandachse (dreht mit der Wand mit).
+    {
+      id: "sia-brick",
+      name: "Backstein (Diagonal)",
+      pattern: "diagonal",
+      scale: 0.5,
+      angle: 45,
+      relativeToWall: true,
+      color: "#1a1a1a",
+      lineStyleId: "hatch-hair",
+    },
+    // Dämmung: DURCHGEZOGENE (nicht gestrichelte) Linien QUER durch die Wanddicke
+    // (senkrecht zur Wandachse), wandbezogen. Basiswinkel 0 = Musterlinie steht
+    // senkrecht zur Wandrichtung; durchgezogene Haarlinie, dichte Teilung.
+    {
+      id: "sia-insulation",
+      name: "Dämmung (Strich)",
+      pattern: "diagonal",
+      scale: 0.45,
+      angle: 0,
+      relativeToWall: true,
+      color: "#1a1a1a",
+      lineStyleId: "hatch-hair",
+    },
   ],
   // Bauteil-Materialien: color = Poché-Füllung im Grundriss UND 3D-Diffusfarbe;
   // joinPriority höher = läuft am Stoß durch (für spätere T-Stöße).
   components: [
     { id: "render-ext", name: "Aussenputz", color: "#d8d2c7", hatchId: "none", joinPriority: 10 },
-    // Weißer Grund unter der schwarzen Dämmungs-Haarlinie (Schraffur-Grundeinstellung).
-    { id: "insulation", name: "Wärmedämmung", color: "#ffffff", hatchId: "insulation", joinPriority: 20 },
-    { id: "brick", name: "Backstein", color: "#8c5544", hatchId: "none", joinPriority: 50 },
+    // Weißer Grund unter den durchgezogenen Dämmungs-Haarlinien (quer zur Wand).
+    { id: "insulation", name: "Wärmedämmung", color: "#ffffff", hatchId: "sia-insulation", joinPriority: 20 },
+    { id: "brick", name: "Backstein", color: "#8c5544", hatchId: "sia-brick", joinPriority: 50 },
     { id: "render-int", name: "Innenputz", color: "#efece6", hatchId: "none", joinPriority: 10 },
     // Für spätere T-Stöße: Beton als durchlaufender Backbone (höchste Priorität).
-    { id: "concrete", name: "Beton", color: "#9aa0a6", hatchId: "solid-concrete", joinPriority: 100 },
+    { id: "concrete", name: "Beton", color: "#9aa0a6", hatchId: "sia-concrete", joinPriority: 100 },
   ],
   wallTypes: [
     {

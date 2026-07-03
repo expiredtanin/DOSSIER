@@ -510,6 +510,8 @@ export const de = {
   "resources.col.pattern": "Muster",
   "resources.col.scale": "Maßstab",
   "resources.col.angle": "Winkel °",
+  "resources.col.relativeToWall": "Wandbezug",
+  "resources.col.relativeToWall.hint": "Winkel relativ zur Wandachse — das Muster dreht mit der Wand mit",
   "resources.col.lineStyle": "Linienstil",
   "resources.lineStyle.none": "— ohne —",
   "resources.delete.hatch": "Schraffur „{name}\" löschen",

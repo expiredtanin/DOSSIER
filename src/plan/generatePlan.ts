@@ -242,17 +242,38 @@ export type Primitive =
  * {@link HatchRender} auf. Der Linienstil der Musterlinien wird, falls gesetzt,
  * aus dem Line Manager nachgeschlagen; sonst gilt ein dünner Default.
  */
-function resolveHatch(project: Project, hatchId: string): HatchRender {
+function resolveHatch(project: Project, hatchId: string, wallAngleDeg?: number): HatchRender {
   const h = getHatch(project, hatchId);
   const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
+  // Wandbezogener Winkel: `HatchRender.angle` wird von allen Renderern in der
+  // SVG-Konvention (im Uhrzeigersinn, Bildschirm-Y nach unten) verstanden — der
+  // Modell-Renderer negiert ihn in `toModelAngleRad`. Die Wandachse `wallAngleDeg`
+  // ist dagegen ein MODELL-Winkel (atan2 der Richtung, gegen den Uhrzeigersinn,
+  // Y nach oben). Wegen der Y-Spiegelung entspricht die Wandrichtung am Bildschirm
+  // dem Winkel −wallAngleDeg; das Muster folgt der Wand also, indem der
+  // Wandwinkel SUBTRAHIERT wird. Ohne Wandkontext (Decke) bleibt `angle` absolut.
+  const angle =
+    h.relativeToWall && wallAngleDeg != null ? h.angle - wallAngleDeg : h.angle;
   return {
     pattern: h.pattern,
     scale: h.scale,
-    angle: h.angle,
+    angle,
     color: h.color,
     lineWeight: ls?.weight ?? 0.13,
     dash: ls?.dash ?? null,
   };
+}
+
+// ── SIA-Poché-Füllung ────────────────────────────────────────────────────
+// Die 2D-Poché einer (auch mehrschichtigen) Wand trägt NICHT die rohe Bauteil-
+// Albedo (3D-Materialfarbe), sondern einen neutralen Hintergrund, auf dem die
+// Schraffur-Musterlinien liegen: Vollmuster ("solid") = reine SCHWARZE Poché
+// (kein Linienmuster), jedes andere Muster (inkl. "none") = WEISSER Hintergrund.
+const POCHE_FILL_WHITE = "#ffffff";
+const POCHE_FILL_BLACK = "#000000";
+/** Neutrale Poché-Füllfarbe für ein Muster: "solid" → schwarz, sonst weiß. */
+function pocheFill(pattern: HatchPattern): string {
+  return pattern === "solid" ? POCHE_FILL_BLACK : POCHE_FILL_WHITE;
 }
 
 /** Füllfarbe + Schraffur eines aufgelösten Bauteils, fertig für eine Cut-Poché. */
@@ -263,8 +284,8 @@ export interface SectionCutStyle {
 
 /**
  * Löst das tragende Bauteil (höchste `joinPriority`) einer Wand auf — dieselbe
- * Regel wie {@link backboneColor} für die grobe Grundriss-Poché — und liefert
- * dessen Füllfarbe + echte Schraffur für die Schnitt-Poché. `null`, wenn Wandtyp
+ * Regel wie {@link backbonePocheFill} für die grobe Grundriss-Poché — und liefert
+ * dessen Poché-Füllung + echte Schraffur für die Schnitt-Poché. `null`, wenn Wandtyp
  * oder Bauteil nicht auflösbar sind (z. B. verwaistes `wallTypeId`); der
  * Aufrufer fällt dann auf die generische Schnitt-Schraffur zurück.
  */
@@ -277,7 +298,15 @@ export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCu
       if (!best || comp.joinPriority > best.joinPriority) best = comp;
     }
     if (!best) return null;
-    return { fill: best.color, hatch: resolveHatch(project, best.hatchId) };
+    const wallAngleDeg =
+      (Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180) / Math.PI;
+    const hatch = resolveHatch(project, best.hatchId, wallAngleDeg);
+    // Poché-Hintergrund neutral (weiß) statt Bauteil-Albedo; Vollmuster → schwarz.
+    const solid = hatch.pattern === "solid";
+    return {
+      fill: solid ? POCHE_FILL_BLACK : POCHE_FILL_WHITE,
+      hatch: solid ? { ...hatch, color: POCHE_FILL_BLACK } : hatch,
+    };
   } catch {
     return null;
   }
@@ -528,17 +557,20 @@ export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
     });
     const fill = cp.fill ?? rgbToHex(cp.color);
     const hatch = cp.hatch ?? SECTION_HATCH;
-    // Mono: reines Weiss statt Bauteilfarbe, Schraffurfarbe → Tinte (nur
-    // Umriss + Schraffur-Musterlinien tragen; wie der toMono()-Postpass für
-    // die normale Poché, hier direkt inline, da Cut-Polygone kein "solid"
-    // führen).
+    // Mono: neutrale Poché — Weiss statt Bauteilfarbe, Schraffur-Musterlinien →
+    // Tinte. Eine schwarze SIA-Vollpoché ("solid") BLEIBT jedoch schwarz
+    // (Schwarz bleibt Schwarz, Weiss bleibt Weiss).
+    const solid = hatch.pattern === "solid";
+    const monoFill = solid ? POCHE_FILL_BLACK : "#ffffff";
+    const monoHatch =
+      solid ? hatch : hatch.pattern !== "none" ? { ...hatch, color: SECTION_INK } : hatch;
     primitives.push({
       kind: "polygon",
       pts,
-      fill: mono ? "#ffffff" : fill,
+      fill: mono ? monoFill : fill,
       stroke: SECTION_INK,
       strokeWidthMm: SECTION_CUT_OUTLINE_MM,
-      hatch: mono && hatch.pattern !== "none" ? { ...hatch, color: SECTION_INK } : hatch,
+      hatch: mono ? monoHatch : hatch,
     });
   }
 
@@ -619,14 +651,16 @@ function addContextContours(out: Primitive[], project: Project): void {
 function toMono(primitives: Primitive[]): void {
   for (const p of primitives) {
     if (p.kind === "polygon") {
-      // Vollfüllung „solid" deckte die Poché farbig — in mono auf Weiss setzen,
-      // damit nur der Umriss trägt. Linien-/Kreuzschraffur bleibt, aber in Tinte.
+      // SIA-Poché in mono: Vollmuster „solid" ist eine SCHWARZE Poché und bleibt
+      // schwarz (Schwarz bleibt Schwarz); jede andere Füllung wird weiß, die
+      // Linien-/Kreuzschraffur bleibt sichtbar, aber in Tinte.
       if (p.hatch.pattern === "solid") {
-        p.hatch = { ...p.hatch, color: "#ffffff" };
-      } else if (p.hatch.pattern !== "none") {
-        p.hatch = { ...p.hatch, color: MONO_INK };
+        p.hatch = { ...p.hatch, color: POCHE_FILL_BLACK };
+        p.fill = p.fill === "none" ? "none" : POCHE_FILL_BLACK;
+      } else {
+        if (p.hatch.pattern !== "none") p.hatch = { ...p.hatch, color: MONO_INK };
+        p.fill = p.fill === "none" ? "none" : "#ffffff";
       }
-      p.fill = p.fill === "none" ? "none" : "#ffffff";
       p.stroke = MONO_INK;
     } else if (p.kind === "line") {
       p.color = MONO_INK;
@@ -801,6 +835,11 @@ function addWallPoche(
   // GANZE Wand (alle Bänder) markiert und die PlanView die wallId nach oben
   // melden kann.
   const wallId = wall.id;
+  // Achswinkel der Wand (Modell, Grad) — treibt wandbezogene Schraffuren
+  // ({@link resolveHatch}), damit z. B. eine Diagonale oder die Dämmungsstriche
+  // mit der Wandorientierung mitdrehen.
+  const wallAngleDeg =
+    (Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180) / Math.PI;
   // Strich-/Umrandungsfarbe der Wand: optionale Übersteuerung (wall.color),
   // sonst der Default-Poché-Strich. Betrifft NUR die Linienfarbe (Umriss +
   // Schichtfugen), nicht die Schicht-Füllfarben/Schraffuren.
@@ -821,8 +860,9 @@ function addWallPoche(
 
   const outlineMm = wallLwMm * OUTLINE_DETAIL_FACTOR[detail];
   const layerLineMm = LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail];
-  // Vereinfachte Füllung (grob): Farbe des tragenden Bauteils (höchste Priorität).
-  const simpleFill = backboneColor(project, wt);
+  // Vereinfachte Füllung (grob): neutrale SIA-Poché des tragenden Bauteils
+  // (höchste Priorität) — weiß, bzw. schwarz falls dessen Muster "solid" ist.
+  const simpleFill = backbonePocheFill(project, wt);
 
   // Kanten-Indizes der inneren Gehrungs-Stirnflächen (die Diagonalen am Knoten).
   // clippedBand liefert [A.start, A.end, B.end, B.start] → Kante 1 (A.end→B.end)
@@ -868,13 +908,17 @@ function addWallPoche(
     let off = refOff - total / 2;
     for (const layer of wt.layers) {
       const comp = getComponent(project, layer.componentId);
+      const layerHatch = resolveHatch(project, comp.hatchId, wallAngleDeg);
+      // SIA-Poché: neutraler Hintergrund (weiß) statt Bauteil-Albedo, die
+      // Schichtschraffur liegt darüber; Vollmuster ("solid") = schwarze Poché.
+      const layerSolid = layerHatch.pattern === "solid";
       out.push({
         kind: "polygon",
         pts: clippedBand(p1, p2, off, off + layer.thickness, startCut, endCut),
-        fill: comp.color,
+        fill: layerSolid ? POCHE_FILL_BLACK : POCHE_FILL_WHITE,
         stroke,
         strokeWidthMm: layerLineMm,
-        hatch: resolveHatch(project, comp.hatchId),
+        hatch: layerSolid ? { ...layerHatch, color: POCHE_FILL_BLACK } : layerHatch,
         greyed,
         // Die Diagonale am Knoten NICHT stricheln → keine 45°-Naht zwischen
         // gleichfarbigen Schichten der beiden Wände.
@@ -900,15 +944,20 @@ function addWallPoche(
   }
 }
 
-/** Farbe des tragenden Bauteils (höchste joinPriority) für die grobe Poché. */
-function backboneColor(project: Project, wt: Project["wallTypes"][number]): string {
-  let best: { color: string; prio: number } | null = null;
+/**
+ * Neutrale SIA-Poché-Füllung des tragenden Bauteils (höchste joinPriority) für
+ * die grobe Sammelfläche: weiß, bzw. schwarz falls dessen Schraffur "solid" ist.
+ * (Ersetzt die frühere rohe Bauteil-Albedo — im Plan zählt die Poché, nicht die
+ * 3D-Materialfarbe.)
+ */
+function backbonePocheFill(project: Project, wt: Project["wallTypes"][number]): string {
+  let best: { pattern: HatchPattern; prio: number } | null = null;
   for (const layer of wt.layers) {
     const comp = getComponent(project, layer.componentId);
     if (!best || comp.joinPriority > best.prio)
-      best = { color: comp.color, prio: comp.joinPriority };
+      best = { pattern: getHatch(project, comp.hatchId).pattern, prio: comp.joinPriority };
   }
-  return best?.color ?? "#9aa0a6";
+  return best ? pocheFill(best.pattern) : POCHE_FILL_WHITE;
 }
 
 /**

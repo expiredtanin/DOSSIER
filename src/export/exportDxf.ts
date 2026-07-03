@@ -126,8 +126,13 @@ function emitPrimitive(
         p.hatch.pattern !== "none" &&
         p.hatch.pattern !== "solid"
       ) {
+        const cycle = dashCycleMeters(p.hatch.dash);
         for (const seg of hatchSegments(pts, p.hatch)) {
-          dxf.addLine(LAYER_HATCH, seg.a, seg.b);
+          if (cycle) {
+            for (const d of dashSeg(seg, cycle)) dxf.addLine(LAYER_HATCH, d.a, d.b);
+          } else {
+            dxf.addLine(LAYER_HATCH, seg.a, seg.b);
+          }
         }
       }
       break;
@@ -172,6 +177,44 @@ function angleDeg(c: Vec2, p: Vec2): number {
 interface Seg {
   a: Vec2;
   b: Vec2;
+}
+
+// Strichmuster (`dash`, mm-Papier) → Zyklus in WELT-Metern. Gleiche Umrechnung
+// wie der Bildschirm/GL-Pfad: 1 mm ≙ (1/0.13) Kachel-Einheiten, 1 Einheit = 1/90 m.
+// `null` = durchgezogen (keine Zerlegung). Ungerade Musterlängen werden verdoppelt.
+const DASH_MM_TO_M = (1 / 0.13) * (1 / 90);
+function dashCycleMeters(dash: number[] | null): number[] | null {
+  if (!dash || dash.length === 0) return null;
+  const pat = dash.map((d) => Math.max(0, d) * DASH_MM_TO_M).filter((d) => d > 0);
+  if (pat.length === 0) return null;
+  return pat.length % 2 === 0 ? pat : pat.concat(pat);
+}
+
+// Zerlegt EINE Schraffurlinie in ihre durchgezogenen Teilstücke gemäß `cycle`
+// ([an, aus, …], Meter). Die Phase startet je Linie neu — visuell identisch zum
+// SVG-`<pattern>`, das das Muster je Kachellinie zurücksetzt.
+function dashSeg(seg: Seg, cycle: number[]): Seg[] {
+  const out: Seg[] = [];
+  const len = Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y);
+  if (len < 1e-9) return out;
+  const ux = (seg.b.x - seg.a.x) / len;
+  const uy = (seg.b.y - seg.a.y) / len;
+  let pos = 0;
+  let idx = 0;
+  let on = true;
+  while (pos < len - 1e-9) {
+    const step = Math.min(cycle[idx % cycle.length], len - pos);
+    if (on && step > 1e-9) {
+      out.push({
+        a: { x: seg.a.x + ux * pos, y: seg.a.y + uy * pos },
+        b: { x: seg.a.x + ux * (pos + step), y: seg.a.y + uy * (pos + step) },
+      });
+    }
+    pos += step;
+    idx++;
+    on = !on;
+  }
+  return out;
 }
 
 function hatchSegments(
