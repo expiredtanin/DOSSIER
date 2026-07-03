@@ -37,6 +37,7 @@ export interface Camera3d {
 /** Minimal-Typ des WASM-Exports (das echte .d.ts entsteht erst mit `build:engine3d`). */
 interface WebModelRendererLike {
   set_model(json: string): void;
+  set_render_mode_white(white: boolean): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -128,6 +129,21 @@ export function useWasm3dRenderer(
     }
   }, []);
 
+  /**
+   * Darstellungsart umschalten: `true` = weisses Clay-Material (beleuchtet,
+   * ohne Bauteil-Farben), `false` = normale Material-/Vertexfarbe (shaded,
+   * Default). Wirkt erst beim nächsten `render`.
+   */
+  const setWhiteMode = useCallback((white: boolean) => {
+    const r = rendererRef.current;
+    if (!r) return;
+    try {
+      r.set_render_mode_white(white);
+    } catch (e) {
+      console.warn("render3d set_render_mode_white fehlgeschlagen:", e);
+    }
+  }, []);
+
   /** Einen Frame mit der gegebenen Kamera zeichnen (Canvas-Größe + DPR abgleichen). */
   const render = useCallback(
     (cam: Camera3d) => {
@@ -166,5 +182,5 @@ export function useWasm3dRenderer(
     [canvasRef],
   );
 
-  return { render, updateModel, ready, failed };
+  return { render, updateModel, setWhiteMode, ready, failed };
 }

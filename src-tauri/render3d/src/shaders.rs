@@ -16,6 +16,7 @@
 //   sky_color    : vec4<f32>    Himmels-Ambient (rgb; von oben)
 //   ground_color : vec4<f32>    Boden-Ambient (rgb; von unten)
 //   sun_color    : vec4<f32>    Farbe/Staerke des Directional-Lights (rgb)
+//   mode         : vec4<f32>    x = Darstellungsart (0 = shaded/Material, 1 = weiss/Clay)
 //
 // Vertex-Attribute: position (world), normal (world), color (Albedo).
 
@@ -28,6 +29,7 @@ struct Globals {
     sky_color    : vec4<f32>,
     ground_color : vec4<f32>,
     sun_color    : vec4<f32>,
+    mode         : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 
@@ -65,7 +67,12 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     // Gerichteter Lambert-Anteil (Sonne); Rueckseiten (n.l < 0) tragen nichts bei.
     let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
 
-    var shaded = in.color * (ambient + diffuse);
+    // Weiss-Modus (Clay-Look): Material-/Vertexfarbe durch ein einheitliches
+    // Hellgrau ersetzen, Beleuchtung (Ambient + Directional) bleibt aktiv — so
+    // liest sich die Volumetrie ohne Bauteil-Farben ab (Vectorworks „white").
+    let albedo = mix(in.color, vec3<f32>(0.82, 0.82, 0.80), globals.mode.x);
+
+    var shaded = albedo * (ambient + diffuse);
 
     // Sanfte Kantenbetonung: senkrechte Flaechen (n.y nahe 0) minimal abdunkeln,
     // damit sich Waende vom hellen Deckel/Boden abheben (ohne Postprocessing).

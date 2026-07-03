@@ -216,6 +216,13 @@ impl WebModelRenderer {
         };
     }
 
+    /// Darstellungsart umschalten: `true` = weisses Clay-Material (beleuchtet,
+    /// ohne Bauteil-Farben — Vectorworks „white"), `false` = normale Material-
+    /// farbe (shaded, Default). Wirkt erst beim naechsten `render`.
+    pub fn set_render_mode_white(&mut self, white: bool) {
+        self.renderer.set_white_mode(white);
+    }
+
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));

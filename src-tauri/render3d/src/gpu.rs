@@ -35,6 +35,8 @@ struct Globals {
     sky_color: [f32; 4],
     ground_color: [f32; 4],
     sun_color: [f32; 4],
+    /// x = Darstellungsart (0 = shaded/Material, 1 = weiss/Clay); siehe shaders.rs.
+    mode: [f32; 4],
 }
 
 impl Default for Globals {
@@ -49,6 +51,7 @@ impl Default for Globals {
             ground_color: [0.30, 0.29, 0.27, 1.0],
             // Directional-Sonne: warmweiss, moderat.
             sun_color: [0.55, 0.53, 0.49, 1.0],
+            mode: [0.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -256,6 +259,12 @@ impl Renderer {
         self.globals.sky_color = [sky[0], sky[1], sky[2], 1.0];
         self.globals.ground_color = [ground[0], ground[1], ground[2], 1.0];
         self.globals.sun_color = [sun[0], sun[1], sun[2], 1.0];
+    }
+
+    /// Darstellungsart umschalten: `true` = weisses Clay-Material (Beleuchtung
+    /// bleibt aktiv, siehe shaders.rs), `false` = normale Bauteil-/Vertexfarbe.
+    pub fn set_white_mode(&mut self, white: bool) {
+        self.globals.mode[0] = if white { 1.0 } else { 0.0 };
     }
 
     /// Stellt sicher, dass ein Tiefenpuffer passend zur Ziel-Groesse existiert.
