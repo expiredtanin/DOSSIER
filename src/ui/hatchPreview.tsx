@@ -148,15 +148,29 @@ export function HatchSwatch({
   } else if (hatch.pattern === "none") {
     inner = null;
   } else if (hatch.lines === "random") {
-    // Zufällig verteilte kurze Striche (deterministisch geseedet).
-    const rnd = mulberry32(Math.round(scale * 1000) + Math.round(angle));
-    const count = Math.round(18 * Math.min(2, scale)) + 6;
-    const len = Math.max(3, 6 / Math.sqrt(scale));
+    // Zufällig verteilte kurze Striche (deterministisch geseedet). Dichte, Länge
+    // und der explizite Seed spiegeln die Plan-Parameter (HatchStyle) — so ändert
+    // „Neu würfeln"/Dichte/Länge die Vorschau wie im Plan. Rein schematisch (px),
+    // NICHT deckungsgleich mit der Modell-Streuung, aber qualitativ konsistent.
+    const density = hatch.density != null && hatch.density > 0 ? hatch.density : 1;
+    const seed = (Math.round(scale * 1000) + Math.round(angle) + Math.round(hatch.seed ?? 0)) >>> 0;
+    const rnd = mulberry32(seed);
+    const count = Math.min(400, Math.max(4, Math.round((18 * Math.min(2, scale) + 6) * density)));
+    // mm-Papier → Vorschau-px (wie das Dash-Muster im LineSwatch: ·4).
+    const PX_PER_MM = 4;
+    const hasRange =
+      hatch.lengthMin != null && hatch.lengthMax != null &&
+      hatch.lengthMin > 0 && hatch.lengthMax >= hatch.lengthMin;
+    const baseLen = Math.max(3, 6 / Math.sqrt(scale));
     const out: React.ReactNode[] = [];
     for (let i = 0; i < count; i++) {
       const cx = rnd() * w;
       const cy = rnd() * h;
       const ang = rnd() * Math.PI;
+      const lr = rnd();
+      const len = hasRange
+        ? (hatch.lengthMin! + lr * (hatch.lengthMax! - hatch.lengthMin!)) * PX_PER_MM
+        : baseLen;
       const dx = (Math.cos(ang) * len) / 2;
       const dy = (Math.sin(ang) * len) / 2;
       out.push(

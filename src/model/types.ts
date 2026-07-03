@@ -29,7 +29,16 @@ export type { RichTextDoc } from "../text/richText";
 export interface LineStyle {
   id: string;
   name: string;
-  /** Strichstärke in Millimetern (≙ Rhino PlotWeight). */
+  /**
+   * @deprecated Die Strichstärke gehört NICHT mehr in den Linienstil — es gibt nur
+   * „Vollinie/Strich", die tatsächliche Dicke wird per Element-Attribut (bzw.
+   * Ebene/Default) aufgelöst. Das Feld bleibt für die Backward-Compat-Auflösung
+   * erhalten und dient den Renderern noch als Fallback für die Muster-/Fugen-Stärke
+   * (siehe `resolveHatch` → `HatchRender.lineWeight`). Der Linien-Detail-Editor
+   * zeigt es nicht mehr an; neue Linienstile bekommen einen Haarlinien-Default.
+   * Die echte per-Element-Strichstärken-Auflösung (Attribut → Ebene → Default)
+   * folgt separat mit dem By-Layer/By-Object-Refactor — NICHT hier.
+   */
   weight: number;
   /** Farbe (hex). */
   color: string;
@@ -112,6 +121,22 @@ export interface HatchStyle {
   color: string;
   /** Optionaler Linienstil für die Musterlinien (Line Manager). */
   lineStyleId?: string;
+  /**
+   * Steuer-Parameter der Random-Vektor-Schraffur (`kind`/"vector" + `lines`===
+   * "random", z. B. Kies/Splitt). ALLE additiv & optional — fehlen sie, gilt das
+   * bestehende deterministische Streu-Verhalten (Seed aus der Flächen-Bounding-Box,
+   * Dichte/Länge aus `scale`). Die Streuung bleibt bei gleichem `seed` + gleicher
+   * Fläche reproduzierbar über ALLE Renderpfade (single render truth); KEIN
+   * `Math.random()` zur Renderzeit.
+   */
+  /** Expliziter Streu-Seed. Wird in den Flächen-Seed eingemischt; „Neu würfeln" setzt einen neuen Wert. */
+  seed?: number;
+  /** Streudichte als Multiplikator auf den Grundabstand (Default 1; >1 = dichter). */
+  density?: number;
+  /** Minimale Strichlänge in mm (Papier). Fehlt es, greift die `scale`-abhängige Default-Länge. */
+  lengthMin?: number;
+  /** Maximale Strichlänge in mm (Papier). Fehlt es, greift die `scale`-abhängige Default-Länge. */
+  lengthMax?: number;
 }
 
 /**

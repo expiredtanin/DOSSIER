@@ -135,6 +135,15 @@ export interface HatchRender {
   lines?: "parallel" | "random";
   /** Bild-Muster-Parameter (nur `kind==="image"`); durchgereicht aus dem HatchStyle. */
   image?: { src: string; scaleX: number; scaleY: number; rotation: number };
+  /**
+   * Steuer-Parameter der Random-Vektor-Streuung (nur `lines==="random"`), 1:1 aus
+   * dem HatchStyle durchgereicht. Alle optional — die eigentliche Erzeugung/
+   * Default-Auflösung liegt zentral in `glPlan/glPlanHatch.ts` (single render truth).
+   */
+  seed?: number;
+  density?: number;
+  lengthMin?: number;
+  lengthMax?: number;
 }
 
 /**
@@ -307,6 +316,11 @@ export function resolveHatch(
     kind: h.kind,
     lines: h.lines,
     image: h.image,
+    // Random-Streu-Parameter unverändert durchreichen (Erzeugung in glPlanHatch).
+    seed: h.seed,
+    density: h.density,
+    lengthMin: h.lengthMin,
+    lengthMax: h.lengthMax,
   };
 }
 

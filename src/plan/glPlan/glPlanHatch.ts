@@ -546,6 +546,8 @@ export function scatterStrokes(
   cell: number,
   baseAngleRad: number,
   seed: number,
+  lenMin?: number,
+  lenMax?: number,
 ): HatchRun[] {
   if (poly.length < 3 || strokeLen <= 1e-9 || cell <= 1e-9) return [];
   const bb = bbox(poly);
@@ -555,14 +557,22 @@ export function scatterStrokes(
   const nx = Math.max(1, Math.round(w / cell));
   const ny = Math.max(1, Math.round(h / cell));
   const count = Math.min(20000, Math.max(4, nx * ny));
+  // Explizite Längen-Spanne (falls gesetzt) validieren; sonst die heutige
+  // scale-abhängige Variation (±40 % um `strokeLen`) beibehalten.
+  const hasRange =
+    lenMin != null && lenMax != null && lenMin > 1e-9 && lenMax >= lenMin;
   const rnd = mulberry32(seed);
   const runs: HatchRun[] = [];
   for (let i = 0; i < count; i++) {
     const cx = bb.minX + rnd() * w;
     const cy = bb.minY + rnd() * h;
-    // Orientierung frei (± π um die Basisrichtung), Länge um ±40 % variiert.
+    // Orientierung frei (± π um die Basisrichtung).
     const ang = baseAngleRad + (rnd() * 2 - 1) * Math.PI;
-    const half = (strokeLen * 0.5) * (0.6 + 0.8 * rnd());
+    // Länge: explizite Spanne [lenMin,lenMax] oder Default (±40 % um strokeLen).
+    const len = hasRange
+      ? lenMin! + rnd() * (lenMax! - lenMin!)
+      : strokeLen * (0.6 + 0.8 * rnd());
+    const half = len * 0.5;
     const dx = Math.cos(ang) * half;
     const dy = Math.sin(ang) * half;
     const a: Vec2 = { x: cx - dx, y: cy - dy };
@@ -581,12 +591,24 @@ export function scatterStrokes(
  */
 export function buildRandomHatchRuns(poly: Vec2[], hatch: HatchRender, scale?: number): HatchRun[] {
   const s = scale ?? (hatch.scale > 1e-6 ? hatch.scale : 1);
-  const cell = 8 * s * PX_TO_M; // Meter, wie der Parallel-Schar-Abstand
-  const strokeLen = cell * 1.1; // kurzer Strich ~ Kachelmaß
+  // Dichte: Multiplikator auf den Grundabstand (>1 = dichter → kleinere Zelle).
+  // Fehlt/ungültig ⇒ 1 ⇒ heutiges Verhalten.
+  const density = hatch.density != null && hatch.density > 1e-6 ? hatch.density : 1;
+  const cell = (8 * s * PX_TO_M) / density; // Meter, wie der Parallel-Schar-Abstand
+  const strokeLen = cell * 1.1; // Default-Strich ~ Kachelmaß (wenn keine Längenspanne)
   const bb = bbox(poly);
-  const seed = hashSeed(bb.minX, bb.minY, bb.maxX - bb.minX, bb.maxY - bb.minY, hatch.angle, s);
+  // Flächen-Seed (gerundete Bounding-Box + Muster-Parameter) MIT dem expliziten
+  // `hatch.seed` gemischt: „Neu würfeln" (neuer seed) ⇒ andere Streuung, aber
+  // gleicher seed + gleiche Fläche ⇒ identische Geometrie über alle Renderpfade.
+  const seed = hashSeed(
+    bb.minX, bb.minY, bb.maxX - bb.minX, bb.maxY - bb.minY,
+    hatch.angle, s, density, hatch.seed ?? 0,
+  );
   const base = toModelAngleRad(hatch.angle);
-  return scatterStrokes(poly, strokeLen, cell, base, seed);
+  // Explizite Längenspanne (mm-Papier → Modell-Meter, wie das Dash-Muster).
+  const lenMin = hatch.lengthMin != null ? hatch.lengthMin * DASH_MM_TO_M : undefined;
+  const lenMax = hatch.lengthMax != null ? hatch.lengthMax * DASH_MM_TO_M : undefined;
+  return scatterStrokes(poly, strokeLen, cell, base, seed, lenMin, lenMax);
 }
 
 // ── Zickzack-/Wellen-Linie ───────────────────────────────────────────────────

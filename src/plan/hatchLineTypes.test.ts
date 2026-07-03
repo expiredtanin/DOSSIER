@@ -68,6 +68,25 @@ describe("Random-Vektor-Schraffur", () => {
     expect(JSON.stringify(random)).not.toEqual(JSON.stringify(parallel));
   });
 
+  it("expliziter Seed ist reproduzierbar und aendert die Streuung (Neu wuerfeln)", () => {
+    const base = { kind: "vector", lines: "random", scale: 1 } as const;
+    const s7a = buildHatchRuns(SQUARE, hatch({ ...base, seed: 7 }));
+    const s7b = buildHatchRuns(SQUARE, hatch({ ...base, seed: 7 }));
+    const s8 = buildHatchRuns(SQUARE, hatch({ ...base, seed: 8 }));
+    expect(s7a).toEqual(s7b); // gleicher Seed ⇒ identische Geometrie
+    expect(JSON.stringify(s7a)).not.toEqual(JSON.stringify(s8)); // neuer Seed ⇒ neue Streuung
+  });
+
+  it("Dichte verdichtet die Streuung, Längenspanne wird angewandt", () => {
+    const base = { kind: "vector", lines: "random", scale: 1, seed: 3 } as const;
+    const sparse = buildHatchRuns(SQUARE, hatch({ ...base }));
+    const dense = buildHatchRuns(SQUARE, hatch({ ...base, density: 3 }));
+    expect(dense.length).toBeGreaterThan(sparse.length);
+    // Längenspanne greift ohne zu werfen und bleibt deterministisch.
+    const ranged = buildHatchRuns(SQUARE, hatch({ ...base, lengthMin: 1, lengthMax: 2 }));
+    expect(ranged).toEqual(buildHatchRuns(SQUARE, hatch({ ...base, lengthMin: 1, lengthMax: 2 })));
+  });
+
   it("erscheint als Streu-Polylinien in der RenderScene (deterministisch)", () => {
     const poly: Primitive = {
       kind: "polygon",

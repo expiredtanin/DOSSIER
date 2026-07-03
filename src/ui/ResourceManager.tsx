@@ -56,29 +56,6 @@ const PATTERN_OPTIONS: { value: HatchPattern; labelKey: string }[] = [
   { value: "crosshatch", labelKey: "pattern.crosshatch" },
 ];
 
-/**
- * Benannte Strichmuster (mm). `null` = durchgezogen. Werte als Schlüssel
- * serialisiert, damit das Dropdown den aktuellen Stil wiedererkennt.
- */
-const DASH_OPTIONS: { key: string; labelKey: string; dash: number[] | null }[] = [
-  { key: "solid", labelKey: "dash.solid", dash: null },
-  { key: "dashed", labelKey: "dash.dashed", dash: [6, 4] },
-  { key: "dotted", labelKey: "dash.dotted", dash: [1, 3] },
-];
-
-/** Findet den Dash-Schlüssel, der zu einem Strichmuster passt (sonst custom). */
-function dashKey(dash: number[] | null): string {
-  const hit = DASH_OPTIONS.find(
-    (o) =>
-      (o.dash === null && dash === null) ||
-      (o.dash !== null &&
-        dash !== null &&
-        o.dash.length === dash.length &&
-        o.dash.every((v, i) => v === dash[i])),
-  );
-  return hit ? hit.key : "custom";
-}
-
 // ── Wiederverwendbare Feld-Bausteine (DOSSIER-Look) ────────────────────────
 // Alle Steuerelemente füllen ihre Tabellenzelle (width:100%) und werden über
 // die Spaltenbreite des Grids dimensioniert; Zahlenfelder sind rechtsbündig.
@@ -979,6 +956,14 @@ function HatchDetail({
     r.readAsDataURL(file);
   };
 
+  // ── Random-Vektor-Schraffur (Kies/Splitt) ───────────────────────────────────
+  // Dichte + Längenspanne + „Neu würfeln". Der Seed wird beim Klick gesetzt (KEIN
+  // Math.random() zur Renderzeit — die Streuung selbst ist deterministisch per
+  // Seed). Länge min/max in mm; bis der Nutzer sie berührt, bleibt der Default.
+  const lenMin = hatch.lengthMin ?? 1;
+  const lenMax = hatch.lengthMax ?? 3;
+  const reroll = () => onPatch({ seed: Math.floor(Math.random() * 0x7fffffff) });
+
   return (
     <div className="res-md-detail-inner">
       <div className="res-md-head">
@@ -1064,6 +1049,39 @@ function HatchDetail({
                 options={lineOptions}
               />
             </FieldRow>
+            {lines === "random" && (
+              <>
+                <FieldRow label={t("resources.field.density")}>
+                  <NumberField
+                    value={hatch.density ?? 1}
+                    onChange={(density) => onPatch({ density })}
+                    step={0.1}
+                    min={0.1}
+                  />
+                </FieldRow>
+                <FieldRow label={t("resources.field.lengthMin")}>
+                  <NumberField
+                    value={lenMin}
+                    onChange={(v) => onPatch({ lengthMin: v, lengthMax: hatch.lengthMax ?? lenMax })}
+                    step={0.5}
+                    min={0}
+                  />
+                </FieldRow>
+                <FieldRow label={t("resources.field.lengthMax")}>
+                  <NumberField
+                    value={lenMax}
+                    onChange={(v) => onPatch({ lengthMax: v, lengthMin: hatch.lengthMin ?? lenMin })}
+                    step={0.5}
+                    min={0}
+                  />
+                </FieldRow>
+                <FieldRow label={t("resources.random.reroll")}>
+                  <button type="button" className="res-seg-btn" onClick={reroll}>
+                    {t("resources.random.reroll")}
+                  </button>
+                </FieldRow>
+              </>
+            )}
           </>
         ) : (
           <>
@@ -1196,6 +1214,27 @@ function LineStyleDetail({
     onPatch({ zigzag: { ...cur, ...part } });
   };
 
+  // ── Strich (dash) ──────────────────────────────────────────────────────────
+  // „Vollinie" = `dash: null` (durchgezogen); „Strich" = editierbare Liste der
+  // Segmentlängen in mm (alternierend Strich/Lücke). Die Dicke gehört NICHT mehr
+  // hierher — sie wird per Element-Attribut aufgelöst (By-Object/By-Layer folgt).
+  const dash = style.dash;
+  const isSolid = dash === null;
+  const dashArr = dash ?? [];
+  const setStroke = (mode: "solid" | "dash") =>
+    onPatch({ dash: mode === "solid" ? null : dashArr.length ? dashArr : [1, 2] });
+  const setSeg = (i: number, v: number) => {
+    const next = dashArr.slice();
+    next[i] = Math.max(0, v);
+    onPatch({ dash: next });
+  };
+  const addSeg = () =>
+    onPatch({ dash: [...dashArr, dashArr.length ? dashArr[dashArr.length - 1] : 1] });
+  const removeSeg = (i: number) => {
+    const next = dashArr.filter((_, k) => k !== i);
+    onPatch({ dash: next.length ? next : null });
+  };
+
   return (
     <div className="res-md-detail-inner">
       <div className="res-md-head">
@@ -1226,16 +1265,6 @@ function LineStyleDetail({
             ]}
           />
         </FieldRow>
-        <FieldRow label={t("resources.col.weight")}>
-          <NumberField
-            value={style.weight}
-            onChange={(weight) => onPatch({ weight })}
-            step={0.05}
-            min={0.01}
-            max={2}
-            list="pen-weights"
-          />
-        </FieldRow>
         <FieldRow label={t("resources.col.color")}>
           <ColorField color={style.color} onChange={(color) => onPatch({ color })} />
         </FieldRow>
@@ -1259,16 +1288,67 @@ function LineStyleDetail({
             </FieldRow>
           </>
         ) : (
-          <FieldRow label={t("resources.col.stroke")}>
-            <SelectField
-              value={dashKey(style.dash)}
-              onChange={(key) => {
-                const opt = DASH_OPTIONS.find((o) => o.key === key);
-                if (opt) onPatch({ dash: opt.dash });
-              }}
-              options={DASH_OPTIONS.map((o) => ({ value: o.key, label: t(o.labelKey) }))}
-            />
-          </FieldRow>
+          <>
+            <FieldRow label={t("resources.col.stroke")}>
+              <Segmented
+                value={isSolid ? "solid" : "dash"}
+                onChange={setStroke}
+                options={[
+                  { value: "solid", label: t("resources.stroke.solid") },
+                  { value: "dash", label: t("resources.stroke.dash") },
+                ]}
+              />
+            </FieldRow>
+            {!isSolid && (
+              <FieldRow
+                label={t("resources.dash.segments")}
+                hint={t("resources.dash.hint")}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 4,
+                    alignItems: "center",
+                  }}
+                >
+                  {dashArr.map((v, i) => (
+                    <span
+                      key={i}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 2 }}
+                    >
+                      <span style={{ width: 46 }}>
+                        <NumberField
+                          value={v}
+                          onChange={(x) => setSeg(i, x)}
+                          step={0.5}
+                          min={0}
+                        />
+                      </span>
+                      <button
+                        type="button"
+                        className="res-seg-btn"
+                        title={t("resources.dash.remove")}
+                        onClick={() => removeSeg(i)}
+                        style={{ padding: "2px 6px", lineHeight: 1 }}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    className="res-seg-btn"
+                    title={t("resources.dash.add")}
+                    onClick={addSeg}
+                    style={{ padding: "2px 8px", lineHeight: 1 }}
+                  >
+                    + {t("resources.dash.add")}
+                  </button>
+                </div>
+              </FieldRow>
+            )}
+          </>
         )}
       </div>
     </div>
