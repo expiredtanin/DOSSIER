@@ -15,9 +15,15 @@
 // Einheiten: METER. Koordinaten der Ausgabe: u = horizontal entlang der Ebene,
 // v = absolute Höhe (world.y). Siehe src-tauri/render3d/src/section.rs.
 
-import type { DrawingLevel, Project } from "../model/types";
+import type { Ceiling, DrawingLevel, Project, Wall } from "../model/types";
+import { openingsOfWall } from "../model/types";
+import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
+import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { projectToModel3d } from "./toWalls3d";
 import { loadEngine3d } from "../engine/engine3d";
+import type { SectionCutStyle } from "./generatePlan";
+import { resolveCeilingSectionStyle, resolveWallSectionStyle } from "./generatePlan";
+import type { HatchRender } from "./generatePlan";
 
 /** Bauteil-Referenz eines Cut-Polygons/einer Kante (Art + Eingabe-Index). */
 export interface SectionComponentRef {
@@ -28,10 +34,19 @@ export interface SectionComponentRef {
 /** Ein geschnittenes Bauteil-Rechteck in (u, v)-Metern (Ring, implizit geschlossen). */
 export interface SectionCutPolygon {
   component: SectionComponentRef;
-  /** Albedo-Farbe des Bauteils (RGB 0..1). */
+  /** Albedo-Farbe des Bauteils (RGB 0..1) — Rohwert aus dem 3D-Modell (Fallback). */
   color: [number, number, number];
   /** Ring-Ecken (u, v). */
   pts: Array<[number, number]>;
+  /**
+   * Echte Poché-Füllfarbe des geschnittenen Bauteils (tragende Wandschicht
+   * bzw. erste Deckenschicht), von `computeSection` aufgelöst. Fehlt, wenn das
+   * Quell-Bauteil nicht auflösbar war — der Aufrufer (generateSectionPlan)
+   * fällt dann auf `color` zurück.
+   */
+  fill?: string;
+  /** Echte Schnitt-Schraffur des geschnittenen Bauteils, analog zu `fill`. */
+  hatch?: HatchRender;
 }
 
 /** Ein projiziertes Liniensegment in (u, v)-Metern. */
@@ -102,6 +117,115 @@ export function sectionPlaneFromLevel(level: DrawingLevel): SectionPlaneSpec | n
   };
 }
 
+// ── Cut-Polygon → Quell-Bauteil (für die echte Hatch-Auflösung) ────────────
+// `cut_section_json` (section.rs) nummeriert jedes Cut-Polygon per
+// `ComponentRef { kind, index }`, wobei `index` exakt die Position im
+// `walls`/`slabs`-Array ist, das ihm als Modell-JSON übergeben wurde
+// (`walls.iter().enumerate()` in section.rs) — also dieselbe Reihenfolge wie
+// `projectToModel3d(project).walls`/`.slabs` (toWalls3d.ts).
+//
+// `projectToWalls3d` zerlegt EINE Wand mit Öffnungen in mehrere Teilquader
+// (Pfeiler/Brüstung/Sturz) — die Emission ist also nicht 1:1 Wand→Element.
+// Um einen `index` wieder auf seine Quellwand zurückzuführen, wird hier exakt
+// dieselbe Segmentierungs-/Skip-Logik wie `emitWall`/`pushSegment`
+// (toWalls3d.ts) repliziert — NICHT die Geometrie, nur welches Quellelement
+// pro emittiertem Segment "besitzt". Bleibt diese Zählung nicht exakt parallel
+// zu `emitWall`, verschieben sich die Indizes und die Hatch-Auflösung wird
+// falsch (harmlos: der Aufrufer fällt dann pro Cut-Polygon auf die generische
+// Schnitt-Schraffur zurück, siehe `resolveWallSectionStyle`/`generatePlan.ts`).
+const OWNER_EPS = 1e-4;
+
+/** Liefert je emittiertem Wand-Teilquader (in Emissions-Reihenfolge) die Quellwand. */
+export function wallSegmentOwners(project: Project): Wall[] {
+  const owners: Wall[] = [];
+  const pushOwner = (wall: Wall, from: number, to: number, zBottom: number, zTop: number) => {
+    if (to - from <= OWNER_EPS) return;
+    if (zTop - zBottom <= OWNER_EPS) return;
+    owners.push(wall);
+  };
+  for (const wall of project.walls) {
+    const { zBottom, zTop } = wallVerticalExtent(project, wall);
+    const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+    if (axisLen < 1e-9 || zTop - zBottom <= OWNER_EPS) continue;
+
+    const cutouts: Array<{ from: number; to: number; oBottom: number; oTop: number }> = [];
+    for (const op of openingsOfWall(project, wall.id)) {
+      const iv = openingInterval(wall, op);
+      if (!iv) continue;
+      const v = openingVerticalExtent(project, wall, op);
+      cutouts.push({ from: iv.from, to: iv.to, oBottom: v.zBottom, oTop: v.zTop });
+    }
+    for (const d of project.doors ?? []) {
+      if (d.hostWallId !== wall.id) continue;
+      const from = Math.max(0, Math.min(d.position, axisLen));
+      const to = Math.max(from, Math.min(d.position + d.width, axisLen));
+      if (to - from < OWNER_EPS) continue;
+      const oTop = Math.min(zTop, zBottom + d.height);
+      cutouts.push({ from, to, oBottom: zBottom, oTop });
+    }
+    cutouts.sort((a, b) => a.from - b.from);
+
+    if (cutouts.length === 0) {
+      pushOwner(wall, 0, axisLen, zBottom, zTop);
+      continue;
+    }
+
+    let cursor = 0;
+    for (const { from, to, oBottom, oTop } of cutouts) {
+      const segFrom = Math.max(cursor, from);
+      if (from > cursor) pushOwner(wall, cursor, from, zBottom, zTop);
+      if (to > segFrom) {
+        if (oBottom > zBottom + OWNER_EPS) pushOwner(wall, segFrom, to, zBottom, oBottom);
+        if (oTop < zTop - OWNER_EPS) pushOwner(wall, segFrom, to, oTop, zTop);
+      }
+      cursor = Math.max(cursor, to);
+    }
+    if (cursor < axisLen) pushOwner(wall, cursor, axisLen, zBottom, zTop);
+  }
+  return owners;
+}
+
+/** Liefert je emittierter Deckenplatte (in Emissions-Reihenfolge) die Quelldecke (1:1, keine Zerlegung). */
+export function slabSegmentOwners(project: Project): Ceiling[] {
+  const owners: Ceiling[] = [];
+  for (const c of project.ceilings ?? []) {
+    if (!c.outline || c.outline.length < 3) continue;
+    const { zBottom, zTop } = ceilingVerticalExtent(project, c);
+    if (zTop - zBottom <= OWNER_EPS) continue;
+    owners.push(c);
+  }
+  return owners;
+}
+
+/**
+ * Hängt an jedes Cut-Polygon von `output` (in-place) die echte Poché-Füllfarbe
+ * + Schraffur des geschnittenen Bauteils an (`fill`/`hatch`), aufgelöst über
+ * die Wand-/Decken-Besitzer-Listen. Nicht auflösbare Referenzen (Index
+ * außerhalb der Besitzer-Liste, verwaistes `wallTypeId`/Bauteil) bleiben ohne
+ * `fill`/`hatch` — `generateSectionPlan` fällt dafür auf die generische
+ * Schnitt-Schraffur zurück.
+ */
+function attachCutStyles(output: SectionOutput, project: Project): void {
+  if (output.cutPolygons.length === 0) return;
+  const walls = wallSegmentOwners(project);
+  const slabs = slabSegmentOwners(project);
+  for (const cp of output.cutPolygons) {
+    const ref = cp.component;
+    let style: SectionCutStyle | null = null;
+    if (ref.kind === "wall") {
+      const owner = walls[ref.index];
+      if (owner) style = resolveWallSectionStyle(project, owner);
+    } else {
+      const owner = slabs[ref.index];
+      if (owner) style = resolveCeilingSectionStyle(project, owner);
+    }
+    if (style) {
+      cp.fill = style.fill;
+      cp.hatch = style.hatch;
+    }
+  }
+}
+
 /**
  * Berechnet den Schnitt/die Ansicht der Ebene `level` gegen das Modell `project`
  * über den WASM-Extraktor. Asynchron (das render3d-WASM-Modul wird lazy geladen).
@@ -133,5 +257,7 @@ export async function computeSection(
     plane.normal[1],
     plane.normal[2],
   );
-  return JSON.parse(json) as SectionOutput;
+  const output = JSON.parse(json) as SectionOutput;
+  attachCutStyles(output, project);
+  return output;
 }

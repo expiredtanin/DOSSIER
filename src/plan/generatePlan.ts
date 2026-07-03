@@ -7,6 +7,7 @@
 
 import type {
   Ceiling,
+  Component,
   Drawing2D,
   HatchPattern,
   LayerCategory,
@@ -254,6 +255,54 @@ function resolveHatch(project: Project, hatchId: string): HatchRender {
   };
 }
 
+/** Füllfarbe + Schraffur eines aufgelösten Bauteils, fertig für eine Cut-Poché. */
+export interface SectionCutStyle {
+  fill: string;
+  hatch: HatchRender;
+}
+
+/**
+ * Löst das tragende Bauteil (höchste `joinPriority`) einer Wand auf — dieselbe
+ * Regel wie {@link backboneColor} für die grobe Grundriss-Poché — und liefert
+ * dessen Füllfarbe + echte Schraffur für die Schnitt-Poché. `null`, wenn Wandtyp
+ * oder Bauteil nicht auflösbar sind (z. B. verwaistes `wallTypeId`); der
+ * Aufrufer fällt dann auf die generische Schnitt-Schraffur zurück.
+ */
+export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCutStyle | null {
+  try {
+    const wt = getWallType(project, wall);
+    let best: Component | null = null;
+    for (const layer of wt.layers) {
+      const comp = getComponent(project, layer.componentId);
+      if (!best || comp.joinPriority > best.joinPriority) best = comp;
+    }
+    if (!best) return null;
+    return { fill: best.color, hatch: resolveHatch(project, best.hatchId) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Löst das erste Bauteil des Deckentyps einer Decke auf — dieselbe Regel wie
+ * {@link addCeilingPoche} für die normale Deckenpoché — und liefert dessen
+ * Füllfarbe + echte Schraffur für die Schnitt-Poché. `null`, wenn Deckentyp
+ * oder Bauteil nicht auflösbar sind bzw. der Deckentyp keine Schicht trägt.
+ */
+export function resolveCeilingSectionStyle(
+  project: Project,
+  ceiling: Ceiling,
+): SectionCutStyle | null {
+  try {
+    const wt = getCeilingType(project, ceiling);
+    if (wt.layers.length === 0) return null;
+    const comp = getComponent(project, wt.layers[0].componentId);
+    return { fill: comp.color, hatch: resolveHatch(project, comp.hatchId) };
+  } catch {
+    return null;
+  }
+}
+
 export interface Plan {
   primitives: Primitive[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
@@ -465,22 +514,31 @@ export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
     if (y > maxY) maxY = y;
   };
 
-  // Cut-Polygone: gefüllte Poché-Fläche (Bauteilfarbe) + Schnitt-Schraffur +
-  // kräftige Umrisslinie — wie eine geschnittene Wand im Grundriss.
+  // Cut-Polygone: gefüllte Poché-Fläche + Schnitt-Schraffur + kräftige
+  // Umrisslinie — wie eine geschnittene Wand im Grundriss. `toSection.ts`
+  // (computeSection) löst je Cut-Polygon bereits das Quell-Bauteil auf und
+  // hängt dessen echte Füllfarbe/Schraffur an (`cp.fill`/`cp.hatch`); fehlt
+  // diese Auflösung (Fallback), greift die generische Schnitt-Schraffur auf
+  // Basis der rohen Albedo-Farbe aus dem 3D-Modell.
   for (const cp of output.cutPolygons) {
     if (cp.pts.length < 3) continue;
     const pts: Vec2[] = cp.pts.map(([u, v]) => {
       acc(u, v);
       return { x: u, y: v };
     });
-    // Mono: reines Weiss statt Bauteilfarbe (nur Umriss + Schraffur tragen).
+    const fill = cp.fill ?? rgbToHex(cp.color);
+    const hatch = cp.hatch ?? SECTION_HATCH;
+    // Mono: reines Weiss statt Bauteilfarbe, Schraffurfarbe → Tinte (nur
+    // Umriss + Schraffur-Musterlinien tragen; wie der toMono()-Postpass für
+    // die normale Poché, hier direkt inline, da Cut-Polygone kein "solid"
+    // führen).
     primitives.push({
       kind: "polygon",
       pts,
-      fill: mono ? "#ffffff" : rgbToHex(cp.color),
+      fill: mono ? "#ffffff" : fill,
       stroke: SECTION_INK,
       strokeWidthMm: SECTION_CUT_OUTLINE_MM,
-      hatch: SECTION_HATCH,
+      hatch: mono && hatch.pattern !== "none" ? { ...hatch, color: SECTION_INK } : hatch,
     });
   }
 
