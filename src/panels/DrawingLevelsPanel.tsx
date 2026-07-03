@@ -1,18 +1,20 @@
 // Inhalts-Panel „Zeichnungsebenen" — die obere Navigator-Liste als Panel.
 //
-// Zeigt die Zeichnungsebenen (Geschosse + Schnitte/Ansichten/Zeichnungen)
-// exakt wie der bisherige Navigator: EyeIcon schaltet die Sichtbarkeit, ein
-// Kind-Badge zeigt die Art, die aktive Ebene ist hervorgehoben, Höhen-Readout
-// (+OKFF) bei Geschossen. Kopfzeile mit + Geschoss / + Zeichnung.
+// Zeigt die Zeichnungsebenen gruppiert in vier einklappbaren Kategorien
+// (Geschosse / Schnitte / Ansichten / 2D-Zeichnungen, in dieser Reihenfolge).
+// Jede Kategorie hat einen eigenen Kopf mit Titel, Ein-/Ausklapp-Chevron und
+// einem blanken „+"-Glyph zum Anlegen einer neuen Zeichnungsebene dieser Art.
+// Innerhalb einer Kategorie: EyeIcon schaltet die Sichtbarkeit, die aktive
+// Ebene ist hervorgehoben, Höhen-Readout (+OKFF) bei Geschossen.
 //
-// Neu gegenüber dem Inline-Navigator: das Panel deklariert hasDisplayMode und
-// liest den gewählten DisplayMode aus dem Host-Context. `itemDisplay`
-// entscheidet je Zeile, ob sie gezeichnet und ob sie ausgegraut wird (aktives
-// Element = Arbeitsfokus, immer sichtbar). Daten/Handler kommen über
-// usePanelHost — kein Prop-Drilling.
+// Das Panel deklariert hasDisplayMode und liest den gewählten DisplayMode aus
+// dem Host-Context. `itemDisplay` entscheidet je Zeile, ob sie gezeichnet und
+// ob sie ausgegraut wird (aktives Element = Arbeitsfokus, immer sichtbar).
+// Daten/Handler kommen über usePanelHost — kein Prop-Drilling.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
+import { useState } from "react";
 import { EyeIcon } from "../ui/EyeIcon";
 import { itemDisplay } from "./displayMode";
 import { usePanelHost } from "./host";
@@ -29,10 +31,48 @@ const KIND_BADGE_KEY: Record<DrawingLevelKind, string> = {
   drawing: "badge.drawing",
 };
 
+/** Kategorien der Zeichnungsebenen, in Anzeigereihenfolge. */
+const CATEGORY_ORDER: DrawingLevelKind[] = [
+  "floor",
+  "section",
+  "elevation",
+  "drawing",
+];
+
+/** i18n-Key des Kategorie-Titels. */
+const CATEGORY_TITLE_KEY: Record<DrawingLevelKind, string> = {
+  floor: "levelCat.floor",
+  section: "levelCat.section",
+  elevation: "levelCat.elevation",
+  drawing: "levelCat.drawing",
+};
+
+/** i18n-Key der Beschriftung des „+"-Glyphs (Tooltip/aria-label). */
+const CATEGORY_ADD_KEY: Record<DrawingLevelKind, string> = {
+  floor: "levels.addFloor",
+  section: "levels.addSection",
+  elevation: "levels.addElevation",
+  drawing: "levels.addDrawing",
+};
+
 /** Inhalt des Panels „Zeichnungsebenen". */
 export function DrawingLevelsPanel() {
   const host = usePanelHost();
   const { project, activeLevelId, displayMode } = host;
+
+  // Auf-/Zu-Zustand je Kategorie, lokal — Default: alle aufgeklappt.
+  const [collapsed, setCollapsed] = useState<Record<DrawingLevelKind, boolean>>(
+    { floor: false, section: false, elevation: false, drawing: false },
+  );
+  const toggleCategory = (kind: DrawingLevelKind) =>
+    setCollapsed((c) => ({ ...c, [kind]: !c[kind] }));
+
+  const onAddByKind: Record<DrawingLevelKind, () => void> = {
+    floor: host.onAddFloor,
+    section: host.onAddSection,
+    elevation: host.onAddElevation,
+    drawing: host.onAddDrawing,
+  };
 
   // Oberstes Geschoss zuoberst (wie DOSSIER): Anzeige umkehren.
   const levelsTopDown = [...project.drawingLevels].reverse();
@@ -55,29 +95,58 @@ export function DrawingLevelsPanel() {
     <section className="nav-group">
       <header className="nav-group-head">
         <span className="nav-group-title">{t("nav.drawingLevels")}</span>
-        <span className="nav-group-actions">
-          <button className="nav-add" onClick={host.onAddFloor}>
-            {t("levels.addFloor")}
-          </button>
-          <button className="nav-add" onClick={host.onAddDrawing}>
-            {t("levels.addDrawing")}
-          </button>
-        </span>
       </header>
 
-      <div className="nav-list">
-        {levelsTopDown.map((level) => (
-          <LevelRow
-            key={level.id}
-            level={level}
-            active={level.id === activeLevelId}
-            mode={displayMode.mode}
-            onSelect={() => host.onSelectLevel(level.id)}
-            onToggle={() => toggle(level.id)}
-            onContext={(e) => onRowContext(level.id, e)}
-          />
-        ))}
-      </div>
+      {CATEGORY_ORDER.map((kind) => {
+        const levelsOfKind = levelsTopDown.filter((l) => l.kind === kind);
+        const isOpen = !collapsed[kind];
+        return (
+          <div className="level-cat" key={kind}>
+            <header
+              className="level-cat-head"
+              onClick={() => toggleCategory(kind)}
+            >
+              <span
+                className={`level-cat-chevron${isOpen ? " open" : ""}`}
+                aria-hidden="true"
+              >
+                ▸
+              </span>
+              <span className="level-cat-title">
+                {t(CATEGORY_TITLE_KEY[kind])}
+              </span>
+              <span
+                className="level-cat-add"
+                role="button"
+                aria-label={t(CATEGORY_ADD_KEY[kind])}
+                title={t(CATEGORY_ADD_KEY[kind])}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddByKind[kind]();
+                }}
+              >
+                +
+              </span>
+            </header>
+
+            {isOpen && (
+              <div className="nav-list">
+                {levelsOfKind.map((level) => (
+                  <LevelRow
+                    key={level.id}
+                    level={level}
+                    active={level.id === activeLevelId}
+                    mode={displayMode.mode}
+                    onSelect={() => host.onSelectLevel(level.id)}
+                    onToggle={() => toggle(level.id)}
+                    onContext={(e) => onRowContext(level.id, e)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }

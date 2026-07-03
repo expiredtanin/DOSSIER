@@ -82,6 +82,8 @@ export interface PanelHostValue {
   onToggleLevel: (id: string) => void;
   onAddFloor: () => void;
   onAddDrawing: () => void;
+  onAddSection: () => void;
+  onAddElevation: () => void;
   /**
    * Rechtsklick auf eine Zeichnungsebenen-Zeile: öffnet das Kontextmenü an der
    * Cursorposition. App hält das offene Menü und baut die Einträge

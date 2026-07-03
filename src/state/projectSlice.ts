@@ -41,6 +41,10 @@ export interface ProjectSlice {
   patchActiveFloor: (patch: Partial<DrawingLevel>) => void;
   addFloor: () => void;
   addDrawing: () => void;
+  /** Legt eine neue Schnitt-Zeichnungsebene (kind:"section") als Platzhalter an. */
+  addSection: () => void;
+  /** Legt eine neue Ansichts-Zeichnungsebene (kind:"elevation") als Platzhalter an. */
+  addElevation: () => void;
   /**
    * Legt eine neue freie Zeichnungsebene (kind:"drawing") mit dem gegebenen
    * Namen an und liefert ihre ID zurück (z. B. als Ziel eines DXF-Imports).
@@ -307,6 +311,34 @@ export function createProjectSlice(
           locked: false,
         };
         return { ...p, drawingLevels: [...p.drawingLevels, drawing] };
+      }),
+
+    // Schnitt/Ansicht sind vorerst Platzhalter ohne Schnittlinie (linePoints
+    // bleibt undefined, bis die Schnitt-UI existiert — siehe toSection.ts).
+    addSection: () =>
+      setProject((p) => {
+        const n = p.drawingLevels.filter((z) => z.kind === "section").length + 1;
+        const section: DrawingLevel = {
+          id: `section-${Date.now()}`,
+          name: t("default.sectionName", { n }),
+          kind: "section",
+          visible: true,
+          locked: false,
+        };
+        return { ...p, drawingLevels: [...p.drawingLevels, section] };
+      }),
+
+    addElevation: () =>
+      setProject((p) => {
+        const n = p.drawingLevels.filter((z) => z.kind === "elevation").length + 1;
+        const elevation: DrawingLevel = {
+          id: `elevation-${Date.now()}`,
+          name: t("default.elevationName", { n }),
+          kind: "elevation",
+          visible: true,
+          locked: false,
+        };
+        return { ...p, drawingLevels: [...p.drawingLevels, elevation] };
       }),
 
     // Neue freie Zeichnungsebene mit explizitem Namen anlegen und ihre ID

@@ -1598,6 +1598,8 @@ export default function App() {
   const toggleCategoryVisible = useStore((s) => s.toggleCategoryVisible);
   const addFloor = useStore((s) => s.addFloor);
   const addDrawing = useStore((s) => s.addDrawing);
+  const addSection = useStore((s) => s.addSection);
+  const addElevation = useStore((s) => s.addElevation);
   const addDrawingLevel = useStore((s) => s.addDrawingLevel);
   const importDrawings = useStore((s) => s.importDrawings);
   const addCategory = useStore((s) => s.addCategory);
@@ -1906,6 +1908,8 @@ export default function App() {
       onToggleLevel: toggleLevelVisible,
       onAddFloor: addFloor,
       onAddDrawing: addDrawing,
+      onAddSection: addSection,
+      onAddElevation: addElevation,
       onLevelContextMenu: (id, x, y) =>
         setMenu({ kind: "level", id, x, y }),
       activeCategoryCode,
