@@ -283,8 +283,8 @@ export const sampleProject: Project = {
     },
   ],
   // Räume (SIA-416-Flächen) — ein Beispielraum im EG (lichte Innenkontur des
-  // 5×4-m-Umrisses, Aussenwände 0.2 m → Innenmaß 4.8×3.8 m ≈ 18.24 m²).
-  // Kategorie „45 Räume", SIA-Blatt HNF (Hauptnutzfläche).
+  // 5×4-m-Umrisses, Aussenwände Typ „aw" 0.345 m dick → Innenmaß 4.655×3.655 m
+  // ≈ 17.01 m²). Kategorie „45 Räume", SIA-Blatt HNF (Hauptnutzfläche).
   rooms: [
     {
       id: "R1",
@@ -293,13 +293,17 @@ export const sampleProject: Project = {
       categoryCode: "60",
       siaCategory: "HNF",
       name: "Wohnen",
+      // Lichte Innenkontur = Wandachse ± halbe Wanddicke (Typ „aw": Putz aussen
+      // 0.02 + Dämmung 0.16 + Backstein 0.15 + Putz innen 0.015 = 0.345 m Gesamt-
+      // dicke → 0.1725 m je Seite). Der Raumumriss liegt damit exakt auf der
+      // Innenfläche der Wand, nicht in der Wand-Poché.
       boundary: [
-        { x: 0.1, y: 0.1 },
-        { x: 4.9, y: 0.1 },
-        { x: 4.9, y: 3.9 },
-        { x: 0.1, y: 3.9 },
+        { x: 0.1725, y: 0.1725 },
+        { x: 4.8275, y: 0.1725 },
+        { x: 4.8275, y: 3.8275 },
+        { x: 0.1725, y: 3.8275 },
       ],
-      color: "#5a7a9a",
+      color: "#6b7280",
       stampAnchor: { x: 2.5, y: 2.0 },
     },
   ],

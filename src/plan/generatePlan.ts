@@ -1241,8 +1241,15 @@ function addCeilingPoche(
   });
 }
 
-/** Deckkraft (0..255) der transluzenten Raum-Füllung → 2-stelliges Hex-Suffix. */
-const ROOM_FILL_ALPHA = "33"; // ~20 % Deckkraft
+/**
+ * Deckkraft (0..255) der Raum-Füllung → 2-stelliges Hex-Suffix. Transluzente
+ * Farbfüllung entfällt — Plandarstellung schwarz/grau; Farbe bleibt späteren
+ * Schema-Ebenen vorbehalten. Alpha 0 = unsichtbar; das Polygon bleibt als
+ * `roomId`-Primitiv erhalten (Auswahl per Punkt-in-Polygon in PlanView, NICHT
+ * über die native Pointer-Trefferfläche der Füllung — die volle Fläche bleibt
+ * damit trotz Alpha 0 klickbar).
+ */
+const ROOM_FILL_ALPHA = "00";
 /** Basis-Schriftgrösse des Raum-Stempels in Punkt (pt). */
 const ROOM_STAMP_PT = 10;
 
@@ -1252,12 +1259,14 @@ function withAlpha(color: string, alphaHex: string): string {
 }
 
 /**
- * Raum (SIA-416-Fläche) im Grundriss: eine transluzente farbige Füllfläche über
- * dem lichten Umriss + eine dünne Umrisslinie (beide `roomId`-getaggt für die
- * Auswahl) + ein Raum-Stempel (Text) am Anker (Centroid oder `stampAnchor`) mit
- * Name, Fläche „24.30 m²" und SIA-Kürzel. Der Stempel entfällt beim Detailgrad
- * „grob"; Fläche/Umfang/Schwerpunkt werden aus `boundary` abgeleitet (nie
- * gespeichert). Wird UNTER der Wand-Poché gezeichnet.
+ * Raum (SIA-416-Fläche) im Grundriss: eine (unsichtbare, nur klickbare) Füll-
+ * fläche über dem lichten Umriss + eine dünne neutrale Umrisslinie (beide
+ * `roomId`-getaggt für die Auswahl) + ein Raum-Stempel (Text) am Anker
+ * (Centroid oder `stampAnchor`) mit Name, Fläche „24.30 m²" und SIA-Kürzel.
+ * Keine Farbwäsche — Plandarstellung schwarz/grau, Farbe bleibt späteren
+ * Schema-Ebenen vorbehalten. Der Stempel entfällt beim Detailgrad „grob";
+ * Fläche/Umfang/Schwerpunkt werden aus `boundary` abgeleitet (nie gespeichert).
+ * Wird UNTER der Wand-Poché gezeichnet.
  */
 function addRoomArea(
   out: Primitive[],
@@ -1270,7 +1279,8 @@ function addRoomArea(
   const res = evaluateRoom(pts, room.siaCategory);
   const stroke = room.color;
 
-  // Transluzente Farbfüllung.
+  // Unsichtbare Füllfläche (Alpha 0): keine Farbwäsche im Plan, das Polygon
+  // bleibt aber als `roomId`-Primitiv für die Punkt-in-Polygon-Auswahl erhalten.
   out.push({
     kind: "polygon",
     pts,
