@@ -47,7 +47,7 @@ const PEN_STEPS = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0] as const;
 const MIN_PEN_MM = 0.13;
 
 /** Quantelt eine mm-Strichstaerke auf die naechste Stift-Stufe (>= MIN_PEN_MM). */
-function quantizePen(mm: number): number {
+export function quantizePen(mm: number): number {
   const w = Math.max(MIN_PEN_MM, mm);
   for (const step of PEN_STEPS) if (w <= step + 1e-6) return step;
   return PEN_STEPS[PEN_STEPS.length - 1];

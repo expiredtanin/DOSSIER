@@ -19,6 +19,7 @@ import type { EdgeGrip, Vec2 } from "../model/types";
 import type { DraftShape, SnapResult, ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
+import { quantizePen } from "../export/sceneToPrintSvg";
 
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
@@ -2533,7 +2534,7 @@ function DrawingRunShape({
   const sw = hairline
     ? HAIRLINE_PX
     : print
-      ? printStrokeVb(run.weightMm, paperScale!)
+      ? printStrokeVb(quantizePen(run.weightMm), paperScale!)
       : mmToPx(run.weightMm);
   const vfx = print ? undefined : ("non-scaling-stroke" as const);
   const dashStr =
@@ -2623,9 +2624,13 @@ function renderPrimitive(
   const print = !hairline && paperScale != null && paperScale > 0;
   // Strichstärke:
   //  • Display  → konstante Haarlinie (Bildschirm-px), papierunabhängig.
-  //  • Print    → echte Papier-mm in viewBox-Einheiten (skaliert mit dem Zoom).
+  //  • Print    → echte Papier-mm, VORHER auf die PEN_STEPS-Stiftstufe
+  //    gequantelt (identisch zum PDF-Export, `quantizePen` aus
+  //    `sceneToPrintSvg.ts`), dann in viewBox-Einheiten (skaliert mit dem
+  //    Zoom) — so zeigt die Vorschau exakt die Strichbreite, die auch gedruckt
+  //    wird.
   const weight = (mm: number): number =>
-    hairline ? HAIRLINE_PX : print ? printStrokeVb(mm, paperScale!) : mmToPx(mm);
+    hairline ? HAIRLINE_PX : print ? printStrokeVb(quantizePen(mm), paperScale!) : mmToPx(mm);
   // vectorEffect: non-scaling NUR, wenn NICHT im Print-Modus (Print skaliert die
   // Linie bewusst mit der Geometrie). undefined ⇒ Attribut entfällt.
   const vfx = print ? undefined : ("non-scaling-stroke" as const);
