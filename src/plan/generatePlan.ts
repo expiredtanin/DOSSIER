@@ -1219,11 +1219,11 @@ function addCeilingPoche(
   const outlineMm = lwMm * OUTLINE_DETAIL_FACTOR[detail];
   const ceilingId = ceiling.id;
 
-  // Gefüllte + schraffierte Fläche (Component-Poché). Im Detailgrad „grob" ohne
-  // Schraffur (reine Füllung), sonst die Bauteil-Schraffur. SIA-Poché wie bei
-  // der mehrschichtigen Wand: neutraler Hintergrund (weiß) statt Bauteil-Albedo,
-  // Vollmuster ("solid") = schwarze Poché.
-  const hatch = comp && detail !== "grob" ? resolveHatch(project, comp.hatchId) : NO_HATCH;
+  // Gefüllte Fläche, ohne Schraffur: die Decke wird im Grundriss frontal von
+  // oben gesehen, nicht aufgeschnitten — Bauteil-Schraffuren gehören nur auf
+  // Schnittflächen (siehe resolveCeilingSectionStyle/splitSlabLayers), nicht
+  // auf die Aufsicht.
+  const hatch = NO_HATCH;
   const solid = hatch.pattern === "solid";
   out.push({
     kind: "polygon",
