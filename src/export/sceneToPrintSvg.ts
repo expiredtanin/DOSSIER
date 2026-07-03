@@ -43,13 +43,20 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  */
 const PEN_STEPS = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0] as const;
 
-/** Untergrenze einer sichtbaren Druck-Strichstaerke (mm). */
+/** Untere Stift-Stufe (mm) — ab hier greift die Quantelung auf die Leiter. */
 const MIN_PEN_MM = 0.13;
 
-/** Quantelt eine mm-Strichstaerke auf die naechste Stift-Stufe (>= MIN_PEN_MM). */
+/**
+ * Quantelt eine mm-Strichstaerke auf die naechste Stift-Stufe. Breiten UNTER
+ * `MIN_PEN_MM` gelten als bewusste HAARLINIEN (Schraffur/Schichtfugen, 0.02 mm)
+ * und werden EXAKT durchgereicht — sonst hoebe die Leiter sie im Druck auf
+ * 0.13 mm, und die Haarlinie waere im PDF sichtbar zu dick (== im Viewport
+ * duenn, im Export dick). Ab `MIN_PEN_MM` rundet die ISO-nahe Leiter wie gehabt
+ * auf die naechsthoehere Stufe.
+ */
 export function quantizePen(mm: number): number {
-  const w = Math.max(MIN_PEN_MM, mm);
-  for (const step of PEN_STEPS) if (w <= step + 1e-6) return step;
+  if (mm > 0 && mm < MIN_PEN_MM) return mm; // echte Haarlinie: unquantelt exakt drucken
+  for (const step of PEN_STEPS) if (mm <= step + 1e-6) return step;
   return PEN_STEPS[PEN_STEPS.length - 1];
 }
 
