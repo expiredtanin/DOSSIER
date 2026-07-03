@@ -87,19 +87,19 @@ export interface ViewportContextInfo {
 }
 
 /**
- * Engine-Umschalter (Gegenstück zu PlanView `wantWasm` / App `rendererMode`):
- * `?engine=wasm` in der URL gewinnt; ohne Param zählt die in der Statusleiste
- * persistierte Wahl (localStorage `cad.rendererMode`, siehe App.tsx). Zusätzlich
- * muss WebGPU vorhanden sein — fehlt es trotz Flag, bleibt die three.js-Sicht
- * (stiller Fallback + Warnung, wie in PlanView). Einmal je Seitenladung
- * ausgewertet: ein Wechsel läuft ohnehin über einen Reload (setRendererMode).
+ * Engine-Umschalter für die 3D-Sicht. Die Engine (render3d/wgpu) ist der
+ * STANDARD-3D-Renderer; three.js ist nur noch Fallback — aktiv, wenn WebGPU
+ * fehlt oder explizit WebGL2 gewählt ist (`?engine=webgl2` bzw. Statusleiste →
+ * localStorage `cad.rendererMode === "webgl2"`). `?engine=wasm` erzwingt weiter
+ * die Engine. Einmal je Seitenladung ausgewertet: ein Wechsel läuft über einen
+ * Reload (setRendererMode).
  */
 const WASM_ENGINE_ACTIVE: boolean = (() => {
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
   const fromUrl = new URLSearchParams(window.location.search).get("engine");
   const wanted = fromUrl
     ? fromUrl === "wasm"
-    : window.localStorage.getItem("cad.rendererMode") === "wasm";
+    : window.localStorage.getItem("cad.rendererMode") !== "webgl2";
   if (!wanted) return false;
   if (!("gpu" in navigator)) {
     console.warn("engine=wasm angefragt, aber navigator.gpu fehlt → three.js-Fallback (3D)");
