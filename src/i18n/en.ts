@@ -191,7 +191,7 @@ export const en: Record<TranslationKey, string> = {
   "status.none": "—",
   "status.renderer": "Renderer",
   "status.rendererWebgl": "WebGL2",
-  "status.rendererWasm": "Engine",
+  "status.rendererWasm": "Nordstern",
   "status.rendererWasmUnavailable": "WebGPU unavailable",
 
   // Document tabs (drawings/sheets).

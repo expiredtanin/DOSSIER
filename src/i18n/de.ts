@@ -192,7 +192,7 @@ export const de = {
   "status.none": "—",
   "status.renderer": "Renderer",
   "status.rendererWebgl": "WebGL2",
-  "status.rendererWasm": "Engine",
+  "status.rendererWasm": "Nordstern",
   "status.rendererWasmUnavailable": "WebGPU nicht verfügbar",
 
   // ── Dokument-Tabs (Zeichnungen/Blätter) ─────────────────────────────────
