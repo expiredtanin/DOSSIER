@@ -211,11 +211,6 @@ export interface PlanViewProps {
    */
   onCursor?: (model: Vec2 | null) => void;
   /**
-   * Meldet den aktuellen Zoom in Prozent relativ zur eingepassten Ansicht
-   * (100 % = eingepasst). Optional.
-   */
-  onZoom?: (percent: number) => void;
-  /**
    * Meldet den LIVE Papier-Massstab als Nenner N (1:N), berechnet aus dem
    * aktuellen Ausschnitt + Canvas-Größe + dpi (docs/design/plans-output.md §3).
    * Aktualisiert sich beim Wheel-Zoom/Pan/Resize. Optional.
@@ -351,7 +346,6 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       plan,
       resetKey,
       onCursor,
-      onZoom,
       onScale,
       onSelect,
       onMarquee,
@@ -553,12 +547,6 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (panRaf.current !== null) cancelAnimationFrame(panRaf.current);
     };
   }, []);
-
-  // Zoom in Prozent (eingepasst = 100 %) nach oben melden: kleinere viewBox-
-  // Breite = stärker hineingezoomt. Reiner Bericht; ändert die Ansicht nicht.
-  useEffect(() => {
-    onZoom?.((defaultView.w / view.w) * 100);
-  }, [onZoom, defaultView.w, view.w]);
 
   // LIVE Papier-Massstab (1:N) nach oben melden. Berechnung aus der effektiven
   // meet-Skala (Bildschirm-px je viewBox-Einheit) → px je Meter → mm je Meter,

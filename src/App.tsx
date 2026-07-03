@@ -274,8 +274,15 @@ export default function App() {
   const [liveScale, setLiveScale] = useState<number | null>(null);
   // Cursor in Modell-Metern (aus der Plan-Ansicht) bzw. null (nicht über Plan).
   const [cursor, setCursor] = useState<Vec2 | null>(null);
-  // Live-Zoom der Plan-Ansicht in Prozent (eingepasst = 100 %).
-  const [zoomPercent, setZoomPercent] = useState(100);
+  // Live-Zoom in Prozent RELATIV zum angewandten Papier-Massstab: 100 % =
+  // Live-Ansicht steht exakt im angewandten Massstab (liveScale == scaleDenominator).
+  // Reinzoomen > 100 %, Rauszoomen < 100 %. Einzige Quelle: angewandter Nenner
+  // (scaleDenominator) / Live-Nenner (liveScale). Ohne Live-Massstab (keine
+  // Plan-Ansicht) Fallback 100 %.
+  const zoomPercent =
+    liveScale != null && liveScale > 0
+      ? (scaleDenominator / liveScale) * 100
+      : 100;
 
   // ── Zeichenwerkzeuge (transienter View-State; bleibt lokal) ───────────────
   // Aktives Werkzeug, Werkzeug-Parameter (Wandtyp/Kategorie/Linienstil), Snap-
@@ -2822,7 +2829,6 @@ export default function App() {
           displayKey={displayKey}
           planViewRef={planViewRef}
           onCursor={setCursor}
-          onZoom={setZoomPercent}
           onScale={setLiveScale}
           selectedWallIds={selectedWallIds}
           selectedCeilingIds={selectedCeilingIds}
@@ -3762,7 +3768,6 @@ function Content({
   displayKey,
   planViewRef,
   onCursor,
-  onZoom,
   onScale,
   selectedWallIds,
   selectedCeilingIds,
@@ -3824,7 +3829,6 @@ function Content({
   displayKey: string;
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
-  onZoom: (percent: number) => void;
   onScale: (n: number) => void;
   selectedWallIds: string[];
   selectedCeilingIds: string[];
@@ -3893,7 +3897,6 @@ function Content({
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
-          onZoom={onZoom}
           onScale={onScale}
           selectedWallIds={selectedWallIds}
           selectedCeilingIds={selectedCeilingIds}
@@ -3943,7 +3946,6 @@ function Content({
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
-          onZoom={onZoom}
           onScale={onScale}
           selectedWallIds={selectedWallIds}
           selectedCeilingIds={selectedCeilingIds}
@@ -4024,7 +4026,6 @@ function Content({
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
-          onZoom={onZoom}
           onScale={onScale}
           selectedWallIds={selectedWallIds}
           selectedCeilingIds={selectedCeilingIds}
@@ -4064,7 +4065,6 @@ function LevelPlanView({
   mono,
   planViewRef,
   onCursor,
-  onZoom,
   onScale,
   selectedWallIds,
   selectedCeilingIds,
@@ -4097,7 +4097,6 @@ function LevelPlanView({
   mono: boolean;
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
-  onZoom: (percent: number) => void;
   onScale: (n: number) => void;
   selectedWallIds: string[];
   selectedCeilingIds: string[];
@@ -4171,7 +4170,6 @@ function LevelPlanView({
         plan={plan}
         resetKey={level.id}
         onCursor={onCursor}
-        onZoom={onZoom}
         onScale={onScale}
         selectedWallIds={selectedWallIds}
         selectedCeilingIds={selectedCeilingIds}
@@ -4217,7 +4215,6 @@ function SectionPlanView({
   mono,
   planViewRef,
   onCursor,
-  onZoom,
   onScale,
   selectedWallIds,
   selectedCeilingIds,
@@ -4246,7 +4243,6 @@ function SectionPlanView({
   mono: boolean;
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
-  onZoom: (percent: number) => void;
   onScale: (n: number) => void;
   selectedWallIds: string[];
   selectedCeilingIds: string[];
@@ -4330,7 +4326,6 @@ function SectionPlanView({
         plan={plan}
         resetKey={level.id}
         onCursor={onCursor}
-        onZoom={onZoom}
         onScale={onScale}
         selectedWallIds={selectedWallIds}
         selectedCeilingIds={selectedCeilingIds}
