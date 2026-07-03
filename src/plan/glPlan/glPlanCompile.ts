@@ -11,7 +11,7 @@
 import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
 import type { GpuGeometry, Rgba } from './glPlanTypes';
-import { applyDashRuns, buildHatchRuns } from './glPlanHatch';
+import { applyDashRuns, buildHatchRuns, zigzagPoints, DASH_MM_TO_M } from './glPlanHatch';
 
 const PX_PER_M = 90;
 
@@ -405,7 +405,15 @@ export function compilePrimitivesToGpu(
       // deckungsgleich mit den Schichtfugen in beiden Modi.
       // `hatch.dash` wird geometrisch (Strich/Lücke) aufgelöst, da die GL-
       // Linien-Pipeline kein Dash kennt.
-      if (prim.hatch && prim.hatch.pattern !== 'none' && prim.hatch.pattern !== 'solid') {
+      // Bild-Schraffur (kind==="image"): WebGL2-Ebene kennt keine Muster-Textur →
+      // FALLBACK auf die neutrale Poché-Füllung (oben), keine Musterlinien. Der
+      // Random-Untermodus läuft transparent über `buildHatchRuns` (Streu-Striche).
+      if (
+        prim.hatch &&
+        prim.hatch.kind !== 'image' &&
+        prim.hatch.pattern !== 'none' &&
+        prim.hatch.pattern !== 'solid'
+      ) {
         const hatchColor = parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1];
         const hatchMm = prim.hatch.lineWeight > 0 ? prim.hatch.lineWeight : 0.13;
         const runs = applyDashRuns(buildHatchRuns(prim.pts, prim.hatch), prim.hatch.dash);
@@ -420,7 +428,16 @@ export function compilePrimitivesToGpu(
       }
     } else if (prim.kind === 'line') {
       const color = parseColor(prim.color) ?? [0.1, 0.1, 0.1, 1];
-      pushLine(prim.a, prim.b, color, prim.weightMm || 0.18);
+      if (prim.zigzag) {
+        // Zickzack-Linie → gehrter Polylinienzug (amplitude/wavelength Papier-mm
+        // → Modell-Meter über dieselbe Kopplung wie Strichmuster).
+        const amp = prim.zigzag.amplitude * DASH_MM_TO_M;
+        const wav = prim.zigzag.wavelength * DASH_MM_TO_M;
+        const zpts = zigzagPoints(prim.a, prim.b, amp, wav);
+        strokePolyline(zpts, false, color, prim.weightMm || 0.18);
+      } else {
+        pushLine(prim.a, prim.b, color, prim.weightMm || 0.18);
+      }
     } else if (prim.kind === 'arc') {
       // Bogen → ein gehrter Polylinienzug (glatt, keine Segment-Stufen).
       const color = parseColor((prim as { color?: string }).color) ?? [0.1, 0.1, 0.1, 1];

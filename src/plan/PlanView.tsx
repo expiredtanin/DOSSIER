@@ -20,6 +20,7 @@ import type { DraftShape, SnapResult, ToolHandlers, ToolId, ToolMods } from "../
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { quantizePen } from "../export/sceneToPrintSvg";
+import { buildRandomHatchRuns, zigzagPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
 
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
@@ -1601,7 +1602,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const hatched = useMemo(() => {
     const list: HatchedPoly[] = [];
     plan.primitives.forEach((p, i) => {
-      if (p.kind === "polygon" && needsPattern(p.hatch.pattern)) {
+      if (p.kind === "polygon" && polyUsesPattern(p.hatch)) {
         list.push({ patternId: `hatch-${i}`, hatch: p.hatch });
       }
     });
@@ -2366,6 +2367,9 @@ function onSegment(a: Vec2, b: Vec2, p: Vec2): boolean {
   );
 }
 
+/** Basis-Kachelmaß (viewBox-Einheiten) einer Bild-Schraffur bei scaleX/scaleY = 1. */
+const IMG_TILE_VB = 40;
+
 /** Lineare/Kreuz-Muster brauchen ein <pattern>; solid/none nicht. */
 function needsPattern(pattern: HatchRender["pattern"]): boolean {
   return (
@@ -2373,6 +2377,19 @@ function needsPattern(pattern: HatchRender["pattern"]): boolean {
     pattern === "diagonal" ||
     pattern === "crosshatch"
   );
+}
+
+/**
+ * Ob ein Polygon ein SVG-`<pattern>` (in `<defs>`) braucht:
+ *  • Bild-Schraffur (`kind==="image"`) → ja (gekacheltes Bild-Muster).
+ *  • Random-Vektor (`lines==="random"`) → NEIN: die Streu-Striche werden als
+ *    geclippte Polylinien direkt gezeichnet (Determinismus, Parität zu GL/PDF).
+ *  • sonst die klassischen Parallel-/Kreuz-/Dämmungs-Muster.
+ */
+function polyUsesPattern(h: HatchRender): boolean {
+  if (h.kind === "image") return !!h.image;
+  if (h.lines === "random") return false;
+  return needsPattern(h.pattern);
 }
 
 /**
@@ -2406,6 +2423,26 @@ function HatchPattern({
         .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
         .join(" ")
     : undefined;
+
+  if (hatch.kind === "image" && hatch.image) {
+    // Bild-Schraffur: gekacheltes <image>-Muster. Kachel-Basismaß in viewBox-
+    // Einheiten, unabhängig in L×B verzerrt (scaleX/scaleY), um `rotation` gedreht.
+    // preserveAspectRatio="none" erlaubt die Verzerrung.
+    const img = hatch.image;
+    const w = Math.max(1, IMG_TILE_VB * (img.scaleX > 0 ? img.scaleX : 1));
+    const h = Math.max(1, IMG_TILE_VB * (img.scaleY > 0 ? img.scaleY : 1));
+    return (
+      <pattern
+        id={id}
+        patternUnits="userSpaceOnUse"
+        width={w}
+        height={h}
+        patternTransform={img.rotation ? `rotate(${img.rotation})` : undefined}
+      >
+        <image href={img.src} x={0} y={0} width={w} height={h} preserveAspectRatio="none" />
+      </pattern>
+    );
+  }
 
   if (hatch.pattern === "insulation") {
     // Weiche Zickzack-/Wellenlinie (SIA-nah). Kachel 14×10 × Maßstab.
@@ -2487,6 +2524,8 @@ interface DrawingRun {
   dash: number[] | null | undefined;
   color?: string;
   greyed?: boolean;
+  /** Zickzack-Parameter (Papier-mm); gesetzt ⇒ Lauf als Zickzack-Pfad zeichnen. */
+  zigzag?: { amplitude: number; wavelength: number };
 }
 
 /** Kleiner Toleranz-Test auf Punktgleichheit (Modell-Meter). */
@@ -2541,6 +2580,22 @@ function buildDrawingRuns(prims: Primitive[]): DrawingRun[] {
       flush();
       continue;
     }
+    // Zickzack-Linien werden NICHT verkettet (jede als eigener Zickzack-Lauf) —
+    // sonst würde die Tessellierung über eine Gehrung hinweg zerreißen.
+    if (p.zigzag) {
+      flush();
+      runs.push({
+        pts: [p.a, p.b],
+        closed: false,
+        cls: p.cls,
+        weightMm: p.weightMm,
+        dash: p.dash,
+        color: p.color,
+        greyed: p.greyed,
+        zigzag: p.zigzag,
+      });
+      continue;
+    }
     if (curPts && curSrc && sameLineStyle(curSrc, p) && samePt(curPts[curPts.length - 1], p.a)) {
       // An den laufenden Zug anhängen.
       curPts.push(p.b);
@@ -2583,7 +2638,17 @@ function DrawingRunShape({
           .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
           .join(" ")
       : undefined;
-  const pts = run.pts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
+  // Zickzack-Lauf: im MODELL-Raum tessellieren (amplitude/wavelength Papier-mm →
+  // Modell-Meter via DASH_MM_TO_M), dann toScreen. Sonst die Roh-Stützpunkte.
+  const modelPts = run.zigzag
+    ? zigzagPoints(
+        run.pts[0],
+        run.pts[run.pts.length - 1],
+        run.zigzag.amplitude * DASH_MM_TO_M,
+        run.zigzag.wavelength * DASH_MM_TO_M,
+      )
+    : run.pts;
+  const pts = modelPts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
   const shape = run.closed ? (
     <polygon
       points={pts}
@@ -2716,6 +2781,40 @@ function renderPrimitive(
           </>
         );
       };
+      // Bild-Schraffur: Grundfüllung + gekacheltes Bild-Muster (<pattern> aus
+      // <defs>, id=hatch-index) + Umriss — unabhängig vom `pattern`-Feld.
+      if (p.hatch.kind === "image" && p.hatch.image) {
+        return (
+          <g>
+            <polygon points={pts} fill={p.fill} stroke="none" />
+            <polygon points={pts} fill={`url(#hatch-${index})`} stroke="none" />
+            {outline()}
+          </g>
+        );
+      }
+      // Random-Vektor-Schraffur (Kies/Splitt): Grundfüllung + deterministische
+      // Streu-Striche (im MODELL-Raum erzeugt → toScreen; identischer Seed wie
+      // GL/PDF) + Umriss. KEIN <pattern> (die Striche werden direkt gezeichnet).
+      if (p.hatch.kind !== "image" && p.hatch.lines === "random") {
+        const hsw = weight(p.hatch.lineWeight > 0 ? p.hatch.lineWeight : 0.13);
+        const runs = buildRandomHatchRuns(p.pts, p.hatch);
+        return (
+          <g>
+            <polygon points={pts} fill={p.fill} stroke="none" />
+            {runs.map((run, ri) => (
+              <polyline
+                key={`r${ri}`}
+                points={run.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ")}
+                fill="none"
+                stroke={p.hatch.color}
+                strokeWidth={hsw}
+                vectorEffect={vfx}
+              />
+            ))}
+            {outline()}
+          </g>
+        );
+      }
       // Ohne Schraffur: reine Component-Füllung bzw. „none" (nur Umriss).
       if (p.hatch.pattern === "none") {
         return (
@@ -2746,6 +2845,27 @@ function renderPrimitive(
     case "line": {
       const a = toScreen(p.a);
       const b = toScreen(p.b);
+      // Zickzack-Linie: als Polylinie (im MODELL-Raum tesselliert → toScreen;
+      // amplitude/wavelength Papier-mm → Modell-Meter via DASH_MM_TO_M, wie
+      // GL/PDF). ADDITIV — gerade/gestrichelte Linien bleiben unverändert.
+      if (p.zigzag) {
+        const zpts = zigzagPoints(
+          p.a,
+          p.b,
+          p.zigzag.amplitude * DASH_MM_TO_M,
+          p.zigzag.wavelength * DASH_MM_TO_M,
+        ).map(toScreen);
+        return (
+          <polyline
+            points={zpts.map((s) => `${s.x},${s.y}`).join(" ")}
+            className={p.cls}
+            fill="none"
+            stroke={p.color}
+            strokeWidth={weight(p.weightMm)}
+            vectorEffect={vfx}
+          />
+        );
+      }
       // Strichstärke + Strichmuster in mm Papier. Die Farbe kommt weiterhin aus
       // der CSS-Klasse (z. B. .door-leaf / .wall-axis).
       return (

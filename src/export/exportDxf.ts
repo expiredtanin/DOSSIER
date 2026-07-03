@@ -12,6 +12,7 @@ import type { Plan, Primitive } from "../plan/generatePlan";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { DxfWriter } from "./dxfWriter";
+import { buildRandomHatchRuns, zigzagPoints } from "../plan/glPlan/glPlanHatch";
 
 export interface ExportDxfOptions {
   /** Titel/Geschossname (nur als Kommentar-freundlicher Dateiname genutzt). */
@@ -106,7 +107,15 @@ function emitPrimitive(
 ): void {
   switch (p.kind) {
     case "line":
-      dxf.addLine(layer, p.a, p.b);
+      if (p.zigzag) {
+        // Zickzack-Linie → offene Polylinie (amplitude/wavelength Papier-mm →
+        // Modell-Meter über dieselbe Kopplung wie das Strichmuster oben).
+        const amp = p.zigzag.amplitude * DASH_MM_TO_M;
+        const wav = p.zigzag.wavelength * DASH_MM_TO_M;
+        dxf.addPolyline(layer, zigzagPoints(p.a, p.b, amp, wav), false);
+      } else {
+        dxf.addLine(layer, p.a, p.b);
+      }
       break;
 
     case "arc":
@@ -121,13 +130,24 @@ function emitPrimitive(
       dxf.addPolyline(layer, pts, true);
       // Schraffur als geklippte Linien (optional). Vollfüllung/„none" tragen keine
       // sichtbaren Musterlinien → wir geben nur echte Muster (nicht solid/none) aus.
+      // Bild-Schraffur (kind==="image"): DXF trägt keine Rasterbilder →
+      // FALLBACK ohne Musterlinien (nur die Umriss-Polylinie oben). Als
+      // Folge-Arbeit dokumentiert. Random-Vektor: deterministische Streu-Striche
+      // (Modell-Meter, identischer Seed wie Bildschirm/PDF).
       if (
         includeHatches &&
+        p.hatch.kind !== "image" &&
         p.hatch.pattern !== "none" &&
         p.hatch.pattern !== "solid"
       ) {
         const cycle = dashCycleMeters(p.hatch.dash);
-        for (const seg of hatchSegments(pts, p.hatch)) {
+        const segs: Seg[] =
+          p.hatch.lines === "random"
+            ? buildRandomHatchRuns(pts, p.hatch)
+                .filter((r) => r.length >= 2)
+                .map((r) => ({ a: r[0], b: r[r.length - 1] }))
+            : hatchSegments(pts, p.hatch);
+        for (const seg of segs) {
           if (cycle) {
             for (const d of dashSeg(seg, cycle)) dxf.addLine(LAYER_HATCH, d.a, d.b);
           } else {

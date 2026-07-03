@@ -210,6 +210,13 @@ export type Primitive =
       weightMm: number;
       /** Strichmuster in mm Papier; null/undefined = durchgezogen. */
       dash?: number[] | null;
+      /**
+       * Zickzack-/Wellen-Parameter (aus einem LineStyle mit `kind==="zigzag"`),
+       * beide in mm Papier. Ist es gesetzt, zeichnen die Renderer die Linie als
+       * Zickzack-Pfad statt als gerade (ggf. gestrichelte) Linie — ADDITIV, ohne
+       * die bestehenden Strich/Dash-Linien zu verändern (Feld fehlt ⇒ heute).
+       */
+      zigzag?: { amplitude: number; wavelength: number };
       /** Optionale explizite Strichfarbe (überschreibt die CSS-Klasse). */
       color?: string;
       /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl von Drawing2D). */
@@ -773,8 +780,11 @@ function addDrawing2D(
   const color = d.color ?? ls?.color ?? colorByCode.get(d.categoryCode) ?? MONO_INK;
   const weightMm = d.weightMm ?? ls?.weight ?? lwByCode.get(d.categoryCode) ?? WALL_FALLBACK_MM;
   const dash = ls?.dash ?? null;
+  // Zickzack-Parameter aus dem LineStyle durchreichen (nur kind==="zigzag").
+  // Additiv: fehlt es, bleibt die Linie gerade/gestrichelt wie bisher.
+  const zigzag = ls?.kind === "zigzag" ? ls.zigzag : undefined;
   const seg = (a: Vec2, b: Vec2) =>
-    out.push({ kind: "line", a, b, cls: "draw2d", weightMm, dash, color, greyed, drawingId: d.id });
+    out.push({ kind: "line", a, b, cls: "draw2d", weightMm, dash, zigzag, color, greyed, drawingId: d.id });
 
   /**
    * Gefüllte Fläche einer GESCHLOSSENEN Form: trägt die Vollton-Füllfarbe
@@ -1027,6 +1037,8 @@ function addWallPoche(
           weightMm: jls ? jls.weight * LAYER_DETAIL_FACTOR[detail] : layerLineMm,
           color: jls ? jls.color : stroke,
           dash: jls ? jls.dash : null,
+          // Zickzack-Fuge (LineStyle kind==="zigzag") ebenfalls durchreichen.
+          zigzag: jls?.kind === "zigzag" ? jls.zigzag : undefined,
           greyed,
         });
       }

@@ -277,7 +277,7 @@ function rotate(v: Vec2, rad: number): Vec2 {
  * mit `PX_TO_M`, ergeben sich die Strichlängen in Modell-Metern (skalieren mit
  * dem Zoom wie die Kachel selbst — genau wie die SVG-Schraffur).
  */
-const DASH_MM_TO_M = (1 / 0.13) * PX_TO_M;
+export const DASH_MM_TO_M = (1 / 0.13) * PX_TO_M;
 
 /**
  * Zerlegt zusammenhängende Läufe entlang eines Strichmusters (`dash`, in mm-
@@ -378,6 +378,14 @@ export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
   if (pattern === 'none' || pattern === 'solid') return [];
 
   const scale = hatch.scale > 1e-6 ? hatch.scale : 1;
+
+  // Random-Vektor-Untermodus (Kies/Splitt): kurze, deterministisch gestreute
+  // Striche statt der regelmäßigen Parallel-/Kreuzschar. Bild-Schraffuren
+  // (kind==="image") werden hier NICHT als Vektorlinien erzeugt — sie fallen im
+  // Aufrufer auf eine neutrale Füllung zurück (RScene/GL kennen keine Textur).
+  if (hatch.kind !== 'image' && hatch.lines === 'random') {
+    return buildRandomHatchRuns(poly, hatch, scale);
+  }
 
   if (pattern === 'insulation') {
     return insulationRuns(poly, hatch, scale);
@@ -485,4 +493,132 @@ function insulationRuns(poly: Vec2[], hatch: HatchRender, scale: number): HatchR
     for (const run of clipPolylineToPolygon(wavePts, poly)) runs.push(run);
   }
   return runs;
+}
+
+// ── Random-Vektor-Schraffur (deterministisch) ────────────────────────────────
+
+/**
+ * Deterministischer 32-bit-PRNG (mulberry32). Gleicher Seed ⇒ gleiche Folge —
+ * KEIN `Math.random()`: die Random-Schraffur muss über Re-Renders/Print
+ * reproduzierbar sein (sonst flackert der Splitt und der Druck ist nicht
+ * deterministisch).
+ */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Faltet mehrere Fließkomma-Kennwerte zu einem stabilen 32-bit-Seed. Die Werte
+ * werden gequantelt (·1000, gerundet), damit numerisches Rauschen den Seed nicht
+ * verschiebt — gleiche Fläche/gleiche Hatch-Parameter ⇒ gleicher Seed ⇒ gleiche
+ * Streuung.
+ */
+function hashSeed(...vals: number[]): number {
+  let h = 0x811c9dc5;
+  for (const v of vals) {
+    const q = Math.round(v * 1000) | 0;
+    h ^= q & 0xffff;
+    h = Math.imul(h, 0x01000193);
+    h ^= (q >>> 16) & 0xffff;
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Streut kurze Striche gleichmäßig-zufällig (aber DETERMINISTISCH per `seed`) über
+ * ein Polygon: je Zelle des `cell`-Rasters ein Strich zufälliger Lage, Länge
+ * (~`strokeLen`) und Orientierung (um `baseAngleRad` ± π), auf das Polygon
+ * geclippt ({@link clipSegmentToPolygon}, konkav-fähig). Einheiten-agnostisch —
+ * der Aufrufer gibt `strokeLen`/`cell` in der Ziel-Koordinateneinheit an
+ * (Modell-Meter bzw. Papier-mm). Ausgabe = 2-Punkt-Läufe.
+ */
+export function scatterStrokes(
+  poly: Vec2[],
+  strokeLen: number,
+  cell: number,
+  baseAngleRad: number,
+  seed: number,
+): HatchRun[] {
+  if (poly.length < 3 || strokeLen <= 1e-9 || cell <= 1e-9) return [];
+  const bb = bbox(poly);
+  const w = bb.maxX - bb.minX;
+  const h = bb.maxY - bb.minY;
+  if (!(w > 0) || !(h > 0)) return [];
+  const nx = Math.max(1, Math.round(w / cell));
+  const ny = Math.max(1, Math.round(h / cell));
+  const count = Math.min(20000, Math.max(4, nx * ny));
+  const rnd = mulberry32(seed);
+  const runs: HatchRun[] = [];
+  for (let i = 0; i < count; i++) {
+    const cx = bb.minX + rnd() * w;
+    const cy = bb.minY + rnd() * h;
+    // Orientierung frei (± π um die Basisrichtung), Länge um ±40 % variiert.
+    const ang = baseAngleRad + (rnd() * 2 - 1) * Math.PI;
+    const half = (strokeLen * 0.5) * (0.6 + 0.8 * rnd());
+    const dx = Math.cos(ang) * half;
+    const dy = Math.sin(ang) * half;
+    const a: Vec2 = { x: cx - dx, y: cy - dy };
+    const b: Vec2 = { x: cx + dx, y: cy + dy };
+    for (const seg of clipSegmentToPolygon(a, b, poly)) runs.push([seg.a, seg.b]);
+  }
+  return runs;
+}
+
+/**
+ * Random-Vektor-Schraffur eines Polygons in Modell-Metern (Kies/Splitt). Dichte
+ * und Strichlänge sind — wie die Parallelschar — an die Kachelgröße
+ * (`8·scale` px) gekoppelt, damit `scale` die Streudichte steuert. Der Seed
+ * stammt aus der Flächen-Kennung (gerundete Bounding-Box) plus den Hatch-
+ * Parametern → über Re-Renders/Print reproduzierbar.
+ */
+export function buildRandomHatchRuns(poly: Vec2[], hatch: HatchRender, scale?: number): HatchRun[] {
+  const s = scale ?? (hatch.scale > 1e-6 ? hatch.scale : 1);
+  const cell = 8 * s * PX_TO_M; // Meter, wie der Parallel-Schar-Abstand
+  const strokeLen = cell * 1.1; // kurzer Strich ~ Kachelmaß
+  const bb = bbox(poly);
+  const seed = hashSeed(bb.minX, bb.minY, bb.maxX - bb.minX, bb.maxY - bb.minY, hatch.angle, s);
+  const base = toModelAngleRad(hatch.angle);
+  return scatterStrokes(poly, strokeLen, cell, base, seed);
+}
+
+// ── Zickzack-/Wellen-Linie ───────────────────────────────────────────────────
+
+/**
+ * Tesselliert die Strecke [a,b] zu einem Zickzack (Dreieckswelle) mit `amplitude`
+ * (Ausschlag quer, Einheit wie a/b) und `wavelength` (Periodenlänge längs). Rein
+ * geometrisch, einheiten-agnostisch: der Aufrufer übergibt amplitude/wavelength
+ * in der Zielkoordinaten-Einheit. Die Auslenkung folgt dem Muster [0,+A,0,−A] je
+ * Viertel-Wellenlänge; Start liegt auf der Achse, das Ende exakt auf `b`.
+ */
+export function zigzagPoints(a: Vec2, b: Vec2, amplitude: number, wavelength: number): Vec2[] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const L = Math.hypot(dx, dy);
+  if (L < 1e-12 || wavelength <= 1e-9 || amplitude <= 0) return [a, b];
+  const ux = dx / L;
+  const uy = dy / L;
+  const nx = -uy; // linke Normale (Ausschlagachse)
+  const ny = ux;
+  const quarter = wavelength / 4;
+  const steps = Math.max(1, Math.round(L / quarter));
+  const tri = [0, 1, 0, -1];
+  const pts: Vec2[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = Math.min(L, i * quarter);
+    const off = amplitude * tri[i % 4];
+    pts.push({ x: a.x + ux * t + nx * off, y: a.y + uy * t + ny * off });
+  }
+  const last = pts[pts.length - 1];
+  if (Math.abs(last.x - b.x) > 1e-9 || Math.abs(last.y - b.y) > 1e-9) {
+    pts.push({ x: b.x, y: b.y });
+  }
+  return pts;
 }

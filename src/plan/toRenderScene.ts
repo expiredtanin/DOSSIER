@@ -20,7 +20,7 @@
 // gesamte (ggf. verkettete oder adaptiv tessellierte) Strecke durchläuft.
 
 import type { Plan, Primitive } from "./generatePlan";
-import { applyDashRuns, buildHatchRuns } from "./glPlan/glPlanHatch";
+import { applyDashRuns, buildHatchRuns, zigzagPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
 import { docToLines } from "../text/renderHtml";
 
 type LinePrim = Extract<Primitive, { kind: "line" }>;
@@ -371,8 +371,16 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
 
       // Schraffur: die aufs Polygon geclippten Musterlinien wie im Browser
       // (glPlanHatch — identische Geometrie), als Polylinien. "none"/"solid"
-      // brauchen keine Linien (solid deckt die Füllung farbig ab).
-      if (p.hatch && p.hatch.pattern !== "none" && p.hatch.pattern !== "solid") {
+      // brauchen keine Linien (solid deckt die Füllung farbig ab). Bild-Schraffuren
+      // (kind==="image") kann die render2d-Szene nicht tragen (keine Textur) →
+      // FALLBACK: nur die neutrale Poché-Füllung (oben), keine Musterlinien. Der
+      // Random-Untermodus läuft transparent über `buildHatchRuns` (Streu-Striche).
+      if (
+        p.hatch &&
+        p.hatch.kind !== "image" &&
+        p.hatch.pattern !== "none" &&
+        p.hatch.pattern !== "solid"
+      ) {
         const hatchCol = withOpacity(
           toRgba(p.hatch.color, 1) ?? [0.1, 0.1, 0.1, 1],
           undefined,
@@ -414,7 +422,24 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
         }
       }
     } else if (p.kind === "line") {
-      if (p.drawingId) {
+      if (p.zigzag) {
+        // Zickzack-Linie: als Polylinie tesselliert (render2d kennt keinen
+        // Zickzack-Primitiv). amplitude/wavelength sind Papier-mm → Modell-Meter
+        // über dieselbe Kopplung wie Strichmuster (DASH_MM_TO_M). Nicht verketten.
+        flushRun();
+        const amp = p.zigzag.amplitude * DASH_MM_TO_M;
+        const wav = p.zigzag.wavelength * DASH_MM_TO_M;
+        const zpts = zigzagPoints(p.a, p.b, amp, wav);
+        const col = withOpacity(strokeColorFor(p.cls, p.color), p.cls, p.greyed);
+        if (zpts.length >= 2) {
+          polylines.push({
+            pts: zpts.map((v) => [v.x, v.y]),
+            color: col,
+            widthMm: p.weightMm,
+            z: zc++,
+          });
+        }
+      } else if (p.drawingId) {
         // Aufeinanderfolgende 2D-Zeichenlinien gleicher drawingId/Stil verketten.
         const a: RPoint = [p.a.x, p.a.y];
         const b: RPoint = [p.b.x, p.b.y];

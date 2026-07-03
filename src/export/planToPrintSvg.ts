@@ -23,9 +23,74 @@
 
 import type { HatchRender, Plan, Primitive } from "../plan/generatePlan";
 import type { Vec2 } from "../model/types";
+import { buildRandomHatchRuns, zigzagPoints } from "../plan/glPlan/glPlanHatch";
 
 /** SVG-Namespace für die programmatisch erzeugten Knoten. */
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Basis-Kachelmaß (mm) einer Bild-Schraffur bei scaleX/scaleY = 1. */
+const IMG_TILE_MM = 20;
+
+/** Monoton wachsender Zähler für eindeutige `<pattern>`-IDs im Dokument. */
+let patternSeq = 0;
+
+/** Liefert (oder erzeugt) das gemeinsame `<defs>`-Element des SVG. */
+function ensureDefs(svg: SVGSVGElement): SVGDefsElement {
+  const existing = svg.querySelector("defs");
+  if (existing) return existing as SVGDefsElement;
+  const defs = document.createElementNS(SVG_NS, "defs") as SVGDefsElement;
+  // Vor den Inhalt setzen, damit Referenzen (url(#…)) sicher aufgelöst werden.
+  svg.insertBefore(defs, svg.firstChild);
+  return defs;
+}
+
+/**
+ * Legt ein gekacheltes Bild-`<pattern>` an und liefert dessen ID. `scaleX`/
+ * `scaleY` verzerren die Kachel unabhängig in L×B (preserveAspectRatio="none"),
+ * `rotation` (Grad) dreht das Muster (patternTransform). Einheiten = Papier-mm.
+ */
+function ensureImagePattern(
+  svg: SVGSVGElement,
+  image: NonNullable<HatchRender["image"]>,
+): string {
+  const id = `imgpat-${patternSeq++}`;
+  const w = Math.max(0.5, IMG_TILE_MM * (image.scaleX > 0 ? image.scaleX : 1));
+  const h = Math.max(0.5, IMG_TILE_MM * (image.scaleY > 0 ? image.scaleY : 1));
+  const pattern = document.createElementNS(SVG_NS, "pattern");
+  pattern.setAttribute("id", id);
+  pattern.setAttribute("patternUnits", "userSpaceOnUse");
+  pattern.setAttribute("width", String(round(w)));
+  pattern.setAttribute("height", String(round(h)));
+  if (image.rotation) pattern.setAttribute("patternTransform", `rotate(${image.rotation})`);
+  const img = document.createElementNS(SVG_NS, "image");
+  img.setAttribute("href", image.src);
+  img.setAttribute("x", "0");
+  img.setAttribute("y", "0");
+  img.setAttribute("width", String(round(w)));
+  img.setAttribute("height", String(round(h)));
+  img.setAttribute("preserveAspectRatio", "none");
+  pattern.appendChild(img);
+  ensureDefs(svg).appendChild(pattern);
+  return id;
+}
+
+/** `<polyline>`-Knoten (mm-Koordinaten) — für Zickzack-Linien/-Läufe. */
+function polylineNode(
+  pts: Vec2[],
+  color: string,
+  strokeMm: number,
+  dash: number[] | null | undefined,
+): SVGElement {
+  const el = document.createElementNS(SVG_NS, "polyline");
+  el.setAttribute("points", pts.map((p) => `${round(p.x)},${round(p.y)}`).join(" "));
+  el.setAttribute("fill", "none");
+  el.setAttribute("stroke", color);
+  el.setAttribute("stroke-width", String(strokeMm));
+  el.setAttribute("stroke-linecap", "round");
+  el.setAttribute("stroke-linejoin", "round");
+  if (dash && dash.length) el.setAttribute("stroke-dasharray", dash.map((d) => round(d)).join(" "));
+  return el;
+}
 
 /**
  * Standard-Stift-Stufen (mm). Beliebige Kategorie-Strichstärken werden auf die
@@ -160,7 +225,16 @@ function appendPrimitive(
     case "line": {
       const a = map(p.a);
       const b = map(p.b);
-      const ln = lineNode(a, b, p.color ?? "#111111", quantizePen(p.weightMm), p.dash, mmPerM);
+      // Zickzack-Linie (amplitude/wavelength sind Papier-mm = mm-Zielraum) →
+      // Polylinie; sonst gerade (ggf. gestrichelte) Linie wie bisher.
+      const ln = p.zigzag
+        ? polylineNode(
+            zigzagPoints(a, b, p.zigzag.amplitude, p.zigzag.wavelength),
+            p.color ?? "#111111",
+            quantizePen(p.weightMm),
+            p.dash,
+          )
+        : lineNode(a, b, p.color ?? "#111111", quantizePen(p.weightMm), p.dash, mmPerM);
       if (opacity) ln.setAttribute("opacity", opacity);
       svg.appendChild(ln);
       break;
@@ -195,7 +269,15 @@ function appendPolygon(
   if (opacity) g.setAttribute("opacity", opacity);
 
   const pattern = p.hatch.pattern;
-  if (pattern === "none") {
+  if (p.hatch.kind === "image" && p.hatch.image) {
+    // Bild-Schraffur: gekacheltes <pattern> mit <image> (scaleX/scaleY/rotation)
+    // über die Fläche, unabhängig vom `pattern`-Feld. Grundfüllung darunter,
+    // Umriss obenauf.
+    if (p.fill !== "none") g.appendChild(polyNode(ptsAttr, p.fill, "none", 0));
+    const patId = ensureImagePattern(svg, p.hatch.image);
+    g.appendChild(polyNode(ptsAttr, `url(#${patId})`, "none", 0));
+    if (strokeMm > 0) g.appendChild(polyNode(ptsAttr, "none", p.stroke, strokeMm));
+  } else if (pattern === "none") {
     g.appendChild(polyNode(ptsAttr, p.fill, p.stroke, strokeMm));
   } else if (pattern === "solid") {
     g.appendChild(polyNode(ptsAttr, p.hatch.color, p.stroke, strokeMm));
@@ -205,17 +287,36 @@ function appendPolygon(
     if (p.fill !== "none") {
       g.appendChild(polyNode(ptsAttr, p.fill, "none", 0));
     }
-    for (const seg of hatchLines(ptsMm, p.hatch, mmPerM)) {
-      g.appendChild(
-        lineNode(
-          seg.a,
-          seg.b,
-          p.hatch.color,
-          quantizePen(p.hatch.lineWeight),
-          p.hatch.dash,
-          mmPerM,
-        ),
-      );
+    if (p.hatch.lines === "random") {
+      // Random-Vektor (Kies/Splitt): deterministische Streu-Striche. Wird im
+      // MODELL-Raum erzeugt (identischer Seed/Geometrie wie Bildschirm/GL/PDF)
+      // und dann nach Papier-mm abgebildet.
+      for (const run of buildRandomHatchRuns(p.pts, p.hatch)) {
+        if (run.length < 2) continue;
+        g.appendChild(
+          lineNode(
+            map(run[0]),
+            map(run[run.length - 1]),
+            p.hatch.color,
+            quantizePen(p.hatch.lineWeight),
+            null,
+            mmPerM,
+          ),
+        );
+      }
+    } else {
+      for (const seg of hatchLines(ptsMm, p.hatch, mmPerM)) {
+        g.appendChild(
+          lineNode(
+            seg.a,
+            seg.b,
+            p.hatch.color,
+            quantizePen(p.hatch.lineWeight),
+            p.hatch.dash,
+            mmPerM,
+          ),
+        );
+      }
     }
     if (strokeMm > 0) {
       g.appendChild(polyNode(ptsAttr, "none", p.stroke, strokeMm));
