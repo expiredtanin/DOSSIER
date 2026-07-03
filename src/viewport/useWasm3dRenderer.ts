@@ -38,6 +38,7 @@ export interface Camera3d {
 interface WebModelRendererLike {
   set_model(json: string): void;
   set_render_mode_white(white: boolean): void;
+  set_view_preset(preset: string): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -144,9 +145,33 @@ export function useWasm3dRenderer(
     }
   }, []);
 
-  /** Einen Frame mit der gegebenen Kamera zeichnen (Canvas-Größe + DPR abgleichen). */
+  /**
+   * Kamera-Praeset anwenden (`front`/`top`/`side`/`iso`/`perspective`, wie
+   * `View3d` in TopBar.tsx). Delegiert die formatfuellende Ziel-/Distanz-
+   * Berechnung + Projektionsart (ortho fuer front/top/side) an Rust
+   * (`web::set_view_preset` -> `math::preset_camera`) — dieselbe Logik wie das
+   * native Fenster, statt einer zweiten Praeset-Tabelle in TS. Wirkt erst beim
+   * naechsten `render`.
+   */
+  const applyViewPreset = useCallback((preset: string) => {
+    const r = rendererRef.current;
+    if (!r) return;
+    try {
+      r.set_view_preset(preset);
+    } catch (e) {
+      console.warn("render3d set_view_preset fehlgeschlagen:", e);
+    }
+  }, []);
+
+  /**
+   * Einen Frame zeichnen (Canvas-Größe + DPR abgleichen). `cam` = null lässt
+   * die zuletzt in Rust gesetzte Kamera unverändert — Fall für `render(null)`
+   * direkt nach `applyViewPreset` (die Kamera kommt dann aus `preset_camera`,
+   * ein `set_camera` hier würde das freie Orbit-Ergebnis darüberschreiben und
+   * die orthografische Projektion der Presets zunichtemachen).
+   */
   const render = useCallback(
-    (cam: Camera3d) => {
+    (cam: Camera3d | null) => {
       const r = rendererRef.current;
       const canvas = canvasRef.current;
       if (!r || !canvas) return;
@@ -160,20 +185,22 @@ export function useWasm3dRenderer(
       }
       try {
         r.resize(w, h);
-        r.set_camera(
-          cam.eye[0],
-          cam.eye[1],
-          cam.eye[2],
-          cam.target[0],
-          cam.target[1],
-          cam.target[2],
-          cam.up[0],
-          cam.up[1],
-          cam.up[2],
-          cam.perspective,
-          cam.fovY,
-          cam.orthoHalfHeight,
-        );
+        if (cam) {
+          r.set_camera(
+            cam.eye[0],
+            cam.eye[1],
+            cam.eye[2],
+            cam.target[0],
+            cam.target[1],
+            cam.target[2],
+            cam.up[0],
+            cam.up[1],
+            cam.up[2],
+            cam.perspective,
+            cam.fovY,
+            cam.orthoHalfHeight,
+          );
+        }
         r.render();
       } catch (e) {
         console.warn("render3d render fehlgeschlagen:", e);
@@ -182,5 +209,5 @@ export function useWasm3dRenderer(
     [canvasRef],
   );
 
-  return { render, updateModel, setWhiteMode, ready, failed };
+  return { render, updateModel, setWhiteMode, applyViewPreset, ready, failed };
 }

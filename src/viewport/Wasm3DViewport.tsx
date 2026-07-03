@@ -5,26 +5,42 @@
 //
 // INTEGRATIONS-SPIKE (Umfang bewusst schmal): Massenmodell (Wände mit Öffnungs-
 // Teilquadern + Deckenplatten, alle Geschosse gestapelt) + Orbit-Navigation +
-// Kamera-Presets (Top/Bottom/Front/Back/Left/Right/Iso) + Darstellungsart
-// (shaded/white) im Overlay unten (s. VIEW_PRESETS, wasm3dOverlay.css).
-// Auswahl/Raycast, Griffe/Zeichnen sowie die übrigen Darstellungsarten der
-// three.js-Sicht (texturiert/Drahtgitter/Kanten, HLR) folgen später — bis
-// dahin gilt: LINKS ohne Funktion, RECHTS unterdrückt nur das Browser-Menü.
+// Kamera-Presets (`view3d`, von der Oberleiste getrieben — s. u.) + Darstellungs-
+// art (shaded/white, `renderMode`, ebenfalls Oberleiste). Auswahl/Raycast,
+// Griffe/Zeichnen sowie die übrigen Darstellungsarten der three.js-Sicht
+// (texturiert/Drahtgitter/Kanten, HLR) folgen später — bis dahin gilt: LINKS
+// ohne Funktion, RECHTS unterdrückt nur das Browser-Menü.
+//
+// KAMERA-PRESETS: `view3d`/`renderMode` kommen als Props von der Oberleiste
+// (TopBar → App.tsx → Viewport3D-Umschalter, dieselbe Quelle wie die three.js-
+// Sicht). Front/Top/Side/Iso/Perspective rechnet NICHT mehr diese Datei (die
+// alte VIEW_PRESETS-Tabelle war perspektivisch-only und damit für Front/Top/
+// Side falsch) — stattdessen `WebModelRenderer.set_view_preset` in Rust
+// (`web.rs` → `math::preset_camera`): Front/Top/Side werden dort ECHT
+// orthografisch, Iso/Perspective perspektivisch, exakt wie die native Fenster-
+// Sicht. „Praeset = hinspringen, kein Lock" (wie `applyView3d` in der three.js-
+// Sicht): manuelles Orbit/Pan/Zoom bleibt danach frei — es fährt mit der
+// FREIEN perspektivischen Orbit-Kamera fort (Kugelkoordinaten, s. u.), deren
+// Start-Blickwinkel VIEW3D_ORBIT so wählt, dass der erste Drag-Frame nahtlos
+// an die Praeset-Blickrichtung anschliesst (Rust berechnet dieselbe Richtung
+// für die exakte, evtl. orthografische Praeset-Kamera).
 //
 // MAUS-SCHEMA wie die three.js-Sicht (docs/design/context-menu.md):
 //   MITTE ziehen = Orbit, Shift+MITTE = Pan, RAD = Zoom.
 // Die Orbit-/Pan-Mathematik folgt den OrbitControls-Konventionen (Winkel je
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Project } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
+import type { RenderMode, View3d } from "../ui/TopBar";
 import { t } from "../i18n";
 import { useWasm3dRenderer } from "./useWasm3dRenderer";
 import type { Camera3d } from "./useWasm3dRenderer";
-import "./wasm3dOverlay.css";
 
-/** Vertikaler Öffnungswinkel (Radiant) — wie die three.js-PerspectiveCamera (50°). */
+/** Vertikaler Öffnungswinkel (Radiant) — wie die three.js-PerspectiveCamera (50°),
+ * auch für die FREIE Orbit-Kamera hier (die Presets selbst nutzen den Rust-
+ * seitigen Default-FOV, s. `types::default_fov`, denselben Wert). */
 const FOV_Y = (50 * Math.PI) / 180;
 /** Pitch-Klemme gegen den Gimbal-Flip (identisch zu render3d::math::orbit_eye). */
 const PITCH_LIMIT = Math.PI / 2 - 0.01;
@@ -41,7 +57,9 @@ interface OrbitState {
   target: [number, number, number];
 }
 
-/** Fertige Kamera aus dem Orbit-Zustand (Konvention wie render3d::math::orbit_eye). */
+/** Fertige (freie, perspektivische) Kamera aus dem Orbit-Zustand (Konvention
+ * wie render3d::math::orbit_eye). Für die manuelle Navigation NACH einem
+ * Praeset-Sprung — die Presets selbst zeichnen über `set_view_preset`. */
 function orbitCamera(o: OrbitState): Camera3d {
   const pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, o.pitch));
   const r = o.dist * Math.cos(pitch);
@@ -61,9 +79,10 @@ function orbitCamera(o: OrbitState): Camera3d {
 
 /**
  * Formatfüllendes Ziel + Distanz: Bounding-Box des geflachten Modells (Wände +
- * Decken, world: x = Modell-x, z = Modell-y, y = Höhe) einpassen. Gemeinsame
- * Grundlage für den Start-Orbit UND die Kamera-Presets (beide sollen das
- * Modell formatfüllend zeigen, nur der Blickwinkel unterscheidet sich).
+ * Decken, world: x = Modell-x, z = Modell-y, y = Höhe) einpassen. Mirror der
+ * Rust-Bounding-Box in `web::model_bounds`/`set_view_preset` — beide Seiten
+ * müssen auf dieselbe Distanz/dasselbe Ziel kommen, damit der Orbit-Zustand
+ * (hier) nahtlos an die exakte Praeset-Kamera (dort) anschliesst.
  */
 function fitTargetDist(project: Project): {
   target: [number, number, number];
@@ -94,7 +113,8 @@ function fitTargetDist(project: Project): {
       grow(p[0], s.zTop, p[1]);
     }
   }
-  // Leeres Modell: neutraler Standpunkt (entspricht dem three.js-Start).
+  // Leeres Modell: neutraler Standpunkt (entspricht dem three.js-Start und dem
+  // Rust-Fallback in `set_view_preset` bei fehlender Bounding-Box).
   if (!Number.isFinite(minX)) {
     return { dist: 14, target: [2.5, 1, 2] };
   }
@@ -111,161 +131,117 @@ function fitTargetDist(project: Project): {
 }
 
 /**
- * Formatfüllender Start-Orbit: Blick von schräg oben (wie das three.js-
- * Perspektive-Preset).
- */
-function fitOrbit(project: Project): OrbitState {
-  const { target, dist } = fitTargetDist(project);
-  return { yaw: Math.PI / 4, pitch: 0.5, dist, target };
-}
-
-/**
- * Kanonische Blickwinkel-Presets (Vectorworks/DOSSIER-Stil, wie
- * `applyView3d` in Viewport3D.tsx — hier als Kugelkoordinaten yaw/pitch statt
- * eines Richtungsvektors, weil der Engine-Pfad die Kamera über den Orbit-
- * Zustand treibt, s. o.). Herleitung (Y-up, world x = Plan-x, world z =
- * Plan-y):
- *   front/back: Blick entlang ±Z (yaw = ±90°, pitch 0).
- *   left/right: Blick entlang ±X (yaw = 0°/180°, pitch 0).
- *   top/bottom: senkrecht von oben/unten; pitch ans Gimbal-Limit geklemmt
- *     (exakt 90° macht die Kamerabasis singulär — dieselbe Klemme wie beim
- *     freien Orbit, s. PITCH_LIMIT), mit demselben leichten Yaw-Versatz wie
- *     front/back (stabile, vorhersagbare „oben"-Achse am Bildschirm, analog
- *     zum three.js-Kniff `dir=(0,1,0.0001)`).
- *   iso: Ecklage von schräg oben (SW-Iso) — Richtung (1,1,1) normiert, exakt
- *     wie das three.js-Iso-Preset (Elevationswinkel arcsin(1/√3) ≈ 35.26°).
+ * Orbit-Blickwinkel (yaw/pitch), die DIESELBE Blickrichtung wie das jeweilige
+ * `view3d`-Praeset ergeben (hergeleitet aus `preset_camera` in
+ * render3d/src/math.rs — front/side/top/iso/perspective). Dient NICHT dem
+ * Zeichnen der Presets selbst (das macht `set_view_preset` in Rust, inkl.
+ * echter Orthografie für front/top/side) — nur als Startpunkt für den freien
+ * Orbit-Zustand, damit ein Drag direkt nach einem Praeset-Sprung nicht aus
+ * einem unpassenden Blickwinkel losspringt.
  */
 const ISO_PITCH = Math.asin(1 / Math.sqrt(3));
-const VIEW_PRESETS: Record<
-  "top" | "bottom" | "front" | "back" | "left" | "right" | "iso",
-  { yaw: number; pitch: number }
-> = {
-  top: { yaw: Math.PI / 2, pitch: PITCH_LIMIT },
-  bottom: { yaw: -Math.PI / 2, pitch: -PITCH_LIMIT },
+const VIEW3D_ORBIT: Record<View3d, { yaw: number; pitch: number }> = {
   front: { yaw: Math.PI / 2, pitch: 0 },
-  back: { yaw: -Math.PI / 2, pitch: 0 },
-  right: { yaw: 0, pitch: 0 },
-  left: { yaw: Math.PI, pitch: 0 },
+  side: { yaw: 0, pitch: 0 },
+  top: { yaw: Math.PI / 2, pitch: PITCH_LIMIT },
   iso: { yaw: Math.PI / 4, pitch: ISO_PITCH },
+  perspective: { yaw: Math.PI / 4, pitch: 0.5 },
 };
-type ViewPreset = keyof typeof VIEW_PRESETS;
 
-/** Labels der Preset-Knöpfe: bestehende i18n-Schlüssel wiederverwendet, wo
- * vorhanden (view3d.*, aus der three.js-Oberleiste); für die im engine-Pfad
- * zusätzlichen Ansichten (bottom/back/left/right, dort nicht vorhanden) ein
- * kurzer inline-deutscher Text — keine neuen i18n-Schlüssel (Projektregel).
- * Als Funktion (nicht Modul-Konstante) aufgerufen, damit `t()` bei jedem
- * Render die aktuelle Sprache liest (wie der bestehende Fallback-Text unten). */
-function viewPresetLabel(preset: ViewPreset): string {
-  switch (preset) {
-    case "top":
-      return t("view3d.top");
-    case "bottom":
-      return "Unten";
-    case "front":
-      return t("view3d.front");
-    case "back":
-      return "Hinten";
-    case "left":
-      return "Links";
-    case "right":
-      return "Rechts";
-    case "iso":
-      return t("view3d.iso");
-  }
-}
-const VIEW_PRESET_ORDER: ViewPreset[] = [
-  "top",
-  "bottom",
-  "front",
-  "back",
-  "left",
-  "right",
-  "iso",
-];
-
-export function Wasm3DViewport({ project }: { project: Project }) {
+export function Wasm3DViewport({
+  project,
+  view3d = "perspective",
+  renderMode = "shaded",
+}: {
+  project: Project;
+  /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
+  view3d?: View3d;
+  /** Darstellungsart (Oberleiste): nur `shaded`/`white` wirken hier (die
+   * übrigen Modi der three.js-Sicht sind im Engine-Pfad noch nicht gebaut,
+   * s. Datei-Kommentar) — alles ausser `white` fällt auf shaded zurück. */
+  renderMode?: RenderMode;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { render, updateModel, setWhiteMode, ready, failed } = useWasm3dRenderer(
-    canvasRef,
-    true,
-  );
+  const { render, updateModel, setWhiteMode, applyViewPreset, ready, failed } =
+    useWasm3dRenderer(canvasRef, true);
   // Orbit-Zustand in einem Ref (kein React-State): Mausbewegungen zeichnen
-  // direkt neu, ohne die Komponente je Frame zu re-rendern.
+  // direkt neu, ohne die Komponente je Frame zu re-rendern. Dient NUR der
+  // freien Navigation NACH einem Praeset-Sprung (s. Datei-Kommentar).
   const orbitRef = useRef<OrbitState | null>(null);
+  // Redraw-Strategie des zuletzt aktiven Kamera-Modus (Praeset ODER freier
+  // Orbit) — Resize/Modell-Update ruft diese auf, ohne den Modus zu kennen.
+  const redrawRef = useRef<() => void>(() => {});
   // Frisches Projekt für den (stabilen) Init-Effekt unten.
   const projectRef = useRef(project);
   projectRef.current = project;
 
-  // Aktiver Blickwinkel-Preset (nur fürs Knopf-Hervorheben) + Darstellungsart
-  // (Overlay-UI, s. u.). Bewusst React-State — anders als der Orbit ändern
-  // sich beide selten (Klick, nicht Mausbewegung), ein Re-Render ist unkritisch.
-  const [activePreset, setActivePreset] = useState<ViewPreset | null>(null);
-  const [renderMode, setRenderMode] = useState<"shaded" | "white">("shaded");
-
-  // Modell bei Bereitschaft + jeder Projektänderung neu einspielen. Der Orbit
-  // wird nur beim ERSTEN Mal eingepasst — danach bleibt die Kamera beim
-  // Editieren stehen (gleiches Verhalten wie der three.js-Kamera-Snapshot).
+  // Modell bei Bereitschaft + jeder Projektänderung neu einspielen. Die
+  // Kamera bleibt dabei stehen (gleiches Verhalten wie der three.js-Kamera-
+  // Snapshot) — nur das `view3d`-Effekt unten springt aktiv auf ein Praeset.
   useEffect(() => {
     if (!ready) return;
     updateModel(project);
-    if (!orbitRef.current) orbitRef.current = fitOrbit(project);
-    render(orbitCamera(orbitRef.current));
-  }, [ready, project, updateModel, render]);
+    redrawRef.current();
+  }, [ready, project, updateModel]);
+
+  // Blickwinkel-Praeset anwenden, wenn `view3d` wechselt (oder der Renderer
+  // bereit wird): springt über `set_view_preset` (Rust) auf die formatfüllende,
+  // ggf. orthografische Praeset-Kamera — „hinspringen, kein Lock", der
+  // Orbit-Zustand wird nur als Startpunkt für spätere manuelle Navigation
+  // nachgezogen (s. VIEW3D_ORBIT).
+  useEffect(() => {
+    if (!ready) return;
+    applyViewPreset(view3d);
+    const { yaw, pitch } = VIEW3D_ORBIT[view3d];
+    const { target, dist } = fitTargetDist(projectRef.current);
+    orbitRef.current = { yaw, pitch, dist, target };
+    redrawRef.current = () => render(null);
+    redrawRef.current();
+  }, [ready, view3d, applyViewPreset, render]);
 
   // Darstellungsart (shaded/weiss) an den Renderer weiterreichen, sobald sie
-  // wechselt (Overlay-Klick) oder der Renderer bereit wird — dann neu zeichnen.
+  // wechselt oder der Renderer bereit wird — dann mit der aktuell aktiven
+  // Kamera (Praeset ODER Orbit) neu zeichnen.
   useEffect(() => {
     if (!ready) return;
     setWhiteMode(renderMode === "white");
-    if (orbitRef.current) render(orbitCamera(orbitRef.current));
-  }, [ready, renderMode, setWhiteMode, render]);
-
-  // Blickwinkel-Preset anwenden: formatfüllend auf die aktuelle Modell-
-  // Bounding-Box (wie fitOrbit), aber mit dem Preset-Blickwinkel statt des
-  // Standard-Schrägblicks. „Preset = dorthin springen, kein Lock" — danach
-  // bleibt Orbit/Pan/Zoom frei (gleiche Philosophie wie Viewport3D.applyView3d).
-  const applyPreset = (name: ViewPreset) => {
-    if (!ready) return;
-    const { yaw, pitch } = VIEW_PRESETS[name];
-    const { target, dist } = fitTargetDist(projectRef.current);
-    orbitRef.current = { yaw, pitch, dist, target };
-    setActivePreset(name);
-    render(orbitCamera(orbitRef.current));
-  };
+    redrawRef.current();
+  }, [ready, renderMode, setWhiteMode]);
 
   // Canvas-Größe beobachten: bei Layout-Änderung mit aktueller Kamera neu
   // zeichnen (die Surface-Anpassung übernimmt der Hook im render()).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!ready || !canvas) return;
-    const ro = new ResizeObserver(() => {
-      if (orbitRef.current) render(orbitCamera(orbitRef.current));
-    });
+    const ro = new ResizeObserver(() => redrawRef.current());
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [ready, render]);
+  }, [ready]);
 
-  // Maus-Navigation (MITTE = Orbit, Shift+MITTE = Pan, RAD = Zoom).
+  // Maus-Navigation (MITTE = Orbit, Shift+MITTE = Pan, RAD = Zoom). Verlässt
+  // damit IMMER die Praeset-Kamera und wechselt auf die freie perspektivische
+  // Orbit-Kamera (Kontinuität über den in VIEW3D_ORBIT vorbereiteten Start-
+  // Blickwinkel) — gleiche Philosophie wie OrbitControls in der three.js-Sicht.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!ready || !canvas) return;
 
+    const useOrbitRedraw = () => {
+      redrawRef.current = () => {
+        if (orbitRef.current) render(orbitCamera(orbitRef.current));
+      };
+    };
+
     let drag: { mode: "orbit" | "pan"; x: number; y: number } | null = null;
 
-    const redraw = () => {
-      if (orbitRef.current) render(orbitCamera(orbitRef.current));
-    };
+    const redraw = () => redrawRef.current();
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 1) return; // nur MITTE navigiert (links = Auswahl, s. o.)
       e.preventDefault();
       drag = { mode: e.shiftKey ? "pan" : "orbit", x: e.clientX, y: e.clientY };
       canvas.setPointerCapture(e.pointerId);
-      // Freies Navigieren verlässt den Preset-Blickwinkel — Knopf-Hervorhebung
-      // löschen (EINMAL je Geste, nicht je Pointermove: kein State-Update im
-      // Bewegungs-Hotpath, s. Kommentar oben zum Orbit-Ref).
-      setActivePreset((prev) => (prev === null ? prev : null));
+      useOrbitRedraw();
     };
 
     const onPointerMove = (e: PointerEvent) => {
@@ -319,9 +295,9 @@ export function Wasm3DViewport({ project }: { project: Project }) {
       const o = orbitRef.current;
       if (!o) return;
       e.preventDefault();
+      useOrbitRedraw();
       // Exponentielles Dolly (rad-deltaY ≈ ±100 je Rastung → ~14 % je Schritt).
       o.dist = Math.max(0.2, Math.min(2000, o.dist * Math.exp(e.deltaY * 0.0013)));
-      setActivePreset((prev) => (prev === null ? prev : null));
       redraw();
     };
 
@@ -347,63 +323,10 @@ export function Wasm3DViewport({ project }: { project: Project }) {
   return (
     <div className="viewport">
       {/* Canvas-Anzeigegröße kommt aus `.viewport canvas` (styles.css); die
-          Renderauflösung (DPR) gleicht der Hook je Frame ab. */}
+          Renderauflösung (DPR) gleicht der Hook je Frame ab. Presets +
+          Darstellungsart kommen jetzt von der Oberleiste (TopBar), kein
+          eigenes Overlay mehr hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
-      {!failed && (
-        <div className="wasm3d-overlay">
-          {/* Kamera-Presets (Vectorworks/DOSSIER-Stil, s. VIEW_PRESETS oben) —
-              „dorthin springen", kein Lock: danach bleibt Orbit/Pan/Zoom frei. */}
-          <div
-            className="wasm3d-overlay-group"
-            role="group"
-            aria-label={t("view3d.group")}
-          >
-            {VIEW_PRESET_ORDER.map((key) => (
-              <button
-                key={key}
-                type="button"
-                className={`wasm3d-overlay-btn${activePreset === key ? " active" : ""}`}
-                disabled={!ready}
-                onClick={() => applyPreset(key)}
-                title={viewPresetLabel(key)}
-                aria-label={viewPresetLabel(key)}
-              >
-                {viewPresetLabel(key)}
-              </button>
-            ))}
-          </div>
-          {/* Darstellungsart: shaded (Bauteil-/Materialfarbe, Default) vs. white
-              (einheitliches beleuchtetes Hellgrau, Clay-Look) — Rust-Uniform
-              `mode.x` (shaders.rs). Texturiert/Drahtgitter/Kanten der three.js-
-              Sicht sind hier (noch) nicht gebaut, s. Datei-Kommentar. */}
-          <div
-            className="wasm3d-overlay-group"
-            role="group"
-            aria-label={t("display.style.group")}
-          >
-            <button
-              type="button"
-              className={`wasm3d-overlay-btn${renderMode === "shaded" ? " active" : ""}`}
-              disabled={!ready}
-              onClick={() => setRenderMode("shaded")}
-              title={t("display.style.shaded")}
-              aria-label={t("display.style.shaded")}
-            >
-              {t("display.style.shaded")}
-            </button>
-            <button
-              type="button"
-              className={`wasm3d-overlay-btn${renderMode === "white" ? " active" : ""}`}
-              disabled={!ready}
-              onClick={() => setRenderMode("white")}
-              title={t("display.style.white")}
-              aria-label={t("display.style.white")}
-            >
-              {t("display.style.white")}
-            </button>
-          </div>
-        </div>
-      )}
       {failed && (
         <div className="viewport-fallback">
           <strong>{t("viewport3d.engineUnavailable")}</strong>

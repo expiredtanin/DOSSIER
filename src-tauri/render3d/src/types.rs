@@ -145,7 +145,9 @@ pub struct Camera {
     pub far: f32,
 }
 
-fn default_fov() -> f32 {
+// `pub(crate)`, damit `web::set_view_preset` denselben Voreinstellungswert
+// fuers formatfuellende Fit nutzen kann (kein zweiter FOV-Wert zum Pflegen).
+pub(crate) fn default_fov() -> f32 {
     // 50 Grad, wie die three.js-PerspectiveCamera-Voreinstellung.
     50.0_f32.to_radians()
 }

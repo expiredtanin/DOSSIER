@@ -116,7 +116,15 @@ const WASM_ENGINE_ACTIVE: boolean = (() => {
  * (Auswahl, Render-Modi, Editier-Griffe) wirken nur im three.js-Pfad.
  */
 export function Viewport3D(props: Parameters<typeof ThreeViewport3D>[0]) {
-  if (WASM_ENGINE_ACTIVE) return <Wasm3DViewport project={props.project} />;
+  if (WASM_ENGINE_ACTIVE) {
+    return (
+      <Wasm3DViewport
+        project={props.project}
+        view3d={props.view3d}
+        renderMode={props.renderMode}
+      />
+    );
+  }
   return <ThreeViewport3D {...props} />;
 }
 

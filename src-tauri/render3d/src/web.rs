@@ -11,11 +11,15 @@
 //                up.x, up.y, up.z, perspective, fovY, orthoHalfHeight);
 //   r.resize(px_w, px_h); r.render(); // pro Frame
 //
-// KAMERA: die Fassade nimmt eine FERTIGE Kamera (eye/target/up + Projektionsart)
-// entgegen — Orbit/Pan/Zoom-Interaktion (Yaw/Pitch/Distanz, Praesets) rechnet die
-// TS-Seite (dieselbe Konvention wie `math::orbit_eye`/`preset_camera`), damit die
-// Maus-UX 1:1 der bestehenden three.js-OrbitControls-Bedienung folgen kann, ohne
-// eine zweite Praeset-Tabelle in Rust pflegen zu muessen.
+// KAMERA: zwei Wege, dieselbe `Camera`. `set_camera` nimmt eine FERTIGE Kamera
+// (eye/target/up + Projektionsart) entgegen — die freie Orbit/Pan/Zoom-Interaktion
+// (Yaw/Pitch/Distanz) rechnet weiterhin die TS-Seite (`math::orbit_eye`-Konvention),
+// damit die Maus-UX 1:1 der bestehenden three.js-OrbitControls-Bedienung folgt.
+// `set_view_preset` wendet stattdessen eines der fuenf `View3d`-Praesete
+// (front/top/side/iso/perspective) direkt ueber `math::preset_camera` an — Front/
+// Top/Side werden dabei ECHT orthografisch (`preset_camera`), was eine reine
+// TS-Orbit-Naeherung nicht leisten kann. Nach einem Praeset-Sprung bleibt die
+// weitere Navigation frei ueber `set_camera` (kein Lock).
 //
 // MODELL-FORMAT: JSON-Struct { walls: WallInput[], slabs: SlabInput[] } — identisch
 // zu `RModel3d` (src/plan/toWalls3d.ts) und zum nativen Tauri-Push (nativeSync.ts).
@@ -25,8 +29,9 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::gpu::Renderer;
+use crate::math::preset_camera;
 use crate::section::{cut_section, SectionPlane};
-use crate::types::{Camera, Projection, SlabInput, WallInput};
+use crate::types::{Camera, CameraPreset, Projection, SlabInput, WallInput};
 
 /// JSON-Eingabe des Modells: Waende (bereits in Teilquader zerlegt, siehe
 /// `projectToWalls3d`) + Deckenplatten. `slabs` optional (leeres Modell ohne
@@ -83,6 +88,54 @@ pub struct WebModelRenderer {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     camera: Camera,
+    /// Achsparallele Bounding-Box (min, max) des zuletzt gesetzten Modells,
+    /// world-Meter (Y-up) — Grundlage fuer `set_view_preset` (formatfuellendes
+    /// Ziel/Distanz, mirror der TS-`fitTargetDist` in Wasm3DViewport.tsx).
+    /// `None` bei leerem Modell (kein Wall-/Slab-Vertex) oder vor `set_model`.
+    bounds: Option<([f32; 3], [f32; 3])>,
+}
+
+/// Achsparallele Bounding-Box des Modells in Welt-Metern (Y-up), aus Waenden +
+/// Decken. Mirror der TS-`fitTargetDist`-Grow-Schleife (Wasm3DViewport.tsx):
+/// Wand-Achsenpunkte auf Basis-/Firsthoehe, Decken-Umriss auf Unter-/Oberkante.
+/// `None` bei leerem Modell.
+fn model_bounds(walls: &[WallInput], slabs: &[SlabInput]) -> Option<([f32; 3], [f32; 3])> {
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    let mut grow = |x: f32, y: f32, z: f32| {
+        if x < min[0] {
+            min[0] = x;
+        }
+        if x > max[0] {
+            max[0] = x;
+        }
+        if y < min[1] {
+            min[1] = y;
+        }
+        if y > max[1] {
+            max[1] = y;
+        }
+        if z < min[2] {
+            min[2] = z;
+        }
+        if z > max[2] {
+            max[2] = z;
+        }
+    };
+    for w in walls {
+        grow(w.start[0], w.base_elevation, w.start[1]);
+        grow(w.end[0], w.base_elevation + w.height, w.end[1]);
+    }
+    for s in slabs {
+        for p in &s.outline {
+            grow(p[0], s.z_bottom, p[1]);
+            grow(p[0], s.z_top, p[1]);
+        }
+    }
+    if !min[0].is_finite() {
+        return None;
+    }
+    Some((min, max))
 }
 
 #[wasm_bindgen]
@@ -165,15 +218,18 @@ impl WebModelRenderer {
             config,
             renderer,
             camera: Camera::default(),
+            bounds: None,
         })
     }
 
     /// Setzt/aktualisiert das darzustellende Modell aus einem JSON-String
     /// (Format = `{ walls: WallInput[], slabs?: SlabInput[] }`, identisch zum
     /// nativen Push). Laedt die GPU-Puffer neu hoch; ruft NICHT selbst `render`.
+    /// Merkt sich zusaetzlich die Bounding-Box (fuer `set_view_preset`).
     pub fn set_model(&mut self, json: &str) -> Result<(), JsValue> {
         let model: ModelInput = serde_json::from_str(json)
             .map_err(|e| JsValue::from_str(&format!("Modell parsen: {e}")))?;
+        self.bounds = model_bounds(&model.walls, &model.slabs);
         self.renderer
             .upload_model(&self.device, &model.walls, &model.slabs);
         Ok(())
@@ -214,6 +270,49 @@ impl WebModelRenderer {
             ortho_half_height,
             ..Camera::default()
         };
+    }
+
+    /// Wendet eines der fuenf Kamera-Praesets der three.js-Sicht
+    /// (`front`/`top`/`side`/`iso`/`perspective`, s. `View3d` in TopBar.tsx) auf
+    /// das aktuelle Modell an: Ziel = Modell-Mitte, Distanz = formatfuellend
+    /// (mirror der TS-`fitTargetDist`); Front/Top/Side werden orthografisch,
+    /// Iso/Perspective perspektivisch (`math::preset_camera`). Wirkt erst beim
+    /// naechsten `render`. „Praeset = hinspringen, kein Lock" — manuelles
+    /// Orbit/Pan/Zoom bleibt danach frei ueber `set_camera` (s. Wasm3DViewport.tsx).
+    pub fn set_view_preset(&mut self, preset: &str) -> Result<(), JsValue> {
+        let preset = match preset {
+            "front" => CameraPreset::Front,
+            "top" => CameraPreset::Top,
+            "side" => CameraPreset::Side,
+            "iso" => CameraPreset::Iso,
+            "perspective" => CameraPreset::Persp,
+            other => {
+                return Err(JsValue::from_str(&format!(
+                    "unbekanntes Kamera-Praeset: {other}"
+                )))
+            }
+        };
+        let (target, dist) = match self.bounds {
+            Some((min, max)) => {
+                let center = [
+                    (min[0] + max[0]) * 0.5,
+                    (min[1] + max[1]) * 0.5,
+                    (min[2] + max[2]) * 0.5,
+                ];
+                let (dx, dy, dz) = (max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+                let radius = (dx * dx + dy * dy + dz * dz).sqrt() * 0.5;
+                let radius = if radius > 0.0 { radius } else { 1.0 };
+                // Abstand so, dass die Bounding-Kugel ins vertikale Sichtfeld
+                // passt (+ Rand) — identische Formel wie `fitTargetDist`.
+                let fov_y = crate::types::default_fov();
+                let dist = ((radius / (fov_y * 0.5).tan()) * 1.2).max(4.0);
+                (center, dist)
+            }
+            // Leeres Modell: neutraler Standpunkt (entspricht dem three.js-Start).
+            None => ([2.5_f32, 1.0, 2.0], 14.0_f32),
+        };
+        self.camera = preset_camera(preset, target, dist);
+        Ok(())
     }
 
     /// Darstellungsart umschalten: `true` = weisses Clay-Material (beleuchtet,
