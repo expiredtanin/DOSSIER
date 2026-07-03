@@ -16,7 +16,7 @@
 // v = absolute Höhe (world.y). Siehe src-tauri/render3d/src/section.rs.
 
 import type { Ceiling, DrawingLevel, Project, Wall } from "../model/types";
-import { getCeilingType, getComponent, openingsOfWall } from "../model/types";
+import { getCeilingType, getComponent, getWallType, openingsOfWall } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { projectToModel3d } from "./toWalls3d";
@@ -213,6 +213,18 @@ function attachCutStyles(output: SectionOutput, project: Project): void {
     const ref = cp.component;
     if (ref.kind === "wall") {
       const owner = walls[ref.index];
+      // Wand: bei mehrschichtigem Wandtyp wird das EINE geschnittene Rechteck in
+      // stehende Teil-Rechtecke je Schicht quer zur Dicke (u) aufgeteilt — das
+      // vertikale Gegenstück zur Decken-Zerlegung (dort quer zur Höhe v), siehe
+      // `splitWallLayers`. Einschichtige Wände laufen unverändert über
+      // `resolveWallSectionStyle` (ein repräsentatives Bauteil).
+      if (owner) {
+        const wt = getWallType(project, owner);
+        if (wt.layers.length > 1) {
+          next.push(...splitWallLayers(cp, project, wt));
+          continue;
+        }
+      }
       const style = owner ? resolveWallSectionStyle(project, owner) : null;
       if (style) {
         cp.fill = style.fill;
@@ -288,6 +300,69 @@ function splitSlabLayers(
         [uMax, vTop],
         [uMax, vBottom],
         [uMin, vBottom],
+      ],
+      fill: hatch.pattern === "solid" ? "#000000" : "#ffffff",
+      hatch,
+    });
+  }
+  return out;
+}
+
+/**
+ * Zerlegt das EINE geschnittene Wandrechteck (`cp`, vier Ecken in u/v-Metern) in
+ * stehende Teil-Rechtecke je Schicht des Wandtyps `wt` — das Wand-Gegenstück zu
+ * `splitSlabLayers`. Achsen-Spiegelung: eine Wand ist vertikal geschnitten, das
+ * Schnittrechteck hat die volle HÖHE in v (vMin..vMax) und spannt über die DICKE
+ * in u (uMin..uMax); die Schichten stapeln quer zur Dicke, also entlang u — im
+ * Gegensatz zur Decke, die quer zur Höhe (v) geschichtet ist. v bleibt darum je
+ * Band voll, u wird proportional zu den Schichtdicken zerlegt. Die Modell-
+ * Schichtdicken werden auf die tatsächlich geschnittene Dicke (uSpan) skaliert.
+ * Jedes Teil-Rechteck trägt Füllung + Schnitt-Schraffur seines Bauteils; die
+ * Fugen ergeben sich implizit aus den aneinanderstoßenden Rechtecken.
+ *
+ * Reihenfolge/Orientierung: `WallType.layers` ist von einer Wandseite zur anderen
+ * geordnet. Aus dem hier vorliegenden (u, v)-Rechteck allein lässt sich nicht
+ * eindeutig ableiten, welche u-Seite der „Aussenseite" (layers[0]) entspricht —
+ * das erforderte die Schnittebene (u→world) plus Wand-Normale. Daher die
+ * deterministische Default-Zuordnung layers[0] → uMin, layers[n] → uMax. Keine
+ * Zufalls-/Reihenfolge-Abhängigkeit. Eine Folge-Iteration kann die Seiten aus
+ * Wandgeometrie + Schnittebene korrekt orientieren.
+ *
+ * Annahme: rechteckiges Schnittpolygon (min/max-Bounding-Box auf `cp.pts`,
+ * identisch zu `splitSlabLayers`).
+ */
+function splitWallLayers(
+  cp: SectionCutPolygon,
+  project: Project,
+  wt: ReturnType<typeof getWallType>,
+): SectionCutPolygon[] {
+  const totalT = wt.layers.reduce((s, l) => s + l.thickness, 0);
+  const us = cp.pts.map((p) => p[0]);
+  const vs = cp.pts.map((p) => p[1]);
+  const uMin = Math.min(...us);
+  const uMax = Math.max(...us);
+  const vMin = Math.min(...vs);
+  const vMax = Math.max(...vs);
+  const uSpan = uMax - uMin;
+  if (totalT <= 1e-9 || uSpan <= 1e-9) return [cp];
+  const scale = uSpan / totalT;
+
+  const out: SectionCutPolygon[] = [];
+  let acc = 0; // kumulierte Dicke von uMin (layers[0]) nach uMax
+  for (const layer of wt.layers) {
+    const comp = getComponent(project, layer.componentId);
+    const hatch = resolveHatch(project, comp.hatchId);
+    const uLeft = uMin + acc * scale;
+    acc += layer.thickness;
+    const uRight = uMin + acc * scale;
+    out.push({
+      component: cp.component,
+      color: cp.color,
+      pts: [
+        [uLeft, vMax],
+        [uRight, vMax],
+        [uRight, vMin],
+        [uLeft, vMin],
       ],
       fill: hatch.pattern === "solid" ? "#000000" : "#ffffff",
       hatch,
