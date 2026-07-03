@@ -144,6 +144,19 @@ export interface WallType {
   layers: Layer[];
 }
 
+/**
+ * Ein Deckentyp (Deckenstil) = geordneter Schichtaufbau EINER Decke, liegend
+ * gestapelt (oben → unten) — das horizontale Gegenstück zum `WallType`. Nutzt
+ * denselben `Layer`-Typ (Bauteil + Dicke + optionaler Schichtfugen-Linienstil),
+ * damit Fuge/Schraffur-Auflösung identisch zur Wand bleiben. Eine „einschichtige"
+ * Decke (SOLID) ist einfach ein Deckentyp mit genau einer Schicht.
+ */
+export interface CeilingType {
+  id: string;
+  name: string;
+  layers: Layer[];
+}
+
 // ── Parametrische Wände (Parametric Walls) ────────────────────────────────
 // Parametrische Wand-Regeln generieren automatisch Wall[]-Arrays — analog zu
 // FreeCAD BIM. Sie leben in Project.resources.parametricWalls[] und werden
@@ -462,8 +475,18 @@ export interface Ceiling {
    * dupliziert (die letzte Kante läuft von outline[n-1] zu outline[0]).
    */
   outline: Vec2[];
-  /** Verweis auf den (mehrschichtigen) Aufbau-Typ (wie WallType). */
+  /**
+   * LEGACY-Verweis auf einen Aufbau-Typ aus `wallTypes` (Rückwärtskompatibilität
+   * für Projekte von vor den dedizierten Deckenstilen). Nur wirksam, wenn
+   * `ceilingTypeId` fehlt.
+   */
   wallTypeId: string;
+  /**
+   * Verweis auf einen dedizierten Deckentyp (Deckenstil) aus `ceilingTypes` —
+   * der reguläre Weg für SOLID (1 Schicht) und MEHRSCHICHTIG (>1 Schicht). Hat
+   * Vorrang vor `wallTypeId`, falls gesetzt und im Projekt auflösbar.
+   */
+  ceilingTypeId?: string;
   /** Optionale Übersteuerung der Gesamtdicke in Metern (sonst Typ-Dicke). */
   thickness?: number;
   /**
@@ -845,6 +868,13 @@ export interface Project {
   /** Bauteil-Material-Bibliothek (Component Manager). */
   components: Component[];
   wallTypes: WallType[];
+  /**
+   * Deckentypen (Deckenstile) — dediziert für Decken, analog `wallTypes`.
+   * Optional, damit bestehende Projekte/Tests ohne `ceilingTypes` gültig
+   * bleiben; Decken ohne `ceilingTypeId` lösen weiterhin über das LEGACY-Feld
+   * `Ceiling.wallTypeId` gegen `wallTypes` auf (siehe `getCeilingType`).
+   */
+  ceilingTypes?: CeilingType[];
   /** Oberste Schnitte: Geschosse + Schnitte/Ansichten. */
   drawingLevels: DrawingLevel[];
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
@@ -898,21 +928,35 @@ export const getWallType = (project: Project, wall: Wall): WallType => {
   return wt;
 };
 
-/** Liefert den Aufbau-Typ (WallType) einer Decke oder wirft. */
-export const getCeilingType = (project: Project, ceiling: Ceiling): WallType => {
+/**
+ * Liefert den Aufbau-Typ einer Decke oder wirft. Bevorzugt den dedizierten
+ * Deckentyp (`ceilingTypeId` → `ceilingTypes`); fehlt er, fällt die Auflösung
+ * auf das LEGACY-Feld `wallTypeId` → `wallTypes` zurück (Rückwärtskompatibilität
+ * mit Projekten von vor den Deckenstilen — dort trug die Decke ihren Aufbau
+ * direkt über einen WallType).
+ */
+export const getCeilingType = (project: Project, ceiling: Ceiling): CeilingType | WallType => {
+  if (ceiling.ceilingTypeId) {
+    const ct = (project.ceilingTypes ?? []).find((t) => t.id === ceiling.ceilingTypeId);
+    if (ct) return ct;
+  }
   const wt = project.wallTypes.find((t) => t.id === ceiling.wallTypeId);
-  if (!wt) throw new Error(`Unbekannter Deckentyp: ${ceiling.wallTypeId}`);
+  if (!wt) throw new Error(`Unbekannter Deckentyp: ${ceiling.ceilingTypeId ?? ceiling.wallTypeId}`);
   return wt;
 };
 
 /**
  * Gesamtdicke einer Decke (Meter): eine explizite `thickness`-Übersteuerung hat
- * Vorrang, sonst die Summe der Schichtdicken ihres Aufbau-Typs.
+ * Vorrang, sonst die Summe der Schichtdicken ihres Aufbau-Typs (siehe
+ * `getCeilingType`).
  */
 export const ceilingThickness = (project: Project, ceiling: Ceiling): number => {
   if (ceiling.thickness != null && ceiling.thickness > 0) return ceiling.thickness;
-  const wt = project.wallTypes.find((t) => t.id === ceiling.wallTypeId);
-  return wt ? wallTypeThickness(wt) : 0.2;
+  try {
+    return wallTypeThickness(getCeilingType(project, ceiling));
+  } catch {
+    return 0.2;
+  }
 };
 
 /** Alle Öffnungen einer Wand (leere Liste, wenn keine oder `openings` fehlt). */

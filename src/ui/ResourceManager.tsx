@@ -18,6 +18,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type {
+  CeilingType,
   Component,
   ComponentMaterial,
   HatchPattern,
@@ -1202,6 +1203,70 @@ function WallStylesTab({
 }
 
 /**
+ * Tab „Deckenstile" — das liegende Gegenstück zu {@link WallStylesTab}: pro
+ * Deckentyp (`project.ceilingTypes`) die Schichten mit Dicke + einem per-Fuge
+ * wählbaren Linienstil (Line Manager). Gleiche Tabelle/Sentinel-Logik wie bei
+ * den Wandstilen — nur die Ressource (`ceilingTypes` statt `wallTypes`) und der
+ * Handler (`onPatchCeilingType`) unterscheiden sich.
+ */
+function CeilingStylesTab({
+  project,
+  onPatchCeilingType,
+}: {
+  project: Project;
+  onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
+}) {
+  const DEFAULT = "__default__";
+  const jointOptions = [
+    { value: DEFAULT, label: t("resources.joint.default") },
+    ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
+  ];
+  const setJoint = (ct: CeilingType, li: number, styleId: string | undefined) => {
+    const layers = ct.layers.map((l, i) =>
+      i === li ? { ...l, jointLineStyleId: styleId } : l,
+    );
+    onPatchCeilingType(ct.id, { layers });
+  };
+  const ceilingTypes = project.ceilingTypes ?? [];
+  return (
+    <div className="res-tab">
+      <div className="res-hint">{t("resources.ceilingStyles.hint")}</div>
+      {ceilingTypes.map((ct) => (
+        <div key={ct.id} className="res-wallstyle">
+          <div className="res-wallstyle-head">{ct.name}</div>
+          <ResTable columns={WALLSTYLE_COLUMNS} template={WALLSTYLE_TEMPLATE}>
+            {ct.layers.map((layer, li) => {
+              const comp = project.components.find((c) => c.id === layer.componentId);
+              const isInner = li === ct.layers.length - 1;
+              return (
+                <ResRow key={li}>
+                  <ResCell emphasis>{comp ? comp.name : layer.componentId}</ResCell>
+                  <ResCell align="right">{Math.round(layer.thickness * 1000)}</ResCell>
+                  <ResCell>
+                    {isInner ? (
+                      <span className="res-joint-none">–</span>
+                    ) : (
+                      <SelectField
+                        value={layer.jointLineStyleId ?? DEFAULT}
+                        onChange={(v) => setJoint(ct, li, v === DEFAULT ? undefined : v)}
+                        options={jointOptions}
+                      />
+                    )}
+                  </ResCell>
+                </ResRow>
+              );
+            })}
+          </ResTable>
+        </div>
+      ))}
+      {ceilingTypes.length === 0 && (
+        <EmptyState text={t("resources.ceilingStyles.empty")} />
+      )}
+    </div>
+  );
+}
+
+/**
  * Datei-Import-Schaltfläche (verstecktes <input type=file>). Liest die gewählte
  * Datei als Text und reicht ihn nach oben. Für .lin/.pat-Import.
  */
@@ -1449,13 +1514,20 @@ function EmptyState({ text }: { text: string }) {
 
 // ── Manager-Schublade ──────────────────────────────────────────────────────
 
-type TabId = "components" | "hatches" | "lines" | "wallStyles" | "materials";
+type TabId =
+  | "components"
+  | "hatches"
+  | "lines"
+  | "wallStyles"
+  | "ceilingStyles"
+  | "materials";
 
 const TABS: { id: TabId; labelKey: string }[] = [
   { id: "components", labelKey: "resources.tab.components" },
   { id: "hatches", labelKey: "resources.tab.hatches" },
   { id: "lines", labelKey: "resources.tab.lines" },
   { id: "wallStyles", labelKey: "resources.tab.wallStyles" },
+  { id: "ceilingStyles", labelKey: "resources.tab.ceilingStyles" },
   { id: "materials", labelKey: "resources.tab.materials" },
 ];
 
@@ -1472,6 +1544,8 @@ export interface ResourceManagerHandlers {
   onDeleteLineStyle: (id: string) => void;
   /** Wandstile: immutable Änderung eines Wandtyps (z. B. Schichtfugen-Stile). */
   onPatchWallType: (id: string, patch: Partial<WallType>) => void;
+  /** Deckenstile: immutable Änderung eines Deckentyps (z. B. Schichtfugen-Stile). */
+  onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
   /** Import: fügt fertige (id-lose) Linienstile/Schraffuren hinzu (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
@@ -1562,6 +1636,12 @@ export function ResourceManager({
             <WallStylesTab
               project={project}
               onPatchWallType={handlers.onPatchWallType}
+            />
+          )}
+          {tab === "ceilingStyles" && (
+            <CeilingStylesTab
+              project={project}
+              onPatchCeilingType={handlers.onPatchCeilingType}
             />
           )}
           {tab === "materials" && <MaterialsTab />}

@@ -510,7 +510,7 @@ function CeilingSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const isSingle = ceiling.singleLayer;
-  const multiPresets = ceiling.wallTypes.filter((wt) => wt.layerCount > 1);
+  const multiPresets = ceiling.ceilingTypes.filter((ct) => ct.layerCount > 1);
 
   function chooseSingle() {
     if (isSingle) return;
@@ -560,13 +560,13 @@ function CeilingSection({
         <div className="objinfo-field">
           <span className="objinfo-flabel">{t("objinfo.ceiling.preset")}</span>
           <Dropdown
-            value={ceiling.wallTypeId}
+            value={ceiling.typeId}
             onChange={(id) => host.onSetCeilingType(id)}
-            options={ceiling.wallTypes.map((wt) => ({
-              value: wt.id,
+            options={ceiling.ceilingTypes.map((ct) => ({
+              value: ct.id,
               label: t("objinfo.wall.presetLabel", {
-                name: wt.name,
-                thickness: wt.thickness.toFixed(2),
+                name: ct.name,
+                thickness: ct.thickness.toFixed(2),
               }),
             }))}
             title={t("objinfo.ceiling.preset")}

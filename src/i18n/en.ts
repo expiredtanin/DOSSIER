@@ -424,6 +424,7 @@ export const en: Record<TranslationKey, string> = {
   "default.copySuffixLevel": "{name} copy",
   "default.copySuffixLayer": "{name} COPY",
   "default.wallTypeSingle": "Wall {thickness} m",
+  "default.ceilingTypeSingle": "Ceiling {thickness} m",
 
   // Alerts.
   "alert.layerInUse": "Layer “{code} {name}” is used by components and cannot be deleted.",
@@ -439,11 +440,15 @@ export const en: Record<TranslationKey, string> = {
   "resources.tab.hatches": "Hatches",
   "resources.tab.lines": "Lines",
   "resources.tab.wallStyles": "Wall styles",
+  "resources.tab.ceilingStyles": "Ceiling styles",
   "resources.tab.materials": "Materials",
 
   "resources.wallStyles.hint":
     "Per wall type, the layer joints (between adjacent layers) as a selectable line style. Unassigned: 0.02 mm hairline.",
   "resources.wallStyles.empty": "No wall types yet.",
+  "resources.ceilingStyles.hint":
+    "Per ceiling type (horizontal build-up, top → bottom), the layer joints as a selectable line style. Unassigned: 0.02 mm hairline.",
+  "resources.ceilingStyles.empty": "No ceiling types yet.",
   "resources.col.layer": "Layer",
   "resources.col.thickness": "Thickness (mm)",
   "resources.col.joint": "Joint",

@@ -16,13 +16,12 @@
 // v = absolute Höhe (world.y). Siehe src-tauri/render3d/src/section.rs.
 
 import type { Ceiling, DrawingLevel, Project, Wall } from "../model/types";
-import { openingsOfWall } from "../model/types";
+import { getCeilingType, getComponent, openingsOfWall } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { projectToModel3d } from "./toWalls3d";
 import { loadEngine3d } from "../engine/engine3d";
-import type { SectionCutStyle } from "./generatePlan";
-import { resolveCeilingSectionStyle, resolveWallSectionStyle } from "./generatePlan";
+import { resolveCeilingSectionStyle, resolveHatch, resolveWallSectionStyle } from "./generatePlan";
 import type { HatchRender } from "./generatePlan";
 
 /** Bauteil-Referenz eines Cut-Polygons/einer Kante (Art + Eingabe-Index). */
@@ -209,21 +208,92 @@ function attachCutStyles(output: SectionOutput, project: Project): void {
   if (output.cutPolygons.length === 0) return;
   const walls = wallSegmentOwners(project);
   const slabs = slabSegmentOwners(project);
+  const next: SectionCutPolygon[] = [];
   for (const cp of output.cutPolygons) {
     const ref = cp.component;
-    let style: SectionCutStyle | null = null;
     if (ref.kind === "wall") {
       const owner = walls[ref.index];
-      if (owner) style = resolveWallSectionStyle(project, owner);
-    } else {
-      const owner = slabs[ref.index];
-      if (owner) style = resolveCeilingSectionStyle(project, owner);
+      const style = owner ? resolveWallSectionStyle(project, owner) : null;
+      if (style) {
+        cp.fill = style.fill;
+        cp.hatch = style.hatch;
+      }
+      next.push(cp);
+      continue;
     }
-    if (style) {
-      cp.fill = style.fill;
-      cp.hatch = style.hatch;
+    // Decke: bei mehrschichtigem Deckentyp wird das EINE geschnittene Rechteck
+    // (von der WASM-Schnitt-Extraktion) in liegende Teil-Rechtecke je Schicht
+    // aufgeteilt (oben/OK → unten/UK) — siehe `splitSlabLayers`. Nur im
+    // Schnitt sichtbar (im Grundriss bleibt die Decke bewusst flächig, siehe
+    // `addCeilingPoche`).
+    const owner = slabs[ref.index];
+    if (owner) {
+      const wt = getCeilingType(project, owner);
+      if (wt.layers.length > 1) {
+        next.push(...splitSlabLayers(cp, project, wt));
+        continue;
+      }
+      const style = resolveCeilingSectionStyle(project, owner);
+      if (style) {
+        cp.fill = style.fill;
+        cp.hatch = style.hatch;
+      }
     }
+    next.push(cp);
   }
+  output.cutPolygons = next;
+}
+
+/**
+ * Zerlegt das EINE geschnittene Deckenrechteck (`cp`, vier Ecken in u/v-Metern)
+ * in liegende Teil-Rechtecke je Schicht des Deckentyps `wt` — das Schnitt-
+ * Gegenstück zur mehrschichtigen Wand-Poché (dort im Grundriss als Bänder quer
+ * zur Achse; hier im Schnitt als Bänder über die Höhe v, oben/OK → unten/UK,
+ * exakt wie der liegende Aufbau physisch stapelt). Die Modell-Schichtdicken
+ * werden proportional auf die tatsächlich geschnittene Höhe skaliert (falls
+ * `Ceiling.thickness` die Typ-Summe übersteuert). Jedes Teil-Rechteck trägt
+ * Füllung + Schraffur seines Bauteils; die Fugen ergeben sich implizit aus den
+ * aneinanderstoßenden Rechtecken (jedes bekommt in `generateSectionPlan` die
+ * generische Schnitt-Umrisslinie).
+ */
+function splitSlabLayers(
+  cp: SectionCutPolygon,
+  project: Project,
+  wt: ReturnType<typeof getCeilingType>,
+): SectionCutPolygon[] {
+  const totalT = wt.layers.reduce((s, l) => s + l.thickness, 0);
+  const us = cp.pts.map((p) => p[0]);
+  const vs = cp.pts.map((p) => p[1]);
+  const uMin = Math.min(...us);
+  const uMax = Math.max(...us);
+  const vMin = Math.min(...vs);
+  const vMax = Math.max(...vs); // vMax = OK (oben), vMin = UK (unten)
+  const vSpan = vMax - vMin;
+  if (totalT <= 1e-9 || vSpan <= 1e-9) return [cp];
+  const scale = vSpan / totalT;
+
+  const out: SectionCutPolygon[] = [];
+  let acc = 0; // kumulierte Dicke von OK (oben) nach UK (unten)
+  for (const layer of wt.layers) {
+    const comp = getComponent(project, layer.componentId);
+    const hatch = resolveHatch(project, comp.hatchId);
+    const vTop = vMax - acc * scale;
+    acc += layer.thickness;
+    const vBottom = vMax - acc * scale;
+    out.push({
+      component: cp.component,
+      color: cp.color,
+      pts: [
+        [uMin, vTop],
+        [uMax, vTop],
+        [uMax, vBottom],
+        [uMin, vBottom],
+      ],
+      fill: hatch.pattern === "solid" ? "#000000" : "#ffffff",
+      hatch,
+    });
+  }
+  return out;
 }
 
 /**

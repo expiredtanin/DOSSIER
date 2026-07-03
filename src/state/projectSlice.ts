@@ -734,11 +734,7 @@ export function createProjectSlice(
       setProject((p) => mapCeiling(p, id, (c) => ({ ...c, ...patch }))),
 
     setCeilingThickness: (ceilingId, thickness) =>
-      setProject((p) =>
-        !isFinite(thickness) || thickness <= 0
-          ? p
-          : mapCeiling(p, ceilingId, (c) => ({ ...c, thickness })),
-      ),
+      setProject((p) => setCeilingThickness(p, ceilingId, thickness)),
 
     // ── Öffnungs-Editieren ────────────────────────────────────────────────
     updateOpening: (id, patch) =>
@@ -910,6 +906,61 @@ function setWallThickness(
     wallTypes: [...project.wallTypes, clone],
     walls: project.walls.map((w) =>
       w.id === wallId ? { ...w, wallTypeId: id } : w,
+    ),
+  };
+}
+
+/**
+ * Setzt die Gesamtdicke einer einschichtigen Decke über ihre Deckentyp-Schicht
+ * — analog `setWallThickness`. Wenn der aktive Aufbau-Typ einschichtig UND ein
+ * DEDIZIERTER Deckentyp (`ceilingTypeId`) ist, der nur von dieser Decke genutzt
+ * wird, wird er direkt editiert. Sonst wird ein neuer, dedizierter
+ * einschichtiger Deckentyp (Klon der ersten Schicht des aktuellen Aufbaus)
+ * erzeugt und der Decke zugewiesen. Der geteilte LEGACY-Wandtyp
+ * (`Ceiling.wallTypeId`) wird dabei NIE mutiert — er gehört den Wänden.
+ */
+function setCeilingThickness(
+  project: Project,
+  ceilingId: string,
+  thickness: number,
+): Project {
+  if (!isFinite(thickness) || thickness <= 0) return project;
+  const ceiling = (project.ceilings ?? []).find((c) => c.id === ceilingId);
+  if (!ceiling) return project;
+  const activeId = ceiling.ceilingTypeId ?? ceiling.wallTypeId;
+  const ct =
+    (project.ceilingTypes ?? []).find((t) => t.id === ceiling.ceilingTypeId) ??
+    project.wallTypes.find((t) => t.id === ceiling.wallTypeId);
+  if (!ct || ct.layers.length === 0) return project;
+
+  const single = ct.layers.length === 1;
+  const usedByOthers = (project.ceilings ?? []).some(
+    (c) => c.id !== ceilingId && (c.ceilingTypeId ?? c.wallTypeId) === activeId,
+  );
+
+  if (single && !usedByOthers && ceiling.ceilingTypeId) {
+    // Direkt die Schichtdicke des (exklusiven, einschichtigen) Deckentyps setzen.
+    return {
+      ...project,
+      ceilingTypes: (project.ceilingTypes ?? []).map((t) =>
+        t.id === ct.id ? { ...t, layers: [{ ...t.layers[0], thickness }] } : t,
+      ),
+    };
+  }
+
+  // Dedizierten einschichtigen Deckentyp erzeugen (erste Schicht klonen) und
+  // der Decke zuweisen — damit die Dicke nur diese Decke betrifft.
+  const id = `ct-${Date.now()}`;
+  const clone = {
+    id,
+    name: t("default.ceilingTypeSingle", { thickness: thickness.toFixed(2) }),
+    layers: [{ ...ct.layers[0], thickness }],
+  };
+  return {
+    ...project,
+    ceilingTypes: [...(project.ceilingTypes ?? []), clone],
+    ceilings: (project.ceilings ?? []).map((c) =>
+      c.id === ceilingId ? { ...c, ceilingTypeId: id, thickness: undefined } : c,
     ),
   };
 }

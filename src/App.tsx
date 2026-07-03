@@ -27,6 +27,7 @@ import {
 import { wallCorners } from "./model/geometry";
 import { leftNormal, normalize, scale, sub } from "./model/geometry";
 import type {
+  CeilingType,
   Drawing2D,
   DrawingLevel,
   EdgeGrip,
@@ -1629,6 +1630,14 @@ export default function App() {
       ...p,
       wallTypes: p.wallTypes.map((wt) => (wt.id === id ? { ...wt, ...patch } : wt)),
     }));
+  // Deckenstile: immutable Patch eines Deckentyps — analog `patchWallType`.
+  const patchCeilingType = (id: string, patch: Partial<CeilingType>) =>
+    setProject((p) => ({
+      ...p,
+      ceilingTypes: (p.ceilingTypes ?? []).map((ct) =>
+        ct.id === id ? { ...ct, ...patch } : ct,
+      ),
+    }));
   const importLineStyles = useStore((s) => s.importLineStyles);
   const importHatches = useStore((s) => s.importHatches);
   // Site-/Kontext-Schicht (siteSlice): Import/Entfernen/Gelände.
@@ -1915,6 +1924,7 @@ export default function App() {
       onAddLineStyle: addLineStyle,
       onDeleteLineStyle: deleteLineStyle,
       onPatchWallType: patchWallType,
+      onPatchCeilingType: patchCeilingType,
       onImportLineStyles: importLineStyles,
       onImportHatches: importHatches,
       selection,
@@ -1972,9 +1982,9 @@ export default function App() {
           updateWall(selection.id, { top: anchor ?? undefined });
       },
       // ── Decken-Attribute (nur bei selektierter Decke) ──────────────────────
-      onSetCeilingType: (wallTypeId) => {
+      onSetCeilingType: (ceilingTypeId) => {
         if (selection?.kind === "ceiling")
-          updateCeiling(selection.id, { wallTypeId, thickness: undefined });
+          updateCeiling(selection.id, { ceilingTypeId, thickness: undefined });
       },
       onSetCeilingThickness: (thickness) => {
         if (selection?.kind === "ceiling")
@@ -2147,6 +2157,7 @@ export default function App() {
   const resourceHandlers: ResourceManagerHandlers = {
     onPatchComponent: patchComponent,
     onPatchWallType: patchWallType,
+    onPatchCeilingType: patchCeilingType,
     onAddComponent: addComponent,
     onDeleteComponent: deleteComponent,
     onPatchHatch: patchHatch,

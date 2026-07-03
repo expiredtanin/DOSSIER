@@ -248,7 +248,7 @@ export type Primitive =
  * {@link HatchRender} auf. Der Linienstil der Musterlinien wird, falls gesetzt,
  * aus dem Line Manager nachgeschlagen; sonst gilt ein dünner Default.
  */
-function resolveHatch(project: Project, hatchId: string, wallAngleDeg?: number): HatchRender {
+export function resolveHatch(project: Project, hatchId: string, wallAngleDeg?: number): HatchRender {
   const h = getHatch(project, hatchId);
   const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
   // Wandbezogener Winkel: `HatchRender.angle` wird von allen Renderern in der
@@ -1195,8 +1195,13 @@ function addReferenceLine(out: Primitive[], wall: Wall, greyed: boolean): void {
  * zur Wand-Schichtauflösung); die Umrissfarbe aus der optionalen Decken-Farbe
  * bzw. dem Poché-Strich. Jedes Polygon trägt die `ceilingId` für die Auswahl.
  *
- * Im Detailgrad „grob" entfällt die Schraffur (nur Fläche + Umriss); „mittel"/
- * „fein" zeigen die Component-Schraffur. `lwMm` ist die Kategorie-Strichstärke.
+ * BEWUSST FLÄCHIG, auch bei mehrschichtigem Deckentyp: anders als die Wand
+ * (deren Schichten im Grundriss als Querschnitt sichtbar sind) liegt der
+ * Schichtaufbau einer Decke in Z (oben → unten) — von oben unsichtbar. Die
+ * Schichtbänderung erscheint daher NUR im Schnitt (siehe `toSection.ts`), nicht
+ * hier. Im Detailgrad „grob" entfällt die Schraffur (nur Fläche + Umriss);
+ * „mittel"/„fein" zeigen die Component-Schraffur. `lwMm` ist die Kategorie-
+ * Strichstärke.
  */
 function addCeilingPoche(
   out: Primitive[],

@@ -15,6 +15,7 @@ import { useContext } from "react";
 import { PanelHostContext } from "./types";
 import type { DisplayMode } from "./types";
 import type {
+  CeilingType,
   Component,
   ContextObject,
   DrawingLevel,
@@ -117,6 +118,8 @@ export interface PanelHostValue {
   onDeleteLineStyle: (id: string) => void;
   /** Wandstile: immutable Änderung eines Wandtyps (Schichtfugen-Stile). */
   onPatchWallType: (id: string, patch: Partial<WallType>) => void;
+  /** Deckenstile: immutable Änderung eines Deckentyps (Schichtfugen-Stile). */
+  onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
   /** Import fertiger (id-loser) Linienstile/Schraffuren (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
@@ -162,8 +165,8 @@ export interface PanelHostValue {
   onSetWallTop: (anchor: VerticalAnchor | null) => void;
 
   // ── Decken-Attribute (Object-Info-Panel; wirken NUR auf die selektierte Decke) ─
-  /** Weist der Decke einen Aufbau-Typ-Preset zu (wie WallType). */
-  onSetCeilingType: (wallTypeId: string) => void;
+  /** Weist der Decke einen dedizierten Deckentyp-Preset zu (Deckenstil). */
+  onSetCeilingType: (ceilingTypeId: string) => void;
   /** Setzt die Gesamtdicke der Decke (Meter, thickness-Übersteuerung). */
   onSetCeilingThickness: (thickness: number) => void;
   /** Setzt/entfernt die OK-Bindung der Decke (`null` = Geschoss-Oberkante). */

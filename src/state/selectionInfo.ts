@@ -94,15 +94,16 @@ export interface WallInfo {
  * einer Decke gesetzt). Anzeigefertige Werte + Listen für die Dropdowns.
  */
 export interface CeilingInfo {
-  wallTypeId: string;
+  /** Effektiv aktiver Aufbau-Typ: `ceilingTypeId`, sonst LEGACY-`wallTypeId`. */
+  typeId: string;
   /** Aktuelle Gesamtdicke (Meter). */
   thickness: number;
   /** Ob der aktuelle Aufbau-Typ einschichtig ist (1 Schicht). */
   singleLayer: boolean;
   /** Grundfläche der Decke (m²). */
   area: number;
-  /** Verfügbare Aufbau-Typ-Presets (wie WallType). */
-  wallTypes: WallTypeChoice[];
+  /** Verfügbare Deckentyp-Presets (dediziert, `project.ceilingTypes`). */
+  ceilingTypes: WallTypeChoice[];
   /** Geschoss, dem die Decke zugeordnet ist. */
   floorId: string;
   floorName: string;
@@ -358,11 +359,11 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
   const floor = project.drawingLevels.find((z) => z.id === ceiling.floorId);
   const { zBottom, zTop } = ceilingVerticalExtent(project, ceiling);
   const ceilingInfo: CeilingInfo = {
-    wallTypeId: ceiling.wallTypeId,
+    typeId: ceiling.ceilingTypeId ?? ceiling.wallTypeId,
     thickness,
     singleLayer: wt.layers.length <= 1,
     area: ceilingArea(ceiling.outline),
-    wallTypes: project.wallTypes.map((t) => ({
+    ceilingTypes: (project.ceilingTypes ?? []).map((t) => ({
       id: t.id,
       name: t.name,
       thickness: wallTypeThickness(t),

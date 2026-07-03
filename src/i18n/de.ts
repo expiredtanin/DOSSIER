@@ -427,6 +427,7 @@ export const de = {
   "default.copySuffixLevel": "{name} Kopie",
   "default.copySuffixLayer": "{name} KOPIE",
   "default.wallTypeSingle": "Wand {thickness} m",
+  "default.ceilingTypeSingle": "Decke {thickness} m",
 
   // ── Warnungen (Lösch-Schutz) ─────────────────────────────────────────────
   "alert.layerInUse": "Ebene „{code} {name}\" wird von Bauteilen verwendet und kann nicht gelöscht werden.",
@@ -442,11 +443,15 @@ export const de = {
   "resources.tab.hatches": "Schraffuren",
   "resources.tab.lines": "Linien",
   "resources.tab.wallStyles": "Wandstile",
+  "resources.tab.ceilingStyles": "Deckenstile",
   "resources.tab.materials": "Materialien",
 
   "resources.wallStyles.hint":
     "Je Wandtyp die Schichtfugen (zwischen benachbarten Schichten) als wählbaren Linienstil. Ohne Zuweisung: Haarlinie 0.02 mm.",
   "resources.wallStyles.empty": "Noch keine Wandtypen.",
+  "resources.ceilingStyles.hint":
+    "Je Deckentyp (liegender Schichtaufbau, oben → unten) die Schichtfugen als wählbaren Linienstil. Ohne Zuweisung: Haarlinie 0.02 mm.",
+  "resources.ceilingStyles.empty": "Noch keine Deckentypen.",
   "resources.col.layer": "Schicht",
   "resources.col.thickness": "Dicke (mm)",
   "resources.col.joint": "Fuge",

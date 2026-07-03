@@ -122,6 +122,8 @@ export const sampleProject: Project = {
     { id: "render-int", name: "Innenputz", color: "#efece6", hatchId: "none", joinPriority: 10 },
     // Für spätere T-Stöße: Beton als durchlaufender Backbone (höchste Priorität).
     { id: "concrete", name: "Beton", color: "#9aa0a6", hatchId: "sia-concrete", joinPriority: 100 },
+    // Zementestrich — oberste Schicht des mehrschichtigen Deckenaufbaus (Decken-Stile).
+    { id: "screed", name: "Zementestrich", color: "#c9c2b3", hatchId: "diagonal", joinPriority: 30 },
   ],
   wallTypes: [
     {
@@ -134,6 +136,22 @@ export const sampleProject: Project = {
         { componentId: "insulation", thickness: 0.16, jointLineStyleId: "joint-massive" },
         { componentId: "brick", thickness: 0.15 },
         { componentId: "render-int", thickness: 0.015 },
+      ],
+    },
+  ],
+  // Deckenstile (Decken-Aufbau-Typen) — das liegende Gegenstück der Wandstile.
+  // Schichten oben (OK) → unten (UK), analog zur Wand außen → innen.
+  ceilingTypes: [
+    {
+      id: "dg-massiv",
+      name: "Geschossdecke mehrschichtig",
+      layers: [
+        // Estrich (schwimmend) → Trittschalldämmung.
+        { componentId: "screed", thickness: 0.06 },
+        // Innere Fuge der Dämmung trifft auf die Betondecke (massiv) → 0.13 mm.
+        { componentId: "insulation", thickness: 0.04, jointLineStyleId: "joint-massive" },
+        // Betondecke (Rohdecke, tragend) — innerste/unterste Schicht.
+        { componentId: "concrete", thickness: 0.2 },
       ],
     },
   ],
@@ -246,8 +264,10 @@ export const sampleProject: Project = {
     },
   ],
   // Decken (Slabs) — Geschossdecke über dem EG (= Boden des OG). Umriss = EG-
-  // Grundriss (5 × 4 m). Kategorie „30 Decken", 25 cm dick, OK bündig mit dem
-  // EG-Wandkopf (baseElevation + floorHeight = 2.6 m).
+  // Grundriss (5 × 4 m). Kategorie „30 Decken", mehrschichtiger Deckenstil
+  // „dg-massiv" (Estrich + Trittschalldämmung + Betondecke, 30 cm), OK bündig
+  // mit dem EG-Wandkopf (baseElevation + floorHeight = 2.6 m). `wallTypeId`
+  // bleibt als LEGACY-Rückfall gesetzt (siehe `getCeilingType`).
   ceilings: [
     {
       id: "C1",
@@ -261,7 +281,7 @@ export const sampleProject: Project = {
         { x: 0, y: 4 },
       ],
       wallTypeId: "aw",
-      thickness: 0.25,
+      ceilingTypeId: "dg-massiv",
     },
   ],
   // Treppen — eine gerade Beispieltreppe im EG entlang der Ostwand, steigt ins OG
