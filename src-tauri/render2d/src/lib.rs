@@ -27,6 +27,11 @@ pub mod gpu;
 #[cfg(feature = "web")]
 pub mod web;
 
+// Offscreen-Renderpfad (kein Fenster/Surface), nur mit Feature "headless".
+// Siehe docs/design/engine-headless.md.
+#[cfg(feature = "headless")]
+pub mod headless;
+
 pub use demo::{demo_scene, initial_view_box};
 pub use ortho::{compute_ortho_matrix, meet_scale, mm_to_device_px, Mat4};
 pub use tessellate::{

@@ -52,6 +52,13 @@ web = [
     "dep:serde_json",
 ]
 
+# Offscreen-Renderpfad (kein Fenster/Surface): Adapter/Device ohne Surface,
+# Render-Target ist eine `wgpu::Texture` statt einer Surface-Textur, Ergebnis als
+# PNG kodiert (`image`-Crate). Fuer Golden-Image-Tests und headlessen PNG-Export
+# (Engine-Nordstern, siehe docs/design/engine-headless.md). Bewusst NICHT Teil von
+# `render`/`web`: die `image`-Abhaengigkeit soll den wasm-Build nicht belasten.
+headless = ["render", "dep:image"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 # JSON-Szene (dieselbe Ableitung wie der native Push): im Web-Pfad zur Laufzeit
@@ -68,6 +75,12 @@ pollster = { version = "0.3", optional = true }
 # Echte TrueType-Glyphen ueber einen GPU-Atlas (cosmic-text + etagere). Version
 # an wgpu gekoppelt: die 0.6er-Reihe ist die zu wgpu 22 passende.
 glyphon = { version = "0.6", optional = true }
+
+# --- Headless-PNG-Export (nur mit Feature "headless") ------------------------
+# Nur der PNG-Codec noetig (kein volles Format-Universum) -> default-features aus.
+image = { version = "0.25", optional = true, default-features = false, features = [
+    "png",
+] }
 
 # --- Fenster (nur mit Feature "window") --------------------------------------
 winit = { version = "0.30", optional = true }
@@ -99,3 +112,17 @@ naga = { version = "22", features = ["wgsl-in"] }
 name = "spike"
 path = "src/bin/spike.rs"
 required-features = ["window"]
+
+# Headless-CLI-Beweis: rendert die Demo-Szene ohne Fenster/Surface nach PNG.
+# Nur mit Feature "headless" verfuegbar (siehe Cargo-Feature-Kommentar oben).
+[[bin]]
+name = "render_png"
+path = "src/bin/render_png.rs"
+required-features = ["headless"]
+
+# Golden-Image-Test des Headless-Renderpfads. Nur mit Feature "headless" gebaut
+# (der Vergleich laedt das Referenzbild ueber `headless::RgbaImage::decode_png`).
+[[test]]
+name = "golden"
+path = "tests/golden.rs"
+required-features = ["headless"]
