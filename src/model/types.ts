@@ -50,14 +50,25 @@ export interface LineStyle {
    *   • "zigzag" — der Strich variiert in Y (Zickzack/Welle), Parameter in
    *     `zigzag`. Fehlt `kind`, gilt „dash"; die heutigen Renderer ignorieren
    *     `kind` und zeichnen weiterhin gerade Striche (Backward-Compat).
+   *   • "custom" — ein frei gezeichnetes Motiv (offene Polylinie in einer
+   *     Einheitszelle), das sich entlang der Linie wiederholt/loopt. Parameter in
+   *     `motif`. „zigzag" bleibt der eigene, parametrische Sonderfall.
    */
-  kind?: "dash" | "zigzag";
+  kind?: "dash" | "zigzag" | "custom";
   /**
    * Parameter der Zickzack-/Wellen-Linie (nur `kind==="zigzag"`), beide in mm
    * Papier: `amplitude` = Ausschlag quer zur Linie, `wavelength` = Periodenlänge
    * entlang der Linie. Fehlt es, wird die Linie gerade gezeichnet.
    */
   zigzag?: { amplitude: number; wavelength: number };
+  /**
+   * Frei gezeichnetes Wiederhol-Motiv (nur `kind==="custom"`): eine OFFENE
+   * Polylinie in einer Einheitszelle. `points` sind die Stützpunkte in mm Papier;
+   * `x` läuft 0..`length` (mm entlang der Linie = Wiederhollänge), `y` = senkrechter
+   * Versatz zur Linienachse (mm, +/−). Das Motiv wird alle `length` entlang der
+   * Linie gekachelt. Fehlt es, wird die Linie gerade gezeichnet.
+   */
+  motif?: { points: Vec2[]; length: number };
 }
 
 /** Mögliche Schraffur-Muster im Plan/Schnitt. */

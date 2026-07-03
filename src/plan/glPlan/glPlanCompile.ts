@@ -11,7 +11,7 @@
 import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
 import type { GpuGeometry, Rgba } from './glPlanTypes';
-import { applyDashRuns, buildHatchRuns, zigzagPoints, DASH_MM_TO_M } from './glPlanHatch';
+import { applyDashRuns, buildHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from './glPlanHatch';
 
 const PX_PER_M = 90;
 
@@ -435,6 +435,10 @@ export function compilePrimitivesToGpu(
         const wav = prim.zigzag.wavelength * DASH_MM_TO_M;
         const zpts = zigzagPoints(prim.a, prim.b, amp, wav);
         strokePolyline(zpts, false, color, prim.weightMm || 0.18);
+      } else if (prim.motif) {
+        // Custom-Motiv → gehrter Polylinienzug (Papier-mm → Modell-Meter, wie Zickzack).
+        const mpts = motifPoints(prim.a, prim.b, prim.motif, DASH_MM_TO_M);
+        strokePolyline(mpts, false, color, prim.weightMm || 0.18);
       } else {
         pushLine(prim.a, prim.b, color, prim.weightMm || 0.18);
       }

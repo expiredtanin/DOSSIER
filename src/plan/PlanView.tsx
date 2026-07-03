@@ -20,7 +20,7 @@ import type { DraftShape, SnapResult, ToolHandlers, ToolId, ToolMods } from "../
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { quantizePen } from "../export/sceneToPrintSvg";
-import { buildRandomHatchRuns, zigzagPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
+import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
 
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
@@ -2526,6 +2526,8 @@ interface DrawingRun {
   greyed?: boolean;
   /** Zickzack-Parameter (Papier-mm); gesetzt ⇒ Lauf als Zickzack-Pfad zeichnen. */
   zigzag?: { amplitude: number; wavelength: number };
+  /** Custom-Motiv (Papier-mm); gesetzt ⇒ Lauf als gekacheltes Motiv zeichnen. */
+  motif?: { points: Vec2[]; length: number };
 }
 
 /** Kleiner Toleranz-Test auf Punktgleichheit (Modell-Meter). */
@@ -2596,6 +2598,21 @@ function buildDrawingRuns(prims: Primitive[]): DrawingRun[] {
       });
       continue;
     }
+    // Custom-Motiv-Linien ebenfalls einzeln (analog Zickzack).
+    if (p.motif) {
+      flush();
+      runs.push({
+        pts: [p.a, p.b],
+        closed: false,
+        cls: p.cls,
+        weightMm: p.weightMm,
+        dash: p.dash,
+        color: p.color,
+        greyed: p.greyed,
+        motif: p.motif,
+      });
+      continue;
+    }
     if (curPts && curSrc && sameLineStyle(curSrc, p) && samePt(curPts[curPts.length - 1], p.a)) {
       // An den laufenden Zug anhängen.
       curPts.push(p.b);
@@ -2638,7 +2655,7 @@ function DrawingRunShape({
           .map((mm) => (print ? printStrokeVb(mm, paperScale!) : mmToPx(mm)))
           .join(" ")
       : undefined;
-  // Zickzack-Lauf: im MODELL-Raum tessellieren (amplitude/wavelength Papier-mm →
+  // Zickzack-/Custom-Motiv-Lauf: im MODELL-Raum tessellieren (Papier-mm →
   // Modell-Meter via DASH_MM_TO_M), dann toScreen. Sonst die Roh-Stützpunkte.
   const modelPts = run.zigzag
     ? zigzagPoints(
@@ -2647,7 +2664,9 @@ function DrawingRunShape({
         run.zigzag.amplitude * DASH_MM_TO_M,
         run.zigzag.wavelength * DASH_MM_TO_M,
       )
-    : run.pts;
+    : run.motif
+      ? motifPoints(run.pts[0], run.pts[run.pts.length - 1], run.motif, DASH_MM_TO_M)
+      : run.pts;
   const pts = modelPts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
   const shape = run.closed ? (
     <polygon
@@ -2858,6 +2877,21 @@ function renderPrimitive(
         return (
           <polyline
             points={zpts.map((s) => `${s.x},${s.y}`).join(" ")}
+            className={p.cls}
+            fill="none"
+            stroke={p.color}
+            strokeWidth={weight(p.weightMm)}
+            vectorEffect={vfx}
+          />
+        );
+      }
+      // Custom-Motiv: gekachelt im MODELL-Raum (Papier-mm → Modell-Meter), analog
+      // Zickzack. ADDITIV — gerade/gestrichelte Linien bleiben unverändert.
+      if (p.motif) {
+        const mpts = motifPoints(p.a, p.b, p.motif, DASH_MM_TO_M).map(toScreen);
+        return (
+          <polyline
+            points={mpts.map((s) => `${s.x},${s.y}`).join(" ")}
             className={p.cls}
             fill="none"
             stroke={p.color}

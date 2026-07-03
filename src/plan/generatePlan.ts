@@ -226,6 +226,14 @@ export type Primitive =
        * die bestehenden Strich/Dash-Linien zu verändern (Feld fehlt ⇒ heute).
        */
       zigzag?: { amplitude: number; wavelength: number };
+      /**
+       * Frei gezeichnetes Wiederhol-Motiv (aus einem LineStyle mit
+       * `kind==="custom"`): eine offene Polylinie in einer Einheitszelle, `points`
+       * in mm Papier, `length` = Wiederhollänge in mm Papier. Ist es gesetzt,
+       * kacheln die Renderer das Motiv entlang der Linie (analog `zigzag`) —
+       * ADDITIV; fehlt es, bleibt die Linie gerade/gestrichelt.
+       */
+      motif?: { points: Vec2[]; length: number };
       /** Optionale explizite Strichfarbe (überschreibt die CSS-Klasse). */
       color?: string;
       /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl von Drawing2D). */
@@ -797,8 +805,10 @@ function addDrawing2D(
   // Zickzack-Parameter aus dem LineStyle durchreichen (nur kind==="zigzag").
   // Additiv: fehlt es, bleibt die Linie gerade/gestrichelt wie bisher.
   const zigzag = ls?.kind === "zigzag" ? ls.zigzag : undefined;
+  // Custom-Motiv analog durchreichen (nur kind==="custom").
+  const motif = ls?.kind === "custom" ? ls.motif : undefined;
   const seg = (a: Vec2, b: Vec2) =>
-    out.push({ kind: "line", a, b, cls: "draw2d", weightMm, dash, zigzag, color, greyed, drawingId: d.id });
+    out.push({ kind: "line", a, b, cls: "draw2d", weightMm, dash, zigzag, motif, color, greyed, drawingId: d.id });
 
   /**
    * Gefüllte Fläche einer GESCHLOSSENEN Form: trägt die Vollton-Füllfarbe
@@ -1053,6 +1063,8 @@ function addWallPoche(
           dash: jls ? jls.dash : null,
           // Zickzack-Fuge (LineStyle kind==="zigzag") ebenfalls durchreichen.
           zigzag: jls?.kind === "zigzag" ? jls.zigzag : undefined,
+          // Custom-Motiv-Fuge (LineStyle kind==="custom") ebenfalls durchreichen.
+          motif: jls?.kind === "custom" ? jls.motif : undefined,
           greyed,
         });
       }

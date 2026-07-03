@@ -292,6 +292,44 @@ export function LineSwatch({
         strokeLinecap="round"
       />
     );
+  } else if (style.kind === "custom" && style.motif && style.motif.points.length >= 2) {
+    // Custom-Motiv: die Einheitszelle (mm) wird entlang der Linie gekachelt
+    // (mm-Papier → px ·4, wie das Dash-Muster). Deckungsgleich zur motifPoints-
+    // Kachelung im Plan-Renderer, hier nur schematisch/px.
+    const PX_PER_MM = 4;
+    const motif = style.motif;
+    const cellPx = Math.max(2, motif.length * PX_PER_MM);
+    let d = "";
+    let started = false;
+    let lastX = -1;
+    let lastY = 0;
+    let x = x0;
+    let rep = 0;
+    outer: while (x <= x1 && rep < 400) {
+      const base = x0 + rep * cellPx;
+      for (const p of motif.points) {
+        const px2 = base + p.x * PX_PER_MM;
+        if (px2 > x1 + 0.5) break outer;
+        const py2 = midY - p.y * PX_PER_MM;
+        if (Math.abs(px2 - lastX) < 0.01 && Math.abs(py2 - lastY) < 0.01) continue;
+        d += `${started ? " L" : "M"} ${px2.toFixed(1)} ${py2.toFixed(1)}`;
+        started = true;
+        lastX = px2;
+        lastY = py2;
+      }
+      x = base + cellPx;
+      rep++;
+    }
+    path = (
+      <path
+        d={d || `M ${x0} ${midY} L ${x1} ${midY}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={px}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    );
   } else {
     const dasharray = style.dash ? style.dash.map((d) => d * 4).join(" ") : undefined;
     path = (

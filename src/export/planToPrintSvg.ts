@@ -23,7 +23,7 @@
 
 import type { HatchRender, Plan, Primitive } from "../plan/generatePlan";
 import type { Vec2 } from "../model/types";
-import { buildRandomHatchRuns, zigzagPoints } from "../plan/glPlan/glPlanHatch";
+import { buildRandomHatchRuns, zigzagPoints, motifPoints } from "../plan/glPlan/glPlanHatch";
 
 /** SVG-Namespace für die programmatisch erzeugten Knoten. */
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -227,6 +227,7 @@ function appendPrimitive(
       const b = map(p.b);
       // Zickzack-Linie (amplitude/wavelength sind Papier-mm = mm-Zielraum) →
       // Polylinie; sonst gerade (ggf. gestrichelte) Linie wie bisher.
+      // Zickzack/Custom-Motiv sind in Papier-mm definiert = mm-Zielraum (scale 1).
       const ln = p.zigzag
         ? polylineNode(
             zigzagPoints(a, b, p.zigzag.amplitude, p.zigzag.wavelength),
@@ -234,7 +235,14 @@ function appendPrimitive(
             quantizePen(p.weightMm),
             p.dash,
           )
-        : lineNode(a, b, p.color ?? "#111111", quantizePen(p.weightMm), p.dash, mmPerM);
+        : p.motif
+          ? polylineNode(
+              motifPoints(a, b, p.motif),
+              p.color ?? "#111111",
+              quantizePen(p.weightMm),
+              p.dash,
+            )
+          : lineNode(a, b, p.color ?? "#111111", quantizePen(p.weightMm), p.dash, mmPerM);
       if (opacity) ln.setAttribute("opacity", opacity);
       svg.appendChild(ln);
       break;

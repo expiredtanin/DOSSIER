@@ -533,61 +533,108 @@ function hashSeed(...vals: number[]): number {
 }
 
 /**
- * Streut kurze Striche gleichmäßig-zufällig (aber DETERMINISTISCH per `seed`) über
- * ein Polygon: je Zelle des `cell`-Rasters ein Strich zufälliger Lage, Länge
- * (~`strokeLen`) und Orientierung (um `baseAngleRad` ± π), auf das Polygon
- * geclippt ({@link clipSegmentToPolygon}, konkav-fähig). Einheiten-agnostisch —
- * der Aufrufer gibt `strokeLen`/`cell` in der Ziel-Koordinateneinheit an
- * (Modell-Meter bzw. Papier-mm). Ausgabe = 2-Punkt-Läufe.
+ * Deterministischer Hash EINER Modellraum-Zelle (`ix`,`iy` = absolute Zell-Indizes
+ * `floor(x/cell)`/`floor(y/cell)`) plus `seed`. Ergebnis ist ein 32-bit-Seed für
+ * {@link mulberry32}. Zentraler Baustein der modellraum-stabilen Streuung: der
+ * Zell-Inhalt hängt NUR an den absoluten Zell-Indizes + Seed — NICHT an der
+ * Bounding-Box der Fläche. Dadurch bleibt ein Strich beim Vergrößern/Verschieben
+ * der Fläche an derselben Zelle „verankert".
+ */
+function hashCell(ix: number, iy: number, seed: number): number {
+  let h = (0x811c9dc5 ^ (seed | 0)) >>> 0;
+  h = Math.imul(h ^ (ix | 0), 0x01000193);
+  h = Math.imul(h ^ (iy | 0), 0x01000193);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  return h >>> 0;
+}
+
+/**
+ * Streut kurze Striche gleichmäßig-zufällig (aber DETERMINISTISCH) über ein
+ * Polygon — MODELLRAUM-STABIL: Der Modellraum wird in ein regelmäßiges Gitter der
+ * Zellgröße `cell` gekachelt (absolutes Gitter, Ursprung = Modell-Ursprung). Über
+ * die Zellen, die die Polygon-Bounding-Box überdecken, wird iteriert (nur aus
+ * Performance-Gründen); PRO Zelle liefert {@link hashCell}(ix,iy,seed) einen festen
+ * PRNG, aus dem Lage (innerhalb der Zelle), Orientierung (um `baseAngleRad` ± π)
+ * und Länge folgen. Jeder Strich wird aufs Polygon geclippt
+ * ({@link clipSegmentToPolygon}, konkav-fähig).
+ *
+ * Folge: Beim Vergrößern der Fläche bleiben bestehende Striche STEHEN (gleiche
+ * Zelle ⇒ gleicher Strich), am Rand kommen neue dazu; die Dichte (Striche pro
+ * Fläche) bleibt konstant; beim Verschieben wandert nichts. „Neu würfeln" (neuer
+ * `seed`) verschiebt das ganze Feld. Einheiten-agnostisch (Aufrufer gibt `cell`/
+ * `strokeLen` in Modell-Metern bzw. Papier-mm). Ausgabe = 2-Punkt-Läufe.
  */
 export function scatterStrokes(
   poly: Vec2[],
-  strokeLen: number,
   cell: number,
   baseAngleRad: number,
   seed: number,
+  strokeLen: number,
   lenMin?: number,
   lenMax?: number,
 ): HatchRun[] {
-  if (poly.length < 3 || strokeLen <= 1e-9 || cell <= 1e-9) return [];
+  if (poly.length < 3 || cell <= 1e-9 || strokeLen <= 1e-9) return [];
   const bb = bbox(poly);
-  const w = bb.maxX - bb.minX;
-  const h = bb.maxY - bb.minY;
-  if (!(w > 0) || !(h > 0)) return [];
-  const nx = Math.max(1, Math.round(w / cell));
-  const ny = Math.max(1, Math.round(h / cell));
-  const count = Math.min(20000, Math.max(4, nx * ny));
-  // Explizite Längen-Spanne (falls gesetzt) validieren; sonst die heutige
-  // scale-abhängige Variation (±40 % um `strokeLen`) beibehalten.
+  if (!(bb.maxX > bb.minX) || !(bb.maxY > bb.minY)) return [];
+
+  // Absolute Zell-Indizes, die die Bounding-Box überdecken (Modell-Ursprung als
+  // Gitter-Anker → verschiebe-invariant).
+  let eff = cell;
+  let ix0 = Math.floor(bb.minX / eff);
+  let ix1 = Math.floor(bb.maxX / eff);
+  let iy0 = Math.floor(bb.minY / eff);
+  let iy1 = Math.floor(bb.maxY / eff);
+  // Sicherheits-Cap gegen pathologisch große Flächen / winzige Zellen: Zellgröße
+  // gröber machen, bis die Zellzahl unter dem Limit liegt (uniform, nur grober).
+  const MAX_CELLS = 250000;
+  let cells = (ix1 - ix0 + 1) * (iy1 - iy0 + 1);
+  if (cells > MAX_CELLS) {
+    eff = cell * Math.sqrt(cells / MAX_CELLS);
+    ix0 = Math.floor(bb.minX / eff);
+    ix1 = Math.floor(bb.maxX / eff);
+    iy0 = Math.floor(bb.minY / eff);
+    iy1 = Math.floor(bb.maxY / eff);
+  }
+
+  // Explizite Längen-Spanne (falls gesetzt) validieren; sonst die scale-abhängige
+  // Variation (±40 % um `strokeLen`) beibehalten.
   const hasRange =
     lenMin != null && lenMax != null && lenMin > 1e-9 && lenMax >= lenMin;
-  const rnd = mulberry32(seed);
+
   const runs: HatchRun[] = [];
-  for (let i = 0; i < count; i++) {
-    const cx = bb.minX + rnd() * w;
-    const cy = bb.minY + rnd() * h;
-    // Orientierung frei (± π um die Basisrichtung).
-    const ang = baseAngleRad + (rnd() * 2 - 1) * Math.PI;
-    // Länge: explizite Spanne [lenMin,lenMax] oder Default (±40 % um strokeLen).
-    const len = hasRange
-      ? lenMin! + rnd() * (lenMax! - lenMin!)
-      : strokeLen * (0.6 + 0.8 * rnd());
-    const half = len * 0.5;
-    const dx = Math.cos(ang) * half;
-    const dy = Math.sin(ang) * half;
-    const a: Vec2 = { x: cx - dx, y: cy - dy };
-    const b: Vec2 = { x: cx + dx, y: cy + dy };
-    for (const seg of clipSegmentToPolygon(a, b, poly)) runs.push([seg.a, seg.b]);
+  for (let iy = iy0; iy <= iy1; iy++) {
+    for (let ix = ix0; ix <= ix1; ix++) {
+      const rnd = mulberry32(hashCell(ix, iy, seed));
+      // Strich-Mittelpunkt innerhalb der Zelle (absolutes Gitter).
+      const cx = (ix + rnd()) * eff;
+      const cy = (iy + rnd()) * eff;
+      // Orientierung frei (± π um die Basisrichtung).
+      const ang = baseAngleRad + (rnd() * 2 - 1) * Math.PI;
+      // Länge: explizite Spanne [lenMin,lenMax] oder Default (±40 % um strokeLen).
+      const len = hasRange
+        ? lenMin! + rnd() * (lenMax! - lenMin!)
+        : strokeLen * (0.6 + 0.8 * rnd());
+      const half = len * 0.5;
+      const dx = Math.cos(ang) * half;
+      const dy = Math.sin(ang) * half;
+      const a: Vec2 = { x: cx - dx, y: cy - dy };
+      const b: Vec2 = { x: cx + dx, y: cy + dy };
+      for (const seg of clipSegmentToPolygon(a, b, poly)) runs.push([seg.a, seg.b]);
+    }
   }
   return runs;
 }
 
 /**
  * Random-Vektor-Schraffur eines Polygons in Modell-Metern (Kies/Splitt). Dichte
- * und Strichlänge sind — wie die Parallelschar — an die Kachelgröße
- * (`8·scale` px) gekoppelt, damit `scale` die Streudichte steuert. Der Seed
- * stammt aus der Flächen-Kennung (gerundete Bounding-Box) plus den Hatch-
- * Parametern → über Re-Renders/Print reproduzierbar.
+ * und Strichlänge sind — wie die Parallelschar — an die Kachelgröße (`8·scale` px)
+ * gekoppelt, damit `scale`/`density` die Streudichte steuern. Die Streuung ist
+ * MODELLRAUM-STABIL (siehe {@link scatterStrokes}): der Seed hängt NUR an den
+ * Muster-Parametern (Winkel/Scale/Dichte) plus dem expliziten `hatch.seed` — NICHT
+ * an der Bounding-Box. Dadurch verankern sich die Striche im Modellraum; beim
+ * Vergrößern der Fläche bleiben sie stehen und die Dichte bleibt konstant.
  */
 export function buildRandomHatchRuns(poly: Vec2[], hatch: HatchRender, scale?: number): HatchRun[] {
   const s = scale ?? (hatch.scale > 1e-6 ? hatch.scale : 1);
@@ -596,19 +643,16 @@ export function buildRandomHatchRuns(poly: Vec2[], hatch: HatchRender, scale?: n
   const density = hatch.density != null && hatch.density > 1e-6 ? hatch.density : 1;
   const cell = (8 * s * PX_TO_M) / density; // Meter, wie der Parallel-Schar-Abstand
   const strokeLen = cell * 1.1; // Default-Strich ~ Kachelmaß (wenn keine Längenspanne)
-  const bb = bbox(poly);
-  // Flächen-Seed (gerundete Bounding-Box + Muster-Parameter) MIT dem expliziten
-  // `hatch.seed` gemischt: „Neu würfeln" (neuer seed) ⇒ andere Streuung, aber
-  // gleicher seed + gleiche Fläche ⇒ identische Geometrie über alle Renderpfade.
-  const seed = hashSeed(
-    bb.minX, bb.minY, bb.maxX - bb.minX, bb.maxY - bb.minY,
-    hatch.angle, s, density, hatch.seed ?? 0,
-  );
+  // Fester Seed NUR aus Muster-Parametern + explizitem `hatch.seed` (KEINE bbox):
+  // „Neu würfeln" (neuer seed) ⇒ anderes Feld, aber gleicher seed + gleiche
+  // Muster-Parameter ⇒ identisches, modellraum-verankertes Feld über alle
+  // Renderpfade — unabhängig von Lage/Größe der Fläche.
+  const seed = hashSeed(hatch.angle, s, density, hatch.seed ?? 0);
   const base = toModelAngleRad(hatch.angle);
   // Explizite Längenspanne (mm-Papier → Modell-Meter, wie das Dash-Muster).
   const lenMin = hatch.lengthMin != null ? hatch.lengthMin * DASH_MM_TO_M : undefined;
   const lenMax = hatch.lengthMax != null ? hatch.lengthMax * DASH_MM_TO_M : undefined;
-  return scatterStrokes(poly, strokeLen, cell, base, seed, lenMin, lenMax);
+  return scatterStrokes(poly, cell, base, seed, strokeLen, lenMin, lenMax);
 }
 
 // ── Zickzack-/Wellen-Linie ───────────────────────────────────────────────────
@@ -643,4 +687,65 @@ export function zigzagPoints(a: Vec2, b: Vec2, amplitude: number, wavelength: nu
     pts.push({ x: b.x, y: b.y });
   }
   return pts;
+}
+
+/**
+ * Kachelt ein frei gezeichnetes Motiv (offene Polylinie in einer Einheitszelle)
+ * entlang der Strecke [a,b] und liefert die zusammenhängende Polylinie. Rein
+ * geometrisch/einheiten-agnostisch (die Verallgemeinerung von {@link zigzagPoints}):
+ *  • `motif.points` sind die Stützpunkte der Zelle; `x` läuft 0..`motif.length`
+ *    ENTLANG der Linie (= Wiederhollänge), `y` = Versatz quer zur Linie (linke
+ *    Normale `n = (-u.y, u.x)`).
+ *  • `scale` skaliert Punkte UND Länge in die Zielkoordinaten-Einheit (z. B.
+ *    Papier-mm → Modell-Meter via `DASH_MM_TO_M`); der Print-SVG-Pfad übergibt 1.
+ * Das Motiv wird alle `length·scale` wiederholt; am Segment-Ende exakt bei `L`
+ * geclippt (letztes Segment interpoliert), sodass die Linie nicht über `b`
+ * hinausläuft. Degeneriert (leeres Motiv, Länge 0, Nullstrecke) → `[a, b]`.
+ */
+export function motifPoints(
+  a: Vec2,
+  b: Vec2,
+  motif: { points: Vec2[]; length: number },
+  scale = 1,
+): Vec2[] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const L = Math.hypot(dx, dy);
+  const cell = motif.length * scale;
+  if (L < 1e-12 || cell <= 1e-9 || motif.points.length < 2) return [a, b];
+  const ux = dx / L;
+  const uy = dy / L;
+  const nx = -uy; // linke Normale (Ausschlagachse)
+  const ny = ux;
+  const toWorld = (ax: number, off: number): Vec2 => ({
+    x: a.x + ux * ax + nx * off,
+    y: a.y + uy * ax + ny * off,
+  });
+
+  const out: Vec2[] = [];
+  const reps = Math.ceil(L / cell) + 1;
+  let last: { ax: number; off: number } | null = null;
+  for (let r = 0; r < reps; r++) {
+    const base = r * cell;
+    for (let i = 0; i < motif.points.length; i++) {
+      const p = motif.points[i];
+      const ax = base + p.x * scale;
+      const off = p.y * scale;
+      // Naht-Duplikat (Zellenende r == Zellenanfang r+1) überspringen.
+      if (last && Math.abs(ax - last.ax) < 1e-9 && Math.abs(off - last.off) < 1e-9) {
+        continue;
+      }
+      if (ax > L + 1e-9) {
+        // Letztes Segment am Segmentende clippen: last→p bei ax = L interpolieren.
+        if (last && ax > last.ax + 1e-12 && L - last.ax > 1e-9) {
+          const tt = (L - last.ax) / (ax - last.ax);
+          out.push(toWorld(L, last.off + (off - last.off) * tt));
+        }
+        return out.length >= 2 ? out : [a, b];
+      }
+      out.push(toWorld(ax, off));
+      last = { ax, off };
+    }
+  }
+  return out.length >= 2 ? out : [a, b];
 }

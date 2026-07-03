@@ -12,7 +12,7 @@ import type { Plan, Primitive } from "../plan/generatePlan";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { DxfWriter } from "./dxfWriter";
-import { buildRandomHatchRuns, zigzagPoints } from "../plan/glPlan/glPlanHatch";
+import { buildRandomHatchRuns, zigzagPoints, motifPoints } from "../plan/glPlan/glPlanHatch";
 
 export interface ExportDxfOptions {
   /** Titel/Geschossname (nur als Kommentar-freundlicher Dateiname genutzt). */
@@ -113,6 +113,9 @@ function emitPrimitive(
         const amp = p.zigzag.amplitude * DASH_MM_TO_M;
         const wav = p.zigzag.wavelength * DASH_MM_TO_M;
         dxf.addPolyline(layer, zigzagPoints(p.a, p.b, amp, wav), false);
+      } else if (p.motif) {
+        // Custom-Motiv → offene Polylinie (Papier-mm → Modell-Meter, wie oben).
+        dxf.addPolyline(layer, motifPoints(p.a, p.b, p.motif, DASH_MM_TO_M), false);
       } else {
         dxf.addLine(layer, p.a, p.b);
       }

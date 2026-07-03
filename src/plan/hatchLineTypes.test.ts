@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Plan, Primitive, HatchRender } from "./generatePlan";
 import { planToRenderScene } from "./toRenderScene";
-import { buildHatchRuns, zigzagPoints } from "./glPlan/glPlanHatch";
+import { buildHatchRuns, buildRandomHatchRuns, zigzagPoints, motifPoints } from "./glPlan/glPlanHatch";
 
 const SQUARE = [
   { x: 0, y: 0 },
@@ -53,6 +53,48 @@ describe("zigzagPoints", () => {
   });
 });
 
+describe("motifPoints (Custom-Wiederhol-Motiv)", () => {
+  // Dreieckszelle (0..4 entlang, ±1 quer): loopt entlang der Linie.
+  const MOTIF = {
+    points: [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      { x: 2, y: 0 },
+      { x: 3, y: -1 },
+      { x: 4, y: 0 },
+    ],
+    length: 4,
+  };
+
+  it("kachelt das Motiv entlang der Strecke (mehr Stützpunkte, quer ausgelenkt)", () => {
+    const pts = motifPoints({ x: 0, y: 0 }, { x: 12, y: 0 }, MOTIF);
+    expect(pts.length).toBeGreaterThan(5); // mehrere Kacheln
+    const ys = pts.map((p) => p.y);
+    expect(Math.max(...ys)).toBeGreaterThan(0.5); // +Ausschlag
+    expect(Math.min(...ys)).toBeLessThan(-0.5); // −Ausschlag
+    // Endet nicht über b hinaus (auf L geclippt).
+    expect(Math.max(...pts.map((p) => p.x))).toBeLessThanOrEqual(12 + 1e-6);
+  });
+
+  it("skaliert Punkte UND Länge (scale) und legt sie auf die Normale", () => {
+    // Vertikale Linie, scale 0.5: y-Versatz wandert in x-Richtung (linke Normale).
+    const pts = motifPoints({ x: 0, y: 0 }, { x: 0, y: 8 }, MOTIF, 0.5);
+    // Bei einer Linie in +y ist die linke Normale (−1, 0): +y-Motiv → −x.
+    expect(Math.min(...pts.map((p) => p.x))).toBeLessThan(-0.1);
+  });
+
+  it("degeneriert (leeres Motiv / Länge 0 / Nullstrecke) auf die Gerade", () => {
+    expect(motifPoints({ x: 0, y: 0 }, { x: 4, y: 0 }, { points: [{ x: 0, y: 0 }], length: 4 })).toEqual([
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    ]);
+    expect(motifPoints({ x: 0, y: 0 }, { x: 4, y: 0 }, { points: MOTIF.points, length: 0 })).toEqual([
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    ]);
+  });
+});
+
 describe("Random-Vektor-Schraffur", () => {
   it("liefert Streu-Striche (nicht leer) und ist DETERMINISTISCH bei gleichem Seed", () => {
     const h = hatch({ kind: "vector", lines: "random", scale: 1 });
@@ -85,6 +127,53 @@ describe("Random-Vektor-Schraffur", () => {
     // Längenspanne greift ohne zu werfen und bleibt deterministisch.
     const ranged = buildHatchRuns(SQUARE, hatch({ ...base, lengthMin: 1, lengthMax: 2 }));
     expect(ranged).toEqual(buildHatchRuns(SQUARE, hatch({ ...base, lengthMin: 1, lengthMax: 2 })));
+  });
+
+  it("ist MODELLRAUM-VERANKERT: grössere Fläche enthält die Striche der kleineren unverändert", () => {
+    // Zwei konzentrische Quadrate; das grosse enthält das kleine mit Rand ≥ 4 m.
+    const small = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 4 },
+      { x: 0, y: 4 },
+    ];
+    const big = [
+      { x: -4, y: -4 },
+      { x: 8, y: -4 },
+      { x: 8, y: 8 },
+      { x: -4, y: 8 },
+    ];
+    const h = hatch({ kind: "vector", lines: "random", scale: 1, seed: 5 });
+    const rsSmall = buildRandomHatchRuns(small, h);
+    const rsBig = buildRandomHatchRuns(big, h);
+    expect(rsSmall.length).toBeGreaterThan(0);
+    const key = (r: { x: number; y: number }[]) => JSON.stringify(r);
+    const bigSet = new Set(rsBig.map(key));
+    // Striche des kleinen Quadrats, die STRIKT im Inneren liegen (Clipping hat sie
+    // nicht bewegt), müssen im grossen Quadrat identisch wieder auftauchen —
+    // gleiche Zelle ⇒ gleicher Strich. So bleibt beim Vergrössern nichts stehen-los.
+    const interior = rsSmall.filter((run) =>
+      run.every((p) => p.x > 0.05 && p.x < 3.95 && p.y > 0.05 && p.y < 3.95),
+    );
+    expect(interior.length).toBeGreaterThan(0);
+    for (const run of interior) {
+      expect(bigSet.has(key(run))).toBe(true);
+    }
+  });
+
+  it("bleibt beim VERSCHIEBEN der Fläche gleich dicht (Striche pro Fläche konstant)", () => {
+    const sq = (ox: number, oy: number) => [
+      { x: ox, y: oy },
+      { x: ox + 6, y: oy },
+      { x: ox + 6, y: oy + 6 },
+      { x: ox, y: oy + 6 },
+    ];
+    const h = hatch({ kind: "vector", lines: "random", scale: 1, seed: 2 });
+    const a = buildRandomHatchRuns(sq(0, 0), h).length;
+    const b = buildRandomHatchRuns(sq(37, -19), h).length;
+    // Gleiche Fläche an anderer Stelle ⇒ näherungsweise gleiche Strichzahl (Dichte
+    // konstant; ±1 Reihe Rand-Toleranz durch die Zell-Ausrichtung).
+    expect(Math.abs(a - b)).toBeLessThan(a * 0.25 + 5);
   });
 
   it("erscheint als Streu-Polylinien in der RenderScene (deterministisch)", () => {

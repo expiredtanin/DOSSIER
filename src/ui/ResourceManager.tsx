@@ -43,6 +43,7 @@ import {
 import { requestMaterialPreview, cancelMaterialPreview } from "../materials/spherePreview";
 import { EyeIcon } from "./EyeIcon";
 import { HatchSwatch, LineSwatch } from "./hatchPreview";
+import { MotifEditor } from "./MotifEditor";
 import { t } from "../i18n";
 
 // ── Auswahl-Optionen (UI-Beschriftung übersetzt, Werte englisch) ───────────
@@ -1188,6 +1189,21 @@ function HatchesTab({
 // ── Linien (Line Styles) ───────────────────────────────────────────────────
 
 /** Detail-Panel EINES Linienstils (rechte Seite des Master-Detail-Layouts). */
+/**
+ * Default-Motiv beim Umschalten auf „Custom": eine Dreieckszelle (0..4 mm entlang,
+ * ±1.5 mm quer), die entlang der Linie loopt. Der Nutzer passt sie im MotifEditor an.
+ */
+const DEFAULT_MOTIF: NonNullable<LineStyle["motif"]> = {
+  points: [
+    { x: 0, y: 0 },
+    { x: 1, y: 1.5 },
+    { x: 2, y: 0 },
+    { x: 3, y: -1.5 },
+    { x: 4, y: 0 },
+  ],
+  length: 4,
+};
+
 function LineStyleDetail({
   style,
   onPatch,
@@ -1199,10 +1215,15 @@ function LineStyleDetail({
 }) {
   const kind = style.kind ?? "dash";
 
-  /** Wechselt den Typ; beim Umschalten auf „Zickzack" Default-Parameter setzen. */
-  const setKind = (k: "dash" | "zigzag") => {
+  /**
+   * Wechselt den Typ; beim Umschalten auf „Zickzack"/„Custom" Default-Parameter
+   * setzen, falls noch keine vorhanden.
+   */
+  const setKind = (k: "dash" | "zigzag" | "custom") => {
     if (k === "zigzag" && !style.zigzag) {
       onPatch({ kind: k, zigzag: { amplitude: 1, wavelength: 4 } });
+    } else if (k === "custom" && !style.motif) {
+      onPatch({ kind: k, motif: DEFAULT_MOTIF });
     } else {
       onPatch({ kind: k });
     }
@@ -1262,6 +1283,7 @@ function LineStyleDetail({
             options={[
               { value: "dash", label: t("resources.lineKind.dash") },
               { value: "zigzag", label: t("resources.lineKind.zigzag") },
+              { value: "custom", label: t("resources.lineKind.custom") },
             ]}
           />
         </FieldRow>
@@ -1287,6 +1309,14 @@ function LineStyleDetail({
               />
             </FieldRow>
           </>
+        ) : kind === "custom" ? (
+          <FieldRow label={t("resources.field.motif")}>
+            <MotifEditor
+              points={style.motif?.points ?? DEFAULT_MOTIF.points}
+              length={style.motif?.length ?? DEFAULT_MOTIF.length}
+              onChange={(points, length) => onPatch({ motif: { points, length } })}
+            />
+          </FieldRow>
         ) : (
           <>
             <FieldRow label={t("resources.col.stroke")}>

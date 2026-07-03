@@ -577,6 +577,10 @@ export const en: Record<TranslationKey, string> = {
   "resources.lines.random": "Random",
   "resources.lineKind.dash": "Dash",
   "resources.lineKind.zigzag": "Zigzag",
+  "resources.lineKind.custom": "Motif",
+  "resources.field.motif": "Motif",
+  "resources.motif.length": "Length (mm)",
+  "resources.motif.hint": "Click = add point · drag = move · double-click = remove. The motif repeats along the line.",
 
   "pattern.none": "None",
   "pattern.solid": "Solid",

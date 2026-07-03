@@ -582,6 +582,10 @@ export const de = {
   "resources.lines.random": "Zufällig",
   "resources.lineKind.dash": "Strich",
   "resources.lineKind.zigzag": "Zickzack",
+  "resources.lineKind.custom": "Motiv",
+  "resources.field.motif": "Motiv",
+  "resources.motif.length": "Länge (mm)",
+  "resources.motif.hint": "Klick = Punkt setzen · Ziehen = verschieben · Doppelklick = entfernen. Das Motiv wiederholt sich entlang der Linie.",
 
   // Schraffur-Muster.
   "pattern.none": "Ohne",

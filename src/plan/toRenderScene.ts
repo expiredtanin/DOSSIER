@@ -20,7 +20,7 @@
 // gesamte (ggf. verkettete oder adaptiv tessellierte) Strecke durchläuft.
 
 import type { Plan, Primitive } from "./generatePlan";
-import { applyDashRuns, buildHatchRuns, zigzagPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
+import { applyDashRuns, buildHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
 import { docToLines } from "../text/renderHtml";
 
 type LinePrim = Extract<Primitive, { kind: "line" }>;
@@ -434,6 +434,20 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
         if (zpts.length >= 2) {
           polylines.push({
             pts: zpts.map((v) => [v.x, v.y]),
+            color: col,
+            widthMm: p.weightMm,
+            z: zc++,
+          });
+        }
+      } else if (p.motif) {
+        // Custom-Motiv: entlang der Linie gekachelt (Papier-mm → Modell-Meter via
+        // DASH_MM_TO_M) → Polylinie. Nicht verketten (wie Zickzack).
+        flushRun();
+        const mpts = motifPoints(p.a, p.b, p.motif, DASH_MM_TO_M);
+        const col = withOpacity(strokeColorFor(p.cls, p.color), p.cls, p.greyed);
+        if (mpts.length >= 2) {
+          polylines.push({
+            pts: mpts.map((v) => [v.x, v.y]),
             color: col,
             widthMm: p.weightMm,
             z: zc++,
