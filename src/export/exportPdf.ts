@@ -64,13 +64,14 @@ export async function buildPlanPdf(
 ): Promise<jsPDF> {
   const { w: pageW, h: pageH } = pageSizeMm(opts.paper, opts.orientation);
 
-  // Render-Szene EXAKT wie der Viewport erzeugen (keine Zusatz-Optionen —
-  // `planToRenderScene(plan)` ist der vollstaendige Aufruf, siehe
-  // `useWasmPlanRenderer.ts`), dann als Papier-SVG serialisieren. Etwas mehr
-  // unterer Rand, falls ein Schriftfeld gezeichnet wird (damit es nicht in
-  // den Plan ragt).
+  // Render-Szene wie der Viewport erzeugen, dann als Papier-SVG serialisieren.
+  // Einziger Unterschied zum Viewport-Aufruf: der echte Export-Massstab wird an
+  // `planToRenderScene` durchgereicht (derselbe `scaleDenominator` wie unten an
+  // `sceneToPrintSvg`), damit der Zeilenabstand mehrzeiliger Stempeltexte auch
+  // bei Nicht-1:100-Massstab papier-mm-genau stimmt. Etwas mehr unterer Rand,
+  // falls ein Schriftfeld gezeichnet wird (damit es nicht in den Plan ragt).
   const margin = 10;
-  const scene = planToRenderScene(plan);
+  const scene = planToRenderScene(plan, opts.scaleDenominator);
   const print = sceneToPrintSvg(scene, {
     scaleDenominator: opts.scaleDenominator,
     pageWidthMm: pageW,
