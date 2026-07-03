@@ -137,6 +137,12 @@ function parseColor(hex: string | undefined): Rgba | null {
 export function compilePrimitivesToGpu(
   gl: WebGL2RenderingContext,
   primitives: Primitive[],
+  // Bildschirm-Massstab (Geräte-px je Modell-Meter) beim aktuellen Zoom. Steuert
+  // NUR die adaptive Bogen-Tessellierung (siehe 'arc'-Zweig): je stärker
+  // hineingezoomt, desto mehr Segmente, damit der Bogen rund statt facettiert
+  // erscheint. 0 → zoom-unabhängiger Rückfall (fixe 16 Segmente je 90°), z. B.
+  // wenn der Aufrufer den Massstab (noch) nicht kennt.
+  pxPerMeter = 0,
 ): GpuGeometry {
   // Füll-Puffer (Bildschirm-Raum Positionen + Indizes).
   const fillPos: number[] = [];
@@ -426,7 +432,23 @@ export function compilePrimitivesToGpu(
       let d = a1 - a0;
       while (d <= -Math.PI) d += 2 * Math.PI;
       while (d > Math.PI) d -= 2 * Math.PI;
-      const segs = Math.max(4, Math.ceil((Math.abs(d) / (Math.PI / 2)) * 16));
+      // Bildschirm-adaptive Tessellierung (LOD): der Bogen-Radius in Geräte-px
+      // ist rPx = r · pxPerMeter. Der Segment-Winkel θ wird so gewählt, dass die
+      // Sagitta (Sehnen-Ausbauchung) rPx·(1−cos(θ/2)) unter ~0.5 px bleibt →
+      // θ = 2·acos(1 − 0.5/rPx). Weit weg (kleiner rPx) = wenige Segmente (billig,
+      // Facetten unsichtbar); hineingezoomt = viele Segmente = runder Bogen — wie
+      // im CAD. Geklammert auf [8, 2048]. pxPerMeter=0 → fixer Rückfall (16/90°).
+      // Der Aufrufer (PlanView) re-tesselliert nur bei LOD-Bucket-Wechseln, nicht
+      // je Frame; Pan/Zoom bleibt reines Matrix-Update.
+      let segs: number;
+      if (pxPerMeter > 0) {
+        const rPx = prim.r * pxPerMeter;
+        // Für sehr kleine rPx ist 0.5/rPx ≥ 1 (kein realer acos) → Minimum greift.
+        const theta = rPx > 0.5 ? 2 * Math.acos(1 - 0.5 / rPx) : Math.PI;
+        segs = Math.min(2048, Math.max(8, Math.ceil(Math.abs(d) / theta)));
+      } else {
+        segs = Math.max(4, Math.ceil((Math.abs(d) / (Math.PI / 2)) * 16));
+      }
       const arcPts: Vec2[] = [prim.from];
       for (let i = 1; i <= segs; i++) {
         const t = a0 + (d * i) / segs;

@@ -469,6 +469,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   toScreenRef.current = toScreen;
   const planRef = useRef(plan);
   planRef.current = plan;
+  // Zuletzt tessellierter LOD-Bucket (quantisierter Zoom). Nur bei Bucket-Wechsel
+  // wird die Bogen-Geometrie neu aufgebaut — sonst bliebe Pan/Zoom reines
+  // Matrix-Update. −Infinity = „noch nie tesselliert".
+  const lodBucketRef = useRef<number>(-Infinity);
 
   // Papier-Massstab-Nenner (1:N) für die GL-Strichbreiten — ECHTE mm im Massstab
   // (0.35 mm bei 1:100). Bevorzugt der stabile `paperScale` (wie beim SVG-Print);
@@ -498,20 +502,48 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return print ? paperScale! : 100;
   };
 
-  // GL-Geometrie beim Plan-Wechsel neu tessellieren + sofort neu zeichnen.
+  // Bildschirm-Massstab (Geräte-px je Modell-Meter) beim aktuellen Ausschnitt:
+  // meet-Skala (CSS-px je viewBox-Einheit) · PX_PER_M (viewBox-Einheiten je Meter)
+  // · dpr (Geräte-px je CSS-px). Steuert die adaptive Bogen-Tessellierung.
+  const pxPerMeterForView = (v: ViewBox): number => {
+    const meet = meetScale(v, svgRef.current);
+    if (!meet || meet <= 0) return 0;
+    return meet * PX_PER_M * (window.devicePixelRatio || 1);
+  };
+  // LOD-Bucket = quantisierter Zoom (log2 des Bildschirm-Massstabs, auf Ganzzahl
+  // gerundet → Schritte von ×2). Nur ein Bucket-Wechsel löst eine Neu-Tessellierung
+  // aus; innerhalb eines Buckets bleibt Pan/Zoom reines Matrix-Uniform-Update.
+  const lodBucketForView = (v: ViewBox): number => {
+    const s = pxPerMeterForView(v);
+    return s > 0 ? Math.round(Math.log2(s)) : -Infinity;
+  };
+
+  // GL-Geometrie beim Plan-Wechsel neu tessellieren + sofort neu zeichnen. Der
+  // aktuelle LOD-Bucket wird mitgeschrieben, damit der Pan/Zoom-Effekt weiss, ab
+  // wann sich der Zoom weit genug bewegt hat, um Bögen neu aufzulösen.
   useEffect(() => {
     if (!useGpuRenderer) return;
-    updateGeometry(plan);
-    renderGl(viewRef.current, paperScaleForGl(viewRef.current), textScaleForGl());
+    const v = viewRef.current;
+    updateGeometry(plan, pxPerMeterForView(v));
+    lodBucketRef.current = lodBucketForView(v);
+    renderGl(v, paperScaleForGl(v), textScaleForGl());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useGpuRenderer, plan, updateGeometry, renderGl]);
 
-  // GL bei jeder Ausschnittsänderung (Pan/Zoom) neu zeichnen — nur Matrix-Uniform,
-  // keine Re-Tessellierung. Auch bei paperScale-Wechsel neu (Strichbreiten).
+  // GL bei jeder Ausschnittsänderung (Pan/Zoom) neu zeichnen. Normalfall: NUR
+  // Matrix-Uniform (keine Re-Tessellierung → flüssig). Ausnahme: hat der Zoom
+  // einen neuen LOD-Bucket erreicht, werden die Bögen einmalig mit dem neuen
+  // Bildschirm-Massstab neu tesselliert (rund beim Hineinzoomen, billig weit weg).
+  // Kostennotiz: `updateGeometry` baut die GESAMTE Linien-/Füll-Geometrie neu auf,
+  // nicht nur die Bögen — Bucket-Wechsel sind aber selten (Zoom-Faktor ×2).
   useEffect(() => {
-    if (useGpuRenderer) {
-      renderGl(view, paperScaleForGl(view), textScaleForGl());
+    if (!useGpuRenderer) return;
+    const bucket = lodBucketForView(view);
+    if (bucket !== lodBucketRef.current) {
+      lodBucketRef.current = bucket;
+      updateGeometry(plan, pxPerMeterForView(view));
     }
+    renderGl(view, paperScaleForGl(view), textScaleForGl());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useGpuRenderer, renderGl, view, paperScale]);
 

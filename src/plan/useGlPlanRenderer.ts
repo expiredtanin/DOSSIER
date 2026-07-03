@@ -85,12 +85,18 @@ export function useGlPlanRenderer(
     };
   }, [enabled, canvasRef]);
 
-  /** Geometrie beim Plan-Wechsel neu tessellieren (einmalig, gecacht). */
-  const updateGeometry = useCallback((plan: Plan) => {
+  /**
+   * Geometrie (neu) tessellieren und cachen. Läuft beim Plan-Wechsel UND bei
+   * jedem LOD-Bucket-Wechsel des Zooms (PlanView triggert beides). `pxPerMeter`
+   * = aktueller Bildschirm-Massstab (Geräte-px je Modell-Meter); steuert die
+   * adaptive Bogen-Tessellierung (mehr Segmente beim Hineinzoomen). 0 → fixer
+   * zoom-unabhängiger Rückfall.
+   */
+  const updateGeometry = useCallback((plan: Plan, pxPerMeter = 0) => {
     const gl = glRef.current;
     if (!gl || !plan) return;
     try {
-      geomRef.current = compilePrimitivesToGpu(gl, plan.primitives);
+      geomRef.current = compilePrimitivesToGpu(gl, plan.primitives, pxPerMeter);
     } catch (e) {
       console.warn('Tessellierung fehlgeschlagen:', e);
       geomRef.current = null;
