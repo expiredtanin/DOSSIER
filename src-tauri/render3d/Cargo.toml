@@ -59,12 +59,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
 
 # --- GPU (nur mit Feature "render") ------------------------------------------
-# Standard-Features von wgpu (wgsl, webgpu, dx12, metal). Die Linux-Backends
-# Vulkan/GLES aktiviert wgpu selbst ueber seine target-spezifischen Defaults —
-# es gibt in wgpu 22 keine expliziten `vulkan`/`gles`-Feature-Namen.
-wgpu = { version = "22", optional = true }
+# Standard-Features von wgpu (wgsl, webgpu, dx12, metal + target-spezifisch
+# Vulkan/GLES auf Linux). Version im Gleichschritt mit render2d: wgpu 29, weil
+# glyphon (dort) noch keine 30 unterstuetzt — beide Crates teilen den Stand.
+wgpu = { version = "29", optional = true }
 bytemuck = { version = "1", optional = true, features = ["derive"] }
-pollster = { version = "0.3", optional = true }
+pollster = { version = "0.4", optional = true }
 
 # --- Fenster (nur mit Feature "window") --------------------------------------
 winit = { version = "0.30", optional = true }
@@ -87,8 +87,8 @@ web-sys = { version = "0.3", optional = true, features = [
 [dev-dependencies]
 serde_json = "1"
 # naga validiert die WGSL-Quellen headless (Parser + Validator) im Test, ohne
-# GPU/Display. Version an wgpu 22 gekoppelt (transitiv ohnehin vorhanden).
-naga = { version = "22", features = ["wgsl-in"] }
+# GPU/Display. Version an wgpu gekoppelt (transitiv ohnehin vorhanden).
+naga = { version = "29", features = ["wgsl-in"] }
 
 # Der Fenster-Spike ist nur mit Feature "window" verfuegbar; ohne das Feature
 # wird das Binary aus dem Build ausgeschlossen (required-features).

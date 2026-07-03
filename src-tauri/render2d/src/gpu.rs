@@ -222,8 +222,8 @@ impl Renderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("2d.layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         // Alpha-Blending (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) wie im WebGL-Pfad.
@@ -245,13 +245,13 @@ impl Renderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &fill_module,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[fill_vertex_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fill_module,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(color_target.clone())],
                 compilation_options: Default::default(),
             }),
@@ -267,7 +267,7 @@ impl Renderer {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -282,13 +282,13 @@ impl Renderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &line_module,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[line_vertex_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &line_module,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(color_target)],
                 compilation_options: Default::default(),
             }),
@@ -303,7 +303,7 @@ impl Renderer {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -332,8 +332,8 @@ impl Renderer {
         let arc_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("arc.pipeline.layout"),
-                bind_group_layouts: &[&arc_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&arc_bind_group_layout)],
+                immediate_size: 0,
             });
         // Instanz-Layout: [center vec2, geom vec4, color vec4, wdash vec4, dash vec4],
         // stride 18*4, step_mode Instance. Das Quad kommt aus @builtin(vertex_index).
@@ -349,13 +349,13 @@ impl Renderer {
             layout: Some(&arc_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &arc_module,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[arc_instance_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &arc_module,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
                     blend,
@@ -374,7 +374,7 @@ impl Renderer {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         let arc_uniform = device.create_buffer(&wgpu::BufferDescriptor {
@@ -724,7 +724,15 @@ impl Renderer {
                     );
                     // Unbegrenzt: eine Zeile, kein Umbruch (Zeilen sind vorgeflacht).
                     buffer.set_size(&mut ts.font_system, None, None);
-                    buffer.set_text(&mut ts.font_system, &t.content, attrs, glyphon::Shaping::Advanced);
+                    // Kein Align-Override (None): die Ausrichtung rechnet der
+                    // Platzierungscode unten selbst ueber die gemessene Zeilenbreite.
+                    buffer.set_text(
+                        &mut ts.font_system,
+                        &t.content,
+                        &attrs,
+                        glyphon::Shaping::Advanced,
+                        None,
+                    );
 
                     // Gemessene Breite + Baseline fuer Ausrichtung/Anker.
                     let (line_w, baseline) = buffer
@@ -817,6 +825,8 @@ impl Renderer {
                 label: Some("2d.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: msaa_view,
+                    // Ziel ist eine 2D-Textur (kein 3D-Volumen) -> kein Depth-Slice.
+                    depth_slice: None,
                     resolve_target: Some(view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(self.clear_color),
@@ -826,6 +836,7 @@ impl Renderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             if let (Some(scene), Some(u)) = (&self.scene, &self.uniform) {

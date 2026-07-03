@@ -87,7 +87,7 @@ impl HeadlessRenderer {
     pub fn new() -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -95,16 +95,15 @@ impl HeadlessRenderer {
             // Kein Fenster -> keine kompatible Surface noetig.
             compatible_surface: None,
         }))
-        .ok_or_else(|| "kein Vulkan-Adapter fuer Headless-Rendering gefunden".to_string())?;
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("headless.device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-            },
-            None,
-        ))
+        .map_err(|e| format!("kein Vulkan-Adapter fuer Headless-Rendering gefunden: {e}"))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("headless.device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        }))
         .map_err(|e| format!("Headless-Device anfordern fehlgeschlagen: {e}"))?;
 
         let renderer = Renderer::new(&device, COLOR_FORMAT);
@@ -178,15 +177,15 @@ impl HeadlessRenderer {
                 label: Some("headless.copy"),
             });
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &output_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: Some(height),
@@ -206,8 +205,11 @@ impl HeadlessRenderer {
             let _ = tx.send(res);
         });
         // Vulkan hat keine Event-Loop wie ein Fenster -> Poll blockierend, bis
-        // die Map-Callback feuert (kein busy-loop noetig, `Maintain::Wait` wartet).
-        self.device.poll(wgpu::Maintain::Wait);
+        // die Map-Callback feuert (kein busy-loop noetig, `PollType::Wait` wartet
+        // ohne Timeout auf die juengste Submission).
+        self.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("Device-Poll fehlgeschlagen");
         rx.recv()
             .expect("Map-Callback nie aufgerufen")
             .expect("Buffer-Mapping fehlgeschlagen");

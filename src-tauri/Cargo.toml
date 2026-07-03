@@ -47,5 +47,5 @@ render2d = { path = "render2d", features = ["window"], optional = true }
 render3d = { path = "render3d", features = ["window"], optional = true }
 # Versionen an render2d gekoppelt (identische raw-window-handle 0.6-Kette).
 winit = { version = "0.30", optional = true }
-wgpu = { version = "22", optional = true }
-pollster = { version = "0.3", optional = true }
+wgpu = { version = "29", optional = true }
+pollster = { version = "0.4", optional = true }

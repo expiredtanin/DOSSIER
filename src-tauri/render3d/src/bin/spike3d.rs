@@ -76,15 +76,14 @@ impl GpuState {
             compatible_surface: Some(&surface),
         }))
         .expect("kein passender GPU-Adapter");
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("3d.device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-            },
-            None,
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("3d.device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+        }))
         .expect("Device anfordern");
 
         let caps = surface.get_capabilities(&adapter);
@@ -129,14 +128,17 @@ impl GpuState {
     }
 
     fn render(&mut self, camera: &Camera) {
+        // wgpu 29: `get_current_texture` liefert ein Enum statt eines Results —
+        // Suboptimal ist weiterhin praesentierbar, Lost/Outdated -> rekonfigurieren.
         let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.config);
                 return;
             }
-            Err(e) => {
-                eprintln!("Surface-Fehler: {e:?}");
+            other => {
+                eprintln!("Surface-Fehler: {other:?}");
                 return;
             }
         };

@@ -54,7 +54,7 @@ impl WebPlanRenderer {
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::BROWSER_WEBGPU,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
@@ -67,19 +67,20 @@ impl WebPlanRenderer {
                 compatible_surface: Some(&surface),
             })
             .await
-            .ok_or_else(|| JsValue::from_str("kein WebGPU-Adapter (navigator.gpu?)"))?;
+            .map_err(|e| {
+                JsValue::from_str(&format!("kein WebGPU-Adapter (navigator.gpu?): {e}"))
+            })?;
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("render2d.web.device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                        .using_resolution(adapter.limits()),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("render2d.web.device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                    .using_resolution(adapter.limits()),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            })
             .await
             .map_err(|e| JsValue::from_str(&format!("request_device: {e:?}")))?;
 
@@ -169,15 +170,18 @@ impl WebPlanRenderer {
 
     /// Zeichnet EINEN Frame in die Surface-Textur.
     pub fn render(&mut self) {
+        // wgpu 29: `get_current_texture` liefert ein Enum statt eines Results —
+        // Suboptimal ist weiterhin praesentierbar, Lost/Outdated -> rekonfigurieren.
         let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.config);
                 return;
             }
-            Err(e) => {
+            other => {
                 web_sys::console::warn_1(&JsValue::from_str(&format!(
-                    "render2d Surface-Fehler: {e:?}"
+                    "render2d Surface-Fehler: {other:?}"
                 )));
                 return;
             }

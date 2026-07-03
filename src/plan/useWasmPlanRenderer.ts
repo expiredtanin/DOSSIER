@@ -15,8 +15,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Plan } from "./generatePlan";
 import { planToRenderScene } from "./toRenderScene";
-// wgpu-22-Limit-Shim (maxInterStageShaderComponents), geteilt mit useWasm3dRenderer.
-import { patchRequestDeviceLimits } from "../engine/requestDeviceShim";
 
 interface ViewBox {
   x: number;
@@ -64,7 +62,6 @@ function getRenderer(canvas: HTMLCanvasElement): Promise<WebPlanRendererLike> {
   let p = rendererCache.get(canvas);
   if (!p) {
     p = (async () => {
-      patchRequestDeviceLimits(); // wgpu-22-Limit-Shim (src/engine/requestDeviceShim)
       const mod = await loadEngine();
       // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
       const rect = canvas.getBoundingClientRect();

@@ -139,14 +139,17 @@ impl GpuState2d {
     }
 
     fn render(&mut self, view_box: ViewBox) {
+        // wgpu 29: `get_current_texture` liefert ein Enum statt eines Results —
+        // Suboptimal ist weiterhin praesentierbar, Lost/Outdated -> rekonfigurieren.
         let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.config);
                 return;
             }
-            Err(e) => {
-                eprintln!("native2d Surface-Fehler: {e:?}");
+            other => {
+                eprintln!("native2d Surface-Fehler: {other:?}");
                 return;
             }
         };
@@ -274,14 +277,17 @@ impl GpuState3d {
     }
 
     fn render(&mut self, camera: &Camera) {
+        // wgpu 29: `get_current_texture` liefert ein Enum statt eines Results —
+        // Suboptimal ist weiterhin praesentierbar, Lost/Outdated -> rekonfigurieren.
         let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.config);
                 return;
             }
-            Err(e) => {
-                eprintln!("native3d Surface-Fehler: {e:?}");
+            other => {
+                eprintln!("native3d Surface-Fehler: {other:?}");
                 return;
             }
         };
@@ -332,6 +338,7 @@ fn demo_walls() -> Vec<WallInput> {
         height: ht,
         base_elevation: 0.0,
         color: grey,
+        openings: vec![],
     };
     vec![
         mk([0.0, 0.0], [6.0, 0.0]),
@@ -443,15 +450,14 @@ fn configure_surface(
         compatible_surface: Some(&surface),
     }))
     .expect("kein passender GPU-Adapter");
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some(device_label),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::Performance,
-        },
-        None,
-    ))
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some(device_label),
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::default(),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
+        memory_hints: wgpu::MemoryHints::Performance,
+        trace: wgpu::Trace::Off,
+    }))
     .expect("Device anfordern");
 
     let caps = surface.get_capabilities(&adapter);

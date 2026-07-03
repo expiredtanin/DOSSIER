@@ -19,8 +19,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
-// wgpu-22-Limit-Shim (maxInterStageShaderComponents), geteilt mit useWasmPlanRenderer.
-import { patchRequestDeviceLimits } from "../engine/requestDeviceShim";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
 export interface Camera3d {
@@ -84,7 +82,6 @@ function getRenderer(canvas: HTMLCanvasElement): Promise<WebModelRendererLike> {
   let p = rendererCache.get(canvas);
   if (!p) {
     p = (async () => {
-      patchRequestDeviceLimits(); // wgpu-22-Limit-Shim (src/engine/requestDeviceShim)
       const mod = await loadEngine();
       // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
       const rect = canvas.getBoundingClientRect();

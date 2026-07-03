@@ -66,15 +66,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
 
 # --- GPU (nur mit Feature "render") ------------------------------------------
-# Standard-Features von wgpu (wgsl, webgpu, dx12, metal). Die Linux-Backends
-# Vulkan/GLES aktiviert wgpu selbst ueber seine target-spezifischen Defaults —
-# es gibt in wgpu 22 keine expliziten `vulkan`/`gles`-Feature-Namen.
-wgpu = { version = "22", optional = true }
+# Standard-Features von wgpu (wgsl, webgpu, dx12, metal + target-spezifisch
+# Vulkan/GLES auf Linux). wgpu 30 ist bereits erschienen, aber glyphon 0.11
+# pinnt `wgpu ^29` — 29 ist damit die neueste Version, bei der beide zusammenpassen.
+wgpu = { version = "29", optional = true }
 bytemuck = { version = "1", optional = true, features = ["derive"] }
-pollster = { version = "0.3", optional = true }
+pollster = { version = "0.4", optional = true }
 # Echte TrueType-Glyphen ueber einen GPU-Atlas (cosmic-text + etagere). Version
-# an wgpu gekoppelt: die 0.6er-Reihe ist die zu wgpu 22 passende.
-glyphon = { version = "0.6", optional = true }
+# an wgpu gekoppelt: die 0.11er-Reihe ist die zu wgpu 29 passende.
+glyphon = { version = "0.11", optional = true }
 
 # --- Headless-PNG-Export (nur mit Feature "headless") ------------------------
 # Nur der PNG-Codec noetig (kein volles Format-Universum) -> default-features aus.
@@ -103,8 +103,8 @@ web-sys = { version = "0.3", optional = true, features = [
 [dev-dependencies]
 serde_json = "1"
 # naga validiert die WGSL-Quellen headless (Parser + Validator) im Test, ohne
-# GPU/Display. Version an wgpu 22 gekoppelt (transitiv ohnehin vorhanden).
-naga = { version = "22", features = ["wgsl-in"] }
+# GPU/Display. Version an wgpu gekoppelt (transitiv ohnehin vorhanden).
+naga = { version = "29", features = ["wgsl-in"] }
 
 # Der Fenster-Spike ist nur mit Feature "window" verfuegbar; ohne das Feature
 # wird das Binary aus dem Build ausgeschlossen (required-features).
