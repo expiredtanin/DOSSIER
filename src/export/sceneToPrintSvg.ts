@@ -54,14 +54,17 @@ export function quantizePen(mm: number): number {
 }
 
 /**
- * viewBox-Einheiten je Modell-Meter im Bildschirm-Pfad (`PX_PER_M` in
- * `PlanView.tsx` / `glPlanHatch.ts` / `glPlanCompile.ts`). Schraffur-
- * Strichbreiten in der Szene (`RPolyline.widthScreen === true`) sind GENAU in
- * diesen Einheiten kodiert (siehe `toRenderScene.ts`, Kommentar bei
- * `hatchPx`) — dieser Wert MUSS mit dem dortigen uebereinstimmen, sonst
- * driftet die Schraffur-Dichte des PDFs von der des Viewports ab.
+ * Papier-mm je Bildschirm-viewBox-Einheit fuer Schraffur-Strichbreiten
+ * (`RPolyline.widthScreen === true`) — die Umkehrung von `hatchPx = max(0.6,
+ * hatchMm * (1/HATCH_DENSITY_MM))` in `toRenderScene.ts`. Dieser Wert MUSS mit
+ * dem dortigen `1/0.13`-Faktor uebereinstimmen, sonst driftet die Schraffur-
+ * Dichte des PDFs von der des Viewports ab. Anders als der Rest der
+ * Strichbreiten-Logik ist dies bewusst NICHT von `scaleDenominator` (N)
+ * abhaengig: eine Schraffur-Strichbreite ist eine feste Papier-mm-Groesse,
+ * unabhaengig vom gewaehlten Export-Massstab (Audit
+ * `docs/design/engine-linewidth-audit.md`, Finding 4).
  */
-const PX_PER_M = 90;
+const HATCH_DENSITY_MM = 0.13;
 
 export interface PrintSceneOptions {
   /** Massstab-Nenner N (1:N). 1 m = 1000/N mm auf dem Papier. */
@@ -154,7 +157,7 @@ export function sceneToPrintSvg(scene: RScene, opts: PrintSceneOptions): PrintSc
         appendFill(svg, it.v, map);
         break;
       case "outline":
-        appendStroke(svg, it.v.pts, true, it.v.color, it.v.widthMm, it.v.dash, map, k, false);
+        appendStroke(svg, it.v.pts, true, it.v.color, it.v.widthMm, it.v.dash, map, false);
         break;
       case "polyline":
         appendStroke(
@@ -165,7 +168,6 @@ export function sceneToPrintSvg(scene: RScene, opts: PrintSceneOptions): PrintSc
           it.v.widthMm,
           it.v.dash,
           map,
-          k,
           it.v.widthScreen ?? false,
         );
         break;
@@ -223,7 +225,8 @@ function appendFill(svg: SVGSVGElement, f: RFill, map: Mapper): void {
 /**
  * Umriss (geschlossener Ring) oder offene Polylinie (2D-Zeichenzug,
  * Schraffur-Musterlinie). `widthScreen`: `widthMm` traegt Bildschirm-viewBox-
- * Einheiten (Schraffur, siehe `PX_PER_M`-Kommentar oben) statt Papier-mm.
+ * Einheiten (Schraffur, siehe `HATCH_DENSITY_MM`-Kommentar oben) statt
+ * Papier-mm.
  */
 function appendStroke(
   svg: SVGSVGElement,
@@ -233,14 +236,18 @@ function appendStroke(
   widthMm: number,
   dash: number[] | null | undefined,
   map: Mapper,
-  mmPerM: number,
   widthScreen: boolean,
 ): void {
   if (pts.length < 2 || widthMm <= 0) return;
-  // Bildschirm-viewBox-Einheiten -> Welt-Meter (/ PX_PER_M) -> Papier-mm
-  // (* mmPerM) — reproduziert exakt die Schraffur-Dichte des SVG-Pfads
-  // (`hatchStrokePx`) beim GEWAEHLTEN Papier-Massstab N.
-  const effectiveMm = widthScreen ? (widthMm / PX_PER_M) * mmPerM : widthMm;
+  // Schraffur-Strichbreite ist eine feste Papier-mm-Groesse (Stift), NICHT vom
+  // gewaehlten Export-Massstab N abhaengig — sonst wuerde dieselbe Quell-
+  // `lineWeight` je nach `scaleDenominator` unterschiedlich dick gedruckt
+  // (Audit `docs/design/engine-linewidth-audit.md`, Finding 4). `widthMm` ist
+  // hier in Bildschirm-viewBox-Einheiten kodiert, exakt `hatchPx = max(0.6,
+  // hatchMm * (1/HATCH_DENSITY_MM))` aus `toRenderScene.ts` — die Umkehrung
+  // `* HATCH_DENSITY_MM` liefert wieder die Papier-mm-Quell-`lineWeight`,
+  // unabhaengig von N.
+  const effectiveMm = widthScreen ? widthMm * HATCH_DENSITY_MM : widthMm;
   const strokeMm = quantizePen(effectiveMm);
 
   const el = document.createElementNS(SVG_NS, closed ? "polygon" : "polyline");
