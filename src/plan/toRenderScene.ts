@@ -155,14 +155,15 @@ function strokeColorFor(cls: string | undefined, color: string | undefined): RRg
 /** 1 Punkt (pt) in Papier-Millimetern. */
 const PT_TO_MM = 25.4 / 72;
 /**
- * Referenzmaßstab des Display-Modus (1:100) — identisch zu PlanView (`nRef`):
- * dort belegt 1 pt Schrift (1/72)·0.0254·100 Modell-Meter. Der native Renderer
- * rechnet mit `paper_scale_n = 100`, damit ist `sizeMm = pt · PT_TO_MM` exakt
- * die Browser-Darstellung.
+ * Default-Referenzmaßstab (1:100) für Aufrufer ohne Massstabskontext (WASM-
+ * Viewport, `nativeSync.ts`) — identisch zu PlanView (`nRef`) im Display-
+ * Modus: dort belegt 1 pt Schrift (1/72)·0.0254·100 Modell-Meter. Der native
+ * Renderer rechnet im Anzeigemodus mit `paper_scale_n = 100`, damit ist
+ * `sizeMm = pt · PT_TO_MM` exakt die Browser-Darstellung. Für Aufrufer MIT
+ * Massstabskontext (z. B. PDF-Export) übersteuert `planToRenderScene`s
+ * `paperScaleN`-Parameter diesen Default — siehe `mmToM` dort.
  */
-const STAMP_REF_N = 100;
-/** Papier-mm → Modell-Meter beim Referenzmaßstab. */
-const MM_TO_M = STAMP_REF_N / 1000;
+const STAMP_DEFAULT_N = 100;
 
 /** Wenige benannte Farben, die in Klassen/Defaults vorkommen können. */
 const NAMED: Record<string, string> = {
@@ -299,8 +300,15 @@ function stitchRuns(runs: RPoint[][]): { pts: RPoint[]; closed: boolean }[] {
  * Wandelt einen Plan in eine native render2d-Szene um. Zusammenhängende Umriss-
  * und Zeichnungskanten werden zu OFFENEN Polylinien verkettet (gehrte Ecken);
  * nur genuin einzelne Segmente (Türblätter, Referenzlinien) bleiben `lines`.
+ *
+ * `paperScaleN` ist der Massstab-Nenner N (1:N), mit dem die vertikale
+ * Zeilenposition mehrzeiliger Stempel-Texte in Modell-Meter umgerechnet wird
+ * (Papier-mm sind massstabsunabhängig, ihre Weltgrösse aber nicht — analog zu
+ * PlanViews `nRef`, s. `PlanView.tsx` case "text"). Default 100 für Aufrufer
+ * ohne Massstabskontext (WASM-Viewport, `nativeSync.ts`).
  */
-export function planToRenderScene(plan: Plan): RScene {
+export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N): RScene {
+  const mmToM = paperScaleN / 1000; // Papier-mm → Modell-Meter beim gewählten Massstab.
   const fills: RFill[] = [];
   const outlines: ROutline[] = [];
   const polylines: RPolyline[] = [];
@@ -478,7 +486,7 @@ export function planToRenderScene(plan: Plan): RScene {
         flat.push({ content: line, sizeMm: baseMm * 0.8, color: defCol, align: "center" });
       }
       if (flat.length > 0) {
-        const baseH = baseMm * MM_TO_M; // Basisgröße in Modell-Metern
+        const baseH = baseMm * mmToM; // Basisgröße in Modell-Metern, beim gewählten Massstab
         const lineGap = baseH * 1.3;
         const totalH = baseH + (flat.length - 1) * lineGap;
         flat.forEach((line, k) => {
