@@ -472,8 +472,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Papier-Massstab-Nenner (1:N) für die GL-Strichbreiten — ECHTE mm im Massstab
   // (0.35 mm bei 1:100). Bevorzugt der stabile `paperScale` (wie beim SVG-Print);
   // solange der noch nicht gemessen ist, der live aus dem Ausschnitt abgeleitete N.
+  // Im Haarlinien-Modus (Display, wie `textScaleForGl` daneben) NICHT den
+  // stabilen `paperScale`: der bliebe beim Rad-Zoom konstant, während die GPU-
+  // Strichbreite (`mm_to_device_px` = N/1000·PX_PER_M·meet) über `meet` trotzdem
+  // mit dem Zoom wächst — genau der Haarlinien-Bug (Finding 1). Der LIVE aus dem
+  // Ausschnitt abgeleitete `scaleFromView` ist hingegen exakt der reziproke Wert
+  // von `meet` (siehe dessen Formel), sodass N·meet — und damit die GL-Strich-
+  // breite in Geräte-px — unabhängig vom Zoom konstant bleibt: dieselbe Wirkung
+  // wie `non-scaling-stroke` im SVG-Pfad, nur über den Massstab-Nenner erzielt.
   const paperScaleForGl = (v: ViewBox): number =>
-    paperScaleRef.current ?? scaleFromView(v, svgRef.current) ?? 100;
+    hairline
+      ? scaleFromView(v, svgRef.current) ?? 100
+      : paperScaleRef.current ?? scaleFromView(v, svgRef.current) ?? 100;
 
   // Referenz-Nenner (1:N) NUR für die Text-Schriftgröße der Engine — spiegelt
   // EXAKT die SVG-Formel (case "text" unten, gleiche `print`-Bedingung): im
