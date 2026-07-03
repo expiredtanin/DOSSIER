@@ -135,12 +135,6 @@ export interface TopBarProps {
   planColorMode: PlanColorMode;
   onPlanColorMode: (m: PlanColorMode) => void;
 
-  // Referenzlinien (Wandachsen).
-  referenceLines: boolean;
-  onReferenceLines: (on: boolean) => void;
-  /** Referenzlinien nur im Grundriss sinnvoll (sonst deaktiviert). */
-  referenceLinesEnabled: boolean;
-
   // Sichtbarkeits-Kombinationen (Ebenen-/Zeichnungskombinationen).
   /** Handler-Satz für die beiden Kombinations-Dropdowns. */
   combos: ComboMenuHandlers;
@@ -846,9 +840,6 @@ export function TopBar({
   renderModeEnabled,
   planColorMode,
   onPlanColorMode,
-  referenceLines,
-  onReferenceLines,
-  referenceLinesEnabled,
   combos,
   resourcesOpen,
   onToggleResources,
@@ -921,52 +912,65 @@ export function TopBar({
           „Grundriss" schaltet auf den 2D-Plan, die übrigen auf die jeweilige
           3D-Ansicht (Perspektive wird dabei automatisch aktiviert). 4 oben /
           3 unten. Tooltip nennt jede Ansicht im Klartext. */}
-      {viewToggleEnabled && (
-        <>
-          <div className="tb-group" role="group" aria-label={t("topbar.viewGroup")}>
-            <div className="view-grid view-grid-4">
-              <button
-                className={`view-icon${viewType === "grundriss" ? " active" : ""}`}
-                onClick={() => onViewType("grundriss")}
-                title={t("topbar.grundriss")}
-                aria-label={t("topbar.grundriss")}
-              >
-                <ViewIcon name="grundriss" />
-              </button>
-              {(
-                [
-                  ["top", t("view3d.top")],
-                  ["iso", t("view3d.iso")],
-                  ["perspective", t("view3d.perspective")],
-                  ["front", t("view3d.front")],
-                  ["side", t("view3d.side")],
-                ] as [View3d, string][]
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  className={`view-icon${
-                    viewType === "perspektive" && view3d === key ? " active" : ""
-                  }`}
-                  onClick={() => {
-                    onView3d(key);
-                    if (viewType !== "perspektive") onViewType("perspektive");
-                  }}
-                  title={`${label} — ${t(`view3d.${key}.hint`)}`}
-                  aria-label={label}
-                >
-                  <ViewIcon name={key} />
-                </button>
-              ))}
-              <CameraMenu
-                fov={fov}
-                onFov={onFov}
-                disabled={viewType !== "perspektive"}
-              />
-            </div>
-          </div>
-          <Sep />
-        </>
-      )}
+      {/* Ansichts-Icons bleiben immer sichtbar; auf Nicht-Geschoss-Ebenen
+          (Schnitt/Ansicht/2D-Zeichnung) sind sie deaktiviert, weil dort keine
+          2D/3D-Umschaltung greift — die Serie verschwindet nicht mehr ganz. */}
+      <div className="tb-group" role="group" aria-label={t("topbar.viewGroup")}>
+        <div className="view-grid view-grid-4">
+          <button
+            className={`view-icon${
+              viewToggleEnabled && viewType === "grundriss" ? " active" : ""
+            }`}
+            onClick={() => onViewType("grundriss")}
+            disabled={!viewToggleEnabled}
+            title={
+              viewToggleEnabled
+                ? t("topbar.grundriss")
+                : t("topbar.viewGroup.disabled")
+            }
+            aria-label={t("topbar.grundriss")}
+          >
+            <ViewIcon name="grundriss" />
+          </button>
+          {(
+            [
+              ["top", t("view3d.top")],
+              ["iso", t("view3d.iso")],
+              ["perspective", t("view3d.perspective")],
+              ["front", t("view3d.front")],
+              ["side", t("view3d.side")],
+            ] as [View3d, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              className={`view-icon${
+                viewToggleEnabled && viewType === "perspektive" && view3d === key
+                  ? " active"
+                  : ""
+              }`}
+              onClick={() => {
+                onView3d(key);
+                if (viewType !== "perspektive") onViewType("perspektive");
+              }}
+              disabled={!viewToggleEnabled}
+              title={
+                viewToggleEnabled
+                  ? `${label} — ${t(`view3d.${key}.hint`)}`
+                  : t("topbar.viewGroup.disabled")
+              }
+              aria-label={label}
+            >
+              <ViewIcon name={key} />
+            </button>
+          ))}
+          <CameraMenu
+            fov={fov}
+            onFov={onFov}
+            disabled={!viewToggleEnabled || viewType !== "perspektive"}
+          />
+        </div>
+      </div>
+      <Sep />
 
       {/* Sichtbarkeits-Kombinationen (Vectorworks: Ebenen-/Zeichnungs-
           kombinationen). Sitzt direkt nach dem Ansichts-Umschalter, weil beides
@@ -1168,27 +1172,6 @@ export function TopBar({
             />
           )}
         </label>
-      </div>
-
-      <Sep />
-
-      {/* Referenzlinien (Wandachsen) — zeigt/versteckt die gestrichelten
-          Achslinien im Grundriss. Nur im Grundriss sinnvoll → sonst deaktiviert. */}
-      <div className="tb-group" role="group" aria-label={t("topbar.referenceLinesGroup")}>
-        <button
-          className={`view-icon${referenceLines ? " active" : ""}`}
-          onClick={() => onReferenceLines(!referenceLines)}
-          disabled={!referenceLinesEnabled}
-          aria-pressed={referenceLines}
-          aria-label={t("topbar.referenceLines")}
-          title={
-            referenceLinesEnabled
-              ? `${t("topbar.referenceLines")} — ${t("topbar.referenceLines.hint")}`
-              : t("topbar.referenceLines.hintDisabled")
-          }
-        >
-          <TbIcon name="straighten" />
-        </button>
       </div>
 
       <Sep />

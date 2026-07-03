@@ -9,6 +9,7 @@ export const en: Record<TranslationKey, string> = {
   "brand.tag": "Document model",
 
   "topbar.viewGroup": "View",
+  "topbar.viewGroup.disabled": "Views available for floors only",
   "topbar.grundriss": "Plan",
   "topbar.perspektive": "Perspective",
 
@@ -182,6 +183,9 @@ export const en: Record<TranslationKey, string> = {
   "status.unit": "Unit",
   "status.scale": "Scale",
   "status.zoom": "Zoom",
+  "status.referenceLines": "Axes",
+  "status.referenceLines.hint": "Show/hide reference lines (wall axes)",
+  "status.referenceLines.hintDisabled": "Reference lines apply in the plan",
   "status.floor": "Floor",
   "status.layer": "Layer",
   "status.none": "—",

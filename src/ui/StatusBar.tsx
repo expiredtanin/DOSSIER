@@ -23,13 +23,12 @@ export interface StatusBarProps {
   cursor: Vec2 | null;
   /** Einheit aus dem Projekt (vorerst fix „m"). */
   unit: string;
-  /**
-   * LIVE Papier-Massstab-Nenner (1:N) aus der View-Transform oder `null`
-   * (keine Plan-Ansicht aktiv → „—").
-   */
-  scaleDenominator: number | null;
-  /** Live-Zoom in Prozent oder `null` (keine zoombare Ansicht aktiv). */
-  zoomPercent: number | null;
+  /** Referenzlinien (Wandachsen) an/aus — sitzt jetzt in der Statusleiste. */
+  referenceLines: boolean;
+  /** Referenzlinien umschalten. */
+  onReferenceLines: (on: boolean) => void;
+  /** Nur im Grundriss sinnvoll — deaktiviert den Schalter wenn `false`. */
+  referenceLinesEnabled: boolean;
   /** Name des aktiven Geschosses / der aktiven Zeichnungsebene. */
   activeFloor: string;
   /** Name der aktiven Ebene (Kategorie) oder „—". */
@@ -260,8 +259,9 @@ export function StatusBar({
   hint,
   cursor,
   unit,
-  scaleDenominator,
-  zoomPercent,
+  referenceLines,
+  onReferenceLines,
+  referenceLinesEnabled,
   activeFloor,
   activeLayer,
   rendererMode,
@@ -293,6 +293,22 @@ export function StatusBar({
         <Sep />
         <SnapControl snap={snap} onSnapChange={onSnapChange} />
         <Sep />
+        {/* Referenzlinien-Schalter (aus der TopBar hierher gewandert). */}
+        <button
+          type="button"
+          className={`sb-toggle${referenceLines ? " active" : ""}`}
+          aria-pressed={referenceLines}
+          disabled={!referenceLinesEnabled}
+          onClick={() => onReferenceLines(!referenceLines)}
+          title={
+            referenceLinesEnabled
+              ? t("status.referenceLines.hint")
+              : t("status.referenceLines.hintDisabled")
+          }
+        >
+          {t("status.referenceLines")}
+        </button>
+        <Sep />
         <span className="sb-field">
           <span className="sb-key">{t("status.renderer")}</span>
           <span className="sb-renderer-toggle" role="group" aria-label={t("status.renderer")}>
@@ -320,16 +336,6 @@ export function StatusBar({
         <Field label={t("status.xy")} value={coords} />
         <Sep />
         <Field label={t("status.unit")} value={unit} />
-        <Sep />
-        <Field
-          label={t("status.scale")}
-          value={scaleDenominator == null ? "—" : `1:${Math.round(scaleDenominator)}`}
-        />
-        <Sep />
-        <Field
-          label={t("status.zoom")}
-          value={zoomPercent == null ? "—" : `${Math.round(zoomPercent)}%`}
-        />
         <Sep />
         <Field label={t("status.floor")} value={activeFloor} />
         <Sep />

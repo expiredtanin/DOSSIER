@@ -803,6 +803,37 @@ body {
   cursor: default;
 }
 
+/* Einzelner Umschalt-Button in der Statusleiste (z. B. Referenzlinien). */
+.sb-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.sb-toggle:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.sb-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.sb-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Generische Segment-Pille für die Statusleiste (Linien-Darstellung, Fang) —
    gleiche Masse/Optik wie .sb-renderer-toggle, aber nicht renderer-spezifisch. */
 .sb-seg {

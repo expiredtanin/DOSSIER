@@ -2747,9 +2747,6 @@ export default function App() {
         renderModeEnabled={viewType === "perspektive"}
         planColorMode={planColorMode}
         onPlanColorMode={setPlanColorMode}
-        referenceLines={referenceLines}
-        onReferenceLines={setReferenceLines}
-        referenceLinesEnabled={planActive}
         combos={{
           // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums →
           // localStorage; Laden = Map lesen → Sichtbarkeits-Flags anwenden.
@@ -2985,8 +2982,9 @@ export default function App() {
         hint={toolHint}
         cursor={planActive ? cursor : null}
         unit="m"
-        scaleDenominator={planActive ? liveScale : null}
-        zoomPercent={planActive ? zoomPercent : null}
+        referenceLines={referenceLines}
+        onReferenceLines={setReferenceLines}
+        referenceLinesEnabled={planActive}
         activeFloor={activeLevel.name}
         activeLayer={activeLayerName}
         rendererMode={rendererMode}

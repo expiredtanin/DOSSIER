@@ -10,6 +10,7 @@ export const de = {
   "brand.tag": "Dokumentmodell",
 
   "topbar.viewGroup": "Ansicht",
+  "topbar.viewGroup.disabled": "Ansichten nur für Geschosse",
   "topbar.grundriss": "Grundriss",
   "topbar.perspektive": "Perspektive",
 
@@ -183,6 +184,9 @@ export const de = {
   "status.unit": "Einheit",
   "status.scale": "Massstab",
   "status.zoom": "Zoom",
+  "status.referenceLines": "Achsen",
+  "status.referenceLines.hint": "Referenzlinien (Wandachsen) ein-/ausblenden",
+  "status.referenceLines.hintDisabled": "Referenzlinien wirken im Grundriss",
   "status.floor": "Geschoss",
   "status.layer": "Ebene",
   "status.none": "—",
