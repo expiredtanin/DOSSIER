@@ -800,6 +800,7 @@ export const en: Record<TranslationKey, string> = {
   "ctxImport.radius": "Radius",
   "ctxImport.sources": "Sources",
   "ctxImport.src.swissBuildings": "Swisstopo buildings",
+  "ctxImport.src.swissTerrain": "Swisstopo terrain",
   "ctxImport.src.osmBuildings": "OSM buildings",
   "ctxImport.src.osmRoads": "OSM roads",
   "ctxImport.src.osmWater": "OSM water",

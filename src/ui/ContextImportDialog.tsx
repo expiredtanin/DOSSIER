@@ -11,12 +11,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
-import { geocode, fetchBuildings } from "../io/swissTopo";
+import { geocode, fetchBuildings, fetchTerrain } from "../io/swissTopo";
 import type { GeocodeCandidate } from "../io/swissTopo";
 import { fetchOsm } from "../io/osm";
 import type { OsmSelection } from "../io/osm";
 import { featuresToContextObjects } from "../io/geoContext";
 import type { GeoFeature } from "../io/geoContext";
+import { terrainMeshFromGrid } from "../model/terrain";
 import type { GeoOrigin } from "../io/lv95";
 import type { ContextObject } from "../model/types";
 
@@ -28,6 +29,7 @@ export interface ContextImportDialogProps {
 
 type Sources = {
   swissBuildings: boolean;
+  swissTerrain: boolean;
   osmBuildings: boolean;
   osmRoads: boolean;
   osmWater: boolean;
@@ -36,6 +38,7 @@ type Sources = {
 
 const DEFAULT_SOURCES: Sources = {
   swissBuildings: true,
+  swissTerrain: true,
   osmBuildings: false,
   osmRoads: true,
   osmWater: true,
@@ -91,6 +94,7 @@ export function ContextImportDialog({
 
   const anySource =
     sources.swissBuildings ||
+    sources.swissTerrain ||
     sources.osmBuildings ||
     sources.osmRoads ||
     sources.osmWater ||
@@ -129,13 +133,25 @@ export function ContextImportDialog({
         all.push(...r.features);
       }
 
-      if (all.length === 0) {
+      // Gelände-Höhenraster (swissALTI3D via geo.admin-Profil) → Terrain-Mesh.
+      let terrain: ContextObject | null = null;
+      if (sources.swissTerrain) {
+        const r = await fetchTerrain(center, radius, origin);
+        origin = r.origin;
+        if (r.grid) {
+          const mesh = terrainMeshFromGrid(r.grid);
+          if (mesh.positions.length >= 9) terrain = mesh;
+        }
+      }
+
+      if (all.length === 0 && !terrain) {
         setError(t("ctxImport.empty"));
         setStatus(null);
         return;
       }
 
       const objs = featuresToContextObjects(all, selected.label);
+      if (terrain) objs.push(terrain);
       onImport(objs);
       setStatus(
         t("ctxImport.imported", { count: all.length, sets: objs.length }),
@@ -248,6 +264,14 @@ export function ContextImportDialog({
                   onChange={() => toggle("swissBuildings")}
                 />
                 {t("ctxImport.src.swissBuildings")}
+              </label>
+              <label className="cim-check">
+                <input
+                  type="checkbox"
+                  checked={sources.swissTerrain}
+                  onChange={() => toggle("swissTerrain")}
+                />
+                {t("ctxImport.src.swissTerrain")}
               </label>
               <label className="cim-check">
                 <input

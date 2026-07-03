@@ -809,6 +809,7 @@ export const de = {
   "ctxImport.radius": "Radius",
   "ctxImport.sources": "Quellen",
   "ctxImport.src.swissBuildings": "Swisstopo-Gebäude",
+  "ctxImport.src.swissTerrain": "Swisstopo-Gelände",
   "ctxImport.src.osmBuildings": "OSM-Gebäude",
   "ctxImport.src.osmRoads": "OSM-Strassen",
   "ctxImport.src.osmWater": "OSM-Wasser",

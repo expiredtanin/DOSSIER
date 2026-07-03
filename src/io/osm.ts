@@ -86,6 +86,28 @@ function isClosedCategory(cat: GeoCategory): boolean {
 }
 
 /**
+ * Gebäudehöhe (m) aus OSM-Tags: bevorzugt `height` (numerisch, evtl. mit
+ * Einheit), sonst `building:levels` × 3 m Geschosshöhe. Ohne Angabe `undefined`
+ * (die Extrusion nutzt dann die Default-Höhe).
+ */
+function osmBuildingHeight(
+  tags: Record<string, string> | undefined,
+): number | undefined {
+  if (!tags) return undefined;
+  const raw = tags.height ?? tags["building:height"];
+  if (raw) {
+    const m = parseFloat(raw.replace(",", "."));
+    if (Number.isFinite(m) && m > 0) return m;
+  }
+  const lvl = tags["building:levels"] ?? tags["building:levels:aboveground"];
+  if (lvl) {
+    const l = parseFloat(lvl.replace(",", "."));
+    if (Number.isFinite(l) && l > 0) return l * 3;
+  }
+  return undefined;
+}
+
+/**
  * OSM-Features für Zentrum + Radius (Meter) laden. `originIn` erlaubt es, exakt
  * dieselbe Origin wie ein vorheriger swisstopo-Import zu verwenden.
  */
@@ -115,23 +137,25 @@ export async function fetchOsm(
   const push = (
     geometry: { lat: number; lon: number }[] | undefined,
     cat: GeoCategory,
+    height?: number,
   ) => {
     if (!geometry || geometry.length < 2) return;
     const pts = geometry.map((g) => wgs84ToLocal(g.lat, g.lon, origin));
     const closed = isClosedCategory(cat);
     if (closed && pts.length < 3) return;
-    features.push({ category: cat, pts, closed });
+    features.push({ category: cat, pts, closed, height });
   };
 
   for (const el of data.elements ?? []) {
     const cat = categorize(el.tags, sel);
     if (!cat) continue;
+    const h = cat === "building" ? osmBuildingHeight(el.tags) : undefined;
     if (el.type === "way") {
-      push(el.geometry, cat);
+      push(el.geometry, cat, h);
     } else if (el.type === "relation") {
       // Multipolygon: outer-Ringe als einzelne geschlossene Linien übernehmen.
       for (const m of el.members ?? []) {
-        if (m.role === "outer" || m.role === "") push(m.geometry, cat);
+        if (m.role === "outer" || m.role === "") push(m.geometry, cat, h);
       }
     }
   }
