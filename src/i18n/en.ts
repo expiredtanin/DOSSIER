@@ -430,6 +430,16 @@ export const en: Record<TranslationKey, string> = {
   "resources.tab.components": "Components",
   "resources.tab.hatches": "Hatches",
   "resources.tab.lines": "Lines",
+  "resources.tab.materials": "Materials",
+
+  "resources.materials.hint":
+    "Sphere preview of the built-in PBR material library — browse and compare. Assign to a component still via its “Material …” column.",
+  "resources.materials.searchPlaceholder": "Search materials …",
+  "resources.materials.categoryLabel": "Category",
+  "resources.materials.categoryAll": "All",
+  "resources.materials.selected": "Selected: {name} ({category})",
+  "resources.materials.empty": "No materials found.",
+  "resources.materials.count": "{shown} of {total} materials",
   "resources.add": "New",
   "resources.import.lin": "⤓ Import .lin",
   "resources.import.pat": "⤓ Import .pat",

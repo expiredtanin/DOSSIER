@@ -433,6 +433,16 @@ export const de = {
   "resources.tab.components": "Bauteile",
   "resources.tab.hatches": "Schraffuren",
   "resources.tab.lines": "Linien",
+  "resources.tab.materials": "Materialien",
+
+  "resources.materials.hint":
+    "Kugel-Vorschau der eingebauten PBR-Materialbibliothek — durchsuchen und vergleichen. Zuweisen an ein Bauteil weiterhin über dessen Spalte „Material …\".",
+  "resources.materials.searchPlaceholder": "Material suchen …",
+  "resources.materials.categoryLabel": "Kategorie",
+  "resources.materials.categoryAll": "Alle",
+  "resources.materials.selected": "Ausgewählt: {name} ({category})",
+  "resources.materials.empty": "Keine Materialien gefunden.",
+  "resources.materials.count": "{shown} von {total} Materialien",
   "resources.add": "Neu",
   "resources.import.lin": "⤓ .lin importieren",
   "resources.import.pat": "⤓ .pat importieren",
