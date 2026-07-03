@@ -53,6 +53,47 @@
 //!   Punkt. Kanten werden dafuer in Sichtbarkeits-Teilstuecke zerlegt (echtes
 //!   1D-Intervall-Clipping in ihrem Parameterbereich, kein Nur-Mittelpunkt-Test).
 //!
+//! ## Oeffnungen (Tueren/Fenster)
+//!
+//! `WallInput::openings` (siehe `types.rs`) gibt je Wand ein Intervall entlang
+//! der Wandachse (`from`/`to`, Meter ab `start`) plus eine vertikale Bruestungs-/
+//! Kopfhoehe (`sill`/`height`, relativ zu `base_elevation`) an. Dieses Modul
+//! nutzt das fuer zwei getrennte Faelle:
+//!
+//! - **Cut-Polygone:** trifft die Schnittlinie eine Wand exakt im Bereich einer
+//!   Oeffnung, wird die volle Rechteck-Hoehe `[z0,z1]` in bis zu ZWEI Rechtecke
+//!   gesplittet (Bruestung `[z0, z0+sill]`, Sturz `[z0+sill+height, z1]`) statt
+//!   eines einzelnen Vollrechtecks — bevorzugt gegenueber einem Loch-Polygon
+//!   (Ring mit Aussparung): mehrere einfache, konvexe Rechtecke sind fuer die
+//!   spaetere Schraffur/Fuellung (Ziel: `render2d::types::FillPolygon`, das
+//!   NUR einfache Ringe kennt) direkt verwendbar, waehrend ein Loch-Polygon
+//!   ein Ring-mit-Loch-Format braeuchte, das die Zielstruktur (noch) nicht hat.
+//!   Liegt die Oeffnung ausserhalb der aktuellen Schnittposition, entsteht wie
+//!   zuvor ein einzelnes Vollrechteck (Regressionsfall, siehe Tests).
+//! - **Projektion/Ansicht:** eine Wand mit Oeffnungen bekommt zusaetzlich zur
+//!   Boxen-Drahtsilhouette die vier Rahmenkanten jeder Oeffnung (zwei Leibungen,
+//!   Sturz, Bruestung) als eigene projizierte Kanten. Fuer die Verdeckung wird
+//!   jede Wand-Bounding-Box um ihre Oeffnungen als "Loch" reduziert (siehe
+//!   `PrismBounds::opening_voids`): ein anderes (oder das gleiche) Bauteil
+//!   hinter der Wand wird in exakt dem (u, Hoehe)-Rechteck der Oeffnung NICHT
+//!   von dieser Wand verdeckt — "Durchblick".
+//!
+//!   GENAUIGKEIT (bewusste Vereinfachung, siehe auch unten "Bekannte
+//!   Vereinfachungen"): die Zuordnung "welche Wandachsen-Position entspricht
+//!   dieser u-Projektionsposition" ist nur DANN exakt/aussagekraeftig, wenn die
+//!   Wandachse hinreichend parallel zur u-Achse der Schnittebene steht — das ist
+//!   GENAU der Fall, in dem man die Wand als Ansicht/Elevation von vorne sieht
+//!   (und ein Fenster darin ueberhaupt als Durchblick sichtbar waere). Steht die
+//!   Wand naeher an "senkrecht zur u-Achse" (Wand auf Kante gesehen bzw. der
+//!   Cut-Fall), wird die Durchblick-Berechnung uebersprungen und die Wand bleibt
+//!   fuer die Verdeckung VOLL UNDURCHSICHTIG (konservativ hidden) — ein
+//!   Kante-auf-Kante gesehenes Fenster liefert ohnehin keine sinnvolle
+//!   Durchblick-Flaeche in der Projektion. Schwelle: siehe `AXIS_ALIGN_EPS`.
+//!
+//!   Die eigenen Rahmenkanten einer Oeffnung werden NICHT gegen das eigene
+//!   Bauteil auf Verdeckung geprueft (ein Loch kann sich nicht selbst verdecken);
+//!   gegen ALLE ANDEREN Bauteile gilt die normale Verdeckungslogik.
+//!
 //! ## Bekannte Vereinfachungen (siehe auch docs/design/engine-section-pipeline.md)
 //!
 //! - Verdeckung nutzt die ACHSPARALLELE (u, Tiefe)-Bounding-Box jedes Prismas,
@@ -66,15 +107,23 @@
 //!   fuehren, dass eine Wand als "in eine andere eingebettet" verdeckt erscheint
 //!   (siehe Test `eck_ueberlappung_verdeckt_kante_am_wandknoten` unten) — real,
 //!   aber ein Artefakt der fehlenden Verschneidungslogik, kein Bug dieses Moduls.
-//! - Oeffnungen (Tueren/Fenster) sind in `WallInput` noch nicht modelliert und
-//!   werden daher hier auch nicht ausgespart.
+//! - Oeffnungen werden hier (Cut + Projektion) ausgewertet, aber NICHT von der
+//!   Vollkoerper-Extrusion in `mesh.rs` — die 3D-Solid-Mesh-Erzeugung extrudiert
+//!   weiterhin die volle Wandflaeche (siehe `mesh.rs`-Moduldoc). Cut-Ansicht und
+//!   3D-Solid-Ansicht sind bis zu diesem Nachtrag also bewusst inkonsistent;
+//!   das Nachziehen von `mesh.rs` ist eine bekannte, separate Luecke.
+//! - Oeffnungs-Durchblick nutzt dieselbe achsparallele Bounding-Box-Naeherung
+//!   wie die allgemeine Verdeckung (kein exaktes Polygon-Clipping der Lochflaeche
+//!   gegen dahinterliegende Kanten) und wird bei Wand-Orientierungen nahe
+//!   "senkrecht zur u-Achse" konservativ auf "kein Durchblick" zurueckgestuft
+//!   (siehe Abschnitt "Oeffnungen" oben).
 //! - Vertices exakt AUF der Schnittlinie werden nicht robust (kein Tie-Breaking/
 //!   Pertubation); die Testszenarien vermeiden diesen Sonderfall bewusst.
 
 use serde::{Deserialize, Serialize};
 
 use crate::math;
-use crate::types::{Point2, Rgb, SlabInput, WallInput};
+use crate::types::{Opening, Point2, Rgb, SlabInput, WallInput};
 
 /// Toleranz fuer "naeher an der Ebene" / Grenzwert-Vergleiche (Meter, Tiefe/Hoehe).
 const EPS: f32 = 1e-4;
@@ -244,6 +293,45 @@ struct Prism {
     z0: f32,
     z1: f32,
     color: Rgb,
+    /// Nur fuer Waende: Achse + Oeffnungen (siehe `WallAxis`). `None` fuer
+    /// Decken (Slabs kennen keine Oeffnungen).
+    wall_axis: Option<WallAxis>,
+}
+
+/// Wandachse + Oeffnungen, wie sie fuer die Oeffnungs-Zuordnung bei Cut-
+/// Polygonen/Projektion gebraucht werden (siehe Moduldoc "Oeffnungen").
+struct WallAxis {
+    /// Achsen-Startpunkt (== `WallInput::start`).
+    start: Point2,
+    /// Normalisierte Achsenrichtung (Start -> Ende).
+    dir: Point2,
+    /// Achsenlaenge (Meter).
+    length: f32,
+    /// Oeffnungen entlang der Achse (unveraendert aus `WallInput::openings`).
+    openings: Vec<Opening>,
+}
+
+/// Schwelle fuer `|dot(u_axis, wall_dir)|`, ab der eine Wandachse als
+/// "hinreichend parallel zur u-Achse" gilt (siehe Moduldoc "Oeffnungen" ->
+/// Genauigkeit). Darunter wird die Oeffnungs-Durchblick-Berechnung fuer diese
+/// Wand konservativ uebersprungen (Wand bleibt fuer die Verdeckung blickdicht).
+const AXIS_ALIGN_EPS: f32 = 1e-3;
+
+/// Affine Abbildung `u -> Wandachsen-Position` fuer eine Wand in einer
+/// gegebenen Schnittebene: `along_wall(u) = c + d*u`. Herleitung: ein Punkt bei
+/// Projektions-Parameter `u` auf der Schnittlinie liegt bei
+/// `plane.plan_point() + u * plane.plan_u_axis()` (siehe `project`/`u_of` in
+/// `footprint_u_intervals`); seine Position entlang der Wandachse ist das
+/// Skalarprodukt aus (Punkt - Wandstart) und der (normalisierten) Wandrichtung.
+/// Ausmultipliziert ergibt das die affine Form unten. `d == 0` heisst: die
+/// Wandachse steht senkrecht auf der u-Achse (Wand auf Kante gesehen / reiner
+/// Cut-Fall) — dort ist `along_wall` konstant ueber das ganze u-Intervall.
+fn axis_map(plane: &SectionPlane, axis: &WallAxis) -> (f32, f32) {
+    let p0 = plane.plan_point();
+    let ua = plane.plan_u_axis();
+    let c = (p0[0] - axis.start[0]) * axis.dir[0] + (p0[1] - axis.start[1]) * axis.dir[1];
+    let d = ua[0] * axis.dir[0] + ua[1] * axis.dir[1];
+    (c, d)
 }
 
 /// 2D-Links-Normale (90 Grad CCW) — 1:1 gespiegelt aus `mesh::left_normal`
@@ -274,6 +362,12 @@ fn wall_prism(index: usize, wall: &WallInput) -> Option<Prism> {
         off(wall.end, -1.0),
         off(wall.start, -1.0),
     ];
+    // Achsenrichtung aus der bereits berechneten Links-Normale ableiten (90 Grad
+    // zurueckgedreht): n = (-dir.y, dir.x)  =>  dir = (n.y, -n.x).
+    let dir = [n[1], -n[0]];
+    let dx = wall.end[0] - wall.start[0];
+    let dy = wall.end[1] - wall.start[1];
+    let length = (dx * dx + dy * dy).sqrt();
     Some(Prism {
         kind: ComponentKind::Wall,
         index,
@@ -281,6 +375,12 @@ fn wall_prism(index: usize, wall: &WallInput) -> Option<Prism> {
         z0: wall.base_elevation,
         z1: wall.base_elevation + wall.height,
         color: wall.color,
+        wall_axis: Some(WallAxis {
+            start: wall.start,
+            dir,
+            length,
+            openings: wall.openings.clone(),
+        }),
     })
 }
 
@@ -300,6 +400,7 @@ fn slab_prism(index: usize, slab: &SlabInput) -> Option<Prism> {
         z0,
         z1,
         color: slab.color,
+        wall_axis: None,
     })
 }
 
@@ -356,18 +457,100 @@ fn footprint_u_intervals(plane: &SectionPlane, footprint: &[Point2]) -> Vec<(f32
     out
 }
 
+/// Zerlegt EIN Cut-u-Intervall `[u_lo, u_hi]` (volle Rechteck-Hoehe `[prism.z0,
+/// prism.z1]`) an den Oeffnungen der Wand in mehrere Rechtecke `(u0, u1, v0,
+/// v1)`. Ohne Oeffnungen (oder fuer Decken, `wall_axis == None`) liefert das
+/// exakt das eine Vollrechteck von vorher (Regressionsfall). Siehe Moduldoc
+/// "Oeffnungen" fuer die Herleitung von `axis_map`.
+fn wall_cut_rectangles(
+    plane: &SectionPlane,
+    prism: &Prism,
+    u_lo: f32,
+    u_hi: f32,
+) -> Vec<(f32, f32, f32, f32)> {
+    let Some(axis) = &prism.wall_axis else {
+        return vec![(u_lo, u_hi, prism.z0, prism.z1)];
+    };
+    if axis.openings.is_empty() {
+        return vec![(u_lo, u_hi, prism.z0, prism.z1)];
+    }
+    let (c, d) = axis_map(plane, axis);
+
+    // Oeffnungs-u-Teilintervalle sammeln (auf [u_lo,u_hi] geclippt), sortiert.
+    let mut voids: Vec<(f32, f32, &Opening)> = Vec::new();
+    for op in &axis.openings {
+        let from = op.from.max(0.0);
+        let to = op.to.min(axis.length);
+        if to <= from {
+            continue;
+        }
+        let (open_lo, open_hi) = if d.abs() < 1e-6 {
+            // Wandachse (nahezu) senkrecht zur u-Achse: die Wandachsen-Position
+            // ist ueber das gesamte Cut-Intervall praktisch konstant (reiner
+            // Quer-Schnitt, wie in der Moduldoc beschrieben) -> ganz drin oder
+            // ganz draussen.
+            if c >= from - EPS && c <= to + EPS {
+                (u_lo, u_hi)
+            } else {
+                continue;
+            }
+        } else {
+            let t0 = (from - c) / d;
+            let t1 = (to - c) / d;
+            (t0.min(t1), t0.max(t1))
+        };
+        let lo = open_lo.max(u_lo);
+        let hi = open_hi.min(u_hi);
+        if hi - lo > MIN_SPAN {
+            voids.push((lo, hi, op));
+        }
+    }
+    if voids.is_empty() {
+        return vec![(u_lo, u_hi, prism.z0, prism.z1)];
+    }
+    voids.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    let mut rects = Vec::new();
+    let mut cursor = u_lo;
+    for (v_lo, v_hi, op) in &voids {
+        if *v_lo > cursor + MIN_SPAN {
+            rects.push((cursor, *v_lo, prism.z0, prism.z1));
+        }
+        let sill_abs = prism.z0 + op.sill.max(0.0);
+        let head_abs = (sill_abs + op.height).min(prism.z1);
+        if sill_abs - prism.z0 > MIN_SPAN {
+            rects.push((*v_lo, *v_hi, prism.z0, sill_abs)); // Bruestung
+        }
+        if prism.z1 - head_abs > MIN_SPAN {
+            rects.push((*v_lo, *v_hi, head_abs, prism.z1)); // Sturz
+        }
+        cursor = cursor.max(*v_hi);
+    }
+    if u_hi > cursor + MIN_SPAN {
+        rects.push((cursor, u_hi, prism.z0, prism.z1));
+    }
+    rects
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Projektions-Kanten + Verdeckung
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Achsparallele Bounding-Box eines Prismas in (u, Tiefe, Hoehe) — genutzt als
-/// Verdeckungs-Naeherung (siehe Moduldoc "Bekannte Vereinfachungen").
+/// Verdeckungs-Naeherung (siehe Moduldoc "Bekannte Vereinfachungen"). `kind`/
+/// `index` erlauben es, das Bauteil bei der Verdeckungspruefung gezielt
+/// auszuschliessen (fuer die eigenen Oeffnungs-Rahmenkanten, siehe Moduldoc
+/// "Oeffnungen"). `opening_voids` sind (u0,u1,v0,v1)-Rechtecke, in denen diese
+/// Bounding-Box NICHT verdeckt (Oeffnungs-"Loch", siehe `axis_map`/Moduldoc).
 struct PrismBounds {
+    kind: ComponentKind,
+    index: usize,
     u_min: f32,
     u_max: f32,
     depth_min: f32,
     z0: f32,
     z1: f32,
+    opening_voids: Vec<(f32, f32, f32, f32)>,
 }
 
 fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
@@ -382,12 +565,42 @@ fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
         u_max = u_max.max(u);
         depth_min = depth_min.min(d);
     }
+
+    let mut opening_voids = Vec::new();
+    if let Some(axis) = &prism.wall_axis {
+        if !axis.openings.is_empty() {
+            let (c, d) = axis_map(plane, axis);
+            // Nur bei hinreichend u-paralleler Wandachse: siehe Moduldoc
+            // "Oeffnungen" -> Genauigkeit. Sonst bleibt die Wand blickdicht.
+            if d.abs() >= AXIS_ALIGN_EPS {
+                for op in &axis.openings {
+                    let from = op.from.max(0.0);
+                    let to = op.to.min(axis.length);
+                    if to <= from {
+                        continue;
+                    }
+                    let ua = (from - c) / d;
+                    let ub = (to - c) / d;
+                    let (open_u0, open_u1) = (ua.min(ub), ua.max(ub));
+                    let sill_abs = prism.z0 + op.sill.max(0.0);
+                    let head_abs = (sill_abs + op.height).min(prism.z1);
+                    if head_abs > sill_abs + MIN_SPAN {
+                        opening_voids.push((open_u0, open_u1, sill_abs, head_abs));
+                    }
+                }
+            }
+        }
+    }
+
     PrismBounds {
+        kind: prism.kind,
+        index: prism.index,
         u_min,
         u_max,
         depth_min,
         z0: prism.z0,
         z1: prism.z1,
+        opening_voids,
     }
 }
 
@@ -493,6 +706,28 @@ fn merge_intervals(mut ivs: Vec<(f32, f32)>) -> Vec<(f32, f32)> {
     out
 }
 
+/// Entfernt `cut` aus jedem Intervall in `pieces` (kann ein Intervall in ZWEI
+/// Stuecke spalten, wenn `cut` es mittig trifft). Genutzt, um ein Oeffnungs-
+/// "Loch" (`PrismBounds::opening_voids`) aus einem sonst blockierten
+/// t-Teilstueck herauszuschneiden (siehe Moduldoc "Oeffnungen").
+fn subtract_range(pieces: Vec<(f32, f32)>, cut: (f32, f32)) -> Vec<(f32, f32)> {
+    let (cs, ce) = cut;
+    let mut out = Vec::with_capacity(pieces.len());
+    for (s, e) in pieces {
+        if ce <= s + MIN_SPAN || cs >= e - MIN_SPAN {
+            out.push((s, e)); // keine nennenswerte Ueberlappung
+            continue;
+        }
+        if cs > s + MIN_SPAN {
+            out.push((s, cs));
+        }
+        if ce < e - MIN_SPAN {
+            out.push((ce, e));
+        }
+    }
+    out
+}
+
 /// Komplement der (sortierten, disjunkten) Intervalle `blocked` in [0, 1].
 fn subtract_from_unit(blocked: &[(f32, f32)]) -> Vec<(f32, f32)> {
     let mut visible = Vec::new();
@@ -511,7 +746,11 @@ fn subtract_from_unit(blocked: &[(f32, f32)]) -> Vec<(f32, f32)> {
 
 /// Fuer eine projizierte Kante (u0,v0)->(u1,v1) bei Tiefen (d0,d1): die
 /// Teilbereiche (t in [0,1]), die durch `bounds` verdeckt werden (Vereinigung
-/// ueber alle Blocker).
+/// ueber alle Blocker). `exclude` (falls gesetzt) nimmt EIN Bauteil von der
+/// Verdeckungspruefung aus — fuer die eigenen Oeffnungs-Rahmenkanten eines
+/// Bauteils, die sich nicht selbst verdecken koennen (siehe Moduldoc
+/// "Oeffnungen"). Jeder Blocker mit `opening_voids` (Fenster/Tueren) gibt an
+/// diesen Stellen NICHTS zur Verdeckung bei ("Durchblick").
 #[allow(clippy::too_many_arguments)]
 fn blocked_intervals(
     u0: f32,
@@ -522,15 +761,30 @@ fn blocked_intervals(
     d1: f32,
     bias: HeightBias,
     bounds: &[PrismBounds],
+    exclude: Option<ComponentRef>,
 ) -> Vec<(f32, f32)> {
     let mut ivs = Vec::new();
     for b in bounds {
+        if let Some(ex) = exclude {
+            if ex.kind == b.kind && ex.index == b.index {
+                continue;
+            }
+        }
         let ru = height_in_range(u0, u1, b.u_min, b.u_max, HeightBias::Vertical);
         let rv = height_in_range(v0, v1, b.z0, b.z1, bias);
         let rd = linear_greater_than(d0, d1, b.depth_min + EPS);
-        if let Some(r) = intersect_ranges(intersect_ranges(ru, rv), rd) {
-            ivs.push(r);
+        let Some(solid) = intersect_ranges(intersect_ranges(ru, rv), rd) else {
+            continue;
+        };
+        let mut pieces = vec![solid];
+        for &(vu0, vu1, vz0, vz1) in &b.opening_voids {
+            let vru = height_in_range(u0, u1, vu0, vu1, HeightBias::Vertical);
+            let vrv = height_in_range(v0, v1, vz0, vz1, HeightBias::Vertical);
+            if let Some(void_range) = intersect_ranges(vru, vrv) {
+                pieces = subtract_range(pieces, void_range);
+            }
         }
+        ivs.extend(pieces);
     }
     merge_intervals(ivs)
 }
@@ -561,6 +815,46 @@ fn prism_wireframe_edges(prism: &Prism) -> Vec<([f32; 3], [f32; 3], HeightBias)>
     edges
 }
 
+/// Baut die vier Rahmenkanten JEDER Oeffnung einer Wand (zwei Leibungen, Sturz,
+/// Bruestung) als Weltpunkt-Paare — analog zu `prism_wireframe_edges`, aber
+/// fuer die Loch-Geometrie statt die Aussenhuelle. Die horizontale Position
+/// nutzt die Wandachsen-Mittellinie (siehe Moduldoc "Oeffnungen": dieselbe
+/// Vereinfachung wie die Bounding-Box-Verdeckung — keine eigene Dicken-
+/// Aufloesung der Leibungsflaeche). `HeightBias::Vertical` fuer alle vier
+/// Kanten: weder Leibungen (echte Hoehenvariation) noch Sturz/Bruestung
+/// (konstante Hoehe, aber keine Prisma-Deckel-/Bodenkante) brauchen die
+/// asymmetrische Cap-Randbehandlung (siehe `HeightBias`-Doku).
+fn opening_wire_edges(prism: &Prism) -> Vec<([f32; 3], [f32; 3], HeightBias)> {
+    let Some(axis) = &prism.wall_axis else {
+        return Vec::new();
+    };
+    let mut edges = Vec::new();
+    for op in &axis.openings {
+        let from = op.from.max(0.0);
+        let to = op.to.min(axis.length);
+        if to <= from {
+            continue;
+        }
+        let sill_abs = prism.z0 + op.sill.max(0.0);
+        let head_abs = (sill_abs + op.height).min(prism.z1);
+        if head_abs <= sill_abs + MIN_SPAN {
+            continue;
+        }
+        let at = |t: f32| -> Point2 { [axis.start[0] + t * axis.dir[0], axis.start[1] + t * axis.dir[1]] };
+        let p_from = at(from);
+        let p_to = at(to);
+        let jamb_from = (to_world(p_from, sill_abs), to_world(p_from, head_abs));
+        let jamb_to = (to_world(p_to, sill_abs), to_world(p_to, head_abs));
+        let sill_edge = (to_world(p_from, sill_abs), to_world(p_to, sill_abs));
+        let head_edge = (to_world(p_from, head_abs), to_world(p_to, head_abs));
+        edges.push((jamb_from.0, jamb_from.1, HeightBias::Vertical));
+        edges.push((jamb_to.0, jamb_to.1, HeightBias::Vertical));
+        edges.push((sill_edge.0, sill_edge.1, HeightBias::Vertical));
+        edges.push((head_edge.0, head_edge.1, HeightBias::Vertical));
+    }
+    edges
+}
+
 fn compute_view_edges(
     plane: &SectionPlane,
     prisms: &[Prism],
@@ -574,7 +868,15 @@ fn compute_view_edges(
             kind: prism.kind,
             index: prism.index,
         };
-        for (pa, pb, bias) in prism_wireframe_edges(prism) {
+        // Box-Silhouette (Selbstverdeckung gewollt, siehe Moduldoc) + eigene
+        // Oeffnungs-Rahmenkanten (NICHT gegen das eigene Bauteil verdeckt).
+        let mut all_edges: Vec<(([f32; 3], [f32; 3], HeightBias), bool)> = prism_wireframe_edges(prism)
+            .into_iter()
+            .map(|e| (e, false))
+            .collect();
+        all_edges.extend(opening_wire_edges(prism).into_iter().map(|e| (e, true)));
+
+        for ((pa, pb, bias), self_exclude) in all_edges {
             let da = plane.depth(pa);
             let db = plane.depth(pb);
             if da <= EPS && db <= EPS {
@@ -607,7 +909,8 @@ fn compute_view_edges(
             let d0 = plane.depth(ca);
             let d1 = plane.depth(cb);
 
-            let blocked = blocked_intervals(u0, u1, v0, v1, d0, d1, bias, &bounds);
+            let exclude = if self_exclude { Some(cref) } else { None };
+            let blocked = blocked_intervals(u0, u1, v0, v1, d0, d1, bias, &bounds, exclude);
             for &(s, e) in &blocked {
                 hidden.push(SectionEdge {
                     component: cref,
@@ -650,14 +953,16 @@ pub fn cut_section(plane: &SectionPlane, walls: &[WallInput], slabs: &[SlabInput
     for prism in &prisms {
         for (u0, u1) in footprint_u_intervals(plane, &prism.footprint) {
             let (lo, hi) = (u0.min(u1), u0.max(u1));
-            cut_polygons.push(CutPolygon {
-                component: ComponentRef {
-                    kind: prism.kind,
-                    index: prism.index,
-                },
-                color: prism.color,
-                pts: vec![[lo, prism.z0], [hi, prism.z0], [hi, prism.z1], [lo, prism.z1]],
-            });
+            for (rlo, rhi, rz0, rz1) in wall_cut_rectangles(plane, prism, lo, hi) {
+                cut_polygons.push(CutPolygon {
+                    component: ComponentRef {
+                        kind: prism.kind,
+                        index: prism.index,
+                    },
+                    color: prism.color,
+                    pts: vec![[rlo, rz0], [rhi, rz0], [rhi, rz1], [rlo, rz1]],
+                });
+            }
         }
     }
 
@@ -695,6 +1000,7 @@ mod tests {
                 height: 2.5,
                 base_elevation: 0.0,
                 color,
+                openings: vec![],
             },
             WallInput {
                 start: [0.0, 3.0],
@@ -703,6 +1009,7 @@ mod tests {
                 height: 2.5,
                 base_elevation: 0.0,
                 color,
+                openings: vec![],
             },
         ];
         let slabs = vec![SlabInput {
@@ -897,5 +1204,206 @@ mod tests {
         for e in &out.visible_edges {
             assert!(e.a[1] >= -1e-4 && e.a[1] <= 2.5 + 1e-4);
         }
+    }
+
+    // --- Oeffnungen (Tueren/Fenster) -----------------------------------------
+
+    /// Eine Wand entlang +X (Achse (0,0)->(4,0)) mit einem Fenster: Intervall
+    /// entlang der Achse [1.5, 2.5] (1 m breit), Bruestung 1.0 m, Fensterhoehe
+    /// 1.0 m (Sturz beginnt also bei 2.0, Wand-Oberkante bei 2.5 -> 0.5 m Sturz).
+    fn wall_with_window() -> WallInput {
+        WallInput {
+            start: [0.0, 0.0],
+            end: [4.0, 0.0],
+            thickness: 0.2,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![Opening {
+                from: 1.5,
+                to: 2.5,
+                sill: 1.0,
+                height: 1.0,
+            }],
+        }
+    }
+
+    #[test]
+    fn schnitt_durch_fenster_liefert_bruestung_und_sturz() {
+        // Schnittebene bei Grundriss-X = 2.0: liegt MITTEN im Fenster (1.5..2.5).
+        // Statt eines Vollrechtecks (0..2.5) muessen zwei Teil-Rechtecke
+        // entstehen: Bruestung (0..1.0) und Sturz (2.0..2.5).
+        let wall = wall_with_window();
+        let plane = SectionPlane::looking_plus_x(2.0);
+        let out = cut_section(&plane, &[wall], &[]);
+
+        assert_eq!(out.cut_polygons.len(), 2, "Bruestung + Sturz statt Vollrechteck");
+
+        let bounds_of = |c: &CutPolygon| -> (f32, f32, f32, f32) {
+            let us: Vec<f32> = c.pts.iter().map(|p| p[0]).collect();
+            let vs: Vec<f32> = c.pts.iter().map(|p| p[1]).collect();
+            (
+                us.iter().cloned().fold(f32::INFINITY, f32::min),
+                us.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+                vs.iter().cloned().fold(f32::INFINITY, f32::min),
+                vs.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+            )
+        };
+
+        let bruestung = out
+            .cut_polygons
+            .iter()
+            .find(|c| bounds_of(c).2.abs() < 1e-3)
+            .expect("Bruestungs-Rechteck (v ab 0)");
+        let (u_lo, u_hi, v_lo, v_hi) = bounds_of(bruestung);
+        assert!((u_lo + 0.1).abs() < 1e-4, "u_lo={u_lo}");
+        assert!((u_hi - 0.1).abs() < 1e-4, "u_hi={u_hi}");
+        assert!((v_lo - 0.0).abs() < 1e-4, "v_lo={v_lo}");
+        assert!((v_hi - 1.0).abs() < 1e-4, "v_hi={v_hi} (Bruestungshoehe)");
+
+        let sturz = out
+            .cut_polygons
+            .iter()
+            .find(|c| (bounds_of(c).3 - 2.5).abs() < 1e-3)
+            .expect("Sturz-Rechteck (v bis 2.5, Wand-Oberkante)");
+        let (u_lo, u_hi, v_lo, v_hi) = bounds_of(sturz);
+        assert!((u_lo + 0.1).abs() < 1e-4, "u_lo={u_lo}");
+        assert!((u_hi - 0.1).abs() < 1e-4, "u_hi={u_hi}");
+        assert!((v_lo - 2.0).abs() < 1e-4, "v_lo={v_lo} (Sturz beginnt bei sill+height=2.0)");
+        assert!((v_hi - 2.5).abs() < 1e-4, "v_hi={v_hi}");
+    }
+
+    #[test]
+    fn schnitt_neben_dem_fenster_liefert_volles_rechteck() {
+        // Schnittebene bei Grundriss-X = 0.5: liegt ausserhalb des Fensters
+        // (1.5..2.5) -> Regressionsfall, unveraendert ein Vollrechteck.
+        let wall = wall_with_window();
+        let plane = SectionPlane::looking_plus_x(0.5);
+        let out = cut_section(&plane, &[wall], &[]);
+
+        assert_eq!(out.cut_polygons.len(), 1, "kein Fenster an dieser Stelle -> ein Vollrechteck");
+        let c = &out.cut_polygons[0];
+        let us: Vec<f32> = c.pts.iter().map(|p| p[0]).collect();
+        let vs: Vec<f32> = c.pts.iter().map(|p| p[1]).collect();
+        let (u_lo, u_hi) = (us.iter().cloned().fold(f32::INFINITY, f32::min), us.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
+        let (v_lo, v_hi) = (vs.iter().cloned().fold(f32::INFINITY, f32::min), vs.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
+        assert!((u_lo + 0.1).abs() < 1e-4, "u_lo={u_lo}");
+        assert!((u_hi - 0.1).abs() < 1e-4, "u_hi={u_hi}");
+        assert!((v_lo - 0.0).abs() < 1e-4, "v_lo={v_lo}");
+        assert!((v_hi - 2.5).abs() < 1e-4, "v_hi={v_hi} (volle Wandhoehe)");
+    }
+
+    #[test]
+    fn ansicht_zeigt_fensterrahmen_sichtbar_und_durchblick_bei_dahinterliegender_kante() {
+        // Wand mit Fenster (Index 0) + eine zweite Wand DAHINTER (Index 1,
+        // ohne Oeffnung), die teils hinter dem Fenster, teils hinter der
+        // geschlossenen Wandflaeche steht. Ansicht von vorne (Blick +Y, Wand-
+        // achse (0,0)->(4,0) steht dabei u-parallel -> Elevations-Fall, siehe
+        // Moduldoc "Oeffnungen").
+        let w0 = wall_with_window();
+        let w1 = WallInput {
+            start: [2.0, 1.0],
+            end: [4.0, 1.0],
+            thickness: 0.2,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+        };
+        // Blick von y = -2 nach +Y: beide Waende (y=0 bzw. y=1) liegen dahinter.
+        let plane = SectionPlane::looking_plus_y(-2.0);
+        let out = cut_section(&plane, &[w0, w1], &[]);
+
+        // -- Fensterrahmen (Wand 0) ist vollstaendig sichtbar (nichts davor). --
+        // Leibungen bei u=-1.5 und u=-2.5 (Fenster-Enden), v von 1.0 (Bruestung)
+        // bis 2.0 (Sturzunterkante).
+        let jamb_visible = |u: f32| {
+            out.visible_edges.iter().any(|e| {
+                e.component.kind == ComponentKind::Wall
+                    && e.component.index == 0
+                    && (e.a[0] - u).abs() < 1e-3
+                    && (e.b[0] - u).abs() < 1e-3
+                    && (e.a[1].min(e.b[1]) - 1.0).abs() < 1e-3
+                    && (e.a[1].max(e.b[1]) - 2.0).abs() < 1e-3
+            })
+        };
+        assert!(jamb_visible(-1.5), "linke Leibung (u=-1.5) muss sichtbar sein");
+        assert!(jamb_visible(-2.5), "rechte Leibung (u=-2.5) muss sichtbar sein");
+        // Bruestungs- und Sturzkante (horizontale Rahmenkanten bei v=1.0/2.0).
+        let horizontal_edge_visible = |v: f32| {
+            out.visible_edges.iter().any(|e| {
+                e.component.kind == ComponentKind::Wall
+                    && e.component.index == 0
+                    && (e.a[1] - v).abs() < 1e-3
+                    && (e.b[1] - v).abs() < 1e-3
+                    && (e.a[0].min(e.b[0]) + 2.5).abs() < 1e-3
+                    && (e.a[0].max(e.b[0]) + 1.5).abs() < 1e-3
+            })
+        };
+        assert!(horizontal_edge_visible(1.0), "Bruestungskante (v=1.0) muss sichtbar sein");
+        assert!(horizontal_edge_visible(2.0), "Sturzkante (v=2.0) muss sichtbar sein");
+        // Keine dieser vier Rahmenkanten darf (auch nur teilweise) hidden sein
+        // (Wand 0 steht als naechstes Bauteil vorne, nichts verdeckt sie).
+        let frame_hidden = out.hidden_edges.iter().any(|e| {
+            e.component.kind == ComponentKind::Wall
+                && e.component.index == 0
+                && ((e.a[0] + 1.5).abs() < 1e-3 || (e.a[0] + 2.5).abs() < 1e-3)
+                && e.a[1] >= 1.0 - 1e-3
+                && e.a[1] <= 2.0 + 1e-3
+        });
+        assert!(!frame_hidden, "Fensterrahmen darf nicht (teilweise) hidden sein");
+
+        // -- Durchblick: die (naeherliegende) Vorderkante von Wand 1 bei
+        // u=-2.0 (Wandstart x=2, liegt IM Fenster-u-Bereich -2.5..-1.5) muss
+        // GENAU im Fensterband (v: 1.0..2.0) sichtbar sein, darueber/darunter
+        // (verdeckt durch Bruestung/Sturz der Wand 0) hidden. --
+        let w1_visible_window = out.visible_edges.iter().any(|e| {
+            e.component.kind == ComponentKind::Wall
+                && e.component.index == 1
+                && (e.a[0] + 2.0).abs() < 1e-3
+                && (e.b[0] + 2.0).abs() < 1e-3
+                && (e.a[1].min(e.b[1]) - 1.0).abs() < 1e-3
+                && (e.a[1].max(e.b[1]) - 2.0).abs() < 1e-3
+        });
+        assert!(w1_visible_window, "Durchblick auf Wand 1 durchs Fenster (v 1.0..2.0) fehlt");
+
+        let w1_hidden_below = out.hidden_edges.iter().any(|e| {
+            e.component.kind == ComponentKind::Wall
+                && e.component.index == 1
+                && (e.a[0] + 2.0).abs() < 1e-3
+                && (e.b[0] + 2.0).abs() < 1e-3
+                && (e.a[1].min(e.b[1]) - 0.0).abs() < 1e-3
+                && (e.a[1].max(e.b[1]) - 1.0).abs() < 1e-3
+        });
+        assert!(w1_hidden_below, "Wand 1 unterhalb der Bruestung (v 0..1.0) muss hidden sein");
+
+        let w1_hidden_above = out.hidden_edges.iter().any(|e| {
+            e.component.kind == ComponentKind::Wall
+                && e.component.index == 1
+                && (e.a[0] + 2.0).abs() < 1e-3
+                && (e.b[0] + 2.0).abs() < 1e-3
+                && (e.a[1].min(e.b[1]) - 2.0).abs() < 1e-3
+                && (e.a[1].max(e.b[1]) - 2.5).abs() < 1e-3
+        });
+        assert!(w1_hidden_above, "Wand 1 oberhalb des Sturzes (v 2.0..2.5) muss hidden sein");
+
+        // Kante hinter der GESCHLOSSENEN Wandflaeche (u=-4.0, ausserhalb des
+        // Fensters, x=4-Ende von Wand 1) bleibt vollstaendig verdeckt.
+        let w1_closed_wall_hidden = out.hidden_edges.iter().any(|e| {
+            e.component.kind == ComponentKind::Wall
+                && e.component.index == 1
+                && (e.a[0] + 4.0).abs() < 1e-3
+                && (e.b[0] + 4.0).abs() < 1e-3
+                && (e.a[1].min(e.b[1]) - 0.0).abs() < 1e-3
+                && (e.a[1].max(e.b[1]) - 2.5).abs() < 1e-3
+        });
+        assert!(
+            w1_closed_wall_hidden,
+            "Kante hinter geschlossener Wandflaeche (u=-4.0) muss vollstaendig hidden sein"
+        );
+        let w1_closed_wall_visible = out.visible_edges.iter().any(|e| {
+            e.component.kind == ComponentKind::Wall && e.component.index == 1 && (e.a[0] + 4.0).abs() < 1e-3
+        });
+        assert!(!w1_closed_wall_visible, "u=-4.0 (hinter geschlossener Wand) darf nicht sichtbar sein");
     }
 }

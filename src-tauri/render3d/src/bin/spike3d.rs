@@ -36,6 +36,7 @@ fn demo_walls() -> Vec<WallInput> {
         height: ht,
         base_elevation: 0.0,
         color: grey,
+        openings: vec![],
     };
     // Raum 6 x 4 m.
     vec![

@@ -25,9 +25,13 @@ pub type Rgb = [f32; 3];
 /// erzeugt (Band aus Achse+Dicke, hochgezogen auf `height` ab `base_elevation`).
 ///
 /// Vereinfachung des Web-`Wall` (siehe src/model/wall.ts): Ecken-Verschneidung
-/// (`computeJoins`/`wallCorners`) und Oeffnungen kommen in spaeteren Milestones;
-/// M1 extrudiert jede Wand als eigenstaendigen, an den Enden stumpf abgeschlossenen
-/// Quader.
+/// (`computeJoins`/`wallCorners`) kommt in einem spaeteren Milestone; M1 extrudiert
+/// jede Wand als eigenstaendigen, an den Enden stumpf abgeschlossenen Quader.
+/// `openings` (Tueren/Fenster, siehe `Opening`) werden vom Schnitt-Modul
+/// (`section.rs`) ausgewertet; die Vollkoerper-Extrusion (`mesh.rs`) kennt sie
+/// (noch) NICHT und extrudiert weiterhin die volle Wandflaeche — siehe
+/// `mesh.rs`-Moduldoc und `docs/design/engine-section-pipeline.md` fuer diese
+/// bekannte Diskrepanz.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WallInput {
     /// Achsen-Startpunkt im Grundriss (Modell-Meter).
@@ -44,6 +48,30 @@ pub struct WallInput {
     /// Albedo-Farbe der Wand (RGB 0..1). Default helles Grau wie die three.js-Sicht.
     #[serde(default = "default_wall_color")]
     pub color: Rgb,
+    /// Oeffnungen (Tueren/Fenster) entlang der Wandachse. Default leer (volle Wand).
+    #[serde(default)]
+    pub openings: Vec<Opening>,
+}
+
+/// Eine Oeffnung (Tuer/Fenster) in einer Wand: Intervall entlang der Wandachse
+/// (Meter ab `WallInput::start`, 0..Wandlaenge) plus vertikale Ausdehnung relativ
+/// zur Wand-Unterkante (`base_elevation`).
+///
+/// Vereinfachung des Web-`Opening` (siehe src/model/types.ts): keine eigene Id,
+/// kein Oeffnungstyp (Tuer/Fenster) — nur die reine Geometrie, die Schnitt/Ansicht
+/// brauchen. Eine Tuer ist der Sonderfall `sill == 0.0` (keine Bruestungsmauer).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Opening {
+    /// Start des Oeffnungs-Intervalls entlang der Wandachse (Meter ab `start`).
+    pub from: f32,
+    /// Ende des Oeffnungs-Intervalls entlang der Wandachse (Meter ab `start`).
+    pub to: f32,
+    /// Bruestungshoehe: Unterkante der Oeffnung relativ zu `base_elevation`
+    /// (Meter). 0 = Tuer (keine Bruestungsmauer darunter).
+    #[serde(default)]
+    pub sill: f32,
+    /// Hoehe der Oeffnung (vertikale Ausdehnung ab `sill`), Meter.
+    pub height: f32,
 }
 
 fn default_wall_color() -> Rgb {

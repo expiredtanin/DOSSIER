@@ -57,6 +57,7 @@ mod tests {
             height,
             base_elevation: 0.0,
             color: [0.8, 0.8, 0.8],
+            openings: vec![],
         }
     }
 
@@ -92,6 +93,7 @@ mod tests {
                 height: 2.5,
                 base_elevation: 0.0,
                 color: [0.8, 0.8, 0.8],
+                openings: vec![],
             },
         ]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX);
@@ -168,6 +170,7 @@ mod tests {
             height: 3.0,
             base_elevation: 0.0,
             color: [0.8, 0.8, 0.8],
+            openings: vec![],
         };
         let mut mesh = Mesh::default();
         extrude_wall(&mut mesh, &w);
@@ -187,6 +190,7 @@ mod tests {
             height: 2.5,
             base_elevation: 0.0,
             color: [0.8, 0.8, 0.8],
+            openings: vec![],
         };
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), 0);

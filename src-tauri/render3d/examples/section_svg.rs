@@ -1,16 +1,23 @@
 //! Beweis-Artefakt fuer den analytischen Schnitt/Ansicht-Extraktor (`section.rs`):
-//! baut die L-Wand + Bodenplatte-Testszene, schneidet sie mit einer Ebene, die
-//! sowohl Material schneidet ALS AUCH auf dahinterliegende Kanten blickt, und
-//! schreibt das Ergebnis als SVG nach `docs/welle-c-hlr-spike/section-engine-proof.svg`.
+//! baut die L-Wand + Bodenplatte-Testszene (Schenkel A bekommt ein FENSTER) plus
+//! eine kurze "Spaeh"-Wand hinter dem Fenster, schneidet/betrachtet sie mit einer
+//! Ebene, die sowohl Material schneidet ALS AUCH auf dahinterliegende Kanten
+//! blickt, und schreibt das Ergebnis als SVG nach
+//! `docs/welle-c-hlr-spike/section-engine-proof.svg`.
 //!
 //! Aufruf: `cargo run --example section_svg` (im Verzeichnis `src-tauri/render3d`).
 
 use render3d::section::{cut_section, ComponentKind, SectionOutput, SectionPlane};
+use render3d::types::Opening;
 use render3d::{SlabInput, WallInput};
 
 fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
     let color = [0.8, 0.8, 0.8];
     let walls = vec![
+        // Schenkel A: Achse (0,0)->(0,3) -- bekommt ein Fenster (u = Modell-Y
+        // liegt fuer diese Blickrichtung parallel zur Achse -> Elevations-Fall,
+        // siehe section.rs-Moduldoc "Oeffnungen"). Fenster von Y=1.0 bis 2.0,
+        // Bruestung 0.8 m, Fensterhoehe 1.0 m (Sturz ab Y-Hoehe 1.8).
         WallInput {
             start: [0.0, 0.0],
             end: [0.0, 3.0],
@@ -18,6 +25,12 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
             height: 2.5,
             base_elevation: 0.0,
             color,
+            openings: vec![Opening {
+                from: 1.0,
+                to: 2.0,
+                sill: 0.8,
+                height: 1.0,
+            }],
         },
         WallInput {
             start: [0.0, 3.0],
@@ -26,6 +39,21 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
             height: 2.5,
             base_elevation: 0.0,
             color,
+            openings: vec![],
+        },
+        // "Spaeh"-Wand: kurzer Stummel HINTER Schenkel A (groesseres Modell-X,
+        // also groessere Tiefe von der Betrachter-Ebene aus), genau im
+        // Grundriss-Y-Bereich des Fensters (1.2..1.8, sicher innerhalb 1.0..2.0)
+        // -- demonstriert den Durchblick: sichtbar im Fensterband (Hoehe
+        // 0.8..1.8), verdeckt darueber/darunter.
+        WallInput {
+            start: [1.5, 1.2],
+            end: [1.5, 1.8],
+            thickness: 0.2,
+            height: 2.5,
+            base_elevation: 0.0,
+            color,
+            openings: vec![],
         },
     ];
     let slabs = vec![SlabInput {
@@ -123,12 +151,13 @@ fn render_svg(out: &SectionOutput) -> String {
 fn main() {
     let (walls, slabs) = l_wall_scene();
     // Ebene bei Grundriss-X = -0.3: schneidet NUR die Bodenplatte (Umriss x in
-    // [-0.5,3.5]) -- liefert deren Poche als Cut-Polygon -- waehrend BEIDE
-    // Wandschenkel (x in [-0.1,0.1] bzw. [0,3]) vollstaendig HINTER der Ebene
-    // liegen und daher als Draht-Silhouette projiziert werden (inkl. der in
-    // den Tests verifizierten Eck-Ueberlappungs-Verdeckung). Zeigt also
-    // geschnittenes Material UND eine gemischte sichtbar/verdeckt-Ansicht in
-    // einem Bild.
+    // [-0.5,3.5]) -- liefert deren Poche als Cut-Polygon -- waehrend ALLE DREI
+    // Waende (Schenkel A samt Fenster, Schenkel B, die Spaeh-Wand) vollstaendig
+    // HINTER der Ebene liegen und daher als Draht-Silhouette projiziert werden
+    // (inkl. der in den Tests verifizierten Eck-Ueberlappungs-Verdeckung UND
+    // des Fensterrahmens + Durchblicks auf die Spaeh-Wand, siehe
+    // section.rs-Tests). Zeigt also geschnittenes Material UND eine gemischte
+    // sichtbar/verdeckt-Ansicht MIT Oeffnung in einem Bild.
     let plane = SectionPlane::looking_plus_x(-0.3);
     let out = cut_section(&plane, &walls, &slabs);
 
