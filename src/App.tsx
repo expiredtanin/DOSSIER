@@ -1294,10 +1294,17 @@ export default function App() {
     //    Cursor-Delta — beide Endpunkte wandern gleich, die geteilten Ecken ziehen
     //    die Nachbar-Segmente nach. Shift = Ortho (H/V) auf das Gesamt-Delta.
     //  • sonst (rect/geschlossene Polylinie/Wand): NUR die Komponente senkrecht
-    //    zur Kante (Seite verschiebt sich parallel nach außen/innen), aufs Raster
-    //    gerundet — wie bisher.
-    onEdgeMove: (edge: EdgeGrip, raw: Vec2, _pxPerMeter: number, mods: ToolMods) => {
+    //    zur Kante (Seite verschiebt sich parallel nach außen/innen). Fängt an
+    //    eingeschalteten Geometrie-Snaps (Endpunkt/Mittelpunkt/Schnittpunkt/…);
+    //    ohne Geometrie-Snap wird der Offset wie bisher aufs Raster gerundet.
+    onEdgeMove: (edge: EdgeGrip, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
       if (edge.free) {
+        // Freier Fall arbeitet mit einem inkrementellen Cursor-DELTA (nicht
+        // einem absoluten Punkt) — eine Geometrie-Snap-Projektion auf die
+        // Normale ergibt hier keinen Sinn, da es keine feste Kanten-Normale
+        // gibt, an die sich ein gefangener Punkt anlehnen könnte. Bleibt beim
+        // bisherigen Raster-Delta-Verhalten.
+        //
         // Inkrementelles 2D-Delta gegen den letzten rohen Cursor. Erster Event
         // verankert nur (kein Sprung, da der Griff am Kanten-Mittelpunkt sitzt).
         const last = edgeFreeLastRef.current;
@@ -1325,13 +1332,21 @@ export default function App() {
         setDraft({ preview: [], vertices: [], snap: null });
         return;
       }
-      // Senkrechte Projektion von (raw − Grab-Mittelpunkt) auf die Außennormale.
-      const rel = sub(raw, edge.mid);
+      // Cursor zuerst durch die Snap-Engine schicken (Ctrl unterdrückt Snap
+      // wie überall sonst, siehe computeSnap). Ein GEOMETRIE-Snap (Endpunkt/
+      // Mittelpunkt/Schnittpunkt/…, nicht Raster/Ortho) liefert den gefangenen
+      // Punkt, der dann auf die Außennormale projiziert wird — so rastet die
+      // Kante an reale Geometrie statt nur ans Raster.
+      const snapResult = snapFor(raw, pxPerMeter, mods);
+      const isGeometrySnap = !!snapResult && snapResult.kind !== "grid" && snapResult.kind !== "ortho";
+      const cursor = isGeometrySnap ? snapResult!.point : raw;
+      // Senkrechte Projektion von (Cursor − Grab-Mittelpunkt) auf die Außennormale.
+      const rel = sub(cursor, edge.mid);
       let offset = rel.x * edge.normal.x + rel.y * edge.normal.y;
-      // Raster-Schritt (Snap) anwenden, sofern Snap+Raster aktiv und nicht per
-      // Ctrl unterdrückt sind.
+      // Raster-Schritt (Snap) nur, wenn kein Geometrie-Snap gefangen wurde —
+      // sonst gewinnt der gefangene Punkt.
       const step = snap.gridSize;
-      if (!mods.ctrl && snap.enabled && snap.grid && step > 0) {
+      if (!isGeometrySnap && !mods.ctrl && snap.enabled && snap.grid && step > 0) {
         offset = Math.round(offset / step) * step;
       }
       // INKREMENTELL + Grab-Anker: moveEdge verschiebt additiv, daher nur die
@@ -1343,7 +1358,7 @@ export default function App() {
       const inc = offset - prev;
       if (inc === 0) return;
       applyEdge(edge.aIndex, edge.bIndex, scale(edge.normal, inc));
-      setDraft({ preview: [], vertices: [], snap: null });
+      setDraft({ preview: [], vertices: [], snap: isGeometrySnap ? snapResult : null });
     },
     onGripEnd: () => {
       setDraft(null);
