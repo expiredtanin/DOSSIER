@@ -21,6 +21,9 @@ export interface ViewSlice {
   activeLevelId: string;
   // Ansichtstyp (Grundriss / Perspektive).
   viewType: ViewType;
+  // Zuletzt gewählter Ansichtstyp je Zeichnungsebene — jeder Tab merkt sich
+  // seinen eigenen 2D/3D-Zustand statt eines rein globalen Umschalters.
+  viewTypeByLevel: Record<string, ViewType>;
   // Detailgrad im Grundriss.
   detail: DetailLevel;
   // Render-Modus der 3D-Ansicht.
@@ -65,6 +68,7 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
   return {
     activeLevelId: sampleProject.drawingLevels[0].id,
     viewType: "grundriss",
+    viewTypeByLevel: {},
     detail: "mittel",
     renderMode: "shaded",
     view3d: "perspective",
@@ -77,8 +81,16 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
       sampleProject.walls[0]?.categoryCode ?? sampleProject.layers[0].code,
     displayModes: {},
 
-    setActiveLevelId: (id) => set({ activeLevelId: id }),
-    setViewType: (v) => set({ viewType: v }),
+    setActiveLevelId: (id) =>
+      set((s) => ({
+        activeLevelId: id,
+        viewType: s.viewTypeByLevel[id] ?? "grundriss",
+      })),
+    setViewType: (v) =>
+      set((s) => ({
+        viewType: v,
+        viewTypeByLevel: { ...s.viewTypeByLevel, [s.activeLevelId]: v },
+      })),
     setDetail: (d) => set({ detail: d }),
     setRenderMode: (m) => set({ renderMode: m }),
     setView3d: (v) => set({ view3d: v }),
