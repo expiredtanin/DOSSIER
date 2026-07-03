@@ -156,6 +156,8 @@ import {
 } from "./state/visibilitySets";
 // Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
 import { BUILTIN_PANEL_IDS } from "./panels/builtinPanels";
+import { DrawingTabs, deriveDrawings } from "./DrawingTabs";
+import type { Drawing } from "./DrawingTabs";
 
 /**
  * Offenes Kontextmenü — genau eine Quelle. `x/y` sind Viewport-Pixel (clientX/Y).
@@ -1593,7 +1595,6 @@ export default function App() {
   // Panels/Menüs/Editoren weiter.
   const toggleLevelVisible = useStore((s) => s.toggleLevelVisible);
   const toggleCategoryVisible = useStore((s) => s.toggleCategoryVisible);
-  const patchActiveFloor = useStore((s) => s.patchActiveFloor);
   const addFloor = useStore((s) => s.addFloor);
   const addDrawing = useStore((s) => s.addDrawing);
   const addDrawingLevel = useStore((s) => s.addDrawingLevel);
@@ -2195,6 +2196,14 @@ export default function App() {
   // referenzstabil → triggert sonst keinen Neuaufbau).
   const displayKey = `${drawingLevelsMode}|${layersMode}|${activeLevelId}`;
 
+  // Dokument-Tabs der Zeichenflächen-Kopfzeile — ein Tab je Geschoss-
+  // Grundriss (siehe DrawingTabs.tsx). Teilt sich `activeLevelId`/
+  // `setActiveLevelId` mit dem Panel „Zeichnungsebenen".
+  const drawings = useMemo(
+    () => deriveDrawings(project.drawingLevels),
+    [project.drawingLevels],
+  );
+
   // ── Ableitungen für Oberleiste + Status-Leiste ────────────────────────────
   // Eine zoom-/cursor-fähige Plan-Ansicht ist nur im Grundriss eines Geschosses
   // aktiv. Sonst sind Cursor/Zoom bedeutungslos (PlanView ist nicht montiert →
@@ -2794,7 +2803,8 @@ export default function App() {
           view3d={view3d}
           fov={fov}
           mono={planColorMode === "mono"}
-          onPatchFloor={patchActiveFloor}
+          drawings={drawings}
+          onSelectLevel={setActiveLevelId}
           floorDisplay={floorDisplay}
           categoryDisplay={categoryDisplay}
           displayKey={displayKey}
@@ -3732,7 +3742,8 @@ function Content({
   view3d,
   fov,
   mono,
-  onPatchFloor,
+  drawings,
+  onSelectLevel,
   floorDisplay,
   categoryDisplay,
   displayKey,
@@ -3790,7 +3801,11 @@ function Content({
   fov: number;
   /** Grundriss in Schwarz-Weiss (mono) statt mit Kategorie-/Element-Farben. */
   mono: boolean;
-  onPatchFloor: (patch: Partial<DrawingLevel>) => void;
+  /** Dokument-Tabs der Kopfzeile — ein Tab je Geschoss-Grundriss. */
+  drawings: Drawing[];
+  /** Aktiviert eine Zeichnungsebene (Geschoss) — geteilt mit dem Panel
+   *  „Zeichnungsebenen"; siehe DrawingTabs.tsx. */
+  onSelectLevel: (id: string) => void;
   floorDisplay: DisplayResolver;
   categoryDisplay: CategoryDisplayResolver & DisplayResolver;
   displayKey: string;
@@ -3853,6 +3868,11 @@ function Content({
   if (level.kind === "section" || level.kind === "elevation") {
     return (
       <main className="content">
+        <DrawingTabs
+          drawings={drawings}
+          activeLevelId={level.id}
+          onSelectLevel={onSelectLevel}
+        />
         <SectionPlanView
           project={project}
           level={level}
@@ -3894,6 +3914,11 @@ function Content({
   if (level.kind === "drawing") {
     return (
       <main className="content">
+        <DrawingTabs
+          drawings={drawings}
+          activeLevelId={level.id}
+          onSelectLevel={onSelectLevel}
+        />
         <LevelPlanView
           project={project}
           level={level}
@@ -3932,10 +3957,16 @@ function Content({
     );
   }
 
-  // Geschoss: Eigenschaften-Leiste + gewählte Ansicht.
+  // Geschoss: Dokument-Tabs + gewählte Ansicht. Geschosshöhe/Schnitthöhe
+  // werden in den Geschoss-Einstellungen gepflegt (Rechtsklick auf das
+  // Geschoss im Panel „Zeichnungsebenen"), nicht mehr hier in der Kopfzeile.
   return (
     <main className="content">
-      <FloorProps level={level} onPatch={onPatchFloor} />
+      <DrawingTabs
+        drawings={drawings}
+        activeLevelId={level.id}
+        onSelectLevel={onSelectLevel}
+      />
       {viewType === "perspektive" ? (
         <section className="pane">
           <div className="pane-title">
@@ -4005,52 +4036,6 @@ function Content({
         />
       )}
     </main>
-  );
-}
-
-/** Kompakte Eigenschaften-Leiste eines Geschosses. */
-function FloorProps({
-  level,
-  onPatch,
-}: {
-  level: DrawingLevel;
-  onPatch: (patch: Partial<DrawingLevel>) => void;
-}) {
-  return (
-    <div className="props-strip">
-      <label className="prop">
-        <span className="prop-label">{t("props.floorHeight")}</span>
-        <span className="prop-input">
-          <input
-            type="number"
-            step={0.05}
-            min={0}
-            value={level.floorHeight ?? 0}
-            onChange={(e) => onPatch({ floorHeight: Number(e.target.value) })}
-          />
-          <span className="prop-unit">{t("editor.unit.m")}</span>
-        </span>
-      </label>
-      <label className="prop">
-        <span className="prop-label">{t("props.cutHeight")}</span>
-        <span className="prop-input">
-          <input
-            type="number"
-            step={0.05}
-            min={0}
-            value={level.cutHeight ?? 0}
-            onChange={(e) => onPatch({ cutHeight: Number(e.target.value) })}
-          />
-          <span className="prop-unit">{t("editor.unit.m")}</span>
-        </span>
-      </label>
-      <span className="prop prop-readonly">
-        <span className="prop-label">{t("props.okff")}</span>
-        <span className="prop-value">
-          {t("props.okffValue", { value: (level.baseElevation ?? 0).toFixed(2) })}
-        </span>
-      </span>
-    </div>
   );
 }
 

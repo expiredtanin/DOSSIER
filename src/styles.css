@@ -1306,66 +1306,50 @@ body {
   min-width: 0;
 }
 
-/* Eigenschaften-Leiste eines Geschosses. */
-.props-strip {
+/* Dokument-Tabs „Zeichnungen/Blätter" — Kopfzeile über der Zeichenfläche.
+   Leiste auf Ebene 1 (--panel), der aktive Tab hebt sich auf Ebene 2 an und
+   verschmilzt unten mit dem Grund der Zeichenfläche darunter (--bg), wie bei
+   klassischen Dokument-Tabs. */
+.drawing-tabs {
   display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 8px 16px;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px 0;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
-.prop {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.prop-label {
-  font-size: 10px;
+.drawing-tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
+  letter-spacing: 0.01em;
+  padding: 7px 16px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
 }
-
-.prop-input {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.prop-input input {
-  width: 64px;
-  font-family: var(--font-mono);
-  font-size: 12px;
+.drawing-tab:hover {
+  background: var(--panel-2);
   color: var(--ink);
-  background: var(--input);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 10px;
-  text-align: right;
-  outline: none;
-  transition: border-color 0.14s, box-shadow 0.14s;
 }
-.prop-input input:hover {
-  border-color: var(--accent);
+.drawing-tab.active {
+  background: var(--bg);
+  border-color: var(--line);
+  color: var(--ink);
+  /* Nahtloser Übergang: die Unterkante verschwindet im Zeichenflächen-Grund. */
+  position: relative;
+  top: 1px;
 }
-.prop-input input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
-}
-
-.prop-unit {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.prop-readonly .prop-value {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-2);
+.drawing-tab-label {
+  pointer-events: none;
 }
 
 /* Eine Ansicht füllt die Restfläche. */

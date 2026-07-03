@@ -190,6 +190,9 @@ export const en: Record<TranslationKey, string> = {
   "status.rendererWasm": "Engine",
   "status.rendererWasmUnavailable": "WebGPU unavailable",
 
+  // Document tabs (drawings/sheets).
+  "tabs.drawings": "Drawings",
+
   // Navigator panels.
   "nav.drawingLevels": "Drawing levels",
   "nav.layers": "Layers",

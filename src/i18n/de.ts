@@ -191,6 +191,9 @@ export const de = {
   "status.rendererWasm": "Engine",
   "status.rendererWasmUnavailable": "WebGPU nicht verfügbar",
 
+  // ── Dokument-Tabs (Zeichnungen/Blätter) ─────────────────────────────────
+  "tabs.drawings": "Zeichnungen",
+
   // ── Navigator-Panels ─────────────────────────────────────────────────────
   "nav.drawingLevels": "Zeichnungsebenen",
   "nav.layers": "Ebenen",
