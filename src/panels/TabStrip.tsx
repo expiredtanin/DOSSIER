@@ -1,4 +1,4 @@
-// Tab-Leiste eines Docks — ein Tab je Panel-ID, Titel aus der Registry.
+// Tab-Leiste eines Docks — ein Tab je Panel-ID, Icon+Titel aus der Registry.
 //
 // Rein darstellend: bekommt einen DockState (Reihenfolge der Panel-IDs +
 // aktiver Tab) und meldet das Greifen eines Tabs über `onStartDrag`. Der
@@ -6,8 +6,12 @@
 // Klick (Tab aktivieren) oder ein Ziehen (Reorder/Andocken/Lösen) wird — die
 // Leiste selbst kennt diese Logik nicht.
 //
-// Titel werden über die Registry (getPanel) aufgelöst, sodass die Leiste nichts
-// über konkrete Panels weiß. IDs ohne registriertes Panel (z. B. ein
+// Jeder Tab zeigt nur das Panel-Icon; der Titel steht als Tooltip (title-
+// Attribut) und aria-label am Button. Hat ein Panel kein Icon (z. B. ein
+// Plugin ohne eigenes Symbol), fällt der Tab auf den Titeltext zurück.
+//
+// Icon+Titel werden über die Registry (getPanel) aufgelöst, sodass die Leiste
+// nichts über konkrete Panels weiß. IDs ohne registriertes Panel (z. B. ein
 // abgeschaltetes Plugin) werden übersprungen — vgl. Hinweis in layout.ts.
 //
 // Datenattribute für die Drag-Trefferprüfung (panelDrag.resolveHover):
@@ -64,12 +68,13 @@ export function TabStrip({ side, groupIndex, group, onStartDrag }: TabStripProps
             type="button"
             role="tab"
             aria-selected={active}
+            aria-label={title}
             title={title}
             data-tab-index={index}
             className={`tab${active ? " active" : ""}`}
             onPointerDown={(e) => onStartDrag(id, e)}
           >
-            {title}
+            {def.icon ?? title}
           </button>
         );
       })}

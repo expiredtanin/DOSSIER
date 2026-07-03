@@ -136,6 +136,14 @@ export interface PanelDef {
    * unverändert zurück (Plugins können also auch einen fertigen Text setzen).
    */
   title: string;
+  /**
+   * Symbol für den Tab in der TabStrip (der Titeltext erscheint dort nur noch
+   * als Tooltip). Erwartet eine kleine Inline-SVG (~16×16, stroke=currentColor),
+   * damit sie die Textfarbe des Tabs (inaktiv/hover/aktiv) übernimmt. Fehlt es
+   * (z. B. bei einem Plugin-Panel ohne eigenes Icon), fällt die TabStrip auf den
+   * Titeltext zurück.
+   */
+  icon?: ReactNode;
   /** Rendert den Panel-Inhalt. Erhält den (generischen) PanelContext. */
   render: (ctx: PanelContext) => ReactNode;
   /**

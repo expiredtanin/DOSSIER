@@ -2402,22 +2402,23 @@ body {
 
 .tab {
   flex: 0 0 auto;
-  max-width: 160px;
+  width: 34px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid transparent;
   border-bottom: none;
   background: transparent;
   color: var(--muted);
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  padding: 8px 14px;
+  padding: 0;
   border-radius: 8px 8px 0 0;
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.tab svg {
+  flex: 0 0 auto;
 }
 .tab:hover {
   background: var(--accent-dim);

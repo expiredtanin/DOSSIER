@@ -22,6 +22,15 @@ import { AttributesPanel } from "./AttributesPanel";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";
 import { SitePanel } from "./SitePanel";
 import { RoomBalancePanel } from "./RoomBalancePanel";
+import {
+  ToolsTabIcon,
+  AttributesTabIcon,
+  ObjectInfoTabIcon,
+  DrawingLevelsTabIcon,
+  LayersTabIcon,
+  SiteTabIcon,
+  RoomBalanceTabIcon,
+} from "./PanelIcons";
 
 /** IDs der eingebauten Dock-Panels (auch für defaultLayout/Filter nutzbar). */
 export const BUILTIN_PANEL_IDS = {
@@ -38,6 +47,7 @@ export const BUILTIN_PANEL_IDS = {
 registerPanel({
   id: BUILTIN_PANEL_IDS.tools,
   title: "nav.tools",
+  icon: <ToolsTabIcon />,
   hasDisplayMode: false,
   render: () => <ToolsPanel />,
 });
@@ -46,6 +56,7 @@ registerPanel({
 registerPanel({
   id: BUILTIN_PANEL_IDS.attributes,
   title: "nav.attributes",
+  icon: <AttributesTabIcon />,
   hasDisplayMode: false,
   render: () => <AttributesPanel />,
 });
@@ -54,6 +65,7 @@ registerPanel({
 registerPanel({
   id: BUILTIN_PANEL_IDS.objectInfo,
   title: "nav.objectInfo",
+  icon: <ObjectInfoTabIcon />,
   hasDisplayMode: false,
   render: () => <ObjectInfoPanel />,
 });
@@ -63,6 +75,7 @@ registerPanel({
   // i18n-Key statt fertigem Text: TabStrip/PanelFrame lösen ihn über t() auf,
   // damit der Titel der gewählten Sprache folgt.
   title: "nav.drawingLevels",
+  icon: <DrawingLevelsTabIcon />,
   hasDisplayMode: true,
   render: () => <DrawingLevelsPanel />,
 });
@@ -70,6 +83,7 @@ registerPanel({
 registerPanel({
   id: BUILTIN_PANEL_IDS.layers,
   title: "nav.layers",
+  icon: <LayersTabIcon />,
   hasDisplayMode: true,
   render: () => <LayersPanel />,
 });
@@ -78,6 +92,7 @@ registerPanel({
 registerPanel({
   id: BUILTIN_PANEL_IDS.site,
   title: "nav.site",
+  icon: <SiteTabIcon />,
   hasDisplayMode: false,
   render: () => <SitePanel />,
 });
@@ -86,6 +101,7 @@ registerPanel({
 registerPanel({
   id: BUILTIN_PANEL_IDS.roomBalance,
   title: "nav.roomBalance",
+  icon: <RoomBalanceTabIcon />,
   hasDisplayMode: false,
   render: () => <RoomBalancePanel />,
 });
