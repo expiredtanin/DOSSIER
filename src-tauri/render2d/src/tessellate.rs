@@ -252,20 +252,23 @@ fn cross(a: Point, b: Point, c: Point) -> f32 {
     (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 }
 
-/// Maximaler Miter-Laengenfaktor; darueber wird geklemmt (kein Spike an spitzen Ecken).
-const MITER_LIMIT: f32 = 8.0;
-
-/// Einheits-Links-Normale von `from` nach `to` (Bildschirm-Raum); None bei Nulllaenge.
+/// Einheits-Richtung von `from` nach `to` (Bildschirm-Raum); None bei Nulllaenge.
 #[inline]
-fn left_normal(from: Point, to: Point) -> Option<Point> {
+fn unit_dir(from: Point, to: Point) -> Option<Point> {
     let dx = to[0] - from[0];
     let dy = to[1] - from[1];
     let len = (dx * dx + dy * dy).sqrt();
-    if len < 1e-6 {
+    if len < 1e-9 {
         None
     } else {
-        Some([-dy / len, dx / len])
+        Some([dx / len, dy / len])
     }
+}
+
+/// 90-Grad-Linksdrehung einer Einheits-Richtung -> Einheits-Links-Normale.
+#[inline]
+fn left_normal_of(d: Point) -> Point {
+    [-d[1], d[0]]
 }
 
 /// Liegt p im (a,b,c)-Dreieck? (CCW-orientiert).
@@ -390,7 +393,10 @@ pub struct GpuGeometry {
     pub fill_idx: Vec<u32>,
     pub fill_batches: Vec<FillBatch>,
     /// Linien-Vertices, interleaved [x,y, bx,by, side, miter] in Bildschirm-Raum
-    /// (bx,by = Miter-Bisektor, miter = 1/cos(theta/2)-Laengenfaktor).
+    /// (bx,by = Einheits-Versatzrichtung — Segment-Normale bei Quad-Raendern,
+    /// Radialrichtung bei Rundkappen-/Rundecken-Faechern; side = 0 im Faecher-
+    /// Zentrum, sonst +-1; miter ist stets 1 — die Strichbreite wird vollstaendig
+    /// im Vertex-Shader angewandt, s. `shaders.rs`).
     pub line_verts: Vec<f32>,
     pub line_idx: Vec<u32>,
     pub line_batches: Vec<LineBatch>,
@@ -461,11 +467,23 @@ impl GpuGeometry {
             .push((BatchKind::Line, (self.line_batches.len() - 1) as u32));
     }
 
-    /// Zeichnet einen zusammenhaengenden Linienzug (Modell-Meter) als EINEN
-    /// gehrten Streifen: an jedem Stuetzpunkt wird der Versatz entlang des Miter-
-    /// Bisektors verlaengert (1/cos(theta/2)), sodass benachbarte Segmente buendig
-    /// verschmelzen -> gehrte Ecke statt Butt-Cap-Stufe. `closed` schliesst den Ring
-    /// (letzter<->erster Punkt). Vertex-Layout: [x,y, bx,by, side, miter] (6 floats).
+    /// Zeichnet einen zusammenhaengenden Linienzug (Modell-Meter) mit ECHTEN
+    /// RUNDEN Kappen/Ecken (wie SVG `stroke-linecap/linejoin: round` und der
+    /// Vektor-PDF-Pfad) statt eckigem Butt-Cap/Gehrung:
+    ///  - jedes Segment ist ein eigenstaendiges Quad mit BUTT-Enden (eigene
+    ///    Segment-Normale, keine Miter-Verlaengerung);
+    ///  - an jedem inneren Stuetzpunkt fuellt ein Dreiecksfaecher (Radius = halbe
+    ///    Strichbreite) die Aussenseite der Ecke rund auf (Innenseite ueberlappt
+    ///    unsichtbar, wie bei jedem Disjoint-Segment-Linienbreiten-Ansatz);
+    ///  - an offenen Enden (nicht `closed`) sitzt ein Halbkreis-Faecher als runde
+    ///    Kappe.
+    /// Die tatsaechliche Pixel-Breite bleibt bildschirmkonstant: alle Faecher-/
+    /// Quad-Vertices tragen nur eine EINHEITS-Richtung (`bx,by`) + `side`-Skalar;
+    /// der Vertex-Shader multipliziert im Clip-Raum mit der aktuellen
+    /// Strichbreite (`stroke_px*stroke_scale`) — die Tessellierung selbst kennt
+    /// keine Pixelmasse. `closed` schliesst den Ring (letzter<->erster Punkt).
+    /// Vertex-Layout unveraendert: [x,y, bx,by, side, miter] (miter bleibt hier
+    /// immer 1, s. Shader-Vertrag in `shaders.rs`).
     ///
     /// 1:1-Port von `strokePolyline` in `src/plan/glPlan/glPlanCompile.ts`.
     fn stroke_polyline(
@@ -501,69 +519,135 @@ impl GpuGeometry {
             return;
         }
 
-        let base = (self.line_verts.len() / 6) as u32;
-        for i in 0..k {
-            let has_in = closed || i > 0;
-            let has_out = closed || i < k - 1;
-            let n_in = if has_in {
-                left_normal(s[(i + k - 1) % k], s[i])
-            } else {
-                None
-            };
-            let n_out = if has_out {
-                left_normal(s[i], s[(i + 1) % k])
-            } else {
-                None
-            };
+        let start_idx_len = self.line_idx.len();
 
-            let (bx, by, miter): (f32, f32, f32);
-            match (n_in, n_out) {
-                (Some(a), Some(b)) => {
-                    let sx = a[0] + b[0];
-                    let sy = a[1] + b[1];
-                    let slen = (sx * sx + sy * sy).sqrt();
-                    if slen < 1e-3 {
-                        // ~180-Grad-Umkehr -> kein sinnvoller Bisektor, gerade weiter.
-                        bx = b[0];
-                        by = b[1];
-                        miter = 1.0;
-                    } else {
-                        bx = sx / slen;
-                        by = sy / slen;
-                        let denom = bx * b[0] + by * b[1]; // cos(theta/2)
-                        miter = if denom > 1e-3 {
-                            (1.0 / denom).min(MITER_LIMIT)
-                        } else {
-                            1.0
-                        };
-                    }
-                }
-                (Some(n), None) | (None, Some(n)) => {
-                    bx = n[0];
-                    by = n[1];
-                    miter = 1.0;
-                }
-                (None, None) => {
-                    // Bei k>=2 unerreichbar; sicherheitshalber gerade lassen.
-                    bx = 0.0;
-                    by = 0.0;
-                    miter = 1.0;
-                }
-            }
-            self.line_verts
-                .extend_from_slice(&[s[i][0], s[i][1], bx, by, 1.0, miter]);
-            self.line_verts
-                .extend_from_slice(&[s[i][0], s[i][1], bx, by, -1.0, miter]);
+        // Vertex fuer Quad-Rand ODER Faecher (Zentrum bei side=0, Rand bei side=1)
+        // anhaengen; gibt den neuen Index zurueck.
+        #[inline]
+        fn push_vert(verts: &mut Vec<f32>, p: Point, n: Point, side: f32) -> u32 {
+            verts.extend_from_slice(&[p[0], p[1], n[0], n[1], side, 1.0]);
+            (verts.len() / 6 - 1) as u32
         }
 
         let segs = if closed { k } else { k - 1 };
+        let mut seg_dir: Vec<Option<Point>> = Vec::with_capacity(segs);
         for i in 0..segs {
-            let a = base + 2 * i as u32;
-            let b = base + 2 * (((i + 1) % k) as u32);
-            self.line_idx
-                .extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
+            seg_dir.push(unit_dir(s[i], s[(i + 1) % k]));
         }
-        self.add_line_batch((segs * 6) as u32, color, stroke_mm, width_screen);
+
+        // Segment-Quads: buttendig, jedes mit seiner EIGENEN Normale (kein
+        // gemeinsamer Bisektor mehr — Ecken werden separat durch Faecher geschlossen).
+        for i in 0..segs {
+            let Some(d) = seg_dir[i] else {
+                continue; // entartetes (Laenge-0) Segment
+            };
+            let n = left_normal_of(d);
+            let a = s[i];
+            let b = s[(i + 1) % k];
+            let i0 = push_vert(&mut self.line_verts, a, n, 1.0);
+            let i1 = push_vert(&mut self.line_verts, a, n, -1.0);
+            let i2 = push_vert(&mut self.line_verts, b, n, 1.0);
+            let i3 = push_vert(&mut self.line_verts, b, n, -1.0);
+            self.line_idx
+                .extend_from_slice(&[i0, i1, i2, i1, i3, i2]);
+        }
+
+        // Kreisbogen-Faecher (Zentrum = Vertex, Radius = halbe Strichbreite, per
+        // Shader skaliert): `side=0` am Zentrum (kein Versatz), `side=1` an den
+        // Randpunkten (voller Versatz in Richtung (cos(t),sin(t))). Segmentzahl
+        // skaliert mit dem ueberstrichenen Winkel (18 Grad je Schritt).
+        #[inline]
+        fn add_fan_arc(verts: &mut Vec<f32>, idx: &mut Vec<u32>, p: Point, a_from: f32, a_to: f32) {
+            let delta = a_to - a_from;
+            let steps = ((delta.abs() / (std::f32::consts::PI / 10.0)).ceil() as u32).max(1);
+            let i_center = push_vert(verts, p, [1.0, 0.0], 0.0);
+            let mut prev = push_vert(verts, p, [a_from.cos(), a_from.sin()], 1.0);
+            for step in 1..=steps {
+                let t = a_from + delta * (step as f32) / (steps as f32);
+                let cur = push_vert(verts, p, [t.cos(), t.sin()], 1.0);
+                idx.extend_from_slice(&[i_center, prev, cur]);
+                prev = cur;
+            }
+        }
+
+        // Runder Join an einem inneren Stuetzpunkt: Faecher NUR auf der konvexen
+        // (aeusseren) Seite der Ecke — die konkave Seite ueberlappt bereits durch
+        // die beiden Segment-Quads (kein Loch, keine zusaetzliche Geometrie noetig).
+        #[inline]
+        fn add_round_join(verts: &mut Vec<f32>, idx: &mut Vec<u32>, p: Point, d1: Point, d2: Point) {
+            let turn = d1[0] * d2[1] - d1[1] * d2[0];
+            let dot = d1[0] * d2[0] + d1[1] * d2[1];
+            if turn.abs() < 1e-6 && dot > 0.0 {
+                return; // praktisch gerade
+            }
+            let n1 = left_normal_of(d1);
+            let n2 = left_normal_of(d2);
+            if dot < -0.9999 {
+                // ~180-Grad-Umkehr: Aussenseite mehrdeutig -> voller Kreis (robust,
+                // entspricht zwei gestapelten Rund-Kappen an derselben Stelle).
+                let a0 = n1[1].atan2(n1[0]);
+                add_fan_arc(verts, idx, p, a0, a0 + 2.0 * std::f32::consts::PI);
+                return;
+            }
+            let outer = if turn > 0.0 { -1.0 } else { 1.0 };
+            let u1 = [outer * n1[0], outer * n1[1]];
+            let u2 = [outer * n2[0], outer * n2[1]];
+            let a1 = u1[1].atan2(u1[0]);
+            let a2 = u2[1].atan2(u2[0]);
+            let mut delta = a2 - a1;
+            while delta <= -std::f32::consts::PI {
+                delta += 2.0 * std::f32::consts::PI;
+            }
+            while delta > std::f32::consts::PI {
+                delta -= 2.0 * std::f32::consts::PI;
+            }
+            if delta.abs() < 1e-4 {
+                return;
+            }
+            add_fan_arc(verts, idx, p, a1, a1 + delta);
+        }
+
+        // Runde Kappe an einem offenen Ende: Halbkreis, der auf der Aussenseite
+        // (weg von der Linie) ausbaucht.
+        #[inline]
+        fn add_round_cap(verts: &mut Vec<f32>, idx: &mut Vec<u32>, p: Point, n: Point, sweep_sign: f32) {
+            let a0 = n[1].atan2(n[0]);
+            add_fan_arc(verts, idx, p, a0, a0 + sweep_sign * std::f32::consts::PI);
+        }
+
+        for v in 0..k {
+            let has_in = closed || v > 0;
+            let has_out = closed || v < k - 1;
+            let d_in = if has_in {
+                seg_dir[(v + segs - 1) % segs]
+            } else {
+                None
+            };
+            let d_out = if has_out { seg_dir[v % segs] } else { None };
+            match (d_in, d_out) {
+                (Some(di), Some(do_)) => {
+                    add_round_join(&mut self.line_verts, &mut self.line_idx, s[v], di, do_)
+                }
+                (None, Some(do_)) => {
+                    // Start-Kappe: baucht rueckwaerts (weg vom ersten Segment) aus.
+                    let n = left_normal_of(do_);
+                    add_round_cap(&mut self.line_verts, &mut self.line_idx, s[v], n, 1.0)
+                }
+                (Some(di), None) => {
+                    // End-Kappe: baucht vorwaerts (weg vom letzten Segment) aus.
+                    let n = left_normal_of(di);
+                    add_round_cap(&mut self.line_verts, &mut self.line_idx, s[v], n, -1.0)
+                }
+                (None, None) => {}
+            }
+        }
+
+        self.add_line_batch(
+            (self.line_idx.len() - start_idx_len) as u32,
+            color,
+            stroke_mm,
+            width_screen,
+        );
     }
 }
 

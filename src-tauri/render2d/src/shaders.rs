@@ -68,7 +68,7 @@ struct Globals {
 
 struct VsIn {
     @location(0) position : vec2<f32>,  // Bildschirm-Raum-Endpunkt
-    @location(1) bisector : vec2<f32>,  // Bildschirm-Raum-Miter-Bisektor (Einheit)
+    @location(1) bisector : vec2<f32>,  // Bildschirm-Raum-Versatzrichtung (Einheit; Normale bei Quads, Radialrichtung bei Rundkappen/-ecken)
     @location(2) side     : f32,        // +1.0 oder -1.0
     @location(3) miter    : f32,        // 1/cos(theta/2)-Laengenfaktor (Gehrung)
 };
