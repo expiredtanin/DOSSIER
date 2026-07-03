@@ -15,9 +15,10 @@
 // Einheiten: METER. Koordinaten der Ausgabe: u = horizontal entlang der Ebene,
 // v = absolute Höhe (world.y). Siehe src-tauri/render3d/src/section.rs.
 
-import type { Ceiling, DrawingLevel, Project, Wall } from "../model/types";
+import type { Ceiling, DrawingLevel, Project, Vec2, Wall } from "../model/types";
 import { getCeilingType, getComponent, getWallType, openingsOfWall } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
+import { dot, leftNormal, normalize, sub } from "../model/geometry";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { projectToModel3d } from "./toWalls3d";
 import { loadEngine3d } from "../engine/engine3d";
@@ -116,6 +117,48 @@ export function sectionPlaneFromLevel(level: DrawingLevel): SectionPlaneSpec | n
   };
 }
 
+/**
+ * Die in-plane-u-Weltrichtung der Schnittebene, projiziert in die Grundriss-
+ * Ebene (Modell-2D: model.x = world.x, model.y = world.z).
+ *
+ * Muss EXAKT der u-Achse des WASM-Extraktors entsprechen (`SectionPlane::u_axis`
+ * in section.rs): dort `u = normalize(cross(normal, up))` mit up = (0,1,0). Für
+ * eine horizontale Normale `[Nx, Ny, Nz]` ist `cross(normal, (0,1,0)) =
+ * (-Nz, 0, Nx)`; die Grundriss-Komponenten (x, z) sind also `(-Nz, Nx)`. Damit
+ * wächst die Ausgabe-u-Koordinate genau in dieser Modell-Richtung — die Referenz,
+ * gegen die die Wand-Aufbaurichtung projiziert wird. (Nicht normiert; für das
+ * Vorzeichen des Skalarprodukts irrelevant.)
+ */
+export function sectionUAxisModel(plane: SectionPlaneSpec): Vec2 {
+  const [nx, , nz] = plane.normal;
+  return { x: -nz, y: nx };
+}
+
+/**
+ * Ob die Schicht-Bänder einer Wand im Schnitt gegenüber der Default-Zuordnung
+ * (layers[0] → uMin) umzukehren sind, damit sie mit der GRUNDRISS-Poché
+ * übereinstimmen (Quelle der Wahrheit: `addWallPoche`/generatePlan).
+ *
+ * Konvention aus dem Grundriss: die Schichten stapeln entlang der linken Normalen
+ * `n = leftNormal(u)` der Wandachse `u = normalize(end − start)`, von layers[0]
+ * am kleinsten Offset (−T/2, `−n`-Seite) zu layers[n] am größten Offset (`+n`-
+ * Seite). Die Aufbaurichtung layers[0] → layers[n] zeigt also nach `+n`. Der
+ * Referenzlinien-Versatz (`wallReferenceOffset`) verschiebt nur die absolute
+ * Lage, nicht diese Reihenfolge — daher hier ohne Belang.
+ *
+ * `splitWallLayers` legt layers[0] per Default an uMin (u wächst entlang der
+ * Schnitt-u-Achse `uWorld`). Zeigt die Aufbaurichtung `+n` GEGEN `uWorld`
+ * (Skalarprodukt < 0), muss die Band-Reihenfolge gespiegelt werden, damit
+ * layers[0] auf der korrekten Weltseite (z. B. Aussenputz aussen) liegt und
+ * gegenüberliegende Wände spiegelverkehrt erscheinen.
+ */
+export function wallLayersReversedInU(owner: Wall, uWorld: Vec2): boolean {
+  const axis = sub(owner.end, owner.start);
+  if (Math.hypot(axis.x, axis.y) < 1e-9) return false;
+  const buildDir = leftNormal(normalize(axis)); // +n: layers[0] → layers[n]
+  return dot(buildDir, uWorld) < 0;
+}
+
 // ── Cut-Polygon → Quell-Bauteil (für die echte Hatch-Auflösung) ────────────
 // `cut_section_json` (section.rs) nummeriert jedes Cut-Polygon per
 // `ComponentRef { kind, index }`, wobei `index` exakt die Position im
@@ -204,8 +247,11 @@ export function slabSegmentOwners(project: Project): Ceiling[] {
  * `fill`/`hatch` — `generateSectionPlan` fällt dafür auf die generische
  * Schnitt-Schraffur zurück.
  */
-function attachCutStyles(output: SectionOutput, project: Project): void {
+function attachCutStyles(output: SectionOutput, project: Project, plane: SectionPlaneSpec): void {
   if (output.cutPolygons.length === 0) return;
+  // Schnitt-u-Weltachse (Modell-2D) — Referenz für die Aussen/Innen-Orientierung
+  // der mehrschichtigen Wand-Bänder (siehe `wallLayersReversedInU`).
+  const uWorld = sectionUAxisModel(plane);
   const walls = wallSegmentOwners(project);
   const slabs = slabSegmentOwners(project);
   const next: SectionCutPolygon[] = [];
@@ -221,7 +267,7 @@ function attachCutStyles(output: SectionOutput, project: Project): void {
       if (owner) {
         const wt = getWallType(project, owner);
         if (wt.layers.length > 1) {
-          next.push(...splitWallLayers(cp, project, wt));
+          next.push(...splitWallLayers(cp, project, wt, owner, uWorld));
           continue;
         }
       }
@@ -321,20 +367,24 @@ function splitSlabLayers(
  * Fugen ergeben sich implizit aus den aneinanderstoßenden Rechtecken.
  *
  * Reihenfolge/Orientierung: `WallType.layers` ist von einer Wandseite zur anderen
- * geordnet. Aus dem hier vorliegenden (u, v)-Rechteck allein lässt sich nicht
- * eindeutig ableiten, welche u-Seite der „Aussenseite" (layers[0]) entspricht —
- * das erforderte die Schnittebene (u→world) plus Wand-Normale. Daher die
- * deterministische Default-Zuordnung layers[0] → uMin, layers[n] → uMax. Keine
- * Zufalls-/Reihenfolge-Abhängigkeit. Eine Folge-Iteration kann die Seiten aus
- * Wandgeometrie + Schnittebene korrekt orientieren.
+ * geordnet (layers[0] = Aussenseite). Welche u-Seite des Schnittrechtecks der
+ * Aussenseite entspricht, folgt NICHT aus dem (u, v)-Rechteck allein, sondern aus
+ * der Wandgeometrie + der Schnitt-u-Weltachse `uWorld`: `wallLayersReversedInU`
+ * projiziert die Grundriss-Aufbaurichtung (`+leftNormal` der Achse, dieselbe
+ * Konvention wie `addWallPoche`/generatePlan) auf `uWorld`. Ist das Vorzeichen
+ * negativ, wird die Band-Reihenfolge gespiegelt (layers[0] → uMax statt uMin), so
+ * dass Schnitt und Grundriss übereinstimmen und gegenüberliegende Wände spiegel-
+ * verkehrt erscheinen (Dämmung aussen, Backstein innen).
  *
  * Annahme: rechteckiges Schnittpolygon (min/max-Bounding-Box auf `cp.pts`,
  * identisch zu `splitSlabLayers`).
  */
-function splitWallLayers(
+export function splitWallLayers(
   cp: SectionCutPolygon,
   project: Project,
   wt: ReturnType<typeof getWallType>,
+  owner: Wall,
+  uWorld: Vec2,
 ): SectionCutPolygon[] {
   const totalT = wt.layers.reduce((s, l) => s + l.thickness, 0);
   const us = cp.pts.map((p) => p[0]);
@@ -347,9 +397,13 @@ function splitWallLayers(
   if (totalT <= 1e-9 || uSpan <= 1e-9) return [cp];
   const scale = uSpan / totalT;
 
+  // Aussen/Innen-Orientierung: per Default liegt layers[0] an uMin; zeigt die
+  // Wand-Aufbaurichtung gegen die Schnitt-u-Achse, werden die Bänder gespiegelt.
+  const layers = wallLayersReversedInU(owner, uWorld) ? [...wt.layers].reverse() : wt.layers;
+
   const out: SectionCutPolygon[] = [];
-  let acc = 0; // kumulierte Dicke von uMin (layers[0]) nach uMax
-  for (const layer of wt.layers) {
+  let acc = 0; // kumulierte Dicke von uMin (erste einsortierte Schicht) nach uMax
+  for (const layer of layers) {
     const comp = getComponent(project, layer.componentId);
     const hatch = resolveHatch(project, comp.hatchId, undefined, resolveForeground(comp));
     const uLeft = uMin + acc * scale;
@@ -403,6 +457,6 @@ export async function computeSection(
     plane.normal[2],
   );
   const output = JSON.parse(json) as SectionOutput;
-  attachCutStyles(output, project);
+  attachCutStyles(output, project, plane);
   return output;
 }
