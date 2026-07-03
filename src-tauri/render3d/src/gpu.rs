@@ -20,6 +20,11 @@ use crate::types::{Camera, Mesh, SlabInput, WallInput, FLOATS_PER_VERTEX};
 /// Tiefenformat des Z-Puffers (32 Bit Float, ueberall verfuegbar).
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+/// MSAA-Samples fuer Farb- und Tiefenziel. 4x ist auf allen gaengigen Backends
+/// (Vulkan/Metal/DX12/GL) fuer die ueblichen Oberflaechenformate verfuegbar und
+/// gleicht die Treppenstufen an Wandkanten/Silhouetten spuerbar aus.
+const SAMPLE_COUNT: u32 = 4;
+
 /// Uniform-Block, 1:1 zum WGSL-`Globals`-Struct. std140-kompatibel (mat4/vec4 auf
 /// 16 Byte ausgerichtet).
 #[repr(C)]
@@ -69,6 +74,9 @@ pub struct Renderer {
     uniform: wgpu::Buffer,
     mesh: Option<MeshBuffers>,
     depth: Option<DepthTarget>,
+    msaa: Option<MsaaTarget>,
+    /// Farbformat des Render-Ziels (Surface), fuer die MSAA-Zwischentextur.
+    color_format: wgpu::TextureFormat,
     globals: Globals,
     /// Loeschfarbe (Hintergrund). Default heller Grauton wie die three.js-Sicht.
     pub clear_color: wgpu::Color,
@@ -76,6 +84,14 @@ pub struct Renderer {
 
 /// Tiefen-Textur samt View, an eine bestimmte Groesse gebunden.
 struct DepthTarget {
+    view: wgpu::TextureView,
+    width: u32,
+    height: u32,
+}
+
+/// Multisampled Farb-Zwischentextur samt View, an eine bestimmte Groesse
+/// gebunden. Wird jeden Frame in das eigentliche Ziel (Surface-View) aufgeloest.
+struct MsaaTarget {
     view: wgpu::TextureView,
     width: u32,
     height: u32,
@@ -152,7 +168,11 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -178,6 +198,8 @@ impl Renderer {
             uniform,
             mesh: None,
             depth: None,
+            msaa: None,
+            color_format,
             globals: Globals::default(),
             // #f5f5f5 heller Hintergrund (wie der 2D-Grundriss).
             clear_color: wgpu::Color {
@@ -250,7 +272,8 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
+            // Muss zur Sample-Zahl der Farb-/Pipeline-Ziele passen (MSAA).
+            sample_count: SAMPLE_COUNT,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -264,14 +287,45 @@ impl Renderer {
         });
     }
 
-    /// Zeichnet einen Frame in `view` (Surface- oder Offscreen-Textur). Die Kamera
-    /// liefert die View-Projektions-Matrix; `viewport` bestimmt das Seitenverhaeltnis
-    /// und die Tiefenpuffer-Groesse.
+    /// Stellt sicher, dass eine multisampled Farb-Zwischentextur passend zur
+    /// Ziel-Groesse existiert (wird jeden Frame in die Surface-View aufgeloest).
+    fn ensure_msaa(&mut self, device: &wgpu::Device, w: u32, h: u32) {
+        let ok = matches!(&self.msaa, Some(m) if m.width == w && m.height == h);
+        if ok {
+            return;
+        }
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("msaa.color"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.msaa = Some(MsaaTarget {
+            view,
+            width: w.max(1),
+            height: h.max(1),
+        });
+    }
+
+    /// Zeichnet einen Frame und loest ihn in `target` auf (Surface- oder
+    /// Offscreen-Textur). Intern wird in eine multisampled Zwischentextur (MSAA)
+    /// gerendert und am Ende der Pass in `target` aufgeloest. Die Kamera liefert
+    /// die View-Projektions-Matrix; `viewport` bestimmt das Seitenverhaeltnis und
+    /// die Tiefen-/MSAA-Puffer-Groesse.
     pub fn render(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        view: &wgpu::TextureView,
+        target: &wgpu::TextureView,
         camera: &Camera,
         viewport: (u32, u32),
     ) {
@@ -282,7 +336,9 @@ impl Renderer {
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&self.globals));
 
         self.ensure_depth(device, w, h);
+        self.ensure_msaa(device, w, h);
         let depth_view = &self.depth.as_ref().unwrap().view;
+        let msaa_view = &self.msaa.as_ref().unwrap().view;
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("3d.encoder"),
@@ -291,13 +347,17 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    // In die multisampled Zwischentextur rendern; wgpu loest sie am
+                    // Ende der Pass automatisch in `target` (Surface-View) auf.
+                    view: msaa_view,
                     // Ziel ist eine 2D-Textur (kein 3D-Volumen) -> kein Depth-Slice.
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: Some(target),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(self.clear_color),
-                        store: wgpu::StoreOp::Store,
+                        // Der multisampled Inhalt selbst wird nach dem Aufloesen nicht
+                        // mehr gebraucht — Discard spart Bandbreite.
+                        store: wgpu::StoreOp::Discard,
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
