@@ -7,7 +7,7 @@
 
 import type { Room, RoomStamp } from "./types";
 import type { SiaCategory } from "../geometry/roomArea";
-import type { RichTextDoc, Paragraph, TextRun } from "../text/richText";
+import type { RichTextDoc, Paragraph, TextRun, Align } from "../text/richText";
 import { makeRun } from "../text/richText";
 
 /** Grösse (pt) des Raumnamens (Zeile 1) relativ zur Stempel-Basis. */
@@ -43,10 +43,13 @@ export function roomStampToDoc(stamp: RoomStamp): RichTextDoc {
   }
   line1.push(makeRun(stamp.name, { bold: true, sizePt: NAME_PT }));
 
-  const paragraphs: Paragraph[] = [{ runs: line1 }];
+  const paragraphs: Paragraph[] = [{ runs: line1, align: stamp.nameAlign }];
   const line2 = (stamp.nameLine2 ?? "").trim();
   if (line2) {
-    paragraphs.push({ runs: [makeRun(line2, { italic: true, sizePt: LINE2_PT })] });
+    paragraphs.push({
+      runs: [makeRun(line2, { italic: true, sizePt: LINE2_PT })],
+      align: stamp.line2Align,
+    });
   }
   return { version: 1, paragraphs };
 }
@@ -58,18 +61,31 @@ export interface RoomStampContext {
   siaLabel: string;
 }
 
+/** Eine Live-Zeile des Stempels mit Text und Ausrichtung. */
+export interface RoomStampLine {
+  text: string;
+  align: Align;
+}
+
 /**
  * Die Live-Zeilen unter dem Stempel: Bodenfläche (mit Präfix) wenn showFloorArea,
- * Nutzung (SIA-Kürzel · Bezeichnung) wenn showUsage.
+ * Nutzung (SIA-Kürzel · Bezeichnung) wenn showUsage. Die Ausrichtung folgt den
+ * Stempel-Feldern; fehlt sie, gilt „zentriert" (Alt-Verhalten).
  */
-export function roomStampExtraLines(stamp: RoomStamp, ctx: RoomStampContext): string[] {
-  const lines: string[] = [];
+export function roomStampExtraLines(stamp: RoomStamp, ctx: RoomStampContext): RoomStampLine[] {
+  const lines: RoomStampLine[] = [];
   if (stamp.showFloorArea) {
     const prefix = stamp.floorAreaPrefix ?? "";
-    lines.push(`${prefix}${ctx.netArea.toFixed(2)} m²`);
+    lines.push({
+      text: `${prefix}${ctx.netArea.toFixed(2)} m²`,
+      align: stamp.floorAreaAlign ?? "center",
+    });
   }
   if (stamp.showUsage) {
-    lines.push(`${ctx.siaCategory} · ${ctx.siaLabel}`);
+    lines.push({
+      text: `${ctx.siaCategory} · ${ctx.siaLabel}`,
+      align: stamp.usageAlign ?? "center",
+    });
   }
   return lines;
 }

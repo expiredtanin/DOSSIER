@@ -4518,6 +4518,57 @@ body {
   color: var(--ink);
   cursor: pointer;
 }
+/* Zeile mit Feld/Häkchen links und Ausrichtungs-Umschalter rechts. */
+.roomstamp-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.roomstamp-row .roomstamp-field {
+  flex: 1;
+}
+.roomstamp-row .roomstamp-check {
+  flex: 1;
+}
+/* Drei-Wege-Umschalter (links/mitte/rechts) je Stempelzeile. */
+.roomstamp-align {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex: none;
+}
+.roomstamp-align-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.roomstamp-align-btn:first-child {
+  border-left: none;
+}
+.roomstamp-align-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.roomstamp-align-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.roomstamp-align-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.roomstamp-align .material-symbols-outlined {
+  font-size: 18px;
+}
 
 /* Flächenbilanz-Panel (SIA 416): Kopf, Raumliste, Summentabelle, Export. */
 .balance-panel {

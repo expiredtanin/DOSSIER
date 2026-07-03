@@ -34,6 +34,7 @@ import { evaluateRoom, siaLabel } from "../geometry/roomArea";
 import type { RichTextDoc } from "../text/richText";
 import { docFromText } from "../text/richText";
 import { roomStampToDoc, roomStampExtraLines } from "../model/roomStamp";
+import type { RoomStampLine } from "../model/roomStamp";
 import { stairVerticalExtent, wallReferenceOffset } from "../model/wall";
 import { stairGeometry, stairCut } from "../geometry/stair";
 import { doorSymbol, openingInterval, windowSymbol } from "../geometry/opening";
@@ -229,9 +230,10 @@ export type Primitive =
       doc: RichTextDoc;
       /**
        * LIVE-Zusatzzeilen (z. B. Fläche „24.30 m²" + SIA-Tag), UNTER dem Doc
-       * gezeichnet — unabhängig vom editierten Text, stets aktuell.
+       * gezeichnet — unabhängig vom editierten Text, stets aktuell. Jede Zeile
+       * trägt ihre eigene Ausrichtung (`align`).
        */
-      extraLines: string[];
+      extraLines: RoomStampLine[];
       /** Basis-Schriftgrösse in PUNKT (für Runs ohne eigene Grösse + Zusatzzeilen). */
       basePt: number;
       /** Textfarbe (hex) als Default. */
@@ -1309,8 +1311,11 @@ function addRoomArea(
           siaLabel: siaLabel(room.siaCategory),
         })
       : [
-          `${res.netArea.toFixed(2)} m²`,
-          `${room.siaCategory} · ${siaLabel(room.siaCategory)}`,
+          { text: `${res.netArea.toFixed(2)} m²`, align: "center" as const },
+          {
+            text: `${room.siaCategory} · ${siaLabel(room.siaCategory)}`,
+            align: "center" as const,
+          },
         ];
     out.push({
       kind: "text",

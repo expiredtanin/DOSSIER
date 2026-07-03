@@ -8,6 +8,7 @@
 
 import type { Project, Vec2 } from "../model/types";
 import { lineIntersect } from "../model/geometry";
+import { centroid as roomCentroid } from "../geometry/roomArea";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
@@ -109,13 +110,20 @@ export function computeSnap(input: SnapInput): SnapResult | null {
       ? collectSegments(input)
       : [];
 
-  // endpoint (Strecken-Endpunkte + Draft-Knoten).
+  // endpoint (Strecken-Endpunkte + Draft-Knoten + Raum-Stempel-Anker).
   if (settings.endpoint) {
     for (const [a, b] of segs) {
       consider(a, "endpoint");
       consider(b, "endpoint");
     }
     for (const p of input.draftPoints) consider(p, "endpoint");
+    // Raum-Stempel-Anker (fixer Anker, sonst Flächenschwerpunkt) des Geschosses.
+    for (const room of input.project.rooms ?? []) {
+      if (room.floorId !== input.levelId) continue;
+      if (!input.visibleCodes.has(room.categoryCode)) continue;
+      if (room.boundary.length < 3) continue;
+      consider(room.stampAnchor ?? roomCentroid(room.boundary), "endpoint");
+    }
   }
   // midpoint.
   if (settings.midpoint) {

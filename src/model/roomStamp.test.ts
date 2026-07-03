@@ -71,8 +71,8 @@ describe("roomStampExtraLines", () => {
       { name: "Bad", showFloorArea: true, showUsage: true, floorAreaPrefix: "BF " },
       { netArea: 12.345, siaCategory: "HNF", siaLabel: "Hauptnutzfläche" },
     );
-    expect(lines[0]).toBe("BF 12.35 m²");
-    expect(lines[1]).toBe("HNF · Hauptnutzfläche");
+    expect(lines[0].text).toBe("BF 12.35 m²");
+    expect(lines[1].text).toBe("HNF · Hauptnutzfläche");
   });
 
   it("blendet Zeilen aus, wenn Flags falsch", () => {

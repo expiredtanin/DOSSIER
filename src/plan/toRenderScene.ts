@@ -483,7 +483,7 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
         });
       }
       for (const line of p.extraLines) {
-        flat.push({ content: line, sizeMm: baseMm * 0.8, color: defCol, align: "center" });
+        flat.push({ content: line.text, sizeMm: baseMm * 0.8, color: defCol, align: line.align });
       }
       if (flat.length > 0) {
         const baseH = baseMm * mmToM; // Basisgröße in Modell-Metern, beim gewählten Massstab

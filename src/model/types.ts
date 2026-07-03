@@ -16,7 +16,7 @@ export type Vec2 = { x: number; y: number };
 import type { SiaCategory } from "../geometry/roomArea";
 export type { SiaCategory } from "../geometry/roomArea";
 // Rich-Text-Dokument für den Raum-Stempel (frei editierbarer Teil).
-import type { RichTextDoc } from "../text/richText";
+import type { RichTextDoc, Align } from "../text/richText";
 export type { RichTextDoc } from "../text/richText";
 
 // ── Ressourcen-Bibliotheken (Vectorworks-/DOSSIER-Stil) ────────────────────
@@ -679,6 +679,14 @@ export interface RoomStamp {
   floorAreaPrefix?: string;
   /** Nutzung (HNF/… · Bezeichnung) anzeigen (Live-Zeile). */
   showUsage: boolean;
+  /** Ausrichtung der Namenszeile (Zeile 1). Fehlt sie, gilt „links". */
+  nameAlign?: Align;
+  /** Ausrichtung der zweiten Namenszeile. Fehlt sie, gilt „links". */
+  line2Align?: Align;
+  /** Ausrichtung der Bodenflächen-Zeile. Fehlt sie, gilt „zentriert" (Alt-Verhalten). */
+  floorAreaAlign?: Align;
+  /** Ausrichtung der Nutzungs-Zeile. Fehlt sie, gilt „zentriert" (Alt-Verhalten). */
+  usageAlign?: Align;
 }
 
 /** Eine Tür, gehostet in einer Wand. Ihr Geschoss ergibt sich aus der Wand. */

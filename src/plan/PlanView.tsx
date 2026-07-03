@@ -2814,8 +2814,8 @@ function renderPrimitive(
         color: p.color,
       });
       const extra: SvgLine[] = p.extraLines.map((line) => ({
-        align: "center" as const,
-        tspans: [{ text: line, fontSize: baseFs * 0.8, fill: p.color }],
+        align: line.align,
+        tspans: [{ text: line.text, fontSize: baseFs * 0.8, fill: p.color }],
       }));
       const lines = [...docLines, ...extra];
       if (lines.length === 0) return null;
