@@ -25,13 +25,17 @@ pub type Rgb = [f32; 3];
 /// erzeugt (Band aus Achse+Dicke, hochgezogen auf `height` ab `base_elevation`).
 ///
 /// Vereinfachung des Web-`Wall` (siehe src/model/wall.ts): Ecken-Verschneidung
-/// (`computeJoins`/`wallCorners`) kommt in einem spaeteren Milestone; M1 extrudiert
-/// jede Wand als eigenstaendigen, an den Enden stumpf abgeschlossenen Quader.
+/// (Gehrung an echten Wandenden, analog `computeJoins`/`wallCorners` im Web)
+/// wird von `mesh.rs` SELBSTAENDIG aus der Wandkonnektivitaet berechnet (siehe
+/// `mesh::compute_wall_miters`) — keine eigenen Eingabefelder noetig, robust
+/// auch gegenueber der hier bereits in Teilquader zerlegten Darstellung (siehe
+/// `openings` unten). Das Schnitt-Modul (`section.rs`) nutzt weiterhin die
+/// (unveraenderte) achsparallele Bounding-Box-Naeherung ohne Gehrung — siehe
+/// dessen Moduldoc "Bekannte Vereinfachungen".
 /// `openings` (Tueren/Fenster, siehe `Opening`) werden vom Schnitt-Modul
-/// (`section.rs`) ausgewertet; die Vollkoerper-Extrusion (`mesh.rs`) kennt sie
-/// (noch) NICHT und extrudiert weiterhin die volle Wandflaeche — siehe
-/// `mesh.rs`-Moduldoc und `docs/design/engine-section-pipeline.md` fuer diese
-/// bekannte Diskrepanz.
+/// (`section.rs`) UND von der Vollkoerper-Extrusion (`mesh.rs`) ausgewertet
+/// (siehe `mesh::wall_solid_segments`) — beide nutzen dieselbe Bruestungs-/
+/// Sturz-Zerlegung (`crate::openings`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WallInput {
     /// Achsen-Startpunkt im Grundriss (Modell-Meter).
@@ -39,6 +43,9 @@ pub struct WallInput {
     /// Achsen-Endpunkt im Grundriss (Modell-Meter).
     pub end: Point2,
     /// Wanddicke in Metern (das Band wird um `thickness/2` je Seite versetzt).
+    /// Bleibt auch bei gesetztem `layers` die GESAMT-Dicke (Summe der
+    /// Schichtdicken) — `section.rs`/`web::model_bounds` rechnen weiterhin
+    /// allein mit diesem Feld, kennen `layers` nicht.
     pub thickness: f32,
     /// Wandhoehe in Metern (Extrusion entlang +Y).
     pub height: f32,
@@ -46,11 +53,28 @@ pub struct WallInput {
     #[serde(default, rename = "baseElevation")]
     pub base_elevation: f32,
     /// Albedo-Farbe der Wand (RGB 0..1). Default helles Grau wie die three.js-Sicht.
+    /// Nur wirksam, wenn `layers` fehlt/leer ist (Vollkoerper-Fallback).
     #[serde(default = "default_wall_color")]
     pub color: Rgb,
     /// Oeffnungen (Tueren/Fenster) entlang der Wandachse. Default leer (volle Wand).
     #[serde(default)]
     pub openings: Vec<Opening>,
+    /// Optionaler Schichtaufbau (z. B. Putz/Daemmung/Mauerwerk), quer zur
+    /// Gesamtdicke gestapelt (siehe `mesh::extrude_wall`). Fehlt dieses Feld
+    /// (`None`) oder ist es leer, extrudiert `mesh.rs` weiterhin EINEN
+    /// Vollkoerper aus `thickness`/`color` (Rueckwaertskompatibilitaet, M1-
+    /// Verhalten unveraendert).
+    #[serde(default)]
+    pub layers: Option<Vec<WallLayer>>,
+}
+
+/// Eine Wandschicht: Dicke + eigene Albedo-Farbe. Siehe `WallInput::layers`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct WallLayer {
+    /// Schichtdicke in Metern.
+    pub thickness: f32,
+    /// Albedo-Farbe dieser Schicht (RGB 0..1).
+    pub color: Rgb,
 }
 
 /// Eine Oeffnung (Tuer/Fenster) in einer Wand: Intervall entlang der Wandachse

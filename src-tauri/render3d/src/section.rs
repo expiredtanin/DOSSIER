@@ -101,12 +101,19 @@
 //!   (Rechteck-Baender) und Decken (i.d.R. konvexe Rechtecke) ist das exakt;
 //!   fuer stark diagonale oder konkave Grundrisse kann es zu Ueberverdeckung
 //!   fuehren.
-//! - Keine Wandknoten-Verschneidung (T-/X-Stoesse): Waende werden wie in
-//!   `mesh.rs` als eigenstaendige, stumpf abgeschlossene Quader behandelt, die
-//!   sich an Ecken UEBERLAPPEN (kein Miter-Join). Das kann in Ecknaehe dazu
-//!   fuehren, dass eine Wand als "in eine andere eingebettet" verdeckt erscheint
-//!   (siehe Test `eck_ueberlappung_verdeckt_kante_am_wandknoten` unten) — real,
-//!   aber ein Artefakt der fehlenden Verschneidungslogik, kein Bug dieses Moduls.
+//! - Keine Wandknoten-Verschneidung (T-/X-Stoesse): DIESES Modul behandelt
+//!   Waende weiterhin als eigenstaendige, stumpf abgeschlossene Quader, die
+//!   sich an Ecken UEBERLAPPEN (kein Miter-Join) — sowohl fuer die Cut-Polygone
+//!   als auch fuer die Verdeckungs-Bounding-Box. `mesh.rs` (die Vollkoerper-
+//!   Extrusion fuer die 3D-Ansicht) berechnet die Eck-Gehrung inzwischen SELBST
+//!   (`mesh::compute_wall_miters`, aus der Wandkonnektivitaet); dieses Modul
+//!   zieht davon bewusst KEINEN Nutzen, weil seine Verdeckungs-Bounding-Box
+//!   ohnehin nur die achsparallele Grundflaeche kennt (siehe oben) — eine
+//!   gehrte, nicht-achsparallele Kante wuerde dort keinen Praezisionsgewinn
+//!   bringen. Das kann in Ecknaehe dazu fuehren, dass eine Wand als "in eine
+//!   andere eingebettet" verdeckt erscheint (siehe Test
+//!   `eck_ueberlappung_verdeckt_kante_am_wandknoten` unten) — real, aber ein
+//!   Artefakt der fehlenden Verschneidungslogik DIESES Moduls, kein Bug.
 //! - Oeffnungen werden hier (Cut + Projektion) UND von der Vollkoerper-
 //!   Extrusion in `mesh.rs` ausgewertet (`mesh::wall_solid_segments`) — beide
 //!   nutzen dieselbe Bruestungs-/Sturz-Zerlegung (`crate::openings::
@@ -984,6 +991,7 @@ mod tests {
                 base_elevation: 0.0,
                 color,
                 openings: vec![],
+                layers: None,
             },
             WallInput {
                 start: [0.0, 3.0],
@@ -993,6 +1001,7 @@ mod tests {
                 base_elevation: 0.0,
                 color,
                 openings: vec![],
+                layers: None,
             },
         ];
         let slabs = vec![SlabInput {
@@ -1208,6 +1217,7 @@ mod tests {
                 sill: 1.0,
                 height: 1.0,
             }],
+            layers: None,
         }
     }
 
@@ -1292,6 +1302,7 @@ mod tests {
             base_elevation: 0.0,
             color: [0.8, 0.8, 0.8],
             openings: vec![],
+            layers: None,
         };
         // Blick von y = -2 nach +Y: beide Waende (y=0 bzw. y=1) liegen dahinter.
         let plane = SectionPlane::looking_plus_y(-2.0);

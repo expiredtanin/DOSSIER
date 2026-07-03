@@ -47,7 +47,7 @@ pub use types::{
 #[cfg(test)]
 mod tests {
     use super::mesh::{build_walls_mesh, extrude_wall, INDICES_PER_BOX, VERTS_PER_BOX};
-    use super::types::{Mesh, Opening, WallInput, FLOATS_PER_VERTEX};
+    use super::types::{Mesh, Opening, WallInput, WallLayer, FLOATS_PER_VERTEX};
 
     /// Bequemer Bau einer achsparallelen Wand entlang +X.
     fn wall_x(len: f32, thickness: f32, height: f32) -> WallInput {
@@ -59,6 +59,7 @@ mod tests {
             base_elevation: 0.0,
             color: [0.8, 0.8, 0.8],
             openings: vec![],
+            layers: None,
         }
     }
 
@@ -95,6 +96,7 @@ mod tests {
                 base_elevation: 0.0,
                 color: [0.8, 0.8, 0.8],
                 openings: vec![],
+                layers: None,
             },
         ]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX);
@@ -172,6 +174,7 @@ mod tests {
             base_elevation: 0.0,
             color: [0.8, 0.8, 0.8],
             openings: vec![],
+            layers: None,
         };
         let mut mesh = Mesh::default();
         extrude_wall(&mut mesh, &w);
@@ -192,6 +195,7 @@ mod tests {
             base_elevation: 0.0,
             color: [0.8, 0.8, 0.8],
             openings: vec![],
+            layers: None,
         };
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), 0);
@@ -293,6 +297,228 @@ mod tests {
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), VERTS_PER_BOX);
         assert_eq!(mesh.indices.len(), INDICES_PER_BOX);
+    }
+
+    // --- Ecken-Verschneidung (Gehrung) -----------------------------------------
+
+    #[test]
+    fn rechtwinklige_ecke_wird_gehrt_kein_ueberstand_kein_spalt() {
+        // Zwei Waende entlang +X bzw. +Y, die sich exakt im Ursprung treffen
+        // (L-Ecke, Dicke 0.4 -> Halbdicke 0.2). Ohne Gehrung ueberlappen sich die
+        // Baender im Eckbereich (jede Wand ragt um die Halbdicke der jeweils
+        // anderen ueber den Knoten hinaus); MIT Gehrung muessen alle Vertices IM
+        // Eckbereich exakt auf der 45-Grad-Gehrungslinie |x| == |z| liegen —
+        // weder darueber hinaus (Ueberstand) noch darunter (Spalt).
+        let a = WallInput {
+            start: [0.0, 0.0],
+            end: [3.0, 0.0],
+            thickness: 0.4,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: None,
+        };
+        let b = WallInput {
+            start: [0.0, 0.0],
+            end: [0.0, 3.0],
+            thickness: 0.4,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: None,
+        };
+        let mesh = build_walls_mesh(&[a, b]);
+        assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX, "weiterhin zwei Quader");
+
+        // Jeder Vertex nahe dem Knoten (innerhalb der doppelten Halbdicke) muss
+        // auf der Gehrungslinie liegen: world.x und world.z (== Grundriss-y)
+        // betragsgleich (45-Grad-Winkelhalbierende der beiden Achsen).
+        let near_corner_margin = 0.5; // deutlich groesser als die Halbdicke 0.2
+        let n = mesh.vertex_count();
+        let mut checked_any = false;
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            if p[0].abs() < near_corner_margin && p[2].abs() < near_corner_margin {
+                checked_any = true;
+                assert!(
+                    (p[0].abs() - p[2].abs()).abs() < 1e-4,
+                    "Eck-Vertex {i} bei {p:?} liegt nicht auf der 45-Grad-Gehrungslinie"
+                );
+            }
+        }
+        assert!(checked_any, "Test hat keinen Eck-Vertex gefunden (Setup falsch)");
+
+        // Kein Vertex ragt ueber die Gehrungslinie hinaus: fuer Punkte mit x>0
+        // UND z>0 (im "inneren" Quadranten der Ecke) muss min(x,z) <= Halbdicke
+        // gelten -- sonst wuerde die Wand ueber die andere hinausragen.
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            if p[0] > 1e-4 && p[2] > 1e-4 && p[0] < near_corner_margin && p[2] < near_corner_margin {
+                assert!(
+                    p[0].min(p[2]) <= 0.2 + 1e-4,
+                    "Vertex {i} bei {p:?} ragt ueber die Gehrung hinaus"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn freies_wandende_bleibt_rechtwinklig() {
+        // Eine einzelne Wand ohne Nachbarn: keine Gehrung, Enden bleiben exakt
+        // senkrecht zur Achse -> identisch zum Einzel-Wand-Regressionsfall.
+        let mesh = build_walls_mesh(&[wall_x(3.0, 0.2, 2.5)]);
+        let (min, max) = mesh.bounds();
+        assert!((min[0]).abs() < 1e-5 && (max[0] - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn t_stoss_bleibt_rechtwinklig() {
+        // Drei Wandenden treffen sich im selben Knoten (T-Stoss) -> gemaess
+        // Moduldoc/`joins.ts` bewusst NICHT gehrt (mehrdeutig), alle drei bleiben
+        // rechtwinklig. Regressions-Absicherung: keine Panik, stabile Zaehlung.
+        let mk = |s: [f32; 2], e: [f32; 2]| WallInput {
+            start: s,
+            end: e,
+            thickness: 0.2,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: None,
+        };
+        let walls = vec![
+            mk([0.0, 0.0], [3.0, 0.0]),
+            mk([0.0, 0.0], [0.0, 3.0]),
+            mk([0.0, 0.0], [-3.0, 0.0]),
+        ];
+        let mesh = build_walls_mesh(&walls);
+        assert_eq!(mesh.vertex_count(), 3 * VERTS_PER_BOX);
+    }
+
+    #[test]
+    fn zwei_geschosse_mit_gleichem_grundriss_verschneiden_sich_nicht_ueber_geschosse() {
+        // EG (Hoehe 0..2.5) und OG (Basis 2.5, Hoehe 2.5..5.0) mit identischem
+        // L-Grundriss: die Hoehenbereiche BERUEHREN sich nur (bei 2.5), ueber-
+        // lappen aber nicht -> jedes Geschoss wird NUR gegen sein eigenes
+        // Pendant gehrt, nicht ueber die Geschossgrenze hinweg. Absicherung:
+        // beide Geschosse zusammen liefern exakt dieselbe Gehrung wie ein
+        // einzelnes Geschoss fuer sich (Vertex-Zaehlung + Eck-Vertices je
+        // Geschoss weiterhin auf der 45-Grad-Linie relativ zu SEINER Basis).
+        let mk = |s: [f32; 2], e: [f32; 2], base: f32| WallInput {
+            start: s,
+            end: e,
+            thickness: 0.4,
+            height: 2.5,
+            base_elevation: base,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: None,
+        };
+        let walls = vec![
+            mk([0.0, 0.0], [3.0, 0.0], 0.0),
+            mk([0.0, 0.0], [0.0, 3.0], 0.0),
+            mk([0.0, 0.0], [3.0, 0.0], 2.5),
+            mk([0.0, 0.0], [0.0, 3.0], 2.5),
+        ];
+        let mesh = build_walls_mesh(&walls);
+        assert_eq!(mesh.vertex_count(), 4 * VERTS_PER_BOX);
+        let n = mesh.vertex_count();
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            if p[0].abs() < 0.5 && p[2].abs() < 0.5 {
+                assert!(
+                    (p[0].abs() - p[2].abs()).abs() < 1e-4,
+                    "Eck-Vertex {i} bei {p:?} (Geschoss-Basis {}) nicht auf der Gehrung",
+                    p[1]
+                );
+            }
+        }
+    }
+
+    // --- Schichten (WallInput::layers) -----------------------------------------
+
+    #[test]
+    fn ohne_layers_entsteht_weiterhin_ein_vollkoerper() {
+        // Regressionsfall: `layers: None` extrudiert exakt wie zuvor.
+        let mesh = build_walls_mesh(&[wall_x(3.0, 0.2, 2.5)]);
+        assert_eq!(mesh.vertex_count(), VERTS_PER_BOX);
+    }
+
+    #[test]
+    fn layer_wand_liefert_ein_prisma_je_schicht() {
+        // Drei Schichten (Putz/Daemmung/Mauerwerk) -> drei eigenstaendige
+        // Quader, je VERTS_PER_BOX Vertices, ohne Oeffnungen.
+        let mut w = wall_x(3.0, 0.3, 2.5);
+        w.layers = Some(vec![
+            WallLayer { thickness: 0.02, color: [1.0, 1.0, 1.0] },
+            WallLayer { thickness: 0.18, color: [0.9, 0.85, 0.7] },
+            WallLayer { thickness: 0.10, color: [0.6, 0.3, 0.2] },
+        ]);
+        let mesh = build_walls_mesh(&[w]);
+        assert_eq!(mesh.vertex_count(), 3 * VERTS_PER_BOX);
+        assert_eq!(mesh.indices.len(), 3 * INDICES_PER_BOX);
+
+        // Die Schichten decken zusammen exakt die Gesamtdicke (0.3, Z in
+        // -0.15..0.15) lueckenlos und ueberlappungsfrei ab.
+        let (min, max) = mesh.bounds();
+        assert!((min[2] + 0.15).abs() < 1e-4, "min z == -0.15");
+        assert!((max[2] - 0.15).abs() < 1e-4, "max z == 0.15");
+
+        // Jede Schicht-Farbe taucht in den Vertex-Farben auf (Layer wurden
+        // tatsaechlich mit ihrer eigenen Farbe extrudiert, nicht der Wandfarbe).
+        let n = mesh.vertex_count();
+        let has_color = |target: [f32; 3]| {
+            (0..n).any(|i| {
+                let b = i * FLOATS_PER_VERTEX;
+                let c = [mesh.verts[b + 6], mesh.verts[b + 7], mesh.verts[b + 8]];
+                (c[0] - target[0]).abs() < 1e-6
+                    && (c[1] - target[1]).abs() < 1e-6
+                    && (c[2] - target[2]).abs() < 1e-6
+            })
+        };
+        assert!(has_color([1.0, 1.0, 1.0]), "Putz-Farbe fehlt");
+        assert!(has_color([0.9, 0.85, 0.7]), "Daemmungs-Farbe fehlt");
+        assert!(has_color([0.6, 0.3, 0.2]), "Mauerwerk-Farbe fehlt");
+    }
+
+    #[test]
+    fn layer_ecke_wird_ebenfalls_gehrt() {
+        // Zwei mehrschichtige Waende an einer Ecke: JEDE Schicht nutzt dasselbe
+        // gehrte Fussabdruck-Band -> auch hier landen alle Eck-Vertices exakt
+        // auf der 45-Grad-Gehrungslinie (analog zum Vollkoerper-Test oben).
+        let layers = || {
+            Some(vec![
+                WallLayer { thickness: 0.15, color: [0.9, 0.85, 0.7] },
+                WallLayer { thickness: 0.15, color: [0.6, 0.3, 0.2] },
+            ])
+        };
+        let a = WallInput {
+            start: [0.0, 0.0],
+            end: [3.0, 0.0],
+            thickness: 0.3,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: layers(),
+        };
+        let mut b = a.clone();
+        b.end = [0.0, 3.0];
+
+        let mesh = build_walls_mesh(&[a, b]);
+        let n = mesh.vertex_count();
+        assert_eq!(n, 4 * VERTS_PER_BOX, "2 Waende x 2 Schichten");
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            if p[0].abs() < 0.4 && p[2].abs() < 0.4 {
+                assert!(
+                    (p[0].abs() - p[2].abs()).abs() < 1e-4,
+                    "Layer-Eck-Vertex {i} bei {p:?} nicht auf der Gehrung"
+                );
+            }
+        }
     }
 
     // --- Deckenplatten (extrudierte Polygone) ---------------------------------
