@@ -750,8 +750,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // (toScreen spiegelt Y), damit „außen" am Bildschirm auch wirklich außen ist.
   // Dreieck-Höhe (nach außen) + halbe Basisbreite in Bildschirm-Pixeln. Die Basis
   // sitzt AUF der Linie (am Kanten-Mittelpunkt), die Spitze zeigt nach außen.
-  const EDGE_GRIP_H_PX = 14;
-  const EDGE_GRIP_HALF_PX = 8;
+  // Flacher, breiter Pfeil (Apex ~124°, also flacher als 120°) statt spitzem
+  // Dreieck: breitere Basis, geringere Höhe.
+  const EDGE_GRIP_H_PX = 8;
+  const EDGE_GRIP_HALF_PX = 15;
   const screenNormal = (n: Vec2): Vec2 => ({ x: n.x, y: -n.y });
   // Index des Kanten-Griffs unter dem Cursor (Bildschirm-Pixel) oder null. Die
   // Trefferfläche liegt um die Dreiecks-Mitte (etwas außerhalb der Linie).
