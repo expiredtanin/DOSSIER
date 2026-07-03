@@ -1720,6 +1720,8 @@ export default function App() {
   const setElementWeight = useStore((s) => s.setElementWeight);
   const setElementFill = useStore((s) => s.setElementFill);
   const setElementFillColor = useStore((s) => s.setElementFillColor);
+  const setElementForeground = useStore((s) => s.setElementForeground);
+  const setElementBackground = useStore((s) => s.setElementBackground);
   const resizeElement = useStore((s) => s.resizeElement);
   const updateWall = useStore((s) => s.updateWall);
   const setWallThickness = useStore((s) => s.setWallThickness);
@@ -2025,6 +2027,24 @@ export default function App() {
         // Vollton-Füllfarbe nur bei Drawing2D (geschlossene Formen).
         if (selection?.kind === "drawing2d")
           setElementFillColor(selection.id, color);
+      },
+      onSetSelectionForeground: (color) => {
+        // Vordergrund-Override: Wand, Decke oder Drawing2D.
+        if (
+          selection?.kind === "wall" ||
+          selection?.kind === "ceiling" ||
+          selection?.kind === "drawing2d"
+        )
+          setElementForeground(selection.kind, selection.id, color);
+      },
+      onSetSelectionBackground: (color) => {
+        // Hintergrund-Override: Wand, Decke oder Drawing2D.
+        if (
+          selection?.kind === "wall" ||
+          selection?.kind === "ceiling" ||
+          selection?.kind === "drawing2d"
+        )
+          setElementBackground(selection.kind, selection.id, color);
       },
       onResizeSelection: (w, h, anchor) => {
         if (selection?.kind === "wall" || selection?.kind === "drawing2d")

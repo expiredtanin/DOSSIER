@@ -145,6 +145,16 @@ export interface PanelHostValue {
    */
   onSetSelectionFillColor: (color: string | null) => void;
   /**
+   * Setzt/entfernt den Vordergrund-Override (Muster-/Schraffurfarbe) der
+   * Selektion — Wand, Decke oder geschlossene Drawing2D. `null` = „Nach System".
+   */
+  onSetSelectionForeground: (color: string | null) => void;
+  /**
+   * Setzt/entfernt den Hintergrund-Override (Füllfarbe/Poché) der Selektion —
+   * Wand, Decke oder geschlossene Drawing2D. `null` = „Nach System".
+   */
+  onSetSelectionBackground: (color: string | null) => void;
+  /**
    * Skaliert die Selektion auf Zielbreite×-höhe (Meter) um einen Anker
    * (fx/fy ∈ [0,1] relativ zur bbox; 0,0 = oben-links … 1,1 = unten-rechts).
    */

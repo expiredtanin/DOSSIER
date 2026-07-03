@@ -218,6 +218,17 @@ export interface Selection {
    * keine (transparent). Bei Wänden/Türen `undefined` (nicht anwendbar).
    */
   fillColor?: string | null;
+  /**
+   * Vordergrund-Override (Muster-/Schraffurfarbe) des Elements; `undefined` =
+   * „Nach System" (erbt vom Bauteil/System). Gesetzt bei Wand, Decke und
+   * geschlossener Drawing2D.
+   */
+  foreground?: string;
+  /**
+   * Hintergrund-Override (Füllfarbe/Poché) des Elements; `undefined` = „Nach
+   * System". Nachfolger von `fillColor`; hat im Plan Vorrang.
+   */
+  background?: string;
   /** Ob die Form geschlossen ist (rect/circle/closed polyline) — nur Drawing2D. */
   closed?: boolean;
   /** Achsparallele Bounding-Box in Modell-Metern. */
@@ -342,6 +353,8 @@ function wallSelection(project: Project, wall: Wall): Selection {
     weightMm,
     fillHatchId: undefined,
     fillColor: undefined,
+    foreground: wall.foreground,
+    background: wall.background,
     closed: undefined,
     bbox: { minX, minY, maxX, maxY },
     wall: wallInfo,
@@ -386,6 +399,8 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     weightMm,
     fillHatchId: undefined,
     fillColor: undefined,
+    foreground: ceiling.foreground,
+    background: ceiling.background,
     closed: true,
     bbox: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY },
     ceiling: ceilingInfo,
@@ -542,6 +557,8 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     weightMm,
     fillHatchId: closed ? d.hatchId ?? null : null,
     fillColor: closed ? d.fillColor ?? null : null,
+    foreground: closed ? d.foreground : undefined,
+    background: closed ? d.background : undefined,
     closed,
     bbox: geomBBox(d.geom),
   };

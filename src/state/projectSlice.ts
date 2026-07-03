@@ -135,6 +135,24 @@ export interface ProjectSlice {
    */
   setElementFillColor: (id: string, fillColor: string | null) => void;
   /**
+   * Setzt/entfernt den Vordergrund-Override (Muster-/Schraffurfarbe) — Wand,
+   * Decke oder Drawing2D. `null` = „Nach System" (Feld entfernen → erben).
+   */
+  setElementForeground: (
+    kind: "wall" | "ceiling" | "drawing2d",
+    id: string,
+    value: string | null,
+  ) => void;
+  /**
+   * Setzt/entfernt den Hintergrund-Override (Füllfarbe/Poché) — Wand, Decke
+   * oder Drawing2D. `null` = „Nach System" (Feld entfernen → erben).
+   */
+  setElementBackground: (
+    kind: "wall" | "ceiling" | "drawing2d",
+    id: string,
+    value: string | null,
+  ) => void;
+  /**
    * Skaliert die Geometrie eines Elements auf Zielbreite×-höhe (Meter) um einen
    * Ankerpunkt (fx/fy ∈ [0,1] relativ zur bbox; 0,0 = oben-links).
    */
@@ -723,6 +741,13 @@ export function createProjectSlice(
         }),
       })),
 
+    // Vordergrund-/Hintergrund-Override (Wand/Decke/Drawing2D); `null` löscht
+    // das Feld (→ „Nach System", erbt wieder vom Bauteil/System).
+    setElementForeground: (kind, id, value) =>
+      setProject((p) => setOverrideField(p, kind, id, "foreground", value)),
+    setElementBackground: (kind, id, value) =>
+      setProject((p) => setOverrideField(p, kind, id, "background", value)),
+
     // ── Größe (Resize um Anker) ────────────────────────────────────────────
     resizeElement: (kind, id, w, h, anchor) =>
       setProject((p) => resizeElement(p, kind, id, w, h, anchor)),
@@ -879,6 +904,32 @@ function mapStair(
 }
 
 /** Immutabler Map über eine Decke (per ID); No-op ohne Treffer. */
+/**
+ * Setzt/entfernt einen optionalen Farb-Override (`foreground`/`background`) an
+ * einem Element (Wand, Decke oder Drawing2D). `value === null` entfernt das Feld
+ * (→ „Nach System", erbt wieder). Immutable; unbekannte IDs sind ein No-op.
+ */
+function setOverrideField(
+  project: Project,
+  kind: "wall" | "ceiling" | "drawing2d",
+  id: string,
+  field: "foreground" | "background",
+  value: string | null,
+): Project {
+  const apply = <T extends { id: string }>(item: T): T => {
+    if (item.id !== id) return item;
+    if (value === null) {
+      const { [field]: _omit, ...rest } = item as Record<string, unknown>;
+      return rest as unknown as T;
+    }
+    return { ...item, [field]: value };
+  };
+  if (kind === "wall") return { ...project, walls: project.walls.map(apply) };
+  if (kind === "ceiling")
+    return { ...project, ceilings: (project.ceilings ?? []).map(apply) };
+  return { ...project, drawings2d: project.drawings2d.map(apply) };
+}
+
 function mapCeiling(
   project: Project,
   ceilingId: string,

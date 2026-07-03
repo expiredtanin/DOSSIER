@@ -37,8 +37,51 @@ export function AttributesPanel() {
   // Strichstärke wirkt laut Kontrakt nur auf Drawing2D; Wände erben sie aus der
   // Ebene und sind daher hier nicht editierbar.
   const weightEditable = isDrawing;
-  // Füllung nur bei geschlossener 2D-Form sinnvoll.
+  // Füllschraffur nur bei geschlossener 2D-Form sinnvoll.
   const fillEditable = isDrawing && sel.closed === true;
+  // Vordergrund/Hintergrund (Muster-/Füllfarbe) tragen Wand, Decke und
+  // geschlossene 2D-Formen als Override; `undefined` = „Nach System".
+  const pocheEditable =
+    sel.kind === "wall" ||
+    sel.kind === "ceiling" ||
+    (isDrawing && sel.closed === true);
+
+  // Ein Override-Farbfeld mit „Nach System"-Zustand: ist der Wert `undefined`,
+  // zeigt es „Nach System" (leerer Swatch) statt einer Farbe und erbt; ein
+  // Klick auf × stellt zurück auf „Nach System" (schreibt `null` → Feld weg).
+  const overrideColor = (
+    value: string | undefined,
+    onSet: (color: string | null) => void,
+  ) => (
+    <span className="attr-val">
+      <label className="attr-color">
+        <span
+          className="attr-color-swatch"
+          style={{ background: pocheEditable && value ? value : "transparent" }}
+        />
+        <input
+          type="color"
+          value={value ?? "#808080"}
+          disabled={!pocheEditable}
+          title={pocheEditable ? undefined : t("attr.fillNeedsClosed")}
+          onChange={(e) => onSet(e.target.value)}
+        />
+        <span className="attr-color-hex">
+          {pocheEditable && value ? value : t("attr.bySystem")}
+        </span>
+        {pocheEditable && value !== undefined && (
+          <button
+            type="button"
+            className="attr-color-clear"
+            title={t("attr.bySystem")}
+            onClick={() => onSet(null)}
+          >
+            ×
+          </button>
+        )}
+      </label>
+    </span>
+  );
 
   // Effektiver Linienstil rein informativ (kein Setter im Kontrakt → kein Fake).
   // Wir leiten ihn aus dem Modell-Element ab, wenn explizit gesetzt; sonst „—".
@@ -107,41 +150,17 @@ export function AttributesPanel() {
         </span>
       </div>
 
-      {/* ── Füllung (nur geschlossene 2D-Form) ────────────────────────── */}
+      {/* ── Füllung (Vordergrund/Hintergrund + Schraffur) ─────────────── */}
+      {/* Vordergrund = Muster-/Schraffurfarbe, Hintergrund = Füllfarbe/Poché.
+          Beide sind Overrides mit Default „Nach System" (erben vom Bauteil);
+          `background` ist der Nachfolger des alten reinen `fillColor`-Feldes. */}
       <div className="attr-section-label">{t("attr.fill")}</div>
       <div className="attr-grid">
-        {/* Vollton-Füllfarbe (getrennt von der Strichfarbe). „keine" = transparent. */}
-        <span className="attr-key">{t("attr.fillColor")}</span>
-        <span className="attr-val">
-          <label className="attr-color">
-            <span
-              className="attr-color-swatch"
-              style={{
-                background: fillEditable && sel.fillColor ? sel.fillColor : "transparent",
-              }}
-            />
-            <input
-              type="color"
-              value={sel.fillColor ?? "#808080"}
-              disabled={!fillEditable}
-              title={fillEditable ? undefined : t("attr.fillNeedsClosed")}
-              onChange={(e) => host.onSetSelectionFillColor(e.target.value)}
-            />
-            <span className="attr-color-hex">
-              {fillEditable && sel.fillColor ? sel.fillColor : t("attr.none")}
-            </span>
-            {fillEditable && sel.fillColor && (
-              <button
-                type="button"
-                className="attr-color-clear"
-                title={t("attr.clearFill")}
-                onClick={() => host.onSetSelectionFillColor(null)}
-              >
-                ×
-              </button>
-            )}
-          </label>
-        </span>
+        <span className="attr-key">{t("attr.foreground")}</span>
+        {overrideColor(sel.foreground, host.onSetSelectionForeground)}
+
+        <span className="attr-key">{t("attr.background")}</span>
+        {overrideColor(sel.background, host.onSetSelectionBackground)}
 
         <span className="attr-key">{t("attr.hatch")}</span>
         <span className="attr-val">
