@@ -17,6 +17,7 @@
 // (CONVENTIONS.md).
 
 import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import type {
   CeilingType,
   Component,
@@ -1917,10 +1918,45 @@ export interface ResourceManagerHandlers {
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
 }
 
+// ── Schwebendes Fenster (nicht-modal) ──────────────────────────────────────
+// Der Ressourcen-Manager schwebt frei über dem Grundriss, OHNE abdunkelnden
+// Hintergrund: der Plan bleibt bedienbar, damit Schraffur-/Linien-Änderungen
+// live am Modell sichtbar sind. Position/Größe leben lokal im Fenster; die
+// Kopfzeile (res-head) ist der Verschiebegriff, unten rechts sitzt ein
+// Größen-Greifer — beide über POINTER-Events mit Pointer-Capture (dieselbe
+// Technik wie FloatingPanel), damit die Geste auch außerhalb weiterläuft.
+
+/** Standard- und Mindestgröße des schwebenden Ressourcen-Fensters (CSS-Pixel). */
+const RES_DEFAULT_W = 760;
+const RES_DEFAULT_H = 640;
+const RES_MIN_W = 420;
+const RES_MIN_H = 320;
+
+/** Rechteck eines frei positionierten Fensters. */
+interface WindowRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Sinnvolle Startlage: rechts oben unter der Oberleiste, in den Viewport geklemmt. */
+function initialRect(): WindowRect {
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1280;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+  const w = Math.min(RES_DEFAULT_W, Math.round(vw * 0.9));
+  const h = Math.min(RES_DEFAULT_H, Math.round(vh * 0.85));
+  const x = Math.max(16, vw - w - 24);
+  const y = 64;
+  return { x, y, w, h };
+}
+
 /**
- * Rechte Schublade mit drei Tabs (Bauteile / Schraffuren / Linien). Wird über
- * den „Ressourcen"-Eintrag der Oberleiste geöffnet und mutiert das Projekt
- * live über die gereichten Handler.
+ * Rechte Schublade mit mehreren Tabs (Bauteile / Schraffuren / Linien / …). Wird
+ * über den „Ressourcen"-Eintrag der Oberleiste geöffnet und mutiert das Projekt
+ * live über die gereichten Handler. Rendert als FREI SCHWEBENDES, nicht-modales
+ * Fenster (kein Backdrop) — verschiebbar über die Kopfzeile, größenveränderbar
+ * über den Greifer unten rechts.
  */
 export function ResourceManager({
   project,
@@ -1932,16 +1968,75 @@ export function ResourceManager({
   handlers: ResourceManagerHandlers;
 }) {
   const [tab, setTab] = useState<TabId>("components");
+  const [rect, setRect] = useState<WindowRect>(initialRect);
+
+  // Verschieben über die Kopfzeile: Cursor − linke/obere Kante festhalten und die
+  // Kante der Cursorbewegung folgen lassen (Pointer-Capture hält die Geste).
+  const onTitlePointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    // Klicks auf Knöpfe (Schließen) nicht als Verschiebe-Start werten.
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const dx = e.clientX - rect.x;
+    const dy = e.clientY - rect.y;
+    const move = (ev: PointerEvent) => {
+      setRect((r) => ({ ...r, x: ev.clientX - dx, y: ev.clientY - dy }));
+    };
+    const up = (ev: PointerEvent) => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      if (handle.hasPointerCapture(ev.pointerId)) {
+        handle.releasePointerCapture(ev.pointerId);
+      }
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+
+  // Größe ändern über den Greifer unten rechts (Deltas ab Startpunkt, Mindestmaß).
+  const onResizePointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = rect.w;
+    const startH = rect.h;
+    const move = (ev: PointerEvent) => {
+      const w = Math.max(RES_MIN_W, Math.round(startW + (ev.clientX - startX)));
+      const h = Math.max(RES_MIN_H, Math.round(startH + (ev.clientY - startY)));
+      setRect((r) => ({ ...r, w, h }));
+    };
+    const up = (ev: PointerEvent) => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      if (handle.hasPointerCapture(ev.pointerId)) {
+        handle.releasePointerCapture(ev.pointerId);
+      }
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
 
   return (
-    <div className="res-overlay" onClick={onClose}>
       <aside
-        className="res-drawer"
+        className="res-window"
         role="dialog"
         aria-label={t("resources.label")}
-        onClick={(e) => e.stopPropagation()}
+        style={{
+          left: `${rect.x}px`,
+          top: `${rect.y}px`,
+          width: `${rect.w}px`,
+          height: `${rect.h}px`,
+        }}
       >
-        <header className="res-head">
+        <header className="res-head" onPointerDown={onTitlePointerDown}>
           <div className="res-head-title">
             <span className="res-head-icon">
               <EyeIcon open />
@@ -2012,7 +2107,15 @@ export function ResourceManager({
           )}
           {tab === "materials" && <MaterialsTab />}
         </div>
+
+        {/* Greifer unten rechts (Größe ändern). */}
+        <div
+          className="floating-resize res-resize"
+          role="separator"
+          aria-label={t("dock.resizePanel")}
+          title={t("dock.resizePanel")}
+          onPointerDown={onResizePointerDown}
+        />
       </aside>
-    </div>
   );
 }

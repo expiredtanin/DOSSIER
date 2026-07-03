@@ -1951,6 +1951,31 @@ body {
   box-shadow: var(--shadow-3);
 }
 
+/* Frei schwebendes, NICHT-modales Ressourcen-Fenster (kein Backdrop): schwebt
+   über dem Grundriss, der dahinter bedienbar bleibt. Position/Größe kommen als
+   Inline-Style; die Kopfzeile (res-head) ist der Verschiebegriff. */
+.res-window {
+  position: fixed;
+  z-index: 700;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-3, 0 12px 32px rgba(0, 0, 0, 0.45));
+  overflow: hidden;
+}
+.res-window .res-head {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+/* Greifer unten rechts: nutzt .floating-resize (siehe unten), sitzt aber im
+   overflow:hidden-Fenster korrekt in der Ecke. */
+.res-window .res-resize {
+  z-index: 1;
+}
+
 /* Kopf der Schublade. */
 .res-head {
   display: flex;

@@ -3082,8 +3082,11 @@ export default function App() {
         onSnapChange={setSnap}
       />
 
-      {/* Schwebendes Ressourcen-Fenster ÜBER allem (hoher z-index, abgedunkelter
-          Hintergrund). Schließt über X / Klick auf den Hintergrund / Esc. */}
+      {/* Frei schwebendes, NICHT-modales Ressourcen-Fenster: kein Backdrop, der
+          Grundriss dahinter bleibt bedienbar (Schraffur-/Linien-Änderungen live
+          am Modell sichtbar). Verschiebbar über die Kopfzeile, größenveränderbar
+          über den Greifer unten rechts. Der „Ressourcen"-Knopf toggelt; Esc
+          schließt (siehe Effekt oben). */}
       {resourcesOpen && (
         <ResourceManager
           project={project}
