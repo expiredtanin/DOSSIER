@@ -160,7 +160,7 @@ export class PlanGpuRenderer {
     const mmToDevicePx = (paperScaleN / 1000) * PX_PER_M * meet;
 
     this.drawFills(geometry);
-    this.drawLines(geometry, viewport, mmToDevicePx);
+    this.drawLines(geometry, viewport, mmToDevicePx, meet);
   }
 
   /** Gefüllte Polygone (Poché). */
@@ -191,11 +191,21 @@ export class PlanGpuRenderer {
     if (pos !== undefined && pos >= 0) gl.disableVertexAttribArray(pos);
   }
 
-  /** Striche mit echter Papier-mm-Breite (massstabs- + zoomrichtig). */
+  /**
+   * Striche. Zwei Skalierungs-Regime pro Batch (siehe `LineBatch.screenPx`):
+   *  • Papier-mm (Standard) — Wand-/Objekt-Umrisse: massstabs- + zoomrichtig
+   *    über `mmToDevicePx`.
+   *  • Bildschirm-px (`screenPx`) — Schraffur-Musterlinien: NUR mit `meet`
+   *    (Zoom) skaliert, unabhängig vom Papier-Massstab N — exakt wie der SVG-
+   *    `hatchStrokePx`-Pfad (`patternUnits="userSpaceOnUse"`, keine
+   *    `printStrokeVb`-Umrechnung) und der PDF-Export (`toRenderScene.ts`,
+   *    `widthScreen: true`).
+   */
   private drawLines(
     geometry: GpuGeometry,
     viewport: { width: number; height: number },
     mmToDevicePx: number,
+    meet: number,
   ): void {
     const gl = this.gl;
     const { vertexBuffer, indexBuffer, batches } = geometry.line;
@@ -209,10 +219,6 @@ export class PlanGpuRenderer {
     }
     if (prog.uniforms.viewportPx) {
       gl.uniform2f(prog.uniforms.viewportPx, viewport.width, viewport.height);
-    }
-    // strokeScale = mm → Geräte-px; die Basis-Breite (strokePx) trägt die mm.
-    if (prog.uniforms.strokeScale) {
-      gl.uniform1f(prog.uniforms.strokeScale, mmToDevicePx);
     }
 
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
@@ -239,13 +245,17 @@ export class PlanGpuRenderer {
     }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 
-    // strokePx-Uniform trägt die ECHTE Papier-mm-Breite; der Shader multipliziert
-    // mit strokeScale (= mm→Geräte-px) und klemmt bei ~0.6 px (Haarlinie sichtbar,
-    // MSAA via antialias:true), damit sehr feine Gewichte beim Rauszoomen nicht
-    // verschwinden.
+    // strokePx-Uniform trägt die Breite (Papier-mm ODER Bildschirm-px, je nach
+    // `screenPx`); strokeScale wählt PRO BATCH den passenden Massstabsfaktor.
+    // Der Shader multipliziert beides und klemmt bei ~0.6 px (Haarlinie
+    // sichtbar, MSAA via antialias:true), damit sehr feine Gewichte beim
+    // Rauszoomen nicht verschwinden.
     for (const b of batches) {
       if (prog.uniforms.color) gl.uniform4fv(prog.uniforms.color, b.color);
       if (prog.uniforms.strokePx) gl.uniform1f(prog.uniforms.strokePx, b.strokeMm);
+      if (prog.uniforms.strokeScale) {
+        gl.uniform1f(prog.uniforms.strokeScale, b.screenPx ? meet : mmToDevicePx);
+      }
       gl.drawElements(gl.TRIANGLES, b.indexCount, gl.UNSIGNED_INT, b.startIndex * 4);
     }
     if (pos !== undefined && pos >= 0) gl.disableVertexAttribArray(pos);

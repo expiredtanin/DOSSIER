@@ -167,26 +167,45 @@ export function compilePrimitivesToGpu(
     if (last && sameRgba(last.color, color)) last.indexCount += count;
     else fillBatches.push({ startIndex: fillIdx.length - count, indexCount: count, color });
   };
-  const addLineBatch = (count: number, color: Rgba, strokeMm: number) => {
+  const addLineBatch = (count: number, color: Rgba, strokeMm: number, screenPx: boolean) => {
     const last = lineBatches[lineBatches.length - 1];
-    if (last && last.strokeMm === strokeMm && sameRgba(last.color, color))
+    if (last && last.strokeMm === strokeMm && !!last.screenPx === screenPx && sameRgba(last.color, color))
       last.indexCount += count;
-    else lineBatches.push({ startIndex: lineIdx.length - count, indexCount: count, color, strokeMm });
+    else
+      lineBatches.push({
+        startIndex: lineIdx.length - count,
+        indexCount: count,
+        color,
+        strokeMm,
+        screenPx,
+      });
   };
 
-  /** Maximaler Miter-Längenfaktor; darüber wird geklemmt (kein Spike an spitzen Ecken).
-   *  8 entspricht `stroke-miterlimit: 8` im SVG-Pfad (styles.css) und dem nativen
-   *  render2d (tessellate.rs) — so sehen spitze Ecken in allen drei Pfaden gleich aus. */
-  const MITER_LIMIT = 8;
-
   /**
-   * Zeichnet einen zusammenhängenden Linienzug (Bildschirm-Raum) als EINEN
-   * gehrten Streifen: an jedem Stützpunkt wird der Versatz entlang des Miter-
-   * Bisektors verlängert (1/cos(θ/2)), sodass benachbarte Segmente bündig
-   * verschmelzen → gehrte Ecke statt Butt-Cap-Stufe. `closed` schließt den Ring
-   * (letzter↔erster Punkt). Vertex-Layout: [x,y, bx,by, side, miter].
+   * Zeichnet einen zusammenhängenden Linienzug (Bildschirm-Raum) mit ECHTEN
+   * RUNDEN Kappen/Ecken (wie SVG `stroke-linecap/linejoin: round` und der
+   * Vektor-PDF-Pfad) statt eckigem Butt-Cap/Gehrung:
+   *  • jedes Segment ist ein eigenständiges Quad mit BUTT-Enden (eigene
+   *    Segment-Normale, keine Miter-Verlängerung);
+   *  • an jedem inneren Stützpunkt füllt ein Dreiecksfächer (Radius = halbe
+   *    Strichbreite) die Außenseite der Ecke rund auf (Innenseite überlappt
+   *    unsichtbar, wie bei jedem Disjoint-Segment-Liniendicken-Ansatz);
+   *  • an offenen Enden (nicht `closed`) sitzt ein Halbkreis-Fächer als runde
+   *    Kappe.
+   * Die tatsächliche Pixel-Breite bleibt bildschirmkonstant: alle Fächer-/Quad-
+   * Vertices tragen nur eine EINHEITS-Richtung (`normal`) + `side`-Skalar; der
+   * Vertex-Shader multipliziert im Clip-Raum mit der aktuellen Strichbreite
+   * (`strokePx*strokeScale`) — die Tessellierung selbst kennt keine Pixelmasse.
+   * `closed` schließt den Ring (letzter↔erster Punkt). Vertex-Layout unverändert:
+   * [x,y, bx,by, side, miter] (miter bleibt hier immer 1, s. Shader-Vertrag).
    */
-  const strokePolyline = (ptsM: Vec2[], closed: boolean, color: Rgba, strokeMm: number) => {
+  const strokePolyline = (
+    ptsM: Vec2[],
+    closed: boolean,
+    color: Rgba,
+    strokeMm: number,
+    screenPx = false,
+  ) => {
     // Auf Bildschirm-Raum abbilden + aufeinanderfolgende Duplikate entfernen.
     const S: Vec2[] = [];
     for (const p of ptsM) {
@@ -203,49 +222,110 @@ export function compilePrimitivesToGpu(
     const k = S.length;
     if (k < 2) return;
 
-    const leftNormal = (from: Vec2, to: Vec2): Vec2 | null => {
+    const dir = (from: Vec2, to: Vec2): Vec2 | null => {
       const dx = to.x - from.x, dy = to.y - from.y;
       const len = Math.hypot(dx, dy);
-      return len < 1e-6 ? null : { x: -dy / len, y: dx / len };
+      return len < 1e-9 ? null : { x: dx / len, y: dy / len };
+    };
+    const leftNormal = (d: Vec2): Vec2 => ({ x: -d.y, y: d.x });
+
+    const startIdxLen = lineIdx.length;
+    const vBase = lineVerts.length / 6;
+    let vcount = 0;
+    const pushVert = (p: Vec2, nx: number, ny: number, side: number): number => {
+      lineVerts.push(p.x, p.y, nx, ny, side, 1);
+      vcount++;
+      return vBase + vcount - 1;
     };
 
-    const base = lineVerts.length / 6;
-    for (let i = 0; i < k; i++) {
-      const hasIn = closed || i > 0;
-      const hasOut = closed || i < k - 1;
-      const nIn = hasIn ? leftNormal(S[(i - 1 + k) % k], S[i]) : null;
-      const nOut = hasOut ? leftNormal(S[i], S[(i + 1) % k]) : null;
-
-      let bx: number, by: number, miter: number;
-      if (nIn && nOut) {
-        let sx = nIn.x + nOut.x, sy = nIn.y + nOut.y;
-        const slen = Math.hypot(sx, sy);
-        if (slen < 1e-3) {
-          // ~180°-Umkehr → kein sinnvoller Bisektor, gerade weiterlaufen.
-          bx = nOut.x; by = nOut.y; miter = 1;
-        } else {
-          bx = sx / slen; by = sy / slen;
-          const denom = bx * nOut.x + by * nOut.y; // cos(θ/2)
-          miter = denom > 1e-3 ? Math.min(1 / denom, MITER_LIMIT) : 1;
-        }
-      } else {
-        const n = nIn ?? nOut!;
-        bx = n.x; by = n.y; miter = 1;
-      }
-      lineVerts.push(S[i].x, S[i].y, bx, by, +1, miter);
-      lineVerts.push(S[i].x, S[i].y, bx, by, -1, miter);
-    }
-
     const segs = closed ? k : k - 1;
+    const segDir: (Vec2 | null)[] = [];
+    for (let i = 0; i < segs; i++) segDir.push(dir(S[i], S[(i + 1) % k]));
+
+    // Segment-Quads: butt-endig, jedes mit seiner EIGENEN Normale (kein
+    // gemeinsamer Bisektor mehr — Ecken werden separat durch Fächer geschlossen).
     for (let i = 0; i < segs; i++) {
-      const a = base + 2 * i;
-      const b = base + 2 * ((i + 1) % k);
-      lineIdx.push(a, a + 1, b, a + 1, b + 1, b);
+      const d = segDir[i];
+      if (!d) continue; // entartetes (Länge-0) Segment
+      const n = leftNormal(d);
+      const a = S[i], b = S[(i + 1) % k];
+      const i0 = pushVert(a, n.x, n.y, +1);
+      const i1 = pushVert(a, n.x, n.y, -1);
+      const i2 = pushVert(b, n.x, n.y, +1);
+      const i3 = pushVert(b, n.x, n.y, -1);
+      lineIdx.push(i0, i1, i2, i1, i3, i2);
     }
-    addLineBatch(segs * 6, color, strokeMm);
+
+    // Kreisbogen-Fächer (Zentrum = Vertex, Radius = halbe Strichbreite, per
+    // Shader skaliert): `side=0` am Zentrum (kein Versatz), `side=1` an den
+    // Randpunkten (voller Versatz in Richtung (cosθ,sinθ)).
+    const addFanArc = (p: Vec2, aFrom: number, aTo: number) => {
+      const delta = aTo - aFrom;
+      const steps = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 10)));
+      const iCenter = pushVert(p, 1, 0, 0);
+      let prev = pushVert(p, Math.cos(aFrom), Math.sin(aFrom), 1);
+      for (let s = 1; s <= steps; s++) {
+        const t = aFrom + (delta * s) / steps;
+        const cur = pushVert(p, Math.cos(t), Math.sin(t), 1);
+        lineIdx.push(iCenter, prev, cur);
+        prev = cur;
+      }
+    };
+
+    // Runder Join an einem inneren Stützpunkt: Fächer NUR auf der konvexen
+    // (äußeren) Seite der Ecke — die konkave Seite überlappt bereits durch die
+    // beiden Segment-Quads (kein Loch, keine zusätzliche Geometrie nötig).
+    const addRoundJoin = (p: Vec2, d1: Vec2, d2: Vec2) => {
+      const turn = d1.x * d2.y - d1.y * d2.x;
+      const dot = d1.x * d2.x + d1.y * d2.y;
+      if (Math.abs(turn) < 1e-6 && dot > 0) return; // praktisch gerade
+      const n1 = leftNormal(d1), n2 = leftNormal(d2);
+      if (dot < -0.9999) {
+        // ~180°-Umkehr: Außenseite mehrdeutig → voller Kreis (robust, entspricht
+        // zwei gestapelten Rund-Kappen an derselben Stelle).
+        const a0 = Math.atan2(n1.y, n1.x);
+        addFanArc(p, a0, a0 + 2 * Math.PI);
+        return;
+      }
+      const outer = turn > 0 ? -1 : 1;
+      const u1 = { x: outer * n1.x, y: outer * n1.y };
+      const u2 = { x: outer * n2.x, y: outer * n2.y };
+      const a1 = Math.atan2(u1.y, u1.x);
+      let a2 = Math.atan2(u2.y, u2.x);
+      let delta = a2 - a1;
+      while (delta <= -Math.PI) delta += 2 * Math.PI;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      if (Math.abs(delta) < 1e-4) return;
+      addFanArc(p, a1, a1 + delta);
+    };
+
+    // Runde Kappe an einem offenen Ende: Halbkreis, der auf der Außenseite
+    // (weg von der Linie) bulgt.
+    const addRoundCap = (p: Vec2, n: Vec2, sweepSign: 1 | -1) => {
+      const a0 = Math.atan2(n.y, n.x);
+      addFanArc(p, a0, a0 + sweepSign * Math.PI);
+    };
+
+    for (let v = 0; v < k; v++) {
+      const hasIn = closed || v > 0;
+      const hasOut = closed || v < k - 1;
+      const dIn = hasIn ? segDir[(v - 1 + segs) % segs] : null;
+      const dOut = hasOut ? segDir[v % segs] : null;
+      if (dIn && dOut) {
+        addRoundJoin(S[v], dIn, dOut);
+      } else if (dOut && !dIn) {
+        // Start-Kappe: bulgt rückwärts (weg vom ersten Segment).
+        addRoundCap(S[v], leftNormal(dOut), 1);
+      } else if (dIn && !dOut) {
+        // End-Kappe: bulgt vorwärts (weg vom letzten Segment).
+        addRoundCap(S[v], leftNormal(dIn), -1);
+      }
+    }
+
+    addLineBatch(lineIdx.length - startIdxLen, color, strokeMm, screenPx);
   };
 
-  /** Einzelnes Segment als (ungehrter) 2-Punkt-Zug. */
+  /** Einzelnes Segment als (ungehrter, rund gekapptes) 2-Punkt-Zug. */
   const pushLine = (aM: Vec2, bM: Vec2, color: Rgba, strokeMm: number) =>
     strokePolyline([aM, bM], false, color, strokeMm);
 
@@ -307,15 +387,27 @@ export function compilePrimitivesToGpu(
       // Schraffur (nach der Füllung, vor/passend zum Umriss — wie der SVG stapelt):
       // das Muster wird in echte Linien-Geometrie (Modell-Meter) tesselliert und
       // aufs Polygon geclippt (konkav-fähig, even-odd). Musterlinien fließen als
-      // zusammenhängende Läufe in `strokePolyline` → GEHRTE, glatte Übergänge
-      // (insb. die Dämmungswelle bleibt spitzenfrei). Breite = dieselbe Papier-mm
-      // wie der SVG-`<pattern>`; `hatch.dash` wird geometrisch (Strich/Lücke)
-      // aufgelöst, da die GL-Linien-Pipeline kein Dash kennt.
+      // zusammenhängende Läufe in `strokePolyline` → glatte, RUND gekappte/
+      // -verbundene Übergänge (insb. die Dämmungswelle bleibt spitzenfrei).
+      // BREITE — bewusst NICHT die Papier-mm-Pipeline (das ist Massstabs-N-
+      // abhängig, s. `strokeMm` unten): der SVG-Referenzpfad zeichnet die
+      // Musterlinie mit `hatchStrokePx` (PlanView.tsx) — einer FESTEN
+      // Bildschirm-Raum-Breite (`max(0.6, weightMm/0.13)` viewBox-px), die NUR
+      // mit dem Zoom (nicht mit dem Papier-Massstab N) skaliert. Die Papier-mm-
+      // Pipeline hier stattdessen zu verwenden multipliziert die Breite
+      // zusätzlich mit N/1000·PX_PER_M — bei grossen/live abgeleiteten N (siehe
+      // `paperScaleForGl` in PlanView) wird die Schraffur dadurch sichtbar zu
+      // DICK. `screenPx=true` markiert den Batch dafür, dass der Renderer NUR
+      // mit `meet` (Zoom) statt mit `mmToDevicePx` (Papier-Massstab) skaliert —
+      // exakt der SVG-Formel entsprechend (siehe glPlanRender.drawLines).
+      // `hatch.dash` wird geometrisch (Strich/Lücke) aufgelöst, da die GL-
+      // Linien-Pipeline kein Dash kennt.
       if (prim.hatch && prim.hatch.pattern !== 'none' && prim.hatch.pattern !== 'solid') {
         const hatchColor = parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1];
         const hatchMm = prim.hatch.lineWeight > 0 ? prim.hatch.lineWeight : 0.13;
+        const hatchStrokeVb = Math.max(0.6, hatchMm * (1 / 0.13));
         const runs = applyDashRuns(buildHatchRuns(prim.pts, prim.hatch), prim.hatch.dash);
-        for (const run of runs) strokePolyline(run, false, hatchColor, hatchMm);
+        for (const run of runs) strokePolyline(run, false, hatchColor, hatchStrokeVb, true);
       }
       // Umriss (crispe Kante) — geschlossener Ring, GEHRT (kein Stufen-Cap an
       // Ecken). Breite = ECHTE Papier-mm; der Renderer rechnet massstabs-/

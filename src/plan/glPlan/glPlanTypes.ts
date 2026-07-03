@@ -53,11 +53,18 @@ export interface LineBatch {
   indexCount: number;
   color: Rgba;
   /**
-   * ECHTE Strichbreite in Papier-Millimeter. Der Renderer rechnet sie über den
-   * Massstab (1:N) + die aktuelle meet-Skala in Pixel — genau wie der SVG-
-   * `printStrokeVb`-Pfad, sodass GL == SVG (0.35 mm bei 1:100 = 0.35 mm Papier).
+   * Strichbreite. Interpretation hängt von `screenPx` ab:
+   *  • `screenPx` falsch (Standard) — ECHTE Papier-Millimeter. Der Renderer
+   *    rechnet über den Massstab (1:N) + die aktuelle meet-Skala in Pixel —
+   *    genau wie der SVG-`printStrokeVb`-Pfad (0.35 mm bei 1:100 = 0.35 mm
+   *    Papier).
+   *  • `screenPx` wahr — bereits eine BILDSCHIRM-Raum-Breite (viewBox-px, wie
+   *    SVG-`hatchStrokePx`): skaliert NUR mit dem Zoom (`meet`), NICHT mit dem
+   *    Papier-Massstab N. Für Schraffur-Musterlinien (s. `glPlanCompile`).
    */
   strokeMm: number;
+  /** Siehe `strokeMm`-Doku: true = Bildschirm-Raum-px statt Papier-mm. */
+  screenPx?: boolean;
 }
 
 /**
