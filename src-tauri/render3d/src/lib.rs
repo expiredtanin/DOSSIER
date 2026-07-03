@@ -16,6 +16,7 @@
 
 pub mod math;
 pub mod mesh;
+pub mod section;
 pub mod shaders;
 pub mod types;
 
@@ -33,6 +34,9 @@ pub use math::{
     view_matrix, view_projection, Mat4,
 };
 pub use mesh::{build_model_mesh, build_walls_mesh, extrude_slab, extrude_wall, triangulate};
+pub use section::{
+    cut_section, ComponentKind, ComponentRef, CutPolygon, SectionEdge, SectionOutput, SectionPlane,
+};
 pub use types::{
     Camera, CameraPreset, Mesh, Point2, Projection, Rgb, SlabInput, WallInput, FLOATS_PER_VERTEX,
 };
