@@ -21,7 +21,7 @@ import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { projectToModel3d } from "./toWalls3d";
 import { loadEngine3d } from "../engine/engine3d";
-import { resolveCeilingSectionStyle, resolveHatch, resolveWallSectionStyle } from "./generatePlan";
+import { resolveCeilingSectionStyle, resolveForeground, resolveHatch, resolveWallSectionStyle } from "./generatePlan";
 import type { HatchRender } from "./generatePlan";
 
 /** Bauteil-Referenz eines Cut-Polygons/einer Kante (Art + Eingabe-Index). */
@@ -288,7 +288,7 @@ function splitSlabLayers(
   let acc = 0; // kumulierte Dicke von OK (oben) nach UK (unten)
   for (const layer of wt.layers) {
     const comp = getComponent(project, layer.componentId);
-    const hatch = resolveHatch(project, comp.hatchId);
+    const hatch = resolveHatch(project, comp.hatchId, undefined, resolveForeground(comp));
     const vTop = vMax - acc * scale;
     acc += layer.thickness;
     const vBottom = vMax - acc * scale;
@@ -351,7 +351,7 @@ function splitWallLayers(
   let acc = 0; // kumulierte Dicke von uMin (layers[0]) nach uMax
   for (const layer of wt.layers) {
     const comp = getComponent(project, layer.componentId);
-    const hatch = resolveHatch(project, comp.hatchId);
+    const hatch = resolveHatch(project, comp.hatchId, undefined, resolveForeground(comp));
     const uLeft = uMin + acc * scale;
     acc += layer.thickness;
     const uRight = uMin + acc * scale;

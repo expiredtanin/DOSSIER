@@ -35,6 +35,20 @@ export interface LineStyle {
   color: string;
   /** Strichmuster in Millimetern; `null` = durchgezogen. */
   dash: number[] | null;
+  /**
+   * Linien-Typ (additiv, Default `undefined` ⇒ "dash"):
+   *   • "dash"   — gerade Linie mit `dash`-Strichmuster (bestehendes Verhalten).
+   *   • "zigzag" — der Strich variiert in Y (Zickzack/Welle), Parameter in
+   *     `zigzag`. Fehlt `kind`, gilt „dash"; die heutigen Renderer ignorieren
+   *     `kind` und zeichnen weiterhin gerade Striche (Backward-Compat).
+   */
+  kind?: "dash" | "zigzag";
+  /**
+   * Parameter der Zickzack-/Wellen-Linie (nur `kind==="zigzag"`), beide in mm
+   * Papier: `amplitude` = Ausschlag quer zur Linie, `wavelength` = Periodenlänge
+   * entlang der Linie. Fehlt es, wird die Linie gerade gezeichnet.
+   */
+  zigzag?: { amplitude: number; wavelength: number };
 }
 
 /** Mögliche Schraffur-Muster im Plan/Schnitt. */
@@ -49,6 +63,30 @@ export type HatchPattern =
 export interface HatchStyle {
   id: string;
   name: string;
+  /**
+   * Schraffur-Typ (additiv, Default `undefined` ⇒ "vector"):
+   *   • "vector" — Musterlinien (die bestehenden `pattern`/`scale`/`angle`/
+   *     `relativeToWall`/`lineStyleId` sind die Vektor-Parameter). Untermodus
+   *     über `lines` (parallel vs. random).
+   *   • "image"  — ein Bild wird als Muster (Pattern-Fill) geladen; Parameter in
+   *     `image` (Skalierung/Verzerrung/Rotation).
+   * Fehlt `kind`, gilt „vector"; heutige Renderer ignorieren `kind` und zeichnen
+   * weiterhin nach `pattern` (Backward-Compat).
+   */
+  kind?: "vector" | "image";
+  /**
+   * Untermodus einer Vektor-Schraffur (nur `kind` fehlt/"vector", Default
+   * `undefined` ⇒ "parallel"):
+   *   • "parallel" — regelmäßige Teilung (bestehendes Verhalten).
+   *   • "random"   — zufällig verteilte Striche (z. B. Kies/Splitt).
+   */
+  lines?: "parallel" | "random";
+  /**
+   * Bild-Muster (nur `kind==="image"`). `src` = Data-URL oder Asset-Referenz;
+   * `scaleX`/`scaleY` = unabhängige Verzerrung in Breite/Höhe (L×B), `rotation`
+   * = Drehung in Grad. Bei `kind==="vector"` ungenutzt.
+   */
+  image?: { src: string; scaleX: number; scaleY: number; rotation: number };
   /** Muster-Typ. */
   pattern: HatchPattern;
   /** Grundmaßstab des Musters (1 = Standardteilung). */
@@ -64,8 +102,12 @@ export interface HatchStyle {
    */
   relativeToWall?: boolean;
   /**
-   * Farbe der Musterlinien bzw. der Vollfüllung (`pattern==="solid"`). Bei
-   * `pattern==="none"` ungenutzt.
+   * @deprecated Schraffuren tragen im Zielmodell KEINE eigene Farbe mehr — die
+   * Muster-/Vordergrundfarbe kommt vom Bauteil (`Component.foreground`) bzw. der
+   * Attribut-Überschreibung. Feld bleibt für die Backward-Compat-Auflösung als
+   * LETZTER Fallback erhalten (siehe Farb-Resolve-Reihenfolge in
+   * `plan/generatePlan.ts` → `resolveHatch`). Bei `pattern==="solid"` ist es die
+   * Vollfüllfarbe, bei `pattern==="none"` ungenutzt.
    */
   color: string;
   /** Optionaler Linienstil für die Musterlinien (Line Manager). */
@@ -106,8 +148,24 @@ export interface ComponentMaterial {
 export interface Component {
   id: string;
   name: string;
-  /** Füllfarbe im Grundriss (Poché) und 3D-Diffusfarbe. */
+  /**
+   * Füllfarbe im Grundriss (Poché) und 3D-Diffusfarbe. Bleibt bestehen; im
+   * Zielmodell (Vordergrund/Hintergrund, s. u.) dient sie als Fallback für
+   * `background`. Migrationsabsicht: neue Projekte setzen `foreground`/
+   * `background`, Alt-Projekte fallen weiterhin auf `color` zurück.
+   */
   color: string;
+  /**
+   * Vordergrundfarbe = Farbe der Muster-/Schraffurlinien (die Schraffur selbst
+   * trägt keine Farbe mehr). Optional; fehlt sie, greift die Resolve-Kette
+   * (Attribut-Override ?? Component.foreground ?? HatchStyle.color-Fallback).
+   */
+  foreground?: string;
+  /**
+   * Hintergrundfarbe = Füllung (Poché). Optional; fehlt sie, gilt als Fallback
+   * `color`. Migrationsabsicht: `background` ⇐ `color`.
+   */
+  background?: string;
   /** Schnitt-Schraffur → Hatch Manager. Gilt, wo das Bauteil echt geschnitten ist. */
   hatchId: string;
   /**
@@ -441,6 +499,17 @@ export interface Wall {
    */
   color?: string;
   /**
+   * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Wand-
+   * Instanz. `undefined` = „Nach System" (erben → Component.foreground →
+   * HatchStyle.color-Fallback). Höchste Priorität in der Farb-Resolve-Kette.
+   */
+  foreground?: string;
+  /**
+   * Attribut-Override der Füllfarbe (Hintergrund/Poché) DIESER Wand-Instanz.
+   * `undefined` = „Nach System" (erben → Component.background → Component.color).
+   */
+  background?: string;
+  /**
    * Lage der Wandachse über die Dicke. Fehlt sie, gilt "center" (= heutiges
    * Verhalten: Schichten symmetrisch −T/2 … +T/2 um die Achse).
    */
@@ -501,6 +570,17 @@ export interface Ceiling {
    * Kategorie-Farbe.
    */
   color?: string;
+  /**
+   * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Decken-
+   * Instanz. `undefined` = „Nach System" (erben → Component.foreground →
+   * HatchStyle.color-Fallback).
+   */
+  foreground?: string;
+  /**
+   * Attribut-Override der Füllfarbe (Hintergrund/Poché) DIESER Decken-Instanz.
+   * `undefined` = „Nach System" (erben → Component.background → Component.color).
+   */
+  background?: string;
   /**
    * Vertikale Bindung der OBERKANTE (OK). Fehlt sie, sitzt die OK an der
    * Oberkante des Geschosses (baseElevation + floorHeight).
@@ -764,6 +844,19 @@ export interface Drawing2D {
   lineStyleId?: string;
   /** Optionale Schraffur für geschlossene Formen (Hatch Manager). */
   hatchId?: string;
+  /**
+   * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER 2D-Form.
+   * `undefined` = „Nach System" (erben → HatchStyle.color-Fallback). Betrifft die
+   * Farbe der Schraffur-Musterlinien einer gefüllten Fläche (nicht den Umriss,
+   * der über `color`/`lineStyleId` läuft).
+   */
+  foreground?: string;
+  /**
+   * Attribut-Override der Füllfarbe (Hintergrund) DIESER 2D-Form. `undefined` =
+   * „Nach System". Synonym/Nachfolger von `fillColor`; ist `background` gesetzt,
+   * hat es Vorrang vor `fillColor` (der Poché-Hintergrund der geschlossenen Form).
+   */
+  background?: string;
   /** Optionale explizite Strichfarbe; sonst Kategorie-Farbe. */
   color?: string;
   /**

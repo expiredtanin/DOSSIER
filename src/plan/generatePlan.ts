@@ -113,12 +113,28 @@ export interface HatchRender {
   pattern: HatchPattern;
   scale: number;
   angle: number;
-  /** Farbe der Musterlinien bzw. der Vollfüllung (pattern==="solid"). */
+  /**
+   * AUFGELÖSTE Farbe der Musterlinien bzw. der Vollfüllung (pattern==="solid").
+   * Ergebnis der Farb-Resolve-Kette (siehe {@link resolveHatch}): Vordergrund =
+   * (Attribut-Override) ?? (Component.foreground) ?? (HatchStyle.color, Backward-
+   * Compat) ?? Default. Der heutige SVG-/GL-/DXF-Renderer liest weiterhin nur
+   * dieses Feld — die Kette ist zur Renderzeit bereits kollabiert.
+   */
   color: string;
   /** Linienstärke der Musterlinien in mm. */
   lineWeight: number;
   /** Strichmuster der Musterlinien in mm; null = durchgezogen. */
   dash: number[] | null;
+  /**
+   * Schraffur-Typ (additiv). `undefined`/"vector" ⇒ Muster nach `pattern` (heutiges
+   * Verhalten); "image" ⇒ Bild-Muster (`image`). Bestehende Renderer ignorieren
+   * `kind` und zeichnen nach `pattern` → unbekannte kinds fallen auf heute zurück.
+   */
+  kind?: "vector" | "image";
+  /** Vektor-Untermodus (additiv). `undefined`/"parallel" ⇒ regelmäßig; "random" ⇒ zufällig. */
+  lines?: "parallel" | "random";
+  /** Bild-Muster-Parameter (nur `kind==="image"`); durchgereicht aus dem HatchStyle. */
+  image?: { src: string; scaleX: number; scaleY: number; rotation: number };
 }
 
 /**
@@ -247,8 +263,21 @@ export type Primitive =
  * Löst eine HatchStyle-Ressource (per id) zu einer darstellungsfertigen
  * {@link HatchRender} auf. Der Linienstil der Musterlinien wird, falls gesetzt,
  * aus dem Line Manager nachgeschlagen; sonst gilt ein dünner Default.
+ *
+ * FARB-RESOLVE-REIHENFOLGE (Vordergrund = Muster-/Schraffurlinienfarbe):
+ *   `foreground` (Parameter: bereits aufgelöste Attribut-Override ?? Component.
+ *   foreground) ?? `HatchStyle.color` (deprecated Backward-Compat) .
+ * Der Aufrufer reicht den bereits kollabierten Vordergrund als `foreground`
+ * durch (siehe {@link resolveForeground}); ist er `undefined` (Sample: weder
+ * Attribut- noch Bauteil-Vordergrund gesetzt), greift der HatchStyle.color-
+ * Fallback → pixelidentisch zum bisherigen Verhalten.
  */
-export function resolveHatch(project: Project, hatchId: string, wallAngleDeg?: number): HatchRender {
+export function resolveHatch(
+  project: Project,
+  hatchId: string,
+  wallAngleDeg?: number,
+  foreground?: string,
+): HatchRender {
   const h = getHatch(project, hatchId);
   const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
   // Wandbezogener Winkel: `HatchRender.angle` wird von allen Renderern in der
@@ -264,10 +293,34 @@ export function resolveHatch(project: Project, hatchId: string, wallAngleDeg?: n
     pattern: h.pattern,
     scale: h.scale,
     angle,
-    color: h.color,
+    // Vordergrund-Override zuerst, sonst der deprecated HatchStyle.color-Fallback.
+    color: foreground ?? h.color,
     lineWeight: ls?.weight ?? 0.13,
     dash: ls?.dash ?? null,
+    kind: h.kind,
+    lines: h.lines,
+    image: h.image,
   };
+}
+
+/**
+ * Kollabiert die Vordergrund-Farbkette (Muster-/Schraffurlinienfarbe) eines
+ * Bauteils zu einem einzelnen Wert für {@link resolveHatch}:
+ *   (Attribut-Override `override`) ?? (`Component.foreground`) ?? `undefined`.
+ * `undefined` heißt „Nach System" — die Kette läuft dann in resolveHatch auf den
+ * HatchStyle.color-Backward-Compat-Fallback weiter (Sample-Verhalten).
+ */
+export function resolveForeground(comp: Component, override?: string): string | undefined {
+  return override ?? comp.foreground;
+}
+
+/**
+ * Kollabiert die Hintergrund-/Füllfarbkette (Poché) eines Bauteils:
+ *   (Attribut-Override `override`) ?? (`Component.background`) ?? `Component.color`.
+ * Immer definiert (endet spätestens bei `Component.color` = heutiges Verhalten).
+ */
+export function resolveBackground(comp: Component, override?: string): string {
+  return override ?? comp.background ?? comp.color;
 }
 
 // ── SIA-Poché-Füllung ────────────────────────────────────────────────────
@@ -306,7 +359,12 @@ export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCu
     if (!best) return null;
     const wallAngleDeg =
       (Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180) / Math.PI;
-    const hatch = resolveHatch(project, best.hatchId, wallAngleDeg);
+    const hatch = resolveHatch(
+      project,
+      best.hatchId,
+      wallAngleDeg,
+      resolveForeground(best, wall.foreground),
+    );
     // Poché-Hintergrund neutral (weiß) statt Bauteil-Albedo; Vollmuster → schwarz.
     const solid = hatch.pattern === "solid";
     return {
@@ -332,7 +390,10 @@ export function resolveCeilingSectionStyle(
     const wt = getCeilingType(project, ceiling);
     if (wt.layers.length === 0) return null;
     const comp = getComponent(project, wt.layers[0].componentId);
-    return { fill: comp.color, hatch: resolveHatch(project, comp.hatchId) };
+    return {
+      fill: resolveBackground(comp, ceiling.background),
+      hatch: resolveHatch(project, comp.hatchId, undefined, resolveForeground(comp, ceiling.foreground)),
+    };
   } catch {
     return null;
   }
@@ -726,12 +787,16 @@ function addDrawing2D(
     out.push({
       kind: "polygon",
       pts,
-      fill: d.fillColor ?? "none",
+      // Hintergrund-Override hat Vorrang vor dem Alt-Feld fillColor (beide leer =
+      // transparente Fläche, nur Schraffur) — Sample bleibt identisch.
+      fill: d.background ?? d.fillColor ?? "none",
       // Umriss zeichnen die separaten Linien-Primitive (mit Strichmuster); die
       // Füllfläche selbst bleibt randlos, um doppelte Striche zu vermeiden.
       stroke: "none",
       strokeWidthMm: 0,
-      hatch: d.hatchId ? resolveHatch(project, d.hatchId) : NO_HATCH,
+      // Drawing2D trägt kein Bauteil → Vordergrund-Override direkt aus d.foreground
+      // (Attribut „Nach System" ⇒ undefined ⇒ HatchStyle.color-Fallback).
+      hatch: d.hatchId ? resolveHatch(project, d.hatchId, undefined, d.foreground) : NO_HATCH,
       greyed,
       drawingId: d.id,
     });
@@ -916,7 +981,12 @@ function addWallPoche(
     for (let li = 0; li < wt.layers.length; li++) {
       const layer = wt.layers[li];
       const comp = getComponent(project, layer.componentId);
-      const layerHatch = resolveHatch(project, comp.hatchId, wallAngleDeg);
+      const layerHatch = resolveHatch(
+        project,
+        comp.hatchId,
+        wallAngleDeg,
+        resolveForeground(comp, wall.foreground),
+      );
       // SIA-Poché: neutraler Hintergrund (weiß) statt Bauteil-Albedo, die
       // Schichtschraffur liegt darüber; Vollmuster ("solid") = schwarze Poché.
       const layerSolid = layerHatch.pattern === "solid";
@@ -1228,7 +1298,7 @@ function addCeilingPoche(
   // die Schraffur ganz (nur Fläche + Umriss).
   const hatch =
     detail !== "grob" && comp?.viewHatchId
-      ? resolveHatch(project, comp.viewHatchId)
+      ? resolveHatch(project, comp.viewHatchId, undefined, resolveForeground(comp, ceiling.foreground))
       : NO_HATCH;
   const solid = hatch.pattern === "solid";
   out.push({
