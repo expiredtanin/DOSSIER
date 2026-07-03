@@ -16,6 +16,7 @@
 
 pub mod math;
 pub mod mesh;
+pub(crate) mod openings;
 pub mod section;
 pub mod shaders;
 pub mod types;
@@ -46,7 +47,7 @@ pub use types::{
 #[cfg(test)]
 mod tests {
     use super::mesh::{build_walls_mesh, extrude_wall, INDICES_PER_BOX, VERTS_PER_BOX};
-    use super::types::{Mesh, WallInput, FLOATS_PER_VERTEX};
+    use super::types::{Mesh, Opening, WallInput, FLOATS_PER_VERTEX};
 
     /// Bequemer Bau einer achsparallelen Wand entlang +X.
     fn wall_x(len: f32, thickness: f32, height: f32) -> WallInput {
@@ -195,6 +196,103 @@ mod tests {
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), 0);
         assert!(mesh.indices.is_empty());
+    }
+
+    // --- Oeffnungen (Fenster/Tueren) in der Vollkoerper-Extrusion -------------
+
+    #[test]
+    fn fenster_erzeugt_pfeiler_bruestung_sturz_und_sichtbare_luecke() {
+        // Wand entlang +X, Laenge 4, ein Fenster bei x in [1.5,2.5], Bruestung
+        // 0.9, Kopfhoehe 2.1 (< Wandhoehe 2.5) -> vier Teil-Quader: Pfeiler
+        // 0..1.5 (voll), Bruestung 1.5..2.5 (0..0.9), Sturz 1.5..2.5 (2.1..2.5),
+        // Pfeiler 2.5..4 (voll). Kein Vollkoerper mehr ueber die Oeffnung.
+        let mut w = wall_x(4.0, 0.2, 2.5);
+        w.openings = vec![Opening {
+            from: 1.5,
+            to: 2.5,
+            sill: 0.9,
+            height: 1.2,
+        }];
+        let mesh = build_walls_mesh(&[w]);
+        assert_eq!(
+            mesh.vertex_count(),
+            4 * VERTS_PER_BOX,
+            "vier Teil-Quader (2 Pfeiler + Bruestung + Sturz)"
+        );
+        assert_eq!(mesh.indices.len(), 4 * INDICES_PER_BOX);
+        let max_idx = *mesh.indices.iter().max().unwrap();
+        assert!((max_idx as usize) < mesh.vertex_count());
+
+        // Aussenmasse bleiben unveraendert (Pfeiler+Bruestung+Sturz decken
+        // zusammen wieder die volle Bounding-Box ab).
+        let (min, max) = mesh.bounds();
+        assert!((min[0]).abs() < 1e-5 && (max[0] - 4.0).abs() < 1e-5);
+        assert!((min[1]).abs() < 1e-5 && (max[1] - 2.5).abs() < 1e-5);
+
+        // Sichtbare Luecke: kein Vertex liegt (mit Sicherheitsabstand) im
+        // Oeffnungs-Loch selbst (x in (1.5,2.5) UND y in (0.9,2.1)) — dort darf
+        // keine Mesh-Flaeche mehr existieren.
+        let margin = 0.05;
+        let n = mesh.vertex_count();
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            let inside_hole = p[0] > 1.5 + margin
+                && p[0] < 2.5 - margin
+                && p[1] > 0.9 + margin
+                && p[1] < 2.1 - margin;
+            assert!(!inside_hole, "Vertex {i} bei {p:?} liegt im Fensterloch");
+        }
+    }
+
+    #[test]
+    fn tuer_erreicht_den_boden_keine_bruestung() {
+        // Tuer (sill == 0.0) reicht bis zum Boden -> keine Bruestung, nur zwei
+        // volle Pfeiler + ein Sturz-Quader ueber der Tuer (drei Teil-Quader).
+        let mut w = wall_x(4.0, 0.2, 2.5);
+        w.openings = vec![Opening {
+            from: 1.0,
+            to: 1.8,
+            sill: 0.0,
+            height: 2.1,
+        }];
+        let mesh = build_walls_mesh(&[w]);
+        assert_eq!(
+            mesh.vertex_count(),
+            3 * VERTS_PER_BOX,
+            "zwei Pfeiler + ein Sturz, keine Bruestung"
+        );
+        assert_eq!(mesh.indices.len(), 3 * INDICES_PER_BOX);
+
+        // Im Tuerbereich (x in (1.0,1.8)) darf unterhalb der Kopfhoehe (2.1)
+        // keine Geometrie liegen -> jeder Vertex dort liegt auf/ueber dem Sturz.
+        let margin = 0.05;
+        let n = mesh.vertex_count();
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            let in_door_span = p[0] > 1.0 + margin && p[0] < 1.8 - margin;
+            if in_door_span {
+                assert!(
+                    p[1] > 2.1 - 1e-4,
+                    "Vertex {i} bei {p:?} liegt unter der Tuer-Kopfhoehe"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn oeffnung_ausserhalb_der_wandlaenge_erzeugt_vollkoerper() {
+        // Oeffnung komplett ausserhalb [0,length] -> Regressionsfall: ein
+        // einzelner Vollkoerper-Quader wie ohne Oeffnungen.
+        let mut w = wall_x(4.0, 0.2, 2.5);
+        w.openings = vec![Opening {
+            from: 5.0,
+            to: 6.0,
+            sill: 0.9,
+            height: 1.2,
+        }];
+        let mesh = build_walls_mesh(&[w]);
+        assert_eq!(mesh.vertex_count(), VERTS_PER_BOX);
+        assert_eq!(mesh.indices.len(), INDICES_PER_BOX);
     }
 
     // --- Deckenplatten (extrudierte Polygone) ---------------------------------

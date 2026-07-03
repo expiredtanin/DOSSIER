@@ -107,11 +107,11 @@
 //!   fuehren, dass eine Wand als "in eine andere eingebettet" verdeckt erscheint
 //!   (siehe Test `eck_ueberlappung_verdeckt_kante_am_wandknoten` unten) — real,
 //!   aber ein Artefakt der fehlenden Verschneidungslogik, kein Bug dieses Moduls.
-//! - Oeffnungen werden hier (Cut + Projektion) ausgewertet, aber NICHT von der
-//!   Vollkoerper-Extrusion in `mesh.rs` — die 3D-Solid-Mesh-Erzeugung extrudiert
-//!   weiterhin die volle Wandflaeche (siehe `mesh.rs`-Moduldoc). Cut-Ansicht und
-//!   3D-Solid-Ansicht sind bis zu diesem Nachtrag also bewusst inkonsistent;
-//!   das Nachziehen von `mesh.rs` ist eine bekannte, separate Luecke.
+//! - Oeffnungen werden hier (Cut + Projektion) UND von der Vollkoerper-
+//!   Extrusion in `mesh.rs` ausgewertet (`mesh::wall_solid_segments`) — beide
+//!   nutzen dieselbe Bruestungs-/Sturz-Zerlegung (`crate::openings::
+//!   split_range_by_voids`), damit Cut-Ansicht und 3D-Solid-Ansicht
+//!   konsistent bleiben.
 //! - Oeffnungs-Durchblick nutzt dieselbe achsparallele Bounding-Box-Naeherung
 //!   wie die allgemeine Verdeckung (kein exaktes Polygon-Clipping der Lochflaeche
 //!   gegen dahinterliegende Kanten) und wird bei Wand-Orientierungen nahe
@@ -508,28 +508,11 @@ fn wall_cut_rectangles(
     if voids.is_empty() {
         return vec![(u_lo, u_hi, prism.z0, prism.z1)];
     }
-    voids.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-    let mut rects = Vec::new();
-    let mut cursor = u_lo;
-    for (v_lo, v_hi, op) in &voids {
-        if *v_lo > cursor + MIN_SPAN {
-            rects.push((cursor, *v_lo, prism.z0, prism.z1));
-        }
-        let sill_abs = prism.z0 + op.sill.max(0.0);
-        let head_abs = (sill_abs + op.height).min(prism.z1);
-        if sill_abs - prism.z0 > MIN_SPAN {
-            rects.push((*v_lo, *v_hi, prism.z0, sill_abs)); // Bruestung
-        }
-        if prism.z1 - head_abs > MIN_SPAN {
-            rects.push((*v_lo, *v_hi, head_abs, prism.z1)); // Sturz
-        }
-        cursor = cursor.max(*v_hi);
-    }
-    if u_hi > cursor + MIN_SPAN {
-        rects.push((cursor, u_hi, prism.z0, prism.z1));
-    }
-    rects
+    // Bruestungs-/Sturz-Zerlegung ist ab hier koordinatenraum-neutral (nur noch
+    // u-Intervall + Hoehe + geclippte Voids) -> gemeinsame Basis mit
+    // `mesh::wall_solid_segments` (siehe `crate::openings`-Moduldoc), damit
+    // Cut-Ansicht und 3D-Solid-Mesh garantiert dasselbe Oeffnungsmodell nutzen.
+    crate::openings::split_range_by_voids(u_lo, u_hi, prism.z0, prism.z1, voids)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

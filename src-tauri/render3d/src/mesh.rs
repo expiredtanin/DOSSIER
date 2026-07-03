@@ -9,13 +9,24 @@
 // `base_elevation` bis `base_elevation + height` extrudiert — analog zur
 // three.js-`ExtrudeGeometry`, die den 2D-`clippedBand` hochzieht (Viewport3D.tsx
 // `addLayerPrism`). M1 nimmt die stumpfe (rechtwinklige) Band-Form; Gehrungen
-// (`computeJoins`/`clippedBand`) und Oeffnungen kommen in spaeteren Milestones.
+// (`computeJoins`/`clippedBand`) sind ein spaeterer Milestone.
+//
+// OEFFNUNGEN (Tueren/Fenster, `WallInput::openings`): eine Wand mit Oeffnungen
+// wird NICHT als ein Vollkoerper-Quader extrudiert, sondern in mehrere
+// Teil-Quader zerlegt — volle Hoehe zwischen Oeffnungen (Pfeiler), Bruestung
+// unterhalb und Sturz oberhalb jeder Oeffnung (`wall_solid_segments`). Das ist
+// exakt dieselbe Bruestungs-/Sturz-Zerlegung wie `section::wall_cut_rectangles`
+// fuer die Schnitt-Cut-Polygone (gemeinsame Basis: `crate::openings::
+// split_range_by_voids`), nur direkt in Wandachsen-Metern statt in der
+// Projektions-u-Achse einer Schnittebene — damit zeigt die 3D-Vollansicht
+// (`?engine=wasm`) dieselbe Oeffnung wie der Schnitt.
 //
 // KOORDINATEN: model [x, y] -> world (x, elevation, y). Also Grundriss in der
 // XZ-Ebene, Extrusion entlang +Y (Y-up), exakt wie Viewport3D.tsx:
 //   "Modell (x,y,z) -> Three (x, z, y)  (Z = Hoehe nach oben)".
 
-use crate::types::{Mesh, Point2, Rgb, SlabInput, WallInput, FLOATS_PER_VERTEX};
+use crate::openings::{split_range_by_voids, MIN_SPAN};
+use crate::types::{Mesh, Opening, Point2, Rgb, SlabInput, WallInput, FLOATS_PER_VERTEX};
 
 /// Ein Quader-Mesh besteht aus 6 Seiten (Boden, Deckel, 4 Waende) zu je 2
 /// Dreiecken = 12 Dreiecke, mit flachen Normalen also 24 Vertices (je Seite 4,
@@ -35,30 +46,101 @@ fn left_normal(start: Point2, end: Point2) -> Point2 {
     [-dy / len, dx / len]
 }
 
-/// Extrudiert EINE Wand zu einem Quader-Mesh und haengt sie an `mesh` an.
-///
-/// Aufbau: die vier Grundriss-Ecken des Bandes (CCW) bilden das Deckel-Rechteck.
-/// Boden = gleiche XZ auf `y0`, Deckel = auf `y1`. Jede der sechs Seiten bekommt
-/// eigene Vertices mit ihrer (nach aussen zeigenden) Flaechen-Normale — daher
-/// flaches Shading und korrektes Backface-Culling.
+/// Extrudiert EINE Wand zu einem oder mehreren Quader-Meshes und haengt sie an
+/// `mesh` an. Ohne Oeffnungen (Regressionsfall) entsteht wie zuvor GENAU ein
+/// Quader (`VERTS_PER_BOX`/`INDICES_PER_BOX`); mit Oeffnungen wird die Wand
+/// zuerst in Achsen-Teilstuecke (Pfeiler/Bruestung/Sturz) zerlegt und jedes
+/// Teilstueck einzeln als Quader extrudiert (siehe `wall_solid_segments` und
+/// die Oeffnungen-Erklaerung im Moduldoc oben).
 pub fn extrude_wall(mesh: &mut Mesh, wall: &WallInput) {
     let n = left_normal(wall.start, wall.end);
     // Degenerierte Wand (Start == Ende) ueberspringen.
     if n == [0.0, 0.0] {
         return;
     }
+    let dx = wall.end[0] - wall.start[0];
+    let dy = wall.end[1] - wall.start[1];
+    let length = (dx * dx + dy * dy).sqrt();
+
+    let z0 = wall.base_elevation;
+    let z1 = wall.base_elevation + wall.height;
+    for (a0, a1, y0, y1) in wall_solid_segments(length, &wall.openings, z0, z1) {
+        extrude_wall_segment(mesh, wall, n, length, a0, a1, y0, y1);
+    }
+}
+
+/// Zerlegt eine Wandachse (`0..length`, volle Hoehe `[z0,z1]`) an ihren
+/// `openings` in Voll-/Bruestungs-/Sturz-Rechtecke `(achse0, achse1, y0, y1)` —
+/// direkt in Wandachsen-Metern, keine Schnittebenen-Projektion noetig (anders
+/// als `section::wall_cut_rectangles`, das dieselbe Zerlegung fuer eine
+/// Cut-Ebenen-u-Achse braucht). Ohne Oeffnungen (oder wenn alle ausserhalb
+/// `[0,length]` liegen) liefert das das eine Vollstueck `[0,length]x[z0,z1]`
+/// (Regressionsfall, identisch zur bisherigen Vollkoerper-Extrusion).
+fn wall_solid_segments(
+    length: f32,
+    openings: &[Opening],
+    z0: f32,
+    z1: f32,
+) -> Vec<(f32, f32, f32, f32)> {
+    if openings.is_empty() {
+        return vec![(0.0, length, z0, z1)];
+    }
+    let mut voids: Vec<(f32, f32, &Opening)> = Vec::new();
+    for op in openings {
+        let from = op.from.max(0.0);
+        let to = op.to.min(length);
+        if to - from > MIN_SPAN {
+            voids.push((from, to, op));
+        }
+    }
+    split_range_by_voids(0.0, length, z0, z1, voids)
+}
+
+/// Punkt entlang der Wandachse bei Achsen-Position `a` (Meter ab `wall.start`),
+/// linear zwischen `wall.start` und `wall.end` interpoliert.
+fn axis_point(wall: &WallInput, length: f32, a: f32) -> Point2 {
+    if length < 1e-9 {
+        return wall.start;
+    }
+    let t = a / length;
+    [
+        wall.start[0] + (wall.end[0] - wall.start[0]) * t,
+        wall.start[1] + (wall.end[1] - wall.start[1]) * t,
+    ]
+}
+
+/// Extrudiert EIN Achsen-Teilstueck `[a0,a1]` (Hoehe `[y0,y1]`) einer Wand zu
+/// einem Quader-Mesh und haengt ihn an `mesh` an. Fuer `a0=0, a1=length,
+/// y0=base_elevation, y1=base_elevation+height` (keine Oeffnungen) ist das
+/// exakt die bisherige Vollkoerper-Extrusion.
+///
+/// Aufbau: die vier Grundriss-Ecken des Bandes (CCW) bilden das Deckel-Rechteck.
+/// Boden = gleiche XZ auf `y0`, Deckel = auf `y1`. Jede der sechs Seiten bekommt
+/// eigene Vertices mit ihrer (nach aussen zeigenden) Flaechen-Normale — daher
+/// flaches Shading und korrektes Backface-Culling.
+fn extrude_wall_segment(
+    mesh: &mut Mesh,
+    wall: &WallInput,
+    n: Point2,
+    length: f32,
+    a0: f32,
+    a1: f32,
+    y0: f32,
+    y1: f32,
+) {
     let h = wall.thickness * 0.5;
 
-    // Vier Band-Ecken im Grundriss (CCW, wie `wallCorners(start,end,thickness)`):
-    //  p0 = start + n*h,  p1 = end + n*h,  p2 = end - n*h,  p3 = start - n*h.
+    // Vier Band-Ecken im Grundriss (CCW, wie `wallCorners(start,end,thickness)`),
+    // aber auf Basis der Achsen-Punkte des Teilstuecks statt Wandanfang/-ende:
+    //  p0 = p(a0) + n*h,  p1 = p(a1) + n*h,  p2 = p(a1) - n*h,  p3 = p(a0) - n*h.
     let off = |p: Point2, s: f32| -> Point2 { [p[0] + n[0] * s * h, p[1] + n[1] * s * h] };
-    let g0 = off(wall.start, 1.0);
-    let g1 = off(wall.end, 1.0);
-    let g2 = off(wall.end, -1.0);
-    let g3 = off(wall.start, -1.0);
+    let p0 = axis_point(wall, length, a0);
+    let p1 = axis_point(wall, length, a1);
+    let g0 = off(p0, 1.0);
+    let g1 = off(p1, 1.0);
+    let g2 = off(p1, -1.0);
+    let g3 = off(p0, -1.0);
 
-    let y0 = wall.base_elevation;
-    let y1 = wall.base_elevation + wall.height;
     let color = wall.color;
 
     // world-Position aus Grundriss-XZ + Hoehe: (x, y, z=grundriss.y).
@@ -83,10 +165,13 @@ pub fn extrude_wall(mesh: &mut Mesh, wall: &WallInput) {
     // Vier Mantelflaechen. Aussen-Normalen aus dem Grundriss:
     //  Kante g0->g1 liegt auf der +n-Seite  -> Normale +n.
     //  Kante g2->g3 liegt auf der -n-Seite  -> Normale -n.
-    //  Kappen an Start (g3->g0) und Ende (g1->g2) liegen an den Achsen-Enden.
+    //  Kappen an a0 (g3->g0) und a1 (g1->g2) liegen an den Achsen-Enden des
+    //  Teilstuecks (bei einem inneren Teilstueck also am Rand der Oeffnung
+    //  -> Leibungsflaeche/Reveal statt Wandende).
     let np = [n[0], 0.0, n[1]]; // +n-Seite (world)
     let nn = [-n[0], 0.0, -n[1]]; // -n-Seite
-    // Achsenrichtung (fuer die End-Kappen-Normalen).
+    // Achsenrichtung der GESAMTEN Wand (fuer die End-Kappen-Normalen) — konstant
+    // ueber alle Teilstuecke, unabhaengig von `a0`/`a1`.
     let ux = wall.end[0] - wall.start[0];
     let uz = wall.end[1] - wall.start[1];
     let ul = (ux * ux + uz * uz).sqrt().max(1e-9);
@@ -97,9 +182,9 @@ pub fn extrude_wall(mesh: &mut Mesh, wall: &WallInput) {
     push_quad(mesh, b0, b1, t1, t0, np, color);
     // -n-Wand: aussen betrachtet CCW = b2, b3, t3, t2.
     push_quad(mesh, b2, b3, t3, t2, nn, color);
-    // End-Kappe (Achsen-Ende, Normale +u): b1, b2, t2, t1.
+    // End-Kappe bei a1, Normale +u: b1, b2, t2, t1.
     push_quad(mesh, b1, b2, t2, t1, u, color);
-    // Start-Kappe (Achsen-Anfang, Normale -u): b3, b0, t0, t3.
+    // End-Kappe bei a0, Normale -u: b3, b0, t0, t3.
     push_quad(mesh, b3, b0, t0, t3, neg_u, color);
 }
 
