@@ -12,6 +12,7 @@ import { join } from "node:path";
 
 const URL = process.env.PROBE_URL || "http://localhost:5187/";
 const OUT = process.env.SCRATCH || "/tmp/pdf-probe";
+const PEN_STEPS_LOG = "0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0";
 if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
 
 const browser = await puppeteer.launch({
@@ -69,10 +70,12 @@ const info = await page.evaluate(() => {
 });
 console.log("Store:", JSON.stringify(info));
 
-// PDF-Button in der Oberleiste klicken (Text „PDF"). Öffnet den Export-Dialog.
+// PDF-Button in der Oberleiste klicken (Icon-Button, aria-label „PDF" — die
+// TopBar zeigt seit dem Icon-Redesign nur noch ein Material-Symbol, kein
+// Klartext mehr). Öffnet den Export-Dialog.
 const clickedBtn = await page.evaluate(() => {
-  const btns = Array.from(document.querySelectorAll(".tb-btn"));
-  const b = btns.find((x) => x.textContent.trim() === "PDF");
+  const btns = Array.from(document.querySelectorAll(".tb-iconbtn"));
+  const b = btns.find((x) => x.getAttribute("aria-label")?.trim() === "PDF");
   if (b) {
     b.click();
     return true;
@@ -118,13 +121,15 @@ const pdfBytes = Buffer.from(captured.b64, "base64");
 const pdfPath = join(OUT, captured.name.endsWith(".pdf") ? captured.name : captured.name + ".pdf");
 writeFileSync(pdfPath, pdfBytes);
 
-// Visuelle Prüfung: das DRUCK-SVG (exakt die Vektor-Quelle des PDF) im Browser
-// erzeugen und nach PNG rastern. Zeigt scharfe Linien, Schraffuren, weisses Blatt.
+// Visuelle Prüfung: das DRUCK-SVG (exakt die Vektor-Quelle des PDF — jetzt aus
+// der RENDER-SZENE, derselben Quelle wie der Viewport) im Browser erzeugen und
+// nach PNG rastern. Zeigt scharfe Linien, Schraffuren, weisses Blatt.
 try {
-  const svgPng = await page.evaluate(async () => {
+  const result = await page.evaluate(async () => {
     const gp = await import("/src/plan/generatePlan.ts");
     const sp = await import("/src/model/sampleProject.ts");
-    const ptp = await import("/src/export/planToPrintSvg.ts");
+    const trs = await import("/src/plan/toRenderScene.ts");
+    const stp = await import("/src/export/sceneToPrintSvg.ts");
     const proj = sp.sampleProject;
     const codes = new Set();
     const walk = (cs) =>
@@ -136,12 +141,29 @@ try {
       });
     walk(proj.layers);
     const plan = gp.generatePlan(proj, "eg", codes, undefined, "mittel", false, false);
-    const print = ptp.planToPrintSvg(plan, {
+    const scene = trs.planToRenderScene(plan);
+    const print = stp.sceneToPrintSvg(scene, {
       scaleDenominator: 100,
       pageWidthMm: 297,
       pageHeightMm: 210,
       marginMm: 10,
     });
+
+    // Schraffur-Nachweis: widthScreen-Polylinien der Szene sind die Schraffur-
+    // Musterlinien (siehe toRenderScene.ts); im Print-SVG muessen sie als
+    // <polyline> mit ISO-Stiftstufen-Strichbreite auftauchen.
+    const hatchRunCount = scene.polylines.filter((p) => p.widthScreen).length;
+    const PEN_STEPS = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0];
+    const strokeWidths = Array.from(
+      print.svg.querySelectorAll("polyline, polygon, line, path"),
+    )
+      .map((el) => el.getAttribute("stroke-width"))
+      .filter((w) => w !== null)
+      .map(Number);
+    const offPenStep = strokeWidths.filter(
+      (w) => !PEN_STEPS.some((s) => Math.abs(s - w) < 1e-6),
+    );
+
     const xml = new XMLSerializer().serializeToString(print.svg);
     const blob = new Blob([xml], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
@@ -159,11 +181,30 @@ try {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/png");
+    return {
+      png: canvas.toDataURL("image/png"),
+      hatchRunCount,
+      strokedElementCount: strokeWidths.length,
+      offPenStepCount: offPenStep.length,
+      offPenStepSample: offPenStep.slice(0, 5),
+    };
   });
-  const b64 = svgPng.split(",")[1];
+  const b64 = result.png.split(",")[1];
   writeFileSync(join(OUT, "print-svg.png"), Buffer.from(b64, "base64"));
   console.log("Druck-SVG → PNG:", join(OUT, "print-svg.png"));
+
+  console.log("\n=== SCHRAFFUR / STIFTSTUFEN (Print-SVG) ===");
+  console.log(`Schraffur-Musterlinien (widthScreen-Polylinien) in der Szene: ${result.hatchRunCount}`);
+  console.log(`Gestrichelte/-gezeichnete Elemente mit stroke-width im Print-SVG: ${result.strokedElementCount}`);
+  console.log(
+    `Strichbreiten ausserhalb der ISO-Stiftstufen (${PEN_STEPS_LOG}): ${result.offPenStepCount}` +
+      (result.offPenStepCount ? ` (Beispiele: ${result.offPenStepSample.join(", ")})` : ""),
+  );
+  console.log(
+    `→ Schraffur vorhanden UND alle Strichbreiten auf Stiftstufen? ${
+      result.hatchRunCount > 0 && result.offPenStepCount === 0 ? "JA" : "NEIN"
+    }`,
+  );
 } catch (e) {
   console.log("(SVG-Render übersprungen:", e.message + ")");
 }

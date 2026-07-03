@@ -91,6 +91,13 @@ export interface RText {
   color: RRgba;
   align: RTextAlign;
 }
+/** Achsenparalleler Rahmen der Plan-Geometrie in Modell-Metern (siehe Plan.bounds). */
+export interface RBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
 export interface RScene {
   fills: RFill[];
   outlines: ROutline[];
@@ -98,6 +105,14 @@ export interface RScene {
   arcs: RArc[];
   lines: RLine[];
   texts: RText[];
+  /**
+   * Plan-Bounds (Modell-Meter) — additiv aus `Plan.bounds` übernommen, damit
+   * Verbraucher (z. B. der Vektor-PDF-Serializer `sceneToPrintSvg.ts`) den
+   * Plan-Inhalt zentrieren können, OHNE zusätzlich den `Plan` selbst zu
+   * benötigen. Unbekannt für den Rust-Renderer (serde ignoriert überzählige
+   * Felder ohne `deny_unknown_fields`), also rückwirkungsfrei fürs GPU-Backend.
+   */
+  bounds: RBounds;
 }
 
 const DEFAULT_LINE = "#1a1a1a";
@@ -496,5 +511,5 @@ export function planToRenderScene(plan: Plan): RScene {
     }
   }
 
-  return { fills, outlines, polylines, arcs, lines, texts };
+  return { fills, outlines, polylines, arcs, lines, texts, bounds: { ...plan.bounds } };
 }

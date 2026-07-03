@@ -1,16 +1,21 @@
-// Vektor-PDF-Export des Grundrisses. Baut aus einem Plan (generatePlan →
-// Primitive) ein massstäbliches Druck-SVG (planToPrintSvg) und rendert dieses
-// per jsPDF + svg2pdf.js als ECHTES Vektor-PDF (Pfad-/Text-Operatoren, KEINE
-// Rasterung). Papierformat (A4/A3) + Ausrichtung (Hoch/Quer) wählbar; der Plan
-// wird zentriert aufs Blatt gesetzt, ein schlichtes Schriftfeld (Titel/Massstab)
-// optional unten rechts.
+// Vektor-PDF-Export des Grundrisses. Baut aus einem Plan zunaechst DIESELBE
+// render2d-Szene wie der Viewport (`planToRenderScene`, siehe
+// `useWasmPlanRenderer.ts`/`nativeSync.ts` — identischer Aufruf, keine
+// Sonderoptionen), serialisiert sie massstaeblich als Papier-SVG
+// (`sceneToPrintSvg`) und rendert dieses per jsPDF + svg2pdf.js als ECHTES
+// Vektor-PDF (Pfad-/Text-Operatoren, KEINE Rasterung). Bildschirm und PDF
+// haben damit dieselbe Quelle, nur ein anderes Ziel (GPU-Framebuffer vs.
+// Papier-mm-SVG). Papierformat (A4/A3) + Ausrichtung (Hoch/Quer) wählbar; der
+// Plan wird zentriert aufs Blatt gesetzt, ein schlichtes Schriftfeld (Titel/
+// Massstab) optional unten rechts.
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import type { Plan } from "../plan/generatePlan";
-import { planToPrintSvg } from "./planToPrintSvg";
+import { planToRenderScene } from "../plan/toRenderScene";
+import { sceneToPrintSvg } from "./sceneToPrintSvg";
 
 /** Unterstützte Papierformate (Blattmasse in mm, Hochformat-Basis). */
 export type PaperFormat = "a4" | "a3";
@@ -59,10 +64,14 @@ export async function buildPlanPdf(
 ): Promise<jsPDF> {
   const { w: pageW, h: pageH } = pageSizeMm(opts.paper, opts.orientation);
 
-  // Druck-SVG (mm-Koordinaten) aufbauen. Etwas mehr unterer Rand, falls ein
-  // Schriftfeld gezeichnet wird (damit es nicht in den Plan ragt).
+  // Render-Szene EXAKT wie der Viewport erzeugen (keine Zusatz-Optionen —
+  // `planToRenderScene(plan)` ist der vollstaendige Aufruf, siehe
+  // `useWasmPlanRenderer.ts`), dann als Papier-SVG serialisieren. Etwas mehr
+  // unterer Rand, falls ein Schriftfeld gezeichnet wird (damit es nicht in
+  // den Plan ragt).
   const margin = 10;
-  const print = planToPrintSvg(plan, {
+  const scene = planToRenderScene(plan);
+  const print = sceneToPrintSvg(scene, {
     scaleDenominator: opts.scaleDenominator,
     pageWidthMm: pageW,
     pageHeightMm: pageH,

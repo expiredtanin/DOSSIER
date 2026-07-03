@@ -1,3 +1,10 @@
+// ERSETZT durch `sceneToPrintSvg.ts` (liest die render2d-Szene aus
+// `toRenderScene.ts` — dieselbe Quelle wie der Viewport — statt den Plan
+// eigenständig zu re-interpretieren). Dieser Serializer wird vom PDF-Export
+// (`exportPdf.ts`) NICHT MEHR verwendet und bleibt nur als Referenz/Altpfad
+// stehen (z. B. für einen Vergleichs-Screenshot). Neue Änderungen bitte in
+// `sceneToPrintSvg.ts` vornehmen.
+//
 // Druck-SVG aus einem Plan (generatePlan → Primitive). Eigenständiges,
 // massstäbliches SVG für den VEKTOR-PDF-Export — NICHT vom Bildschirm-DOM
 // abgeleitet, sondern direkt aus den Plan-Primitiven (Polygon/Linie/Bogen).
