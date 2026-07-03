@@ -47,6 +47,15 @@ export interface SectionCutPolygon {
   fill?: string;
   /** Echte Schnitt-Schraffur des geschnittenen Bauteils, analog zu `fill`. */
   hatch?: HatchRender;
+  /**
+   * Verschneidungs-Rang der Schicht dieses Bands (`Component.joinPriority` des
+   * Ursprungs-Bauteils). Steuert die Schnitt-Boolean-Dominanz in
+   * `attachCutStyles`: ein Band mit STRIKT höherer Priorität schneidet ein
+   * überlappendes schwächeres Band per Rechteck-Subtraktion weg (element-
+   * übergreifend, z. B. Decken-Beton schneidet Wand-Putz). Fehlt der Wert
+   * (unauflösbares Bauteil), nimmt das Band an keiner Subtraktion teil.
+   */
+  joinPriority?: number;
 }
 
 /** Ein projiziertes Liniensegment in (u, v)-Metern. */
@@ -254,7 +263,11 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
   const uWorld = sectionUAxisModel(plane);
   const walls = wallSegmentOwners(project);
   const slabs = slabSegmentOwners(project);
-  const next: SectionCutPolygon[] = [];
+
+  // Phase 1 — ALLE Cut-Bänder (aus allen Wänden UND Decken, mehr- wie einschichtig)
+  // als flache Liste sammeln, jedes mit seiner `joinPriority` getaggt (aus dem
+  // Bauteil der Schicht bzw. dem repräsentativen Bauteil bei einschichtig).
+  const bands: SectionCutPolygon[] = [];
   for (const cp of output.cutPolygons) {
     const ref = cp.component;
     if (ref.kind === "wall") {
@@ -267,7 +280,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
       if (owner) {
         const wt = getWallType(project, owner);
         if (wt.layers.length > 1) {
-          next.push(...splitWallLayers(cp, project, wt, owner, uWorld));
+          bands.push(...splitWallLayers(cp, project, wt, owner, uWorld));
           continue;
         }
       }
@@ -276,7 +289,8 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
         cp.fill = style.fill;
         cp.hatch = style.hatch;
       }
-      next.push(cp);
+      cp.joinPriority = owner ? wallRepresentativePriority(project, owner) : undefined;
+      bands.push(cp);
       continue;
     }
     // Decke: bei mehrschichtigem Deckentyp wird das EINE geschnittene Rechteck
@@ -288,7 +302,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     if (owner) {
       const wt = getCeilingType(project, owner);
       if (wt.layers.length > 1) {
-        next.push(...splitSlabLayers(cp, project, wt));
+        bands.push(...splitSlabLayers(cp, project, wt));
         continue;
       }
       const style = resolveCeilingSectionStyle(project, owner);
@@ -296,10 +310,165 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
         cp.fill = style.fill;
         cp.hatch = style.hatch;
       }
+      cp.joinPriority = ceilingRepresentativePriority(project, owner);
     }
-    next.push(cp);
+    bands.push(cp);
   }
-  output.cutPolygons = next;
+
+  // Phase 2 — Boolean-Dominanz: die stärkere Schicht schneidet die schwächere.
+  output.cutPolygons = subtractDominantBands(bands);
+}
+
+/**
+ * Repräsentative `joinPriority` einer Wand für die Schnitt-Dominanz, wenn ihre
+ * Poché einschichtig (ein Band über die volle Dicke) gezeichnet wird: die
+ * HÖCHSTE joinPriority ihrer Schichten — dieselbe Regel, mit der
+ * `resolveWallSectionStyle` das tragende Bauteil (dessen Füllung/Schraffur das
+ * Band trägt) wählt. `undefined`, wenn der Wandtyp/keine Schicht auflösbar ist
+ * (das Band nimmt dann an keiner Subtraktion teil).
+ */
+function wallRepresentativePriority(project: Project, wall: Wall): number | undefined {
+  try {
+    const wt = getWallType(project, wall);
+    let best: number | undefined;
+    for (const layer of wt.layers) {
+      const p = getComponent(project, layer.componentId).joinPriority;
+      if (best === undefined || p > best) best = p;
+    }
+    return best;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Repräsentative `joinPriority` einer Decke für die Schnitt-Dominanz, wenn ihre
+ * Poché einschichtig (ein Band über die volle Dicke) gezeichnet wird: die der
+ * ERSTEN Schicht — dasselbe Bauteil, dessen Füllung/Schraffur
+ * `resolveCeilingSectionStyle` dem Band gibt. `undefined`, wenn Deckentyp/keine
+ * Schicht auflösbar ist.
+ */
+function ceilingRepresentativePriority(project: Project, ceiling: Ceiling): number | undefined {
+  try {
+    const wt = getCeilingType(project, ceiling);
+    const first = wt.layers[0];
+    if (!first) return undefined;
+    return getComponent(project, first.componentId).joinPriority;
+  } catch {
+    return undefined;
+  }
+}
+
+// ── Schnitt-Boolean-Dominanz (achsparallele Rechteck-Subtraktion) ───────────
+// Kleine Toleranz für Überlappungs-/Rest-Rechtecke: Null-/Negativflächen und
+// Rest-Streifen dünner als EPS werden verworfen (Float-Rauschen der u-/v-Meter).
+const RECT_EPS = 1e-6;
+
+/** Achsparalleles Rechteck in (u, v)-Metern. */
+export interface Rect {
+  uMin: number;
+  uMax: number;
+  vMin: number;
+  vMax: number;
+}
+
+/** Bounding-Box eines (achsparallelen) Cut-Bands als `Rect`, oder `null` bei <3 Ecken. */
+function rectOfBand(band: SectionCutPolygon): Rect | null {
+  if (band.pts.length < 3) return null;
+  const us = band.pts.map((p) => p[0]);
+  const vs = band.pts.map((p) => p[1]);
+  return {
+    uMin: Math.min(...us),
+    uMax: Math.max(...us),
+    vMin: Math.min(...vs),
+    vMax: Math.max(...vs),
+  };
+}
+
+/**
+ * Rechteck-minus-Rechteck (beide achsparallel): `base` ohne die Überlappung mit
+ * `cutter`, zerlegt in 0–4 disjunkte Rest-Rechtecke (links/rechts über die volle
+ * Höhe, dann oben/unten im mittleren u-Streifen — überlappungsfrei). Kein echter
+ * Überlapp (Fläche ≤ EPS in u oder v) ⇒ `base` bleibt ganz. Vollständige
+ * Überdeckung ⇒ leere Liste. Rest-Streifen dünner als EPS werden verworfen.
+ */
+export function subtractRect(base: Rect, cutter: Rect): Rect[] {
+  const oMinU = Math.max(base.uMin, cutter.uMin);
+  const oMaxU = Math.min(base.uMax, cutter.uMax);
+  const oMinV = Math.max(base.vMin, cutter.vMin);
+  const oMaxV = Math.min(base.vMax, cutter.vMax);
+  // Kein (nennenswerter) Überlapp — `base` unverändert.
+  if (oMaxU - oMinU <= RECT_EPS || oMaxV - oMinV <= RECT_EPS) return [base];
+
+  const out: Rect[] = [];
+  const push = (r: Rect) => {
+    if (r.uMax - r.uMin > RECT_EPS && r.vMax - r.vMin > RECT_EPS) out.push(r);
+  };
+  // Links / rechts der Überlappung, jeweils über die volle Basis-Höhe.
+  push({ uMin: base.uMin, uMax: oMinU, vMin: base.vMin, vMax: base.vMax });
+  push({ uMin: oMaxU, uMax: base.uMax, vMin: base.vMin, vMax: base.vMax });
+  // Unten / oben im mittleren u-Streifen (nur der von der Überlappung befreite Rest).
+  push({ uMin: oMinU, uMax: oMaxU, vMin: base.vMin, vMax: oMinV });
+  push({ uMin: oMinU, uMax: oMaxU, vMin: oMaxV, vMax: base.vMax });
+  return out;
+}
+
+/**
+ * Globale Schnitt-Dominanz: für jedes Band wird die Rechteck-Überlappung ALLER
+ * Bänder mit STRIKT höherer `joinPriority` subtrahiert (elementübergreifend —
+ * z. B. schneidet ein Decken-Beton-Band 100 ein überlappendes Wand-Putz-Band 10
+ * weg). Gleiche Priorität schneidet NICHT (koexistiert → durchgehende Fläche).
+ * Bänder ohne `joinPriority` (unauflösbares Bauteil) nehmen weder als Basis noch
+ * als Cutter teil und bleiben unverändert erhalten.
+ *
+ * Kanten: jedes emittierte Rest-Rechteck erhält in `generateSectionPlan` seine
+ * eigene Schnitt-Umrisslinie (unverändert). An der Schnittkante fällt die
+ * Rest-Rechteck-Kante mit der Kante des stärkeren Bands zusammen — das ist die
+ * gewünschte Material-/Fugenlinie zwischen den Schichten; im Inneren einer
+ * Schicht entstehen durch die überlappungsfreie Zerlegung keine falschen Kanten.
+ */
+export function subtractDominantBands(bands: SectionCutPolygon[]): SectionCutPolygon[] {
+  const rects = bands.map(rectOfBand);
+  const out: SectionCutPolygon[] = [];
+  for (let i = 0; i < bands.length; i++) {
+    const band = bands[i];
+    const base = rects[i];
+    const prio = band.joinPriority;
+    // Nicht-rechteckig oder ohne Priorität: unverändert durchreichen.
+    if (base === null || prio === undefined) {
+      out.push(band);
+      continue;
+    }
+    let pieces: Rect[] = [base];
+    for (let j = 0; j < bands.length && pieces.length > 0; j++) {
+      if (j === i) continue;
+      const otherPrio = bands[j].joinPriority;
+      const cutter = rects[j];
+      if (cutter === null || otherPrio === undefined || otherPrio <= prio) continue;
+      const next: Rect[] = [];
+      for (const p of pieces) next.push(...subtractRect(p, cutter));
+      pieces = next;
+    }
+    for (const p of pieces) out.push(bandFromRect(band, p));
+  }
+  return out;
+}
+
+/** Erzeugt aus einem Rest-`Rect` ein Cut-Band, das Stil/Referenz von `src` erbt. */
+function bandFromRect(src: SectionCutPolygon, r: Rect): SectionCutPolygon {
+  return {
+    component: src.component,
+    color: src.color,
+    pts: [
+      [r.uMin, r.vMax],
+      [r.uMax, r.vMax],
+      [r.uMax, r.vMin],
+      [r.uMin, r.vMin],
+    ],
+    fill: src.fill,
+    hatch: src.hatch,
+    joinPriority: src.joinPriority,
+  };
 }
 
 /**
@@ -349,6 +518,7 @@ function splitSlabLayers(
       ],
       fill: hatch.pattern === "solid" ? "#000000" : "#ffffff",
       hatch,
+      joinPriority: comp.joinPriority,
     });
   }
   return out;
@@ -420,6 +590,7 @@ export function splitWallLayers(
       ],
       fill: hatch.pattern === "solid" ? "#000000" : "#ffffff",
       hatch,
+      joinPriority: comp.joinPriority,
     });
   }
   return out;
