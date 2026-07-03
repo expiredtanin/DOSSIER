@@ -128,10 +128,10 @@ const DEFAULT_LINE = "#1a1a1a";
  * `opacity: 0.7`, wall-axis `opacity: 0.85`.
  */
 const CLS_STROKE: Record<string, string> = {
-  "door-leaf": "#2b3039",
-  "door-swing": "#6b7280",
-  "door-frame": "#2b3039",
-  "window-glass": "#4a86c7",
+  "door-leaf": "#1a1a1a",
+  "door-swing": "#1a1a1a",
+  "door-frame": "#1a1a1a",
+  "window-glass": "#1a1a1a",
   "wall-axis": "#2f5d54", // var(--accent) des hellen Standard-Themes
 };
 const CLS_OPACITY: Record<string, number> = {
@@ -433,7 +433,7 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
       }
     } else if (p.kind === "arc") {
       flushRun();
-      // Farbe wie im SVG: CSS-Klassen-Regel (z. B. .door-swing → #6b7280).
+      // Farbe wie im SVG: CSS-Klassen-Regel (z. B. .door-swing → #1a1a1a).
       const col = withOpacity(strokeColorFor(p.cls, undefined), p.cls, p.greyed);
       // Bogen unvortessellliert an Rust übergeben (`RArc`) — die exakte runde
       // Darstellung (analytischer SDF-Shader, `ARC_WGSL`) und ein evtl. Strich-

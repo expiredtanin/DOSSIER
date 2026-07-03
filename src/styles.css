@@ -1527,24 +1527,24 @@ body {
    Das Zeichenblatt ist IMMER hell (--sheet) → Plan-Tinte bleibt fix dunkel,
    unabhängig vom UI-Theme (sonst unsichtbar auf Weiß im Dark-Mode). */
 .plan-svg .door-leaf {
-  stroke: #2b3039;
+  stroke: #1a1a1a;
   fill: none;
 }
 
 .plan-svg .door-swing {
-  stroke: #6b7280;
+  stroke: #1a1a1a;
   fill: none;
 }
 
 /* Anschlag-/Rahmenstriche der Tür (nur im Detailgrad „fein"). */
 .plan-svg .door-frame {
-  stroke: #2b3039;
+  stroke: #1a1a1a;
   fill: none;
 }
 
 /* Glaslinien des Fensters (dünn, gedämpft — die Verglasung im Grundriss). */
 .plan-svg .window-glass {
-  stroke: #4a86c7;
+  stroke: #1a1a1a;
   fill: none;
 }
 

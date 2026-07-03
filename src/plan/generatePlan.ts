@@ -82,6 +82,8 @@ const MONO_INK = "#111111";
 
 /** Haarlinie zwischen den Schichten (Schichtfugen) in mm — gleiche Stärke wie die Schraffur-Tinte. */
 const LAYER_LINE_MM = 0.02;
+/** Haarlinie für Tür-/Fenstersymbole (Flügel, Bogen, Rahmen, Glas) in mm. */
+const SYMBOL_HAIRLINE_MM = 0.02;
 /** Stärke der Wand-Umrisslinie je Detailgrad, als Faktor auf die Ebenen-lw. */
 const OUTLINE_DETAIL_FACTOR: Record<DetailLevel, number> = {
   grob: 1.6, // dickere Sammellinie
@@ -974,7 +976,7 @@ function addDoorSymbol(
   door: Project["doors"][number],
   greyed: boolean,
   detail: DetailLevel,
-  doorLwMm: number,
+  _doorLwMm: number,
 ): void {
   const u = normalize(sub(wall.end, wall.start));
   const n = leftNormal(u); // linke Seite der Wandachse
@@ -994,7 +996,7 @@ function addDoorSymbol(
     a: hinge,
     b: openEnd,
     cls: "door-leaf",
-    weightMm: doorLwMm,
+    weightMm: SYMBOL_HAIRLINE_MM,
     greyed,
   });
 
@@ -1007,8 +1009,7 @@ function addDoorSymbol(
       to: openEnd,
       r: door.width,
       cls: "door-swing",
-      weightMm: doorLwMm * 0.6,
-      dash: [0.06, 0.04], // gestrichelt in mm Papier
+      weightMm: SYMBOL_HAIRLINE_MM,
       greyed,
     });
   }
@@ -1023,7 +1024,7 @@ function addDoorSymbol(
         a: add(jamb, scale(n, reveal)),
         b: add(jamb, scale(n, -reveal)),
         cls: "door-frame",
-        weightMm: doorLwMm,
+        weightMm: SYMBOL_HAIRLINE_MM,
         greyed,
       });
     }
@@ -1062,7 +1063,7 @@ function addOpeningSymbol(
       a: sym.hinge,
       b: sym.openEnd,
       cls: "door-leaf",
-      weightMm: lwMm,
+      weightMm: SYMBOL_HAIRLINE_MM,
       greyed,
       openingId: o.id,
     });
@@ -1075,8 +1076,7 @@ function addOpeningSymbol(
         to: sym.openEnd,
         r: sym.radius,
         cls: "door-swing",
-        weightMm: lwMm * 0.6,
-        dash: [0.06, 0.04],
+        weightMm: SYMBOL_HAIRLINE_MM,
         greyed,
         openingId: o.id,
       });
@@ -1090,7 +1090,7 @@ function addOpeningSymbol(
           a: add(jamb, scale(sym.normal, reveal)),
           b: add(jamb, scale(sym.normal, -reveal)),
           cls: "door-frame",
-          weightMm: lwMm,
+          weightMm: SYMBOL_HAIRLINE_MM,
           greyed,
           openingId: o.id,
         });
@@ -1122,7 +1122,7 @@ function addOpeningSymbol(
       a,
       b,
       cls: "window-glass",
-      weightMm: lwMm * 0.7,
+      weightMm: SYMBOL_HAIRLINE_MM,
       greyed,
       openingId: o.id,
     });
@@ -1183,14 +1183,18 @@ function addCeilingPoche(
   const ceilingId = ceiling.id;
 
   // Gefüllte + schraffierte Fläche (Component-Poché). Im Detailgrad „grob" ohne
-  // Schraffur (reine Füllung), sonst die Bauteil-Schraffur.
+  // Schraffur (reine Füllung), sonst die Bauteil-Schraffur. SIA-Poché wie bei
+  // der mehrschichtigen Wand: neutraler Hintergrund (weiß) statt Bauteil-Albedo,
+  // Vollmuster ("solid") = schwarze Poché.
+  const hatch = comp && detail !== "grob" ? resolveHatch(project, comp.hatchId) : NO_HATCH;
+  const solid = hatch.pattern === "solid";
   out.push({
     kind: "polygon",
     pts,
-    fill: comp ? comp.color : "none",
+    fill: comp ? pocheFill(hatch.pattern) : "none",
     stroke,
     strokeWidthMm: LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail],
-    hatch: comp && detail !== "grob" ? resolveHatch(project, comp.hatchId) : NO_HATCH,
+    hatch: solid ? { ...hatch, color: POCHE_FILL_BLACK } : hatch,
     greyed,
     ceilingId,
   });
