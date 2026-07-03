@@ -34,6 +34,7 @@ export function ResourcesPanel() {
     onPatchLineStyle: host.onPatchLineStyle,
     onAddLineStyle: host.onAddLineStyle,
     onDeleteLineStyle: host.onDeleteLineStyle,
+    onPatchWallType: host.onPatchWallType,
     onImportLineStyles: host.onImportLineStyles,
     onImportHatches: host.onImportHatches,
   };

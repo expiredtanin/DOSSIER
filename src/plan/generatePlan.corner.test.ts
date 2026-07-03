@@ -114,3 +114,31 @@ describe("generatePlan — Wandecken-Gehrung", () => {
     for (const p of wallPolys) expect(p.noStrokeEdges).toEqual([]);
   });
 });
+
+describe("generatePlan — Schichtfugen als stilisierbare Linien", () => {
+  const jointLines = (proj: Project) =>
+    generatePlan(proj, "eg", visible, undefined, "mittel").primitives.filter(
+      (p): p is Extract<typeof p, { kind: "line" }> =>
+        p.kind === "line" && p.cls === "layer-joint",
+    );
+
+  it("zieht die innere Fuge als eigene Linie und übernimmt Gewicht/Farbe des LineStyle", () => {
+    const proj = cornerProject();
+    proj.walls = [proj.walls[0]]; // nur W1, zwei Schichten → genau eine innere Fuge
+    proj.wallTypes[0].layers[0].jointLineStyleId = "thin"; // weight 0.13, color #111
+    const joints = jointLines(proj);
+    expect(joints.length).toBe(1);
+    // LAYER_DETAIL_FACTOR["mittel"] == 1 → das LineStyle-Gewicht wirkt direkt.
+    expect(joints[0].weightMm).toBeCloseTo(0.13, 6);
+    expect(joints[0].color).toBe("#111");
+    expect(joints[0].dash ?? null).toBeNull();
+  });
+
+  it("fällt ohne Zuweisung auf die Haarlinie (0.02 mm) in Wandfarbe zurück", () => {
+    const proj = cornerProject();
+    proj.walls = [proj.walls[0]];
+    const joints = jointLines(proj);
+    expect(joints.length).toBe(1);
+    expect(joints[0].weightMm).toBeCloseTo(0.02, 6);
+  });
+});

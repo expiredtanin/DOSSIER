@@ -438,7 +438,16 @@ export const de = {
   "resources.tab.components": "Bauteile",
   "resources.tab.hatches": "Schraffuren",
   "resources.tab.lines": "Linien",
+  "resources.tab.wallStyles": "Wandstile",
   "resources.tab.materials": "Materialien",
+
+  "resources.wallStyles.hint":
+    "Je Wandtyp die Schichtfugen (zwischen benachbarten Schichten) als wählbaren Linienstil. Ohne Zuweisung: Haarlinie 0.02 mm.",
+  "resources.wallStyles.empty": "Noch keine Wandtypen.",
+  "resources.col.layer": "Schicht",
+  "resources.col.thickness": "Dicke (mm)",
+  "resources.col.joint": "Fuge",
+  "resources.joint.default": "— (Haarlinie)",
 
   "resources.materials.hint":
     "Kugel-Vorschau der eingebauten PBR-Materialbibliothek — durchsuchen und vergleichen. Zuweisen an ein Bauteil weiterhin über dessen Spalte „Material …\".",

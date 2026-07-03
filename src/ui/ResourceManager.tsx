@@ -24,6 +24,7 @@ import type {
   HatchStyle,
   LineStyle,
   Project,
+  WallType,
 } from "../model/types";
 import { PEN_WEIGHTS } from "../model/types";
 import { parseLin } from "../io/linParser";
@@ -1129,6 +1130,77 @@ function LinesTab({
   );
 }
 
+// ── Wandstile (Wall Styles) ────────────────────────────────────────────────
+// Pro Wandtyp die geordneten Schichten (Bauteil + Dicke) und je INNERER Fuge
+// (zwischen zwei aufeinanderfolgenden Schichten) ein LineStyle-Dropdown, das an
+// layer[i].jointLineStyleId hängt (i = Schicht, deren innere Kante die Fuge ist).
+// Die innerste Schicht hat keine innere Fuge (ihre Kante ist der Wand-Innenumriss).
+
+// Spalten: Schicht | Dicke (mm) | Fuge (innere).
+const WALLSTYLE_COLUMNS: ResColumn[] = [
+  { titleKey: "resources.col.layer" },
+  { titleKey: "resources.col.thickness", align: "right" },
+  { titleKey: "resources.col.joint" },
+];
+const WALLSTYLE_TEMPLATE = "minmax(120px, 1fr) 72px minmax(140px, 1.2fr)";
+
+function WallStylesTab({
+  project,
+  onPatchWallType,
+}: {
+  project: Project;
+  onPatchWallType: (id: string, patch: Partial<WallType>) => void;
+}) {
+  // Sentinel „— (Haarlinie)": kein Feld gesetzt → Standard-Haarlinie 0.02 mm.
+  const DEFAULT = "__default__";
+  const jointOptions = [
+    { value: DEFAULT, label: t("resources.joint.default") },
+    ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
+  ];
+  const setJoint = (wt: WallType, li: number, styleId: string | undefined) => {
+    const layers = wt.layers.map((l, i) =>
+      i === li ? { ...l, jointLineStyleId: styleId } : l,
+    );
+    onPatchWallType(wt.id, { layers });
+  };
+  return (
+    <div className="res-tab">
+      <div className="res-hint">{t("resources.wallStyles.hint")}</div>
+      {project.wallTypes.map((wt) => (
+        <div key={wt.id} className="res-wallstyle">
+          <div className="res-wallstyle-head">{wt.name}</div>
+          <ResTable columns={WALLSTYLE_COLUMNS} template={WALLSTYLE_TEMPLATE}>
+            {wt.layers.map((layer, li) => {
+              const comp = project.components.find((c) => c.id === layer.componentId);
+              const isInner = li === wt.layers.length - 1;
+              return (
+                <ResRow key={li}>
+                  <ResCell emphasis>{comp ? comp.name : layer.componentId}</ResCell>
+                  <ResCell align="right">{Math.round(layer.thickness * 1000)}</ResCell>
+                  <ResCell>
+                    {isInner ? (
+                      <span className="res-joint-none">–</span>
+                    ) : (
+                      <SelectField
+                        value={layer.jointLineStyleId ?? DEFAULT}
+                        onChange={(v) => setJoint(wt, li, v === DEFAULT ? undefined : v)}
+                        options={jointOptions}
+                      />
+                    )}
+                  </ResCell>
+                </ResRow>
+              );
+            })}
+          </ResTable>
+        </div>
+      ))}
+      {project.wallTypes.length === 0 && (
+        <EmptyState text={t("resources.wallStyles.empty")} />
+      )}
+    </div>
+  );
+}
+
 /**
  * Datei-Import-Schaltfläche (verstecktes <input type=file>). Liest die gewählte
  * Datei als Text und reicht ihn nach oben. Für .lin/.pat-Import.
@@ -1377,12 +1449,13 @@ function EmptyState({ text }: { text: string }) {
 
 // ── Manager-Schublade ──────────────────────────────────────────────────────
 
-type TabId = "components" | "hatches" | "lines" | "materials";
+type TabId = "components" | "hatches" | "lines" | "wallStyles" | "materials";
 
 const TABS: { id: TabId; labelKey: string }[] = [
   { id: "components", labelKey: "resources.tab.components" },
   { id: "hatches", labelKey: "resources.tab.hatches" },
   { id: "lines", labelKey: "resources.tab.lines" },
+  { id: "wallStyles", labelKey: "resources.tab.wallStyles" },
   { id: "materials", labelKey: "resources.tab.materials" },
 ];
 
@@ -1397,6 +1470,8 @@ export interface ResourceManagerHandlers {
   onPatchLineStyle: (id: string, patch: Partial<LineStyle>) => void;
   onAddLineStyle: () => void;
   onDeleteLineStyle: (id: string) => void;
+  /** Wandstile: immutable Änderung eines Wandtyps (z. B. Schichtfugen-Stile). */
+  onPatchWallType: (id: string, patch: Partial<WallType>) => void;
   /** Import: fügt fertige (id-lose) Linienstile/Schraffuren hinzu (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
@@ -1481,6 +1556,12 @@ export function ResourceManager({
               onAddLineStyle={handlers.onAddLineStyle}
               onDeleteLineStyle={handlers.onDeleteLineStyle}
               onImportLineStyles={handlers.onImportLineStyles}
+            />
+          )}
+          {tab === "wallStyles" && (
+            <WallStylesTab
+              project={project}
+              onPatchWallType={handlers.onPatchWallType}
             />
           )}
           {tab === "materials" && <MaterialsTab />}

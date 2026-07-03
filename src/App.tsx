@@ -34,6 +34,7 @@ import type {
   Project,
   Vec2,
   Wall,
+  WallType,
 } from "./model/types";
 import { generatePlan, generateSectionPlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
@@ -1619,6 +1620,14 @@ export default function App() {
   const patchLineStyle = useStore((s) => s.patchLineStyle);
   const addLineStyle = useStore((s) => s.addLineStyle);
   const deleteLineStyle = useStore((s) => s.deleteLineStyle);
+  // Wandstile: immutable Patch eines Wandtyps (z. B. Schichtfugen-Stile). Kein
+  // eigener Store-Slice nötig — läuft direkt über setProject wie die übrigen
+  // Ressourcen-Mutationen.
+  const patchWallType = (id: string, patch: Partial<WallType>) =>
+    setProject((p) => ({
+      ...p,
+      wallTypes: p.wallTypes.map((wt) => (wt.id === id ? { ...wt, ...patch } : wt)),
+    }));
   const importLineStyles = useStore((s) => s.importLineStyles);
   const importHatches = useStore((s) => s.importHatches);
   // Site-/Kontext-Schicht (siteSlice): Import/Entfernen/Gelände.
@@ -1904,6 +1913,7 @@ export default function App() {
       onPatchLineStyle: patchLineStyle,
       onAddLineStyle: addLineStyle,
       onDeleteLineStyle: deleteLineStyle,
+      onPatchWallType: patchWallType,
       onImportLineStyles: importLineStyles,
       onImportHatches: importHatches,
       selection,
@@ -2135,6 +2145,7 @@ export default function App() {
   // Handler-Bündel für das schwebende Ressourcen-Fenster (ResourceManager).
   const resourceHandlers: ResourceManagerHandlers = {
     onPatchComponent: patchComponent,
+    onPatchWallType: patchWallType,
     onAddComponent: addComponent,
     onDeleteComponent: deleteComponent,
     onPatchHatch: patchHatch,

@@ -1971,6 +1971,26 @@ body {
   line-height: 1.4;
 }
 
+/* ── Wandstile: ein Block je Wandtyp (Überschrift + Schicht-/Fugen-Tabelle) ─── */
+.res-wallstyle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.res-wallstyle-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 2px 2px 0;
+}
+
+/* Innerste Schicht: keine innere Fuge → gedämpfter Platzhalter statt Dropdown. */
+.res-joint-none {
+  color: var(--muted);
+  padding-left: 4px;
+}
+
 /* ── Tabelle (saubere Liste, CONVENTIONS.md) ──────────────────────────────────
    Ein CSS-Grid trägt die Spalten (gridTemplateColumns wird je Tab inline
    gesetzt). Kopfzeile und Datenzeilen sind `display:contents`, damit ihre

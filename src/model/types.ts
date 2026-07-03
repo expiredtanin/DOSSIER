@@ -128,6 +128,13 @@ export interface Layer {
   componentId: string;
   /** Schichtdicke in Metern. */
   thickness: number;
+  /**
+   * Linienstil (LineStyle) der Schichtfuge an der INNEREN Kante DIESER Schicht —
+   * also der Fuge zwischen dieser und der nächst-inneren Schicht. Bei der
+   * innersten Schicht ungenutzt (ihre innere Kante ist der Wand-Innenumriss).
+   * Fehlt das Feld, wird die Standard-Haarlinie (0.02 mm) gezeichnet.
+   */
+  jointLineStyleId?: string;
 }
 
 /** Ein Wandtyp = geordneter Schichtaufbau (außen → innen). */

@@ -80,7 +80,9 @@ const MONO_INK = "#111111";
 // dpi = 96·devicePixelRatio in konstante Bildschirm-Pixel um (non-scaling-stroke),
 // damit Linien beim Zoomen ihre Papiergröße behalten und der Massstab stimmt.
 
-/** Haarlinie zwischen den Schichten (Schichtfugen) in mm — gleiche Stärke wie die Schraffur-Tinte. */
+/** Default-Schichtfuge zwischen den Materialschichten in mm — Haarlinie (0.02),
+ *  gleiche Stärke wie die Schraffur-Tinte. Pro Fuge im Wandstil überschreibbar
+ *  (z. B. 0.13, wenn zwei massive Materialien aufeinandertreffen). */
 const LAYER_LINE_MM = 0.02;
 /** Haarlinie für Tür-/Fenstersymbole (Flügel, Bogen, Rahmen, Glas) in mm. */
 const SYMBOL_HAIRLINE_MM = 0.02;
@@ -905,10 +907,12 @@ function addWallPoche(
 
     // mittel/fein: Schichten von außen (-T/2) nach innen (+T/2) stapeln. Jede
     // Schicht löst Bauteil (Füllfarbe) + Schraffur (Muster/Maßstab/Winkel/Farbe)
-    // auf; die Schichtfugen werden dünn gestrichen.
+    // auf. Die Bänder tragen NUR Füllung + Schraffur (kein eigener Umriss); jede
+    // innere Schichtfuge wird als EIGENSTÄNDIGE, stilisierbare Linie gezeichnet.
     const bandJoinEdges = joinEdges(startCut, endCut);
     let off = refOff - total / 2;
-    for (const layer of wt.layers) {
+    for (let li = 0; li < wt.layers.length; li++) {
+      const layer = wt.layers[li];
       const comp = getComponent(project, layer.componentId);
       const layerHatch = resolveHatch(project, comp.hatchId, wallAngleDeg);
       // SIA-Poché: neutraler Hintergrund (weiß) statt Bauteil-Albedo, die
@@ -918,16 +922,42 @@ function addWallPoche(
         kind: "polygon",
         pts: clippedBand(p1, p2, off, off + layer.thickness, startCut, endCut),
         fill: layerSolid ? POCHE_FILL_BLACK : POCHE_FILL_WHITE,
-        stroke,
-        strokeWidthMm: layerLineMm,
+        // Band ohne Umriss: keine Schichtfuge über die Bandkante, keine 45°-Naht
+        // am Knoten. Die Fugen kommen als separate `line`-Primitive (siehe unten).
+        stroke: "none",
+        strokeWidthMm: 0,
         hatch: layerSolid ? { ...layerHatch, color: POCHE_FILL_BLACK } : layerHatch,
         greyed,
-        // Die Diagonale am Knoten NICHT stricheln → keine 45°-Naht zwischen
-        // gleichfarbigen Schichten der beiden Wände.
+        // Für die Ecktests/Konsistenz beibehalten (bei stroke:"none" wirkungslos).
         noStrokeEdges: bandJoinEdges,
         wallId,
       });
       off += layer.thickness;
+      // Innere Schichtfuge (zwischen dieser und der nächst-inneren Schicht) als
+      // eigene Linie am kumulierten Offset `off`, mit dem Cut der Bänder geclippt.
+      // Stil aus layer.jointLineStyleId (Gewicht/Farbe/Strich); Rückfall = Haar-
+      // linie (LAYER_LINE_MM) in Wandfarbe. Das Gewicht folgt demselben Detail-
+      // Faktor wie die frühere Schichtfuge (`layerLineMm`), damit die Detailgrade
+      // sich unverändert verhalten. Die innerste Schicht hat keine innere Fuge.
+      if (li < wt.layers.length - 1) {
+        // clippedBand(p1, p2, off, off, …) liefert [edgeStart, edgeEnd, edgeEnd,
+        // edgeStart] → die zwei distinkten Endpunkte sind Index 0 (Start) und 1
+        // (Ende), beide am Cut abgeschnitten wie die Bandlängskante.
+        const jq = clippedBand(p1, p2, off, off, startCut, endCut);
+        const jls = layer.jointLineStyleId
+          ? project.lineStyles.find((l) => l.id === layer.jointLineStyleId)
+          : undefined;
+        out.push({
+          kind: "line",
+          a: jq[0],
+          b: jq[1],
+          cls: "layer-joint",
+          weightMm: jls ? jls.weight * LAYER_DETAIL_FACTOR[detail] : layerLineMm,
+          color: jls ? jls.color : stroke,
+          dash: jls ? jls.dash : null,
+          greyed,
+        });
+      }
     }
     // Kräftige Wand-Umrisslinie über die volle Dicke (nur Kontur, keine Füllung),
     // damit die Wand sich klar von den dünnen Schichtfugen abhebt. Die Gehrungs-

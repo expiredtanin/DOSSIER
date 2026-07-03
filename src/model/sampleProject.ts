@@ -30,6 +30,8 @@ export const sampleProject: Project = {
     { id: "hatch-hair", name: "Schraffur-Haarlinie", weight: 0.02, color: "#1a1a1a", dash: null },
     // Gestrichelte Haarlinie für die Dämmung (Striche quer durch die Wanddicke).
     { id: "hatch-dash", name: "Dämmungsstrich", weight: 0.02, color: "#1a1a1a", dash: [0.35, 0.3] },
+    // Kräftige Schichtfuge, wo zwei massive Materialien aneinanderstoßen (Wandstile).
+    { id: "joint-massive", name: "Schichtfuge 0.13", weight: 0.13, color: "#1a1a1a", dash: null },
   ],
   // Schraffuren: color = Linien-/Vollfüllfarbe des Musters; angle in Grad.
   // "none" = keine Schraffur (nur Component-Füllung).
@@ -128,7 +130,8 @@ export const sampleProject: Project = {
       // Schichten außen → innen; Priorität lebt jetzt am Component.
       layers: [
         { componentId: "render-ext", thickness: 0.02 },
-        { componentId: "insulation", thickness: 0.16 },
+        // Innere Fuge der Dämmung trifft auf den Backstein (massiv↔massiv) → 0.13 mm.
+        { componentId: "insulation", thickness: 0.16, jointLineStyleId: "joint-massive" },
         { componentId: "brick", thickness: 0.15 },
         { componentId: "render-int", thickness: 0.015 },
       ],

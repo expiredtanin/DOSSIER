@@ -435,7 +435,16 @@ export const en: Record<TranslationKey, string> = {
   "resources.tab.components": "Components",
   "resources.tab.hatches": "Hatches",
   "resources.tab.lines": "Lines",
+  "resources.tab.wallStyles": "Wall styles",
   "resources.tab.materials": "Materials",
+
+  "resources.wallStyles.hint":
+    "Per wall type, the layer joints (between adjacent layers) as a selectable line style. Unassigned: 0.02 mm hairline.",
+  "resources.wallStyles.empty": "No wall types yet.",
+  "resources.col.layer": "Layer",
+  "resources.col.thickness": "Thickness (mm)",
+  "resources.col.joint": "Joint",
+  "resources.joint.default": "— (hairline)",
 
   "resources.materials.hint":
     "Sphere preview of the built-in PBR material library — browse and compare. Assign to a component still via its “Material …” column.",

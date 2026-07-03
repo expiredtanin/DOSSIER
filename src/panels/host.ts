@@ -26,6 +26,7 @@ import type {
   StairShape,
   VerticalAnchor,
   WallReferenceLine,
+  WallType,
 } from "../model/types";
 import type { SnapSettings, ToolId } from "../tools/types";
 import type { Selection } from "../state/selectionInfo";
@@ -114,6 +115,8 @@ export interface PanelHostValue {
   onPatchLineStyle: (id: string, patch: Partial<LineStyle>) => void;
   onAddLineStyle: () => void;
   onDeleteLineStyle: (id: string) => void;
+  /** Wandstile: immutable Änderung eines Wandtyps (Schichtfugen-Stile). */
+  onPatchWallType: (id: string, patch: Partial<WallType>) => void;
   /** Import fertiger (id-loser) Linienstile/Schraffuren (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
