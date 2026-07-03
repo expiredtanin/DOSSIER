@@ -1003,6 +1003,13 @@ export function TopBar({
 
       <Sep />
 
+      {/* Text-Gruppe (immer sichtbar) — Stil/Schrift/Grösse + B/I/U · L/C/R +
+          „+ Text". Formatiert das aktuelle Text-Ziel (Raumstempel) live. Sitzt
+          bewusst zwischen den Ebenen-Kombis und Detailgrad/Massstab. */}
+      <TextGroup textTarget={textTarget} onAddText={onAddText} />
+
+      <Sep />
+
       {/* Zeichenwerkzeuge liegen jetzt in der Werkzeug-Palette (ToolsPanel,
           dockbar) — nicht mehr in der Oberleiste (Vectorworks-Bild: Werkzeuge
           in der Palette). Auch Wandtyp-Wahl + Fang-Menü sind dort. */}
@@ -1130,12 +1137,6 @@ export function TopBar({
           <TbIcon name="download" />
         </button>
       </div>
-
-      <Sep />
-
-      {/* Text-Gruppe (immer sichtbar) — Stil/Schrift/Grösse + B/I/U · L/C/R +
-          „+ Text". Formatiert das aktuelle Text-Ziel (Raumstempel) live. */}
-      <TextGroup textTarget={textTarget} onAddText={onAddText} />
 
       <Sep />
 
