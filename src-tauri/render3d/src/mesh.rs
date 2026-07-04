@@ -59,8 +59,8 @@ use std::collections::HashMap;
 
 use crate::openings::{split_range_by_voids, MIN_SPAN};
 use crate::types::{
-    Hole, Mesh, MeshInput, Opening, Point2, Rgb, SlabInput, WallInput, WallLayer,
-    FLOATS_PER_VERTEX,
+    Hole, Mesh, MeshInput, Opening, Point2, Rgb, SlabInput, TexturedMesh, WallInput, WallLayer,
+    FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
 };
 
 /// Ein Quader-Mesh besteht aus 6 Seiten (Boden, Deckel, 4 Waende) zu je 2
@@ -915,6 +915,72 @@ pub fn build_walls_mesh(walls: &[WallInput]) -> Mesh {
         extrude_wall_with_miters(&mut mesh, w, *m);
     }
     mesh
+}
+
+/// TEXTURIERTER Wand-Pfad (`RenderStyle::Textured`): liefert DIESELBE Geometrie wie
+/// `build_walls_mesh` — Positionen und Normalen bitgleich, gleiche Vertex-/Dreiecks-
+/// Reihenfolge — aber mit einer planaren, WELTMASSSTAEBLICHEN UV je Vertex statt der
+/// Bauteilfarbe. Bewusst ALS ABLEITUNG aus dem fertigen `Mesh` implementiert (nicht
+/// als parallele Re-Extrusion): so bleibt die paritaets-/reihenfolgesensible
+/// Geometrie (Gehrungen, Oeffnungen, Loecher, Schichten) die EINE Quelle der
+/// Wahrheit und der Alt-Pfad `[pos, normal, color]` bleibt bitgleich unangetastet —
+/// wir tauschen nur den color-Kanal gegen den aus Position+Normale abgeleiteten
+/// UV-Kanal aus.
+///
+/// UV-PROJEKTION (planar, in Metern, damit das Textur-Raster weltmassstaeblich ist,
+/// z. B. 1 Kachel = 1 m; kein Verzug an Gehrungen/Ecken, weil jede Flaeche planar
+/// projiziert wird und benachbarte Waende dieselbe Welt-Projektion fortsetzen —
+/// die Kacheln stossen im Weltraum sauber aneinander):
+///   - Senkrechte Flaechen (Wand-Mantel, Normale ~ horizontal): `u` = Weglaenge
+///     entlang der horizontalen Flaechen-Tangente `t = (-n.z, 0, n.x)`
+///     (`u = dot(pos.xz, t.xz)`), `v` = Hoehe `pos.y`.
+///   - Waagerechte Flaechen (Deckel/Boden, Normale ~ +/-Y): direkt aus dem
+///     Grundriss `u = pos.x`, `v = pos.z`.
+/// Die Wahl der Achse allein aus der Flaechen-Normale (statt aus der Wand-Achse)
+/// haelt die Projektion rein lokal je Vertex — das ist genau der Grund, warum sie
+/// sich verlustfrei aus dem fertigen `Mesh` ableiten laesst.
+pub fn build_walls_mesh_textured(walls: &[WallInput]) -> TexturedMesh {
+    textured_from_mesh(&build_walls_mesh(walls))
+}
+
+/// Rechnet ein `Mesh` (`[pos, normal, color]`) in einen `TexturedMesh`
+/// (`[pos, normal, uv]`) um: Positionen/Normalen/Indizes werden 1:1 uebernommen,
+/// die Farbe je Vertex wird durch die planare Welt-UV ersetzt (siehe
+/// `build_walls_mesh_textured` fuer die Achswahl). Indizes bleiben unveraendert,
+/// weil sich die Vertex-Anzahl/-Reihenfolge nicht aendert. `pub`, damit die
+/// GPU-Schicht (`gpu.rs`) das texturierte Pendant AUS DEMSELBEN `Mesh` ableiten
+/// kann, das sie ohnehin schon gebaut/hochgeladen hat (eine Geometrie-Quelle).
+pub fn textured_from_mesh(mesh: &Mesh) -> TexturedMesh {
+    let n = mesh.vertex_count();
+    let mut verts: Vec<f32> = Vec::with_capacity(n * TEXTURED_FLOATS_PER_VERTEX);
+    for i in 0..n {
+        let b = i * FLOATS_PER_VERTEX;
+        let px = mesh.verts[b];
+        let py = mesh.verts[b + 1];
+        let pz = mesh.verts[b + 2];
+        let nx = mesh.verts[b + 3];
+        let ny = mesh.verts[b + 4];
+        let nz = mesh.verts[b + 5];
+        // Waagerecht (Deckel/Boden) vs. senkrecht (Mantel) an der Vertikal-
+        // Komponente der Normale unterscheiden. Waende sind vertikal extrudiert,
+        // ihre Mantelnormale ist streng horizontal (ny == 0) — die Schwelle 0.5
+        // trennt sauber Deckel/Boden (|ny| == 1) von Mantelflaechen (ny == 0).
+        let (u, v) = if ny.abs() > 0.5 {
+            // Grundriss-Projektion: u = x, v = z (Meter).
+            (px, pz)
+        } else {
+            // Horizontale Flaechen-Tangente t = (-n.z, 0, n.x): u = Weglaenge
+            // entlang t, v = Hoehe. `t` ist ein Einheitsvektor, weil (n.x, n.z)
+            // fuer Mantelflaechen normiert ist.
+            let u = px * (-nz) + pz * nx;
+            (u, py)
+        };
+        verts.extend_from_slice(&[px, py, pz, nx, ny, nz, u, v]);
+    }
+    TexturedMesh {
+        verts,
+        indices: mesh.indices.clone(),
+    }
 }
 
 /// Baut das volle Modell-Mesh: erst die Waende (Quader), dann die Deckenplatten

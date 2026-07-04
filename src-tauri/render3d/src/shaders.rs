@@ -125,6 +125,89 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// WGSL des TEXTURIERTEN Wand-Pfades (`RenderStyle::Textured`, gpu::textured_pipeline).
+/// GLEICHE Beleuchtung wie `MESH_WGSL` (hemisphaerisches Ambient Himmel/Boden +
+/// Lambert-Directional + Gegen-Fuelllicht + Kantenbetonung) — nur die ALBEDO kommt
+/// aus einer Bild-Textur (`textureSample`) statt aus der Vertexfarbe. Vertex-Layout
+/// [pos vec3, normal vec3, uv vec2]; `Globals` bleibt group(0) binding(0) unveraendert,
+/// die Textur haengt in group(1). Die Weiss-/Hidden-Modi (`mode.x`) sind hier nicht
+/// relevant: `Textured` reicht `mode.x == 0` (Material) durch (siehe gpu.rs).
+pub const MESH_TEXTURED_WGSL: &str = r#"
+struct Globals {
+    view_proj     : mat4x4<f32>,
+    light_dir     : vec4<f32>,
+    sky_color     : vec4<f32>,
+    ground_color  : vec4<f32>,
+    sun_color     : vec4<f32>,
+    mode          : vec4<f32>,
+    section_plane : vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> globals : Globals;
+
+// Bild-Textur + Sampler (group 1). Sampler mit Repeat/Linear (siehe gpu.rs) ->
+// das weltmassstaebliche UV-Raster kachelt sich ueber die Wandflaechen.
+@group(1) @binding(0) var tex  : texture_2d<f32>;
+@group(1) @binding(1) var samp : sampler;
+
+struct VsIn {
+    @location(0) position : vec3<f32>,
+    @location(1) normal   : vec3<f32>,
+    @location(2) uv       : vec2<f32>,
+};
+
+struct VsOut {
+    @builtin(position) clip_pos : vec4<f32>,
+    @location(0) world_normal : vec3<f32>,
+    @location(1) uv           : vec2<f32>,
+    @location(2) world_pos    : vec3<f32>,
+};
+
+@vertex
+fn vs_main(in : VsIn) -> VsOut {
+    var out : VsOut;
+    out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
+    out.world_normal = in.normal;
+    out.uv = in.uv;
+    out.world_pos = in.position;
+    return out;
+}
+
+@fragment
+fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
+    // Live-Schnitt-Kappung identisch zur Mesh-Pipeline (mode.y > 0.5 = aktiv).
+    if (globals.mode.y > 0.5) {
+        if (dot(in.world_pos, globals.section_plane.xyz) + globals.section_plane.w > 0.0) {
+            discard;
+        }
+    }
+    let n = normalize(in.world_normal);
+    let l = normalize(globals.light_dir.xyz);
+
+    // Hemisphaerisches Ambient (identisch zu MESH_WGSL).
+    let hemi_t = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+    let ambient = mix(globals.ground_color.rgb, globals.sky_color.rgb, hemi_t);
+
+    // Gerichteter Lambert-Anteil (Sonne).
+    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
+
+    // Gegen-Fuelllicht (identisch zu MESH_WGSL).
+    let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
+    let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
+        * vec3<f32>(0.24, 0.27, 0.30);
+
+    // EINZIGER Unterschied zu MESH_WGSL: Albedo aus der Bild-Textur statt Vertexfarbe.
+    let albedo = textureSample(tex, samp, in.uv).rgb;
+
+    var shaded = albedo * (ambient + diffuse + fill);
+
+    // Sanfte Kantenbetonung (identisch zu MESH_WGSL).
+    let edge = 0.90 + 0.10 * abs(n.y);
+    shaded = shaded * edge;
+
+    return vec4<f32>(shaded, 1.0);
+}
+"#;
+
 /// WGSL des Referenz-Bodengitters (grid.rs). Eigene, schlanke `LineList`-Pipeline:
 /// KONSTANTE Farbe (unlit — unabhaengig von Normalen/Licht), nur View-Projektion
 /// aus demselben `Globals`-Uniform (group(0) binding(0)) wie die Mesh-Pipeline.

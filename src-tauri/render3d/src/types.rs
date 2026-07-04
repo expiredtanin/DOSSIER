@@ -333,6 +333,30 @@ pub struct Mesh {
 /// Anzahl f32 je Vertex im interleaved Puffer: 3 Position + 3 Normale + 3 Farbe.
 pub const FLOATS_PER_VERTEX: usize = 9;
 
+/// Ausgabe der TEXTURIERTEN Mesh-Erzeugung (`RenderStyle::Textured`): interleaved
+/// [pos.xyz, normal.xyz, uv.xy] je Vertex plus Indexpuffer. Ein ZWEITER, additiver
+/// Vertex-Pfad neben `Mesh` — der bestehende `[pos, normal, color]`-Pfad (`Mesh`)
+/// bleibt dadurch bitgleich unangetastet. Genutzt nur mit den GPU-Features
+/// (`render`/`window`); serde-frei (reine GPU-Zwischenform), damit der Default-Bau
+/// ohne GPU nichts davon zieht.
+#[derive(Debug, Clone, Default)]
+pub struct TexturedMesh {
+    /// Interleaved Vertices: je 8 f32 = [px,py,pz, nx,ny,nz, u,v].
+    pub verts: Vec<f32>,
+    /// Dreiecks-Indizes (0-basiert auf die Vertices).
+    pub indices: Vec<u32>,
+}
+
+/// Anzahl f32 je Vertex im texturierten Puffer: 3 Position + 3 Normale + 2 UV.
+pub const TEXTURED_FLOATS_PER_VERTEX: usize = 8;
+
+impl TexturedMesh {
+    /// Anzahl Vertices im Puffer.
+    pub fn vertex_count(&self) -> usize {
+        self.verts.len() / TEXTURED_FLOATS_PER_VERTEX
+    }
+}
+
 impl Mesh {
     /// Anzahl Vertices im Puffer.
     pub fn vertex_count(&self) -> usize {

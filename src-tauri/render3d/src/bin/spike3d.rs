@@ -13,13 +13,14 @@
 
 use std::sync::Arc;
 
-use render3d::gpu::Renderer;
+use render3d::gpu::{RenderStyle, Renderer};
 use render3d::math::orbit_eye;
 use render3d::types::{Camera, Projection, WallInput};
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 /// Demo-Szene: ein rechteckiger Raum (4 Aussenwaende) plus eine Innenwand. Achsen
@@ -196,6 +197,9 @@ struct App {
     orbit: Orbit,
     dragging: bool,
     last_cursor: (f64, f64),
+    /// Darstellung: false = Shaded (Default, unveraendert), true = Textured
+    /// (prozedurales Schachbrett auf den Wandflaechen). Per Taste `T` umschaltbar.
+    textured: bool,
 }
 
 impl ApplicationHandler for App {
@@ -221,6 +225,27 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 state.resize(size.width, size.height);
+                state.window.request_redraw();
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(KeyCode::KeyT),
+                        state: ElementState::Pressed,
+                        repeat: false,
+                        ..
+                    },
+                ..
+            } => {
+                // `T` schaltet Shaded <-> Textured um (Laufzeit, kein Re-Meshing:
+                // der Renderer haelt beide Vertex-Puffer bereit).
+                self.textured = !self.textured;
+                let style = if self.textured {
+                    RenderStyle::Textured
+                } else {
+                    RenderStyle::Shaded
+                };
+                state.renderer.set_render_style(style);
                 state.window.request_redraw();
             }
             WindowEvent::MouseInput { state: s, button, .. } => {

@@ -15,11 +15,13 @@ use wgpu::util::DeviceExt;
 use crate::edges::{build_mesh_edges, EDGE_FLOATS_PER_VERTEX};
 use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::math::{view_projection, Mat4};
-use crate::mesh::{build_scene_mesh, build_walls_mesh};
+use crate::mesh::{build_scene_mesh, build_walls_mesh, textured_from_mesh};
 use crate::section::SectionPlane;
 use crate::section_fill::{build_cut_caps, CAP_FLOATS_PER_VERTEX};
-use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_WGSL};
-use crate::types::{Camera, Mesh, MeshInput, SlabInput, WallInput, FLOATS_PER_VERTEX};
+use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
+use crate::types::{
+    Camera, Mesh, MeshInput, SlabInput, WallInput, FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
+};
 
 /// Darstellungsart des 3D-Renderers (Oberleiste: shaded/white/textured/
 /// wireframe/hidden). Bestimmt, welche Pipelines je Frame gezeichnet werden und
@@ -30,7 +32,9 @@ pub enum RenderStyle {
     Shaded,
     /// Clay-Look: einheitlich helles Material, beleuchtet.
     White,
-    /// Mangels Textur-Pipeline VORERST identisch zu `Shaded` behandelt (kein Fake).
+    /// Echte Bild-Textur (prozedurales Schachbrett) auf den Wandflaechen,
+    /// beleuchtet wie `Shaded` (eigene Pipeline + Textur-Bind-Group group 1,
+    /// siehe `textured_pipeline`).
     Textured,
     /// Nur Modell-Kanten (Feature-Edges), keine gefuellten Flaechen.
     Wireframe,
@@ -132,6 +136,55 @@ struct MeshBuffers {
     index_count: u32,
 }
 
+/// GPU-seitige Puffer des TEXTURIERTEN Wand-Meshes (`RenderStyle::Textured`).
+/// Eigenes Vertex-Layout `[pos vec3, normal vec3, uv vec2]`
+/// (`TEXTURED_FLOATS_PER_VERTEX`), sonst wie `MeshBuffers`. Zweiter, additiver
+/// Puffer neben `MeshBuffers` — der Alt-Pfad bleibt bitgleich unangetastet.
+struct TexturedMeshBuffers {
+    vbo: wgpu::Buffer,
+    ibo: wgpu::Buffer,
+    index_count: u32,
+}
+
+/// Kantenlaenge der prozeduralen Test-Textur (Schachbrett), in Texeln.
+const TEXTURE_SIZE: u32 = 256;
+
+/// Erzeugt ein 256x256-RGBA-Schachbrett IM CODE (kein Asset, keine `image`-Crate):
+/// 8x8 Felder abwechselnd hell/dunkel, mit einem duennen Raster als Kachel-Grenze.
+/// Rueckgabe = flaches RGBA8-Byte-Array (`4 * TEXTURE_SIZE * TEXTURE_SIZE`), direkt
+/// fuer `queue.write_texture` (Zeilen sind `4 * TEXTURE_SIZE` Byte breit, ohne
+/// Padding, weil `256 * 4 = 1024` bereits ein Vielfaches von 256 ist). Bewusst
+/// selbststaendig, damit der Spike ohne Dateipfade/Asset-Pipeline laeuft.
+fn build_checker_texture() -> Vec<u8> {
+    let size = TEXTURE_SIZE as usize;
+    // 8 Felder je Kante -> jedes Feld 32 Texel breit. Das macht 1 Textur-Kachel
+    // (= 1 m Welt, siehe UV-Massstab) in ein 8x8-Schachbrett sichtbar.
+    let cell = size / 8;
+    let mut data = vec![0u8; size * size * 4];
+    // Zwei Grautoene als Schachbrett + eine dunkle Rasterlinie an den Feldgrenzen.
+    let light = [220u8, 220, 224, 255];
+    let dark = [150u8, 152, 160, 255];
+    let line = [70u8, 72, 80, 255];
+    for y in 0..size {
+        for x in 0..size {
+            let checker = ((x / cell) + (y / cell)) % 2 == 0;
+            // Duenne Rasterlinie (2 Texel) exakt auf den Feldkanten — betont die
+            // weltmassstaebliche Kachelung an Gehrungen/Ecken sichtbar.
+            let on_line = (x % cell) < 2 || (y % cell) < 2;
+            let px = if on_line {
+                line
+            } else if checker {
+                light
+            } else {
+                dark
+            };
+            let o = (y * size + x) * 4;
+            data[o..o + 4].copy_from_slice(&px);
+        }
+    }
+    data
+}
+
 /// GPU-seitiger Vertex-Buffer einer LineList (kein Indexpuffer). Format
 /// [pos vec3, color vec3] — genutzt fuer das Bodengitter UND die Modell-Kanten
 /// (identisches Layout/Shader, siehe grid.rs / edges.rs).
@@ -172,9 +225,29 @@ pub struct Renderer {
     /// Depth-Bias zur Kamera hin gegen Z-Fighting mit den an der Ebene
     /// per-`discard` gekappten Wandflaechen. Backface-Culling AUS (CullMode::None).
     cap_pipeline: wgpu::RenderPipeline,
+    /// Texturierte Wand-Pipeline (`RenderStyle::Textured`, TriangleList,
+    /// MESH_TEXTURED_WGSL, Vertex-Layout [pos vec3, normal vec3, uv vec2]). Bindet
+    /// group 0 (Globals) UND group 1 (Bild-Textur). Depth-/MSAA-/Farbziel
+    /// BITIDENTISCH zur Haupt-`pipeline` (sonst inkompatibler Render-Pass), nur
+    /// Shader/Layout unterscheiden sich.
+    textured_pipeline: wgpu::RenderPipeline,
+    /// Bind-Group der prozeduralen Test-Textur (group 1): Texture-View + Sampler.
+    /// Konstant ueber die Lebensdauer des Renderers (eine Textur fuer alle Waende).
+    texture_bind_group: wgpu::BindGroup,
+    /// Die (prozedurale) Textur selbst — nur festgehalten, um ihre Texel beim
+    /// ersten `render` einmalig hochzuladen (`texture_uploaded`), da `new` keine
+    /// Queue bekommt.
+    texture: wgpu::Texture,
+    /// Ob die Textur-Texel schon per `queue.write_texture` geladen wurden. Beim
+    /// ersten `render` einmalig gesetzt (lazy Upload).
+    texture_uploaded: bool,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     mesh: Option<MeshBuffers>,
+    /// Texturiertes Wand-Mesh (`[pos, normal, uv]`) — zweiter, additiver Puffer
+    /// neben `mesh`. Nur im Stil `Textured` gezeichnet; bei `upload_*` zusammen mit
+    /// `mesh` erzeugt. None = kein Mesh geladen.
+    textured_mesh: Option<TexturedMeshBuffers>,
     /// Modell-Kanten (Feature-Edges, edges.rs) als LineList. Einmalig bei
     /// `set_model`/`upload_*` erzeugt und gecacht (nicht je Frame). Gezeichnet in
     /// den Stilen wireframe/hidden.
@@ -462,6 +535,144 @@ impl Renderer {
             cache: None,
         });
 
+        // ── Texturierter Wand-Pfad (RenderStyle::Textured) ──────────────────────
+        // Bild-Textur-Bind-Group-Layout (group 1): sampelbare 2D-Float-Textur +
+        // Filter-Sampler. `Globals` bleibt group 0 (oben) UND unveraendert.
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("texture.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        // Pipeline-Layout des texturierten Pfades: group 0 = Globals (wie oben),
+        // group 1 = Textur. Reihenfolge = Bindungs-Index, deshalb beide hier.
+        let textured_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("3d.textured.layout"),
+                bind_group_layouts: &[Some(&bind_group_layout), Some(&texture_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let textured_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mesh_textured.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(MESH_TEXTURED_WGSL.into()),
+        });
+        // Vertex-Layout: [pos vec3, normal vec3, uv vec2], stride 8*4.
+        let textured_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: (TEXTURED_FLOATS_PER_VERTEX * 4) as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
+        };
+        // WICHTIG: Depth-Format, MSAA (`SAMPLE_COUNT`), Color-Target-Format,
+        // Topologie und Culling BITIDENTISCH zur Haupt-`pipeline` (make_mesh_pipeline)
+        // — die texturierten Waende laufen im GLEICHEN Render-Pass, deshalb muss der
+        // Pipeline-State kompatibel sein (sonst wgpu-Validierungspanik). Einziger
+        // Unterschied: Shader/Vertex-Layout und das zusaetzliche group-1-Layout.
+        let textured_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mesh.textured.pipeline"),
+            layout: Some(&textured_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &textured_module,
+                entry_point: Some("vs_main"),
+                buffers: &[textured_vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &textured_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Prozedurale 256x256-Schachbrett-Textur ANLEGEN (kein Asset). RGBA8-srgb,
+        // damit die im Shader gesampelten Werte im linearen Raum landen (die
+        // Beleuchtung rechnet linear) — analog zum srgb-Surface-Format. Das
+        // Hochladen der Texel (queue.write_texture) passiert einmalig beim ersten
+        // `render` (siehe `texture_uploaded`), weil `new` bewusst KEINE Queue
+        // bekommt — die Signatur bleibt fuer die bestehenden Aufrufer (web.rs,
+        // spike3d) unveraendert.
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("checker.texture"),
+            size: wgpu::Extent3d {
+                width: TEXTURE_SIZE,
+                height: TEXTURE_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Repeat (weltmassstaebliches UV kachelt) + Linear (weiche Filterung).
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("checker.sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("texture.bind"),
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals.buffer"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -483,9 +694,14 @@ impl Renderer {
             grid_pipeline,
             highlight_pipeline,
             cap_pipeline,
+            textured_pipeline,
+            texture_bind_group,
+            texture,
+            texture_uploaded: false,
             bind_group,
             uniform,
             mesh: None,
+            textured_mesh: None,
             edges: None,
             grid: None,
             highlight: None,
@@ -529,6 +745,7 @@ impl Renderer {
     fn upload_mesh(&mut self, device: &wgpu::Device, mesh: Mesh) {
         if mesh.indices.is_empty() {
             self.mesh = None;
+            self.textured_mesh = None;
             self.edges = None;
             return;
         }
@@ -563,6 +780,27 @@ impl Renderer {
             vbo,
             ibo,
             index_count: mesh.indices.len() as u32,
+        });
+
+        // Texturiertes Pendant AUS DEMSELBEN `Mesh` ableiten (planare Welt-UV je
+        // Vertex statt Farbe, siehe `textured_from_mesh`) und in einen zweiten
+        // Vertex-Puffer hochladen. So bleibt die Geometrie bitgleich zum Alt-Pfad,
+        // und der Stil `Textured` hat ohne Re-Meshing seine Puffer bereit.
+        let tex_mesh = textured_from_mesh(&mesh);
+        let tvbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mesh.textured.vbo"),
+            contents: bytemuck::cast_slice(&tex_mesh.verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let tibo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mesh.textured.ibo"),
+            contents: bytemuck::cast_slice(&tex_mesh.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        self.textured_mesh = Some(TexturedMeshBuffers {
+            vbo: tvbo,
+            ibo: tibo,
+            index_count: tex_mesh.indices.len() as u32,
         });
     }
 
@@ -783,6 +1021,33 @@ impl Renderer {
         self.globals.mode[0] = self.style.mesh_mode();
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&self.globals));
 
+        // Prozedurale Schachbrett-Textur einmalig hochladen (lazy, weil `new` keine
+        // Queue bekommt — Signatur unveraendert). Danach steht sie fuer den Stil
+        // `Textured` bereit; kostet ab dem zweiten Frame nichts mehr.
+        if !self.texture_uploaded {
+            let texel_data = build_checker_texture();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &texel_data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * TEXTURE_SIZE),
+                    rows_per_image: Some(TEXTURE_SIZE),
+                },
+                wgpu::Extent3d {
+                    width: TEXTURE_SIZE,
+                    height: TEXTURE_SIZE,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.texture_uploaded = true;
+        }
+
         self.ensure_depth(device, w, h);
         self.ensure_msaa(device, w, h);
         let depth_view = &self.depth.as_ref().unwrap().view;
@@ -825,7 +1090,20 @@ impl Renderer {
             //    Hidden-Line-Stil die leicht nach hinten gebiaste Pipeline, damit
             //    die folgenden Kanten sauber obenauf liegen.
             if self.style.draws_faces() {
-                if let Some(m) = &self.mesh {
+                if self.style == RenderStyle::Textured {
+                    // Texturierter Pfad: eigene Pipeline + zweiter Vertex-Puffer
+                    // ([pos, normal, uv]) + zusaetzliche Textur-Bind-Group (group 1).
+                    // Globals bleiben group 0. Fehlt der texturierte Puffer (kein
+                    // Mesh geladen), wird nichts gezeichnet.
+                    if let Some(t) = &self.textured_mesh {
+                        pass.set_pipeline(&self.textured_pipeline);
+                        pass.set_bind_group(0, &self.bind_group, &[]);
+                        pass.set_bind_group(1, &self.texture_bind_group, &[]);
+                        pass.set_vertex_buffer(0, t.vbo.slice(..));
+                        pass.set_index_buffer(t.ibo.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..t.index_count, 0, 0..1);
+                    }
+                } else if let Some(m) = &self.mesh {
                     let face_pipeline = if self.style == RenderStyle::Hidden {
                         &self.hidden_face_pipeline
                     } else {

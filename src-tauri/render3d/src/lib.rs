@@ -38,23 +38,27 @@ pub use math::{
     view_matrix, view_projection, Mat4,
 };
 pub use mesh::{
-    append_context_mesh, build_model_mesh, build_scene_mesh, build_walls_mesh, extrude_slab,
-    extrude_wall, triangulate,
+    append_context_mesh, build_model_mesh, build_scene_mesh, build_walls_mesh,
+    build_walls_mesh_textured, extrude_slab, extrude_wall, textured_from_mesh, triangulate,
 };
 pub use section::{
     cut_section, ComponentKind, ComponentRef, CutPolygon, SectionEdge, SectionOutput, SectionPlane,
 };
 pub use types::{
-    Camera, CameraPreset, Mesh, MeshInput, MeshKind, Point2, Projection, Rgb, SlabInput, WallInput,
-    FLOATS_PER_VERTEX,
+    Camera, CameraPreset, Mesh, MeshInput, MeshKind, Point2, Projection, Rgb, SlabInput,
+    TexturedMesh, WallInput, FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
 };
 
 // --- Tests: Mesh-Erzeugung (Muster wie render2d/tessellate) -------------------
 
 #[cfg(test)]
 mod tests {
-    use super::mesh::{build_walls_mesh, extrude_wall, INDICES_PER_BOX, VERTS_PER_BOX};
-    use super::types::{Hole, Mesh, Opening, WallInput, WallLayer, FLOATS_PER_VERTEX};
+    use super::mesh::{
+        build_walls_mesh, build_walls_mesh_textured, extrude_wall, INDICES_PER_BOX, VERTS_PER_BOX,
+    };
+    use super::types::{
+        Hole, Mesh, Opening, WallInput, WallLayer, FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
+    };
 
     /// Bequemer Bau einer achsparallelen Wand entlang +X.
     fn wall_x(len: f32, thickness: f32, height: f32) -> WallInput {
@@ -78,6 +82,67 @@ mod tests {
             [mesh.verts[b], mesh.verts[b + 1], mesh.verts[b + 2]],
             [mesh.verts[b + 3], mesh.verts[b + 4], mesh.verts[b + 5]],
         )
+    }
+
+    #[test]
+    fn texturierter_pfad_ist_geometrisch_deckungsgleich_mit_shaded() {
+        // Der texturierte Wand-Pfad (`build_walls_mesh_textured`, [pos,normal,uv])
+        // muss GEOMETRISCH bitgleich zum Alt-Pfad (`build_walls_mesh`,
+        // [pos,normal,color]) sein: gleiche Vertex-/Index-Zahl und -Reihenfolge,
+        // identische Positionen und Normalen. Nur der letzte Kanal (Farbe -> UV)
+        // unterscheidet sich. So ist belegt, dass der additive UV-Kanal den
+        // Alt-Pfad nicht beruehrt.
+        let walls = [wall_x(3.0, 0.2, 2.5)];
+        let shaded = build_walls_mesh(&walls);
+        let tex = build_walls_mesh_textured(&walls);
+        assert_eq!(tex.indices, shaded.indices, "Index-Puffer identisch");
+        assert_eq!(
+            tex.vertex_count(),
+            shaded.vertex_count(),
+            "gleiche Vertex-Zahl"
+        );
+        for i in 0..shaded.vertex_count() {
+            let sb = i * FLOATS_PER_VERTEX;
+            let tb = i * TEXTURED_FLOATS_PER_VERTEX;
+            // Position (0..3) und Normale (3..6) bitgleich uebernommen.
+            for k in 0..6 {
+                assert_eq!(
+                    shaded.verts[sb + k],
+                    tex.verts[tb + k],
+                    "Vertex {i} Kanal {k}: pos/normal muss identisch sein"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn texturierte_uv_ist_weltmassstaeblich() {
+        // UV-Massstab: `u`/`v` in Metern (1 Kachel = 1 m). Fuer eine Wand entlang +X
+        // liegt die +Z-Mantelflaeche bei Normale (0,0,1); dort ist die Tangente
+        // t=(-n.z,0,n.x)=(-1,0,0), also u = -x und v = Hoehe. Die Deckflaeche
+        // (Normale +Y) projiziert auf u=x, v=z. Wir pruefen, dass es UEBERHAUPT
+        // Vertices mit v == Wandhoehe (2.5) bzw. v == 0 gibt (Hoehe wandert als v
+        // mit) — belegt den weltmassstaeblichen Hoehen-Kanal.
+        let tex = build_walls_mesh_textured(&[wall_x(3.0, 0.2, 2.5)]);
+        let n = tex.vertex_count();
+        let mut saw_top = false;
+        let mut saw_bottom = false;
+        for i in 0..n {
+            let b = i * TEXTURED_FLOATS_PER_VERTEX;
+            let ny = tex.verts[b + 4];
+            let v = tex.verts[b + 7];
+            // Nur Mantelflaechen (ny ~ 0) tragen die Hoehe als v.
+            if ny.abs() < 0.5 {
+                if (v - 2.5).abs() < 1e-5 {
+                    saw_top = true;
+                }
+                if v.abs() < 1e-5 {
+                    saw_bottom = true;
+                }
+            }
+        }
+        assert!(saw_top, "Mantel-Vertex mit v == Wandhoehe (2.5 m) erwartet");
+        assert!(saw_bottom, "Mantel-Vertex mit v == 0 (Sockel) erwartet");
     }
 
     #[test]
@@ -927,5 +992,14 @@ mod tests {
         Validator::new(ValidationFlags::all(), Capabilities::all())
             .validate(&cap_module)
             .unwrap_or_else(|e| panic!("cap: WGSL-Validierung fehlgeschlagen: {e:?}"));
+
+        // Texturierter Wand-Shader (RenderStyle::Textured, Bild-Textur in group 1)
+        // ebenso headless validieren — faengt Textur-/Sampler-Bindungsfehler ab.
+        let tex_src = super::shaders::MESH_TEXTURED_WGSL;
+        let tex_module = naga::front::wgsl::parse_str(tex_src)
+            .unwrap_or_else(|e| panic!("textured: WGSL-Parse-Fehler: {e:?}"));
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&tex_module)
+            .unwrap_or_else(|e| panic!("textured: WGSL-Validierung fehlgeschlagen: {e:?}"));
     }
 }
