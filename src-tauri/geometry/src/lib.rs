@@ -117,8 +117,12 @@ fn resolve_join_priority(
 /// von `applyLayerCuts` aus `model/joins.ts`. Vergleicht jede Schicht der
 /// Abzweig-Wand mit dem Rueckgrat (hoechste `joinPriority`) der Durchgangswand;
 /// verschmilzt sie (gleiches Rueckgrat-Material, oder die Abzweig-Schicht ist
-/// sogar prioritaerer), bekommt sie keinen Cut. Getrimmte Schichten neben einer
-/// verschmelzenden Nachbarschicht bekommen zusaetzlich die seitliche L-Linie.
+/// sogar prioritaerer), bekommt sie einen Cut an der NAHFLAECHE DES RUECKGRAT-
+/// KERNS der Durchgangswand -- der verschmelzende Kern sticht nur durch den
+/// Nah-Putz und stoppt am Durchgangs-Kern, statt bis zur Achse durchzulaufen.
+/// Getrimmte Schichten neben einer verschmelzenden Nachbarschicht bekommen
+/// zusaetzlich die seitliche L-Linie an eben dieser Rueckgrat-Nahflaeche.
+/// `sign`/`off_t` = Nahseite bzw. Referenzversatz der Durchgangswand.
 #[allow(clippy::too_many_arguments)]
 fn apply_layer_cuts(
     result: &mut [WallCuts],
@@ -129,16 +133,21 @@ fn apply_layer_cuts(
     face_cut: Line,
     axis_point: Vec2,
     through_dir: Vec2,
+    sign: f64,
+    off_t: f64,
 ) {
     if branch_layers.is_empty() || through_layers.is_empty() {
         return;
     }
 
-    // Rueckgrat der Durchgangswand: die Schicht mit der hoechsten joinPriority.
+    // Rueckgrat der Durchgangswand: die Schicht mit der hoechsten joinPriority
+    // (Index mitgefuehrt fuer die Nah-Putz-Dicke davor).
     let mut backbone = &through_layers[0];
-    for l in through_layers {
+    let mut backbone_idx = 0usize;
+    for (i, l) in through_layers.iter().enumerate() {
         if l.join_priority > backbone.join_priority {
             backbone = l;
+            backbone_idx = i;
         }
     }
 
@@ -171,13 +180,33 @@ fn apply_layer_cuts(
         return; // Schicht-Anzahl passt nicht zusammen (sollte nicht vorkommen)
     }
 
-    let side_line = Line { point: axis_point, dir: through_dir };
+    // Nahflaechen-Cut des verschmelzenden Kerns: von der Durchgangswand-Nah-
+    // flaeche (off_t + sign*t_t/2) um die Nah-Putz-Dicke nach innen versetzt =
+    // die dem Abzweig zugewandte Flaeche des Rueckgrat-Kerns. Nah-Putz = Summe
+    // der Durchgangswand-Schichten zwischen Nahseite (sign) und Rueckgrat: auf
+    // der +nT-Nahseite (sign>0) die Schichten hinter dem Rueckgrat
+    // (Index > backbone_idx), auf der -nT-Nahseite die davor.
+    let t_t: f64 = through_layers.iter().map(|l| l.thickness).sum();
+    let mut near_plaster = 0.0;
+    for (i, l) in through_layers.iter().enumerate() {
+        let near = if sign > 0.0 { i > backbone_idx } else { i < backbone_idx };
+        if near {
+            near_plaster += l.thickness;
+        }
+    }
+    let n_t = left_normal(through_dir);
+    let merge_point = add(axis_point, scale(n_t, off_t + sign * (t_t / 2.0 - near_plaster)));
+    let merge_cut = Line { point: merge_point, dir: through_dir };
+
+    // Getrimmte Nachbarschichten schliessen mit ihrer L-Seitenlinie an dieser
+    // Rueckgrat-Nahflaeche ab (nicht an der Wandachse).
+    let side_line = merge_cut;
     let (face_arr, side_arr) = match branch_end {
         WallEndKind::Start => (&mut lc.start, &mut lc.start_side),
         WallEndKind::End => (&mut lc.end, &mut lc.end_side),
     };
     for i in 0..n {
-        face_arr[i] = if merged[i] { None } else { Some(face_cut) };
+        face_arr[i] = if merged[i] { Some(merge_cut) } else { Some(face_cut) };
         let adj_merged =
             !merged[i] && ((i > 0 && merged[i - 1]) || (i + 1 < n && merged[i + 1]));
         side_arr[i] = if adj_merged { Some(side_line) } else { None };
@@ -454,6 +483,8 @@ fn apply_t_junction(
         face_cut,
         j,
         u_t,
+        sign,
+        off_t,
     );
 }
 
@@ -542,6 +573,8 @@ fn apply_mid_span_tee(
         face_cut,
         axis_point,
         u_w,
+        sign,
+        off_w,
     );
 }
 
@@ -825,9 +858,10 @@ mod tests {
     #[test]
     fn t_junction_layer_cuts_merge_and_trim() {
         // Wie t_junction_branch_gets_face_cut, aber alle drei Waende vom
-        // W9-artigen Wandtyp: der Backstein-Kern (Index 1) verschmilzt (kein
-        // Cut), die beiden Innenputz-Schichten (Index 0/2) werden getrimmt und
-        // bekommen zusaetzlich die seitliche L-Linie.
+        // W9-artigen Wandtyp: der Backstein-Kern (Index 1) sticht durch den
+        // Nah-Putz und stoppt an der Kern-Nahflaeche (y=0.06), die beiden
+        // Innenputz-Schichten (Index 0/2) werden getrimmt und bekommen
+        // zusaetzlich die seitliche L-Linie an derselben Flaeche.
         let input = JoinInput {
             walls: vec![
                 w_iw("A", 0.0, 0.0, 5.0, 0.0),
@@ -846,8 +880,15 @@ mod tests {
         let lc = cb.layer_cuts.as_ref().expect("layerCuts gesetzt (Backstein verschmilzt)");
         assert_eq!(lc.start.len(), 3);
 
-        // Schicht 1 (Backstein-Kern): kein Cut, keine Seitenlinie.
-        assert!(lc.start[1].is_none());
+        let dist = |cut: Line, q: Vec2| cross(cut.dir, sub(q, cut.point)).abs() / len(cut.dir);
+
+        // Schicht 1 (Backstein-Kern): Cut an der Rueckgrat-Nahflaeche y=0.06
+        // (Halbdicke 0.075 minus Nah-Putz 0.015), NICHT null/Achse; keine
+        // Seitenlinie (verschmilzt).
+        let l1 = lc.start[1].expect("Schicht 1 (Kern) hat Merge-Cut");
+        assert!(dist(l1, Vec2 { x: 5.0, y: 0.06 }) < 1e-9);
+        assert!(dist(l1, Vec2 { x: 0.0, y: 0.06 }) < 1e-9);
+        assert!(dist(l1, Vec2 { x: 5.0, y: 0.0 }) > 1e-6); // nicht bis zur Achse
         assert!(lc.start_side[1].is_none());
 
         // Schichten 0/2 (Innenputz): derselbe Nahflaechen-Cut wie das Aggregat...
@@ -855,14 +896,13 @@ mod tests {
         let l2 = lc.start[2].expect("Schicht 2 getrimmt");
         assert!((l0.point.y - 0.075).abs() < 1e-9);
         assert!((l2.point.y - 0.075).abs() < 1e-9);
-        // ... UND die seitliche L-Linie entlang der Durchgangsachse (durch den
-        // Knoten (5,0), parallel zur x-Achse).
+        // ... UND die seitliche L-Linie an der Rueckgrat-Nahflaeche (y=0.06,
+        // parallel zur x-Achse).
         let s0 = lc.start_side[0].expect("Schicht 0 hat L-Seitenlinie");
         let s2 = lc.start_side[2].expect("Schicht 2 hat L-Seitenlinie");
-        let dist = |cut: Line, q: Vec2| cross(cut.dir, sub(q, cut.point)).abs() / len(cut.dir);
-        assert!(dist(s0, Vec2 { x: 5.0, y: 0.0 }) < 1e-9);
-        assert!(dist(s0, Vec2 { x: 0.0, y: 0.0 }) < 1e-9);
-        assert!(dist(s2, Vec2 { x: 5.0, y: 0.0 }) < 1e-9);
+        assert!(dist(s0, Vec2 { x: 5.0, y: 0.06 }) < 1e-9);
+        assert!(dist(s0, Vec2 { x: 0.0, y: 0.06 }) < 1e-9);
+        assert!(dist(s2, Vec2 { x: 5.0, y: 0.06 }) < 1e-9);
 
         // Die kollineare Durchgangswand bleibt unangetastet (kein layerCuts).
         let ca = find(&out, "A");

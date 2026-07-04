@@ -267,7 +267,7 @@ function iwWall(id: string, start: Vec2, end: Vec2): Wall {
 }
 
 describe("computeJoins — materialbewusster T-Stoss (layerCuts)", () => {
-  it("W9-artiger T-Knoten: Backstein-Kern des Abzweigs verschmilzt (kein Cut), Putz wird getrimmt + L-Seitenlinie", () => {
+  it("W9-artiger T-Knoten: Backstein-Kern des Abzweigs sticht bis zur Rückgrat-Nahfläche durch, Putz wird getrimmt + L-Seitenlinie an derselben Fläche", () => {
     // Durchgangswand WA1 (0,0)→(5,0) / WA2 (5,0)→(10,0), Abzweig WB (5,0)→(5,3),
     // alle vom selben Wandtyp "iw" (Innenputz/Backstein/Innenputz, T=0.15).
     const proj = layeredWallProject(
@@ -287,8 +287,14 @@ describe("computeJoins — materialbewusster T-Stoss (layerCuts)", () => {
     const lc = cuts.layerCuts!;
     expect(lc.start.length).toBe(3);
 
-    // Schicht 1 (Backstein-Kern, Index 1) verschmilzt: KEIN Cut.
-    expect(lc.start[1]).toBeNull();
+    // Schicht 1 (Backstein-Kern, Index 1) verschmilzt: Cut an der Nahfläche des
+    // Durchgangs-Rückgrats — NICHT null (Achse) und NICHT die Aggregat-Nahfläche
+    // (0.075). Durchgangswand-Halbdicke 0.075 minus Nah-Putz 0.015 → y = 0.06.
+    expect(lc.start[1]).not.toBeNull();
+    expect(distToLine(lc.start[1]!, { x: 5, y: 0.06 })).toBeCloseTo(0, 6);
+    expect(distToLine(lc.start[1]!, { x: 0, y: 0.06 })).toBeCloseTo(0, 6);
+    // Der Kern läuft NICHT bis zur Achse (y=0) durch.
+    expect(distToLine(lc.start[1]!, { x: 5, y: 0 })).not.toBeCloseTo(0, 6);
     expect(lc.startSide[1]).toBeNull();
 
     // Schichten 0 und 2 (Innenputz) werden getrimmt: derselbe Nahflächen-Cut
@@ -297,12 +303,13 @@ describe("computeJoins — materialbewusster T-Stoss (layerCuts)", () => {
     expect(lc.start[2]).not.toBeNull();
     expect(distToLine(lc.start[0]!, { x: 5, y: 0.075 })).toBeCloseTo(0, 6);
     expect(distToLine(lc.start[2]!, { x: 5, y: 0.075 })).toBeCloseTo(0, 6);
-    // ... UND bekommen die zusätzliche L-Seitenlinie entlang der
-    // Durchgangsachse (durch den Knoten (5,0), Richtung parallel zur x-Achse).
+    // ... UND bekommen die zusätzliche L-Seitenlinie an der Rückgrat-Nahfläche
+    // (y = 0.06, parallel zur Durchgangsachse) — dort endet der durchstechende
+    // Kern.
     expect(lc.startSide[0]).not.toBeNull();
     expect(lc.startSide[2]).not.toBeNull();
-    expect(distToLine(lc.startSide[0]!, { x: 5, y: 0 })).toBeCloseTo(0, 6);
-    expect(distToLine(lc.startSide[0]!, { x: 0, y: 0 })).toBeCloseTo(0, 6);
+    expect(distToLine(lc.startSide[0]!, { x: 5, y: 0.06 })).toBeCloseTo(0, 6);
+    expect(distToLine(lc.startSide[0]!, { x: 0, y: 0.06 })).toBeCloseTo(0, 6);
 
     // Die kollinearen Hälften der Durchgangswand bleiben unangetastet
     // (unverändertes Verhalten, keine layerCuts für sie).

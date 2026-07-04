@@ -3,8 +3,9 @@
  * an einem T-Stoss zweier verputzter Mauerwerkswände (W9-artig: Innenputz/
  * Backstein-Kern/Innenputz) darf der Abzweig nicht mehr naiv über die volle
  * Dicke an der Durchgangswand-Fläche gekappt werden.
- *  • Der Backstein-Kern des Abzweigs läuft UNGEKAPPT bis zur Durchgangsachse
- *    durch (kein Cut an der Nahfläche) — "durchgehender Kern".
+ *  • Der Backstein-Kern des Abzweigs sticht durch den Nah-Putz der Durchgangs-
+ *    wand und stoppt an deren Kern-Nahfläche (kein Durchlaufen bis zur Achse,
+ *    kein Überlappen) — "durchstechender Kern".
  *  • Die Innenputz-Schichten des Abzweigs enden weiterhin an der Nahfläche
  *    UND bekommen eine zusätzliche seitliche L-Linie (cls "layer-joint-l").
  */
@@ -88,10 +89,11 @@ describe("generatePlan — materialbewusster T-Stoss (Poché-Bänder)", () => {
     expect(render2.pts[0].y).toBeCloseTo(0.075, 6);
     expect(render2.pts[3].y).toBeCloseTo(0.075, 6);
 
-    // Der Backstein-Kern verschmilzt: KEIN Cut an der Nahfläche → die
-    // Randpunkte liegen auf der Durchgangsachse (y=0), nicht auf y=0.075.
-    expect(brick.pts[0].y).toBeCloseTo(0, 6);
-    expect(brick.pts[3].y).toBeCloseTo(0, 6);
+    // Der Backstein-Kern verschmilzt, sticht aber nur durch den Nah-Putz der
+    // Durchgangswand bis zur Nahfläche des Durchgangs-Kerns (y = 0.075 − 0.015 =
+    // 0.06) — nicht bis zur Nahfläche (0.075) und NICHT bis zur Achse (0).
+    expect(brick.pts[0].y).toBeCloseTo(0.06, 6);
+    expect(brick.pts[3].y).toBeCloseTo(0.06, 6);
   });
 
   it("zeichnet die L-Seitenlinie nur für die getrimmten Putzschichten, nicht für den durchlaufenden Kern", () => {
@@ -103,11 +105,11 @@ describe("generatePlan — materialbewusster T-Stoss (Poché-Bänder)", () => {
     // bekommt keine (er verschmilzt, kein Sprung im Material).
     expect(lLines.length).toBe(2);
 
-    // Jede L-Linie verläuft entlang der Durchgangsachse (y=0, parallel zur
+    // Jede L-Linie verläuft an der Rückgrat-Nahfläche (y=0.06, parallel zur
     // x-Achse) und spannt genau die Breite EINER Putzschicht (0.015 m) auf.
     for (const l of lLines) {
-      expect(l.a.y).toBeCloseTo(0, 6);
-      expect(l.b.y).toBeCloseTo(0, 6);
+      expect(l.a.y).toBeCloseTo(0.06, 6);
+      expect(l.b.y).toBeCloseTo(0.06, 6);
       expect(Math.abs(l.a.x - l.b.x)).toBeCloseTo(0.015, 6);
     }
   });

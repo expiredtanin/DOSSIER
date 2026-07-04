@@ -285,7 +285,7 @@ function applyTJunction(
   const faceCut: Line = { point: facePoint, dir: uT };
 
   setCut(result, branchEnd, faceCut);
-  applyLayerCuts(project, result, branchEnd, branchWall, throughWall, faceCut, j, uT);
+  applyLayerCuts(project, result, branchEnd, branchWall, throughWall, faceCut, j, uT, sign);
 }
 
 /**
@@ -293,16 +293,22 @@ function applyTJunction(
  * {@link resolveJoinPriority}): vergleicht jede Schicht der ABZWEIG-Wand mit
  * dem Rückgrat (höchste `joinPriority`) der DURCHGANGSWAND. Verschmilzt eine
  * Schicht (gleiche Komponente + Priorität wie das Rückgrat, oder die
- * Abzweig-Schicht ist sogar prioritärer), bekommt sie KEINEN Cut — das Band
- * läuft bis zum Wandachsenpunkt durch (die Durchgangswand selbst ist an einem
- * T-Stoss unzerschnitten und deckt den Rest ab, s. `applyTJunction`-Doc).
+ * Abzweig-Schicht ist sogar prioritärer), bekommt sie einen Cut an der
+ * NAHFLÄCHE DES RÜCKGRAT-KERNS der Durchgangswand: der verschmelzende Abzweig-
+ * Kern (z. B. Backstein) sticht nur durch den Nah-Putz der Durchgangswand und
+ * stoppt am Durchgangs-Kern — er läuft NICHT bis zur Achse durch und überlappt
+ * die Durchgangswand nicht (dort verschmelzen die beiden Kerne nahtlos).
  * Getrimmte Schichten, die direkt an eine verschmelzende Nachbarschicht
- * grenzen, bekommen zusätzlich eine seitliche Cut-Linie entlang der
- * Durchgangsachse (L-Anschluss, z. B. Putz neben durchlaufendem Kern).
+ * grenzen, bekommen zusätzlich eine seitliche Cut-Linie an eben dieser
+ * Rückgrat-Nahfläche (L-Anschluss, z. B. Putz neben durchstechendem Kern).
  *
  * Setzt `WallCuts.layerCuts` NUR, wenn mindestens eine Schicht verschmilzt —
  * sonst bleibt das Feld `undefined` (additiv, bit-identisches Default-
  * Verhalten für den ganz überwiegenden Fall ohne Materialübereinstimmung).
+ *
+ * `sign` ist die Nahseite der Durchgangswand (der Abzweig-zugewandte `nT`-
+ * Vorzeichen, aus {@link applyTJunction}/{@link applyMidSpanTee}); er bestimmt,
+ * welche Durchgangswand-Schichten als Nah-Putz vor dem Rückgrat liegen.
  */
 function applyLayerCuts(
   project: Project,
@@ -313,16 +319,22 @@ function applyLayerCuts(
   faceCut: Line,
   axisPoint: Vec2,
   throughDir: Vec2,
+  sign: number,
 ): void {
   const branchWt = getWallType(project, branchWall);
   const throughWt = getWallType(project, throughWall);
   if (branchWt.layers.length === 0 || throughWt.layers.length === 0) return;
 
-  // Rückgrat der Durchgangswand: die Schicht mit der höchsten joinPriority.
+  // Rückgrat der Durchgangswand: die Schicht mit der höchsten joinPriority
+  // (Index mitgeführt, um die Nah-Putz-Dicke davor zu bestimmen).
   let backbone = getComponent(project, throughWt.layers[0].componentId);
-  for (const l of throughWt.layers) {
-    const c = getComponent(project, l.componentId);
-    if (c.joinPriority > backbone.joinPriority) backbone = c;
+  let backboneIdx = 0;
+  for (let i = 0; i < throughWt.layers.length; i++) {
+    const c = getComponent(project, throughWt.layers[i].componentId);
+    if (c.joinPriority > backbone.joinPriority) {
+      backbone = c;
+      backboneIdx = i;
+    }
   }
 
   const n = branchWt.layers.length;
@@ -352,13 +364,35 @@ function applyLayerCuts(
 
   const faceArr = branchEnd.end === "start" ? lc.start : lc.end;
   const sideArr = branchEnd.end === "start" ? lc.startSide : lc.endSide;
-  // Seitliche Cut-Linie entlang der Durchgangsachse, auf Höhe des Wand-
-  // Achsenpunkts (= die Tiefe, bis zu der eine verschmelzende Nachbarschicht
-  // ungekappt durchläuft).
-  const sideLine: Line = { point: axisPoint, dir: throughDir };
+
+  // Nahflächen-Cut des verschmelzenden Kerns: von der Durchgangswand-Nahfläche
+  // (`offT + sign·tT/2`) um die Nah-Putz-Dicke nach innen versetzt — also genau
+  // die dem Abzweig zugewandte Fläche des Rückgrat-Kerns. Nah-Putz = Summe der
+  // Durchgangswand-Schichten, die zwischen der Nahseite (sign) und dem Rückgrat
+  // liegen. Die Schichten stapeln entlang +nT (Index 0 = −tT/2); auf der
+  // +nT-Nahseite (sign>0) sind das die Schichten HINTER dem Rückgrat
+  // (Index > backboneIdx), auf der −nT-Nahseite die davor (Index < backboneIdx).
+  const tT = wallTypeThickness(throughWt);
+  const offT = wallReferenceOffset(throughWall, tT);
+  let nearPlaster = 0;
+  for (let i = 0; i < throughWt.layers.length; i++) {
+    if (sign > 0 ? i > backboneIdx : i < backboneIdx)
+      nearPlaster += throughWt.layers[i].thickness;
+  }
+  const nT = leftNormal(throughDir);
+  const mergePoint = add(
+    axisPoint,
+    scale(nT, offT + sign * (tT / 2 - nearPlaster)),
+  );
+  const mergeCut: Line = { point: mergePoint, dir: throughDir };
+
+  // Getrimmte Nachbarschichten schließen mit ihrer L-Seitenlinie an eben dieser
+  // Rückgrat-Nahfläche (nicht an der Wandachse) — dort endet der Kern und die
+  // Nachbarschicht kappt ihre Breite.
+  const sideLine: Line = mergeCut;
 
   for (let i = 0; i < n; i++) {
-    faceArr[i] = merged[i] ? null : faceCut;
+    faceArr[i] = merged[i] ? mergeCut : faceCut;
     const adjMerged =
       !merged[i] && ((i > 0 && merged[i - 1]) || (i < n - 1 && merged[i + 1]));
     sideArr[i] = adjMerged ? sideLine : null;
@@ -420,5 +454,5 @@ function applyMidSpanTee(
   // Endes (nicht zwingend w.start) — Anker für die materialbewusste
   // Pro-Schicht-Erweiterung (analog zum T-Knoten-Fall).
   const axisPoint = add(w.start, scale(uW, best.distAlong));
-  applyLayerCuts(project, result, freeEnd, freeWall, w, faceCut, axisPoint, uW);
+  applyLayerCuts(project, result, freeEnd, freeWall, w, faceCut, axisPoint, uW, sign);
 }
