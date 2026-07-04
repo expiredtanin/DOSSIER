@@ -519,14 +519,30 @@ function Segment({
   );
 }
 
-/** Systemfont-Auswahl der Text-Gruppe. */
+/**
+ * Schriftauswahl der Text-Gruppe: 15 kuratierte, lokal gebuendelte
+ * Open-Source-Schriften (SIL Open Font License, siehe `src/text/fonts.css`
+ * und `public/fonts/<slug>/OFL.txt`). Bewusst KEINE Systemfonts mehr — die
+ * Darstellung soll unabhaengig vom Betriebssystem und der PDF-Export
+ * deterministisch sein. Ein spaeterer Einstellungen-Dialog kann weitere
+ * Schriften nachladen; das hier ist die Standardliste.
+ */
 const TEXT_FONTS: string[] = [
-  "Helvetica",
-  "Arial",
   "Inter",
-  "Times New Roman",
-  "Georgia",
-  "Courier New",
+  "Work Sans",
+  "IBM Plex Sans",
+  "IBM Plex Mono",
+  "Source Sans 3",
+  "Space Grotesk",
+  "Manrope",
+  "Outfit",
+  "DM Sans",
+  "Public Sans",
+  "Karla",
+  "Rubik",
+  "Jost",
+  "Archivo",
+  "Source Serif 4",
 ];
 
 /** Grössen-Presets (pt) der Text-Gruppe. */
@@ -547,7 +563,7 @@ function TextGroup({
 }) {
   // Defaults für neuen Text, solange nichts Text-artiges selektiert ist. Bei
   // aktivem Ziel spiegeln die Controls die gemeinsamen Werte des Ziels wider.
-  const [defFont, setDefFont] = useState<string>("Helvetica");
+  const [defFont, setDefFont] = useState<string>("Inter");
   const [defSize, setDefSize] = useState<number>(12);
   const [defAlign, setDefAlign] = useState<Align>("left");
   const [defBold, setDefBold] = useState(false);

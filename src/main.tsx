@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { getLanguage, setLanguage } from "./i18n";
 import type { Language } from "./i18n";
 import "./styles.css";
+import "./text/fonts.css";
 
 // Sprach-Naht für Werkzeuge/Tests (und einen späteren Umschalter): die i18n-
 // Steuerung am window verfügbar machen. Identifier englisch; Werte übersetzbar.
