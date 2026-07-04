@@ -138,6 +138,17 @@ export const sampleProject: Project = {
         { componentId: "render-int", thickness: 0.015 },
       ],
     },
+    {
+      // Verputzte Backstein-Innenwand (beidseitig Innenputz) — für den T-Stoß-Test:
+      // eine Querwand, die mit beiden Enden an die Innenflächen der Aussenwände stösst.
+      id: "iw",
+      name: "Innenwand Mauerwerk verputzt 15 cm",
+      layers: [
+        { componentId: "render-int", thickness: 0.015 },
+        { componentId: "brick", thickness: 0.12 },
+        { componentId: "render-int", thickness: 0.015 },
+      ],
+    },
   ],
   // Deckenstile (Decken-Aufbau-Typen) — das liegende Gegenstück der Wandstile.
   // Schichten oben (OK) → unten (UK), analog zur Wand außen → innen.
@@ -213,6 +224,10 @@ export const sampleProject: Project = {
     { id: "W3", type: "wall", floorId: "eg", categoryCode: "20", start: { x: 5, y: 4 }, end: { x: 0, y: 4 }, wallTypeId: "aw", height: 2.6 },
     // West (links)
     { id: "W4", type: "wall", floorId: "eg", categoryCode: "20", start: { x: 0, y: 4 }, end: { x: 0, y: 0 }, wallTypeId: "aw", height: 2.6 },
+    // Innere Querwand (Mauerwerk verputzt): teilt den Raum in zwei. Beide Enden
+    // treffen mittig auf die Innenflächen von W1 (unten) und W3 (oben) → zwei
+    // Mittelspannen-T-Stösse; computeJoins schneidet die Querwand bündig an.
+    { id: "W9", type: "wall", floorId: "eg", categoryCode: "20", start: { x: 2.4, y: 0 }, end: { x: 2.4, y: 4 }, wallTypeId: "iw", height: 2.6 },
 
     // ── OG: 5 × 3 m Raum (CCW), keine Tür ──
     // Süd (unten)
@@ -230,7 +245,7 @@ export const sampleProject: Project = {
       type: "door",
       hostWallId: "W1",
       categoryCode: "21",
-      position: 2.0, // 2 m vom Wand-Start (Ecke unten links)
+      position: 0.8, // Startkante 0.8 m ab Wand-Start → Tür x 0.8–1.7, links von W9 (x=2.4)
       width: 0.9,
       height: 2.1,
       swing: "left", // schlägt nach innen (in den Raum) auf
@@ -246,7 +261,7 @@ export const sampleProject: Project = {
       hostWallId: "W1",
       categoryCode: "21",
       kind: "window",
-      position: 3.6, // hinter der Tür (2.0–2.9), noch innerhalb der 5-m-Wand
+      position: 3.0, // Startkante 3.0 m → Fenster x 3.0–4.0, rechts von W9 mit Massiv-Abstand
       width: 1.0,
       height: 1.2,
       sillHeight: 0.9,
@@ -257,7 +272,9 @@ export const sampleProject: Project = {
       hostWallId: "W3",
       categoryCode: "21",
       kind: "window",
-      position: 1.8,
+      // Startkante 0.6 m ab W3-Start (x=5) → Fenster x 3.0–4.4, rechts von W9 (x=2.4)
+      // mit sichtbarer Massiv-Wand dazwischen (die Querwand stösst auf Mauerwerk).
+      position: 0.6,
       width: 1.4,
       height: 1.3,
       sillHeight: 0.9,
