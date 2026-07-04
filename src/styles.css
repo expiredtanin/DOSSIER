@@ -816,12 +816,14 @@ body {
   background: var(--border);
 }
 
-/* Renderer-Umschalter (WebGL2 / Engine) in der Statusleiste — kleine
-   Segmentpille, an die 22px-Leiste angepasst (siehe .tb-seg für das größere
-   Vorbild in der Oberleiste). */
+/* Renderer-Umschalter (WebGL2 / Nordstern) — kleine Segmentpille; ursprünglich
+   in der Statusleiste (22px-Leiste), jetzt im Einstellungs-Fenster. In einer
+   flex-column (.imp-section) würde sie sonst auf volle Breite gestreckt
+   werden (Standard-`align-items: stretch`) — bleibt daher inhaltsbreit. */
 .sb-renderer-toggle {
   display: inline-flex;
   align-items: stretch;
+  align-self: flex-start;
   height: 16px;
   border: 1px solid var(--border);
   border-radius: 999px;

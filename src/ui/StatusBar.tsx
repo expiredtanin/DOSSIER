@@ -33,15 +33,6 @@ export interface StatusBarProps {
   activeFloor: string;
   /** Name der aktiven Ebene (Kategorie) oder „—". */
   activeLayer: string;
-  /** Aktuell gewählter Plan-Renderer (aus dem `?engine`-URL-Param abgeleitet). */
-  rendererMode: RendererMode;
-  /** Ist `navigator.gpu` vorhanden? Steuert, ob „Engine" wählbar ist. */
-  webGpuAvailable: boolean;
-  /**
-   * Renderer wechseln (setzt/entfernt den `engine`-URL-Param und lädt neu — kein
-   * Live-Remount der Renderer-Hooks).
-   */
-  onRendererModeChange: (mode: RendererMode) => void;
   /** Linien-Darstellung: „display" (Haarlinien) oder „print" (echte mm-Stärken). */
   lineMode: "display" | "print";
   /** Linien-Darstellung wechseln. */
@@ -264,9 +255,6 @@ export function StatusBar({
   referenceLinesEnabled,
   activeFloor,
   activeLayer,
-  rendererMode,
-  webGpuAvailable,
-  onRendererModeChange,
   lineMode,
   onLineModeChange,
   lineModeEnabled,
@@ -308,30 +296,6 @@ export function StatusBar({
         >
           {t("status.referenceLines")}
         </button>
-        <Sep />
-        <span className="sb-field">
-          <span className="sb-key">{t("status.renderer")}</span>
-          <span className="sb-renderer-toggle" role="group" aria-label={t("status.renderer")}>
-            <button
-              type="button"
-              className={`sb-renderer-btn${rendererMode === "webgl2" ? " active" : ""}`}
-              aria-pressed={rendererMode === "webgl2"}
-              onClick={() => onRendererModeChange("webgl2")}
-            >
-              {t("status.rendererWebgl")}
-            </button>
-            <button
-              type="button"
-              className={`sb-renderer-btn${rendererMode === "wasm" ? " active" : ""}`}
-              aria-pressed={rendererMode === "wasm"}
-              disabled={!webGpuAvailable}
-              title={webGpuAvailable ? undefined : t("status.rendererWasmUnavailable")}
-              onClick={() => onRendererModeChange("wasm")}
-            >
-              {t("status.rendererWasm")}
-            </button>
-          </span>
-        </span>
         <Sep />
         <Field label={t("status.xy")} value={coords} />
         <Sep />

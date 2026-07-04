@@ -2534,15 +2534,18 @@ export default function App() {
   // Persistiert in localStorage, damit die Wahl einen Neustart ohne URL-Param
   // übersteht (z.B. die Electron-App startet immer auf der Basis-URL).
   const RENDERER_STORAGE_KEY = "cad.rendererMode";
+  const webGpuAvailable = typeof navigator !== "undefined" && "gpu" in navigator;
   const rendererMode: RendererMode = (() => {
     const fromUrl = new URLSearchParams(window.location.search).get("engine");
     if (fromUrl === "wasm") return "wasm";
     if (fromUrl === "webgl2") return "webgl2";
-    return window.localStorage.getItem(RENDERER_STORAGE_KEY) === "wasm"
-      ? "wasm"
-      : "webgl2";
+    const fromStorage = window.localStorage.getItem(RENDERER_STORAGE_KEY);
+    if (fromStorage === "webgl2") return "webgl2";
+    if (fromStorage === "wasm") return "wasm";
+    // Keine explizite Wahl (weder URL noch localStorage) — Nordstern (WASM)
+    // ist Standard, sofern WebGPU verfügbar ist; sonst WebGL2 als Fallback.
+    return webGpuAvailable ? "wasm" : "webgl2";
   })();
-  const webGpuAvailable = typeof navigator !== "undefined" && "gpu" in navigator;
   const setRendererMode = (mode: RendererMode) => {
     window.localStorage.setItem(RENDERER_STORAGE_KEY, mode);
     const url = new URL(window.location.href);
@@ -3343,9 +3346,6 @@ export default function App() {
         referenceLinesEnabled={planActive}
         activeFloor={activeLevel.name}
         activeLayer={activeLayerName}
-        rendererMode={rendererMode}
-        webGpuAvailable={webGpuAvailable}
-        onRendererModeChange={setRendererMode}
         lineMode={lineMode}
         onLineModeChange={setLineMode}
         lineModeEnabled={planActive}
@@ -3411,6 +3411,9 @@ export default function App() {
           onSnapColorChange={setSnapColor}
           project={project}
           setProject={setProject}
+          rendererMode={rendererMode}
+          webGpuAvailable={webGpuAvailable}
+          onRendererModeChange={setRendererMode}
           onClose={() => setSettingsOpen(false)}
         />
       )}

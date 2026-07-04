@@ -14,6 +14,7 @@ import { t } from "../i18n";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import type { Project } from "../model/types";
 import { ColorHexField } from "./ColorHexField";
+import type { RendererMode } from "./StatusBar";
 
 export interface SettingsDialogProps {
   marqueeColor: string;
@@ -22,6 +23,15 @@ export interface SettingsDialogProps {
   onSnapColorChange: (hex: string) => void;
   project: Project;
   setProject: (next: Project | ((p: Project) => Project)) => void;
+  /** Aktuell gewählter Plan-Renderer (aus dem `?engine`-URL-Param abgeleitet). */
+  rendererMode: RendererMode;
+  /** Ist `navigator.gpu` vorhanden? Steuert, ob „Nordstern" wählbar ist. */
+  webGpuAvailable: boolean;
+  /**
+   * Renderer wechseln (setzt/entfernt den `engine`-URL-Param und lädt neu — kein
+   * Live-Remount der Renderer-Hooks).
+   */
+  onRendererModeChange: (mode: RendererMode) => void;
   onClose: () => void;
 }
 
@@ -32,6 +42,9 @@ export function SettingsDialog({
   onSnapColorChange,
   project,
   setProject,
+  rendererMode,
+  webGpuAvailable,
+  onRendererModeChange,
   onClose,
 }: SettingsDialogProps) {
   useEffect(() => {
@@ -85,6 +98,33 @@ export function SettingsDialog({
         </header>
 
         <div className="imp-body">
+          <section className="imp-section">
+            <div className="imp-section-title">{t("status.renderer")}</div>
+            <span className="sb-renderer-toggle" role="group" aria-label={t("status.renderer")}>
+              <button
+                type="button"
+                className={`sb-renderer-btn${rendererMode === "webgl2" ? " active" : ""}`}
+                aria-pressed={rendererMode === "webgl2"}
+                onClick={() => onRendererModeChange("webgl2")}
+              >
+                {t("status.rendererWebgl")}
+              </button>
+              <button
+                type="button"
+                className={`sb-renderer-btn${rendererMode === "wasm" ? " active" : ""}`}
+                aria-pressed={rendererMode === "wasm"}
+                disabled={!webGpuAvailable}
+                title={webGpuAvailable ? undefined : t("status.rendererWasmUnavailable")}
+                onClick={() => onRendererModeChange("wasm")}
+              >
+                {t("status.rendererWasm")}
+              </button>
+            </span>
+            {!webGpuAvailable && (
+              <div className="imp-note">{t("status.rendererWasmUnavailable")}</div>
+            )}
+          </section>
+
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.display")}</div>
             <AccentColorField
