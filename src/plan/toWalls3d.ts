@@ -26,8 +26,14 @@
 // render3d selbständig aus der Wandkonnektivität, braucht also keine
 // zusätzlichen Felder von hier.
 
-import type { Project, Wall } from "../model/types";
-import { getComponent, getWallType, wallTypeThickness, openingsOfWall } from "../model/types";
+import type { Project, Wall, Layer } from "../model/types";
+import {
+  getComponent,
+  getWallType,
+  getCeilingType,
+  wallTypeThickness,
+  openingsOfWall,
+} from "../model/types";
 import { wallVerticalExtent, ceilingVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 
@@ -115,11 +121,28 @@ const EPS = 1e-4;
  * (0..1, render3d-Konvention) um. Ungültiges/fehlendes Format fällt auf den
  * neutralen Wand-Grundton zurück (nie ein hartes Fehlbild).
  */
-function hexToRgb(hex: string): RRgb {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
-  if (!m) return WALL_RGB;
+function hexToRgb(hex: string, fallback: RRgb = WALL_RGB): RRgb {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex ?? "");
+  if (!m) return fallback;
   const v = parseInt(m[1], 16);
   return [((v >> 16) & 0xff) / 255, ((v >> 8) & 0xff) / 255, (v & 0xff) / 255];
+}
+
+/**
+ * Repräsentative Bauteilfarbe eines Schichtaufbaus: die Farbe der DICKSTEN
+ * Schicht (i. d. R. die tragende/dominante Schicht, z. B. Mauerwerk/Beton) —
+ * einfache Näherung, solange Wände/Decken als EIN Vollkörper emittiert werden
+ * (kein Schicht-Rendering in 3D). Fällt auf `fallback` zurück, wenn keine
+ * Schicht vorhanden ist oder deren Component nicht auflösbar ist.
+ */
+function dominantLayerColor(layers: Layer[], project: Project, fallback: RRgb): RRgb {
+  if (layers.length === 0) return fallback;
+  const dominant = layers.reduce((best, l) => (l.thickness > best.thickness ? l : best));
+  try {
+    return hexToRgb(getComponent(project, dominant.componentId).color, fallback);
+  } catch {
+    return fallback;
+  }
 }
 
 /**
@@ -138,6 +161,7 @@ function pushSegment(
   thickness: number,
   layers: RLayer[],
   wallId: string,
+  color: RRgb,
 ): void {
   if (to - from <= EPS) return;
   if (zTop - zBottom <= EPS) return;
@@ -155,7 +179,7 @@ function pushSegment(
     thickness,
     height: zTop - zBottom,
     baseElevation: zBottom,
-    color: WALL_RGB,
+    color,
     layers,
     wallId,
   });
@@ -168,6 +192,9 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
   // leer, wenn kein WallType auflösbar ist (render3d extrudiert dann wie
   // bisher einen Vollkörper aus `thickness`/`color`, siehe RWall-Moduldoc).
   let layers: RLayer[] = [];
+  // Repräsentative Vollkörper-Farbe = Farbe der dicksten Schicht (Option A,
+  // siehe Moduldoc); Fallback WALL_RGB, wenn kein WallType auflösbar ist.
+  let color: RRgb = WALL_RGB;
   try {
     const wt = getWallType(project, wall);
     thickness = wallTypeThickness(wt);
@@ -175,9 +202,11 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
       thickness: l.thickness,
       color: hexToRgb(getComponent(project, l.componentId).color),
     }));
+    color = dominantLayerColor(wt.layers, project, WALL_RGB);
   } catch {
     thickness = 0.2;
     layers = [];
+    color = WALL_RGB;
   }
   const { zBottom, zTop } = wallVerticalExtent(project, wall);
   const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
@@ -207,7 +236,7 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
 
   // Ohne Aussparungen: ein durchgehender Quader (wie bisher).
   if (cutouts.length === 0) {
-    pushSegment(out, wall, 0, axisLen, zBottom, zTop, thickness, layers, wall.id);
+    pushSegment(out, wall, 0, axisLen, zBottom, zTop, thickness, layers, wall.id, color);
     return;
   }
 
@@ -219,23 +248,23 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
     const segFrom = Math.max(cursor, from);
     if (from > cursor) {
       // Voller Wandpfeiler bis zur Aussparung.
-      pushSegment(out, wall, cursor, from, zBottom, zTop, thickness, layers, wall.id);
+      pushSegment(out, wall, cursor, from, zBottom, zTop, thickness, layers, wall.id, color);
     }
     if (to > segFrom) {
       // Brüstung unter der Öffnung (bei Türen entfällt sie, da oBottom == zBottom).
       if (oBottom > zBottom + EPS) {
-        pushSegment(out, wall, segFrom, to, zBottom, oBottom, thickness, layers, wall.id);
+        pushSegment(out, wall, segFrom, to, zBottom, oBottom, thickness, layers, wall.id, color);
       }
       // Sturz über der Öffnung (bis zum Wandkopf).
       if (oTop < zTop - EPS) {
-        pushSegment(out, wall, segFrom, to, oTop, zTop, thickness, layers, wall.id);
+        pushSegment(out, wall, segFrom, to, oTop, zTop, thickness, layers, wall.id, color);
       }
     }
     cursor = Math.max(cursor, to);
   }
   // Restlicher Wandpfeiler bis zum Achsenende.
   if (cursor < axisLen) {
-    pushSegment(out, wall, cursor, axisLen, zBottom, zTop, thickness, layers, wall.id);
+    pushSegment(out, wall, cursor, axisLen, zBottom, zTop, thickness, layers, wall.id, color);
   }
 }
 
@@ -248,11 +277,19 @@ function emitSlabs(project: Project): RSlab[] {
     // bereits über ceilingThickness (respektiert Typ-Dicke + Übersteuerung).
     const { zBottom, zTop } = ceilingVerticalExtent(project, c);
     if (zTop - zBottom <= EPS) continue;
+    // Repräsentative Farbe = dickste Schicht des Deckentyps (analog Wände);
+    // kein auflösbarer Deckentyp ⇒ SLAB_RGB-Fallback.
+    let color: RRgb = SLAB_RGB;
+    try {
+      color = dominantLayerColor(getCeilingType(project, c).layers, project, SLAB_RGB);
+    } catch {
+      color = SLAB_RGB;
+    }
     out.push({
       outline: c.outline.map((p) => [p.x, p.y] as RVec2),
       zBottom,
       zTop,
-      color: SLAB_RGB,
+      color,
       ceilingId: c.id,
     });
   }

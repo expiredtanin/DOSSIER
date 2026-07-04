@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { sampleProject } from "../model/sampleProject";
-import { selectionHighlightLines } from "./toWalls3d";
+import { selectionHighlightLines, projectToWalls3d, projectToModel3d } from "./toWalls3d";
 
 const RGB: [number, number, number] = [1, 0.5, 0.1];
 const FLOATS_PER_VERTEX = 6; // [px,py,pz, r,g,b]
@@ -66,5 +66,31 @@ describe("selectionHighlightLines", () => {
     const lines = selectionHighlightLines(sampleProject, ["W1"], [], RGB);
     expect(lines.length).toBeGreaterThan(12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
     expect(lines.length % (12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX)).toBe(0);
+  });
+});
+
+describe("Bauteil-/Materialfarbe statt Einheits-Grau (Wände + Decken)", () => {
+  it("Wand -> Farbe der dicksten Schicht (aw: insulation 0.16 m, #ffffff)", () => {
+    // Wandtyp "aw" (s. sampleProject): render-ext 0.02, insulation 0.16,
+    // brick 0.15, render-int 0.015 -> dickste Schicht = insulation (#ffffff).
+    const walls = projectToWalls3d(sampleProject);
+    const w2 = walls.filter((w) => w.wallId === "W2");
+    expect(w2.length).toBeGreaterThan(0);
+    for (const seg of w2) {
+      expect(seg.color[0]).toBeCloseTo(1, 6);
+      expect(seg.color[1]).toBeCloseTo(1, 6);
+      expect(seg.color[2]).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("Decke -> Farbe der dicksten Schicht (dg-massiv: concrete 0.2 m, #9aa0a6)", () => {
+    // Deckentyp "dg-massiv": screed 0.06, insulation 0.04, concrete 0.2 ->
+    // dickste Schicht = concrete (#9aa0a6).
+    const { slabs } = projectToModel3d(sampleProject);
+    const c1 = slabs.find((s) => s.ceilingId === "C1");
+    expect(c1).toBeDefined();
+    expect(c1!.color[0]).toBeCloseTo(0x9a / 255, 6);
+    expect(c1!.color[1]).toBeCloseTo(0xa0 / 255, 6);
+    expect(c1!.color[2]).toBeCloseTo(0xa6 / 255, 6);
   });
 });
