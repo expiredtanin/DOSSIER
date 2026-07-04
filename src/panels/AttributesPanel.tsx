@@ -28,6 +28,7 @@ import { formatM } from "../model/types";
 import { PEN_WEIGHTS } from "../model/types";
 import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
+import { Dropdown } from "../ui/Dropdown";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
  *  „custom" ist abgeleitet aus „ist ein expliziter Wert gesetzt?", nicht
@@ -77,17 +78,17 @@ export function AttributesPanel() {
     ui: UiSource,
     onChange: (next: UiSource) => void,
   ) => (
-    <select
-      className="attr-select"
-      style={{ width: 104 }}
+    <Dropdown
+      width={104}
       value={ui}
       disabled={!editable}
-      onChange={(e) => onChange(e.target.value as UiSource)}
-    >
-      <option value="layer">{t("attr.source.layer")}</option>
-      <option value="object">{t("attr.source.object")}</option>
-      <option value="custom">{t("attr.source.custom")}</option>
-    </select>
+      onChange={(v) => onChange(v as UiSource)}
+      options={[
+        { value: "layer", label: t("attr.source.layer") },
+        { value: "object", label: t("attr.source.object") },
+        { value: "custom", label: t("attr.source.custom") },
+      ]}
+    />
   );
 
   // Farb-Swatch-Eingabe für „eigener Wert" (Vordergrund/Hintergrund). Erscheint
@@ -246,19 +247,15 @@ export function AttributesPanel() {
           fillEditable,
           hatchUi,
           onHatchSourceChange,
-          <select
-            className="attr-select"
-            style={{ width: 104 }}
+          <Dropdown
+            width={104}
             value={sel.fillHatchId ?? ""}
-            onChange={(e) => host.onSetSelectionFill(e.target.value || null)}
-          >
-            <option value="">{t("attr.none")}</option>
-            {project.hatches.map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.name}
-              </option>
-            ))}
-          </select>,
+            onChange={(v) => host.onSetSelectionFill(v || null)}
+            options={[
+              { value: "", label: t("attr.none") },
+              ...project.hatches.map((h) => ({ value: h.id, label: h.name })),
+            ]}
+          />,
         )}
       </div>
 

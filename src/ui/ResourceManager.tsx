@@ -43,6 +43,7 @@ import {
   type AmbientResolution,
 } from "../materials/ambientcg";
 import { requestMaterialPreview, cancelMaterialPreview } from "../materials/spherePreview";
+import { Dropdown } from "./Dropdown";
 import { EyeIcon } from "./EyeIcon";
 import { HatchSwatch, LineSwatch, WallTypeSwatch } from "./hatchPreview";
 import type { SwatchLayer } from "./hatchPreview";
@@ -154,7 +155,7 @@ function ColorField({
   );
 }
 
-/** Pill-Dropdown (erbt das globale select-Styling). */
+/** Pill-Dropdown (nutzt die gemeinsame Dropdown-Komponente statt <select>). */
 function SelectField<T extends string>({
   value,
   onChange,
@@ -165,17 +166,11 @@ function SelectField<T extends string>({
   options: { value: T; label: string }[];
 }) {
   return (
-    <select
-      className="res-select"
+    <Dropdown
       value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+      onChange={(v) => onChange(v as T)}
+      options={options}
+    />
   );
 }
 
@@ -623,28 +618,24 @@ function AmbientBrowser({
         <button className="res-add" onClick={submitSearch}>
           {t("material.browse.search")}
         </button>
-        <select
-          className="res-select"
+        <Dropdown
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        >
-          <option value="">{t("material.browse.category.all")}</option>
-          {AMBIENT_CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-        <select
-          className="res-select"
+          onChange={(v) => setCategory(v)}
+          options={[
+            { value: "", label: t("material.browse.category.all") },
+            ...AMBIENT_CATEGORIES.map((c) => ({ value: c, label: c })),
+          ]}
+        />
+        <Dropdown
           value={resolution}
           title={t("material.browse.resolution")}
-          onChange={(e) => setResolution(e.target.value as AmbientResolution)}
-        >
-          <option value="1K">1K</option>
-          <option value="2K">2K</option>
-          <option value="4K">4K</option>
-        </select>
+          onChange={(v) => setResolution(v as AmbientResolution)}
+          options={[
+            { value: "1K", label: "1K" },
+            { value: "2K", label: "2K" },
+            { value: "4K", label: "4K" },
+          ]}
+        />
       </div>
 
       {error && <div className="mat-browse-error">{error}</div>}

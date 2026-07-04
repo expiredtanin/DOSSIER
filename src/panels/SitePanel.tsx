@@ -17,6 +17,7 @@ import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
 import type { ContextObject } from "../model/types";
 import { ContextImportDialog } from "../ui/ContextImportDialog";
+import { Dropdown } from "../ui/Dropdown";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -85,18 +86,12 @@ export function SitePanel() {
       {contourSets.length > 0 && (
         <div className="site-terrain-row">
           {contourSets.length > 1 ? (
-            <select
-              className="site-select"
+            <Dropdown
               value={effectiveSet}
-              onChange={(e) => setSelectedSet(e.target.value)}
-              aria-label={t("site.contourSet")}
-            >
-              {contourSets.map((cs) => (
-                <option key={cs.id} value={cs.id}>
-                  {cs.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setSelectedSet(v)}
+              title={t("site.contourSet")}
+              options={contourSets.map((cs) => ({ value: cs.id, label: cs.name }))}
+            />
           ) : (
             <span className="site-terrain-src" title={t("site.contourSet")}>
               {contourSets[0].name}

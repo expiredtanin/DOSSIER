@@ -10,6 +10,7 @@
 
 import type { DisplayMode } from "./types";
 import { t } from "../i18n";
+import { Dropdown } from "../ui/Dropdown";
 
 /**
  * Beschriftungs-Keys je Modus (Werte englisch, vgl. types.ts) — exakt die
@@ -41,18 +42,12 @@ export function DisplayModeSelect({
 }) {
   const label = title ?? t("display.title");
   return (
-    <select
-      className="display-mode"
+    <Dropdown
+      triggerClassName="display-mode"
       value={value}
       title={label}
-      aria-label={label}
-      onChange={(e) => onChange(e.target.value as DisplayMode)}
-    >
-      {MODE_OPTIONS.map((o) => (
-        <option key={o.value} value={o.value}>
-          {t(o.labelKey)}
-        </option>
-      ))}
-    </select>
+      onChange={(v) => onChange(v as DisplayMode)}
+      options={MODE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+    />
   );
 }

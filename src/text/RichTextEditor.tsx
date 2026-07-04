@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { docToHtml } from "./renderHtml";
+import { Dropdown } from "../ui/Dropdown";
 import {
   applyMark,
   applyPreset,
@@ -574,15 +575,13 @@ export function RichTextEditor({
   );
 
   const handlePreset = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const id = e.target.value;
+    (id: string) => {
       const preset = effectivePresets.find((p) => p.id === id);
       if (!preset) return;
       const range = selRange ?? { start: 0, end: 0 };
       const newDoc = applyPreset(valueRef.current, range, preset);
       onChangeRef.current(newDoc);
       setEditorHtml(newDoc, selRange, true);
-      e.target.value = "";
     },
     [effectivePresets, selRange, setEditorHtml],
   );
@@ -688,21 +687,16 @@ export function RichTextEditor({
 
         {/* Presets */}
         {effectivePresets.length > 0 && (
-          <select
-            className="rt-preset-select"
-            defaultValue=""
+          <Dropdown
+            triggerClassName="rt-preset-select"
+            value=""
             onChange={handlePreset}
             title={t("rt.preset")}
-          >
-            <option value="" disabled>
-              {t("rt.preset")} …
-            </option>
-            {effectivePresets.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: `${t("rt.preset")} …`, disabled: true },
+              ...effectivePresets.map((p) => ({ value: p.id, label: p.label })),
+            ]}
+          />
         )}
       </div>
 

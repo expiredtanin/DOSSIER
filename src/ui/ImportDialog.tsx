@@ -25,6 +25,7 @@ import {
   distinctLayers,
 } from "../io/dxfToDrawings";
 import type { CategoryMode } from "../io/dxfToDrawings";
+import { Dropdown } from "./Dropdown";
 
 /** Strukturierte Import-Entscheidung, die der Dialog beim Bestätigen liefert. */
 export interface ImportDecision {
@@ -226,18 +227,15 @@ export function ImportDialog({
                     <span>{t("import.target.existing")}</span>
                   </label>
                   {targetKind === "existing" && (
-                    <select
-                      className="imp-select"
+                    <Dropdown
                       value={existingLevelId}
-                      onChange={(e) => setExistingLevelId(e.target.value)}
-                      aria-label={t("import.target.existing")}
-                    >
-                      {project.drawingLevels.map((z) => (
-                        <option key={z.id} value={z.id}>
-                          {z.name} · {t(kindBadgeKey(z.kind))}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setExistingLevelId(v)}
+                      title={t("import.target.existing")}
+                      options={project.drawingLevels.map((z) => ({
+                        value: z.id,
+                        label: `${z.name} · ${t(kindBadgeKey(z.kind))}`,
+                      }))}
+                    />
                   )}
                   <label className="imp-radio">
                     <input

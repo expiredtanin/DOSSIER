@@ -13,6 +13,7 @@ import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import type { ToolId } from "./host";
 import { TOOL_ORDER, getTool } from "../tools/tools";
+import { Dropdown } from "../ui/Dropdown";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 // Keine echten Asset-Icons vorhanden: schlichte Inline-SVG-Glyphen je Werkzeug
@@ -153,17 +154,15 @@ export function ToolsPanel() {
       {host.activeTool === "wall" && (
         <label className="tools-field">
           <span>{t("tool.wallType")}</span>
-          <select
+          <Dropdown
             value={host.activeWallTypeId}
             disabled={!host.toolsEnabled}
-            onChange={(e) => host.onActiveWallTypeId(e.target.value)}
-          >
-            {host.project.wallTypes.map((wt) => (
-              <option key={wt.id} value={wt.id}>
-                {wt.name}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => host.onActiveWallTypeId(v)}
+            options={host.project.wallTypes.map((wt) => ({
+              value: wt.id,
+              label: wt.name,
+            }))}
+          />
         </label>
       )}
 
@@ -174,17 +173,15 @@ export function ToolsPanel() {
       {host.activeTool === "ceiling" && (
         <label className="tools-field">
           <span>{t("tool.ceilingType")}</span>
-          <select
+          <Dropdown
             value={host.activeWallTypeId}
             disabled={!host.toolsEnabled}
-            onChange={(e) => host.onActiveWallTypeId(e.target.value)}
-          >
-            {host.project.wallTypes.map((wt) => (
-              <option key={wt.id} value={wt.id}>
-                {wt.name}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => host.onActiveWallTypeId(v)}
+            options={host.project.wallTypes.map((wt) => ({
+              value: wt.id,
+              label: wt.name,
+            }))}
+          />
         </label>
       )}
 
