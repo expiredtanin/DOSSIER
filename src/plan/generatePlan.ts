@@ -44,6 +44,7 @@ import {
   add,
   along,
   clippedBand,
+  dot,
   leftNormal,
   lineIntersect,
   normalize,
@@ -574,6 +575,11 @@ export function generatePlan(
       visibleCodes.has(c.categoryCode) &&
       categoryDisplay(c.categoryCode).render,
   );
+  // Wand-Footprints für das Verdecken der (darunterliegenden) Decken-Umrisse:
+  // die Decke liegt als Slab über der Schnittebene, ihre Umrisslinie soll dort,
+  // wo eine Wand darüber steht, NICHT durch die Wand-Poché schlagen. Nur nötig,
+  // wenn es überhaupt Decken gibt.
+  const wallFootprints = ceilings.length ? buildWallFootprints(project, walls) : [];
   for (const ceiling of ceilings) {
     const greyed = categoryDisplay(ceiling.categoryCode).greyed;
     const category = catByCode.get(ceiling.categoryCode);
@@ -583,7 +589,7 @@ export function generatePlan(
       category,
       lwByCode.get(ceiling.categoryCode) ?? WALL_FALLBACK_MM,
     );
-    addCeilingPoche(primitives, project, ceiling, greyed, detail, lwMm, category);
+    addCeilingPoche(primitives, project, ceiling, greyed, detail, lwMm, category, wallFootprints);
   }
 
   // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
@@ -1075,6 +1081,88 @@ function subtractIntervals(
   }
   if (cursor < e - CUTOUT_EPS) parts.push([cursor, e]);
   return parts;
+}
+
+/**
+ * Wand-Footprint als orientiertes Rechteck (OBB) für das Verdecken der
+ * darunterliegenden Decke im Grundriss: Achs-Startpunkt + Einheits-Richtung `u`
+ * und -Normale `m`, Halbdicke, Referenz-Querversatz (Wandachse↔Bandmitte) und
+ * Achslänge. Die u-Ausdehnung wird beim Test an beiden Enden um die Halbdicke
+ * verlängert, damit auch die Eck-Überlappe (Gehrungen) sicher abgedeckt sind.
+ */
+interface WallFootprint {
+  a: Vec2;
+  u: Vec2;
+  m: Vec2;
+  len: number;
+  half: number;
+  refOff: number;
+}
+
+/** Baut die Wand-Footprints (OBBs) aus den gerenderten Wänden. Nicht auflösbarer
+ *  Wandtyp ⇒ Default-Dicke 0.2 m (wie der Vollkörper-Fallback im 3D-Emitter). */
+function buildWallFootprints(project: Project, walls: Wall[]): WallFootprint[] {
+  const out: WallFootprint[] = [];
+  for (const w of walls) {
+    let t = 0.2;
+    try {
+      t = wallTypeThickness(getWallType(project, w));
+    } catch {
+      // Default-Dicke behalten.
+    }
+    const u = normalize(sub(w.end, w.start));
+    out.push({
+      a: w.start,
+      u,
+      m: leftNormal(u),
+      len: Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y),
+      half: t / 2,
+      refOff: wallReferenceOffset(w, t),
+    });
+  }
+  return out;
+}
+
+/**
+ * Parametrisches Intervall [t0,t1] ⊆ [0,1], über das die Strecke `pa→pb`
+ * INNERHALB des Wand-Footprints liegt (also von der Wand verdeckt). `null`, wenn
+ * die Strecke den Footprint nicht schneidet. OBB-Test über zwei Slabs: Projektion
+ * auf die Achse `u` (Bereich [−half, len+half]) und auf die Normale `m` (Bereich
+ * [refOff−half, refOff+half]); das Schnitt-Intervall beider Slabs ∩ [0,1] ist die
+ * verdeckte Strecke.
+ */
+function segmentInsideWallBand(
+  pa: Vec2,
+  pb: Vec2,
+  fp: WallFootprint,
+): [number, number] | null {
+  const d = sub(pb, pa);
+  const rel = sub(pa, fp.a);
+  const clipSlab = (
+    f0: number,
+    fd: number,
+    lo: number,
+    hi: number,
+  ): [number, number] | null => {
+    if (Math.abs(fd) < 1e-12)
+      return f0 >= lo - CUTOUT_EPS && f0 <= hi + CUTOUT_EPS ? [0, 1] : null;
+    let ta = (lo - f0) / fd;
+    let tb = (hi - f0) / fd;
+    if (ta > tb) [ta, tb] = [tb, ta];
+    return [ta, tb];
+  };
+  const su = clipSlab(dot(rel, fp.u), dot(d, fp.u), -fp.half, fp.len + fp.half);
+  if (!su) return null;
+  const sm = clipSlab(
+    dot(rel, fp.m),
+    dot(d, fp.m),
+    fp.refOff - fp.half,
+    fp.refOff + fp.half,
+  );
+  if (!sm) return null;
+  const t0 = Math.max(0, su[0], sm[0]);
+  const t1 = Math.min(1, su[1], sm[1]);
+  return t1 > t0 + CUTOUT_EPS ? [t0, t1] : null;
 }
 
 function addWallPoche(
@@ -1614,6 +1702,7 @@ function addCeilingPoche(
   detail: DetailLevel,
   lwMm: number,
   category: LayerCategory | undefined,
+  wallFootprints: WallFootprint[],
 ): void {
   const pts = ceiling.outline;
   if (pts.length < 3) return;
@@ -1646,27 +1735,47 @@ function addCeilingPoche(
           resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
         )
       : NO_HATCH;
+  // Gefüllte Fläche OHNE eigenen Umriss (stroke:"none"): die Decke liegt unter
+  // der Wand-Poché; ihre Kante wird separat als verdeckungs-geclippte Linie
+  // gezeichnet (s. u.), damit sie nicht durch die darüberstehenden Wände schlägt.
+  // Trägt weiterhin die `ceilingId` für die Links-Klick-Auswahl der Fläche.
   out.push({
     kind: "polygon",
     pts,
     fill: comp ? pocheFill(hatch.pattern) : "none",
-    stroke,
-    strokeWidthMm: LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail],
+    stroke: "none",
+    strokeWidthMm: 0,
     hatch,
     greyed,
     ceilingId,
   });
-  // Kräftige Umrisslinie über die volle Decke (nur Kontur, keine Füllung).
-  out.push({
-    kind: "polygon",
-    pts,
-    fill: "none",
-    stroke,
-    strokeWidthMm: outlineMm,
-    hatch: NO_HATCH,
-    greyed,
-    ceilingId,
-  });
+  // Kräftige Umrisslinie NUR dort, wo keine Wand die Decke verdeckt: jede
+  // Umriss-Kante gegen die Wand-Footprints clippen und die freien Teilstücke als
+  // Linien ausgeben. Liegt die Decke deckungsgleich unter den Wänden (Regelfall:
+  // Deckenumriss = Gebäude-/Wand-Mittellinien), entfällt der Umriss ganz; nur
+  // Überstände (Vordach/Balkon jenseits der Wand) bleiben sichtbar.
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const holes: Array<[number, number]> = [];
+    for (const fp of wallFootprints) {
+      const iv = segmentInsideWallBand(a, b, fp);
+      if (iv) holes.push(iv);
+    }
+    const d = sub(b, a);
+    for (const [t0, t1] of subtractIntervals(0, 1, holes)) {
+      out.push({
+        kind: "line",
+        a: add(a, scale(d, t0)),
+        b: add(a, scale(d, t1)),
+        cls: "ceiling-outline",
+        weightMm: outlineMm,
+        color: stroke,
+        greyed,
+      });
+    }
+  }
 }
 
 /**
