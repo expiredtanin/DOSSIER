@@ -390,6 +390,11 @@ export const de = {
   "ctx.intersect": "Schneiden",
   "ctx.boolean.disabled":
     "Mindestens zwei geschlossene Flächen auswählen (Rechteck oder geschlossene Polylinie).",
+  "ctx.arrange.front": "Ganz nach vorn",
+  "ctx.arrange.forward": "Nach vorn",
+  "ctx.arrange.backward": "Nach hinten",
+  "ctx.arrange.back": "Ganz nach hinten",
+  "ctx.arrange.disabled": "Mindestens ein 2D-Element auswählen.",
   "ctx.noWallHit": "Keine Wand getroffen",
   "ctx.noWallHit.hint": "Rechtsklick auf eine Wand wählt sie und zeigt Wand-Aktionen.",
 

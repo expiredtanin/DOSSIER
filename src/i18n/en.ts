@@ -388,6 +388,11 @@ export const en: Record<TranslationKey, string> = {
   "ctx.intersect": "Intersect",
   "ctx.boolean.disabled":
     "Select at least two closed areas (rectangle or closed polyline).",
+  "ctx.arrange.front": "Bring to front",
+  "ctx.arrange.forward": "Bring forward",
+  "ctx.arrange.backward": "Send backward",
+  "ctx.arrange.back": "Send to back",
+  "ctx.arrange.disabled": "Select at least one 2D element.",
   "ctx.noWallHit": "No wall hit",
   "ctx.noWallHit.hint": "Right-clicking a wall selects it and shows wall actions.",
 

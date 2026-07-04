@@ -163,6 +163,18 @@ export interface ProjectSlice {
    */
   updateDrawing2D: (id: string, patch: Partial<Drawing2D>) => void;
   /**
+   * Sortiert die gewählten 2D-Zeichnungselemente in `drawings2d` um (z-Anordnen
+   * im Grundriss). Die Array-Reihenfolge IST die Zeichenreihenfolge — spätere
+   * Position = weiter oben/vorn (siehe `generatePlan.ts`). Unbekannte IDs
+   * werden ignoriert; die relative Reihenfolge der Auswahl bleibt erhalten.
+   * - "front"/"back": Auswahl ans Ende/an den Anfang des Arrays.
+   * - "forward"/"backward": Auswahl je einen Schritt Richtung Ende/Anfang.
+   */
+  reorderDrawings: (
+    ids: string[],
+    op: "front" | "back" | "forward" | "backward",
+  ) => void;
+  /**
    * Skaliert die Geometrie eines Elements auf Zielbreite×-höhe (Meter) um einen
    * Ankerpunkt (fx/fy ∈ [0,1] relativ zur bbox; 0,0 = oben-links).
    */
@@ -828,6 +840,12 @@ export function createProjectSlice(
         drawings2d: p.drawings2d.map((d) => (d.id === id ? { ...d, ...patch } : d)),
       })),
 
+    reorderDrawings: (ids, op) =>
+      setProject((p) => ({
+        ...p,
+        drawings2d: reorderDrawings2D(p.drawings2d, ids, op),
+      })),
+
     // ── Größe (Resize um Anker) ────────────────────────────────────────────
     resizeElement: (kind, id, w, h, anchor) =>
       setProject((p) => resizeElement(p, kind, id, w, h, anchor)),
@@ -1029,6 +1047,53 @@ function setOverrideField(
   if (kind === "ceiling")
     return { ...project, ceilings: (project.ceilings ?? []).map(apply) };
   return { ...project, drawings2d: project.drawings2d.map(apply) };
+}
+
+/**
+ * Z-Anordnen im Grundriss: `drawings2d` IST die Zeichenreihenfolge (spätere
+ * Position = weiter oben, siehe `generatePlan.ts`). Unbekannte IDs werden
+ * ignoriert; reine, immutable Umsortierung.
+ *
+ * - "front"/"back": die gewählten Elemente wandern gesammelt ans Ende/an den
+ *   Anfang des Arrays, ihre relative Reihenfolge untereinander bleibt erhalten.
+ * - "forward"/"backward": jedes gewählte Element rückt einzeln um eine
+ *   Position Richtung Ende/Anfang vor. Bei "forward" von hinten nach vorn
+ *   iteriert (sonst würde ein vorderes Element ein gerade verschobenes
+ *   sofort wieder überholen); bei "backward" entsprechend von vorn nach
+ *   hinten. Über die Array-Grenzen hinaus passiert nichts (kein Wrap).
+ */
+function reorderDrawings2D(
+  drawings: Drawing2D[],
+  ids: string[],
+  op: "front" | "back" | "forward" | "backward",
+): Drawing2D[] {
+  const selected = new Set(ids.filter((id) => drawings.some((d) => d.id === id)));
+  if (selected.size === 0) return drawings;
+
+  if (op === "front" || op === "back") {
+    const picked = drawings.filter((d) => selected.has(d.id));
+    const rest = drawings.filter((d) => !selected.has(d.id));
+    return op === "front" ? [...rest, ...picked] : [...picked, ...rest];
+  }
+
+  // "forward" / "backward": jedes gewählte Element um genau eine Position
+  // tauschen — Iterationsrichtung verhindert, dass mehrfach-selektierte
+  // Nachbarn sich gegenseitig überholen.
+  const arr = drawings.slice();
+  if (op === "forward") {
+    for (let i = arr.length - 2; i >= 0; i--) {
+      if (selected.has(arr[i].id) && !selected.has(arr[i + 1].id)) {
+        [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
+      }
+    }
+  } else {
+    for (let i = 1; i < arr.length; i++) {
+      if (selected.has(arr[i].id) && !selected.has(arr[i - 1].id)) {
+        [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]];
+      }
+    }
+  }
+  return arr;
 }
 
 function mapCeiling(

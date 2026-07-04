@@ -1820,6 +1820,7 @@ export default function App() {
   const setElementForeground = useStore((s) => s.setElementForeground);
   const setElementBackground = useStore((s) => s.setElementBackground);
   const updateDrawing2D = useStore((s) => s.updateDrawing2D);
+  const reorderDrawings = useStore((s) => s.reorderDrawings);
   const resizeElement = useStore((s) => s.resizeElement);
   const updateWall = useStore((s) => s.updateWall);
   const setWallThickness = useStore((s) => s.setWallThickness);
@@ -3475,6 +3476,11 @@ export default function App() {
             union: () => applyBoolean(unionDrawings),
             difference: () => applyBoolean(differenceDrawings),
             intersect: () => applyBoolean(intersectionDrawings),
+            drawingSelectionCount: selectedDrawingIds.length,
+            bringToFront: () => reorderDrawings(selectedDrawingIds, "front"),
+            bringForward: () => reorderDrawings(selectedDrawingIds, "forward"),
+            sendBackward: () => reorderDrawings(selectedDrawingIds, "backward"),
+            sendToBack: () => reorderDrawings(selectedDrawingIds, "back"),
           })}
           onClose={() => setMenu(null)}
         />
@@ -3734,6 +3740,12 @@ interface MenuActions {
   union: () => void;
   difference: () => void;
   intersect: () => void;
+  /** Anzahl aktuell selektierter 2D-Zeichnungselemente (z-Anordnen-Menü). */
+  drawingSelectionCount: number;
+  bringToFront: () => void;
+  bringForward: () => void;
+  sendBackward: () => void;
+  sendToBack: () => void;
 }
 
 /**
@@ -3887,6 +3899,42 @@ function planMenuItems(
     },
   ];
 
+  // Z-Anordnen (nach vorn/hinten holen) — wirkt auf die aktuelle 2D-Auswahl,
+  // sortiert `drawings2d` um (Array-Reihenfolge = Zeichenreihenfolge). Aktiv
+  // ab 1 selektiertem Element; sonst deaktiviert mit erklärendem Tooltip.
+  const arrangeEnabled = a.drawingSelectionCount >= 1;
+  const arrangeTitle = arrangeEnabled ? undefined : t("ctx.arrange.disabled");
+  const arrangeItems: ContextMenuItem[] = [
+    {
+      label: t("ctx.arrange.front"),
+      icon: <MenuIcon name="flip_to_front" />,
+      disabled: !arrangeEnabled,
+      title: arrangeTitle,
+      onClick: a.bringToFront,
+    },
+    {
+      label: t("ctx.arrange.forward"),
+      icon: <MenuIcon name="arrow_upward" />,
+      disabled: !arrangeEnabled,
+      title: arrangeTitle,
+      onClick: a.bringForward,
+    },
+    {
+      label: t("ctx.arrange.backward"),
+      icon: <MenuIcon name="arrow_downward" />,
+      disabled: !arrangeEnabled,
+      title: arrangeTitle,
+      onClick: a.sendBackward,
+    },
+    {
+      label: t("ctx.arrange.back"),
+      icon: <MenuIcon name="flip_to_back" />,
+      disabled: !arrangeEnabled,
+      title: arrangeTitle,
+      onClick: a.sendToBack,
+    },
+  ];
+
   if (wallId) {
     return [
       {
@@ -3902,6 +3950,8 @@ function planMenuItems(
       { divider: true },
       ...booleanItems,
       { divider: true },
+      ...arrangeItems,
+      { divider: true },
       {
         label: t("ctx.fit"),
         icon: <MenuIcon name="fit_screen" />,
@@ -3911,6 +3961,8 @@ function planMenuItems(
   }
   return [
     ...booleanItems,
+    { divider: true },
+    ...arrangeItems,
     { divider: true },
     {
       label: t("ctx.fit"),
