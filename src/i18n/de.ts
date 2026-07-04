@@ -403,6 +403,7 @@ export const de = {
   "editor.name": "Name",
   "editor.color": "Farbe",
   "editor.lineWeight": "Linienstärke",
+  "editor.hatch": "Schraffur",
   "editor.floorHeight": "Geschosshöhe",
   "editor.cutHeight": "Schnitthöhe",
   "editor.unit.mm": "mm",

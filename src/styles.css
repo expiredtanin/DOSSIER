@@ -3298,6 +3298,37 @@ body {
   border-color: rgba(255, 255, 255, 0.4);
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.14);
 }
+/* Auswahlfelder (z. B. Schraffur) wie die Text-/Zahlenfelder gestaltet. */
+.editor-control select {
+  width: 100%;
+  padding: 5px 8px;
+  background: #1f1f1f;
+  border: 1px solid var(--ctx-border);
+  border-radius: 7px;
+  color: var(--ctx-text);
+  font-family: inherit;
+  font-size: 13px;
+}
+.editor-control select:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.14);
+}
+/* Schraffur-Auswahl + kleine Vorschau nebeneinander. */
+.editor-hatch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.editor-hatch select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.editor-hatch svg {
+  flex: 0 0 auto;
+}
 /* Farbwähler als kompakter Swatch. */
 .editor-control input[type="color"] {
   width: 40px;

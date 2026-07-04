@@ -400,6 +400,7 @@ export const en: Record<TranslationKey, string> = {
   "editor.name": "Name",
   "editor.color": "Color",
   "editor.lineWeight": "Line weight",
+  "editor.hatch": "Hatch",
   "editor.floorHeight": "Floor height",
   "editor.cutHeight": "Cut height",
   "editor.unit.mm": "mm",

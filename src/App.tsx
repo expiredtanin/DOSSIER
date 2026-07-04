@@ -64,6 +64,7 @@ import { Viewport3D } from "./viewport/Viewport3D";
 import type { DisplayResolver, ViewportContextInfo } from "./viewport/Viewport3D";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
+import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar } from "./ui/TopBar";
 import { TextEditorDialog } from "./ui/TextEditorDialog";
 import { RoomStampEditor } from "./panels/RoomStampEditor";
@@ -3370,6 +3371,30 @@ export default function App() {
                     }
                   />
                   <span className="editor-unit">{t("editor.unit.mm")}</span>
+                </span>
+              </EditorField>
+              <EditorField label={t("editor.hatch")}>
+                <span className="editor-hatch">
+                  <select
+                    value={cat.hatch ?? ""}
+                    onChange={(e) =>
+                      patchCategory(cat.code, {
+                        hatch: e.target.value || undefined,
+                      })
+                    }
+                  >
+                    <option value="">{t("resources.viewHatch.none")}</option>
+                    {project.hatches.map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.name}
+                      </option>
+                    ))}
+                  </select>
+                  {cat.hatch &&
+                    (() => {
+                      const h = project.hatches.find((ht) => ht.id === cat.hatch);
+                      return h ? <HatchSwatch hatch={h} size={26} /> : null;
+                    })()}
                 </span>
               </EditorField>
             </InlineEditor>
