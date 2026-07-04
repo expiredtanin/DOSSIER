@@ -806,6 +806,7 @@ export const en: Record<TranslationKey, string> = {
   "file.import": "Import DXF/DWG…",
   "file.exportPdf": "Export as PDF…",
   "file.exportDxf": "Export as DXF…",
+  "file.exportSchedule": "Component schedule (CSV)…",
 
   // Settings dialog.
   "topbar.settings": "Settings",

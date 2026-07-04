@@ -131,6 +131,8 @@ export interface TopBarProps {
   onExportPdf: () => void;
   /** Öffnet den DXF-Export-Dialog (nur im Grundriss sinnvoll). */
   onExportDxf: () => void;
+  /** Lädt die Bauteilliste des Projekts als CSV herunter. */
+  onExportSchedule: () => void;
 
   // Darstellungsart — kontextabhängig: Perspektive nutzt `renderMode`,
   // Grundriss nutzt `planColorMode`. Genau einer der beiden ist je View aktiv.
@@ -918,6 +920,7 @@ function AppMenu({
   onImport,
   onExportPdf,
   onExportDxf,
+  onExportSchedule,
   onSaveProject,
   onOpenProject,
   onOpenSettings,
@@ -926,6 +929,7 @@ function AppMenu({
   onImport: () => void;
   onExportPdf: () => void;
   onExportDxf: () => void;
+  onExportSchedule: () => void;
   onSaveProject: () => void;
   onOpenProject: () => void;
   onOpenSettings: () => void;
@@ -939,6 +943,7 @@ function AppMenu({
     { divider: true },
     { label: t("file.exportPdf"), onSelect: onExportPdf, disabled: !exportEnabled },
     { label: t("file.exportDxf"), onSelect: onExportDxf, disabled: !exportEnabled },
+    { label: t("file.exportSchedule"), onSelect: onExportSchedule },
     { divider: true },
     { label: t("topbar.settings"), onSelect: onOpenSettings },
   ];
@@ -975,6 +980,7 @@ export function TopBar({
   onZoom100,
   onExportPdf,
   onExportDxf,
+  onExportSchedule,
   renderMode,
   onRenderMode,
   renderModeEnabled,
@@ -1314,6 +1320,7 @@ export function TopBar({
           onImport={onImport}
           onExportPdf={onExportPdf}
           onExportDxf={onExportDxf}
+          onExportSchedule={onExportSchedule}
           onSaveProject={onSaveProject}
           onOpenProject={onOpenProject}
           onOpenSettings={onOpenSettings}

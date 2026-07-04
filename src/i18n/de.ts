@@ -815,6 +815,7 @@ export const de = {
   "file.import": "DXF/DWG importieren…",
   "file.exportPdf": "Als PDF exportieren…",
   "file.exportDxf": "Als DXF exportieren…",
+  "file.exportSchedule": "Bauteilliste (CSV)…",
 
   // ── Einstellungs-Fenster ──────────────────────────────────────────────────
   "topbar.settings": "Einstellungen",

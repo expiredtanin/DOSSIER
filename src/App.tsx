@@ -54,6 +54,7 @@ import { savePlanPdf } from "./export/exportPdf";
 import { ExportDxfDialog } from "./ui/ExportDxfDialog";
 import type { ExportDxfDecision } from "./ui/ExportDxfDialog";
 import { savePlanDxf } from "./export/exportDxf";
+import { exportScheduleCsv } from "./export/exportSchedule";
 import { SettingsDialog } from "./ui/SettingsDialog";
 import { PlanView } from "./plan/PlanView";
 import type {
@@ -2048,6 +2049,22 @@ export default function App() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+  // Bauteilliste (Bauteil-Schedule) als CSV herunterladen — gleiche
+  // Blob+Anchor-Download-Technik wie onSaveProject/savePlanDxf. Der CSV-Inhalt
+  // kommt aus dem reinen Kern (export/exportScheduleCsv); BOM voranstellen,
+  // damit Excel UTF-8 (Umlaute/„m²") korrekt liest (wie der Raum-CSV).
+  const onExportSchedule = () => {
+    const csv = exportScheduleCsv(project);
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bauteilliste.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
   const onOpenProject = () => projectFileInputRef.current?.click();
   const onProjectFileChosen = (file: File) => {
     const r = new FileReader();
@@ -3073,6 +3090,7 @@ export default function App() {
         onZoom100={zoomToApplied}
         onExportPdf={() => setExportOpen(true)}
         onExportDxf={() => setExportDxfOpen(true)}
+        onExportSchedule={onExportSchedule}
         renderMode={renderMode}
         onRenderMode={setRenderMode}
         renderModeEnabled={viewType === "perspektive"}
