@@ -54,7 +54,7 @@ pub use types::{
 #[cfg(test)]
 mod tests {
     use super::mesh::{build_walls_mesh, extrude_wall, INDICES_PER_BOX, VERTS_PER_BOX};
-    use super::types::{Mesh, Opening, WallInput, WallLayer, FLOATS_PER_VERTEX};
+    use super::types::{Hole, Mesh, Opening, WallInput, WallLayer, FLOATS_PER_VERTEX};
 
     /// Bequemer Bau einer achsparallelen Wand entlang +X.
     fn wall_x(len: f32, thickness: f32, height: f32) -> WallInput {
@@ -67,6 +67,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         }
     }
 
@@ -104,6 +105,7 @@ mod tests {
                 color: [0.8, 0.8, 0.8],
                 openings: vec![],
                 layers: None,
+                holes: vec![],
             },
         ]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX);
@@ -182,6 +184,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         };
         let mut mesh = Mesh::default();
         extrude_wall(&mut mesh, &w);
@@ -203,6 +206,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         };
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), 0);
@@ -306,6 +310,97 @@ mod tests {
         assert_eq!(mesh.indices.len(), INDICES_PER_BOX);
     }
 
+    // --- Echte Loecher in EINEM Wandkoerper (WallInput::holes) -----------------
+
+    #[test]
+    fn zwei_versetzte_ueberlappende_loecher_in_einem_koerper() {
+        // KERNFALL: EINE Wand (Laenge 4, Hoehe 2.5) mit ZWEI Loechern, deren
+        // Achsen-Intervalle sich UEBERLAPPEN, aber auf UNTERSCHIEDLICHER Hoehe
+        // liegen — Fenster A u=[1.0,2.0] z=[0.9,2.1], Fenster B u=[1.5,2.5]
+        // z=[0.3,0.7]. Das kann die Segment-Zerlegung nicht abbilden; als Loecher
+        // in EINEM Koerper muss es sauber zerfallen (keine Geometrie in den
+        // Loechern, Aussenmasse erhalten, beide Laibungen vollstaendig).
+        let mut w = wall_x(4.0, 0.2, 2.5);
+        w.holes = vec![
+            Hole { from: 1.0, to: 2.0, z_bottom: 0.9, z_top: 2.1 },
+            Hole { from: 1.5, to: 2.5, z_bottom: 0.3, z_top: 0.7 },
+        ];
+        let mesh = build_walls_mesh(&[w]);
+
+        // Mehr als ein Vollkoerper (Loecher fuegen Teilrechtecke + Laibungen hinzu).
+        assert!(mesh.vertex_count() > VERTS_PER_BOX);
+        // Index-Integritaet.
+        let max_idx = *mesh.indices.iter().max().unwrap();
+        assert!((max_idx as usize) < mesh.vertex_count());
+
+        // Aussenmasse unveraendert (die soliden Teilrechtecke decken den Rand ab).
+        let (min, max) = mesh.bounds();
+        assert!((min[0]).abs() < 1e-5 && (max[0] - 4.0).abs() < 1e-5, "u 0..4");
+        assert!((min[1]).abs() < 1e-5 && (max[1] - 2.5).abs() < 1e-5, "z 0..2.5");
+        assert!((min[2] + 0.1).abs() < 1e-5 && (max[2] - 0.1).abs() < 1e-5, "Dicke +/-0.1");
+
+        // KEIN Vertex liegt (mit Sicherheitsabstand) im Inneren eines der Loecher.
+        let holes = [(1.0f32, 2.0f32, 0.9f32, 2.1f32), (1.5, 2.5, 0.3, 0.7)];
+        let m = 0.05;
+        let n = mesh.vertex_count();
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            for (a0, a1, zb, zt) in holes {
+                let inside =
+                    p[0] > a0 + m && p[0] < a1 - m && p[1] > zb + m && p[1] < zt - m;
+                assert!(!inside, "Vertex {i} bei {p:?} liegt im Loch [{a0},{a1}]x[{zb},{zt}]");
+            }
+        }
+
+        // Beide Loecher besitzen ihre vier inneren Laibungen: fuer jede Loch-Kante
+        // muss mindestens ein Vertex GENAU auf der Kante (in u bzw. z) UND im
+        // jeweils anderen Loch-Intervall liegen (die Laibungsflaeche).
+        let has_vert = |pred: &dyn Fn([f32; 3]) -> bool| (0..n).any(|i| pred(vert(&mesh, i).0));
+        for (a0, a1, zb, zt) in holes {
+            // linke/rechte Laibung: Vertex bei u==a0 bzw. u==a1, z im Loch.
+            assert!(
+                has_vert(&|p| (p[0] - a0).abs() < 1e-4 && p[1] > zb - 1e-4 && p[1] < zt + 1e-4),
+                "linke Laibung fehlt fuer Loch [{a0},{a1}]"
+            );
+            assert!(
+                has_vert(&|p| (p[0] - a1).abs() < 1e-4 && p[1] > zb - 1e-4 && p[1] < zt + 1e-4),
+                "rechte Laibung fehlt fuer Loch [{a0},{a1}]"
+            );
+            // untere/obere Laibung: Vertex bei z==zb bzw. z==zt, u im Loch.
+            assert!(
+                has_vert(&|p| (p[1] - zb).abs() < 1e-4 && p[0] > a0 - 1e-4 && p[0] < a1 + 1e-4),
+                "untere Laibung fehlt fuer Loch [{a0},{a1}]"
+            );
+            assert!(
+                has_vert(&|p| (p[1] - zt).abs() < 1e-4 && p[0] > a0 - 1e-4 && p[0] < a1 + 1e-4),
+                "obere Laibung fehlt fuer Loch [{a0},{a1}]"
+            );
+        }
+    }
+
+    #[test]
+    fn tuer_loch_bis_zum_boden_ohne_untere_laibung() {
+        // Tuer-Loch reicht bis zum Boden (z_bottom == base_elevation 0): die
+        // untere Kante liegt am Wandrand -> KEINE untere Laibung, stattdessen eine
+        // Luecke im Boden-Streifen. Unter der Kopfhoehe (z_top 2.1) darf im
+        // Tuerbereich keine Geometrie liegen.
+        let mut w = wall_x(4.0, 0.2, 2.5);
+        w.holes = vec![Hole { from: 1.0, to: 1.8, z_bottom: 0.0, z_top: 2.1 }];
+        let mesh = build_walls_mesh(&[w]);
+        let n = mesh.vertex_count();
+        let m = 0.05;
+        for i in 0..n {
+            let (p, _) = vert(&mesh, i);
+            let in_span = p[0] > 1.0 + m && p[0] < 1.8 - m;
+            if in_span {
+                assert!(
+                    p[1] < m || p[1] > 2.1 - 1e-4,
+                    "Vertex {i} bei {p:?} liegt unter der Tuer-Kopfhoehe im Loch"
+                );
+            }
+        }
+    }
+
     // --- Ecken-Verschneidung (Gehrung) -----------------------------------------
 
     #[test]
@@ -325,6 +420,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         };
         let b = WallInput {
             start: [0.0, 0.0],
@@ -335,6 +431,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         };
         let mesh = build_walls_mesh(&[a, b]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX, "weiterhin zwei Quader");
@@ -394,6 +491,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         };
         let walls = vec![
             mk([0.0, 0.0], [3.0, 0.0]),
@@ -422,6 +520,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         };
         let walls = vec![
             mk([0.0, 0.0], [3.0, 0.0], 0.0),
@@ -510,6 +609,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: layers(),
+            holes: vec![],
         };
         let mut b = a.clone();
         b.end = [0.0, 3.0];

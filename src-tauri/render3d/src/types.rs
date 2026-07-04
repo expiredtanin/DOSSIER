@@ -66,6 +66,46 @@ pub struct WallInput {
     /// Verhalten unveraendert).
     #[serde(default)]
     pub layers: Option<Vec<WallLayer>>,
+    /// Rechteckige LOECHER (Fenster/Tueren) als ECHTE Aussparungen in EINEM
+    /// Wandkoerper (siehe `Hole` + `mesh::extrude_wall*`). Default leer.
+    ///
+    /// Anders als `openings` zerlegt das die Wand NICHT in Pfeiler/Bruestung/
+    /// Sturz-Teilquader, sondern stanzt die Loecher in die beiden Langseiten
+    /// (Rechteck-Gitter-Zerlegung + Laibungsflaechen). So bildet EIN Koerper
+    /// beliebig (auch versetzt uebereinander) angeordnete Oeffnungen ab — das
+    /// kann die Segment-Zerlegung nicht. Genutzt vom 3D-Viewer-Pfad der
+    /// TS-Ableitung (`toWalls3d`, `layeredWalls:true`); der Schnitt-Pfad
+    /// (`layeredWalls:false`) bleibt bei `openings`/Segmentierung.
+    ///
+    /// `holes` und `openings` schliessen sich im TS-Emitter gegenseitig aus; ist
+    /// `holes` gesetzt, ueberspringt `mesh.rs` die Oeffnungs-Segmentierung und
+    /// extrudiert den vollen Achsen-Abschnitt mit Loechern.
+    #[serde(default)]
+    pub holes: Vec<Hole>,
+}
+
+/// Ein rechteckiges Loch (Fenster/Tuer) in EINEM Wandkoerper. Siehe
+/// `WallInput::holes`.
+///
+/// KONVENTION: `from`/`to` sind Achsen-Meter ab `WallInput::start` (0..Wandlaenge,
+/// dieselbe Achse wie `Opening::from`/`to`); `z_bottom`/`z_top` sind ABSOLUTE
+/// Weltmeter (NICHT relativ zu `base_elevation` — anders als `Opening::sill`).
+/// Eine Tuer ist der Sonderfall `z_bottom == base_elevation` (Loch bis zur
+/// Wand-Unterkante). Loecher liegen definitionsgemaess im Wand-INNEREN und
+/// beruehren die gemiterten Enden nicht — die Gehrung (`compute_wall_miters`)
+/// bleibt davon unberuehrt (siehe `mesh`-Moduldoc).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct Hole {
+    /// Start des Loch-Intervalls entlang der Wandachse (Meter ab `start`).
+    pub from: f32,
+    /// Ende des Loch-Intervalls entlang der Wandachse (Meter ab `start`).
+    pub to: f32,
+    /// Absolute Unterkante des Lochs (Weltmeter).
+    #[serde(default, rename = "zBottom")]
+    pub z_bottom: f32,
+    /// Absolute Oberkante des Lochs (Weltmeter).
+    #[serde(default, rename = "zTop")]
+    pub z_top: f32,
 }
 
 /// Eine Wandschicht: Dicke + eigene Albedo-Farbe. Siehe `WallInput::layers`.

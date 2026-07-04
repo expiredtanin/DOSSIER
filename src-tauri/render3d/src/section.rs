@@ -1016,6 +1016,7 @@ mod tests {
                 color,
                 openings: vec![],
                 layers: None,
+                holes: vec![],
             },
             WallInput {
                 start: [0.0, 3.0],
@@ -1026,6 +1027,7 @@ mod tests {
                 color,
                 openings: vec![],
                 layers: None,
+                holes: vec![],
             },
         ];
         let slabs = vec![SlabInput {
@@ -1282,6 +1284,7 @@ mod tests {
                 height: 1.0,
             }],
             layers: None,
+            holes: vec![],
         }
     }
 
@@ -1367,6 +1370,7 @@ mod tests {
             color: [0.8, 0.8, 0.8],
             openings: vec![],
             layers: None,
+            holes: vec![],
         };
         // Blick von y = -2 nach +Y: beide Waende (y=0 bzw. y=1) liegen dahinter.
         let plane = SectionPlane::looking_plus_y(-2.0);

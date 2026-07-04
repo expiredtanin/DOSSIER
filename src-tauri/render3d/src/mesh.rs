@@ -59,7 +59,8 @@ use std::collections::HashMap;
 
 use crate::openings::{split_range_by_voids, MIN_SPAN};
 use crate::types::{
-    Mesh, MeshInput, Opening, Point2, Rgb, SlabInput, WallInput, WallLayer, FLOATS_PER_VERTEX,
+    Hole, Mesh, MeshInput, Opening, Point2, Rgb, SlabInput, WallInput, WallLayer,
+    FLOATS_PER_VERTEX,
 };
 
 /// Ein Quader-Mesh besteht aus 6 Seiten (Boden, Deckel, 4 Waende) zu je 2
@@ -109,7 +110,16 @@ fn extrude_wall_with_miters(mesh: &mut Mesh, wall: &WallInput, miters: WallMiter
 
     let z0 = wall.base_elevation;
     let z1 = wall.base_elevation + wall.height;
-    let segments = wall_solid_segments(length, &wall.openings, z0, z1);
+    // Mit echten Loechern (`holes`) wird die Wand NICHT an Oeffnungen segmentiert,
+    // sondern als EIN voller Achsen-Abschnitt extrudiert; die Loecher stanzt
+    // `extrude_layer_segment_with_holes` in die Langseiten (holes/openings
+    // schliessen sich aus, siehe `types::WallInput::holes`).
+    let has_holes = !wall.holes.is_empty();
+    let segments = if has_holes {
+        vec![(0.0, length, z0, z1)]
+    } else {
+        wall_solid_segments(length, &wall.openings, z0, z1)
+    };
 
     // Schicht-Stapel: ohne `layers` (oder leer) EIN synthetisches Layer aus
     // der Gesamtdicke/-Farbe — bitgenau das bisherige Vollkoerper-Verhalten.
@@ -139,10 +149,20 @@ fn extrude_wall_with_miters(mesh: &mut Mesh, wall: &WallInput, miters: WallMiter
             // Wandende grenzen (innere Laibungs-Teilstuecke bleiben eckig).
             let start_cut = if a0 <= 1e-6 { miters.start } else { None };
             let end_cut = if a1 >= length - 1e-6 { miters.end } else { None };
-            extrude_layer_segment(
-                mesh, wall, n, length, a0, a1, y0, y1, off_a, off_b, start_cut, end_cut,
-                layer.color,
-            );
+            if has_holes {
+                // Voller Achsen-Abschnitt (a0=0, a1=length) mit echten Loechern
+                // in den Langseiten — pro Schicht-Band dieselben Loecher (quer
+                // gestapelt bilden ihre Laibungen die volle Loch-Tiefe).
+                extrude_layer_segment_with_holes(
+                    mesh, wall, n, length, y0, y1, off_a, off_b, start_cut, end_cut, layer.color,
+                    &wall.holes,
+                );
+            } else {
+                extrude_layer_segment(
+                    mesh, wall, n, length, a0, a1, y0, y1, off_a, off_b, start_cut, end_cut,
+                    layer.color,
+                );
+            }
         }
         off_a = off_b;
     }
@@ -282,6 +302,328 @@ fn extrude_layer_segment(
     let start_normal = quad_normal(b3, b0, t3);
     push_quad(mesh, b1, b2, t2, t1, end_normal, color);
     push_quad(mesh, b3, b0, t0, t3, start_normal, color);
+}
+
+/// Haengt ein Quad (vier Ecken als Ring, beliebige Reihenfolge) als zwei
+/// orientierte Dreiecke an — Winding via `push_tri_oriented` an `want_normal`
+/// ausgerichtet (robust gegen die Eck-Reihenfolge, anders als `push_quad`).
+/// Genutzt fuer die Loch-Zerlegung (Langseiten-Teilrechtecke, Deckel-/Boden-
+/// Streifen, Laibungen), wo die Ecken aus Gitter-Koordinaten kommen.
+fn push_quad_oriented(
+    mesh: &mut Mesh,
+    a: [f32; 3],
+    b: [f32; 3],
+    c: [f32; 3],
+    d: [f32; 3],
+    want_normal: [f32; 3],
+    color: Rgb,
+) {
+    push_tri_oriented(mesh, a, b, c, want_normal, color);
+    push_tri_oriented(mesh, a, c, d, want_normal, color);
+}
+
+/// Zerlegt das Rechteck `[u_lo,u_hi] x [z_lo,z_hi]` MINUS der `holes`
+/// (`(u0,u1,z0,z1)`) in achsparallele, paarweise disjunkte Teilrechtecke (die
+/// SOLIDEN Bereiche). Verfahren: Koordinaten-Kompression — alle Loch-Kanten in u
+/// und z bilden ein Gitter; jede Gitterzelle, deren Mittelpunkt in KEINEM Loch
+/// liegt, ist ein solides Teilrechteck. Dadurch koennen sich Loecher in u
+/// ueberlappen und auf unterschiedlicher Hoehe liegen (Kernfall zweier versetzt
+/// uebereinanderliegender Fenster), ohne dass degenerierte oder ueberlappende
+/// Teilrechtecke entstehen.
+fn solid_subrects(
+    u_lo: f32,
+    u_hi: f32,
+    z_lo: f32,
+    z_hi: f32,
+    holes: &[(f32, f32, f32, f32)],
+) -> Vec<(f32, f32, f32, f32)> {
+    let sort_dedup = |mut v: Vec<f32>| -> Vec<f32> {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v.dedup_by(|a, b| (*a - *b).abs() <= MIN_SPAN);
+        v
+    };
+    let mut us = vec![u_lo, u_hi];
+    let mut zs = vec![z_lo, z_hi];
+    for (a0, a1, hb, ht) in holes {
+        us.push(*a0);
+        us.push(*a1);
+        zs.push(*hb);
+        zs.push(*ht);
+    }
+    let us = sort_dedup(us);
+    let zs = sort_dedup(zs);
+    let mut out = Vec::new();
+    for i in 0..us.len().saturating_sub(1) {
+        let (ua, ub) = (us[i], us[i + 1]);
+        if ub - ua <= MIN_SPAN {
+            continue;
+        }
+        for j in 0..zs.len().saturating_sub(1) {
+            let (za, zb) = (zs[j], zs[j + 1]);
+            if zb - za <= MIN_SPAN {
+                continue;
+            }
+            let cu = (ua + ub) * 0.5;
+            let cz = (za + zb) * 0.5;
+            let in_hole = holes
+                .iter()
+                .any(|(a0, a1, hb, ht)| cu > *a0 && cu < *a1 && cz > *hb && cz < *ht);
+            if !in_hole {
+                out.push((ua, ub, za, zb));
+            }
+        }
+    }
+    out
+}
+
+/// Zieht die (ggf. ueberlappenden) `gaps` vom Intervall `[lo,hi]` ab und liefert
+/// die verbleibenden Teilintervalle (sortiert, disjunkt). Fuer die Deckel-/
+/// Boden-/Kappen-Flaechen, in denen ein randstaendiges Loch eine Luecke reisst.
+fn subtract_intervals(lo: f32, hi: f32, gaps: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let mut gs: Vec<(f32, f32)> = gaps
+        .iter()
+        .map(|(a, b)| (a.max(lo), b.min(hi)))
+        .filter(|(a, b)| b - a > MIN_SPAN)
+        .collect();
+    gs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let mut out = Vec::new();
+    let mut cursor = lo;
+    for (a, b) in gs {
+        if a > cursor + MIN_SPAN {
+            out.push((cursor, a));
+        }
+        cursor = cursor.max(b);
+    }
+    if hi > cursor + MIN_SPAN {
+        out.push((cursor, hi));
+    }
+    out
+}
+
+/// Extrudiert EIN Schicht-Band (volle Achse `0..length`, Hoehe `[y0,y1]`,
+/// Dicken-Versatz `[off_a,off_b]`) mit ECHTEN rechteckigen LOECHERN (`holes`,
+/// siehe `types::Hole`) statt der Oeffnungs-Segmentierung. Aufbau:
+///  • Langseiten (+n bei `off_a`, −n bei `off_b`): das Flaechen-Rechteck MINUS
+///    der Loecher, per `solid_subrects` in Teilrechtecke zerlegt (je 2 Dreiecke).
+///  • Deckel (`y1`) / Boden (`y0`): voller Streifen minus der u-Intervalle der
+///    Loecher, die die jeweilige Kante beruehren (z. B. eine Tuer am Boden).
+///  • End-Kappen (`a=0`/`a=length`, gemitert): volle Hoehe minus der z-Intervalle
+///    randstaendiger Loecher (Loecher liegen normalerweise im Inneren → volle
+///    Kappe, unveraendert gegenueber der Gehrung).
+///  • Laibungen je Loch: vier Quads (links/rechts/unten/oben) — aber nur fuer die
+///    Seiten, die im Wand-INNEREN liegen (die randstaendige Seite hat stattdessen
+///    die Luecke in Deckel/Boden/Kappe, keine Laibung).
+/// Winding/Normalen konsistent ueber `push_quad_oriented`/`push_tri_oriented`
+/// (Backface-Culling + Beleuchtung korrekt).
+#[allow(clippy::too_many_arguments)]
+fn extrude_layer_segment_with_holes(
+    mesh: &mut Mesh,
+    wall: &WallInput,
+    n: Point2,
+    length: f32,
+    y0: f32,
+    y1: f32,
+    off_a: f32,
+    off_b: f32,
+    start_cut: Option<MiterLine>,
+    end_cut: Option<MiterLine>,
+    color: Rgb,
+    holes: &[Hole],
+) {
+    let ux = wall.end[0] - wall.start[0];
+    let uz = wall.end[1] - wall.start[1];
+    let ul = (ux * ux + uz * uz).sqrt().max(1e-9);
+    let u: Point2 = [ux / ul, uz / ul];
+
+    let off = |p: Point2, s: f32| -> Point2 { [p[0] + n[0] * s, p[1] + n[1] * s] };
+    let clip = |base: Point2, cut: Option<MiterLine>| -> Point2 {
+        match cut {
+            None => base,
+            Some(c) => line_intersect_2(base, u, c.point, c.dir).unwrap_or(base),
+        }
+    };
+    // Plan-Punkt bei Achsen-Position `a`, Dicken-Versatz `offv`; NUR an den echten
+    // Wandenden (a≈0 / a≈length) gegen die Gehrungslinie verschnitten — innere
+    // Loch-Kanten bleiben rechtwinklig (unabhaengig von der Gehrung).
+    let g_at = |a: f32, offv: f32| -> Point2 {
+        let base = off(axis_point(wall, length, a), offv);
+        if a <= 1e-6 {
+            clip(base, start_cut)
+        } else if a >= length - 1e-6 {
+            clip(base, end_cut)
+        } else {
+            base
+        }
+    };
+    let w = |g: Point2, y: f32| -> [f32; 3] { [g[0], y, g[1]] };
+
+    // Loecher auf [0,length] x [y0,y1] klemmen, entartete verwerfen.
+    let mut hs: Vec<(f32, f32, f32, f32)> = Vec::new();
+    for h in holes {
+        let a0 = h.from.max(0.0);
+        let a1 = h.to.min(length);
+        let zb = h.z_bottom.max(y0);
+        let zt = h.z_top.min(y1);
+        if a1 - a0 > MIN_SPAN && zt - zb > MIN_SPAN {
+            hs.push((a0, a1, zb, zt));
+        }
+    }
+
+    // ── Langseiten (+n / −n): Rechteck-Gitter minus Loecher. ──────────────────
+    let np = [n[0], 0.0, n[1]];
+    let nn = [-n[0], 0.0, -n[1]];
+    for (ua, ub, za, zb) in solid_subrects(0.0, length, y0, y1, &hs) {
+        push_quad_oriented(
+            mesh,
+            w(g_at(ua, off_a), za),
+            w(g_at(ub, off_a), za),
+            w(g_at(ub, off_a), zb),
+            w(g_at(ua, off_a), zb),
+            np,
+            color,
+        );
+        push_quad_oriented(
+            mesh,
+            w(g_at(ua, off_b), za),
+            w(g_at(ub, off_b), za),
+            w(g_at(ub, off_b), zb),
+            w(g_at(ua, off_b), zb),
+            nn,
+            color,
+        );
+    }
+
+    // ── Deckel (y1) und Boden (y0): voller Streifen minus randstaendiger Loecher.
+    let top_gaps: Vec<(f32, f32)> = hs
+        .iter()
+        .filter(|(_, _, _, zt)| *zt >= y1 - MIN_SPAN)
+        .map(|(a0, a1, _, _)| (*a0, *a1))
+        .collect();
+    for (ua, ub) in subtract_intervals(0.0, length, &top_gaps) {
+        push_quad_oriented(
+            mesh,
+            w(g_at(ua, off_a), y1),
+            w(g_at(ub, off_a), y1),
+            w(g_at(ub, off_b), y1),
+            w(g_at(ua, off_b), y1),
+            [0.0, 1.0, 0.0],
+            color,
+        );
+    }
+    let bot_gaps: Vec<(f32, f32)> = hs
+        .iter()
+        .filter(|(_, _, zb, _)| *zb <= y0 + MIN_SPAN)
+        .map(|(a0, a1, _, _)| (*a0, *a1))
+        .collect();
+    for (ua, ub) in subtract_intervals(0.0, length, &bot_gaps) {
+        push_quad_oriented(
+            mesh,
+            w(g_at(ua, off_a), y0),
+            w(g_at(ub, off_a), y0),
+            w(g_at(ub, off_b), y0),
+            w(g_at(ua, off_b), y0),
+            [0.0, -1.0, 0.0],
+            color,
+        );
+    }
+
+    // ── End-Kappen (a=0 / a=length): volle Hoehe minus randstaendiger Loecher. ─
+    // Aussen-Normale je Kappe geometrisch aus den vollen Kappen-Ecken (wie im
+    // rechtwinkligen/gehrten Fall in `extrude_layer_segment`).
+    let start_normal = quad_normal(
+        w(g_at(0.0, off_b), y0),
+        w(g_at(0.0, off_a), y0),
+        w(g_at(0.0, off_b), y1),
+    );
+    let start_gaps: Vec<(f32, f32)> = hs
+        .iter()
+        .filter(|(a0, _, _, _)| *a0 <= MIN_SPAN)
+        .map(|(_, _, zb, zt)| (*zb, *zt))
+        .collect();
+    for (za, zb) in subtract_intervals(y0, y1, &start_gaps) {
+        push_quad_oriented(
+            mesh,
+            w(g_at(0.0, off_b), za),
+            w(g_at(0.0, off_a), za),
+            w(g_at(0.0, off_a), zb),
+            w(g_at(0.0, off_b), zb),
+            start_normal,
+            color,
+        );
+    }
+    let end_normal = quad_normal(
+        w(g_at(length, off_a), y0),
+        w(g_at(length, off_b), y0),
+        w(g_at(length, off_a), y1),
+    );
+    let end_gaps: Vec<(f32, f32)> = hs
+        .iter()
+        .filter(|(_, a1, _, _)| *a1 >= length - MIN_SPAN)
+        .map(|(_, _, zb, zt)| (*zb, *zt))
+        .collect();
+    for (za, zb) in subtract_intervals(y0, y1, &end_gaps) {
+        push_quad_oriented(
+            mesh,
+            w(g_at(length, off_a), za),
+            w(g_at(length, off_b), za),
+            w(g_at(length, off_b), zb),
+            w(g_at(length, off_a), zb),
+            end_normal,
+            color,
+        );
+    }
+
+    // ── Laibungen je Loch: nur die im Wand-Inneren liegenden Seiten. ──────────
+    for &(a0, a1, zb, zt) in &hs {
+        // Linke Laibung (bei a0), Normale +u (in die Oeffnung).
+        if a0 > MIN_SPAN {
+            push_quad_oriented(
+                mesh,
+                w(g_at(a0, off_a), zb),
+                w(g_at(a0, off_b), zb),
+                w(g_at(a0, off_b), zt),
+                w(g_at(a0, off_a), zt),
+                [u[0], 0.0, u[1]],
+                color,
+            );
+        }
+        // Rechte Laibung (bei a1), Normale −u.
+        if a1 < length - MIN_SPAN {
+            push_quad_oriented(
+                mesh,
+                w(g_at(a1, off_a), zb),
+                w(g_at(a1, off_b), zb),
+                w(g_at(a1, off_b), zt),
+                w(g_at(a1, off_a), zt),
+                [-u[0], 0.0, -u[1]],
+                color,
+            );
+        }
+        // Untere Laibung (bei zb = Bruestungsoberkante), Normale +Y.
+        if zb > y0 + MIN_SPAN {
+            push_quad_oriented(
+                mesh,
+                w(g_at(a0, off_a), zb),
+                w(g_at(a1, off_a), zb),
+                w(g_at(a1, off_b), zb),
+                w(g_at(a0, off_b), zb),
+                [0.0, 1.0, 0.0],
+                color,
+            );
+        }
+        // Obere Laibung (bei zt = Sturzunterkante), Normale −Y.
+        if zt < y1 - MIN_SPAN {
+            push_quad_oriented(
+                mesh,
+                w(g_at(a0, off_a), zt),
+                w(g_at(a1, off_a), zt),
+                w(g_at(a1, off_b), zt),
+                w(g_at(a0, off_b), zt),
+                [0.0, -1.0, 0.0],
+                color,
+            );
+        }
+    }
 }
 
 /// Aussen-Normale eines planaren, CCW-von-aussen georderten Quads `(a,b,_,d)`

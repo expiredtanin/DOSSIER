@@ -59,6 +59,24 @@ export interface RLayer {
   color: RRgb;
 }
 
+/**
+ * Ein rechteckiges LOCH (Fenster/Tür) in EINEM Wandkörper — matcht 1:1
+ * render3d::types::Hole. KONVENTION: `from`/`to` sind Achsen-Meter ab
+ * `RWall.start` (0..Achslänge, dieselbe Achse wie die Öffnungs-Intervalle);
+ * `zBottom`/`zTop` sind ABSOLUTE Weltmeter (NICHT relativ zur Wand-UK — anders
+ * als `Opening.sillHeight`). Eine Tür ist der Sonderfall
+ * `zBottom == RWall.baseElevation` (Loch bis zur Wand-UK). render3d stanzt die
+ * Löcher als echte Aussparungen in die beiden Langseiten (Rechteck-Gitter-
+ * Zerlegung + Laibungsflächen), statt die Wand in Pfeiler/Brüstung/Sturz zu
+ * zerlegen.
+ */
+export interface RHole {
+  from: number;
+  to: number;
+  zBottom: number;
+  zTop: number;
+}
+
 export interface RWall {
   start: RVec2;
   end: RVec2;
@@ -79,6 +97,19 @@ export interface RWall {
    * serde verwirft unbekannte Felder).
    */
   wallId: string;
+  /**
+   * Echte rechteckige Löcher (Fenster/Türen) in DIESEM Wandkörper (siehe
+   * {@link RHole}). Nur im 3D-Viewer-Pfad ({@link projectToModel3d} mit
+   * `layeredWalls:true`) gesetzt: dort emittiert {@link emitWall} EINEN RWall pro
+   * Schicht-Band über die volle Achse mit ALLEN Öffnungen als `holes` — statt der
+   * Pfeiler/Brüstung/Sturz-Segment-Boxen. So bildet EIN Körper auch versetzt
+   * übereinanderliegende Fenster ab (das kann die Segment-Zerlegung nicht). Der
+   * Schnitt-Pfad (`layeredWalls:false`) setzt `holes` NICHT und segmentiert
+   * unverändert weiter (Owner-Kompatibilität mit `toSection.ts`, s. u.). Fehlt/
+   * leer ⇒ Vollkörper ohne Aussparung (render3d: `#[serde(default)]`). `holes`
+   * und die Segment-Zerlegung schliessen sich damit gegenseitig aus.
+   */
+  holes?: RHole[];
 }
 
 /** Eine extrudierte Deckenplatte: geschlossener Grundriss-Umriss + Z-Ausdehnung. */
@@ -224,6 +255,13 @@ function resolveWallBands(project: Project, wall: Wall, layered = true): WallBan
  * mit Schicht-`thickness`/`color`. Entartete Stücke (Länge ≤ 0 oder Höhe ≤ 0)
  * werden übersprungen — so überleben Öffnungen dicht an den Wandenden ohne
  * Nullquader.
+ *
+ * Optionale `holes`: echte rechteckige Aussparungen in DIESER Box (siehe
+ * {@link RHole}). Ihre `from`/`to` sind Achsen-Meter ab Wand-Start (dieselbe
+ * Achse wie `from`/`to` dieser Box), `zBottom`/`zTop` absolute Weltmeter — beides
+ * unverändert an render3d durchgereicht (der Querversatz `normalOffset` wirkt nur
+ * senkrecht zur Achse und lässt die Loch-Parametrisierung unberührt). Werden nur
+ * im 3D-Pfad (voller Achsen-Quader) gesetzt.
  */
 function pushSegment(
   out: RWall[],
@@ -236,6 +274,7 @@ function pushSegment(
   normalOffset: number,
   color: RRgb,
   wallId: string,
+  holes?: RHole[],
 ): void {
   if (to - from <= EPS) return;
   if (zTop - zBottom <= EPS) return;
@@ -269,6 +308,7 @@ function pushSegment(
     color,
     layers: [],
     wallId,
+    ...(holes && holes.length > 0 ? { holes } : {}),
   });
 }
 
@@ -422,11 +462,31 @@ function trimWallTopForCeilings(
   return Math.max(zBottom, top);
 }
 
-/** Emittiert die Teilquader EINER Wand (mit oder ohne Öffnungen). */
+/**
+ * Emittiert die Wandkörper EINER Wand (mit oder ohne Öffnungen).
+ *
+ * ZWEI PFADE je `layered`:
+ *  • layered=true (3D-Viewer, Default): EIN Körper pro Schicht-Band über die
+ *    VOLLE Achse mit allen Öffnungen als echte `holes` (render3d stanzt sie in
+ *    die Langseiten). Ermöglicht auch versetzt übereinanderliegende Fenster in
+ *    EINEM Körper (keine Segment-Nähte).
+ *  • layered=false (Schnitt-Pfad, `computeSection`): UNVERÄNDERTE Pfeiler/
+ *    Brüstung/Sturz-Segmentierung (EIN Voll-Band je Segment), damit die
+ *    `ComponentRef.index`-Reihenfolge exakt zu `toSection.ts::wallSegmentOwners`
+ *    passt (Owner-Kompatibilität; toSection.ts bleibt unangetastet). Löcher
+ *    werden hier NICHT emittiert.
+ */
 function emitWall(out: RWall[], project: Project, wall: Wall, layered = true): void {
   const bands = resolveWallBands(project, wall, layered);
   const { zBottom, zTop: rawZTop } = wallVerticalExtent(project, wall);
-  const zTop = trimWallTopForCeilings(project, wall, zBottom, rawZTop);
+  // Decken-Trim (kappt die Wand an der Unterkante einer dominanteren Decke) NUR
+  // im 3D-Viewer-Pfad (layered=true): dort vermeidet das Kappen das Z-Fighting
+  // Wand/Decke am bündigen Anschluss. Der Schnitt-Pfad (layered=false) will die
+  // UNGEKAPPTE volle Wandhöhe, weil er seine EIGENE prioritätsbasierte Schicht-
+  // Dominanz (toSection.ts::subtractDominantBands) auf Rohgeometrie anwendet —
+  // ein vorab gekürzter Wandkopf würde dort Schichteinzug/Bodenaufbau am Wand-
+  // Decken-Anschluss verfälschen.
+  const zTop = layered ? trimWallTopForCeilings(project, wall, zBottom, rawZTop) : rawZTop;
   const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
   if (axisLen < 1e-9 || zTop - zBottom <= EPS) return;
 
@@ -461,8 +521,27 @@ function emitWall(out: RWall[], project: Project, wall: Wall, layered = true): v
   }
   cutouts.sort((a, b) => a.from - b.from);
 
-  // Ohne Aussparungen: ein durchgehender Quader je Schicht (wie bisher, aber
-  // in Lagen aufgeteilt).
+  // ── 3D-Viewer-Pfad (layered=true): EIN Körper je Schicht-Band über die volle
+  // Achse mit allen Öffnungen als echte Löcher. Die Segment-Zerlegung entfällt
+  // komplett — render3d stanzt die Löcher (Rechteck-Gitter + Laibungen). Türen
+  // sind Löcher bis zur Wand-UK (`oBottom == zBottom`), Fenster ab Brüstung. So
+  // bildet EIN Körper auch versetzt übereinanderliegende Fenster ab.
+  if (layered) {
+    const holes: RHole[] = cutouts.map((c) => ({
+      from: c.from,
+      to: c.to,
+      zBottom: c.oBottom,
+      zTop: c.oTop,
+    }));
+    for (const b of bands) {
+      pushSegment(out, wall, 0, axisLen, zBottom, zTop, b.thickness, b.offset, b.color, wall.id, holes);
+    }
+    return;
+  }
+
+  // ── Schnitt-Pfad (layered=false): unveränderte Pfeiler/Brüstung/Sturz-
+  // Segmentierung (Owner-Kompatibilität mit toSection.ts::wallSegmentOwners).
+  // Ohne Aussparungen: ein durchgehender Quader je Schicht.
   if (cutouts.length === 0) {
     emitSeg(0, axisLen, zBottom, zTop);
     return;

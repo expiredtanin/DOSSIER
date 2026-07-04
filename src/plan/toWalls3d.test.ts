@@ -63,12 +63,96 @@ describe("selectionHighlightLines", () => {
     expect(two.length).toBe(one.length * 2);
   });
 
-  it("eine Wand MIT Öffnungen -> mehrere Teilquader (mehr als 12 Kanten)", () => {
-    // W1 trägt Tür D1 + Fenster O1 -> Pfeiler/Brüstung/Sturz-Segmente, also
-    // ein Vielfaches von 12 Kanten (mehr als ein einzelner Quader).
-    const lines = selectionHighlightLines(sampleProject, ["W1"], [], RGB);
-    expect(lines.length).toBeGreaterThan(12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
-    expect(lines.length % (12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX)).toBe(0);
+  it("eine Wand MIT Öffnungen -> EIN Körper je Schicht-Band mit Löchern (kein Segment-Vielfaches mehr)", () => {
+    // NEUES Verhalten (3D-Pfad, layered=true): W1 (Tür D1 + Fenster O1) wird
+    // NICHT mehr in Pfeiler/Brüstung/Sturz zerlegt, sondern als EIN Körper pro
+    // Schicht-Band mit echten Löchern emittiert. Das Highlight umrandet daher
+    // genau die Schicht-Bänder (Wandtyp "aw" = 4 Schichten) — exakt so viele
+    // Kanten wie eine öffnungslose Wand desselben Typs (W2), NICHT ein Vielfaches
+    // durch Segmente. (Die Löcher selbst fügen im Highlight keine Kanten hinzu.)
+    const w1 = selectionHighlightLines(sampleProject, ["W1"], [], RGB);
+    const w2 = selectionHighlightLines(sampleProject, ["W2"], [], RGB);
+    expect(w1.length).toBe(4 * 12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
+    expect(w1.length).toBe(w2.length);
+  });
+});
+
+describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:true)", () => {
+  // Wand W1 (EG, Wandtyp "aw" = 4 Schichten) mit ZWEI Fenstern, deren Achsen-
+  // Intervalle sich ÜBERLAPPEN, aber auf UNTERSCHIEDLICHER Höhe liegen:
+  //   Fenster A: u=[1.0,2.0] (position 1.0, width 1.0), z=[0.9,2.1] (sill 0.9, h 1.2)
+  //   Fenster B: u=[1.5,2.5] (position 1.5, width 1.0), z=[0.3,0.7] (sill 0.3, h 0.4)
+  // Die alte Segment-Zerlegung kann diesen versetzt-überlappenden Fall nicht
+  // abbilden; als Löcher in EINEM Körper müssen beide sauber als `holes`
+  // erscheinen. W1: start (0,0)->(5,0), floor "eg" (baseElevation 0).
+  const twoOffsetWindows: Project = {
+    ...sampleProject,
+    doors: [],
+    openings: [
+      {
+        id: "WA",
+        type: "opening",
+        hostWallId: "W1",
+        categoryCode: "21",
+        kind: "window",
+        position: 1.0,
+        width: 1.0,
+        height: 1.2,
+        sillHeight: 0.9,
+      },
+      {
+        id: "WB",
+        type: "opening",
+        hostWallId: "W1",
+        categoryCode: "21",
+        kind: "window",
+        position: 1.5,
+        width: 1.0,
+        height: 0.4,
+        sillHeight: 0.3,
+      },
+    ],
+  };
+
+  it("layered=true: 1 RWall je Schicht-Band mit BEIDEN Fenstern als holes", () => {
+    const w1 = projectToWalls3d(twoOffsetWindows, true).filter((w) => w.wallId === "W1");
+    // Genau ein Körper je Schicht-Band (aw = 4 Schichten), KEINE Segment-Boxen.
+    expect(w1.length).toBe(4);
+    for (const body of w1) {
+      // Jeder Band-Körper trägt BEIDE Löcher (in EINEM Körper).
+      expect(body.holes).toBeDefined();
+      expect(body.holes!.length).toBe(2);
+      const byFrom = [...body.holes!].sort((a, b) => a.from - b.from);
+      // Fenster A: u=[1,2], z=[0.9,2.1].
+      expect(byFrom[0].from).toBeCloseTo(1.0, 6);
+      expect(byFrom[0].to).toBeCloseTo(2.0, 6);
+      expect(byFrom[0].zBottom).toBeCloseTo(0.9, 6);
+      expect(byFrom[0].zTop).toBeCloseTo(2.1, 6);
+      // Fenster B: u=[1.5,2.5], z=[0.3,0.7] — überlappt A in u, liegt tiefer.
+      expect(byFrom[1].from).toBeCloseTo(1.5, 6);
+      expect(byFrom[1].to).toBeCloseTo(2.5, 6);
+      expect(byFrom[1].zBottom).toBeCloseTo(0.3, 6);
+      expect(byFrom[1].zTop).toBeCloseTo(0.7, 6);
+    }
+  });
+
+  it("layered=false (Schnitt-Pfad): unverändert segmentiert, KEINE holes", () => {
+    const w1 = projectToWalls3d(twoOffsetWindows, false).filter((w) => w.wallId === "W1");
+    // Der Schnitt-Pfad zerlegt weiter in Pfeiler/Brüstung/Sturz-Segmente (mehr
+    // Boxen als die 4 Schicht-Bänder des 3D-Pfads) und setzt NIE `holes`.
+    expect(w1.length).toBeGreaterThan(4);
+    for (const seg of w1) expect(seg.holes).toBeUndefined();
+  });
+
+  it("Tür = Loch bis zur Wand-UK (zBottom == baseElevation)", () => {
+    // Eine Tür (D1 auf W1) muss im 3D-Pfad als Loch bis zum Boden erscheinen:
+    // zBottom des Lochs == Wand-UK (0), NICHT ab einer Brüstung.
+    const p: Project = { ...sampleProject, openings: [] };
+    const w1 = projectToWalls3d(p, true).filter((w) => w.wallId === "W1");
+    expect(w1.length).toBe(4);
+    const door = w1[0].holes?.find((h) => h.zBottom < 1e-6);
+    expect(door).toBeDefined();
+    expect(door!.zBottom).toBeCloseTo(0, 6); // Loch bis zur Wand-UK.
   });
 });
 

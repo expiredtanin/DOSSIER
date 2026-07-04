@@ -32,6 +32,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
                 height: 1.0,
             }],
             layers: None,
+            holes: vec![],
         },
         WallInput {
             start: [0.0, 3.0],
@@ -42,6 +43,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
             color,
             openings: vec![],
             layers: None,
+            holes: vec![],
         },
         // "Spaeh"-Wand: kurzer Stummel HINTER Schenkel A (groesseres Modell-X,
         // also groessere Tiefe von der Betrachter-Ebene aus), genau im
@@ -57,6 +59,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
             color,
             openings: vec![],
             layers: None,
+            holes: vec![],
         },
     ];
     let slabs = vec![SlabInput {
