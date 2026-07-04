@@ -3012,13 +3012,24 @@ function renderPrimitive(
       });
       const extra: SvgLine[] = p.extraLines.map((line) => ({
         align: line.align,
+        lineHeight: lineGap,
         tspans: [{ text: line.text, fontSize: baseFs * 0.8, fill: p.color }],
       }));
       const lines = [...docLines, ...extra];
       if (lines.length === 0) return null;
-      // Block vertikal um den Anker zentrieren.
-      const totalH = baseFs + (lines.length - 1) * lineGap;
+      // Block vertikal um den Anker zentrieren. Absätze können eine eigene
+      // Zeilenhöhe tragen (Text-Gruppe, Zeilenhöhe-Regler) — darum kumulierte
+      // Vorschübe statt eines einzigen festen lineGap.
+      const totalH = baseFs + lines.slice(1).reduce((sum, l) => sum + l.lineHeight, 0);
       const startY = c.y - totalH / 2 + baseFs * 0.8;
+      const lineYs: number[] = [];
+      {
+        let y = startY;
+        lines.forEach((line, k) => {
+          if (k > 0) y += line.lineHeight;
+          lineYs.push(y);
+        });
+      }
       return (
         <text style={{ pointerEvents: "none", userSelect: "none" }}>
           {lines.map((line, k) => {
@@ -3032,7 +3043,7 @@ function renderPrimitive(
               <tspan
                 key={k}
                 x={c.x}
-                y={startY + k * lineGap}
+                y={lineYs[k]}
                 textAnchor={anchor}
               >
                 {line.tspans.map((ts, j) => (

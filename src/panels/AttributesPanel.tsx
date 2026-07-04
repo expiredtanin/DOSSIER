@@ -199,10 +199,24 @@ export function AttributesPanel() {
           </>,
         )}
 
-        {/* Linienstil — read-only/informativ (kein Setter im Kontrakt). */}
+        {/* Linienstil — nur Drawing2D trägt ihn (Wand/Decke/etc. read-only). */}
         <span className="attr-key">{t("attr.lineStyle")}</span>
-        <span className="attr-val attr-readonly">
-          {lineStyle ? lineStyle.name : "—"}
+        <span className="attr-val">
+          {isDrawing ? (
+            <Dropdown
+              value={drawing?.lineStyleId ?? "__none__"}
+              onChange={(v) =>
+                host.onSetSelectionLineStyle(v === "__none__" ? undefined : v)
+              }
+              width={120}
+              options={[
+                { value: "__none__", label: t("attr.lineStyle.none") },
+                ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
+              ]}
+            />
+          ) : (
+            <span className="attr-readonly">{lineStyle ? lineStyle.name : "—"}</span>
+          )}
         </span>
       </div>
 

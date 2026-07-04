@@ -85,10 +85,13 @@ export function docToHtml(doc: RichTextDoc, opts: HtmlOptions = {}): string {
 }
 
 function paragraphToHtml(p: Paragraph, basePt: number, color?: string): string {
-  const align = p.align && p.align !== "left" ? ` style="text-align:${p.align}"` : "";
-  if (p.runs.length === 0) return `<div${align}><br></div>`;
+  const styles: string[] = [];
+  if (p.align && p.align !== "left") styles.push(`text-align:${p.align}`);
+  if (p.lineHeight != null) styles.push(`line-height:${p.lineHeight}`);
+  const style = styles.length ? ` style="${styles.join(";")}"` : "";
+  if (p.runs.length === 0) return `<div${style}><br></div>`;
   const inner = p.runs.map((r) => runToHtmlSpan(r, basePt, color)).join("");
-  return `<div${align}>${inner}</div>`;
+  return `<div${style}>${inner}</div>`;
 }
 
 function runToHtmlSpan(run: TextRun, basePt: number, color?: string): string {
@@ -119,6 +122,8 @@ export interface SvgTspan {
 export interface SvgLine {
   tspans: SvgTspan[];
   align: "left" | "center" | "right";
+  /** Zeilenhöhe dieses Absatzes (Vielfaches der Basisgrösse), s. `Paragraph.lineHeight`. */
+  lineHeight: number;
 }
 
 export interface SvgTextOptions {
@@ -126,7 +131,12 @@ export interface SvgTextOptions {
   x: number;
   /** Baseline der ERSTEN Zeile, Y in Benutzereinheiten. */
   y: number;
-  /** Zeilenvorschub (Baseline zu Baseline) in Benutzereinheiten. */
+  /**
+   * Zeilenvorschub (Baseline zu Baseline) in Benutzereinheiten für Zeilen OHNE
+   * eigene `lineHeight` (Rückwärts-Kompatibilität/Fallback). Absätze mit
+   * gesetzter `Paragraph.lineHeight` berechnen ihren Vorschub stattdessen
+   * selbst aus `basePt · unitPerPt · lineHeight`.
+   */
   lineHeight: number;
   /**
    * Umrechnung Schriftgrösse: `sizePt` × `unitPerPt` = Grösse in Benutzereinheiten.
@@ -142,13 +152,15 @@ export interface SvgTextOptions {
 /**
  * Zerlegt das Dokument in Zeilen/Tspans mit bereits in Benutzereinheiten
  * umgerechneten Grössen. Der Aufrufer positioniert die Zeilen selbst (Baseline
- * der Zeile i = `y + i·lineHeight`).
+ * der Zeile i = `y + Σ lineHeight[0..i-1]`, s. `docToSvgText`).
  */
 export function docToLines(doc: RichTextDoc, opts: SvgTextOptions): SvgLine[] {
   const basePt = opts.basePt ?? 12;
   const color = opts.color ?? "#000000";
+  const baseUnit = basePt * opts.unitPerPt;
   return doc.paragraphs.map((p) => ({
     align: p.align ?? "left",
+    lineHeight: p.lineHeight != null ? baseUnit * p.lineHeight : opts.lineHeight,
     tspans: p.runs
       .filter((r) => r.text.length > 0)
       .map((r) => runToTspan(r, basePt, opts.unitPerPt, color)),
@@ -184,7 +196,7 @@ export function docToSvgText(doc: RichTextDoc, opts: SvgTextOptions): string {
   const lines = docToLines(doc, opts);
   const parts: string[] = [];
   lines.forEach((line, i) => {
-    const dy = i === 0 ? 0 : opts.lineHeight;
+    const dy = i === 0 ? 0 : line.lineHeight;
     const anchor = line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
     const runSpans = line.tspans.map((t) => tspanToSvg(t)).join("");
     // Leere Zeile: ein Zero-Width-Space, damit dy dennoch wirkt.

@@ -486,36 +486,47 @@ body {
   gap: 6px;
 }
 /* „+ Text"-Knopf: Pille mit Icon + Label. */
-.tb-addtext {
+/* Zeilenhöhe-Regler (ersetzt den früheren „+ Text"-Knopf — Text wird ein
+   eigenständiges Zeichenwerkzeug, AUDIT B1). Gleiche dunkle Pillen-Optik wie
+   die übrigen Oberleisten-Controls (.tb-dd-trigger/.tb-seg). */
+.tb-lineheight {
+  display: inline-flex;
+  align-items: stretch;
+  height: 24px;
+  width: 80px;
+  box-sizing: border-box;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #2c2c2c;
+  flex: 0 0 auto;
+}
+.tb-lineheight-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  width: 80px;
-  height: 24px;
-  box-sizing: border-box;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--input);
-  color: var(--ink-2);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  border: none;
+  background: transparent;
+  color: #b0b0b0;
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
-.tb-addtext:hover:not(:disabled) {
-  background: var(--accent-dim);
-  border-color: var(--accent-border);
-  color: var(--accent);
+.tb-lineheight-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f0f0f0;
 }
-.tb-addtext:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.tb-addtext-label {
+.tb-lineheight-value {
   flex: 1 1 auto;
-  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #e8e8e8;
+  border-left: 1px solid #4a4a4a;
+  border-right: 1px solid #4a4a4a;
 }
 
 /* Marken-Gruppe: Wortmarke + kleiner Icon-Stapel daneben (Settings/Ressourcen),

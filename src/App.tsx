@@ -2156,6 +2156,11 @@ export default function App() {
         else if (selection?.kind === "drawing2d")
           setElementFill(selection.id, hatchId);
       },
+      onSetSelectionLineStyle: (lineStyleId) => {
+        // Nur Drawing2D trägt einen Linienstil (Wand/Decke/etc. nicht).
+        if (selection?.kind === "drawing2d")
+          updateDrawing2D(selection.id, { lineStyleId });
+      },
       onSetSelectionFillColor: (color) => {
         // Vollton-Füllfarbe nur bei Drawing2D (geschlossene Formen).
         if (selection?.kind === "drawing2d")
@@ -3061,7 +3066,6 @@ export default function App() {
           />
         }
         textTarget={textTarget}
-        onAddText={null}
       />
 
       <div className="body">

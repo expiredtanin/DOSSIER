@@ -153,6 +153,11 @@ export interface PanelHostValue {
    */
   onSetSelectionFill: (hatchId: string | null) => void;
   /**
+   * Setzt/entfernt den Linienstil-Override — wirkt NUR auf Drawing2D (sonst
+   * No-op). `undefined` löscht den Wert (fällt zurück auf den Default-Stil).
+   */
+  onSetSelectionLineStyle: (lineStyleId: string | undefined) => void;
+  /**
    * Setzt/entfernt die Vollton-Füllfarbe — wirkt NUR auf Drawing2D (sonst No-op).
    * `null` entfernt die Füllfarbe (Fläche wieder transparent).
    */

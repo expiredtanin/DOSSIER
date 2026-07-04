@@ -19,6 +19,7 @@ import {
   applyMark,
   applyPreset,
   commonMarkValue,
+  DEFAULT_LINE_HEIGHT,
   DEFAULT_PRESETS,
   docLength,
   isMarkActive,
@@ -172,11 +173,6 @@ export interface TopBarProps {
    * Setter. Ist `range` `null`, wirken Aktionen auf das GANZE Doc.
    */
   textTarget: TextTarget | null;
-  /**
-   * Startet das Text-Werkzeug (neues Textobjekt platzieren). `null`, solange das
-   * Werkzeug noch nicht existiert → der „+ Text"-Knopf ist dann deaktiviert.
-   */
-  onAddText: (() => void) | null;
 }
 
 /**
@@ -556,16 +552,15 @@ const TEXT_SIZES: number[] = [8, 9, 10, 11, 12, 14, 18, 24, 36, 48];
  */
 function TextGroup({
   textTarget,
-  onAddText,
 }: {
   textTarget: TextTarget | null;
-  onAddText: (() => void) | null;
 }) {
   // Defaults für neuen Text, solange nichts Text-artiges selektiert ist. Bei
   // aktivem Ziel spiegeln die Controls die gemeinsamen Werte des Ziels wider.
   const [defFont, setDefFont] = useState<string>("Inter");
   const [defSize, setDefSize] = useState<number>(12);
   const [defAlign, setDefAlign] = useState<Align>("left");
+  const [defLineHeight, setDefLineHeight] = useState<number>(DEFAULT_LINE_HEIGHT);
   const [defBold, setDefBold] = useState(false);
   const [defItalic, setDefItalic] = useState(false);
   const [defUnderline, setDefUnderline] = useState(false);
@@ -593,6 +588,10 @@ function TextGroup({
   const curAlign: Align = textTarget
     ? commonAlign(textTarget.doc, rng) ?? "left"
     : defAlign;
+  // Zeilenhöhe: gemeinsamer Wert der berührten Absätze, sonst Default.
+  const curLineHeight: number = textTarget
+    ? commonLineHeight(textTarget.doc, rng) ?? DEFAULT_LINE_HEIGHT
+    : defLineHeight;
 
   // ── Aktions-Helfer (wirken auf das Ziel oder setzen Defaults) ──────────────
   const toggle = (mark: BoolMark, setDefault: (v: boolean) => void, cur: boolean) => {
@@ -628,6 +627,15 @@ function TextGroup({
       textTarget.apply(applyAlign(textTarget.doc, textTarget.range, align));
     } else {
       setDefAlign(align);
+    }
+  };
+
+  const setLineHeightValue = (lh: number) => {
+    const clamped = Math.round(Math.min(3, Math.max(0.8, lh)) * 10) / 10;
+    if (textTarget) {
+      textTarget.apply(applyLineHeight(textTarget.doc, textTarget.range, clamped));
+    } else {
+      setDefLineHeight(clamped);
     }
   };
 
@@ -773,19 +781,36 @@ function TextGroup({
             },
           ]}
         />
-        <button
-          type="button"
-          className="tb-addtext"
-          disabled={onAddText == null}
-          onClick={() => onAddText?.()}
-          title={onAddText ? t("text.add") : t("text.add.hint")}
-          aria-label={t("text.add")}
+        <div
+          className="tb-lineheight"
+          role="group"
+          aria-label={t("text.lineHeight")}
+          title={t("text.lineHeight.hint")}
         >
-          <span className="material-symbols-outlined tb-ico" aria-hidden="true">
-            add
-          </span>
-          <span className="tb-addtext-label">{t("text.add")}</span>
-        </button>
+          <button
+            type="button"
+            className="tb-lineheight-btn"
+            onClick={() => setLineHeightValue(curLineHeight - 0.1)}
+            title={t("text.lineHeight.decrease")}
+            aria-label={t("text.lineHeight.decrease")}
+          >
+            <span className="material-symbols-outlined tb-ico" aria-hidden="true">
+              remove
+            </span>
+          </button>
+          <span className="tb-lineheight-value">{curLineHeight.toFixed(1)}×</span>
+          <button
+            type="button"
+            className="tb-lineheight-btn"
+            onClick={() => setLineHeightValue(curLineHeight + 0.1)}
+            title={t("text.lineHeight.increase")}
+            aria-label={t("text.lineHeight.increase")}
+          >
+            <span className="material-symbols-outlined tb-ico" aria-hidden="true">
+              add
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -824,6 +849,42 @@ function applyAlign(doc: RichTextDoc, range: TextRange | null, align: Align): Ri
     version: 1,
     paragraphs: doc.paragraphs.map((p, i) =>
       all || touched.has(i) ? { ...p, align } : p,
+    ),
+  };
+}
+
+/**
+ * Gemeinsame Zeilenhöhe der vom Bereich berührten Absätze (Vielfaches der
+ * Basisgrösse); `undefined` bei uneinheitlicher Auswahl.
+ */
+function commonLineHeight(doc: RichTextDoc, range: TextRange | null): number | undefined {
+  const paras = touchedParagraphs(doc, range);
+  if (paras.length === 0) return doc.paragraphs[0]?.lineHeight ?? DEFAULT_LINE_HEIGHT;
+  let value: number | undefined;
+  let first = true;
+  for (const idx of paras) {
+    const lh = doc.paragraphs[idx]?.lineHeight ?? DEFAULT_LINE_HEIGHT;
+    if (first) {
+      value = lh;
+      first = false;
+    } else if (lh !== value) {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+/**
+ * Setzt die Zeilenhöhe auf alle vom Bereich berührten Absätze. Ohne Bereich
+ * (null) auf ALLE Absätze des Dokuments.
+ */
+function applyLineHeight(doc: RichTextDoc, range: TextRange | null, lineHeight: number): RichTextDoc {
+  const touched = new Set(touchedParagraphs(doc, range));
+  const all = range == null;
+  return {
+    version: 1,
+    paragraphs: doc.paragraphs.map((p, i) =>
+      all || touched.has(i) ? { ...p, lineHeight } : p,
     ),
   };
 }
@@ -928,7 +989,6 @@ export function TopBar({
   onSaveProject,
   onOpenProject,
   textTarget,
-  onAddText,
 }: TopBarProps) {
   // Dezente Scrollleiste: die Oberleiste scrollt horizontal (overflow-x). Statt
   // der prägnanten Standard-Leiste blenden wir eine eigene, sehr ruhige Leiste
@@ -1105,9 +1165,11 @@ export function TopBar({
       <Sep />
 
       {/* Text-Gruppe (immer sichtbar) — Stil/Schrift/Grösse + B/I/U · L/C/R +
-          „+ Text". Formatiert das aktuelle Text-Ziel (Raumstempel) live. Sitzt
-          bewusst zwischen den Ebenen-Kombis und Detailgrad/Massstab. */}
-      <TextGroup textTarget={textTarget} onAddText={onAddText} />
+          Zeilenhöhe. Formatiert das aktuelle Text-Ziel (Raumstempel) live.
+          Sitzt bewusst zwischen den Ebenen-Kombis und Detailgrad/Massstab.
+          „+ Text" ist raus — Text wird ein eigenständiges Zeichenwerkzeug
+          (HANDOVER-Backlog AUDIT B1), kein TopBar-Knopf mehr. */}
+      <TextGroup textTarget={textTarget} />
 
       <Sep />
 

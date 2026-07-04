@@ -44,10 +44,15 @@ export interface TextRun {
 /** Absatz-Ausrichtung. */
 export type Align = "left" | "center" | "right";
 
-/** Ein Absatz: eine Zeile aus Runs plus optionale Ausrichtung. */
+/** Zeilenhöhe als Vielfaches der Basisgrösse, wenn nicht am Absatz gesetzt. */
+export const DEFAULT_LINE_HEIGHT = 1.3;
+
+/** Ein Absatz: eine Zeile aus Runs plus optionale Ausrichtung/Zeilenhöhe. */
 export interface Paragraph {
   runs: TextRun[];
   align?: Align;
+  /** Zeilenhöhe als Vielfaches der Basisgrösse (z. B. 1.3 = 130 %). */
+  lineHeight?: number;
 }
 
 /** Das gesamte Rich-Text-Dokument. */
