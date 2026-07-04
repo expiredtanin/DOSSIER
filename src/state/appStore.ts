@@ -10,6 +10,7 @@ import { createStore } from "./store";
 import type { StoreApi } from "./store";
 import { createProjectSlice } from "./projectSlice";
 import type { ProjectSlice } from "./projectSlice";
+import type { HistorySlice } from "./historySlice";
 import { createSelectionSlice } from "./selectionSlice";
 import type { SelectionSlice } from "./selectionSlice";
 import { createViewSlice } from "./viewSlice";
@@ -21,6 +22,7 @@ import type { SiteSlice } from "./siteSlice";
 
 /** Gesamtzustand: Vereinigung aller Slice-Felder + Actions. */
 export type RootState = ProjectSlice &
+  HistorySlice &
   SelectionSlice &
   ViewSlice &
   LayoutSlice &
@@ -29,8 +31,12 @@ export type RootState = ProjectSlice &
 const store = createStore<RootState>((api) => ({
   // Jede Slice-Factory bekommt die volle RootState-API. Die Slices tippen nur
   // ihren eigenen Ausschnitt; die Cast auf die enge Slice-API ist sicher, weil
-  // `set/get` immer über den Gesamt-RootState laufen.
-  ...createProjectSlice(api as unknown as StoreApi<ProjectSlice & { activeLevelId: string }>),
+  // `set/get` immer über den Gesamt-RootState laufen. ProjectSlice bringt die
+  // History (undo/redo) gleich mit (setProject ist der einzige Durchlauf-
+  // punkt jeder Projekt-Mutation, siehe projectSlice.ts).
+  ...createProjectSlice(
+    api as unknown as StoreApi<ProjectSlice & HistorySlice & { activeLevelId: string }>,
+  ),
   ...createSelectionSlice(api as unknown as StoreApi<SelectionSlice>),
   ...createViewSlice(api as unknown as StoreApi<ViewSlice>),
   ...createLayoutSlice(api as unknown as StoreApi<LayoutSlice>),

@@ -28,6 +28,8 @@ import type { CopyMode, TransformOp, TransformSelection } from "../tools/transfo
 import { centroid as roomCentroid } from "../geometry/roomArea";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
+import { createHistorySlice, pushHistoryPatch } from "./historySlice";
+import type { HistorySlice } from "./historySlice";
 
 /** Felder, die diese Slice in den RootState beisteuert. */
 export interface ProjectSlice {
@@ -265,24 +267,76 @@ export interface ProjectSlice {
 /**
  * Minimaler View-Ausschnitt, den Projekt-Aktionen lesen/schreiben dürfen
  * (Cross-Slice). Der Store komponiert ProjectSlice mit dieser Sicht, sodass
- * `get()`/`set` typsicher auf `activeLevelId` zugreifen können.
+ * `get()`/`set` typsicher auf `activeLevelId` zugreifen können. Die
+ * History-Felder gehören ebenfalls dazu: `setProject` (unten) ist der EINZIGE
+ * Durchlaufpunkt jeder Projekt-Mutation und pusht dort bei jeder ECHTEN
+ * Änderung auf `undoStack`.
  */
 type ProjectSliceDeps = {
   activeLevelId: string;
-};
+} & HistorySlice;
 
 export function createProjectSlice(
   api: StoreApi<ProjectSlice & ProjectSliceDeps>,
-): ProjectSlice {
+): ProjectSlice & HistorySlice {
   const { set, get } = api;
 
-  // Bequemer immutabler Projekt-Updater (wie setProject in App).
-  const setProject: ProjectSlice["setProject"] = (next) =>
-    set((s) => ({
-      project: typeof next === "function" ? (next as (p: Project) => Project)(s.project) : next,
-    }));
+  // Koaleszenz-Buchführung für Drag-Serien (Griff ziehen, Element verschieben,
+  // Kante ziehen, …): diese Aktionen rufen `setProject` bei JEDEM
+  // Maus-Move-Schritt auf (kein separates Draft/Preview + Commit-Muster wie
+  // bei den Zeichenwerkzeugen — dort läuft die Vorschau über lokalen
+  // `draft`-State in App.tsx, und `setProject` wird erst einmal beim Commit
+  // aufgerufen, siehe `applyToolResult`/`onToolCommit` in App.tsx). Ohne
+  // Koaleszenz würde EIN Drag zig Undo-Schritte erzeugen. Ephemer (wie ein
+  // Ref) — kein reaktiver State nötig, wird bei jedem `setProject`-Aufruf neu
+  // bewertet und bei `undo`/`redo` zurückgesetzt (siehe `onAfterJump` unten).
+  let lastCoalesceKey: string | undefined;
+  let lastCoalesceAt = 0;
+  const COALESCE_WINDOW_MS = 400;
+
+  const history = createHistorySlice(
+    api as unknown as StoreApi<HistorySlice & { project: Project }>,
+    () => {
+      // Nach einem Sprung (undo/redo) muss die NÄCHSTE Aktion garantiert
+      // pushen, auch wenn sie zufällig denselben coalesceKey trägt wie die
+      // Serie vor dem Sprung — sonst würde sie mit der alten Serie
+      // verschmolzen und verschwände spurlos (kein Undo-Eintrag).
+      lastCoalesceKey = undefined;
+    },
+  );
+
+  // Bequemer immutabler Projekt-Updater (wie setProject in App). Zweiter,
+  // optionaler Parameter `coalesceKey`: NUR von den paar bekannten
+  // Hochfrequenz-Aktionen (Grip-Drag & Co., s. u.) gesetzt — alle anderen ~50
+  // Aktionen in dieser Datei rufen `setProject(fn)` ohne Key auf und pushen
+  // damit IMMER diskret (kein Koaleszieren zwischen unterschiedlichen
+  // Aktionen möglich, auch nicht bei zufällig identischem Timing in Tests).
+  const setProject = (
+    next: Project | ((p: Project) => Project),
+    coalesceKey?: string,
+  ) =>
+    set((s) => {
+      const nextProject =
+        typeof next === "function" ? (next as (p: Project) => Project)(s.project) : next;
+      // No-Op-Schutz: echte Immutable-Updates liefern bei tatsächlicher
+      // Änderung immer eine NEUE Referenz — bleibt sie gleich, gab es keine
+      // Änderung, also kein History-Eintrag (und `set` selbst benachrichtigt
+      // dann ebenfalls nicht, da der Patch leer ist).
+      if (nextProject === s.project) return {};
+      const now = Date.now();
+      const coalesced =
+        coalesceKey !== undefined &&
+        coalesceKey === lastCoalesceKey &&
+        now - lastCoalesceAt < COALESCE_WINDOW_MS;
+      lastCoalesceKey = coalesceKey;
+      lastCoalesceAt = now;
+      if (coalesced) return { project: nextProject };
+      return { project: nextProject, ...pushHistoryPatch(s.undoStack, s.project) };
+    });
 
   return {
+    ...history,
+
     project: sampleProject,
 
     setProject,
@@ -685,14 +739,26 @@ export function createProjectSlice(
       })),
 
     // ── Editier-Griffe ─────────────────────────────────────────────────────
+    // Diese Aktionen laufen AD-HOC bei jedem Maus-Move-Schritt eines Drags
+    // (kein Draft/Commit-Muster wie bei den Zeichenwerkzeugen) — daher mit
+    // coalesceKey, damit EIN Drag EINEN Undo-Schritt erzeugt statt vieler.
     moveGripOf: (drawingId, wallId, index, pt) =>
-      setProject((p) => moveGrip(p, drawingId, wallId, index, pt)),
+      setProject(
+        (p) => moveGrip(p, drawingId, wallId, index, pt),
+        `moveGripOf:${drawingId ?? ""}:${wallId ?? ""}:${index}`,
+      ),
 
     moveElementByOf: (drawingId, wallId, delta) =>
-      setProject((p) => moveElementBy(p, drawingId, wallId, delta)),
+      setProject(
+        (p) => moveElementBy(p, drawingId, wallId, delta),
+        `moveElementByOf:${drawingId ?? ""}:${wallId ?? ""}`,
+      ),
 
     moveEdgeOf: (drawingId, wallId, aIndex, bIndex, delta) =>
-      setProject((p) => moveEdge(p, drawingId, wallId, aIndex, bIndex, delta)),
+      setProject(
+        (p) => moveEdge(p, drawingId, wallId, aIndex, bIndex, delta),
+        `moveEdgeOf:${drawingId ?? ""}:${wallId ?? ""}:${aIndex}:${bIndex}`,
+      ),
 
     // ── Selektions-Attribute ───────────────────────────────────────────────
     setElementColor: (kind, id, color) =>
@@ -781,25 +847,36 @@ export function createProjectSlice(
       setProject((p) => setWallThickness(p, wallId, thickness)),
 
     // ── Decken-Editieren ──────────────────────────────────────────────────
+    // (coalesceKey: siehe Kommentar bei moveGripOf — auch hier läuft die
+    // Mutation bei jedem Maus-Move-Schritt eines Drags.)
     moveCeilingGrip: (ceilingId, index, pt) =>
-      setProject((p) => mapCeiling(p, ceilingId, (c) => ({
-        ...c,
-        outline: c.outline.map((v, i) => (i === index ? pt : v)),
-      }))),
+      setProject(
+        (p) => mapCeiling(p, ceilingId, (c) => ({
+          ...c,
+          outline: c.outline.map((v, i) => (i === index ? pt : v)),
+        })),
+        `moveCeilingGrip:${ceilingId}:${index}`,
+      ),
 
     moveCeilingBy: (ceilingId, delta) =>
-      setProject((p) => mapCeiling(p, ceilingId, (c) => ({
-        ...c,
-        outline: c.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
-      }))),
+      setProject(
+        (p) => mapCeiling(p, ceilingId, (c) => ({
+          ...c,
+          outline: c.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
+        })),
+        `moveCeilingBy:${ceilingId}`,
+      ),
 
     moveCeilingEdge: (ceilingId, aIndex, bIndex, delta) =>
-      setProject((p) => mapCeiling(p, ceilingId, (c) => ({
-        ...c,
-        outline: c.outline.map((v, i) =>
-          i === aIndex || i === bIndex ? { x: v.x + delta.x, y: v.y + delta.y } : v,
-        ),
-      }))),
+      setProject(
+        (p) => mapCeiling(p, ceilingId, (c) => ({
+          ...c,
+          outline: c.outline.map((v, i) =>
+            i === aIndex || i === bIndex ? { x: v.x + delta.x, y: v.y + delta.y } : v,
+          ),
+        })),
+        `moveCeilingEdge:${ceilingId}:${aIndex}:${bIndex}`,
+      ),
 
     updateCeiling: (id, patch) =>
       setProject((p) => mapCeiling(p, id, (c) => ({ ...c, ...patch }))),
@@ -815,55 +892,65 @@ export function createProjectSlice(
       })),
 
     // ── Treppen-Editieren ──────────────────────────────────────────────────
+    // (coalesceKey: siehe Kommentar bei moveGripOf.)
     moveStairBy: (stairId, delta) =>
-      setProject((p) =>
-        mapStair(p, stairId, (s) => ({
-          ...s,
-          start: { x: s.start.x + delta.x, y: s.start.y + delta.y },
-          ...(s.center
-            ? { center: { x: s.center.x + delta.x, y: s.center.y + delta.y } }
-            : {}),
-        })),
+      setProject(
+        (p) =>
+          mapStair(p, stairId, (s) => ({
+            ...s,
+            start: { x: s.start.x + delta.x, y: s.start.y + delta.y },
+            ...(s.center
+              ? { center: { x: s.center.x + delta.x, y: s.center.y + delta.y } }
+              : {}),
+          })),
+        `moveStairBy:${stairId}`,
       ),
 
     updateStair: (id, patch) =>
       setProject((p) => mapStair(p, id, (s) => ({ ...s, ...patch }))),
 
     // ── Raum-Editieren ──────────────────────────────────────────────────────
+    // (coalesceKey: siehe Kommentar bei moveGripOf.)
     moveRoomBy: (roomId, delta) =>
-      setProject((p) =>
-        mapRoom(p, roomId, (r) => ({
-          ...r,
-          boundary: r.boundary.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
-          ...(r.stampAnchor
-            ? {
-                stampAnchor: {
-                  x: r.stampAnchor.x + delta.x,
-                  y: r.stampAnchor.y + delta.y,
-                },
-              }
-            : {}),
-        })),
+      setProject(
+        (p) =>
+          mapRoom(p, roomId, (r) => ({
+            ...r,
+            boundary: r.boundary.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
+            ...(r.stampAnchor
+              ? {
+                  stampAnchor: {
+                    x: r.stampAnchor.x + delta.x,
+                    y: r.stampAnchor.y + delta.y,
+                  },
+                }
+              : {}),
+          })),
+        `moveRoomBy:${roomId}`,
       ),
 
     moveRoomGrip: (roomId, index, pt) =>
-      setProject((p) =>
-        mapRoom(p, roomId, (r) => ({
-          ...r,
-          boundary: r.boundary.map((v, i) => (i === index ? pt : v)),
-        })),
+      setProject(
+        (p) =>
+          mapRoom(p, roomId, (r) => ({
+            ...r,
+            boundary: r.boundary.map((v, i) => (i === index ? pt : v)),
+          })),
+        `moveRoomGrip:${roomId}:${index}`,
       ),
 
     moveRoomEdge: (roomId, aIndex, bIndex, delta) =>
-      setProject((p) =>
-        mapRoom(p, roomId, (r) => ({
-          ...r,
-          boundary: r.boundary.map((v, i) =>
-            i === aIndex || i === bIndex
-              ? { x: v.x + delta.x, y: v.y + delta.y }
-              : v,
-          ),
-        })),
+      setProject(
+        (p) =>
+          mapRoom(p, roomId, (r) => ({
+            ...r,
+            boundary: r.boundary.map((v, i) =>
+              i === aIndex || i === bIndex
+                ? { x: v.x + delta.x, y: v.y + delta.y }
+                : v,
+            ),
+          })),
+        `moveRoomEdge:${roomId}:${aIndex}:${bIndex}`,
       ),
 
     updateRoom: (id, patch) =>
