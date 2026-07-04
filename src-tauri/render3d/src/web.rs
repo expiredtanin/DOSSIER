@@ -320,9 +320,29 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// Darstellungsart der Oberleiste setzen. Gueltige Werte:
+    ///  - `"shaded"`   — beleuchtete Bauteilfarben (Default).
+    ///  - `"white"`    — Clay-Look: einheitlich helles Material, beleuchtet
+    ///    (identisch zum bisherigen `set_render_mode_white(true)`).
+    ///  - `"textured"` — mangels Textur-Pipeline VORERST identisch zu `"shaded"`
+    ///    behandelt (KEIN Fake-Stub); Platzhalter fuer eine spaetere Textur-Schicht.
+    ///  - `"wireframe"`— nur Modell-Kanten (Feature-Edges), keine Flaechen.
+    ///  - `"hidden"`   — Hidden-Line: flach-weisse Flaechen fuellen den Depth-
+    ///    Buffer, dunkle Kanten liegen tiefengetestet obenauf (nur sichtbare).
+    /// Unbekannte Werte fallen auf `"shaded"` zurueck. Wirkt erst beim naechsten
+    /// `render`. Loest `set_render_mode_white` ab (das bleibt kompatibel).
+    pub fn set_render_style(&mut self, style: &str) -> Result<(), JsValue> {
+        self.renderer
+            .set_render_style(crate::gpu::RenderStyle::from_str_or_shaded(style));
+        Ok(())
+    }
+
     /// Darstellungsart umschalten: `true` = weisses Clay-Material (beleuchtet,
     /// ohne Bauteil-Farben — Vectorworks „white"), `false` = normale Material-
-    /// farbe (shaded, Default). Wirkt erst beim naechsten `render`.
+    /// farbe (shaded, Default). Wirkt erst beim naechsten `render`. RUECKWAERTS-
+    /// KOMPATIBEL — bildet intern auf denselben `render_style`-Zustand ab wie
+    /// `set_render_style` (true→„white", false→„shaded"), sodass es keine zwei
+    /// widersprechenden Zustaende gibt.
     pub fn set_render_mode_white(&mut self, white: bool) {
         self.renderer.set_white_mode(white);
     }

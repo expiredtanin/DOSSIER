@@ -14,6 +14,7 @@
 // Standard-Build (`cargo test`/`cargo build` ohne Features) enthaelt nur die
 // GPU-freien Schichten und ist damit unabhaengig von einer Display-Session.
 
+pub mod edges;
 pub mod grid;
 pub mod math;
 pub mod mesh;

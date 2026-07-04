@@ -12,11 +12,65 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
+use crate::edges::{build_mesh_edges, EDGE_FLOATS_PER_VERTEX};
 use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::math::{view_projection, Mat4};
 use crate::mesh::{build_scene_mesh, build_walls_mesh};
 use crate::shaders::{GRID_WGSL, MESH_WGSL};
 use crate::types::{Camera, Mesh, MeshInput, SlabInput, WallInput, FLOATS_PER_VERTEX};
+
+/// Darstellungsart des 3D-Renderers (Oberleiste: shaded/white/textured/
+/// wireframe/hidden). Bestimmt, welche Pipelines je Frame gezeichnet werden und
+/// welchen `mode.x`-Wert der Mesh-Shader bekommt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderStyle {
+    /// Beleuchtete Bauteilfarben (Default).
+    Shaded,
+    /// Clay-Look: einheitlich helles Material, beleuchtet.
+    White,
+    /// Mangels Textur-Pipeline VORERST identisch zu `Shaded` behandelt (kein Fake).
+    Textured,
+    /// Nur Modell-Kanten (Feature-Edges), keine gefuellten Flaechen.
+    Wireframe,
+    /// Hidden-Line: flach-weisse Flaechen (fuellen den Depth-Buffer) + dunkle
+    /// Kanten obenauf, tiefengetestet -> nur sichtbare Kanten erscheinen.
+    Hidden,
+}
+
+impl RenderStyle {
+    /// Parst den API-String; unbekannte Werte fallen auf `Shaded` zurueck.
+    pub fn from_str_or_shaded(s: &str) -> Self {
+        match s {
+            "white" => RenderStyle::White,
+            "textured" => RenderStyle::Textured,
+            "wireframe" => RenderStyle::Wireframe,
+            "hidden" => RenderStyle::Hidden,
+            _ => RenderStyle::Shaded,
+        }
+    }
+
+    /// `mode.x`-Wert fuer den Mesh-Shader (siehe shaders.rs): 0 = Material/shaded
+    /// (auch textured), 1 = weiss/Clay, 2 = flach-weisse Hidden-Line-Flaechen.
+    fn mesh_mode(self) -> f32 {
+        match self {
+            RenderStyle::White => 1.0,
+            RenderStyle::Hidden => 2.0,
+            // Shaded, Textured, Wireframe (Flaechen werden bei Wireframe eh nicht
+            // gezeichnet) -> Material.
+            _ => 0.0,
+        }
+    }
+
+    /// Werden in diesem Stil gefuellte Flaechen gezeichnet?
+    fn draws_faces(self) -> bool {
+        !matches!(self, RenderStyle::Wireframe)
+    }
+
+    /// Werden in diesem Stil Modell-Kanten gezeichnet?
+    fn draws_edges(self) -> bool {
+        matches!(self, RenderStyle::Wireframe | RenderStyle::Hidden)
+    }
+}
 
 /// Tiefenformat des Z-Puffers (32 Bit Float, ueberall verfuegbar).
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -69,8 +123,10 @@ struct MeshBuffers {
     index_count: u32,
 }
 
-/// GPU-seitiger Vertex-Buffer des Bodengitters (LineList, kein Indexpuffer).
-struct GridBuffers {
+/// GPU-seitiger Vertex-Buffer einer LineList (kein Indexpuffer). Format
+/// [pos vec3, color vec3] — genutzt fuer das Bodengitter UND die Modell-Kanten
+/// (identisches Layout/Shader, siehe grid.rs / edges.rs).
+struct LineBuffers {
     vbo: wgpu::Buffer,
     vertex_count: u32,
 }
@@ -80,19 +136,32 @@ struct GridBuffers {
 /// Ziel-Groesse (neu) angelegt.
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
-    /// Eigene, schlanke Linien-Pipeline (LineList, unlit) fuer das Bodengitter.
+    /// Wie `pipeline`, aber mit positivem Depth-Bias (Flaechen leicht nach hinten
+    /// geschoben). Nur fuer den Hidden-Line-Stil: so gewinnen die danach an ihrer
+    /// wahren Tiefe gezeichneten Kanten den Less-Test und liegen sauber obenauf,
+    /// waehrend verdeckte Kanten weiterhin weggeschnitten werden (kein Z-Fighting).
+    hidden_face_pipeline: wgpu::RenderPipeline,
+    /// Eigene, schlanke Linien-Pipeline (LineList, unlit) fuer das Bodengitter
+    /// UND die Modell-Kanten (wireframe/hidden — identisches Layout/Shader).
     /// Teilt sich das `Globals`-Uniform/Bind-Group (nur View-Projektion) mit der
     /// Mesh-Pipeline und rendert in denselben Pass/Tiefenpuffer.
     grid_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     mesh: Option<MeshBuffers>,
+    /// Modell-Kanten (Feature-Edges, edges.rs) als LineList. Einmalig bei
+    /// `set_model`/`upload_*` erzeugt und gecacht (nicht je Frame). Gezeichnet in
+    /// den Stilen wireframe/hidden.
+    edges: Option<LineBuffers>,
     /// Bodengitter-Vertices (None = nicht erzeugt). Wird nur gezeichnet, wenn
     /// zusaetzlich `grid_visible` gesetzt ist.
-    grid: Option<GridBuffers>,
+    grid: Option<LineBuffers>,
     /// Ob das Bodengitter im naechsten `render` gezeichnet wird. Default false —
     /// bestehende Aufrufer ohne `set_ground_grid` bekommen KEIN Gitter.
     grid_visible: bool,
+    /// Aktuelle Darstellungsart (Default `Shaded`). Einzige Quelle der Wahrheit;
+    /// `set_white_mode` bildet auf `Shaded`/`White` ab.
+    style: RenderStyle,
     depth: Option<DepthTarget>,
     msaa: Option<MsaaTarget>,
     /// Farbformat des Render-Ziels (Surface), fuer die MSAA-Zwischentextur.
@@ -155,47 +224,64 @@ impl Renderer {
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3],
         };
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mesh.pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_main"),
-                buffers: &[vertex_layout],
-                compilation_options: Default::default(),
+        // Mesh-Pipeline-Fabrik: identische Beschreibung fuer die Standard-Flaechen
+        // (kein Bias) und die Hidden-Line-Flaechen (positiver Depth-Bias, damit die
+        // spaeter gezeichneten Kanten obenauf liegen). Nur `bias` unterscheidet sich.
+        let make_mesh_pipeline = |label: &str, bias: wgpu::DepthBiasState| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    buffers: &[vertex_layout.clone()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    // Aussen zeigende Flaechen sind CCW (mesh.rs) -> Rueckseiten cullen.
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias,
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: SAMPLE_COUNT,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline = make_mesh_pipeline("mesh.pipeline", wgpu::DepthBiasState::default());
+        // Hidden-Line-Flaechen leicht nach hinten schieben (Depth-Bias auf
+        // Dreiecke wirkt zuverlaessig — anders als bei Linien), damit die Kanten
+        // an ihrer wahren Tiefe den Less-Test gewinnen.
+        let hidden_face_pipeline = make_mesh_pipeline(
+            "mesh.hidden.pipeline",
+            wgpu::DepthBiasState {
+                constant: 4,
+                slope_scale: 1.0,
+                clamp: 0.0,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                // Aussen zeigende Flaechen sind CCW (mesh.rs) -> Rueckseiten cullen.
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: SAMPLE_COUNT,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
+        );
 
         // Bodengitter-Pipeline: dieselbe Bind-Group (Globals/View-Projektion) und
         // dasselbe Depth-/MSAA-/Farbziel wie die Mesh-Pipeline, aber LineList-
@@ -268,12 +354,15 @@ impl Renderer {
 
         Self {
             pipeline,
+            hidden_face_pipeline,
             grid_pipeline,
             bind_group,
             uniform,
             mesh: None,
+            edges: None,
             grid: None,
             grid_visible: false,
+            style: RenderStyle::Shaded,
             depth: None,
             msaa: None,
             color_format,
@@ -305,12 +394,32 @@ impl Renderer {
         self.upload_mesh(device, build_scene_mesh(walls, slabs, meshes));
     }
 
-    /// Laedt ein fertiges Mesh in die GPU-Puffer (oder loescht es bei leer).
+    /// Laedt ein fertiges Mesh in die GPU-Puffer (oder loescht es bei leer) und
+    /// erzeugt ZUGLEICH die gecachten Modell-Kanten (Feature-Edges, edges.rs) fuer
+    /// die Stile wireframe/hidden — einmalig hier, nicht je Frame.
     fn upload_mesh(&mut self, device: &wgpu::Device, mesh: Mesh) {
         if mesh.indices.is_empty() {
             self.mesh = None;
+            self.edges = None;
             return;
         }
+
+        // Kanten aus der Mesh-Geometrie ableiten und (falls vorhanden) hochladen.
+        let edge_verts = build_mesh_edges(&mesh);
+        self.edges = if edge_verts.is_empty() {
+            None
+        } else {
+            let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("edges.vbo"),
+                contents: bytemuck::cast_slice(&edge_verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            Some(LineBuffers {
+                vbo,
+                vertex_count: (edge_verts.len() / EDGE_FLOATS_PER_VERTEX) as u32,
+            })
+        };
+
         let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mesh.vbo"),
             contents: bytemuck::cast_slice(&mesh.verts),
@@ -342,10 +451,21 @@ impl Renderer {
         self.globals.sun_color = [sun[0], sun[1], sun[2], 1.0];
     }
 
-    /// Darstellungsart umschalten: `true` = weisses Clay-Material (Beleuchtung
-    /// bleibt aktiv, siehe shaders.rs), `false` = normale Bauteil-/Vertexfarbe.
+    /// Darstellungsart setzen (shaded/white/textured/wireframe/hidden). Einzige
+    /// Quelle der Wahrheit; `render` leitet daraus Pipeline-Wahl und `mode.x` ab.
+    pub fn set_render_style(&mut self, style: RenderStyle) {
+        self.style = style;
+    }
+
+    /// Rueckwaerts-kompatibler Schalter: `true` bildet auf `White`, `false` auf
+    /// `Shaded` ab (kein separater Zustand mehr — vermeidet Widerspruch zum
+    /// `style`-Feld). Neue Aufrufer nutzen `set_render_style`.
     pub fn set_white_mode(&mut self, white: bool) {
-        self.globals.mode[0] = if white { 1.0 } else { 0.0 };
+        self.style = if white {
+            RenderStyle::White
+        } else {
+            RenderStyle::Shaded
+        };
     }
 
     /// Setzt/aktualisiert das Referenz-Bodengitter (grid.rs). Erzeugt den Linien-
@@ -372,7 +492,7 @@ impl Renderer {
             contents: bytemuck::cast_slice(&verts),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        self.grid = Some(GridBuffers {
+        self.grid = Some(LineBuffers {
             vbo,
             vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
         });
@@ -453,6 +573,9 @@ impl Renderer {
         let aspect = if h > 0 { w as f32 / h as f32 } else { 1.0 };
         let vp: Mat4 = view_projection(camera, aspect);
         self.globals.view_proj = vp;
+        // `mode.x` fuer den Mesh-Shader aus dem aktuellen Stil ableiten (Material/
+        // Clay/Hidden-Flaechen). Wireframe zeichnet keine Flaechen -> Wert egal.
+        self.globals.mode[0] = self.style.mesh_mode();
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&self.globals));
 
         self.ensure_depth(device, w, h);
@@ -493,16 +616,40 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            if let Some(m) = &self.mesh {
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.set_vertex_buffer(0, m.vbo.slice(..));
-                pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..m.index_count, 0, 0..1);
+            // 1) Gefuellte Flaechen — in allen Stilen ausser "wireframe". Im
+            //    Hidden-Line-Stil die leicht nach hinten gebiaste Pipeline, damit
+            //    die folgenden Kanten sauber obenauf liegen.
+            if self.style.draws_faces() {
+                if let Some(m) = &self.mesh {
+                    let face_pipeline = if self.style == RenderStyle::Hidden {
+                        &self.hidden_face_pipeline
+                    } else {
+                        &self.pipeline
+                    };
+                    pass.set_pipeline(face_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, m.vbo.slice(..));
+                    pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..m.index_count, 0, 0..1);
+                }
             }
 
-            // Bodengitter NACH dem Modell zeichnen (gemeinsamer Tiefenpuffer ->
-            // das Modell verdeckt das Gitter korrekt). Nur wenn sichtbar + vorhanden.
+            // 2) Modell-Kanten (wireframe/hidden) — LineList-Pipeline (wie Grid).
+            //    Im Hidden-Stil obenauf, tiefengetestet gegen die (gebiasten)
+            //    Flaechen -> verdeckte Kanten fallen weg. Im Wireframe ohne
+            //    Flaechen -> alle Kanten sichtbar.
+            if self.style.draws_edges() {
+                if let Some(e) = &self.edges {
+                    pass.set_pipeline(&self.grid_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, e.vbo.slice(..));
+                    pass.draw(0..e.vertex_count, 0..1);
+                }
+            }
+
+            // 3) Bodengitter NACH dem Modell zeichnen (gemeinsamer Tiefenpuffer ->
+            //    das Modell verdeckt das Gitter korrekt). Unabhaengig vom Stil, nur
+            //    wenn sichtbar + vorhanden.
             if self.grid_visible {
                 if let Some(g) = &self.grid {
                     pass.set_pipeline(&self.grid_pipeline);

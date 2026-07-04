@@ -37,7 +37,10 @@ export interface Camera3d {
 /** Minimal-Typ des WASM-Exports (das echte .d.ts entsteht erst mit `build:engine3d`). */
 interface WebModelRendererLike {
   set_model(json: string): void;
-  set_render_mode_white(white: boolean): void;
+  /** Darstellungsart setzen — `style` ∈ "shaded"|"white"|"wireframe"|"hidden"|
+   * "textured" (deckt die volle `RenderMode`-Union der Oberleiste ab;
+   * "textured" faellt engine-seitig vorerst auf "shaded" zurueck). */
+  set_render_style(style: string): void;
   set_view_preset(preset: string): void;
   /** Boden-Referenzraster in der Welt-XZ-Ebene ein-/ausblenden (Rust-seitig,
    * `web::set_ground_grid`). `visible=false` zeichnet kein Raster; sonst ein
@@ -142,17 +145,19 @@ export function useWasm3dRenderer(
   }, []);
 
   /**
-   * Darstellungsart umschalten: `true` = weisses Clay-Material (beleuchtet,
-   * ohne Bauteil-Farben), `false` = normale Material-/Vertexfarbe (shaded,
-   * Default). Wirkt erst beim nächsten `render`.
+   * Darstellungsart umschalten — reicht die volle `RenderMode`-Union der
+   * Oberleiste ("shaded"/"white"/"textured"/"wireframe"/"hidden") an Rust
+   * durch (`web::set_render_style`); die Engine entscheidet je Stil, wie
+   * gezeichnet wird ("textured" faellt dort vorerst auf "shaded" zurueck).
+   * Wirkt erst beim nächsten `render`.
    */
-  const setWhiteMode = useCallback((white: boolean) => {
+  const setRenderStyle = useCallback((style: string) => {
     const r = rendererRef.current;
     if (!r) return;
     try {
-      r.set_render_mode_white(white);
+      r.set_render_style(style);
     } catch (e) {
-      console.warn("render3d set_render_mode_white fehlgeschlagen:", e);
+      console.warn("render3d set_render_style fehlgeschlagen:", e);
     }
   }, []);
 
@@ -242,7 +247,7 @@ export function useWasm3dRenderer(
   return {
     render,
     updateModel,
-    setWhiteMode,
+    setRenderStyle,
     applyViewPreset,
     setGroundGrid,
     ready,

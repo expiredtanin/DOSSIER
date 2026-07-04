@@ -6,12 +6,13 @@
 // INTEGRATIONS-SPIKE (Umfang bewusst schmal): Massenmodell (Wände mit Öffnungs-
 // Teilquadern + Deckenplatten, alle Geschosse gestapelt) + Orbit-Navigation +
 // Kamera-Presets (`view3d`, von der Oberleiste getrieben — s. u.) + Darstellungs-
-// art (shaded/white, `renderMode`, ebenfalls Oberleiste) + ein-/ausblendbares
-// Boden-Referenzraster (`gridVisible`/`groundElevation`, Overlay-Umschalter im
-// Viewport selbst). Auswahl/Raycast, Griffe/Zeichnen sowie die übrigen
-// Darstellungsarten der three.js-Sicht (texturiert/Drahtgitter/Kanten, HLR)
-// folgen später — bis dahin gilt: RECHTS unterdrückt weiterhin nur das
-// Browser-Menü (kein Kontextmenü im Engine-Pfad).
+// art (volle `renderMode`-Union der Oberleiste — shaded/white/textured/
+// wireframe/hidden — via `set_render_style` in Rust; "textured" faellt dort
+// vorerst auf "shaded" zurueck) + ein-/ausblendbares Boden-Referenzraster
+// (`gridVisible`/`groundElevation`, Overlay-Umschalter im Viewport selbst).
+// Auswahl/Raycast sowie Griffe/Zeichnen der three.js-Sicht folgen später —
+// bis dahin gilt: RECHTS unterdrückt weiterhin nur das Browser-Menü (kein
+// Kontextmenü im Engine-Pfad).
 //
 // KAMERA-PRESETS: `view3d`/`renderMode` kommen als Props von der Oberleiste
 // (TopBar → App.tsx → Viewport3D-Umschalter, dieselbe Quelle wie die three.js-
@@ -170,9 +171,8 @@ export function Wasm3DViewport({
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
   view3d?: View3d;
-  /** Darstellungsart (Oberleiste): nur `shaded`/`white` wirken hier (die
-   * übrigen Modi der three.js-Sicht sind im Engine-Pfad noch nicht gebaut,
-   * s. Datei-Kommentar) — alles ausser `white` fällt auf shaded zurück. */
+  /** Darstellungsart (Oberleiste) — alle fünf Werte wirken hier, s.
+   * Datei-Kommentar. */
   renderMode?: RenderMode;
   /** Boden-Referenzraster sichtbar? Umgeschaltet über den Overlay-Button unten
    * rechts im Viewport (`onToggleGrid`) — Single Source of Truth ist der
@@ -188,7 +188,7 @@ export function Wasm3DViewport({
   const {
     render,
     updateModel,
-    setWhiteMode,
+    setRenderStyle,
     applyViewPreset,
     setGroundGrid,
     ready,
@@ -229,14 +229,14 @@ export function Wasm3DViewport({
     redrawRef.current();
   }, [ready, view3d, applyViewPreset, render]);
 
-  // Darstellungsart (shaded/weiss) an den Renderer weiterreichen, sobald sie
-  // wechselt oder der Renderer bereit wird — dann mit der aktuell aktiven
-  // Kamera (Praeset ODER Orbit) neu zeichnen.
+  // Darstellungsart (volle RenderMode-Union) an den Renderer weiterreichen,
+  // sobald sie wechselt oder der Renderer bereit wird — dann mit der aktuell
+  // aktiven Kamera (Praeset ODER Orbit) neu zeichnen.
   useEffect(() => {
     if (!ready) return;
-    setWhiteMode(renderMode === "white");
+    setRenderStyle(renderMode);
     redrawRef.current();
-  }, [ready, renderMode, setWhiteMode]);
+  }, [ready, renderMode, setRenderStyle]);
 
   // Boden-Referenzraster: bei Bereitschaft oder Wechsel von Sichtbarkeit/
   // Geschoss-Hoehe neu setzen + zeichnen. Fixe Ausdehnung/Abstand (40 m /

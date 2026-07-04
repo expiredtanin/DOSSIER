@@ -16,9 +16,16 @@
 //   sky_color    : vec4<f32>    Himmels-Ambient (rgb; von oben)
 //   ground_color : vec4<f32>    Boden-Ambient (rgb; von unten)
 //   sun_color    : vec4<f32>    Farbe/Staerke des Directional-Lights (rgb)
-//   mode         : vec4<f32>    x = Darstellungsart (0 = shaded/Material, 1 = weiss/Clay)
+//   mode         : vec4<f32>    x = Darstellungsart (0 = shaded/Material,
+//                               1 = weiss/Clay, 2 = hidden-Line-Flaechen/flach-weiss)
 //
 // Vertex-Attribute: position (world), normal (world), color (Albedo).
+//
+// FILL-LIGHT: Zusaetzlich zum Haupt-Directional (Sonne) wirkt ein schwaches
+// GEGEN-Fuelllicht aus der entgegengesetzten Azimut-Richtung (leicht von oben),
+// abgeleitet aus der Sonnenrichtung — es hebt die vom Hauptlicht abgewandten
+// Flaechen an, damit sie nicht in reinem Schwarz absaufen. Dezent (≈ 0.28 der
+// Sonne, leicht kuehl), physikalisch als Himmels-/Bounce-Fuellung plausibel.
 
 /// Der einzige Shader (Vertex + Fragment). Hemisphaerisches Ambient (Himmel/Boden)
 /// + Lambert-Directional — GPU-Aequivalent eines Architektur-Massenmodell-Lichts.
@@ -58,6 +65,7 @@ fn vs_main(in : VsIn) -> VsOut {
 fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.world_normal);
     let l = normalize(globals.light_dir.xyz);
+    let style = globals.mode.x;
 
     // Hemisphaerisches Ambient: Mischfaktor aus der Vertikal-Komponente der
     // Normalen (n.y = +1 -> voll Himmel, n.y = -1 -> voll Boden).
@@ -67,17 +75,39 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     // Gerichteter Lambert-Anteil (Sonne); Rueckseiten (n.l < 0) tragen nichts bei.
     let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
 
-    // Weiss-Modus (Clay-Look): Material-/Vertexfarbe durch ein einheitliches
-    // Hellgrau ersetzen, Beleuchtung (Ambient + Directional) bleibt aktiv — so
-    // liest sich die Volumetrie ohne Bauteil-Farben ab (Vectorworks „white").
-    let albedo = mix(in.color, vec3<f32>(0.82, 0.82, 0.80), globals.mode.x);
+    // Schwaches Gegen-Fuelllicht: aus entgegengesetztem Azimut, leicht von oben,
+    // aus der Sonnenrichtung abgeleitet — hebt abgewandte Flaechen an (kein
+    // reines Schwarz). Dezent (0.28) und leicht kuehl getoent.
+    let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
+    let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
+        * vec3<f32>(0.24, 0.27, 0.30);
 
-    var shaded = albedo * (ambient + diffuse);
+    // Weiss-Modus (Clay, style==1) bzw. Hidden-Flaechen (style==2): Material-/
+    // Vertexfarbe durch ein einheitliches Hell ersetzen. Clay = warmes Hellgrau,
+    // Hidden = nahezu Weiss (damit die dunklen Kanten obenauf klar lesbar sind).
+    let clay = vec3<f32>(0.82, 0.82, 0.80);
+    let paper = vec3<f32>(0.97, 0.97, 0.97);
+    var albedo = in.color;
+    if (style > 1.5) {
+        albedo = paper;
+    } else if (style > 0.5) {
+        albedo = clay;
+    }
+
+    var shaded = albedo * (ambient + diffuse + fill);
 
     // Sanfte Kantenbetonung: senkrechte Flaechen (n.y nahe 0) minimal abdunkeln,
     // damit sich Waende vom hellen Deckel/Boden abheben (ohne Postprocessing).
     let edge = 0.90 + 0.10 * abs(n.y);
     shaded = shaded * edge;
+
+    // Hidden-Line-Flaechen: sehr flach halten (fast unlit, nahezu weiss), damit
+    // die dunklen Modell-Kanten die Form tragen und die Flaechen nur den Depth-
+    // Buffer fuellen (verdeckte Kanten wegschneiden). Leichte Hemi-Toenung bleibt,
+    // damit die Silhouette auch ohne Kante nicht voellig verschwindet.
+    if (style > 1.5) {
+        shaded = albedo * (0.88 + 0.12 * hemi_t);
+    }
 
     return vec4<f32>(shaded, 1.0);
 }
