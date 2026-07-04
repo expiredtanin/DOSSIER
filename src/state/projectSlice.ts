@@ -15,6 +15,7 @@ import {
 } from "../model/types";
 import type {
   Component,
+  Drawing2D,
   DrawingLevel,
   HatchStyle,
   LayerCategory,
@@ -152,6 +153,13 @@ export interface ProjectSlice {
     id: string,
     value: string | null,
   ) => void;
+  /**
+   * Generischer immutabler Patch auf ein Drawing2D (per ID) — analog zu
+   * `updateWall`/`updateCeiling`. Trägt u. a. die By-Layer/By-Object-
+   * Quellenfelder (`foregroundSource`/`backgroundSource`/`strokeWeightSource`/
+   * `hatchSource`), die kein eigenes Setter-Paar haben.
+   */
+  updateDrawing2D: (id: string, patch: Partial<Drawing2D>) => void;
   /**
    * Skaliert die Geometrie eines Elements auf Zielbreite×-höhe (Meter) um einen
    * Ankerpunkt (fx/fy ∈ [0,1] relativ zur bbox; 0,0 = oben-links).
@@ -747,6 +755,12 @@ export function createProjectSlice(
       setProject((p) => setOverrideField(p, kind, id, "foreground", value)),
     setElementBackground: (kind, id, value) =>
       setProject((p) => setOverrideField(p, kind, id, "background", value)),
+
+    updateDrawing2D: (id, patch) =>
+      setProject((p) => ({
+        ...p,
+        drawings2d: p.drawings2d.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+      })),
 
     // ── Größe (Resize um Anker) ────────────────────────────────────────────
     resizeElement: (kind, id, w, h, anchor) =>

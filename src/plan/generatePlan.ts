@@ -6,6 +6,7 @@
 // Öffnungen) — exakt, schnell, sauber.
 
 import type {
+  AttributeSource,
   Ceiling,
   Component,
   Drawing2D,
@@ -23,6 +24,7 @@ import {
   getCeilingType,
   getComponent,
   getHatch,
+  getLayerCategory,
   getLineStyle,
   getWallType,
   openingsOfWall,
@@ -334,22 +336,82 @@ export function resolveHatch(
 
 /**
  * Kollabiert die Vordergrund-Farbkette (Muster-/Schraffurlinienfarbe) eines
- * Bauteils zu einem einzelnen Wert für {@link resolveHatch}:
- *   (Attribut-Override `override`) ?? (`Component.foreground`) ?? `undefined`.
- * `undefined` heißt „Nach System" — die Kette läuft dann in resolveHatch auf den
- * HatchStyle.color-Backward-Compat-Fallback weiter (Sample-Verhalten).
+ * Bauteils zu einem einzelnen Wert für {@link resolveHatch}. AUFLÖSUNGSREIHENFOLGE
+ * (By-Layer/By-Object, siehe `docs`/Attribut-Panel):
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
+ *   (`Component.foreground`) ?? `undefined`.
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ * `undefined` als Endergebnis heißt „Nach System" — die Kette läuft dann in
+ * resolveHatch auf den HatchStyle.color-Backward-Compat-Fallback weiter
+ * (Sample-Verhalten: kein Element setzt `override`/`source`, also identisch).
  */
-export function resolveForeground(comp: Component, override?: string): string | undefined {
-  return override ?? comp.foreground;
+export function resolveForeground(
+  comp: Component,
+  override?: string,
+  category?: LayerCategory,
+  source?: AttributeSource,
+): string | undefined {
+  if (override != null) return override;
+  if (source === "layer") return category?.color ?? comp.foreground;
+  return comp.foreground;
 }
 
 /**
- * Kollabiert die Hintergrund-/Füllfarbkette (Poché) eines Bauteils:
- *   (Attribut-Override `override`) ?? (`Component.background`) ?? `Component.color`.
+ * Kollabiert die Hintergrund-/Füllfarbkette (Poché) eines Bauteils, analog zu
+ * {@link resolveForeground}:
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
+ *   (`Component.background`) ?? `Component.color`.
  * Immer definiert (endet spätestens bei `Component.color` = heutiges Verhalten).
  */
-export function resolveBackground(comp: Component, override?: string): string {
-  return override ?? comp.background ?? comp.color;
+export function resolveBackground(
+  comp: Component,
+  override?: string,
+  category?: LayerCategory,
+  source?: AttributeSource,
+): string {
+  if (override != null) return override;
+  if (source === "layer") return category?.color ?? comp.background ?? comp.color;
+  return comp.background ?? comp.color;
+}
+
+/**
+ * Kollabiert die Schraffur-Referenz (Hatch Manager) eines Elements zu einer
+ * einzelnen `hatchId` für {@link resolveHatch} — By-Layer/By-Object, analog zu
+ * {@link resolveForeground}:
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.hatch`) ??
+ *   `fallback` (Bauteil-Schraffur, z. B. `Component.hatchId`/`viewHatchId`, oder
+ *   `undefined` bei Drawing2D ohne Bauteil-Bezug).
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ * Ergebnis kann `undefined` sein — der Aufrufer fällt dann auf `NO_HATCH` zurück.
+ */
+export function resolveHatchId(
+  override: string | undefined,
+  source: AttributeSource | undefined,
+  category: LayerCategory | undefined,
+  fallback?: string,
+): string | undefined {
+  if (override != null) return override;
+  if (source === "layer") return category?.hatch ?? fallback;
+  return fallback;
+}
+
+/**
+ * Kollabiert die Strichstärke-Kette (mm Papier) eines Elements, By-Layer/By-
+ * Object, analog zu {@link resolveHatchId}:
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.lw`) ??
+ *   `fallback` (bisherige Bauteil-/LineStyle-/Kategorie-Default-Kette des
+ *   Aufrufers — heutiges Verhalten).
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ */
+export function resolveStrokeWeight(
+  override: number | undefined,
+  source: AttributeSource | undefined,
+  category: LayerCategory | undefined,
+  fallback: number,
+): number {
+  if (override != null) return override;
+  if (source === "layer") return category?.lw ?? fallback;
+  return fallback;
 }
 
 // ── SIA-Poché-Füllung ────────────────────────────────────────────────────
@@ -386,13 +448,15 @@ export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCu
       if (!best || comp.joinPriority > best.joinPriority) best = comp;
     }
     if (!best) return null;
+    const category = getLayerCategory(project, wall.categoryCode);
     const wallAngleDeg =
       (Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180) / Math.PI;
+    const hatchId = resolveHatchId(wall.hatchId, wall.hatchSource, category, best.hatchId) ?? best.hatchId;
     const hatch = resolveHatch(
       project,
-      best.hatchId,
+      hatchId,
       wallAngleDeg,
-      resolveForeground(best, wall.foreground),
+      resolveForeground(best, wall.foreground, category, wall.foregroundSource),
     );
     // Poché-Hintergrund neutral (weiß) statt Bauteil-Albedo; Vollmuster → schwarz.
     const solid = hatch.pattern === "solid";
@@ -419,9 +483,17 @@ export function resolveCeilingSectionStyle(
     const wt = getCeilingType(project, ceiling);
     if (wt.layers.length === 0) return null;
     const comp = getComponent(project, wt.layers[0].componentId);
+    const category = getLayerCategory(project, ceiling.categoryCode);
+    const hatchId =
+      resolveHatchId(ceiling.hatchId, ceiling.hatchSource, category, comp.hatchId) ?? comp.hatchId;
     return {
-      fill: resolveBackground(comp, ceiling.background),
-      hatch: resolveHatch(project, comp.hatchId, undefined, resolveForeground(comp, ceiling.foreground)),
+      fill: resolveBackground(comp, ceiling.background, category, ceiling.backgroundSource),
+      hatch: resolveHatch(
+        project,
+        hatchId,
+        undefined,
+        resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
+      ),
     };
   } catch {
     return null;
@@ -466,6 +538,9 @@ export function generatePlan(
   // Modell (Ebene) stammt statt aus einer Magie-Konstante.
   const lwByCode = categoryLwMap(project.layers);
   const colorByCode = categoryColorMap(project.layers);
+  // Code → volle LayerCategory, für die By-Layer-Attribut-Auflösung (Quelle
+  // "layer" von Vordergrund/Hintergrund/Strichstärke/Schraffur).
+  const catByCode = categoryMap(project.layers);
 
   // Freie 2D-Zeichengeometrie dieses Geschosses (wie Wände nach sichtbaren
   // Kategorien + Darstellungsmodus gefiltert). Wird über der Wand-Poché
@@ -489,8 +564,14 @@ export function generatePlan(
   );
   for (const ceiling of ceilings) {
     const greyed = categoryDisplay(ceiling.categoryCode).greyed;
-    const lwMm = lwByCode.get(ceiling.categoryCode) ?? WALL_FALLBACK_MM;
-    addCeilingPoche(primitives, project, ceiling, greyed, detail, lwMm);
+    const category = catByCode.get(ceiling.categoryCode);
+    const lwMm = resolveStrokeWeight(
+      ceiling.strokeWeight,
+      ceiling.strokeWeightSource,
+      category,
+      lwByCode.get(ceiling.categoryCode) ?? WALL_FALLBACK_MM,
+    );
+    addCeilingPoche(primitives, project, ceiling, greyed, detail, lwMm, category);
   }
 
   // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
@@ -510,14 +591,20 @@ export function generatePlan(
 
   for (const wall of walls) {
     const wallGreyed = categoryDisplay(wall.categoryCode).greyed;
-    const wallLwMm = lwByCode.get(wall.categoryCode) ?? WALL_FALLBACK_MM;
+    const wallCategory = catByCode.get(wall.categoryCode);
+    const wallLwMm = resolveStrokeWeight(
+      wall.strokeWeight,
+      wall.strokeWeightSource,
+      wallCategory,
+      lwByCode.get(wall.categoryCode) ?? WALL_FALLBACK_MM,
+    );
     // Türen (Legacy) + Öffnungen (Fenster/Türen) am Wandhost: BEIDE sparen die
     // Wand-Poché aus. Aus beiden wird eine gemeinsame Lücken-Intervall-Liste.
     const doors = project.doors.filter((d) => d.hostWallId === wall.id);
     const openings = openingsOfWall(project, wall.id);
     const gaps = wallGaps(wall, doors, openings);
     const cuts = joins.get(wall.id) ?? { startCut: null, endCut: null };
-    addWallPoche(primitives, project, wall, gaps, cuts, wallGreyed, detail, wallLwMm);
+    addWallPoche(primitives, project, wall, gaps, cuts, wallGreyed, detail, wallLwMm, wallCategory);
     // Referenzlinie: dünne gestrichelte Wand-Achslinie (von der Oberleiste
     // umschaltbar). Wird über der Poché gezeichnet, damit sie sichtbar bleibt.
     if (showReferenceLines) addReferenceLine(primitives, wall, wallGreyed);
@@ -557,7 +644,7 @@ export function generatePlan(
   // 2D-Zeichengeometrie zuletzt (über der Poché).
   for (const d of drawings) {
     const greyed = categoryDisplay(d.categoryCode).greyed;
-    addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode);
+    addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode);
   }
 
   // Kontext-Konturen (Höhenlinien) als dezente Linien zeichnen — UNTER der
@@ -781,6 +868,17 @@ function categoryColorMap(layers: LayerCategory[]): Map<string, string> {
 }
 
 /**
+ * Baut eine Map Kategorie-Code → volle LayerCategory über den ganzen Baum, für
+ * die By-Layer-Attribut-Auflösung (Quelle "layer" von Vordergrund/Hintergrund/
+ * Strichstärke/Schraffur, siehe {@link resolveForeground} und Geschwister).
+ */
+function categoryMap(layers: LayerCategory[]): Map<string, LayerCategory> {
+  const map = new Map<string, LayerCategory>();
+  for (const c of flattenCategories(layers)) map.set(c.code, c);
+  return map;
+}
+
+/**
  * Leitet ein 2D-Zeichenelement in Plan-Primitive ab (docs/design/drawing-tools.md
  * §7.2). Farbe/Strichstärke kommen aus dem optionalen LineStyle, sonst aus der
  * Kategorie. Phase 1 deckt line/polyline/rect ab (alles → line-Primitive);
@@ -793,15 +891,30 @@ function addDrawing2D(
   greyed: boolean,
   lwByCode: Map<string, number>,
   colorByCode: Map<string, string>,
+  catByCode: Map<string, LayerCategory>,
 ): void {
+  const category = catByCode.get(d.categoryCode);
   const ls = d.lineStyleId
     ? project.lineStyles.find((l) => l.id === d.lineStyleId)
     : undefined;
   // Plan-Tinte fix dunkel: Fallback auf MONO_INK (statt hell „#d0d0d0"), damit
   // ein kategorieloses 2D-Element auf dem hellen Papier sichtbar bleibt.
   const color = d.color ?? ls?.color ?? colorByCode.get(d.categoryCode) ?? MONO_INK;
-  const weightMm = d.weightMm ?? ls?.weight ?? lwByCode.get(d.categoryCode) ?? WALL_FALLBACK_MM;
+  // Strichstärke: "layer" erzwingt die Ebenen-Strichstärke (umgeht das
+  // LineStyle-Gewicht), sonst (Default "object") die heutige Kette.
+  const weightMm = resolveStrokeWeight(
+    d.weightMm,
+    d.strokeWeightSource,
+    category,
+    ls?.weight ?? lwByCode.get(d.categoryCode) ?? WALL_FALLBACK_MM,
+  );
   const dash = ls?.dash ?? null;
+  // Drawing2D trägt kein Bauteil → die By-Layer-Quelle ist hier die einzige
+  // Alternative zum expliziten Wert (kein Component-Fallback); Default
+  // "object"/undefined bleibt exakt das heutige Verhalten.
+  const foreground = d.foreground ?? (d.foregroundSource === "layer" ? category?.color : undefined);
+  const background = d.background ?? (d.backgroundSource === "layer" ? category?.color : undefined);
+  const hatchId = resolveHatchId(d.hatchId, d.hatchSource, category, undefined);
   // Zickzack-Parameter aus dem LineStyle durchreichen (nur kind==="zigzag").
   // Additiv: fehlt es, bleibt die Linie gerade/gestrichelt wie bisher.
   const zigzag = ls?.kind === "zigzag" ? ls.zigzag : undefined;
@@ -821,16 +934,18 @@ function addDrawing2D(
     out.push({
       kind: "polygon",
       pts,
-      // Hintergrund-Override hat Vorrang vor dem Alt-Feld fillColor (beide leer =
-      // transparente Fläche, nur Schraffur) — Sample bleibt identisch.
-      fill: d.background ?? d.fillColor ?? "none",
+      // Hintergrund-Override (Wert ?? By-Layer) hat Vorrang vor dem Alt-Feld
+      // fillColor (alle leer = transparente Fläche, nur Schraffur) — Sample
+      // bleibt identisch (kein Element setzt background/backgroundSource).
+      fill: background ?? d.fillColor ?? "none",
       // Umriss zeichnen die separaten Linien-Primitive (mit Strichmuster); die
       // Füllfläche selbst bleibt randlos, um doppelte Striche zu vermeiden.
       stroke: "none",
       strokeWidthMm: 0,
-      // Drawing2D trägt kein Bauteil → Vordergrund-Override direkt aus d.foreground
-      // (Attribut „Nach System" ⇒ undefined ⇒ HatchStyle.color-Fallback).
-      hatch: d.hatchId ? resolveHatch(project, d.hatchId, undefined, d.foreground) : NO_HATCH,
+      // Drawing2D trägt kein Bauteil → Vordergrund/Schraffur-Override direkt aus
+      // d.foreground/d.hatchId bzw. der Ebene (Attribut „Nach System" ⇒
+      // undefined ⇒ HatchStyle.color-Fallback bzw. NO_HATCH).
+      hatch: hatchId ? resolveHatch(project, hatchId, undefined, foreground) : NO_HATCH,
       greyed,
       drawingId: d.id,
     });
@@ -929,6 +1044,7 @@ function addWallPoche(
   greyed: boolean,
   detail: DetailLevel,
   wallLwMm: number,
+  category: LayerCategory | undefined,
 ): void {
   const wt = getWallType(project, wall);
   const total = wallTypeThickness(wt);
@@ -1015,11 +1131,13 @@ function addWallPoche(
     for (let li = 0; li < wt.layers.length; li++) {
       const layer = wt.layers[li];
       const comp = getComponent(project, layer.componentId);
+      const layerHatchId =
+        resolveHatchId(wall.hatchId, wall.hatchSource, category, comp.hatchId) ?? comp.hatchId;
       const layerHatch = resolveHatch(
         project,
-        comp.hatchId,
+        layerHatchId,
         wallAngleDeg,
-        resolveForeground(comp, wall.foreground),
+        resolveForeground(comp, wall.foreground, category, wall.foregroundSource),
       );
       // SIA-Poché: neutraler Hintergrund (weiß) statt Bauteil-Albedo, die
       // Schichtschraffur liegt darüber; Vollmuster ("solid") = schwarze Poché.
@@ -1319,6 +1437,7 @@ function addCeilingPoche(
   greyed: boolean,
   detail: DetailLevel,
   lwMm: number,
+  category: LayerCategory | undefined,
 ): void {
   const pts = ceiling.outline;
   if (pts.length < 3) return;
@@ -1333,10 +1452,23 @@ function addCeilingPoche(
   // NICHT die Schnitt-Schraffur (die gehört auf echte Schnittflächen, siehe
   // resolveCeilingSectionStyle/splitSlabLayers), sondern `viewHatchId`. Fehlt
   // sie (Default), bleibt die Aufsicht weiss. Im Detailgrad „grob" entfällt
-  // die Schraffur ganz (nur Fläche + Umriss).
+  // die Schraffur ganz (nur Fläche + Umriss). Das Attribut-Override
+  // `ceiling.hatchId` (+ `hatchSource`) überschreibt diese Ansichts-Schraffur
+  // genauso wie die Schnitt-Schraffur in {@link resolveCeilingSectionStyle}.
+  const effectiveViewHatchId = resolveHatchId(
+    ceiling.hatchId,
+    ceiling.hatchSource,
+    category,
+    comp?.viewHatchId,
+  );
   const hatch =
-    detail !== "grob" && comp?.viewHatchId
-      ? resolveHatch(project, comp.viewHatchId, undefined, resolveForeground(comp, ceiling.foreground))
+    detail !== "grob" && comp && effectiveViewHatchId
+      ? resolveHatch(
+          project,
+          effectiveViewHatchId,
+          undefined,
+          resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
+        )
       : NO_HATCH;
   const solid = hatch.pattern === "solid";
   out.push({

@@ -1769,6 +1769,7 @@ export default function App() {
   const setElementFillColor = useStore((s) => s.setElementFillColor);
   const setElementForeground = useStore((s) => s.setElementForeground);
   const setElementBackground = useStore((s) => s.setElementBackground);
+  const updateDrawing2D = useStore((s) => s.updateDrawing2D);
   const resizeElement = useStore((s) => s.resizeElement);
   const updateWall = useStore((s) => s.updateWall);
   const setWallThickness = useStore((s) => s.setWallThickness);
@@ -2065,13 +2066,22 @@ export default function App() {
           updateRoom(selection.id, { color });
       },
       onSetSelectionWeight: (weightMm) => {
-        // Strichstärke gibt es als direktes Feld nur bei Drawing2D.
-        if (selection?.kind === "drawing2d")
+        // Strichstärke-Override: Wand/Decke (`strokeWeight`) oder Drawing2D
+        // (`weightMm`, Alt-Feldname bleibt).
+        if (selection?.kind === "wall") updateWall(selection.id, { strokeWeight: weightMm });
+        else if (selection?.kind === "ceiling")
+          updateCeiling(selection.id, { strokeWeight: weightMm });
+        else if (selection?.kind === "drawing2d")
           setElementWeight(selection.id, weightMm);
       },
       onSetSelectionFill: (hatchId) => {
-        // Füllschraffur nur bei Drawing2D (geschlossene Formen).
-        if (selection?.kind === "drawing2d")
+        // Schraffur-Override: Wand, Decke oder Drawing2D (geschlossene Formen).
+        // `null` löscht das Feld (→ „Nach System"/Quelle).
+        if (selection?.kind === "wall")
+          updateWall(selection.id, { hatchId: hatchId ?? undefined });
+        else if (selection?.kind === "ceiling")
+          updateCeiling(selection.id, { hatchId: hatchId ?? undefined });
+        else if (selection?.kind === "drawing2d")
           setElementFill(selection.id, hatchId);
       },
       onSetSelectionFillColor: (color) => {
@@ -2096,6 +2106,51 @@ export default function App() {
           selection?.kind === "drawing2d"
         )
           setElementBackground(selection.kind, selection.id, color);
+      },
+      // ── By-Layer/By-Object-Quellen (Vordergrund/Hintergrund/Strichstärke/
+      // Schraffur): "layer" erzwingt die Ebene, "object" erbt vom Bauteil —
+      // beide löschen dabei den expliziten Wert (siehe Modell-Kommentar
+      // `AttributeSource`); „eigener Wert" läuft weiterhin über die
+      // onSetSelection{Foreground,Background,Weight,Fill}-Setter oben.
+      onSetSelectionForegroundSource: (source) => {
+        if (!selection) return;
+        const patch = {
+          foregroundSource: source === "layer" ? ("layer" as const) : undefined,
+          foreground: undefined,
+        };
+        if (selection.kind === "wall") updateWall(selection.id, patch);
+        else if (selection.kind === "ceiling") updateCeiling(selection.id, patch);
+        else if (selection.kind === "drawing2d") updateDrawing2D(selection.id, patch);
+      },
+      onSetSelectionBackgroundSource: (source) => {
+        if (!selection) return;
+        const patch = {
+          backgroundSource: source === "layer" ? ("layer" as const) : undefined,
+          background: undefined,
+        };
+        if (selection.kind === "wall") updateWall(selection.id, patch);
+        else if (selection.kind === "ceiling") updateCeiling(selection.id, patch);
+        else if (selection.kind === "drawing2d") updateDrawing2D(selection.id, patch);
+      },
+      onSetSelectionStrokeWeightSource: (source) => {
+        if (!selection) return;
+        const strokeWeightSource = source === "layer" ? ("layer" as const) : undefined;
+        if (selection.kind === "wall")
+          updateWall(selection.id, { strokeWeightSource, strokeWeight: undefined });
+        else if (selection.kind === "ceiling")
+          updateCeiling(selection.id, { strokeWeightSource, strokeWeight: undefined });
+        else if (selection.kind === "drawing2d")
+          updateDrawing2D(selection.id, { strokeWeightSource, weightMm: undefined });
+      },
+      onSetSelectionHatchSource: (source) => {
+        if (!selection) return;
+        const hatchSource = source === "layer" ? ("layer" as const) : undefined;
+        if (selection.kind === "wall")
+          updateWall(selection.id, { hatchSource, hatchId: undefined });
+        else if (selection.kind === "ceiling")
+          updateCeiling(selection.id, { hatchSource, hatchId: undefined });
+        else if (selection.kind === "drawing2d")
+          updateDrawing2D(selection.id, { hatchSource, hatchId: undefined });
       },
       onResizeSelection: (w, h, anchor) => {
         if (selection?.kind === "wall" || selection?.kind === "drawing2d")

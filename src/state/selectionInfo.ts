@@ -18,6 +18,7 @@ import {
   wallTypeThickness,
 } from "../model/types";
 import type {
+  AttributeSource,
   Ceiling,
   Drawing2D,
   Drawing2DGeom,
@@ -229,6 +230,24 @@ export interface Selection {
    * System". Nachfolger von `fillColor`; hat im Plan Vorrang.
    */
   background?: string;
+  /**
+   * Quelle des Vordergrunds, wenn `foreground` NICHT gesetzt ist ("layer" =
+   * Nach Ebene, "object"/`undefined` = Nach Bauteil, Default). Gesetzt bei
+   * Wand, Decke und geschlossener Drawing2D (wie `foreground`/`pocheEditable`).
+   */
+  foregroundSource?: AttributeSource;
+  /** Quelle des Hintergrunds, analog zu {@link Selection.foregroundSource}. */
+  backgroundSource?: AttributeSource;
+  /**
+   * RAW Strichstärke-Override (mm) DIESES Elements; `undefined` = kein Override
+   * (Herkunft dann `strokeWeightSource`). Gesetzt bei Wand, Decke, Drawing2D.
+   * `weightMm` bleibt der EFFEKTIVE (aufgelöste) Wert für die Anzeige.
+   */
+  strokeWeightOverride?: number;
+  /** Quelle der Strichstärke, wenn kein `strokeWeightOverride` gesetzt ist. */
+  strokeWeightSource?: AttributeSource;
+  /** Quelle der Schraffur, wenn kein `fillHatchId` gesetzt ist. */
+  hatchSource?: AttributeSource;
   /** Ob die Form geschlossen ist (rect/circle/closed polyline) — nur Drawing2D. */
   closed?: boolean;
   /** Achsparallele Bounding-Box in Modell-Metern. */
@@ -310,7 +329,10 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
 function wallSelection(project: Project, wall: Wall): Selection {
   const cat = findCategory(project.layers, wall.categoryCode);
   const color = wall.color ?? cat?.color ?? WALL_FALLBACK_COLOR;
-  const weightMm = cat?.lw ?? WALL_FALLBACK_MM;
+  // Effektive Strichstärke: expliziter Override zuerst, sonst die Kategorie
+  // (die Quelle "layer"/"object" macht heute keinen Unterschied, da Component
+  // keine eigene Strichstärke trägt — siehe resolveStrokeWeight).
+  const weightMm = wall.strokeWeight ?? cat?.lw ?? WALL_FALLBACK_MM;
   const minX = Math.min(wall.start.x, wall.end.x);
   const minY = Math.min(wall.start.y, wall.end.y);
   const maxX = Math.max(wall.start.x, wall.end.x);
@@ -351,10 +373,15 @@ function wallSelection(project: Project, wall: Wall): Selection {
     categoryCode: wall.categoryCode,
     color,
     weightMm,
-    fillHatchId: undefined,
+    fillHatchId: wall.hatchId,
     fillColor: undefined,
     foreground: wall.foreground,
     background: wall.background,
+    foregroundSource: wall.foregroundSource,
+    backgroundSource: wall.backgroundSource,
+    strokeWeightOverride: wall.strokeWeight,
+    strokeWeightSource: wall.strokeWeightSource,
+    hatchSource: wall.hatchSource,
     closed: undefined,
     bbox: { minX, minY, maxX, maxY },
     wall: wallInfo,
@@ -365,7 +392,7 @@ function wallSelection(project: Project, wall: Wall): Selection {
 function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
   const cat = findCategory(project.layers, ceiling.categoryCode);
   const color = ceiling.color ?? cat?.color ?? WALL_FALLBACK_COLOR;
-  const weightMm = cat?.lw ?? WALL_FALLBACK_MM;
+  const weightMm = ceiling.strokeWeight ?? cat?.lw ?? WALL_FALLBACK_MM;
   const box = outlineBBox(ceiling.outline);
   const wt = getCeilingType(project, ceiling);
   const thickness = ceilingThickness(project, ceiling);
@@ -397,10 +424,15 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     categoryCode: ceiling.categoryCode,
     color,
     weightMm,
-    fillHatchId: undefined,
+    fillHatchId: ceiling.hatchId,
     fillColor: undefined,
     foreground: ceiling.foreground,
     background: ceiling.background,
+    foregroundSource: ceiling.foregroundSource,
+    backgroundSource: ceiling.backgroundSource,
+    strokeWeightOverride: ceiling.strokeWeight,
+    strokeWeightSource: ceiling.strokeWeightSource,
+    hatchSource: ceiling.hatchSource,
     closed: true,
     bbox: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY },
     ceiling: ceilingInfo,
@@ -547,7 +579,15 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     : undefined;
   const cat = findCategory(project.layers, d.categoryCode);
   const color = d.color ?? ls?.color ?? cat?.color ?? DRAW_FALLBACK_COLOR;
-  const weightMm = d.weightMm ?? ls?.weight ?? cat?.lw ?? WALL_FALLBACK_MM;
+  // Effektive Strichstärke, dieselbe Kette wie generatePlan/addDrawing2D
+  // (resolveStrokeWeight): Override zuerst, "layer" erzwingt die Kategorie
+  // (umgeht das LineStyle-Gewicht), sonst die heutige LineStyle-/Kategorie-Kette.
+  const weightMm =
+    d.weightMm ??
+    (d.strokeWeightSource === "layer" ? cat?.lw : undefined) ??
+    ls?.weight ??
+    cat?.lw ??
+    WALL_FALLBACK_MM;
   const closed = isClosedGeom(d.geom);
   return {
     kind: "drawing2d",
@@ -559,6 +599,11 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     fillColor: closed ? d.fillColor ?? null : null,
     foreground: closed ? d.foreground : undefined,
     background: closed ? d.background : undefined,
+    foregroundSource: closed ? d.foregroundSource : undefined,
+    backgroundSource: closed ? d.backgroundSource : undefined,
+    strokeWeightOverride: d.weightMm,
+    strokeWeightSource: d.strokeWeightSource,
+    hatchSource: closed ? d.hatchSource : undefined,
     closed,
     bbox: geomBBox(d.geom),
   };

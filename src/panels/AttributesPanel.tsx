@@ -3,6 +3,14 @@
 // ersten selektierten Elements und erlaubt das direkte Bearbeiten (Farbe,
 // Strichstärke, Füllschraffur).
 //
+// Vordergrund/Hintergrund/Strichstärke/Schraffur tragen je einen 3-Optionen-
+// Quellen-Dropdown: „Nach Ebene" (die LayerCategory erzwingt den Wert), „Nach
+// Bauteil" (erbt vom Component-Manager, heutiges Default-Verhalten) oder
+// „eigener Wert" (expliziter Override, gewinnt immer). Das Eingabe-Element
+// (Farb-Swatch/mm-Zahlenfeld/Schraffur-Dropdown) erscheint NUR bei „eigener
+// Wert"; ein Wechsel auf „Nach Ebene"/„Nach Bauteil" löscht den Wert wieder
+// (siehe host.ts: onSetSelection{Foreground,Background,StrokeWeight,Hatch}Source).
+//
 // Daten/Handler kommen ausschließlich über usePanelHost (kein Prop-Drilling).
 // Es werden NUR Eigenschaften angeboten, die der Host-Kontrakt tatsächlich
 // setzen kann — keine Stubs/Fake-Setter (Konvention wire-dont-stub). Felder ohne
@@ -14,10 +22,23 @@
 // Label→Wert-Grid. Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 // Alle sichtbaren Texte über t(...).
 
+import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { formatM } from "../model/types";
 import { PEN_WEIGHTS } from "../model/types";
+import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
+
+/** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
+ *  „custom" ist abgeleitet aus „ist ein expliziter Wert gesetzt?", nicht
+ *  selbst gespeichert). */
+type UiSource = "layer" | "object" | "custom";
+
+/** Leitet den UI-Quellen-Zustand ab: ein gesetzter Wert gewinnt immer („eigener
+ *  Wert"), sonst das rohe Source-Feld (`undefined` ⇒ „Nach Bauteil", Default). */
+function uiSourceOf(hasValue: boolean, raw: AttributeSource | undefined): UiSource {
+  return hasValue ? "custom" : raw ?? "object";
+}
 
 export function AttributesPanel() {
   const host = usePanelHost();
@@ -34,11 +55,13 @@ export function AttributesPanel() {
   }
 
   const isDrawing = sel.kind === "drawing2d";
-  // Strichstärke wirkt laut Kontrakt nur auf Drawing2D; Wände erben sie aus der
-  // Ebene und sind daher hier nicht editierbar.
-  const weightEditable = isDrawing;
-  // Füllschraffur nur bei geschlossener 2D-Form sinnvoll.
-  const fillEditable = isDrawing && sel.closed === true;
+  // Strichstärke: Wand/Decke/Drawing2D tragen einen eigenen Override
+  // (`strokeWeight`/`weightMm`) + Quellen-Dropdown; andere Elementarten erben
+  // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar).
+  const weightEditable = sel.kind === "wall" || sel.kind === "ceiling" || isDrawing;
+  // Schraffur: Wand/Decke (Schnitt-/Ansichts-Schraffur) oder geschlossene 2D-Form.
+  const fillEditable =
+    sel.kind === "wall" || sel.kind === "ceiling" || (isDrawing && sel.closed === true);
   // Vordergrund/Hintergrund (Muster-/Füllfarbe) tragen Wand, Decke und
   // geschlossene 2D-Formen als Override; `undefined` = „Nach System".
   const pocheEditable =
@@ -46,42 +69,83 @@ export function AttributesPanel() {
     sel.kind === "ceiling" ||
     (isDrawing && sel.closed === true);
 
-  // Ein Override-Farbfeld mit „Nach System"-Zustand: ist der Wert `undefined`,
-  // zeigt es „Nach System" (leerer Swatch) statt einer Farbe und erbt; ein
-  // Klick auf × stellt zurück auf „Nach System" (schreibt `null` → Feld weg).
-  const overrideColor = (
-    value: string | undefined,
-    onSet: (color: string | null) => void,
+  // Der 3-Optionen-Quellen-Dropdown, gemeinsam für alle vier Felder. Deaktiviert,
+  // wenn das Feld für diese Elementart gar nicht gilt (z. B. Strichstärke bei
+  // einer Treppe).
+  const sourceSelect = (
+    editable: boolean,
+    ui: UiSource,
+    onChange: (next: UiSource) => void,
   ) => (
-    <span className="attr-val">
-      <label className="attr-color">
-        <span
-          className="attr-color-swatch"
-          style={{ background: pocheEditable && value ? value : "transparent" }}
-        />
-        <input
-          type="color"
-          value={value ?? "#808080"}
-          disabled={!pocheEditable}
-          title={pocheEditable ? undefined : t("attr.fillNeedsClosed")}
-          onChange={(e) => onSet(e.target.value)}
-        />
-        <span className="attr-color-hex">
-          {pocheEditable && value ? value : t("attr.bySystem")}
-        </span>
-        {pocheEditable && value !== undefined && (
-          <button
-            type="button"
-            className="attr-color-clear"
-            title={t("attr.bySystem")}
-            onClick={() => onSet(null)}
-          >
-            ×
-          </button>
-        )}
-      </label>
-    </span>
+    <select
+      className="attr-select"
+      style={{ width: 104 }}
+      value={ui}
+      disabled={!editable}
+      onChange={(e) => onChange(e.target.value as UiSource)}
+    >
+      <option value="layer">{t("attr.source.layer")}</option>
+      <option value="object">{t("attr.source.object")}</option>
+      <option value="custom">{t("attr.source.custom")}</option>
+    </select>
   );
+
+  // Farb-Swatch-Eingabe für „eigener Wert" (Vordergrund/Hintergrund). Erscheint
+  // nur, wenn die Quelle „custom" ist — sonst zeigt allein der Dropdown den
+  // Zustand.
+  const colorValue = (value: string | undefined, onSet: (color: string) => void) => (
+    <label className="attr-color">
+      <span className="attr-color-swatch" style={{ background: value ?? "#808080" }} />
+      <input type="color" value={value ?? "#808080"} onChange={(e) => onSet(e.target.value)} />
+      <span className="attr-color-hex">{value ?? "#808080"}</span>
+    </label>
+  );
+
+  // Eine Attribut-Zeile: Label + Quellen-Dropdown + (nur bei „eigener Wert")
+  // das passende Eingabe-Element.
+  const sourceRow = (
+    labelKey: string,
+    editable: boolean,
+    ui: UiSource,
+    onSource: (next: UiSource) => void,
+    valueEditor: ReactNode,
+  ) => (
+    <>
+      <span className="attr-key">{t(labelKey)}</span>
+      <span className="attr-val" style={{ gap: 6 }}>
+        {ui === "custom" && valueEditor}
+        {sourceSelect(editable, ui, onSource)}
+      </span>
+    </>
+  );
+
+  // Vordergrund/Hintergrund: „eigener Wert" ⇒ auf Quelle "object" (Nach
+  // Bauteil, Default) zurückfallen; „Nach Ebene"/„Nach Bauteil" schreiben die
+  // Quelle direkt (der Host löscht dabei den expliziten Wert).
+  const fgUi = uiSourceOf(sel.foreground !== undefined, sel.foregroundSource);
+  const bgUi = uiSourceOf(sel.background !== undefined, sel.backgroundSource);
+  const weightUi = uiSourceOf(sel.strokeWeightOverride !== undefined, sel.strokeWeightSource);
+  const hatchUi = uiSourceOf(
+    sel.fillHatchId !== undefined && sel.fillHatchId !== null,
+    sel.hatchSource,
+  );
+
+  const onForegroundSourceChange = (next: UiSource) => {
+    if (next === "custom") host.onSetSelectionForeground(sel.foreground ?? sel.color);
+    else host.onSetSelectionForegroundSource(next);
+  };
+  const onBackgroundSourceChange = (next: UiSource) => {
+    if (next === "custom") host.onSetSelectionBackground(sel.background ?? sel.color);
+    else host.onSetSelectionBackgroundSource(next);
+  };
+  const onWeightSourceChange = (next: UiSource) => {
+    if (next === "custom") host.onSetSelectionWeight(sel.weightMm);
+    else host.onSetSelectionStrokeWeightSource(next);
+  };
+  const onHatchSourceChange = (next: UiSource) => {
+    if (next === "custom") host.onSetSelectionFill(project.hatches[0]?.id ?? null);
+    else host.onSetSelectionHatchSource(next);
+  };
 
   // Effektiver Linienstil rein informativ (kein Setter im Kontrakt → kein Fake).
   // Wir leiten ihn aus dem Modell-Element ab, wenn explizit gesetzt; sonst „—".
@@ -119,29 +183,34 @@ export function AttributesPanel() {
           </label>
         </span>
 
-        {/* Strichstärke (mm) — nur Drawing2D editierbar; Wände erben aus Ebene. */}
-        <span className="attr-key">{t("attr.weight")}</span>
-        <span className="attr-val">
-          <input
-            className="attr-num"
-            type="number"
-            step={0.01}
-            min={0}
-            list="attr-pen-weights"
-            value={sel.weightMm}
-            disabled={!weightEditable}
-            title={weightEditable ? undefined : t("attr.inheritedFromLayer")}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isFinite(v)) host.onSetSelectionWeight(v);
-            }}
-          />
-          <datalist id="attr-pen-weights">
-            {PEN_WEIGHTS.map((w) => (
-              <option key={w} value={w} />
-            ))}
-          </datalist>
-        </span>
+        {/* Strichstärke (mm) — Wand/Decke/Drawing2D, mit Nach-Ebene/Nach-Bauteil/
+            eigener-Wert-Quelle; andere Elementarten erben stets aus der Kategorie. */}
+        {sourceRow(
+          "attr.weight",
+          weightEditable,
+          weightUi,
+          onWeightSourceChange,
+          <>
+            <input
+              className="attr-num"
+              style={{ width: 72 }}
+              type="number"
+              step={0.01}
+              min={0}
+              list="attr-pen-weights"
+              value={sel.weightMm}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) host.onSetSelectionWeight(v);
+              }}
+            />
+            <datalist id="attr-pen-weights">
+              {PEN_WEIGHTS.map((w) => (
+                <option key={w} value={w} />
+              ))}
+            </datalist>
+          </>,
+        )}
 
         {/* Linienstil — read-only/informativ (kein Setter im Kontrakt). */}
         <span className="attr-key">{t("attr.lineStyle")}</span>
@@ -152,26 +221,36 @@ export function AttributesPanel() {
 
       {/* ── Füllung (Vordergrund/Hintergrund + Schraffur) ─────────────── */}
       {/* Vordergrund = Muster-/Schraffurfarbe, Hintergrund = Füllfarbe/Poché.
-          Beide sind Overrides mit Default „Nach System" (erben vom Bauteil);
-          `background` ist der Nachfolger des alten reinen `fillColor`-Feldes. */}
+          Jedes Feld: Nach Ebene (LayerCategory erzwingt den Wert) / Nach Bauteil
+          (erbt vom Component-Manager, Default) / eigener Wert (Override). */}
       <div className="attr-section-label">{t("attr.fill")}</div>
       <div className="attr-grid">
-        <span className="attr-key">{t("attr.foreground")}</span>
-        {overrideColor(sel.foreground, host.onSetSelectionForeground)}
+        {sourceRow(
+          "attr.foreground",
+          pocheEditable,
+          fgUi,
+          onForegroundSourceChange,
+          colorValue(sel.foreground, host.onSetSelectionForeground),
+        )}
 
-        <span className="attr-key">{t("attr.background")}</span>
-        {overrideColor(sel.background, host.onSetSelectionBackground)}
+        {sourceRow(
+          "attr.background",
+          pocheEditable,
+          bgUi,
+          onBackgroundSourceChange,
+          colorValue(sel.background, host.onSetSelectionBackground),
+        )}
 
-        <span className="attr-key">{t("attr.hatch")}</span>
-        <span className="attr-val">
+        {sourceRow(
+          "attr.hatch",
+          fillEditable,
+          hatchUi,
+          onHatchSourceChange,
           <select
             className="attr-select"
-            value={fillEditable ? sel.fillHatchId ?? "" : ""}
-            disabled={!fillEditable}
-            title={fillEditable ? undefined : t("attr.fillNeedsClosed")}
-            onChange={(e) =>
-              host.onSetSelectionFill(e.target.value || null)
-            }
+            style={{ width: 104 }}
+            value={sel.fillHatchId ?? ""}
+            onChange={(e) => host.onSetSelectionFill(e.target.value || null)}
           >
             <option value="">{t("attr.none")}</option>
             {project.hatches.map((h) => (
@@ -179,8 +258,8 @@ export function AttributesPanel() {
                 {h.name}
               </option>
             ))}
-          </select>
-        </span>
+          </select>,
+        )}
       </div>
 
       {/* ── Maße (informativ, aus der bbox) ───────────────────────────── */}

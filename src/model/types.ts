@@ -501,6 +501,19 @@ export interface LayerCategory {
 }
 
 /**
+ * Quelle eines vererbbaren Attributs (Vordergrund/Hintergrund/Strichstärke/
+ * Schraffur), wenn KEIN expliziter Wert am Element gesetzt ist:
+ *   • "layer"  — „Nach Ebene": die LayerCategory des Elements erzwingt den Wert
+ *     (`color`/`lw`/`hatch`).
+ *   • "object" — „Nach Bauteil": erbt vom Bauteil (Component) bzw. dessen
+ *     bisheriger Fallback-Kette. Das ist auch der Default, wenn das Source-Feld
+ *     fehlt (`undefined`) — damit bleibt das heutige Verhalten unverändert.
+ * Ein gesetzter expliziter Wert (z. B. `foreground`) gewinnt IMMER, unabhängig
+ * von der Source (s. Resolve-Reihenfolge in `plan/generatePlan.ts`).
+ */
+export type AttributeSource = "layer" | "object";
+
+/**
  * Lage der Wandachse (Referenzlinie) über die Dicke der Wand — analog
  * Vectorworks. Gemessen relativ zur Laufrichtung (start→end) mit der
  * leftNormal-Konvention `n = (-u.y, u.x)`:
@@ -553,6 +566,37 @@ export interface Wall {
    * `undefined` = „Nach System" (erben → Component.background → Component.color).
    */
   background?: string;
+  /**
+   * Attribut-Override der Strichstärke (mm Papier) DIESER Wand-Instanz (Umriss/
+   * Schichtfugen). `undefined` = „Nach System" (erben → `strokeWeightSource`).
+   */
+  strokeWeight?: number;
+  /**
+   * Attribut-Override der Schnitt-Schraffur (Hatch Manager) DIESER Wand-Instanz;
+   * überschreibt die Schraffur ALLER Schichten einheitlich. `undefined` =
+   * „Nach System" (erben → `hatchSource`).
+   */
+  hatchId?: string;
+  /**
+   * Quelle des Vordergrunds, wenn kein expliziter `foreground`-Wert gesetzt ist:
+   * "layer" erzwingt die Ebenenfarbe (LayerCategory.color), "object"/`undefined`
+   * (Default) erbt vom Bauteil (heutiges Verhalten).
+   */
+  foregroundSource?: AttributeSource;
+  /** Quelle des Hintergrunds, analog zu {@link Wall.foregroundSource}. */
+  backgroundSource?: AttributeSource;
+  /**
+   * Quelle der Strichstärke, wenn kein explizites `strokeWeight` gesetzt ist:
+   * "layer" erzwingt `LayerCategory.lw`, "object"/`undefined` (Default) fällt auf
+   * die bisherige Kategorie-/Fallback-Strichstärke zurück (heutiges Verhalten).
+   */
+  strokeWeightSource?: AttributeSource;
+  /**
+   * Quelle der Schraffur, wenn kein explizites `hatchId` gesetzt ist: "layer"
+   * erzwingt `LayerCategory.hatch`, "object"/`undefined` (Default) erbt vom
+   * Bauteil (heutiges Verhalten).
+   */
+  hatchSource?: AttributeSource;
   /**
    * Lage der Wandachse über die Dicke. Fehlt sie, gilt "center" (= heutiges
    * Verhalten: Schichten symmetrisch −T/2 … +T/2 um die Achse).
@@ -625,6 +669,25 @@ export interface Ceiling {
    * `undefined` = „Nach System" (erben → Component.background → Component.color).
    */
   background?: string;
+  /**
+   * Attribut-Override der Strichstärke (mm Papier) DIESER Decken-Instanz.
+   * `undefined` = „Nach System" (erben → `strokeWeightSource`).
+   */
+  strokeWeight?: number;
+  /**
+   * Attribut-Override der Schraffur (Hatch Manager) DIESER Decken-Instanz;
+   * überschreibt sowohl die Schnitt- als auch die Ansichts-Schraffur des
+   * Bauteils. `undefined` = „Nach System" (erben → `hatchSource`).
+   */
+  hatchId?: string;
+  /** Quelle des Vordergrunds, analog zu {@link Wall.foregroundSource}. */
+  foregroundSource?: AttributeSource;
+  /** Quelle des Hintergrunds, analog zu {@link Wall.backgroundSource}. */
+  backgroundSource?: AttributeSource;
+  /** Quelle der Strichstärke, analog zu {@link Wall.strokeWeightSource}. */
+  strokeWeightSource?: AttributeSource;
+  /** Quelle der Schraffur, analog zu {@link Wall.hatchSource}. */
+  hatchSource?: AttributeSource;
   /**
    * Vertikale Bindung der OBERKANTE (OK). Fehlt sie, sitzt die OK an der
    * Oberkante des Geschosses (baseElevation + floorHeight).
@@ -914,6 +977,25 @@ export interface Drawing2D {
    * vor dem LineStyle-Gewicht und der Kategorie-Strichstärke.
    */
   weightMm?: number;
+  /**
+   * Quelle des Vordergrunds (Schraffur-Musterfarbe), wenn kein explizites
+   * `foreground` gesetzt ist: "layer" erzwingt die Ebenenfarbe
+   * (LayerCategory.color), "object"/`undefined` (Default) = heutiges Verhalten
+   * (kein Bauteil-Bezug bei Drawing2D → HatchStyle.color-Fallback).
+   */
+  foregroundSource?: AttributeSource;
+  /** Quelle des Hintergrunds (Füllfarbe), analog zu `foregroundSource`. */
+  backgroundSource?: AttributeSource;
+  /**
+   * Quelle der Strichstärke, wenn kein explizites `weightMm` gesetzt ist:
+   * "layer" erzwingt `LayerCategory.lw` (unter Umgehung des LineStyle-Gewichts),
+   * "object"/`undefined` (Default) = heutige Kette (LineStyle.weight ?? Kategorie).
+   */
+  strokeWeightSource?: AttributeSource;
+  /** Quelle der Schraffur, wenn kein explizites `hatchId` gesetzt ist: "layer"
+   * erzwingt `LayerCategory.hatch`, "object"/`undefined` (Default) = heutiges
+   * Verhalten (ohne `hatchId` keine Schraffur). */
+  hatchSource?: AttributeSource;
 }
 
 /**
@@ -1189,6 +1271,16 @@ export const flattenCategories = (cats: LayerCategory[]): LayerCategory[] => {
   walk(cats);
   return out;
 };
+
+/**
+ * Liefert die LayerCategory zu einem Kategorie-Code (Baum durchsucht), oder
+ * `undefined`, falls der Code auf keine Ebene verweist (verwaister
+ * `categoryCode`). Nicht-werfend, damit die Attribut-Resolve-Kette
+ * (`plan/generatePlan.ts`) robust auf einen fehlenden Ebenen-Wert zurückfallen
+ * kann (→ Bauteil-Fallback).
+ */
+export const getLayerCategory = (project: Project, code: string): LayerCategory | undefined =>
+  flattenCategories(project.layers).find((c) => c.code === code);
 
 /** Menge aller Codes sichtbarer Kategorien (Baum berücksichtigt). */
 export const collectVisibleCodes = (layers: LayerCategory[]): Set<string> => {

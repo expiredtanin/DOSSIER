@@ -15,6 +15,7 @@ import { useContext } from "react";
 import { PanelHostContext } from "./types";
 import type { DisplayMode } from "./types";
 import type {
+  AttributeSource,
   CeilingType,
   Component,
   ContextObject,
@@ -139,9 +140,17 @@ export interface PanelHostValue {
   selection: Selection | null;
   /** Setzt die (Strich-)Farbe der aktuellen Selektion (Wand oder Drawing2D). */
   onSetSelectionColor: (color: string) => void;
-  /** Setzt die Strichstärke (mm) — wirkt NUR auf Drawing2D (sonst No-op). */
+  /**
+   * Setzt den Strichstärke-Override (mm, „eigener Wert") — Wand/Decke
+   * (`strokeWeight`) oder Drawing2D (`weightMm`). Die Quelle (Ebene/Bauteil)
+   * setzt {@link onSetSelectionStrokeWeightSource}.
+   */
   onSetSelectionWeight: (weightMm: number) => void;
-  /** Setzt/entfernt die Füllschraffur — wirkt NUR auf Drawing2D (sonst No-op). */
+  /**
+   * Setzt/entfernt den Schraffur-Override („eigener Wert") — Wand, Decke oder
+   * Drawing2D (geschlossene Formen). `null` löscht den Wert (fällt zurück auf
+   * die Quelle, siehe {@link onSetSelectionHatchSource}).
+   */
   onSetSelectionFill: (hatchId: string | null) => void;
   /**
    * Setzt/entfernt die Vollton-Füllfarbe — wirkt NUR auf Drawing2D (sonst No-op).
@@ -149,15 +158,30 @@ export interface PanelHostValue {
    */
   onSetSelectionFillColor: (color: string | null) => void;
   /**
-   * Setzt/entfernt den Vordergrund-Override (Muster-/Schraffurfarbe) der
-   * Selektion — Wand, Decke oder geschlossene Drawing2D. `null` = „Nach System".
+   * Setzt/entfernt den Vordergrund-Override (Muster-/Schraffurfarbe, „eigener
+   * Wert") der Selektion — Wand, Decke oder geschlossene Drawing2D. `null` =
+   * „Nach System" (fällt zurück auf die Quelle, siehe
+   * {@link onSetSelectionForegroundSource}).
    */
   onSetSelectionForeground: (color: string | null) => void;
   /**
-   * Setzt/entfernt den Hintergrund-Override (Füllfarbe/Poché) der Selektion —
-   * Wand, Decke oder geschlossene Drawing2D. `null` = „Nach System".
+   * Setzt/entfernt den Hintergrund-Override (Füllfarbe/Poché, „eigener Wert")
+   * der Selektion — Wand, Decke oder geschlossene Drawing2D. `null` = „Nach
+   * System" (siehe {@link onSetSelectionBackgroundSource}).
    */
   onSetSelectionBackground: (color: string | null) => void;
+  /**
+   * Setzt die Quelle des Vordergrunds, wenn KEIN „eigener Wert" gilt: "layer" =
+   * Nach Ebene, "object" = Nach Bauteil. Löscht dabei IMMER den expliziten
+   * Vordergrund-Override (die Quelle gewinnt nur, wenn kein Wert gesetzt ist).
+   */
+  onSetSelectionForegroundSource: (source: AttributeSource) => void;
+  /** Setzt die Quelle des Hintergrunds, analog zu {@link onSetSelectionForegroundSource}. */
+  onSetSelectionBackgroundSource: (source: AttributeSource) => void;
+  /** Setzt die Quelle der Strichstärke, analog zu {@link onSetSelectionForegroundSource}. */
+  onSetSelectionStrokeWeightSource: (source: AttributeSource) => void;
+  /** Setzt die Quelle der Schraffur, analog zu {@link onSetSelectionForegroundSource}. */
+  onSetSelectionHatchSource: (source: AttributeSource) => void;
   /**
    * Skaliert die Selektion auf Zielbreite×-höhe (Meter) um einen Anker
    * (fx/fy ∈ [0,1] relativ zur bbox; 0,0 = oben-links … 1,1 = unten-rechts).
