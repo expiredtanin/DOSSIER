@@ -802,6 +802,30 @@ export const de = {
   "exportDxf.unitsNote":
     "Modell-Space in Metern (1:1). Layer entsprechen den Ebenen des Projekts; beim Plot beliebig skalierbar.",
 
+  // ── Datei-Menü (Burger, ganz rechts der Oberleiste) ──────────────────────
+  "file.menu": "Datei",
+  "file.save": "Projekt speichern",
+  "file.open": "Projekt öffnen",
+  "file.import": "DXF/DWG importieren…",
+  "file.exportPdf": "Als PDF exportieren…",
+  "file.exportDxf": "Als DXF exportieren…",
+
+  // ── Einstellungs-Fenster ──────────────────────────────────────────────────
+  "topbar.settings": "Einstellungen",
+  "topbar.settings.hint": "Einstellungen öffnen (Darstellungsfarben, Projekt)",
+  "settings.title": "Einstellungen",
+  "settings.section.display": "Darstellung",
+  "settings.marqueeColor": "Auswahlrahmen-Farbe",
+  "settings.marqueeColor.hint":
+    "Farbe des Auswahlrahmens beim Aufziehen einer Auswahl (Marquee) im Grundriss.",
+  "settings.snapColor": "Snap-/Endpunkt-Farbe",
+  "settings.snapColor.hint":
+    "Farbe der Snap-/Endpunkt-Hervorhebung beim Zeichnen/Editieren im Grundriss.",
+  "settings.section.project": "Projekt",
+  "settings.referenceElevation": "Referenzhöhe EG (m ü. M.)",
+  "settings.referenceElevation.hint":
+    "Nur gespeichert — wird noch nicht verwendet. Folgt für Terrain-Draping/reale Höhen relativ zum Erdgeschoss.",
+
   // ── Drag & Drop (App-weiter Datei-Drop) ──────────────────────────────────
   "drop.hint": "DXF/DWG-Datei hier ablegen",
 

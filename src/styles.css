@@ -3,10 +3,69 @@
    das DOSSIER-Look: aktive Zeile als Petrol-Pille, nicht-aktive gedimmt,
    ausgeblendete grau; Augen-Schalter, Farbtupfer, eingerückte Kinder. */
 
+/* Dark ist der feste Standard (Nutzer-Wunsch, unabhängig von OS/Browser-
+   Präferenz — vorher hing das an `prefers-color-scheme` und zeigte je nach
+   Umgebung fälschlich Light). Light bleibt als Opt-in erhalten (`[data-theme=
+   "light"]`) für ein späteres manuelles Umschalt-Feature. */
 :root {
+  color-scheme: dark;
+  /* Gestufte Elevations-Palette (Wunsch: dunkler + mehr Tiefe). Tiefster
+     Grund hinten, Flächen werden nach vorn schrittweise heller — leicht
+     kühl-neutral, harmoniert mit dem Petrol-Akzent.
+       --bg      Ebene 0  — App-Grund / Rinnen hinter allem (am dunkelsten)
+       --panel   Ebene 1  — Oberleiste, Docks, Panel-Körper
+       --panel-2 Ebene 2  — angehobene Flächen: Panel-Köpfe, Hover-Zeilen
+       --input   versenkt  — Eingabefelder (dunkler als die Fläche → Inset) */
+  /* Zwei-Ton-Grundlage (Nutzer-Vorgabe): Fast-Schwarz hinten, dunkles
+     Neutralgrau für die Flächen. Neutral (kein Blaustich), mit dezenten
+     Elevations-Schritten für Tiefe. */
+  --bg: #0e0e0e;
+  --panel: #1d1d1d;
+  --panel-2: #262626;
+  --input: #0a0a0a;
+  --line: #2b2b2b;
+  --border: #383838;
+
+  /* --sheet bleibt bewusst hell (#f0f0f0): das Zeichenblatt ist immer
+     „Papier", unabhängig vom UI-Theme (Wunsch des Nutzers). */
+  --sheet: #f0f0f0;
+
+  --ink: #ededed;
+  --ink-2: #a8a8a8;
+  --muted: #6e6e6e;
+  --label: #c8c8c8;
+
+  /* Akzent NEUTRAL (kein Petrol-Grün, Nutzer-Vorgabe): helles Neutralgrau für
+     aktive/ausgewählte Flächen; weiße Schrift darauf bleibt lesbar. Hover/Dim
+     sind dezente weiße Aufhellungen. */
+  --accent: #4d4d4d;
+  --accent-light: #5e5e5e;
+  --accent-dim: rgba(255, 255, 255, 0.07);
+  --accent-border: rgba(255, 255, 255, 0.22);
+  --active: #6a6a6a;
+  --active-light: #7d7d7d;
+  --active-dim: rgba(255, 255, 255, 0.1);
+
+  --wall: #c8ccd2;
+  --swing: #7e8794;
+  --danger: #c85050;
+  --danger-light: #d86060;
+  /* Tiefere Schatten für klare Schichtung auf dunklem Grund. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 3px 12px rgba(0, 0, 0, 0.55);
+  --shadow-3: 0 12px 34px rgba(0, 0, 0, 0.62);
+  --overlay: rgba(0, 0, 0, 0.62);
+
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
+}
+
+/* Light-Palette als Opt-in (aktuell von nichts gesetzt — bereit für einen
+   künftigen manuellen Theme-Umschalter in den Einstellungen). */
+:root[data-theme="light"] {
   color-scheme: light;
 
-  /* Flächen */
   --bg: #e0dbd4;
   --panel: #e0dbd4;
   --panel-2: #d4cfc8;
@@ -14,17 +73,13 @@
   --line: #d4cfc8;
   --border: #c8c2ba;
 
-  /* Zeichenblatt-Hintergrund (Plan) — bewusst fix, unabhängig von der Panel-
-     Farbe: helles „Papier" im Light-Mode. */
   --sheet: #f0f0f0;
 
-  /* Schrift */
   --ink: #1a1a18;
   --ink-2: #555550;
   --muted: #8a8580;
   --label: #1a1a18;
 
-  /* Petrol-Akzent + aktiver Marker */
   --accent: #2f5d54;
   --accent-light: #4a8a7c;
   --accent-dim: #e6efed;
@@ -33,11 +88,9 @@
   --active-light: #2f8275;
   --active-dim: rgba(26, 101, 90, 0.12);
 
-  /* Plan-/3D-Töne */
   --wall: #2b3039;
   --swing: #9aa3b2;
 
-  /* Warn-/Gefahr-Akzente (z. B. Löschen). */
   --danger: #8a1a1a;
   --danger-light: #b03030;
 
@@ -45,61 +98,6 @@
   --shadow-2: 0 2px 8px rgba(26, 26, 24, 0.14);
   --shadow-3: 0 6px 24px rgba(26, 26, 24, 0.18);
   --overlay: rgba(26, 26, 24, 0.36);
-
-  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    sans-serif;
-  --font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    /* Gestufte Elevations-Palette (Wunsch: dunkler + mehr Tiefe). Tiefster
-       Grund hinten, Flächen werden nach vorn schrittweise heller — leicht
-       kühl-neutral, harmoniert mit dem Petrol-Akzent.
-         --bg      Ebene 0  — App-Grund / Rinnen hinter allem (am dunkelsten)
-         --panel   Ebene 1  — Oberleiste, Docks, Panel-Körper
-         --panel-2 Ebene 2  — angehobene Flächen: Panel-Köpfe, Hover-Zeilen
-         --input   versenkt  — Eingabefelder (dunkler als die Fläche → Inset) */
-    /* Zwei-Ton-Grundlage (Nutzer-Vorgabe): Fast-Schwarz hinten, dunkles
-       Neutralgrau für die Flächen. Neutral (kein Blaustich), mit dezenten
-       Elevations-Schritten für Tiefe. */
-    --bg: #0e0e0e;
-    --panel: #1d1d1d;
-    --panel-2: #262626;
-    --input: #0a0a0a;
-    --line: #2b2b2b;
-    --border: #383838;
-
-    /* --sheet bleibt bewusst hell (#f0f0f0) wie im Light-Mode: das Zeichenblatt
-       ist immer „Papier", unabhängig vom UI-Theme (Wunsch des Nutzers). */
-
-    --ink: #ededed;
-    --ink-2: #a8a8a8;
-    --muted: #6e6e6e;
-    --label: #c8c8c8;
-
-    /* Akzent NEUTRAL (kein Petrol-Grün mehr, Nutzer-Vorgabe): helles Neutralgrau
-       für aktive/ausgewählte Flächen; weiße Schrift darauf bleibt lesbar. Hover/
-       Dim sind dezente weiße Aufhellungen. */
-    --accent: #4d4d4d;
-    --accent-light: #5e5e5e;
-    --accent-dim: rgba(255, 255, 255, 0.07);
-    --accent-border: rgba(255, 255, 255, 0.22);
-    --active: #6a6a6a;
-    --active-light: #7d7d7d;
-    --active-dim: rgba(255, 255, 255, 0.1);
-
-    --wall: #c8ccd2;
-    --swing: #7e8794;
-    --danger: #c85050;
-    --danger-light: #d86060;
-    /* Tiefere Schatten für klare Schichtung auf dunklem Grund. */
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
-    --shadow-2: 0 3px 12px rgba(0, 0, 0, 0.55);
-    --shadow-3: 0 12px 34px rgba(0, 0, 0, 0.62);
-    --overlay: rgba(0, 0, 0, 0.62);
-  }
 }
 
 * {
@@ -155,7 +153,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 14px;
+  padding: 4px 14px;
   height: 56px;
   border-bottom: 1px solid var(--line);
   /* Oberleiste auf Ebene 1 (angehoben über dem App-Grund) + weicher Schatten
@@ -254,15 +252,17 @@ body {
 .tb-btn {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border);
-  background: var(--input);
-  color: var(--ink);
+  /* Gleiche stets-dunkle Fläche wie .tb-dd-trigger — einheitlicher Pillen-
+     Look über die ganze Oberleiste. */
+  border: 1px solid #4a4a4a;
+  background: #2c2c2c;
+  color: #e8e8e8;
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: 8px;
   cursor: pointer;
   outline: none;
   transition: border-color 0.14s, background-color 0.14s, color 0.14s,
@@ -270,7 +270,7 @@ body {
 }
 .tb-btn:hover:not(:disabled) {
   border-color: var(--accent-border);
-  background-color: var(--accent-dim);
+  background-color: rgba(255, 255, 255, 0.1);
   color: var(--accent);
 }
 .tb-btn:focus-visible {
@@ -278,7 +278,7 @@ body {
   box-shadow: 0 0 0 2px var(--accent-dim);
 }
 .tb-btn:disabled {
-  color: var(--muted);
+  color: #8a8a8a;
   opacity: 0.55;
   cursor: default;
 }
@@ -320,20 +320,20 @@ body {
 
 /* Pillen-Toggle der Oberleiste (Referenzlinien). */
 .tb-toggle {
-  border: 1px solid var(--border);
-  background: var(--input);
-  color: var(--ink-2);
+  border: 1px solid #4a4a4a;
+  background: #2c2c2c;
+  color: #e8e8e8;
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.03em;
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.14s, color 0.14s, border-color 0.14s;
 }
 .tb-toggle:hover {
-  background: var(--accent-dim);
+  background: rgba(255, 255, 255, 0.1);
   border-color: var(--accent-border);
   color: var(--accent);
 }
@@ -346,16 +346,17 @@ body {
 /* ── DOSSIER-Grundprimitive: Segmentpille · Icon-Knopf · Zoom-Cluster ──────── */
 
 /* Segmentpille (3er/4er): Aussencontainer rund, Zellen gleich hoch, interne
-   Trenner über border-left. Genutzt für Zoom-Aktionen, B/I/U, L/C/R. */
+   Trenner über border-left. Genutzt für Zoom-Aktionen, B/I/U, L/C/R. Gleiche
+   stets-dunkle Fläche wie .tb-dd-trigger/.tb-btn (einheitlicher Pillen-Look). */
 .tb-seg {
   display: inline-flex;
   align-items: stretch;
   height: 24px;
   box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
   overflow: hidden;
-  background: var(--input);
+  background: #2c2c2c;
   flex: 0 0 auto;
 }
 /* Akzent-Rand, wenn ein Text-Ziel selektiert ist (Auswahl-Bewusstsein). */
@@ -370,9 +371,9 @@ body {
   min-width: 26px;
   padding: 0 6px;
   border: none;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid #4a4a4a;
   background: transparent;
-  color: var(--ink-2);
+  color: #b0b0b0;
   cursor: pointer;
   transition: background 0.14s, color 0.14s;
 }
@@ -380,8 +381,8 @@ body {
   border-left: none;
 }
 .tb-seg-cell:hover:not(:disabled) {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: rgba(255, 255, 255, 0.1);
+  color: #f0f0f0;
 }
 .tb-seg-cell.active {
   background: var(--accent);
@@ -392,7 +393,7 @@ body {
   cursor: default;
 }
 
-/* Quadratischer Icon-Knopf (BarButton) — Export-Pillen (PDF/DXF). */
+/* Quadratischer Icon-Knopf (BarButton). */
 .tb-iconbtn {
   display: inline-flex;
   align-items: center;
@@ -401,15 +402,15 @@ body {
   height: 24px;
   box-sizing: border-box;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--input);
-  color: var(--ink-2);
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  background: #2c2c2c;
+  color: #b0b0b0;
   cursor: pointer;
   transition: background 0.14s, color 0.14s, border-color 0.14s;
 }
 .tb-iconbtn:hover:not(:disabled) {
-  background: var(--accent-dim);
+  background: rgba(255, 255, 255, 0.1);
   border-color: var(--accent-border);
   color: var(--accent);
 }
@@ -422,7 +423,7 @@ body {
 .tb-zoomcluster {
   display: grid;
   grid-template-columns: auto auto;
-  gap: 4px 6px;
+  gap: 6px;
   align-items: center;
 }
 .tb-stat {
@@ -437,6 +438,10 @@ body {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--input);
+  /* Ring (Box-Shadow statt Border) für „am Massstab" — startet unsichtbar
+     (Alpha 0) und blendet weich ein/aus, statt die Fläche aufzuhellen. */
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0);
+  transition: box-shadow 0.25s ease;
 }
 .tb-stat-scale {
   font-family: var(--font-mono);
@@ -456,20 +461,16 @@ body {
   width: 100%;
   text-align: center;
 }
-/* „am Massstab" (Live == gewählter Massstab): Akzent-Hervorhebung. */
+/* „am Massstab" (Live == gewählter Massstab): weisser Ring statt aufgehellter
+   Fläche — blendet dynamisch ein/aus (s. transition oben), Fläche bleibt
+   unverändert. */
 .tb-stat-atscale {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-}
-.tb-stat-atscale .tb-stat-scale {
-  border-bottom-color: var(--accent-border);
-}
-.tb-stat-atscale .tb-stat-zoom {
-  color: var(--accent);
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
 }
 .tb-zoomcluster-right {
   display: inline-flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
 }
 
@@ -477,7 +478,7 @@ body {
 .tb-textgroup {
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 6px;
 }
 .tb-textgroup-row {
   display: inline-flex;
@@ -517,27 +518,71 @@ body {
   text-align: left;
 }
 
-.brand {
+/* Marken-Gruppe: Wortmarke + kleiner Icon-Stapel daneben (Settings/Ressourcen),
+   wie im DOSSIER-Rhino-Plugin (ToolbarApp.jsx: Logo + vertikal gestapelte
+   Settings-Icons direkt daneben, vor dem ersten Trenner). */
+.tb-brandgroup {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 650;
-  font-size: 16px;
-  letter-spacing: 0.2px;
+  gap: 6px;
+  flex: 0 0 auto;
 }
-
-.logo {
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  line-height: 1;
+}
+.brand-word {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.brand-dot {
   color: var(--accent);
-  font-size: 18px;
 }
 
 .tag {
   font-weight: 500;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 1px 7px;
+}
+
+/* Icon-Stapel neben der Wortmarke (Settings/Ressourcen) — schmal, dezent. */
+.tb-brandicons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tb-brandicon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 17px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.tb-brandicon .tb-ico {
+  font-size: 13px;
+}
+.tb-brandicon:hover {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
+.tb-brandicon.active {
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 .project-name {
@@ -625,9 +670,9 @@ body {
   grid-template-columns: repeat(4, auto);
 }
 .view-icon {
-  border: 1px solid var(--border);
-  background: var(--input);
-  color: var(--ink-2);
+  border: 1px solid #4a4a4a;
+  background: #2c2c2c;
+  color: #b0b0b0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -639,8 +684,8 @@ body {
   transition: background 0.14s, color 0.14s, border-color 0.14s;
 }
 .view-icon:hover:not(:disabled) {
-  background: var(--accent-dim);
-  color: var(--ink);
+  background: rgba(255, 255, 255, 0.1);
+  color: #f0f0f0;
   border-color: var(--accent-border);
 }
 .view-icon.active {
@@ -681,7 +726,7 @@ body {
 .tb-group.tb-stack {
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 6px;
 }
 .tb-field-row {
   justify-content: space-between;
@@ -2852,10 +2897,18 @@ body {
   justify-content: space-between;
   gap: 8px;
   flex: 0 0 auto;
-  padding: 9px 12px;
+  /* Feste Höhe statt nur Padding: Panels OHNE Darstellungsmodus-Dropdown
+     (nur Titel) hatten sonst einen niedrigeren Kopf als Panels MIT Dropdown
+     — beim Wechseln/Stapeln "sprang" die Kopfzeile sichtbar. box-sizing
+     zieht das Padding von der festen Höhe ab, align-items:center zentriert
+     Titel bzw. Titel+Dropdown gleichermassen. */
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
   border-bottom: 1px solid var(--line);
-  /* Panel-Kopf leicht angehoben (Ebene 2) → setzt sich vom Körper ab. */
-  background: var(--panel-2);
+  /* Uniform mit dem Panel-Körper (Nutzer-Wunsch): kein separater hellerer
+     Kopf-Balken mehr, nur die Trennlinie grenzt Kopf/Körper ab. */
+  background: var(--panel);
 }
 .panel-title {
   min-width: 0;
@@ -2863,7 +2916,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: #f0f0f0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2876,38 +2929,15 @@ body {
   padding: 10px 8px 16px;
 }
 
-/* ── Darstellungsmodus-Dropdown (kompaktes Pill, vgl. .res-select) ────────── */
+/* ── Darstellungsmodus-Dropdown (Panel-Kopf) ──────────────────────────────
+   Nutzt jetzt die gemeinsame Dropdown-Komponente (.tb-dd-trigger) für den
+   dunklen, abgerundeten Look; hier nur noch die Breitenbegrenzung + kompakte
+   Panel-Kopf-Typografie, die dem generischen Trigger fehlen. */
 .display-mode {
   flex: 0 0 auto;
-  appearance: none;
-  -webkit-appearance: none;
   max-width: 160px;
-  font-family: var(--font);
   font-size: 10px;
-  font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--ink-2);
-  background-color: var(--input);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M0 0l5 6 5-6z' fill='%23888'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 22px 4px 10px;
-  cursor: pointer;
-  outline: none;
-  text-overflow: ellipsis;
-  transition: border-color 0.14s, background-color 0.14s, color 0.14s,
-    box-shadow 0.14s;
-}
-.display-mode:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background-color: var(--panel);
-}
-.display-mode:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
 }
 
 /* ── Layout-Menü (Oberleiste: benannte Layouts sichern/laden) ─────────────── */
@@ -2952,14 +2982,18 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
-  background: var(--input);
-  color: var(--ink);
+  /* Trigger trägt dieselbe stets-dunkle Fläche wie sein Popover (.ctx-menu) —
+     beide sollen wie EIN durchgehendes Element wirken statt heller Knopf +
+     dunkles Menü darunter. .ctx-menu hängt per Portal ausserhalb dieses
+     DOM-Zweigs, darum hier dieselben Werte dupliziert statt geerbt. */
+  border: 1px solid #4a4a4a;
+  background: #2c2c2c;
+  color: #e8e8e8;
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
   padding: 3px 8px 3px 8px;
-  border-radius: 999px;
+  border-radius: 8px;
   cursor: pointer;
   outline: none;
   transition: border-color 0.14s, background-color 0.14s, color 0.14s,
@@ -2967,7 +3001,7 @@ body {
 }
 .tb-dd-trigger:hover:not(:disabled) {
   border-color: var(--accent-border);
-  background-color: var(--accent-dim);
+  background-color: rgba(255, 255, 255, 0.1);
   color: var(--accent);
 }
 .tb-dd-trigger.active,
@@ -2976,7 +3010,7 @@ body {
   box-shadow: 0 0 0 2px var(--accent-dim);
 }
 .tb-dd-trigger:disabled {
-  color: var(--muted);
+  color: #8a8a8a;
   opacity: 0.55;
   cursor: default;
 }
@@ -2989,7 +3023,7 @@ body {
 }
 .tb-dd-chevron {
   flex: 0 0 auto;
-  color: var(--muted);
+  color: #8a8a8a;
 }
 .tb-dd-trigger:hover:not(:disabled) .tb-dd-chevron {
   color: var(--accent);
@@ -4212,6 +4246,59 @@ body {
   cursor: not-allowed;
 }
 
+/* ── Einstellungs-Fenster (SettingsDialog): Farbfelder + Akzent-Presets ────
+   Nutzt sonst dieselben imp-*-Klassen wie die anderen Dialoge. */
+.settings-field-label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.settings-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.settings-color-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.settings-accent-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.settings-accent-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.12s;
+}
+.settings-accent-btn:hover {
+  transform: scale(1.08);
+}
+.settings-accent-btn.active {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+.settings-num-input {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--input);
+  color: var(--ink);
+  width: 120px;
+}
+.settings-num-input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+}
+
 /* ── App-weites Drop-Feedback ──────────────────────────────────────────────
    Dezenter Rahmen + Hinweis, solange eine Datei über die App gezogen wird. */
 .drop-feedback {
@@ -5121,4 +5208,54 @@ body {
 .balance-area {
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* ── Fenster-Drag-Region (randloses Electron-Fenster) ────────────────────────
+   Ohne native Titelleiste (frame:false) muss die Oberleiste als Drag-Handle
+   dienen; alle interaktiven Elemente darin bekommen `no-drag` zurück, sonst
+   liesse sich nichts mehr anklicken. Wirkt nur unter Electron/Chromium
+   (WebKit/Firefox ignorieren `-webkit-app-region` ergebnislos, harmlos). */
+.topbar {
+  -webkit-app-region: drag;
+}
+.topbar button,
+.topbar select,
+.topbar input,
+.topbar a,
+.topbar [role="button"],
+.topbar [role="listbox"] {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Custom Fenstersteuerung (WindowControls.tsx) — eigener Look statt OS-
+   Fensterknöpfen, ganz rechts in der Oberleiste (nur sichtbar unter
+   Electron/randlosem Fenster). */
+.win-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+}
+.win-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.win-btn:hover {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
+.win-btn-close:hover {
+  background: #e5484d;
+  color: #fff;
 }

@@ -1144,6 +1144,15 @@ export interface Project {
    * aufgelöst — generiert Wall[]-Objekte bei Bedarf.
    */
   parametricWalls?: ParametricWall[];
+  /**
+   * Referenzhöhe des Erdgeschosses in Metern über Meer (m ü. M.), editierbar
+   * im Einstellungs-Fenster. Optional, damit bestehende Projekte ohne diesen
+   * Wert gültig bleiben (Default: unbestimmt/0). NUR Speicherfeld — die
+   * eigentliche Verwendung (Terrain-Draping/reale Höhen relativ dazu, siehe
+   * HANDOVER GEO-BLOCK) ist ein separater, späterer Task und liest dieses
+   * Feld noch nicht.
+   */
+  referenceElevationMasl?: number;
 }
 
 // ── Helfer ───────────────────────────────────────────────────────────────

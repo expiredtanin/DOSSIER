@@ -22,6 +22,7 @@ import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { quantizePen } from "../export/sceneToPrintSvg";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
 import { dashHasDot } from "../ui/lineSegments";
+import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
@@ -79,8 +80,11 @@ const mmToPx = (mm: number): number => (mm / 25.4) * dpi();
 
 // Zoom-Grenzen relativ zur eingepassten Default-Ansicht. Kleinere viewBox-
 // Breite = stärkerer Zoom. ZOOM_MAX → max. Hineinzoomen, ZOOM_MIN → Herauszoomen.
-const ZOOM_MAX = 50; // bis 50× hinein
-const ZOOM_MIN = 0.2; // bis 5× heraus
+// Grosszügig bemessen (CAD-Anspruch: vom Milimeter-Detail bis zum Siedlungs-
+// Kontext) statt der früheren 250×-Spanne (50/0.2), die für Detailarbeit an
+// einem Gebäude deutlich zu eng war.
+const ZOOM_MAX = 20000; // bis 20 000× hinein (Sub-Millimeter-Details)
+const ZOOM_MIN = 0.005; // bis 200× heraus (Siedlungs-/Site-Kontext)
 const WHEEL_STEP = 0.0015; // Empfindlichkeit des Mausrads
 
 // Schwelle (Bildschirm-Pixel), ab der ein Links-Ziehen als Marquee gilt; darunter
@@ -320,6 +324,16 @@ export interface PlanViewProps {
   selectedDrawingIds?: string[];
   /** Griff-Zieh-Treiber: Live-Bewegung (gesnappt) + Abschluss. */
   gripHandlers?: GripHandlers;
+  /**
+   * Farbe des Auswahlrahmens (Marquee-Ziehauswahl). Einstellbar im
+   * Einstellungs-Fenster (State in ViewSlice); Default = Akzent „Yuyake".
+   */
+  marqueeColor?: string;
+  /**
+   * Farbe der Snap-/Endpunkt-Hervorhebung (Werkzeug-Overlay). Einstellbar im
+   * Einstellungs-Fenster (State in ViewSlice); Default = Akzent „Sora".
+   */
+  snapColor?: string;
 }
 
 /** Treiber für das Ziehen von Editier-Griffen (von App bereitgestellt). */
@@ -370,6 +384,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       selectedDrawingId,
       selectedDrawingIds,
       gripHandlers,
+      marqueeColor = DEFAULT_MARQUEE_COLOR,
+      snapColor = DEFAULT_SNAP_COLOR,
     },
     ref,
   ) {
@@ -1884,6 +1900,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           y={marqueeRect.y}
           width={marqueeRect.w}
           height={marqueeRect.h}
+          style={{ stroke: marqueeColor, fill: marqueeColor }}
           pointerEvents="none"
         />
       )}
@@ -1965,6 +1982,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           draft={toolHandlers.draft}
           toScreen={toScreen}
           vbPerPx={1 / (meetScale(view, svgRef.current) ?? 1)}
+          snapColor={snapColor}
         />
       )}
       </svg>
@@ -1983,10 +2001,12 @@ function DraftOverlay({
   draft,
   toScreen,
   vbPerPx,
+  snapColor,
 }: {
   draft: { preview: DraftShape[]; vertices: Vec2[]; snap?: SnapResult | null };
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
+  snapColor: string;
 }) {
   const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
   const markSize = 4.5 * vbPerPx; // halbe Kantenlänge des Snap-Markers (gleich groß wie Stützpunkt)
@@ -2030,7 +2050,7 @@ function DraftOverlay({
       })}
       {/* Snap-Marker + optionale Ortho-Hilfslinie. */}
       {draft.snap && (
-        <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} />
+        <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} />
       )}
     </g>
   );
@@ -2041,13 +2061,22 @@ function SnapMarker({
   snap,
   toScreen,
   size,
+  color,
 }: {
   snap: SnapResult;
   toScreen: (v: Vec2) => Vec2;
   size: number;
+  /** Farbe des Snap-Glyphs (einstellbar, Default = Akzent „Sora"). */
+  color: string;
 }) {
   const s = toScreen(snap.point);
   const r = size;
+  // Inline `style` überschreibt gezielt die CSS-Klassenfarbe (eine am Element
+  // selbst deklarierte Klassenregel gewinnt sonst gegen eine geerbte Farbe von
+  // einer umschließenden Gruppe — daher pro Glyph statt einmal an der Gruppe).
+  const glyphStyle = { stroke: color };
+  const helperStyle = { stroke: color };
+  const fillStyle = { stroke: color, fill: color };
   return (
     <g className="snap-marker">
       {(snap.kind === "ortho" || snap.kind === "extension") && snap.refA && (
@@ -2057,11 +2086,19 @@ function SnapMarker({
           y1={toScreen(snap.refA).y}
           x2={s.x}
           y2={s.y}
+          style={helperStyle}
           vectorEffect="non-scaling-stroke"
         />
       )}
       {snap.kind === "grid" && (
-        <circle className="snap-glyph snap-fill" cx={s.x} cy={s.y} r={r * 0.5} vectorEffect="non-scaling-stroke" />
+        <circle
+          className="snap-glyph snap-fill"
+          cx={s.x}
+          cy={s.y}
+          r={r * 0.5}
+          style={fillStyle}
+          vectorEffect="non-scaling-stroke"
+        />
       )}
       {snap.kind === "midpoint" && (
         <line
@@ -2070,22 +2107,24 @@ function SnapMarker({
           y1={s.y}
           x2={s.x + r}
           y2={s.y}
+          style={glyphStyle}
           vectorEffect="non-scaling-stroke"
         />
       )}
       {snap.kind === "intersection" && (
         <>
-          <line className="snap-glyph" x1={s.x - r} y1={s.y - r} x2={s.x + r} y2={s.y + r} vectorEffect="non-scaling-stroke" />
-          <line className="snap-glyph" x1={s.x - r} y1={s.y + r} x2={s.x + r} y2={s.y - r} vectorEffect="non-scaling-stroke" />
+          <line className="snap-glyph" x1={s.x - r} y1={s.y - r} x2={s.x + r} y2={s.y + r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
+          <line className="snap-glyph" x1={s.x - r} y1={s.y + r} x2={s.x + r} y2={s.y - r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
         </>
       )}
       {(snap.kind === "center" || snap.kind === "quadrant") && (
-        <circle className="snap-glyph" cx={s.x} cy={s.y} r={r} vectorEffect="non-scaling-stroke" />
+        <circle className="snap-glyph" cx={s.x} cy={s.y} r={r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
       )}
       {snap.kind === "onEdge" && (
         <polygon
           className="snap-glyph"
           points={`${s.x},${s.y - r} ${s.x + r},${s.y} ${s.x},${s.y + r} ${s.x - r},${s.y}`}
+          style={glyphStyle}
           vectorEffect="non-scaling-stroke"
         />
       )}
@@ -2095,6 +2134,7 @@ function SnapMarker({
           cx={s.x}
           cy={s.y}
           r={r}
+          style={glyphStyle}
           vectorEffect="non-scaling-stroke"
         />
       )}

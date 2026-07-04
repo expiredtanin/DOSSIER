@@ -10,6 +10,7 @@
 import { sampleProject } from "../model/sampleProject";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../ui/TopBar";
 import type { DisplayMode } from "../panels/types";
+import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 import type { StoreApi } from "./store";
 
 /** Standard-Darstellungsmodus je Panel (wie bisher: alles sichtbar normal). */
@@ -45,6 +46,13 @@ export interface ViewSlice {
   activeCategoryCode: string;
   // Darstellungsmodus je Panel-ID (z. B. "drawing-levels", "layers").
   displayModes: Record<string, DisplayMode>;
+  // Farbe des Auswahlrahmens (Marquee-Ziehauswahl) im Grundriss. Einstellbar
+  // im Einstellungs-Fenster; Default = Akzent „Yuyake" (theme/accents.ts).
+  marqueeColor: string;
+  // Farbe der Snap-/Endpunkt-Hervorhebung im Grundriss (Zeichnen/Editieren).
+  // Einstellbar im Einstellungs-Fenster; Default = Akzent „Sora" (vorläufig,
+  // siehe HANDOVER-Rückfrage „aki").
+  snapColor: string;
 
   setActiveLevelId: (id: string) => void;
   setViewType: (v: ViewType) => void;
@@ -61,6 +69,8 @@ export interface ViewSlice {
   modeFor: (id: string | null) => DisplayMode;
   /** Darstellungsmodus eines Panels setzen (No-op bei null id). */
   setModeFor: (id: string | null, mode: DisplayMode) => void;
+  setMarqueeColor: (hex: string) => void;
+  setSnapColor: (hex: string) => void;
 }
 
 export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
@@ -80,6 +90,8 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     activeCategoryCode:
       sampleProject.walls[0]?.categoryCode ?? sampleProject.layers[0].code,
     displayModes: {},
+    marqueeColor: DEFAULT_MARQUEE_COLOR,
+    snapColor: DEFAULT_SNAP_COLOR,
 
     setActiveLevelId: (id) =>
       set((s) => ({
@@ -105,5 +117,7 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
       if (!id) return;
       set((s) => ({ displayModes: { ...s.displayModes, [id]: mode } }));
     },
+    setMarqueeColor: (hex) => set({ marqueeColor: hex }),
+    setSnapColor: (hex) => set({ snapColor: hex }),
   };
 }

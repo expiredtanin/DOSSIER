@@ -53,6 +53,7 @@ import { savePlanPdf } from "./export/exportPdf";
 import { ExportDxfDialog } from "./ui/ExportDxfDialog";
 import type { ExportDxfDecision } from "./ui/ExportDxfDialog";
 import { savePlanDxf } from "./export/exportDxf";
+import { SettingsDialog } from "./ui/SettingsDialog";
 import { PlanView } from "./plan/PlanView";
 import type {
   PlanViewHandle,
@@ -66,6 +67,8 @@ import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar } from "./ui/TopBar";
+import { Dropdown } from "./ui/Dropdown";
+import type { DropdownItem } from "./ui/Dropdown";
 import { TextEditorDialog } from "./ui/TextEditorDialog";
 import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
@@ -223,6 +226,8 @@ export default function App() {
   // Endlosschleife). Actions leben ebenfalls im Zustand und sind referenzstabil.
   const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
+  const undo = useStore((s) => s.undo);
+  const redo = useStore((s) => s.redo);
   const activeLevelId = useStore((s) => s.activeLevelId);
   const setActiveLevelId = useStore((s) => s.setActiveLevelId);
   const viewType = useStore((s) => s.viewType);
@@ -246,6 +251,8 @@ export default function App() {
   // Modaler PDF-Export-Dialog (Grundriss → Vektor-PDF). true = offen.
   const [exportOpen, setExportOpen] = useState(false);
   const [exportDxfOpen, setExportDxfOpen] = useState(false);
+  // Modales Einstellungs-Fenster (Darstellungsfarben + Projekt-Felder).
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Visuelles Drop-Feedback (dezenter Rahmen), solange eine Datei über die App
   // gezogen wird. Zählt dragenter/dragleave aus, um Flackern bei Kind-Elementen
   // zu vermeiden.
@@ -268,6 +275,10 @@ export default function App() {
   const setReferenceLines = useStore((s) => s.setReferenceLines);
   const lineMode = useStore((s) => s.lineMode);
   const setLineMode = useStore((s) => s.setLineMode);
+  const marqueeColor = useStore((s) => s.marqueeColor);
+  const setMarqueeColor = useStore((s) => s.setMarqueeColor);
+  const snapColor = useStore((s) => s.snapColor);
+  const setSnapColor = useStore((s) => s.setSnapColor);
   const scaleDenominator = useStore((s) => s.scaleDenominator);
   const setScaleDenominator = useStore((s) => s.setScaleDenominator);
   // LIVE Papier-Massstab-Nenner aus der View-Transform (PlanView meldet ihn);
@@ -387,6 +398,8 @@ export default function App() {
   // Der Klick auf „DXF importieren" triggert .click() dieses Inputs; onChange
   // liest die Datei als Text und reicht sie durch parseDxf → addContextObjects.
   const dxfInputRef = useRef<HTMLInputElement>(null);
+  // Verstecktes Datei-Input zum Laden eines Projekts (Datei-Burger „Öffnen").
+  const projectFileInputRef = useRef<HTMLInputElement>(null);
 
   // Den DXF-Datei-Dialog-Öffner für den „import"-Befehl registrieren (entkoppelt
   // über den Modul-Hook). Beim Unmount wieder abmelden.
@@ -790,6 +803,29 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Globaler Undo/Redo-Shortcut: Ctrl+Z / Cmd+Z, Ctrl+Shift+Z / Cmd+Shift+Z
+  // bzw. Ctrl+Y für redo. Gleicher Eingabe-Guard wie die übrigen globalen
+  // keydown-Handler (Tab-Zyklus, Zahlen-Shortcuts).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (!mod || (key !== "z" && key !== "y")) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      if (key === "y" || (key === "z" && e.shiftKey)) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
 
   // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 2 Linie, 4
   // Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum. Nur auf
@@ -1981,6 +2017,41 @@ export default function App() {
     r.readAsText(file);
   };
 
+  // Projekt als Datei speichern/laden (Datei-Burger-Menü, TopBar/AppMenu).
+  // Reines JSON des ProjectSlice-Zustands (gleiche Blob+Anchor-Download-Technik
+  // wie savePlanDxf/savePlanPdf); Laden liest die Datei als Text, parst sie und
+  // ersetzt das Projekt — nur ein grobes Shape-Sanity-Check (walls/layers als
+  // Array), damit ein fremdes/kaputtes JSON nicht die App zerlegt.
+  const onSaveProject = () => {
+    const json = JSON.stringify(project, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${project.name || "projekt"}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  const onOpenProject = () => projectFileInputRef.current?.click();
+  const onProjectFileChosen = (file: File) => {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(String(r.result ?? "")) as Partial<Project>;
+        if (!Array.isArray(parsed.walls) || !Array.isArray(parsed.layers)) {
+          console.warn("Projekt-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
+          return;
+        }
+        setProject(parsed as Project);
+      } catch (err) {
+        console.error("Projekt-Import fehlgeschlagen:", err);
+      }
+    };
+    r.readAsText(file);
+  };
+
   // Bestätigte Import-Entscheidung ausführen: ggf. neue Zeichnung anlegen, die
   // 2D-Konturen als Drawing2D anhängen, optional die Meshes als Kontext
   // übernehmen. Reihenfolge: erst Ebene (echte ID), dann Drawings/Kontext.
@@ -2917,6 +2988,18 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {/* Verstecktes Projekt-Datei-Input (Datei-Burger „Öffnen"). */}
+      <input
+        ref={projectFileInputRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onProjectFileChosen(f);
+          e.target.value = "";
+        }}
+      />
       <TopBar
         project={project}
         viewToggleEnabled={activeLevel.kind === "floor"}
@@ -2967,6 +3050,10 @@ export default function App() {
         }}
         resourcesOpen={resourcesOpen}
         onToggleResources={() => setResourcesOpen((v) => !v)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onImport={() => dxfInputRef.current?.click()}
+        onSaveProject={onSaveProject}
+        onOpenProject={onOpenProject}
         layoutMenu={
           <LayoutMenu
             layout={layout}
@@ -3008,6 +3095,8 @@ export default function App() {
           detail={detail}
           referenceLines={referenceLines}
           hairline={lineMode === "display"}
+          marqueeColor={marqueeColor}
+          snapColor={snapColor}
           renderMode={renderMode}
           view3d={view3d}
           fov={fov}
@@ -3240,6 +3329,18 @@ export default function App() {
           planTitle={activeLevel.name}
           onExport={onExportDxf}
           onClose={() => setExportDxfOpen(false)}
+        />
+      )}
+
+      {settingsOpen && (
+        <SettingsDialog
+          marqueeColor={marqueeColor}
+          onMarqueeColorChange={setMarqueeColor}
+          snapColor={snapColor}
+          onSnapColorChange={setSnapColor}
+          project={project}
+          setProject={setProject}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
@@ -3908,58 +4009,39 @@ function LayoutMenu({
     refresh();
   };
 
-  const onPick = (value: string) => {
-    if (value === "__save__") {
-      onSave();
-      return;
+  // Aktions-Menü (analog ComboMenu in TopBar.tsx): „Aktuelles speichern" oben,
+  // dann je eine Gruppe „Laden" und „Löschen" (Trenner statt <optgroup>, die
+  // die Dropdown-Komponente nicht kennt).
+  const items: DropdownItem[] = [];
+  items.push({ label: t("layout.saveCurrent"), onSelect: onSave });
+  if (names.length > 0) {
+    items.push({ divider: true });
+    for (const n of names) {
+      items.push({
+        label: n,
+        onSelect: () => {
+          const loaded = loadNamedLayout(n);
+          if (loaded) onApply(loaded);
+        },
+      });
     }
-    if (value.startsWith("__del__:")) {
-      const name = value.slice("__del__:".length);
-      deleteNamedLayout(name);
-      refresh();
-      return;
+    items.push({ divider: true });
+    for (const n of names) {
+      items.push({
+        label: `✕ ${n}`,
+        danger: true,
+        onSelect: () => {
+          deleteNamedLayout(n);
+          refresh();
+        },
+      });
     }
-    const loaded = loadNamedLayout(value);
-    if (loaded) onApply(loaded);
-  };
+  }
 
   return (
-    <select
-      className="layout-menu"
-      title={t("layout.title")}
-      aria-label={t("layout.title")}
-      value=""
-      onFocus={refresh}
-      onMouseDown={refresh}
-      onChange={(e) => {
-        onPick(e.target.value);
-        // Auswahl-Anzeige zurücksetzen (Menü ist ein Aktions-Trigger).
-        e.currentTarget.value = "";
-      }}
-    >
-      <option value="" disabled>
-        {t("layout.placeholder")}
-      </option>
-      <option value="__save__">{t("layout.saveCurrent")}</option>
-      {names.length > 0 && (
-        <optgroup label={t("layout.loadGroup")}>
-          {names.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </optgroup>
-      )}
-      {names.length > 0 && (
-        <optgroup label={t("layout.deleteGroup")}>
-          {names.map((n) => (
-            <option key={`del-${n}`} value={`__del__:${n}`}>
-              ✕ {n}
-            </option>
-          ))}
-        </optgroup>
-      )}
-    </select>
+    <span onPointerDownCapture={refresh}>
+      <Dropdown items={items} placeholder={t("layout.placeholder")} title={t("layout.title")} />
+    </span>
   );
 }
 
@@ -3974,6 +4056,8 @@ function Content({
   detail,
   referenceLines,
   hairline,
+  marqueeColor,
+  snapColor,
   renderMode,
   view3d,
   fov,
@@ -4029,6 +4113,10 @@ function Content({
   detail: DetailLevel;
   referenceLines: boolean;
   hairline: boolean;
+  /** Farbe des Auswahlrahmens (Marquee) im Grundriss. */
+  marqueeColor: string;
+  /** Farbe der Snap-/Endpunkt-Hervorhebung im Grundriss. */
+  snapColor: string;
   renderMode: RenderMode;
   /** Kanonischer 3D-Blickwinkel (Preset) der Perspektive. */
   view3d: View3d;
@@ -4111,6 +4199,8 @@ function Content({
           project={project}
           level={level}
           hairline={hairline}
+          marqueeColor={marqueeColor}
+          snapColor={snapColor}
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
@@ -4160,6 +4250,8 @@ function Content({
           detail={detail}
           referenceLines={referenceLines}
           hairline={hairline}
+          marqueeColor={marqueeColor}
+          snapColor={snapColor}
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
@@ -4240,6 +4332,8 @@ function Content({
           detail={detail}
           referenceLines={referenceLines}
           hairline={hairline}
+          marqueeColor={marqueeColor}
+          snapColor={snapColor}
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
@@ -4279,6 +4373,8 @@ function LevelPlanView({
   detail,
   referenceLines,
   hairline,
+  marqueeColor,
+  snapColor,
   mono,
   planViewRef,
   onCursor,
@@ -4311,6 +4407,8 @@ function LevelPlanView({
   detail: DetailLevel;
   referenceLines: boolean;
   hairline: boolean;
+  marqueeColor: string;
+  snapColor: string;
   mono: boolean;
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
@@ -4406,6 +4504,8 @@ function LevelPlanView({
         grips={grips}
         edgeGrips={edgeGrips}
         hairline={hairline}
+        marqueeColor={marqueeColor}
+        snapColor={snapColor}
         selectedDrawingId={selectedDrawingId}
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
@@ -4429,6 +4529,8 @@ function SectionPlanView({
   project,
   level,
   hairline,
+  marqueeColor,
+  snapColor,
   mono,
   planViewRef,
   onCursor,
@@ -4457,6 +4559,8 @@ function SectionPlanView({
   project: Project;
   level: DrawingLevel;
   hairline: boolean;
+  marqueeColor: string;
+  snapColor: string;
   mono: boolean;
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
@@ -4562,6 +4666,8 @@ function SectionPlanView({
         grips={grips}
         edgeGrips={edgeGrips}
         hairline={hairline}
+        marqueeColor={marqueeColor}
+        snapColor={snapColor}
         selectedDrawingId={selectedDrawingId}
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}

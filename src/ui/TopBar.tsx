@@ -14,6 +14,7 @@ import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem, DropdownOption } from "./Dropdown";
+import { WindowControls } from "./WindowControls";
 import {
   applyMark,
   applyPreset,
@@ -72,6 +73,12 @@ export type PlanColorMode = "color" | "mono";
  * per Eingabe). Quelle für die Anzeige in Top-Bar und Status-Leiste.
  */
 export const SCALE_PRESETS: number[] = [1, 5, 10, 20, 50, 100, 200, 500, 1000];
+
+/**
+ * Gemeinsame Breite (px) von Massstab-Dropdown und Zoom-Segmentpille im
+ * Zoom-Cluster — beide sollen exakt gleich breit sein (Nutzer-Wunsch).
+ */
+const ZOOM_CLUSTER_WIDTH = 140;
 
 export interface TopBarProps {
   project: Project;
@@ -143,8 +150,19 @@ export interface TopBarProps {
   resourcesOpen: boolean;
   onToggleResources: () => void;
 
+  /** Öffnet das Einstellungs-Fenster (Darstellungsfarben, Projekt-Felder). */
+  onOpenSettings: () => void;
+
   /** Layout-Menü (von App geliefert, damit dessen Logik dort bleibt). */
   layoutMenu: ReactNode;
+
+  // ── Datei-Menü (Burger, ganz rechts) ───────────────────────────────────────
+  /** Öffnet den DXF/DWG-Import-Datei-Dialog. */
+  onImport: () => void;
+  /** Projekt als Datei speichern (JSON-Export des gesamten Projekts). */
+  onSaveProject: () => void;
+  /** Projekt aus einer Datei laden. */
+  onOpenProject: () => void;
 
   // ── Text-Gruppe (Stempel-/Text-Formatierung) ───────────────────────────────
   /**
@@ -813,6 +831,51 @@ function touchedParagraphs(doc: RichTextDoc, range: TextRange | null): number[] 
   return out;
 }
 
+/**
+ * Datei-Menü der Oberleiste (Burger, ganz rechts): Speichern/Öffnen des
+ * Projekts sowie Import (DXF/DWG) und Export (PDF/DXF) — vorher eigene
+ * Icon-Pillen im Zoom-Bereich, jetzt gebündelt hinter einem Menü, damit die
+ * Leiste ruhiger bleibt (GTK-Burger-Stil).
+ */
+function AppMenu({
+  onImport,
+  onExportPdf,
+  onExportDxf,
+  onSaveProject,
+  onOpenProject,
+  onOpenSettings,
+  exportEnabled,
+}: {
+  onImport: () => void;
+  onExportPdf: () => void;
+  onExportDxf: () => void;
+  onSaveProject: () => void;
+  onOpenProject: () => void;
+  onOpenSettings: () => void;
+  exportEnabled: boolean;
+}) {
+  const items: DropdownItem[] = [
+    { label: t("file.save"), onSelect: onSaveProject },
+    { label: t("file.open"), onSelect: onOpenProject },
+    { divider: true },
+    { label: t("file.import"), onSelect: onImport },
+    { divider: true },
+    { label: t("file.exportPdf"), onSelect: onExportPdf, disabled: !exportEnabled },
+    { label: t("file.exportDxf"), onSelect: onExportDxf, disabled: !exportEnabled },
+    { divider: true },
+    { label: t("topbar.settings"), onSelect: onOpenSettings },
+  ];
+  return (
+    <Dropdown
+      items={items}
+      placeholder=""
+      title={t("file.menu")}
+      triggerClassName="tb-burger"
+      triggerSuffix={<TbIcon name="menu" />}
+    />
+  );
+}
+
 export function TopBar({
   project,
   viewToggleEnabled,
@@ -843,7 +906,11 @@ export function TopBar({
   combos,
   resourcesOpen,
   onToggleResources,
+  onOpenSettings,
   layoutMenu,
+  onImport,
+  onSaveProject,
+  onOpenProject,
   textTarget,
   onAddText,
 }: TopBarProps) {
@@ -899,10 +966,28 @@ export function TopBar({
 
   return (
     <header className="topbar" ref={headerRef}>
-      {/* Marke/Logo. */}
-      <div className="brand">
-        <span className="logo">▦</span> cad{" "}
-        <span className="tag">{t("brand.tag")}</span>
+      {/* Marke (DOSSIER-Wortmarke) + Settings/Ressourcen-Icons daneben,
+          gestapelt wie im Rhino-Plugin (ToolbarApp.jsx: Wortmarke links,
+          rechts daneben ein schmaler Icon-Stapel). */}
+      <div className="tb-brandgroup">
+        <div className="brand">
+          <span className="brand-word">
+            DOSSIER<span className="brand-dot">.</span>
+          </span>
+          <span className="tag">{t("brand.tag")}</span>
+        </div>
+        <div className="tb-brandicons">
+          <button
+            type="button"
+            className={`tb-brandicon${resourcesOpen ? " active" : ""}`}
+            onClick={onToggleResources}
+            aria-pressed={resourcesOpen}
+            aria-label={t("topbar.resources")}
+            title={`${t("topbar.resources")} — ${t("topbar.resources.hint")}`}
+          >
+            <TbIcon name="widgets" />
+          </button>
+        </div>
       </div>
 
       <Sep />
@@ -1017,9 +1102,9 @@ export function TopBar({
       {/* Detailgrad (grob/mittel/fein) — wirkt im Grundriss auf Symbole +
           Schraffuren/Linien. In der Perspektive (noch) ohne Wirkung → dort
           deaktiviert mit Tooltip statt stiller No-Op. */}
-      {/* Detailgrad + Massstab gestapelt — eine Spalte, platzsparend (wie die
-          Ebenen-/Zeichnungs-Kombis). */}
-      <div className="tb-group tb-stack" role="group" aria-label={t("topbar.detailGroup")}>
+      {/* Detailgrad — Massstab lebt nur noch EINMAL im Zoom-Cluster (die
+          Dropdown hier war ein redundantes Relikt der TopBar-Reorg). */}
+      <div className="tb-group" role="group" aria-label={t("topbar.detailGroup")}>
         <label className="tb-field tb-field-row">
           <span className="tb-label">{t("topbar.detail")}</span>
           <Dropdown
@@ -1036,17 +1121,6 @@ export function TopBar({
               { value: "mittel", label: t("topbar.detail.mittel") },
               { value: "fein", label: t("topbar.detail.fein") },
             ]}
-          />
-        </label>
-        <label className="tb-field tb-field-row">
-          <span className="tb-label">{t("topbar.scale")}</span>
-          <Dropdown
-            value={inPresets ? String(scaleDenominator) : "__current__"}
-            disabled={!zoomEnabled}
-            onChange={onScaleChange}
-            title={t("topbar.scale.apply")}
-            triggerClassName="tb-dd-mono"
-            options={scaleOptions}
           />
         </label>
       </div>
@@ -1081,11 +1155,12 @@ export function TopBar({
             onChange={onScaleChange}
             title={t("topbar.scale.apply")}
             triggerClassName="tb-dd-mono"
-            width={140}
+            width={ZOOM_CLUSTER_WIDTH}
             options={scaleOptions}
           />
           <Segment
             ariaLabel={t("topbar.scaleGroup")}
+            style={{ width: ZOOM_CLUSTER_WIDTH }}
             cells={[
               {
                 key: "zoom100",
@@ -1111,31 +1186,6 @@ export function TopBar({
             ]}
           />
         </div>
-      </div>
-
-      {/* Export als eigene kleine Pillen-Reihe (nicht mehr Teil des Zoom-Blocks,
-          damit der Cluster ruhig bleibt). */}
-      <div className="tb-group tb-btns" role="group" aria-label={t("topbar.exportPdf")}>
-        <button
-          type="button"
-          className="tb-iconbtn"
-          onClick={onExportPdf}
-          disabled={!zoomEnabled}
-          title={t("topbar.exportPdf.hint")}
-          aria-label={t("topbar.exportPdf")}
-        >
-          <TbIcon name="picture_as_pdf" />
-        </button>
-        <button
-          type="button"
-          className="tb-iconbtn"
-          onClick={onExportDxf}
-          disabled={!zoomEnabled}
-          title={t("topbar.exportDxf.hint")}
-          aria-label={t("topbar.exportDxf")}
-        >
-          <TbIcon name="download" />
-        </button>
       </div>
 
       <Sep />
@@ -1177,19 +1227,21 @@ export function TopBar({
 
       <Sep />
 
-      {/* Rechte Gruppe: Layout-Menü · Ressourcen · Projektname. */}
+      {/* Rechte Gruppe: Layout-Menü · Projektname · Datei-Burger (ganz rechts,
+          GTK-Stil) — Ressourcen sitzt jetzt bei der Marke (s. o.). */}
       <div className="topbar-right">
         {layoutMenu}
-        <button
-          className={`view-icon${resourcesOpen ? " active" : ""}`}
-          onClick={onToggleResources}
-          aria-pressed={resourcesOpen}
-          aria-label={t("topbar.resources")}
-          title={`${t("topbar.resources")} — ${t("topbar.resources.hint")}`}
-        >
-          <TbIcon name="widgets" />
-        </button>
         <span className="project-name">{project.name}</span>
+        <AppMenu
+          onImport={onImport}
+          onExportPdf={onExportPdf}
+          onExportDxf={onExportDxf}
+          onSaveProject={onSaveProject}
+          onOpenProject={onOpenProject}
+          onOpenSettings={onOpenSettings}
+          exportEnabled={zoomEnabled}
+        />
+        <WindowControls />
       </div>
     </header>
   );

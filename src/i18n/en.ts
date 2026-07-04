@@ -793,6 +793,30 @@ export const en: Record<TranslationKey, string> = {
   "exportDxf.unitsNote":
     "Model space in meters (1:1). Layers mirror the project's categories; scale freely on plot.",
 
+  // File menu (burger, far right of the top bar).
+  "file.menu": "File",
+  "file.save": "Save project",
+  "file.open": "Open project",
+  "file.import": "Import DXF/DWG…",
+  "file.exportPdf": "Export as PDF…",
+  "file.exportDxf": "Export as DXF…",
+
+  // Settings dialog.
+  "topbar.settings": "Settings",
+  "topbar.settings.hint": "Open settings (display colors, project)",
+  "settings.title": "Settings",
+  "settings.section.display": "Display",
+  "settings.marqueeColor": "Selection box color",
+  "settings.marqueeColor.hint":
+    "Color of the marquee selection box drawn while dragging a selection in the plan view.",
+  "settings.snapColor": "Snap/endpoint color",
+  "settings.snapColor.hint":
+    "Color of the snap/endpoint highlight while drawing/editing in the plan view.",
+  "settings.section.project": "Project",
+  "settings.referenceElevation": "Ground floor reference elevation (m a.s.l.)",
+  "settings.referenceElevation.hint":
+    "Stored only — not used yet. Terrain draping / real-world elevations relative to the ground floor will follow.",
+
   // Drag & drop (app-wide file drop).
   "drop.hint": "Drop a DXF/DWG file here",
 

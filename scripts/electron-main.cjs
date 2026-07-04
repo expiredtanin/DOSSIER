@@ -4,10 +4,14 @@
 // (render2d-WASM-Engine, ?engine=wasm) zuverlässig läuft. Kein Rust-Backend
 // nötig: compute_joins hat einen TS-Fallback (src/compute/index.ts).
 
-const { app, BrowserWindow, Menu } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain } = require("electron");
+const path = require("node:path");
 
 // Randloses App-Fenster wie chromium-shell.sh (--app=…): keine native
-// Menüleiste (File/Edit/View/Window), kein Fensterrahmen.
+// Menüleiste (File/Edit/View/Window), kein Fensterrahmen. Minimieren/
+// Maximieren/Schliessen laufen darum über eine eigene Fenstersteuerung im
+// Renderer (WindowControls.tsx) + IPC hier unten — ohne frame gibt es sonst
+// gar keine Möglichkeit, das Fenster zu steuern.
 Menu.setApplicationMenu(null);
 
 // Gleiche Flags wie scripts/chromium-shell.sh — WebGPU liegt unter Linux
@@ -27,8 +31,15 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "electron-preload.cjs"),
     },
   });
+
+  const notifyMaximized = () => {
+    win.webContents.send("window:maximized-changed", win.isMaximized());
+  };
+  win.on("maximize", notifyMaximized);
+  win.on("unmaximize", notifyMaximized);
 
   if (isDev) {
     win.loadURL(DEV_URL);
@@ -36,6 +47,24 @@ function createWindow() {
     win.loadFile(require("node:path").join(__dirname, "..", "dist", "index.html"));
   }
 }
+
+// Fenstersteuerung vom Renderer (WindowControls.tsx über electron-preload.cjs).
+// Wirkt auf das Fenster, aus dem das Event kam (mehrfachfenster-sicher).
+ipcMain.on("window:minimize", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+ipcMain.on("window:toggle-maximize", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+});
+ipcMain.on("window:close", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close();
+});
+ipcMain.handle("window:is-maximized", (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
+});
 
 app.whenReady().then(createWindow);
 
