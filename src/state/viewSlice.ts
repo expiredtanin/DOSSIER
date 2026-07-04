@@ -33,6 +33,10 @@ export interface ViewSlice {
   view3d: View3d;
   // Sichtwinkel (FOV) der 3D-Perspektivkamera in Grad.
   fov: number;
+  // Boden-Referenzraster im 3D-Viewport ein-/ausgeblendet (wirkt aktuell nur
+  // im Nordstern/WASM-Pfad — die three.js-Sicht zeigt ihr Raster unveraendert
+  // immer; s. Wasm3DViewport.tsx).
+  grid3dVisible: boolean;
   // Farb-Modus des Grundrisses: "color" = Kategorie-/Element-Farben (heute),
   // "mono" = reiner Schwarz-Weiss-Plan (Tinte, keine Farb-/Schraffurfarben).
   planColorMode: "color" | "mono";
@@ -60,6 +64,7 @@ export interface ViewSlice {
   setRenderMode: (m: RenderMode) => void;
   setView3d: (v: View3d) => void;
   setFov: (n: number) => void;
+  setGrid3dVisible: (b: boolean) => void;
   setPlanColorMode: (m: "color" | "mono") => void;
   setReferenceLines: (b: boolean) => void;
   setLineMode: (m: "display" | "print") => void;
@@ -83,6 +88,7 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     renderMode: "shaded",
     view3d: "perspective",
     fov: 50,
+    grid3dVisible: true,
     planColorMode: "color",
     referenceLines: false,
     lineMode: "display",
@@ -107,6 +113,7 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     setRenderMode: (m) => set({ renderMode: m }),
     setView3d: (v) => set({ view3d: v }),
     setFov: (n) => set({ fov: n }),
+    setGrid3dVisible: (b) => set({ grid3dVisible: b }),
     setPlanColorMode: (m) => set({ planColorMode: m }),
     setReferenceLines: (b) => set({ referenceLines: b }),
     setLineMode: (m) => set({ lineMode: m }),

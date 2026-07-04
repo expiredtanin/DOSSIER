@@ -269,6 +269,10 @@ export default function App() {
   const setView3d = useStore((s) => s.setView3d);
   const fov = useStore((s) => s.fov);
   const setFov = useStore((s) => s.setFov);
+  // Boden-Referenzraster im 3D-Viewport (wirkt nur im WASM/Nordstern-Pfad,
+  // s. Wasm3DViewport.tsx) — Umschalter sitzt als Overlay-Button im Viewport.
+  const grid3dVisible = useStore((s) => s.grid3dVisible);
+  const setGrid3dVisible = useStore((s) => s.setGrid3dVisible);
   const planColorMode = useStore((s) => s.planColorMode);
   const setPlanColorMode = useStore((s) => s.setPlanColorMode);
   const referenceLines = useStore((s) => s.referenceLines);
@@ -3104,6 +3108,8 @@ export default function App() {
           renderMode={renderMode}
           view3d={view3d}
           fov={fov}
+          grid3dVisible={grid3dVisible}
+          onToggleGrid3d={() => setGrid3dVisible(!grid3dVisible)}
           mono={planColorMode === "mono"}
           drawings={drawings}
           onSelectLevel={setActiveLevelId}
@@ -4065,6 +4071,8 @@ function Content({
   renderMode,
   view3d,
   fov,
+  grid3dVisible,
+  onToggleGrid3d,
   mono,
   drawings,
   onSelectLevel,
@@ -4126,6 +4134,10 @@ function Content({
   view3d: View3d;
   /** Sichtwinkel der 3D-Perspektivkamera in Grad. */
   fov: number;
+  /** Boden-Referenzraster im 3D-Viewport sichtbar (wirkt nur im WASM-Pfad). */
+  grid3dVisible: boolean;
+  /** Klick auf den Grid-Umschalter-Button im 3D-Viewport (WASM-Pfad). */
+  onToggleGrid3d: () => void;
   /** Grundriss in Schwarz-Weiss (mono) statt mit Kategorie-/Element-Farben. */
   mono: boolean;
   /** Dokument-Tabs der Kopfzeile — ein Tab je Geschoss-Grundriss. */
@@ -4310,6 +4322,8 @@ function Content({
             view3d={view3d}
             fov={fov}
             gridElevation={level.baseElevation ?? 0}
+            gridVisible={grid3dVisible}
+            onToggleGrid={onToggleGrid3d}
             onSelectWall={onViewportSelectWall}
             onSelectCeiling={onViewportSelectCeiling}
             onSelectOpening={onViewportSelectOpening}

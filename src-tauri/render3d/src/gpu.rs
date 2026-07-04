@@ -12,9 +12,10 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
+use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::math::{view_projection, Mat4};
 use crate::mesh::{build_scene_mesh, build_walls_mesh};
-use crate::shaders::MESH_WGSL;
+use crate::shaders::{GRID_WGSL, MESH_WGSL};
 use crate::types::{Camera, Mesh, MeshInput, SlabInput, WallInput, FLOATS_PER_VERTEX};
 
 /// Tiefenformat des Z-Puffers (32 Bit Float, ueberall verfuegbar).
@@ -68,14 +69,30 @@ struct MeshBuffers {
     index_count: u32,
 }
 
+/// GPU-seitiger Vertex-Buffer des Bodengitters (LineList, kein Indexpuffer).
+struct GridBuffers {
+    vbo: wgpu::Buffer,
+    vertex_count: u32,
+}
+
 /// Der native 3D-Renderer: haelt die Pipeline, das Uniform (View-Projektion +
 /// Licht) und das aktuell hochgeladene Mesh. Ein Tiefenpuffer wird passend zur
 /// Ziel-Groesse (neu) angelegt.
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
+    /// Eigene, schlanke Linien-Pipeline (LineList, unlit) fuer das Bodengitter.
+    /// Teilt sich das `Globals`-Uniform/Bind-Group (nur View-Projektion) mit der
+    /// Mesh-Pipeline und rendert in denselben Pass/Tiefenpuffer.
+    grid_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     mesh: Option<MeshBuffers>,
+    /// Bodengitter-Vertices (None = nicht erzeugt). Wird nur gezeichnet, wenn
+    /// zusaetzlich `grid_visible` gesetzt ist.
+    grid: Option<GridBuffers>,
+    /// Ob das Bodengitter im naechsten `render` gezeichnet wird. Default false —
+    /// bestehende Aufrufer ohne `set_ground_grid` bekommen KEIN Gitter.
+    grid_visible: bool,
     depth: Option<DepthTarget>,
     msaa: Option<MsaaTarget>,
     /// Farbformat des Render-Ziels (Surface), fuer die MSAA-Zwischentextur.
@@ -180,6 +197,60 @@ impl Renderer {
             cache: None,
         });
 
+        // Bodengitter-Pipeline: dieselbe Bind-Group (Globals/View-Projektion) und
+        // dasselbe Depth-/MSAA-/Farbziel wie die Mesh-Pipeline, aber LineList-
+        // Topologie, ein eigener unlit-Shader (konstante Vertexfarbe) und ein
+        // schlankeres Vertex-Layout [pos vec3, color vec3].
+        let grid_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("grid.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(GRID_WGSL.into()),
+        });
+        let grid_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: (GRID_FLOATS_PER_VERTEX * 4) as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        };
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("grid.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &grid_module,
+                entry_point: Some("vs_main"),
+                buffers: &[grid_vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &grid_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                // Linien haben keine Vorder-/Rueckseite -> kein Culling.
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals.buffer"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -197,9 +268,12 @@ impl Renderer {
 
         Self {
             pipeline,
+            grid_pipeline,
             bind_group,
             uniform,
             mesh: None,
+            grid: None,
+            grid_visible: false,
             depth: None,
             msaa: None,
             color_format,
@@ -272,6 +346,36 @@ impl Renderer {
     /// bleibt aktiv, siehe shaders.rs), `false` = normale Bauteil-/Vertexfarbe.
     pub fn set_white_mode(&mut self, white: bool) {
         self.globals.mode[0] = if white { 1.0 } else { 0.0 };
+    }
+
+    /// Setzt/aktualisiert das Referenz-Bodengitter (grid.rs). Erzeugt den Linien-
+    /// Vertex-Buffer aus den Parametern neu und merkt sich die Sichtbarkeit; der
+    /// naechste `render` zeichnet das Gitter (bzw. nichts bei `visible == false`).
+    /// Ohne Aufruf bleibt das Gitter unsichtbar (Default), damit bestehende
+    /// Aufrufer unveraendert bleiben.
+    pub fn set_ground_grid(
+        &mut self,
+        device: &wgpu::Device,
+        visible: bool,
+        elevation: f32,
+        extent: f32,
+        spacing: f32,
+    ) {
+        self.grid_visible = visible;
+        let verts = build_ground_grid(elevation, extent, spacing);
+        if verts.is_empty() {
+            self.grid = None;
+            return;
+        }
+        let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("grid.vbo"),
+            contents: bytemuck::cast_slice(&verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.grid = Some(GridBuffers {
+            vbo,
+            vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
+        });
     }
 
     /// Stellt sicher, dass ein Tiefenpuffer passend zur Ziel-Groesse existiert.
@@ -395,6 +499,17 @@ impl Renderer {
                 pass.set_vertex_buffer(0, m.vbo.slice(..));
                 pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..m.index_count, 0, 0..1);
+            }
+
+            // Bodengitter NACH dem Modell zeichnen (gemeinsamer Tiefenpuffer ->
+            // das Modell verdeckt das Gitter korrekt). Nur wenn sichtbar + vorhanden.
+            if self.grid_visible {
+                if let Some(g) = &self.grid {
+                    pass.set_pipeline(&self.grid_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, g.vbo.slice(..));
+                    pass.draw(0..g.vertex_count, 0..1);
+                }
             }
         }
         queue.submit(std::iter::once(encoder.finish()));

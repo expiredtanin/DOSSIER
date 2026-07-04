@@ -327,6 +327,25 @@ impl WebModelRenderer {
         self.renderer.set_white_mode(white);
     }
 
+    /// Schaltet das Referenz-Bodengitter (grid.rs) ein/aus und setzt seine
+    /// Parameter. `elevation_m` = Hoehe der XZ-Gitterebene (world-Meter, i. d. R.
+    /// die z=0-Ebene des aktiven Geschosses); `extent_m` = quadratische Kantenlaenge
+    /// (auf ein Vielfaches von `spacing_m` gerundet); `spacing_m` = Linienabstand.
+    /// Das Gitter ist zentriert um den Welt-Ursprung (x=0, z=0). Wirkt erst beim
+    /// naechsten `render`. Default ohne Aufruf: unsichtbar (bestehende Aufrufer
+    /// bleiben unveraendert). Jede 5. Linie (inkl. Mittelachse) ist eine Major-Linie.
+    pub fn set_ground_grid(
+        &mut self,
+        visible: bool,
+        elevation_m: f32,
+        extent_m: f32,
+        spacing_m: f32,
+    ) -> Result<(), JsValue> {
+        self.renderer
+            .set_ground_grid(&self.device, visible, elevation_m, extent_m, spacing_m);
+        Ok(())
+    }
+
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));

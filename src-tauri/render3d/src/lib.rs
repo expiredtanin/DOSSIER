@@ -14,6 +14,7 @@
 // Standard-Build (`cargo test`/`cargo build` ohne Features) enthaelt nur die
 // GPU-freien Schichten und ist damit unabhaengig von einer Display-Session.
 
+pub mod grid;
 pub mod math;
 pub mod mesh;
 pub(crate) mod openings;
@@ -808,5 +809,13 @@ mod tests {
         validator
             .validate(&module)
             .unwrap_or_else(|e| panic!("mesh: WGSL-Validierung fehlgeschlagen: {e:?}"));
+
+        // Bodengitter-Shader ebenso headless validieren.
+        let grid_src = super::shaders::GRID_WGSL;
+        let grid_module = naga::front::wgsl::parse_str(grid_src)
+            .unwrap_or_else(|e| panic!("grid: WGSL-Parse-Fehler: {e:?}"));
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&grid_module)
+            .unwrap_or_else(|e| panic!("grid: WGSL-Validierung fehlgeschlagen: {e:?}"));
     }
 }

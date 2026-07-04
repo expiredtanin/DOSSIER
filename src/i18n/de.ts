@@ -914,6 +914,8 @@ export const de = {
   "viewport3d.engineUnavailable": "3D-Engine nicht verfügbar",
   "viewport3d.engineUnavailableHint":
     "WebGPU konnte nicht initialisiert werden. In der Statusleiste auf WebGL2 umschalten, um die 3D-Ansicht weiter zu nutzen.",
+  "viewport3d.grid.show": "Bodenraster einblenden",
+  "viewport3d.grid.hide": "Bodenraster ausblenden",
 } as const;
 
 export type TranslationKey = keyof typeof de;

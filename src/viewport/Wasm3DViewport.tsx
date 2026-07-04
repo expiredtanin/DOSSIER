@@ -6,10 +6,12 @@
 // INTEGRATIONS-SPIKE (Umfang bewusst schmal): Massenmodell (Wände mit Öffnungs-
 // Teilquadern + Deckenplatten, alle Geschosse gestapelt) + Orbit-Navigation +
 // Kamera-Presets (`view3d`, von der Oberleiste getrieben — s. u.) + Darstellungs-
-// art (shaded/white, `renderMode`, ebenfalls Oberleiste). Auswahl/Raycast,
-// Griffe/Zeichnen sowie die übrigen Darstellungsarten der three.js-Sicht
-// (texturiert/Drahtgitter/Kanten, HLR) folgen später — bis dahin gilt: LINKS
-// ohne Funktion, RECHTS unterdrückt nur das Browser-Menü.
+// art (shaded/white, `renderMode`, ebenfalls Oberleiste) + ein-/ausblendbares
+// Boden-Referenzraster (`gridVisible`/`groundElevation`, Overlay-Umschalter im
+// Viewport selbst). Auswahl/Raycast, Griffe/Zeichnen sowie die übrigen
+// Darstellungsarten der three.js-Sicht (texturiert/Drahtgitter/Kanten, HLR)
+// folgen später — bis dahin gilt: RECHTS unterdrückt weiterhin nur das
+// Browser-Menü (kein Kontextmenü im Engine-Pfad).
 //
 // KAMERA-PRESETS: `view3d`/`renderMode` kommen als Props von der Oberleiste
 // (TopBar → App.tsx → Viewport3D-Umschalter, dieselbe Quelle wie die three.js-
@@ -25,8 +27,17 @@
 // an die Praeset-Blickrichtung anschliesst (Rust berechnet dieselbe Richtung
 // für die exakte, evtl. orthografische Praeset-Kamera).
 //
-// MAUS-SCHEMA wie die three.js-Sicht (docs/design/context-menu.md):
-//   MITTE ziehen = Orbit, Shift+MITTE = Pan, RAD = Zoom.
+// MAUS-SCHEMA (bewusst ANDERS als die three.js-Sicht — Laptop-freundlich, ohne
+// Modifier-Taste zu verlangen; im Engine-Pfad gibt es noch keine Auswahl/kein
+// Kontextmenü, LINKS/RECHTS sind also frei für Navigation):
+//   LINKS ziehen   = Orbit (drehen) — entdeckbarste Geste, da frei.
+//   MITTE ziehen   = Pan (bewegen) — konsistent mit der 2D-Grundriss-Ansicht
+//                    (dort ist MITTE ebenfalls Pan).
+//   RECHTS ziehen  = Pan (bewegen), zweiter leicht erreichbarer Weg; das
+//                    Browser-Kontextmenü bleibt unterdrückt (RECHTS-KLICK ohne
+//                    Bewegung löst ohnehin kein Menü aus, es gibt hier keins).
+//   RAD            = Zoom, Ziel leicht Richtung Cursor-Strahl verschoben
+//                    (Näherungs-„Zoom-to-Cursor", s. onWheel).
 // Die Orbit-/Pan-Mathematik folgt den OrbitControls-Konventionen (Winkel je
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
@@ -152,6 +163,9 @@ export function Wasm3DViewport({
   project,
   view3d = "perspective",
   renderMode = "shaded",
+  gridVisible = true,
+  groundElevation = 0,
+  onToggleGrid,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -160,10 +174,26 @@ export function Wasm3DViewport({
    * übrigen Modi der three.js-Sicht sind im Engine-Pfad noch nicht gebaut,
    * s. Datei-Kommentar) — alles ausser `white` fällt auf shaded zurück. */
   renderMode?: RenderMode;
+  /** Boden-Referenzraster sichtbar? Umgeschaltet über den Overlay-Button unten
+   * rechts im Viewport (`onToggleGrid`) — Single Source of Truth ist der
+   * Aufrufer (App/viewSlice `grid3dVisible`), diese Komponente spiegelt nur. */
+  gridVisible?: boolean;
+  /** Hoehe (world-Y, Meter) des Bodenrasters = OKFF/`baseElevation` des
+   * aktiven Geschosses (vom Aufrufer berechnet, s. App.tsx). */
+  groundElevation?: number;
+  /** Klick auf den Grid-Umschalter-Button; ohne Angabe kein Button. */
+  onToggleGrid?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { render, updateModel, setWhiteMode, applyViewPreset, ready, failed } =
-    useWasm3dRenderer(canvasRef, true);
+  const {
+    render,
+    updateModel,
+    setWhiteMode,
+    applyViewPreset,
+    setGroundGrid,
+    ready,
+    failed,
+  } = useWasm3dRenderer(canvasRef, true);
   // Orbit-Zustand in einem Ref (kein React-State): Mausbewegungen zeichnen
   // direkt neu, ohne die Komponente je Frame zu re-rendern. Dient NUR der
   // freien Navigation NACH einem Praeset-Sprung (s. Datei-Kommentar).
@@ -208,6 +238,15 @@ export function Wasm3DViewport({
     redrawRef.current();
   }, [ready, renderMode, setWhiteMode]);
 
+  // Boden-Referenzraster: bei Bereitschaft oder Wechsel von Sichtbarkeit/
+  // Geschoss-Hoehe neu setzen + zeichnen. Fixe Ausdehnung/Abstand (40 m /
+  // 1 m) — ausreichend fuer die ueblichen Grundriss-Groessen dieses Spikes.
+  useEffect(() => {
+    if (!ready) return;
+    setGroundGrid(gridVisible, groundElevation, 40, 1);
+    redrawRef.current();
+  }, [ready, gridVisible, groundElevation, setGroundGrid]);
+
   // Canvas-Größe beobachten: bei Layout-Änderung mit aktueller Kamera neu
   // zeichnen (die Surface-Anpassung übernimmt der Hook im render()).
   useEffect(() => {
@@ -218,10 +257,12 @@ export function Wasm3DViewport({
     return () => ro.disconnect();
   }, [ready]);
 
-  // Maus-Navigation (MITTE = Orbit, Shift+MITTE = Pan, RAD = Zoom). Verlässt
-  // damit IMMER die Praeset-Kamera und wechselt auf die freie perspektivische
-  // Orbit-Kamera (Kontinuität über den in VIEW3D_ORBIT vorbereiteten Start-
-  // Blickwinkel) — gleiche Philosophie wie OrbitControls in der three.js-Sicht.
+  // Maus-Navigation (LINKS = Orbit, MITTE/RECHTS = Pan, RAD = Zoom, s.
+  // Datei-Kommentar MAUS-SCHEMA). Verlässt damit IMMER die Praeset-Kamera und
+  // wechselt auf die freie perspektivische Orbit-Kamera (Kontinuität über den
+  // in VIEW3D_ORBIT vorbereiteten Start-Blickwinkel) — gleiche Philosophie wie
+  // OrbitControls in der three.js-Sicht, nur mit laptop-freundlicher
+  // Tastenbelegung ohne Modifier (s. o.).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!ready || !canvas) return;
@@ -237,9 +278,11 @@ export function Wasm3DViewport({
     const redraw = () => redrawRef.current();
 
     const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 1) return; // nur MITTE navigiert (links = Auswahl, s. o.)
+      // LINKS (0) = Orbit, MITTE (1)/RECHTS (2) = Pan (s. MAUS-SCHEMA oben).
+      const mode = e.button === 0 ? "orbit" : e.button === 1 || e.button === 2 ? "pan" : null;
+      if (!mode) return;
       e.preventDefault();
-      drag = { mode: e.shiftKey ? "pan" : "orbit", x: e.clientX, y: e.clientY };
+      drag = { mode, x: e.clientX, y: e.clientY };
       canvas.setPointerCapture(e.pointerId);
       useOrbitRedraw();
     };
@@ -296,12 +339,46 @@ export function Wasm3DViewport({
       if (!o) return;
       e.preventDefault();
       useOrbitRedraw();
+      const prevDist = o.dist;
       // Exponentielles Dolly (rad-deltaY ≈ ±100 je Rastung → ~14 % je Schritt).
       o.dist = Math.max(0.2, Math.min(2000, o.dist * Math.exp(e.deltaY * 0.0013)));
+      // Zoom-to-Cursor-Näherung (kein Tiefenwert unter dem Cursor verfügbar):
+      // das Blickziel anteilig der Distanzänderung in Richtung des Cursor-
+      // Strahls IN DER BILDEBENE verschieben (Bildschirm-Basis s/u aus dem
+      // Orbit-Winkel, wie beim Pan). Bei Cursor in Bildmitte (ndcX=ndcY=0)
+      // bleibt es ein reines Distanz-Dolly (Verschiebung = 0); je weiter der
+      // Cursor vom Zentrum, desto mehr wandert das Ziel darauf zu — spürbar
+      // besser bedienbar als ein reines Mittendolly, ohne echte Tiefenprojektion.
+      const rect = canvas.getBoundingClientRect();
+      const ndcX = rect.width > 0 ? ((e.clientX - rect.left) / rect.width) * 2 - 1 : 0;
+      const ndcY = rect.height > 0 ? 1 - ((e.clientY - rect.top) / rect.height) * 2 : 0;
+      const distDelta = prevDist - o.dist; // > 0 beim Reinzoomen
+      if (distDelta !== 0 && (ndcX !== 0 || ndcY !== 0)) {
+        const pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, o.pitch));
+        const f = [
+          -Math.cos(pitch) * Math.cos(o.yaw),
+          -Math.sin(pitch),
+          -Math.cos(pitch) * Math.sin(o.yaw),
+        ];
+        const s = [Math.sin(o.yaw), 0, -Math.cos(o.yaw)];
+        const u = [
+          s[1] * f[2] - s[2] * f[1],
+          s[2] * f[0] - s[0] * f[2],
+          s[0] * f[1] - s[1] * f[0],
+        ];
+        // Bildhalbhöhe je Distanz-Einheit (Sichtwinkel) × halbe Distanzänderung
+        // (gedämpft — voller Betrag würde den Cursor-Punkt exakt zentrieren,
+        // was sich bei wiederholtem Scrollen zu ruckartig anfühlt).
+        const shift = distDelta * Math.tan(FOV_Y / 2) * 0.5;
+        o.target[0] += (s[0] * ndcX + u[0] * ndcY) * shift;
+        o.target[1] += (s[1] * ndcX + u[1] * ndcY) * shift;
+        o.target[2] += (s[2] * ndcX + u[2] * ndcY) * shift;
+      }
       redraw();
     };
 
-    // Browser-Kontextmenü unterdrücken (RECHTS ist fürs App-Menü reserviert).
+    // Browser-Kontextmenü unterdrücken (RECHTS navigiert jetzt selbst, s. o.;
+    // ein eigenes Kontextmenü gibt es im Engine-Pfad noch nicht).
     const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
     canvas.addEventListener("pointerdown", onPointerDown);
@@ -324,9 +401,42 @@ export function Wasm3DViewport({
     <div className="viewport">
       {/* Canvas-Anzeigegröße kommt aus `.viewport canvas` (styles.css); die
           Renderauflösung (DPR) gleicht der Hook je Frame ab. Presets +
-          Darstellungsart kommen jetzt von der Oberleiste (TopBar), kein
-          eigenes Overlay mehr hier. */}
+          Darstellungsart kommen von der Oberleiste (TopBar); das Grid-Overlay
+          unten ist der einzige eigene Umschalter hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
+      {onToggleGrid && (
+        // Dezenter Overlay-Button (eigener DOM-Knoten neben dem Canvas, `.viewport`
+        // ist `position: relative` — s. styles.css), stört die Maus-Navigation
+        // auf dem Canvas nicht. Keine eigene CSS-Klasse (styles.css ist nicht in
+        // dieser Datei-Lane) — Inline-Style im dunklen App-Look.
+        <button
+          type="button"
+          onClick={onToggleGrid}
+          title={t(gridVisible ? "viewport3d.grid.hide" : "viewport3d.grid.show")}
+          aria-pressed={gridVisible}
+          style={{
+            position: "absolute",
+            right: 10,
+            bottom: 10,
+            width: 30,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+            borderRadius: 7,
+            border: "1px solid rgba(255,255,255,0.14)",
+            background: gridVisible ? "rgba(255,255,255,0.14)" : "rgba(20,20,24,0.65)",
+            color: gridVisible ? "#f2f2f2" : "#9a9a9a",
+            cursor: "pointer",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>
+            {gridVisible ? "grid_on" : "grid_off"}
+          </span>
+        </button>
+      )}
       {failed && (
         <div className="viewport-fallback">
           <strong>{t("viewport3d.engineUnavailable")}</strong>

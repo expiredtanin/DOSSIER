@@ -39,6 +39,17 @@ interface WebModelRendererLike {
   set_model(json: string): void;
   set_render_mode_white(white: boolean): void;
   set_view_preset(preset: string): void;
+  /** Boden-Referenzraster in der Welt-XZ-Ebene ein-/ausblenden (Rust-seitig,
+   * `web::set_ground_grid`). `visible=false` zeichnet kein Raster; sonst ein
+   * Quadrat der Kantenlaenge `extent_m` (zentriert um den Ursprung, XZ) auf
+   * Hoehe `elevation_m` (world-Y) mit Linienabstand `spacing_m`. Wirkt erst
+   * beim naechsten `render`. */
+  set_ground_grid(
+    visible: boolean,
+    elevation_m: number,
+    extent_m: number,
+    spacing_m: number,
+  ): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -146,6 +157,25 @@ export function useWasm3dRenderer(
   }, []);
 
   /**
+   * Boden-Referenzraster ein-/ausblenden (Overlay-Umschalter im Viewport,
+   * s. Wasm3DViewport.tsx). `elevationM` = OKFF des aktiven Geschosses
+   * (`baseElevation`), `extentM`/`spacingM` = Kantenlaenge/Linienabstand des
+   * Quadrats in Metern. Wirkt erst beim naechsten `render`.
+   */
+  const setGroundGrid = useCallback(
+    (visible: boolean, elevationM: number, extentM: number, spacingM: number) => {
+      const r = rendererRef.current;
+      if (!r) return;
+      try {
+        r.set_ground_grid(visible, elevationM, extentM, spacingM);
+      } catch (e) {
+        console.warn("render3d set_ground_grid fehlgeschlagen:", e);
+      }
+    },
+    [],
+  );
+
+  /**
    * Kamera-Praeset anwenden (`front`/`top`/`side`/`iso`/`perspective`, wie
    * `View3d` in TopBar.tsx). Delegiert die formatfuellende Ziel-/Distanz-
    * Berechnung + Projektionsart (ortho fuer front/top/side) an Rust
@@ -209,5 +239,13 @@ export function useWasm3dRenderer(
     [canvasRef],
   );
 
-  return { render, updateModel, setWhiteMode, applyViewPreset, ready, failed };
+  return {
+    render,
+    updateModel,
+    setWhiteMode,
+    applyViewPreset,
+    setGroundGrid,
+    ready,
+    failed,
+  };
 }

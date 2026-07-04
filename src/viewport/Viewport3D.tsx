@@ -115,17 +115,31 @@ const WASM_ENGINE_ACTIVE: boolean = (() => {
  * nutzt vorerst nur das Projekt (Massenmodell + Orbit); alle weiteren Props
  * (Auswahl, Render-Modi, Editier-Griffe) wirken nur im three.js-Pfad.
  */
-export function Viewport3D(props: Parameters<typeof ThreeViewport3D>[0]) {
+export function Viewport3D(
+  props: Parameters<typeof ThreeViewport3D>[0] & {
+    /** Boden-Referenzraster ein-/ausblenden — wirkt NUR im WASM-Pfad (der
+     * Overlay-Umschalter sitzt im Wasm3DViewport selbst); die three.js-Sicht
+     * zeigt ihr Raster unveraendert immer (kein Toggle dort). */
+    gridVisible?: boolean;
+    /** Klick auf den Grid-Umschalter-Button im WASM-Viewport — Single Source
+     * of Truth bleibt der Aufrufer (App/viewSlice `grid3dVisible`). */
+    onToggleGrid?: () => void;
+  },
+) {
+  const { gridVisible, onToggleGrid, ...threeProps } = props;
   if (WASM_ENGINE_ACTIVE) {
     return (
       <Wasm3DViewport
         project={props.project}
         view3d={props.view3d}
         renderMode={props.renderMode}
+        gridVisible={gridVisible}
+        groundElevation={props.gridElevation}
+        onToggleGrid={onToggleGrid}
       />
     );
   }
-  return <ThreeViewport3D {...props} />;
+  return <ThreeViewport3D {...threeProps} />;
 }
 
 function ThreeViewport3D({

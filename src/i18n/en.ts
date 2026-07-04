@@ -905,4 +905,6 @@ export const en: Record<TranslationKey, string> = {
   "viewport3d.engineUnavailable": "3D engine unavailable",
   "viewport3d.engineUnavailableHint":
     "WebGPU could not be initialized. Switch to WebGL2 in the status bar to keep using the 3D view.",
+  "viewport3d.grid.show": "Show ground grid",
+  "viewport3d.grid.hide": "Hide ground grid",
 };
