@@ -6,8 +6,10 @@
 // Prioritäts-Reihenfolge (Vorrang bei nahem Abstand): endpoint > intersection >
 // midpoint > onEdge > grid; ortho/Winkelraster ist eine Projektion (überlagert).
 
-import type { Project, Vec2 } from "../model/types";
-import { lineIntersect } from "../model/geometry";
+import type { Project, Vec2, Wall } from "../model/types";
+import { getWallType, wallTypeThickness } from "../model/types";
+import { add, leftNormal, lineIntersect, normalize, scale, sub } from "../model/geometry";
+import { wallReferenceOffset } from "../model/wall";
 import { centroid as roomCentroid } from "../geometry/roomArea";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
 
@@ -43,6 +45,39 @@ export interface SnapInput {
 /** Eine Strecke als Snap-Quelle (Wandachse oder 2D-Segment). */
 type Seg = [Vec2, Vec2];
 
+/**
+ * Schichttrennlinien einer Wand: für jede kumulierte Schichtgrenze (inkl.
+ * beider Aussenflächen) eine zur Achse parallele Strecke, um den Betrag
+ * entlang `leftNormal(u)` verschoben. Spiegelt EXAKT die Offset-Berechnung aus
+ * `generatePlan.ts` (`addWallPoche`): Start bei `refOff − total/2`
+ * (`wallReferenceOffset`), danach je Schicht `+= layer.thickness` aufsummiert.
+ * Liefert `layers.length + 1` Segmente (leer bei unbekanntem Wandtyp).
+ */
+export function wallLayerBoundarySegments(project: Project, wall: Wall): Seg[] {
+  let wt;
+  try {
+    wt = getWallType(project, wall);
+  } catch {
+    return [];
+  }
+  const total = wallTypeThickness(wt);
+  const refOff = wallReferenceOffset(wall, total);
+  const u = normalize(sub(wall.end, wall.start));
+  const n = leftNormal(u);
+  const out: Seg[] = [];
+  let off = refOff - total / 2;
+  const boundary = (o: number): Seg => [
+    add(wall.start, scale(n, o)),
+    add(wall.end, scale(n, o)),
+  ];
+  out.push(boundary(off)); // äussere Fläche
+  for (const layer of wt.layers) {
+    off += layer.thickness;
+    out.push(boundary(off)); // Schichtfuge (letzte = innere Fläche)
+  }
+  return out;
+}
+
 /** Sammelt alle sichtbaren Strecken des Geschosses (Wandachsen + 2D-Segmente). */
 function collectSegments(input: SnapInput): Seg[] {
   const segs: Seg[] = [];
@@ -50,6 +85,7 @@ function collectSegments(input: SnapInput): Seg[] {
     if (w.floorId !== input.levelId) continue;
     if (!input.visibleCodes.has(w.categoryCode)) continue;
     segs.push([w.start, w.end]);
+    for (const seg of wallLayerBoundarySegments(input.project, w)) segs.push(seg);
   }
   for (const d of input.project.drawings2d) {
     if (d.levelId !== input.levelId) continue;
