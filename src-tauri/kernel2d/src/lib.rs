@@ -300,6 +300,120 @@ pub fn is_ccw(pts: &[Vec2]) -> bool {
     signed_area(pts) > 0.0
 }
 
+// --- Offset ------------------------------------------------------------------
+
+/// Offset einer einzelnen Strecke um `d` (links positiv).
+pub fn offset_segment(a: Vec2, b: Vec2, d: f64) -> (Vec2, Vec2) {
+    let n = left_normal(normalize(sub(b, a)));
+    let off = scale(n, d);
+    (add(a, off), add(b, off))
+}
+
+/// Offset einer Polylinie um `d` (links positiv) mit GEHRUNG (miter). Bei
+/// (nahezu) parallelen Nachbarkanten faellt `line_intersect` (Schwelle 1e-9)
+/// auf den verschobenen Endpunkt zurueck — dieser geometrische Sprung MUSS an
+/// exakt 1e-9 haengen (nicht EPS). Selbstschnitte werden NICHT geheilt (wie TS).
+pub fn offset_polyline(pts: &[Vec2], d: f64, closed: bool) -> Vec<Vec2> {
+    // Auf signifikante Kanten reduzieren (Duplikate verwerfen).
+    let mut clean: Vec<Vec2> = Vec::new();
+    for &p in pts {
+        if clean.is_empty() || dist(clean[clean.len() - 1], p) > EPS {
+            clean.push(p);
+        }
+    }
+    if closed && clean.len() > 1 && dist(clean[0], clean[clean.len() - 1]) <= EPS {
+        clean.pop();
+    }
+    let n = clean.len();
+    if n < 2 {
+        return pts.to_vec();
+    }
+    let edges: Vec<(Vec2, Vec2)> = polyline_edges(&clean, closed)
+        .into_iter()
+        .map(|(a, b)| offset_segment(a, b, d))
+        .collect();
+    if edges.is_empty() {
+        return pts.to_vec();
+    }
+    // Schnitt zweier (verschobener) Kanten als unendliche Geraden; None → fallback.
+    let join = |e1: (Vec2, Vec2), e2: (Vec2, Vec2), fallback: Vec2| -> Vec2 {
+        let d1 = sub(e1.1, e1.0);
+        let d2 = sub(e2.1, e2.0);
+        line_intersect(e1.0, d1, e2.0, d2).unwrap_or(fallback)
+    };
+    let m = edges.len();
+    let mut result: Vec<Vec2> = Vec::new();
+    if !closed {
+        result.push(edges[0].0);
+        for i in 0..m - 1 {
+            result.push(join(edges[i], edges[i + 1], edges[i].1));
+        }
+        result.push(edges[m - 1].1);
+        return result;
+    }
+    for i in 0..m {
+        let prev = edges[(i + m - 1) % m];
+        let curr = edges[i];
+        result.push(join(prev, curr, curr.0));
+    }
+    result
+}
+
+// --- Fillet (Eck-Verrundung) -------------------------------------------------
+
+/// Ergebnis einer Eck-Verrundung (Port von `Fillet`). serde-camelCase, damit die
+/// JSON-Keys (`tangentA`/`startAngle` …) exakt der TS-Referenz entsprechen.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Fillet {
+    pub center: Vec2,
+    pub radius: f64,
+    /// Tangentenpunkt auf dem ersten Schenkel (corner→p1).
+    pub tangent_a: Vec2,
+    /// Tangentenpunkt auf dem zweiten Schenkel (corner→p2).
+    pub tangent_b: Vec2,
+    pub start_angle: f64,
+    pub end_angle: f64,
+}
+
+/// Verrundet die Ecke bei `corner` (Schenkel corner→p1, corner→p2) mit Radius r.
+/// None bei (nahezu) kollinearen/zu kurzen Schenkeln. Transzendente Kette
+/// (`acos/tan/sin/atan2`) — libm nativ↔wasm↔JS driftet um letzte ULP, daher im
+/// Diff-Test Winkel-Epsilon 1e-7 rad (Struktur/None-Entscheidung bleibt exakt).
+pub fn fillet_corner(corner: Vec2, p1: Vec2, p2: Vec2, r: f64) -> Option<Fillet> {
+    let u1 = normalize(sub(p1, corner));
+    let u2 = normalize(sub(p2, corner));
+    // Klemm-Reihenfolge wie TS `Math.max(-1, Math.min(1, dot))`.
+    let cos_theta = dot(u1, u2).min(1.0).max(-1.0);
+    let theta = cos_theta.acos();
+    if theta < 1e-4 || std::f64::consts::PI - theta < 1e-4 {
+        return None; // kollinear
+    }
+    let tan_half = (theta / 2.0).tan();
+    if tan_half < EPS {
+        return None;
+    }
+    let setback = r / tan_half;
+    if setback > len(sub(p1, corner)) + EPS || setback > len(sub(p2, corner)) + EPS {
+        return None;
+    }
+    let tangent_a = add(corner, scale(u1, setback));
+    let tangent_b = add(corner, scale(u2, setback));
+    let bis = normalize(add(u1, u2));
+    let center_dist = r / (theta / 2.0).sin();
+    let center = add(corner, scale(bis, center_dist));
+    let start_angle = (tangent_a.y - center.y).atan2(tangent_a.x - center.x);
+    let end_angle = (tangent_b.y - center.y).atan2(tangent_b.x - center.x);
+    Some(Fillet {
+        center,
+        radius: r,
+        tangent_a,
+        tangent_b,
+        start_angle,
+        end_angle,
+    })
+}
+
 // --- Batch-WASM-Fassade (Feature "web") --------------------------------------
 // Phase 1: nur ein Versions-/Ping-Export, um die WASM-Grenze + das Tooling
 // (wasm-pack → pkgKernel2d → Vite/vitest) end-to-end gruen zu bekommen. Die
@@ -376,6 +490,31 @@ struct CircleCircleQuery {
     r1: f64,
     c2: Vec2,
     r2: f64,
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct OffsetSegQuery {
+    a: Vec2,
+    b: Vec2,
+    d: f64,
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct OffsetPolyQuery {
+    pts: Vec<Vec2>,
+    d: f64,
+    closed: bool,
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct FilletQuery {
+    corner: Vec2,
+    p1: Vec2,
+    p2: Vec2,
+    r: f64,
 }
 
 #[cfg(feature = "web")]
@@ -501,6 +640,39 @@ pub fn is_ccw_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsVal
     to_js(&out)
 }
 
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn offset_segment_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<OffsetSegQuery> = from_js(input_json)?;
+    let out: Vec<(Vec2, Vec2)> = qs.iter().map(|q| offset_segment(q.a, q.b, q.d)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn offset_polyline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<OffsetPolyQuery> = from_js(input_json)?;
+    let out: Vec<Vec<Vec2>> = qs
+        .iter()
+        .map(|q| offset_polyline(&q.pts, q.d, q.closed))
+        .collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn fillet_corner_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<FilletQuery> = from_js(input_json)?;
+    let out: Vec<Option<Fillet>> = qs
+        .iter()
+        .map(|q| fillet_corner(q.corner, q.p1, q.p2, q.r))
+        .collect();
+    to_js(&out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,5 +795,64 @@ mod tests {
         assert_eq!(polyline_edges(&pts, true).len(), 3);
         assert!(polyline_edges(&[], true).is_empty());
         assert!(polyline_edges(&[Vec2::new(0.0, 0.0)], true).is_empty());
+    }
+
+    #[test]
+    fn offset_segment_left_positive() {
+        // Strecke (0,0)->(1,0), Offset +0.5 → linke Normale (0,1) → y=0.5.
+        let (a, b) = offset_segment(Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), 0.5);
+        assert!((a.x).abs() < T && (a.y - 0.5).abs() < T);
+        assert!((b.x - 1.0).abs() < T && (b.y - 0.5).abs() < T);
+    }
+
+    #[test]
+    fn offset_polyline_right_angle_miter() {
+        // L-Ecke (0,0)->(1,0)->(1,1), offen, Offset +0.5 (nach innen/links).
+        // Innerer Gehrungspunkt = Schnitt der beiden verschobenen Kanten bei (0.5,0.5).
+        let l = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+        ];
+        let out = offset_polyline(&l, 0.5, false);
+        assert_eq!(out.len(), 3);
+        assert!((out[1].x - 0.5).abs() < 1e-9 && (out[1].y - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fillet_right_angle() {
+        // Rechter Winkel bei (0,0), Schenkel entlang +x und +y, r=1.
+        // setback = r/tan(45°) = 1; center auf Winkelhalbierender bei (1,1).
+        let f = fillet_corner(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(5.0, 0.0),
+            Vec2::new(0.0, 5.0),
+            1.0,
+        )
+        .unwrap();
+        assert!((f.tangent_a.x - 1.0).abs() < 1e-9 && f.tangent_a.y.abs() < 1e-9);
+        assert!(f.tangent_b.x.abs() < 1e-9 && (f.tangent_b.y - 1.0).abs() < 1e-9);
+        assert!((f.center.x - 1.0).abs() < 1e-9 && (f.center.y - 1.0).abs() < 1e-9);
+        assert!((f.radius - 1.0).abs() < T);
+    }
+
+    #[test]
+    fn fillet_collinear_is_none() {
+        // Gestreckt (180°) → kollinear → None.
+        assert!(fillet_corner(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(-1.0, 0.0),
+            0.5,
+        )
+        .is_none());
+        // Zu grosser Radius für die Schenkellänge → None.
+        assert!(fillet_corner(
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.1, 0.0),
+            Vec2::new(0.0, 0.1),
+            10.0,
+        )
+        .is_none());
     }
 }

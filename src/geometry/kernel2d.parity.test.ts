@@ -18,15 +18,19 @@ import type { Vec2 } from "../model/types";
 import {
   circleCircleIntersect,
   closestPointOnSegment,
+  filletCorner,
   isCCW,
   lineCircleIntersect,
   lineSegmentIntersect,
+  offsetPolyline,
+  offsetSegment,
   pointSegmentDistance,
   projectParam,
   segmentCircleIntersect,
   segmentIntersect,
   segmentPolylineHits,
   signedArea,
+  type Fillet,
   type Hit,
 } from "./kernel2d";
 
@@ -215,6 +219,74 @@ describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Zufall", () => {
       expect(wCcw[i], `ccw#${i}`).toBe(isCCW(p));
     });
   });
+
+  it("offsetSegment / offsetPolyline (Miter, Struktur + Werte rel 1e-9)", () => {
+    const rng = mulberry32(7);
+    const segs = Array.from({ length: N }, () => ({
+      a: v(rng),
+      b: v(rng),
+      d: (rng() * 2 - 1) * 5,
+    }));
+    const wSeg = JSON.parse(K.offset_segment_batch_json(JSON.stringify(segs))) as [Vec2, Vec2][];
+    segs.forEach((q, i) => {
+      const [a, b] = offsetSegment(q.a, q.b, q.d);
+      expect(closeVec(wSeg[i][0], a) && closeVec(wSeg[i][1], b), `offSeg#${i}`).toBe(true);
+    });
+
+    const polys = Array.from({ length: N }, () => {
+      const n = 3 + Math.floor(rng() * 10);
+      const pts = Array.from({ length: n }, () => v(rng));
+      return { pts, d: (rng() * 2 - 1) * 5, closed: rng() < 0.5 };
+    });
+    const wPoly = JSON.parse(K.offset_polyline_batch_json(JSON.stringify(polys))) as Vec2[][];
+    polys.forEach((q, i) => {
+      const t = offsetPolyline(q.pts, q.d, q.closed);
+      expect(wPoly[i].length, `offPoly-len#${i}`).toBe(t.length);
+      t.forEach((p, j) => expect(closeVec(wPoly[i][j], p), `offPoly#${i}.${j}`).toBe(true));
+    });
+  });
+
+  it("filletCorner (Struktur exakt + Werte, Winkel abs 1e-7)", () => {
+    const rng = mulberry32(8);
+    // Halb kontrolliert (garantiert gueltige Verrundung), halb Zufall (None-Paritaet).
+    const qs = Array.from({ length: N }, (_, i) => {
+      if (i % 2 === 0) {
+        const corner = v(rng);
+        const a0 = rng() * Math.PI * 2;
+        const half = 0.3 + rng() * 0.9; // theta = 2*half ∈ [0.6, 2.4] rad (weg von 0/π)
+        const legLen = 3 + rng() * 7;
+        const rMax = legLen * Math.tan(half);
+        const r = 0.1 + rng() * 0.8 * rMax;
+        const dir = (ang: number) => ({ x: Math.cos(ang), y: Math.sin(ang) });
+        const d1 = dir(a0 + half);
+        const d2 = dir(a0 - half);
+        return {
+          corner,
+          p1: { x: corner.x + d1.x * legLen, y: corner.y + d1.y * legLen },
+          p2: { x: corner.x + d2.x * legLen, y: corner.y + d2.y * legLen },
+          r,
+        };
+      }
+      return { corner: v(rng), p1: v(rng), p2: v(rng), r: 0.1 + rng() * 5 };
+    });
+    const w = JSON.parse(K.fillet_corner_batch_json(JSON.stringify(qs))) as (Fillet | null)[];
+    let valid = 0;
+    qs.forEach((q, i) => {
+      const t = filletCorner(q.corner, q.p1, q.p2, q.r);
+      expect(w[i] === null, `fil-null#${i}`).toBe(t === null);
+      if (t && w[i]) {
+        const f = w[i]!;
+        expect(closeVec(f.center, t.center), `fil-center#${i}`).toBe(true);
+        expect(closeVec(f.tangentA, t.tangentA), `fil-tA#${i}`).toBe(true);
+        expect(closeVec(f.tangentB, t.tangentB), `fil-tB#${i}`).toBe(true);
+        expect(closeNum(f.radius, t.radius), `fil-r#${i}`).toBe(true);
+        expect(Math.abs(f.startAngle - t.startAngle) <= 1e-7, `fil-sa#${i}`).toBe(true);
+        expect(Math.abs(f.endAngle - t.endAngle) <= 1e-7, `fil-ea#${i}`).toBe(true);
+        valid++;
+      }
+    });
+    expect(valid, "keine gueltige Verrundung — Test waere aussagelos").toBeGreaterThan(50);
+  });
 });
 
 describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Golden (Grenzfaelle)", () => {
@@ -258,5 +330,28 @@ describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Golden (Grenzfae
     expect(closeNum(wArea[0], signedArea(polys[0]))).toBe(true);
     expect(Math.abs(wArea[0])).toBeLessThan(1e-12);
     expect(wCcw[0]).toBe(isCCW(polys[0]));
+  });
+
+  it("Offset L-Ecke (Gehrung) und Fillet rechter Winkel / kollinear→null / zu gross→null", () => {
+    const off = [{ pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }], d: 0.5, closed: false }];
+    const wOff = JSON.parse(K.offset_polyline_batch_json(JSON.stringify(off))) as Vec2[][];
+    const tOff = offsetPolyline(off[0].pts, off[0].d, off[0].closed);
+    expect(wOff[0].length).toBe(tOff.length);
+    tOff.forEach((p, j) => expect(closeVec(wOff[0][j], p)).toBe(true));
+
+    const fil = [
+      { corner: { x: 0, y: 0 }, p1: { x: 5, y: 0 }, p2: { x: 0, y: 5 }, r: 1 }, // rechter Winkel
+      { corner: { x: 0, y: 0 }, p1: { x: 1, y: 0 }, p2: { x: -1, y: 0 }, r: 0.5 }, // kollinear → null
+      { corner: { x: 0, y: 0 }, p1: { x: 0.1, y: 0 }, p2: { x: 0, y: 0.1 }, r: 10 }, // zu gross → null
+    ];
+    const wFil = JSON.parse(K.fillet_corner_batch_json(JSON.stringify(fil))) as (Fillet | null)[];
+    fil.forEach((q, i) => {
+      const t = filletCorner(q.corner, q.p1, q.p2, q.r);
+      expect(wFil[i] === null, `golden-fil#${i}`).toBe(t === null);
+      if (t && wFil[i]) {
+        expect(closeVec(wFil[i]!.center, t.center)).toBe(true);
+        expect(closeVec(wFil[i]!.tangentA, t.tangentA)).toBe(true);
+      }
+    });
   });
 });
