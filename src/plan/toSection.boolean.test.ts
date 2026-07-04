@@ -55,6 +55,19 @@ function band(
   };
 }
 
+/** Ein achsparalleles Cut-Band mit joinPriority UND Komponenten-Identität (für die MERGE-Regel). */
+function cband(
+  uMin: number,
+  uMax: number,
+  vMin: number,
+  vMax: number,
+  joinPriority: number,
+  componentId: string,
+  tag = "",
+): SectionCutPolygon {
+  return { ...band(uMin, uMax, vMin, vMax, joinPriority, tag), componentId };
+}
+
 /** Bounding-Box eines Bands als Rect. */
 function boxOf(b: SectionCutPolygon): Rect {
   const us = b.pts.map((p) => p[0]);
@@ -183,5 +196,74 @@ describe("subtractDominantBands: stärkere Schicht schneidet schwächere", () =>
     const out = subtractDominantBands([stark, schwach]);
     expect(out.filter((b) => b.fill === "schwach")).toHaveLength(0);
     expect(area(out.filter((b) => b.fill === "stark"))).toBeCloseTo(9, 9);
+  });
+});
+
+describe("subtractDominantBands: MERGE-Regel (gleiche Komponente + Priorität)", () => {
+  it("(a) zwei berührende Bänder gleicher Komponente+Priorität → EIN Körper, keine Innenkante", () => {
+    // Beton-Wand (vertikal) trifft Beton-Decke (deren Schnittband hier u-deckungs-
+    // gleich): gleiche componentId "beton", gleiche joinPriority, Überlappung v∈[2,3].
+    const betonWand = cband(0, 1, 0, 3, 100, "beton", "wand");
+    const betonDecke = cband(0, 1, 2, 4, 100, "beton", "decke"); // überlappt in v∈[2,3]
+    const out = subtractDominantBands([betonWand, betonDecke]);
+    // Zu EINEM Rechteck u∈[0,1], v∈[0,4] verschmolzen → keine innere Trennlinie.
+    expect(out).toHaveLength(1);
+    expect(boxOf(out[0])).toEqual(r(0, 1, 0, 4));
+    expect(out[0].componentId).toBe("beton");
+    expect(area(out)).toBeCloseTo(4, 9);
+  });
+
+  it("(a2) exakt bündig aneinander (Kantenberührung, kein Überlapp) → verschmilzt", () => {
+    // Zwei Backstein-Kerne, die sich nur an v=3 berühren: die Innenkante muss weg.
+    const unten = cband(0, 1, 0, 3, 100, "backstein", "u");
+    const oben = cband(0, 1, 3, 5, 100, "backstein", "o");
+    const out = subtractDominantBands([unten, oben]);
+    expect(out).toHaveLength(1);
+    expect(boxOf(out[0])).toEqual(r(0, 1, 0, 5));
+  });
+
+  it("(b) gleiche Priorität, VERSCHIEDENE Komponenten → bleiben getrennt (coexist)", () => {
+    // Selbe Geometrie wie (a), aber unterschiedliche componentId → kein Merge.
+    const wand = cband(0, 1, 0, 3, 100, "beton-wand", "wand");
+    const decke = cband(0, 1, 2, 4, 100, "beton-decke", "decke");
+    const out = subtractDominantBands([wand, decke]);
+    expect(out).toHaveLength(2);
+    expect(area(out.filter((b) => b.fill === "wand"))).toBeCloseTo(3, 9);
+    expect(area(out.filter((b) => b.fill === "decke"))).toBeCloseTo(2, 9);
+  });
+
+  it("(c) Bänder ohne componentId verschmelzen nie (Dominanz-Tests bit-identisch)", () => {
+    // Wie der bestehende Koexistenz-Test, ohne componentId → weiterhin 2 Bänder.
+    const a = band(0, 1, 0, 3, 100, "a");
+    const b = band(0, 1, 2, 4, 100, "b");
+    const out = subtractDominantBands([a, b]);
+    expect(out).toHaveLength(2);
+    expect(area(out.filter((x) => x.fill === "a"))).toBeCloseTo(3, 9);
+    expect(area(out.filter((x) => x.fill === "b"))).toBeCloseTo(2, 9);
+  });
+
+  it("Merge respektiert die Dominanz: stärkeres Fremd-Band schneidet erst, dann verschmelzen die Reste", () => {
+    // Zwei gleichartige Putz-Bänder (Prio 10) u-deckungsgleich, dazwischen greift
+    // KEIN stärkeres Band -> sie verschmelzen; ein separates starkes Beton-Band
+    // (Prio 100) schneidet vorher ein Stück aus dem oberen Putz.
+    const putzUnten = cband(0, 1, 0, 2, 10, "putz", "pu");
+    const putzOben = cband(0, 1, 2, 4, 10, "putz", "po");
+    const beton = cband(0, 1, 3, 5, 100, "beton", "beton"); // schneidet Putz-Oben v∈[3,4] weg
+    const out = subtractDominantBands([putzUnten, putzOben, beton]);
+    // Putz: unten[0,2] + oben-Rest[2,3] verschmelzen zu [0,3] → EIN Band, Fläche 3.
+    const putz = out.filter((b) => b.componentId === "putz");
+    expect(putz).toHaveLength(1);
+    expect(boxOf(putz[0])).toEqual(r(0, 1, 0, 3));
+    // Beton unangetastet.
+    expect(area(out.filter((b) => b.componentId === "beton"))).toBeCloseTo(2, 9);
+  });
+
+  it("Teil-/Eck-Überlappung gleicher Komponente verschmilzt NICHT (Union wäre L-förmig)", () => {
+    // Nicht achs-deckungsgleich, nur Eck-Überlapp → Bounding-Box würde leere
+    // Fläche abdecken, darum bleiben beide getrennt.
+    const a = cband(0, 2, 0, 2, 100, "x", "a");
+    const b = cband(1, 3, 1, 3, 100, "x", "b");
+    const out = subtractDominantBands([a, b]);
+    expect(out).toHaveLength(2);
   });
 });

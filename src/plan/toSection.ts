@@ -65,6 +65,16 @@ export interface SectionCutPolygon {
    * (unauflösbares Bauteil), nimmt das Band an keiner Subtraktion teil.
    */
   joinPriority?: number;
+  /**
+   * Bauteil-Identität der Schicht dieses Bands (`Component.id` des Ursprungs-
+   * Bauteils bzw. — bei einschichtiger Poché — des tragenden Bauteils). Steuert
+   * die MERGE-Regel in `subtractDominantBands`: berühren/überlappen sich zwei
+   * Bänder mit GLEICHER `componentId` UND gleicher `joinPriority`, verschmelzen
+   * sie zu einem Körper (keine innere Trennlinie durch gleichartiges Material —
+   * analog zu `resolveJoinPriority` "merge" im Grundriss-Join-Modell). Fehlt der
+   * Wert (unauflösbares Bauteil), nimmt das Band an keiner Verschmelzung teil.
+   */
+  componentId?: string;
 }
 
 /** Ein projiziertes Liniensegment in (u, v)-Metern. */
@@ -299,6 +309,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
         cp.hatch = style.hatch;
       }
       cp.joinPriority = owner ? wallRepresentativePriority(project, owner) : undefined;
+      cp.componentId = owner ? wallRepresentativeComponentId(project, owner) : undefined;
       bands.push(cp);
       continue;
     }
@@ -320,6 +331,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
         cp.hatch = style.hatch;
       }
       cp.joinPriority = ceilingRepresentativePriority(project, owner);
+      cp.componentId = ceilingRepresentativeComponentId(project, owner);
     }
     bands.push(cp);
   }
@@ -345,6 +357,48 @@ function wallRepresentativePriority(project: Project, wall: Wall): number | unde
       if (best === undefined || p > best) best = p;
     }
     return best;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Bauteil-Identität einer einschichtig gezeichneten Wand-Poché für die MERGE-
+ * Regel: die `id` des tragenden Bauteils (höchste joinPriority) — exakt das
+ * Bauteil, dessen Füllung/Schraffur `resolveWallSectionStyle` dem Band gibt und
+ * dessen `joinPriority` `wallRepresentativePriority` liefert. `undefined`, wenn
+ * Wandtyp/keine Schicht auflösbar ist.
+ */
+function wallRepresentativeComponentId(project: Project, wall: Wall): string | undefined {
+  try {
+    const wt = getWallType(project, wall);
+    let bestId: string | undefined;
+    let bestPrio = -Infinity;
+    for (const layer of wt.layers) {
+      const p = getComponent(project, layer.componentId).joinPriority;
+      if (bestId === undefined || p > bestPrio) {
+        bestId = layer.componentId;
+        bestPrio = p;
+      }
+    }
+    return bestId;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Bauteil-Identität einer einschichtig gezeichneten Decken-Poché für die MERGE-
+ * Regel: die `id` der ERSTEN Schicht — dasselbe Bauteil, das
+ * `resolveCeilingSectionStyle`/`ceilingRepresentativePriority` verwenden.
+ * `undefined`, wenn Deckentyp/keine Schicht auflösbar ist.
+ */
+function ceilingRepresentativeComponentId(project: Project, ceiling: Ceiling): string | undefined {
+  try {
+    const wt = getCeilingType(project, ceiling);
+    const first = wt.layers[0];
+    if (!first) return undefined;
+    return first.componentId;
   } catch {
     return undefined;
   }
@@ -460,6 +514,89 @@ export function subtractDominantBands(bands: SectionCutPolygon[]): SectionCutPol
     }
     for (const p of pieces) out.push(bandFromRect(band, p));
   }
+  // MERGE-Regel: nach der Dominanz-Subtraktion angrenzende/überlappende Bänder
+  // gleicher Komponente + Priorität zu einem Körper verschmelzen (keine innere
+  // Trennlinie durch gleichartiges Material). Die Subtraktion oben bleibt davon
+  // unberührt (bit-identisch) — hier werden nur gleichartige Reste vereinigt.
+  return mergeSameComponentBands(out);
+}
+
+/**
+ * Union zweier achsparalleler Rechtecke, ABER NUR wenn das Ergebnis EXAKT wieder
+ * ein Rechteck ist — sonst `null`. Zwei Fälle liefern eine rechteckige Union
+ * (jeweils mit `RECT_EPS`-Toleranz):
+ *   • Enthaltensein: eines liegt vollständig im anderen ⇒ das umschließende.
+ *   • Achs-Deckung + Berührung: in einer Achse deckungsgleich (gleiche min/max)
+ *     UND in der anderen berührend/überlappend (kein Spalt) ⇒ Bounding-Box.
+ * Teil-/Eck-Überlappungen (Union wäre L-förmig) und Bänder mit Spalt liefern
+ * `null` — sie dürfen NICHT verschmolzen werden (die Bounding-Box deckte sonst
+ * leere Fläche ab). Genau die im Schnitt vorkommenden bündigen Rechtecke.
+ */
+function rectUnionIfRect(a: Rect, b: Rect): Rect | null {
+  const E = RECT_EPS;
+  // Enthaltensein (inkl. Deckungsgleichheit): Union = umschließendes Rechteck.
+  const aInB =
+    b.uMin - a.uMin <= E && a.uMax - b.uMax <= E && b.vMin - a.vMin <= E && a.vMax - b.vMax <= E;
+  if (aInB) return { uMin: b.uMin, uMax: b.uMax, vMin: b.vMin, vMax: b.vMax };
+  const bInA =
+    a.uMin - b.uMin <= E && b.uMax - a.uMax <= E && a.vMin - b.vMin <= E && b.vMax - a.vMax <= E;
+  if (bInA) return { uMin: a.uMin, uMax: a.uMax, vMin: a.vMin, vMax: a.vMax };
+
+  const uAligned = Math.abs(a.uMin - b.uMin) <= E && Math.abs(a.uMax - b.uMax) <= E;
+  const vAligned = Math.abs(a.vMin - b.vMin) <= E && Math.abs(a.vMax - b.vMax) <= E;
+  // Berührung/Überlappung in der jeweils ANDEREN Achse (kein Spalt größer EPS).
+  const vTouch = a.vMax >= b.vMin - E && b.vMax >= a.vMin - E;
+  const uTouch = a.uMax >= b.uMin - E && b.uMax >= a.uMin - E;
+  if ((uAligned && vTouch) || (vAligned && uTouch)) {
+    return {
+      uMin: Math.min(a.uMin, b.uMin),
+      uMax: Math.max(a.uMax, b.uMax),
+      vMin: Math.min(a.vMin, b.vMin),
+      vMax: Math.max(a.vMax, b.vMax),
+    };
+  }
+  return null;
+}
+
+/**
+ * MERGE-Phase der Schnitt-Dominanz (vgl. `resolveJoinPriority` "merge",
+ * src/model/joins.ts): Bänder mit GLEICHER `componentId` UND gleicher
+ * `joinPriority`, deren achsparallele Rechtecke sich berühren/überlappen und
+ * eine rechteckige Union bilden (`rectUnionIfRect`), werden zu EINEM Band
+ * zusammengefasst — so entsteht an der Berührkante keine innere Trennlinie durch
+ * gleichartiges Material (z. B. zwei Backstein-Kerne, Beton-Decke an Beton-Wand).
+ *
+ * Bänder VERSCHIEDENER Komponenten (auch bei gleicher Priorität) bleiben
+ * getrennt (coexist). Bänder ohne `componentId`/`joinPriority` oder ohne
+ * Rechteck-Form nehmen nicht teil und werden unverändert durchgereicht — daher
+ * ist die Phase für die bestehenden Dominanz-Tests (keine `componentId`) ein
+ * No-op. Iterativ bis zum Fixpunkt (Ketten aus ≥3 Rechtecken verschmelzen
+ * schrittweise); die Reihenfolge bleibt erhalten (das verschmolzene Rechteck
+ * ersetzt das erste Band an seiner Position).
+ */
+function mergeSameComponentBands(bands: SectionCutPolygon[]): SectionCutPolygon[] {
+  const out = bands.slice();
+  for (let merged = true; merged; ) {
+    merged = false;
+    for (let i = 0; i < out.length && !merged; i++) {
+      const bi = out[i];
+      if (bi.componentId === undefined || bi.joinPriority === undefined) continue;
+      const ri = rectOfBand(bi);
+      if (!ri) continue;
+      for (let j = i + 1; j < out.length; j++) {
+        const bj = out[j];
+        if (bj.componentId !== bi.componentId || bj.joinPriority !== bi.joinPriority) continue;
+        const rj = rectOfBand(bj);
+        if (!rj) continue;
+        const u = rectUnionIfRect(ri, rj);
+        if (!u) continue;
+        out[i] = bandFromRect(bi, u);
+        out.splice(j, 1);
+        merged = true; // Fixpunkt-Neustart: neu entstandene Nachbarschaften erfassen
+        break;
+      }
+    }
+  }
   return out;
 }
 
@@ -477,6 +614,7 @@ function bandFromRect(src: SectionCutPolygon, r: Rect): SectionCutPolygon {
     fill: src.fill,
     hatch: src.hatch,
     joinPriority: src.joinPriority,
+    componentId: src.componentId,
   };
 }
 
@@ -528,6 +666,7 @@ function splitSlabLayers(
       fill: hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER,
       hatch,
       joinPriority: comp.joinPriority,
+      componentId: comp.id,
     });
   }
   return out;
@@ -613,6 +752,7 @@ export function splitWallLayers(
       fill: hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER,
       hatch,
       joinPriority: comp.joinPriority,
+      componentId: comp.id,
     });
   }
   return out;
