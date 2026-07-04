@@ -6,7 +6,9 @@ members = ["."]
 # hier ausschliessen, damit `cad-tauri` sie dennoch per Pfad als Abhaengigkeit
 # nutzen kann. geometry: neu ausgeschlossen (war Member), seit es zu WASM gebaut
 # wird und das TS-Frontend die Joins direkt per WASM aufruft (statt TS-Duplikat).
-exclude = ["render2d", "render3d", "geometry"]
+# kernel2d: analog — eigenstaendiger 2D-Geometrie-Kern (Port von kernel2d.ts),
+# per wasm-pack (Feature "web") zu WASM gebaut, ausserhalb des cad-tauri-Workspace.
+exclude = ["render2d", "render3d", "geometry", "kernel2d"]
 
 [package]
 name = "cad-tauri"
