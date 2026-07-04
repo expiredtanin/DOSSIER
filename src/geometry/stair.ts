@@ -409,3 +409,132 @@ export function pointHitsStair(p: Vec2, geo: StairGeometry): boolean {
   if (geo.landing && pointInPolygon(p, geo.landing)) return true;
   return false;
 }
+
+// ── Treppen-Aussenlinie (Plan-Outline) ───────────────────────────────────────
+
+/**
+ * Schliessendes Umriss-Polygon einer geraden Treppe im Grundriss (4 Ecken CCW).
+ * Entspricht `_aussen_gerade` im Rhino-Plugin (Rechteck über Laufbreite + Lauflänge).
+ * Liefert null bei entarteter Geometrie.
+ */
+function straightOutlinePoints(stair: Stair, halfW: number): Vec2[] | null {
+  const u = norm({ x: stair.dir.x, y: stair.dir.y });
+  const n = leftN(u);
+  const L = Math.max(1e-4, stair.runLength);
+  const s = stair.start;
+  // Vier Ecken: Start-links → Start-rechts → End-rechts → End-links (CCW).
+  return [
+    add(s, scale(n, halfW)),
+    add(s, scale(n, -halfW)),
+    add(add(s, scale(u, L)), scale(n, -halfW)),
+    add(add(s, scale(u, L)), scale(n, halfW)),
+  ];
+}
+
+/**
+ * 2D-Linien-Schnittpunkt. Liefert null bei Parallelität (det < ε).
+ * Entspricht `_line_intersect_xy` im Rhino-Plugin.
+ */
+function lineIntersect2d(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2): Vec2 | null {
+  const det = d1.x * (-d2.y) - d1.y * (-d2.x);
+  if (Math.abs(det) < 1e-9) return null;
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const t = (dx * (-d2.y) - dy * (-d2.x)) / det;
+  return { x: p1.x + d1.x * t, y: p1.y + d1.y * t };
+}
+
+/**
+ * Umriss-Polygon einer L-Treppe im Grundriss. Entspricht `_aussen_l_polygon`
+ * im Rhino-Plugin: Linien-Schnittpunkte liefern die Ecken des L-Polygons.
+ * Liefert null bei entarteter Geometrie.
+ */
+function lOutlinePoints(stair: Stair, halfW: number): Vec2[] | null {
+  const u1 = norm(stair.dir);
+  const n1 = leftN(u1);
+  const L1 = Math.max(1e-4, stair.runLength);
+  const turn = stair.turn ?? 1;
+  const u2: Vec2 = turn > 0 ? n1 : scale(n1, -1);
+  const n2 = leftN(u2);
+  const L2 = Math.max(1e-4, stair.run2Length ?? stair.runLength);
+
+  // Podest-Zentrum am Ende des ersten Laufs (Mitte = halfW hinter dem Lauf-Ende).
+  const corner = add(stair.start, scale(u1, L1 + halfW));
+  const run2Start = add(corner, scale(u2, halfW));
+
+  // Lauf-1-Anfang je Seite
+  const p0l = add(stair.start, scale(n1, halfW));
+  const p0r = add(stair.start, scale(n1, -halfW));
+  // Lauf-2-Ende je Seite
+  const endRun2 = add(run2Start, scale(u2, L2));
+  const p3l = add(endRun2, scale(n2, halfW));
+  const p3r = add(endRun2, scale(n2, -halfW));
+  // Innere Eck-Punkte: Schnittpunkt der parallelen Seitenlinien je Seite.
+  const cornerL = lineIntersect2d(p0l, u1, p3l, scale(u2, -1)) ?? add(corner, scale(n1, halfW));
+  const cornerR = lineIntersect2d(p0r, u1, p3r, scale(u2, -1)) ?? add(corner, scale(n1, -halfW));
+  // CCW-Polygon: p0l → p0r → cornerR → p3r → p3l → cornerL
+  return [p0l, p0r, cornerR, p3r, p3l, cornerL];
+}
+
+/**
+ * Spiral-Outline: Innenbogen + Aussenbogen + zwei radiale Schliesslinien.
+ * Entspricht `_aussen_wendel` im Rhino-Plugin (immer vollständig, ohne Cut).
+ * Die Bögen werden als Kreisbogen-Parameter geliefert (cx/cy/r/a0/a1), die
+ * radialen Schliesslinien als Segment-Paare.
+ */
+export interface SpiralOutlineSegments {
+  /** Radiale Abschlusslinien (jeweils Innenpunkt → Aussenpunkt). */
+  lines: [Vec2, Vec2][];
+  /** Kreisbogen-Parameter: Innen- und Aussenkreis. */
+  arcs: { cx: number; cy: number; r: number; a0: number; a1: number }[];
+}
+
+function spiralOutline(stair: Stair, halfW: number): SpiralOutlineSegments | null {
+  const center = stair.center ?? stair.start;
+  const radius = Math.max(halfW + 0.1, stair.radius ?? stair.width);
+  const sweep = (stair.sweep ?? 270) * (Math.PI / 180);
+  const startVec = sub(stair.start, center);
+  const a0 = Math.atan2(startVec.y, startVec.x);
+  const a1 = a0 + sweep;
+  const rIn = Math.max(0.02, radius - halfW);
+  const rOut = radius + halfW;
+
+  const ptAt = (r: number, a: number): Vec2 => ({
+    x: center.x + r * Math.cos(a),
+    y: center.y + r * Math.sin(a),
+  });
+
+  return {
+    lines: [
+      [ptAt(rIn, a0), ptAt(rOut, a0)],
+      [ptAt(rIn, a1), ptAt(rOut, a1)],
+    ],
+    arcs: [
+      { cx: center.x, cy: center.y, r: rIn, a0, a1 },
+      { cx: center.x, cy: center.y, r: rOut, a0, a1 },
+    ],
+  };
+}
+
+/**
+ * Aussenlinie einer Treppe im Grundriss je nach Form:
+ *   • gerade → geschlossenes Rechteck als Polygon-Punkte.
+ *   • L       → L-Polygon via Linien-Schnittpunkten.
+ *   • Wendel  → `SpiralOutlineSegments` (Bögen + radiale Linien).
+ *
+ * Genau einer von `polygon` / `spiral` ist nicht null.
+ */
+export function stairOutline(
+  stair: Stair,
+  totalRise: number,
+): { polygon: Vec2[] | null; spiral: SpiralOutlineSegments | null } {
+  void totalRise; // Signatur-Konsistenz mit stairGeometry; derzeit ungenutzt
+  const halfW = Math.max(0.05, stair.width / 2);
+  if (stair.shape === "spiral") {
+    return { polygon: null, spiral: spiralOutline(stair, halfW) };
+  }
+  if (stair.shape === "L") {
+    return { polygon: lOutlinePoints(stair, halfW), spiral: null };
+  }
+  return { polygon: straightOutlinePoints(stair, halfW), spiral: null };
+}

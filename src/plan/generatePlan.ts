@@ -38,8 +38,15 @@ import { docFromText } from "../text/richText";
 import { roomStampToDoc, roomStampExtraLines } from "../model/roomStamp";
 import type { RoomStampLine } from "../model/roomStamp";
 import { stairVerticalExtent, wallReferenceOffset } from "../model/wall";
-import { stairGeometry, stairCut } from "../geometry/stair";
-import { doorSymbol, openingInterval, windowSymbol } from "../geometry/opening";
+import { stairGeometry, stairCut, stairOutline } from "../geometry/stair";
+import type { SpiralOutlineSegments } from "../geometry/stair";
+import {
+  doorSymbol,
+  openingInterval,
+  openingJambs,
+  wallAxisFrame,
+  windowSymbol,
+} from "../geometry/opening";
 import {
   add,
   along,
@@ -261,6 +268,8 @@ export type Primitive =
       dash?: number[] | null;
       /** ID der Öffnung (für Links-Klick-Auswahl von Tür-Schwenkbögen). */
       openingId?: string;
+      /** ID der Treppe (für Links-Klick-Auswahl von Wendel-Outline-Bögen). */
+      stairId?: string;
       greyed?: boolean;
     }
   | {
@@ -1618,6 +1627,57 @@ function addOpeningSymbol(
         });
       }
     }
+    // Sturzlinien (SIA, gestrichelt) — Überkopf-Projektion des Sturzes quer über
+    // die Öffnung an der Wand-Innen-/Aussenkante. Entspricht `_make_tuer_sturz_curves`
+    // im Rhino-Plugin. Default „beide" wenn nicht explizit gesetzt.
+    const lintelMode = o.lintelLines ?? "beide";
+    if (lintelMode !== "keine") {
+      const jambs = openingJambs(wall, o);
+      if (jambs) {
+        const { n } = wallAxisFrame(wall);
+        const total = wallTypeThickness(getWallType(project, wall));
+        const refOff = wallReferenceOffset(wall, total);
+        const halfD = total / 2;
+        const outerOff = refOff + halfD;
+        const innerOff = refOff - halfD;
+        // Strichmuster: gestrichelt (Überkopf-Projektion, SIA-Konvention).
+        const dash: number[] = [0.18, 0.09];
+        const strokeColor = o.color ?? POCHE_STROKE;
+        /** Linie quer über die Öffnung am gegebenen Perp-Offset. */
+        const lintelLine = (perpOff: number) => ({
+          a: add(jambs.jambStart, scale(n, perpOff)),
+          b: add(jambs.jambEnd,   scale(n, perpOff)),
+        });
+        if (lintelMode === "aussen" || lintelMode === "beide") {
+          const seg = lintelLine(outerOff);
+          out.push({
+            kind: "line" as const,
+            a: seg.a,
+            b: seg.b,
+            cls: "door-lintel",
+            weightMm: SYMBOL_HAIRLINE_MM,
+            dash,
+            color: strokeColor,
+            greyed,
+            openingId: o.id,
+          });
+        }
+        if (lintelMode === "innen" || lintelMode === "beide") {
+          const seg = lintelLine(innerOff);
+          out.push({
+            kind: "line" as const,
+            a: seg.a,
+            b: seg.b,
+            cls: "door-lintel",
+            weightMm: SYMBOL_HAIRLINE_MM,
+            dash,
+            color: strokeColor,
+            greyed,
+            openingId: o.id,
+          });
+        }
+      }
+    }
     return;
   }
 
@@ -1648,6 +1708,26 @@ function addOpeningSymbol(
       greyed,
       openingId: o.id,
     });
+  }
+  // Brüstungslinie (gepunktet) — zeigt die Brüstung im Grundriss auf der Wandachse.
+  // Nur bei Fenstern mit Brüstungshöhe > 0. Entspricht der Sill-Linie in
+  // `_make_oeffnung_preview` und dem Brüstungs-Plansymbol im Rhino-Plugin.
+  if (o.sillHeight > 0) {
+    const jambs = openingJambs(wall, o);
+    if (jambs) {
+      out.push({
+        kind: "line",
+        a: jambs.jambStart,
+        b: jambs.jambEnd,
+        cls: "window-sill",
+        weightMm: SYMBOL_HAIRLINE_MM,
+        // Gepunktet (dot-dash) wie in _make_oeffnung_preview DrawDottedLine.
+        dash: [0.04, 0.08],
+        color: o.color ?? POCHE_STROKE,
+        greyed,
+        openingId: o.id,
+      });
+    }
   }
 }
 
@@ -1866,6 +1946,40 @@ function addRoomArea(
 }
 
 /**
+ * Zeichnet die Wendel-Aussenlinie: Innen-/Aussenbogen als Arc-Primitive plus zwei
+ * radiale Schliesslinien. Wird von `addStairSymbol` aufgerufen wenn `shape === "spiral"`.
+ */
+function _addSpiralOutline(
+  out: Primitive[],
+  seg: SpiralOutlineSegments,
+  stroke: string,
+  lwMm: number,
+  greyed: boolean,
+  stairId: string,
+): void {
+  // Radiale Schliesslinien (Startwinkel + Endwinkel).
+  for (const [a, b] of seg.lines) {
+    out.push({ kind: "line", a, b, cls: "stair-outline", weightMm: lwMm, color: stroke, greyed, stairId });
+  }
+  // Innen- und Aussenbogen.
+  for (const arc of seg.arcs) {
+    const from: Vec2 = { x: arc.cx + arc.r * Math.cos(arc.a0), y: arc.cy + arc.r * Math.sin(arc.a0) };
+    const to: Vec2   = { x: arc.cx + arc.r * Math.cos(arc.a1), y: arc.cy + arc.r * Math.sin(arc.a1) };
+    out.push({
+      kind: "arc",
+      center: { x: arc.cx, y: arc.cy },
+      from,
+      to,
+      r: arc.r,
+      cls: "stair-outline",
+      weightMm: lwMm,
+      greyed,
+      stairId,
+    });
+  }
+}
+
+/**
  * Treppen-Symbol im Grundriss (DOSSIER/SIA):
  *  • Tritte als Rechtecke: die Tritt-Trennlinien werden gezeichnet — unter der
  *    Schnittebene DURCHGEZOGEN (sichtbar), darüber GESTRICHELT (verdeckt).
@@ -1969,6 +2083,27 @@ function addStairSymbol(
   const [h1, tip, h2] = geo.arrow.head;
   out.push({ kind: "line", a: h1, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
   out.push({ kind: "line", a: h2, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
+
+  // Aussenlinie (Outline) der Treppe — schliessendes Umriss-Polygon (gerade/L)
+  // bzw. Innen-/Aussenbogen + radiale Schliesslinien (Wendel).
+  // Entspricht `_aussen_gerade` / `_aussen_l_polygon` / `_aussen_wendel` im
+  // Rhino-Plugin. Stets durchgezogen, volle Strichstärke.
+  const outline = stairOutline(stair, totalRise);
+  if (outline.polygon && outline.polygon.length >= 3) {
+    out.push({
+      kind: "polygon",
+      pts: outline.polygon,
+      fill: "none",
+      stroke,
+      strokeWidthMm: lwMm,
+      hatch: NO_HATCH,
+      greyed,
+      stairId,
+    });
+  }
+  if (outline.spiral) {
+    _addSpiralOutline(out, outline.spiral, stroke, lwMm, greyed, stairId);
+  }
 }
 
 const length = (w: Wall): number => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);

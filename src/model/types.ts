@@ -742,6 +742,15 @@ export interface Opening {
   /** Optionale Rahmenstärke (quer zur Wand) in Metern für die 3D-Darstellung. */
   frameThickness?: number;
   /**
+   * Nur Tür: Sturzlinien (SIA, gestrichelt) quer über die Öffnung an der Wand-
+   * Innen- und/oder Aussenkante. Zeigt die Überkopf-Projektion des Sturzes.
+   *   "keine" → keine Sturzlinien
+   *   "innen" → eine Linie an der Wand-Innenkante
+   *   "aussen"→ eine Linie an der Wand-Aussenkante
+   *   "beide" → beide Linien (Default wenn nicht gesetzt)
+   */
+  lintelLines?: "keine" | "innen" | "aussen" | "beide";
+  /**
    * Optionale Übersteuerung der Strich-/Symbolfarbe; sonst gilt die
    * Kategorie-Farbe.
    */
