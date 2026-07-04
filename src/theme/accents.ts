@@ -39,11 +39,12 @@ export const ACCENT_SWATCHES: AccentSwatch[] = [
 export const DEFAULT_MARQUEE_COLOR = "#CEB188";
 
 /**
- * Snap-/Endpunkt-Default: Akzent „Sora" (vorläufig — die offene Rückfrage
- * „aki" im HANDOVER-Backlog ist noch nicht geklärt). Bewusst ein kühler,
- * heller Ton: hebt sich klar vom warmen Yuyake-Auswahlrahmen UND von den
- * meist neutral-dunklen Wand-/Linienfarben ab, bleibt aber (anders als das
- * sehr blasse Kori) auch auf hellem Papier-Hintergrund gut sichtbar.
+ * Snap-/Endpunkt-Default: Akzent „Sora" (#5FA1C9). Vom Nutzer als endgültiger
+ * Default festgelegt (2026-07-04) — die frühere „aki"-Rückfrage ist damit
+ * geschlossen. Bewusst ein kühler, heller Ton: hebt sich klar vom warmen
+ * Yuyake-Auswahlrahmen UND von den meist neutral-dunklen Wand-/Linienfarben ab,
+ * bleibt aber (anders als das sehr blasse Kori) auch auf hellem
+ * Papier-Hintergrund gut sichtbar. Per Picker im Einstellungs-Fenster änderbar.
  */
 export const DEFAULT_SNAP_COLOR = "#5FA1C9";
 
