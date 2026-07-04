@@ -13,9 +13,9 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::math::{view_projection, Mat4};
-use crate::mesh::{build_model_mesh, build_walls_mesh};
+use crate::mesh::{build_scene_mesh, build_walls_mesh};
 use crate::shaders::MESH_WGSL;
-use crate::types::{Camera, Mesh, SlabInput, WallInput, FLOATS_PER_VERTEX};
+use crate::types::{Camera, Mesh, MeshInput, SlabInput, WallInput, FLOATS_PER_VERTEX};
 
 /// Tiefenformat des Z-Puffers (32 Bit Float, ueberall verfuegbar).
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -219,9 +219,16 @@ impl Renderer {
         self.upload_mesh(device, build_walls_mesh(walls));
     }
 
-    /// Erzeugt das Mesh aus Waenden UND Deckenplatten und laedt die Puffer hoch.
-    pub fn upload_model(&mut self, device: &wgpu::Device, walls: &[WallInput], slabs: &[SlabInput]) {
-        self.upload_mesh(device, build_model_mesh(walls, slabs));
+    /// Erzeugt das Mesh aus Waenden, Deckenplatten UND rohen Kontext-Meshes
+    /// (Terrain/importierte Volumen, siehe `MeshInput`) und laedt die Puffer hoch.
+    pub fn upload_model(
+        &mut self,
+        device: &wgpu::Device,
+        walls: &[WallInput],
+        slabs: &[SlabInput],
+        meshes: &[MeshInput],
+    ) {
+        self.upload_mesh(device, build_scene_mesh(walls, slabs, meshes));
     }
 
     /// Laedt ein fertiges Mesh in die GPU-Puffer (oder loescht es bei leer).

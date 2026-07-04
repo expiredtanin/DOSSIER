@@ -34,12 +34,16 @@ pub use math::{
     look_at, orbit_eye, orthographic, perspective, preset_camera, projection_matrix,
     view_matrix, view_projection, Mat4,
 };
-pub use mesh::{build_model_mesh, build_walls_mesh, extrude_slab, extrude_wall, triangulate};
+pub use mesh::{
+    append_context_mesh, build_model_mesh, build_scene_mesh, build_walls_mesh, extrude_slab,
+    extrude_wall, triangulate,
+};
 pub use section::{
     cut_section, ComponentKind, ComponentRef, CutPolygon, SectionEdge, SectionOutput, SectionPlane,
 };
 pub use types::{
-    Camera, CameraPreset, Mesh, Point2, Projection, Rgb, SlabInput, WallInput, FLOATS_PER_VERTEX,
+    Camera, CameraPreset, Mesh, MeshInput, MeshKind, Point2, Projection, Rgb, SlabInput, WallInput,
+    FLOATS_PER_VERTEX,
 };
 
 // --- Tests: Mesh-Erzeugung (Muster wie render2d/tessellate) -------------------
@@ -622,6 +626,98 @@ mod tests {
         // Nullhoehe.
         extrude_slab(&mut mesh, &square_slab(4.0, 2.6, 2.6));
         assert_eq!(mesh.vertex_count(), 0);
+    }
+
+    // --- Rohe Kontext-Meshes (Terrain / importierte Volumen) ------------------
+
+    use super::mesh::{append_context_mesh, build_scene_mesh};
+    use super::types::{MeshInput, MeshKind};
+
+    /// Ein flaches Dreieck auf Modell-Hoehe `z` (Modell x,y,z=Hoehe).
+    fn flat_context_tri(z: f32, kind: MeshKind, color: Option<[f32; 3]>) -> MeshInput {
+        MeshInput {
+            positions: vec![0.0, 0.0, z, 1.0, 0.0, z, 0.0, 1.0, z],
+            indices: vec![0, 1, 2],
+            kind,
+            color,
+        }
+    }
+
+    #[test]
+    fn context_mesh_ist_doppelseitig_und_mappt_hoehe_nach_y() {
+        let mut mesh = Mesh::default();
+        append_context_mesh(&mut mesh, &flat_context_tri(5.0, MeshKind::Terrain, None));
+        // Ein Quell-Dreieck -> zwei (Vorder-/Rueckseite) = 6 Vertices.
+        assert_eq!(mesh.triangle_count(), 2);
+        assert_eq!(mesh.vertex_count(), 6);
+        // model (x,y,z) -> world (x, z, y): die Hoehe z=5 liegt auf world.y=5.
+        let (min, max) = mesh.bounds();
+        assert!((min[1] - 5.0).abs() < 1e-5 && (max[1] - 5.0).abs() < 1e-5, "flach auf y=5");
+        // Doppelseitig: eine Normale +Y, eine −Y.
+        let mut saw_up = false;
+        let mut saw_down = false;
+        for i in 0..mesh.vertex_count() {
+            let ny = mesh.verts[i * FLOATS_PER_VERTEX + 4];
+            if ny > 0.5 {
+                saw_up = true;
+            }
+            if ny < -0.5 {
+                saw_down = true;
+            }
+        }
+        assert!(saw_up && saw_down, "Vorder- UND Rueckseite (±Y)");
+    }
+
+    #[test]
+    fn context_mesh_default_farbe_je_kind() {
+        // Ohne explizite Farbe greift die kind-Default-Farbe (three.js mats.*).
+        let mut mesh = Mesh::default();
+        append_context_mesh(&mut mesh, &flat_context_tri(0.0, MeshKind::Terrain, None));
+        let c = [mesh.verts[6], mesh.verts[7], mesh.verts[8]];
+        assert_eq!(c, MeshKind::Terrain.default_color());
+        // Explizite Farbe schlaegt den Default.
+        let mut mesh2 = Mesh::default();
+        append_context_mesh(&mut mesh2, &flat_context_tri(0.0, MeshKind::Imported, Some([0.1, 0.2, 0.3])));
+        assert_eq!([mesh2.verts[6], mesh2.verts[7], mesh2.verts[8]], [0.1, 0.2, 0.3]);
+    }
+
+    #[test]
+    fn context_mesh_ueberspringt_kaputte_indizes_und_entartung() {
+        let mut mesh = Mesh::default();
+        // Index 9 out-of-range (nur 3 Vertices) -> Dreieck verworfen, kein Panic.
+        append_context_mesh(
+            &mut mesh,
+            &MeshInput {
+                positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                indices: vec![0, 1, 9],
+                kind: MeshKind::Imported,
+                color: None,
+            },
+        );
+        assert_eq!(mesh.vertex_count(), 0);
+        // Kollineares (entartetes) Dreieck -> keine Normale, verworfen.
+        append_context_mesh(
+            &mut mesh,
+            &MeshInput {
+                positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+                indices: vec![0, 1, 2],
+                kind: MeshKind::Imported,
+                color: None,
+            },
+        );
+        assert_eq!(mesh.vertex_count(), 0);
+    }
+
+    #[test]
+    fn build_scene_mesh_haengt_kontext_meshes_hinten_an() {
+        let model = build_model_mesh(&[wall_x(4.0, 0.2, 2.6)], &[square_slab(4.0, 2.6, 2.85)]);
+        let scene = build_scene_mesh(
+            &[wall_x(4.0, 0.2, 2.6)],
+            &[square_slab(4.0, 2.6, 2.85)],
+            &[flat_context_tri(0.0, MeshKind::Terrain, None)],
+        );
+        // Szene = Modell (Wand+Slab) + 6 Kontext-Vertices (doppelseitiges Dreieck).
+        assert_eq!(scene.vertex_count(), model.vertex_count() + 6);
     }
 
     // --- Kamera / Matrizen ----------------------------------------------------

@@ -92,7 +92,7 @@ pub fn push_walls(value: serde_json::Value) {
 fn parse_model3d(value: serde_json::Value) -> Result<Model3d, serde_json::Error> {
     if value.is_array() {
         let walls = serde_json::from_value::<Vec<WallInput>>(value)?;
-        Ok(Model3d { walls, slabs: Vec::new() })
+        Ok(Model3d { walls, slabs: Vec::new(), meshes: Vec::new() })
     } else {
         serde_json::from_value::<Model3d>(value)
     }
@@ -232,7 +232,7 @@ use render3d::gpu::Renderer as Renderer3d;
 #[cfg(feature = "native3d")]
 use render3d::math::orbit_eye;
 #[cfg(feature = "native3d")]
-use render3d::types::{Camera, Projection, SlabInput, WallInput};
+use render3d::types::{Camera, MeshInput, Projection, SlabInput, WallInput};
 #[cfg(feature = "native3d")]
 use serde::Deserialize;
 
@@ -245,6 +245,10 @@ struct Model3d {
     walls: Vec<WallInput>,
     #[serde(default)]
     slabs: Vec<SlabInput>,
+    /// Rohe Kontext-Meshes (Terrain/importierte Volumen). `#[serde(default)]`
+    /// haelt aeltere Payloads ohne `meshes` gueltig.
+    #[serde(default)]
+    meshes: Vec<MeshInput>,
 }
 
 #[cfg(feature = "native3d")]
@@ -262,7 +266,7 @@ impl GpuState3d {
     fn new(window: Arc<Window>, model: &Model3d) -> Self {
         let (surface, device, queue, config) = configure_surface(&window, "3d.device");
         let mut renderer = Renderer3d::new(&device, config.format);
-        renderer.upload_model(&device, &model.walls, &model.slabs);
+        renderer.upload_model(&device, &model.walls, &model.slabs, &model.meshes);
         renderer.set_light([6.0, 12.0, 4.0]);
         Self { surface, device, queue, config, renderer, window }
     }
@@ -315,12 +319,12 @@ fn load_model() -> Model3d {
             Ok(model) => model,
             Err(e) => {
                 eprintln!("native3d: Modell-Parse-Fehler ({WALLS_PATH}): {e} — nutze Demo-Waende");
-                Model3d { walls: demo_walls(), slabs: Vec::new() }
+                Model3d { walls: demo_walls(), slabs: Vec::new(), meshes: Vec::new() }
             }
         },
         Err(e) => {
             eprintln!("native3d: Modell nicht ladbar ({WALLS_PATH}): {e} — nutze Demo-Waende");
-            Model3d { walls: demo_walls(), slabs: Vec::new() }
+            Model3d { walls: demo_walls(), slabs: Vec::new(), meshes: Vec::new() }
         }
     }
 }
@@ -339,6 +343,7 @@ fn demo_walls() -> Vec<WallInput> {
         base_elevation: 0.0,
         color: grey,
         openings: vec![],
+        layers: None,
     };
     vec![
         mk([0.0, 0.0], [6.0, 0.0]),
@@ -715,7 +720,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.pending3d = Some(model);
                     return;
                 };
-                state.renderer.upload_model(&state.device, &model.walls, &model.slabs);
+                state.renderer.upload_model(&state.device, &model.walls, &model.slabs, &model.meshes);
                 if !self.nav3d {
                     self.orbit = Some(Orbit::framed(&model));
                 }

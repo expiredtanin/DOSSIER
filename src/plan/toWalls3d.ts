@@ -59,16 +59,38 @@ export interface RSlab {
   color: RRgb;
 }
 
-/** Modell-Bündel für den nativen 3D-Renderer (Wände + Decken). */
+/** Art eines rohen Kontext-Meshes (bestimmt in render3d die Default-Einfärbung). */
+export type RMeshKind = "terrain" | "imported";
+
+/**
+ * Ein rohes Dreiecks-Mesh aus dem Geo-Kontext (Terrain-TIN oder importiertes
+ * Gebäude-/DXF-Volumen). `positions` ist das flache (x,y,z=Höhe…)-Array in
+ * MODELL-Metern — genau wie `ImportedMesh`/`TerrainMesh` es hält; render3d bildet
+ * es selbst nach world (x, z, y) ab (analog Wände/Decken). Matcht
+ * render3d::types::MeshInput.
+ */
+export interface RMesh {
+  positions: number[];
+  indices: number[];
+  kind: RMeshKind;
+  color: RRgb;
+}
+
+/** Modell-Bündel für den nativen 3D-Renderer (Wände + Decken + Kontext-Meshes). */
 export interface RModel3d {
   walls: RWall[];
   slabs: RSlab[];
+  meshes: RMesh[];
 }
 
 /** Warmer, neutraler Wand-Grundton (wie render3d default). */
 const WALL_RGB: RRgb = [0.82, 0.8, 0.76];
 /** Etwas hellerer, kühlerer Ton für Deckenplatten (heben sich von Wänden ab). */
 const SLAB_RGB: RRgb = [0.86, 0.86, 0.88];
+/** Gedämpftes Lehm-/Geländegrün-grau (three.js mats.terrain = 0xa9b0a2). */
+const TERRAIN_RGB: RRgb = [169 / 255, 176 / 255, 162 / 255];
+/** Neutrales Hellgrau für importierte Meshes (three.js mats.mesh = 0x9fa6ae). */
+const IMPORTED_RGB: RRgb = [159 / 255, 166 / 255, 174 / 255];
 
 /** Ignoriere entartete vertikale Ausschnitte (Rundungsrauschen). */
 const EPS = 1e-4;
@@ -220,6 +242,30 @@ function emitSlabs(project: Project): RSlab[] {
 }
 
 /**
+ * Emittiert die rohen Kontext-Meshes eines Projekts: Gelände-TINs (`terrainMesh`)
+ * und importierte Volumen (`importedMesh`) aus `project.context`. `contourSet`
+ * bleibt außen vor — das sind nur 2D-Linien (Höhenlinien/Footprints), keine
+ * Dreiecksmeshes. Die `positions`/`indices` werden 1:1 durchgereicht (Modell-
+ * Koordinaten, x,y,z=Höhe); render3d bildet sie selbst nach world ab.
+ */
+function emitMeshes(project: Project): RMesh[] {
+  const out: RMesh[] = [];
+  for (const obj of project.context ?? []) {
+    if (obj.type === "terrainMesh" || obj.type === "importedMesh") {
+      // Leere/entartete Meshes überspringen (render3d würde sie ohnehin verwerfen).
+      if (obj.positions.length < 9 || obj.indices.length < 3) continue;
+      out.push({
+        positions: obj.positions,
+        indices: obj.indices,
+        kind: obj.type === "terrainMesh" ? "terrain" : "imported",
+        color: obj.type === "terrainMesh" ? TERRAIN_RGB : IMPORTED_RGB,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände
  * mit Öffnungen in Teilquader.
  */
@@ -229,7 +275,11 @@ export function projectToWalls3d(project: Project): RWall[] {
   return out;
 }
 
-/** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten. */
+/** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
 export function projectToModel3d(project: Project): RModel3d {
-  return { walls: projectToWalls3d(project), slabs: emitSlabs(project) };
+  return {
+    walls: projectToWalls3d(project),
+    slabs: emitSlabs(project),
+    meshes: emitMeshes(project),
+  };
 }

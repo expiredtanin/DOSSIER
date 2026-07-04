@@ -58,7 +58,9 @@
 use std::collections::HashMap;
 
 use crate::openings::{split_range_by_voids, MIN_SPAN};
-use crate::types::{Mesh, Opening, Point2, Rgb, SlabInput, WallInput, WallLayer, FLOATS_PER_VERTEX};
+use crate::types::{
+    Mesh, MeshInput, Opening, Point2, Rgb, SlabInput, WallInput, WallLayer, FLOATS_PER_VERTEX,
+};
 
 /// Ein Quader-Mesh besteht aus 6 Seiten (Boden, Deckel, 4 Waende) zu je 2
 /// Dreiecken = 12 Dreiecke, mit flachen Normalen also 24 Vertices (je Seite 4,
@@ -582,6 +584,94 @@ pub fn build_model_mesh(walls: &[WallInput], slabs: &[SlabInput]) -> Mesh {
         extrude_slab(&mut mesh, s);
     }
     mesh
+}
+
+/// Baut die volle Szene: Waende + Deckenplatten (`build_model_mesh`) und haengt
+/// danach die rohen Kontext-Meshes (Terrain/importierte Volumen, siehe
+/// `MeshInput`) an — alles in EINEN Puffer. Die Wand-/Slab-Reihenfolge bleibt
+/// vorne (deterministische Zaehlung fuer die bestehenden Tests); die Kontext-
+/// Meshes kommen hinten dran.
+pub fn build_scene_mesh(walls: &[WallInput], slabs: &[SlabInput], meshes: &[MeshInput]) -> Mesh {
+    let mut mesh = build_model_mesh(walls, slabs);
+    for m in meshes {
+        append_context_mesh(&mut mesh, m);
+    }
+    mesh
+}
+
+// ── Rohe Kontext-Meshes (Terrain / importierte Volumen) ──────────────────────
+
+/// Haengt EIN rohes Dreiecks-Mesh (Terrain-TIN oder importiertes Volumen, siehe
+/// `MeshInput`) an `mesh` an. `positions` ist ein flaches (x,y,z)-Array in
+/// MODELL-Metern (z = Hoehe), `indices` sind Dreiecks-Indizes. Jede Dreiecks-
+/// flaeche bekommt eigene Vertices mit ihrer Flaechen-Normale (Flat Shading, wie
+/// Wand/Slab) — so ist das Ergebnis unabhaengig von geteilten Vertices im
+/// Quell-Mesh.
+///
+/// Koordinaten: model `(x, y, z)` -> world `(x, z, y)` (Hoehe entlang +Y), exakt
+/// wie `extrude_layer_segment`/`extrude_slab` und `Viewport3D.tsx`.
+///
+/// DOPPELSEITIG: jedes Dreieck wird ZWEIMAL emittiert (Vorderseite `a,b,c` mit
+/// Normale `+n`, Rueckseite `a,c,b` mit `-n`), weil das Quell-Winding von
+/// Terrain/Import nicht garantiert ist (three.js rendert sie mit `DoubleSide`).
+/// Da der Pfad Rueckseiten cullt (`gpu.rs`), traegt stets das zum Betrachter
+/// zeigende Dreieck die korrekte Normale, das andere wird verworfen — keine
+/// Z-Fighting (beide liegen deckungsgleich, nur eines ist front-facing).
+pub fn append_context_mesh(mesh: &mut Mesh, input: &MeshInput) {
+    let pos = &input.positions;
+    let vcount = pos.len() / 3;
+    let color = input.effective_color();
+    // world-Position aus Modell (x, y, z=Hoehe): (x, hoehe, y).
+    let vworld = |i: usize| -> [f32; 3] {
+        let b = i * 3;
+        [pos[b], pos[b + 2], pos[b + 1]]
+    };
+    for t in input.indices.chunks_exact(3) {
+        let (ia, ib, ic) = (t[0] as usize, t[1] as usize, t[2] as usize);
+        // Fehlerhafte Indizes robust ueberspringen (kein Panic bei kaputter Eingabe).
+        if ia >= vcount || ib >= vcount || ic >= vcount {
+            continue;
+        }
+        let a = vworld(ia);
+        let b = vworld(ib);
+        let c = vworld(ic);
+        // Flaechen-Normale (b-a) x (c-a); entartete Dreiecke ueberspringen.
+        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let gn = [
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        ];
+        let len = (gn[0] * gn[0] + gn[1] * gn[1] + gn[2] * gn[2]).sqrt();
+        if len < 1e-12 {
+            continue;
+        }
+        let n = [gn[0] / len, gn[1] / len, gn[2] / len];
+        // Vorderseite + Rueckseite (siehe Moduldoc: doppelseitig).
+        push_ctx_tri(mesh, a, b, c, n, color);
+        push_ctx_tri(mesh, a, c, b, [-n[0], -n[1], -n[2]], color);
+    }
+}
+
+/// Haengt EIN Dreieck (drei world-Ecken) mit gegebener Normale + Farbe an —
+/// Winding wie uebergeben (im Gegensatz zu `push_tri_oriented`, das umsortiert).
+/// Wird von `append_context_mesh` fuer beide Seiten genutzt.
+fn push_ctx_tri(
+    mesh: &mut Mesh,
+    a: [f32; 3],
+    b: [f32; 3],
+    c: [f32; 3],
+    normal: [f32; 3],
+    color: Rgb,
+) {
+    let base = (mesh.verts.len() / FLOATS_PER_VERTEX) as u32;
+    for p in [a, b, c] {
+        mesh.verts.extend_from_slice(&[
+            p[0], p[1], p[2], normal[0], normal[1], normal[2], color[0], color[1], color[2],
+        ]);
+    }
+    mesh.indices.extend_from_slice(&[base, base + 1, base + 2]);
 }
 
 // ── Deckenplatten (extrudierte Polygone) ─────────────────────────────────────

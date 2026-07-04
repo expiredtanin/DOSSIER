@@ -128,6 +128,74 @@ fn default_slab_color() -> Rgb {
     [0.86, 0.86, 0.88]
 }
 
+/// Art eines rohen Kontext-Meshes (aus `Project.context`) — bestimmt die
+/// Default-Einfaerbung, wenn kein explizites `color` mitkommt. Werte sind
+/// serde-kompatibel mit der TS-Seite (lowercase).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MeshKind {
+    /// Gelaende-TIN (offene Flaeche) — gedecktes Lehm-/Gelaendegruen-grau.
+    Terrain,
+    /// Importiertes Volumen (Gebaeude/DXF) — neutrales Hellgrau.
+    #[default]
+    Imported,
+}
+
+impl MeshKind {
+    /// Default-Albedo (RGB 0..1), wenn `MeshInput::color` fehlt. Werte 1:1 aus
+    /// der three.js-Sicht (`src/viewport/Viewport3D.tsx`, `mats.terrain`/
+    /// `mats.mesh`), damit beide Renderer denselben Kontext-Farbton zeigen.
+    pub fn default_color(self) -> Rgb {
+        match self {
+            // 0xa9b0a2 — gedaempftes Lehm-/Gelaendegruen-grau (Clay-Look).
+            MeshKind::Terrain => [0.663, 0.690, 0.635],
+            // 0x9fa6ae — neutrales Hellgrau fuer importierte Meshes.
+            MeshKind::Imported => [0.624, 0.651, 0.682],
+        }
+    }
+}
+
+/// Ein rohes Dreiecks-Mesh aus dem Geo-Kontext (`Project.context`): entweder ein
+/// Gelaende-TIN (`TerrainMesh`) oder ein importiertes Volumen (`ImportedMesh`,
+/// z. B. extrudierte OSM-Gebaeude/DXF). Anders als `WallInput`/`SlabInput` bringt
+/// es die Geometrie bereits FERTIG TRIANGULIERT mit — `mesh.rs` berechnet daraus
+/// nur noch die Flaechen-Normalen (Flat Shading, wie Wand/Slab) und speist es in
+/// denselben GPU-Pfad ein.
+///
+/// KOORDINATEN wie WallInput/SlabInput: die TS-Seite (`projectToModel3d`) liefert
+/// `positions` im MODELL-System als flaches `[x, y, z, ...]`-Array (z = Hoehe, in
+/// Metern); `mesh.rs` bildet jeden Vertex nach world ab: model `(x, y, z)` ->
+/// world `(x, z, y)`, d. h. Grundriss in der XZ-Ebene, Hoehe entlang +Y (exakt wie
+/// `Viewport3D.tsx` die rohen positions konsumiert).
+///
+/// DOPPELSEITIG: Terrain-/Import-Meshes tragen KEIN garantiertes Winding (die
+/// three.js-Sicht rendert sie mit `DoubleSide`, siehe `io/geoContext.ts`). Da der
+/// Nordstern-Pfad Rueckseiten cullt, emittiert `mesh.rs` jedes Dreieck ZWEIMAL
+/// (beide Windings, entgegengesetzte Normale) — so bleibt die Flaeche aus jeder
+/// Blickrichtung sichtbar und korrekt beleuchtet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshInput {
+    /// Flaches Positions-Array in MODELL-Metern: `[x0,y0,z0, x1,y1,z1, ...]`
+    /// (z = Hoehe). Wird von `mesh.rs` nach world (x, z, y) abgebildet.
+    pub positions: Vec<f32>,
+    /// Dreiecks-Indizes (0-basiert auf die Positions-Vertices, je 3 ein Dreieck).
+    pub indices: Vec<u32>,
+    /// Art des Meshes (Default-Einfaerbung, siehe `MeshKind`). Default `Imported`.
+    #[serde(default)]
+    pub kind: MeshKind,
+    /// Optionale explizite Albedo-Farbe (RGB 0..1). Fehlt sie, greift die
+    /// Default-Farbe je `kind` (siehe `effective_color`).
+    #[serde(default)]
+    pub color: Option<Rgb>,
+}
+
+impl MeshInput {
+    /// Effektive Albedo-Farbe: explizit gesetzt (`color`) oder Default je `kind`.
+    pub fn effective_color(&self) -> Rgb {
+        self.color.unwrap_or_else(|| self.kind.default_color())
+    }
+}
+
 /// Projektionsart der Kamera. Die three.js-Sicht schaltet zwischen perspektivisch
 /// (freies Orbit) und orthografisch (die achsparallelen Presets front/top/side um).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

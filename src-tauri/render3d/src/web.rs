@@ -32,7 +32,7 @@ use web_sys::HtmlCanvasElement;
 use crate::gpu::Renderer;
 use crate::math::preset_camera;
 use crate::section::{cut_section, SectionPlane};
-use crate::types::{Camera, CameraPreset, Projection, SlabInput, WallInput};
+use crate::types::{Camera, CameraPreset, MeshInput, Projection, SlabInput, WallInput};
 
 /// JSON-Eingabe des Modells: Waende (bereits in Teilquader zerlegt, siehe
 /// `projectToWalls3d`) + Deckenplatten. `slabs` optional (leeres Modell ohne
@@ -42,6 +42,10 @@ struct ModelInput {
     walls: Vec<WallInput>,
     #[serde(default)]
     slabs: Vec<SlabInput>,
+    /// Rohe Kontext-Meshes (Terrain/importierte Volumen). `#[serde(default)]`
+    /// haelt aeltere Payloads ohne `meshes` gueltig.
+    #[serde(default)]
+    meshes: Vec<MeshInput>,
 }
 
 /// Berechnet einen Schnitt/eine Ansicht (`section::cut_section`) gegen das Modell
@@ -232,7 +236,7 @@ impl WebModelRenderer {
             .map_err(|e| JsValue::from_str(&format!("Modell parsen: {e}")))?;
         self.bounds = model_bounds(&model.walls, &model.slabs);
         self.renderer
-            .upload_model(&self.device, &model.walls, &model.slabs);
+            .upload_model(&self.device, &model.walls, &model.slabs, &model.meshes);
         Ok(())
     }
 
