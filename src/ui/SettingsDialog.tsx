@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import type { Project } from "../model/types";
+import { ColorHexField } from "./ColorHexField";
 
 export interface SettingsDialogProps {
   marqueeColor: string;
@@ -145,11 +146,7 @@ function AccentColorField({
     <div className="settings-color-field">
       <div className="settings-color-head">
         <span className="settings-field-label">{label}</span>
-        <label className="attr-color">
-          <span className="attr-color-swatch" style={{ background: value }} />
-          <input type="color" value={value} onChange={(e) => onChange(e.target.value)} />
-          <span className="attr-color-hex">{value.toUpperCase()}</span>
-        </label>
+        <ColorHexField value={value} onChange={onChange} />
       </div>
       <div className="settings-accent-presets" role="group" aria-label={label}>
         {ACCENT_SWATCHES.map((a) => (

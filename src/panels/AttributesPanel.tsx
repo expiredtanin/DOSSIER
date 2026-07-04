@@ -29,6 +29,7 @@ import { PEN_WEIGHTS } from "../model/types";
 import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
 import { Dropdown } from "../ui/Dropdown";
+import { ColorHexField } from "../ui/ColorHexField";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
  *  „custom" ist abgeleitet aus „ist ein expliziter Wert gesetzt?", nicht
@@ -95,11 +96,7 @@ export function AttributesPanel() {
   // nur, wenn die Quelle „custom" ist — sonst zeigt allein der Dropdown den
   // Zustand.
   const colorValue = (value: string | undefined, onSet: (color: string) => void) => (
-    <label className="attr-color">
-      <span className="attr-color-swatch" style={{ background: value ?? "#808080" }} />
-      <input type="color" value={value ?? "#808080"} onChange={(e) => onSet(e.target.value)} />
-      <span className="attr-color-hex">{value ?? "#808080"}</span>
-    </label>
+    <ColorHexField value={value ?? "#808080"} onChange={onSet} />
   );
 
   // Eine Attribut-Zeile: Label + Quellen-Dropdown + (nur bei „eigener Wert")
@@ -170,18 +167,7 @@ export function AttributesPanel() {
         {/* Farbe — gilt für Wand UND Drawing2D (Kontrakt setzt beide). */}
         <span className="attr-key">{t("attr.color")}</span>
         <span className="attr-val">
-          <label className="attr-color">
-            <span
-              className="attr-color-swatch"
-              style={{ background: sel.color }}
-            />
-            <input
-              type="color"
-              value={sel.color}
-              onChange={(e) => host.onSetSelectionColor(e.target.value)}
-            />
-            <span className="attr-color-hex">{sel.color}</span>
-          </label>
+          <ColorHexField value={sel.color} onChange={host.onSetSelectionColor} />
         </span>
 
         {/* Strichstärke (mm) — Wand/Decke/Drawing2D, mit Nach-Ebene/Nach-Bauteil/

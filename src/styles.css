@@ -4018,6 +4018,14 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+/* Swatch + natives Farb-Input — EIGENER Klick-Bereich (öffnet die Palette).
+   Der Hex-Text daneben ist jetzt ein separates <input> (ColorHexField),
+   damit er unabhängig editierbar ist statt nur die Palette zu öffnen. */
+.attr-color-swatch-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   cursor: pointer;
 }
 .attr-color-swatch {
@@ -4040,6 +4048,26 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   font-size: 11px;
+}
+/* Editierbarer Hex-Code: sieht wie reiner Text aus, bis man klickt/fokussiert
+   — dann Rahmen + helle Schrift als Editier-Signal. */
+.attr-color-hex-input {
+  width: 6.5ch;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 3px;
+  padding: 1px 3px;
+  font-family: var(--font-mono);
+  cursor: text;
+}
+.attr-color-hex-input:hover:not(:disabled) {
+  border-color: var(--border);
+}
+.attr-color-hex-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--input);
+  color: var(--ink);
 }
 .attr-color input[type="color"]:disabled {
   opacity: 0.4;
