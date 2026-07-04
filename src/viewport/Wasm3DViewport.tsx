@@ -75,6 +75,16 @@ interface OrbitState {
   dist: number;
   /** Blickziel (world). */
   target: [number, number, number];
+  /** Soll die freie Kamera orthografisch bleiben? (true fuer alle Presets ausser
+   * `perspective`) — sonst kippt die erste Kamerabewegung fälschlich in
+   * Perspektive („locked iso"). */
+  ortho: boolean;
+  /** Orthografische Bild-Halbhoehe (Meter), UNABHAENGIG von `dist` gefuehrt: eine
+   * echte Ortho-Kamera skaliert ihr Bild ueber diese Groesse, nicht ueber den
+   * Augabstand. Wird beim Preset aus `dist*tan(FOV_Y/2)` geseedet (perspektiv-
+   * äquivalente Bildhoehe an der eingepassten Distanz → kein Sprung beim ersten
+   * Move) und beim Zoom in Ortho-Modus multiplikativ skaliert. */
+  orthoHalfHeight: number;
 }
 
 /** Fertige (freie, perspektivische) Kamera aus dem Orbit-Zustand (Konvention
@@ -91,9 +101,12 @@ function orbitCamera(o: OrbitState): Camera3d {
     ],
     target: [o.target[0], o.target[1], o.target[2]],
     up: [0, 1, 0],
-    perspective: true,
+    // Projektion aus dem Orbit-Zustand (war hartkodiert `true`/`dist*0.5` — genau
+    // DAS war der Locked-Iso-Bug: die erste Bewegung nach einem Ortho-Preset kippte
+    // sofort in Perspektive). Ortho behaelt seine eigene, dist-unabhaengige Halbhoehe.
+    perspective: !o.ortho,
     fovY: FOV_Y,
-    orthoHalfHeight: o.dist * 0.5,
+    orthoHalfHeight: o.orthoHalfHeight,
   };
 }
 
@@ -260,7 +273,20 @@ export function Wasm3DViewport({
     applyViewPreset(view3d);
     const { yaw, pitch } = VIEW3D_ORBIT[view3d];
     const { target, dist } = fitTargetDist(projectRef.current);
-    orbitRef.current = { yaw, pitch, dist, target };
+    // Alle Presets ausser `perspective` sind orthografisch (front/top/side/iso, wie
+    // die Rust-Seite `preset_camera`) → die freie Kamera bleibt danach ebenfalls
+    // ortho („locked iso"). orthoHalfHeight auf die perspektiv-aequivalente Bildhoehe
+    // an der eingepassten Distanz seeden, damit der erste manuelle Move/Zoom groessen-
+    // gleich an das von Rust gezeichnete Preset-Bild anschliesst (kein Sprung).
+    const ortho = view3d !== "perspective";
+    orbitRef.current = {
+      yaw,
+      pitch,
+      dist,
+      target,
+      ortho,
+      orthoHalfHeight: dist * Math.tan(FOV_Y / 2),
+    };
     redrawRef.current = () => render(null);
     redrawRef.current();
   }, [ready, view3d, applyViewPreset, render]);
@@ -405,9 +431,13 @@ export function Wasm3DViewport({
           Math.min(PITCH_LIMIT, o.pitch + (2 * Math.PI * dy) / h),
         );
       } else {
-        // Pan in der Bildebene: Welt-Meter je Pixel aus Distanz + Sichtwinkel;
-        // Ziel entgegen der Mausrichtung verschieben (Szene folgt dem Cursor).
-        const worldPerPx = (2 * o.dist * Math.tan(FOV_Y / 2)) / h;
+        // Pan in der Bildebene: Welt-Meter je Pixel. In Ortho aus der (dist-
+        // unabhaengigen) Bild-Halbhoehe, sonst aus Distanz + Sichtwinkel — sonst
+        // driftet die Pan-Geschwindigkeit gegen einen Ortho-Zoom, der `dist` gar
+        // nicht mehr anfasst. Ziel entgegen der Mausrichtung (Szene folgt Cursor).
+        const worldPerPx = o.ortho
+          ? (2 * o.orthoHalfHeight) / h
+          : (2 * o.dist * Math.tan(FOV_Y / 2)) / h;
         const pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, o.pitch));
         // Kamera-Basis aus dem Orbit: f = Blickrichtung, s = rechts, u = Kamera-oben.
         const f = [
@@ -457,6 +487,19 @@ export function Wasm3DViewport({
       if (!o) return;
       e.preventDefault();
       useOrbitRedraw();
+      // Ortho-Modus („locked iso"): eine echte Ortho-Kamera skaliert ihr Bild ueber
+      // die Halbhoehe, NICHT ueber den Augabstand — `dist` zu dollyen haette hier
+      // keinen sichtbaren Effekt. Also orthoHalfHeight multiplikativ skalieren und
+      // frueh raus (Eye/dist unangetastet). Zoom-to-Cursor bleibt in Ortho zentrisch
+      // — die cursor-versetzte Dolly-Logik unten ist perspektiv-only.
+      if (o.ortho) {
+        o.orthoHalfHeight = Math.max(
+          0.05,
+          Math.min(500, o.orthoHalfHeight * Math.exp(e.deltaY * 0.0013)),
+        );
+        redraw();
+        return;
+      }
       const prevDist = o.dist;
       // Exponentielles Dolly (rad-deltaY ≈ ±100 je Rastung → ~14 % je Schritt).
       o.dist = Math.max(0.2, Math.min(2000, o.dist * Math.exp(e.deltaY * 0.0013)));
