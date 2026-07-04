@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import type { Project } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
 import { selectionHighlightLines, projectToWalls3d, projectToModel3d } from "./toWalls3d";
 
@@ -117,6 +118,44 @@ describe("Bauteil-/Materialfarbe statt Einheits-Grau (Wände + Decken)", () => {
     }
   });
 
+});
+
+describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
+  it("1 Fenster + 1 Tür -> genau 1 Glas-Mesh mit korrekter vertikaler Ausdehnung", () => {
+    // Sample-Projekt auf EINE Öffnung (Fenster O1) + EINE Tür (D1) reduzieren,
+    // beide auf W1 (EG, baseElevation 0). Kontext ist leer -> `meshes` enthält
+    // ausschliesslich die Glasscheiben.
+    const p: Project = {
+      ...sampleProject,
+      openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
+      doors: sampleProject.doors,
+      context: [],
+    };
+    const { meshes } = projectToModel3d(p);
+    // Genau EINE Scheibe: das Fenster O1; die Tür D1 bleibt offen (keine Scheibe).
+    expect(meshes.length).toBe(1);
+    const glass = meshes[0];
+    // Quader: 8 Ecken (24 Floats) + 12 Dreiecke (36 Indizes), leicht bläuliches Glas.
+    expect(glass.positions.length).toBe(24);
+    expect(glass.indices.length).toBe(36);
+    expect(glass.color).toEqual([0.62, 0.76, 0.85]);
+
+    // Vertikale Ausdehnung (z = 3. Komponente jeder Ecke, MODELL-Höhe):
+    // O1 sillHeight 0.9, height 1.2, Wand-UK 0 -> UK 0.9 .. OK 2.1.
+    const zs: number[] = [];
+    for (let i = 2; i < glass.positions.length; i += 3) zs.push(glass.positions[i]);
+    expect(Math.min(...zs)).toBeCloseTo(0.9, 6);
+    expect(Math.max(...zs)).toBeCloseTo(2.1, 6);
+  });
+
+  it("Türen bekommen keine Scheibe; je Fenster genau eine", () => {
+    // Volles Sample-Projekt: 2 Fenster (O1, O2) + 1 Tür (D1), Kontext leer.
+    const { meshes } = projectToModel3d(sampleProject);
+    expect(meshes.length).toBe(2);
+  });
+});
+
+describe("Bauteil-/Materialfarbe Decke", () => {
   it("Decke -> Farbe der dicksten Schicht (dg-massiv: concrete 0.2 m, #9aa0a6)", () => {
     // Deckentyp "dg-massiv": screed 0.06, insulation 0.04, concrete 0.2 ->
     // dickste Schicht = concrete (#9aa0a6).

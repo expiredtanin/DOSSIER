@@ -127,6 +127,10 @@ const SLAB_RGB: RRgb = [0.86, 0.86, 0.88];
 const TERRAIN_RGB: RRgb = [169 / 255, 176 / 255, 162 / 255];
 /** Neutrales Hellgrau für importierte Meshes (three.js mats.mesh = 0x9fa6ae). */
 const IMPORTED_RGB: RRgb = [159 / 255, 166 / 255, 174 / 255];
+/** Helles, leicht bläuliches Fenster-Glas (Scheibe in der Öffnung). */
+const GLASS_RGB: RRgb = [0.62, 0.76, 0.85];
+/** Halbe Dicke der Fensterscheibe (Meter) — sehr dünn, mittig in der Wand. */
+const GLASS_HALF_THICK = 0.01;
 
 /** Ignoriere entartete vertikale Ausschnitte (Rundungsrauschen). */
 const EPS = 1e-4;
@@ -379,6 +383,70 @@ function emitMeshes(project: Project): RMesh[] {
 }
 
 /**
+ * Emittiert je Fensteröffnung eine dünne Glasscheibe als rohes Quader-Mesh —
+ * damit Fenster im 3D als Fenster lesbar sind statt als blosse Löcher in der
+ * Wand. Nur `kind === "window"`; Türen bleiben offen (keine Scheibe).
+ *
+ * Für jede Scheibe wird ein geschlossener Quader (8 Ecken, 12 Dreiecke) gebaut:
+ *   • entlang der Wandachse: das geklemmte Öffnungs-Intervall (openingInterval),
+ *   • vertikal: die absolute Öffnungs-Ausdehnung (openingVerticalExtent, also
+ *     UK = baseElevation+sillHeight … OK = +height, an den Wandkopf geklemmt) —
+ *     exakt der Bereich, den emitWall als Loch freilässt,
+ *   • quer zur Wand: ±GLASS_HALF_THICK um die Wandachse (mittig in der Dicke).
+ *
+ * `positions` liegen — wie bei {@link emitMeshes} (Terrain/Import) — in MODELL-
+ * Metern als flaches (x, y, z=Höhe)-Array; render3d bildet sie selbst nach world
+ * (x, Höhe, y) ab und rendert die Meshes doppelseitig (append_context_mesh),
+ * daher ist die Winding-Reihenfolge der Dreiecke unerheblich. `kind: "imported"`
+ * mit gesetzter `color` ⇒ render3d zeichnet die Scheibe in GLASS_RGB.
+ */
+function emitOpeningGlass(project: Project): RMesh[] {
+  // Faces eines Boxen-Quaders als Dreiecks-Indizes (Ecken-Index-Bits:
+  // bit0 = Achse from/to, bit1 = Höhe UK/OK, bit2 = Dicke −/+). Doppelseitig
+  // gerendert ⇒ Winding egal; je Fläche 2 Dreiecke, 6 Flächen = 12 Dreiecke.
+  const BOX_TRIS: number[] = [
+    0, 1, 3, 0, 3, 2, // Dicke −
+    4, 5, 7, 4, 7, 6, // Dicke +
+    0, 1, 5, 0, 5, 4, // UK
+    2, 3, 7, 2, 7, 6, // OK
+    0, 2, 6, 0, 6, 4, // from
+    1, 3, 7, 1, 7, 5, // to
+  ];
+  const out: RMesh[] = [];
+  for (const wall of project.walls) {
+    const dx = wall.end.x - wall.start.x;
+    const dy = wall.end.y - wall.start.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) continue;
+    const ux = dx / len;
+    const uy = dy / len;
+    // Grundriss-Normale (Dicken-Achse) — dieselbe Konvention wie pushSegment.
+    const nx = uy;
+    const ny = -ux;
+    for (const op of openingsOfWall(project, wall.id)) {
+      if (op.kind !== "window") continue; // Türen bekommen keine Scheibe.
+      const iv = openingInterval(wall, op);
+      if (!iv) continue;
+      const { zBottom, zTop } = openingVerticalExtent(project, wall, op);
+      if (zTop - zBottom <= EPS) continue;
+      const positions: number[] = [];
+      // 8 Ecken: Achse s ∈ {from,to} × Höhe z ∈ {UK,OK} × Dicke t ∈ {−,+}.
+      for (let i = 0; i < 8; i++) {
+        const s = i & 1 ? iv.to : iv.from;
+        const z = i & 2 ? zTop : zBottom;
+        const t = i & 4 ? GLASS_HALF_THICK : -GLASS_HALF_THICK;
+        const px = wall.start.x + ux * s + nx * t;
+        const py = wall.start.y + uy * s + ny * t;
+        // MODELL-Koordinaten (x, y, z=Höhe) wie emitMeshes.
+        positions.push(px, py, z);
+      }
+      out.push({ positions, indices: [...BOX_TRIS], kind: "imported", color: GLASS_RGB });
+    }
+  }
+  return out;
+}
+
+/**
  * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände
  * mit Öffnungen in Teilquader.
  */
@@ -393,7 +461,10 @@ export function projectToModel3d(project: Project): RModel3d {
   return {
     walls: projectToWalls3d(project),
     slabs: emitSlabs(project),
-    meshes: emitMeshes(project),
+    // Kontext-Meshes (Terrain/Import) + Fenster-Glasscheiben (eigenes Mesh je
+    // Fensteröffnung) — pickGeometry/Highlight nutzen `meshes` bewusst NICHT,
+    // daher sind die Scheiben nicht selektierbar (man wählt Wand/Öffnung).
+    meshes: [...emitMeshes(project), ...emitOpeningGlass(project)],
   };
 }
 
