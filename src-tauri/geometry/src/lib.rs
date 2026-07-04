@@ -22,6 +22,21 @@ pub struct Line {
     pub dir: Vec2,
 }
 
+/// Eine Schicht einer Wand, bereits aus dem WallType aufgeloest (Komponenten-Id
+/// + Prioritaet + Dicke) -- fuer die materialbewusste T-Stoss-Erweiterung
+/// (siehe `resolve_join_priority`/`apply_layer_cuts`). ADDITIV: fehlt der Key
+/// `layers` in der JSON-Eingabe, liefert `#[serde(default)]` eine leere Liste,
+/// sodass die bestehende Paritaets-Eingabe (ohne Schichten) unveraendert
+/// funktioniert.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LayerInput {
+    #[serde(rename = "componentId")]
+    pub component_id: String,
+    #[serde(rename = "joinPriority")]
+    pub join_priority: f64,
+    pub thickness: f64,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct WallInput {
     pub id: String,
@@ -30,11 +45,26 @@ pub struct WallInput {
     pub thickness: f64,
     #[serde(rename = "referenceOffset")]
     pub reference_offset: f64,
+    #[serde(default)]
+    pub layers: Vec<LayerInput>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct JoinInput {
     pub walls: Vec<WallInput>,
+}
+
+/// Pro-Schicht-Override der Nahflaechen-Cuts (materialbewusster T-Stoss).
+/// Index = Schicht-Index in `WallInput.layers` der Abzweig-Wand. Spiegelt
+/// `LayerCuts` aus `model/joins.ts` 1:1.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LayerCuts {
+    pub start: Vec<Option<Line>>,
+    pub end: Vec<Option<Line>>,
+    #[serde(rename = "startSide")]
+    pub start_side: Vec<Option<Line>>,
+    #[serde(rename = "endSide")]
+    pub end_side: Vec<Option<Line>>,
 }
 
 /// Schnittlinien einer Wand an ihren beiden Achsenden.
@@ -46,6 +76,112 @@ pub struct WallCuts {
     pub start_cut: Option<Line>,
     #[serde(rename = "endCut")]
     pub end_cut: Option<Line>,
+    /// ADDITIV: nur gesetzt, wenn an einem T-Stoss mindestens eine Schicht
+    /// materialbewusst verschmilzt (siehe `apply_layer_cuts`). Fehlt sie in der
+    /// Ausgabe (`None` -> von serde bei Serialisierung weggelassen), gilt
+    /// weiterhin `start_cut`/`end_cut` fuer alle Schichten.
+    #[serde(rename = "layerCuts", skip_serializing_if = "Option::is_none")]
+    pub layer_cuts: Option<LayerCuts>,
+}
+
+/// Verschneidungs-Entscheidung zweier Bauteile am Stoss -- Rust-Spiegel von
+/// `JoinPriorityResolution`/`resolveJoinPriority` aus `model/joins.ts`.
+#[derive(PartialEq)]
+enum JoinPriorityResolution {
+    Merge,
+    TrimA,
+    TrimB,
+    Coexist,
+}
+
+fn resolve_join_priority(
+    a_id: &str,
+    a_prio: f64,
+    b_id: &str,
+    b_prio: f64,
+) -> JoinPriorityResolution {
+    if a_prio == b_prio {
+        if a_id == b_id {
+            JoinPriorityResolution::Merge
+        } else {
+            JoinPriorityResolution::Coexist
+        }
+    } else if a_prio > b_prio {
+        JoinPriorityResolution::TrimB
+    } else {
+        JoinPriorityResolution::TrimA
+    }
+}
+
+/// Materialbewusste Pro-Schicht-Erweiterung eines T-Stoss-Cuts -- Rust-Spiegel
+/// von `applyLayerCuts` aus `model/joins.ts`. Vergleicht jede Schicht der
+/// Abzweig-Wand mit dem Rueckgrat (hoechste `joinPriority`) der Durchgangswand;
+/// verschmilzt sie (gleiches Rueckgrat-Material, oder die Abzweig-Schicht ist
+/// sogar prioritaerer), bekommt sie keinen Cut. Getrimmte Schichten neben einer
+/// verschmelzenden Nachbarschicht bekommen zusaetzlich die seitliche L-Linie.
+#[allow(clippy::too_many_arguments)]
+fn apply_layer_cuts(
+    result: &mut [WallCuts],
+    branch_wall_idx: usize,
+    branch_end: WallEndKind,
+    branch_layers: &[LayerInput],
+    through_layers: &[LayerInput],
+    face_cut: Line,
+    axis_point: Vec2,
+    through_dir: Vec2,
+) {
+    if branch_layers.is_empty() || through_layers.is_empty() {
+        return;
+    }
+
+    // Rueckgrat der Durchgangswand: die Schicht mit der hoechsten joinPriority.
+    let mut backbone = &through_layers[0];
+    for l in through_layers {
+        if l.join_priority > backbone.join_priority {
+            backbone = l;
+        }
+    }
+
+    let n = branch_layers.len();
+    let mut merged = vec![false; n];
+    for (i, layer) in branch_layers.iter().enumerate() {
+        let res = resolve_join_priority(
+            &layer.component_id,
+            layer.join_priority,
+            &backbone.component_id,
+            backbone.join_priority,
+        );
+        merged[i] = matches!(res, JoinPriorityResolution::Merge | JoinPriorityResolution::TrimB);
+    }
+    if !merged.iter().any(|&m| m) {
+        return; // keine Materialuebereinstimmung -> Default (kein layer_cuts)
+    }
+
+    let cuts = &mut result[branch_wall_idx];
+    if cuts.layer_cuts.is_none() {
+        cuts.layer_cuts = Some(LayerCuts {
+            start: vec![None; n],
+            end: vec![None; n],
+            start_side: vec![None; n],
+            end_side: vec![None; n],
+        });
+    }
+    let lc = cuts.layer_cuts.as_mut().unwrap();
+    if lc.start.len() != n {
+        return; // Schicht-Anzahl passt nicht zusammen (sollte nicht vorkommen)
+    }
+
+    let side_line = Line { point: axis_point, dir: through_dir };
+    let (face_arr, side_arr) = match branch_end {
+        WallEndKind::Start => (&mut lc.start, &mut lc.start_side),
+        WallEndKind::End => (&mut lc.end, &mut lc.end_side),
+    };
+    for i in 0..n {
+        face_arr[i] = if merged[i] { None } else { Some(face_cut) };
+        let adj_merged =
+            !merged[i] && ((i > 0 && merged[i - 1]) || (i + 1 < n && merged[i + 1]));
+        side_arr[i] = if adj_merged { Some(side_line) } else { None };
+    }
 }
 
 // --- Vektor-Helfer -----------------------------------------------------------
@@ -139,6 +275,7 @@ pub fn compute_joins(input: JoinInput) -> Vec<WallCuts> {
             wall_id: w.id.clone(),
             start_cut: None,
             end_cut: None,
+            layer_cuts: None,
         })
         .collect();
 
@@ -305,11 +442,18 @@ fn apply_t_junction(
     // zeigt (positive n_t-Seite, wenn der Abzweig dorthin auslaeuft).
     let sign = if dot(n_t, d_branch) >= 0.0 { 1.0 } else { -1.0 };
     let face_point = add(j, scale(n_t, off_t + sign * (t_t / 2.0)));
+    let face_cut = Line { point: face_point, dir: u_t };
 
-    set_cut(
-        &mut result[branch_wall_idx],
+    set_cut(&mut result[branch_wall_idx], branch_end.end, face_cut);
+    apply_layer_cuts(
+        result,
+        branch_wall_idx,
         branch_end.end,
-        Line { point: face_point, dir: u_t },
+        &branch_wall.layers,
+        &through_wall.layers,
+        face_cut,
+        j,
+        u_t,
     );
 }
 
@@ -381,11 +525,23 @@ fn apply_mid_span_tee(
     let off_w = w.reference_offset;
     let sign = if perp >= 0.0 { 1.0 } else { -1.0 };
     let face_point = add(w.start, scale(n_w, off_w + sign * (tw / 2.0)));
+    let face_cut = Line { point: face_point, dir: u_w };
 
-    set_cut(
-        &mut result[free_wall_idx],
+    set_cut(&mut result[free_wall_idx], free_end.end, face_cut);
+    // Achsenpunkt auf der getroffenen Wand, auf Hoehe der Projektion des
+    // freien Endes (nicht zwingend w.start) -- Anker fuer die
+    // materialbewusste Pro-Schicht-Erweiterung (analog zum T-Knoten-Fall).
+    let dist_along = dot(sub(p, w.start), u_w);
+    let axis_point = add(w.start, scale(u_w, dist_along));
+    apply_layer_cuts(
+        result,
+        free_wall_idx,
         free_end.end,
-        Line { point: face_point, dir: u_w },
+        &free_wall.layers,
+        &w.layers,
+        face_cut,
+        axis_point,
+        u_w,
     );
 }
 
@@ -476,6 +632,7 @@ mod tests {
             end: Vec2 { x: ex, y: ey },
             thickness,
             reference_offset: 0.0,
+            layers: Vec::new(),
         }
     }
 
@@ -645,5 +802,72 @@ mod tests {
         // Robuster: die Gerade verlaeuft exakt bei y=0.1, unabhaengig vom x.
         let dist = |q: Vec2| cross(cut.dir, sub(q, cut.point)).abs() / len(cut.dir);
         assert!(dist(Vec2 { x: 5.0, y: 0.1 }) < 1e-9, "Treffpunkt (5,0.1) auf Gehrung");
+    }
+
+    /// W9-artiger Wandtyp: Innenputz (0.015) / Backstein-Kern (0.12) / Innenputz
+    /// (0.015), joinPriority 10 bzw. 50 -- Spiegel von `layeredWallProject` aus
+    /// `model/joins.test.ts`.
+    fn w_iw(id: &str, sx: f64, sy: f64, ex: f64, ey: f64) -> WallInput {
+        WallInput {
+            id: id.to_string(),
+            start: Vec2 { x: sx, y: sy },
+            end: Vec2 { x: ex, y: ey },
+            thickness: 0.15,
+            reference_offset: 0.0,
+            layers: vec![
+                LayerInput { component_id: "render-int".into(), join_priority: 10.0, thickness: 0.015 },
+                LayerInput { component_id: "brick".into(), join_priority: 50.0, thickness: 0.12 },
+                LayerInput { component_id: "render-int".into(), join_priority: 10.0, thickness: 0.015 },
+            ],
+        }
+    }
+
+    #[test]
+    fn t_junction_layer_cuts_merge_and_trim() {
+        // Wie t_junction_branch_gets_face_cut, aber alle drei Waende vom
+        // W9-artigen Wandtyp: der Backstein-Kern (Index 1) verschmilzt (kein
+        // Cut), die beiden Innenputz-Schichten (Index 0/2) werden getrimmt und
+        // bekommen zusaetzlich die seitliche L-Linie.
+        let input = JoinInput {
+            walls: vec![
+                w_iw("A", 0.0, 0.0, 5.0, 0.0),
+                w_iw("B", 5.0, 0.0, 5.0, 3.0),
+                w_iw("C", 5.0, 0.0, 10.0, 0.0),
+            ],
+        };
+        let out = compute_joins(input);
+        let cb = find(&out, "B");
+
+        // Aggregat-Cut bleibt unveraendert (bit-identisch zum bisherigen Verhalten).
+        let agg = cb.start_cut.expect("B startCut gesetzt");
+        assert!((agg.point.x - 5.0).abs() < 1e-9);
+        assert!((agg.point.y - 0.075).abs() < 1e-9);
+
+        let lc = cb.layer_cuts.as_ref().expect("layerCuts gesetzt (Backstein verschmilzt)");
+        assert_eq!(lc.start.len(), 3);
+
+        // Schicht 1 (Backstein-Kern): kein Cut, keine Seitenlinie.
+        assert!(lc.start[1].is_none());
+        assert!(lc.start_side[1].is_none());
+
+        // Schichten 0/2 (Innenputz): derselbe Nahflaechen-Cut wie das Aggregat...
+        let l0 = lc.start[0].expect("Schicht 0 getrimmt");
+        let l2 = lc.start[2].expect("Schicht 2 getrimmt");
+        assert!((l0.point.y - 0.075).abs() < 1e-9);
+        assert!((l2.point.y - 0.075).abs() < 1e-9);
+        // ... UND die seitliche L-Linie entlang der Durchgangsachse (durch den
+        // Knoten (5,0), parallel zur x-Achse).
+        let s0 = lc.start_side[0].expect("Schicht 0 hat L-Seitenlinie");
+        let s2 = lc.start_side[2].expect("Schicht 2 hat L-Seitenlinie");
+        let dist = |cut: Line, q: Vec2| cross(cut.dir, sub(q, cut.point)).abs() / len(cut.dir);
+        assert!(dist(s0, Vec2 { x: 5.0, y: 0.0 }) < 1e-9);
+        assert!(dist(s0, Vec2 { x: 0.0, y: 0.0 }) < 1e-9);
+        assert!(dist(s2, Vec2 { x: 5.0, y: 0.0 }) < 1e-9);
+
+        // Die kollineare Durchgangswand bleibt unangetastet (kein layerCuts).
+        let ca = find(&out, "A");
+        let cc = find(&out, "C");
+        assert!(ca.layer_cuts.is_none());
+        assert!(cc.layer_cuts.is_none());
     }
 }

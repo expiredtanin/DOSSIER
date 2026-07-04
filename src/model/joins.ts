@@ -3,8 +3,8 @@
 // gemeinsamen Gehrungslinie sauber stoßen. Dieses Modul berechnet pro Wand
 // die optionalen Schnittlinien an Start- und Endpunkt.
 
-import type { Project, Vec2, Wall } from "./types";
-import { getWallType, wallTypeThickness } from "./types";
+import type { Component, Project, Vec2, Wall } from "./types";
+import { getComponent, getWallType, wallTypeThickness } from "./types";
 import { wallReferenceOffset } from "./wall";
 import {
   add,
@@ -18,10 +18,55 @@ import {
 } from "./geometry";
 import type { Line } from "./geometry";
 
+/**
+ * Pro-Schicht-Override der Nahflächen-Cuts (materialbewusster T-Stoss, siehe
+ * {@link resolveJoinPriority}). Index = Schicht-Index im Wandtyp DIESER Wand
+ * (der Abzweig-Wand). `start`/`end` ersetzen — wo gesetzt — den einheitlichen
+ * `startCut`/`endCut` NUR für die jeweilige Schicht; `null` an einem Index
+ * heisst: diese Schicht bekommt KEINEN Cut (verschmilzt, läuft durch).
+ * `startSide`/`endSide` tragen die zusätzliche seitliche Cut-Linie einer
+ * getrimmten Schicht, die an eine verschmelzende Nachbarschicht angrenzt
+ * (L-Anschluss, z. B. Putz neben durchlaufendem Backstein-Kern).
+ */
+export interface LayerCuts {
+  start: (Line | null)[];
+  end: (Line | null)[];
+  startSide: (Line | null)[];
+  endSide: (Line | null)[];
+}
+
 /** Schnittlinien einer Wand an ihren beiden Achsenden. */
 export interface WallCuts {
   startCut: Line | null;
   endCut: Line | null;
+  /**
+   * Additive Erweiterung: fehlt dieses Feld, gilt weiterhin `startCut`/
+   * `endCut` für ALLE Schichten (bisheriges Verhalten, bit-identisch). Wird
+   * nur gesetzt, wenn an einem T-Stoss mindestens eine Schicht materialbewusst
+   * verschmilzt (siehe {@link resolveJoinPriority}).
+   */
+  layerCuts?: LayerCuts;
+}
+
+/**
+ * Verschneidungs-Entscheidung zweier Bauteile (Komponenten) am Stoss:
+ *  • "merge"   — gleiche Priorität UND gleiche Komponente (z. B. Backstein-
+ *    Kern trifft Backstein-Kern): die Schichten verschmelzen, kein Cut.
+ *  • "coexist" — gleiche Priorität, aber VERSCHIEDENE Komponente: keine
+ *    eindeutige Rangfolge, bleibt beim heutigen (getrimmten) Verhalten.
+ *  • "trim-a"  — `b` hat die höhere Priorität und gewinnt; `a` wird getrimmt.
+ *  • "trim-b"  — `a` hat die höhere Priorität und gewinnt; `b` wird getrimmt.
+ */
+export type JoinPriorityResolution = "merge" | "trim-a" | "trim-b" | "coexist";
+
+export function resolveJoinPriority(
+  a: Component,
+  b: Component,
+): JoinPriorityResolution {
+  if (a.joinPriority === b.joinPriority) {
+    return a.id === b.id ? "merge" : "coexist";
+  }
+  return a.joinPriority > b.joinPriority ? "trim-b" : "trim-a";
 }
 
 /** Rundet eine Koordinate auf ein Gitter, um Endpunkte robust zu gruppieren. */
@@ -237,8 +282,87 @@ function applyTJunction(
   // zeigt (positive nT-Seite, wenn der Abzweig dorthin ausläuft).
   const sign = dot(nT, dBranch) >= 0 ? 1 : -1;
   const facePoint = add(j, scale(nT, offT + sign * (tT / 2)));
+  const faceCut: Line = { point: facePoint, dir: uT };
 
-  setCut(result, branchEnd, { point: facePoint, dir: uT });
+  setCut(result, branchEnd, faceCut);
+  applyLayerCuts(project, result, branchEnd, branchWall, throughWall, faceCut, j, uT);
+}
+
+/**
+ * Materialbewusste Pro-Schicht-Erweiterung eines T-Stoss-Cuts (siehe
+ * {@link resolveJoinPriority}): vergleicht jede Schicht der ABZWEIG-Wand mit
+ * dem Rückgrat (höchste `joinPriority`) der DURCHGANGSWAND. Verschmilzt eine
+ * Schicht (gleiche Komponente + Priorität wie das Rückgrat, oder die
+ * Abzweig-Schicht ist sogar prioritärer), bekommt sie KEINEN Cut — das Band
+ * läuft bis zum Wandachsenpunkt durch (die Durchgangswand selbst ist an einem
+ * T-Stoss unzerschnitten und deckt den Rest ab, s. `applyTJunction`-Doc).
+ * Getrimmte Schichten, die direkt an eine verschmelzende Nachbarschicht
+ * grenzen, bekommen zusätzlich eine seitliche Cut-Linie entlang der
+ * Durchgangsachse (L-Anschluss, z. B. Putz neben durchlaufendem Kern).
+ *
+ * Setzt `WallCuts.layerCuts` NUR, wenn mindestens eine Schicht verschmilzt —
+ * sonst bleibt das Feld `undefined` (additiv, bit-identisches Default-
+ * Verhalten für den ganz überwiegenden Fall ohne Materialübereinstimmung).
+ */
+function applyLayerCuts(
+  project: Project,
+  result: Map<string, WallCuts>,
+  branchEnd: WallEnd,
+  branchWall: Wall,
+  throughWall: Wall,
+  faceCut: Line,
+  axisPoint: Vec2,
+  throughDir: Vec2,
+): void {
+  const branchWt = getWallType(project, branchWall);
+  const throughWt = getWallType(project, throughWall);
+  if (branchWt.layers.length === 0 || throughWt.layers.length === 0) return;
+
+  // Rückgrat der Durchgangswand: die Schicht mit der höchsten joinPriority.
+  let backbone = getComponent(project, throughWt.layers[0].componentId);
+  for (const l of throughWt.layers) {
+    const c = getComponent(project, l.componentId);
+    if (c.joinPriority > backbone.joinPriority) backbone = c;
+  }
+
+  const n = branchWt.layers.length;
+  const merged: boolean[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const comp = getComponent(project, branchWt.layers[i].componentId);
+    const res = resolveJoinPriority(comp, backbone);
+    // "merge": identisches Rückgrat-Material -> durchgehender Kern.
+    // "trim-b": die Abzweig-Schicht ist SELBST prioritärer als das Rückgrat
+    // der Durchgangswand -> sie gewinnt ebenfalls und läuft durch (die
+    // Durchgangswand könnten wir hier nicht schneiden, ausserhalb des Scopes).
+    merged[i] = res === "merge" || res === "trim-b";
+  }
+  if (!merged.some(Boolean)) return; // keine Materialübereinstimmung -> Default
+
+  const cuts = result.get(branchWall.id)!;
+  if (!cuts.layerCuts) {
+    cuts.layerCuts = {
+      start: new Array(n).fill(null),
+      end: new Array(n).fill(null),
+      startSide: new Array(n).fill(null),
+      endSide: new Array(n).fill(null),
+    };
+  }
+  const lc = cuts.layerCuts;
+  if (lc.start.length !== n) return; // Schicht-Anzahl passt nicht zusammen (sollte nicht vorkommen)
+
+  const faceArr = branchEnd.end === "start" ? lc.start : lc.end;
+  const sideArr = branchEnd.end === "start" ? lc.startSide : lc.endSide;
+  // Seitliche Cut-Linie entlang der Durchgangsachse, auf Höhe des Wand-
+  // Achsenpunkts (= die Tiefe, bis zu der eine verschmelzende Nachbarschicht
+  // ungekappt durchläuft).
+  const sideLine: Line = { point: axisPoint, dir: throughDir };
+
+  for (let i = 0; i < n; i++) {
+    faceArr[i] = merged[i] ? null : faceCut;
+    const adjMerged =
+      !merged[i] && ((i > 0 && merged[i - 1]) || (i < n - 1 && merged[i + 1]));
+    sideArr[i] = adjMerged ? sideLine : null;
+  }
 }
 
 /**
@@ -262,7 +386,7 @@ function applyMidSpanTee(
   const endGap = 1e-4; // Mindestabstand zu den Wandenden für „innere Spanne"
   const tol = 1e-3; // Toleranz für den senkrechten Abstand zur Wandfläche
 
-  let best: { wall: Wall; perp: number; dist: number } | null = null;
+  let best: { wall: Wall; perp: number; dist: number; distAlong: number } | null = null;
   for (const w of walls) {
     if (w.id === freeWall.id) continue;
     const u = dirOf(w);
@@ -278,7 +402,7 @@ function applyMidSpanTee(
     const dist = Math.abs(perp);
     if (dist > tw / 2 + tol) continue;
 
-    if (!best || dist < best.dist) best = { wall: w, perp, dist };
+    if (!best || dist < best.dist) best = { wall: w, perp, dist, distAlong };
   }
   if (!best) return; // kein Treffer → rechtwinklig
 
@@ -289,6 +413,12 @@ function applyMidSpanTee(
   const offW = wallReferenceOffset(w, tw);
   const sign = best.perp >= 0 ? 1 : -1;
   const facePoint = add(w.start, scale(nW, offW + sign * (tw / 2)));
+  const faceCut: Line = { point: facePoint, dir: uW };
 
-  setCut(result, freeEnd, { point: facePoint, dir: uW });
+  setCut(result, freeEnd, faceCut);
+  // Achsenpunkt auf der getroffenen Wand, auf Höhe der Projektion des freien
+  // Endes (nicht zwingend w.start) — Anker für die materialbewusste
+  // Pro-Schicht-Erweiterung (analog zum T-Knoten-Fall).
+  const axisPoint = add(w.start, scale(uW, best.distAlong));
+  applyLayerCuts(project, result, freeEnd, freeWall, w, faceCut, axisPoint, uW);
 }

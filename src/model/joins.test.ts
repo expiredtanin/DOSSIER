@@ -15,10 +15,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeJoins } from "./joins";
+import { computeJoins, resolveJoinPriority } from "./joins";
 import { cross, len, sub } from "./geometry";
 import type { Line } from "./geometry";
-import type { Project, Vec2, Wall } from "./types";
+import type { Component, Project, Vec2, Wall } from "./types";
 
 /** Abstand eines Punktes P von der unendlichen Geraden `line`. */
 function distToLine(line: Line, p: Vec2): number {
@@ -183,5 +183,149 @@ describe("computeJoins — Mittelspannen-T-Stoß (Ende trifft Wandseite)", () =>
     );
     const joins = computeJoins(proj, proj.walls);
     expect(joins.get("WB3")!.endCut).toBeNull();
+  });
+});
+
+describe("resolveJoinPriority — Ordnungslogik zweier Bauteile am Stoss", () => {
+  const brick: Component = { id: "brick", name: "Backstein", color: "#8c5544", hatchId: "none", joinPriority: 50 };
+  const brick2: Component = { id: "brick", name: "Backstein (Kopie)", color: "#000", hatchId: "none", joinPriority: 50 };
+  const render: Component = { id: "render", name: "Putz", color: "#efece6", hatchId: "none", joinPriority: 10 };
+  const insulation: Component = { id: "insulation", name: "Dämmung", color: "#fff", hatchId: "none", joinPriority: 20 };
+  const concrete: Component = { id: "concrete", name: "Beton", color: "#9aa0a6", hatchId: "none", joinPriority: 100 };
+
+  it("verschmilzt bei gleicher Priorität UND gleicher Komponente", () => {
+    expect(resolveJoinPriority(brick, brick2)).toBe("merge");
+  });
+
+  it("koexistiert bei gleicher Priorität, aber verschiedener Komponente", () => {
+    // Zwei fiktive Komponenten mit zufällig gleicher Priorität, aber
+    // unterschiedlicher Identität — keine eindeutige Rangfolge.
+    const other: Component = { id: "other-30", name: "X", color: "#123", hatchId: "none", joinPriority: 20 };
+    expect(resolveJoinPriority(insulation, other)).toBe("coexist");
+  });
+
+  it("lässt die höhere Priorität gewinnen (die niedrigere wird getrimmt)", () => {
+    expect(resolveJoinPriority(render, brick)).toBe("trim-a"); // a=Putz verliert
+    expect(resolveJoinPriority(brick, render)).toBe("trim-b"); // b=Putz verliert
+    expect(resolveJoinPriority(concrete, brick)).toBe("trim-b");
+    expect(resolveJoinPriority(brick, concrete)).toBe("trim-a");
+  });
+});
+
+/**
+ * Minimalprojekt mit einem mehrschichtigen, W9-artigen Wandtyp
+ * (Innenputz/Backstein-Kern/Innenputz, wie `sampleProject`s "iw") — für die
+ * materialbewusste T-Stoss-Erweiterung (layerCuts).
+ */
+function layeredWallProject(w1: Wall, w2: Wall, w3: Wall): Project {
+  return {
+    id: "t",
+    name: "T",
+    lineStyles: [],
+    hatches: [],
+    components: [
+      { id: "render-int", name: "Innenputz", color: "#efece6", hatchId: "none", joinPriority: 10 },
+      { id: "brick", name: "Backstein", color: "#8c5544", hatchId: "none", joinPriority: 50 },
+    ],
+    wallTypes: [
+      {
+        id: "iw",
+        name: "Innenwand",
+        layers: [
+          { componentId: "render-int", thickness: 0.015 },
+          { componentId: "brick", thickness: 0.12 },
+          { componentId: "render-int", thickness: 0.015 },
+        ],
+      },
+    ],
+    drawingLevels: [
+      { id: "eg", name: "EG", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0, baseElevation: 0 },
+    ],
+    layers: [{ code: "20", name: "Wände", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
+    walls: [w1, w2, w3],
+    doors: [],
+    openings: [],
+    ceilings: [],
+    stairs: [],
+    rooms: [],
+    drawings2d: [],
+    context: [],
+  };
+}
+
+function iwWall(id: string, start: Vec2, end: Vec2): Wall {
+  return {
+    id,
+    type: "wall",
+    floorId: "eg",
+    categoryCode: "20",
+    start,
+    end,
+    wallTypeId: "iw",
+    height: 2.6,
+  };
+}
+
+describe("computeJoins — materialbewusster T-Stoss (layerCuts)", () => {
+  it("W9-artiger T-Knoten: Backstein-Kern des Abzweigs verschmilzt (kein Cut), Putz wird getrimmt + L-Seitenlinie", () => {
+    // Durchgangswand WA1 (0,0)→(5,0) / WA2 (5,0)→(10,0), Abzweig WB (5,0)→(5,3),
+    // alle vom selben Wandtyp "iw" (Innenputz/Backstein/Innenputz, T=0.15).
+    const proj = layeredWallProject(
+      iwWall("WA1", { x: 0, y: 0 }, { x: 5, y: 0 }),
+      iwWall("WA2", { x: 5, y: 0 }, { x: 10, y: 0 }),
+      iwWall("WB", { x: 5, y: 0 }, { x: 5, y: 3 }),
+    );
+    const joins = computeJoins(proj, proj.walls);
+    const cuts = joins.get("WB")!;
+
+    // Aggregat-Cut bleibt unverändert (bit-identisch zum bisherigen Verhalten).
+    expect(cuts.startCut).not.toBeNull();
+    expect(distToLine(cuts.startCut!, { x: 5, y: 0.075 })).toBeCloseTo(0, 6);
+
+    // layerCuts ist gesetzt (mindestens eine Schicht verschmilzt).
+    expect(cuts.layerCuts).toBeDefined();
+    const lc = cuts.layerCuts!;
+    expect(lc.start.length).toBe(3);
+
+    // Schicht 1 (Backstein-Kern, Index 1) verschmilzt: KEIN Cut.
+    expect(lc.start[1]).toBeNull();
+    expect(lc.startSide[1]).toBeNull();
+
+    // Schichten 0 und 2 (Innenputz) werden getrimmt: derselbe Nahflächen-Cut
+    // wie das Aggregat...
+    expect(lc.start[0]).not.toBeNull();
+    expect(lc.start[2]).not.toBeNull();
+    expect(distToLine(lc.start[0]!, { x: 5, y: 0.075 })).toBeCloseTo(0, 6);
+    expect(distToLine(lc.start[2]!, { x: 5, y: 0.075 })).toBeCloseTo(0, 6);
+    // ... UND bekommen die zusätzliche L-Seitenlinie entlang der
+    // Durchgangsachse (durch den Knoten (5,0), Richtung parallel zur x-Achse).
+    expect(lc.startSide[0]).not.toBeNull();
+    expect(lc.startSide[2]).not.toBeNull();
+    expect(distToLine(lc.startSide[0]!, { x: 5, y: 0 })).toBeCloseTo(0, 6);
+    expect(distToLine(lc.startSide[0]!, { x: 0, y: 0 })).toBeCloseTo(0, 6);
+
+    // Die kollinearen Hälften der Durchgangswand bleiben unangetastet
+    // (unverändertes Verhalten, keine layerCuts für sie).
+    expect(joins.get("WA1")!.layerCuts).toBeUndefined();
+    expect(joins.get("WA2")!.layerCuts).toBeUndefined();
+  });
+
+  it("setzt layerCuts NICHT, wenn kein Bauteil des Abzweigs mit dem Rückgrat der Durchgangswand übereinstimmt", () => {
+    // Gleiche Anordnung, aber der Abzweig ist eine reine Einschicht-Wand ohne
+    // Materialübereinstimmung zum Backstein-Rückgrat → Default-Verhalten.
+    const proj = layeredWallProject(
+      iwWall("WA1", { x: 0, y: 0 }, { x: 5, y: 0 }),
+      iwWall("WA2", { x: 5, y: 0 }, { x: 10, y: 0 }),
+      iwWall("WB", { x: 5, y: 0 }, { x: 5, y: 3 }),
+    );
+    proj.wallTypes.push({
+      id: "solo",
+      name: "Solo",
+      layers: [{ componentId: "render-int", thickness: 0.1 }],
+    });
+    proj.walls[2] = { ...proj.walls[2], wallTypeId: "solo" };
+    const joins = computeJoins(proj, proj.walls);
+    expect(joins.get("WB")!.layerCuts).toBeUndefined();
+    expect(joins.get("WB")!.startCut).not.toBeNull(); // Aggregat-Cut bleibt normal
   });
 });

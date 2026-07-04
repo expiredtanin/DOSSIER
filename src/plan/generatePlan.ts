@@ -45,6 +45,7 @@ import {
   along,
   clippedBand,
   leftNormal,
+  lineIntersect,
   normalize,
   scale,
   sub,
@@ -1127,6 +1128,12 @@ function addWallPoche(
     // auf. Die Bänder tragen NUR Füllung + Schraffur (kein eigener Umriss); jede
     // innere Schichtfuge wird als EIGENSTÄNDIGE, stilisierbare Linie gezeichnet.
     const bandJoinEdges = joinEdges(startCut, endCut);
+    // Materialbewusster T-Stoss (siehe resolveJoinPriority in model/joins.ts):
+    // liegt eine Pro-Schicht-Cut-Überschreibung vor, ersetzt sie PRO SCHICHT den
+    // einheitlichen startCut/endCut — nur an den echten Wandenden (dieselbe
+    // Maskierung wie oben für startCut/endCut, s <= 1e-6 / e >= axisLen-1e-6).
+    // Fehlt sie, bleibt alles wie zuvor (startCut/endCut für jede Schicht).
+    const layerCuts = cuts.layerCuts;
     let off = refOff - total / 2;
     for (let li = 0; li < wt.layers.length; li++) {
       const layer = wt.layers[li];
@@ -1142,9 +1149,11 @@ function addWallPoche(
       // SIA-Poché: neutraler Hintergrund (weiß) statt Bauteil-Albedo, die
       // Schichtschraffur liegt darüber; Vollmuster ("solid") = schwarze Poché.
       const layerSolid = layerHatch.pattern === "solid";
+      const layerStartCut = s <= 1e-6 ? (layerCuts ? layerCuts.start[li] : startCut) : null;
+      const layerEndCut = e >= axisLen - 1e-6 ? (layerCuts ? layerCuts.end[li] : endCut) : null;
       out.push({
         kind: "polygon",
-        pts: clippedBand(p1, p2, off, off + layer.thickness, startCut, endCut),
+        pts: clippedBand(p1, p2, off, off + layer.thickness, layerStartCut, layerEndCut),
         fill: layerSolid ? POCHE_FILL_BLACK : POCHE_FILL_WHITE,
         // Band ohne Umriss: keine Schichtfuge über die Bandkante, keine 45°-Naht
         // am Knoten. Die Fugen kommen als separate `line`-Primitive (siehe unten).
@@ -1156,6 +1165,42 @@ function addWallPoche(
         noStrokeEdges: bandJoinEdges,
         wallId,
       });
+      // L-Anschluss: eine getrimmte Schicht (z. B. Putz), die an eine
+      // verschmelzende Nachbarschicht (durchlaufender Kern) grenzt, bekommt
+      // zusätzlich eine seitliche Cut-Linie entlang der Durchgangsachse — sie
+      // begrenzt die Schichtbreite dort, wo der Kern sie unterbricht (L-Form).
+      const sideStart = s <= 1e-6 ? layerCuts?.startSide[li] : null;
+      const sideEnd = e >= axisLen - 1e-6 ? layerCuts?.endSide[li] : null;
+      if (sideStart || sideEnd) {
+        const uSeg = normalize(sub(p2, p1));
+        const nSeg = leftNormal(uSeg);
+        const sidePoint = (base: Vec2, layerOff: number, cut: Line): Vec2 => {
+          const pt = add(base, scale(nSeg, layerOff));
+          return lineIntersect(pt, uSeg, cut.point, cut.dir) ?? pt;
+        };
+        if (sideStart) {
+          out.push({
+            kind: "line",
+            a: sidePoint(p1, off, sideStart),
+            b: sidePoint(p1, off + layer.thickness, sideStart),
+            cls: "layer-joint-l",
+            weightMm: layerLineMm,
+            color: stroke,
+            greyed,
+          });
+        }
+        if (sideEnd) {
+          out.push({
+            kind: "line",
+            a: sidePoint(p2, off, sideEnd),
+            b: sidePoint(p2, off + layer.thickness, sideEnd),
+            cls: "layer-joint-l",
+            weightMm: layerLineMm,
+            color: stroke,
+            greyed,
+          });
+        }
+      }
       off += layer.thickness;
       // Innere Schichtfuge (zwischen dieser und der nächst-inneren Schicht) als
       // eigene Linie am kumulierten Offset `off`, mit dem Cut der Bänder geclippt.
@@ -1163,6 +1208,9 @@ function addWallPoche(
       // linie (LAYER_LINE_MM) in Wandfarbe. Das Gewicht folgt demselben Detail-
       // Faktor wie die frühere Schichtfuge (`layerLineMm`), damit die Detailgrade
       // sich unverändert verhalten. Die innerste Schicht hat keine innere Fuge.
+      // Nutzt bewusst weiterhin den einheitlichen startCut/endCut (nicht die
+      // Pro-Schicht-Cuts): die Fuge markiert den Materialwechsel INNERHALB
+      // dieser Wand und bleibt daher an der bisherigen Nahfläche.
       if (li < wt.layers.length - 1) {
         // clippedBand(p1, p2, off, off, …) liefert [edgeStart, edgeEnd, edgeEnd,
         // edgeStart] → die zwei distinkten Endpunkte sind Index 0 (Start) und 1
