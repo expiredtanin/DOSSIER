@@ -42,6 +42,33 @@ import {
   type Fillet,
   type Hit,
 } from "./kernel2d";
+import {
+  ceilingArea,
+  isValidOutline,
+  normalizeOutline,
+  outlineBBox,
+  outlineCentroid,
+  pointInOutline,
+} from "./ceiling";
+import { centroid, perimeter, polygonArea } from "./roomArea";
+import {
+  defaultStepCount,
+  pointHitsStair,
+  pointInPolygon as stairPointInPolygon,
+  stairBBox,
+  stairCut,
+  stairGeometry,
+  type StairGeometry as TSStairGeometry,
+} from "./stair";
+import type { Stair } from "../model/types";
+import {
+  detectRooms,
+  pointInPolygon as rbPointInPolygon,
+  roomFromPointInside,
+  roomFromPointInsideFaces,
+  type WallSegment,
+  type WallFace,
+} from "./roomBoundary";
 
 type Poly = { pts: Vec2[]; closed: boolean };
 
@@ -440,6 +467,447 @@ describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Zufall", () => {
     const w = JSON.parse(K.join_chains_batch_json(JSON.stringify(groups))) as Poly[][];
     groups.forEach((g, i) => {
       expect(eqPolyList(w[i], joinChains(g)), `join#${i}`).toBe(true);
+    });
+  });
+});
+
+// ── Slice 1: roomArea / ceiling ───────────────────────────────────────────────
+
+/** Zufaelliges konvexes Polygon mit n=3..10 Ecken in [-30,30]×[-30,30]. */
+function genConvexPoly(rng: () => number, n: number): Vec2[] {
+  // Einfache Methode: Einheitswinkel sortieren + skalieren.
+  const angles = Array.from({ length: n }, () => rng() * 2 * Math.PI);
+  angles.sort((a, b) => a - b);
+  const rx = 1 + rng() * 20;
+  const ry = 1 + rng() * 20;
+  const cx = (rng() * 2 - 1) * 10;
+  const cy = (rng() * 2 - 1) * 10;
+  return angles.map((a) => ({ x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) }));
+}
+
+describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Slice 1: roomArea + ceiling", () => {
+  it("polygonArea / perimeter / centroid (Zufallspolygone 3–10 Ecken, rel 1e-9)", () => {
+    const rng = mulberry32(20);
+    const polys = Array.from({ length: N }, () => {
+      const n = 3 + Math.floor(rng() * 8);
+      return genConvexPoly(rng, n);
+    });
+    const wArea = JSON.parse(K.polygon_area_batch_json(JSON.stringify(polys))) as number[];
+    const wPerim = JSON.parse(K.perimeter_batch_json(JSON.stringify(polys))) as number[];
+    const wCent = JSON.parse(K.centroid_batch_json(JSON.stringify(polys))) as Vec2[];
+
+    polys.forEach((p, i) => {
+      const a = polygonArea(p);
+      const pe = perimeter(p);
+      const c = centroid(p);
+      expect(closeNum(wArea[i], a), `area#${i}`).toBe(true);
+      expect(closeNum(wPerim[i], pe), `perim#${i}`).toBe(true);
+      expect(closeVec(wCent[i], c), `centroid#${i}`).toBe(true);
+    });
+  });
+
+  it("normalizeOutline: Struktur exakt (null↔null) + Werte + None-Paritaet", () => {
+    const rng = mulberry32(21);
+    // Haelfte: gueltige Polygone; Haelfte: degenerierte (< 3 Punkte oder kollinear).
+    const inputs = Array.from({ length: N }, (_, i) => {
+      if (i % 4 < 3) {
+        const n = 3 + Math.floor(rng() * 8);
+        return genConvexPoly(rng, n);
+      }
+      // Degeneriert: 0, 1 oder 2 Punkte.
+      const k = Math.floor(rng() * 3);
+      return Array.from({ length: k }, () => ({ x: rng() * 10, y: rng() * 10 }));
+    });
+    const w = JSON.parse(K.normalize_outline_batch_json(JSON.stringify(inputs))) as (Vec2[] | null)[];
+    inputs.forEach((p, i) => {
+      const t = normalizeOutline(p);
+      expect(w[i] === null, `norm-null#${i}`).toBe(t === null);
+      if (t !== null && w[i] !== null) {
+        const wp = w[i]!;
+        expect(wp.length, `norm-len#${i}`).toBe(t.length);
+        t.forEach((pt, j) => expect(closeVec(wp[j], pt), `norm-pt#${i}.${j}`).toBe(true));
+      }
+    });
+  });
+
+  it("isValidOutline / ceilingArea (Struktur exakt + Werte)", () => {
+    const rng = mulberry32(22);
+    const polys = Array.from({ length: N }, (_, i) => {
+      if (i % 5 < 4) return genConvexPoly(rng, 3 + Math.floor(rng() * 8));
+      return Array.from({ length: Math.floor(rng() * 3) }, () => ({ x: rng() * 5, y: rng() * 5 }));
+    });
+    const wValid = JSON.parse(K.is_valid_outline_batch_json(JSON.stringify(polys))) as boolean[];
+    const wArea = JSON.parse(K.ceiling_area_batch_json(JSON.stringify(polys))) as number[];
+
+    polys.forEach((p, i) => {
+      expect(wValid[i], `valid#${i}`).toBe(isValidOutline(p));
+      expect(closeNum(wArea[i], ceilingArea(p)), `ceilArea#${i}`).toBe(true);
+    });
+  });
+
+  it("outlineBBox / outlineCentroid (Werte rel 1e-9)", () => {
+    const rng = mulberry32(23);
+    const polys = Array.from({ length: N }, () => genConvexPoly(rng, 3 + Math.floor(rng() * 8)));
+    const wBBox = JSON.parse(K.outline_bbox_batch_json(JSON.stringify(polys))) as {
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+    }[];
+    const wCent = JSON.parse(K.outline_centroid_batch_json(JSON.stringify(polys))) as Vec2[];
+
+    polys.forEach((p, i) => {
+      const bb = outlineBBox(p);
+      const c = outlineCentroid(p);
+      expect(closeNum(wBBox[i].minX, bb.minX), `bbox-minX#${i}`).toBe(true);
+      expect(closeNum(wBBox[i].minY, bb.minY), `bbox-minY#${i}`).toBe(true);
+      expect(closeNum(wBBox[i].maxX, bb.maxX), `bbox-maxX#${i}`).toBe(true);
+      expect(closeNum(wBBox[i].maxY, bb.maxY), `bbox-maxY#${i}`).toBe(true);
+      expect(closeVec(wCent[i], c), `outCentroid#${i}`).toBe(true);
+    });
+  });
+
+  it("pointInOutline (Struktur exakt: true↔true, Zufallspunkte innen+aussen)", () => {
+    const rng = mulberry32(24);
+    const qs = Array.from({ length: N }, () => {
+      const n = 3 + Math.floor(rng() * 8);
+      const outline = genConvexPoly(rng, n);
+      // Schwerpunkt des Polygons als garantiert innerer Punkt.
+      const cx = outline.reduce((s, p) => s + p.x, 0) / outline.length;
+      const cy = outline.reduce((s, p) => s + p.y, 0) / outline.length;
+      const p = rng() < 0.5 ? { x: cx, y: cy } : { x: (rng() * 2 - 1) * 50, y: (rng() * 2 - 1) * 50 };
+      return { p, outline };
+    });
+    const w = JSON.parse(K.point_in_outline_batch_json(JSON.stringify(qs))) as boolean[];
+    qs.forEach((q, i) => {
+      expect(w[i], `pio#${i}`).toBe(pointInOutline(q.p, q.outline));
+    });
+  });
+});
+
+// ── Slice 2: stair ────────────────────────────────────────────────────────────
+
+/** Erzeugt einen einfachen Stair-Stub mit geometrisch relevanten Feldern. */
+function genStair(
+  rng: () => number,
+  shape: "straight" | "L" | "spiral",
+): Stair & { totalRise: number } {
+  const start = { x: (rng() * 2 - 1) * 10, y: (rng() * 2 - 1) * 10 };
+  const angle = rng() * Math.PI * 2;
+  const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+  const runLength = 1 + rng() * 5;
+  const width = 0.8 + rng() * 1.5;
+  const stepCount = 3 + Math.floor(rng() * 12);
+  const totalRise = 0.5 + rng() * 3;
+  const up = rng() < 0.5 ? true : false;
+  const base: Stair = {
+    id: "test",
+    type: "stair",
+    floorId: "f1",
+    categoryCode: "40",
+    shape,
+    start,
+    dir,
+    runLength,
+    width,
+    stepCount,
+    up,
+  };
+  if (shape === "L") {
+    return { ...base, run2Length: 1 + rng() * 4, turn: rng() < 0.5 ? 1 : -1, totalRise };
+  }
+  if (shape === "spiral") {
+    return {
+      ...base,
+      center: { x: start.x + rng() * 2, y: start.y + rng() * 2 },
+      radius: 0.5 + rng() * 2,
+      sweep: 90 + rng() * 270,
+      totalRise,
+    };
+  }
+  return { ...base, totalRise };
+}
+
+/** Prueft Tritt-Listen-Gleichheit: Laenge, dann je Tritt index/baseRise/topRise/pts. */
+function eqTreads(
+  w: { pts: Vec2[]; index: number; topRise: number; baseRise: number }[],
+  t: TSStairGeometry["treads"],
+): boolean {
+  if (w.length !== t.length) return false;
+  return t.every((tr, i) => {
+    const wtr = w[i];
+    if (wtr.index !== tr.index) return false;
+    if (!closeNum(wtr.topRise, tr.topRise)) return false;
+    if (!closeNum(wtr.baseRise, tr.baseRise)) return false;
+    if (!eqPts(wtr.pts, tr.pts)) return false;
+    return true;
+  });
+}
+
+describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Slice 2: stair", () => {
+  it("defaultStepCount (Struktur exakt + Werte)", () => {
+    const rng = mulberry32(30);
+    const qs = Array.from({ length: N }, () => ({
+      totalRise: 0.1 + rng() * 5,
+      runLength: rng() * 8,
+    }));
+    const w = JSON.parse(K.default_step_count_batch_json(JSON.stringify(qs))) as number[];
+    qs.forEach((q, i) => {
+      expect(w[i], `dsc#${i}`).toBe(defaultStepCount(q.totalRise, q.runLength));
+    });
+  });
+
+  it("stairGeometry gerade: Tritte + Werte (Struktur exakt, rel 1e-9)", () => {
+    const rng = mulberry32(31);
+    const qs = Array.from({ length: 100 }, () => {
+      const s = genStair(rng, "straight");
+      return { stair: s, totalRise: s.totalRise };
+    });
+    const wGeos = JSON.parse(K.stair_geometry_batch_json(JSON.stringify(qs))) as {
+      treads: { pts: Vec2[]; index: number; topRise: number; baseRise: number }[];
+      landing: Vec2[] | null;
+      riserHeight: number;
+      treadDepth: number;
+      runLine: Vec2[];
+      totalRise: number;
+    }[];
+    qs.forEach((q, i) => {
+      const t = stairGeometry(q.stair, q.totalRise);
+      const w = wGeos[i];
+      expect(eqTreads(w.treads, t.treads), `treads#${i}`).toBe(true);
+      expect(w.landing === null, `landing-null#${i}`).toBe(t.landing === null);
+      expect(closeNum(w.riserHeight, t.riserHeight), `riser#${i}`).toBe(true);
+      expect(closeNum(w.treadDepth, t.treadDepth), `depth#${i}`).toBe(true);
+      expect(eqPts(w.runLine, t.runLine), `runLine#${i}`).toBe(true);
+    });
+  });
+
+  it("stairGeometry L + spiral: Struktur exakt + Werte", () => {
+    const rng = mulberry32(32);
+    const lqs = Array.from({ length: 50 }, () => {
+      const s = genStair(rng, "L");
+      return { stair: s, totalRise: s.totalRise };
+    });
+    const spiralqs = Array.from({ length: 50 }, () => {
+      const s = genStair(rng, "spiral");
+      return { stair: s, totalRise: s.totalRise };
+    });
+    const wL = JSON.parse(K.stair_geometry_batch_json(JSON.stringify(lqs))) as {
+      treads: { pts: Vec2[]; index: number; topRise: number; baseRise: number }[];
+      landing: Vec2[] | null;
+      riserHeight: number;
+      treadDepth: number;
+      runLine: Vec2[];
+    }[];
+    lqs.forEach((q, i) => {
+      const t = stairGeometry(q.stair, q.totalRise);
+      const w = wL[i];
+      expect(eqTreads(w.treads, t.treads), `L-treads#${i}`).toBe(true);
+      expect(w.landing !== null, `L-landing#${i}`).toBe(t.landing !== null);
+      if (t.landing && w.landing) expect(eqPts(w.landing, t.landing), `L-landingPts#${i}`).toBe(true);
+      expect(eqPts(w.runLine, t.runLine), `L-runLine#${i}`).toBe(true);
+    });
+    const wSp = JSON.parse(K.stair_geometry_batch_json(JSON.stringify(spiralqs))) as typeof wL;
+    spiralqs.forEach((q, i) => {
+      const t = stairGeometry(q.stair, q.totalRise);
+      const w = wSp[i];
+      expect(eqTreads(w.treads, t.treads), `sp-treads#${i}`).toBe(true);
+      expect(eqPts(w.runLine, t.runLine), `sp-runLine#${i}`).toBe(true);
+    });
+  });
+
+  it("stairCut (Struktur exakt: Indizes + breakLine-null)", () => {
+    const rng = mulberry32(33);
+    const qs = Array.from({ length: 100 }, () => {
+      const s = genStair(rng, "straight");
+      const geo = stairGeometry(s, s.totalRise);
+      const cutRise = rng() * s.totalRise * 1.1;
+      return { geo, cutRise };
+    });
+    const w = JSON.parse(K.stair_cut_batch_json(JSON.stringify(qs))) as {
+      belowIndices: number[];
+      aboveIndices: number[];
+      breakLine: [Vec2, Vec2][] | null;
+    }[];
+    qs.forEach((q, i) => {
+      const t = stairCut(q.geo, q.cutRise);
+      expect(w[i].belowIndices.length, `cut-below-len#${i}`).toBe(t.belowIndices.length);
+      expect(w[i].aboveIndices.length, `cut-above-len#${i}`).toBe(t.aboveIndices.length);
+      expect(w[i].belowIndices, `cut-below#${i}`).toEqual(t.belowIndices);
+      expect(w[i].aboveIndices, `cut-above#${i}`).toEqual(t.aboveIndices);
+      expect(w[i].breakLine === null, `cut-break-null#${i}`).toBe(t.breakLine === null);
+    });
+  });
+
+  it("stairBBox (Werte rel 1e-9)", () => {
+    const rng = mulberry32(34);
+    const geos = Array.from({ length: 100 }, () => {
+      const s = genStair(rng, "straight");
+      return stairGeometry(s, s.totalRise);
+    });
+    const w = JSON.parse(K.stair_bbox_batch_json(JSON.stringify(geos))) as {
+      minX: number; minY: number; maxX: number; maxY: number;
+    }[];
+    geos.forEach((g, i) => {
+      const t = stairBBox(g);
+      expect(closeNum(w[i].minX, t.minX), `bbox-minX#${i}`).toBe(true);
+      expect(closeNum(w[i].minY, t.minY), `bbox-minY#${i}`).toBe(true);
+      expect(closeNum(w[i].maxX, t.maxX), `bbox-maxX#${i}`).toBe(true);
+      expect(closeNum(w[i].maxY, t.maxY), `bbox-maxY#${i}`).toBe(true);
+    });
+  });
+
+  it("pointInPolygon / pointHitsStair (Struktur exakt)", () => {
+    const rng = mulberry32(35);
+    const pipQs = Array.from({ length: N }, () => {
+      const n = 3 + Math.floor(rng() * 8);
+      const poly = genConvexPoly(rng, n);
+      const cx = poly.reduce((s, p) => s + p.x, 0) / poly.length;
+      const cy = poly.reduce((s, p) => s + p.y, 0) / poly.length;
+      const p = rng() < 0.5 ? { x: cx, y: cy } : { x: (rng() * 2 - 1) * 50, y: (rng() * 2 - 1) * 50 };
+      return { p, poly };
+    });
+    const wPip = JSON.parse(K.point_in_polygon_batch_json(JSON.stringify(pipQs))) as boolean[];
+    pipQs.forEach((q, i) => {
+      expect(wPip[i], `pip#${i}`).toBe(stairPointInPolygon(q.p, q.poly));
+    });
+
+    const phsQs = Array.from({ length: 50 }, () => {
+      const s = genStair(rng, "straight");
+      const geo = stairGeometry(s, s.totalRise);
+      const p = { x: s.start.x + rng() * 6 - 1, y: s.start.y + (rng() * 2 - 1) * 2 };
+      return { p, geo };
+    });
+    const wPhs = JSON.parse(K.point_hits_stair_batch_json(JSON.stringify(phsQs))) as boolean[];
+    phsQs.forEach((q, i) => {
+      expect(wPhs[i], `phs#${i}`).toBe(pointHitsStair(q.p, q.geo));
+    });
+  });
+});
+
+// ── Slice 3: roomBoundary ─────────────────────────────────────────────────────
+
+/** Erzeugt eine Menge rechtwinkliger Wandsegmente, die ein einfaches Rechteck
+ *  (oder L-Form) bilden. */
+function genRectWalls(rng: () => number): WallSegment[] {
+  const x0 = (rng() * 2 - 1) * 5;
+  const y0 = (rng() * 2 - 1) * 5;
+  const w = 2 + rng() * 5;
+  const h = 2 + rng() * 5;
+  const t = 0.1 + rng() * 0.3;
+  return [
+    { a: { x: x0, y: y0 }, b: { x: x0 + w, y: y0 }, thickness: t },
+    { a: { x: x0 + w, y: y0 }, b: { x: x0 + w, y: y0 + h }, thickness: t },
+    { a: { x: x0 + w, y: y0 + h }, b: { x: x0, y: y0 + h }, thickness: t },
+    { a: { x: x0, y: y0 + h }, b: { x: x0, y: y0 }, thickness: t },
+  ];
+}
+
+/** Erzeugt WallFace-Liste aus einem geschlossenen Polygon. */
+function polyToFaces(pts: Vec2[]): WallFace[] {
+  const n = pts.length;
+  return Array.from({ length: n }, (_, i) => ({ a: pts[i], b: pts[(i + 1) % n] }));
+}
+
+describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Slice 3: roomBoundary", () => {
+  it("rbPointInPolygon (roomBoundary-Variante, kein Nenner-Guard, Struktur exakt)", () => {
+    const rng = mulberry32(40);
+    const qs = Array.from({ length: N }, () => {
+      const n = 3 + Math.floor(rng() * 8);
+      const poly = genConvexPoly(rng, n);
+      const cx = poly.reduce((s, p) => s + p.x, 0) / poly.length;
+      const cy = poly.reduce((s, p) => s + p.y, 0) / poly.length;
+      const p = rng() < 0.5 ? { x: cx, y: cy } : { x: (rng() * 2 - 1) * 50, y: (rng() * 2 - 1) * 50 };
+      return { p, poly };
+    });
+    const w = JSON.parse(K.rb_point_in_polygon_batch_json(JSON.stringify(qs))) as boolean[];
+    qs.forEach((q, i) => {
+      expect(w[i], `rbpip#${i}`).toBe(rbPointInPolygon(q.p, q.poly));
+    });
+  });
+
+  it("detectRooms — Rechteck-Grundriss: gleiche Anzahl + Reihenfolge Raeume", () => {
+    const rng = mulberry32(41);
+    const qs = Array.from({ length: 50 }, () => ({
+      walls: genRectWalls(rng),
+      gapTol: 0.05,
+      minArea: 0.05,
+      offsetToInner: true,
+    }));
+    const w = JSON.parse(K.detect_rooms_batch_json(JSON.stringify(qs))) as Vec2[][][];
+    qs.forEach((q, i) => {
+      const t = detectRooms(q.walls, { gapTol: q.gapTol, minArea: q.minArea, offsetToInner: q.offsetToInner });
+      // Gleiche Anzahl Raeume.
+      expect(w[i].length, `dr-count#${i}`).toBe(t.length);
+      // Je Raum: gleiche Punktanzahl (Reihenfolge-abhaengig, aber deterministisch).
+      t.forEach((room, j) => {
+        expect(w[i][j]?.length, `dr-roomLen#${i}.${j}`).toBe(room.length);
+        room.forEach((pt, k) => expect(closeVec(w[i][j][k], pt), `dr-pt#${i}.${j}.${k}`).toBe(true));
+      });
+    });
+  });
+
+  it("detectRooms ohne Offset + degeneriert (< 3 Waende → leer)", () => {
+    const rng = mulberry32(42);
+    const qs = Array.from({ length: 30 }, () => ({
+      walls: genRectWalls(rng),
+      gapTol: 0.05,
+      minArea: 0.05,
+      offsetToInner: false,
+    }));
+    const w = JSON.parse(K.detect_rooms_batch_json(JSON.stringify(qs))) as Vec2[][][];
+    qs.forEach((q, i) => {
+      const t = detectRooms(q.walls, { gapTol: q.gapTol, minArea: q.minArea, offsetToInner: q.offsetToInner });
+      expect(w[i].length, `drno-count#${i}`).toBe(t.length);
+    });
+    // Degeneriert: < 3 Waende → leer.
+    const deg = [{ walls: [{ a: { x: 0, y: 0 }, b: { x: 1, y: 0 }, thickness: 0.2 }], gapTol: 0.05, minArea: 0.05, offsetToInner: true }];
+    const wd = JSON.parse(K.detect_rooms_batch_json(JSON.stringify(deg))) as Vec2[][][];
+    expect(wd[0].length).toBe(detectRooms(deg[0].walls, {}).length);
+    expect(wd[0].length).toBe(0);
+  });
+
+  it("roomFromPointInside — Schwerpunkt als Saatpunkt findet den Raum (nicht null)", () => {
+    const rng = mulberry32(43);
+    const qs = Array.from({ length: 50 }, () => {
+      const walls = genRectWalls(rng);
+      // Mittelpunkt des Rechtecks als Saatpunkt.
+      const xs = walls.flatMap((w) => [w.a.x, w.b.x]);
+      const ys = walls.flatMap((w) => [w.a.y, w.b.y]);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      return { point: { x: cx, y: cy }, walls, gapTol: 0.05, offsetToInner: true };
+    });
+    const w = JSON.parse(K.room_from_point_inside_batch_json(JSON.stringify(qs))) as (Vec2[] | null)[];
+    qs.forEach((q, i) => {
+      const t = roomFromPointInside(q.point, q.walls, { gapTol: q.gapTol, offsetToInner: q.offsetToInner });
+      expect(w[i] === null, `rfpi-null#${i}`).toBe(t === null);
+      if (t !== null && w[i] !== null) {
+        expect(w[i]!.length, `rfpi-len#${i}`).toBe(t.length);
+        t.forEach((pt, j) => expect(closeVec(w[i]![j], pt), `rfpi-pt#${i}.${j}`).toBe(true));
+      }
+    });
+  });
+
+  it("roomFromPointInsideFaces — Struktur exakt (null↔null, Laenge, Punkte)", () => {
+    const rng = mulberry32(44);
+    const qs = Array.from({ length: 30 }, () => {
+      const n = 4 + Math.floor(rng() * 4);
+      const poly = genConvexPoly(rng, n);
+      const faces = polyToFaces(poly);
+      const cx = poly.reduce((s, p) => s + p.x, 0) / poly.length;
+      const cy = poly.reduce((s, p) => s + p.y, 0) / poly.length;
+      const inOrOut = rng() < 0.7 ? { x: cx, y: cy } : { x: (rng() * 2 - 1) * 40, y: (rng() * 2 - 1) * 40 };
+      return { point: inOrOut, wallFaces: faces, gapTol: 0.05 };
+    });
+    const w = JSON.parse(K.room_from_point_inside_faces_batch_json(JSON.stringify(qs))) as (Vec2[] | null)[];
+    qs.forEach((q, i) => {
+      const t = roomFromPointInsideFaces(q.point, q.wallFaces, q.gapTol);
+      expect(w[i] === null, `rfpif-null#${i}`).toBe(t === null);
+      if (t !== null && w[i] !== null) {
+        expect(w[i]!.length, `rfpif-len#${i}`).toBe(t.length);
+        t.forEach((pt, j) => expect(closeVec(w[i]![j], pt), `rfpif-pt#${i}.${j}`).toBe(true));
+      }
     });
   });
 });

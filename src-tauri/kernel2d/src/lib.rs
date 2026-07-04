@@ -977,6 +977,180 @@ pub fn join_chains(polylines: &[Polyline]) -> Vec<Polyline> {
     out
 }
 
+// --- Polygon-Kennzahlen (roomArea) -------------------------------------------
+
+/// Absolute Polygonflaeche in m² (Port von `polygonArea`).
+pub fn polygon_area(pts: &[Vec2]) -> f64 {
+    signed_area(pts).abs()
+}
+
+/// Umfang eines geschlossenen Polygons (Summe aller Kantenlaengen, hypot).
+pub fn perimeter(pts: &[Vec2]) -> f64 {
+    let n = pts.len();
+    if n < 2 {
+        return 0.0;
+    }
+    let mut p = 0.0;
+    for i in 0..n {
+        let a = pts[i];
+        let b = pts[(i + 1) % n];
+        p += (b.x - a.x).hypot(b.y - a.y);
+    }
+    p
+}
+
+/// Flaechenschwerpunkt (momenten-gewichtet); degeneriert (|A|<1e-12) → Mittelwert.
+pub fn centroid(pts: &[Vec2]) -> Vec2 {
+    let n = pts.len();
+    if n == 0 {
+        return Vec2::new(0.0, 0.0);
+    }
+    if n < 3 {
+        let (mut sx, mut sy) = (0.0, 0.0);
+        for p in pts {
+            sx += p.x;
+            sy += p.y;
+        }
+        return Vec2::new(sx / n as f64, sy / n as f64);
+    }
+    let (mut a, mut cx, mut cy) = (0.0, 0.0, 0.0);
+    for i in 0..n {
+        let p = pts[i];
+        let q = pts[(i + 1) % n];
+        let cr = p.x * q.y - q.x * p.y;
+        a += cr;
+        cx += (p.x + q.x) * cr;
+        cy += (p.y + q.y) * cr;
+    }
+    a /= 2.0;
+    if a.abs() < 1e-12 {
+        let (mut sx, mut sy) = (0.0, 0.0);
+        for p in pts {
+            sx += p.x;
+            sy += p.y;
+        }
+        return Vec2::new(sx / n as f64, sy / n as f64);
+    }
+    Vec2::new(cx / (6.0 * a), cy / (6.0 * a))
+}
+
+// --- Umriss-/Decken-Utilities (ceiling) --------------------------------------
+
+/// Kleinste sinnvolle Deckenflaeche (m²) — darunter gilt der Umriss als entartet.
+pub const MIN_CEILING_AREA: f64 = 1e-4;
+
+/// Achsparallele Bounding-Box (serde camelCase: minX/minY/maxX/maxY wie TS).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BBox {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+}
+
+/// Normalisiert einen Umriss: Dedup, schliessenden Duplikat-Endpunkt weg,
+/// CCW erzwingen. None bei < 3 Restpunkten.
+pub fn normalize_outline(pts: &[Vec2]) -> Option<Vec<Vec2>> {
+    let mut clean: Vec<Vec2> = Vec::new();
+    for &p in pts {
+        if clean.is_empty() || !vec_equal(clean[clean.len() - 1], p, EPS) {
+            clean.push(p);
+        }
+    }
+    if clean.len() > 1 && vec_equal(clean[0], clean[clean.len() - 1], EPS) {
+        clean.pop();
+    }
+    if clean.len() < 3 {
+        return None;
+    }
+    if is_ccw(&clean) {
+        Some(clean)
+    } else {
+        clean.reverse();
+        Some(clean)
+    }
+}
+
+/// Fläche eines Deckenumrisses in m² (immer positiv).
+pub fn ceiling_area(pts: &[Vec2]) -> f64 {
+    signed_area(pts).abs()
+}
+
+/// Ob ein Umriss ein gueltiges (nicht entartetes) Deckenpolygon bildet.
+pub fn is_valid_outline(pts: &[Vec2]) -> bool {
+    match normalize_outline(pts) {
+        Some(norm) => ceiling_area(&norm) >= MIN_CEILING_AREA,
+        None => false,
+    }
+}
+
+/// Achsparallele Bounding-Box; leer/entartet → Null-Box.
+pub fn outline_bbox(pts: &[Vec2]) -> BBox {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for p in pts {
+        min_x = min_x.min(p.x);
+        min_y = min_y.min(p.y);
+        max_x = max_x.max(p.x);
+        max_y = max_y.max(p.y);
+    }
+    if !min_x.is_finite() {
+        return BBox { min_x: 0.0, min_y: 0.0, max_x: 0.0, max_y: 0.0 };
+    }
+    BBox { min_x, min_y, max_x, max_y }
+}
+
+/// Schwerpunkt des Umriss-Polygons (ceiling-Variante: f = 1/(6·signedArea)).
+pub fn outline_centroid(pts: &[Vec2]) -> Vec2 {
+    let a = signed_area(pts);
+    if a.abs() < 1e-12 {
+        let (mut sx, mut sy) = (0.0, 0.0);
+        for p in pts {
+            sx += p.x;
+            sy += p.y;
+        }
+        let n = if pts.is_empty() { 1.0 } else { pts.len() as f64 };
+        return Vec2::new(sx / n, sy / n);
+    }
+    let (mut cx, mut cy) = (0.0, 0.0);
+    let n = pts.len();
+    for i in 0..n {
+        let p = pts[i];
+        let q = pts[(i + 1) % n];
+        let cr = p.x * q.y - q.x * p.y;
+        cx += (p.x + q.x) * cr;
+        cy += (p.y + q.y) * cr;
+    }
+    let f = 1.0 / (6.0 * a);
+    Vec2::new(cx * f, cy * f)
+}
+
+/// Punkt-in-Polygon (Ray-Casting) fuer einen geschlossenen Umriss. Der TS-Guard
+/// `(b.y-a.y || 1e-12)` wird exakt nachgebildet (Null-Nenner → 1e-12).
+pub fn point_in_outline(p: Vec2, outline: &[Vec2]) -> bool {
+    let n = outline.len();
+    if n == 0 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let a = outline[i];
+        let b = outline[j];
+        let denom = if b.y - a.y == 0.0 { 1e-12 } else { b.y - a.y };
+        let intersect =
+            (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / denom + a.x;
+        if intersect {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
 // --- Batch-WASM-Fassade (Feature "web") --------------------------------------
 // Phase 1: nur ein Versions-/Ping-Export, um die WASM-Grenze + das Tooling
 // (wasm-pack → pkgKernel2d → Vite/vitest) end-to-end gruen zu bekommen. Die
@@ -1419,6 +1593,1151 @@ pub fn join_chains_batch_json(input_json: &str) -> Result<String, wasm_bindgen::
     console_error_panic_hook::set_once();
     let groups: Vec<Vec<Polyline>> = from_js(input_json)?;
     let out: Vec<Vec<Polyline>> = groups.iter().map(|g| join_chains(g)).collect();
+    to_js(&out)
+}
+
+// --- Treppen-Geometrie (stair.ts, Slice 2) -----------------------------------
+
+/// Formkonstanten fuer Treppen (identisch zur TS-Referenz).
+pub const IDEAL_RISER: f64 = 0.17;
+pub const IDEAL_TREAD: f64 = 0.29;
+pub const MIN_STEPS: i64 = 2;
+const DEG: f64 = std::f64::consts::PI / 180.0;
+
+/// norm in stair.ts: `lenOf(a) || 1e-9` (NICHT EPS!).
+#[inline]
+fn stair_norm(a: Vec2) -> Vec2 {
+    let l = len(a);
+    let l = if l == 0.0 { 1e-9 } else { l };
+    Vec2 { x: a.x / l, y: a.y / l }
+}
+
+/// Linke Normale (stair.ts `leftN`).
+#[inline]
+fn stair_left_n(u: Vec2) -> Vec2 {
+    Vec2 { x: -u.y, y: u.x }
+}
+
+/// Sinnvolle Default-Stufenzahl (Port von `defaultStepCount`).
+pub fn default_step_count(total_rise: f64, run_length: f64) -> i64 {
+    let by_rise = (total_rise / IDEAL_RISER).round() as i64;
+    let by_rise = if by_rise < MIN_STEPS { MIN_STEPS } else { by_rise };
+    let max_by_run = if run_length > 0.0 {
+        let v = (run_length / 0.24).floor() as i64 + 1;
+        if v < MIN_STEPS { MIN_STEPS } else { v }
+    } else {
+        by_rise
+    };
+    let res = if by_rise < max_by_run { by_rise } else { max_by_run };
+    if res < MIN_STEPS { MIN_STEPS } else { res }
+}
+
+/// Ein Tritt im Grundriss (Port von `TreadRect`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TreadRect {
+    pub pts: Vec<Vec2>,
+    pub index: i64,
+    pub top_rise: f64,
+    pub base_rise: f64,
+}
+
+/// Vollstaendige abgeleitete Treppengeometrie (Port von `StairGeometry`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct StairGeometry {
+    pub treads: Vec<TreadRect>,
+    pub landing: Option<Vec<Vec2>>,
+    pub riser_height: f64,
+    pub tread_depth: f64,
+    pub run_line: Vec<Vec2>,
+    pub arrow: StairArrow,
+    pub total_rise: f64,
+}
+
+/// Auf-/Abpfeil (Port von `arrow`-Typ in stair.ts).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StairArrow {
+    pub shaft: (Vec2, Vec2),
+    pub head: (Vec2, Vec2, Vec2),
+}
+
+/// Schnitt-Aufteilung (Port von `StairCut`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct StairCut {
+    pub below_indices: Vec<i64>,
+    pub above_indices: Vec<i64>,
+    pub break_line: Option<Vec<(Vec2, Vec2)>>,
+}
+
+/// Achsparallele BBox (Treppen, eigenes Struct um Konflikte zu vermeiden).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct StairBBox {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+}
+
+/// Tritt-Rechteck zwischen Achsparametern `a0..a1` entlang `dir`, Breite `half_w`
+/// (Port der lokalen Hilfsfunktion `treadRect`).
+fn tread_rect_pts(origin: Vec2, dir: Vec2, n: Vec2, a0: f64, a1: f64, half_w: f64) -> Vec<Vec2> {
+    let p0 = add(origin, scale(dir, a0));
+    let p1 = add(origin, scale(dir, a1));
+    vec![
+        add(p0, scale(n, half_w)),
+        add(p1, scale(n, half_w)),
+        add(p1, scale(n, -half_w)),
+        add(p0, scale(n, -half_w)),
+    ]
+}
+
+/// Auf-/Abpfeil aus der Lauflinie (Port von `arrowFor`).
+fn arrow_for(run_line: &[Vec2], up: bool) -> StairArrow {
+    let a = run_line[0];
+    let b = run_line[run_line.len() - 1];
+    let tip = if up { b } else { a };
+    let from = if up {
+        run_line[run_line.len() - 2]
+    } else {
+        run_line[1]
+    };
+    let dir = stair_norm(sub(tip, from));
+    let n = stair_left_n(dir);
+    let s = 0.22_f64;
+    let back = add(tip, scale(dir, -s));
+    let w1 = add(back, scale(n, s * 0.55));
+    let w2 = add(back, scale(n, -s * 0.55));
+    StairArrow { shaft: (a, b), head: (w1, tip, w2) }
+}
+
+/// Achteck-Approximation des Wendel-Auges (Port von `eyePolygon`, 12 Segmente).
+fn eye_polygon(center: Vec2, r: f64) -> Vec<Vec2> {
+    (0..12).map(|i| {
+        let t = (i as f64 / 12.0) * std::f64::consts::PI * 2.0;
+        Vec2 { x: center.x + r * t.cos(), y: center.y + r * t.sin() }
+    }).collect()
+}
+
+/// Parameter-Struct fuer die Batch-Fassade (enthaelt alle geometrisch relevanten
+/// Felder des TS-Typs `Stair`; Modell-Semantik-Felder wie id/floorId werden
+/// ignoriert).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StairParams {
+    shape: String,
+    start: Vec2,
+    dir: Vec2,
+    run_length: f64,
+    #[serde(default)]
+    run2_length: Option<f64>,
+    #[serde(default)]
+    turn: Option<i32>,
+    #[serde(default)]
+    center: Option<Vec2>,
+    #[serde(default)]
+    radius: Option<f64>,
+    #[serde(default)]
+    sweep: Option<f64>,
+    width: f64,
+    step_count: i64,
+    #[serde(default)]
+    up: Option<bool>,
+}
+
+/// Gerade Treppe (Port von `straightGeometry`).
+fn straight_geometry(
+    stair: &StairParams,
+    total_rise: f64,
+    steps: i64,
+    riser_height: f64,
+    half_w: f64,
+    u: Vec2,
+    n: Vec2,
+) -> StairGeometry {
+    let run_length = stair.run_length.max(0.1);
+    let tread_depth = run_length / steps as f64;
+    let mut treads: Vec<TreadRect> = Vec::new();
+    for i in 0..steps {
+        treads.push(TreadRect {
+            pts: tread_rect_pts(stair.start, u, n, i as f64 * tread_depth, (i + 1) as f64 * tread_depth, half_w),
+            index: i,
+            base_rise: i as f64 * riser_height,
+            top_rise: (i + 1) as f64 * riser_height,
+        });
+    }
+    let run_line: Vec<Vec2> = vec![
+        add(stair.start, scale(u, tread_depth * 0.5)),
+        add(stair.start, scale(u, run_length - tread_depth * 0.15)),
+    ];
+    let up = stair.up.unwrap_or(true);
+    StairGeometry {
+        arrow: arrow_for(&run_line, up),
+        treads,
+        landing: None,
+        riser_height,
+        tread_depth,
+        run_line,
+        total_rise,
+    }
+}
+
+/// L-Treppe (Port von `lGeometry`).
+fn l_geometry(
+    stair: &StairParams,
+    total_rise: f64,
+    steps: i64,
+    riser_height: f64,
+    half_w: f64,
+    u: Vec2,
+    n: Vec2,
+) -> StairGeometry {
+    let run1 = stair.run_length.max(0.1);
+    let run2 = stair.run2_length.unwrap_or(stair.run_length).max(0.1);
+    let turn = stair.turn.unwrap_or(1);
+    let body_steps = steps - 1;
+    let s1 = {
+        let v = ((body_steps as f64 * run1) / (run1 + run2)).round() as i64;
+        if v < 1 { 1 } else { v }
+    };
+    let s2 = {
+        let v = body_steps - s1;
+        if v < 1 { 1 } else { v }
+    };
+    let td1 = run1 / s1 as f64;
+    let td2 = run2 / s2 as f64;
+
+    let mut treads: Vec<TreadRect> = Vec::new();
+    let mut rise = 0.0_f64;
+    for i in 0..s1 {
+        treads.push(TreadRect {
+            pts: tread_rect_pts(stair.start, u, n, i as f64 * td1, (i + 1) as f64 * td1, half_w),
+            index: i,
+            base_rise: rise,
+            top_rise: rise + riser_height,
+        });
+        rise += riser_height;
+    }
+    let corner_center = add(stair.start, scale(u, run1 + half_w));
+    let u2: Vec2 = if turn > 0 { n } else { scale(n, -1.0) };
+    let n2 = stair_left_n(u2);
+    let landing: Vec<Vec2> = vec![
+        add(add(corner_center, scale(u, -half_w)), scale(n, half_w)),
+        add(add(corner_center, scale(u, half_w)), scale(n, half_w)),
+        add(add(corner_center, scale(u, half_w)), scale(n, -half_w)),
+        add(add(corner_center, scale(u, -half_w)), scale(n, -half_w)),
+    ];
+    rise += riser_height; // Podest-Tritt
+    let run2_start = add(corner_center, scale(u2, half_w));
+    for i in 0..s2 {
+        treads.push(TreadRect {
+            pts: tread_rect_pts(run2_start, u2, n2, i as f64 * td2, (i + 1) as f64 * td2, half_w),
+            index: s1 + 1 + i,
+            base_rise: rise,
+            top_rise: rise + riser_height,
+        });
+        rise += riser_height;
+    }
+    let run_line: Vec<Vec2> = vec![
+        add(stair.start, scale(u, td1 * 0.5)),
+        corner_center,
+        add(run2_start, scale(u2, run2 - td2 * 0.15)),
+    ];
+    let up = stair.up.unwrap_or(true);
+    StairGeometry {
+        arrow: arrow_for(&run_line, up),
+        treads,
+        landing: Some(landing),
+        riser_height,
+        tread_depth: td1,
+        run_line,
+        total_rise,
+    }
+}
+
+/// Wendeltreppe (Port von `spiralGeometry`).
+fn spiral_geometry(
+    stair: &StairParams,
+    total_rise: f64,
+    steps: i64,
+    riser_height: f64,
+    half_w: f64,
+) -> StairGeometry {
+    let center = stair.center.unwrap_or(stair.start);
+    let radius = (half_w + 0.1).max(stair.radius.unwrap_or(stair.width));
+    let sweep = stair.sweep.unwrap_or(270.0) * DEG;
+    let start_vec = sub(stair.start, center);
+    let a0 = start_vec.y.atan2(start_vec.x);
+    let d_a = sweep / steps as f64;
+    let r_in = (radius - half_w).max(0.02);
+    let r_out = radius + half_w;
+
+    let mut treads: Vec<TreadRect> = Vec::new();
+    for i in 0..steps {
+        let t0 = a0 + i as f64 * d_a;
+        let t1 = a0 + (i + 1) as f64 * d_a;
+        let pts: Vec<Vec2> = vec![
+            Vec2 { x: center.x + r_in * t0.cos(), y: center.y + r_in * t0.sin() },
+            Vec2 { x: center.x + r_out * t0.cos(), y: center.y + r_out * t0.sin() },
+            Vec2 { x: center.x + r_out * t1.cos(), y: center.y + r_out * t1.sin() },
+            Vec2 { x: center.x + r_in * t1.cos(), y: center.y + r_in * t1.sin() },
+        ];
+        treads.push(TreadRect {
+            pts,
+            index: i,
+            base_rise: i as f64 * riser_height,
+            top_rise: (i + 1) as f64 * riser_height,
+        });
+    }
+    let n_seg = steps.max(2) as usize;
+    let mut run_line: Vec<Vec2> = Vec::new();
+    for i in 0..=n_seg {
+        let tt = a0 + (sweep * i as f64) / n_seg as f64;
+        run_line.push(Vec2 { x: center.x + radius * tt.cos(), y: center.y + radius * tt.sin() });
+    }
+    let tread_depth = (2.0 * std::f64::consts::PI * radius * (sweep / (2.0 * std::f64::consts::PI))) / steps as f64;
+    let up = stair.up.unwrap_or(true);
+    StairGeometry {
+        arrow: arrow_for(&run_line, up),
+        treads,
+        landing: Some(eye_polygon(center, r_in)),
+        riser_height,
+        tread_depth,
+        run_line,
+        total_rise,
+    }
+}
+
+/// Vollstaendige Treppengeometrie (Port von `stairGeometry`).
+fn stair_geometry(stair: &StairParams, total_rise: f64) -> StairGeometry {
+    let steps = (stair.step_count as i64).max(MIN_STEPS);
+    let riser_height = total_rise / steps as f64;
+    let half_w = (0.05_f64).max(stair.width / 2.0);
+    let u = stair_norm(stair.dir);
+    let n = stair_left_n(u);
+
+    if stair.shape == "spiral" {
+        return spiral_geometry(stair, total_rise, steps, riser_height, half_w);
+    }
+    if stair.shape == "L" {
+        return l_geometry(stair, total_rise, steps, riser_height, half_w, u, n);
+    }
+    straight_geometry(stair, total_rise, steps, riser_height, half_w, u, n)
+}
+
+/// Punkt-in-Polygon (Ray-Casting) — gleiches Muster wie `pointInOutline` /
+/// stair.ts `pointInPolygon` (Nenner-Guard `|| 1e-12`).
+pub fn point_in_polygon(p: Vec2, poly: &[Vec2]) -> bool {
+    let nn = poly.len();
+    if nn == 0 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = nn - 1;
+    for i in 0..nn {
+        let a = poly[i];
+        let b = poly[j];
+        let denom = if b.y - a.y == 0.0 { 1e-12 } else { b.y - a.y };
+        let intersect =
+            (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / denom + a.x;
+        if intersect {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Schnittaufteilung (Port von `stairCut`).
+pub fn stair_cut(geo: &StairGeometry, cut_rise: f64) -> StairCut {
+    let mut below: Vec<i64> = Vec::new();
+    let mut above: Vec<i64> = Vec::new();
+    let mut break_idx: i64 = -1;
+    for tr in &geo.treads {
+        if tr.top_rise <= cut_rise + 1e-6 {
+            below.push(tr.index);
+        } else {
+            if break_idx < 0 {
+                break_idx = tr.index;
+            }
+            above.push(tr.index);
+        }
+    }
+    let break_line = if break_idx >= 0 {
+        geo.treads.iter().find(|t| t.index == break_idx).map(|tr| {
+            let (c0, c1, c2, c3) = (tr.pts[0], tr.pts[1], tr.pts[2], tr.pts[3]);
+            let mid01 = scale(add(c0, c1), 0.5);
+            let mid23 = scale(add(c2, c3), 0.5);
+            let off = scale(stair_norm(sub(c1, c0)), 0.06);
+            vec![
+                (add(mid01, off), add(mid23, off)),
+                (sub(mid01, off), sub(mid23, off)),
+            ]
+        })
+    } else {
+        None
+    };
+    StairCut { below_indices: below, above_indices: above, break_line }
+}
+
+/// Achsparallele BBox aller Tritte + Podest (Port von `stairBBox`).
+pub fn stair_bbox(geo: &StairGeometry) -> StairBBox {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for tr in &geo.treads {
+        for p in &tr.pts {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+    }
+    if let Some(land) = &geo.landing {
+        for p in land {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+    }
+    if !min_x.is_finite() {
+        return StairBBox { min_x: 0.0, min_y: 0.0, max_x: 0.0, max_y: 0.0 };
+    }
+    StairBBox { min_x, min_y, max_x, max_y }
+}
+
+/// Ob ein Punkt irgendeinen Tritt (oder das Podest) trifft (Port `pointHitsStair`).
+pub fn point_hits_stair(p: Vec2, geo: &StairGeometry) -> bool {
+    for tr in &geo.treads {
+        if point_in_polygon(p, &tr.pts) {
+            return true;
+        }
+    }
+    if let Some(land) = &geo.landing {
+        if point_in_polygon(p, land) {
+            return true;
+        }
+    }
+    false
+}
+
+// --- Raum-Erkennung (roomBoundary.ts, Slice 3) -------------------------------
+// Lokale Konstanten exakt wie TS (EPS=1e-9, normalize-Guard 1e-12).
+
+const RB_EPS: f64 = 1e-9;
+
+/// normalize (roomBoundary-Variante): Guard `l < 1e-12 → {0,0}` (NICHT `l||1`).
+#[inline]
+fn rb_normalize(a: Vec2) -> Vec2 {
+    let l = len(a);
+    if l < 1e-12 { Vec2 { x: 0.0, y: 0.0 } } else { Vec2 { x: a.x / l, y: a.y / l } }
+}
+
+/// cross (lokal, identisch zur globalen).
+#[inline]
+fn rb_cross(a: Vec2, b: Vec2) -> f64 {
+    a.x * b.y - a.y * b.x
+}
+
+// ── Planarer Graph ────────────────────────────────────────────────────────────
+
+struct RbNode {
+    p: Vec2,
+}
+
+struct RbUEdge {
+    u: usize,
+    v: usize,
+}
+
+struct RbSplit {
+    t: f64,
+    p: Vec2,
+}
+
+/// Baut den planaren Graphen aus Mittellinien-Segmenten (Port von `buildPlanarGraph`).
+fn build_planar_graph(segments: &[(Vec2, Vec2)], snap: f64) -> (Vec<RbNode>, Vec<RbUEdge>) {
+    let mut nodes: Vec<RbNode> = Vec::new();
+
+    let add_node = |nodes: &mut Vec<RbNode>, p: Vec2| -> usize {
+        for i in 0..nodes.len() {
+            if dist(nodes[i].p, p) <= snap {
+                return i;
+            }
+        }
+        nodes.push(RbNode { p: Vec2 { x: p.x, y: p.y } });
+        nodes.len() - 1
+    };
+
+    // Rohe Segmente: degenerate (zu kurze) herausfiltern.
+    let raw: Vec<(Vec2, Vec2)> = segments
+        .iter()
+        .filter(|(a, b)| dist(*a, *b) > snap)
+        .cloned()
+        .collect();
+
+    let mut per_segment: Vec<Vec<RbSplit>> = raw
+        .iter()
+        .map(|(a, b)| vec![RbSplit { t: 0.0, p: *a }, RbSplit { t: 1.0, p: *b }])
+        .collect();
+
+    for i in 0..raw.len() {
+        for j in i + 1..raw.len() {
+            let (aa, ab) = raw[i];
+            let (ba, bb) = raw[j];
+            let da = sub(ab, aa);
+            let db = sub(bb, ba);
+            let denom = rb_cross(da, db);
+            if denom.abs() < RB_EPS {
+                continue;
+            }
+            let t = rb_cross(sub(ba, aa), db) / denom;
+            let s = rb_cross(sub(ba, aa), da) / denom;
+            let tol_t = snap / len(da).max(1e-9);
+            let tol_s = snap / len(db).max(1e-9);
+            if t < -tol_t || t > 1.0 + tol_t || s < -tol_s || s > 1.0 + tol_s {
+                continue;
+            }
+            let p = add(aa, scale(da, t));
+            per_segment[i].push(RbSplit { t, p });
+            per_segment[j].push(RbSplit { t: s, p });
+        }
+    }
+
+    let mut edge_set: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut edges: Vec<RbUEdge> = Vec::new();
+
+    let push_edge = |edges: &mut Vec<RbUEdge>, edge_set: &mut std::collections::HashSet<(usize, usize)>, u: usize, v: usize| {
+        if u == v { return; }
+        let key = if u < v { (u, v) } else { (v, u) };
+        if edge_set.contains(&key) { return; }
+        edge_set.insert(key);
+        edges.push(RbUEdge { u, v });
+    };
+
+    for i in 0..raw.len() {
+        per_segment[i].sort_by(|p, q| p.t.partial_cmp(&q.t).unwrap_or(std::cmp::Ordering::Equal));
+        let mut prev: Option<usize> = None;
+        let mut prev_t = f64::NEG_INFINITY;
+        for sp in &per_segment[i] {
+            if sp.t - prev_t < 1e-9 && prev.is_some() {
+                continue;
+            }
+            let idx = add_node(&mut nodes, sp.p);
+            if let Some(pr) = prev {
+                if idx != pr {
+                    push_edge(&mut edges, &mut edge_set, pr, idx);
+                }
+            }
+            prev = Some(idx);
+            prev_t = sp.t;
+        }
+    }
+
+    (nodes, edges)
+}
+
+// ── Face-Extraktion ───────────────────────────────────────────────────────────
+
+struct RbHalfEdge {
+    from: usize,
+    to: usize,
+    angle: f64,
+    used: bool,
+}
+
+/// Extrahiert die minimalen geschlossenen Maschen (Port von `extractFaces`).
+fn extract_faces(nodes: &[RbNode], edges: &[RbUEdge]) -> Vec<Vec<usize>> {
+    let mut half_edges: Vec<RbHalfEdge> = Vec::new();
+    let mut outgoing: Vec<Vec<usize>> = (0..nodes.len()).map(|_| Vec::new()).collect();
+
+    let angle_of = |from: usize, to: usize| -> f64 {
+        let d = sub(nodes[to].p, nodes[from].p);
+        d.y.atan2(d.x)
+    };
+
+    for e in edges {
+        let h1 = half_edges.len();
+        half_edges.push(RbHalfEdge { from: e.u, to: e.v, angle: angle_of(e.u, e.v), used: false });
+        outgoing[e.u].push(h1);
+        let h2 = half_edges.len();
+        half_edges.push(RbHalfEdge { from: e.v, to: e.u, angle: angle_of(e.v, e.u), used: false });
+        outgoing[e.v].push(h2);
+    }
+
+    // Abgehende Halbkanten je Knoten nach Winkel sortieren (stabil).
+    for list in outgoing.iter_mut() {
+        list.sort_by(|&h1, &h2| half_edges[h1].angle.partial_cmp(&half_edges[h2].angle).unwrap_or(std::cmp::Ordering::Equal));
+    }
+
+    // Positionsindex je Halbkante in der sortierten Liste seines from-Knotens.
+    let mut pos_in_list: Vec<usize> = vec![0; half_edges.len()];
+    for list in &outgoing {
+        for (k, &h) in list.iter().enumerate() {
+            pos_in_list[h] = k;
+        }
+    }
+
+    // Zwilling: Paare liegen benachbart (2i, 2i+1).
+    let twin = |h: usize| -> usize { if h % 2 == 0 { h + 1 } else { h - 1 } };
+
+    let mut faces: Vec<Vec<usize>> = Vec::new();
+    let max_steps = half_edges.len() + 2;
+
+    for start in 0..half_edges.len() {
+        if half_edges[start].used {
+            continue;
+        }
+        let mut face_nodes: Vec<usize> = Vec::new();
+        let mut h = start;
+        let mut guard = 0;
+        loop {
+            half_edges[h].used = true;
+            face_nodes.push(half_edges[h].from);
+            let tw = twin(h);
+            let to = half_edges[h].to;
+            let list = &outgoing[to];
+            let pos = pos_in_list[tw];
+            let next_pos = if pos == 0 { list.len() - 1 } else { pos - 1 };
+            h = list[next_pos];
+            guard += 1;
+            if h == start || guard >= max_steps {
+                break;
+            }
+        }
+        if face_nodes.len() >= 3 {
+            faces.push(face_nodes);
+        }
+    }
+
+    // Aussenmaschen verwerfen: nur CCW (positive Flaeche) behalten.
+    faces.into_iter().filter(|f| {
+        let poly: Vec<Vec2> = f.iter().map(|&n| nodes[n].p).collect();
+        signed_area(&poly) > RB_EPS
+    }).collect()
+}
+
+// ── Innen-Offset ──────────────────────────────────────────────────────────────
+
+/// Versetzt ein CCW-Polygon um `d` nach innen (Port von `offsetInward`).
+fn offset_inward(poly: &[Vec2], d: f64) -> Vec<Vec2> {
+    let n = poly.len();
+    if n < 3 || d <= 0.0 {
+        return poly.to_vec();
+    }
+    // CCW sicherstellen.
+    let pts_owned: Vec<Vec2>;
+    let pts: &[Vec2] = if signed_area(poly) > 0.0 {
+        poly
+    } else {
+        pts_owned = { let mut v = poly.to_vec(); v.reverse(); v };
+        &pts_owned
+    };
+    // Verschobene Kanten: linke Normale zeigt ins Innere bei CCW.
+    let shifted: Vec<(Vec2, Vec2)> = (0..n).map(|i| {
+        let a = pts[i];
+        let b = pts[(i + 1) % n];
+        let dir = rb_normalize(sub(b, a));
+        let nrm = left_normal(dir);
+        (add(a, scale(nrm, d)), dir)
+    }).collect();
+
+    let mut out: Vec<Vec2> = Vec::new();
+    for i in 0..n {
+        let prev = &shifted[(i + n - 1) % n];
+        let curr = &shifted[i];
+        let denom = rb_cross(prev.1, curr.1);
+        if denom.abs() < 1e-9 {
+            out.push(curr.0);
+            continue;
+        }
+        let t = rb_cross(sub(curr.0, prev.0), curr.1) / denom;
+        out.push(add(prev.0, scale(prev.1, t)));
+    }
+    out
+}
+
+/// Dedupliziert aufeinanderfolgende nahezu gleiche Punkte im Ring (Port von
+/// `dedupeRing`, Toleranz 1e-7 wie TS).
+fn dedupe_ring_rb(pts: &[Vec2]) -> Vec<Vec2> {
+    let tol = 1e-7_f64;
+    let mut out: Vec<Vec2> = Vec::new();
+    for &p in pts {
+        if let Some(&last) = out.last() {
+            if dist(last, p) <= tol {
+                continue;
+            }
+        }
+        out.push(p);
+    }
+    if out.len() > 1 {
+        let first = out[0];
+        if dist(first, *out.last().unwrap()) <= tol {
+            out.pop();
+        }
+    }
+    out
+}
+
+/// Durchschnittliche Wanddicke (Port von `averageThickness`).
+fn average_thickness(walls: &[WallSegment]) -> f64 {
+    if walls.is_empty() {
+        return 0.0;
+    }
+    let s: f64 = walls.iter().map(|w| w.thickness).sum();
+    s / walls.len() as f64
+}
+
+// ── Oeffentliche Structs fuer die Batch-Fassade ───────────────────────────────
+
+/// Wandsegment (Port von `WallSegment`): Mittellinie a→b mit Dicke.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct WallSegment {
+    pub a: Vec2,
+    pub b: Vec2,
+    pub thickness: f64,
+}
+
+/// Wand-Innenflaeche (Port von `WallFace`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct WallFace {
+    pub a: Vec2,
+    pub b: Vec2,
+}
+
+// ── Oeffentliche Funktionen ───────────────────────────────────────────────────
+
+/// pointInPolygon (roomBoundary-Variante, KEIN Nenner-Guard — `b.y - a.y + 0`).
+pub fn rb_point_in_polygon(p: Vec2, poly: &[Vec2]) -> bool {
+    let mut inside = false;
+    let n = poly.len();
+    if n == 0 {
+        return false;
+    }
+    let mut j = n - 1;
+    for i in 0..n {
+        let a = poly[i];
+        let b = poly[j];
+        let intersects =
+            (a.y > p.y) != (b.y > p.y)
+            && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x;
+        if intersects {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Erkennt geschlossene Raeume aus Wandsegmenten (Port von `detectRooms`).
+pub fn detect_rooms(
+    walls: &[WallSegment],
+    gap_tol: f64,
+    min_area: f64,
+    offset_to_inner: bool,
+) -> Vec<Vec<Vec2>> {
+    if walls.len() < 3 {
+        return Vec::new();
+    }
+    let segs: Vec<(Vec2, Vec2)> = walls.iter().map(|w| (w.a, w.b)).collect();
+    let (nodes, edges) = build_planar_graph(&segs, gap_tol);
+    if edges.len() < 3 {
+        return Vec::new();
+    }
+    let faces = extract_faces(&nodes, &edges);
+    let half = average_thickness(walls) / 2.0;
+
+    let mut rooms: Vec<Vec<Vec2>> = Vec::new();
+    for f in faces {
+        let raw: Vec<Vec2> = f.iter().map(|&n| nodes[n].p).collect();
+        let mut poly = dedupe_ring_rb(&raw);
+        if poly.len() < 3 {
+            continue;
+        }
+        if offset_to_inner && half > 0.0 {
+            poly = dedupe_ring_rb(&offset_inward(&poly, half));
+            if poly.len() < 3 {
+                continue;
+            }
+        }
+        if polygon_area(&poly) < min_area {
+            continue;
+        }
+        // Kanonisch CCW zurueckgeben.
+        if signed_area(&poly) < 0.0 {
+            poly.reverse();
+        }
+        rooms.push(poly);
+    }
+    rooms
+}
+
+/// Klick-in-Raum-Fallback (Port von `roomFromPointInside`).
+pub fn room_from_point_inside(
+    point: Vec2,
+    walls: &[WallSegment],
+    gap_tol: f64,
+    offset_to_inner: bool,
+) -> Option<Vec<Vec2>> {
+    if walls.len() < 3 {
+        return None;
+    }
+    let segs: Vec<(Vec2, Vec2)> = walls.iter().map(|w| (w.a, w.b)).collect();
+    let (nodes, edges) = build_planar_graph(&segs, gap_tol);
+    if edges.len() < 3 {
+        return None;
+    }
+    let faces = extract_faces(&nodes, &edges);
+    let half = average_thickness(walls) / 2.0;
+
+    let mut best: Option<Vec<Vec2>> = None;
+    let mut best_area = f64::INFINITY;
+
+    for f in faces {
+        let raw: Vec<Vec2> = f.iter().map(|&n| nodes[n].p).collect();
+        let raw = dedupe_ring_rb(&raw);
+        if raw.len() < 3 {
+            continue;
+        }
+        if !rb_point_in_polygon(point, &raw) {
+            continue;
+        }
+        let area = polygon_area(&raw);
+        if area >= best_area {
+            continue;
+        }
+        let mut inner = raw.clone();
+        if offset_to_inner && half > 0.0 {
+            let off = dedupe_ring_rb(&offset_inward(&raw, half));
+            if off.len() >= 3 {
+                inner = off;
+            }
+        }
+        if signed_area(&inner) < 0.0 {
+            inner.reverse();
+        }
+        best = Some(inner);
+        best_area = area;
+    }
+
+    best
+}
+
+/// Klick-Tracer auf bereits berechneten Wand-Innenflaechen (Port von
+/// `roomFromPointInsideFaces`).
+pub fn room_from_point_inside_faces(
+    point: Vec2,
+    wall_faces: &[WallFace],
+    gap_tol: f64,
+) -> Option<Vec<Vec2>> {
+    if wall_faces.len() < 3 {
+        return None;
+    }
+    let segs: Vec<(Vec2, Vec2)> = wall_faces.iter().map(|f| (f.a, f.b)).collect();
+    let (nodes, edges) = build_planar_graph(&segs, gap_tol);
+    if edges.len() < 3 {
+        return None;
+    }
+    let faces = extract_faces(&nodes, &edges);
+
+    let mut best: Option<Vec<Vec2>> = None;
+    let mut best_area = f64::INFINITY;
+
+    for f in faces {
+        let raw: Vec<Vec2> = f.iter().map(|&n| nodes[n].p).collect();
+        let poly = dedupe_ring_rb(&raw);
+        if poly.len() < 3 {
+            continue;
+        }
+        if !rb_point_in_polygon(point, &poly) {
+            continue;
+        }
+        let area = polygon_area(&poly);
+        if area < best_area {
+            let mut out = poly;
+            if signed_area(&out) < 0.0 {
+                out.reverse();
+            }
+            best = Some(out);
+            best_area = area;
+        }
+    }
+
+    best
+}
+
+// --- Batch-Fassaden: roomArea / ceiling (Slice 1) ----------------------------
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn polygon_area_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<f64> = polys.iter().map(|p| polygon_area(p)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn perimeter_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<f64> = polys.iter().map(|p| perimeter(p)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn centroid_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<Vec2> = polys.iter().map(|p| centroid(p)).collect();
+    to_js(&out)
+}
+
+/// Query-Struct fuer normalize_outline: optional (None bei ungueltigem Umriss).
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn normalize_outline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<Option<Vec<Vec2>>> = polys.iter().map(|p| normalize_outline(p)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn is_valid_outline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<bool> = polys.iter().map(|p| is_valid_outline(p)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn ceiling_area_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<f64> = polys.iter().map(|p| ceiling_area(p)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn outline_bbox_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<BBox> = polys.iter().map(|p| outline_bbox(p)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn outline_centroid_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
+    let out: Vec<Vec2> = polys.iter().map(|p| outline_centroid(p)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct PointInOutlineQuery {
+    p: Vec2,
+    outline: Vec<Vec2>,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn point_in_outline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<PointInOutlineQuery> = from_js(input_json)?;
+    let out: Vec<bool> = qs.iter().map(|q| point_in_outline(q.p, &q.outline)).collect();
+    to_js(&out)
+}
+
+// --- Batch-Fassaden: stair (Slice 2) -----------------------------------------
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct DefaultStepCountQuery {
+    #[serde(rename = "totalRise")]
+    total_rise: f64,
+    #[serde(rename = "runLength")]
+    run_length: f64,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn default_step_count_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<DefaultStepCountQuery> = from_js(input_json)?;
+    let out: Vec<i64> = qs.iter().map(|q| default_step_count(q.total_rise, q.run_length)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct StairGeoQuery {
+    stair: StairParams,
+    #[serde(rename = "totalRise")]
+    total_rise: f64,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn stair_geometry_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<StairGeoQuery> = from_js(input_json)?;
+    let out: Vec<StairGeometry> = qs.iter().map(|q| stair_geometry(&q.stair, q.total_rise)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct StairCutQuery {
+    geo: StairGeometry,
+    #[serde(rename = "cutRise")]
+    cut_rise: f64,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn stair_cut_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<StairCutQuery> = from_js(input_json)?;
+    let out: Vec<StairCut> = qs.iter().map(|q| stair_cut(&q.geo, q.cut_rise)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn stair_bbox_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let geos: Vec<StairGeometry> = from_js(input_json)?;
+    let out: Vec<StairBBox> = geos.iter().map(|g| stair_bbox(g)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct PointHitsStairQuery {
+    p: Vec2,
+    geo: StairGeometry,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn point_hits_stair_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<PointHitsStairQuery> = from_js(input_json)?;
+    let out: Vec<bool> = qs.iter().map(|q| point_hits_stair(q.p, &q.geo)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct PointInPolygonQuery {
+    p: Vec2,
+    poly: Vec<Vec2>,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn point_in_polygon_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<PointInPolygonQuery> = from_js(input_json)?;
+    let out: Vec<bool> = qs.iter().map(|q| point_in_polygon(q.p, &q.poly)).collect();
+    to_js(&out)
+}
+
+// --- Batch-Fassaden: roomBoundary (Slice 3) -----------------------------------
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct DetectRoomsQuery {
+    walls: Vec<WallSegment>,
+    #[serde(rename = "gapTol", default = "default_gap_tol")]
+    gap_tol: f64,
+    #[serde(rename = "minArea", default = "default_min_area")]
+    min_area: f64,
+    #[serde(rename = "offsetToInner", default = "default_true")]
+    offset_to_inner: bool,
+}
+
+#[cfg(feature = "web")]
+fn default_gap_tol() -> f64 { 0.05 }
+#[cfg(feature = "web")]
+fn default_min_area() -> f64 { 0.05 }
+#[cfg(feature = "web")]
+fn default_true() -> bool { true }
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn detect_rooms_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<DetectRoomsQuery> = from_js(input_json)?;
+    let out: Vec<Vec<Vec<Vec2>>> = qs.iter().map(|q| detect_rooms(&q.walls, q.gap_tol, q.min_area, q.offset_to_inner)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct RoomFromPointQuery {
+    point: Vec2,
+    walls: Vec<WallSegment>,
+    #[serde(rename = "gapTol", default = "default_gap_tol")]
+    gap_tol: f64,
+    #[serde(rename = "offsetToInner", default = "default_true")]
+    offset_to_inner: bool,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn room_from_point_inside_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<RoomFromPointQuery> = from_js(input_json)?;
+    let out: Vec<Option<Vec<Vec2>>> = qs.iter().map(|q| room_from_point_inside(q.point, &q.walls, q.gap_tol, q.offset_to_inner)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct RoomFromFacesQuery {
+    point: Vec2,
+    #[serde(rename = "wallFaces")]
+    wall_faces: Vec<WallFace>,
+    #[serde(rename = "gapTol", default = "default_gap_tol")]
+    gap_tol: f64,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn room_from_point_inside_faces_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<RoomFromFacesQuery> = from_js(input_json)?;
+    let out: Vec<Option<Vec<Vec2>>> = qs.iter().map(|q| room_from_point_inside_faces(q.point, &q.wall_faces, q.gap_tol)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+struct RbPointInPolygonQuery {
+    p: Vec2,
+    poly: Vec<Vec2>,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn rb_point_in_polygon_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<RbPointInPolygonQuery> = from_js(input_json)?;
+    let out: Vec<bool> = qs.iter().map(|q| rb_point_in_polygon(q.p, &q.poly)).collect();
     to_js(&out)
 }
 
