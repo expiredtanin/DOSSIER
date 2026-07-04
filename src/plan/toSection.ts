@@ -22,7 +22,14 @@ import { dot, leftNormal, normalize, sub } from "../model/geometry";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { projectToModel3d } from "./toWalls3d";
 import { loadEngine3d } from "../engine/engine3d";
-import { resolveCeilingSectionStyle, resolveForeground, resolveHatch, resolveWallSectionStyle } from "./generatePlan";
+import {
+  HATCH_INK,
+  HATCH_PAPER,
+  resolveCeilingSectionStyle,
+  resolveForeground,
+  resolveHatch,
+  resolveWallSectionStyle,
+} from "./generatePlan";
 import type { HatchRender } from "./generatePlan";
 
 /** Bauteil-Referenz eines Cut-Polygons/einer Kante (Art + Eingabe-Index). */
@@ -516,7 +523,7 @@ function splitSlabLayers(
         [uMax, vBottom],
         [uMin, vBottom],
       ],
-      fill: hatch.pattern === "solid" ? "#000000" : "#ffffff",
+      fill: hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER,
       hatch,
       joinPriority: comp.joinPriority,
     });
@@ -588,7 +595,7 @@ export function splitWallLayers(
         [uRight, vMin],
         [uLeft, vMin],
       ],
-      fill: hatch.pattern === "solid" ? "#000000" : "#ffffff",
+      fill: hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER,
       hatch,
       joinPriority: comp.joinPriority,
     });

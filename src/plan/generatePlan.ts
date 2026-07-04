@@ -291,19 +291,20 @@ export type Primitive =
  * {@link HatchRender} auf. Der Linienstil der Musterlinien wird, falls gesetzt,
  * aus dem Line Manager nachgeschlagen; sonst gilt ein dünner Default.
  *
- * FARB-RESOLVE-REIHENFOLGE (Vordergrund = Muster-/Schraffurlinienfarbe):
- *   `foreground` (Parameter: bereits aufgelöste Attribut-Override ?? Component.
- *   foreground) ?? `HatchStyle.color` (deprecated Backward-Compat) .
- * Der Aufrufer reicht den bereits kollabierten Vordergrund als `foreground`
- * durch (siehe {@link resolveForeground}); ist er `undefined` (Sample: weder
- * Attribut- noch Bauteil-Vordergrund gesetzt), greift der HatchStyle.color-
- * Fallback → pixelidentisch zum bisherigen Verhalten.
+ * VORDERGRUND (Muster-/Schraffurlinienfarbe bzw. Vollfüllung): AKTUELL fest auf
+ * {@link HATCH_INK} gezwungen (Nutzer-Vorgabe 2026-07-04) — Schnitt- WIE
+ * Oberflächen-/Ansichtsschraffur zeigen dieselbe dunkle Tinte, unabhängig von
+ * Material-/Bauteilfarbe, HatchStyle.color oder einem By-Layer/By-Object-
+ * Vordergrund-Override. `_foreground` bleibt Teil der Signatur — alle Aufrufer
+ * reichen weiterhin den über {@link resolveForeground} aufgelösten Bauteil-
+ * Vordergrund durch (z. B. für eine spätere Wiederherstellung der materialtreuen
+ * Schraffur) —, fließt aber bewusst nicht mehr in `color` ein.
  */
 export function resolveHatch(
   project: Project,
   hatchId: string,
   wallAngleDeg?: number,
-  foreground?: string,
+  _foreground?: string,
 ): HatchRender {
   const h = getHatch(project, hatchId);
   const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
@@ -320,8 +321,9 @@ export function resolveHatch(
     pattern: h.pattern,
     scale: h.scale,
     angle,
-    // Vordergrund-Override zuerst, sonst der deprecated HatchStyle.color-Fallback.
-    color: foreground ?? h.color,
+    // Fest auf die Monochrom-Tinte gezwungen (siehe JSDoc oben) — weder
+    // `_foreground` noch `HatchStyle.color` (Material-/Bauteilfarbe) fließen ein.
+    color: HATCH_INK,
     lineWeight: ls?.weight ?? 0.13,
     dash: ls?.dash ?? null,
     kind: h.kind,
@@ -415,16 +417,19 @@ export function resolveStrokeWeight(
   return fallback;
 }
 
-// ── SIA-Poché-Füllung ────────────────────────────────────────────────────
+// ── SIA-Poché-Füllung + monochrome Schraffur-Tinte ──────────────────────────
 // Die 2D-Poché einer (auch mehrschichtigen) Wand trägt NICHT die rohe Bauteil-
 // Albedo (3D-Materialfarbe), sondern einen neutralen Hintergrund, auf dem die
-// Schraffur-Musterlinien liegen: Vollmuster ("solid") = reine SCHWARZE Poché
-// (kein Linienmuster), jedes andere Muster (inkl. "none") = WEISSER Hintergrund.
-const POCHE_FILL_WHITE = "#ffffff";
-const POCHE_FILL_BLACK = "#000000";
-/** Neutrale Poché-Füllfarbe für ein Muster: "solid" → schwarz, sonst weiß. */
+// Schraffur-Musterlinien liegen: Vollmuster ("solid") = dunkle Tinten-Poché
+// (kein Linienmuster), jedes andere Muster (inkl. "none") = HELLER Hintergrund.
+// Dieselben zwei Werte sind AKTUELL auch die feste Schraffur-Vordergrundfarbe
+// (siehe {@link resolveHatch}) — Schnitt- wie Oberflächen-Schraffur zeigen also
+// einheitlich Tinte auf hellem Papier, unabhängig von Material-/Bauteilfarbe.
+export const HATCH_PAPER = "#f0f0f0";
+export const HATCH_INK = "#0f0f0f";
+/** Neutrale Poché-Füllfarbe für ein Muster: "solid" → Tinte, sonst Papier. */
 function pocheFill(pattern: HatchPattern): string {
-  return pattern === "solid" ? POCHE_FILL_BLACK : POCHE_FILL_WHITE;
+  return pattern === "solid" ? HATCH_INK : HATCH_PAPER;
 }
 
 /** Füllfarbe + Schraffur eines aufgelösten Bauteils, fertig für eine Cut-Poché. */
@@ -459,11 +464,12 @@ export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCu
       wallAngleDeg,
       resolveForeground(best, wall.foreground, category, wall.foregroundSource),
     );
-    // Poché-Hintergrund neutral (weiß) statt Bauteil-Albedo; Vollmuster → schwarz.
+    // Poché-Hintergrund neutral (Papier) statt Bauteil-Albedo; Vollmuster → Tinte.
+    // `hatch.color` ist bereits über {@link resolveHatch} auf HATCH_INK gezwungen.
     const solid = hatch.pattern === "solid";
     return {
-      fill: solid ? POCHE_FILL_BLACK : POCHE_FILL_WHITE,
-      hatch: solid ? { ...hatch, color: POCHE_FILL_BLACK } : hatch,
+      fill: solid ? HATCH_INK : HATCH_PAPER,
+      hatch,
     };
   } catch {
     return null;
@@ -487,14 +493,19 @@ export function resolveCeilingSectionStyle(
     const category = getLayerCategory(project, ceiling.categoryCode);
     const hatchId =
       resolveHatchId(ceiling.hatchId, ceiling.hatchSource, category, comp.hatchId) ?? comp.hatchId;
+    const hatch = resolveHatch(
+      project,
+      hatchId,
+      undefined,
+      resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
+    );
+    // Poché-Hintergrund neutral (Papier) statt Bauteil-Albedo; Vollmuster → Tinte
+    // — dieselbe Neutralisierung wie {@link resolveWallSectionStyle}, damit die
+    // geschnittene Decke nicht als andersfarbige Fläche gegenüber der Wand auffällt.
+    const solid = hatch.pattern === "solid";
     return {
-      fill: resolveBackground(comp, ceiling.background, category, ceiling.backgroundSource),
-      hatch: resolveHatch(
-        project,
-        hatchId,
-        undefined,
-        resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
-      ),
+      fill: solid ? HATCH_INK : HATCH_PAPER,
+      hatch,
     };
   } catch {
     return null;
@@ -689,24 +700,20 @@ const SECTION_HIDDEN_MM = 0.13;
 /** Strichmuster verdeckter Kanten (mm Papier). */
 const SECTION_HIDDEN_DASH: number[] = [0.12, 0.08];
 
-/** Schnitt-Schraffur der Cut-Flächen (diagonale Poché wie ein Wandschnitt). */
+/**
+ * Schnitt-Schraffur der Cut-Flächen (diagonale Poché wie ein Wandschnitt) —
+ * Fallback, wenn `toSection.ts` das Quell-Bauteil einer Cut-Fläche NICHT
+ * auflösen konnte (siehe `attachCutStyles`). Vordergrund fest `HATCH_INK`,
+ * damit auch der Fallback monochrom bleibt statt der rohen 3D-Albedo-Farbe.
+ */
 const SECTION_HATCH: HatchRender = {
   pattern: "diagonal",
   scale: 1,
   angle: 45,
-  color: SECTION_INK,
+  color: HATCH_INK,
   lineWeight: 0.13,
   dash: null,
 };
-
-/** RGB (0..1) → 6-stelliges Hex, für die Cut-Poché-Füllfarbe. */
-function rgbToHex(rgb: [number, number, number]): string {
-  const c = (v: number) =>
-    Math.max(0, Math.min(255, Math.round(v * 255)))
-      .toString(16)
-      .padStart(2, "0");
-  return `#${c(rgb[0])}${c(rgb[1])}${c(rgb[2])}`;
-}
 
 /**
  * Baut aus einem {@link SectionOutput} (render3d::section, (u, v)-Meter) den
@@ -731,21 +738,23 @@ export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
   // Umrisslinie — wie eine geschnittene Wand im Grundriss. `toSection.ts`
   // (computeSection) löst je Cut-Polygon bereits das Quell-Bauteil auf und
   // hängt dessen echte Füllfarbe/Schraffur an (`cp.fill`/`cp.hatch`); fehlt
-  // diese Auflösung (Fallback), greift die generische Schnitt-Schraffur auf
-  // Basis der rohen Albedo-Farbe aus dem 3D-Modell.
+  // diese Auflösung (Fallback, z. B. verwaistes Bauteil), greift die generische
+  // Schnitt-Schraffur (`SECTION_HATCH`, HATCH_PAPER-Hintergrund) — NICHT die rohe
+  // Albedo-Farbe aus dem 3D-Modell (Nutzer-Vorgabe 2026-07-04: einheitlich
+  // monochrom, auch im Fallback-Fall).
   for (const cp of output.cutPolygons) {
     if (cp.pts.length < 3) continue;
     const pts: Vec2[] = cp.pts.map(([u, v]) => {
       acc(u, v);
       return { x: u, y: v };
     });
-    const fill = cp.fill ?? rgbToHex(cp.color);
+    const fill = cp.fill ?? HATCH_PAPER;
     const hatch = cp.hatch ?? SECTION_HATCH;
-    // Mono: neutrale Poché — Weiss statt Bauteilfarbe, Schraffur-Musterlinien →
-    // Tinte. Eine schwarze SIA-Vollpoché ("solid") BLEIBT jedoch schwarz
-    // (Schwarz bleibt Schwarz, Weiss bleibt Weiss).
+    // Mono: neutrale Poché — Papier statt Bauteilfarbe, Schraffur-Musterlinien →
+    // Tinte. Eine dunkle SIA-Vollpoché ("solid") BLEIBT jedoch dunkel
+    // (Tinte bleibt Tinte, Papier bleibt Papier).
     const solid = hatch.pattern === "solid";
-    const monoFill = solid ? POCHE_FILL_BLACK : "#ffffff";
+    const monoFill = solid ? HATCH_INK : HATCH_PAPER;
     const monoHatch =
       solid ? hatch : hatch.pattern !== "none" ? { ...hatch, color: SECTION_INK } : hatch;
     primitives.push({
@@ -839,8 +848,8 @@ function toMono(primitives: Primitive[]): void {
       // schwarz (Schwarz bleibt Schwarz); jede andere Füllung wird weiß, die
       // Linien-/Kreuzschraffur bleibt sichtbar, aber in Tinte.
       if (p.hatch.pattern === "solid") {
-        p.hatch = { ...p.hatch, color: POCHE_FILL_BLACK };
-        p.fill = p.fill === "none" ? "none" : POCHE_FILL_BLACK;
+        p.hatch = { ...p.hatch, color: HATCH_INK };
+        p.fill = p.fill === "none" ? "none" : HATCH_INK;
       } else {
         if (p.hatch.pattern !== "none") p.hatch = { ...p.hatch, color: MONO_INK };
         p.fill = p.fill === "none" ? "none" : "#ffffff";
@@ -1146,20 +1155,21 @@ function addWallPoche(
         wallAngleDeg,
         resolveForeground(comp, wall.foreground, category, wall.foregroundSource),
       );
-      // SIA-Poché: neutraler Hintergrund (weiß) statt Bauteil-Albedo, die
-      // Schichtschraffur liegt darüber; Vollmuster ("solid") = schwarze Poché.
+      // SIA-Poché: neutraler Hintergrund (Papier) statt Bauteil-Albedo, die
+      // Schichtschraffur (fest in HATCH_INK, siehe resolveHatch) liegt darüber;
+      // Vollmuster ("solid") = Tinten-Poché.
       const layerSolid = layerHatch.pattern === "solid";
       const layerStartCut = s <= 1e-6 ? (layerCuts ? layerCuts.start[li] : startCut) : null;
       const layerEndCut = e >= axisLen - 1e-6 ? (layerCuts ? layerCuts.end[li] : endCut) : null;
       out.push({
         kind: "polygon",
         pts: clippedBand(p1, p2, off, off + layer.thickness, layerStartCut, layerEndCut),
-        fill: layerSolid ? POCHE_FILL_BLACK : POCHE_FILL_WHITE,
+        fill: layerSolid ? HATCH_INK : HATCH_PAPER,
         // Band ohne Umriss: keine Schichtfuge über die Bandkante, keine 45°-Naht
         // am Knoten. Die Fugen kommen als separate `line`-Primitive (siehe unten).
         stroke: "none",
         strokeWidthMm: 0,
-        hatch: layerSolid ? { ...layerHatch, color: POCHE_FILL_BLACK } : layerHatch,
+        hatch: layerHatch,
         greyed,
         // Für die Ecktests/Konsistenz beibehalten (bei stroke:"none" wirkungslos).
         noStrokeEdges: bandJoinEdges,
@@ -1254,7 +1264,7 @@ function addWallPoche(
 
 /**
  * Neutrale SIA-Poché-Füllung des tragenden Bauteils (höchste joinPriority) für
- * die grobe Sammelfläche: weiß, bzw. schwarz falls dessen Schraffur "solid" ist.
+ * die grobe Sammelfläche: Papier, bzw. Tinte falls dessen Schraffur "solid" ist.
  * (Ersetzt die frühere rohe Bauteil-Albedo — im Plan zählt die Poché, nicht die
  * 3D-Materialfarbe.)
  */
@@ -1265,7 +1275,7 @@ function backbonePocheFill(project: Project, wt: Project["wallTypes"][number]): 
     if (!best || comp.joinPriority > best.prio)
       best = { pattern: getHatch(project, comp.hatchId).pattern, prio: comp.joinPriority };
   }
-  return best ? pocheFill(best.pattern) : POCHE_FILL_WHITE;
+  return best ? pocheFill(best.pattern) : HATCH_PAPER;
 }
 
 /**
@@ -1518,14 +1528,13 @@ function addCeilingPoche(
           resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
         )
       : NO_HATCH;
-  const solid = hatch.pattern === "solid";
   out.push({
     kind: "polygon",
     pts,
     fill: comp ? pocheFill(hatch.pattern) : "none",
     stroke,
     strokeWidthMm: LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail],
-    hatch: solid ? { ...hatch, color: POCHE_FILL_BLACK } : hatch,
+    hatch,
     greyed,
     ceilingId,
   });
