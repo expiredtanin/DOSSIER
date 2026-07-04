@@ -1,10 +1,12 @@
 [workspace]
-members = [".", "geometry"]
-# render2d/render3d sind eigenstaendige Crates (jeweils eigener [workspace]), damit
-# sie headless ohne Tauri-Toolchain baubar/testbar bleiben. Sie liegen zwar im
-# src-tauri-Baum, gehoeren aber NICHT zum cad-tauri-Workspace — hier ausschliessen,
-# damit `cad-tauri` sie dennoch per Pfad als (optionale) Abhaengigkeit nutzen kann.
-exclude = ["render2d", "render3d"]
+members = ["."]
+# render2d/render3d/geometry sind eigenstaendige Crates, damit sie headless ohne
+# Tauri-Toolchain UND per wasm-pack (Feature "web") zu WASM baubar bleiben. Sie
+# liegen zwar im src-tauri-Baum, gehoeren aber NICHT zum cad-tauri-Workspace —
+# hier ausschliessen, damit `cad-tauri` sie dennoch per Pfad als Abhaengigkeit
+# nutzen kann. geometry: neu ausgeschlossen (war Member), seit es zu WASM gebaut
+# wird und das TS-Frontend die Joins direkt per WASM aufruft (statt TS-Duplikat).
+exclude = ["render2d", "render3d", "geometry"]
 
 [package]
 name = "cad-tauri"

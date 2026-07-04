@@ -16,7 +16,8 @@
     "shell": "scripts/chromium-shell.sh",
     "electron": "scripts/electron-shell.sh",
     "build:engine": "wasm-pack build src-tauri/render2d --release --target web --out-dir ../../src/engine/pkg --out-name render2d --no-default-features --features web",
-    "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web"
+    "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web",
+    "build:geometry": "wasm-pack build src-tauri/geometry --release --target web --out-dir ../../src/engine/pkgGeometry --out-name geometry --no-default-features --features web"
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.7",

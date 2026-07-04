@@ -9,6 +9,20 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Browser-Fassade (Feature "web"): JSON rein/raus, damit das TS-Frontend die
+/// EINE Rust-Join-Implementierung per wasm-pack aufrufen kann (Single Source of
+/// Truth statt TS-Duplikat). `input_json` = serialisiertes `JoinInput`, Rueckgabe
+/// = serialisiertes `Vec<WallCuts>`.
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn compute_joins_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let input: JoinInput = serde_json::from_str(input_json)
+        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
+    let out = compute_joins(input);
+    serde_json::to_string(&out).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Vec2 {
     pub x: f64,

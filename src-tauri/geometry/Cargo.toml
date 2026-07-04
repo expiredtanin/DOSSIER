@@ -2,9 +2,28 @@
 name = "geometry"
 version = "0.1.0"
 edition = "2021"
+description = "Serde-only Geometrie-Kern (Wand-Verschneidungen/Joins) — headless und per wasm-pack (Feature \"web\") zu WASM baubar; Single Source of Truth fuer TS + nativen Host."
+
+# cdylib: von wasm-pack (Feature "web") fuer das .wasm-Modul benoetigt. rlib:
+# damit die Crate weiterhin als Pfad-Abhaengigkeit (cad-tauri) und im Test-Build
+# nutzbar bleibt. Der cdylib-Artefakt-Build auf nativen Zielen ist harmlos (leere
+# Export-Oberflaeche ohne Feature "web"). Muster: render2d/render3d.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Standard: reine serde-Geometrie, headless per `cargo test` pruefbar.
+default = []
+# Browser-Bindings: dieselbe Geometrie hinter einer wasm-bindgen-Fassade
+# (`compute_joins_json`), aus TS via wasm-pack aufgerufen. Baut nur fuer
+# target wasm32-unknown-unknown sinnvoll. Muster: render3d/Cargo.toml.
+web = ["dep:wasm-bindgen", "dep:serde_json", "dep:console_error_panic_hook"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
 
 # Nur fuers Paritaets-Beispiel (examples/parity.rs) — JSON von stdin lesen.
 [dev-dependencies]
