@@ -267,7 +267,7 @@ function iwWall(id: string, start: Vec2, end: Vec2): Wall {
 }
 
 describe("computeJoins — materialbewusster T-Stoss (layerCuts)", () => {
-  it("W9-artiger T-Knoten: Backstein-Kern des Abzweigs sticht bis zur Rückgrat-Nahfläche durch, Putz wird getrimmt + L-Seitenlinie an derselben Fläche", () => {
+  it("W9-artiger T-Knoten: Backstein-Kern des Abzweigs sticht bis zur Rückgrat-Nahfläche durch, Putz wird getrimmt — materialgleicher Nah-Putz ⇒ KEINE L-Trennnaht", () => {
     // Durchgangswand WA1 (0,0)→(5,0) / WA2 (5,0)→(10,0), Abzweig WB (5,0)→(5,3),
     // alle vom selben Wandtyp "iw" (Innenputz/Backstein/Innenputz, T=0.15).
     const proj = layeredWallProject(
@@ -303,13 +303,13 @@ describe("computeJoins — materialbewusster T-Stoss (layerCuts)", () => {
     expect(lc.start[2]).not.toBeNull();
     expect(distToLine(lc.start[0]!, { x: 5, y: 0.075 })).toBeCloseTo(0, 6);
     expect(distToLine(lc.start[2]!, { x: 5, y: 0.075 })).toBeCloseTo(0, 6);
-    // ... UND bekommen die zusätzliche L-Seitenlinie an der Rückgrat-Nahfläche
-    // (y = 0.06, parallel zur Durchgangsachse) — dort endet der durchstechende
-    // Kern.
-    expect(lc.startSide[0]).not.toBeNull();
-    expect(lc.startSide[2]).not.toBeNull();
-    expect(distToLine(lc.startSide[0]!, { x: 5, y: 0.06 })).toBeCloseTo(0, 6);
-    expect(distToLine(lc.startSide[0]!, { x: 0, y: 0.06 })).toBeCloseTo(0, 6);
+    // ... aber KEINE L-Seitenlinie: der Nah-Putz der Durchgangswand ist
+    // materialgleicher Innenputz und füllt den getrimmten Abzweig-Putz an den
+    // Flanken durchgehend (der spanCutout schneidet nur die Kernbreite aus).
+    // Es entsteht ein durchgehendes Putz-L ohne Trennnaht. Nur bei material-
+    // FREMDEM Nah-Putz stünde hier eine L-Linie.
+    expect(lc.startSide[0]).toBeNull();
+    expect(lc.startSide[2]).toBeNull();
 
     // Die kollinearen Hälften der Durchgangswand bleiben bei den layerCuts
     // unangetastet (keine Pro-Schicht-Cuts für sie).

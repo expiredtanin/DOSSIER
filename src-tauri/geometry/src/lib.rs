@@ -228,6 +228,18 @@ fn apply_layer_cuts(
     // Rueckgrat-Nahflaeche ab (nicht an der Wandachse). In einem Block, damit die
     // mutable Ausleihe von `result[branch_wall_idx]` vor dem Zugriff auf die
     // Durchgangswand unten endet.
+    // Nah-Putz-Komponenten der Durchgangswand (dieselbe sign-Seite wie
+    // near_plaster oben): ist die getrimmte Abzweig-Schicht materialgleich mit
+    // einer davon, fuellt der Nah-Putz den Abzweig-Putz an dieser Stelle
+    // durchgehend (spanCutout schneidet nur die KERN-Breite aus, nicht die
+    // schmalen Putzflanken) -> Putz-L OHNE Trennnaht, also KEINE L-Seitenlinie.
+    let near_plaster_comps: Vec<&str> = through_layers
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| if sign > 0.0 { *i > backbone_idx } else { *i < backbone_idx })
+        .map(|(_, l)| l.component_id.as_str())
+        .collect();
+
     {
         let side_line = merge_cut;
         let (face_arr, side_arr) = match branch_end {
@@ -238,7 +250,13 @@ fn apply_layer_cuts(
             face_arr[i] = if merged[i] { Some(merge_cut) } else { Some(face_cut) };
             let adj_merged =
                 !merged[i] && ((i > 0 && merged[i - 1]) || (i + 1 < n && merged[i + 1]));
-            side_arr[i] = if adj_merged { Some(side_line) } else { None };
+            let merges_with_near_plaster =
+                near_plaster_comps.contains(&branch_layers[i].component_id.as_str());
+            side_arr[i] = if adj_merged && !merges_with_near_plaster {
+                Some(side_line)
+            } else {
+                None
+            };
         }
     }
 
@@ -936,8 +954,8 @@ mod tests {
         // Wie t_junction_branch_gets_face_cut, aber alle drei Waende vom
         // W9-artigen Wandtyp: der Backstein-Kern (Index 1) sticht durch den
         // Nah-Putz und stoppt an der Kern-Nahflaeche (y=0.06), die beiden
-        // Innenputz-Schichten (Index 0/2) werden getrimmt und bekommen
-        // zusaetzlich die seitliche L-Linie an derselben Flaeche.
+        // Innenputz-Schichten (Index 0/2) werden getrimmt. Da der Nah-Putz der
+        // Durchgangswand materialgleich ist, entsteht KEINE L-Trennnaht.
         let input = JoinInput {
             walls: vec![
                 w_iw("A", 0.0, 0.0, 5.0, 0.0),
@@ -972,13 +990,12 @@ mod tests {
         let l2 = lc.start[2].expect("Schicht 2 getrimmt");
         assert!((l0.point.y - 0.075).abs() < 1e-9);
         assert!((l2.point.y - 0.075).abs() < 1e-9);
-        // ... UND die seitliche L-Linie an der Rueckgrat-Nahflaeche (y=0.06,
-        // parallel zur x-Achse).
-        let s0 = lc.start_side[0].expect("Schicht 0 hat L-Seitenlinie");
-        let s2 = lc.start_side[2].expect("Schicht 2 hat L-Seitenlinie");
-        assert!(dist(s0, Vec2 { x: 5.0, y: 0.06 }) < 1e-9);
-        assert!(dist(s0, Vec2 { x: 0.0, y: 0.06 }) < 1e-9);
-        assert!(dist(s2, Vec2 { x: 5.0, y: 0.06 }) < 1e-9);
+        // ... aber KEINE seitliche L-Linie: der Innenputz der Durchgangswand ist
+        // materialgleich und fuellt den getrimmten Abzweig-Putz durchgehend
+        // (Putz-L ohne Trennnaht). Nur bei materialFREMDEM Nah-Putz stuende hier
+        // eine L-Linie.
+        assert!(lc.start_side[0].is_none());
+        assert!(lc.start_side[2].is_none());
 
         // Die kollineare Durchgangswand bleibt bei den layerCuts unangetastet.
         let ca = find(&out, "A");

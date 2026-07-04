@@ -421,11 +421,23 @@ function applyLayerCuts(
   // Nachbarschicht kappt ihre Breite.
   const sideLine: Line = mergeCut;
 
+  // Materialien des durchgehenden Nah-Putzes der Durchgangswand (dieselbe
+  // sign-Seite wie die nearPlaster-Summe oben). Ist die getrimmte Abzweig-Schicht
+  // materialgleich mit einer davon, füllt der Nah-Putz den Abzweig-Putz an dieser
+  // Stelle durchgehend (der spanCutout schneidet nur die KERN-Breite aus, nicht
+  // die schmalen Putzflanken) → Putz-L OHNE Trennnaht, also KEINE L-Seitenlinie.
+  const nearPlasterComps = new Set<string>();
+  for (let i = 0; i < throughWt.layers.length; i++) {
+    if (sign > 0 ? i > backboneIdx : i < backboneIdx)
+      nearPlasterComps.add(throughWt.layers[i].componentId);
+  }
+
   for (let i = 0; i < n; i++) {
     faceArr[i] = merged[i] ? mergeCut : faceCut;
     const adjMerged =
       !merged[i] && ((i > 0 && merged[i - 1]) || (i < n - 1 && merged[i + 1]));
-    sideArr[i] = adjMerged ? sideLine : null;
+    const mergesWithNearPlaster = nearPlasterComps.has(branchWt.layers[i].componentId);
+    sideArr[i] = adjMerged && !mergesWithNearPlaster ? sideLine : null;
   }
 
   // Durchgangswand-Aussparung (Phase 1c): den Nah-Putz der Durchgangswand über

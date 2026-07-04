@@ -6,8 +6,9 @@
  *  • Der Backstein-Kern des Abzweigs sticht durch den Nah-Putz der Durchgangs-
  *    wand und stoppt an deren Kern-Nahfläche (kein Durchlaufen bis zur Achse,
  *    kein Überlappen) — "durchstechender Kern".
- *  • Die Innenputz-Schichten des Abzweigs enden weiterhin an der Nahfläche
- *    UND bekommen eine zusätzliche seitliche L-Linie (cls "layer-joint-l").
+ *  • Die Innenputz-Schichten des Abzweigs enden an der Nahfläche. Ist der
+ *    Nah-Putz der Durchgangswand materialgleich, füllt er die Flanken durchgehend
+ *    → durchgehendes Putz-L OHNE Trennnaht (keine "layer-joint-l"-Linie).
  */
 
 import { describe, it, expect } from "vitest";
@@ -96,22 +97,17 @@ describe("generatePlan — materialbewusster T-Stoss (Poché-Bänder)", () => {
     expect(brick.pts[3].y).toBeCloseTo(0.06, 6);
   });
 
-  it("zeichnet die L-Seitenlinie nur für die getrimmten Putzschichten, nicht für den durchlaufenden Kern", () => {
+  it("zeichnet KEINE L-Seitenlinie, wenn der getrimmte Putz materialgleich mit dem durchgehenden Nah-Putz der Durchgangswand ist (durchgehendes Putz-L ohne Naht)", () => {
     const plan = generatePlan(tJunctionProject(), "eg", visible, undefined, "mittel");
     const lLines = plan.primitives.filter(
       (p): p is Extract<typeof p, { kind: "line" }> => p.kind === "line" && p.cls === "layer-joint-l",
     );
-    // Genau zwei L-Linien (eine je Innenputz-Schicht); der Backstein-Kern
-    // bekommt keine (er verschmilzt, kein Sprung im Material).
-    expect(lLines.length).toBe(2);
-
-    // Jede L-Linie verläuft an der Rückgrat-Nahfläche (y=0.06, parallel zur
-    // x-Achse) und spannt genau die Breite EINER Putzschicht (0.015 m) auf.
-    for (const l of lLines) {
-      expect(l.a.y).toBeCloseTo(0.06, 6);
-      expect(l.b.y).toBeCloseTo(0.06, 6);
-      expect(Math.abs(l.a.x - l.b.x)).toBeCloseTo(0.015, 6);
-    }
+    // Alle drei Wände sind vom selben iw-Typ: der Innenputz des Abzweigs trifft
+    // an der Flanke auf den materialgleichen Innenputz der Durchgangswand (der
+    // spanCutout schneidet nur die Kernbreite aus, nicht die Putzflanken). Der
+    // Putz läuft dort durchgehend ums Eck (L) — eine Trennnaht würde eine falsche
+    // Materialgrenze suggerieren. Daher KEINE L-Linie.
+    expect(lLines.length).toBe(0);
   });
 
   it("bricht die Nah-Putz-Schicht der Durchgangswand am Durchstoss auf (Phase 1c)", () => {
