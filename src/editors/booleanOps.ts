@@ -85,12 +85,25 @@ function ringDrawing(src: Drawing2D, pts: Vec2[], filled: boolean): Drawing2D {
     categoryCode: src.categoryCode,
     geom: { shape: "polyline", pts, closed: true },
   };
+  // Strich-/Ebenen-bezogene Attribute gelten für JEDEN Ring (Aussen wie Loch):
+  // die zusammengesetzte Form erbt das volle Erscheinungsbild des Quell-
+  // Elements (bei Boolean-Ops die des ERSTEN gewählten, s. unionDrawings).
   if (src.lineStyleId !== undefined) out.lineStyleId = src.lineStyleId;
   if (src.color !== undefined) out.color = src.color;
   if (src.weightMm !== undefined) out.weightMm = src.weightMm;
+  if (src.strokeWeightSource !== undefined) out.strokeWeightSource = src.strokeWeightSource;
   if (filled) {
+    // Füll-/Schraffur-bezogene Attribute nur auf dem gefüllten Aussenring (Löcher
+    // bleiben ungefüllt). `background` ist der Nachfolger von `fillColor` und wird
+    // mitgeführt, sonst ginge eine über das Attribut-Panel gesetzte Füllung (z. B.
+    // rote Fläche) bei der Vereinigung verloren.
     if (src.hatchId !== undefined) out.hatchId = src.hatchId;
     if (src.fillColor !== undefined) out.fillColor = src.fillColor;
+    if (src.foreground !== undefined) out.foreground = src.foreground;
+    if (src.background !== undefined) out.background = src.background;
+    if (src.foregroundSource !== undefined) out.foregroundSource = src.foregroundSource;
+    if (src.backgroundSource !== undefined) out.backgroundSource = src.backgroundSource;
+    if (src.hatchSource !== undefined) out.hatchSource = src.hatchSource;
   }
   return out;
 }
