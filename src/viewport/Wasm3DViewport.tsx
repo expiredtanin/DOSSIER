@@ -44,11 +44,19 @@
 
 import { useEffect, useRef } from "react";
 import type { Project } from "../model/types";
-import { projectToModel3d } from "../plan/toWalls3d";
+import { projectToModel3d, pickGeometry } from "../plan/toWalls3d";
 import type { RenderMode, View3d } from "../ui/TopBar";
 import { t } from "../i18n";
 import { useWasm3dRenderer } from "./useWasm3dRenderer";
 import type { Camera3d } from "./useWasm3dRenderer";
+import { cameraRay, pickNearest } from "./raycast3d";
+
+/** Ein per 3D-Klick getroffenes Bauteil (Wand oder Decke), oder null (Leerraum). */
+export type Pick3dHit = { kind: "wall" | "ceiling"; id: string } | null;
+
+/** Klick-vs-Drag-Schwelle (Pixel): bleibt die Maus zwischen pointerdown und
+ * pointerup darunter, gilt die Links-Geste als KLICK (Pick) statt als Orbit-Drag. */
+const CLICK_THRESHOLD_PX = 4;
 
 /** Vertikaler Öffnungswinkel (Radiant) — wie die three.js-PerspectiveCamera (50°),
  * auch für die FREIE Orbit-Kamera hier (die Presets selbst nutzen den Rust-
@@ -167,6 +175,7 @@ export function Wasm3DViewport({
   gridVisible = true,
   groundElevation = 0,
   onToggleGrid,
+  onPick3d,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -183,8 +192,20 @@ export function Wasm3DViewport({
   groundElevation?: number;
   /** Klick auf den Grid-Umschalter-Button; ohne Angabe kein Button. */
   onToggleGrid?: () => void;
+  /**
+   * Links-KLICK (kein Drag) auf ein Bauteil: meldet das per TS-Raycast getroffene
+   * Bauteil (Wand/Decke) oder null (Leerraum → Auswahl leeren). `additive` =
+   * Shift/Ctrl/Meta gedrückt (zur Auswahl hinzufügen statt ersetzen). Der
+   * Aufrufer (App) setzt daraus die Store-Selektion; ohne Angabe passiert nichts.
+   */
+  onPick3d?: (hit: Pick3dHit, additive: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
+  // Pointer-Listener stets den aktuellen liest (additive-Logik in App liest
+  // die frische Store-Auswahl), ohne den Listener-Effekt neu aufzubauen.
+  const onPick3dRef = useRef(onPick3d);
+  onPick3dRef.current = onPick3d;
   const {
     render,
     updateModel,
@@ -273,16 +294,52 @@ export function Wasm3DViewport({
       };
     };
 
-    let drag: { mode: "orbit" | "pan"; x: number; y: number } | null = null;
+    let drag:
+      | {
+          mode: "orbit" | "pan";
+          button: number;
+          x: number;
+          y: number;
+          downX: number;
+          downY: number;
+          moved: boolean;
+        }
+      | null = null;
 
     const redraw = () => redrawRef.current();
+
+    // Cursor-Pixel → Kamerastrahl (aktuelle Orbit-Kamera) → nächstes Bauteil.
+    // Meldet den Treffer (oder null) an den Aufrufer; `additive` wird vom
+    // pointerup-Modifier bestimmt. Frische Pick-Geometrie je Klick (selten genug).
+    const doPick = (clientX: number, clientY: number, additive: boolean) => {
+      const cb = onPick3dRef.current;
+      const o = orbitRef.current;
+      if (!cb || !o) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2; // Pixel-Y invertiert
+      const aspect = rect.width / rect.height;
+      const ray = cameraRay(orbitCamera(o), ndcX, ndcY, aspect);
+      const { walls, slabs } = pickGeometry(projectRef.current);
+      const hit = pickNearest(ray, walls, slabs);
+      cb(hit ? { kind: hit.kind, id: hit.id } : null, additive);
+    };
 
     const onPointerDown = (e: PointerEvent) => {
       // LINKS (0) = Orbit, MITTE (1)/RECHTS (2) = Pan (s. MAUS-SCHEMA oben).
       const mode = e.button === 0 ? "orbit" : e.button === 1 || e.button === 2 ? "pan" : null;
       if (!mode) return;
       e.preventDefault();
-      drag = { mode, x: e.clientX, y: e.clientY };
+      drag = {
+        mode,
+        button: e.button,
+        x: e.clientX,
+        y: e.clientY,
+        downX: e.clientX,
+        downY: e.clientY,
+        moved: false,
+      };
       canvas.setPointerCapture(e.pointerId);
       useOrbitRedraw();
     };
@@ -290,6 +347,13 @@ export function Wasm3DViewport({
     const onPointerMove = (e: PointerEvent) => {
       const o = orbitRef.current;
       if (!drag || !o) return;
+      // Bewegung über die Schwelle ⇒ echter Drag (kein Klick beim Loslassen).
+      if (
+        !drag.moved &&
+        Math.hypot(e.clientX - drag.downX, e.clientY - drag.downY) >= CLICK_THRESHOLD_PX
+      ) {
+        drag.moved = true;
+      }
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
       drag.x = e.clientX;
@@ -326,12 +390,28 @@ export function Wasm3DViewport({
       redraw();
     };
 
-    const endDrag = (e: PointerEvent) => {
-      if (!drag) return;
+    // Cleanup einer Geste (Capture lösen, Drag-Zustand fallenlassen).
+    const releaseDrag = (e: PointerEvent) => {
       drag = null;
       if (canvas.hasPointerCapture(e.pointerId)) {
         canvas.releasePointerCapture(e.pointerId);
       }
+    };
+
+    // Loslassen: war es ein LINKS-Klick ohne nennenswerte Bewegung (kein Orbit),
+    // löse einen Pick aus. Sonst nur aufräumen. additive = Shift/Ctrl/Meta.
+    const onPointerUp = (e: PointerEvent) => {
+      if (!drag) return;
+      const wasClick = drag.button === 0 && drag.mode === "orbit" && !drag.moved;
+      const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+      releaseDrag(e);
+      if (wasClick) doPick(e.clientX, e.clientY, additive);
+    };
+
+    // Abgebrochene Geste (z. B. Fensterwechsel) — nie als Klick werten.
+    const onPointerCancel = (e: PointerEvent) => {
+      if (!drag) return;
+      releaseDrag(e);
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -383,15 +463,15 @@ export function Wasm3DViewport({
 
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", endDrag);
-    canvas.addEventListener("pointercancel", endDrag);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerCancel);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("contextmenu", onContextMenu);
     return () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", endDrag);
-      canvas.removeEventListener("pointercancel", endDrag);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
     };

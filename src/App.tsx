@@ -63,6 +63,7 @@ import type {
 } from "./plan/PlanView";
 import { Viewport3D } from "./viewport/Viewport3D";
 import type { DisplayResolver, ViewportContextInfo } from "./viewport/Viewport3D";
+import type { Pick3dHit } from "./viewport/Wasm3DViewport";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
@@ -2933,6 +2934,38 @@ export default function App() {
       setSelectedRoomIds([]);
     }
   };
+  // Links-KLICK im Nordstern-3D-Viewport (WASM, TS-Raycast): getroffenes Bauteil
+  // wählen, sodass das Attribute-/Objekt-Info-Panel es zeigt (erster Schritt zur
+  // 3D-Editierbarkeit). `additive` (Shift/Ctrl) = zur Auswahl DERSELBEN Art
+  // hinzufügen, sonst ersetzen; beim Setzen die ANDEREN Arten-Arrays leeren
+  // (Einzel-Selektion über Arten hinweg, konsistent mit dem 2D-Verhalten).
+  // Leertreffer (kein Bauteil) → alle Selektionen leeren.
+  const onViewport3dPick = (hit: Pick3dHit, additive: boolean) => {
+    if (!hit) {
+      setSelectedWallIds([]);
+      setSelectedCeilingIds([]);
+      setSelectedDrawingId(null);
+      setSelectedOpeningIds([]);
+      setSelectedStairIds([]);
+      setSelectedRoomIds([]);
+      return;
+    }
+    if (hit.kind === "wall") {
+      setSelectedWallIds(
+        additive ? Array.from(new Set([...selectedWallIds, hit.id])) : [hit.id],
+      );
+      setSelectedCeilingIds([]);
+    } else {
+      setSelectedCeilingIds(
+        additive ? Array.from(new Set([...selectedCeilingIds, hit.id])) : [hit.id],
+      );
+      setSelectedWallIds([]);
+    }
+    setSelectedDrawingId(null);
+    setSelectedOpeningIds([]);
+    setSelectedStairIds([]);
+    setSelectedRoomIds([]);
+  };
   // Rechts-Klick im 3D: Wand-Kontextmenü an der Cursorposition.
   const onViewportContextMenu = (info: ViewportContextInfo) => {
     if (info.wallId && !selectedWallIds.includes(info.wallId)) {
@@ -3136,6 +3169,7 @@ export default function App() {
           onViewportSelectOpening={onViewportSelectOpening}
           onViewportSelectStair={onViewportSelectStair}
           onViewportContextMenu={onViewportContextMenu}
+          onViewport3dPick={onViewport3dPick}
           commandActive={commandActive}
           draft={draft}
           onWorkplanePoint={onWorkplanePoint}
@@ -4099,6 +4133,7 @@ function Content({
   onViewportSelectOpening,
   onViewportSelectStair,
   onViewportContextMenu,
+  onViewport3dPick,
   commandActive,
   draft,
   onWorkplanePoint,
@@ -4172,6 +4207,8 @@ function Content({
   onViewportSelectOpening: (openingId: string | null) => void;
   onViewportSelectStair: (stairId: string | null) => void;
   onViewportContextMenu: (info: ViewportContextInfo) => void;
+  /** Links-KLICK-Auswahl im WASM-3D-Viewport (TS-Raycast, Wand/Decke). */
+  onViewport3dPick: (hit: Pick3dHit, additive: boolean) => void;
   /** Läuft ein zeichnender Befehl? Macht den 3D-Viewport zur Erstellungs-Fläche. */
   commandActive: boolean;
   /** Aktuelle Werkzeug-Vorschau (Rubber-Band) — auch in 3D gespiegelt. */
@@ -4329,6 +4366,7 @@ function Content({
             onSelectOpening={onViewportSelectOpening}
             onSelectStair={onViewportSelectStair}
             onContextMenu={onViewportContextMenu}
+            onPick3d={onViewport3dPick}
             commandActive={commandActive}
             draft={draft}
             onWorkplanePoint={onWorkplanePoint}

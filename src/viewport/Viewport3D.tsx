@@ -45,6 +45,7 @@ import {
 } from "../model/wall";
 import { MaterialRuntime } from "../materials/runtime";
 import { Wasm3DViewport } from "./Wasm3DViewport";
+import type { Pick3dHit } from "./Wasm3DViewport";
 import type { RenderMode, View3d } from "../ui/TopBar";
 import type { ToolDraft } from "../tools/types";
 import { applyAngleConstraint } from "../tools/snapping";
@@ -124,9 +125,12 @@ export function Viewport3D(
     /** Klick auf den Grid-Umschalter-Button im WASM-Viewport — Single Source
      * of Truth bleibt der Aufrufer (App/viewSlice `grid3dVisible`). */
     onToggleGrid?: () => void;
+    /** Links-Klick-Auswahl im WASM-Viewport (TS-Raycast) — wirkt NUR im WASM-Pfad;
+     * die three.js-Sicht nutzt weiter `onSelectWall`/`onSelectCeiling`. */
+    onPick3d?: (hit: Pick3dHit, additive: boolean) => void;
   },
 ) {
-  const { gridVisible, onToggleGrid, ...threeProps } = props;
+  const { gridVisible, onToggleGrid, onPick3d, ...threeProps } = props;
   if (WASM_ENGINE_ACTIVE) {
     return (
       <Wasm3DViewport
@@ -136,6 +140,7 @@ export function Viewport3D(
         gridVisible={gridVisible}
         groundElevation={props.gridElevation}
         onToggleGrid={onToggleGrid}
+        onPick3d={onPick3d}
       />
     );
   }

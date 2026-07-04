@@ -49,6 +49,13 @@ export interface RWall {
   color: RRgb;
   /** Aufgelöster Schichtaufbau (leer = kein WallType auflösbar, siehe emitWall). */
   layers: RLayer[];
+  /**
+   * Id der Ursprungs-Wand (`project.walls[].id`). Alle Öffnungs-Teilquader einer
+   * Wand tragen dieselbe Id. Rein für den TS-seitigen Pick-Raycast (raycast3d);
+   * der render3d/Serde-Pfad ignoriert das Feld (kein `deny_unknown_fields`,
+   * serde verwirft unbekannte Felder).
+   */
+  wallId: string;
 }
 
 /** Eine extrudierte Deckenplatte: geschlossener Grundriss-Umriss + Z-Ausdehnung. */
@@ -57,6 +64,12 @@ export interface RSlab {
   zBottom: number;
   zTop: number;
   color: RRgb;
+  /**
+   * Id der Ursprungs-Decke (`project.ceilings[].id`). Nur für den TS-seitigen
+   * Pick-Raycast (raycast3d); der render3d/Serde-Pfad ignoriert das Feld
+   * (kein `deny_unknown_fields`).
+   */
+  ceilingId: string;
 }
 
 /** Art eines rohen Kontext-Meshes (bestimmt in render3d die Default-Einfärbung). */
@@ -122,6 +135,7 @@ function pushSegment(
   zTop: number,
   thickness: number,
   layers: RLayer[],
+  wallId: string,
 ): void {
   if (to - from <= EPS) return;
   if (zTop - zBottom <= EPS) return;
@@ -141,6 +155,7 @@ function pushSegment(
     baseElevation: zBottom,
     color: WALL_RGB,
     layers,
+    wallId,
   });
 }
 
@@ -190,7 +205,7 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
 
   // Ohne Aussparungen: ein durchgehender Quader (wie bisher).
   if (cutouts.length === 0) {
-    pushSegment(out, wall, 0, axisLen, zBottom, zTop, thickness, layers);
+    pushSegment(out, wall, 0, axisLen, zBottom, zTop, thickness, layers, wall.id);
     return;
   }
 
@@ -202,23 +217,23 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
     const segFrom = Math.max(cursor, from);
     if (from > cursor) {
       // Voller Wandpfeiler bis zur Aussparung.
-      pushSegment(out, wall, cursor, from, zBottom, zTop, thickness, layers);
+      pushSegment(out, wall, cursor, from, zBottom, zTop, thickness, layers, wall.id);
     }
     if (to > segFrom) {
       // Brüstung unter der Öffnung (bei Türen entfällt sie, da oBottom == zBottom).
       if (oBottom > zBottom + EPS) {
-        pushSegment(out, wall, segFrom, to, zBottom, oBottom, thickness, layers);
+        pushSegment(out, wall, segFrom, to, zBottom, oBottom, thickness, layers, wall.id);
       }
       // Sturz über der Öffnung (bis zum Wandkopf).
       if (oTop < zTop - EPS) {
-        pushSegment(out, wall, segFrom, to, oTop, zTop, thickness, layers);
+        pushSegment(out, wall, segFrom, to, oTop, zTop, thickness, layers, wall.id);
       }
     }
     cursor = Math.max(cursor, to);
   }
   // Restlicher Wandpfeiler bis zum Achsenende.
   if (cursor < axisLen) {
-    pushSegment(out, wall, cursor, axisLen, zBottom, zTop, thickness, layers);
+    pushSegment(out, wall, cursor, axisLen, zBottom, zTop, thickness, layers, wall.id);
   }
 }
 
@@ -236,6 +251,7 @@ function emitSlabs(project: Project): RSlab[] {
       zBottom,
       zTop,
       color: SLAB_RGB,
+      ceilingId: c.id,
     });
   }
   return out;
@@ -282,4 +298,16 @@ export function projectToModel3d(project: Project): RModel3d {
     slabs: emitSlabs(project),
     meshes: emitMeshes(project),
   };
+}
+
+/**
+ * Pick-Geometrie für den TS-seitigen 3D-Raycast (siehe viewport/raycast3d): die
+ * Wand-Teilquader (mit `wallId`) und Decken-Prismen (mit `ceilingId`) desselben
+ * geflachten Modells wie {@link projectToModel3d}, aber ohne die Kontext-Meshes
+ * (die sind für die Bauteil-Auswahl irrelevant). Reine TS-Nutzung — geht NICHT an
+ * render3d; die Records tragen dieselben Geometriefelder wie die Serde-Payload,
+ * plus die Ids fürs Picking.
+ */
+export function pickGeometry(project: Project): { walls: RWall[]; slabs: RSlab[] } {
+  return { walls: projectToWalls3d(project), slabs: emitSlabs(project) };
 }
