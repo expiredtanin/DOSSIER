@@ -155,6 +155,51 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
   });
 });
 
+describe("Prioritäts-Trim Wand/Decke (Z-Fighting-Fix, s. trimWallTopForCeilings)", () => {
+  // Sample-Projekt: W1-W4 (EG, Wandtyp "aw", dominante Schicht "brick"
+  // joinPriority 50) tragen exakt Wandhöhe 2.6 m = Geschosshöhe -> zTop 2.6.
+  // Decke C1 (EG, Deckentyp "dg-massiv", dominante Schicht "concrete"
+  // joinPriority 100) hat OK bündig mit dem Wandkopf (zTop 2.6) und
+  // Gesamtdicke 0.3 m (screed .06 + insulation .04 + concrete .2) -> zBottom
+  // 2.3. Vor dem Trim überlappten sich Wand- und Deckenvolumen exakt über
+  // [2.3..2.6] im ganzen Wand-Footprint (Z-Fighting). Nach dem Trim endet die
+  // Wand an der Deckenunterkante, weil die Decke die höhere joinPriority hat.
+  it("Decke mit höherer joinPriority kappt die Wand an ihrer Unterkante", () => {
+    const w2 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W2");
+    expect(w2.length).toBeGreaterThan(0);
+    for (const seg of w2) {
+      expect(seg.baseElevation + seg.height).toBeCloseTo(2.3, 6);
+    }
+  });
+
+  it("kein Trim, wenn die Wand-Priorität >= Decken-Priorität ist", () => {
+    // Deckentyp-Priorität (concrete) auf 40 senken -> unter der Wand-Priorität
+    // (brick 50) -> die Decke gewinnt nicht mehr, die Wand bleibt unverändert
+    // auf voller Höhe (2.6 m, wie ohne Trim-Logik).
+    const p: Project = {
+      ...sampleProject,
+      components: sampleProject.components.map((c) =>
+        c.id === "concrete" ? { ...c, joinPriority: 40 } : c,
+      ),
+    };
+    const w2 = projectToWalls3d(p).filter((w) => w.wallId === "W2");
+    expect(w2.length).toBeGreaterThan(0);
+    for (const seg of w2) {
+      expect(seg.baseElevation + seg.height).toBeCloseTo(2.6, 6);
+    }
+  });
+
+  it("kein Trim, wenn keine Decke im selben Geschoss überlappt (z.B. OG-Wände ohne Dach-Decke)", () => {
+    // W6 (OG) hat keine überlappende Decke im Sample-Projekt (C1 ist EG) ->
+    // unverändertes Verhalten (volle wall.height).
+    const w6 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W6");
+    expect(w6.length).toBeGreaterThan(0);
+    for (const seg of w6) {
+      expect(seg.height).toBeCloseTo(2.6, 6);
+    }
+  });
+});
+
 describe("Bauteil-/Materialfarbe Decke", () => {
   it("Decke -> Farbe der dicksten Schicht (dg-massiv: concrete 0.2 m, #9aa0a6)", () => {
     // Deckentyp "dg-massiv": screed 0.06, insulation 0.04, concrete 0.2 ->

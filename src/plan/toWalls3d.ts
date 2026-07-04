@@ -32,7 +32,7 @@
 // Ohne auflösbaren WallType/ohne Schichten: EIN Vollkörper über die volle
 // Dicke im neutralen Grundton (heutiges Fallback-Verhalten).
 
-import type { Project, Wall, Layer } from "../model/types";
+import type { Project, Wall, Ceiling, Layer } from "../model/types";
 import {
   getComponent,
   getWallType,
@@ -257,10 +257,161 @@ function pushSegment(
   });
 }
 
+/**
+ * Achsenparalleles Grundriss-Rechteck (min/max je Achse), Meter, Modell-XY.
+ * Dient hier NUR der groben Footprint-Überlapp-Prüfung Wand↔Decke (s.
+ * {@link trimWallTopForCeilings}) — kein exakter Polygon-Test, siehe dort.
+ */
+interface Bounds2 {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+/** Bounding-Box der Wandachse, um `halfThickness` in beide Richtungen geweitet
+ * (sichere Über-Approximation des tatsächlichen Wandkörpers, unabhängig von
+ * dessen Orientierung). */
+function wallFootprintBounds(wall: Wall, halfThickness: number): Bounds2 {
+  return {
+    minX: Math.min(wall.start.x, wall.end.x) - halfThickness,
+    maxX: Math.max(wall.start.x, wall.end.x) + halfThickness,
+    minY: Math.min(wall.start.y, wall.end.y) - halfThickness,
+    maxY: Math.max(wall.start.y, wall.end.y) + halfThickness,
+  };
+}
+
+/** Bounding-Box eines geschlossenen Umrisses (Decke). */
+function outlineBounds(outline: Array<{ x: number; y: number }>): Bounds2 {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of outline) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+/** Überlappen sich zwei Bounding-Boxen (mit EPS-Toleranz an den Rändern)? */
+function boundsOverlap(a: Bounds2, b: Bounds2): boolean {
+  return (
+    a.minX <= b.maxX + EPS &&
+    a.maxX >= b.minX - EPS &&
+    a.minY <= b.maxY + EPS &&
+    a.maxY >= b.minY - EPS
+  );
+}
+
+/**
+ * Dicke einer Wand für die Footprint-Näherung (s. {@link wallFootprintBounds}):
+ * Summe der WallType-Schichtdicken, sonst der Fallback-Grundton-Dicke aus
+ * {@link resolveWallBands} (0.2 m), falls kein WallType auflösbar ist.
+ */
+function wallThicknessSafe(project: Project, wall: Wall): number {
+  try {
+    return wallTypeThickness(getWallType(project, wall));
+  } catch {
+    return 0.2;
+  }
+}
+
+/**
+ * Repräsentative `joinPriority` einer Wand (höchste ihrer Schichten) — analog
+ * `wallRepresentativePriority` in `toSection.ts` (2D-Schnitt-Dominanz), hier
+ * fürs 3D-Trim gegen überlappende Decken (s. {@link trimWallTopForCeilings}).
+ * `undefined`, wenn kein WallType/keine Schicht auflösbar ist (dann findet nie
+ * ein Trim statt — konservativ, kein Verhaltensbruch für unbekannte Typen).
+ */
+function wallDominantPriority(project: Project, wall: Wall): number | undefined {
+  try {
+    const wt = getWallType(project, wall);
+    let best: number | undefined;
+    for (const layer of wt.layers) {
+      const p = getComponent(project, layer.componentId).joinPriority;
+      if (best === undefined || p > best) best = p;
+    }
+    return best;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Repräsentative `joinPriority` einer Decke (höchste ihrer Schichten, analog
+ * {@link wallDominantPriority}) — bestimmt, ob die Decke am Wand/Decke-Stoss
+ * "durchläuft" (gewinnt) und die Wand kappt.
+ */
+function ceilingDominantPriority(project: Project, ceiling: Ceiling): number | undefined {
+  try {
+    const ct = getCeilingType(project, ceiling);
+    let best: number | undefined;
+    for (const layer of ct.layers) {
+      const p = getComponent(project, layer.componentId).joinPriority;
+      if (best === undefined || p > best) best = p;
+    }
+    return best;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Kappt `zTop` einer Wand an der Unterkante jeder überlappenden Decke mit
+ * HÖHERER `joinPriority` (Prioritäts-Join, Phase 3 — behebt das Wand/Decke-
+ * Z-Fighting aus `wallVerticalExtent`/`ceilingVerticalExtent`, s. Moduldoc):
+ * wächst `wall.height` bis zur Deckenoberkante (Standardfall, häufig bündig
+ * mit dem Geschoss-Wandkopf) und die Decke wächst vom selben Z nach unten, so
+ * überlappen sich beide Volumen exakt über die Deckendicke im Wand-Footprint.
+ * Gewinnt die Decke (höhere Priorität), endet die Wand VOR der Deckenunterkante
+ * statt sie zu durchdringen.
+ *
+ * Kriterien je Decke (alle müssen zutreffen, sonst kein Effekt):
+ *  • dasselbe Geschoss (`ceiling.floorId === wall.floorId`),
+ *  • vertikale Überlappung mit der (ungekappten) Wand-Ausdehnung,
+ *  • grober Footprint-Überlapp (Bounding-Box, s. {@link boundsOverlap}) —
+ *    KEIN exakter Polygon-Test; eine Decke, deren Umriss die Wand nur knapp
+ *    berührt/verfehlt, kann so fälschlich als überlappend gelten. Das ist eine
+ *    bekannte Restlücke (siehe Moduldoc-Kommentar in dieser Datei): für den
+ *    Regelfall (Decken-Umriss = Gebäude-/Raumgrundriss inkl. Wand-Footprints)
+ *    ist die Bounding-Box exakt genug, um das Haupt-Z-Fighting zu beheben.
+ *  • Decke hat eine HÖHERE (strikt) repräsentative `joinPriority` als die Wand.
+ *
+ * Bei mehreren qualifizierenden Decken gewinnt die NIEDRIGSTE Deckenunterkante
+ * (kappt am weitesten). Ohne auflösbare Wand-Priorität (unbekannter WallType)
+ * bleibt `zTop` unverändert (konservativ, wie heute).
+ */
+function trimWallTopForCeilings(
+  project: Project,
+  wall: Wall,
+  zBottom: number,
+  zTop: number,
+): number {
+  const wallPriority = wallDominantPriority(project, wall);
+  if (wallPriority === undefined) return zTop;
+  const halfThickness = wallThicknessSafe(project, wall) / 2;
+  const wallBounds = wallFootprintBounds(wall, halfThickness);
+  let top = zTop;
+  for (const c of project.ceilings ?? []) {
+    if (c.floorId !== wall.floorId) continue;
+    if (!c.outline || c.outline.length < 3) continue;
+    const cExtent = ceilingVerticalExtent(project, c);
+    // Keine vertikale Überlappung mit der (ungekappten) Wand-Ausdehnung -> Decke
+    // liegt komplett ausserhalb des Wandkörpers, betrifft ihn nicht.
+    if (cExtent.zBottom >= zTop - EPS || cExtent.zTop <= zBottom + EPS) continue;
+    const ceilingPriority = ceilingDominantPriority(project, c);
+    if (ceilingPriority === undefined || ceilingPriority <= wallPriority) continue;
+    if (!boundsOverlap(wallBounds, outlineBounds(c.outline))) continue;
+    if (cExtent.zBottom < top) top = cExtent.zBottom;
+  }
+  return Math.max(zBottom, top);
+}
+
 /** Emittiert die Teilquader EINER Wand (mit oder ohne Öffnungen). */
 function emitWall(out: RWall[], project: Project, wall: Wall): void {
   const bands = resolveWallBands(project, wall);
-  const { zBottom, zTop } = wallVerticalExtent(project, wall);
+  const { zBottom, zTop: rawZTop } = wallVerticalExtent(project, wall);
+  const zTop = trimWallTopForCeilings(project, wall, zBottom, rawZTop);
   const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
   if (axisLen < 1e-9 || zTop - zBottom <= EPS) return;
 
