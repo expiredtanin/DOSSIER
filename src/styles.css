@@ -4046,13 +4046,14 @@ body {
 }
 .attr-color-hex {
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 11px;
 }
 /* Editierbarer Hex-Code: sieht wie reiner Text aus, bis man klickt/fokussiert
    — dann Rahmen + helle Schrift als Editier-Signal. */
 .attr-color-hex-input {
-  width: 6.5ch;
+  width: 8.5ch;
+  color: var(--ink-2);
   border: 1px solid transparent;
   background: transparent;
   border-radius: 3px;
