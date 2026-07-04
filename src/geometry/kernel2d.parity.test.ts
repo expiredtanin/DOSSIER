@@ -18,21 +18,32 @@ import type { Vec2 } from "../model/types";
 import {
   circleCircleIntersect,
   closestPointOnSegment,
+  extendSegment,
   filletCorner,
   isCCW,
+  joinChains,
   lineCircleIntersect,
   lineSegmentIntersect,
   offsetPolyline,
   offsetSegment,
   pointSegmentDistance,
   projectParam,
+  removeSegment,
   segmentCircleIntersect,
   segmentIntersect,
   segmentPolylineHits,
   signedArea,
+  splitAtIntersections,
+  splitClosedByChord,
+  splitPolylineAtParam,
+  splitSegmentByCutters,
+  trimPolyline,
+  trimSegment,
   type Fillet,
   type Hit,
 } from "./kernel2d";
+
+type Poly = { pts: Vec2[]; closed: boolean };
 
 // Das WASM-Paket ist git-ignoriert und wird nur von `npm run build:kernel2d`
 // erzeugt. Fehlt es, wird die Suite SAUBER uebersprungen (statt Collection-Fehler),
@@ -107,6 +118,33 @@ function closeVec(a: Vec2, b: Vec2, rel = 1e-9): boolean {
 }
 function closeHit(a: Hit, b: Hit): boolean {
   return closeVec(a.point, b.point) && closeNum(a.t, b.t) && closeNum(a.s, b.s);
+}
+function eqPts(w: Vec2[], t: Vec2[]): boolean {
+  return w.length === t.length && t.every((p, i) => closeVec(w[i], p));
+}
+function eqPtsLists(w: Vec2[][], t: Vec2[][]): boolean {
+  return w.length === t.length && t.every((s, i) => eqPts(w[i], s));
+}
+function eqPolyList(w: Poly[], t: Poly[]): boolean {
+  return w.length === t.length && t.every((pl, i) => w[i].closed === pl.closed && eqPts(w[i].pts, pl.pts));
+}
+function eqPairs(w: [Vec2, Vec2][], t: [Vec2, Vec2][]): boolean {
+  return w.length === t.length && t.every((pr, i) => closeVec(w[i][0], pr[0]) && closeVec(w[i][1], pr[1]));
+}
+/** Ein paar lange Schneider-Segmente quer durch die BBox (als offene Cutter). */
+function genCutters(rng: () => number): Poly[] {
+  const k = 1 + Math.floor(rng() * 3);
+  return Array.from({ length: k }, () => ({
+    pts: [
+      { x: -80, y: (rng() * 2 - 1) * 60 },
+      { x: 80, y: (rng() * 2 - 1) * 60 },
+    ],
+    closed: false,
+  }));
+}
+function genPolyline(rng: () => number, minN: number, maxN: number): Vec2[] {
+  const n = minN + Math.floor(rng() * (maxN - minN + 1));
+  return Array.from({ length: n }, () => ({ x: (rng() * 2 - 1) * 50, y: (rng() * 2 - 1) * 50 }));
 }
 
 const N = 300;
@@ -286,6 +324,123 @@ describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Zufall", () => {
       }
     });
     expect(valid, "keine gueltige Verrundung — Test waere aussagelos").toBeGreaterThan(50);
+  });
+
+  it("splitSegmentByCutters / trimSegment (Struktur + Werte)", () => {
+    const rng = mulberry32(9);
+    const qs = Array.from({ length: N }, () => ({
+      a1: { x: -60, y: (rng() * 2 - 1) * 40 },
+      a2: { x: 60, y: (rng() * 2 - 1) * 40 },
+      cutters: genCutters(rng),
+      pick: { x: (rng() * 2 - 1) * 60, y: (rng() * 2 - 1) * 40 },
+    }));
+    const wSplit = JSON.parse(K.split_segment_by_cutters_batch_json(JSON.stringify(qs))) as [Vec2, Vec2][][];
+    const wTrim = JSON.parse(K.trim_segment_batch_json(JSON.stringify(qs))) as [Vec2, Vec2][][];
+    qs.forEach((q, i) => {
+      expect(eqPairs(wSplit[i], splitSegmentByCutters(q.a1, q.a2, q.cutters)), `split#${i}`).toBe(true);
+      expect(eqPairs(wTrim[i], trimSegment(q.a1, q.a2, q.cutters, q.pick)), `trim#${i}`).toBe(true);
+    });
+  });
+
+  it("trimPolyline / splitAtIntersections (offen+geschlossen, Struktur exakt)", () => {
+    const rng = mulberry32(10);
+    const qs = Array.from({ length: N }, () => ({
+      pts: genPolyline(rng, 4, 9),
+      closed: rng() < 0.5,
+      cutters: genCutters(rng),
+      pick: { x: (rng() * 2 - 1) * 50, y: (rng() * 2 - 1) * 50 },
+      others: genCutters(rng).map((c) => c.pts),
+    }));
+    const wTrim = JSON.parse(K.trim_polyline_batch_json(JSON.stringify(qs))) as Poly[][];
+    const wSplit = JSON.parse(
+      K.split_at_intersections_batch_json(
+        JSON.stringify(qs.map((q) => ({ targetPts: q.pts, closed: q.closed, others: q.others }))),
+      ),
+    ) as Vec2[][][];
+    qs.forEach((q, i) => {
+      expect(eqPolyList(wTrim[i], trimPolyline(q.pts, q.closed, q.cutters, q.pick)), `trimPoly#${i}`).toBe(true);
+      expect(eqPtsLists(wSplit[i], splitAtIntersections(q.pts, q.closed, q.others)), `splitAt#${i}`).toBe(true);
+    });
+  });
+
+  it("splitPolylineAtParam / splitClosedByChord / removeSegment", () => {
+    const rng = mulberry32(11);
+    const qs = Array.from({ length: N }, () => {
+      const pts = genPolyline(rng, 4, 9);
+      const n = pts.length;
+      const closed = rng() < 0.5;
+      return { pts, closed, edgeIndex: Math.floor(rng() * (closed ? n : n - 1)), t: rng() };
+    });
+    const wSap = JSON.parse(K.split_polyline_at_param_batch_json(JSON.stringify(qs))) as Vec2[][][];
+    const wRem = JSON.parse(
+      K.remove_segment_batch_json(
+        JSON.stringify(qs.map((q) => ({ pts: q.pts, closed: q.closed, edgeIndex: q.edgeIndex }))),
+      ),
+    ) as Poly[];
+    const chords = Array.from({ length: N }, () => {
+      const pts = genPolyline(rng, 4, 8);
+      const n = pts.length;
+      const i = Math.floor(rng() * n);
+      let j = Math.floor(rng() * n);
+      if (j === i) j = (j + 1) % n;
+      return { pts, i, ti: rng(), j, tj: rng() };
+    });
+    const wChord = JSON.parse(K.split_closed_by_chord_batch_json(JSON.stringify(chords))) as ([Vec2[], Vec2[]] | null)[];
+    qs.forEach((q, i) => {
+      expect(eqPtsLists(wSap[i], splitPolylineAtParam(q.pts, q.closed, q.edgeIndex, q.t)), `sap#${i}`).toBe(true);
+      const tr = removeSegment(q.pts, q.closed, q.edgeIndex);
+      expect(wRem[i].closed === tr.closed && eqPts(wRem[i].pts, tr.pts), `rem#${i}`).toBe(true);
+    });
+    chords.forEach((q, i) => {
+      const t = splitClosedByChord(q.pts, q.i, q.ti, q.j, q.tj);
+      expect((wChord[i] === null) === (t === null), `chord-null#${i}`).toBe(true);
+      if (t && wChord[i]) {
+        expect(eqPts(wChord[i]![0], t[0]) && eqPts(wChord[i]![1], t[1]), `chord#${i}`).toBe(true);
+      }
+    });
+  });
+
+  it("extendSegment (start/end, null-Paritaet + Werte)", () => {
+    const rng = mulberry32(12);
+    const qs = Array.from({ length: N }, (_, k) => {
+      const c = { x: (rng() * 2 - 1) * 30, y: (rng() * 2 - 1) * 30 };
+      return {
+        a1: { x: c.x - 1, y: c.y },
+        a2: { x: c.x + 1, y: c.y },
+        end: (k % 2 === 0 ? "end" : "start") as "start" | "end",
+        cutters: genCutters(rng).concat([
+          { pts: [{ x: c.x + 5, y: -50 }, { x: c.x + 5, y: 50 }], closed: false },
+        ]),
+      };
+    });
+    const w = JSON.parse(K.extend_segment_batch_json(JSON.stringify(qs))) as ([Vec2, Vec2] | null)[];
+    qs.forEach((q, i) => {
+      const t = extendSegment(q.a1, q.a2, q.end, q.cutters);
+      expect((w[i] === null) === (t === null), `ext-null#${i}`).toBe(true);
+      if (t && w[i]) expect(closeVec(w[i]![0], t[0]) && closeVec(w[i]![1], t[1]), `ext#${i}`).toBe(true);
+    });
+  });
+
+  it("joinChains (mergeable + Zufall, Struktur exakt)", () => {
+    const rng = mulberry32(13);
+    const groups = Array.from({ length: N }, () => {
+      const base = genPolyline(rng, 4, 7);
+      const chains: Poly[] = [];
+      for (let k = 0; k < base.length - 1; k++) {
+        const seg = [base[k], base[k + 1]];
+        chains.push({ pts: rng() < 0.5 ? seg : [seg[1], seg[0]], closed: false });
+      }
+      if (rng() < 0.5) chains.push({ pts: genPolyline(rng, 2, 3), closed: false });
+      for (let k = chains.length - 1; k > 0; k--) {
+        const j = Math.floor(rng() * (k + 1));
+        [chains[k], chains[j]] = [chains[j], chains[k]];
+      }
+      return chains;
+    });
+    const w = JSON.parse(K.join_chains_batch_json(JSON.stringify(groups))) as Poly[][];
+    groups.forEach((g, i) => {
+      expect(eqPolyList(w[i], joinChains(g)), `join#${i}`).toBe(true);
+    });
   });
 });
 
