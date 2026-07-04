@@ -36,9 +36,11 @@ interface WallEnd {
 }
 
 /**
- * Berechnet für jede Wand die Gehrungs-Schnittlinien.
- * Nur L-Ecken (genau zwei Wandenden treffen sich) werden behandelt; freie
- * Enden und T-/X-Stöße bleiben rechtwinklig (siehe Kommentare unten).
+ * Berechnet für jede Wand die Gehrungs-/Anschluss-Schnittlinien.
+ * Behandelt werden: L-Ecken (genau zwei Wandenden treffen sich), T-Knoten
+ * (drei Wandenden treffen sich, zwei davon kollinear) und Mittelspannen-
+ * T-Stöße (ein freies Wandende trifft auf die Seite einer anderen Wand).
+ * X-Stöße (vier und mehr Enden) bleiben vorerst rechtwinklig.
  *
  * `walls` ist die bereits gefilterte Wandmenge (z. B. ein Geschoss); die
  * Gehrung wird nur innerhalb dieser Menge gebildet.
@@ -66,18 +68,36 @@ export function computeJoins(
   }
 
   for (const [, ends] of junctions) {
-    // Freies Ende → kein Schnitt.
+    // Freies Ende → kein Schnitt hier (wird unten separat auf Mittelspannen-T
+    // geprüft, Fall 2).
     if (ends.length === 1) continue;
-    // T-/X-Stöße (>2 Enden): vorerst rechtwinklig lassen (Folge-Arbeit).
-    if (ends.length !== 2) continue;
 
-    const a = byId.get(ends[0].wallId)!;
-    const b = byId.get(ends[1].wallId)!;
-    const cut = miterLine(project, a, ends[0].end, b);
-    if (!cut) continue; // kollinear → kein Schnitt
+    if (ends.length === 2) {
+      const a = byId.get(ends[0].wallId)!;
+      const b = byId.get(ends[1].wallId)!;
+      const cut = miterLine(project, a, ends[0].end, b);
+      if (!cut) continue; // kollinear → kein Schnitt
 
-    setCut(result, ends[0], cut);
-    setCut(result, ends[1], cut);
+      setCut(result, ends[0], cut);
+      setCut(result, ends[1], cut);
+      continue;
+    }
+
+    if (ends.length === 3) {
+      applyTJunction(project, byId, ends, result);
+      continue;
+    }
+
+    // X-Stöße u. ä. (>3 Enden): vorerst rechtwinklig lassen (Folge-Arbeit).
+  }
+
+  // Fall 2: Mittelspannen-T-Stoß. Ein freies Wandende (kein anderes Wandende
+  // teilt sich seinen Knoten) kann trotzdem auf die Seite einer anderen Wand
+  // treffen (nicht an deren Endpunkten). In dem Fall bekommt das freie Ende
+  // einen Schnitt entlang der zugewandten Fläche dieser Wand.
+  for (const [, ends] of junctions) {
+    if (ends.length !== 1) continue;
+    applyMidSpanTee(project, byId, walls, ends[0], result);
   }
 
   return result;
@@ -161,4 +181,114 @@ function miterLine(
   const dir = sub(c2, c1);
   if (len(dir) < 1e-9) return null;
   return { point: c1, dir };
+}
+
+/**
+ * Fall 1 — T-Knoten: drei Wandenden treffen sich im selben (gerundeten)
+ * Knoten. Typisch sind zwei davon kollinear (die zwei Hälften der
+ * Durchgangswand, die geometrisch als eine Achse durchläuft) und das dritte
+ * zweigt ab. Die kollinearen zwei bleiben ungeschnitten; der Abzweig bekommt
+ * einen Schnitt entlang der ihm zugewandten Fläche der Durchgangswand.
+ * Findet sich kein eindeutig kollineares Paar (z. B. echter Y-/X-Knoten),
+ * bleibt der Knoten unangetastet (rechtwinklig).
+ */
+function applyTJunction(
+  project: Project,
+  byId: Map<string, Wall>,
+  ends: WallEnd[],
+  result: Map<string, WallCuts>,
+): void {
+  const dirs = ends.map((e) => dirOf(byId.get(e.wallId)!));
+
+  // Suche das (näherungsweise) kollineare Paar: |cos(Winkel der Achsen)| ≈ 1.
+  let throughPair: [number, number] | null = null;
+  for (let i = 0; i < 3 && !throughPair; i++) {
+    for (let k = i + 1; k < 3; k++) {
+      if (1 - Math.abs(dot(dirs[i], dirs[k])) < 1e-6) {
+        throughPair = [i, k];
+        break;
+      }
+    }
+  }
+  if (!throughPair) return; // kein eindeutiger Durchgang erkennbar
+
+  const branchIdx = [0, 1, 2].find(
+    (i) => i !== throughPair![0] && i !== throughPair![1],
+  )!;
+  const branchEnd = ends[branchIdx];
+  const throughEnd = ends[throughPair[0]];
+  const branchWall = byId.get(branchEnd.wallId)!;
+  const throughWall = byId.get(throughEnd.wallId)!;
+
+  const j = throughEnd.end === "start" ? throughWall.start : throughWall.end;
+  const tT = wallTypeThickness(getWallType(project, throughWall));
+  const uT = dirOf(throughWall);
+  const nT = leftNormal(uT);
+  const offT = wallReferenceOffset(throughWall, tT);
+
+  // Auslaufrichtung des Abzweigs vom Knoten weg, in seinen eigenen Körper
+  // (gleiche Konvention wie dA/dB in miterLine).
+  const dBranch =
+    branchEnd.end === "start"
+      ? dirOf(branchWall)
+      : scale(dirOf(branchWall), -1);
+
+  // Zugewandte Fläche: die Seite der Durchgangsachse, zu der der Abzweig
+  // zeigt (positive nT-Seite, wenn der Abzweig dorthin ausläuft).
+  const sign = dot(nT, dBranch) >= 0 ? 1 : -1;
+  const facePoint = add(j, scale(nT, offT + sign * (tT / 2)));
+
+  setCut(result, branchEnd, { point: facePoint, dir: uT });
+}
+
+/**
+ * Fall 2 — Mittelspannen-T-Stoß: prüft, ob das freie Wandende `freeEnd` auf
+ * die innere Spanne einer anderen Wand trifft (projizierter Parameter im
+ * Inneren, nicht an deren Endpunkten) und dabei senkrecht nah genug an deren
+ * Achse liegt (≤ halbe Dicke + Toleranz). Bei Treffer bekommt das freie Ende
+ * einen Schnitt entlang der zugewandten Fläche der getroffenen Wand; bei
+ * mehreren Treffern gewinnt die nächstliegende Wand.
+ */
+function applyMidSpanTee(
+  project: Project,
+  byId: Map<string, Wall>,
+  walls: Wall[],
+  freeEnd: WallEnd,
+  result: Map<string, WallCuts>,
+): void {
+  const freeWall = byId.get(freeEnd.wallId)!;
+  const p = freeEnd.end === "start" ? freeWall.start : freeWall.end;
+
+  const endGap = 1e-4; // Mindestabstand zu den Wandenden für „innere Spanne"
+  const tol = 1e-3; // Toleranz für den senkrechten Abstand zur Wandfläche
+
+  let best: { wall: Wall; perp: number; dist: number } | null = null;
+  for (const w of walls) {
+    if (w.id === freeWall.id) continue;
+    const u = dirOf(w);
+    const wLen = len(sub(w.end, w.start));
+    if (wLen < 1e-9) continue;
+
+    const rel = sub(p, w.start);
+    const distAlong = dot(rel, u);
+    if (distAlong <= endGap || distAlong >= wLen - endGap) continue; // an Endpunkt, kein Mittelspann
+
+    const perp = dot(rel, leftNormal(u));
+    const tw = wallTypeThickness(getWallType(project, w));
+    const dist = Math.abs(perp);
+    if (dist > tw / 2 + tol) continue;
+
+    if (!best || dist < best.dist) best = { wall: w, perp, dist };
+  }
+  if (!best) return; // kein Treffer → rechtwinklig
+
+  const w = best.wall;
+  const tw = wallTypeThickness(getWallType(project, w));
+  const uW = dirOf(w);
+  const nW = leftNormal(uW);
+  const offW = wallReferenceOffset(w, tw);
+  const sign = best.perp >= 0 ? 1 : -1;
+  const facePoint = add(w.start, scale(nW, offW + sign * (tw / 2)));
+
+  setCut(result, freeEnd, { point: facePoint, dir: uW });
 }

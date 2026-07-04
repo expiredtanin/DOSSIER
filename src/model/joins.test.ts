@@ -6,6 +6,12 @@
  *    Außen und Innen mit Innen paaren. Die frühere Distanz-Heuristik kippte hier
  *    und lieferte eine um 90° verdrehte Gehrung (Kreuz-Overlap der Poché-Bänder);
  *    dieser Test fängt den Regress.
+ *  • T-Knoten (drei Wandenden am selben Punkt): das abzweigende Ende bekommt
+ *    einen Schnitt auf der zugewandten Fläche der Durchgangswand, die beiden
+ *    kollinearen Enden bleiben ungeschnitten.
+ *  • Mittelspannen-T-Stoß: ein freies Ende, das mitten auf die Seite einer
+ *    anderen Wand trifft, bekommt einen Schnitt auf deren Fläche; ohne Treffer
+ *    bleibt es rechtwinklig (null).
  */
 
 import { describe, it, expect } from "vitest";
@@ -43,6 +49,18 @@ function twoWallProject(w1: Wall, w2: Wall, thickness: number): Project {
     drawings2d: [],
     context: [],
   };
+}
+
+/** Minimalprojekt aus drei Wänden mit einem Wandtyp gegebener Gesamtdicke. */
+function threeWallProject(
+  w1: Wall,
+  w2: Wall,
+  w3: Wall,
+  thickness: number,
+): Project {
+  const proj = twoWallProject(w1, w2, thickness);
+  proj.walls = [w1, w2, w3];
+  return proj;
 }
 
 function wall(id: string, start: Vec2, end: Vec2): Wall {
@@ -100,5 +118,70 @@ describe("computeJoins — Gehrung an der L-Ecke", () => {
     // Gehrung vertikal: dir.x ≈ 0 (die falsche, horizontale Gehrung hätte dir.y ≈ 0).
     const dir = cut!.dir;
     expect(Math.abs(dir.x) / len(dir)).toBeCloseTo(0, 6);
+  });
+});
+
+describe("computeJoins — T-Knoten (drei Wandenden am selben Punkt)", () => {
+  it("schneidet nur das abzweigende Ende, auf der zugewandten Fläche der Durchgangswand", () => {
+    // Durchgangswand in zwei Hälften WA1 (0,0)→(5,0) und WA2 (5,0)→(10,0),
+    // Abzweig WB (5,0)→(5,3) nach oben. T=0.4 → halbe Dicke 0.2.
+    const proj = threeWallProject(
+      wall("WA1", { x: 0, y: 0 }, { x: 5, y: 0 }),
+      wall("WA2", { x: 5, y: 0 }, { x: 10, y: 0 }),
+      wall("WB", { x: 5, y: 0 }, { x: 5, y: 3 }),
+      0.4,
+    );
+    const joins = computeJoins(proj, proj.walls);
+
+    // Die kollinearen Hälften der Durchgangswand bleiben ungeschnitten.
+    expect(joins.get("WA1")!.endCut).toBeNull();
+    expect(joins.get("WA2")!.startCut).toBeNull();
+
+    // Der Abzweig bekommt einen Schnitt auf der ihm zugewandten (oberen)
+    // Fläche der Durchgangswand: die horizontale Gerade y = 0.2.
+    const cut = joins.get("WB")!.startCut;
+    expect(cut).not.toBeNull();
+    expect(distToLine(cut!, { x: 5, y: 0.2 })).toBeCloseTo(0, 6);
+    expect(distToLine(cut!, { x: 0, y: 0.2 })).toBeCloseTo(0, 6);
+    // Gehrungsgerade horizontal (parallel zur Durchgangsachse).
+    expect(Math.abs(cut!.dir.y) / len(cut!.dir)).toBeCloseTo(0, 6);
+  });
+});
+
+describe("computeJoins — Mittelspannen-T-Stoß (Ende trifft Wandseite)", () => {
+  it("schneidet ein freies Ende, das auf die Seite einer anderen Wand trifft, entlang deren Fläche", () => {
+    // Durchgangswand W (0,0)→(10,0), T=0.4 → halbe Dicke 0.2. Abzweig WB2
+    // trifft mit seinem freien Ende (4, 0.2) genau auf die obere Fläche.
+    const proj = threeWallProject(
+      wall("W", { x: 0, y: 0 }, { x: 10, y: 0 }),
+      wall("WB2", { x: 4, y: 3 }, { x: 4, y: 0.2 }),
+      wall("Filler", { x: 100, y: 100 }, { x: 100, y: 103 }), // unbeteiligt
+      0.4,
+    );
+    const joins = computeJoins(proj, proj.walls);
+
+    const cut = joins.get("WB2")!.endCut;
+    expect(cut).not.toBeNull();
+    expect(distToLine(cut!, { x: 0, y: 0.2 })).toBeCloseTo(0, 6);
+    expect(distToLine(cut!, { x: 5, y: 0.2 })).toBeCloseTo(0, 6);
+    expect(Math.abs(cut!.dir.y) / len(cut!.dir)).toBeCloseTo(0, 6);
+
+    // Die Wand W selbst bleibt an ihren (freien) Enden ungeschnitten.
+    expect(joins.get("W")!.startCut).toBeNull();
+    expect(joins.get("W")!.endCut).toBeNull();
+    // Das obere, unbeteiligte Ende von WB2 bleibt ebenfalls ungeschnitten.
+    expect(joins.get("WB2")!.startCut).toBeNull();
+  });
+
+  it("lässt ein freies Ende rechtwinklig (null), wenn keine Wand nah genug getroffen wird", () => {
+    // Gleiche Anordnung, aber Abzweig-Ende bei y=0.5 — außerhalb der
+    // Wandfläche (Dicke/2 + Toleranz = 0.201).
+    const proj = twoWallProject(
+      wall("W", { x: 0, y: 0 }, { x: 10, y: 0 }),
+      wall("WB3", { x: 4, y: 3 }, { x: 4, y: 0.5 }),
+      0.4,
+    );
+    const joins = computeJoins(proj, proj.walls);
+    expect(joins.get("WB3")!.endCut).toBeNull();
   });
 });
