@@ -5,9 +5,11 @@
 //   1. Aus einer Zeichnungsebene (DrawingLevel, kind "section"/"elevation") wird
 //      eine Schnittebene abgeleitet — die Grundriss-Schnittlinie `linePoints`
 //      plus `directionSign` (Blickrichtung).
-//   2. Das Projekt wird über `projectToModel3d` (dieselbe Wand-/Decken-Zerlegung
-//      wie der 3D-Viewport) zu Wänden + Decken geflacht und als JSON an
-//      `cut_section_json` gereicht.
+//   2. Das Projekt wird über `projectToModel3d({ layeredWalls: false })` zu
+//      Wänden + Decken geflacht und als JSON an `cut_section_json` gereicht —
+//      pro Wand EINE Voll-Box (der 3D-Viewport bekommt dagegen je Materiallage
+//      eine Box). So bleiben die Cut-Polygone 1:1 zu `wallSegmentOwners`, und
+//      die per-Material-Schnitt-Schraffur macht `splitWallLayers` TS-seitig.
 //   3. Das zurückgegebene `SectionOutput` (Cut-Polygone + sichtbare/verdeckte
 //      Kanten, alles in (u, v)-Metern) wird in `generateSectionPlan`
 //      (generatePlan.ts) zu Plan-Primitiven übersetzt.
@@ -624,7 +626,11 @@ export async function computeSection(
       "render3d-WASM ohne cut_section_json — pkg3d neu bauen (npm run build:engine3d)",
     );
   }
-  const modelJson = JSON.stringify(projectToModel3d(project));
+  // Schnitt-Eingabe: EINE Voll-Box pro Wand (layeredWalls:false), damit die
+  // Cut-Polygone 1:1 zu `wallSegmentOwners` (Öffnungs-Segmentierung) liegen und
+  // `splitWallLayers` die materialspezifischen Schnitt-Bänder korrekt aus dem
+  // EINEN Wandrechteck erzeugt. Der 3D-Viewer bekommt weiter per-Schicht-Boxen.
+  const modelJson = JSON.stringify(projectToModel3d(project, { layeredWalls: false }));
   const json = mod.cut_section_json(
     modelJson,
     plane.point[0],

@@ -185,13 +185,21 @@ interface WallBand {
  * WallType / keine Lagen ⇒ EIN Vollkörper-Band über die volle Dicke im
  * neutralen Grundton (heutiges Fallback-Verhalten).
  */
-function resolveWallBands(project: Project, wall: Wall): WallBand[] {
+function resolveWallBands(project: Project, wall: Wall, layered = true): WallBand[] {
   try {
     const wt = getWallType(project, wall);
     if (wt.layers.length > 0) {
       // Gesamtdicke = Summe der Lagen (konsistent mit den Offsets); wenn diese
       // von wallTypeThickness abwiche, gewinnt die Lagen-Summe (keine Lücken).
       const total = wt.layers.reduce((s, l) => s + l.thickness, 0);
+      // Schnitt-Eingabe (layered=false): EINE Voll-Box über die ganze Dicke statt
+      // je Lage eine Box. So bleibt die Emission 1:1 Wand→Rechteck — passend zu
+      // `wallSegmentOwners`/`splitWallLayers` in toSection.ts, die die Schicht-
+      // Zerlegung TS-seitig aus diesem einen Rechteck machen. (Der 3D-Viewer ruft
+      // mit Default layered=true auf und bekommt unverändert die Schicht-Bänder.)
+      if (!layered) {
+        return [{ thickness: total, color: dominantLayerColor(wt.layers, project, WALL_RGB), offset: 0 }];
+      }
       const bands: WallBand[] = [];
       let prefix = 0;
       for (const l of wt.layers) {
@@ -415,8 +423,8 @@ function trimWallTopForCeilings(
 }
 
 /** Emittiert die Teilquader EINER Wand (mit oder ohne Öffnungen). */
-function emitWall(out: RWall[], project: Project, wall: Wall): void {
-  const bands = resolveWallBands(project, wall);
+function emitWall(out: RWall[], project: Project, wall: Wall, layered = true): void {
+  const bands = resolveWallBands(project, wall, layered);
   const { zBottom, zTop: rawZTop } = wallVerticalExtent(project, wall);
   const zTop = trimWallTopForCeilings(project, wall, zBottom, rawZTop);
   const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
@@ -608,16 +616,31 @@ function emitOpeningGlass(project: Project): RMesh[] {
  * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände
  * mit Öffnungen in Teilquader.
  */
-export function projectToWalls3d(project: Project): RWall[] {
+export function projectToWalls3d(project: Project, layered = true): RWall[] {
   const out: RWall[] = [];
-  for (const w of project.walls) emitWall(out, project, w);
+  for (const w of project.walls) emitWall(out, project, w, layered);
   return out;
 }
 
+/**
+ * Optionen für {@link projectToModel3d}. `layeredWalls` steuert, ob eine
+ * mehrschichtige Wand als eigene Box je Materiallage (Default, 3D-Viewer) oder
+ * als EINE Voll-Box über die ganze Dicke emittiert wird. Der Schnitt-Pfad
+ * (`computeSection`) setzt `false`, damit die Cut-Polygone 1:1 zur Wand liegen
+ * (die Schicht-Zerlegung macht dort `splitWallLayers` TS-seitig) — sonst
+ * verschöben die per-Lage vervielfachten Boxen die `ComponentRef.index`
+ * gegenüber `wallSegmentOwners` und die materialspezifische Schnitt-Schraffur
+ * ginge verloren.
+ */
+export interface Model3dOptions {
+  layeredWalls?: boolean;
+}
+
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
-export function projectToModel3d(project: Project): RModel3d {
+export function projectToModel3d(project: Project, opts: Model3dOptions = {}): RModel3d {
+  const layered = opts.layeredWalls ?? true;
   return {
-    walls: projectToWalls3d(project),
+    walls: projectToWalls3d(project, layered),
     slabs: emitSlabs(project),
     // Kontext-Meshes (Terrain/Import) + Fenster-Glasscheiben (eigenes Mesh je
     // Fensteröffnung) — pickGeometry/Highlight nutzen `meshes` bewusst NICHT,
