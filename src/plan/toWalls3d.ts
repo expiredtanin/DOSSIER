@@ -18,13 +18,19 @@
 // Polygon-Platten (SlabInput) mitgegeben — render3d trianguliert den Umriss und
 // zieht ihn über die Deckendicke hoch.
 //
-// SCHICHTEN (Putz/Dämmung/Mauerwerk/…): zusätzlich zur Gesamtdicke wird der
-// aufgelöste Schichtaufbau des WallType mitgegeben (`layers`) — je Schicht
-// Dicke + 3D-Farbe des zugehörigen Bauteil-Materials (Component). render3d
-// extrudiert daraus je Schicht ein eigenes Band quer zur Wanddicke (siehe
-// render3d::mesh); die Eck-Gehrung (Wandknoten-Verschneidung) berechnet
-// render3d selbständig aus der Wandkonnektivität, braucht also keine
-// zusätzlichen Felder von hier.
+// SCHICHTEN (Putz/Dämmung/Mauerwerk/…): der aufgelöste Schichtaufbau des
+// WallType wird HIER (TS-seitig) in echte 3D-Substanz zerlegt — statt EINES
+// Vollkörpers in der repräsentativen Farbe emittiert jede Achsen-Teilquader-
+// Position je Materiallage eine EIGENE Box, quer zur Wanddicke entlang der
+// Wand-Normalen gestapelt und in der Materialfarbe ihres Components eingefärbt
+// (Option B). Schicht i belegt entlang der Normalen das Intervall
+//   [−T/2 + Σ_{k<i} t_k,  −T/2 + Σ_{k≤i} t_k],  T = Σ t_k (Summe der Lagen),
+// zentriert um die Wandachse. Alle Schicht-Boxen einer Wand tragen dieselbe
+// `wallId` (Klick/Highlight selektieren die GANZE Wand). Jede Box ist ein
+// Vollkörper (`layers: []`), den render3d in ihrer `color` zeichnet — die
+// Schicht-Aufteilung passiert also komplett hier, render3d bleibt unverändert.
+// Ohne auflösbaren WallType/ohne Schichten: EIN Vollkörper über die volle
+// Dicke im neutralen Grundton (heutiges Fallback-Verhalten).
 
 import type { Project, Wall, Layer } from "../model/types";
 import {
@@ -42,7 +48,12 @@ export type RRgb = [number, number, number];
 /** Weltpunkt (x, elevation, y) — nur intern für Highlight-Kantengeometrie. */
 type RVec3 = [number, number, number];
 
-/** Eine aufgelöste Wandschicht: Dicke + 3D-Albedo-Farbe (aus dem Component). */
+/**
+ * Eine aufgelöste Wandschicht: Dicke + 3D-Albedo-Farbe (aus dem Component).
+ * Wird seit der TS-seitigen Schicht-Zerlegung (Option B, siehe Moduldoc) NICHT
+ * mehr an render3d durchgereicht — jede Schicht ist eine eigene Voll-Box; das
+ * `RWall.layers`-Feld bleibt für Serde-Kompatibilität, aber stets leer.
+ */
 export interface RLayer {
   thickness: number;
   color: RRgb;
@@ -55,7 +66,11 @@ export interface RWall {
   height: number;
   baseElevation: number;
   color: RRgb;
-  /** Aufgelöster Schichtaufbau (leer = kein WallType auflösbar, siehe emitWall). */
+  /**
+   * Immer leer: die Schichten werden TS-seitig in eigene Voll-Boxen zerlegt
+   * (Option B, siehe Moduldoc). Feld bleibt nur zur Serde-Kompatibilität mit
+   * render3d::WallInput (leer ⇒ Vollkörper-Extrusion in `color`).
+   */
   layers: RLayer[];
   /**
    * Id der Ursprungs-Wand (`project.walls[].id`). Alle Öffnungs-Teilquader einer
@@ -146,10 +161,57 @@ function dominantLayerColor(layers: Layer[], project: Project, fallback: RRgb): 
 }
 
 /**
- * Hängt einen Wand-Teilquader an: das Achsenstück [from..to] (Meter ab
- * Wand-Startpunkt) über den Höhenbereich [zBottom..zTop]. Entartete Stücke
- * (Länge ≤ 0 oder Höhe ≤ 0) werden übersprungen — so überleben Öffnungen dicht
- * an den Wandenden ohne Nullquader.
+ * Eine quer zur Wanddicke gestapelte Materiallage als 3D-Band: eigene Dicke,
+ * Materialfarbe und Mitten-Versatz `offset` (Meter, entlang der Wand-Normalen,
+ * relativ zur Wandachse). Jede solche Lage wird pro Achsen-Teilquader zu einer
+ * eigenen Voll-Box (siehe {@link emitWall}/{@link pushSegment}).
+ */
+interface WallBand {
+  thickness: number;
+  color: RRgb;
+  offset: number;
+}
+
+/**
+ * Löst den Schichtstapel EINER Wand auf: je Materiallage ein {@link WallBand}
+ * mit ihrer Dicke, Component-Farbe und dem Mitten-Versatz entlang der Normalen.
+ * Die Versätze zentrieren den Stapel um die Wandachse; als Gesamtdicke T dient
+ * die SUMME der tatsächlichen Lagen-Dicken (nicht `wallTypeThickness`, falls es
+ * abweicht) — so schließen die Bänder lückenlos aneinander an. Kein auflösbarer
+ * WallType / keine Lagen ⇒ EIN Vollkörper-Band über die volle Dicke im
+ * neutralen Grundton (heutiges Fallback-Verhalten).
+ */
+function resolveWallBands(project: Project, wall: Wall): WallBand[] {
+  try {
+    const wt = getWallType(project, wall);
+    if (wt.layers.length > 0) {
+      // Gesamtdicke = Summe der Lagen (konsistent mit den Offsets); wenn diese
+      // von wallTypeThickness abwiche, gewinnt die Lagen-Summe (keine Lücken).
+      const total = wt.layers.reduce((s, l) => s + l.thickness, 0);
+      const bands: WallBand[] = [];
+      let prefix = 0;
+      for (const l of wt.layers) {
+        const color = hexToRgb(getComponent(project, l.componentId).color);
+        bands.push({ thickness: l.thickness, color, offset: -total / 2 + prefix + l.thickness / 2 });
+        prefix += l.thickness;
+      }
+      return bands;
+    }
+    // WallType ohne Schichten: EIN Vollkörper über die Typ-Gesamtdicke.
+    return [{ thickness: wallTypeThickness(wt), color: WALL_RGB, offset: 0 }];
+  } catch {
+    // Kein auflösbarer WallType: EIN Vollkörper mit Default-Dicke/Grundton.
+    return [{ thickness: 0.2, color: WALL_RGB, offset: 0 }];
+  }
+}
+
+/**
+ * Hängt eine Wand-Schicht-Box an: das Achsenstück [from..to] (Meter ab
+ * Wand-Startpunkt) über den Höhenbereich [zBottom..zTop], quer um `normalOffset`
+ * Meter entlang der Wand-Normalen versetzt (Schichtmitte relativ zur Achse) und
+ * mit Schicht-`thickness`/`color`. Entartete Stücke (Länge ≤ 0 oder Höhe ≤ 0)
+ * werden übersprungen — so überleben Öffnungen dicht an den Wandenden ohne
+ * Nullquader.
  */
 function pushSegment(
   out: RWall[],
@@ -159,9 +221,9 @@ function pushSegment(
   zBottom: number,
   zTop: number,
   thickness: number,
-  layers: RLayer[],
-  wallId: string,
+  normalOffset: number,
   color: RRgb,
+  wallId: string,
 ): void {
   if (to - from <= EPS) return;
   if (zTop - zBottom <= EPS) return;
@@ -171,8 +233,14 @@ function pushSegment(
   if (len < 1e-9) return;
   const ux = dx / len;
   const uy = dy / len;
-  const p1: RVec2 = [wall.start.x + ux * from, wall.start.y + uy * from];
-  const p2: RVec2 = [wall.start.x + ux * to, wall.start.y + uy * to];
+  // Grundriss-Normale (identisch zur Dicken-Achse in raycast3d /
+  // selectionHighlightLines: n = (uy, −ux)). Der Schicht-Versatz verschiebt
+  // Start/Ende der Box quer zur Wand, sodass render3d/raycast die Box um ihre
+  // eigene (versetzte) Achse zentriert aufbaut.
+  const ox = uy * normalOffset;
+  const oy = -ux * normalOffset;
+  const p1: RVec2 = [wall.start.x + ux * from + ox, wall.start.y + uy * from + oy];
+  const p2: RVec2 = [wall.start.x + ux * to + ox, wall.start.y + uy * to + oy];
   out.push({
     start: p1,
     end: p2,
@@ -180,37 +248,26 @@ function pushSegment(
     height: zTop - zBottom,
     baseElevation: zBottom,
     color,
-    layers,
+    layers: [],
     wallId,
   });
 }
 
 /** Emittiert die Teilquader EINER Wand (mit oder ohne Öffnungen). */
 function emitWall(out: RWall[], project: Project, wall: Wall): void {
-  let thickness = 0.2;
-  // Aufgelöster Schichtaufbau (Dicke + 3D-Farbe je Schicht des WallType) —
-  // leer, wenn kein WallType auflösbar ist (render3d extrudiert dann wie
-  // bisher einen Vollkörper aus `thickness`/`color`, siehe RWall-Moduldoc).
-  let layers: RLayer[] = [];
-  // Repräsentative Vollkörper-Farbe = Farbe der dicksten Schicht (Option A,
-  // siehe Moduldoc); Fallback WALL_RGB, wenn kein WallType auflösbar ist.
-  let color: RRgb = WALL_RGB;
-  try {
-    const wt = getWallType(project, wall);
-    thickness = wallTypeThickness(wt);
-    layers = wt.layers.map((l) => ({
-      thickness: l.thickness,
-      color: hexToRgb(getComponent(project, l.componentId).color),
-    }));
-    color = dominantLayerColor(wt.layers, project, WALL_RGB);
-  } catch {
-    thickness = 0.2;
-    layers = [];
-    color = WALL_RGB;
-  }
+  const bands = resolveWallBands(project, wall);
   const { zBottom, zTop } = wallVerticalExtent(project, wall);
   const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
   if (axisLen < 1e-9 || zTop - zBottom <= EPS) return;
+
+  // Ein Achsen-Teilquader × jede Materiallage = eine Box (Schichtstapel quer
+  // zur Wanddicke). Alle tragen die Wand-Id, sodass ein Klick auf irgendeine
+  // Schicht die GANZE Wand selektiert und das Highlight alle Bänder umrandet.
+  const emitSeg = (from: number, to: number, zb: number, zt: number): void => {
+    for (const b of bands) {
+      pushSegment(out, wall, from, to, zb, zt, b.thickness, b.offset, b.color, wall.id);
+    }
+  };
 
   // Aussparungen der Wand als vereinheitlichte Cutouts sammeln:
   //   • Öffnungen (project.openings, Fenster mit Brüstung/Sturz),
@@ -234,9 +291,10 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
   }
   cutouts.sort((a, b) => a.from - b.from);
 
-  // Ohne Aussparungen: ein durchgehender Quader (wie bisher).
+  // Ohne Aussparungen: ein durchgehender Quader je Schicht (wie bisher, aber
+  // in Lagen aufgeteilt).
   if (cutouts.length === 0) {
-    pushSegment(out, wall, 0, axisLen, zBottom, zTop, thickness, layers, wall.id, color);
+    emitSeg(0, axisLen, zBottom, zTop);
     return;
   }
 
@@ -248,23 +306,23 @@ function emitWall(out: RWall[], project: Project, wall: Wall): void {
     const segFrom = Math.max(cursor, from);
     if (from > cursor) {
       // Voller Wandpfeiler bis zur Aussparung.
-      pushSegment(out, wall, cursor, from, zBottom, zTop, thickness, layers, wall.id, color);
+      emitSeg(cursor, from, zBottom, zTop);
     }
     if (to > segFrom) {
       // Brüstung unter der Öffnung (bei Türen entfällt sie, da oBottom == zBottom).
       if (oBottom > zBottom + EPS) {
-        pushSegment(out, wall, segFrom, to, zBottom, oBottom, thickness, layers, wall.id, color);
+        emitSeg(segFrom, to, zBottom, oBottom);
       }
       // Sturz über der Öffnung (bis zum Wandkopf).
       if (oTop < zTop - EPS) {
-        pushSegment(out, wall, segFrom, to, oTop, zTop, thickness, layers, wall.id, color);
+        emitSeg(segFrom, to, oTop, zTop);
       }
     }
     cursor = Math.max(cursor, to);
   }
   // Restlicher Wandpfeiler bis zum Achsenende.
   if (cursor < axisLen) {
-    pushSegment(out, wall, cursor, axisLen, zBottom, zTop, thickness, layers, wall.id, color);
+    emitSeg(cursor, axisLen, zBottom, zTop);
   }
 }
 
