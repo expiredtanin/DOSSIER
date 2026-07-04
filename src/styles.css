@@ -153,8 +153,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 14px;
-  height: 56px;
+  padding: 6px 14px;
+  height: 60px;
   border-bottom: 1px solid var(--line);
   /* Oberleiste auf Ebene 1 (angehoben über dem App-Grund) + weicher Schatten
      nach unten → trennt sich klar von der Zeichenfläche (Tiefe). */
@@ -421,13 +421,17 @@ body {
 
 /* Massstab/Zoom-Cluster (2×2-Raster): Stat-Pille links über beide Zeilen. */
 .tb-zoomcluster {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 6px;
+  /* Einfaches Flex: links die Stat-Pille, rechts der gestapelte
+     (Massstab-Dropdown + Zoom-Segment) Flex-Container. Früher ein 2-Zeilen-Grid
+     mit `grid-row: 1/span 2` an der Stat-Pille — das erzeugte aber eine leere
+     Phantom-Zeile (die rechte Seite ist EIN Flex-Container, keine zwei Grid-
+     Zeilen) und damit +6px Höhe, wodurch der Cluster höher war als die übrigen
+     zweizeiligen Kombos. */
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
 }
 .tb-stat {
-  grid-row: 1 / span 2;
   display: flex;
   flex-direction: column;
   justify-content: center;
