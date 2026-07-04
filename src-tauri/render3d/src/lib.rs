@@ -20,6 +20,7 @@ pub mod math;
 pub mod mesh;
 pub(crate) mod openings;
 pub mod section;
+pub mod section_fill;
 pub mod shaders;
 pub mod types;
 
@@ -818,5 +819,13 @@ mod tests {
         Validator::new(ValidationFlags::all(), Capabilities::all())
             .validate(&grid_module)
             .unwrap_or_else(|e| panic!("grid: WGSL-Validierung fehlgeschlagen: {e:?}"));
+
+        // Schnittflaechen-Kappen-Shader (Live-Schnitt-Schraffur) ebenso.
+        let cap_src = super::shaders::CAP_WGSL;
+        let cap_module = naga::front::wgsl::parse_str(cap_src)
+            .unwrap_or_else(|e| panic!("cap: WGSL-Parse-Fehler: {e:?}"));
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&cap_module)
+            .unwrap_or_else(|e| panic!("cap: WGSL-Validierung fehlgeschlagen: {e:?}"));
     }
 }

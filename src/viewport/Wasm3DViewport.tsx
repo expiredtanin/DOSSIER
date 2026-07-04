@@ -42,7 +42,7 @@
 // Die Orbit-/Pan-Mathematik folgt den OrbitControls-Konventionen (Winkel je
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Project } from "../model/types";
 import { projectToModel3d, pickGeometry } from "../plan/toWalls3d";
 import type { RenderMode, View3d } from "../ui/TopBar";
@@ -220,10 +220,16 @@ export function Wasm3DViewport({
     setRenderStyle,
     applyViewPreset,
     setGroundGrid,
+    setSectionPlane,
     setHighlightLines,
     ready,
     failed,
   } = useWasm3dRenderer(canvasRef, true);
+  // Live-Schnitt-Zustand (lokaler Overlay-Umschalter, MVP): vertikale
+  // Schnittebene durch die Modellmitte, Blick +Y (Grundriss-Y = world Z, s.
+  // section.rs `looking_plus_y`: normal = [0,0,1]). Kein Store-/App-Prop —
+  // reine Viewport-Ansichts-Option analog zum Grid-Overlay.
+  const [sectionActive, setSectionActive] = useState(false);
   // Orbit-Zustand in einem Ref (kein React-State): Mausbewegungen zeichnen
   // direkt neu, ohne die Komponente je Frame zu re-rendern. Dient NUR der
   // freien Navigation NACH einem Praeset-Sprung (s. Datei-Kommentar).
@@ -276,6 +282,18 @@ export function Wasm3DViewport({
     setGroundGrid(gridVisible, groundElevation, 40, 1);
     redrawRef.current();
   }, [ready, gridVisible, groundElevation, setGroundGrid]);
+
+  // Live-Schnitt: bei Bereitschaft, Umschalten (`sectionActive`) oder
+  // Modelländerung neu setzen. MVP-Ebene = vertikal durch die Modellmitte
+  // (`fitTargetDist`-Ziel), Blick nach +Y -> Normale [0,0,1] (Grundriss-Y =
+  // world Z, s. section.rs `looking_plus_y`). Bei aktivem Schnitt baut Rust die
+  // Schnittflaechen-Schraffur (Caps) aus den gecachten Waenden/Decken.
+  useEffect(() => {
+    if (!ready) return;
+    const { target } = fitTargetDist(project);
+    setSectionPlane(sectionActive, target, [0, 0, 1]);
+    redrawRef.current();
+  }, [ready, sectionActive, project, setSectionPlane]);
 
   // Auswahl-Hervorhebung: bei Bereitschaft oder Änderung der Highlight-Linien
   // (Auswahl gewechselt/aufgehoben) neu setzen + zeichnen. Die Engine hält das
@@ -504,6 +522,37 @@ export function Wasm3DViewport({
           Darstellungsart kommen von der Oberleiste (TopBar); das Grid-Overlay
           unten ist der einzige eigene Umschalter hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
+      {/* Live-Schnitt-Umschalter (eigener Overlay-Button, MVP): vertikale
+          Schnittebene durch die Modellmitte, Blick +Y. Sitzt ueber dem
+          Grid-Button (falls vorhanden). Reine Ansichts-Option des Viewports. */}
+      <button
+        type="button"
+        aria-label="Schnittebene"
+        onClick={() => setSectionActive((v) => !v)}
+        title={sectionActive ? "Schnittebene aus" : "Schnittebene ein"}
+        aria-pressed={sectionActive}
+        style={{
+          position: "absolute",
+          right: 10,
+          bottom: onToggleGrid ? 48 : 10,
+          width: 30,
+          height: 30,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 0,
+          borderRadius: 7,
+          border: "1px solid rgba(255,255,255,0.14)",
+          background: sectionActive ? "rgba(255,255,255,0.14)" : "rgba(20,20,24,0.65)",
+          color: sectionActive ? "#f2f2f2" : "#9a9a9a",
+          cursor: "pointer",
+          backdropFilter: "blur(4px)",
+        }}
+      >
+        <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>
+          content_cut
+        </span>
+      </button>
       {onToggleGrid && (
         // Dezenter Overlay-Button (eigener DOM-Knoten neben dem Canvas, `.viewport`
         // ist `position: relative` — s. styles.css), stört die Maus-Navigation

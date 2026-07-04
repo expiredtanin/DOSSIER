@@ -53,6 +53,20 @@ interface WebModelRendererLike {
     extent_m: number,
     spacing_m: number,
   ): void;
+  /** Live-Schnitt ein-/ausschalten (Rust-seitig, `web::set_section_plane`).
+   * `active=false` hebt den Schnitt auf. `p*` = Punkt auf der Ebene, `n*` =
+   * Ebenennormale = Blickrichtung (world-Meter, Y-up; nur vertikale Ebenen).
+   * Kappt das Modell per Shader-`discard` und fuellt die Schnittflaeche mit der
+   * Diagonalschraffur (Caps). Wirkt erst beim naechsten `render`. */
+  set_section_plane(
+    active: boolean,
+    px: number,
+    py: number,
+    pz: number,
+    nx: number,
+    ny: number,
+    nz: number,
+  ): void;
   /**
    * Auswahl-Hervorhebung setzen: ein LineList-Vertex-Array (interleaved
    * `[px,py,pz, r,g,b, ...]`, world-Meter, je 2 Vertices = 1 Linie), das die
@@ -188,6 +202,38 @@ export function useWasm3dRenderer(
   );
 
   /**
+   * Live-Schnitt setzen/aufheben (Overlay-Umschalter im Viewport, s.
+   * Wasm3DViewport.tsx). `active=false` zeigt das Modell wieder komplett.
+   * `point` = Punkt auf der Schnittebene, `normal` = Ebenennormale =
+   * Blickrichtung (world-Meter, Y-up; nur vertikale Ebenen sinnvoll). Wirkt
+   * erst beim nächsten `render`.
+   */
+  const setSectionPlane = useCallback(
+    (
+      active: boolean,
+      point: [number, number, number],
+      normal: [number, number, number],
+    ) => {
+      const r = rendererRef.current;
+      if (!r) return;
+      try {
+        r.set_section_plane(
+          active,
+          point[0],
+          point[1],
+          point[2],
+          normal[0],
+          normal[1],
+          normal[2],
+        );
+      } catch (e) {
+        console.warn("render3d set_section_plane fehlgeschlagen:", e);
+      }
+    },
+    [],
+  );
+
+  /**
    * Auswahl-Hervorhebung setzen (Umriss-Linien des gewählten Bauteils, immer
    * obenauf) — reicht das fertige LineList-Vertex-Array 1:1 an
    * `set_highlight_lines` durch (s. WebModelRendererLike). Der Aufrufer
@@ -274,6 +320,7 @@ export function useWasm3dRenderer(
     setRenderStyle,
     applyViewPreset,
     setGroundGrid,
+    setSectionPlane,
     setHighlightLines,
     ready,
     failed,

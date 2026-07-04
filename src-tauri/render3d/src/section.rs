@@ -186,7 +186,9 @@ impl SectionPlane {
 
     /// u-Achse der Projektion: horizontal, senkrecht zur Blickrichtung (siehe
     /// Moduldoc — dieselbe Konvention wie `math::look_at`s `right`-Vektor).
-    fn u_axis(&self) -> [f32; 3] {
+    /// `pub(crate)`, damit `section_fill` die (u,v)->Welt-Ruecktransformation
+    /// mit EXAKT derselben Achsdefinition (inkl. Entartungs-Fallback) rechnet.
+    pub(crate) fn u_axis(&self) -> [f32; 3] {
         let up = [0.0, 1.0, 0.0];
         let u = math::cross(self.normal, up);
         if math::length(u) > 1e-6 {

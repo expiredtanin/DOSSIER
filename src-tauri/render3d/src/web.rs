@@ -98,6 +98,15 @@ pub struct WebModelRenderer {
     /// Ziel/Distanz, mirror der TS-`fitTargetDist` in Wasm3DViewport.tsx).
     /// `None` bei leerem Modell (kein Wall-/Slab-Vertex) oder vor `set_model`.
     bounds: Option<([f32; 3], [f32; 3])>,
+    /// Gecachte Wand-/Decken-Eingabe des zuletzt gesetzten Modells. `set_model`
+    /// verwirft sie nach dem GPU-Upload NICHT (anders als der Renderer selbst),
+    /// weil der Live-Schnitt (`set_section_plane`) daraus jederzeit die
+    /// Cut-Cap-Geometrie neu berechnen koennen muss (GPU-frei, `cut_section`).
+    walls: Vec<WallInput>,
+    slabs: Vec<SlabInput>,
+    /// Aktueller Live-Schnitt-Zustand: aktiv? + Ebene (point/normal). Gemerkt,
+    /// damit ein `set_model` bei aktivem Schnitt die Caps automatisch neu baut.
+    section: Option<([f32; 3], [f32; 3])>,
 }
 
 /// Achsparallele Bounding-Box des Modells in Welt-Metern (Y-up), aus Waenden +
@@ -224,6 +233,9 @@ impl WebModelRenderer {
             renderer,
             camera: Camera::default(),
             bounds: None,
+            walls: Vec::new(),
+            slabs: Vec::new(),
+            section: None,
         })
     }
 
@@ -237,6 +249,47 @@ impl WebModelRenderer {
         self.bounds = model_bounds(&model.walls, &model.slabs);
         self.renderer
             .upload_model(&self.device, &model.walls, &model.slabs, &model.meshes);
+        // Wand-/Decken-Eingabe fuer den Live-Schnitt cachen (Klon, da der Renderer
+        // sie nur zu GPU-Puffern verarbeitet und verwirft).
+        self.walls = model.walls;
+        self.slabs = model.slabs;
+        // Ist der Schnitt aktiv, die Caps am neuen Modell neu aufbauen.
+        if let Some((point, normal)) = self.section {
+            self.renderer.update_section(
+                &self.device,
+                true,
+                point,
+                normal,
+                &self.walls,
+                &self.slabs,
+            );
+        }
+        Ok(())
+    }
+
+    /// Live-Schnitt ein-/ausschalten und die Schnittebene setzen. `active=false`
+    /// hebt den Schnitt auf (Modell wieder komplett, keine Caps). `p*` = Punkt auf
+    /// der Ebene, `n*` = Ebenennormale = Blickrichtung (world-Meter, Y-up; wird
+    /// normalisiert). NUR VERTIKALE Ebenen sind sinnvoll (Normale ohne Y-Anteil —
+    /// Annahme von `section.rs`). Kappt Mesh/Kanten/Grid per Shader-`discard` und
+    /// baut aus den gecachten Waenden/Decken die Schnittflaechen-Schraffur (Caps).
+    /// Wirkt erst beim naechsten `render`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_section_plane(
+        &mut self,
+        active: bool,
+        px: f32,
+        py: f32,
+        pz: f32,
+        nx: f32,
+        ny: f32,
+        nz: f32,
+    ) -> Result<(), JsValue> {
+        let point = [px, py, pz];
+        let normal = [nx, ny, nz];
+        self.section = if active { Some((point, normal)) } else { None };
+        self.renderer
+            .update_section(&self.device, active, point, normal, &self.walls, &self.slabs);
         Ok(())
     }
 

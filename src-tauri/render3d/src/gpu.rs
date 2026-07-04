@@ -16,7 +16,9 @@ use crate::edges::{build_mesh_edges, EDGE_FLOATS_PER_VERTEX};
 use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::math::{view_projection, Mat4};
 use crate::mesh::{build_scene_mesh, build_walls_mesh};
-use crate::shaders::{GRID_WGSL, MESH_WGSL};
+use crate::section::SectionPlane;
+use crate::section_fill::{build_cut_caps, CAP_FLOATS_PER_VERTEX};
+use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_WGSL};
 use crate::types::{Camera, Mesh, MeshInput, SlabInput, WallInput, FLOATS_PER_VERTEX};
 
 /// Darstellungsart des 3D-Renderers (Oberleiste: shaded/white/textured/
@@ -90,8 +92,13 @@ struct Globals {
     sky_color: [f32; 4],
     ground_color: [f32; 4],
     sun_color: [f32; 4],
-    /// x = Darstellungsart (0 = shaded/Material, 1 = weiss/Clay); siehe shaders.rs.
+    /// x = Darstellungsart (0 = shaded/Material, 1 = weiss/Clay, 2 = hidden);
+    /// y = Live-Schnitt aktiv (0/1). Siehe shaders.rs.
     mode: [f32; 4],
+    /// Live-Schnittebene: xyz = Ebenennormale (= Blickrichtung, normiert),
+    /// w = -dot(normal, point). Ein Fragment mit `dot(world, xyz) + w > 0` liegt
+    /// hinter der Ebene und wird (bei aktivem Schnitt, mode.y > 0.5) verworfen.
+    section_plane: [f32; 4],
 }
 
 impl Default for Globals {
@@ -107,6 +114,8 @@ impl Default for Globals {
             // Directional-Sonne: warmweiss, moderat.
             sun_color: [0.55, 0.53, 0.49, 1.0],
             mode: [0.0, 0.0, 0.0, 0.0],
+            // Default: kein Schnitt (mode.y = 0). Neutrale Ebene.
+            section_plane: [0.0, 0.0, 1.0, 0.0],
         }
     }
 }
@@ -131,6 +140,14 @@ struct LineBuffers {
     vertex_count: u32,
 }
 
+/// GPU-seitiger Vertex-Buffer der Schnittflaechen-Kappen (Cut-Caps, TriangleList,
+/// kein Indexpuffer). Format `[pos vec3, uv vec2]` (`CAP_FLOATS_PER_VERTEX`) —
+/// die (u,v)-Ebenenkoordinaten treiben die prozedurale Schraffur (CAP_WGSL).
+struct CapBuffers {
+    vbo: wgpu::Buffer,
+    vertex_count: u32,
+}
+
 /// Der native 3D-Renderer: haelt die Pipeline, das Uniform (View-Projektion +
 /// Licht) und das aktuell hochgeladene Mesh. Ein Tiefenpuffer wird passend zur
 /// Ziel-Groesse (neu) angelegt.
@@ -150,6 +167,11 @@ pub struct Renderer {
     /// (`depth_compare: Always`, kein Depth-Write): die Auswahl-Highlight-Linien
     /// liegen immer sichtbar obenauf und scheinen auch hinter Waenden durch.
     highlight_pipeline: wgpu::RenderPipeline,
+    /// Schnittflaechen-Kappen (TriangleList, CAP_WGSL, eigenes Vertex-Layout
+    /// [pos vec3, uv vec2]). Teilt sich die `Globals`-Bind-Group; leichter
+    /// Depth-Bias zur Kamera hin gegen Z-Fighting mit den an der Ebene
+    /// per-`discard` gekappten Wandflaechen. Backface-Culling AUS (CullMode::None).
+    cap_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     mesh: Option<MeshBuffers>,
@@ -165,6 +187,10 @@ pub struct Renderer {
     /// `set_highlight_lines` gesetzt/geloescht; im Render-Pass als ALLERLETZTES
     /// (ohne Tiefentest) gezeichnet.
     highlight: Option<LineBuffers>,
+    /// Schnittflaechen-Kappen (Cut-Caps) des Live-Schnitts. None = kein Schnitt
+    /// aktiv / keine Schnittgeometrie. Ueber `set_cut_caps` gesetzt/geloescht,
+    /// gezeichnet NACH den Flaechen, VOR Kanten/Grid/Highlight.
+    caps: Option<CapBuffers>,
     /// Ob das Bodengitter im naechsten `render` gezeichnet wird. Default false —
     /// bestehende Aufrufer ohne `set_ground_grid` bekommen KEIN Gitter.
     grid_visible: bool,
@@ -372,6 +398,70 @@ impl Renderer {
             },
         );
 
+        // Schnittflaechen-Kappen-Pipeline: eigener Shader (CAP_WGSL), eigenes
+        // schlankes Vertex-Layout [pos vec3, uv vec2], TriangleList. Dieselbe
+        // Bind-Group (Globals) und dasselbe Depth-/MSAA-/Farbziel wie oben.
+        let cap_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cap.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(CAP_WGSL.into()),
+        });
+        let cap_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: (CAP_FLOATS_PER_VERTEX * 4) as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2],
+        };
+        let cap_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cap.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &cap_module,
+                entry_point: Some("vs_main"),
+                buffers: &[cap_vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &cap_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                // Die Cap ist eine flache Flaeche und soll aus BEIDEN Richtungen
+                // sichtbar sein (das Winding der Rueckprojektion ist nicht
+                // kamerakonsistent garantiert) -> kein Backface-Culling.
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                // Leicht ZUR Kamera ziehen (negativer Bias, Gegenteil des
+                // hidden_face_pipeline-Bias): die Caps liegen exakt auf der
+                // Schnittebene, an der die Wandflaechen weggeschnitten werden —
+                // der negative Bias vermeidet Z-Fighting mit an der Grenze
+                // gerade noch stehen gebliebenen Wandfragmenten.
+                bias: wgpu::DepthBiasState {
+                    constant: -4,
+                    slope_scale: -1.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals.buffer"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -392,12 +482,14 @@ impl Renderer {
             hidden_face_pipeline,
             grid_pipeline,
             highlight_pipeline,
+            cap_pipeline,
             bind_group,
             uniform,
             mesh: None,
             edges: None,
             grid: None,
             highlight: None,
+            caps: None,
             grid_visible: false,
             style: RenderStyle::Shaded,
             depth: None,
@@ -556,6 +648,61 @@ impl Renderer {
         });
     }
 
+    /// Aktiviert/deaktiviert den Live-Schnitt und setzt die Schnittebene. `active`
+    /// steuert `mode.y` (der Mesh-/Grid-Shader kappt die Geometrie nur bei > 0.5);
+    /// `point`/`normal` (world-Meter, Normale = Blickrichtung) fuellen
+    /// `section_plane = [n, -dot(n, point)]`. Nur die Uniform-Werte — die Cap-
+    /// Geometrie setzt der Aufrufer separat via `set_cut_caps`.
+    pub fn set_section_plane(&mut self, active: bool, point: [f32; 3], normal: [f32; 3]) {
+        let n = crate::math::normalize(normal);
+        let w = -(n[0] * point[0] + n[1] * point[1] + n[2] * point[2]);
+        self.globals.section_plane = [n[0], n[1], n[2], w];
+        self.globals.mode[1] = if active { 1.0 } else { 0.0 };
+    }
+
+    /// Setzt/loescht die Schnittflaechen-Kappen (Cut-Caps). `verts` = interleaved
+    /// `[px,py,pz, u,v, ...]` (world-Meter + Ebenenkoordinaten, TriangleList,
+    /// `CAP_FLOATS_PER_VERTEX`), wie `section_fill::build_cut_caps` liefert. Leeres
+    /// Slice loescht die Caps. Wirkt erst beim naechsten `render`.
+    pub fn set_cut_caps(&mut self, device: &wgpu::Device, verts: &[f32]) {
+        if verts.is_empty() {
+            self.caps = None;
+            return;
+        }
+        let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("caps.vbo"),
+            contents: bytemuck::cast_slice(verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.caps = Some(CapBuffers {
+            vbo,
+            vertex_count: (verts.len() / CAP_FLOATS_PER_VERTEX) as u32,
+        });
+    }
+
+    /// Komfort: Schnittebene setzen UND die Cap-Geometrie aus den (gecachten)
+    /// Waenden/Decken neu bauen — bei `active == false` werden Uniform-Flag und
+    /// Caps geloescht. Buendelt `set_section_plane` + `build_cut_caps` +
+    /// `set_cut_caps`, damit `web.rs` nur EINEN Aufruf braucht.
+    pub fn update_section(
+        &mut self,
+        device: &wgpu::Device,
+        active: bool,
+        point: [f32; 3],
+        normal: [f32; 3],
+        walls: &[WallInput],
+        slabs: &[SlabInput],
+    ) {
+        self.set_section_plane(active, point, normal);
+        if active {
+            let plane = SectionPlane::new(point, normal);
+            let caps = build_cut_caps(&plane, walls, slabs);
+            self.set_cut_caps(device, &caps);
+        } else {
+            self.set_cut_caps(device, &[]);
+        }
+    }
+
     /// Stellt sicher, dass ein Tiefenpuffer passend zur Ziel-Groesse existiert.
     fn ensure_depth(&mut self, device: &wgpu::Device, w: u32, h: u32) {
         let ok = matches!(&self.depth, Some(d) if d.width == w && d.height == h);
@@ -690,6 +837,17 @@ impl Renderer {
                     pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..m.index_count, 0, 0..1);
                 }
+            }
+
+            // 1b) Schnittflaechen-Kappen (Cut-Caps) NACH den Flaechen, VOR den
+            //     Kanten: sie fuellen die an der Schnittebene weggeschnittene Wunde
+            //     mit der Diagonalschraffur (CAP_WGSL). Werden selbst NICHT gekappt.
+            //     Nur vorhanden, wenn der Live-Schnitt aktiv ist (set_cut_caps).
+            if let Some(c) = &self.caps {
+                pass.set_pipeline(&self.cap_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, c.vbo.slice(..));
+                pass.draw(0..c.vertex_count, 0..1);
             }
 
             // 2) Modell-Kanten (wireframe/hidden) — LineList-Pipeline (wie Grid).

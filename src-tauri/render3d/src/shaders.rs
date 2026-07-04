@@ -31,12 +31,13 @@
 /// + Lambert-Directional — GPU-Aequivalent eines Architektur-Massenmodell-Lichts.
 pub const MESH_WGSL: &str = r#"
 struct Globals {
-    view_proj    : mat4x4<f32>,
-    light_dir    : vec4<f32>,
-    sky_color    : vec4<f32>,
-    ground_color : vec4<f32>,
-    sun_color    : vec4<f32>,
-    mode         : vec4<f32>,
+    view_proj     : mat4x4<f32>,
+    light_dir     : vec4<f32>,
+    sky_color     : vec4<f32>,
+    ground_color  : vec4<f32>,
+    sun_color     : vec4<f32>,
+    mode          : vec4<f32>,
+    section_plane : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 
@@ -50,6 +51,7 @@ struct VsOut {
     @builtin(position) clip_pos : vec4<f32>,
     @location(0) world_normal : vec3<f32>,
     @location(1) color        : vec3<f32>,
+    @location(2) world_pos    : vec3<f32>,
 };
 
 @vertex
@@ -58,11 +60,21 @@ fn vs_main(in : VsIn) -> VsOut {
     out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
     out.world_normal = in.normal;
     out.color = in.color;
+    out.world_pos = in.position;
     return out;
 }
 
 @fragment
 fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
+    // Live-Schnitt: mode.y > 0.5 aktiviert die Kappung. section_plane.xyz =
+    // Ebenennormale (= Blickrichtung), .w = -dot(n, point). depth > 0 heisst
+    // "hinter der Ebene" (in Blickrichtung) -> dieses Material wird weggeschnitten,
+    // die Schnittflaechen-Caps (cap_pipeline) fuellen die entstehende Wunde.
+    if (globals.mode.y > 0.5) {
+        if (dot(in.world_pos, globals.section_plane.xyz) + globals.section_plane.w > 0.0) {
+            discard;
+        }
+    }
     let n = normalize(in.world_normal);
     let l = normalize(globals.light_dir.xyz);
     let style = globals.mode.x;
@@ -120,12 +132,13 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 /// gemeinsamen Tiefenpuffer, sodass das Modell das Gitter korrekt verdeckt.
 pub const GRID_WGSL: &str = r#"
 struct Globals {
-    view_proj    : mat4x4<f32>,
-    light_dir    : vec4<f32>,
-    sky_color    : vec4<f32>,
-    ground_color : vec4<f32>,
-    sun_color    : vec4<f32>,
-    mode         : vec4<f32>,
+    view_proj     : mat4x4<f32>,
+    light_dir     : vec4<f32>,
+    sky_color     : vec4<f32>,
+    ground_color  : vec4<f32>,
+    sun_color     : vec4<f32>,
+    mode          : vec4<f32>,
+    section_plane : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 
@@ -136,7 +149,8 @@ struct VsIn {
 
 struct VsOut {
     @builtin(position) clip_pos : vec4<f32>,
-    @location(0) color : vec3<f32>,
+    @location(0) color     : vec3<f32>,
+    @location(1) world_pos : vec3<f32>,
 };
 
 @vertex
@@ -144,11 +158,79 @@ fn vs_main(in : VsIn) -> VsOut {
     var out : VsOut;
     out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
     out.color = in.color;
+    out.world_pos = in.position;
     return out;
 }
 
 @fragment
 fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
+    // Gleiche Kappung wie die Mesh-Pipeline: Grid-, Modell-Kanten- und
+    // Highlight-Linien (alle teilen diesen Shader) werden an der Schnittebene
+    // weggeschnitten, damit auf der abgeschnittenen Seite keine Kanten stehen
+    // bleiben (mode.y > 0.5 = aktiv).
+    if (globals.mode.y > 0.5) {
+        if (dot(in.world_pos, globals.section_plane.xyz) + globals.section_plane.w > 0.0) {
+            discard;
+        }
+    }
     return vec4<f32>(in.color, 1.0);
+}
+"#;
+
+/// WGSL der Schnittflaechen-Kappen (Cut-Caps, section_fill.rs / gpu::cap_pipeline).
+/// Eigene TriangleList-Pipeline: schlankes Vertex-Layout [pos vec3, uv vec2],
+/// dieselbe `Globals`-Bind-Group (group(0) binding(0)) wie Mesh/Grid. Die Caps
+/// werden NICHT geclippt (sie SIND die Schnittflaeche). Fragment: prozedurale
+/// 45-Grad-Diagonalschraffur aus den Ebenen-Koordinaten (u,v) in Modell-Metern —
+/// dunkle Tinte auf hellem Papier, passend zur 2D-Schnittkonvention.
+pub const CAP_WGSL: &str = r#"
+struct Globals {
+    view_proj     : mat4x4<f32>,
+    light_dir     : vec4<f32>,
+    sky_color     : vec4<f32>,
+    ground_color  : vec4<f32>,
+    sun_color     : vec4<f32>,
+    mode          : vec4<f32>,
+    section_plane : vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> globals : Globals;
+
+struct VsIn {
+    @location(0) position : vec3<f32>,
+    @location(1) uv       : vec2<f32>,
+};
+
+struct VsOut {
+    @builtin(position) clip_pos : vec4<f32>,
+    @location(0) uv : vec2<f32>,
+};
+
+@vertex
+fn vs_main(in : VsIn) -> VsOut {
+    var out : VsOut;
+    out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
+    out.uv = in.uv;
+    return out;
+}
+
+@fragment
+fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
+    // 45-Grad-Diagonalschraffur in Modell-Metern: Linien bei ganzzahligen
+    // Vielfachen von `spacing` entlang (u + v). `dist` = Abstand (in Einheiten
+    // von `spacing`) zur naechsten Linie; `fwidth` liefert eine bildschirm-
+    // groessenrichtige Kantenglaettung (kein Aliasing bei flachem Blickwinkel).
+    let spacing = 0.08;   // Linienabstand ~8 cm
+    let half    = 0.004;  // halbe Linienbreite ~4 mm (Strich ~8 mm)
+    let ink   = vec3<f32>(0.06, 0.06, 0.06);
+    let paper = vec3<f32>(0.94, 0.94, 0.94);
+
+    let s = (in.uv.x + in.uv.y) / spacing;
+    let frac = fract(s);
+    let dist = min(frac, 1.0 - frac);     // 0 auf der Linie
+    let half_s = half / spacing;
+    let aa = max(fwidth(s), 1e-5);
+    let line = 1.0 - smoothstep(half_s, half_s + aa, dist);
+    let color = mix(paper, ink, line);
+    return vec4<f32>(color, 1.0);
 }
 "#;
