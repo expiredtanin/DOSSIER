@@ -366,6 +366,18 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// Setzt/loescht die Auswahl-Highlight-Linien (Umriss/Kanten des selektierten
+    /// Bauteils). `vertices` = interleaved LineList-Vertices
+    /// `[px,py,pz, r,g,b, ...]` (world-Meter, je 2 Vertices = 1 Segment) — exakt
+    /// dasselbe Format wie die Grid-/Edge-Vertices. Ein leeres Slice loescht das
+    /// Highlight (nichts wird gezeichnet). Die Linien liegen im Render-Pass ohne
+    /// Tiefentest immer sichtbar obenauf (scheinen auch hinter Waenden durch).
+    /// Wirkt erst beim naechsten `render`.
+    pub fn set_highlight_lines(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
+        self.renderer.set_highlight_lines(&self.device, vertices);
+        Ok(())
+    }
+
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));

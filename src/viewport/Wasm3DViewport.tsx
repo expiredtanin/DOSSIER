@@ -176,6 +176,7 @@ export function Wasm3DViewport({
   groundElevation = 0,
   onToggleGrid,
   onPick3d,
+  highlightLines = null,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -199,6 +200,13 @@ export function Wasm3DViewport({
    * Aufrufer (App) setzt daraus die Store-Selektion; ohne Angabe passiert nichts.
    */
   onPick3d?: (hit: Pick3dHit, additive: boolean) => void;
+  /**
+   * Umriss-Linien der aktuellen Auswahl (LineList-Vertex-Array, s.
+   * `selectionHighlightLines` in plan/toWalls3d.ts) — werden ohne Tiefentest
+   * immer sichtbar obenauf gezeichnet (Akzentfarbe kommt vom Aufrufer/App).
+   * `null`/leeres Array = kein Highlight (leere Auswahl).
+   */
+  highlightLines?: Float32Array | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
@@ -212,6 +220,7 @@ export function Wasm3DViewport({
     setRenderStyle,
     applyViewPreset,
     setGroundGrid,
+    setHighlightLines,
     ready,
     failed,
   } = useWasm3dRenderer(canvasRef, true);
@@ -267,6 +276,17 @@ export function Wasm3DViewport({
     setGroundGrid(gridVisible, groundElevation, 40, 1);
     redrawRef.current();
   }, [ready, gridVisible, groundElevation, setGroundGrid]);
+
+  // Auswahl-Hervorhebung: bei Bereitschaft oder Änderung der Highlight-Linien
+  // (Auswahl gewechselt/aufgehoben) neu setzen + zeichnen. Die Engine hält das
+  // Highlight, bis es erneut gesetzt wird — Kamerabewegungen (Orbit/Pan/Zoom)
+  // lösen hier KEINEN neuen `setHighlightLines`-Aufruf aus, das Highlight
+  // bleibt einfach über den nächsten `render()`-Aufruf hinweg sichtbar.
+  useEffect(() => {
+    if (!ready) return;
+    setHighlightLines(highlightLines ?? new Float32Array(0));
+    redrawRef.current();
+  }, [ready, highlightLines, setHighlightLines]);
 
   // Canvas-Größe beobachten: bei Layout-Änderung mit aktueller Kamera neu
   // zeichnen (die Surface-Anpassung übernimmt der Hook im render()).

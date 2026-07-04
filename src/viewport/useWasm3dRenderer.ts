@@ -53,6 +53,13 @@ interface WebModelRendererLike {
     extent_m: number,
     spacing_m: number,
   ): void;
+  /**
+   * Auswahl-Hervorhebung setzen: ein LineList-Vertex-Array (interleaved
+   * `[px,py,pz, r,g,b, ...]`, world-Meter, je 2 Vertices = 1 Linie), das die
+   * Engine OHNE Tiefentest zeichnet (immer sichtbar obenauf) — der Umriss des
+   * aktuell gewählten Bauteils. Leeres Array löscht das Highlight. Wirkt erst
+   * beim nächsten `render`. */
+  set_highlight_lines(vertices: Float32Array): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -181,6 +188,23 @@ export function useWasm3dRenderer(
   );
 
   /**
+   * Auswahl-Hervorhebung setzen (Umriss-Linien des gewählten Bauteils, immer
+   * obenauf) — reicht das fertige LineList-Vertex-Array 1:1 an
+   * `set_highlight_lines` durch (s. WebModelRendererLike). Der Aufrufer
+   * (Wasm3DViewport) übergibt ein leeres Float32Array, um das Highlight zu
+   * löschen (leere Auswahl). Wirkt erst beim nächsten `render`.
+   */
+  const setHighlightLines = useCallback((vertices: Float32Array) => {
+    const r = rendererRef.current;
+    if (!r) return;
+    try {
+      r.set_highlight_lines(vertices);
+    } catch (e) {
+      console.warn("render3d set_highlight_lines fehlgeschlagen:", e);
+    }
+  }, []);
+
+  /**
    * Kamera-Praeset anwenden (`front`/`top`/`side`/`iso`/`perspective`, wie
    * `View3d` in TopBar.tsx). Delegiert die formatfuellende Ziel-/Distanz-
    * Berechnung + Projektionsart (ortho fuer front/top/side) an Rust
@@ -250,6 +274,7 @@ export function useWasm3dRenderer(
     setRenderStyle,
     applyViewPreset,
     setGroundGrid,
+    setHighlightLines,
     ready,
     failed,
   };

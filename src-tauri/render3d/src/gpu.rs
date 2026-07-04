@@ -146,6 +146,10 @@ pub struct Renderer {
     /// Teilt sich das `Globals`-Uniform/Bind-Group (nur View-Projektion) mit der
     /// Mesh-Pipeline und rendert in denselben Pass/Tiefenpuffer.
     grid_pipeline: wgpu::RenderPipeline,
+    /// Wie `grid_pipeline` (LineList, GRID_WGSL), aber OHNE Tiefentest
+    /// (`depth_compare: Always`, kein Depth-Write): die Auswahl-Highlight-Linien
+    /// liegen immer sichtbar obenauf und scheinen auch hinter Waenden durch.
+    highlight_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     mesh: Option<MeshBuffers>,
@@ -156,6 +160,11 @@ pub struct Renderer {
     /// Bodengitter-Vertices (None = nicht erzeugt). Wird nur gezeichnet, wenn
     /// zusaetzlich `grid_visible` gesetzt ist.
     grid: Option<LineBuffers>,
+    /// Auswahl-Highlight-Linien (Kanten des selektierten Bauteils, LineList) als
+    /// LineBuffers. None = keine Auswahl -> nichts wird gezeichnet. Ueber
+    /// `set_highlight_lines` gesetzt/geloescht; im Render-Pass als ALLERLETZTES
+    /// (ohne Tiefentest) gezeichnet.
+    highlight: Option<LineBuffers>,
     /// Ob das Bodengitter im naechsten `render` gezeichnet wird. Default false —
     /// bestehende Aufrufer ohne `set_ground_grid` bekommen KEIN Gitter.
     grid_visible: bool,
@@ -296,46 +305,72 @@ impl Renderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
         };
-        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("grid.pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &grid_module,
-                entry_point: Some("vs_main"),
-                buffers: &[grid_vertex_layout],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &grid_module,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                // Linien haben keine Vorder-/Rueckseite -> kein Culling.
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
+        // Linien-Pipeline-Fabrik: identische Beschreibung (LineList, GRID_WGSL,
+        // gemeinsame Bind-Group/Farbziel/MSAA) fuer das Bodengitter/die Kanten
+        // (tiefengetestet) UND die Auswahl-Highlight-Linien (ohne Tiefentest, siehe
+        // unten). Nur der `depth_stencil`-Zustand unterscheidet sich.
+        let make_line_pipeline = |label: &str, depth: wgpu::DepthStencilState| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &grid_module,
+                    entry_point: Some("vs_main"),
+                    buffers: &[grid_vertex_layout.clone()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &grid_module,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    // Linien haben keine Vorder-/Rueckseite -> kein Culling.
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth),
+                multisample: wgpu::MultisampleState {
+                    count: SAMPLE_COUNT,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        // Grid/Kanten: normaler Tiefentest (Less), schreibt Tiefe -> das Modell
+        // verdeckt Gitter/verdeckte Kanten korrekt.
+        let grid_pipeline = make_line_pipeline(
+            "grid.pipeline",
+            wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: SAMPLE_COUNT,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
             },
-            multiview_mask: None,
-            cache: None,
-        });
+        );
+        // Auswahl-Highlight: KEIN Tiefentest (`Always`) und KEIN Tiefen-Write —
+        // die Auswahl-Umrisslinien werden unabhaengig von der Szenentiefe immer
+        // gezeichnet und scheinen so auch hinter Waenden durch (liegen optisch oben,
+        // weil sie als letztes gezeichnet werden).
+        let highlight_pipeline = make_line_pipeline(
+            "highlight.pipeline",
+            wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            },
+        );
 
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals.buffer"),
@@ -356,11 +391,13 @@ impl Renderer {
             pipeline,
             hidden_face_pipeline,
             grid_pipeline,
+            highlight_pipeline,
             bind_group,
             uniform,
             mesh: None,
             edges: None,
             grid: None,
+            highlight: None,
             grid_visible: false,
             style: RenderStyle::Shaded,
             depth: None,
@@ -493,6 +530,27 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         self.grid = Some(LineBuffers {
+            vbo,
+            vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
+        });
+    }
+
+    /// Setzt/loescht die Auswahl-Highlight-Linien (Kanten des selektierten Bauteils).
+    /// `verts` = interleaved LineList-Vertices `[px,py,pz, r,g,b, ...]` (world,
+    /// je 2 Vertices = 1 Segment), exakt wie Grid-/Edge-Vertices
+    /// (`GRID_FLOATS_PER_VERTEX`). Leeres Slice -> Highlight loeschen. Analog
+    /// `set_ground_grid`, aber ohne Sichtbarkeits-Flag: vorhanden = gezeichnet.
+    pub fn set_highlight_lines(&mut self, device: &wgpu::Device, verts: &[f32]) {
+        if verts.is_empty() {
+            self.highlight = None;
+            return;
+        }
+        let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("highlight.vbo"),
+            contents: bytemuck::cast_slice(verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.highlight = Some(LineBuffers {
             vbo,
             vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
         });
@@ -657,6 +715,17 @@ impl Renderer {
                     pass.set_vertex_buffer(0, g.vbo.slice(..));
                     pass.draw(0..g.vertex_count, 0..1);
                 }
+            }
+
+            // 4) Auswahl-Highlight-Linien als ALLERLETZTES — ohne Tiefentest
+            //    (`highlight_pipeline`: depth_compare Always, kein Depth-Write),
+            //    damit die Auswahl immer sichtbar obenauf liegt und auch hinter
+            //    Waenden durchscheint. Nur wenn per `set_highlight_lines` gesetzt.
+            if let Some(hl) = &self.highlight {
+                pass.set_pipeline(&self.highlight_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, hl.vbo.slice(..));
+                pass.draw(0..hl.vertex_count, 0..1);
             }
         }
         queue.submit(std::iter::once(encoder.finish()));

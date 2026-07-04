@@ -42,6 +42,7 @@ import type { CategoryDisplayResolver } from "./plan/generatePlan";
 import { computeSection } from "./plan/toSection";
 import type { SectionOutput } from "./plan/toSection";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
+import { selectionHighlightLines } from "./plan/toWalls3d";
 import { parseDxf } from "./io/dxfParser";
 import type { DxfImportResult } from "./io/dxfParser";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
@@ -193,6 +194,13 @@ type EditorState =
  * getipptes „wall"/„wand" münden in denselben Befehl; der Legacy-Wand-Pfad ist
  * damit deaktiviert (siehe toolHandlers/onSelectTool).
  */
+/**
+ * Akzentfarbe der 3D-Auswahl-Hervorhebung (Umriss-Linien, WASM-Viewport, s.
+ * `Content`/`selectionHighlightLines`). Kräftiges Orange — hebt sich vom
+ * grauen Wand-/Deckenton, dem hellen Hidden-Line-Weiss und dem Bodenraster ab.
+ */
+const HIGHLIGHT_RGB: [number, number, number] = [1.0, 0.5, 0.1];
+
 const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   wall: "wall",
   ceiling: "ceiling",
@@ -4240,6 +4248,25 @@ function Content({
   onEdit3dWallTop: (wallId: string, topZ: number) => void;
   onEdit3dEnd: () => void;
 }) {
+  // Auswahl-Hervorhebung im WASM-3D-Viewport: Umriss der gewählten Wand(e)/
+  // Decke(n) in Akzent-Orange, immer obenauf (s. selectionHighlightLines in
+  // plan/toWalls3d.ts + set_highlight_lines in useWasm3dRenderer). Wirkt NUR
+  // im WASM-Zweig (Viewport3D reicht sie nur dort an Wasm3DViewport durch);
+  // die three.js-Sicht hebt die Auswahl weiterhin über ihr eigenes Material
+  // hervor. Leere Auswahl → null (kein Highlight).
+  const highlightLines = useMemo(
+    () =>
+      selectedWallIds.length === 0 && selectedCeilingIds.length === 0
+        ? null
+        : selectionHighlightLines(
+            project,
+            selectedWallIds,
+            selectedCeilingIds,
+            HIGHLIGHT_RGB,
+          ),
+    [project, selectedWallIds, selectedCeilingIds],
+  );
+
   if (level.kind === "section" || level.kind === "elevation") {
     return (
       <main className="content">
@@ -4367,6 +4394,7 @@ function Content({
             onSelectStair={onViewportSelectStair}
             onContextMenu={onViewportContextMenu}
             onPick3d={onViewport3dPick}
+            highlightLines={highlightLines}
             commandActive={commandActive}
             draft={draft}
             onWorkplanePoint={onWorkplanePoint}

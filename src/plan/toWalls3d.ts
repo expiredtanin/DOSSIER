@@ -33,6 +33,8 @@ import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 
 export type RVec2 = [number, number];
 export type RRgb = [number, number, number];
+/** Weltpunkt (x, elevation, y) — nur intern für Highlight-Kantengeometrie. */
+type RVec3 = [number, number, number];
 
 /** Eine aufgelöste Wandschicht: Dicke + 3D-Albedo-Farbe (aus dem Component). */
 export interface RLayer {
@@ -310,4 +312,96 @@ export function projectToModel3d(project: Project): RModel3d {
  */
 export function pickGeometry(project: Project): { walls: RWall[]; slabs: RSlab[] } {
   return { walls: projectToWalls3d(project), slabs: emitSlabs(project) };
+}
+
+/**
+ * Baut die Highlight-Linien der aktuellen 3D-Auswahl (Wand-/Decken-Ids) als
+ * flaches LineList-Vertex-Array `[px,py,pz,r,g,b, ...]` (world-Meter, je 2
+ * Vertices = 1 Kante) — genau das Format, das `set_highlight_lines` erwartet
+ * (immer obenauf gezeichnete Akzent-Umrisslinie, s. useWasm3dRenderer). Leere
+ * Auswahl → leeres Array (Highlight löschen).
+ *
+ * GEOMETRIE (dieselbe Welt-Konvention wie pickGeometry/raycast3d: model (x,y)
+ * → world (x, elevation, y), Höhe entlang +Y):
+ *  • Wand: derselbe orientierte Quader wie `rayWallBox` (raycast3d.ts) — Achse
+ *    entlang der Wandlänge, Normale (Dicke) senkrecht dazu in der XZ-Ebene,
+ *    Y = Höhe. Aus den 8 Ecken werden die 12 Kanten des Quaders emittiert.
+ *    Wände MIT Öffnungen bestehen aus mehreren Teilquadern (Pfeiler/Brüstung/
+ *    Sturz, s. emitWall) — alle tragen dieselbe `wallId` und werden hier ALLE
+ *    umrandet, sodass Öffnungsränder mit hervorgehoben werden.
+ *  • Decke: der Umriss oben (zTop) und unten (zBottom) je als geschlossener
+ *    Kantenzug, plus eine vertikale Kante an jeder Umriss-Ecke.
+ *
+ * Kanten werden EINFACH (nicht versetzt/doppelt) ausgegeben — eine zweite,
+ * leicht verschobene Kopie je Linie (für optisch "breitere" Linien bei
+ * WebGPU-Linienbreite 1) würde die Vertexzahl verdoppeln und die Achse/Betrag
+ * des Versatzes müsste in Bildschirm- statt Weltraum berechnet werden (hängt
+ * von Kamera-Distanz/-Winkel ab) — außerhalb des schmalen TS-Rahmens dieser
+ * Funktion. Der Renderer kann das bei Bedarf selbst tun (Rust-seitige
+ * Linienbreite/Shader), ohne dass sich dieses Vertexformat ändert.
+ */
+export function selectionHighlightLines(
+  project: Project,
+  wallIds: string[],
+  ceilingIds: string[],
+  rgb: RRgb,
+): Float32Array {
+  if (wallIds.length === 0 && ceilingIds.length === 0) return new Float32Array(0);
+  const { walls, slabs } = pickGeometry(project);
+  const wallSet = new Set(wallIds);
+  const ceilingSet = new Set(ceilingIds);
+  const out: number[] = [];
+  const pushEdge = (a: RVec3, b: RVec3) => {
+    out.push(a[0], a[1], a[2], rgb[0], rgb[1], rgb[2]);
+    out.push(b[0], b[1], b[2], rgb[0], rgb[1], rgb[2]);
+  };
+  // 12 Kanten eines Quaders aus 8 Ecken (Ecken-Index-Bits: bit0=Achse,
+  // bit1=Höhe, bit2=Dicke — je zwei Ecken, die sich in genau einem Bit
+  // unterscheiden, bilden eine Kante).
+  const BOX_EDGES: Array<[number, number]> = [
+    [0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3],
+    [2, 6], [3, 7], [4, 5], [4, 6], [5, 7], [6, 7],
+  ];
+  for (const w of walls) {
+    if (!wallSet.has(w.wallId)) continue;
+    const ax = w.end[0] - w.start[0];
+    const az = w.end[1] - w.start[1];
+    const len = Math.hypot(ax, az);
+    if (len < EPS || w.height <= EPS || w.thickness <= EPS) continue;
+    const axis: RVec3 = [ax / len, 0, az / len];
+    const normal: RVec3 = [az / len, 0, -ax / len];
+    const halfLen = len / 2;
+    const halfHeight = w.height / 2;
+    const halfThick = w.thickness / 2;
+    const center: RVec3 = [
+      (w.start[0] + w.end[0]) / 2,
+      w.baseElevation + w.height / 2,
+      (w.start[1] + w.end[1]) / 2,
+    ];
+    const corners: RVec3[] = [];
+    for (let i = 0; i < 8; i++) {
+      const sL = i & 1 ? 1 : -1;
+      const sH = i & 2 ? 1 : -1;
+      const sT = i & 4 ? 1 : -1;
+      corners.push([
+        center[0] + sL * halfLen * axis[0] + sT * halfThick * normal[0],
+        center[1] + sH * halfHeight,
+        center[2] + sL * halfLen * axis[2] + sT * halfThick * normal[2],
+      ]);
+    }
+    for (const [i, j] of BOX_EDGES) pushEdge(corners[i], corners[j]);
+  }
+  for (const s of slabs) {
+    if (!ceilingSet.has(s.ceilingId)) continue;
+    const n = s.outline.length;
+    if (n < 3 || s.zTop - s.zBottom <= EPS) continue;
+    const bottom: RVec3[] = s.outline.map((p) => [p[0], s.zBottom, p[1]]);
+    const top: RVec3[] = s.outline.map((p) => [p[0], s.zTop, p[1]]);
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      pushEdge(bottom[j], bottom[i]);
+      pushEdge(top[j], top[i]);
+    }
+    for (let i = 0; i < n; i++) pushEdge(bottom[i], top[i]);
+  }
+  return new Float32Array(out);
 }

@@ -128,9 +128,13 @@ export function Viewport3D(
     /** Links-Klick-Auswahl im WASM-Viewport (TS-Raycast) — wirkt NUR im WASM-Pfad;
      * die three.js-Sicht nutzt weiter `onSelectWall`/`onSelectCeiling`. */
     onPick3d?: (hit: Pick3dHit, additive: boolean) => void;
+    /** Umriss-Linien der aktuellen Auswahl — wirkt NUR im WASM-Pfad (s.
+     * Wasm3DViewport); die three.js-Sicht hebt die Auswahl weiterhin über ihr
+     * eigenes Material hervor (highlightMat in ThreeViewport3D). */
+    highlightLines?: Float32Array | null;
   },
 ) {
-  const { gridVisible, onToggleGrid, onPick3d, ...threeProps } = props;
+  const { gridVisible, onToggleGrid, onPick3d, highlightLines, ...threeProps } = props;
   if (WASM_ENGINE_ACTIVE) {
     return (
       <Wasm3DViewport
@@ -141,6 +145,7 @@ export function Viewport3D(
         groundElevation={props.gridElevation}
         onToggleGrid={onToggleGrid}
         onPick3d={onPick3d}
+        highlightLines={highlightLines}
       />
     );
   }
