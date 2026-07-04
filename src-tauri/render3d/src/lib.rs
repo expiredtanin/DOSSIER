@@ -687,7 +687,7 @@ mod tests {
         );
         assert_eq!(
             preset_camera(CameraPreset::Iso, t, 10.0).projection,
-            Projection::Perspective
+            Projection::Orthographic
         );
         assert_eq!(
             preset_camera(CameraPreset::Persp, t, 10.0).projection,

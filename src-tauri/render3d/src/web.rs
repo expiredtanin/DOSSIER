@@ -17,8 +17,9 @@
 // damit die Maus-UX 1:1 der bestehenden three.js-OrbitControls-Bedienung folgt.
 // `set_view_preset` wendet stattdessen eines der fuenf `View3d`-Praesete
 // (front/top/side/iso/perspective) direkt ueber `math::preset_camera` an — Front/
-// Top/Side werden dabei ECHT orthografisch (`preset_camera`), was eine reine
-// TS-Orbit-Naeherung nicht leisten kann. Nach einem Praeset-Sprung bleibt die
+// Top/Side/Iso werden dabei ECHT orthografisch (`preset_camera`; Iso = echte
+// Isometrie ohne perspektivische Verzerrung), was eine reine TS-Orbit-Naeherung
+// nicht leisten kann. Nach einem Praeset-Sprung bleibt die
 // weitere Navigation frei ueber `set_camera` (kein Lock).
 //
 // MODELL-FORMAT: JSON-Struct { walls: WallInput[], slabs: SlabInput[] } — identisch
@@ -275,8 +276,8 @@ impl WebModelRenderer {
     /// Wendet eines der fuenf Kamera-Praesets der three.js-Sicht
     /// (`front`/`top`/`side`/`iso`/`perspective`, s. `View3d` in TopBar.tsx) auf
     /// das aktuelle Modell an: Ziel = Modell-Mitte, Distanz = formatfuellend
-    /// (mirror der TS-`fitTargetDist`); Front/Top/Side werden orthografisch,
-    /// Iso/Perspective perspektivisch (`math::preset_camera`). Wirkt erst beim
+    /// (mirror der TS-`fitTargetDist`); Front/Top/Side/Iso werden orthografisch,
+    /// nur Perspective ist perspektivisch (`math::preset_camera`). Wirkt erst beim
     /// naechsten `render`. „Praeset = hinspringen, kein Lock" — manuelles
     /// Orbit/Pan/Zoom bleibt danach frei ueber `set_camera` (s. Wasm3DViewport.tsx).
     pub fn set_view_preset(&mut self, preset: &str) -> Result<(), JsValue> {

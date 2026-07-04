@@ -186,8 +186,9 @@ pub fn orbit_eye(target: [f32; 3], yaw: f32, pitch: f32, dist: f32) -> [f32; 3] 
 }
 
 /// Baut eine `Camera` fuer eines der fuenf Presets der three.js-Sicht. `target`
-/// ist das Blickziel (Modell-Mitte), `dist` der Abstand. Front/Top/Side sind
-/// orthografisch achsparallel; Iso/Persp sind perspektivisch.
+/// ist das Blickziel (Modell-Mitte), `dist` der Abstand. Front/Top/Side/Iso
+/// sind orthografisch (Front/Top/Side achsparallel, Iso diagonal); nur Persp
+/// ist perspektivisch.
 pub fn preset_camera(preset: CameraPreset, target: [f32; 3], dist: f32) -> Camera {
     let mut cam = Camera {
         target,
@@ -216,12 +217,18 @@ pub fn preset_camera(preset: CameraPreset, target: [f32; 3], dist: f32) -> Camer
             cam.up = [0.0, 1.0, 0.0];
             cam.ortho_half_height = dist * 0.5;
         }
-        // Isometrischer Ueberblick (perspektivisch, Blick von schraeg oben).
+        // Isometrischer Ueberblick (orthografisch, Blick von schraeg oben).
+        // Echte Isometrie ist per Definition parallelprojiziert (keine
+        // perspektivische Verzerrung, Kantenlaengen bleiben massstabsgetreu).
         CameraPreset::Iso => {
-            cam.projection = Projection::Perspective;
+            cam.projection = Projection::Orthographic;
             let d = dist / 3.0_f32.sqrt();
             cam.eye = [target[0] + d, target[1] + d, target[2] + d];
             cam.up = [0.0, 1.0, 0.0];
+            // eye-target-Abstand ist hier (wie bei Front/Top/Side) exakt
+            // `dist` (d*sqrt(3) == dist), darum dieselbe Skalierung wie dort,
+            // damit das Modell im Bild aehnlich gross erscheint.
+            cam.ortho_half_height = dist * 0.5;
         }
         // Freie perspektivische Standard-Ansicht (leicht von vorn-oben-rechts).
         CameraPreset::Persp => {
