@@ -534,6 +534,14 @@ function splitSlabLayers(
 }
 
 /**
+ * Achswinkel einer GESCHNITTENEN Wand im Schnitt-Koordinatensystem (Modell-
+ * Konvention wie `wallAngleDeg` in resolveHatch): das Wand-Band steht vertikal
+ * (Achse entlang v, atan2(1,0) = 90°). Damit drehen wandrelative Muster
+ * (Dämmung, Backstein) im Schnitt genauso mit der Wand wie im Grundriss.
+ */
+const SECTION_WALL_AXIS_ANGLE_DEG = 90;
+
+/**
  * Zerlegt das EINE geschnittene Wandrechteck (`cp`, vier Ecken in u/v-Metern) in
  * stehende Teil-Rechtecke je Schicht des Wandtyps `wt` — das Wand-Gegenstück zu
  * `splitSlabLayers`. Achsen-Spiegelung: eine Wand ist vertikal geschnitten, das
@@ -584,7 +592,12 @@ export function splitWallLayers(
   let acc = 0; // kumulierte Dicke von uMin (erste einsortierte Schicht) nach uMax
   for (const layer of layers) {
     const comp = getComponent(project, layer.componentId);
-    const hatch = resolveHatch(project, comp.hatchId, undefined, resolveForeground(comp));
+    // Wandrelative Muster (relativeToWall, z. B. Dämmung/Backstein) folgen der
+    // Wandachse — im Schnitt steht die geschnittene Wand VERTIKAL (Bandachse
+    // entlang v, Modellwinkel 90°). Wie im Grundriss (`addWallPoche` übergibt
+    // die Wandachse) wird der Achswinkel mitgegeben, sonst liefe die Dämmung
+    // vertikal statt quer zur Wanddicke (horizontal).
+    const hatch = resolveHatch(project, comp.hatchId, SECTION_WALL_AXIS_ANGLE_DEG, resolveForeground(comp));
     const uLeft = uMin + acc * scale;
     acc += layer.thickness;
     const uRight = uMin + acc * scale;
