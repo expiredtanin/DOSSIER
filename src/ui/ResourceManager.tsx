@@ -257,97 +257,7 @@ function FieldRow({
   );
 }
 
-// ── Tabellen-Gerüst ────────────────────────────────────────────────────────
-
-/** Eine Spaltendefinition: Titel-Key + optionale rechtsbündige Ausrichtung. */
-interface ResColumn {
-  /** i18n-Key des Spaltentitels (leerer String = titellose Spalte). */
-  titleKey: string;
-  /** Zahlen-Spalten rechtsbündig ausrichten (Titel + Zellen). */
-  align?: "right";
-  /** Optionaler i18n-Key für den Tooltip auf dem Spaltentitel. */
-  hintKey?: string;
-}
-
-/**
- * Tabelle als CSS-Grid: eine sticky Kopfzeile mit Spaltentiteln, darunter eine
- * Datenzeile je Item. Kopf und Zeilen erben `gridTemplateColumns` vom äußeren
- * Grid, damit die Spalten exakt fluchten. Datenzeilen werden als Kinder
- * übergeben (jede Zeile = `ResRow`).
- */
-function ResTable({
-  columns,
-  template,
-  children,
-}: {
-  columns: ResColumn[];
-  template: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="res-table" style={{ gridTemplateColumns: template }}>
-      <div className="res-thead">
-        {columns.map((c, i) => (
-          <div
-            key={i}
-            className={`res-th${c.align === "right" ? " num" : ""}`}
-            title={c.hintKey ? t(c.hintKey) : undefined}
-          >
-            {c.titleKey ? t(c.titleKey) : ""}
-          </div>
-        ))}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-/** Eine Datenzeile der Tabelle (Zellen als Kinder, eine je Spalte). */
-function ResRow({ children }: { children: React.ReactNode }) {
-  return <div className="res-tr">{children}</div>;
-}
-
-/** Eine Tabellenzelle; optional rechtsbündig (für Zahlen). */
-function ResCell({
-  children,
-  align,
-  emphasis = false,
-}: {
-  children: React.ReactNode;
-  align?: "right";
-  emphasis?: boolean;
-}) {
-  return (
-    <div
-      className={`res-td${align === "right" ? " num" : ""}${
-        emphasis ? " emphasis" : ""
-      }`}
-    >
-      {children}
-    </div>
-  );
-}
-
 // ── Bauteile (Components) ──────────────────────────────────────────────────
-
-// Spalten: Name | Vordergrund | Hintergrund | Schnittschraffur | Ansichtsschraffur | Prio | Textur | Material | (löschen).
-const COMPONENT_COLUMNS: ResColumn[] = [
-  { titleKey: "resources.col.name" },
-  { titleKey: "resources.col.foreground", hintKey: "resources.col.foreground.hint" },
-  { titleKey: "resources.col.background", hintKey: "resources.col.background.hint" },
-  { titleKey: "resources.col.hatch" },
-  { titleKey: "resources.col.viewHatch" },
-  {
-    titleKey: "resources.col.prio",
-    align: "right",
-    hintKey: "resources.col.prio.hint",
-  },
-  { titleKey: "resources.col.texture" },
-  { titleKey: "resources.col.material" },
-  { titleKey: "" },
-];
-const COMPONENT_TEMPLATE =
-  "minmax(120px, 1fr) auto auto minmax(120px, 0.8fr) minmax(120px, 0.8fr) 64px minmax(90px, 0.7fr) minmax(130px, 0.9fr) 36px";
 
 /**
  * Material-Zelle der Bauteil-Tabelle: ein Button, der den aktuellen Material-
@@ -803,7 +713,24 @@ function ImagePickButton({ onFile }: { onFile: (file: File | null) => void }) {
   );
 }
 
-function ComponentRow({
+/** Kleiner Farb-Swatch als Listen-Thumbnail für Bauteile ohne Schraffur. */
+function ColorSwatch({ color, size = 30 }: { color: string; size?: number }) {
+  return (
+    <span
+      className="res-swatch"
+      style={{
+        display: "block",
+        width: size,
+        height: size,
+        background: color,
+        border: "1px solid var(--border)",
+      }}
+    />
+  );
+}
+
+/** Detail-Panel EINES Bauteils (rechte Seite des Master-Detail-Layouts). */
+function ComponentDetail({
   component,
   hatches,
   onPatch,
@@ -820,74 +747,91 @@ function ComponentRow({
     { value: "", label: t("resources.viewHatch.none") },
     ...hatchOptions,
   ];
+  const previewHatch = hatches.find((h) => h.id === component.hatchId);
   return (
-    <ResRow>
-      <ResCell>
-        <TextField
+    <div className="res-md-detail-inner">
+      <div className="res-md-head">
+        <input
+          className="res-input res-md-rename"
           value={component.name}
-          onChange={(name) => onPatch({ name })}
           placeholder={t("resources.components.placeholder")}
+          onChange={(e) => onPatch({ name: e.target.value })}
         />
-      </ResCell>
-      <ResCell>
-        {/* Vordergrund = Farbe der Muster-/Schraffurlinien. Fehlt sie, greift
-            als Anzeige-Fallback `color`; das Setzen definiert `foreground`. */}
-        <ColorField
-          color={component.foreground ?? component.color}
-          onChange={(foreground) => onPatch({ foreground })}
-        />
-      </ResCell>
-      <ResCell>
-        {/* Hintergrund = Füllung (Poché). Fehlt sie, gilt `color` als Fallback. */}
-        <ColorField
-          color={component.background ?? component.color}
-          onChange={(background) => onPatch({ background })}
-        />
-      </ResCell>
-      <ResCell>
-        <SelectField
-          value={component.hatchId}
-          onChange={(hatchId) => onPatch({ hatchId })}
-          options={hatchOptions}
-        />
-      </ResCell>
-      <ResCell>
-        <SelectField
-          value={component.viewHatchId ?? ""}
-          onChange={(viewHatchId) => onPatch({ viewHatchId: viewHatchId || undefined })}
-          options={viewHatchOptions}
-        />
-      </ResCell>
-      <ResCell align="right" emphasis>
-        <NumberField
-          value={component.joinPriority}
-          onChange={(joinPriority) => onPatch({ joinPriority })}
-          step={10}
-          min={0}
-        />
-      </ResCell>
-      <ResCell>
-        <TextField
-          value={component.texture3d ?? ""}
-          onChange={(v) => onPatch({ texture3d: v || undefined })}
-          placeholder={t("resources.texture.empty")}
-          mono
-        />
-      </ResCell>
-      <ResCell>
-        <MaterialCell
-          material={component.material}
-          onAssign={(material) => onPatch({ material })}
-          onClear={() => onPatch({ material: undefined })}
-        />
-      </ResCell>
-      <ResCell>
         <DeleteButton
           onClick={onDelete}
           title={t("resources.delete.component", { name: component.name })}
         />
-      </ResCell>
-    </ResRow>
+      </div>
+
+      <div className="res-md-preview">
+        {previewHatch ? (
+          <HatchSwatch hatch={previewHatch} size={128} />
+        ) : (
+          <ColorSwatch color={component.foreground ?? component.color} size={128} />
+        )}
+      </div>
+
+      <div className="res-fields">
+        <FieldRow
+          label={t("resources.col.foreground")}
+          hint={t("resources.col.foreground.hint")}
+        >
+          {/* Vordergrund = Farbe der Muster-/Schraffurlinien. Fehlt sie, greift
+              als Anzeige-Fallback `color`; das Setzen definiert `foreground`. */}
+          <ColorField
+            color={component.foreground ?? component.color}
+            onChange={(foreground) => onPatch({ foreground })}
+          />
+        </FieldRow>
+        <FieldRow
+          label={t("resources.col.background")}
+          hint={t("resources.col.background.hint")}
+        >
+          {/* Hintergrund = Füllung (Poché). Fehlt sie, gilt `color` als Fallback. */}
+          <ColorField
+            color={component.background ?? component.color}
+            onChange={(background) => onPatch({ background })}
+          />
+        </FieldRow>
+        <FieldRow label={t("resources.col.hatch")}>
+          <SelectField
+            value={component.hatchId}
+            onChange={(hatchId) => onPatch({ hatchId })}
+            options={hatchOptions}
+          />
+        </FieldRow>
+        <FieldRow label={t("resources.col.viewHatch")}>
+          <SelectField
+            value={component.viewHatchId ?? ""}
+            onChange={(viewHatchId) => onPatch({ viewHatchId: viewHatchId || undefined })}
+            options={viewHatchOptions}
+          />
+        </FieldRow>
+        <FieldRow label={t("resources.col.prio")} hint={t("resources.col.prio.hint")}>
+          <NumberField
+            value={component.joinPriority}
+            onChange={(joinPriority) => onPatch({ joinPriority })}
+            step={10}
+            min={0}
+          />
+        </FieldRow>
+        <FieldRow label={t("resources.col.texture")}>
+          <TextField
+            value={component.texture3d ?? ""}
+            onChange={(v) => onPatch({ texture3d: v || undefined })}
+            placeholder={t("resources.texture.empty")}
+            mono
+          />
+        </FieldRow>
+        <FieldRow label={t("resources.col.material")}>
+          <MaterialCell
+            material={component.material}
+            onAssign={(material) => onPatch({ material })}
+            onClear={() => onPatch({ material: undefined })}
+          />
+        </FieldRow>
+      </div>
+    </div>
   );
 }
 
@@ -902,24 +846,58 @@ function ComponentsTab({
   onAddComponent: () => void;
   onDeleteComponent: (id: string) => void;
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const components = project.components;
+  // Auswahl gegen die Liste validieren (nach Delete/Add stabil bleiben).
+  const selected = components.find((c) => c.id === selectedId) ?? components[0];
+
   return (
     <div className="res-tab">
       <div className="res-hint">{t("resources.components.hint")}</div>
-      <ResTable columns={COMPONENT_COLUMNS} template={COMPONENT_TEMPLATE}>
-        {project.components.map((c) => (
-          <ComponentRow
-            key={c.id}
-            component={c}
-            hatches={project.hatches}
-            onPatch={(patch) => onPatchComponent(c.id, patch)}
-            onDelete={() => onDeleteComponent(c.id)}
-          />
-        ))}
-        {project.components.length === 0 && (
-          <EmptyState text={t("resources.components.empty")} />
-        )}
-      </ResTable>
-      <AddButton label={t("resources.add")} onClick={onAddComponent} />
+      <div className="res-md">
+        <div className="res-md-list">
+          {components.map((c) => {
+            const hatch = project.hatches.find((h) => h.id === c.hatchId);
+            return (
+              <button
+                key={c.id}
+                className={`res-md-row${selected?.id === c.id ? " active" : ""}`}
+                onClick={() => setSelectedId(c.id)}
+              >
+                <span className="res-md-row-thumb">
+                  {hatch ? (
+                    <HatchSwatch hatch={hatch} size={30} />
+                  ) : (
+                    <ColorSwatch color={c.foreground ?? c.color} />
+                  )}
+                </span>
+                <span className="res-md-row-name">{c.name}</span>
+              </button>
+            );
+          })}
+          {components.length === 0 && (
+            <div className="res-md-empty">{t("resources.components.empty")}</div>
+          )}
+          <div className="res-md-listfoot">
+            <button className="res-add" onClick={onAddComponent}>
+              <span className="res-add-plus">+</span> {t("resources.add")}
+            </button>
+          </div>
+        </div>
+        <div className="res-md-detail">
+          {selected ? (
+            <ComponentDetail
+              key={selected.id}
+              component={selected}
+              hatches={project.hatches}
+              onPatch={(patch) => onPatchComponent(selected.id, patch)}
+              onDelete={() => onDeleteComponent(selected.id)}
+            />
+          ) : (
+            <div className="res-md-empty">{t("resources.components.empty")}</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2049,16 +2027,6 @@ function MaterialsTab() {
 }
 
 // ── Gemeinsame kleine Bausteine ────────────────────────────────────────────
-
-function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <div className="res-add-row">
-      <button className="res-add" onClick={onClick}>
-        <span className="res-add-plus">+</span> {label}
-      </button>
-    </div>
-  );
-}
 
 function EmptyState({ text }: { text: string }) {
   return <div className="res-empty">{text}</div>;
