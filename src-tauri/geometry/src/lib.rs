@@ -67,6 +67,20 @@ pub struct LayerCuts {
     pub end_side: Vec<Option<Line>>,
 }
 
+/// Aussparung der DURCHGANGSWAND am materialbewussten T-Stoss -- Rust-Spiegel
+/// von `SpanCutout` aus `model/joins.ts`. `from`/`to` = Achsen-Intervall (Meter
+/// ab `wall.start`), `offA`/`offB` = Quer-Offsetbereich (Nah-Putz-Zone) in der
+/// Offset-Konvention der Schicht-Baender; `offA` ist stets die Nahflaeche.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct SpanCutout {
+    pub from: f64,
+    pub to: f64,
+    #[serde(rename = "offA")]
+    pub off_a: f64,
+    #[serde(rename = "offB")]
+    pub off_b: f64,
+}
+
 /// Schnittlinien einer Wand an ihren beiden Achsenden.
 #[derive(Serialize, Deserialize)]
 pub struct WallCuts {
@@ -82,6 +96,11 @@ pub struct WallCuts {
     /// weiterhin `start_cut`/`end_cut` fuer alle Schichten.
     #[serde(rename = "layerCuts", skip_serializing_if = "Option::is_none")]
     pub layer_cuts: Option<LayerCuts>,
+    /// ADDITIV (Durchgangswand-Seite): Nah-Putz-Aussparungen, durch die ein
+    /// Abzweig-Kern sticht. Leer -> von serde bei Serialisierung weggelassen
+    /// (`skip_serializing_if`), Wand wird unveraendert gezeichnet.
+    #[serde(rename = "spanCutouts", skip_serializing_if = "Vec::is_empty")]
+    pub span_cutouts: Vec<SpanCutout>,
 }
 
 /// Verschneidungs-Entscheidung zweier Bauteile am Stoss -- Rust-Spiegel von
@@ -135,6 +154,13 @@ fn apply_layer_cuts(
     through_dir: Vec2,
     sign: f64,
     off_t: f64,
+    // Durchgangswand-Aussparung (Phase 1c): Index/Start der Durchgangswand,
+    // Achsrichtung + Referenzversatz des Abzweigs -- fuer die Projektion der
+    // Kernbreite auf die Durchgangsachse.
+    through_wall_idx: usize,
+    through_start: Vec2,
+    branch_dir: Vec2,
+    branch_ref_off: f64,
 ) {
     if branch_layers.is_empty() || through_layers.is_empty() {
         return;
@@ -199,17 +225,58 @@ fn apply_layer_cuts(
     let merge_cut = Line { point: merge_point, dir: through_dir };
 
     // Getrimmte Nachbarschichten schliessen mit ihrer L-Seitenlinie an dieser
-    // Rueckgrat-Nahflaeche ab (nicht an der Wandachse).
-    let side_line = merge_cut;
-    let (face_arr, side_arr) = match branch_end {
-        WallEndKind::Start => (&mut lc.start, &mut lc.start_side),
-        WallEndKind::End => (&mut lc.end, &mut lc.end_side),
-    };
-    for i in 0..n {
-        face_arr[i] = if merged[i] { Some(merge_cut) } else { Some(face_cut) };
-        let adj_merged =
-            !merged[i] && ((i > 0 && merged[i - 1]) || (i + 1 < n && merged[i + 1]));
-        side_arr[i] = if adj_merged { Some(side_line) } else { None };
+    // Rueckgrat-Nahflaeche ab (nicht an der Wandachse). In einem Block, damit die
+    // mutable Ausleihe von `result[branch_wall_idx]` vor dem Zugriff auf die
+    // Durchgangswand unten endet.
+    {
+        let side_line = merge_cut;
+        let (face_arr, side_arr) = match branch_end {
+            WallEndKind::Start => (&mut lc.start, &mut lc.start_side),
+            WallEndKind::End => (&mut lc.end, &mut lc.end_side),
+        };
+        for i in 0..n {
+            face_arr[i] = if merged[i] { Some(merge_cut) } else { Some(face_cut) };
+            let adj_merged =
+                !merged[i] && ((i > 0 && merged[i - 1]) || (i + 1 < n && merged[i + 1]));
+            side_arr[i] = if adj_merged { Some(side_line) } else { None };
+        }
+    }
+
+    // Durchgangswand-Aussparung (Phase 1c): den Nah-Putz der Durchgangswand ueber
+    // die Breite des durchstechenden Abzweig-Kerns ECHT ausschneiden. Nur noetig,
+    // wenn davor Nah-Putz liegt (near_plaster > 0).
+    if near_plaster > 1e-9 {
+        let total_branch: f64 = branch_layers.iter().map(|l| l.thickness).sum();
+        let mut b_off = branch_ref_off - total_branch / 2.0;
+        let mut core_lo = f64::INFINITY;
+        let mut core_hi = f64::NEG_INFINITY;
+        for (i, l) in branch_layers.iter().enumerate() {
+            if merged[i] {
+                if b_off < core_lo {
+                    core_lo = b_off;
+                }
+                if b_off + l.thickness > core_hi {
+                    core_hi = b_off + l.thickness;
+                }
+            }
+            b_off += l.thickness;
+        }
+        if core_hi > core_lo {
+            // Projektion der Kern-Offsethuelle auf die Durchgangsachse.
+            let n_branch = left_normal(branch_dir);
+            let proj = dot(n_branch, through_dir);
+            let axis_at = dot(sub(axis_point, through_start), through_dir);
+            let e1 = axis_at + core_lo * proj;
+            let e2 = axis_at + core_hi * proj;
+            let off_a = off_t + sign * (t_t / 2.0);
+            let off_b = off_t + sign * (t_t / 2.0 - near_plaster);
+            result[through_wall_idx].span_cutouts.push(SpanCutout {
+                from: e1.min(e2),
+                to: e1.max(e2),
+                off_a,
+                off_b,
+            });
+        }
     }
 }
 
@@ -305,6 +372,7 @@ pub fn compute_joins(input: JoinInput) -> Vec<WallCuts> {
             start_cut: None,
             end_cut: None,
             layer_cuts: None,
+            span_cutouts: Vec::new(),
         })
         .collect();
 
@@ -485,6 +553,10 @@ fn apply_t_junction(
         u_t,
         sign,
         off_t,
+        through_wall_idx,
+        through_wall.start,
+        dir_of(branch_wall),
+        branch_wall.reference_offset,
     );
 }
 
@@ -575,6 +647,10 @@ fn apply_mid_span_tee(
         u_w,
         sign,
         off_w,
+        w_idx,
+        w.start,
+        dir_of(free_wall),
+        free_wall.reference_offset,
     );
 }
 
@@ -904,10 +980,47 @@ mod tests {
         assert!(dist(s0, Vec2 { x: 0.0, y: 0.06 }) < 1e-9);
         assert!(dist(s2, Vec2 { x: 5.0, y: 0.06 }) < 1e-9);
 
-        // Die kollineare Durchgangswand bleibt unangetastet (kein layerCuts).
+        // Die kollineare Durchgangswand bleibt bei den layerCuts unangetastet.
         let ca = find(&out, "A");
         let cc = find(&out, "C");
         assert!(ca.layer_cuts.is_none());
         assert!(cc.layer_cuts.is_none());
+
+        // ... bekommt aber die Durchgangswand-Aussparung (Phase 1c): die als
+        // Durchgang gewaehlte Haelfte A wird ueber die Backstein-Kernbreite (0.12)
+        // im Nah-Putz-Bereich (y in [0.06,0.075]) ausgeschnitten. Das Intervall
+        // ist die Projektion der Kernbreite auf die Achse, zentriert am Knoten x=5.
+        assert_eq!(ca.span_cutouts.len(), 1, "A (Durchgang) hat genau eine Aussparung");
+        let sc = ca.span_cutouts[0];
+        assert!((sc.from - 4.94).abs() < 1e-9, "from = 5 - 0.06");
+        assert!((sc.to - 5.06).abs() < 1e-9, "to = 5 + 0.06");
+        assert!(((sc.to - sc.from) - 0.12).abs() < 1e-9, "Intervallbreite = Kernbreite");
+        assert!((sc.off_a - 0.075).abs() < 1e-9, "offA = Nahflaeche");
+        assert!((sc.off_b - 0.06).abs() < 1e-9, "offB = Rueckgrat-Nahflaeche");
+        // Der Abzweig B traegt keine Aussparung (die gehoert der Durchgangswand).
+        assert!(cb.span_cutouts.is_empty());
+    }
+
+    #[test]
+    fn mid_span_tee_through_wall_gets_span_cutout() {
+        // Mittelspannen-T-Stoss (wie der reale W9-Fall): Durchgangswand W als EINE
+        // Wand (0,0)->(10,0), Abzweig B trifft mit seinem freien Ende (4,0) mittig
+        // auf ihre Seite. W bekommt EINE Aussparung um x=4, Breite = Kernbreite.
+        let input = JoinInput {
+            walls: vec![
+                w_iw("W", 0.0, 0.0, 10.0, 0.0),
+                w_iw("B", 4.0, 3.0, 4.0, 0.0),
+            ],
+        };
+        let out = compute_joins(input);
+        let cw = find(&out, "W");
+        assert_eq!(cw.span_cutouts.len(), 1, "W hat genau eine Aussparung");
+        let sc = cw.span_cutouts[0];
+        assert!((sc.from - 3.94).abs() < 1e-9);
+        assert!((sc.to - 4.06).abs() < 1e-9);
+        assert!((sc.off_a - 0.075).abs() < 1e-9);
+        assert!((sc.off_b - 0.06).abs() < 1e-9);
+        // Der Abzweig selbst hat keine Aussparung.
+        assert!(find(&out, "B").span_cutouts.is_empty());
     }
 }

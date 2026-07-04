@@ -311,10 +311,68 @@ describe("computeJoins — materialbewusster T-Stoss (layerCuts)", () => {
     expect(distToLine(lc.startSide[0]!, { x: 5, y: 0.06 })).toBeCloseTo(0, 6);
     expect(distToLine(lc.startSide[0]!, { x: 0, y: 0.06 })).toBeCloseTo(0, 6);
 
-    // Die kollinearen Hälften der Durchgangswand bleiben unangetastet
-    // (unverändertes Verhalten, keine layerCuts für sie).
+    // Die kollinearen Hälften der Durchgangswand bleiben bei den layerCuts
+    // unangetastet (keine Pro-Schicht-Cuts für sie).
     expect(joins.get("WA1")!.layerCuts).toBeUndefined();
     expect(joins.get("WA2")!.layerCuts).toBeUndefined();
+
+    // Die als Durchgang gewählte Wandhälfte bekommt eine Durchgangswand-Aussparung
+    // (Phase 1c): über die Backstein-Kernbreite (0.12) im Nah-Putz-Bereich
+    // (Offset 0.06…0.075). Welche Hälfte den Durchgang bildet, hängt von der
+    // Knoten-Reihenfolge ab — wir prüfen die, die den Cutout trägt.
+    const throughCuts = joins.get("WA1")!.spanCutouts ?? joins.get("WA2")!.spanCutouts;
+    expect(throughCuts).toBeDefined();
+    expect(throughCuts!.length).toBe(1);
+    const sc = throughCuts![0];
+    // Achsen-Intervall: Kernbreite 0.12, zentriert am Knoten (x=5 → [4.94,5.06]).
+    expect(sc.to - sc.from).toBeCloseTo(0.12, 6);
+    // offA = Nahfläche (0.075), offB = Rückgrat-Nahfläche (0.06).
+    expect(sc.offA).toBeCloseTo(0.075, 6);
+    expect(sc.offB).toBeCloseTo(0.06, 6);
+    // Der Abzweig selbst trägt keine Aussparung (die gehört der Durchgangswand).
+    expect(joins.get("WB")!.spanCutouts).toBeUndefined();
+    // L-Ecke bzw. Wände ohne T bleiben cutout-frei (die kollineare Nicht-Durchgangs-
+    // Hälfte hat keinen Cutout).
+    expect(
+      joins.get("WA1")!.spanCutouts === undefined ||
+        joins.get("WA2")!.spanCutouts === undefined,
+    ).toBe(true);
+  });
+
+  it("Mittelspannen-T-Stoss: die Durchgangswand bekommt einen spanCutout mit korrekter Kernbreite und Nah-Putz-Offsetzone", () => {
+    // Realer W9-Fall: Durchgangswand als EINE Wand W (0,0)→(10,0), Abzweig WB
+    // trifft mit seinem freien Ende (4,0) mittig auf ihre Seite. Beide iw.
+    const proj = layeredWallProject(
+      iwWall("W", { x: 0, y: 0 }, { x: 10, y: 0 }),
+      iwWall("WB", { x: 4, y: 3 }, { x: 4, y: 0 }),
+      iwWall("Filler", { x: 100, y: 100 }, { x: 100, y: 103 }), // unbeteiligt
+    );
+    const joins = computeJoins(proj, proj.walls);
+
+    const wCuts = joins.get("W")!;
+    expect(wCuts.spanCutouts).toBeDefined();
+    expect(wCuts.spanCutouts!.length).toBe(1);
+    const sc = wCuts.spanCutouts![0];
+    // Intervall um x=4, Breite = Kernbreite 0.12 → [3.94, 4.06].
+    expect(sc.from).toBeCloseTo(3.94, 6);
+    expect(sc.to).toBeCloseTo(4.06, 6);
+    expect(sc.offA).toBeCloseTo(0.075, 6);
+    expect(sc.offB).toBeCloseTo(0.06, 6);
+    // Der Abzweig und die unbeteiligte Wand tragen keine Aussparung.
+    expect(joins.get("WB")!.spanCutouts).toBeUndefined();
+    expect(joins.get("Filler")!.spanCutouts).toBeUndefined();
+  });
+
+  it("L-Ecke und einfacher (nicht materialbewusster) Stoss bekommen KEINEN spanCutout", () => {
+    // Reine L-Ecke zweier Wände: keine Durchgangswand, kein Durchstoss.
+    const proj = twoWallProject(
+      wall("L1", { x: 0, y: 0 }, { x: 5, y: 0 }),
+      wall("L2", { x: 5, y: 0 }, { x: 5, y: 4 }),
+      0.4,
+    );
+    const joins = computeJoins(proj, proj.walls);
+    expect(joins.get("L1")!.spanCutouts).toBeUndefined();
+    expect(joins.get("L2")!.spanCutouts).toBeUndefined();
   });
 
   it("setzt layerCuts NICHT, wenn kein Bauteil des Abzweigs mit dem Rückgrat der Durchgangswand übereinstimmt", () => {

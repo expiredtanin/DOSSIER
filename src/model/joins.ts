@@ -35,6 +35,29 @@ export interface LayerCuts {
   endSide: (Line | null)[];
 }
 
+/**
+ * Aussparung der DURCHGANGSWAND an einem materialbewussten T-Stoss: über das
+ * Achsen-Intervall `[from,to]` (Meter ab `wall.start` entlang der Achse) und den
+ * Quer-Offsetbereich `[offA,offB]` wird die Nah-Putz-Zone der Durchgangswand
+ * echt ausgeschnitten, damit der durchstechende Abzweig-Kern (Phase 1b) die
+ * Durchgangswand nicht nur übermalt, sondern geometrisch aufbricht.
+ *
+ * OFFSET-KONVENTION (identisch zu den Schicht-Bändern in `addWallPoche`):
+ * `offA`/`offB` sind Querabstände von der Wandachse ENTLANG der linken Normalen
+ * `leftNormal(dir)`, inkl. Referenzversatz — also im selben Bereich wie
+ * `refOff − total/2` (außen) … `refOff + total/2` (innen). `offA` ist stets die
+ * NAHFLÄCHE (Wandoberfläche, `refOff + sign·total/2`), `offB` die dem Abzweig
+ * zugewandte Fläche des Rückgrat-KERNS (`refOff + sign·(total/2 − nearPlaster)`)
+ * — die Zone dazwischen ist exakt der Nah-Putz, den der Abzweig-Kern durchstösst.
+ * `from ≤ to` ist die Projektion der Abzweig-Kernbreite auf die Durchgangsachse.
+ */
+export interface SpanCutout {
+  from: number;
+  to: number;
+  offA: number;
+  offB: number;
+}
+
 /** Schnittlinien einer Wand an ihren beiden Achsenden. */
 export interface WallCuts {
   startCut: Line | null;
@@ -46,6 +69,13 @@ export interface WallCuts {
    * verschmilzt (siehe {@link resolveJoinPriority}).
    */
   layerCuts?: LayerCuts;
+  /**
+   * Additive Erweiterung (Durchgangswand-Seite): Aussparungen der Nah-Putz-Zone,
+   * durch die ein Abzweig-Kern sticht. Fehlt/leer ⇒ die Wand wird unverändert
+   * gezeichnet. Wird nur an der DURCHGANGSWAND gesetzt (nie am Abzweig), analog
+   * additiv zu {@link layerCuts}. Siehe {@link SpanCutout}.
+   */
+  spanCutouts?: SpanCutout[];
 }
 
 /**
@@ -396,6 +426,53 @@ function applyLayerCuts(
     const adjMerged =
       !merged[i] && ((i > 0 && merged[i - 1]) || (i < n - 1 && merged[i + 1]));
     sideArr[i] = adjMerged ? sideLine : null;
+  }
+
+  // Durchgangswand-Aussparung (Phase 1c): den Nah-Putz der Durchgangswand über
+  // die Breite des durchstechenden Abzweig-Kerns ECHT ausschneiden. Nur nötig,
+  // wenn davor überhaupt Nah-Putz liegt (nearPlaster > 0) — sonst schliesst der
+  // Kern flächenbündig an und es gibt nichts aufzubrechen.
+  if (nearPlaster > 1e-9) {
+    // Kernbreite des Abzweigs im Quer-Offset (Offset-Konvention der Bänder:
+    // gestapelt entlang leftNormal ab refOff − total/2). Die verschmelzenden
+    // Schichten (`merged`) bilden den Kern; Lo/Hi = ihre Offset-Hülle.
+    const totalBranch = wallTypeThickness(branchWt);
+    const refOffBranch = wallReferenceOffset(branchWall, totalBranch);
+    let bOff = refOffBranch - totalBranch / 2;
+    let coreLo = Infinity;
+    let coreHi = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const th = branchWt.layers[i].thickness;
+      if (merged[i]) {
+        if (bOff < coreLo) coreLo = bOff;
+        if (bOff + th > coreHi) coreHi = bOff + th;
+      }
+      bOff += th;
+    }
+    if (coreHi > coreLo) {
+      // Projektion der Kern-Offsethülle auf die Durchgangsachse: der Achsenpunkt
+      // liegt bei `axisAt` (Meter ab Durchgangs-Start), ein Abzweig-Offset `o`
+      // verschiebt sich entlang der Achse um `o · (nBranch · uT)`.
+      const nBranch = leftNormal(dirOf(branchWall));
+      const proj = dot(nBranch, throughDir);
+      const axisAt = dot(sub(axisPoint, throughWall.start), throughDir);
+      const e1 = axisAt + coreLo * proj;
+      const e2 = axisAt + coreHi * proj;
+      // Quer-Offsetbereich = Nah-Putz-Zone der Durchgangswand: Nahfläche (offA)
+      // bis Rückgrat-Nahfläche (offB, = mergeCut-Offset). Beide in derselben
+      // Offset-Konvention wie die Schicht-Bänder der Durchgangswand.
+      const offA = offT + sign * (tT / 2);
+      const offB = offT + sign * (tT / 2 - nearPlaster);
+      const throughCuts = result.get(throughWall.id);
+      if (throughCuts) {
+        (throughCuts.spanCutouts ??= []).push({
+          from: Math.min(e1, e2),
+          to: Math.max(e1, e2),
+          offA,
+          offB,
+        });
+      }
+    }
   }
 }
 
