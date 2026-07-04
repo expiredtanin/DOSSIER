@@ -237,12 +237,19 @@ function pushSegment(
   if (len < 1e-9) return;
   const ux = dx / len;
   const uy = dy / len;
-  // Grundriss-Normale (identisch zur Dicken-Achse in raycast3d /
-  // selectionHighlightLines: n = (uy, −ux)). Der Schicht-Versatz verschiebt
-  // Start/Ende der Box quer zur Wand, sodass render3d/raycast die Box um ihre
-  // eigene (versetzte) Achse zentriert aufbaut.
-  const ox = uy * normalOffset;
-  const oy = -ux * normalOffset;
+  // LINKE Grundriss-Normale (identisch zu `leftNormal(u)` = (−uy, ux) in
+  // generatePlan.ts/clippedBand — dieselbe Konvention, die addWallPoche für
+  // den Schichtstapel im 2D-Grundriss benutzt). Der Schicht-Versatz verschiebt
+  // Start/Ende der Box quer zur Wand, sodass render3d die Box um ihre eigene
+  // (versetzte) Achse zentriert aufbaut — mit dieser Normale liegt Schicht 0
+  // (Aussenseite, kleinster `offset`) auf derselben Weltseite wie im Grundriss.
+  // Bewusst NICHT identisch zur Normale, die raycast3d/selectionHighlightLines
+  // für den Box-Rebuild nutzen (n = (uy, −ux), rechte Normale) — das ist
+  // unschädlich, weil jene Boxen symmetrisch um die (hier bereits versetzte)
+  // Achse jedes einzelnen Layer-Records aufgebaut werden und daher unabhängig
+  // von der Vorzeichen-Konvention des Versatzes sind.
+  const ox = -uy * normalOffset;
+  const oy = ux * normalOffset;
   const p1: RVec2 = [wall.start.x + ux * from + ox, wall.start.y + uy * from + oy];
   const p2: RVec2 = [wall.start.x + ux * to + ox, wall.start.y + uy * to + oy];
   out.push({
