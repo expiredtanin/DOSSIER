@@ -281,8 +281,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.wall.linkAbove": "Bind to floor above",
   "objinfo.wall.bottom": "Bottom (UK)",
   "objinfo.wall.top": "Top (OK)",
-  "objinfo.wall.anchorFloor": "Bound to floor",
-  "objinfo.wall.anchorCustom": "Custom height",
+  "objinfo.wall.anchorFloor": "Bound",
+  "objinfo.wall.anchorCustom": "Custom",
   "objinfo.wall.height": "Height",
   "objinfo.wall.floorAboveNone": "No floor above",
   // ── Ceiling attributes (object info panel) ───────────────────────────────
@@ -295,8 +295,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.ceiling.bottom": "Bottom (UK)",
   "objinfo.ceiling.height": "Thickness (OK−UK)",
   "objinfo.ceiling.area": "Area",
-  "objinfo.ceiling.anchorFloor": "Bound to floor",
-  "objinfo.ceiling.anchorCustom": "Custom height",
+  "objinfo.ceiling.anchorFloor": "Bound",
+  "objinfo.ceiling.anchorCustom": "Custom",
   // ── Opening attributes (object info panel) ──────────────────────────────
   "objinfo.opening.section": "Opening",
   "objinfo.opening.kind": "Type",

@@ -282,8 +282,8 @@ export const de = {
   "objinfo.wall.linkAbove": "An oberes Geschoss binden",
   "objinfo.wall.bottom": "Unterkante (UK)",
   "objinfo.wall.top": "Oberkante (OK)",
-  "objinfo.wall.anchorFloor": "An Geschoss gebunden",
-  "objinfo.wall.anchorCustom": "Eigene Höhe",
+  "objinfo.wall.anchorFloor": "Gebunden",
+  "objinfo.wall.anchorCustom": "Eigene",
   "objinfo.wall.height": "Höhe",
   // ── Decken-Attribute (Object-Info-Panel) ────────────────────────────────
   "objinfo.ceiling.section": "Decke",
@@ -295,8 +295,8 @@ export const de = {
   "objinfo.ceiling.bottom": "Unterkante (UK)",
   "objinfo.ceiling.height": "Dicke (OK−UK)",
   "objinfo.ceiling.area": "Fläche",
-  "objinfo.ceiling.anchorFloor": "An Geschoss gebunden",
-  "objinfo.ceiling.anchorCustom": "Eigene Höhe",
+  "objinfo.ceiling.anchorFloor": "Gebunden",
+  "objinfo.ceiling.anchorCustom": "Eigene",
   // ── Öffnungs-Attribute (Object-Info-Panel) ──────────────────────────────
   "objinfo.opening.section": "Öffnung",
   "objinfo.opening.kind": "Art",
