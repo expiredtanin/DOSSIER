@@ -31,7 +31,10 @@ import type {
  * der rechten unteren Gruppe. Das Hochzählen verwirft alt gespeicherte Layouts
  * sauber auf den neuen Standard (kein Migrationspfad über die Strukturgrenze).
  */
-export const LAYOUT_VERSION = 7;
+// v8: Werkzeug-Sidebar aus dem Default-Layout entfernt (Ribbon-UI Phase 3) →
+// Version-Bump, damit gespeicherte Layouts auf den neuen Standard zurückfallen
+// (Attribute volle linke Höhe statt Werkzeug-Palette oben).
+export const LAYOUT_VERSION = 8;
 
 /** localStorage-Schlüssel des zuletzt benutzten Layouts. */
 const CURRENT_KEY = "cad.layout";
@@ -55,9 +58,12 @@ const NAMED_PREFIX = "cad.layouts.";
  * OBEN, Zeichnungsebenen + Ebenen als Tab-Stapel UNTEN. (Ressourcen bleibt ein
  * schwebendes Fenster.) Jede Gruppe trägt ein Höhen-Gewicht.
  */
+// Ribbon-UI Phase 3: die Werkzeug-Sidebar ("tools") ist NICHT mehr im Default-
+// Layout — die Werkzeuge liegen im Ribbon, der Wandtyp-/Deckentyp-Picker im
+// Attribute-Panel. `ToolsPanel` bleibt registriert (per Fenster-Menü andockbar),
+// nur nicht mehr per Default sichtbar → Attribute bekommt die volle linke Höhe.
 const DEFAULT_LEFT_GROUPS: DockGroup[] = [
-  { tabs: ["tools"], activeTab: "tools", weight: 1 },
-  { tabs: ["attributes"], activeTab: "attributes", weight: 1.1 },
+  { tabs: ["attributes"], activeTab: "attributes", weight: 1 },
 ];
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
   { tabs: ["object-info", "room-balance"], activeTab: "object-info", weight: 1 },
@@ -86,9 +92,10 @@ function cloneGroups(groups: DockGroup[]): DockGroup[] {
 // ── Standard ────────────────────────────────────────────────────────────────
 
 /**
- * Liefert den eingebauten Startzustand: links zwei Gruppen (Werkzeuge oben,
- * Zeichnungsebenen/Ebenen unten), rechts LEER. Jeder Aufruf erzeugt frische
- * Objekte/Arrays, damit Aufrufer das Ergebnis gefahrlos mutieren können.
+ * Liefert den eingebauten Startzustand: links das Attribute-Panel (volle Höhe),
+ * rechts Objektinfo/Raumbilanz oben + Zeichnungsebenen/Ebenen/Umgebung unten.
+ * Die Werkzeuge liegen im Ribbon (keine Sidebar mehr). Jeder Aufruf erzeugt
+ * frische Objekte/Arrays, damit Aufrufer das Ergebnis gefahrlos mutieren können.
  */
 export function defaultLayout(): LayoutState {
   return {

@@ -220,6 +220,7 @@ export const en: Record<TranslationKey, string> = {
   // Attribute-Palette (AttributesPanel)
   "attr.title": "Attributes",
   "attr.empty": "No selection",
+  "attr.newComponent": "New component",
   "attr.stroke": "Pen",
   "attr.color": "Color",
   "attr.weight": "Line weight (mm)",

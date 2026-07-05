@@ -221,6 +221,7 @@ export const de = {
   // Attribute-Palette (AttributesPanel)
   "attr.title": "Attribute",
   "attr.empty": "Keine Auswahl",
+  "attr.newComponent": "Neues Bauteil",
   "attr.stroke": "Stift",
   "attr.color": "Farbe",
   "attr.weight": "Strichstärke (mm)",

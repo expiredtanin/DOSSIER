@@ -13,7 +13,6 @@ import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import type { ToolId } from "./host";
 import { TOOL_ORDER, getTool } from "../tools/tools";
-import { Dropdown } from "../ui/Dropdown";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 // Keine echten Asset-Icons vorhanden: schlichte Inline-SVG-Glyphen je Werkzeug
@@ -162,44 +161,9 @@ export function ToolsPanel() {
         );
       })}
 
-      <div className="tools-sep" />
-
-      {/* Wandtyp-Auswahl — nur sichtbar, wenn das Wand-Werkzeug aktiv ist. */}
-      {host.activeTool === "wall" && (
-        <label className="tools-field">
-          <span>{t("tool.wallType")}</span>
-          <Dropdown
-            value={host.activeWallTypeId}
-            disabled={!host.toolsEnabled}
-            onChange={(v) => host.onActiveWallTypeId(v)}
-            options={host.project.wallTypes.map((wt) => ({
-              value: wt.id,
-              label: wt.name,
-            }))}
-          />
-        </label>
-      )}
-
-      {host.activeTool === "wall" && <div className="tools-sep" />}
-
-      {/* Deckentyp-Auswahl — nur sichtbar, wenn das Decken-Werkzeug aktiv ist.
-          Nutzt denselben Aufbau-Typ (WallType) wie die Wand. */}
-      {host.activeTool === "ceiling" && (
-        <label className="tools-field">
-          <span>{t("tool.ceilingType")}</span>
-          <Dropdown
-            value={host.activeWallTypeId}
-            disabled={!host.toolsEnabled}
-            onChange={(v) => host.onActiveWallTypeId(v)}
-            options={host.project.wallTypes.map((wt) => ({
-              value: wt.id,
-              label: wt.name,
-            }))}
-          />
-        </label>
-      )}
-
-      {host.activeTool === "ceiling" && <div className="tools-sep" />}
+      {/* Wandtyp-/Deckentyp-Auswahl ist ins Attribute-Panel gewandert (Ribbon-UI
+          Phase 3: Werkzeug-Sidebar nicht mehr im Default-Layout). Der Picker
+          erscheint dort bei aktivem Wand-/Decken-Werkzeug. */}
     </div>
   );
 }

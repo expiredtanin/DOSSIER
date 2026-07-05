@@ -47,11 +47,38 @@ export function AttributesPanel() {
   const sel = host.selection;
   const { project } = host;
 
-  // Leerzustand: kompakter Hinweis, wenn nichts (Sinnvolles) selektiert ist.
+  // Wandtyp-/Deckentyp-Wahl für das NEUE Bauteil (was gezeichnet wird) — früher
+  // in der Werkzeug-Sidebar (ToolsPanel), seit deren Entfernung hier. Erscheint
+  // nur bei aktivem Wand-/Decken-Werkzeug (unabhängig von einer Auswahl); Wand und
+  // Decke teilen sich denselben Aufbau-Typ (WallType) + Host-State.
+  const drawingComponent =
+    host.activeTool === "wall" || host.activeTool === "ceiling";
+  const typeSection = drawingComponent ? (
+    <>
+      <div className="attr-section-label">{t("attr.newComponent")}</div>
+      <div className="attr-grid">
+        <span className="attr-key">
+          {t(host.activeTool === "wall" ? "tool.wallType" : "tool.ceilingType")}
+        </span>
+        <span className="attr-val">
+          <Dropdown
+            value={host.activeWallTypeId}
+            disabled={!host.toolsEnabled}
+            onChange={(v) => host.onActiveWallTypeId(v)}
+            options={project.wallTypes.map((wt) => ({ value: wt.id, label: wt.name }))}
+          />
+        </span>
+      </div>
+    </>
+  ) : null;
+
+  // Leerzustand: der Typ-Picker (falls ein Bauteil-Werkzeug aktiv ist), sonst ein
+  // kompakter Hinweis.
   if (sel === null) {
     return (
       <div className="attr-panel">
-        <div className="attr-empty">{t("attr.empty")}</div>
+        {typeSection}
+        {!typeSection && <div className="attr-empty">{t("attr.empty")}</div>}
       </div>
     );
   }
@@ -158,6 +185,8 @@ export function AttributesPanel() {
 
   return (
     <div className="attr-panel">
+      {/* Typ-Picker für das neue Bauteil (nur bei aktivem Wand-/Decken-Werkzeug). */}
+      {typeSection}
       {/* EIN durchgehendes Grid über alle Sektionen — dieselben zwei Spalten
           (Label | Wert) für Stift/Füllung/Maße, damit die Wertfelder überall
           bündig in EINER Spalte stehen. Sektion-Balken spannen beide Spalten. */}
