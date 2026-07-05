@@ -69,7 +69,7 @@ import type { Pick3dHit } from "./viewport/Wasm3DViewport";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
-import { TopBar, ViewRibbonTab, TextGroup } from "./ui/TopBar";
+import { TopBar, ViewRibbonTab } from "./ui/TopBar";
 import { RibbonBar } from "./ui/ribbon/RibbonBar";
 import type { RibbonTabId } from "./ui/ribbon/ribbonItems";
 import { Dropdown } from "./ui/Dropdown";
@@ -359,7 +359,7 @@ export default function App() {
   // Aktiver Ribbon-Tab (2D/3D/BIM/Ansichten). Liegt hier (nicht in der RibbonBar),
   // weil die Tab-Reiter in der TopBar-Zeile sitzen und der Ribbon-Inhalt darunter
   // — beide teilen sich denselben aktiven Tab.
-  const [ribbonTab, setRibbonTab] = useState<RibbonTabId>("2d");
+  const [ribbonTab, setRibbonTab] = useState<RibbonTabId>("views");
   const [activeWallTypeId, setActiveWallTypeId] = useState<string>(
     project.wallTypes[0].id,
   );
@@ -3232,11 +3232,6 @@ export default function App() {
         onSelectTool={onSelectTool}
         onRunCommand={onRunCommand}
         tabContent={{
-          text: (
-            <div className="ribbon-views">
-              <TextGroup textTarget={textTarget} />
-            </div>
-          ),
           views: (
           <ViewRibbonTab
             viewToggleEnabled={activeLevel.kind === "floor"}
@@ -3283,6 +3278,7 @@ export default function App() {
               },
               deleteDrawingCombo,
             }}
+            textTarget={textTarget}
           />
           ),
         }}

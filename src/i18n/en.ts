@@ -123,7 +123,6 @@ export const en: Record<TranslationKey, string> = {
   "ribbon.tab.2d": "2D",
   "ribbon.tab.3d": "3D",
   "ribbon.tab.bim": "BIM",
-  "ribbon.tab.text": "Text",
   "ribbon.tab.views": "Views",
   "ribbon.group.draw": "Draw",
   "ribbon.group.modify": "Modify",

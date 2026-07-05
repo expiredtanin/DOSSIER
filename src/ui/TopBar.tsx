@@ -991,6 +991,9 @@ export interface ViewRibbonTabProps {
   planColorMode: PlanColorMode;
   onPlanColorMode: (m: PlanColorMode) => void;
   combos: ComboMenuHandlers;
+  /** Text-/Font-Formatierung auf DERSELBEN Leiste (Raumstempel-Ziel; `null` =
+   *  nur Defaults). Liegt bewusst im „Ansichten"-Tab (Nutzer-Wunsch). */
+  textTarget: TextTarget | null;
 }
 
 /**
@@ -1025,6 +1028,7 @@ export function ViewRibbonTab({
   planColorMode,
   onPlanColorMode,
   combos,
+  textTarget,
 }: ViewRibbonTabProps) {
   // „frei" wird über einen Prompt erfasst; akzeptiert „1:35" ODER „35".
   const onScaleChange = (value: string) => {
@@ -1248,6 +1252,12 @@ export function ViewRibbonTab({
           )}
         </label>
       </div>
+      <Sep />
+
+      {/* Text-/Font-Formatierung auf DERSELBEN Leiste (Nutzer-Wunsch: Text und
+          Ansichten zusammen) — Stil/Schrift/Grösse + B/I/U · L/C/R + Zeilenhöhe,
+          formatiert das aktuelle Text-Ziel (Raumstempel) live. */}
+      <TextGroup textTarget={textTarget} />
     </div>
   );
 }

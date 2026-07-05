@@ -28,7 +28,7 @@ export interface RibbonGroup {
 }
 
 /** Kennung eines Ribbon-Tabs (fest, für Tab-State + i18n). */
-export type RibbonTabId = "2d" | "3d" | "bim" | "text" | "views";
+export type RibbonTabId = "views" | "2d" | "3d" | "bim";
 
 /** Ein Ribbon-Tab: Beschriftung + gruppierte Elemente. */
 export interface RibbonTab {
@@ -41,12 +41,20 @@ const t = (id: ToolId): RibbonItem => ({ kind: "tool", id });
 const c = (name: string): RibbonItem => ({ kind: "command", name });
 
 /**
- * Die Ribbon-Tabs (Reihenfolge 2D·3D·BIM·Ansichten). 2D (Zeichnen + Ändern) und
- * BIM (Bauteile) sind datengetrieben aus Werkzeugen/Befehlen; „Ansichten" trägt
- * reichen Custom-Inhalt (aus der TopBar gemergt, siehe `ViewRibbonTab` — die
- * Registry lässt seine `groups` leer). 3D ist vorerst leer (spätere Phase).
+ * Die Ribbon-Tabs (Reihenfolge Ansichten·2D·3D·BIM). „Ansichten" ist der
+ * Standard-Tab (zuerst, initial aktiv) und trägt reichen Custom-Inhalt: die aus
+ * der TopBar gemergte Ansichts-/Zoom-/Darstellungs-Steuerung UND die Text-/Font-
+ * Formatierung auf DERSELBEN Leiste (`ViewRibbonTab` — `groups` bleibt leer). 2D
+ * (Zeichnen + Ändern) und BIM (Bauteile) sind datengetrieben aus Werkzeugen/
+ * Befehlen; 3D ist vorerst leer (spätere Phase).
  */
 export const RIBBON_TABS: RibbonTab[] = [
+  {
+    // Custom-Inhalt (ViewRibbonTab): Ansichts-/Zoom-/Darstellungssteuerung + Text.
+    id: "views",
+    labelKey: "ribbon.tab.views",
+    groups: [],
+  },
   {
     id: "2d",
     labelKey: "ribbon.tab.2d",
@@ -96,16 +104,5 @@ export const RIBBON_TABS: RibbonTab[] = [
         ],
       },
     ],
-  },
-  {
-    // Custom-Inhalt: die Text-/Font-Formatierung (TextGroup), via tabContent.
-    id: "text",
-    labelKey: "ribbon.tab.text",
-    groups: [],
-  },
-  {
-    id: "views",
-    labelKey: "ribbon.tab.views",
-    groups: [],
   },
 ];
