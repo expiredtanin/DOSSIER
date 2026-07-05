@@ -80,3 +80,56 @@ describe("generatePlan — Schnitt vs. Ansicht nach Schnitthöhe", () => {
     expect(low.some((pr) => pr.fill !== "none")).toBe(true);
   });
 });
+
+// ── Decke über der Schnittebene → gestrichelte Überkopf-Umrisslinie ──────────
+
+/** Minimalprojekt mit EINER Decke (Slab) ohne Wände → voller Umriss sichtbar. */
+function ceilingProject(): Project {
+  return {
+    id: "t",
+    name: "T",
+    lineStyles: [{ id: "thin", name: "d", weight: 0.13, color: "#111", dash: null }],
+    hatches: [{ id: "none", name: "Ohne", pattern: "none", scale: 1, angle: 0, color: "#111" }],
+    components: [{ id: "a", name: "A", color: "#d8d2c7", hatchId: "none", joinPriority: 10 }],
+    wallTypes: [{ id: "aw", name: "AW", layers: [{ componentId: "a", thickness: 0.2 }] }],
+    drawingLevels: [
+      { id: "eg", name: "EG", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0, baseElevation: 0 },
+    ],
+    layers: [{ code: "30", name: "Decken", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
+    walls: [],
+    doors: [],
+    openings: [],
+    ceilings: [
+      {
+        id: "C1",
+        type: "ceiling",
+        floorId: "eg",
+        categoryCode: "30",
+        outline: [
+          { x: 0, y: 0 },
+          { x: 2, y: 0 },
+          { x: 2, y: 2 },
+          { x: 0, y: 2 },
+        ],
+        wallTypeId: "aw",
+      },
+    ],
+    stairs: [],
+    rooms: [],
+    drawings2d: [],
+    context: [],
+  };
+}
+
+describe("generatePlan — Decke = gestrichelte Überkopf-Ansicht", () => {
+  it("zeichnet den freien Decken-Umriss gestrichelt (Überkopf-Konvention)", () => {
+    const plan = generatePlan(ceilingProject(), "eg", new Set(["30"]), undefined, "mittel");
+    const outlines = plan.primitives.filter(
+      (p): p is Extract<typeof p, { kind: "line" }> =>
+        p.kind === "line" && p.cls === "ceiling-outline",
+    );
+    expect(outlines.length).toBeGreaterThan(0);
+    // JEDE Decken-Umrisslinie ist gestrichelt (dash gesetzt, nicht null).
+    expect(outlines.every((p) => Array.isArray(p.dash) && p.dash.length >= 2)).toBe(true);
+  });
+});

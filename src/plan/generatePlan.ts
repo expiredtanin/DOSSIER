@@ -98,6 +98,10 @@ const MONO_INK = "#111111";
 const LAYER_LINE_MM = 0.02;
 /** Haarlinie für Tür-/Fenstersymbole (Flügel, Bogen, Rahmen, Glas) in mm. */
 const SYMBOL_HAIRLINE_MM = 0.02;
+/** Strichmuster (mm Papier) für ÜBERKOPF-Ansichtslinien: Bauteile über der
+ *  Grundriss-Schnittebene (Decken-/Slab-Überstände, Unterzüge) werden nach
+ *  BIM-Konvention gestrichelt gezeichnet (Aufsicht auf ein Bauteil über einem). */
+const OVERHEAD_DASH: number[] = [0.4, 0.25];
 /** Stärke der Wand-Umrisslinie je Detailgrad, als Faktor auf die Ebenen-lw. */
 const OUTLINE_DETAIL_FACTOR: Record<DetailLevel, number> = {
   grob: 1.6, // dickere Sammellinie
@@ -638,13 +642,9 @@ export function generatePlan(
   for (const ceiling of ceilings) {
     const greyed = categoryDisplay(ceiling.categoryCode).greyed;
     const category = catByCode.get(ceiling.categoryCode);
-    const lwMm = resolveStrokeWeight(
-      ceiling.strokeWeight,
-      ceiling.strokeWeightSource,
-      category,
-      lwByCode.get(ceiling.categoryCode) ?? WALL_FALLBACK_MM,
-    );
-    addCeilingPoche(primitives, project, ceiling, greyed, detail, lwMm, category, wallFootprints);
+    // Kein lwMm mehr: der Decken-Umriss ist eine feste Überkopf-Haarlinie
+    // (gestrichelt), unabhängig von der Kategorie-Strichstärke.
+    addCeilingPoche(primitives, project, ceiling, greyed, detail, category, wallFootprints);
   }
 
   // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
@@ -1904,7 +1904,6 @@ function addCeilingPoche(
   ceiling: Ceiling,
   greyed: boolean,
   detail: DetailLevel,
-  lwMm: number,
   category: LayerCategory | undefined,
   wallFootprints: WallFootprint[],
 ): void {
@@ -1913,7 +1912,6 @@ function addCeilingPoche(
   const wt = getCeilingType(project, ceiling);
   const comp = wt.layers.length > 0 ? getComponent(project, wt.layers[0].componentId) : null;
   const stroke = ceiling.color ?? POCHE_STROKE;
-  const outlineMm = lwMm * OUTLINE_DETAIL_FACTOR[detail];
   const ceilingId = ceiling.id;
 
   // Gefüllte Fläche mit der Ansichts-Schraffur: die Decke wird im Grundriss
@@ -1974,7 +1972,10 @@ function addCeilingPoche(
         a: add(a, scale(d, t0)),
         b: add(a, scale(d, t1)),
         cls: "ceiling-outline",
-        weightMm: outlineMm,
+        // Überkopf-Ansichtslinie (Decke liegt als Slab über der Schnittebene) →
+        // gestrichelte Haarlinie statt kräftiger Volllinie (BIM-Konvention).
+        weightMm: LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail],
+        dash: OVERHEAD_DASH,
         color: stroke,
         greyed,
       });
