@@ -486,7 +486,7 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
         widthMm: p.weightMm,
         dash: p.dash ?? null,
       });
-    } else {
+    } else if (p.kind === "text") {
       // "text": zeilenweise flachen — die ECHTEN Glyphen rastert der Rust-
       // Renderer über einen GPU-Glyphen-Atlas (glyphon, dieselbe Font-Familie
       // wie im Browser). Layout identisch zum SVG-Pfad in PlanView (case

@@ -779,6 +779,7 @@ export const de = {
   "import.file": "Datei",
   "import.summary.heading": "Inhalt",
   "import.summary.contours": "{n} Konturen",
+  "import.summary.texts": "{n} Texte",
   "import.summary.meshes": "{n} Meshes",
   "import.summary.layers": "Layer: {layers}",
   "import.summary.noLayers": "keine Layer-Namen",

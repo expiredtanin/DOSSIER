@@ -15,7 +15,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Contour, ContourSet, Drawing2D, Drawing2DGeom } from "../model/types";
+import type { Contour, ContourSet, Drawing2D, Drawing2DGeom, ImportedText } from "../model/types";
 
 /** Wie DXF-Layer auf Kategorien abgebildet werden. */
 export type CategoryMode = "active" | "byLayer";
@@ -62,6 +62,40 @@ export function contoursToDrawings(
       }
       out.push(drawing);
     }
+  }
+  return out;
+}
+
+/**
+ * Wandelt importierte Texte in Drawing2D-`text`-Elemente um — analog
+ * `contoursToDrawings` (gleiche Layer→Kategorie-Zuordnung). Winkel/Höhe kommen
+ * 1:1 aus `ImportedText` (Höhe in Modell-Metern, Winkel in Radiant).
+ */
+export function textsToDrawings(
+  texts: ImportedText[],
+  levelId: string,
+  categoryMode: CategoryMode,
+  fallbackCode: string,
+  layerToCode: (layerName: string) => string,
+): Drawing2D[] {
+  const out: Drawing2D[] = [];
+  for (const it of texts) {
+    const layerName = it.layer ?? "";
+    const categoryCode =
+      categoryMode === "byLayer" && layerName ? layerToCode(layerName) : fallbackCode;
+    out.push({
+      id: nextId(),
+      type: "drawing2d",
+      levelId,
+      categoryCode,
+      geom: {
+        shape: "text",
+        at: { ...it.at },
+        text: it.text,
+        height: it.height,
+        angle: it.angle,
+      },
+    });
   }
   return out;
 }

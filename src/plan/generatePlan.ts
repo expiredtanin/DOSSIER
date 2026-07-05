@@ -294,6 +294,23 @@ export type Primitive =
       /** ID des Raums (Room), zu dem dieser Stempel gehört (Auswahl). */
       roomId?: string;
       greyed?: boolean;
+    }
+  | {
+      // Schlichter, modellverankerter Einzeltext (aus Drawing2D `{shape:"text"}`,
+      // z. B. DXF-Import). Anders als `kind:"text"` (Raum-Stempel, RichText) trägt
+      // er nur einen String mit Höhe in Metern + Drehung — rein SVG-gerendert.
+      kind: "drawingText";
+      /** Ankerpunkt im Modell (Meter). */
+      at: Vec2;
+      text: string;
+      /** Schrifthöhe in Modell-Metern. */
+      heightM: number;
+      /** Drehung in RADIANT (CCW im Modell). */
+      angle: number;
+      color: string;
+      /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl). */
+      drawingId?: string;
+      greyed?: boolean;
     };
 
 /**
@@ -1013,7 +1030,19 @@ function addDrawing2D(
       for (let i = 0; i < N; i++) seg(pts[i], pts[(i + 1) % N]);
       break;
     }
-    // arc/text: Primitive-Erweiterungen folgen später.
+    case "text":
+      out.push({
+        kind: "drawingText",
+        at: g.at,
+        text: g.text,
+        heightM: g.height,
+        angle: g.angle,
+        color,
+        greyed,
+        drawingId: d.id,
+      });
+      break;
+    // arc: Primitive-Erweiterung folgt später.
     default:
       break;
   }

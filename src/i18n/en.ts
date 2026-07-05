@@ -768,6 +768,7 @@ export const en: Record<TranslationKey, string> = {
   "import.file": "File",
   "import.summary.heading": "Contents",
   "import.summary.contours": "{n} contours",
+  "import.summary.texts": "{n} texts",
   "import.summary.meshes": "{n} meshes",
   "import.summary.layers": "Layers: {layers}",
   "import.summary.noLayers": "no layer names",

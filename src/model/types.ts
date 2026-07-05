@@ -1100,6 +1100,20 @@ export interface Contour {
   filled?: boolean;
 }
 
+/**
+ * Ein importiertes Text-Element (DXF TEXT/MTEXT). `at` = Einfügepunkt in Metern,
+ * `height` = Schrifthöhe in Modell-Metern, `angle` = Drehung in RADIANT (CCW).
+ * Wird beim Drawing-Import zu einem `{shape:"text"}`-Drawing2D.
+ */
+export interface ImportedText {
+  at: Vec2;
+  text: string;
+  height: number;
+  angle: number;
+  /** Ursprünglicher DXF-Layer-Name (für die Kategorisierung beim 2D-Import). */
+  layer?: string;
+}
+
 /** Ein Satz Konturen (z. B. alle Höhenlinien eines DXF-Imports). */
 export interface ContourSet {
   id: string;

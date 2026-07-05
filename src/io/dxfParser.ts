@@ -24,9 +24,10 @@
 //   • INSERT                         → Block-Konturen, transformiert (Scale/Rot/Array, verschachtelt).
 //   • HATCH                          → gefüllte Kontur(en) je Randpfad (Custom-Handler,
 //                                       Polyline- + Linien-/Bogen-/Ellipsen-/Spline-Kanten; Fill via `Contour.filled`).
+//   • TEXT / MTEXT                   → ImportedText (Position/Höhe/Winkel) → Drawing2D `{shape:"text"}`.
 
 import DxfParser from "dxf-parser";
-import type { Contour, ContourSet, ImportedMesh, Vec2 } from "../model/types";
+import type { Contour, ContourSet, ImportedMesh, ImportedText, Vec2 } from "../model/types";
 
 /**
  * Optionale Import-Diagnose: Histogramm der gelesenen Entity-Typen (Typ → Anzahl)
@@ -41,10 +42,12 @@ export interface ImportDiagnostics {
   total: number;
 }
 
-/** Ergebnis eines DXF-Imports: rohe Meshes + Konturen-Sätze. */
+/** Ergebnis eines DXF-Imports: rohe Meshes + Konturen-Sätze + Texte. */
 export interface DxfImportResult {
   meshes: ImportedMesh[];
   contours: ContourSet[];
+  /** Importierte TEXT/MTEXT-Elemente (optional; der DWG-Parser füllt sie nicht). */
+  texts?: ImportedText[];
   /** Optionale Diagnose (Entity-Typ-Histogramm); vom DWG-Parser gefüllt. */
   diagnostics?: ImportDiagnostics;
 }
@@ -97,6 +100,12 @@ interface DxfEntity {
   rowSpacing?: number;
   // HATCH: rohe Gruppencodes (vom Custom-Handler gesammelt, siehe HatchHandler).
   rawCodes?: RawCode[];
+  // TEXT/MTEXT. `position` (MTEXT-Einfügepunkt) wird tolerant gelesen (oben als
+  // MESH-Vertexliste getippt). `rotation` (Grad) ist bereits oben deklariert.
+  startPoint?: DxfVertex; // TEXT-Einfügepunkt
+  textHeight?: number; // TEXT-Höhe (Code 40)
+  height?: number; // MTEXT-Höhe (Code 40)
+  text?: string; // Textinhalt (Code 1, MTEXT auch 3)
   [k: string]: unknown;
 }
 /** Ein rohes DXF-Gruppencode/Wert-Paar (HATCH-Randpfad-Auswertung). */
@@ -140,6 +149,7 @@ export function parseDxf(text: string): DxfImportResult {
   const meshTriangles: number[] = []; // gesammelte Mesh-Positions (x,y,z…)
   const meshIndices: number[] = [];
   const contours: Contour[] = [];
+  const texts: ImportedText[] = [];
 
   for (const e of entities) {
     const type = (e.type ?? "").toUpperCase();
@@ -154,6 +164,11 @@ export function parseDxf(text: string): DxfImportResult {
     }
     if (type === "POLYLINE" && isMeshPolyline(e)) {
       addPolyfaceMesh(meshTriangles, meshIndices, e);
+      continue;
+    }
+    if (type === "TEXT" || type === "MTEXT") {
+      const it = textEntity(e, type);
+      if (it) texts.push(it);
       continue;
     }
     // Alle übrigen Kontur-Entities (inkl. SPLINE + INSERT-Block-Expansion) über
@@ -182,7 +197,43 @@ export function parseDxf(text: string): DxfImportResult {
     });
   }
 
-  return { meshes, contours: contourSets };
+  return { meshes, contours: contourSets, texts };
+}
+
+// ── TEXT / MTEXT ─────────────────────────────────────────────────────────────
+
+/** Fallback-Schrifthöhe (Meter), wenn die DXF-Höhe fehlt/0 ist. */
+const DEFAULT_TEXT_HEIGHT = 0.25;
+
+/**
+ * MTEXT-Inhalt von Formatierungscodes säubern (grober erster Wurf): \P → Leer-
+ * zeichen, \~ → Leerzeichen, `\f…;`/`\H…;`/`\C…;`/`\A…;`-Sequenzen und die {}-
+ * Gruppenklammern entfernen, `\{`/`\}`/`\\` entschärfen. Komplexe Verschachte-
+ * lungen werden flachgeklopft (dokumentierte Grenze).
+ */
+function sanitizeMText(s: string): string {
+  return s
+    .replace(/\\P/gi, " ")
+    .replace(/\\~/g, " ")
+    .replace(/\\[A-Za-z][^;\\]*;/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\\([{}\\])/g, "$1")
+    .trim();
+}
+
+/** TEXT/MTEXT-Entity → ImportedText (Position/Höhe/Winkel), oder null bei leer. */
+function textEntity(e: DxfEntity, type: string): ImportedText | null {
+  const rawText = typeof e.text === "string" ? e.text : "";
+  const content = type === "MTEXT" ? sanitizeMText(rawText) : rawText;
+  if (!content) return null;
+  const at: Vec2 =
+    type === "MTEXT"
+      ? { x: coord(e.position, "x"), y: coord(e.position, "y") }
+      : { x: e.startPoint?.x ?? 0, y: e.startPoint?.y ?? 0 };
+  const rawHeight = type === "MTEXT" ? numOr(e.height, 0) : numOr(e.textHeight, 0);
+  const height = rawHeight > 0 ? rawHeight : DEFAULT_TEXT_HEIGHT;
+  const angle = (numOr(e.rotation, 0) * Math.PI) / 180; // DXF: Grad CCW → Radiant
+  return { at, text: content, height, angle, layer: e.layer };
 }
 
 // ── Mesh-Entities ────────────────────────────────────────────────────────────

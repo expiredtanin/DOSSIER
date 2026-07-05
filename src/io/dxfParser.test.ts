@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { parseDxf } from "./dxfParser";
-import { contoursToDrawings } from "./dxfToDrawings";
+import { contoursToDrawings, textsToDrawings } from "./dxfToDrawings";
 import type { Contour, ContourSet, Vec2 } from "../model/types";
 
 /** Minimales DXF aus Gruppencode/Wert-Paaren; nur eine ENTITIES-Sektion. */
@@ -408,6 +408,66 @@ describe("parseDxf — HATCH", () => {
     const res = parseDxf(dxf(g));
     expect(res.contours[0].contours).toHaveLength(2);
     expect(res.contours[0].contours.every((c) => c.filled && c.closed)).toBe(true);
+  });
+});
+
+// ── TEXT / MTEXT ──────────────────────────────────────────────────────────────
+
+/** TEXT-Entity: Position, Höhe, Rotation (Grad), String. */
+function textEnt(x: number, y: number, h: number, rotDeg: number, s: string): string[] {
+  return ["0", "TEXT", "8", "0", "10", `${x}`, "20", `${y}`, "30", "0", "40", `${h}`, "50", `${rotDeg}`, "1", s];
+}
+
+/** MTEXT-Entity: Position, Höhe, String (Rotation 0). */
+function mtextEnt(x: number, y: number, h: number, s: string): string[] {
+  return ["0", "MTEXT", "8", "0", "10", `${x}`, "20", `${y}`, "30", "0", "40", `${h}`, "50", "0", "1", s];
+}
+
+describe("parseDxf — TEXT/MTEXT", () => {
+  it("TEXT → ImportedText mit Position/Höhe/Winkel (Grad→Radiant)", () => {
+    const res = parseDxf(dxf(textEnt(5, 3, 0.5, 90, "Hallo")));
+    expect(res.texts).toHaveLength(1);
+    const t0 = res.texts![0];
+    expect(t0.at.x).toBeCloseTo(5, 9);
+    expect(t0.at.y).toBeCloseTo(3, 9);
+    expect(t0.height).toBeCloseTo(0.5, 9);
+    expect(t0.angle).toBeCloseTo(Math.PI / 2, 9);
+    expect(t0.text).toBe("Hallo");
+  });
+
+  it("MTEXT → Formatcodes gesäubert (\\P → Leerzeichen)", () => {
+    const res = parseDxf(dxf(mtextEnt(1, 2, 0.3, "Welt\\Pzeile2")));
+    expect(res.texts![0].text).toBe("Welt zeile2");
+    expect(res.texts![0].at.x).toBeCloseTo(1, 9);
+    expect(res.texts![0].height).toBeCloseTo(0.3, 9);
+  });
+
+  it("leerer Text wird übersprungen", () => {
+    const res = parseDxf(dxf(textEnt(0, 0, 0.2, 0, "")));
+    expect(res.texts ?? []).toHaveLength(0);
+  });
+
+  it("fehlende Höhe → positiver Default", () => {
+    const g = ["0", "TEXT", "8", "0", "10", "0", "20", "0", "30", "0", "1", "X"];
+    const res = parseDxf(dxf(g));
+    expect(res.texts![0].height).toBeGreaterThan(0);
+  });
+});
+
+describe("textsToDrawings", () => {
+  it("ImportedText → Drawing2D {shape:\"text\"}", () => {
+    const drawings = textsToDrawings(
+      [{ at: { x: 1, y: 2 }, text: "Hi", height: 0.4, angle: 0, layer: "L" }],
+      "lvl", "active", "CODE", (s) => s,
+    );
+    expect(drawings).toHaveLength(1);
+    const g = drawings[0].geom;
+    expect(g.shape).toBe("text");
+    if (g.shape === "text") {
+      expect(g.text).toBe("Hi");
+      expect(g.height).toBeCloseTo(0.4, 9);
+      expect(g.at.x).toBeCloseTo(1, 9);
+    }
   });
 });
 

@@ -21,6 +21,7 @@ import type { DrawingLevelKind, ImportedMesh, Project } from "../model/types";
 import type { DxfImportResult, ImportDiagnostics } from "../io/dxfParser";
 import {
   contoursToDrawings,
+  textsToDrawings,
   countContours,
   distinctLayers,
 } from "../io/dxfToDrawings";
@@ -107,9 +108,11 @@ export function ImportDialog({
 
   const contourSets = parsed?.contours ?? [];
   const meshes: ImportedMesh[] = parsed?.meshes ?? [];
+  const texts = parsed?.texts ?? [];
   const contourCount = countContours(contourSets);
+  const textCount = texts.length;
   const layers = distinctLayers(contourSets);
-  const hasDrawings = contourCount > 0;
+  const hasDrawings = contourCount > 0 || textCount > 0;
   const hasMeshes = meshes.length > 0;
 
   // ── Formular-Zustand ──────────────────────────────────────────────────────
@@ -187,6 +190,9 @@ export function ImportDialog({
                 </div>
                 <ul className="imp-summary">
                   <li>{t("import.summary.contours", { n: contourCount })}</li>
+                  {textCount > 0 && (
+                    <li>{t("import.summary.texts", { n: textCount })}</li>
+                  )}
                   <li>{t("import.summary.meshes", { n: meshes.length })}</li>
                   <li>
                     {layers.length > 0
@@ -348,11 +354,19 @@ export function buildDrawings(
   for (const c of project.layers) byName.set(c.name.toLowerCase(), c.code);
   const layerToCode = (layerName: string): string =>
     byName.get(layerName.toLowerCase()) ?? activeCategoryCode;
-  return contoursToDrawings(
+  const fromContours = contoursToDrawings(
     decision.parsed.contours,
     levelId,
     decision.categoryMode,
     activeCategoryCode,
     layerToCode,
   );
+  const fromTexts = textsToDrawings(
+    decision.parsed.texts ?? [],
+    levelId,
+    decision.categoryMode,
+    activeCategoryCode,
+    layerToCode,
+  );
+  return [...fromContours, ...fromTexts];
 }

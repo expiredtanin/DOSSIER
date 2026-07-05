@@ -1640,7 +1640,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         // Raum-Stempel selbst (glyphon) — das SVG darf ihn NICHT zusätzlich
         // zeichnen (sonst doppelter Text), also entfällt dort auch das Textoverlay.
         // Sonst (reines SVG): alles außer den gebündelten 2D-Zeichenlinien.
-        (useGpuRenderer ? wantWasm || p.kind !== "text" : p.kind === "line" && p.drawingId) ? null : (
+        // `drawingText` (importierter Einzeltext) rendert IMMER im SVG — der GL-
+        // wie der WASM-Renderer zeichnet ihn nicht. Der Raum-Stempel (`text`)
+        // bleibt: unter WASM rastert ihn render2d selbst (sonst doppelt).
+        (useGpuRenderer
+          ? wantWasm
+            ? p.kind !== "drawingText"
+            : p.kind !== "text" && p.kind !== "drawingText"
+          : p.kind === "line" && p.drawingId)
+          ? null : (
           <PrimitiveShape
             key={i}
             p={p}
@@ -3062,6 +3070,29 @@ function renderPrimitive(
               </tspan>
             );
           })}
+        </text>
+      );
+    }
+    case "drawingText": {
+      // Modellverankerter Einzeltext (DXF-Import): Höhe in Metern → viewBox-
+      // Einheiten (skaliert mit dem Zoom), Baseline am Ankerpunkt (links).
+      const c = toScreen(p.at);
+      const fontSize = p.heightM * PX_PER_M;
+      // Modell-Winkel CCW; Screen-Y ist gespiegelt und SVG-rotate CW-positiv → -deg.
+      const deg = -(p.angle * 180) / Math.PI;
+      return (
+        <text
+          x={c.x}
+          y={c.y}
+          fontSize={fontSize}
+          fontFamily="var(--font-ui, sans-serif)"
+          fill={p.color}
+          opacity={p.greyed ? 0.45 : undefined}
+          textAnchor="start"
+          transform={deg ? `rotate(${deg} ${c.x} ${c.y})` : undefined}
+          style={{ pointerEvents: "none", userSelect: "none" }}
+        >
+          {p.text}
         </text>
       );
     }
