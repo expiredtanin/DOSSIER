@@ -70,6 +70,7 @@ import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar } from "./ui/TopBar";
+import { RibbonBar } from "./ui/ribbon/RibbonBar";
 import { Dropdown } from "./ui/Dropdown";
 import type { DropdownItem } from "./ui/Dropdown";
 import { TextEditorDialog } from "./ui/TextEditorDialog";
@@ -808,6 +809,16 @@ export default function App() {
     // „Auswahl" oder ein Legacy-Werkzeug (Wand): laufenden Befehl beenden.
     if (engine.isActive()) engine.cancel();
     setActiveTool(id);
+  };
+
+  // Ribbon-Befehl (Ändern-Gruppe u. a.): startet einen Engine-Befehl OHNE
+  // eigenes Werkzeug (kein ToolId). Läuft über DIESELBE Engine wie das Tippen des
+  // Befehls; das Werkzeug-Highlight fällt auf „Auswahl" zurück, das Aktiv-
+  // Highlight des Ribbon-Befehls spiegelt der laufende Befehl (engineView).
+  const onRunCommand = (name: string) => {
+    engine.start(name);
+    setActiveTool("select");
+    requestAnimationFrame(() => commandLineRef.current?.focus());
   };
 
   // 3D-Viewport als Erstellungs-Fläche: der Viewport projiziert den Cursor auf
@@ -3242,6 +3253,17 @@ export default function App() {
           />
         }
         textTarget={textTarget}
+      />
+
+      {/* Ribbon-Oberleiste (2D · 3D · BIM · Ansichten) — additiv unter der TopBar.
+          Teilt sich denselben Aktivierungs-Pfad wie die Werkzeug-Sidebar; die
+          Sidebar bleibt vorerst erhalten (Plan-Doc Phase 3 entfernt sie). */}
+      <RibbonBar
+        activeTool={activeTool}
+        activeCommand={engineView.commandName}
+        toolsEnabled={activeLevel.kind === "floor"}
+        onSelectTool={onSelectTool}
+        onRunCommand={onRunCommand}
       />
 
       <div className="body">

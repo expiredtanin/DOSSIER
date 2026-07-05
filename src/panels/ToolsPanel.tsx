@@ -19,7 +19,7 @@ import { Dropdown } from "../ui/Dropdown";
 // Keine echten Asset-Icons vorhanden: schlichte Inline-SVG-Glyphen je Werkzeug
 // (~16×16, stroke=currentColor, fill=none), damit das Icon die Textfarbe der
 // Zeile übernimmt.
-function ToolIcon({ id }: { id: ToolId }) {
+export function ToolIcon({ id }: { id: ToolId }) {
   const common = {
     width: 16,
     height: 16,

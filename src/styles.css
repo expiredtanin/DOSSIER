@@ -5340,3 +5340,135 @@ body {
   background: #e5484d;
   color: #fff;
 }
+
+/* ── Ribbon-Oberleiste (2D · 3D · BIM · Ansichten) ─────────────────────────
+   Datengetriebene Tab-Leiste unter der TopBar (RibbonBar). Kompakte Band-Höhe:
+   Tab-Reiter oben, darunter die Werkzeug-/Befehls-Gruppen des aktiven Tabs. */
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+}
+.ribbon-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.ribbon-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 7px 12px 6px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+.ribbon-tab:hover {
+  color: var(--label);
+}
+.ribbon-tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent-border, var(--accent));
+}
+.ribbon-body {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 4px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  min-height: 56px;
+}
+.ribbon-body::-webkit-scrollbar {
+  height: 6px;
+}
+.ribbon-body::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.ribbon-body:hover::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+/* Eine Gruppe: Buttons oben, kleiner Gruppentitel darunter; rechts ein dezenter
+   Trenner (wie OCS-Ribbon-Gruppen). */
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  border-right: 1px solid var(--line);
+}
+.ribbon-group:last-child {
+  border-right: none;
+}
+.ribbon-items {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 1;
+}
+.ribbon-group-title {
+  text-align: center;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding-top: 2px;
+}
+/* Ein Ribbon-Button: Icon oben, Label darunter (kompakt, wie eine Palette). */
+.ribbon-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--label);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 52px;
+  padding: 4px 2px 3px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.15;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ribbon-btn span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ribbon-btn:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+.ribbon-btn.active {
+  background: var(--accent-dim, var(--panel-2));
+  border-color: var(--accent-border, var(--accent));
+  color: var(--ink);
+}
+.ribbon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.ribbon-empty {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  padding: 0 8px;
+}
