@@ -1588,29 +1588,36 @@ function addOpeningSymbol(
   if (o.kind === "door") {
     const sym = doorSymbol(wall, o);
     if (!sym) return;
-    // Türblatt (alle Stufen).
-    out.push({
-      kind: "line",
-      a: sym.hinge,
-      b: sym.openEnd,
-      cls: "door-leaf",
-      weightMm: SYMBOL_HAIRLINE_MM,
-      greyed,
-      openingId: o.id,
-    });
-    // mittel + fein: Schwenkbogen von geschlossen → offen.
-    if (detail !== "grob") {
+    // Tür-Typ „wandoeffnung": reiner Wanddurchbruch — KEIN Türblatt, KEIN
+    // Schwenkbogen. Nur die Öffnung/Laibung bleibt (die Wandlücke kommt aus der
+    // ausgesparten Poché; Sturz-/Anschlaglinien werden weiter unten gezeichnet).
+    // Entspricht `oeff_tuer_typ == "wandoeffnung"` im Rhino-Plugin.
+    const isWandoeffnung = (o.doorType ?? "normal") === "wandoeffnung";
+    if (!isWandoeffnung) {
+      // Türblatt (alle Stufen).
       out.push({
-        kind: "arc",
-        center: sym.hinge,
-        from: sym.closedEnd,
-        to: sym.openEnd,
-        r: sym.radius,
-        cls: "door-swing",
+        kind: "line",
+        a: sym.hinge,
+        b: sym.openEnd,
+        cls: "door-leaf",
         weightMm: SYMBOL_HAIRLINE_MM,
         greyed,
         openingId: o.id,
       });
+      // mittel + fein: Schwenkbogen von geschlossen → offen.
+      if (detail !== "grob") {
+        out.push({
+          kind: "arc",
+          center: sym.hinge,
+          from: sym.closedEnd,
+          to: sym.openEnd,
+          r: sym.radius,
+          cls: "door-swing",
+          weightMm: SYMBOL_HAIRLINE_MM,
+          greyed,
+          openingId: o.id,
+        });
+      }
     }
     // fein: Anschlag-Striche an beiden Pfosten (quer zur Wand).
     if (detail === "fein") {
@@ -1697,6 +1704,20 @@ function addOpeningSymbol(
       greyed,
       openingId: o.id,
     });
+    // Flügel-Mittelpfosten (wingCount − 1) — reine Querlinien innerhalb des
+    // Rahmens (kein Strichmuster). Nur mittel/fein; entfällt bei grob/schema.
+    for (const [a, b] of sym.mullionLines) {
+      out.push({
+        kind: "line",
+        a,
+        b,
+        cls: "window-mullion",
+        weightMm: SYMBOL_HAIRLINE_MM,
+        color: o.color ?? POCHE_STROKE,
+        greyed,
+        openingId: o.id,
+      });
+    }
   }
   for (const [a, b] of sym.glassLines) {
     out.push({

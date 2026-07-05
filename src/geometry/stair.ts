@@ -27,6 +27,32 @@ const norm = (a: Vec2): Vec2 => {
 /** Linke Normale (n = (−u.y, u.x)) — quer zur Laufrichtung. */
 const leftN = (u: Vec2): Vec2 => ({ x: -u.y, y: u.x });
 
+/**
+ * Perp-Versatz von der Referenzkante zur visuellen Treppen-MITTE, entlang der
+ * linken Normale `n = leftN(u)`. Entspricht `mid_off` aus `_treppe_2d_side_offsets`
+ * im Rhino-Plugin (Konvention: `perp` = CCW-Normale = linke Normale):
+ *   • referenz "links"  → Achse ist die LINKE Kante; die Mitte liegt eine
+ *     halbe Breite in −n-Richtung (rechts) → mid_off = −width/2.
+ *   • referenz "rechts" → Achse ist die RECHTE Kante; die Mitte liegt eine
+ *     halbe Breite in +n-Richtung (links) → mid_off = +width/2.
+ *   • referenz "mitte"/undefined → Achse ist bereits die Mitte → 0.
+ *
+ * ANNAHME (selbstkritisch): „links" heisst „linke Kante in Laufrichtung", und die
+ * linke Kante liegt in +n (n = leftN(u), 90° links der Laufrichtung). Von der
+ * linken Kante zur Mitte geht es also nach −n, daher mid_off = −width/2. Das
+ * deckt sich mit `_treppe_2d_side_offsets` (referenz="links" → off_a=0, off_b=−b,
+ * Mitte = −b/2·perp). Wird die Richtung im UI als seitenverkehrt empfunden, ist
+ * hier das Vorzeichen zu drehen — die Geometrie bleibt in sich konsistent.
+ */
+function referenzMidShift(stair: Stair, u: Vec2): Vec2 {
+  const ref = stair.referenz ?? "mitte";
+  if (ref === "mitte") return { x: 0, y: 0 };
+  const n = leftN(u);
+  const halfW = Math.max(0.05, stair.width / 2);
+  const midOff = ref === "links" ? -halfW : halfW;
+  return scale(n, midOff);
+}
+
 /** SIA-nahe Schrittregel: gute Steigungshöhe ≈ 0.17 m, Auftritt ≈ 0.29 m. */
 export const IDEAL_RISER = 0.17;
 export const IDEAL_TREAD = 0.29;
@@ -105,13 +131,22 @@ export function stairGeometry(stair: Stair, totalRise: number): StairGeometry {
   const u = norm(stair.dir);
   const n = leftN(u);
 
-  if (stair.shape === "spiral") {
-    return spiralGeometry(stair, totalRise, steps, riserHeight, halfW);
+  // Referenz (links/mitte/rechts): die gespeicherte Achse wird auf die visuelle
+  // Treppen-MITTE versetzt, danach greift die bestehende, um die Achse zentrierte
+  // Tritt-/Lauflinien-Logik unverändert. So bleibt die Lauflinie samt Pfeil stets
+  // auf der Mitte (nicht auf der Referenzkante). "mitte"/undefined ⇒ Nullversatz.
+  const c = referenzMidShift(stair, u);
+  const s = stair.referenz && stair.referenz !== "mitte"
+    ? { ...stair, start: add(stair.start, c), center: stair.center ? add(stair.center, c) : stair.center }
+    : stair;
+
+  if (s.shape === "spiral") {
+    return spiralGeometry(s, totalRise, steps, riserHeight, halfW);
   }
-  if (stair.shape === "L") {
-    return lGeometry(stair, totalRise, steps, riserHeight, halfW, u, n);
+  if (s.shape === "L") {
+    return lGeometry(s, totalRise, steps, riserHeight, halfW, u, n);
   }
-  return straightGeometry(stair, totalRise, steps, riserHeight, halfW, u, n);
+  return straightGeometry(s, totalRise, steps, riserHeight, halfW, u, n);
 }
 
 /** Gerade Treppe: gleich breite Tritte über die Lauflänge. */
@@ -530,11 +565,19 @@ export function stairOutline(
 ): { polygon: Vec2[] | null; spiral: SpiralOutlineSegments | null } {
   void totalRise; // Signatur-Konsistenz mit stairGeometry; derzeit ungenutzt
   const halfW = Math.max(0.05, stair.width / 2);
-  if (stair.shape === "spiral") {
-    return { polygon: null, spiral: spiralOutline(stair, halfW) };
+  // Referenz (links/mitte/rechts): die gespeicherte Achse zuerst auf die
+  // visuelle Treppen-Mitte versetzen, danach die um die Mitte zentrierte
+  // Aussenlinien-Logik unverändert anwenden (identisch zu `stairGeometry`).
+  const u = norm(stair.dir);
+  const c = referenzMidShift(stair, u);
+  const s = stair.referenz && stair.referenz !== "mitte"
+    ? { ...stair, start: add(stair.start, c), center: stair.center ? add(stair.center, c) : stair.center }
+    : stair;
+  if (s.shape === "spiral") {
+    return { polygon: null, spiral: spiralOutline(s, halfW) };
   }
-  if (stair.shape === "L") {
-    return { polygon: lOutlinePoints(stair, halfW), spiral: null };
+  if (s.shape === "L") {
+    return { polygon: lOutlinePoints(s, halfW), spiral: null };
   }
-  return { polygon: straightOutlinePoints(stair, halfW), spiral: null };
+  return { polygon: straightOutlinePoints(s, halfW), spiral: null };
 }

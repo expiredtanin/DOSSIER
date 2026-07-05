@@ -731,6 +731,22 @@ export interface Opening {
   height: number;
   /** Brüstungshöhe (Unterkante der Öffnung) über der Wand-UK; 0 bei Türen. */
   sillHeight: number;
+  /**
+   * Nur Fenster: Anzahl der Flügel (1–4). Bei > 1 werden im Plan `wingCount − 1`
+   * Mittelpfosten (Querlinien quer zur Öffnungsrichtung) gleichmäßig innerhalb des
+   * Rahmens gezeichnet — analog den Mittelpfosten in `_make_oeffnung_pieces` des
+   * Rhino-Plugins (`oeff_fluegel`). Fehlt es, gilt 1 (= heutiges Verhalten: keine
+   * Pfosten).
+   */
+  wingCount?: number;
+  /**
+   * Nur Tür: Tür-Typ (analog `oeff_tuer_typ` im Rhino-Plugin).
+   *   • "normal"       — Türblatt + Schwenkbogen (Default = heutiges Verhalten).
+   *   • "wandoeffnung" — reiner Wanddurchbruch: KEIN Türblatt, KEIN Schwenkbogen;
+   *     nur die Öffnung/Laibung (Wandlücke + ggf. Sturz-/Anschlaglinien) bleibt.
+   * Fehlt es, gilt "normal".
+   */
+  doorType?: "normal" | "wandoeffnung";
   /** Nur Tür: an welchem Pfosten das Scharnier sitzt. */
   hinge?: "start" | "end";
   /** Nur Tür: auf welche Seite der Wandachse das Blatt aufschlägt. */
@@ -814,6 +830,19 @@ export interface Stair {
   sweep?: number;
   /** Laufbreite in Metern (quer zur Laufrichtung). */
   width: number;
+  /**
+   * Lage der gespeicherten Achse (`start`/`dir` bzw. Wendel-Bogen) über die
+   * Laufbreite — analog `treppe_referenz` im Rhino-Plugin. Bestimmt, ob die Achse
+   * die LINKE, MITTLERE oder RECHTE Kante der Treppe repräsentiert (in
+   * Laufrichtung gesehen). Fehlt sie, gilt "mitte" (= heutiges Verhalten: Achse =
+   * Treppen-Mitte).
+   *   • "links"  — Achse = linke Kante; die Treppe liegt rechts der Achse.
+   *   • "mitte"  — Achse = Mitte (Default).
+   *   • "rechts" — Achse = rechte Kante; die Treppe liegt links der Achse.
+   * Die Lauflinie samt Pfeil bleibt IMMER auf der visuellen Treppen-Mitte
+   * (nicht auf der Referenzkante) — siehe `stairGeometry`.
+   */
+  referenz?: "links" | "mitte" | "rechts";
   /**
    * Gesamt-Steighöhe in Metern (OKFF → OKFF nächstes Geschoss). Fehlt sie, gilt
    * beim Auflösen die Geschosshöhe des zugehörigen Geschosses.

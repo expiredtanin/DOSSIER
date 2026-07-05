@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { stairOutline } from "./stair";
+import { stairOutline, stairGeometry } from "./stair";
 import type { Stair, Vec2 } from "../model/types";
 
 /** Einfache Distanz-Funktion. */
@@ -144,5 +144,68 @@ describe("stairOutline — Wendeltreppe", () => {
     const [innerPt] = lineStart;
     const d = dist({ x: arcIn.cx, y: arcIn.cy }, innerPt);
     expect(d).toBeCloseTo(arcIn.r, 4);
+  });
+});
+
+describe("stairOutline — Referenz links/mitte/rechts (Item 4)", () => {
+  const totalRise = 3.0;
+  // Gerade Treppe entlang +X, Breite 1.2 m. Perp (linke Normale) = (0, +1).
+  const base: Stair = { ...geradeStair, referenz: "mitte" };
+  const mitte = stairOutline(base, totalRise).polygon!;
+  const links = stairOutline({ ...base, referenz: "links" }, totalRise).polygon!;
+  const rechts = stairOutline({ ...base, referenz: "rechts" }, totalRise).polygon!;
+
+  /** Mittlere Y-Höhe eines Rechteck-Polygons. */
+  const midY = (pts: Vec2[]) => pts.reduce((s, p) => s + p.y, 0) / pts.length;
+
+  it("Breite bleibt bei allen Referenzen gleich", () => {
+    for (const poly of [mitte, links, rechts]) {
+      expect(dist(poly[0], poly[1])).toBeCloseTo(geradeStair.width, 5);
+    }
+  });
+
+  it("referenz=links: Treppe liegt RECHTS der Achse (−n) → Mitte um width/2 nach −Y", () => {
+    // Achse (start/dir) = linke Kante; die Fläche versetzt sich in −n = (0,−1).
+    expect(midY(links) - midY(mitte)).toBeCloseTo(-geradeStair.width / 2, 5);
+  });
+
+  it("referenz=rechts: Treppe liegt LINKS der Achse (+n) → Mitte um width/2 nach +Y", () => {
+    expect(midY(rechts) - midY(mitte)).toBeCloseTo(+geradeStair.width / 2, 5);
+  });
+
+  it("bei referenz=links liegt die Achse (y=0) auf der linken Kante der Treppe", () => {
+    // Linke Kante = max-Y-Kante der Fläche (n = +Y). Sie soll bei y=0 liegen.
+    const maxY = Math.max(...links.map((p) => p.y));
+    expect(maxY).toBeCloseTo(0, 5);
+  });
+
+  it("mitte entspricht dem Default (kein referenz-Feld gesetzt)", () => {
+    const noRef = stairOutline({ ...geradeStair }, totalRise).polygon!;
+    for (let i = 0; i < noRef.length; i++) {
+      expect(noRef[i].x).toBeCloseTo(mitte[i].x, 6);
+      expect(noRef[i].y).toBeCloseTo(mitte[i].y, 6);
+    }
+  });
+});
+
+describe("stairGeometry — Lauflinie bleibt visuell zentriert (Item 4)", () => {
+  const totalRise = 3.0;
+  const links = stairGeometry({ ...geradeStair, referenz: "links" }, totalRise);
+  const mitte = stairGeometry({ ...geradeStair, referenz: "mitte" }, totalRise);
+
+  it("Lauflinie liegt auf der Treppen-Mitte, nicht auf der Referenzkante (y=0)", () => {
+    // Bei referenz=links liegt die Mitte bei y = −width/2 = −0.6.
+    for (const p of links.runLine) {
+      expect(p.y).toBeCloseTo(-geradeStair.width / 2, 5);
+    }
+    // Bei mitte liegt die Lauflinie auf y=0 (Achse = Mitte).
+    for (const p of mitte.runLine) {
+      expect(p.y).toBeCloseTo(0, 5);
+    }
+  });
+
+  it("Tritte sind bei referenz=links um −width/2 versetzt", () => {
+    const dy = links.treads[0].pts[0].y - mitte.treads[0].pts[0].y;
+    expect(dy).toBeCloseTo(-geradeStair.width / 2, 5);
   });
 });

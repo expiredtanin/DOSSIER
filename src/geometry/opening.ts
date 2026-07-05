@@ -170,12 +170,21 @@ export interface WindowSymbol {
   frame: Vec2[];
   /** Glaslinien-Segmente quer über die Lücke (1–2 parallele Linien). */
   glassLines: [Vec2, Vec2][];
+  /**
+   * Flügel-Mittelpfosten (`wingCount − 1` Querlinien), jeweils von einer
+   * Laibungsseite zur anderen (parallel zu den Laibungslinien, quer zur
+   * Öffnungsrichtung), gleichmäßig zwischen den beiden Pfosten verteilt. Bei
+   * `wingCount ≤ 1` leer. Entspricht den Mittelpfosten in `_make_oeffnung_pieces`
+   * des Rhino-Plugins (`oeff_fluegel`).
+   */
+  mullionLines: [Vec2, Vec2][];
 }
 
 /**
  * Löst die Fenster-Symbolik auf: ein Rahmen-Rechteck über die Lücke (volle
  * Wanddicke) plus 1–2 Glaslinien (dünne parallele Linien in der Wandmitte,
- * `count` steuert die Anzahl je Detailgrad).
+ * `count` steuert die Anzahl je Detailgrad) plus optionale Flügel-Mittelpfosten
+ * (`wingCount − 1` Querlinien).
  */
 export function windowSymbol(
   project: Project,
@@ -205,5 +214,21 @@ export function windowSymbol(
     const off = refOff + (count === 1 ? 0 : (i - (count - 1) / 2) * spread * 2);
     glassLines.push([add(jambStart, scale(n, off)), add(jambEnd, scale(n, off))]);
   }
-  return { frame, glassLines };
+  // Flügel-Mittelpfosten: (wingCount − 1) Querlinien gleichmäßig zwischen den
+  // Pfosten. Jede Linie läuft quer über die Öffnung (n-Richtung), auf ~60 % der
+  // Mauerdicke symmetrisch um die Wandmitte (Referenz-Offset) — analog Rhino, wo
+  // die Pfosten x_mid = inner_l + span·(i/fluegel) über die Rahmentiefe sitzen.
+  const mullionLines: [Vec2, Vec2][] = [];
+  const wings = Math.max(1, Math.min(4, Math.round(o.wingCount ?? 1)));
+  if (wings > 1) {
+    const postDepth = total * 0.6;
+    const pOuter = refOff + postDepth / 2;
+    const pInner = refOff - postDepth / 2;
+    for (let i = 1; i < wings; i++) {
+      const t = i / wings; // gleichmäßige Teilung entlang der Achse
+      const onAxis = add(jambStart, scale(sub(jambEnd, jambStart), t));
+      mullionLines.push([add(onAxis, scale(n, pOuter)), add(onAxis, scale(n, pInner))]);
+    }
+  }
+  return { frame, glassLines, mullionLines };
 }
