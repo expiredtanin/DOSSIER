@@ -349,6 +349,11 @@ export default function App() {
     selectedDrawingIds.length === 1 ? selectedDrawingIds[0] : null;
   const setSelectedDrawingId = (id: string | null) =>
     setSelectedDrawingIds(id ? [id] : []);
+  // Zwischenablage für 2D-Zeichenelemente (Ctrl/Cmd+C/V). Kopiert die GEWÄHLTEN
+  // Drawing2D tief; Einfügen legt Klone mit neuen IDs auf dem AKTIVEN Geschoss
+  // (Zeichnungsebene) an — so lässt sich z. B. importiertes Mobiliar über
+  // Geschosse hinweg wiederverwenden. Kategorie/Stil bleiben erhalten.
+  const [drawingClipboard, setDrawingClipboard] = useState<Drawing2D[]>([]);
   // Bequemer Einzel-Selektor (erste gewählte Wand).
   const selectedWallId = selectedWallIds[0] ?? null;
   // Decken-Auswahl (MENGE); für die Einzel-Element-Maschinerie der „eine"
@@ -1580,6 +1585,46 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDrawingIds, engine]);
+
+  // Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen. Kopieren legt
+  // die GEWÄHLTEN Drawing2D tief in die Zwischenablage; Einfügen erzeugt Klone mit
+  // neuen IDs auf dem AKTIVEN Geschoss (Zeichnungsebene) und wählt sie aus — so
+  // wandert z. B. importiertes Mobiliar von einem Geschoss auf ein anderes. Im
+  // Textfeld bleibt das native Copy/Paste; ohne 2D-Auswahl kein preventDefault.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "c" && k !== "v") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      if (k === "c") {
+        const ids = new Set(selectedDrawingIds);
+        if (ids.size === 0) return; // nur bei 2D-Auswahl (sonst Browser-Copy)
+        const picked = project.drawings2d.filter((d) => ids.has(d.id));
+        if (picked.length === 0) return;
+        e.preventDefault();
+        setDrawingClipboard(picked.map((d) => structuredClone(d)));
+        return;
+      }
+      // Einfügen: Klone auf dem aktiven Geschoss, neue IDs, danach ausgewählt.
+      if (drawingClipboard.length === 0) return;
+      e.preventDefault();
+      const stamp = Date.now();
+      const pasted: Drawing2D[] = drawingClipboard.map((d, i) => ({
+        ...structuredClone(d),
+        id: `drawing-${stamp}-${i}`,
+        levelId: activeLevelId,
+      }));
+      importDrawings(pasted);
+      setSelectedDrawingIds(pasted.map((p) => p.id));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDrawingIds, drawingClipboard, activeLevelId, project.drawings2d]);
 
   // Ctrl/Cmd+Shift+U/D/I = Boolean Vereinigung/Subtraktion/Schnitt der gewählten
   // geschlossenen Drawing2D. preventDefault (sonst Browser-Aktionen). Braucht ≥2
