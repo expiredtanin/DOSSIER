@@ -272,7 +272,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.wall.refLine.center": "Center",
   "objinfo.wall.refLine.right": "Interior (right)",
   "objinfo.wall.buildup": "Build-up",
-  "objinfo.wall.single": "Single layer",
+  "objinfo.wall.single": "Solid",
   "objinfo.wall.multi": "Multi layer",
   "objinfo.wall.thickness": "Thickness",
   "objinfo.wall.preset": "Wall style",

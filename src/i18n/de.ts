@@ -273,7 +273,7 @@ export const de = {
   "objinfo.wall.refLine.center": "Mitte",
   "objinfo.wall.refLine.right": "Innen (rechts)",
   "objinfo.wall.buildup": "Aufbau",
-  "objinfo.wall.single": "Einschichtig",
+  "objinfo.wall.single": "Solid",
   "objinfo.wall.multi": "Mehrschichtig",
   "objinfo.wall.thickness": "Dicke",
   "objinfo.wall.preset": "Wandaufbau",
