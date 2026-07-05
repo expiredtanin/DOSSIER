@@ -108,6 +108,28 @@ function collectSegments(input: SnapInput): Seg[] {
   return segs;
 }
 
+/** Kreis-/Bogen-Geometrie für Center-/Quadrant-/Endpunkt-Snaps. `arc=null` =
+ *  Vollkreis (keine Endpunkte, alle vier Quadranten). */
+interface CircleGeom {
+  center: Vec2;
+  r: number;
+  arc: { a0: number; a1: number } | null;
+}
+
+/** Sammelt sichtbare Kreise/Bögen des aktiven Geschosses (aus `drawings2d`). */
+function collectCircles(input: SnapInput): CircleGeom[] {
+  const out: CircleGeom[] = [];
+  for (const d of input.project.drawings2d) {
+    if (d.levelId !== input.levelId) continue;
+    if (!input.visibleCodes.has(d.categoryCode)) continue;
+    const g = d.geom;
+    if (g.shape === "circle") out.push({ center: g.center, r: g.r, arc: null });
+    else if (g.shape === "arc")
+      out.push({ center: g.center, r: g.r, arc: { a0: g.a0, a1: g.a1 } });
+  }
+  return out;
+}
+
 /** Lotfußpunkt von p auf die Strecke a-b, auf das Segment geklemmt. */
 function perpFoot(p: Vec2, a: Vec2, b: Vec2): Vec2 {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -182,6 +204,34 @@ export function computeSnap(input: SnapInput): SnapResult | null {
   // onEdge (Lotfußpunkt auf nahe Strecken; niedrige Priorität).
   if (settings.onEdge) {
     for (const [a, b] of segs) consider(perpFoot(raw, a, b), "onEdge");
+  }
+
+  // Kreis-/Bogen-Snaps: Mittelpunkt + Quadranten (Ost/Nord/West/Süd); bei Bögen
+  // nur die Quadranten IM Bogen-Bereich, plus die beiden Bogen-Endpunkte. Center/
+  // Quadrant hängen an der `center`-Einstellung, die Endpunkte an `endpoint`.
+  if (settings.center || settings.endpoint) {
+    const TAU = Math.PI * 2;
+    const norm = (x: number) => ((x % TAU) + TAU) % TAU;
+    const onCircle = (c: CircleGeom, ang: number): Vec2 => ({
+      x: c.center.x + c.r * Math.cos(ang),
+      y: c.center.y + c.r * Math.sin(ang),
+    });
+    for (const c of collectCircles(input)) {
+      if (settings.center) {
+        consider(c.center, "center");
+        // Volle CCW-Spanne (0 ⇒ Vollkreis); Quadrant nur, wenn im Bogen liegt.
+        const sweep = c.arc ? norm(c.arc.a1 - c.arc.a0) || TAU : TAU;
+        for (let q = 0; q < 4; q++) {
+          const ang = q * (Math.PI / 2);
+          if (c.arc && norm(ang - c.arc.a0) > sweep + 1e-9) continue;
+          consider(onCircle(c, ang), "quadrant");
+        }
+      }
+      if (settings.endpoint && c.arc) {
+        consider(onCircle(c, c.arc.a0), "endpoint");
+        consider(onCircle(c, c.arc.a1), "endpoint");
+      }
+    }
   }
 
   if (best) return best;
