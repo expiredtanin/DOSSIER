@@ -26,6 +26,16 @@ export const importCommand: Command = {
   options: () => [],
   init: () => ({ ...IDLE }),
 
+  // Sofort-Befehl (wie Join/Split): `startCommand` ruft `autoRun` SYNCHRON im
+  // selben Aufruf-Stack wie die Enter-/Klick-Geste auf. Genau das braucht der
+  // Datei-Dialog — ein `<input type=file>.click()` öffnet den OS-Dialog nur
+  // innerhalb einer echten Nutzer-Geste; ein State-Update/async-Hop dazwischen
+  // (wie beim reinen onConfirm/onInput-Weg) lässt ihn verzögern oder ausbleiben.
+  autoRun: (): CommandResult => {
+    openDxfImport();
+    return { draft: null, done: true };
+  },
+
   // Der Befehl hat keine Schritte: Start/Enter/Input öffnet den Dialog + endet.
   onInput: () => open(),
   onMove: (state): [CommandState, CommandResult] => [state, { draft: null }],
