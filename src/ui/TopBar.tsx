@@ -15,6 +15,8 @@ import { useEffect, useRef, useState } from "react";
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem, DropdownOption } from "./Dropdown";
 import { WindowControls } from "./WindowControls";
+import { RibbonTabs } from "./ribbon/RibbonBar";
+import type { RibbonTabId } from "./ribbon/ribbonItems";
 import {
   applyMark,
   applyPreset,
@@ -84,9 +86,14 @@ const ZOOM_CLUSTER_WIDTH = 140;
 export interface TopBarProps {
   project: Project;
 
+  // Ribbon-Tab-Reiter (2D/3D/BIM/Ansichten) sitzen in DIESER Zeile — der Ribbon-
+  // Inhalt darunter (RibbonBar). Der aktive Tab liegt in App (geteilter State).
+  ribbonTab: RibbonTabId;
+  onRibbonTab: (id: RibbonTabId) => void;
+
   // Ansichts-/Zoom-/Darstellungs-Steuerung ist in den „Ansichten"-Ribbon-Tab
   // gewandert (siehe ViewRibbonTab). Die TopBar ist nur noch die schmale globale
-  // Leiste: Marke/Ressourcen · Text-Formatierung · Datei/Export/Einstellungen.
+  // Leiste: Marke/Ressourcen · Tabs · Text-Formatierung · Datei/Export/Einstell.
 
   /** Ob Zoom/Plan aktiv ist — steuert nur noch, ob Export im Datei-Menü geht. */
   zoomEnabled: boolean;
@@ -1198,6 +1205,8 @@ export function ViewRibbonTab({
 
 export function TopBar({
   project,
+  ribbonTab,
+  onRibbonTab,
   zoomEnabled,
   onExportPdf,
   onExportDxf,
@@ -1256,6 +1265,13 @@ export function TopBar({
           </button>
         </div>
       </div>
+
+      <Sep />
+
+      {/* Ribbon-Tab-Reiter (2D/3D/BIM/Ansichten) — sitzen in dieser Zeile, der
+          Ribbon-Inhalt folgt darunter (RibbonBar). So gibt es nur ZWEI Bänder:
+          diese Leiste (Chrome + Tabs) und den Inhalt. */}
+      <RibbonTabs tab={ribbonTab} onTab={onRibbonTab} />
 
       <Sep />
 

@@ -5341,9 +5341,10 @@ body {
   color: #fff;
 }
 
-/* ── Ribbon-Oberleiste (2D · 3D · BIM · Ansichten) ─────────────────────────
-   Datengetriebene Tab-Leiste unter der TopBar (RibbonBar). Kompakte Band-Höhe:
-   Tab-Reiter oben, darunter die Werkzeug-/Befehls-Gruppen des aktiven Tabs. */
+/* ── Ribbon (2D · 3D · BIM · Ansichten) ────────────────────────────────────
+   Die Tab-REITER (`.ribbon-tabs`) sitzen in der TopBar-Zeile; hier folgt nur der
+   INHALT (`.ribbon`/`.ribbon-body`) des aktiven Tabs darunter. So gibt es genau
+   zwei Bänder: TopBar-Zeile (Chrome + Tabs) oben, Ribbon-Inhalt darunter. */
 .ribbon {
   display: flex;
   flex-direction: column;
@@ -5353,12 +5354,13 @@ body {
   z-index: 1;
   flex: 0 0 auto;
 }
+/* Tab-Reiter — leben in der TopBar-Zeile: volle Zeilenhöhe, Aktiv-Unterstrich
+   sitzt an der Unterkante (verbindet optisch mit dem Inhalt darunter). */
 .ribbon-tabs {
   display: flex;
-  align-items: flex-end;
+  align-self: stretch;
+  align-items: stretch;
   gap: 2px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--line);
 }
 .ribbon-tab {
   appearance: none;
@@ -5369,7 +5371,9 @@ body {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 7px 12px 6px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: color 0.12s, border-color 0.12s;

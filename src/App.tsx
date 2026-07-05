@@ -71,6 +71,7 @@ import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab } from "./ui/TopBar";
 import { RibbonBar } from "./ui/ribbon/RibbonBar";
+import type { RibbonTabId } from "./ui/ribbon/ribbonItems";
 import { Dropdown } from "./ui/Dropdown";
 import type { DropdownItem } from "./ui/Dropdown";
 import { TextEditorDialog } from "./ui/TextEditorDialog";
@@ -355,6 +356,10 @@ export default function App() {
   // Einstellungen sowie der laufende Werkzeug-Zustand (Ref, kein Re-Render je
   // Mausbewegung) und die Live-Vorschau (Draft → Overlay in PlanView).
   const [activeTool, setActiveTool] = useState<ToolId>("select");
+  // Aktiver Ribbon-Tab (2D/3D/BIM/Ansichten). Liegt hier (nicht in der RibbonBar),
+  // weil die Tab-Reiter in der TopBar-Zeile sitzen und der Ribbon-Inhalt darunter
+  // — beide teilen sich denselben aktiven Tab.
+  const [ribbonTab, setRibbonTab] = useState<RibbonTabId>("2d");
   const [activeWallTypeId, setActiveWallTypeId] = useState<string>(
     project.wallTypes[0].id,
   );
@@ -3196,6 +3201,8 @@ export default function App() {
           in den „Ansichten"-Ribbon-Tab gewandert (ViewRibbonTab, unten). */}
       <TopBar
         project={project}
+        ribbonTab={ribbonTab}
+        onRibbonTab={setRibbonTab}
         zoomEnabled={planActive}
         onExportPdf={() => setExportOpen(true)}
         onExportDxf={() => setExportDxfOpen(true)}
@@ -3219,6 +3226,7 @@ export default function App() {
           die aus der TopBar gemergte Ansichts-/Zoom-/Darstellungs-Steuerung
           (ViewRibbonTab); die Werkzeug-Sidebar bleibt vorerst erhalten. */}
       <RibbonBar
+        tab={ribbonTab}
         activeTool={activeTool}
         activeCommand={engineView.commandName}
         toolsEnabled={activeLevel.kind === "floor"}
