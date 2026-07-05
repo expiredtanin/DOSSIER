@@ -118,6 +118,13 @@ function ToolIcon({ id }: { id: ToolId }) {
           <circle cx="8" cy="8" r="5.5" />
         </svg>
       );
+    case "arc":
+      // Offener Halbbogen.
+      return (
+        <svg {...common}>
+          <path d="M 2.5 12 A 5.5 5.5 0 0 1 13.5 12" fill="none" />
+        </svg>
+      );
     default:
       return null;
   }

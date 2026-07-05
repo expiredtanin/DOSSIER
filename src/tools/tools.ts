@@ -541,6 +541,19 @@ const circleTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Bogen: Platzhalter-Werkzeug, gekoppelt an den `arc`-Befehl (3 Klicks:
+// Mitte → Start/Radius → Ende). Wie Kreis nicht floorOnly.
+const arcTool: Tool = {
+  id: "arc",
+  labelKey: "tool.arc",
+  hintKey: () => "tool.arc.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 const TOOLS: Record<ToolId, Tool> = {
@@ -555,6 +568,7 @@ const TOOLS: Record<ToolId, Tool> = {
   polyline: polylineTool,
   rect: rectTool,
   circle: circleTool,
+  arc: arcTool,
 };
 
 /** Liefert das Werkzeug zur ID. */
@@ -575,4 +589,5 @@ export const TOOL_ORDER: ToolId[] = [
   "polyline",
   "rect",
   "circle",
+  "arc",
 ];

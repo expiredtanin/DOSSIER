@@ -13,6 +13,7 @@ import { stairCommand } from "./cmds/stair";
 import { roomCommand } from "./cmds/room";
 import { rectCommand } from "./cmds/rect";
 import { circleCommand } from "./cmds/circle";
+import { arcCommand } from "./cmds/arc";
 import { moveCommand } from "./cmds/move";
 import { mirrorCommand } from "./cmds/mirror";
 import { joinCommand } from "./cmds/join";
@@ -35,6 +36,7 @@ export const COMMANDS: Record<string, Command> = {
   polyline: polylineCommand,
   rect: rectCommand,
   circle: circleCommand,
+  arc: arcCommand,
   move: moveCommand,
   mirror: mirrorCommand,
   join: joinCommand,
@@ -67,6 +69,8 @@ export const ALIASES: Record<string, string> = {
   pl: "polyline",
   rec: "rect",
   c: "circle",
+  a: "arc",
+  bogen: "arc",
   m: "move",
   s: "mirror",
   spiegeln: "mirror",

@@ -19,7 +19,8 @@ export type ToolId =
   | "line"
   | "polyline"
   | "rect"
-  | "circle";
+  | "circle"
+  | "arc";
 
 // ── Snapping ───────────────────────────────────────────────────────────────
 
