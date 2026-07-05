@@ -69,7 +69,7 @@ import type { Pick3dHit } from "./viewport/Wasm3DViewport";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
-import { TopBar } from "./ui/TopBar";
+import { TopBar, ViewRibbonTab } from "./ui/TopBar";
 import { RibbonBar } from "./ui/ribbon/RibbonBar";
 import { Dropdown } from "./ui/Dropdown";
 import type { DropdownItem } from "./ui/Dropdown";
@@ -3191,55 +3191,15 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {/* Schmale globale Leiste: Marke/Ressourcen · Text-Formatierung ·
+          Datei/Export/Einstellungen. Ansichts-/Zoom-/Darstellungs-Steuerung ist
+          in den „Ansichten"-Ribbon-Tab gewandert (ViewRibbonTab, unten). */}
       <TopBar
         project={project}
-        viewToggleEnabled={activeLevel.kind === "floor"}
-        viewType={viewType}
-        onViewType={setViewType}
-        view3d={view3d}
-        onView3d={setView3d}
-        fov={fov}
-        onFov={setFov}
-        detail={detail}
-        onDetail={setDetail}
-        detailEnabled={planActive}
-        scaleDenominator={scaleDenominator}
-        onApplyScale={applyScale}
-        liveScale={planActive ? liveScale : null}
-        zoomPercent={zoomPercent}
         zoomEnabled={planActive}
-        onFit={fitPlan}
-        onFitSelection={fitSelection}
-        onZoom100={zoomToApplied}
         onExportPdf={() => setExportOpen(true)}
         onExportDxf={() => setExportDxfOpen(true)}
         onExportSchedule={onExportSchedule}
-        renderMode={renderMode}
-        onRenderMode={setRenderMode}
-        renderModeEnabled={viewType === "perspektive"}
-        planColorMode={planColorMode}
-        onPlanColorMode={setPlanColorMode}
-        combos={{
-          // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums →
-          // localStorage; Laden = Map lesen → Sichtbarkeits-Flags anwenden.
-          listLayerCombos,
-          saveLayerCombo: (name) =>
-            saveLayerCombo(name, snapshotLayerVisibility()),
-          loadLayerCombo: (name) => {
-            const codes = loadLayerCombo(name);
-            if (codes) applyLayerVisibility(codes);
-          },
-          deleteLayerCombo,
-          // Zeichnungs-Kombinationen: analog über drawingLevels[].visible.
-          listDrawingCombos,
-          saveDrawingCombo: (name) =>
-            saveDrawingCombo(name, snapshotDrawingVisibility()),
-          loadDrawingCombo: (name) => {
-            const ids = loadDrawingCombo(name);
-            if (ids) applyDrawingVisibility(ids);
-          },
-          deleteDrawingCombo,
-        }}
         resourcesOpen={resourcesOpen}
         onToggleResources={() => setResourcesOpen((v) => !v)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -3255,15 +3215,63 @@ export default function App() {
         textTarget={textTarget}
       />
 
-      {/* Ribbon-Oberleiste (2D · 3D · BIM · Ansichten) — additiv unter der TopBar.
-          Teilt sich denselben Aktivierungs-Pfad wie die Werkzeug-Sidebar; die
-          Sidebar bleibt vorerst erhalten (Plan-Doc Phase 3 entfernt sie). */}
+      {/* Ribbon-Oberleiste (2D · 3D · BIM · Ansichten). Der „Ansichten"-Tab trägt
+          die aus der TopBar gemergte Ansichts-/Zoom-/Darstellungs-Steuerung
+          (ViewRibbonTab); die Werkzeug-Sidebar bleibt vorerst erhalten. */}
       <RibbonBar
         activeTool={activeTool}
         activeCommand={engineView.commandName}
         toolsEnabled={activeLevel.kind === "floor"}
         onSelectTool={onSelectTool}
         onRunCommand={onRunCommand}
+        viewsContent={
+          <ViewRibbonTab
+            viewToggleEnabled={activeLevel.kind === "floor"}
+            viewType={viewType}
+            onViewType={setViewType}
+            view3d={view3d}
+            onView3d={setView3d}
+            fov={fov}
+            onFov={setFov}
+            detail={detail}
+            onDetail={setDetail}
+            detailEnabled={planActive}
+            scaleDenominator={scaleDenominator}
+            onApplyScale={applyScale}
+            liveScale={planActive ? liveScale : null}
+            zoomPercent={zoomPercent}
+            zoomEnabled={planActive}
+            onFit={fitPlan}
+            onFitSelection={fitSelection}
+            onZoom100={zoomToApplied}
+            renderMode={renderMode}
+            onRenderMode={setRenderMode}
+            renderModeEnabled={viewType === "perspektive"}
+            planColorMode={planColorMode}
+            onPlanColorMode={setPlanColorMode}
+            combos={{
+              // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums →
+              // localStorage; Laden = Map lesen → Sichtbarkeits-Flags anwenden.
+              listLayerCombos,
+              saveLayerCombo: (name) =>
+                saveLayerCombo(name, snapshotLayerVisibility()),
+              loadLayerCombo: (name) => {
+                const codes = loadLayerCombo(name);
+                if (codes) applyLayerVisibility(codes);
+              },
+              deleteLayerCombo,
+              // Zeichnungs-Kombinationen: analog über drawingLevels[].visible.
+              listDrawingCombos,
+              saveDrawingCombo: (name) =>
+                saveDrawingCombo(name, snapshotDrawingVisibility()),
+              loadDrawingCombo: (name) => {
+                const ids = loadDrawingCombo(name);
+                if (ids) applyDrawingVisibility(ids);
+              },
+              deleteDrawingCombo,
+            }}
+          />
+        }
       />
 
       <div className="body">

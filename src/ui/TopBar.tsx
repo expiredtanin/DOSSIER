@@ -84,70 +84,18 @@ const ZOOM_CLUSTER_WIDTH = 140;
 export interface TopBarProps {
   project: Project;
 
-  // Ansicht.
-  /** Ob der Ansichts-Umschalter sinnvoll ist (nur für Geschosse). */
-  viewToggleEnabled: boolean;
-  viewType: ViewType;
-  onViewType: (v: ViewType) => void;
+  // Ansichts-/Zoom-/Darstellungs-Steuerung ist in den „Ansichten"-Ribbon-Tab
+  // gewandert (siehe ViewRibbonTab). Die TopBar ist nur noch die schmale globale
+  // Leiste: Marke/Ressourcen · Text-Formatierung · Datei/Export/Einstellungen.
 
-  // 3D-Ansicht: kanonischer Blickwinkel + Kamera-Sichtwinkel (FOV). Wirkt nur in
-  // der Perspektive; ein Preset-Klick wechselt nötigenfalls auch dorthin.
-  view3d: View3d;
-  onView3d: (v: View3d) => void;
-  /** Sichtwinkel der Perspektivkamera in Grad (Kamera-Einstellungen). */
-  fov: number;
-  onFov: (n: number) => void;
-
-  // Zeichenwerkzeuge (Auswahl/Wand/Linie …), Wandtyp-Wahl und Fang-Menü leben
-  // jetzt in der Werkzeug-Palette (ToolsPanel), nicht mehr in der Oberleiste.
-
-  // Detailgrad.
-  detail: DetailLevel;
-  onDetail: (d: DetailLevel) => void;
-  /** Detailgrad wirkt nur, wenn ein Plan gezeichnet wird (sonst deaktiviert). */
-  detailEnabled: boolean;
-
-  // Massstab + Zoom.
-  /**
-   * Gewählter (angewandter) Papier-Massstab-Nenner (1:N) — steuert das Dropdown
-   * und „100 %". Setzt beim Wählen den Plan-Zoom auf exakt 1:N.
-   */
-  scaleDenominator: number;
-  /** Einen Papier-Massstab anwenden (Preset/frei): setzt N + Plan-Zoom. */
-  onApplyScale: (n: number) => void;
-  /**
-   * LIVE Papier-Massstab-Nenner aus der aktuellen View-Transform (ändert sich
-   * beim Wheel-Zoom) oder `null`, wenn keine Plan-Ansicht aktiv ist.
-   */
-  liveScale: number | null;
-  /** Live-Zoom in Prozent (aus der Plan-View-Transform). */
-  zoomPercent: number;
-  /** Zoom-Aktionen — nur wirksam, wenn eine Plan-Ansicht aktiv ist. */
+  /** Ob Zoom/Plan aktiv ist — steuert nur noch, ob Export im Datei-Menü geht. */
   zoomEnabled: boolean;
-  onFit: () => void;
-  onFitSelection: () => void;
-  onZoom100: () => void;
   /** Öffnet den PDF-Export-Dialog (nur im Grundriss sinnvoll). */
   onExportPdf: () => void;
   /** Öffnet den DXF-Export-Dialog (nur im Grundriss sinnvoll). */
   onExportDxf: () => void;
   /** Lädt die Bauteilliste des Projekts als CSV herunter. */
   onExportSchedule: () => void;
-
-  // Darstellungsart — kontextabhängig: Perspektive nutzt `renderMode`,
-  // Grundriss nutzt `planColorMode`. Genau einer der beiden ist je View aktiv.
-  renderMode: RenderMode;
-  onRenderMode: (m: RenderMode) => void;
-  /** Render-Modus nur in der Perspektive sinnvoll (sonst deaktiviert). */
-  renderModeEnabled: boolean;
-
-  // Farb-Modus des Grundrisses (Farbig ↔ Schwarz-Weiss). Nur im Grundriss.
-  planColorMode: PlanColorMode;
-  onPlanColorMode: (m: PlanColorMode) => void;
-
-  // Sichtbarkeits-Kombinationen (Ebenen-/Zeichnungskombinationen).
-  /** Handler-Satz für die beiden Kombinations-Dropdowns. */
-  combos: ComboMenuHandlers;
 
   // Ressourcen-Fenster.
   resourcesOpen: boolean;
@@ -958,8 +906,45 @@ function AppMenu({
   );
 }
 
-export function TopBar({
-  project,
+/**
+ * Props des „Ansichten"-Tabs — die Ansichts-/Zoom-/Darstellungs-Steuerung, die
+ * früher in der Mitte der TopBar sass. Eine Teilmenge von {@link TopBarProps}.
+ */
+export interface ViewRibbonTabProps {
+  viewToggleEnabled: boolean;
+  viewType: ViewType;
+  onViewType: (v: ViewType) => void;
+  view3d: View3d;
+  onView3d: (v: View3d) => void;
+  fov: number;
+  onFov: (n: number) => void;
+  detail: DetailLevel;
+  onDetail: (d: DetailLevel) => void;
+  detailEnabled: boolean;
+  scaleDenominator: number;
+  onApplyScale: (n: number) => void;
+  liveScale: number | null;
+  zoomPercent: number;
+  zoomEnabled: boolean;
+  onFit: () => void;
+  onFitSelection: () => void;
+  onZoom100: () => void;
+  renderMode: RenderMode;
+  onRenderMode: (m: RenderMode) => void;
+  renderModeEnabled: boolean;
+  planColorMode: PlanColorMode;
+  onPlanColorMode: (m: PlanColorMode) => void;
+  combos: ComboMenuHandlers;
+}
+
+/**
+ * „Ansichten"-Tab des Ribbons — trägt die aus der TopBar gemergten Mittelcluster:
+ * 2D/3D-Ansichts-Raster (+ Kamera-FOV), Sichtbarkeits-Kombinationen, Detailgrad,
+ * Massstab/Zoom-Cluster und Darstellungsart. EIN Ribbon für alles; Handler/Setter
+ * kommen unverändert von App (gleiche Props wie zuvor an die TopBar). Wird von
+ * `RibbonBar` als Inhalt des „Ansichten"-Tabs gerendert.
+ */
+export function ViewRibbonTab({
   viewToggleEnabled,
   viewType,
   onViewType,
@@ -978,44 +963,13 @@ export function TopBar({
   onFit,
   onFitSelection,
   onZoom100,
-  onExportPdf,
-  onExportDxf,
-  onExportSchedule,
   renderMode,
   onRenderMode,
   renderModeEnabled,
   planColorMode,
   onPlanColorMode,
   combos,
-  resourcesOpen,
-  onToggleResources,
-  onOpenSettings,
-  layoutMenu,
-  onImport,
-  onSaveProject,
-  onOpenProject,
-  textTarget,
-}: TopBarProps) {
-  // Dezente Scrollleiste: die Oberleiste scrollt horizontal (overflow-x). Statt
-  // der prägnanten Standard-Leiste blenden wir eine eigene, sehr ruhige Leiste
-  // NUR während des Scrollens ein (Klasse `is-scrolling`, ~900 ms nachlaufend).
-  const headerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const onScroll = () => {
-      el.classList.add("is-scrolling");
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => el.classList.remove("is-scrolling"), 900);
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
+}: ViewRibbonTabProps) {
   // „frei" wird über einen Prompt erfasst; akzeptiert „1:35" ODER „35".
   const onScaleChange = (value: string) => {
     if (value === "__custom__") {
@@ -1030,14 +984,7 @@ export function TopBar({
     const n = Number(value);
     if (Number.isFinite(n) && n > 0) onApplyScale(n);
   };
-
-  // Aktueller Nenner steht evtl. nicht in den Presets (frei gesetzt) → dann
-  // einen Eintrag „1:N" voranstellen, damit das Select den Wert anzeigt.
   const inPresets = SCALE_PRESETS.includes(scaleDenominator);
-
-  // Optionsliste des Massstab-Dropdowns: ggf. der frei gesetzte aktuelle Wert
-  // (damit er sichtbar bleibt), dann die Presets, zuletzt „frei …" als
-  // Sonder-Wert, der über onScaleChange den Prompt öffnet (Funktion unverändert).
   const scaleOptions: DropdownOption[] = [
     ...(inPresets
       ? []
@@ -1047,41 +994,8 @@ export function TopBar({
   ];
 
   return (
-    <header className="topbar" ref={headerRef}>
-      {/* Marke (DOSSIER-Wortmarke) + Settings/Ressourcen-Icons daneben,
-          gestapelt wie im Rhino-Plugin (ToolbarApp.jsx: Wortmarke links,
-          rechts daneben ein schmaler Icon-Stapel). */}
-      <div className="tb-brandgroup">
-        <div className="brand">
-          <span className="brand-word">
-            DOSSIER<span className="brand-dot">.</span>
-          </span>
-          <span className="tag">{t("brand.tag")}</span>
-        </div>
-        <div className="tb-brandicons">
-          <button
-            type="button"
-            className={`tb-brandicon${resourcesOpen ? " active" : ""}`}
-            onClick={onToggleResources}
-            aria-pressed={resourcesOpen}
-            aria-label={t("topbar.resources")}
-            title={`${t("topbar.resources")} — ${t("topbar.resources.hint")}`}
-          >
-            <TbIcon name="widgets" />
-          </button>
-        </div>
-      </div>
-
-      <Sep />
-
-      {/* Ansichten als EIN kompaktes Icon-Grid (Vectorworks/DOSSIER-Stil): der
-          2D-Grundriss UND die 3D-Blicke sind eine durchgängige Icon-Serie —
-          „Grundriss" schaltet auf den 2D-Plan, die übrigen auf die jeweilige
-          3D-Ansicht (Perspektive wird dabei automatisch aktiviert). 4 oben /
-          3 unten. Tooltip nennt jede Ansicht im Klartext. */}
-      {/* Ansichts-Icons bleiben immer sichtbar; auf Nicht-Geschoss-Ebenen
-          (Schnitt/Ansicht/2D-Zeichnung) sind sie deaktiviert, weil dort keine
-          2D/3D-Umschaltung greift — die Serie verschwindet nicht mehr ganz. */}
+    <div className="ribbon-views">
+      {/* Ansichten als EIN kompaktes Icon-Grid (2D-Grundriss + 3D-Blicke). */}
       <div className="tb-group" role="group" aria-label={t("topbar.viewGroup")}>
         <div className="view-grid view-grid-4">
           <button
@@ -1139,10 +1053,7 @@ export function TopBar({
       </div>
       <Sep />
 
-      {/* Sichtbarkeits-Kombinationen (Vectorworks: Ebenen-/Zeichnungs-
-          kombinationen). Sitzt direkt nach dem Ansichts-Umschalter, weil beides
-          „Navigations-/Sicht"-Steuerung ist — ruhige Stelle vor dem Detailgrad.
-          Nur die Dropdowns; eine grafische Überschreibung kommt später. */}
+      {/* Sichtbarkeits-Kombinationen (Ebenen-/Zeichnungskombinationen). */}
       <div className="tb-group tb-stack" role="group" aria-label={t("combo.layers.title")}>
         <label className="tb-field tb-field-row">
           <span className="tb-label">{t("combo.layers")}</span>
@@ -1167,27 +1078,9 @@ export function TopBar({
           />
         </label>
       </div>
-
       <Sep />
 
-      {/* Text-Gruppe (immer sichtbar) — Stil/Schrift/Grösse + B/I/U · L/C/R +
-          Zeilenhöhe. Formatiert das aktuelle Text-Ziel (Raumstempel) live.
-          Sitzt bewusst zwischen den Ebenen-Kombis und Detailgrad/Massstab.
-          „+ Text" ist raus — Text wird ein eigenständiges Zeichenwerkzeug
-          (HANDOVER-Backlog AUDIT B1), kein TopBar-Knopf mehr. */}
-      <TextGroup textTarget={textTarget} />
-
-      <Sep />
-
-      {/* Zeichenwerkzeuge liegen jetzt in der Werkzeug-Palette (ToolsPanel,
-          dockbar) — nicht mehr in der Oberleiste (Vectorworks-Bild: Werkzeuge
-          in der Palette). Auch Wandtyp-Wahl + Fang-Menü sind dort. */}
-
-      {/* Detailgrad (grob/mittel/fein) — wirkt im Grundriss auf Symbole +
-          Schraffuren/Linien. In der Perspektive (noch) ohne Wirkung → dort
-          deaktiviert mit Tooltip statt stiller No-Op. */}
-      {/* Detailgrad — Massstab lebt nur noch EINMAL im Zoom-Cluster (die
-          Dropdown hier war ein redundantes Relikt der TopBar-Reorg). */}
+      {/* Detailgrad (grob/mittel/fein) — wirkt im Grundriss. */}
       <div className="tb-group" role="group" aria-label={t("topbar.detailGroup")}>
         <label className="tb-field tb-field-row">
           <span className="tb-label">{t("topbar.detail")}</span>
@@ -1208,14 +1101,9 @@ export function TopBar({
           />
         </label>
       </div>
-
       <Sep />
 
-      {/* Massstab/Zoom-Cluster (DOSSIER, 2×2). Links über beide Zeilen die
-          kombinierte Stat-Pille (Live-Massstab 1:N oben / Zoom% unten); rechts
-          oben das Massstab-Dropdown, rechts unten die Zoom-Segmentpille. „am
-          Massstab" (Live-Massstab == gewählter Massstab) hebt die Stat-Pille im
-          Akzent hervor. */}
+      {/* Massstab/Zoom-Cluster (2×2). */}
       <div className="tb-group tb-zoomcluster" role="group" aria-label={t("topbar.scaleGroup")}>
         <div
           className={`tb-stat${
@@ -1271,13 +1159,9 @@ export function TopBar({
           />
         </div>
       </div>
-
       <Sep />
 
-      {/* Darstellungsart (Vectorworks-Stil) — EIN Dropdown, dessen Optionen vom
-          Ansichtstyp abhängen: Grundriss → Farbig/Schwarz-Weiss (planColorMode);
-          Perspektive → Schattiert/Weiss/Drahtgitter/Kanten (renderMode). Der
-          Linien-Modus (Display/Print) bleibt separat. */}
+      {/* Darstellungsart — Grundriss: Farbig/SW; Perspektive: Render-Modus. */}
       <div className="tb-group" role="group" aria-label={t("display.style.group")}>
         <label className="tb-field">
           <span className="tb-label">{t("display.style")}</span>
@@ -1308,8 +1192,78 @@ export function TopBar({
           )}
         </label>
       </div>
+    </div>
+  );
+}
+
+export function TopBar({
+  project,
+  zoomEnabled,
+  onExportPdf,
+  onExportDxf,
+  onExportSchedule,
+  resourcesOpen,
+  onToggleResources,
+  onOpenSettings,
+  layoutMenu,
+  onImport,
+  onSaveProject,
+  onOpenProject,
+  textTarget,
+}: TopBarProps) {
+  // Dezente Scrollleiste: die Oberleiste scrollt horizontal (overflow-x). Statt
+  // der prägnanten Standard-Leiste blenden wir eine eigene, sehr ruhige Leiste
+  // NUR während des Scrollens ein (Klasse `is-scrolling`, ~900 ms nachlaufend).
+  const headerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      el.classList.add("is-scrolling");
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => el.classList.remove("is-scrolling"), 900);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  return (
+    <header className="topbar" ref={headerRef}>
+      {/* Marke (DOSSIER-Wortmarke) + Settings/Ressourcen-Icons daneben,
+          gestapelt wie im Rhino-Plugin (ToolbarApp.jsx: Wortmarke links,
+          rechts daneben ein schmaler Icon-Stapel). */}
+      <div className="tb-brandgroup">
+        <div className="brand">
+          <span className="brand-word">
+            DOSSIER<span className="brand-dot">.</span>
+          </span>
+          <span className="tag">{t("brand.tag")}</span>
+        </div>
+        <div className="tb-brandicons">
+          <button
+            type="button"
+            className={`tb-brandicon${resourcesOpen ? " active" : ""}`}
+            onClick={onToggleResources}
+            aria-pressed={resourcesOpen}
+            aria-label={t("topbar.resources")}
+            title={`${t("topbar.resources")} — ${t("topbar.resources.hint")}`}
+          >
+            <TbIcon name="widgets" />
+          </button>
+        </div>
+      </div>
 
       <Sep />
+
+      {/* Text-Gruppe (kontextabhängig) — Stil/Schrift/Grösse + B/I/U · L/C/R +
+          Zeilenhöhe. Formatiert das aktuelle Text-Ziel (Raumstempel) live. Bleibt
+          in der schmalen globalen Leiste, weil sie eine kontextuelle Formatier-
+          Steuerung ist (kein Ansichts-/Ausgabe-Element). */}
+      <TextGroup textTarget={textTarget} />
 
       {/* Rechte Gruppe: Layout-Menü · Projektname · Datei-Burger (ganz rechts,
           GTK-Stil) — Ressourcen sitzt jetzt bei der Marke (s. o.). */}

@@ -5472,3 +5472,12 @@ body {
   font-style: italic;
   padding: 0 8px;
 }
+/* „Ansichten"-Tab: die aus der TopBar gemergten Cluster (View-Grid, Kombis,
+   Detail, Zoom, Darstellung) in EINER Zeile — nutzt die bestehenden `.tb-*`-
+   Stile unverändert weiter. */
+.ribbon-views {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}

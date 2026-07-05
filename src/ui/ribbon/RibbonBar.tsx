@@ -12,6 +12,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { t } from "../../i18n";
 import { ToolIcon } from "../../panels/ToolsPanel";
 import { getTool } from "../../tools/tools";
@@ -32,6 +33,13 @@ export interface RibbonBarProps {
   onSelectTool: (id: ToolId) => void;
   /** Engine-Befehl starten (Ändern-Gruppe u. a.). */
   onRunCommand: (name: string) => void;
+  /**
+   * Reicher Inhalt des „Ansichten"-Tabs (aus der TopBar gemergte Ansichts-/Zoom-/
+   * Darstellungs-Steuerung, `ViewRibbonTab`). Von App geliefert, damit dessen
+   * Setter/State dort bleiben — analog dazu, wie die TopBar das Layout-Menü als
+   * Node bekommt. Fehlt er, zeigt der Tab den Leer-Hinweis.
+   */
+  viewsContent?: ReactNode;
 }
 
 /** Ein einzelner Ribbon-Button (Werkzeug ODER Befehl). */
@@ -104,9 +112,12 @@ export function RibbonBar(props: RibbonBarProps) {
         ))}
       </div>
 
-      {/* Gruppen des aktiven Tabs */}
+      {/* Gruppen des aktiven Tabs. Der „Ansichten"-Tab trägt reichen Custom-
+          Inhalt (ViewRibbonTab) statt der datengetriebenen Item-Gruppen. */}
       <div className="ribbon-body">
-        {current.groups.length === 0 ? (
+        {current.id === "views" && props.viewsContent ? (
+          props.viewsContent
+        ) : current.groups.length === 0 ? (
           <div className="ribbon-empty">{t("ribbon.empty")}</div>
         ) : (
           current.groups.map((g) => (

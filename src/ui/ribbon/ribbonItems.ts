@@ -41,9 +41,10 @@ const t = (id: ToolId): RibbonItem => ({ kind: "tool", id });
 const c = (name: string): RibbonItem => ({ kind: "command", name });
 
 /**
- * Die Ribbon-Tabs. Phase 1 füllt 2D (Zeichnen + Ändern) und BIM (Bauteile) mit
- * den vorhandenen Werkzeugen/Befehlen; 3D und Ansichten bleiben vorerst leer
- * (Platzhalter, in einer späteren Phase gefüllt — siehe Plan-Doc).
+ * Die Ribbon-Tabs (Reihenfolge 2D·3D·BIM·Ansichten). 2D (Zeichnen + Ändern) und
+ * BIM (Bauteile) sind datengetrieben aus Werkzeugen/Befehlen; „Ansichten" trägt
+ * reichen Custom-Inhalt (aus der TopBar gemergt, siehe `ViewRibbonTab` — die
+ * Registry lässt seine `groups` leer). 3D ist vorerst leer (spätere Phase).
  */
 export const RIBBON_TABS: RibbonTab[] = [
   {
@@ -75,6 +76,11 @@ export const RIBBON_TABS: RibbonTab[] = [
     ],
   },
   {
+    id: "3d",
+    labelKey: "ribbon.tab.3d",
+    groups: [],
+  },
+  {
     id: "bim",
     labelKey: "ribbon.tab.bim",
     groups: [
@@ -90,11 +96,6 @@ export const RIBBON_TABS: RibbonTab[] = [
         ],
       },
     ],
-  },
-  {
-    id: "3d",
-    labelKey: "ribbon.tab.3d",
-    groups: [],
   },
   {
     id: "views",
