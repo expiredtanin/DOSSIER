@@ -230,6 +230,31 @@ function promptCount(): number | null {
   return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
+/** localStorage-Schlüssel der modularen Custom-Bar (Ribbon-Tab „Eigene"). */
+const RIBBON_CUSTOM_KEY = "dossier.ribbon.customItems";
+
+/** Persistierte Custom-Bar-Item-Schlüssel lesen (leer bei Fehler/Erststart). */
+function loadCustomItems(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RIBBON_CUSTOM_KEY);
+    const arr = raw ? JSON.parse(raw) : null;
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Custom-Bar-Item-Schlüssel persistieren (Fehler still schlucken). */
+function saveCustomItems(items: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(RIBBON_CUSTOM_KEY, JSON.stringify(items));
+  } catch {
+    // localStorage nicht verfügbar (privater Modus o. ä.) → ignorieren.
+  }
+}
+
 /** Umriss (bbox) aller Drawing2D-Geometrien in Modell-Metern (null = leer). */
 function drawingsBBox(
   drawings: Drawing2D[],
@@ -360,6 +385,18 @@ export default function App() {
   // weil die Tab-Reiter in der TopBar-Zeile sitzen und der Ribbon-Inhalt darunter
   // — beide teilen sich denselben aktiven Tab.
   const [ribbonTab, setRibbonTab] = useState<RibbonTabId>("views");
+  // Modulare Custom-Bar (Ribbon-Tab „Eigene"): persistierte Item-Schlüssel. Der
+  // Picker im Tab wählt Werkzeuge/Befehle an/ab (localStorage-persistiert).
+  const [customItems, setCustomItems] = useState<string[]>(loadCustomItems);
+  const onToggleCustomItem = (key: string) => {
+    setCustomItems((prev) => {
+      const next = prev.includes(key)
+        ? prev.filter((k) => k !== key)
+        : [...prev, key];
+      saveCustomItems(next);
+      return next;
+    });
+  };
   const [activeWallTypeId, setActiveWallTypeId] = useState<string>(
     project.wallTypes[0].id,
   );
@@ -3231,6 +3268,8 @@ export default function App() {
         toolsEnabled={activeLevel.kind === "floor"}
         onSelectTool={onSelectTool}
         onRunCommand={onRunCommand}
+        customItems={customItems}
+        onToggleCustomItem={onToggleCustomItem}
         tabContent={{
           views: (
           <ViewRibbonTab

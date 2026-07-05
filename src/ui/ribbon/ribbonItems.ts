@@ -28,7 +28,7 @@ export interface RibbonGroup {
 }
 
 /** Kennung eines Ribbon-Tabs (fest, für Tab-State + i18n). */
-export type RibbonTabId = "views" | "2d" | "3d" | "bim";
+export type RibbonTabId = "views" | "2d" | "3d" | "bim" | "custom";
 
 /** Ein Ribbon-Tab: Beschriftung + gruppierte Elemente. */
 export interface RibbonTab {
@@ -105,4 +105,35 @@ export const RIBBON_TABS: RibbonTab[] = [
       },
     ],
   },
+  {
+    // Modulare Custom-Bar (Phase 4): der Nutzer stellt sich die Elemente selbst
+    // zusammen (persistiert). Gerendert aus `customItems`, nicht aus `groups`.
+    id: "custom",
+    labelKey: "ribbon.tab.custom",
+    groups: [],
+  },
 ];
+
+/** Stabiler Schlüssel eines Items für die Persistenz der Custom-Bar. */
+export function itemKey(item: RibbonItem): string {
+  return item.kind === "tool" ? `tool:${item.id}` : `command:${item.name}`;
+}
+
+/** Parst einen Item-Schlüssel zurück (oder null bei unbekanntem Präfix). */
+export function itemFromKey(key: string): RibbonItem | null {
+  const i = key.indexOf(":");
+  if (i < 0) return null;
+  const kind = key.slice(0, i);
+  const rest = key.slice(i + 1);
+  if (kind === "tool") return { kind: "tool", id: rest as ToolId };
+  if (kind === "command") return { kind: "command", name: rest };
+  return null;
+}
+
+/**
+ * Alle datengetriebenen Items (aus den Werkzeug-/Befehls-Tabs) — die wählbare
+ * Menge für den Custom-Bar-Picker. „views"/„custom" tragen keine `groups`.
+ */
+export const ALL_RIBBON_ITEMS: RibbonItem[] = RIBBON_TABS.flatMap((tab) =>
+  tab.groups.flatMap((g) => g.items),
+);

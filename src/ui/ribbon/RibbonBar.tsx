@@ -17,9 +17,18 @@ import { ToolIcon } from "../../panels/ToolsPanel";
 import { getTool } from "../../tools/tools";
 import type { ToolId } from "../../tools/types";
 import { getCommand } from "../../commands/registry";
-import { RIBBON_TABS } from "./ribbonItems";
+import { Dropdown } from "../Dropdown";
+import type { DropdownItem } from "../Dropdown";
+import { RIBBON_TABS, ALL_RIBBON_ITEMS, itemKey, itemFromKey } from "./ribbonItems";
 import type { RibbonItem, RibbonTabId } from "./ribbonItems";
 import { CommandIcon } from "./CommandIcon";
+
+/** Aufgelöste Beschriftung eines Items (Werkzeug bzw. Befehl). */
+function itemLabel(item: RibbonItem): string {
+  if (item.kind === "tool") return t(getTool(item.id).labelKey);
+  const cmd = getCommand(item.name);
+  return cmd ? t(cmd.labelKey) : item.name;
+}
 
 export interface RibbonBarProps {
   /** Aktiver Tab (State liegt in App, geteilt mit den Reitern in der TopBar). */
@@ -41,6 +50,10 @@ export interface RibbonBarProps {
    * Gruppen zeigt den Leer-Hinweis.
    */
   tabContent?: Partial<Record<RibbonTabId, ReactNode>>;
+  /** Persistierte Item-Schlüssel der modularen Custom-Bar (Tab „Eigene"). */
+  customItems: string[];
+  /** Ein Item in der Custom-Bar an-/abwählen (Picker im „Eigene"-Tab). */
+  onToggleCustomItem: (key: string) => void;
 }
 
 /** Aktivierungs-/Highlight-Kontext, den jeder Button-Typ braucht. */
@@ -120,6 +133,53 @@ export function RibbonTabs({
   );
 }
 
+/**
+ * Modulare Custom-Bar (Tab „Eigene") — rendert die vom Nutzer gewählten Items
+ * plus einen „＋"-Picker, der ALLE verfügbaren Werkzeuge/Befehle mit Häkchen für
+ * die bereits enthaltenen listet (Klick = an-/abwählen). Gleiche Item-Typen +
+ * gleiche Aktivierung wie die normalen Tabs — kein Sonderweg.
+ */
+function CustomBar({
+  customItems,
+  onToggle,
+  ctx,
+}: {
+  customItems: string[];
+  onToggle: (key: string) => void;
+  ctx: ButtonCtx;
+}) {
+  const pickerItems: DropdownItem[] = ALL_RIBBON_ITEMS.map((it) => {
+    const key = itemKey(it);
+    return {
+      label: itemLabel(it),
+      active: customItems.includes(key),
+      onSelect: () => onToggle(key),
+    };
+  });
+  const items = customItems
+    .map(itemFromKey)
+    .filter((it): it is RibbonItem => it !== null);
+  return (
+    <div className="ribbon-group">
+      <div className="ribbon-items">
+        {items.length === 0 && (
+          <div className="ribbon-empty">{t("ribbon.custom.empty")}</div>
+        )}
+        {items.map((item, i) => (
+          <RibbonButton key={`${itemKey(item)}-${i}`} item={item} ctx={ctx} />
+        ))}
+        <Dropdown
+          items={pickerItems}
+          placeholder={t("ribbon.custom.add")}
+          title={t("ribbon.custom.add")}
+          triggerClassName="ribbon-add"
+        />
+      </div>
+      <div className="ribbon-group-title">{t("ribbon.group.custom")}</div>
+    </div>
+  );
+}
+
 export function RibbonBar(props: RibbonBarProps) {
   const current = RIBBON_TABS.find((tt) => tt.id === props.tab) ?? RIBBON_TABS[0];
   const custom = props.tabContent?.[current.id];
@@ -134,9 +194,16 @@ export function RibbonBar(props: RibbonBarProps) {
   return (
     <div className="ribbon">
       {/* Inhalt des aktiven Tabs. Tabs mit reichem Custom-Inhalt („Ansichten",
-          „Text") rendern diesen statt der datengetriebenen Item-Gruppen. */}
+          „Text") rendern diesen; der „Eigene"-Tab die modulare Custom-Bar; sonst
+          die datengetriebenen Item-Gruppen. */}
       <div className="ribbon-body">
-        {custom ? (
+        {current.id === "custom" ? (
+          <CustomBar
+            customItems={props.customItems}
+            onToggle={props.onToggleCustomItem}
+            ctx={ctx}
+          />
+        ) : custom ? (
           custom
         ) : current.groups.length === 0 ? (
           <div className="ribbon-empty">{t("ribbon.empty")}</div>

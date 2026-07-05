@@ -5529,6 +5529,18 @@ body {
   font-style: italic;
   padding: 0 8px;
 }
+/* Custom-Bar-Picker („＋ Hinzufügen") — kompakter, unauffälliger Trigger, der
+   sich neben die Custom-Buttons stellt. */
+.ribbon-add.tb-dd-trigger {
+  align-self: center;
+  height: 24px;
+  font-size: 11px;
+  color: var(--muted);
+  border-style: dashed;
+}
+.ribbon-add.tb-dd-trigger:hover {
+  color: var(--label);
+}
 /* „Ansichten"-Tab: die aus der TopBar gemergten Cluster (View-Grid, Kombis,
    Detail, Zoom, Darstellung) in EINER Zeile — nutzt die bestehenden `.tb-*`-
    Stile unverändert weiter. */
