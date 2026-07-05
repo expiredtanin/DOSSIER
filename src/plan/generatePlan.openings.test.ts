@@ -147,3 +147,20 @@ describe("generatePlan — Tür-Typ wandoeffnung (Item 6)", () => {
     expect(arcCount(def)).toBe(1);
   });
 });
+
+/** Zählt Fenster-Anschlag-/Laibungsstriche (cls "window-frame") im Plan. */
+function windowRevealCount(p: Project, detail: "grob" | "mittel" | "fein") {
+  return generatePlan(p, "eg", visible, undefined, detail).primitives.filter(
+    (pr) => pr.kind === "line" && pr.cls === "window-frame",
+  ).length;
+}
+
+describe("generatePlan — Fenster Anschlag-Striche (Item 8)", () => {
+  it("erzeugt bei 'fein' zwei Laibungsstriche (je Pfosten einen)", () => {
+    expect(windowRevealCount(projectWithOpening({ ...baseWindow }), "fein")).toBe(2);
+  });
+
+  it("erzeugt bei 'mittel' KEINE (nur im Detailgrad fein)", () => {
+    expect(windowRevealCount(projectWithOpening({ ...baseWindow }), "mittel")).toBe(0);
+  });
+});

@@ -1833,6 +1833,30 @@ function addOpeningSymbol(
       openingId: o.id,
     });
   }
+  // fein: Anschlag-/Laibungsstriche an beiden Pfosten (kurz quer zur Wand) —
+  // analog zur Tür, damit Fenster im Detailplan gleich „fertig" wirken (bisher
+  // hatten nur Türen sie). Haarlinie, 6 cm Andeutung je Seite.
+  if (detail === "fein") {
+    const jambs = openingJambs(wall, o);
+    const dir = sub(wall.end, wall.start);
+    const len = Math.hypot(dir.x, dir.y);
+    if (jambs && len > 1e-9) {
+      const n = { x: -dir.y / len, y: dir.x / len };
+      const reveal = 0.06;
+      for (const jamb of [jambs.jambStart, jambs.jambEnd]) {
+        out.push({
+          kind: "line",
+          a: add(jamb, scale(n, reveal)),
+          b: add(jamb, scale(n, -reveal)),
+          cls: "window-frame",
+          weightMm: SYMBOL_HAIRLINE_MM,
+          color: o.color ?? POCHE_STROKE,
+          greyed,
+          openingId: o.id,
+        });
+      }
+    }
+  }
   // Brüstungslinie (gepunktet) — zeigt die Brüstung im Grundriss auf der Wandachse.
   // Nur bei Fenstern mit Brüstungshöhe > 0. Entspricht der Sill-Linie in
   // `_make_oeffnung_preview` und dem Brüstungs-Plansymbol im Rhino-Plugin.
