@@ -677,7 +677,14 @@ export function generatePlan(
     const openings = openingsOfWall(project, wall.id);
     const gaps = wallGaps(wall, doors, openings);
     const cuts = joins.get(wall.id) ?? { startCut: null, endCut: null };
-    addWallPoche(primitives, project, wall, gaps, cuts, wallGreyed, detail, wallLwMm, wallCategory);
+    // Schnitt vs. Ansicht nach Schnitthöhe (BIM-Standard): erreicht die Wand die
+    // Grundriss-Schnittebene nicht (Höhe < Schnitthöhe des Geschosses, z. B. eine
+    // Brüstung/ein Podestrand), wird sie nur als Ansichts-Umriss gezeichnet —
+    // keine Schnitt-Poché. Normale Wände (Höhe ≥ Schnitthöhe) sind unberührt.
+    const wallViewOnly = wall.height < (floor?.cutHeight ?? 1.0);
+    addWallPoche(
+      primitives, project, wall, gaps, cuts, wallGreyed, detail, wallLwMm, wallCategory, wallViewOnly,
+    );
     // Referenzlinie: dünne gestrichelte Wand-Achslinie (von der Oberleiste
     // umschaltbar). Wird über der Poché gezeichnet, damit sie sichtbar bleibt.
     if (showReferenceLines) addReferenceLine(primitives, wall, wallGreyed);
@@ -1258,6 +1265,10 @@ function addWallPoche(
   detail: DetailLevel,
   wallLwMm: number,
   category: LayerCategory | undefined,
+  // Wand liegt GANZ unter der Grundriss-Schnittebene (z. B. 30-cm-Brüstung bei
+  // 1 m Schnitthöhe) → „von oben gesehen": nur Ansichts-Umriss (Haarlinie), KEINE
+  // Schnitt-Poché/Schraffur/Schichten. Der reguläre Schnittfall bleibt `false`.
+  viewOnly: boolean,
 ): void {
   const wt = getWallType(project, wall);
   const total = wallTypeThickness(wt);
@@ -1325,6 +1336,24 @@ function addWallPoche(
     // bleiben rechtwinklig (kein Schnitt).
     const startCut = s <= 1e-6 ? cuts.startCut : null;
     const endCut = e >= axisLen - 1e-6 ? cuts.endCut : null;
+
+    if (viewOnly) {
+      // Ansichts-Wand (unter der Schnittebene): ein Umriss über die volle Dicke
+      // als Haarlinie, ohne Füllung/Schraffur. Segment-/Gehrungs-/Öffnungs-Logik
+      // bleibt dieselbe wie im Schnittfall (nur eben ohne Poché).
+      out.push({
+        kind: "polygon",
+        pts: clippedBand(p1, p2, refOff - total / 2, refOff + total / 2, startCut, endCut),
+        fill: "none",
+        stroke,
+        strokeWidthMm: layerLineMm,
+        hatch: NO_HATCH,
+        greyed,
+        noStrokeEdges: joinEdges(startCut, endCut),
+        wallId,
+      });
+      continue;
+    }
 
     if (detail === "grob") {
       // Eine Sammelfläche über die volle Dicke, ohne Schraffur, dicker Umriss.
