@@ -10,10 +10,12 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "cad",
         "width": 1400,
         "height": 900,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "decorations": false
       }
     ],
     "security": {

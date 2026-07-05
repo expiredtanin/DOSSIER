@@ -1299,7 +1299,15 @@ export function TopBar({
   }, []);
 
   return (
-    <header className="topbar" ref={headerRef}>
+    // `data-tauri-drag-region`: die randlose (decorations:false) Titelleiste ist
+    // selbst der Fenster-Ziehbereich. Kind-Buttons/Dropdowns bleiben klickbar;
+    // nur die leeren Zonen ziehen das Fenster.
+    <header className="topbar" ref={headerRef} data-tauri-drag-region>
+      {/* Fensterknöpfe (Schliessen/Minimieren/Maximieren) GANZ LINKS — die
+          randlose Titelleiste beginnt mit ihnen (macOS-Konvention). Nur unter
+          Electron/Tauri sichtbar (sonst null). */}
+      <WindowControls />
+
       {/* Kleine Wortmarke „dossier" (OCS-Stil, klein/kleingeschrieben) + Quick-
           Access-Leiste: alle Datei-/Export-Aktionen + Ressourcen/Einstellungen
           als kleine Icons direkt in der Zeile (ersetzt das Burger-Menü). */}
@@ -1328,12 +1336,12 @@ export function TopBar({
           Bänder: diese schmale Leiste (Chrome + Tabs) und den Inhalt. */}
       <RibbonTabs tab={ribbonTab} onTab={onRibbonTab} />
 
-      {/* Rechte Gruppe: Layout-Menü · Projektname · Fensterknöpfe. Datei-/Export-
-          Aktionen liegen jetzt in der Quick-Access-Leiste links (kein Burger). */}
+      {/* Rechte Gruppe: Layout-Menü · Projektname. Die Fensterknöpfe sitzen jetzt
+          ganz links (macOS-Titelleisten-Konvention); Datei-/Export-Aktionen in
+          der Quick-Access-Leiste (kein Burger). */}
       <div className="topbar-right">
         {layoutMenu}
         <span className="project-name">{project.name}</span>
-        <WindowControls />
       </div>
     </header>
   );

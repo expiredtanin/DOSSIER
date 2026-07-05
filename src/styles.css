@@ -5317,7 +5317,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: 6px;
+  /* Ganz links in der randlosen Titelleiste (macOS-Konvention). */
+  margin-right: 4px;
   flex: 0 0 auto;
 }
 .win-btn {
