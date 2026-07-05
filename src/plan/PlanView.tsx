@@ -3096,5 +3096,51 @@ function renderPrimitive(
         </text>
       );
     }
+    case "drawingCircle": {
+      // Echtes `<circle>` — rund bei jedem Zoom (kein Vieleck). Füllung optional.
+      const c = toScreen(p.center);
+      const r = p.r * PX_PER_M;
+      return (
+        <circle
+          cx={c.x}
+          cy={c.y}
+          r={r}
+          fill={p.fill}
+          stroke={p.stroke}
+          strokeWidth={weight(p.weightMm)}
+          strokeDasharray={dashOf(p.dash)}
+          vectorEffect={vfx}
+        />
+      );
+    }
+    case "drawingArc": {
+      // Glatter SVG-Bogen. Winkel in Radiant (CCW im Modell); Screen-Y ist
+      // gespiegelt → ein modell-CCW-Bogen läuft am Bildschirm im Uhrzeigersinn
+      // (SVG sweep-flag 1). large-arc aus der Spannweite (>π).
+      const TAU = Math.PI * 2;
+      const rPx = p.r * PX_PER_M;
+      const from = toScreen({
+        x: p.center.x + p.r * Math.cos(p.a0),
+        y: p.center.y + p.r * Math.sin(p.a0),
+      });
+      const to = toScreen({
+        x: p.center.x + p.r * Math.cos(p.a1),
+        y: p.center.y + p.r * Math.sin(p.a1),
+      });
+      const sweep = (((p.a1 - p.a0) % TAU) + TAU) % TAU;
+      const largeArc = sweep > Math.PI ? 1 : 0;
+      const d = `M ${from.x} ${from.y} A ${rPx} ${rPx} 0 ${largeArc} 1 ${to.x} ${to.y}`;
+      return (
+        <path
+          d={d}
+          fill="none"
+          stroke={p.stroke}
+          strokeWidth={weight(p.weightMm)}
+          strokeDasharray={dashOf(p.dash)}
+          strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
+          vectorEffect={vfx}
+        />
+      );
+    }
   }
 }

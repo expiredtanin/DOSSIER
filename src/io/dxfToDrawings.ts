@@ -102,6 +102,14 @@ export function textsToDrawings(
 
 /** Eine Kontur → 2D-Geometrie (line bei 2 offenen Punkten, sonst polyline). */
 function contourGeom(contour: Contour): Drawing2DGeom | null {
+  // Echte Kurve (CIRCLE/ARC) → GLATTE Kreis-/Bogen-Form statt tesselliertem Vieleck.
+  const c = contour.curve;
+  if (c) {
+    if (c.kind === "circle") {
+      return { shape: "circle", center: { x: c.cx, y: c.cy }, r: c.r };
+    }
+    return { shape: "arc", center: { x: c.cx, y: c.cy }, r: c.r, a0: c.a0, a1: c.a1 };
+  }
   const pts = contour.pts;
   if (pts.length < 2) return null;
   if (pts.length === 2 && !contour.closed) {

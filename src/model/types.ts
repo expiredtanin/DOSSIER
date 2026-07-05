@@ -1098,6 +1098,19 @@ export interface Contour {
    * geschlossene, gefüllte 2D-Form (Vollton-Füllung); sonst nur ein Umriss.
    */
   filled?: boolean;
+  /**
+   * Wahre Kurvengeometrie (aus CIRCLE/ARC). `pts` bleibt tesselliert (Kontext/
+   * 3D), aber der Drawing-Import baut daraus eine GLATTE `{shape:"circle"|"arc"}`-
+   * Form statt eines Vielecks. Winkel in RADIANT (CCW); Kreis = a0..a1 über 2π.
+   */
+  curve?: {
+    kind: "circle" | "arc";
+    cx: number;
+    cy: number;
+    r: number;
+    a0: number;
+    a1: number;
+  };
 }
 
 /**

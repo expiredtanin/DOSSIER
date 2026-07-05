@@ -311,6 +311,35 @@ export type Primitive =
       /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl). */
       drawingId?: string;
       greyed?: boolean;
+    }
+  | {
+      // Glatter Kreis (aus Drawing2D `{shape:"circle"}`, z. B. DXF-CIRCLE) — als
+      // echtes `<circle>` gerendert (rund bei jedem Zoom), nicht als Vieleck.
+      kind: "drawingCircle";
+      center: Vec2;
+      /** Radius in Modell-Metern. */
+      r: number;
+      /** Vollton-Füllfarbe oder "none". */
+      fill: string;
+      stroke: string;
+      weightMm: number;
+      dash?: number[] | null;
+      drawingId?: string;
+      greyed?: boolean;
+    }
+  | {
+      // Glatter Bogen (aus Drawing2D `{shape:"arc"}`, z. B. DXF-ARC) — als
+      // SVG-Bogenpfad gerendert; Winkel in RADIANT (CCW im Modell).
+      kind: "drawingArc";
+      center: Vec2;
+      r: number;
+      a0: number;
+      a1: number;
+      stroke: string;
+      weightMm: number;
+      dash?: number[] | null;
+      drawingId?: string;
+      greyed?: boolean;
     };
 
 /**
@@ -1017,19 +1046,36 @@ function addDrawing2D(
       seg(c4, c1);
       break;
     }
-    case "circle": {
-      // Kreis als geschlossene Polygon-Approximation (N Segmente) — nutzt die
-      // vorhandene Füll-/Strich-Pipeline, ohne ein eigenes Kreis-Primitiv.
-      const N = 64;
-      const pts: Vec2[] = [];
-      for (let i = 0; i < N; i++) {
-        const t = (i / N) * Math.PI * 2;
-        pts.push({ x: g.center.x + g.r * Math.cos(t), y: g.center.y + g.r * Math.sin(t) });
-      }
-      fillPoly(pts);
-      for (let i = 0; i < N; i++) seg(pts[i], pts[(i + 1) % N]);
+    case "circle":
+      // Echtes Kreis-Primitiv → glattes `<circle>` (rund bei jedem Zoom) mit
+      // optionaler Vollton-Füllung. Ersetzt die frühere 64-Ecken-Approximation.
+      out.push({
+        kind: "drawingCircle",
+        center: g.center,
+        r: g.r,
+        fill: background ?? d.fillColor ?? "none",
+        stroke: color,
+        weightMm,
+        dash,
+        greyed,
+        drawingId: d.id,
+      });
       break;
-    }
+    case "arc":
+      // Echtes Bogen-Primitiv → glatter SVG-Bogenpfad (Winkel in Radiant).
+      out.push({
+        kind: "drawingArc",
+        center: g.center,
+        r: g.r,
+        a0: g.a0,
+        a1: g.a1,
+        stroke: color,
+        weightMm,
+        dash,
+        greyed,
+        drawingId: d.id,
+      });
+      break;
     case "text":
       out.push({
         kind: "drawingText",
@@ -1042,7 +1088,6 @@ function addDrawing2D(
         drawingId: d.id,
       });
       break;
-    // arc: Primitive-Erweiterung folgt später.
     default:
       break;
   }

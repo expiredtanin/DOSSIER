@@ -444,7 +444,13 @@ function arcContour(e: DxfEntity): Contour | null {
     const t = start + (sweep * i) / segs;
     pts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
   }
-  return { z, pts, closed: false, layer: e.layer };
+  return {
+    z,
+    pts,
+    closed: false,
+    layer: e.layer,
+    curve: { kind: "arc", cx, cy, r, a0: start, a1: start + sweep },
+  };
 }
 
 /** CIRCLE → geschlossener Kreis-Linienzug (voller Umlauf, letzter Punkt weggelassen). */
@@ -471,7 +477,13 @@ function circleContour(e: DxfEntity): Contour | null {
     const t = (Math.PI * 2 * i) / segs;
     pts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
   }
-  return { z, pts, closed: true, layer: e.layer };
+  return {
+    z,
+    pts,
+    closed: true,
+    layer: e.layer,
+    curve: { kind: "circle", cx, cy, r, a0: 0, a1: Math.PI * 2 },
+  };
 }
 
 /**

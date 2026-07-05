@@ -471,6 +471,52 @@ describe("textsToDrawings", () => {
   });
 });
 
+describe("parseDxf — Kurven behalten echte Geometrie (curve)", () => {
+  it("CIRCLE trägt curve {kind:circle}", () => {
+    const c = onlyContour(dxf(circle(10, 20, 5, 4)));
+    expect(c.curve?.kind).toBe("circle");
+    expect(c.curve?.cx).toBeCloseTo(10, 9);
+    expect(c.curve?.cy).toBeCloseTo(20, 9);
+    expect(c.curve?.r).toBeCloseTo(4, 9);
+  });
+
+  it("ARC trägt curve {kind:arc} mit Winkeln (Radiant)", () => {
+    const c = onlyContour(dxf(arc(0, 0, 10, 0, 90)));
+    expect(c.curve?.kind).toBe("arc");
+    expect(c.curve?.r).toBeCloseTo(10, 9);
+    expect(c.curve?.a0).toBeCloseTo(0, 9);
+    expect(c.curve?.a1).toBeCloseTo(Math.PI / 2, 9);
+  });
+});
+
+describe("contoursToDrawings — Kurven → glatte Formen", () => {
+  it("curve circle → {shape:\"circle\"}", () => {
+    const set: ContourSet = {
+      id: "s", type: "contourSet", name: "c",
+      contours: [{ z: 0, closed: true, pts: [{ x: 0, y: 0 }], curve: { kind: "circle", cx: 1, cy: 2, r: 3, a0: 0, a1: Math.PI * 2 } }],
+    };
+    const [d] = contoursToDrawings([set], "lvl", "active", "C", (s) => s);
+    expect(d.geom.shape).toBe("circle");
+    if (d.geom.shape === "circle") {
+      expect(d.geom.r).toBeCloseTo(3, 9);
+      expect(d.geom.center.x).toBeCloseTo(1, 9);
+    }
+  });
+
+  it("curve arc → {shape:\"arc\"}", () => {
+    const set: ContourSet = {
+      id: "s", type: "contourSet", name: "c",
+      contours: [{ z: 0, closed: false, pts: [{ x: 0, y: 0 }], curve: { kind: "arc", cx: 0, cy: 0, r: 5, a0: 0, a1: 1 } }],
+    };
+    const [d] = contoursToDrawings([set], "lvl", "active", "C", (s) => s);
+    expect(d.geom.shape).toBe("arc");
+    if (d.geom.shape === "arc") {
+      expect(d.geom.r).toBeCloseTo(5, 9);
+      expect(d.geom.a1).toBeCloseTo(1, 9);
+    }
+  });
+});
+
 describe("contoursToDrawings — HATCH-Füllung", () => {
   it("gefüllte Kontur → Drawing2D mit fillColor und polyline-Form", () => {
     const set: ContourSet = {

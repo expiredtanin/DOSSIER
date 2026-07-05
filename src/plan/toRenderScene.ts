@@ -486,6 +486,21 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
         widthMm: p.weightMm,
         dash: p.dash ?? null,
       });
+    } else if (p.kind === "drawingCircle" || p.kind === "drawingArc") {
+      // Der native Renderer hat kein Kreis-/Bogen-Primitiv → hier tessellieren
+      // (der SVG-Pfad zeichnet sie glatt). Kreis = voller Umlauf, Bogen = a0..a1.
+      flushRun();
+      const col = withOpacity(toRgba(p.stroke, 1) ?? [0.1, 0.1, 0.1, 1], undefined, p.greyed);
+      const TAU = Math.PI * 2;
+      const a0 = p.kind === "drawingArc" ? p.a0 : 0;
+      const sweep = p.kind === "drawingArc" ? (((p.a1 - p.a0) % TAU) + TAU) % TAU : TAU;
+      const N = Math.max(8, Math.ceil(sweep / (Math.PI / 32)));
+      const pts: RPoint[] = [];
+      for (let i = 0; i <= N; i++) {
+        const t = a0 + (sweep * i) / N;
+        pts.push([p.center.x + p.r * Math.cos(t), p.center.y + p.r * Math.sin(t)]);
+      }
+      polylines.push({ pts, color: col, widthMm: p.weightMm, dash: p.dash ?? null, z: zc++ });
     } else if (p.kind === "text") {
       // "text": zeilenweise flachen — die ECHTEN Glyphen rastert der Rust-
       // Renderer über einen GPU-Glyphen-Atlas (glyphon, dieselbe Font-Familie
