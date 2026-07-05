@@ -3979,10 +3979,6 @@ body {
 
 /* ── Attribute-Palette (AttributesPanel) ─────────────────────────────── */
 .attr-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
   overflow-y: auto;
   height: 100%;
   min-height: 0;
@@ -3993,28 +3989,29 @@ body {
   padding: 8px 4px;
   text-align: center;
 }
-.attr-title {
-  font-weight: 600;
-  color: var(--label);
-  padding: 0 2px 4px;
-}
-/* OCS-artiges Eigenschaften-Grid: Sektion-Balken über die volle Breite, Zeilen
-   mit dezenten Trennlinien (klares Grid, ohne aufdringliche Ränder), Wertfelder
-   füllen ihre Zelle linksbündig — einheitlicher Look für Texte/Zahlen/Dropdowns. */
+/* OCS-artiges Eigenschaften-Grid: EIN durchgehendes Zwei-Spalten-Grid über alle
+   Sektionen (Label | Wert), damit die Wertfelder über Stift/Füllung/Maße hinweg
+   in EINER Spalte bündig stehen. Sektion-Balken spannen beide Spalten. Zeilen mit
+   dezenten Trennlinien; Wertfelder füllen ihre Zelle linksbündig über die volle
+   Panel-Breite — einheitlicher Look für Texte/Zahlen/Dropdowns. */
 .attr-section-label {
+  grid-column: 1 / -1;
   color: var(--label);
   font-weight: 700;
   text-transform: uppercase;
   font-size: 10px;
   letter-spacing: 0.05em;
-  margin: 8px 0 0;
-  padding: 4px 8px;
+  margin: 8px 0 2px;
+  padding: 3px 6px;
   background: var(--panel-2);
   border-radius: 3px;
 }
+.attr-section-label:first-child {
+  margin-top: 0;
+}
 .attr-grid {
   display: grid;
-  grid-template-columns: minmax(84px, auto) 1fr;
+  grid-template-columns: minmax(80px, max-content) 1fr;
   align-items: stretch;
   gap: 0;
   padding: 0;
@@ -4024,16 +4021,24 @@ body {
   white-space: nowrap;
   display: flex;
   align-items: center;
-  padding: 4px 10px 4px 6px;
+  padding: 3px 10px 3px 2px;
   border-bottom: 1px solid var(--line);
 }
 .attr-val {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 6px;
   min-width: 0;
-  padding: 3px 2px 3px 0;
+  padding: 2px 0;
   border-bottom: 1px solid var(--line);
+}
+/* Wertfelder (Dropdown-Trigger, Zahlenfeld) füllen die Wert-Spalte — der
+   Dropdown wächst in die verfügbare Breite (kein fixes width mehr im TSX). */
+.attr-val .tb-dd-trigger {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: space-between;
 }
 .attr-readonly {
   color: var(--label);

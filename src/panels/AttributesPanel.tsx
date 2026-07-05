@@ -80,7 +80,6 @@ export function AttributesPanel() {
     onChange: (next: UiSource) => void,
   ) => (
     <Dropdown
-      width={104}
       value={ui}
       disabled={!editable}
       onChange={(v) => onChange(v as UiSource)}
@@ -110,7 +109,7 @@ export function AttributesPanel() {
   ) => (
     <>
       <span className="attr-key">{t(labelKey)}</span>
-      <span className="attr-val" style={{ gap: 6 }}>
+      <span className="attr-val">
         {ui === "custom" && valueEditor}
         {sourceSelect(editable, ui, onSource)}
       </span>
@@ -159,11 +158,13 @@ export function AttributesPanel() {
 
   return (
     <div className="attr-panel">
-      <div className="attr-title">{t("attr.title")}</div>
-
-      {/* ── Stift/Strich ──────────────────────────────────────────────── */}
-      <div className="attr-section-label">{t("attr.stroke")}</div>
+      {/* EIN durchgehendes Grid über alle Sektionen — dieselben zwei Spalten
+          (Label | Wert) für Stift/Füllung/Maße, damit die Wertfelder überall
+          bündig in EINER Spalte stehen. Sektion-Balken spannen beide Spalten. */}
       <div className="attr-grid">
+        {/* ── Stift/Strich ──────────────────────────────────────────── */}
+        <div className="attr-section-label">{t("attr.stroke")}</div>
+
         {/* Farbe — gilt für Wand UND Drawing2D (Kontrakt setzt beide). */}
         <span className="attr-key">{t("attr.color")}</span>
         <span className="attr-val">
@@ -208,7 +209,6 @@ export function AttributesPanel() {
               onChange={(v) =>
                 host.onSetSelectionLineStyle(v === "__none__" ? undefined : v)
               }
-              width={120}
               options={[
                 { value: "__none__", label: t("attr.lineStyle.none") },
                 ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
@@ -218,14 +218,13 @@ export function AttributesPanel() {
             <span className="attr-readonly">{lineStyle ? lineStyle.name : "—"}</span>
           )}
         </span>
-      </div>
 
-      {/* ── Füllung (Vordergrund/Hintergrund + Schraffur) ─────────────── */}
-      {/* Vordergrund = Muster-/Schraffurfarbe, Hintergrund = Füllfarbe/Poché.
-          Jedes Feld: Nach Ebene (LayerCategory erzwingt den Wert) / Nach Bauteil
-          (erbt vom Component-Manager, Default) / eigener Wert (Override). */}
-      <div className="attr-section-label">{t("attr.fill")}</div>
-      <div className="attr-grid">
+        {/* ── Füllung (Vordergrund/Hintergrund + Schraffur) ─────────── */}
+        {/* Vordergrund = Muster-/Schraffurfarbe, Hintergrund = Füllfarbe/
+            Poché. Jedes Feld: Nach Ebene (LayerCategory erzwingt den Wert) /
+            Nach Bauteil (erbt vom Component-Manager, Default) / eigener Wert. */}
+        <div className="attr-section-label">{t("attr.fill")}</div>
+
         {sourceRow(
           "attr.foreground",
           pocheEditable,
@@ -248,7 +247,6 @@ export function AttributesPanel() {
           hatchUi,
           onHatchSourceChange,
           <Dropdown
-            width={104}
             value={sel.fillHatchId ?? ""}
             onChange={(v) => host.onSetSelectionFill(v || null)}
             options={[
@@ -257,11 +255,9 @@ export function AttributesPanel() {
             ]}
           />,
         )}
-      </div>
 
-      {/* ── Maße (informativ, aus der bbox) ───────────────────────────── */}
-      <div className="attr-section-label">{t("attr.size")}</div>
-      <div className="attr-grid">
+        {/* ── Maße (informativ, aus der bbox) ───────────────────────── */}
+        <div className="attr-section-label">{t("attr.size")}</div>
         <span className="attr-key">{t("attr.width")}</span>
         <span className="attr-val attr-readonly">{formatM(bboxW)}</span>
         <span className="attr-key">{t("attr.height")}</span>
