@@ -3998,39 +3998,52 @@ body {
   color: var(--label);
   padding: 0 2px 4px;
 }
+/* OCS-artiges Eigenschaften-Grid: Sektion-Balken über die volle Breite, Zeilen
+   mit dezenten Trennlinien (klares Grid, ohne aufdringliche Ränder), Wertfelder
+   füllen ihre Zelle linksbündig — einheitlicher Look für Texte/Zahlen/Dropdowns. */
 .attr-section-label {
   color: var(--label);
   font-weight: 700;
   text-transform: uppercase;
   font-size: 10px;
   letter-spacing: 0.05em;
-  margin-top: 6px;
-  padding: 0 2px;
+  margin: 8px 0 0;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border-radius: 3px;
 }
 .attr-grid {
   display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 4px 10px;
-  padding: 2px;
+  grid-template-columns: minmax(84px, auto) 1fr;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
 }
 .attr-key {
   color: var(--label);
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  padding: 4px 10px 4px 6px;
+  border-bottom: 1px solid var(--line);
 }
 .attr-val {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   min-width: 0;
+  padding: 3px 2px 3px 0;
+  border-bottom: 1px solid var(--line);
 }
 .attr-readonly {
   color: var(--label);
   opacity: 0.85;
+  padding-left: 6px;
 }
 .attr-num,
 .attr-select {
-  width: 110px;
+  width: 100%;
+  text-align: left;
   background: var(--panel-2);
   color: var(--label);
   border: 1px solid var(--line);
