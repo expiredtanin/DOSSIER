@@ -23,6 +23,9 @@ export type CategoryMode = "active" | "byLayer";
 let drawingSeq = 0;
 const nextId = (): string => `dxf2d-${Date.now()}-${drawingSeq++}`;
 
+/** Default-Füllfarbe für aus HATCH importierte Flächen (neutral, restylebar). */
+const DXF_HATCH_FILL = "#c8c8c8";
+
 /**
  * Wandelt einen Satz Konturen-Sätze in Drawing2D-Elemente für die Ziel-Ebene
  * `levelId` um. Bei `categoryMode === "byLayer"` liefert `layerToCode` den
@@ -45,13 +48,19 @@ export function contoursToDrawings(
         categoryMode === "byLayer" && layerName
           ? layerToCode(layerName)
           : fallbackCode;
-      out.push({
+      const drawing: Drawing2D = {
         id: nextId(),
         type: "drawing2d",
         levelId,
         categoryCode,
         geom,
-      });
+      };
+      // Aus einer HATCH stammende Kontur → geschlossene, gefüllte Form. Vollton-
+      // Füllung als restylebarer Default (neutrales Grau); Umriss bleibt Kategorie.
+      if (contour.filled && geom.shape === "polyline") {
+        drawing.fillColor = DXF_HATCH_FILL;
+      }
+      out.push(drawing);
     }
   }
   return out;

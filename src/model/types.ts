@@ -1093,6 +1093,11 @@ export interface Contour {
   closed: boolean;
   /** Ursprünglicher DXF-Layer-Name (für die Kategorisierung beim 2D-Import). */
   layer?: string;
+  /**
+   * Gefüllte Fläche (aus einer DXF-HATCH). Beim Drawing-Import wird daraus eine
+   * geschlossene, gefüllte 2D-Form (Vollton-Füllung); sonst nur ein Umriss.
+   */
+  filled?: boolean;
 }
 
 /** Ein Satz Konturen (z. B. alle Höhenlinien eines DXF-Imports). */

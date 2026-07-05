@@ -3,7 +3,8 @@
 
 import { describe, it, expect } from "vitest";
 import { parseDxf } from "./dxfParser";
-import type { Contour, Vec2 } from "../model/types";
+import { contoursToDrawings } from "./dxfToDrawings";
+import type { Contour, ContourSet, Vec2 } from "../model/types";
 
 /** Minimales DXF aus Gruppencode/Wert-Paaren; nur eine ENTITIES-Sektion. */
 function dxf(...entities: string[][]): string {
@@ -284,5 +285,108 @@ describe("parseDxf — INSERT", () => {
     expect(c.pts[0].y).toBeCloseTo(3, 9);
     expect(c.pts[1].x).toBeCloseTo(3, 9);
     expect(c.pts[1].y).toBeCloseTo(3, 9);
+  });
+});
+
+// ── HATCH (gefüllte Flächen) ──────────────────────────────────────────────────
+
+/** HATCH mit Polyline-Randpfad (Flag 3 = external+polyline). */
+function hatchPoly(verts: Array<[number, number]>): string[] {
+  const g = ["0", "HATCH", "8", "0", "2", "SOLID", "70", "1", "91", "1", "92", "3", "72", "0", "73", "1", "93", `${verts.length}`];
+  for (const [x, y] of verts) g.push("10", `${x}`, "20", `${y}`);
+  g.push("97", "0");
+  return g;
+}
+
+/** HATCH mit Kanten-Randpfad aus Linienkanten (Flag 1 = external, kein Polyline-Bit). */
+function hatchLineEdges(verts: Array<[number, number]>): string[] {
+  const g = ["0", "HATCH", "8", "0", "2", "SOLID", "70", "1", "91", "1", "92", "1", "93", `${verts.length}`];
+  for (let k = 0; k < verts.length; k++) {
+    const a = verts[k];
+    const b = verts[(k + 1) % verts.length];
+    g.push("72", "1", "10", `${a[0]}`, "20", `${a[1]}`, "11", `${b[0]}`, "21", `${b[1]}`);
+  }
+  g.push("97", "0");
+  return g;
+}
+
+/** HATCH mit einer Bogenkante (Kantentyp 2), Winkel in Grad. */
+function hatchArc(cx: number, cy: number, r: number, s: number, e: number): string[] {
+  return [
+    "0", "HATCH", "8", "0", "2", "SOLID", "70", "1",
+    "91", "1", "92", "1", "93", "1",
+    "72", "2", "10", `${cx}`, "20", `${cy}`, "40", `${r}`, "50", `${s}`, "51", `${e}`, "73", "1",
+    "97", "0",
+  ];
+}
+
+describe("parseDxf — HATCH", () => {
+  it("Polyline-Rand → geschlossene gefüllte Kontur", () => {
+    const c = onlyContour(dxf(hatchPoly([[0, 0], [10, 0], [10, 10], [0, 10]])));
+    expect(c.closed).toBe(true);
+    expect(c.filled).toBe(true);
+    expect(c.pts).toHaveLength(4);
+    expect(c.pts[1].x).toBeCloseTo(10, 9);
+    expect(c.pts[1].y).toBeCloseTo(0, 9);
+    expect(c.pts[2].x).toBeCloseTo(10, 9);
+    expect(c.pts[2].y).toBeCloseTo(10, 9);
+  });
+
+  it("Linienkanten-Rand → geschlossene gefüllte Kontur (Eckpunkte)", () => {
+    const c = onlyContour(dxf(hatchLineEdges([[0, 0], [4, 0], [4, 4], [0, 4]])));
+    expect(c.closed).toBe(true);
+    expect(c.filled).toBe(true);
+    expect(c.pts).toHaveLength(4);
+    const xs = c.pts.map((p) => p.x).sort((a, b) => a - b);
+    expect(xs[0]).toBeCloseTo(0, 9);
+    expect(xs[3]).toBeCloseTo(4, 9);
+  });
+
+  it("Bogenkante → tessellierter Halbkreis auf Radius", () => {
+    const c = onlyContour(dxf(hatchArc(0, 0, 5, 0, 180)));
+    expect(c.filled).toBe(true);
+    for (const p of c.pts) expect(Math.hypot(p.x, p.y)).toBeCloseTo(5, 6);
+    expect(c.pts[0].x).toBeCloseTo(5, 6);
+    expect(c.pts[0].y).toBeCloseTo(0, 6);
+    const last = c.pts[c.pts.length - 1];
+    expect(last.x).toBeCloseTo(-5, 6);
+    expect(last.y).toBeCloseTo(0, 6);
+  });
+
+  it("mehrere Randpfade → mehrere Loops (Insel als eigener Ring)", () => {
+    // Zwei Polyline-Pfade in EINER HATCH: numPaths = 2.
+    const g = [
+      "0", "HATCH", "8", "0", "2", "SOLID", "70", "1", "91", "2",
+      "92", "3", "72", "0", "73", "1", "93", "4",
+      "10", "0", "20", "0", "10", "10", "20", "0", "10", "10", "20", "10", "10", "0", "20", "10",
+      "97", "0",
+      "92", "3", "72", "0", "73", "1", "93", "4",
+      "10", "3", "20", "3", "10", "7", "20", "3", "10", "7", "20", "7", "10", "3", "20", "7",
+      "97", "0",
+    ];
+    const res = parseDxf(dxf(g));
+    expect(res.contours[0].contours).toHaveLength(2);
+    expect(res.contours[0].contours.every((c) => c.filled && c.closed)).toBe(true);
+  });
+});
+
+describe("contoursToDrawings — HATCH-Füllung", () => {
+  it("gefüllte Kontur → Drawing2D mit fillColor und polyline-Form", () => {
+    const set: ContourSet = {
+      id: "s", type: "contourSet", name: "h",
+      contours: [{ z: 0, closed: true, filled: true, pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }] }],
+    };
+    const [d] = contoursToDrawings([set], "lvl", "active", "CODE", (s) => s);
+    expect(d.geom.shape).toBe("polyline");
+    expect(d.fillColor).toBeTruthy();
+  });
+
+  it("ungefüllte Kontur → Drawing2D ohne fillColor", () => {
+    const set: ContourSet = {
+      id: "s", type: "contourSet", name: "h",
+      contours: [{ z: 0, closed: true, pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }] }],
+    };
+    const [d] = contoursToDrawings([set], "lvl", "active", "CODE", (s) => s);
+    expect(d.fillColor).toBeUndefined();
   });
 });

@@ -22,6 +22,8 @@
 //   • ELLIPSE                        → Kontur (Ellipsenbogen/-umlauf, tesselliert).
 //   • SPLINE                         → Kontur (B-Spline via De Boor; Fallback fitPoints).
 //   • INSERT                         → Block-Konturen, transformiert (Scale/Rot/Array, verschachtelt).
+//   • HATCH                          → gefüllte Kontur(en) je Randpfad (Custom-Handler,
+//                                       Polyline- + Linien-/Bogen-Kanten; Fill via `Contour.filled`).
 
 import DxfParser from "dxf-parser";
 import type { Contour, ContourSet, ImportedMesh, Vec2 } from "../model/types";
@@ -93,7 +95,14 @@ interface DxfEntity {
   rowCount?: number;
   columnSpacing?: number;
   rowSpacing?: number;
+  // HATCH: rohe Gruppencodes (vom Custom-Handler gesammelt, siehe HatchHandler).
+  rawCodes?: RawCode[];
   [k: string]: unknown;
+}
+/** Ein rohes DXF-Gruppencode/Wert-Paar (HATCH-Randpfad-Auswertung). */
+interface RawCode {
+  code: number;
+  value: number | string;
 }
 /** Ein Block (BLOCKS-Tabelle): Basispunkt `position` + eigene Entity-Liste. */
 interface DxfBlock {
@@ -117,6 +126,12 @@ const nextId = (prefix: string) =>
  */
 export function parseDxf(text: string): DxfImportResult {
   const parser = new DxfParser();
+  // dxf-parser bringt keinen HATCH-Handler mit (verwirft HATCH sonst stumm).
+  // Eigenen registrieren, der die rohen Gruppencodes einsammelt; die Auswertung
+  // der Randpfade läuft separat und testbar in `hatchContours`.
+  (parser as unknown as {
+    registerEntityHandler: (h: new () => unknown) => void;
+  }).registerEntityHandler(HatchHandler);
   // parseSync wirft bei strukturell kaputtem DXF; das soll nach oben.
   const doc = parser.parseSync(text) as unknown as DxfDocument;
   const entities = doc?.entities ?? [];
@@ -668,6 +683,9 @@ function collectContours(
       if (c) out.push(c);
       break;
     }
+    case "HATCH":
+      for (const c of hatchContours(e)) out.push(c);
+      break;
     case "INSERT":
       expandInsert(e, blocks, out, depth);
       break;
@@ -675,4 +693,177 @@ function collectContours(
       // Unbekannte/irrelevante Entity → ignorieren (tolerant).
       break;
   }
+}
+
+// ── HATCH (Custom-Handler + Randpfad-Auswertung → gefüllte Konturen) ──────────
+
+/**
+ * Custom dxf-parser-Handler für HATCH: sammelt die rohen Gruppencodes der Entity
+ * (bis zum nächsten Code 0), OHNE zu interpretieren. Muster wie die eingebauten
+ * Handler (Schleife bricht bei Code 0; `lastReadGroup` bleibt darauf stehen).
+ * Die eigentliche Randpfad-Logik liegt testbar in `hatchContours`.
+ */
+class HatchHandler {
+  ForEntityName = "HATCH";
+  parseEntity(
+    scanner: {
+      next: () => { code: number; value: number | string };
+      isEOF: () => boolean;
+    },
+    curr: { code: number; value: number | string },
+  ): DxfEntity {
+    const raw: RawCode[] = [];
+    const entity: DxfEntity = { type: String(curr.value), rawCodes: raw };
+    curr = scanner.next();
+    while (!scanner.isEOF()) {
+      if (curr.code === 0) break;
+      if (curr.code === 8) entity.layer = String(curr.value);
+      raw.push({ code: curr.code, value: curr.value });
+      curr = scanner.next();
+    }
+    return entity;
+  }
+}
+
+/** Zahlenwert eines Gruppencodes (tolerant). */
+function rc(v: number | string | undefined): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const n = typeof v === "string" ? Number.parseFloat(v) : NaN;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Erster Wert eines Codes aus der Kanten-Code-Sammlung. */
+function firstOf(m: Map<number, number[]>, code: number): number | undefined {
+  const a = m.get(code);
+  return a && a.length > 0 ? a[0] : undefined;
+}
+
+/** Bogenkante (Kantentyp 2): Zentrum/Radius, Winkel in GRAD, ggf. im Uhrzeigersinn. */
+function pushArcEdge(pts: Vec2[], m: Map<number, number[]>): void {
+  const cx = firstOf(m, 10);
+  const cy = firstOf(m, 20);
+  const r = firstOf(m, 40);
+  if (cx === undefined || cy === undefined || r === undefined || r <= 0) return;
+  const s = (firstOf(m, 50) ?? 0) * (Math.PI / 180);
+  const e = (firstOf(m, 51) ?? 360) * (Math.PI / 180);
+  const ccw = (firstOf(m, 73) ?? 1) !== 0;
+  // Spanne in Laufrichtung auf (0, 2π] normieren.
+  let sweep = ccw ? e - s : -(e - s);
+  sweep = ((sweep % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  if (sweep === 0) sweep = Math.PI * 2;
+  const dir = ccw ? 1 : -1;
+  const segs = segmentsFor(sweep);
+  // Startpunkt weglassen, wenn er den vorherigen Kanten-Endpunkt dupliziert.
+  for (let i = 0; i <= segs; i++) {
+    const t = s + dir * (sweep * i) / segs;
+    pts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
+  }
+}
+
+/** Punkte einer HATCH-Randkante an die Loop-Punkte anhängen (Typ 1 Linie, 2 Bogen). */
+function appendEdge(pts: Vec2[], edgeType: number, m: Map<number, number[]>): void {
+  if (edgeType === 1) {
+    // Linie: Start (10/20) — der Endpunkt ist der Start der nächsten Kante.
+    const x = firstOf(m, 10);
+    const y = firstOf(m, 20);
+    if (x !== undefined && y !== undefined) pts.push({ x, y });
+    // Bei der LETZTEN Kante fehlt sonst der Endpunkt; der closed-Ring schließt ihn.
+    return;
+  }
+  if (edgeType === 2) {
+    pushArcEdge(pts, m);
+    return;
+  }
+  // Kantentyp 3 (Ellipse) / 4 (Spline): im ersten Wurf nicht unterstützt.
+}
+
+/**
+ * HATCH-Entity (rohe Gruppencodes) → gefüllte, geschlossene Konturen (ein Loop
+ * je Randpfad). Unterstützt Polyline-Randpfade (Flag-Bit 2) sowie Kanten-Pfade
+ * mit Linien- und Bogenkanten. Bulges an Polyline-Rändern und Ellipse-/Spline-
+ * Kanten werden im ersten Wurf ignoriert (als Sehne bzw. übersprungen). Insel-
+ * Loops entstehen als eigene geschlossene Ringe (keine echten Löcher).
+ */
+function hatchContours(e: DxfEntity): Contour[] {
+  const raw = e.rawCodes;
+  if (!raw || raw.length === 0) return [];
+  const n = raw.length;
+  const layer = e.layer;
+
+  // Zum ersten Code 91 (Anzahl Randpfade).
+  let i = 0;
+  while (i < n && raw[i].code !== 91) i++;
+  if (i >= n) return [];
+  const numPaths = rc(raw[i].value);
+  i++;
+
+  const loops: Contour[] = [];
+  for (let p = 0; p < numPaths && i < n; p++) {
+    // Zum Pfadtyp-Flag (92) des nächsten Pfads.
+    while (i < n && raw[i].code !== 92) i++;
+    if (i >= n) break;
+    const flag = rc(raw[i].value);
+    i++;
+    const isPolyline = (flag & 2) !== 0;
+    const pts: Vec2[] = [];
+
+    if (isPolyline) {
+      // Optionale 72/73 überspringen, bis 93 (Vertex-Anzahl).
+      while (i < n && raw[i].code !== 93) i++;
+      if (i >= n) break;
+      const numVerts = rc(raw[i].value);
+      i++;
+      let cx: number | null = null;
+      let got = 0;
+      while (i < n && got < numVerts) {
+        const c = raw[i];
+        if (c.code === 91 || c.code === 92) break; // Sicherheitsnetz
+        if (c.code === 10) {
+          cx = rc(c.value);
+        } else if (c.code === 20 && cx !== null) {
+          pts.push({ x: cx, y: rc(c.value) });
+          cx = null;
+          got++;
+        }
+        i++;
+      }
+    } else {
+      // Kanten-Pfad: 93 = Anzahl Kanten.
+      while (i < n && raw[i].code !== 93) i++;
+      if (i >= n) break;
+      const numEdges = rc(raw[i].value);
+      i++;
+      for (let ed = 0; ed < numEdges && i < n; ed++) {
+        // Zum Kantentyp (72), aber nicht über den Pfad/Kanten-Block hinaus.
+        while (
+          i < n &&
+          raw[i].code !== 72 &&
+          raw[i].code !== 97 &&
+          raw[i].code !== 92 &&
+          raw[i].code !== 91
+        ) {
+          i++;
+        }
+        if (i >= n || raw[i].code !== 72) break;
+        const edgeType = rc(raw[i].value);
+        i++;
+        // Kanten-Codes bis zur nächsten Kante/Blockgrenze sammeln.
+        const m = new Map<number, number[]>();
+        while (i < n) {
+          const c = raw[i];
+          if (c.code === 72 || c.code === 97 || c.code === 92 || c.code === 91) break;
+          const arr = m.get(c.code) ?? [];
+          arr.push(rc(c.value));
+          m.set(c.code, arr);
+          i++;
+        }
+        appendEdge(pts, edgeType, m);
+      }
+    }
+
+    if (pts.length >= 2) {
+      loops.push({ z: 0, pts, closed: true, layer, filled: true });
+    }
+  }
+  return loops;
 }
