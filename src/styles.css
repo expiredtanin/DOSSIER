@@ -5505,7 +5505,8 @@ body {
   overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
-  min-height: 56px;
+  height: 60px;
+  flex-shrink: 0;
 }
 .ribbon-body::-webkit-scrollbar {
   height: 6px;
@@ -5606,5 +5607,6 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 48px;
+  height: 100%;
+  overflow: hidden;
 }
