@@ -17,6 +17,9 @@
 //   • MESH                           → Dreiecks-Mesh (Vertices + Face-Liste).
 //   • LWPOLYLINE / POLYLINE (2D/3D)  → Kontur (z aus elevation/Vertex-Z).
 //   • LINE                           → Kontur (zwei-Punkt-Linienzug).
+//   • ARC                            → Kontur (offener Bogen, tesselliert).
+//   • CIRCLE                         → Kontur (geschlossener Kreis, tesselliert).
+//   • ELLIPSE                        → Kontur (Ellipsenbogen/-umlauf, tesselliert).
 
 import DxfParser from "dxf-parser";
 import type { Contour, ContourSet, ImportedMesh, Vec2 } from "../model/types";
@@ -61,6 +64,16 @@ interface DxfEntity {
   faces?: number[][];
   isPolyfaceMesh?: boolean;
   is3dPolygonMesh?: boolean;
+  // Kurven-Entities (ARC/CIRCLE/ELLIPSE). Winkel liefert dxf-parser in RADIANT
+  // (ARC/CIRCLE Grad→rad umgerechnet; ELLIPSE-Parameterwinkel roh in Radiant).
+  center?: DxfVertex;
+  radius?: number;
+  startAngle?: number;
+  endAngle?: number;
+  /** ELLIPSE: Hauptachsen-Endpunkt RELATIV zum Center. */
+  majorAxisEndPoint?: DxfVertex;
+  /** ELLIPSE: Verhältnis Neben-/Hauptachse (b/a). */
+  axisRatio?: number;
   [k: string]: unknown;
 }
 interface DxfDocument {
@@ -111,6 +124,21 @@ export function parseDxf(text: string): DxfImportResult {
       }
       case "LINE": {
         const ct = lineContour(e);
+        if (ct) contours.push(ct);
+        break;
+      }
+      case "ARC": {
+        const ct = arcContour(e);
+        if (ct) contours.push(ct);
+        break;
+      }
+      case "CIRCLE": {
+        const ct = circleContour(e);
+        if (ct) contours.push(ct);
+        break;
+      }
+      case "ELLIPSE": {
+        const ct = ellipseContour(e);
         if (ct) contours.push(ct);
         break;
       }
@@ -307,4 +335,124 @@ function lineContour(e: DxfEntity): Contour | null {
     closed: false,
     layer: e.layer,
   };
+}
+
+// ── Kurven-Entities (ARC/CIRCLE/ELLIPSE) → tessellierte Konturen ──────────────
+
+/** Winkelauflösung der Tessellierung (~5.6° pro Segment). */
+const CURVE_STEP = Math.PI / 32;
+/** Obergrenze der Segmentzahl (Schutz gegen entartete Eingaben). */
+const CURVE_MAX_SEG = 256;
+
+/** Segmentzahl für eine Winkelspanne (Radiant): mind. 2, gedeckelt. */
+function segmentsFor(sweep: number): number {
+  return Math.max(2, Math.min(CURVE_MAX_SEG, Math.ceil(Math.abs(sweep) / CURVE_STEP)));
+}
+
+/**
+ * ARC → offener Bogen-Linienzug. `startAngle`/`endAngle` in Radiant (dxf-parser
+ * rechnet Grad→rad). Bögen laufen CCW; eine nicht-positive Spanne wird um 2π
+ * ergänzt (voller-Kreis-Fall bleibt 2π).
+ */
+function arcContour(e: DxfEntity): Contour | null {
+  const c = e.center;
+  const r = e.radius;
+  if (
+    !c ||
+    !Number.isFinite(c.x) ||
+    !Number.isFinite(c.y) ||
+    typeof r !== "number" ||
+    !Number.isFinite(r) ||
+    r <= 0
+  ) {
+    return null;
+  }
+  const start = Number.isFinite(e.startAngle) ? (e.startAngle as number) : 0;
+  const end = Number.isFinite(e.endAngle) ? (e.endAngle as number) : Math.PI * 2;
+  let sweep = end - start;
+  if (sweep <= 0) sweep += Math.PI * 2;
+  const cx = c.x ?? 0;
+  const cy = c.y ?? 0;
+  const z = Number.isFinite(c.z) ? (c.z as number) : 0;
+  const segs = segmentsFor(sweep);
+  const pts: Vec2[] = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = start + (sweep * i) / segs;
+    pts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
+  }
+  return { z, pts, closed: false, layer: e.layer };
+}
+
+/** CIRCLE → geschlossener Kreis-Linienzug (voller Umlauf, letzter Punkt weggelassen). */
+function circleContour(e: DxfEntity): Contour | null {
+  const c = e.center;
+  const r = e.radius;
+  if (
+    !c ||
+    !Number.isFinite(c.x) ||
+    !Number.isFinite(c.y) ||
+    typeof r !== "number" ||
+    !Number.isFinite(r) ||
+    r <= 0
+  ) {
+    return null;
+  }
+  const cx = c.x ?? 0;
+  const cy = c.y ?? 0;
+  const z = Number.isFinite(c.z) ? (c.z as number) : 0;
+  const segs = segmentsFor(Math.PI * 2);
+  const pts: Vec2[] = [];
+  // 0..2π ohne Schluss-Duplikat (closed schließt den Ring).
+  for (let i = 0; i < segs; i++) {
+    const t = (Math.PI * 2 * i) / segs;
+    pts.push({ x: cx + r * Math.cos(t), y: cy + r * Math.sin(t) });
+  }
+  return { z, pts, closed: true, layer: e.layer };
+}
+
+/**
+ * ELLIPSE → Linienzug. Hauptachse = `majorAxisEndPoint` (Vektor relativ zum
+ * Center), Nebenachse = ⟂ dazu · `axisRatio`. `startAngle`/`endAngle` sind
+ * PARAMETERwinkel in Radiant; ein voller Umlauf (Spanne ≈ 2π) wird geschlossen.
+ * Punkt(t) = Center + cos t · Haupt + sin t · Neben.
+ */
+function ellipseContour(e: DxfEntity): Contour | null {
+  const c = e.center;
+  const maj = e.majorAxisEndPoint;
+  const ratio = e.axisRatio;
+  if (
+    !c ||
+    !maj ||
+    !Number.isFinite(c.x) ||
+    !Number.isFinite(c.y) ||
+    !Number.isFinite(maj.x) ||
+    !Number.isFinite(maj.y) ||
+    typeof ratio !== "number" ||
+    !Number.isFinite(ratio)
+  ) {
+    return null;
+  }
+  const cx = c.x ?? 0;
+  const cy = c.y ?? 0;
+  const ax = maj.x ?? 0; // Hauptachsen-Vektor (relativ Center)
+  const ay = maj.y ?? 0;
+  const bx = -ay * ratio; // Nebenachse = Linksnormale der Hauptachse · Verhältnis
+  const by = ax * ratio;
+  const start = Number.isFinite(e.startAngle) ? (e.startAngle as number) : 0;
+  const end = Number.isFinite(e.endAngle) ? (e.endAngle as number) : Math.PI * 2;
+  let sweep = end - start;
+  if (sweep <= 0) sweep += Math.PI * 2;
+  const full = Math.abs(sweep - Math.PI * 2) < 1e-9;
+  const z = Number.isFinite(c.z) ? (c.z as number) : 0;
+  const segs = segmentsFor(sweep);
+  const pts: Vec2[] = [];
+  // Bei vollem Umlauf Schluss-Duplikat weglassen (closed schließt den Ring).
+  const last = full ? segs - 1 : segs;
+  for (let i = 0; i <= last; i++) {
+    const t = start + (sweep * i) / segs;
+    const ct = Math.cos(t);
+    const st = Math.sin(t);
+    pts.push({ x: cx + ax * ct + bx * st, y: cy + ay * ct + by * st });
+  }
+  return { z, pts, closed: full, layer: e.layer };
 }
