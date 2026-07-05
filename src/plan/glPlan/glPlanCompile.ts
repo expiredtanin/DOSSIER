@@ -476,6 +476,54 @@ export function compilePrimitivesToGpu(
         arcPts.push({ x: c.x + prim.r * Math.cos(t), y: c.y + prim.r * Math.sin(t) });
       }
       strokePolyline(arcPts, false, color, strokeMm);
+    } else if (prim.kind === 'drawingCircle' || prim.kind === 'drawingArc') {
+      // 2D-Zeichnungs-Kreis/-Bogen (Kreis-/Bogen-Werkzeug ODER DXF-Import). Der
+      // SVG-Pfad zeichnet sie als glattes <circle>/<path>; die WebGL-Ebene kennt
+      // kein Kreis-Primitiv → hier bildschirm-adaptiv tessellieren (wie 'arc').
+      // Kreis = voller Umlauf (geschlossen, optional gefüllt), Bogen = a0..a1 (CCW,
+      // offen). OHNE diesen Zweig blieben gezeichnete Kreise/Bögen im GL unsichtbar.
+      const stroke = parseColor(prim.stroke) ?? [0.1, 0.1, 0.1, 1];
+      const strokeMm = prim.weightMm || 0.18;
+      const c = prim.center;
+      const TAU = Math.PI * 2;
+      const a0 = prim.kind === 'drawingArc' ? prim.a0 : 0;
+      const sweep =
+        prim.kind === 'drawingArc'
+          ? ((prim.a1 - prim.a0) % TAU + TAU) % TAU || TAU
+          : TAU;
+      // Segmentzahl wie im 'arc'-Zweig: Sagitta < ~0.5 px (LOD über pxPerMeter).
+      let segs: number;
+      if (pxPerMeter > 0) {
+        const rPx = prim.r * pxPerMeter;
+        const theta = rPx > 0.5 ? 2 * Math.acos(1 - 0.5 / rPx) : Math.PI;
+        segs = Math.min(2048, Math.max(8, Math.ceil(sweep / theta)));
+      } else {
+        segs = Math.max(8, Math.ceil((sweep / (Math.PI / 2)) * 16));
+      }
+      const pts: Vec2[] = [];
+      for (let i = 0; i <= segs; i++) {
+        const t = a0 + (sweep * i) / segs;
+        pts.push({ x: c.x + prim.r * Math.cos(t), y: c.y + prim.r * Math.sin(t) });
+      }
+      // Vollton-Füllung nur beim geschlossenen Kreis (Bogen ist offen).
+      if (prim.kind === 'drawingCircle') {
+        const fill = parseColor(prim.fill);
+        if (fill) {
+          const ring = pts.slice(0, segs); // ohne den doppelten Schlusspunkt
+          const tris = triangulate(ring);
+          if (tris.length) {
+            const base = fillPos.length / 2;
+            for (const pt of ring) {
+              const s = toScreen(pt);
+              fillPos.push(s.x, s.y);
+              track(pt.x, pt.y);
+            }
+            for (const t of tris) fillIdx.push(base + t);
+            addFillBatch(tris.length, fill);
+          }
+        }
+      }
+      strokePolyline(pts, prim.kind === 'drawingCircle', stroke, strokeMm);
     }
     // Text: bleibt im SVG-Overlay (scharfe Schrift, DOM-Hit-Test).
   }
