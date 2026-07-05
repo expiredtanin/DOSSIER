@@ -35,11 +35,12 @@ export interface RibbonBarProps {
   /** Engine-Befehl starten (Ändern-Gruppe u. a.). */
   onRunCommand: (name: string) => void;
   /**
-   * Reicher Inhalt des „Ansichten"-Tabs (aus der TopBar gemergte Ansichts-/Zoom-/
-   * Darstellungs-Steuerung, `ViewRibbonTab`). Von App geliefert, damit dessen
-   * Setter/State dort bleiben. Fehlt er, zeigt der Tab den Leer-Hinweis.
+   * Reicher Custom-Inhalt je Tab (statt datengetriebener Item-Gruppen) — z. B.
+   * „Ansichten" (`ViewRibbonTab`) und „Text" (`TextGroup`). Von App geliefert,
+   * damit deren Setter/State dort bleiben. Ein Tab ohne Custom-Inhalt und ohne
+   * Gruppen zeigt den Leer-Hinweis.
    */
-  viewsContent?: ReactNode;
+  tabContent?: Partial<Record<RibbonTabId, ReactNode>>;
 }
 
 /** Aktivierungs-/Highlight-Kontext, den jeder Button-Typ braucht. */
@@ -121,6 +122,7 @@ export function RibbonTabs({
 
 export function RibbonBar(props: RibbonBarProps) {
   const current = RIBBON_TABS.find((tt) => tt.id === props.tab) ?? RIBBON_TABS[0];
+  const custom = props.tabContent?.[current.id];
   const ctx: ButtonCtx = {
     activeTool: props.activeTool,
     activeCommand: props.activeCommand,
@@ -131,11 +133,11 @@ export function RibbonBar(props: RibbonBarProps) {
 
   return (
     <div className="ribbon">
-      {/* Inhalt des aktiven Tabs. Der „Ansichten"-Tab trägt reichen Custom-Inhalt
-          (ViewRibbonTab) statt der datengetriebenen Item-Gruppen. */}
+      {/* Inhalt des aktiven Tabs. Tabs mit reichem Custom-Inhalt („Ansichten",
+          „Text") rendern diesen statt der datengetriebenen Item-Gruppen. */}
       <div className="ribbon-body">
-        {current.id === "views" && props.viewsContent ? (
-          props.viewsContent
+        {custom ? (
+          custom
         ) : current.groups.length === 0 ? (
           <div className="ribbon-empty">{t("ribbon.empty")}</div>
         ) : (

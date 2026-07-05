@@ -69,7 +69,7 @@ import type { Pick3dHit } from "./viewport/Wasm3DViewport";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
-import { TopBar, ViewRibbonTab } from "./ui/TopBar";
+import { TopBar, ViewRibbonTab, TextGroup } from "./ui/TopBar";
 import { RibbonBar } from "./ui/ribbon/RibbonBar";
 import type { RibbonTabId } from "./ui/ribbon/ribbonItems";
 import { Dropdown } from "./ui/Dropdown";
@@ -3219,7 +3219,6 @@ export default function App() {
             onApply={(l) => setLayout(reconcileLayout(l))}
           />
         }
-        textTarget={textTarget}
       />
 
       {/* Ribbon-Oberleiste (2D · 3D · BIM · Ansichten). Der „Ansichten"-Tab trägt
@@ -3232,7 +3231,13 @@ export default function App() {
         toolsEnabled={activeLevel.kind === "floor"}
         onSelectTool={onSelectTool}
         onRunCommand={onRunCommand}
-        viewsContent={
+        tabContent={{
+          text: (
+            <div className="ribbon-views">
+              <TextGroup textTarget={textTarget} />
+            </div>
+          ),
+          views: (
           <ViewRibbonTab
             viewToggleEnabled={activeLevel.kind === "floor"}
             viewType={viewType}
@@ -3279,7 +3284,8 @@ export default function App() {
               deleteDrawingCombo,
             }}
           />
-        }
+          ),
+        }}
       />
 
       <div className="body">

@@ -28,7 +28,7 @@ export interface RibbonGroup {
 }
 
 /** Kennung eines Ribbon-Tabs (fest, für Tab-State + i18n). */
-export type RibbonTabId = "2d" | "3d" | "bim" | "views";
+export type RibbonTabId = "2d" | "3d" | "bim" | "text" | "views";
 
 /** Ein Ribbon-Tab: Beschriftung + gruppierte Elemente. */
 export interface RibbonTab {
@@ -96,6 +96,12 @@ export const RIBBON_TABS: RibbonTab[] = [
         ],
       },
     ],
+  },
+  {
+    // Custom-Inhalt: die Text-/Font-Formatierung (TextGroup), via tabContent.
+    id: "text",
+    labelKey: "ribbon.tab.text",
+    groups: [],
   },
   {
     id: "views",

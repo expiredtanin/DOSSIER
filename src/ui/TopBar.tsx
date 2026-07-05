@@ -122,14 +122,8 @@ export interface TopBarProps {
   /** Projekt aus einer Datei laden. */
   onOpenProject: () => void;
 
-  // ── Text-Gruppe (Stempel-/Text-Formatierung) ───────────────────────────────
-  /**
-   * Ziel der Text-Formatierung: `null` = nichts Text-artiges selektiert (die
-   * Controls setzen nur Defaults für neuen Text). Sonst das aktuell selektierte
-   * Rich-Text-Dokument (z. B. Raumstempel) samt optionalem Bereich und einem
-   * Setter. Ist `range` `null`, wirken Aktionen auf das GANZE Doc.
-   */
-  textTarget: TextTarget | null;
+  // Die Text-/Font-Formatierung (TextGroup) liegt jetzt im „Text"-Ribbon-Tab
+  // (App reicht sie via RibbonBar.tabContent), nicht mehr in dieser Leiste.
 }
 
 /**
@@ -507,7 +501,7 @@ const TEXT_SIZES: number[] = [8, 9, 10, 11, 12, 14, 18, 24, 36, 48];
  * `textTarget` gesetzt, tragen die Zeile-2-Pillen einen Akzent-Rand und alle
  * Aktionen wirken auf `textTarget.doc` via `textTarget.apply`.
  */
-function TextGroup({
+export function TextGroup({
   textTarget,
 }: {
   textTarget: TextTarget | null;
@@ -1218,7 +1212,6 @@ export function TopBar({
   onImport,
   onSaveProject,
   onOpenProject,
-  textTarget,
 }: TopBarProps) {
   // Dezente Scrollleiste: die Oberleiste scrollt horizontal (overflow-x). Statt
   // der prägnanten Standard-Leiste blenden wir eine eigene, sehr ruhige Leiste
@@ -1268,18 +1261,11 @@ export function TopBar({
 
       <Sep />
 
-      {/* Ribbon-Tab-Reiter (2D/3D/BIM/Ansichten) — sitzen in dieser Zeile, der
-          Ribbon-Inhalt folgt darunter (RibbonBar). So gibt es nur ZWEI Bänder:
-          diese Leiste (Chrome + Tabs) und den Inhalt. */}
+      {/* Ribbon-Tab-Reiter (2D/3D/BIM/Text/Ansichten) — sitzen in dieser Zeile,
+          der Ribbon-Inhalt folgt darunter (RibbonBar). So gibt es nur ZWEI
+          Bänder: diese schmale Leiste (Chrome + Tabs) und den Inhalt. Die Text-/
+          Font-Formatierung liegt jetzt im „Text"-Tab (nicht mehr hier). */}
       <RibbonTabs tab={ribbonTab} onTab={onRibbonTab} />
-
-      <Sep />
-
-      {/* Text-Gruppe (kontextabhängig) — Stil/Schrift/Grösse + B/I/U · L/C/R +
-          Zeilenhöhe. Formatiert das aktuelle Text-Ziel (Raumstempel) live. Bleibt
-          in der schmalen globalen Leiste, weil sie eine kontextuelle Formatier-
-          Steuerung ist (kein Ansichts-/Ausgabe-Element). */}
-      <TextGroup textTarget={textTarget} />
 
       {/* Rechte Gruppe: Layout-Menü · Projektname · Datei-Burger (ganz rechts,
           GTK-Stil) — Ressourcen sitzt jetzt bei der Marke (s. o.). */}
