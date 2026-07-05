@@ -69,7 +69,7 @@ import type { Pick3dHit } from "./viewport/Wasm3DViewport";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
 import { HatchSwatch } from "./ui/hatchPreview";
-import { TopBar, ViewRibbonTab } from "./ui/TopBar";
+import { TopBar, ViewRibbonTab, Ribbon3dTab } from "./ui/TopBar";
 import { RibbonBar } from "./ui/ribbon/RibbonBar";
 import type { RibbonTabId } from "./ui/ribbon/ribbonItems";
 import { Dropdown } from "./ui/Dropdown";
@@ -3319,6 +3319,20 @@ export default function App() {
             }}
             textTarget={textTarget}
           />
+          ),
+          "3d": (
+            <Ribbon3dTab
+              viewToggleEnabled={activeLevel.kind === "floor"}
+              viewType={viewType}
+              onViewType={setViewType}
+              view3d={view3d}
+              onView3d={setView3d}
+              fov={fov}
+              onFov={setFov}
+              renderMode={renderMode}
+              onRenderMode={setRenderMode}
+              renderModeEnabled={viewType === "perspektive"}
+            />
           ),
         }}
       />

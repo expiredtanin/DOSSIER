@@ -1262,6 +1262,99 @@ export function ViewRibbonTab({
   );
 }
 
+export interface Ribbon3dTabProps {
+  viewToggleEnabled: boolean;
+  viewType: ViewType;
+  onViewType: (v: ViewType) => void;
+  view3d: View3d;
+  onView3d: (v: View3d) => void;
+  fov: number;
+  onFov: (n: number) => void;
+  renderMode: RenderMode;
+  onRenderMode: (m: RenderMode) => void;
+  renderModeEnabled: boolean;
+}
+
+/** 3D-Tab des Ribbons — Kamera-Presets + Darstellungsart. Kein Duplikat des
+ *  Ansichten-Tabs: hier nur 3D-relevante Steuerung (Blickwinkel, Rendermodus). */
+export function Ribbon3dTab({
+  viewToggleEnabled,
+  viewType,
+  onViewType,
+  view3d,
+  onView3d,
+  fov,
+  onFov,
+  renderMode,
+  onRenderMode,
+  renderModeEnabled,
+}: Ribbon3dTabProps) {
+  return (
+    <div className="ribbon-views">
+      <div className="tb-group" role="group" aria-label={t("topbar.viewGroup")}>
+        <div className="view-grid view-grid-4">
+          <button
+            className={`view-icon${viewToggleEnabled && viewType === "grundriss" ? " active" : ""}`}
+            onClick={() => onViewType("grundriss")}
+            disabled={!viewToggleEnabled}
+            title={viewToggleEnabled ? t("topbar.grundriss") : t("topbar.viewGroup.disabled")}
+            aria-label={t("topbar.grundriss")}
+          >
+            <ViewIcon name="grundriss" />
+          </button>
+          {(
+            [
+              ["top", t("view3d.top")],
+              ["iso", t("view3d.iso")],
+              ["perspective", t("view3d.perspective")],
+              ["front", t("view3d.front")],
+              ["side", t("view3d.side")],
+            ] as [View3d, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              className={`view-icon${viewToggleEnabled && viewType === "perspektive" && view3d === key ? " active" : ""}`}
+              onClick={() => {
+                onView3d(key);
+                if (viewType !== "perspektive") onViewType("perspektive");
+              }}
+              disabled={!viewToggleEnabled}
+              title={viewToggleEnabled ? `${label} — ${t(`view3d.${key}.hint`)}` : t("topbar.viewGroup.disabled")}
+              aria-label={label}
+            >
+              <ViewIcon name={key} />
+            </button>
+          ))}
+          <CameraMenu
+            fov={fov}
+            onFov={onFov}
+            disabled={!viewToggleEnabled || viewType !== "perspektive"}
+          />
+        </div>
+      </div>
+      <Sep />
+      <div className="tb-group" role="group" aria-label={t("display.style.group")}>
+        <label className="tb-field">
+          <span className="tb-label">{t("display.style")}</span>
+          <Dropdown
+            value={renderMode}
+            disabled={!renderModeEnabled}
+            onChange={(v) => onRenderMode(v as RenderMode)}
+            title={t("display.style.hint")}
+            options={[
+              { value: "shaded", label: t("display.style.shaded") },
+              { value: "white", label: t("display.style.white") },
+              { value: "textured", label: t("display.style.textured") },
+              { value: "wireframe", label: t("display.style.wireframe") },
+              { value: "hidden", label: t("display.style.hidden") },
+            ]}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 export function TopBar({
   project,
   ribbonTab,
