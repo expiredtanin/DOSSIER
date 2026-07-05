@@ -3917,6 +3917,64 @@ body {
   font-size: 11px;
 }
 
+/* ── Element-Abschnitte IM Attribute-Panel dem .attr-Grid-Look angleichen ──────
+   Die aus ObjectInfo verschobenen Sektionen (Wand/Decke/Öffnung/Treppe/Raum)
+   nutzen weiter die `objinfo-*`-Klassen; hier bekommen sie — NUR innerhalb
+   `.attr-panel` — denselben sauberen Look wie das obere Attribut-Grid: Sektion-
+   Balken, Zeilentrenner, einheitliche Label-Spalte, linksbündig füllende Felder.
+   Das eigenständige ObjectInfo-Panel (Bezugspunkt/Masse) bleibt unberührt. */
+.attr-panel .objinfo-section-label {
+  color: var(--label);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  margin: 8px 0 2px;
+  padding: 3px 6px;
+  background: var(--panel-2);
+  border-radius: 3px;
+}
+/* Sektion-Balken trennen bereits → die dünnen Extra-Striche entfallen. */
+.attr-panel .objinfo-sep {
+  display: none;
+}
+/* Zeile: Label-Spalte | Wert/Control, mit dezentem Zeilentrenner (wie .attr-*). */
+.attr-panel .objinfo-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 2px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.attr-panel .objinfo-flabel {
+  flex: 0 0 104px;
+  width: 104px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+  color: var(--label);
+}
+/* Werte/Controls füllen die Zelle linksbündig (statt rechtsbündig). */
+.attr-panel .objinfo-fval {
+  flex: 1 1 auto;
+  text-align: left;
+}
+.attr-panel .objinfo-input {
+  text-align: left;
+}
+.attr-panel .objinfo-field .tb-dd-trigger {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: space-between;
+}
+/* Segment-Umschalter + verschachtelte Felder füllen ebenfalls die Wert-Spalte. */
+.attr-panel .objinfo-segment,
+.attr-panel .objinfo-subfield {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* ── Wand-Abschnitt (Object-Info) ─────────────────────────────────────── */
 /* Referenzlinie-Dropdown rechts oben im Kopf. */
 .objinfo-head-ref {
