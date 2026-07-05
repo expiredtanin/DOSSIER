@@ -581,10 +581,8 @@ export function CeilingSection({
             onChange={(id) => host.onSetCeilingType(id)}
             options={ceiling.ceilingTypes.map((ct) => ({
               value: ct.id,
-              label: t("objinfo.wall.presetLabel", {
-                name: ct.name,
-                thickness: ct.thickness.toFixed(2),
-              }),
+              label: ct.label,
+              title: ct.name,
             }))}
             title={t("objinfo.ceiling.preset")}
             width={150}
@@ -717,10 +715,8 @@ export function WallSection({
             onChange={(id) => host.onSetWallType(id)}
             options={wall.wallTypes.map((wt) => ({
               value: wt.id,
-              label: t("objinfo.wall.presetLabel", {
-                name: wt.name,
-                thickness: wt.thickness.toFixed(2),
-              }),
+              label: wt.label,
+              title: wt.name,
             }))}
             title={t("objinfo.wall.preset")}
             width={150}

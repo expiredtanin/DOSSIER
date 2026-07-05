@@ -24,7 +24,7 @@
 
 import type { ReactNode } from "react";
 import { t } from "../i18n";
-import { formatM } from "../model/types";
+import { formatM, wallTypeLabel } from "../model/types";
 import { PEN_WEIGHTS } from "../model/types";
 import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
@@ -75,7 +75,11 @@ export function AttributesPanel() {
             value={host.activeWallTypeId}
             disabled={!host.toolsEnabled}
             onChange={(v) => host.onActiveWallTypeId(v)}
-            options={project.wallTypes.map((wt) => ({ value: wt.id, label: wt.name }))}
+            options={project.wallTypes.map((wt) => ({
+              value: wt.id,
+              label: wallTypeLabel(wt, project.components),
+              title: wt.name,
+            }))}
           />
         </span>
       </div>

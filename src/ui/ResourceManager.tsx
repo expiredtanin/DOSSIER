@@ -763,6 +763,13 @@ function ComponentDetail({
       </div>
 
       <div className="res-fields">
+        <FieldRow label={t("resources.col.abbrev")} hint={t("resources.col.abbrev.hint")}>
+          <TextField
+            value={component.abbrev ?? ""}
+            onChange={(v) => onPatch({ abbrev: v || undefined })}
+            placeholder={t("resources.col.abbrev.placeholder")}
+          />
+        </FieldRow>
         <FieldRow
           label={t("resources.col.foreground")}
           hint={t("resources.col.foreground.hint")}

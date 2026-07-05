@@ -4040,7 +4040,8 @@ body {
   padding-left: 56px;
 }
 .objinfo-subfield .tb-dd-trigger {
-  width: 100%;
+  width: auto;
+  max-width: 140px;
 }
 
 /* ── Attribute-Palette (AttributesPanel) ─────────────────────────────── */

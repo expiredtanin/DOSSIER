@@ -227,6 +227,12 @@ export interface Component {
    * Render-Modus „textured".
    */
   material?: ComponentMaterial;
+  /**
+   * Optionales Kürzel für Wandtyp-Labels (z. B. „BET", „HLZ", „GKB", „DAE").
+   * Wird von `wallTypeLabel()` genutzt, um Wandtyp-Dropdowns kompakt darzustellen
+   * (z. B. „BET 24" statt dem vollen Namen). Fehlt es, greift der Name.
+   */
+  abbrev?: string;
   /** Verschneidungs-Rang: höher läuft am Stoß durch (Backbone). */
   joinPriority: number;
 }
@@ -1373,6 +1379,35 @@ export const collectVisibleCodes = (layers: LayerCategory[]): Set<string> => {
 /** Gesamtdicke eines Wandtyps = Summe der Schichtdicken. */
 export const wallTypeThickness = (wt: WallType): number =>
   wt.layers.reduce((sum, l) => sum + l.thickness, 0);
+
+/**
+ * Kompakter Anzeigetext für einen Wandtyp im Dropdown (VW-Stil).
+ * - Einschichtig mit Kürzel: „BET 24" (Kürzel + Dicke in cm)
+ * - Mehrschichtig mit Kürzeln: „GKB·BET·DAE" + Gesamtdicke „(25.5)"
+ * - Ohne Kürzel: Name bleibt — kein Rückfall auf rohen Namen, nur keine Kurzform.
+ *
+ * `project.components` wird genutzt, um `Component.abbrev` aufzulösen.
+ * Ist kein abbrev gesetzt, erscheint der volle Name unverändert.
+ */
+export function wallTypeLabel(
+  wt: WallType | CeilingType,
+  components: Component[],
+): string {
+  const resolve = (id: string) => components.find((c) => c.id === id);
+  const totalCm = +(wallTypeThickness(wt) * 100).toFixed(1);
+  // cm-Zahl: "24" statt "24.0", "17.5" bleibt "17.5"
+  const cmStr = totalCm % 1 === 0 ? String(totalCm | 0) : String(totalCm);
+
+  // Alle Schichten haben ein Kürzel → Kurzform bauen
+  const abbrevs = wt.layers.map((l) => resolve(l.componentId)?.abbrev ?? "");
+  const allHaveAbbrev = abbrevs.every((a) => a.length > 0);
+  if (allHaveAbbrev) {
+    if (wt.layers.length === 1) return `${abbrevs[0]} ${cmStr}`;
+    return `${abbrevs.join("·")} (${cmStr})`;
+  }
+  // Fallback: voller Name
+  return wt.name;
+}
 
 /** Formatiert Meter mit zwei Nachkommastellen, z. B. "0.35 m". */
 export const formatM = (meters: number): string => meters.toFixed(2) + " m";

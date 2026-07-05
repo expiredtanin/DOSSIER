@@ -15,6 +15,7 @@ import {
   flattenCategories,
   getCeilingType,
   getWallType,
+  wallTypeLabel,
   wallTypeThickness,
 } from "../model/types";
 import type {
@@ -48,6 +49,8 @@ import { stairGeometry, stairBBox } from "../geometry/stair";
 export interface WallTypeChoice {
   id: string;
   name: string;
+  /** Kurz-Label für das Dropdown (aus wallTypeLabel: Kürzel+Dicke oder Name). */
+  label: string;
   /** Gesamtdicke (Meter) — informativ im Dropdown-Label. */
   thickness: number;
   /** Anzahl Schichten (1 = einschichtig). */
@@ -359,6 +362,7 @@ function wallSelection(project: Project, wall: Wall): Selection {
     wallTypes: project.wallTypes.map((t) => ({
       id: t.id,
       name: t.name,
+      label: wallTypeLabel(t, project.components),
       thickness: wallTypeThickness(t),
       layerCount: t.layers.length,
     })),
@@ -414,6 +418,7 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     ceilingTypes: (project.ceilingTypes ?? []).map((t) => ({
       id: t.id,
       name: t.name,
+      label: wallTypeLabel(t, project.components),
       thickness: wallTypeThickness(t),
       layerCount: t.layers.length,
     })),
