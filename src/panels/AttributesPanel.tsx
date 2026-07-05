@@ -30,6 +30,16 @@ import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
 import { Dropdown } from "../ui/Dropdown";
 import { ColorHexField } from "../ui/ColorHexField";
+// Element-spezifische Attribut-Abschnitte (Wand/Decke/Öffnung/Treppe/Raum) —
+// aus ObjectInfoPanel hierher verschoben (Ribbon Phase 3: ObjectInfo trägt nur
+// noch Bezugspunkt + Masse).
+import {
+  WallSection,
+  CeilingSection,
+  OpeningSection,
+  StairSection,
+  RoomSection,
+} from "./ObjectInfoPanel";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
  *  „custom" ist abgeleitet aus „ist ein expliziter Wert gesetzt?", nicht
@@ -292,6 +302,15 @@ export function AttributesPanel() {
         <span className="attr-key">{t("attr.height")}</span>
         <span className="attr-val attr-readonly">{formatM(bboxH)}</span>
       </div>
+
+      {/* Element-spezifische Abschnitte (aus ObjectInfo hierher verschoben) —
+          nur der jeweils passende erscheint. Nutzen weiter die `objinfo-*`-
+          Darstellung + die Host-Handler. */}
+      {sel.wall && <WallSection wall={sel.wall} host={host} />}
+      {sel.ceiling && <CeilingSection ceiling={sel.ceiling} host={host} />}
+      {sel.opening && <OpeningSection opening={sel.opening} host={host} />}
+      {sel.stair && <StairSection stair={sel.stair} host={host} />}
+      {sel.room && <RoomSection room={sel.room} roomId={sel.id} host={host} />}
     </div>
   );
 }

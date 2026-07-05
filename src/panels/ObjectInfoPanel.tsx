@@ -82,40 +82,14 @@ export function ObjectInfoPanel() {
     host.onResizeSelection(nextWidth, nextHeight, anchor);
   }
 
-  const wall = sel.wall;
-  const ceiling = sel.ceiling;
-  const opening = sel.opening;
-  const stair = sel.stair;
-  const room = sel.room;
-
   return (
     <div className="objinfo-panel">
-      {/* Kopfzeile: Typ + Kategorie. Bei einer Wand rechts oben das
-          Referenzlinie-Dropdown (wo die Achse über die Dicke liegt). */}
+      {/* Kopfzeile: Typ + Kategorie. Die element-spezifischen Attribut-Abschnitte
+          (Wand/Decke/Öffnung/Treppe/Raum) liegen jetzt im Attribute-Panel;
+          ObjectInfo trägt nur noch Bezugspunkt + Masse. */}
       <div className="objinfo-head">
         <span className="objinfo-kind">{t(`objinfo.kind.${sel.kind}`)}</span>
-        {wall ? (
-          <div className="objinfo-head-ref" title={t("objinfo.wall.refLine")}>
-            <span className="objinfo-head-ref-label">
-              {t("objinfo.wall.refLine")}
-            </span>
-            <Dropdown
-              value={wall.referenceLine}
-              onChange={(v) =>
-                host.onSetWallReferenceLine(v as WallReferenceLine)
-              }
-              options={[
-                { value: "left", label: t("objinfo.wall.refLine.left") },
-                { value: "center", label: t("objinfo.wall.refLine.center") },
-                { value: "right", label: t("objinfo.wall.refLine.right") },
-              ]}
-              title={t("objinfo.wall.refLine")}
-              width={120}
-            />
-          </div>
-        ) : (
-          <span className="objinfo-cat">{sel.categoryCode}</span>
-        )}
+        <span className="objinfo-cat">{sel.categoryCode}</span>
       </div>
 
       <div className="objinfo-sep" />
@@ -174,21 +148,9 @@ export function ObjectInfoPanel() {
         value={height}
         onCommit={(h) => commitSize(width, h)}
       />
-
-      {/* ── Wand-Abschnitt (nur bei genau einer Wand) ────────────────────── */}
-      {wall && <WallSection wall={wall} host={host} />}
-
-      {/* ── Decken-Abschnitt (nur bei genau einer Decke) ─────────────────── */}
-      {ceiling && <CeilingSection ceiling={ceiling} host={host} />}
-
-      {/* ── Öffnungs-Abschnitt (nur bei genau einer Öffnung) ─────────────── */}
-      {opening && <OpeningSection opening={opening} host={host} />}
-
-      {/* ── Treppen-Abschnitt (nur bei genau einer Treppe) ───────────────── */}
-      {stair && <StairSection stair={stair} host={host} />}
-
-      {/* ── Raum-Abschnitt (nur bei genau einem Raum) ────────────────────── */}
-      {room && <RoomSection room={room} roomId={sel.id} host={host} />}
+      {/* Die element-spezifischen Abschnitte (Wand/Decke/Öffnung/Treppe/Raum)
+          werden jetzt im Attribute-Panel gerendert (AttributesPanel importiert
+          die exportierten *Section-Komponenten). */}
     </div>
   );
 }
@@ -197,7 +159,7 @@ export function ObjectInfoPanel() {
 // Editierbarer Name, SIA-416-Kategorie (5 Blatt-Kategorien), abgeleitete Fläche
 // + Umfang (read-only), Referenzgeschoss, sowie ein Button, der den Rich-Text-
 // Stempel-Editor öffnet. Alle Werte/Setter über den Host.
-function RoomSection({
+export function RoomSection({
   room,
   roomId,
   host,
@@ -269,7 +231,7 @@ function RoomSection({
 // ── Treppen-Attribut-Abschnitt ───────────────────────────────────────────────
 // Grundform (gerade/L/Wendel), Laufbreite, Stufenanzahl, Steighöhe (+ abgeleitete
 // Steigungshöhe/Auftrittstiefe), Laufrichtung; Referenzgeschoss + UK/OK read-only.
-function StairSection({
+export function StairSection({
   stair,
   host,
 }: {
@@ -385,7 +347,7 @@ function StairSection({
 // ── Öffnungs-Attribut-Abschnitt ──────────────────────────────────────────────
 // Art (Fenster/Tür), Wirts-Wand, Position/Breite/Höhe/Brüstung, bei Türen
 // zusätzlich Anschlag/Aufschlag/Richtung/Winkel; UK/OK read-only.
-function OpeningSection({
+export function OpeningSection({
   opening,
   host,
 }: {
@@ -557,7 +519,7 @@ function OpeningSection({
 // ── Decken-Attribut-Abschnitt ────────────────────────────────────────────────
 // Aufbau-Typ (einschichtig/mehrschichtig), Dicke/Preset, Referenzgeschoss +
 // OK-Bindung, Fläche. Alle Werte/Setter über den Host.
-function CeilingSection({
+export function CeilingSection({
   ceiling,
   host,
 }: {
@@ -670,7 +632,7 @@ function CeilingSection({
 // ── Wand-Attribut-Abschnitt ──────────────────────────────────────────────────
 // Aufbau-Typ (einschichtig/mehrschichtig), Dicke/Preset, Referenzgeschoss +
 // Oberverknüpfung, UK/OK je Modus-Umschalter. Alle Werte/Setter über den Host.
-function WallSection({
+export function WallSection({
   wall,
   host,
 }: {
@@ -700,6 +662,23 @@ function WallSection({
     <>
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">{t("objinfo.wall.section")}</div>
+
+      {/* Referenzlinie (wo die Achse über die Dicke liegt) — früher im ObjectInfo-
+          Kopf, jetzt hier bei den Wand-Attributen. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.wall.refLine")}</span>
+        <Dropdown
+          value={wall.referenceLine}
+          onChange={(v) => host.onSetWallReferenceLine(v as WallReferenceLine)}
+          options={[
+            { value: "left", label: t("objinfo.wall.refLine.left") },
+            { value: "center", label: t("objinfo.wall.refLine.center") },
+            { value: "right", label: t("objinfo.wall.refLine.right") },
+          ]}
+          title={t("objinfo.wall.refLine")}
+          width={120}
+        />
+      </div>
 
       {/* Aufbau-Typ-Segment. */}
       <div className="objinfo-field">
