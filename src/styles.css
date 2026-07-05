@@ -109,6 +109,11 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  /* Dokument selbst NIE scrollen/bouncen: das Zoom-Wheel im Viewport darf die
+     App-Chrome nicht mitziehen (macOS-Overscroll/Rubberband). Interne Panels
+     scrollen weiterhin über ihre eigenen overflow-Container. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* Native-App-Verhalten: KEINE Textauswahl / „Alles markieren" in der App-Chrome.
