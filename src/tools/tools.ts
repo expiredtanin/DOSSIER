@@ -526,6 +526,21 @@ const rectTool: Tool = {
   onCancel: () => [{ phase: "idle" }, { draft: null, done: true }],
 };
 
+// Kreis: Platzhalter-Werkzeug (analog window/door), gekoppelt an den
+// `circle`-Befehl (TOOL_COMMAND in App.tsx). Der eigentliche Ablauf
+// (Mittelpunkt → Radius) läuft über die Command-Engine — EIN Pfad für
+// Toolbar-Klick und getipptes „circle". Nicht floorOnly (freie 2D-Zeichnung).
+const circleTool: Tool = {
+  id: "circle",
+  labelKey: "tool.circle",
+  hintKey: () => "tool.circle.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 const TOOLS: Record<ToolId, Tool> = {
@@ -539,6 +554,7 @@ const TOOLS: Record<ToolId, Tool> = {
   line: lineTool,
   polyline: polylineTool,
   rect: rectTool,
+  circle: circleTool,
 };
 
 /** Liefert das Werkzeug zur ID. */
@@ -558,4 +574,5 @@ export const TOOL_ORDER: ToolId[] = [
   "line",
   "polyline",
   "rect",
+  "circle",
 ];

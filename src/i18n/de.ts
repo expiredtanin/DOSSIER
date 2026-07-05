@@ -116,6 +116,8 @@ export const de = {
   "tool.line": "Linie",
   "tool.polyline": "Polylinie",
   "tool.rect": "Rechteck",
+  "tool.circle": "Kreis",
+  "tool.circle.hint": "Kreis: Mittelpunkt setzen, dann Radius",
   "tool.select.hint": "Auswahl — Elemente klicken/aufziehen",
   "tool.window.hint": "Fenster: Wand wählen, dann Position setzen",
   "tool.door.hint": "Tür: Wand wählen, dann Position setzen",

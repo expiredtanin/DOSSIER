@@ -111,6 +111,13 @@ function ToolIcon({ id }: { id: ToolId }) {
           <rect x="2.5" y="3.5" width="11" height="9" />
         </svg>
       );
+    case "circle":
+      // Kreis-Umriss.
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5.5" />
+        </svg>
+      );
     default:
       return null;
   }

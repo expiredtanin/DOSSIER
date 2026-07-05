@@ -212,6 +212,7 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   line: "line",
   polyline: "polyline",
   rect: "rect",
+  circle: "circle",
 };
 /** Befehlsname für ein gekoppeltes Werkzeug (oder null, wenn keiner). */
 function coupledCommandFor(id: ToolId): string | null {

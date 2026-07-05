@@ -18,7 +18,8 @@ export type ToolId =
   | "room"
   | "line"
   | "polyline"
-  | "rect";
+  | "rect"
+  | "circle";
 
 // ── Snapping ───────────────────────────────────────────────────────────────
 

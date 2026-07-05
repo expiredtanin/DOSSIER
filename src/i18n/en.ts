@@ -115,6 +115,8 @@ export const en: Record<TranslationKey, string> = {
   "tool.line": "Line",
   "tool.polyline": "Polyline",
   "tool.rect": "Rectangle",
+  "tool.circle": "Circle",
+  "tool.circle.hint": "Circle: set center, then radius",
   "tool.select.hint": "Select — click/drag elements",
   "tool.window.hint": "Window: pick a wall, then set the position",
   "tool.door.hint": "Door: pick a wall, then set the position",
