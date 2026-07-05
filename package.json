@@ -18,7 +18,8 @@
     "build:engine": "wasm-pack build src-tauri/render2d --release --target web --out-dir ../../src/engine/pkg --out-name render2d --no-default-features --features web",
     "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web",
     "build:geometry": "wasm-pack build src-tauri/geometry --release --target web --out-dir ../../src/engine/pkgGeometry --out-name geometry --no-default-features --features web",
-    "build:kernel2d": "wasm-pack build src-tauri/kernel2d --release --target web --out-dir ../../src/engine/pkgKernel2d --out-name kernel2d --no-default-features --features web"
+    "build:kernel2d": "wasm-pack build src-tauri/kernel2d --release --target web --out-dir ../../src/engine/pkgKernel2d --out-name kernel2d --no-default-features --features web",
+    "build:dwgimport": "wasm-pack build src-tauri/dwgimport --release --target web --out-dir ../../src/engine/pkgDwgImport --out-name dwgimport --no-default-features --features web"
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.7",
