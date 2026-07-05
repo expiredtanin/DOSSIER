@@ -20,6 +20,8 @@
 //   • ARC                            → Kontur (offener Bogen, tesselliert).
 //   • CIRCLE                         → Kontur (geschlossener Kreis, tesselliert).
 //   • ELLIPSE                        → Kontur (Ellipsenbogen/-umlauf, tesselliert).
+//   • SPLINE                         → Kontur (B-Spline via De Boor; Fallback fitPoints).
+//   • INSERT                         → Block-Konturen, transformiert (Scale/Rot/Array, verschachtelt).
 
 import DxfParser from "dxf-parser";
 import type { Contour, ContourSet, ImportedMesh, Vec2 } from "../model/types";
@@ -74,10 +76,34 @@ interface DxfEntity {
   majorAxisEndPoint?: DxfVertex;
   /** ELLIPSE: Verhältnis Neben-/Hauptachse (b/a). */
   axisRatio?: number;
+  // SPLINE-Felder. Winkel/Parameter roh; Knoten/Grad definieren die B-Spline.
+  controlPoints?: DxfVertex[];
+  fitPoints?: DxfVertex[];
+  knotValues?: number[];
+  degreeOfSplineCurve?: number;
+  closed?: boolean;
+  // INSERT-Felder (Block-Referenz). `position` (Einfügepunkt) wird tolerant
+  // gelesen (das Feld ist oben als MESH-Vertexliste getippt) — daher hier NICHT
+  // erneut deklariert; `rotation` ist in GRAD (anders als ARC/CIRCLE).
+  name?: string;
+  xScale?: number;
+  yScale?: number;
+  rotation?: number;
+  columnCount?: number;
+  rowCount?: number;
+  columnSpacing?: number;
+  rowSpacing?: number;
   [k: string]: unknown;
+}
+/** Ein Block (BLOCKS-Tabelle): Basispunkt `position` + eigene Entity-Liste. */
+interface DxfBlock {
+  name?: string;
+  position?: DxfVertex;
+  entities?: DxfEntity[];
 }
 interface DxfDocument {
   entities?: DxfEntity[];
+  blocks?: Record<string, DxfBlock>;
 }
 
 let importSeq = 0;
@@ -94,6 +120,7 @@ export function parseDxf(text: string): DxfImportResult {
   // parseSync wirft bei strukturell kaputtem DXF; das soll nach oben.
   const doc = parser.parseSync(text) as unknown as DxfDocument;
   const entities = doc?.entities ?? [];
+  const blocks = doc?.blocks ?? {};
 
   const meshTriangles: number[] = []; // gesammelte Mesh-Positions (x,y,z…)
   const meshIndices: number[] = [];
@@ -101,51 +128,22 @@ export function parseDxf(text: string): DxfImportResult {
 
   for (const e of entities) {
     const type = (e.type ?? "").toUpperCase();
-    switch (type) {
-      case "3DFACE":
-        addFace(meshTriangles, meshIndices, e);
-        break;
-      case "MESH":
-        addMesh(meshTriangles, meshIndices, e);
-        break;
-      case "POLYLINE":
-        // POLYLINE ist mehrdeutig: Polyface/PolygonMesh → Mesh; sonst → Kontur.
-        if (isMeshPolyline(e)) {
-          addPolyfaceMesh(meshTriangles, meshIndices, e);
-        } else {
-          const ct = polylineContour(e);
-          if (ct) contours.push(ct);
-        }
-        break;
-      case "LWPOLYLINE": {
-        const ct = polylineContour(e);
-        if (ct) contours.push(ct);
-        break;
-      }
-      case "LINE": {
-        const ct = lineContour(e);
-        if (ct) contours.push(ct);
-        break;
-      }
-      case "ARC": {
-        const ct = arcContour(e);
-        if (ct) contours.push(ct);
-        break;
-      }
-      case "CIRCLE": {
-        const ct = circleContour(e);
-        if (ct) contours.push(ct);
-        break;
-      }
-      case "ELLIPSE": {
-        const ct = ellipseContour(e);
-        if (ct) contours.push(ct);
-        break;
-      }
-      default:
-        // Unbekannte/irrelevante Entity → ignorieren (tolerant).
-        break;
+    // Mesh-Entities in die Dreiecks-Puffer; POLYLINE nur als Mesh-Variante.
+    if (type === "3DFACE") {
+      addFace(meshTriangles, meshIndices, e);
+      continue;
     }
+    if (type === "MESH") {
+      addMesh(meshTriangles, meshIndices, e);
+      continue;
+    }
+    if (type === "POLYLINE" && isMeshPolyline(e)) {
+      addPolyfaceMesh(meshTriangles, meshIndices, e);
+      continue;
+    }
+    // Alle übrigen Kontur-Entities (inkl. SPLINE + INSERT-Block-Expansion) über
+    // den gemeinsamen Sammler — dieselbe Logik nutzt die INSERT-Rekursion.
+    collectContours(e, blocks, contours, 0);
   }
 
   const meshes: ImportedMesh[] = [];
@@ -455,4 +453,226 @@ function ellipseContour(e: DxfEntity): Contour | null {
     pts.push({ x: cx + ax * ct + bx * st, y: cy + ay * ct + by * st });
   }
   return { z, pts, closed: full, layer: e.layer };
+}
+
+// ── SPLINE (B-Spline via De Boor) ────────────────────────────────────────────
+
+/** DxfVertex-Liste → finite Vec2-Stützpunkte. */
+function toVec2s(vs: DxfVertex[] | undefined): Vec2[] {
+  const out: Vec2[] = [];
+  for (const v of vs ?? []) {
+    if (Number.isFinite(v.x) && Number.isFinite(v.y)) {
+      out.push({ x: v.x ?? 0, y: v.y ?? 0 });
+    }
+  }
+  return out;
+}
+
+/** Erster finiter Z-Wert einer DxfVertex-Liste (sonst 0). */
+function firstZ(vs: DxfVertex[] | undefined): number {
+  for (const v of vs ?? []) if (Number.isFinite(v.z)) return v.z as number;
+  return 0;
+}
+
+/**
+ * Knoten-Span-Index (The NURBS Book, A2.1): grösstes k mit U[k] ≤ t < U[k+1],
+ * geklemmt auf [p, n]. `n` = letzter Kontrollpunkt-Index.
+ */
+function findSpan(n: number, p: number, t: number, U: number[]): number {
+  if (t >= U[n + 1]) return n;
+  if (t <= U[p]) return p;
+  let low = p;
+  let high = n + 1;
+  let mid = Math.floor((low + high) / 2);
+  while (t < U[mid] || t >= U[mid + 1]) {
+    if (t < U[mid]) high = mid;
+    else low = mid;
+    mid = Math.floor((low + high) / 2);
+  }
+  return mid;
+}
+
+/** Punkt einer (nicht-rationalen) B-Spline bei Parameter t (De Boor, A2.4). */
+function deBoor(cps: Vec2[], U: number[], p: number, t: number): Vec2 {
+  const n = cps.length - 1;
+  const span = findSpan(n, p, t, U);
+  const d: Vec2[] = [];
+  for (let j = 0; j <= p; j++) d[j] = { ...cps[span - p + j] };
+  for (let r = 1; r <= p; r++) {
+    for (let j = p; j >= r; j--) {
+      const i = span - p + j;
+      const denom = U[i + p - r + 1] - U[i];
+      const a = denom === 0 ? 0 : (t - U[i]) / denom;
+      d[j] = {
+        x: (1 - a) * d[j - 1].x + a * d[j].x,
+        y: (1 - a) * d[j - 1].y + a * d[j].y,
+      };
+    }
+  }
+  return d[p];
+}
+
+/**
+ * SPLINE → Linienzug. Primär echte B-Spline-Auswertung (Kontrollpunkte + Knoten
+ * + Grad, wenn der Knotenvektor konsistent ist: |U| = |P| + Grad + 1). Sonst
+ * Rückfall auf Stützpunkte (fitPoints) bzw. — grob — das Kontrollpolygon.
+ * Rationale Gewichte werden ignoriert (selten; dxf-parser liefert sie nicht).
+ */
+function splineContour(e: DxfEntity): Contour | null {
+  const cps = toVec2s(e.controlPoints);
+  const fps = toVec2s(e.fitPoints);
+  const knots = (e.knotValues ?? []).filter((k) => Number.isFinite(k));
+  const degree = Number.isFinite(e.degreeOfSplineCurve)
+    ? (e.degreeOfSplineCurve as number)
+    : 3;
+  const closed = e.closed === true;
+  const z = cps.length > 0 ? firstZ(e.controlPoints) : firstZ(e.fitPoints);
+
+  if (cps.length >= 2 && degree >= 1 && knots.length === cps.length + degree + 1) {
+    // ~8 Abtastpunkte je Kontrollpunkt, gedeckelt.
+    const samples = Math.max(16, Math.min(CURVE_MAX_SEG, cps.length * 8));
+    const n = cps.length - 1;
+    const t0 = knots[degree];
+    const t1 = knots[n + 1];
+    const pts: Vec2[] = [];
+    for (let i = 0; i <= samples; i++) {
+      const t = i === samples ? t1 : t0 + ((t1 - t0) * i) / samples;
+      pts.push(deBoor(cps, knots, degree, t));
+    }
+    return { z, pts, closed, layer: e.layer };
+  }
+  if (fps.length >= 2) return { z, pts: fps, closed, layer: e.layer };
+  if (cps.length >= 2) return { z, pts: cps, closed, layer: e.layer };
+  return null;
+}
+
+// ── INSERT (Block-Referenz → transformierte Konturen) ─────────────────────────
+
+/** Tolerantes Zahlenfeld: endliche Zahl oder Default. */
+function numOr(v: unknown, d: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : d;
+}
+
+/** Tolerante Koordinate aus einem (unbekannt getippten) Punktobjekt. */
+function coord(v: unknown, key: "x" | "y"): number {
+  if (v && typeof v === "object") {
+    const n = (v as Record<string, unknown>)[key];
+    if (typeof n === "number" && Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+/** Schutz gegen zyklische/tief verschachtelte Blockreferenzen. */
+const MAX_INSERT_DEPTH = 8;
+
+/**
+ * INSERT expandieren: Block-Entities rekursiv zu LOKALEN Konturen sammeln, dann
+ * je Array-Zelle mit der 2D-Transform der Referenz nach Welt abbilden.
+ * Welt(p, off) = Einfügepunkt + Rot(θ) · ( Scale(p − Basispunkt) + off ).
+ * `off` = (Spalte·Spaltenabstand, Zeile·Zeilenabstand) im rotierten Blockraster.
+ */
+function expandInsert(
+  e: DxfEntity,
+  blocks: Record<string, DxfBlock>,
+  out: Contour[],
+  depth: number,
+): void {
+  if (depth >= MAX_INSERT_DEPTH) return;
+  const name = typeof e.name === "string" ? e.name : null;
+  if (!name) return;
+  const block = blocks[name];
+  if (!block || !Array.isArray(block.entities)) return;
+
+  const sx = numOr(e.xScale, 1);
+  const sy = numOr(e.yScale, 1);
+  const rot = (numOr(e.rotation, 0) * Math.PI) / 180; // INSERT-Rotation in GRAD
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const ix = coord(e.position, "x"); // Einfügepunkt (tolerant gelesen)
+  const iy = coord(e.position, "y");
+  const bx = coord(block.position, "x"); // Block-Basispunkt
+  const by = coord(block.position, "y");
+  const nc = Math.max(1, Math.floor(numOr(e.columnCount, 1)));
+  const nr = Math.max(1, Math.floor(numOr(e.rowCount, 1)));
+  const dc = numOr(e.columnSpacing, 0);
+  const dr = numOr(e.rowSpacing, 0);
+
+  // Block-Inhalt EINMAL lokal sammeln (rekursiv), dann je Zelle transformieren.
+  const local: Contour[] = [];
+  for (const be of block.entities) collectContours(be, blocks, local, depth + 1);
+  if (local.length === 0) return;
+
+  for (let row = 0; row < nr; row++) {
+    for (let col = 0; col < nc; col++) {
+      const offx = col * dc;
+      const offy = row * dr;
+      for (const lc of local) {
+        const pts = lc.pts.map((p) => {
+          const vx = (p.x - bx) * sx + offx;
+          const vy = (p.y - by) * sy + offy;
+          return { x: ix + (vx * cos - vy * sin), y: iy + (vx * sin + vy * cos) };
+        });
+        out.push({ z: lc.z, pts, closed: lc.closed, layer: e.layer ?? lc.layer });
+      }
+    }
+  }
+}
+
+/**
+ * Gemeinsamer Kontur-Dispatch für eine Entity (Top-Level UND Block-Inhalt).
+ * Mesh-Entities werden hier NICHT behandelt (nur der Top-Level-Pfad erzeugt
+ * Meshes; Block-interne Meshes sind im 2D-Import selten und bleiben aussen vor).
+ */
+function collectContours(
+  e: DxfEntity,
+  blocks: Record<string, DxfBlock>,
+  out: Contour[],
+  depth: number,
+): void {
+  const type = (e.type ?? "").toUpperCase();
+  switch (type) {
+    case "LWPOLYLINE": {
+      const c = polylineContour(e);
+      if (c) out.push(c);
+      break;
+    }
+    case "POLYLINE": {
+      if (!isMeshPolyline(e)) {
+        const c = polylineContour(e);
+        if (c) out.push(c);
+      }
+      break;
+    }
+    case "LINE": {
+      const c = lineContour(e);
+      if (c) out.push(c);
+      break;
+    }
+    case "ARC": {
+      const c = arcContour(e);
+      if (c) out.push(c);
+      break;
+    }
+    case "CIRCLE": {
+      const c = circleContour(e);
+      if (c) out.push(c);
+      break;
+    }
+    case "ELLIPSE": {
+      const c = ellipseContour(e);
+      if (c) out.push(c);
+      break;
+    }
+    case "SPLINE": {
+      const c = splineContour(e);
+      if (c) out.push(c);
+      break;
+    }
+    case "INSERT":
+      expandInsert(e, blocks, out, depth);
+      break;
+    default:
+      // Unbekannte/irrelevante Entity → ignorieren (tolerant).
+      break;
+  }
 }
