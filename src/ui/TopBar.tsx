@@ -1298,14 +1298,24 @@ export function TopBar({
     };
   }, []);
 
+  // Unter Tauri (native macOS-Ampeln oben links via titleBarStyle "Overlay")
+  // braucht die Zeile links Platz, damit `dossier.` nicht darunter liegt.
+  const tauriNativeTitlebar =
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
   return (
-    // `data-tauri-drag-region`: die randlose (decorations:false) Titelleiste ist
-    // selbst der Fenster-Ziehbereich. Kind-Buttons/Dropdowns bleiben klickbar;
-    // nur die leeren Zonen ziehen das Fenster.
-    <header className="topbar" ref={headerRef} data-tauri-drag-region>
-      {/* Fensterknöpfe (Schliessen/Minimieren/Maximieren) GANZ LINKS — die
-          randlose Titelleiste beginnt mit ihnen (macOS-Konvention). Nur unter
-          Electron/Tauri sichtbar (sonst null). */}
+    // `data-tauri-drag-region`: die Titelleiste ist selbst der Fenster-Ziehbereich
+    // (macOS titleBarStyle "Overlay"). Kind-Buttons/Dropdowns bleiben klickbar;
+    // nur die leeren Zonen ziehen das Fenster. Unter Tauri bekommt die Zeile links
+    // einen Inset, damit `dossier.` nicht unter den nativen macOS-Ampeln liegt.
+    <header
+      className={`topbar${tauriNativeTitlebar ? " topbar-native-inset" : ""}`}
+      ref={headerRef}
+      data-tauri-drag-region
+    >
+      {/* Fensterknöpfe NUR unter Electron (randloses frame:false-Fenster) — unter
+          Tauri liefern die NATIVEN macOS-Ampeln Schliessen/Minimieren/Maximieren,
+          daher rendert WindowControls dort null. */}
       <WindowControls />
 
       {/* Kleine Wortmarke „dossier" (OCS-Stil, klein/kleingeschrieben) + Quick-

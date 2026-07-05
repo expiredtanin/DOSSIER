@@ -1,74 +1,32 @@
-// Eigene Fenstersteuerung (Minimieren/Maximieren/Schliessen) für das RANDLOSE
-// Fenster — sowohl Electron (frame:false, s. scripts/electron-main.cjs) ALS AUCH
-// Tauri (decorations:false, s. tauri.conf.json). Ohne native Titelleiste gibt es
-// sonst keine Möglichkeit, das Fenster zu steuern.
+// Eigene Fenstersteuerung (Minimieren/Maximieren/Schliessen) für das randlose
+// ELECTRON-Fenster (frame:false, s. scripts/electron-main.cjs) — dort gibt es
+// ohne native Titelleiste sonst keine Fenstersteuerung.
 //
-// Rendert NUR, wenn eine Fenster-API vorhanden ist: unter Electron
-// `window.dossierWindow` (Preload), unter Tauri `getCurrentWindow()`
-// (@tauri-apps/api/window, dynamisch geladen wie in nativeSync.ts). Im reinen
-// Browser-Dev-Modus (?vite) bleibt die Komponente unsichtbar (`null`) — dort
-// steuert der Browser das Fenster. Die Tauri-Permissions liegen in
-// src-tauri/capabilities/default.json (core:window:allow-minimize/…/close).
+// Unter TAURI werden die NATIVEN macOS-Ampeln verwendet (tauri.conf.json:
+// titleBarStyle "Overlay" + hiddenTitle, native Dekoration mit gerundeten Ecken),
+// daher rendert diese Komponente dort NICHT (kein `window.dossierWindow`) — sonst
+// gäbe es doppelte Knöpfe. Im Browser-Dev-Modus ebenfalls unsichtbar (`null`).
 
 import { useEffect, useState } from "react";
 
-/** Gemeinsame, minimale Fenster-API (Electron-Preload ODER Tauri-Adapter). */
-interface WindowApi {
+/** Von electron-preload.cjs via contextBridge injiziert (nur unter Electron). */
+interface DossierWindowApi {
   minimize: () => void;
   toggleMaximize: () => void;
   close: () => void;
   isMaximized: () => Promise<boolean>;
-  /** Abo auf Maximiert-Wechsel; liefert eine Abmelde-Funktion. */
   onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
 }
 
 declare global {
   interface Window {
-    dossierWindow?: WindowApi;
+    dossierWindow?: DossierWindowApi;
   }
 }
 
-/** Tauri-Laufzeit erkannt (analog nativeSync.ts). */
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
 export function WindowControls() {
-  const [api, setApi] = useState<WindowApi | null>(null);
+  const api = window.dossierWindow;
   const [maximized, setMaximized] = useState(false);
-
-  // Passende Fenster-API einmalig auflösen: Electron synchron, Tauri asynchron
-  // (dynamischer Import, damit Browser-/Build-Pfad ohne @tauri-apps grün bleibt).
-  useEffect(() => {
-    if (window.dossierWindow) {
-      setApi(window.dossierWindow);
-      return;
-    }
-    if (!isTauri()) return;
-    let disposed = false;
-    import(/* @vite-ignore */ "@tauri-apps/api/window")
-      .then(({ getCurrentWindow }) => {
-        if (disposed) return;
-        const w = getCurrentWindow();
-        setApi({
-          minimize: () => void w.minimize(),
-          toggleMaximize: () => void w.toggleMaximize(),
-          close: () => void w.close(),
-          isMaximized: () => w.isMaximized(),
-          onMaximizedChange: (cb) => {
-            // Bei jeder Größenänderung den Maximiert-Zustand neu melden.
-            const unlisten = w.onResized(() => {
-              void w.isMaximized().then(cb);
-            });
-            return () => void unlisten.then((fn) => fn());
-          },
-        });
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (!api) return;
