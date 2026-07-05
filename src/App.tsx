@@ -3168,6 +3168,10 @@ export default function App() {
           />
         )}
 
+        {/* Mitte-Spalte: Hauptansicht + Befehlszeile DARUNTER. So ist die
+            Befehlszeile nur so breit wie der Viewport (nicht die ganze App),
+            und die Docks nehmen die volle Body-Höhe ein (inkl. der Zeile). */}
+        <div className="center-col">
         {/* Hauptansicht (Mitte) — füllt den verbleibenden Platz. Die Plan-
             Ansicht meldet Cursor + Zoom an die Status-/Oberleiste und nimmt
             das Zoom-Handle entgegen. */}
@@ -3232,6 +3236,54 @@ export default function App() {
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
         />
+        {/* Command-Line (Rhino-artig) UNTER dem Viewport — nur Viewport-breit.
+            Prompt + klickbare Inline-Optionen + Texteingabe + Autocomplete. */}
+        <CommandLine
+          ref={commandLineRef}
+          // (c) Während eines Vertex-Griff-Drags belegt der Feld-Controller das
+          // Befehlsfeld (Länge/Winkel). Läuft eine Auswahl-Transformation (Drehen
+          // etc.), belegt sie Prompt + U/I/O/P + Winkel-/Distanzfeld. Sonst gilt die
+          // Engine (Zeichnen/Ruhe). Griff-Drag hat Vorrang (schließen sich sonst aus).
+          active={gripEdit ? true : activeTransform ? true : engineView.active}
+          promptKey={
+            gripEdit
+              ? "cmd.edit.point"
+              : activeTransform
+              ? `transform.hint.${activeTransform.op}.${Math.min(
+                  activeTransform.points.length,
+                  activeTransform.op === "rotate" ? 2 : 1,
+                )}`
+              : engineView.promptKey
+          }
+          options={gripEdit ? [] : activeTransform ? transformOptions() : engineView.options}
+          fields={
+            gripEdit ? gripEditFields() : activeTransform ? transformFields() : engineView.fields
+          }
+          onSubmit={(text) => {
+            if (gripEdit) {
+              const v = parseFloat(text.replace(",", "."));
+              if (isFinite(v)) submitGripEditValue(v);
+              return;
+            }
+            if (activeTransform) {
+              const v = parseFloat(text.replace(",", "."));
+              if (isFinite(v)) submitTransformValue(v);
+              return;
+            }
+            engine.submitText(text);
+          }}
+          onOption={(id) =>
+            activeTransform ? onTransformMode(id as CopyMode) : engine.chooseOption(id)
+          }
+          onCycleField={() =>
+            gripEdit ? cycleGripEditField() : activeTransform ? undefined : engine.cycleField()
+          }
+          onCancel={() =>
+            gripEdit ? setGripEdit(null) : activeTransform ? cancelTransform() : engine.cancel()
+          }
+          suggest={(prefix) => engine.suggest(prefix)}
+        />
+        </div>
 
         {/* Rechtes Dock: standardmäßig leer (Ressourcen ist ein schwebendes
             Fenster). Nur gerendert, wenn es Gruppen hat — sonst nutzt die Mitte
@@ -3299,54 +3351,6 @@ export default function App() {
 
       {/* Drag-Overlay (Geist + Tab-Einfüge-Caret) während eines Tab-Ziehens. */}
       <DragOverlay drag={drag} />
-
-      {/* Command-Line (Rhino-artig) ÜBER der Statusleiste: Prompt + klickbare
-          Inline-Optionen + Texteingabe + Autocomplete. Tab fokussiert sie. */}
-      <CommandLine
-        ref={commandLineRef}
-        // (c) Während eines Vertex-Griff-Drags belegt der Feld-Controller das
-        // Befehlsfeld (Länge/Winkel). Läuft eine Auswahl-Transformation (Drehen
-        // etc.), belegt sie Prompt + U/I/O/P + Winkel-/Distanzfeld. Sonst gilt die
-        // Engine (Zeichnen/Ruhe). Griff-Drag hat Vorrang (schließen sich sonst aus).
-        active={gripEdit ? true : activeTransform ? true : engineView.active}
-        promptKey={
-          gripEdit
-            ? "cmd.edit.point"
-            : activeTransform
-            ? `transform.hint.${activeTransform.op}.${Math.min(
-                activeTransform.points.length,
-                activeTransform.op === "rotate" ? 2 : 1,
-              )}`
-            : engineView.promptKey
-        }
-        options={gripEdit ? [] : activeTransform ? transformOptions() : engineView.options}
-        fields={
-          gripEdit ? gripEditFields() : activeTransform ? transformFields() : engineView.fields
-        }
-        onSubmit={(text) => {
-          if (gripEdit) {
-            const v = parseFloat(text.replace(",", "."));
-            if (isFinite(v)) submitGripEditValue(v);
-            return;
-          }
-          if (activeTransform) {
-            const v = parseFloat(text.replace(",", "."));
-            if (isFinite(v)) submitTransformValue(v);
-            return;
-          }
-          engine.submitText(text);
-        }}
-        onOption={(id) =>
-          activeTransform ? onTransformMode(id as CopyMode) : engine.chooseOption(id)
-        }
-        onCycleField={() =>
-          gripEdit ? cycleGripEditField() : activeTransform ? undefined : engine.cycleField()
-        }
-        onCancel={() =>
-          gripEdit ? setGripEdit(null) : activeTransform ? cancelTransform() : engine.cancel()
-        }
-        suggest={(prefix) => engine.suggest(prefix)}
-      />
 
       {/* Footer / Status-Leiste (unten). Werte rein aus Modell + View-State.
           Cursor/Zoom nur, wenn eine Plan-Ansicht aktiv ist (sonst „—"). */}

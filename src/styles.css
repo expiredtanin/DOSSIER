@@ -1463,6 +1463,18 @@ body {
   min-width: 0;
 }
 
+/* Mitte-Spalte: Viewport (.content) + Befehlszeile (.cmdline) darunter. Nimmt in
+   der horizontalen .body den Platz ZWISCHEN den Docks ein und stapelt vertikal —
+   so ist die Befehlszeile nur so breit wie der Viewport, und die Docks reichen
+   über die volle Body-Höhe (inkl. der Befehlszeilen-Zeile). */
+.center-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* Dokument-Tabs „Zeichnungen/Blätter" — Kopfzeile über der Zeichenfläche.
    Leiste auf Ebene 1 (--panel), der aktive Tab hebt sich auf Ebene 2 an und
    verschmilzt unten mit dem Grund der Zeichenfläche darunter (--bg), wie bei
