@@ -157,9 +157,9 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-  height: 40px;
+  gap: 8px;
+  padding: 0 10px;
+  height: 26px;
   border-bottom: 1px solid var(--line);
   /* Oberleiste auf Ebene 1 (angehoben über dem App-Grund) + weicher Schatten
      nach unten → trennt sich klar von der Zeichenfläche (Tiefe). */
@@ -555,10 +555,12 @@ body {
   line-height: 1;
 }
 .brand-word {
-  font-weight: 800;
-  font-size: 15px;
+  font-weight: 700;
+  font-size: 12px;
   letter-spacing: -0.01em;
+  text-transform: lowercase;
   color: var(--ink);
+  white-space: nowrap;
 }
 .brand-dot {
   color: var(--accent);
@@ -5322,8 +5324,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 22px;
   padding: 0;
   border: none;
   background: transparent;
@@ -5367,16 +5369,60 @@ body {
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 0 12px;
+  padding: 0 10px;
   display: flex;
   align-items: center;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: color 0.12s, border-color 0.12s;
+}
+
+/* Quick-Access-Leiste (OCS-Stil) — kleine Icon-Knöpfe in der TopBar-Zeile. */
+.tb-qa {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+}
+.tb-qa-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.tb-qa-btn:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--label);
+}
+.tb-qa-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.tb-qa-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.tb-qa-btn .tb-ico {
+  font-size: 16px;
+}
+.tb-qa-sep {
+  width: 1px;
+  height: 15px;
+  background: var(--line);
+  margin: 0 3px;
+  flex: 0 0 auto;
 }
 .ribbon-tab:hover {
   color: var(--label);

@@ -865,45 +865,100 @@ function touchedParagraphs(doc: RichTextDoc, range: TextRange | null): number[] 
  * Icon-Pillen im Zoom-Bereich, jetzt gebündelt hinter einem Menü, damit die
  * Leiste ruhiger bleibt (GTK-Burger-Stil).
  */
-function AppMenu({
+/** Ein kleiner Icon-Knopf der Quick-Access-Leiste (OCS-Stil). */
+function QaButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  active,
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`tb-qa-btn${active ? " active" : ""}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+    >
+      <TbIcon name={icon} />
+    </button>
+  );
+}
+
+/** Kleiner Trenner in der Quick-Access-Leiste. */
+function QaSep() {
+  return <span className="tb-qa-sep" aria-hidden="true" />;
+}
+
+/**
+ * Quick-Access-Leiste (OCS-Stil) — alle früheren Datei-Burger-Aktionen plus
+ * Ressourcen/Einstellungen als kleine Icon-Knöpfe direkt in der TopBar-Zeile.
+ * Ersetzt das Burger-Menü (`AppMenu`). Rein gesteuert über Callbacks (i18n via t).
+ */
+function QuickAccess({
+  onOpenProject,
+  onSaveProject,
   onImport,
   onExportPdf,
   onExportDxf,
   onExportSchedule,
-  onSaveProject,
-  onOpenProject,
+  onToggleResources,
   onOpenSettings,
+  resourcesOpen,
   exportEnabled,
 }: {
+  onOpenProject: () => void;
+  onSaveProject: () => void;
   onImport: () => void;
   onExportPdf: () => void;
   onExportDxf: () => void;
   onExportSchedule: () => void;
-  onSaveProject: () => void;
-  onOpenProject: () => void;
+  onToggleResources: () => void;
   onOpenSettings: () => void;
+  resourcesOpen: boolean;
   exportEnabled: boolean;
 }) {
-  const items: DropdownItem[] = [
-    { label: t("file.save"), onSelect: onSaveProject },
-    { label: t("file.open"), onSelect: onOpenProject },
-    { divider: true },
-    { label: t("file.import"), onSelect: onImport },
-    { divider: true },
-    { label: t("file.exportPdf"), onSelect: onExportPdf, disabled: !exportEnabled },
-    { label: t("file.exportDxf"), onSelect: onExportDxf, disabled: !exportEnabled },
-    { label: t("file.exportSchedule"), onSelect: onExportSchedule },
-    { divider: true },
-    { label: t("topbar.settings"), onSelect: onOpenSettings },
-  ];
   return (
-    <Dropdown
-      items={items}
-      placeholder=""
-      title={t("file.menu")}
-      triggerClassName="tb-burger"
-      triggerSuffix={<TbIcon name="menu" />}
-    />
+    <div className="tb-qa" role="toolbar" aria-label={t("file.menu")}>
+      <QaButton icon="folder_open" label={t("file.open")} onClick={onOpenProject} />
+      <QaButton icon="save" label={t("file.save")} onClick={onSaveProject} />
+      <QaSep />
+      <QaButton icon="download" label={t("file.import")} onClick={onImport} />
+      <QaButton
+        icon="picture_as_pdf"
+        label={t("file.exportPdf")}
+        onClick={onExportPdf}
+        disabled={!exportEnabled}
+      />
+      <QaButton
+        icon="output"
+        label={t("file.exportDxf")}
+        onClick={onExportDxf}
+        disabled={!exportEnabled}
+      />
+      <QaButton
+        icon="table_view"
+        label={t("file.exportSchedule")}
+        onClick={onExportSchedule}
+      />
+      <QaSep />
+      <QaButton
+        icon="widgets"
+        label={t("topbar.resources")}
+        onClick={onToggleResources}
+        active={resourcesOpen}
+      />
+      <QaButton icon="settings" label={t("topbar.settings")} onClick={onOpenSettings} />
+    </div>
   );
 }
 
@@ -1235,53 +1290,39 @@ export function TopBar({
 
   return (
     <header className="topbar" ref={headerRef}>
-      {/* Marke (DOSSIER-Wortmarke) + Settings/Ressourcen-Icons daneben,
-          gestapelt wie im Rhino-Plugin (ToolbarApp.jsx: Wortmarke links,
-          rechts daneben ein schmaler Icon-Stapel). */}
+      {/* Kleine Wortmarke „dossier" (OCS-Stil, klein/kleingeschrieben) + Quick-
+          Access-Leiste: alle Datei-/Export-Aktionen + Ressourcen/Einstellungen
+          als kleine Icons direkt in der Zeile (ersetzt das Burger-Menü). */}
       <div className="tb-brandgroup">
-        <div className="brand">
-          <span className="brand-word">
-            DOSSIER<span className="brand-dot">.</span>
-          </span>
-          <span className="tag">{t("brand.tag")}</span>
-        </div>
-        <div className="tb-brandicons">
-          <button
-            type="button"
-            className={`tb-brandicon${resourcesOpen ? " active" : ""}`}
-            onClick={onToggleResources}
-            aria-pressed={resourcesOpen}
-            aria-label={t("topbar.resources")}
-            title={`${t("topbar.resources")} — ${t("topbar.resources.hint")}`}
-          >
-            <TbIcon name="widgets" />
-          </button>
-        </div>
+        <span className="brand-word">
+          dossier<span className="brand-dot">.</span>
+        </span>
       </div>
+      <QuickAccess
+        onOpenProject={onOpenProject}
+        onSaveProject={onSaveProject}
+        onImport={onImport}
+        onExportPdf={onExportPdf}
+        onExportDxf={onExportDxf}
+        onExportSchedule={onExportSchedule}
+        onToggleResources={onToggleResources}
+        onOpenSettings={onOpenSettings}
+        resourcesOpen={resourcesOpen}
+        exportEnabled={zoomEnabled}
+      />
 
       <Sep />
 
       {/* Ribbon-Tab-Reiter (2D/3D/BIM/Text/Ansichten) — sitzen in dieser Zeile,
           der Ribbon-Inhalt folgt darunter (RibbonBar). So gibt es nur ZWEI
-          Bänder: diese schmale Leiste (Chrome + Tabs) und den Inhalt. Die Text-/
-          Font-Formatierung liegt jetzt im „Text"-Tab (nicht mehr hier). */}
+          Bänder: diese schmale Leiste (Chrome + Tabs) und den Inhalt. */}
       <RibbonTabs tab={ribbonTab} onTab={onRibbonTab} />
 
-      {/* Rechte Gruppe: Layout-Menü · Projektname · Datei-Burger (ganz rechts,
-          GTK-Stil) — Ressourcen sitzt jetzt bei der Marke (s. o.). */}
+      {/* Rechte Gruppe: Layout-Menü · Projektname · Fensterknöpfe. Datei-/Export-
+          Aktionen liegen jetzt in der Quick-Access-Leiste links (kein Burger). */}
       <div className="topbar-right">
         {layoutMenu}
         <span className="project-name">{project.name}</span>
-        <AppMenu
-          onImport={onImport}
-          onExportPdf={onExportPdf}
-          onExportDxf={onExportDxf}
-          onExportSchedule={onExportSchedule}
-          onSaveProject={onSaveProject}
-          onOpenProject={onOpenProject}
-          onOpenSettings={onOpenSettings}
-          exportEnabled={zoomEnabled}
-        />
         <WindowControls />
       </div>
     </header>
