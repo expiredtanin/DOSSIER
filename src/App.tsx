@@ -2337,6 +2337,16 @@ export default function App() {
       onSetOpeningDir: (openingDir) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { openingDir });
       },
+      onSetOpeningWingCount: (wingCount) => {
+        if (selection?.kind === "opening")
+          updateOpening(selection.id, { wingCount: Math.max(1, Math.min(4, Math.round(wingCount))) });
+      },
+      onSetOpeningDoorType: (doorType) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, { doorType });
+      },
+      onSetOpeningLintelLines: (lintelLines) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, { lintelLines });
+      },
       // ── Treppen-Attribute (nur bei selektierter Treppe) ────────────────────
       onSetStairShape: (shape) => {
         if (selection?.kind === "stair") updateStair(selection.id, { shape });
@@ -2355,6 +2365,9 @@ export default function App() {
       },
       onSetStairUp: (up) => {
         if (selection?.kind === "stair") updateStair(selection.id, { up });
+      },
+      onSetStairReferenz: (referenz) => {
+        if (selection?.kind === "stair") updateStair(selection.id, { referenz });
       },
       // ── Raum-Attribute (nur bei selektiertem Raum) ─────────────────────────
       onSetRoomName: (name) => {

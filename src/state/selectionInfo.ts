@@ -137,6 +137,12 @@ export interface OpeningInfo {
   swing?: "left" | "right";
   swingAngle?: number;
   openingDir?: "in" | "out";
+  /** Nur Fenster: Anzahl der Flügel (1–4). Fehlt → 1 (Default). */
+  wingCount?: number;
+  /** Nur Tür: Tür-Typ (normal / Wandöffnung). Fehlt → "normal". */
+  doorType?: "normal" | "wandoeffnung";
+  /** Nur Tür: Sturzlinien (keine/innen/aussen/beide). Fehlt → "beide". */
+  lintelLines?: "keine" | "innen" | "aussen" | "beide";
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
@@ -160,6 +166,8 @@ export interface StairInfo {
   treadDepth: number;
   /** Laufrichtung aufwärts (Auf-/Abpfeil-Richtung). */
   up: boolean;
+  /** Referenzpunkt der Laufbreite (links/mitte/rechts). Fehlt → "mitte". */
+  referenz?: "links" | "mitte" | "rechts";
   /** Geschoss, dem die Treppe zugeordnet ist. */
   floorId: string;
   floorName: string;
@@ -478,6 +486,9 @@ function openingSelection(project: Project, o: Opening): Selection {
     swing: o.swing,
     swingAngle: o.swingAngle,
     openingDir: o.openingDir,
+    wingCount: o.wingCount,
+    doorType: o.doorType,
+    lintelLines: o.lintelLines,
     zBottom: ext.zBottom,
     zTop: ext.zTop,
   };
@@ -513,6 +524,7 @@ function stairSelection(project: Project, s: Stair): Selection {
     riserHeight: geo.riserHeight,
     treadDepth: geo.treadDepth,
     up: s.up !== false,
+    referenz: s.referenz,
     floorId: s.floorId,
     floorName: floor?.name ?? s.floorId,
     zBottom,

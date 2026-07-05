@@ -236,6 +236,12 @@ export interface PanelHostValue {
   onSetOpeningSwing: (swing: "left" | "right") => void;
   /** Setzt die Aufschlagrichtung der Tür (innen/außen). */
   onSetOpeningDir: (dir: "in" | "out") => void;
+  /** Setzt die Flügelanzahl des Fensters (1–4). */
+  onSetOpeningWingCount: (wingCount: number) => void;
+  /** Setzt den Tür-Typ (normal / Wandöffnung). */
+  onSetOpeningDoorType: (doorType: "normal" | "wandoeffnung") => void;
+  /** Setzt die Sturzlinien-Darstellung der Tür. */
+  onSetOpeningLintelLines: (lintelLines: "keine" | "innen" | "aussen" | "beide") => void;
 
   // ── Treppen-Attribute (Object-Info-Panel; nur die selektierte Treppe) ───
   /** Setzt die Grundform (gerade/L/Wendel). */
@@ -248,6 +254,8 @@ export interface PanelHostValue {
   onSetStairRise: (totalRise: number) => void;
   /** Setzt die Laufrichtung (aufwärts/abwärts). */
   onSetStairUp: (up: boolean) => void;
+  /** Setzt den Referenzpunkt der Laufbreite (links/mitte/rechts). */
+  onSetStairReferenz: (referenz: "links" | "mitte" | "rechts") => void;
 
   // ── Raum-Attribute (Object-Info-Panel; nur der selektierte Raum) ────────
   /** Setzt den Raum-Namen. */

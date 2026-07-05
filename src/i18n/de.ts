@@ -301,6 +301,16 @@ export const de = {
   "objinfo.opening.dir.out": "Außen",
   "objinfo.opening.bottom": "Unterkante (UK)",
   "objinfo.opening.top": "Oberkante (OK)",
+  // Neue Öffnungs-Felder
+  "objinfo.opening.wingCount": "Flügel",
+  "objinfo.opening.doorType": "Typ",
+  "objinfo.opening.doorType.normal": "Normal",
+  "objinfo.opening.doorType.wandoeffnung": "Wandöffnung",
+  "objinfo.opening.lintelLines": "Sturzlinien",
+  "objinfo.opening.lintelLines.keine": "Keine",
+  "objinfo.opening.lintelLines.innen": "Innen",
+  "objinfo.opening.lintelLines.aussen": "Außen",
+  "objinfo.opening.lintelLines.beide": "Beide",
   // ── Treppen-Attribute (Object-Info-Panel) ───────────────────────────────
   "objinfo.stair.section": "Treppe",
   "objinfo.stair.shape": "Grundform",
@@ -318,6 +328,11 @@ export const de = {
   "objinfo.stair.refFloor": "Referenzgeschoss",
   "objinfo.stair.bottom": "Unterkante (UK)",
   "objinfo.stair.top": "Oberkante (OK)",
+  // Neues Treppen-Feld
+  "objinfo.stair.referenz": "Referenz",
+  "objinfo.stair.referenz.links": "Links",
+  "objinfo.stair.referenz.mitte": "Mitte",
+  "objinfo.stair.referenz.rechts": "Rechts",
   // ── Raum-Attribute (Object-Info-Panel) ──────────────────────────────────
   "objinfo.room.section": "Raum",
   "objinfo.room.name": "Name",

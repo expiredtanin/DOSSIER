@@ -297,6 +297,22 @@ function StairSection({
         />
       </div>
 
+      {/* Referenzpunkt der Laufbreite (links/mitte/rechts). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.referenz")}</span>
+        <Dropdown
+          value={stair.referenz ?? "mitte"}
+          onChange={(v) => host.onSetStairReferenz(v as "links" | "mitte" | "rechts")}
+          options={[
+            { value: "links", label: t("objinfo.stair.referenz.links") },
+            { value: "mitte", label: t("objinfo.stair.referenz.mitte") },
+            { value: "rechts", label: t("objinfo.stair.referenz.rechts") },
+          ]}
+          title={t("objinfo.stair.referenz")}
+          width={130}
+        />
+      </div>
+
       {/* Laufrichtung (aufwärts/abwärts). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.stair.direction")}</span>
@@ -426,16 +442,55 @@ function OpeningSection({
         onCommit={(v) => host.onSetOpeningHeight(v)}
       />
       {!isDoor && (
-        <DimensionField
-          label={t("objinfo.opening.sill")}
-          value={opening.sillHeight}
-          onCommit={(v) => host.onSetOpeningSill(v)}
-        />
+        <>
+          <DimensionField
+            label={t("objinfo.opening.sill")}
+            value={opening.sillHeight}
+            onCommit={(v) => host.onSetOpeningSill(v)}
+          />
+          {/* Fenster-spezifisch: Flügelanzahl (1–4). */}
+          <DimensionField
+            label={t("objinfo.opening.wingCount")}
+            value={opening.wingCount ?? 1}
+            min={1}
+            onCommit={(v) => host.onSetOpeningWingCount(Math.max(1, Math.min(4, Math.round(v))))}
+          />
+        </>
       )}
 
-      {/* Tür-spezifisch: Anschlag / Aufschlagseite / Richtung / Winkel. */}
+      {/* Tür-spezifisch: Typ / Sturzlinien / Anschlag / Aufschlagseite / Richtung / Winkel. */}
       {isDoor && (
         <>
+          {/* Tür-Typ (normal / Wandöffnung). */}
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.doorType")}</span>
+            <Dropdown
+              value={opening.doorType ?? "normal"}
+              onChange={(v) => host.onSetOpeningDoorType(v as "normal" | "wandoeffnung")}
+              options={[
+                { value: "normal", label: t("objinfo.opening.doorType.normal") },
+                { value: "wandoeffnung", label: t("objinfo.opening.doorType.wandoeffnung") },
+              ]}
+              title={t("objinfo.opening.doorType")}
+              width={130}
+            />
+          </div>
+          {/* Sturzlinien-Darstellung (keine/innen/aussen/beide). */}
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.lintelLines")}</span>
+            <Dropdown
+              value={opening.lintelLines ?? "beide"}
+              onChange={(v) => host.onSetOpeningLintelLines(v as "keine" | "innen" | "aussen" | "beide")}
+              options={[
+                { value: "keine", label: t("objinfo.opening.lintelLines.keine") },
+                { value: "innen", label: t("objinfo.opening.lintelLines.innen") },
+                { value: "aussen", label: t("objinfo.opening.lintelLines.aussen") },
+                { value: "beide", label: t("objinfo.opening.lintelLines.beide") },
+              ]}
+              title={t("objinfo.opening.lintelLines")}
+              width={130}
+            />
+          </div>
           <div className="objinfo-field">
             <span className="objinfo-flabel">{t("objinfo.opening.hinge")}</span>
             <Dropdown
