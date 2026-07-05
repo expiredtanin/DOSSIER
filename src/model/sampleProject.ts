@@ -16,22 +16,18 @@ export const sampleProject: Project = {
   id: "demo",
   name: "Demo-Haus",
   // ── Ressourcen-Bibliotheken (zentral verwiesen per id) ──────────────────
-  // Linienstile: Strichstärken aus DEFAULT_LAYER_SCHEMA (lw in mm). "hatch-line"
-  // ist der dünne Strich für Schraffur-Muster.
+  // Linienstile: aufgeräumt auf kanonische VOLLLINIEN je Strichstärke (dash=null)
+  // + eine gestrichelte Linie. Früher gab es drei funktional identische 0.13-
+  // Volllinien ("thin"/"hatch-line"/"joint-massive") — zusammengeführt auf "thin"
+  // ("Volllinie 0.13"); Schraffur-/Schichtfugen-Referenzen zeigen jetzt darauf.
+  // (Die ids bleiben stabil, damit geladene Projekte + interne Referenzen halten.)
   lineStyles: [
-    { id: "thin", name: "Dünn 0.13", weight: 0.13, color: "#1a1a1a", dash: null },
-    { id: "medium", name: "Mittel 0.25", weight: 0.25, color: "#1a1a1a", dash: null },
-    { id: "thick", name: "Stark 0.5", weight: 0.5, color: "#0a0a0a", dash: null },
-    // Schraffurlinie = schwarze Haarlinie (Grundeinstellung für alle Schraffuren).
-    { id: "hatch-line", name: "Schraffurlinie", weight: 0.13, color: "#1a1a1a", dash: null },
-    // Feinste Haarlinie für die SIA-Schnittschraffuren (Beton/Backstein/Dämmung):
-    // Gewicht unter der Bildschirm-Untergrenze, damit die Musterlinien als dünnste
-    // Haarlinie (Stroke-Minimum) rendern.
-    { id: "hatch-hair", name: "Schraffur-Haarlinie", weight: 0.02, color: "#1a1a1a", dash: null },
+    { id: "hatch-hair", name: "Volllinie 0.02", weight: 0.02, color: "#1a1a1a", dash: null },
+    { id: "thin", name: "Volllinie 0.13", weight: 0.13, color: "#1a1a1a", dash: null },
+    { id: "medium", name: "Volllinie 0.25", weight: 0.25, color: "#1a1a1a", dash: null },
+    { id: "thick", name: "Volllinie 0.5", weight: 0.5, color: "#0a0a0a", dash: null },
     // Gestrichelte Haarlinie für die Dämmung (Striche quer durch die Wanddicke).
     { id: "hatch-dash", name: "Dämmungsstrich", weight: 0.02, color: "#1a1a1a", dash: [0.35, 0.3] },
-    // Kräftige Schichtfuge, wo zwei massive Materialien aneinanderstoßen (Wandstile).
-    { id: "joint-massive", name: "Schichtfuge 0.13", weight: 0.13, color: "#1a1a1a", dash: null },
   ],
   // Schraffuren: color = Linien-/Vollfüllfarbe des Musters; angle in Grad.
   // "none" = keine Schraffur (nur Component-Füllung).
@@ -46,7 +42,7 @@ export const sampleProject: Project = {
       scale: 1,
       angle: 0,
       color: "#1a1a1a",
-      lineStyleId: "hatch-line",
+      lineStyleId: "thin",
     },
     {
       id: "diagonal",
@@ -55,7 +51,7 @@ export const sampleProject: Project = {
       scale: 1,
       angle: 45,
       color: "#1a1a1a",
-      lineStyleId: "hatch-line",
+      lineStyleId: "thin",
     },
     {
       id: "crosshatch",
@@ -64,7 +60,7 @@ export const sampleProject: Project = {
       scale: 1,
       angle: 0,
       color: "#1a1a1a",
-      lineStyleId: "hatch-line",
+      lineStyleId: "thin",
     },
     {
       id: "solid-concrete",
@@ -133,7 +129,7 @@ export const sampleProject: Project = {
       layers: [
         { componentId: "render-ext", thickness: 0.02 },
         // Innere Fuge der Dämmung trifft auf den Backstein (massiv↔massiv) → 0.13 mm.
-        { componentId: "insulation", thickness: 0.16, jointLineStyleId: "joint-massive" },
+        { componentId: "insulation", thickness: 0.16, jointLineStyleId: "thin" },
         { componentId: "brick", thickness: 0.15 },
         { componentId: "render-int", thickness: 0.015 },
       ],
@@ -160,7 +156,7 @@ export const sampleProject: Project = {
         // Estrich (schwimmend) → Trittschalldämmung.
         { componentId: "screed", thickness: 0.06 },
         // Innere Fuge der Dämmung trifft auf die Betondecke (massiv) → 0.13 mm.
-        { componentId: "insulation", thickness: 0.04, jointLineStyleId: "joint-massive" },
+        { componentId: "insulation", thickness: 0.04, jointLineStyleId: "thin" },
         // Betondecke (Rohdecke, tragend) — innerste/unterste Schicht.
         { componentId: "concrete", thickness: 0.2 },
       ],

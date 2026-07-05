@@ -1847,7 +1847,8 @@ function patToHatches(text: string): Omit<HatchStyle, "id">[] {
     scale: 1,
     angle: p.families[0]?.angle ?? 45,
     color: "#1a1a1a",
-    lineStyleId: "hatch-line",
+    // Kanonische Volllinie 0.13 (früher "hatch-line", zusammengeführt auf "thin").
+    lineStyleId: "thin",
   }));
 }
 
