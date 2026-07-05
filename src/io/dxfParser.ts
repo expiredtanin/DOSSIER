@@ -23,7 +23,7 @@
 //   • SPLINE                         → Kontur (B-Spline via De Boor; Fallback fitPoints).
 //   • INSERT                         → Block-Konturen, transformiert (Scale/Rot/Array, verschachtelt).
 //   • HATCH                          → gefüllte Kontur(en) je Randpfad (Custom-Handler,
-//                                       Polyline- + Linien-/Bogen-Kanten; Fill via `Contour.filled`).
+//                                       Polyline- + Linien-/Bogen-/Ellipsen-/Spline-Kanten; Fill via `Contour.filled`).
 
 import DxfParser from "dxf-parser";
 import type { Contour, ContourSet, ImportedMesh, Vec2 } from "../model/types";
@@ -528,6 +528,27 @@ function deBoor(cps: Vec2[], U: number[], p: number, t: number): Vec2 {
 }
 
 /**
+ * Nicht-rationale B-Spline über die Domäne [U[p], U[n+1]] abtasten (De Boor),
+ * wenn Kontrollpunkte/Knoten/Grad konsistent sind (|U| = |P| + Grad + 1). Sonst
+ * null. ~8 Abtastpunkte je Kontrollpunkt, gedeckelt.
+ */
+function sampleBSpline(cps: Vec2[], knots: number[], degree: number): Vec2[] | null {
+  if (cps.length < 2 || degree < 1 || knots.length !== cps.length + degree + 1) {
+    return null;
+  }
+  const samples = Math.max(16, Math.min(CURVE_MAX_SEG, cps.length * 8));
+  const n = cps.length - 1;
+  const t0 = knots[degree];
+  const t1 = knots[n + 1];
+  const pts: Vec2[] = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = i === samples ? t1 : t0 + ((t1 - t0) * i) / samples;
+    pts.push(deBoor(cps, knots, degree, t));
+  }
+  return pts;
+}
+
+/**
  * SPLINE → Linienzug. Primär echte B-Spline-Auswertung (Kontrollpunkte + Knoten
  * + Grad, wenn der Knotenvektor konsistent ist: |U| = |P| + Grad + 1). Sonst
  * Rückfall auf Stützpunkte (fitPoints) bzw. — grob — das Kontrollpolygon.
@@ -543,19 +564,8 @@ function splineContour(e: DxfEntity): Contour | null {
   const closed = e.closed === true;
   const z = cps.length > 0 ? firstZ(e.controlPoints) : firstZ(e.fitPoints);
 
-  if (cps.length >= 2 && degree >= 1 && knots.length === cps.length + degree + 1) {
-    // ~8 Abtastpunkte je Kontrollpunkt, gedeckelt.
-    const samples = Math.max(16, Math.min(CURVE_MAX_SEG, cps.length * 8));
-    const n = cps.length - 1;
-    const t0 = knots[degree];
-    const t1 = knots[n + 1];
-    const pts: Vec2[] = [];
-    for (let i = 0; i <= samples; i++) {
-      const t = i === samples ? t1 : t0 + ((t1 - t0) * i) / samples;
-      pts.push(deBoor(cps, knots, degree, t));
-    }
-    return { z, pts, closed, layer: e.layer };
-  }
+  const sampled = sampleBSpline(cps, knots, degree);
+  if (sampled) return { z, pts: sampled, closed, layer: e.layer };
   if (fps.length >= 2) return { z, pts: fps, closed, layer: e.layer };
   if (cps.length >= 2) return { z, pts: cps, closed, layer: e.layer };
   return null;
@@ -760,7 +770,59 @@ function pushArcEdge(pts: Vec2[], m: Map<number, number[]>): void {
   }
 }
 
-/** Punkte einer HATCH-Randkante an die Loop-Punkte anhängen (Typ 1 Linie, 2 Bogen). */
+/**
+ * Ellipsenkante (Kantentyp 3): Zentrum (10/20), Hauptachsen-Endpunkt relativ
+ * (11/21), Achsverhältnis (40), Start/End-PARAMETERwinkel in GRAD (50/51), ggf.
+ * im Uhrzeigersinn (73). Punkt(t) = Center + cos t·Haupt + sin t·Neben.
+ */
+function pushEllipseEdge(pts: Vec2[], m: Map<number, number[]>): void {
+  const cx = firstOf(m, 10);
+  const cy = firstOf(m, 20);
+  const mx = firstOf(m, 11);
+  const my = firstOf(m, 21);
+  const ratio = firstOf(m, 40);
+  if (cx === undefined || cy === undefined || mx === undefined || my === undefined || ratio === undefined) {
+    return;
+  }
+  const bx = -my * ratio; // Nebenachse = Linksnormale der Hauptachse · Verhältnis
+  const by = mx * ratio;
+  const s = (firstOf(m, 50) ?? 0) * (Math.PI / 180);
+  const e = (firstOf(m, 51) ?? 360) * (Math.PI / 180);
+  const ccw = (firstOf(m, 73) ?? 1) !== 0;
+  let sweep = ccw ? e - s : -(e - s);
+  sweep = ((sweep % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  if (sweep === 0) sweep = Math.PI * 2;
+  const dir = ccw ? 1 : -1;
+  const segs = segmentsFor(sweep);
+  for (let i = 0; i <= segs; i++) {
+    const t = s + (dir * (sweep * i)) / segs;
+    const ct = Math.cos(t);
+    const st = Math.sin(t);
+    pts.push({ x: cx + mx * ct + bx * st, y: cy + my * ct + by * st });
+  }
+}
+
+/**
+ * Spline-Kante (Kantentyp 4): Grad (94), Knoten (40×), Kontrollpunkte (10/20×).
+ * Über De Boor abgetastet (rationale Gewichte 42 ignoriert). Fallback: rohe
+ * Kontrollpunkte als Polygonzug.
+ */
+function pushSplineEdge(pts: Vec2[], m: Map<number, number[]>): void {
+  const xs = m.get(10) ?? [];
+  const ys = m.get(20) ?? [];
+  const cps: Vec2[] = [];
+  for (let i = 0; i < Math.min(xs.length, ys.length); i++) cps.push({ x: xs[i], y: ys[i] });
+  const knots = m.get(40) ?? [];
+  const degree = firstOf(m, 94) ?? 3;
+  const sampled = sampleBSpline(cps, knots, degree);
+  if (sampled) {
+    for (const p of sampled) pts.push(p);
+  } else {
+    for (const p of cps) pts.push(p);
+  }
+}
+
+/** Punkte einer HATCH-Randkante an die Loop-Punkte anhängen (Typ 1/2/3/4). */
 function appendEdge(pts: Vec2[], edgeType: number, m: Map<number, number[]>): void {
   if (edgeType === 1) {
     // Linie: Start (10/20) — der Endpunkt ist der Start der nächsten Kante.
@@ -770,19 +832,17 @@ function appendEdge(pts: Vec2[], edgeType: number, m: Map<number, number[]>): vo
     // Bei der LETZTEN Kante fehlt sonst der Endpunkt; der closed-Ring schließt ihn.
     return;
   }
-  if (edgeType === 2) {
-    pushArcEdge(pts, m);
-    return;
-  }
-  // Kantentyp 3 (Ellipse) / 4 (Spline): im ersten Wurf nicht unterstützt.
+  if (edgeType === 2) pushArcEdge(pts, m);
+  else if (edgeType === 3) pushEllipseEdge(pts, m);
+  else if (edgeType === 4) pushSplineEdge(pts, m);
 }
 
 /**
  * HATCH-Entity (rohe Gruppencodes) → gefüllte, geschlossene Konturen (ein Loop
  * je Randpfad). Unterstützt Polyline-Randpfade (Flag-Bit 2) sowie Kanten-Pfade
- * mit Linien- und Bogenkanten. Bulges an Polyline-Rändern und Ellipse-/Spline-
- * Kanten werden im ersten Wurf ignoriert (als Sehne bzw. übersprungen). Insel-
- * Loops entstehen als eigene geschlossene Ringe (keine echten Löcher).
+ * mit Linien-, Bogen-, Ellipsen- und Spline-Kanten (alle tesselliert). Bulges an
+ * Polyline-Rändern werden ignoriert (als Sehne); Insel-Loops entstehen als eigene
+ * geschlossene Ringe (keine echten Löcher).
  */
 function hatchContours(e: DxfEntity): Contour[] {
   const raw = e.rawCodes;

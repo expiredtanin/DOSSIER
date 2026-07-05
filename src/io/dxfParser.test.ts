@@ -353,6 +353,47 @@ describe("parseDxf — HATCH", () => {
     expect(last.y).toBeCloseTo(0, 6);
   });
 
+  it("Ellipsenkante → tessellierter Halbumlauf mit korrekten Halbachsen", () => {
+    // Center (0,0), Hauptachse (10,0), Verhältnis 0.5, 0°→180° ccw.
+    const g = [
+      "0", "HATCH", "8", "0", "2", "SOLID", "70", "1",
+      "91", "1", "92", "1", "93", "1",
+      "72", "3", "10", "0", "20", "0", "11", "10", "21", "0", "40", "0.5", "50", "0", "51", "180", "73", "1",
+      "97", "0",
+    ];
+    const c = onlyContour(dxf(g));
+    expect(c.filled).toBe(true);
+    // t=0 → Center + Hauptachse = (10,0).
+    expect(c.pts[0].x).toBeCloseTo(10, 6);
+    expect(c.pts[0].y).toBeCloseTo(0, 6);
+    // Scheitel bei t=90° → Nebenachse (0,5).
+    const maxY = Math.max(...c.pts.map((p) => p.y));
+    expect(maxY).toBeCloseTo(5, 6);
+    const last = c.pts[c.pts.length - 1];
+    expect(last.x).toBeCloseTo(-10, 6);
+    expect(last.y).toBeCloseTo(0, 6);
+  });
+
+  it("Spline-Kante (Grad 1) → Kontrollpolygon nachgezeichnet", () => {
+    // 2 CPs (0,0)-(10,0), Grad 1, clamped-Knoten [0,0,1,1].
+    const g = [
+      "0", "HATCH", "8", "0", "2", "SOLID", "70", "1",
+      "91", "1", "92", "1", "93", "1",
+      "72", "4", "94", "1", "95", "4", "96", "2",
+      "40", "0", "40", "0", "40", "1", "40", "1",
+      "10", "0", "20", "0", "10", "10", "20", "0",
+      "97", "0",
+    ];
+    const c = onlyContour(dxf(g));
+    expect(c.filled).toBe(true);
+    expect(c.pts[0].x).toBeCloseTo(0, 9);
+    expect(c.pts[0].y).toBeCloseTo(0, 9);
+    const last = c.pts[c.pts.length - 1];
+    expect(last.x).toBeCloseTo(10, 9);
+    expect(last.y).toBeCloseTo(0, 9);
+    for (const p of c.pts) expect(p.y).toBeCloseTo(0, 9);
+  });
+
   it("mehrere Randpfade → mehrere Loops (Insel als eigener Ring)", () => {
     // Zwei Polyline-Pfade in EINER HATCH: numPaths = 2.
     const g = [
