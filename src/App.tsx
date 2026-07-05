@@ -226,6 +226,43 @@ function promptCount(): number | null {
   return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
+/** Umriss (bbox) aller Drawing2D-Geometrien in Modell-Metern (null = leer). */
+function drawingsBBox(
+  drawings: Drawing2D[],
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const acc = (x: number, y: number) => {
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  };
+  for (const d of drawings) {
+    const g = d.geom;
+    if (g.shape === "line") { acc(g.a.x, g.a.y); acc(g.b.x, g.b.y); }
+    else if (g.shape === "polyline") for (const p of g.pts) acc(p.x, p.y);
+    else if (g.shape === "rect") { acc(g.min.x, g.min.y); acc(g.max.x, g.max.y); }
+    else if (g.shape === "circle" || g.shape === "arc") {
+      acc(g.center.x - g.r, g.center.y - g.r);
+      acc(g.center.x + g.r, g.center.y + g.r);
+    } else if (g.shape === "text") acc(g.at.x, g.at.y);
+  }
+  return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
+}
+
+/** Ein Drawing2D um (dx,dy) in Modell-Metern verschieben (alle Formen). */
+function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
+  const mv = (p: Vec2): Vec2 => ({ x: p.x + dx, y: p.y + dy });
+  const g = d.geom;
+  switch (g.shape) {
+    case "line": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
+    case "polyline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
+    case "rect": return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
+    case "circle": return { ...d, geom: { ...g, center: mv(g.center) } };
+    case "arc": return { ...d, geom: { ...g, center: mv(g.center) } };
+    case "text": return { ...d, geom: { ...g, at: mv(g.at) } };
+    default: return d;
+  }
+}
+
 export default function App() {
   // Sprachwechsel abonnieren: re-rendert den gesamten Baum, wenn die Sprache
   // umgeschaltet wird (alle Kinder lesen denselben modulweiten Zustand über t).
@@ -2136,12 +2173,24 @@ export default function App() {
       decision.target.kind === "new"
         ? addDrawingLevel(decision.target.name)
         : decision.target.levelId;
-    const drawings = buildDrawings(
+    let drawings = buildDrawings(
       decision,
       levelId,
       project,
       activeCategoryCode,
     );
+    // Platzierung „viewCenter": den Gesamt-Umriss so verschieben, dass seine
+    // Mitte auf die Mitte des aktuellen Ausschnitts fällt (sonst bleibt alles an
+    // den DXF-Koordinaten relativ zum Nullpunkt).
+    if (decision.placement === "viewCenter" && drawings.length) {
+      const center = planViewRef.current?.viewCenterModel();
+      const bb = drawingsBBox(drawings);
+      if (center && bb) {
+        const dx = center.x - (bb.minX + bb.maxX) / 2;
+        const dy = center.y - (bb.minY + bb.maxY) / 2;
+        drawings = drawings.map((d) => translateDrawing(d, dx, dy));
+      }
+    }
     if (drawings.length) importDrawings(drawings);
     if (decision.importMeshes && decision.parsed.meshes.length) {
       addContextObjects(decision.parsed.meshes);

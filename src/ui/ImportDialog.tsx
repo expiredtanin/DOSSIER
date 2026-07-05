@@ -36,6 +36,12 @@ export interface ImportDecision {
   categoryMode: CategoryMode;
   /** Ob die Meshes als Kontext-Geometrie übernommen werden. */
   importMeshes: boolean;
+  /**
+   * Platzierung der importierten Geometrie: `origin` = 1:1 an den DXF-Koordinaten
+   * (relativ zum Nullpunkt); `viewCenter` = der Gesamt-Umriss wird in die Mitte
+   * des aktuellen Ausschnitts geschoben.
+   */
+  placement: "origin" | "viewCenter";
   /** Die geparsten Konturen-Sätze (für die spätere 2D-Konvertierung). */
   parsed: DxfImportResult;
 }
@@ -127,6 +133,7 @@ export function ImportDialog({
     layers.length > 0 ? "byLayer" : "active",
   );
   const [importMeshes, setImportMeshes] = useState<boolean>(true);
+  const [placement, setPlacement] = useState<"origin" | "viewCenter">("origin");
 
   const canImport =
     !isDwg && !loading && (hasDrawings || (hasMeshes && importMeshes));
@@ -137,7 +144,7 @@ export function ImportDialog({
       targetKind === "existing"
         ? ({ kind: "existing", levelId: existingLevelId } as const)
         : ({ kind: "new", name: newName } as const);
-    onImport({ target, categoryMode, importMeshes, parsed });
+    onImport({ target, categoryMode, importMeshes, placement, parsed });
   };
 
   return (
@@ -291,6 +298,34 @@ export function ImportDialog({
                     <span>
                       {t("import.layers.toActive", { code: activeCategoryCode })}
                     </span>
+                  </label>
+                </section>
+              )}
+
+              {/* Platzierung: an den DXF-Koordinaten (relativ zu 0) ODER in die
+                  Mitte des aktuellen Ausschnitts geschoben. */}
+              {hasDrawings && (
+                <section className="imp-section">
+                  <div className="imp-section-title">
+                    {t("import.placement.heading")}
+                  </div>
+                  <label className="imp-radio">
+                    <input
+                      type="radio"
+                      name="imp-place"
+                      checked={placement === "origin"}
+                      onChange={() => setPlacement("origin")}
+                    />
+                    <span>{t("import.placement.origin")}</span>
+                  </label>
+                  <label className="imp-radio">
+                    <input
+                      type="radio"
+                      name="imp-place"
+                      checked={placement === "viewCenter"}
+                      onChange={() => setPlacement("viewCenter")}
+                    />
+                    <span>{t("import.placement.viewCenter")}</span>
                   </label>
                 </section>
               )}

@@ -131,6 +131,8 @@ export interface PlanViewHandle {
   applyScale: (n: number) => void;
   /** Aktuelle Pixel/Meter-Skala (für Snap-Toleranz der Command-Engine). */
   pxPerMeter: () => number;
+  /** Mitte des aktuellen Ausschnitts in Modell-Metern (z. B. für Import-Platzierung). */
+  viewCenterModel: () => Vec2;
 }
 
 /** Ergebnis eines Links-Klicks (Auswahl) an einer Modellposition. */
@@ -631,6 +633,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         if (n > 0) setPaperScale(n);
       },
       pxPerMeter: () => currentPxPerMeter(),
+      viewCenterModel: () => {
+        // Mitte der frischen viewBox (aus Ref) → Modell (inverse toScreen).
+        const v = viewRef.current;
+        return { x: (v.x + v.w / 2) / PX_PER_M, y: -(v.y + v.h / 2) / PX_PER_M };
+      },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
