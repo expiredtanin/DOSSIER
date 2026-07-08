@@ -44,7 +44,7 @@ import {
 import { columnFootprint } from "../geometry/column";
 import { effectiveOverrides, hasOverrides } from "../overrides/engine";
 import { evaluateRoom, siaLabel } from "../geometry/roomArea";
-import type { RichTextDoc } from "../text/richText";
+import type { Marks, RichTextDoc } from "../text/richText";
 import { docFromText } from "../text/richText";
 import { roomStampToDoc, roomStampExtraLines } from "../model/roomStamp";
 import type { RoomStampLine } from "../model/roomStamp";
@@ -335,6 +335,8 @@ export type Primitive =
       /** Drehung in RADIANT (CCW im Modell). */
       angle: number;
       color: string;
+      /** Optionale einheitliche Formatierung (Schriftfamilie/fett/kursiv/…). */
+      marks?: Marks;
       /**
        * Optionale Spaltenbreite in Modell-Metern (Textspalte): ist sie gesetzt,
        * bricht der Renderer den Text wortweise auf diese Breite um. Fehlt sie,
@@ -1289,8 +1291,10 @@ function addDrawing2D(
         text: g.text,
         heightM: g.height,
         angle: g.angle,
-        color,
+        // marks.color (falls gesetzt) übersteuert die Kategorie-/Elementfarbe.
+        color: g.marks?.color ?? color,
         ...(g.width && g.width > 0 ? { wrapWidth: g.width } : {}),
+        ...(g.marks ? { marks: g.marks } : {}),
         greyed,
         drawingId: d.id,
       });

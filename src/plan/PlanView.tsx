@@ -3283,12 +3283,24 @@ function renderPrimitive(
       } else {
         lines.push(p.text);
       }
+      // Einheitliche Formatierung (Text-Werkzeug + Oberleisten-Formatier-Gruppe):
+      // Schriftfamilie/fett/kursiv/Unterstreichung aus `marks`; Grösse bleibt über
+      // heightM (Modell-Meter). Farbe steckt bereits in p.color (marks.color-Vorrang
+      // in generatePlan aufgelöst).
+      const mk = p.marks;
+      const deco =
+        mk && (mk.underline || mk.strike)
+          ? [mk.underline ? "underline" : "", mk.strike ? "line-through" : ""].join(" ").trim()
+          : undefined;
       return (
         <text
           x={c.x}
           y={c.y}
           fontSize={fontSize}
-          fontFamily="var(--font-ui, sans-serif)"
+          fontFamily={mk?.font ?? "var(--font-ui, sans-serif)"}
+          fontWeight={mk?.bold ? 700 : undefined}
+          fontStyle={mk?.italic ? "italic" : undefined}
+          textDecoration={deco}
           fill={p.color}
           opacity={p.greyed ? 0.45 : undefined}
           textAnchor="start"

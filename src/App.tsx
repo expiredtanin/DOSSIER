@@ -189,7 +189,7 @@ import type {
 import type { PanelHostValue } from "./panels/host";
 import { deriveSelection } from "./state/selectionInfo";
 import { centroid as roomCentroid } from "./geometry/roomArea";
-import { docFromText } from "./text/richText";
+import { docFromText, plainText } from "./text/richText";
 import type { RichTextDoc } from "./text/richText";
 import {
   deleteNamedLayout,
@@ -2399,17 +2399,36 @@ export default function App() {
   // gewählten Raums. Ohne aktive Editor-Auswahl wirkt Formatierung auf das ganze
   // Doc (range: null). Ist kein Raum gewählt → null (Controls setzen nur
   // Defaults). Der Setter schreibt live in den Store.
-  const textTarget = useMemo(
-    () =>
-      selectedRoom
-        ? {
-            doc: selectedRoom.stampDoc ?? docFromText(selectedRoom.name),
-            range: null,
-            apply: (doc: RichTextDoc) => setRoomStampDoc(selectedRoom.id, doc),
-          }
-        : null,
-    [selectedRoom, setRoomStampDoc],
-  );
+  const textTarget = useMemo(() => {
+    if (selectedRoom) {
+      return {
+        doc: selectedRoom.stampDoc ?? docFromText(selectedRoom.name),
+        range: null,
+        apply: (doc: RichTextDoc) => setRoomStampDoc(selectedRoom.id, doc),
+      };
+    }
+    // Selektierter freier Text/Textspalte: die Oberleisten-Formatier-Gruppe wirkt
+    // auf Schriftfamilie/fett/kursiv/Farbe des ganzen Texts. Die GRÖSSE bleibt
+    // bewusst über die Modell-Höhe (Meter, height) geführt — nicht über sizePt,
+    // damit der Text im Massstab bleibt (Punkt-Grössen wären massstabslos).
+    if (selectedDrawingId) {
+      const d = project.drawings2d.find((x) => x.id === selectedDrawingId);
+      if (d && d.geom.shape === "text") {
+        const g = d.geom;
+        return {
+          doc: docFromText(g.text, g.marks ?? {}),
+          range: null,
+          apply: (doc: RichTextDoc) => {
+            const runMarks = doc.paragraphs.flatMap((p) => p.runs)[0]?.marks ?? {};
+            const marks = { ...runMarks };
+            delete marks.sizePt; // Grösse folgt der Modell-Höhe, nicht dem pt-Wert.
+            updateDrawing2D(d.id, { geom: { ...g, text: plainText(doc), marks } });
+          },
+        };
+      }
+    }
+    return null;
+  }, [selectedRoom, setRoomStampDoc, selectedDrawingId, project.drawings2d, updateDrawing2D]);
 
   // ── 3D-Editier-Griffe (direkt im Viewport3D) ──────────────────────────────
   // Genau EINE gewählte Wand (kein 2D-Element) bzw. genau EIN 2D-Element liefert

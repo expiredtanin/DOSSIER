@@ -16,7 +16,7 @@ export type Vec2 = { x: number; y: number };
 import type { SiaCategory } from "../geometry/roomArea";
 export type { SiaCategory } from "../geometry/roomArea";
 // Rich-Text-Dokument für den Raum-Stempel (frei editierbarer Teil).
-import type { RichTextDoc, Align } from "../text/richText";
+import type { RichTextDoc, Align, Marks } from "../text/richText";
 export type { RichTextDoc } from "../text/richText";
 // Ansichts-Enums für Ausschnitte/View-Snapshots (Ansichtstyp, Kamera-Preset,
 // Detailgrad). Rein type-only importiert — zur Laufzeit erased, kein Zyklus
@@ -1279,6 +1279,13 @@ export type Drawing2DGeom =
        * sie, bleibt es einzeiliger Text (heutiges Verhalten).
        */
       width?: number;
+      /**
+       * Optionale einheitliche Formatierung des ganzen Texts (Schriftfamilie, fett/
+       * kursiv, Farbe …) — gesetzt über die Text-Formatier-Gruppe der Oberleiste,
+       * wenn dieser Text selektiert ist. Die Grösse bleibt bewusst über `height`
+       * (Modell-Meter) geführt, nicht über `marks.sizePt`.
+       */
+      marks?: Marks;
     };
 
 /** Ein freies 2D-Zeichenelement auf einer Zeichnungsebene. */
