@@ -906,17 +906,29 @@ export function WallSection({
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">{t("objinfo.wall.section")}</div>
 
-      {/* Referenzlinie (wo die Achse über die Dicke liegt) — früher im ObjectInfo-
-          Kopf, jetzt hier bei den Wand-Attributen. */}
+      {/* Referenzlinie (wo die Achse über die Dicke liegt) — außen/mitte/innen ODER
+          bei mehrschichtigen Wänden eine SCHICHTTRENNLINIE (Fuge). Ein Fugenwert
+          wird als "off:<offset>" kodiert und übersteuert die benannte Linie. */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.wall.refLine")}</span>
         <Dropdown
-          value={wall.referenceLine}
-          onChange={(v) => host.onSetWallReferenceLine(v as WallReferenceLine)}
+          value={
+            wall.referenceOffset != null
+              ? `off:${wall.referenceOffset.toFixed(4)}`
+              : wall.referenceLine
+          }
+          onChange={(v) => {
+            if (v.startsWith("off:")) host.onSetWallReferenceOffset(Number(v.slice(4)));
+            else host.onSetWallReferenceLine(v as WallReferenceLine);
+          }}
           options={[
             { value: "left", label: t("objinfo.wall.refLine.left") },
             { value: "center", label: t("objinfo.wall.refLine.center") },
             { value: "right", label: t("objinfo.wall.refLine.right") },
+            ...wall.layerBoundaries.map((b) => ({
+              value: `off:${b.offset.toFixed(4)}`,
+              label: `${t("objinfo.wall.refLine.joint")} ${b.label}`,
+            })),
           ]}
           title={t("objinfo.wall.refLine")}
           width={120}

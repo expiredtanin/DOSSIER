@@ -2968,7 +2968,12 @@ export default function App() {
       // ── Wand-Attribute (nur bei selektierter Wand) ─────────────────────────
       onSetWallReferenceLine: (ref) => {
         if (selection?.kind === "wall")
-          updateWall(selection.id, { referenceLine: ref });
+          // Benannte Linie gewählt ⇒ freien Fugen-Versatz löschen (er übersteuert sonst).
+          updateWall(selection.id, { referenceLine: ref, referenceOffset: undefined });
+      },
+      onSetWallReferenceOffset: (offset) => {
+        if (selection?.kind === "wall")
+          updateWall(selection.id, { referenceOffset: offset ?? undefined });
       },
       onSetWallSliceTermination: (termination) => {
         if (selection?.kind === "wall")

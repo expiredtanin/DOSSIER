@@ -301,6 +301,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.wall.refLine.left": "Exterior (left)",
   "objinfo.wall.refLine.center": "Center",
   "objinfo.wall.refLine.right": "Interior (right)",
+  "objinfo.wall.refLine.joint": "Joint",
   "objinfo.wall.sliceTermination": "End at ceiling",
   "objinfo.wall.sliceTermination.both": "Off",
   "objinfo.wall.sliceTermination.below": "Below",

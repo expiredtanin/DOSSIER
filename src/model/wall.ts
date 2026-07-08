@@ -26,8 +26,14 @@ export function wallReferenceOffset(
   wall: Wall,
   totalThickness: number,
 ): number {
-  const ref = wall.referenceLine ?? "center";
   const half = totalThickness / 2;
+  // Freier Fugen-Versatz (Schichttrennlinie als Referenz) übersteuert die
+  // benannte Referenzlinie. Auf die Wanddicke geklemmt, damit die Achse nie
+  // ausserhalb der Wand landet.
+  if (wall.referenceOffset != null) {
+    return Math.max(-half, Math.min(half, wall.referenceOffset));
+  }
+  const ref = wall.referenceLine ?? "center";
   if (ref === "left") return +half;
   if (ref === "right") return -half;
   return 0;

@@ -828,6 +828,14 @@ export interface Wall {
    */
   referenceLine?: WallReferenceLine;
   /**
+   * Freier Referenz-Versatz der Achse entlang der +n-Normalen von der Wandmitte
+   * (Meter). Ist er gesetzt, ÜBERSTEUERT er {@link referenceLine} — genutzt, um
+   * bei mehrschichtigen Wänden eine SCHICHTTRENNLINIE (Fuge zwischen zwei
+   * Schichten) als Referenzlinie zu wählen. +T/2 = Aussenfläche, 0 = Mitte,
+   * −T/2 = Innenfläche; ein interner Fugenwert liegt dazwischen.
+   */
+  referenceOffset?: number;
+  /**
    * Vertikale Bindung der Unterkante (UK). Fehlt sie, sitzt die UK auf der
    * baseElevation des zugehörigen Geschosses (= heutiges Verhalten).
    */

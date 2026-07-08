@@ -235,6 +235,11 @@ export interface PanelHostValue {
   /** Setzt die Lage der Wandachse über die Dicke (außen/mitte/innen). */
   onSetWallReferenceLine: (ref: WallReferenceLine) => void;
   /**
+   * Setzt einen freien Achsversatz (Schichttrennlinie als Referenz) oder löscht
+   * ihn (`null` → zurück zur benannten Referenzlinie). Meter entlang +n.
+   */
+  onSetWallReferenceOffset: (offset: number | null) => void;
+  /**
    * Setzt die Terminierungs-Regel am Deckenanschluss (Zuschnitt, NICHT Priorität):
    * "both" = heutiges Verhalten, "below"/"above" = die Wand endet an der Decke.
    */

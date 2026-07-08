@@ -302,6 +302,7 @@ export const de = {
   "objinfo.wall.refLine.left": "Außen (links)",
   "objinfo.wall.refLine.center": "Mitte",
   "objinfo.wall.refLine.right": "Innen (rechts)",
+  "objinfo.wall.refLine.joint": "Fuge",
   "objinfo.wall.sliceTermination": "An Decke enden",
   "objinfo.wall.sliceTermination.both": "Aus",
   "objinfo.wall.sliceTermination.below": "Unten",

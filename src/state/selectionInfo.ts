@@ -14,6 +14,7 @@ import {
   ceilingThickness,
   flattenCategories,
   getCeilingType,
+  getComponent,
   getWallType,
   wallTypeLabel,
   wallTypeThickness,
@@ -70,12 +71,30 @@ export interface FloorChoice {
 }
 
 /**
+ * Eine wählbare Schichttrennlinie (Fuge zwischen zwei Schichten) als
+ * Referenzlinie einer mehrschichtigen Wand. `offset` ist der fertige
+ * Achsversatz entlang +n (Meter), `label` benennt die angrenzenden Schichten.
+ */
+export interface LayerBoundaryChoice {
+  offset: number;
+  label: string;
+}
+
+/**
  * Wand-spezifische Attribute für das Object-Info-Panel (nur bei Auswahl einer
  * einzelnen Wand gesetzt). Effektiv aufgelöste, anzeigefertige Werte plus die
  * Listen, die die Dropdowns brauchen.
  */
 export interface WallInfo {
   referenceLine: WallReferenceLine;
+  /** Freier Achsversatz (Schichttrennlinie), falls gesetzt — sonst undefined. */
+  referenceOffset?: number;
+  /**
+   * Interne Schichttrennlinien der Wand als wählbare Referenz (leer bei
+   * einschichtigen Wänden). Aussen-/Innenfläche stecken bereits in
+   * left/right — hier stehen nur die FUGEN dazwischen.
+   */
+  layerBoundaries: LayerBoundaryChoice[];
   /** Terminierungs-Regel am Deckenanschluss (Default "both" = heutiges Verhalten). */
   sliceTermination: SliceTermination;
   wallTypeId: string;
@@ -435,8 +454,26 @@ function wallSelection(project: Project, wall: Wall): Selection {
     .filter((o) => o.hostWallId === wall.id)
     .reduce((sum, o) => sum + o.width * o.height * thickness, 0);
   const netVolume = Math.max(0, grossVolume - openingVolume);
+  // Interne Schichttrennlinien als wählbare Referenz: von aussen (Schicht 0)
+  // nach innen aufsummiert; der Achsversatz +n = halbe Dicke − Fugenlage.
+  const half = thickness / 2;
+  const layerBoundaries: WallInfo["layerBoundaries"] = [];
+  let cum = 0;
+  const abbrevOf = (componentId: string): string => {
+    const c = getComponent(project, componentId);
+    return c ? c.abbrev ?? c.name : "?";
+  };
+  for (let i = 0; i < wt.layers.length - 1; i++) {
+    cum += wt.layers[i].thickness;
+    layerBoundaries.push({
+      offset: half - cum,
+      label: `${abbrevOf(wt.layers[i].componentId)}|${abbrevOf(wt.layers[i + 1].componentId)}`,
+    });
+  }
   const wallInfo: WallInfo = {
     referenceLine: wall.referenceLine ?? "center",
+    referenceOffset: wall.referenceOffset,
+    layerBoundaries,
     sliceTermination: wall.sliceTermination ?? "both",
     wallTypeId: wall.wallTypeId,
     thickness,
