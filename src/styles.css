@@ -4044,6 +4044,24 @@ body {
   letter-spacing: 0.04em;
   margin: 2px 2px 4px;
 }
+/* „Typ bearbeiten"-Knopf (⚙) neben dem Öffnungstyp-Dropdown. */
+.objinfo-typebtn {
+  margin-left: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg, inherit);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.objinfo-typebtn:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.18));
+}
+
 /* Mess-Werkzeug: Live-Messwerte im Objekt-Info-Panel. */
 .objinfo-measure {
   margin: 2px 2px 8px;

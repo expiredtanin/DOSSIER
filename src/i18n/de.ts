@@ -340,6 +340,7 @@ export const de = {
   // ── Öffnungs-Attribute (Object-Info-Panel) ──────────────────────────────
   "objinfo.opening.section": "Öffnung",
   "objinfo.opening.type": "Typ",
+  "objinfo.opening.editType": "Typ bearbeiten (Ressourcen)",
   "objinfo.stair.type": "Typ",
   "objinfo.type.none": "(kein Typ)",
   "objinfo.opening.kind": "Art",

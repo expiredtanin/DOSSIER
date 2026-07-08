@@ -93,7 +93,7 @@ import { Viewport3D } from "./viewport/Viewport3D";
 import type { DisplayResolver, ViewportContextInfo } from "./viewport/Viewport3D";
 import type { Pick3dHit } from "./viewport/Wasm3DViewport";
 import { ResourceManager } from "./ui/ResourceManager";
-import type { ResourceManagerHandlers } from "./ui/ResourceManager";
+import type { ResourceManagerHandlers, TabId as ResourceTabId } from "./ui/ResourceManager";
 import { LayoutSheetView } from "./ui/LayoutSheet";
 import {
   createLayout,
@@ -408,6 +408,9 @@ export default function App() {
   // bleibt lokal. Wird über die Oberleiste geöffnet und über X / Hintergrund-
   // Klick / Esc geschlossen.
   const [resourcesOpen, setResourcesOpen] = useState(false);
+  // Angeforderter Start-Tab des Ressourcen-Fensters (z. B. „doorStyles", wenn man
+  // von einer gewählten Tür in den Typeditor springt).
+  const [resourcesTab, setResourcesTab] = useState<ResourceTabId>("components");
 
   // Aktives Layout-Blatt im HAUPT-Viewport (DOSSIER A3, Phase 2b): Id des offenen
   // Layouts oder null (= normale Modell-Ansicht). Transienter UI-State; das
@@ -3109,6 +3112,10 @@ export default function App() {
         if (selection?.kind === "opening")
           updateOpening(selection.id, { typeId: typeId || undefined });
       },
+      onEditOpeningType: (kind) => {
+        setResourcesTab(kind === "door" ? "doorStyles" : "windowStyles");
+        setResourcesOpen(true);
+      },
       // ── Treppen-Attribute (nur bei selektierter Treppe) ────────────────────
       onSetStairShape: (shape) => {
         if (selection?.kind === "stair") updateStair(selection.id, { shape });
@@ -4910,6 +4917,7 @@ export default function App() {
         <ResourceManager
           project={project}
           handlers={resourceHandlers}
+          initialTab={resourcesTab}
           onClose={() => setResourcesOpen(false)}
         />
       )}

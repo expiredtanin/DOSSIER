@@ -340,6 +340,7 @@ export const en: Record<TranslationKey, string> = {
   // ── Opening attributes (object info panel) ──────────────────────────────
   "objinfo.opening.section": "Opening",
   "objinfo.opening.type": "Type",
+  "objinfo.opening.editType": "Edit type (Resources)",
   "objinfo.stair.type": "Type",
   "objinfo.type.none": "(no type)",
   "objinfo.opening.kind": "Type",

@@ -578,7 +578,8 @@ export function OpeningSection({
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">{t("objinfo.opening.section")}</div>
 
-      {/* Tür-/Fenstertyp (Bibliothek) — je nach Art aus doorTypes bzw. windowTypes. */}
+      {/* Tür-/Fenstertyp (Bibliothek) — je nach Art aus doorTypes bzw. windowTypes.
+          Der ⚙-Knopf springt direkt in den Typeditor (Ressourcen-Fenster). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.opening.type")}</span>
         <Dropdown
@@ -592,8 +593,17 @@ export function OpeningSection({
             ).map((ty) => ({ value: ty.id, label: ty.name })),
           ]}
           title={t("objinfo.opening.type")}
-          width={130}
+          width={106}
         />
+        <button
+          type="button"
+          className="objinfo-typebtn"
+          title={t("objinfo.opening.editType")}
+          aria-label={t("objinfo.opening.editType")}
+          onClick={() => host.onEditOpeningType(isDoor ? "door" : "window")}
+        >
+          ⚙
+        </button>
       </div>
 
       {/* Art-Segment Fenster/Tür. */}

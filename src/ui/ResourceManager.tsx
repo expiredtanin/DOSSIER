@@ -2951,7 +2951,7 @@ function EmptyState({ text }: { text: string }) {
 
 // ── Manager-Schublade ──────────────────────────────────────────────────────
 
-type TabId =
+export type TabId =
   | "components"
   | "hatches"
   | "lines"
@@ -3064,12 +3064,20 @@ export function ResourceManager({
   project,
   onClose,
   handlers,
+  initialTab,
 }: {
   project: Project;
   onClose: () => void;
   handlers: ResourceManagerHandlers;
+  /** Beim Öffnen (bzw. bei erneutem Sprung) direkt aktiver Tab, z. B. „doorStyles". */
+  initialTab?: TabId;
 }) {
-  const [tab, setTab] = useState<TabId>("components");
+  const [tab, setTab] = useState<TabId>(initialTab ?? "components");
+  // Erneuter Sprung aus einem Element heraus (z. B. „Typ bearbeiten" an einer
+  // Öffnung): auf den angeforderten Tab wechseln, auch wenn das Fenster schon offen ist.
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
   const [rect, setRect] = useState<WindowRect>(initialRect);
 
   // Verschieben über die Kopfzeile: Cursor − linke/obere Kante festhalten und die

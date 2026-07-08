@@ -294,6 +294,11 @@ export interface PanelHostValue {
   onSetOpeningLintelLines: (lintelLines: "keine" | "innen" | "aussen" | "beide") => void;
   /** Weist der Öffnung einen Tür-/Fenstertyp (Bibliothek) zu; "" löst die Zuweisung. */
   onSetOpeningType: (typeId: string) => void;
+  /**
+   * Öffnet das Ressourcen-Fenster direkt beim Tür- bzw. Fenstertyp-Editor
+   * (Discoverability: von der gewählten Öffnung in den Typeditor springen).
+   */
+  onEditOpeningType: (kind: "door" | "window") => void;
 
   // ── Treppen-Attribute (Object-Info-Panel; nur die selektierte Treppe) ───
   /** Setzt die Grundform (gerade/L/Wendel). */
