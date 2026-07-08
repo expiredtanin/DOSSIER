@@ -1,0 +1,212 @@
+/**
+ * Unit-Tests für die Tür-/Fenstertyp-Rahmenparameter im Grundriss
+ * (generatePlan): Rahmenband (Zarge/Blockrahmen), Schichteinzug (insetFromFace/
+ * insetFace), Oberlicht (transomHeight). `mullionRows` bleibt bewusst ungetestet
+ * — Kämpfer-Zeilen sind im Grundriss-Schnitt unsichtbar (3D-Sache).
+ */
+
+import { describe, it, expect } from "vitest";
+import { generatePlan } from "./generatePlan";
+import type { DoorType, Opening, Project, Wall, WindowType } from "../model/types";
+
+/** Minimalprojekt: eine Wand (Dicke 0.3 m, Achse mittig) + Öffnungen und
+ *  optionale Tür-/Fenstertyp-Bibliotheken, konfigurierbar je Test. */
+function project(
+  openings: Opening[],
+  opts: { doorTypes?: DoorType[]; windowTypes?: WindowType[] } = {},
+): Project {
+  const wall: Wall = {
+    id: "W1",
+    type: "wall",
+    floorId: "eg",
+    categoryCode: "20",
+    start: { x: 0, y: 0 },
+    end: { x: 4, y: 0 },
+    wallTypeId: "aw",
+    height: 2.6,
+  };
+  return {
+    id: "t",
+    name: "T",
+    lineStyles: [{ id: "thin", name: "d", weight: 0.13, color: "#111", dash: null }],
+    hatches: [{ id: "none", name: "Ohne", pattern: "none", scale: 1, angle: 0, color: "#111" }],
+    components: [{ id: "a", name: "A", color: "#d8d2c7", hatchId: "none", joinPriority: 10 }],
+    wallTypes: [{ id: "aw", name: "AW", layers: [{ componentId: "a", thickness: 0.3 }] }],
+    doorTypes: opts.doorTypes,
+    windowTypes: opts.windowTypes,
+    drawingLevels: [
+      {
+        id: "eg",
+        name: "EG",
+        kind: "floor",
+        visible: true,
+        locked: false,
+        floorHeight: 2.6,
+        cutHeight: 1.0,
+        baseElevation: 0,
+      },
+    ],
+    layers: [
+      { code: "20", name: "Wände", color: "#0a0a0a", lw: 0.5, visible: true, locked: false },
+      { code: "21", name: "Öffnungen", color: "#0a0a0a", lw: 0.3, visible: true, locked: false },
+    ],
+    walls: [wall],
+    doors: [],
+    openings,
+    ceilings: [],
+    stairs: [],
+    rooms: [],
+    drawings2d: [],
+    context: [],
+  };
+}
+
+const visible = new Set(["20", "21"]);
+
+/** Basis-Fenster, jenseits der Tür auf derselben Wandachse. */
+const baseWindow: Opening = {
+  id: "F1",
+  type: "opening",
+  hostWallId: "W1",
+  categoryCode: "21",
+  kind: "window",
+  position: 2.0,
+  width: 1.2,
+  height: 1.2,
+  sillHeight: 0,
+};
+
+/** Basis-Tür. */
+const baseDoor: Opening = {
+  id: "T1",
+  type: "opening",
+  hostWallId: "W1",
+  categoryCode: "21",
+  kind: "door",
+  position: 0.2,
+  width: 0.9,
+  height: 2.0,
+  sillHeight: 0,
+  swing: "left",
+  hinge: "start",
+};
+
+/** Fenstertyp mit Rahmen, Schichteinzug (aussen) und Oberlicht. */
+const windowType: WindowType = {
+  id: "wt1",
+  name: "Fenstertyp Test",
+  kind: "dreh",
+  wingCount: 1,
+  glazing: "zweifach",
+  frameThickness: 0.06,
+  frameWidth: 0.05,
+  insetFromFace: 0.05,
+  insetFace: "aussen",
+  transomHeight: 0.3,
+  defaultSillHeight: 0.8,
+  defaultWidth: 1.2,
+  defaultHeight: 1.2,
+};
+
+/** Türtyp mit Blockrahmen, Schichteinzug (innen) und Oberlicht. */
+const doorType: DoorType = {
+  id: "dt1",
+  name: "Türtyp Test",
+  kind: "dreh",
+  leafCount: 1,
+  leafStyle: "glatt",
+  frameThickness: 0.06,
+  frameKind: "blockrahmen",
+  frameWidth: 0.06,
+  insetFromFace: 0.04,
+  insetFace: "innen",
+  transomHeight: 0.4,
+  defaultWidth: 0.9,
+  defaultHeight: 2.0,
+};
+
+type LinePrim = Extract<ReturnType<typeof generatePlan>["primitives"][number], { kind: "line" }>;
+
+function linesOfClass(p: Project, cls: string, openingId?: string): LinePrim[] {
+  return generatePlan(p, "eg", visible, undefined, "mittel").primitives.filter(
+    (pr): pr is LinePrim =>
+      pr.kind === "line" && pr.cls === cls && (!openingId || pr.openingId === openingId),
+  );
+}
+
+describe("generatePlan — Tür-/Fenstertyp-Rahmenband (opening-frame)", () => {
+  it("erzeugt Rahmenband-Primitive für Tür UND Fenster mit referenziertem Typ", () => {
+    const p = project(
+      [
+        { ...baseWindow, typeId: "wt1" },
+        { ...baseDoor, typeId: "dt1" },
+      ],
+      { doorTypes: [doorType], windowTypes: [windowType] },
+    );
+    expect(linesOfClass(p, "opening-frame").length).toBeGreaterThan(0);
+    // Je Öffnung ein geschlossenes Rechteck aus 4 Kanten.
+    expect(linesOfClass(p, "opening-frame", "F1").length).toBe(4);
+    expect(linesOfClass(p, "opening-frame", "T1").length).toBe(4);
+  });
+
+  it("Blockrahmen (Tür) zeichnet eine kräftigere Linie als die Zargen-Optik (Fenster)", () => {
+    const p = project(
+      [
+        { ...baseWindow, typeId: "wt1" },
+        { ...baseDoor, typeId: "dt1" },
+      ],
+      { doorTypes: [doorType], windowTypes: [windowType] },
+    );
+    const doorWeight = linesOfClass(p, "opening-frame", "T1")[0].weightMm;
+    const windowWeight = linesOfClass(p, "opening-frame", "F1")[0].weightMm;
+    expect(doorWeight).toBeGreaterThan(windowWeight);
+  });
+});
+
+describe("generatePlan — Oberlicht (opening-transom)", () => {
+  it("erscheint genau dann, wenn transomHeight > 0", () => {
+    const withTransom = project([{ ...baseWindow, typeId: "wt1" }], { windowTypes: [windowType] });
+    const transomLines = linesOfClass(withTransom, "opening-transom", "F1");
+    expect(transomLines.length).toBe(1);
+    expect(Array.isArray(transomLines[0].dash) && transomLines[0].dash!.length).toBeGreaterThan(0);
+
+    const noTransomType: WindowType = { ...windowType, id: "wt2", transomHeight: 0 };
+    const withoutTransom = project([{ ...baseWindow, typeId: "wt2" }], { windowTypes: [noTransomType] });
+    expect(linesOfClass(withoutTransom, "opening-transom", "F1").length).toBe(0);
+  });
+});
+
+describe("generatePlan — Schichteinzug (insetFromFace/insetFace)", () => {
+  it("verschiebt die Rahmen-Nahfläche um den Einzugsbetrag, die Gegenfläche bleibt unverändert", () => {
+    const flushType: WindowType = { ...windowType, id: "wt-flush", insetFromFace: 0 };
+    const inset = project([{ ...baseWindow, typeId: "wt1" }], { windowTypes: [windowType] });
+    const flush = project([{ ...baseWindow, typeId: "wt-flush" }], { windowTypes: [flushType] });
+
+    // Die Wandachse ist horizontal (u=(1,0)) ⇒ Wandnormale n=(0,1); die
+    // y-Koordinate der Rahmenband-Punkte entspricht direkt dem Offset quer zur
+    // Wand. Die "aussen"-Fläche liegt bei +n — ihr Rahmenrand muss um genau
+    // `insetFromFace` (0.05 m) nach innen (kleineres y) rücken; die
+    // gegenüberliegende ("innen"-)Fläche bleibt unverändert.
+    const insetYs = linesOfClass(inset, "opening-frame", "F1").flatMap((l) => [l.a.y, l.b.y]);
+    const flushYs = linesOfClass(flush, "opening-frame", "F1").flatMap((l) => [l.a.y, l.b.y]);
+
+    expect(Math.max(...flushYs) - Math.max(...insetYs)).toBeCloseTo(0.05, 9);
+    expect(Math.min(...insetYs)).toBeCloseTo(Math.min(...flushYs), 9);
+  });
+});
+
+describe("generatePlan — Rückwärtskompatibilität (Öffnung ohne typeId)", () => {
+  it("liefert exakt dieselben Primitive, ob Typ-Bibliotheken im Projekt existieren oder nicht", () => {
+    const withResources = project([{ ...baseWindow }, { ...baseDoor }], {
+      doorTypes: [doorType],
+      windowTypes: [windowType],
+    });
+    const withoutResources = project([{ ...baseWindow }, { ...baseDoor }]);
+
+    const a = generatePlan(withResources, "eg", visible, undefined, "mittel").primitives;
+    const b = generatePlan(withoutResources, "eg", visible, undefined, "mittel").primitives;
+    expect(a).toEqual(b);
+    expect(a.some((pr) => pr.kind === "line" && pr.cls === "opening-frame")).toBe(false);
+    expect(a.some((pr) => pr.kind === "line" && pr.cls === "opening-transom")).toBe(false);
+  });
+});

@@ -28,10 +28,12 @@ import {
   flattenCategories,
   getCeilingType,
   getComponent,
+  getDoorType,
   getHatch,
   getLayerCategory,
   getLineStyle,
   getWallType,
+  getWindowType,
   openingLabel,
   openingsOfWall,
   roomsOfFloor,
@@ -1864,6 +1866,166 @@ function addDoorSymbol(
 }
 
 /**
+ * Aufgelöste Rahmen-Parameter (Typ-Bibliothek) einer Tür-/Fenster-Öffnung —
+ * nur vorhanden, wenn die Öffnung einen Bauteil-Typ referenziert (`typeId`).
+ * Fehlt der Typ, bleibt das heutige Inline-Verhalten unverändert (kein
+ * Rahmenband, kein Oberlicht) — siehe `resolveOpeningFrameSpec`.
+ */
+interface OpeningFrameSpec {
+  frameWidth: number;
+  /** Nur bei Türen relevant; Fenster zeichnen stets die schmale Zargen-Optik. */
+  frameKind: "zarge" | "blockrahmen";
+  insetFromFace: number;
+  insetFace: "aussen" | "innen";
+  transomHeight: number;
+}
+
+/**
+ * Löst die Rahmen-Parameter aus dem referenzierten Tür-/Fenstertyp auf (samt
+ * Defaults); `undefined`, wenn kein Typ referenziert/auflösbar ist — die
+ * Öffnung bleibt dann beim heutigen Inline-Verhalten (rückwärtskompatibel).
+ */
+function resolveOpeningFrameSpec(project: Project, o: Opening): OpeningFrameSpec | undefined {
+  if (o.kind === "door") {
+    const t = getDoorType(project, o);
+    if (!t) return undefined;
+    return {
+      frameWidth: t.frameWidth ?? 0.06,
+      frameKind: t.frameKind ?? "zarge",
+      insetFromFace: t.insetFromFace ?? 0,
+      insetFace: t.insetFace ?? "aussen",
+      transomHeight: t.transomHeight ?? 0,
+    };
+  }
+  const t = getWindowType(project, o);
+  if (!t) return undefined;
+  return {
+    frameWidth: t.frameWidth ?? 0.06,
+    frameKind: "zarge",
+    insetFromFace: t.insetFromFace ?? 0,
+    insetFace: t.insetFace ?? "aussen",
+    transomHeight: t.transomHeight ?? 0,
+  };
+}
+
+/**
+ * Rahmenband + Oberlicht-Andeutung einer Tür-/Fenstertyp-Öffnung im
+ * Grundriss-Schnitt. Nur aufgerufen, wenn `resolveOpeningFrameSpec` einen Typ
+ * liefert — sonst bleibt die Darstellung exakt wie zuvor (kein neues Primitiv).
+ *
+ *  • Zarge             — schmales Umlauf-Rahmenband, ringsum um `frameWidth`
+ *    von der vollen Öffnung (Pfosten × Wanddicke) nach innen eingezogen.
+ *  • Blockrahmen (Tür) — kräftiges Rechteckprofil, sitzt PROUD an der
+ *    gewählten Fläche (kein Einzug an den Pfosten, nur eine Tiefenscheibe von
+ *    `frameWidth` ab der Nah-Fläche), kräftigere Linie.
+ *  • Schichteinzug     — verschiebt die Nah-Fläche des Rahmens um
+ *    `insetFromFace` von der gewählten Wandfläche nach innen; die Gegenfläche
+ *    bleibt unverändert (der Rahmen reicht weiterhin bis dorthin).
+ *  • Oberlicht         — Überkopf-Andeutung (gestrichelte Linie quer über die
+ *    Öffnung), nur wenn `transomHeight > 0`.
+ */
+function addOpeningFrameBand(
+  out: Primitive[],
+  project: Project,
+  wall: Wall,
+  o: Opening,
+  spec: OpeningFrameSpec,
+  greyed: boolean,
+): void {
+  const jambs = openingJambs(wall, o);
+  if (!jambs) return;
+  const { n } = wallAxisFrame(wall);
+  const total = wallTypeThickness(getWallType(project, wall));
+  const refOff = wallReferenceOffset(wall, total);
+  const outerFace = refOff + total / 2; // "aussen"-Fläche (+n)
+  const innerFace = refOff - total / 2; // "innen"-Fläche (−n)
+
+  // Schichteinzug: die GEWÄHLTE Fläche rückt um `insetFromFace` nach innen; die
+  // gegenüberliegende Fläche bleibt unverändert (der Rahmen reicht weiterhin
+  // bis dorthin) — vgl. DoorType.insetFromFace/WindowType.insetFromFace.
+  const clampedInset = Math.max(0, Math.min(spec.insetFromFace, total));
+  const nearIsAussen = spec.insetFace !== "innen";
+  const faceNear = nearIsAussen ? outerFace - clampedInset : innerFace + clampedInset;
+  const faceFar = nearIsAussen ? innerFace : outerFace;
+  const lo = Math.min(faceNear, faceFar);
+  const hi = Math.max(faceNear, faceFar);
+
+  const { jambStart, jambEnd } = jambs;
+  const frameWidth = Math.max(0, spec.frameWidth);
+  const isBlock = o.kind === "door" && spec.frameKind === "blockrahmen";
+  const color = o.color ?? POCHE_STROKE;
+
+  let bandLo: number;
+  let bandHi: number;
+  let jStart: Vec2;
+  let jEnd: Vec2;
+  let weightMm: number;
+  if (isBlock) {
+    // Blockrahmen: volle Öffnungsbreite (kein Pfosten-Einzug), nur eine
+    // Tiefenscheibe von frameWidth ab der Nah-Fläche — sitzt proud VOR/auf der
+    // Laibung, statt schmal darin zu verschwinden (Zargen-Optik).
+    const depth = Math.min(frameWidth, hi - lo);
+    bandLo = nearIsAussen ? hi - depth : lo;
+    bandHi = nearIsAussen ? hi : lo + depth;
+    jStart = jambStart;
+    jEnd = jambEnd;
+    weightMm = SYMBOL_HAIRLINE_MM * 2.2;
+  } else {
+    // Zarge: ringsum um frameWidth von der vollen Öffnung eingezogenes,
+    // schmales Rahmenband (Laibungs-Anschlaglinie).
+    const jambSpan = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
+    const jambInset = Math.min(frameWidth, jambSpan / 2);
+    jStart = along(jambStart, jambEnd, jambInset);
+    jEnd = along(jambEnd, jambStart, jambInset);
+    const depthInset = Math.min(frameWidth, (hi - lo) / 2);
+    bandLo = lo + depthInset;
+    bandHi = hi - depthInset;
+    weightMm = SYMBOL_HAIRLINE_MM;
+  }
+
+  // Geschlossenes Rechteck aus 4 Kanten (Primitive "line", nicht "polygon" —
+  // so bleibt das Band per `cls` selektierbar/testbar wie die übrigen Symbole).
+  const p1 = add(jStart, scale(n, bandLo));
+  const p2 = add(jEnd, scale(n, bandLo));
+  const p3 = add(jEnd, scale(n, bandHi));
+  const p4 = add(jStart, scale(n, bandHi));
+  const edges: [Vec2, Vec2][] = [
+    [p1, p2],
+    [p2, p3],
+    [p3, p4],
+    [p4, p1],
+  ];
+  for (const [a, b] of edges) {
+    out.push({
+      kind: "line",
+      a,
+      b,
+      cls: "opening-frame",
+      weightMm,
+      color,
+      greyed,
+      openingId: o.id,
+    });
+  }
+
+  // Oberlicht (Überkopf-Andeutung): eine gestrichelte Linie quer über die
+  // Öffnung auf der Wandachse — nur wenn der Typ ein Oberlicht definiert.
+  if (spec.transomHeight > 0) {
+    out.push({
+      kind: "line",
+      a: jambStart,
+      b: jambEnd,
+      cls: "opening-transom",
+      weightMm: SYMBOL_HAIRLINE_MM,
+      dash: OVERHEAD_DASH,
+      color,
+      greyed,
+      openingId: o.id,
+    });
+  }
+}
+
+/**
  * Öffnungs-Symbol (Fenster/Tür) je Detailgrad. Anders als das Legacy-`addDoorSymbol`
  * arbeitet diese Funktion über die reinen Geometrie-Helfer (opening.ts) und taggt
  * ihre Primitive mit `openingId`, sodass die Öffnung im Plan selektierbar ist.
@@ -1953,6 +2115,10 @@ function addOpeningSymbol(
         });
       }
     }
+    // Rahmenband (Zarge/Blockrahmen) + Oberlicht-Andeutung — nur wenn die
+    // Öffnung einen Türtyp referenziert (siehe `resolveOpeningFrameSpec`).
+    const doorFrameSpec = resolveOpeningFrameSpec(project, o);
+    if (doorFrameSpec) addOpeningFrameBand(out, project, wall, o, doorFrameSpec, greyed);
     // Sturzlinien (SIA, gestrichelt) — Überkopf-Projektion des Sturzes quer über
     // die Öffnung an der Wand-Innen-/Aussenkante. Entspricht `_make_tuer_sturz_curves`
     // im Rhino-Plugin. Default „beide" wenn nicht explizit gesetzt.
@@ -2065,6 +2231,11 @@ function addOpeningSymbol(
       openingId: o.id,
     });
   }
+  // Rahmenband (Zarge) + Oberlicht-Andeutung — nur wenn die Öffnung einen
+  // Fenstertyp referenziert (siehe `resolveOpeningFrameSpec`). Kämpfer-Zeilen
+  // (`mullionRows`) bleiben im Grundriss-Schnitt unsichtbar (3D-Sache).
+  const windowFrameSpec = resolveOpeningFrameSpec(project, o);
+  if (windowFrameSpec) addOpeningFrameBand(out, project, wall, o, windowFrameSpec, greyed);
   // fein: Anschlag-/Laibungsstriche an beiden Pfosten (kurz quer zur Wand) —
   // analog zur Tür, damit Fenster im Detailplan gleich „fertig" wirken (bisher
   // hatten nur Türen sie). Haarlinie, 6 cm Andeutung je Seite.
