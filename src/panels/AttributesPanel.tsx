@@ -39,6 +39,8 @@ import {
   OpeningSection,
   StairSection,
   RoomSection,
+  ExtrudedSolidSection,
+  ColumnSection,
 } from "./ObjectInfoPanel";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
@@ -315,6 +317,8 @@ export function AttributesPanel() {
       {sel.opening && <OpeningSection opening={sel.opening} host={host} />}
       {sel.stair && <StairSection stair={sel.stair} host={host} />}
       {sel.room && <RoomSection room={sel.room} roomId={sel.id} host={host} />}
+      {sel.extrudedSolid && <ExtrudedSolidSection solid={sel.extrudedSolid} host={host} />}
+      {sel.column && <ColumnSection column={sel.column} host={host} />}
     </div>
   );
 }

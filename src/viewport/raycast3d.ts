@@ -8,12 +8,13 @@
 // (x, elevation, y); Höhe entlang +Y. Der Grundriss liegt also in der XZ-Ebene,
 // vertikal wird über die world-Y-Achse extrudiert.
 //
-// KAMERA: perspektivischer Pinhole-Strahl aus eye durch das Cursor-Pixel. Für
-// die freie Orbit-Kamera (iso/perspektivisch bzw. nach jeder manuellen
-// Navigation) ist das exakt. Für die achsparallelen Presets (front/top/side),
-// die render3d orthografisch zeichnet, ist es eine perspektivische Näherung —
-// der Blickwinkel stimmt (VIEW3D_ORBIT), die Parallaxe nicht ganz. Ausreichend
-// für die Bauteil-Auswahl; ein exakter Ortho-Strahl kann später ergänzt werden.
+// KAMERA: `cameraRay` deckt BEIDE Projektionen ab — perspektivischer Pinhole-
+// Strahl aus `eye` (Default, `perspective` fehlt/true) für die freie Orbit-
+// Kamera, ODER (bei `perspective:false`, s. `ProjCamera`/Front-/Top-/Side-/
+// Iso-Presets, die render3d orthografisch zeichnet) echte parallele Strahlen:
+// alle Strahlen teilen dieselbe Richtung (Blickrichtung `f`), nur der URSPRUNG
+// wandert lateral mit dem Pixel — exakte Umkehrung von `worldToScreen`s
+// Ortho-Zweig, keine perspektivische Näherung mehr.
 
 export type Vec3 = [number, number, number];
 
@@ -24,6 +25,11 @@ export interface RayCamera {
   up: readonly [number, number, number];
   /** Vertikaler Öffnungswinkel in RADIANT. */
   fovY: number;
+  /** false = orthografisch (parallele Strahlen). Fehlt/true = perspektivisch
+   *  (Default, rückwärtskompatibel zu bestehenden Aufrufern ohne dieses Feld). */
+  perspective?: boolean;
+  /** Halbe Bildhöhe in Metern — nur bei `perspective:false` relevant. */
+  orthoHalfHeight?: number;
 }
 
 /** Ein Strahl in Weltkoordinaten (dir normalisiert). */
@@ -42,6 +48,21 @@ export interface PickWall {
   wallId: string;
 }
 
+/**
+ * Minimal-Form einer Öffnungs-Box (Fenster/Tür) für den Raycast — dieselbe
+ * orientierte-Quader-Form wie `PickWall` (Achse jambStart→jambEnd in der
+ * XZ-Ebene, Dicke = Wanddicke am Sitz der Öffnung), nur über ihre EIGENE
+ * vertikale Ausdehnung (Brüstung..Sturz) statt der vollen Wandhöhe.
+ */
+export interface PickOpening {
+  start: readonly [number, number];
+  end: readonly [number, number];
+  thickness: number;
+  height: number;
+  baseElevation: number;
+  openingId: string;
+}
+
 /** Minimal-Form eines Decken-Prismas für den Raycast (RSlab erfüllt sie strukturell). */
 export interface PickSlab {
   outline: ReadonlyArray<readonly [number, number]>;
@@ -50,11 +71,28 @@ export interface PickSlab {
   ceilingId: string;
 }
 
+/**
+ * Minimal-Form eines Treppen-Bounding-Prismas für den Raycast: ein achsparalleles
+ * Rechteck über den Grundriss-Fußabdruck (alle Tritte + Podest), extrudiert über
+ * die vertikale Ausdehnung der Treppe. Pragmatische Näherung statt Tritt-für-
+ * Tritt-Boxen — reicht für zuverlässiges Anklicken im 3D-Viewport.
+ */
+export interface PickStair {
+  outline: ReadonlyArray<readonly [number, number]>;
+  zBottom: number;
+  zTop: number;
+  stairId: string;
+}
+
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling";
+  kind: "wall" | "ceiling" | "opening" | "stair";
   id: string;
   t: number;
+  /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
+  openingId?: string;
+  /** Bei `kind:"stair"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
+  stairId?: string;
 }
 
 const EPS = 1e-9;
@@ -78,10 +116,16 @@ function norm(a: Vec3): Vec3 {
 }
 
 /**
- * Perspektivischer Kamerastrahl durch ein NDC-Pixel. `ndcX`/`ndcY` ∈ [-1,1]
- * (X links→rechts, Y unten→oben — der Aufrufer invertiert die Pixel-Y-Achse).
- * `aspect` = Breite/Höhe des Canvas. Standard-Pinhole: Kamerabasis f/s/u aus
- * eye/target/up, Richtung = f + s·(ndcX·aspect·tan(fovY/2)) + u·(ndcY·tan(fovY/2)).
+ * Kamerastrahl durch ein NDC-Pixel. `ndcX`/`ndcY` ∈ [-1,1] (X links→rechts, Y
+ * unten→oben — der Aufrufer invertiert die Pixel-Y-Achse). `aspect` = Breite/
+ * Höhe des Canvas.
+ *
+ * `perspective` (Default true): Standard-Pinhole — EIN Ursprung (`eye`),
+ * Richtung = f + s·(ndcX·aspect·tan(fovY/2)) + u·(ndcY·tan(fovY/2)).
+ *
+ * `perspective:false`: orthografisch — alle Strahlen PARALLEL (Richtung
+ * immer `f`), der Ursprung wandert stattdessen lateral mit dem Pixel (exakte
+ * Umkehrung von `worldToScreen`s Ortho-Zweig, s. `ProjCamera`).
  */
 export function cameraRay(
   cam: RayCamera,
@@ -93,6 +137,17 @@ export function cameraRay(
   const f = norm(sub(cam.target as Vec3, eye)); // Blickrichtung
   const s = norm(cross(f, cam.up as Vec3)); // rechts
   const u = cross(s, f); // echtes Kamera-oben
+
+  if (cam.perspective === false) {
+    const hh = cam.orthoHalfHeight || 1;
+    const origin: Vec3 = [
+      eye[0] + s[0] * (ndcX * aspect * hh) + u[0] * (ndcY * hh),
+      eye[1] + s[1] * (ndcX * aspect * hh) + u[1] * (ndcY * hh),
+      eye[2] + s[2] * (ndcX * aspect * hh) + u[2] * (ndcY * hh),
+    ];
+    return { origin, dir: f };
+  }
+
   const th = Math.tan(cam.fovY / 2);
   const dir = norm([
     f[0] + s[0] * (ndcX * aspect * th) + u[0] * (ndcY * th),
@@ -103,27 +158,36 @@ export function cameraRay(
 }
 
 /**
- * Schnitt-Distanz des Strahls mit dem orientierten Quader (OBB) einer Wand, oder
- * null. Der Quader ist exakt: Achse start→end in der XZ-Ebene (Länge), Normale
- * dazu (Dicke), world-Y (Höhe baseElevation..baseElevation+height). Slab-Methode
- * im OBB-Rahmen (Real-Time Rendering). Rückgabe = nichtnegative Eintritts-t (bzw.
- * Austritts-t, falls der Ursprung im Quader liegt).
+ * Schnitt-Distanz des Strahls mit einem orientierten Quader (OBB) in der
+ * world-XZ-Ebene, oder null. Der Quader ist exakt: Achse start→end in der
+ * XZ-Ebene (Länge), Normale dazu (Dicke), world-Y (Höhe baseElevation..
+ * baseElevation+height). Slab-Methode im OBB-Rahmen (Real-Time Rendering).
+ * Rückgabe = nichtnegative Eintritts-t (bzw. Austritts-t, falls der Ursprung
+ * im Quader liegt). Gemeinsamer Kern für `rayWallBox` (volle Wandhöhe) und
+ * `rayOpeningBox` (nur die vertikale Ausdehnung der Öffnung).
  */
-export function rayWallBox(ray: Ray, wall: PickWall): number | null {
-  const ax = wall.end[0] - wall.start[0];
-  const az = wall.end[1] - wall.start[1];
+function rayOrientedBoxXZ(
+  ray: Ray,
+  start: readonly [number, number],
+  end: readonly [number, number],
+  thickness: number,
+  height: number,
+  baseElevation: number,
+): number | null {
+  const ax = end[0] - start[0];
+  const az = end[1] - start[1];
   const len = Math.hypot(ax, az);
-  if (len < EPS || wall.height <= EPS || wall.thickness <= EPS) return null;
+  if (len < EPS || height <= EPS || thickness <= EPS) return null;
   const axis: [Vec3, Vec3, Vec3] = [
-    [ax / len, 0, az / len], // entlang der Wandachse
+    [ax / len, 0, az / len], // entlang der Achse
     [0, 1, 0], // Höhe
     [az / len, 0, -ax / len], // Normale (Dicke), senkrecht in XZ
   ];
-  const half = [len / 2, wall.height / 2, wall.thickness / 2];
+  const half = [len / 2, height / 2, thickness / 2];
   const center: Vec3 = [
-    (wall.start[0] + wall.end[0]) / 2,
-    wall.baseElevation + wall.height / 2,
-    (wall.start[1] + wall.end[1]) / 2,
+    (start[0] + end[0]) / 2,
+    baseElevation + height / 2,
+    (start[1] + end[1]) / 2,
   ];
   const p = sub(center, ray.origin);
   let tmin = -Infinity;
@@ -150,6 +214,29 @@ export function rayWallBox(ray: Ray, wall: PickWall): number | null {
     }
   }
   return tmin > 0 ? tmin : tmax;
+}
+
+/**
+ * Schnitt-Distanz des Strahls mit dem orientierten Quader (OBB) einer Wand,
+ * oder null — s. {@link rayOrientedBoxXZ}.
+ */
+export function rayWallBox(ray: Ray, wall: PickWall): number | null {
+  return rayOrientedBoxXZ(ray, wall.start, wall.end, wall.thickness, wall.height, wall.baseElevation);
+}
+
+/**
+ * Schnitt-Distanz des Strahls mit der orientierten Box einer Öffnung (Fenster/
+ * Tür) über ihre EIGENE vertikale Ausdehnung, oder null — s. {@link rayOrientedBoxXZ}.
+ */
+export function rayOpeningBox(ray: Ray, opening: PickOpening): number | null {
+  return rayOrientedBoxXZ(
+    ray,
+    opening.start,
+    opening.end,
+    opening.thickness,
+    opening.height,
+    opening.baseElevation,
+  );
 }
 
 /** Punkt-in-Polygon (XZ-Ebene), klassisches Ray-Casting (ungerade Kreuzungen). */
@@ -191,36 +278,42 @@ function rayTriangle(ray: Ray, a: Vec3, b: Vec3, c: Vec3): number | null {
 }
 
 /**
- * Schnitt-Distanz des Strahls mit dem extrudierten Umriss-Prisma einer Decke,
- * oder null. GENAUIGKEIT: exakt für ein einfaches (nicht selbst-schneidendes)
- * Polygon — Deckel/Boden (y=zTop/zBottom) über Punkt-in-Polygon (XZ), die
- * Seitenflächen als vertikale Quads (je zwei Ray-Dreiecke). Kleinstes
- * nichtnegatives t gewinnt.
+ * Schnitt-Distanz des Strahls mit einem extrudierten Umriss-Prisma (world-XZ-
+ * Grundriss, world-Y-Extrusion zBottom..zTop), oder null. GENAUIGKEIT: exakt
+ * für ein einfaches (nicht selbst-schneidendes) Polygon — Deckel/Boden (y=
+ * zTop/zBottom) über Punkt-in-Polygon (XZ), die Seitenflächen als vertikale
+ * Quads (je zwei Ray-Dreiecke). Kleinstes nichtnegatives t gewinnt. Gemeinsamer
+ * Kern für `raySlabPrism` (Decke) und `rayStairPrism` (Treppen-Bounding-Box).
  */
-export function raySlabPrism(ray: Ray, slab: PickSlab): number | null {
-  const n = slab.outline.length;
-  if (n < 3 || slab.zTop - slab.zBottom <= EPS) return null;
+function rayPrismXZ(
+  ray: Ray,
+  outline: ReadonlyArray<readonly [number, number]>,
+  zBottom: number,
+  zTop: number,
+): number | null {
+  const n = outline.length;
+  if (n < 3 || zTop - zBottom <= EPS) return null;
   let best = Infinity;
   const consider = (t: number | null) => {
     if (t !== null && t >= 0 && t < best) best = t;
   };
   // Deckel + Boden (horizontale Ebenen) via Punkt-in-Polygon.
-  for (const y of [slab.zBottom, slab.zTop]) {
+  for (const y of [zBottom, zTop]) {
     if (Math.abs(ray.dir[1]) <= EPS) continue;
     const t = (y - ray.origin[1]) / ray.dir[1];
     if (t < 0) continue;
     const px = ray.origin[0] + t * ray.dir[0];
     const pz = ray.origin[2] + t * ray.dir[2];
-    if (pointInPolyXZ(px, pz, slab.outline)) consider(t);
+    if (pointInPolyXZ(px, pz, outline)) consider(t);
   }
   // Seitenwände: je Kante ein vertikales Quad (zwei Dreiecke).
   for (let i = 0, j = n - 1; i < n; j = i++) {
-    const a = slab.outline[j];
-    const b = slab.outline[i];
-    const A: Vec3 = [a[0], slab.zBottom, a[1]];
-    const B: Vec3 = [b[0], slab.zBottom, b[1]];
-    const C: Vec3 = [b[0], slab.zTop, b[1]];
-    const D: Vec3 = [a[0], slab.zTop, a[1]];
+    const a = outline[j];
+    const b = outline[i];
+    const A: Vec3 = [a[0], zBottom, a[1]];
+    const B: Vec3 = [b[0], zBottom, b[1]];
+    const C: Vec3 = [b[0], zTop, b[1]];
+    const D: Vec3 = [a[0], zTop, a[1]];
     consider(rayTriangle(ray, A, B, C));
     consider(rayTriangle(ray, A, C, D));
   }
@@ -228,27 +321,155 @@ export function raySlabPrism(ray: Ray, slab: PickSlab): number | null {
 }
 
 /**
- * Nächstes getroffenes Bauteil (kleinstes t) über Wände + Decken, oder null.
- * Wände und Decken konkurrieren direkt über die Distanz — was näher an der
- * Kamera liegt, gewinnt.
+ * Schnitt-Distanz des Strahls mit dem extrudierten Umriss-Prisma einer Decke,
+ * oder null — s. {@link rayPrismXZ}.
+ */
+export function raySlabPrism(ray: Ray, slab: PickSlab): number | null {
+  return rayPrismXZ(ray, slab.outline, slab.zBottom, slab.zTop);
+}
+
+/**
+ * Schnitt-Distanz des Strahls mit dem Bounding-Prisma einer Treppe (Grundriss-
+ * Fußabdruck × vertikale Ausdehnung), oder null — s. {@link rayPrismXZ}.
+ */
+export function rayStairPrism(ray: Ray, stair: PickStair): number | null {
+  return rayPrismXZ(ray, stair.outline, stair.zBottom, stair.zTop);
+}
+
+// Overload OHNE Öffnungen/Treppen: bleibt exakt die bisherige Signatur, sodass
+// der bestehende Aufrufer (Wasm3DViewport.tsx: `pickNearest(ray, walls, slabs)`)
+// unverändert kompiliert — inklusive des dort erwarteten engen `kind`-Typs
+// ("wall" | "ceiling"), da mit leeren Öffnungen/Treppen ohnehin nur diese beiden
+// Arten getroffen werden können.
+export function pickNearest(
+  ray: Ray,
+  walls: readonly PickWall[],
+  slabs: readonly PickSlab[],
+): (PickHit & { kind: "wall" | "ceiling" }) | null;
+// Erweiterter Overload MIT Öffnungen/Treppen: `kind` deckt alle vier Arten ab.
+export function pickNearest(
+  ray: Ray,
+  walls: readonly PickWall[],
+  slabs: readonly PickSlab[],
+  openings: readonly PickOpening[],
+  stairs?: readonly PickStair[],
+): PickHit | null;
+/**
+ * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
+ * Treppen, oder null. Alle Kandidaten konkurrieren direkt über die Distanz —
+ * was näher an der Kamera liegt, gewinnt. PRIORITÄT bei (nahezu) gleichem t:
+ * Öffnung/Treppe vor Wand/Decke, weil ihr Symbol (Rahmen, Blatt, Stufenkante)
+ * auf derselben Fläche wie die Wandaussenkante liegt und sonst vom fast
+ * gleich-weiten Wandtreffer verdeckt würde — primär entscheidet aber IMMER das
+ * kleinste t, der Rang bricht nur echte Gleichstände.
  */
 export function pickNearest(
   ray: Ray,
   walls: readonly PickWall[],
   slabs: readonly PickSlab[],
+  openings: readonly PickOpening[] = [],
+  stairs: readonly PickStair[] = [],
 ): PickHit | null {
+  const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
+  let rank = Infinity;
+  const consider = (candidate: PickHit, candidateRank: number) => {
+    if (
+      hit === null ||
+      candidate.t < hit.t - TIE_EPS ||
+      (candidate.t <= hit.t + TIE_EPS && candidateRank < rank)
+    ) {
+      hit = candidate;
+      rank = candidateRank;
+    }
+  };
   for (const w of walls) {
     const t = rayWallBox(ray, w);
-    if (t !== null && (hit === null || t < hit.t)) {
-      hit = { kind: "wall", id: w.wallId, t };
-    }
+    if (t !== null) consider({ kind: "wall", id: w.wallId, t }, 1);
   }
   for (const s of slabs) {
     const t = raySlabPrism(ray, s);
-    if (t !== null && (hit === null || t < hit.t)) {
-      hit = { kind: "ceiling", id: s.ceilingId, t };
-    }
+    if (t !== null) consider({ kind: "ceiling", id: s.ceilingId, t }, 1);
+  }
+  for (const o of openings) {
+    const t = rayOpeningBox(ray, o);
+    if (t !== null) consider({ kind: "opening", id: o.openingId, t, openingId: o.openingId }, 0);
+  }
+  for (const st of stairs) {
+    const t = rayStairPrism(ray, st);
+    if (t !== null) consider({ kind: "stair", id: st.stairId, t, stairId: st.stairId }, 0);
   }
   return hit;
+}
+
+// ── 3D-Editier-Griffe (Wasm-Pfad) ────────────────────────────────────────────
+// Ergänzt den Pick-Kern um die Bausteine, die ein Vertex-Griff-Drag im nativen
+// Viewport braucht: Schnitt mit einer horizontalen Arbeitsebene (Drag-Ziel-
+// punkt, analog `workplaneModel` in der three.js-Sicht) + Nächster-Griff-Test
+// (Screen-Pixel-Toleranz, die je Strahl-Distanz in Welt-Meter umgerechnet wird
+// — dieselbe perspektivische Näherung wie `cameraRay`/`pickNearest`).
+
+/**
+ * Schnittpunkt des Strahls mit der horizontalen Ebene world-y = `planeY`, oder
+ * null (Strahl (nahezu) parallel zur Ebene oder Schnitt liegt hinter dem
+ * Ursprung). Analog `workplaneModel` in `Viewport3D.tsx`, nur ohne three.js.
+ */
+export function rayPlaneY(ray: Ray, planeY: number): Vec3 | null {
+  return rayPlane(ray, [0, planeY, 0], [0, 1, 0]);
+}
+
+/**
+ * Schnittpunkt des Strahls mit einer beliebigen Ebene (Punkt + Normale), oder
+ * null (Strahl (nahezu) parallel zur Ebene oder Schnitt hinter dem Ursprung).
+ * Für den 3D-Höhen-Griff (vertikale Ebene entlang der Wandachse) — s.
+ * `Wasm3DViewport.tsx`.
+ */
+export function rayPlane(ray: Ray, point: Vec3, normal: Vec3): Vec3 | null {
+  const denom = dot(ray.dir, normal);
+  if (Math.abs(denom) < EPS) return null;
+  const t = dot(sub(point, ray.origin), normal) / denom;
+  if (t < 0) return null;
+  return [ray.origin[0] + t * ray.dir[0], ray.origin[1] + t * ray.dir[1], ray.origin[2] + t * ray.dir[2]];
+}
+
+/** Kameraparameter für die Weltpunkt→Bildschirm-Projektion (Umkehrung von `cameraRay`). */
+export interface ProjCamera extends RayCamera {
+  /** true = perspektivisch (fovY), false = orthografisch (orthoHalfHeight). */
+  perspective: boolean;
+  /** Halbe Sichthöhe in Metern (nur orthografisch). */
+  orthoHalfHeight: number;
+}
+
+/**
+ * Projiziert einen Weltpunkt auf Bildschirm-Pixel (0,0 = oben links) innerhalb
+ * eines `width`×`height`-Rechtecks. `null`, wenn der Punkt (nur perspektivisch
+ * relevant) hinter der Kamera liegt. Für echte GUI-Griffe (DOM-Overlay statt
+ * In-Szene-Geometrie) — s. `Wasm3DViewport.tsx`.
+ */
+export function worldToScreen(
+  cam: ProjCamera,
+  point: Vec3,
+  width: number,
+  height: number,
+): { x: number; y: number } | null {
+  const eye = cam.eye as Vec3;
+  const f = norm(sub(cam.target as Vec3, eye));
+  const s = norm(cross(f, cam.up as Vec3));
+  const u = cross(s, f);
+  const v = sub(point, eye);
+  const aspect = width / height;
+  let ndcX: number;
+  let ndcY: number;
+  if (cam.perspective) {
+    const depth = dot(v, f);
+    if (depth <= 0.01) return null;
+    const th = Math.tan(cam.fovY / 2);
+    ndcX = dot(v, s) / (depth * aspect * th);
+    ndcY = dot(v, u) / (depth * th);
+  } else {
+    const hh = cam.orthoHalfHeight || 1;
+    ndcX = dot(v, s) / (hh * aspect);
+    ndcY = dot(v, u) / hh;
+  }
+  return { x: ((ndcX + 1) / 2) * width, y: ((1 - ndcY) / 2) * height };
 }

@@ -1,0 +1,42 @@
+[workspace]
+
+[package]
+name = "trucksolid"
+version = "0.1.0"
+edition = "2021"
+description = "Profil-Extrusion via truck B-Rep → tesselliertes Mesh für render3d"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+web = [
+    "dep:wasm-bindgen",
+    "dep:serde_json",
+    "dep:console_error_panic_hook",
+]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+# truck-modeling bringt truck-geometry/topology/polymesh transitiv mit (alle
+# auf derselben kompatiblen Version). Nur truck-modeling explizit pinnen —
+# keine separaten geometry/topology-Einträge, die einen Versions-Konflikt erzeugen.
+truck-modeling = "0.3"
+# Mesh-Ebenen-CSG (Boolesche Operationen) — bewusst NICHT truck-modeling-Booleans
+# (instabil bei koinzidenten Flächen, siehe PENDENZEN.md truck-Integration Phase 4).
+# csgrs arbeitet auf Dreiecks-Ebene (BSP-Baum), robust genau in diesem Fall.
+# Gepinnt auf einen Git-Commit (crates.io-Veröffentlichungen 0.16–0.20.1 sind alle
+# wegen einer harten, zurückgezogenen core2-Abhängigkeit nicht installierbar; auf
+# dem unveröffentlichten main-Branch bereits behoben). Nutzerautorisiert (Spike).
+csgrs = { git = "https://github.com/timschmidt/csgrs", rev = "5e7a37a8803d4e56617734687edc9b98f4ebeed7", default-features = false, features = ["f64", "bmesh", "mesh", "earcut"] }
+nalgebra = "0.34"
+
+[dev-dependencies]
+serde_json = "1"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

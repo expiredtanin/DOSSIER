@@ -40,6 +40,9 @@ fn demo_walls() -> Vec<WallInput> {
         openings: vec![],
         layers: None,
         holes: vec![],
+        material_index: None,
+        hatch: None,
+        cut: None,
     };
     // Raum 6 x 4 m.
     vec![

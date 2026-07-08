@@ -5,7 +5,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Ceiling, Project, Stair, VerticalAnchor, Wall } from "./types";
+import type { Ceiling, Column, Project, Stair, VerticalAnchor, Wall } from "./types";
 import { ceilingThickness, getFloor } from "./types";
 
 /**
@@ -74,7 +74,9 @@ export function wallVerticalExtent(
  * Vertikale Ausdehnung einer Decke (absolute Z-Werte in Metern).
  *   • zTop:    aus `ceiling.top`, sonst Oberkante des Geschosses
  *     (baseElevation + floorHeight) — also bündig mit dem Wandkopf.
- *   • zBottom: zTop − Deckendicke (die Decke wächst nach UNTEN).
+ *   • zBottom: aus `ceiling.bottom`, sonst zTop − Deckendicke (die Decke
+ *     wächst nach UNTEN — heutiges Verhalten). Die `thickness` bleibt bei
+ *     gesetztem `bottom` rein informativ (dient nicht mehr der UK-Ableitung).
  * Fehlt das Geschoss, dient 0 als sicherer Rückfall für die Oberkante.
  */
 export function ceilingVerticalExtent(
@@ -89,7 +91,9 @@ export function ceilingVerticalExtent(
     floorTop = 0;
   }
   const zTop = resolveAnchor(project, ceiling.top) ?? floorTop;
-  const zBottom = zTop - ceilingThickness(project, ceiling);
+  const zBottom =
+    resolveAnchor(project, ceiling.bottom) ??
+    zTop - ceilingThickness(project, ceiling);
   return { zBottom, zTop };
 }
 
@@ -122,6 +126,28 @@ export function stairVerticalExtent(
         ? floorHeight
         : 2.6;
   return { zBottom: base, zTop: base + rise };
+}
+
+/**
+ * Vertikale Ausdehnung einer Stütze (absolute Z-Werte in Metern) — dieselbe
+ * Regel wie {@link wallVerticalExtent}:
+ *   • zBottom: aus `column.bottom`, sonst baseElevation des Geschosses.
+ *   • zTop:    aus `column.top`, sonst `zBottom + column.height`.
+ * Fehlt das Geschoss, dient 0 als sicherer Rückfall für die Unterkante.
+ */
+export function columnVerticalExtent(
+  project: Project,
+  column: Column,
+): { zBottom: number; zTop: number } {
+  let floorBase = 0;
+  try {
+    floorBase = getFloor(project, column.floorId).baseElevation ?? 0;
+  } catch {
+    floorBase = 0;
+  }
+  const zBottom = resolveAnchor(project, column.bottom) ?? floorBase;
+  const zTop = resolveAnchor(project, column.top) ?? zBottom + column.height;
+  return { zBottom, zTop };
 }
 
 /**

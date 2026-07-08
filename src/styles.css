@@ -561,6 +561,14 @@ body {
   line-height: 1;
 }
 .brand-word {
+  /* Als <button> gerendert (öffnet den Über-Dialog) — Button-Chrome zurücksetzen,
+     Optik bleibt exakt wie die frühere <span>. */
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
   font-weight: 700;
   font-size: 12px;
   letter-spacing: -0.01em;
@@ -568,8 +576,101 @@ body {
   color: var(--ink);
   white-space: nowrap;
 }
+.brand-word:hover .brand-dot {
+  filter: brightness(1.25);
+}
 .brand-dot {
-  color: var(--accent);
+  /* Petrolgrün wie im DOSSIER-Rhino-Plugin (fix, unabhängig vom Akzent). */
+  color: #0f766e;
+}
+
+/* Export-Sammelmenü: Liste im Popover (fixed) über der Oberleiste. */
+.tb-popover.tb-menu {
+  padding: 4px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* „Über"-Dialog (In-App, dunkel). */
+.about-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.about-dialog {
+  min-width: 320px;
+  max-width: 420px;
+  padding: 22px 24px;
+  border-radius: 10px;
+  background: var(--panel, #23262b);
+  border: 1px solid var(--border, #3a3f47);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  color: var(--ink, #e6e8ea);
+  /* Der Dialog ist ein DOM-Kind der `.topbar` (white-space: nowrap) — ohne
+     dieses Reset liefe der mehrzeilige Beschreibungstext einzeilig aus dem
+     Dialog heraus. Hier wieder normalen Zeilenumbruch erzwingen. */
+  white-space: normal;
+}
+.about-brand {
+  font-weight: 700;
+  font-size: 20px;
+  text-transform: lowercase;
+  letter-spacing: -0.01em;
+}
+.about-version {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted, #9aa0a6);
+}
+.about-desc {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--label, #c4c8cd);
+}
+.about-meta {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted, #9aa0a6);
+}
+.about-sec-label {
+  margin-top: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #9aa0a6);
+}
+.about-licenses {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--label, #c4c8cd);
+}
+.about-close {
+  appearance: none;
+  margin-top: 18px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #3a3f47);
+  background: var(--input, #2b2f36);
+  color: var(--ink, #e6e8ea);
+  cursor: pointer;
+  font-size: 12px;
+}
+.about-close:hover {
+  background: var(--accent-dim, #33383f);
 }
 
 .tag {
@@ -728,6 +829,49 @@ body {
 /* Kamera-Button steckt im Popover-Wrapper → als Grid-Zelle behandeln. */
 .view-grid .tb-popwrap {
   display: inline-flex;
+}
+
+/* Iso-Split-Button (IsoMenu): Haupt-Icon + schmaler Pfeil-Trigger, zusammen
+   exakt so breit wie ein normales .view-icon (31px) — behält die Grid-Spalten-
+   breite des Ansichts-Rasters bei. */
+.view-icon-split {
+  display: inline-flex;
+}
+.view-icon-split-main {
+  width: 22px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.view-icon-caret {
+  width: 9px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #4a4a4a;
+  background: #2c2c2c;
+  color: #b0b0b0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.view-icon-caret:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f0f0f0;
+  border-color: var(--accent-border);
+}
+.view-icon-caret.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.view-icon-caret:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Material-Symbols-Icon in Oberleisten-Buttons (Referenzlinien, Linien-Modus,
@@ -1318,6 +1462,18 @@ body {
   opacity: 0.45;
 }
 
+/* Drag&Drop-Ziel: überfahrene Ordnerzeile (Layouts-Baum) hervorheben. */
+.nav-row.drag-over {
+  background: var(--active-dim);
+  box-shadow: inset 0 0 0 1.5px var(--active-light);
+  border-bottom-color: transparent;
+}
+/* Wurzel-Ablagefläche (leerer Bereich der Baumliste) beim Ziehen markieren. */
+.nav-list.drag-over-root {
+  box-shadow: inset 0 0 0 1.5px var(--active-light);
+  border-radius: 6px;
+}
+
 .nav-label {
   flex: 1;
   min-width: 0;
@@ -1333,6 +1489,53 @@ body {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--muted);
+}
+
+/* Footer-Bar des Ausschnitte-Panels: fixiert am Panel-Boden, zeigt die
+   Kenndaten des angewählten Ausschnitts (Massstab/Kombis/Overrides + Rename). */
+.viewsnap-footer {
+  margin-top: auto;
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.viewsnap-footer-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+.viewsnap-footer-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--active-light);
+}
+.viewsnap-footer-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0;
+  font-size: 11px;
+}
+.viewsnap-footer-grid dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.viewsnap-footer-grid dd {
+  margin: 0;
+  color: var(--label);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Augen-Schalter (Sichtbarkeit) — erbt Zeilenfarbe via currentColor. */
@@ -1814,7 +2017,7 @@ body {
 .plan-svg .snap-glyph {
   fill: none;
   stroke: #ffcc44;
-  stroke-width: 1.4;
+  stroke-width: 2.2;
 }
 .plan-svg .snap-glyph.snap-fill {
   fill: #ffcc44;
@@ -3841,18 +4044,34 @@ body {
   letter-spacing: 0.04em;
   margin: 2px 2px 4px;
 }
+/* Bezugspunkt-Zeile: Würfel (fix quadratisch) links, X/Y/Z-Spalte rechts. */
+.objinfo-refrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
 .objinfo-cube {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
   gap: 3px;
+  /* Immer quadratisch, wächst NICHT mit der Panelbreite (Nutzer-Wunsch). */
+  flex: 0 0 auto;
   width: 64px;
   height: 64px;
-  margin: 0 auto 6px;
+  aspect-ratio: 1 / 1;
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--input);
+}
+.objinfo-xyzcol {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .objinfo-anchor {
   display: flex;
@@ -4325,6 +4544,52 @@ body {
 .imp-radio input[disabled] + span {
   color: var(--muted);
 }
+
+/* Segment-Auswahl (A4/A3/Frei · Hoch/Quer) in den Layout-Erstell-Dialogen. */
+.imp-seg {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.imp-seg-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 14px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--input);
+  color: var(--ink);
+  cursor: pointer;
+}
+.imp-seg-btn:last-child {
+  border-right: none;
+}
+.imp-seg-btn:hover {
+  background: var(--panel-2);
+}
+.imp-seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+/* Freie-Grösse-Felder (Breite × Höhe). */
+.imp-size-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.imp-size-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.imp-size-x {
+  padding-bottom: 6px;
+  color: var(--muted);
+}
 .imp-input,
 .imp-select {
   width: 100%;
@@ -4392,6 +4657,17 @@ body {
 .imp-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+/* Riskante Aktion (z. B. Lock erzwingen): dezente rote Kontur statt Fläche —
+   warnt, ohne wie der primäre Bestätigen-Button auszusehen. */
+.imp-btn.danger {
+  color: var(--ctx-danger);
+  border-color: var(--ctx-danger);
+}
+.imp-btn.danger:hover {
+  background: rgba(216, 96, 96, 0.14);
+  color: var(--ctx-danger);
+  border-color: var(--ctx-danger);
 }
 
 /* ── Einstellungs-Fenster (SettingsDialog): Farbfelder + Akzent-Presets ────
@@ -5490,6 +5766,15 @@ body {
   margin: 0 3px;
   flex: 0 0 auto;
 }
+/* Kamera-Gruppe der Quick-Access-Leiste (zusätzlich zum „Ansichten"-Ribbon-Tab):
+   dieselben `.view-icon`/`.view-icon-split`-Bausteine, nur ohne eigenen Rand um
+   die Gruppe — die 22px-Höhe passt bereits in die 26px hohe Chrome-Zeile. */
+.tb-qa-camera {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
 .ribbon-tab:hover {
   color: var(--label);
 }
@@ -5610,4 +5895,255 @@ body {
   gap: 10px;
   height: 100%;
   overflow: hidden;
+}
+
+/* ── Layout-Blatt im Haupt-Viewport (DOSSIER A3, Phase 2b) ─────────────────────
+   Das Blatt liegt auf einem dunklen „Tisch"; oben eine schlanke Werkzeugleiste,
+   darunter die pan-/zoombare Blattfläche mit dem weissen Papier. Griffe/HUD sind
+   Overlays. */
+.layout-sheet-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-sheet-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line, #2b2b2b);
+  background: var(--panel, #1d1d1d);
+  flex: 0 0 auto;
+  z-index: 3;
+}
+
+.layout-sheet-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg, #ddd);
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+.layout-sheet-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  /* Dunkler „Tisch" mit dezentem Verlauf, damit das weisse Blatt abhebt. */
+  background:
+    radial-gradient(circle at 50% 40%, #2a2a2a 0%, #161616 70%, #101010 100%);
+  touch-action: none;
+  user-select: none;
+}
+
+.layout-sheet-paper {
+  position: absolute;
+  background: #ffffff;
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.55);
+}
+
+.layout-sheet-vp {
+  position: absolute;
+  overflow: hidden;
+  background: #ffffff;
+  outline: 1px solid rgba(0, 0, 0, 0.35);
+}
+.layout-sheet-vp.selected {
+  outline: 1.5px solid #3b82f6;
+  z-index: 2;
+}
+
+.layout-sheet-vp-missing {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #b00;
+  text-align: center;
+  padding: 4px;
+}
+
+/* Resize-Griffe (8 Stück) — kleine blaue Quadrate am Rand des gewählten VP. */
+.layout-sheet-grip {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px; /* auf den Ankerpunkt zentrieren */
+  background: #ffffff;
+  border: 1.5px solid #3b82f6;
+  border-radius: 2px;
+  z-index: 4;
+}
+
+/* Ghost-Rechteck beim Aufziehen einer neuen Platzierung. */
+.layout-sheet-ghost {
+  position: absolute;
+  border: 1.5px dashed #3b82f6;
+  background: rgba(59, 130, 246, 0.12);
+  z-index: 4;
+  pointer-events: none;
+}
+
+/* HUD (Eigenschaften des gewählten VP) unten links. */
+.layout-sheet-hud {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  min-width: 150px;
+  background: color-mix(in srgb, var(--panel-2, #262626) 92%, transparent);
+  border: 1px solid var(--line, #2b2b2b);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+/* Ausschnitt-Bindung nach dem Aufziehen — mittig oben. */
+.layout-sheet-bind {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  min-width: 220px;
+  background: color-mix(in srgb, var(--panel-2, #262626) 96%, transparent);
+  border: 1px solid var(--line, #2b2b2b);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+.layout-sheet-hud-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg, #ddd);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.layout-sheet-hud-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted, #6e6e6e);
+}
+.layout-sheet-hud-row > span:first-child {
+  flex: 0 0 54px;
+}
+.layout-sheet-hud-scale {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+.layout-sheet-hud-scale input {
+  width: 64px;
+}
+
+.layout-sheet-hud-size {
+  font-size: 10px;
+  color: var(--muted, #6e6e6e);
+}
+
+.layout-sheet-hud-actions {
+  display: flex;
+  gap: 5px;
+}
+
+/* Leer-Hinweis (keine Ausschnitte / keine Viewports). */
+.layout-sheet-empty {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 3;
+  max-width: 70%;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted, #9a9a9a);
+  background: color-mix(in srgb, var(--panel, #1d1d1d) 80%, transparent);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+/* ── Toast (nicht-blockierende Kurzmeldungen, Ersatz für window.alert) ──────
+   Oben rechts, gestapelt, über allem (auch Modals) — window.alert war im
+   WKWebView ohnehin lautlos wirkungslos, siehe state/notifySlice.ts. */
+.toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: var(--shadow-3);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  pointer-events: auto;
+  animation: toast-in 0.15s ease-out;
+}
+.toast-item.toast-warning {
+  border-left-color: #d8a83c;
+}
+.toast-item.toast-error {
+  border-left-color: var(--danger);
+}
+.toast-message {
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+}
+.toast-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.toast-close:hover {
+  color: var(--ink);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

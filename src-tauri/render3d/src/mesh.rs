@@ -940,7 +940,10 @@ pub fn build_walls_mesh(walls: &[WallInput]) -> Mesh {
 /// haelt die Projektion rein lokal je Vertex — das ist genau der Grund, warum sie
 /// sich verlustfrei aus dem fertigen `Mesh` ableiten laesst.
 pub fn build_walls_mesh_textured(walls: &[WallInput]) -> TexturedMesh {
-    textured_from_mesh(&build_walls_mesh(walls))
+    // Ueber den Szenen-Builder (ohne Decken/Kontext) — so traegt der Puffer auch
+    // die Material-Ebenen je Wand (`layers`), waehrend Geometrie/UV bitgleich zu
+    // `textured_from_mesh(&build_walls_mesh(walls))` bleiben.
+    build_scene_mesh_textured(walls, &[], &[])
 }
 
 /// Rechnet ein `Mesh` (`[pos, normal, color]`) in einen `TexturedMesh`
@@ -980,7 +983,60 @@ pub fn textured_from_mesh(mesh: &Mesh) -> TexturedMesh {
     TexturedMesh {
         verts,
         indices: mesh.indices.clone(),
+        // Ohne Material-Zuordnung: leer -> die GPU-Schicht bindet einen konstanten
+        // `-1`-Ebenenpuffer (Fallback-Schachbrett fuer alle Vertices).
+        layers: Vec::new(),
     }
+}
+
+/// TEXTURIERTES Szenen-Mesh MIT Material-Ebenen: baut dieselbe Szene wie
+/// `build_scene_mesh` (Waende -> Decken -> Kontext-Meshes, gleiche Reihenfolge/
+/// Geometrie) und fuellt zusaetzlich den parallelen `layers`-Puffer (ein Eintrag
+/// je Vertex): fuer jede Wand ihre `material_index`-Textur-Ebene (`None` -> `-1`),
+/// fuer Decken und Kontext-Meshes `-1` (Fallback-Schachbrett). Die Vertex-Ranges
+/// werden waehrend des Baus je Bauteil aus `Mesh::vertex_count()` abgegriffen —
+/// dieselben `extrude_*`/`append_*`-Funktionen wie der Shaded-Pfad bleiben die
+/// EINE Geometrie-Quelle (Paritaet garantiert), es kommt nur die Ebenen-Zuordnung
+/// dazu. Genutzt vom `Textured`-Stil (`gpu::upload_*`).
+pub fn build_scene_mesh_textured(
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    meshes: &[MeshInput],
+) -> TexturedMesh {
+    let mut mesh = Mesh::default();
+    let mut layers: Vec<f32> = Vec::new();
+    let fill = |mesh: &Mesh, layers: &mut Vec<f32>, before: usize, layer: f32| {
+        let added = mesh.vertex_count().saturating_sub(before);
+        layers.extend(std::iter::repeat(layer).take(added));
+    };
+
+    let miters = compute_wall_miters(walls);
+    for (w, m) in walls.iter().zip(miters.iter()) {
+        let before = mesh.vertex_count();
+        extrude_wall_with_miters(&mut mesh, w, *m);
+        // Material-Ebene der Wand (1-basiert; 0 ist das Fallback-Schachbrett).
+        let layer = w.material_index.map(|i| i as f32).unwrap_or(-1.0);
+        fill(&mesh, &mut layers, before, layer);
+    }
+    for s in slabs {
+        let before = mesh.vertex_count();
+        extrude_slab(&mut mesh, s);
+        fill(&mesh, &mut layers, before, -1.0);
+    }
+    for m in meshes {
+        let before = mesh.vertex_count();
+        append_context_mesh(&mut mesh, m);
+        fill(&mesh, &mut layers, before, -1.0);
+    }
+
+    let mut tex = textured_from_mesh(&mesh);
+    debug_assert_eq!(
+        layers.len(),
+        tex.vertex_count(),
+        "ein Ebenen-Eintrag je Vertex"
+    );
+    tex.layers = layers;
+    tex
 }
 
 /// Baut das volle Modell-Mesh: erst die Waende (Quader), dann die Deckenplatten

@@ -3,6 +3,7 @@
 // Text-Anzeige des Hex-Werts, die nicht anklickbar/editierbar war.
 
 import { useEffect, useState } from "react";
+import { t } from "../i18n";
 
 export function ColorHexField({
   value,
@@ -32,7 +33,7 @@ export function ColorHexField({
 
   return (
     <span className="attr-color">
-      <label className="attr-color-swatch-wrap" title="Farbe wählen">
+      <label className="attr-color-swatch-wrap" title={t("attr.pickColor")}>
         <span className="attr-color-swatch" style={{ background: value }} />
         <input
           type="color"

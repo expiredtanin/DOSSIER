@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
 import { loadEngine3d } from "../engine/engine3d";
+import { decodeMaterialTextures } from "./materialTextures";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
 export interface Camera3d {
@@ -74,6 +75,12 @@ interface WebModelRendererLike {
    * aktuell gewählten Bauteils. Leeres Array löscht das Highlight. Wirkt erst
    * beim nächsten `render`. */
   set_highlight_lines(vertices: Float32Array): void;
+  /** Material-Farbkarten (Stil „textured") als Textur-Array hochladen
+   * (`web::set_material_textures`). `rgba` = gepackte RGBA8-Bytes von
+   * `layerCount` 256×256-Ebenen; Ebene 0 bleibt intern das Fallback-Schachbrett,
+   * die Karten belegen Ebenen 1..N (siehe `WallInput.materialIndex`). Optional —
+   * ältere WASM-Builds ohne diesen Export lassen den Aufrufer still zurückfallen. */
+  set_material_textures?(rgba: Uint8Array, layerCount: number): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -154,6 +161,11 @@ export function useWasm3dRenderer(
     };
   }, [enabled, canvasRef]);
 
+  // Signatur der zuletzt hochgeladenen Material-Textur-Menge — verhindert ein
+  // erneutes (teures) Dekodieren/Hochladen, wenn sich die Materialien nicht
+  // geändert haben (updateModel läuft bei JEDER Projektänderung).
+  const materialSigRef = useRef<string | null>(null);
+
   /** Modell bei Projektänderung neu setzen (re-extrudiert in Rust). */
   const updateModel = useCallback((project: Project) => {
     const r = rendererRef.current;
@@ -163,6 +175,26 @@ export function useWasm3dRenderer(
     } catch (e) {
       console.warn("render3d set_model fehlgeschlagen:", e);
     }
+    // Material-Farbkarten (Stil „textured") ASYNCHRON dekodieren + hochladen.
+    // Fire-and-forget: bis die Texturen ankommen, zeigt render3d für die
+    // betroffenen Bänder das Fallback-Schachbrett (graceful). Nur neu laden,
+    // wenn sich die Material-Menge geändert hat.
+    if (typeof r.set_material_textures !== "function") return;
+    void (async () => {
+      try {
+        const decoded = await decodeMaterialTextures(project);
+        const sig = decoded ? decoded.signature : "";
+        if (sig === materialSigRef.current) return; // unverändert
+        materialSigRef.current = sig;
+        // Renderer könnte zwischenzeitlich getauscht worden sein.
+        const cur = rendererRef.current;
+        if (!cur || typeof cur.set_material_textures !== "function") return;
+        if (decoded) cur.set_material_textures(decoded.data, decoded.count);
+        else cur.set_material_textures(new Uint8Array(0), 0); // zurück auf Schachbrett
+      } catch (e) {
+        console.warn("render3d set_material_textures fehlgeschlagen:", e);
+      }
+    })();
   }, []);
 
   /**

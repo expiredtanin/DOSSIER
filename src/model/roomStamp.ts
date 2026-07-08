@@ -68,16 +68,31 @@ export interface RoomStampLine {
 }
 
 /**
+ * Formatiert die Bodenfläche für die Stempel-Anzeige: ohne `roundingStep` wie
+ * bisher auf 2 Nachkommastellen; mit `roundingStep` auf das nächste Vielfache
+ * davon gerundet (z. B. 0.5 → halbe m²), ohne Nachkommastellen-Rauschen.
+ */
+export function formatStampArea(area: number, roundingStep?: number): string {
+  if (roundingStep && roundingStep > 0) {
+    const rounded = Math.round(area / roundingStep) * roundingStep;
+    // Rundungsfehler aus der Fliesskomma-Division kappen (max. 2 Nachkommastellen).
+    return `${Math.round(rounded * 100) / 100}`;
+  }
+  return area.toFixed(2);
+}
+
+/**
  * Die Live-Zeilen unter dem Stempel: Bodenfläche (mit Präfix) wenn showFloorArea,
- * Nutzung (SIA-Kürzel · Bezeichnung) wenn showUsage. Die Ausrichtung folgt den
- * Stempel-Feldern; fehlt sie, gilt „zentriert" (Alt-Verhalten).
+ * Nutzung (SIA-Kürzel · Bezeichnung) wenn showUsage, Personenzahl wenn gesetzt.
+ * Die Ausrichtung folgt den Stempel-Feldern; fehlt sie, gilt „zentriert"
+ * (Alt-Verhalten).
  */
 export function roomStampExtraLines(stamp: RoomStamp, ctx: RoomStampContext): RoomStampLine[] {
   const lines: RoomStampLine[] = [];
   if (stamp.showFloorArea) {
     const prefix = stamp.floorAreaPrefix ?? "";
     lines.push({
-      text: `${prefix}${ctx.netArea.toFixed(2)} m²`,
+      text: `${prefix}${formatStampArea(ctx.netArea, stamp.roundingStep)} m²`,
       align: stamp.floorAreaAlign ?? "center",
     });
   }
@@ -85,6 +100,12 @@ export function roomStampExtraLines(stamp: RoomStamp, ctx: RoomStampContext): Ro
     lines.push({
       text: `${ctx.siaCategory} · ${ctx.siaLabel}`,
       align: stamp.usageAlign ?? "center",
+    });
+  }
+  if (stamp.occupancy != null) {
+    lines.push({
+      text: `${stamp.occupancy} Pers.`,
+      align: "center",
     });
   }
   return lines;

@@ -8,11 +8,14 @@
 import type {
   AttributeSource,
   Ceiling,
+  Column,
   Component,
   Drawing2D,
+  ExtrudedSolid,
   HatchPattern,
   LayerCategory,
   Opening,
+  OverrideActions,
   Project,
   Room,
   Stair,
@@ -20,6 +23,8 @@ import type {
   Wall,
 } from "../model/types";
 import {
+  columnLabel,
+  columnsOfFloor,
   flattenCategories,
   getCeilingType,
   getComponent,
@@ -27,11 +32,15 @@ import {
   getLayerCategory,
   getLineStyle,
   getWallType,
+  openingLabel,
   openingsOfWall,
   roomsOfFloor,
+  stairLabel,
   stairsOfFloor,
   wallTypeThickness,
 } from "../model/types";
+import { columnFootprint } from "../geometry/column";
+import { effectiveOverrides, hasOverrides } from "../overrides/engine";
 import { evaluateRoom, siaLabel } from "../geometry/roomArea";
 import type { RichTextDoc } from "../text/richText";
 import { docFromText } from "../text/richText";
@@ -42,6 +51,7 @@ import { stairGeometry, stairCut, stairOutline } from "../geometry/stair";
 import type { SpiralOutlineSegments } from "../geometry/stair";
 import {
   doorSymbol,
+  openingGapQuad,
   openingInterval,
   openingJambs,
   wallAxisFrame,
@@ -224,6 +234,17 @@ export type Primitive =
       stairId?: string;
       /** ID des Raums (Room), falls dieses Polygon eine Raum-Fläche ist (Auswahl). */
       roomId?: string;
+      /**
+       * ID des extrudierten Körpers (truck-Integration), falls dieses Polygon der
+       * Grundriss-Footprint einer Extrusion ist (für eine spätere Links-Klick-
+       * Auswahl — heute nur zur Nachvollziehbarkeit getaggt, noch nicht verdrahtet).
+       */
+      extrudedSolidId?: string;
+      /**
+       * ID der Stütze (Column), falls dieses Polygon der Grundriss-Querschnitt
+       * (Poché) einer Stütze ist (für die Links-Klick-Auswahl der Fläche).
+       */
+      columnId?: string;
     }
   | {
       kind: "line";
@@ -312,6 +333,12 @@ export type Primitive =
       /** Drehung in RADIANT (CCW im Modell). */
       angle: number;
       color: string;
+      /**
+       * Optionale Spaltenbreite in Modell-Metern (Textspalte): ist sie gesetzt,
+       * bricht der Renderer den Text wortweise auf diese Breite um. Fehlt sie,
+       * bleibt es einzeiliger Text.
+       */
+      wrapWidth?: number;
       /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl). */
       drawingId?: string;
       greyed?: boolean;
@@ -597,15 +624,6 @@ export function generatePlan(
   const primitives: Primitive[] = [];
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
   const floor = project.drawingLevels.find((z) => z.id === floorId);
-  // Sichtbarkeit wie bisher; der Darstellungsmodus verfeinert sie zusätzlich:
-  // render=false blendet die Wand aus, greyed=true dimmt sie.
-  const walls = project.walls.filter(
-    (w) =>
-      w.floorId === floorId &&
-      visibleCodes.has(w.categoryCode) &&
-      categoryDisplay(w.categoryCode).render,
-  );
-
   // Code → Kategorie-Strichstärke (mm), damit die Wand-Umrisslinie aus dem
   // Modell (Ebene) stammt statt aus einer Magie-Konstante.
   const lwByCode = categoryLwMap(project.layers);
@@ -614,26 +632,92 @@ export function generatePlan(
   // "layer" von Vordergrund/Hintergrund/Strichstärke/Schraffur).
   const catByCode = categoryMap(project.layers);
 
+  // ── Grafische Overrides (Regel-Engine, src/overrides/engine.ts) ───────────
+  // Effektive Aktionen je Element als OBERSTE Schicht ÜBER der regulären
+  // By-Layer/By-Object-Auflösung: die Elemente werden hier — rein zur
+  // Renderzeit — mit den Regel-Ergebnissen dekoriert (flache Kopien; das
+  // Projekt bleibt unverändert, jederzeit reversibel). `layer_name` matcht
+  // Ebenen-Name ODER -Code, `object_name` den Element-/Typ-Namen.
+  const overrideFor = (
+    categoryCode: string,
+    objectName?: string,
+  ): OverrideActions =>
+    effectiveOverrides(project.overrideRules, {
+      layerName: catByCode.get(categoryCode)?.name,
+      layerCode: categoryCode,
+      objectName,
+    });
+  const wallTypeNameById = new Map(project.wallTypes.map((t) => [t.id, t.name]));
+  const ceilingTypeNameById = new Map(
+    (project.ceilingTypes ?? []).map((t) => [t.id, t.name]),
+  );
+
+  // Sichtbarkeit wie bisher; der Darstellungsmodus verfeinert sie zusätzlich:
+  // render=false blendet die Wand aus, greyed=true dimmt sie.
+  const walls = project.walls
+    .filter(
+      (w) =>
+        w.floorId === floorId &&
+        visibleCodes.has(w.categoryCode) &&
+        categoryDisplay(w.categoryCode).render,
+    )
+    .map((w) => {
+      // Regel-Override gewinnt über den Per-Instanz-Wert (oberste Schicht):
+      // Farbe → Umriss-/Fugenfarbe (Wall.color), Strichstärke → strokeWeight
+      // (der topmost-Wert der bestehenden resolveStrokeWeight-Kette).
+      const ov = overrideFor(w.categoryCode, wallTypeNameById.get(w.wallTypeId));
+      if (!hasOverrides(ov)) return w;
+      return {
+        ...w,
+        color: ov.color ?? w.color,
+        strokeWeight: ov.lineweight ?? w.strokeWeight,
+      };
+    });
+
   // Freie 2D-Zeichengeometrie dieses Geschosses (wie Wände nach sichtbaren
   // Kategorien + Darstellungsmodus gefiltert). Wird über der Wand-Poché
   // gezeichnet (am Ende angehängt).
-  const drawings = project.drawings2d.filter(
-    (d) =>
-      d.levelId === floorId &&
-      visibleCodes.has(d.categoryCode) &&
-      categoryDisplay(d.categoryCode).render,
-  );
+  const drawings = project.drawings2d
+    .filter(
+      (d) =>
+        d.levelId === floorId &&
+        visibleCodes.has(d.categoryCode) &&
+        categoryDisplay(d.categoryCode).render,
+    )
+    .map((d) => {
+      // `object_name` matcht bei freier 2D-Geometrie den Formnamen
+      // (line/polyline/rect/circle/arc/text). Linienstil-Override nur hier —
+      // Drawing2D ist das einzige Element mit LineStyle-Referenz.
+      const ov = overrideFor(d.categoryCode, d.geom.shape);
+      if (!hasOverrides(ov)) return d;
+      return {
+        ...d,
+        color: ov.color ?? d.color,
+        weightMm: ov.lineweight ?? d.weightMm,
+        lineStyleId: ov.linetypeId ?? d.lineStyleId,
+      };
+    });
 
   // Decken dieses Geschosses (wie Wände nach sichtbaren Kategorien +
   // Darstellungsmodus gefiltert). Eine Decke liegt (als Slab) über der
   // Schnittebene → im Grundriss als gefüllter/schraffierter Umriss dargestellt,
   // UNTER der Wand-Poché (damit die Wände darüber lesbar bleiben).
-  const ceilings = (project.ceilings ?? []).filter(
-    (c) =>
-      c.floorId === floorId &&
-      visibleCodes.has(c.categoryCode) &&
-      categoryDisplay(c.categoryCode).render,
-  );
+  const ceilings = (project.ceilings ?? [])
+    .filter(
+      (c) =>
+        c.floorId === floorId &&
+        visibleCodes.has(c.categoryCode) &&
+        categoryDisplay(c.categoryCode).render,
+    )
+    .map((c) => {
+      // Decken: nur der Farb-Override wirkt (der Umriss ist eine feste
+      // Überkopf-Haarlinie, siehe addCeilingPoche — keine Strichstärke).
+      const typeName =
+        (c.ceilingTypeId ? ceilingTypeNameById.get(c.ceilingTypeId) : undefined) ??
+        wallTypeNameById.get(c.wallTypeId);
+      const ov = overrideFor(c.categoryCode, typeName);
+      return ov.color !== undefined ? { ...c, color: ov.color } : c;
+    });
   // Wand-Footprints für das Verdecken der (darunterliegenden) Decken-Umrisse:
   // die Decke liegt als Slab über der Schnittebene, ihre Umrisslinie soll dort,
   // wo eine Wand darüber steht, NICHT durch die Wand-Poché schlagen. Nur nötig,
@@ -650,10 +734,17 @@ export function generatePlan(
   // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
   // (Name + Fläche + SIA-Tag). UNTER der Wand-Poché gezeichnet, damit die Wände
   // lesbar bleiben. Der Stempel (Text) entfällt beim Detailgrad „grob".
-  const rooms = roomsOfFloor(project, floorId).filter(
-    (r) =>
-      visibleCodes.has(r.categoryCode) && categoryDisplay(r.categoryCode).render,
-  );
+  const rooms = roomsOfFloor(project, floorId)
+    .filter(
+      (r) =>
+        visibleCodes.has(r.categoryCode) && categoryDisplay(r.categoryCode).render,
+    )
+    .map((r) => {
+      // Räume: `object_name` matcht den Raum-Namen; der Farb-Override färbt
+      // Fläche + Stempel (Room.color) um.
+      const ov = overrideFor(r.categoryCode, r.name);
+      return ov.color !== undefined ? { ...r, color: ov.color } : r;
+    });
   for (const room of rooms) {
     const greyed = categoryDisplay(room.categoryCode).greyed;
     addRoomArea(primitives, room, greyed, detail);
@@ -701,8 +792,13 @@ export function generatePlan(
     for (const o of openings) {
       const d = categoryDisplay(o.categoryCode);
       if (visibleCodes.has(o.categoryCode) && d.render) {
-        const oLwMm = lwByCode.get(o.categoryCode) ?? LAYER_LINE_MM;
-        addOpeningSymbol(primitives, project, wall, o, d.greyed, detail, oLwMm);
+        // Override-Regeln: `object_name` matcht das Öffnungs-Label
+        // („Tür 90×210" / „Fenster 120×140").
+        const ov = overrideFor(o.categoryCode, openingLabel(o));
+        const oLwMm =
+          ov.lineweight ?? lwByCode.get(o.categoryCode) ?? LAYER_LINE_MM;
+        const effO = ov.color !== undefined ? { ...o, color: ov.color } : o;
+        addOpeningSymbol(primitives, project, wall, effO, d.greyed, detail, oLwMm);
       }
     }
   }
@@ -717,14 +813,42 @@ export function generatePlan(
   );
   for (const stair of stairs) {
     const greyed = categoryDisplay(stair.categoryCode).greyed;
-    const lwMm = lwByCode.get(stair.categoryCode) ?? WALL_FALLBACK_MM;
-    addStairSymbol(primitives, project, stair, greyed, lwMm, cutHeight);
+    // Override-Regeln: `object_name` matcht das Treppen-Label („Gerade 16 STG").
+    const ov = overrideFor(stair.categoryCode, stairLabel(stair));
+    const lwMm =
+      ov.lineweight ?? lwByCode.get(stair.categoryCode) ?? WALL_FALLBACK_MM;
+    const effStair = ov.color !== undefined ? { ...stair, color: ov.color } : stair;
+    addStairSymbol(primitives, project, effStair, greyed, lwMm, cutHeight);
+  }
+
+  // Stützen (Tragwerk) dieses Geschosses: Querschnitt-Poché (Rechteck/Kreis),
+  // um `rotation` gedreht, auf Kategorie „50". Über der Wand-Poché gezeichnet.
+  const columns = columnsOfFloor(project, floorId).filter(
+    (col) =>
+      visibleCodes.has(col.categoryCode) && categoryDisplay(col.categoryCode).render,
+  );
+  for (const column of columns) {
+    const greyed = categoryDisplay(column.categoryCode).greyed;
+    const category = catByCode.get(column.categoryCode);
+    const ov = overrideFor(column.categoryCode, columnLabel(column));
+    const lwMm =
+      ov.lineweight ?? resolveStrokeWeight(undefined, undefined, category, lwByCode.get(column.categoryCode) ?? WALL_FALLBACK_MM);
+    const effCol = ov.color !== undefined ? { ...column, color: ov.color } : column;
+    addColumnPoche(primitives, project, effCol, greyed, lwMm, category);
   }
 
   // 2D-Zeichengeometrie zuletzt (über der Poché).
   for (const d of drawings) {
     const greyed = categoryDisplay(d.categoryCode).greyed;
     addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode);
+  }
+
+  // Extrudierte Körper (truck-Integration): das Quell-Profil wurde beim
+  // Extrudieren aus `drawings2d` entfernt (s. `extrude.ts` appendExtrudedSolid)
+  // — im Grundriss erscheint stattdessen der Footprint-Umriss des Körpers
+  // selbst (Haarlinie, kein Poché/Schraffur; Farbe wie das 3D-Orange).
+  for (const solid of project.extrudedSolids ?? []) {
+    if (solid.levelId === floorId) addExtrudedSolidOutline(primitives, solid);
   }
 
   // Kontext-Konturen (Höhenlinien) als dezente Linien zeichnen — UNTER der
@@ -956,6 +1080,79 @@ function categoryMap(layers: LayerCategory[]): Map<string, LayerCategory> {
   return map;
 }
 
+/** Footprint-Farbe der truck-Extrusionen im Grundriss (identisch zum 3D-Orange EXTRUSION_RGB in toWalls3d.ts). */
+const EXTRUSION_STROKE = "#d98c40";
+
+/**
+ * Footprint-Umriss eines extrudierten Körpers (truck-Integration) im Grundriss:
+ * reine Haarlinie ohne Füllung/Schraffur — analog zur Ansichtslinie einer Wand
+ * unter der Schnitthöhe ({@link addWallPoche} `viewOnly`), da der Körper (noch)
+ * keine Schnitt-Poché/Kategorie-Zuordnung hat.
+ */
+function addExtrudedSolidOutline(out: Primitive[], solid: ExtrudedSolid): void {
+  out.push({
+    kind: "polygon",
+    pts: solid.points,
+    fill: "none",
+    stroke: EXTRUSION_STROKE,
+    strokeWidthMm: SYMBOL_HAIRLINE_MM,
+    hatch: NO_HATCH,
+    extrudedSolidId: solid.id,
+  });
+}
+
+/** Fallback-Poché-Füllung einer Stütze ohne (auflösbares) Bauteil: neutrale Tinte. */
+const COLUMN_FALLBACK_FILL = "#3a3f47";
+
+/**
+ * Grundriss-Querschnitt einer Stütze (Column) als Schnitt-Poché: gefülltes
+ * Polygon (Rechteck bzw. tesselliertes Kreisprofil), an `position` platziert und
+ * um `rotation` gedreht. Trägt — sofern ein Bauteil (`componentId`) auflösbar ist
+ * — dessen Füllung + Schraffur (dieselbe Auflösung wie Wand/Decke, {@link
+ * resolveWallSectionStyle}); sonst eine neutrale Vollton-Poché. `columnId` macht
+ * die Fläche links-klick-selektierbar (analog Extrusion/Raum).
+ */
+function addColumnPoche(
+  out: Primitive[],
+  project: Project,
+  column: Column,
+  greyed: boolean,
+  lwMm: number,
+  category: LayerCategory | undefined,
+): void {
+  const pts = columnFootprint(column);
+  const stroke = column.color ?? category?.color ?? MONO_INK;
+  let fill = column.color ?? category?.color ?? COLUMN_FALLBACK_FILL;
+  let hatch: HatchRender = NO_HATCH;
+  if (column.componentId) {
+    try {
+      const comp = getComponent(project, column.componentId);
+      const hatchId =
+        resolveHatchId(undefined, undefined, category, comp.hatchId) ?? comp.hatchId;
+      const resolved = resolveHatch(
+        project,
+        hatchId,
+        undefined,
+        resolveForeground(comp, undefined, category, undefined),
+      );
+      hatch = resolved;
+      fill = resolved.pattern === "solid" ? HATCH_INK : HATCH_PAPER;
+    } catch {
+      // Bauteil nicht auflösbar → neutrale Poché (Fallback bleibt bestehen).
+    }
+  }
+  out.push({
+    kind: "polygon",
+    pts,
+    fill,
+    stroke,
+    strokeWidthMm: lwMm,
+    hatch,
+    greyed,
+    columnId: column.id,
+  });
+}
+
 /**
  * Leitet ein 2D-Zeichenelement in Plan-Primitive ab (docs/design/drawing-tools.md
  * §7.2). Farbe/Strichstärke kommen aus dem optionalen LineStyle, sonst aus der
@@ -1091,6 +1288,7 @@ function addDrawing2D(
         heightM: g.height,
         angle: g.angle,
         color,
+        ...(g.width && g.width > 0 ? { wrapWidth: g.width } : {}),
         greyed,
         drawingId: d.id,
       });
@@ -1691,6 +1889,24 @@ function addOpeningSymbol(
   if (o.kind === "door") {
     const sym = doorSymbol(wall, o);
     if (!sym) return;
+    // Unsichtbares Pick-Polygon über der Öffnungslücke (Laibung × Wanddicke) —
+    // damit die Tür wie ein Fenster per Punkt-in-Polygon über die ganze
+    // Öffnungsfläche selektierbar ist (Türsymbol besteht sonst nur aus dünnem
+    // Blatt + Bogen, die man exakt treffen müsste). fill/stroke "none" ⇒ zeichnet
+    // nichts; `pickOpening` (PlanView) testet nur die `pts`.
+    const gap = openingGapQuad(project, wall, o);
+    if (gap) {
+      out.push({
+        kind: "polygon",
+        pts: gap,
+        fill: "none",
+        stroke: "none",
+        strokeWidthMm: 0,
+        hatch: NO_HATCH,
+        greyed,
+        openingId: o.id,
+      });
+    }
     // Tür-Typ „wandoeffnung": reiner Wanddurchbruch — KEIN Türblatt, KEIN
     // Schwenkbogen. Nur die Öffnung/Laibung bleibt (die Wandlücke kommt aus der
     // ausgesparten Poché; Sturz-/Anschlaglinien werden weiter unten gezeichnet).
@@ -1795,6 +2011,22 @@ function addOpeningSymbol(
   const glassCount = detail === "fein" ? 2 : 1;
   const sym = windowSymbol(project, wall, o, glassCount);
   if (!sym) return;
+  // Unsichtbares Pick-Polygon über der Öffnungslücke — macht das Fenster über
+  // die ganze Fläche selektierbar, auch bei „grob" (nur eine Glaslinie, sonst
+  // schwer zu treffen). Siehe Tür-Zweig oben.
+  const wgap = openingGapQuad(project, wall, o);
+  if (wgap) {
+    out.push({
+      kind: "polygon",
+      pts: wgap,
+      fill: "none",
+      stroke: "none",
+      strokeWidthMm: 0,
+      hatch: NO_HATCH,
+      greyed,
+      openingId: o.id,
+    });
+  }
   if (detail !== "grob") {
     // Rahmen-Rechteck als reine Umrisslinie (Poché-Stroke, keine Füllung).
     out.push({

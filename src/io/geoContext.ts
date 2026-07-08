@@ -2,7 +2,7 @@
 //
 // Beide Quellen liefern am Ende dasselbe: geschlossene/offene Polylinien in
 // LOKALEN Modell-Metern (bereits um die Origin verschoben, siehe lv95.ts),
-// kategorisiert nach Art (Gebäude/Strasse/Wasser/Grün). Die UI wandelt diese in
+// kategorisiert nach Art (Gebäude/Strasse/Wasser/Grün/Parkplatz/Bahn/Wald). Die UI wandelt diese in
 // `ContourSet`-Kontext-Objekte pro Kategorie um und legt sie in `project.context`.
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
@@ -12,7 +12,14 @@ import type { GeoOrigin } from "./lv95";
 import type { ContextObject, Contour, ImportedMesh } from "../model/types";
 
 /** Fachliche Kategorie einer importierten Kontext-Linie. */
-export type GeoCategory = "building" | "road" | "water" | "green";
+export type GeoCategory =
+  | "building"
+  | "road"
+  | "water"
+  | "green"
+  | "parking"
+  | "railway"
+  | "forest";
 
 /** Ein importiertes Polygon/Polylinie in lokalen Modell-Metern. */
 export interface GeoFeature {
@@ -44,6 +51,9 @@ const CATEGORY_LABEL: Record<GeoCategory, string> = {
   road: "Strassen",
   water: "Gewässer",
   green: "Grünflächen",
+  parking: "Parkplätze",
+  railway: "Bahn",
+  forest: "Wald",
 };
 
 /** Layer-Kennung (englischer Identifier) je Kategorie — für spätere Zuordnung. */
@@ -52,6 +62,9 @@ const CATEGORY_LAYER: Record<GeoCategory, string> = {
   road: "context-roads",
   water: "context-water",
   green: "context-green",
+  parking: "context-parking",
+  railway: "context-railway",
+  forest: "context-forest",
 };
 
 /** Erzeugt eine (kollisionsarme) ID für ein neues Kontext-Objekt. */

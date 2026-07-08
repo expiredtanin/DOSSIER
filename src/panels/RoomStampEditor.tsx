@@ -183,6 +183,25 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
             />
           </label>
 
+          <label className="roomstamp-field">
+            <span className="roomstamp-label">{t("roomStamp.roundingStep")}</span>
+            <select
+              className="roomstamp-input"
+              value={draft.roundingStep ?? ""}
+              disabled={!draft.showFloorArea}
+              onChange={(e) => {
+                const v = e.target.value;
+                patch({ roundingStep: v === "" ? undefined : Number(v) });
+              }}
+            >
+              <option value="">{t("roomStamp.roundingStepDefault")}</option>
+              <option value="0.01">0.01 m²</option>
+              <option value="0.1">0.1 m²</option>
+              <option value="0.5">0.5 m²</option>
+              <option value="1">1 m²</option>
+            </select>
+          </label>
+
           <div className="roomstamp-row">
             <label className="roomstamp-check">
               <input
@@ -200,6 +219,21 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
               onChange={(usageAlign) => patch({ usageAlign })}
             />
           </div>
+
+          <label className="roomstamp-field">
+            <span className="roomstamp-label">{t("roomStamp.occupancy")}</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className="roomstamp-input"
+              value={draft.occupancy ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                patch({ occupancy: v === "" ? undefined : Number(v) });
+              }}
+            />
+          </label>
         </div>
 
         <div className="texteditor-foot">

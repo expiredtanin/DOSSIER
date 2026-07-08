@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "author": "Karim Gabriele Varano",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -19,11 +21,14 @@
     "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web",
     "build:geometry": "wasm-pack build src-tauri/geometry --release --target web --out-dir ../../src/engine/pkgGeometry --out-name geometry --no-default-features --features web",
     "build:kernel2d": "wasm-pack build src-tauri/kernel2d --release --target web --out-dir ../../src/engine/pkgKernel2d --out-name kernel2d --no-default-features --features web",
-    "build:dwgimport": "wasm-pack build src-tauri/dwgimport --release --target web --out-dir ../../src/engine/pkgDwgImport --out-name dwgimport --no-default-features --features web"
+    "build:dwgimport": "wasm-pack build src-tauri/dwgimport --release --target web --out-dir ../../src/engine/pkgDwgImport --out-name dwgimport --no-default-features --features web",
+    "build:truck": "wasm-pack build src-tauri/trucksolid --release --target web --out-dir ../../src/engine/pkgTruck --out-name trucksolid --no-default-features --features web"
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.7",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
     "delaunator": "^5.1.0",
     "dxf-parser": "^1.1.2",
     "jspdf": "^4.2.1",
@@ -48,5 +53,12 @@
     "vite": "^5.4.8",
     "vitest": "^4.1.9",
     "wasm-pack": "^0.15.0"
+  },
+  "allowScripts": {
+    "core-js@3.49.0": true,
+    "esbuild@0.21.5": true,
+    "fsevents@2.3.3": true,
+    "fsevents@2.3.2": true,
+    "wasm-pack@0.15.0": true
   }
 }

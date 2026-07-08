@@ -1,16 +1,16 @@
 # DOSSIER Standalone
 
-Eigenständiges BIM-Werkzeug für Wohnbau. Modelliert ein Wohnhaus aus
-semantischen Bauteilen und zieht daraus saubere, normgerechte 2D-Pläne —
-ohne Revit.
+Open-Source-CAAD (Computer Aided Architecture Design). Modelliert ein Gebäude
+aus semantischen Bauteilen und zieht daraus saubere, normgerechte 2D-Pläne —
+ohne Revit. Als Desktop-App und im Browser zugänglich; die Desktop-App ist die
+vollständige Fassung.
 
 Das ist die eigenständige Standalone-Variante des Rhino-Plugins
 [DOSSIER](https://git.kgva.ch/karim/DOSSIER): dieselbe Denkweise (Geschosse,
 Kategorie-Ebenen, mehrschichtige Bauteile, Prioritäts-Verschneidung), aber als
-React/Three.js-App in einer Electron-Desktop-Shell statt als Rhino-Aufsatz.
-Kein Browser-Tab-Produkt: eigenes Fenster, eigene Rendering-Engine
-(Rust/WASM/WebGPU), gebaut für flüssiges CAD-Arbeiten statt für den Webview
-kleinster gemeinsamer Nenner.
+React-App mit eigener Rendering-Engine (Rust/WASM/WebGPU) statt als Rhino-Aufsatz.
+Als Desktop-App (Tauri) läuft sie im eigenen Fenster mit voller Engine-Leistung;
+browserseitig ist derselbe Kern zugänglich, die App ist die vollständige Fassung.
 
 ## Grundgedanke
 
@@ -151,7 +151,17 @@ src-tauri/     Rust-Crates (render2d/render3d) — headless per wasm-pack zu WAS
 - [HANDOVER.md](HANDOVER.md) — aktueller Arbeitsstand, Befunde, nächste Schritte
 - [docs/](docs/) — Design-Specs (Befehlssystem, Zeichenwerkzeuge, Wand-Joins, Backend …)
 
+## Lizenz
+
+Copyright © 2026 Karim Gabriele Varano. Veröffentlicht unter der
+**GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)** —
+siehe [LICENSE](LICENSE). DOSSIER ist Teil der **openbureau**-Suite.
+
+Die AGPL verlangt, dass auch bei Betrieb als Netzwerk-/Webdienst der (ggf.
+geänderte) Quellcode für die Nutzer verfügbar gemacht wird. Drittkomponenten
+behalten ihre jeweiligen Lizenzen (siehe „Über"-Dialog in der App).
+
 ---
 
-Privates Projekt. Die UI ist deutsch; Schweizer Spezifika (SIA-416-Flächen,
-Swisstopo-Geodaten) sind als Differenzierer eingeplant.
+Die UI ist deutsch; Schweizer Spezifika (SIA-416-Flächen, Swisstopo-Geodaten)
+sind als Differenzierer eingeplant.

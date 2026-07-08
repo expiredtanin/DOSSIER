@@ -43,20 +43,89 @@
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
 import { useEffect, useRef, useState } from "react";
-import type { Project } from "../model/types";
-import { projectToModel3d, pickGeometry } from "../plan/toWalls3d";
+import type { Project, Wall, Drawing2D, Vec2 } from "../model/types";
+import { wallVerticalExtent } from "../model/wall";
+import { projectToModel3d, pickGeometry, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
 import type { RenderMode, View3d } from "../ui/TopBar";
 import { t } from "../i18n";
 import { useWasm3dRenderer } from "./useWasm3dRenderer";
 import type { Camera3d } from "./useWasm3dRenderer";
-import { cameraRay, pickNearest } from "./raycast3d";
+import { cameraRay, pickNearest, rayPlaneY, rayPlane, worldToScreen } from "./raycast3d";
+import type { Vec3 } from "./raycast3d";
+import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 
 /** Ein per 3D-Klick getroffenes Bauteil (Wand oder Decke), oder null (Leerraum). */
-export type Pick3dHit = { kind: "wall" | "ceiling"; id: string } | null;
+export type Pick3dHit =
+  | { kind: "wall" | "ceiling" | "opening" | "stair"; id: string }
+  | null;
 
 /** Klick-vs-Drag-Schwelle (Pixel): bleibt die Maus zwischen pointerdown und
  * pointerup darunter, gilt die Links-Geste als KLICK (Pick) statt als Orbit-Drag. */
 const CLICK_THRESHOLD_PX = 4;
+
+// ── 3D-Editier-Griffe ─────────────────────────────────────────────────────
+// Volle Parität mit den three.js-Griffen (`Viewport3D.tsx`/`drawGrips`):
+// Wand-Endpunkte + Höhen-Griff (OK der Wand) + Verschiebe-Griff (ganze Wand),
+// dieselben drei Griff-Arten für gewählte 2D-Zeichnungen (Vertex + Verschieben).
+// Bewusst NICHT nachgebaut: Snap/Koinzidenz-Mitführen beim Ziehen (mehrere
+// gewählte Elemente mit gemeinsamer Ecke) — das bleibt dem three.js-Pfad
+// vorbehalten, bis sich das dort bewährte Muster als eigener Bedarf zeigt.
+//
+// DARSTELLUNG: ECHTE DOM-Buttons (kleine Kreise, `position:absolute` über dem
+// Canvas), nicht In-Szene-Geometrie. Ein erster Versuch zeichnete die Griffe
+// als Drahtgitter-Kugeln über denselben `setHighlightLines`-Kanal wie den
+// Auswahl-Umriss — Nutzer-Feedback 2026-07-06: "immernoch kein GUI button
+// sondern geometrie" (zurecht: dünne Linien-Kugeln lesen sich nicht als
+// klickbarer Punkt, ausserdem teilten sie sich die Farbe mit dem Umriss und
+// sassen exakt auf dessen Ecken). Echte DOM-Buttons sind trivial zu treffen
+// (native Pointer-Events statt Ray-Toleranz-Mathe) und sehen wie ein
+// GUI-Element aus. Kosten: die Bildschirm-Position muss der Kamera folgen —
+// `useEffect` unten pollt sie per `requestAnimationFrame`, solange Griffe
+// aktiv sind (billige 2D-Projektion, kein WASM/GPU-Aufruf).
+type GripKind = "vertex" | "height" | "move";
+interface Grip {
+  kind: GripKind;
+  /** Element, dessen Griff das ist (Wand-ID ODER Drawing-ID). */
+  target: { wallId?: string; drawingId?: string };
+  /** Vertex-Index (nur `kind==="vertex"`); -1 sonst. */
+  index: number;
+  pos: Vec3;
+}
+
+/**
+ * Alle Griffe der gewählten Wände + 2D-Zeichnungen: pro Wand zwei Endpunkte
+ * (UK), ein Höhen-Griff (Achsmitte, OK) und ein Verschiebe-Griff (Achsmitte,
+ * knapp über UK) — Positionen exakt wie `drawGrips` in `Viewport3D.tsx`. Pro
+ * Zeichnung ein Vertex-Griff je Eckpunkt + ein Verschiebe-Griff im Schwerpunkt,
+ * auf der Ebene des aktiven Geschosses (`drawingElevation`).
+ */
+function computeGrips(
+  project: Project,
+  walls: readonly Wall[],
+  drawings: readonly Drawing2D[],
+  drawingElevation: number,
+): Grip[] {
+  const out: Grip[] = [];
+  for (const w of walls) {
+    const { zBottom, zTop } = wallVerticalExtent(project, w);
+    const target = { wallId: w.id };
+    out.push({ kind: "vertex", target, index: 0, pos: [w.start.x, zBottom, w.start.y] });
+    out.push({ kind: "vertex", target, index: 1, pos: [w.end.x, zBottom, w.end.y] });
+    const midX = (w.start.x + w.end.x) / 2;
+    const midY = (w.start.y + w.end.y) / 2;
+    out.push({ kind: "height", target, index: -1, pos: [midX, zTop, midY] });
+    out.push({ kind: "move", target, index: -1, pos: [midX, zBottom + 0.05, midY] });
+  }
+  for (const d of drawings) {
+    const verts = drawingGripVertices(d);
+    const target = { drawingId: d.id };
+    const y = drawingElevation + 0.02;
+    verts.forEach((v, i) => out.push({ kind: "vertex", target, index: i, pos: [v.x, y, v.y] }));
+    const anchor = drawingMoveAnchor(d, verts);
+    if (anchor) out.push({ kind: "move", target, index: -1, pos: [anchor.x, y + 0.03, anchor.y] });
+  }
+  return out;
+}
 
 /** Vertikaler Öffnungswinkel (Radiant) — wie die three.js-PerspectiveCamera (50°),
  * auch für die FREIE Orbit-Kamera hier (die Presets selbst nutzen den Rust-
@@ -175,9 +244,14 @@ function fitTargetDist(project: Project): {
 const ISO_PITCH = Math.asin(1 / Math.sqrt(3));
 const VIEW3D_ORBIT: Record<View3d, { yaw: number; pitch: number }> = {
   front: { yaw: Math.PI / 2, pitch: 0 },
+  back: { yaw: -Math.PI / 2, pitch: 0 },
   side: { yaw: 0, pitch: 0 },
+  left: { yaw: Math.PI, pitch: 0 },
   top: { yaw: Math.PI / 2, pitch: PITCH_LIMIT },
   iso: { yaw: Math.PI / 4, pitch: ISO_PITCH },
+  isoFrontLeft: { yaw: (3 * Math.PI) / 4, pitch: ISO_PITCH },
+  isoBackRight: { yaw: -Math.PI / 4, pitch: ISO_PITCH },
+  isoBackLeft: { yaw: (-3 * Math.PI) / 4, pitch: ISO_PITCH },
   perspective: { yaw: Math.PI / 4, pitch: 0.5 },
 };
 
@@ -190,6 +264,12 @@ export function Wasm3DViewport({
   onToggleGrid,
   onPick3d,
   highlightLines = null,
+  editWalls = [],
+  editDrawings = [],
+  onEditVertex,
+  onEditBody,
+  onEditWallTop,
+  onEditEnd,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -220,6 +300,22 @@ export function Wasm3DViewport({
    * `null`/leeres Array = kein Highlight (leere Auswahl).
    */
   highlightLines?: Float32Array | null;
+  /** Gewählte Wände — Quelle der 3D-Endpunkt-/Höhen-/Verschiebe-Griffe. */
+  editWalls?: Wall[];
+  /** Gewählte 2D-Zeichnungen — Quelle der 3D-Vertex-/Verschiebe-Griffe. */
+  editDrawings?: Drawing2D[];
+  /** Endpunkt-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index` des Elements. */
+  onEditVertex?: (
+    target: { wallId?: string; drawingId?: string },
+    index: number,
+    model: Vec2,
+  ) => Vec2;
+  /** Verschiebe-Griff gezogen: das Element um `delta` (XY) verschieben. */
+  onEditBody?: (target: { wallId?: string; drawingId?: string }, delta: Vec2) => void;
+  /** Höhen-Griff gezogen: neue absolute Oberkanten-Z der Wand. */
+  onEditWallTop?: (wallId: string, topZ: number) => void;
+  /** Ende eines Griff-Drags. */
+  onEditEnd?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
@@ -227,6 +323,23 @@ export function Wasm3DViewport({
   // die frische Store-Auswahl), ohne den Listener-Effekt neu aufzubauen.
   const onPick3dRef = useRef(onPick3d);
   onPick3dRef.current = onPick3d;
+  // Griff-Auswahl/Callbacks ebenfalls als Refs (gleiches Muster) — der Pointer-
+  // Listener-Effekt unten bleibt stabil ([ready, render]) und liest trotzdem
+  // stets die aktuelle Auswahl/den aktuellen Callback.
+  const editWallsRef = useRef(editWalls);
+  editWallsRef.current = editWalls;
+  const editDrawingsRef = useRef(editDrawings);
+  editDrawingsRef.current = editDrawings;
+  const onEditVertexRef = useRef(onEditVertex);
+  onEditVertexRef.current = onEditVertex;
+  const onEditBodyRef = useRef(onEditBody);
+  onEditBodyRef.current = onEditBody;
+  const onEditWallTopRef = useRef(onEditWallTop);
+  onEditWallTopRef.current = onEditWallTop;
+  const onEditEndRef = useRef(onEditEnd);
+  onEditEndRef.current = onEditEnd;
+  const groundElevationRef = useRef(groundElevation);
+  groundElevationRef.current = groundElevation;
   const {
     render,
     updateModel,
@@ -262,6 +375,20 @@ export function Wasm3DViewport({
     updateModel(project);
     redrawRef.current();
   }, [ready, project, updateModel]);
+
+  // truck-Extrusionen (s. toWalls3d.ts emitExtrudedSolids): die WASM-Extrusion
+  // läuft asynchron und ist beim ersten `updateModel` oben typischerweise noch
+  // nicht fertig — ohne diesen Re-Push bliebe sie trotz erfolgreichen Ladens
+  // unsichtbar, weil `project` sich dafür nicht ändert.
+  useEffect(() => {
+    if (!ready) return;
+    const onMeshReady = () => {
+      updateModel(projectRef.current);
+      redrawRef.current();
+    };
+    window.addEventListener(TRUCK_MESH_READY_EVENT, onMeshReady);
+    return () => window.removeEventListener(TRUCK_MESH_READY_EVENT, onMeshReady);
+  }, [ready, updateModel]);
 
   // Blickwinkel-Praeset anwenden, wenn `view3d` wechselt (oder der Renderer
   // bereit wird): springt über `set_view_preset` (Rust) auf die formatfüllende,
@@ -316,8 +443,19 @@ export function Wasm3DViewport({
   // Schnittflaechen-Schraffur (Caps) aus den gecachten Waenden/Decken.
   useEffect(() => {
     if (!ready) return;
+    // Bei inaktivem Schnitt braucht es kein Ziel (Ebene ist ohnehin unsichtbar)
+    // — `fitTargetDist` NICHT aufrufen, das würde sonst bei JEDER Projekt-
+    // Änderung (auch waehrend eines Griff-Drags) unnoetig die komplette
+    // Wand-/Oeffnungs-/Decken-Geometrie erneut flatten, nur um eine Bounding-
+    // Box zu ziehen, die `updateModel` fuer denselben `project`-Stand gerade
+    // erst berechnet hat.
+    if (!sectionActive) {
+      setSectionPlane(false, [0, 0, 0], [0, 0, 1]);
+      redrawRef.current();
+      return;
+    }
     const { target } = fitTargetDist(project);
-    setSectionPlane(sectionActive, target, [0, 0, 1]);
+    setSectionPlane(true, target, [0, 0, 1]);
     redrawRef.current();
   }, [ready, sectionActive, project, setSectionPlane]);
 
@@ -332,6 +470,45 @@ export function Wasm3DViewport({
     redrawRef.current();
   }, [ready, highlightLines, setHighlightLines]);
 
+  // Griff-Bildschirmpositionen: solange Wände/2D-Zeichnungen zum Editieren
+  // gewählt sind, pollt ein rAF-Loop ihre Griffpunkte durch die aktuelle
+  // Kamera auf Bildschirm-Pixel — die DOM-Buttons unten im JSX folgen so
+  // Orbit/Pan/Zoom UND Modelländerungen (Drag), ohne dass Kamerabewegungen
+  // einen WASM-Push auslösen (reine 2D-Projektionsmathe, kein GPU-Aufruf).
+  const [gripScreens, setGripScreens] = useState<{ grip: Grip; x: number; y: number }[]>([]);
+  useEffect(() => {
+    if (!ready || (editWalls.length === 0 && editDrawings.length === 0)) {
+      setGripScreens([]);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const canvas = canvasRef.current;
+      const o = orbitRef.current;
+      if (canvas && o) {
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const cam = orbitCamera(o);
+          const grips = computeGrips(
+            projectRef.current,
+            editWallsRef.current,
+            editDrawingsRef.current,
+            groundElevationRef.current,
+          );
+          const next: { grip: Grip; x: number; y: number }[] = [];
+          for (const g of grips) {
+            const p = worldToScreen(cam, g.pos, rect.width, rect.height);
+            if (p) next.push({ grip: g, x: p.x, y: p.y });
+          }
+          setGripScreens(next);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, editWalls, editDrawings]);
+
   // Canvas-Größe beobachten: bei Layout-Änderung mit aktueller Kamera neu
   // zeichnen (die Surface-Anpassung übernimmt der Hook im render()).
   useEffect(() => {
@@ -341,6 +518,88 @@ export function Wasm3DViewport({
     ro.observe(canvas);
     return () => ro.disconnect();
   }, [ready]);
+
+  // ── Griff-Drag (DOM-Buttons, s. Datei-Kommentar oben) ─────────────────────
+  // Der Drag-Zustand lebt in einem Ref (kein State) — die Pointer-Handler an
+  // den Buttons sind normale React-Props, aber der Ref überlebt zwischen
+  // Pointer-Move-Events, ohne bei jedem Frame einen Re-Render auszulösen.
+  // "vertex"/"move" ziehen auf einer horizontalen Arbeitsebene (Wand-UK bzw.
+  // Geschossebene für Zeichnungen) — exakt wie `workplaneModel` im three.js-
+  // Pfad; "height" zieht auf einer VERTIKALEN Ebene entlang der Wandachse
+  // (analog `heightZAt` dort), damit eine überwiegend vertikale Mausbewegung
+  // auf eine Höhenänderung abbildet.
+  type GripDrag =
+    | { kind: "vertex"; target: { wallId?: string; drawingId?: string }; index: number; planeY: number }
+    | { kind: "move"; target: { wallId?: string; drawingId?: string }; planeY: number; lastModel: Vec2 | null }
+    | { kind: "height"; wallId: string };
+  const gripDragRef = useRef<GripDrag | null>(null);
+  const startGripDrag = (grip: Grip) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (grip.kind === "height") {
+      if (!grip.target.wallId) return;
+      gripDragRef.current = { kind: "height", wallId: grip.target.wallId };
+    } else {
+      let planeY: number;
+      if (grip.target.wallId) {
+        const wall = editWallsRef.current.find((w) => w.id === grip.target.wallId);
+        if (!wall) return;
+        planeY = wallVerticalExtent(projectRef.current, wall).zBottom;
+      } else {
+        planeY = groundElevationRef.current;
+      }
+      gripDragRef.current =
+        grip.kind === "vertex"
+          ? { kind: "vertex", target: grip.target, index: grip.index, planeY }
+          : { kind: "move", target: grip.target, planeY, lastModel: null };
+    }
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+  const onGripPointerMove = (e: React.PointerEvent) => {
+    const drag = gripDragRef.current;
+    const o = orbitRef.current;
+    const canvas = canvasRef.current;
+    if (!drag || !o || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = 1 - ((e.clientY - rect.top) / rect.height) * 2;
+    const ray = cameraRay(orbitCamera(o), ndcX, ndcY, rect.width / rect.height);
+
+    if (drag.kind === "height") {
+      const wall = editWallsRef.current.find((w) => w.id === drag.wallId);
+      if (!wall) return;
+      const ux = wall.end.x - wall.start.x;
+      const uy = wall.end.y - wall.start.y;
+      const len = Math.hypot(ux, uy) || 1;
+      const midX = (wall.start.x + wall.end.x) / 2;
+      const midY = (wall.start.y + wall.end.y) / 2;
+      const hit = rayPlane(ray, [midX, 0, midY], [ux / len, 0, uy / len]);
+      if (!hit) return;
+      onEditWallTopRef.current?.(drag.wallId, hit[1]);
+      return;
+    }
+
+    const hit = rayPlaneY(ray, drag.planeY);
+    if (!hit) return;
+    const model: Vec2 = { x: hit[0], y: hit[2] };
+    if (drag.kind === "vertex") {
+      onEditVertexRef.current?.(drag.target, drag.index, model);
+      return;
+    }
+    // "move": inkrementelles Delta wie im three.js-Pendant (workplaneModel + lastModel).
+    if (drag.lastModel) {
+      const delta: Vec2 = { x: model.x - drag.lastModel.x, y: model.y - drag.lastModel.y };
+      if (delta.x !== 0 || delta.y !== 0) onEditBodyRef.current?.(drag.target, delta);
+    }
+    drag.lastModel = model;
+  };
+  const endGripDrag = () => {
+    if (!gripDragRef.current) return;
+    gripDragRef.current = null;
+    onEditEndRef.current?.();
+  };
 
   // Maus-Navigation (LINKS = Orbit, MITTE/RECHTS = Pan, RAD = Zoom, s.
   // Datei-Kommentar MAUS-SCHEMA). Verlässt damit IMMER die Praeset-Kamera und
@@ -358,19 +617,29 @@ export function Wasm3DViewport({
       };
     };
 
-    let drag:
-      | {
-          mode: "orbit" | "pan";
-          button: number;
-          x: number;
-          y: number;
-          downX: number;
-          downY: number;
-          moved: boolean;
-        }
-      | null = null;
+    let drag: {
+      mode: "orbit" | "pan";
+      button: number;
+      x: number;
+      y: number;
+      downX: number;
+      downY: number;
+      moved: boolean;
+    } | null = null;
 
     const redraw = () => redrawRef.current();
+
+    // Cursor-Pixel (Client) → NDC, relativ zum Canvas-Rechteck. `null`, wenn
+    // das Canvas gerade keine Ausdehnung hat (z. B. verstecktes Layout).
+    const toNdc = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      return {
+        ndcX: ((clientX - rect.left) / rect.width) * 2 - 1,
+        ndcY: 1 - ((clientY - rect.top) / rect.height) * 2, // Pixel-Y invertiert
+        aspect: rect.width / rect.height,
+      };
+    };
 
     // Cursor-Pixel → Kamerastrahl (aktuelle Orbit-Kamera) → nächstes Bauteil.
     // Meldet den Treffer (oder null) an den Aufrufer; `additive` wird vom
@@ -378,20 +647,17 @@ export function Wasm3DViewport({
     const doPick = (clientX: number, clientY: number, additive: boolean) => {
       const cb = onPick3dRef.current;
       const o = orbitRef.current;
-      if (!cb || !o) return;
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
-      const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2; // Pixel-Y invertiert
-      const aspect = rect.width / rect.height;
-      const ray = cameraRay(orbitCamera(o), ndcX, ndcY, aspect);
-      const { walls, slabs } = pickGeometry(projectRef.current);
-      const hit = pickNearest(ray, walls, slabs);
+      const ndc = toNdc(clientX, clientY);
+      if (!cb || !o || !ndc) return;
+      const ray = cameraRay(orbitCamera(o), ndc.ndcX, ndc.ndcY, ndc.aspect);
+      const { walls, slabs, openings, stairs } = pickGeometry(projectRef.current);
+      // Erweiterter Pick inkl. Öffnungen (Fenster/Türen) + Treppen — sonst wären
+      // im WASM-Viewport nur Wände/Decken anwählbar.
+      const hit = pickNearest(ray, walls, slabs, openings, stairs);
       cb(hit ? { kind: hit.kind, id: hit.id } : null, additive);
     };
 
     const onPointerDown = (e: PointerEvent) => {
-      // LINKS (0) = Orbit, MITTE (1)/RECHTS (2) = Pan (s. MAUS-SCHEMA oben).
       const mode = e.button === 0 ? "orbit" : e.button === 1 || e.button === 2 ? "pan" : null;
       if (!mode) return;
       e.preventDefault();
@@ -565,14 +831,48 @@ export function Wasm3DViewport({
           Darstellungsart kommen von der Oberleiste (TopBar); das Grid-Overlay
           unten ist der einzige eigene Umschalter hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
+      {/* 3D-Editier-Griffe: echte DOM-Buttons statt In-Szene-Geometrie, s.
+          Datei-Kommentar oben. Position folgt der Kamera via `gripScreens`
+          (rAF-Loop). Farben wie die three.js-Griffe (`Viewport3D.tsx`,
+          gripVertMat/gripHeightMat/gripMoveMat): Vertex orange, Höhe blau,
+          Verschieben grün. */}
+      {gripScreens.map(({ grip, x, y }) => (
+        <div
+          key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId}:${grip.index}`}
+          onPointerDown={startGripDrag(grip)}
+          onPointerMove={onGripPointerMove}
+          onPointerUp={endGripDrag}
+          onPointerCancel={endGripDrag}
+          title={t(
+            grip.kind === "height"
+              ? "viewport3d.grip.height"
+              : grip.kind === "move"
+              ? "viewport3d.grip.move"
+              : "viewport3d.grip.vertex",
+          )}
+          style={{
+            position: "absolute",
+            left: x - 8,
+            top: y - 8,
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            background: grip.kind === "height" ? "#2f8fff" : grip.kind === "move" ? "#18b85a" : "#ff8c1a",
+            border: "2px solid rgba(0,0,0,0.6)",
+            boxShadow: "0 0 5px rgba(0,0,0,0.55)",
+            cursor: grip.kind === "height" ? "ns-resize" : "grab",
+            touchAction: "none",
+          }}
+        />
+      ))}
       {/* Live-Schnitt-Umschalter (eigener Overlay-Button, MVP): vertikale
           Schnittebene durch die Modellmitte, Blick +Y. Sitzt ueber dem
           Grid-Button (falls vorhanden). Reine Ansichts-Option des Viewports. */}
       <button
         type="button"
-        aria-label="Schnittebene"
+        aria-label={t("viewport3d.section.label")}
         onClick={() => setSectionActive((v) => !v)}
-        title={sectionActive ? "Schnittebene aus" : "Schnittebene ein"}
+        title={t(sectionActive ? "viewport3d.section.hide" : "viewport3d.section.show")}
         aria-pressed={sectionActive}
         style={{
           position: "absolute",

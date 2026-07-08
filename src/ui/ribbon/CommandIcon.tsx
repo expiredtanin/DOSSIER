@@ -36,6 +36,26 @@ export function CommandIcon({ name }: { name: string }) {
           <rect x="5.5" y="5.5" width="8" height="8" />
         </svg>
       );
+    case "measure":
+      // Lineal/Massband: Strecke mit Endmarken + kleiner Skala.
+      return (
+        <svg {...common}>
+          <line x1="2.5" y1="12.5" x2="13.5" y2="3.5" />
+          <line x1="2" y1="11" x2="4" y2="13" />
+          <line x1="12.5" y1="2.5" x2="14.5" y2="4.5" />
+          <line x1="6" y1="9" x2="7" y2="10" />
+          <line x1="9" y1="6" x2="10" y2="7" />
+        </svg>
+      );
+    case "rotate":
+      // Kreisbogen mit Pfeil (Drehung) um einen Mittelpunkt.
+      return (
+        <svg {...common}>
+          <path d="M12.5 6 A5 5 0 1 0 13 9" />
+          <polyline points="10.5,5.5 12.5,6 12.9,3.8" />
+          <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+        </svg>
+      );
     case "mirror":
       // Spiegelachse (gestrichelt) mit zwei gespiegelten Dreiecken.
       return (
@@ -69,6 +89,14 @@ export function CommandIcon({ name }: { name: string }) {
         <svg {...common}>
           <polyline points="2.5,13 8,13 8,3" />
           <circle cx="8" cy="13" r="1.4" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "column":
+      // Stütze: Quadrat-Querschnitt mit vertikalen Kanten (Pfeiler).
+      return (
+        <svg {...common}>
+          <rect x="5.5" y="2.5" width="5" height="11" />
+          <line x1="8" y1="2.5" x2="8" y2="13.5" strokeDasharray="1.6 1.6" />
         </svg>
       );
     default:

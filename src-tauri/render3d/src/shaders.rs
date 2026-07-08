@@ -144,15 +144,20 @@ struct Globals {
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 
-// Bild-Textur + Sampler (group 1). Sampler mit Repeat/Linear (siehe gpu.rs) ->
-// das weltmassstaebliche UV-Raster kachelt sich ueber die Wandflaechen.
-@group(1) @binding(0) var tex  : texture_2d<f32>;
+// Material-Textur-ARRAY + Sampler (group 1). Sampler mit Repeat/Linear (siehe
+// gpu.rs) -> das weltmassstaebliche UV-Raster kachelt sich ueber die Wandflaechen.
+// Ebene 0 = Fallback-Schachbrett; Ebenen 1..N = per `set_material_textures`
+// hochgeladene Material-Farbkarten. Die Ebene je Vertex kommt aus einem ZWEITEN
+// Vertex-Buffer (@location(3)); `mode.z` traegt die Anzahl gueltiger Ebenen.
+@group(1) @binding(0) var tex  : texture_2d_array<f32>;
 @group(1) @binding(1) var samp : sampler;
 
 struct VsIn {
     @location(0) position : vec3<f32>,
     @location(1) normal   : vec3<f32>,
     @location(2) uv       : vec2<f32>,
+    // Material-Textur-Ebene dieses Vertex (`-1` = kein Material -> Schachbrett).
+    @location(3) layer    : f32,
 };
 
 struct VsOut {
@@ -160,6 +165,7 @@ struct VsOut {
     @location(0) world_normal : vec3<f32>,
     @location(1) uv           : vec2<f32>,
     @location(2) world_pos    : vec3<f32>,
+    @location(3) @interpolate(flat) layer : f32,
 };
 
 @vertex
@@ -169,6 +175,7 @@ fn vs_main(in : VsIn) -> VsOut {
     out.world_normal = in.normal;
     out.uv = in.uv;
     out.world_pos = in.position;
+    out.layer = in.layer;
     return out;
 }
 
@@ -195,8 +202,13 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
         * vec3<f32>(0.24, 0.27, 0.30);
 
-    // EINZIGER Unterschied zu MESH_WGSL: Albedo aus der Bild-Textur statt Vertexfarbe.
-    let albedo = textureSample(tex, samp, in.uv).rgb;
+    // Albedo aus dem Material-Textur-Array statt Vertexfarbe. Ebene je Vertex:
+    // `layer < 0` (kein Material) -> Ebene 0 (Schachbrett). Sonst auf den
+    // gueltigen Bereich [0, mode.z-1] geklemmt (Sicherheit gegen ueberzaehlige
+    // Indizes, falls die Material-Menge kleiner ist als erwartet).
+    let max_layer = max(i32(globals.mode.z) - 1, 0);
+    let li = clamp(i32(round(in.layer)), 0, max_layer);
+    let albedo = textureSample(tex, samp, in.uv, li).rgb;
 
     var shaded = albedo * (ambient + diffuse + fill);
 
@@ -261,11 +273,16 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 "#;
 
 /// WGSL der Schnittflaechen-Kappen (Cut-Caps, section_fill.rs / gpu::cap_pipeline).
-/// Eigene TriangleList-Pipeline: schlankes Vertex-Layout [pos vec3, uv vec2],
+/// Eigene TriangleList-Pipeline: Vertex-Layout [pos vec3, uv vec2, hatch vec3],
 /// dieselbe `Globals`-Bind-Group (group(0) binding(0)) wie Mesh/Grid. Die Caps
-/// werden NICHT geclippt (sie SIND die Schnittflaeche). Fragment: prozedurale
-/// 45-Grad-Diagonalschraffur aus den Ebenen-Koordinaten (u,v) in Modell-Metern —
-/// dunkle Tinte auf hellem Papier, passend zur 2D-Schnittkonvention.
+/// werden NICHT geclippt (sie SIND die Schnittflaeche). Fragment: PROZEDURALE
+/// Bauteil-Schraffur je geschnittener Schicht — Muster/Winkel/Skalierung kommen aus
+/// dem `hatch`-Vertex-Attribut (pattern, angle_rad, scale; siehe
+/// `section_fill.rs`/`types::Hatch`). MONOCHROM (dunkle Tinte auf hellem Papier,
+/// passend zur 2D-Schnittkonvention `HATCH_INK`): es variiert das MUSTER, nicht die
+/// Farbe. Muster-Ids: 0 = none (leer/weiss), 1 = solid (Vollton),
+/// 2 = diagonal (Linienschar, `angle` steuert die Neigung — 0° = horizontal, wie
+/// im 2D), 3 = crosshatch (Kreuz), 4 = insulation (Zickzack/Daemmung).
 pub const CAP_WGSL: &str = r#"
 struct Globals {
     view_proj     : mat4x4<f32>,
@@ -281,11 +298,18 @@ struct Globals {
 struct VsIn {
     @location(0) position : vec3<f32>,
     @location(1) uv       : vec2<f32>,
+    // hatch: x = Muster-Id, y = Winkel (Radiant), z = Skalierung, w = Musterlinien-
+    // Staerke (mm-Papier). Je Cut-Polygon konstant (redundant je Vertex, siehe
+    // section_fill.rs).
+    @location(2) hatch    : vec4<f32>,
 };
 
 struct VsOut {
     @builtin(position) clip_pos : vec4<f32>,
     @location(0) uv : vec2<f32>,
+    // flat: die Muster-Parameter sind je Flaeche konstant und duerfen nicht
+    // interpoliert werden (Muster-Id ist eine Ganzzahl-Auswahl).
+    @location(1) @interpolate(flat) hatch : vec4<f32>,
 };
 
 @vertex
@@ -293,27 +317,85 @@ fn vs_main(in : VsIn) -> VsOut {
     var out : VsOut;
     out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
     out.uv = in.uv;
+    out.hatch = in.hatch;
     return out;
+}
+
+// Ein AA-gekantetes Linienband entlang der Koordinate `s` (in Einheiten von
+// `spacing`): 1 auf der Linie, 0 dazwischen. `fwidth` glaettet blickwinkelrichtig.
+fn line_band(s : f32, half_s : f32) -> f32 {
+    let frac = fract(s);
+    let dist = min(frac, 1.0 - frac);
+    let aa = max(fwidth(s), 1e-5);
+    return 1.0 - smoothstep(half_s, half_s + aa, dist);
 }
 
 @fragment
 fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
-    // 45-Grad-Diagonalschraffur in Modell-Metern: Linien bei ganzzahligen
-    // Vielfachen von `spacing` entlang (u + v). `dist` = Abstand (in Einheiten
-    // von `spacing`) zur naechsten Linie; `fwidth` liefert eine bildschirm-
-    // groessenrichtige Kantenglaettung (kein Aliasing bei flachem Blickwinkel).
-    let spacing = 0.08;   // Linienabstand ~8 cm
-    let half    = 0.004;  // halbe Linienbreite ~4 mm (Strich ~8 mm)
     let ink   = vec3<f32>(0.06, 0.06, 0.06);
     let paper = vec3<f32>(0.94, 0.94, 0.94);
 
-    let s = (in.uv.x + in.uv.y) / spacing;
-    let frac = fract(s);
-    let dist = min(frac, 1.0 - frac);     // 0 auf der Linie
-    let half_s = half / spacing;
-    let aa = max(fwidth(s), 1e-5);
-    let line = 1.0 - smoothstep(half_s, half_s + aa, dist);
-    let color = mix(paper, ink, line);
+    let pattern = i32(round(in.hatch.x));
+    let angle   = in.hatch.y;
+    let scale   = max(in.hatch.z, 0.05);
+
+    // none (0): leere (weisse) Schnittflaeche — wie „keine Schraffur" im 2D.
+    if (pattern == 0) {
+        return vec4<f32>(paper, 1.0);
+    }
+    // solid (1): Vollton (Poché) — z. B. Beton.
+    if (pattern == 1) {
+        return vec4<f32>(ink, 1.0);
+    }
+
+    // Muster-Koordinaten: (u,v) in Modell-Metern, um `angle` gedreht. Konvention
+    // wie die 2D-Schraffur (`hatchPreview.parallelLines`): `angle == 0` ergibt
+    // HORIZONTALE Linien (Phasen-Achse = dv), `+angle` dreht die Schar gegen den
+    // Uhrzeigersinn wie im 2D-Swatch. `du` laeuft ENTLANG der Linienrichtung, `dv`
+    // ist die Quer-/Phasen-Achse. (Frueher lag hier ein fixer 45°-Versatz, weil das
+    // Diagonalmuster ueber `du+dv` lief — dadurch war alles 45° verdreht.)
+    let ca = cos(angle);
+    let sa = sin(angle);
+    let du =  in.uv.x * ca + in.uv.y * sa;   // entlang der Linienrichtung
+    let dv = -in.uv.x * sa + in.uv.y * ca;   // quer (Phase)
+
+    let spacing = 0.08 * scale;   // Grund-Linienabstand ~8 cm * Skalierung
+    // Musterlinien-Staerke PRO Schraffur aus `hatch.w` (mm-Papier, aus dem LineStyle
+    // des Hatch — wie die 2D-Schnitt-Schraffur: SIA `hatch-hair` 0.02 mm vs. `thin`
+    // 0.13 mm). Dieselbe mm→Welt-Kalibrierung wie die Schicht-Trennlinien
+    // (`section_fill::CUT_LINE_MM_TO_WORLD` = 0.01, halbe Breite ×0.5 → Faktor 0.005),
+    // damit Schraffur- und Trennlinien-Staerke konsistent skalieren. Kleiner Floor,
+    // damit eine Haarlinie nicht ganz verschwindet.
+    let half    = max(in.hatch.w * 0.005, 0.0001);
+    let half_s  = half / spacing;
+
+    var line = 0.0;
+    if (pattern == 2) {
+        // diagonal: EINE Linienschar quer zur Phasen-Achse (dv). angle==0 →
+        // horizontal; `hatch.angle` (z. B. 45° bei Backstein) dreht sie wie im 2D.
+        line = line_band(dv / spacing, half_s);
+    } else if (pattern == 3) {
+        // crosshatch: zwei Scharen ueber Kreuz (Phase dv + Phase du = +90°). Bei
+        // angle==0 horizontal+vertikal, bei 45° (Beton) das gekippte Kreuz — wie 2D.
+        line = max(
+            line_band(dv / spacing, half_s),
+            line_band(du / spacing, half_s)
+        );
+    } else {
+        // insulation (4, Daemmung): Zickzack. Die Quer-Position (dv) folgt einer
+        // Dreieckswelle entlang der Lauf-Achse (du) — ein durchgehender Zickzack.
+        let cell = spacing * 2.0;
+        let a = du / cell;
+        let b = dv / cell;
+        let tri = abs(fract(a) - 0.5) * 2.0;   // 0..1 Dreieckswelle
+        let fb = fract(b);
+        let d = min(abs(fb - tri), min(abs(fb - tri + 1.0), abs(fb - tri - 1.0)));
+        let aa = max(fwidth(fb) + fwidth(tri), 1e-5);
+        let hw = half / cell;
+        line = 1.0 - smoothstep(hw, hw + aa, d);
+    }
+
+    let color = mix(paper, ink, clamp(line, 0.0, 1.0));
     return vec4<f32>(color, 1.0);
 }
 "#;

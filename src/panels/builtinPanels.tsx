@@ -22,6 +22,9 @@ import { AttributesPanel } from "./AttributesPanel";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";
 import { SitePanel } from "./SitePanel";
 import { RoomBalancePanel } from "./RoomBalancePanel";
+import { ElementTreePanel, ElementsTabIcon } from "./ElementTreePanel";
+import { ViewSnapshotsPanel, ViewSnapshotsTabIcon } from "./ViewSnapshotsPanel";
+import { LayoutsPanel, LayoutsTabIcon } from "./LayoutsPanel";
 import {
   ToolsTabIcon,
   AttributesTabIcon,
@@ -41,6 +44,9 @@ export const BUILTIN_PANEL_IDS = {
   objectInfo: "object-info",
   site: "site",
   roomBalance: "room-balance",
+  elements: "elements",
+  viewSnapshots: "view-snapshots",
+  layouts: "layouts",
 } as const;
 
 // Werkzeug-Palette (Symbol + Name je Werkzeug, ArchiCAD/Vectorworks-Stil).
@@ -104,4 +110,33 @@ registerPanel({
   icon: <RoomBalanceTabIcon />,
   hasDisplayMode: false,
   render: () => <RoomBalancePanel />,
+});
+
+// Element-Baum (ROADMAP §11) — Geschoss → Bauteilklasse → Element, Suche + Klick-Selektion.
+registerPanel({
+  id: BUILTIN_PANEL_IDS.elements,
+  title: "elements.title",
+  icon: <ElementsTabIcon />,
+  hasDisplayMode: false,
+  render: () => <ElementTreePanel />,
+});
+
+// Ausschnitte / View-Snapshots (DOSSIER A2, ROADMAP §2c/§11) — benannte,
+// wiederherstellbare Ansichten (Darstellungszustand als Preset).
+registerPanel({
+  id: BUILTIN_PANEL_IDS.viewSnapshots,
+  title: "viewsnap.title",
+  icon: <ViewSnapshotsTabIcon />,
+  hasDisplayMode: false,
+  render: () => <ViewSnapshotsPanel />,
+});
+
+// Layouts / Masterlayouts (DOSSIER A3, ROADMAP §11) — Druck-/Plan-Blätter mit
+// platzierten Viewports (an Ausschnitte gebunden), Editor als schwebendes Fenster.
+registerPanel({
+  id: BUILTIN_PANEL_IDS.layouts,
+  title: "layouts.panelTitle",
+  icon: <LayoutsTabIcon />,
+  hasDisplayMode: false,
+  render: () => <LayoutsPanel />,
 });

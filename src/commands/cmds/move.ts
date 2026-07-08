@@ -49,12 +49,22 @@ function targetFromFields(base: Vec2, locks: Record<string, number>, cursor: Vec
 
 /** Hat die Auswahl überhaupt etwas Verschiebbares? */
 function hasSelection(sel: CommandSelection): boolean {
-  return sel.wallIds.length > 0 || sel.drawingId !== null;
+  return (
+    sel.wallIds.length > 0 ||
+    sel.drawingId !== null ||
+    !!sel.extrudedSolidId ||
+    !!sel.columnId
+  );
 }
 
 /** Auswahl → TransformSelection (gleiche Form). */
 function toTransformSel(sel: CommandSelection): TransformSelection {
-  return { wallIds: sel.wallIds, drawingId: sel.drawingId };
+  return {
+    wallIds: sel.wallIds,
+    drawingId: sel.drawingId,
+    extrudedSolidId: sel.extrudedSolidId,
+    columnId: sel.columnId,
+  };
 }
 
 // Zustand: erst Basispunkt setzen, dann Ziel (mit Auswahl-Snapshot vom Start).

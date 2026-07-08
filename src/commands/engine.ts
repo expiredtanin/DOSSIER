@@ -328,6 +328,14 @@ export class CommandEngine {
       }
     }
 
+    // Freitext-Schritt (z. B. Text-Platzierung): der Schritt nimmt beliebigen
+    // Text als Label — die komplette getippte Zeile geht 1:1 durch (auch Zahlen/
+    // Kommas), bevor die numerische/Koordinaten-Auflösung greift.
+    if (accepts.includes("text")) {
+      this.feed({ kind: "text", text });
+      return;
+    }
+
     const parsed = parseInput(text);
 
     // Tab-Feld-Modus (§2.7): eine nackte Zahl LOCKT das aktive Feld (statt als

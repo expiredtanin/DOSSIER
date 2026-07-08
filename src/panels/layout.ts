@@ -34,7 +34,13 @@ import type {
 // v8: Werkzeug-Sidebar aus dem Default-Layout entfernt (Ribbon-UI Phase 3) →
 // Version-Bump, damit gespeicherte Layouts auf den neuen Standard zurückfallen
 // (Attribute volle linke Höhe statt Werkzeug-Palette oben).
-export const LAYOUT_VERSION = 8;
+// v9: Element-Baum ("elements", ROADMAP Paragraf 11) als weiterer Tab in der
+// rechten unteren Gruppe (neben Zeichnungsebenen/Ebenen/Umgebung).
+// v10: Ausschnitte-Panel ("view-snapshots", DOSSIER A2 / ROADMAP Paragraf 2c)
+// als weiterer Tab in der rechten unteren Gruppe.
+// v11: Layouts-Panel ("layouts", DOSSIER A3 / ROADMAP Paragraf 11) als weiterer
+// Tab in der rechten unteren Gruppe.
+export const LAYOUT_VERSION = 11;
 
 /** localStorage-Schlüssel des zuletzt benutzten Layouts. */
 const CURRENT_KEY = "cad.layout";
@@ -68,7 +74,7 @@ const DEFAULT_LEFT_GROUPS: DockGroup[] = [
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
   { tabs: ["object-info", "room-balance"], activeTab: "object-info", weight: 1 },
   {
-    tabs: ["drawing-levels", "layers", "site"],
+    tabs: ["drawing-levels", "layers", "site", "elements", "view-snapshots", "layouts"],
     activeTab: "drawing-levels",
     weight: 1.5,
   },

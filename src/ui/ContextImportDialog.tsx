@@ -1,7 +1,7 @@
 // Standort-Import-Dialog (modal). Sucht einen Ort/Adresse (geo.admin
 // SearchServer), lässt einen Radius wählen und importiert Gebäude-Grundrisse
-// (swisstopo) sowie OSM-Features (Gebäude/Strassen/Wasser/Grün) als Kontext-
-// Geometrie ins Projekt.
+// (swisstopo) sowie OSM-Features (Gebäude/Strassen/Wasser/Grün/Parkplätze/
+// Bahn/Wald) als Kontext-Geometrie ins Projekt.
 //
 // Muster wie ExportPdfDialog/ImportDialog: abgedunkeltes Overlay, Klick auf den
 // Hintergrund + Esc schließen. Der eigentliche Netz-Abruf läuft hier (io/*); das
@@ -34,6 +34,9 @@ type Sources = {
   osmRoads: boolean;
   osmWater: boolean;
   osmGreen: boolean;
+  osmParking: boolean;
+  osmRailway: boolean;
+  osmForest: boolean;
 };
 
 const DEFAULT_SOURCES: Sources = {
@@ -43,6 +46,9 @@ const DEFAULT_SOURCES: Sources = {
   osmRoads: true,
   osmWater: true,
   osmGreen: true,
+  osmParking: false,
+  osmRailway: false,
+  osmForest: false,
 };
 
 export function ContextImportDialog({
@@ -98,7 +104,10 @@ export function ContextImportDialog({
     sources.osmBuildings ||
     sources.osmRoads ||
     sources.osmWater ||
-    sources.osmGreen;
+    sources.osmGreen ||
+    sources.osmParking ||
+    sources.osmRailway ||
+    sources.osmForest;
 
   const runImport = async () => {
     if (!selected || !anySource) return;
@@ -121,12 +130,18 @@ export function ContextImportDialog({
         roads: sources.osmRoads,
         water: sources.osmWater,
         green: sources.osmGreen,
+        parking: sources.osmParking,
+        railway: sources.osmRailway,
+        forest: sources.osmForest,
       };
       if (
         osmSel.buildings ||
         osmSel.roads ||
         osmSel.water ||
-        osmSel.green
+        osmSel.green ||
+        osmSel.parking ||
+        osmSel.railway ||
+        osmSel.forest
       ) {
         const r = await fetchOsm(center, radius, osmSel, origin);
         origin = r.origin;
@@ -304,6 +319,30 @@ export function ContextImportDialog({
                   onChange={() => toggle("osmGreen")}
                 />
                 {t("ctxImport.src.osmGreen")}
+              </label>
+              <label className="cim-check">
+                <input
+                  type="checkbox"
+                  checked={sources.osmParking}
+                  onChange={() => toggle("osmParking")}
+                />
+                {t("ctxImport.src.osmParking")}
+              </label>
+              <label className="cim-check">
+                <input
+                  type="checkbox"
+                  checked={sources.osmRailway}
+                  onChange={() => toggle("osmRailway")}
+                />
+                {t("ctxImport.src.osmRailway")}
+              </label>
+              <label className="cim-check">
+                <input
+                  type="checkbox"
+                  checked={sources.osmForest}
+                  onChange={() => toggle("osmForest")}
+                />
+                {t("ctxImport.src.osmForest")}
               </label>
             </div>
           </section>

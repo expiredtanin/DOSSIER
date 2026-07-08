@@ -344,6 +344,12 @@ fn demo_walls() -> Vec<WallInput> {
         color: grey,
         openings: vec![],
         layers: None,
+        // Additive Felder (Loecher/Material/Schnitt) — die Demo-Waende nutzen sie
+        // nicht; Defaults wie im Serde-Pfad.
+        holes: vec![],
+        material_index: None,
+        hatch: None,
+        cut: None,
     };
     vec![
         mk([0.0, 0.0], [6.0, 0.0]),

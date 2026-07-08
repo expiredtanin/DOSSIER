@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import type { Project } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
 import { selectionHighlightLines, projectToWalls3d, projectToModel3d } from "./toWalls3d";
+import { resolveHatch } from "./generatePlan";
 
 const RGB: [number, number, number] = [1, 0.5, 0.1];
 const FLOATS_PER_VERTEX = 6; // [px,py,pz, r,g,b]
@@ -25,14 +26,19 @@ describe("selectionHighlightLines", () => {
     expect(lines.length).toBe(0);
   });
 
-  it("eine Wand ohne Öffnungen -> je Materiallage ein Quader (4·12 Kanten)", () => {
+  it("eine Wand ohne Öffnungen -> je Materiallage ein Quader, Kern-Band unter der Decke gespalten (5·12 Kanten)", () => {
     // W2 (EG, Ost) trägt keine Tür/kein Fenster im Sample-Projekt (nur W1/W3
     // haben Öffnungen, s. sampleProject.ts) -> ein Achsen-Teilquader. Wandtyp
     // "aw" hat 4 Schichten (render-ext/insulation/brick/render-int), die
-    // TS-seitig je als eigene Box gestapelt werden (Option B) -> 4 Quader =
-    // 4·12 Kanten. (Früher: 1 Vollkörper = 12 Kanten.)
+    // TS-seitig je als eigene Box gestapelt werden (Option B).
+    // NEU (per-Schicht-Decken-Dominanz): W2 steht unter der Geschossdecke C1
+    // (dg-massiv: screed 30 / insulation 20 / concrete 100). Der Backstein (50)
+    // wird NUR von der Beton-Schicht (100) im z-Band [2.3,2.5] gekappt und läuft
+    // darüber (bis Wandkopf 2.6) durch -> ZWEI Backstein-Boxen [0,2.3] + [2.5,2.6].
+    // Die anderen Bänder bleiben je 1 Box (Aussenputz/Dämmung aussen: ungeschnitten;
+    // Innenputz 10 < alle Deckenschichten: bis 2.3). Also 5 Quader = 5·12 Kanten.
     const lines = selectionHighlightLines(sampleProject, ["W2"], [], RGB);
-    expect(lines.length).toBe(4 * 12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
+    expect(lines.length).toBe(5 * 12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
   });
 
   it("eine Wand mit Farbwerten in jedem Vertex", () => {
@@ -43,11 +49,14 @@ describe("selectionHighlightLines", () => {
     expect(lines[5]).toBeCloseTo(RGB[2], 6);
   });
 
-  it("eine Decke (Slab) -> 3·n Kanten (n = Umriss-Eckenzahl)", () => {
-    // C1 hat einen 4-eckigen Umriss (5x4m Rechteck) -> 3*4 = 12 Kanten.
+  it("eine Decke (Slab) -> je Schicht 3·n Kanten (geschichteter Bodenaufbau)", () => {
+    // C1 hat einen 4-eckigen Umriss (5x4m Rechteck) -> 3*4 = 12 Kanten JE SCHICHT.
+    // Deckentyp "dg-massiv" hat 3 Schichten (Estrich/Dämmung/Beton) -> je ein
+    // eigener Slab, damit der 3D-Schnitt den Aufbau geschichtet zeigt (wie 2D).
     const lines = selectionHighlightLines(sampleProject, [], ["C1"], RGB);
     const n = 4;
-    expect(lines.length).toBe(3 * n * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
+    const layers = 3; // dg-massiv: screed + insulation + concrete
+    expect(lines.length).toBe(layers * 3 * n * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
   });
 
   it("Mehrfachauswahl (Wand + Decke) -> Summe der Einzelgeometrien", () => {
@@ -63,16 +72,21 @@ describe("selectionHighlightLines", () => {
     expect(two.length).toBe(one.length * 2);
   });
 
-  it("eine Wand MIT Öffnungen -> EIN Körper je Schicht-Band mit Löchern (kein Segment-Vielfaches mehr)", () => {
-    // NEUES Verhalten (3D-Pfad, layered=true): W1 (Tür D1 + Fenster O1) wird
-    // NICHT mehr in Pfeiler/Brüstung/Sturz zerlegt, sondern als EIN Körper pro
-    // Schicht-Band mit echten Löchern emittiert. Das Highlight umrandet daher
-    // genau die Schicht-Bänder (Wandtyp "aw" = 4 Schichten) — exakt so viele
-    // Kanten wie eine öffnungslose Wand desselben Typs (W2), NICHT ein Vielfaches
-    // durch Segmente. (Die Löcher selbst fügen im Highlight keine Kanten hinzu.)
-    const w1 = selectionHighlightLines(sampleProject, ["W1"], [], RGB);
-    const w2 = selectionHighlightLines(sampleProject, ["W2"], [], RGB);
-    expect(w1.length).toBe(4 * 12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
+  it("Öffnungen allein multiplizieren die Bänder NICHT (ein Körper je Schicht-Band mit Löchern)", () => {
+    // 3D-Pfad (layered=true): eine Wand mit Öffnungen wird NICHT in Pfeiler/
+    // Brüstung/Sturz zerlegt, sondern als EIN Körper pro Schicht-Band mit echten
+    // Löchern emittiert — die Löcher fügen im Highlight keine Kanten hinzu.
+    // Isoliert von Verschneidungen getestet: OHNE die Querwand W9 (deren T-Stoss
+    // sonst die innerste Putzschicht von W1 span-cutout-splittet, s. eigener
+    // Test unten) hat W1 (Tür D1 + Fenster O1) dieselbe Bänder-Zahl wie die
+    // öffnungslose Wand W2 desselben Typs "aw" — die Löcher fügen keine Körper
+    // hinzu. Beide stehen unter der Geschossdecke C1, deren Beton-Schicht (100)
+    // den Backstein (50) im z-Band [2.3,2.5] spaltet -> 5 Körper (per-Schicht-
+    // Decken-Dominanz, s. Backstein-Boxen [0,2.3] + [2.5,2.6]).
+    const noW9: Project = { ...sampleProject, walls: sampleProject.walls.filter((w) => w.id !== "W9") };
+    const w1 = selectionHighlightLines(noW9, ["W1"], [], RGB);
+    const w2 = selectionHighlightLines(noW9, ["W2"], [], RGB);
+    expect(w1.length).toBe(5 * 12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
     expect(w1.length).toBe(w2.length);
   });
 });
@@ -114,23 +128,37 @@ describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:t
     ],
   };
 
-  it("layered=true: 1 RWall je Schicht-Band mit BEIDEN Fenstern als holes", () => {
+  it("layered=true: BEIDE Fenster als holes je Band, Loch-Positionen bleiben nach Join-Rebase korrekt", () => {
     const w1 = projectToWalls3d(twoOffsetWindows, true).filter((w) => w.wallId === "W1");
-    // Genau ein Körper je Schicht-Band (aw = 4 Schichten), KEINE Segment-Boxen.
-    expect(w1.length).toBe(4);
-    for (const body of w1) {
-      // Jeder Band-Körper trägt BEIDE Löcher (in EINEM Körper).
+    // W1 ist Durchgangswand für die Querwand W9 (T-Stoss): die innerste Putz-
+    // schicht wird durch den Span-Cutout entlang der Achse in ZWEI Teilstücke
+    // gebrochen. NEU (per-Schicht-Decken-Dominanz): W1 steht unter der Decke C1,
+    // deren Beton (100) den Backstein (50) im z-Band [2.3,2.5] spaltet -> der
+    // Backstein kommt als ZWEI Boxen [0,2.3] + [2.5,2.6]. Die obere Backstein-Box
+    // liegt ÜBER beiden Fenstern (z ≤ 2.1) und trägt daher KEINE Löcher.
+    // Körper gesamt: render-ext(1) + insulation(1) + brick[0,2.3](1) +
+    // brick[2.5,2.6](1, ohne Loch) + render-int-Span(2) = 6.
+    expect(w1.length).toBe(6);
+    // Nur die Körper, die die Fenster-z-Bänder schneiden, tragen Löcher (5 Stück);
+    // die obere Backstein-Box (über den Fenstern) hat keine.
+    const withHoles = w1.filter((b) => b.holes && b.holes.length > 0);
+    expect(withHoles.length).toBe(5);
+    // W1-Achse: (0,0)->(5,0), u=(1,0) -> Box-Achsenstart = box.start[0]. Die Loch-
+    // Achsenkoordinaten sind je Körper auf DESSEN Box-Start rebased; die ABSOLUTE
+    // Position (Box-Start + from) muss wieder exakt auf den Öffnungs-Intervallen liegen.
+    for (const body of withHoles) {
       expect(body.holes).toBeDefined();
       expect(body.holes!.length).toBe(2);
+      const axis0 = body.start[0];
       const byFrom = [...body.holes!].sort((a, b) => a.from - b.from);
-      // Fenster A: u=[1,2], z=[0.9,2.1].
-      expect(byFrom[0].from).toBeCloseTo(1.0, 6);
-      expect(byFrom[0].to).toBeCloseTo(2.0, 6);
+      // Fenster A: u=[1,2], z=[0.9,2.1] (absolut rekonstruiert).
+      expect(axis0 + byFrom[0].from).toBeCloseTo(1.0, 6);
+      expect(axis0 + byFrom[0].to).toBeCloseTo(2.0, 6);
       expect(byFrom[0].zBottom).toBeCloseTo(0.9, 6);
       expect(byFrom[0].zTop).toBeCloseTo(2.1, 6);
       // Fenster B: u=[1.5,2.5], z=[0.3,0.7] — überlappt A in u, liegt tiefer.
-      expect(byFrom[1].from).toBeCloseTo(1.5, 6);
-      expect(byFrom[1].to).toBeCloseTo(2.5, 6);
+      expect(axis0 + byFrom[1].from).toBeCloseTo(1.5, 6);
+      expect(axis0 + byFrom[1].to).toBeCloseTo(2.5, 6);
       expect(byFrom[1].zBottom).toBeCloseTo(0.3, 6);
       expect(byFrom[1].zTop).toBeCloseTo(0.7, 6);
     }
@@ -149,7 +177,12 @@ describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:t
     // zBottom des Lochs == Wand-UK (0), NICHT ab einer Brüstung.
     const p: Project = { ...sampleProject, openings: [] };
     const w1 = projectToWalls3d(p, true).filter((w) => w.wallId === "W1");
-    expect(w1.length).toBe(4);
+    // W1 ist Durchgangswand für W9 (T-Stoss) -> innerste Putzschicht span-cutout-
+    // gebrochen. Zusätzlich spaltet die Decke C1 (Beton 100) den Backstein (50) im
+    // z-Band [2.3,2.5] -> obere Backstein-Box [2.5,2.6] ohne Loch. Körper: render-ext
+    // + insulation + brick[0,2.3] + brick[2.5,2.6] + render-int-Span(2) = 6.
+    expect(w1.length).toBe(6);
+    // Der erste Körper (Aussenputz-Band, volle Achse) trägt die Tür als Loch bis UK.
     const door = w1[0].holes?.find((h) => h.zBottom < 1e-6);
     expect(door).toBeDefined();
     expect(door!.zBottom).toBeCloseTo(0, 6); // Loch bis zur Wand-UK.
@@ -161,10 +194,13 @@ describe("Bauteil-/Materialfarbe statt Einheits-Grau (Wände + Decken)", () => {
     // Wandtyp "aw" (s. sampleProject) hat 4 Schichten mit eigenen Farben:
     //   render-ext 0.02 #d8d2c7, insulation 0.16 #ffffff,
     //   brick 0.15 #8c5544, render-int 0.015 #efece6  (Σ = 0.345 m).
-    // W2 ist öffnungslos -> genau ein Achsen-Teilquader, also 4 Schicht-Boxen.
+    // W2 ist öffnungslos, steht aber unter der Geschossdecke C1: die Beton-Schicht
+    // (100) spaltet den Backstein (50) im z-Band [2.3,2.5] -> der Backstein kommt
+    // als ZWEI Boxen [0,2.3] + [2.5,2.6] (per-Schicht-Decken-Dominanz), die drei
+    // übrigen Bänder je 1 Box = 5 Boxen. Die Farbzuordnung je Schicht bleibt.
     const walls = projectToWalls3d(sampleProject);
     const w2 = walls.filter((w) => w.wallId === "W2");
-    expect(w2.length).toBe(4);
+    expect(w2.length).toBe(5);
 
     // Alle Schicht-Boxen tragen die gemeinsame wallId (Klick selektiert ganze Wand)
     // und sind Vollkörper (layers leer -> render3d zeichnet in `color`).
@@ -173,14 +209,18 @@ describe("Bauteil-/Materialfarbe statt Einheits-Grau (Wände + Decken)", () => {
       expect(seg.layers.length).toBe(0);
     }
 
-    // Die vier Materialfarben kommen genau einmal vor.
+    // Die vier Materialfarben kommen vor; der Backstein (#8c5544) zweimal (gespalten).
     const hex = (c: [number, number, number]) =>
       c.map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
     const colors = w2.map((s) => hex(s.color)).sort();
-    expect(colors).toEqual(["8c5544", "d8d2c7", "efece6", "ffffff"]);
+    expect(colors).toEqual(["8c5544", "8c5544", "d8d2c7", "efece6", "ffffff"]);
+    expect([...new Set(colors)].sort()).toEqual(["8c5544", "d8d2c7", "efece6", "ffffff"]);
 
-    // Die Schichtdicken summieren zur Gesamt-Wanddicke (keine Lücken/Overlaps).
-    const totalT = w2.reduce((s, seg) => s + seg.thickness, 0);
+    // Die Schichtdicken (je EINDEUTIGEM Querversatz, damit die gespaltene Backstein-
+    // Box nur EINMAL zählt) summieren zur Gesamt-Wanddicke (keine Lücken/Overlaps).
+    const byOffset = new Map<number, number>();
+    for (const seg of w2) byOffset.set(Math.round((seg.start[0] - 5) * 1e6) / 1e6, seg.thickness);
+    const totalT = [...byOffset.values()].reduce((s, t) => s + t, 0);
     expect(totalT).toBeCloseTo(0.345, 6);
   });
 
@@ -189,9 +229,14 @@ describe("Bauteil-/Materialfarbe statt Einheits-Grau (Wände + Decken)", () => {
     // wirkt rein auf x (Box-Start.x = 5 + offset). Sortiert man die Boxen nach
     // Versatz, müssen sich benachbarte Flächen exakt berühren und der Stapel
     // symmetrisch um die Achse liegen: min = -T/2, max = +T/2.
-    const w2 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W2");
-    const bands = w2
-      .map((s) => ({ offset: s.start[0] - 5, t: s.thickness }))
+    // Nach EINDEUTIGEM Querversatz zusammenfassen: der unter der Decke gespaltene
+    // Backstein ([0,2.3] + [2.5,2.6]) liegt zweimal am SELBEN Versatz vor und darf
+    // die Dicken-Bilanz nicht doppelt zählen (per-Schicht-Decken-Dominanz).
+    const w2raw = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W2");
+    const byOffset = new Map<number, number>();
+    for (const s of w2raw) byOffset.set(Math.round((s.start[0] - 5) * 1e6) / 1e6, s.thickness);
+    const bands = [...byOffset.entries()]
+      .map(([offset, t]) => ({ offset, t }))
       .sort((a, b) => a.offset - b.offset);
     const T = bands.reduce((s, b) => s + b.t, 0);
     expect(bands[0].offset - bands[0].t / 2).toBeCloseTo(-T / 2, 6);
@@ -216,9 +261,14 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
       context: [],
     };
     const { meshes } = projectToModel3d(p);
+    // `meshes` enthält jetzt auch die glatte Betontreppen-Laufplatte (ST1, Mesh);
+    // die Glasscheiben tragen die bläuliche Glasfarbe → danach filtern.
+    const glassMeshes = meshes.filter(
+      (m) => m.color[0] === 0.62 && m.color[1] === 0.76 && m.color[2] === 0.85,
+    );
     // Genau EINE Scheibe: das Fenster O1; die Tür D1 bleibt offen (keine Scheibe).
-    expect(meshes.length).toBe(1);
-    const glass = meshes[0];
+    expect(glassMeshes.length).toBe(1);
+    const glass = glassMeshes[0];
     // Quader: 8 Ecken (24 Floats) + 12 Dreiecke (36 Indizes), leicht bläuliches Glas.
     expect(glass.positions.length).toBe(24);
     expect(glass.indices.length).toBe(36);
@@ -234,32 +284,73 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
 
   it("Türen bekommen keine Scheibe; je Fenster genau eine", () => {
     // Volles Sample-Projekt: 2 Fenster (O1, O2) + 1 Tür (D1), Kontext leer.
+    // Neben den Glasscheiben liegt jetzt auch das Betontreppen-Mesh in `meshes`
+    // → nach Glasfarbe filtern: genau 2 Scheiben (O1, O2), Tür ohne Scheibe.
     const { meshes } = projectToModel3d(sampleProject);
-    expect(meshes.length).toBe(2);
+    const glassMeshes = meshes.filter(
+      (m) => m.color[0] === 0.62 && m.color[1] === 0.76 && m.color[2] === 0.85,
+    );
+    expect(glassMeshes.length).toBe(2);
   });
 });
 
-describe("Prioritäts-Trim Wand/Decke (Z-Fighting-Fix, s. trimWallTopForCeilings)", () => {
-  // Sample-Projekt: W1-W4 (EG, Wandtyp "aw", dominante Schicht "brick"
-  // joinPriority 50) tragen exakt Wandhöhe 2.6 m = Geschosshöhe -> zTop 2.6.
-  // Decke C1 (EG, Deckentyp "dg-massiv", dominante Schicht "concrete"
-  // joinPriority 100) hat OK bündig mit dem Wandkopf (zTop 2.6) und
-  // Gesamtdicke 0.3 m (screed .06 + insulation .04 + concrete .2) -> zBottom
-  // 2.3. Vor dem Trim überlappten sich Wand- und Deckenvolumen exakt über
-  // [2.3..2.6] im ganzen Wand-Footprint (Z-Fighting). Nach dem Trim endet die
-  // Wand an der Deckenunterkante, weil die Decke die höhere joinPriority hat.
-  it("Decke mit höherer joinPriority kappt die Wand an ihrer Unterkante", () => {
+describe("Per-Schicht-Decken-Dominanz Wand/Decke (3D-Entsprechung der Schnitt-Boolean-Dominanz)", () => {
+  // Sample-Projekt: W1-W4 (EG, Wandtyp "aw": render-ext 10, insulation 20,
+  // brick 50, render-int 10) tragen Wandhöhe 2.6 m = Geschosshöhe. Decke C1
+  // (EG, Deckentyp "dg-massiv", dominante Schicht "concrete" joinPriority 100)
+  // hat OK bündig mit dem Wandkopf (zTop 2.6), Gesamtdicke 0.3 m -> zBottom 2.3.
+  //
+  // ENTSCHEIDEND (Nutzer-Bug „Kranz durch die Dämmung"): C1.outline ist der
+  // Raumgrundriss auf den WAND-ACHSEN ((0,0)-(5,0)-(5,4)-(0,4)) — die Decke liegt
+  // also nur auf dem INNEREN Halbquerschnitt jeder Aussenwand. Für W2 (Achse x=5)
+  // liegen die Bandmittellinien bei x = 5 − offset:
+  //   render-ext  x=5.1625  (AUSSEN, x>5) -> NICHT überdeckt -> läuft durch
+  //   insulation  x=5.0725  (AUSSEN)      -> NICHT überdeckt -> läuft durch
+  //   brick       x=4.9175  (INNEN, x<5)  -> überdeckt -> Decken-z-Schnitt
+  //   render-int  x=4.8350  (INNEN)       -> überdeckt -> Decken-z-Schnitt
+  // Die Decke schneidet ein Band also nur dort, wo ihre Outline die Footprint-
+  // Mittellinie DIESES Bandes überdeckt (geometrischer Überlapp wie
+  // toSection.ts::subtractDominantBands) — NICHT mehr per wandweitem BBox-Test.
+  // (Frühere Tests erwarteten hier „ALLE Schichten geschnitten"; das kodierte das
+  // falsche BBox-Verhalten und ist die Ursache des 3D-Kranzes. Korrigiert.)
+  it("Decke schneidet nur die von ihrer Outline überdeckten (inneren) Bänder; Dämmung/Aussenputz laufen durch; Beton spaltet den Backstein PER SCHICHT", () => {
     const w2 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W2");
-    expect(w2.length).toBeGreaterThan(0);
-    for (const seg of w2) {
-      expect(seg.baseElevation + seg.height).toBeCloseTo(2.3, 6);
-    }
+    // PER-SCHICHT-Decken-Dominanz (identisch zu toSection.ts::subtractDominantBands):
+    // jede Deckenschicht (screed 30 / insulation 20 / concrete 100) schneidet nur
+    // Wandbänder mit STRIKT niedrigerer Priorität in IHREM z-Band. Der Backstein (50)
+    // wird also NUR von der Beton-Schicht (100, z-Band [2.3,2.5]) gekappt und läuft
+    // darüber bis zum Wandkopf (2.6) durch -> ZWEI Boxen. So schneidet er im Schnitt
+    // die schwimmenden Deckenschichten Estrich/Dämmung über sich weg (Nutzer-Bug).
+    const zBoxes = (t: number) =>
+      w2.filter((s) => Math.abs(s.thickness - t) < 1e-6)
+        .map((s) => [s.baseElevation, s.baseElevation + s.height] as const)
+        .sort((a, b) => a[0] - b[0]);
+    // brick: [0,2.3] (unter Beton) + [2.5,2.6] (über Beton, bis Wandkopf).
+    const brick = zBoxes(0.15);
+    expect(brick.length).toBe(2);
+    expect(brick[0][1]).toBeCloseTo(2.3, 6); // endet an Beton-UK
+    expect(brick[1][0]).toBeCloseTo(2.5, 6); // beginnt an Beton-OK
+    expect(brick[1][1]).toBeCloseTo(2.6, 6); // läuft bis Wandkopf durch
+    // render-int (10 < allen Deckenschichten): über [2.3,2.6] komplett gekappt -> [0,2.3].
+    const renderInt = zBoxes(0.015);
+    expect(renderInt.length).toBe(1);
+    expect(renderInt[0][1]).toBeCloseTo(2.3, 6);
+    // AUSSEN liegende Schichten (Mittellinie ausserhalb der Decken-Outline): KEIN
+    // Schnitt -> volle Höhe (behobener „Kranz"-Bug, wie im 2D-Schnitt).
+    expect(zBoxes(0.16)).toEqual([[0, 2.6]]); // insulation läuft durch
+    expect(zBoxes(0.02)).toEqual([[0, 2.6]]); // render-ext (Aussenputz) läuft durch
+    expect(w2.length).toBe(5); // render-ext + insulation + brick(2) + render-int
   });
 
-  it("kein Trim, wenn die Wand-Priorität >= Decken-Priorität ist", () => {
-    // Deckentyp-Priorität (concrete) auf 40 senken -> unter der Wand-Priorität
-    // (brick 50) -> die Decke gewinnt nicht mehr, die Wand bleibt unverändert
-    // auf voller Höhe (2.6 m, wie ohne Trim-Logik).
+  it("PER-SCHICHT: nur überdeckte Bänder mit < Decken-Priorität werden geschnitten (Kern >= Prio läuft durch)", () => {
+    // Deckentyp-Priorität (concrete) auf 40 senken. Von den ÜBERDECKTEN (inneren)
+    // Bändern läuft brick (50 > 40) jetzt bis zum Wandkopf (2.6) durch; render-int
+    // (10 < 40) wird im Decken-z-Band [2.3,2.6] geschnitten -> endet bei 2.3. Die
+    // AUSSEN liegenden Bänder (insulation, render-ext) sind ohnehin nicht überdeckt
+    // und laufen unabhängig von der Priorität durch (2.6). Priorität ALLEIN genügt
+    // also nicht — es braucht zusätzlich den geometrischen Überlapp (wie die
+    // „gestaffelte Kette" in toSection.boolean.test.ts, wo Beton die Dämmung trotz
+    // höherer Prio NICHT schneidet, weil sie sich nicht überlappen).
     const p: Project = {
       ...sampleProject,
       components: sampleProject.components.map((c) =>
@@ -267,13 +358,155 @@ describe("Prioritäts-Trim Wand/Decke (Z-Fighting-Fix, s. trimWallTopForCeilings
       ),
     };
     const w2 = projectToWalls3d(p).filter((w) => w.wallId === "W2");
-    expect(w2.length).toBeGreaterThan(0);
-    for (const seg of w2) {
-      expect(seg.baseElevation + seg.height).toBeCloseTo(2.6, 6);
-    }
+    expect(w2.length).toBe(4); // je 1 Box pro Band (Wand ragt nicht über die Decke)
+    const top = (t: number) => {
+      const b = w2.find((s) => Math.abs(s.thickness - t) < 1e-6)!;
+      return b.baseElevation + b.height;
+    };
+    expect(top(0.15)).toBeCloseTo(2.6, 6); // brick (überdeckt, 50 > 40) läuft durch
+    expect(top(0.015)).toBeCloseTo(2.3, 6); // render-int (überdeckt, 10 < 40) geschnitten
+    expect(top(0.16)).toBeCloseTo(2.6, 6); // insulation (nicht überdeckt) läuft durch
+    expect(top(0.02)).toBeCloseTo(2.6, 6); // render-ext (nicht überdeckt) läuft durch
   });
 
-  it("kein Trim, wenn keine Decke im selben Geschoss überlappt (z.B. OG-Wände ohne Dach-Decke)", () => {
+  it("Wand ragt über die Decke: überdecktes dominiertes Band spaltet vertikal, Aussenschichten bleiben ungeteilt", () => {
+    // W2 auf 3.0 m erhöhen (über Decken-OK 2.6) und concrete-Priorität auf 25
+    // senken. Von den ÜBERDECKTEN Bändern spaltet render-int (10 < 25) vertikal in
+    // ZWEI Boxen [0,2.3] + [2.6,3.0] (Decken-z-Band [2.3,2.6] ausgespart); brick
+    // (50 > 25) läuft als EINE Box [0,3.0] durch. Die NICHT überdeckten Aussen-
+    // schichten (insulation, render-ext) bleiben je EINE volle Box [0,3.0] — sie
+    // werden NICHT vertikal aufgespalten (kein Kranz).
+    const p: Project = {
+      ...sampleProject,
+      walls: sampleProject.walls.map((w) => (w.id === "W2" ? { ...w, height: 3.0 } : w)),
+      components: sampleProject.components.map((c) =>
+        c.id === "concrete" ? { ...c, joinPriority: 25 } : c,
+      ),
+    };
+    const w2 = projectToWalls3d(p).filter((w) => w.wallId === "W2");
+    // render-int 2 Boxen + brick/insulation/render-ext je 1 Box = 5 Boxen.
+    expect(w2.length).toBe(5);
+    const zRanges = (t: number) =>
+      w2
+        .filter((s) => Math.abs(s.thickness - t) < 1e-6)
+        .map((s) => [s.baseElevation, s.baseElevation + s.height] as const)
+        .sort((a, b) => a[0] - b[0]);
+    // brick (überdeckt, 50 > 25): EINE durchgehende Box.
+    const brick = zRanges(0.15);
+    expect(brick.length).toBe(1);
+    expect(brick[0][0]).toBeCloseTo(0, 6);
+    expect(brick[0][1]).toBeCloseTo(3.0, 6);
+    // render-int (überdeckt, 10 < 25): ZWEI Boxen unter/über der Decke.
+    const renderInt = zRanges(0.015);
+    expect(renderInt.length).toBe(2);
+    expect(renderInt[0][0]).toBeCloseTo(0, 6);
+    expect(renderInt[0][1]).toBeCloseTo(2.3, 6);
+    expect(renderInt[1][0]).toBeCloseTo(2.6, 6);
+    expect(renderInt[1][1]).toBeCloseTo(3.0, 6);
+    // insulation (nicht überdeckt): EINE volle Box, KEIN vertikaler Split.
+    const insul = zRanges(0.16);
+    expect(insul.length).toBe(1);
+    expect(insul[0][0]).toBeCloseTo(0, 6);
+    expect(insul[0][1]).toBeCloseTo(3.0, 6);
+    // render-ext (nicht überdeckt): ebenfalls EINE volle Box.
+    const renderExt = zRanges(0.02);
+    expect(renderExt.length).toBe(1);
+    expect(renderExt[0][0]).toBeCloseTo(0, 6);
+    expect(renderExt[0][1]).toBeCloseTo(3.0, 6);
+  });
+
+  it("Decke überdeckt die VOLLE Wanddicke -> jede Schicht PER SCHICHT gegen die Deckenschichten verschnitten", () => {
+    // Gegenprobe: verbreitert man C1 so, dass die Outline die ganze W2 überdeckt
+    // (Aussenkante x=5.1725 < 5.5), liegen ALLE Bandmittellinien innerhalb der Decke.
+    // PER-SCHICHT (statt pauschal): Deckenschichten screed(30, z[2.54,2.6]),
+    // insulation(20, z[2.5,2.54]), concrete(100, z[2.3,2.5]).
+    //  • render-ext/render-int (Prio 10 < allen): über [2.3,2.6] komplett gekappt -> [0,2.3].
+    //  • brick (50): nur von concrete(100) gekappt -> [0,2.3] + [2.5,2.6].
+    //  • insulation-Wand (20): von concrete(100) und screed(30) gekappt, aber NICHT
+    //    von der gleichrangigen Decken-insulation(20) -> [0,2.3] + [2.5,2.54] (Sliver,
+    //    wo gleichrangiges Material koexistiert — exakt wie „gleiche Prio koexistiert").
+    const p: Project = {
+      ...sampleProject,
+      ceilings: (sampleProject.ceilings ?? []).map((c) =>
+        c.id === "C1"
+          ? {
+              ...c,
+              outline: [
+                { x: 0, y: -0.5 },
+                { x: 5.5, y: -0.5 },
+                { x: 5.5, y: 4.5 },
+                { x: 0, y: 4.5 },
+              ],
+            }
+          : c,
+      ),
+    };
+    const w2 = projectToWalls3d(p).filter((w) => w.wallId === "W2");
+    expect(w2.length).toBe(6);
+    const zBoxes = (t: number) =>
+      w2.filter((s) => Math.abs(s.thickness - t) < 1e-6)
+        .map((s) => [s.baseElevation, s.baseElevation + s.height] as const)
+        .sort((a, b) => a[0] - b[0]);
+    expect(zBoxes(0.02)).toEqual([[0, 2.3]]); // render-ext (10) voll gekappt
+    expect(zBoxes(0.015)).toEqual([[0, 2.3]]); // render-int (10) voll gekappt
+    const brick = zBoxes(0.15); // brick (50): nur Beton kappt
+    expect(brick.length).toBe(2);
+    expect(brick[0][1]).toBeCloseTo(2.3, 6);
+    expect(brick[1][0]).toBeCloseTo(2.5, 6);
+    expect(brick[1][1]).toBeCloseTo(2.6, 6);
+    const insul = zBoxes(0.16); // insulation-Wand (20): Sliver [2.5,2.54] bleibt
+    expect(insul.length).toBe(2);
+    expect(insul[0][1]).toBeCloseTo(2.3, 6);
+    expect(insul[1][0]).toBeCloseTo(2.5, 6);
+    expect(insul[1][1]).toBeCloseTo(2.54, 6);
+  });
+
+  it("Decke überdeckt nur EINEN TEIL der Wandlänge -> überdecktes Kern-Band spaltet ENTLANG DER ACHSE", () => {
+    // C1.outline auf die halbe Länge kürzen (y in [0,2] statt [0,4]): die Decke
+    // überdeckt die inneren W2-Bänder nur auf dem Achsenstück y in [0,2]. Das
+    // überdeckte Kern-Band (brick) wird dort z-geschnitten und läuft im Rest der
+    // Wandlänge (y > 2) über die volle Höhe durch — die Überdeckungsgrenze (y=2)
+    // wird aus der Bandmittellinien-Abtastung per Bisektion scharf ermittelt. Die
+    // Aussenschichten (nicht überdeckt) bleiben ganz. So wird auch eine Decke
+    // korrekt behandelt, die nur einen Teil der Wandlänge trägt.
+    const p: Project = {
+      ...sampleProject,
+      ceilings: (sampleProject.ceilings ?? []).map((c) =>
+        c.id === "C1"
+          ? { ...c, outline: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 2 }, { x: 0, y: 2 }] }
+          : c,
+      ),
+    };
+    const w2 = projectToWalls3d(p).filter((w) => w.wallId === "W2");
+    // Per-Schicht-Decken-Dominanz + Achsen-Überdeckung: der Backstein (50) wird nur
+    // von der Beton-Schicht (100) UND nur auf dem überdeckten Achsenstück y∈[~0.08,2]
+    // gekappt. Dort entstehen ZWEI z-Boxen [0,2.3] + [2.5,2.6]; das unbedeckte Stück
+    // y∈[2,~3.92] läuft als EINE volle Box [0,2.6] durch -> 3 Backstein-Boxen.
+    // render-int (10 < Beton) spaltet in [0,2.3] (überdeckt) + [0,2.6] (unbedeckt) = 2.
+    // Aussenschichten (insulation, render-ext) nicht überdeckt -> je 1 volle Box.
+    expect(w2.length).toBe(7);
+    const brick = w2
+      .filter((s) => Math.abs(s.thickness - 0.15) < 1e-6)
+      .map((s) => ({ sy: s.start[1], zb: s.baseElevation, zt: s.baseElevation + s.height }))
+      .sort((a, b) => a.zb - b.zb || a.sy - b.sy);
+    expect(brick.length).toBe(3);
+    // Überdecktes Stück y∈[~0.08,2]: untere Box [0,2.3] + obere Box [2.5,2.6].
+    const covered = brick.filter((b) => b.sy < 1.0);
+    expect(covered.length).toBe(2);
+    expect(covered[0].zt).toBeCloseTo(2.3, 6); // unter Beton
+    expect(covered[1].zb).toBeCloseTo(2.5, 6); // über Beton
+    expect(covered[1].zt).toBeCloseTo(2.6, 6);
+    // Unbedecktes Stück y∈[2,~3.92]: EINE volle Box [0,2.6].
+    const uncovered = brick.filter((b) => b.sy > 1.5);
+    expect(uncovered.length).toBe(1);
+    expect(uncovered[0].zt).toBeCloseTo(2.6, 6);
+    // insulation (aussen) bleibt EINE ungeteilte volle Box.
+    const insul = w2.filter((s) => Math.abs(s.thickness - 0.16) < 1e-6);
+    expect(insul.length).toBe(1);
+    expect(insul[0].baseElevation + insul[0].height).toBeCloseTo(2.6, 6);
+  });
+
+  it("keine Subtraktion, wenn keine Decke im selben Geschoss überlappt (z.B. OG-Wände ohne Dach-Decke)", () => {
     // W6 (OG) hat keine überlappende Decke im Sample-Projekt (C1 ist EG) ->
     // unverändertes Verhalten (volle wall.height).
     const w6 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W6");
@@ -284,15 +517,271 @@ describe("Prioritäts-Trim Wand/Decke (Z-Fighting-Fix, s. trimWallTopForCeilings
   });
 });
 
-describe("Bauteil-/Materialfarbe Decke", () => {
-  it("Decke -> Farbe der dicksten Schicht (dg-massiv: concrete 0.2 m, #9aa0a6)", () => {
-    // Deckentyp "dg-massiv": screed 0.06, insulation 0.04, concrete 0.2 ->
-    // dickste Schicht = concrete (#9aa0a6).
+describe("Geschichteter Bodenaufbau Decke", () => {
+  it("Decke -> je Schicht ein Slab, oben->unten gestapelt mit Bauteilfarbe/-schraffur", () => {
+    // Deckentyp "dg-massiv": screed 0.06 (#c9c2b3), insulation 0.04 (#ffffff),
+    // concrete 0.2 (#9aa0a6) — Reihenfolge OK->UK. C1: zTop 2.6, Gesamt 0.3 ->
+    // zBottom 2.3. Proportional: Estrich 2.54..2.6, Dämmung 2.50..2.54,
+    // Beton 2.30..2.50. Der 3D-Schnitt zeigt so den Aufbau geschichtet (wie 2D).
     const { slabs } = projectToModel3d(sampleProject);
-    const c1 = slabs.find((s) => s.ceilingId === "C1");
-    expect(c1).toBeDefined();
-    expect(c1!.color[0]).toBeCloseTo(0x9a / 255, 6);
-    expect(c1!.color[1]).toBeCloseTo(0xa0 / 255, 6);
-    expect(c1!.color[2]).toBeCloseTo(0xa6 / 255, 6);
+    const c1 = slabs
+      .filter((s) => s.ceilingId === "C1")
+      .sort((a, b) => b.zTop - a.zTop); // oben zuerst
+    expect(c1.length).toBe(3);
+
+    // Oberste Schicht = Estrich (#c9c2b3), bündig mit OK der Decke (2.6).
+    expect(c1[0].zTop).toBeCloseTo(2.6, 6);
+    expect(c1[0].color[0]).toBeCloseTo(0xc9 / 255, 6);
+    expect(c1[0].color[1]).toBeCloseTo(0xc2 / 255, 6);
+    expect(c1[0].color[2]).toBeCloseTo(0xb3 / 255, 6);
+
+    // Mittlere Schicht = Dämmung (#ffffff).
+    expect(c1[1].color[0]).toBeCloseTo(1, 6);
+    expect(c1[1].color[1]).toBeCloseTo(1, 6);
+    expect(c1[1].color[2]).toBeCloseTo(1, 6);
+
+    // Unterste Schicht = Betondecke (#9aa0a6), bündig mit UK der Decke (2.3).
+    expect(c1[2].zBottom).toBeCloseTo(2.3, 6);
+    expect(c1[2].color[0]).toBeCloseTo(0x9a / 255, 6);
+    expect(c1[2].color[1]).toBeCloseTo(0xa0 / 255, 6);
+    expect(c1[2].color[2]).toBeCloseTo(0xa6 / 255, 6);
+
+    // Schichten schließen lückenlos aneinander (UK Schicht k == OK Schicht k+1).
+    expect(c1[0].zBottom).toBeCloseTo(c1[1].zTop, 6);
+    expect(c1[1].zBottom).toBeCloseTo(c1[2].zTop, 6);
+  });
+});
+
+describe("sliceTermination: Wand endet an der Decke (Zuschnitt, nicht Priorität)", () => {
+  // W2 (EG, aw) steht unter der Decke C1 (dg-massiv). Ohne Terminierung ("both")
+  // spaltet der Beton (100) den Backstein (50) in [0,2.3] + [2.5,2.6] (heutiges,
+  // prioritäts-korrektes Verhalten). "below" clippt die Wand an der Decken-UK →
+  // nur die untere Backstein-Box [0,2.3] bleibt; "above" spiegelbildlich [2.5,2.6].
+  const withTermination = (mode: "both" | "below" | "above") => ({
+    ...sampleProject,
+    walls: sampleProject.walls.map((w) =>
+      w.id === "W2" ? { ...w, sliceTermination: mode === "both" ? undefined : mode } : w,
+    ),
+  });
+  const brickBoxes = (mode: "both" | "below" | "above") =>
+    projectToWalls3d(withTermination(mode))
+      .filter((w) => w.wallId === "W2" && Math.abs(w.thickness - 0.15) < 1e-6)
+      .map((w) => [w.baseElevation, w.baseElevation + w.height] as const)
+      .sort((a, b) => a[0] - b[0]);
+
+  it('Default/"both": Backstein bleibt als ZWEI Boxen [0,2.3] + [2.5,2.6] (heutiges Verhalten)', () => {
+    const brick = brickBoxes("both");
+    expect(brick.length).toBe(2);
+    expect(brick[0][0]).toBeCloseTo(0, 6);
+    expect(brick[0][1]).toBeCloseTo(2.3, 6);
+    expect(brick[1][0]).toBeCloseTo(2.5, 6);
+    expect(brick[1][1]).toBeCloseTo(2.6, 6);
+  });
+
+  it('"below": NUR die untere Backstein-Box [0,2.3] (Wand endet an der Decke, kein Rest oben)', () => {
+    const brick = brickBoxes("below");
+    expect(brick.length).toBe(1);
+    expect(brick[0][0]).toBeCloseTo(0, 6);
+    expect(brick[0][1]).toBeCloseTo(2.3, 6);
+    // Auch der Innenputz (render-int, überdeckt) endet einheitlich an der Decken-UK 2.3.
+    const renderInt = projectToWalls3d(withTermination("below"))
+      .filter((w) => w.wallId === "W2" && Math.abs(w.thickness - 0.015) < 1e-6);
+    expect(renderInt.length).toBe(1);
+    expect(renderInt[0].baseElevation + renderInt[0].height).toBeCloseTo(2.3, 6);
+    // Aussenschichten (nicht überdeckt) laufen weiter voll durch (2.6).
+    const insul = projectToWalls3d(withTermination("below"))
+      .filter((w) => w.wallId === "W2" && Math.abs(w.thickness - 0.16) < 1e-6);
+    expect(insul[0].baseElevation + insul[0].height).toBeCloseTo(2.6, 6);
+  });
+
+  it('"above": NUR die obere Backstein-Box [2.5,2.6] (Brüstung/Attika von oben)', () => {
+    const brick = brickBoxes("above");
+    expect(brick.length).toBe(1);
+    expect(brick[0][0]).toBeCloseTo(2.5, 6);
+    expect(brick[0][1]).toBeCloseTo(2.6, 6);
+  });
+});
+
+describe("Schnitt-Schraffur-Orientierung: relativeToWall dreht bei Wand, nicht bei Decke (2D-Parität)", () => {
+  // 2D-Referenz (verbindlich): splitWallLayers ruft resolveHatch(…, 90, …) (Wand
+  // steht vertikal, relativeToWall-Muster drehen mit), splitSlabLayers ruft
+  // resolveHatch(…, undefined, …) (Decke liegt, absoluter Winkel). Der 3D-Pfad muss
+  // EXAKT diesen Endwinkel je Kontext liefern (statt des rohen Hatch-Winkels) —
+  // sonst läuft z. B. die Boden-Dämmung im 3D-Schnitt horizontal statt vertikal.
+  const wallInsul = () =>
+    projectToModel3d(sampleProject).walls.find(
+      (w) => w.cut?.componentId === "insulation" && Math.abs(w.thickness - 0.16) < 1e-6,
+    )!;
+  const slabInsul = () =>
+    projectToModel3d(sampleProject).slabs.find((s) => s.cut?.componentId === "insulation")!;
+
+  it("WAND-Dämmung: 3D-Hatch-Winkel == resolveHatch(sia-insulation, 90)", () => {
+    const expected = resolveHatch(sampleProject, "sia-insulation", 90).angle;
+    expect(wallInsul().hatch?.angle).toBeCloseTo(expected, 6);
+  });
+
+  it("DECKEN-Dämmung: 3D-Hatch-Winkel == resolveHatch(sia-insulation, undefined) (absolut)", () => {
+    const expected = resolveHatch(sampleProject, "sia-insulation", undefined).angle;
+    expect(slabInsul().hatch?.angle).toBeCloseTo(expected, 6);
+  });
+
+  it("Wand- und Decken-Dämmung unterscheiden sich um den Wandachsenwinkel (relativeToWall dreht 90°)", () => {
+    // sia-insulation ist relativeToWall -> Wand-Winkel = roh − 90, Decke = roh.
+    // Die Differenz ist exakt 90° (der Boden-Aufbau läuft dadurch quer zur Wand).
+    const diff = (slabInsul().hatch!.angle - wallInsul().hatch!.angle + 360) % 360;
+    expect(diff).toBeCloseTo(90, 6);
+  });
+
+  it("WAND-Backstein (relativeToWall): 3D-Hatch-Winkel == resolveHatch(sia-brick, 90)", () => {
+    const brick = projectToModel3d(sampleProject).walls.find(
+      (w) => w.cut?.componentId === "brick" && Math.abs(w.thickness - 0.15) < 1e-6,
+    )!;
+    expect(brick.hatch?.angle).toBeCloseTo(resolveHatch(sampleProject, "sia-brick", 90).angle, 6);
+  });
+
+  it("Musterlinien-Stärke kommt aus dem LineStyle des Hatch durch (2D-Parität)", () => {
+    // sia-insulation nutzt lineStyleId "hatch-hair" (0.02 mm). Der 3D-Hatch muss die
+    // resolveHatch-lineWeight (aus dem LineStyle) tragen — für Wand UND Decke gleich.
+    const expected = resolveHatch(sampleProject, "sia-insulation", 90).lineWeight;
+    expect(wallInsul().hatch?.lineWeight).toBeCloseTo(expected, 6);
+    expect(slabInsul().hatch?.lineWeight).toBeCloseTo(expected, 6);
+    expect(expected).toBeCloseTo(0.02, 6); // hatch-hair
+  });
+});
+
+describe("Wand-Joins im 3D (L-/T-Stösse, identisch zum 2D-Grundriss/Schnitt)", () => {
+  // Die per-Schicht-Cut-Distanzen aus computeJoins (model/joins.ts) werden im
+  // layered-3D-Pfad auf die Band-Achsenlängen angewandt — dieselben Zahlen, die
+  // generatePlan.ts über clippedBand auf die 2D-Polygone anwendet (Band-Mittellinie
+  // an der Gehrungs-/Anschluss-Linie geschnitten). Alle Erwartungswerte unten sind
+  // aus der Join-Geometrie des Sample-Projekts von Hand hergeleitet.
+
+  it("(a) L-Ecke gleicher Wandtyp: jede Schicht individuell gehrt (aussen länger, Kern kürzer)", () => {
+    // W2 (5,0)->(5,4), Typ "aw", KEINE Öffnung/Querwand -> genau 4 Schicht-Bänder.
+    // Beide Enden sind rechtwinklige L-Ecken (mit W1 bei (5,0), W3 bei (5,4)):
+    // 45°-Gehrung x+y=5 (Start) bzw. y=x-1 (Ende). Die Mittellinie einer Schicht
+    // bei Querversatz `offset` trifft die Gehrung bei Achsenmeter `offset` (Start)
+    // bzw. `4-offset` (Ende). Aussenschichten (negativer offset) laufen ÜBER die
+    // Ecke hinaus (wrappen), Innenschichten (positiver offset) enden kürzer.
+    // Achse u=(0,1) -> Box-Achsenanfang/-ende = start[1]/end[1].
+    // W2 steht unter der Decke C1: die Beton-Schicht (100) spaltet den Backstein (50)
+    // z-mässig in [0,2.3] + [2.5,2.6] (per-Schicht-Decken-Dominanz) -> 5 Boxen. Die
+    // Gehrung ist z-unabhängig, beide Backstein-Boxen tragen denselben Achsenschnitt.
+    const w2 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W2");
+    expect(w2.length).toBe(5);
+    const band = (t: number) => w2.find((s) => Math.abs(s.thickness - t) < 1e-9)!;
+    // offset je Schicht (aw, center): -0.1625 / -0.0725 / 0.0825 / 0.165.
+    const cases: Array<[number, number]> = [
+      [0.02, -0.1625], // render-ext (aussen) -> from=-0.1625, to=4.1625
+      [0.16, -0.0725], // insulation
+      [0.15, 0.0825], // brick (Kern)
+      [0.015, 0.165], // render-int (innen) -> from=0.165, to=3.835 (am kürzesten)
+    ];
+    for (const [t, offset] of cases) {
+      const b = band(t);
+      expect(b.start[1]).toBeCloseTo(offset, 6); // Achsenanfang = offset
+      expect(b.end[1]).toBeCloseTo(4 - offset, 6); // Achsenende = 4-offset
+    }
+    // Der Kern (brick) ist kürzer als die Aussenschicht (render-ext): die
+    // per-Schicht-Gehrung ist also wirklich individuell (keine einheitliche Länge).
+    const len = (t: number) => band(t).end[1] - band(t).start[1];
+    expect(len(0.15)).toBeLessThan(len(0.02));
+    expect(len(0.15)).toBeCloseTo(3.835, 6); // 3.9175 - 0.0825
+    expect(len(0.02)).toBeCloseTo(4.325, 6); // 4.1625 - (-0.1625)
+  });
+
+  it("(b) T-Stoss: Abzweig-Kern läuft bis zur Rückgrat-Nahfläche durch, Putz-Band stoppt an der Wandfläche", () => {
+    // Querwand W9 (2.4,0)->(2.4,4), Typ "iw" (render-int 0.015 / brick 0.12 /
+    // render-int 0.015), stösst mittig auf W1 (unten) und W3 (oben) -> zwei
+    // Mittelspannen-T-Stösse. W9-brick == W1/W3-Rückgrat (Komponente "brick",
+    // Prio 50) -> MERGE: der brick-Kern sticht durch den 0.015-Nah-Putz der
+    // Durchgangswand bis zu deren Rückgrat-Nahfläche, die render-int-Putzschichten
+    // stoppen an der Wandoberfläche. Achse u=(0,1) -> Achsenmeter = start[1]/end[1].
+    // W9 (iw) steht ebenfalls unter der Decke C1: die Beton-Schicht (100) spaltet den
+    // Kern-Backstein (50) z-mässig in [0,2.3] + [2.5,2.6] -> 2 Kern-Boxen + 2 Putz = 4.
+    // Die Gehrung/T-Stoss-Achse ist z-unabhängig, beide Kern-Boxen identisch.
+    const w9 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W9");
+    expect(w9.length).toBe(4);
+    const brick = w9.find((s) => Math.abs(s.thickness - 0.12) < 1e-9)!;
+    const renders = w9.filter((s) => Math.abs(s.thickness - 0.015) < 1e-9);
+    expect(renders.length).toBe(2);
+    // Putz stoppt an W1-Oberfläche (y=0.1725) bzw. W3-Oberfläche (y=3.8275).
+    for (const r of renders) {
+      expect(r.start[1]).toBeCloseTo(0.1725, 6);
+      expect(r.end[1]).toBeCloseTo(3.8275, 6);
+    }
+    // Kern läuft 0.015 tiefer bis zur Rückgrat-Nahfläche (y=0.1575 bzw. 3.8425).
+    expect(brick.start[1]).toBeCloseTo(0.1575, 6);
+    expect(brick.end[1]).toBeCloseTo(3.8425, 6);
+    expect(brick.start[1]).toBeLessThan(renders[0].start[1]); // Kern durchgesteckt
+  });
+
+  it("(b) T-Stoss Durchgangswand: Nah-Putz wird über die Kernbreite aufgebrochen (Span-Cutout splittet das Band)", () => {
+    // W1 (Durchgangswand) verliert den Nah-Putz (innerstes render-int-Band) über
+    // die Achsen-Breite des durchstechenden W9-Kerns: das Band zerfällt entlang
+    // der Achse in zwei Teilstücke [0.165..2.34] und [2.46..4.835] (Lücke = die
+    // 0.12 m Kernbreite um x=2.4). W1-Achse u=(1,0) -> Achsenmeter = start[0]/end[0].
+    const w1 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W1");
+    const innerPlaster = w1
+      .filter((s) => Math.abs(s.thickness - 0.015) < 1e-9)
+      .map((s) => [s.start[0], s.end[0]] as const)
+      .sort((a, b) => a[0] - b[0]);
+    expect(innerPlaster.length).toBe(2); // in zwei Teilstücke gebrochen
+    // Lücke = Kernbreite-Projektion [2.34, 2.46] um die Querwand-Achse x=2.4.
+    expect(innerPlaster[0][1]).toBeCloseTo(2.34, 6); // Ende Teilstück 1
+    expect(innerPlaster[1][0]).toBeCloseTo(2.46, 6); // Anfang Teilstück 2
+  });
+
+  it("(c) Join-verschobenes Band: Öffnungs-Löcher bleiben absolut korrekt positioniert (rebased)", () => {
+    // W1 trägt Fenster O1 (Achsenintervall [3.0,4.0]). Das Aussenputz-Band ist an
+    // den L-Ecken über die Achse hinaus verlängert (Achsenanfang < 0) — die Loch-
+    // `from`/`to` sind auf DIESEN Box-Start umgerechnet. Rekonstruiert man die
+    // absolute Achsenposition (Box-Achsenanfang + `from`), liegt das Fenster wieder
+    // exakt auf [3.0,4.0], unabhängig von der Join-Verschiebung. W1-Achse u=(1,0).
+    const w1 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W1");
+    const outer = w1.find((s) => Math.abs(s.thickness - 0.02) < 1e-9)!;
+    expect(outer.start[0]).toBeLessThan(0); // Band über die Ecke hinaus verlängert
+    const window = (outer.holes ?? [])
+      .map((h) => [outer.start[0] + h.from, outer.start[0] + h.to] as const)
+      .sort((a, b) => a[0] - b[0])
+      .find(([a]) => a > 2); // das Fenster O1 (das andere Loch ist die Tür D1)
+    expect(window).toBeDefined();
+    expect(window![0]).toBeCloseTo(3.0, 6);
+    expect(window![1]).toBeCloseTo(4.0, 6);
+  });
+
+  it("Joins wirken NUR im layered-3D-Pfad, nicht im Schnitt-Pfad (layered=false unverändert)", () => {
+    // Der Schnitt-Pfad (computeSection, layeredWalls:false) darf KEINE Join-Cuts
+    // bekommen: W2 bleibt eine Voll-Box über die ganze Dicke, ungehrt (Achse
+    // 0..4), damit toSection.ts::subtractDominantBands seine eigene Dominanz auf
+    // Rohgeometrie anwendet.
+    const w2 = projectToWalls3d(sampleProject, false).filter((w) => w.wallId === "W2");
+    expect(w2.length).toBe(1); // Voll-Box, keine Schicht-Bänder
+    expect(w2[0].start[1]).toBeCloseTo(0, 6); // ungehrt: Achse 0..4
+    expect(w2[0].end[1]).toBeCloseTo(4, 6);
+  });
+});
+
+describe("emitStairMeshes (Betontreppe: glatte Laufplatte als Mesh)", () => {
+  it("gerade Betontreppe -> Mesh mit 8 Ecken je Tritt, glatte schräge Untersicht", () => {
+    // Sample-Treppe ST1: Typ "stair-standard" (Tragart "beton"), gerade,
+    // stepCount 15 -> ein konvexes Prisma je Tritt = 8 Ecken. Das Mesh landet in
+    // model.meshes (kind "extrusion").
+    const model = projectToModel3d(sampleProject);
+    const stairMesh = model.meshes.find((m) => m.positions.length / 3 === 8 * 15);
+    expect(stairMesh).toBeTruthy();
+    const m = stairMesh!;
+    // Indizes bilden Dreiecke (6 Quads * 2 Tris * 3 = 36 Indizes je Tritt).
+    expect(m.indices.length).toBe(15 * 36);
+    expect(m.indices.length % 3).toBe(0);
+    // Keine NaN/Inf in der Geometrie.
+    expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
+    // Höhen (jede 3. Komponente) liegen zwischen Treppen-UK (~0) und -OK (~2.6).
+    const heights = m.positions.filter((_, i) => i % 3 === 2);
+    expect(Math.min(...heights)).toBeGreaterThanOrEqual(-1e-6);
+    expect(Math.max(...heights)).toBeLessThanOrEqual(2.6 + 1e-6);
+    // Alle Index-Werte referenzieren existierende Vertices.
+    const vcount = m.positions.length / 3;
+    expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
   });
 });

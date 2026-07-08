@@ -15,12 +15,17 @@ use wgpu::util::DeviceExt;
 use crate::edges::{build_mesh_edges, EDGE_FLOATS_PER_VERTEX};
 use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::math::{view_projection, Mat4};
-use crate::mesh::{build_scene_mesh, build_walls_mesh, textured_from_mesh};
+use crate::mesh::{
+    build_scene_mesh, build_scene_mesh_textured, build_walls_mesh, build_walls_mesh_textured,
+};
 use crate::section::SectionPlane;
-use crate::section_fill::{build_cut_caps, CAP_FLOATS_PER_VERTEX};
+use crate::section_fill::{
+    build_cut_cap_lines, build_cut_caps, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
+};
 use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
 use crate::types::{
-    Camera, Mesh, MeshInput, SlabInput, WallInput, FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
+    Camera, Mesh, MeshInput, SlabInput, TexturedMesh, WallInput, FLOATS_PER_VERTEX,
+    TEXTURED_FLOATS_PER_VERTEX,
 };
 
 /// Darstellungsart des 3D-Renderers (Oberleiste: shaded/white/textured/
@@ -142,6 +147,10 @@ struct MeshBuffers {
 /// Puffer neben `MeshBuffers` — der Alt-Pfad bleibt bitgleich unangetastet.
 struct TexturedMeshBuffers {
     vbo: wgpu::Buffer,
+    /// Zweiter Vertex-Buffer: EIN f32 (Material-Textur-Ebene) je Vertex,
+    /// @location(3) im `MESH_TEXTURED_WGSL`. Immer gesetzt (Fallback: `-1` je
+    /// Vertex), damit das Pipeline-Layout stets zwei Vertex-Buffer erwartet.
+    layer_vbo: wgpu::Buffer,
     ibo: wgpu::Buffer,
     index_count: u32,
 }
@@ -225,21 +234,39 @@ pub struct Renderer {
     /// Depth-Bias zur Kamera hin gegen Z-Fighting mit den an der Ebene
     /// per-`discard` gekappten Wandflaechen. Backface-Culling AUS (CullMode::None).
     cap_pipeline: wgpu::RenderPipeline,
+    /// Schnitt-Umrisslinien-Pipeline (Cut-Cap-Kanten, P2): TriangleList von
+    /// Ribbon-Quads (`section_fill::build_cut_cap_lines`), Vertex-Layout [pos vec3,
+    /// color vec3] wie die Grid/Highlight-LineList — teilt darum das `grid_module`
+    /// (GRID_WGSL). KEIN Tiefentest (`depth_compare: Always`, kein Write) wie das
+    /// Highlight: die Fugenlinien liegen (leicht zur Kamera versetzt) sichtbar auf
+    /// den Cut-Caps. Sie werden NICHT an der Schnittebene weggeclippt (sie SIND die
+    /// Schnittflaeche) — der Kamera-Lift in `build_cut_cap_lines` haelt sie vor der
+    /// `depth > 0`-Kappung von GRID_WGSL.
+    cut_line_pipeline: wgpu::RenderPipeline,
     /// Texturierte Wand-Pipeline (`RenderStyle::Textured`, TriangleList,
     /// MESH_TEXTURED_WGSL, Vertex-Layout [pos vec3, normal vec3, uv vec2]). Bindet
     /// group 0 (Globals) UND group 1 (Bild-Textur). Depth-/MSAA-/Farbziel
     /// BITIDENTISCH zur Haupt-`pipeline` (sonst inkompatibler Render-Pass), nur
     /// Shader/Layout unterscheiden sich.
     textured_pipeline: wgpu::RenderPipeline,
-    /// Bind-Group der prozeduralen Test-Textur (group 1): Texture-View + Sampler.
-    /// Konstant ueber die Lebensdauer des Renderers (eine Textur fuer alle Waende).
+    /// Bind-Group des Material-Textur-Arrays (group 1): Array-View + Sampler.
+    /// Wird bei `set_material_textures` neu gebaut (mehr Ebenen); bis dahin haelt
+    /// sie das 1-Ebenen-Array mit dem Fallback-Schachbrett.
     texture_bind_group: wgpu::BindGroup,
-    /// Die (prozedurale) Textur selbst — nur festgehalten, um ihre Texel beim
-    /// ersten `render` einmalig hochzuladen (`texture_uploaded`), da `new` keine
-    /// Queue bekommt.
+    /// Das Textur-Array selbst. Start: 1 Ebene (Schachbrett). `set_material_textures`
+    /// ersetzt es durch ein Array `[Schachbrett, Material0, Material1, …]`.
     texture: wgpu::Texture,
-    /// Ob die Textur-Texel schon per `queue.write_texture` geladen wurden. Beim
-    /// ersten `render` einmalig gesetzt (lazy Upload).
+    /// Bind-Group-Layout (group 1), festgehalten fuer den Neubau der Bind-Group
+    /// beim Hochladen von Material-Texturen.
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    /// Sampler (Repeat/Linear), festgehalten fuer den Bind-Group-Neubau.
+    texture_sampler: wgpu::Sampler,
+    /// Anzahl gueltiger Ebenen im Textur-Array (>= 1). 1 = nur Schachbrett; nach
+    /// `set_material_textures` = 1 + Anzahl Material-Karten. Wandert je Frame nach
+    /// `mode.z` (Klemmung der Ebenen-Auswahl im Shader).
+    material_layer_count: u32,
+    /// Ob die Schachbrett-Texel (Ebene 0) schon hochgeladen wurden. Beim ersten
+    /// `render` einmalig gesetzt (lazy Upload, weil `new` keine Queue bekommt).
     texture_uploaded: bool,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
@@ -264,6 +291,10 @@ pub struct Renderer {
     /// aktiv / keine Schnittgeometrie. Ueber `set_cut_caps` gesetzt/geloescht,
     /// gezeichnet NACH den Flaechen, VOR Kanten/Grid/Highlight.
     caps: Option<CapBuffers>,
+    /// Schnitt-Umrisslinien (Cut-Cap-Kanten, P2) als Ribbon-TriangleList
+    /// (`[pos, color]`). None = kein Schnitt aktiv / keine Kanten. Ueber
+    /// `set_cut_lines` gesetzt/geloescht, gezeichnet NACH den Caps.
+    cut_lines: Option<LineBuffers>,
     /// Ob das Bodengitter im naechsten `render` gezeichnet wird. Default false —
     /// bestehende Aufrufer ohne `set_ground_grid` bekommen KEIN Gitter.
     grid_visible: bool,
@@ -471,6 +502,52 @@ impl Renderer {
             },
         );
 
+        // Schnitt-Umrisslinien-Pipeline (Cut-Cap-Kanten, P2): dasselbe schlanke
+        // LineList-Vertex-Layout [pos vec3, color vec3] und `grid_module` (GRID_WGSL)
+        // wie Grid/Highlight, aber als TriangleList (die Kanten sind Ribbon-Quads,
+        // damit die Strichstaerke als Welt-Breite durchkommt). Depth wie Highlight
+        // (Always, kein Write) -> immer sichtbar auf den Caps.
+        let cut_line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cut_line.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &grid_module,
+                entry_point: Some("vs_main"),
+                buffers: &[grid_vertex_layout.clone()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &grid_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                // Ribbons sind flach in der Schnittebene, aus beiden Seiten sichtbar.
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         // Schnittflaechen-Kappen-Pipeline: eigener Shader (CAP_WGSL), eigenes
         // schlankes Vertex-Layout [pos vec3, uv vec2], TriangleList. Dieselbe
         // Bind-Group (Globals) und dasselbe Depth-/MSAA-/Farbziel wie oben.
@@ -478,10 +555,14 @@ impl Renderer {
             label: Some("cap.wgsl"),
             source: wgpu::ShaderSource::Wgsl(CAP_WGSL.into()),
         });
+        // Vertex-Layout: [pos vec3, uv vec2, hatch vec4(pattern, angle_rad, scale,
+        // line_weight_mm)], stride 9*4 (`CAP_FLOATS_PER_VERTEX`). Das dritte Attribut
+        // treibt die musterspezifische Schraffur im Cap-Fragment-Shader (CAP_WGSL);
+        // `line_weight_mm` setzt die Musterlinien-Breite je Schraffur.
         let cap_vertex_layout = wgpu::VertexBufferLayout {
             array_stride: (CAP_FLOATS_PER_VERTEX * 4) as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4],
         };
         let cap_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cap.pipeline"),
@@ -547,7 +628,7 @@ impl Renderer {
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
                             multisampled: false,
                         },
                         count: None,
@@ -579,6 +660,14 @@ impl Renderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
         };
+        // ZWEITER Vertex-Buffer: die Material-Textur-Ebene je Vertex (@location(3),
+        // 1 f32). Separat gehalten, damit das Haupt-`[pos,normal,uv]`-Layout (und
+        // die Geometrie-Paritaet zum Shaded-Pfad) unveraendert bleibt.
+        let textured_layer_layout = wgpu::VertexBufferLayout {
+            array_stride: 4,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![3 => Float32],
+        };
         // WICHTIG: Depth-Format, MSAA (`SAMPLE_COUNT`), Color-Target-Format,
         // Topologie und Culling BITIDENTISCH zur Haupt-`pipeline` (make_mesh_pipeline)
         // — die texturierten Waende laufen im GLEICHEN Render-Pass, deshalb muss der
@@ -590,7 +679,7 @@ impl Renderer {
             vertex: wgpu::VertexState {
                 module: &textured_module,
                 entry_point: Some("vs_main"),
-                buffers: &[textured_vertex_layout],
+                buffers: &[textured_vertex_layout, textured_layer_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -632,8 +721,10 @@ impl Renderer {
         // `render` (siehe `texture_uploaded`), weil `new` bewusst KEINE Queue
         // bekommt — die Signatur bleibt fuer die bestehenden Aufrufer (web.rs,
         // spike3d) unveraendert.
+        // Textur-ARRAY (D2Array). Start: EINE Ebene (Fallback-Schachbrett).
+        // `set_material_textures` ersetzt das Array spaeter durch mehrere Ebenen.
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("checker.texture"),
+            label: Some("materials.texture_array"),
             size: wgpu::Extent3d {
                 width: TEXTURE_SIZE,
                 height: TEXTURE_SIZE,
@@ -646,10 +737,13 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         // Repeat (weltmassstaebliches UV kachelt) + Linear (weiche Filterung).
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("checker.sampler"),
+        let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("materials.sampler"),
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
@@ -659,7 +753,7 @@ impl Renderer {
             ..Default::default()
         });
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("texture.bind"),
+            label: Some("materials.bind"),
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -668,7 +762,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Sampler(&texture_sampler),
                 },
             ],
         });
@@ -694,9 +788,13 @@ impl Renderer {
             grid_pipeline,
             highlight_pipeline,
             cap_pipeline,
+            cut_line_pipeline,
             textured_pipeline,
             texture_bind_group,
             texture,
+            texture_bind_group_layout,
+            texture_sampler,
+            material_layer_count: 1,
             texture_uploaded: false,
             bind_group,
             uniform,
@@ -706,6 +804,7 @@ impl Renderer {
             grid: None,
             highlight: None,
             caps: None,
+            cut_lines: None,
             grid_visible: false,
             style: RenderStyle::Shaded,
             depth: None,
@@ -724,7 +823,7 @@ impl Renderer {
 
     /// Erzeugt das Mesh aus geflachten Waenden und laedt die Puffer hoch.
     pub fn upload_walls(&mut self, device: &wgpu::Device, walls: &[WallInput]) {
-        self.upload_mesh(device, build_walls_mesh(walls));
+        self.upload_mesh(device, build_walls_mesh(walls), build_walls_mesh_textured(walls));
     }
 
     /// Erzeugt das Mesh aus Waenden, Deckenplatten UND rohen Kontext-Meshes
@@ -736,13 +835,17 @@ impl Renderer {
         slabs: &[SlabInput],
         meshes: &[MeshInput],
     ) {
-        self.upload_mesh(device, build_scene_mesh(walls, slabs, meshes));
+        self.upload_mesh(
+            device,
+            build_scene_mesh(walls, slabs, meshes),
+            build_scene_mesh_textured(walls, slabs, meshes),
+        );
     }
 
     /// Laedt ein fertiges Mesh in die GPU-Puffer (oder loescht es bei leer) und
     /// erzeugt ZUGLEICH die gecachten Modell-Kanten (Feature-Edges, edges.rs) fuer
     /// die Stile wireframe/hidden — einmalig hier, nicht je Frame.
-    fn upload_mesh(&mut self, device: &wgpu::Device, mesh: Mesh) {
+    fn upload_mesh(&mut self, device: &wgpu::Device, mesh: Mesh, tex_mesh: TexturedMesh) {
         if mesh.indices.is_empty() {
             self.mesh = None;
             self.textured_mesh = None;
@@ -782,11 +885,10 @@ impl Renderer {
             index_count: mesh.indices.len() as u32,
         });
 
-        // Texturiertes Pendant AUS DEMSELBEN `Mesh` ableiten (planare Welt-UV je
-        // Vertex statt Farbe, siehe `textured_from_mesh`) und in einen zweiten
-        // Vertex-Puffer hochladen. So bleibt die Geometrie bitgleich zum Alt-Pfad,
-        // und der Stil `Textured` hat ohne Re-Meshing seine Puffer bereit.
-        let tex_mesh = textured_from_mesh(&mesh);
+        // Texturiertes Pendant (planare Welt-UV je Vertex + Material-Ebenen-Puffer,
+        // siehe `build_scene_mesh_textured`) in zwei Vertex-Puffer hochladen. Die
+        // Geometrie bleibt bitgleich zum Alt-Pfad; der Stil `Textured` hat ohne
+        // Re-Meshing seine Puffer bereit.
         let tvbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mesh.textured.vbo"),
             contents: bytemuck::cast_slice(&tex_mesh.verts),
@@ -797,8 +899,22 @@ impl Renderer {
             contents: bytemuck::cast_slice(&tex_mesh.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
+        // Material-Ebenen-Puffer (1 f32 je Vertex). Fehlt er (kein Material-Bau),
+        // mit `-1` je Vertex fuellen -> alle Vertices auf das Fallback-Schachbrett.
+        let vertex_count = tex_mesh.verts.len() / TEXTURED_FLOATS_PER_VERTEX;
+        let layer_data: Vec<f32> = if tex_mesh.layers.len() == vertex_count {
+            tex_mesh.layers
+        } else {
+            vec![-1.0; vertex_count]
+        };
+        let tlvbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mesh.textured.layer.vbo"),
+            contents: bytemuck::cast_slice(&layer_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         self.textured_mesh = Some(TexturedMeshBuffers {
             vbo: tvbo,
+            layer_vbo: tlvbo,
             ibo: tibo,
             index_count: tex_mesh.indices.len() as u32,
         });
@@ -918,6 +1034,27 @@ impl Renderer {
         });
     }
 
+    /// Setzt/loescht die Schnitt-Umrisslinien (Cut-Cap-Kanten, P2). `verts` =
+    /// interleaved `[px,py,pz, r,g,b, ...]` (world-Meter + Farbe, TriangleList von
+    /// Ribbon-Quads, `CUT_LINE_FLOATS_PER_VERTEX`), wie `section_fill::
+    /// build_cut_cap_lines` liefert. Leeres Slice loescht die Linien. Wirkt erst
+    /// beim naechsten `render`.
+    pub fn set_cut_lines(&mut self, device: &wgpu::Device, verts: &[f32]) {
+        if verts.is_empty() {
+            self.cut_lines = None;
+            return;
+        }
+        let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cut_lines.vbo"),
+            contents: bytemuck::cast_slice(verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.cut_lines = Some(LineBuffers {
+            vbo,
+            vertex_count: (verts.len() / CUT_LINE_FLOATS_PER_VERTEX) as u32,
+        });
+    }
+
     /// Komfort: Schnittebene setzen UND die Cap-Geometrie aus den (gecachten)
     /// Waenden/Decken neu bauen — bei `active == false` werden Uniform-Flag und
     /// Caps geloescht. Buendelt `set_section_plane` + `build_cut_caps` +
@@ -936,9 +1073,108 @@ impl Renderer {
             let plane = SectionPlane::new(point, normal);
             let caps = build_cut_caps(&plane, walls, slabs);
             self.set_cut_caps(device, &caps);
+            // P2: die Schnitt-Umrisslinien (Fugen-/Materiallinien) je ueberlebendem
+            // Cut-Cap-Rechteck aus DERSELBEN, dominanz-verschnittenen Rechteck-Menge.
+            let lines = build_cut_cap_lines(&plane, walls, slabs);
+            self.set_cut_lines(device, &lines);
         } else {
             self.set_cut_caps(device, &[]);
+            self.set_cut_lines(device, &[]);
         }
+    }
+
+    /// Laedt die Material-Farbkarten fuer den Stil `Textured` als Textur-ARRAY hoch.
+    /// `rgba` = dicht gepackte RGBA8-Bytes von `layer_count` Ebenen, jede exakt
+    /// `TEXTURE_SIZE × TEXTURE_SIZE` (der Aufrufer skaliert/dekodiert die Bilder
+    /// JS-seitig, siehe `web::set_material_textures`/`Wasm3DViewport`). Baut ein
+    /// neues Array `[Schachbrett (Ebene 0), Material0 (Ebene 1), …]`, laedt es hoch
+    /// und ersetzt die group-1-Bind-Group. Ein Wand-Band verweist per
+    /// `WallInput::material_index` (1-basiert) auf seine Ebene; Baender ohne
+    /// Material (`-1`) bleiben beim Schachbrett (Ebene 0). `layer_count == 0` (oder
+    /// leere/zu kleine Daten) setzt auf das reine Schachbrett-Array zurueck.
+    pub fn set_material_textures(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &[u8],
+        layer_count: u32,
+    ) {
+        let bytes_per_layer = (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize;
+        // Ungueltige/leere Eingabe -> reines Schachbrett-Array (1 Ebene).
+        let valid = layer_count > 0 && rgba.len() >= layer_count as usize * bytes_per_layer;
+        let material_layers = if valid { layer_count } else { 0 };
+        let total_layers = material_layers + 1; // Ebene 0 = Schachbrett
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("materials.texture_array"),
+            size: wgpu::Extent3d {
+                width: TEXTURE_SIZE,
+                height: TEXTURE_SIZE,
+                depth_or_array_layers: total_layers,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Ebene 0: Schachbrett-Fallback.
+        let checker = build_checker_texture();
+        let write_layer = |layer: u32, data: &[u8]| {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * TEXTURE_SIZE),
+                    rows_per_image: Some(TEXTURE_SIZE),
+                },
+                wgpu::Extent3d {
+                    width: TEXTURE_SIZE,
+                    height: TEXTURE_SIZE,
+                    depth_or_array_layers: 1,
+                },
+            );
+        };
+        write_layer(0, &checker);
+        for i in 0..material_layers {
+            let start = i as usize * bytes_per_layer;
+            write_layer(i + 1, &rgba[start..start + bytes_per_layer]);
+        }
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        self.texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("materials.bind"),
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
+                },
+            ],
+        });
+        self.texture = texture;
+        self.material_layer_count = total_layers;
+        // Ebene 0 (Schachbrett) ist bereits geladen -> den Lazy-Upload ueberspringen.
+        self.texture_uploaded = true;
     }
 
     /// Stellt sicher, dass ein Tiefenpuffer passend zur Ziel-Groesse existiert.
@@ -1019,6 +1255,8 @@ impl Renderer {
         // `mode.x` fuer den Mesh-Shader aus dem aktuellen Stil ableiten (Material/
         // Clay/Hidden-Flaechen). Wireframe zeichnet keine Flaechen -> Wert egal.
         self.globals.mode[0] = self.style.mesh_mode();
+        // `mode.z` = Anzahl gueltiger Textur-Array-Ebenen (Klemmung im Textur-Shader).
+        self.globals.mode[2] = self.material_layer_count as f32;
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&self.globals));
 
         // Prozedurale Schachbrett-Textur einmalig hochladen (lazy, weil `new` keine
@@ -1100,6 +1338,7 @@ impl Renderer {
                         pass.set_bind_group(0, &self.bind_group, &[]);
                         pass.set_bind_group(1, &self.texture_bind_group, &[]);
                         pass.set_vertex_buffer(0, t.vbo.slice(..));
+                        pass.set_vertex_buffer(1, t.layer_vbo.slice(..));
                         pass.set_index_buffer(t.ibo.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..t.index_count, 0, 0..1);
                     }
@@ -1126,6 +1365,18 @@ impl Renderer {
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, c.vbo.slice(..));
                 pass.draw(0..c.vertex_count, 0..1);
+            }
+
+            // 1c) Schnitt-Umrisslinien (Cut-Cap-Kanten, P2) NACH den Caps: die
+            //     Material-/Fugenlinien je ueberlebendem Cut-Rechteck (Ribbon-
+            //     TriangleList, eigener Stil je Schicht). Ohne Tiefentest (Always)
+            //     liegen sie sichtbar auf den Caps; der Kamera-Lift in
+            //     `build_cut_cap_lines` haelt sie vor der Ebenen-Kappung.
+            if let Some(cl) = &self.cut_lines {
+                pass.set_pipeline(&self.cut_line_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, cl.vbo.slice(..));
+                pass.draw(0..cl.vertex_count, 0..1);
             }
 
             // 2) Modell-Kanten (wireframe/hidden) — LineList-Pipeline (wie Grid).

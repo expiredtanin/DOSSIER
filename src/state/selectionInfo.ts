@@ -21,20 +21,26 @@ import {
 import type {
   AttributeSource,
   Ceiling,
+  Column,
+  ColumnProfile,
   Drawing2D,
   Drawing2DGeom,
+  ExtrudedSolid,
   LayerCategory,
   Opening,
   Project,
   Room,
   SiaCategory,
+  SliceTermination,
   Stair,
   StairShape,
   VerticalAnchor,
   Wall,
   WallReferenceLine,
 } from "../model/types";
-import { evaluateRoom } from "../geometry/roomArea";
+import { columnVerticalExtent } from "../model/wall";
+import { columnFootprint } from "../geometry/column";
+import { evaluateRoom, polygonArea } from "../geometry/roomArea";
 import {
   ceilingVerticalExtent,
   nextFloorAbove,
@@ -70,6 +76,8 @@ export interface FloorChoice {
  */
 export interface WallInfo {
   referenceLine: WallReferenceLine;
+  /** Terminierungs-Regel am Deckenanschluss (Default "both" = heutiges Verhalten). */
+  sliceTermination: SliceTermination;
   wallTypeId: string;
   /** Aktuelle Gesamtdicke (Meter). */
   thickness: number;
@@ -91,6 +99,14 @@ export interface WallInfo {
   /** Aufgelöste absolute UK/OK (Meter) + abgeleitete Höhe. */
   zBottom: number;
   zTop: number;
+  /** Achslänge der Wand (Meter). */
+  length: number;
+  /** Bruttovolumen = Länge × Dicke × Höhe (m³, ohne Öffnungsabzug). */
+  grossVolume: number;
+  /** Summe der Öffnungsvolumina (Fenster/Türen) dieser Wand (m³). */
+  openingVolume: number;
+  /** Nettovolumen = Brutto − Öffnungen (m³, ≥ 0). */
+  netVolume: number;
 }
 
 /**
@@ -106,6 +122,8 @@ export interface CeilingInfo {
   singleLayer: boolean;
   /** Grundfläche der Decke (m²). */
   area: number;
+  /** Volumen = Fläche × Dicke (m³). */
+  volume: number;
   /** Verfügbare Deckentyp-Presets (dediziert, `project.ceilingTypes`). */
   ceilingTypes: WallTypeChoice[];
   /** Geschoss, dem die Decke zugeordnet ist. */
@@ -115,6 +133,8 @@ export interface CeilingInfo {
   floors: FloorChoice[];
   /** OK-Bindung (undefined = Geschoss-Oberkante). */
   top?: VerticalAnchor;
+  /** UK-Bindung (undefined = OK − Dicke). */
+  bottom?: VerticalAnchor;
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
@@ -146,6 +166,8 @@ export interface OpeningInfo {
   doorType?: "normal" | "wandoeffnung";
   /** Nur Tür: Sturzlinien (keine/innen/aussen/beide). Fehlt → "beide". */
   lintelLines?: "keine" | "innen" | "aussen" | "beide";
+  /** Zugewiesener Tür-/Fenstertyp (Bibliothek, `Opening.typeId`) oder undefined. */
+  typeId?: string;
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
@@ -171,6 +193,8 @@ export interface StairInfo {
   up: boolean;
   /** Referenzpunkt der Laufbreite (links/mitte/rechts). Fehlt → "mitte". */
   referenz?: "links" | "mitte" | "rechts";
+  /** Zugewiesener Treppentyp (Bibliothek, `Stair.typeId`) oder undefined. */
+  typeId?: string;
   /** Geschoss, dem die Treppe zugeordnet ist. */
   floorId: string;
   floorName: string;
@@ -198,6 +222,41 @@ export interface RoomInfo {
   floorName: string;
 }
 
+/**
+ * Extrusions-spezifische Attribute für das Object-Info-Panel (nur bei Auswahl
+ * genau eines extrudierten Körpers, truck-Integration, gesetzt).
+ */
+export interface ExtrudedSolidInfo {
+  /** Extrusionshöhe in Metern (editierbar). */
+  height: number;
+  /** Verjüngung 0 (Prisma) … 1 (Spitze), editierbar. */
+  taper: number;
+  /** Grundfläche des Profils (m²). */
+  area: number;
+  /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
+  floorId: string;
+  floorName: string;
+}
+
+/**
+ * Stützen-spezifische Attribute für das Object-Info-Panel (nur bei Auswahl genau
+ * einer Stütze gesetzt). Anzeigefertige Werte für die Panel-Felder.
+ */
+export interface ColumnInfo {
+  /** Profil (Rechteck/Kreis) — bestimmt, welche Masse editierbar sind. */
+  profile: ColumnProfile;
+  /** Höhe (Meter, editierbar). */
+  height: number;
+  /** Drehung (Grad, editierbar) — intern in Radiant gespeichert. */
+  rotationDeg: number;
+  /** Geschoss, dem die Stütze zugeordnet ist. */
+  floorId: string;
+  floorName: string;
+  /** Aufgelöste absolute UK/OK (Meter). */
+  zBottom: number;
+  zTop: number;
+}
+
 /** Achsparallele Bounding-Box eines Elements in Modell-Metern. */
 export interface SelectionBBox {
   minX: number;
@@ -212,7 +271,16 @@ export interface SelectionBBox {
  * gezeichneten Wert zeigt. `fillHatchId`/`closed` sind nur für Drawing2D sinnvoll.
  */
 export interface Selection {
-  kind: "wall" | "ceiling" | "opening" | "stair" | "room" | "drawing2d" | "door";
+  kind:
+    | "wall"
+    | "ceiling"
+    | "opening"
+    | "stair"
+    | "room"
+    | "drawing2d"
+    | "door"
+    | "extrudedSolid"
+    | "column";
   id: string;
   /** Grafik-Kategorie (Ebene) des Elements. */
   categoryCode: string;
@@ -276,6 +344,10 @@ export interface Selection {
   stair?: StairInfo;
   /** Raum-Attribute (nur bei `kind === "room"`). */
   room?: RoomInfo;
+  /** Extrusions-Attribute (nur bei `kind === "extrudedSolid"`). */
+  extrudedSolid?: ExtrudedSolidInfo;
+  /** Stützen-Attribute (nur bei `kind === "column"`). */
+  column?: ColumnInfo;
 }
 
 const WALL_FALLBACK_MM = 0.18;
@@ -354,8 +426,18 @@ function wallSelection(project: Project, wall: Wall): Selection {
   const floor = project.drawingLevels.find((z) => z.id === wall.floorId);
   const { zBottom, zTop } = wallVerticalExtent(project, wall);
   const above = nextFloorAbove(project, wall);
+  // Volumen aus Achslänge × Gesamtdicke × Höhe, abzüglich der Öffnungen (jede
+  // Öffnung durchbricht die volle Wanddicke: Breite × Höhe × Dicke).
+  const length = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+  const wallHeight = Math.max(0, zTop - zBottom);
+  const grossVolume = length * thickness * wallHeight;
+  const openingVolume = (project.openings ?? [])
+    .filter((o) => o.hostWallId === wall.id)
+    .reduce((sum, o) => sum + o.width * o.height * thickness, 0);
+  const netVolume = Math.max(0, grossVolume - openingVolume);
   const wallInfo: WallInfo = {
     referenceLine: wall.referenceLine ?? "center",
+    sliceTermination: wall.sliceTermination ?? "both",
     wallTypeId: wall.wallTypeId,
     thickness,
     singleLayer: wt.layers.length <= 1,
@@ -376,6 +458,10 @@ function wallSelection(project: Project, wall: Wall): Selection {
     top: wall.top,
     zBottom,
     zTop,
+    length,
+    grossVolume,
+    openingVolume,
+    netVolume,
   };
   // bbox aus der Wandachse (start/end); die Schichtdicke bleibt unberücksichtigt,
   // damit die Box der Achs-Geometrie folgt (genügt für die Paletten).
@@ -415,6 +501,7 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     thickness,
     singleLayer: wt.layers.length <= 1,
     area: ceilingArea(ceiling.outline),
+    volume: ceilingArea(ceiling.outline) * thickness,
     ceilingTypes: (project.ceilingTypes ?? []).map((t) => ({
       id: t.id,
       name: t.name,
@@ -428,6 +515,7 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
       .filter((z) => z.kind === "floor")
       .map((z) => ({ id: z.id, name: z.name })),
     top: ceiling.top,
+    bottom: ceiling.bottom,
     zBottom,
     zTop,
   };
@@ -494,6 +582,7 @@ function openingSelection(project: Project, o: Opening): Selection {
     wingCount: o.wingCount,
     doorType: o.doorType,
     lintelLines: o.lintelLines,
+    typeId: o.typeId,
     zBottom: ext.zBottom,
     zTop: ext.zTop,
   };
@@ -530,6 +619,7 @@ function stairSelection(project: Project, s: Stair): Selection {
     treadDepth: geo.treadDepth,
     up: s.up !== false,
     referenz: s.referenz,
+    typeId: s.typeId,
     floorId: s.floorId,
     floorName: floor?.name ?? s.floorId,
     zBottom,
@@ -589,6 +679,84 @@ function roomSelection(project: Project, r: Room): Selection {
   };
 }
 
+/** Auswahl-Farbe der Extrusions-Footprints (identisch zum Grundriss-Umriss/3D-Orange). */
+const EXTRUSION_COLOR = "#d98c40";
+
+/** Selektion für einen extrudierten Körper ableiten (truck-Integration). */
+function extrudedSolidSelection(project: Project, s: ExtrudedSolid): Selection {
+  const floor = project.drawingLevels.find((z) => z.id === s.levelId);
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const p of s.points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  if (!isFinite(minX)) minX = minY = maxX = maxY = 0;
+  const info: ExtrudedSolidInfo = {
+    height: s.height,
+    taper: s.taper ?? 0,
+    area: polygonArea(s.points),
+    floorId: s.levelId,
+    floorName: floor?.name ?? s.levelId,
+  };
+  return {
+    kind: "extrudedSolid",
+    id: s.id,
+    categoryCode: "",
+    color: EXTRUSION_COLOR,
+    weightMm: WALL_FALLBACK_MM,
+    fillHatchId: null,
+    fillColor: null,
+    closed: true,
+    bbox: { minX, minY, maxX, maxY },
+    extrudedSolid: info,
+  };
+}
+
+/** Umriss-/Auswahlfarbe der Stützen-Poché (neutrales Tragwerks-Grau). */
+const COLUMN_COLOR = "#3a3f47";
+
+/** Selektion für eine Stütze (Column) ableiten. */
+function columnSelection(project: Project, col: Column): Selection {
+  const floor = project.drawingLevels.find((z) => z.id === col.floorId);
+  const category = findCategory(project.layers, col.categoryCode);
+  const pts = columnFootprint(col);
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  if (!isFinite(minX)) minX = minY = maxX = maxY = 0;
+  const { zBottom, zTop } = columnVerticalExtent(project, col);
+  const info: ColumnInfo = {
+    profile: col.profile,
+    height: col.height,
+    rotationDeg: ((col.rotation ?? 0) * 180) / Math.PI,
+    floorId: col.floorId,
+    floorName: floor?.name ?? col.floorId,
+    zBottom,
+    zTop,
+  };
+  return {
+    kind: "column",
+    id: col.id,
+    categoryCode: col.categoryCode,
+    color: col.color ?? category?.color ?? COLUMN_COLOR,
+    weightMm: WALL_FALLBACK_MM,
+    bbox: { minX, minY, maxX, maxY },
+    column: info,
+  };
+}
+
 /** Selektion für ein 2D-Zeichenelement ableiten (gleiche Auflösung wie generatePlan). */
 function drawingSelection(project: Project, d: Drawing2D): Selection {
   const ls = d.lineStyleId
@@ -640,10 +808,20 @@ export function deriveSelection(
   selectedOpeningId: string | null = null,
   selectedStairId: string | null = null,
   selectedRoomId: string | null = null,
+  selectedExtrudedSolidId: string | null = null,
+  selectedColumnId: string | null = null,
 ): Selection | null {
   if (selectedDrawingId) {
     const d = project.drawings2d.find((x) => x.id === selectedDrawingId);
     return d ? drawingSelection(project, d) : null;
+  }
+  if (selectedExtrudedSolidId) {
+    const s = (project.extrudedSolids ?? []).find((x) => x.id === selectedExtrudedSolidId);
+    return s ? extrudedSolidSelection(project, s) : null;
+  }
+  if (selectedColumnId) {
+    const c = (project.columns ?? []).find((x) => x.id === selectedColumnId);
+    return c ? columnSelection(project, c) : null;
   }
   if (selectedOpeningId) {
     const o = (project.openings ?? []).find((x) => x.id === selectedOpeningId);

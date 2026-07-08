@@ -8,7 +8,7 @@ members = ["."]
 # wird und das TS-Frontend die Joins direkt per WASM aufruft (statt TS-Duplikat).
 # kernel2d: analog — eigenstaendiger 2D-Geometrie-Kern (Port von kernel2d.ts),
 # per wasm-pack (Feature "web") zu WASM gebaut, ausserhalb des cad-tauri-Workspace.
-exclude = ["render2d", "render3d", "geometry", "kernel2d", "dwgimport"]
+exclude = ["render2d", "render3d", "geometry", "kernel2d", "dwgimport", "trucksolid"]
 
 [package]
 name = "cad-tauri"
@@ -37,9 +37,15 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 geometry = { path = "geometry" }
+# OS-Advisory-Lock (gepflegter fs2-Nachfolger) fuer die Projektdatei-Lock-Datei
+# (src/lock.rs): exklusiver Lock auf einer Sidecar-Datei, faellt automatisch
+# beim Prozessende/Absturz weg (kein manuelles Aufraeumen noetig).
+fs4 = { version = "0.9", default-features = false, features = ["sync"] }
 
 # --- M2-Spike (nur mit Feature "native2d") -----------------------------------
 # render2d ist eine eigenstaendige Crate (eigener leerer [workspace]); wir binden

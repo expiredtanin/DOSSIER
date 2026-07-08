@@ -15,12 +15,13 @@
 // (eye/target/up + Projektionsart) entgegen — die freie Orbit/Pan/Zoom-Interaktion
 // (Yaw/Pitch/Distanz) rechnet weiterhin die TS-Seite (`math::orbit_eye`-Konvention),
 // damit die Maus-UX 1:1 der bestehenden three.js-OrbitControls-Bedienung folgt.
-// `set_view_preset` wendet stattdessen eines der fuenf `View3d`-Praesete
-// (front/top/side/iso/perspective) direkt ueber `math::preset_camera` an — Front/
-// Top/Side/Iso werden dabei ECHT orthografisch (`preset_camera`; Iso = echte
-// Isometrie ohne perspektivische Verzerrung), was eine reine TS-Orbit-Naeherung
-// nicht leisten kann. Nach einem Praeset-Sprung bleibt die
-// weitere Navigation frei ueber `set_camera` (kein Lock).
+// `set_view_preset` wendet stattdessen eines der `View3d`-Praesete (front/back/
+// top/side/left/iso/isoFrontLeft/isoBackRight/isoBackLeft/perspective) direkt
+// ueber `math::preset_camera` an — alle ausser Perspective werden dabei ECHT
+// orthografisch (`preset_camera`; die Iso-Varianten = echte Isometrie ohne
+// perspektivische Verzerrung), was eine reine TS-Orbit-Naeherung nicht leisten
+// kann. Nach einem Praeset-Sprung bleibt die weitere Navigation frei ueber
+// `set_camera` (kein Lock).
 //
 // MODELL-FORMAT: JSON-Struct { walls: WallInput[], slabs: SlabInput[] } — identisch
 // zu `RModel3d` (src/plan/toWalls3d.ts) und zum nativen Tauri-Push (nativeSync.ts).
@@ -330,19 +331,25 @@ impl WebModelRenderer {
         };
     }
 
-    /// Wendet eines der fuenf Kamera-Praesets der three.js-Sicht
-    /// (`front`/`top`/`side`/`iso`/`perspective`, s. `View3d` in TopBar.tsx) auf
-    /// das aktuelle Modell an: Ziel = Modell-Mitte, Distanz = formatfuellend
-    /// (mirror der TS-`fitTargetDist`); Front/Top/Side/Iso werden orthografisch,
+    /// Wendet eines der Kardinal-/Iso-Kamera-Praesets der three.js-Sicht
+    /// (`front`/`back`/`top`/`side`/`left`/`iso`/`isoFrontLeft`/`isoBackRight`/
+    /// `isoBackLeft`/`perspective`, s. `View3d` in TopBar.tsx) auf das aktuelle
+    /// Modell an: Ziel = Modell-Mitte, Distanz = formatfuellend (mirror der
+    /// TS-`fitTargetDist`); alle Presets ausser Perspective werden orthografisch,
     /// nur Perspective ist perspektivisch (`math::preset_camera`). Wirkt erst beim
     /// naechsten `render`. „Praeset = hinspringen, kein Lock" — manuelles
     /// Orbit/Pan/Zoom bleibt danach frei ueber `set_camera` (s. Wasm3DViewport.tsx).
     pub fn set_view_preset(&mut self, preset: &str) -> Result<(), JsValue> {
         let preset = match preset {
             "front" => CameraPreset::Front,
+            "back" => CameraPreset::Back,
             "top" => CameraPreset::Top,
             "side" => CameraPreset::Side,
+            "left" => CameraPreset::Left,
             "iso" => CameraPreset::Iso,
+            "isoFrontLeft" => CameraPreset::IsoFrontLeft,
+            "isoBackRight" => CameraPreset::IsoBackRight,
+            "isoBackLeft" => CameraPreset::IsoBackLeft,
             "perspective" => CameraPreset::Persp,
             other => {
                 return Err(JsValue::from_str(&format!(
@@ -377,8 +384,8 @@ impl WebModelRenderer {
     ///  - `"shaded"`   — beleuchtete Bauteilfarben (Default).
     ///  - `"white"`    — Clay-Look: einheitlich helles Material, beleuchtet
     ///    (identisch zum bisherigen `set_render_mode_white(true)`).
-    ///  - `"textured"` — mangels Textur-Pipeline VORERST identisch zu `"shaded"`
-    ///    behandelt (KEIN Fake-Stub); Platzhalter fuer eine spaetere Textur-Schicht.
+    ///  - `"textured"` — Material-Farbkarten je Wand-Band aus dem Textur-Array
+    ///    (`set_material_textures`), Fallback-Schachbrett fuer Baender ohne Material.
     ///  - `"wireframe"`— nur Modell-Kanten (Feature-Edges), keine Flaechen.
     ///  - `"hidden"`   — Hidden-Line: flach-weisse Flaechen fuellen den Depth-
     ///    Buffer, dunkle Kanten liegen tiefengetestet obenauf (nur sichtbare).
@@ -428,6 +435,20 @@ impl WebModelRenderer {
     /// Wirkt erst beim naechsten `render`.
     pub fn set_highlight_lines(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
         self.renderer.set_highlight_lines(&self.device, vertices);
+        Ok(())
+    }
+
+    /// Laedt die Material-Farbkarten fuer den Stil `Textured` als Textur-Array hoch
+    /// (`Renderer::set_material_textures`). `rgba` = dicht gepackte RGBA8-Bytes von
+    /// `layer_count` Ebenen, JEDE exakt 256×256 (der JS-Aufrufer dekodiert/skaliert
+    /// die Material-Bilder, siehe `viewport/materialTextures.ts`). Ebene 0 bleibt
+    /// intern das Fallback-Schachbrett; die hochgeladenen Karten belegen die Ebenen
+    /// 1..N, auf die `WallInput::materialIndex` (1-basiert) zeigt. `layer_count == 0`
+    /// oder zu kleine Daten setzen auf das reine Schachbrett zurueck. Wirkt erst beim
+    /// naechsten `render`.
+    pub fn set_material_textures(&mut self, rgba: &[u8], layer_count: u32) -> Result<(), JsValue> {
+        self.renderer
+            .set_material_textures(&self.device, &self.queue, rgba, layer_count);
         Ok(())
     }
 

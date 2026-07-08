@@ -60,7 +60,7 @@ import {
   stairGeometry,
   type StairGeometry as TSStairGeometry,
 } from "./stair";
-import type { Stair } from "../model/types";
+import { wallTypeThickness, type Opening, type Project, type Stair, type Wall, type WallType } from "../model/types";
 import {
   detectRooms,
   pointInPolygon as rbPointInPolygon,
@@ -69,6 +69,19 @@ import {
   type WallSegment,
   type WallFace,
 } from "./roomBoundary";
+import { wallReferenceOffset } from "../model/wall";
+import {
+  doorSymbol,
+  openingCenter,
+  openingGapQuad,
+  openingInterval,
+  openingJambs,
+  wallAxisFrame,
+  wallAxisLength,
+  windowSymbol,
+  type DoorSymbol,
+  type WindowSymbol,
+} from "./opening";
 
 type Poly = { pts: Vec2[]; closed: boolean };
 
@@ -909,6 +922,317 @@ describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Slice 3: roomBou
         t.forEach((pt, j) => expect(closeVec(w[i]![j], pt), `rfpif-pt#${i}.${j}`).toBe(true));
       }
     });
+  });
+});
+
+// ── Slice 4: opening ──────────────────────────────────────────────────────────
+// `opening.ts` ist model-gekoppelt (Wall/Opening/Project) — die geometrisch
+// reinen Kerne wurden mit abgeflachter Signatur (Vec2/number) portiert
+// (PORT_PLAN §1). `thickness`/`refOffset` werden hier — wie beim Rust-Port —
+// bereits aufgeloest uebergeben (`wallTypeThickness`/`wallReferenceOffset`,
+// nicht ueber `getWallType`/ein volles `Project` im WASM-Aufruf).
+
+/** Zufaellige, NICHT entartete Wand (Laenge 0.5..15.5 m). */
+function genWall(rng: () => number): Wall {
+  const start = v(rng);
+  const angle = rng() * Math.PI * 2;
+  const length = 0.5 + rng() * 15;
+  const end = { x: start.x + Math.cos(angle) * length, y: start.y + Math.sin(angle) * length };
+  const refs = ["left", "center", "right"] as const;
+  return {
+    id: "w1",
+    type: "wall",
+    floorId: "f1",
+    categoryCode: "20",
+    start,
+    end,
+    wallTypeId: "wt1",
+    height: 2.4,
+    referenceLine: refs[Math.floor(rng() * 3)],
+  };
+}
+
+/** Einschichtiger WallType mit zufaelliger Dicke (0.15..0.5 m). */
+function genWallType(rng: () => number): WallType {
+  return { id: "wt1", name: "wt", layers: [{ componentId: "c1", thickness: 0.15 + rng() * 0.35 }] };
+}
+
+/** Minimales Project — `getWallType` liest nur `wallTypes`. */
+function makeProject(wallType: WallType): Project {
+  return { wallTypes: [wallType] } as unknown as Project;
+}
+
+/** Zufaellige Oeffnung auf `wall`: position/width teils ausserhalb der Achse
+ *  oder negativ (Strukturabdeckung fuer den null-Zweig von `openingInterval`). */
+function genOpening(rng: () => number, wall: Wall, kind: "window" | "door"): Opening {
+  const axis = wallAxisLength(wall);
+  const position = (rng() * 1.6 - 0.3) * axis;
+  const width = rng() < 0.1 ? -0.5 + rng() * 0.5 : 0.3 + rng() * Math.max(0.3, axis);
+  const swings = ["left", "right"] as const;
+  const hinges = ["start", "end"] as const;
+  const dirs = ["in", "out"] as const;
+  return {
+    id: "o1",
+    type: "opening",
+    hostWallId: wall.id,
+    categoryCode: "21",
+    kind,
+    position,
+    width,
+    height: 1.2,
+    sillHeight: kind === "door" ? 0 : 0.8,
+    wingCount: rng() < 0.5 ? undefined : 1 + Math.floor(rng() * 4),
+    hinge: rng() < 0.3 ? undefined : hinges[Math.floor(rng() * 2)],
+    swing: rng() < 0.3 ? undefined : swings[Math.floor(rng() * 2)],
+    swingAngle: rng() < 0.3 ? undefined : 30 + rng() * 120,
+    openingDir: rng() < 0.3 ? undefined : dirs[Math.floor(rng() * 2)],
+  };
+}
+
+describe.skipIf(!built)("kernel2d Rust-WASM ⇄ TS Paritaet — Slice 4: opening", () => {
+  it("wallAxisLength (Zufallswaende, rel 1e-9)", () => {
+    const rng = mulberry32(50);
+    const walls = Array.from({ length: N }, () => genWall(rng));
+    const qs = walls.map((wl) => ({ start: wl.start, end: wl.end }));
+    const w = JSON.parse(K.wall_axis_length_batch_json(JSON.stringify(qs))) as number[];
+    walls.forEach((wl, i) => {
+      expect(closeNum(w[i], wallAxisLength(wl)), `axisLen#${i}`).toBe(true);
+    });
+  });
+
+  it("openingInterval: Struktur exakt (null-Zweig inklusive) + Werte", () => {
+    const rng = mulberry32(51);
+    const cases = Array.from({ length: N }, () => {
+      const wall = genWall(rng);
+      return { wall, o: genOpening(rng, wall, "window") };
+    });
+    const qs = cases.map(({ wall, o }) => ({
+      start: wall.start,
+      end: wall.end,
+      position: o.position,
+      width: o.width,
+    }));
+    const w = JSON.parse(K.opening_interval_batch_json(JSON.stringify(qs))) as (
+      | { from: number; to: number }
+      | null
+    )[];
+    cases.forEach(({ wall, o }, i) => {
+      const t = openingInterval(wall, o);
+      expect(w[i] === null, `iv-null#${i}`).toBe(t === null);
+      if (t && w[i]) {
+        expect(closeNum(w[i]!.from, t.from), `iv-from#${i}`).toBe(true);
+        expect(closeNum(w[i]!.to, t.to), `iv-to#${i}`).toBe(true);
+      }
+    });
+  });
+
+  it("wallAxisFrame (u/n, rel 1e-9)", () => {
+    const rng = mulberry32(52);
+    const walls = Array.from({ length: N }, () => genWall(rng));
+    const qs = walls.map((wl) => ({ start: wl.start, end: wl.end }));
+    const w = JSON.parse(K.wall_axis_frame_batch_json(JSON.stringify(qs))) as { u: Vec2; n: Vec2 }[];
+    walls.forEach((wl, i) => {
+      const t = wallAxisFrame(wl);
+      expect(closeVec(w[i].u, t.u), `frame-u#${i}`).toBe(true);
+      expect(closeVec(w[i].n, t.n), `frame-n#${i}`).toBe(true);
+    });
+  });
+
+  it("openingJambs / openingCenter: Struktur exakt (null-Zweig) + Werte", () => {
+    const rng = mulberry32(53);
+    const cases = Array.from({ length: N }, () => {
+      const wall = genWall(rng);
+      return { wall, o: genOpening(rng, wall, "window") };
+    });
+    const qs = cases.map(({ wall, o }) => ({
+      start: wall.start,
+      end: wall.end,
+      position: o.position,
+      width: o.width,
+    }));
+    const wJ = JSON.parse(K.opening_jambs_batch_json(JSON.stringify(qs))) as (
+      | { jambStart: Vec2; jambEnd: Vec2 }
+      | null
+    )[];
+    const wC = JSON.parse(K.opening_center_batch_json(JSON.stringify(qs))) as (Vec2 | null)[];
+    cases.forEach(({ wall, o }, i) => {
+      const tJ = openingJambs(wall, o);
+      expect(wJ[i] === null, `jambs-null#${i}`).toBe(tJ === null);
+      if (tJ && wJ[i]) {
+        expect(closeVec(wJ[i]!.jambStart, tJ.jambStart), `jambs-start#${i}`).toBe(true);
+        expect(closeVec(wJ[i]!.jambEnd, tJ.jambEnd), `jambs-end#${i}`).toBe(true);
+      }
+      const tC = openingCenter(wall, o);
+      expect(wC[i] === null, `center-null#${i}`).toBe(tC === null);
+      if (tC && wC[i]) expect(closeVec(wC[i]!, tC), `center#${i}`).toBe(true);
+    });
+  });
+
+  it("openingGapQuad / windowSymbol: Struktur exakt + Werte (rel 1e-9)", () => {
+    const rng = mulberry32(54);
+    const cases = Array.from({ length: 150 }, () => {
+      const wall = genWall(rng);
+      const wallType = genWallType(rng);
+      wall.wallTypeId = wallType.id;
+      const project = makeProject(wallType);
+      const o = genOpening(rng, wall, "window");
+      const total = wallTypeThickness(wallType);
+      const refOffset = wallReferenceOffset(wall, total);
+      const glassCount = 1 + Math.floor(rng() * 3);
+      return { wall, o, project, total, refOffset, glassCount };
+    });
+
+    const qsGap = cases.map((c) => ({
+      start: c.wall.start,
+      end: c.wall.end,
+      position: c.o.position,
+      width: c.o.width,
+      thickness: c.total,
+      refOffset: c.refOffset,
+    }));
+    const wGap = JSON.parse(K.opening_gap_quad_batch_json(JSON.stringify(qsGap))) as (Vec2[] | null)[];
+    cases.forEach((c, i) => {
+      const t = openingGapQuad(c.project, c.wall, c.o);
+      expect(wGap[i] === null, `gap-null#${i}`).toBe(t === null);
+      if (t && wGap[i]) expect(eqPts(wGap[i]!, t), `gap-pts#${i}`).toBe(true);
+    });
+
+    const qsWin = cases.map((c) => ({
+      start: c.wall.start,
+      end: c.wall.end,
+      position: c.o.position,
+      width: c.o.width,
+      thickness: c.total,
+      refOffset: c.refOffset,
+      glassCount: c.glassCount,
+      wingCount: c.o.wingCount,
+    }));
+    const wWin = JSON.parse(K.window_symbol_batch_json(JSON.stringify(qsWin))) as (WindowSymbol | null)[];
+    cases.forEach((c, i) => {
+      const t = windowSymbol(c.project, c.wall, c.o, c.glassCount);
+      expect(wWin[i] === null, `win-null#${i}`).toBe(t === null);
+      if (t && wWin[i]) {
+        expect(eqPts(wWin[i]!.frame, t.frame), `win-frame#${i}`).toBe(true);
+        expect(eqPairs(wWin[i]!.glassLines, t.glassLines), `win-glass#${i}`).toBe(true);
+        expect(eqPairs(wWin[i]!.mullionLines, t.mullionLines), `win-mullion#${i}`).toBe(true);
+      }
+    });
+  });
+
+  it("doorSymbol: Struktur exakt + Werte (Default-Parameter inklusive)", () => {
+    const rng = mulberry32(55);
+    const cases = Array.from({ length: 150 }, () => {
+      const wall = genWall(rng);
+      return { wall, o: genOpening(rng, wall, "door") };
+    });
+    const qs = cases.map(({ wall, o }) => ({
+      start: wall.start,
+      end: wall.end,
+      position: o.position,
+      width: o.width,
+      swing: o.swing,
+      openingDir: o.openingDir,
+      hinge: o.hinge,
+      swingAngle: o.swingAngle,
+    }));
+    const w = JSON.parse(K.door_symbol_batch_json(JSON.stringify(qs))) as (DoorSymbol | null)[];
+    cases.forEach(({ wall, o }, i) => {
+      const t = doorSymbol(wall, o);
+      expect(w[i] === null, `door-null#${i}`).toBe(t === null);
+      if (t && w[i]) {
+        expect(closeVec(w[i]!.hinge, t.hinge), `door-hinge#${i}`).toBe(true);
+        expect(closeVec(w[i]!.openEnd, t.openEnd), `door-open#${i}`).toBe(true);
+        expect(closeVec(w[i]!.closedEnd, t.closedEnd), `door-closed#${i}`).toBe(true);
+        expect(closeNum(w[i]!.radius, t.radius), `door-radius#${i}`).toBe(true);
+        expect(closeVec(w[i]!.jambStart, t.jambStart), `door-jambStart#${i}`).toBe(true);
+        expect(closeVec(w[i]!.jambEnd, t.jambEnd), `door-jambEnd#${i}`).toBe(true);
+        expect(closeVec(w[i]!.normal, t.normal), `door-normal#${i}`).toBe(true);
+      }
+    });
+  });
+
+  it("Golden: entartetes Intervall (Breite 0 / ausserhalb der Achse) → null; wingCount-Clamp >4 → 3 Pfosten", () => {
+    const wall: Wall = {
+      id: "w",
+      type: "wall",
+      floorId: "f",
+      categoryCode: "20",
+      start: { x: 0, y: 0 },
+      end: { x: 5, y: 0 },
+      wallTypeId: "wt",
+      height: 2.4,
+      referenceLine: "center",
+    };
+    const wallType: WallType = { id: "wt", name: "wt", layers: [{ componentId: "c", thickness: 0.24 }] };
+    const project = makeProject(wallType);
+
+    // Breite 0 → entartet.
+    const oZero: Opening = {
+      id: "o",
+      type: "opening",
+      hostWallId: "w",
+      categoryCode: "21",
+      kind: "window",
+      position: 2,
+      width: 0,
+      height: 1.2,
+      sillHeight: 0.8,
+    };
+    const ivZero = JSON.parse(
+      K.opening_interval_batch_json(
+        JSON.stringify([{ start: wall.start, end: wall.end, position: oZero.position, width: oZero.width }]),
+      ),
+    ) as ({ from: number; to: number } | null)[];
+    expect(ivZero[0] === null).toBe(true);
+    expect(ivZero[0] === null).toBe(openingInterval(wall, oZero) === null);
+
+    // Vollstaendig ausserhalb der Achse.
+    const oOut: Opening = { ...oZero, position: 10, width: 1 };
+    const ivOut = JSON.parse(
+      K.opening_interval_batch_json(
+        JSON.stringify([{ start: wall.start, end: wall.end, position: oOut.position, width: oOut.width }]),
+      ),
+    ) as ({ from: number; to: number } | null)[];
+    expect(ivOut[0] === null).toBe(true);
+    expect(ivOut[0] === null).toBe(openingInterval(wall, oOut) === null);
+
+    // wingCount > 4 wird auf 4 geklemmt → 3 Mittelpfosten.
+    const total = wallTypeThickness(wallType);
+    const refOffset = wallReferenceOffset(wall, total);
+    const oWings: Opening = {
+      id: "o",
+      type: "opening",
+      hostWallId: "w",
+      categoryCode: "21",
+      kind: "window",
+      position: 1,
+      width: 2,
+      height: 1.2,
+      sillHeight: 0.8,
+      wingCount: 9,
+    };
+    const wWin = JSON.parse(
+      K.window_symbol_batch_json(
+        JSON.stringify([
+          {
+            start: wall.start,
+            end: wall.end,
+            position: oWings.position,
+            width: oWings.width,
+            thickness: total,
+            refOffset,
+            glassCount: 1,
+            wingCount: oWings.wingCount,
+          },
+        ]),
+      ),
+    ) as (WindowSymbol | null)[];
+    const tWin = windowSymbol(project, wall, oWings, 1);
+    expect(tWin).not.toBeNull();
+    expect(wWin[0]).not.toBeNull();
+    expect(wWin[0]!.mullionLines.length).toBe(tWin!.mullionLines.length);
+    expect(wWin[0]!.mullionLines.length).toBe(3);
+    expect(eqPairs(wWin[0]!.mullionLines, tWin!.mullionLines)).toBe(true);
   });
 });
 

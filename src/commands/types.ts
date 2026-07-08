@@ -19,7 +19,7 @@ export type { DraftShape, SnapResult, ToolDraft } from "../tools/types";
 // ── Eingabe-Arten ────────────────────────────────────────────────────────────
 
 /** Arten von Eingaben, die ein Schritt annehmen kann. */
-export type AcceptKind = "point" | "number" | "option" | "selection";
+export type AcceptKind = "point" | "number" | "option" | "text" | "selection";
 
 /**
  * Geparste, noch nicht aufgelöste Roh-Eingabe aus der Command-Line bzw. der
@@ -67,6 +67,10 @@ export interface CommandSelection {
    * `drawingId` (falls gesetzt) als einziges Element.
    */
   drawingIds?: string[];
+  /** Gewählter extrudierter Körper (truck-Integration), falls einer selektiert ist. */
+  extrudedSolidId?: string | null;
+  /** Gewählte Stütze (Tragwerk), falls eine selektiert ist. */
+  columnId?: string | null;
 }
 
 /** Live-Kontext, den ein Befehl bei jedem Schritt erhält (analog ToolContext). */

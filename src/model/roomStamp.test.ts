@@ -4,6 +4,7 @@ import {
   roomStampToDoc,
   roomStampExtraLines,
   roomDisplayName,
+  formatStampArea,
 } from "./roomStamp";
 import type { Room } from "./types";
 
@@ -81,6 +82,54 @@ describe("roomStampExtraLines", () => {
       { netArea: 12.345, siaCategory: "HNF", siaLabel: "Hauptnutzfläche" },
     );
     expect(lines).toHaveLength(0);
+  });
+
+  it("rundet die Fläche auf roundingStep, falls gesetzt", () => {
+    const lines = roomStampExtraLines(
+      { name: "Bad", showFloorArea: true, showUsage: false, roundingStep: 0.5 },
+      { netArea: 12.34, siaCategory: "HNF", siaLabel: "Hauptnutzfläche" },
+    );
+    expect(lines[0].text).toBe("12.5 m²");
+  });
+
+  it("nutzt 2 Nachkommastellen ohne roundingStep (Alt-Verhalten)", () => {
+    const lines = roomStampExtraLines(
+      { name: "Bad", showFloorArea: true, showUsage: false },
+      { netArea: 12.345, siaCategory: "HNF", siaLabel: "Hauptnutzfläche" },
+    );
+    expect(lines[0].text).toBe("12.35 m²");
+  });
+
+  it("zeigt die Personenzahl als eigene Zeile, wenn gesetzt", () => {
+    const lines = roomStampExtraLines(
+      { name: "Bad", showFloorArea: false, showUsage: false, occupancy: 4 },
+      { netArea: 12.345, siaCategory: "HNF", siaLabel: "Hauptnutzfläche" },
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text).toBe("4 Pers.");
+    expect(lines[0].align).toBe("center");
+  });
+
+  it("blendet die Personenzahl-Zeile aus, wenn occupancy fehlt", () => {
+    const lines = roomStampExtraLines(
+      { name: "Bad", showFloorArea: false, showUsage: false },
+      { netArea: 12.345, siaCategory: "HNF", siaLabel: "Hauptnutzfläche" },
+    );
+    expect(lines).toHaveLength(0);
+  });
+});
+
+describe("formatStampArea", () => {
+  it("2 Nachkommastellen ohne roundingStep", () => {
+    expect(formatStampArea(12.345)).toBe("12.35");
+    expect(formatStampArea(12)).toBe("12.00");
+  });
+
+  it("rundet auf das nächste Vielfache von roundingStep", () => {
+    expect(formatStampArea(12.24, 0.5)).toBe("12");
+    expect(formatStampArea(12.26, 0.5)).toBe("12.5");
+    expect(formatStampArea(12.3, 0.1)).toBe("12.3");
+    expect(formatStampArea(12.34, 1)).toBe("12");
   });
 });
 

@@ -19,6 +19,7 @@ import { t } from "../i18n";
 import { formatM } from "../model/types";
 import type {
   SiaCategory,
+  SliceTermination,
   StairShape,
   VerticalAnchor,
   WallReferenceLine,
@@ -28,6 +29,8 @@ import { Dropdown } from "../ui/Dropdown";
 import { usePanelHost } from "./host";
 import type {
   CeilingInfo,
+  ColumnInfo,
+  ExtrudedSolidInfo,
   OpeningInfo,
   RoomInfo,
   StairInfo,
@@ -68,10 +71,23 @@ export function ObjectInfoPanel() {
   const width = bbox.maxX - bbox.minX;
   const height = bbox.maxY - bbox.minY;
 
-  // X/Y des gewählten Bezugspunkts (Modell-Meter). Read-only: Der Kontrakt
-  // bietet keinen Positions-Setter, daher wird hier kein Verschieben gefaket.
+  // X/Y des gewählten Bezugspunkts (Modell-Meter). Editierbar: Commit
+  // verschiebt die Selektion so, dass der gewählte Bezugspunkt auf die
+  // eingegebene Koordinate wandert (Delta = neu − aktuell → generischer Move
+  // über den Host). Bei Elementarten, die der Transform-Kern nicht kennt
+  // (Decke/Öffnung/Treppe/Raum), ist der Host-Aufruf ein No-op — das Feld
+  // zeigt danach wieder den unveränderten Wert (wie bei Breite/Höhe oben).
   const px = bbox.minX + anchor.fx * width;
   const py = bbox.minY + anchor.fy * height;
+
+  // Rohe Drawing2D-Geometrie der Selektion (nur bei kind==="drawing2d") — für
+  // die Linien-Länge/Kreis-Radius-Felder unten; die Selection-Sicht trägt
+  // keine Geometrieform, daher direkter (Lese-)Zugriff aufs Projekt.
+  const rawDrawing =
+    sel.kind === "drawing2d"
+      ? host.project.drawings2d.find((d) => d.id === sel.id)
+      : undefined;
+  const drawingShape = rawDrawing?.geom.shape;
 
   // ── Maß-Commit ──────────────────────────────────────────────────────────────
   // Liest beide aktuellen Maße aus den Feldern und skaliert um den aktiven
@@ -94,44 +110,57 @@ export function ObjectInfoPanel() {
 
       <div className="objinfo-sep" />
 
-      {/* Bezugspunkt-Würfel (3×3). */}
+      {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
+          rechts daneben (Nutzer-Wunsch). */}
       <div className="objinfo-section-label">{t("objinfo.refpoint")}</div>
-      <div className="objinfo-cube" role="group" aria-label={t("objinfo.refpoint")}>
-        {FRACTIONS.map((fy) =>
-          FRACTIONS.map((fx) => {
-            const active = anchor.fx === fx && anchor.fy === fy;
-            return (
-              <button
-                key={anchorKey(fx, fy)}
-                type="button"
-                className={"objinfo-anchor" + (active ? " active" : "")}
-                title={t("objinfo.setRefpoint")}
-                aria-pressed={active}
-                onClick={() => setAnchor({ fx, fy })}
-              >
-                <span className="objinfo-dot" />
-              </button>
-            );
-          }),
-        )}
-      </div>
+      <div className="objinfo-refrow">
+        <div className="objinfo-cube" role="group" aria-label={t("objinfo.refpoint")}>
+          {FRACTIONS.map((fy) =>
+            FRACTIONS.map((fx) => {
+              const active = anchor.fx === fx && anchor.fy === fy;
+              return (
+                <button
+                  key={anchorKey(fx, fy)}
+                  type="button"
+                  className={"objinfo-anchor" + (active ? " active" : "")}
+                  title={t("objinfo.setRefpoint")}
+                  aria-pressed={active}
+                  onClick={() => setAnchor({ fx, fy })}
+                >
+                  <span className="objinfo-dot" />
+                </button>
+              );
+            }),
+          )}
+        </div>
 
-      {/* X / Y des gewählten Bezugspunkts (read-only). */}
-      <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.x")}</span>
-        <span className="objinfo-fval">{formatM(px)}</span>
-      </div>
-      <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.y")}</span>
-        <span className="objinfo-fval">{formatM(py)}</span>
-      </div>
-      {/* Z ehrlich: Das Modell ist 2D pro Ebene; es gibt keine Z am Element.
-          Daher „—" statt einer gefakten 0, mit kurzem Hinweis im Titel. */}
-      <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.z")}</span>
-        <span className="objinfo-fval objinfo-muted" title={t("objinfo.zHint")}>
-          —
-        </span>
+        {/* X / Y des gewählten Bezugspunkts (editierbar) + Z (read-only) + ein
+            Dreh-Feld, als Spalte. */}
+        <div className="objinfo-xyzcol">
+          <DimensionField
+            label={t("objinfo.x")}
+            value={px}
+            min={-Infinity}
+            onCommit={(nx) => host.onMoveSelectionBy(nx - px, 0)}
+          />
+          <DimensionField
+            label={t("objinfo.y")}
+            value={py}
+            min={-Infinity}
+            onCommit={(ny) => host.onMoveSelectionBy(0, ny - py)}
+          />
+          {/* Z ehrlich: Das Modell ist 2D pro Ebene; es gibt keine Z am Element.
+              Daher „—" statt einer gefakten 0, mit kurzem Hinweis im Titel. */}
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.z")}</span>
+            <span className="objinfo-fval objinfo-muted" title={t("objinfo.zHint")}>
+              —
+            </span>
+          </div>
+          {/* Drehen: Delta-Winkel (Grad) um den gewählten Bezugspunkt — kein
+              persistenter Zustand, das Feld zeigt nach dem Commit wieder „0". */}
+          <RotateField onCommit={(deg) => host.onRotateSelectionAround(px, py, deg)} />
+        </div>
       </div>
 
       <div className="objinfo-sep" />
@@ -148,6 +177,23 @@ export function ObjectInfoPanel() {
         value={height}
         onCommit={(h) => commitSize(width, h)}
       />
+      {/* Linien-Länge bzw. Kreis-Radius (nur wenn die Selektion genau eine
+          Linie/ein Kreis ist — das Modell gibt das direkt her, andere Formen
+          bleiben ohne Zusatzfeld). */}
+      {drawingShape === "line" && (
+        <DimensionField
+          label={t("objinfo.drawing.length")}
+          value={Math.hypot(width, height)}
+          onCommit={(v) => host.onSetDrawingLineLength(v)}
+        />
+      )}
+      {drawingShape === "circle" && (
+        <DimensionField
+          label={t("objinfo.drawing.radius")}
+          value={width / 2}
+          onCommit={(v) => host.onSetDrawingCircleRadius(v)}
+        />
+      )}
       {/* Die element-spezifischen Abschnitte (Wand/Decke/Öffnung/Treppe/Raum)
           werden jetzt im Attribute-Panel gerendert (AttributesPanel importiert
           die exportierten *Section-Komponenten). */}
@@ -228,6 +274,153 @@ export function RoomSection({
   );
 }
 
+// ── Extrusions-Attribut-Abschnitt (truck-Integration) ───────────────────────
+// Höhe editierbar (löst Re-Extrusion aus); Grundfläche + Geschoss read-only.
+export function ExtrudedSolidSection({
+  solid,
+  host,
+}: {
+  solid: ExtrudedSolidInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.extrudedSolid.section")}</div>
+
+      {/* Höhe (editierbar, > 0) — löst eine Re-Extrusion (truck-WASM) aus. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.height")}</span>
+        <input
+          type="number"
+          className="objinfo-text"
+          step={0.01}
+          min={0.01}
+          value={solid.height}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v) && v > 0) host.onSetExtrudedSolidHeight(v);
+          }}
+          title={t("objinfo.extrudedSolid.height")}
+        />
+      </div>
+
+      {/* Verjüngung (editierbar, 0..1) — löst eine Re-Extrusion (truck-WASM) aus. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.taper")}</span>
+        <input
+          type="number"
+          className="objinfo-text"
+          step={0.05}
+          min={0}
+          max={1}
+          value={solid.taper}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) host.onSetExtrudedSolidTaper(v);
+          }}
+          title={t("objinfo.extrudedSolid.taper")}
+        />
+      </div>
+
+      {/* Grundfläche (read-only, abgeleitet). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.area")}</span>
+        <span className="objinfo-fval">{solid.area.toFixed(2)} m²</span>
+      </div>
+
+      {/* Geschoss (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.floor")}</span>
+        <span className="objinfo-fval">{solid.floorName}</span>
+      </div>
+    </>
+  );
+}
+
+// ── Stützen-Attribut-Abschnitt (Tragwerk) ───────────────────────────────────
+// Profil (Rechteck/Kreis) + Masse, Höhe, Drehung editierbar; Geschoss + UK/OK
+// read-only.
+export function ColumnSection({
+  column,
+  host,
+}: {
+  column: ColumnInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.column.section")}</div>
+
+      {/* Profil-Dropdown (Rechteck/Kreis). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.column.profile")}</span>
+        <Dropdown
+          value={column.profile.kind}
+          onChange={(v) => host.onSetColumnProfileKind(v as "rect" | "round")}
+          options={[
+            { value: "rect", label: t("objinfo.column.profile.rect") },
+            { value: "round", label: t("objinfo.column.profile.round") },
+          ]}
+          title={t("objinfo.column.profile")}
+          width={130}
+        />
+      </div>
+
+      {/* Editierbare Masse je Profil. */}
+      {column.profile.kind === "round" ? (
+        <DimensionField
+          label={t("objinfo.column.radius")}
+          value={column.profile.radius}
+          onCommit={(v) => host.onSetColumnRadius(v)}
+        />
+      ) : (
+        <>
+          <DimensionField
+            label={t("objinfo.column.width")}
+            value={column.profile.kind === "rect" ? column.profile.width : 0}
+            onCommit={(v) => host.onSetColumnWidth(v)}
+          />
+          <DimensionField
+            label={t("objinfo.column.depth")}
+            value={column.profile.kind === "rect" ? column.profile.depth : 0}
+            onCommit={(v) => host.onSetColumnDepth(v)}
+          />
+        </>
+      )}
+
+      <DimensionField
+        label={t("objinfo.column.height")}
+        value={column.height}
+        onCommit={(v) => host.onSetColumnHeight(v)}
+      />
+
+      {/* Drehung (Grad). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.column.rotation")}</span>
+        <input
+          type="number"
+          className="objinfo-text"
+          step={1}
+          value={Number(column.rotationDeg.toFixed(1))}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) host.onSetColumnRotation(v);
+          }}
+          title={t("objinfo.column.rotation")}
+        />
+      </div>
+
+      {/* Geschoss (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.column.floor")}</span>
+        <span className="objinfo-fval">{column.floorName}</span>
+      </div>
+    </>
+  );
+}
+
 // ── Treppen-Attribut-Abschnitt ───────────────────────────────────────────────
 // Grundform (gerade/L/Wendel), Laufbreite, Stufenanzahl, Steighöhe (+ abgeleitete
 // Steigungshöhe/Auftrittstiefe), Laufrichtung; Referenzgeschoss + UK/OK read-only.
@@ -242,6 +435,24 @@ export function StairSection({
     <>
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">{t("objinfo.stair.section")}</div>
+
+      {/* Treppentyp (Bibliothek) — treibt u. a. die 3D-Tragart (massiv/offen). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.type")}</span>
+        <Dropdown
+          value={stair.typeId ?? ""}
+          onChange={(v) => host.onSetStairType(v)}
+          options={[
+            { value: "", label: t("objinfo.type.none") },
+            ...(host.project.stairTypes ?? []).map((st) => ({
+              value: st.id,
+              label: st.name,
+            })),
+          ]}
+          title={t("objinfo.stair.type")}
+          width={130}
+        />
+      </div>
 
       {/* Grundform-Dropdown. */}
       <div className="objinfo-field">
@@ -359,6 +570,24 @@ export function OpeningSection({
     <>
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">{t("objinfo.opening.section")}</div>
+
+      {/* Tür-/Fenstertyp (Bibliothek) — je nach Art aus doorTypes bzw. windowTypes. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.type")}</span>
+        <Dropdown
+          value={opening.typeId ?? ""}
+          onChange={(v) => host.onSetOpeningType(v)}
+          options={[
+            { value: "", label: t("objinfo.type.none") },
+            ...(isDoor
+              ? host.project.doorTypes ?? []
+              : host.project.windowTypes ?? []
+            ).map((ty) => ({ value: ty.id, label: ty.name })),
+          ]}
+          title={t("objinfo.opening.type")}
+          width={130}
+        />
+      </div>
 
       {/* Art-Segment Fenster/Tür. */}
       <div className="objinfo-field">
@@ -596,10 +825,14 @@ export function CeilingSection({
         <span className="objinfo-fval">{ceiling.floorName}</span>
       </div>
 
-      {/* Fläche (read-only). */}
+      {/* Fläche + Volumen (read-only). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.ceiling.area")}</span>
         <span className="objinfo-fval">{ceiling.area.toFixed(2)} m²</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.volume")}</span>
+        <span className="objinfo-fval">{ceiling.volume.toFixed(2)} m³</span>
       </div>
 
       <div className="objinfo-sep" />
@@ -614,11 +847,16 @@ export function CeilingSection({
         onChange={(a) => host.onSetCeilingTop(a)}
       />
 
-      {/* UK = OK − Dicke (abgeleitet, read-only). */}
-      <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.ceiling.bottom")}</span>
-        <span className="objinfo-fval">{formatM(ceiling.zBottom)}</span>
-      </div>
+      {/* UK der Decke: an Geschoss gebunden ODER eigene Höhe; ohne Override
+          bleibt es beim heutigen Verhalten UK = OK − Dicke. */}
+      <VerticalAnchorRow
+        label={t("objinfo.ceiling.bottom")}
+        anchor={ceiling.bottom}
+        defaultZ={ceiling.zBottom}
+        floors={ceiling.floors}
+        defaultFloorId={ceiling.floorId}
+        onChange={(a) => host.onSetCeilingBottom?.(a)}
+      />
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.ceiling.height")}</span>
         <span className="objinfo-fval">{formatM(ceiling.zTop - ceiling.zBottom)}</span>
@@ -678,6 +916,23 @@ export function WallSection({
         />
       </div>
 
+      {/* Terminierung am Deckenanschluss (Zuschnitt, NICHT Priorität): ob die Wand
+          an der Decke endet oder oberhalb wieder auftaucht. Default "both". */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.wall.sliceTermination")}</span>
+        <Dropdown
+          value={wall.sliceTermination}
+          onChange={(v) => host.onSetWallSliceTermination(v as SliceTermination)}
+          options={[
+            { value: "both", label: t("objinfo.wall.sliceTermination.both") },
+            { value: "below", label: t("objinfo.wall.sliceTermination.below") },
+            { value: "above", label: t("objinfo.wall.sliceTermination.above") },
+          ]}
+          title={t("objinfo.wall.sliceTermination")}
+          width={120}
+        />
+      </div>
+
       {/* Aufbau-Typ-Segment. */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.wall.buildup")}</span>
@@ -730,6 +985,26 @@ export function WallSection({
         <span className="objinfo-fval">{wall.floorName}</span>
       </div>
 
+      {/* Länge + Volumen (read-only). Volumen ist NETTO — Fenster/Türen
+          abgezogen; der Titel zeigt zusätzlich das Bruttovolumen. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.wall.length")}</span>
+        <span className="objinfo-fval">{formatM(wall.length)}</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.volume")}</span>
+        <span
+          className="objinfo-fval"
+          title={
+            wall.openingVolume > 0
+              ? `${t("objinfo.wall.volumeGross")}: ${wall.grossVolume.toFixed(2)} m³ − ${wall.openingVolume.toFixed(2)} m³`
+              : undefined
+          }
+        >
+          {wall.netVolume.toFixed(2)} m³
+        </span>
+      </div>
+
       {/* Verknüpfung zum oberen Geschoss: OK an nächstes Geschoss binden. */}
       <label className="objinfo-field objinfo-check-field">
         <span className="objinfo-flabel">{t("objinfo.wall.linkAbove")}</span>
@@ -755,15 +1030,8 @@ export function WallSection({
 
       <div className="objinfo-sep" />
 
-      {/* UK & OK getrennt: je „an Geschoss gebunden" ODER „eigene Höhe". */}
-      <VerticalAnchorRow
-        label={t("objinfo.wall.bottom")}
-        anchor={wall.bottom}
-        defaultZ={wall.zBottom}
-        floors={wall.floors}
-        defaultFloorId={wall.floorId}
-        onChange={(a) => host.onSetWallBottom(a)}
-      />
+      {/* OK & UK getrennt: je „an Geschoss gebunden" ODER „eigene Höhe". OK
+          (oben) steht oben, UK (unten) darunter — räumlich passend (Nutzer). */}
       <VerticalAnchorRow
         label={t("objinfo.wall.top")}
         anchor={wall.top}
@@ -771,6 +1039,14 @@ export function WallSection({
         floors={wall.floors}
         defaultFloorId={wall.floorAbove?.id ?? wall.floorId}
         onChange={(a) => host.onSetWallTop(a)}
+      />
+      <VerticalAnchorRow
+        label={t("objinfo.wall.bottom")}
+        anchor={wall.bottom}
+        defaultZ={wall.zBottom}
+        floors={wall.floors}
+        defaultFloorId={wall.floorId}
+        onChange={(a) => host.onSetWallBottom(a)}
       />
 
       {/* Höhe = OK − UK (abgeleitet, read-only). */}
@@ -836,25 +1112,27 @@ function VerticalAnchorRow({
           </button>
         </div>
       </div>
+      {/* Unterzeile in normaler Label-/Wert-Struktur: Label links, Control in
+          der Wert-Spalte (Nutzer-Wunsch — vorher hing das Control ohne Label
+          im Einzug der linken Spalte). */}
       {mode === "floor" ? (
-        <div className="objinfo-field objinfo-subfield">
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.anchor.refFloor")}</span>
           <Dropdown
             value={anchor?.mode === "floor" ? anchor.floorId : defaultFloorId}
             onChange={(id) => onChange({ mode: "floor", floorId: id })}
             options={floors.map((f) => ({ value: f.id, label: f.name }))}
-            title={label}
+            title={t("objinfo.anchor.refFloor")}
             width={150}
           />
         </div>
       ) : (
-        <div className="objinfo-subfield">
-          <DimensionField
-            label={t("objinfo.z")}
-            value={anchor?.mode === "custom" ? anchor.z : defaultZ}
-            min={-Infinity}
-            onCommit={(z) => onChange({ mode: "custom", z })}
-          />
-        </div>
+        <DimensionField
+          label={t("objinfo.anchor.customHeight")}
+          value={anchor?.mode === "custom" ? anchor.z : defaultZ}
+          min={-Infinity}
+          onCommit={(z) => onChange({ mode: "custom", z })}
+        />
       )}
     </div>
   );
@@ -912,6 +1190,47 @@ function DimensionField({
         }}
       />
       <span className="objinfo-unit">m</span>
+    </label>
+  );
+}
+
+// ── Dreh-Feld (Delta-Winkel in Grad) ─────────────────────────────────────────
+// Anders als DimensionField zeigt dieses Feld KEINEN persistenten Host-Wert —
+// eine „aktuelle Rotation" gibt es für die Selektion generell nicht (Wand ist
+// nur eine Achse, Drawing2D/Extrusion tragen keinen Rotationswinkel). Das Feld
+// ist daher ein Delta: Eingabe = Drehung ab jetzt, danach zeigt es wieder „0".
+function RotateField({ onCommit }: { onCommit: (deg: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? "0";
+
+  function commit() {
+    if (draft === null) return;
+    const v = Number(draft);
+    setDraft(null);
+    if (isFinite(v) && v !== 0) onCommit(v);
+  }
+
+  return (
+    <label className="objinfo-field">
+      <span className="objinfo-flabel">{t("objinfo.rotate")}</span>
+      <input
+        className="objinfo-input"
+        type="number"
+        step={1}
+        value={shown}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            commit();
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            setDraft(null);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      <span className="objinfo-unit">°</span>
     </label>
   );
 }

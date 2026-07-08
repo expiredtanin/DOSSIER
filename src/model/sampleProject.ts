@@ -1,5 +1,15 @@
 import type { Project } from "./types";
 import { recomputeFloorElevations } from "./types";
+import { MATERIAL_LIBRARY } from "../materials/library";
+import { materialFromAsset } from "../materials/runtime";
+
+// Bibliotheks-Materialien für die Basis-Components ab Werk (PBR-Texturen,
+// s. `src/materials/library.ts`). Zuordnung nur, wo ein Bibliotheks-Asset
+// sinnvoll passt — Wärmedämmung und Zementestrich bleiben bewusst ohne
+// Zuweisung (kein passendes Asset in der Bibliothek), statt zu raten.
+const PLASTER_ASSET = MATERIAL_LIBRARY.find((a) => a.id === "Plaster001")!;
+const BRICK_ASSET = MATERIAL_LIBRARY.find((a) => a.id === "Bricks104")!;
+const CONCRETE_ASSET = MATERIAL_LIBRARY.find((a) => a.id === "Concrete048")!;
 
 // Demo-Haus mit zwei Geschossen:
 //   EG — rechteckiger Raum (5 × 4 m) mit einer Tür in der Südwand.
@@ -111,14 +121,44 @@ export const sampleProject: Project = {
   // Bauteil-Materialien: color = Poché-Füllung im Grundriss UND 3D-Diffusfarbe;
   // joinPriority höher = läuft am Stoß durch (für spätere T-Stöße).
   components: [
-    { id: "render-ext", name: "Aussenputz", color: "#d8d2c7", hatchId: "none", joinPriority: 10 },
+    {
+      id: "render-ext",
+      name: "Aussenputz",
+      color: "#d8d2c7",
+      hatchId: "none",
+      joinPriority: 10,
+      material: materialFromAsset(PLASTER_ASSET),
+    },
     // Weißer Grund unter den durchgezogenen Dämmungs-Haarlinien (quer zur Wand).
+    // Kein passendes Bibliotheks-Asset (Dämmung) → bewusst ohne `material`.
     { id: "insulation", name: "Wärmedämmung", color: "#ffffff", hatchId: "sia-insulation", joinPriority: 20 },
-    { id: "brick", name: "Backstein", color: "#8c5544", hatchId: "sia-brick", joinPriority: 50 },
-    { id: "render-int", name: "Innenputz", color: "#efece6", hatchId: "none", joinPriority: 10 },
+    {
+      id: "brick",
+      name: "Backstein",
+      color: "#8c5544",
+      hatchId: "sia-brick",
+      joinPriority: 50,
+      material: materialFromAsset(BRICK_ASSET),
+    },
+    {
+      id: "render-int",
+      name: "Innenputz",
+      color: "#efece6",
+      hatchId: "none",
+      joinPriority: 10,
+      material: materialFromAsset(PLASTER_ASSET),
+    },
     // Für spätere T-Stöße: Beton als durchlaufender Backbone (höchste Priorität).
-    { id: "concrete", name: "Beton", color: "#9aa0a6", hatchId: "sia-concrete", joinPriority: 100 },
+    {
+      id: "concrete",
+      name: "Beton",
+      color: "#9aa0a6",
+      hatchId: "sia-concrete",
+      joinPriority: 100,
+      material: materialFromAsset(CONCRETE_ASSET),
+    },
     // Zementestrich — oberste Schicht des mehrschichtigen Deckenaufbaus (Decken-Stile).
+    // Kein passendes Bibliotheks-Asset (Estrich) → bewusst ohne `material`.
     { id: "screed", name: "Zementestrich", color: "#c9c2b3", hatchId: "diagonal", joinPriority: 30 },
   ],
   wallTypes: [
@@ -160,6 +200,80 @@ export const sampleProject: Project = {
         // Betondecke (Rohdecke, tragend) — innerste/unterste Schicht.
         { componentId: "concrete", thickness: 0.2 },
       ],
+    },
+  ],
+  // Bauteil-Typen (Bibliothek) — Tür/Fenster/Treppe, analog Wand-/Deckenstile.
+  // Elemente referenzieren sie per `typeId`; ohne Referenz gilt Inline-Verhalten.
+  doorTypes: [
+    {
+      id: "door-standard",
+      name: "Zimmertür 0.9 m",
+      kind: "dreh",
+      leafCount: 1,
+      leafStyle: "glatt",
+      frameThickness: 0.05,
+      defaultWidth: 0.9,
+      defaultHeight: 2.0,
+    },
+  ],
+  windowTypes: [
+    {
+      id: "window-standard",
+      name: "Fenster 1.2 × 1.4 m",
+      kind: "drehkipp",
+      wingCount: 1,
+      glazing: "zweifach",
+      frameThickness: 0.06,
+      defaultSillHeight: 0.9,
+      defaultWidth: 1.2,
+      defaultHeight: 1.4,
+    },
+  ],
+  stairTypes: [
+    {
+      // Standard: normale Ortbeton-Laufplatte (schräge, offene Untersicht).
+      id: "stair-standard",
+      name: "Betontreppe 1.0 m",
+      structure: "beton",
+      closedRisers: true,
+      treadThickness: 0.05,
+      nosing: 0.03,
+      railing: "keine",
+      defaultWidth: 1.0,
+    },
+    {
+      id: "stair-massiv",
+      name: "Massivtreppe (auf Sockel)",
+      structure: "massiv",
+      closedRisers: true,
+      treadThickness: 0.04,
+      nosing: 0.03,
+      railing: "keine",
+      defaultWidth: 1.0,
+    },
+    {
+      // Offene Wangentreppe: schwebende Tritte (unten offen), zum direkten
+      // Vergleich mit der Massivtreppe — im ObjectInfoPanel der Treppe zuweisen.
+      id: "stair-wange-holz",
+      name: "Wangentreppe Holz (offen)",
+      structure: "wange",
+      closedRisers: false,
+      treadThickness: 0.05,
+      nosing: 0.03,
+      railing: "keine",
+      defaultWidth: 1.0,
+    },
+    {
+      // Aufgesattelte Treppe mit geschlossenen Setzstufen (Tritt + Setzstufe,
+      // aber unten offen — der Raum darunter bleibt frei).
+      id: "stair-aufgesattelt",
+      name: "Aufgesattelt (Setzstufen)",
+      structure: "aufgesattelt",
+      closedRisers: true,
+      treadThickness: 0.05,
+      nosing: 0.025,
+      railing: "keine",
+      defaultWidth: 1.0,
     },
   ],
   // Oberste Schnitte: Geschosse + Schnitt/Ansicht + freie Zeichnung.
@@ -257,6 +371,7 @@ export const sampleProject: Project = {
       hostWallId: "W1",
       categoryCode: "21",
       kind: "window",
+      typeId: "window-standard",
       position: 3.0, // Startkante 3.0 m → Fenster x 3.0–4.0, rechts von W9 mit Massiv-Abstand
       width: 1.0,
       height: 1.2,
@@ -268,6 +383,7 @@ export const sampleProject: Project = {
       hostWallId: "W3",
       categoryCode: "21",
       kind: "window",
+      typeId: "window-standard",
       // Startkante 0.6 m ab W3-Start (x=5) → Fenster x 3.0–4.4, rechts von W9 (x=2.4)
       // mit sichtbarer Massiv-Wand dazwischen (die Querwand stösst auf Mauerwerk).
       position: 0.6,
@@ -306,6 +422,7 @@ export const sampleProject: Project = {
       floorId: "eg",
       categoryCode: "40",
       shape: "straight",
+      typeId: "stair-standard",
       start: { x: 3.7, y: 0.4 },
       dir: { x: 0, y: 1 },
       runLength: 3.2,

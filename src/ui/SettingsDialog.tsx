@@ -10,6 +10,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import type { Project } from "../model/types";
@@ -32,6 +33,8 @@ export interface SettingsDialogProps {
    * Live-Remount der Renderer-Hooks).
    */
   onRendererModeChange: (mode: RendererMode) => void;
+  /** Arbeitsumgebung-Auswahl (Fenster-/Dock-Layouts) — früher in der TopBar. */
+  layoutMenu: ReactNode;
   onClose: () => void;
 }
 
@@ -45,6 +48,7 @@ export function SettingsDialog({
   rendererMode,
   webGpuAvailable,
   onRendererModeChange,
+  layoutMenu,
   onClose,
 }: SettingsDialogProps) {
   useEffect(() => {
@@ -98,6 +102,11 @@ export function SettingsDialog({
         </header>
 
         <div className="imp-body">
+          <section className="imp-section">
+            <div className="imp-section-title">{t("settings.section.workspace")}</div>
+            {layoutMenu}
+          </section>
+
           <section className="imp-section">
             <div className="imp-section-title">{t("status.renderer")}</div>
             <span className="sb-renderer-toggle" role="group" aria-label={t("status.renderer")}>

@@ -20,6 +20,79 @@ pub type Point2 = [f32; 2];
 /// RGB-Farbe/Albedo, Komponenten in [0,1]. Alpha wird (noch) nicht gebraucht.
 pub type Rgb = [f32; 3];
 
+/// Schnitt-Schraffur eines Bauteils (fuer den 3D-Live-Schnitt). Rust-seitiges
+/// Minimal-Aequivalent zu `HatchStyle` (src/model/types.ts): nur die drei Felder,
+/// die der prozedurale Cap-Shader (`shaders::CAP_WGSL`) auswertet — Muster-Id,
+/// Winkel und Skalierung. Die Muster-Farbe bleibt MONOCHROM (Tinte auf Papier,
+/// siehe 2D-Direktive `HATCH_INK`) und wandert deshalb bewusst NICHT mit.
+///
+/// `pattern`: 0 = none (leer/weiss), 1 = solid (Vollton), 2 = diagonal (45°),
+/// 3 = crosshatch (Kreuz), 4 = insulation (Zickzack/Daemmung). Die Zuordnung ist
+/// mit der TS-Seite (`toWalls3d::hatchPatternId`) und dem Shader synchron zu halten.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Hatch {
+    /// Muster-Id (siehe oben). Default 0 (none).
+    #[serde(default)]
+    pub pattern: u32,
+    /// Musterdrehung in Grad (Bildschirm-/Schnittebenen-Konvention). Default 0.
+    #[serde(default)]
+    pub angle: f32,
+    /// Grundmassstab (1 = Standardteilung). Default 1.
+    #[serde(default = "default_hatch_scale")]
+    pub scale: f32,
+    /// Strichstaerke der Musterlinien in mm-Papier (aus dem LineStyle des Hatch,
+    /// `HatchRender.lineWeight`). Der Cap-Shader (`CAP_WGSL`) setzt die Muster-
+    /// linienbreite daraus (mm->Welt wie die Trennlinien), sodass die Schraffur-
+    /// Staerke pro Schraffur einstellbar ist (z. B. SIA `hatch-hair` 0.02 mm vs.
+    /// `thin` 0.13 mm). Default 0.13 (Alt-Verhalten/Haarlinie).
+    #[serde(default = "default_hatch_line_weight", rename = "lineWeight")]
+    pub line_weight: f32,
+}
+
+fn default_hatch_scale() -> f32 {
+    1.0
+}
+
+fn default_hatch_line_weight() -> f32 {
+    0.13
+}
+
+/// Verschneidungs-/Stil-Metadaten EINES geschnittenen Bauteil-Bandes fuer den
+/// 3D-Live-Schnitt — das Rust-Gegenstueck zu den Feldern, mit denen `toSection.ts`
+/// die Schnitt-Boolean-Dominanz (`subtractDominantBands`) rechnet. Rein additiv
+/// (`#[serde(default)]` an jedem Feld); fehlt der ganze Block (`WallInput::cut ==
+/// None`), verhaelt sich der Schnitt wie zuvor (Band nimmt an keiner Subtraktion
+/// teil).
+///
+/// Da der 3D-Viewer-Pfad je Materiallage EINE eigene `WallInput`/`SlabInput`-Box
+/// emittiert (`toWalls3d`, layered), traegt jede geschnittene Schicht hier IHRE
+/// eigene Prioritaet/Identitaet/Linienstil — die Dominanz-Verschneidung
+/// (`section_boolean.rs`) laeuft dann elementuebergreifend auf den erzeugten
+/// (u,v)-Rechtecken, exakt wie im 2D-Schnitt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CutBandMeta {
+    /// `Component.joinPriority` der Schicht: ein Band mit STRIKT hoeherer
+    /// Prioritaet schneidet ein ueberlappendes schwaecheres per Rechteck-
+    /// Subtraktion weg (elementuebergreifend). `None` -> keine Teilnahme.
+    #[serde(default)]
+    pub join_priority: Option<i32>,
+    /// `Component.id` der Schicht — steuert die MERGE-Regel (gleiche Komponente +
+    /// Prioritaet verschmelzen zu einem Koerper, keine innere Trennlinie). `None`
+    /// -> keine Verschmelzung.
+    #[serde(default)]
+    pub component_id: Option<String>,
+    /// Farbe (RGB 0..1) der Schnitt-Umrisslinie dieses Bandes (P2, aus dem
+    /// `jointLineStyleId`-LineStyle). `None` -> Default-Schnittkanten-Stil.
+    #[serde(default)]
+    pub line_color: Option<Rgb>,
+    /// Strichstaerke der Schnitt-Umrisslinie in mm-Papier (aus dem LineStyle).
+    /// `None` -> Default. Siehe `section_fill::build_cut_cap_lines` fuer die (ehrlich
+    /// dokumentierte) mm->Welt-Umsetzung.
+    #[serde(default)]
+    pub line_weight: Option<f32>,
+}
+
 /// Eine geflachte Wand: Achse (Mittellinie) Start->Ende im Grundriss, plus Dicke,
 /// Hoehe und Basis-Hoehe. Aus diesen Feldern wird ein extrudiertes Quader-Mesh
 /// erzeugt (Band aus Achse+Dicke, hochgezogen auf `height` ab `base_elevation`).
@@ -82,6 +155,30 @@ pub struct WallInput {
     /// extrudiert den vollen Achsen-Abschnitt mit Loechern.
     #[serde(default)]
     pub holes: Vec<Hole>,
+    /// Optionaler Material-Textur-Index fuer den Stil `Textured`: verweist auf eine
+    /// per `Renderer::set_material_textures` hochgeladene Material-Farbkarte
+    /// (Textur-Array-Ebene, 1-basiert; Ebene 0 ist das Fallback-Schachbrett). Da
+    /// der 3D-Viewer-Pfad je Materiallage EINE eigene `WallInput`-Box emittiert
+    /// (`toWalls3d`, `layeredWalls:true`), traegt jede Schicht so IHRE Material-
+    /// Textur. `None` -> Fallback-Schachbrett (bisheriges Verhalten). Vom
+    /// Schnitt/Serde-Pfad (`section.rs`) ignoriert.
+    #[serde(default, rename = "materialIndex")]
+    pub material_index: Option<u32>,
+    /// Optionale Schnitt-Schraffur dieses Wand-Bandes (siehe `Hatch`). Nur der
+    /// 3D-Live-Schnitt (`section.rs`/`section_fill.rs`) wertet sie aus, um die
+    /// Schnittflaeche im MUSTER des Bauteils zu schraffieren (statt eines fixen
+    /// 45°-Musters). `None` -> Fallback-Diagonalmuster (Alt-Verhalten). Da der
+    /// 3D-Viewer-Pfad je Materiallage EINE eigene `WallInput`-Box emittiert
+    /// (`toWalls3d`, `layeredWalls:true`), traegt jede geschnittene Schicht so
+    /// ihre eigene Schraffur.
+    #[serde(default)]
+    pub hatch: Option<Hatch>,
+    /// Schnitt-Verschneidungs-/Linienstil-Metadaten dieses Wand-Bandes (siehe
+    /// `CutBandMeta`). Nur der 3D-Live-Schnitt (`section_fill`/`section_boolean`)
+    /// wertet sie aus; fehlt sie, bleibt das Alt-Verhalten (keine Dominanz-
+    /// Subtraktion, Default-Schnittkante).
+    #[serde(default)]
+    pub cut: Option<CutBandMeta>,
 }
 
 /// Ein rechteckiges Loch (Fenster/Tuer) in EINEM Wandkoerper. Siehe
@@ -162,6 +259,13 @@ pub struct SlabInput {
     /// Albedo-Farbe (RGB 0..1). Default heller Deckenton.
     #[serde(default = "default_slab_color")]
     pub color: Rgb,
+    /// Optionale Schnitt-Schraffur der Decke (siehe `Hatch`/`WallInput::hatch`).
+    #[serde(default)]
+    pub hatch: Option<Hatch>,
+    /// Schnitt-Verschneidungs-/Linienstil-Metadaten dieser Decken-Schicht (siehe
+    /// `CutBandMeta`/`WallInput::cut`).
+    #[serde(default)]
+    pub cut: Option<CutBandMeta>,
 }
 
 fn default_slab_color() -> Rgb {
@@ -179,6 +283,9 @@ pub enum MeshKind {
     /// Importiertes Volumen (Gebaeude/DXF) — neutrales Hellgrau.
     #[default]
     Imported,
+    /// Per truck (Profil-Extrusion, `src-tauri/trucksolid`) erzeugter Koerper —
+    /// warmes Orange, damit er sich klar von Wand/Decke/Kontext abhebt.
+    Extrusion,
 }
 
 impl MeshKind {
@@ -191,6 +298,8 @@ impl MeshKind {
             MeshKind::Terrain => [0.663, 0.690, 0.635],
             // 0x9fa6ae — neutrales Hellgrau fuer importierte Meshes.
             MeshKind::Imported => [0.624, 0.651, 0.682],
+            // Warmes Orange fuer truck-Profil-Extrusionen (Phase-1-Viewer-Beweis).
+            MeshKind::Extrusion => [0.85, 0.55, 0.25],
         }
     }
 }
@@ -308,14 +417,24 @@ impl Default for Camera {
     }
 }
 
-/// Die fuenf Kamera-Presets der three.js-Sicht. `Iso` und `Persp` sind
-/// perspektivisch/frei; `Front`/`Top`/`Side` sind achsparallel (orthografisch).
+/// Die Kamera-Presets der Kardinal-/Iso-Sicht (ROADMAP §11). `Persp` ist frei
+/// perspektivisch; alle anderen sind achsparallel bzw. diagonal orthografisch.
+/// `Front`/`Back`/`Side`/`Left` sind die vier Kardinalrichtungen (Vorne/Hinten/
+/// Rechts/Links im UI, s. `View3d` in TopBar.tsx — keine Himmelsrichtungen, da
+/// es noch keinen Nordwinkel gibt); `Iso`/`IsoFrontLeft`/`IsoBackRight`/
+/// `IsoBackLeft` sind die vier OBEREN Iso-Oktanten (untere vier bleiben im
+/// Hochbau ungenutzt) — `Iso` (vorne-oben-rechts) ist der bestehende Default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CameraPreset {
     Front,
+    Back,
     Top,
     Side,
+    Left,
     Iso,
+    IsoFrontLeft,
+    IsoBackRight,
+    IsoBackLeft,
     Persp,
 }
 
@@ -345,6 +464,14 @@ pub struct TexturedMesh {
     pub verts: Vec<f32>,
     /// Dreiecks-Indizes (0-basiert auf die Vertices).
     pub indices: Vec<u32>,
+    /// Optionaler PARALLELER Puffer: EIN f32 je Vertex = die Material-Textur-
+    /// Ebene (Textur-Array-Index) dieses Vertex, oder `-1` fuer „kein Material"
+    /// (Fallback-Schachbrett, Ebene 0). Leer, wenn ohne Material-Zuordnung gebaut
+    /// (`textured_from_mesh`) — dann bindet die GPU-Schicht einen konstanten
+    /// `-1`-Puffer. Als ZWEITER Vertex-Buffer gehalten (nicht in `verts`
+    /// interleaved), damit das bestehende `[pos,normal,uv]`-Layout (und die
+    /// Geometrie-Paritaets-Tests) bitgleich bleiben.
+    pub layers: Vec<f32>,
 }
 
 /// Anzahl f32 je Vertex im texturierten Puffer: 3 Position + 3 Normale + 2 UV.

@@ -18,6 +18,10 @@ export type { SiaCategory } from "../geometry/roomArea";
 // Rich-Text-Dokument für den Raum-Stempel (frei editierbarer Teil).
 import type { RichTextDoc, Align } from "../text/richText";
 export type { RichTextDoc } from "../text/richText";
+// Ansichts-Enums für Ausschnitte/View-Snapshots (Ansichtstyp, Kamera-Preset,
+// Detailgrad). Rein type-only importiert — zur Laufzeit erased, kein Zyklus
+// (TopBar importiert seinerseits nur `Project` als Typ). Wie SiaCategory oben.
+import type { DetailLevel, View3d, ViewType } from "../ui/TopBar";
 
 // ── Ressourcen-Bibliotheken (Vectorworks-/DOSSIER-Stil) ────────────────────
 // Verwaltete, per id verwiesene Stil-Ressourcen. Verweis-Kette:
@@ -270,6 +274,166 @@ export interface CeilingType {
   id: string;
   name: string;
   layers: Layer[];
+}
+
+// ── Bauteil-Typen: Tür / Fenster / Treppe ──────────────────────────────────
+// Wiederverwendbare Stile (Presets) für Türen, Fenster und Treppen — analog
+// `WallType`/`CeilingType` (Bibliothek im Projekt, referenziert per `typeId`).
+// Getrennte Typen (kein gemeinsames „OpeningType"), damit türspezifische und
+// fensterspezifische Parameter sauber je Gattung wohnen. Ein Element ohne
+// `typeId` behält sein heutiges Inline-Verhalten (rückwärtskompatibel).
+
+// Detailstufe der Bauteil-Darstellung (Grundriss + 3D) nutzt das bestehende
+// {@link DetailLevel}-Vokabular ("grob" | "mittel" | "fein", aus ui/TopBar) —
+// bewusst KEIN zweites Detail-Enum, damit Ansicht und Bauteil dieselbe Skala
+// teilen. Ausgewertet an der Symbol-/Mesh-Erzeugung (Phase 2).
+
+/**
+ * Ein Türtyp (Türstil) — wiederverwendbares Preset für {@link Opening} mit
+ * `kind: "door"`. Bündelt Bauart, Blattausführung und Standardmaße. Werte am
+ * einzelnen Element (Breite/Höhe/Anschlag) übersteuern die Typ-Defaults.
+ */
+export interface DoorType {
+  id: string;
+  name: string;
+  /**
+   * Bauart: normaler Drehflügel, reine Wandöffnung (kein Blatt/Schwenk),
+   * Schiebetür. Ersetzt/ergänzt das Inline-Feld `Opening.doorType`.
+   */
+  kind: "dreh" | "schiebe" | "wandoeffnung";
+  /** Anzahl Türblätter (1 = einflügelig, 2 = zweiflügelig). */
+  leafCount: 1 | 2;
+  /** Blatt-Ausführung (3D/Detail): glatt, Kassette, Glasfüllung. */
+  leafStyle: "glatt" | "kassette" | "glas";
+  /** Glasanteil des Blatts (0..1); nur bei `leafStyle: "glas"` relevant. */
+  glazingRatio?: number;
+  /** Zargen-/Rahmenstärke quer zur Wand (Meter). */
+  frameThickness: number;
+  /** Rahmen-/Zargen-Tiefe in Wandrichtung (Meter); fehlt ⇒ aus Wanddicke. */
+  frameDepth?: number;
+  /** Default-Lichtbreite (Meter) für neu platzierte Türen dieses Typs. */
+  defaultWidth: number;
+  /** Default-Lichthöhe (Meter). */
+  defaultHeight: number;
+  /** Bodenschwelle/Anschlag zeichnen (3D/Detail). */
+  threshold?: boolean;
+}
+
+/**
+ * Ein Fenstertyp (Fensterstil) — wiederverwendbares Preset für {@link Opening}
+ * mit `kind: "window"`. Bündelt Öffnungsart, Flügelzahl, Verglasung und
+ * Standardmaße inkl. Brüstungshöhe.
+ */
+export interface WindowType {
+  id: string;
+  name: string;
+  /** Öffnungsart: Dreh, Kipp, Dreh-Kipp, fest verglast, Schiebe. */
+  kind: "dreh" | "kipp" | "drehkipp" | "fest" | "schiebe";
+  /** Anzahl Flügel (1–4) → Mittelpfosten = wingCount − 1 (vgl. `Opening.wingCount`). */
+  wingCount: number;
+  /** Verglasung: Einfach/Zweifach/Dreifach (3D-Scheibenzahl). */
+  glazing: "einfach" | "zweifach" | "dreifach";
+  /** Rahmenstärke quer zur Wand (Meter). */
+  frameThickness: number;
+  /** Rahmen-Tiefe in Wandrichtung (Meter); fehlt ⇒ aus Wanddicke. */
+  frameDepth?: number;
+  /** Default-Brüstungshöhe über Wand-UK (Meter). */
+  defaultSillHeight: number;
+  /** Default-Lichtbreite (Meter). */
+  defaultWidth: number;
+  /** Default-Lichthöhe (Meter). */
+  defaultHeight: number;
+  /** Fensterbank zeichnen (Detail): keine / innen / aussen / beide. */
+  sillBoard?: "keine" | "innen" | "aussen" | "beide";
+}
+
+/**
+ * Ein Treppentyp (Treppenstil) — wiederverwendbares Preset für {@link Stair}.
+ * Bündelt Tragart, Stufenausbildung und Geländer. Geometrische Grundform
+ * (gerade/L/Wendel) + Lauflänge/Stufenzahl bleiben am einzelnen Element.
+ */
+export interface StairType {
+  id: string;
+  name: string;
+  /**
+   * Tragart:
+   *  • "massiv"       — Vollblock bis zur Treppen-UK (Treppe auf Erdreich/Sockel).
+   *  • "beton"        — Ortbeton-Laufplatte mit SCHRÄGER, offener Untersicht
+   *    (die klassische „normale Betontreppe" zwischen zwei Geschossen).
+   *  • "wange"        — Wangentreppe (schwebende Tritte, offen).
+   *  • "aufgesattelt" — aufgesattelte Tritte (mit Setzstufen, offen).
+   *  • "spindel"      — Spindel-/Wendeltreppe (offen).
+   */
+  structure: "massiv" | "beton" | "wange" | "aufgesattelt" | "spindel";
+  /** Setzstufen geschlossen (true) oder offen (false, durchsichtige Tritte). */
+  closedRisers: boolean;
+  /** Trittstufendicke (Meter). */
+  treadThickness: number;
+  /** Trittkanten-Überstand / Nase (Meter); fehlt ⇒ 0. */
+  nosing?: number;
+  /** Handlauf/Geländer: keine / links / rechts / beide (in Laufrichtung). */
+  railing?: "keine" | "links" | "rechts" | "beide";
+  /** Default-Laufbreite (Meter) für neu platzierte Treppen dieses Typs. */
+  defaultWidth: number;
+}
+
+// ── Grafische Overrides (Regel-Engine) ─────────────────────────────────────
+// ArchiCAD-/Vectorworks-Stil: benannte Regeln `condition → actions`, die beim
+// RENDERN als oberste Schicht über die By-Layer/By-Object-Attribut-Auflösung
+// gelegt werden (reines Rendering-Overlay — die Elementdaten bleiben
+// unverändert, jederzeit reversibel). Regeln werden additiv angewendet: pro
+// Aktions-Feld gewinnt die OBERSTE (erste) aktive Regel, die es setzt.
+// Auswertung: `src/overrides/engine.ts`; Einhängepunkt: `plan/generatePlan.ts`.
+
+/**
+ * Bedingungs-Typ einer Override-Regel — wogegen der Wert verglichen wird:
+ *   • "layer_name"  — Name ODER Code der Ebene (LayerCategory) des Elements.
+ *   • "object_name" — Element-/Typ-Name (z. B. Wandtyp-Name, Raum-Name,
+ *     Öffnungs-Label, Drawing2D-Formname).
+ * Ein `user_string`-Tag (DOSSIER-Rhino) existiert am Element noch nicht und
+ * ist deshalb bewusst NICHT enthalten (kein Schein-Feature).
+ */
+export type OverrideConditionType = "layer_name" | "object_name";
+
+/** Vergleichs-Operator einer Override-Bedingung (case-insensitiv). */
+export type OverrideOperator =
+  | "equals"
+  | "contains"
+  | "starts_with"
+  | "not_equals";
+
+/** Bedingung einer Override-Regel. */
+export interface OverrideCondition {
+  type: OverrideConditionType;
+  operator: OverrideOperator;
+  /** Vergleichswert (Freitext, case-insensitiv verglichen). */
+  value: string;
+}
+
+/**
+ * Aktionen einer Override-Regel — jede optional (Teilaktionen sind erlaubt;
+ * fehlende Felder lassen die reguläre Auflösung unberührt).
+ */
+export interface OverrideActions {
+  /** Strich-/Umrandungsfarbe (hex). */
+  color?: string;
+  /** Strichstärke in mm Papier. */
+  lineweight?: number;
+  /** Linienstil (Line Manager) — wirkt, wo Elemente einen LineStyle tragen (Drawing2D). */
+  linetypeId?: string;
+}
+
+/**
+ * Eine grafische Override-Regel. Lebt in `Project.overrideRules` (Reihenfolge
+ * = Priorität, oben gewinnt) und ist einzeln aktivier-/deaktivierbar.
+ */
+export interface OverrideRule {
+  id: string;
+  name: string;
+  /** Deaktivierte Regeln werden bei der Auswertung übersprungen. */
+  enabled: boolean;
+  condition: OverrideCondition;
+  actions: OverrideActions;
 }
 
 // ── Parametrische Wände (Parametric Walls) ────────────────────────────────
@@ -619,7 +783,25 @@ export interface Wall {
    * Z-Wert; „floor" bindet die OK an ein (z. B. nächsthöheres) Geschoss.
    */
   top?: VerticalAnchor;
+  /**
+   * TERMINIERUNGS-Regel am horizontalen Deckenanschluss (Zuschnitt, NICHT
+   * Priorität — bewusst getrennt von `Component.joinPriority`/der Schnitt-
+   * Boolean-Dominanz gehalten). Steuert, ob ein Wandband, das eine dominante
+   * Deckenschicht durchstösst, oberhalb der Decke „wieder auftaucht":
+   *   • `undefined`/"both" — heutiges Verhalten: die dominante Deckenschicht
+   *     stanzt nur ihr z-Band aus, das Wandband bleibt oben UND unten erhalten.
+   *   • "below" — die Wand ENDET an der Decke: nur der Teil UNTER dem höchst-
+   *     gelegenen dominanten Cut bleibt (Regelfall, Wand steigt von unten in die
+   *     Decke). Der oberhalb der Decke stehende Rest wird verworfen.
+   *   • "above" — spiegelbildlich: nur der Teil ÜBER dem tiefsten dominanten Cut
+   *     bleibt (Brüstung/Attika, die von oben an die Decke stösst).
+   * Additiv; Alt-Projekte laden unverändert (Default = "both").
+   */
+  sliceTermination?: SliceTermination;
 }
+
+/** Terminierungs-Regel einer Wand am Deckenanschluss (siehe {@link Wall.sliceTermination}). */
+export type SliceTermination = "both" | "below" | "above";
 
 /**
  * Eine Decke (Slab) — ein geschossgebundenes, mehrschichtiges Flächenbauteil,
@@ -631,7 +813,9 @@ export interface Wall {
  * Vertikale Lage: die OBERKANTE (OK) der Decke. Fehlt `top`, liegt die OK an der
  * Oberkante des Geschosses (baseElevation + floorHeight — also bündig mit dem
  * Wandkopf); die Decke wächst um `thickness` nach UNTEN. `top: custom` setzt eine
- * absolute Z-Höhe, `top: floor` bindet die OK an ein Geschoss.
+ * absolute Z-Höhe, `top: floor` bindet die OK an ein Geschoss. Optional übersteuert
+ * `bottom` die UNTERKANTE (UK) direkt (analog zur Wand); fehlt `bottom`, bleibt es
+ * beim heutigen Verhalten UK = OK − `thickness`.
  */
 export interface Ceiling {
   id: string;
@@ -699,6 +883,12 @@ export interface Ceiling {
    * Oberkante des Geschosses (baseElevation + floorHeight).
    */
   top?: VerticalAnchor;
+  /**
+   * Vertikale Bindung der UNTERKANTE (UK). Fehlt sie, ergibt sich die UK aus
+   * OK − `thickness` (= heutiges Verhalten). „custom" setzt einen absoluten
+   * Z-Wert; „floor" bindet die UK an ein Geschoss.
+   */
+  bottom?: VerticalAnchor;
 }
 
 /** Schwenkrichtung der Tür relativ zur Wandachse. */
@@ -772,6 +962,18 @@ export interface Opening {
    *   "beide" → beide Linien (Default wenn nicht gesetzt)
    */
   lintelLines?: "keine" | "innen" | "aussen" | "beide";
+  /**
+   * Referenz auf einen Bauteil-Typ (Bibliothek): {@link DoorType} bei
+   * `kind: "door"`, {@link WindowType} bei `kind: "window"`. Fehlt sie, gilt
+   * das heutige Inline-Verhalten (rückwärtskompatibel). Typ-Defaults liefern
+   * Bauart/Rahmen/Verglasung; Element-Felder (Breite/Höhe/…) übersteuern.
+   */
+  typeId?: string;
+  /**
+   * Optionale per-Element-Übersteuerung der Detailstufe (grob/normal/
+   * detailliert); fehlt sie, gilt die Ansichts-/Projekt-Detailstufe.
+   */
+  detailLevel?: DetailLevel;
   /**
    * Optionale Übersteuerung der Strich-/Symbolfarbe; sonst gilt die
    * Kategorie-Farbe.
@@ -863,6 +1065,17 @@ export interface Stair {
    */
   up?: boolean;
   /**
+   * Referenz auf einen {@link StairType} (Bibliothek). Fehlt sie, gilt das
+   * heutige Inline-Verhalten (rückwärtskompatibel). Typ-Defaults liefern
+   * Tragart/Stufenausbildung/Geländer; Element-Felder übersteuern.
+   */
+  typeId?: string;
+  /**
+   * Optionale per-Element-Übersteuerung der Detailstufe (grob/normal/
+   * detailliert); fehlt sie, gilt die Ansichts-/Projekt-Detailstufe.
+   */
+  detailLevel?: DetailLevel;
+  /**
    * Optionale Übersteuerung der Strich-/Umrandungsfarbe; sonst gilt die
    * Kategorie-Farbe.
    */
@@ -948,6 +1161,17 @@ export interface RoomStamp {
   floorAreaAlign?: Align;
   /** Ausrichtung der Nutzungs-Zeile. Fehlt sie, gilt „zentriert" (Alt-Verhalten). */
   usageAlign?: Align;
+  /**
+   * Personenzahl (Live-Zeile), z. B. für Nutzungsauflagen. Fehlt/undefined:
+   * keine Personenzahl-Zeile (Alt-Verhalten).
+   */
+  occupancy?: number;
+  /**
+   * Rundungsschritt der angezeigten Bodenfläche in m² (z. B. 0.5 → auf halbe
+   * m² gerundet). Fehlt er, gilt das Alt-Verhalten: 2 Nachkommastellen ohne
+   * Schrittrundung.
+   */
+  roundingStep?: number;
 }
 
 /** Eine Tür, gehostet in einer Wand. Ihr Geschoss ergibt sich aus der Wand. */
@@ -980,7 +1204,19 @@ export type Drawing2DGeom =
   | { shape: "rect"; min: Vec2; max: Vec2 }
   | { shape: "circle"; center: Vec2; r: number }
   | { shape: "arc"; center: Vec2; r: number; a0: number; a1: number }
-  | { shape: "text"; at: Vec2; text: string; height: number; angle: number };
+  | {
+      shape: "text";
+      at: Vec2;
+      text: string;
+      height: number;
+      angle: number;
+      /**
+       * Optionale Spaltenbreite in Metern (Textspalte/Absatztext). Ist sie gesetzt,
+       * wird der Text beim Rendern wortweise auf diese Breite umgebrochen; fehlt
+       * sie, bleibt es einzeiliger Text (heutiges Verhalten).
+       */
+      width?: number;
+    };
 
 /** Ein freies 2D-Zeichenelement auf einer Zeichnungsebene. */
 export interface Drawing2D {
@@ -1066,6 +1302,96 @@ export interface EdgeGrip {
 }
 
 export type Element = Wall | Ceiling | Opening | Door | Stair | Room | Drawing2D;
+
+// ── Extrudierter Körper (truck-Integration, docs/design/truck-plan.md) ─────
+// Ein per `extrude`-Befehl aus einem geschlossenen 2D-Profil (Polylinie-Ring/
+// Rechteck) erzeugter 3D-Körper. Die eigentliche B-Rep-Extrusion (truck-WASM,
+// `engine/truckSolid.ts`) läuft NICHT hier, sondern asynchron in
+// `toWalls3d.ts` (emitExtrudedSolids) — dieser Typ hält nur die Rohdaten.
+
+/** Ein extrudierter Körper: geschlossenes Profil (Modell-Meter) + Höhe. */
+export interface ExtrudedSolid {
+  id: string;
+  type: "extrudedSolid";
+  /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
+  levelId: string;
+  /**
+   * Geschlossenes Profil in der XY-Ebene (Grundriss), ≥3 Punkte. Bei einem
+   * Kreis-Profil (`circle` gesetzt) eine Tessellierung des Kreises (48-Eck) —
+   * für 2D-Footprint/Auswahl/bbox/Verschieben; die 3D-Extrusion nutzt in dem
+   * Fall stattdessen `circle` (echte runde truck-Extrusion, `extrudeCircle`).
+   */
+  points: Vec2[];
+  /** Extrusionshöhe in Metern (> 0), nach +Z ab der Geschoss-UK. */
+  height: number;
+  /**
+   * Gesetzt, wenn das Profil ein Kreis ist (aus einem `Drawing2D` mit
+   * `shape:"circle"`) — `points` bleibt die Tessellierung, `toWalls3d.ts`
+   * (emitExtrudedSolids) nutzt `circle` für die runde 3D-Extrusion.
+   */
+  circle?: { center: Vec2; r: number };
+  /**
+   * Verjüngung 0 (Prisma, Default/fehlend) … 1 (Spitze — Kegel bei Kreis-,
+   * Pyramide bei Polygon-Profil). Linear zum Profil-Schwerpunkt skaliert.
+   */
+  taper?: number;
+}
+
+// ── Stütze (Column, Tragwerk) ──────────────────────────────────────────────
+// Eine Stütze ist im Kern eine PLATZIERTE PROFIL-EXTRUSION: ein an `position`
+// gesetztes 2D-Profil (Rechteck oder Kreis), um `rotation` gedreht, über `height`
+// nach oben extrudiert. Anders als der generische `ExtrudedSolid` trägt sie
+// vollständige BIM-Attribute (Geschoss, Kategorie, optionales Bauteil, UK/OK-
+// Anker) — sie lebt daher in `Project.columns` mit eigenem Selektionskanal.
+
+/**
+ * Querschnitt einer Stütze im Grundriss (Modell-Meter), lokal um `position`.
+ *   • "rect"  — Rechteck `width` (X, quer) × `depth` (Y, längs), vor Rotation.
+ *   • "round" — Kreis mit `radius`.
+ */
+export type ColumnProfile =
+  | { kind: "rect"; width: number; depth: number }
+  | { kind: "round"; radius: number };
+
+/**
+ * Eine Stütze (Column) — ein geschossgebundenes Tragwerk-Bauteil (Kategorie
+ * „50"), definiert über einen Einfügepunkt `position`, ein Profil, eine Drehung
+ * und eine Höhe. Vertikale Lage analog Wand (UK/OK-Anker, sonst Geschoss-UK +
+ * `height`).
+ */
+export interface Column {
+  id: string;
+  type: "column";
+  /** Zugehörige Zeichnungsebene (Geschoss). */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk. */
+  categoryCode: string;
+  /** Einfügepunkt (Profil-Mitte) im Grundriss (Meter). */
+  position: Vec2;
+  /** Querschnitt (Rechteck oder Kreis). */
+  profile: ColumnProfile;
+  /** Drehung des Profils um `position` (Radiant, CCW; Default 0). */
+  rotation: number;
+  /** Höhe in Metern (> 0), nach +Z ab der UK. */
+  height: number;
+  /** Optionales tragendes Bauteil (Component) für Poché/3D-Farbe/Schraffur. */
+  componentId?: string;
+  /**
+   * Vertikale Bindung der Unterkante (UK). Fehlt sie, sitzt die UK auf der
+   * baseElevation des zugehörigen Geschosses (= Wand-Default).
+   */
+  bottom?: VerticalAnchor;
+  /**
+   * Vertikale Bindung der Oberkante (OK). Fehlt sie, ergibt sich die OK aus
+   * UK + `height`.
+   */
+  top?: VerticalAnchor;
+  /**
+   * Optionale Übersteuerung der Strich-/Umrandungsfarbe; sonst gilt die
+   * Kategorie-Farbe.
+   */
+  color?: string;
+}
 
 // ── Kontext-Geometrie (importiert / abgeleitet, NICHT semantisch) ───────────
 // Importierte Geometrie ist „dumme" KONTEXT-Geometrie (Anzeige + späteres
@@ -1160,6 +1486,278 @@ export interface TerrainMesh {
 export type ContextObject = ImportedMesh | ContourSet | TerrainMesh;
 
 /** Das gesamte Projekt. */
+/**
+ * Ein Ausschnitt (View-Snapshot) — eine benannte, gespeicherte Ansicht, die den
+ * kompletten Darstellungszustand einfängt und per Klick wiederherstellt
+ * (DOSSIER A2, ROADMAP §2c/§11). KEIN neuer Zustand, sondern ein Container, der
+ * bereits vorhandene Bausteine KOMPONIERT + benennt: Ansicht (Typ/Kamera/
+ * Massstab/Detail), Sichtbarkeit (Ebenen-/Zeichnungskombination, gleiches
+ * Payload-Format wie {@link https LayerCombo}/`DrawingCombo`), aktive Overrides
+ * und das aktive Geschoss. Lebt im DOKUMENT (`Project.viewSnapshots`), nicht im
+ * localStorage — Ausschnitte gehören zum Projekt (Export/Teilen).
+ */
+export interface ViewSnapshot {
+  id: string;
+  name: string;
+  /**
+   * LEGACY: name-basierte Flach-Gruppierung (Phase 1). Wird von der neuen
+   * Ordner-/Baum-UI nicht mehr genutzt, bleibt aber für Alt-Projekte gültig.
+   * Neue Ausschnitte tragen stattdessen `folderId` (echte Ordner-Referenz).
+   */
+  folder?: string;
+  /**
+   * Ordner (Baumstruktur) des Ausschnitte-Panels, in dem der Ausschnitt liegt
+   * ({@link ViewSnapshotFolder}). Fehlt er (oder verweist er ins Leere), liegt
+   * der Ausschnitt auf der Wurzelebene. Additiv — Alt-Projekte laden unverändert.
+   */
+  folderId?: string;
+  // ── Ansicht ──────────────────────────────────────────────────────────────
+  /** Ansichtstyp (Grundriss / Perspektive). */
+  viewType: ViewType;
+  /** Kanonischer 3D-Blickwinkel (Front/Top/Iso/… bzw. freie Perspektive). */
+  view3d: View3d;
+  /** Sichtwinkel (FOV) der 3D-Perspektivkamera in Grad. Optional (nur 3D relevant). */
+  fov?: number;
+  /** Papier-Massstab „1:N" (der Nenner). */
+  scaleDenominator: number;
+  /** Detailgrad der Darstellung (grob/mittel/fein). */
+  detail: DetailLevel;
+  // ── Zustand ──────────────────────────────────────────────────────────────
+  /** Aktives Geschoss/Zeichnungsebene beim Erfassen. */
+  activeLevelId: string;
+  /** Ebenen-Sichtbarkeit: Kategorie-`code` → sichtbar (wie `LayerCombo.codes`). */
+  layerVisibility: Record<string, boolean>;
+  /** Zeichnungsebenen-Sichtbarkeit: DrawingLevel-`id` → sichtbar (wie `DrawingCombo.ids`). */
+  drawingVisibility: Record<string, boolean>;
+  /**
+   * Ids der beim Erfassen AKTIVEN (`enabled`) Override-Regeln. Beim
+   * Wiederherstellen wird jede Regel des Projekts auf `enabled = ids.includes(id)`
+   * gesetzt. Optional, damit hand-/altangelegte Snapshots ohne Feld gültig sind.
+   */
+  enabledOverrideRuleIds?: string[];
+}
+
+/**
+ * Ein Ordner im Ausschnitte-Baum (DOSSIER A2). Ausschnitte verweisen per
+ * `folderId` auf ihren Ordner; `parentId` erlaubt Verschachtelung (Ordner in
+ * Ordner). Fehlt `parentId`, liegt der Ordner auf der Wurzelebene. Additiv —
+ * Alt-Projekte laden unverändert (spiegelbildlich zu {@link LayoutFolder}).
+ */
+export interface ViewSnapshotFolder {
+  id: string;
+  name: string;
+  /** Übergeordneter Ordner; ohne → Wurzelebene. */
+  parentId?: string;
+}
+
+// ── Layout-Blätter mit Masterlayout (DOSSIER A3, ROADMAP §11) ───────────────
+//
+// Ein „Layout" ist ein Druck-/Plan-Blatt (A4/A3), auf dem mehrere Viewports
+// platziert werden; jeder Viewport ist an einen Ausschnitt ({@link ViewSnapshot})
+// gebunden und rendert dessen Plan im gewählten Massstab. Ein Masterlayout
+// liefert die gemeinsamen Blatt-Elemente (Titelblock/Rahmen), die die Layouts
+// erben. Alles lebt im DOKUMENT (`Project.layouts`/`Project.masterLayouts`),
+// nicht im localStorage — Layouts gehören zum Projekt. Additiv: bestehende
+// Projekte ohne diese Felder bleiben unverändert gültig.
+
+/**
+ * Papierformat eines Layout-Blatts (Blattmasse in mm identisch zum PDF-Export).
+ * ISO-216-Reihen A0–A6 und B0–B6; Alt-Projekte (nur A4/A3) laden unverändert.
+ */
+export type LayoutPaperFormat =
+  | "a0"
+  | "a1"
+  | "a2"
+  | "a3"
+  | "a4"
+  | "a5"
+  | "a6"
+  | "b0"
+  | "b1"
+  | "b2"
+  | "b3"
+  | "b4"
+  | "b5"
+  | "b6";
+/** Ausrichtung eines Layout-Blatts. */
+export type LayoutOrientation = "portrait" | "landscape";
+
+/**
+ * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
+ * werden beim Auflösen aus dem Projekt/Layout mit sinnvollen Defaults gefüllt
+ * (Projektname ← `Project.name`, Blattname ← `Layout.name`, Datum ← heute).
+ */
+export interface LayoutTitleBlock {
+  projectName?: string;
+  sheetName?: string;
+  scale?: string;
+  date?: string;
+  author?: string;
+}
+
+/**
+ * Masterlayout — gemeinsame Blatt-Elemente (Titelblock + optionaler Rahmen), die
+ * einzelne {@link Layout}s per `masterId` erben. Eine Änderung am Master schlägt
+ * auf alle Layouts durch, die ihn referenzieren (InDesign-/ArchiCAD-Muster).
+ */
+export interface MasterLayout {
+  id: string;
+  name: string;
+  paper: LayoutPaperFormat;
+  orientation: LayoutOrientation;
+  /** Titelblock-Textfelder (Vorlage; leere Felder werden aufgelöst/aufgefüllt). */
+  titleBlock: LayoutTitleBlock;
+  /**
+   * Ordner (Master-Baum), in dem das Masterlayout liegt ({@link LayoutFolder} mit
+   * `kind:"master"`). Fehlt er (oder verweist auf einen gelöschten/Layout-Ordner),
+   * liegt der Master auf der Wurzelebene. Additiv — Alt-Projekte laden unverändert.
+   */
+  folderId?: string;
+  /** Blattrahmen zeichnen (Randlinie). Optional, Default `true`. */
+  border?: boolean;
+  /**
+   * Freie Blattbreite in mm. Ist sie (zusammen mit `customHeightMm`) gesetzt,
+   * überschreibt sie `paper`/A4·A3 (die effektive Blattgrösse ist dann
+   * `customWidthMm`×`customHeightMm`, `orientation` wird ignoriert). Fehlt sie,
+   * gilt `paper`+`orientation` wie bisher. Additiv — Alt-Projekte laden unverändert.
+   */
+  customWidthMm?: number;
+  /** Freie Blatthöhe in mm (siehe {@link MasterLayout.customWidthMm}). */
+  customHeightMm?: number;
+}
+
+/**
+ * Ein platzierter Viewport auf einem Layout-Blatt — Position/Grösse in Papier-mm,
+ * gebunden an einen Ausschnitt (`snapshotId`). `scaleDenominator` übersteuert
+ * optional den Massstab des Ausschnitts (Massstab pro Viewport).
+ */
+export interface LayoutViewport {
+  id: string;
+  /** Id des gebundenen Ausschnitts ({@link ViewSnapshot}). */
+  snapshotId: string;
+  /** Linke Kante auf dem Blatt (mm, von links). */
+  xMm: number;
+  /** Obere Kante auf dem Blatt (mm, von oben). */
+  yMm: number;
+  /** Breite des Viewport-Rahmens auf dem Blatt (mm). */
+  widthMm: number;
+  /** Höhe des Viewport-Rahmens auf dem Blatt (mm). */
+  heightMm: number;
+  /** Optionaler Massstab-Nenner (1:N); übersteuert `snapshot.scaleDenominator`. */
+  scaleDenominator?: number;
+}
+
+/**
+ * Eine 2D-Annotation (Linie/Rechteck/Text), direkt auf dem Layout-Blatt in
+ * Papier-mm-Koordinaten gezeichnet — eine vom Viewport-Baum unabhängige
+ * Zusatzschicht (Markup). `color`/`weightMm` sind optional (Editor-Defaults:
+ * `#111111` / 0.25 mm); Text trägt statt `weightMm` seine Zeilenhöhe.
+ */
+export type LayoutAnnotation =
+  | {
+      id: string;
+      kind: "line";
+      x1Mm: number;
+      y1Mm: number;
+      x2Mm: number;
+      y2Mm: number;
+      color?: string;
+      weightMm?: number;
+    }
+  | {
+      id: string;
+      kind: "rect";
+      xMm: number;
+      yMm: number;
+      widthMm: number;
+      heightMm: number;
+      color?: string;
+      weightMm?: number;
+    }
+  | {
+      id: string;
+      kind: "text";
+      xMm: number;
+      yMm: number;
+      text: string;
+      heightMm: number;
+      color?: string;
+    };
+
+/**
+ * Flaches Patch-Objekt für {@link LayoutAnnotation} — alle Felder ALLER Arten
+ * optional (statt eines pro Art unterscheidenden Unions), damit CRUD/Handler
+ * unabhängig von der konkreten `kind` bleiben (der Aufrufer setzt ohnehin nur
+ * die zur gewählten Annotation passenden Felder).
+ */
+export type LayoutAnnotationPatch = Partial<{
+  x1Mm: number;
+  y1Mm: number;
+  x2Mm: number;
+  y2Mm: number;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+  text: string;
+  color: string;
+  weightMm: number;
+}>;
+
+/**
+ * Ein Layout-Blatt — Papierformat/Ausrichtung, optionaler Master (`masterId`)
+ * und die platzierten Viewports.
+ */
+export interface Layout {
+  id: string;
+  name: string;
+  paper: LayoutPaperFormat;
+  orientation: LayoutOrientation;
+  /** Referenz auf ein {@link MasterLayout}; ohne → kein Master (blanko Blatt). */
+  masterId?: string;
+  /**
+   * Ordner (Baumstruktur), in dem das Layout liegt ({@link LayoutFolder}). Fehlt
+   * er (oder verweist auf einen gelöschten Ordner), liegt das Layout auf der
+   * Wurzelebene. Additiv — Alt-Projekte laden unverändert.
+   */
+  folderId?: string;
+  /**
+   * Freie Blattbreite in mm — überschreibt `paper`/A4·A3, siehe
+   * {@link MasterLayout.customWidthMm}. Bei gesetztem `masterId` erbt das Blatt
+   * ohnehin die Master-Grösse; eigene Custom-Werte gelten nur ohne Master.
+   */
+  customWidthMm?: number;
+  /** Freie Blatthöhe in mm (siehe {@link Layout.customWidthMm}). */
+  customHeightMm?: number;
+  viewports: LayoutViewport[];
+  /**
+   * 2D-Markups direkt auf dem Blatt (Linie/Rechteck/Text), siehe
+   * {@link LayoutAnnotation}. Additiv — Alt-Layouts ohne dieses Feld laden
+   * unverändert (Editor/CRUD behandeln ein fehlendes Array wie ein leeres).
+   */
+  annotations?: LayoutAnnotation[];
+}
+
+/**
+ * Ein Ordner im Layouts-Baum (DOSSIER A3). Layouts verweisen per `folderId` auf
+ * ihren Ordner; `parentId` erlaubt Verschachtelung (Ordner in Ordner). Fehlt
+ * `parentId`, liegt der Ordner auf der Wurzelebene. Masterlayouts liegen NICHT
+ * in Ordnern (sie sind Vorlagen). Additiv — Alt-Projekte laden unverändert.
+ */
+export interface LayoutFolder {
+  id: string;
+  name: string;
+  /** Übergeordneter Ordner; ohne → Wurzelebene. */
+  parentId?: string;
+  /**
+   * Baum-Zugehörigkeit: `"layout"`-Ordner tragen Layouts, `"master"`-Ordner
+   * tragen Masterlayouts. Die beiden Bäume bleiben getrennt (ein Master-Ordner
+   * erscheint nie im Layout-Baum und umgekehrt). Fehlt das Feld, gilt `"layout"`
+   * (rückwärtskompatibel — Alt-Projekte ohne `kind` bleiben Layout-Ordner).
+   */
+  kind?: "layout" | "master";
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -1177,6 +1775,20 @@ export interface Project {
    * `Ceiling.wallTypeId` gegen `wallTypes` auf (siehe `getCeilingType`).
    */
   ceilingTypes?: CeilingType[];
+  /**
+   * Türtypen-Bibliothek (Türstile), analog `wallTypes`. Optional, damit
+   * bestehende Projekte/Tests ohne `doorTypes` gültig bleiben; Türen ohne
+   * `typeId` verhalten sich wie bisher (Inline-Felder).
+   */
+  doorTypes?: DoorType[];
+  /**
+   * Fenstertypen-Bibliothek (Fensterstile). Optional (siehe `doorTypes`).
+   */
+  windowTypes?: WindowType[];
+  /**
+   * Treppentypen-Bibliothek (Treppenstile). Optional (siehe `doorTypes`).
+   */
+  stairTypes?: StairType[];
   /** Oberste Schnitte: Geschosse + Schnitte/Ansichten. */
   drawingLevels: DrawingLevel[];
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
@@ -1214,12 +1826,63 @@ export interface Project {
    */
   context?: ContextObject[];
   /**
+   * Extrudierte Körper (truck-Integration) — geschlossene 2D-Profile mit Höhe,
+   * siehe {@link ExtrudedSolid}. Optional, damit bestehende Projekte/Tests ohne
+   * `extrudedSolids` gültig bleiben (Default: leer behandeln).
+   */
+  extrudedSolids?: ExtrudedSolid[];
+  /**
+   * Stützen (Columns) — geschossgebundene Tragwerk-Bauteile (platzierte
+   * Profil-Extrusionen), siehe {@link Column}. Optional, damit bestehende
+   * Projekte/Tests ohne `columns` gültig bleiben (Default: leer behandeln).
+   */
+  columns?: Column[];
+  /**
    * Bibliothek parametrischer Wand-Regelwerke. Optional, damit bestehende
    * Projekte ohne `parametricWalls` gültig bleiben (Default: leer behandeln).
    * Wird durch `resolveParametricWall()` in `src/model/parametricWalls.ts`
    * aufgelöst — generiert Wall[]-Objekte bei Bedarf.
    */
   parametricWalls?: ParametricWall[];
+  /**
+   * Grafische Override-Regeln (Regel-Engine, Reihenfolge = Priorität, oben
+   * gewinnt) — reines Rendering-Overlay, siehe {@link OverrideRule}. Optional,
+   * damit bestehende Projekte/Tests ohne `overrideRules` gültig bleiben
+   * (Default: leer behandeln).
+   */
+  overrideRules?: OverrideRule[];
+  /**
+   * Ausschnitte / View-Snapshots (DOSSIER A2) — benannte, wiederherstellbare
+   * Ansichten (siehe {@link ViewSnapshot}). Optional, damit bestehende
+   * Projekte/Tests ohne `viewSnapshots` unverändert gültig bleiben (Default:
+   * leer behandeln). Gehört ins Dokument (nicht localStorage).
+   */
+  viewSnapshots?: ViewSnapshot[];
+  /**
+   * Ordner des Ausschnitte-Baums (DOSSIER A2) — Gruppierung der
+   * {@link ViewSnapshot}s per `folderId`. Optional, damit bestehende
+   * Projekte/Tests ohne `viewSnapshotFolders` gültig bleiben (Default: leer →
+   * alle Ausschnitte auf Wurzelebene).
+   */
+  viewSnapshotFolders?: ViewSnapshotFolder[];
+  /**
+   * Layout-Blätter (DOSSIER A3) — Druck-/Plan-Blätter mit platzierten Viewports
+   * (siehe {@link Layout}). Optional, damit bestehende Projekte/Tests ohne
+   * `layouts` gültig bleiben (Default: leer behandeln). Gehört ins Dokument.
+   */
+  layouts?: Layout[];
+  /**
+   * Masterlayouts (DOSSIER A3) — gemeinsame Blatt-Elemente (Titelblock/Rahmen),
+   * die einzelne {@link Layout}s erben (siehe {@link MasterLayout}). Optional,
+   * damit bestehende Projekte/Tests ohne `masterLayouts` gültig bleiben.
+   */
+  masterLayouts?: MasterLayout[];
+  /**
+   * Ordner des Layouts-Baums (DOSSIER A3) — Gruppierung der {@link Layout}s per
+   * `folderId`. Optional, damit bestehende Projekte/Tests ohne `layoutFolders`
+   * gültig bleiben (Default: leer → alle Layouts auf Wurzelebene).
+   */
+  layoutFolders?: LayoutFolder[];
   /**
    * Referenzhöhe des Erdgeschosses in Metern über Meer (m ü. M.), editierbar
    * im Einstellungs-Fenster. Optional, damit bestehende Projekte ohne diesen
@@ -1270,6 +1933,22 @@ export const ceilingThickness = (project: Project, ceiling: Ceiling): number => 
   }
 };
 
+/**
+ * Löst den {@link DoorType} einer Tür-Öffnung auf, oder `undefined` (keine
+ * `typeId` bzw. unbekannt ⇒ Inline-Verhalten). Bewusst NICHT werfend — der
+ * Typ ist eine optionale Übersteuerung, kein Pflichtbezug wie beim Wandtyp.
+ */
+export const getDoorType = (project: Project, opening: Opening): DoorType | undefined =>
+  opening.typeId ? (project.doorTypes ?? []).find((t) => t.id === opening.typeId) : undefined;
+
+/** Löst den {@link WindowType} einer Fenster-Öffnung auf, oder `undefined`. */
+export const getWindowType = (project: Project, opening: Opening): WindowType | undefined =>
+  opening.typeId ? (project.windowTypes ?? []).find((t) => t.id === opening.typeId) : undefined;
+
+/** Löst den {@link StairType} einer Treppe auf, oder `undefined`. */
+export const getStairType = (project: Project, stair: Stair): StairType | undefined =>
+  stair.typeId ? (project.stairTypes ?? []).find((t) => t.id === stair.typeId) : undefined;
+
 /** Alle Öffnungen einer Wand (leere Liste, wenn keine oder `openings` fehlt). */
 export const openingsOfWall = (project: Project, wallId: string): Opening[] =>
   (project.openings ?? []).filter((o) => o.hostWallId === wallId);
@@ -1289,6 +1968,18 @@ export const stairLabel = (s: Stair): string => {
   const shape =
     s.shape === "straight" ? "Gerade" : s.shape === "L" ? "L-Treppe" : "Wendel";
   return `${shape} ${s.stepCount} STG`;
+};
+
+/** Alle Stützen eines Geschosses (leere Liste, wenn keine oder `columns` fehlt). */
+export const columnsOfFloor = (project: Project, floorId: string): Column[] =>
+  (project.columns ?? []).filter((c) => c.floorId === floorId);
+
+/** Menschenlesbarer Standardname einer Stütze (Profil + Masse in cm). */
+export const columnLabel = (c: Column): string => {
+  if (c.profile.kind === "round") {
+    return `Stütze Ø${(c.profile.radius * 200).toFixed(0)}`;
+  }
+  return `Stütze ${(c.profile.width * 100).toFixed(0)}×${(c.profile.depth * 100).toFixed(0)}`;
 };
 
 /** Alle Räume eines Geschosses (leere Liste, wenn keine oder `rooms` fehlt). */

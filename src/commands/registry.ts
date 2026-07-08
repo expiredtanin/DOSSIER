@@ -10,18 +10,23 @@ import { wallCommand } from "./cmds/wall";
 import { ceilingCommand } from "./cmds/ceiling";
 import { openingCommand, fensterCommand, tuerCommand } from "./cmds/opening";
 import { stairCommand } from "./cmds/stair";
+import { columnCommand } from "./cmds/column";
 import { roomCommand } from "./cmds/room";
 import { rectCommand } from "./cmds/rect";
 import { circleCommand } from "./cmds/circle";
 import { arcCommand } from "./cmds/arc";
+import { textCommand } from "./cmds/text";
+import { textboxCommand } from "./cmds/textbox";
 import { moveCommand } from "./cmds/move";
 import { mirrorCommand } from "./cmds/mirror";
 import { joinCommand } from "./cmds/join";
 import { copyCommand } from "./cmds/copy";
 import { offsetCommand } from "./cmds/offset";
+import { extrudeCommand } from "./cmds/extrude";
 import { trimCommand } from "./cmds/trim";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
+import { measureCommand } from "./cmds/measure";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -31,20 +36,25 @@ export const COMMANDS: Record<string, Command> = {
   fenster: fensterCommand,
   tuer: tuerCommand,
   stair: stairCommand,
+  column: columnCommand,
   room: roomCommand,
   line: lineCommand,
   polyline: polylineCommand,
   rect: rectCommand,
   circle: circleCommand,
   arc: arcCommand,
+  text: textCommand,
+  textbox: textboxCommand,
   move: moveCommand,
   mirror: mirrorCommand,
   join: joinCommand,
   copy: copyCommand,
   offset: offsetCommand,
+  extrude: extrudeCommand,
   trim: trimCommand,
   import: importCommand,
   terrain: terrainCommand,
+  measure: measureCommand,
 };
 
 /**
@@ -63,6 +73,8 @@ export const ALIASES: Record<string, string> = {
   oe: "opening",
   treppe: "stair",
   tp: "stair",
+  stuetze: "column",
+  stütze: "column",
   raum: "room",
   rm: "room",
   l: "line",
@@ -71,6 +83,9 @@ export const ALIASES: Record<string, string> = {
   c: "circle",
   a: "arc",
   bogen: "arc",
+  tx: "text",
+  txt: "text",
+  beschriftung: "text",
   m: "move",
   s: "mirror",
   spiegeln: "mirror",
@@ -78,6 +93,7 @@ export const ALIASES: Record<string, string> = {
   verbinden: "join",
   cp: "copy",
   o: "offset",
+  ex: "extrude",
   tr: "trim",
   imp: "import",
   ter: "terrain",

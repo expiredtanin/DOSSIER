@@ -124,6 +124,24 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <path d="M 2.5 12 A 5.5 5.5 0 0 1 13.5 12" fill="none" />
         </svg>
       );
+    case "text":
+      // Serifen-„A" als Text-Symbol.
+      return (
+        <svg {...common}>
+          <path d="M 4 13 L 8 3 L 12 13" fill="none" />
+          <path d="M 5.5 9.5 L 10.5 9.5" fill="none" />
+        </svg>
+      );
+    case "textbox":
+      // Spalten-Rahmen mit drei Textzeilen (Absatztext).
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="3" width="11" height="10" fill="none" />
+          <line x1="4.5" y1="6" x2="11.5" y2="6" />
+          <line x1="4.5" y1="8.5" x2="11.5" y2="8.5" />
+          <line x1="4.5" y1="11" x2="9" y2="11" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -140,7 +158,10 @@ export function ToolsPanel() {
       {TOOL_ORDER.map((id) => {
         const tool = getTool(id);
         const active = host.activeTool === id;
-        const disabled = id !== "select" && !host.toolsEnabled;
+        // Nur Boden-gebundene (`floorOnly`) Werkzeuge sind ohne aktives Geschoss
+        // gesperrt; freie 2D-Werkzeuge (Linie/Kreis/Text/…) bleiben auf
+        // Zeichnungsebenen nutzbar — Parität mit dem Ribbon (RibbonBar).
+        const disabled = !!tool.floorOnly && !host.toolsEnabled;
         const title = disabled
           ? t("tool.floorOnlyDisabled")
           : t(tool.hintKey(tool.init()));

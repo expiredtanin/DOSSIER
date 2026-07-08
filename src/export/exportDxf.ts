@@ -28,6 +28,10 @@ const LAYER_HATCH = "HATCH";
 const LAYER_SYMBOLS = "SYMBOLS";
 const LAYER_CONTEXT = "CONTEXT";
 const LAYER_DEFAULT = "PLAN";
+/** Sammel-Layer für Extrusions-Footprints (truck-Integration) — die Quell-
+ *  Drawing2D wird beim Extrudieren entfernt, es gibt also keine categoryCode
+ *  mehr nachzuschlagen; eigener Layer statt Absturz in LAYER_DEFAULT. */
+const LAYER_EXTRUSION = "EXTRUSION";
 
 /**
  * Baut aus einem Plan + Projekt einen vollständigen DXF-String (Meter-Modell-Space).
@@ -60,6 +64,8 @@ export function buildPlanDxf(
   dxf.addLayer({ name: LAYER_HATCH, color: 8, trueColor: 0x888888, lineWeight: 13 });
   dxf.addLayer({ name: LAYER_CONTEXT, color: 9, trueColor: 0x9aa3ad, lineWeight: 10 });
   dxf.addLayer({ name: LAYER_DEFAULT, color: 7, trueColor: 0x111111, lineWeight: 18 });
+  // Warmes Orange, identisch zum 3D-/Grundriss-Footprint der Extrusionen (EXTRUSION_STROKE/EXTRUSION_RGB).
+  dxf.addLayer({ name: LAYER_EXTRUSION, color: aciFromHex("#d98c40"), trueColor: rgbFromHex("#d98c40"), lineWeight: 13 });
 
   // 2) Rückverweise Primitiv → Kategorie: Wände/2D-Elemente tragen nur ihre ID im
   //    Plan; die Kategorie liegt am Projekt-Objekt. Damit landet jede Wand-/Drawing-
@@ -68,11 +74,15 @@ export function buildPlanDxf(
   for (const w of project.walls) codeByWall.set(w.id, w.categoryCode);
   const codeByDrawing = new Map<string, string>();
   for (const d of project.drawings2d) codeByDrawing.set(d.id, d.categoryCode);
+  const codeByColumn = new Map<string, string>();
+  for (const c of project.columns ?? []) codeByColumn.set(c.id, c.categoryCode);
 
   const layerFor = (p: Primitive): string => {
     if (p.kind === "polygon") {
       if (p.wallId) return layerNameByCode.get(codeByWall.get(p.wallId) ?? "") ?? LAYER_DEFAULT;
       if (p.drawingId) return layerNameByCode.get(codeByDrawing.get(p.drawingId) ?? "") ?? LAYER_DEFAULT;
+      if (p.columnId) return layerNameByCode.get(codeByColumn.get(p.columnId) ?? "") ?? LAYER_DEFAULT;
+      if (p.extrudedSolidId) return LAYER_EXTRUSION;
       return LAYER_DEFAULT;
     }
     if (p.kind === "line") {

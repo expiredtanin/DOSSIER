@@ -92,6 +92,7 @@ export function centroid(pts: Vec2[]): Vec2 {
 //
 //   GF  Geschossfläche
 //   ├── KGF  Konstruktionsfläche (Wände, Stützen, Schächte-Wandungen …)
+//   ├── AGF  Aussengeschossfläche (Balkone, Terrassen, Laubengänge …)
 //   └── NGF  Nettogeschossfläche
 //        ├── NF  Nutzfläche
 //        │    ├── HNF  Hauptnutzfläche  (der eigentliche Nutzungszweck)
@@ -100,10 +101,12 @@ export function centroid(pts: Vec2[]): Vec2 {
 //        └── FF  Funktionsfläche        (technische Anlagen, Haustechnik)
 //
 // Die „Blatt"-Kategorien, die einem konkreten Raum zugewiesen werden, sind
-// HNF, NNF, VF, FF und KGF. HNF+NNF = NF; NF+VF+FF = NGF; NGF+KGF = GF.
+// HNF, NNF, VF, FF, KGF und AGF. HNF+NNF = NF; NF+VF+FF = NGF; NGF+KGF+AGF = GF.
+// AGF zählt zur Geschossfläche, ist aber ausserhalb der Gebäudehülle (Aussen-
+// bereich) und fliesst daher NICHT in NGF (bzw. NF) ein.
 
 /** Blatt-Kategorien nach SIA 416, die einem Raum direkt zugewiesen werden. */
-export type SiaCategory = "HNF" | "NNF" | "VF" | "FF" | "KGF";
+export type SiaCategory = "HNF" | "NNF" | "VF" | "FF" | "KGF" | "AGF";
 
 /** Aggregat-(Zwischensummen-)Ebenen der SIA-416-Hierarchie. */
 export type SiaAggregate = "NF" | "NGF" | "GF";
@@ -118,6 +121,7 @@ export const SIA_CATEGORIES: readonly SiaCategory[] = [
   "VF",
   "FF",
   "KGF",
+  "AGF",
 ] as const;
 
 /** Deutsche Bezeichnungen (Kurz + Lang) je SIA-416-Schlüssel. */
@@ -134,6 +138,7 @@ const SIA_LABELS: Record<SiaKey, string> = {
   VF: "Verkehrsfläche",
   FF: "Funktionsfläche",
   KGF: "Konstruktionsfläche",
+  AGF: "Aussengeschossfläche",
   NF: "Nutzfläche",
   NGF: "Nettogeschossfläche",
   GF: "Geschossfläche",
@@ -152,7 +157,8 @@ export function siaLabelFull(key: SiaKey): string {
 /**
  * Zuordnung Blatt-Kategorie → übergeordnete Aggregate. Eine HNF trägt zu
  * NF, NGF und GF bei; eine KGF nur zu GF; VF/FF zu NGF und GF; NNF wie HNF.
- * Wird für den Bilanz-Roll-up genutzt.
+ * AGF (Aussengeschossfläche) trägt nur zu GF bei — sie liegt ausserhalb der
+ * Gebäudehülle und zählt NICHT zu NF/NGF. Wird für den Bilanz-Roll-up genutzt.
  */
 const CATEGORY_ROLLUP: Record<SiaCategory, SiaAggregate[]> = {
   HNF: ["NF", "NGF", "GF"],
@@ -160,6 +166,7 @@ const CATEGORY_ROLLUP: Record<SiaCategory, SiaAggregate[]> = {
   VF: ["NGF", "GF"],
   FF: ["NGF", "GF"],
   KGF: ["GF"],
+  AGF: ["GF"],
 };
 
 // ── Raum-Flächenergebnis ─────────────────────────────────────────────────────
@@ -242,14 +249,14 @@ export interface Balance {
  * anzurechnende Fläche (i. d. R. `netArea` aus {@link evaluateRoom}).
  *
  * Die zurückgegebenen `rows` sind in kanonischer Reihenfolge:
- *   HNF, NNF, NF(=Σ), VF, FF, NGF(=Σ), KGF, GF(=Σ)
+ *   HNF, NNF, NF(=Σ), VF, FF, NGF(=Σ), KGF, AGF, GF(=Σ)
  * — passend für die Bilanz-Tabelle und den CSV-Export.
  */
 export function balance(
   rooms: { category: SiaCategory; area: number }[],
 ): Balance {
-  const leaf: Record<SiaCategory, number> = { HNF: 0, NNF: 0, VF: 0, FF: 0, KGF: 0 };
-  const leafCount: Record<SiaCategory, number> = { HNF: 0, NNF: 0, VF: 0, FF: 0, KGF: 0 };
+  const leaf: Record<SiaCategory, number> = { HNF: 0, NNF: 0, VF: 0, FF: 0, KGF: 0, AGF: 0 };
+  const leafCount: Record<SiaCategory, number> = { HNF: 0, NNF: 0, VF: 0, FF: 0, KGF: 0, AGF: 0 };
   const agg: Record<SiaAggregate, number> = { NF: 0, NGF: 0, GF: 0 };
   const aggCount: Record<SiaAggregate, number> = { NF: 0, NGF: 0, GF: 0 };
 
@@ -269,6 +276,7 @@ export function balance(
     VF: leaf.VF,
     FF: leaf.FF,
     KGF: leaf.KGF,
+    AGF: leaf.AGF,
     NF: agg.NF,
     NGF: agg.NGF,
     GF: agg.GF,
@@ -297,6 +305,7 @@ export function balance(
     mkLeaf("FF"),
     mkAgg("NGF"),
     mkLeaf("KGF"),
+    mkLeaf("AGF"),
     mkAgg("GF"),
   ];
 

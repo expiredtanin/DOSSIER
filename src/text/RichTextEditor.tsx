@@ -597,6 +597,8 @@ export function RichTextEditor({
   const isItalic = isMarkActive(value, queryRange, "italic");
   const isUnderline = isMarkActive(value, queryRange, "underline");
   const isStrike = isMarkActive(value, queryRange, "strike");
+  const isSuper = isMarkActive(value, queryRange, "super");
+  const isSub = isMarkActive(value, queryRange, "sub");
 
   const currentSize = commonMarkValue(value, queryRange, "sizePt") ?? 12;
   const rawColor = commonMarkValue(value, queryRange, "color") ?? "#ededed";
@@ -657,6 +659,34 @@ export function RichTextEditor({
           }}
         >
           <s>S</s>
+        </button>
+
+        {/* Hochgestellt */}
+        <button
+          type="button"
+          className={`rt-btn${isSuper ? " rt-btn--active" : ""}`}
+          title={t("rt.super")}
+          aria-label={t("rt.super")}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            handleToggleMark("super");
+          }}
+        >
+          x<sup>2</sup>
+        </button>
+
+        {/* Tiefgestellt */}
+        <button
+          type="button"
+          className={`rt-btn${isSub ? " rt-btn--active" : ""}`}
+          title={t("rt.sub")}
+          aria-label={t("rt.sub")}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            handleToggleMark("sub");
+          }}
+        >
+          x<sub>2</sub>
         </button>
 
         <div className="rt-toolbar-sep" />

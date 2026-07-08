@@ -25,17 +25,24 @@ import {
   wallTypeThickness,
 } from "./model/types";
 import { wallCorners } from "./model/geometry";
-import { leftNormal, normalize, scale, sub } from "./model/geometry";
+import { add, dot, leftNormal, normalize, scale, sub } from "./model/geometry";
 import type {
   CeilingType,
+  ContextObject,
+  DoorType,
   Drawing2D,
   DrawingLevel,
   EdgeGrip,
   LayerCategory,
+  Layout,
+  OverrideRule,
   Project,
+  Stair,
+  StairType,
   Vec2,
   Wall,
   WallType,
+  WindowType,
 } from "./model/types";
 import { generatePlan, generateSectionPlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
@@ -55,7 +62,25 @@ import { ExportDxfDialog } from "./ui/ExportDxfDialog";
 import type { ExportDxfDecision } from "./ui/ExportDxfDialog";
 import { savePlanDxf } from "./export/exportDxf";
 import { exportScheduleCsv } from "./export/exportSchedule";
+import { exportIfcSpf } from "./export/exportIfc";
+import { exportObj, exportStl } from "./export/exportMesh";
+import type { ScheduleKind } from "./export/exportSchedule";
 import { SettingsDialog } from "./ui/SettingsDialog";
+import { ExportSaveDialog } from "./ui/ExportSaveDialog";
+import type { ExportSaveFormat } from "./ui/ExportSaveDialog";
+import { PromptDialog } from "./ui/PromptDialog";
+import { LockConflictDialog } from "./ui/LockConflictDialog";
+import { Toast } from "./ui/Toast";
+import { saveTextFile } from "./io/saveFile";
+import {
+  saveProjectFile,
+  openProjectFileNative,
+  acquireProjectLock,
+  releaseProjectLock,
+  registerLockAutoRelease,
+  isTauriRuntime,
+} from "./io/projectFile";
+import type { LockInfo } from "./io/projectFile";
 import { PlanView } from "./plan/PlanView";
 import type {
   PlanViewHandle,
@@ -68,6 +93,25 @@ import type { DisplayResolver, ViewportContextInfo } from "./viewport/Viewport3D
 import type { Pick3dHit } from "./viewport/Wasm3DViewport";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers } from "./ui/ResourceManager";
+import { LayoutSheetView } from "./ui/LayoutSheet";
+import {
+  createLayout,
+  createLayoutFolder,
+  createMasterLayout,
+  createViewport,
+  createAnnotation,
+  deleteFolder as deleteLayoutFolder,
+  deleteMasterFolder,
+  moveLayoutToFolder,
+  moveFolderToFolder,
+  addViewport as addViewportToLayout,
+  removeViewport as removeViewportFromLayout,
+  patchViewport as patchViewportInLayout,
+  addAnnotation as addAnnotationToLayout,
+  removeAnnotation as removeAnnotationFromLayout,
+  patchAnnotation as patchAnnotationInLayout,
+} from "./panels/layoutModel";
+import { saveFolderPdf } from "./export/layoutPdf";
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab, Ribbon3dTab } from "./ui/TopBar";
 import { RibbonBar } from "./ui/ribbon/RibbonBar";
@@ -164,6 +208,19 @@ import {
   saveDrawingCombo,
   saveLayerCombo,
 } from "./state/visibilitySets";
+import {
+  applyOverrideRuleEnabled,
+  captureViewSnapshot,
+  readViewSnapshot,
+  snapshotMatchesLiveState,
+  type ViewSnapshotState,
+} from "./state/viewSnapshots";
+import {
+  createViewSnapshotFolder,
+  deleteFolder as deleteViewSnapshotFolder,
+  moveSnapshotToFolder,
+  moveFolder as moveViewSnapshotFolder,
+} from "./state/viewSnapshotFolders";
 // Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
 import { BUILTIN_PANEL_IDS } from "./panels/builtinPanels";
 import { DrawingTabs, deriveDrawings } from "./DrawingTabs";
@@ -216,18 +273,12 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   rect: "rect",
   circle: "circle",
   arc: "arc",
+  text: "text",
+  textbox: "textbox",
 };
 /** Befehlsname für ein gekoppeltes Werkzeug (oder null, wenn keiner). */
 function coupledCommandFor(id: ToolId): string | null {
   return TOOL_COMMAND[id] ?? null;
-}
-
-/** Fragt die Kopienanzahl (≥1) für die Modi O/P ab; null bei Abbruch/ungültig. */
-function promptCount(): number | null {
-  const s = window.prompt(t("transform.countPrompt"), "3");
-  if (s == null) return null;
-  const n = Math.round(Number(s));
-  return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
 /** localStorage-Schlüssel der modularen Custom-Bar (Ribbon-Tab „Eigene"). */
@@ -277,6 +328,33 @@ function drawingsBBox(
   return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
 }
 
+/**
+ * Bounding-Box (Modell-Meter) neu importierter Kontext-Objekte (Konturen/
+ * Meshes/Terrain, z. B. aus dem Standort-Import-Dialog), als zwei Eckpunkte
+ * für `PlanViewHandle.fitBounds` (Auto-Zoom auf Import). Ignoriert die
+ * Z-Achse (reine 2D-Projektion, wie die Plan-Darstellung der Kontext-
+ * Konturen in generatePlan.ts). Leere/degenerierte Eingabe → null.
+ */
+function contextObjectsBounds(objs: ContextObject[]): Vec2[] | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const acc = (x: number, y: number) => {
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  };
+  for (const obj of objs) {
+    if (obj.type === "contourSet") {
+      for (const c of obj.contours) for (const p of c.pts) acc(p.x, p.y);
+    } else {
+      // importedMesh / terrainMesh: flaches (x,y,z…)-Array, Stride 3.
+      const pos = obj.positions;
+      for (let i = 0; i + 1 < pos.length; i += 3) acc(pos[i], pos[i + 1]);
+    }
+  }
+  return Number.isFinite(minX)
+    ? [{ x: minX, y: minY }, { x: maxX, y: maxY }]
+    : null;
+}
+
 /** Ein Drawing2D um (dx,dy) in Modell-Metern verschieben (alle Formen). */
 function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
   const mv = (p: Vec2): Vec2 => ({ x: p.x + dx, y: p.y + dy });
@@ -292,6 +370,21 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
   }
 }
 
+/**
+ * Baut eine TransformSelection für GENAU EIN Element (Object-Info: Verschieben/
+ * Drehen per Zahlenfeld, siehe onMoveSelectionBy/onRotateSelectionAround unten).
+ * Deckt nur die vom Transform-Kern (tools/transform.ts) unterstützten Arten ab
+ * — Decke/Öffnung/Treppe/Raum kennt er nicht, dort liefert die Funktion `null`
+ * (Aufrufer macht dann No-op, wie bei onResizeSelection).
+ */
+function singleTransformSel(kind: string, id: string): TransformSelection | null {
+  if (kind === "wall") return { wallIds: [id], drawingId: null };
+  if (kind === "drawing2d") return { wallIds: [], drawingId: id };
+  if (kind === "extrudedSolid") return { wallIds: [], drawingId: null, extrudedSolidId: id };
+  if (kind === "column") return { wallIds: [], drawingId: null, columnId: id };
+  return null;
+}
+
 export default function App() {
   // Sprachwechsel abonnieren: re-rendert den gesamten Baum, wenn die Sprache
   // umgeschaltet wird (alle Kinder lesen denselben modulweiten Zustand über t).
@@ -302,6 +395,7 @@ export default function App() {
   // Endlosschleife). Actions leben ebenfalls im Zustand und sind referenzstabil.
   const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
+  const notify = useStore((s) => s.notify);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const activeLevelId = useStore((s) => s.activeLevelId);
@@ -313,6 +407,12 @@ export default function App() {
   // bleibt lokal. Wird über die Oberleiste geöffnet und über X / Hintergrund-
   // Klick / Esc geschlossen.
   const [resourcesOpen, setResourcesOpen] = useState(false);
+
+  // Aktives Layout-Blatt im HAUPT-Viewport (DOSSIER A3, Phase 2b): Id des offenen
+  // Layouts oder null (= normale Modell-Ansicht). Transienter UI-State; das
+  // Layout selbst lebt im Projekt (project.layouts). Ist es gesetzt, zeigt der
+  // Haupt-Viewport das Blatt (LayoutSheetView) statt Grundriss/3D.
+  const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null);
 
   // Modaler Import-Dialog (DXF/DWG). Offen, sobald eine Datei gewählt/fallen-
   // gelassen wurde; hält Dateiname, geparstes Ergebnis (null bei DWG) und das
@@ -329,6 +429,8 @@ export default function App() {
   const [exportDxfOpen, setExportDxfOpen] = useState(false);
   // Modales Einstellungs-Fenster (Darstellungsfarben + Projekt-Felder).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Offener Schnellexport-Dialog: Format (aus dem Menü) oder null = geschlossen.
+  const [exportSaveFormat, setExportSaveFormat] = useState<ExportSaveFormat | null>(null);
   // Visuelles Drop-Feedback (dezenter Rahmen), solange eine Datei über die App
   // gezogen wird. Zählt dragenter/dragleave aus, um Flackern bei Kind-Elementen
   // zu vermeiden.
@@ -364,6 +466,12 @@ export default function App() {
   // LIVE Papier-Massstab-Nenner aus der View-Transform (PlanView meldet ihn);
   // null = keine Plan-Ansicht aktiv. Transienter UI-State, bleibt lokal.
   const [liveScale, setLiveScale] = useState<number | null>(null);
+  // „Angewählter" Ausschnitt (View-Snapshot): bleibt gesetzt, solange der
+  // Live-Zustand EXAKT dem Ausschnitt entspricht (siehe Effekt weiter unten).
+  // Steuert die Footer-Bar + die Aktiv-Markierung im Ausschnitte-Panel.
+  const [selectedViewSnapshotId, setSelectedViewSnapshotId] = useState<
+    string | null
+  >(null);
   // Cursor in Modell-Metern (aus der Plan-Ansicht) bzw. null (nicht über Plan).
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   // Live-Zoom in Prozent RELATIV zum angewandten Papier-Massstab: 100 % =
@@ -417,6 +525,19 @@ export default function App() {
   // Letzter gesnappter Cursor der laufenden Transformation — für das Live-Feld
   // (Winkel/Distanz) der Befehlszeile (analog gripDragInfoRef beim Vertex-Drag).
   const transformDragInfoRef = useRef<{ cursor: Vec2 } | null>(null);
+  // Kopienanzahl für array/distribute wird über einen PromptDialog erfasst
+  // (window.prompt ist im Tauri-WKWebView deaktiviert) — `pendingCopyMode`
+  // hält den Modus, während der Dialog offen ist.
+  const [pendingCopyMode, setPendingCopyMode] = useState<"array" | "distribute" | null>(null);
+  const requestCopyCount = (mode: "array" | "distribute") => setPendingCopyMode(mode);
+  const commitCopyCount = (input: string) => {
+    const n = Math.round(Number(input));
+    if (Number.isFinite(n) && n >= 1 && pendingCopyMode) {
+      const mode = pendingCopyMode;
+      setActiveTransform((t) => (t ? { ...t, copyMode: mode, count: n } : t));
+    }
+    setPendingCopyMode(null);
+  };
 
   // ── Auswahl (Store-Slice) ─────────────────────────────────────────────────
   const selectedWallIds = useStore((s) => s.selectedWallIds);
@@ -456,6 +577,14 @@ export default function App() {
   const setSelectedRoomIds = useStore((s) => s.setSelectedRoomIds);
   const selectedRoomId =
     selectedRoomIds.length === 1 ? selectedRoomIds[0] : null;
+  const selectedExtrudedSolidIds = useStore((s) => s.selectedExtrudedSolidIds);
+  const setSelectedExtrudedSolidIds = useStore((s) => s.setSelectedExtrudedSolidIds);
+  const selectedExtrudedSolidId =
+    selectedExtrudedSolidIds.length === 1 ? selectedExtrudedSolidIds[0] : null;
+  const selectedColumnIds = useStore((s) => s.selectedColumnIds);
+  const setSelectedColumnIds = useStore((s) => s.setSelectedColumnIds);
+  const selectedColumnId =
+    selectedColumnIds.length === 1 ? selectedColumnIds[0] : null;
 
   // ── Kontextmenüs (transienter UI-State, bleibt lokal) ─────────────────────
   // Eigenschaften-Zwischenablage des Ebenen-Kontextmenüs (Farbe + Linienstärke).
@@ -469,6 +598,8 @@ export default function App() {
   const [editor, setEditor] = useState<EditorState>(null);
   // Offener Raum-Stempel-Editor (Rich-Text) — per Doppelklick/Button geöffnet.
   const [stampEditorRoomId, setStampEditorRoomId] = useState<string | null>(null);
+  // Text-Inhalt-Editor: Id des per Doppelklick bearbeiteten Text-2D-Elements.
+  const [editTextId, setEditTextId] = useState<string | null>(null);
 
   // Beim Geschosswechsel die Wand-Auswahl + offene Overlays zurücksetzen (die
   // Wände eines anderen Geschosses sind eine andere Menge). Der Ansichtswechsel
@@ -481,6 +612,8 @@ export default function App() {
     setSelectedOpeningIds([]);
     setSelectedStairIds([]);
     setSelectedRoomIds([]);
+    setSelectedExtrudedSolidIds([]);
+    setSelectedColumnIds([]);
     setMenu(null);
     setEditor(null);
   }, [activeLevelId]);
@@ -500,7 +633,27 @@ export default function App() {
   // liest die Datei als Text und reicht sie durch parseDxf → addContextObjects.
   const dxfInputRef = useRef<HTMLInputElement>(null);
   // Verstecktes Datei-Input zum Laden eines Projekts (Datei-Burger „Öffnen").
+  // Wird NUR im Browser-Pfad benutzt (ohne Tauri) — unter Tauri geht „Öffnen"
+  // über den nativen Dialog (openProjectFileNative), der einen echten Pfad für
+  // den Lock liefert (File-API im Browser hat keinen echten Dateipfad).
   const projectFileInputRef = useRef<HTMLInputElement>(null);
+  // Pfad + Lock-Status der aktuell offenen .obp/.json-Datei (nur Tauri; sonst
+  // bleibt beides null/false — Browser-Blob-Pfad hat keinen echten Pfad).
+  const openedProjectPathRef = useRef<string | null>(null);
+  const projectLockOwnedRef = useRef(false);
+  // Konflikt-Zustand: Datei ist in einer anderen Instanz gesperrt → Dialog mit
+  // „Schreibgeschützt öffnen"/„Trotzdem erzwingen"/„Abbrechen" (kein window.confirm!).
+  const [lockConflict, setLockConflict] = useState<{
+    path: string;
+    content: string;
+    info: LockInfo | null;
+  } | null>(null);
+
+  // Best-effort Lock-Freigabe beim Fenster-Schliessen (sauberes Timing; der
+  // OS-Lock fällt bei Prozessende/Absturz ohnehin automatisch weg). No-op ohne Tauri.
+  useEffect(() => {
+    registerLockAutoRelease(() => openedProjectPathRef.current);
+  }, []);
 
   // Den DXF-Datei-Dialog-Öffner für den „import"-Befehl registrieren (entkoppelt
   // über den Modul-Hook). Beim Unmount wieder abmelden.
@@ -629,9 +782,14 @@ export default function App() {
   };
 
   // ── Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl ──────────────
+  // Trägt ALLE von der Transform-Engine unterstützten Elementarten (Wände, 2D-
+  // Zeichnungen, extrudierte Körper, Stützen) — sonst wirken die Kürzel m/s/d nur
+  // auf Wände/2D, obwohl `commitTransform` auch Extrude/Stütze bewegt.
   const transformSel: TransformSelection = {
     wallIds: selectedWallIds,
     drawingId: selectedDrawingId,
+    extrudedSolidId: selectedExtrudedSolidId,
+    columnId: selectedColumnId,
   };
   const snapForTransform = (raw: Vec2, pxPerMeter: number, mods: ToolMods, points: Vec2[]) =>
     computeSnap({
@@ -752,6 +910,8 @@ export default function App() {
     selectedWallIds,
     selectedDrawingId,
     selectedDrawingIds,
+    selectedExtrudedSolidId,
+    selectedColumnId,
     setProject,
     setDraft,
   });
@@ -766,6 +926,8 @@ export default function App() {
     selectedWallIds,
     selectedDrawingId,
     selectedDrawingIds,
+    selectedExtrudedSolidId,
+    selectedColumnId,
     setProject,
     setDraft,
   };
@@ -788,6 +950,8 @@ export default function App() {
             wallIds: c.selectedWallIds,
             drawingId: c.selectedDrawingId,
             drawingIds: c.selectedDrawingIds,
+            extrudedSolidId: c.selectedExtrudedSolidId,
+            columnId: c.selectedColumnId,
           },
         };
       },
@@ -857,7 +1021,32 @@ export default function App() {
   // eigenes Werkzeug (kein ToolId). Läuft über DIESELBE Engine wie das Tippen des
   // Befehls; das Werkzeug-Highlight fällt auf „Auswahl" zurück, das Aktiv-
   // Highlight des Ribbon-Befehls spiegelt der laufende Befehl (engineView).
+  // Interaktive Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl starten —
+  // derselbe U/I/O/P-Pfad (`activeTransform`) wie die Kürzel m/s/d, nur von Button/
+  // Befehlszeile ausgelöst. Ohne transformierbare Auswahl ein kurzer Hinweis.
+  const startTransformOp = (op: TransformOp) => {
+    const hasSel =
+      selectedWallIds.length > 0 ||
+      !!selectedDrawingId ||
+      !!selectedExtrudedSolidId ||
+      !!selectedColumnId;
+    if (!hasSel) {
+      notify(t("transform.needSelection"), "info");
+      return;
+    }
+    setActiveTool("select");
+    setActiveTransform({ op, copyMode: "move", count: 1, points: [] });
+    setDraft(null);
+    requestAnimationFrame(() => commandLineRef.current?.focus());
+  };
   const onRunCommand = (name: string) => {
+    // „rotate" (Drehen) läuft über die interaktive Transformation mit U/I/O/P —
+    // nicht über die Befehls-Engine (die kennt kein Rotate-Kommando). So ist der
+    // Ribbon-Button der Einstieg in denselben Fluss wie die Taste „d".
+    if (name === "rotate") {
+      startTransformOp("rotate");
+      return;
+    }
     engine.start(name);
     setActiveTool("select");
     requestAnimationFrame(() => commandLineRef.current?.focus());
@@ -1050,7 +1239,34 @@ export default function App() {
         : null,
     [selectedRoom],
   );
+  // Bewegpunkt (Move-Handle) einer Treppe: liegt auf der Treppe (Mitte des
+  // ersten Laufs bei gerade/L, Zentrum bei Wendel) und verschiebt beim Ziehen
+  // die GANZE Treppe (moveStairBy mit dem Delta). Ein einzelner, gut sichtbarer
+  // Griff — analog zum Öffnungs-Mittelpunkt.
+  const stairMoveHandle = (st: Stair): Vec2 => {
+    if (st.shape === "spiral") return st.center ?? st.start;
+    const d = normalize(st.dir);
+    return add(st.start, scale(d, st.runLength / 2));
+  };
   const grips: Vec2[] = useMemo(() => {
+    // Öffnung (Fenster/Tür): EIN Mittelpunkt-Griff auf der Wandachse. Ziehen
+    // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
+    // `position`). Nur bei genau einer selektierten Öffnung (Auswahl exklusiv).
+    if (selectedOpeningId) {
+      const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
+      const w = op && project.walls.find((x) => x.id === op.hostWallId);
+      if (op && w) {
+        const axis = normalize(sub(w.end, w.start));
+        return [add(w.start, scale(axis, op.position + op.width / 2))];
+      }
+      return [];
+    }
+    // Treppe: EIN Bewegpunkt (siehe stairMoveHandle); Ziehen verschiebt die
+    // ganze Treppe (applyGrip → moveStairBy). Auswahl exklusiv.
+    if (selectedStairId) {
+      const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
+      return st ? [stairMoveHandle(st)] : [];
+    }
     if (selectedDrawing) return drawingVertices(selectedDrawing);
     if (selectedWallIds.length === 1 && !selectedDrawingId) {
       const w = project.walls.find((x) => x.id === selectedWallIds[0]);
@@ -1074,9 +1290,13 @@ export default function App() {
     selectedDrawing,
     selectedCeiling,
     selectedRoom,
+    selectedOpeningId,
+    selectedStairId,
     selectedWallIds,
     selectedDrawingId,
     project.walls,
+    project.openings,
+    project.stairs,
   ]);
 
   // ── Kanten-/Seiten-Griffe (Edge Grips) ───────────────────────────────────
@@ -1347,6 +1567,33 @@ export default function App() {
   // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
   // auf die Wand/2D-Aktionen. So teilen Plan- UND 3D-Griffe denselben Pfad.
   const applyGrip = (index: number, pt: Vec2) => {
+    // Öffnung: den gezogenen Punkt auf die Wandachse projizieren → neue
+    // `position` (Abstand des ersten Pfostens vom Wand-Start), sodass die
+    // Öffnung entlang der Wand gleitet. Griff sitzt in der Öffnungsmitte, daher
+    // width/2 abziehen; auf [0, Wandlänge − Breite] klemmen (Öffnung bleibt drin).
+    if (selectedOpeningId) {
+      const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
+      const w = op && project.walls.find((x) => x.id === op.hostWallId);
+      if (op && w) {
+        const d = sub(w.end, w.start);
+        const len = Math.hypot(d.x, d.y);
+        if (len > 1e-9) {
+          const axis = scale(d, 1 / len);
+          const t = dot(sub(pt, w.start), axis);
+          const pos = Math.max(0, Math.min(len - op.width, t - op.width / 2));
+          updateOpening(op.id, { position: pos });
+        }
+      }
+      return;
+    }
+    // Treppe: den Bewegpunkt verfolgen → ganze Treppe um das Delta (Ziel −
+    // aktueller Handle) verschieben. Handle wird identisch zu grips gebildet,
+    // sodass er nach dem Move exakt unter dem Cursor sitzt.
+    if (selectedStairId) {
+      const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
+      if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
+      return;
+    }
     if (selectedRoomId) moveRoomGrip(selectedRoomId, index, pt);
     else if (selectedCeilingId) moveCeilingGrip(selectedCeilingId, index, pt);
     else moveGripOf(selectedDrawingId, selectedWallId, index, pt);
@@ -1406,7 +1653,20 @@ export default function App() {
       applyGrip(index, pt);
       setDraft({ preview: [], vertices: [], snap: snapResult });
     },
-    onMoveBody: (delta: Vec2, target?: { wallId?: string; drawingId?: string }) => {
+    onMoveBody: (
+      delta: Vec2,
+      target?: { wallId?: string; drawingId?: string },
+      mods?: ToolMods,
+    ) => {
+      // Shift = Ortho: das Delta auf die dominante Achse (H/V) zwingen —
+      // dieselbe Regel wie beim freien Kanten-Zug (onEdgeMove) und beim
+      // Vertex-Griff (onGripMove). Bisher wirkte Shift beim Körper-Verschieben
+      // (Wand/2D-Element/Decke/Treppe/Raum als Ganzes) gar nicht (Nutzer-Report
+      // 2026-07-06) — `mods` kam von PlanView schlicht nicht bis hierher.
+      if (mods?.shift) {
+        if (Math.abs(delta.x) >= Math.abs(delta.y)) delta = { x: delta.x, y: 0 };
+        else delta = { x: 0, y: delta.y };
+      }
       // Decke: ganzen Umriss verschieben (kein Multi-Koinzidenz-Handling nötig).
       if (selectedCeilingId && !target) {
         moveCeilingBy(selectedCeilingId, delta);
@@ -1544,18 +1804,28 @@ export default function App() {
         const roomIds = (project.rooms ?? [])
           .filter((r) => r.floorId === activeLevel.id)
           .map((r) => r.id);
+        const extrudedSolidIds = (project.extrudedSolids ?? [])
+          .filter((s) => s.levelId === activeLevel.id)
+          .map((s) => s.id);
+        const columnIds = (project.columns ?? [])
+          .filter((c) => c.floorId === activeLevel.id)
+          .map((c) => c.id);
         if (
           wallIds.length ||
           drawingIds.length ||
           ceilingIds.length ||
           stairIds.length ||
-          roomIds.length
+          roomIds.length ||
+          extrudedSolidIds.length ||
+          columnIds.length
         ) {
           setSelectedWallIds(wallIds);
           setSelectedDrawingIds(drawingIds);
           setSelectedCeilingIds(ceilingIds);
           setSelectedStairIds(stairIds);
           setSelectedRoomIds(roomIds);
+          setSelectedExtrudedSolidIds(extrudedSolidIds);
+          setSelectedColumnIds(columnIds);
           e.preventDefault();
         }
         return;
@@ -1568,7 +1838,9 @@ export default function App() {
         selectedCeilingIds.length ||
         selectedOpeningIds.length ||
         selectedStairIds.length ||
-        selectedRoomIds.length
+        selectedRoomIds.length ||
+        selectedExtrudedSolidIds.length ||
+        selectedColumnIds.length
       ) {
         const dids = new Set(selectedDrawingIds);
         const wids = new Set(selectedWallIds);
@@ -1576,6 +1848,8 @@ export default function App() {
         const oids = new Set(selectedOpeningIds);
         const stids = new Set(selectedStairIds);
         const rmids = new Set(selectedRoomIds);
+        const exids = new Set(selectedExtrudedSolidIds);
+        const colids = new Set(selectedColumnIds);
         setProject((p) => ({
           ...p,
           drawings2d: p.drawings2d.filter((d) => !dids.has(d.id)),
@@ -1583,6 +1857,8 @@ export default function App() {
           ceilings: (p.ceilings ?? []).filter((c) => !cids.has(c.id)),
           stairs: (p.stairs ?? []).filter((s) => !stids.has(s.id)),
           rooms: (p.rooms ?? []).filter((r) => !rmids.has(r.id)),
+          extrudedSolids: (p.extrudedSolids ?? []).filter((s) => !exids.has(s.id)),
+          columns: (p.columns ?? []).filter((c) => !colids.has(c.id)),
           doors: p.doors.filter((dr) => !wids.has(dr.hostWallId)),
           // Öffnungen: eigene Auswahl löschen UND alle, deren Host-Wand entfällt.
           openings: (p.openings ?? []).filter(
@@ -1595,6 +1871,8 @@ export default function App() {
         setSelectedOpeningIds([]);
         setSelectedStairIds([]);
         setSelectedRoomIds([]);
+        setSelectedExtrudedSolidIds([]);
+        setSelectedColumnIds([]);
         e.preventDefault();
       }
     };
@@ -1608,10 +1886,14 @@ export default function App() {
     selectedCeilingIds,
     selectedOpeningIds,
     selectedStairIds,
+    selectedExtrudedSolidIds,
+    selectedColumnIds,
     project.walls,
     project.drawings2d,
     project.ceilings,
     project.stairs,
+    project.extrudedSolids,
+    project.columns,
     activeLevel.id,
   ]);
 
@@ -1812,11 +2094,9 @@ export default function App() {
         if (k === "u") setActiveTransform((t) => (t ? { ...t, copyMode: "move" } : t));
         else if (k === "i") setActiveTransform((t) => (t ? { ...t, copyMode: "copy" } : t));
         else if (k === "o") {
-          const n = promptCount();
-          if (n) setActiveTransform((t) => (t ? { ...t, copyMode: "array", count: n } : t));
+          requestCopyCount("array");
         } else if (k === "p") {
-          const n = promptCount();
-          if (n) setActiveTransform((t) => (t ? { ...t, copyMode: "distribute", count: n } : t));
+          requestCopyCount("distribute");
         } else if (e.key === "Escape") {
           setActiveTransform(null);
           setDraft(null);
@@ -1824,7 +2104,21 @@ export default function App() {
         e.preventDefault();
         return;
       }
-      const hasSel = selectedWallIds.length > 0 || !!selectedDrawingId;
+      // „q" = Messen (Distanz/Winkel) — braucht KEINE Auswahl, daher vor hasSel.
+      if (e.key.toLowerCase() === "q") {
+        onRunCommand("measure");
+        e.preventDefault();
+        return;
+      }
+      // Transformierbar sind Wände, 2D-Zeichnungen, extrudierte Körper und Stützen
+      // (dieselben Arten wie transformSel). Öffnungen/Treppen laufen bewusst NICHT
+      // hierüber, sondern über ihre eigenen Bewegpunkte (Grips) — sie sind wand-
+      // bzw. geschossgebunden.
+      const hasSel =
+        selectedWallIds.length > 0 ||
+        !!selectedDrawingId ||
+        !!selectedExtrudedSolidId ||
+        !!selectedColumnId;
       if (!hasSel) return;
       const k = e.key.toLowerCase();
       // Bewegen/Spiegeln/Drehen laufen ALLE über die interaktive Transformation
@@ -1842,7 +2136,15 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeTool, activeTransform, selectedWallIds, selectedDrawingId, engine]);
+  }, [
+    activeTool,
+    activeTransform,
+    selectedWallIds,
+    selectedDrawingId,
+    selectedExtrudedSolidId,
+    selectedColumnId,
+    engine,
+  ]);
 
   // ── Projekt-Mutationen (aus dem Store-Slice) ─────────────────────────────
   // Sämtliche immutablen Projekt-Mutationen liegen jetzt in projectSlice. App
@@ -1886,6 +2188,11 @@ export default function App() {
       ...p,
       wallTypes: p.wallTypes.map((wt) => (wt.id === id ? { ...wt, ...patch } : wt)),
     }));
+  // Grafische Override-Regeln: ersetzt die ganze Regelliste (Reihenfolge =
+  // Priorität, oben gewinnt). Läuft wie die übrigen Ressourcen-Mutationen
+  // direkt über setProject — persistiert damit automatisch im Projekt-JSON.
+  const setOverrideRules = (rules: OverrideRule[]) =>
+    setProject((p) => ({ ...p, overrideRules: rules }));
   // Deckenstile: immutable Patch eines Deckentyps — analog `patchWallType`.
   const patchCeilingType = (id: string, patch: Partial<CeilingType>) =>
     setProject((p) => ({
@@ -1911,7 +2218,7 @@ export default function App() {
       const used = p.walls.some((w) => w.wallTypeId === id);
       if (used) {
         const name = p.wallTypes.find((wt) => wt.id === id)?.name ?? id;
-        window.alert(t("alert.wallTypeInUse", { name }));
+        notify(t("alert.wallTypeInUse", { name }), "warning");
         return p;
       }
       return { ...p, wallTypes: p.wallTypes.filter((wt) => wt.id !== id) };
@@ -1933,7 +2240,7 @@ export default function App() {
       const used = (p.ceilings ?? []).some((c) => c.ceilingTypeId === id);
       if (used) {
         const name = (p.ceilingTypes ?? []).find((ct) => ct.id === id)?.name ?? id;
-        window.alert(t("alert.ceilingTypeInUse", { name }));
+        notify(t("alert.ceilingTypeInUse", { name }), "warning");
         return p;
       }
       return {
@@ -1941,10 +2248,120 @@ export default function App() {
         ceilingTypes: (p.ceilingTypes ?? []).filter((ct) => ct.id !== id),
       };
     });
+  // ── Bauteil-Typen: Tür / Fenster / Treppe (Bibliothek) ────────────────────
+  // Anlegen/Patchen/Löschen analog Wand-/Deckentyp — direkt über setProject
+  // (kein eigener Slice). Löschen ist geschützt, solange ein Element den Typ
+  // per `typeId` referenziert. Defaults orientieren sich an den Element-Inline-
+  // Werten (Tür 0.9×2.0, Fenster 1.2×1.4 Brüstung 0.9).
+  const addDoorType = () =>
+    setProject((p) => {
+      const dt: DoorType = {
+        id: `dt-${Date.now()}`,
+        name: t("default.doorTypeName"),
+        kind: "dreh",
+        leafCount: 1,
+        leafStyle: "glatt",
+        frameThickness: 0.05,
+        defaultWidth: 0.9,
+        defaultHeight: 2.0,
+      };
+      return { ...p, doorTypes: [...(p.doorTypes ?? []), dt] };
+    });
+  const patchDoorType = (id: string, patch: Partial<DoorType>) =>
+    setProject((p) => ({
+      ...p,
+      doorTypes: (p.doorTypes ?? []).map((dt) =>
+        dt.id === id ? { ...dt, ...patch } : dt,
+      ),
+    }));
+  const deleteDoorType = (id: string) =>
+    setProject((p) => {
+      const used = (p.openings ?? []).some((o) => o.typeId === id);
+      if (used) {
+        const name = (p.doorTypes ?? []).find((dt) => dt.id === id)?.name ?? id;
+        notify(t("alert.doorTypeInUse", { name }), "warning");
+        return p;
+      }
+      return { ...p, doorTypes: (p.doorTypes ?? []).filter((dt) => dt.id !== id) };
+    });
+  const addWindowType = () =>
+    setProject((p) => {
+      const wt: WindowType = {
+        id: `ft-${Date.now()}`,
+        name: t("default.windowTypeName"),
+        kind: "drehkipp",
+        wingCount: 1,
+        glazing: "zweifach",
+        frameThickness: 0.06,
+        defaultSillHeight: 0.9,
+        defaultWidth: 1.2,
+        defaultHeight: 1.4,
+      };
+      return { ...p, windowTypes: [...(p.windowTypes ?? []), wt] };
+    });
+  const patchWindowType = (id: string, patch: Partial<WindowType>) =>
+    setProject((p) => ({
+      ...p,
+      windowTypes: (p.windowTypes ?? []).map((wt) =>
+        wt.id === id ? { ...wt, ...patch } : wt,
+      ),
+    }));
+  const deleteWindowType = (id: string) =>
+    setProject((p) => {
+      const used = (p.openings ?? []).some((o) => o.typeId === id);
+      if (used) {
+        const name = (p.windowTypes ?? []).find((wt) => wt.id === id)?.name ?? id;
+        notify(t("alert.windowTypeInUse", { name }), "warning");
+        return p;
+      }
+      return {
+        ...p,
+        windowTypes: (p.windowTypes ?? []).filter((wt) => wt.id !== id),
+      };
+    });
+  const addStairType = () =>
+    setProject((p) => {
+      const st: StairType = {
+        id: `st-${Date.now()}`,
+        name: t("default.stairTypeName"),
+        structure: "massiv",
+        closedRisers: true,
+        treadThickness: 0.04,
+        nosing: 0.03,
+        railing: "keine",
+        defaultWidth: 1.0,
+      };
+      return { ...p, stairTypes: [...(p.stairTypes ?? []), st] };
+    });
+  const patchStairType = (id: string, patch: Partial<StairType>) =>
+    setProject((p) => ({
+      ...p,
+      stairTypes: (p.stairTypes ?? []).map((st) =>
+        st.id === id ? { ...st, ...patch } : st,
+      ),
+    }));
+  const deleteStairType = (id: string) =>
+    setProject((p) => {
+      const used = (p.stairs ?? []).some((s) => s.typeId === id);
+      if (used) {
+        const name = (p.stairTypes ?? []).find((st) => st.id === id)?.name ?? id;
+        notify(t("alert.stairTypeInUse", { name }), "warning");
+        return p;
+      }
+      return { ...p, stairTypes: (p.stairTypes ?? []).filter((st) => st.id !== id) };
+    });
   const importLineStyles = useStore((s) => s.importLineStyles);
   const importHatches = useStore((s) => s.importHatches);
   // Site-/Kontext-Schicht (siteSlice): Import/Entfernen/Gelände.
   const addContextObjects = useStore((s) => s.addContextObjects);
+  // Wie addContextObjects, aber passt die Plan-Ansicht danach auf die Bounding-
+  // Box der NEU importierten Objekte ein (Auto-Zoom auf Import, ROADMAP §11) —
+  // sonst muss man nach Standort-/Geo-Import manuell zur Geometrie suchen.
+  const addContextObjectsAndFit = (objs: ContextObject[]) => {
+    addContextObjects(objs);
+    const pts = contextObjectsBounds(objs);
+    if (pts) planViewRef.current?.fitBounds(pts);
+  };
   const removeContextObject = useStore((s) => s.removeContextObject);
   const generateTerrain = useStore((s) => s.generateTerrain);
   const moveGripOf = useStore((s) => s.moveGripOf);
@@ -2098,8 +2515,20 @@ export default function App() {
         selectedOpeningId,
         selectedStairId,
         selectedRoomId,
+        selectedExtrudedSolidId,
+        selectedColumnId,
       ),
-    [project, selectedWallIds, selectedDrawingId, selectedCeilingId, selectedOpeningId, selectedStairId, selectedRoomId],
+    [
+      project,
+      selectedWallIds,
+      selectedDrawingId,
+      selectedCeilingId,
+      selectedOpeningId,
+      selectedStairId,
+      selectedRoomId,
+      selectedExtrudedSolidId,
+      selectedColumnId,
+    ],
   );
 
   // ── DXF/DWG-Import (Dialog) ───────────────────────────────────────────────
@@ -2170,39 +2599,113 @@ export default function App() {
   };
 
   // Projekt als Datei speichern/laden (Datei-Burger-Menü, TopBar/AppMenu).
-  // Reines JSON des ProjectSlice-Zustands (gleiche Blob+Anchor-Download-Technik
-  // wie savePlanDxf/savePlanPdf); Laden liest die Datei als Text, parst sie und
-  // ersetzt das Projekt — nur ein grobes Shape-Sanity-Check (walls/layers als
-  // Array), damit ein fremdes/kaputtes JSON nicht die App zerlegt.
+  // Reines JSON des ProjectSlice-Zustands. Eigene Endung „.obp" (openbureau
+  // project) statt generischem „.json" — unter Tauri über den nativen
+  // Speichern-/Öffnen-Dialog mit passendem Datei-Filter (saveProjectFile/
+  // openProjectFileNative in io/projectFile.ts), im Browser Blob-Download wie
+  // bisher. Laden parst die Datei und ersetzt das Projekt — nur ein grobes
+  // Shape-Sanity-Check (walls/layers als Array), damit ein fremdes/kaputtes
+  // JSON nicht die App zerlegt. Alte „.json"-Projekte bleiben ladbar (Filter
+  // erlaubt beide Endungen).
   const onSaveProject = () => {
     const json = JSON.stringify(project, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${project.name || "projekt"}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    void saveProjectFile(json, project.name);
   };
-  // Bauteilliste (Bauteil-Schedule) als CSV herunterladen — gleiche
-  // Blob+Anchor-Download-Technik wie onSaveProject/savePlanDxf. Der CSV-Inhalt
-  // kommt aus dem reinen Kern (export/exportScheduleCsv); BOM voranstellen,
-  // damit Excel UTF-8 (Umlaute/„m²") korrekt liest (wie der Raum-CSV).
-  const onExportSchedule = () => {
-    const csv = exportScheduleCsv(project);
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "bauteilliste.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  // Gibt den Lock der zuletzt geöffneten Projektdatei frei (falls wir ihn
+  // halten) und vergisst den Pfad — vor dem Wechsel auf ein anderes Projekt.
+  const releaseCurrentProjectLock = () => {
+    if (openedProjectPathRef.current && projectLockOwnedRef.current) {
+      void releaseProjectLock(openedProjectPathRef.current);
+    }
+    openedProjectPathRef.current = null;
+    projectLockOwnedRef.current = false;
   };
-  const onOpenProject = () => projectFileInputRef.current?.click();
+  // Übernimmt ein per Pfad geöffnetes Projekt (Tauri-Fluss): parst, prüft grob
+  // die Form, gibt einen evtl. vorher gehaltenen Lock frei und merkt sich Pfad
+  // + ob WIR den Schreib-Lock für die neue Datei halten.
+  const applyOpenedProjectFile = (path: string, content: string, lockOwned: boolean) => {
+    try {
+      const parsed = JSON.parse(content) as Partial<Project>;
+      if (!Array.isArray(parsed.walls) || !Array.isArray(parsed.layers)) {
+        console.warn("Projekt-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
+        return;
+      }
+      releaseCurrentProjectLock();
+      setProject(parsed as Project);
+      openedProjectPathRef.current = path;
+      projectLockOwnedRef.current = lockOwned;
+    } catch (err) {
+      console.error("Projekt-Import fehlgeschlagen:", err);
+    }
+  };
+  // Öffnen unter Tauri: nativer Dialog (echter Pfad) → Lock versuchen. Klappt
+  // er → Projekt übernehmen. Schon gesperrt → Konflikt-Dialog (kein
+  // window.confirm!) mit „Schreibgeschützt öffnen"/„Trotzdem erzwingen"/
+  // „Abbrechen". Beide „öffnen"-Optionen übernehmen das Projekt ohne eigenen
+  // Lock (die andere Instanz hält ihn) — „erzwingen" bewusst mit Warn-Hinweis
+  // im Dialog, „schreibgeschützt" als sichere Standardwahl.
+  const openProjectViaNativeDialog = async () => {
+    let opened: Awaited<ReturnType<typeof openProjectFileNative>>;
+    try {
+      opened = await openProjectFileNative();
+    } catch (err) {
+      console.error(t("file.openFailed"), err);
+      return;
+    }
+    if (!opened) return; // Nutzer hat den Öffnen-Dialog abgebrochen
+    const lock = await acquireProjectLock(opened.path);
+    if (lock.ok) {
+      applyOpenedProjectFile(opened.path, opened.content, true);
+    } else {
+      setLockConflict({ path: opened.path, content: opened.content, info: lock.info });
+    }
+  };
+  // Datei speichern: unter Tauri nativer „Speichern unter"-Dialog (Ordner + Name),
+  // im Browser Blob-Download-Fallback — die gesamte Logik (inkl. WKWebView-
+  // Härtung: octet-stream-MIME + verzögertes revoke) steckt in saveTextFile.
+  const downloadTextFile = (
+    content: string,
+    filename: string,
+    mime = "application/octet-stream",
+  ) => {
+    void saveTextFile(content, filename, mime);
+  };
+  const projectFileName = () => project.name || "modell";
+  // Führt den gewählten Direkt-Export (CSV/IFC/OBJ/STL) mit dem im Dialog
+  // gewählten Dateinamen aus. Erzeugung aus dem jeweiligen reinen Kern, Download
+  // über den robusten Helfer.
+  const runExport = (format: ExportSaveFormat, filename: string) => {
+    switch (format) {
+      case "csv":
+        downloadTextFile("﻿" + exportScheduleCsv(project), filename, "text/csv;charset=utf-8;");
+        break;
+      case "ifc":
+        downloadTextFile(exportIfcSpf(project), filename);
+        break;
+      case "obj":
+        downloadTextFile(exportObj(project), filename);
+        break;
+      case "stl":
+        downloadTextFile(exportStl(project), filename);
+        break;
+    }
+  };
+  // Schnellexport aus dem Topbar-Menü öffnet den Format-/Dateiname-Dialog
+  // (vorausgewähltes Format). PDF/DXF haben eigene Options-Dialoge.
+  const onExportSchedule = () => setExportSaveFormat("csv");
+  const onExportIfc = () => setExportSaveFormat("ifc");
+  const onExportObj = () => setExportSaveFormat("obj");
+  const onExportStl = () => setExportSaveFormat("stl");
+  // Unter Tauri: nativer Öffnen-Dialog (echter Pfad → Lock möglich). Im
+  // Browser: verstecktes <input type=file> wie bisher (kein echter Pfad, also
+  // ohne Lock — File-API im Browser liefert keinen Dateisystempfad).
+  const onOpenProject = () => {
+    if (isTauriRuntime()) {
+      void openProjectViaNativeDialog();
+    } else {
+      projectFileInputRef.current?.click();
+    }
+  };
   const onProjectFileChosen = (file: File) => {
     const r = new FileReader();
     r.onload = () => {
@@ -2212,6 +2715,9 @@ export default function App() {
           console.warn("Projekt-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
           return;
         }
+        // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
+        // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
+        releaseCurrentProjectLock();
         setProject(parsed as Project);
       } catch (err) {
         console.error("Projekt-Import fehlgeschlagen:", err);
@@ -2413,10 +2919,60 @@ export default function App() {
         if (selection?.kind === "wall" || selection?.kind === "drawing2d")
           resizeElement(selection.kind, selection.id, w, h, anchor);
       },
+      onMoveSelectionBy: (dx, dy) => {
+        if (!selection) return;
+        if (!isFinite(dx) || !isFinite(dy) || (dx === 0 && dy === 0)) return;
+        const sel2 = singleTransformSel(selection.kind, selection.id);
+        if (!sel2) return;
+        commitTransformOn(sel2, "move", [{ x: 0, y: 0 }, { x: dx, y: dy }], "move", 1);
+      },
+      onRotateSelectionAround: (cx, cy, deg) => {
+        if (!selection) return;
+        if (!isFinite(deg) || deg === 0) return;
+        const sel2 = singleTransformSel(selection.kind, selection.id);
+        if (!sel2) return;
+        const rad = (deg * Math.PI) / 180;
+        commitTransformOn(
+          sel2,
+          "rotate",
+          [
+            { x: cx, y: cy },
+            { x: cx + 1, y: cy },
+            { x: cx + Math.cos(rad), y: cy + Math.sin(rad) },
+          ],
+          "move",
+          1,
+        );
+      },
+      onSetDrawingLineLength: (length) => {
+        if (selection?.kind !== "drawing2d" || !isFinite(length) || length <= 0) return;
+        const d = project.drawings2d.find((x) => x.id === selection.id);
+        if (!d || d.geom.shape !== "line") return;
+        const { a, b } = d.geom;
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 1e-9) return;
+        const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+        updateDrawing2D(selection.id, {
+          geom: { ...d.geom, b: { x: a.x + ux * length, y: a.y + uy * length } },
+        });
+      },
+      onSetDrawingCircleRadius: (radius) => {
+        if (selection?.kind !== "drawing2d" || !isFinite(radius) || radius <= 0) return;
+        const d = project.drawings2d.find((x) => x.id === selection.id);
+        if (!d || d.geom.shape !== "circle") return;
+        updateDrawing2D(selection.id, { geom: { ...d.geom, r: radius } });
+      },
       // ── Wand-Attribute (nur bei selektierter Wand) ─────────────────────────
       onSetWallReferenceLine: (ref) => {
         if (selection?.kind === "wall")
           updateWall(selection.id, { referenceLine: ref });
+      },
+      onSetWallSliceTermination: (termination) => {
+        if (selection?.kind === "wall")
+          // "both" ist der Default ⇒ als undefined speichern (Alt-Projekt-Parität).
+          updateWall(selection.id, {
+            sliceTermination: termination === "both" ? undefined : termination,
+          });
       },
       onSetWallType: (wallTypeId) => {
         if (selection?.kind === "wall")
@@ -2446,6 +3002,10 @@ export default function App() {
       onSetCeilingTop: (anchor) => {
         if (selection?.kind === "ceiling")
           updateCeiling(selection.id, { top: anchor ?? undefined });
+      },
+      onSetCeilingBottom: (anchor) => {
+        if (selection?.kind === "ceiling")
+          updateCeiling(selection.id, { bottom: anchor ?? undefined });
       },
       // ── Öffnungs-Attribute (nur bei selektierter Öffnung) ──────────────────
       onSetOpeningKind: (kind) => {
@@ -2496,6 +3056,12 @@ export default function App() {
       onSetOpeningLintelLines: (lintelLines) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { lintelLines });
       },
+      // Typ-Zuweisung (Bibliothek): Tür-/Fenstertyp per typeId; leerer String löst
+      // die Zuweisung wieder (Inline-Verhalten).
+      onSetOpeningType: (typeId) => {
+        if (selection?.kind === "opening")
+          updateOpening(selection.id, { typeId: typeId || undefined });
+      },
       // ── Treppen-Attribute (nur bei selektierter Treppe) ────────────────────
       onSetStairShape: (shape) => {
         if (selection?.kind === "stair") updateStair(selection.id, { shape });
@@ -2518,6 +3084,12 @@ export default function App() {
       onSetStairReferenz: (referenz) => {
         if (selection?.kind === "stair") updateStair(selection.id, { referenz });
       },
+      // Typ-Zuweisung (Bibliothek): Treppentyp per typeId; leerer String löst die
+      // Zuweisung (Inline-Verhalten). Treibt u. a. die 3D-Tragart (massiv/offen).
+      onSetStairType: (typeId) => {
+        if (selection?.kind === "stair")
+          updateStair(selection.id, { typeId: typeId || undefined });
+      },
       // ── Raum-Attribute (nur bei selektiertem Raum) ─────────────────────────
       onSetRoomName: (name) => {
         if (selection?.kind === "room") updateRoom(selection.id, { name });
@@ -2526,12 +3098,481 @@ export default function App() {
         if (selection?.kind === "room") updateRoom(selection.id, { siaCategory: category });
       },
       onEditRoomStamp: (roomId) => onOpenStampEditor(roomId),
+      // ── Extrusions-Attribute (truck-Integration; nur bei selektiertem Körper) ──
+      onSetExtrudedSolidHeight: (height) => {
+        if (selection?.kind !== "extrudedSolid" || !(height > 0)) return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
+            s.id === id ? { ...s, height } : s,
+          ),
+        }));
+      },
+      onSetExtrudedSolidTaper: (taper) => {
+        if (selection?.kind !== "extrudedSolid") return;
+        const clamped = Math.min(1, Math.max(0, taper));
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
+            s.id === id ? { ...s, taper: clamped } : s,
+          ),
+        }));
+      },
+      // ── Stützen-Attribute (Tragwerk; nur bei selektierter Stütze) ──────────
+      onSetColumnProfileKind: (kind) => {
+        if (selection?.kind !== "column") return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          columns: (p.columns ?? []).map((c) => {
+            if (c.id !== id) return c;
+            if (kind === c.profile.kind) return c;
+            // Profil-Typ wechseln: sinnvolles Mass aus dem bisherigen ableiten.
+            if (kind === "round") {
+              const r =
+                c.profile.kind === "rect"
+                  ? Math.max(c.profile.width, c.profile.depth) / 2
+                  : c.profile.radius;
+              return { ...c, profile: { kind: "round", radius: r } };
+            }
+            const side = c.profile.kind === "round" ? c.profile.radius * 2 : 0.3;
+            return { ...c, profile: { kind: "rect", width: side, depth: side } };
+          }),
+        }));
+      },
+      onSetColumnWidth: (width) => {
+        if (selection?.kind !== "column" || !(width > 0)) return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          columns: (p.columns ?? []).map((c) =>
+            c.id === id && c.profile.kind === "rect"
+              ? { ...c, profile: { ...c.profile, width } }
+              : c,
+          ),
+        }));
+      },
+      onSetColumnDepth: (depth) => {
+        if (selection?.kind !== "column" || !(depth > 0)) return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          columns: (p.columns ?? []).map((c) =>
+            c.id === id && c.profile.kind === "rect"
+              ? { ...c, profile: { ...c.profile, depth } }
+              : c,
+          ),
+        }));
+      },
+      onSetColumnRadius: (radius) => {
+        if (selection?.kind !== "column" || !(radius > 0)) return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          columns: (p.columns ?? []).map((c) =>
+            c.id === id && c.profile.kind === "round"
+              ? { ...c, profile: { ...c.profile, radius } }
+              : c,
+          ),
+        }));
+      },
+      onSetColumnHeight: (height) => {
+        if (selection?.kind !== "column" || !(height > 0)) return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          columns: (p.columns ?? []).map((c) => (c.id === id ? { ...c, height } : c)),
+        }));
+      },
+      onSetColumnRotation: (deg) => {
+        if (selection?.kind !== "column" || !Number.isFinite(deg)) return;
+        const id = selection.id;
+        const rotation = (deg * Math.PI) / 180;
+        setProject((p) => ({
+          ...p,
+          columns: (p.columns ?? []).map((c) => (c.id === id ? { ...c, rotation } : c)),
+        }));
+      },
       // ── Site-/Kontext-Schicht ──────────────────────────────────────────────
       contextObjects: project.context ?? [],
-      onAddContextObjects: addContextObjects,
+      onAddContextObjects: addContextObjectsAndFit,
       onRemoveContextObject: removeContextObject,
       onGenerateTerrain: generateTerrain,
       onImportDxf: () => dxfInputRef.current?.click(),
+      // ── Element-Baum (Elemente-Panel) ────────────────────────────────────
+      onSelectScheduleRow: (
+        kind: ScheduleKind,
+        id: string,
+        floorId: string | undefined,
+        opts?: { zoom?: boolean },
+      ) => {
+        const applySelection = () => {
+          setSelectedWallIds([]);
+          setSelectedDrawingId(null);
+          setSelectedCeilingIds([]);
+          setSelectedOpeningIds([]);
+          setSelectedStairIds([]);
+          setSelectedRoomIds([]);
+          setSelectedExtrudedSolidIds([]);
+          setSelectedColumnIds([]);
+          switch (kind) {
+            case "Wand":
+              setSelectedWallIds([id]);
+              break;
+            case "Decke":
+              setSelectedCeilingIds([id]);
+              break;
+            case "Fenster":
+            case "Öffnung":
+              setSelectedOpeningIds([id]);
+              break;
+            case "Treppe":
+              setSelectedStairIds([id]);
+              break;
+            case "Extrusion":
+              setSelectedExtrudedSolidIds([id]);
+              break;
+            default:
+              // z. B. Legacy-„Tür"-Datensätze (project.doors) — kein Auswahl-Kanal.
+              return;
+          }
+          if (opts?.zoom) requestAnimationFrame(() => planViewRef.current?.fit());
+        };
+        if (floorId && floorId !== activeLevelId) {
+          // Der Geschosswechsel-Effekt (oben, deps [activeLevelId]) leert die
+          // Auswahl NACH diesem Render — die neue Auswahl daher einen Tick
+          // später anwenden, sonst überschreibt der Effekt sie sofort wieder.
+          setActiveLevelId(floorId);
+          requestAnimationFrame(applySelection);
+        } else {
+          applySelection();
+        }
+      },
+
+      // ── Ausschnitte / View-Snapshots (DOSSIER A2) ─────────────────────────
+      // Erfassen: aktuellen Darstellungszustand einsammeln (View-State +
+      // Sichtbarkeits-Snapshots + aktive Overrides) → pure captureViewSnapshot →
+      // an project.viewSnapshots anhängen (im Dokument, nicht localStorage).
+      onCaptureViewSnapshot: (name: string, folderId?: string) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const st: ViewSnapshotState = {
+          viewType,
+          view3d,
+          fov,
+          scaleDenominator,
+          detail,
+          activeLevelId,
+          layerVisibility: snapshotLayerVisibility(),
+          drawingVisibility: snapshotDrawingVisibility(),
+          enabledOverrideRuleIds: (project.overrideRules ?? [])
+            .filter((r) => r.enabled)
+            .map((r) => r.id),
+        };
+        const snap = captureViewSnapshot(`vs-${Date.now()}`, trimmed, st);
+        // Neuer Ausschnitt landet im aktiven Ordner (falls das Panel einen
+        // mitgibt), sonst auf der Wurzelebene — additiv (folderId optional).
+        const full = folderId ? { ...snap, folderId } : snap;
+        setProject((p) => ({
+          ...p,
+          viewSnapshots: [...(p.viewSnapshots ?? []), full],
+        }));
+      },
+
+      // Wiederherstellen: ALLE Felder zurückspielen. Reihenfolge: Geschoss ZUERST
+      // (setActiveLevelId setzt viewType provisorisch aus viewTypeByLevel), danach
+      // die Ansicht (überschreibt es synchron), dann Sichtbarkeit + Overrides.
+      // Die Store-Setter laufen synchron im selben Tick; nur den imperativen
+      // Massstab-Zoom (Plan muss für den neuen View gemountet sein) via rAF
+      // nachziehen — analog zum BIM-Tree-Geschosswechsel.
+      onApplyViewSnapshot: (id: string) => {
+        const snap = (project.viewSnapshots ?? []).find((s) => s.id === id);
+        if (!snap) return;
+        const st = readViewSnapshot(snap);
+        setActiveLevelId(st.activeLevelId);
+        setViewType(st.viewType);
+        setView3d(st.view3d);
+        setFov(st.fov);
+        setDetail(st.detail);
+        setScaleDenominator(st.scaleDenominator);
+        applyLayerVisibility(st.layerVisibility);
+        applyDrawingVisibility(st.drawingVisibility);
+        setProject((p) => ({
+          ...p,
+          overrideRules: applyOverrideRuleEnabled(
+            p.overrideRules ?? [],
+            st.enabledOverrideRuleIds,
+          ),
+        }));
+        requestAnimationFrame(() =>
+          planViewRef.current?.applyScale(st.scaleDenominator),
+        );
+        // Klick = Anwenden UND Anwählen: der Ausschnitt bleibt markiert, bis der
+        // Nutzer eine erfasste Grösse ändert (Abweichungs-Effekt löscht ihn dann).
+        setSelectedViewSnapshotId(id);
+      },
+
+      onRenameViewSnapshot: (id: string, name: string) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        setProject((p) => ({
+          ...p,
+          viewSnapshots: (p.viewSnapshots ?? []).map((s) =>
+            s.id === id ? { ...s, name: trimmed } : s,
+          ),
+        }));
+      },
+
+      onDeleteViewSnapshot: (id: string) => {
+        setProject((p) => ({
+          ...p,
+          viewSnapshots: (p.viewSnapshots ?? []).filter((s) => s.id !== id),
+        }));
+        if (selectedViewSnapshotId === id) setSelectedViewSnapshotId(null);
+      },
+
+      // ── Ausschnitte-Baum (Ordner, DOSSIER A2) ─────────────────────────────
+      // Immutable CRUD über pure Helfer (state/viewSnapshotFolders.ts). Löschen
+      // zieht Inhalt auf die Elternebene hoch (kein Datenverlust).
+      onAddViewSnapshotFolder: (parentId) => {
+        const id = `vsf-${Date.now()}`;
+        const folder = createViewSnapshotFolder(
+          id,
+          t("viewsnap.folder.defaultName"),
+          parentId,
+        );
+        setProject((p) => ({
+          ...p,
+          viewSnapshotFolders: [...(p.viewSnapshotFolders ?? []), folder],
+        }));
+        return id;
+      },
+      onRenameViewSnapshotFolder: (id, name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        setProject((p) => ({
+          ...p,
+          viewSnapshotFolders: (p.viewSnapshotFolders ?? []).map((f) =>
+            f.id === id ? { ...f, name: trimmed } : f,
+          ),
+        }));
+      },
+      onDeleteViewSnapshotFolder: (id) => {
+        setProject((p) => {
+          const { folders, snapshots } = deleteViewSnapshotFolder(
+            id,
+            p.viewSnapshotFolders ?? [],
+            p.viewSnapshots ?? [],
+          );
+          return { ...p, viewSnapshotFolders: folders, viewSnapshots: snapshots };
+        });
+      },
+      onMoveViewSnapshotToFolder: (snapshotId, folderId) => {
+        setProject((p) => ({
+          ...p,
+          viewSnapshots: moveSnapshotToFolder(
+            p.viewSnapshots ?? [],
+            snapshotId,
+            folderId,
+          ),
+        }));
+      },
+      onMoveViewSnapshotFolder: (folderId, parentId) => {
+        setProject((p) => ({
+          ...p,
+          viewSnapshotFolders: moveViewSnapshotFolder(
+            p.viewSnapshotFolders ?? [],
+            folderId,
+            parentId,
+          ),
+        }));
+      },
+
+      // Footer-Bar des Ausschnitte-Panels: die aktuell „angewählte" Id plus
+      // Lesezugriff auf die benannten Sichtbarkeits-Kombinationen (localStorage),
+      // damit der Footer den Kombi-NAMEN zu den gespeicherten Maps auflösen kann.
+      selectedViewSnapshotId,
+      listLayerCombos,
+      loadLayerCombo,
+      listDrawingCombos,
+      loadDrawingCombo,
+
+      // ── Layouts / Masterlayouts (DOSSIER A3) ──────────────────────────────
+      // Immutable CRUD über pure Helfer (panels/layoutModel.ts); das Blatt öffnet
+      // als erstklassige Ansicht IM HAUPT-Viewport (activeLayoutId, Phase 2b).
+      // Anlegen öffnet es direkt; Löschen schliesst es, falls es das offene trifft.
+      onAddLayout: (name, paper, orientation) => {
+        const lay = createLayout(`lay-${Date.now()}`, name, paper, orientation);
+        setProject((p) => ({ ...p, layouts: [...(p.layouts ?? []), lay] }));
+        setActiveLayoutId(lay.id);
+      },
+      onRenameLayout: (id, name) => {
+        setProject((p) => ({
+          ...p,
+          layouts: (p.layouts ?? []).map((l) =>
+            l.id === id ? { ...l, name } : l,
+          ),
+        }));
+      },
+      onDeleteLayout: (id) => {
+        setProject((p) => ({
+          ...p,
+          layouts: (p.layouts ?? []).filter((l) => l.id !== id),
+        }));
+        setActiveLayoutId((cur) => (cur === id ? null : cur));
+      },
+      onOpenLayout: (id) => setActiveLayoutId(id),
+      onAddMasterLayout: (name) => {
+        const m = createMasterLayout(`mas-${Date.now()}`, name, "a4", "portrait");
+        setProject((p) => ({
+          ...p,
+          masterLayouts: [...(p.masterLayouts ?? []), m],
+        }));
+      },
+      onRenameMasterLayout: (id, name) => {
+        setProject((p) => ({
+          ...p,
+          masterLayouts: (p.masterLayouts ?? []).map((m) =>
+            m.id === id ? { ...m, name } : m,
+          ),
+        }));
+      },
+      onDeleteMasterLayout: (id) => {
+        // Master löschen UND Bindungen der Layouts lösen (masterId → undefined).
+        setProject((p) => ({
+          ...p,
+          masterLayouts: (p.masterLayouts ?? []).filter((m) => m.id !== id),
+          layouts: (p.layouts ?? []).map((l) =>
+            l.masterId === id ? { ...l, masterId: undefined } : l,
+          ),
+        }));
+      },
+      onPatchMasterLayout: (id, patch) => {
+        setProject((p) => ({
+          ...p,
+          masterLayouts: (p.masterLayouts ?? []).map((m) =>
+            m.id === id ? { ...m, ...patch } : m,
+          ),
+        }));
+      },
+
+      // ── Layouts-Baum (Ordner) + Erstell-Dialoge (DOSSIER A3) ────────────
+      onAddLayoutFolder: (parentId) => {
+        const id = `folder-${Date.now()}`;
+        const folder = createLayoutFolder(id, t("layouts.folder.defaultName"), parentId);
+        setProject((p) => ({
+          ...p,
+          layoutFolders: [...(p.layoutFolders ?? []), folder],
+        }));
+        return id;
+      },
+      onAddMasterFolder: (parentId) => {
+        const id = `mfolder-${Date.now()}`;
+        const folder = createLayoutFolder(
+          id,
+          t("layouts.folder.defaultName"),
+          parentId,
+          "master",
+        );
+        setProject((p) => ({
+          ...p,
+          layoutFolders: [...(p.layoutFolders ?? []), folder],
+        }));
+        return id;
+      },
+      onDeleteMasterFolder: (id) => {
+        setProject((p) => {
+          const { folders, masters } = deleteMasterFolder(
+            id,
+            p.layoutFolders ?? [],
+            p.masterLayouts ?? [],
+          );
+          return { ...p, layoutFolders: folders, masterLayouts: masters };
+        });
+      },
+      onRenameLayoutFolder: (id, name) => {
+        setProject((p) => ({
+          ...p,
+          layoutFolders: (p.layoutFolders ?? []).map((f) =>
+            f.id === id ? { ...f, name } : f,
+          ),
+        }));
+      },
+      onDeleteLayoutFolder: (id) => {
+        setProject((p) => {
+          const { folders, layouts } = deleteLayoutFolder(
+            id,
+            p.layoutFolders ?? [],
+            p.layouts ?? [],
+          );
+          return { ...p, layoutFolders: folders, layouts };
+        });
+      },
+      onCreateLayout: (opts) => {
+        const id = `lay-${Date.now()}`;
+        // Bei gebundenem Master erbt das Blatt dessen Papier/Ausrichtung/Grösse.
+        const master = opts.masterId
+          ? (project.masterLayouts ?? []).find((m) => m.id === opts.masterId)
+          : undefined;
+        const paper = master?.paper ?? opts.paper;
+        const orientation = master?.orientation ?? opts.orientation;
+        const customWidthMm = master ? master.customWidthMm : opts.customWidthMm;
+        const customHeightMm = master ? master.customHeightMm : opts.customHeightMm;
+        const lay = createLayout(id, t("layouts.defaultName"), paper, orientation);
+        const full = {
+          ...lay,
+          ...(opts.masterId ? { masterId: opts.masterId } : {}),
+          ...(opts.folderId ? { folderId: opts.folderId } : {}),
+          ...(customWidthMm !== undefined && customHeightMm !== undefined
+            ? { customWidthMm, customHeightMm }
+            : {}),
+        };
+        setProject((p) => ({ ...p, layouts: [...(p.layouts ?? []), full] }));
+        return id;
+      },
+      onCreateMasterLayout: (opts) => {
+        const id = `mas-${Date.now()}`;
+        const custom =
+          opts.customWidthMm !== undefined && opts.customHeightMm !== undefined
+            ? { widthMm: opts.customWidthMm, heightMm: opts.customHeightMm }
+            : undefined;
+        const m = createMasterLayout(
+          id,
+          t("layouts.defaultMasterName"),
+          opts.paper,
+          opts.orientation,
+          custom,
+        );
+        const full = opts.folderId ? { ...m, folderId: opts.folderId } : m;
+        setProject((p) => ({
+          ...p,
+          masterLayouts: [...(p.masterLayouts ?? []), full],
+        }));
+        return id;
+      },
+      onExportFolderPdf: (folderId) => {
+        const folder = (project.layoutFolders ?? []).find((f) => f.id === folderId);
+        const name = folder?.name?.trim() || "layouts";
+        void saveFolderPdf(project, folderId, name);
+      },
+      onMoveLayoutToFolder: (layoutId, folderId) => {
+        setProject((p) => ({
+          ...p,
+          layouts: moveLayoutToFolder(p.layouts ?? [], layoutId, folderId),
+        }));
+      },
+      onMoveFolderToFolder: (folderId, parentId) => {
+        setProject((p) => ({
+          ...p,
+          layoutFolders: moveFolderToFolder(
+            p.layoutFolders ?? [],
+            folderId,
+            parentId,
+          ),
+        }));
+      },
     };
     return value;
     // setProject-Closures sind stabil genug; Neuberechnung bei project/active.
@@ -2544,7 +3585,61 @@ export default function App() {
     activeWallTypeId,
     snap,
     viewType,
+    view3d,
+    fov,
+    detail,
+    scaleDenominator,
     selection,
+    selectedViewSnapshotId,
+  ]);
+
+  // ── Ausschnitt-Anwahl: „bleibt bis zur Abweichung" (DOSSIER A2) ───────────
+  // Sobald ein Ausschnitt angewählt ist, vergleicht dieser Effekt bei JEDER
+  // Änderung einer ERFASSTEN Grösse (Ansicht/Kamera/Massstab/Detail/Geschoss +
+  // Ebenen-/Zeichnungssichtbarkeit + aktive Overrides) den Live-Zustand gegen
+  // den gespeicherten Kernzustand (pure `snapshotMatchesLiveState`). Weicht auch
+  // nur EIN Feld ab → Auswahl löschen (Footer verschwindet). Der Effekt reagiert
+  // NUR auf die snapshot-relevanten Projekt-Teile (layers/drawingLevels/
+  // overrideRules), NICHT auf `project` als Ganzes — eine Wand verschieben o. Ä.
+  // lässt die Auswahl unberührt.
+  useEffect(() => {
+    if (!selectedViewSnapshotId) return;
+    const snap = (project.viewSnapshots ?? []).find(
+      (s) => s.id === selectedViewSnapshotId,
+    );
+    if (!snap) {
+      setSelectedViewSnapshotId(null);
+      return;
+    }
+    const live: ViewSnapshotState = {
+      viewType,
+      view3d,
+      fov,
+      scaleDenominator,
+      detail,
+      activeLevelId,
+      layerVisibility: snapshotLayerVisibility(),
+      drawingVisibility: snapshotDrawingVisibility(),
+      enabledOverrideRuleIds: (project.overrideRules ?? [])
+        .filter((r) => r.enabled)
+        .map((r) => r.id),
+    };
+    if (!snapshotMatchesLiveState(readViewSnapshot(snap), live)) {
+      setSelectedViewSnapshotId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedViewSnapshotId,
+    viewType,
+    view3d,
+    fov,
+    scaleDenominator,
+    detail,
+    activeLevelId,
+    project.viewSnapshots,
+    project.layers,
+    project.drawingLevels,
+    project.overrideRules,
   ]);
 
   // ── Dock-/Float-Handler (aus dem Layout-Slice) ────────────────────────────
@@ -2628,6 +3723,15 @@ export default function App() {
     onPatchCeilingType: patchCeilingType,
     onAddCeilingType: addCeilingType,
     onDeleteCeilingType: deleteCeilingType,
+    onAddDoorType: addDoorType,
+    onPatchDoorType: patchDoorType,
+    onDeleteDoorType: deleteDoorType,
+    onAddWindowType: addWindowType,
+    onPatchWindowType: patchWindowType,
+    onDeleteWindowType: deleteWindowType,
+    onAddStairType: addStairType,
+    onPatchStairType: patchStairType,
+    onDeleteStairType: deleteStairType,
     onAddComponent: addComponent,
     onDeleteComponent: deleteComponent,
     onPatchHatch: patchHatch,
@@ -2638,7 +3742,23 @@ export default function App() {
     onDeleteLineStyle: deleteLineStyle,
     onImportLineStyles: importLineStyles,
     onImportHatches: importHatches,
+    onSetOverrideRules: setOverrideRules,
   };
+
+  // ── Layout-Blatt (DOSSIER A3, Phase 2b): das offene Blatt + Viewport-Handler ─
+  // Das offene Layout wird live aus dem Projekt gelesen (Single Source of Truth);
+  // wurde es zwischenzeitlich gelöscht, ist es undefined → der Haupt-Viewport
+  // zeigt wieder die Modell-Ansicht. Die Handler mutieren immutabel über die
+  // pure CRUD-Ebene (panels/layoutModel.ts).
+  const activeLayout =
+    activeLayoutId !== null
+      ? (project.layouts ?? []).find((l) => l.id === activeLayoutId)
+      : undefined;
+  const patchOpenLayout = (id: string, fn: (l: Layout) => Layout) =>
+    setProject((p) => ({
+      ...p,
+      layouts: (p.layouts ?? []).map((l) => (l.id === id ? fn(l) : l)),
+    }));
 
   // ── Effektive Darstellung für die Hauptansicht ────────────────────────────
   // 3D: Geschosse nach dem Modus des Zeichnungsebenen-Panels, Kategorien nach
@@ -2841,8 +3961,7 @@ export default function App() {
   // Modusleiste-Wechsel: array/distribute fragen die Kopienanzahl ab.
   const onTransformMode = (mode: CopyMode) => {
     if (mode === "array" || mode === "distribute") {
-      const n = promptCount();
-      if (n) setActiveTransform((tr) => (tr ? { ...tr, copyMode: mode, count: n } : tr));
+      requestCopyCount(mode);
     } else {
       setActiveTransform((tr) => (tr ? { ...tr, copyMode: mode } : tr));
     }
@@ -2951,7 +4070,40 @@ export default function App() {
     setSelectedCeilingIds([]);
     setSelectedOpeningIds([]);
     setSelectedStairIds([]);
+    setSelectedExtrudedSolidIds([]);
+    setSelectedColumnIds([]);
     setStampEditorRoomId(roomId);
+  };
+  // Doppelklick auf ein Text-2D-Element: selektieren + Inhalts-Editor öffnen.
+  const onEditDrawingText = (drawingId: string) => {
+    const d = project.drawings2d.find((x) => x.id === drawingId);
+    if (!d || d.geom.shape !== "text") return;
+    setSelectedDrawingId(drawingId);
+    setSelectedWallIds([]);
+    setSelectedCeilingIds([]);
+    setSelectedOpeningIds([]);
+    setSelectedStairIds([]);
+    setSelectedRoomIds([]);
+    setSelectedExtrudedSolidIds([]);
+    setSelectedColumnIds([]);
+    setEditTextId(drawingId);
+  };
+  // Bearbeiteten Text-Inhalt übernehmen (immutabel; nur bei Text-Geometrie).
+  const commitTextEdit = (value: string) => {
+    const id = editTextId;
+    if (!id) return;
+    const text = value.trim();
+    if (text !== "") {
+      setProject((p) => ({
+        ...p,
+        drawings2d: p.drawings2d.map((d) =>
+          d.id === id && d.geom.shape === "text"
+            ? { ...d, geom: { ...d.geom, text } }
+            : d,
+        ),
+      }));
+    }
+    setEditTextId(null);
   };
   const onPlanSelect = (sel: PlanSelection) => {
     // Shift+Klick: Mehrfach-Auswahl — getroffenes Element zu-/abschalten, den
@@ -3000,6 +4152,20 @@ export default function App() {
             ? selectedRoomIds.filter((r) => r !== id)
             : [...selectedRoomIds, id],
         );
+      } else if (sel.extrudedSolidId) {
+        const id = sel.extrudedSolidId;
+        setSelectedExtrudedSolidIds(
+          selectedExtrudedSolidIds.includes(id)
+            ? selectedExtrudedSolidIds.filter((x) => x !== id)
+            : [...selectedExtrudedSolidIds, id],
+        );
+      } else if (sel.columnId) {
+        const id = sel.columnId;
+        setSelectedColumnIds(
+          selectedColumnIds.includes(id)
+            ? selectedColumnIds.filter((x) => x !== id)
+            : [...selectedColumnIds, id],
+        );
       }
       return;
     }
@@ -3013,6 +4179,8 @@ export default function App() {
       setSelectedCeilingIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     } else if (sel.wallId) {
       setSelectedWallIds([sel.wallId]);
       setSelectedDrawingId(null);
@@ -3020,6 +4188,17 @@ export default function App() {
       setSelectedOpeningIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
+    } else if (sel.columnId) {
+      setSelectedColumnIds([sel.columnId]);
+      setSelectedWallIds([]);
+      setSelectedDrawingId(null);
+      setSelectedCeilingIds([]);
+      setSelectedOpeningIds([]);
+      setSelectedStairIds([]);
+      setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
     } else if (sel.drawingId) {
       setSelectedDrawingId(sel.drawingId);
       setSelectedWallIds([]);
@@ -3027,6 +4206,17 @@ export default function App() {
       setSelectedOpeningIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
+    } else if (sel.extrudedSolidId) {
+      setSelectedExtrudedSolidIds([sel.extrudedSolidId]);
+      setSelectedWallIds([]);
+      setSelectedDrawingId(null);
+      setSelectedCeilingIds([]);
+      setSelectedOpeningIds([]);
+      setSelectedStairIds([]);
+      setSelectedRoomIds([]);
+      setSelectedColumnIds([]);
     } else if (sel.ceilingId) {
       setSelectedCeilingIds([sel.ceilingId]);
       setSelectedWallIds([]);
@@ -3034,6 +4224,8 @@ export default function App() {
       setSelectedOpeningIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     } else if (sel.stairId) {
       setSelectedStairIds([sel.stairId]);
       setSelectedWallIds([]);
@@ -3041,6 +4233,8 @@ export default function App() {
       setSelectedCeilingIds([]);
       setSelectedOpeningIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     } else if (sel.roomId) {
       setSelectedRoomIds([sel.roomId]);
       setSelectedWallIds([]);
@@ -3048,6 +4242,8 @@ export default function App() {
       setSelectedCeilingIds([]);
       setSelectedOpeningIds([]);
       setSelectedStairIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     } else {
       setSelectedWallIds([]);
       setSelectedDrawingId(null);
@@ -3055,6 +4251,8 @@ export default function App() {
       setSelectedOpeningIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     }
   };
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
@@ -3062,11 +4260,14 @@ export default function App() {
   const onPlanMarquee = (sel: MarqueeSelection) => {
     setSelectedWallIds(sel.wallIds);
     setSelectedDrawingIds(sel.drawingIds ?? []);
-    // Decken/Öffnungen/Treppen/Räume sind (noch) nicht Teil des Marquee → beim Aufziehen abwählen.
+    // Decken/Öffnungen/Treppen/Räume/Extrusionen sind (noch) nicht Teil des
+    // Marquee → beim Aufziehen abwählen.
     setSelectedCeilingIds([]);
     setSelectedOpeningIds([]);
     setSelectedStairIds([]);
     setSelectedRoomIds([]);
+    setSelectedExtrudedSolidIds([]);
+    setSelectedColumnIds([]);
   };
   // Rechts-Klick im Grundriss: Wand-Kontextmenü. Trifft der Klick eine Wand, die
   // NICHT bereits in der Auswahl ist, wird die Auswahl auf sie gesetzt (damit die
@@ -3090,6 +4291,8 @@ export default function App() {
       setSelectedOpeningIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Treppe wählen (Einzelauswahl).
@@ -3101,6 +4304,8 @@ export default function App() {
       setSelectedCeilingIds([]);
       setSelectedOpeningIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Decke wählen (Einzelauswahl).
@@ -3112,6 +4317,8 @@ export default function App() {
       setSelectedStairIds([]);
       setSelectedOpeningIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Öffnung wählen (Einzelauswahl).
@@ -3123,6 +4330,8 @@ export default function App() {
       setSelectedCeilingIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
     }
   };
   // Links-KLICK im Nordstern-3D-Viewport (WASM, TS-Raycast): getroffenes Bauteil
@@ -3139,6 +4348,33 @@ export default function App() {
       setSelectedOpeningIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
+      return;
+    }
+    // Öffnung (Fenster/Tür) und Treppe sind jetzt auch im WASM-Viewport pickbar
+    // (raycast3d/pickGeometry). Jede Art ersetzt die Auswahl exklusiv; nur Wände
+    // unterstützen additive Mehrfachauswahl (wie bisher).
+    if (hit.kind === "opening") {
+      setSelectedOpeningIds([hit.id]);
+      setSelectedWallIds([]);
+      setSelectedCeilingIds([]);
+      setSelectedDrawingId(null);
+      setSelectedStairIds([]);
+      setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
+      return;
+    }
+    if (hit.kind === "stair") {
+      setSelectedStairIds([hit.id]);
+      setSelectedWallIds([]);
+      setSelectedCeilingIds([]);
+      setSelectedDrawingId(null);
+      setSelectedOpeningIds([]);
+      setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
       return;
     }
     if (hit.kind === "wall") {
@@ -3156,6 +4392,8 @@ export default function App() {
     setSelectedOpeningIds([]);
     setSelectedStairIds([]);
     setSelectedRoomIds([]);
+    setSelectedExtrudedSolidIds([]);
+    setSelectedColumnIds([]);
   };
   // Rechts-Klick im 3D: Wand-Kontextmenü an der Cursorposition.
   const onViewportContextMenu = (info: ViewportContextInfo) => {
@@ -3225,7 +4463,7 @@ export default function App() {
       <input
         ref={projectFileInputRef}
         type="file"
-        accept="application/json,.json"
+        accept="application/json,.json,.obp"
         style={{ display: "none" }}
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -3244,18 +4482,19 @@ export default function App() {
         onExportPdf={() => setExportOpen(true)}
         onExportDxf={() => setExportDxfOpen(true)}
         onExportSchedule={onExportSchedule}
+        onExportIfc={onExportIfc}
+        onExportObj={onExportObj}
+        onExportStl={onExportStl}
+        viewType={viewType}
+        fov={fov}
+        onFov={setFov}
+        cameraEnabled={activeLevel.kind === "floor"}
         resourcesOpen={resourcesOpen}
         onToggleResources={() => setResourcesOpen((v) => !v)}
         onOpenSettings={() => setSettingsOpen(true)}
         onImport={() => dxfInputRef.current?.click()}
         onSaveProject={onSaveProject}
         onOpenProject={onOpenProject}
-        layoutMenu={
-          <LayoutMenu
-            layout={layout}
-            onApply={(l) => setLayout(reconcileLayout(l))}
-          />
-        }
       />
 
       {/* Ribbon-Oberleiste (2D · 3D · BIM · Ansichten). Der „Ansichten"-Tab trägt
@@ -3278,8 +4517,6 @@ export default function App() {
             onViewType={setViewType}
             view3d={view3d}
             onView3d={setView3d}
-            fov={fov}
-            onFov={setFov}
             detail={detail}
             onDetail={setDetail}
             detailEnabled={planActive}
@@ -3327,11 +4564,11 @@ export default function App() {
               onViewType={setViewType}
               view3d={view3d}
               onView3d={setView3d}
-              fov={fov}
-              onFov={setFov}
               renderMode={renderMode}
               onRenderMode={setRenderMode}
               renderModeEnabled={viewType === "perspektive"}
+              onRunCommand={onRunCommand}
+              activeCommand={engineView.commandName}
             />
           ),
         }}
@@ -3361,6 +4598,50 @@ export default function App() {
             Befehlszeile nur so breit wie der Viewport (nicht die ganze App),
             und die Docks nehmen die volle Body-Höhe ein (inkl. der Zeile). */}
         <div className="center-col">
+        {activeLayout ? (
+          /* Layout-Modus (Phase 2b): das Blatt füllt den Haupt-Viewport (statt
+             Grundriss/3D) und ist direkt mit der Maus editierbar — platzieren/
+             verschieben/skalieren/löschen der Viewports, Pan/Zoom, mm↔Bildschirm.
+             Die Befehlszeile entfällt (kein Zeichnen auf dem Blatt). */
+          <LayoutSheetView
+            project={project}
+            layout={activeLayout}
+            handlers={{
+              onBack: () => setActiveLayoutId(null),
+              onPatchViewport: (viewportId, patch) =>
+                patchOpenLayout(activeLayout.id, (l) =>
+                  patchViewportInLayout(l, viewportId, patch),
+                ),
+              onRemoveViewport: (viewportId) =>
+                patchOpenLayout(activeLayout.id, (l) =>
+                  removeViewportFromLayout(l, viewportId),
+                ),
+              onAddViewport: (snapshotId, init) =>
+                patchOpenLayout(activeLayout.id, (l) =>
+                  addViewportToLayout(
+                    l,
+                    createViewport(`vp-${Date.now()}`, snapshotId, init),
+                  ),
+                ),
+              onAddAnnotation: (kind, init) =>
+                patchOpenLayout(activeLayout.id, (l) =>
+                  addAnnotationToLayout(
+                    l,
+                    createAnnotation(`ann-${Date.now()}`, kind, init),
+                  ),
+                ),
+              onPatchAnnotation: (annotationId, patch) =>
+                patchOpenLayout(activeLayout.id, (l) =>
+                  patchAnnotationInLayout(l, annotationId, patch),
+                ),
+              onRemoveAnnotation: (annotationId) =>
+                patchOpenLayout(activeLayout.id, (l) =>
+                  removeAnnotationFromLayout(l, annotationId),
+                ),
+            }}
+          />
+        ) : (
+        <>
         {/* Hauptansicht (Mitte) — füllt den verbleibenden Platz. Die Plan-
             Ansicht meldet Cursor + Zoom an die Status-/Oberleiste und nimmt
             das Zoom-Handle entgegen. */}
@@ -3392,10 +4673,13 @@ export default function App() {
           selectedCeilingIds={selectedCeilingIds}
           selectedOpeningIds={selectedOpeningIds}
           selectedStairIds={selectedStairIds}
+          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
+          selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           roomStamp={roomStamp}
           onStampMove={moveRoomStamp}
           onStampEdit={onOpenStampEditor}
+          onEditDrawingText={onEditDrawingText}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -3459,6 +4743,13 @@ export default function App() {
               if (isFinite(v)) submitTransformValue(v);
               return;
             }
+            // Getipptes „rotate"/„drehen" startet die interaktive Drehung (U/I/O/P),
+            // analog zum Ribbon-Button und der Taste „d".
+            const cmdWord = text.trim().toLowerCase();
+            if (cmdWord === "rotate" || cmdWord === "drehen") {
+              startTransformOp("rotate");
+              return;
+            }
             engine.submitText(text);
           }}
           onOption={(id) =>
@@ -3472,6 +4763,8 @@ export default function App() {
           }
           suggest={(prefix) => engine.suggest(prefix)}
         />
+        </>
+        )}
         </div>
 
         {/* Rechtes Dock: standardmäßig leer (Ressourcen ist ein schwebendes
@@ -3620,9 +4913,75 @@ export default function App() {
           rendererMode={rendererMode}
           webGpuAvailable={webGpuAvailable}
           onRendererModeChange={setRendererMode}
+          layoutMenu={
+            <LayoutMenu
+              layout={layout}
+              onApply={(l) => setLayout(reconcileLayout(l))}
+            />
+          }
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      {exportSaveFormat && (
+        <ExportSaveDialog
+          initialFormat={exportSaveFormat}
+          baseName={projectFileName()}
+          onSave={(fmt, filename) => {
+            runExport(fmt, filename);
+            setExportSaveFormat(null);
+          }}
+          onClose={() => setExportSaveFormat(null)}
+        />
+      )}
+
+      {lockConflict && (
+        <LockConflictDialog
+          info={lockConflict.info}
+          onCancel={() => setLockConflict(null)}
+          onReadOnly={() => {
+            applyOpenedProjectFile(lockConflict.path, lockConflict.content, false);
+            setLockConflict(null);
+          }}
+          onForceOpen={() => {
+            // Kein eigener Lock (die andere Instanz hält ihn) — bewusste
+            // Risiko-Übernahme, im Dialog als Warnung gekennzeichnet.
+            applyOpenedProjectFile(lockConflict.path, lockConflict.content, false);
+            setLockConflict(null);
+          }}
+        />
+      )}
+
+      {pendingCopyMode && (
+        <PromptDialog
+          title={t(pendingCopyMode === "array" ? "transform.mode.array" : "transform.mode.distribute")}
+          label={t("transform.countPrompt")}
+          defaultValue="3"
+          type="number"
+          onConfirm={commitCopyCount}
+          onClose={() => setPendingCopyMode(null)}
+        />
+      )}
+
+      {/* Text-Inhalt-Editor: per Doppelklick auf ein Text-2D-Element geöffnet.
+          Einzeilige Bearbeitung des Textinhalts (Absätze der Textspalte per „\n"
+          werden dabei zu einer Zeile zusammengezogen — für mehrzeilige Spalten
+          bleibt die Ersteingabe massgeblich). */}
+      {editTextId &&
+        (() => {
+          const d = project.drawings2d.find((x) => x.id === editTextId);
+          if (!d || d.geom.shape !== "text") return null;
+          return (
+            <PromptDialog
+              title={t("cmd.text.label")}
+              label={t("cmd.text.enter")}
+              defaultValue={d.geom.text}
+              type="text"
+              onConfirm={commitTextEdit}
+              onClose={() => setEditTextId(null)}
+            />
+          );
+        })()}
 
       {/* Text-Editor (schwebendes Fenster): Doppelklick auf einen Raumstempel bzw.
           Button in der Objekt-Info öffnet ihn. „Übernehmen" schreibt das
@@ -3853,6 +5212,10 @@ export default function App() {
             </InlineEditor>
           );
         })()}
+
+      {/* Nicht-blockierende Kurzmeldungen (Ersatz für window.alert, siehe
+          notifySlice.ts) — top-level, damit sie über allen Docks/Modals liegen. */}
+      <Toast />
     </div>
   );
 }
@@ -4330,14 +5693,17 @@ function LayoutMenu({
   onApply: (layout: LayoutState) => void;
 }) {
   const [names, setNames] = useState<string[]>([]);
+  // Name-Erfassung über PromptDialog statt window.prompt (im Tauri-WKWebView
+  // deaktiviert — liefert sofort null, nichts würde je gespeichert).
+  const [saving, setSaving] = useState(false);
 
   const refresh = () => setNames(listNamedLayouts());
 
-  const onSave = () => {
-    const name = window.prompt(t("layout.savePrompt"));
-    if (!name) return;
+  const onSave = () => setSaving(true);
+  const commitSave = (name: string) => {
     saveNamedLayout(name.trim(), layout);
     refresh();
+    setSaving(false);
   };
 
   // Aktions-Menü (analog ComboMenu in TopBar.tsx): „Aktuelles speichern" oben,
@@ -4372,6 +5738,14 @@ function LayoutMenu({
   return (
     <span onPointerDownCapture={refresh}>
       <Dropdown items={items} placeholder={t("layout.placeholder")} title={t("layout.title")} />
+      {saving && (
+        <PromptDialog
+          title={t("layout.title")}
+          label={t("layout.savePrompt")}
+          onConfirm={commitSave}
+          onClose={() => setSaving(false)}
+        />
+      )}
     </span>
   );
 }
@@ -4407,10 +5781,13 @@ function Content({
   selectedCeilingIds,
   selectedOpeningIds,
   selectedStairIds,
+  selectedExtrudedSolidIds,
+  selectedColumnIds,
   selectedRoomIds,
   roomStamp,
   onStampMove,
   onStampEdit,
+  onEditDrawingText,
   onPlanSelect,
   onPlanMarquee,
   onSegmentCut,
@@ -4477,10 +5854,13 @@ function Content({
   selectedCeilingIds: string[];
   selectedOpeningIds: string[];
   selectedStairIds: string[];
+  selectedExtrudedSolidIds: string[];
+  selectedColumnIds: string[];
   selectedRoomIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
+  onEditDrawingText?: (drawingId: string) => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
   onSegmentCut: (drawingId: string, model: Vec2) => void;
@@ -4535,15 +5915,26 @@ function Content({
   // hervor. Leere Auswahl → null (kein Highlight).
   const highlightLines = useMemo(
     () =>
-      selectedWallIds.length === 0 && selectedCeilingIds.length === 0
+      selectedWallIds.length === 0 &&
+      selectedCeilingIds.length === 0 &&
+      selectedOpeningIds.length === 0 &&
+      selectedStairIds.length === 0
         ? null
         : selectionHighlightLines(
             project,
             selectedWallIds,
             selectedCeilingIds,
             HIGHLIGHT_RGB,
+            selectedOpeningIds,
+            selectedStairIds,
           ),
-    [project, selectedWallIds, selectedCeilingIds],
+    [
+      project,
+      selectedWallIds,
+      selectedCeilingIds,
+      selectedOpeningIds,
+      selectedStairIds,
+    ],
   );
 
   if (level.kind === "section" || level.kind === "elevation") {
@@ -4568,10 +5959,13 @@ function Content({
           selectedCeilingIds={selectedCeilingIds}
           selectedOpeningIds={selectedOpeningIds}
           selectedStairIds={selectedStairIds}
+          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
+          selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
+          onEditDrawingText={onEditDrawingText}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -4619,10 +6013,13 @@ function Content({
           selectedCeilingIds={selectedCeilingIds}
           selectedOpeningIds={selectedOpeningIds}
           selectedStairIds={selectedStairIds}
+          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
+          selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
+          onEditDrawingText={onEditDrawingText}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -4705,10 +6102,13 @@ function Content({
           selectedCeilingIds={selectedCeilingIds}
           selectedOpeningIds={selectedOpeningIds}
           selectedStairIds={selectedStairIds}
+          selectedExtrudedSolidIds={selectedExtrudedSolidIds}
+          selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
+          onEditDrawingText={onEditDrawingText}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -4746,10 +6146,13 @@ function LevelPlanView({
   selectedCeilingIds,
   selectedOpeningIds,
   selectedStairIds,
+  selectedExtrudedSolidIds,
+  selectedColumnIds,
   selectedRoomIds,
   roomStamp,
   onStampMove,
   onStampEdit,
+  onEditDrawingText,
   onPlanSelect,
   onPlanMarquee,
   onSegmentCut,
@@ -4780,10 +6183,13 @@ function LevelPlanView({
   selectedCeilingIds: string[];
   selectedOpeningIds: string[];
   selectedStairIds: string[];
+  selectedExtrudedSolidIds: string[];
+  selectedColumnIds: string[];
   selectedRoomIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
+  onEditDrawingText?: (drawingId: string) => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
   onSegmentCut: (drawingId: string, model: Vec2) => void;
@@ -4853,10 +6259,13 @@ function LevelPlanView({
         selectedCeilingIds={selectedCeilingIds}
         selectedOpeningIds={selectedOpeningIds}
         selectedStairIds={selectedStairIds}
+        selectedExtrudedSolidIds={selectedExtrudedSolidIds}
+        selectedColumnIds={selectedColumnIds}
         selectedRoomIds={selectedRoomIds}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
+        onEditDrawingText={onEditDrawingText}
         onSelect={onPlanSelect}
         onMarquee={onPlanMarquee}
         onSegmentCut={onSegmentCut}
@@ -4902,10 +6311,13 @@ function SectionPlanView({
   selectedCeilingIds,
   selectedOpeningIds,
   selectedStairIds,
+  selectedExtrudedSolidIds,
+  selectedColumnIds,
   selectedRoomIds,
   roomStamp,
   onStampMove,
   onStampEdit,
+  onEditDrawingText,
   onPlanSelect,
   onPlanMarquee,
   onSegmentCut,
@@ -4932,10 +6344,13 @@ function SectionPlanView({
   selectedCeilingIds: string[];
   selectedOpeningIds: string[];
   selectedStairIds: string[];
+  selectedExtrudedSolidIds: string[];
+  selectedColumnIds: string[];
   selectedRoomIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
+  onEditDrawingText?: (drawingId: string) => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
   onSegmentCut: (drawingId: string, model: Vec2) => void;
@@ -5015,10 +6430,13 @@ function SectionPlanView({
         selectedCeilingIds={selectedCeilingIds}
         selectedOpeningIds={selectedOpeningIds}
         selectedStairIds={selectedStairIds}
+        selectedExtrudedSolidIds={selectedExtrudedSolidIds}
+        selectedColumnIds={selectedColumnIds}
         selectedRoomIds={selectedRoomIds}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
+        onEditDrawingText={onEditDrawingText}
         onSelect={onPlanSelect}
         onMarquee={onPlanMarquee}
         onSegmentCut={onSegmentCut}

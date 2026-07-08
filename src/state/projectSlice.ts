@@ -30,6 +30,7 @@ import { t } from "../i18n";
 import type { StoreApi } from "./store";
 import { createHistorySlice, pushHistoryPatch } from "./historySlice";
 import type { HistorySlice } from "./historySlice";
+import type { NotifyKind } from "./notifySlice";
 
 /** Felder, die diese Slice in den RootState beisteuert. */
 export interface ProjectSlice {
@@ -286,6 +287,9 @@ export interface ProjectSlice {
  */
 type ProjectSliceDeps = {
   activeLevelId: string;
+  /** Nicht-blockierende Kurzmeldung (Toast) — Ersatz für `window.alert`, das
+   *  im Tauri-WKWebView deaktiviert ist (siehe notifySlice.ts). */
+  notify: (message: string, kind?: NotifyKind) => void;
 } & HistorySlice;
 
 export function createProjectSlice(
@@ -579,7 +583,7 @@ export function createProjectSlice(
           codes.has(o.categoryCode),
         );
         if (usedByWall || usedByDoor || usedByOpening) {
-          window.alert(t("alert.layerInUse", { code: src.code, name: src.name }));
+          get().notify(t("alert.layerInUse", { code: src.code, name: src.name }), "warning");
           return p;
         }
         return { ...p, layers: removeByCode(p.layers, code) };
@@ -664,7 +668,7 @@ export function createProjectSlice(
         );
         if (used) {
           const name = p.components.find((c) => c.id === id)?.name ?? id;
-          window.alert(t("alert.componentInUse", { name }));
+          get().notify(t("alert.componentInUse", { name }), "warning");
           return p;
         }
         return { ...p, components: p.components.filter((c) => c.id !== id) };
@@ -695,7 +699,7 @@ export function createProjectSlice(
         const used = p.components.some((c) => c.hatchId === id);
         if (used) {
           const name = p.hatches.find((h) => h.id === id)?.name ?? id;
-          window.alert(t("alert.hatchInUse", { name }));
+          get().notify(t("alert.hatchInUse", { name }), "warning");
           return p;
         }
         return { ...p, hatches: p.hatches.filter((h) => h.id !== id) };
@@ -726,7 +730,7 @@ export function createProjectSlice(
         const used = p.hatches.some((h) => h.lineStyleId === id);
         if (used) {
           const name = p.lineStyles.find((l) => l.id === id)?.name ?? id;
-          window.alert(t("alert.lineStyleInUse", { name }));
+          get().notify(t("alert.lineStyleInUse", { name }), "warning");
           return p;
         }
         return { ...p, lineStyles: p.lineStyles.filter((l) => l.id !== id) };
@@ -1373,6 +1377,8 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
       { x: g.min.x, y: g.max.y },
     ];
   }
+  // Text: EIN Griff am Ankerpunkt (zum Verschieben; siehe moveGrip).
+  if (g.shape === "text") return [g.at];
   return [];
 }
 
@@ -1412,6 +1418,8 @@ function moveGrip(
           const max = { x: Math.max(pt.x, opp.x), y: Math.max(pt.y, opp.y) };
           return { ...d, geom: { ...g, min, max } };
         }
+        // Text: der einzige Griff (Index 0) sitzt am Ankerpunkt → verschiebt ihn.
+        if (g.shape === "text") return { ...d, geom: { ...g, at: pt } };
         return d;
       }),
     };

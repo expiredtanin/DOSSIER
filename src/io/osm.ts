@@ -1,7 +1,8 @@
 // OpenStreetMap-Anbindung (Overpass API) für den Standort-Import.
 //
-// Holt für eine LV95-Box Gebäude / Strassen / Wasser / Grünflächen und wandelt
-// sie in Polylinien in LOKALEN Modell-Metern (über LV95 + Origin, siehe
+// Holt für eine LV95-Box Gebäude / Strassen / Wasser / Grünflächen / Parkplätze /
+// Bahnlinien / Wald und wandelt sie in Polylinien in LOKALEN Modell-Metern (über
+// LV95 + Origin, siehe
 // lv95.ts). Overpass sendet je nach Mirror unzuverlässige CORS-Header, daher
 // läuft der Abruf über den openbureau-core Geo-Proxy (`viaProxy`), sofern
 // `VITE_GEO_PROXY` gesetzt ist — sonst Direktabruf gegen den CORS-fähigen
@@ -24,6 +25,9 @@ export interface OsmSelection {
   roads: boolean;
   water: boolean;
   green: boolean;
+  parking: boolean;
+  railway: boolean;
+  forest: boolean;
 }
 
 /** Ein Overpass-Element mit inline-Geometrie (`out geom`). */
@@ -55,7 +59,12 @@ function buildQuery(
   }
   if (sel.green) {
     parts.push(`way["leisure"="park"](${b});`);
-    parts.push(`way["landuse"~"grass|forest|meadow|recreation_ground"](${b});`);
+    parts.push(`way["landuse"~"grass|meadow|recreation_ground"](${b});`);
+  }
+  if (sel.parking) parts.push(`way["amenity"="parking"](${b});`);
+  if (sel.railway) parts.push(`way["railway"~"rail|tram"](${b});`);
+  if (sel.forest) {
+    parts.push(`way["landuse"="forest"](${b});`);
     parts.push(`way["natural"="wood"](${b});`);
   }
   return `[out:json][timeout:40];(${parts.join("")});out geom;`;
@@ -69,20 +78,23 @@ function categorize(
   if (!tags) return null;
   if (sel.buildings && tags.building) return "building";
   if (sel.water && (tags.natural === "water" || tags.waterway)) return "water";
+  if (sel.forest && (tags.natural === "wood" || tags.landuse === "forest"))
+    return "forest";
   if (
     sel.green &&
     (tags.leisure === "park" ||
-      tags.natural === "wood" ||
-      /grass|forest|meadow|recreation_ground/.test(tags.landuse ?? ""))
+      /grass|meadow|recreation_ground/.test(tags.landuse ?? ""))
   )
     return "green";
+  if (sel.parking && tags.amenity === "parking") return "parking";
+  if (sel.railway && /rail|tram/.test(tags.railway ?? "")) return "railway";
   if (sel.roads && tags.highway) return "road";
   return null;
 }
 
-/** Geschlossene Kategorien (Flächen) vs. offene (Strassen). */
+/** Geschlossene Kategorien (Flächen) vs. offene (Strassen/Bahn). */
 function isClosedCategory(cat: GeoCategory): boolean {
-  return cat !== "road";
+  return cat !== "road" && cat !== "railway";
 }
 
 /**
@@ -118,7 +130,15 @@ export async function fetchOsm(
   originIn?: GeoOrigin,
 ): Promise<{ origin: GeoOrigin; features: GeoFeature[] }> {
   const origin = originIn ?? makeOrigin(center);
-  if (!sel.buildings && !sel.roads && !sel.water && !sel.green) {
+  if (
+    !sel.buildings &&
+    !sel.roads &&
+    !sel.water &&
+    !sel.green &&
+    !sel.parking &&
+    !sel.railway &&
+    !sel.forest
+  ) {
     return { origin, features: [] };
   }
 

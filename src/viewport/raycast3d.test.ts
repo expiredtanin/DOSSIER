@@ -7,6 +7,8 @@ import {
   type RayCamera,
   type PickWall,
   type PickSlab,
+  type PickOpening,
+  type PickStair,
 } from "./raycast3d";
 
 // Kamera bei (0,1,10), Blick entlang -Z auf (0,1,0). Zentraler Strahl (ndc 0,0)
@@ -34,6 +36,24 @@ describe("cameraRay", () => {
     expect(ray.dir[2]).toBeLessThan(0);
     // normalisiert
     expect(Math.hypot(...ray.dir)).toBeCloseTo(1, 6);
+  });
+
+  it("orthografisch (perspective:false): alle Strahlen sind parallel zur Blickrichtung", () => {
+    const orthoCam: RayCamera = { ...CAM, perspective: false, orthoHalfHeight: 5 };
+    const center = cameraRay(orthoCam, 0, 0, 16 / 9);
+    const offset = cameraRay(orthoCam, 0.5, 0.5, 1);
+    // Beide Strahlen zeigen exakt in dieselbe Richtung (parallel, keine Konvergenz).
+    expect(offset.dir).toEqual(center.dir);
+    expect(center.dir[2]).toBeCloseTo(-1, 6);
+    // Der Ursprung wandert stattdessen lateral mit dem Pixel (Kehrwert von worldToScreen).
+    expect(offset.origin[0]).toBeCloseTo(2.5, 6); // ndcX·aspect·hh = 0.5·1·5
+    expect(offset.origin[1]).toBeCloseTo(3.5, 6); // eye.y(1) + ndcY·hh = 1 + 0.5·5
+    expect(offset.origin[2]).toBeCloseTo(10, 6); // unveraendert (Achse senkrecht zur Blickrichtung)
+  });
+
+  it("orthografisch ohne perspective-Feld bleibt rückwärtskompatibel perspektivisch", () => {
+    const ray = cameraRay(CAM, 0.5, 0.5, 1);
+    expect(ray.origin).toEqual([0, 1, 10]); // Ursprung bleibt eye (Perspektive)
   });
 });
 
@@ -123,5 +143,67 @@ describe("pickNearest", () => {
   it("Leertreffer liefert null", () => {
     const hit = pickNearest({ origin: [50, 50, 10], dir: [0, 0, -1] }, [WALL], [SLAB]);
     expect(hit).toBeNull();
+  });
+});
+
+// Öffnung: dieselbe Achse/Front wie WALL (model y=5 → world z≈5), aber nur über
+// die Fenster-Ausdehnung (Brüstung 0.9m..1.9m) statt der vollen Wandhöhe.
+const OPENING: PickOpening = {
+  start: [-0.5, 5],
+  end: [0.5, 5],
+  thickness: 0.2,
+  height: 1.0,
+  baseElevation: 0.9,
+  openingId: "op1",
+};
+
+// Treppe: Fußabdruck-Rechteck model (0,0)-(2,3), Bounding-Prisma bis 2.6m Rise.
+const STAIR: PickStair = {
+  outline: [
+    [0, 0],
+    [2, 0],
+    [2, 3],
+    [0, 3],
+  ],
+  zBottom: 0,
+  zTop: 2.6,
+  stairId: "st1",
+};
+
+describe("pickNearest — Öffnungen und Treppen", () => {
+  it("Strahl auf eine Öffnung liefert openingId", () => {
+    // Wie der Wand-Treffer (Front z=5.1 → t=4.9), aber y=1 liegt in der
+    // Fenster-Ausdehnung (0.9..1.9) → Öffnung statt Wand.
+    const hit = pickNearest({ origin: [0, 1, 10], dir: [0, 0, -1] }, [], [], [OPENING]);
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe("opening");
+    expect(hit!.openingId).toBe("op1");
+    expect(hit!.t).toBeCloseTo(4.9, 6);
+  });
+
+  it("Strahl auf eine Treppe liefert stairId", () => {
+    // Senkrecht von oben ins Fußabdruck-Rechteck: Deckel bei y=2.6 → t=7.4.
+    const hit = pickNearest(
+      { origin: [1, 10, 1], dir: [0, -1, 0] },
+      [],
+      [],
+      [],
+      [STAIR],
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe("stair");
+    expect(hit!.stairId).toBe("st1");
+    expect(hit!.t).toBeCloseTo(7.4, 6);
+  });
+
+  it("bei näherer Wand gewinnt die Wand (kleinstes t) trotz konkurrierender Öffnung", () => {
+    // farOpening liegt bei model y=2 (world z=2) → Front z=2.1 → t=7.9, WEITER
+    // hinten als die Wand (t=4.9) → die Wand muss trotz der Öffnung-Priorität
+    // bei Gleichstand gewinnen, weil hier gar kein Gleichstand vorliegt.
+    const farOpening: PickOpening = { ...OPENING, start: [-0.5, 2], end: [0.5, 2], openingId: "op-far" };
+    const hit = pickNearest({ origin: [0, 1, 10], dir: [0, 0, -1] }, [WALL], [], [farOpening]);
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe("wall");
+    expect(hit!.id).toBe("w1");
   });
 });

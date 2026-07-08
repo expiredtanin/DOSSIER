@@ -19,6 +19,8 @@ import { createLayoutSlice } from "./layoutSlice";
 import type { LayoutSlice } from "./layoutSlice";
 import { createSiteSlice } from "./siteSlice";
 import type { SiteSlice } from "./siteSlice";
+import { createNotifySlice } from "./notifySlice";
+import type { NotifySlice } from "./notifySlice";
 
 /** Gesamtzustand: Vereinigung aller Slice-Felder + Actions. */
 export type RootState = ProjectSlice &
@@ -26,17 +28,23 @@ export type RootState = ProjectSlice &
   SelectionSlice &
   ViewSlice &
   LayoutSlice &
-  SiteSlice;
+  SiteSlice &
+  NotifySlice;
 
 const store = createStore<RootState>((api) => ({
   // Jede Slice-Factory bekommt die volle RootState-API. Die Slices tippen nur
   // ihren eigenen Ausschnitt; die Cast auf die enge Slice-API ist sicher, weil
   // `set/get` immer über den Gesamt-RootState laufen. ProjectSlice bringt die
   // History (undo/redo) gleich mit (setProject ist der einzige Durchlauf-
-  // punkt jeder Projekt-Mutation, siehe projectSlice.ts).
+  // punkt jeder Projekt-Mutation, siehe projectSlice.ts) und braucht `notify`
+  // (Cross-Slice) für die Lösch-Schutz-Warnungen (statt window.alert, siehe
+  // notifySlice.ts).
   ...createProjectSlice(
-    api as unknown as StoreApi<ProjectSlice & HistorySlice & { activeLevelId: string }>,
+    api as unknown as StoreApi<
+      ProjectSlice & HistorySlice & { activeLevelId: string } & Pick<NotifySlice, "notify">
+    >,
   ),
+  ...createNotifySlice(api as unknown as StoreApi<NotifySlice>),
   ...createSelectionSlice(api as unknown as StoreApi<SelectionSlice>),
   ...createViewSlice(api as unknown as StoreApi<ViewSlice>),
   ...createLayoutSlice(api as unknown as StoreApi<LayoutSlice>),

@@ -8,15 +8,18 @@
 // aus App, Aktionen melden sich über Callbacks zurück. Bezeichner englisch,
 // UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import type { ReactNode } from "react";
 import type { Project } from "../model/types";
 import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem, DropdownOption } from "./Dropdown";
+import { PromptDialog } from "./PromptDialog";
 import { WindowControls } from "./WindowControls";
 import { RibbonTabs } from "./ribbon/RibbonBar";
 import type { RibbonTabId } from "./ribbon/ribbonItems";
+import { getCommand } from "../commands/registry";
+import { CommandIcon } from "./ribbon/CommandIcon";
 import {
   applyMark,
   applyPreset,
@@ -58,11 +61,25 @@ export type RenderMode =
   | "hidden";
 
 /**
- * Kanonischer Blickwinkel der 3D-Ansicht (Vectorworks/DOSSIER-Stil). „front",
- * „top", „side", „iso" springen auf die jeweilige Standardansicht; „perspective"
- * ist der freie 3/4-Blick. Wirkt nur in der Perspektive.
+ * Kanonischer Blickwinkel der 3D-Ansicht (Vectorworks/DOSSIER-Stil). „front"/
+ * „back"/„side"/„left" springen auf die vier Kardinalrichtungen (Vorne/Hinten/
+ * Rechts/Links — KEINE Himmelsrichtungs-Labels, da es noch keinen Nordwinkel
+ * gibt); „top" auf die Draufsicht. „iso"/„isoFrontLeft"/„isoBackRight"/
+ * „isoBackLeft" sind die vier oberen Iso-Oktanten (untere vier bleiben im
+ * Hochbau ungenutzt) — „iso" (vorne-oben-rechts) ist der bestehende Default.
+ * „perspective" ist der freie 3/4-Blick. Wirkt nur in der Perspektive.
  */
-export type View3d = "front" | "top" | "side" | "iso" | "perspective";
+export type View3d =
+  | "front"
+  | "back"
+  | "side"
+  | "left"
+  | "top"
+  | "iso"
+  | "isoFrontLeft"
+  | "isoBackRight"
+  | "isoBackLeft"
+  | "perspective";
 
 /**
  * Farb-Modus des Grundrisses: „color" zeigt Kategorie-/Element-Farben (heutiges
@@ -103,6 +120,21 @@ export interface TopBarProps {
   onExportDxf: () => void;
   /** Lädt die Bauteilliste des Projekts als CSV herunter. */
   onExportSchedule: () => void;
+  /** Lädt das Projekt als IFC4-STEP-Datei herunter. */
+  onExportIfc: () => void;
+  onExportObj: () => void;
+  onExportStl: () => void;
+
+  // Kamera-Settings (FOV), ZUSÄTZLICH zur bestehenden im „Ansichten"-Ribbon-
+  // Tab (ViewRibbonTab) und im 3D-Ribbon-Tab (Ribbon3dTab) — hier direkt neben
+  // dem CSV-Export in der schmalen Chrome-Zeile, damit sie immer erreichbar
+  // ist (Nutzer-Wunsch). Dieselben Felder/Handler wie dort.
+  viewType: ViewType;
+  fov: number;
+  onFov: (n: number) => void;
+  /** Presets nur sinnvoll, solange ein Geschoss aktiv ist (wie `viewToggleEnabled`
+   *  in {@link ViewRibbonTabProps}). */
+  cameraEnabled: boolean;
 
   // Ressourcen-Fenster.
   resourcesOpen: boolean;
@@ -112,7 +144,6 @@ export interface TopBarProps {
   onOpenSettings: () => void;
 
   /** Layout-Menü (von App geliefert, damit dessen Logik dort bleibt). */
-  layoutMenu: ReactNode;
 
   // ── Datei-Menü (Burger, ganz rechts) ───────────────────────────────────────
   /** Öffnet den DXF/DWG-Import-Datei-Dialog. */
@@ -200,14 +231,17 @@ function ComboMenu({
   // Dropdown gesteuert ist, halten wir die aktuelle Liste im State und
   // aktualisieren sie beim Trigger-Klick (siehe `items`-Aufbau unten).
   const [names, setNames] = useState<string[]>([]);
+  // Name-Erfassung über PromptDialog statt window.prompt (im Tauri-WKWebView
+  // deaktiviert — liefert sofort null, nichts würde je gespeichert).
+  const [saving, setSaving] = useState(false);
 
   const refresh = () => setNames(list());
 
-  const save = () => {
-    const name = window.prompt(savePrompt);
-    if (!name) return;
+  const save = () => setSaving(true);
+  const commitSave = (name: string) => {
     onSave(name.trim());
     refresh();
+    setSaving(false);
   };
 
   // Aktions-Menü (analog ContextMenu-Items): „Aktuelle speichern" oben, dann je
@@ -240,6 +274,14 @@ function ComboMenu({
         placeholder={t("combo.placeholder")}
         title={title}
       />
+      {saving && (
+        <PromptDialog
+          title={title}
+          label={savePrompt}
+          onConfirm={commitSave}
+          onClose={() => setSaving(false)}
+        />
+      )}
     </span>
   );
 }
@@ -326,6 +368,133 @@ function CameraMenu({
   );
 }
 
+/** Die vier oberen Iso-Oktanten (untere vier bleiben im Hochbau ungenutzt). */
+const ISO_VARIANTS: View3d[] = ["iso", "isoFrontLeft", "isoBackRight", "isoBackLeft"];
+
+/** Häkchen vor der aktiven Iso-Zeile (gleiche Glyphe wie `Dropdown`s Check). */
+function IsoCheck() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+      <path
+        d="M2.5 6.2 L4.7 8.6 L9.5 3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Iso-Oktanten als Split-Button (Vectorworks-Stil): Klick auf das Würfel-Icon
+ * springt direkt auf die zuletzt gewählte Iso-Ansicht (Default „iso" =
+ * vorne-oben-rechts, s. View3d); der schmale Pfeil daneben öffnet ein Popover
+ * mit allen vier oberen Iso-Oktanten (untere vier bleiben im Hochbau ungenutzt).
+ * Popover-Markup/Klassen wie `Dropdown`s Listenmodus (`ctx-menu`/`tb-dd-item`),
+ * Positionierung wie `CameraMenu` (fixed, kein Portal — entkommt dem
+ * `overflow:hidden` der Oberleiste).
+ */
+function IsoMenu({
+  view3d,
+  onView3d,
+  viewType,
+  onViewType,
+  disabled,
+}: {
+  view3d: View3d;
+  onView3d: (v: View3d) => void;
+  viewType: ViewType;
+  onViewType: (v: ViewType) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const caretRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const current: View3d = ISO_VARIANTS.includes(view3d) ? view3d : "iso";
+  const active = viewType === "perspektive" && ISO_VARIANTS.includes(view3d);
+
+  const select = (v: View3d) => {
+    onView3d(v);
+    if (viewType !== "perspektive") onViewType("perspektive");
+    setOpen(false);
+  };
+
+  const toggle = () => {
+    const next = !open;
+    if (next && caretRef.current) {
+      const r = caretRef.current.getBoundingClientRect();
+      setPos({ left: r.left, top: r.bottom + 6 });
+    }
+    setOpen(next);
+  };
+
+  return (
+    <div className="tb-popwrap view-icon-split" ref={wrapRef}>
+      <button
+        className={`view-icon view-icon-split-main${active ? " active" : ""}`}
+        disabled={disabled}
+        onClick={() => select(current)}
+        title={disabled ? t("topbar.viewGroup.disabled") : `${t(`view3d.${current}`)} — ${t(`view3d.${current}.hint`)}`}
+        aria-label={t("view3d.iso")}
+      >
+        <ViewIcon name="iso" />
+      </button>
+      <button
+        ref={caretRef}
+        className={`view-icon-caret${open ? " active" : ""}`}
+        disabled={disabled}
+        onClick={toggle}
+        title={disabled ? t("topbar.viewGroup.disabled") : `${t("view3d.iso.menu")} — ${t("view3d.iso.menu.hint")}`}
+        aria-label={t("view3d.iso.menu")}
+        aria-haspopup="true"
+        aria-expanded={open}
+      >
+        <svg width="9" height="6" viewBox="0 0 10 6" aria-hidden="true">
+          <path d="M0 0l5 6 5-6z" fill="currentColor" />
+        </svg>
+      </button>
+      {open && !disabled && (
+        <div
+          className="ctx-menu tb-dd-menu"
+          role="menu"
+          aria-label={t("view3d.iso.menu")}
+          style={{ left: pos.left, top: pos.top }}
+        >
+          {ISO_VARIANTS.map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="menuitemradio"
+              aria-checked={view3d === v}
+              className={`ctx-item tb-dd-item${view3d === v ? " is-active" : ""}`}
+              onClick={() => select(v)}
+              title={t(`view3d.${v}.hint`)}
+            >
+              <span className="tb-dd-check-slot">{view3d === v && <IsoCheck />}</span>
+              <span className="ctx-item-label">{t(`view3d.${v}`)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Parst eine Massstab-Eingabe „1:35" ODER „35" zum Nenner N (gerundet, > 0).
  * Liefert null bei ungültiger/leerer Eingabe.
@@ -365,9 +534,19 @@ function ViewIcon({ name }: { name: View3d | "camera" | "grundriss" }) {
         </svg>
       );
     case "front":
+      // Kardinal-Quartett (front/back/side/left): Quadrat + kleiner Steg an der
+      // Aussenkante zeigt, von welcher Seite die Kamera blickt (Vorne = unten).
       return (
         <svg {...s}>
           <rect x="3.5" y="3.5" width="9" height="9" />
+          <line x1="8" y1="12.5" x2="8" y2="14.3" />
+        </svg>
+      );
+    case "back":
+      return (
+        <svg {...s}>
+          <rect x="3.5" y="3.5" width="9" height="9" />
+          <line x1="8" y1="1.7" x2="8" y2="3.5" />
         </svg>
       );
     case "top":
@@ -381,7 +560,14 @@ function ViewIcon({ name }: { name: View3d | "camera" | "grundriss" }) {
       return (
         <svg {...s}>
           <rect x="3.5" y="3.5" width="9" height="9" />
-          <line x1="8" y1="3.5" x2="8" y2="12.5" />
+          <line x1="12.5" y1="8" x2="14.3" y2="8" />
+        </svg>
+      );
+    case "left":
+      return (
+        <svg {...s}>
+          <rect x="3.5" y="3.5" width="9" height="9" />
+          <line x1="1.7" y1="8" x2="3.5" y2="8" />
         </svg>
       );
     case "perspective":
@@ -515,6 +701,8 @@ export function TextGroup({
   const [defBold, setDefBold] = useState(false);
   const [defItalic, setDefItalic] = useState(false);
   const [defUnderline, setDefUnderline] = useState(false);
+  // Freie Grösse über PromptDialog statt window.prompt (Tauri-WKWebView).
+  const [sizePromptOpen, setSizePromptOpen] = useState(false);
 
   // Effektiver Bereich am Ziel: expliziter Bereich oder — ohne Bereich — das
   // ganze Dokument (mind. 1 Zeichen, damit isMarkActive/applyMark greifen).
@@ -624,16 +812,16 @@ export function TextGroup({
 
   const onSizeChange = (value: string) => {
     if (value === "__custom__") {
-      const input = window.prompt(
-        t("text.size.customPrompt"),
-        String(curSize > 0 ? curSize : 12),
-      );
-      const n = input == null ? NaN : Math.round(Number(input.trim()));
-      if (Number.isFinite(n) && n > 0) setSizeValue(n);
+      setSizePromptOpen(true);
       return;
     }
     if (value === "__current__") return;
     setSizeValue(Number(value));
+  };
+  const onSizePromptConfirm = (input: string) => {
+    const n = Math.round(Number(input.trim()));
+    if (Number.isFinite(n) && n > 0) setSizeValue(n);
+    setSizePromptOpen(false);
   };
 
   return (
@@ -763,6 +951,16 @@ export function TextGroup({
           </button>
         </div>
       </div>
+      {sizePromptOpen && (
+        <PromptDialog
+          title={t("text.size.custom")}
+          label={t("text.size.customPrompt")}
+          defaultValue={String(curSize > 0 ? curSize : 12)}
+          type="number"
+          onConfirm={onSizePromptConfirm}
+          onClose={() => setSizePromptOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -904,6 +1102,200 @@ function QaSep() {
  * Ressourcen/Einstellungen als kleine Icon-Knöpfe direkt in der TopBar-Zeile.
  * Ersetzt das Burger-Menü (`AppMenu`). Rein gesteuert über Callbacks (i18n via t).
  */
+/**
+ * Kompakte Kamera-Gruppe der Quick-Access-Leiste: NUR das Kamera-Settings-
+ * Popover (FOV), damit es immer erreichbar ist, ohne die Ansichts-Presets
+ * (die bleiben unverändert im „Ansichten"-Tab und im 3D-Ribbon-Tab).
+ */
+function QaCameraGroup({
+  viewType,
+  fov,
+  onFov,
+  cameraEnabled,
+}: {
+  viewType: ViewType;
+  fov: number;
+  onFov: (n: number) => void;
+  cameraEnabled: boolean;
+}) {
+  return (
+    <div className="tb-qa-camera" role="toolbar" aria-label={t("topbar.viewGroup")}>
+      <CameraMenu
+        fov={fov}
+        onFov={onFov}
+        disabled={!cameraEnabled || viewType !== "perspektive"}
+      />
+    </div>
+  );
+}
+
+/** App-Version (spiegelt src-tauri/tauri.conf.json). */
+const APP_VERSION = "0.1.0";
+
+/**
+ * Export-Sammelmenü: EIN „Export"-Knopf in der Quick-Access-Leiste öffnet ein
+ * Dropdown (wie ein Kontextmenü) mit allen Export-Formaten — ersetzt die früher
+ * einzeln aufgereihten Export-Icons. Popover fixed positioniert (die Oberleiste
+ * hat overflow:hidden), Muster wie {@link CameraMenu}.
+ */
+function ExportMenu({
+  onExportPdf,
+  onExportDxf,
+  onExportSchedule,
+  onExportIfc,
+  onExportObj,
+  onExportStl,
+  exportEnabled,
+}: {
+  onExportPdf: () => void;
+  onExportDxf: () => void;
+  onExportSchedule: () => void;
+  onExportIfc: () => void;
+  onExportObj: () => void;
+  onExportStl: () => void;
+  exportEnabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  // Das Popover hängt per Portal an body (NICHT in wrapRef) — der Outside-Handler
+  // muss es daher separat als „innen" behandeln, sonst schliesst der mousedown
+  // das Menü vor dem Klick.
+  const popRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (popRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const toggle = () => {
+    const next = !open;
+    if (next && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ left: r.left, top: r.bottom + 6 });
+    }
+    setOpen(next);
+  };
+  const pick = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+
+  const items: { icon: string; label: string; onClick: () => void; disabled?: boolean }[] = [
+    { icon: "picture_as_pdf", label: t("file.exportPdf"), onClick: onExportPdf, disabled: !exportEnabled },
+    { icon: "output", label: t("file.exportDxf"), onClick: onExportDxf, disabled: !exportEnabled },
+    { icon: "table_view", label: t("file.exportSchedule"), onClick: onExportSchedule },
+    { icon: "deployed_code", label: t("file.exportIfc"), onClick: onExportIfc },
+    { icon: "view_in_ar", label: t("file.exportObj"), onClick: onExportObj },
+    { icon: "landscape", label: t("file.exportStl"), onClick: onExportStl },
+  ];
+
+  return (
+    <div className="tb-popwrap" ref={wrapRef}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`tb-qa-btn${open ? " active" : ""}`}
+        onClick={toggle}
+        title={t("file.export")}
+        aria-label={t("file.export")}
+        aria-haspopup="true"
+        aria-expanded={open}
+      >
+        <TbIcon name="ios_share" />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            className="tb-popover tb-menu"
+            role="menu"
+            aria-label={t("file.export")}
+            style={{ left: pos.left, top: pos.top }}
+          >
+            {items.map((it) => (
+              <button
+                key={it.label}
+                type="button"
+                className="ctx-item"
+                role="menuitem"
+                disabled={it.disabled}
+                onClick={() => pick(it.onClick)}
+              >
+                <span className="ctx-item-icon">
+                  <TbIcon name={it.icon} />
+                </span>
+                <span className="ctx-item-label">{it.label}</span>
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+/**
+ * „Über"-Dialog (In-App, dunkel) — App-Marke, Version, Kurzbeschreibung und die
+ * Lizenzen der wichtigsten Open-Source-Bausteine. Öffnet per Klick auf die
+ * Wortmarke. Klick ausserhalb / Esc schliesst.
+ */
+function AboutDialog({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="about-overlay" onMouseDown={onClose}>
+      <div
+        className="about-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("about.title")}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="about-brand">
+          dossier<span className="brand-dot">.</span>
+        </div>
+        <div className="about-version">
+          {t("about.version")} {APP_VERSION}
+        </div>
+        <p className="about-desc">{t("about.desc")}</p>
+        <div className="about-meta">
+          <div>{t("about.copyright")}</div>
+          <div>{t("about.license")}</div>
+          <div>{t("about.suite")}</div>
+        </div>
+        <div className="about-sec-label">{t("about.licenses")}</div>
+        <ul className="about-licenses">
+          <li>React · Vite — MIT</li>
+          <li>Tauri — MIT / Apache-2.0</li>
+          <li>wgpu (render3d) — MIT / Apache-2.0</li>
+          <li>truck · csgrs — Apache-2.0</li>
+          <li>OpenCascade.js — LGPL-2.1</li>
+          <li>LibreDWG — GPL-3.0</li>
+          <li>acadrust — MPL-2.0</li>
+        </ul>
+        <button type="button" className="about-close" onClick={onClose}>
+          {t("about.close")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function QuickAccess({
   onOpenProject,
   onSaveProject,
@@ -911,10 +1303,17 @@ function QuickAccess({
   onExportPdf,
   onExportDxf,
   onExportSchedule,
+  onExportIfc,
+  onExportObj,
+  onExportStl,
   onToggleResources,
   onOpenSettings,
   resourcesOpen,
   exportEnabled,
+  viewType,
+  fov,
+  onFov,
+  cameraEnabled,
 }: {
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -922,10 +1321,17 @@ function QuickAccess({
   onExportPdf: () => void;
   onExportDxf: () => void;
   onExportSchedule: () => void;
+  onExportIfc: () => void;
+  onExportObj: () => void;
+  onExportStl: () => void;
   onToggleResources: () => void;
   onOpenSettings: () => void;
   resourcesOpen: boolean;
   exportEnabled: boolean;
+  viewType: ViewType;
+  fov: number;
+  onFov: (n: number) => void;
+  cameraEnabled: boolean;
 }) {
   return (
     <div className="tb-qa" role="toolbar" aria-label={t("file.menu")}>
@@ -933,22 +1339,21 @@ function QuickAccess({
       <QaButton icon="save" label={t("file.save")} onClick={onSaveProject} />
       <QaSep />
       <QaButton icon="download" label={t("file.import")} onClick={onImport} />
-      <QaButton
-        icon="picture_as_pdf"
-        label={t("file.exportPdf")}
-        onClick={onExportPdf}
-        disabled={!exportEnabled}
+      <ExportMenu
+        onExportPdf={onExportPdf}
+        onExportDxf={onExportDxf}
+        onExportSchedule={onExportSchedule}
+        onExportIfc={onExportIfc}
+        onExportObj={onExportObj}
+        onExportStl={onExportStl}
+        exportEnabled={exportEnabled}
       />
-      <QaButton
-        icon="output"
-        label={t("file.exportDxf")}
-        onClick={onExportDxf}
-        disabled={!exportEnabled}
-      />
-      <QaButton
-        icon="table_view"
-        label={t("file.exportSchedule")}
-        onClick={onExportSchedule}
+      <QaSep />
+      <QaCameraGroup
+        viewType={viewType}
+        fov={fov}
+        onFov={onFov}
+        cameraEnabled={cameraEnabled}
       />
       <QaSep />
       <QaButton
@@ -972,8 +1377,6 @@ export interface ViewRibbonTabProps {
   onViewType: (v: ViewType) => void;
   view3d: View3d;
   onView3d: (v: View3d) => void;
-  fov: number;
-  onFov: (n: number) => void;
   detail: DetailLevel;
   onDetail: (d: DetailLevel) => void;
   detailEnabled: boolean;
@@ -1009,8 +1412,6 @@ export function ViewRibbonTab({
   onViewType,
   view3d,
   onView3d,
-  fov,
-  onFov,
   detail,
   onDetail,
   detailEnabled,
@@ -1030,19 +1431,21 @@ export function ViewRibbonTab({
   combos,
   textTarget,
 }: ViewRibbonTabProps) {
-  // „frei" wird über einen Prompt erfasst; akzeptiert „1:35" ODER „35".
+  // „frei" wird über einen In-App-Dialog erfasst (window.prompt ist im Tauri-
+  // WKWebView deaktiviert); akzeptiert „1:35" ODER „35".
+  const [scalePromptOpen, setScalePromptOpen] = useState(false);
   const onScaleChange = (value: string) => {
     if (value === "__custom__") {
-      const input = window.prompt(
-        t("topbar.scale.prompt"),
-        `1:${scaleDenominator}`,
-      );
-      const n = parseScaleInput(input);
-      if (n != null) onApplyScale(n);
+      setScalePromptOpen(true);
       return;
     }
     const n = Number(value);
     if (Number.isFinite(n) && n > 0) onApplyScale(n);
+  };
+  const onScalePromptConfirm = (input: string) => {
+    const n = parseScaleInput(input);
+    if (n != null) onApplyScale(n);
+    setScalePromptOpen(false);
   };
   const inPresets = SCALE_PRESETS.includes(scaleDenominator);
   const scaleOptions: DropdownOption[] = [
@@ -1080,35 +1483,43 @@ export function ViewRibbonTab({
               ["perspective", t("view3d.perspective")],
               ["front", t("view3d.front")],
               ["side", t("view3d.side")],
+              ["back", t("view3d.back")],
+              ["left", t("view3d.left")],
             ] as [View3d, string][]
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              className={`view-icon${
-                viewToggleEnabled && viewType === "perspektive" && view3d === key
-                  ? " active"
-                  : ""
-              }`}
-              onClick={() => {
-                onView3d(key);
-                if (viewType !== "perspektive") onViewType("perspektive");
-              }}
-              disabled={!viewToggleEnabled}
-              title={
-                viewToggleEnabled
-                  ? `${label} — ${t(`view3d.${key}.hint`)}`
-                  : t("topbar.viewGroup.disabled")
-              }
-              aria-label={label}
-            >
-              <ViewIcon name={key} />
-            </button>
-          ))}
-          <CameraMenu
-            fov={fov}
-            onFov={onFov}
-            disabled={!viewToggleEnabled || viewType !== "perspektive"}
-          />
+          ).map(([key, label]) =>
+            key === "iso" ? (
+              <IsoMenu
+                key={key}
+                view3d={view3d}
+                onView3d={onView3d}
+                viewType={viewType}
+                onViewType={onViewType}
+                disabled={!viewToggleEnabled}
+              />
+            ) : (
+              <button
+                key={key}
+                className={`view-icon${
+                  viewToggleEnabled && viewType === "perspektive" && view3d === key
+                    ? " active"
+                    : ""
+                }`}
+                onClick={() => {
+                  onView3d(key);
+                  if (viewType !== "perspektive") onViewType("perspektive");
+                }}
+                disabled={!viewToggleEnabled}
+                title={
+                  viewToggleEnabled
+                    ? `${label} — ${t(`view3d.${key}.hint`)}`
+                    : t("topbar.viewGroup.disabled")
+                }
+                aria-label={label}
+              >
+                <ViewIcon name={key} />
+              </button>
+            ),
+          )}
         </div>
       </div>
       <Sep />
@@ -1140,8 +1551,9 @@ export function ViewRibbonTab({
       </div>
       <Sep />
 
-      {/* Detailgrad (grob/mittel/fein) — wirkt im Grundriss. */}
-      <div className="tb-group" role="group" aria-label={t("topbar.detailGroup")}>
+      {/* Detailgrad (grob/mittel/fein) + Darstellungsart übereinander gestapelt
+          (Nutzer-Wunsch) — gleiches Stapel-Muster wie die Kombinationen. */}
+      <div className="tb-group tb-stack" role="group" aria-label={t("topbar.detailGroup")}>
         <label className="tb-field tb-field-row">
           <span className="tb-label">{t("topbar.detail")}</span>
           <Dropdown
@@ -1159,6 +1571,34 @@ export function ViewRibbonTab({
               { value: "fein", label: t("topbar.detail.fein") },
             ]}
           />
+        </label>
+        <label className="tb-field tb-field-row">
+          <span className="tb-label">{t("display.style")}</span>
+          {viewType === "perspektive" ? (
+            <Dropdown
+              value={renderMode}
+              disabled={!renderModeEnabled}
+              onChange={(v) => onRenderMode(v as RenderMode)}
+              title={t("display.style.hint")}
+              options={[
+                { value: "shaded", label: t("display.style.shaded") },
+                { value: "white", label: t("display.style.white") },
+                { value: "textured", label: t("display.style.textured") },
+                { value: "wireframe", label: t("display.style.wireframe") },
+                { value: "hidden", label: t("display.style.hidden") },
+              ]}
+            />
+          ) : (
+            <Dropdown
+              value={planColorMode}
+              onChange={(v) => onPlanColorMode(v as PlanColorMode)}
+              title={t("display.style.hint")}
+              options={[
+                { value: "color", label: t("display.style.color") },
+                { value: "mono", label: t("display.style.mono") },
+              ]}
+            />
+          )}
         </label>
       </div>
       <Sep />
@@ -1221,43 +1661,20 @@ export function ViewRibbonTab({
       </div>
       <Sep />
 
-      {/* Darstellungsart — Grundriss: Farbig/SW; Perspektive: Render-Modus. */}
-      <div className="tb-group" role="group" aria-label={t("display.style.group")}>
-        <label className="tb-field">
-          <span className="tb-label">{t("display.style")}</span>
-          {viewType === "perspektive" ? (
-            <Dropdown
-              value={renderMode}
-              disabled={!renderModeEnabled}
-              onChange={(v) => onRenderMode(v as RenderMode)}
-              title={t("display.style.hint")}
-              options={[
-                { value: "shaded", label: t("display.style.shaded") },
-                { value: "white", label: t("display.style.white") },
-                { value: "textured", label: t("display.style.textured") },
-                { value: "wireframe", label: t("display.style.wireframe") },
-                { value: "hidden", label: t("display.style.hidden") },
-              ]}
-            />
-          ) : (
-            <Dropdown
-              value={planColorMode}
-              onChange={(v) => onPlanColorMode(v as PlanColorMode)}
-              title={t("display.style.hint")}
-              options={[
-                { value: "color", label: t("display.style.color") },
-                { value: "mono", label: t("display.style.mono") },
-              ]}
-            />
-          )}
-        </label>
-      </div>
-      <Sep />
 
       {/* Text-/Font-Formatierung auf DERSELBEN Leiste (Nutzer-Wunsch: Text und
           Ansichten zusammen) — Stil/Schrift/Grösse + B/I/U · L/C/R + Zeilenhöhe,
           formatiert das aktuelle Text-Ziel (Raumstempel) live. */}
       <TextGroup textTarget={textTarget} />
+      {scalePromptOpen && (
+        <PromptDialog
+          title={t("topbar.scale.custom")}
+          label={t("topbar.scale.prompt")}
+          defaultValue={`1:${scaleDenominator}`}
+          onConfirm={onScalePromptConfirm}
+          onClose={() => setScalePromptOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1268,11 +1685,11 @@ export interface Ribbon3dTabProps {
   onViewType: (v: ViewType) => void;
   view3d: View3d;
   onView3d: (v: View3d) => void;
-  fov: number;
-  onFov: (n: number) => void;
   renderMode: RenderMode;
   onRenderMode: (m: RenderMode) => void;
   renderModeEnabled: boolean;
+  onRunCommand: (name: string) => void;
+  activeCommand: string | null;
 }
 
 /** 3D-Tab des Ribbons — Kamera-Presets + Darstellungsart. Kein Duplikat des
@@ -1283,11 +1700,11 @@ export function Ribbon3dTab({
   onViewType,
   view3d,
   onView3d,
-  fov,
-  onFov,
   renderMode,
   onRenderMode,
   renderModeEnabled,
+  onRunCommand,
+  activeCommand,
 }: Ribbon3dTabProps) {
   return (
     <div className="ribbon-views">
@@ -1309,27 +1726,35 @@ export function Ribbon3dTab({
               ["perspective", t("view3d.perspective")],
               ["front", t("view3d.front")],
               ["side", t("view3d.side")],
+              ["back", t("view3d.back")],
+              ["left", t("view3d.left")],
             ] as [View3d, string][]
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              className={`view-icon${viewToggleEnabled && viewType === "perspektive" && view3d === key ? " active" : ""}`}
-              onClick={() => {
-                onView3d(key);
-                if (viewType !== "perspektive") onViewType("perspektive");
-              }}
-              disabled={!viewToggleEnabled}
-              title={viewToggleEnabled ? `${label} — ${t(`view3d.${key}.hint`)}` : t("topbar.viewGroup.disabled")}
-              aria-label={label}
-            >
-              <ViewIcon name={key} />
-            </button>
-          ))}
-          <CameraMenu
-            fov={fov}
-            onFov={onFov}
-            disabled={!viewToggleEnabled || viewType !== "perspektive"}
-          />
+          ).map(([key, label]) =>
+            key === "iso" ? (
+              <IsoMenu
+                key={key}
+                view3d={view3d}
+                onView3d={onView3d}
+                viewType={viewType}
+                onViewType={onViewType}
+                disabled={!viewToggleEnabled}
+              />
+            ) : (
+              <button
+                key={key}
+                className={`view-icon${viewToggleEnabled && viewType === "perspektive" && view3d === key ? " active" : ""}`}
+                onClick={() => {
+                  onView3d(key);
+                  if (viewType !== "perspektive") onViewType("perspektive");
+                }}
+                disabled={!viewToggleEnabled}
+                title={viewToggleEnabled ? `${label} — ${t(`view3d.${key}.hint`)}` : t("topbar.viewGroup.disabled")}
+                aria-label={label}
+              >
+                <ViewIcon name={key} />
+              </button>
+            ),
+          )}
         </div>
       </div>
       <Sep />
@@ -1351,6 +1776,26 @@ export function Ribbon3dTab({
           />
         </label>
       </div>
+      <Sep />
+      <div className="tb-group" role="group" aria-label={t("cmd.extrude.label")}>
+        {(() => {
+          const cmd = getCommand("extrude");
+          const label = cmd ? t(cmd.labelKey) : "extrude";
+          const active = activeCommand === "extrude";
+          return (
+            <button
+              type="button"
+              className={`ribbon-btn${active ? " active" : ""}`}
+              disabled={!viewToggleEnabled}
+              title={viewToggleEnabled ? label : t("tool.floorOnlyDisabled")}
+              onClick={() => onRunCommand("extrude")}
+            >
+              <CommandIcon name="extrude" />
+              <span>{label}</span>
+            </button>
+          );
+        })()}
+      </div>
     </div>
   );
 }
@@ -1363,10 +1808,16 @@ export function TopBar({
   onExportPdf,
   onExportDxf,
   onExportSchedule,
+  onExportIfc,
+  onExportObj,
+  onExportStl,
+  viewType,
+  fov,
+  onFov,
+  cameraEnabled,
   resourcesOpen,
   onToggleResources,
   onOpenSettings,
-  layoutMenu,
   onImport,
   onSaveProject,
   onOpenProject,
@@ -1393,6 +1844,8 @@ export function TopBar({
 
   // Unter Tauri (native macOS-Ampeln oben links via titleBarStyle "Overlay")
   // braucht die Zeile links Platz, damit `dossier.` nicht darunter liegt.
+  const [aboutOpen, setAboutOpen] = useState(false);
+
   const tauriNativeTitlebar =
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -1415,10 +1868,17 @@ export function TopBar({
           Access-Leiste: alle Datei-/Export-Aktionen + Ressourcen/Einstellungen
           als kleine Icons direkt in der Zeile (ersetzt das Burger-Menü). */}
       <div className="tb-brandgroup">
-        <span className="brand-word">
+        <button
+          type="button"
+          className="brand-word"
+          onClick={() => setAboutOpen(true)}
+          title={t("about.title")}
+          aria-label={t("about.title")}
+        >
           dossier<span className="brand-dot">.</span>
-        </span>
+        </button>
       </div>
+      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       <QuickAccess
         onOpenProject={onOpenProject}
         onSaveProject={onSaveProject}
@@ -1426,10 +1886,17 @@ export function TopBar({
         onExportPdf={onExportPdf}
         onExportDxf={onExportDxf}
         onExportSchedule={onExportSchedule}
+        onExportIfc={onExportIfc}
+        onExportObj={onExportObj}
+        onExportStl={onExportStl}
         onToggleResources={onToggleResources}
         onOpenSettings={onOpenSettings}
         resourcesOpen={resourcesOpen}
         exportEnabled={zoomEnabled}
+        viewType={viewType}
+        fov={fov}
+        onFov={onFov}
+        cameraEnabled={cameraEnabled}
       />
 
       <Sep />
@@ -1439,11 +1906,10 @@ export function TopBar({
           Bänder: diese schmale Leiste (Chrome + Tabs) und den Inhalt. */}
       <RibbonTabs tab={ribbonTab} onTab={onRibbonTab} />
 
-      {/* Rechte Gruppe: Layout-Menü · Projektname. Die Fensterknöpfe sitzen jetzt
-          ganz links (macOS-Titelleisten-Konvention); Datei-/Export-Aktionen in
-          der Quick-Access-Leiste (kein Burger). */}
+      {/* Rechte Gruppe: Projektname. Die Fensterknöpfe sitzen ganz links (macOS-
+          Titelleisten-Konvention); Datei-/Export-Aktionen in der Quick-Access-
+          Leiste; die Arbeitsumgebung (Layout) liegt jetzt in den Einstellungen. */}
       <div className="topbar-right">
-        {layoutMenu}
         <span className="project-name">{project.name}</span>
       </div>
     </header>

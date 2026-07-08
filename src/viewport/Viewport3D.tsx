@@ -23,6 +23,7 @@ import {
   flattenCategories,
   getCeilingType,
   getComponent,
+  getStairType,
   getWallType,
   stairsOfFloor,
   wallTypeThickness,
@@ -49,6 +50,7 @@ import type { Pick3dHit } from "./Wasm3DViewport";
 import type { RenderMode, View3d } from "../ui/TopBar";
 import type { ToolDraft } from "../tools/types";
 import { applyAngleConstraint } from "../tools/snapping";
+import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 
 /**
  * Render-Entscheidung je Element (Geschoss bzw. Kategorie) im 3D — gespiegelt
@@ -146,6 +148,14 @@ export function Viewport3D(
         onToggleGrid={onToggleGrid}
         onPick3d={onPick3d}
         highlightLines={highlightLines}
+        // 3D-Editier-Griffe (s. Wasm3DViewport.tsx): dieselben Props/Callbacks
+        // wie die three.js-Sicht (renderer-agnostisch).
+        editWalls={props.editWalls}
+        editDrawings={props.editDrawings}
+        onEditVertex={props.onEditVertex}
+        onEditBody={props.onEditBody}
+        onEditWallTop={props.onEditWallTop}
+        onEditEnd={props.onEditEnd}
       />
     );
   }
@@ -1642,8 +1652,9 @@ function updateOrthoFrustum(
  * Wendet einen kanonischen Blickwinkel-Preset (Vectorworks/DOSSIER) an und
  * bestimmt die aktive Kamera:
  *   perspective → PerspectiveCamera (Fluchtpunkt-Projektion, FOV wirkt).
- *   front/side/top/iso → OrthographicCamera (echte parallele Projektion;
- *     „Isometrie" zeigt parallele Kanten parallel, ohne Konvergenz).
+ *   front/back/side/left/top/iso/isoFrontLeft/isoBackRight/isoBackLeft →
+ *     OrthographicCamera (echte parallele Projektion; „Isometrie" zeigt
+ *     parallele Kanten parallel, ohne Konvergenz).
  *
  * Für die aktive Kamera: Ziel = Modell-Zentrum, Position = Zentrum + Richtung ×
  * Distanz, up=(0,1,0) (für top eine stabile up-Achse über winzigen Z-Anteil).
@@ -1669,20 +1680,39 @@ function applyView3d(
   const size = bounds.getSize(new THREE.Vector3());
   const radius = Math.max(0.5 * Math.hypot(size.x, size.y, size.z), 0.001);
 
-  // Blickrichtung je Preset (vom Zentrum zur Kamera, normalisiert).
+  // Blickrichtung je Preset (vom Zentrum zur Kamera, normalisiert). Kardinal-
+  // Paare sind exakte Gegenrichtungen (back = -front, left = -side); die vier
+  // Iso-Richtungen sind die oberen Oktanten (untere bleiben im Hochbau
+  // ungenutzt) — dieselbe Achs-Konvention wie `preset_camera` in render3d/
+  // src/math.rs (WASM-Pfad), s. View3d in TopBar.tsx.
   let dir: THREE.Vector3;
   switch (view3d) {
     case "front":
       dir = new THREE.Vector3(0, 0, 1);
       break;
+    case "back":
+      dir = new THREE.Vector3(0, 0, -1);
+      break;
     case "side":
       dir = new THREE.Vector3(1, 0, 0);
+      break;
+    case "left":
+      dir = new THREE.Vector3(-1, 0, 0);
       break;
     case "top":
       dir = new THREE.Vector3(0, 1, 0.0001); // winziger Z-Anteil → stabiles Up
       break;
     case "iso":
       dir = new THREE.Vector3(1, 1, 1).normalize();
+      break;
+    case "isoFrontLeft":
+      dir = new THREE.Vector3(-1, 1, 1).normalize();
+      break;
+    case "isoBackRight":
+      dir = new THREE.Vector3(1, 1, -1).normalize();
+      break;
+    case "isoBackLeft":
+      dir = new THREE.Vector3(-1, 1, -1).normalize();
       break;
     case "perspective":
     default:
@@ -1923,48 +1953,8 @@ function drawing2DColor(project: Project, d: Drawing2D): string {
   return cat?.color ?? "#888888";
 }
 
-/**
- * Editierbare Eckpunkte eines 2D-Elements für die 3D-Vertex-Griffe — in genau
- * derselben Reihenfolge/Indizierung wie `drawingVertices`/`moveGripOf` im
- * Store, damit ein gezogener Griff den richtigen Vertex mutiert. line/polyline/
- * rect liefern Punkte; andere Formen (circle/arc/text) → keine Vertex-Griffe.
- */
-function drawingGripVertices(d: Drawing2D): Vec2[] {
-  const g = d.geom;
-  if (g.shape === "line") return [g.a, g.b];
-  if (g.shape === "polyline") return [...g.pts];
-  if (g.shape === "rect") {
-    return [
-      g.min,
-      { x: g.max.x, y: g.min.y },
-      g.max,
-      { x: g.min.x, y: g.max.y },
-    ];
-  }
-  return [];
-}
-
-/**
- * Ankerpunkt für den Verschiebe-Griff eines 2D-Elements (Schwerpunkt der
- * Vertex-Griffe). Formen ohne Vertex-Griffe (circle/arc/text) liefern ihren
- * Geometrie-Ursprung (Mittelpunkt bzw. Textanker), damit auch sie einen
- * Verschiebe-Griff bekommen. null, wenn kein sinnvoller Anker existiert.
- */
-function drawingMoveAnchor(d: Drawing2D, verts: Vec2[]): Vec2 | null {
-  if (verts.length > 0) {
-    let sx = 0;
-    let sy = 0;
-    for (const v of verts) {
-      sx += v.x;
-      sy += v.y;
-    }
-    return { x: sx / verts.length, y: sy / verts.length };
-  }
-  const g = d.geom;
-  if (g.shape === "circle" || g.shape === "arc") return g.center;
-  if (g.shape === "text") return g.at;
-  return null;
-}
+// drawingGripVertices/drawingMoveAnchor sind nach `./drawingGrips` ausgelagert
+// (gemeinsam mit Wasm3DViewport.tsx genutzt — s. dortiger Modul-Kommentar).
 
 /** Strecken eines 2D-Zeichenelements (line/polyline/rect); andere → leer. */
 function drawing2DSegments(d: Drawing2D): [Vec2, Vec2][] {
@@ -2466,6 +2456,12 @@ function addCeilingMesh(
  * einem). Das Zwischenpodest (L/Wendel) wird bis zu seiner Höhe extrudiert. Das
  * Material folgt dem Render-Modus; ein neutraler Beton-Grauton dient als Default.
  * `userData.stairId` trägt die Auswahl-ID für den Raycast.
+ *
+ * Ist ein Treppentyp (`StairType`) aufgelöst und dessen Tragart ungleich
+ * "massiv", wird die Treppe stattdessen UNTEN OFFEN dargestellt: jeder Tritt
+ * wird nur als dünne Platte (Dicke `treadThickness`) an seiner Oberkante
+ * modelliert, optional mit Trittkanten-Überstand (Nase) und/oder geschlossenen
+ * Setzstufen-Platten — je nach `StairType`-Feldern.
  */
 function addStairMeshes(
   group: THREE.Group,
@@ -2478,6 +2474,7 @@ function addStairMeshes(
   const totalRise = zTop - zBottom;
   if (totalRise <= 1e-6) return;
   const geo = stairGeometry(stair, totalRise);
+  const st = getStairType(project, stair);
 
   // Material je Render-Modus. Ohne Component-Referenz nutzen wir einen neutralen
   // Beton-Grauton (gedimmt heller/transparent).
@@ -2495,16 +2492,19 @@ function addStairMeshes(
             opacity: greyed ? 0.35 : 1,
           });
 
-  const extrudeBlock = (pts: Vec2[], top: number, idKey: string) => {
-    if (pts.length < 3 || top <= 1e-6) return;
+  // Extrudiert ein geschlossenes Grundriss-Polygon zu einer Platte zwischen
+  // `bottom` und `top` (beide relativ zur Treppen-UK `zBottom`). Analog zum
+  // Vollblock, aber mit frei wählbarer Unterkante statt immer 0.
+  const extrudeSlab = (pts: Vec2[], bottom: number, top: number) => {
+    const depth = top - bottom;
+    if (pts.length < 3 || depth <= 1e-6) return;
     const shape = new THREE.Shape();
     pts.forEach((v, i) => (i === 0 ? shape.moveTo(v.x, v.y) : shape.lineTo(v.x, v.y)));
     shape.closePath();
-    const g = new THREE.ExtrudeGeometry(shape, { depth: top, bevelEnabled: false });
+    const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
     const mesh = new THREE.Mesh(g, baseMat);
     mesh.userData.stairId = stair.id;
-    void idKey;
-    // Plan (x,y) → Three (x, z=y); Extrusion nach −Y, daher an die Block-OK setzen.
+    // Plan (x,y) → Three (x, z=y); Extrusion nach −Y, daher an die Platten-OK setzen.
     mesh.rotation.x = Math.PI / 2;
     mesh.position.y = zBottom + top;
     if (opts.renderMode === "hidden") {
@@ -2514,12 +2514,115 @@ function addStairMeshes(
     group.add(mesh);
   };
 
-  for (const tr of geo.treads) extrudeBlock(tr.pts, tr.topRise, `t${tr.index}`);
+  // Vollblock (Default/"massiv"): von der Treppen-UK bis zur Tritt-Oberkante.
+  const extrudeBlock = (pts: Vec2[], top: number) => extrudeSlab(pts, 0, top);
+
+  const centroidOf = (pts: Vec2[]): Vec2 => {
+    let x = 0, y = 0;
+    for (const p of pts) { x += p.x; y += p.y; }
+    return { x: x / pts.length, y: y / pts.length };
+  };
+
+  // Bestimmt die "vordere" Kante eines Tritt-Vierecks (die Kante in Richtung
+  // des nächsten Tritts). `target` ist der Schwerpunkt eines Nachbartritts;
+  // `preferNear` wählt die dem Ziel NÄCHSTE Kante (Nachbar = nächster Tritt),
+  // sonst die FERNSTE (Nachbar = vorheriger Tritt, Vorderkante liegt entgegengesetzt).
+  // Rückgabe: Indizes der beiden Eckpunkte der Vorderkante + deren Richtung
+  // (vom Trittschwerpunkt zur Kantenmitte, normiert).
+  const frontEdgeOf = (
+    pts: Vec2[],
+    target: Vec2,
+    preferNear: boolean,
+  ): { a: number; b: number; dir: Vec2 } => {
+    const c = centroidOf(pts);
+    let best = 0;
+    let bestDist = preferNear ? Infinity : -Infinity;
+    for (let e = 0; e < pts.length; e++) {
+      const p0 = pts[e];
+      const p1 = pts[(e + 1) % pts.length];
+      const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+      const d = Math.hypot(mid.x - target.x, mid.y - target.y);
+      if (preferNear ? d < bestDist : d > bestDist) {
+        bestDist = d;
+        best = e;
+      }
+    }
+    const p0 = pts[best];
+    const p1 = pts[(best + 1) % pts.length];
+    const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+    const dx = mid.x - c.x;
+    const dy = mid.y - c.y;
+    const len = Math.hypot(dx, dy) || 1e-9;
+    return { a: best, b: (best + 1) % pts.length, dir: { x: dx / len, y: dy / len } };
+  };
+
+  if (!st || st.structure === "massiv") {
+    // Default/rückwärtskompatibel: durchgehend massive Vollblöcke.
+    for (const tr of geo.treads) extrudeBlock(tr.pts, tr.topRise);
+  } else {
+    // Offene Treppe (Wangen-, aufgesattelte oder Spindeltreppe): dünne
+    // Tritt-Platten statt Vollblöcken, darunter bleibt die Treppe offen.
+    const treads = geo.treads;
+    for (let k = 0; k < treads.length; k++) {
+      const tr = treads[k];
+      let pts = tr.pts;
+
+      // Nase (Nosing): die Vorderkante des Tritts (Richtung nächster Tritt)
+      // um den Überstand nach vorne verlängern. Die Vorderkante wird über den
+      // Nachbartritt (Schwerpunkt) bestimmt — für den letzten Tritt (kein
+      // Nachfolger) wird stattdessen die dem Vorgänger abgewandte Kante genutzt.
+      const nosing = st.nosing ?? 0;
+      if (nosing > 1e-6) {
+        const hasNext = k + 1 < treads.length;
+        const hasPrev = k > 0;
+        const ref = hasNext ? treads[k + 1] : hasPrev ? treads[k - 1] : null;
+        if (ref) {
+          const { a, b, dir } = frontEdgeOf(pts, centroidOf(ref.pts), hasNext);
+          const nosed = pts.slice();
+          nosed[a] = { x: pts[a].x + dir.x * nosing, y: pts[a].y + dir.y * nosing };
+          nosed[b] = { x: pts[b].x + dir.x * nosing, y: pts[b].y + dir.y * nosing };
+          pts = nosed;
+        }
+      }
+
+      // Tritt-Platte: dünne Scheibe, Oberkante an der Setzstufen-Oberkante.
+      extrudeSlab(pts, tr.topRise - st.treadThickness, tr.topRise);
+
+      // Geschlossene Setzstufe: vertikale Platte an der RÜCKKante dieses Tritts
+      // (= Vorderkante des Vorgängers), von dessen UK (`baseRise`) bis zu
+      // dieser Oberkante (`topRise`). Offene Treppe (closedRisers=false) lässt
+      // diese Fläche bewusst weg.
+      if (st.closedRisers) {
+        const hasNext = k + 1 < treads.length;
+        const ref = hasNext ? treads[k + 1] : k > 0 ? treads[k - 1] : null;
+        if (ref) {
+          // Rückkante = Gegenkante der Vorderkante desselben Tritts.
+          const front = frontEdgeOf(tr.pts, centroidOf(ref.pts), hasNext);
+          const n = tr.pts.length;
+          const backA = (front.a + Math.floor(n / 2)) % n;
+          const backB = (front.b + Math.floor(n / 2)) % n;
+          const riserPts = [tr.pts[backA], tr.pts[backB]];
+          // Dünne Platte: Rückkante zu einer flachen Wange in Setzrichtung
+          // aufgeweitet (minimaler Versatz nach vorn), damit ein extrudierbares
+          // Polygon entsteht.
+          const thin = Math.min(st.treadThickness, 0.02) || 0.01;
+          const offA = { x: tr.pts[backA].x - front.dir.x * thin, y: tr.pts[backA].y - front.dir.y * thin };
+          const offB = { x: tr.pts[backB].x - front.dir.x * thin, y: tr.pts[backB].y - front.dir.y * thin };
+          const riserPoly = [riserPts[0], riserPts[1], offB, offA];
+          extrudeSlab(riserPoly, tr.baseRise, tr.topRise);
+        }
+      }
+
+      // TODO Geländer (railing) noch nicht umgesetzt.
+    }
+  }
+
   // Podest (L/Wendel-Auge): bis zur mittleren Höhe extrudieren, damit es sichtbar
-  // als Absatz erscheint (halber Gesamt-Rise als sinnvoller Default).
+  // als Absatz erscheint (halber Gesamt-Rise als sinnvoller Default). Bleibt
+  // unabhängig von der Tragart immer als Vollblock stehen.
   if (geo.landing && geo.landing.length >= 3) {
     // Höhe des Podests = Höhe des höchsten Tritts unter/an der Podestposition;
     // wir nehmen die halbe Gesamt-Steighöhe als robusten Näherungswert.
-    extrudeBlock(geo.landing, totalRise * 0.5, "landing");
+    extrudeBlock(geo.landing, totalRise * 0.5);
   }
 }

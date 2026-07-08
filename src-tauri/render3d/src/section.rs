@@ -133,7 +133,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::math;
-use crate::types::{Opening, Point2, Rgb, SlabInput, WallInput};
+use crate::types::{CutBandMeta, Hatch, Opening, Point2, Rgb, SlabInput, WallInput};
 
 /// Toleranz fuer "naeher an der Ebene" / Grenzwert-Vergleiche (Meter, Tiefe/Hoehe).
 const EPS: f32 = 1e-4;
@@ -268,8 +268,19 @@ pub struct ComponentRef {
 pub struct CutPolygon {
     pub component: ComponentRef,
     pub color: Rgb,
+    /// Schnitt-Schraffur des Ursprungs-Bauteils (siehe `WallInput::hatch`). `None`
+    /// -> der Cap-Shader zeichnet das Fallback-Diagonalmuster (Alt-Verhalten).
+    #[serde(default)]
+    pub hatch: Option<Hatch>,
     /// Ring-Ecken (u, v); erste != letzte (Ring implizit geschlossen).
     pub pts: Vec<[f32; 2]>,
+    /// Schnitt-Verschneidungs-/Linienstil-Metadaten des Ursprungs-Bandes (siehe
+    /// `WallInput::cut`). Treibt die Boolean-Dominanz in `section_boolean::
+    /// subtract_dominant_bands` (die staerkere Schicht schneidet die schwaechere)
+    /// und die Schnitt-Umrisslinien (`section_fill::build_cut_cap_lines`). `None`
+    /// -> das Band nimmt an keiner Subtraktion teil (Alt-Verhalten).
+    #[serde(default)]
+    pub cut: Option<CutBandMeta>,
 }
 
 /// Ein Liniensegment in Schnittkoordinaten (u, v), Meter.
@@ -314,9 +325,16 @@ struct Prism {
     z0: f32,
     z1: f32,
     color: Rgb,
+    /// Schnitt-Schraffur des Bauteils (siehe `WallInput::hatch`). Wandert in die
+    /// Cut-Polygone, damit `section_fill`/`CAP_WGSL` das richtige Muster zeichnen.
+    hatch: Option<Hatch>,
     /// Nur fuer Waende: Achse + Oeffnungen (siehe `WallAxis`). `None` fuer
     /// Decken (Slabs kennen keine Oeffnungen).
     wall_axis: Option<WallAxis>,
+    /// Schnitt-Metadaten (Prioritaet/Identitaet/Linienstil), 1:1 aus der
+    /// `WallInput`/`SlabInput`-Eingabe (`cut`) uebernommen und an jedes erzeugte
+    /// `CutPolygon` weitergereicht.
+    cut: Option<CutBandMeta>,
 }
 
 /// Wandachse + Oeffnungen, wie sie fuer die Oeffnungs-Zuordnung bei Cut-
@@ -399,12 +417,14 @@ fn wall_prism(index: usize, wall: &WallInput) -> Option<Prism> {
         z0: wall.base_elevation,
         z1: wall.base_elevation + wall.height,
         color: wall.color,
+        hatch: wall.hatch,
         wall_axis: Some(WallAxis {
             start: wall.start,
             dir,
             length,
             openings: wall.openings.clone(),
         }),
+        cut: wall.cut.clone(),
     })
 }
 
@@ -425,7 +445,9 @@ fn slab_prism(index: usize, slab: &SlabInput) -> Option<Prism> {
         z0,
         z1,
         color: slab.color,
+        hatch: slab.hatch,
         wall_axis: None,
+        cut: slab.cut.clone(),
     })
 }
 
@@ -974,7 +996,9 @@ pub fn cut_section(plane: &SectionPlane, walls: &[WallInput], slabs: &[SlabInput
                         index: prism.index,
                     },
                     color: prism.color,
+                    hatch: prism.hatch,
                     pts: vec![[rlo, rz0], [rhi, rz0], [rhi, rz1], [rlo, rz1]],
+                    cut: prism.cut.clone(),
                 });
             }
         }
@@ -1017,6 +1041,9 @@ mod tests {
                 openings: vec![],
                 layers: None,
                 holes: vec![],
+                material_index: None,
+                hatch: None,
+                cut: None,
             },
             WallInput {
                 start: [0.0, 3.0],
@@ -1028,6 +1055,9 @@ mod tests {
                 openings: vec![],
                 layers: None,
                 holes: vec![],
+                material_index: None,
+                hatch: None,
+                cut: None,
             },
         ];
         let slabs = vec![SlabInput {
@@ -1035,6 +1065,8 @@ mod tests {
             z_bottom: -0.2,
             z_top: 0.0,
             color: [0.86, 0.86, 0.88],
+            hatch: None,
+            cut: None,
         }];
         (walls, slabs)
     }
@@ -1285,6 +1317,9 @@ mod tests {
             }],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         }
     }
 
@@ -1371,6 +1406,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         // Blick von y = -2 nach +Y: beide Waende (y=0 bzw. y=1) liegen dahinter.
         let plane = SectionPlane::looking_plus_y(-2.0);

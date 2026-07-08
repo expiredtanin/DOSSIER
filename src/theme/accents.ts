@@ -46,7 +46,7 @@ export const DEFAULT_MARQUEE_COLOR = "#CEB188";
  * bleibt aber (anders als das sehr blasse Kori) auch auf hellem
  * Papier-Hintergrund gut sichtbar. Per Picker im Einstellungs-Fenster änderbar.
  */
-export const DEFAULT_SNAP_COLOR = "#5FA1C9";
+export const DEFAULT_SNAP_COLOR = "#E0BE5A";
 
 /** Liefert einen Swatch nach `id`, oder `undefined`. */
 export function findAccentSwatch(id: string): AccentSwatch | undefined {

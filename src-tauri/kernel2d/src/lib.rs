@@ -2470,6 +2470,223 @@ pub fn room_from_point_inside_faces(
     best
 }
 
+// --- Oeffnungs-Geometrie (Port von src/geometry/opening.ts, Slice 4) --------
+// `Wall`/`Opening`/`Project`-Kopplung durch Vec2/number-Parameter ersetzt
+// (PORT_PLAN §1 "Teilweise im Scope"): `thickness`/`refOffset` werden hier als
+// bereits aufgeloeste Zahlen uebergeben (TS: `wallTypeThickness(getWallType(...))`
+// bzw. `wallReferenceOffset(wall, total)` gegen ein `Project`). Nur
+// `openingVerticalExtent` bleibt TS (haengt an `Project.drawingLevels` via
+// `wallVerticalExtent`) und wird hier NICHT portiert.
+//
+// `DEG` (Grad→Radiant, Port des lokalen `DEG` in opening.ts) ist bereits als
+// modul-weite Konstante aus dem stair-Slice vorhanden (identischer Wert).
+
+/// Punkt entlang der Strecke p1→p2 im Abstand d vom Start (Port von `along`
+/// aus src/model/geometry.ts).
+pub fn along(p1: Vec2, p2: Vec2, d: f64) -> Vec2 {
+    add(p1, scale(normalize(sub(p2, p1)), d))
+}
+
+/// Achslaenge einer Wand (Port von `wallAxisLength`; Wand → start/end).
+pub fn wall_axis_length(start: Vec2, end: Vec2) -> f64 {
+    (end.x - start.x).hypot(end.y - start.y)
+}
+
+/// Oeffnungs-Intervall entlang der Achse (Port von `openingInterval`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Interval {
+    pub from: f64,
+    pub to: f64,
+}
+
+pub fn opening_interval(start: Vec2, end: Vec2, position: f64, width: f64) -> Option<Interval> {
+    let axis = wall_axis_length(start, end);
+    let from = position.min(axis).max(0.0);
+    let to = (position + width).min(axis).max(from);
+    if to - from < 1e-4 {
+        return None; // entartet: Breite <= 0 oder vollstaendig ausserhalb der Achse
+    }
+    Some(Interval { from, to })
+}
+
+/// Einheits-Laufrichtung (u) und linke Normale (n) der Wandachse (Port von
+/// `wallAxisFrame`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct AxisFrame {
+    pub u: Vec2,
+    pub n: Vec2,
+}
+
+pub fn wall_axis_frame(start: Vec2, end: Vec2) -> AxisFrame {
+    let u = normalize(sub(end, start));
+    AxisFrame { u, n: left_normal(u) }
+}
+
+/// Die beiden Pfosten-Punkte einer Oeffnung im Grundriss (Port von `openingJambs`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Jambs {
+    pub jamb_start: Vec2,
+    pub jamb_end: Vec2,
+}
+
+pub fn opening_jambs(start: Vec2, end: Vec2, position: f64, width: f64) -> Option<Jambs> {
+    let iv = opening_interval(start, end, position, width)?;
+    Some(Jambs {
+        jamb_start: along(start, end, iv.from),
+        jamb_end: along(start, end, iv.to),
+    })
+}
+
+/// Luecken-Rechteck-Ecken ueber die volle Wanddicke (Port von `openingGapQuad`).
+/// Reihenfolge: jambStart(+n/2) → jambEnd(+n/2) → jambEnd(−n/2) → jambStart(−n/2).
+pub fn opening_gap_quad(
+    start: Vec2,
+    end: Vec2,
+    position: f64,
+    width: f64,
+    thickness: f64,
+    ref_offset: f64,
+) -> Option<Vec<Vec2>> {
+    let jambs = opening_jambs(start, end, position, width)?;
+    let n = wall_axis_frame(start, end).n;
+    let outer = ref_offset + thickness / 2.0;
+    let inner = ref_offset - thickness / 2.0;
+    Some(vec![
+        add(jambs.jamb_start, scale(n, outer)),
+        add(jambs.jamb_end, scale(n, outer)),
+        add(jambs.jamb_end, scale(n, inner)),
+        add(jambs.jamb_start, scale(n, inner)),
+    ])
+}
+
+/// Mittelpunkt einer Oeffnung im Grundriss (Port von `openingCenter`).
+pub fn opening_center(start: Vec2, end: Vec2, position: f64, width: f64) -> Option<Vec2> {
+    let iv = opening_interval(start, end, position, width)?;
+    Some(along(start, end, (iv.from + iv.to) / 2.0))
+}
+
+/// Aufgeloeste Tuer-Symbol-Geometrie im Grundriss (Port von `DoorSymbol`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DoorSymbol {
+    pub hinge: Vec2,
+    pub open_end: Vec2,
+    pub closed_end: Vec2,
+    pub radius: f64,
+    pub jamb_start: Vec2,
+    pub jamb_end: Vec2,
+    pub normal: Vec2,
+}
+
+/// Port von `doorSymbol`. `swing`/`opening_dir`/`hinge_side` folgen der TS-
+/// `??`-Fallback-Semantik (`None` → TS-Default); `swing_angle` `None` → 90°.
+pub fn door_symbol(
+    start: Vec2,
+    end: Vec2,
+    position: f64,
+    width: f64,
+    swing: Option<&str>,
+    opening_dir: Option<&str>,
+    hinge_side: Option<&str>,
+    swing_angle: Option<f64>,
+) -> Option<DoorSymbol> {
+    let jambs = opening_jambs(start, end, position, width)?;
+    let frame = wall_axis_frame(start, end);
+    let (jamb_start, jamb_end) = (jambs.jamb_start, jambs.jamb_end);
+    // TS berechnet die Breite NEU aus den geklemmten Pfosten (nicht das rohe
+    // `o.width`) — bewusst repliziert.
+    let w = (jamb_end.x - jamb_start.x).hypot(jamb_end.y - jamb_start.y);
+
+    let swing_sign = if swing.unwrap_or("left") == "left" { 1.0 } else { -1.0 };
+    let dir_sign = if opening_dir.unwrap_or("in") == "in" { 1.0 } else { -1.0 };
+    let swing_dir = scale(frame.n, swing_sign * dir_sign);
+
+    let hinge_at_start = hinge_side.unwrap_or("start") == "start";
+    let hinge = if hinge_at_start { jamb_start } else { jamb_end };
+    let closed_dir = if hinge_at_start { frame.u } else { scale(frame.u, -1.0) };
+
+    let angle = swing_angle.unwrap_or(90.0) * DEG;
+    let open_dir = Vec2 {
+        x: closed_dir.x * angle.cos() + swing_dir.x * angle.sin(),
+        y: closed_dir.y * angle.cos() + swing_dir.y * angle.sin(),
+    };
+    Some(DoorSymbol {
+        hinge,
+        open_end: add(hinge, scale(open_dir, w)),
+        closed_end: add(hinge, scale(closed_dir, w)),
+        radius: w,
+        jamb_start,
+        jamb_end,
+        normal: frame.n,
+    })
+}
+
+/// Aufgeloeste Fenster-Linien im Grundriss (Port von `WindowSymbol`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowSymbol {
+    pub frame: Vec<Vec2>,
+    pub glass_lines: Vec<(Vec2, Vec2)>,
+    pub mullion_lines: Vec<(Vec2, Vec2)>,
+}
+
+/// Port von `windowSymbol`. `thickness`/`ref_offset` sind bereits aufgeloeste
+/// Werte (siehe Modul-Kommentar); `wing_count` `None` → TS-Default `1`.
+pub fn window_symbol(
+    start: Vec2,
+    end: Vec2,
+    position: f64,
+    width: f64,
+    thickness: f64,
+    ref_offset: f64,
+    glass_count: f64,
+    wing_count: Option<f64>,
+) -> Option<WindowSymbol> {
+    let jambs = opening_jambs(start, end, position, width)?;
+    let (jamb_start, jamb_end) = (jambs.jamb_start, jambs.jamb_end);
+    let n = wall_axis_frame(start, end).n;
+    let outer = ref_offset + thickness / 2.0;
+    let inner = ref_offset - thickness / 2.0;
+    let frame_quad = vec![
+        add(jamb_start, scale(n, outer)),
+        add(jamb_end, scale(n, outer)),
+        add(jamb_end, scale(n, inner)),
+        add(jamb_start, scale(n, inner)),
+    ];
+
+    let mut glass_lines: Vec<(Vec2, Vec2)> = Vec::new();
+    let count = glass_count.max(1.0);
+    let mut i: i64 = 0;
+    while (i as f64) < count {
+        let spread = thickness / 8.0;
+        let off = if count == 1.0 {
+            ref_offset
+        } else {
+            ref_offset + ((i as f64) - (count - 1.0) / 2.0) * spread * 2.0
+        };
+        glass_lines.push((add(jamb_start, scale(n, off)), add(jamb_end, scale(n, off))));
+        i += 1;
+    }
+
+    let mut mullion_lines: Vec<(Vec2, Vec2)> = Vec::new();
+    let wings = wing_count.unwrap_or(1.0).round().min(4.0).max(1.0);
+    if wings > 1.0 {
+        let post_depth = thickness * 0.6;
+        let p_outer = ref_offset + post_depth / 2.0;
+        let p_inner = ref_offset - post_depth / 2.0;
+        let wings_n = wings as i64;
+        for k in 1..wings_n {
+            let t = k as f64 / wings;
+            let on_axis = add(jamb_start, scale(sub(jamb_end, jamb_start), t));
+            mullion_lines.push((add(on_axis, scale(n, p_outer)), add(on_axis, scale(n, p_inner))));
+        }
+    }
+
+    Some(WindowSymbol { frame: frame_quad, glass_lines, mullion_lines })
+}
+
 // --- Batch-Fassaden: roomArea / ceiling (Slice 1) ----------------------------
 
 #[cfg(feature = "web")]
@@ -2738,6 +2955,183 @@ pub fn rb_point_in_polygon_batch_json(input_json: &str) -> Result<String, wasm_b
     console_error_panic_hook::set_once();
     let qs: Vec<RbPointInPolygonQuery> = from_js(input_json)?;
     let out: Vec<bool> = qs.iter().map(|q| rb_point_in_polygon(q.p, &q.poly)).collect();
+    to_js(&out)
+}
+
+// --- Batch-Fassaden: opening (Slice 4) ---------------------------------------
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WallAxisLengthQuery {
+    start: Vec2,
+    end: Vec2,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn wall_axis_length_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<WallAxisLengthQuery> = from_js(input_json)?;
+    let out: Vec<f64> = qs.iter().map(|q| wall_axis_length(q.start, q.end)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpeningQuery {
+    start: Vec2,
+    end: Vec2,
+    position: f64,
+    width: f64,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn opening_interval_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<OpeningQuery> = from_js(input_json)?;
+    let out: Vec<Option<Interval>> = qs
+        .iter()
+        .map(|q| opening_interval(q.start, q.end, q.position, q.width))
+        .collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn wall_axis_frame_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<WallAxisLengthQuery> = from_js(input_json)?;
+    let out: Vec<AxisFrame> = qs.iter().map(|q| wall_axis_frame(q.start, q.end)).collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn opening_jambs_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<OpeningQuery> = from_js(input_json)?;
+    let out: Vec<Option<Jambs>> = qs
+        .iter()
+        .map(|q| opening_jambs(q.start, q.end, q.position, q.width))
+        .collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpeningGapQuadQuery {
+    start: Vec2,
+    end: Vec2,
+    position: f64,
+    width: f64,
+    thickness: f64,
+    ref_offset: f64,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn opening_gap_quad_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<OpeningGapQuadQuery> = from_js(input_json)?;
+    let out: Vec<Option<Vec<Vec2>>> = qs
+        .iter()
+        .map(|q| opening_gap_quad(q.start, q.end, q.position, q.width, q.thickness, q.ref_offset))
+        .collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn opening_center_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<OpeningQuery> = from_js(input_json)?;
+    let out: Vec<Option<Vec2>> = qs
+        .iter()
+        .map(|q| opening_center(q.start, q.end, q.position, q.width))
+        .collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DoorSymbolQuery {
+    start: Vec2,
+    end: Vec2,
+    position: f64,
+    width: f64,
+    #[serde(default)]
+    swing: Option<String>,
+    #[serde(default)]
+    opening_dir: Option<String>,
+    #[serde(default)]
+    hinge: Option<String>,
+    #[serde(default)]
+    swing_angle: Option<f64>,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn door_symbol_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<DoorSymbolQuery> = from_js(input_json)?;
+    let out: Vec<Option<DoorSymbol>> = qs
+        .iter()
+        .map(|q| {
+            door_symbol(
+                q.start,
+                q.end,
+                q.position,
+                q.width,
+                q.swing.as_deref(),
+                q.opening_dir.as_deref(),
+                q.hinge.as_deref(),
+                q.swing_angle,
+            )
+        })
+        .collect();
+    to_js(&out)
+}
+
+#[cfg(feature = "web")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowSymbolQuery {
+    start: Vec2,
+    end: Vec2,
+    position: f64,
+    width: f64,
+    thickness: f64,
+    ref_offset: f64,
+    glass_count: f64,
+    #[serde(default)]
+    wing_count: Option<f64>,
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn window_symbol_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
+    console_error_panic_hook::set_once();
+    let qs: Vec<WindowSymbolQuery> = from_js(input_json)?;
+    let out: Vec<Option<WindowSymbol>> = qs
+        .iter()
+        .map(|q| {
+            window_symbol(
+                q.start,
+                q.end,
+                q.position,
+                q.width,
+                q.thickness,
+                q.ref_offset,
+                q.glass_count,
+                q.wing_count,
+            )
+        })
+        .collect();
     to_js(&out)
 }
 

@@ -20,6 +20,7 @@ pub mod math;
 pub mod mesh;
 pub(crate) mod openings;
 pub mod section;
+pub mod section_boolean;
 pub mod section_fill;
 pub mod shaders;
 pub mod types;
@@ -72,6 +73,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         }
     }
 
@@ -171,6 +175,9 @@ mod tests {
                 openings: vec![],
                 layers: None,
                 holes: vec![],
+                material_index: None,
+                hatch: None,
+                cut: None,
             },
         ]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX);
@@ -250,6 +257,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         let mut mesh = Mesh::default();
         extrude_wall(&mut mesh, &w);
@@ -272,6 +282,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         let mesh = build_walls_mesh(&[w]);
         assert_eq!(mesh.vertex_count(), 0);
@@ -486,6 +499,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         let b = WallInput {
             start: [0.0, 0.0],
@@ -497,6 +513,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         let mesh = build_walls_mesh(&[a, b]);
         assert_eq!(mesh.vertex_count(), 2 * VERTS_PER_BOX, "weiterhin zwei Quader");
@@ -557,6 +576,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         let walls = vec![
             mk([0.0, 0.0], [3.0, 0.0]),
@@ -586,6 +608,9 @@ mod tests {
             openings: vec![],
             layers: None,
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         let walls = vec![
             mk([0.0, 0.0], [3.0, 0.0], 0.0),
@@ -675,6 +700,9 @@ mod tests {
             openings: vec![],
             layers: layers(),
             holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
         };
         let mut b = a.clone();
         b.end = [0.0, 3.0];
@@ -705,6 +733,8 @@ mod tests {
             z_bottom,
             z_top,
             color: [0.86, 0.86, 0.88],
+            hatch: None,
+            cut: None,
         }
     }
 
@@ -761,6 +791,8 @@ mod tests {
             z_bottom: 0.0,
             z_top: 0.3,
             color: [0.8, 0.8, 0.8],
+            hatch: None,
+            cut: None,
         };
         let mut mesh = Mesh::default();
         extrude_slab(&mut mesh, &slab);
@@ -789,7 +821,7 @@ mod tests {
     fn entarteter_slab_erzeugt_nichts() {
         let mut mesh = Mesh::default();
         // <3 Ecken.
-        extrude_slab(&mut mesh, &SlabInput { outline: vec![[0.0, 0.0], [1.0, 0.0]], z_bottom: 0.0, z_top: 0.2, color: [0.8, 0.8, 0.8] });
+        extrude_slab(&mut mesh, &SlabInput { outline: vec![[0.0, 0.0], [1.0, 0.0]], z_bottom: 0.0, z_top: 0.2, color: [0.8, 0.8, 0.8], hatch: None, cut: None });
         assert_eq!(mesh.vertex_count(), 0);
         // Nullhoehe.
         extrude_slab(&mut mesh, &square_slab(4.0, 2.6, 2.6));
@@ -960,6 +992,51 @@ mod tests {
         // Top blickt von oben herab: eye.y > target.y.
         let top = preset_camera(CameraPreset::Top, t, 10.0);
         assert!(top.eye[1] > t[1], "Top-Kamera ueber dem Ziel");
+    }
+
+    #[test]
+    fn presets_kardinal_back_left_sind_orthografisch_und_gegenrichtung() {
+        use super::math::preset_camera;
+        use super::types::{CameraPreset, Projection};
+        let t = [0.0, 0.0, 0.0];
+        let front = preset_camera(CameraPreset::Front, t, 10.0);
+        let back = preset_camera(CameraPreset::Back, t, 10.0);
+        let side = preset_camera(CameraPreset::Side, t, 10.0);
+        let left = preset_camera(CameraPreset::Left, t, 10.0);
+        assert_eq!(back.projection, Projection::Orthographic);
+        assert_eq!(left.projection, Projection::Orthographic);
+        // Back/Left sind exakt die Gegenrichtung von Front/Side (gespiegelte Achse).
+        assert!((back.eye[2] - (-front.eye[2])).abs() < 1e-4, "Back == -Front (Z)");
+        assert!((left.eye[0] - (-side.eye[0])).abs() < 1e-4, "Left == -Side (X)");
+    }
+
+    #[test]
+    fn presets_iso_oktanten_sind_orthografisch_gleich_gross() {
+        use super::math::preset_camera;
+        use super::types::{CameraPreset, Projection};
+        let t = [0.0, 0.0, 0.0];
+        let dist = 10.0;
+        let iso = preset_camera(CameraPreset::Iso, t, dist);
+        let fl = preset_camera(CameraPreset::IsoFrontLeft, t, dist);
+        let br = preset_camera(CameraPreset::IsoBackRight, t, dist);
+        let bl = preset_camera(CameraPreset::IsoBackLeft, t, dist);
+        for cam in [&iso, &fl, &br, &bl] {
+            assert_eq!(cam.projection, Projection::Orthographic);
+            // Alle vier oberen Iso-Oktanten haben denselben eye-target-Abstand
+            // (Modell erscheint in jedem Oktanten gleich gross).
+            let d = ((cam.eye[0] - t[0]).powi(2)
+                + (cam.eye[1] - t[1]).powi(2)
+                + (cam.eye[2] - t[2]).powi(2))
+            .sqrt();
+            assert!((d - dist).abs() < 1e-3, "Iso-Oktant-Abstand == dist");
+            // Alle vier blicken von OBEN (Y > 0) — untere Oktanten bleiben ungenutzt.
+            assert!(cam.eye[1] > t[1], "Iso-Oktant ueber dem Ziel");
+        }
+        // Vier unterschiedliche horizontale Vorzeichen-Kombinationen (X,Z).
+        assert!(iso.eye[0] > t[0] && iso.eye[2] > t[2]); // vorne-rechts
+        assert!(fl.eye[0] < t[0] && fl.eye[2] > t[2]); // vorne-links
+        assert!(br.eye[0] > t[0] && br.eye[2] < t[2]); // hinten-rechts
+        assert!(bl.eye[0] < t[0] && bl.eye[2] < t[2]); // hinten-links
     }
 
     /// Validiert die WGSL-Quelle headless ueber naga (Parser + Validator) — faengt

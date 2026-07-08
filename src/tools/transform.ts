@@ -10,14 +10,17 @@
 // die App hält den State und wendet `commitTransform` immutabel an.
 
 import type {
+  Column,
   Drawing2D,
   Drawing2DGeom,
+  ExtrudedSolid,
   Project,
   Vec2,
   Wall,
 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { wallCorners } from "../model/geometry";
+import { columnFootprint } from "../geometry/column";
 import type { DraftShape } from "./types";
 import { uniqueId } from "./types";
 
@@ -28,6 +31,10 @@ export type CopyMode = "move" | "copy" | "array" | "distribute"; // U / I / O / 
 export interface TransformSelection {
   wallIds: string[];
   drawingId: string | null;
+  /** Gewählter extrudierter Körper (truck-Integration); nur move.ts setzt ihn. */
+  extrudedSolidId?: string | null;
+  /** Gewählte Stütze (Tragwerk); von move/copy/mirror gesetzt. */
+  columnId?: string | null;
 }
 
 /** Wie viele Klickpunkte die Operation braucht (Drehen = 3, sonst 2). */
@@ -95,7 +102,15 @@ interface SelDrawingItem {
   kind: "drawing";
   drawing: Drawing2D;
 }
-type AnyItem = SelItem | SelDrawingItem;
+interface SelExtrudedItem {
+  kind: "extrudedSolid";
+  solid: ExtrudedSolid;
+}
+interface SelColumnItem {
+  kind: "column";
+  column: Column;
+}
+type AnyItem = SelItem | SelDrawingItem | SelExtrudedItem | SelColumnItem;
 
 function gatherItems(project: Project, sel: TransformSelection): AnyItem[] {
   const items: AnyItem[] = [];
@@ -105,7 +120,31 @@ function gatherItems(project: Project, sel: TransformSelection): AnyItem[] {
     const d = project.drawings2d.find((x) => x.id === sel.drawingId);
     if (d) items.push({ kind: "drawing", drawing: d });
   }
+  if (sel.extrudedSolidId) {
+    const s = (project.extrudedSolids ?? []).find((x) => x.id === sel.extrudedSolidId);
+    if (s) items.push({ kind: "extrudedSolid", solid: s });
+  }
+  if (sel.columnId) {
+    const c = (project.columns ?? []).find((x) => x.id === sel.columnId);
+    if (c) items.push({ kind: "column", column: c });
+  }
   return items;
+}
+
+/**
+ * Transformiert eine Stütze unter einer affinen Punkt-Abbildung `fn`
+ * (Verschiebung/Drehung/Spiegelung): der Einfügepunkt wandert mit; die Profil-
+ * Drehung folgt der Abbildung, indem ein Richtungsvektor (Länge 1 unter dem
+ * aktuellen Winkel) mit-transformiert und der neue Winkel daraus gemessen wird
+ * — das ergibt für alle drei Operationen die korrekte neue Ausrichtung.
+ */
+function mvColumn(col: Column, fn: (p: Vec2) => Vec2): Column {
+  const base = col.position;
+  const rot = col.rotation ?? 0;
+  const tip = { x: base.x + Math.cos(rot), y: base.y + Math.sin(rot) };
+  const nb = fn(base);
+  const nt = fn(tip);
+  return { ...col, position: nb, rotation: Math.atan2(nt.y - nb.y, nt.x - nb.x) };
 }
 
 const mvGeom = (geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom => {
@@ -156,6 +195,12 @@ function itemPreview(project: Project, item: AnyItem, fn: (p: Vec2) => Vec2): Dr
       { kind: "poly", pts: wallCorners(a, b, th), closed: true },
       { kind: "line", a, b },
     ];
+  }
+  if (item.kind === "extrudedSolid") {
+    return [{ kind: "poly", pts: item.solid.points.map(fn), closed: true }];
+  }
+  if (item.kind === "column") {
+    return [{ kind: "poly", pts: columnFootprint(item.column).map(fn), closed: true }];
   }
   const g = mvGeom(item.drawing.geom, fn);
   switch (g.shape) {
@@ -215,6 +260,8 @@ export function commitTransform(
 
   let walls = project.walls;
   let drawings2d = project.drawings2d;
+  let extrudedSolids = project.extrudedSolids ?? [];
+  let columns = project.columns ?? [];
 
   // U (move): Original an die Endlage (t=1) transformieren.
   if (movesOriginal(mode)) {
@@ -225,20 +272,46 @@ export function commitTransform(
         d.id === sel.drawingId ? { ...d, geom: mvGeom(d.geom, fn) } : d,
       );
     }
+    if (sel.extrudedSolidId) {
+      extrudedSolids = extrudedSolids.map((s) =>
+        s.id === sel.extrudedSolidId
+          ? {
+              ...s,
+              points: s.points.map(fn),
+              circle: s.circle ? { ...s.circle, center: fn(s.circle.center) } : undefined,
+            }
+          : s,
+      );
+    }
+    if (sel.columnId) {
+      columns = columns.map((c) => (c.id === sel.columnId ? mvColumn(c, fn) : c));
+    }
   }
 
   // Kopien anhängen (I/O/P bzw. mirror copy).
   const newWalls: Wall[] = [];
   const newDrawings: Drawing2D[] = [];
+  const newSolids: ExtrudedSolid[] = [];
+  const newColumns: Column[] = [];
   for (const t of copyTs(op, mode, count)) {
     const fn = transformFn(op, pts, t);
     for (const item of items) {
       if (item.kind === "wall") {
         const w = item.wall;
         newWalls.push({ ...w, id: uniqueId("W"), start: fn(w.start), end: fn(w.end) });
-      } else {
+      } else if (item.kind === "drawing") {
         const d = item.drawing;
         newDrawings.push({ ...d, id: uniqueId("dr2d"), geom: mvGeom(d.geom, fn) });
+      } else if (item.kind === "column") {
+        newColumns.push({ ...mvColumn(item.column, fn), id: uniqueId("column") });
+      } else {
+        const s = item.solid;
+        newSolids.push({
+          ...s,
+          id: uniqueId("extrude"),
+          points: s.points.map(fn),
+          circle: s.circle ? { ...s.circle, center: fn(s.circle.center) } : undefined,
+        });
       }
     }
   }
@@ -247,5 +320,7 @@ export function commitTransform(
     ...project,
     walls: newWalls.length ? [...walls, ...newWalls] : walls,
     drawings2d: newDrawings.length ? [...drawings2d, ...newDrawings] : drawings2d,
+    extrudedSolids: newSolids.length ? [...extrudedSolids, ...newSolids] : extrudedSolids,
+    columns: newColumns.length ? [...columns, ...newColumns] : columns,
   };
 }

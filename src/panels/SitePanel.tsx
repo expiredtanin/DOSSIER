@@ -18,6 +18,7 @@ import { usePanelHost } from "./host";
 import type { ContextObject } from "../model/types";
 import { ContextImportDialog } from "../ui/ContextImportDialog";
 import { Dropdown } from "../ui/Dropdown";
+import { useStore } from "../state/appStore";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -33,6 +34,7 @@ function typeBadgeKey(obj: ContextObject): TranslationKey {
 
 export function SitePanel() {
   const host = usePanelHost();
+  const notify = useStore((s) => s.notify);
   const objects = host.contextObjects;
   const contourSets = objects.filter((o) => o.type === "contourSet");
 
@@ -50,9 +52,9 @@ export function SitePanel() {
     if (!effectiveSet) return;
     const id = host.onGenerateTerrain(effectiveSet);
     if (id === null) {
-      // Kein sinnvolles TIN — ruhiger Hinweis (keine harte Fehlerbox).
-      // eslint-disable-next-line no-alert
-      alert(t("site.terrainFailed"));
+      // Kein sinnvolles TIN — ruhiger Hinweis als Toast (keine harte Fehlerbox;
+      // window.alert wäre im Tauri-WKWebView ohnehin wirkungslos).
+      notify(t("site.terrainFailed"), "error");
     }
   };
 

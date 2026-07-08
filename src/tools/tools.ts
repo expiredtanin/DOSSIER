@@ -554,6 +554,32 @@ const arcTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Text: Platzhalter-Werkzeug, gekoppelt an den `text`-Befehl (Ankerpunkt →
+// getippte Zeile). Wie Kreis/Bogen nicht floorOnly (freies 2D-Element).
+const textTool: Tool = {
+  id: "text",
+  labelKey: "tool.text",
+  hintKey: () => "tool.text.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Textspalte: Platzhalter-Werkzeug, gekoppelt an den `textbox`-Befehl (Anker →
+// Spaltenbreite → getippte Zeile). Freies 2D-Element (nicht floorOnly).
+const textboxTool: Tool = {
+  id: "textbox",
+  labelKey: "tool.textbox",
+  hintKey: () => "tool.textbox.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 const TOOLS: Record<ToolId, Tool> = {
@@ -569,6 +595,8 @@ const TOOLS: Record<ToolId, Tool> = {
   rect: rectTool,
   circle: circleTool,
   arc: arcTool,
+  text: textTool,
+  textbox: textboxTool,
 };
 
 /** Liefert das Werkzeug zur ID. */
@@ -590,4 +618,6 @@ export const TOOL_ORDER: ToolId[] = [
   "rect",
   "circle",
   "arc",
+  "text",
+  "textbox",
 ];

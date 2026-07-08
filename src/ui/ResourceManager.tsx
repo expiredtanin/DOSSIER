@@ -16,18 +16,24 @@
 // Rendering noch Persistenz. Bezeichner englisch, UI-Text deutsch
 // (CONVENTIONS.md).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type {
   CeilingType,
   Component,
   ComponentMaterial,
+  DoorType,
   HatchPattern,
   HatchStyle,
   Layer,
   LineStyle,
+  OverrideConditionType,
+  OverrideOperator,
+  OverrideRule,
   Project,
+  StairType,
   WallType,
+  WindowType,
 } from "../model/types";
 import { PEN_WEIGHTS } from "../model/types";
 import { parseLin } from "../io/linParser";
@@ -720,6 +726,95 @@ function ColorSwatch({ color, size = 30 }: { color: string; size?: number }) {
   );
 }
 
+/**
+ * Baut aus einem zugewiesenen Bauteil-Material ein `MaterialAsset` für die
+ * PBR-Kugel-Vorschau (`requestMaterialPreview`): verweist es auf die
+ * Bibliothek (`libraryId`), wird deren Asset wiederverwendet (Name/Kategorie
+ * fürs Tooltip); sonst entsteht aus den hochgeladenen Karten ein Ad-hoc-Asset.
+ */
+function materialAssetOf(material: ComponentMaterial): MaterialAsset {
+  if (material.libraryId) {
+    const asset = MATERIAL_LIBRARY.find((a) => a.id === material.libraryId);
+    if (asset) return asset;
+  }
+  return {
+    id: material.libraryId ?? "custom",
+    name: t("material.uploaded"),
+    category: "",
+    maps: {
+      color: material.color,
+      normal: material.normal,
+      roughness: material.roughness,
+      metalness: material.metalness,
+      displacement: material.displacement,
+      ao: material.ao,
+    },
+  };
+}
+
+/**
+ * PBR-Kugel-Vorschau eines zugewiesenen Bauteil-Materials — dieselbe
+ * Lazy-Render-Logik wie `MaterialLibraryTile` (IntersectionObserver +
+ * `requestMaterialPreview`, geteilter Renderer), nur ohne Klick-Interaktion,
+ * als Thumbnail-Ersatz für `ColorSwatch`/`HatchSwatch` sobald ein Bauteil ein
+ * Material trägt.
+ */
+function ComponentMaterialSphere({
+  material,
+  size = 30,
+}: {
+  material: ComponentMaterial;
+  size?: number;
+}) {
+  const asset = useMemo(
+    () => materialAssetOf(material),
+    [
+      material.libraryId,
+      material.color,
+      material.normal,
+      material.roughness,
+      material.metalness,
+      material.displacement,
+      material.ao,
+    ],
+  );
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || visible) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setVisible(true);
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const handleReady = (url: string) => setPreviewUrl(url);
+    const cached = requestMaterialPreview(asset, handleReady);
+    if (cached) setPreviewUrl(cached);
+    return () => cancelMaterialPreview(asset, handleReady);
+  }, [visible, asset]);
+
+  return (
+    <span
+      ref={ref}
+      className="mat-sphere"
+      title={asset.name || undefined}
+      style={{ width: size, height: size, flex: "0 0 auto" }}
+    >
+      {previewUrl && <img src={previewUrl} alt="" draggable={false} />}
+    </span>
+  );
+}
+
 /** Detail-Panel EINES Bauteils (rechte Seite des Master-Detail-Layouts). */
 function ComponentDetail({
   component,
@@ -755,7 +850,9 @@ function ComponentDetail({
       </div>
 
       <div className="res-md-preview">
-        {previewHatch ? (
+        {component.material ? (
+          <ComponentMaterialSphere material={component.material} size={128} />
+        ) : previewHatch ? (
           <HatchSwatch hatch={previewHatch} size={128} />
         ) : (
           <ColorSwatch color={component.foreground ?? component.color} size={128} />
@@ -863,7 +960,9 @@ function ComponentsTab({
                 onClick={() => setSelectedId(c.id)}
               >
                 <span className="res-md-row-thumb">
-                  {hatch ? (
+                  {c.material ? (
+                    <ComponentMaterialSphere material={c.material} size={30} />
+                  ) : hatch ? (
                     <HatchSwatch hatch={hatch} size={30} />
                   ) : (
                     <ColorSwatch color={c.foreground ?? c.color} />
@@ -1859,6 +1958,424 @@ function patToHatches(text: string): Omit<HatchStyle, "id">[] {
   }));
 }
 
+// ── Bauteil-Typen (Tür/Fenster/Treppe) ─────────────────────────────────────
+// Formular-basierte Bibliotheken (im Gegensatz zu Wand-/Deckenstilen, die
+// schichtbasiert über LayeredStylesTab laufen): jeder Typ ist ein flaches
+// Feld-Bündel (Bauart, Maße, …), daher genügt ein generischer Master-Detail-
+// Rumpf ({@link TypeLibraryTab}), der die konkreten Felder je Typ als Render-
+// Funktion einreicht — analog zum Bauteile-Tab (Liste links, Editor rechts).
+
+const DOOR_KIND_OPTIONS: { value: DoorType["kind"]; labelKey: string }[] = [
+  { value: "dreh", labelKey: "resources.doorKind.dreh" },
+  { value: "schiebe", labelKey: "resources.doorKind.schiebe" },
+  { value: "wandoeffnung", labelKey: "resources.doorKind.wandoeffnung" },
+];
+
+const DOOR_LEAF_STYLE_OPTIONS: { value: DoorType["leafStyle"]; labelKey: string }[] = [
+  { value: "glatt", labelKey: "resources.leafStyle.glatt" },
+  { value: "kassette", labelKey: "resources.leafStyle.kassette" },
+  { value: "glas", labelKey: "resources.leafStyle.glas" },
+];
+
+const WINDOW_KIND_OPTIONS: { value: WindowType["kind"]; labelKey: string }[] = [
+  { value: "dreh", labelKey: "resources.windowKind.dreh" },
+  { value: "kipp", labelKey: "resources.windowKind.kipp" },
+  { value: "drehkipp", labelKey: "resources.windowKind.drehkipp" },
+  { value: "fest", labelKey: "resources.windowKind.fest" },
+  { value: "schiebe", labelKey: "resources.windowKind.schiebe" },
+];
+
+const WINDOW_GLAZING_OPTIONS: { value: WindowType["glazing"]; labelKey: string }[] = [
+  { value: "einfach", labelKey: "resources.glazing.einfach" },
+  { value: "zweifach", labelKey: "resources.glazing.zweifach" },
+  { value: "dreifach", labelKey: "resources.glazing.dreifach" },
+];
+
+const WINDOW_SILL_BOARD_OPTIONS: { value: NonNullable<WindowType["sillBoard"]>; labelKey: string }[] = [
+  { value: "keine", labelKey: "resources.sillBoard.keine" },
+  { value: "innen", labelKey: "resources.sillBoard.innen" },
+  { value: "aussen", labelKey: "resources.sillBoard.aussen" },
+  { value: "beide", labelKey: "resources.sillBoard.beide" },
+];
+
+const STAIR_STRUCTURE_OPTIONS: { value: StairType["structure"]; labelKey: string }[] = [
+  { value: "massiv", labelKey: "resources.structure.massiv" },
+  { value: "beton", labelKey: "resources.structure.beton" },
+  { value: "wange", labelKey: "resources.structure.wange" },
+  { value: "aufgesattelt", labelKey: "resources.structure.aufgesattelt" },
+  { value: "spindel", labelKey: "resources.structure.spindel" },
+];
+
+const STAIR_RAILING_OPTIONS: { value: NonNullable<StairType["railing"]>; labelKey: string }[] = [
+  { value: "keine", labelKey: "resources.railing.keine" },
+  { value: "links", labelKey: "resources.railing.links" },
+  { value: "rechts", labelKey: "resources.railing.rechts" },
+  { value: "beide", labelKey: "resources.railing.beide" },
+];
+
+/**
+ * Generischer Rumpf für formular-basierte Typ-Bibliotheken (Tür-/Fenster-/
+ * Treppentypen): Liste links (Name je Zeile, „+ Neu" im Fuß), Editor rechts
+ * (Umbenennen-Feld + Löschen-Knopf im Kopf, darunter die typspezifischen
+ * Felder aus `renderFields`). Handler sind optional (nur gesetzt, wenn die
+ * einbettende App sie bereitstellt) — Aufrufe laufen daher über `?.()`.
+ */
+function TypeLibraryTab<T extends { id: string; name: string }>({
+  types,
+  hintKey,
+  emptyKey,
+  placeholderKey,
+  deleteKeyPrefix,
+  onAdd,
+  onPatch,
+  onDelete,
+  renderFields,
+}: {
+  types: T[];
+  hintKey: string;
+  emptyKey: string;
+  placeholderKey: string;
+  deleteKeyPrefix: string;
+  onAdd?: () => void;
+  onPatch?: (id: string, patch: Partial<T>) => void;
+  onDelete?: (id: string) => void;
+  renderFields: (item: T, onPatch: (patch: Partial<T>) => void) => React.ReactNode;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = types.find((x) => x.id === selectedId) ?? types[0];
+
+  return (
+    <div className="res-tab">
+      <div className="res-hint">{t(hintKey)}</div>
+      <div className="res-md">
+        <div className="res-md-list">
+          {types.map((item) => (
+            <button
+              key={item.id}
+              className={`res-md-row${selected?.id === item.id ? " active" : ""}`}
+              onClick={() => setSelectedId(item.id)}
+            >
+              <span className="res-md-row-name">{item.name}</span>
+            </button>
+          ))}
+          {types.length === 0 && (
+            <div className="res-md-empty">{t(emptyKey)}</div>
+          )}
+          <div className="res-md-listfoot">
+            <button className="res-add" onClick={() => onAdd?.()}>
+              <span className="res-add-plus">+</span> {t("resources.add")}
+            </button>
+          </div>
+        </div>
+        <div className="res-md-detail">
+          {selected ? (
+            <div className="res-md-detail-inner" key={selected.id}>
+              <div className="res-md-head">
+                <input
+                  className="res-input res-md-rename"
+                  value={selected.name}
+                  placeholder={t(placeholderKey)}
+                  onChange={(e) =>
+                    onPatch?.(selected.id, { name: e.target.value } as Partial<T>)
+                  }
+                />
+                <DeleteButton
+                  onClick={() => onDelete?.(selected.id)}
+                  title={t(deleteKeyPrefix, { name: selected.name })}
+                />
+              </div>
+              <div className="res-fields">
+                {renderFields(selected, (patch) => onPatch?.(selected.id, patch))}
+              </div>
+            </div>
+          ) : (
+            <div className="res-md-empty">{t(emptyKey)}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Tab „Türtypen" — Bauart, Blattausführung/-zahl, Zarge und Standardmaße. */
+function DoorStylesTab({
+  project,
+  onAddDoorType,
+  onPatchDoorType,
+  onDeleteDoorType,
+}: {
+  project: Project;
+  onAddDoorType?: () => void;
+  onPatchDoorType?: (id: string, patch: Partial<DoorType>) => void;
+  onDeleteDoorType?: (id: string) => void;
+}) {
+  return (
+    <TypeLibraryTab
+      types={project.doorTypes ?? []}
+      hintKey="resources.doorTypes.hint"
+      emptyKey="resources.doorTypes.empty"
+      placeholderKey="resources.doorTypes.placeholder"
+      deleteKeyPrefix="resources.delete.doorType"
+      onAdd={onAddDoorType}
+      onPatch={onPatchDoorType}
+      onDelete={onDeleteDoorType}
+      renderFields={(door, patch) => (
+        <>
+          <FieldRow label={t("resources.field.doorKind")}>
+            <SelectField
+              value={door.kind}
+              onChange={(kind) => patch({ kind })}
+              options={DOOR_KIND_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.leafCount")}>
+            <Segmented
+              value={String(door.leafCount)}
+              onChange={(v) => patch({ leafCount: (v === "2" ? 2 : 1) as 1 | 2 })}
+              options={[
+                { value: "1", label: t("resources.leafCount.1") },
+                { value: "2", label: t("resources.leafCount.2") },
+              ]}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.leafStyle")}>
+            <SelectField
+              value={door.leafStyle}
+              onChange={(leafStyle) => patch({ leafStyle })}
+              options={DOOR_LEAF_STYLE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+          {door.leafStyle === "glas" && (
+            <FieldRow label={t("resources.field.glazingRatio")}>
+              <NumberField
+                value={door.glazingRatio ?? 0.6}
+                onChange={(glazingRatio) => patch({ glazingRatio })}
+                step={0.01}
+                min={0}
+                max={1}
+              />
+            </FieldRow>
+          )}
+          <FieldRow label={t("resources.field.frameThickness")}>
+            <NumberField
+              value={door.frameThickness}
+              onChange={(frameThickness) => patch({ frameThickness })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.frameDepth")}>
+            <NumberField
+              value={door.frameDepth ?? 0}
+              onChange={(frameDepth) => patch({ frameDepth })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.defaultWidth")}>
+            <NumberField
+              value={door.defaultWidth}
+              onChange={(defaultWidth) => patch({ defaultWidth })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.defaultHeight")}>
+            <NumberField
+              value={door.defaultHeight}
+              onChange={(defaultHeight) => patch({ defaultHeight })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.threshold")}>
+            <input
+              type="checkbox"
+              checked={!!door.threshold}
+              onChange={(e) => patch({ threshold: e.target.checked })}
+            />
+          </FieldRow>
+        </>
+      )}
+    />
+  );
+}
+
+/** Tab „Fenstertypen" — Öffnungsart, Flügelzahl, Verglasung, Zarge, Brüstung. */
+function WindowStylesTab({
+  project,
+  onAddWindowType,
+  onPatchWindowType,
+  onDeleteWindowType,
+}: {
+  project: Project;
+  onAddWindowType?: () => void;
+  onPatchWindowType?: (id: string, patch: Partial<WindowType>) => void;
+  onDeleteWindowType?: (id: string) => void;
+}) {
+  return (
+    <TypeLibraryTab
+      types={project.windowTypes ?? []}
+      hintKey="resources.windowTypes.hint"
+      emptyKey="resources.windowTypes.empty"
+      placeholderKey="resources.windowTypes.placeholder"
+      deleteKeyPrefix="resources.delete.windowType"
+      onAdd={onAddWindowType}
+      onPatch={onPatchWindowType}
+      onDelete={onDeleteWindowType}
+      renderFields={(win, patch) => (
+        <>
+          <FieldRow label={t("resources.field.windowKind")}>
+            <SelectField
+              value={win.kind}
+              onChange={(kind) => patch({ kind })}
+              options={WINDOW_KIND_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.wingCount")}>
+            <NumberField
+              value={win.wingCount}
+              onChange={(wingCount) => patch({ wingCount: Math.round(wingCount) })}
+              step={1}
+              min={1}
+              max={4}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.glazing")}>
+            <SelectField
+              value={win.glazing}
+              onChange={(glazing) => patch({ glazing })}
+              options={WINDOW_GLAZING_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.frameThickness")}>
+            <NumberField
+              value={win.frameThickness}
+              onChange={(frameThickness) => patch({ frameThickness })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.frameDepth")}>
+            <NumberField
+              value={win.frameDepth ?? 0}
+              onChange={(frameDepth) => patch({ frameDepth })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.defaultSillHeight")}>
+            <NumberField
+              value={win.defaultSillHeight}
+              onChange={(defaultSillHeight) => patch({ defaultSillHeight })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.defaultWidth")}>
+            <NumberField
+              value={win.defaultWidth}
+              onChange={(defaultWidth) => patch({ defaultWidth })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.defaultHeight")}>
+            <NumberField
+              value={win.defaultHeight}
+              onChange={(defaultHeight) => patch({ defaultHeight })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.sillBoard")}>
+            <SelectField
+              value={win.sillBoard ?? "keine"}
+              onChange={(sillBoard) => patch({ sillBoard })}
+              options={WINDOW_SILL_BOARD_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+        </>
+      )}
+    />
+  );
+}
+
+/** Tab „Treppentypen" — Tragart, Stufenausbildung, Geländer und Laufbreite. */
+function StairStylesTab({
+  project,
+  onAddStairType,
+  onPatchStairType,
+  onDeleteStairType,
+}: {
+  project: Project;
+  onAddStairType?: () => void;
+  onPatchStairType?: (id: string, patch: Partial<StairType>) => void;
+  onDeleteStairType?: (id: string) => void;
+}) {
+  return (
+    <TypeLibraryTab
+      types={project.stairTypes ?? []}
+      hintKey="resources.stairTypes.hint"
+      emptyKey="resources.stairTypes.empty"
+      placeholderKey="resources.stairTypes.placeholder"
+      deleteKeyPrefix="resources.delete.stairType"
+      onAdd={onAddStairType}
+      onPatch={onPatchStairType}
+      onDelete={onDeleteStairType}
+      renderFields={(stair, patch) => (
+        <>
+          <FieldRow label={t("resources.field.structure")}>
+            <SelectField
+              value={stair.structure}
+              onChange={(structure) => patch({ structure })}
+              options={STAIR_STRUCTURE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.closedRisers")}>
+            <input
+              type="checkbox"
+              checked={!!stair.closedRisers}
+              onChange={(e) => patch({ closedRisers: e.target.checked })}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.treadThickness")}>
+            <NumberField
+              value={stair.treadThickness}
+              onChange={(treadThickness) => patch({ treadThickness })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.nosing")}>
+            <NumberField
+              value={stair.nosing ?? 0}
+              onChange={(nosing) => patch({ nosing })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.railing")}>
+            <SelectField
+              value={stair.railing ?? "keine"}
+              onChange={(railing) => patch({ railing })}
+              options={STAIR_RAILING_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.stairWidth")}>
+            <NumberField
+              value={stair.defaultWidth}
+              onChange={(defaultWidth) => patch({ defaultWidth })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+        </>
+      )}
+    />
+  );
+}
+
 // ── Materialien (PBR-Bibliothek durchsuchen) ───────────────────────────────
 // Eigenständiger Tab, der die eingebaute Materialbibliothek (MATERIAL_LIBRARY)
 // als Kachel-Grid mit gerenderter PBR-Kugel-Vorschau zeigt — Name/Kategorie
@@ -2025,6 +2542,313 @@ function MaterialsTab() {
   );
 }
 
+// ── Grafische Overrides (Regel-Engine, A1) ─────────────────────────────────
+// Master-Detail wie Linien/Wandstile: Liste links = Regeln in PRIORITÄTS-
+// Reihenfolge (oben gewinnt pro Aktions-Feld) mit Aktiv-Checkbox, Auf/Ab und
+// Löschen; Detail rechts = Bedingung (Kriterium/Operator/Wert) + optionale
+// Aktionen (Farbe/Strichstärke/Linienstil). Reines Rendering-Overlay — die
+// Auswertung liegt in src/overrides/engine.ts, der Einhängepunkt in
+// plan/generatePlan.ts; Elementdaten bleiben unverändert.
+
+/** Bedingungs-Typen (UI-Beschriftung übersetzt, Werte englisch). */
+const OVERRIDE_TYPE_OPTIONS: { value: OverrideConditionType; labelKey: string }[] = [
+  { value: "layer_name", labelKey: "resources.overrides.condType.layer" },
+  { value: "object_name", labelKey: "resources.overrides.condType.object" },
+];
+
+/** Vergleichs-Operatoren (UI-Beschriftung übersetzt, Werte englisch). */
+const OVERRIDE_OP_OPTIONS: { value: OverrideOperator; labelKey: string }[] = [
+  { value: "equals", labelKey: "resources.overrides.op.equals" },
+  { value: "contains", labelKey: "resources.overrides.op.contains" },
+  { value: "starts_with", labelKey: "resources.overrides.op.startsWith" },
+  { value: "not_equals", labelKey: "resources.overrides.op.notEquals" },
+];
+
+/** Kompakte Bedingungs-Zusammenfassung für die Listenzeile. */
+function overrideConditionSummary(rule: OverrideRule): string {
+  const type = OVERRIDE_TYPE_OPTIONS.find((o) => o.value === rule.condition.type);
+  const op = OVERRIDE_OP_OPTIONS.find((o) => o.value === rule.condition.operator);
+  return `${type ? t(type.labelKey) : rule.condition.type} ${
+    op ? t(op.labelKey) : rule.condition.operator
+  } „${rule.condition.value}"`;
+}
+
+/** Optionale Aktion: Checkbox (an/aus) + Steuerelement, solange sie an ist. */
+function OptionalAction({
+  label,
+  active,
+  onToggle,
+  children,
+}: {
+  label: string;
+  active: boolean;
+  onToggle: (on: boolean) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="res-field">
+      <span className="res-field-label">
+        <label className="res-ov-action-toggle">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => onToggle(e.target.checked)}
+          />{" "}
+          {label}
+        </label>
+      </span>
+      <span className="res-field-control">
+        {active ? children : <span className="res-joint-none">–</span>}
+      </span>
+    </div>
+  );
+}
+
+/** Detail-Panel EINER Override-Regel (rechte Seite des Master-Detail-Layouts). */
+function OverrideRuleDetail({
+  rule,
+  project,
+  onPatch,
+  onDelete,
+}: {
+  rule: OverrideRule;
+  project: Project;
+  onPatch: (patch: Partial<OverrideRule>) => void;
+  onDelete: () => void;
+}) {
+  const patchCondition = (patch: Partial<OverrideRule["condition"]>) =>
+    onPatch({ condition: { ...rule.condition, ...patch } });
+  const patchActions = (patch: Partial<OverrideRule["actions"]>) =>
+    onPatch({ actions: { ...rule.actions, ...patch } });
+  // Sentinel „—": kein Linienstil-Override.
+  const NONE = "__none__";
+  const lineOptions = [
+    { value: NONE, label: t("resources.overrides.linetype.none") },
+    ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
+  ];
+
+  return (
+    <div className="res-md-detail-inner">
+      <div className="res-md-head">
+        <input
+          className="res-input res-md-rename"
+          value={rule.name}
+          placeholder={t("resources.overrides.placeholder")}
+          onChange={(e) => onPatch({ name: e.target.value })}
+        />
+        <DeleteButton onClick={onDelete} title={t("resources.overrides.delete")} />
+      </div>
+
+      <div className="res-hint">{t("resources.overrides.condition")}</div>
+      <FieldRow label={t("resources.overrides.condType")}>
+        <SelectField
+          value={rule.condition.type}
+          onChange={(type) => patchCondition({ type })}
+          options={OVERRIDE_TYPE_OPTIONS.map((o) => ({
+            value: o.value,
+            label: t(o.labelKey),
+          }))}
+        />
+      </FieldRow>
+      <FieldRow label={t("resources.overrides.operator")}>
+        <SelectField
+          value={rule.condition.operator}
+          onChange={(operator) => patchCondition({ operator })}
+          options={OVERRIDE_OP_OPTIONS.map((o) => ({
+            value: o.value,
+            label: t(o.labelKey),
+          }))}
+        />
+      </FieldRow>
+      <FieldRow label={t("resources.overrides.value")}>
+        <TextField
+          value={rule.condition.value}
+          placeholder={t("resources.overrides.value.placeholder")}
+          onChange={(value) => patchCondition({ value })}
+        />
+      </FieldRow>
+
+      <div className="res-hint">{t("resources.overrides.actions")}</div>
+      {/* Vorschlagswerte für die Strichstärke (Standard-Stiftbreiten in mm). */}
+      <datalist id="ov-pen-weights">
+        {PEN_WEIGHTS.map((w) => (
+          <option key={w} value={w} />
+        ))}
+      </datalist>
+      <OptionalAction
+        label={t("resources.overrides.action.color")}
+        active={rule.actions.color !== undefined}
+        onToggle={(on) => patchActions({ color: on ? "#808080" : undefined })}
+      >
+        <ColorField
+          color={rule.actions.color ?? "#808080"}
+          onChange={(color) => patchActions({ color })}
+        />
+      </OptionalAction>
+      <OptionalAction
+        label={t("resources.overrides.action.lineweight")}
+        active={rule.actions.lineweight !== undefined}
+        onToggle={(on) => patchActions({ lineweight: on ? 0.35 : undefined })}
+      >
+        <NumberField
+          value={rule.actions.lineweight ?? 0.35}
+          onChange={(lineweight) => patchActions({ lineweight: Math.max(0, lineweight) })}
+          step={0.05}
+          min={0}
+          list="ov-pen-weights"
+        />
+      </OptionalAction>
+      <OptionalAction
+        label={t("resources.overrides.action.linetype")}
+        active={rule.actions.linetypeId !== undefined}
+        onToggle={(on) =>
+          patchActions({
+            linetypeId: on ? project.lineStyles[0]?.id : undefined,
+          })
+        }
+      >
+        <SelectField
+          value={rule.actions.linetypeId ?? NONE}
+          onChange={(v) =>
+            patchActions({ linetypeId: v === NONE ? undefined : v })
+          }
+          options={lineOptions}
+        />
+      </OptionalAction>
+    </div>
+  );
+}
+
+/** Tab „Overrides": Regelliste (Priorität von oben nach unten) + Detail. */
+function OverridesTab({
+  project,
+  onSetOverrideRules,
+}: {
+  project: Project;
+  onSetOverrideRules?: (rules: OverrideRule[]) => void;
+}) {
+  const rules = project.overrideRules ?? [];
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = rules.find((r) => r.id === selectedId) ?? rules[0];
+
+  const setRules = (next: OverrideRule[]) => onSetOverrideRules?.(next);
+  const patchRule = (id: string, patch: Partial<OverrideRule>) =>
+    setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addRule = () => {
+    const rule: OverrideRule = {
+      id: `ov-${Date.now()}`,
+      name: t("resources.overrides.defaultName"),
+      enabled: true,
+      condition: { type: "layer_name", operator: "contains", value: "" },
+      actions: {},
+    };
+    setRules([...rules, rule]);
+    setSelectedId(rule.id);
+  };
+  const deleteRule = (id: string) => setRules(rules.filter((r) => r.id !== id));
+  const moveRule = (id: string, dir: -1 | 1) => {
+    const i = rules.findIndex((r) => r.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= rules.length) return;
+    const next = rules.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    setRules(next);
+  };
+
+  return (
+    <div className="res-tab">
+      <div className="res-hint">{t("resources.overrides.hint")}</div>
+      <div className="res-md">
+        <div className="res-md-list">
+          {rules.map((r) => (
+            <div
+              key={r.id}
+              role="button"
+              tabIndex={0}
+              className={`res-md-row res-ov-row${
+                selected?.id === r.id ? " active" : ""
+              }`}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+              onClick={() => setSelectedId(r.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setSelectedId(r.id);
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={r.enabled}
+                title={t("resources.overrides.enabled")}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => patchRule(r.id, { enabled: e.target.checked })}
+              />
+              <span
+                className="res-md-row-name"
+                style={{ flex: 1, opacity: r.enabled ? 1 : 0.5 }}
+              >
+                {r.name || t("resources.overrides.placeholder")}
+                <span
+                  style={{ display: "block", fontSize: "0.85em", opacity: 0.65 }}
+                >
+                  {overrideConditionSummary(r)}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="res-layer-btn"
+                title={t("resources.overrides.moveUp")}
+                disabled={rules[0]?.id === r.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  moveRule(r.id, -1);
+                }}
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                className="res-layer-btn"
+                title={t("resources.overrides.moveDown")}
+                disabled={rules[rules.length - 1]?.id === r.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  moveRule(r.id, 1);
+                }}
+              >
+                ▼
+              </button>
+            </div>
+          ))}
+          {rules.length === 0 && (
+            <div className="res-md-empty">{t("resources.overrides.empty")}</div>
+          )}
+          <div className="res-md-listfoot">
+            <button
+              className="res-add"
+              onClick={addRule}
+              disabled={!onSetOverrideRules}
+            >
+              <span className="res-add-plus">+</span> {t("resources.add")}
+            </button>
+          </div>
+        </div>
+        <div className="res-md-detail">
+          {selected ? (
+            <OverrideRuleDetail
+              key={selected.id}
+              rule={selected}
+              project={project}
+              onPatch={(patch) => patchRule(selected.id, patch)}
+              onDelete={() => deleteRule(selected.id)}
+            />
+          ) : (
+            <div className="res-md-empty">{t("resources.overrides.empty")}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Gemeinsame kleine Bausteine ────────────────────────────────────────────
 
 function EmptyState({ text }: { text: string }) {
@@ -2039,7 +2863,11 @@ type TabId =
   | "lines"
   | "wallStyles"
   | "ceilingStyles"
-  | "materials";
+  | "doorStyles"
+  | "windowStyles"
+  | "stairStyles"
+  | "materials"
+  | "overrides";
 
 const TABS: { id: TabId; labelKey: string }[] = [
   { id: "components", labelKey: "resources.tab.components" },
@@ -2047,7 +2875,11 @@ const TABS: { id: TabId; labelKey: string }[] = [
   { id: "lines", labelKey: "resources.tab.lines" },
   { id: "wallStyles", labelKey: "resources.tab.wallStyles" },
   { id: "ceilingStyles", labelKey: "resources.tab.ceilingStyles" },
+  { id: "doorStyles", labelKey: "resources.tab.doorStyles" },
+  { id: "windowStyles", labelKey: "resources.tab.windowStyles" },
+  { id: "stairStyles", labelKey: "resources.tab.stairStyles" },
   { id: "materials", labelKey: "resources.tab.materials" },
+  { id: "overrides", labelKey: "resources.tab.overrides" },
 ];
 
 /** Bündel der immutablen Mutationen (von App über setProject bereitgestellt). */
@@ -2072,6 +2904,26 @@ export interface ResourceManagerHandlers {
   /** Import: fügt fertige (id-lose) Linienstile/Schraffuren hinzu (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
+  /**
+   * Grafische Override-Regeln: ersetzt die GANZE Regelliste (Reihenfolge =
+   * Priorität). Optional, damit bestehende Einbettungen (z. B. ResourcesPanel)
+   * ohne Änderung weiter kompilieren — ohne Handler ist der Tab nur lesend.
+   */
+  onSetOverrideRules?: (rules: OverrideRule[]) => void;
+  /**
+   * Bauteil-Typen (Tür/Fenster/Treppe) — Bibliotheks-CRUD, analog Wand-/
+   * Deckentypen. Optional, damit bestehende Einbettungen (z. B. ResourcesPanel)
+   * ohne Änderung weiter kompilieren; ohne Handler bleiben die Tabs verborgen.
+   */
+  onAddDoorType?: () => void;
+  onPatchDoorType?: (id: string, patch: Partial<DoorType>) => void;
+  onDeleteDoorType?: (id: string) => void;
+  onAddWindowType?: () => void;
+  onPatchWindowType?: (id: string, patch: Partial<WindowType>) => void;
+  onDeleteWindowType?: (id: string) => void;
+  onAddStairType?: () => void;
+  onPatchStairType?: (id: string, patch: Partial<StairType>) => void;
+  onDeleteStairType?: (id: string) => void;
 }
 
 // ── Schwebendes Fenster (nicht-modal) ──────────────────────────────────────
@@ -2265,7 +3117,37 @@ export function ResourceManager({
               onDeleteCeilingType={handlers.onDeleteCeilingType}
             />
           )}
+          {tab === "doorStyles" && (
+            <DoorStylesTab
+              project={project}
+              onAddDoorType={handlers.onAddDoorType}
+              onPatchDoorType={handlers.onPatchDoorType}
+              onDeleteDoorType={handlers.onDeleteDoorType}
+            />
+          )}
+          {tab === "windowStyles" && (
+            <WindowStylesTab
+              project={project}
+              onAddWindowType={handlers.onAddWindowType}
+              onPatchWindowType={handlers.onPatchWindowType}
+              onDeleteWindowType={handlers.onDeleteWindowType}
+            />
+          )}
+          {tab === "stairStyles" && (
+            <StairStylesTab
+              project={project}
+              onAddStairType={handlers.onAddStairType}
+              onPatchStairType={handlers.onPatchStairType}
+              onDeleteStairType={handlers.onDeleteStairType}
+            />
+          )}
           {tab === "materials" && <MaterialsTab />}
+          {tab === "overrides" && (
+            <OverridesTab
+              project={project}
+              onSetOverrideRules={handlers.onSetOverrideRules}
+            />
+          )}
         </div>
 
         {/* Greifer unten rechts (Größe ändern). */}

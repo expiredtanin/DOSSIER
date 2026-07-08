@@ -87,9 +87,11 @@ function RibbonButton({ item, ctx }: { item: RibbonItem; ctx: ButtonCtx }) {
       </button>
     );
   }
-  // Befehls-Element: Label aus der Befehls-Registry ableiten.
+  // Befehls-Element: Label aus der Befehls-Registry ableiten. Für Aktionen ohne
+  // eigenes Engine-Kommando (z. B. „rotate", das über die interaktive
+  // Transformation läuft) auf den i18n-Schlüssel `cmd.<name>.label` zurückfallen.
   const cmd = getCommand(item.name);
-  const label = cmd ? t(cmd.labelKey) : item.name;
+  const label = cmd ? t(cmd.labelKey) : t(`cmd.${item.name}.label`);
   const active = ctx.activeCommand === item.name;
   return (
     <button

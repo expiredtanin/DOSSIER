@@ -133,6 +133,12 @@ export interface PlanViewHandle {
   pxPerMeter: () => number;
   /** Mitte des aktuellen Ausschnitts in Modell-Metern (z. B. für Import-Platzierung). */
   viewCenterModel: () => Vec2;
+  /**
+   * Auf eine beliebige Punktmenge (Modell-Meter) einpassen, z. B. die Bounding-
+   * Box neu importierter Kontext-Objekte (Auto-Zoom nach Geo-/DXF-Import).
+   * Leere Punktmenge → No-op (kein Fit, kein Crash).
+   */
+  fitBounds: (pts: Vec2[]) => void;
 }
 
 /** Ergebnis eines Links-Klicks (Auswahl) an einer Modellposition. */
@@ -175,6 +181,17 @@ export interface PlanSelection {
    * sonst `null`.
    */
   roomId: string | null;
+  /**
+   * ID des getroffenen extrudierten Körpers (truck-Integration, Footprint-
+   * Umriss), wenn der Klick ihn traf und KEIN Element höherer Priorität
+   * (Wand/2D/Decke/Öffnung/Treppe); sonst `null`.
+   */
+  extrudedSolidId: string | null;
+  /**
+   * ID der getroffenen Stütze (Column, Grundriss-Querschnitt), wenn der Klick sie
+   * traf und KEIN Element höherer Priorität (Öffnung/Wand); sonst `null`.
+   */
+  columnId: string | null;
   /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
@@ -264,6 +281,17 @@ export interface PlanViewProps {
    */
   selectedRoomIds?: string[];
   /**
+   * Aktuell ausgewählte IDs extrudierter Körper (truck-Integration; kontrolliert
+   * von App). Die Ansicht markiert den Footprint-Umriss JEDES dieser Körper mit
+   * einer Akzentkontur.
+   */
+  selectedExtrudedSolidIds?: string[];
+  /**
+   * Aktuell ausgewählte Stützen-IDs (Tragwerk; kontrolliert von App). Die Ansicht
+   * markiert den Querschnitt-Umriss JEDER dieser Stützen mit einer Akzentkontur.
+   */
+  selectedColumnIds?: string[];
+  /**
    * Der Stempel-Griff des (einzeln) gewählten Raums: sein Anker (Meter) + ID.
    * PlanView zeichnet einen ziehbaren Griff und meldet Bewegung/Doppelklick.
    * `null` = kein einzelner Raum gewählt.
@@ -273,6 +301,8 @@ export interface PlanViewProps {
   onStampMove?: (roomId: string, delta: Vec2) => void;
   /** Doppelklick auf einen Raum-Stempel: Editor öffnen. */
   onStampEdit?: (roomId: string) => void;
+  /** Doppelklick auf ein Text-2D-Element: Inhalt bearbeiten (Editor öffnen). */
+  onEditDrawingText?: (drawingId: string) => void;
   /**
    * Links-Drag (Marquee): meldet die im Auswahl-Rechteck getroffenen Wände nach
    * der CAD-Konvention (siehe {@link MarqueeSelection}). Optional.
@@ -348,7 +378,11 @@ export interface GripHandlers {
    * wird und koinzidente Enden der übrigen gewählten Elemente mitwandern. Fehlt
    * `target`, gilt das einzeln selektierte Element (Rückwärtskompatibilität).
    */
-  onMoveBody(delta: Vec2, target?: { wallId?: string; drawingId?: string }): void;
+  onMoveBody(
+    delta: Vec2,
+    target?: { wallId?: string; drawingId?: string },
+    mods?: ToolMods,
+  ): void;
   /**
    * Eine SEITE (Kante) ziehen: verschiebt beide Vertices der Kante senkrecht
    * (nur die Normal-Komponente von `raw` wirkt; siehe App). `raw` ist der rohe
@@ -374,9 +408,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       selectedOpeningIds,
       selectedStairIds,
       selectedRoomIds,
+      selectedExtrudedSolidIds,
+      selectedColumnIds,
       roomStamp,
       onStampMove,
       onStampEdit,
+      onEditDrawingText,
       activeTool,
       toolInputActive,
       toolHandlers,
@@ -638,6 +675,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const v = viewRef.current;
         return { x: (v.x + v.w / 2) / PX_PER_M, y: -(v.y + v.h / 2) / PX_PER_M };
       },
+      fitBounds: (pts) => {
+        if (pts.length === 0) return; // leerer Import → kein Fit, kein Crash
+        setView(fitBoxFor(pts, toScreenRef.current));
+      },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -841,7 +882,34 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         bestId = p.drawingId;
       }
     }
-    return bestId;
+    if (bestId) return bestId;
+    // Kein Linien-Treffer: Text-Elemente prüfen (eigene Bounding-Box-Logik).
+    return pickDrawingText(clientX, clientY);
+  };
+
+  // Trifft der Klick ein Text-2D-Element (kind "drawingText")? Grosszügige Modell-
+  // Bounding-Box um den Ankerpunkt (Text hat keine Linien-Geometrie zum Anfassen);
+  // Winkel wird vernachlässigt (meist waagrecht). Liefert die drawingId oder null.
+  const pickDrawingText = (clientX: number, clientY: number): string | null => {
+    const m = rawModelAt(clientX, clientY);
+    for (const p of plan.primitives) {
+      if (p.kind !== "drawingText" || !p.drawingId) continue;
+      const singleW = Math.max(1, p.text.length) * p.heightM * 0.6;
+      // Textspalte: Breite = wrapWidth, Höhe = geschätzte Zeilenzahl · Zeilenhöhe.
+      const w = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth : singleW;
+      const lines =
+        p.wrapWidth && p.wrapWidth > 0 ? Math.max(1, Math.ceil(singleW / p.wrapWidth)) : 1;
+      const pad = p.heightM * 0.6;
+      const minX = p.at.x - pad;
+      const maxX = p.at.x + w + pad;
+      // Baseline am Anker; Text läuft nach unten (Zeilen) und etwas nach oben (Oberlängen).
+      const minY = p.at.y - lines * p.heightM * 1.25 - pad;
+      const maxY = p.at.y + p.heightM * 0.4 + pad;
+      if (m.x >= minX && m.x <= maxX && m.y >= minY && m.y <= maxY) {
+        return p.drawingId;
+      }
+    }
+    return null;
   };
 
   // Nächstgelegene Öffnung (Fenster/Tür) zum Cursor: Linien-/Bogen-Primitive mit
@@ -912,6 +980,35 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const p = plan.primitives[i];
       if (p.kind === "polygon" && p.roomId && pointInPolygon(m, p.pts)) {
         return p.roomId;
+      }
+    }
+    return null;
+  };
+
+  // Getroffener extrudierter Körper (truck-Integration): der Footprint-Umriss
+  // ist ein reiner Haarlinien-Umriss (fill:"none"), aber per Punkt-in-Polygon
+  // trotzdem als FLÄCHE anklickbar (analog Raum, nicht nur auf der Linie).
+  const pickExtrudedSolid = (clientX: number, clientY: number): string | null => {
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (let i = plan.primitives.length - 1; i >= 0; i--) {
+      const p = plan.primitives[i];
+      if (p.kind === "polygon" && p.extrudedSolidId && pointInPolygon(m, p.pts)) {
+        return p.extrudedSolidId;
+      }
+    }
+    return null;
+  };
+
+  // Getroffene Stütze (Tragwerk): ihr Querschnitt ist eine gefüllte Poché
+  // (Polygon mit columnId) — per Punkt-in-Polygon als FLÄCHE anklickbar.
+  const pickColumn = (clientX: number, clientY: number): string | null => {
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (let i = plan.primitives.length - 1; i >= 0; i--) {
+      const p = plan.primitives[i];
+      if (p.kind === "polygon" && p.columnId && pointInPolygon(m, p.pts)) {
+        return p.columnId;
       }
     }
     return null;
@@ -1188,7 +1285,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (md && md.pointerId === p.pointerId) {
       const delta = { x: raw.x - md.last.x, y: raw.y - md.last.y };
       if (delta.x !== 0 || delta.y !== 0) {
-        gripHandlers!.onMoveBody(delta, md.target);
+        gripHandlers!.onMoveBody(delta, md.target, mods);
         md.last = raw;
       }
       return;
@@ -1402,28 +1499,46 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const openingId = pickOpening(e.clientX, e.clientY);
         const wallId =
           openingId ? null : hit && hit.kind === "polygon" ? hit.wallId ?? null : null;
-        // Traf der Klick KEINE Wand/Öffnung: zuerst eine getroffene gefüllte 2D-Fläche
-        // (Polygon mit drawingId), sonst die 2D-Linien (Drawing2D) per Nähe.
+        // Stütze (Tragwerk): ihre Querschnitt-Poché liegt ÜBER der Wand-Poché —
+        // ein direkter Klick auf sie trifft zuerst die Stütze (hit.columnId), sonst
+        // die Fläche per Punkt-in-Polygon. Priorität direkt nach Öffnung/Wand.
+        const polyColumnId =
+          hit && hit.kind === "polygon" ? hit.columnId ?? null : null;
+        const columnId =
+          openingId || wallId
+            ? null
+            : polyColumnId ?? pickColumn(e.clientX, e.clientY);
+        // Traf der Klick KEINE Wand/Öffnung/Stütze: zuerst eine getroffene gefüllte
+        // 2D-Fläche (Polygon mit drawingId), sonst die 2D-Linien (Drawing2D) per Nähe.
         const polyDrawingId =
           hit && hit.kind === "polygon" ? hit.drawingId ?? null : null;
         const drawingId =
-          openingId || wallId
+          openingId || wallId || columnId
             ? null
             : polyDrawingId ?? pickDrawing(e.clientX, e.clientY);
+        // Extrudierter Körper (truck-Integration): sein Footprint-Umriss ersetzt
+        // die frühere Drawing2D-Fläche, also gleiche Priorität wie drawingId.
+        const polyExtrudedSolidId =
+          hit && hit.kind === "polygon" ? hit.extrudedSolidId ?? null : null;
+        const extrudedSolidId =
+          openingId || wallId || columnId || drawingId
+            ? null
+            : polyExtrudedSolidId ?? pickExtrudedSolid(e.clientX, e.clientY);
         // Decke nur, wenn weder Öffnung/Wand noch 2D-Element getroffen wurde. Da die
         // Decken-Polygone UNTER der Wand-Poché liegen, trifft ein direkter Klick
         // auf die Wand zuerst die Wand; freie Deckenfläche trifft die Decke.
         const hitCeilingId =
           hit && hit.kind === "polygon" ? hit.ceilingId ?? null : null;
-        const ceilingId = openingId || wallId || drawingId ? null : hitCeilingId;
+        const ceilingId =
+          openingId || wallId || columnId || drawingId || extrudedSolidId ? null : hitCeilingId;
         // Treppe nur, wenn nichts anderes getroffen wurde (Tritte liegen frei).
         const stairId =
-          openingId || wallId || drawingId || ceilingId
+          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId
             ? null
             : pickStair(e.clientX, e.clientY);
         // Raum als letzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
         const roomId =
-          openingId || wallId || drawingId || ceilingId || stairId
+          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId
             ? null
             : pickRoom(e.clientX, e.clientY);
         onSelect({
@@ -1435,6 +1550,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           openingId,
           stairId,
           roomId,
+          extrudedSolidId,
+          columnId,
           shift: e.shiftKey,
         });
       }
@@ -1489,6 +1606,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (toolActive) {
       toolHandlers!.onToolCommit();
       return;
+    }
+    // Doppelklick auf ein Text-2D-Element → Inhalt bearbeiten (Vorrang vor Raum).
+    if (onEditDrawingText) {
+      const tid = pickDrawingText(e.clientX, e.clientY);
+      if (tid) {
+        onEditDrawingText(tid);
+        return;
+      }
     }
     // Doppelklick auf einen Raum (Stempel-Griff ODER Fläche) → Stempel-Editor.
     if (onStampEdit) {
@@ -1613,6 +1738,33 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         p.kind === "polygon" && p.roomId != null && ids.has(p.roomId),
     );
   }, [plan, selectedRoomIds]);
+
+  // Hervorhebung der selektierten extrudierten Körper (truck-Integration): der
+  // Footprint-Umriss (Polygon mit extrudedSolidId) mit Akzentkontur überzeichnen
+  // — analog zur Raum-Auswahl.
+  const highlightExtrudedSolidPolys = useMemo(() => {
+    const ids =
+      selectedExtrudedSolidIds && selectedExtrudedSolidIds.length
+        ? new Set(selectedExtrudedSolidIds)
+        : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "polygon" }> =>
+        p.kind === "polygon" && p.extrudedSolidId != null && ids.has(p.extrudedSolidId),
+    );
+  }, [plan, selectedExtrudedSolidIds]);
+
+  // Hervorhebung der selektierten Stützen (Tragwerk): der Querschnitt-Umriss
+  // (Polygon mit columnId) mit Akzentkontur überzeichnen — analog Extrusion/Raum.
+  const highlightColumnPolys = useMemo(() => {
+    const ids =
+      selectedColumnIds && selectedColumnIds.length ? new Set(selectedColumnIds) : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "polygon" }> =>
+        p.kind === "polygon" && p.columnId != null && ids.has(p.columnId),
+    );
+  }, [plan, selectedColumnIds]);
 
   // Zusammenhängende 2D-Zeichen-Linien (gleiche drawingId + Stil) zu Zügen
   // bündeln, damit sie als EIN <polyline>/<polygon> gezeichnet werden können —
@@ -1811,6 +1963,30 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {highlightRoomPolys.map((poly, i) => (
         <polygon
           key={`selrm-${i}`}
+          className="plan-selected"
+          points={poly.pts
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
+      {/* Auswahl-Hervorhebung der gewählten extrudierten Körper (truck-Integration). */}
+      {highlightExtrudedSolidPolys.map((poly, i) => (
+        <polygon
+          key={`selex-${i}`}
+          className="plan-selected"
+          points={poly.pts
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
+      {/* Auswahl-Hervorhebung der gewählten Stützen (Tragwerk). */}
+      {highlightColumnPolys.map((poly, i) => (
+        <polygon
+          key={`selcol-${i}`}
           className="plan-selected"
           points={poly.pts
             .map(toScreen)
@@ -2024,7 +2200,7 @@ function DraftOverlay({
   snapColor: string;
 }) {
   const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
-  const markSize = 4.5 * vbPerPx; // halbe Kantenlänge des Snap-Markers (gleich groß wie Stützpunkt)
+  const markSize = 6.5 * vbPerPx; // halbe Kantenlänge des Snap-Markers (grösser = besser sichtbar)
   return (
     <g className="tool-overlay" pointerEvents="none">
       {/* Vorschau-Formen. */}
@@ -3081,12 +3257,32 @@ function renderPrimitive(
       );
     }
     case "drawingText": {
-      // Modellverankerter Einzeltext (DXF-Import): Höhe in Metern → viewBox-
-      // Einheiten (skaliert mit dem Zoom), Baseline am Ankerpunkt (links).
+      // Modellverankerter Einzeltext (DXF-Import / Text-Werkzeug): Höhe in Metern →
+      // viewBox-Einheiten (skaliert mit dem Zoom), Baseline am Ankerpunkt (links).
       const c = toScreen(p.at);
       const fontSize = p.heightM * PX_PER_M;
       // Modell-Winkel CCW; Screen-Y ist gespiegelt und SVG-rotate CW-positiv → -deg.
       const deg = -(p.angle * 180) / Math.PI;
+      // Spaltentext: bei gesetzter `wrapWidth` den Text wortweise auf die Breite
+      // umbrechen (Zeichenbreite ≈ 0.55·fontSize geschätzt), sonst eine Zeile.
+      const lineH = fontSize * 1.25;
+      const lines: string[] = [];
+      if (p.wrapWidth && p.wrapWidth > 0) {
+        const maxPx = p.wrapWidth * PX_PER_M;
+        const charPx = fontSize * 0.55;
+        const maxChars = Math.max(1, Math.floor(maxPx / charPx));
+        for (const paragraph of p.text.split("\n")) {
+          let line = "";
+          for (const word of paragraph.split(/\s+/)) {
+            if (line === "") line = word;
+            else if ((line.length + 1 + word.length) <= maxChars) line += " " + word;
+            else { lines.push(line); line = word; }
+          }
+          lines.push(line);
+        }
+      } else {
+        lines.push(p.text);
+      }
       return (
         <text
           x={c.x}
@@ -3099,7 +3295,15 @@ function renderPrimitive(
           transform={deg ? `rotate(${deg} ${c.x} ${c.y})` : undefined}
           style={{ pointerEvents: "none", userSelect: "none" }}
         >
-          {p.text}
+          {lines.length <= 1 ? (
+            p.text
+          ) : (
+            lines.map((ln, li) => (
+              <tspan key={li} x={c.x} dy={li === 0 ? 0 : lineH}>
+                {ln === "" ? "​" : ln}
+              </tspan>
+            ))
+          )}
         </text>
       );
     }

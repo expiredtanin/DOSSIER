@@ -12,7 +12,7 @@
 import type { Plan } from "./generatePlan";
 import type { Project } from "../model/types";
 import { planToRenderScene } from "./toRenderScene";
-import { projectToModel3d } from "./toWalls3d";
+import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "./toWalls3d";
 
 /** Sammel-Fenster: Modelländerungen werden gebündelt gepusht (nicht je Frame). */
 const DEBOUNCE_MS = 200;
@@ -56,8 +56,21 @@ export function pushNativeScene(plan: Plan): void {
  */
 export function pushNativeWalls(project: Project): void {
   if (!isTauri()) return;
+  lastProject = project;
   clearTimeout(wallsTimer);
   wallsTimer = setTimeout(() => {
     void invokeNative("push_native_walls", { walls: projectToModel3d(project) });
   }, DEBOUNCE_MS);
+}
+
+/** Letztes an {@link pushNativeWalls} übergebenes Projekt (für den Re-Push unten). */
+let lastProject: Project | null = null;
+
+// truck-Extrusionen (s. toWalls3d.ts emitExtrudedSolids) laden WASM asynchron;
+// ohne diesen Re-Push nach Abschluss bliebe eine fertige Extrusion im nativen
+// Fenster unsichtbar, weil `pushNativeWalls` nur bei Projektänderungen läuft.
+if (typeof window !== "undefined") {
+  window.addEventListener(TRUCK_MESH_READY_EVENT, () => {
+    if (lastProject) pushNativeWalls(lastProject);
+  });
 }
