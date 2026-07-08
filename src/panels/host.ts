@@ -34,7 +34,7 @@ import type {
   WallReferenceLine,
   WallType,
 } from "../model/types";
-import type { SnapSettings, ToolId } from "../tools/types";
+import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
 import type { Selection } from "../state/selectionInfo";
 import type { ScheduleKind } from "../export/exportSchedule";
 
@@ -143,6 +143,12 @@ export interface PanelHostValue {
    * und grauen nicht-anwendbare Felder per `selection.kind` aus.
    */
   selection: Selection | null;
+  /**
+   * Live-Messwerte des Mess-Werkzeugs (Länge/Fläche/Winkel), oder `null`, wenn
+   * gerade nicht gemessen wird. Das Objekt-Info-Panel zeigt sie dauerhaft an,
+   * damit der Messwert nicht nur flüchtig am Cursor (HUD) erscheint.
+   */
+  measurement: MeasurementReadout | null;
   /** Setzt die (Strich-)Farbe der aktuellen Selektion (Wand oder Drawing2D). */
   onSetSelectionColor: (color: string) => void;
   /**

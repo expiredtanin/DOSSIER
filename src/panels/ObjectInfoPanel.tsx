@@ -36,6 +36,7 @@ import type {
   StairInfo,
   WallInfo,
 } from "../state/selectionInfo";
+import type { MeasurementReadout } from "../tools/types";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
 // Neun Anker als 3×3-Raster. Zeile 0 = oben (fy=0), Spalte 0 = links (fx=0).
@@ -58,11 +59,16 @@ export function ObjectInfoPanel() {
     fy: 0.5,
   });
 
+  // ── Mess-Werkzeug: Live-Messwerte (Länge/Fläche/Winkel) ─────────────────────
+  // Werden angezeigt, sobald gemessen wird — unabhängig von einer Selektion
+  // (das Mess-Werkzeug erzeugt kein Element). Hat Vorrang vor dem Leerzustand.
+  const m = host.measurement;
+
   // ── Leerzustand ───────────────────────────────────────────────────────────
   if (sel === null) {
     return (
       <div className="objinfo-panel">
-        <div className="objinfo-empty">{t("objinfo.empty")}</div>
+        {m ? <MeasurementSection m={m} /> : <div className="objinfo-empty">{t("objinfo.empty")}</div>}
       </div>
     );
   }
@@ -100,6 +106,7 @@ export function ObjectInfoPanel() {
 
   return (
     <div className="objinfo-panel">
+      {m && <MeasurementSection m={m} />}
       {/* Kopfzeile: Typ + Kategorie. Die element-spezifischen Attribut-Abschnitte
           (Wand/Decke/Öffnung/Treppe/Raum) liegen jetzt im Attribute-Panel;
           ObjectInfo trägt nur noch Bezugspunkt + Masse. */}
@@ -1232,5 +1239,31 @@ function RotateField({ onCommit }: { onCommit: (deg: number) => void }) {
       />
       <span className="objinfo-unit">°</span>
     </label>
+  );
+}
+
+// ── Mess-Werkzeug-Abschnitt ───────────────────────────────────────────────────
+// Zeigt die Live-Messwerte (letztes Segment, aufsummierte Länge, umschlossene
+// Fläche, Richtung). Fläche nur, sobald der Zug ≥ 3 Ecken hat.
+function MeasurementSection({ m }: { m: MeasurementReadout }) {
+  return (
+    <div className="objinfo-measure">
+      <div className="objinfo-section-label">{t("objinfo.measure.title")}</div>
+      <div className="objinfo-measure-grid">
+        <span className="objinfo-measure-key">{t("objinfo.measure.segment")}</span>
+        <span className="objinfo-measure-val">{m.segment.toFixed(3)} m</span>
+        <span className="objinfo-measure-key">{t("objinfo.measure.total")}</span>
+        <span className="objinfo-measure-val">{m.total.toFixed(3)} m</span>
+        <span className="objinfo-measure-key">{t("objinfo.measure.angle")}</span>
+        <span className="objinfo-measure-val">{m.angle.toFixed(1)}°</span>
+        {m.area != null && (
+          <>
+            <span className="objinfo-measure-key">{t("objinfo.measure.area")}</span>
+            <span className="objinfo-measure-val">{m.area.toFixed(2)} m²</span>
+          </>
+        )}
+      </div>
+      <div className="objinfo-measure-hint">{t("objinfo.measure.hint")}</div>
+    </div>
   );
 }

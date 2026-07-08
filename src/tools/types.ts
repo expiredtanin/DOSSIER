@@ -119,6 +119,27 @@ export type DraftShape =
   | { kind: "line"; a: Vec2; b: Vec2 }
   | { kind: "poly"; pts: Vec2[]; closed?: boolean };
 
+/**
+ * Live-Messwerte eines laufenden Mess-Vorgangs (Werkzeug „Messen"). Wird über
+ * den {@link ToolDraft} bis ins Objekt-Info-Panel durchgereicht, damit der
+ * Messwert nicht nur am Cursor (HUD), sondern dauerhaft ablesbar ist.
+ */
+export interface MeasurementReadout {
+  /** Länge des letzten Segments (Meter). */
+  segment: number;
+  /** Aufsummierte Länge des ganzen Mess-Pfades (Meter). */
+  total: number;
+  /**
+   * Umschlossene Fläche des Pfades (m²), sobald ≥ 3 Punkte den Polygonzug
+   * schliessen; sonst null (reine Streckenmessung).
+   */
+  area: number | null;
+  /** Richtung des letzten Segments (Grad, 0…360, 0 = +X). */
+  angle: number;
+  /** Anzahl bereits gesetzter Stützpunkte. */
+  points: number;
+}
+
 /** Darstellbare Vorschau (Rubber-Band). */
 export interface ToolDraft {
   /** Vorschau-Formen (gestrichelt/halbtransparent gezeichnet). */
@@ -129,6 +150,8 @@ export interface ToolDraft {
   snap?: SnapResult | null;
   /** Optionaler Maß-/Winkel-Text am Cursor (z. B. „3.20 m · 90°"). */
   hud?: { at: Vec2; text: string };
+  /** Live-Messwerte (nur beim Mess-Werkzeug gesetzt) fürs Objekt-Info-Panel. */
+  measure?: MeasurementReadout;
 }
 
 /** Was ein Werkzeug-Schritt nach außen meldet. */

@@ -2810,6 +2810,9 @@ export default function App() {
       onImportLineStyles: importLineStyles,
       onImportHatches: importHatches,
       selection,
+      // Live-Messwerte des Mess-Werkzeugs (aus dem aktiven Draft) — das Objekt-
+      // Info-Panel zeigt sie, solange gemessen wird.
+      measurement: draft?.measure ?? null,
       onSetSelectionColor: (color) => {
         if (!selection) return;
         if (selection.kind === "wall" || selection.kind === "drawing2d")

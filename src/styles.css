@@ -4044,6 +4044,32 @@ body {
   letter-spacing: 0.04em;
   margin: 2px 2px 4px;
 }
+/* Mess-Werkzeug: Live-Messwerte im Objekt-Info-Panel. */
+.objinfo-measure {
+  margin: 2px 2px 8px;
+}
+.objinfo-measure-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: baseline;
+  margin: 2px 0 4px;
+}
+.objinfo-measure-key {
+  color: var(--label);
+  font-size: 11px;
+}
+.objinfo-measure-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.objinfo-measure-hint {
+  color: var(--label);
+  font-size: 10px;
+  opacity: 0.75;
+}
+
 /* Bezugspunkt-Zeile: Würfel (fix quadratisch) links, X/Y/Z-Spalte rechts. */
 .objinfo-refrow {
   display: flex;
