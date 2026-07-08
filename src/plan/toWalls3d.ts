@@ -32,7 +32,7 @@
 // Ohne auflösbaren WallType/ohne Schichten: EIN Vollkörper über die volle
 // Dicke im neutralen Grundton (heutiges Fallback-Verhalten).
 
-import type { Project, Wall, Ceiling, Column, Layer, ExtrudedSolid, Drawing2D, Vec2, HatchPattern, SliceTermination } from "../model/types";
+import type { Project, Wall, Ceiling, Column, Layer, ExtrudedSolid, Drawing2D, Vec2, HatchPattern, SliceTermination, Opening } from "../model/types";
 import {
   getComponent,
   getWallType,
@@ -42,6 +42,8 @@ import {
   openingsOfWall,
   getFloor,
   flattenCategories,
+  getDoorType,
+  getWindowType,
 } from "../model/types";
 import { wallVerticalExtent, ceilingVerticalExtent, columnVerticalExtent, stairVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
@@ -381,6 +383,15 @@ const COLUMN_RGB: RRgb = [0.7, 0.7, 0.72];
 const GLASS_RGB: RRgb = [0.62, 0.76, 0.85];
 /** Halbe Dicke der Fensterscheibe (Meter) — sehr dünn, mittig in der Wand. */
 const GLASS_HALF_THICK = 0.01;
+/**
+ * Helles, warmes Rahmen-Grau (Zarge/Blendrahmen/Kämpfer/Sprossen) — bewusst
+ * deutlich heller als Wand ({@link WALL_RGB}) und klar von der bläulichen
+ * Scheibe ({@link GLASS_RGB}) unterscheidbar, damit der Rahmen im 3D als
+ * eigenes Bauteil lesbar ist (s. {@link emitOpeningFrames}).
+ */
+const FRAME_RGB: RRgb = [0.85, 0.85, 0.83];
+/** Default-Ansichtsbreite des Rahmenprofils (Meter), wenn `TYPE.frameWidth` fehlt. */
+const DEFAULT_FRAME_WIDTH = 0.06;
 /** Fallback-Farbe für 2D-Zeichnungen ohne color/lineStyle/Kategorie (wie drawing2DColor in Viewport3D.tsx, "#888888"). */
 const DRAWING_LINE_FALLBACK_RGB: RRgb = [0x88 / 255, 0x88 / 255, 0x88 / 255];
 /** Halbe Linienbreite der 2D-Boden-Spuren im 3D (Meter) — liest sich als dünne Linie. */
@@ -1648,17 +1659,298 @@ function emitMeshes(project: Project): RMesh[] {
   return out;
 }
 
+// Faces eines Boxen-Quaders als Dreiecks-Indizes (Ecken-Index-Bits: bit0 =
+// Achse from/to, bit1 = Höhe UK/OK, bit2 = Quer-Versatz nMin/nMax). Doppelseitig
+// gerendert (append_context_mesh) ⇒ Winding egal; je Fläche 2 Dreiecke, 6
+// Flächen = 12 Dreiecke. Gemeinsame Topologie für Glasscheiben UND Rahmen-/
+// Sprossen-Riegel (s. {@link openingAxisBox}).
+const OPENING_BOX_TRIS: number[] = [
+  0, 1, 3, 0, 3, 2, // Quer-Versatz nMin
+  4, 5, 7, 4, 7, 6, // Quer-Versatz nMax
+  0, 1, 5, 0, 5, 4, // UK
+  2, 3, 7, 2, 7, 6, // OK
+  0, 2, 6, 0, 6, 4, // from
+  1, 3, 7, 1, 7, 5, // to
+];
+
 /**
- * Emittiert je Fensteröffnung eine dünne Glasscheibe als rohes Quader-Mesh —
- * damit Fenster im 3D als Fenster lesbar sind statt als blosse Löcher in der
- * Wand. Nur `kind === "window"`; Türen bleiben offen (keine Scheibe).
+ * Baut EINEN geschlossenen Achsen-Quader (8 Ecken, 12 Dreiecke) für eine
+ * Öffnung — die gemeinsame Basis von {@link emitOpeningGlass} (Scheiben) und
+ * {@link emitOpeningFrames} (Rahmen-/Sprossen-Riegel). Achsen-Intervall
+ * `[from,to]` (Meter ab `wall.start`, entlang der Wandrichtung u), Höhen-
+ * Intervall `[zBottom,zTop]` (absolute Weltmeter) und Quer-Versatz-Intervall
+ * `[nMin,nMax]` (Meter entlang der Grundriss-Normalen n=(uy,−ux), dieselbe
+ * Konvention wie die bisherige Glas-Box — `nMin`/`nMax` MÜSSEN nicht sortiert
+ * übergeben werden, die Box spannt zwischen beiden Werten). `positions` in
+ * MODELL-Metern (x, y, z=Höhe) wie {@link emitMeshes}. Liefert `null` bei
+ * entarteten Massen (Achse/Höhe/Dicke ≤ EPS) statt eines Nullquaders.
+ */
+function openingAxisBox(
+  wall: Wall,
+  from: number,
+  to: number,
+  zBottom: number,
+  zTop: number,
+  nMin: number,
+  nMax: number,
+  color: RRgb,
+): RMesh | null {
+  if (to - from <= EPS) return null;
+  if (zTop - zBottom <= EPS) return null;
+  if (Math.abs(nMax - nMin) <= EPS) return null;
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  // Grundriss-Normale (Dicken-Achse) — dieselbe Konvention wie pushSegment.
+  const nx = uy;
+  const ny = -ux;
+  const positions: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const s = i & 1 ? to : from;
+    const z = i & 2 ? zTop : zBottom;
+    const t = i & 4 ? nMax : nMin;
+    positions.push(wall.start.x + ux * s + nx * t, wall.start.y + uy * s + ny * t, z);
+  }
+  return { positions, indices: [...OPENING_BOX_TRIS], kind: "imported", color };
+}
+
+/** Klemmt `v` auf `[lo,hi]`. */
+function clampRange(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+/**
+ * Rahmen-Tiefe quer zur Wand (Meter): `frameThickness` des Typs, sonst dessen
+ * `frameDepth`, sonst die volle Wanddicke (Fallback, wenn der Typ keine
+ * brauchbare Tiefe nennt). Beide Typ-Felder sind wörtlich Meter ≤ 0 ⇒ ungültig
+ * (übersprungen, nächster Fallback greift).
+ */
+function resolveAcrossWallDepth(
+  frameThickness: number | undefined,
+  frameDepth: number | undefined,
+  wallThickness: number,
+): number {
+  if (frameThickness !== undefined && frameThickness > EPS) return frameThickness;
+  if (frameDepth !== undefined && frameDepth > EPS) return frameDepth;
+  return wallThickness;
+}
+
+/**
+ * Quer-Versatz-Intervall `[nMin,nMax]` (Meter entlang der Wand-Normalen, s.
+ * {@link openingAxisBox}) des Rahmenkörpers — der 3D-Niederschlag des
+ * Schichteinzugs (`insetFromFace`/`insetFace`): die Rahmen-VORDERKANTE liegt
+ * bündig mit der gewählten Wandfläche, zurückversetzt um `insetFromFace`
+ * (0/fehlt ⇒ bündig), der Rahmenkörper erstreckt sich von dort aus `depth`
+ * Meter zur Wandmitte hin. "aussen" liegt an der POSITIVEN Normalen-Seite
+ * (kleinster Schicht-Offset in {@link pushSegment}, s. dessen Kommentar zur
+ * Aussenseiten-Konvention via `leftNormal`), "innen" an der negativen. Das
+ * Ergebnis wird auf die halbe Wanddicke geklemmt — ein Schichteinzug darf den
+ * Rahmen nie aus der Wand hinausschieben.
+ */
+function resolveFrameNormalRange(
+  halfThickness: number,
+  depth: number,
+  insetFromFace: number,
+  face: "aussen" | "innen",
+): { nMin: number; nMax: number } {
+  const sign = face === "innen" ? -1 : 1;
+  const front = sign * (halfThickness - insetFromFace);
+  const back = front - sign * depth;
+  const a = clampRange(front, -halfThickness, halfThickness);
+  const b = clampRange(back, -halfThickness, halfThickness);
+  return { nMin: Math.min(a, b), nMax: Math.max(a, b) };
+}
+
+/**
+ * Aufgelöste Rahmen-/Sprossen-Parameter EINER Öffnung (Tür oder Fenster) aus
+ * ihrem {@link DoorType}/{@link WindowType} (via `getDoorType`/`getWindowType`).
+ * `null`, wenn kein Typ auflösbar ist (`Opening.typeId` fehlt/verwaist) — DANN
+ * emittieren weder {@link emitOpeningFrames} noch die Rahmen-/Sprossen-Logik in
+ * {@link emitOpeningGlass} irgendetwas (Rückwärtskompatibilität: unveränderte
+ * Alt-Darstellung, s. Moduldoc-Kommentar dort).
+ */
+interface OpeningFrameParams {
+  /** Sichtbare Rahmen-/Flügelprofil-Breite in der Öffnungsebene (Meter). */
+  frameWidth: number;
+  /** Rahmen-Tiefe quer zur Wand (Meter, informativ — steckt bereits in nMin/nMax). */
+  acrossWallDepth: number;
+  /** Quer-Versatz-Intervall des Rahmenkörpers (s. {@link resolveFrameNormalRange}). */
+  nMin: number;
+  nMax: number;
+  /** Oberlicht-Höhe (Meter); 0 = kein Oberlicht/Kämpfer. */
+  transomHeight: number;
+  /** Schwelle/Sohlbank zeichnen: Fenster immer, Tür nur mit `threshold`. */
+  hasSill: boolean;
+  /** Flügelzahl (vertikale Mittelpfosten = wingCount−1); Türen immer 1. */
+  wingCount: number;
+  /** Kämpfer-Zeilen (horizontale Teilung = mullionRows−1); Türen immer 1. */
+  mullionRows: number;
+  /** Ob eine Glasscheibe gezeichnet wird (Fenster immer, Tür nur `leafStyle: "glas"`). */
+  glazed: boolean;
+}
+
+function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): OpeningFrameParams | null {
+  const wallThickness = wallThicknessSafe(project, wall);
+  const halfThickness = wallThickness / 2;
+  if (op.kind === "door") {
+    const dt = getDoorType(project, op);
+    if (!dt) return null;
+    const acrossWallDepth = resolveAcrossWallDepth(dt.frameThickness, dt.frameDepth, wallThickness);
+    const { nMin, nMax } = resolveFrameNormalRange(
+      halfThickness,
+      acrossWallDepth,
+      dt.insetFromFace ?? 0,
+      dt.insetFace ?? "aussen",
+    );
+    return {
+      frameWidth: dt.frameWidth ?? DEFAULT_FRAME_WIDTH,
+      acrossWallDepth,
+      nMin,
+      nMax,
+      transomHeight: Math.max(0, dt.transomHeight ?? 0),
+      hasSill: dt.threshold === true,
+      wingCount: 1,
+      mullionRows: 1,
+      glazed: dt.leafStyle === "glas",
+    };
+  }
+  const wt = getWindowType(project, op);
+  if (!wt) return null;
+  const acrossWallDepth = resolveAcrossWallDepth(wt.frameThickness, wt.frameDepth, wallThickness);
+  const { nMin, nMax } = resolveFrameNormalRange(
+    halfThickness,
+    acrossWallDepth,
+    wt.insetFromFace ?? 0,
+    wt.insetFace ?? "aussen",
+  );
+  return {
+    frameWidth: wt.frameWidth ?? DEFAULT_FRAME_WIDTH,
+    acrossWallDepth,
+    nMin,
+    nMax,
+    transomHeight: Math.max(0, wt.transomHeight ?? 0),
+    hasSill: true,
+    // Inline-Override `Opening.wingCount` gewinnt vor dem Typ-Default (analog
+    // `windowSymbol` im 2D, das dieselbe Priorität kennt), sonst Typ, sonst 1.
+    wingCount: Math.max(1, Math.round(op.wingCount ?? wt.wingCount ?? 1)),
+    mullionRows: Math.max(1, Math.round(wt.mullionRows ?? 1)),
+    glazed: true,
+  };
+}
+
+/**
+ * Rahmen-/Sprossen-Riegel EINER Öffnung: Pfosten (links/rechts, volle
+ * Öffnungshöhe), Sturz (oben), Schwelle (nur wenn `params.hasSill`), optional
+ * ein Kämpfer-Riegel (Oberlicht-Trennung, `transomHeight>0`) sowie die
+ * Flügel-Mittelpfosten (`wingCount−1`, vertikal) und Kämpfer-Zeilen
+ * (`mullionRows−1`, horizontal) im Flügel-Bereich zwischen Schwelle/Sturz
+ * bzw. Schwelle/Kämpfer. Alle Riegel in {@link FRAME_RGB}.
+ */
+function frameMeshesForOpening(
+  wall: Wall,
+  iv: { from: number; to: number },
+  vert: { zBottom: number; zTop: number },
+  params: OpeningFrameParams,
+): RMesh[] {
+  const out: RMesh[] = [];
+  const fw = params.frameWidth;
+  const push = (from: number, to: number, zBottom: number, zTop: number): void => {
+    const mesh = openingAxisBox(wall, from, to, zBottom, zTop, params.nMin, params.nMax, FRAME_RGB);
+    if (mesh) out.push(mesh);
+  };
+  // Pfosten (Laibungsseiten), über die volle Öffnungshöhe durchlaufend.
+  push(iv.from, iv.from + fw, vert.zBottom, vert.zTop);
+  push(iv.to - fw, iv.to, vert.zBottom, vert.zTop);
+  // Sturz (oberer Riegel).
+  push(iv.from + fw, iv.to - fw, vert.zTop - fw, vert.zTop);
+  // Schwelle: Fenster immer, Tür nur mit Bodenanschlag (threshold).
+  if (params.hasSill) push(iv.from + fw, iv.to - fw, vert.zBottom, vert.zBottom + fw);
+
+  // Flügel-/Sash-Bereich zwischen Schwelle und Sturz, ggf. durch den Kämpfer
+  // (Oberlicht-Trennung) oben beschnitten.
+  const sashFrom = iv.from + fw;
+  const sashTo = iv.to - fw;
+  const sashBottom = vert.zBottom + (params.hasSill ? fw : 0);
+  let sashTop = vert.zTop - fw;
+  if (params.transomHeight > EPS) {
+    const splitZ = clampRange(vert.zTop - params.transomHeight, sashBottom, sashTop);
+    push(sashFrom, sashTo, splitZ - fw / 2, splitZ + fw / 2); // Kämpfer-Riegel
+    sashTop = splitZ - fw / 2;
+  }
+  // Flügel-Mittelpfosten (vertikal, wingCount−1) im Sash-Bereich.
+  if (params.wingCount > 1 && sashTo - sashFrom > EPS) {
+    const cell = (sashTo - sashFrom) / params.wingCount;
+    for (let i = 1; i < params.wingCount; i++) {
+      const center = sashFrom + i * cell;
+      push(center - fw / 2, center + fw / 2, sashBottom, sashTop);
+    }
+  }
+  // Kämpfer-Zeilen (horizontal, mullionRows−1) im Sash-Bereich.
+  if (params.mullionRows > 1 && sashTop - sashBottom > EPS) {
+    const cell = (sashTop - sashBottom) / params.mullionRows;
+    for (let i = 1; i < params.mullionRows; i++) {
+      const center = sashBottom + i * cell;
+      push(sashFrom, sashTo, center - fw / 2, center + fw / 2);
+    }
+  }
+  return out;
+}
+
+/**
+ * Glasscheibe(n) EINER typisierten Öffnung (Fenster immer, Tür nur bei
+ * `params.glazed`): eine Hauptscheibe im Flügel-Bereich (zwischen Schwelle und
+ * Sturz bzw. Kämpfer), plus — bei `transomHeight>0` — eine ZWEITE Scheibe im
+ * Oberlicht-Band oberhalb des Kämpfers. Die Sprossen/Mittelpfosten aus
+ * {@link frameMeshesForOpening} liegen VOR dieser einen Hauptscheibe (keine
+ * Pro-Feld-Aufteilung — bewusst einfach gehalten, s. Datei-weite Erläuterung).
+ */
+function glassPanesForOpening(
+  wall: Wall,
+  iv: { from: number; to: number },
+  vert: { zBottom: number; zTop: number },
+  params: OpeningFrameParams,
+): RMesh[] {
+  const out: RMesh[] = [];
+  const fw = params.frameWidth;
+  const sashFrom = iv.from + fw;
+  const sashTo = iv.to - fw;
+  const sashBottom = vert.zBottom + (params.hasSill ? fw : 0);
+  const sashTopFull = vert.zTop - fw;
+  const push = (zBottom: number, zTop: number): void => {
+    const mesh = openingAxisBox(wall, sashFrom, sashTo, zBottom, zTop, params.nMin, params.nMax, GLASS_RGB);
+    if (mesh) out.push(mesh);
+  };
+  if (params.transomHeight > EPS) {
+    const splitZ = clampRange(vert.zTop - params.transomHeight, sashBottom, sashTopFull);
+    push(sashBottom, splitZ - fw / 2); // Hauptscheibe/-blatt unterhalb des Kämpfers.
+    push(splitZ + fw / 2, sashTopFull); // Oberlicht-Scheibe oberhalb des Kämpfers.
+  } else {
+    push(sashBottom, sashTopFull);
+  }
+  return out;
+}
+
+/**
+ * Emittiert je Fensteröffnung eine Glasscheibe (Türen nur bei glasfülligem
+ * Blatt, `leafStyle: "glas"`) als rohes Quader-Mesh — damit Fenster im 3D als
+ * Fenster lesbar sind statt als blosse Löcher in der Wand.
  *
- * Für jede Scheibe wird ein geschlossener Quader (8 Ecken, 12 Dreiecke) gebaut:
- *   • entlang der Wandachse: das geklemmte Öffnungs-Intervall (openingInterval),
- *   • vertikal: die absolute Öffnungs-Ausdehnung (openingVerticalExtent, also
- *     UK = baseElevation+sillHeight … OK = +height, an den Wandkopf geklemmt) —
- *     exakt der Bereich, den emitWall als Loch freilässt,
- *   • quer zur Wand: ±GLASS_HALF_THICK um die Wandachse (mittig in der Dicke).
+ * OHNE auflösbaren Typ (`getWindowType`/`getDoorType` liefert `undefined`,
+ * z. B. `Opening.typeId` fehlt): unverändertes ALT-Verhalten — EINE Vollscheibe
+ * über die geklemmte Öffnungs-Achse ({@link openingInterval}) und -Höhe
+ * ({@link openingVerticalExtent}), quer ±{@link GLASS_HALF_THICK} mittig in der
+ * Wand (Rückwärtskompatibilität, s. Moduldoc-Kommentar).
+ *
+ * MIT Typ: die Scheibe(n) sitzen im Flügel-Bereich INNERHALB des Rahmens (s.
+ * {@link glassPanesForOpening}), quer entlang des über den Schichteinzug
+ * bestimmten Rahmen-Versatzes (s. {@link resolveFrameNormalRange}) statt fix
+ * mittig — bei Oberlicht (`transomHeight>0`) kommt eine zweite Scheibe im
+ * Oberlicht-Band dazu. Die zugehörigen Rahmen-/Sprossen-Riegel emittiert
+ * separat {@link emitOpeningFrames} (eigene Farbe, eigene Funktion — leichter
+ * einzeln zu testen/filtern als eine gemeinsame Emission).
  *
  * `positions` liegen — wie bei {@link emitMeshes} (Terrain/Import) — in MODELL-
  * Metern als flaches (x, y, z=Höhe)-Array; render3d bildet sie selbst nach world
@@ -1667,46 +1959,60 @@ function emitMeshes(project: Project): RMesh[] {
  * mit gesetzter `color` ⇒ render3d zeichnet die Scheibe in GLASS_RGB.
  */
 function emitOpeningGlass(project: Project): RMesh[] {
-  // Faces eines Boxen-Quaders als Dreiecks-Indizes (Ecken-Index-Bits:
-  // bit0 = Achse from/to, bit1 = Höhe UK/OK, bit2 = Dicke −/+). Doppelseitig
-  // gerendert ⇒ Winding egal; je Fläche 2 Dreiecke, 6 Flächen = 12 Dreiecke.
-  const BOX_TRIS: number[] = [
-    0, 1, 3, 0, 3, 2, // Dicke −
-    4, 5, 7, 4, 7, 6, // Dicke +
-    0, 1, 5, 0, 5, 4, // UK
-    2, 3, 7, 2, 7, 6, // OK
-    0, 2, 6, 0, 6, 4, // from
-    1, 3, 7, 1, 7, 5, // to
-  ];
   const out: RMesh[] = [];
   for (const wall of project.walls) {
-    const dx = wall.end.x - wall.start.x;
-    const dy = wall.end.y - wall.start.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-9) continue;
-    const ux = dx / len;
-    const uy = dy / len;
-    // Grundriss-Normale (Dicken-Achse) — dieselbe Konvention wie pushSegment.
-    const nx = uy;
-    const ny = -ux;
     for (const op of openingsOfWall(project, wall.id)) {
-      if (op.kind !== "window") continue; // Türen bekommen keine Scheibe.
       const iv = openingInterval(wall, op);
       if (!iv) continue;
-      const { zBottom, zTop } = openingVerticalExtent(project, wall, op);
-      if (zTop - zBottom <= EPS) continue;
-      const positions: number[] = [];
-      // 8 Ecken: Achse s ∈ {from,to} × Höhe z ∈ {UK,OK} × Dicke t ∈ {−,+}.
-      for (let i = 0; i < 8; i++) {
-        const s = i & 1 ? iv.to : iv.from;
-        const z = i & 2 ? zTop : zBottom;
-        const t = i & 4 ? GLASS_HALF_THICK : -GLASS_HALF_THICK;
-        const px = wall.start.x + ux * s + nx * t;
-        const py = wall.start.y + uy * s + ny * t;
-        // MODELL-Koordinaten (x, y, z=Höhe) wie emitMeshes.
-        positions.push(px, py, z);
+      const vert = openingVerticalExtent(project, wall, op);
+      if (vert.zTop - vert.zBottom <= EPS) continue;
+      if (op.kind === "window") {
+        const params = resolveOpeningFrame(project, wall, op);
+        if (!params) {
+          // Kein Typ auflösbar -> Alt-Verhalten (fixe Vollscheibe, mittig).
+          const mesh = openingAxisBox(
+            wall,
+            iv.from,
+            iv.to,
+            vert.zBottom,
+            vert.zTop,
+            -GLASS_HALF_THICK,
+            GLASS_HALF_THICK,
+            GLASS_RGB,
+          );
+          if (mesh) out.push(mesh);
+          continue;
+        }
+        out.push(...glassPanesForOpening(wall, iv, vert, params));
+      } else {
+        // Tür: nur bei glasfülligem Blatt eine Scheibe (Alt-Verhalten: offen).
+        const params = resolveOpeningFrame(project, wall, op);
+        if (params?.glazed) out.push(...glassPanesForOpening(wall, iv, vert, params));
       }
-      out.push({ positions, indices: [...BOX_TRIS], kind: "imported", color: GLASS_RGB });
+    }
+  }
+  return out;
+}
+
+/**
+ * Emittiert je Öffnung MIT auflösbarem Typ ({@link getDoorType}/
+ * {@link getWindowType}) die Rahmen-/Sprossen-Riegel (Zarge/Blendrahmen, Sturz,
+ * Schwelle, Kämpfer, Mittelpfosten — s. {@link frameMeshesForOpening}) als rohe
+ * Quader-Meshes in {@link FRAME_RGB}. Öffnungen OHNE auflösbaren Typ (`typeId`
+ * fehlt/verwaist) bekommen KEINEN Rahmen — exakt das Alt-Verhalten vor der
+ * Typ-Vertiefung (Rückwärtskompatibilität).
+ */
+function emitOpeningFrames(project: Project): RMesh[] {
+  const out: RMesh[] = [];
+  for (const wall of project.walls) {
+    for (const op of openingsOfWall(project, wall.id)) {
+      const iv = openingInterval(wall, op);
+      if (!iv) continue;
+      const vert = openingVerticalExtent(project, wall, op);
+      if (vert.zTop - vert.zBottom <= EPS) continue;
+      const params = resolveOpeningFrame(project, wall, op);
+      if (!params) continue;
+      out.push(...frameMeshesForOpening(wall, iv, vert, params));
     }
   }
   return out;
@@ -1774,13 +2080,16 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     // Decken + Treppen (Treppentritte als extrudierte Slabs) — so wird die Treppe
     // auch im WASM/wgpu-Renderer sichtbar (der three.js-Pfad rendert sie separat).
     slabs: [...emitSlabs(project), ...emitStairs(project)],
-    // Kontext-Meshes (Terrain/Import) + Fenster-Glasscheiben (eigenes Mesh je
-    // Fensteröffnung) + glatte Beton-Laufplatten (gerade Betontreppen als Mesh)
-    // — pickGeometry/Highlight nutzen `meshes` bewusst NICHT (man wählt Wand/
-    // Öffnung/Treppe; Treppen-Pick läuft über die pickGeometry-Boxen).
+    // Kontext-Meshes (Terrain/Import) + Fenster-/Tür-Glasscheiben (eigenes Mesh
+    // je Scheibe) + Rahmen-/Sprossen-Riegel typisierter Öffnungen (Zarge/
+    // Blendrahmen/Kämpfer/Mittelpfosten, s. emitOpeningFrames) + glatte Beton-
+    // Laufplatten (gerade Betontreppen als Mesh) — pickGeometry/Highlight nutzen
+    // `meshes` bewusst NICHT (man wählt Wand/Öffnung/Treppe; Treppen-Pick läuft
+    // über die pickGeometry-Boxen).
     meshes: [
       ...emitMeshes(project),
       ...emitOpeningGlass(project),
+      ...emitOpeningFrames(project),
       ...emitStairMeshes(project),
     ],
   };

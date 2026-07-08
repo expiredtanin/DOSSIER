@@ -275,11 +275,14 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
     expect(glass.color).toEqual([0.62, 0.76, 0.85]);
 
     // Vertikale Ausdehnung (z = 3. Komponente jeder Ecke, MODELL-Höhe):
-    // O1 sillHeight 0.9, height 1.2, Wand-UK 0 -> UK 0.9 .. OK 2.1.
+    // O1 sillHeight 0.9, height 1.2, Wand-UK 0 -> Öffnung UK 0.9 .. OK 2.1.
+    // O1 referenziert den Typ "window-standard" (frameWidth 0.06, kein Oberlicht)
+    // -> die Scheibe sitzt jetzt INNERHALB des Rahmens (Schwelle/Sturz ziehen je
+    // frameWidth ab), s. emitOpeningFrames/glassPanesForOpening: 0.96 .. 2.04.
     const zs: number[] = [];
     for (let i = 2; i < glass.positions.length; i += 3) zs.push(glass.positions[i]);
-    expect(Math.min(...zs)).toBeCloseTo(0.9, 6);
-    expect(Math.max(...zs)).toBeCloseTo(2.1, 6);
+    expect(Math.min(...zs)).toBeCloseTo(0.96, 6);
+    expect(Math.max(...zs)).toBeCloseTo(2.04, 6);
   });
 
   it("Türen bekommen keine Scheibe; je Fenster genau eine", () => {
@@ -291,6 +294,248 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
       (m) => m.color[0] === 0.62 && m.color[1] === 0.76 && m.color[2] === 0.85,
     );
     expect(glassMeshes.length).toBe(2);
+  });
+});
+
+describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", () => {
+  // Farbfilter analog GLASS_RGB oben: FRAME_RGB (toWalls3d.ts) ist bewusst NICHT
+  // exportiert -> Tests filtern per Literalwert, wie es der bestehende Glas-Test
+  // schon für GLASS_RGB tut.
+  const isFrame = (m: { color: [number, number, number] }): boolean =>
+    m.color[0] === 0.85 && m.color[1] === 0.85 && m.color[2] === 0.83;
+  const isGlass = (m: { color: [number, number, number] }): boolean =>
+    m.color[0] === 0.62 && m.color[1] === 0.76 && m.color[2] === 0.85;
+  const zRange = (m: { positions: number[] }): { min: number; max: number } => {
+    const zs: number[] = [];
+    for (let i = 2; i < m.positions.length; i += 3) zs.push(m.positions[i]);
+    return { min: Math.min(...zs), max: Math.max(...zs) };
+  };
+
+  it("typisiertes Fenster (O1, Typ window-standard) -> Rahmen-Riegel mit endlichen Positionen innerhalb der Öffnungshöhe", () => {
+    // O1: sillHeight 0.9, height 1.2 -> Öffnung UK 0.9 .. OK 2.1. Typ "window-
+    // standard" hat wingCount 1, kein mullionRows/transomHeight -> nur die 4
+    // Basis-Riegel (2 Pfosten + Sturz + Schwelle), keine Sprossen/Kämpfer.
+    const p: Project = {
+      ...sampleProject,
+      openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
+      doors: [],
+      context: [],
+    };
+    const { meshes } = projectToModel3d(p);
+    const frames = meshes.filter(isFrame);
+    expect(frames.length).toBe(4);
+    for (const f of frames) {
+      expect(f.positions.every((v) => Number.isFinite(v))).toBe(true);
+      const { min, max } = zRange(f);
+      expect(min).toBeGreaterThanOrEqual(0.9 - 1e-6);
+      expect(max).toBeLessThanOrEqual(2.1 + 1e-6);
+    }
+  });
+
+  it("transomHeight > 0 -> zusätzlicher Kämpfer-Riegel + zweite Glasscheibe im Oberlicht-Band", () => {
+    const p: Project = {
+      ...sampleProject,
+      windowTypes: [
+        ...(sampleProject.windowTypes ?? []),
+        {
+          id: "win-transom-test",
+          name: "Test Oberlicht",
+          kind: "fest",
+          wingCount: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          transomHeight: 0.4,
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+      openings: [
+        {
+          id: "OT",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-transom-test",
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+      doors: [],
+      context: [],
+    };
+    const { meshes } = projectToModel3d(p);
+    const frames = meshes.filter(isFrame);
+    const glass = meshes.filter(isGlass);
+    // 2 Pfosten + Sturz + Schwelle + Kämpfer = 5 Riegel (gegenüber 4 ohne Oberlicht).
+    expect(frames.length).toBe(5);
+    // Hauptscheibe (unterhalb des Kämpfers) + Oberlicht-Scheibe (oberhalb) = 2.
+    expect(glass.length).toBe(2);
+    // Kämpfer sitzt bei zTop - transomHeight = 2.1 - 0.4 = 1.7 und muss diese
+    // Höhe im eigenen z-Intervall einschliessen.
+    const splitZ = 1.7;
+    const kaempfer = frames.find((f) => {
+      const { min, max } = zRange(f);
+      return min < splitZ && max > splitZ;
+    });
+    expect(kaempfer).toBeDefined();
+    // Eine der beiden Scheiben liegt VOLLSTÄNDIG oberhalb des Kämpfers (Oberlicht).
+    const hasUpperPane = glass.some((g) => zRange(g).min > splitZ);
+    expect(hasUpperPane).toBe(true);
+  });
+
+  it("wingCount=2 + mullionRows=2 -> je ein zusätzlicher Mittelpfosten (vertikal) und Kämpfer (horizontal)", () => {
+    const baseline: Project = {
+      ...sampleProject,
+      openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
+      doors: [],
+      context: [],
+    };
+    const withMullions: Project = {
+      ...sampleProject,
+      windowTypes: [
+        ...(sampleProject.windowTypes ?? []),
+        {
+          id: "win-mullion-test",
+          name: "Test Sprossen",
+          kind: "fest",
+          wingCount: 2,
+          mullionRows: 2,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+      openings: [
+        {
+          id: "OM",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-mullion-test",
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+      doors: [],
+      context: [],
+    };
+    const baseCount = projectToModel3d(baseline).meshes.filter(isFrame).length;
+    const mullionCount = projectToModel3d(withMullions).meshes.filter(isFrame).length;
+    // +1 Mittelpfosten (wingCount-1) +1 Kämpfer-Zeile (mullionRows-1).
+    expect(mullionCount).toBe(baseCount + 2);
+  });
+
+  it("insetFromFace verschiebt Rahmen-Position entlang der Wand-Normalen gegenüber bündig (kein Einzug)", () => {
+    // W1-Achse (0,0)->(5,0): u=(1,0) -> Normale n=(0,-1); der Quer-Versatz
+    // bildet sich rein in der Y-Koordinate ab (y = -t). insetFromFace 0.1 muss
+    // die Rahmen-Aussenkante (min y, s. resolveFrameNormalRange) um ~0.1 m
+    // gegenüber bündig (insetFromFace 0) verschieben.
+    const flushWindow = (project: Project): Project => ({
+      ...project,
+      windowTypes: [
+        ...(project.windowTypes ?? []),
+        {
+          id: "win-flush-test",
+          name: "Test bündig",
+          kind: "fest",
+          wingCount: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          insetFromFace: 0,
+          insetFace: "aussen",
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+    });
+    const insetWindow = (project: Project): Project => ({
+      ...project,
+      windowTypes: [
+        ...(project.windowTypes ?? []),
+        {
+          id: "win-inset-test",
+          name: "Test Schichteinzug",
+          kind: "fest",
+          wingCount: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          insetFromFace: 0.1,
+          insetFace: "aussen",
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+    });
+    const openingWithType = (typeId: string): Project["openings"] => [
+      {
+        id: "OI",
+        type: "opening",
+        hostWallId: "W1",
+        categoryCode: "21",
+        kind: "window",
+        typeId,
+        position: 3.0,
+        width: 1.0,
+        height: 1.2,
+        sillHeight: 0.9,
+      },
+    ];
+    const pFlush: Project = { ...flushWindow(sampleProject), openings: openingWithType("win-flush-test"), doors: [], context: [] };
+    const pInset: Project = { ...insetWindow(sampleProject), openings: openingWithType("win-inset-test"), doors: [], context: [] };
+
+    const minY = (meshes: { positions: number[]; color: [number, number, number] }[]): number => {
+      let m = Infinity;
+      for (const mesh of meshes.filter(isFrame)) {
+        for (let i = 1; i < mesh.positions.length; i += 3) m = Math.min(m, mesh.positions[i]);
+      }
+      return m;
+    };
+    const flushMinY = minY(projectToModel3d(pFlush).meshes);
+    const insetMinY = minY(projectToModel3d(pInset).meshes);
+    // Bündig sitzt die Rahmen-Aussenkante weiter aussen (negativeres y); mit
+    // Einzug rückt sie um insetFromFace (0.1 m) Richtung Wandmitte (grösseres y).
+    expect(insetMinY - flushMinY).toBeCloseTo(0.1, 6);
+  });
+
+  it("Öffnung ohne auflösbaren Typ -> KEIN Rahmen-Mesh (Rückwärtskompatibilität)", () => {
+    const p: Project = {
+      ...sampleProject,
+      openings: [
+        {
+          id: "OX",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          // Kein typeId -> kein auflösbarer WindowType.
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+      doors: [],
+      context: [],
+    };
+    const { meshes } = projectToModel3d(p);
+    expect(meshes.some(isFrame)).toBe(false);
+    // Alt-Verhalten bleibt unverändert: weiterhin genau EINE Vollscheibe.
+    expect(meshes.filter(isGlass).length).toBe(1);
   });
 });
 
