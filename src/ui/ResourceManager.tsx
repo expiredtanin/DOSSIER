@@ -1977,6 +1977,18 @@ const DOOR_LEAF_STYLE_OPTIONS: { value: DoorType["leafStyle"]; labelKey: string 
   { value: "glas", labelKey: "resources.leafStyle.glas" },
 ];
 
+const DOOR_FRAME_KIND_OPTIONS: { value: NonNullable<DoorType["frameKind"]>; labelKey: string }[] = [
+  { value: "zarge", labelKey: "resources.frameKind.zarge" },
+  { value: "blockrahmen", labelKey: "resources.frameKind.blockrahmen" },
+];
+
+// Bezugsfläche des Schichteinzugs — von aussen oder innen gemessen. Für Tür UND
+// Fenster genutzt (gleiche Semantik).
+const INSET_FACE_OPTIONS: { value: "aussen" | "innen"; labelKey: string }[] = [
+  { value: "aussen", labelKey: "resources.insetFace.aussen" },
+  { value: "innen", labelKey: "resources.insetFace.innen" },
+];
+
 const WINDOW_KIND_OPTIONS: { value: WindowType["kind"]; labelKey: string }[] = [
   { value: "dreh", labelKey: "resources.windowKind.dreh" },
   { value: "kipp", labelKey: "resources.windowKind.kipp" },
@@ -2172,6 +2184,46 @@ function DoorStylesTab({
               min={0}
             />
           </FieldRow>
+          <FieldRow label={t("resources.field.frameKind")}>
+            <SelectField
+              value={door.frameKind ?? "zarge"}
+              onChange={(frameKind) => patch({ frameKind })}
+              options={DOOR_FRAME_KIND_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.frameWidth")}>
+            <NumberField
+              value={door.frameWidth ?? 0.06}
+              onChange={(frameWidth) => patch({ frameWidth })}
+              step={0.005}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.insetFromFace")}>
+            <NumberField
+              value={door.insetFromFace ?? 0}
+              onChange={(insetFromFace) => patch({ insetFromFace })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          {(door.insetFromFace ?? 0) > 0 && (
+            <FieldRow label={t("resources.field.insetFace")}>
+              <SelectField
+                value={door.insetFace ?? "aussen"}
+                onChange={(insetFace) => patch({ insetFace })}
+                options={INSET_FACE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+              />
+            </FieldRow>
+          )}
+          <FieldRow label={t("resources.field.transomHeight")}>
+            <NumberField
+              value={door.transomHeight ?? 0}
+              onChange={(transomHeight) => patch({ transomHeight })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
           <FieldRow label={t("resources.field.defaultWidth")}>
             <NumberField
               value={door.defaultWidth}
@@ -2241,6 +2293,15 @@ function WindowStylesTab({
               max={4}
             />
           </FieldRow>
+          <FieldRow label={t("resources.field.mullionRows")}>
+            <NumberField
+              value={win.mullionRows ?? 1}
+              onChange={(mullionRows) => patch({ mullionRows: Math.max(1, Math.round(mullionRows)) })}
+              step={1}
+              min={1}
+              max={4}
+            />
+          </FieldRow>
           <FieldRow label={t("resources.field.glazing")}>
             <SelectField
               value={win.glazing}
@@ -2260,6 +2321,39 @@ function WindowStylesTab({
             <NumberField
               value={win.frameDepth ?? 0}
               onChange={(frameDepth) => patch({ frameDepth })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.frameWidth")}>
+            <NumberField
+              value={win.frameWidth ?? 0.06}
+              onChange={(frameWidth) => patch({ frameWidth })}
+              step={0.005}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("resources.field.insetFromFace")}>
+            <NumberField
+              value={win.insetFromFace ?? 0}
+              onChange={(insetFromFace) => patch({ insetFromFace })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          {(win.insetFromFace ?? 0) > 0 && (
+            <FieldRow label={t("resources.field.insetFace")}>
+              <SelectField
+                value={win.insetFace ?? "aussen"}
+                onChange={(insetFace) => patch({ insetFace })}
+                options={INSET_FACE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+              />
+            </FieldRow>
+          )}
+          <FieldRow label={t("resources.field.transomHeight")}>
+            <NumberField
+              value={win.transomHeight ?? 0}
+              onChange={(transomHeight) => patch({ transomHeight })}
               step={0.01}
               min={0}
             />

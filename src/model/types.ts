@@ -311,6 +311,36 @@ export interface DoorType {
   frameThickness: number;
   /** Rahmen-/Zargen-Tiefe in Wandrichtung (Meter); fehlt ⇒ aus Wanddicke. */
   frameDepth?: number;
+  /**
+   * Rahmenart:
+   *  • "zarge"       — Zarge, umschliesst die Laibung (schmales Profil, in der
+   *    Wandlaibung sitzend — der Standard im Innenausbau).
+   *  • "blockrahmen" — Blockrahmen, sitzt als kräftiges Rechteckprofil VOR/auf
+   *    der Laibung (typisch bei Aussentüren/älterem Bestand).
+   * Fehlt es, gilt "zarge".
+   */
+  frameKind?: "zarge" | "blockrahmen";
+  /**
+   * Ansichtsbreite des Rahmenprofils (Meter) — die sichtbare Rahmen-Randbreite
+   * in der Öffnungsebene (Elevation), NICHT die Tiefe quer zur Wand. Fehlt es,
+   * gilt ein schmaler Default (~0.06 m). Steuert 2D-Rahmenkontur + 3D-Rahmen.
+   */
+  frameWidth?: number;
+  /**
+   * Schichteinzug: Abstand der Rahmen-Vorderkante von einer Wandfläche (Meter).
+   * 0/fehlt ⇒ bündig. > 0 ⇒ der Rahmen sitzt um diesen Betrag in die Wand
+   * zurückgesetzt (z. B. hinter die Aussenschale eines mehrschichtigen Aufbaus).
+   * Gemessen von der über {@link insetFace} gewählten Fläche.
+   */
+  insetFromFace?: number;
+  /** Von welcher Wandfläche der {@link insetFromFace} gemessen wird; Default "aussen". */
+  insetFace?: "aussen" | "innen";
+  /**
+   * Oberlicht: Höhe eines festen, verglasten Oberlichts über dem Türblatt
+   * (Meter). 0/fehlt ⇒ kein Oberlicht. Das Oberlicht sitzt oberhalb eines
+   * Kämpfers innerhalb derselben lichten Öffnungshöhe.
+   */
+  transomHeight?: number;
   /** Default-Lichtbreite (Meter) für neu platzierte Türen dieses Typs. */
   defaultWidth: number;
   /** Default-Lichthöhe (Meter). */
@@ -331,12 +361,37 @@ export interface WindowType {
   kind: "dreh" | "kipp" | "drehkipp" | "fest" | "schiebe";
   /** Anzahl Flügel (1–4) → Mittelpfosten = wingCount − 1 (vgl. `Opening.wingCount`). */
   wingCount: number;
+  /**
+   * Anzahl horizontaler Felder (Kämpfer-Zeilen): 1 = keine Querteilung, 2 = ein
+   * Kämpfer, usw. Zusammen mit {@link wingCount} (Spalten) ergibt sich das
+   * Sprossen-/Flügelraster. Fehlt es, gilt 1.
+   */
+  mullionRows?: number;
   /** Verglasung: Einfach/Zweifach/Dreifach (3D-Scheibenzahl). */
   glazing: "einfach" | "zweifach" | "dreifach";
   /** Rahmenstärke quer zur Wand (Meter). */
   frameThickness: number;
   /** Rahmen-Tiefe in Wandrichtung (Meter); fehlt ⇒ aus Wanddicke. */
   frameDepth?: number;
+  /**
+   * Ansichtsbreite des Rahmen-/Flügelprofils (Meter) — sichtbare Randbreite in
+   * der Öffnungsebene. Fehlt es, gilt ein schmaler Default (~0.06 m). Steuert die
+   * 2D-Rahmen-/Sprossenkontur und den 3D-Rahmen.
+   */
+  frameWidth?: number;
+  /**
+   * Schichteinzug: Abstand der Rahmen-Vorderkante von einer Wandfläche (Meter).
+   * 0/fehlt ⇒ bündig; > 0 ⇒ der Rahmen sitzt zurückgesetzt (klassisch hinter der
+   * Aussenschale eines mehrschichtigen Wandaufbaus). Von {@link insetFace} gemessen.
+   */
+  insetFromFace?: number;
+  /** Von welcher Wandfläche der {@link insetFromFace} gemessen wird; Default "aussen". */
+  insetFace?: "aussen" | "innen";
+  /**
+   * Oberlicht: Höhe eines festen, verglasten Oberlichts über dem Hauptflügel
+   * (Meter), abgeteilt durch einen Kämpfer. 0/fehlt ⇒ kein Oberlicht.
+   */
+  transomHeight?: number;
   /** Default-Brüstungshöhe über Wand-UK (Meter). */
   defaultSillHeight: number;
   /** Default-Lichtbreite (Meter). */
