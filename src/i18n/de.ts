@@ -1209,6 +1209,7 @@ export const de = {
   "viewport3d.grip.vertex": "Wandende ziehen",
   "viewport3d.grip.height": "Höhe ziehen",
   "viewport3d.grip.move": "Verschieben",
+  "viewport3d.grip.edge": "Kante ziehen",
 
   // ── Element-Baum (Elemente-Panel, ROADMAP §11) ──────────────────────────────
   "elements.title": "Elemente",

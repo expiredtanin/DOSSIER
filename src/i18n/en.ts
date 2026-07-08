@@ -1195,6 +1195,7 @@ export const en: Record<TranslationKey, string> = {
   "viewport3d.section.show": "Section plane on",
   "viewport3d.section.hide": "Section plane off",
   "viewport3d.grip.vertex": "Drag wall endpoint",
+  "viewport3d.grip.edge": "Drag edge",
   "viewport3d.grip.height": "Drag height",
   "viewport3d.grip.move": "Move",
 

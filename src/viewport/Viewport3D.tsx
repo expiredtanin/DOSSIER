@@ -152,8 +152,10 @@ export function Viewport3D(
         // wie die three.js-Sicht (renderer-agnostisch).
         editWalls={props.editWalls}
         editDrawings={props.editDrawings}
+        editCeilings={props.editCeilings}
         onEditVertex={props.onEditVertex}
         onEditBody={props.onEditBody}
+        onEditEdge={props.onEditEdge}
         onEditWallTop={props.onEditWallTop}
         onEditEnd={props.onEditEnd}
       />
@@ -276,23 +278,29 @@ function ThreeViewport3D({
   editWalls?: Wall[];
   /** Alle gewählten 2D-Elemente — Vertex-Griffe in 3D (Mehrfachauswahl ⇒ alle). */
   editDrawings?: Drawing2D[];
+  /** Alle gewählten Decken — Eckpunkt-/Kanten-/Verschiebe-Griffe (nur wgpu-Sicht). */
+  editCeilings?: Ceiling[];
   /**
    * Endpunkt-/Vertex-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index`
-   * des durch `target` benannten Elements (Wand-ID ODER Drawing-ID). Optional
-   * `excludeWallIds`/`excludeDrawingIds` = Koinzidenz-Gruppe, die aus den
+   * des durch `target` benannten Elements (Wand-ID, Drawing-ID ODER Decken-ID).
+   * Optional `excludeWallIds`/`excludeDrawingIds` = Koinzidenz-Gruppe, die aus den
    * Snap-Quellen genommen wird; nur dann snappt App den Punkt. Liefert den
    * effektiv angewandten (gesnappten) Punkt zurück (für Marker + Mitführen).
-   * Wird auf dieselbe Store-Action (`moveGripOf`) gelegt wie die Plan-Griffe.
    */
   onEditVertex?: (
-    target: { wallId?: string; drawingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
     index: number,
     model: Vec2,
     excludeWallIds?: Set<string>,
     excludeDrawingIds?: Set<string>,
   ) => Vec2;
   /** Verschiebe-Griff gezogen: das `target`-Element um `delta` (XY) verschieben. */
-  onEditBody?: (target: { wallId?: string; drawingId?: string }, delta: Vec2) => void;
+  onEditBody?: (
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    delta: Vec2,
+  ) => void;
+  /** Kanten-Griff einer Decke gezogen: Kante (aIndex→bIndex) um `delta` verschieben. */
+  onEditEdge?: (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   /** Höhen-Griff gezogen: neue absolute Oberkanten-Z der Wand. */
   onEditWallTop?: (wallId: string, topZ: number) => void;
   /** Ende eines Griff-Drags (Commit/Aufräumen). */

@@ -27,6 +27,7 @@ import {
 import { wallCorners } from "./model/geometry";
 import { add, dot, leftNormal, normalize, scale, sub } from "./model/geometry";
 import type {
+  Ceiling,
   CeilingType,
   ContextObject,
   DoorType,
@@ -2458,6 +2459,17 @@ export default function App() {
         : [],
     [selectedWallIds, selectedDrawingIds, project.drawings2d],
   );
+  // Gewählte Decken → 3D-Eckpunkt-/Kanten-/Verschiebe-Griffe. Nur wenn keine
+  // Wände/2D-Elemente mitselektiert sind (eindeutiger Editierfokus).
+  const edit3dCeilings = useMemo(
+    () =>
+      selectedWallIds.length === 0 && selectedDrawingIds.length === 0
+        ? selectedCeilingIds
+            .map((id) => (project.ceilings ?? []).find((c) => c.id === id))
+            .filter((c): c is Ceiling => !!c)
+        : [],
+    [selectedWallIds, selectedDrawingIds, selectedCeilingIds, project.ceilings],
+  );
   // Snap beim 3D-Vertex-Drag: dieselbe computeSnap-Logik wie die Plan-Griffe.
   // Das/die gerade GEZOGENEN Element(e) werden aus den Snap-Quellen genommen
   // (sonst fängt der Punkt an sich selbst). `excludeWallIds`/`excludeDrawingIds`
@@ -2494,7 +2506,7 @@ export default function App() {
   // Snap-Marker zu zeigen. `snapped=false` (für mitgeführte Geschwister) wendet
   // den Punkt direkt an, ohne erneut zu snappen.
   const onEdit3dVertex = (
-    target: { wallId?: string; drawingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
     index: number,
     model: Vec2,
     excludeWallIds?: Set<string>,
@@ -2509,11 +2521,19 @@ export default function App() {
       );
       pt = snapResult?.point ?? model;
     }
-    moveGripOf(target.drawingId ?? null, target.wallId ?? null, index, pt);
+    if (target.ceilingId) moveCeilingGrip(target.ceilingId, index, pt);
+    else moveGripOf(target.drawingId ?? null, target.wallId ?? null, index, pt);
     return pt;
   };
-  const onEdit3dBody = (target: { wallId?: string; drawingId?: string }, delta: Vec2) => {
-    moveElementByOf(target.drawingId ?? null, target.wallId ?? null, delta);
+  const onEdit3dBody = (
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    delta: Vec2,
+  ) => {
+    if (target.ceilingId) moveCeilingBy(target.ceilingId, delta);
+    else moveElementByOf(target.drawingId ?? null, target.wallId ?? null, delta);
+  };
+  const onEdit3dEdge = (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => {
+    moveCeilingEdge(ceilingId, aIndex, bIndex, delta);
   };
   const onEdit3dWallTop = (wallId: string, topZ: number) => {
     updateWall(wallId, { top: { mode: "custom", z: topZ } });
@@ -4731,8 +4751,10 @@ export default function App() {
           gripHandlers={gripHandlers}
           edit3dWalls={edit3dWalls}
           edit3dDrawings={edit3dDrawings}
+          edit3dCeilings={edit3dCeilings}
           onEdit3dVertex={onEdit3dVertex}
           onEdit3dBody={onEdit3dBody}
+          onEdit3dEdge={onEdit3dEdge}
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
         />
@@ -5839,8 +5861,10 @@ function Content({
   gripHandlers,
   edit3dWalls,
   edit3dDrawings,
+  edit3dCeilings,
   onEdit3dVertex,
   onEdit3dBody,
+  onEdit3dEdge,
   onEdit3dWallTop,
   onEdit3dEnd,
 }: {
@@ -5923,14 +5947,20 @@ function Content({
   edit3dWalls: Wall[];
   /** Alle gewählten 2D-Elemente — 3D-Vertex-Griffe (Mehrfachauswahl ⇒ alle). */
   edit3dDrawings: Drawing2D[];
+  /** Alle gewählten Decken — 3D-Eckpunkt-/Kanten-/Verschiebe-Griffe. */
+  edit3dCeilings: Ceiling[];
   onEdit3dVertex: (
-    target: { wallId?: string; drawingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
     index: number,
     model: Vec2,
     excludeWallIds?: Set<string>,
     excludeDrawingIds?: Set<string>,
   ) => Vec2;
-  onEdit3dBody: (target: { wallId?: string; drawingId?: string }, delta: Vec2) => void;
+  onEdit3dBody: (
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    delta: Vec2,
+  ) => void;
+  onEdit3dEdge: (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   onEdit3dWallTop: (wallId: string, topZ: number) => void;
   onEdit3dEnd: () => void;
 }) {
@@ -6104,8 +6134,10 @@ function Content({
             onWorkplaneConfirm={onWorkplaneConfirm}
             editWalls={edit3dWalls}
             editDrawings={edit3dDrawings}
+            editCeilings={edit3dCeilings}
             onEditVertex={onEdit3dVertex}
             onEditBody={onEdit3dBody}
+            onEditEdge={onEdit3dEdge}
             onEditWallTop={onEdit3dWallTop}
             onEditEnd={onEdit3dEnd}
           />

@@ -43,8 +43,8 @@
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
 import { useEffect, useRef, useState } from "react";
-import type { Project, Wall, Drawing2D, Vec2 } from "../model/types";
-import { wallVerticalExtent } from "../model/wall";
+import type { Project, Wall, Drawing2D, Ceiling, Vec2 } from "../model/types";
+import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { projectToModel3d, pickGeometry, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
 import type { RenderMode, View3d } from "../ui/TopBar";
 import { t } from "../i18n";
@@ -82,13 +82,15 @@ const CLICK_THRESHOLD_PX = 4;
 // GUI-Element aus. Kosten: die Bildschirm-Position muss der Kamera folgen —
 // `useEffect` unten pollt sie per `requestAnimationFrame`, solange Griffe
 // aktiv sind (billige 2D-Projektion, kein WASM/GPU-Aufruf).
-type GripKind = "vertex" | "height" | "move";
+type GripKind = "vertex" | "height" | "move" | "edge";
 interface Grip {
   kind: GripKind;
-  /** Element, dessen Griff das ist (Wand-ID ODER Drawing-ID). */
-  target: { wallId?: string; drawingId?: string };
-  /** Vertex-Index (nur `kind==="vertex"`); -1 sonst. */
+  /** Element, dessen Griff das ist (Wand-ID, Drawing-ID ODER Decken-ID). */
+  target: { wallId?: string; drawingId?: string; ceilingId?: string };
+  /** Vertex-Index (`vertex`) bzw. erster Kanten-Index (`edge`); -1 sonst. */
   index: number;
+  /** Zweiter Kanten-Index (nur `kind==="edge"`). */
+  index2?: number;
   pos: Vec3;
 }
 
@@ -103,6 +105,7 @@ function computeGrips(
   project: Project,
   walls: readonly Wall[],
   drawings: readonly Drawing2D[],
+  ceilings: readonly Ceiling[],
   drawingElevation: number,
 ): Grip[] {
   const out: Grip[] = [];
@@ -123,6 +126,32 @@ function computeGrips(
     verts.forEach((v, i) => out.push({ kind: "vertex", target, index: i, pos: [v.x, y, v.y] }));
     const anchor = drawingMoveAnchor(d, verts);
     if (anchor) out.push({ kind: "move", target, index: -1, pos: [anchor.x, y + 0.03, anchor.y] });
+  }
+  // Decken: Eckpunkt-Griffe (Umriss) + je Seite ein Kanten-Mittelpunkt-Griff
+  // (Nutzer-Wunsch „an allen seiten auch ein punkt … wie an den eckpunkten") +
+  // ein Verschiebe-Griff im Schwerpunkt. Griffe sitzen auf der Deckenoberkante.
+  for (const c of ceilings) {
+    const pts = c.outline;
+    const n = pts.length;
+    if (n < 2) continue;
+    const target = { ceilingId: c.id };
+    const y = ceilingVerticalExtent(project, c).zTop + 0.02;
+    let sx = 0;
+    let sy = 0;
+    pts.forEach((p, i) => {
+      out.push({ kind: "vertex", target, index: i, pos: [p.x, y, p.y] });
+      const q = pts[(i + 1) % n];
+      out.push({
+        kind: "edge",
+        target,
+        index: i,
+        index2: (i + 1) % n,
+        pos: [(p.x + q.x) / 2, y, (p.y + q.y) / 2],
+      });
+      sx += p.x;
+      sy += p.y;
+    });
+    out.push({ kind: "move", target, index: -1, pos: [sx / n, y + 0.03, sy / n] });
   }
   return out;
 }
@@ -266,8 +295,10 @@ export function Wasm3DViewport({
   highlightLines = null,
   editWalls = [],
   editDrawings = [],
+  editCeilings = [],
   onEditVertex,
   onEditBody,
+  onEditEdge,
   onEditWallTop,
   onEditEnd,
 }: {
@@ -304,14 +335,21 @@ export function Wasm3DViewport({
   editWalls?: Wall[];
   /** Gewählte 2D-Zeichnungen — Quelle der 3D-Vertex-/Verschiebe-Griffe. */
   editDrawings?: Drawing2D[];
+  /** Gewählte Decken — Quelle der 3D-Eckpunkt-/Kanten-/Verschiebe-Griffe. */
+  editCeilings?: Ceiling[];
   /** Endpunkt-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index` des Elements. */
   onEditVertex?: (
-    target: { wallId?: string; drawingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
     index: number,
     model: Vec2,
   ) => Vec2;
   /** Verschiebe-Griff gezogen: das Element um `delta` (XY) verschieben. */
-  onEditBody?: (target: { wallId?: string; drawingId?: string }, delta: Vec2) => void;
+  onEditBody?: (
+    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    delta: Vec2,
+  ) => void;
+  /** Kanten-Griff einer Decke gezogen: Kante (aIndex→bIndex) um `delta` (XY) verschieben. */
+  onEditEdge?: (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   /** Höhen-Griff gezogen: neue absolute Oberkanten-Z der Wand. */
   onEditWallTop?: (wallId: string, topZ: number) => void;
   /** Ende eines Griff-Drags. */
@@ -330,10 +368,14 @@ export function Wasm3DViewport({
   editWallsRef.current = editWalls;
   const editDrawingsRef = useRef(editDrawings);
   editDrawingsRef.current = editDrawings;
+  const editCeilingsRef = useRef(editCeilings);
+  editCeilingsRef.current = editCeilings;
   const onEditVertexRef = useRef(onEditVertex);
   onEditVertexRef.current = onEditVertex;
   const onEditBodyRef = useRef(onEditBody);
   onEditBodyRef.current = onEditBody;
+  const onEditEdgeRef = useRef(onEditEdge);
+  onEditEdgeRef.current = onEditEdge;
   const onEditWallTopRef = useRef(onEditWallTop);
   onEditWallTopRef.current = onEditWallTop;
   const onEditEndRef = useRef(onEditEnd);
@@ -477,7 +519,10 @@ export function Wasm3DViewport({
   // einen WASM-Push auslösen (reine 2D-Projektionsmathe, kein GPU-Aufruf).
   const [gripScreens, setGripScreens] = useState<{ grip: Grip; x: number; y: number }[]>([]);
   useEffect(() => {
-    if (!ready || (editWalls.length === 0 && editDrawings.length === 0)) {
+    if (
+      !ready ||
+      (editWalls.length === 0 && editDrawings.length === 0 && editCeilings.length === 0)
+    ) {
       setGripScreens([]);
       return;
     }
@@ -493,6 +538,7 @@ export function Wasm3DViewport({
             projectRef.current,
             editWallsRef.current,
             editDrawingsRef.current,
+            editCeilingsRef.current,
             groundElevationRef.current,
           );
           const next: { grip: Grip; x: number; y: number }[] = [];
@@ -507,7 +553,7 @@ export function Wasm3DViewport({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [ready, editWalls, editDrawings]);
+  }, [ready, editWalls, editDrawings, editCeilings]);
 
   // Canvas-Größe beobachten: bei Layout-Änderung mit aktueller Kamera neu
   // zeichnen (die Surface-Anpassung übernimmt der Hook im render()).
@@ -528,11 +574,25 @@ export function Wasm3DViewport({
   // Pfad; "height" zieht auf einer VERTIKALEN Ebene entlang der Wandachse
   // (analog `heightZAt` dort), damit eine überwiegend vertikale Mausbewegung
   // auf eine Höhenänderung abbildet.
+  type GripTarget = { wallId?: string; drawingId?: string; ceilingId?: string };
   type GripDrag =
-    | { kind: "vertex"; target: { wallId?: string; drawingId?: string }; index: number; planeY: number }
-    | { kind: "move"; target: { wallId?: string; drawingId?: string }; planeY: number; lastModel: Vec2 | null }
+    | { kind: "vertex"; target: GripTarget; index: number; planeY: number }
+    | { kind: "move"; target: GripTarget; planeY: number; lastModel: Vec2 | null }
+    | { kind: "edge"; ceilingId: string; a: number; b: number; planeY: number; lastModel: Vec2 | null }
     | { kind: "height"; wallId: string };
   const gripDragRef = useRef<GripDrag | null>(null);
+  // Arbeitsebene (world-Y) eines Griffs: Wand-UK, Decken-OK bzw. Geschossebene.
+  const gripPlaneY = (target: GripTarget): number | null => {
+    if (target.wallId) {
+      const wall = editWallsRef.current.find((w) => w.id === target.wallId);
+      return wall ? wallVerticalExtent(projectRef.current, wall).zBottom : null;
+    }
+    if (target.ceilingId) {
+      const c = editCeilingsRef.current.find((x) => x.id === target.ceilingId);
+      return c ? ceilingVerticalExtent(projectRef.current, c).zTop : null;
+    }
+    return groundElevationRef.current;
+  };
   const startGripDrag = (grip: Grip) => (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -541,18 +601,22 @@ export function Wasm3DViewport({
       if (!grip.target.wallId) return;
       gripDragRef.current = { kind: "height", wallId: grip.target.wallId };
     } else {
-      let planeY: number;
-      if (grip.target.wallId) {
-        const wall = editWallsRef.current.find((w) => w.id === grip.target.wallId);
-        if (!wall) return;
-        planeY = wallVerticalExtent(projectRef.current, wall).zBottom;
+      const planeY = gripPlaneY(grip.target);
+      if (planeY == null) return;
+      if (grip.kind === "vertex") {
+        gripDragRef.current = { kind: "vertex", target: grip.target, index: grip.index, planeY };
+      } else if (grip.kind === "edge" && grip.target.ceilingId && grip.index2 != null) {
+        gripDragRef.current = {
+          kind: "edge",
+          ceilingId: grip.target.ceilingId,
+          a: grip.index,
+          b: grip.index2,
+          planeY,
+          lastModel: null,
+        };
       } else {
-        planeY = groundElevationRef.current;
+        gripDragRef.current = { kind: "move", target: grip.target, planeY, lastModel: null };
       }
-      gripDragRef.current =
-        grip.kind === "vertex"
-          ? { kind: "vertex", target: grip.target, index: grip.index, planeY }
-          : { kind: "move", target: grip.target, planeY, lastModel: null };
     }
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -586,6 +650,16 @@ export function Wasm3DViewport({
     const model: Vec2 = { x: hit[0], y: hit[2] };
     if (drag.kind === "vertex") {
       onEditVertexRef.current?.(drag.target, drag.index, model);
+      return;
+    }
+    if (drag.kind === "edge") {
+      // Kanten-Griff (Decke): inkrementelles Delta auf beide Kanten-Endpunkte.
+      if (drag.lastModel) {
+        const delta: Vec2 = { x: model.x - drag.lastModel.x, y: model.y - drag.lastModel.y };
+        if (delta.x !== 0 || delta.y !== 0)
+          onEditEdgeRef.current?.(drag.ceilingId, drag.a, drag.b, delta);
+      }
+      drag.lastModel = model;
       return;
     }
     // "move": inkrementelles Delta wie im three.js-Pendant (workplaneModel + lastModel).
@@ -838,7 +912,7 @@ export function Wasm3DViewport({
           Verschieben grün. */}
       {gripScreens.map(({ grip, x, y }) => (
         <div
-          key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId}:${grip.index}`}
+          key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId ?? grip.target.ceilingId}:${grip.index}`}
           onPointerDown={startGripDrag(grip)}
           onPointerMove={onGripPointerMove}
           onPointerUp={endGripDrag}
@@ -848,6 +922,8 @@ export function Wasm3DViewport({
               ? "viewport3d.grip.height"
               : grip.kind === "move"
               ? "viewport3d.grip.move"
+              : grip.kind === "edge"
+              ? "viewport3d.grip.edge"
               : "viewport3d.grip.vertex",
           )}
           style={{
@@ -856,8 +932,18 @@ export function Wasm3DViewport({
             top: y - 8,
             width: 16,
             height: 16,
-            borderRadius: "50%",
-            background: grip.kind === "height" ? "#2f8fff" : grip.kind === "move" ? "#18b85a" : "#ff8c1a",
+            // Kanten-Griffe rautenförmig + eigene Farbe, damit sie sich klar von
+            // den Eckpunkt-Griffen abheben (Nutzer-Wunsch: „an allen seiten").
+            borderRadius: grip.kind === "edge" ? "3px" : "50%",
+            transform: grip.kind === "edge" ? "rotate(45deg)" : undefined,
+            background:
+              grip.kind === "height"
+                ? "#2f8fff"
+                : grip.kind === "move"
+                ? "#18b85a"
+                : grip.kind === "edge"
+                ? "#b06cff"
+                : "#ff8c1a",
             border: "2px solid rgba(0,0,0,0.6)",
             boxShadow: "0 0 5px rgba(0,0,0,0.55)",
             cursor: grip.kind === "height" ? "ns-resize" : "grab",
