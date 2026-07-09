@@ -4728,6 +4728,7 @@ export default function App() {
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
+          selectedRoofIds={selectedRoofIds}
           roomStamp={roomStamp}
           onStampMove={moveRoomStamp}
           onStampEdit={onOpenStampEditor}
@@ -5839,6 +5840,7 @@ function Content({
   selectedExtrudedSolidIds,
   selectedColumnIds,
   selectedRoomIds,
+  selectedRoofIds,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -5914,6 +5916,7 @@ function Content({
   selectedExtrudedSolidIds: string[];
   selectedColumnIds: string[];
   selectedRoomIds: string[];
+  selectedRoofIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -6025,6 +6028,7 @@ function Content({
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
+          selectedRoofIds={selectedRoofIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -6079,6 +6083,7 @@ function Content({
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
+          selectedRoofIds={selectedRoofIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -6171,6 +6176,7 @@ function Content({
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
+          selectedRoofIds={selectedRoofIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -6215,6 +6221,7 @@ function LevelPlanView({
   selectedExtrudedSolidIds,
   selectedColumnIds,
   selectedRoomIds,
+  selectedRoofIds,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -6252,6 +6259,7 @@ function LevelPlanView({
   selectedExtrudedSolidIds: string[];
   selectedColumnIds: string[];
   selectedRoomIds: string[];
+  selectedRoofIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -6328,6 +6336,7 @@ function LevelPlanView({
         selectedExtrudedSolidIds={selectedExtrudedSolidIds}
         selectedColumnIds={selectedColumnIds}
         selectedRoomIds={selectedRoomIds}
+        selectedRoofIds={selectedRoofIds}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
@@ -6380,6 +6389,7 @@ function SectionPlanView({
   selectedExtrudedSolidIds,
   selectedColumnIds,
   selectedRoomIds,
+  selectedRoofIds,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -6413,6 +6423,7 @@ function SectionPlanView({
   selectedExtrudedSolidIds: string[];
   selectedColumnIds: string[];
   selectedRoomIds: string[];
+  selectedRoofIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -6499,6 +6510,7 @@ function SectionPlanView({
         selectedExtrudedSolidIds={selectedExtrudedSolidIds}
         selectedColumnIds={selectedColumnIds}
         selectedRoomIds={selectedRoomIds}
+        selectedRoofIds={selectedRoofIds}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}

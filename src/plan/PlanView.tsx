@@ -285,6 +285,8 @@ export interface PlanViewProps {
    * Fläche JEDES dieser Räume mit einer Akzentkontur.
    */
   selectedRoomIds?: string[];
+  /** Aktuell ausgewählte Dach-IDs (von App); die Ansicht markiert die Traufe. */
+  selectedRoofIds?: string[];
   /**
    * Aktuell ausgewählte IDs extrudierter Körper (truck-Integration; kontrolliert
    * von App). Die Ansicht markiert den Footprint-Umriss JEDES dieser Körper mit
@@ -413,6 +415,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       selectedOpeningIds,
       selectedStairIds,
       selectedRoomIds,
+      selectedRoofIds,
       selectedExtrudedSolidIds,
       selectedColumnIds,
       roomStamp,
@@ -1765,6 +1768,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     );
   }, [plan, selectedRoomIds]);
 
+  // Hervorhebung der selektierten Dächer: das (unsichtbare) Traufe-Pick-Polygon
+  // mit roofId als Akzentkontur überzeichnen — analog zur Raum-/Decken-Auswahl.
+  const highlightRoofPolys = useMemo(() => {
+    const ids =
+      selectedRoofIds && selectedRoofIds.length ? new Set(selectedRoofIds) : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "polygon" }> =>
+        p.kind === "polygon" && p.roofId != null && ids.has(p.roofId),
+    );
+  }, [plan, selectedRoofIds]);
+
   // Hervorhebung der selektierten extrudierten Körper (truck-Integration): der
   // Footprint-Umriss (Polygon mit extrudedSolidId) mit Akzentkontur überzeichnen
   // — analog zur Raum-Auswahl.
@@ -1989,6 +2004,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {highlightRoomPolys.map((poly, i) => (
         <polygon
           key={`selrm-${i}`}
+          className="plan-selected"
+          points={poly.pts
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
+      {/* Auswahl-Hervorhebung der gewählten Dächer (Traufe-Umriss). */}
+      {highlightRoofPolys.map((poly, i) => (
+        <polygon
+          key={`selrf-${i}`}
           className="plan-selected"
           points={poly.pts
             .map(toScreen)
