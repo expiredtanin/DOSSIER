@@ -51,6 +51,8 @@ import { pointInOutline } from "../geometry/ceiling";
 import { openingInterval, openingVerticalExtent, openingJambs } from "../geometry/opening";
 import type { DetailLevel } from "../ui/TopBar";
 import { stairGeometry, stairBBox } from "../geometry/stair";
+import { roofGeometry, roofBaseElevation } from "../geometry/roof";
+import type { Vec3 as RoofVec3 } from "../geometry/roof";
 import { extrudePolygon, extrudeCircle } from "../engine/truckSolid";
 import { computeJoins } from "../model/joins";
 import type { WallCuts } from "../model/joins";
@@ -393,6 +395,8 @@ const GLASS_HALF_THICK = 0.01;
 const FRAME_RGB: RRgb = [0.85, 0.85, 0.83];
 /** Default-Ansichtsbreite des Rahmenprofils (Meter), wenn `TYPE.frameWidth` fehlt. */
 const DEFAULT_FRAME_WIDTH = 0.06;
+/** Warmer Terrakotta-Grauton für Dachflächen/-giebel (s. {@link emitRoofs}) — hebt das Dach klar von Wand/Decke/Kontext ab. */
+const ROOF_RGB: RRgb = [0.72, 0.45, 0.36];
 /** Fallback-Farbe für 2D-Zeichnungen ohne color/lineStyle/Kategorie (wie drawing2DColor in Viewport3D.tsx, "#888888"). */
 const DRAWING_LINE_FALLBACK_RGB: RRgb = [0x88 / 255, 0x88 / 255, 0x88 / 255];
 /** Halbe Linienbreite der 2D-Boden-Spuren im 3D (Meter) — liest sich als dünne Linie. */
@@ -1634,6 +1638,49 @@ function emitColumns(project: Project): RMesh[] {
 }
 
 /**
+ * Trianguliert ein KONVEXES 3D-Polygon per Dreiecks-Fächer ab Vertex 0 und hängt
+ * die Dreiecke an `positions`/`indices` an. `roofGeometry` (Vertrag in
+ * `geometry/roof.ts`) liefert für `planes`/`gables` ausschliesslich konvexe
+ * Polygone (Dreieck/Quader bei den meisten Formen, ein Fünfeck-Giebel bei
+ * Mansarde) — ein Fächer trianguliert diese korrekt, ohne Ear-Clipping.
+ */
+function pushFanTriangles(positions: number[], indices: number[], pts: RoofVec3[]): void {
+  if (pts.length < 3) return;
+  const base = positions.length / 3;
+  for (const p of pts) positions.push(p[0], p[1], p[2]);
+  for (let i = 1; i < pts.length - 1; i++) indices.push(base, base + i, base + i + 1);
+}
+
+/**
+ * Emittiert Dächer (`project.roofs`) als geschlossene Dreiecks-Meshes: sowohl die
+ * geneigten Dachflächen (`RoofGeometry.planes`) als auch die Giebelflächen
+ * (`RoofGeometry.gables`) — erst zusammen bilden sie einen von aussen
+ * geschlossenen Körper (die Giebel schliessen die offenen Enden bei Sattel/
+ * Mansarde, die First-/Grat-/Knicklinien sind reine Grundriss-Hilfslinien und
+ * werden hier nicht gebraucht). Traufhöhe über {@link roofBaseElevation}
+ * (Override oder Geschoss-Oberkante), Flächen über {@link roofGeometry}. Farbe:
+ * `roof.color` (falls gültiges Hex), sonst {@link ROOF_RGB}. `positions` in
+ * MODELL-Metern (x, y, z=Höhe) wie {@link emitOpeningGlass}/{@link emitMeshes};
+ * render3d rendert Kontext-Meshes doppelseitig, die Winding-Reihenfolge ist also
+ * unerheblich.
+ */
+function emitRoofs(project: Project): RMesh[] {
+  const out: RMesh[] = [];
+  for (const roof of project.roofs ?? []) {
+    const eavesZ = roofBaseElevation(project, roof);
+    const g = roofGeometry(roof, eavesZ);
+    const color = roof.color ? hexToRgb(roof.color, ROOF_RGB) : ROOF_RGB;
+    const positions: number[] = [];
+    const indices: number[] = [];
+    for (const plane of g.planes) pushFanTriangles(positions, indices, plane.pts);
+    for (const gable of g.gables) pushFanTriangles(positions, indices, gable);
+    if (indices.length === 0) continue;
+    out.push({ positions, indices, kind: "extrusion", color });
+  }
+  return out;
+}
+
+/**
  * Emittiert die rohen Kontext-Meshes eines Projekts: Gelände-TINs (`terrainMesh`)
  * und importierte Volumen (`importedMesh`) aus `project.context`. `contourSet`
  * bleibt außen vor — das sind nur 2D-Linien (Höhenlinien/Footprints), keine
@@ -2110,14 +2157,15 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     // Kontext-Meshes (Terrain/Import) + Fenster-/Tür-Glasscheiben (eigenes Mesh
     // je Scheibe) + Rahmen-/Sprossen-Riegel typisierter Öffnungen (Zarge/
     // Blendrahmen/Kämpfer/Mittelpfosten, s. emitOpeningFrames) + glatte Beton-
-    // Laufplatten (gerade Betontreppen als Mesh) — pickGeometry/Highlight nutzen
-    // `meshes` bewusst NICHT (man wählt Wand/Öffnung/Treppe; Treppen-Pick läuft
-    // über die pickGeometry-Boxen).
+    // Laufplatten (gerade Betontreppen als Mesh) + Dachflächen/-giebel
+    // (s. emitRoofs) — pickGeometry/Highlight nutzen `meshes` bewusst NICHT (man
+    // wählt Wand/Öffnung/Treppe; Treppen-Pick läuft über die pickGeometry-Boxen).
     meshes: [
       ...emitMeshes(project),
       ...emitOpeningGlass(project),
       ...emitOpeningFrames(project, detail),
       ...emitStairMeshes(project),
+      ...emitRoofs(project),
     ],
   };
 }

@@ -99,6 +99,15 @@ export function CommandIcon({ name }: { name: string }) {
           <line x1="8" y1="2.5" x2="8" y2="13.5" strokeDasharray="1.6 1.6" />
         </svg>
       );
+    case "roof":
+      // Satteldach: Giebeldreieck + Traufe.
+      return (
+        <svg {...common}>
+          <polyline points="2,9 8,3 14,9" />
+          <line x1="2" y1="12" x2="14" y2="12" />
+          <line x1="8" y1="3" x2="8" y2="9" strokeDasharray="1.5 1.5" />
+        </svg>
+      );
     default:
       return null;
   }

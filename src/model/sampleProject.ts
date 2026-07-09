@@ -451,6 +451,27 @@ export const sampleProject: Project = {
       ceilingTypeId: "dg-massiv",
     },
   ],
+  // Dach — Satteldach über dem Baukörper (5×4), First entlang X (längere Seite),
+  // 0.4 m Traufüberstand. Sitzt auf der OG-Oberkante (roofBaseElevation-Default).
+  roofs: [
+    {
+      id: "RF1",
+      type: "roof",
+      floorId: "og",
+      categoryCode: "31",
+      outline: [
+        { x: 0, y: 0 },
+        { x: 5, y: 0 },
+        { x: 5, y: 4 },
+        { x: 0, y: 4 },
+      ],
+      shape: "sattel",
+      pitchDeg: 30,
+      overhang: 0.4,
+      ridgeAxis: "x",
+      thickness: 0.2,
+    },
+  ],
   // Treppen — eine gerade Beispieltreppe im EG entlang der Ostwand, steigt ins OG
   // (totalRise = Geschosshöhe). Kategorie „40 Treppen".
   stairs: [

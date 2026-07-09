@@ -11,6 +11,7 @@ import { ceilingCommand } from "./cmds/ceiling";
 import { openingCommand, fensterCommand, tuerCommand } from "./cmds/opening";
 import { stairCommand } from "./cmds/stair";
 import { columnCommand } from "./cmds/column";
+import { roofCommand } from "./cmds/roof";
 import { roomCommand } from "./cmds/room";
 import { rectCommand } from "./cmds/rect";
 import { circleCommand } from "./cmds/circle";
@@ -37,6 +38,7 @@ export const COMMANDS: Record<string, Command> = {
   tuer: tuerCommand,
   stair: stairCommand,
   column: columnCommand,
+  roof: roofCommand,
   room: roomCommand,
   line: lineCommand,
   polyline: polylineCommand,
@@ -75,6 +77,8 @@ export const ALIASES: Record<string, string> = {
   tp: "stair",
   stuetze: "column",
   stütze: "column",
+  dach: "roof",
+  rf: "roof",
   raum: "room",
   rm: "room",
   l: "line",

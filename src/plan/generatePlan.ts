@@ -17,6 +17,7 @@ import type {
   Opening,
   OverrideActions,
   Project,
+  Roof,
   Room,
   Stair,
   Vec2,
@@ -42,6 +43,7 @@ import {
   wallTypeThickness,
 } from "../model/types";
 import { columnFootprint } from "../geometry/column";
+import { roofGeometry } from "../geometry/roof";
 import { effectiveOverrides, hasOverrides } from "../overrides/engine";
 import { evaluateRoom, siaLabel } from "../geometry/roomArea";
 import type { Marks, RichTextDoc } from "../text/richText";
@@ -114,6 +116,15 @@ const SYMBOL_HAIRLINE_MM = 0.02;
  *  Grundriss-Schnittebene (Decken-/Slab-Überstände, Unterzüge) werden nach
  *  BIM-Konvention gestrichelt gezeichnet (Aufsicht auf ein Bauteil über einem). */
 const OVERHEAD_DASH: number[] = [0.4, 0.25];
+/** Strichstärken der Dach-Grundrisslinien (mm Papier): Traufe = mittlere
+ *  Haarlinie, First etwas kräftiger als die Traufe, Grat dazwischen, Knick dünn
+ *  + gestrichelt (vgl. addRoofs). */
+const ROOF_EAVES_MM = 0.13;
+const ROOF_RIDGE_MM = 0.25;
+const ROOF_HIP_MM = 0.18;
+const ROOF_BREAK_MM = 0.09;
+/** Strichmuster (mm Papier) der Dach-Knicklinie (Mansarde). */
+const ROOF_BREAK_DASH: number[] = [0.12, 0.08];
 /** Stärke der Wand-Umrisslinie je Detailgrad, als Faktor auf die Ebenen-lw. */
 const OUTLINE_DETAIL_FACTOR: Record<DetailLevel, number> = {
   grob: 1.6, // dickere Sammellinie
@@ -735,6 +746,20 @@ export function generatePlan(
     addCeilingPoche(primitives, project, ceiling, greyed, detail, category, wallFootprints);
   }
 
+  // Dächer dieses Geschosses (Dachaufsicht): reine Grundriss-Linien (Traufe/
+  // First/Grat/Knick), kein Poché. Über der Wand-Poché gezeichnet.
+  const roofs = (project.roofs ?? []).filter(
+    (r) =>
+      r.floorId === floorId &&
+      visibleCodes.has(r.categoryCode) &&
+      categoryDisplay(r.categoryCode).render,
+  );
+  for (const roof of roofs) {
+    const greyed = categoryDisplay(roof.categoryCode).greyed;
+    const category = catByCode.get(roof.categoryCode);
+    addRoof(primitives, roof, greyed, category);
+  }
+
   // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
   // (Name + Fläche + SIA-Tag). UNTER der Wand-Poché gezeichnet, damit die Wände
   // lesbar bleiben. Der Stempel (Text) entfällt beim Detailgrad „grob".
@@ -867,7 +892,7 @@ export function generatePlan(
 
   return {
     primitives,
-    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms),
+    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs),
   };
 }
 
@@ -2415,6 +2440,58 @@ function addCeilingPoche(
 }
 
 /**
+ * Dach im Grundriss (Dachaufsicht): reine Linien-Darstellung ohne Poché — die
+ * 2D-Geometrie aus `roofGeometry` (First/Grat/Knick hängen NICHT von der
+ * Traufhöhe ab, daher `eavesZ=0`):
+ *  • Traufe (`eaves`): geschlossener Umriss-Ring als mittlere Haarlinie.
+ *  • First (`ridges`): kräftige Volllinie, etwas stärker als die Traufe.
+ *  • Grat (`hips`, Walm/Zelt): Volllinie zwischen Traufe- und First-Stärke.
+ *  • Knick (`breaks`, Mansarde): dünne gestrichelte Linie.
+ * Farbe: `roof.color` übersteuert sonst die Kategorie-Farbe (analog Stützen-
+ * Poché), Default die neutrale Poché-Tinte.
+ */
+function addRoof(
+  out: Primitive[],
+  roof: Roof,
+  greyed: boolean,
+  category: LayerCategory | undefined,
+): void {
+  const stroke = roof.color ?? category?.color ?? POCHE_STROKE;
+  const geo = roofGeometry(roof, 0);
+
+  const n = geo.eaves.length;
+  for (let i = 0; i < n; i++) {
+    out.push({
+      kind: "line",
+      a: geo.eaves[i],
+      b: geo.eaves[(i + 1) % n],
+      cls: "roof-eaves",
+      weightMm: ROOF_EAVES_MM,
+      color: stroke,
+      greyed,
+    });
+  }
+  for (const [a, b] of geo.ridges) {
+    out.push({ kind: "line", a, b, cls: "roof-ridge", weightMm: ROOF_RIDGE_MM, color: stroke, greyed });
+  }
+  for (const [a, b] of geo.hips) {
+    out.push({ kind: "line", a, b, cls: "roof-hip", weightMm: ROOF_HIP_MM, color: stroke, greyed });
+  }
+  for (const [a, b] of geo.breaks) {
+    out.push({
+      kind: "line",
+      a,
+      b,
+      cls: "roof-break",
+      weightMm: ROOF_BREAK_MM,
+      dash: ROOF_BREAK_DASH,
+      color: stroke,
+      greyed,
+    });
+  }
+}
+
+/**
  * Deckkraft (0..255) der Raum-Füllung → 2-stelliges Hex-Suffix. Transluzente
  * Farbfüllung entfällt — Plandarstellung schwarz/grau; Farbe bleibt späteren
  * Schema-Ebenen vorbehalten. Alpha 0 = unsichtbar; das Polygon bleibt als
@@ -2671,6 +2748,7 @@ function computeBounds(
   ceilings: Ceiling[] = [],
   stairs: Stair[] = [],
   rooms: Room[] = [],
+  roofs: Roof[] = [],
 ) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const acc = (p: Vec2) => {
@@ -2683,6 +2761,9 @@ function computeBounds(
   }
   for (const c of ceilings) for (const p of c.outline) acc(p);
   for (const r of rooms) for (const p of r.boundary) acc(p);
+  // Traufe (inkl. Überstand) statt reinem Umriss, damit ein weit auskragendes
+  // Dach das „Einpassen" korrekt mit einrahmt.
+  for (const roof of roofs) for (const p of roofGeometry(roof, 0).eaves) acc(p);
   for (const s of stairs) {
     const { zBottom, zTop } = stairVerticalExtent(project, s);
     const geo = stairGeometry(s, zTop - zBottom);

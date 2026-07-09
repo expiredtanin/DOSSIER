@@ -105,6 +105,7 @@ export const RIBBON_TABS: RibbonTab[] = [
           t("stair"),
           c("column"),
           t("ceiling"),
+          c("roof"),
           t("room"),
         ],
       },

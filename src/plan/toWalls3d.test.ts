@@ -6,10 +6,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Project } from "../model/types";
+import type { Project, Roof } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
 import { selectionHighlightLines, projectToWalls3d, projectToModel3d } from "./toWalls3d";
 import { resolveHatch } from "./generatePlan";
+import { roofGeometry, roofBaseElevation } from "../geometry/roof";
 
 const RGB: [number, number, number] = [1, 0.5, 0.1];
 const FLOATS_PER_VERTEX = 6; // [px,py,pz, r,g,b]
@@ -1045,5 +1046,80 @@ describe("emitStairMeshes (Betontreppe: glatte Laufplatte als Mesh)", () => {
     // Alle Index-Werte referenzieren existierende Vertices.
     const vcount = m.positions.length / 3;
     expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
+  });
+});
+
+describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
+  // Dieselbe Terrakotta-Farbe wie ROOF_RGB in toWalls3d.ts — dient hier nur der
+  // Isolation der Dach-Meshes von Kontext-/Öffnungs-/Treppen-Meshes im Test.
+  const ROOF_RGB: [number, number, number] = [0.72, 0.45, 0.36];
+  const isRoofMesh = (m: { color: readonly number[] }) =>
+    m.color[0] === ROOF_RGB[0] && m.color[1] === ROOF_RGB[1] && m.color[2] === ROOF_RGB[2];
+
+  const baseRoof: Roof = {
+    id: "R1",
+    type: "roof",
+    floorId: "eg",
+    categoryCode: "35",
+    outline: [
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+      { x: 6, y: 4 },
+      { x: 0, y: 4 },
+    ],
+    shape: "sattel",
+    pitchDeg: 30,
+    overhang: 0,
+    ridgeAxis: "x",
+    baseElevation: 3, // fix, unabhängig von Geschoss-Stapelung
+    thickness: 0.3,
+  };
+
+  it("Satteldach: Flächen + Giebel als EIN Roof-Mesh, First-Höhe passt zur Traufhöhe + ridgeHeight", () => {
+    const project: Project = { ...sampleProject, roofs: [baseRoof] };
+    const { meshes } = projectToModel3d(project);
+    const roofMeshes = meshes.filter(isRoofMesh);
+    // Zwei Dachflächen (je ein Quad -> 2 Dreiecke) + zwei Giebel (je ein Dreieck)
+    // landen in EINEM kombinierten Mesh (Flächen und Giebel bilden zusammen den
+    // geschlossenen Dachkörper).
+    expect(roofMeshes.length).toBe(1);
+    const m = roofMeshes[0];
+    expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
+    expect(m.indices.length % 3).toBe(0);
+    expect(m.indices.length).toBeGreaterThan(0);
+    const vcount = m.positions.length / 3;
+    expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
+    // Firsthöhe: eavesZ (baseElevation) + ridgeHeight aus roofGeometry.
+    const g = roofGeometry(baseRoof, roofBaseElevation(project, baseRoof));
+    const expectedRidgeZ = roofBaseElevation(project, baseRoof) + g.ridgeHeight;
+    const heights = m.positions.filter((_, i) => i % 3 === 2);
+    expect(Math.max(...heights)).toBeCloseTo(expectedRidgeZ, 6);
+  });
+
+  it("Walmdach: vier Dachflächen (2 Quader + 2 Dreiecke) korrekt trianguliert", () => {
+    const walmRoof: Roof = { ...baseRoof, id: "R2", shape: "walm" };
+    const project: Project = { ...sampleProject, roofs: [walmRoof] };
+    const { meshes } = projectToModel3d(project);
+    const roofMeshes = meshes.filter(isRoofMesh);
+    expect(roofMeshes.length).toBe(1);
+    const m = roofMeshes[0];
+    expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
+    // Walm hat KEINE Giebel (gables: []); 2 Quader (je 2 Dreiecke) + 2 Dreiecke
+    // (je 1 Dreieck) = 6 Dreiecke = 18 Indizes.
+    expect(m.indices.length).toBe(18);
+    const vcount = m.positions.length / 3;
+    expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
+  });
+
+  it("Projekt ohne Dächer emittiert keine Roof-Meshes (Rückwärtskompatibilität)", () => {
+    // Explizit leeres roofs-Feld -> keine Roof-Meshes.
+    const project: Project = { ...sampleProject, roofs: [] };
+    expect(projectToModel3d(project).meshes.filter(isRoofMesh).length).toBe(0);
+    // Fehlt das Feld ganz (undefined), ebenfalls keine.
+    const noField: Project = { ...sampleProject };
+    delete (noField as { roofs?: unknown }).roofs;
+    expect(projectToModel3d(noField).meshes.filter(isRoofMesh).length).toBe(0);
+    // sampleProject enthält jetzt ein Demo-Satteldach (RF1) -> genau ein Roof-Mesh.
+    expect(projectToModel3d(sampleProject).meshes.filter(isRoofMesh).length).toBe(1);
   });
 });
