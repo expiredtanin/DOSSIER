@@ -3289,6 +3289,7 @@ export default function App() {
           setSelectedRoomIds([]);
           setSelectedExtrudedSolidIds([]);
           setSelectedColumnIds([]);
+          setSelectedRoofIds([]);
           switch (kind) {
             case "Wand":
               setSelectedWallIds([id]);
@@ -4144,6 +4145,7 @@ export default function App() {
     setSelectedStairIds([]);
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
+    setSelectedRoofIds([]);
     setStampEditorRoomId(roomId);
   };
   // Doppelklick auf ein Text-2D-Element: selektieren + Inhalts-Editor öffnen.
@@ -4158,6 +4160,7 @@ export default function App() {
     setSelectedRoomIds([]);
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
+    setSelectedRoofIds([]);
     setEditTextId(drawingId);
   };
   // Bearbeiteten Text-Inhalt übernehmen (immutabel; nur bei Text-Geometrie).
@@ -4334,6 +4337,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Treppe wählen (Einzelauswahl).
@@ -4347,6 +4351,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Decke wählen (Einzelauswahl).
@@ -4360,6 +4365,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Öffnung wählen (Einzelauswahl).
@@ -4373,6 +4379,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
     }
   };
   // Links-KLICK im Nordstern-3D-Viewport (WASM, TS-Raycast): getroffenes Bauteil
@@ -4391,6 +4398,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
       return;
     }
     // Öffnung (Fenster/Tür) und Treppe sind jetzt auch im WASM-Viewport pickbar
@@ -4405,6 +4413,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
       return;
     }
     if (hit.kind === "stair") {
@@ -4416,6 +4425,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
       return;
     }
     if (hit.kind === "wall") {
@@ -4435,6 +4445,7 @@ export default function App() {
     setSelectedRoomIds([]);
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
+    setSelectedRoofIds([]);
   };
   // Rechts-Klick im 3D: Wand-Kontextmenü an der Cursorposition.
   const onViewportContextMenu = (info: ViewportContextInfo) => {

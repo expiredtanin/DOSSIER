@@ -521,6 +521,10 @@ export function RoofSection({
       {numField("objinfo.roof.thickness", roof.thickness, 0.02, (v) =>
         host.onSetRoofPatch({ thickness: Math.max(0.01, v) }),
       )}
+      {/* Traufhöhe (absolutes Z) — z. B. für einen Kniestock übers Geschoss anheben. */}
+      {numField("objinfo.roof.baseElevation", roof.baseElevation, 0.1, (v) =>
+        host.onSetRoofPatch({ baseElevation: v }),
+      )}
 
       {/* Abgeleitete Werte (read-only). */}
       <div className="objinfo-field">

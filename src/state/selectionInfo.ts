@@ -86,6 +86,8 @@ export interface RoofInfo {
   ridgeAxis: "x" | "y";
   /** Dachdicke (Meter). */
   thickness: number;
+  /** Traufhöhe (absolutes Z, Meter) — aufgelöst (Override ODER Geschoss-Oberkante). */
+  baseElevation: number;
   /** Firsthöhe über der Traufe (Meter, abgeleitet). */
   ridgeHeight: number;
   /** Grundfläche des Umriss-Rechtecks (m², ohne Überstand). */
@@ -618,6 +620,7 @@ function roofSelection(project: Project, roof: Roof): Selection {
     overhang: roof.overhang,
     ridgeAxis: roof.ridgeAxis,
     thickness: roof.thickness,
+    baseElevation: eavesZ,
     ridgeHeight: g.ridgeHeight,
     footprintArea,
   };

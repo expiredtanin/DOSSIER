@@ -301,6 +301,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.roof.pitchUpper": "Upper pitch (°)",
   "objinfo.roof.overhang": "Overhang (m)",
   "objinfo.roof.thickness": "Roof thickness (m)",
+  "objinfo.roof.baseElevation": "Eaves height (m)",
   "objinfo.roof.ridgeHeight": "Ridge height",
   "objinfo.roof.area": "Footprint area",
   // ── Column attributes (object info panel) ────────────────────────────────

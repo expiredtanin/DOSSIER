@@ -302,6 +302,7 @@ export const de = {
   "objinfo.roof.pitchUpper": "Obere Neigung (°)",
   "objinfo.roof.overhang": "Überstand (m)",
   "objinfo.roof.thickness": "Dachdicke (m)",
+  "objinfo.roof.baseElevation": "Traufhöhe (m)",
   "objinfo.roof.ridgeHeight": "Firsthöhe",
   "objinfo.roof.area": "Grundfläche",
   // ── Stützen-Attribute (Object-Info-Panel) ───────────────────────────────
