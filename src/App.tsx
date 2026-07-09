@@ -5984,7 +5984,8 @@ function Content({
       selectedWallIds.length === 0 &&
       selectedCeilingIds.length === 0 &&
       selectedOpeningIds.length === 0 &&
-      selectedStairIds.length === 0
+      selectedStairIds.length === 0 &&
+      selectedRoofIds.length === 0
         ? null
         : selectionHighlightLines(
             project,
@@ -5993,6 +5994,7 @@ function Content({
             HIGHLIGHT_RGB,
             selectedOpeningIds,
             selectedStairIds,
+            selectedRoofIds,
           ),
     [
       project,
@@ -6000,6 +6002,7 @@ function Content({
       selectedCeilingIds,
       selectedOpeningIds,
       selectedStairIds,
+      selectedRoofIds,
     ],
   );
 

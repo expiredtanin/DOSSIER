@@ -2254,12 +2254,14 @@ export function selectionHighlightLines(
   rgb: RRgb,
   openingIds: string[] = [],
   stairIds: string[] = [],
+  roofIds: string[] = [],
 ): Float32Array {
   if (
     wallIds.length === 0 &&
     ceilingIds.length === 0 &&
     openingIds.length === 0 &&
-    stairIds.length === 0
+    stairIds.length === 0 &&
+    roofIds.length === 0
   ) {
     return new Float32Array(0);
   }
@@ -2268,6 +2270,7 @@ export function selectionHighlightLines(
   const ceilingSet = new Set(ceilingIds);
   const openingSet = new Set(openingIds);
   const stairSet = new Set(stairIds);
+  const roofSet = new Set(roofIds);
   const out: number[] = [];
   const pushEdge = (a: RVec3, b: RVec3) => {
     out.push(a[0], a[1], a[2], rgb[0], rgb[1], rgb[2]);
@@ -2332,5 +2335,23 @@ export function selectionHighlightLines(
   for (const o of openings) if (openingSet.has(o.openingId)) boxEdges(o);
   for (const s of slabs) if (ceilingSet.has(s.ceilingId)) prismEdges(s.outline, s.zBottom, s.zTop);
   for (const st of stairs) if (stairSet.has(st.stairId)) prismEdges(st.outline, st.zBottom, st.zTop);
+  // Dach: die Kanten aller Dachflächen + Giebel als Draht-Umriss (roofGeometry
+  // liefert 3D-Polygone in MODELL-Koordinaten [x, y, z=Höhe]; world = [x, z, y]).
+  if (roofSet.size > 0) {
+    for (const roof of project.roofs ?? []) {
+      if (!roofSet.has(roof.id)) continue;
+      const g = roofGeometry(roof, roofBaseElevation(project, roof));
+      const polyEdges = (pts: readonly (readonly [number, number, number])[]) => {
+        const m = pts.length;
+        for (let i = 0, j = m - 1; i < m; j = i++) {
+          const a = pts[j];
+          const b = pts[i];
+          pushEdge([a[0], a[2], a[1]], [b[0], b[2], b[1]]);
+        }
+      };
+      for (const pl of g.planes) polyEdges(pl.pts);
+      for (const gab of g.gables) polyEdges(gab);
+    }
+  }
   return new Float32Array(out);
 }

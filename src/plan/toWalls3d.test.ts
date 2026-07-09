@@ -27,6 +27,15 @@ describe("selectionHighlightLines", () => {
     expect(lines.length).toBe(0);
   });
 
+  it("ein Dach -> Draht-Kanten der Dachflächen/Giebel (nicht leer, mit Farbe)", () => {
+    // sampleProject enthält das Demo-Satteldach RF1.
+    const lines = selectionHighlightLines(sampleProject, [], [], RGB, [], [], ["RF1"]);
+    expect(lines.length).toBeGreaterThan(0);
+    // Farbe in jedem Vertex (erstes Vertex: [px,py,pz,r,g,b]).
+    expect(lines[3]).toBeCloseTo(RGB[0], 6);
+    expect(lines[5]).toBeCloseTo(RGB[2], 6);
+  });
+
   it("eine Wand ohne Öffnungen -> je Materiallage ein Quader, Kern-Band unter der Decke gespalten (5·12 Kanten)", () => {
     // W2 (EG, Ost) trägt keine Tür/kein Fenster im Sample-Projekt (nur W1/W3
     // haben Öffnungen, s. sampleProject.ts) -> ein Achsen-Teilquader. Wandtyp
