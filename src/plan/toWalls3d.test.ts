@@ -1195,3 +1195,69 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     expect(projectToModel3d(sampleProject).meshes.filter(isRoofMesh).length).toBe(1);
   });
 });
+
+describe("emitOpeningShading (Rollladen-/Sonnenschutzkasten als 3D-Box)", () => {
+  // SHADING_RGB in toWalls3d.ts — nur zur Isolation der Kasten-Meshes.
+  const isShadingMesh = (m: { color: readonly number[] }) =>
+    m.color[0] === 0.88 && m.color[1] === 0.88 && m.color[2] === 0.9;
+
+  const withShading = (create: boolean): Project => ({
+    ...sampleProject,
+    windowTypes: [
+      {
+        id: "win-shade",
+        name: "Test Rollladen",
+        kind: "fest",
+        wingCount: 1,
+        glazing: "einfach",
+        frameThickness: 0.06,
+        frameWidth: 0.06,
+        defaultSillHeight: 0.9,
+        defaultWidth: 1.0,
+        defaultHeight: 1.2,
+        shading: create
+          ? { create: true, kind: "rollladen", box: { width: 0, height: 0.24, depth: 0.2 } }
+          : undefined,
+      },
+    ],
+    openings: [
+      {
+        id: "OS",
+        type: "opening",
+        hostWallId: "W1",
+        categoryCode: "21",
+        kind: "window",
+        typeId: "win-shade",
+        position: 3.0,
+        width: 1.0,
+        height: 1.2,
+        sillHeight: 0.9,
+      },
+    ],
+    doors: [],
+    context: [],
+  });
+
+  it("shading.create -> genau eine Kasten-Box (Quader: 24 Floats, 36 Indizes)", () => {
+    const meshes = projectToModel3d(withShading(true)).meshes.filter(isShadingMesh);
+    expect(meshes.length).toBe(1);
+    expect(meshes[0].positions.length).toBe(24);
+    expect(meshes[0].indices.length).toBe(36);
+    // Der Kasten sitzt ÜBER der Öffnungs-OK (UK 0.9 + Höhe 1.2 = 2.1): alle
+    // z-Werte >= 2.1 (nur nach oben), OK bei 2.1 + 0.24 = 2.34.
+    const zs: number[] = [];
+    for (let i = 2; i < meshes[0].positions.length; i += 3) zs.push(meshes[0].positions[i]);
+    expect(Math.min(...zs)).toBeCloseTo(2.1, 6);
+    expect(Math.max(...zs)).toBeCloseTo(2.34, 6);
+  });
+
+  it("kein shading / create:false -> keine Kasten-Box", () => {
+    expect(projectToModel3d(withShading(false)).meshes.filter(isShadingMesh).length).toBe(0);
+  });
+
+  it("grob -> keine Kasten-Box (nur mittel/fein)", () => {
+    expect(
+      projectToModel3d(withShading(true), { detail: "grob" }).meshes.filter(isShadingMesh).length,
+    ).toBe(0);
+  });
+});

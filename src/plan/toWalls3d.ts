@@ -394,6 +394,8 @@ const GLASS_HALF_THICK = 0.01;
  * eigenes Bauteil lesbar ist (s. {@link emitOpeningFrames}).
  */
 const FRAME_RGB: RRgb = [0.85, 0.85, 0.83];
+/** Heller Grauton für den Rollladen-/Sonnenschutzkasten (s. {@link emitOpeningShading}). */
+const SHADING_RGB: RRgb = [0.88, 0.88, 0.9];
 /** Default-Ansichtsbreite des Rahmenprofils (Meter), wenn `TYPE.frameWidth` fehlt. */
 const DEFAULT_FRAME_WIDTH = 0.06;
 /** Warmer Terrakotta-Grauton für Dachflächen/-giebel (s. {@link emitRoofs}) — hebt das Dach klar von Wand/Decke/Kontext ab. */
@@ -2109,6 +2111,54 @@ function emitOpeningFrames(project: Project, detail: DetailLevel = "fein"): RMes
 }
 
 /**
+ * Rollladen-/Sonnenschutzkasten als 3D-Box über der Öffnung (nur Fenster mit
+ * `WindowType.shading.create`, nur mittel/fein). Ein heller Quader, aussen an
+ * der Aussenfläche (params.nMax) ansetzend und um `box.depth` nach aussen
+ * ragend, von der Öffnungs-OK um `box.height` nach oben. Breite = `box.width`
+ * (0/fehlt ⇒ Öffnungsbreite), mittig über der Öffnung. Pendant zur 2D-Kontur
+ * (`window-shading` in generatePlan). 3D vom Nutzer in der Tauri-App zu prüfen.
+ */
+function emitOpeningShading(project: Project, detail: DetailLevel = "fein"): RMesh[] {
+  if (detail === "grob") return [];
+  const out: RMesh[] = [];
+  for (const wall of project.walls) {
+    for (const op of openingsOfWall(project, wall.id)) {
+      if (op.kind !== "window") continue;
+      const wt = getWindowType(project, op);
+      if (!wt?.shading?.create) continue;
+      const iv = openingInterval(wall, op);
+      if (!iv) continue;
+      const vert = openingVerticalExtent(project, wall, op);
+      if (vert.zTop - vert.zBottom <= EPS) continue;
+      const params = resolveOpeningFrame(project, wall, op);
+      if (!params) continue;
+      const box = wt.shading.box;
+      const h = Math.max(0, box.height);
+      const d = Math.max(0, box.depth);
+      if (h <= EPS || d <= EPS) continue;
+      const span = box.width > 0 ? box.width : iv.to - iv.from;
+      const center = (iv.from + iv.to) / 2;
+      const from = center - span / 2;
+      const to = center + span / 2;
+      // Aussen an der Aussenfläche (nMax) ansetzen und um die Kastentiefe hinaus.
+      const nOuter = params.nMax;
+      const mesh = openingAxisBox(
+        wall,
+        from,
+        to,
+        vert.zTop,
+        vert.zTop + h,
+        nOuter,
+        nOuter + d,
+        SHADING_RGB,
+      );
+      if (mesh) out.push(mesh);
+    }
+  }
+  return out;
+}
+
+/**
  * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände
  * mit Öffnungen in Teilquader.
  */
@@ -2189,6 +2239,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
       ...emitMeshes(project),
       ...emitOpeningGlass(project),
       ...emitOpeningFrames(project, detail),
+      ...emitOpeningShading(project, detail),
       ...emitStairMeshes(project),
       ...emitRoofs(project),
     ],
