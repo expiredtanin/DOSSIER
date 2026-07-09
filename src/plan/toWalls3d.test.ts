@@ -260,10 +260,16 @@ describe("Bauteil-/Materialfarbe statt Einheits-Grau (Wände + Decken)", () => {
 });
 
 describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
-  it("1 Fenster + 1 Tür -> genau 1 Glas-Mesh mit korrekter vertikaler Ausdehnung", () => {
+  it("1 Fenster + 1 Tür -> 2 Glas-Meshes (Typ 'window-standard' = Zweifachverglasung) mit korrekter vertikaler Ausdehnung", () => {
     // Sample-Projekt auf EINE Öffnung (Fenster O1) + EINE Tür (D1) reduzieren,
     // beide auf W1 (EG, baseElevation 0). Kontext ist leer -> `meshes` enthält
     // ausschliesslich die Glasscheiben.
+    //
+    // ANGEPASST (glazingPanes-Feature): O1 referenziert den Typ "window-standard"
+    // (`glazing: "zweifach"` -> `glazingPanesOf` = 2). `glassPanesForOpening`
+    // zeichnet jetzt render-wirksam so viele Scheiben, statt wie bisher immer
+    // fix EINE — bewusste, korrekte Verhaltensänderung (Aufgabe: 2D/3D-Renderer
+    // sollen die neuen Fenster-Verglasungsfelder konsumieren).
     const p: Project = {
       ...sampleProject,
       openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
@@ -276,34 +282,91 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
     const glassMeshes = meshes.filter(
       (m) => m.color[0] === 0.62 && m.color[1] === 0.76 && m.color[2] === 0.85,
     );
-    // Genau EINE Scheibe: das Fenster O1; die Tür D1 bleibt offen (keine Scheibe).
-    expect(glassMeshes.length).toBe(1);
-    const glass = glassMeshes[0];
-    // Quader: 8 Ecken (24 Floats) + 12 Dreiecke (36 Indizes), leicht bläuliches Glas.
-    expect(glass.positions.length).toBe(24);
-    expect(glass.indices.length).toBe(36);
-    expect(glass.color).toEqual([0.62, 0.76, 0.85]);
-
-    // Vertikale Ausdehnung (z = 3. Komponente jeder Ecke, MODELL-Höhe):
-    // O1 sillHeight 0.9, height 1.2, Wand-UK 0 -> Öffnung UK 0.9 .. OK 2.1.
-    // O1 referenziert den Typ "window-standard" (frameWidth 0.06, kein Oberlicht)
-    // -> die Scheibe sitzt jetzt INNERHALB des Rahmens (Schwelle/Sturz ziehen je
-    // frameWidth ab), s. emitOpeningFrames/glassPanesForOpening: 0.96 .. 2.04.
-    const zs: number[] = [];
-    for (let i = 2; i < glass.positions.length; i += 3) zs.push(glass.positions[i]);
-    expect(Math.min(...zs)).toBeCloseTo(0.96, 6);
-    expect(Math.max(...zs)).toBeCloseTo(2.04, 6);
+    expect(glassMeshes.length).toBe(2);
+    // Vertikale Ausdehnung (z = 3. Komponente jeder Ecke, MODELL-Höhe) — BEIDE
+    // Scheiben sitzen INNERHALB desselben Rahmens (Schwelle/Sturz ziehen je
+    // frameWidth ab): O1 sillHeight 0.9, height 1.2, Wand-UK 0 -> Öffnung UK
+    // 0.9 .. OK 2.1, Rahmen 0.06 -> Scheiben 0.96 .. 2.04.
+    for (const glass of glassMeshes) {
+      // Quader: 8 Ecken (24 Floats) + 12 Dreiecke (36 Indizes), leicht bläuliches Glas.
+      expect(glass.positions.length).toBe(24);
+      expect(glass.indices.length).toBe(36);
+      expect(glass.color).toEqual([0.62, 0.76, 0.85]);
+      const zs: number[] = [];
+      for (let i = 2; i < glass.positions.length; i += 3) zs.push(glass.positions[i]);
+      expect(Math.min(...zs)).toBeCloseTo(0.96, 6);
+      expect(Math.max(...zs)).toBeCloseTo(2.04, 6);
+    }
+    // Quer zur Wand (y-Achse, da W1 entlang x läuft) sitzen die beiden Scheiben
+    // MIT Luftraum versetzt (Isolierverglasung) — sie überlappen sich nicht.
+    const yRange = (m: { positions: number[] }): { min: number; max: number } => {
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 1; i < m.positions.length; i += 3) {
+        min = Math.min(min, m.positions[i]);
+        max = Math.max(max, m.positions[i]);
+      }
+      return { min, max };
+    };
+    const [a, b] = glassMeshes.map(yRange).sort((r1, r2) => r1.min - r2.min);
+    expect(a.max).toBeLessThanOrEqual(b.min + 1e-9);
   });
 
-  it("Türen bekommen keine Scheibe; je Fenster genau eine", () => {
-    // Volles Sample-Projekt: 2 Fenster (O1, O2) + 1 Tür (D1), Kontext leer.
-    // Neben den Glasscheiben liegt jetzt auch das Betontreppen-Mesh in `meshes`
-    // → nach Glasfarbe filtern: genau 2 Scheiben (O1, O2), Tür ohne Scheibe.
+  it("Türen bekommen keine Scheibe; je Fenster genau 2 (window-standard = zweifach verglast)", () => {
+    // Volles Sample-Projekt: 2 Fenster (O1, O2, beide Typ "window-standard" =
+    // Zweifachverglasung) + 1 Tür (D1), Kontext leer. Neben den Glasscheiben
+    // liegt jetzt auch das Betontreppen-Mesh in `meshes` → nach Glasfarbe
+    // filtern: 2 Fenster × 2 Scheiben = 4, Tür ohne Scheibe.
     const { meshes } = projectToModel3d(sampleProject);
     const glassMeshes = meshes.filter(
       (m) => m.color[0] === 0.62 && m.color[1] === 0.76 && m.color[2] === 0.85,
     );
-    expect(glassMeshes.length).toBe(2);
+    expect(glassMeshes.length).toBe(4);
+  });
+
+  it("glazingPanes: 3 erzeugt mehr Glas-Meshes als glazingPanes: 1 (glazingPanesOf)", () => {
+    const glassMeshCount = (glazingPanes: 1 | 2 | 3): number => {
+      const p: Project = {
+        ...sampleProject,
+        windowTypes: [
+          {
+            id: "win-panes-test",
+            name: "Test Verglasung",
+            kind: "fest",
+            wingCount: 1,
+            glazing: "einfach",
+            glazingPanes,
+            frameThickness: 0.06,
+            frameWidth: 0.06,
+            defaultSillHeight: 0.9,
+            defaultWidth: 1.0,
+            defaultHeight: 1.2,
+          },
+        ],
+        openings: [
+          {
+            id: "OG",
+            type: "opening",
+            hostWallId: "W1",
+            categoryCode: "21",
+            kind: "window",
+            typeId: "win-panes-test",
+            position: 3.0,
+            width: 1.0,
+            height: 1.2,
+            sillHeight: 0.9,
+          },
+        ],
+        doors: [],
+        context: [],
+      };
+      const { meshes } = projectToModel3d(p);
+      return meshes.filter((m) => m.color[0] === 0.62 && m.color[1] === 0.76 && m.color[2] === 0.85)
+        .length;
+    };
+    expect(glassMeshCount(1)).toBe(1);
+    expect(glassMeshCount(3)).toBe(3);
+    expect(glassMeshCount(3)).toBeGreaterThan(glassMeshCount(1));
   });
 });
 

@@ -11,7 +11,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Opening, Project, Vec2, Wall } from "../model/types";
+import type { Opening, Project, SashDef, Vec2, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
 import { add, along, leftNormal, normalize, scale, sub } from "../model/geometry";
 import { wallReferenceOffset, wallVerticalExtent } from "../model/wall";
@@ -168,29 +168,93 @@ export function doorSymbol(wall: Wall, o: Opening): DoorSymbol | null {
 export interface WindowSymbol {
   /** Rahmen-Rechteck (volle Dicke) als Ecken. */
   frame: Vec2[];
-  /** Glaslinien-Segmente quer über die Lücke (1–2 parallele Linien). */
+  /** Glaslinien-Segmente quer über die Lücke (1–3 parallele Linien). */
   glassLines: [Vec2, Vec2][];
   /**
-   * Flügel-Mittelpfosten (`wingCount − 1` Querlinien), jeweils von einer
-   * Laibungsseite zur anderen (parallel zu den Laibungslinien, quer zur
-   * Öffnungsrichtung), gleichmäßig zwischen den beiden Pfosten verteilt. Bei
-   * `wingCount ≤ 1` leer. Entspricht den Mittelpfosten in `_make_oeffnung_pieces`
-   * des Rhino-Plugins (`oeff_fluegel`).
+   * Flügel-/Pfosten-Trennlinien, jeweils von einer Laibungsseite zur anderen
+   * (parallel zu den Laibungslinien, quer zur Öffnungsrichtung). Ist `sashes`
+   * (dritter Parameter von {@link windowSymbol}) gesetzt, ergeben sich die
+   * Positionen aus den Flügel-/Pfostenbreiten (siehe `sashSegments`); sonst
+   * (Alt-Fall) `wingCount − 1` gleichmäßig verteilte Querlinien. Entspricht den
+   * Mittelpfosten in `_make_oeffnung_pieces` des Rhino-Plugins (`oeff_fluegel`).
    */
   mullionLines: [Vec2, Vec2][];
+  /**
+   * Öffnungsandeutung je NICHT-festem Flügel (Dreh/Kipp/Drehkipp/Schiebe): eine
+   * einzelne Diagonale über die Flügelfläche, von der äusseren Ecke der
+   * Bandseite GEGENüberliegenden Seite (aussen) zur Bandseite (innen) — eine
+   * schlichte Andeutung der Öffnungsrichtung, analog zur Schwenkbogen-Andeutung
+   * bei Türen, aber ohne Bogen (P0-Minimalfassung). Nur befüllt, wenn `sashes`
+   * übergeben wird; leer im Alt-Fall (kein `sashes`).
+   */
+  sashOpeningLines: [Vec2, Vec2][];
+}
+
+/** Ein Segment (Flügel/Pfosten) der Flügeleinteilung, mit aufgelöster Breite. */
+interface SashSegment {
+  sash: SashDef;
+  /** Abstand vom Laibungsstart in Metern (0 = jambStart). */
+  from: number;
+  /** Abstand vom Laibungsstart in Metern. */
+  to: number;
+}
+
+/** Default-Pfostenbreite (Meter), wenn ein `kind:"pfosten"`-Eintrag keine `postWidth` angibt. */
+const DEFAULT_POST_WIDTH = 0.06;
+
+/**
+ * Löst eine Flügeleinteilung ({@link SashDef}-Liste) zu konkreten Segment-
+ * Intervallen (Meter, gemessen ab Laibungsstart) über die gegebene
+ * Gesamtbreite auf: `kind:"pfosten"` und Flügel mit `autoWidth === false`
+ * erhalten ihre feste Breite (`postWidth` bzw. `width`), die restlichen
+ * (`autoWidth`, Default) teilen sich die verbleibende Breite gleichmäßig.
+ * Degeneriert bei GLEICHMÄSSIGEN Flügeln (alle `autoWidth`, keine Pfosten) zur
+ * bisherigen `wingCount`-Gleichverteilung (Regressionssicherheit).
+ */
+function sashSegments(sashes: SashDef[], totalWidth: number): SashSegment[] {
+  if (sashes.length === 0) return [];
+  let fixedSum = 0;
+  let autoCount = 0;
+  for (const s of sashes) {
+    if (s.kind === "pfosten") fixedSum += Math.max(0, s.postWidth ?? DEFAULT_POST_WIDTH);
+    else if (s.autoWidth === false) fixedSum += Math.max(0, s.width ?? 0);
+    else autoCount++;
+  }
+  const remaining = Math.max(0, totalWidth - fixedSum);
+  const autoWidth = autoCount > 0 ? remaining / autoCount : 0;
+  const segs: SashSegment[] = [];
+  let cursor = 0;
+  for (const s of sashes) {
+    const w =
+      s.kind === "pfosten"
+        ? Math.max(0, s.postWidth ?? DEFAULT_POST_WIDTH)
+        : s.autoWidth === false
+          ? Math.max(0, s.width ?? 0)
+          : autoWidth;
+    segs.push({ sash: s, from: cursor, to: cursor + w });
+    cursor += w;
+  }
+  return segs;
 }
 
 /**
  * Löst die Fenster-Symbolik auf: ein Rahmen-Rechteck über die Lücke (volle
- * Wanddicke) plus 1–2 Glaslinien (dünne parallele Linien in der Wandmitte,
- * `count` steuert die Anzahl je Detailgrad) plus optionale Flügel-Mittelpfosten
- * (`wingCount − 1` Querlinien).
+ * Wanddicke) plus 1–3 Glaslinien (dünne parallele Linien in der Wandmitte,
+ * `glassCount` steuert die Anzahl) plus optionale Flügel-/Pfosten-Trennlinien
+ * und Öffnungsandeutungen je Flügel.
+ *
+ * `sashes` (optional) ist die aufgelöste Flügeltabelle (siehe
+ * `sashesOfWindowType`) EINES referenzierten Fenstertyps. Fehlt sie (kein Typ
+ * referenziert/auflösbar), bleibt die Mittelpfosten-Berechnung beim
+ * BISHERIGEN Verhalten — `o.wingCount` gleichmäßig verteilt, KEINE
+ * Öffnungsandeutungen — exakt wie vor dieser Erweiterung (Rückwärtskompatibilität).
  */
 export function windowSymbol(
   project: Project,
   wall: Wall,
   o: Opening,
   glassCount: number,
+  sashes?: SashDef[],
 ): WindowSymbol | null {
   const jambs = openingJambs(wall, o);
   if (!jambs) return null;
@@ -214,21 +278,48 @@ export function windowSymbol(
     const off = refOff + (count === 1 ? 0 : (i - (count - 1) / 2) * spread * 2);
     glassLines.push([add(jambStart, scale(n, off)), add(jambEnd, scale(n, off))]);
   }
-  // Flügel-Mittelpfosten: (wingCount − 1) Querlinien gleichmäßig zwischen den
-  // Pfosten. Jede Linie läuft quer über die Öffnung (n-Richtung), auf ~60 % der
-  // Mauerdicke symmetrisch um die Wandmitte (Referenz-Offset) — analog Rhino, wo
-  // die Pfosten x_mid = inner_l + span·(i/fluegel) über die Rahmentiefe sitzen.
   const mullionLines: [Vec2, Vec2][] = [];
-  const wings = Math.max(1, Math.min(4, Math.round(o.wingCount ?? 1)));
-  if (wings > 1) {
+  const sashOpeningLines: [Vec2, Vec2][] = [];
+  if (sashes && sashes.length > 0) {
+    // Neuer Weg: Trennlinien + Öffnungsandeutungen aus der Flügeltabelle.
+    const axisWidth = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
+    const segs = sashSegments(sashes, axisWidth);
     const postDepth = total * 0.6;
     const pOuter = refOff + postDepth / 2;
     const pInner = refOff - postDepth / 2;
-    for (let i = 1; i < wings; i++) {
-      const t = i / wings; // gleichmäßige Teilung entlang der Achse
-      const onAxis = add(jambStart, scale(sub(jambEnd, jambStart), t));
+    for (let i = 0; i < segs.length - 1; i++) {
+      const onAxis = along(jambStart, jambEnd, segs[i].to);
       mullionLines.push([add(onAxis, scale(n, pOuter)), add(onAxis, scale(n, pInner))]);
     }
+    for (const seg of segs) {
+      if (seg.sash.kind !== "fluegel") continue;
+      const kind = seg.sash.opening;
+      if (!kind || kind === "fest") continue;
+      // Bandseite "left" = Scharnier am Laibungsstart (jambStart-Seite), "right"
+      // = am Laibungsende. Die Diagonale läuft von der GEGENüberliegenden
+      // Aussenecke zur Bandecke (innen) — schlichte Andeutung, kein Schwenkbogen.
+      const hingeAtStart = (seg.sash.hingeSide ?? "left") === "left";
+      const hingeAxis = along(jambStart, jambEnd, hingeAtStart ? seg.from : seg.to);
+      const farAxis = along(jambStart, jambEnd, hingeAtStart ? seg.to : seg.from);
+      sashOpeningLines.push([add(farAxis, scale(n, outer)), add(hingeAxis, scale(n, inner))]);
+    }
+  } else {
+    // Alt-Fall (kein sashes): (wingCount − 1) Querlinien gleichmäßig zwischen
+    // den Pfosten. Jede Linie läuft quer über die Öffnung (n-Richtung), auf
+    // ~60 % der Mauerdicke symmetrisch um die Wandmitte (Referenz-Offset) —
+    // analog Rhino, wo die Pfosten x_mid = inner_l + span·(i/fluegel) über die
+    // Rahmentiefe sitzen. UNVERÄNDERT gegenüber dem bisherigen Verhalten.
+    const wings = Math.max(1, Math.min(4, Math.round(o.wingCount ?? 1)));
+    if (wings > 1) {
+      const postDepth = total * 0.6;
+      const pOuter = refOff + postDepth / 2;
+      const pInner = refOff - postDepth / 2;
+      for (let i = 1; i < wings; i++) {
+        const t = i / wings; // gleichmäßige Teilung entlang der Achse
+        const onAxis = add(jambStart, scale(sub(jambEnd, jambStart), t));
+        mullionLines.push([add(onAxis, scale(n, pOuter)), add(onAxis, scale(n, pInner))]);
+      }
+    }
   }
-  return { frame, glassLines, mullionLines };
+  return { frame, glassLines, mullionLines, sashOpeningLines };
 }

@@ -35,9 +35,11 @@ import {
   getLineStyle,
   getWallType,
   getWindowType,
+  glazingPanesOf,
   openingLabel,
   openingsOfWall,
   roomsOfFloor,
+  sashesOfWindowType,
   stairLabel,
   stairsOfFloor,
   wallTypeThickness,
@@ -2211,9 +2213,19 @@ function addOpeningSymbol(
     return;
   }
 
-  // Fenster: Rahmen (mittel/fein) + Glaslinie(n) je Detailgrad.
-  const glassCount = detail === "fein" ? 2 : 1;
-  const sym = windowSymbol(project, wall, o, glassCount);
+  // Fenster: Rahmen (mittel/fein) + Glaslinie(n) je Detailgrad + Fenstertyp.
+  const wt = getWindowType(project, o);
+  // Flügeltabelle NUR übergeben, wenn ein Fenstertyp auflösbar ist — fehlt er
+  // (kein `typeId`/unbekannt), bleibt `windowSymbol` beim reinen
+  // `o.wingCount`-Alt-Verhalten (siehe dortiger Kommentar, Regressionssicherheit).
+  const sashes = wt ? sashesOfWindowType(wt) : undefined;
+  const detailGlassCount = detail === "fein" ? 2 : 1;
+  // Verglasungs-Scheibenzahl des Typs (glazingPanesOf) hebt die Detailgrad-
+  // Vorgabe bei mittel/fein an (mind. so viele Glaslinien); "grob" bleibt bei
+  // einer Glaslinie, unabhängig vom Typ (bleibt die schlichteste Stufe).
+  const glassCount =
+    detail === "grob" ? detailGlassCount : Math.max(detailGlassCount, wt ? glazingPanesOf(wt) : 0);
+  const sym = windowSymbol(project, wall, o, glassCount, sashes);
   if (!sym) return;
   // Unsichtbares Pick-Polygon über der Öffnungslücke — macht das Fenster über
   // die ganze Fläche selektierbar, auch bei „grob" (nur eine Glaslinie, sonst
@@ -2243,14 +2255,29 @@ function addOpeningSymbol(
       greyed,
       openingId: o.id,
     });
-    // Flügel-Mittelpfosten (wingCount − 1) — reine Querlinien innerhalb des
-    // Rahmens (kein Strichmuster). Nur mittel/fein; entfällt bei grob/schema.
+    // Flügel-/Pfosten-Trennlinien — reine Querlinien innerhalb des Rahmens
+    // (kein Strichmuster). Nur mittel/fein; entfällt bei grob/schema.
     for (const [a, b] of sym.mullionLines) {
       out.push({
         kind: "line",
         a,
         b,
         cls: "window-mullion",
+        weightMm: SYMBOL_HAIRLINE_MM,
+        color: o.color ?? POCHE_STROKE,
+        greyed,
+        openingId: o.id,
+      });
+    }
+    // Öffnungsandeutung je NICHT-festem Flügel (Dreh/Kipp/Drehkipp/Schiebe) —
+    // schlichte Diagonale zur Bandseite, nur wenn ein Fenstertyp mit
+    // Flügeltabelle referenziert ist (siehe windowSymbol/sashOpeningLines).
+    for (const [a, b] of sym.sashOpeningLines) {
+      out.push({
+        kind: "line",
+        a,
+        b,
+        cls: "window-opening",
         weightMm: SYMBOL_HAIRLINE_MM,
         color: o.color ?? POCHE_STROKE,
         greyed,
@@ -2316,6 +2343,55 @@ function addOpeningSymbol(
         greyed,
         openingId: o.id,
       });
+    }
+  }
+  // Rollladen-/Sonnenschutzkasten (P0-Minimalfassung, reine 2D-Kontur): ein
+  // gestricheltes Rechteck ÜBER der Öffnung, ausserhalb der Wand-Aussenfläche —
+  // Breite = `shading.box.width` (0/fehlt ⇒ Öffnungsbreite), die zweite
+  // Rechteckseite = `shading.box.height`. Die 3D-Tiefe (`box.depth`) bleibt für
+  // eine spätere 3D-Box reserviert (Fokus hier bewusst 2D, s. Aufgabenstellung).
+  // Gestrichelt wie die übrigen Überkopf-Projektionen (Sturz/Oberlicht) — der
+  // Kasten liegt oberhalb der Schnittebene und wird nur angedeutet.
+  if (wt?.shading?.create) {
+    const jambs = openingJambs(wall, o);
+    if (jambs) {
+      const { u, n: nrm } = wallAxisFrame(wall);
+      const total = wallTypeThickness(getWallType(project, wall));
+      const refOff = wallReferenceOffset(wall, total);
+      const outerFace = refOff + total / 2;
+      const axisWidth = Math.hypot(
+        jambs.jambEnd.x - jambs.jambStart.x,
+        jambs.jambEnd.y - jambs.jambStart.y,
+      );
+      const boxWidth = wt.shading.box.width > 0 ? wt.shading.box.width : axisWidth;
+      const boxHeight = Math.max(0, wt.shading.box.height);
+      const center = add(jambs.jambStart, scale(u, axisWidth / 2));
+      const half = boxWidth / 2;
+      const c1 = add(center, scale(u, -half));
+      const c2 = add(center, scale(u, half));
+      const p1 = add(c1, scale(nrm, outerFace));
+      const p2 = add(c2, scale(nrm, outerFace));
+      const p3 = add(c2, scale(nrm, outerFace + boxHeight));
+      const p4 = add(c1, scale(nrm, outerFace + boxHeight));
+      const edges: [Vec2, Vec2][] = [
+        [p1, p2],
+        [p2, p3],
+        [p3, p4],
+        [p4, p1],
+      ];
+      for (const [a, b] of edges) {
+        out.push({
+          kind: "line",
+          a,
+          b,
+          cls: "window-shading",
+          weightMm: SYMBOL_HAIRLINE_MM,
+          dash: OVERHEAD_DASH,
+          color: o.color ?? POCHE_STROKE,
+          greyed,
+          openingId: o.id,
+        });
+      }
     }
   }
 }

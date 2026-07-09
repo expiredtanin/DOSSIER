@@ -44,6 +44,7 @@ import {
   flattenCategories,
   getDoorType,
   getWindowType,
+  glazingPanesOf,
 } from "../model/types";
 import { wallVerticalExtent, ceilingVerticalExtent, columnVerticalExtent, stairVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
@@ -1840,6 +1841,13 @@ interface OpeningFrameParams {
   mullionRows: number;
   /** Ob eine Glasscheibe gezeichnet wird (Fenster immer, Tür nur `leafStyle: "glas"`). */
   glazed: boolean;
+  /**
+   * Verglasungs-Scheibenzahl (1–3), render-wirksam ({@link glazingPanesOf}).
+   * Türen: immer 1 (keine typisierte Mehrfachverglasung). Steuert die Anzahl
+   * dünner, in Wandrichtung leicht versetzter Glasflächen in
+   * {@link glassPanesForOpening}.
+   */
+  glazingPanes: 1 | 2 | 3;
 }
 
 function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): OpeningFrameParams | null {
@@ -1865,6 +1873,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       wingCount: 1,
       mullionRows: 1,
       glazed: dt.leafStyle === "glas",
+      glazingPanes: 1,
     };
   }
   const wt = getWindowType(project, op);
@@ -1888,6 +1897,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     wingCount: Math.max(1, Math.round(op.wingCount ?? wt.wingCount ?? 1)),
     mullionRows: Math.max(1, Math.round(wt.mullionRows ?? 1)),
     glazed: true,
+    glazingPanes: glazingPanesOf(wt),
   };
 }
 
@@ -1954,13 +1964,20 @@ function frameMeshesForOpening(
   return out;
 }
 
+/** Luftraum zwischen zwei Scheiben einer Mehrfachverglasung (Meter, informativ). */
+const GLASS_PANE_GAP = 0.01;
+
 /**
  * Glasscheibe(n) EINER typisierten Öffnung (Fenster immer, Tür nur bei
- * `params.glazed`): eine Hauptscheibe im Flügel-Bereich (zwischen Schwelle und
- * Sturz bzw. Kämpfer), plus — bei `transomHeight>0` — eine ZWEITE Scheibe im
- * Oberlicht-Band oberhalb des Kämpfers. Die Sprossen/Mittelpfosten aus
- * {@link frameMeshesForOpening} liegen VOR dieser einen Hauptscheibe (keine
- * Pro-Feld-Aufteilung — bewusst einfach gehalten, s. Datei-weite Erläuterung).
+ * `params.glazed`): je Z-Band (Hauptfeld zwischen Schwelle und Sturz bzw.
+ * Kämpfer, plus — bei `transomHeight>0` — ein zweites Oberlicht-Band) werden
+ * `params.glazingPanes` dünne, in Wandrichtung (quer zur Wand, n-Achse) leicht
+ * versetzte Scheiben mit Luftraum dazwischen erzeugt (Isolierverglasung:
+ * 1 = Einfach-, 2 = Zweifach-, 3 = Dreifachverglasung). Bei `glazingPanes: 1`
+ * (Alt-Verhalten/Default) entsteht exakt EINE Scheibe an derselben Position wie
+ * bisher. Die Sprossen/Mittelpfosten aus {@link frameMeshesForOpening} liegen
+ * VOR diesen Scheiben (keine Pro-Feld-Aufteilung — bewusst einfach gehalten,
+ * s. Datei-weite Erläuterung).
  */
 function glassPanesForOpening(
   wall: Wall,
@@ -1974,16 +1991,24 @@ function glassPanesForOpening(
   const sashTo = iv.to - fw;
   const sashBottom = vert.zBottom + (params.hasSill ? fw : 0);
   const sashTopFull = vert.zTop - fw;
-  // Die Scheibe ist eine DÜNNE Tafel NAHE der Aussenfläche (nMax = +n-Seite, s.
-  // resolveFrameNormalRange) — mittig tief im Reveal wirkte sie schwach/kaum
-  // sichtbar. Direkt hinter der Aussenkante (3 cm zurück) liest sich das Fenster
-  // klar, die Laibung/Reveal-Tiefe zeigt nach innen.
+  // Die Scheibe(n) sitzen als DÜNNE Tafeln NAHE der Aussenfläche (nMax = +n-
+  // Seite, s. resolveFrameNormalRange) — mittig tief im Reveal wirkte das
+  // schwach/kaum sichtbar. Direkt hinter der Aussenkante (3 cm zurück) liest
+  // sich das Fenster klar, die Laibung/Reveal-Tiefe zeigt nach innen. Bei
+  // mehreren Scheiben rücken die weiteren mit `GLASS_PANE_GAP` Luftraum
+  // dazwischen weiter nach innen (Richtung `nMin`).
   const glassThick = GLASS_HALF_THICK * 2;
-  const gN1 = params.nMax - 0.03;
-  const gN0 = Math.max(params.nMin, gN1 - glassThick);
+  const panes = Math.max(1, Math.min(3, Math.round(params.glazingPanes)));
   const push = (zBottom: number, zTop: number): void => {
-    const mesh = openingAxisBox(wall, sashFrom, sashTo, zBottom, zTop, gN0, gN1, GLASS_RGB);
-    if (mesh) out.push(mesh);
+    let n1 = params.nMax - 0.03;
+    for (let p = 0; p < panes; p++) {
+      const n0 = Math.max(params.nMin, n1 - glassThick);
+      if (n1 - n0 <= EPS) break;
+      const mesh = openingAxisBox(wall, sashFrom, sashTo, zBottom, zTop, n0, n1, GLASS_RGB);
+      if (mesh) out.push(mesh);
+      n1 = n0 - GLASS_PANE_GAP;
+      if (n1 <= params.nMin) break;
+    }
   };
   if (params.transomHeight > EPS) {
     const splitZ = clampRange(vert.zTop - params.transomHeight, sashBottom, sashTopFull);
