@@ -299,6 +299,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.roof.ridgeAxis.y": "along Y",
   "objinfo.roof.pitch": "Pitch (°)",
   "objinfo.roof.pitchUpper": "Upper pitch (°)",
+  "objinfo.roof.width": "Width (m)",
+  "objinfo.roof.depth": "Depth (m)",
   "objinfo.roof.overhang": "Overhang (m)",
   "objinfo.roof.thickness": "Roof thickness (m)",
   "objinfo.roof.baseElevation": "Eaves height (m)",

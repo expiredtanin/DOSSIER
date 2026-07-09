@@ -92,6 +92,13 @@ export interface RoofInfo {
   ridgeHeight: number;
   /** Grundfläche des Umriss-Rechtecks (m², ohne Überstand). */
   footprintArea: number;
+  /** Breite (X-Ausdehnung) des Umriss-Rechtecks (Meter). */
+  width: number;
+  /** Tiefe (Y-Ausdehnung) des Umriss-Rechtecks (Meter). */
+  depth: number;
+  /** Untere/linke Ecke der Bounding-Box (fix beim Breite/Tiefe-Resize). */
+  minX: number;
+  minY: number;
 }
 
 /**
@@ -623,6 +630,10 @@ function roofSelection(project: Project, roof: Roof): Selection {
     baseElevation: eavesZ,
     ridgeHeight: g.ridgeHeight,
     footprintArea,
+    width: Math.abs(bb.x1 - bb.x0),
+    depth: Math.abs(bb.y1 - bb.y0),
+    minX: bb.x0,
+    minY: bb.y0,
   };
   return {
     kind: "roof",

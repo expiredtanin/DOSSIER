@@ -434,6 +434,16 @@ export function ColumnSection({
 // ── Treppen-Attribut-Abschnitt ───────────────────────────────────────────────
 // Grundform (gerade/L/Wendel), Laufbreite, Stufenanzahl, Steighöhe (+ abgeleitete
 // Steigungshöhe/Auftrittstiefe), Laufrichtung; Referenzgeschoss + UK/OK read-only.
+/** Rechteck-Umriss (CCW) aus unterer/linker Ecke + Breite/Tiefe (für Dach-Resize). */
+function rectOutline(x0: number, y0: number, w: number, d: number) {
+  return [
+    { x: x0, y: y0 },
+    { x: x0 + w, y: y0 },
+    { x: x0 + w, y: y0 + d },
+    { x: x0, y: y0 + d },
+  ];
+}
+
 /** Dach-Abschnitt: Form, Neigung(en), Überstand, Firstrichtung, Dicke. */
 export function RoofSection({
   roof,
@@ -513,6 +523,21 @@ export function RoofSection({
         numField("objinfo.roof.pitchUpper", roof.pitchUpperDeg ?? roof.pitchDeg / 2, 1, (v) =>
           host.onSetRoofPatch({ pitchUpperDeg: Math.max(0, Math.min(85, v)) }),
         )}
+
+      {/* Grundriss-Masse (Breite/Tiefe): das Umriss-Rechteck neu bilden, die
+          untere/linke Ecke (minX/minY) bleibt fix. */}
+      {numField("objinfo.roof.width", roof.width, 0.1, (v) => {
+        const w = Math.max(0.2, v);
+        host.onSetRoofPatch({
+          outline: rectOutline(roof.minX, roof.minY, w, roof.depth),
+        });
+      })}
+      {numField("objinfo.roof.depth", roof.depth, 0.1, (v) => {
+        const d = Math.max(0.2, v);
+        host.onSetRoofPatch({
+          outline: rectOutline(roof.minX, roof.minY, roof.width, d),
+        });
+      })}
 
       {/* Überstand + Dicke (Meter). */}
       {numField("objinfo.roof.overhang", roof.overhang, 0.05, (v) =>

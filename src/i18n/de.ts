@@ -300,6 +300,8 @@ export const de = {
   "objinfo.roof.ridgeAxis.y": "entlang Y",
   "objinfo.roof.pitch": "Neigung (°)",
   "objinfo.roof.pitchUpper": "Obere Neigung (°)",
+  "objinfo.roof.width": "Breite (m)",
+  "objinfo.roof.depth": "Tiefe (m)",
   "objinfo.roof.overhang": "Überstand (m)",
   "objinfo.roof.thickness": "Dachdicke (m)",
   "objinfo.roof.baseElevation": "Traufhöhe (m)",
