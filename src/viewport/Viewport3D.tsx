@@ -47,7 +47,7 @@ import {
 import { MaterialRuntime } from "../materials/runtime";
 import { Wasm3DViewport } from "./Wasm3DViewport";
 import type { Pick3dHit } from "./Wasm3DViewport";
-import type { RenderMode, View3d } from "../ui/TopBar";
+import type { DetailLevel, RenderMode, View3d } from "../ui/TopBar";
 import type { ToolDraft } from "../tools/types";
 import { applyAngleConstraint } from "../tools/snapping";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
@@ -143,6 +143,7 @@ export function Viewport3D(
         project={props.project}
         view3d={props.view3d}
         renderMode={props.renderMode}
+        detail={props.detail}
         gridVisible={gridVisible}
         groundElevation={props.gridElevation}
         onToggleGrid={onToggleGrid}
@@ -210,6 +211,8 @@ function ThreeViewport3D({
    * schwarze Kantenlinien, tiefen-getestet → Hidden-Line-Look). Default shaded.
    */
   renderMode?: RenderMode;
+  /** Detailgrad (grob/mittel/fein) — reicht die Öffnungs-Details ins wgpu-Modell. */
+  detail?: DetailLevel;
   /**
    * Render-Entscheidung je Geschoss-ID (Darstellungsmodus „Zeichnungsebenen").
    * Ohne Angabe werden alle sichtbaren Geschosse normal gezeigt.

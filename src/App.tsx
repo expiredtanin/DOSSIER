@@ -6124,6 +6124,7 @@ function Content({
             categoryDisplay={categoryDisplay}
             displayKey={displayKey}
             renderMode={renderMode}
+            detail={detail}
             view3d={view3d}
             fov={fov}
             gridElevation={level.baseElevation ?? 0}

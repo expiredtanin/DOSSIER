@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
+import type { DetailLevel } from "../ui/TopBar";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
 
@@ -166,12 +167,13 @@ export function useWasm3dRenderer(
   // geändert haben (updateModel läuft bei JEDER Projektänderung).
   const materialSigRef = useRef<string | null>(null);
 
-  /** Modell bei Projektänderung neu setzen (re-extrudiert in Rust). */
-  const updateModel = useCallback((project: Project) => {
+  /** Modell bei Projektänderung neu setzen (re-extrudiert in Rust). `detail`
+   *  steuert den Öffnungs-Detailgrad (grob/mittel/fein) im 3D wie im Grundriss. */
+  const updateModel = useCallback((project: Project, detail?: DetailLevel) => {
     const r = rendererRef.current;
     if (!r || !project) return;
     try {
-      r.set_model(JSON.stringify(projectToModel3d(project)));
+      r.set_model(JSON.stringify(projectToModel3d(project, { detail })));
     } catch (e) {
       console.warn("render3d set_model fehlgeschlagen:", e);
     }

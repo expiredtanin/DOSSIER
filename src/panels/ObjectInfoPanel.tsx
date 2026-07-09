@@ -606,25 +606,14 @@ export function OpeningSection({
         </button>
       </div>
 
-      {/* Art-Segment Fenster/Tür. */}
+      {/* Art (Fenster/Tür) — read-only: die Gattung wird beim Platzieren mit dem
+          jeweiligen Werkzeug festgelegt und NICHT nachträglich umgeschaltet
+          (ein Fenster in eine Tür zu verwandeln ergibt keinen sinnvollen Bauteil). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.opening.kind")}</span>
-        <div className="objinfo-segment">
-          <button
-            type="button"
-            className={"objinfo-seg-btn" + (!isDoor ? " active" : "")}
-            onClick={() => host.onSetOpeningKind("window")}
-          >
-            {t("objinfo.opening.kind.window")}
-          </button>
-          <button
-            type="button"
-            className={"objinfo-seg-btn" + (isDoor ? " active" : "")}
-            onClick={() => host.onSetOpeningKind("door")}
-          >
-            {t("objinfo.opening.kind.door")}
-          </button>
-        </div>
+        <span className="objinfo-fval">
+          {t(isDoor ? "objinfo.opening.kind.door" : "objinfo.opening.kind.window")}
+        </span>
       </div>
 
       {/* Wirts-Wand (read-only Anzeige des Geschosses/Wand-Bezugs). */}

@@ -46,7 +46,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Vec2 } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { projectToModel3d, pickGeometry, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
-import type { RenderMode, View3d } from "../ui/TopBar";
+import type { DetailLevel, RenderMode, View3d } from "../ui/TopBar";
 import { t } from "../i18n";
 import { useWasm3dRenderer } from "./useWasm3dRenderer";
 import type { Camera3d } from "./useWasm3dRenderer";
@@ -288,6 +288,7 @@ export function Wasm3DViewport({
   project,
   view3d = "perspective",
   renderMode = "shaded",
+  detail = "fein",
   gridVisible = true,
   groundElevation = 0,
   onToggleGrid,
@@ -308,6 +309,8 @@ export function Wasm3DViewport({
   /** Darstellungsart (Oberleiste) — alle fünf Werte wirken hier, s.
    * Datei-Kommentar. */
   renderMode?: RenderMode;
+  /** Detailgrad (grob/mittel/fein) — steuert die Öffnungs-Rahmen/Sprossen im 3D. */
+  detail?: DetailLevel;
   /** Boden-Referenzraster sichtbar? Umgeschaltet über den Overlay-Button unten
    * rechts im Viewport (`onToggleGrid`) — Single Source of Truth ist der
    * Aufrufer (App/viewSlice `grid3dVisible`), diese Komponente spiegelt nur. */
@@ -382,6 +385,8 @@ export function Wasm3DViewport({
   onEditEndRef.current = onEditEnd;
   const groundElevationRef = useRef(groundElevation);
   groundElevationRef.current = groundElevation;
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
   const {
     render,
     updateModel,
@@ -414,9 +419,9 @@ export function Wasm3DViewport({
   // Snapshot) — nur das `view3d`-Effekt unten springt aktiv auf ein Praeset.
   useEffect(() => {
     if (!ready) return;
-    updateModel(project);
+    updateModel(project, detail);
     redrawRef.current();
-  }, [ready, project, updateModel]);
+  }, [ready, project, detail, updateModel]);
 
   // truck-Extrusionen (s. toWalls3d.ts emitExtrudedSolids): die WASM-Extrusion
   // läuft asynchron und ist beim ersten `updateModel` oben typischerweise noch
@@ -425,7 +430,7 @@ export function Wasm3DViewport({
   useEffect(() => {
     if (!ready) return;
     const onMeshReady = () => {
-      updateModel(projectRef.current);
+      updateModel(projectRef.current, detailRef.current);
       redrawRef.current();
     };
     window.addEventListener(TRUCK_MESH_READY_EVENT, onMeshReady);

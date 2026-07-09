@@ -49,6 +49,7 @@ import { wallVerticalExtent, ceilingVerticalExtent, columnVerticalExtent, stairV
 import { columnFootprint } from "../geometry/column";
 import { pointInOutline } from "../geometry/ceiling";
 import { openingInterval, openingVerticalExtent, openingJambs } from "../geometry/opening";
+import type { DetailLevel } from "../ui/TopBar";
 import { stairGeometry, stairBBox } from "../geometry/stair";
 import { extrudePolygon, extrudeCircle } from "../engine/truckSolid";
 import { computeJoins } from "../model/joins";
@@ -1729,11 +1730,13 @@ function clampRange(v: number, lo: number, hi: number): number {
  * (übersprungen, nächster Fallback greift).
  */
 function resolveAcrossWallDepth(
-  frameThickness: number | undefined,
   frameDepth: number | undefined,
   wallThickness: number,
 ): number {
-  if (frameThickness !== undefined && frameThickness > EPS) return frameThickness;
+  // Rahmen-Tiefe quer zur Wand: explizite `frameDepth` gewinnt, sonst füllt der
+  // Rahmen die VOLLE Wanddicke (tiefe Laibung/Reveal). Das `frameThickness` ist
+  // die Profil-Breite des Rahmenstabs (2D/Ansicht), NICHT die Einbautiefe — es
+  // hier zu verwenden liess Fenster im 3D flach wirken (nur wenige cm tief).
   if (frameDepth !== undefined && frameDepth > EPS) return frameDepth;
   return wallThickness;
 }
@@ -1798,7 +1801,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
   if (op.kind === "door") {
     const dt = getDoorType(project, op);
     if (!dt) return null;
-    const acrossWallDepth = resolveAcrossWallDepth(dt.frameThickness, dt.frameDepth, wallThickness);
+    const acrossWallDepth = resolveAcrossWallDepth(dt.frameDepth, wallThickness);
     const { nMin, nMax } = resolveFrameNormalRange(
       halfThickness,
       acrossWallDepth,
@@ -1819,7 +1822,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
   }
   const wt = getWindowType(project, op);
   if (!wt) return null;
-  const acrossWallDepth = resolveAcrossWallDepth(wt.frameThickness, wt.frameDepth, wallThickness);
+  const acrossWallDepth = resolveAcrossWallDepth(wt.frameDepth, wallThickness);
   const { nMin, nMax } = resolveFrameNormalRange(
     halfThickness,
     acrossWallDepth,
@@ -1854,6 +1857,7 @@ function frameMeshesForOpening(
   iv: { from: number; to: number },
   vert: { zBottom: number; zTop: number },
   params: OpeningFrameParams,
+  fine = true,
 ): RMesh[] {
   const out: RMesh[] = [];
   const fw = params.frameWidth;
@@ -1880,20 +1884,24 @@ function frameMeshesForOpening(
     push(sashFrom, sashTo, splitZ - fw / 2, splitZ + fw / 2); // Kämpfer-Riegel
     sashTop = splitZ - fw / 2;
   }
-  // Flügel-Mittelpfosten (vertikal, wingCount−1) im Sash-Bereich.
-  if (params.wingCount > 1 && sashTo - sashFrom > EPS) {
-    const cell = (sashTo - sashFrom) / params.wingCount;
-    for (let i = 1; i < params.wingCount; i++) {
-      const center = sashFrom + i * cell;
-      push(center - fw / 2, center + fw / 2, sashBottom, sashTop);
+  // Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen) nur bei FEINEM Detailgrad —
+  // bei „mittel" bleibt es beim reinen Rahmen (+ Oberlicht-Kämpfer oben).
+  if (fine) {
+    // Flügel-Mittelpfosten (vertikal, wingCount−1) im Sash-Bereich.
+    if (params.wingCount > 1 && sashTo - sashFrom > EPS) {
+      const cell = (sashTo - sashFrom) / params.wingCount;
+      for (let i = 1; i < params.wingCount; i++) {
+        const center = sashFrom + i * cell;
+        push(center - fw / 2, center + fw / 2, sashBottom, sashTop);
+      }
     }
-  }
-  // Kämpfer-Zeilen (horizontal, mullionRows−1) im Sash-Bereich.
-  if (params.mullionRows > 1 && sashTop - sashBottom > EPS) {
-    const cell = (sashTop - sashBottom) / params.mullionRows;
-    for (let i = 1; i < params.mullionRows; i++) {
-      const center = sashBottom + i * cell;
-      push(sashFrom, sashTo, center - fw / 2, center + fw / 2);
+    // Kämpfer-Zeilen (horizontal, mullionRows−1) im Sash-Bereich.
+    if (params.mullionRows > 1 && sashTop - sashBottom > EPS) {
+      const cell = (sashTop - sashBottom) / params.mullionRows;
+      for (let i = 1; i < params.mullionRows; i++) {
+        const center = sashBottom + i * cell;
+        push(sashFrom, sashTo, center - fw / 2, center + fw / 2);
+      }
     }
   }
   return out;
@@ -1919,8 +1927,15 @@ function glassPanesForOpening(
   const sashTo = iv.to - fw;
   const sashBottom = vert.zBottom + (params.hasSill ? fw : 0);
   const sashTopFull = vert.zTop - fw;
+  // Die Scheibe ist eine DÜNNE Tafel mittig in der (nun tiefen) Rahmen-Laibung —
+  // nicht der volle Rahmen-Querschnitt, sonst wäre das „Glas" ein dicker Block
+  // und die Laibung/Reveal-Tiefe unsichtbar. So liest sich das Fenster plastisch:
+  // Rahmen zieht in die Wand, die Scheibe sitzt zurückgesetzt in der Mitte.
+  const glassMid = (params.nMin + params.nMax) / 2;
+  const gN0 = glassMid - GLASS_HALF_THICK;
+  const gN1 = glassMid + GLASS_HALF_THICK;
   const push = (zBottom: number, zTop: number): void => {
-    const mesh = openingAxisBox(wall, sashFrom, sashTo, zBottom, zTop, params.nMin, params.nMax, GLASS_RGB);
+    const mesh = openingAxisBox(wall, sashFrom, sashTo, zBottom, zTop, gN0, gN1, GLASS_RGB);
     if (mesh) out.push(mesh);
   };
   if (params.transomHeight > EPS) {
@@ -2002,7 +2017,10 @@ function emitOpeningGlass(project: Project): RMesh[] {
  * fehlt/verwaist) bekommen KEINEN Rahmen — exakt das Alt-Verhalten vor der
  * Typ-Vertiefung (Rückwärtskompatibilität).
  */
-function emitOpeningFrames(project: Project): RMesh[] {
+function emitOpeningFrames(project: Project, detail: DetailLevel = "fein"): RMesh[] {
+  // Grob: keine Rahmen/Sprossen — die Öffnung bleibt Loch + Scheibe (schlank).
+  if (detail === "grob") return [];
+  const fine = detail === "fein";
   const out: RMesh[] = [];
   for (const wall of project.walls) {
     for (const op of openingsOfWall(project, wall.id)) {
@@ -2012,7 +2030,7 @@ function emitOpeningFrames(project: Project): RMesh[] {
       if (vert.zTop - vert.zBottom <= EPS) continue;
       const params = resolveOpeningFrame(project, wall, op);
       if (!params) continue;
-      out.push(...frameMeshesForOpening(wall, iv, vert, params));
+      out.push(...frameMeshesForOpening(wall, iv, vert, params, fine));
     }
   }
   return out;
@@ -2070,11 +2088,20 @@ function computeJoinsByFloor(project: Project): Map<string, WallCuts> {
  */
 export interface Model3dOptions {
   layeredWalls?: boolean;
+  /**
+   * Detailgrad der Öffnungs-Darstellung im 3D (wie im 2D-Grundriss):
+   *  • "grob"  — keine Rahmen/Sprossen (nur Loch + Scheibe).
+   *  • "mittel"— Rahmen (Pfosten/Sturz/Schwelle) + ggf. Kämpfer, keine Sprossen.
+   *  • "fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen).
+   * Fehlt es, gilt "fein" (= bisheriges Verhalten, volle Details).
+   */
+  detail?: DetailLevel;
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
 export function projectToModel3d(project: Project, opts: Model3dOptions = {}): RModel3d {
   const layered = opts.layeredWalls ?? true;
+  const detail = opts.detail ?? "fein";
   return {
     walls: projectToWalls3d(project, layered),
     // Decken + Treppen (Treppentritte als extrudierte Slabs) — so wird die Treppe
@@ -2089,7 +2116,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     meshes: [
       ...emitMeshes(project),
       ...emitOpeningGlass(project),
-      ...emitOpeningFrames(project),
+      ...emitOpeningFrames(project, detail),
       ...emitStairMeshes(project),
     ],
   };

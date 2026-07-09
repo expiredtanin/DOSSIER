@@ -332,6 +332,23 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     }
   });
 
+  it("Detailgrad steuert Rahmen/Sprossen im 3D (grob=0, mittel=Rahmen, fein=+Mittelpfosten)", () => {
+    // O1 mit erzwungenem wingCount 2 -> im FEIN-Fall ein Flügel-Mittelpfosten extra.
+    const o1 = (sampleProject.openings ?? []).find((o) => o.id === "O1");
+    if (!o1) throw new Error("O1 fehlt im sampleProject");
+    const p: Project = {
+      ...sampleProject,
+      openings: [{ ...o1, wingCount: 2 }],
+      doors: [],
+      context: [],
+    };
+    const frameCount = (detail: "grob" | "mittel" | "fein"): number =>
+      projectToModel3d(p, { detail }).meshes.filter(isFrame).length;
+    expect(frameCount("grob")).toBe(0); // keine Rahmen/Sprossen
+    expect(frameCount("mittel")).toBe(4); // 2 Pfosten + Sturz + Schwelle, KEIN Mittelpfosten
+    expect(frameCount("fein")).toBe(5); // + 1 Flügel-Mittelpfosten (wingCount 2)
+  });
+
   it("transomHeight > 0 -> zusätzlicher Kämpfer-Riegel + zweite Glasscheibe im Oberlicht-Band", () => {
     const p: Project = {
       ...sampleProject,
