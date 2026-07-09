@@ -1974,13 +1974,13 @@ function glassPanesForOpening(
   const sashTo = iv.to - fw;
   const sashBottom = vert.zBottom + (params.hasSill ? fw : 0);
   const sashTopFull = vert.zTop - fw;
-  // Die Scheibe ist eine DÜNNE Tafel mittig in der (nun tiefen) Rahmen-Laibung —
-  // nicht der volle Rahmen-Querschnitt, sonst wäre das „Glas" ein dicker Block
-  // und die Laibung/Reveal-Tiefe unsichtbar. So liest sich das Fenster plastisch:
-  // Rahmen zieht in die Wand, die Scheibe sitzt zurückgesetzt in der Mitte.
-  const glassMid = (params.nMin + params.nMax) / 2;
-  const gN0 = glassMid - GLASS_HALF_THICK;
-  const gN1 = glassMid + GLASS_HALF_THICK;
+  // Die Scheibe ist eine DÜNNE Tafel NAHE der Aussenfläche (nMax = +n-Seite, s.
+  // resolveFrameNormalRange) — mittig tief im Reveal wirkte sie schwach/kaum
+  // sichtbar. Direkt hinter der Aussenkante (3 cm zurück) liest sich das Fenster
+  // klar, die Laibung/Reveal-Tiefe zeigt nach innen.
+  const glassThick = GLASS_HALF_THICK * 2;
+  const gN1 = params.nMax - 0.03;
+  const gN0 = Math.max(params.nMin, gN1 - glassThick);
   const push = (zBottom: number, zTop: number): void => {
     const mesh = openingAxisBox(wall, sashFrom, sashTo, zBottom, zTop, gN0, gN1, GLASS_RGB);
     if (mesh) out.push(mesh);

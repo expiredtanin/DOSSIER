@@ -135,7 +135,7 @@ function linesOfClass(p: Project, cls: string, openingId?: string): LinePrim[] {
 }
 
 describe("generatePlan — Tür-/Fenstertyp-Rahmenband (opening-frame)", () => {
-  it("erzeugt Rahmenband-Primitive für Tür UND Fenster mit referenziertem Typ", () => {
+  it("erzeugt das Rahmenband NUR für die Tür (Fenster: windowSymbol zeichnet den Rahmen)", () => {
     const p = project(
       [
         { ...baseWindow, typeId: "wt1" },
@@ -143,23 +143,24 @@ describe("generatePlan — Tür-/Fenstertyp-Rahmenband (opening-frame)", () => {
       ],
       { doorTypes: [doorType], windowTypes: [windowType] },
     );
-    expect(linesOfClass(p, "opening-frame").length).toBeGreaterThan(0);
-    // Je Öffnung ein geschlossenes Rechteck aus 4 Kanten.
-    expect(linesOfClass(p, "opening-frame", "F1").length).toBe(4);
+    // Tür: ein geschlossenes Rechteck aus 4 Kanten. Fenster: KEIN Band (sonst
+    // doppeltes, verschachteltes Rechteck über dem windowSymbol-Rahmen).
     expect(linesOfClass(p, "opening-frame", "T1").length).toBe(4);
+    expect(linesOfClass(p, "opening-frame", "F1").length).toBe(0);
   });
 
-  it("Blockrahmen (Tür) zeichnet eine kräftigere Linie als die Zargen-Optik (Fenster)", () => {
+  it("Blockrahmen-Tür zeichnet eine kräftigere Linie als eine Zargen-Tür", () => {
+    const zargeDoor: DoorType = { ...doorType, id: "dt-zarge", frameKind: "zarge" };
     const p = project(
       [
-        { ...baseWindow, typeId: "wt1" },
-        { ...baseDoor, typeId: "dt1" },
+        { ...baseDoor, id: "T1", typeId: "dt1" },
+        { ...baseDoor, id: "T2", position: 3.0, typeId: "dt-zarge" },
       ],
-      { doorTypes: [doorType], windowTypes: [windowType] },
+      { doorTypes: [doorType, zargeDoor] },
     );
-    const doorWeight = linesOfClass(p, "opening-frame", "T1")[0].weightMm;
-    const windowWeight = linesOfClass(p, "opening-frame", "F1")[0].weightMm;
-    expect(doorWeight).toBeGreaterThan(windowWeight);
+    const blockWeight = linesOfClass(p, "opening-frame", "T1")[0].weightMm;
+    const zargeWeight = linesOfClass(p, "opening-frame", "T2")[0].weightMm;
+    expect(blockWeight).toBeGreaterThan(zargeWeight);
   });
 });
 
@@ -178,17 +179,25 @@ describe("generatePlan — Oberlicht (opening-transom)", () => {
 
 describe("generatePlan — Schichteinzug (insetFromFace/insetFace)", () => {
   it("verschiebt die Rahmen-Nahfläche um den Einzugsbetrag, die Gegenfläche bleibt unverändert", () => {
-    const flushType: WindowType = { ...windowType, id: "wt-flush", insetFromFace: 0 };
-    const inset = project([{ ...baseWindow, typeId: "wt1" }], { windowTypes: [windowType] });
-    const flush = project([{ ...baseWindow, typeId: "wt-flush" }], { windowTypes: [flushType] });
+    // Am Tür-Zargenband geprüft (das Fenster nutzt jetzt windowSymbol statt Band).
+    const insetDoor: DoorType = {
+      ...doorType,
+      id: "dt-inset",
+      frameKind: "zarge",
+      insetFromFace: 0.05,
+      insetFace: "aussen",
+    };
+    const flushDoor: DoorType = { ...insetDoor, id: "dt-flush", insetFromFace: 0 };
+    const inset = project([{ ...baseDoor, typeId: "dt-inset" }], { doorTypes: [insetDoor] });
+    const flush = project([{ ...baseDoor, typeId: "dt-flush" }], { doorTypes: [flushDoor] });
 
     // Die Wandachse ist horizontal (u=(1,0)) ⇒ Wandnormale n=(0,1); die
     // y-Koordinate der Rahmenband-Punkte entspricht direkt dem Offset quer zur
     // Wand. Die "aussen"-Fläche liegt bei +n — ihr Rahmenrand muss um genau
     // `insetFromFace` (0.05 m) nach innen (kleineres y) rücken; die
     // gegenüberliegende ("innen"-)Fläche bleibt unverändert.
-    const insetYs = linesOfClass(inset, "opening-frame", "F1").flatMap((l) => [l.a.y, l.b.y]);
-    const flushYs = linesOfClass(flush, "opening-frame", "F1").flatMap((l) => [l.a.y, l.b.y]);
+    const insetYs = linesOfClass(inset, "opening-frame", "T1").flatMap((l) => [l.a.y, l.b.y]);
+    const flushYs = linesOfClass(flush, "opening-frame", "T1").flatMap((l) => [l.a.y, l.b.y]);
 
     expect(Math.max(...flushYs) - Math.max(...insetYs)).toBeCloseTo(0.05, 9);
     expect(Math.min(...insetYs)).toBeCloseTo(Math.min(...flushYs), 9);

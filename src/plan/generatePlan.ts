@@ -1980,61 +1980,68 @@ function addOpeningFrameBand(
   const hi = Math.max(faceNear, faceFar);
 
   const { jambStart, jambEnd } = jambs;
-  const frameWidth = Math.max(0, spec.frameWidth);
-  const isBlock = o.kind === "door" && spec.frameKind === "blockrahmen";
   const color = o.color ?? POCHE_STROKE;
 
-  let bandLo: number;
-  let bandHi: number;
-  let jStart: Vec2;
-  let jEnd: Vec2;
-  let weightMm: number;
-  if (isBlock) {
-    // Blockrahmen: volle Öffnungsbreite (kein Pfosten-Einzug), nur eine
-    // Tiefenscheibe von frameWidth ab der Nah-Fläche — sitzt proud VOR/auf der
-    // Laibung, statt schmal darin zu verschwinden (Zargen-Optik).
-    const depth = Math.min(frameWidth, hi - lo);
-    bandLo = nearIsAussen ? hi - depth : lo;
-    bandHi = nearIsAussen ? hi : lo + depth;
-    jStart = jambStart;
-    jEnd = jambEnd;
-    weightMm = SYMBOL_HAIRLINE_MM * 2.2;
-  } else {
-    // Zarge: ringsum um frameWidth von der vollen Öffnung eingezogenes,
-    // schmales Rahmenband (Laibungs-Anschlaglinie).
-    const jambSpan = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
-    const jambInset = Math.min(frameWidth, jambSpan / 2);
-    jStart = along(jambStart, jambEnd, jambInset);
-    jEnd = along(jambEnd, jambStart, jambInset);
-    const depthInset = Math.min(frameWidth, (hi - lo) / 2);
-    bandLo = lo + depthInset;
-    bandHi = hi - depthInset;
-    weightMm = SYMBOL_HAIRLINE_MM;
-  }
+  // Rahmen-Rechteck NUR bei Türen zeichnen. Beim Fenster stellt bereits
+  // `windowSymbol` den Rahmen dar (voller Öffnungsumriss + Glaslinien); ein
+  // zusätzliches Band ergäbe ein doppeltes, verschachteltes Rechteck — genau
+  // das wirkte im 2D „nicht korrekt". Die Tür hat dort nur Blatt+Bogen, daher
+  // ist ihr Rahmenband die einzige Rahmenkontur und bleibt.
+  if (o.kind === "door") {
+    const frameWidth = Math.max(0, spec.frameWidth);
+    const isBlock = spec.frameKind === "blockrahmen";
+    let bandLo: number;
+    let bandHi: number;
+    let jStart: Vec2;
+    let jEnd: Vec2;
+    let weightMm: number;
+    if (isBlock) {
+      // Blockrahmen: volle Öffnungsbreite (kein Pfosten-Einzug), nur eine
+      // Tiefenscheibe von frameWidth ab der Nah-Fläche — sitzt proud VOR/auf der
+      // Laibung, statt schmal darin zu verschwinden (Zargen-Optik).
+      const depth = Math.min(frameWidth, hi - lo);
+      bandLo = nearIsAussen ? hi - depth : lo;
+      bandHi = nearIsAussen ? hi : lo + depth;
+      jStart = jambStart;
+      jEnd = jambEnd;
+      weightMm = SYMBOL_HAIRLINE_MM * 2.2;
+    } else {
+      // Zarge: ringsum um frameWidth von der vollen Öffnung eingezogenes,
+      // schmales Rahmenband (Laibungs-Anschlaglinie).
+      const jambSpan = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
+      const jambInset = Math.min(frameWidth, jambSpan / 2);
+      jStart = along(jambStart, jambEnd, jambInset);
+      jEnd = along(jambEnd, jambStart, jambInset);
+      const depthInset = Math.min(frameWidth, (hi - lo) / 2);
+      bandLo = lo + depthInset;
+      bandHi = hi - depthInset;
+      weightMm = SYMBOL_HAIRLINE_MM;
+    }
 
-  // Geschlossenes Rechteck aus 4 Kanten (Primitive "line", nicht "polygon" —
-  // so bleibt das Band per `cls` selektierbar/testbar wie die übrigen Symbole).
-  const p1 = add(jStart, scale(n, bandLo));
-  const p2 = add(jEnd, scale(n, bandLo));
-  const p3 = add(jEnd, scale(n, bandHi));
-  const p4 = add(jStart, scale(n, bandHi));
-  const edges: [Vec2, Vec2][] = [
-    [p1, p2],
-    [p2, p3],
-    [p3, p4],
-    [p4, p1],
-  ];
-  for (const [a, b] of edges) {
-    out.push({
-      kind: "line",
-      a,
-      b,
-      cls: "opening-frame",
-      weightMm,
-      color,
-      greyed,
-      openingId: o.id,
-    });
+    // Geschlossenes Rechteck aus 4 Kanten (Primitive "line", nicht "polygon" —
+    // so bleibt das Band per `cls` selektierbar/testbar wie die übrigen Symbole).
+    const p1 = add(jStart, scale(n, bandLo));
+    const p2 = add(jEnd, scale(n, bandLo));
+    const p3 = add(jEnd, scale(n, bandHi));
+    const p4 = add(jStart, scale(n, bandHi));
+    const edges: [Vec2, Vec2][] = [
+      [p1, p2],
+      [p2, p3],
+      [p3, p4],
+      [p4, p1],
+    ];
+    for (const [a, b] of edges) {
+      out.push({
+        kind: "line",
+        a,
+        b,
+        cls: "opening-frame",
+        weightMm,
+        color,
+        greyed,
+        openingId: o.id,
+      });
+    }
   }
 
   // Oberlicht (Überkopf-Andeutung): eine gestrichelte Linie quer über die
