@@ -1034,6 +1034,19 @@ export interface Roof {
   pitchDeg: number;
   /** Nur Mansarde: obere (flachere) Neigung in Grad; fehlt ⇒ halbe Hauptneigung. */
   pitchUpperDeg?: number;
+  /**
+   * Nur Mansarde: Untertyp der Mansardform. "giebel" = Mansard-Satteldach
+   * (steile untere + flache obere Neigung nur an zwei Seiten, Giebel an den
+   * Enden — Default), "walm" = Mansard-Walmdach (allseitige Mansarde, auch die
+   * Stirnseiten geknickt, kein Giebel), "zelt" = Mansard-Zeltdach (allseitig
+   * zur Spitze, geknickt). Fehlt ⇒ "giebel".
+   */
+  mansardType?: "giebel" | "walm" | "zelt";
+  /**
+   * Nur Mansarde: Lage der Knicklinie als Anteil der halben Spannweite (0..0.5),
+   * gemessen von der Traufe. Kleiner ⇒ steiler Sockel kürzer; fehlt ⇒ 0.4.
+   */
+  mansardKneeRatio?: number;
   /** Dachüberstand an der Traufe (Meter, ringsum); 0 = bündig mit dem Umriss. */
   overhang: number;
   /** Firstrichtung (Sattel/Walm/Mansarde/Pult): entlang der X- oder Y-Achse. */

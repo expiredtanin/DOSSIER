@@ -523,6 +523,29 @@ export function RoofSection({
         numField("objinfo.roof.pitchUpper", roof.pitchUpperDeg ?? roof.pitchDeg / 2, 1, (v) =>
           host.onSetRoofPatch({ pitchUpperDeg: Math.max(0, Math.min(85, v)) }),
         )}
+      {/* Mansarde-Untertyp (Giebel/Walm/Zelt) + Knicklage. */}
+      {roof.shape === "mansarde" && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.roof.mansardType")}</span>
+          <Dropdown
+            value={roof.mansardType ?? "giebel"}
+            onChange={(v) =>
+              host.onSetRoofPatch({ mansardType: v as "giebel" | "walm" | "zelt" })
+            }
+            options={[
+              { value: "giebel", label: t("objinfo.roof.mansard.giebel") },
+              { value: "walm", label: t("objinfo.roof.mansard.walm") },
+              { value: "zelt", label: t("objinfo.roof.mansard.zelt") },
+            ]}
+            title={t("objinfo.roof.mansardType")}
+            width={130}
+          />
+        </div>
+      )}
+      {roof.shape === "mansarde" &&
+        numField("objinfo.roof.mansardKnee", (roof.mansardKneeRatio ?? 0.4) * 100, 1, (v) =>
+          host.onSetRoofPatch({ mansardKneeRatio: Math.max(5, Math.min(49, v)) / 100 }),
+        )}
 
       {/* Grundriss-Masse (Breite/Tiefe): das Umriss-Rechteck neu bilden, die
           untere/linke Ecke (minX/minY) bleibt fix. */}

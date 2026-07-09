@@ -102,6 +102,39 @@ describe("roofGeometry — Formen (6×4, 45°, First entlang X)", () => {
     expect(g.ridgeHeight).toBeGreaterThan(0);
     expect(g.breaks[0][0].y).toBeCloseTo(0 + 2 * 0.4, 6); // yf = y0 + halfD·0.4
   });
+
+  it("mansarde giebel: Knick-Ratio parametriert die Knicklinien-Lage", () => {
+    const g = roofGeometry(
+      roof({ shape: "mansarde", mansardType: "giebel", mansardKneeRatio: 0.25 }),
+      E,
+    );
+    // yf = y0 + halfD·ratio = 0 + 2·0.25 = 0.5.
+    expect(g.breaks[0][0].y).toBeCloseTo(0.5, 6);
+  });
+
+  it("mansarde walm: allseitig geknickt -> 8 Flächen, 4 Knicklinien (Rechteck), 8 Grate, keine Giebel", () => {
+    const g = roofGeometry(roof({ shape: "mansarde", mansardType: "walm" }), E);
+    expect(g.planes).toHaveLength(8); // 4 Sockel + 2 Walm-Trapeze + 2 Walm-Dreiecke
+    expect(g.breaks).toHaveLength(4); // inneres Knick-Rechteck
+    expect(g.hips).toHaveLength(8); // 4 Sockel-Grate + 4 obere Walm-Grate
+    expect(g.ridges).toHaveLength(1);
+    expect(g.gables).toHaveLength(0); // Walm hat keine Giebel
+    expect(g.ridgeHeight).toBeGreaterThan(0);
+    // Knick-Höhe < First-Höhe (Sockel endet unter dem First).
+    const kneeZ = g.planes[0].pts[2][2] - E; // z1 - e am inneren Punkt
+    expect(kneeZ).toBeGreaterThan(0);
+    expect(kneeZ).toBeLessThan(g.ridgeHeight);
+  });
+
+  it("mansarde zelt: allseitig geknickt zur Spitze -> 8 Flächen, kein First, 8 Grate", () => {
+    const g = roofGeometry(roof({ shape: "mansarde", mansardType: "zelt" }), E);
+    expect(g.planes).toHaveLength(8); // 4 Sockel + 4 Spitzen-Dreiecke
+    expect(g.breaks).toHaveLength(4);
+    expect(g.hips).toHaveLength(8);
+    expect(g.ridges).toHaveLength(0); // Zelt hat keinen First
+    expect(g.gables).toHaveLength(0);
+    expect(g.ridgeHeight).toBeGreaterThan(0);
+  });
 });
 
 describe("roofGeometry — First entlang Y (Transponierung)", () => {

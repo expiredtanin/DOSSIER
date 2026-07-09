@@ -174,33 +174,125 @@ function computeCanonical(
     }
 
     case "mansarde": {
-      // Sattel mit Knick: steile untere Neigung (pitchDeg) über den äusseren
-      // Tiefenanteil, dann flache obere (pitchUpperDeg ?? halbe Hauptneigung).
+      // Mansarde: steile untere Neigung (pitchDeg) bis zur Knicklinie, dann
+      // flache obere (pitchUpperDeg ?? halbe Hauptneigung). Untertyp steuert, ob
+      // die Knickform an ZWEI Seiten sitzt (Giebel) oder RINGSUM (Walm/Zelt).
       const aLow = a;
       const aUp = Math.max(0, roof.pitchUpperDeg ?? roof.pitchDeg / 2) * DEG;
-      const d1 = halfD * 0.4; // Knick-Einzug von der Traufe (äussere 40% steil)
-      const z1 = e + d1 * Math.tan(aLow);
-      const z2 = z1 + (halfD - d1) * Math.tan(aUp);
-      const yf = y0 + d1; // vordere Knicklinie
-      const yb = y1 - d1; // hintere Knicklinie
+      const ratio = Math.min(0.49, Math.max(0.05, roof.mansardKneeRatio ?? 0.4));
+      const mType = roof.mansardType ?? "giebel";
+
+      if (mType === "giebel") {
+        // Mansard-Satteldach: Knick nur an den beiden Traufseiten, Giebel an den
+        // Enden (bisheriges Verhalten, jetzt mit parametrierbarem Knick).
+        const d1 = halfD * ratio;
+        const z1 = e + d1 * Math.tan(aLow);
+        const z2 = z1 + (halfD - d1) * Math.tan(aUp);
+        const yf = y0 + d1;
+        const yb = y1 - d1;
+        return {
+          eaves,
+          ridges: [[P(x0, yc), P(x1, yc)]],
+          hips: [],
+          breaks: [
+            [P(x0, yf), P(x1, yf)],
+            [P(x0, yb), P(x1, yb)],
+          ],
+          planes: [
+            { pts: [[x0, y0, e], [x1, y0, e], [x1, yf, z1], [x0, yf, z1]] },
+            { pts: [[x0, yf, z1], [x1, yf, z1], [x1, yc, z2], [x0, yc, z2]] },
+            { pts: [[x0, y1, e], [x1, y1, e], [x1, yb, z1], [x0, yb, z1]] },
+            { pts: [[x0, yb, z1], [x1, yb, z1], [x1, yc, z2], [x0, yc, z2]] },
+          ],
+          gables: [
+            [[x0, y0, e], [x0, yf, z1], [x0, yc, z2], [x0, yb, z1], [x0, y1, e]],
+            [[x1, y0, e], [x1, yf, z1], [x1, yc, z2], [x1, yb, z1], [x1, y1, e]],
+          ],
+          ridgeHeight: z2 - e,
+        };
+      }
+
+      // Allseitige Mansarde (Walm/Zelt): steiler Sockel ringsum bis zur
+      // Knicklinie (inneres Rechteck), darüber flacher Walm bzw. flache Spitze.
+      const dLow = Math.min(halfW, halfD) * ratio;
+      const z1 = e + dLow * Math.tan(aLow);
+      const ix0 = x0 + dLow;
+      const iy0 = y0 + dLow;
+      const ix1 = x1 - dLow;
+      const iy1 = y1 - dLow;
+      const ihalfD = (iy1 - iy0) / 2;
+      const ihalfW = (ix1 - ix0) / 2;
+      // Sockel-Trapeze (4 Seiten, steil) + Sockel-Grate (Ecken aussen→innen) +
+      // Knicklinie (inneres Rechteck) sind beiden allseitigen Formen gemein.
+      const socketPlanes = [
+        { pts: [[x0, y0, e], [x1, y0, e], [ix1, iy0, z1], [ix0, iy0, z1]] as Vec3[] },
+        { pts: [[x1, y1, e], [x0, y1, e], [ix0, iy1, z1], [ix1, iy1, z1]] as Vec3[] },
+        { pts: [[x0, y1, e], [x0, y0, e], [ix0, iy0, z1], [ix0, iy1, z1]] as Vec3[] },
+        { pts: [[x1, y0, e], [x1, y1, e], [ix1, iy1, z1], [ix1, iy0, z1]] as Vec3[] },
+      ];
+      const socketHips: [Vec2, Vec2][] = [
+        [P(x0, y0), P(ix0, iy0)],
+        [P(x1, y0), P(ix1, iy0)],
+        [P(x1, y1), P(ix1, iy1)],
+        [P(x0, y1), P(ix0, iy1)],
+      ];
+      const kneeBreaks: [Vec2, Vec2][] = [
+        [P(ix0, iy0), P(ix1, iy0)],
+        [P(ix1, iy0), P(ix1, iy1)],
+        [P(ix1, iy1), P(ix0, iy1)],
+        [P(ix0, iy1), P(ix0, iy0)],
+      ];
+
+      if (mType === "walm") {
+        // Oberer Walm auf dem inneren Rechteck (First entlang X).
+        const z2 = z1 + ihalfD * Math.tan(aUp);
+        let ra = ix0 + ihalfD;
+        let rb = ix1 - ihalfD;
+        if (ra > rb) ra = rb = xc;
+        return {
+          eaves,
+          ridges: [[P(ra, yc), P(rb, yc)]],
+          hips: [
+            ...socketHips,
+            [P(ix0, iy0), P(ra, yc)],
+            [P(ix1, iy0), P(rb, yc)],
+            [P(ix1, iy1), P(rb, yc)],
+            [P(ix0, iy1), P(ra, yc)],
+          ],
+          breaks: kneeBreaks,
+          planes: [
+            ...socketPlanes,
+            { pts: [[ix0, iy0, z1], [ix1, iy0, z1], [rb, yc, z2], [ra, yc, z2]] },
+            { pts: [[ix1, iy1, z1], [ix0, iy1, z1], [ra, yc, z2], [rb, yc, z2]] },
+            { pts: [[ix0, iy1, z1], [ix0, iy0, z1], [ra, yc, z2]] },
+            { pts: [[ix1, iy0, z1], [ix1, iy1, z1], [rb, yc, z2]] },
+          ],
+          gables: [],
+          ridgeHeight: z2 - e,
+        };
+      }
+
+      // "zelt": flache Spitze über der Mitte des inneren Rechtecks.
+      const z2 = z1 + Math.min(ihalfW, ihalfD) * Math.tan(aUp);
       return {
         eaves,
-        ridges: [[P(x0, yc), P(x1, yc)]],
-        hips: [],
-        breaks: [
-          [P(x0, yf), P(x1, yf)],
-          [P(x0, yb), P(x1, yb)],
+        ridges: [],
+        hips: [
+          ...socketHips,
+          [P(ix0, iy0), P(xc, yc)],
+          [P(ix1, iy0), P(xc, yc)],
+          [P(ix1, iy1), P(xc, yc)],
+          [P(ix0, iy1), P(xc, yc)],
         ],
+        breaks: kneeBreaks,
         planes: [
-          { pts: [[x0, y0, e], [x1, y0, e], [x1, yf, z1], [x0, yf, z1]] }, // vorn unten
-          { pts: [[x0, yf, z1], [x1, yf, z1], [x1, yc, z2], [x0, yc, z2]] }, // vorn oben
-          { pts: [[x0, y1, e], [x1, y1, e], [x1, yb, z1], [x0, yb, z1]] }, // hinten unten
-          { pts: [[x0, yb, z1], [x1, yb, z1], [x1, yc, z2], [x0, yc, z2]] }, // hinten oben
+          ...socketPlanes,
+          { pts: [[ix0, iy0, z1], [ix1, iy0, z1], [xc, yc, z2]] },
+          { pts: [[ix1, iy0, z1], [ix1, iy1, z1], [xc, yc, z2]] },
+          { pts: [[ix1, iy1, z1], [ix0, iy1, z1], [xc, yc, z2]] },
+          { pts: [[ix0, iy1, z1], [ix0, iy0, z1], [xc, yc, z2]] },
         ],
-        gables: [
-          [[x0, y0, e], [x0, yf, z1], [x0, yc, z2], [x0, yb, z1], [x0, y1, e]],
-          [[x1, y0, e], [x1, yf, z1], [x1, yc, z2], [x1, yb, z1], [x1, y1, e]],
-        ],
+        gables: [],
         ridgeHeight: z2 - e,
       };
     }
