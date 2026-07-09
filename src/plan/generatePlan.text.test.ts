@@ -6,6 +6,18 @@
 import { describe, it, expect } from "vitest";
 import { generatePlan } from "./generatePlan";
 import type { Drawing2D, Project } from "../model/types";
+import type { Marks } from "../text/richText";
+
+/** Baut ein Text-Drawing mit optionalen Marks (umgeht die Union-Verengung). */
+function textDrawing(marks?: Marks): Drawing2D {
+  return {
+    id: "TX1",
+    type: "drawing2d",
+    levelId: "eg",
+    categoryCode: "70",
+    geom: { shape: "text", at: { x: 1, y: 1 }, text: "Hallo", height: 0.2, angle: 0, ...(marks ? { marks } : {}) },
+  };
+}
 
 function projectWithText(drawing: Drawing2D): Project {
   return {
@@ -49,34 +61,22 @@ function textPrim(drawing: Drawing2D) {
 }
 
 describe("Drawing2D-Text: Marks im drawingText-Primitiv", () => {
-  const base: Drawing2D = {
-    id: "TX1",
-    type: "drawing2d",
-    levelId: "eg",
-    categoryCode: "70",
-    geom: { shape: "text", at: { x: 1, y: 1 }, text: "Hallo", height: 0.2, angle: 0 },
-  };
-
   it("trägt marks (font/bold/italic) ins Primitiv", () => {
-    const p = textPrim({
-      ...base,
-      geom: { ...base.geom, marks: { font: "Merriweather", bold: true, italic: true } },
-    }) as { marks?: { font?: string; bold?: boolean; italic?: boolean } } | undefined;
+    const p = textPrim(textDrawing({ font: "Merriweather", bold: true, italic: true })) as
+      | { marks?: { font?: string; bold?: boolean; italic?: boolean } }
+      | undefined;
     expect(p?.marks?.font).toBe("Merriweather");
     expect(p?.marks?.bold).toBe(true);
     expect(p?.marks?.italic).toBe(true);
   });
 
   it("marks.color übersteuert die Kategorie-Farbe", () => {
-    const p = textPrim({
-      ...base,
-      geom: { ...base.geom, marks: { color: "#ff0000" } },
-    }) as { color: string } | undefined;
+    const p = textPrim(textDrawing({ color: "#ff0000" })) as { color: string } | undefined;
     expect(p?.color).toBe("#ff0000");
   });
 
   it("ohne marks bleibt das Primitiv unverändert (kein marks-Feld)", () => {
-    const p = textPrim(base) as { marks?: unknown } | undefined;
+    const p = textPrim(textDrawing()) as { marks?: unknown } | undefined;
     expect(p).toBeTruthy();
     expect(p?.marks).toBeUndefined();
   });
