@@ -4714,6 +4714,207 @@ body {
   border-color: var(--ctx-danger);
 }
 
+/* ── Fenster-/Tür-Einstellungsdialog (OpeningEditorDialog) ──────────────────
+   Drei Zonen (Sidebar · Panel · Ansicht) unter einer Stil-Leiste. Nutzt sonst
+   die imp-*-Klassen (Overlay/Head/Foot). */
+.oed-dialog {
+  width: min(880px, 96vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+.oed-stylebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.oed-stylebar-spacer {
+  flex: 1 1 auto;
+}
+.oed-style-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+.oed-style-select {
+  min-width: 160px;
+}
+.oed-main {
+  display: grid;
+  grid-template-columns: 150px 1fr 250px;
+  min-height: 320px;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.oed-sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 2px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+.oed-cat {
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.oed-cat:hover {
+  background: var(--panel-2);
+}
+.oed-cat.active {
+  background: var(--accent);
+  color: #fff;
+}
+.oed-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+.oed-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+}
+.oed-preview-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+.oed-elev {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 320px;
+}
+.oed-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+.oed-flabel {
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+.oed-input,
+.oed-select {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--ink);
+  min-width: 120px;
+}
+.oed-input {
+  width: 110px;
+  text-align: right;
+}
+.oed-select-sm {
+  min-width: 0;
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.oed-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.oed-hint-warn {
+  color: var(--ctx-danger);
+}
+.oed-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.oed-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--ink);
+  cursor: pointer;
+}
+.oed-btn:hover {
+  background: var(--panel-2);
+}
+.oed-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.oed-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.oed-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.oed-td-num {
+  color: var(--muted);
+  width: 20px;
+}
+.oed-td-dash {
+  color: var(--muted);
+}
+.oed-rowbtn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.oed-rowbtn:hover:not(:disabled) {
+  color: var(--ctx-danger);
+}
+.oed-rowbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.oed-rowactions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 /* ── Einstellungs-Fenster (SettingsDialog): Farbfelder + Akzent-Presets ────
    Nutzt sonst dieselben imp-*-Klassen wie die anderen Dialoge. */
 .settings-field-label {

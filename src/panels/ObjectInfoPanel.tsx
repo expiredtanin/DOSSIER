@@ -712,7 +712,7 @@ export function OpeningSection({
       <div className="objinfo-section-label">{t("objinfo.opening.section")}</div>
 
       {/* Tür-/Fenstertyp (Bibliothek) — je nach Art aus doorTypes bzw. windowTypes.
-          Der ⚙-Knopf springt direkt in den Typeditor (Ressourcen-Fenster). */}
+          Der ⚙-Knopf öffnet den reichen Fenster-/Tür-Einstellungsdialog. */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.opening.type")}</span>
         <Dropdown
@@ -733,7 +733,7 @@ export function OpeningSection({
           className="objinfo-typebtn"
           title={t("objinfo.opening.editType")}
           aria-label={t("objinfo.opening.editType")}
-          onClick={() => host.onEditOpeningType(isDoor ? "door" : "window")}
+          onClick={() => host.onOpenOpeningEditor(opening.id)}
         >
           ⚙
         </button>

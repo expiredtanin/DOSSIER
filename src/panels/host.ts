@@ -300,6 +300,12 @@ export interface PanelHostValue {
    */
   onEditOpeningType: (kind: "door" | "window") => void;
   /**
+   * Öffnet den reichen Fenster-/Tür-Einstellungsdialog für DIESE Öffnung
+   * (Kategorie-Sidebar, Live-2D-Vorschau, Flügeleinteilung, „Als Stil speichern").
+   * Ist der Primärort für Öffnungs-Parameter; das ⚙ der OpeningSection ruft ihn.
+   */
+  onOpenOpeningEditor: (openingId: string) => void;
+  /**
    * Immutable Änderung von Dach-Attributen (Form/Neigung/Überstand/Firstrichtung/
    * Dicke) — wirkt NUR auf das selektierte Dach.
    */

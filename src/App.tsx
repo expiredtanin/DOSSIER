@@ -69,6 +69,7 @@ import { exportIfcSpf } from "./export/exportIfc";
 import { exportObj, exportStl } from "./export/exportMesh";
 import type { ScheduleKind } from "./export/exportSchedule";
 import { SettingsDialog } from "./ui/SettingsDialog";
+import { OpeningEditorDialog } from "./ui/OpeningEditorDialog";
 import { ExportSaveDialog } from "./ui/ExportSaveDialog";
 import type { ExportSaveFormat } from "./ui/ExportSaveDialog";
 import { PromptDialog } from "./ui/PromptDialog";
@@ -414,6 +415,9 @@ export default function App() {
   // Angeforderter Start-Tab des Ressourcen-Fensters (z. B. „doorStyles", wenn man
   // von einer gewählten Tür in den Typeditor springt).
   const [resourcesTab, setResourcesTab] = useState<ResourceTabId>("components");
+  // Offener Fenster-/Tür-Einstellungsdialog (⚙ der OpeningSection) — ID der
+  // editierten Öffnung, oder null wenn geschlossen.
+  const [openingEditorId, setOpeningEditorId] = useState<string | null>(null);
 
   // Aktives Layout-Blatt im HAUPT-Viewport (DOSSIER A3, Phase 2b): Id des offenen
   // Layouts oder null (= normale Modell-Ansicht). Transienter UI-State; das
@@ -2340,6 +2344,57 @@ export default function App() {
         windowTypes: (p.windowTypes ?? []).filter((wt) => wt.id !== id),
       };
     });
+  // „Als Stil speichern": aktuellen Fenster-/Tür-Typ der Öffnung als NEUEN
+  // benannten Stil ablegen und der Öffnung zuweisen (VW „Fenster speichern…").
+  // Ohne Bezugstyp wird aus den Default-Feldern ein frischer Stil erzeugt.
+  const saveOpeningStyle = (openingId: string, name: string) =>
+    setProject((p) => {
+      const o = (p.openings ?? []).find((x) => x.id === openingId);
+      if (!o) return p;
+      if (o.kind === "door") {
+        const base = (p.doorTypes ?? []).find((d) => d.id === o.typeId);
+        const nt: DoorType = base
+          ? { ...base, id: `dt-${Date.now()}`, name }
+          : {
+              id: `dt-${Date.now()}`,
+              name,
+              kind: "dreh",
+              leafCount: 1,
+              leafStyle: "glatt",
+              frameThickness: 0.05,
+              defaultWidth: 0.9,
+              defaultHeight: 2.0,
+            };
+        return {
+          ...p,
+          doorTypes: [...(p.doorTypes ?? []), nt],
+          openings: (p.openings ?? []).map((x) =>
+            x.id === openingId ? { ...x, typeId: nt.id } : x,
+          ),
+        };
+      }
+      const base = (p.windowTypes ?? []).find((w) => w.id === o.typeId);
+      const nt: WindowType = base
+        ? { ...base, id: `ft-${Date.now()}`, name }
+        : {
+            id: `ft-${Date.now()}`,
+            name,
+            kind: "drehkipp",
+            wingCount: 1,
+            glazing: "zweifach",
+            frameThickness: 0.06,
+            defaultSillHeight: 0.9,
+            defaultWidth: 1.2,
+            defaultHeight: 1.4,
+          };
+      return {
+        ...p,
+        windowTypes: [...(p.windowTypes ?? []), nt],
+        openings: (p.openings ?? []).map((x) =>
+          x.id === openingId ? { ...x, typeId: nt.id } : x,
+        ),
+      };
+    });
   const addStairType = () =>
     setProject((p) => {
       const st: StairType = {
@@ -3166,6 +3221,7 @@ export default function App() {
         setResourcesTab(kind === "door" ? "doorStyles" : "windowStyles");
         setResourcesOpen(true);
       },
+      onOpenOpeningEditor: (id) => setOpeningEditorId(id),
       // ── Dach-Attribute (nur bei selektiertem Dach) ─────────────────────────
       onSetRoofPatch: (patch) => {
         if (selection?.kind === "roof") updateRoof(selection.id, patch);
@@ -4956,6 +5012,20 @@ export default function App() {
           handlers={resourceHandlers}
           initialTab={resourcesTab}
           onClose={() => setResourcesOpen(false)}
+        />
+      )}
+
+      {/* Reicher Fenster-/Tür-Einstellungsdialog (⚙ der OpeningSection). */}
+      {openingEditorId != null && (
+        <OpeningEditorDialog
+          openingId={openingEditorId}
+          project={project}
+          onPatchWindowType={patchWindowType}
+          onPatchDoorType={patchDoorType}
+          onPatchOpening={(patch) => updateOpening(openingEditorId, patch)}
+          onSetOpeningType={(typeId) => updateOpening(openingEditorId, { typeId: typeId || undefined })}
+          onSaveAsStyle={(name) => saveOpeningStyle(openingEditorId, name)}
+          onClose={() => setOpeningEditorId(null)}
         />
       )}
 

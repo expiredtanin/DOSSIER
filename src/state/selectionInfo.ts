@@ -195,6 +195,8 @@ export interface CeilingInfo {
  * genau einer Öffnung gesetzt). Anzeigefertige Werte + Wirts-Wand-Bezug.
  */
 export interface OpeningInfo {
+  /** ID der Öffnung (für den ⚙-Sprung in den Fenster-/Tür-Editor). */
+  id: string;
   kind: "window" | "door";
   /** Wirts-Wand (ID + Name/Geschoss zur Anzeige). */
   hostWallId: string;
@@ -675,6 +677,7 @@ function openingSelection(project: Project, o: Opening): Selection {
     ? openingVerticalExtent(project, wall, o)
     : { zBottom: 0, zTop: o.height };
   const openingInfo: OpeningInfo = {
+    id: o.id,
     kind: o.kind,
     hostWallId: o.hostWallId,
     hostWallName: floor ? `${floor.name}` : o.hostWallId,
