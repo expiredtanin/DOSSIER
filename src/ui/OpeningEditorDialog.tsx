@@ -478,6 +478,20 @@ function FluegelPanel({
   return (
     <>
       <div className="oed-hint">{t("oed.fluegel.hint")}</div>
+      {/* Oberlicht (festes Feld über einem Kämpfer) + Kämpfer-/Sprossen-Zeilen. */}
+      <NumField
+        label={t("oed.f.transomHeight")}
+        value={wt.transomHeight ?? 0}
+        min={0}
+        onCommit={(n) => patchWt({ transomHeight: n || undefined })}
+      />
+      <NumField
+        label={t("oed.f.mullionRows")}
+        value={wt.mullionRows ?? 1}
+        step={1}
+        min={1}
+        onCommit={(n) => patchWt({ mullionRows: Math.max(1, Math.round(n)) })}
+      />
       <table className="oed-table">
         <thead>
           <tr>
@@ -832,7 +846,40 @@ function ElevationPreview({
           )}
         </>
       ) : (
-        segEls
+        <>
+          {segEls}
+          {/* Oberlicht-Kämpfer (waagrechte Linie transomHeight unter der OK). */}
+          {!dt && wt && (wt.transomHeight ?? 0) > 0 && (
+            <line
+              x1={pad}
+              y1={originY + px(wt.transomHeight ?? 0)}
+              x2={pad + px(w)}
+              y2={originY + px(wt.transomHeight ?? 0)}
+              stroke={strokeMain}
+            />
+          )}
+          {/* Kämpfer-/Sprossen-Zeilen (mullionRows − 1 waagrechte Teiler im
+              Hauptfeld unterhalb eines etwaigen Oberlichts). */}
+          {!dt &&
+            wt &&
+            (() => {
+              const rows = Math.max(1, Math.round(wt.mullionRows ?? 1));
+              if (rows <= 1) return null;
+              const top = originY + px(wt.transomHeight ?? 0);
+              const fieldH = px(h) - px(wt.transomHeight ?? 0);
+              return Array.from({ length: rows - 1 }, (_, k) => (
+                <line
+                  key={k}
+                  x1={pad}
+                  y1={top + (fieldH * (k + 1)) / rows}
+                  x2={pad + px(w)}
+                  y2={top + (fieldH * (k + 1)) / rows}
+                  stroke={strokeMuted}
+                  strokeWidth={0.75}
+                />
+              ));
+            })()}
+        </>
       )}
     </svg>
   );

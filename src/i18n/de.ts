@@ -391,6 +391,8 @@ export const de = {
   "oed.f.frameThickness": "Rahmenstärke quer (m)",
   "oed.f.frameDepth": "Rahmentiefe (m)",
   "oed.f.frameWidth": "Rahmenbreite Ansicht (m)",
+  "oed.f.transomHeight": "Oberlichthöhe (m)",
+  "oed.f.mullionRows": "Kämpfer-/Sprossenzeilen",
   "oed.kind.dreh": "Dreh",
   "oed.kind.kipp": "Kipp",
   "oed.kind.drehkipp": "Dreh-Kipp",
