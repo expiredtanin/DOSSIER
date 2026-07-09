@@ -954,6 +954,53 @@ export interface Ceiling {
   bottom?: VerticalAnchor;
 }
 
+// ── Dach ────────────────────────────────────────────────────────────────────
+
+/**
+ * Dachform (analog DOSSIER-Rhino):
+ *  • "flach"    — Flachdach (waagrechte Fläche auf Traufhöhe).
+ *  • "pult"     — Pultdach (eine geneigte Fläche, First an EINER Traufseite).
+ *  • "sattel"   — Satteldach (First mittig, zwei Flächen, Giebel an den Enden).
+ *  • "walm"     — Walmdach (allseitig geneigt, First verkürzt, vier Flächen).
+ *  • "mansarde" — Mansarddach (Sattel mit Knick: steile untere + flache obere Neigung).
+ *  • "zelt"     — Zeltdach (allseitig zur Spitze, First-Länge 0, Pyramide).
+ */
+export type RoofShape = "flach" | "pult" | "sattel" | "walm" | "mansarde" | "zelt";
+
+/**
+ * Ein Dach über einem (rechteckigen) Grundriss-Umriss. Die Geometrie rechnet auf
+ * der Bounding-Box des Umrisses (die gängige, intuitive Vereinfachung — First
+ * entlang einer Hauptachse); der Umriss selbst wird beim Zeichnen als Rechteck
+ * angelegt. Die Traufhöhe (`baseElevation`) ist die Unterkante der Dachfläche;
+ * darüber steigt das Dach je nach Form/Neigung auf.
+ */
+export interface Roof {
+  id: string;
+  type: "roof";
+  /** Zugehörige Zeichnungsebene (Geschoss). */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), z. B. "35" für Dächer. */
+  categoryCode: string;
+  /** Geschlossener Grundriss-Umriss (Meter); Geometrie nutzt die Bounding-Box. */
+  outline: Vec2[];
+  /** Dachform. */
+  shape: RoofShape;
+  /** Hauptneigung in Grad (0 = flach). */
+  pitchDeg: number;
+  /** Nur Mansarde: obere (flachere) Neigung in Grad; fehlt ⇒ halbe Hauptneigung. */
+  pitchUpperDeg?: number;
+  /** Dachüberstand an der Traufe (Meter, ringsum); 0 = bündig mit dem Umriss. */
+  overhang: number;
+  /** Firstrichtung (Sattel/Walm/Mansarde/Pult): entlang der X- oder Y-Achse. */
+  ridgeAxis: "x" | "y";
+  /** Traufhöhe (absolutes Z, Meter); fehlt ⇒ Oberkante des Geschosses. */
+  baseElevation?: number;
+  /** Dachdicke (Meter, senkrecht zur Fläche gemessen). */
+  thickness: number;
+  /** Optionale Übersteuerung der Strich-/Umrissfarbe; sonst Kategorie-Farbe. */
+  color?: string;
+}
+
 /** Schwenkrichtung der Tür relativ zur Wandachse. */
 export type SwingSide = "left" | "right";
 
@@ -1870,6 +1917,8 @@ export interface Project {
    * (Default: leer behandeln).
    */
   ceilings?: Ceiling[];
+  /** Dächer über (rechteckigen) Grundriss-Umrissen. Optional (Alt-Projekte). */
+  roofs?: Roof[];
   doors: Door[];
   /**
    * Öffnungen (Fenster/Türen), gehostet in Wänden. Optional, damit bestehende
