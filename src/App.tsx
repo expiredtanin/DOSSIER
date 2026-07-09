@@ -569,6 +569,11 @@ export default function App() {
   const setSelectedCeilingIds = useStore((s) => s.setSelectedCeilingIds);
   const selectedCeilingId =
     selectedCeilingIds.length === 1 ? selectedCeilingIds[0] : null;
+  // Dach-Auswahl (MENGE); Einzel-Element bei genau einem gewählten Dach.
+  const selectedRoofIds = useStore((s) => s.selectedRoofIds);
+  const setSelectedRoofIds = useStore((s) => s.setSelectedRoofIds);
+  const selectedRoofId = selectedRoofIds.length === 1 ? selectedRoofIds[0] : null;
+  const updateRoof = useStore((s) => s.updateRoof);
   const selectedOpeningIds = useStore((s) => s.selectedOpeningIds);
   const setSelectedOpeningIds = useStore((s) => s.setSelectedOpeningIds);
   const selectedOpeningId =
@@ -618,6 +623,7 @@ export default function App() {
     setSelectedRoomIds([]);
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
+    setSelectedRoofIds([]);
     setMenu(null);
     setEditor(null);
   }, [activeLevelId]);
@@ -1844,7 +1850,8 @@ export default function App() {
         selectedStairIds.length ||
         selectedRoomIds.length ||
         selectedExtrudedSolidIds.length ||
-        selectedColumnIds.length
+        selectedColumnIds.length ||
+        selectedRoofIds.length
       ) {
         const dids = new Set(selectedDrawingIds);
         const wids = new Set(selectedWallIds);
@@ -1854,11 +1861,13 @@ export default function App() {
         const rmids = new Set(selectedRoomIds);
         const exids = new Set(selectedExtrudedSolidIds);
         const colids = new Set(selectedColumnIds);
+        const rfids = new Set(selectedRoofIds);
         setProject((p) => ({
           ...p,
           drawings2d: p.drawings2d.filter((d) => !dids.has(d.id)),
           walls: p.walls.filter((w) => !wids.has(w.id)),
           ceilings: (p.ceilings ?? []).filter((c) => !cids.has(c.id)),
+          roofs: (p.roofs ?? []).filter((r) => !rfids.has(r.id)),
           stairs: (p.stairs ?? []).filter((s) => !stids.has(s.id)),
           rooms: (p.rooms ?? []).filter((r) => !rmids.has(r.id)),
           extrudedSolids: (p.extrudedSolids ?? []).filter((s) => !exids.has(s.id)),
@@ -1877,6 +1886,7 @@ export default function App() {
         setSelectedRoomIds([]);
         setSelectedExtrudedSolidIds([]);
         setSelectedColumnIds([]);
+        setSelectedRoofIds([]);
         e.preventDefault();
       }
     };
@@ -1892,9 +1902,11 @@ export default function App() {
     selectedStairIds,
     selectedExtrudedSolidIds,
     selectedColumnIds,
+    selectedRoofIds,
     project.walls,
     project.drawings2d,
     project.ceilings,
+    project.roofs,
     project.stairs,
     project.extrudedSolids,
     project.columns,
@@ -2559,6 +2571,7 @@ export default function App() {
         selectedRoomId,
         selectedExtrudedSolidId,
         selectedColumnId,
+        selectedRoofId,
       ),
     [
       project,
@@ -2570,6 +2583,7 @@ export default function App() {
       selectedRoomId,
       selectedExtrudedSolidId,
       selectedColumnId,
+      selectedRoofId,
     ],
   );
 
@@ -3115,6 +3129,10 @@ export default function App() {
       onEditOpeningType: (kind) => {
         setResourcesTab(kind === "door" ? "doorStyles" : "windowStyles");
         setResourcesOpen(true);
+      },
+      // ── Dach-Attribute (nur bei selektiertem Dach) ─────────────────────────
+      onSetRoofPatch: (patch) => {
+        if (selection?.kind === "roof") updateRoof(selection.id, patch);
       },
       // ── Treppen-Attribute (nur bei selektierter Treppe) ────────────────────
       onSetStairShape: (shape) => {
@@ -4220,93 +4238,61 @@ export default function App() {
             ? selectedColumnIds.filter((x) => x !== id)
             : [...selectedColumnIds, id],
         );
+      } else if (sel.roofId) {
+        const id = sel.roofId;
+        setSelectedRoofIds(
+          selectedRoofIds.includes(id)
+            ? selectedRoofIds.filter((x) => x !== id)
+            : [...selectedRoofIds, id],
+        );
       }
       return;
     }
     // Ohne Shift: ersetzen. Öffnung hat Vorrang (ihr Symbol liegt in der Lücke),
     // dann Wand, dann 2D-Element, dann Decke; sonst leeren. Die Kanäle schließen
     // sich gegenseitig aus.
+    // Alle Kanäle ausser dem gewählten leeren — als Helfer, damit jeder Zweig
+    // (inkl. des neuen Dach-Kanals) konsistent bleibt.
+    const clearOthers = (keep: string) => {
+      if (keep !== "wall") setSelectedWallIds([]);
+      if (keep !== "drawing") setSelectedDrawingId(null);
+      if (keep !== "ceiling") setSelectedCeilingIds([]);
+      if (keep !== "opening") setSelectedOpeningIds([]);
+      if (keep !== "stair") setSelectedStairIds([]);
+      if (keep !== "room") setSelectedRoomIds([]);
+      if (keep !== "extrudedSolid") setSelectedExtrudedSolidIds([]);
+      if (keep !== "column") setSelectedColumnIds([]);
+      if (keep !== "roof") setSelectedRoofIds([]);
+    };
     if (sel.openingId) {
       setSelectedOpeningIds([sel.openingId]);
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("opening");
     } else if (sel.wallId) {
       setSelectedWallIds([sel.wallId]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("wall");
     } else if (sel.columnId) {
       setSelectedColumnIds([sel.columnId]);
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
+      clearOthers("column");
     } else if (sel.drawingId) {
       setSelectedDrawingId(sel.drawingId);
-      setSelectedWallIds([]);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("drawing");
     } else if (sel.extrudedSolidId) {
       setSelectedExtrudedSolidIds([sel.extrudedSolidId]);
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("extrudedSolid");
     } else if (sel.ceilingId) {
       setSelectedCeilingIds([sel.ceilingId]);
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("ceiling");
     } else if (sel.stairId) {
       setSelectedStairIds([sel.stairId]);
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("stair");
     } else if (sel.roomId) {
       setSelectedRoomIds([sel.roomId]);
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("room");
+    } else if (sel.roofId) {
+      setSelectedRoofIds([sel.roofId]);
+      clearOthers("roof");
     } else {
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
+      clearOthers("");
     }
   };
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
@@ -4314,14 +4300,15 @@ export default function App() {
   const onPlanMarquee = (sel: MarqueeSelection) => {
     setSelectedWallIds(sel.wallIds);
     setSelectedDrawingIds(sel.drawingIds ?? []);
-    // Decken/Öffnungen/Treppen/Räume/Extrusionen sind (noch) nicht Teil des
-    // Marquee → beim Aufziehen abwählen.
+    // Decken/Öffnungen/Treppen/Räume/Extrusionen/Dächer sind (noch) nicht Teil
+    // des Marquee → beim Aufziehen abwählen.
     setSelectedCeilingIds([]);
     setSelectedOpeningIds([]);
     setSelectedStairIds([]);
     setSelectedRoomIds([]);
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
+    setSelectedRoofIds([]);
   };
   // Rechts-Klick im Grundriss: Wand-Kontextmenü. Trifft der Klick eine Wand, die
   // NICHT bereits in der Auswahl ist, wird die Auswahl auf sie gesetzt (damit die

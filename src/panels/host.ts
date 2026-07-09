@@ -299,6 +299,11 @@ export interface PanelHostValue {
    * (Discoverability: von der gewählten Öffnung in den Typeditor springen).
    */
   onEditOpeningType: (kind: "door" | "window") => void;
+  /**
+   * Immutable Änderung von Dach-Attributen (Form/Neigung/Überstand/Firstrichtung/
+   * Dicke) — wirkt NUR auf das selektierte Dach.
+   */
+  onSetRoofPatch: (patch: Partial<import("../model/types").Roof>) => void;
 
   // ── Treppen-Attribute (Object-Info-Panel; nur die selektierte Treppe) ───
   /** Setzt die Grundform (gerade/L/Wendel). */

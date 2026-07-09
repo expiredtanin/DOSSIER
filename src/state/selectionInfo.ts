@@ -30,6 +30,8 @@ import type {
   LayerCategory,
   Opening,
   Project,
+  Roof,
+  RoofShape,
   Room,
   SiaCategory,
   SliceTermination,
@@ -49,6 +51,7 @@ import {
   wallVerticalExtent,
 } from "../model/wall";
 import { ceilingArea, outlineBBox } from "../geometry/ceiling";
+import { roofBBox, roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { openingGapQuad, openingVerticalExtent } from "../geometry/opening";
 import { stairGeometry, stairBBox } from "../geometry/stair";
 
@@ -68,6 +71,25 @@ export interface WallTypeChoice {
 export interface FloorChoice {
   id: string;
   name: string;
+}
+
+/** Dach-Attribute fürs Objekt-Info-Panel (nur bei Auswahl genau eines Dachs). */
+export interface RoofInfo {
+  shape: RoofShape;
+  /** Hauptneigung (Grad). */
+  pitchDeg: number;
+  /** Obere Neigung (Grad) — nur Mansarde relevant. */
+  pitchUpperDeg?: number;
+  /** Dachüberstand an der Traufe (Meter). */
+  overhang: number;
+  /** Firstrichtung entlang X oder Y. */
+  ridgeAxis: "x" | "y";
+  /** Dachdicke (Meter). */
+  thickness: number;
+  /** Firsthöhe über der Traufe (Meter, abgeleitet). */
+  ridgeHeight: number;
+  /** Grundfläche des Umriss-Rechtecks (m², ohne Überstand). */
+  footprintArea: number;
 }
 
 /**
@@ -299,7 +321,8 @@ export interface Selection {
     | "drawing2d"
     | "door"
     | "extrudedSolid"
-    | "column";
+    | "column"
+    | "roof";
   id: string;
   /** Grafik-Kategorie (Ebene) des Elements. */
   categoryCode: string;
@@ -357,6 +380,8 @@ export interface Selection {
   wall?: WallInfo;
   /** Decken-Attribute (nur bei `kind === "ceiling"`). */
   ceiling?: CeilingInfo;
+  /** Dach-Attribute (nur bei `kind === "roof"`). */
+  roof?: RoofInfo;
   /** Öffnungs-Attribute (nur bei `kind === "opening"`). */
   opening?: OpeningInfo;
   /** Treppen-Attribute (nur bei `kind === "stair"`). */
@@ -574,6 +599,37 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     closed: true,
     bbox: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY },
     ceiling: ceilingInfo,
+  };
+}
+
+/** Selektion für ein Dach ableiten (Farbe übersteuerbar, Strichstärke = Kategorie). */
+function roofSelection(project: Project, roof: Roof): Selection {
+  const cat = findCategory(project.layers, roof.categoryCode);
+  const color = roof.color ?? cat?.color ?? WALL_FALLBACK_COLOR;
+  const weightMm = cat?.lw ?? WALL_FALLBACK_MM;
+  const bb = roofBBox(roof.outline);
+  const eavesZ = roofBaseElevation(project, roof);
+  const g = roofGeometry(roof, eavesZ);
+  const footprintArea = Math.abs(bb.x1 - bb.x0) * Math.abs(bb.y1 - bb.y0);
+  const roofInfo: RoofInfo = {
+    shape: roof.shape,
+    pitchDeg: roof.pitchDeg,
+    pitchUpperDeg: roof.pitchUpperDeg,
+    overhang: roof.overhang,
+    ridgeAxis: roof.ridgeAxis,
+    thickness: roof.thickness,
+    ridgeHeight: g.ridgeHeight,
+    footprintArea,
+  };
+  return {
+    kind: "roof",
+    id: roof.id,
+    categoryCode: roof.categoryCode,
+    color,
+    weightMm,
+    closed: true,
+    bbox: { minX: bb.x0, minY: bb.y0, maxX: bb.x1, maxY: bb.y1 },
+    roof: roofInfo,
   };
 }
 
@@ -847,6 +903,7 @@ export function deriveSelection(
   selectedRoomId: string | null = null,
   selectedExtrudedSolidId: string | null = null,
   selectedColumnId: string | null = null,
+  selectedRoofId: string | null = null,
 ): Selection | null {
   if (selectedDrawingId) {
     const d = project.drawings2d.find((x) => x.id === selectedDrawingId);
@@ -872,6 +929,10 @@ export function deriveSelection(
   if (selectedCeilingId) {
     const c = (project.ceilings ?? []).find((x) => x.id === selectedCeilingId);
     return c ? ceilingSelection(project, c) : null;
+  }
+  if (selectedRoofId) {
+    const r = (project.roofs ?? []).find((x) => x.id === selectedRoofId);
+    return r ? roofSelection(project, r) : null;
   }
   if (selectedStairId) {
     const s = (project.stairs ?? []).find((x) => x.id === selectedStairId);

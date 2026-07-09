@@ -193,6 +193,11 @@ export interface PlanSelection {
    */
   columnId: string | null;
   /**
+   * ID des getroffenen Dachs (Traufe-Fläche), wenn der Klick es traf und KEIN
+   * Element höherer Priorität (alle anderen gehen vor); sonst `null`.
+   */
+  roofId: string | null;
+  /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
    * ersetzen. Bei Leerraum-Klick mit Shift bleibt die Auswahl erhalten.
@@ -985,6 +990,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return null;
   };
 
+  // Getroffenes Dach: das unsichtbare Traufe-Pick-Polygon per Punkt-in-Polygon
+  // (die sichtbaren Dachlinien allein wären schwer exakt zu treffen).
+  const pickRoof = (clientX: number, clientY: number): string | null => {
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (let i = plan.primitives.length - 1; i >= 0; i--) {
+      const p = plan.primitives[i];
+      if (p.kind === "polygon" && p.roofId && pointInPolygon(m, p.pts)) {
+        return p.roofId;
+      }
+    }
+    return null;
+  };
+
   // Getroffener extrudierter Körper (truck-Integration): der Footprint-Umriss
   // ist ein reiner Haarlinien-Umriss (fill:"none"), aber per Punkt-in-Polygon
   // trotzdem als FLÄCHE anklickbar (analog Raum, nicht nur auf der Linie).
@@ -1536,11 +1555,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId
             ? null
             : pickStair(e.clientX, e.clientY);
-        // Raum als letzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
+        // Raum als vorletzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
         const roomId =
           openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId
             ? null
             : pickRoom(e.clientX, e.clientY);
+        // Dach als LETZTE Priorität: die Traufe-Fläche deckt den ganzen Grundriss
+        // ab, daher erst wählen, wenn wirklich nichts anderes getroffen wurde.
+        const roofId =
+          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId
+            ? null
+            : pickRoof(e.clientX, e.clientY);
         onSelect({
           model: viewToModel(v.x, v.y),
           hitIndex,
@@ -1552,6 +1577,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           roomId,
           extrudedSolidId,
           columnId,
+          roofId,
           shift: e.shiftKey,
         });
       }

@@ -23,6 +23,8 @@ export interface SelectionSlice {
   selectedExtrudedSolidIds: string[];
   // Gewählte Stützen (Tragwerk) als MENGE von IDs — getrennt von den übrigen Kanälen.
   selectedColumnIds: string[];
+  // Gewählte Dächer als MENGE von IDs — getrennt von den übrigen Kanälen.
+  selectedRoofIds: string[];
 
   setSelectedWallIds: (ids: string[]) => void;
   setSelectedDrawingIds: (ids: string[]) => void;
@@ -32,7 +34,8 @@ export interface SelectionSlice {
   setSelectedRoomIds: (ids: string[]) => void;
   setSelectedExtrudedSolidIds: (ids: string[]) => void;
   setSelectedColumnIds: (ids: string[]) => void;
-  /** Auswahl (Wände + Decken + Öffnungen + Treppen + 2D-Elemente) leeren. */
+  setSelectedRoofIds: (ids: string[]) => void;
+  /** Auswahl (Wände + Decken + Öffnungen + Treppen + Dächer + 2D-Elemente) leeren. */
   clearSelection: () => void;
 }
 
@@ -49,6 +52,7 @@ export function createSelectionSlice(
     selectedRoomIds: [],
     selectedExtrudedSolidIds: [],
     selectedColumnIds: [],
+    selectedRoofIds: [],
     setSelectedWallIds: (ids) => set({ selectedWallIds: ids }),
     setSelectedDrawingIds: (ids) => set({ selectedDrawingIds: ids }),
     setSelectedCeilingIds: (ids) => set({ selectedCeilingIds: ids }),
@@ -57,6 +61,7 @@ export function createSelectionSlice(
     setSelectedRoomIds: (ids) => set({ selectedRoomIds: ids }),
     setSelectedExtrudedSolidIds: (ids) => set({ selectedExtrudedSolidIds: ids }),
     setSelectedColumnIds: (ids) => set({ selectedColumnIds: ids }),
+    setSelectedRoofIds: (ids) => set({ selectedRoofIds: ids }),
     clearSelection: () =>
       set({
         selectedWallIds: [],
@@ -67,6 +72,7 @@ export function createSelectionSlice(
         selectedRoomIds: [],
         selectedExtrudedSolidIds: [],
         selectedColumnIds: [],
+        selectedRoofIds: [],
       }),
   };
 }

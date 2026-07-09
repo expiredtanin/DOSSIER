@@ -235,6 +235,12 @@ export interface ProjectSlice {
     patch: Partial<import("../model/types").Opening>,
   ) => void;
 
+  /** Immutable Änderung eines Dachs (Form/Neigung/Überstand/Firstrichtung/Dicke). */
+  updateRoof: (
+    id: string,
+    patch: Partial<import("../model/types").Roof>,
+  ) => void;
+
   // ── Treppen-Editieren ──────────────────────────────────────────────────────
   /** Verschiebt eine Treppe (Antritt) um `delta`. */
   moveStairBy: (stairId: string, delta: Vec2) => void;
@@ -911,6 +917,13 @@ export function createProjectSlice(
       setProject((p) => ({
         ...p,
         openings: (p.openings ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)),
+      })),
+
+    // ── Dach-Editieren ─────────────────────────────────────────────────────
+    updateRoof: (id, patch) =>
+      setProject((p) => ({
+        ...p,
+        roofs: (p.roofs ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
       })),
 
     // ── Treppen-Editieren ──────────────────────────────────────────────────

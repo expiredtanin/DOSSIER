@@ -258,6 +258,8 @@ export type Primitive =
        * (Poché) einer Stütze ist (für die Links-Klick-Auswahl der Fläche).
        */
       columnId?: string;
+      /** ID des Dachs (Roof), falls dieses (unsichtbare) Polygon der Traufe-Umriss ist (Auswahl). */
+      roofId?: string;
     }
   | {
       kind: "line";
@@ -2465,6 +2467,23 @@ function addRoof(
 ): void {
   const stroke = roof.color ?? category?.color ?? POCHE_STROKE;
   const geo = roofGeometry(roof, 0);
+
+  // Unsichtbares Pick-Polygon über der Traufe-Fläche — macht das Dach über die
+  // ganze Fläche per Links-Klick selektierbar (die Dachlinien allein wären
+  // schwer exakt zu treffen). fill/stroke "none" ⇒ zeichnet nichts; PlanView
+  // testet nur die `pts` (Punkt-in-Polygon), analog Öffnung/Decke.
+  if (geo.eaves.length >= 3) {
+    out.push({
+      kind: "polygon",
+      pts: geo.eaves,
+      fill: "none",
+      stroke: "none",
+      strokeWidthMm: 0,
+      hatch: NO_HATCH,
+      greyed,
+      roofId: roof.id,
+    });
+  }
 
   const n = geo.eaves.length;
   for (let i = 0; i < n; i++) {

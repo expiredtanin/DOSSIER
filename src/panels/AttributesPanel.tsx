@@ -36,6 +36,7 @@ import { ColorHexField } from "../ui/ColorHexField";
 import {
   WallSection,
   CeilingSection,
+  RoofSection,
   OpeningSection,
   StairSection,
   RoomSection,
@@ -314,6 +315,7 @@ export function AttributesPanel() {
           Darstellung + die Host-Handler. */}
       {sel.wall && <WallSection wall={sel.wall} host={host} />}
       {sel.ceiling && <CeilingSection ceiling={sel.ceiling} host={host} />}
+      {sel.roof && <RoofSection roof={sel.roof} host={host} />}
       {sel.opening && <OpeningSection opening={sel.opening} host={host} />}
       {sel.stair && <StairSection stair={sel.stair} host={host} />}
       {sel.room && <RoomSection room={sel.room} roomId={sel.id} host={host} />}

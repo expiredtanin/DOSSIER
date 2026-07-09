@@ -16,8 +16,10 @@
 
 import { useState } from "react";
 import { t } from "../i18n";
+import type { TranslationKey } from "../i18n";
 import { formatM } from "../model/types";
 import type {
+  RoofShape,
   SiaCategory,
   SliceTermination,
   StairShape,
@@ -32,6 +34,7 @@ import type {
   ColumnInfo,
   ExtrudedSolidInfo,
   OpeningInfo,
+  RoofInfo,
   RoomInfo,
   StairInfo,
   WallInfo,
@@ -431,6 +434,107 @@ export function ColumnSection({
 // ── Treppen-Attribut-Abschnitt ───────────────────────────────────────────────
 // Grundform (gerade/L/Wendel), Laufbreite, Stufenanzahl, Steighöhe (+ abgeleitete
 // Steigungshöhe/Auftrittstiefe), Laufrichtung; Referenzgeschoss + UK/OK read-only.
+/** Dach-Abschnitt: Form, Neigung(en), Überstand, Firstrichtung, Dicke. */
+export function RoofSection({
+  roof,
+  host,
+}: {
+  roof: RoofInfo;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  const numField = (
+    labelKey: TranslationKey,
+    value: number,
+    step: number,
+    apply: (v: number) => void,
+  ) => (
+    <div className="objinfo-field">
+      <span className="objinfo-flabel">{t(labelKey)}</span>
+      <input
+        type="number"
+        className="objinfo-text"
+        step={step}
+        value={Number(value.toFixed(2))}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v)) apply(v);
+        }}
+        title={t(labelKey)}
+      />
+    </div>
+  );
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.roof.section")}</div>
+
+      {/* Dachform. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.roof.shape")}</span>
+        <Dropdown
+          value={roof.shape}
+          onChange={(v) => host.onSetRoofPatch({ shape: v as RoofShape })}
+          options={[
+            { value: "flach", label: t("objinfo.roof.shape.flach") },
+            { value: "pult", label: t("objinfo.roof.shape.pult") },
+            { value: "sattel", label: t("objinfo.roof.shape.sattel") },
+            { value: "walm", label: t("objinfo.roof.shape.walm") },
+            { value: "mansarde", label: t("objinfo.roof.shape.mansarde") },
+            { value: "zelt", label: t("objinfo.roof.shape.zelt") },
+          ]}
+          title={t("objinfo.roof.shape")}
+          width={130}
+        />
+      </div>
+
+      {/* Firstrichtung (X/Y) — nur bei Formen mit First relevant. */}
+      {roof.shape !== "flach" && roof.shape !== "zelt" && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.roof.ridgeAxis")}</span>
+          <Dropdown
+            value={roof.ridgeAxis}
+            onChange={(v) => host.onSetRoofPatch({ ridgeAxis: v as "x" | "y" })}
+            options={[
+              { value: "x", label: t("objinfo.roof.ridgeAxis.x") },
+              { value: "y", label: t("objinfo.roof.ridgeAxis.y") },
+            ]}
+            title={t("objinfo.roof.ridgeAxis")}
+            width={130}
+          />
+        </div>
+      )}
+
+      {/* Neigung(en) — Flachdach hat keine. */}
+      {roof.shape !== "flach" &&
+        numField("objinfo.roof.pitch", roof.pitchDeg, 1, (v) =>
+          host.onSetRoofPatch({ pitchDeg: Math.max(0, Math.min(85, v)) }),
+        )}
+      {roof.shape === "mansarde" &&
+        numField("objinfo.roof.pitchUpper", roof.pitchUpperDeg ?? roof.pitchDeg / 2, 1, (v) =>
+          host.onSetRoofPatch({ pitchUpperDeg: Math.max(0, Math.min(85, v)) }),
+        )}
+
+      {/* Überstand + Dicke (Meter). */}
+      {numField("objinfo.roof.overhang", roof.overhang, 0.05, (v) =>
+        host.onSetRoofPatch({ overhang: Math.max(0, v) }),
+      )}
+      {numField("objinfo.roof.thickness", roof.thickness, 0.02, (v) =>
+        host.onSetRoofPatch({ thickness: Math.max(0.01, v) }),
+      )}
+
+      {/* Abgeleitete Werte (read-only). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.roof.ridgeHeight")}</span>
+        <span className="objinfo-fval">{formatM(roof.ridgeHeight)}</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.roof.area")}</span>
+        <span className="objinfo-fval">{roof.footprintArea.toFixed(2)} m²</span>
+      </div>
+    </>
+  );
+}
+
 export function StairSection({
   stair,
   host,
