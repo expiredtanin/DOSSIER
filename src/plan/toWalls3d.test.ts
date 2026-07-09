@@ -386,8 +386,9 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
 
   it("typisiertes Fenster (O1, Typ window-standard) -> Rahmen-Riegel mit endlichen Positionen innerhalb der Öffnungshöhe", () => {
     // O1: sillHeight 0.9, height 1.2 -> Öffnung UK 0.9 .. OK 2.1. Typ "window-
-    // standard" hat wingCount 1, kein mullionRows/transomHeight -> nur die 4
-    // Basis-Riegel (2 Pfosten + Sturz + Schwelle), keine Sprossen/Kämpfer.
+    // standard" hat wingCount 1, kein mullionRows/transomHeight -> 4 Basis-Riegel
+    // (2 Pfosten + Sturz + Schwelle). "drehkipp" ist ÖFFENBAR -> zusätzlich ein
+    // Flügelrahmen-Ring (4 Riegel) im Blendrahmen = 8 Riegel gesamt (fein).
     const p: Project = {
       ...sampleProject,
       openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
@@ -396,7 +397,7 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     };
     const { meshes } = projectToModel3d(p);
     const frames = meshes.filter(isFrame);
-    expect(frames.length).toBe(4);
+    expect(frames.length).toBe(8);
     for (const f of frames) {
       expect(f.positions.every((v) => Number.isFinite(v))).toBe(true);
       const { min, max } = zRange(f);
@@ -405,8 +406,8 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     }
   });
 
-  it("Detailgrad steuert Rahmen/Sprossen im 3D (grob=0, mittel=Rahmen, fein=+Mittelpfosten)", () => {
-    // O1 mit erzwungenem wingCount 2 -> im FEIN-Fall ein Flügel-Mittelpfosten extra.
+  it("Detailgrad steuert Rahmen/Sprossen im 3D (grob=0, mittel=Rahmen, fein=+Mittelpfosten+Flügelrahmen)", () => {
+    // O1 mit erzwungenem wingCount 2 (window-standard "drehkipp", öffenbar).
     const o1 = (sampleProject.openings ?? []).find((o) => o.id === "O1");
     if (!o1) throw new Error("O1 fehlt im sampleProject");
     const p: Project = {
@@ -418,8 +419,10 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     const frameCount = (detail: "grob" | "mittel" | "fein"): number =>
       projectToModel3d(p, { detail }).meshes.filter(isFrame).length;
     expect(frameCount("grob")).toBe(0); // keine Rahmen/Sprossen
-    expect(frameCount("mittel")).toBe(4); // 2 Pfosten + Sturz + Schwelle, KEIN Mittelpfosten
-    expect(frameCount("fein")).toBe(5); // + 1 Flügel-Mittelpfosten (wingCount 2)
+    expect(frameCount("mittel")).toBe(4); // 2 Pfosten + Sturz + Schwelle (keine Sprossen/Flügelrahmen)
+    // fein: 4 Basis + 1 Mittelpfosten (wingCount 2) + 2 öffenbare Flügel × 4
+    // Flügelrahmen-Riegel = 4 + 1 + 8 = 13.
+    expect(frameCount("fein")).toBe(13);
   });
 
   it("transomHeight > 0 -> zusätzlicher Kämpfer-Riegel + zweite Glasscheibe im Oberlicht-Band", () => {
@@ -479,9 +482,41 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
   });
 
   it("wingCount=2 + mullionRows=2 -> je ein zusätzlicher Mittelpfosten (vertikal) und Kämpfer (horizontal)", () => {
+    // Baseline: FESTES Einzelfenster (kein Flügelrahmen), damit nur die
+    // Mittelpfosten/Kämpfer den Unterschied ausmachen (nicht die Flügelrahmen
+    // öffenbarer Flügel). Beide Typen "fest".
     const baseline: Project = {
       ...sampleProject,
-      openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
+      windowTypes: [
+        ...(sampleProject.windowTypes ?? []),
+        {
+          id: "win-fixed-base",
+          name: "Test Fest 1-flg",
+          kind: "fest",
+          wingCount: 1,
+          mullionRows: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+      openings: [
+        {
+          id: "OB",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-fixed-base",
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
       doors: [],
       context: [],
     };
@@ -524,6 +559,49 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     const mullionCount = projectToModel3d(withMullions).meshes.filter(isFrame).length;
     // +1 Mittelpfosten (wingCount-1) +1 Kämpfer-Zeile (mullionRows-1).
     expect(mullionCount).toBe(baseCount + 2);
+  });
+
+  it("öffenbarer Flügel bekommt einen Flügelrahmen-Ring (4 Riegel) im 3D; fest keinen", () => {
+    // Gleiches Fenster einmal 'fest', einmal 'dreh' (öffenbar). Der öffenbare
+    // Flügel erzeugt zusätzlich einen Flügelrahmen-Ring (4 Riegel) INNERHALB des
+    // Blendrahmens (Schachtelung Blendrahmen → Flügelrahmen → Glas).
+    const win = (kind: "fest" | "dreh"): Project => ({
+      ...sampleProject,
+      windowTypes: [
+        {
+          id: "win-sash-test",
+          name: `Test ${kind}`,
+          kind,
+          wingCount: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+      openings: [
+        {
+          id: "OSF",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-sash-test",
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+      doors: [],
+      context: [],
+    });
+    const fixedCount = projectToModel3d(win("fest")).meshes.filter(isFrame).length;
+    const operableCount = projectToModel3d(win("dreh")).meshes.filter(isFrame).length;
+    expect(fixedCount).toBe(4); // nur Blendrahmen (2 Pfosten + Sturz + Schwelle)
+    expect(operableCount).toBe(8); // + 4 Flügelrahmen-Riegel
   });
 
   it("insetFromFace verschiebt Rahmen-Position entlang der Wand-Normalen gegenüber bündig (kein Einzug)", () => {

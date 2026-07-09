@@ -32,7 +32,7 @@
 // Ohne auflösbaren WallType/ohne Schichten: EIN Vollkörper über die volle
 // Dicke im neutralen Grundton (heutiges Fallback-Verhalten).
 
-import type { Project, Wall, Ceiling, Column, Layer, ExtrudedSolid, Drawing2D, Vec2, HatchPattern, SliceTermination, Opening } from "../model/types";
+import type { Project, Wall, Ceiling, Column, Layer, ExtrudedSolid, Drawing2D, Vec2, HatchPattern, SliceTermination, Opening, SashDef } from "../model/types";
 import {
   getComponent,
   getWallType,
@@ -1850,6 +1850,12 @@ interface OpeningFrameParams {
    * {@link glassPanesForOpening}.
    */
   glazingPanes: 1 | 2 | 3;
+  /**
+   * Flügeleinteilung ({@link sashesOfWindowType}) — je ÖFFENBAREM Flügel wird im
+   * 3D ein Flügelrahmen (Rahmen-Riegel innerhalb des Blendrahmens) erzeugt
+   * (Schachtelung Blendrahmen → Flügelrahmen → Glas). Türen: leer.
+   */
+  sashes: SashDef[];
 }
 
 function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): OpeningFrameParams | null {
@@ -1876,6 +1882,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       mullionRows: 1,
       glazed: dt.leafStyle === "glas",
       glazingPanes: 1,
+      sashes: [],
     };
   }
   const wt = getWindowType(project, op);
@@ -1887,6 +1894,22 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     wt.insetFromFace ?? 0,
     wt.insetFace ?? "aussen",
   );
+  // Flügeltabelle: explizite `wt.sashes` gewinnen; sonst gleichmäßig aus dem
+  // effektiven Flügelzahl-Wert (Instanz-Override `op.wingCount` vor Typ-Default).
+  // wingCount wird DARAUS abgeleitet, damit Mittelpfosten (wingCount−1) und
+  // Flügelrahmen (je Flügel) konsistent bleiben.
+  let sashes = wt.sashes && wt.sashes.length > 0 ? wt.sashes : undefined;
+  if (!sashes) {
+    const n = Math.max(1, Math.round(op.wingCount ?? wt.wingCount ?? 1));
+    const opening = wt.kind === "fest" ? "fest" : wt.kind;
+    sashes = Array.from({ length: n }, (_, i) => ({
+      kind: "fluegel" as const,
+      autoWidth: true,
+      opening,
+      hingeSide: (i % 2 === 0 ? "left" : "right") as "left" | "right",
+    }));
+  }
+  const wingCount = Math.max(1, sashes.filter((s) => s.kind === "fluegel").length);
   return {
     frameWidth: wt.frameWidth ?? DEFAULT_FRAME_WIDTH,
     acrossWallDepth,
@@ -1894,12 +1917,11 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     nMax,
     transomHeight: Math.max(0, wt.transomHeight ?? 0),
     hasSill: true,
-    // Inline-Override `Opening.wingCount` gewinnt vor dem Typ-Default (analog
-    // `windowSymbol` im 2D, das dieselbe Priorität kennt), sonst Typ, sonst 1.
-    wingCount: Math.max(1, Math.round(op.wingCount ?? wt.wingCount ?? 1)),
+    wingCount,
     mullionRows: Math.max(1, Math.round(wt.mullionRows ?? 1)),
     glazed: true,
     glazingPanes: glazingPanesOf(wt),
+    sashes,
   };
 }
 
@@ -1962,6 +1984,63 @@ function frameMeshesForOpening(
         push(sashFrom, sashTo, center - fw / 2, center + fw / 2);
       }
     }
+    // Flügelrahmen je ÖFFENBAREM Flügel: ein Rahmen-Riegel-Ring (links/rechts/
+    // oben/unten) INNERHALB des Blendrahmen-Felds, um `reveal` eingerückt
+    // (Schachtelung Blendrahmen → Flügelrahmen → Glas). Feste Flügel bekommen
+    // keinen — so unterscheidet sich fest von öffenbar auch im 3D.
+    if (params.sashes.length > 0 && sashTo - sashFrom > EPS && sashTop - sashBottom > EPS) {
+      const segs = resolveSashSpans(params.sashes, sashFrom, sashTo);
+      const reveal = fw * 0.5;
+      const sfw = fw * 0.7;
+      for (const seg of segs) {
+        const s = seg.sash;
+        if (s.kind !== "fluegel" || !s.opening || s.opening === "fest") continue;
+        const cf = seg.from + fw + reveal;
+        const ct = seg.to - fw - reveal;
+        const bz = sashBottom + reveal;
+        const tz = sashTop - reveal;
+        if (ct - cf <= EPS || tz - bz <= EPS) continue;
+        push(cf, cf + sfw, bz, tz); // linker Flügelholm
+        push(ct - sfw, ct, bz, tz); // rechter Flügelholm
+        push(cf, ct, tz - sfw, tz); // oberer Flügelriegel
+        push(cf, ct, bz, bz + sfw); // unterer Flügelriegel
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Löst die Flügeleinteilung auf das konkrete Achsintervall `[from,to]` (Meter)
+ * auf — feste Breiten (`kind:"pfosten"`/`autoWidth:false`) exakt, der Rest
+ * gleichmäßig auf die Restbreite. Pendant zu `sashSegments` in `opening.ts`
+ * (2D), aber direkt in Öffnungs-Achskoordinaten (3D).
+ */
+function resolveSashSpans(
+  sashes: SashDef[],
+  from: number,
+  to: number,
+): { sash: SashDef; from: number; to: number }[] {
+  const width = Math.max(0, to - from);
+  let fixedSum = 0;
+  let autoCount = 0;
+  for (const s of sashes) {
+    if (s.kind === "pfosten") fixedSum += Math.max(0, s.postWidth ?? 0.06);
+    else if (s.autoWidth === false) fixedSum += Math.max(0, s.width ?? 0);
+    else autoCount++;
+  }
+  const autoW = autoCount > 0 ? Math.max(0, (width - fixedSum) / autoCount) : 0;
+  const out: { sash: SashDef; from: number; to: number }[] = [];
+  let cursor = from;
+  for (const s of sashes) {
+    const w =
+      s.kind === "pfosten"
+        ? Math.max(0, s.postWidth ?? 0.06)
+        : s.autoWidth === false
+          ? Math.max(0, s.width ?? 0)
+          : autoW;
+    out.push({ sash: s, from: cursor, to: cursor + w });
+    cursor += w;
   }
   return out;
 }

@@ -180,14 +180,38 @@ export interface WindowSymbol {
    */
   mullionLines: [Vec2, Vec2][];
   /**
-   * Öffnungsandeutung je NICHT-festem Flügel (Dreh/Kipp/Drehkipp/Schiebe): eine
-   * einzelne Diagonale über die Flügelfläche, von der äusseren Ecke der
-   * Bandseite GEGENüberliegenden Seite (aussen) zur Bandseite (innen) — eine
-   * schlichte Andeutung der Öffnungsrichtung, analog zur Schwenkbogen-Andeutung
-   * bei Türen, aber ohne Bogen (P0-Minimalfassung). Nur befüllt, wenn `sashes`
-   * übergeben wird; leer im Alt-Fall (kein `sashes`).
+   * Flügelrahmen (Flügelkontur) je ÖFFENBAREM Flügel (Dreh/Kipp/Drehkipp/
+   * Schiebe): ein Rechteck INNERHALB des Blendrahmens (Schachtelung
+   * Blendrahmen → Flügelrahmen → Glas), das den öffenbaren Flügel vom festen
+   * Feld unterscheidet. Feste Flügel (`opening:"fest"`) bekommen KEINEN
+   * Flügelrahmen — dort sitzt das Glas direkt im Blendrahmen. Nur befüllt im
+   * neuen (spec-)Pfad; leer im Alt-Fall (kein `spec`).
+   */
+  sashFrames: Vec2[][];
+  /**
+   * (Alt-Feld, für Rückwärtskompatibilität der Schnittstelle beibehalten) — im
+   * neuen Pfad leer; die Öffenbarkeit wird jetzt über {@link sashFrames}
+   * ausgedrückt statt über eine Diagonale quer über die Box.
    */
   sashOpeningLines: [Vec2, Vec2][];
+}
+
+/**
+ * Render-Parameter des Fensters für die reiche 2D-Symbolik (aus dem
+ * referenzierten {@link WindowType}): Flügeltabelle, Profilbreite, Rahmentiefe
+ * und Schichteinzug. Fehlt der Spec (kein Typ auflösbar), zeichnet
+ * {@link windowSymbol} das schlichte Alt-Symbol (`o.wingCount`, volle Wanddicke).
+ */
+export interface WindowRenderSpec {
+  sashes: SashDef[];
+  /** Sichtbare Profilbreite (Meter) von Blend-/Flügelrahmen in der Öffnungsebene. */
+  frameWidth: number;
+  /** Rahmentiefe quer zur Wand (Meter); fehlt ⇒ volle Wanddicke. */
+  frameDepth?: number;
+  /** Schichteinzug: Abstand der Rahmen-Vorderkante von {@link insetFace} (Meter). */
+  insetFromFace?: number;
+  /** Bezugsfläche des Schichteinzugs; Default "aussen". */
+  insetFace?: "aussen" | "innen";
 }
 
 /** Ein Segment (Flügel/Pfosten) der Flügeleinteilung, mit aufgelöster Breite. */
@@ -254,7 +278,7 @@ export function windowSymbol(
   wall: Wall,
   o: Opening,
   glassCount: number,
-  sashes?: SashDef[],
+  spec?: WindowRenderSpec,
 ): WindowSymbol | null {
   const jambs = openingJambs(wall, o);
   if (!jambs) return null;
@@ -264,6 +288,90 @@ export function windowSymbol(
   const outer = refOff + total / 2;
   const inner = refOff - total / 2;
   const { jambStart, jambEnd } = jambs;
+
+  // ── Reicher Pfad (typisiertes Fenster mit Flügeltabelle) ─────────────────
+  // Blendrahmen an der realen Einbaulage (Schichteinzug), je Flügel
+  // Blendrahmen → Flügelrahmen (öffenbar) → Glas. Feste Flügel: Glas direkt im
+  // Blendrahmen (kein Flügelrahmen) — so unterscheidet sich fest von öffenbar.
+  if (spec && spec.sashes.length > 0) {
+    const fw = Math.max(0.01, spec.frameWidth);
+    const depth = spec.frameDepth && spec.frameDepth > 1e-9 ? spec.frameDepth : total;
+    const inset = Math.max(0, spec.insetFromFace ?? 0);
+    const halfT = total / 2;
+    const sign = (spec.insetFace ?? "aussen") === "innen" ? -1 : 1;
+    // Rahmen-Vorderkante bündig mit der Bezugsfläche, um `inset` zurück; der
+    // Körper reicht `depth` zur Wandmitte. Auf die Wanddicke geklemmt (mirror
+    // von resolveFrameNormalRange im 3D). Alles relativ zur Referenzlinie.
+    let frontRel = sign * (halfT - inset);
+    let backRel = frontRel - sign * depth;
+    frontRel = Math.max(-halfT, Math.min(halfT, frontRel));
+    backRel = Math.max(-halfT, Math.min(halfT, backRel));
+    const frameOuterN = refOff + Math.max(frontRel, backRel);
+    const frameInnerN = refOff + Math.min(frontRel, backRel);
+    const bandDepth = frameOuterN - frameInnerN;
+
+    const frame = [
+      add(jambStart, scale(n, frameOuterN)),
+      add(jambEnd, scale(n, frameOuterN)),
+      add(jambEnd, scale(n, frameInnerN)),
+      add(jambStart, scale(n, frameInnerN)),
+    ];
+
+    const axisWidth = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
+    const segs = sashSegments(spec.sashes, axisWidth);
+
+    // Trennlinien (Pfosten/Mittelpfosten) an den inneren Segmentgrenzen, über
+    // die volle Rahmentiefe.
+    const mullionLines: [Vec2, Vec2][] = [];
+    for (let i = 0; i < segs.length - 1; i++) {
+      const onAxis = along(jambStart, jambEnd, segs[i].to);
+      mullionLines.push([add(onAxis, scale(n, frameOuterN)), add(onAxis, scale(n, frameInnerN))]);
+    }
+
+    const sashFrames: Vec2[][] = [];
+    const glassLines: [Vec2, Vec2][] = [];
+    const count = Math.max(1, glassCount);
+    // Öffenbarer Flügel sitzt `reveal` tiefer im Blendrahmen (n- und u-Richtung).
+    const reveal = Math.min(bandDepth * 0.3, fw * 0.7);
+    for (const seg of segs) {
+      if (seg.sash.kind === "pfosten") continue;
+      const clearFrom = seg.from + fw;
+      const clearTo = seg.to - fw;
+      if (clearTo - clearFrom <= 1e-6) continue;
+      const operable = !!seg.sash.opening && seg.sash.opening !== "fest";
+      const gOuterN = frameOuterN - (operable ? reveal : 0);
+      const gInnerN = frameInnerN + (operable ? reveal : 0);
+      if (operable) {
+        const sFrom = along(jambStart, jambEnd, clearFrom);
+        const sTo = along(jambStart, jambEnd, clearTo);
+        sashFrames.push([
+          add(sFrom, scale(n, gOuterN)),
+          add(sTo, scale(n, gOuterN)),
+          add(sTo, scale(n, gInnerN)),
+          add(sFrom, scale(n, gInnerN)),
+        ]);
+      }
+      // Glas innerhalb des Flügels (bei öffenbar zusätzlich in u eingerückt).
+      const gInsetU = operable ? fw * 0.6 : 0;
+      const gFrom = clearFrom + gInsetU;
+      const gTo = clearTo - gInsetU;
+      if (gTo - gFrom <= 1e-6) continue;
+      const gMid = (gOuterN + gInnerN) / 2;
+      const gBand = gOuterN - gInnerN;
+      const step = count > 1 ? Math.min(total / 10, gBand / (count + 1)) : 0;
+      const a = along(jambStart, jambEnd, gFrom);
+      const b = along(jambStart, jambEnd, gTo);
+      for (let i = 0; i < count; i++) {
+        const off = gMid + (count === 1 ? 0 : (i - (count - 1) / 2) * step);
+        glassLines.push([add(a, scale(n, off)), add(b, scale(n, off))]);
+      }
+    }
+    return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [] };
+  }
+
+  // ── Alt-Pfad (kein Typ auflösbar) ────────────────────────────────────────
+  // UNVERÄNDERT (Rust-Parität kernel2d): Rahmen an voller Wanddicke, Glaslinien
+  // mittig, (wingCount−1) gleichmäßige Mittelpfosten. Keine Flügelrahmen.
   const frame = [
     add(jambStart, scale(n, outer)),
     add(jambEnd, scale(n, outer)),
@@ -273,53 +381,21 @@ export function windowSymbol(
   const glassLines: [Vec2, Vec2][] = [];
   const count = Math.max(1, glassCount);
   for (let i = 0; i < count; i++) {
-    // Glaslinien symmetrisch um die Wandmitte verteilt (Abstand = Dicke/8).
     const spread = total / 8;
     const off = refOff + (count === 1 ? 0 : (i - (count - 1) / 2) * spread * 2);
     glassLines.push([add(jambStart, scale(n, off)), add(jambEnd, scale(n, off))]);
   }
   const mullionLines: [Vec2, Vec2][] = [];
-  const sashOpeningLines: [Vec2, Vec2][] = [];
-  if (sashes && sashes.length > 0) {
-    // Neuer Weg: Trennlinien + Öffnungsandeutungen aus der Flügeltabelle.
-    const axisWidth = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
-    const segs = sashSegments(sashes, axisWidth);
+  const wings = Math.max(1, Math.min(4, Math.round(o.wingCount ?? 1)));
+  if (wings > 1) {
     const postDepth = total * 0.6;
     const pOuter = refOff + postDepth / 2;
     const pInner = refOff - postDepth / 2;
-    for (let i = 0; i < segs.length - 1; i++) {
-      const onAxis = along(jambStart, jambEnd, segs[i].to);
+    for (let i = 1; i < wings; i++) {
+      const t = i / wings;
+      const onAxis = add(jambStart, scale(sub(jambEnd, jambStart), t));
       mullionLines.push([add(onAxis, scale(n, pOuter)), add(onAxis, scale(n, pInner))]);
     }
-    for (const seg of segs) {
-      if (seg.sash.kind !== "fluegel") continue;
-      const kind = seg.sash.opening;
-      if (!kind || kind === "fest") continue;
-      // Bandseite "left" = Scharnier am Laibungsstart (jambStart-Seite), "right"
-      // = am Laibungsende. Die Diagonale läuft von der GEGENüberliegenden
-      // Aussenecke zur Bandecke (innen) — schlichte Andeutung, kein Schwenkbogen.
-      const hingeAtStart = (seg.sash.hingeSide ?? "left") === "left";
-      const hingeAxis = along(jambStart, jambEnd, hingeAtStart ? seg.from : seg.to);
-      const farAxis = along(jambStart, jambEnd, hingeAtStart ? seg.to : seg.from);
-      sashOpeningLines.push([add(farAxis, scale(n, outer)), add(hingeAxis, scale(n, inner))]);
-    }
-  } else {
-    // Alt-Fall (kein sashes): (wingCount − 1) Querlinien gleichmäßig zwischen
-    // den Pfosten. Jede Linie läuft quer über die Öffnung (n-Richtung), auf
-    // ~60 % der Mauerdicke symmetrisch um die Wandmitte (Referenz-Offset) —
-    // analog Rhino, wo die Pfosten x_mid = inner_l + span·(i/fluegel) über die
-    // Rahmentiefe sitzen. UNVERÄNDERT gegenüber dem bisherigen Verhalten.
-    const wings = Math.max(1, Math.min(4, Math.round(o.wingCount ?? 1)));
-    if (wings > 1) {
-      const postDepth = total * 0.6;
-      const pOuter = refOff + postDepth / 2;
-      const pInner = refOff - postDepth / 2;
-      for (let i = 1; i < wings; i++) {
-        const t = i / wings; // gleichmäßige Teilung entlang der Achse
-        const onAxis = add(jambStart, scale(sub(jambEnd, jambStart), t));
-        mullionLines.push([add(onAxis, scale(n, pOuter)), add(onAxis, scale(n, pInner))]);
-      }
-    }
   }
-  return { frame, glassLines, mullionLines, sashOpeningLines };
+  return { frame, glassLines, mullionLines, sashFrames: [], sashOpeningLines: [] };
 }

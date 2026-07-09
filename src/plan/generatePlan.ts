@@ -2218,14 +2218,22 @@ function addOpeningSymbol(
   // Flügeltabelle NUR übergeben, wenn ein Fenstertyp auflösbar ist — fehlt er
   // (kein `typeId`/unbekannt), bleibt `windowSymbol` beim reinen
   // `o.wingCount`-Alt-Verhalten (siehe dortiger Kommentar, Regressionssicherheit).
-  const sashes = wt ? sashesOfWindowType(wt) : undefined;
+  const spec = wt
+    ? {
+        sashes: sashesOfWindowType(wt),
+        frameWidth: wt.frameWidth ?? 0.06,
+        frameDepth: wt.frameDepth,
+        insetFromFace: wt.insetFromFace,
+        insetFace: wt.insetFace,
+      }
+    : undefined;
   const detailGlassCount = detail === "fein" ? 2 : 1;
   // Verglasungs-Scheibenzahl des Typs (glazingPanesOf) hebt die Detailgrad-
   // Vorgabe bei mittel/fein an (mind. so viele Glaslinien); "grob" bleibt bei
   // einer Glaslinie, unabhängig vom Typ (bleibt die schlichteste Stufe).
   const glassCount =
     detail === "grob" ? detailGlassCount : Math.max(detailGlassCount, wt ? glazingPanesOf(wt) : 0);
-  const sym = windowSymbol(project, wall, o, glassCount, sashes);
+  const sym = windowSymbol(project, wall, o, glassCount, spec);
   if (!sym) return;
   // Unsichtbares Pick-Polygon über der Öffnungslücke — macht das Fenster über
   // die ganze Fläche selektierbar, auch bei „grob" (nur eine Glaslinie, sonst
@@ -2269,20 +2277,23 @@ function addOpeningSymbol(
         openingId: o.id,
       });
     }
-    // Öffnungsandeutung je NICHT-festem Flügel (Dreh/Kipp/Drehkipp/Schiebe) —
-    // schlichte Diagonale zur Bandseite, nur wenn ein Fenstertyp mit
-    // Flügeltabelle referenziert ist (siehe windowSymbol/sashOpeningLines).
-    for (const [a, b] of sym.sashOpeningLines) {
-      out.push({
-        kind: "line",
-        a,
-        b,
-        cls: "window-opening",
-        weightMm: SYMBOL_HAIRLINE_MM,
-        color: o.color ?? POCHE_STROKE,
-        greyed,
-        openingId: o.id,
-      });
+    // Flügelrahmen (Flügelkontur) je ÖFFENBAREM Flügel — Rechteck (4 Kanten)
+    // innerhalb des Blendrahmens (Schachtelung Blendrahmen → Flügelrahmen →
+    // Glas). Feste Flügel bekommen keinen; so liest man fest vs. öffenbar
+    // direkt im Plan.
+    for (const pts of sym.sashFrames) {
+      for (let i = 0; i < pts.length; i++) {
+        out.push({
+          kind: "line",
+          a: pts[i],
+          b: pts[(i + 1) % pts.length],
+          cls: "window-sash",
+          weightMm: SYMBOL_HAIRLINE_MM,
+          color: o.color ?? POCHE_STROKE,
+          greyed,
+          openingId: o.id,
+        });
+      }
     }
   }
   for (const [a, b] of sym.glassLines) {

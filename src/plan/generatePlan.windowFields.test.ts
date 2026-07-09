@@ -142,7 +142,10 @@ describe("generatePlan — Flügeleinteilung aus sashes (Item 1)", () => {
     a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 9));
   });
 
-  it("Flügel mit opening !== 'fest' erzeugt eine Öffnungsandeutung (window-opening); 'fest' keine", () => {
+  it("öffenbarer Flügel bekommt einen Flügelrahmen (window-sash, 4 Kanten); 'fest' keinen", () => {
+    // Ein öffenbarer + ein fester Flügel: genau EIN Flügelrahmen-Rechteck = 4
+    // Kanten-Linien (der feste Flügel bekommt keinen; Glas sitzt direkt im
+    // Blendrahmen). So liest man fest vs. öffenbar direkt im Grundriss.
     const wt: WindowType = {
       ...baseWindowType,
       sashes: [
@@ -151,12 +154,20 @@ describe("generatePlan — Flügeleinteilung aus sashes (Item 1)", () => {
       ],
     };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
-    expect(linesOfClass(p, "window-opening").length).toBe(1);
+    expect(linesOfClass(p, "window-sash").length).toBe(4);
+
+    // Nur feste Flügel -> gar kein Flügelrahmen.
+    const wtFixed: WindowType = {
+      ...baseWindowType,
+      sashes: [{ kind: "fluegel", autoWidth: true, opening: "fest" }],
+    };
+    const pFixed = project({ ...baseWindow, typeId: "wt1" }, [wtFixed]);
+    expect(linesOfClass(pFixed, "window-sash").length).toBe(0);
   });
 
-  it("Alt-Fall (kein typeId) erzeugt KEINE Öffnungsandeutung", () => {
+  it("Alt-Fall (kein typeId) erzeugt KEINEN Flügelrahmen", () => {
     const p = project({ ...baseWindow });
-    expect(linesOfClass(p, "window-opening").length).toBe(0);
+    expect(linesOfClass(p, "window-sash").length).toBe(0);
   });
 });
 
