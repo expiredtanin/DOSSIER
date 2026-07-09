@@ -187,6 +187,12 @@ function appendOpening(p: Project, s: OpPos, ctx: CommandContext): Project {
   const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
   const width = Math.max(0.1, Math.min(s.width, len));
   const position = Math.max(0, Math.min(s.posAlong, Math.max(0, len - width)));
+  // Standard-Bauteiltyp zuweisen (erster Tür-/Fenstertyp der Bibliothek), damit
+  // frisch platzierte Öffnungen SOFORT die volle Rahmen-/Laibungs-Darstellung
+  // (2D + 3D) bekommen — ohne Typ blieben sie ein blosses Loch mit flacher
+  // Scheibe. Fehlt eine Bibliothek, bleibt es beim Inline-Verhalten (kein Typ).
+  const typeId =
+    s.kind === "door" ? ctx.project.doorTypes?.[0]?.id : ctx.project.windowTypes?.[0]?.id;
   const opening: Opening = {
     id: uniqueId("O"),
     type: "opening",
@@ -197,6 +203,7 @@ function appendOpening(p: Project, s: OpPos, ctx: CommandContext): Project {
     width,
     height: s.height,
     sillHeight: s.kind === "door" ? 0 : s.sill,
+    ...(typeId ? { typeId } : {}),
     ...(s.kind === "door"
       ? { hinge: s.hinge, swing: s.side, openingDir: s.dir, swingAngle: s.swingAngle }
       : {}),
