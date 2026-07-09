@@ -133,6 +133,7 @@ import {
 import type { CopyMode, TransformOp, TransformSelection } from "./tools/transform";
 import { DEFAULT_SNAP } from "./tools/types";
 import type {
+  MeasurementReadout,
   SnapResult,
   SnapSettings,
   ToolContext,
@@ -2866,9 +2867,9 @@ export default function App() {
       onImportLineStyles: importLineStyles,
       onImportHatches: importHatches,
       selection,
-      // Live-Messwerte des Mess-Werkzeugs (aus dem aktiven Draft) — das Objekt-
-      // Info-Panel zeigt sie, solange gemessen wird.
-      measurement: draft?.measure ?? null,
+      // Platzhalter — der LIVE-Wert wird in `hostWithMode` je Render injiziert
+      // (nicht hier, weil `draft` bewusst kein Dep dieses Memos ist, s. dort).
+      measurement: null,
       onSetSelectionColor: (color) => {
         if (!selection) return;
         if (selection.kind === "wall" || selection.kind === "drawing2d")
@@ -4639,7 +4640,7 @@ export default function App() {
             onResize={(size) => resizeDock("left", size)}
             onResizeGroups={(w) => resizeGroups("left", w)}
             buildHost={(activeTab) =>
-              hostWithMode(baseHost, activeTab, modeFor, setModeFor)
+              hostWithMode(baseHost, activeTab, modeFor, setModeFor, draft?.measure ?? null)
             }
             displayModeFor={(activeTab) => modeFor(activeTab)}
             onDisplayModeChange={(activeTab, m) => setModeFor(activeTab, m)}
@@ -4833,7 +4834,7 @@ export default function App() {
             onResize={(size) => resizeDock("right", size)}
             onResizeGroups={(w) => resizeGroups("right", w)}
             buildHost={(activeTab) =>
-              hostWithMode(baseHost, activeTab, modeFor, setModeFor)
+              hostWithMode(baseHost, activeTab, modeFor, setModeFor, draft?.measure ?? null)
             }
             displayModeFor={(activeTab) => modeFor(activeTab)}
             onDisplayModeChange={(activeTab, m) => setModeFor(activeTab, m)}
@@ -4868,7 +4869,7 @@ export default function App() {
         {layout.floating.map((fp) => (
           <PanelHostContext.Provider
             key={fp.panelId}
-            value={hostWithMode(baseHost, fp.panelId, modeFor, setModeFor)}
+            value={hostWithMode(baseHost, fp.panelId, modeFor, setModeFor, draft?.measure ?? null)}
           >
             <FloatingPanel
               panel={fp}
@@ -5290,9 +5291,14 @@ function hostWithMode(
   activeTab: string | null,
   modeFor: (id: string | null) => DisplayMode,
   setModeFor: (id: string | null, mode: DisplayMode) => void,
+  measurement: MeasurementReadout | null = null,
 ): PanelHost {
   const value: PanelHostValue = {
     ...base,
+    // Live-Messwerte NICHT aus dem memoisierten `base` (dort wären sie eingefroren,
+    // da `draft` bewusst kein Memo-Dep ist — sonst würde der ganze Host bei jeder
+    // Mausbewegung neu gebaut). Hier bei jedem Render frisch injiziert.
+    measurement,
     displayMode: {
       mode: modeFor(activeTab),
       setMode: (mode) => setModeFor(activeTab, mode),
