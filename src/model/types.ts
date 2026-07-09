@@ -354,13 +354,58 @@ export interface DoorType {
  * mit `kind: "window"`. Bündelt Öffnungsart, Flügelzahl, Verglasung und
  * Standardmaße inkl. Brüstungshöhe.
  */
+/** Öffnungsart eines einzelnen Flügels (bzw. des ganzen Fensters, alt). */
+export type OpeningKind = "dreh" | "kipp" | "drehkipp" | "fest" | "schiebe";
+
+/**
+ * Ein Eintrag der Flügeleinteilung eines Fensters (VW „Flügeltabelle"): entweder
+ * ein Flügel (verglaste, ggf. öffenbare Einheit) oder ein Pfosten (feste vertikale
+ * Teilung). Ersetzt/erweitert das grobe {@link WindowType.wingCount}: ist
+ * {@link WindowType.sashes} gesetzt, hat es Vorrang; sonst wird die Einteilung aus
+ * `wingCount` gleichmäßig abgeleitet (siehe `sashesOfWindowType`).
+ */
+export interface SashDef {
+  kind: "fluegel" | "pfosten";
+  /** Gleichmässig mitaufteilen (Default true); bei false gilt {@link width}. */
+  autoWidth?: boolean;
+  /** Feste Flügelbreite (Meter), nur wenn `autoWidth === false`. */
+  width?: number;
+  /** Pfostenbreite (Meter); nur `kind === "pfosten"`. */
+  postWidth?: number;
+  /** Öffnungsart DIESES Flügels (nur `kind === "fluegel"`). */
+  opening?: OpeningKind;
+  /** Anschlag/Bandseite (nur öffenbare Flügel). */
+  hingeSide?: "left" | "right";
+}
+
+/** Rollladen-/Sonnenschutzkasten über der Öffnung (P0-Minimalfassung). */
+export interface WindowShading {
+  create: boolean;
+  kind: "rollladen" | "raffstore" | "markise";
+  /** Kastenmasse (Meter): Breite (quer, meist = Öffnung), Höhe, Tiefe. */
+  box: { width: number; height: number; depth: number };
+}
+
 export interface WindowType {
   id: string;
   name: string;
   /** Öffnungsart: Dreh, Kipp, Dreh-Kipp, fest verglast, Schiebe. */
-  kind: "dreh" | "kipp" | "drehkipp" | "fest" | "schiebe";
+  kind: OpeningKind;
   /** Anzahl Flügel (1–4) → Mittelpfosten = wingCount − 1 (vgl. `Opening.wingCount`). */
   wingCount: number;
+  /**
+   * Flügeleinteilung (VW „Flügeltabelle"): einzelne Flügel/Pfosten mit Breite und
+   * Öffnungsrichtung. Hat Vorrang vor {@link wingCount}; fehlt es, wird die
+   * Einteilung gleichmässig aus `wingCount` abgeleitet (`sashesOfWindowType`).
+   */
+  sashes?: SashDef[];
+  /** Rollladen-/Sonnenschutzkasten über der Öffnung. */
+  shading?: WindowShading;
+  /**
+   * Verglasungs-Scheibenzahl, RENDER-wirksam (1/2/3). Fehlt es, wird sie aus
+   * {@link glazing} abgeleitet. Steuert die 3D-Scheibenzahl und die 2D-Glaslinien.
+   */
+  glazingPanes?: 1 | 2 | 3;
   /**
    * Anzahl horizontaler Felder (Kämpfer-Zeilen): 1 = keine Querteilung, 2 = ein
    * Kämpfer, usw. Zusammen mit {@link wingCount} (Spalten) ergibt sich das
@@ -2063,6 +2108,35 @@ export const getDoorType = (project: Project, opening: Opening): DoorType | unde
 /** Löst den {@link WindowType} einer Fenster-Öffnung auf, oder `undefined`. */
 export const getWindowType = (project: Project, opening: Opening): WindowType | undefined =>
   opening.typeId ? (project.windowTypes ?? []).find((t) => t.id === opening.typeId) : undefined;
+
+/**
+ * Flügeleinteilung eines Fenstertyps als normalisierte {@link SashDef}-Liste.
+ * Ist `wt.sashes` gesetzt, gilt sie unverändert; sonst wird sie aus `wingCount`
+ * gleichmässig abgeleitet (n Flügel ⇒ n Flügel-Einträge; die n−1 Mittelpfosten
+ * ergeben sich implizit aus der gleichmässigen Aufteilung). So beherrschen alle
+ * Renderer beide Wege (Alt-Projekte ohne `sashes` inbegriffen).
+ */
+export const sashesOfWindowType = (wt: WindowType): SashDef[] => {
+  if (wt.sashes && wt.sashes.length > 0) return wt.sashes;
+  const n = Math.max(1, Math.round(wt.wingCount || 1));
+  const opening = wt.kind === "fest" ? "fest" : wt.kind;
+  return Array.from({ length: n }, (_, i) => ({
+    kind: "fluegel" as const,
+    autoWidth: true,
+    opening,
+    // Abwechselnder Anschlag (klassisch): erster Flügel links, nächster rechts …
+    hingeSide: (i % 2 === 0 ? "left" : "right") as "left" | "right",
+  }));
+};
+
+/**
+ * Verglasungs-Scheibenzahl (1/2/3) eines Fenstertyps, render-wirksam. `glazingPanes`
+ * hat Vorrang; fehlt es, wird sie aus {@link WindowType.glazing} abgeleitet.
+ */
+export const glazingPanesOf = (wt: WindowType): 1 | 2 | 3 => {
+  if (wt.glazingPanes) return wt.glazingPanes;
+  return wt.glazing === "dreifach" ? 3 : wt.glazing === "zweifach" ? 2 : 1;
+};
 
 /** Löst den {@link StairType} einer Treppe auf, oder `undefined`. */
 export const getStairType = (project: Project, stair: Stair): StairType | undefined =>
