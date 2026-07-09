@@ -1242,6 +1242,7 @@ export const de = {
   "viewport3d.grip.height": "Höhe ziehen",
   "viewport3d.grip.move": "Verschieben",
   "viewport3d.grip.edge": "Kante ziehen",
+  "viewport3d.grip.roofpitch": "Dachneigung ziehen",
 
   // ── Element-Baum (Elemente-Panel, ROADMAP §11) ──────────────────────────────
   "elements.title": "Elemente",

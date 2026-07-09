@@ -15,6 +15,7 @@ import type {
   DrawingLevel,
   Opening,
   Project,
+  Roof,
   Stair,
   Vec2,
   Wall,
@@ -154,9 +155,11 @@ export function Viewport3D(
         editWalls={props.editWalls}
         editDrawings={props.editDrawings}
         editCeilings={props.editCeilings}
+        editRoofs={props.editRoofs}
         onEditVertex={props.onEditVertex}
         onEditBody={props.onEditBody}
         onEditEdge={props.onEditEdge}
+        onEditRoofPitch={props.onEditRoofPitch}
         onEditWallTop={props.onEditWallTop}
         onEditEnd={props.onEditEnd}
       />
@@ -291,7 +294,7 @@ function ThreeViewport3D({
    * effektiv angewandten (gesnappten) Punkt zurück (für Marker + Mitführen).
    */
   onEditVertex?: (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     index: number,
     model: Vec2,
     excludeWallIds?: Set<string>,
@@ -299,11 +302,15 @@ function ThreeViewport3D({
   ) => Vec2;
   /** Verschiebe-Griff gezogen: das `target`-Element um `delta` (XY) verschieben. */
   onEditBody?: (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     delta: Vec2,
   ) => void;
   /** Kanten-Griff einer Decke gezogen: Kante (aIndex→bIndex) um `delta` verschieben. */
   onEditEdge?: (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => void;
+  /** Alle gewählten Dächer — Eck-/Verschiebe-/First-Griffe (nur wgpu-Sicht). */
+  editRoofs?: Roof[];
+  /** First-Griff gezogen: neue absolute First-Höhe (Modell-Z) → Dachneigung. */
+  onEditRoofPitch?: (roofId: string, apexHeight: number) => void;
   /** Höhen-Griff gezogen: neue absolute Oberkanten-Z der Wand. */
   onEditWallTop?: (wallId: string, topZ: number) => void;
   /** Ende eines Griff-Drags (Commit/Aufräumen). */

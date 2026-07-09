@@ -240,6 +240,10 @@ export interface ProjectSlice {
     id: string,
     patch: Partial<import("../model/types").Roof>,
   ) => void;
+  /** Dach-Eckgriff (3D): Umriss-Ecke `index` auf `pt`, Gegenecke fix (Rechteck). */
+  moveRoofGrip: (roofId: string, index: number, pt: import("../model/types").Vec2) => void;
+  /** Dach als Ganzes um `delta` verschieben (Verschiebe-Griff). */
+  moveRoofBy: (roofId: string, delta: import("../model/types").Vec2) => void;
 
   // ── Treppen-Editieren ──────────────────────────────────────────────────────
   /** Verschiebt eine Treppe (Antritt) um `delta`. */
@@ -925,6 +929,48 @@ export function createProjectSlice(
         ...p,
         roofs: (p.roofs ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
       })),
+
+    // Dach-Eckgriff (3D): der gezogene Umriss-Eckpunkt `index` wandert auf `pt`;
+    // die GEGENÜBERLIEGENDE Ecke bleibt fix → der Umriss bleibt ein achsparalleles
+    // Rechteck (die Dach-Geometrie rechnet ohnehin auf der Bounding-Box).
+    moveRoofGrip: (roofId, index, pt) =>
+      setProject(
+        (p) => ({
+          ...p,
+          roofs: (p.roofs ?? []).map((r) => {
+            if (r.id !== roofId || r.outline.length < 4) return r;
+            const opp = r.outline[(index + 2) % r.outline.length];
+            const x0 = Math.min(pt.x, opp.x);
+            const x1 = Math.max(pt.x, opp.x);
+            const y0 = Math.min(pt.y, opp.y);
+            const y1 = Math.max(pt.y, opp.y);
+            return {
+              ...r,
+              outline: [
+                { x: x0, y: y0 },
+                { x: x1, y: y0 },
+                { x: x1, y: y1 },
+                { x: x0, y: y1 },
+              ],
+            };
+          }),
+        }),
+        `moveRoofGrip:${roofId}`,
+      ),
+
+    // Dach als Ganzes verschieben (Verschiebe-Griff).
+    moveRoofBy: (roofId, delta) =>
+      setProject(
+        (p) => ({
+          ...p,
+          roofs: (p.roofs ?? []).map((r) =>
+            r.id === roofId
+              ? { ...r, outline: r.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })) }
+              : r,
+          ),
+        }),
+        `moveRoofBy:${roofId}`,
+      ),
 
     // ── Treppen-Editieren ──────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf.)

@@ -38,6 +38,7 @@ import type {
   Layout,
   OverrideRule,
   Project,
+  Roof,
   Stair,
   StairType,
   Vec2,
@@ -51,6 +52,7 @@ import { computeSection } from "./plan/toSection";
 import type { SectionOutput } from "./plan/toSection";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { selectionHighlightLines } from "./plan/toWalls3d";
+import { roofBaseElevation, roofGeometry } from "./geometry/roof";
 import { parseDxf } from "./io/dxfParser";
 import type { DxfImportResult } from "./io/dxfParser";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
@@ -575,6 +577,8 @@ export default function App() {
   const setSelectedRoofIds = useStore((s) => s.setSelectedRoofIds);
   const selectedRoofId = selectedRoofIds.length === 1 ? selectedRoofIds[0] : null;
   const updateRoof = useStore((s) => s.updateRoof);
+  const moveRoofGrip = useStore((s) => s.moveRoofGrip);
+  const moveRoofBy = useStore((s) => s.moveRoofBy);
   const selectedOpeningIds = useStore((s) => s.selectedOpeningIds);
   const setSelectedOpeningIds = useStore((s) => s.setSelectedOpeningIds);
   const selectedOpeningId =
@@ -2486,6 +2490,19 @@ export default function App() {
         : [],
     [selectedWallIds, selectedDrawingIds, selectedCeilingIds, project.ceilings],
   );
+  // Dächer mit 3D-Griffen: nur wenn ausschliesslich Dächer gewählt sind
+  // (Eck-Griffe zum Resizen, Move-Griff, First-Griff für die Neigung).
+  const edit3dRoofs = useMemo(
+    () =>
+      selectedWallIds.length === 0 &&
+      selectedDrawingIds.length === 0 &&
+      selectedCeilingIds.length === 0
+        ? selectedRoofIds
+            .map((id) => (project.roofs ?? []).find((r) => r.id === id))
+            .filter((r): r is Roof => !!r)
+        : [],
+    [selectedWallIds, selectedDrawingIds, selectedCeilingIds, selectedRoofIds, project.roofs],
+  );
   // Snap beim 3D-Vertex-Drag: dieselbe computeSnap-Logik wie die Plan-Griffe.
   // Das/die gerade GEZOGENEN Element(e) werden aus den Snap-Quellen genommen
   // (sonst fängt der Punkt an sich selbst). `excludeWallIds`/`excludeDrawingIds`
@@ -2522,7 +2539,7 @@ export default function App() {
   // Snap-Marker zu zeigen. `snapped=false` (für mitgeführte Geschwister) wendet
   // den Punkt direkt an, ohne erneut zu snappen.
   const onEdit3dVertex = (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     index: number,
     model: Vec2,
     excludeWallIds?: Set<string>,
@@ -2537,16 +2554,34 @@ export default function App() {
       );
       pt = snapResult?.point ?? model;
     }
-    if (target.ceilingId) moveCeilingGrip(target.ceilingId, index, pt);
+    if (target.roofId) moveRoofGrip(target.roofId, index, pt);
+    else if (target.ceilingId) moveCeilingGrip(target.ceilingId, index, pt);
     else moveGripOf(target.drawingId ?? null, target.wallId ?? null, index, pt);
     return pt;
   };
   const onEdit3dBody = (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     delta: Vec2,
   ) => {
-    if (target.ceilingId) moveCeilingBy(target.ceilingId, delta);
+    if (target.roofId) moveRoofBy(target.roofId, delta);
+    else if (target.ceilingId) moveCeilingBy(target.ceilingId, delta);
     else moveElementByOf(target.drawingId ?? null, target.wallId ?? null, delta);
+  };
+  // First-Griff: neue First-Höhe (world-Y = Modell-Höhe) → Dachneigung. Aus der
+  // aktuellen Neigung die halbe Spannweite ableiten und daraus den neuen Winkel
+  // rechnen (behält die Firstlage, ändert nur die Steilheit).
+  const onEdit3dRoofPitch = (roofId: string, apexHeight: number) => {
+    const roof = (project.roofs ?? []).find((r) => r.id === roofId);
+    if (!roof) return;
+    const baseZ = roofBaseElevation(project, roof);
+    const geom = roofGeometry(roof, baseZ);
+    const currentRidge = geom.ridgeHeight; // Höhe First über Traufe
+    const newRidge = Math.max(0.05, apexHeight - baseZ);
+    const curPitch = ((roof.pitchDeg ?? 30) * Math.PI) / 180;
+    // Halbe Spannweite aus aktueller Geometrie (First/tan(Neigung)).
+    const halfSpan = currentRidge > 1e-4 ? currentRidge / Math.tan(curPitch || 1e-3) : 1;
+    const newPitch = (Math.atan(newRidge / Math.max(0.05, halfSpan)) * 180) / Math.PI;
+    updateRoof(roofId, { pitchDeg: Math.max(1, Math.min(85, newPitch)) });
   };
   const onEdit3dEdge = (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => {
     moveCeilingEdge(ceilingId, aIndex, bIndex, delta);
@@ -4759,9 +4794,11 @@ export default function App() {
           edit3dWalls={edit3dWalls}
           edit3dDrawings={edit3dDrawings}
           edit3dCeilings={edit3dCeilings}
+          edit3dRoofs={edit3dRoofs}
           onEdit3dVertex={onEdit3dVertex}
           onEdit3dBody={onEdit3dBody}
           onEdit3dEdge={onEdit3dEdge}
+          onEdit3dRoofPitch={onEdit3dRoofPitch}
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
         />
@@ -5876,9 +5913,11 @@ function Content({
   edit3dWalls,
   edit3dDrawings,
   edit3dCeilings,
+  edit3dRoofs,
   onEdit3dVertex,
   onEdit3dBody,
   onEdit3dEdge,
+  onEdit3dRoofPitch,
   onEdit3dWallTop,
   onEdit3dEnd,
 }: {
@@ -5964,18 +6003,20 @@ function Content({
   edit3dDrawings: Drawing2D[];
   /** Alle gewählten Decken — 3D-Eckpunkt-/Kanten-/Verschiebe-Griffe. */
   edit3dCeilings: Ceiling[];
+  edit3dRoofs: Roof[];
   onEdit3dVertex: (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     index: number,
     model: Vec2,
     excludeWallIds?: Set<string>,
     excludeDrawingIds?: Set<string>,
   ) => Vec2;
   onEdit3dBody: (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     delta: Vec2,
   ) => void;
   onEdit3dEdge: (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => void;
+  onEdit3dRoofPitch: (roofId: string, apexHeight: number) => void;
   onEdit3dWallTop: (wallId: string, topZ: number) => void;
   onEdit3dEnd: () => void;
 }) {
@@ -6156,9 +6197,11 @@ function Content({
             editWalls={edit3dWalls}
             editDrawings={edit3dDrawings}
             editCeilings={edit3dCeilings}
+            editRoofs={edit3dRoofs}
             onEditVertex={onEdit3dVertex}
             onEditBody={onEdit3dBody}
             onEditEdge={onEdit3dEdge}
+            onEditRoofPitch={onEdit3dRoofPitch}
             onEditWallTop={onEdit3dWallTop}
             onEditEnd={onEdit3dEnd}
           />

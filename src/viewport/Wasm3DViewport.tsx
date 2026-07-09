@@ -43,8 +43,9 @@
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
 import { useEffect, useRef, useState } from "react";
-import type { Project, Wall, Drawing2D, Ceiling, Vec2 } from "../model/types";
+import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
+import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d, pickGeometry, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
 import type { DetailLevel, RenderMode, View3d } from "../ui/TopBar";
 import { t } from "../i18n";
@@ -82,11 +83,11 @@ const CLICK_THRESHOLD_PX = 4;
 // GUI-Element aus. Kosten: die Bildschirm-Position muss der Kamera folgen —
 // `useEffect` unten pollt sie per `requestAnimationFrame`, solange Griffe
 // aktiv sind (billige 2D-Projektion, kein WASM/GPU-Aufruf).
-type GripKind = "vertex" | "height" | "move" | "edge";
+type GripKind = "vertex" | "height" | "move" | "edge" | "roofpitch";
 interface Grip {
   kind: GripKind;
-  /** Element, dessen Griff das ist (Wand-ID, Drawing-ID ODER Decken-ID). */
-  target: { wallId?: string; drawingId?: string; ceilingId?: string };
+  /** Element, dessen Griff das ist (Wand-/Drawing-/Decken-/Dach-ID). */
+  target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string };
   /** Vertex-Index (`vertex`) bzw. erster Kanten-Index (`edge`); -1 sonst. */
   index: number;
   /** Zweiter Kanten-Index (nur `kind==="edge"`). */
@@ -106,6 +107,7 @@ function computeGrips(
   walls: readonly Wall[],
   drawings: readonly Drawing2D[],
   ceilings: readonly Ceiling[],
+  roofs: readonly Roof[],
   drawingElevation: number,
 ): Grip[] {
   const out: Grip[] = [];
@@ -152,6 +154,34 @@ function computeGrips(
       sy += p.y;
     });
     out.push({ kind: "move", target, index: -1, pos: [sx / n, y + 0.03, sy / n] });
+  }
+  // Dächer: Eckpunkt-Griffe (Umriss = Traufe-Grundriss, resize) + Verschiebe-Griff
+  // + ein FIRST-/Neigungs-Griff am höchsten Punkt (vertikal ziehen ändert die
+  // Neigung). Eckpunkte auf Traufhöhe.
+  for (const roof of roofs) {
+    const pts = roof.outline;
+    const rn = pts.length;
+    if (rn < 4) continue;
+    const target = { roofId: roof.id };
+    const eavesZ = roofBaseElevation(project, roof);
+    let sx = 0;
+    let sy = 0;
+    pts.forEach((p, i) => {
+      out.push({ kind: "vertex", target, index: i, pos: [p.x, eavesZ + 0.02, p.y] });
+      sx += p.x;
+      sy += p.y;
+    });
+    out.push({ kind: "move", target, index: -1, pos: [sx / rn, eavesZ + 0.05, sy / rn] });
+    // First-/Neigungs-Griff am höchsten Dachpunkt (aus der 3D-Geometrie).
+    const g = roofGeometry(roof, eavesZ);
+    if (g.ridgeHeight > 0.01) {
+      let apex: readonly [number, number, number] | null = null;
+      for (const pl of g.planes) {
+        for (const v of pl.pts) if (!apex || v[2] > apex[2]) apex = v;
+      }
+      // g-Punkte sind MODELL [x, y, z=Höhe] → world [x, Höhe, y].
+      if (apex) out.push({ kind: "roofpitch", target, index: -1, pos: [apex[0], apex[2], apex[1]] });
+    }
   }
   return out;
 }
@@ -297,9 +327,11 @@ export function Wasm3DViewport({
   editWalls = [],
   editDrawings = [],
   editCeilings = [],
+  editRoofs = [],
   onEditVertex,
   onEditBody,
   onEditEdge,
+  onEditRoofPitch,
   onEditWallTop,
   onEditEnd,
 }: {
@@ -340,19 +372,23 @@ export function Wasm3DViewport({
   editDrawings?: Drawing2D[];
   /** Gewählte Decken — Quelle der 3D-Eckpunkt-/Kanten-/Verschiebe-Griffe. */
   editCeilings?: Ceiling[];
+  /** Gewählte Dächer — Quelle der 3D-Eckpunkt-/Verschiebe-/First-Griffe. */
+  editRoofs?: Roof[];
   /** Endpunkt-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index` des Elements. */
   onEditVertex?: (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     index: number,
     model: Vec2,
   ) => Vec2;
   /** Verschiebe-Griff gezogen: das Element um `delta` (XY) verschieben. */
   onEditBody?: (
-    target: { wallId?: string; drawingId?: string; ceilingId?: string },
+    target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     delta: Vec2,
   ) => void;
   /** Kanten-Griff einer Decke gezogen: Kante (aIndex→bIndex) um `delta` (XY) verschieben. */
   onEditEdge?: (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => void;
+  /** First-/Neigungs-Griff eines Dachs gezogen: neue absolute Firsthöhe (Z). */
+  onEditRoofPitch?: (roofId: string, apexZ: number) => void;
   /** Höhen-Griff gezogen: neue absolute Oberkanten-Z der Wand. */
   onEditWallTop?: (wallId: string, topZ: number) => void;
   /** Ende eines Griff-Drags. */
@@ -373,12 +409,16 @@ export function Wasm3DViewport({
   editDrawingsRef.current = editDrawings;
   const editCeilingsRef = useRef(editCeilings);
   editCeilingsRef.current = editCeilings;
+  const editRoofsRef = useRef(editRoofs);
+  editRoofsRef.current = editRoofs;
   const onEditVertexRef = useRef(onEditVertex);
   onEditVertexRef.current = onEditVertex;
   const onEditBodyRef = useRef(onEditBody);
   onEditBodyRef.current = onEditBody;
   const onEditEdgeRef = useRef(onEditEdge);
   onEditEdgeRef.current = onEditEdge;
+  const onEditRoofPitchRef = useRef(onEditRoofPitch);
+  onEditRoofPitchRef.current = onEditRoofPitch;
   const onEditWallTopRef = useRef(onEditWallTop);
   onEditWallTopRef.current = onEditWallTop;
   const onEditEndRef = useRef(onEditEnd);
@@ -526,7 +566,10 @@ export function Wasm3DViewport({
   useEffect(() => {
     if (
       !ready ||
-      (editWalls.length === 0 && editDrawings.length === 0 && editCeilings.length === 0)
+      (editWalls.length === 0 &&
+        editDrawings.length === 0 &&
+        editCeilings.length === 0 &&
+        editRoofs.length === 0)
     ) {
       setGripScreens([]);
       return;
@@ -544,6 +587,7 @@ export function Wasm3DViewport({
             editWallsRef.current,
             editDrawingsRef.current,
             editCeilingsRef.current,
+            editRoofsRef.current,
             groundElevationRef.current,
           );
           const next: { grip: Grip; x: number; y: number }[] = [];
@@ -558,7 +602,7 @@ export function Wasm3DViewport({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [ready, editWalls, editDrawings, editCeilings]);
+  }, [ready, editWalls, editDrawings, editCeilings, editRoofs]);
 
   // Canvas-Größe beobachten: bei Layout-Änderung mit aktueller Kamera neu
   // zeichnen (die Surface-Anpassung übernimmt der Hook im render()).
@@ -579,14 +623,15 @@ export function Wasm3DViewport({
   // Pfad; "height" zieht auf einer VERTIKALEN Ebene entlang der Wandachse
   // (analog `heightZAt` dort), damit eine überwiegend vertikale Mausbewegung
   // auf eine Höhenänderung abbildet.
-  type GripTarget = { wallId?: string; drawingId?: string; ceilingId?: string };
+  type GripTarget = { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string };
   type GripDrag =
     | { kind: "vertex"; target: GripTarget; index: number; planeY: number }
     | { kind: "move"; target: GripTarget; planeY: number; lastModel: Vec2 | null }
     | { kind: "edge"; ceilingId: string; a: number; b: number; planeY: number; lastModel: Vec2 | null }
-    | { kind: "height"; wallId: string };
+    | { kind: "height"; wallId: string }
+    | { kind: "roofpitch"; roofId: string; apexXZ: readonly [number, number] };
   const gripDragRef = useRef<GripDrag | null>(null);
-  // Arbeitsebene (world-Y) eines Griffs: Wand-UK, Decken-OK bzw. Geschossebene.
+  // Arbeitsebene (world-Y) eines Griffs: Wand-UK, Decken-OK, Dach-Traufe bzw. Geschossebene.
   const gripPlaneY = (target: GripTarget): number | null => {
     if (target.wallId) {
       const wall = editWallsRef.current.find((w) => w.id === target.wallId);
@@ -595,6 +640,10 @@ export function Wasm3DViewport({
     if (target.ceilingId) {
       const c = editCeilingsRef.current.find((x) => x.id === target.ceilingId);
       return c ? ceilingVerticalExtent(projectRef.current, c).zTop : null;
+    }
+    if (target.roofId) {
+      const r = editRoofsRef.current.find((x) => x.id === target.roofId);
+      return r ? roofBaseElevation(projectRef.current, r) : null;
     }
     return groundElevationRef.current;
   };
@@ -605,6 +654,10 @@ export function Wasm3DViewport({
     if (grip.kind === "height") {
       if (!grip.target.wallId) return;
       gripDragRef.current = { kind: "height", wallId: grip.target.wallId };
+    } else if (grip.kind === "roofpitch") {
+      if (!grip.target.roofId) return;
+      // Vertikaler Drag am First; XZ-Position (world) des Apex als Achse merken.
+      gripDragRef.current = { kind: "roofpitch", roofId: grip.target.roofId, apexXZ: [grip.pos[0], grip.pos[2]] };
     } else {
       const planeY = gripPlaneY(grip.target);
       if (planeY == null) return;
@@ -647,6 +700,22 @@ export function Wasm3DViewport({
       const hit = rayPlane(ray, [midX, 0, midY], [ux / len, 0, uy / len]);
       if (!hit) return;
       onEditWallTopRef.current?.(drag.wallId, hit[1]);
+      return;
+    }
+
+    if (drag.kind === "roofpitch") {
+      // Vertikaler First-Drag: Strahl auf eine senkrechte Ebene durch die
+      // Apex-Achse (world-XZ) projizieren, world-Y = neue First-Höhe abgreifen.
+      // Ebenen-Normale horizontal zur Kamera, damit der Drag stabil folgt.
+      const cam = orbitCamera(o);
+      let nx = cam.eye[0] - drag.apexXZ[0];
+      let nz = cam.eye[2] - drag.apexXZ[1];
+      const nlen = Math.hypot(nx, nz) || 1;
+      nx /= nlen;
+      nz /= nlen;
+      const hitR = rayPlane(ray, [drag.apexXZ[0], 0, drag.apexXZ[1]], [nx, 0, nz]);
+      if (!hitR) return;
+      onEditRoofPitchRef.current?.(drag.roofId, hitR[1]);
       return;
     }
 
@@ -917,7 +986,7 @@ export function Wasm3DViewport({
           Verschieben grün. */}
       {gripScreens.map(({ grip, x, y }) => (
         <div
-          key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId ?? grip.target.ceilingId}:${grip.index}`}
+          key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId ?? grip.target.ceilingId ?? grip.target.roofId}:${grip.index}`}
           onPointerDown={startGripDrag(grip)}
           onPointerMove={onGripPointerMove}
           onPointerUp={endGripDrag}
@@ -925,6 +994,8 @@ export function Wasm3DViewport({
           title={t(
             grip.kind === "height"
               ? "viewport3d.grip.height"
+              : grip.kind === "roofpitch"
+              ? "viewport3d.grip.roofpitch"
               : grip.kind === "move"
               ? "viewport3d.grip.move"
               : grip.kind === "edge"
@@ -944,6 +1015,8 @@ export function Wasm3DViewport({
             background:
               grip.kind === "height"
                 ? "#2f8fff"
+                : grip.kind === "roofpitch"
+                ? "#ff4d9d"
                 : grip.kind === "move"
                 ? "#18b85a"
                 : grip.kind === "edge"
@@ -951,7 +1024,8 @@ export function Wasm3DViewport({
                 : "#ff8c1a",
             border: "2px solid rgba(0,0,0,0.6)",
             boxShadow: "0 0 5px rgba(0,0,0,0.55)",
-            cursor: grip.kind === "height" ? "ns-resize" : "grab",
+            cursor:
+              grip.kind === "height" || grip.kind === "roofpitch" ? "ns-resize" : "grab",
             touchAction: "none",
           }}
         />

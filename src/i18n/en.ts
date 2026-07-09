@@ -1230,6 +1230,7 @@ export const en: Record<TranslationKey, string> = {
   "viewport3d.grip.edge": "Drag edge",
   "viewport3d.grip.height": "Drag height",
   "viewport3d.grip.move": "Move",
+  "viewport3d.grip.roofpitch": "Drag roof pitch",
 
   // ── Element tree (Elements panel, ROADMAP §11) ──────────────────────────────
   "elements.title": "Elements",
