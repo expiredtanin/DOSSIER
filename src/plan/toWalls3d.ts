@@ -1667,15 +1667,75 @@ function pushFanTriangles(positions: number[], indices: number[], pts: RoofVec3[
  * render3d rendert Kontext-Meshes doppelseitig, die Winding-Reihenfolge ist also
  * unerheblich.
  */
+/**
+ * Robuste Flächennormale (Newell) einer Polygon-Ebene in MODELL-Koordinaten
+ * ([x, y, z=Höhe]), nach OBEN orientiert (positive Höhen-Komponente) — für die
+ * Dach-Dickenversetzung (Unterseite = Oberseite − Normale·Dicke).
+ */
+function planeNormalUp(pts: RoofVec3[]): [number, number, number] {
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const c = pts[i];
+    const d = pts[(i + 1) % pts.length];
+    nx += (c[1] - d[1]) * (c[2] + d[2]);
+    ny += (c[2] - d[2]) * (c[0] + d[0]);
+    nz += (c[0] - d[0]) * (c[1] + d[1]);
+  }
+  const len = Math.hypot(nx, ny, nz) || 1;
+  const u: [number, number, number] = [nx / len, ny / len, nz / len];
+  return u[2] < 0 ? [-u[0], -u[1], -u[2]] : u;
+}
+
+/**
+ * Eine Dachfläche als SOLIDER Slab (Oberseite + um `thickness` entlang der
+ * Normalen nach unten versetzte Unterseite + umlaufende Seitenwände) — gibt dem
+ * Dach eine echte Materialdicke statt einer papierdünnen Fläche. render3d
+ * rendert doppelseitig, Winding ist unerheblich.
+ */
+function pushRoofSlab(
+  positions: number[],
+  indices: number[],
+  pts: RoofVec3[],
+  thickness: number,
+): void {
+  if (pts.length < 3 || thickness <= EPS) {
+    pushFanTriangles(positions, indices, pts);
+    return;
+  }
+  const nrm = planeNormalUp(pts);
+  const bottom: RoofVec3[] = pts.map((p) => [
+    p[0] - nrm[0] * thickness,
+    p[1] - nrm[1] * thickness,
+    p[2] - nrm[2] * thickness,
+  ]);
+  pushFanTriangles(positions, indices, pts); // Oberseite
+  pushFanTriangles(positions, indices, bottom); // Unterseite
+  // Seitenwände: je Kante ein Quad (zwei Dreiecke) zwischen Ober- und Unterseite.
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    const base = positions.length / 3;
+    positions.push(pts[i][0], pts[i][1], pts[i][2]);
+    positions.push(pts[j][0], pts[j][1], pts[j][2]);
+    positions.push(bottom[j][0], bottom[j][1], bottom[j][2]);
+    positions.push(bottom[i][0], bottom[i][1], bottom[i][2]);
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+}
+
 function emitRoofs(project: Project): RMesh[] {
   const out: RMesh[] = [];
   for (const roof of project.roofs ?? []) {
     const eavesZ = roofBaseElevation(project, roof);
     const g = roofGeometry(roof, eavesZ);
     const color = roof.color ? hexToRgb(roof.color, ROOF_RGB) : ROOF_RGB;
+    const thickness = Math.max(0, roof.thickness);
     const positions: number[] = [];
     const indices: number[] = [];
-    for (const plane of g.planes) pushFanTriangles(positions, indices, plane.pts);
+    // Dachflächen als solide Slabs (echte Dicke); Giebel bleiben dünne Füllung
+    // (schliessen die offenen Enden zur Attika hin).
+    for (const plane of g.planes) pushRoofSlab(positions, indices, plane.pts, thickness);
     for (const gable of g.gables) pushFanTriangles(positions, indices, gable);
     if (indices.length === 0) continue;
     out.push({ positions, indices, kind: "extrusion", color });

@@ -1254,11 +1254,22 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     expect(roofMeshes.length).toBe(1);
     const m = roofMeshes[0];
     expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
-    // Walm hat KEINE Giebel (gables: []); 2 Quader (je 2 Dreiecke) + 2 Dreiecke
-    // (je 1 Dreieck) = 6 Dreiecke = 18 Indizes.
-    expect(m.indices.length).toBe(18);
+    // Walm hat KEINE Giebel (gables: []). Jede Fläche ist jetzt ein SOLIDER Slab
+    // (Oberseite + Unterseite + Seitenwände): Quader-Fläche (4 Ecken) = 2+2+8 =
+    // 12 Dreiecke, Dreiecks-Fläche (3 Ecken) = 1+1+6 = 8 Dreiecke.
+    // 2 Quader × 12 + 2 Dreiecke × 8 = 40 Dreiecke = 120 Indizes.
+    expect(m.indices.length).toBe(120);
     const vcount = m.positions.length / 3;
     expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
+  });
+
+  it("Dach-Dicke: Slab erzeugt eine Unterseite unter der Oberfläche (thickness > 0)", () => {
+    const project: Project = { ...sampleProject, roofs: [baseRoof] };
+    const m = projectToModel3d(project).meshes.filter(isRoofMesh)[0];
+    const heights = m.positions.filter((_, i) => i % 3 === 2);
+    // Sattel 6×4, 30°, Traufe 3: Traufe-OK bei z=3, First höher. Die Unterseite
+    // liegt um ~thickness (0.3, senkrecht) tiefer -> min height klar unter 3.
+    expect(Math.min(...heights)).toBeLessThan(3 - 0.2);
   });
 
   it("Projekt ohne Dächer emittiert keine Roof-Meshes (Rückwärtskompatibilität)", () => {
