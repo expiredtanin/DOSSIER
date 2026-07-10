@@ -18,10 +18,11 @@
 // v = absolute Höhe (world.y). Siehe src-tauri/render3d/src/section.rs.
 
 import type { Ceiling, DrawingLevel, Project, Vec2, Wall } from "../model/types";
-import { getCeilingType, getComponent, getWallType, openingsOfWall } from "../model/types";
+import { getCeilingType, getComponent, getWallType, openingsOfWall, roofLayers } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { dot, leftNormal, normalize, sub } from "../model/geometry";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
+import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d } from "./toWalls3d";
 import { loadEngine3d } from "../engine/engine3d";
 import {
@@ -36,7 +37,7 @@ import type { HatchRender } from "./generatePlan";
 
 /** Bauteil-Referenz eines Cut-Polygons/einer Kante (Art + Eingabe-Index). */
 export interface SectionComponentRef {
-  kind: "wall" | "slab";
+  kind: "wall" | "slab" | "roof";
   index: number;
 }
 
@@ -289,6 +290,13 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
   const bands: SectionCutPolygon[] = [];
   for (const cp of output.cutPolygons) {
     const ref = cp.component;
+    // Dach: Füllung/Schraffur sind bereits je Schicht in `appendRoofSections`
+    // aufgelöst; keine Boolean-Dominanz (joinPriority undefined) — unverändert
+    // übernehmen. WICHTIG vor dem Slab-Zweig (sonst falscher owner-Lookup).
+    if (ref.kind === "roof") {
+      bands.push(cp);
+      continue;
+    }
     if (ref.kind === "wall") {
       const owner = walls[ref.index];
       // Wand: bei mehrschichtigem Wandtyp wird das EINE geschnittene Rechteck in
@@ -767,6 +775,160 @@ export function splitWallLayers(
  * und blendet einen Fallback ein (pkg3d muss dann über `npm run build:engine3d`
  * neu gebaut werden, damit `cut_section_json` verfügbar ist).
  */
+/** Hex "#rrggbb" → RGB 0..1 (Fallback bei ungültigem Hex). */
+function hexToRgb01(hex: string, fallback: [number, number, number]): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return fallback;
+  const v = parseInt(m[1], 16);
+  return [((v >> 16) & 0xff) / 255, ((v >> 8) & 0xff) / 255, (v & 0xff) / 255];
+}
+
+/** Default-Albedo geschnittener Dächer (wie ROOF_RGB im 3D). */
+const ROOF_CUT_RGB: [number, number, number] = [0.72, 0.45, 0.36];
+
+/**
+ * Schneidet die vertikale Schnittebene analytisch mit den DÄCHERN des Projekts
+ * und hängt die Schnitt-Polygone an `output.cutPolygons` an — der Rust-Extraktor
+ * (`cut_section_json`) kennt nur Wände + Decken, Dächer werden TS-seitig ergänzt.
+ *
+ * Vorgehen je Dach: die Grundriss-Spur der Schnittebene (Gerade durch
+ * `plane.point`, Richtung u-Achse) wird gegen jede DACHFLÄCHE (konvexes Polygon
+ * der Aufsicht, s. roofGeometry.planes) geclippt (Cyrus–Beck) → u-Intervall.
+ * Die Oberkante v(u) ist auf dem Intervall LINEAR (Ebenengleichung); die
+ * Unterkante liegt um die LOTRECHTE Dicke / cos(Flächenneigung) tiefer
+ * (vertikale Dicke). Mehrschichtige Dächer (roofLayers) werden wie beim
+ * Decken-Schnitt in Bänder von aussen (Eindeckung, oben) nach innen zerlegt,
+ * jedes mit Füllung/Schraffur seines Bauteils (Neutralisierung wie
+ * `resolveCeilingSectionStyle`: Papier-Hintergrund, solid → Tinte).
+ *
+ * Bewusst NUR Schnitt-Polygone (keine Ansichts-/Silhouettenkanten des Dachs
+ * hinter der Ebene) — Ansicht/Elevation des Dachs bleibt eine eigene Phase.
+ * Giebel (vertikale Endflächen) schneiden die vertikale Ebene nur in einer
+ * Linie (keine Fläche) und entfallen.
+ */
+export function appendRoofSections(
+  output: SectionOutput,
+  project: Project,
+  plane: SectionPlaneSpec,
+): void {
+  const roofs = project.roofs ?? [];
+  if (roofs.length === 0) return;
+  // Grundriss-Spur: Basispunkt + u-Richtung (Modell-2D). world=[x,H,y] ⇒
+  // plane.point[0]=x, plane.point[2]=y; u-Achse = (−nz, nx) (s. section.rs).
+  const base: Vec2 = { x: plane.point[0], y: plane.point[2] };
+  const uDir = sectionUAxisModel(plane);
+  const EPS_U = 1e-6;
+
+  roofs.forEach((roof, index) => {
+    const eavesZ = roofBaseElevation(project, roof);
+    const geo = roofGeometry(roof, eavesZ);
+    const layers = roofLayers(project, roof);
+    const totalT = layers.reduce((s, l) => s + Math.max(0, l.thickness), 0);
+    if (totalT <= 1e-9) return;
+
+    for (const pl of geo.planes) {
+      const pts = pl.pts;
+      if (pts.length < 3) continue;
+      // Ebenengleichung z = z0 − (A(x−x0)+B(y−y0))/C über die Newell-Normale.
+      let A = 0;
+      let B = 0;
+      let C = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const c = pts[i];
+        const d = pts[(i + 1) % pts.length];
+        A += (c[1] - d[1]) * (c[2] + d[2]);
+        B += (c[2] - d[2]) * (c[0] + d[0]);
+        C += (c[0] - d[0]) * (c[1] + d[1]);
+      }
+      if (Math.abs(C) < 1e-9) continue; // (nahezu) vertikale Fläche — kein Flächenschnitt
+      const nLen = Math.hypot(A, B, C);
+      const cosTheta = Math.abs(C) / (nLen || 1);
+      const zAt = (x: number, y: number): number =>
+        pts[0][2] - (A * (x - pts[0][0]) + B * (y - pts[0][1])) / C;
+
+      // Cyrus–Beck: Gerade base + t·uDir gegen das konvexe Aufsichts-Polygon.
+      // Orientierungsunabhängig: Innenseite je Kante über den Polygon-Schwerpunkt.
+      let cx = 0;
+      let cy = 0;
+      for (const p of pts) {
+        cx += p[0];
+        cy += p[1];
+      }
+      cx /= pts.length;
+      cy /= pts.length;
+      let tLo = -Infinity;
+      let tHi = Infinity;
+      let outside = false;
+      for (let i = 0; i < pts.length && !outside; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % pts.length];
+        // Kanten-Normale, zum Schwerpunkt orientiert (Innenseite).
+        let ex = -(b[1] - a[1]);
+        let ey = b[0] - a[0];
+        if (ex * (cx - a[0]) + ey * (cy - a[1]) < 0) {
+          ex = -ex;
+          ey = -ey;
+        }
+        const denom = ex * uDir.x + ey * uDir.y;
+        const dist = ex * (base.x - a[0]) + ey * (base.y - a[1]);
+        if (Math.abs(denom) < 1e-12) {
+          if (dist < -1e-9) outside = true; // parallel ausserhalb
+          continue;
+        }
+        const t = -dist / denom;
+        if (denom > 0) tLo = Math.max(tLo, t);
+        else tHi = Math.min(tHi, t);
+      }
+      if (outside || tHi - tLo <= EPS_U) continue;
+
+      const q = (t: number): Vec2 => ({ x: base.x + t * uDir.x, y: base.y + t * uDir.y });
+      const p0 = q(tLo);
+      const p1 = q(tHi);
+      const zTop0 = zAt(p0.x, p0.y);
+      const zTop1 = zAt(p1.x, p1.y);
+
+      // Schicht-Bänder von aussen (oben) nach innen, vertikale Dicke je Schicht.
+      let prefixV = 0;
+      for (const layer of layers) {
+        const t = Math.max(0, layer.thickness);
+        if (t <= 1e-9) continue;
+        const vT = t / Math.max(cosTheta, 1e-6);
+        const top0 = zTop0 - prefixV;
+        const top1 = zTop1 - prefixV;
+        prefixV += vT;
+
+        let fill: string | undefined;
+        let hatch: HatchRender | undefined;
+        let color = ROOF_CUT_RGB;
+        if (layer.componentId) {
+          try {
+            const comp = getComponent(project, layer.componentId);
+            const h = resolveHatch(project, comp.hatchId);
+            fill = h.pattern === "solid" ? HATCH_INK : HATCH_PAPER;
+            hatch = h;
+            color = hexToRgb01(comp.color, ROOF_CUT_RGB);
+          } catch {
+            fill = undefined;
+            hatch = undefined;
+          }
+        }
+        output.cutPolygons.push({
+          component: { kind: "roof", index },
+          color,
+          pts: [
+            [tLo, top0],
+            [tHi, top1],
+            [tHi, top1 - vT],
+            [tLo, top0 - vT],
+          ],
+          ...(fill ? { fill } : {}),
+          ...(hatch ? { hatch } : {}),
+        });
+      }
+    }
+  });
+}
+
 export async function computeSection(
   project: Project,
   level: DrawingLevel,
@@ -794,6 +956,8 @@ export async function computeSection(
     plane.normal[2],
   );
   const output = JSON.parse(json) as SectionOutput;
+  // Dächer TS-seitig ergänzen (der Rust-Extraktor kennt nur Wände + Decken).
+  appendRoofSections(output, project, plane);
   attachCutStyles(output, project, plane);
   return output;
 }
