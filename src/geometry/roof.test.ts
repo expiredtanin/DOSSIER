@@ -154,4 +154,30 @@ describe("roofGeometry — Überstand", () => {
     const bb = roofBBox(g.eaves);
     expect(bb).toEqual({ x0: -0.5, y0: -0.5, x1: 6.5, y1: 4.5 });
   });
+
+  it("getrennter Traufe/Ortgang-Überstand: First entlang X -> Ortgang weitet X, Traufe Y", () => {
+    // ridgeAxis "x": First entlang X -> Ortgang (Giebel) an den X-Enden,
+    // Traufe an den Y-Seiten. overhang(Traufe)=0.3, overhangGable(Ortgang)=0.8.
+    const g = roofGeometry(
+      roof({ shape: "sattel", ridgeAxis: "x", overhang: 0.3, overhangGable: 0.8 }),
+      E,
+    );
+    const bb = roofBBox(g.eaves);
+    expect(bb).toEqual({ x0: -0.8, y0: -0.3, x1: 6.8, y1: 4.3 });
+  });
+
+  it("getrennter Überstand: First entlang Y -> Ortgang weitet Y, Traufe X", () => {
+    const g = roofGeometry(
+      roof({ shape: "sattel", ridgeAxis: "y", overhang: 0.3, overhangGable: 0.8 }),
+      E,
+    );
+    const bb = roofBBox(g.eaves);
+    expect(bb).toEqual({ x0: -0.3, y0: -0.8, x1: 6.3, y1: 4.8 });
+  });
+
+  it("overhangGable fehlt -> ringsum gleich overhang (rückwärtskompatibel)", () => {
+    const g = roofGeometry(roof({ shape: "sattel", overhang: 0.4 }), E);
+    const bb = roofBBox(g.eaves);
+    expect(bb).toEqual({ x0: -0.4, y0: -0.4, x1: 6.4, y1: 4.4 });
+  });
 });

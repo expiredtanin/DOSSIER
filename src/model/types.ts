@@ -1062,8 +1062,13 @@ export interface Roof {
    * gemessen von der Traufe. Kleiner ⇒ steiler Sockel kürzer; fehlt ⇒ 0.4.
    */
   mansardKneeRatio?: number;
-  /** Dachüberstand an der Traufe (Meter, ringsum); 0 = bündig mit dem Umriss. */
+  /** Dachüberstand an der TRAUFE (Meter, senkrecht zum First); 0 = bündig. */
   overhang: number;
+  /**
+   * Dachüberstand am ORTGANG (Giebelseite, entlang des Firsts, Meter). Fehlt ⇒
+   * gleich dem Traufüberstand {@link overhang} (rückwärtskompatibel = ringsum).
+   */
+  overhangGable?: number;
   /** Firstrichtung (Sattel/Walm/Mansarde/Pult): entlang der X- oder Y-Achse. */
   ridgeAxis: "x" | "y";
   /** Traufhöhe (absolutes Z, Meter); fehlt ⇒ Oberkante des Geschosses. */

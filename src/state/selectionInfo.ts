@@ -88,6 +88,8 @@ export interface RoofInfo {
   mansardKneeRatio?: number;
   /** Dachüberstand an der Traufe (Meter). */
   overhang: number;
+  /** Dachüberstand am Ortgang (Giebelseite, Meter); fehlt ⇒ = Traufüberstand. */
+  overhangGable?: number;
   /** Firstrichtung entlang X oder Y. */
   ridgeAxis: "x" | "y";
   /** Dachdicke (Meter). */
@@ -636,6 +638,7 @@ function roofSelection(project: Project, roof: Roof): Selection {
     mansardType: roof.mansardType,
     mansardKneeRatio: roof.mansardKneeRatio,
     overhang: roof.overhang,
+    overhangGable: roof.overhangGable,
     ridgeAxis: roof.ridgeAxis,
     thickness: roof.thickness,
     baseElevation: eavesZ,

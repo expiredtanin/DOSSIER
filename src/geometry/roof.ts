@@ -336,11 +336,16 @@ const swapLine = (l: [Vec2, Vec2]): [Vec2, Vec2] => [swap2(l[0]), swap2(l[1])];
  */
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
   const bb = roofBBox(roof.outline);
-  const o = Math.max(0, roof.overhang);
-  let x0 = bb.x0 - o;
-  let y0 = bb.y0 - o;
-  let x1 = bb.x1 + o;
-  let y1 = bb.y1 + o;
+  const oe = Math.max(0, roof.overhang); // Traufüberstand (senkrecht zum First)
+  const og = Math.max(0, roof.overhangGable ?? roof.overhang); // Ortgang (entlang First)
+  // Der First liegt entlang der `ridgeAxis`-Achse: dort wirkt der Ortgang-, quer
+  // dazu der Traufüberstand. In OUTLINE-Koordinaten je nach Firstrichtung mappen.
+  const ox = roof.ridgeAxis === "x" ? og : oe;
+  const oy = roof.ridgeAxis === "x" ? oe : og;
+  let x0 = bb.x0 - ox;
+  let y0 = bb.y0 - oy;
+  let x1 = bb.x1 + ox;
+  let y1 = bb.y1 + oy;
   const flip = roof.ridgeAxis === "y";
   if (flip) {
     [x0, y0, x1, y1] = [y0, x0, y1, x1];

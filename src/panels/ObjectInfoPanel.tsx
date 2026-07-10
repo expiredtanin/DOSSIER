@@ -577,10 +577,18 @@ export function RoofSection({
         });
       })}
 
-      {/* Überstand + Dicke (Meter). */}
+      {/* Überstand: Traufe (senkrecht zum First) + Ortgang (Giebelseite). */}
       {numField("objinfo.roof.overhang", roof.overhang, 0.05, (v) =>
         host.onSetRoofPatch({ overhang: Math.max(0, v) }),
       )}
+      {roof.shape !== "flach" &&
+        roof.shape !== "zelt" &&
+        numField(
+          "objinfo.roof.overhangGable",
+          roof.overhangGable ?? roof.overhang,
+          0.05,
+          (v) => host.onSetRoofPatch({ overhangGable: Math.max(0, v) }),
+        )}
       {numField("objinfo.roof.thickness", roof.thickness, 0.02, (v) =>
         host.onSetRoofPatch({ thickness: Math.max(0.01, v) }),
       )}
