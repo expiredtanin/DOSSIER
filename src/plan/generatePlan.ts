@@ -57,6 +57,7 @@ import { stairGeometry, stairCut, stairOutline } from "../geometry/stair";
 import type { SpiralOutlineSegments } from "../geometry/stair";
 import {
   doorSymbol,
+  doorLeaves,
   openingGapQuad,
   openingInterval,
   openingJambs,
@@ -2115,29 +2116,33 @@ function addOpeningSymbol(
     // Entspricht `oeff_tuer_typ == "wandoeffnung"` im Rhino-Plugin.
     const isWandoeffnung = (o.doorType ?? "normal") === "wandoeffnung";
     if (!isWandoeffnung) {
-      // Türblatt (alle Stufen).
-      out.push({
-        kind: "line",
-        a: sym.hinge,
-        b: sym.openEnd,
-        cls: "door-leaf",
-        weightMm: SYMBOL_HAIRLINE_MM,
-        greyed,
-        openingId: o.id,
-      });
-      // mittel + fein: Schwenkbogen von geschlossen → offen.
-      if (detail !== "grob") {
+      // Türblätter (1 oder 2 Flügel, je DoorType.leafCount). Zweiflüglig ⇒ zwei
+      // halbbreite Blätter an gegenüberliegenden Pfosten (symmetrische Doppeltür).
+      const leafCount = Math.max(1, Math.round(getDoorType(project, o)?.leafCount ?? 1));
+      for (const leaf of doorLeaves(wall, o, leafCount)) {
         out.push({
-          kind: "arc",
-          center: sym.hinge,
-          from: sym.closedEnd,
-          to: sym.openEnd,
-          r: sym.radius,
-          cls: "door-swing",
+          kind: "line",
+          a: leaf.hinge,
+          b: leaf.openEnd,
+          cls: "door-leaf",
           weightMm: SYMBOL_HAIRLINE_MM,
           greyed,
           openingId: o.id,
         });
+        // mittel + fein: Schwenkbogen von geschlossen → offen je Blatt.
+        if (detail !== "grob") {
+          out.push({
+            kind: "arc",
+            center: leaf.hinge,
+            from: leaf.closedEnd,
+            to: leaf.openEnd,
+            r: leaf.radius,
+            cls: "door-swing",
+            weightMm: SYMBOL_HAIRLINE_MM,
+            greyed,
+            openingId: o.id,
+          });
+        }
       }
     }
     // fein: Anschlag-Striche an beiden Pfosten (quer zur Wand).

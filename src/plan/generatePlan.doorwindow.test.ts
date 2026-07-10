@@ -164,6 +164,30 @@ describe("generatePlan — Tür-/Fenstertyp-Rahmenband (opening-frame)", () => {
   });
 });
 
+describe("generatePlan — zweiflügelige Tür (leafCount)", () => {
+  it("leafCount 2 -> zwei Türblätter + zwei Schwenkbögen; leafCount 1 -> je eines", () => {
+    const oneLeaf = project([{ ...baseDoor, typeId: "dt1" }], { doorTypes: [doorType] });
+    expect(linesOfClass(oneLeaf, "door-leaf", "T1").length).toBe(1);
+
+    const twoLeafType: DoorType = { ...doorType, id: "dt2", leafCount: 2 };
+    const twoLeaf = project([{ ...baseDoor, typeId: "dt2" }], { doorTypes: [twoLeafType] });
+    expect(linesOfClass(twoLeaf, "door-leaf", "T1").length).toBe(2);
+    // Zwei Schwenkbögen (arc-Primitive) bei mittel/fein.
+    const arcs = generatePlan(twoLeaf, "eg", visible, undefined, "mittel").primitives.filter(
+      (pr) => pr.kind === "arc" && (pr as { cls?: string }).cls === "door-swing",
+    );
+    expect(arcs.length).toBe(2);
+    // Die beiden Blätter sind je halb so breit (Radius) wie das einflügelige.
+    const oneRadius = (
+      generatePlan(oneLeaf, "eg", visible, undefined, "mittel").primitives.find(
+        (pr) => pr.kind === "arc" && (pr as { cls?: string }).cls === "door-swing",
+      ) as { r: number }
+    ).r;
+    const twoRadius = (arcs[0] as { r: number }).r;
+    expect(twoRadius).toBeCloseTo(oneRadius / 2, 6);
+  });
+});
+
 describe("generatePlan — Oberlicht (opening-transom)", () => {
   it("erscheint genau dann, wenn transomHeight > 0", () => {
     const withTransom = project([{ ...baseWindow, typeId: "wt1" }], { windowTypes: [windowType] });

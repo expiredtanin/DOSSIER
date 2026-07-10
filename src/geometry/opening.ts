@@ -162,6 +162,63 @@ export function doorSymbol(wall: Wall, o: Opening): DoorSymbol | null {
   };
 }
 
+/** Ein einzelnes Türblatt (Grundriss): Scharnier + geschlossenes/offenes Ende + Radius. */
+export interface DoorLeaf {
+  hinge: Vec2;
+  openEnd: Vec2;
+  closedEnd: Vec2;
+  radius: number;
+}
+
+/** Blatt-Geometrie aus Scharnier, geschlossener Richtung, Schwenkrichtung, Winkel, Breite. */
+function computeLeaf(
+  hinge: Vec2,
+  closedDir: Vec2,
+  swingDir: Vec2,
+  angle: number,
+  width: number,
+): DoorLeaf {
+  const openDir = {
+    x: closedDir.x * Math.cos(angle) + swingDir.x * Math.sin(angle),
+    y: closedDir.y * Math.cos(angle) + swingDir.y * Math.sin(angle),
+  };
+  return {
+    hinge,
+    openEnd: add(hinge, scale(openDir, width)),
+    closedEnd: add(hinge, scale(closedDir, width)),
+    radius: width,
+  };
+}
+
+/**
+ * Türblätter im Grundriss (1 oder 2 Flügel). Einflüglig: ein Blatt über die
+ * volle Breite (Scharnier je `o.hinge`). Zweiflüglig (`leafCount === 2`): zwei
+ * halbbreite Blätter, an den GEGENüberliegenden Pfosten angeschlagen, beide zur
+ * selben Seite schwenkend (symmetrische Doppeltür / Stulptür). `doorSymbol`
+ * bleibt unverändert (einflügelig) für Bestandspfade/Parität; dies ist additiv.
+ */
+export function doorLeaves(wall: Wall, o: Opening, leafCount: number): DoorLeaf[] {
+  const jambs = openingJambs(wall, o);
+  if (!jambs) return [];
+  const { u, n } = wallAxisFrame(wall);
+  const { jambStart, jambEnd } = jambs;
+  const width = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
+  const swingSign = (o.swing ?? "left") === "left" ? 1 : -1;
+  const dirSign = (o.openingDir ?? "in") === "in" ? 1 : -1;
+  const swingDir = scale(n, swingSign * dirSign);
+  const angle = (o.swingAngle ?? 90) * DEG;
+  if (leafCount >= 2) {
+    const hw = width / 2;
+    return [
+      computeLeaf(jambStart, u, swingDir, angle, hw),
+      computeLeaf(jambEnd, scale(u, -1), swingDir, angle, hw),
+    ];
+  }
+  const hinge = (o.hinge ?? "start") === "start" ? jambStart : jambEnd;
+  const closedDir = (o.hinge ?? "start") === "start" ? u : scale(u, -1);
+  return [computeLeaf(hinge, closedDir, swingDir, angle, width)];
+}
+
 // ── Fenster-Symbol (Plan) ────────────────────────────────────────────────────
 
 /** Aufgelöste Fenster-Linien im Grundriss (Weltkoordinaten). */

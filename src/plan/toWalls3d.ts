@@ -1970,7 +1970,8 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       nMax,
       transomHeight: Math.max(0, dt.transomHeight ?? 0),
       hasSill: dt.threshold === true,
-      wingCount: 1,
+      // Zweiflüglige Tür ⇒ 2 Flügel = ein mittiger Anschlagpfosten (Stulp) im 3D.
+      wingCount: Math.max(1, Math.round(dt.leafCount ?? 1)),
       mullionRows: 1,
       glazed: dt.leafStyle === "glas",
       glazingPanes: 1,
