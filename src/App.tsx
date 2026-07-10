@@ -4663,7 +4663,9 @@ export default function App() {
             onView3d={setView3d}
             detail={detail}
             onDetail={setDetail}
-            detailEnabled={planActive}
+            // Detailgrad wirkt im Grundriss UND in der 3D-Sicht (projectToModel3d
+            // bekommt `detail` durchgereicht) — nicht mehr nur im Plan.
+            detailEnabled={planActive || viewType === "perspektive"}
             scaleDenominator={scaleDenominator}
             onApplyScale={applyScale}
             liveScale={planActive ? liveScale : null}
