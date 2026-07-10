@@ -344,8 +344,112 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     bands.push(cp);
   }
 
+  // Phase 1b — Decken-Terminierung: Wände mit `sliceTermination` "below"/"above"
+  // ENDEN im Schnitt an der Decke (2D = 3D, s. terminateOrSubtractSpans in
+  // toWalls3d), statt dass die Decke nur per Priorität herausgestanzt wird und
+  // die Wand darüber wieder auftaucht.
+  const terminated = applyWallTermination(bands, walls);
+
   // Phase 2 — Boolean-Dominanz: die stärkere Schicht schneidet die schwächere.
-  output.cutPolygons = subtractDominantBands(bands);
+  output.cutPolygons = subtractDominantBands(terminated);
+}
+
+/**
+ * Decken-Terminierung der Wand-Bänder im (u,v)-Schnittraum — der 2D-Spiegel von
+ * `terminateOrSubtractSpans` (toWalls3d, 3D-Pfad): trägt die Wand eines Bands
+ * `sliceTermination: "below"`, wird das Band an der UNTERKANTE der dominanten
+ * Decken-Bänder gekappt (kein über der Decke wieder auftauchender Rest);
+ * `"above"` spiegelbildlich an der Oberkante. Dominant = Decken-Band mit STRIKT
+ * höherer `joinPriority` UND u-Überlapp (u-Überlapp ↔ Plan-Überdeckung am Ort
+ * der Schnittebene). `"both"`/undefined ⇒ unverändert (die reine Prioritäts-
+ * Subtraktion in Phase 2 bleibt das heutige Verhalten). Bänder sind Rechtecke
+ * (splitWallLayers/Rust-Extraktor) — gekappt wird über die BBox.
+ */
+export function applyWallTermination(
+  bands: SectionCutPolygon[],
+  walls: Wall[],
+): SectionCutPolygon[] {
+  const EPS_T = 1e-9;
+  const bbox = (
+    cp: SectionCutPolygon,
+  ): { uMin: number; uMax: number; vMin: number; vMax: number } => {
+    let uMin = Infinity;
+    let uMax = -Infinity;
+    let vMin = Infinity;
+    let vMax = -Infinity;
+    for (const [u, v] of cp.pts) {
+      uMin = Math.min(uMin, u);
+      uMax = Math.max(uMax, u);
+      vMin = Math.min(vMin, v);
+      vMax = Math.max(vMax, v);
+    }
+    return { uMin, uMax, vMin, vMax };
+  };
+  const slabBands = bands
+    .filter((b) => b.component.kind === "slab" && b.joinPriority !== undefined)
+    .map((b) => ({ box: bbox(b), joinPriority: b.joinPriority as number }));
+  if (slabBands.length === 0) return bands;
+
+  const out: SectionCutPolygon[] = [];
+  for (const b of bands) {
+    if (b.component.kind !== "wall") {
+      out.push(b);
+      continue;
+    }
+    const owner = walls[b.component.index];
+    const term = owner?.sliceTermination;
+    if ((term !== "below" && term !== "above") || b.joinPriority === undefined) {
+      out.push(b);
+      continue;
+    }
+    const wb = bbox(b);
+    // Dominante Decken-Cutter mit u-Überlapp — dieselbe Auswahl wie die
+    // bandZCuts im 3D (nur STRIKT höhere Priorität schneidet/terminiert).
+    const cutters = slabBands.filter(
+      (s) =>
+        s.joinPriority > (b.joinPriority as number) &&
+        s.box.uMax > wb.uMin + EPS_T &&
+        s.box.uMin < wb.uMax - EPS_T,
+    );
+    if (cutters.length === 0) {
+      out.push(b);
+      continue;
+    }
+    if (term === "below") {
+      // Wand endet an der Decken-UNTERKANTE (kleinstes vMin der Cutter).
+      let clipTop = Infinity;
+      for (const c of cutters) clipTop = Math.min(clipTop, c.box.vMin);
+      const top = Math.min(clipTop, wb.vMax);
+      if (top > wb.vMin + EPS_T) {
+        out.push({
+          ...b,
+          pts: [
+            [wb.uMin, top],
+            [wb.uMax, top],
+            [wb.uMax, wb.vMin],
+            [wb.uMin, wb.vMin],
+          ],
+        });
+      }
+      continue;
+    }
+    // "above": Wand beginnt an der Decken-OBERKANTE (grösstes vMax der Cutter).
+    let clipBottom = -Infinity;
+    for (const c of cutters) clipBottom = Math.max(clipBottom, c.box.vMax);
+    const bottom = Math.max(clipBottom, wb.vMin);
+    if (bottom < wb.vMax - EPS_T) {
+      out.push({
+        ...b,
+        pts: [
+          [wb.uMin, wb.vMax],
+          [wb.uMax, wb.vMax],
+          [wb.uMax, bottom],
+          [wb.uMin, bottom],
+        ],
+      });
+    }
+  }
+  return out;
 }
 
 /**
