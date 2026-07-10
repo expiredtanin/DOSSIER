@@ -18,7 +18,7 @@
 import type { Wall, WallType } from "../../model/types";
 import { wallTypeThickness } from "../../model/types";
 import { wallCorners } from "../../model/geometry";
-import { uniqueId } from "../../tools/types";
+import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -164,14 +164,7 @@ function wallDraft(points: Vec2[], cursor: Vec2 | null, thickness: number): Tool
   }
   const draft: ToolDraft = { preview, vertices: points };
   const last = points[points.length - 1];
-  if (cursor && last && segLen(last, cursor) >= EPS) {
-    draft.hud = {
-      at: cursor,
-      text: `${segLen(last, cursor).toFixed(2)} m · ${Math.abs(
-        (segAngleDeg(last, cursor) + 360) % 360,
-      ).toFixed(0)}°`,
-    };
-  }
+  if (cursor && last && segLen(last, cursor) >= EPS) draft.hud = segmentHud(last, cursor);
   return draft;
 }
 

@@ -16,7 +16,7 @@ import {
 import type { HatchRender, Plan, Primitive } from "./generatePlan";
 import { docToLines, type SvgLine } from "../text/renderHtml";
 import type { EdgeGrip, Vec2 } from "../model/types";
-import type { DraftShape, SnapResult, ToolHandlers, ToolId, ToolMods } from "../tools/types";
+import type { SnapResult, ToolDraft, ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { quantizePen } from "../export/sceneToPrintSvg";
@@ -2236,10 +2236,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /
- * halbtransparente Flächen), gesetzte Stützpunkte (kleine Quadrate) und den
- * aktiven Snap-Marker. `vbPerPx` rechnet eine gewünschte Bildschirm-Pixelgröße in
- * viewBox-Einheiten um (bildschirmkonstante Marker). Das frühere Maß-/Winkel-HUD
- * am Cursor entfällt — die Werte zeigt jetzt ausschließlich die Befehlszeile.
+ * halbtransparente Flächen), gesetzte Stützpunkte (kleine Quadrate), den
+ * aktiven Snap-Marker, das Cursor-HUD (Länge/Winkel, VW-Stil) sowie — bei
+ * weichem Winkel-Snap (`snap.kind === "angle"`) — Winkel-Badge + verlängerte
+ * Führungslinie. `vbPerPx` rechnet eine gewünschte Bildschirm-Pixelgröße in
+ * viewBox-Einheiten um (bildschirmkonstante Marker/Schrift). Die Winkel-Info
+ * reitet auf `draft.snap` mit (refA/point/angleDeg) — kein eigenes Feld nötig,
+ * `computeSnap` liefert sie bereits vollständig.
  */
 function DraftOverlay({
   draft,
@@ -2247,7 +2250,7 @@ function DraftOverlay({
   vbPerPx,
   snapColor,
 }: {
-  draft: { preview: DraftShape[]; vertices: Vec2[]; snap?: SnapResult | null };
+  draft: ToolDraft;
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
   snapColor: string;
@@ -2292,10 +2295,137 @@ function DraftOverlay({
           />
         );
       })}
+      {/* Weicher Winkel-Snap: verlängerte gestrichelte Führungslinie + Badge
+          UNTER dem Snap-Marker (der bleibt obenauf). */}
+      {draft.snap?.kind === "angle" && draft.snap.refA && draft.snap.angleDeg != null && (
+        <AngleGuide
+          from={draft.snap.refA}
+          point={draft.snap.point}
+          angleDeg={draft.snap.angleDeg}
+          toScreen={toScreen}
+          vbPerPx={vbPerPx}
+        />
+      )}
       {/* Snap-Marker + optionale Ortho-Hilfslinie. */}
       {draft.snap && (
         <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} />
       )}
+      {/* Maß-/Winkel-HUD am Cursor (VW-Stil `L: … W: …`, oder einfacher Text). */}
+      {draft.hud && <DraftHud hud={draft.hud} toScreen={toScreen} vbPerPx={vbPerPx} />}
+    </g>
+  );
+}
+
+/**
+ * Cursor-HUD im Vectorworks-Stil: weisser Kasten, blauer Rahmen, blauer
+ * Monospace-Text. Zeigt `L:`/`W:` (Länge 3 Nachkommastellen + „m", Winkel 3
+ * Nachkommastellen + „°"), wenn beide vorhanden sind — sonst den freien
+ * `text` (Radius/Fläche/… bei Befehlen ohne Länge-Winkel-Paar). Leicht
+ * versetzt rechts-unten vom Cursorpunkt, bildschirmkonstante Größe.
+ */
+function DraftHud({
+  hud,
+  toScreen,
+  vbPerPx,
+}: {
+  hud: NonNullable<ToolDraft["hud"]>;
+  toScreen: (v: Vec2) => Vec2;
+  vbPerPx: number;
+}) {
+  const text =
+    hud.length != null && hud.angleDeg != null
+      ? `L: ${hud.length.toFixed(3)}m    W: ${hud.angleDeg.toFixed(3)}°`
+      : hud.text;
+  if (!text) return null;
+  const p = toScreen(hud.at);
+  const fontSize = 12 * vbPerPx;
+  const padX = 6 * vbPerPx;
+  const padY = 4 * vbPerPx;
+  const charW = fontSize * 0.62; // Monospace-Schätzung für die Kastenbreite
+  const w = text.length * charW + padX * 2;
+  const h = fontSize + padY * 2;
+  const x = p.x + 14 * vbPerPx;
+  const y = p.y + 14 * vbPerPx;
+  return (
+    <g className="plan-hud" pointerEvents="none">
+      <rect className="plan-hud-box" x={x} y={y} width={w} height={h} rx={2 * vbPerPx} />
+      <text
+        className="plan-hud-text"
+        x={x + padX}
+        y={y + h / 2}
+        fontSize={fontSize}
+        dominantBaseline="middle"
+      >
+        {text}
+      </text>
+    </g>
+  );
+}
+
+/**
+ * Weicher Winkel-Snap (§snapCommonAngle): gestrichelte Führungslinie vom
+ * letzten Punkt über den Cursor hinaus verlängert (dezent, wie in VW) + ein
+ * gelbliches Winkel-Badge nahe der Liniemitte.
+ */
+function AngleGuide({
+  from,
+  point,
+  angleDeg,
+  toScreen,
+  vbPerPx,
+}: {
+  from: Vec2;
+  point: Vec2;
+  angleDeg: number;
+  toScreen: (v: Vec2) => Vec2;
+  vbPerPx: number;
+}) {
+  const a = toScreen(from);
+  const b = toScreen(point);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  const dir = len > 1e-6 ? { x: dx / len, y: dy / len } : { x: 1, y: 0 };
+  const extend = 40 * vbPerPx; // Bildschirm-px, die die Führungslinie über den Cursor hinausragt
+  const end = { x: b.x + dir.x * extend, y: b.y + dir.y * extend };
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  // Senkrecht zur Linie versetzt, damit das Badge die Führungslinie nicht verdeckt.
+  const perp = { x: -dir.y, y: dir.x };
+  const badgeAt = { x: mid.x + perp.x * 10 * vbPerPx, y: mid.y + perp.y * 10 * vbPerPx };
+  const fontSize = 11 * vbPerPx;
+  const padX = 5 * vbPerPx;
+  const padY = 3 * vbPerPx;
+  const text = `${angleDeg.toFixed(3)}°`;
+  const w = text.length * fontSize * 0.62 + padX * 2;
+  const h = fontSize + padY * 2;
+  return (
+    <g className="plan-angle-guide" pointerEvents="none">
+      <line
+        className="plan-angle-guide-line"
+        x1={a.x}
+        y1={a.y}
+        x2={end.x}
+        y2={end.y}
+        vectorEffect="non-scaling-stroke"
+      />
+      <rect
+        className="plan-angle-badge-box"
+        x={badgeAt.x - w / 2}
+        y={badgeAt.y - h / 2}
+        width={w}
+        height={h}
+        rx={2 * vbPerPx}
+      />
+      <text
+        className="plan-angle-badge-text"
+        x={badgeAt.x}
+        y={badgeAt.y}
+        fontSize={fontSize}
+        textAnchor="middle"
+        dominantBaseline="middle"
+      >
+        {text}
+      </text>
     </g>
   );
 }

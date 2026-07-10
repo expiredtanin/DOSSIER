@@ -15,6 +15,7 @@ import type { DrawingLevel } from "../model/types";
 import type { SnapResult, ToolDraft } from "../tools/types";
 
 export type { DraftShape, SnapResult, ToolDraft } from "../tools/types";
+export { segmentHud, angleDegOf } from "../tools/types";
 
 // ── Eingabe-Arten ────────────────────────────────────────────────────────────
 

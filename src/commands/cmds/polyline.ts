@@ -6,7 +6,7 @@
 // Akzeptiert je Punkt Maus-Picks UND getippte Koordinaten (0,0 · r3,0 · 5<45).
 
 import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
+import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -74,14 +74,7 @@ function polyDraft(points: Vec2[], cursor: Vec2 | null, closed = false): ToolDra
   const preview: DraftShape[] = [{ kind: "poly", pts, closed: showClosed }];
   const draft: ToolDraft = { preview, vertices: points };
   const last = points[points.length - 1];
-  if (cursor && last && segLen(last, cursor) >= EPS) {
-    draft.hud = {
-      at: cursor,
-      text: `${segLen(last, cursor).toFixed(2)} m · ${Math.abs(
-        (segAngleDeg(last, cursor) + 360) % 360,
-      ).toFixed(0)}°`,
-    };
-  }
+  if (cursor && last && segLen(last, cursor) >= EPS) draft.hud = segmentHud(last, cursor);
   return draft;
 }
 

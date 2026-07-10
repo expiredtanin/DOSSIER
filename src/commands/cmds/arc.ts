@@ -73,14 +73,14 @@ function circlePts(center: Vec2, r: number): Vec2[] {
   return pts;
 }
 
-/** Vorschau (offener Bogen) + HUD (Spanne in Grad). */
+/** Vorschau (offener Bogen) + HUD (Radius als L, Spanne als W — L/W-Kästchen). */
 function arcDraft(center: Vec2, r: number, a0: number, a1: number, at: Vec2 | null): ToolDraft {
   if (r < EPS) return { preview: [], vertices: [center] };
   const preview: DraftShape[] = [{ kind: "poly", pts: arcPts(center, r, a0, a1), closed: false }];
   const draft: ToolDraft = { preview, vertices: [center] };
   if (at) {
     const deg = (sweepOf(a0, a1) * 180) / Math.PI;
-    draft.hud = { at, text: `${deg.toFixed(0)}°` };
+    draft.hud = { at, length: r, angleDeg: deg };
   }
   return draft;
 }
@@ -148,7 +148,7 @@ export const arcCommand: Command = {
           draft: {
             preview: [{ kind: "poly", pts: circlePts(s.center, r), closed: true }],
             vertices: [s.center],
-            hud: { at: point, text: `r ${r.toFixed(2)} m` },
+            hud: { at: point, text: `R: ${r.toFixed(3)}m` },
           },
         },
       ];

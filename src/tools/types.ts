@@ -35,16 +35,19 @@ export type SnapKind =
   | "onEdge"
   | "grid"
   | "ortho"
-  | "extension";
+  | "extension"
+  | "angle";
 
 export interface SnapResult {
   /** Gefangener Punkt (Meter). */
   point: Vec2;
   kind: SnapKind;
-  /** Quell-Bezugspunkt (für Hilfslinien bei ortho/extension), optional. */
+  /** Quell-Bezugspunkt (für Hilfslinien bei ortho/extension/angle), optional. */
   refA?: Vec2;
   /** Bildschirm-Distanz Cursor→Snap (px) — für die Auswahl des Besten. */
   distPx: number;
+  /** Eingerasteter Winkel in Grad, Bereich (−180,180] — nur bei kind "angle". */
+  angleDeg?: number;
 }
 
 export interface SnapSettings {
@@ -63,6 +66,10 @@ export interface SnapSettings {
   angleStep: number;
   /** Fangradius am Bildschirm in Pixeln. */
   tolerancePx: number;
+  /** Weiches Einrasten auf gängige Winkel (15°-Vielfache), wenn kein Objekt-Snap greift. */
+  commonAngles: boolean;
+  /** Toleranz (Grad) für das weiche Winkel-Einrasten. */
+  commonAngleTolerance: number;
 }
 
 /** Default-Snap-Einstellungen (endpoint/midpoint/intersection/onEdge + grid). */
@@ -78,6 +85,8 @@ export const DEFAULT_SNAP: SnapSettings = {
   ortho: false,
   angleStep: 90,
   tolerancePx: 12,
+  commonAngles: true,
+  commonAngleTolerance: 2.5,
 };
 
 // ── Werkzeug-Schnittstelle ──────────────────────────────────────────────────
@@ -148,8 +157,14 @@ export interface ToolDraft {
   vertices: Vec2[];
   /** Aktiver Snap (für den Bildschirm-Marker), optional. */
   snap?: SnapResult | null;
-  /** Optionaler Maß-/Winkel-Text am Cursor (z. B. „3.20 m · 90°"). */
-  hud?: { at: Vec2; text: string };
+  /**
+   * Maß-/Winkel-Anzeige am Cursor (Vectorworks-Stil: `L: 3.118m` + `W: 60.000°`
+   * in einem blau umrandeten Kästchen). `length`/`angleDeg` speisen die VW-Box;
+   * `text` bleibt für Befehle ohne Länge/Winkel-Paar (z. B. Radius, Fläche) als
+   * einfaches Text-Label. Beide Formen sind additiv kombinierbar (text kann als
+   * Zusatzzeile neben length/angleDeg stehen).
+   */
+  hud?: { at: Vec2; text?: string; length?: number; angleDeg?: number };
   /** Live-Messwerte (nur beim Mess-Werkzeug gesetzt) fürs Objekt-Info-Panel. */
   measure?: MeasurementReadout;
 }
@@ -216,6 +231,26 @@ export interface ToolHandlers {
   onToolCommit(): void;
   /** Aktuelle Vorschau (vom Controller gehalten). */
   draft: ToolDraft | null;
+}
+
+// ── Cursor-HUD (VW-Stil L/W-Kästchen) ────────────────────────────────────────
+
+/** Modell-Winkel atan2(dy,dx) in Grad — bereits im Bereich (−180,180] (VW-Konvention). */
+export function angleDegOf(from: Vec2, to: Vec2): number {
+  return (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
+}
+
+/**
+ * Länge+Winkel-HUD für das aktive Segment `from → to` (VW-Stil `L: … W: …`).
+ * Gemeinsamer Helper für alle Zeichenbefehle (line/polyline/wall/rect/…), damit
+ * die Formatierung/Konvention EINMAL lebt statt in jedem Befehl neu.
+ */
+export function segmentHud(from: Vec2, to: Vec2): { at: Vec2; length: number; angleDeg: number } {
+  return {
+    at: to,
+    length: Math.hypot(to.x - from.x, to.y - from.y),
+    angleDeg: angleDegOf(from, to),
+  };
 }
 
 // ── ID-Vergabe ───────────────────────────────────────────────────────────────

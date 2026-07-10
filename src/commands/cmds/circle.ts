@@ -68,7 +68,7 @@ function circleDraft(center: Vec2, r: number, at: Vec2 | null): ToolDraft {
   if (r < EPS) return { preview: [], vertices: [center] };
   const preview: DraftShape[] = [{ kind: "poly", pts: circlePts(center, r), closed: true }];
   const draft: ToolDraft = { preview, vertices: [center] };
-  if (at) draft.hud = { at, text: `r ${r.toFixed(2)} m` };
+  if (at) draft.hud = { at, text: `R: ${r.toFixed(3)}m` };
   return draft;
 }
 
