@@ -953,6 +953,13 @@ export interface Ceiling {
    */
   outline: Vec2[];
   /**
+   * Aussparungen (Löcher) im Grundriss (Meter): je Loch ein geschlossener
+   * Umriss (Schlusspunkt nicht dupliziert), VOLLSTÄNDIG innerhalb von
+   * {@link outline} — Treppenauge, Schacht, Kamindurchbruch. Wirkt in 2D
+   * (Poché-Loch + Randlinien) und 3D (Loch im Slab). Fehlt/leer ⇒ Volldecke.
+   */
+  openings?: Vec2[][];
+  /**
    * LEGACY-Verweis auf einen Aufbau-Typ aus `wallTypes` (Rückwärtskompatibilität
    * für Projekte von vor den dedizierten Deckenstilen). Nur wirksam, wenn
    * `ceilingTypeId` fehlt.
