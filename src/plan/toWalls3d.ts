@@ -50,6 +50,7 @@ import {
 import { wallVerticalExtent, ceilingVerticalExtent, columnVerticalExtent, stairVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
 import { pointInOutline } from "../geometry/ceiling";
+import { mergeHoles } from "../geometry/polygonHoles";
 import { openingInterval, openingVerticalExtent, openingJambs } from "../geometry/opening";
 import type { DetailLevel } from "../ui/TopBar";
 import { stairGeometry, stairBBox } from "../geometry/stair";
@@ -1358,7 +1359,15 @@ function emitSlabs(project: Project): RSlab[] {
     // bereits über ceilingThickness (respektiert Typ-Dicke + Übersteuerung).
     const { zBottom, zTop } = ceilingVerticalExtent(project, c);
     if (zTop - zBottom <= EPS) continue;
-    const outline = c.outline.map((p) => [p.x, p.y] as RVec2);
+    // Aussparungen (Treppenauge/Schacht) über den Brücken-Trick in EINEN
+    // einfachen Umriss-Ring einfügen — derselbe Ring für ALLE Schichten dieser
+    // Decke. Kein `openings` ⇒ unverändertes `c.outline` (exakt heutiges
+    // Verhalten). Der Ring ist paritätskorrekt fürs Ear-Clipping (render3d)
+    // UND fürs Pick (pickGeometry nutzt denselben emitSlabs-Pfad): ein Klick
+    // ins Loch trifft die Decke NICHT — das ist gewollt.
+    const openings = c.openings ?? [];
+    const mergedOutline = openings.length ? mergeHoles(c.outline, openings).ring : c.outline;
+    const outline = mergedOutline.map((p) => [p.x, p.y] as RVec2);
 
     // Geschichteter Bodenaufbau: je Schicht des Deckentyps EIN eigener Slab,
     // von oben (OK, erste Lage) nach unten (UK, letzte Lage) gestapelt und
