@@ -38,6 +38,7 @@ import {
   glazingPanesOf,
   openingLabel,
   openingsOfWall,
+  roofLayers,
   roomsOfFloor,
   sashesOfWindowType,
   stairLabel,
@@ -763,7 +764,7 @@ export function generatePlan(
   for (const roof of roofs) {
     const greyed = categoryDisplay(roof.categoryCode).greyed;
     const category = catByCode.get(roof.categoryCode);
-    addRoof(primitives, roof, greyed, category);
+    addRoof(primitives, project, roof, greyed, category);
   }
 
   // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
@@ -2567,6 +2568,7 @@ function addCeilingPoche(
  */
 function addRoof(
   out: Primitive[],
+  project: Project,
   roof: Roof,
   greyed: boolean,
   category: LayerCategory | undefined,
@@ -2574,10 +2576,26 @@ function addRoof(
   const stroke = roof.color ?? category?.color ?? POCHE_STROKE;
   const geo = roofGeometry(roof, 0);
 
-  // Unsichtbares Pick-Polygon über der Traufe-Fläche — macht das Dach über die
-  // ganze Fläche per Links-Klick selektierbar (die Dachlinien allein wären
-  // schwer exakt zu treffen). fill/stroke "none" ⇒ zeichnet nichts; PlanView
-  // testet nur die `pts` (Punkt-in-Polygon), analog Öffnung/Decke.
+  // Ansichts-Poché der Dachaufsicht: das Dach liegt ÜBER der Schnittebene und
+  // wird von oben gesehen (nicht geschnitten) → Ansichts-Schraffur
+  // (viewHatchId) der ÄUSSERSTEN Schicht (Eindeckung) des Dachtyps, analog dem
+  // Decken-Poché (Aufsicht = erste Lage). Ohne Dachtyp/viewHatchId keine
+  // Schraffur (weiss) — die Fläche bleibt trotzdem das Pick-Polygon.
+  let viewHatch = NO_HATCH;
+  const firstLayer = roofLayers(project, roof)[0];
+  if (firstLayer?.componentId) {
+    try {
+      const comp = getComponent(project, firstLayer.componentId);
+      if (comp.viewHatchId) viewHatch = resolveHatch(project, comp.viewHatchId);
+    } catch {
+      viewHatch = NO_HATCH;
+    }
+  }
+
+  // Pick-Polygon über der Traufe-Fläche (macht das Dach über die ganze Fläche
+  // per Links-Klick selektierbar) — trägt jetzt zusätzlich die Ansichts-
+  // Schraffur der Eindeckung (fill bleibt "none": keine Volltonfüllung, nur
+  // Musterlinien). PlanView testet die `pts` (Punkt-in-Polygon).
   if (geo.eaves.length >= 3) {
     out.push({
       kind: "polygon",
@@ -2585,7 +2603,7 @@ function addRoof(
       fill: "none",
       stroke: "none",
       strokeWidthMm: 0,
-      hatch: NO_HATCH,
+      hatch: viewHatch,
       greyed,
       roofId: roof.id,
     });

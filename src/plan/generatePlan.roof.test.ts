@@ -129,6 +129,33 @@ describe("generatePlan — Dächer (Dachaufsicht)", () => {
     expect(linesOf(withoutColor.primitives, "roof-eaves")[0].color).toBe("#8a4b32");
   });
 
+  it("Dachaufsicht-Poché: viewHatchId der äussersten Dachtyp-Schicht schraffiert das Pick-Polygon", () => {
+    const p: Project = {
+      ...baseProject([roof("R9", "sattel", { roofTypeId: "rt1" })]),
+      hatches: [
+        { id: "diag", name: "Diagonal", pattern: "diagonal", scale: 1, angle: 45, color: "#1a1a1a" },
+      ],
+      components: [
+        { id: "tile", name: "Ziegel", color: "#a03a2a", hatchId: "", viewHatchId: "diag", joinPriority: 1 },
+      ],
+      roofTypes: [{ id: "rt1", name: "Dach", layers: [{ componentId: "tile", thickness: 0.05 }] }],
+    };
+    const polys = generatePlan(p, "eg", visible).primitives.filter(
+      (pr): pr is Extract<typeof pr, { kind: "polygon" }> =>
+        pr.kind === "polygon" && (pr as { roofId?: string }).roofId === "R9",
+    );
+    expect(polys.length).toBe(1);
+    expect(polys[0].hatch.pattern).toBe("diagonal");
+
+    // Ohne Dachtyp: keine Schraffur (Pattern "none"), Pick-Polygon bleibt.
+    const plain = generatePlan(baseProject([roof("R10", "sattel")]), "eg", visible).primitives.filter(
+      (pr): pr is Extract<typeof pr, { kind: "polygon" }> =>
+        pr.kind === "polygon" && (pr as { roofId?: string }).roofId === "R10",
+    );
+    expect(plain.length).toBe(1);
+    expect(plain[0].hatch.pattern).toBe("none");
+  });
+
   it("Rückwärtskompatibilität: ohne Dächer (bzw. Dach auf anderem Geschoss) bleiben die Primitive unverändert", () => {
     const planNoField = generatePlan(baseProject(undefined), "eg", visible);
     const planEmpty = generatePlan(baseProject([]), "eg", visible);
