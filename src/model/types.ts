@@ -478,6 +478,13 @@ export interface DrawingLevel {
   linePoints?: [Vec2, Vec2];
   /** Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht). */
   directionSign?: 1 | -1;
+  /**
+   * Schlagschatten in der Ansicht (nur kind "elevation"). Additiv; fehlt/`false`
+   * ⇒ keine Schatten (heutiges Verhalten). Steuert `generateElevationPlan`
+   * (toElevation.ts): auskragende Bauteile werfen einen 45°-Schlagschatten auf
+   * die dahinterliegende Fassade.
+   */
+  shadows?: boolean;
 }
 
 /**
