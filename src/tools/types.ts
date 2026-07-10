@@ -164,7 +164,7 @@ export interface ToolDraft {
    * einfaches Text-Label. Beide Formen sind additiv kombinierbar (text kann als
    * Zusatzzeile neben length/angleDeg stehen).
    */
-  hud?: { at: Vec2; text?: string; length?: number; angleDeg?: number };
+  hud?: { at: Vec2; text?: string; length?: number; angleDeg?: number; dx?: number; dy?: number };
   /** Live-Messwerte (nur beim Mess-Werkzeug gesetzt) fürs Objekt-Info-Panel. */
   measure?: MeasurementReadout;
 }
@@ -251,6 +251,15 @@ export function segmentHud(from: Vec2, to: Vec2): { at: Vec2; length: number; an
     length: Math.hypot(to.x - from.x, to.y - from.y),
     angleDeg: angleDegOf(from, to),
   };
+}
+
+/**
+ * HUD für achsparallele Masse (Rechtecke, VW-Verhalten): Δx/Δy VORZEICHENBEHAFTET
+ * statt Diagonale+Winkel — die Diagonale eines Rechtecks interessiert beim
+ * Aufziehen nicht, die Kantenmasse schon.
+ */
+export function deltaHud(from: Vec2, to: Vec2): { at: Vec2; dx: number; dy: number } {
+  return { at: to, dx: to.x - from.x, dy: to.y - from.y };
 }
 
 // ── ID-Vergabe ───────────────────────────────────────────────────────────────

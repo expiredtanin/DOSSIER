@@ -2066,6 +2066,21 @@ body {
   stroke-dasharray: 5 4;
   opacity: 0.8;
 }
+/* Horizontale 0°-Referenz des Winkelbogens (dezentes Lachsrot, VW-Anlehnung). */
+.plan-svg .plan-angle-ref-line {
+  stroke: #cf8d7f;
+  stroke-width: 1;
+  stroke-dasharray: 7 5;
+  opacity: 0.8;
+}
+/* Gestrichelter Winkelbogen von der Referenz zur Strahlrichtung. */
+.plan-svg .plan-angle-arc {
+  fill: none;
+  stroke: #8a8a8a;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  opacity: 0.8;
+}
 .plan-svg .plan-angle-badge-box {
   fill: #2c2c2c;
   fill-opacity: 0.94;

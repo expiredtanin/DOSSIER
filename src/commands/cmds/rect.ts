@@ -17,7 +17,7 @@
 // werden (die Engine löst `r…` relativ zu lastPoint auf).
 
 import type { Drawing2D } from "../../model/types";
-import { segmentHud, uniqueId } from "../../tools/types";
+import { deltaHud, segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -208,7 +208,7 @@ function cornerDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [], vertices: [a] };
   const g = rectGeom(a, cursor);
   const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-  return corners4Draft(pts, segLen(a, cursor) >= EPS ? segmentHud(a, cursor) : null);
+  return corners4Draft(pts, segLen(a, cursor) >= EPS ? deltaHud(a, cursor) : null);
 }
 
 /** Vorschau des Zentrum-Rechtecks (achsparallel) — HUD zeigt die Diagonale center→cursor. */
@@ -216,7 +216,12 @@ function centerDraft(center: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [], vertices: [center] };
   const g = centerGeom(center, cursor);
   const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-  return corners4Draft(pts, segLen(center, cursor) >= EPS ? segmentHud(center, cursor) : null);
+  return corners4Draft(
+    pts,
+    segLen(center, cursor) >= EPS
+      ? { at: cursor, dx: 2 * (cursor.x - center.x), dy: 2 * (cursor.y - center.y) }
+      : null,
+  );
 }
 
 /** Vorschau der Basiskante (3-Punkt, erster Teil). */

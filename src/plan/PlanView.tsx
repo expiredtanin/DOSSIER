@@ -2447,11 +2447,22 @@ function DraftHud({
     locked: boolean;
   }
   const liveFor = (id: string): number | null =>
-    id === "length" ? (hud.length ?? null) : id === "angle" ? (hud.angleDeg ?? null) : null;
+    id === "length"
+      ? (hud.length ?? null)
+      : id === "angle"
+        ? (hud.angleDeg ?? null)
+        : id === "width"
+          ? (hud.dx ?? null)
+          : id === "height"
+            ? (hud.dy ?? null)
+            : null;
+  // Feld-Beschriftung: Länge/Winkel als L/W, Rechteck-Masse als Δx/Δy (VW).
+  const labelFor = (id: string): string =>
+    id === "length" ? "L" : id === "angle" ? "W" : id === "width" ? "Δx" : id === "height" ? "Δy" : id;
   const segs: Seg[] = [];
   if (hudFields && hudFields.fields.length > 0) {
     for (const f of hudFields.fields) {
-      const label = f.id === "length" ? "L" : f.id === "angle" ? "W" : f.id;
+      const label = labelFor(f.id);
       const unit = f.id === "angle" ? "°" : "m";
       const typedHere = f.active && hudFields.typed.trim() !== "";
       const value = typedHere
@@ -2461,6 +2472,9 @@ function DraftHud({
           : (liveFor(f.id)?.toFixed(3) ?? "—");
       segs.push({ text: `${label}: ${value}${unit}`, active: f.active, locked: f.locked });
     }
+  } else if (hud.dx != null && hud.dy != null) {
+    segs.push({ text: `Δx: ${hud.dx.toFixed(3)}m`, active: false, locked: false });
+    segs.push({ text: `Δy: ${hud.dy.toFixed(3)}m`, active: false, locked: false });
   } else if (hud.length != null && hud.angleDeg != null) {
     segs.push({ text: `L: ${hud.length.toFixed(3)}m`, active: false, locked: false });
     segs.push({ text: `W: ${hud.angleDeg.toFixed(3)}°`, active: false, locked: false });
@@ -2541,12 +2555,27 @@ function AngleGuide({
   const dy = b.y - a.y;
   const len = Math.hypot(dx, dy);
   const dir = len > 1e-6 ? { x: dx / len, y: dy / len } : { x: 1, y: 0 };
-  const extend = 40 * vbPerPx; // Bildschirm-px, die die Führungslinie über den Cursor hinausragt
+  // Führungslinie WEIT über den Cursor hinaus (VW-Verhalten: die Referenz läuft
+  // quer über den sichtbaren Ausschnitt; der SVG-Clip schneidet den Rest ab).
+  const extend = 4000 * vbPerPx;
   const end = { x: b.x + dir.x * extend, y: b.y + dir.y * extend };
-  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  // Senkrecht zur Linie versetzt, damit das Badge die Führungslinie nicht verdeckt.
-  const perp = { x: -dir.y, y: dir.x };
-  const badgeAt = { x: mid.x + perp.x * 10 * vbPerPx, y: mid.y + perp.y * 10 * vbPerPx };
+  // Winkelbogen (VW): gestrichelter Bogen von der HORIZONTALEN Referenz (0°) zur
+  // Strahlrichtung, Radius knapp innerhalb des Cursors. Screen-y läuft nach
+  // unten → der Screen-Winkel ist der negierte Modellwinkel; für den Bogenpfad
+  // rechnen wir direkt mit Screen-Vektoren.
+  const screenAng = Math.atan2(dy, dx); // (−π, π], y-down
+  const r = Math.min(len * 0.85, 160 * vbPerPx);
+  const arcStart = { x: a.x + r, y: a.y };
+  const arcEnd = { x: a.x + r * Math.cos(screenAng), y: a.y + r * Math.sin(screenAng) };
+  const sweep = screenAng > 0 ? 1 : 0; // y-down: positiver Screen-Winkel = im Uhrzeigersinn
+  const arcPath = `M ${arcStart.x} ${arcStart.y} A ${r} ${r} 0 0 ${sweep} ${arcEnd.x} ${arcEnd.y}`;
+  // Horizontale Referenz-Strichellinie (0°-Basis des Bogens), etwas über den
+  // Bogen hinaus.
+  const refEnd = { x: a.x + r + 60 * vbPerPx, y: a.y };
+  // Badge aussen am Bogen bei halbem Winkel (VW-Position).
+  const halfAng = screenAng / 2;
+  const badgeR = r + 22 * vbPerPx;
+  const badgeAt = { x: a.x + badgeR * Math.cos(halfAng), y: a.y + badgeR * Math.sin(halfAng) };
   const fontSize = 11 * vbPerPx;
   const padX = 5 * vbPerPx;
   const padY = 3 * vbPerPx;
@@ -2563,6 +2592,17 @@ function AngleGuide({
         y2={end.y}
         vectorEffect="non-scaling-stroke"
       />
+      <line
+        className="plan-angle-ref-line"
+        x1={a.x}
+        y1={a.y}
+        x2={refEnd.x}
+        y2={refEnd.y}
+        vectorEffect="non-scaling-stroke"
+      />
+      {len > 24 * vbPerPx && Math.abs(screenAng) > 0.02 && (
+        <path className="plan-angle-arc" d={arcPath} vectorEffect="non-scaling-stroke" />
+      )}
       <rect
         className="plan-angle-badge-box"
         x={badgeAt.x - w / 2}
