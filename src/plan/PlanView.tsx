@@ -2483,7 +2483,7 @@ function DraftHud({
   let cx = x + padX;
   return (
     <g className="plan-hud" pointerEvents="none">
-      <rect className="plan-hud-box" x={x} y={y} width={w} height={h} rx={2 * vbPerPx} />
+      <rect className="plan-hud-box" x={x} y={y} width={w} height={h} rx={6 * vbPerPx} />
       {segs.map((s, i) => {
         const sx = cx;
         cx += widths[i] + gap;
@@ -2496,7 +2496,7 @@ function DraftHud({
                 y={y + 1.5 * vbPerPx}
                 width={widths[i] + 4 * vbPerPx}
                 height={h - 3 * vbPerPx}
-                rx={2 * vbPerPx}
+                rx={5 * vbPerPx}
               />
             )}
             <text
@@ -2569,7 +2569,7 @@ function AngleGuide({
         y={badgeAt.y - h / 2}
         width={w}
         height={h}
-        rx={2 * vbPerPx}
+        rx={6 * vbPerPx}
       />
       <text
         className="plan-angle-badge-text"
