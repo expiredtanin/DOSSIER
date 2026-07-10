@@ -581,6 +581,9 @@ export default function App() {
   const selectedRoofIds = useStore((s) => s.selectedRoofIds);
   const setSelectedRoofIds = useStore((s) => s.setSelectedRoofIds);
   const selectedRoofId = selectedRoofIds.length === 1 ? selectedRoofIds[0] : null;
+  // Schnitt-/Ansichtslinien-Auswahl (Einzel-DrawingLevel-Id oder null).
+  const selectedSectionLineId = useStore((s) => s.selectedSectionLineId);
+  const setSelectedSectionLineId = useStore((s) => s.setSelectedSectionLineId);
   const updateRoof = useStore((s) => s.updateRoof);
   const moveRoofGrip = useStore((s) => s.moveRoofGrip);
   const moveRoofBy = useStore((s) => s.moveRoofBy);
@@ -634,6 +637,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedSectionLineId(null);
     setMenu(null);
     setEditor(null);
   }, [activeLevelId]);
@@ -1897,6 +1901,7 @@ export default function App() {
         setSelectedExtrudedSolidIds([]);
         setSelectedColumnIds([]);
         setSelectedRoofIds([]);
+        setSelectedSectionLineId(null);
         e.preventDefault();
       }
     };
@@ -3474,6 +3479,7 @@ export default function App() {
           setSelectedExtrudedSolidIds([]);
           setSelectedColumnIds([]);
           setSelectedRoofIds([]);
+          setSelectedSectionLineId(null);
           switch (kind) {
             case "Wand":
               setSelectedWallIds([id]);
@@ -4333,6 +4339,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedSectionLineId(null);
     setStampEditorRoomId(roomId);
   };
   // Doppelklick auf ein Text-2D-Element: selektieren + Inhalts-Editor öffnen.
@@ -4348,6 +4355,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedSectionLineId(null);
     setEditTextId(drawingId);
   };
   // Bearbeiteten Text-Inhalt übernehmen (immutabel; nur bei Text-Geometrie).
@@ -4372,6 +4380,13 @@ export default function App() {
     // Rest behalten (Wände und 2D-Zeichnungen unabhängig, gemischte Auswahl
     // erlaubt). Leerraum-Klick mit Shift lässt die Auswahl unverändert.
     if (sel.shift) {
+      // Schnittlinie ist Einzelauswahl — Shift+Klick togglet sie an/aus.
+      if (sel.sectionLineId) {
+        setSelectedSectionLineId(
+          selectedSectionLineId === sel.sectionLineId ? null : sel.sectionLineId,
+        );
+        return;
+      }
       if (sel.wallId) {
         const id = sel.wallId;
         setSelectedWallIds(
@@ -4453,8 +4468,12 @@ export default function App() {
       if (keep !== "extrudedSolid") setSelectedExtrudedSolidIds([]);
       if (keep !== "column") setSelectedColumnIds([]);
       if (keep !== "roof") setSelectedRoofIds([]);
+      if (keep !== "sectionLine") setSelectedSectionLineId(null);
     };
-    if (sel.openingId) {
+    if (sel.sectionLineId) {
+      setSelectedSectionLineId(sel.sectionLineId);
+      clearOthers("sectionLine");
+    } else if (sel.openingId) {
       setSelectedOpeningIds([sel.openingId]);
       clearOthers("opening");
     } else if (sel.wallId) {
@@ -4499,6 +4518,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedSectionLineId(null);
   };
   // Rechts-Klick im Grundriss: Wand-Kontextmenü. Trifft der Klick eine Wand, die
   // NICHT bereits in der Auswahl ist, wird die Auswahl auf sie gesetzt (damit die
@@ -4525,6 +4545,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedSectionLineId(null);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Treppe wählen (Einzelauswahl).
@@ -4539,6 +4560,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedSectionLineId(null);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Decke wählen (Einzelauswahl).
@@ -4553,6 +4575,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedSectionLineId(null);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Öffnung wählen (Einzelauswahl).
@@ -4567,6 +4590,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedSectionLineId(null);
     }
   };
   // Links-KLICK im Nordstern-3D-Viewport (WASM, TS-Raycast): getroffenes Bauteil
@@ -4586,6 +4610,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedSectionLineId(null);
       return;
     }
     // Öffnung (Fenster/Tür) und Treppe sind jetzt auch im WASM-Viewport pickbar
@@ -4601,6 +4626,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedSectionLineId(null);
       return;
     }
     if (hit.kind === "stair") {
@@ -4613,6 +4639,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedSectionLineId(null);
       return;
     }
     if (hit.kind === "roof") {
@@ -4645,6 +4672,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedSectionLineId(null);
   };
   // Rechts-Klick im 3D: Wand-Kontextmenü an der Cursorposition.
   const onViewportContextMenu = (info: ViewportContextInfo) => {
@@ -4930,6 +4958,7 @@ export default function App() {
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
+          selectedSectionLineId={selectedSectionLineId}
           roomStamp={roomStamp}
           onStampMove={moveRoomStamp}
           onStampEdit={onOpenStampEditor}
@@ -6063,6 +6092,7 @@ function Content({
   selectedColumnIds,
   selectedRoomIds,
   selectedRoofIds,
+  selectedSectionLineId,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -6141,6 +6171,7 @@ function Content({
   selectedColumnIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
+  selectedSectionLineId: string | null;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -6258,6 +6289,7 @@ function Content({
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
+          selectedSectionLineId={selectedSectionLineId}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -6313,6 +6345,7 @@ function Content({
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
+          selectedSectionLineId={selectedSectionLineId}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -6408,6 +6441,7 @@ function Content({
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
+          selectedSectionLineId={selectedSectionLineId}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -6453,6 +6487,7 @@ function LevelPlanView({
   selectedColumnIds,
   selectedRoomIds,
   selectedRoofIds,
+  selectedSectionLineId,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -6491,6 +6526,7 @@ function LevelPlanView({
   selectedColumnIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
+  selectedSectionLineId: string | null;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -6568,6 +6604,7 @@ function LevelPlanView({
         selectedColumnIds={selectedColumnIds}
         selectedRoomIds={selectedRoomIds}
         selectedRoofIds={selectedRoofIds}
+        selectedSectionLineIds={selectedSectionLineId ? [selectedSectionLineId] : []}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
@@ -6621,6 +6658,7 @@ function SectionPlanView({
   selectedColumnIds,
   selectedRoomIds,
   selectedRoofIds,
+  selectedSectionLineId,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -6655,6 +6693,7 @@ function SectionPlanView({
   selectedColumnIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
+  selectedSectionLineId: string | null;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -6742,6 +6781,7 @@ function SectionPlanView({
         selectedColumnIds={selectedColumnIds}
         selectedRoomIds={selectedRoomIds}
         selectedRoofIds={selectedRoofIds}
+        selectedSectionLineIds={selectedSectionLineId ? [selectedSectionLineId] : []}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
