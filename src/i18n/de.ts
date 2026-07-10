@@ -366,6 +366,8 @@ export const de = {
   "objinfo.ceiling.top": "Oberkante (OK)",
   "objinfo.ceiling.bottom": "Unterkante (UK)",
   "objinfo.ceiling.height": "Dicke (OK−UK)",
+  "objinfo.ceiling.openings": "Aussparungen",
+  "objinfo.ceiling.removeOpening": "Aussparung entfernen",
   "objinfo.ceiling.area": "Fläche",
   "objinfo.ceiling.anchorFloor": "Gebunden",
   "objinfo.ceiling.anchorCustom": "Eigene",

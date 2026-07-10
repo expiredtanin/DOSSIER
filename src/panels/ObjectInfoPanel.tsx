@@ -1050,6 +1050,33 @@ export function CeilingSection({
         <span className="objinfo-fval">{ceiling.volume.toFixed(2)} m³</span>
       </div>
 
+      {/* Aussparungen (Treppenauge/Schacht) — Liste mit Entfernen je Loch.
+          Anlegen über den Befehl „Deckenloch" (BIM-Ribbon). */}
+      {ceiling.openings.length > 0 && (
+        <>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.ceiling.openings")}</span>
+            <span className="objinfo-fval">{ceiling.openings.length}</span>
+          </div>
+          {ceiling.openings.map((o, i) => (
+            <div className="objinfo-field" key={i}>
+              <span className="objinfo-flabel objinfo-muted">
+                {`${i + 1}: ${o.width.toFixed(2)} × ${o.depth.toFixed(2)} m`}
+              </span>
+              <button
+                type="button"
+                className="objinfo-typebtn"
+                title={t("objinfo.ceiling.removeOpening")}
+                aria-label={t("objinfo.ceiling.removeOpening")}
+                onClick={() => host.onRemoveCeilingOpening(i)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+
       <div className="objinfo-sep" />
 
       {/* OK der Decke: an Geschoss gebunden ODER eigene Höhe. */}

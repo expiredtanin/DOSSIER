@@ -196,6 +196,8 @@ export interface CeilingInfo {
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
+  /** Aussparungen (Treppenauge/Schacht) als BBox-Masse, Reihenfolge = Modell. */
+  openings: { width: number; depth: number }[];
 }
 
 /**
@@ -606,6 +608,11 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     bottom: ceiling.bottom,
     zBottom,
     zTop,
+    // Aussparungen als anzeigefertige BBox-Masse (Breite × Tiefe je Loch).
+    openings: (ceiling.openings ?? []).map((hole) => {
+      const bb = outlineBBox(hole);
+      return { width: bb.maxX - bb.minX, depth: bb.maxY - bb.minY };
+    }),
   };
   return {
     kind: "ceiling",

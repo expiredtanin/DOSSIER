@@ -3238,6 +3238,14 @@ export default function App() {
         if (selection?.kind === "ceiling")
           setCeilingThickness(selection.id, thickness);
       },
+      onRemoveCeilingOpening: (index) => {
+        if (selection?.kind !== "ceiling") return;
+        const c = (project.ceilings ?? []).find((x) => x.id === selection.id);
+        if (!c?.openings || index < 0 || index >= c.openings.length) return;
+        updateCeiling(selection.id, {
+          openings: c.openings.filter((_, i) => i !== index),
+        });
+      },
       onSetCeilingTop: (anchor) => {
         if (selection?.kind === "ceiling")
           updateCeiling(selection.id, { top: anchor ?? undefined });

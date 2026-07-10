@@ -366,6 +366,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.ceiling.top": "Top (OK)",
   "objinfo.ceiling.bottom": "Bottom (UK)",
   "objinfo.ceiling.height": "Thickness (OK−UK)",
+  "objinfo.ceiling.openings": "Openings",
+  "objinfo.ceiling.removeOpening": "Remove opening",
   "objinfo.ceiling.area": "Area",
   "objinfo.ceiling.anchorFloor": "Bound",
   "objinfo.ceiling.anchorCustom": "Custom",

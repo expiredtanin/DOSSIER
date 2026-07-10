@@ -275,6 +275,8 @@ export interface PanelHostValue {
   onSetCeilingType: (ceilingTypeId: string) => void;
   /** Setzt die Gesamtdicke der Decke (Meter, thickness-Übersteuerung). */
   onSetCeilingThickness: (thickness: number) => void;
+  /** Entfernt die Aussparung mit Index `index` der selektierten Decke. */
+  onRemoveCeilingOpening: (index: number) => void;
   /** Setzt/entfernt die OK-Bindung der Decke (`null` = Geschoss-Oberkante). */
   onSetCeilingTop: (anchor: VerticalAnchor | null) => void;
   /**
