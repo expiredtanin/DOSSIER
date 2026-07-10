@@ -42,6 +42,7 @@ import {
   RoomSection,
   ExtrudedSolidSection,
   ColumnSection,
+  SectionLineSection,
 } from "./ObjectInfoPanel";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
@@ -92,10 +93,15 @@ export function AttributesPanel() {
   // Leerzustand: der Typ-Picker (falls ein Bauteil-Werkzeug aktiv ist), sonst ein
   // kompakter Hinweis.
   if (sel === null) {
+    // Schnitt-/Ansichtslinie ist kein Projekt-Bauteil (kein `selection`) — sie
+    // kommt über host.sectionLine und wird hier im „Leerzustand" bearbeitet.
     return (
       <div className="attr-panel">
         {typeSection}
-        {!typeSection && <div className="attr-empty">{t("attr.empty")}</div>}
+        {host.sectionLine && <SectionLineSection level={host.sectionLine} host={host} />}
+        {!typeSection && !host.sectionLine && (
+          <div className="attr-empty">{t("attr.empty")}</div>
+        )}
       </div>
     );
   }

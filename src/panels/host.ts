@@ -330,6 +330,25 @@ export interface PanelHostValue {
    */
   onSetRoofPatch: (patch: Partial<import("../model/types").Roof>) => void;
 
+  // ── Schnitt-/Ansichtslinie (Object-Info-Panel; nur die selektierte Linie) ──
+  /**
+   * Die aktuell gewählte Schnitt-/Ansichtsebene (DrawingLevel, kind
+   * "section"/"elevation"), oder `null`. Das Object-Info-Panel zeigt ihre
+   * Attribute (Name, Blickrichtung, Endpunkte, Tiefe), auch wenn `selection`
+   * null ist (eine Schnittlinie ist KEIN Projekt-Bauteil).
+   */
+  sectionLine: DrawingLevel | null;
+  /**
+   * Immutable Änderung einer Schnitt-/Ansichtslinie (Name/directionSign/
+   * linePoints/depth) — wirkt NUR auf die selektierte Linie.
+   */
+  onSetSectionLinePatch: (patch: Partial<DrawingLevel>) => void;
+  /**
+   * Löscht die Schnittlinie der gewählten Ebene (`linePoints` = undefined); die
+   * Ebene selbst bleibt bestehen (der Schnitt zeigt dann wieder den Hinweis).
+   */
+  onDeleteSectionLine: () => void;
+
   // ── Treppen-Attribute (Object-Info-Panel; nur die selektierte Treppe) ───
   /** Setzt die Grundform (gerade/L/Wendel). */
   onSetStairShape: (shape: StairShape) => void;

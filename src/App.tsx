@@ -1856,6 +1856,13 @@ export default function App() {
       }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       if (activeTransform) return; // während einer Transformation nicht löschen
+      // Schnittlinie: Entf löscht NUR ihre Linie (linePoints), die Ebene bleibt.
+      if (selectedSectionLineId) {
+        patchLevel(selectedSectionLineId, { linePoints: undefined });
+        setSelectedSectionLineId(null);
+        e.preventDefault();
+        return;
+      }
       if (
         selectedDrawingIds.length ||
         selectedWallIds.length ||
@@ -1918,6 +1925,7 @@ export default function App() {
     selectedExtrudedSolidIds,
     selectedColumnIds,
     selectedRoofIds,
+    selectedSectionLineId,
     project.walls,
     project.drawings2d,
     project.ceilings,
@@ -2711,6 +2719,21 @@ export default function App() {
     ],
   );
 
+  // Gewählte Schnitt-/Ansichtslinie (DrawingLevel) — separat von `selection`, da
+  // eine Schnittlinie KEIN Projekt-Bauteil ist. Speist die Schnittlinien-Sektion
+  // des Object-Info-Panels.
+  const sectionLine = useMemo(
+    () =>
+      selectedSectionLineId
+        ? project.drawingLevels.find(
+            (z) =>
+              z.id === selectedSectionLineId &&
+              (z.kind === "section" || z.kind === "elevation"),
+          ) ?? null
+        : null,
+    [project.drawingLevels, selectedSectionLineId],
+  );
+
   // ── DXF/DWG-Import (Dialog) ───────────────────────────────────────────────
   // Eine Datei (Button ODER Drop) öffnet den modalen Import-Dialog. DXF wird als
   // Text geparst, DWG als ArrayBuffer über LibreDWG-WASM (lazy, asynchron); beide
@@ -3323,6 +3346,14 @@ export default function App() {
       onSetRoofPatch: (patch) => {
         if (selection?.kind === "roof") updateRoof(selection.id, patch);
       },
+      // ── Schnitt-/Ansichtslinie (nur bei selektierter Linie) ────────────────
+      sectionLine,
+      onSetSectionLinePatch: (patch) => {
+        if (selectedSectionLineId) patchLevel(selectedSectionLineId, patch);
+      },
+      onDeleteSectionLine: () => {
+        if (selectedSectionLineId) patchLevel(selectedSectionLineId, { linePoints: undefined });
+      },
       // ── Treppen-Attribute (nur bei selektierter Treppe) ────────────────────
       onSetStairShape: (shape) => {
         if (selection?.kind === "stair") updateStair(selection.id, { shape });
@@ -3853,6 +3884,8 @@ export default function App() {
     detail,
     scaleDenominator,
     selection,
+    sectionLine,
+    selectedSectionLineId,
     selectedViewSnapshotId,
   ]);
 
