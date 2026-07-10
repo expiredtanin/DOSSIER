@@ -340,7 +340,18 @@ export const sampleProject: Project = {
       linePoints: [{ x: -1, y: 2 }, { x: 6, y: 2 }],
       directionSign: 1,
     },
-    { id: "ansicht-sued", name: "Ansicht Süd", kind: "elevation", visible: true, locked: false },
+    {
+      id: "ansicht-sued",
+      name: "Ansicht Süd",
+      kind: "elevation",
+      visible: true,
+      locked: false,
+      // Ansichtslinie südlich des Demo-Hauses, Blick nach Norden (+y) — damit
+      // die Demo-Ansicht sofort rendert (analog zur gesäten Schnitt-A-Linie).
+      linePoints: [{ x: -1, y: -2 }, { x: 6, y: -2 }],
+      directionSign: 1,
+      shadows: true,
+    },
     { id: "detail-1", name: "Detail 1", kind: "drawing", visible: true, locked: false },
   ]),
   // Grafik-Kategorie-Baum (DOSSIER-Codes 1:1).
