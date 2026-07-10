@@ -627,7 +627,7 @@ export const de = {
   "section.loading": "{kind} wird berechnet …",
   "section.empty": "{kind} — keine Schnittlinie im Grundriss gesetzt",
   "section.error": "{kind} — Berechnung fehlgeschlagen (render3d-WASM neu bauen?)",
-  "section.legend": "{kind} · abgeleitete Projektion (render3d)",
+  "section.legend": "{kind} · abgeleitete Projektion aus dem Modell",
   "elevation.shadows": "Schatten",
   "elevation.shadows.hint": "Schlagschatten auskragender Bauteile (45°) in der Ansicht ein-/ausblenden",
   "props.floorHeight": "Geschosshöhe",

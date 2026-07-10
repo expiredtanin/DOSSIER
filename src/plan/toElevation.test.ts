@@ -46,8 +46,9 @@ describe("toElevation — Projektion + Culling", () => {
     const p = projectPoint(frame, [4, 3, -0.1]);
     expect(p.v).toBeCloseTo(3, 6); // v = absolute Höhe
     expect(p.depth).toBeCloseTo(1.9, 6); // −0.1 − (−2) = 1.9 hinter der Ebene
-    // u = dot(rel, U); U = [−1, 0, 0], P.x = −1 → u = −(4 − (−1)) = −5.
-    expect(p.u).toBeCloseTo(-5, 6);
+    // u = dot(rel, U); U (entspiegelt, Blick +z ⇒ rechts = +x) = [1, 0, 0],
+    // P.x = −1 → u = 4 − (−1) = 5.
+    expect(p.u).toBeCloseTo(5, 6);
   });
 
   it("Süd-Langseite einer Wand: erwartetes (u, v)-Rechteck + Tiefe, Rückseite gecullt", () => {
@@ -62,8 +63,8 @@ describe("toElevation — Projektion + Culling", () => {
     expect(face.wallId).toBe("W");
     const us = face.pts.map((p) => p[0]);
     const vs = face.pts.map((p) => p[1]);
-    expect(Math.min(...us)).toBeCloseTo(-5, 6); // x=4 → u=−5 (P.x=−1)
-    expect(Math.max(...us)).toBeCloseTo(-1, 6); // x=0 → u=−1
+    expect(Math.min(...us)).toBeCloseTo(1, 6); // x=0 → u=1 (P.x=−1)
+    expect(Math.max(...us)).toBeCloseTo(5, 6); // x=4 → u=5
     expect(Math.min(...vs)).toBeCloseTo(0, 6);
     expect(Math.max(...vs)).toBeCloseTo(3, 6);
     expect(face.depth).toBeCloseTo(1.9, 6);

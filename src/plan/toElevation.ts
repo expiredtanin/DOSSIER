@@ -42,7 +42,7 @@ import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d } from "./toWalls3d";
 import type { RModel3d, RSlab, RWall } from "./toWalls3d";
-import { sectionPlaneFromLevel, sectionUAxisModel } from "./toSection";
+import { sectionPlaneFromLevel } from "./toSection";
 import type { SectionPlaneSpec } from "./toSection";
 import type { HatchRender, Plan, Primitive } from "./generatePlan";
 
@@ -76,9 +76,12 @@ const SHADOW_FILL = "#8f959e";
 const GROUND_INK = "#1f242c";
 /** Strichstärke der Bodenlinie (mm Papier). */
 const GROUND_MM = 0.5;
-/** Fassaden-Fläche: hellste (nächste) und dunkelste (fernste) Graustufe. */
-const FILL_NEAR_L = 0.96;
-const FILL_FAR_L = 0.82;
+/** Rollen-Füllungen: EINE ruhige Fassadenfläche statt Tiefen-Patchworks —
+ *  klassische Architektur-Ansicht (Flächen tragen, Kanten nur wo bedeutsam:
+ *  Dachrand, Öffnungen, Bodenlinie). Wand/Decke identisch (Decken-Stirnflächen
+ *  verschwinden optisch in der Fassade), Dach eine Stufe dunkler. */
+const WALL_FILL = "#ecebe8";
+const ROOF_FILL = "#d9d6d1";
 
 /** Sonnenrichtung als (u, v)-Schattenversatz je Tiefeneinheit: 45° von links
  *  oben ⇒ Schatten fällt nach rechts unten (+u, −v). */
@@ -113,9 +116,14 @@ export function elevationFrame(plane: SectionPlaneSpec): ElevationFrame {
   const [nx, ny, nz] = plane.normal;
   const nLen = Math.hypot(nx, ny, nz) || 1;
   const N: V3 = [nx / nLen, ny / nLen, nz / nLen];
-  const uModel = sectionUAxisModel(plane); // Modell-2D (x, z)
-  const ux = uModel.x;
-  const uz = uModel.y;
+  // Blickrichtungs-RECHTS statt der Schnitt-u-Achse: `sectionUAxisModel`
+  // (cross(N, up), die Kamera-Formel für Blick entlang −z) SPIEGELT eine
+  // Ansicht, die entlang +N betrachtet wird — wer nach Norden schaut, hat
+  // Osten rechts. Die Ansicht nutzt darum u = cross(up, N) = (Nz, −Nx) im
+  // Grundriss. (Die Schnitt-Pipeline behält vorerst ihre Rust-Konvention —
+  // dort ist die Spiegelung ein bekanntes, separat zu lösendes Thema.)
+  const ux = nz / nLen;
+  const uz = -nx / nLen;
   const uLen = Math.hypot(ux, uz) || 1;
   const U: V3 = [ux / uLen, 0, uz / uLen];
   return { P: plane.point, N, U };
@@ -274,6 +282,8 @@ export interface ProjectedFace {
   pts: Array<[number, number]>;
   /** Mittlere Tiefe hinter der Ebene (Painter-Schlüssel). */
   depth: number;
+  /** Kleinste Punkt-Tiefe (nächste Kante — z. B. die auskragende Traufe). */
+  depthMin: number;
   role: FaceRole;
   wallId?: string;
   ceilingId?: string;
@@ -291,14 +301,16 @@ export function projectFace(frame: ElevationFrame, face: WorldFace): ProjectedFa
   if (facing >= -FACING_EPS) return null; // Rückseite oder streifend → unsichtbar
   const pts: Array<[number, number]> = [];
   let depthSum = 0;
+  let depthMin = Infinity;
   for (const w of face.poly) {
     const p = projectPoint(frame, w);
     pts.push([p.u, p.v]);
     depthSum += p.depth;
+    depthMin = Math.min(depthMin, p.depth);
   }
   const depth = depthSum / face.poly.length;
   if (depth <= EPS) return null; // vor der Ebene → ignorieren
-  return { pts, depth, role: face.role, wallId: face.wallId, ceilingId: face.ceilingId, roofId: face.roofId };
+  return { pts, depth, depthMin, role: face.role, wallId: face.wallId, ceilingId: face.ceilingId, roofId: face.roofId };
 }
 
 /**
@@ -564,14 +576,22 @@ interface ShadowPoly {
  * die geforderten Fälle (Dachüberstand/Traufe, auskragende Decke/Balkon) ab;
  * schräge Auskragungen werden als achsparalleles Band angenähert.
  */
+/** Maximale Schatten-Tiefendifferenz (Meter): tiefer liegende Empfänger (ferne
+ *  Innen-/Rückwände) bekämen sonst raumhohe Schatten-Parallelogramme —
+ *  gezeichnet wird der klassische Bauteil-Schlagschatten (Traufe, Balkon),
+ *  nicht die globale Verschattung. */
+const MAX_SHADOW_DELTA = 1.2;
+
 export function buildShadows(walls: ProjectedFace[], slabs: ProjectedFace[]): ShadowPoly[] {
   const out: ShadowPoly[] = [];
   for (const slab of slabs) {
     const so = bboxOf(slab.pts);
     for (const wall of walls) {
       const wo = bboxOf(wall.pts);
-      const delta = wall.depth - slab.depth; // Wand hinter dem Überstand?
-      if (delta <= EPS) continue;
+      // Werfer-Tiefe = NÄCHSTE Kante (depthMin): bei geneigten Dachflächen ist
+      // das die auskragende Traufe — der Bezug für die Schattentiefe.
+      const delta = wall.depth - slab.depthMin; // Wand hinter dem Überstand?
+      if (delta <= EPS || delta > MAX_SHADOW_DELTA) continue;
       // u-Überlapp Überstand/Wand?
       if (so.uMax <= wo.uMin + EPS || so.uMin >= wo.uMax - EPS) continue;
       // Der Schatten hängt an der Slab-Unterkante (so.vMin) und fällt um Δ nach
@@ -598,13 +618,6 @@ export interface ElevationOptions {
   shadows?: boolean;
   /** Schwarz-Weiss-Modus (neutralisierte Füllungen). */
   mono?: boolean;
-}
-
-/** Graustufen-Hex aus einer Helligkeit 0..1. */
-function greyHex(l: number): string {
-  const c = Math.max(0, Math.min(255, Math.round(l * 255)));
-  const h = c.toString(16).padStart(2, "0");
-  return `#${h}${h}${h}`;
 }
 
 /**
@@ -644,17 +657,11 @@ export function generateElevationPlan(
     if (y > maxY) maxY = y;
   };
 
-  // Tiefenbereich für die Graustufen-Staffelung (nah hell, fern dunkel).
-  let dMin = Infinity, dMax = -Infinity;
-  for (const f of faces) {
-    if (f.depth < dMin) dMin = f.depth;
-    if (f.depth > dMax) dMax = f.depth;
-  }
-  const dSpan = dMax - dMin;
-  const fillFor = (depth: number): string => {
+  // Rollen-Füllung: Fassade/Decke einheitlich, Dach eine Stufe dunkler —
+  // KEINE Tiefenstaffelung (die machte aus der Fassade ein Grau-Patchwork).
+  const fillFor = (role: FaceRole): string => {
     if (mono) return "#ffffff";
-    const t = dSpan > EPS ? (depth - dMin) / dSpan : 0; // 0 = nah, 1 = fern
-    return greyHex(FILL_NEAR_L + (FILL_FAR_L - FILL_NEAR_L) * t);
+    return role === "roof" ? ROOF_FILL : WALL_FILL;
   };
 
   // ── Painter-Sammelstrom: Flächen + Schatten + Öffnungen, fern→nah sortiert.
@@ -663,6 +670,8 @@ export function generateElevationPlan(
   interface Item {
     depth: number;
     seq: number;
+    /** Zeichen-Rang bei Tiefen-Gleichstand (Decke < Wand < Dach < Deko). */
+    rank?: number;
     prim: Primitive;
   }
   const items: Item[] = [];
@@ -673,15 +682,22 @@ export function generateElevationPlan(
       acc(u, v);
       return { x: u, y: v };
     });
+    const isRoof = f.role === "roof";
     items.push({
       depth: f.depth,
       seq: seq++,
+      // Painter-Gleichstand (bündige Flächen, z. B. Decken-Stirn in der
+      // Fassadenebene): Decke vor Wand vor Dach zeichnen, damit die Wand die
+      // Stirnstreifen überdeckt.
+      rank: f.role === "slab" ? 0 : f.role === "wall" ? 1 : 2,
       prim: {
         kind: "polygon",
         pts,
-        fill: fillFor(f.depth),
-        stroke: EDGE_INK,
-        strokeWidthMm: EDGE_MM,
+        fill: fillFor(f.role),
+        // Nur das Dach trägt eine Kontur — die Fassade bleibt EINE ruhige
+        // Fläche (ihr Rand liest sich über den Kontrast zum Papier).
+        stroke: isRoof ? EDGE_INK : "none",
+        strokeWidthMm: isRoof ? EDGE_MM : 0,
         hatch: NO_HATCH,
         ...(f.wallId ? { wallId: f.wallId } : {}),
         ...(f.ceilingId ? { ceilingId: f.ceilingId } : {}),
@@ -735,7 +751,9 @@ export function generateElevationPlan(
   }
 
   // Painter: fern (grosse Tiefe) zuerst, nah zuletzt. Stabiler Tiebreak über seq.
-  items.sort((a, b) => (b.depth - a.depth) || (a.seq - b.seq));
+  items.sort(
+    (a, b) => (b.depth - a.depth) || ((a.rank ?? 3) - (b.rank ?? 3)) || (a.seq - b.seq),
+  );
   for (const it of items) primitives.push(it.prim);
 
   // Bodenlinie (Terrain-/Nulllinie): kräftige Linie über die volle Breite an der
