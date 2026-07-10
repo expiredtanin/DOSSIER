@@ -266,6 +266,8 @@ export const de = {
   // Objekt-Info-Palette (ObjectInfoPanel)
   "objinfo.title": "Objekt-Info",
   "objinfo.empty": "Kein Objekt gewählt",
+  "objinfo.category": "Klasse",
+  "objinfo.level": "Ebene",
   "objinfo.refpoint": "Bezugspunkt",
   "objinfo.setRefpoint": "Bezugspunkt wählen",
   "objinfo.x": "X",

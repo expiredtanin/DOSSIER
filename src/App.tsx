@@ -3076,6 +3076,59 @@ export default function App() {
         if (!sel2) return;
         commitTransformOn(sel2, "move", [{ x: 0, y: 0 }, { x: dx, y: dy }], "move", 1);
       },
+      // Objektinfo-Kopf: Klasse (Grafik-Kategorie) + Zeichnungsebene ändern
+      // (VW-Muster „Klasse"/„Ebene"). Je Elementart der passende Store-Weg.
+      onSetSelectionCategory: (code) => {
+        if (!selection || !code) return;
+        const id = selection.id;
+        switch (selection.kind) {
+          case "wall": updateWall(id, { categoryCode: code }); break;
+          case "ceiling": updateCeiling(id, { categoryCode: code }); break;
+          case "roof": updateRoof(id, { categoryCode: code }); break;
+          case "opening": updateOpening(id, { categoryCode: code }); break;
+          case "stair": updateStair(id, { categoryCode: code }); break;
+          case "room": updateRoom(id, { categoryCode: code }); break;
+          case "drawing2d": updateDrawing2D(id, { categoryCode: code }); break;
+          case "column":
+            setProject((p) => ({
+              ...p,
+              columns: (p.columns ?? []).map((c) =>
+                c.id === id ? { ...c, categoryCode: code } : c,
+              ),
+            }));
+            break;
+          default: break; // extrudedSolid/door: keine Kategorie am Element
+        }
+      },
+      onSetSelectionLevel: (levelId) => {
+        if (!selection || !levelId) return;
+        const id = selection.id;
+        switch (selection.kind) {
+          case "wall": updateWall(id, { floorId: levelId }); break;
+          case "ceiling": updateCeiling(id, { floorId: levelId }); break;
+          case "roof": updateRoof(id, { floorId: levelId }); break;
+          case "stair": updateStair(id, { floorId: levelId }); break;
+          case "room": updateRoom(id, { floorId: levelId }); break;
+          case "drawing2d": updateDrawing2D(id, { levelId }); break;
+          case "extrudedSolid":
+            setProject((p) => ({
+              ...p,
+              extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
+                s.id === id ? { ...s, levelId } : s,
+              ),
+            }));
+            break;
+          case "column":
+            setProject((p) => ({
+              ...p,
+              columns: (p.columns ?? []).map((c) =>
+                c.id === id ? { ...c, floorId: levelId } : c,
+              ),
+            }));
+            break;
+          default: break; // opening: Ebene kommt aus der Wirts-Wand
+        }
+      },
       onRotateSelectionAround: (cx, cy, deg) => {
         if (!selection) return;
         if (!isFinite(deg) || deg === 0) return;

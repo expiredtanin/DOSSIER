@@ -215,6 +215,18 @@ export interface PanelHostValue {
    */
   onMoveSelectionBy: (dx: number, dy: number) => void;
   /**
+   * Setzt die Grafik-Kategorie (Klasse/Ebene) des selektierten Elements —
+   * editierbar im Objektinfo-Kopf (VW: „Klasse"). Wirkt auf alle Elementarten
+   * mit `categoryCode`.
+   */
+  onSetSelectionCategory: (code: string) => void;
+  /**
+   * Verschiebt das selektierte Element auf eine andere Zeichnungsebene
+   * (Geschoss) — editierbar im Objektinfo-Kopf (VW: „Ebene"). No-op bei
+   * Öffnungen (deren Ebene kommt aus der Wirts-Wand).
+   */
+  onSetSelectionLevel: (levelId: string) => void;
+  /**
    * Dreht die Selektion um `deg` Grad um den Weltpunkt (cx,cy) — generischer
    * Rotate über das Transform-System; deckt dieselben Selektionsarten ab wie
    * {@link onMoveSelectionBy}.

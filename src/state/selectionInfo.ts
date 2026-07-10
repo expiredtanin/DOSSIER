@@ -345,6 +345,12 @@ export interface Selection {
   id: string;
   /** Grafik-Kategorie (Ebene) des Elements. */
   categoryCode: string;
+  /**
+   * Zeichnungsebene (Geschoss) des Elements — editierbar im Objektinfo-Kopf
+   * (VW: „Ebene"). Bei Öffnungen `undefined` (die Ebene kommt aus der
+   * Wirts-Wand, ein Verschieben auf eine andere Ebene ergäbe keinen Sinn).
+   */
+  floorId?: string;
   /** Effektiv aufgelöste Strich-/Umrandungsfarbe (hex). */
   color: string;
   /** Effektiv aufgelöste Strichstärke in Millimetern. */
@@ -550,6 +556,7 @@ function wallSelection(project: Project, wall: Wall): Selection {
     kind: "wall",
     id: wall.id,
     categoryCode: wall.categoryCode,
+    floorId: wall.floorId,
     color,
     weightMm,
     fillHatchId: wall.hatchId,
@@ -604,6 +611,7 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     kind: "ceiling",
     id: ceiling.id,
     categoryCode: ceiling.categoryCode,
+    floorId: ceiling.floorId,
     color,
     weightMm,
     fillHatchId: ceiling.hatchId,
@@ -653,6 +661,7 @@ function roofSelection(project: Project, roof: Roof): Selection {
     kind: "roof",
     id: roof.id,
     categoryCode: roof.categoryCode,
+    floorId: roof.floorId,
     color,
     weightMm,
     closed: true,
@@ -751,6 +760,7 @@ function stairSelection(project: Project, s: Stair): Selection {
     kind: "stair",
     id: s.id,
     categoryCode: s.categoryCode,
+    floorId: s.floorId,
     color,
     weightMm,
     fillHatchId: undefined,
@@ -791,6 +801,7 @@ function roomSelection(project: Project, r: Room): Selection {
     kind: "room",
     id: r.id,
     categoryCode: r.categoryCode,
+    floorId: r.floorId,
     color,
     weightMm,
     fillHatchId: undefined,
@@ -829,6 +840,7 @@ function extrudedSolidSelection(project: Project, s: ExtrudedSolid): Selection {
     kind: "extrudedSolid",
     id: s.id,
     categoryCode: "",
+    floorId: s.levelId,
     color: EXTRUSION_COLOR,
     weightMm: WALL_FALLBACK_MM,
     fillHatchId: null,
@@ -872,6 +884,7 @@ function columnSelection(project: Project, col: Column): Selection {
     kind: "column",
     id: col.id,
     categoryCode: col.categoryCode,
+    floorId: col.floorId,
     color: col.color ?? category?.color ?? COLUMN_COLOR,
     weightMm: WALL_FALLBACK_MM,
     bbox: { minX, minY, maxX, maxY },
@@ -900,6 +913,7 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     kind: "drawing2d",
     id: d.id,
     categoryCode: d.categoryCode,
+    floorId: d.levelId,
     color,
     weightMm,
     fillHatchId: closed ? d.hatchId ?? null : null,

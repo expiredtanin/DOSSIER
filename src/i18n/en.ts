@@ -265,6 +265,8 @@ export const en: Record<TranslationKey, string> = {
   // Objekt-Info-Palette (ObjectInfoPanel)
   "objinfo.title": "Object Info",
   "objinfo.empty": "No object selected",
+  "objinfo.category": "Class",
+  "objinfo.level": "Layer",
   "objinfo.refpoint": "Reference point",
   "objinfo.setRefpoint": "Set reference point",
   "objinfo.x": "X",

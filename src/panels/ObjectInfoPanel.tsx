@@ -17,7 +17,7 @@
 import { useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
-import { formatM } from "../model/types";
+import { flattenCategories, formatM } from "../model/types";
 import type {
   RoofShape,
   SiaCategory,
@@ -110,13 +110,43 @@ export function ObjectInfoPanel() {
   return (
     <div className="objinfo-panel">
       {m && <MeasurementSection m={m} />}
-      {/* Kopfzeile: Typ + Kategorie. Die element-spezifischen Attribut-Abschnitte
-          (Wand/Decke/Öffnung/Treppe/Raum) liegen jetzt im Attribute-Panel;
-          ObjectInfo trägt nur noch Bezugspunkt + Masse. */}
+      {/* Kopfzeile: Typ + editierbare Klasse (Grafik-Kategorie) + Zeichnungsebene
+          (VW-Muster „Klasse"/„Ebene"). Die element-spezifischen Attribut-
+          Abschnitte (Wand/Decke/Öffnung/Treppe/Raum) liegen im Attribute-Panel. */}
       <div className="objinfo-head">
         <span className="objinfo-kind">{t(`objinfo.kind.${sel.kind}`)}</span>
-        <span className="objinfo-cat">{sel.categoryCode}</span>
       </div>
+      {sel.categoryCode !== "" && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.category")}</span>
+          <Dropdown
+            value={sel.categoryCode}
+            onChange={(v) => host.onSetSelectionCategory(v)}
+            options={flattenCategories(host.project.layers).map((c) => ({
+              value: c.code,
+              label: `${c.code} ${c.name}`,
+            }))}
+            title={t("objinfo.category")}
+            width={150}
+          />
+        </div>
+      )}
+      {sel.floorId != null && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.level")}</span>
+          <Dropdown
+            value={sel.floorId}
+            onChange={(v) => host.onSetSelectionLevel(v)}
+            options={host.project.drawingLevels
+              // Geschosse + die aktuelle Ebene (2D-Zeichnungen können auch auf
+              // Schnitt-/Zeichnungs-Ebenen liegen — die darf nicht verschwinden).
+              .filter((z) => z.kind === "floor" || z.id === sel.floorId)
+              .map((z) => ({ value: z.id, label: z.name }))}
+            title={t("objinfo.level")}
+            width={150}
+          />
+        </div>
+      )}
 
       <div className="objinfo-sep" />
 
