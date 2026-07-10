@@ -222,6 +222,29 @@ function SnapControl({
               }
             />
           </label>
+          <label className="sb-snap-row">
+            <input
+              type="checkbox"
+              checked={snap.commonAngles}
+              disabled={!snap.enabled}
+              onChange={(e) => onSnapChange({ ...snap, commonAngles: e.target.checked })}
+            />
+            <span>{t("snap.commonAngles")}</span>
+          </label>
+          <label className="sb-snap-row sb-snap-row-num">
+            <span>{t("snap.commonAngleTolerance")}</span>
+            <input
+              type="number"
+              step={0.5}
+              min={0.5}
+              max={10}
+              disabled={!snap.enabled || !snap.commonAngles}
+              value={snap.commonAngleTolerance}
+              onChange={(e) =>
+                onSnapChange({ ...snap, commonAngleTolerance: Number(e.target.value) })
+              }
+            />
+          </label>
         </div>
       )}
     </span>

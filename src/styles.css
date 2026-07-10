@@ -1825,13 +1825,38 @@ body {
   stroke-dasharray: 4 4;
   opacity: 0.8;
 }
-.plan-svg .tool-hud {
-  fill: var(--accent-light);
-  paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.55);
-  stroke-width: 3px;
+/* Cursor-HUD (Vectorworks-Stil): weisser Kasten, blauer Rahmen, blauer
+   Monospace-Text „L: 3.118m    W: 60.000°". */
+.plan-svg .plan-hud-box {
+  fill: #ffffff;
+  fill-opacity: 0.92;
+  stroke: #2864ff;
+  stroke-width: 1.25;
+}
+.plan-svg .plan-hud-text {
+  fill: #2864ff;
   font-family: var(--mono, ui-monospace, monospace);
-  dominant-baseline: middle;
+  font-weight: 600;
+}
+
+/* Weicher Winkel-Snap: gestrichelte Führungslinie (dezent) + gelbliches
+   Winkel-Badge nahe der Liniemitte. */
+.plan-svg .plan-angle-guide-line {
+  stroke: #b06a6a;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  opacity: 0.75;
+}
+.plan-svg .plan-angle-badge-box {
+  fill: #fff3c4;
+  fill-opacity: 0.95;
+  stroke: #6b5b1e;
+  stroke-width: 1;
+}
+.plan-svg .plan-angle-badge-text {
+  fill: #4a3f10;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-weight: 600;
 }
 
 /* ── Modusleiste der Transformation (über der Mitte) ─────────────────────── */

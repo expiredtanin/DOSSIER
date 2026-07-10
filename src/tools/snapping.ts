@@ -27,6 +27,7 @@ const PRIORITY: Record<SnapKind, number> = {
   grid: -2,
   ortho: 0,
   extension: 0,
+  angle: 0,
 };
 
 export interface SnapInput {
@@ -236,10 +237,27 @@ export function computeSnap(input: SnapInput): SnapResult | null {
 
   if (best) return best;
 
-  // Ortho / Winkelraster (Projektion relativ zum letzten Punkt).
+  // Ortho / Winkelraster (hart, Projektion relativ zum letzten Punkt). Shift
+  // erzwingt zusätzlich — beides UNVERÄNDERT gegenüber dem weichen Winkelraster
+  // unten, das nur greift, wenn weder Shift noch die Ortho-Einstellung aktiv ist.
   if ((settings.ortho || shift) && input.lastPoint) {
     const point = applyAngleConstraint(input.lastPoint, raw, settings.angleStep);
     return { point, kind: "ortho", refA: input.lastPoint, distPx: 0 };
+  }
+
+  // Weiches Winkelraster (gängige Winkel, 15°-Vielfache) — nur wenn kein
+  // Objekt-Snap UND kein harter Ortho-Zwang gegriffen hat (Vorrang-Reihenfolge).
+  if (settings.commonAngles && input.lastPoint) {
+    const snapped = snapCommonAngle(input.lastPoint, raw, settings.commonAngleTolerance);
+    if (snapped) {
+      return {
+        point: snapped.point,
+        kind: "angle",
+        refA: input.lastPoint,
+        angleDeg: snapped.angleDeg,
+        distPx: 0,
+      };
+    }
   }
 
   // Raster.
@@ -268,4 +286,43 @@ export function applyAngleConstraint(from: Vec2, to: Vec2, stepDeg: number): Vec
 function snapToGrid(p: Vec2, size: number): Vec2 {
   if (!(size > 0)) return p;
   return { x: Math.round(p.x / size) * size, y: Math.round(p.y / size) * size };
+}
+
+/** Winkel (Grad) auf den Bereich (−180,180] normalisieren (VW-Konvention). */
+function normalizeAngleDeg(deg: number): number {
+  let a = deg % 360;
+  if (a <= -180) a += 360;
+  if (a > 180) a -= 360;
+  return a;
+}
+
+/** Schrittweite des weichen Winkelrasters: deckt 0/15/30/45/60/75/90/… ab. */
+const COMMON_ANGLE_STEP_DEG = 15;
+
+/**
+ * Weiches Winkel-Einrasten (Vectorworks-Stil): rastet den Roh-Winkel von `from`
+ * nach `raw` auf den NÄCHSTEN gängigen Winkel (15°-Vielfache), wenn die
+ * Abweichung ≤ `toleranceDeg` — sonst `null`. Die LÄNGE bleibt die Roh-Distanz,
+ * projiziert auf den gerasterten Strahl (nicht die rohe Luftlinie). Reine
+ * Geometrie, unabhängig von Objekt-Snaps/Settings (Integration in
+ * {@link computeSnap} entscheidet über den Vorrang).
+ */
+export function snapCommonAngle(
+  from: Vec2,
+  raw: Vec2,
+  toleranceDeg = 2.5,
+): { point: Vec2; angleDeg: number } | null {
+  const dx = raw.x - from.x;
+  const dy = raw.y - from.y;
+  const rawLen = Math.hypot(dx, dy);
+  if (rawLen < 1e-9) return null;
+  const rawAngleDeg = (Math.atan2(dy, dx) * 180) / Math.PI; // bereits (−180,180]
+  const snappedRaw = Math.round(rawAngleDeg / COMMON_ANGLE_STEP_DEG) * COMMON_ANGLE_STEP_DEG;
+  const delta = snappedRaw - rawAngleDeg; // klein (≤ halbe Schrittweite), keine Wraparound-Sorgen
+  if (Math.abs(delta) > toleranceDeg) return null;
+  const angleDeg = normalizeAngleDeg(snappedRaw);
+  const rad = (angleDeg * Math.PI) / 180;
+  const length = rawLen * Math.cos((delta * Math.PI) / 180); // Projektion auf den Strahl
+  const point = { x: from.x + Math.cos(rad) * length, y: from.y + Math.sin(rad) * length };
+  return { point, angleDeg };
 }

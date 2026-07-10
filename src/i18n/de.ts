@@ -165,6 +165,8 @@ export const de = {
   "snap.ortho": "Ortho (Shift)",
   "snap.gridSize": "Rasterweite (m)",
   "snap.angleStep": "Winkelraster",
+  "snap.commonAngles": "Gängige Winkel",
+  "snap.commonAngleTolerance": "Winkeltoleranz (°)",
 
   // ── Transformation (Bewegen/Spiegeln/Drehen) + Modusleiste ───────────────
   "transform.bar": "Transformation",

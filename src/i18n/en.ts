@@ -164,6 +164,8 @@ export const en: Record<TranslationKey, string> = {
   "snap.ortho": "Ortho (Shift)",
   "snap.gridSize": "Grid size (m)",
   "snap.angleStep": "Angle step",
+  "snap.commonAngles": "Common angles",
+  "snap.commonAngleTolerance": "Angle tolerance (°)",
 
   // Transform (move/mirror/rotate) + mode bar.
   "transform.bar": "Transform",

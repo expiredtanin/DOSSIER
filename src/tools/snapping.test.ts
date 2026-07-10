@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeSnap, wallLayerBoundarySegments } from "./snapping";
+import { computeSnap, snapCommonAngle, wallLayerBoundarySegments } from "./snapping";
 import { DEFAULT_SNAP } from "./types";
 import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
 
@@ -226,3 +226,145 @@ describe("computeSnap — Kreis/Bogen", () => {
     expect(r?.kind).not.toBe("quadrant");
   });
 });
+
+// ── Weiches Winkel-Einrasten (snapCommonAngle) ──────────────────────────────
+
+describe("snapCommonAngle", () => {
+  const O: Vec2 = { x: 0, y: 0 };
+
+  it("lässt einen exakten 45°-Winkel unverändert", () => {
+    const r = snapCommonAngle(O, { x: 2, y: 2 });
+    expect(r).not.toBeNull();
+    expect(r!.angleDeg).toBeCloseTo(45, 9);
+    expect(r!.point.x).toBeCloseTo(2, 9);
+    expect(r!.point.y).toBeCloseTo(2, 9);
+  });
+
+  it("rastet 43.8° (innerhalb 2.5° Toleranz) auf 45°", () => {
+    const rad = (43.8 * Math.PI) / 180;
+    const raw: Vec2 = { x: Math.cos(rad) * 5, y: Math.sin(rad) * 5 };
+    const r = snapCommonAngle(O, raw, 2.5);
+    expect(r).not.toBeNull();
+    expect(r!.angleDeg).toBeCloseTo(45, 9);
+  });
+
+  it("rastet NICHT bei 40° (5° Abweichung > 2.5° Toleranz)", () => {
+    const rad = (40 * Math.PI) / 180;
+    const raw: Vec2 = { x: Math.cos(rad) * 5, y: Math.sin(rad) * 5 };
+    const r = snapCommonAngle(O, raw, 2.5);
+    expect(r).toBeNull();
+  });
+
+  it("Länge = Projektion der Roh-Distanz auf den gerasterten Strahl", () => {
+    const rad = (43.8 * Math.PI) / 180;
+    const rawLen = 5;
+    const raw: Vec2 = { x: Math.cos(rad) * rawLen, y: Math.sin(rad) * rawLen };
+    const r = snapCommonAngle(O, raw, 2.5);
+    expect(r).not.toBeNull();
+    const expectedLen = rawLen * Math.cos(((45 - 43.8) * Math.PI) / 180);
+    const len = Math.hypot(r!.point.x, r!.point.y);
+    expect(len).toBeCloseTo(expectedLen, 9);
+    // Der gerastete Punkt liegt exakt auf dem 45°-Strahl.
+    expect(r!.point.x).toBeCloseTo(r!.point.y, 9);
+  });
+
+  it("normalisiert auf den Bereich (−180,180] — z. B. −135°", () => {
+    const rad = (-133 * Math.PI) / 180;
+    const raw: Vec2 = { x: Math.cos(rad) * 3, y: Math.sin(rad) * 3 };
+    const r = snapCommonAngle(O, raw, 2.5);
+    expect(r).not.toBeNull();
+    expect(r!.angleDeg).toBeCloseTo(-135, 9);
+  });
+
+  it("deckt alle 15°-Vielfachen ab (0/30/45/60/90/135/…)", () => {
+    for (const deg of [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, -15, -90, -135]) {
+      const rad = (deg * Math.PI) / 180;
+      const raw: Vec2 = { x: Math.cos(rad) * 4, y: Math.sin(rad) * 4 };
+      const r = snapCommonAngle(O, raw, 2.5);
+      expect(r, `deg=${deg}`).not.toBeNull();
+      expect(r!.angleDeg, `deg=${deg}`).toBeCloseTo(deg === -180 ? 180 : deg, 9);
+    }
+  });
+
+  it("liefert null bei Roh-Distanz ≈ 0 (kein Winkel bestimmbar)", () => {
+    expect(snapCommonAngle(O, { x: 1e-10, y: 0 })).toBeNull();
+  });
+});
+
+describe("computeSnap — Objekt-Snap hat Vorrang vor dem weichen Winkelraster", () => {
+  it("fängt den Endpunkt statt auf das Winkelraster einzurasten, wenn beide zutreffen", () => {
+    // Wand-Endpunkt bei (5,5) liegt exakt auf dem 45°-Strahl ab (0,0) — beide
+    // Kandidaten (Endpunkt UND Winkelraster) träfen zu; der Endpunkt muss gewinnen.
+    const w = wall2d({ x: 5, y: 5 }, { x: 8, y: 5 });
+    const project = drawProject([]);
+    project.walls = [w];
+    const result = computeSnap({
+      raw: { x: 5.02, y: 5.02 },
+      project,
+      levelId: "eg",
+      visibleCodes: new Set(["20"]),
+      settings: DEFAULT_SNAP,
+      draftPoints: [],
+      lastPoint: { x: 0, y: 0 },
+      pxPerMeter: 100,
+      shift: false,
+      ctrl: false,
+    });
+    expect(result?.kind).toBe("endpoint");
+    expect(result!.point.x).toBeCloseTo(5, 6);
+    expect(result!.point.y).toBeCloseTo(5, 6);
+  });
+
+  it("rastet auf das Winkelraster, wenn KEIN Objekt-Snap in Reichweite ist", () => {
+    const project = drawProject([]);
+    const rad = (43.8 * Math.PI) / 180;
+    const raw: Vec2 = { x: Math.cos(rad) * 5, y: Math.sin(rad) * 5 };
+    const result = computeSnap({
+      raw,
+      project,
+      levelId: "eg",
+      visibleCodes: new Set(["20"]),
+      settings: DEFAULT_SNAP,
+      draftPoints: [],
+      lastPoint: { x: 0, y: 0 },
+      pxPerMeter: 100,
+      shift: false,
+      ctrl: false,
+    });
+    expect(result?.kind).toBe("angle");
+    expect(result?.angleDeg).toBeCloseTo(45, 9);
+  });
+
+  it("respektiert settings.commonAngles=false (kein Winkelraster-Fallback)", () => {
+    const project = drawProject([]);
+    const rad = (45 * Math.PI) / 180;
+    const raw: Vec2 = { x: Math.cos(rad) * 5, y: Math.sin(rad) * 5 };
+    const result = computeSnap({
+      raw,
+      project,
+      levelId: "eg",
+      visibleCodes: new Set(["20"]),
+      settings: { ...DEFAULT_SNAP, commonAngles: false, grid: false },
+      draftPoints: [],
+      lastPoint: { x: 0, y: 0 },
+      pxPerMeter: 100,
+      shift: false,
+      ctrl: false,
+    });
+    expect(result).toBeNull();
+  });
+});
+
+/** Minimal-Wand (nur für Endpunkt-Snap-Vorrang-Tests) — kein Wandtyp nötig. */
+function wall2d(start: Vec2, end: Vec2): Wall {
+  return {
+    id: "w-angle-test",
+    type: "wall",
+    floorId: "eg",
+    categoryCode: "20",
+    start,
+    end,
+    wallTypeId: "unknown",
+    height: 2.6,
+  };
+}
