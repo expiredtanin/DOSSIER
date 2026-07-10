@@ -19,10 +19,12 @@ import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { flattenCategories, formatM } from "../model/types";
 import type {
+  DrawingLevel,
   RoofShape,
   SiaCategory,
   SliceTermination,
   StairShape,
+  Vec2,
   VerticalAnchor,
   WallReferenceLine,
 } from "../model/types";
@@ -309,6 +311,118 @@ export function RoomSection({
         onClick={() => host.onEditRoomStamp(roomId)}
       >
         {t("objinfo.room.editStamp")}
+      </button>
+    </>
+  );
+}
+
+// ── Schnitt-/Ansichtslinien-Abschnitt (Object-Info; nur die gewählte Linie) ──
+// Name (editierbar), Blickrichtung umkehren (directionSign-Flip), Endpunkt-
+// Koordinaten (editierbar) + Schnitt-Tiefe; Löschen setzt linePoints zurück
+// (die Ebene bleibt bestehen). Eine Schnittlinie ist KEIN Projekt-Bauteil,
+// darum kommt sie über `host.sectionLine` (nicht über `selection`).
+export function SectionLineSection({
+  level,
+  host,
+}: {
+  level: DrawingLevel;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  const line = level.linePoints;
+  const kindLabel =
+    level.kind === "elevation"
+      ? t("objinfo.sectionLine.kind.elevation")
+      : t("objinfo.sectionLine.kind.section");
+  const patchPoint = (which: 0 | 1, axis: "x" | "y", value: number) => {
+    if (!line) return;
+    const next: [Vec2, Vec2] = [{ ...line[0] }, { ...line[1] }];
+    next[which] = { ...next[which], [axis]: value };
+    host.onSetSectionLinePatch({ linePoints: next });
+  };
+  const coordField = (labelKey: TranslationKey, value: number, on: (v: number) => void) => (
+    <div className="objinfo-field">
+      <span className="objinfo-flabel">{t(labelKey)}</span>
+      <input
+        type="number"
+        className="objinfo-text"
+        step={0.1}
+        value={value}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v)) on(v);
+        }}
+        title={t(labelKey)}
+      />
+    </div>
+  );
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">
+        {t("objinfo.sectionLine.section")} · {kindLabel}
+      </div>
+
+      {/* Name (editierbar). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.sectionLine.name")}</span>
+        <input
+          type="text"
+          className="objinfo-text"
+          value={level.name}
+          onChange={(e) => host.onSetSectionLinePatch({ name: e.target.value })}
+          title={t("objinfo.sectionLine.name")}
+        />
+      </div>
+
+      {/* Blickrichtung umkehren (directionSign-Flip). */}
+      <button
+        type="button"
+        className="objinfo-btn"
+        onClick={() =>
+          host.onSetSectionLinePatch({
+            directionSign: (level.directionSign ?? 1) === 1 ? -1 : 1,
+          })
+        }
+      >
+        {t("objinfo.sectionLine.flip")}
+      </button>
+
+      {/* Endpunkt-Koordinaten (nur wenn eine Linie gesetzt ist). */}
+      {line && (
+        <>
+          {coordField("objinfo.sectionLine.startX", line[0].x, (v) => patchPoint(0, "x", v))}
+          {coordField("objinfo.sectionLine.startY", line[0].y, (v) => patchPoint(0, "y", v))}
+          {coordField("objinfo.sectionLine.endX", line[1].x, (v) => patchPoint(1, "x", v))}
+          {coordField("objinfo.sectionLine.endY", line[1].y, (v) => patchPoint(1, "y", v))}
+        </>
+      )}
+
+      {/* Schnitt-Tiefe (leer = unbegrenzt). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.sectionLine.depth")}</span>
+        <input
+          type="number"
+          className="objinfo-text"
+          step={0.5}
+          min={0}
+          value={level.depth ?? ""}
+          placeholder={t("objinfo.sectionLine.depthHint")}
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            if (raw === "") {
+              host.onSetSectionLinePatch({ depth: undefined });
+              return;
+            }
+            const v = Number(raw);
+            if (Number.isFinite(v) && v > 0) host.onSetSectionLinePatch({ depth: v });
+          }}
+          title={t("objinfo.sectionLine.depth")}
+        />
+      </div>
+
+      {/* Löschen: linePoints zurücksetzen (die Ebene bleibt bestehen). */}
+      <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>
+        {t("objinfo.sectionLine.delete")}
       </button>
     </>
   );

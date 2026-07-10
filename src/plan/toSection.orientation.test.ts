@@ -112,6 +112,13 @@ describe("splitWallLayers: Aussenputz auf der Aussenseite, Wände spiegelverkehr
     expect(bands[3].width).toBeCloseTo(RENDER_EXT_T, 6);
   });
 
+  it("propagiert sourceId (Quell-Element) auf ALLE Schicht-Bänder", () => {
+    const cpWithId: SectionCutPolygon = { ...cp, sourceId: "W2" };
+    const bands = splitWallLayers(cpWithId, sampleProject, aw, wall("W2"), uWorld);
+    expect(bands.length).toBeGreaterThan(1);
+    expect(bands.every((b) => b.sourceId === "W2")).toBe(true);
+  });
+
   it("W2 und W4 liegen spiegelverkehrt (nicht identisch)", () => {
     const b2 = bandsByU(splitWallLayers(cp, sampleProject, aw, wall("W2"), uWorld));
     const b4 = bandsByU(splitWallLayers(cp, sampleProject, aw, wall("W4"), uWorld));

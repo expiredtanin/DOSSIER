@@ -76,6 +76,15 @@ export interface SectionCutPolygon {
    * Wert (unauflösbares Bauteil), nimmt das Band an keiner Verschmelzung teil.
    */
   componentId?: string;
+  /**
+   * ID des QUELL-Elements dieses Cut-Bands im Dokumentmodell (Wand/Decke/Dach) —
+   * aufgelöst in `attachCutStyles` über die Besitzer-Listen. Trägt die Auswahl im
+   * Schnitt-View: `generateSectionPlan` schreibt sie je nach `component.kind` als
+   * `wallId`/`ceilingId`/`roofId` ins Plan-Polygon, sodass ein Klick auf das
+   * geschnittene Bauteil im Schnitt exakt jenes Element im Grundriss-Modell wählt.
+   * Fehlt (unauflösbares Bauteil), bleibt das Band ohne Auswahlbezug.
+   */
+  sourceId?: string;
 }
 
 /** Ein projiziertes Liniensegment in (u, v)-Metern. */
@@ -294,11 +303,13 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     // aufgelöst; keine Boolean-Dominanz (joinPriority undefined) — unverändert
     // übernehmen. WICHTIG vor dem Slab-Zweig (sonst falscher owner-Lookup).
     if (ref.kind === "roof") {
+      cp.sourceId = (project.roofs ?? [])[ref.index]?.id;
       bands.push(cp);
       continue;
     }
     if (ref.kind === "wall") {
       const owner = walls[ref.index];
+      cp.sourceId = owner?.id;
       // Wand: bei mehrschichtigem Wandtyp wird das EINE geschnittene Rechteck in
       // stehende Teil-Rechtecke je Schicht quer zur Dicke (u) aufgeteilt — das
       // vertikale Gegenstück zur Decken-Zerlegung (dort quer zur Höhe v), siehe
@@ -327,6 +338,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     // Schnitt sichtbar (im Grundriss bleibt die Decke bewusst flächig, siehe
     // `addCeilingPoche`).
     const owner = slabs[ref.index];
+    cp.sourceId = owner?.id;
     if (owner) {
       const wt = getCeilingType(project, owner);
       if (wt.layers.length > 1) {
@@ -727,6 +739,7 @@ function bandFromRect(src: SectionCutPolygon, r: Rect): SectionCutPolygon {
     hatch: src.hatch,
     joinPriority: src.joinPriority,
     componentId: src.componentId,
+    sourceId: src.sourceId,
   };
 }
 
@@ -779,6 +792,7 @@ function splitSlabLayers(
       hatch,
       joinPriority: comp.joinPriority,
       componentId: comp.id,
+      sourceId: cp.sourceId,
     });
   }
   return out;
@@ -865,6 +879,7 @@ export function splitWallLayers(
       hatch,
       joinPriority: comp.joinPriority,
       componentId: comp.id,
+      sourceId: cp.sourceId,
     });
   }
   return out;
@@ -1033,6 +1048,72 @@ export function appendRoofSections(
   });
 }
 
+/** Mittelpunkt (Modell-2D) einer Punktliste (Outline-Schwerpunkt, naiv). */
+function centroid2d(pts: Vec2[]): Vec2 | null {
+  if (pts.length === 0) return null;
+  let x = 0;
+  let y = 0;
+  for (const p of pts) {
+    x += p.x;
+    y += p.y;
+  }
+  return { x: x / pts.length, y: y / pts.length };
+}
+
+/**
+ * Blendet Ansichtskanten (sichtbar/verdeckt) aus, deren QUELL-Bauteil weiter als
+ * `depth` Meter HINTER der Schnittebene (in Blickrichtung) liegt — die
+ * Schnitt-Tiefe (`DrawingLevel.depth`). Die Distanz wird über den REPRÄSENTATIVEN
+ * Bauteilpunkt (Wand-Mitte bzw. Outline-Schwerpunkt) gegen die Ebenennormale
+ * gemessen (in-place).
+ *
+ * NÄHERUNG (bewusst, kein Rust-Hack): der Rust-Extraktor liefert die Kanten nur in
+ * (u, v) OHNE echte Tiefe je Kante — die exakte Lösung bräuchte eine Tiefen-Achse
+ * aus `section.rs`. Bis dahin filtert dieser Owner-Distanz-Test grob nach dem
+ * Bauteil-Mittelpunkt: ein Bauteil wird GANZ ein- oder ausgeblendet (kein
+ * Teil-Clipping an der Tiefengrenze). Cut-Polygone liegen auf der Ebene (Distanz
+ * ~0) und bleiben immer erhalten. TODO: exakte per-Kante-Tiefe aus render3d
+ * (section.rs) zurückgeben, dann hier hart nach Kanten-Tiefe clippen.
+ */
+export function filterByDepth(
+  output: SectionOutput,
+  project: Project,
+  plane: SectionPlaneSpec,
+  depth: number,
+): void {
+  if (!(depth > 0)) return;
+  // Blickrichtung + Ebenenaufpunkt in Modell-2D (x = world.x, y = world.z).
+  const blick = normalize({ x: plane.normal[0], y: plane.normal[2] });
+  const origin = { x: plane.point[0], y: plane.point[2] };
+  const walls = wallSegmentOwners(project);
+  const slabs = slabSegmentOwners(project);
+  const roofs = project.roofs ?? [];
+
+  const ownerPoint = (ref: SectionComponentRef): Vec2 | null => {
+    if (ref.kind === "wall") {
+      const w = walls[ref.index];
+      return w ? { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 } : null;
+    }
+    if (ref.kind === "slab") {
+      const c = slabs[ref.index];
+      return c ? centroid2d(c.outline) : null;
+    }
+    const r = roofs[ref.index];
+    return r ? centroid2d(r.outline) : null;
+  };
+
+  const keep = (e: SectionEdge): boolean => {
+    const p = ownerPoint(e.component);
+    if (!p) return true; // Unauflösbar: konservativ behalten.
+    // Distanz HINTER der Ebene entlang der Blickrichtung; ≤ depth ⇒ behalten.
+    const d = dot(sub(p, origin), blick);
+    return d <= depth + 1e-6;
+  };
+
+  output.visibleEdges = output.visibleEdges.filter(keep);
+  output.hiddenEdges = output.hiddenEdges.filter(keep);
+}
+
 export async function computeSection(
   project: Project,
   level: DrawingLevel,
@@ -1063,5 +1144,7 @@ export async function computeSection(
   // Dächer TS-seitig ergänzen (der Rust-Extraktor kennt nur Wände + Decken).
   appendRoofSections(output, project, plane);
   attachCutStyles(output, project, plane);
+  // Schnitt-Tiefe: Kanten weiter als `level.depth` hinter der Ebene ausblenden.
+  if (level.depth !== undefined) filterByDepth(output, project, plane, level.depth);
   return output;
 }

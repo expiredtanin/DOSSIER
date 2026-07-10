@@ -198,6 +198,12 @@ export interface PlanSelection {
    */
   roofId: string | null;
   /**
+   * ID der getroffenen Schnitt-/Ansichtslinie (DrawingLevel), wenn der Klick ihr
+   * dünnes Pick-Band traf; sonst `null`. Höchste Priorität (das schmale Band liegt
+   * über allem — ein Klick genau darauf meint die Linie).
+   */
+  sectionLineId: string | null;
+  /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
    * ersetzen. Bei Leerraum-Klick mit Shift bleibt die Auswahl erhalten.
@@ -287,6 +293,11 @@ export interface PlanViewProps {
   selectedRoomIds?: string[];
   /** Aktuell ausgewählte Dach-IDs (von App); die Ansicht markiert die Traufe. */
   selectedRoofIds?: string[];
+  /**
+   * Aktuell ausgewählte Schnitt-/Ansichtslinien-IDs (DrawingLevel; von App). Die
+   * Ansicht markiert das Pick-Band JEDER dieser Linien mit einer Akzentkontur.
+   */
+  selectedSectionLineIds?: string[];
   /**
    * Aktuell ausgewählte IDs extrudierter Körper (truck-Integration; kontrolliert
    * von App). Die Ansicht markiert den Footprint-Umriss JEDES dieser Körper mit
@@ -416,6 +427,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       selectedStairIds,
       selectedRoomIds,
       selectedRoofIds,
+      selectedSectionLineIds,
       selectedExtrudedSolidIds,
       selectedColumnIds,
       roomStamp,
@@ -1007,6 +1019,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return null;
   };
 
+  // Getroffene Schnitt-/Ansichtslinie: ihr schmales, unsichtbares Pick-Band
+  // (Polygon mit sectionLineId) per Punkt-in-Polygon.
+  const pickSectionLine = (clientX: number, clientY: number): string | null => {
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (let i = plan.primitives.length - 1; i >= 0; i--) {
+      const p = plan.primitives[i];
+      if (p.kind === "polygon" && p.sectionLineId && pointInPolygon(m, p.pts)) {
+        return p.sectionLineId;
+      }
+    }
+    return null;
+  };
+
   // Getroffener extrudierter Körper (truck-Integration): der Footprint-Umriss
   // ist ein reiner Haarlinien-Umriss (fill:"none"), aber per Punkt-in-Polygon
   // trotzdem als FLÄCHE anklickbar (analog Raum, nicht nur auf der Linie).
@@ -1518,6 +1544,28 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const hit = hitIndex !== null ? plan.primitives[hitIndex] : undefined;
         // Öffnung (Fenster/Tür) zuerst: ihr Symbol sitzt in der ausgesparten Lücke
         // bzw. schlägt über die Wand — ein Klick nahe am Symbol wählt die Öffnung.
+        // Schnitt-/Ansichtslinie zuerst: ihr schmales Band liegt über allem, ein
+        // Klick genau darauf meint die Linie (nicht die darunterliegende Wand) —
+        // dann sofort melden (kein anderes Element konkurriert).
+        const sectionLineId = pickSectionLine(e.clientX, e.clientY);
+        if (sectionLineId) {
+          onSelect({
+            model: viewToModel(v.x, v.y),
+            hitIndex,
+            wallId: null,
+            drawingId: null,
+            ceilingId: null,
+            openingId: null,
+            stairId: null,
+            roomId: null,
+            extrudedSolidId: null,
+            columnId: null,
+            roofId: null,
+            sectionLineId,
+            shift: e.shiftKey,
+          });
+          return;
+        }
         const openingId = pickOpening(e.clientX, e.clientY);
         const wallId =
           openingId ? null : hit && hit.kind === "polygon" ? hit.wallId ?? null : null;
@@ -1581,6 +1629,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           extrudedSolidId,
           columnId,
           roofId,
+          sectionLineId: null,
           shift: e.shiftKey,
         });
       }
@@ -1779,6 +1828,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         p.kind === "polygon" && p.roofId != null && ids.has(p.roofId),
     );
   }, [plan, selectedRoofIds]);
+
+  // Hervorhebung der selektierten Schnitt-/Ansichtslinie: das (unsichtbare)
+  // Pick-Band (Polygon mit sectionLineId) mit Akzentkontur überzeichnen.
+  const highlightSectionLinePolys = useMemo(() => {
+    const ids =
+      selectedSectionLineIds && selectedSectionLineIds.length
+        ? new Set(selectedSectionLineIds)
+        : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "polygon" }> =>
+        p.kind === "polygon" && p.sectionLineId != null && ids.has(p.sectionLineId),
+    );
+  }, [plan, selectedSectionLineIds]);
 
   // Hervorhebung der selektierten extrudierten Körper (truck-Integration): der
   // Footprint-Umriss (Polygon mit extrudedSolidId) mit Akzentkontur überzeichnen
@@ -2016,6 +2079,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {highlightRoofPolys.map((poly, i) => (
         <polygon
           key={`selrf-${i}`}
+          className="plan-selected"
+          points={poly.pts
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
+      {/* Auswahl-Hervorhebung der gewählten Schnitt-/Ansichtslinie (Pick-Band). */}
+      {highlightSectionLinePolys.map((poly, i) => (
+        <polygon
+          key={`selsl-${i}`}
           className="plan-selected"
           points={poly.pts
             .map(toScreen)

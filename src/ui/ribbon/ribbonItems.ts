@@ -110,6 +110,10 @@ export const RIBBON_TABS: RibbonTab[] = [
           t("room"),
         ],
       },
+      {
+        titleKey: "ribbon.group.sections",
+        items: [c("sectionline"), c("viewline")],
+      },
     ],
   },
   {

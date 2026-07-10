@@ -770,6 +770,13 @@ export interface DrawingLevel {
    * die dahinterliegende Fassade.
    */
   shadows?: boolean;
+  /**
+   * Schnitt-Tiefe in Metern (nur Schnitt/Ansicht): Bauteile weiter als `depth`
+   * HINTER der Schnittebene (in Blickrichtung) werden ausgeblendet. Fehlt der
+   * Wert, ist die Tiefe unbegrenzt (das gesamte Modell wird projiziert — heutiges
+   * Verhalten).
+   */
+  depth?: number;
 }
 
 /**

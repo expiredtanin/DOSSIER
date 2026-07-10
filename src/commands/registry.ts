@@ -29,6 +29,7 @@ import { trimCommand } from "./cmds/trim";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
 import { measureCommand } from "./cmds/measure";
+import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -59,6 +60,8 @@ export const COMMANDS: Record<string, Command> = {
   import: importCommand,
   terrain: terrainCommand,
   measure: measureCommand,
+  sectionline: sectionLineCommand,
+  viewline: viewLineCommand,
 };
 
 /**
@@ -105,6 +108,8 @@ export const ALIASES: Record<string, string> = {
   tr: "trim",
   imp: "import",
   ter: "terrain",
+  schnittlinie: "sectionline",
+  ansichtslinie: "viewline",
 };
 
 /** Liefert den Befehl zu einem exakten Namen (oder undefined). */
