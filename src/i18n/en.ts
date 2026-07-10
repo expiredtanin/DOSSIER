@@ -633,6 +633,7 @@ export const en: Record<TranslationKey, string> = {
   "default.ceilingTypeSingle": "Ceiling {thickness} m",
   "default.wallTypeName": "New wall type",
   "default.ceilingTypeName": "New ceiling type",
+  "default.roofTypeName": "New roof type",
   "default.doorTypeName": "New door type",
   "default.windowTypeName": "New window type",
   "default.stairTypeName": "New stair type",
@@ -644,6 +645,7 @@ export const en: Record<TranslationKey, string> = {
   "alert.lineStyleInUse": "Line style “{name}” is used by a hatch and cannot be deleted.",
   "alert.wallTypeInUse": "Wall type “{name}” is used by a wall and cannot be deleted.",
   "alert.ceilingTypeInUse": "Ceiling type “{name}” is used by a ceiling and cannot be deleted.",
+  "alert.roofTypeInUse": "Roof type “{name}” is used by a roof and cannot be deleted.",
   "alert.doorTypeInUse": "Door type “{name}” is used by a door and cannot be deleted.",
   "alert.windowTypeInUse": "Window type “{name}” is used by a window and cannot be deleted.",
   "alert.stairTypeInUse": "Stair type “{name}” is used by a stair and cannot be deleted.",
@@ -657,6 +659,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.tab.lines": "Lines",
   "resources.tab.wallStyles": "Wall styles",
   "resources.tab.ceilingStyles": "Ceiling styles",
+  "resources.tab.roofStyles": "Roof types",
   "resources.tab.doorStyles": "Door types",
   "resources.tab.windowStyles": "Window types",
   "resources.tab.stairStyles": "Stair types",
@@ -698,6 +701,10 @@ export const en: Record<TranslationKey, string> = {
   "resources.ceilingStyles.empty": "No ceiling types yet.",
   "resources.wallStyles.placeholder": "Wall type",
   "resources.ceilingStyles.placeholder": "Ceiling type",
+  "resources.roofStyles.hint":
+    "Per roof type (layer build-up outside/covering → inside/lining) the layer joints as a selectable line style. Without assignment: hairline 0.02 mm.",
+  "resources.roofStyles.empty": "No roof types yet.",
+  "resources.roofStyles.placeholder": "Roof type",
 
   // Component types (door/window/stair) — form-based libraries.
   "resources.doorTypes.hint":
@@ -871,6 +878,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.delete.hatch": "Delete hatch “{name}”",
   "resources.delete.wallType": "Delete wall type “{name}”",
   "resources.delete.ceilingType": "Delete ceiling type “{name}”",
+  "resources.delete.roofType": "Delete roof type “{name}”",
 
   // Hatch/line type (master-detail editor).
   "resources.field.type": "Type",

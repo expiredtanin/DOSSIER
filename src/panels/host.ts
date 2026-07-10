@@ -17,6 +17,7 @@ import type { DisplayMode } from "./types";
 import type {
   AttributeSource,
   CeilingType,
+  RoofType,
   Component,
   ContextObject,
   DrawingLevel,
@@ -132,6 +133,10 @@ export interface PanelHostValue {
   onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
   onAddCeilingType: () => void;
   onDeleteCeilingType: (id: string) => void;
+  /** Dachtypen (Dachaufbauten): immutable Änderung/Anlage/Löschung. */
+  onPatchRoofType: (id: string, patch: Partial<RoofType>) => void;
+  onAddRoofType: () => void;
+  onDeleteRoofType: (id: string) => void;
   /** Import fertiger (id-loser) Linienstile/Schraffuren (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;

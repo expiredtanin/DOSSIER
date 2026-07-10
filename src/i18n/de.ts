@@ -638,6 +638,7 @@ export const de = {
   "default.ceilingTypeSingle": "Decke {thickness} m",
   "default.wallTypeName": "Neuer Wandtyp",
   "default.ceilingTypeName": "Neuer Deckentyp",
+  "default.roofTypeName": "Neuer Dachtyp",
   "default.doorTypeName": "Neuer Türtyp",
   "default.windowTypeName": "Neuer Fenstertyp",
   "default.stairTypeName": "Neuer Treppentyp",
@@ -649,6 +650,7 @@ export const de = {
   "alert.lineStyleInUse": "Linienstil „{name}\" wird von einer Schraffur verwendet und kann nicht gelöscht werden.",
   "alert.wallTypeInUse": "Wandtyp „{name}\" wird von einer Wand verwendet und kann nicht gelöscht werden.",
   "alert.ceilingTypeInUse": "Deckentyp „{name}\" wird von einer Decke verwendet und kann nicht gelöscht werden.",
+  "alert.roofTypeInUse": "Dachtyp „{name}\" wird von einem Dach verwendet und kann nicht gelöscht werden.",
   "alert.doorTypeInUse": "Türtyp „{name}\" wird von einer Tür verwendet und kann nicht gelöscht werden.",
   "alert.windowTypeInUse": "Fenstertyp „{name}\" wird von einem Fenster verwendet und kann nicht gelöscht werden.",
   "alert.stairTypeInUse": "Treppentyp „{name}\" wird von einer Treppe verwendet und kann nicht gelöscht werden.",
@@ -662,6 +664,7 @@ export const de = {
   "resources.tab.lines": "Linien",
   "resources.tab.wallStyles": "Wandstile",
   "resources.tab.ceilingStyles": "Deckenstile",
+  "resources.tab.roofStyles": "Dachtypen",
   "resources.tab.doorStyles": "Türtypen",
   "resources.tab.windowStyles": "Fenstertypen",
   "resources.tab.stairStyles": "Treppentypen",
@@ -703,6 +706,10 @@ export const de = {
   "resources.ceilingStyles.empty": "Noch keine Deckentypen.",
   "resources.wallStyles.placeholder": "Wandtyp",
   "resources.ceilingStyles.placeholder": "Deckentyp",
+  "resources.roofStyles.hint":
+    "Je Dachtyp (Schichtaufbau aussen/Eindeckung → innen/Verkleidung) die Schichtfugen als wählbaren Linienstil. Ohne Zuweisung: Haarlinie 0.02 mm.",
+  "resources.roofStyles.empty": "Noch keine Dachtypen.",
+  "resources.roofStyles.placeholder": "Dachtyp",
 
   // Bauteil-Typen (Tür/Fenster/Treppe) — Formular-Bibliotheken.
   "resources.doorTypes.hint":
@@ -878,6 +885,7 @@ export const de = {
   "resources.delete.hatch": "Schraffur „{name}\" löschen",
   "resources.delete.wallType": "Wandtyp „{name}\" löschen",
   "resources.delete.ceilingType": "Deckentyp „{name}\" löschen",
+  "resources.delete.roofType": "Dachtyp „{name}\" löschen",
 
   // Schraffur-/Linien-Typ (Master-Detail-Editor).
   "resources.field.type": "Typ",

@@ -39,6 +39,7 @@ import type {
   OverrideRule,
   Project,
   Roof,
+  RoofType,
   Stair,
   StairType,
   Vec2,
@@ -2273,6 +2274,33 @@ export default function App() {
         ceilingTypes: (p.ceilingTypes ?? []).filter((ct) => ct.id !== id),
       };
     });
+  // ── Dachtypen (Dachaufbauten) — analog Deckentyp ──────────────────────────
+  const patchRoofType = (id: string, patch: Partial<RoofType>) =>
+    setProject((p) => ({
+      ...p,
+      roofTypes: (p.roofTypes ?? []).map((rt) => (rt.id === id ? { ...rt, ...patch } : rt)),
+    }));
+  const addRoofType = () =>
+    setProject((p) => {
+      const componentId = p.components[0]?.id ?? "";
+      const roofType: RoofType = {
+        id: `rt-${Date.now()}`,
+        name: t("default.roofTypeName"),
+        layers: [{ componentId, thickness: 0.2 }],
+      };
+      return { ...p, roofTypes: [...(p.roofTypes ?? []), roofType] };
+    });
+  // Dachtyp löschen — geschützt, solange ihn ein Dach verwendet.
+  const deleteRoofType = (id: string) =>
+    setProject((p) => {
+      const used = (p.roofs ?? []).some((r) => r.roofTypeId === id);
+      if (used) {
+        const name = (p.roofTypes ?? []).find((rt) => rt.id === id)?.name ?? id;
+        notify(t("alert.roofTypeInUse", { name }), "warning");
+        return p;
+      }
+      return { ...p, roofTypes: (p.roofTypes ?? []).filter((rt) => rt.id !== id) };
+    });
   // ── Bauteil-Typen: Tür / Fenster / Treppe (Bibliothek) ────────────────────
   // Anlegen/Patchen/Löschen analog Wand-/Deckentyp — direkt über setProject
   // (kein eigener Slice). Löschen ist geschützt, solange ein Element den Typ
@@ -2954,6 +2982,9 @@ export default function App() {
       onPatchCeilingType: patchCeilingType,
       onAddCeilingType: addCeilingType,
       onDeleteCeilingType: deleteCeilingType,
+      onPatchRoofType: patchRoofType,
+      onAddRoofType: addRoofType,
+      onDeleteRoofType: deleteRoofType,
       onImportLineStyles: importLineStyles,
       onImportHatches: importHatches,
       selection,
@@ -3941,6 +3972,9 @@ export default function App() {
     onPatchCeilingType: patchCeilingType,
     onAddCeilingType: addCeilingType,
     onDeleteCeilingType: deleteCeilingType,
+    onPatchRoofType: patchRoofType,
+    onAddRoofType: addRoofType,
+    onDeleteRoofType: deleteRoofType,
     onAddDoorType: addDoorType,
     onPatchDoorType: patchDoorType,
     onDeleteDoorType: deleteDoorType,

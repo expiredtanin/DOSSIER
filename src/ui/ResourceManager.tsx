@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type {
   CeilingType,
+  RoofType,
   Component,
   ComponentMaterial,
   DoorType,
@@ -1894,6 +1895,39 @@ function CeilingStylesTab({
 }
 
 /**
+ * Tab „Dachtypen" — das geneigte Gegenstück zu {@link CeilingStylesTab}: gleicher
+ * {@link LayeredStylesTab}-Rumpf (Schichtaufbau aussen/Eindeckung → innen/
+ * Verkleidung), Ressource `roofTypes`. Vorschau in Decken-Orientierung
+ * (gestapelt) — für die Schichtreihenfolge/-dicken ausreichend.
+ */
+function RoofStylesTab({
+  project,
+  onPatchRoofType,
+  onAddRoofType,
+  onDeleteRoofType,
+}: {
+  project: Project;
+  onPatchRoofType: (id: string, patch: Partial<RoofType>) => void;
+  onAddRoofType: () => void;
+  onDeleteRoofType: (id: string) => void;
+}) {
+  return (
+    <LayeredStylesTab
+      project={project}
+      types={project.roofTypes ?? []}
+      orientation="ceiling"
+      hintKey="resources.roofStyles.hint"
+      emptyKey="resources.roofStyles.empty"
+      placeholderKey="resources.roofStyles.placeholder"
+      deleteKeyPrefix="resources.delete.roofType"
+      onPatch={onPatchRoofType}
+      onAdd={onAddRoofType}
+      onDelete={onDeleteRoofType}
+    />
+  );
+}
+
+/**
  * Datei-Import-Schaltfläche (verstecktes <input type=file>). Liest die gewählte
  * Datei als Text und reicht ihn nach oben. Für .lin/.pat-Import.
  */
@@ -2957,6 +2991,7 @@ export type TabId =
   | "lines"
   | "wallStyles"
   | "ceilingStyles"
+  | "roofStyles"
   | "doorStyles"
   | "windowStyles"
   | "stairStyles"
@@ -2969,6 +3004,7 @@ const TABS: { id: TabId; labelKey: string }[] = [
   { id: "lines", labelKey: "resources.tab.lines" },
   { id: "wallStyles", labelKey: "resources.tab.wallStyles" },
   { id: "ceilingStyles", labelKey: "resources.tab.ceilingStyles" },
+  { id: "roofStyles", labelKey: "resources.tab.roofStyles" },
   { id: "doorStyles", labelKey: "resources.tab.doorStyles" },
   { id: "windowStyles", labelKey: "resources.tab.windowStyles" },
   { id: "stairStyles", labelKey: "resources.tab.stairStyles" },
@@ -2995,6 +3031,10 @@ export interface ResourceManagerHandlers {
   onPatchCeilingType: (id: string, patch: Partial<CeilingType>) => void;
   onAddCeilingType: () => void;
   onDeleteCeilingType: (id: string) => void;
+  /** Dachtypen (Dachaufbauten): immutable Änderung/Anlage/Löschung. */
+  onPatchRoofType: (id: string, patch: Partial<RoofType>) => void;
+  onAddRoofType: () => void;
+  onDeleteRoofType: (id: string) => void;
   /** Import: fügt fertige (id-lose) Linienstile/Schraffuren hinzu (.lin/.pat). */
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
@@ -3217,6 +3257,14 @@ export function ResourceManager({
               onPatchCeilingType={handlers.onPatchCeilingType}
               onAddCeilingType={handlers.onAddCeilingType}
               onDeleteCeilingType={handlers.onDeleteCeilingType}
+            />
+          )}
+          {tab === "roofStyles" && (
+            <RoofStylesTab
+              project={project}
+              onPatchRoofType={handlers.onPatchRoofType}
+              onAddRoofType={handlers.onAddRoofType}
+              onDeleteRoofType={handlers.onDeleteRoofType}
             />
           )}
           {tab === "doorStyles" && (
