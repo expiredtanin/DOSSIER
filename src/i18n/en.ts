@@ -457,6 +457,8 @@ export const en: Record<TranslationKey, string> = {
   "section.empty": "{kind} — no section line set in the plan",
   "section.error": "{kind} — computation failed (rebuild render3d WASM?)",
   "section.legend": "{kind} · derived projection (render3d)",
+  "elevation.shadows": "Shadows",
+  "elevation.shadows.hint": "Toggle 45° cast shadows of overhanging elements in the elevation",
   "props.floorHeight": "Floor height",
   "props.cutHeight": "Cut height",
   "props.okff": "FFL",

@@ -990,6 +990,12 @@ export interface ViewRibbonTabProps {
   renderModeEnabled: boolean;
   planColorMode: PlanColorMode;
   onPlanColorMode: (m: PlanColorMode) => void;
+  /** Ob die aktive Ebene eine Ansicht (kind "elevation") ist — nur dann ist der
+   *  Schatten-Umschalter sichtbar/aktiv. */
+  shadowsAvailable: boolean;
+  /** Schlagschatten der aktiven Ansicht ein/aus (DrawingLevel.shadows). */
+  shadows: boolean;
+  onShadows: (v: boolean) => void;
   combos: ComboMenuHandlers;
   /** Text-/Font-Formatierung auf DERSELBEN Leiste (Raumstempel-Ziel; `null` =
    *  nur Defaults). Liegt bewusst im „Ansichten"-Tab (Nutzer-Wunsch). */
@@ -1027,6 +1033,9 @@ export function ViewRibbonTab({
   renderModeEnabled,
   planColorMode,
   onPlanColorMode,
+  shadowsAvailable,
+  shadows,
+  onShadows,
   combos,
   textTarget,
 }: ViewRibbonTabProps) {
@@ -1253,6 +1262,25 @@ export function ViewRibbonTab({
         </label>
       </div>
       <Sep />
+
+      {/* Schatten ein/aus — NUR für eine aktive Ansicht (kind "elevation").
+          Schreibt DrawingLevel.shadows; der Ansichts-Generator (toElevation)
+          zeichnet dann den 45°-Schlagschatten auskragender Bauteile. */}
+      {shadowsAvailable && (
+        <>
+          <div className="tb-group" role="group" aria-label={t("elevation.shadows")}>
+            <button
+              className={`tb-toggle${shadows ? " active" : ""}`}
+              onClick={() => onShadows(!shadows)}
+              title={t("elevation.shadows.hint")}
+              aria-pressed={shadows}
+            >
+              {t("elevation.shadows")}
+            </button>
+          </div>
+          <Sep />
+        </>
+      )}
 
       {/* Text-/Font-Formatierung auf DERSELBEN Leiste (Nutzer-Wunsch: Text und
           Ansichten zusammen) — Stil/Schrift/Grösse + B/I/U · L/C/R + Zeilenhöhe,

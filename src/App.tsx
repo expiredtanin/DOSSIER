@@ -41,6 +41,7 @@ import { generatePlan, generateSectionPlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
 import { computeSection } from "./plan/toSection";
 import type { SectionOutput } from "./plan/toSection";
+import { generateElevationPlan } from "./plan/toElevation";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { selectionHighlightLines } from "./plan/toWalls3d";
 import { parseDxf } from "./io/dxfParser";
@@ -3296,6 +3297,16 @@ export default function App() {
             renderModeEnabled={viewType === "perspektive"}
             planColorMode={planColorMode}
             onPlanColorMode={setPlanColorMode}
+            shadowsAvailable={activeLevel.kind === "elevation"}
+            shadows={activeLevel.shadows ?? false}
+            onShadows={(v) =>
+              setProject((p) => ({
+                ...p,
+                drawingLevels: p.drawingLevels.map((z) =>
+                  z.id === activeLevel.id ? { ...z, shadows: v } : z,
+                ),
+              }))
+            }
             combos={{
               // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums →
               // localStorage; Laden = Map lesen → Sichtbarkeits-Flags anwenden.
@@ -4949,12 +4960,17 @@ function SectionPlanView({
   selectedDrawingIds?: string[];
   gripHandlers: GripHandlers;
 }) {
+  // Die Ansicht (kind "elevation") läuft NICHT über den WASM-Schnitt, sondern
+  // über den rein TS-seitigen Flächen-Generator (Painter, toElevation.ts) —
+  // synchron, kein Lazy-Load. Nur der echte Schnitt braucht die WASM-Pipeline.
+  const isElevation = level.kind === "elevation";
   const [output, setOutput] = useState<SectionOutput | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">(
     "loading",
   );
 
   useEffect(() => {
+    if (isElevation) return; // Ansicht: kein WASM-Schnitt (synchroner Generator).
     let disposed = false;
     setStatus("loading");
     setOutput(null);
@@ -4976,20 +4992,29 @@ function SectionPlanView({
     return () => {
       disposed = true;
     };
-  }, [project, level]);
+  }, [project, level, isElevation]);
 
-  const plan = useMemo(
-    () => (output ? generateSectionPlan(output, mono) : null),
-    [output, mono],
+  // Ansichts-Plan: gefüllte Fassadenansicht inkl. optionalem Schatten
+  // (level.shadows). Liefert null, wenn die Ebene keine Ansichtslinie trägt.
+  const elevationPlan = useMemo(
+    () => (isElevation ? generateElevationPlan(project, level, { mono }) : null),
+    [isElevation, project, level, mono],
   );
+
+  const plan = isElevation
+    ? elevationPlan
+    : output
+      ? generateSectionPlan(output, mono)
+      : null;
+  const effStatus = isElevation ? (elevationPlan ? "ready" : "empty") : status;
 
   const kindLabel = level.kind === "section" ? t("stub.section") : t("stub.elevation");
 
-  if (!plan || status !== "ready") {
+  if (!plan || effStatus !== "ready") {
     const note =
-      status === "empty"
+      effStatus === "empty"
         ? t("section.empty", { kind: kindLabel })
-        : status === "error"
+        : effStatus === "error"
           ? t("section.error", { kind: kindLabel })
           : t("section.loading", { kind: kindLabel });
     return (
