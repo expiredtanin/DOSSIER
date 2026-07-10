@@ -2041,6 +2041,18 @@ body {
   font-family: var(--mono, ui-monospace, monospace);
   font-weight: 600;
 }
+/* Aktives Tab-Feld im HUD: blaue Pille, weisser Text (VW: Eingabefeld-Optik). */
+.plan-svg .plan-hud-active {
+  fill: #2864ff;
+}
+.plan-svg .plan-hud-text.active {
+  fill: #ffffff;
+}
+/* Gelockter (getippter) Wert: dunkler + fett, unterscheidet sich vom Live-Wert. */
+.plan-svg .plan-hud-text.locked {
+  fill: #143a99;
+  font-weight: 700;
+}
 
 /* Weicher Winkel-Snap: gestrichelte Führungslinie (dezent) + gelbliches
    Winkel-Badge nahe der Liniemitte. */

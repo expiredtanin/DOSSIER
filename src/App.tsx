@@ -93,6 +93,7 @@ import type {
   PlanSelection,
   MarqueeSelection,
   GripHandlers,
+  HudFieldsState,
 } from "./plan/PlanView";
 import { Viewport3D } from "./viewport/Viewport3D";
 import type { DisplayResolver, ViewportContextInfo } from "./viewport/Viewport3D";
@@ -1017,6 +1018,21 @@ export default function App() {
   void engineTick;
   const engineView = engine.view();
   const commandActive = engineView.active;
+  // Live-Echo des Befehlszeilen-Texts fürs Cursor-HUD: der getippte Wert
+  // erscheint sofort im aktiven Tab-Feld am Cursor (VW-Verhalten).
+  const [cmdTyped, setCmdTyped] = useState("");
+  const hudFields =
+    commandActive && engineView.fields.length > 0
+      ? {
+          fields: engineView.fields.map((f) => ({
+            id: f.id,
+            value: f.value,
+            locked: f.locked,
+            active: f.active,
+          })),
+          typed: cmdTyped,
+        }
+      : null;
 
   // ── GUI-Werkzeug ↔ Befehls-Engine (ein Eingabe-Hub) ───────────────────────
   // Ein Klick auf ein gekoppeltes Zeichen-Werkzeug (Wand/Linie/Rechteck/Polylinie)
@@ -1100,12 +1116,28 @@ export default function App() {
   // (das CommandLine-Input selbst behandelt Tab eigenständig).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
       const el = e.target as HTMLElement | null;
+      const inInput =
+        !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      // Direktes Zahlen-Tippen beim Zeichnen (VW-Verhalten): läuft ein Befehl
+      // mit Tab-Feldern und tippt man eine Ziffer (oder . , -), ohne dass ein
+      // Eingabefeld fokussiert ist, startet das die Werteingabe in der
+      // Befehlszeile — der Wert erscheint live im Cursor-HUD UND unten im Feld.
       if (
-        el &&
-        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+        !inInput &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        /^[0-9.,-]$/.test(e.key) &&
+        engineRef.current?.isActive() &&
+        engineRef.current.hasFields()
       ) {
+        e.preventDefault();
+        commandLineRef.current?.beginTyping(e.key);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      if (inInput) {
         return;
       }
       e.preventDefault();
@@ -5024,6 +5056,7 @@ export default function App() {
           activeTool={activeTool}
           toolInputActive={toolInputActive}
           toolHandlers={toolHandlers}
+          hudFields={hudFields}
           grips={grips}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
@@ -5093,6 +5126,7 @@ export default function App() {
             gripEdit ? setGripEdit(null) : activeTransform ? cancelTransform() : engine.cancel()
           }
           suggest={(prefix) => engine.suggest(prefix)}
+          onTextChange={setCmdTyped}
         />
         </>
         )}
@@ -6158,6 +6192,7 @@ function Content({
   activeTool,
   toolInputActive,
   toolHandlers,
+  hudFields,
   grips,
   edgeGrips,
   selectedDrawingId,
@@ -6246,6 +6281,7 @@ function Content({
   activeTool: ToolId;
   toolInputActive: boolean;
   toolHandlers: ToolHandlers;
+  hudFields: HudFieldsState | null;
   grips: Vec2[];
   edgeGrips: EdgeGrip[];
   selectedDrawingId: string | null;
@@ -6345,6 +6381,7 @@ function Content({
           activeTool={activeTool}
           toolInputActive={toolInputActive}
           toolHandlers={toolHandlers}
+          hudFields={hudFields}
           grips={grips}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
@@ -6401,6 +6438,7 @@ function Content({
           activeTool={activeTool}
           toolInputActive={toolInputActive}
           toolHandlers={toolHandlers}
+          hudFields={hudFields}
           grips={grips}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
@@ -6497,6 +6535,7 @@ function Content({
           activeTool={activeTool}
           toolInputActive={toolInputActive}
           toolHandlers={toolHandlers}
+          hudFields={hudFields}
           grips={grips}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
@@ -6543,6 +6582,7 @@ function LevelPlanView({
   activeTool,
   toolInputActive,
   toolHandlers,
+  hudFields,
   grips,
   edgeGrips,
   selectedDrawingId,
@@ -6586,6 +6626,7 @@ function LevelPlanView({
   activeTool: ToolId;
   toolInputActive: boolean;
   toolHandlers: ToolHandlers;
+  hudFields: HudFieldsState | null;
   grips: Vec2[];
   edgeGrips: EdgeGrip[];
   selectedDrawingId: string | null;
@@ -6660,6 +6701,7 @@ function LevelPlanView({
         activeTool={activeTool}
         toolInputActive={toolInputActive}
         toolHandlers={toolHandlers}
+          hudFields={hudFields}
         grips={grips}
         edgeGrips={edgeGrips}
         hairline={hairline}
@@ -6714,6 +6756,7 @@ function SectionPlanView({
   activeTool,
   toolInputActive,
   toolHandlers,
+  hudFields,
   grips,
   edgeGrips,
   selectedDrawingId,
@@ -6749,6 +6792,7 @@ function SectionPlanView({
   activeTool: ToolId;
   toolInputActive: boolean;
   toolHandlers: ToolHandlers;
+  hudFields: HudFieldsState | null;
   grips: Vec2[];
   edgeGrips: EdgeGrip[];
   selectedDrawingId: string | null;
@@ -6851,6 +6895,7 @@ function SectionPlanView({
         activeTool={activeTool}
         toolInputActive={toolInputActive}
         toolHandlers={toolHandlers}
+          hudFields={hudFields}
         grips={grips}
         edgeGrips={edgeGrips}
         hairline={hairline}

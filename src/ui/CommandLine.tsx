@@ -48,6 +48,12 @@ export interface CommandLineProps {
   onCycleField: () => void;
   /** Esc: laufenden Befehl abbrechen. */
   onCancel: () => void;
+  /**
+   * Live-Echo des Eingabetexts (bei jeder Änderung, inkl. Leeren nach Submit/
+   * Esc) — speist das Cursor-HUD, das den getippten Wert im aktiven Feld
+   * spiegelt (VW-Verhalten: tippen → Wert erscheint oben UND unten).
+   */
+  onTextChange?: (text: string) => void;
   /** Autocomplete-Kandidaten für ein Präfix (nur im Ruhezustand sinnvoll). */
   suggest: (prefix: string) => string[];
 }
@@ -55,18 +61,32 @@ export interface CommandLineProps {
 export interface CommandLineHandle {
   /** Fokussiert (und öffnet) das Eingabefeld — vom globalen Tab-Handler genutzt. */
   focus: () => void;
+  /**
+   * Startet die Zahleneingabe mit einem ersten Zeichen (globales Tippen beim
+   * Zeichnen, ohne dass das Feld fokussiert war): fokussiert + setzt den Text.
+   */
+  beginTyping: (seed: string) => void;
 }
 
 export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
   function CommandLine(
-    { active, promptKey, options, fields, onSubmit, onOption, onCycleField, onCancel, suggest },
+    { active, promptKey, options, fields, onSubmit, onOption, onCycleField, onCancel, suggest, onTextChange },
     ref,
   ) {
-    const [text, setText] = useState("");
+    const [text, setTextRaw] = useState("");
     const inputRef = useRef<HTMLInputElement>(null);
+    // Jede Textänderung (auch programmatisch/Leeren) ans Live-Echo melden.
+    const setText = (v: string) => {
+      setTextRaw(v);
+      onTextChange?.(v);
+    };
 
     useImperativeHandle(ref, () => ({
       focus: () => inputRef.current?.focus(),
+      beginTyping: (seed: string) => {
+        setText(seed);
+        inputRef.current?.focus();
+      },
     }));
 
     // Autocomplete nur im Ruhezustand (Befehlsname tippen), nicht in einem Schritt.

@@ -24,6 +24,16 @@ import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from ".
 import { dashHasDot } from "../ui/lineSegments";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 
+/**
+ * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7): Werte je
+ * Feld (gelockt oder live), aktives Tab-Ziel und der gerade getippte Text —
+ * das HUD spiegelt die Eingabe LIVE am Cursor (VW-Verhalten).
+ */
+export interface HudFieldsState {
+  fields: { id: string; value: number | null; locked: boolean; active: boolean }[];
+  typed: string;
+}
+
 const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutzerraum)
 const PAD = 60; // Rand in viewBox-Einheiten
 
@@ -350,6 +360,14 @@ export interface PlanViewProps {
    */
   toolHandlers?: ToolHandlers;
   /**
+   * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7):
+   * gelockte/live Werte je Feld, aktives Tab-Ziel und der gerade getippte
+   * Text. Das HUD spiegelt damit die Eingabe LIVE am Cursor (VW-Verhalten:
+   * tippen → Wert erscheint oben im Kästchen UND unten im Befehl); ohne
+   * Felder fällt es auf die draft.hud-Livewerte zurück.
+   */
+  hudFields?: HudFieldsState | null;
+  /**
    * Editier-Griffe (Grips) des aktuell EINZELN selektierten Elements, in Modell-
    * Metern (Wand-Enden, 2D-Vertices/Ecken). Werden als ziehbare Quadrate
    * gezeichnet; das Ziehen meldet sich über {@link gripHandlers}. Nur im
@@ -437,6 +455,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       activeTool,
       toolInputActive,
       toolHandlers,
+      hudFields,
       grips,
       edgeGrips,
       hairline,
@@ -2302,6 +2321,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           toScreen={toScreen}
           vbPerPx={1 / (meetScale(view, svgRef.current) ?? 1)}
           snapColor={snapColor}
+          hudFields={hudFields ?? null}
         />
       )}
       </svg>
@@ -2324,11 +2344,16 @@ function DraftOverlay({
   toScreen,
   vbPerPx,
   snapColor,
+  hudFields = null,
 }: {
   draft: ToolDraft;
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
   snapColor: string;
+  hudFields?: {
+    fields: { id: string; value: number | null; locked: boolean; active: boolean }[];
+    typed: string;
+  } | null;
 }) {
   const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
   const markSize = 6.5 * vbPerPx; // halbe Kantenlänge des Snap-Markers (grösser = besser sichtbar)
@@ -2386,7 +2411,7 @@ function DraftOverlay({
         <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} />
       )}
       {/* Maß-/Winkel-HUD am Cursor (VW-Stil `L: … W: …`, oder einfacher Text). */}
-      {draft.hud && <DraftHud hud={draft.hud} toScreen={toScreen} vbPerPx={vbPerPx} />}
+      {draft.hud && <DraftHud hud={draft.hud} toScreen={toScreen} vbPerPx={vbPerPx} hudFields={hudFields} />}
     </g>
   );
 }
@@ -2402,37 +2427,92 @@ function DraftHud({
   hud,
   toScreen,
   vbPerPx,
+  hudFields = null,
 }: {
   hud: NonNullable<ToolDraft["hud"]>;
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
+  hudFields?: {
+    fields: { id: string; value: number | null; locked: boolean; active: boolean }[];
+    typed: string;
+  } | null;
 }) {
-  const text =
-    hud.length != null && hud.angleDeg != null
-      ? `L: ${hud.length.toFixed(3)}m    W: ${hud.angleDeg.toFixed(3)}°`
-      : hud.text;
-  if (!text) return null;
+  // Segmente: mit Befehlszeilen-Feldern (Tab-Zyklus) spiegelt das HUD deren
+  // Zustand — getippter Text erscheint LIVE im aktiven Feld (VW-Verhalten),
+  // gelockte Werte fest, ungelockte folgen der Maus (draft.hud-Livewerte als
+  // Fallback je Feld-Id). Ohne Felder: bisherige L/W- bzw. Text-Anzeige.
+  interface Seg {
+    text: string;
+    active: boolean;
+    locked: boolean;
+  }
+  const liveFor = (id: string): number | null =>
+    id === "length" ? (hud.length ?? null) : id === "angle" ? (hud.angleDeg ?? null) : null;
+  const segs: Seg[] = [];
+  if (hudFields && hudFields.fields.length > 0) {
+    for (const f of hudFields.fields) {
+      const label = f.id === "length" ? "L" : f.id === "angle" ? "W" : f.id;
+      const unit = f.id === "angle" ? "°" : "m";
+      const typedHere = f.active && hudFields.typed.trim() !== "";
+      const value = typedHere
+        ? hudFields.typed
+        : f.value != null
+          ? f.value.toFixed(3)
+          : (liveFor(f.id)?.toFixed(3) ?? "—");
+      segs.push({ text: `${label}: ${value}${unit}`, active: f.active, locked: f.locked });
+    }
+  } else if (hud.length != null && hud.angleDeg != null) {
+    segs.push({ text: `L: ${hud.length.toFixed(3)}m`, active: false, locked: false });
+    segs.push({ text: `W: ${hud.angleDeg.toFixed(3)}°`, active: false, locked: false });
+  } else if (hud.text) {
+    segs.push({ text: hud.text, active: false, locked: false });
+  }
+  if (segs.length === 0) return null;
+
   const p = toScreen(hud.at);
   const fontSize = 12 * vbPerPx;
   const padX = 6 * vbPerPx;
   const padY = 4 * vbPerPx;
+  const gap = 10 * vbPerPx;
   const charW = fontSize * 0.62; // Monospace-Schätzung für die Kastenbreite
-  const w = text.length * charW + padX * 2;
+  const widths = segs.map((s) => s.text.length * charW);
+  const w = widths.reduce((a, b) => a + b, 0) + gap * (segs.length - 1) + padX * 2;
   const h = fontSize + padY * 2;
   const x = p.x + 14 * vbPerPx;
   const y = p.y + 14 * vbPerPx;
+  let cx = x + padX;
   return (
     <g className="plan-hud" pointerEvents="none">
       <rect className="plan-hud-box" x={x} y={y} width={w} height={h} rx={2 * vbPerPx} />
-      <text
-        className="plan-hud-text"
-        x={x + padX}
-        y={y + h / 2}
-        fontSize={fontSize}
-        dominantBaseline="middle"
-      >
-        {text}
-      </text>
+      {segs.map((s, i) => {
+        const sx = cx;
+        cx += widths[i] + gap;
+        return (
+          <g key={i}>
+            {s.active && (
+              <rect
+                className="plan-hud-active"
+                x={sx - 2 * vbPerPx}
+                y={y + 1.5 * vbPerPx}
+                width={widths[i] + 4 * vbPerPx}
+                height={h - 3 * vbPerPx}
+                rx={2 * vbPerPx}
+              />
+            )}
+            <text
+              className={
+                "plan-hud-text" + (s.active ? " active" : "") + (s.locked ? " locked" : "")
+              }
+              x={sx}
+              y={y + h / 2}
+              fontSize={fontSize}
+              dominantBaseline="middle"
+            >
+              {s.text}
+            </text>
+          </g>
+        );
+      })}
     </g>
   );
 }
