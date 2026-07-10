@@ -5001,11 +5001,11 @@ function SectionPlanView({
     [isElevation, project, level, mono],
   );
 
-  const plan = isElevation
-    ? elevationPlan
-    : output
-      ? generateSectionPlan(output, mono)
-      : null;
+  const sectionPlan = useMemo(
+    () => (!isElevation && output ? generateSectionPlan(output, mono) : null),
+    [isElevation, output, mono],
+  );
+  const plan = isElevation ? elevationPlan : sectionPlan;
   const effStatus = isElevation ? (elevationPlan ? "ready" : "empty") : status;
 
   const kindLabel = level.kind === "section" ? t("stub.section") : t("stub.elevation");
