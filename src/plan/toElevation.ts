@@ -39,6 +39,7 @@ import {
 } from "../model/types";
 import { wallVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
+import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d } from "./toWalls3d";
 import type { RModel3d, RSlab, RWall } from "./toWalls3d";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./toSection";
@@ -138,7 +139,7 @@ export function projectPoint(
 // ── Welt-Flächen aus dem geflachten Modell ─────────────────────────────────
 
 /** Rolle einer Fläche (steuert Füllung/Stil in der Ansicht). */
-export type FaceRole = "wall" | "slab";
+export type FaceRole = "wall" | "slab" | "roof";
 
 /** Eine orientierte Welt-Fläche (konvexes Polygon + Aussennormale). */
 export interface WorldFace {
@@ -149,6 +150,8 @@ export interface WorldFace {
   wallId?: string;
   /** Ursprungs-Decke (nur role "slab"). */
   ceilingId?: string;
+  /** Ursprungs-Dach (nur role "roof"). */
+  roofId?: string;
 }
 
 function normalize3(a: V3): V3 {
@@ -274,6 +277,7 @@ export interface ProjectedFace {
   role: FaceRole;
   wallId?: string;
   ceilingId?: string;
+  roofId?: string;
 }
 
 /**
@@ -294,7 +298,7 @@ export function projectFace(frame: ElevationFrame, face: WorldFace): ProjectedFa
   }
   const depth = depthSum / face.poly.length;
   if (depth <= EPS) return null; // vor der Ebene → ignorieren
-  return { pts, depth, role: face.role, wallId: face.wallId, ceilingId: face.ceilingId };
+  return { pts, depth, role: face.role, wallId: face.wallId, ceilingId: face.ceilingId, roofId: face.roofId };
 }
 
 /**
@@ -315,6 +319,71 @@ export function collectElevationFaces(model: RModel3d, frame: ElevationFrame): P
     for (const f of slabWorldFaces(s)) {
       const pf = projectFace(frame, f);
       if (pf) out.push(pf);
+    }
+  }
+  return out;
+}
+
+// ── Dächer ──────────────────────────────────────────────────────────────────
+
+/**
+ * Die Welt-Flächen ALLER Dächer des Projekts: Dachflächen (Aufsicht-Polygone der
+ * roofGeometry, Normale aufwärts orientiert) + Giebel (vertikale Endflächen,
+ * Normale vom Dach-Schwerpunkt weg nach aussen). Modell [x,y,z=Höhe] → Welt
+ * (x, y=Höhe, z=y), dieselbe Konvention wie emitRoofs/pickGeometry. Die
+ * Materialdicke bleibt für die Ansicht unberücksichtigt (Silhouette genügt —
+ * die Untersicht ist rückseiten-gecullt ohnehin unsichtbar).
+ */
+export function roofWorldFacesAll(project: Project): WorldFace[] {
+  const out: WorldFace[] = [];
+  for (const roof of project.roofs ?? []) {
+    const eavesZ = roofBaseElevation(project, roof);
+    const g = roofGeometry(roof, eavesZ);
+    // Dach-Schwerpunkt (Welt) für die Aussen-Orientierung der Giebel.
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    let cn = 0;
+    for (const pl of g.planes) {
+      for (const p of pl.pts) {
+        cx += p[0];
+        cy += p[2];
+        cz += p[1];
+        cn++;
+      }
+    }
+    if (cn === 0) continue;
+    cx /= cn;
+    cy /= cn;
+    cz /= cn;
+    const newell = (poly: V3[]): V3 => {
+      let nx = 0;
+      let ny = 0;
+      let nz = 0;
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i];
+        const b = poly[(i + 1) % poly.length];
+        nx += (a[1] - b[1]) * (a[2] + b[2]);
+        ny += (a[2] - b[2]) * (a[0] + b[0]);
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
+      }
+      return normalize3([nx, ny, nz]);
+    };
+    for (const pl of g.planes) {
+      const poly: V3[] = pl.pts.map((p) => [p[0], p[2], p[1]]);
+      let n = newell(poly);
+      // Dachflächen zeigen aufwärts (Welt-Y).
+      if (n[1] < 0) n = [-n[0], -n[1], -n[2]];
+      out.push({ role: "roof", normal: n, poly, roofId: roof.id });
+    }
+    for (const gable of g.gables) {
+      const poly: V3[] = gable.map((p) => [p[0], p[2], p[1]]);
+      if (poly.length < 3) continue;
+      let n = newell(poly);
+      // Giebel zeigen vom Dach-Schwerpunkt weg nach aussen.
+      const toC: V3 = [cx - poly[0][0], cy - poly[0][1], cz - poly[0][2]];
+      if (n[0] * toC[0] + n[1] * toC[1] + n[2] * toC[2] > 0) n = [-n[0], -n[1], -n[2]];
+      out.push({ role: "roof", normal: n, poly, roofId: roof.id });
     }
   }
   return out;
@@ -557,8 +626,14 @@ export function generateElevationPlan(
   // Eine Voll-Box je Wand (Öffnungen als Segment-Aussparungen) + Decken-Prismen.
   const model = projectToModel3d(project, { layeredWalls: false });
   const faces = collectElevationFaces(model, frame);
+  // Dächer analytisch (roofGeometry) — nicht Teil von RModel3d walls/slabs.
+  for (const rf of roofWorldFacesAll(project)) {
+    const pf = projectFace(frame, rf);
+    if (pf) faces.push(pf);
+  }
   const wallFaces = faces.filter((f) => f.role === "wall");
   const slabFaces = faces.filter((f) => f.role === "slab");
+  const roofFaces = faces.filter((f) => f.role === "roof");
 
   const primitives: Primitive[] = [];
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -610,6 +685,7 @@ export function generateElevationPlan(
         hatch: NO_HATCH,
         ...(f.wallId ? { wallId: f.wallId } : {}),
         ...(f.ceilingId ? { ceilingId: f.ceilingId } : {}),
+        ...(f.roofId ? { roofId: f.roofId } : {}),
       },
     });
   }
@@ -617,7 +693,8 @@ export function generateElevationPlan(
   // Schatten (leicht VOR der Empfängertiefe, damit sie direkt nach der Fassade,
   // aber unter den Öffnungen/Kanten näherer Flächen liegen).
   if (shadows) {
-    for (const sh of buildShadows(wallFaces, slabFaces)) {
+    // Schattenwerfer: auskragende Decken UND Dachflächen (Traufüberstand).
+    for (const sh of buildShadows(wallFaces, [...slabFaces, ...roofFaces])) {
       const pts: Vec2[] = sh.pts.map(([u, v]) => {
         acc(u, v);
         return { x: u, y: v };

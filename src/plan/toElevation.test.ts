@@ -255,3 +255,48 @@ function elevationProject(opts: { overhang: boolean }): Project {
   };
   return project;
 }
+
+describe("Dächer in der Ansicht (roofWorldFacesAll)", () => {
+  it("Dachflächen erscheinen als roofId-Polygone bis zur Firsthöhe", () => {
+    // Sattel 4×3 über dem Fixture-Haus, First entlang X, Traufe 3 m — die
+    // Süd-Schräge zeigt zum Betrachter (Ansicht Süd des Fixtures), die
+    // Nord-Schräge ist rückseiten-gecullt.
+    const base = elevationProject({ overhang: false });
+    const p = {
+      ...base,
+      roofs: [
+        {
+          id: "R1",
+          type: "roof",
+          floorId: "eg",
+          categoryCode: "35",
+          outline: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 3 },
+            { x: 0, y: 3 },
+          ],
+          shape: "sattel",
+          pitchDeg: 30,
+          overhang: 0,
+          ridgeAxis: "x",
+          baseElevation: 3,
+          thickness: 0.2,
+        },
+      ],
+    } as unknown as Project;
+    const level = p.drawingLevels.find((z) => z.kind === "elevation")!;
+    const plan = generateElevationPlan(p, level);
+    expect(plan).not.toBeNull();
+    const roofPolys = plan!.primitives.filter(
+      (pr) => pr.kind === "polygon" && (pr as { roofId?: string }).roofId === "R1",
+    );
+    expect(roofPolys.length).toBeGreaterThanOrEqual(1);
+    // Die sichtbare Dachfläche reicht bis zur Firsthöhe 3 + 1.5·tan30.
+    const ridge = 3 + 1.5 * Math.tan((30 * Math.PI) / 180);
+    const maxV = Math.max(
+      ...roofPolys.flatMap((pr) => (pr as { pts: { y: number }[] }).pts.map((q) => q.y)),
+    );
+    expect(maxV).toBeCloseTo(ridge, 5);
+  });
+});
