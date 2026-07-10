@@ -995,6 +995,12 @@ export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
     const monoFill = solid ? HATCH_INK : HATCH_PAPER;
     const monoHatch =
       solid ? hatch : hatch.pattern !== "none" ? { ...hatch, color: SECTION_INK } : hatch;
+    // Auswahl im Schnitt: das QUELL-Element (via cp.sourceId + component.kind) als
+    // wallId/ceilingId/roofId ans Polygon hängen — so wählt ein Klick auf das
+    // geschnittene Bauteil im Schnitt exakt jene Wand/Decke/Dach im Modell, und
+    // die bestehende PlanView-Pick-/Highlight-Logik greift ohne Sonderfall.
+    const kind = cp.component.kind;
+    const sourceId = cp.sourceId;
     primitives.push({
       kind: "polygon",
       pts,
@@ -1002,6 +1008,9 @@ export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
       stroke: SECTION_INK,
       strokeWidthMm: SECTION_CUT_OUTLINE_MM,
       hatch: mono ? monoHatch : hatch,
+      wallId: kind === "wall" ? sourceId : undefined,
+      ceilingId: kind === "slab" ? sourceId : undefined,
+      roofId: kind === "roof" ? sourceId : undefined,
     });
   }
 

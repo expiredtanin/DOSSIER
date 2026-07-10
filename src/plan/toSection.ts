@@ -76,6 +76,15 @@ export interface SectionCutPolygon {
    * Wert (unauflösbares Bauteil), nimmt das Band an keiner Verschmelzung teil.
    */
   componentId?: string;
+  /**
+   * ID des QUELL-Elements dieses Cut-Bands im Dokumentmodell (Wand/Decke/Dach) —
+   * aufgelöst in `attachCutStyles` über die Besitzer-Listen. Trägt die Auswahl im
+   * Schnitt-View: `generateSectionPlan` schreibt sie je nach `component.kind` als
+   * `wallId`/`ceilingId`/`roofId` ins Plan-Polygon, sodass ein Klick auf das
+   * geschnittene Bauteil im Schnitt exakt jenes Element im Grundriss-Modell wählt.
+   * Fehlt (unauflösbares Bauteil), bleibt das Band ohne Auswahlbezug.
+   */
+  sourceId?: string;
 }
 
 /** Ein projiziertes Liniensegment in (u, v)-Metern. */
@@ -294,11 +303,13 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     // aufgelöst; keine Boolean-Dominanz (joinPriority undefined) — unverändert
     // übernehmen. WICHTIG vor dem Slab-Zweig (sonst falscher owner-Lookup).
     if (ref.kind === "roof") {
+      cp.sourceId = (project.roofs ?? [])[ref.index]?.id;
       bands.push(cp);
       continue;
     }
     if (ref.kind === "wall") {
       const owner = walls[ref.index];
+      cp.sourceId = owner?.id;
       // Wand: bei mehrschichtigem Wandtyp wird das EINE geschnittene Rechteck in
       // stehende Teil-Rechtecke je Schicht quer zur Dicke (u) aufgeteilt — das
       // vertikale Gegenstück zur Decken-Zerlegung (dort quer zur Höhe v), siehe
@@ -327,6 +338,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     // Schnitt sichtbar (im Grundriss bleibt die Decke bewusst flächig, siehe
     // `addCeilingPoche`).
     const owner = slabs[ref.index];
+    cp.sourceId = owner?.id;
     if (owner) {
       const wt = getCeilingType(project, owner);
       if (wt.layers.length > 1) {
@@ -727,6 +739,7 @@ function bandFromRect(src: SectionCutPolygon, r: Rect): SectionCutPolygon {
     hatch: src.hatch,
     joinPriority: src.joinPriority,
     componentId: src.componentId,
+    sourceId: src.sourceId,
   };
 }
 
@@ -779,6 +792,7 @@ function splitSlabLayers(
       hatch,
       joinPriority: comp.joinPriority,
       componentId: comp.id,
+      sourceId: cp.sourceId,
     });
   }
   return out;
@@ -865,6 +879,7 @@ export function splitWallLayers(
       hatch,
       joinPriority: comp.joinPriority,
       componentId: comp.id,
+      sourceId: cp.sourceId,
     });
   }
   return out;
