@@ -300,6 +300,8 @@ export const de = {
   "objinfo.roof.ridgeAxis.y": "entlang Y",
   "objinfo.roof.pitch": "Neigung (°)",
   "objinfo.roof.pitchUpper": "Obere Neigung (°)",
+  "objinfo.roof.type": "Dachtyp",
+  "objinfo.roof.type.single": "Einschichtig (Dicke)",
   "objinfo.roof.mansardType": "Mansard-Art",
   "objinfo.roof.mansard.giebel": "Giebel-Mansarde",
   "objinfo.roof.mansard.walm": "Walm-Mansarde",

@@ -276,6 +276,21 @@ export interface CeilingType {
   layers: Layer[];
 }
 
+/**
+ * Ein Dachtyp (Dachaufbau) = geordneter Schichtaufbau EINES Daches, senkrecht
+ * zur Dachfläche gestapelt (aussen/Eindeckung → innen/Verkleidung) — das
+ * geneigte Gegenstück zu `WallType`/`CeilingType`. Nutzt denselben `Layer`-Typ.
+ * Typische Folge: Eindeckung (Ziegel/Blech) → Konterlattung/Lattung → Unterdach
+ * → Sparren/Dämmung → Dampfbremse → Innenverkleidung. Ein Dach ohne `roofTypeId`
+ * fällt auf die einschichtige `Roof.thickness` zurück (rückwärtskompatibel).
+ */
+export interface RoofType {
+  id: string;
+  name: string;
+  /** Aussen (Eindeckung) → innen (Verkleidung), analog `WallType.layers`. */
+  layers: Layer[];
+}
+
 // ── Bauteil-Typen: Tür / Fenster / Treppe ──────────────────────────────────
 // Wiederverwendbare Stile (Presets) für Türen, Fenster und Treppen — analog
 // `WallType`/`CeilingType` (Bibliothek im Projekt, referenziert per `typeId`).
@@ -1053,8 +1068,18 @@ export interface Roof {
   ridgeAxis: "x" | "y";
   /** Traufhöhe (absolutes Z, Meter); fehlt ⇒ Oberkante des Geschosses. */
   baseElevation?: number;
-  /** Dachdicke (Meter, senkrecht zur Fläche gemessen). */
+  /**
+   * Dachdicke (Meter, senkrecht zur Fläche) — Fallback/Override. Ohne
+   * {@link roofTypeId} ist es die einschichtige Gesamtdicke; mit `roofTypeId`
+   * bleibt es als reiner Fallback bestehen (die Schichtsumme des Typs gilt).
+   */
   thickness: number;
+  /**
+   * Verweis auf einen Dachtyp (Dachaufbau) aus `Project.roofTypes` — mehrschichtig
+   * (Eindeckung/Lattung/Dämmung/Verkleidung), analog `Ceiling.ceilingTypeId`.
+   * Fehlt er, gilt die einschichtige {@link thickness}.
+   */
+  roofTypeId?: string;
   /** Optionale Übersteuerung der Strich-/Umrissfarbe; sonst Kategorie-Farbe. */
   color?: string;
 }
@@ -1951,6 +1976,11 @@ export interface Project {
    */
   ceilingTypes?: CeilingType[];
   /**
+   * Dachtypen (Dachaufbauten) — mehrschichtig, analog `ceilingTypes`. Optional;
+   * Dächer ohne `roofTypeId` lösen über die einschichtige `Roof.thickness` auf.
+   */
+  roofTypes?: RoofType[];
+  /**
    * Türtypen-Bibliothek (Türstile), analog `wallTypes`. Optional, damit
    * bestehende Projekte/Tests ohne `doorTypes` gültig bleiben; Türen ohne
    * `typeId` verhalten sich wie bisher (Inline-Felder).
@@ -2109,6 +2139,24 @@ export const ceilingThickness = (project: Project, ceiling: Ceiling): number => 
     return 0.2;
   }
 };
+
+/**
+ * Schichtaufbau eines Daches (aussen/Eindeckung → innen/Verkleidung). Mit
+ * {@link Roof.roofTypeId} die Schichten des Dachtyps; sonst eine EINSCHICHTIGE
+ * synthetische Schicht aus {@link Roof.thickness} (leere `componentId` ⇒ der
+ * Renderer nutzt seine Default-Dachfarbe).
+ */
+export const roofLayers = (project: Project, roof: Roof): Layer[] => {
+  if (roof.roofTypeId) {
+    const rt = (project.roofTypes ?? []).find((t) => t.id === roof.roofTypeId);
+    if (rt && rt.layers.length > 0) return rt.layers;
+  }
+  return [{ componentId: "", thickness: Math.max(0, roof.thickness) }];
+};
+
+/** Gesamtdicke eines Daches (Meter, senkrecht zur Fläche) = Summe der Schichten. */
+export const roofTotalThickness = (project: Project, roof: Roof): number =>
+  roofLayers(project, roof).reduce((s, l) => s + Math.max(0, l.thickness), 0);
 
 /**
  * Löst den {@link DoorType} einer Tür-Öffnung auf, oder `undefined` (keine

@@ -1229,21 +1229,22 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     const project: Project = { ...sampleProject, roofs: [baseRoof] };
     const { meshes } = projectToModel3d(project);
     const roofMeshes = meshes.filter(isRoofMesh);
-    // Zwei Dachflächen (je ein Quad -> 2 Dreiecke) + zwei Giebel (je ein Dreieck)
-    // landen in EINEM kombinierten Mesh (Flächen und Giebel bilden zusammen den
-    // geschlossenen Dachkörper).
-    expect(roofMeshes.length).toBe(1);
-    const m = roofMeshes[0];
-    expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
-    expect(m.indices.length % 3).toBe(0);
-    expect(m.indices.length).toBeGreaterThan(0);
-    const vcount = m.positions.length / 3;
-    expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
-    // Firsthöhe: eavesZ (baseElevation) + ridgeHeight aus roofGeometry.
+    // Einschichtiges Dach (thickness-Fallback): 1 Schicht-Slab-Mesh (Flächen) +
+    // 1 Giebel-Mesh (Endfüllung) = 2 Roof-Meshes (beide ROOF_RGB).
+    expect(roofMeshes.length).toBe(2);
+    for (const m of roofMeshes) {
+      expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
+      expect(m.indices.length % 3).toBe(0);
+      expect(m.indices.length).toBeGreaterThan(0);
+      const vcount = m.positions.length / 3;
+      expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
+    }
+    // Firsthöhe: eavesZ (baseElevation) + ridgeHeight aus roofGeometry — über ALLE
+    // Roof-Meshes (Oberseite der Flächen bzw. Giebelspitze).
     const g = roofGeometry(baseRoof, roofBaseElevation(project, baseRoof));
     const expectedRidgeZ = roofBaseElevation(project, baseRoof) + g.ridgeHeight;
-    const heights = m.positions.filter((_, i) => i % 3 === 2);
-    expect(Math.max(...heights)).toBeCloseTo(expectedRidgeZ, 6);
+    const allHeights = roofMeshes.flatMap((m) => m.positions.filter((_, i) => i % 3 === 2));
+    expect(Math.max(...allHeights)).toBeCloseTo(expectedRidgeZ, 6);
   });
 
   it("Walmdach: vier Dachflächen (2 Quader + 2 Dreiecke) korrekt trianguliert", () => {
@@ -1272,6 +1273,61 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     expect(Math.min(...heights)).toBeLessThan(3 - 0.2);
   });
 
+  it("Dach-Schichtaufbau (roofTypeId): je Schicht ein eigenes Mesh mit Bauteilfarbe, entlang der Normalen gestapelt", () => {
+    // Dachtyp mit zwei Schichten (Eindeckung + Sparren/Dämmung), eigene Farben.
+    const flatRoof: Roof = {
+      ...baseRoof,
+      shape: "flach", // Flachdach: eine Fläche, keine Giebel -> reine Schicht-Meshes
+      roofTypeId: "rt-warm",
+    };
+    const project: Project = {
+      ...sampleProject,
+      components: [
+        ...sampleProject.components,
+        {
+          id: "comp-tile",
+          name: "Ziegel",
+          color: "#a03a2a",
+          hatchId: "",
+          joinPriority: 1,
+        },
+        {
+          id: "comp-rafter",
+          name: "Sparren/Dämmung",
+          color: "#caa15a",
+          hatchId: "",
+          joinPriority: 1,
+        },
+      ],
+      roofTypes: [
+        {
+          id: "rt-warm",
+          name: "Warmdach",
+          layers: [
+            { componentId: "comp-tile", thickness: 0.05 },
+            { componentId: "comp-rafter", thickness: 0.24 },
+          ],
+        },
+      ],
+      roofs: [flatRoof],
+    };
+    const meshes = projectToModel3d(project).meshes;
+    const tile = meshes.filter(
+      (m) => Math.abs(m.color[0] - 0xa0 / 255) < 1e-6 && Math.abs(m.color[1] - 0x3a / 255) < 1e-6,
+    );
+    const rafter = meshes.filter(
+      (m) => Math.abs(m.color[0] - 0xca / 255) < 1e-6 && Math.abs(m.color[1] - 0xa1 / 255) < 1e-6,
+    );
+    expect(tile.length).toBe(1); // Eindeckungs-Schicht als eigenes Mesh
+    expect(rafter.length).toBe(1); // Sparren-Schicht als eigenes Mesh
+    // Die Sparren-Schicht liegt UNTER der Eindeckung: ihre Oberkante = Traufe −
+    // Eindeckungsdicke. Flachdach-Oberseite bei baseElevation 3.
+    const topOf = (m: { positions: number[] }) =>
+      Math.max(...m.positions.filter((_, i) => i % 3 === 2));
+    expect(topOf(tile[0])).toBeCloseTo(3, 6);
+    expect(topOf(rafter[0])).toBeCloseTo(3 - 0.05, 6);
+  });
+
   it("Projekt ohne Dächer emittiert keine Roof-Meshes (Rückwärtskompatibilität)", () => {
     // Explizit leeres roofs-Feld -> keine Roof-Meshes.
     const project: Project = { ...sampleProject, roofs: [] };
@@ -1280,8 +1336,9 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     const noField: Project = { ...sampleProject };
     delete (noField as { roofs?: unknown }).roofs;
     expect(projectToModel3d(noField).meshes.filter(isRoofMesh).length).toBe(0);
-    // sampleProject enthält jetzt ein Demo-Satteldach (RF1) -> genau ein Roof-Mesh.
-    expect(projectToModel3d(sampleProject).meshes.filter(isRoofMesh).length).toBe(1);
+    // sampleProject enthält ein Demo-Satteldach (RF1, einschichtig) -> 2 Roof-
+    // Meshes: Schicht-Slab (Flächen) + Giebel-Endfüllung.
+    expect(projectToModel3d(sampleProject).meshes.filter(isRoofMesh).length).toBe(2);
   });
 });
 

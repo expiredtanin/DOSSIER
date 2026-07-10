@@ -497,6 +497,21 @@ export function RoofSection({
         />
       </div>
 
+      {/* Dachtyp (mehrschichtiger Aufbau) — leer = einschichtig (Dicke unten). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.roof.type")}</span>
+        <Dropdown
+          value={roof.roofTypeId ?? ""}
+          onChange={(v) => host.onSetRoofPatch({ roofTypeId: v || undefined })}
+          options={[
+            { value: "", label: t("objinfo.roof.type.single") },
+            ...(host.project.roofTypes ?? []).map((rt) => ({ value: rt.id, label: rt.name })),
+          ]}
+          title={t("objinfo.roof.type")}
+          width={130}
+        />
+      </div>
+
       {/* Firstrichtung (X/Y) — nur bei Formen mit First relevant. */}
       {roof.shape !== "flach" && roof.shape !== "zelt" && (
         <div className="objinfo-field">

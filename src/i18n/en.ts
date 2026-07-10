@@ -299,6 +299,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.roof.ridgeAxis.y": "along Y",
   "objinfo.roof.pitch": "Pitch (°)",
   "objinfo.roof.pitchUpper": "Upper pitch (°)",
+  "objinfo.roof.type": "Roof type",
+  "objinfo.roof.type.single": "Single layer (thickness)",
   "objinfo.roof.mansardType": "Mansard type",
   "objinfo.roof.mansard.giebel": "Gable mansard",
   "objinfo.roof.mansard.walm": "Hip mansard",

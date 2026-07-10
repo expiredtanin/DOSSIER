@@ -80,6 +80,8 @@ export interface RoofInfo {
   pitchDeg: number;
   /** Obere Neigung (Grad) — nur Mansarde relevant. */
   pitchUpperDeg?: number;
+  /** Dachtyp-Verweis (mehrschichtiger Aufbau) oder undefined (einschichtig). */
+  roofTypeId?: string;
   /** Mansarde-Untertyp (Giebel/Walm/Zelt) — nur Mansarde relevant. */
   mansardType?: "giebel" | "walm" | "zelt";
   /** Mansarde-Knicklage (0..0.5 der halben Spannweite) — nur Mansarde relevant. */
@@ -630,6 +632,7 @@ function roofSelection(project: Project, roof: Roof): Selection {
     shape: roof.shape,
     pitchDeg: roof.pitchDeg,
     pitchUpperDeg: roof.pitchUpperDeg,
+    roofTypeId: roof.roofTypeId,
     mansardType: roof.mansardType,
     mansardKneeRatio: roof.mansardKneeRatio,
     overhang: roof.overhang,

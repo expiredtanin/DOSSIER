@@ -202,6 +202,18 @@ export const sampleProject: Project = {
       ],
     },
   ],
+  roofTypes: [
+    {
+      id: "roof-warm",
+      name: "Steildach gedämmt",
+      // Aussen (Eindeckung) → innen (Verkleidung); Bauteile aus der Bibliothek.
+      layers: [
+        { componentId: "brick", thickness: 0.04 }, // Eindeckung (Ziegel, Platzhalter)
+        { componentId: "insulation", thickness: 0.22, jointLineStyleId: "thin" }, // Sparren/Dämmung
+        { componentId: "render-int", thickness: 0.0125 }, // Innenverkleidung (GK)
+      ],
+    },
+  ],
   // Bauteil-Typen (Bibliothek) — Tür/Fenster/Treppe, analog Wand-/Deckenstile.
   // Elemente referenzieren sie per `typeId`; ohne Referenz gilt Inline-Verhalten.
   doorTypes: [

@@ -45,6 +45,7 @@ import {
   getDoorType,
   getWindowType,
   glazingPanesOf,
+  roofLayers,
 } from "../model/types";
 import { wallVerticalExtent, ceilingVerticalExtent, columnVerticalExtent, stairVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
@@ -1729,16 +1730,47 @@ function emitRoofs(project: Project): RMesh[] {
   for (const roof of project.roofs ?? []) {
     const eavesZ = roofBaseElevation(project, roof);
     const g = roofGeometry(roof, eavesZ);
-    const color = roof.color ? hexToRgb(roof.color, ROOF_RGB) : ROOF_RGB;
-    const thickness = Math.max(0, roof.thickness);
-    const positions: number[] = [];
-    const indices: number[] = [];
-    // Dachflächen als solide Slabs (echte Dicke); Giebel bleiben dünne Füllung
-    // (schliessen die offenen Enden zur Attika hin).
-    for (const plane of g.planes) pushRoofSlab(positions, indices, plane.pts, thickness);
-    for (const gable of g.gables) pushFanTriangles(positions, indices, gable);
-    if (indices.length === 0) continue;
-    out.push({ positions, indices, kind: "extrusion", color });
+    const overrideColor = roof.color ? hexToRgb(roof.color, ROOF_RGB) : null;
+    // Schichtaufbau (aussen/Eindeckung → innen). Jede Schicht wird zu einem
+    // eigenen RMesh mit ihrer Bauteilfarbe, entlang der Flächennormalen unter die
+    // vorige gestapelt. Leere componentId (einschichtige thickness-Fallback) ⇒
+    // Default-Dachfarbe. Eine Roof.color-Übersteuerung gilt für alle Schichten.
+    const layers = roofLayers(project, roof);
+    layers.reduce((offsetAbove, layer) => {
+      const t = Math.max(0, layer.thickness);
+      if (t <= EPS) return offsetAbove;
+      const color =
+        overrideColor ??
+        (layer.componentId ? hexToRgb(getComponent(project, layer.componentId).color, ROOF_RGB) : ROOF_RGB);
+      const positions: number[] = [];
+      const indices: number[] = [];
+      for (const plane of g.planes) {
+        // Oberseite dieser Schicht = Dachfläche um `offsetAbove` entlang der
+        // Normalen nach innen versetzt; Slab-Dicke = Schichtdicke.
+        const nrm = planeNormalUp(plane.pts);
+        const top: RoofVec3[] = plane.pts.map((p) => [
+          p[0] - nrm[0] * offsetAbove,
+          p[1] - nrm[1] * offsetAbove,
+          p[2] - nrm[2] * offsetAbove,
+        ]);
+        pushRoofSlab(positions, indices, top, t);
+      }
+      if (indices.length > 0) out.push({ positions, indices, kind: "extrusion", color });
+      return offsetAbove + t;
+    }, 0);
+    // Giebel (Endfüllung) als dünne Fläche, äusserste Schichtfarbe/Override.
+    if (g.gables.length > 0) {
+      const gp: number[] = [];
+      const gi: number[] = [];
+      for (const gable of g.gables) pushFanTriangles(gp, gi, gable);
+      if (gi.length > 0) {
+        const first = layers[0];
+        const gc =
+          overrideColor ??
+          (first?.componentId ? hexToRgb(getComponent(project, first.componentId).color, ROOF_RGB) : ROOF_RGB);
+        out.push({ positions: gp, indices: gi, kind: "extrusion", color: gc });
+      }
+    }
   }
   return out;
 }
