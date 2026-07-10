@@ -10,7 +10,7 @@
 // Tool. Live-Vorschau + HUD (Länge/Winkel) wie die bestehenden Tools.
 
 import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
+import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -61,14 +61,7 @@ function lineDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   const preview: DraftShape[] = [];
   if (cursor && segLen(a, cursor) >= EPS) preview.push({ kind: "line", a, b: cursor });
   const draft: ToolDraft = { preview, vertices: [a] };
-  if (cursor && segLen(a, cursor) >= EPS) {
-    draft.hud = {
-      at: cursor,
-      text: `${segLen(a, cursor).toFixed(2)} m · ${Math.abs(
-        (segAngleDeg(a, cursor) + 360) % 360,
-      ).toFixed(0)}°`,
-    };
-  }
+  if (cursor && segLen(a, cursor) >= EPS) draft.hud = segmentHud(a, cursor);
   return draft;
 }
 

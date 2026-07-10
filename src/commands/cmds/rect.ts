@@ -17,7 +17,7 @@
 // werden (die Engine löst `r…` relativ zu lastPoint auf).
 
 import type { Drawing2D } from "../../model/types";
-import { uniqueId } from "../../tools/types";
+import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,
   CommandContext,
@@ -196,51 +196,42 @@ function rectGeom(a: Vec2, b: Vec2): { min: Vec2; max: Vec2 } {
 
 // ── Vorschau ─────────────────────────────────────────────────────────────────
 
-function corners4Draft(pts: Vec2[], hudAt: Vec2 | null, hudText: string): ToolDraft {
+function corners4Draft(pts: Vec2[], hud: ToolDraft["hud"] | null): ToolDraft {
   const preview: DraftShape[] = [{ kind: "poly", pts, closed: true }];
   const draft: ToolDraft = { preview, vertices: [pts[0]] };
-  if (hudAt) draft.hud = { at: hudAt, text: hudText };
+  if (hud) draft.hud = hud;
   return draft;
 }
 
-/** Vorschau des 2-Punkt-Rechtecks (achsparallel). */
+/** Vorschau des 2-Punkt-Rechtecks (achsparallel) — HUD zeigt die Diagonale a→cursor. */
 function cornerDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [], vertices: [a] };
   const g = rectGeom(a, cursor);
   const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-  const w = g.max.x - g.min.x;
-  const h = g.max.y - g.min.y;
-  return corners4Draft(pts, cursor, `${w.toFixed(2)} × ${h.toFixed(2)} m`);
+  return corners4Draft(pts, segLen(a, cursor) >= EPS ? segmentHud(a, cursor) : null);
 }
 
-/** Vorschau des Zentrum-Rechtecks (achsparallel). */
+/** Vorschau des Zentrum-Rechtecks (achsparallel) — HUD zeigt die Diagonale center→cursor. */
 function centerDraft(center: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [], vertices: [center] };
   const g = centerGeom(center, cursor);
   const pts: Vec2[] = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-  const w = g.max.x - g.min.x;
-  const h = g.max.y - g.min.y;
-  return corners4Draft(pts, cursor, `${w.toFixed(2)} × ${h.toFixed(2)} m`);
+  return corners4Draft(pts, segLen(center, cursor) >= EPS ? segmentHud(center, cursor) : null);
 }
 
 /** Vorschau der Basiskante (3-Punkt, erster Teil). */
 function baseDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor || segLen(a, cursor) < EPS) return { preview: [{ kind: "line", a, b: a }], vertices: [a] };
-  const draft: ToolDraft = { preview: [{ kind: "line", a, b: cursor }], vertices: [a] };
-  draft.hud = {
-    at: cursor,
-    text: `${segLen(a, cursor).toFixed(2)} m · ${Math.abs((segAngleDeg(a, cursor) + 360) % 360).toFixed(0)}°`,
-  };
-  return draft;
+  return { preview: [{ kind: "line", a, b: cursor }], vertices: [a], hud: segmentHud(a, cursor) };
 }
 
-/** Vorschau des gedrehten Rechtecks (3-Punkt, zweiter Teil). */
+/** Vorschau des gedrehten Rechtecks (3-Punkt, zweiter Teil) — HUD: Basisbreite + Höhe am Cursor. */
 function riseDraft(a: Vec2, b: Vec2, cursor: Vec2 | null): ToolDraft {
   if (!cursor) return { preview: [{ kind: "line", a, b }], vertices: [a] };
   const pts = rotatedCorners(a, b, cursor);
   const w = segLen(a, b);
   const h = Math.abs(riseFrom(a, b, cursor));
-  return corners4Draft(pts, cursor, `${w.toFixed(2)} × ${h.toFixed(2)} m`);
+  return corners4Draft(pts, { at: cursor, text: `B: ${w.toFixed(3)}m    H: ${h.toFixed(3)}m` });
 }
 
 // ── Commit ───────────────────────────────────────────────────────────────────
