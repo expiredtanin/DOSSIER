@@ -604,6 +604,52 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     expect(operableCount).toBe(8); // + 4 Flügelrahmen-Riegel
   });
 
+  it("Glastür mit glazingRatio < 1: Glas nur im oberen Blattanteil (Teilverglasung)", () => {
+    const glassDoor = (glazingRatio?: number): Project => ({
+      ...sampleProject,
+      doorTypes: [
+        {
+          id: "dt-glass",
+          name: "Glastür Test",
+          kind: "dreh",
+          leafCount: 1,
+          leafStyle: "glas",
+          glazingRatio,
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          defaultWidth: 0.9,
+          defaultHeight: 2.0,
+        },
+      ],
+      openings: [
+        {
+          id: "DG",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "door",
+          typeId: "dt-glass",
+          position: 3.0,
+          width: 0.9,
+          height: 2.0,
+          sillHeight: 0,
+        },
+      ],
+      doors: [],
+      context: [],
+    });
+    // Vollglas (ratio 1 / fehlt): Glas über (fast) die ganze Blatthöhe.
+    const full = projectToModel3d(glassDoor(1)).meshes.filter(isGlass);
+    expect(full.length).toBe(1);
+    const fullR = zRange(full[0]);
+    // Halbglas (ratio 0.5): Glas nur in der oberen Hälfte -> Unterkante deutlich höher.
+    const half = projectToModel3d(glassDoor(0.5)).meshes.filter(isGlass);
+    expect(half.length).toBe(1);
+    const halfR = zRange(half[0]);
+    expect(halfR.max).toBeCloseTo(fullR.max, 6); // Oberkante gleich (an OK/Sturz)
+    expect(halfR.min).toBeGreaterThan(fullR.min + 0.5); // Unterkante klar angehoben
+  });
+
   it("insetFromFace verschiebt Rahmen-Position entlang der Wand-Normalen gegenüber bündig (kein Einzug)", () => {
     // W1-Achse (0,0)->(5,0): u=(1,0) -> Normale n=(0,-1); der Quer-Versatz
     // bildet sich rein in der Y-Koordinate ab (y = -t). insetFromFace 0.1 muss

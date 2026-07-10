@@ -1943,6 +1943,13 @@ interface OpeningFrameParams {
    */
   glazingPanes: 1 | 2 | 3;
   /**
+   * Verglasungs-Anteil des HAUPTFELDS (0..1, von OBEN gemessen): 1 = voll
+   * verglast (Fenster, Ganzglastür), < 1 = nur der obere Anteil ist Glas, unten
+   * bleibt ein blindes Feld (z. B. Tür mit Oberglas, `DoorType.glazingRatio`).
+   * Fenster: immer 1.
+   */
+  glazedFraction: number;
+  /**
    * Flügeleinteilung ({@link sashesOfWindowType}) — je ÖFFENBAREM Flügel wird im
    * 3D ein Flügelrahmen (Rahmen-Riegel innerhalb des Blendrahmens) erzeugt
    * (Schachtelung Blendrahmen → Flügelrahmen → Glas). Türen: leer.
@@ -1975,6 +1982,8 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       mullionRows: 1,
       glazed: dt.leafStyle === "glas",
       glazingPanes: 1,
+      // Teilverglasung: glazingRatio (Glasanteil oben) bei Glasblatt; sonst voll.
+      glazedFraction: Math.max(0.05, Math.min(1, dt.glazingRatio ?? 1)),
       sashes: [],
     };
   }
@@ -2014,6 +2023,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     mullionRows: Math.max(1, Math.round(wt.mullionRows ?? 1)),
     glazed: true,
     glazingPanes: glazingPanesOf(wt),
+    glazedFraction: 1,
     sashes,
   };
 }
@@ -2184,12 +2194,19 @@ function glassPanesForOpening(
       if (n1 <= params.nMin) break;
     }
   };
+  // Teilverglasung (Türen mit glazingRatio < 1): das HAUPTFELD ist nur im oberen
+  // `glazedFraction`-Anteil Glas; darunter bleibt ein blindes Blattfeld. Von der
+  // OBERKANTE des Hauptbands gemessen. Fenster: glazedFraction = 1 (voll).
+  const frac = Math.max(0.05, Math.min(1, params.glazedFraction));
+  const glazedBottom = (bBottom: number, bTop: number) =>
+    bTop - frac * (bTop - bBottom);
   if (params.transomHeight > EPS) {
     const splitZ = clampRange(vert.zTop - params.transomHeight, sashBottom, sashTopFull);
-    push(sashBottom, splitZ - fw / 2); // Hauptscheibe/-blatt unterhalb des Kämpfers.
-    push(splitZ + fw / 2, sashTopFull); // Oberlicht-Scheibe oberhalb des Kämpfers.
+    const mainTop = splitZ - fw / 2;
+    push(glazedBottom(sashBottom, mainTop), mainTop); // Hauptglas (ggf. nur oben).
+    push(splitZ + fw / 2, sashTopFull); // Oberlicht-Scheibe (immer voll).
   } else {
-    push(sashBottom, sashTopFull);
+    push(glazedBottom(sashBottom, sashTopFull), sashTopFull);
   }
   return out;
 }
