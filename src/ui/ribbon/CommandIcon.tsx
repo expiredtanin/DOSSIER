@@ -108,6 +108,14 @@ export function CommandIcon({ name }: { name: string }) {
           <line x1="8" y1="3" x2="8" y2="9" strokeDasharray="1.5 1.5" />
         </svg>
       );
+    case "ceilingopening":
+      // Deckenloch: Decken-Rechteck mit ausgespartem Innenrechteck.
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="3.5" width="11" height="9" />
+          <rect x="6" y="6.5" width="4" height="3" strokeDasharray="1.4 1.2" />
+        </svg>
+      );
     default:
       return null;
   }
