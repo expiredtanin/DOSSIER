@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import type { Project, Roof } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
-import { selectionHighlightLines, projectToWalls3d, projectToModel3d } from "./toWalls3d";
+import { selectionHighlightLines, projectToWalls3d, projectToModel3d, pickGeometry } from "./toWalls3d";
 import { resolveHatch } from "./generatePlan";
 import { roofGeometry, roofBaseElevation } from "../geometry/roof";
 
@@ -1451,5 +1451,18 @@ describe("emitOpeningShading (Rollladen-/Sonnenschutzkasten als 3D-Box)", () => 
     expect(
       projectToModel3d(withShading(true), { detail: "grob" }).meshes.filter(isShadingMesh).length,
     ).toBe(0);
+  });
+});
+
+describe("pickGeometry — Dächer (Ray-Dreieck-Pick)", () => {
+  it("liefert je Dach World-Dreiecke (Flächen + Giebel), world=[x,Höhe,y]", () => {
+    const { roofs } = pickGeometry(sampleProject);
+    // sampleProject trägt das Demo-Satteldach RF1.
+    expect(roofs.length).toBe(1);
+    expect(roofs[0].roofId).toBe("RF1");
+    // Sattel: 2 Flächen (je 4 Ecken → 2 Dreiecke) + 2 Giebel (je 1 Dreieck) = 6.
+    expect(roofs[0].tris.length).toBe(6);
+    // Höhe liegt in der WORLD-Y-Komponente (Index 1) — alle über der Traufe > 0.
+    for (const tri of roofs[0].tris) for (const p of tri) expect(p[1]).toBeGreaterThan(0);
   });
 });

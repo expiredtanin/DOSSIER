@@ -4615,6 +4615,18 @@ export default function App() {
       setSelectedRoofIds([]);
       return;
     }
+    if (hit.kind === "roof") {
+      setSelectedRoofIds([hit.id]);
+      setSelectedWallIds([]);
+      setSelectedCeilingIds([]);
+      setSelectedDrawingId(null);
+      setSelectedOpeningIds([]);
+      setSelectedStairIds([]);
+      setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
+      return;
+    }
     if (hit.kind === "wall") {
       setSelectedWallIds(
         additive ? Array.from(new Set([...selectedWallIds, hit.id])) : [hit.id],

@@ -62,7 +62,10 @@ import type { WallCuts } from "../model/joins";
 import { add, dot, leftNormal, lineIntersect, normalize, scale, sub } from "../model/geometry";
 import type { Line } from "../model/geometry";
 import { resolveHatch } from "./generatePlan";
-import type { PickOpening, PickStair } from "../viewport/raycast3d";
+import type { PickOpening, PickRoof, PickStair } from "../viewport/raycast3d";
+
+/** World-Punkt [x, Höhe, y] für den Dach-Pick (Vec3-Konvention von raycast3d). */
+type RoofPickVec3 = [number, number, number];
 
 /**
  * Achswinkel einer GESCHNITTENEN Wand im Schnitt-Koordinatensystem (Modell-
@@ -2455,7 +2458,29 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
  */
 export function pickGeometry(
   project: Project,
-): { walls: RWall[]; slabs: RSlab[]; openings: PickOpening[]; stairs: PickStair[] } {
+): {
+  walls: RWall[];
+  slabs: RSlab[];
+  openings: PickOpening[];
+  stairs: PickStair[];
+  roofs: PickRoof[];
+} {
+  // Dächer: Dachflächen + Giebel als WORLD-Dreiecke (fan-trianguliert wie
+  // emitRoofs; model [x,y,z=Höhe] → world [x, z, y]) — präzise geneigte
+  // Flächen für den Ray-Dreieck-Pick (raycast3d.rayRoofTris).
+  const roofs: PickRoof[] = [];
+  for (const roof of project.roofs ?? []) {
+    const eavesZ = roofBaseElevation(project, roof);
+    const g = roofGeometry(roof, eavesZ);
+    const tris: [RoofPickVec3, RoofPickVec3, RoofPickVec3][] = [];
+    const toWorld = (p: RoofVec3): RoofPickVec3 => [p[0], p[2], p[1]];
+    for (const poly of [...g.planes.map((pl) => pl.pts), ...g.gables]) {
+      for (let i = 1; i + 1 < poly.length; i++) {
+        tris.push([toWorld(poly[0]), toWorld(poly[i]), toWorld(poly[i + 1])]);
+      }
+    }
+    if (tris.length > 0) roofs.push({ tris, roofId: roof.id });
+  }
   const openings: PickOpening[] = [];
   for (const o of project.openings ?? []) {
     const wall = project.walls.find((w) => w.id === o.hostWallId);
@@ -2492,7 +2517,7 @@ export function pickGeometry(
       stairId: st.id,
     });
   }
-  return { walls: projectToWalls3d(project), slabs: emitSlabs(project), openings, stairs };
+  return { walls: projectToWalls3d(project), slabs: emitSlabs(project), openings, stairs, roofs };
 }
 
 /**

@@ -55,9 +55,9 @@ import { cameraRay, pickNearest, rayPlaneY, rayPlane, worldToScreen } from "./ra
 import type { Vec3 } from "./raycast3d";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 
-/** Ein per 3D-Klick getroffenes Bauteil (Wand oder Decke), oder null (Leerraum). */
+/** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
-  | { kind: "wall" | "ceiling" | "opening" | "stair"; id: string }
+  | { kind: "wall" | "ceiling" | "opening" | "stair" | "roof"; id: string }
   | null;
 
 /** Klick-vs-Drag-Schwelle (Pixel): bleibt die Maus zwischen pointerdown und
@@ -798,10 +798,10 @@ export function Wasm3DViewport({
       const ndc = toNdc(clientX, clientY);
       if (!cb || !o || !ndc) return;
       const ray = cameraRay(orbitCamera(o), ndc.ndcX, ndc.ndcY, ndc.aspect);
-      const { walls, slabs, openings, stairs } = pickGeometry(projectRef.current);
+      const { walls, slabs, openings, stairs, roofs } = pickGeometry(projectRef.current);
       // Erweiterter Pick inkl. Öffnungen (Fenster/Türen) + Treppen — sonst wären
       // im WASM-Viewport nur Wände/Decken anwählbar.
-      const hit = pickNearest(ray, walls, slabs, openings, stairs);
+      const hit = pickNearest(ray, walls, slabs, openings, stairs, roofs);
       cb(hit ? { kind: hit.kind, id: hit.id } : null, additive);
     };
 

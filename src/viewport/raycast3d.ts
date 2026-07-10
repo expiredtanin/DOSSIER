@@ -84,9 +84,21 @@ export interface PickStair {
   stairId: string;
 }
 
+/**
+ * Minimal-Form eines Dachs für den Raycast: die Dachflächen + Giebel als
+ * WORLD-Dreiecke (fan-trianguliert, dieselbe Konvention wie `emitRoofs`:
+ * model (x,y,z=Höhe) → world (x, z, y)). Präzise geneigte Flächen statt eines
+ * grosszügigen Bounding-Prismas — sonst stähle das Dach Klicks auf die
+ * Fassade dahinter (pickNearest entscheidet über die Strahl-Distanz).
+ */
+export interface PickRoof {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  roofId: string;
+}
+
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling" | "opening" | "stair";
+  kind: "wall" | "ceiling" | "opening" | "stair" | "roof";
   id: string;
   t: number;
   /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
@@ -336,6 +348,20 @@ export function rayStairPrism(ray: Ray, stair: PickStair): number | null {
   return rayPrismXZ(ray, stair.outline, stair.zBottom, stair.zTop);
 }
 
+/**
+ * Kleinstes t über alle Dreiecke eines Dachs, oder null — nutzt das bestehende
+ * doppelseitige {@link rayTriangle} (Dachflächen sind von oben UND unten
+ * anklickbar).
+ */
+function rayRoofTris(ray: Ray, roof: PickRoof): number | null {
+  let best: number | null = null;
+  for (const [a, b, c] of roof.tris) {
+    const t = rayTriangle(ray, a, b, c);
+    if (t !== null && (best === null || t < best)) best = t;
+  }
+  return best;
+}
+
 // Overload OHNE Öffnungen/Treppen: bleibt exakt die bisherige Signatur, sodass
 // der bestehende Aufrufer (Wasm3DViewport.tsx: `pickNearest(ray, walls, slabs)`)
 // unverändert kompiliert — inklusive des dort erwarteten engen `kind`-Typs
@@ -346,13 +372,14 @@ export function pickNearest(
   walls: readonly PickWall[],
   slabs: readonly PickSlab[],
 ): (PickHit & { kind: "wall" | "ceiling" }) | null;
-// Erweiterter Overload MIT Öffnungen/Treppen: `kind` deckt alle vier Arten ab.
+// Erweiterter Overload MIT Öffnungen/Treppen/Dächern: `kind` deckt alle Arten ab.
 export function pickNearest(
   ray: Ray,
   walls: readonly PickWall[],
   slabs: readonly PickSlab[],
   openings: readonly PickOpening[],
   stairs?: readonly PickStair[],
+  roofs?: readonly PickRoof[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -369,6 +396,7 @@ export function pickNearest(
   slabs: readonly PickSlab[],
   openings: readonly PickOpening[] = [],
   stairs: readonly PickStair[] = [],
+  roofs: readonly PickRoof[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -398,6 +426,12 @@ export function pickNearest(
   for (const st of stairs) {
     const t = rayStairPrism(ray, st);
     if (t !== null) consider({ kind: "stair", id: st.stairId, t, stairId: st.stairId }, 0);
+  }
+  // Dächer: präzise geneigte Flächen (Dreiecke) — Rang wie Wand/Decke; die
+  // Distanz entscheidet, ob das Dach oder die Fassade dahinter gemeint ist.
+  for (const r of roofs) {
+    const t = rayRoofTris(ray, r);
+    if (t !== null) consider({ kind: "roof", id: r.roofId, t }, 1);
   }
   return hit;
 }
