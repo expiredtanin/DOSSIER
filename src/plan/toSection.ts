@@ -418,11 +418,16 @@ export function applyWallTermination(
     const wb = bbox(b);
     // Dominante Decken-Cutter mit u-Überlapp — dieselbe Auswahl wie die
     // bandZCuts im 3D (nur STRIKT höhere Priorität schneidet/terminiert).
+    // Überlapp ODER Anschluss (±5 cm): eine Decke, die nur bis zur Wand-
+    // Innenkante gezeichnet ist, terminiert die Wand trotzdem (VW-Verhalten;
+    // ohne die Toleranz liefen Innenputz/Backstein durch die Decke, wenn die
+    // Decken-Outline die Wand geometrisch nicht überlappt — Nutzer-Report).
+    const TOUCH = 0.05;
     const cutters = slabBands.filter(
       (s) =>
         s.joinPriority > (b.joinPriority as number) &&
-        s.box.uMax > wb.uMin + EPS_T &&
-        s.box.uMin < wb.uMax - EPS_T,
+        s.box.uMax > wb.uMin - TOUCH &&
+        s.box.uMin < wb.uMax + TOUCH,
     );
     if (cutters.length === 0) {
       out.push(b);
@@ -776,7 +781,12 @@ function splitSlabLayers(
   let acc = 0; // kumulierte Dicke von OK (oben) nach UK (unten)
   for (const layer of wt.layers) {
     const comp = getComponent(project, layer.componentId);
-    const hatch = resolveHatch(project, comp.hatchId, undefined, resolveForeground(comp));
+    const hatch = resolveHatch(
+      project,
+      comp.hatchId,
+      SECTION_SLAB_AXIS_ANGLE_DEG,
+      resolveForeground(comp),
+    );
     const vTop = vMax - acc * scale;
     acc += layer.thickness;
     const vBottom = vMax - acc * scale;
@@ -805,7 +815,13 @@ function splitSlabLayers(
  * (Achse entlang v, atan2(1,0) = 90°). Damit drehen wandrelative Muster
  * (Dämmung, Backstein) im Schnitt genauso mit der Wand wie im Grundriss.
  */
-const SECTION_WALL_AXIS_ANGLE_DEG = 90;
+// Wandachse im Schnitt: die geschnittene Wand STEHT (Band entlang v). Wand-
+// relative Muster (Dämmwellen laufen ENTLANG der Wand) müssen im Schnitt also
+// VERTIKAL laufen — Winkel 0 lieferte sie horizontal (90° falsch, Nutzer-Report).
+const SECTION_WALL_AXIS_ANGLE_DEG = 0;
+// Deckenachse im Schnitt: die geschnittene Decke LIEGT (Band entlang u) —
+// wandrelative Muster laufen horizontal.
+const SECTION_SLAB_AXIS_ANGLE_DEG = 90;
 
 /**
  * Zerlegt das EINE geschnittene Wandrechteck (`cp`, vier Ecken in u/v-Metern) in
