@@ -49,7 +49,8 @@ function project(r: Roof, extra: Partial<Project> = {}): Project {
   } as unknown as Project;
 }
 
-/** Schnittebene: Blick entlang +x, Spur = Modell-Gerade x=0 (u wächst mit y). */
+/** Schnittebene: Blick entlang +x (Osten), Spur x=0 — Betrachter-RECHTS =
+ *  Süden, u fällt also mit Modell-y (entspiegelte u-Achse). */
 const PLANE: SectionPlaneSpec = { point: [0, 0, 0], normal: [1, 0, 0] };
 
 const emptyOutput = (): SectionOutput => ({ cutPolygons: [], visibleEdges: [], hiddenEdges: [] });
@@ -61,10 +62,11 @@ describe("appendRoofSections", () => {
     expect(out.cutPolygons.length).toBe(1);
     const cp = out.cutPolygons[0];
     expect(cp.component).toEqual({ kind: "roof", index: 0 });
-    // u-Intervall = Tiefe 0..4; Oberkante 5, Unterkante 5 − 0.3 (cosθ = 1).
+    // u-Intervall = Tiefe 0..4 → u −4..0 (u = −Modell-y); Oberkante 5,
+    // Unterkante 5 − 0.3 (cosθ = 1).
     const us = cp.pts.map((p) => p[0]).sort((a, b) => a - b);
-    expect(us[0]).toBeCloseTo(0, 6);
-    expect(us[3]).toBeCloseTo(4, 6);
+    expect(us[0]).toBeCloseTo(-4, 6);
+    expect(us[3]).toBeCloseTo(0, 6);
     const vs = cp.pts.map((p) => p[1]).sort((a, b) => a - b);
     expect(vs[3]).toBeCloseTo(5, 6);
     expect(vs[0]).toBeCloseTo(5 - 0.3, 6);
@@ -76,19 +78,19 @@ describe("appendRoofSections", () => {
     expect(out.cutPolygons.length).toBe(2);
     const tan30 = Math.tan((30 * Math.PI) / 180);
     const cos30 = Math.cos((30 * Math.PI) / 180);
-    const ridgeZ = 5 + 2 * tan30; // First bei halber Tiefe (y=2)
-    // Alle Oberkanten-Werte je Band: an u=0/4 Traufe (5), an u=2 First.
+    const ridgeZ = 5 + 2 * tan30; // First bei halber Tiefe (y=2 → u=−2)
+    // Alle Oberkanten-Werte je Band: an u=0/−4 Traufe (5), an u=−2 First.
     const topAt = (cp: (typeof out.cutPolygons)[number], u: number): number =>
       Math.max(...cp.pts.filter((p) => Math.abs(p[0] - u) < 1e-6).map((p) => p[1]));
     const bands = out.cutPolygons;
     const front = bands.find((b) => b.pts.some((p) => Math.abs(p[0]) < 1e-6));
-    const back = bands.find((b) => b.pts.some((p) => Math.abs(p[0] - 4) < 1e-6));
+    const back = bands.find((b) => b.pts.some((p) => Math.abs(p[0] + 4) < 1e-6));
     expect(front).toBeDefined();
     expect(back).toBeDefined();
     expect(topAt(front!, 0)).toBeCloseTo(5, 5);
-    expect(topAt(front!, 2)).toBeCloseTo(ridgeZ, 5);
-    expect(topAt(back!, 4)).toBeCloseTo(5, 5);
-    expect(topAt(back!, 2)).toBeCloseTo(ridgeZ, 5);
+    expect(topAt(front!, -2)).toBeCloseTo(ridgeZ, 5);
+    expect(topAt(back!, -4)).toBeCloseTo(5, 5);
+    expect(topAt(back!, -2)).toBeCloseTo(ridgeZ, 5);
     // Vertikale Banddicke = lotrechte Dicke / cos(Neigung).
     const vAt = (cp: (typeof out.cutPolygons)[number], u: number): number[] =>
       cp.pts.filter((p) => Math.abs(p[0] - u) < 1e-6).map((p) => p[1]);

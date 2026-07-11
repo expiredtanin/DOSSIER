@@ -66,13 +66,14 @@ const RENDER_EXT_T = 0.02; // Aussenputz — layers[0], die Aussenseite
 const RENDER_INT_T = 0.015; // Innenputz — letzte Schicht, die Innenseite
 
 describe("Schnitt-u-Weltachse", () => {
-  it("entspricht der WASM-Konvention u = cross(normal, up) → Grundriss (−Nz, Nx)", () => {
-    // Schnitt A: Ebenennormale world = (0,0,1) → uWorld model = (−1, 0).
+  it("entspricht der WASM-Konvention u = cross(up, normal) → Grundriss (Nz, −Nx)", () => {
+    // Schnitt A: Ebenennormale world = (0,0,1) → uWorld model = (1, 0) —
+    // Betrachter-RECHTS (Entspiegelung: Blick nach Norden ⇒ Osten rechts).
     expect(planeA.normal[0]).toBeCloseTo(0, 9);
     expect(planeA.normal[1]).toBeCloseTo(0, 9);
     expect(planeA.normal[2]).toBeCloseTo(1, 9);
     const u = sectionUAxisModel(planeA);
-    expect(u.x).toBeCloseTo(-1, 9);
+    expect(u.x).toBeCloseTo(1, 9);
     expect(u.y).toBeCloseTo(0, 9);
   });
 });
@@ -80,11 +81,14 @@ describe("Schnitt-u-Weltachse", () => {
 describe("Wand-Aufbaurichtung vs. Schnitt-u-Achse", () => {
   const uWorld = sectionUAxisModel(planeA);
 
-  it("W2 (Aussenseite +x) nicht gespiegelt, W4 (Aussenseite −x) gespiegelt", () => {
+  it("W2 (Aussenseite +x) gespiegelt, W4 (Aussenseite −x) nicht — entspiegelte u-Achse", () => {
     // Beide Wände gehören zum CCW-Umriss; die linke Normale zeigt nach innen.
-    // Gegenüberliegende Wände ⇒ genau eine der beiden wird gespiegelt.
-    expect(wallLayersReversedInU(wall("W2"), uWorld)).toBe(false);
-    expect(wallLayersReversedInU(wall("W4"), uWorld)).toBe(true);
+    // Gegenüberliegende Wände ⇒ genau eine der beiden wird gespiegelt. (Mit
+    // der Entspiegelung der u-Achse tauschen die Rollen gegenüber früher —
+    // Geometrie UND Bandreihenfolge kippen zusammen, die Aussenseite bleibt
+    // in der Zeichnung physisch aussen.)
+    expect(wallLayersReversedInU(wall("W2"), uWorld)).toBe(true);
+    expect(wallLayersReversedInU(wall("W4"), uWorld)).toBe(false);
   });
 
   it("degenerierte Wand (Länge 0) bleibt unverändert (kein Spiegeln)", () => {
@@ -97,19 +101,19 @@ describe("splitWallLayers: Aussenputz auf der Aussenseite, Wände spiegelverkehr
   const uWorld = sectionUAxisModel(planeA);
   const cp = rect(0, 0.345); // volle Wanddicke, Skala 1:1
 
-  it("W2: Aussenputz (layers[0]) an uMin, Innenputz an uMax", () => {
+  it("W2: gespiegelt — Aussenputz an uMax, Innenputz an uMin", () => {
     const bands = bandsByU(splitWallLayers(cp, sampleProject, aw, wall("W2"), uWorld));
     expect(bands).toHaveLength(4);
-    // uMin-Band = Aussenputz (Breite 0.02), uMax-Band = Innenputz (0.015).
-    expect(bands[0].width).toBeCloseTo(RENDER_EXT_T, 6);
-    expect(bands[3].width).toBeCloseTo(RENDER_INT_T, 6);
-  });
-
-  it("W4: gespiegelt — Aussenputz an uMax, Innenputz an uMin", () => {
-    const bands = bandsByU(splitWallLayers(cp, sampleProject, aw, wall("W4"), uWorld));
-    expect(bands).toHaveLength(4);
+    // Entspiegelte u-Achse: W2s Aussenseite (+x) liegt jetzt bei uMax.
     expect(bands[0].width).toBeCloseTo(RENDER_INT_T, 6);
     expect(bands[3].width).toBeCloseTo(RENDER_EXT_T, 6);
+  });
+
+  it("W4: Aussenputz (layers[0]) an uMin, Innenputz an uMax", () => {
+    const bands = bandsByU(splitWallLayers(cp, sampleProject, aw, wall("W4"), uWorld));
+    expect(bands).toHaveLength(4);
+    expect(bands[0].width).toBeCloseTo(RENDER_EXT_T, 6);
+    expect(bands[3].width).toBeCloseTo(RENDER_INT_T, 6);
   });
 
   it("propagiert sourceId (Quell-Element) auf ALLE Schicht-Bänder", () => {

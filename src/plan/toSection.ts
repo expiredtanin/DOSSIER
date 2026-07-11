@@ -160,16 +160,17 @@ export function sectionPlaneFromLevel(level: DrawingLevel): SectionPlaneSpec | n
  * Ebene (Modell-2D: model.x = world.x, model.y = world.z).
  *
  * Muss EXAKT der u-Achse des WASM-Extraktors entsprechen (`SectionPlane::u_axis`
- * in section.rs): dort `u = normalize(cross(normal, up))` mit up = (0,1,0). Für
- * eine horizontale Normale `[Nx, Ny, Nz]` ist `cross(normal, (0,1,0)) =
- * (-Nz, 0, Nx)`; die Grundriss-Komponenten (x, z) sind also `(-Nz, Nx)`. Damit
- * wächst die Ausgabe-u-Koordinate genau in dieser Modell-Richtung — die Referenz,
- * gegen die die Wand-Aufbaurichtung projiziert wird. (Nicht normiert; für das
+ * in section.rs): dort `u = normalize(cross(up, normal))` mit up = (0,1,0) —
+ * das Blickrichtungs-RECHTS des Betrachters (Entspiegelung; wer nach Norden
+ * blickt, hat Osten rechts). Für eine horizontale Normale `[Nx, Ny, Nz]` sind
+ * die Grundriss-Komponenten (x, z) also `(Nz, -Nx)`. (Nicht normiert; für das
  * Vorzeichen des Skalarprodukts irrelevant.)
  */
 export function sectionUAxisModel(plane: SectionPlaneSpec): Vec2 {
+  // Blickrichtungs-RECHTS (cross(up, N)) — muss EXAKT `SectionPlane::u_axis`
+  // in section.rs spiegeln (dort seit der Entspiegelung dieselbe Formel).
   const [nx, , nz] = plane.normal;
-  return { x: -nz, y: nx };
+  return { x: nz, y: -nx };
 }
 
 /**

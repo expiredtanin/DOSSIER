@@ -24,12 +24,9 @@
 //! - **Ursprung:** `SectionPlane::point`, projiziert.
 //! - **u (horizontal in der Zeichnung):** Strecke entlang der Schnittebene,
 //!   senkrecht zur Blickrichtung, in der Horizontalen. Berechnet als
-//!   `u_axis = normalize(cross(normal, world_up))` — dieselbe rechtshaendige
-//!   Kamera-Konvention wie `math::look_at` (dort `s = cross(f, up)`), damit die
-//!   Vorzeichen-Konvention modulübergreifend konsistent bleibt. Bei den
-//!   Standard-Konstruktoren entspricht `u` direkt der jeweils ANDEREN
-//!   Grundriss-Achse (Schnitt entlang X -> u = Modell-Y, Schnitt entlang Y ->
-//!   u = -Modell-X).
+//!   `u_axis = normalize(cross(world_up, normal))` — das Blickrichtungs-RECHTS
+//!   des Betrachters (wer nach Norden blickt, hat Osten rechts). Die fruehere
+//!   look_at-Konvention `cross(normal, up)` spiegelte die Zeichnung.
 //! - **v (vertikal in der Zeichnung, "Hoehe"):** `v = world.y`, ABSOLUT (nicht
 //!   relativ zur Schnittebene). `world.y` ist in dieser Codebasis durchgaengig
 //!   die Hoehen-Achse (Y-up, siehe `types.rs`/`mesh.rs`/`math.rs`: "world.y =
@@ -189,8 +186,13 @@ impl SectionPlane {
     /// `pub(crate)`, damit `section_fill` die (u,v)->Welt-Ruecktransformation
     /// mit EXAKT derselben Achsdefinition (inkl. Entartungs-Fallback) rechnet.
     pub(crate) fn u_axis(&self) -> [f32; 3] {
+        // Blickrichtungs-RECHTS des Betrachters: cross(up, normal). Die alte
+        // Formel cross(normal, up) (die `look_at`-right-Konvention fuer Blick
+        // entlang -z) SPIEGELTE den Schnitt — wer nach Norden blickt, hat
+        // Osten rechts, die Ausgabe zeigte ihn links. Gleiche Entspiegelung
+        // wie `elevationFrame` (toElevation.ts) auf der TS-Seite.
         let up = [0.0, 1.0, 0.0];
-        let u = math::cross(self.normal, up);
+        let u = math::cross(up, self.normal);
         if math::length(u) > 1e-6 {
             math::normalize(u)
         } else {
@@ -1099,8 +1101,9 @@ mod tests {
             math::dot(u, plane.normal).abs() < 1e-6,
             "u-Achse orthogonal zur Blickrichtung"
         );
-        // Fuer looking_plus_x ist u = Modell-Y (world +Z).
-        assert!((u[2] - 1.0).abs() < 1e-6);
+        // Fuer looking_plus_x (Blick nach Osten) zeigt das Betrachter-RECHTS
+        // nach Sueden: u = world −Z (Entspiegelung, s. u_axis-Doc).
+        assert!((u[2] + 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -1140,8 +1143,8 @@ mod tests {
         let vs: Vec<f32> = wall_cut.pts.iter().map(|p| p[1]).collect();
         let (u_lo, u_hi) = (us.iter().cloned().fold(f32::INFINITY, f32::min), us.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
         let (v_lo, v_hi) = (vs.iter().cloned().fold(f32::INFINITY, f32::min), vs.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
-        assert!((u_lo - 2.9).abs() < 1e-4, "u_lo={u_lo}");
-        assert!((u_hi - 3.1).abs() < 1e-4, "u_hi={u_hi}");
+        assert!((u_lo + 3.1).abs() < 1e-4, "u_lo={u_lo}");
+        assert!((u_hi + 2.9).abs() < 1e-4, "u_hi={u_hi}");
         assert!((v_lo - 0.0).abs() < 1e-4, "v_lo={v_lo}");
         assert!((v_hi - 2.5).abs() < 1e-4, "v_hi={v_hi}");
 
@@ -1154,8 +1157,8 @@ mod tests {
         let vs: Vec<f32> = slab_cut.pts.iter().map(|p| p[1]).collect();
         let (u_lo, u_hi) = (us.iter().cloned().fold(f32::INFINITY, f32::min), us.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
         let (v_lo, v_hi) = (vs.iter().cloned().fold(f32::INFINITY, f32::min), vs.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
-        assert!((u_lo + 0.5).abs() < 1e-4, "u_lo={u_lo}");
-        assert!((u_hi - 3.5).abs() < 1e-4, "u_hi={u_hi}");
+        assert!((u_lo + 3.5).abs() < 1e-4, "u_lo={u_lo}");
+        assert!((u_hi - 0.5).abs() < 1e-4, "u_hi={u_hi}");
         assert!((v_lo + 0.2).abs() < 1e-4, "v_lo={v_lo}");
         assert!((v_hi - 0.0).abs() < 1e-4, "v_hi={v_hi}");
     }
@@ -1211,30 +1214,30 @@ mod tests {
         let embedded_corner_hidden = out.hidden_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 1
-                && (e.a[0] - 2.9).abs() < 1e-3
-                && (e.b[0] - 2.9).abs() < 1e-3
+                && (e.a[0] + 2.9).abs() < 1e-3
+                && (e.b[0] + 2.9).abs() < 1e-3
                 && (e.a[1].min(e.b[1]) - 0.0).abs() < 1e-3
                 && (e.a[1].max(e.b[1]) - 2.5).abs() < 1e-3
         });
-        assert!(embedded_corner_hidden, "Eckkante von Schenkel B bei u=2.9 muss hidden sein");
+        assert!(embedded_corner_hidden, "Eckkante von Schenkel B bei u=-2.9 muss hidden sein");
 
         // Die AEUSSERE Eckkante von Schenkel B (u=3.1, ragt ueber Schenkel A
         // hinaus) bleibt dagegen sichtbar.
         let outer_corner_visible = out.visible_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 1
-                && (e.a[0] - 3.1).abs() < 1e-3
-                && (e.b[0] - 3.1).abs() < 1e-3
+                && (e.a[0] + 3.1).abs() < 1e-3
+                && (e.b[0] + 3.1).abs() < 1e-3
         });
         assert!(outer_corner_visible, "Aeussere Eckkante von Schenkel B (u=3.1) bleibt sichtbar");
 
-        // Die partiell gesplittete Bodenkante (u: 2.9 -> 3.1 bei v=0) zerfaellt
-        // in einen sichtbaren Anteil ab u=3.0.
+        // Die partiell gesplittete Bodenkante (u: -3.1 -> -2.9 bei v=0,
+        // gespiegelte u-Achse) zerfaellt in einen sichtbaren Anteil ab u=-3.0.
         let split_visible_present = out.visible_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 1
                 && (e.a[1].abs() < 1e-3 && e.b[1].abs() < 1e-3)
-                && ((e.a[0] - 3.0).abs() < 1e-3 || (e.b[0] - 3.0).abs() < 1e-3)
+                && ((e.a[0] + 3.0).abs() < 1e-3 || (e.b[0] + 3.0).abs() < 1e-3)
         });
         assert!(split_visible_present, "Sichtbarer Teil der gesplitteten Bodenkante ab u=3.0 fehlt");
     }
@@ -1286,14 +1289,14 @@ mod tests {
         };
         let a = wall_cuts.iter().find(|c| c.component.index == 0).expect("Schenkel A");
         let b = wall_cuts.iter().find(|c| c.component.index == 1).expect("Schenkel B");
-        let (_a_lo, a_hi) = u_bounds(a);
-        let (b_lo, _b_hi) = u_bounds(b);
+        let (a_lo, _a_hi) = u_bounds(a);
+        let (_b_lo, b_hi) = u_bounds(b);
 
-        // Beide enden/beginnen an der Gehrungslinie (u ~ 2.95) statt sich zu
-        // ueberlappen (Schenkel A reichte ungehrt bis u=3.0, Schenkel B ab 2.9).
-        assert!((a_hi - 2.95).abs() < 1e-3, "Schenkel-A-Querschnitt endet an der Gehrung, u_hi={a_hi}");
-        assert!((b_lo - 2.95).abs() < 1e-3, "Schenkel-B-Querschnitt beginnt an der Gehrung, u_lo={b_lo}");
-        assert!(a_hi <= b_lo + 1e-4, "keine u-Ueberlappung der beiden Querschnitte");
+        // Beide enden/beginnen an der Gehrungslinie (u ~ -2.95, gespiegelte
+        // u-Achse) statt sich zu ueberlappen.
+        assert!((a_lo + 2.95).abs() < 1e-3, "Schenkel-A-Querschnitt endet an der Gehrung, u_lo={a_lo}");
+        assert!((b_hi + 2.95).abs() < 1e-3, "Schenkel-B-Querschnitt beginnt an der Gehrung, u_hi={b_hi}");
+        assert!(b_hi <= a_lo + 1e-4, "keine u-Ueberlappung der beiden Querschnitte");
     }
 
     // --- Oeffnungen (Tueren/Fenster) -----------------------------------------
@@ -1427,8 +1430,8 @@ mod tests {
                     && (e.a[1].max(e.b[1]) - 2.0).abs() < 1e-3
             })
         };
-        assert!(jamb_visible(-1.5), "linke Leibung (u=-1.5) muss sichtbar sein");
-        assert!(jamb_visible(-2.5), "rechte Leibung (u=-2.5) muss sichtbar sein");
+        assert!(jamb_visible(1.5), "linke Leibung (u=1.5) muss sichtbar sein");
+        assert!(jamb_visible(2.5), "rechte Leibung (u=2.5) muss sichtbar sein");
         // Bruestungs- und Sturzkante (horizontale Rahmenkanten bei v=1.0/2.0).
         let horizontal_edge_visible = |v: f32| {
             out.visible_edges.iter().any(|e| {
@@ -1436,8 +1439,8 @@ mod tests {
                     && e.component.index == 0
                     && (e.a[1] - v).abs() < 1e-3
                     && (e.b[1] - v).abs() < 1e-3
-                    && (e.a[0].min(e.b[0]) + 2.5).abs() < 1e-3
-                    && (e.a[0].max(e.b[0]) + 1.5).abs() < 1e-3
+                    && (e.a[0].min(e.b[0]) - 1.5).abs() < 1e-3
+                    && (e.a[0].max(e.b[0]) - 2.5).abs() < 1e-3
             })
         };
         assert!(horizontal_edge_visible(1.0), "Bruestungskante (v=1.0) muss sichtbar sein");
@@ -1447,21 +1450,21 @@ mod tests {
         let frame_hidden = out.hidden_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 0
-                && ((e.a[0] + 1.5).abs() < 1e-3 || (e.a[0] + 2.5).abs() < 1e-3)
+                && ((e.a[0] - 1.5).abs() < 1e-3 || (e.a[0] - 2.5).abs() < 1e-3)
                 && e.a[1] >= 1.0 - 1e-3
                 && e.a[1] <= 2.0 + 1e-3
         });
         assert!(!frame_hidden, "Fensterrahmen darf nicht (teilweise) hidden sein");
 
         // -- Durchblick: die (naeherliegende) Vorderkante von Wand 1 bei
-        // u=-2.0 (Wandstart x=2, liegt IM Fenster-u-Bereich -2.5..-1.5) muss
+        // u=2.0 (Wandstart x=2, liegt IM Fenster-u-Bereich 1.5..2.5) muss
         // GENAU im Fensterband (v: 1.0..2.0) sichtbar sein, darueber/darunter
         // (verdeckt durch Bruestung/Sturz der Wand 0) hidden. --
         let w1_visible_window = out.visible_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 1
-                && (e.a[0] + 2.0).abs() < 1e-3
-                && (e.b[0] + 2.0).abs() < 1e-3
+                && (e.a[0] - 2.0).abs() < 1e-3
+                && (e.b[0] - 2.0).abs() < 1e-3
                 && (e.a[1].min(e.b[1]) - 1.0).abs() < 1e-3
                 && (e.a[1].max(e.b[1]) - 2.0).abs() < 1e-3
         });
@@ -1470,8 +1473,8 @@ mod tests {
         let w1_hidden_below = out.hidden_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 1
-                && (e.a[0] + 2.0).abs() < 1e-3
-                && (e.b[0] + 2.0).abs() < 1e-3
+                && (e.a[0] - 2.0).abs() < 1e-3
+                && (e.b[0] - 2.0).abs() < 1e-3
                 && (e.a[1].min(e.b[1]) - 0.0).abs() < 1e-3
                 && (e.a[1].max(e.b[1]) - 1.0).abs() < 1e-3
         });
@@ -1480,20 +1483,20 @@ mod tests {
         let w1_hidden_above = out.hidden_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 1
-                && (e.a[0] + 2.0).abs() < 1e-3
-                && (e.b[0] + 2.0).abs() < 1e-3
+                && (e.a[0] - 2.0).abs() < 1e-3
+                && (e.b[0] - 2.0).abs() < 1e-3
                 && (e.a[1].min(e.b[1]) - 2.0).abs() < 1e-3
                 && (e.a[1].max(e.b[1]) - 2.5).abs() < 1e-3
         });
         assert!(w1_hidden_above, "Wand 1 oberhalb des Sturzes (v 2.0..2.5) muss hidden sein");
 
-        // Kante hinter der GESCHLOSSENEN Wandflaeche (u=-4.0, ausserhalb des
+        // Kante hinter der GESCHLOSSENEN Wandflaeche (u=4.0, ausserhalb des
         // Fensters, x=4-Ende von Wand 1) bleibt vollstaendig verdeckt.
         let w1_closed_wall_hidden = out.hidden_edges.iter().any(|e| {
             e.component.kind == ComponentKind::Wall
                 && e.component.index == 1
-                && (e.a[0] + 4.0).abs() < 1e-3
-                && (e.b[0] + 4.0).abs() < 1e-3
+                && (e.a[0] - 4.0).abs() < 1e-3
+                && (e.b[0] - 4.0).abs() < 1e-3
                 && (e.a[1].min(e.b[1]) - 0.0).abs() < 1e-3
                 && (e.a[1].max(e.b[1]) - 2.5).abs() < 1e-3
         });
