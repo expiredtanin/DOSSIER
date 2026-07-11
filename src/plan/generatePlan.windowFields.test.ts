@@ -142,10 +142,12 @@ describe("generatePlan — Flügeleinteilung aus sashes (Item 1)", () => {
     a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 9));
   });
 
-  it("öffenbarer Flügel bekommt einen Flügelrahmen (window-sash, 4 Kanten); 'fest' keinen", () => {
+  it("öffenbarer Flügel bekommt einen Flügelrahmen (window-sash, 4 Kanten) bei 'fein'; 'fest' keinen — SIA fig. 38 (verschachtelter Flügelrahmen nur bei fein, s. sia400-fenster-tueren.md)", () => {
     // Ein öffenbarer + ein fester Flügel: genau EIN Flügelrahmen-Rechteck = 4
     // Kanten-Linien (der feste Flügel bekommt keinen; Glas sitzt direkt im
     // Blendrahmen). So liest man fest vs. öffenbar direkt im Grundriss.
+    // Nur bei „fein" (SIA fig. 38) — „mittel" (fig. 37) bleibt beim reinen
+    // Blendrahmen-Band ohne verschachtelten Flügelrahmen.
     const wt: WindowType = {
       ...baseWindowType,
       sashes: [
@@ -154,7 +156,8 @@ describe("generatePlan — Flügeleinteilung aus sashes (Item 1)", () => {
       ],
     };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
-    expect(linesOfClass(p, "window-sash").length).toBe(4);
+    expect(linesOfClass(p, "window-sash", "fein").length).toBe(4);
+    expect(linesOfClass(p, "window-sash", "mittel").length).toBe(0);
 
     // Nur feste Flügel -> gar kein Flügelrahmen.
     const wtFixed: WindowType = {
@@ -162,12 +165,12 @@ describe("generatePlan — Flügeleinteilung aus sashes (Item 1)", () => {
       sashes: [{ kind: "fluegel", autoWidth: true, opening: "fest" }],
     };
     const pFixed = project({ ...baseWindow, typeId: "wt1" }, [wtFixed]);
-    expect(linesOfClass(pFixed, "window-sash").length).toBe(0);
+    expect(linesOfClass(pFixed, "window-sash", "fein").length).toBe(0);
   });
 
   it("Alt-Fall (kein typeId) erzeugt KEINEN Flügelrahmen", () => {
     const p = project({ ...baseWindow });
-    expect(linesOfClass(p, "window-sash").length).toBe(0);
+    expect(linesOfClass(p, "window-sash", "fein").length).toBe(0);
   });
 });
 
@@ -175,14 +178,15 @@ describe("generatePlan — Verglasung glazingPanes (Item 2)", () => {
   const glassLineCount = (p: Project, detail: "grob" | "mittel" | "fein" = "mittel") =>
     linesOfClass(p, "window-glass", detail).length;
 
-  it("glazingPanes: 3 erzeugt mehr Glaslinien als glazingPanes: 1", () => {
+  it("glazingPanes beeinflusst die 2D-Glaslinienzahl NICHT mehr — SIA-Detailgrad entscheidet (Doppellinie/IV nur bei 'fein', unabhängig von der Scheibenzahl)", () => {
     const wt3: WindowType = { ...baseWindowType, id: "wt3", glazingPanes: 3 };
     const wt1: WindowType = { ...baseWindowType, id: "wt1", glazingPanes: 1 };
     const p3 = project({ ...baseWindow, typeId: "wt3" }, [wt3]);
     const p1 = project({ ...baseWindow, typeId: "wt1" }, [wt1]);
-    expect(glassLineCount(p3)).toBeGreaterThan(glassLineCount(p1));
-    expect(glassLineCount(p3)).toBe(3);
-    expect(glassLineCount(p1)).toBe(1);
+    expect(glassLineCount(p3, "mittel")).toBe(1);
+    expect(glassLineCount(p1, "mittel")).toBe(1);
+    expect(glassLineCount(p3, "fein")).toBe(2);
+    expect(glassLineCount(p1, "fein")).toBe(2);
   });
 
   it("ohne typeId bleibt die alte Detailgrad-Regel (grob/mittel=1, fein=2) unverändert — Regression", () => {
@@ -196,6 +200,45 @@ describe("generatePlan — Verglasung glazingPanes (Item 2)", () => {
     const wt: WindowType = { ...baseWindowType, glazingPanes: 3 };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
     expect(glassLineCount(p, "grob")).toBe(1);
+  });
+});
+
+describe("generatePlan — Stulp-/Flügelstoss-Marken (SIA fig. 37/38, window-stulp)", () => {
+  const stulpLineCount = (p: Project, detail: "grob" | "mittel" | "fein") =>
+    linesOfClass(p, "window-stulp", detail).length;
+  const twoSashType: WindowType = {
+    ...baseWindowType,
+    sashes: [
+      { kind: "fluegel", autoWidth: true, opening: "dreh", hingeSide: "left" },
+      { kind: "fluegel", autoWidth: true, opening: "dreh", hingeSide: "right" },
+    ],
+  };
+
+  it("mittel: EIN Stulp-Quadrat (4 Linien) je Flügel-Junction", () => {
+    const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
+    expect(stulpLineCount(p, "mittel")).toBe(4);
+  });
+
+  it("fein: ZWEI Stulp-Quadrate (8 Linien) je Flügel-Junction", () => {
+    const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
+    expect(stulpLineCount(p, "fein")).toBe(8);
+  });
+
+  it("grob: KEINE Stulp-Marken", () => {
+    const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
+    expect(stulpLineCount(p, "grob")).toBe(0);
+  });
+
+  it("Alt-Fall (kein typeId, nur wingCount) erzeugt KEINE Stulp-Marken — keine echte Flügeltabelle", () => {
+    const p = project({ ...baseWindow, wingCount: 3 });
+    expect(stulpLineCount(p, "mittel")).toBe(0);
+    expect(stulpLineCount(p, "fein")).toBe(0);
+  });
+
+  it("einflügliges Fenster (keine Junction) erzeugt KEINE Stulp-Marken", () => {
+    const p = project({ ...baseWindow, typeId: "wt1" }, [baseWindowType]);
+    expect(stulpLineCount(p, "mittel")).toBe(0);
+    expect(stulpLineCount(p, "fein")).toBe(0);
   });
 });
 

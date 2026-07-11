@@ -251,6 +251,14 @@ export interface WindowSymbol {
    * ausgedrückt statt über eine Diagonale quer über die Box.
    */
   sashOpeningLines: [Vec2, Vec2][];
+  /**
+   * Stulp-/Flügelstoss-Marken (SIA-„kleines Quadrat mittig", Figur 37/38): je
+   * Flügel-Trennung ein kleines Rechteck-Polygon auf der Glasebene, das den
+   * Anschlag der zwei zusammenstossenden Flügelprofile darstellt. Bei „mittel"
+   * ein Quadrat je Stoss, bei „fein" zwei (die beiden Stulpprofile). „grob":
+   * leer. Der Aufrufer zeichnet sie als dünne Umriss-Rechtecke.
+   */
+  meetingMarks: Vec2[][];
 }
 
 /**
@@ -345,6 +353,7 @@ export function windowSymbol(
   o: Opening,
   glassCount: number,
   spec?: WindowRenderSpec,
+  detail: "grob" | "mittel" | "fein" = "fein",
 ): WindowSymbol | null {
   const jambs = openingJambs(wall, o);
   if (!jambs) return null;
@@ -355,10 +364,14 @@ export function windowSymbol(
   const inner = refOff - total / 2;
   const { jambStart, jambEnd } = jambs;
 
-  // ── Reicher Pfad (typisiertes Fenster mit Flügeltabelle) ─────────────────
-  // Blendrahmen an der realen Einbaulage (Schichteinzug), je Flügel
-  // Blendrahmen → Flügelrahmen (öffenbar) → Glas. Feste Flügel: Glas direkt im
-  // Blendrahmen (kein Flügelrahmen) — so unterscheidet sich fest von öffenbar.
+  // ── Reicher Pfad (typisiertes Fenster mit Flügeltabelle), SIA-Darstellung ─
+  // Detailstufe = SIA-Massstab (fig. 36/37/38):
+  //   • grob  (1:100): NUR Blendrahmen-Band + eine Glaslinie über die ganze
+  //     Öffnung — schematisch (SIA fig. 36).
+  //   • mittel(1:50):  Blendrahmen + Flügel-Trennlinien + je Flügel eine Glas-
+  //     linie + kleines Stulp-Quadrat je Stoss (SIA fig. 37). KEINE Flügelrahmen.
+  //   • fein  (1:20):  zusätzlich verschachtelte Flügelrahmen, Glas als Doppel-
+  //     linie (Isolierverglasung) und je Stoss ZWEI Stulp-Quadrate (SIA fig. 38).
   if (spec && spec.sashes.length > 0) {
     const fw = Math.max(0.01, spec.frameWidth);
     const depth = Math.min(total, spec.frameDepth && spec.frameDepth > 1e-9 ? spec.frameDepth : DEFAULT_FRAME_DEPTH);
@@ -375,6 +388,7 @@ export function windowSymbol(
     const frameOuterN = refOff + Math.max(frontRel, backRel);
     const frameInnerN = refOff + Math.min(frontRel, backRel);
     const bandDepth = frameOuterN - frameInnerN;
+    const gMidBase = (frameOuterN + frameInnerN) / 2;
 
     const frame = [
       add(jambStart, scale(n, frameOuterN)),
@@ -383,22 +397,49 @@ export function windowSymbol(
       add(jambStart, scale(n, frameInnerN)),
     ];
 
-    const axisWidth = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
-    const segs = sashSegments(spec.sashes, axisWidth);
-
-    // Trennlinien (Pfosten/Mittelpfosten) an den inneren Segmentgrenzen, über
-    // die volle Rahmentiefe.
+    const glassLines: [Vec2, Vec2][] = [];
     const mullionLines: [Vec2, Vec2][] = [];
-    for (let i = 0; i < segs.length - 1; i++) {
-      const onAxis = along(jambStart, jambEnd, segs[i].to);
-      mullionLines.push([add(onAxis, scale(n, frameOuterN)), add(onAxis, scale(n, frameInnerN))]);
+    const sashFrames: Vec2[][] = [];
+    const meetingMarks: Vec2[][] = [];
+
+    // grob (1:100): nur der Rahmenkasten + EINE Glaslinie über die ganze Öffnung.
+    if (detail === "grob") {
+      glassLines.push([add(jambStart, scale(n, gMidBase)), add(jambEnd, scale(n, gMidBase))]);
+      return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks };
     }
 
-    const sashFrames: Vec2[][] = [];
-    const glassLines: [Vec2, Vec2][] = [];
-    const count = Math.max(1, glassCount);
-    // Öffenbarer Flügel sitzt `reveal` tiefer im Blendrahmen (n- und u-Richtung).
-    const reveal = Math.min(bandDepth * 0.3, fw * 0.7);
+    const fein = detail === "fein";
+    const axisWidth = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
+    const axisDir = normalize(sub(jambEnd, jambStart));
+    const segs = sashSegments(spec.sashes, axisWidth);
+    // Öffenbarer Flügel sitzt `reveal` tiefer im Blendrahmen (nur „fein").
+    const reveal = fein ? Math.min(bandDepth * 0.3, fw * 0.7) : 0;
+    // Halbe Kantenlänge eines Stulp-Quadrats (SIA-Marke), an die Rahmenbreite gekoppelt.
+    const markHalf = Math.min(fw * 0.6, bandDepth * 0.4);
+
+    // Flügel-Trennlinien (Mittelpfosten) an den inneren Segmentgrenzen +
+    // Stulp-Quadrate: mittel 1, fein 2 (die beiden zusammenstossenden Profile).
+    for (let i = 0; i < segs.length - 1; i++) {
+      const uPos = segs[i].to;
+      const onAxis = along(jambStart, jambEnd, uPos);
+      mullionLines.push([add(onAxis, scale(n, frameOuterN)), add(onAxis, scale(n, frameInnerN))]);
+      const center = add(onAxis, scale(n, gMidBase));
+      const square = (offU: number): Vec2[] => {
+        const c = add(center, scale(axisDir, offU));
+        return [
+          add(add(c, scale(axisDir, -markHalf)), scale(n, -markHalf)),
+          add(add(c, scale(axisDir, markHalf)), scale(n, -markHalf)),
+          add(add(c, scale(axisDir, markHalf)), scale(n, markHalf)),
+          add(add(c, scale(axisDir, -markHalf)), scale(n, markHalf)),
+        ];
+      };
+      if (fein) {
+        meetingMarks.push(square(-markHalf), square(markHalf));
+      } else {
+        meetingMarks.push(square(0));
+      }
+    }
+
     for (const seg of segs) {
       if (seg.sash.kind === "pfosten") continue;
       const clearFrom = seg.from + fw;
@@ -407,7 +448,9 @@ export function windowSymbol(
       const operable = !!seg.sash.opening && seg.sash.opening !== "fest";
       const gOuterN = frameOuterN - (operable ? reveal : 0);
       const gInnerN = frameInnerN + (operable ? reveal : 0);
-      if (operable) {
+      // Verschachtelter Flügelrahmen NUR bei „fein" (SIA fig. 38); „mittel" bleibt
+      // beim reinen Blendrahmen-Band (SIA fig. 37).
+      if (fein && operable) {
         const sFrom = along(jambStart, jambEnd, clearFrom);
         const sTo = along(jambStart, jambEnd, clearTo);
         sashFrames.push([
@@ -417,22 +460,25 @@ export function windowSymbol(
           add(sFrom, scale(n, gInnerN)),
         ]);
       }
-      // Glas innerhalb des Flügels (bei öffenbar zusätzlich in u eingerückt).
-      const gInsetU = operable ? fw * 0.6 : 0;
+      const gInsetU = fein && operable ? fw * 0.6 : 0;
       const gFrom = clearFrom + gInsetU;
       const gTo = clearTo - gInsetU;
       if (gTo - gFrom <= 1e-6) continue;
       const gMid = (gOuterN + gInnerN) / 2;
-      const gBand = gOuterN - gInnerN;
-      const step = count > 1 ? Math.min(total / 10, gBand / (count + 1)) : 0;
       const a = along(jambStart, jambEnd, gFrom);
       const b = along(jambStart, jambEnd, gTo);
-      for (let i = 0; i < count; i++) {
-        const off = gMid + (count === 1 ? 0 : (i - (count - 1) / 2) * step);
-        glassLines.push([add(a, scale(n, off)), add(b, scale(n, off))]);
+      // fein: Glas als Doppellinie (Isolierverglasung, ~15 mm Abstand); mittel:
+      // eine Glaslinie mittig.
+      if (fein) {
+        const half = Math.min(0.0075, bandDepth * 0.18);
+        for (const off of [gMid - half, gMid + half]) {
+          glassLines.push([add(a, scale(n, off)), add(b, scale(n, off))]);
+        }
+      } else {
+        glassLines.push([add(a, scale(n, gMid)), add(b, scale(n, gMid))]);
       }
     }
-    return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [] };
+    return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks };
   }
 
   // ── Alt-Pfad (kein Typ auflösbar) ────────────────────────────────────────
@@ -463,5 +509,5 @@ export function windowSymbol(
       mullionLines.push([add(onAxis, scale(n, pOuter)), add(onAxis, scale(n, pInner))]);
     }
   }
-  return { frame, glassLines, mullionLines, sashFrames: [], sashOpeningLines: [] };
+  return { frame, glassLines, mullionLines, sashFrames: [], sashOpeningLines: [], meetingMarks: [] };
 }

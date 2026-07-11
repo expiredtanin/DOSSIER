@@ -35,7 +35,6 @@ import {
   getLineStyle,
   getWallType,
   getWindowType,
-  glazingPanesOf,
   openingLabel,
   openingsOfWall,
   roofLayers,
@@ -2259,13 +2258,10 @@ function addOpeningSymbol(
         insetFace: wt.insetFace,
       }
     : undefined;
-  const detailGlassCount = detail === "fein" ? 2 : 1;
-  // Verglasungs-Scheibenzahl des Typs (glazingPanesOf) hebt die Detailgrad-
-  // Vorgabe bei mittel/fein an (mind. so viele Glaslinien); "grob" bleibt bei
-  // einer Glaslinie, unabhängig vom Typ (bleibt die schlichteste Stufe).
-  const glassCount =
-    detail === "grob" ? detailGlassCount : Math.max(detailGlassCount, wt ? glazingPanesOf(wt) : 0);
-  const sym = windowSymbol(project, wall, o, glassCount, spec);
+  // Glaslinienzahl NUR für den Alt-Pfad (kein `spec`) relevant — der typisierte
+  // Pfad entscheidet die Anzahl selbst nach SIA-Detailgrad (s. windowSymbol).
+  const glassCount = detail === "fein" ? 2 : 1;
+  const sym = windowSymbol(project, wall, o, glassCount, spec, detail);
   if (!sym) return;
   // Unsichtbares Pick-Polygon über der Öffnungslücke — macht das Fenster über
   // die ganze Fläche selektierbar, auch bei „grob" (nur eine Glaslinie, sonst
@@ -2283,95 +2279,115 @@ function addOpeningSymbol(
       openingId: o.id,
     });
   }
-  if (detail !== "grob") {
-    // Rahmen-Rechteck als reine Umrisslinie (Poché-Stroke, keine Füllung).
+  // ── SIA-Fensterdarstellung, nach Detailgrad gestaffelt ────────────────────
+  // grob (1:100): weisse Öffnung + EINE dünne Glaslinie, sonst nichts.
+  // mittel (1:50): Blendrahmen-Rechteck + Pfosten-Trennlinien + Stulp-Mittel-
+  //   quadrat je Flügel-Junction + Glaslinie(n).
+  // fein (1:20): zusätzlich Flügelrahmen, Stulp als ZWEI Rechtecke, Fensterbank
+  //   (aussen) und Anschlag-/Laibungskerben — deutlich reicher als mittel.
+  const strokeColor = o.color ?? POCHE_STROKE;
+  const { u: wu, n: wn } = wallAxisFrame(wall);
+  const fpw = Math.max(0.03, wt?.frameWidth ?? 0.06); // Rahmenprofil-Breite (m)
+  // Kleines Rechteck (Stulp/Anschlag) um `center`, Halbmasse hu (Achse)/hn (quer).
+  const emitStulp = (center: Vec2, hu: number, hn: number): void => {
+    const c1 = add(add(center, scale(wu, -hu)), scale(wn, -hn));
+    const c2 = add(add(center, scale(wu, hu)), scale(wn, -hn));
+    const c3 = add(add(center, scale(wu, hu)), scale(wn, hn));
+    const c4 = add(add(center, scale(wu, -hu)), scale(wn, hn));
+    for (const [a, b] of [[c1, c2], [c2, c3], [c3, c4], [c4, c1]] as [Vec2, Vec2][]) {
+      out.push({ kind: "line", a, b, cls: "window-stulp", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
+    }
+  };
+  // Flügel-Junctions (Stulp-/Anschlagstelle zweier Flügel) = Mitten der Pfosten-
+  // Trennlinien. NUR im typisierten Pfad (`spec`) — der Alt-Pfad (reines
+  // `wingCount`) hat keine echte Flügeltabelle, seine Trennlinien sind nur eine
+  // gleichmässige Näherung ohne Stoss-Semantik (siehe windowSymbol-Kommentar).
+  // Bei einflügligen Fenstern leer ⇒ kein Mittelquadrat (korrekt).
+  const junctionCenters: Vec2[] = spec
+    ? sym.mullionLines.map(([a, b]) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }))
+    : [];
+
+  if (detail === "grob") {
+    // SIA 1:100 — nur eine dünne Glaslinie mittig über die weisse Öffnung.
+    const g = sym.glassLines[Math.floor(sym.glassLines.length / 2)] ?? sym.glassLines[0];
+    if (g) {
+      out.push({ kind: "line", a: g[0], b: g[1], cls: "window-glass", weightMm: SYMBOL_HAIRLINE_MM, greyed, openingId: o.id });
+    }
+  } else {
+    // Blendrahmen-Rechteck (mittel + fein).
     out.push({
       kind: "polygon",
       pts: sym.frame,
       fill: "none",
-      stroke: o.color ?? POCHE_STROKE,
+      stroke: strokeColor,
       strokeWidthMm: lwMm,
       hatch: NO_HATCH,
       greyed,
       openingId: o.id,
     });
-    // Flügel-/Pfosten-Trennlinien — reine Querlinien innerhalb des Rahmens
-    // (kein Strichmuster). Nur mittel/fein; entfällt bei grob/schema.
+    // Pfosten-/Flügel-Trennlinien.
     for (const [a, b] of sym.mullionLines) {
-      out.push({
-        kind: "line",
-        a,
-        b,
-        cls: "window-mullion",
-        weightMm: SYMBOL_HAIRLINE_MM,
-        color: o.color ?? POCHE_STROKE,
-        greyed,
-        openingId: o.id,
-      });
+      out.push({ kind: "line", a, b, cls: "window-mullion", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
     }
-    // Flügelrahmen (Flügelkontur) je ÖFFENBAREM Flügel — Rechteck (4 Kanten)
-    // innerhalb des Blendrahmens (Schachtelung Blendrahmen → Flügelrahmen →
-    // Glas). Feste Flügel bekommen keinen; so liest man fest vs. öffenbar
-    // direkt im Plan.
-    for (const pts of sym.sashFrames) {
-      for (let i = 0; i < pts.length; i++) {
-        out.push({
-          kind: "line",
-          a: pts[i],
-          b: pts[(i + 1) % pts.length],
-          cls: "window-sash",
-          weightMm: SYMBOL_HAIRLINE_MM,
-          color: o.color ?? POCHE_STROKE,
-          greyed,
-          openingId: o.id,
-        });
+    // fein: Flügelrahmen (Flügelkontur) je öffenbarem Flügel — Schachtelung
+    // Blendrahmen → Flügelrahmen → Glas (Feindetail, hebt fein klar von mittel ab).
+    if (detail === "fein") {
+      for (const pts of sym.sashFrames) {
+        for (let i = 0; i < pts.length; i++) {
+          out.push({ kind: "line", a: pts[i], b: pts[(i + 1) % pts.length], cls: "window-sash", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
+        }
       }
     }
-  }
-  for (const [a, b] of sym.glassLines) {
-    out.push({
-      kind: "line",
-      a,
-      b,
-      cls: "window-glass",
-      weightMm: SYMBOL_HAIRLINE_MM,
-      greyed,
-      openingId: o.id,
-    });
-  }
-  // Rahmenband (Zarge) + Oberlicht-Andeutung — nur wenn die Öffnung einen
-  // Fenstertyp referenziert (siehe `resolveOpeningFrameSpec`). Kämpfer-Zeilen
-  // (`mullionRows`) bleiben im Grundriss-Schnitt unsichtbar (3D-Sache).
-  const windowFrameSpec = resolveOpeningFrameSpec(project, o);
-  if (windowFrameSpec) addOpeningFrameBand(out, project, wall, o, windowFrameSpec, greyed);
-  // fein: Anschlag-/Laibungsstriche an beiden Pfosten (kurz quer zur Wand) —
-  // analog zur Tür, damit Fenster im Detailplan gleich „fertig" wirken (bisher
-  // hatten nur Türen sie). Haarlinie, 6 cm Andeutung je Seite.
-  if (detail === "fein") {
-    const jambs = openingJambs(wall, o);
-    const dir = sub(wall.end, wall.start);
-    const len = Math.hypot(dir.x, dir.y);
-    if (jambs && len > 1e-9) {
-      const n = { x: -dir.y / len, y: dir.x / len };
-      const reveal = 0.06;
-      for (const jamb of [jambs.jambStart, jambs.jambEnd]) {
-        out.push({
-          kind: "line",
-          a: add(jamb, scale(n, reveal)),
-          b: add(jamb, scale(n, -reveal)),
-          cls: "window-frame",
-          weightMm: SYMBOL_HAIRLINE_MM,
-          color: o.color ?? POCHE_STROKE,
-          greyed,
-          openingId: o.id,
-        });
+    // Stulp-Mittelquadrat je Flügel-Junction (SIA-Signatur): mittel = EIN Quadrat,
+    // fein = ZWEI anliegende Rechtecke (die beiden Stulp-Stäbe der Flügel).
+    for (const c of junctionCenters) {
+      if (detail === "fein") {
+        emitStulp(add(c, scale(wu, -fpw / 2)), fpw / 2, fpw / 2);
+        emitStulp(add(c, scale(wu, fpw / 2)), fpw / 2, fpw / 2);
+      } else {
+        emitStulp(c, fpw / 2, fpw / 2);
+      }
+    }
+    // Glaslinien (Anzahl je Detailgrad/Verglasung, s. glassCount).
+    for (const [a, b] of sym.glassLines) {
+      out.push({ kind: "line", a, b, cls: "window-glass", weightMm: SYMBOL_HAIRLINE_MM, greyed, openingId: o.id });
+    }
+    // Oberlicht-Andeutung (transom, gestrichelt) — mittel/fein.
+    const windowFrameSpec = resolveOpeningFrameSpec(project, o);
+    if (windowFrameSpec) addOpeningFrameBand(out, project, wall, o, windowFrameSpec, greyed);
+    // fein: Fensterbank (aussen) + Anschlag-/Laibungskerben.
+    if (detail === "fein") {
+      const jb = openingJambs(wall, o);
+      if (jb) {
+        const { jambStart, jambEnd } = jb;
+        const total = wallTypeThickness(getWallType(project, wall));
+        const refOff = wallReferenceOffset(wall, total);
+        const outerN = refOff + total / 2;
+        // Fensterbank: schmales Rechteck vor der Aussenfläche, seitlich ~3 cm
+        // überstehend, ~4 cm auskragend (SIA-Sims-Andeutung im Grundriss).
+        const ov = 0.03;
+        const proj = 0.04;
+        const s0 = along(jambStart, jambEnd, -ov);
+        const s1 = along(jambEnd, jambStart, -ov);
+        const b0 = add(s0, scale(wn, outerN));
+        const b1 = add(s1, scale(wn, outerN));
+        const b2 = add(s1, scale(wn, outerN + proj));
+        const b3 = add(s0, scale(wn, outerN + proj));
+        for (const [a, b] of [[b0, b1], [b1, b2], [b2, b3], [b3, b0]] as [Vec2, Vec2][]) {
+          out.push({ kind: "line", a, b, cls: "window-sill", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
+        }
+        // Anschlag-Kerben an beiden Pfosten (kurz quer zur Wand).
+        const reveal = 0.06;
+        for (const jamb of [jambStart, jambEnd]) {
+          out.push({ kind: "line", a: add(jamb, scale(wn, reveal)), b: add(jamb, scale(wn, -reveal)), cls: "window-frame", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
+        }
       }
     }
   }
   // Brüstungslinie (gepunktet) — zeigt die Brüstung im Grundriss auf der Wandachse.
   // Nur bei Fenstern mit Brüstungshöhe > 0. Entspricht der Sill-Linie in
   // `_make_oeffnung_preview` und dem Brüstungs-Plansymbol im Rhino-Plugin.
-  if (o.sillHeight > 0) {
+  if (o.sillHeight > 0 && detail !== "grob") {
     const jambs = openingJambs(wall, o);
     if (jambs) {
       out.push({
