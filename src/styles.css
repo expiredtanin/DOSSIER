@@ -2058,6 +2058,38 @@ body {
   font-weight: 700;
 }
 
+/* Lineale (oben + links, VW-Stil): helle Papier-Leisten, Tinte-Ticks,
+   gelber Cursor-Marker. */
+.plan-svg .plan-ruler-strip {
+  fill: #f7f6f3;
+  fill-opacity: 0.96;
+}
+.plan-svg .plan-ruler-border {
+  stroke: #b9b5ae;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.plan-svg .plan-ruler-tick {
+  stroke: #6d6a64;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.plan-svg .plan-ruler-text {
+  fill: #3c3a36;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-weight: 500;
+}
+.plan-svg .plan-ruler-cursor {
+  fill: #e8c33c;
+  fill-opacity: 0.9;
+}
+.plan-svg .plan-ruler-corner {
+  fill: #f0efec;
+  stroke: #b9b5ae;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
 /* Weicher Winkel-Snap: gestrichelte Führungslinie (dezent) + Winkel-Badge in
    derselben dunklen Dropdown-Pille wie das Cursor-HUD. */
 .plan-svg .plan-angle-guide-line {
