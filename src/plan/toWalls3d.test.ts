@@ -856,21 +856,89 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
     }
   });
 
-  it("Verschachtelter Flügelrahmen steht ~12 mm vor dem Blendrahmen (nicht mehr flach)", () => {
+  it("Verschachtelter Flügelrahmen: ~5 mm zurückgesetztes Band, kein Vorstand vor den Blendrahmen", () => {
     // Fest vs. öffenbar, sonst identisch (flush, frameThickness gleich). Der
-    // Flügelrahmen des öffenbaren Fensters sitzt in einem nach aussen (nMax)
-    // vorstehenden Band -> seine Aussenkante ragt 0.012 m weiter hinaus als der
-    // Blendrahmen (bei W1 in Richtung negatives world-y, s. Inset-Test).
-    const minY = (p: Project): number => {
+    // Flügelrahmen sitzt in einem ~5 mm HINTER die Blendrahmen-Vorderkante
+    // (nMax) zurückgesetzten Band — er ragt also nirgends weiter nach aussen
+    // als der Blendrahmen (kein Fassaden-Vorstand; bei W1 zeigt aussen in
+    // Richtung negatives world-y, s. Inset-Test).
+    const meshMinY = (mesh: { positions: number[] }): number => {
       let m = Infinity;
-      for (const mesh of projectToModel3d(p).meshes.filter(isFrame)) {
-        for (let i = 1; i < mesh.positions.length; i += 3) m = Math.min(m, mesh.positions[i]);
-      }
+      for (let i = 1; i < mesh.positions.length; i += 3) m = Math.min(m, mesh.positions[i]);
       return m;
     };
-    const fixedMinY = minY(winProject({ ...baseWin, id: "win-proud-fixed", kind: "fest", sillBoard: "keine" }));
-    const openMinY = minY(winProject({ ...baseWin, id: "win-proud-open", kind: "drehkipp", sillBoard: "keine" }));
-    expect(fixedMinY - openMinY).toBeCloseTo(0.012, 6);
+    const frameMeshes = (p: Project) => projectToModel3d(p).meshes.filter(isFrame);
+    const fixed = frameMeshes(winProject({ ...baseWin, id: "win-proud-fixed", kind: "fest", sillBoard: "keine" }));
+    const open = frameMeshes(winProject({ ...baseWin, id: "win-proud-open", kind: "drehkipp", sillBoard: "keine" }));
+    const blendFront = Math.min(...fixed.map(meshMinY));
+    // Kein Vorstand: öffenbares Fenster reicht nicht weiter nach aussen.
+    expect(Math.min(...open.map(meshMinY))).toBeCloseTo(blendFront, 6);
+    // Die 4 zusätzlichen Flügelrahmen-Riegel liegen mit ihrer Vorderkante
+    // exakt 5 mm hinter der Blendrahmen-Vorderkante (zurückgesetzte Stufe).
+    const sashMeshes = open.filter((m) => meshMinY(m) > blendFront + 1e-6);
+    expect(sashMeshes.length).toBe(4);
+    for (const m of sashMeshes) expect(meshMinY(m)).toBeCloseTo(blendFront + 0.005, 6);
+  });
+
+  it("Türblatt: Vollblatt füllt das Feld, Teilverglasung nur den blinden Rest, Fenster nie", () => {
+    const isLeaf = (m: { color: [number, number, number] }): boolean =>
+      m.color[0] === 0.93 && m.color[1] === 0.9 && m.color[2] === 0.85;
+    const doorProject = (dt: NonNullable<Project["doorTypes"]>[number]): Project => ({
+      ...sampleProject,
+      doorTypes: [dt],
+      openings: [
+        {
+          id: "DL",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "31",
+          kind: "door",
+          typeId: dt.id,
+          position: 3.0,
+          width: 0.9,
+          height: 2.0,
+          sillHeight: 0,
+        },
+      ],
+      doors: [],
+      context: [],
+    });
+    const baseDoor = {
+      id: "door-leaf-test",
+      name: "Blatt-Test",
+      kind: "dreh" as const,
+      leafCount: 1 as const,
+      leafStyle: "glatt" as const,
+      frameThickness: 0.05,
+      frameWidth: 0.06,
+      defaultWidth: 0.9,
+      defaultHeight: 2.0,
+    };
+    const zTop = (meshes: { positions: number[] }[]): number => {
+      let m = -Infinity;
+      for (const mesh of meshes) for (let i = 2; i < mesh.positions.length; i += 3) m = Math.max(m, mesh.positions[i]);
+      return m;
+    };
+    // Vollblatt (glatt): genau EIN Blatt-Panel, bis unter den Sturz (2.0 − fw).
+    const solid = projectToModel3d(doorProject(baseDoor)).meshes.filter(isLeaf);
+    expect(solid.length).toBe(1);
+    expect(zTop(solid)).toBeCloseTo(2.0 - 0.06, 6);
+    // Auch bei grob vorhanden (Füllung ist kein „fein"-Detail).
+    expect(projectToModel3d(doorProject(baseDoor), { detail: "grob" }).meshes.filter(isLeaf).length).toBe(1);
+    // Teilverglasung (glas, glazingRatio 0.4): Blatt nur im unteren 60%-Rest.
+    const glazed = projectToModel3d(
+      doorProject({ ...baseDoor, id: "door-leaf-glas", leafStyle: "glas", glazingRatio: 0.4 }),
+    ).meshes.filter(isLeaf);
+    expect(glazed.length).toBe(1);
+    const fieldTop = 2.0 - 0.06;
+    expect(zTop(glazed)).toBeCloseTo(fieldTop - 0.4 * fieldTop, 6);
+    // Ganzglastür (glazingRatio 1): kein blinder Rest -> kein Blatt.
+    expect(
+      projectToModel3d(doorProject({ ...baseDoor, id: "door-leaf-vollglas", leafStyle: "glas" })).meshes.filter(isLeaf)
+        .length,
+    ).toBe(0);
+    // Fenster: nie ein Blatt.
+    expect(projectToModel3d(winProject({ ...baseWin, id: "win-no-leaf" })).meshes.filter(isLeaf).length).toBe(0);
   });
 
   it("Tür-Zarge mit Umgriff: zarge -> 6 Bekleidungs-Riegel mehr als blockrahmen", () => {

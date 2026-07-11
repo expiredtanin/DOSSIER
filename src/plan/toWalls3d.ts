@@ -417,6 +417,14 @@ const SILL_RGB: RRgb = [0.8, 0.8, 0.78];
 const SYMBOL_RGB: RRgb = [0.25, 0.27, 0.3];
 /** Halbe Breite der Symbol-Diagonalen (Meter) — ~5 mm Gesamtbreite, feine Linie. */
 const SYMBOL_HALF_WIDTH = 0.0025;
+/**
+ * Warmer, heller Türblatt-Ton — bewusst wärmer/heller als der Rahmen
+ * ({@link FRAME_RGB}), damit das Blatt im 3D als eigene Füllung liest
+ * (s. {@link doorLeafPanels}).
+ */
+const DOOR_LEAF_RGB: RRgb = [0.93, 0.9, 0.85];
+/** Türblatt-Dicke quer zur Wand (Meter). */
+const DOOR_LEAF_THICK = 0.04;
 /** Default-Ansichtsbreite des Rahmenprofils (Meter), wenn `TYPE.frameWidth` fehlt. */
 const DEFAULT_FRAME_WIDTH = 0.06;
 /** Warmer Terrakotta-Grauton für Dachflächen/-giebel (s. {@link emitRoofs}) — hebt das Dach klar von Wand/Decke/Kontext ab. */
@@ -2216,21 +2224,22 @@ function frameMeshesForOpening(
     }
   }
   // Flügelrahmen je ÖFFENBAREM Flügel: ein eigener Rahmen-Riegel-Ring (links/
-  // rechts/oben/unten) INNERHALB des Blendrahmen-Felds, um `reveal` eingerückt
-  // (Schachtelung Blendrahmen → Flügelrahmen → Glas). Anders als bisher sitzt der
-  // Flügelrahmen in einem EIGENEN, nach aussen VORSTEHENDEN und flacheren Quer-
-  // Band (`sashBackN..sashFrontN`) — dadurch liest er sich als abgesetzter,
-  // verschachtelter Körper VOR dem Blendrahmen (VW „fein"), nicht mehr flach mit
-  // ihm verschmolzen. Zusätzlich (nur „fein") die DIN-Öffnungssymbole auf dem
-  // Glas. Feste Flügel bekommen weder Flügelrahmen noch Symbol.
+  // rechts/oben/unten), der DIREKT am Blendrahmen ansetzt (kein Spalt — sonst
+  // schiene die Vollfeld-Glasscheibe als Streifen zwischen Blend- und Flügel-
+  // rahmen durch). Die Schachtelung Blendrahmen → Flügelrahmen → Glas liest sich
+  // über die Tiefe: der Flügelrahmen sitzt in einem EIGENEN, leicht ZURÜCK-
+  // GESETZTEN und flacheren Quer-Band (`sashBackN..sashFrontN`) hinter der
+  // Blendrahmen-Vorderkante — eine plastische Stufe nach innen (VW „fein"),
+  // ohne vor die Fassade auszukragen. Zusätzlich (nur „fein") die DIN-Öffnungs-
+  // symbole auf dem Glas. Feste Flügel bekommen weder Flügelrahmen noch Symbol.
   if (sashesOn && params.sashes.length > 0 && sashTo - sashFrom > EPS && sashTop - sashBottom > EPS) {
     const segs = resolveSashSpans(params.sashes, sashFrom, sashTo);
-    const reveal = fw * 0.5;
     const sfw = fw * 0.7;
-    // Verschachteltes Flügelrahmen-Band: ~12 mm vor der Blendrahmen-Vorderkante
-    // (nMax = Aussenseite) und nur ~50 mm tief — abgesetzte, plastische Stufe.
-    const sashFrontN = params.nMax + 0.012;
-    const sashBackN = Math.max(params.nMin, params.nMax - 0.05);
+    // Verschachteltes Flügelrahmen-Band: ~5 mm HINTER der Blendrahmen-Vorderkante
+    // (nMax = Aussenseite) und nur ~50 mm tief — abgesetzte Stufe nach innen,
+    // die Glas-Vorderkante (nMax − 0.03) liegt INNERHALB dieses Bands.
+    const sashFrontN = params.nMax - 0.005;
+    const sashBackN = Math.max(params.nMin, params.nMax - 0.055);
     // Glas-Vorderkante (s. glassPanesForOpening: n1 = nMax − 0.03); die Symbole
     // liegen als ~2.5 mm dünne dunkle Prismen KNAPP davor (weiter aussen).
     const glassFrontN = params.nMax - 0.03;
@@ -2245,10 +2254,12 @@ function frameMeshesForOpening(
     for (const seg of segs) {
       const s = seg.sash;
       if (s.kind !== "fluegel" || !s.opening || s.opening === "fest") continue;
-      const cf = seg.from + fw + reveal;
-      const ct = seg.to - fw - reveal;
-      const bz = sashBottom + reveal;
-      const tz = sashTop - reveal;
+      // Bündig am Blendrahmen/Segmentrand ansetzen — die Stufe kommt aus der
+      // Tiefe (sashBackN..sashFrontN), nicht aus einem sichtbaren Glas-Spalt.
+      const cf = seg.from;
+      const ct = seg.to;
+      const bz = sashBottom;
+      const tz = sashTop;
       if (ct - cf <= EPS || tz - bz <= EPS) continue;
       pushSash(cf, cf + sfw, bz, tz); // linker Flügelholm
       pushSash(ct - sfw, ct, bz, tz); // rechter Flügelholm
@@ -2410,18 +2421,56 @@ function glassPanesForOpening(
   if (params.transomHeight > EPS) {
     const splitZ = clampRange(vert.zTop - params.transomHeight, sashBottom, sashTopFull);
     const mainTop = splitZ - fw / 2;
-    push(glazedBottom(sashBottom, mainTop), mainTop); // Hauptglas (ggf. nur oben).
-    push(splitZ + fw / 2, sashTopFull); // Oberlicht-Scheibe (immer voll).
-  } else {
+    if (params.glazed) push(glazedBottom(sashBottom, mainTop), mainTop); // Hauptglas (ggf. nur oben).
+    push(splitZ + fw / 2, sashTopFull); // Oberlicht-Scheibe (immer voll, auch Vollblatt-Tür).
+  } else if (params.glazed) {
     push(glazedBottom(sashBottom, sashTopFull), sashTopFull);
   }
   return out;
 }
 
 /**
- * Emittiert je Fensteröffnung eine Glasscheibe (Türen nur bei glasfülligem
- * Blatt, `leafStyle: "glas"`) als rohes Quader-Mesh — damit Fenster im 3D als
- * Fenster lesbar sind statt als blosse Löcher in der Wand.
+ * Türblatt EINER typisierten Tür als solide Blatt-Tafel im Hauptfeld (zwischen
+ * den Rahmen-Pfosten, über Schwelle bis Sturz bzw. Kämpfer): Vollblatt
+ * (`leafStyle` ≠ "glas") füllt das ganze Feld, Teilverglasung
+ * (`glazingRatio` < 1) nur den blinden UNTEREN Rest unter dem Glasanteil
+ * (Anteil von OBEN gemessen, s. {@link glassPanesForOpening}). Das Blatt liegt
+ * mittig um die Glasebene (nMax − 0.03), ~4 cm dick ({@link DOOR_LEAF_THICK}),
+ * in {@link DOOR_LEAF_RGB} — damit Türen im 3D als Türen lesbar sind statt als
+ * offene Löcher mit Rahmen. Fenster: nie (glazedFraction = 1 ⇒ kein Blatt).
+ */
+function doorLeafPanels(
+  wall: Wall,
+  iv: { from: number; to: number },
+  vert: { zBottom: number; zTop: number },
+  params: OpeningFrameParams,
+): RMesh[] {
+  const out: RMesh[] = [];
+  const fw = params.frameWidth;
+  const leafFrom = iv.from + fw;
+  const leafTo = iv.to - fw;
+  const leafBottom = vert.zBottom + (params.hasSill ? fw : 0);
+  let fieldTop = vert.zTop - fw;
+  if (params.transomHeight > EPS) {
+    const splitZ = clampRange(vert.zTop - params.transomHeight, leafBottom, fieldTop);
+    fieldTop = splitZ - fw / 2; // Hauptfeld endet am Kämpfer, Oberlicht bleibt Glas.
+  }
+  // Blinder Blattanteil: alles unterhalb des (von oben gemessenen) Glasanteils.
+  const frac = params.glazed ? Math.max(0.05, Math.min(1, params.glazedFraction)) : 0;
+  const leafTop = fieldTop - frac * (fieldTop - leafBottom);
+  if (leafTop - leafBottom <= EPS || leafTo - leafFrom <= EPS) return out;
+  const n1 = params.nMax - 0.03 + DOOR_LEAF_THICK / 2;
+  const n0 = Math.max(params.nMin, n1 - DOOR_LEAF_THICK);
+  const mesh = openingAxisBox(wall, leafFrom, leafTo, leafBottom, leafTop, n0, n1, DOOR_LEAF_RGB);
+  if (mesh) out.push(mesh);
+  return out;
+}
+
+/**
+ * Emittiert je Fensteröffnung eine Glasscheibe und je Türöffnung die Füllung
+ * (Blatt-Tafel, s. {@link doorLeafPanels}, plus Scheibe bei Glasanteil/
+ * Oberlicht) als rohe Quader-Meshes — damit Fenster/Türen im 3D lesbar sind
+ * statt als blosse Löcher in der Wand.
  *
  * OHNE auflösbaren Typ (`getWindowType`/`getDoorType` liefert `undefined`,
  * z. B. `Opening.typeId` fehlt): unverändertes ALT-Verhalten — EINE Vollscheibe
@@ -2470,9 +2519,14 @@ function emitOpeningGlass(project: Project): RMesh[] {
         }
         out.push(...glassPanesForOpening(wall, iv, vert, params));
       } else {
-        // Tür: nur bei glasfülligem Blatt eine Scheibe (Alt-Verhalten: offen).
+        // Tür: Blatt-Tafel (Vollblatt bzw. blinder Rest unter der Teilverglasung)
+        // + Scheibe(n) für Glasanteil/Oberlicht. Ohne auflösbaren Typ: nichts
+        // (Alt-Verhalten: offenes Loch).
         const params = resolveOpeningFrame(project, wall, op);
-        if (params?.glazed) out.push(...glassPanesForOpening(wall, iv, vert, params));
+        if (params) {
+          out.push(...doorLeafPanels(wall, iv, vert, params));
+          out.push(...glassPanesForOpening(wall, iv, vert, params));
+        }
       }
     }
   }

@@ -33,9 +33,11 @@
 
 import type { DrawingLevel, Project, Vec2, Wall } from "../model/types";
 import {
+  getComponent,
   getWallType,
   getWindowType,
   openingsOfWall,
+  roofLayers,
   sashesOfWindowType,
   wallTypeThickness,
 } from "../model/types";
@@ -43,7 +45,7 @@ import { wallVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d } from "./toWalls3d";
-import type { RModel3d, RSlab, RWall } from "./toWalls3d";
+import type { RModel3d, RRgb, RSlab, RVec2, RWall } from "./toWalls3d";
 import { sectionPlaneFromLevel } from "./toSection";
 import type { SectionPlaneSpec } from "./toSection";
 import type { HatchRender, Plan, Primitive } from "./generatePlan";
@@ -68,28 +70,53 @@ const EDGE_INK = "#2b3039";
 const EDGE_MM = 0.13;
 /** Fenster/Tür-Rahmen: etwas kräftigere Umrisslinie. */
 const FRAME_MM = 0.18;
-/** Blaugraues Fenster-Glas (dunkler als die Fassade → als Öffnung lesbar). */
-const GLASS_FILL = "#ffffff";
-/** Glas im Mono-Modus (neutrales Grau statt Blaugrau). */
+/**
+ * Fenster-Glas/Rahmen/Türblatt/Wand/Dach: im MONO-Modus (SW/Print, VW-Linien-
+ * zeichnungs-Look) bleibt alles weiss — nur Kontur trägt Information. Im
+ * FARBIG-Modus tragen die Flächen echte Bauteilfarbe: Wand/Dach die dominante
+ * Schicht (s. {@link WorldFace.fill}, gesetzt in {@link wallWorldFaces}/
+ * {@link roofWorldFacesAll}), Fenster/Türen feste, an `toWalls3d.ts`
+ * (FRAME_RGB/GLASS_RGB/SILL_RGB/DOOR_LEAF_RGB) angelehnte Töne, damit Ansicht
+ * und 3D konsistent wirken.
+ */
 const GLASS_FILL_MONO = "#c4c8cd";
-/** Festes Schattengrau (über der Fassade, unter den Kanten). */
+const GLASS_FILL_COLOR = "#9fc2d9";
 const SHADOW_FILL = "#8f959e";
 /** Bodenlinie (Terrain-/Nulllinie): kräftige Tinte über die volle Breite. */
 const GROUND_INK = "#1f242c";
 /** Strichstärke der Bodenlinie (mm Papier). */
 const GROUND_MM = 0.5;
-/** Rollen-Füllungen: EINE ruhige Fassadenfläche statt Tiefen-Patchworks —
- *  klassische Architektur-Ansicht (Flächen tragen, Kanten nur wo bedeutsam:
- *  Dachrand, Öffnungen, Bodenlinie). Wand/Decke identisch (Decken-Stirnflächen
- *  verschwinden optisch in der Fassade), Dach eine Stufe dunkler. */
+/** Rollen-Füllungen: MONO-Fallback, wenn eine Fläche keine Bauteilfarbe trägt
+ *  (z. B. Dach ohne auflösbare Schicht) — sonst gilt im Farbig-Modus immer die
+ *  echte Bauteilfarbe (s. `fillFor` in {@link generateElevationPlan}). */
 const WALL_FILL = "#ffffff";
 const ROOF_FILL = "#ffffff";
-/** Blendrahmen-Fläche der Öffnungen. */
-const FRAME_FILL = "#ffffff";
+/** Blendrahmen-/Sims-Fläche der Öffnungen. */
+const FRAME_FILL_COLOR = "#d9d9d4";
+const SILL_FILL_COLOR = "#cccccb";
 /** Türblatt-Fläche. */
-const DOOR_LEAF_FILL = "#ffffff";
+const DOOR_LEAF_FILL_COLOR = "#ede6d9";
 /** Öffnungssymbol (DIN-Andeutung): dezente Annotation, nicht Bauteilkante. */
 const SYMBOL_INK = "#7d858f";
+/** Neutraler Dach-Grauton, falls keine Eindeckungs-Schicht/-Farbe auflösbar ist (wie `toWalls3d.ts::ROOF_RGB`). */
+const ROOF_RGB_FALLBACK: RRgb = [0.72, 0.45, 0.36];
+
+/** Wandelt eine Hex-Farbe ("#rrggbb") in float-RGB (0..1) um (wie `toWalls3d.ts::hexToRgb`, hier dupliziert — nicht exportiert). */
+function hexToRgb(hex: string, fallback: RRgb): RRgb {
+  const h = hex?.trim().replace(/^#/, "") ?? "";
+  if (h.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(h)) return fallback;
+  return [
+    parseInt(h.slice(0, 2), 16) / 255,
+    parseInt(h.slice(2, 4), 16) / 255,
+    parseInt(h.slice(4, 6), 16) / 255,
+  ];
+}
+
+/** Wandelt float-RGB (0..1) zurück in "#rrggbb" (für Primitive-Fill-Strings). */
+function rgbToHex(c: RRgb): string {
+  const b = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255))).toString(16).padStart(2, "0");
+  return `#${b(c[0])}${b(c[1])}${b(c[2])}`;
+}
 
 /** Sonnenrichtung als (u, v)-Schattenversatz je Tiefeneinheit: 45° von links
  *  oben ⇒ Schatten fällt nach rechts unten (+u, −v). */
@@ -168,6 +195,12 @@ export interface WorldFace {
   ceilingId?: string;
   /** Ursprungs-Dach (nur role "roof"). */
   roofId?: string;
+  /**
+   * Bauteil-Farbe (dominante Wandschicht bzw. äusserste Dach-/Eindeckungs-
+   * schicht) für den Farbig-Modus (s. {@link ElevationOptions.mono}). Fehlt
+   * ⇒ Fallback auf die neutrale Rollen-Füllung.
+   */
+  fill?: RRgb;
 }
 
 function normalize3(a: V3): V3 {
@@ -237,8 +270,115 @@ export function wallWorldFaces(w: RWall): WorldFace[] {
     normal: [0, -1, 0],
     poly: [corner(0, -ht, zb), corner(len, -ht, zb), corner(len, ht, zb), corner(0, ht, zb)],
   });
-  for (const f of faces) f.wallId = w.wallId;
+  for (const f of faces) {
+    f.wallId = w.wallId;
+    f.fill = w.color;
+  }
   return faces;
+}
+
+/** Rundet einen Wandachsen-Endpunkt auf ein Gitter, um Knoten robust zu gruppieren (wie `model/joins.ts::roundKey`). */
+function cornerKey(p: Vec2): string {
+  const r = (v: number) => Math.round(v * 1e3) / 1e3;
+  return `${r(p.x)},${r(p.y)}`;
+}
+
+/**
+ * Achsen-Verlängerung je Wandende (Meter, ≥0) für die ANSICHT: axis-zu-axis
+ * gebaute Wandboxen (s. {@link wallWorldFaces}) decken einen Aussen-/Innen-
+ * Eckknoten nicht voll ab — an jeder Ecke bleibt ein dreieckiger Spalt der
+ * Grösse der halben Dicke der anschliessenden Wand (sichtbar als Kerbe in der
+ * Silhouette bzw. als Lücke im Schlagschatten). Wo eine ANDERE Wand DERSELBEN
+ * Ebene mit ihrem Start-/Endpunkt an diesem Knoten anschliesst, wird um deren
+ * halbe Dicke verlängert — die Boxen überlappen dann vollständig im Eckbereich.
+ *
+ * Bewusst eine EIGENE, einfache Näherung (nur „teilt sich einen Endpunkt")
+ * statt der vollen Gehrungs-Logik aus `model/joins.ts` (die bedient den 2D-
+ * Grundriss/3D-Viewer-Pfad mit L-/T-/X-Knoten-Klassifikation und bleibt dafür
+ * unangetastet, s. Moduldoc oben): die Ansicht ist ein Painter-Silhouetten-
+ * Verfahren, dem eine leichte Überlappung an Ecken nichts ausmacht — anders als
+ * der 2D-Grundriss (Schicht-Poché) oder der Schnitt (Boolean-Dominanz), die
+ * eine exakte, überlappungsfreie Gehrung brauchen. T-Stösse (Zwischenwand
+ * trifft auf die SEITE einer durchlaufenden Wand statt deren Endpunkt) fängt
+ * diese einfache Näherung nicht ab — dort deckt die durchlaufende Wand die
+ * Fuge in der Ansicht i. d. R. ohnehin ab.
+ */
+function wallCornerExtensions(project: Project, walls: Wall[]): Map<string, { start: number; end: number }> {
+  const thicknessOf = (w: Wall): number => {
+    try {
+      return wallTypeThickness(getWallType(project, w));
+    } catch {
+      return 0.2;
+    }
+  };
+  const nodeMembers = new Map<string, Array<{ id: string; half: number }>>();
+  for (const w of walls) {
+    const half = thicknessOf(w) / 2;
+    for (const p of [w.start, w.end]) {
+      const k = cornerKey(p);
+      const arr = nodeMembers.get(k);
+      if (arr) arr.push({ id: w.id, half });
+      else nodeMembers.set(k, [{ id: w.id, half }]);
+    }
+  }
+  const extAt = (w: Wall, p: Vec2): number => {
+    const members = nodeMembers.get(cornerKey(p)) ?? [];
+    let maxOther = 0;
+    for (const m of members) if (m.id !== w.id) maxOther = Math.max(maxOther, m.half);
+    return maxOther;
+  };
+  const out = new Map<string, { start: number; end: number }>();
+  for (const w of walls) out.set(w.id, { start: extAt(w, w.start), end: extAt(w, w.end) });
+  return out;
+}
+
+/**
+ * Verlängert die (offset-freien, s. {@link resolveWallBands} `layered:false`)
+ * Wand-Boxen des Ansichts-Modells an gemeinsamen Eck-Knoten (s.
+ * {@link wallCornerExtensions}), damit Fassaden-Ecken in der Ansicht ohne
+ * dreieckige Kerbe/Schattenlücke erscheinen. Wirkt PRO GESCHOSS (`floorId`),
+ * damit sich nur Wände desselben Grundrisses zu Ecken verbinden. Mutiert die
+ * `start`/`end`-Koordinaten der jeweils äussersten Teilstücke (Pfeiler vor der
+ * ersten bzw. nach der letzten Öffnung) in-place.
+ */
+function extendWallCornersForElevation(project: Project, rwalls: RWall[]): void {
+  const byFloor = new Map<string, Wall[]>();
+  for (const w of project.walls) {
+    const key = w.floorId ?? "";
+    const list = byFloor.get(key);
+    if (list) list.push(w);
+    else byFloor.set(key, [w]);
+  }
+  const byWallId = new Map<string, RWall[]>();
+  for (const rw of rwalls) {
+    const list = byWallId.get(rw.wallId);
+    if (list) list.push(rw);
+    else byWallId.set(rw.wallId, [rw]);
+  }
+  const closeTo = (a: RVec2, b: Vec2): boolean => Math.abs(a[0] - b.x) < 1e-6 && Math.abs(a[1] - b.y) < 1e-6;
+  for (const floorWalls of byFloor.values()) {
+    const ext = wallCornerExtensions(project, floorWalls);
+    for (const w of floorWalls) {
+      const e = ext.get(w.id);
+      if (!e || (e.start <= EPS && e.end <= EPS)) continue;
+      const pieces = byWallId.get(w.id);
+      if (!pieces) continue;
+      const dx = w.end.x - w.start.x;
+      const dz = w.end.y - w.start.y;
+      const len = Math.hypot(dx, dz);
+      if (len < 1e-9) continue;
+      const ux = dx / len;
+      const uz = dz / len;
+      if (e.start > EPS) {
+        const first = pieces.find((p) => closeTo(p.start, w.start));
+        if (first) first.start = [first.start[0] - ux * e.start, first.start[1] - uz * e.start];
+      }
+      if (e.end > EPS) {
+        const last = pieces.find((p) => closeTo(p.end, w.end));
+        if (last) last.end = [last.end[0] + ux * e.end, last.end[1] + uz * e.end];
+      }
+    }
+  }
 }
 
 /**
@@ -279,7 +419,10 @@ export function slabWorldFaces(s: RSlab): WorldFace[] {
       poly: [bottom[i], bottom[j], top[j], top[i]],
     });
   }
-  for (const f of faces) f.ceilingId = s.ceilingId;
+  for (const f of faces) {
+    f.ceilingId = s.ceilingId;
+    f.fill = s.color;
+  }
   return faces;
 }
 
@@ -298,6 +441,7 @@ export interface ProjectedFace {
   wallId?: string;
   ceilingId?: string;
   roofId?: string;
+  fill?: RRgb;
 }
 
 /**
@@ -322,7 +466,17 @@ export function projectFace(frame: ElevationFrame, face: WorldFace): ProjectedFa
   }
   const depth = depthSum / face.poly.length;
   if (depth <= EPS) return null; // vor der Ebene → ignorieren
-  return { pts, depth, depthMin, depthMax, role: face.role, wallId: face.wallId, ceilingId: face.ceilingId, roofId: face.roofId };
+  return {
+    pts,
+    depth,
+    depthMin,
+    depthMax,
+    role: face.role,
+    wallId: face.wallId,
+    ceilingId: face.ceilingId,
+    roofId: face.roofId,
+    fill: face.fill,
+  };
 }
 
 /**
@@ -363,6 +517,15 @@ export function roofWorldFacesAll(project: Project): WorldFace[] {
   for (const roof of project.roofs ?? []) {
     const eavesZ = roofBaseElevation(project, roof);
     const g = roofGeometry(roof, eavesZ);
+    // Äusserste Schicht (Eindeckung) bzw. `roof.color`-Übersteuerung — dieselbe
+    // Farbwahl wie {@link emitRoofs} (3D-Viewer), damit Ansicht/3D konsistent
+    // wirken. Ohne auflösbare Schicht der neutrale Dach-Fallback.
+    const outer = roofLayers(project, roof)[0];
+    const fill: RRgb = roof.color
+      ? hexToRgb(roof.color, ROOF_RGB_FALLBACK)
+      : outer?.componentId
+        ? hexToRgb(getComponent(project, outer.componentId).color, ROOF_RGB_FALLBACK)
+        : ROOF_RGB_FALLBACK;
     // Dach-Schwerpunkt (Welt) für die Aussen-Orientierung der Giebel.
     let cx = 0;
     let cy = 0;
@@ -398,7 +561,7 @@ export function roofWorldFacesAll(project: Project): WorldFace[] {
       let n = newell(poly);
       // Dachflächen zeigen aufwärts (Welt-Y).
       if (n[1] < 0) n = [-n[0], -n[1], -n[2]];
-      out.push({ role: "roof", normal: n, poly, roofId: roof.id });
+      out.push({ role: "roof", normal: n, poly, roofId: roof.id, fill });
     }
     for (const gable of g.gables) {
       const poly: V3[] = gable.map((p) => [p[0], p[2], p[1]]);
@@ -407,7 +570,7 @@ export function roofWorldFacesAll(project: Project): WorldFace[] {
       // Giebel zeigen vom Dach-Schwerpunkt weg nach aussen.
       const toC: V3 = [cx - poly[0][0], cy - poly[0][1], cz - poly[0][2]];
       if (n[0] * toC[0] + n[1] * toC[1] + n[2] * toC[2] > 0) n = [-n[0], -n[1], -n[2]];
-      out.push({ role: "roof", normal: n, poly, roofId: roof.id });
+      out.push({ role: "roof", normal: n, poly, roofId: roof.id, fill });
     }
   }
   return out;
@@ -675,6 +838,34 @@ function bboxOf(pts: Array<[number, number]>): UVRect {
 }
 
 /**
+ * Deckt eine NÄHERE, achsparallele Wand-Bounding-Box `bbox`/`depth` VOLLSTÄNDIG
+ * ab? Grobe NÄHERUNG (Bounding-Box statt exaktes Polygon, wie
+ * {@link buildShadows}) — genügt, um zu verhindern, dass Öffnungssymbole/
+ * Fugenlinien einer HINTEREN Fassade (z. B. Nordwand) durch eine NÄHERE Wand
+ * (Südwand) "durchscheinen": die GL-Ansicht zeichnet ALLE Linien (inkl. der
+ * Umriss-Konturen von Polygonen) in einem EIGENEN Stift-Durchgang ÜBER allen
+ * Füllungen (s. `glPlan/glPlanCompile.ts`) — eine reine Tiefensortierung der
+ * Flächen (Painter) reicht dafür NICHT, die Linien bräuchten sonst eine echte
+ * Tiefenprüfung im Renderer. Statt dessen werden verdeckte Elemente hier, beim
+ * Aufbau des Ansichts-Plans, gar nicht erst emittiert.
+ */
+function isOccluded(bbox: UVRect, depth: number, blockers: Array<{ bbox: UVRect; depth: number }>): boolean {
+  const MARGIN = 1e-3;
+  for (const b of blockers) {
+    if (b.depth >= depth - EPS) continue; // nicht echt näher
+    if (
+      b.bbox.uMin - MARGIN <= bbox.uMin &&
+      b.bbox.uMax + MARGIN >= bbox.uMax &&
+      b.bbox.vMin - MARGIN <= bbox.vMin &&
+      b.bbox.vMax + MARGIN >= bbox.vMax
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Clippt ein Polygon an ein achsparalleles Rechteck (Sutherland–Hodgman, vier
  * Halbebenen). Liefert das (konvexe) Restpolygon oder [] bei leerem Schnitt.
  */
@@ -859,6 +1050,7 @@ export function generateElevationPlan(
 
   // Eine Voll-Box je Wand (Öffnungen als Segment-Aussparungen) + Decken-Prismen.
   const model = projectToModel3d(project, { layeredWalls: false });
+  extendWallCornersForElevation(project, model.walls);
   const faces = collectElevationFaces(model, frame);
   // Dächer analytisch (roofGeometry) — nicht Teil von RModel3d walls/slabs.
   for (const rf of roofWorldFacesAll(project)) {
@@ -868,6 +1060,13 @@ export function generateElevationPlan(
   const wallFaces = faces.filter((f) => f.role === "wall");
   const slabFaces = faces.filter((f) => f.role === "slab");
   const roofFaces = faces.filter((f) => f.role === "roof");
+  // Blocker für die Durchsicht-Prüfung (s. {@link isOccluded}): NÄHERE, frontal
+  // zum Betrachter stehende Wandflächen (ganze Fassaden-Ebenen) — der Regelfall
+  // einer verdeckenden Vorderfassade. Schräge/Stirnflächen sind selten volle
+  // Blocker und bleiben aussen vor (Näherung).
+  const wallBlockers = wallFaces
+    .filter((f) => f.depthMax - f.depthMin < 1e-4)
+    .map((f) => ({ bbox: bboxOf(f.pts), depth: f.depthMin }));
 
   const primitives: Primitive[] = [];
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -878,10 +1077,13 @@ export function generateElevationPlan(
     if (y > maxY) maxY = y;
   };
 
-  // Rollen-Füllung: Fassade/Decke einheitlich, Dach eine Stufe dunkler —
-  // KEINE Tiefenstaffelung (die machte aus der Fassade ein Grau-Patchwork).
-  const fillFor = (role: FaceRole): string => {
+  // Rollen-Füllung: im Farbig-Modus die echte Bauteilfarbe (dominante Wand-
+  // schicht bzw. Dach-Eindeckung, s. {@link WorldFace.fill}); MONO bleibt eine
+  // ruhige weisse Fläche — KEINE Tiefenstaffelung (die machte aus der Fassade
+  // ein Grau-Patchwork).
+  const fillFor = (role: FaceRole, fill: RRgb | undefined): string => {
     if (mono) return "#ffffff";
+    if (fill) return rgbToHex(fill);
     return role === "roof" ? ROOF_FILL : WALL_FILL;
   };
 
@@ -916,6 +1118,10 @@ export function generateElevationPlan(
       if (!frontalGroups.has(gk)) frontalGroups.set(gk, { faces: [], depth: f.depth });
       frontalGroups.get(gk)!.faces.push(f);
     }
+    // Eigene Kontur (Dach/schräg angeschnittene Flächen) nur zeichnen, wenn sie
+    // nicht ohnehin hinter einer näheren Fassade verschwindet (s. {@link isOccluded}
+    // — die Linien-Pipeline verdeckt Umrisslinien sonst NICHT automatisch).
+    const ownStroke = (isRoof || !frontal) && !isOccluded(bboxOf(f.pts), f.depthMin, wallBlockers);
     items.push({
       depth: f.depth,
       seq: seq++,
@@ -926,11 +1132,11 @@ export function generateElevationPlan(
       prim: {
         kind: "polygon",
         pts,
-        fill: fillFor(f.role),
+        fill: fillFor(f.role, f.fill),
         // Dach + schräg angeschnittene Flächen tragen ihre eigene Kontur;
         // frontale Flächen bekommen den Gruppen-Umriss (unten).
-        stroke: isRoof || !frontal ? EDGE_INK : "none",
-        strokeWidthMm: isRoof || !frontal ? EDGE_MM : 0,
+        stroke: ownStroke ? EDGE_INK : "none",
+        strokeWidthMm: ownStroke ? EDGE_MM : 0,
         hatch: NO_HATCH,
         ...(f.wallId ? { wallId: f.wallId } : {}),
         ...(f.ceilingId ? { ceilingId: f.ceilingId } : {}),
@@ -939,6 +1145,8 @@ export function generateElevationPlan(
     });
   }
   for (const g of frontalGroups.values()) {
+    const groupBbox = bboxOf(g.faces.flatMap((f) => f.pts));
+    if (isOccluded(groupBbox, g.depth, wallBlockers)) continue;
     for (const [a, b] of xorOutlineEdges(g.faces.map((f) => f.pts))) {
       items.push({
         depth: g.depth - EPS * 5,
@@ -980,7 +1188,11 @@ export function generateElevationPlan(
   }
 
   // Fenster/Türen: Rahmen+Glas, knapp VOR der Wirtsfläche (auf der Fassade).
+  // Ganz verdeckte Öffnungen (hinter einer näheren Fassade, s. {@link isOccluded})
+  // werden gar nicht erst emittiert — sonst scheinen ihre Symbol-/Sprossen-Linien
+  // (eigener Linien-Durchgang, s. Blocker-Kommentar oben) durch die Vorderwand.
   for (const op of collectOpenings(project, frame)) {
+    if (isOccluded(bboxOf(op.pts), op.depth, wallBlockers)) continue;
     const toVec = (q: Array<[number, number]>): Vec2[] =>
       q.map(([u, v]) => {
         acc(u, v);
@@ -995,13 +1207,13 @@ export function generateElevationPlan(
       prim: {
         kind: "polygon",
         pts: toVec(op.pts),
-        fill: mono ? "#ffffff" : FRAME_FILL,
+        fill: mono ? "#ffffff" : FRAME_FILL_COLOR,
         stroke: EDGE_INK,
         strokeWidthMm: FRAME_MM,
         hatch: NO_HATCH,
       },
     });
-    // Sims (Bank + Tropfkante) — weiss gefüllt (verdeckt die Fassade), Kontur.
+    // Sims (Bank + Tropfkante) — verdeckt die Fassade, Kontur.
     for (const sRect of op.sill) {
       items.push({
         depth: d,
@@ -1009,7 +1221,7 @@ export function generateElevationPlan(
         prim: {
           kind: "polygon",
           pts: toVec(sRect),
-          fill: mono ? "#ffffff" : FRAME_FILL,
+          fill: mono ? "#ffffff" : SILL_FILL_COLOR,
           stroke: EDGE_INK,
           strokeWidthMm: EDGE_MM,
           hatch: NO_HATCH,
@@ -1038,7 +1250,7 @@ export function generateElevationPlan(
         prim: {
           kind: "polygon",
           pts: toVec(g),
-          fill: mono ? GLASS_FILL_MONO : op.isDoor ? DOOR_LEAF_FILL : GLASS_FILL,
+          fill: mono ? GLASS_FILL_MONO : op.isDoor ? DOOR_LEAF_FILL_COLOR : GLASS_FILL_COLOR,
           stroke: EDGE_INK,
           strokeWidthMm: EDGE_MM,
           hatch: NO_HATCH,
