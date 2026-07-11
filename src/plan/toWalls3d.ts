@@ -2606,11 +2606,15 @@ function computeJoinsByFloor(project: Project): Map<string, WallCuts> {
 export interface Model3dOptions {
   layeredWalls?: boolean;
   /**
-   * Detailgrad der Öffnungs-Darstellung im 3D (wie im 2D-Grundriss):
+   * Detailgrad der Öffnungs-Darstellung im 3D (wie im 2D-Grundriss, Referenz ist
+   * der VW-Detailgrad "fein"):
    *  • "grob"  — keine Rahmen/Sprossen (nur Loch + Scheibe).
-   *  • "mittel"— Rahmen (Pfosten/Sturz/Schwelle) + ggf. Kämpfer, keine Sprossen.
-   *  • "fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen).
-   * Fehlt es, gilt "fein" (= bisheriges Verhalten, volle Details).
+   *  • "mittel"— Blendrahmen (Pfosten/Sturz/Schwelle) + ggf. Kämpfer, dazu die
+   *    verschachtelten Flügelrahmen, Fensterbank (Sims) und Zargen-Umgriff — aber
+   *    KEINE Sprossen und KEINE DIN-Öffnungssymbole.
+   *  • "fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen) und
+   *    die DIN-Öffnungssymbole (Dreh/Kipp) auf dem Glas.
+   * Fehlt es, gilt "fein" (= volle Details).
    */
   detail?: DetailLevel;
 }
