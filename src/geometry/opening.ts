@@ -263,7 +263,7 @@ export interface WindowRenderSpec {
   sashes: SashDef[];
   /** Sichtbare Profilbreite (Meter) von Blend-/Flügelrahmen in der Öffnungsebene. */
   frameWidth: number;
-  /** Rahmentiefe quer zur Wand (Meter); fehlt ⇒ volle Wanddicke. */
+  /** Rahmentiefe quer zur Wand (Meter); fehlt ⇒ {@link DEFAULT_FRAME_DEPTH}. */
   frameDepth?: number;
   /** Schichteinzug: Abstand der Rahmen-Vorderkante von {@link insetFace} (Meter). */
   insetFromFace?: number;
@@ -282,6 +282,15 @@ interface SashSegment {
 
 /** Default-Pfostenbreite (Meter), wenn ein `kind:"pfosten"`-Eintrag keine `postWidth` angibt. */
 const DEFAULT_POST_WIDTH = 0.06;
+/**
+ * Default-Rahmentiefe (Meter), wenn ein Fenster-/Türtyp keine explizite
+ * `frameDepth` trägt: reale Fensterrahmen sind ~70–90 mm tief (Holz/PVC/Alu),
+ * unabhängig von der Wanddicke — NICHT die volle Wanddicke (das liess Fenster
+ * wie einen massiven Block in der Öffnung wirken statt eines schlanken Rahmens
+ * mit sichtbarer Laibung/Leibung ringsum, s. Recherche zu VW/ArchiCAD-Fenster-
+ * konstruktion). Deckt sich mit `toWalls3d.ts::DEFAULT_FRAME_DEPTH` (2D=3D).
+ */
+const DEFAULT_FRAME_DEPTH = 0.07;
 
 /**
  * Löst eine Flügeleinteilung ({@link SashDef}-Liste) zu konkreten Segment-
@@ -352,7 +361,7 @@ export function windowSymbol(
   // Blendrahmen (kein Flügelrahmen) — so unterscheidet sich fest von öffenbar.
   if (spec && spec.sashes.length > 0) {
     const fw = Math.max(0.01, spec.frameWidth);
-    const depth = spec.frameDepth && spec.frameDepth > 1e-9 ? spec.frameDepth : total;
+    const depth = Math.min(total, spec.frameDepth && spec.frameDepth > 1e-9 ? spec.frameDepth : DEFAULT_FRAME_DEPTH);
     const inset = Math.max(0, spec.insetFromFace ?? 0);
     const halfT = total / 2;
     const sign = (spec.insetFace ?? "aussen") === "innen" ? -1 : 1;

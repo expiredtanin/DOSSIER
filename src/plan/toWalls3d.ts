@@ -390,8 +390,15 @@ const EXTRUSION_RGB: RRgb = [0.85, 0.55, 0.25];
 const COLUMN_RGB: RRgb = [0.7, 0.7, 0.72];
 /** Helles, leicht bläuliches Fenster-Glas (Scheibe in der Öffnung). */
 const GLASS_RGB: RRgb = [0.62, 0.76, 0.85];
-/** Halbe Dicke der Fensterscheibe (Meter) — sehr dünn, mittig in der Wand. */
-const GLASS_HALF_THICK = 0.01;
+/**
+ * Halbe Dicke EINER Fensterscheibe (Meter, Mehrfachverglasungs-Pfad). Kompakt
+ * gehalten (8 mm Gesamtdicke je Scheibe, wie ein reales Einzelglas), damit
+ * z. B. eine Dreifachverglasung noch in den realistisch schlanken Default-
+ * Rahmen ({@link DEFAULT_FRAME_DEPTH}, ~70 mm) passt — bei der früheren
+ * "volle Wanddicke"-Rahmentiefe gab es dafür reichlich Platz, im schlanken
+ * Rahmen nicht mehr.
+ */
+const GLASS_HALF_THICK = 0.004;
 /**
  * Helles, warmes Rahmen-Grau (Zarge/Blendrahmen/Kämpfer/Sprossen) — bewusst
  * deutlich heller als Wand ({@link WALL_RGB}) und klar von der bläulichen
@@ -427,6 +434,14 @@ const DOOR_LEAF_RGB: RRgb = [0.93, 0.9, 0.85];
 const DOOR_LEAF_THICK = 0.04;
 /** Default-Ansichtsbreite des Rahmenprofils (Meter), wenn `TYPE.frameWidth` fehlt. */
 const DEFAULT_FRAME_WIDTH = 0.06;
+/**
+ * Default-Rahmentiefe (Meter), wenn ein Typ keine `frameDepth` nennt: reale
+ * Fensterrahmen sind ~70–90 mm tief (Holz/PVC/Alu), UNABHÄNGIG von der
+ * Wanddicke — ein schlanker Rahmen mit sichtbarer Laibung ringsum, nicht ein
+ * massiver Block über die volle Wandtiefe. Deckt sich mit
+ * `geometry/opening.ts::DEFAULT_FRAME_DEPTH` (2D=3D).
+ */
+const DEFAULT_FRAME_DEPTH = 0.07;
 /** Warmer Terrakotta-Grauton für Dachflächen/-giebel (s. {@link emitRoofs}) — hebt das Dach klar von Wand/Decke/Kontext ab. */
 const ROOF_RGB: RRgb = [0.72, 0.45, 0.36];
 /** Fallback-Farbe für 2D-Zeichnungen ohne color/lineStyle/Kategorie (wie drawing2DColor in Viewport3D.tsx, "#888888"). */
@@ -1958,21 +1973,16 @@ function clampRange(v: number, lo: number, hi: number): number {
 }
 
 /**
- * Rahmen-Tiefe quer zur Wand (Meter): `frameThickness` des Typs, sonst dessen
- * `frameDepth`, sonst die volle Wanddicke (Fallback, wenn der Typ keine
- * brauchbare Tiefe nennt). Beide Typ-Felder sind wörtlich Meter ≤ 0 ⇒ ungültig
- * (übersprungen, nächster Fallback greift).
+ * Rahmen-Tiefe quer zur Wand (Meter): explizite `frameDepth` des Typs, sonst
+ * {@link DEFAULT_FRAME_DEPTH} (auf die Wanddicke geklemmt, falls die Wand
+ * dünner als der Default-Rahmen ist).
  */
 function resolveAcrossWallDepth(
   frameDepth: number | undefined,
   wallThickness: number,
 ): number {
-  // Rahmen-Tiefe quer zur Wand: explizite `frameDepth` gewinnt, sonst füllt der
-  // Rahmen die VOLLE Wanddicke (tiefe Laibung/Reveal). Das `frameThickness` ist
-  // die Profil-Breite des Rahmenstabs (2D/Ansicht), NICHT die Einbautiefe — es
-  // hier zu verwenden liess Fenster im 3D flach wirken (nur wenige cm tief).
-  if (frameDepth !== undefined && frameDepth > EPS) return frameDepth;
-  return wallThickness;
+  const depth = frameDepth !== undefined && frameDepth > EPS ? frameDepth : DEFAULT_FRAME_DEPTH;
+  return Math.min(depth, wallThickness);
 }
 
 /**
@@ -2237,12 +2247,12 @@ function frameMeshesForOpening(
     const sfw = fw * 0.7;
     // Verschachteltes Flügelrahmen-Band: ~5 mm HINTER der Blendrahmen-Vorderkante
     // (nMax = Aussenseite) und nur ~50 mm tief — abgesetzte Stufe nach innen,
-    // die Glas-Vorderkante (nMax − 0.03) liegt INNERHALB dieses Bands.
+    // die Glas-Vorderkante (nMax − 0.02, Falzmass) liegt INNERHALB dieses Bands.
     const sashFrontN = params.nMax - 0.005;
     const sashBackN = Math.max(params.nMin, params.nMax - 0.055);
-    // Glas-Vorderkante (s. glassPanesForOpening: n1 = nMax − 0.03); die Symbole
+    // Glas-Vorderkante (s. glassPanesForOpening: n1 = nMax − 0.02); die Symbole
     // liegen als ~2.5 mm dünne dunkle Prismen KNAPP davor (weiter aussen).
-    const glassFrontN = params.nMax - 0.03;
+    const glassFrontN = params.nMax - 0.02;
     const symBackN = glassFrontN;
     const symFrontN = glassFrontN + 0.003;
     const pushSash = (from: number, to: number, zB: number, zT: number): void =>
@@ -2367,7 +2377,7 @@ function resolveSashSpans(
 }
 
 /** Luftraum zwischen zwei Scheiben einer Mehrfachverglasung (Meter, informativ). */
-const GLASS_PANE_GAP = 0.01;
+const GLASS_PANE_GAP = 0.006;
 
 /**
  * Glasscheibe(n) EINER typisierten Öffnung (Fenster immer, Tür nur bei
@@ -2395,14 +2405,14 @@ function glassPanesForOpening(
   const sashTopFull = vert.zTop - fw;
   // Die Scheibe(n) sitzen als DÜNNE Tafeln NAHE der Aussenfläche (nMax = +n-
   // Seite, s. resolveFrameNormalRange) — mittig tief im Reveal wirkte das
-  // schwach/kaum sichtbar. Direkt hinter der Aussenkante (3 cm zurück) liest
-  // sich das Fenster klar, die Laibung/Reveal-Tiefe zeigt nach innen. Bei
-  // mehreren Scheiben rücken die weiteren mit `GLASS_PANE_GAP` Luftraum
-  // dazwischen weiter nach innen (Richtung `nMin`).
+  // schwach/kaum sichtbar. Direkt hinter der Aussenkante (Falzmass ~2 cm, s.
+  // Fensterbau-Recherche) liest sich das Fenster klar, die Laibung/Reveal-
+  // Tiefe zeigt nach innen. Bei mehreren Scheiben rücken die weiteren mit
+  // `GLASS_PANE_GAP` Luftraum dazwischen weiter nach innen (Richtung `nMin`).
   const glassThick = GLASS_HALF_THICK * 2;
   const panes = Math.max(1, Math.min(3, Math.round(params.glazingPanes)));
   const push = (zBottom: number, zTop: number): void => {
-    let n1 = params.nMax - 0.03;
+    let n1 = params.nMax - 0.02;
     for (let p = 0; p < panes; p++) {
       const n0 = Math.max(params.nMin, n1 - glassThick);
       if (n1 - n0 <= EPS) break;
@@ -2459,7 +2469,7 @@ function doorLeafPanels(
   const frac = params.glazed ? Math.max(0.05, Math.min(1, params.glazedFraction)) : 0;
   const leafTop = fieldTop - frac * (fieldTop - leafBottom);
   if (leafTop - leafBottom <= EPS || leafTo - leafFrom <= EPS) return out;
-  const n1 = params.nMax - 0.03 + DOOR_LEAF_THICK / 2;
+  const n1 = params.nMax - 0.02 + DOOR_LEAF_THICK / 2;
   const n0 = Math.max(params.nMin, n1 - DOOR_LEAF_THICK);
   const mesh = openingAxisBox(wall, leafFrom, leafTo, leafBottom, leafTop, n0, n1, DOOR_LEAF_RGB);
   if (mesh) out.push(mesh);
