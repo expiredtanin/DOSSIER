@@ -772,8 +772,20 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
         const gB = fa1 - gU;
         const gz0 = fz + gV;
         const gz1 = fieldTop - gV;
+        // Kämpfer-/Sprossen-Zeilen (mullionRows): das Glasfeld wird in `rows`
+        // horizontale Scheiben geteilt (analog zum 3D, s. toWalls3d), mit einer
+        // Trennlinie je Zeilengrenze über die Glasbreite. 1 = ungeteilt (bisher).
+        const rows = Math.max(1, Math.round(wt?.mullionRows ?? 1));
         if (gB - gA > 1e-6 && gz1 - gz0 > 1e-6) {
-          pr.glass.push(rect(pr.pts, gA, gB, gz0, gz1));
+          for (let r = 0; r < rows; r++) {
+            const rz0 = gz0 + ((gz1 - gz0) * r) / rows + (r > 0 ? gV / 2 : 0);
+            const rz1 = gz0 + ((gz1 - gz0) * (r + 1)) / rows - (r < rows - 1 ? gV / 2 : 0);
+            if (rz1 - rz0 > 1e-6) pr.glass.push(rect(pr.pts, gA, gB, rz0, rz1));
+          }
+          for (let r = 1; r < rows; r++) {
+            const rz = gz0 + ((gz1 - gz0) * r) / rows;
+            pr.divisions.push([quadAt(pr.pts, gA, rz), quadAt(pr.pts, gB, rz)]);
+          }
         }
         // Trennlinie zum nächsten Feld (ausser am Rand).
         if (fa1 < 1 - fa - 1e-6) {
