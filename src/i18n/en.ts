@@ -512,6 +512,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.sectionLine.endX": "End X",
   "objinfo.sectionLine.endY": "End Y",
   "objinfo.sectionLine.depth": "Section depth (m)",
+  "objinfo.sectionLine.hiddenLines": "Hidden lines",
   "objinfo.sectionLine.depthHint": "empty = unlimited",
   "objinfo.sectionLine.delete": "Delete section line",
   "objinfo.extrudedSolid.section": "Extrusion",

@@ -1141,6 +1141,19 @@ export async function computeSection(
     plane.normal[2],
   );
   const output = JSON.parse(json) as SectionOutput;
+  // Kanten GESCHNITTENER Bauteile verwerfen: der Extraktor projiziert auch die
+  // Restkörper der geschnittenen Wände/Decken (Deckel-/Bodenkanten laufen quer
+  // durch die eigene Schnitt-Poché — die „komischen Linien über den
+  // Schnittlinien"). Die Schnittgeometrie trägt die Poché-Kontur selbst; die
+  // Ansichtskanten UNGESCHNITTENER Bauteile (z. B. Fenster der Rückwand)
+  // bleiben erhalten.
+  const cutOwners = new Set(
+    output.cutPolygons.map((cp) => `${cp.component.kind}:${cp.component.index}`),
+  );
+  const notCut = (e: SectionEdge): boolean =>
+    !cutOwners.has(`${e.component.kind}:${e.component.index}`);
+  output.visibleEdges = output.visibleEdges.filter(notCut);
+  output.hiddenEdges = output.hiddenEdges.filter(notCut);
   // Dächer TS-seitig ergänzen (der Rust-Extraktor kennt nur Wände + Decken).
   appendRoofSections(output, project, plane);
   attachCutStyles(output, project, plane);

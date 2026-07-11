@@ -777,6 +777,11 @@ export interface DrawingLevel {
    * Verhalten).
    */
   depth?: number;
+  /**
+   * Verdeckte Kanten im Schnitt zeichnen (gestrichelt). Default AUS — sie
+   * legen sich sonst als blasses Liniengewirr über Poché und Ansichtskanten.
+   */
+  hiddenLines?: boolean;
 }
 
 /**

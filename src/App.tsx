@@ -5212,7 +5212,10 @@ export default function App() {
         activeLayer={activeLayerName}
         lineMode={lineMode}
         onLineModeChange={setLineMode}
-        lineModeEnabled={planActive}
+        // Display/Print wirkt in ALLEN 2D-Darstellungen (Grundriss, Schnitt,
+        // Ansicht, Zeichnung — hairline fliesst überall hin); nur die
+        // 3D-Perspektive kennt keine Papier-Linienstärken.
+        lineModeEnabled={activeLevel.kind !== "floor" || viewType === "grundriss"}
         snap={snap}
         onSnapChange={setSnap}
       />
@@ -6841,8 +6844,11 @@ function SectionPlanView({
   );
 
   const sectionPlan = useMemo(
-    () => (!isElevation && output ? generateSectionPlan(output, mono) : null),
-    [isElevation, output, mono],
+    () =>
+      !isElevation && output
+        ? generateSectionPlan(output, mono, { hiddenLines: level.hiddenLines })
+        : null,
+    [isElevation, output, mono, level.hiddenLines],
   );
   const plan = isElevation ? elevationPlan : sectionPlan;
   const effStatus = isElevation ? (elevationPlan ? "ready" : "empty") : status;

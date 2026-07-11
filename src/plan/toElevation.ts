@@ -34,7 +34,9 @@
 import type { DrawingLevel, Project, Vec2, Wall } from "../model/types";
 import {
   getWallType,
+  getWindowType,
   openingsOfWall,
+  sashesOfWindowType,
   wallTypeThickness,
 } from "../model/types";
 import { wallVerticalExtent } from "../model/wall";
@@ -82,6 +84,12 @@ const GROUND_MM = 0.5;
  *  verschwinden optisch in der Fassade), Dach eine Stufe dunkler. */
 const WALL_FILL = "#ecebe8";
 const ROOF_FILL = "#d9d6d1";
+/** Blendrahmen-Fläche der Öffnungen (heller als die Fassade). */
+const FRAME_FILL = "#f8f7f4";
+/** Türblatt-Fläche (zwischen Fassade und Glas). */
+const DOOR_LEAF_FILL = "#d4d2cd";
+/** Öffnungssymbol (DIN-Andeutung): dezente Annotation, nicht Bauteilkante. */
+const SYMBOL_INK = "#7d858f";
 
 /** Sonnenrichtung als (u, v)-Schattenversatz je Tiefeneinheit: 45° von links
  *  oben ⇒ Schatten fällt nach rechts unten (+u, −v). */
@@ -407,6 +415,14 @@ export function roofWorldFacesAll(project: Project): WorldFace[] {
 interface ProjectedOpening {
   pts: Array<[number, number]>;
   depth: number;
+  /** Glasfelder (je Flügel/Feld) innerhalb des Blendrahmens. */
+  glass: Array<Array<[number, number]>>;
+  /** Teilungslinien (Pfosten/Kämpfer) über den Rahmen. */
+  divisions: Array<[[number, number], [number, number]]>;
+  /** Öffnungssymbol (DIN-Ansicht): gestrichelte Linien zum Bandseiten-Mittel. */
+  symbol: Array<[[number, number], [number, number]]>;
+  /** Tür (Blatt-Fläche statt Glas, ausser Glas-Blatt). */
+  isDoor: boolean;
 }
 
 /**
@@ -454,7 +470,9 @@ function projectOpeningRect(
     }
     const depth = depthSum / world.length;
     if (depth <= EPS) continue;
-    return { pts, depth };
+    // pts-Reihenfolge: [unten-von, unten-bis, oben-bis, oben-von] — Basis für
+    // die (fa, fz)-Interpolation der Flügel-/Glasfelder in collectOpenings.
+    return { pts, depth, glass: [], divisions: [], symbol: [], isDoor: false };
   }
   return null;
 }
@@ -467,6 +485,30 @@ function projectOpeningRect(
  */
 function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpening[] {
   const out: ProjectedOpening[] = [];
+  const lerp = (
+    a: [number, number],
+    b: [number, number],
+    t: number,
+  ): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  // Punkt im Öffnungs-Quad: fa = Anteil entlang der Wandachse, fz = Höhenanteil.
+  const quadAt = (
+    q: Array<[number, number]>,
+    fa: number,
+    fz: number,
+  ): [number, number] => lerp(lerp(q[0], q[1], fa), lerp(q[3], q[2], fa), fz);
+  const rect = (
+    q: Array<[number, number]>,
+    fa0: number,
+    fa1: number,
+    fz0: number,
+    fz1: number,
+  ): Array<[number, number]> => [
+    quadAt(q, fa0, fz0),
+    quadAt(q, fa1, fz0),
+    quadAt(q, fa1, fz1),
+    quadAt(q, fa0, fz1),
+  ];
+
   for (const wall of project.walls) {
     let thickness = 0.2;
     try {
@@ -481,7 +523,83 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
       if (!iv) continue;
       const v = openingVerticalExtent(project, wall, op);
       const pr = projectOpeningRect(frame, wall, iv.from, iv.to, v.zBottom, v.zTop, thickness);
-      if (pr) out.push(pr);
+      if (!pr) continue;
+      const w = iv.to - iv.from;
+      const h = v.zTop - v.zBottom;
+      if (op.kind === "door") {
+        // Türen im Projekt-`openings`-Array: Blatt-Fläche (kein Glasraster).
+        pr.isDoor = true;
+        pr.glass.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
+        out.push(pr);
+        continue;
+      }
+      // Fenster: Blendrahmen → Flügelfelder → Glas (+ Kämpfer/Oberlicht) aus dem
+      // Fenstertyp; ohne Typ ein einzelnes Glasfeld im Default-Rahmen.
+      const wt = getWindowType(project, op);
+      const fw = wt?.frameWidth ?? 0.06;
+      const fa = Math.min(0.45, fw / Math.max(w, 1e-6));
+      const fz = Math.min(0.45, fw / Math.max(h, 1e-6));
+      const transom = Math.max(0, wt?.transomHeight ?? 0);
+      // Oberlicht-Trennung als Höhenanteil (0 = keins).
+      const fTr = transom > EPS && transom < h - fw ? 1 - transom / h : 0;
+      const fieldTop = fTr > 0 ? fTr - fz / 2 : 1 - fz;
+      // Flügel-Spannen über die innere Breite (autoWidth gleichmässig).
+      const sashes = wt ? sashesOfWindowType(wt) : [{ kind: "fluegel" as const }];
+      const innerW = Math.max(1e-6, w * (1 - 2 * fa));
+      let fixedSum = 0;
+      let autoCount = 0;
+      for (const sd of sashes) {
+        if (sd.kind === "pfosten") fixedSum += Math.max(0, sd.postWidth ?? 0.06);
+        else if (sd.autoWidth === false) fixedSum += Math.max(0, sd.width ?? 0);
+        else autoCount++;
+      }
+      const autoW = autoCount > 0 ? Math.max(0.02, (innerW - fixedSum) / autoCount) : 0;
+      let cursor = fa;
+      for (const sd of sashes) {
+        const sw =
+          sd.kind === "pfosten"
+            ? Math.max(0, sd.postWidth ?? 0.06)
+            : sd.autoWidth === false
+              ? Math.max(0, sd.width ?? autoW)
+              : autoW;
+        const fa0 = cursor;
+        const fa1 = cursor + sw / w;
+        cursor = fa1;
+        if (sd.kind === "pfosten") {
+          // Pfosten als Teilungslinie (Mitte).
+          const fm = (fa0 + fa1) / 2;
+          pr.divisions.push([quadAt(pr.pts, fm, fz), quadAt(pr.pts, fm, fieldTop)]);
+          continue;
+        }
+        pr.glass.push(rect(pr.pts, fa0 + fa * 0.3, fa1 - fa * 0.3, fz, fieldTop));
+        // Trennlinie zum nächsten Feld (ausser am Rand).
+        if (fa1 < 1 - fa - 1e-6) {
+          pr.divisions.push([quadAt(pr.pts, fa1, fz), quadAt(pr.pts, fa1, fieldTop)]);
+        }
+        // Öffnungssymbol (DIN-Ansicht, gestrichelt): Spitze am Bandseiten-Mittel.
+        const kind = sd.opening ?? wt?.kind ?? "fest";
+        if (kind === "dreh" || kind === "drehkipp") {
+          const hingeLeft = (sd.hingeSide ?? "left") === "left";
+          const apex = quadAt(pr.pts, hingeLeft ? fa0 : fa1, (fz + fieldTop) / 2);
+          pr.symbol.push(
+            [quadAt(pr.pts, hingeLeft ? fa1 : fa0, fz), apex],
+            [quadAt(pr.pts, hingeLeft ? fa1 : fa0, fieldTop), apex],
+          );
+        }
+        if (kind === "kipp" || kind === "drehkipp") {
+          const apex = quadAt(pr.pts, (fa0 + fa1) / 2, fz);
+          pr.symbol.push(
+            [quadAt(pr.pts, fa0, fieldTop), apex],
+            [quadAt(pr.pts, fa1, fieldTop), apex],
+          );
+        }
+      }
+      // Oberlicht: eigenes Glasfeld + Kämpferlinie.
+      if (fTr > 0) {
+        pr.glass.push(rect(pr.pts, fa, 1 - fa, fTr + fz / 2, 1 - fz));
+        pr.divisions.push([quadAt(pr.pts, 0, fTr), quadAt(pr.pts, 1, fTr)]);
+      }
+      out.push(pr);
     }
     for (const d of project.doors ?? []) {
       if (d.hostWallId !== wall.id) continue;
@@ -489,7 +607,11 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
       const to = Math.max(from, Math.min(d.position + d.width, axisLen));
       const oTop = Math.min(zTop, zBottom + d.height);
       const pr = projectOpeningRect(frame, wall, from, to, zBottom, oTop, thickness);
-      if (pr) out.push(pr);
+      if (pr) {
+        pr.isDoor = true;
+        pr.glass.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
+        out.push(pr);
+      }
     }
   }
   return out;
@@ -732,22 +854,70 @@ export function generateElevationPlan(
 
   // Fenster/Türen: Rahmen+Glas, knapp VOR der Wirtsfläche (auf der Fassade).
   for (const op of collectOpenings(project, frame)) {
-    const pts: Vec2[] = op.pts.map(([u, v]) => {
-      acc(u, v);
-      return { x: u, y: v };
-    });
+    const toVec = (q: Array<[number, number]>): Vec2[] =>
+      q.map(([u, v]) => {
+        acc(u, v);
+        return { x: u, y: v };
+      });
+    const d = op.depth - EPS * 100;
+    // Blendrahmen: helle Rahmenfläche mit kräftiger Kontur — Glas/Blatt/
+    // Teilungen liegen darüber (gleiche Tiefe, seq-Reihenfolge).
     items.push({
-      depth: op.depth - EPS * 100,
+      depth: d,
       seq: seq++,
       prim: {
         kind: "polygon",
-        pts,
-        fill: mono ? GLASS_FILL_MONO : GLASS_FILL,
+        pts: toVec(op.pts),
+        fill: mono ? "#ffffff" : FRAME_FILL,
         stroke: EDGE_INK,
         strokeWidthMm: FRAME_MM,
         hatch: NO_HATCH,
       },
     });
+    for (const g of op.glass) {
+      items.push({
+        depth: d,
+        seq: seq++,
+        prim: {
+          kind: "polygon",
+          pts: toVec(g),
+          fill: mono ? GLASS_FILL_MONO : op.isDoor ? DOOR_LEAF_FILL : GLASS_FILL,
+          stroke: EDGE_INK,
+          strokeWidthMm: EDGE_MM,
+          hatch: NO_HATCH,
+        },
+      });
+    }
+    for (const [a, bLn] of op.divisions) {
+      items.push({
+        depth: d,
+        seq: seq++,
+        prim: {
+          kind: "line",
+          a: { x: a[0], y: a[1] },
+          b: { x: bLn[0], y: bLn[1] },
+          cls: "elevation-division",
+          weightMm: EDGE_MM,
+          color: EDGE_INK,
+        },
+      });
+    }
+    // Öffnungssymbol (DIN): dünn gestrichelt über dem Glas.
+    for (const [a, bLn] of op.symbol) {
+      items.push({
+        depth: d,
+        seq: seq++,
+        prim: {
+          kind: "line",
+          a: { x: a[0], y: a[1] },
+          b: { x: bLn[0], y: bLn[1] },
+          cls: "elevation-opening-symbol",
+          weightMm: 0.1,
+          dash: [2.2, 1.8],
+          color: SYMBOL_INK,
+        },
+      });
+    }
   }
 
   // Painter: fern (grosse Tiefe) zuerst, nah zuletzt. Stabiler Tiebreak über seq.

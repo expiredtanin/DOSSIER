@@ -959,7 +959,11 @@ const SECTION_HATCH: HatchRender = {
  * zur Plan-Y — die PlanView zeigt Y nach oben, also erscheint der Schnitt
  * aufrecht. Rein darstellend; kennt das Projekt nicht.
  */
-export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
+export function generateSectionPlan(
+  output: SectionOutput,
+  mono = false,
+  opts: { hiddenLines?: boolean } = {},
+): Plan {
   const primitives: Primitive[] = [];
   let minX = Infinity,
     minY = Infinity,
@@ -1014,8 +1018,10 @@ export function generateSectionPlan(output: SectionOutput, mono = false): Plan {
     });
   }
 
-  // Verdeckte Kanten zuerst (liegen unter den sichtbaren), gestrichelt.
-  for (const e of output.hiddenEdges) {
+  // Verdeckte Kanten zuerst (liegen unter den sichtbaren), gestrichelt —
+  // Standard AUS (VW-üblich): sie legen sich sonst als blasses Liniengewirr
+  // über Poché und Ansichtskanten. Zuschaltbar je Schnitt-/Ansichts-Ebene.
+  for (const e of opts.hiddenLines ? output.hiddenEdges : []) {
     acc(e.a[0], e.a[1]);
     acc(e.b[0], e.b[1]);
     primitives.push({

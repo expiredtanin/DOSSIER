@@ -420,6 +420,17 @@ export function SectionLineSection({
         />
       </div>
 
+      {/* Verdeckte Kanten (gestrichelt) — Default aus (blasses Liniengewirr). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.sectionLine.hiddenLines")}</span>
+        <input
+          type="checkbox"
+          checked={level.hiddenLines ?? false}
+          onChange={(e) => host.onSetSectionLinePatch({ hiddenLines: e.target.checked })}
+          title={t("objinfo.sectionLine.hiddenLines")}
+        />
+      </div>
+
       {/* Löschen: linePoints zurücksetzen (die Ebene bleibt bestehen). */}
       <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>
         {t("objinfo.sectionLine.delete")}
