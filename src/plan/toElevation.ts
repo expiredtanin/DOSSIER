@@ -82,6 +82,10 @@ const FRAME_MM = 0.18;
 const GLASS_FILL_MONO = "#c4c8cd";
 const GLASS_FILL_COLOR = "#9fc2d9";
 const SHADOW_FILL = "#8f959e";
+/** Laibungs-/Reveal-Schatten der Öffnungen (Fenster/Türen) — etwas heller als
+ *  der Bauteil-Schlagschatten {@link SHADOW_FILL}, damit die Vertiefung dezent
+ *  liest und Sprossen/Symbole darüber noch erkennbar bleiben. */
+const OPENING_SHADOW_FILL = "#a7adb5";
 /** Bodenlinie (Terrain-/Nulllinie): kräftige Tinte über die volle Breite. */
 const GROUND_INK = "#1f242c";
 /** Strichstärke der Bodenlinie (mm Papier). */
@@ -277,31 +281,42 @@ export function wallWorldFaces(w: RWall): WorldFace[] {
   return faces;
 }
 
-/** Rundet einen Wandachsen-Endpunkt auf ein Gitter, um Knoten robust zu gruppieren (wie `model/joins.ts::roundKey`). */
-function cornerKey(p: Vec2): string {
-  const r = (v: number) => Math.round(v * 1e3) / 1e3;
-  return `${r(p.x)},${r(p.y)}`;
+/**
+ * Enthält der Wandkörper von `w` (Achse ± `half`) den Punkt `p`? Perpendikular-
+ * abstand ≤ half UND Projektion innerhalb der Achsenlänge (mit half-Toleranz an
+ * den Enden). Basis der T-/L-/X-Stoss-Erkennung für die Eckverlängerung.
+ */
+function wallBodyContains(w: Wall, half: number, p: Vec2): boolean {
+  const dx = w.end.x - w.start.x;
+  const dy = w.end.y - w.start.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return false;
+  const ux = dx / len;
+  const uy = dy / len;
+  const rx = p.x - w.start.x;
+  const ry = p.y - w.start.y;
+  const along = rx * ux + ry * uy;
+  const perp = Math.abs(-uy * rx + ux * ry);
+  return along >= -1e-6 && along <= len + 1e-6 && perp <= half + 1e-6;
 }
 
 /**
  * Achsen-Verlängerung je Wandende (Meter, ≥0) für die ANSICHT: axis-zu-axis
- * gebaute Wandboxen (s. {@link wallWorldFaces}) decken einen Aussen-/Innen-
- * Eckknoten nicht voll ab — an jeder Ecke bleibt ein dreieckiger Spalt der
- * Grösse der halben Dicke der anschliessenden Wand (sichtbar als Kerbe in der
- * Silhouette bzw. als Lücke im Schlagschatten). Wo eine ANDERE Wand DERSELBEN
- * Ebene mit ihrem Start-/Endpunkt an diesem Knoten anschliesst, wird um deren
- * halbe Dicke verlängert — die Boxen überlappen dann vollständig im Eckbereich.
+ * gebaute Wandboxen (s. {@link wallWorldFaces}) decken einen Eckknoten nicht
+ * voll ab — an jeder Ecke bleibt ein dreieckiger Spalt der Grösse der halben
+ * Dicke der anschliessenden Wand (sichtbar als Kerbe in der Silhouette bzw. als
+ * Lücke im Schlagschatten). Jedes Wandende wird darum bis zur AUSSENFLÄCHE der
+ * dicksten anstossenden anderen Wand verlängert — die Boxen überlappen dann im
+ * Eckbereich vollständig.
  *
- * Bewusst eine EIGENE, einfache Näherung (nur „teilt sich einen Endpunkt")
- * statt der vollen Gehrungs-Logik aus `model/joins.ts` (die bedient den 2D-
- * Grundriss/3D-Viewer-Pfad mit L-/T-/X-Knoten-Klassifikation und bleibt dafür
- * unangetastet, s. Moduldoc oben): die Ansicht ist ein Painter-Silhouetten-
- * Verfahren, dem eine leichte Überlappung an Ecken nichts ausmacht — anders als
- * der 2D-Grundriss (Schicht-Poché) oder der Schnitt (Boolean-Dominanz), die
- * eine exakte, überlappungsfreie Gehrung brauchen. T-Stösse (Zwischenwand
- * trifft auf die SEITE einer durchlaufenden Wand statt deren Endpunkt) fängt
- * diese einfache Näherung nicht ab — dort deckt die durchlaufende Wand die
- * Fuge in der Ansicht i. d. R. ohnehin ab.
+ * Erfasst L-Ecken (Endpunkt teilt sich mit anderem Endpunkt), T-Stösse (Ende
+ * trifft die SEITE/Achse einer durchlaufenden Wand) UND versetzte Stösse — über
+ * {@link wallBodyContains} statt exakter Endpunkt-Gleichheit. Bewusst eine
+ * EIGENE, tolerante Näherung statt der Gehrungs-Logik aus `model/joins.ts` (die
+ * bedient 2D-Grundriss/3D-Viewer und bleibt unangetastet): die Ansicht ist ein
+ * Painter-Silhouetten-Verfahren, dem eine leichte Eck-Überlappung nichts
+ * ausmacht — anders als Grundriss-Poché/Schnitt-Dominanz, die exakte Gehrung
+ * brauchen.
  */
 function wallCornerExtensions(project: Project, walls: Wall[]): Map<string, { start: number; end: number }> {
   const thicknessOf = (w: Wall): number => {
@@ -311,20 +326,15 @@ function wallCornerExtensions(project: Project, walls: Wall[]): Map<string, { st
       return 0.2;
     }
   };
-  const nodeMembers = new Map<string, Array<{ id: string; half: number }>>();
-  for (const w of walls) {
-    const half = thicknessOf(w) / 2;
-    for (const p of [w.start, w.end]) {
-      const k = cornerKey(p);
-      const arr = nodeMembers.get(k);
-      if (arr) arr.push({ id: w.id, half });
-      else nodeMembers.set(k, [{ id: w.id, half }]);
-    }
-  }
+  const halves = new Map<string, number>();
+  for (const w of walls) halves.set(w.id, thicknessOf(w) / 2);
   const extAt = (w: Wall, p: Vec2): number => {
-    const members = nodeMembers.get(cornerKey(p)) ?? [];
     let maxOther = 0;
-    for (const m of members) if (m.id !== w.id) maxOther = Math.max(maxOther, m.half);
+    for (const other of walls) {
+      if (other.id === w.id) continue;
+      const ho = halves.get(other.id) ?? 0.1;
+      if (wallBodyContains(other, ho, p)) maxOther = Math.max(maxOther, ho);
+    }
     return maxOther;
   };
   const out = new Map<string, { start: number; end: number }>();
@@ -340,8 +350,15 @@ function wallCornerExtensions(project: Project, walls: Wall[]): Map<string, { st
  * damit sich nur Wände desselben Grundrisses zu Ecken verbinden. Mutiert die
  * `start`/`end`-Koordinaten der jeweils äussersten Teilstücke (Pfeiler vor der
  * ersten bzw. nach der letzten Öffnung) in-place.
+ *
+ * WICHTIG — nur Wände verlängern, die etwa PARALLEL zur Ansichtsebene laufen
+ * (Fassaden-Silhouette): eine facaden-SENKRECHTE Wand (Innenwand quer zur
+ * Blickrichtung) würde sonst entlang ihrer Achse in die Tiefe — u. U. VOR die
+ * Fassade auf den Betrachter zu — geschoben und erschiene als störender
+ * Balken. `uModel` ist die Ansichts-u-Achse in Grundriss-Koordinaten (Modell
+ * x,y = Welt x,z), gegen die die Wandachse projiziert wird.
  */
-function extendWallCornersForElevation(project: Project, rwalls: RWall[]): void {
+function extendWallCornersForElevation(project: Project, rwalls: RWall[], uModel: Vec2): void {
   const byFloor = new Map<string, Wall[]>();
   for (const w of project.walls) {
     const key = w.floorId ?? "";
@@ -369,6 +386,9 @@ function extendWallCornersForElevation(project: Project, rwalls: RWall[]): void 
       if (len < 1e-9) continue;
       const ux = dx / len;
       const uz = dz / len;
+      // Parallelität zur Ansichtsebene: |Achse · u| ≈ 1 (parallel) … 0 (senkrecht).
+      // Facaden-senkrechte Wände NICHT verlängern (sonst Tiefen-Protrusion).
+      if (Math.abs(ux * uModel.x + uz * uModel.y) < 0.35) continue;
       if (e.start > EPS) {
         const first = pieces.find((p) => closeTo(p.start, w.start));
         if (first) first.start = [first.start[0] - ux * e.start, first.start[1] - uz * e.start];
@@ -838,31 +858,102 @@ function bboxOf(pts: Array<[number, number]>): UVRect {
 }
 
 /**
- * Deckt eine NÄHERE, achsparallele Wand-Bounding-Box `bbox`/`depth` VOLLSTÄNDIG
- * ab? Grobe NÄHERUNG (Bounding-Box statt exaktes Polygon, wie
- * {@link buildShadows}) — genügt, um zu verhindern, dass Öffnungssymbole/
- * Fugenlinien einer HINTEREN Fassade (z. B. Nordwand) durch eine NÄHERE Wand
- * (Südwand) "durchscheinen": die GL-Ansicht zeichnet ALLE Linien (inkl. der
- * Umriss-Konturen von Polygonen) in einem EIGENEN Stift-Durchgang ÜBER allen
- * Füllungen (s. `glPlan/glPlanCompile.ts`) — eine reine Tiefensortierung der
- * Flächen (Painter) reicht dafür NICHT, die Linien bräuchten sonst eine echte
- * Tiefenprüfung im Renderer. Statt dessen werden verdeckte Elemente hier, beim
- * Aufbau des Ansichts-Plans, gar nicht erst emittiert.
+ * Ein opakes Verdeckungs-Polygon (projizierte Fläche) mit seiner FERNSTEN Tiefe
+ * (`depthMax`): eine Linie/Fläche gilt nur dann als verdeckt, wenn sie hinter
+ * dem gesamten Occluder liegt (`> depthMax`) — konservativ, damit gekippte
+ * Flächen (Dach) keine sichtbaren Kanten fälschlich wegschneiden.
  */
-function isOccluded(bbox: UVRect, depth: number, blockers: Array<{ bbox: UVRect; depth: number }>): boolean {
-  const MARGIN = 1e-3;
-  for (const b of blockers) {
-    if (b.depth >= depth - EPS) continue; // nicht echt näher
-    if (
-      b.bbox.uMin - MARGIN <= bbox.uMin &&
-      b.bbox.uMax + MARGIN >= bbox.uMax &&
-      b.bbox.vMin - MARGIN <= bbox.vMin &&
-      b.bbox.vMax + MARGIN >= bbox.vMax
-    ) {
-      return true;
+interface Occluder {
+  poly: Array<[number, number]>;
+  bbox: UVRect;
+  depth: number;
+}
+
+/** Warum überhaupt clippen: die GL-Ansicht zeichnet ALLE Linien in einem
+ *  EIGENEN Stift-Durchgang ÜBER allen Füllungen (s. `glPlan/glPlanCompile.ts`);
+ *  eine reine Painter-Tiefensortierung der Flächen verdeckt Linien also NICHT.
+ *  Verdeckte Linienstücke werden darum hier, beim Planaufbau, exakt entfernt. */
+const OCC_MARGIN = 2e-3;
+
+/**
+ * Teilintervall `[t0,t1] ⊆ [0,1]` des Segments A→B, das INNERHALB des konvexen
+ * Polygons liegt (Halbebenen-Schnitt auf dem Parameter t), oder `null`. Die
+ * Polygon-Windung wird aus der Signfläche bestimmt, sodass die Innen-Seite jeder
+ * Kante korrekt orientiert ist (kein Vorwissen über CW/CCW nötig).
+ */
+function segmentInsidePolyInterval(
+  a: [number, number],
+  b: [number, number],
+  poly: Array<[number, number]>,
+): [number, number] | null {
+  const n = poly.length;
+  if (n < 3) return null;
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % n];
+    area += p[0] * q[1] - q[0] * p[1];
+  }
+  const sign = area >= 0 ? 1 : -1;
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  let t0 = 0;
+  let t1 = 1;
+  for (let i = 0; i < n; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % n];
+    const ex = q[0] - p[0];
+    const ey = q[1] - p[1];
+    // Innen: sign·cross(edge, X−p) ≥ 0. f(t) = c0 + cd·t.
+    const c0 = sign * (ex * (a[1] - p[1]) - ey * (a[0] - p[0]));
+    const cd = sign * (ex * dy - ey * dx);
+    if (Math.abs(cd) < 1e-12) {
+      if (c0 < 0) return null; // Segment komplett ausserhalb dieser Kante
+    } else {
+      const tHit = -c0 / cd;
+      if (cd > 0) t0 = Math.max(t0, tHit);
+      else t1 = Math.min(t1, tHit);
+      if (t0 > t1) return null;
     }
   }
-  return false;
+  return t0 <= t1 ? [t0, t1] : null;
+}
+
+/**
+ * Sichtbare Teilstücke eines Segments A→B (Tiefe `depth`): entfernt alle Anteile,
+ * die innerhalb eines NÄHEREN opaken Occluders (`o.depth < depth − margin`)
+ * liegen. Liefert die verbleibenden Segmente (leer, wenn ganz verdeckt). Exakt
+ * (Polygon-Halbebenen), nicht die frühere Bounding-Box-Näherung.
+ */
+function clipSegmentVisible(
+  a: [number, number],
+  b: [number, number],
+  depth: number,
+  occluders: Occluder[],
+): Array<[[number, number], [number, number]]> {
+  const cuts: Array<[number, number]> = [];
+  const segMin: [number, number] = [Math.min(a[0], b[0]), Math.min(a[1], b[1])];
+  const segMax: [number, number] = [Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+  for (const o of occluders) {
+    if (o.depth >= depth - OCC_MARGIN) continue; // nicht echt näher
+    // Billiger Bounding-Box-Vorabtest.
+    if (o.bbox.uMax < segMin[0] || o.bbox.uMin > segMax[0]) continue;
+    if (o.bbox.vMax < segMin[1] || o.bbox.vMin > segMax[1]) continue;
+    const iv = segmentInsidePolyInterval(a, b, o.poly);
+    if (iv && iv[1] - iv[0] > 1e-6) cuts.push(iv);
+  }
+  if (cuts.length === 0) return [[a, b]];
+  cuts.sort((x, y) => x[0] - y[0]);
+  const at = (t: number): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  const out: Array<[[number, number], [number, number]]> = [];
+  let cursor = 0;
+  for (const [s, e] of cuts) {
+    if (s > cursor + 1e-6) out.push([at(cursor), at(Math.min(s, 1))]);
+    cursor = Math.max(cursor, e);
+    if (cursor >= 1) break;
+  }
+  if (cursor < 1 - 1e-6) out.push([at(cursor), at(1)]);
+  return out;
 }
 
 /**
@@ -1050,7 +1141,8 @@ export function generateElevationPlan(
 
   // Eine Voll-Box je Wand (Öffnungen als Segment-Aussparungen) + Decken-Prismen.
   const model = projectToModel3d(project, { layeredWalls: false });
-  extendWallCornersForElevation(project, model.walls);
+  // Ansichts-u-Achse in Grundriss-Koordinaten (Welt x,z = Modell x,y).
+  extendWallCornersForElevation(project, model.walls, { x: frame.U[0], y: frame.U[2] });
   const faces = collectElevationFaces(model, frame);
   // Dächer analytisch (roofGeometry) — nicht Teil von RModel3d walls/slabs.
   for (const rf of roofWorldFacesAll(project)) {
@@ -1060,13 +1152,43 @@ export function generateElevationPlan(
   const wallFaces = faces.filter((f) => f.role === "wall");
   const slabFaces = faces.filter((f) => f.role === "slab");
   const roofFaces = faces.filter((f) => f.role === "roof");
-  // Blocker für die Durchsicht-Prüfung (s. {@link isOccluded}): NÄHERE, frontal
-  // zum Betrachter stehende Wandflächen (ganze Fassaden-Ebenen) — der Regelfall
-  // einer verdeckenden Vorderfassade. Schräge/Stirnflächen sind selten volle
-  // Blocker und bleiben aussen vor (Näherung).
-  const wallBlockers = wallFaces
-    .filter((f) => f.depthMax - f.depthMin < 1e-4)
-    .map((f) => ({ bbox: bboxOf(f.pts), depth: f.depthMin }));
+  // Öffnungen (Fenster/Türen) einmal sammeln — als Fläche gebraucht (Occluder,
+  // s. u.) UND weiter unten für die Rahmen-/Glas-/Symbol-Emission.
+  const openings = collectOpenings(project, frame);
+  // Occluder für die exakte Durchsicht-Entfernung (s. {@link clipSegmentVisible}):
+  // ALLE opaken Flächen (Wände, Decken, Dächer) als Verdeckungs-Polygone mit
+  // ihrer FERNSTEN Tiefe (`depthMax`, konservativ), PLUS die Öffnungs-Rahmen-
+  // quads (die Fassaden-Boxen sind um die Öffnungen ausgespart — ohne diese
+  // Occluder schiene eine hintere Wandlinie durch das Fensterloch der vorderen
+  // Fassade). Linien HINTER einem Occluder werden exakt herausgeschnitten —
+  // nötig, weil die GL-Pipeline alle Linien in einem eigenen Durchgang über die
+  // Füllungen legt.
+  const occluders: Occluder[] = faces.map((f) => ({
+    poly: f.pts,
+    bbox: bboxOf(f.pts),
+    depth: f.depthMax,
+  }));
+  for (const op of openings) {
+    occluders.push({ poly: op.pts, bbox: bboxOf(op.pts), depth: op.depth });
+  }
+  // Ist ein Punkt hinter einer näheren opaken Fläche verborgen? (Ganz-Öffnung-Cull.)
+  const pointInPoly = (pt: [number, number], poly: Array<[number, number]>): boolean => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i];
+      const [xj, yj] = poly[j];
+      if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  const isPointOccluded = (pt: [number, number], depth: number): boolean => {
+    for (const o of occluders) {
+      if (o.depth >= depth - OCC_MARGIN) continue;
+      if (pt[0] < o.bbox.uMin || pt[0] > o.bbox.uMax || pt[1] < o.bbox.vMin || pt[1] > o.bbox.vMax) continue;
+      if (pointInPoly(pt, o.poly)) return true;
+    }
+    return false;
+  };
 
   const primitives: Primitive[] = [];
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1100,11 +1222,27 @@ export function generateElevationPlan(
   const items: Item[] = [];
   let seq = 0;
 
+  // Emittiert ein Linien-Segment, exakt gegen nähere Occluder geclippt (verdeckte
+  // Teilstücke entfallen). `depth` = Tiefe der Linie (leicht vor ihrer Trägerfläche).
+  const pushClippedLine = (
+    a: [number, number],
+    b: [number, number],
+    depth: number,
+    prim: (a: [number, number], b: [number, number]) => Primitive,
+  ): void => {
+    for (const [sa, sb] of clipSegmentVisible(a, b, depth, occluders)) {
+      acc(sa[0], sa[1]);
+      acc(sb[0], sb[1]);
+      items.push({ depth, seq: seq++, prim: prim(sa, sb) });
+    }
+  };
+
   // Frontale Wand-/Deckenflächen (alle Ecken auf gleicher Tiefe) werden je
-  // Tiefen-Gruppe gesammelt: die Flächen selbst weiss OHNE Kontur, dann der
-  // XOR-Vereinigungs-Umriss der Gruppe als Linienzug — Innenkanten der
-  // Teilboxen (Pfeiler/Sturz/Geschossfugen) heben sich auf, übrig bleibt die
-  // Silhouette samt Öffnungslöchern (VW-Linienzeichnungs-Look).
+  // Tiefen-Gruppe gesammelt: die Flächen selbst OHNE Kontur, dann der
+  // XOR-Vereinigungs-Umriss der Gruppe als (geclippter) Linienzug — Innenkanten
+  // der Teilboxen (Pfeiler/Sturz/Geschossfugen) heben sich auf, übrig bleibt die
+  // Silhouette samt Öffnungslöchern (VW-Linienzeichnungs-Look). Dach/schräge
+  // Flächen tragen ihre eigene, ebenfalls geclippte Kanten-Kontur (unten).
   const frontalGroups = new Map<number, { faces: ProjectedFace[]; depth: number }>();
   for (const f of faces) {
     const pts: Vec2[] = f.pts.map(([u, v]) => {
@@ -1117,11 +1255,22 @@ export function generateElevationPlan(
       const gk = Math.round(f.depth * 1e4);
       if (!frontalGroups.has(gk)) frontalGroups.set(gk, { faces: [], depth: f.depth });
       frontalGroups.get(gk)!.faces.push(f);
+    } else {
+      // Dach/schräg angeschnittene Fläche: jede Polygonkante als geclippte Linie
+      // (verdeckte Teile hinter näheren Fassaden entfallen exakt).
+      for (let i = 0; i < f.pts.length; i++) {
+        const a = f.pts[i];
+        const b = f.pts[(i + 1) % f.pts.length];
+        pushClippedLine(a, b, f.depthMin - EPS * 5, (sa, sb) => ({
+          kind: "line",
+          a: { x: sa[0], y: sa[1] },
+          b: { x: sb[0], y: sb[1] },
+          cls: "elevation-outline",
+          weightMm: EDGE_MM,
+          color: EDGE_INK,
+        }));
+      }
     }
-    // Eigene Kontur (Dach/schräg angeschnittene Flächen) nur zeichnen, wenn sie
-    // nicht ohnehin hinter einer näheren Fassade verschwindet (s. {@link isOccluded}
-    // — die Linien-Pipeline verdeckt Umrisslinien sonst NICHT automatisch).
-    const ownStroke = (isRoof || !frontal) && !isOccluded(bboxOf(f.pts), f.depthMin, wallBlockers);
     items.push({
       depth: f.depth,
       seq: seq++,
@@ -1133,10 +1282,10 @@ export function generateElevationPlan(
         kind: "polygon",
         pts,
         fill: fillFor(f.role, f.fill),
-        // Dach + schräg angeschnittene Flächen tragen ihre eigene Kontur;
-        // frontale Flächen bekommen den Gruppen-Umriss (unten).
-        stroke: ownStroke ? EDGE_INK : "none",
-        strokeWidthMm: ownStroke ? EDGE_MM : 0,
+        // Kontur trägt die geclippte Kanten-/Gruppen-Linie (oben/unten) —
+        // die Fläche selbst füllt nur (nähere Füllung überdeckt fernere).
+        stroke: "none",
+        strokeWidthMm: 0,
         hatch: NO_HATCH,
         ...(f.wallId ? { wallId: f.wallId } : {}),
         ...(f.ceilingId ? { ceilingId: f.ceilingId } : {}),
@@ -1145,21 +1294,19 @@ export function generateElevationPlan(
     });
   }
   for (const g of frontalGroups.values()) {
-    const groupBbox = bboxOf(g.faces.flatMap((f) => f.pts));
-    if (isOccluded(groupBbox, g.depth, wallBlockers)) continue;
+    // Der XOR-Silhouetten-Umriss der Gruppe, JEDE Kante exakt gegen nähere
+    // opake Flächen geclippt: verdeckte Teile einer hinteren Fassade/Decke
+    // entfallen, die vorderste Silhouette bleibt vollständig (Ecken via
+    // Wandverlängerung geschlossen). Ersetzt die frühere Bbox-Occlusion.
     for (const [a, b] of xorOutlineEdges(g.faces.map((f) => f.pts))) {
-      items.push({
-        depth: g.depth - EPS * 5,
-        seq: seq++,
-        prim: {
-          kind: "line",
-          a: { x: a[0], y: a[1] },
-          b: { x: b[0], y: b[1] },
-          cls: "elevation-outline",
-          weightMm: EDGE_MM,
-          color: EDGE_INK,
-        },
-      });
+      pushClippedLine(a, b, g.depth - EPS * 5, (sa, sb) => ({
+        kind: "line",
+        a: { x: sa[0], y: sa[1] },
+        b: { x: sb[0], y: sb[1] },
+        cls: "elevation-outline",
+        weightMm: EDGE_MM,
+        color: EDGE_INK,
+      }));
     }
   }
 
@@ -1188,11 +1335,15 @@ export function generateElevationPlan(
   }
 
   // Fenster/Türen: Rahmen+Glas, knapp VOR der Wirtsfläche (auf der Fassade).
-  // Ganz verdeckte Öffnungen (hinter einer näheren Fassade, s. {@link isOccluded})
+  // Ganz verdeckte Öffnungen (Mittelpunkt hinter einer näheren opaken Fläche)
   // werden gar nicht erst emittiert — sonst scheinen ihre Symbol-/Sprossen-Linien
-  // (eigener Linien-Durchgang, s. Blocker-Kommentar oben) durch die Vorderwand.
-  for (const op of collectOpenings(project, frame)) {
-    if (isOccluded(bboxOf(op.pts), op.depth, wallBlockers)) continue;
+  // (eigener Linien-Durchgang, s. Occluder-Kommentar oben) durch die Vorderwand.
+  for (const op of openings) {
+    const opCenter: [number, number] = [
+      (op.pts[0][0] + op.pts[1][0] + op.pts[2][0] + op.pts[3][0]) / 4,
+      (op.pts[0][1] + op.pts[1][1] + op.pts[2][1] + op.pts[3][1]) / 4,
+    ];
+    if (isPointOccluded(opCenter, op.depth)) continue;
     const toVec = (q: Array<[number, number]>): Vec2[] =>
       q.map(([u, v]) => {
         acc(u, v);
@@ -1256,6 +1407,40 @@ export function generateElevationPlan(
           hatch: NO_HATCH,
         },
       });
+    }
+    // Reveal-/Laibungsschatten (nur mit Schatten-Toggle): das zurückliegende
+    // Fenster wirft — Sonne 45° von links oben — einen Schatten in die Laibung.
+    // Klassische Architektur-Konvention: ein Band UNTER dem Sturz (Kopf, volle
+    // Breite) und eines RECHTS der linken Laibung. Über dem Glas (nach den
+    // Glasflächen, vor den Symbolen), damit die Öffnung als Vertiefung liest.
+    // Bilinear im Öffnungs-Quad (pts [unten-links, unten-rechts, oben-rechts,
+    // oben-links]).
+    if (shadows) {
+      const q = op.pts;
+      const lerpP = (a: [number, number], b: [number, number], t: number): [number, number] => [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+      ];
+      const quadAt = (fa: number, fz: number): [number, number] =>
+        lerpP(lerpP(q[0], q[1], fa), lerpP(q[3], q[2], fa), fz);
+      const wU = Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]);
+      const hV = Math.hypot(q[3][0] - q[0][0], q[3][1] - q[0][1]);
+      const fU = Math.min(0.3, 0.08 / Math.max(wU, 1e-6));
+      const fV = Math.min(0.3, 0.08 / Math.max(hV, 1e-6));
+      const shadowRect = (fa0: number, fa1: number, fz0: number, fz1: number): Vec2[] =>
+        [quadAt(fa0, fz0), quadAt(fa1, fz0), quadAt(fa1, fz1), quadAt(fa0, fz1)].map(([u, v]) => {
+          acc(u, v);
+          return { x: u, y: v };
+        });
+      const pushShadow = (pts: Vec2[]): void => {
+        items.push({
+          depth: d,
+          seq: seq++,
+          prim: { kind: "polygon", pts, fill: OPENING_SHADOW_FILL, stroke: "none", strokeWidthMm: 0, hatch: NO_HATCH },
+        });
+      };
+      pushShadow(shadowRect(0, 1, 1 - fV, 1)); // Kopf/Sturz-Schatten (oben, volle Breite)
+      pushShadow(shadowRect(0, fU, 0, 1 - fV)); // linke Laibung (Rest der Höhe)
     }
     for (const [a, bLn] of op.divisions) {
       items.push({

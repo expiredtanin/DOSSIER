@@ -257,6 +257,117 @@ function elevationProject(opts: { overhang: boolean }): Project {
   return project;
 }
 
+describe("toElevation — Hidden-Line-Clipping (keine Durchsicht)", () => {
+  // Zwei deckungsgleiche Wände (NEAR vor FAR): die hintere Silhouette liegt
+  // vollständig hinter der vorderen und darf KEINE Umrisslinie beisteuern —
+  // sonst „scheint" die Hinterwand durch (Nutzer-Report). Erwartet: genau die
+  // 4 Kanten der vorderen Wand.
+  it("deckungsgleiche Hinterwand trägt keine Umrisslinie bei", () => {
+    const project = elevationProject({ overhang: false });
+    const plan = generateElevationPlan(project, project.drawingLevels[1])!;
+    const outlineLines = plan.primitives.filter(
+      (p) => p.kind === "line" && (p as { cls?: string }).cls === "elevation-outline",
+    );
+    // Nur die 4 Kanten der NEAR-Fassade (FAR ist vollständig geclippt).
+    expect(outlineLines.length).toBe(4);
+  });
+
+  it("höhere Hinterwand: nur der ÜBERSTEHENDE Teil bleibt sichtbar", () => {
+    const base = elevationProject({ overhang: false });
+    // FAR-Wand höher machen (4 statt 3 m) → ihr oberer Rand ragt über NEAR.
+    const project: Project = {
+      ...base,
+      walls: base.walls.map((w) => (w.id === "FAR" ? { ...w, height: 4 } : w)),
+    };
+    const plan = generateElevationPlan(project, project.drawingLevels[1])!;
+    const outline = plan.primitives.filter(
+      (p) => p.kind === "line" && (p as { cls?: string }).cls === "elevation-outline",
+    ) as Array<{ a: { x: number; y: number }; b: { x: number; y: number } }>;
+    // Eine horizontale Kante bei v≈4 (FAR-Oberkante, sichtbar über NEAR) …
+    const hasFarTop = outline.some(
+      (l) => Math.abs(l.a.y - 4) < 1e-4 && Math.abs(l.b.y - 4) < 1e-4,
+    );
+    expect(hasFarTop).toBe(true);
+    // … aber KEINE horizontale Kante bei v≈0 aus FAR im von NEAR verdeckten
+    // Bereich: die einzige v≈0-Kante ist NEARs Unterkante (die FAR-Unterkante
+    // liegt hinter NEAR und ist geclippt). Es gibt also nur EINE v≈0-Linie.
+    const bottomLines = outline.filter(
+      (l) => Math.abs(l.a.y) < 1e-4 && Math.abs(l.b.y) < 1e-4,
+    );
+    expect(bottomLines.length).toBe(1);
+  });
+});
+
+describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
+  // Projekt mit einem Fenster auf NEAR und einem deckungsgleich dahinter auf FAR.
+  function openingProject(): Project {
+    const base = elevationProject({ overhang: false });
+    const wt = {
+      id: "wt",
+      name: "Fenster",
+      kind: "drehkipp" as const,
+      wingCount: 1,
+      glazing: "zweifach" as const,
+      frameWidth: 0.06,
+      defaultSillHeight: 0.9,
+      defaultWidth: 1,
+      defaultHeight: 1.2,
+    };
+    const mkOpening = (id: string, hostWallId: string) => ({
+      id,
+      type: "opening" as const,
+      hostWallId,
+      categoryCode: "21",
+      kind: "window" as const,
+      typeId: "wt",
+      position: 1.5,
+      width: 1,
+      height: 1.2,
+      sillHeight: 0.9,
+    });
+    return {
+      ...base,
+      windowTypes: [wt],
+      openings: [mkOpening("op-near", "NEAR"), mkOpening("op-far", "FAR")],
+    } as unknown as Project;
+  }
+
+  it("Fenster auf der verdeckten Hinterwand wird NICHT emittiert (keine Durchsicht)", () => {
+    const project = openingProject();
+    const plan = generateElevationPlan(project, project.drawingLevels[1])!;
+    // Öffnungs-Symbollinien (DIN) — die des FAR-Fensters dürften durch NEAR
+    // scheinen, wenn nicht gecullt. Nur das NEAR-Fenster liefert Symbole.
+    const symbols = plan.primitives.filter(
+      (p) => p.kind === "line" && (p as { cls?: string }).cls === "elevation-opening-symbol",
+    );
+    const nearOnly = generateElevationPlan(
+      { ...project, openings: (project.openings ?? []).filter((o) => o.id === "op-near") },
+      project.drawingLevels[1],
+    )!;
+    const nearSymbols = nearOnly.primitives.filter(
+      (p) => p.kind === "line" && (p as { cls?: string }).cls === "elevation-opening-symbol",
+    );
+    // Mit beiden Fenstern gleich viele Symbole wie mit NUR dem vorderen → das
+    // hintere trägt nichts bei (vollständig verdeckt).
+    expect(symbols.length).toBe(nearSymbols.length);
+    expect(symbols.length).toBeGreaterThan(0);
+  });
+
+  it("Reveal-Schatten: shadows=true erzeugt Öffnungs-Schattenbänder, false keine", () => {
+    const project = openingProject();
+    const level = project.drawingLevels[1];
+    const off = generateElevationPlan(project, level, { shadows: false })!;
+    const on = generateElevationPlan(project, level, { shadows: true })!;
+    const revealShadows = (plan: typeof on) =>
+      plan.primitives.filter(
+        (p) => p.kind === "polygon" && p.stroke === "none" && p.fill === "#a7adb5",
+      ).length;
+    expect(revealShadows(off)).toBe(0);
+    // Ein sichtbares Fenster → zwei Reveal-Bänder (Kopf + linke Laibung).
+    expect(revealShadows(on)).toBe(2);
+  });
+});
+
 describe("Dächer in der Ansicht (roofWorldFacesAll)", () => {
   it("Dachflächen erscheinen als roofId-Polygone bis zur Firsthöhe", () => {
     // Sattel 4×3 über dem Fixture-Haus, First entlang X, Traufe 3 m — die
