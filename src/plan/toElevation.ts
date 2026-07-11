@@ -69,7 +69,7 @@ const EDGE_MM = 0.13;
 /** Fenster/Tür-Rahmen: etwas kräftigere Umrisslinie. */
 const FRAME_MM = 0.18;
 /** Blaugraues Fenster-Glas (dunkler als die Fassade → als Öffnung lesbar). */
-const GLASS_FILL = "#7f8b99";
+const GLASS_FILL = "#ffffff";
 /** Glas im Mono-Modus (neutrales Grau statt Blaugrau). */
 const GLASS_FILL_MONO = "#c4c8cd";
 /** Festes Schattengrau (über der Fassade, unter den Kanten). */
@@ -82,12 +82,12 @@ const GROUND_MM = 0.5;
  *  klassische Architektur-Ansicht (Flächen tragen, Kanten nur wo bedeutsam:
  *  Dachrand, Öffnungen, Bodenlinie). Wand/Decke identisch (Decken-Stirnflächen
  *  verschwinden optisch in der Fassade), Dach eine Stufe dunkler. */
-const WALL_FILL = "#ecebe8";
-const ROOF_FILL = "#d9d6d1";
-/** Blendrahmen-Fläche der Öffnungen (heller als die Fassade). */
-const FRAME_FILL = "#f8f7f4";
-/** Türblatt-Fläche (zwischen Fassade und Glas). */
-const DOOR_LEAF_FILL = "#d4d2cd";
+const WALL_FILL = "#ffffff";
+const ROOF_FILL = "#ffffff";
+/** Blendrahmen-Fläche der Öffnungen. */
+const FRAME_FILL = "#ffffff";
+/** Türblatt-Fläche. */
+const DOOR_LEAF_FILL = "#ffffff";
 /** Öffnungssymbol (DIN-Andeutung): dezente Annotation, nicht Bauteilkante. */
 const SYMBOL_INK = "#7d858f";
 
@@ -292,6 +292,8 @@ export interface ProjectedFace {
   depth: number;
   /** Kleinste Punkt-Tiefe (nächste Kante — z. B. die auskragende Traufe). */
   depthMin: number;
+  /** Grösste Punkt-Tiefe — depthMax≈depthMin ⇒ frontale (ebene) Fläche. */
+  depthMax: number;
   role: FaceRole;
   wallId?: string;
   ceilingId?: string;
@@ -310,15 +312,17 @@ export function projectFace(frame: ElevationFrame, face: WorldFace): ProjectedFa
   const pts: Array<[number, number]> = [];
   let depthSum = 0;
   let depthMin = Infinity;
+  let depthMax = -Infinity;
   for (const w of face.poly) {
     const p = projectPoint(frame, w);
     pts.push([p.u, p.v]);
     depthSum += p.depth;
     depthMin = Math.min(depthMin, p.depth);
+    depthMax = Math.max(depthMax, p.depth);
   }
   const depth = depthSum / face.poly.length;
   if (depth <= EPS) return null; // vor der Ebene → ignorieren
-  return { pts, depth, depthMin, role: face.role, wallId: face.wallId, ceilingId: face.ceilingId, roofId: face.roofId };
+  return { pts, depth, depthMin, depthMax, role: face.role, wallId: face.wallId, ceilingId: face.ceilingId, roofId: face.roofId };
 }
 
 /**
@@ -732,6 +736,69 @@ export function buildShadows(walls: ProjectedFace[], slabs: ProjectedFace[]): Sh
   return out;
 }
 
+// ── Umriss-Vereinigung frontaler Flächengruppen ─────────────────────────────
+
+/**
+ * Vereinigungs-UMRISS einer Gruppe achsparalleler (u,v)-Rechteckflächen über
+ * Kanten-XOR: jede Kante wird als Intervall auf ihrer Trägerlinie gesammelt;
+ * Bereiche mit GERADER Überdeckung (geteilte Innenkanten zweier Teilboxen)
+ * heben sich auf, ungerade Bereiche bilden die Silhouette — inklusive der
+ * Fensterlöcher (die Teilboxen um eine Öffnung lassen genau deren Rand übrig).
+ * Nicht-achsparallele Kanten werden unverändert durchgereicht.
+ */
+export function xorOutlineEdges(
+  polys: Array<Array<[number, number]>>,
+): Array<[[number, number], [number, number]]> {
+  const EPS_AX = 1e-6;
+  const keyOf = (x: number): number => Math.round(x * 1e5);
+  const horiz = new Map<number, Array<[number, number]>>();
+  const vert = new Map<number, Array<[number, number]>>();
+  const out: Array<[[number, number], [number, number]]> = [];
+  for (const poly of polys) {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      if (Math.abs(a[1] - b[1]) < EPS_AX) {
+        const k = keyOf(a[1]);
+        if (!horiz.has(k)) horiz.set(k, []);
+        horiz.get(k)!.push([Math.min(a[0], b[0]), Math.max(a[0], b[0])]);
+      } else if (Math.abs(a[0] - b[0]) < EPS_AX) {
+        const k = keyOf(a[0]);
+        if (!vert.has(k)) vert.set(k, []);
+        vert.get(k)!.push([Math.min(a[1], b[1]), Math.max(a[1], b[1])]);
+      } else {
+        out.push([a, b]);
+      }
+    }
+  }
+  const sweep = (
+    m: Map<number, Array<[number, number]>>,
+    emit: (coord: number, s: number, e: number) => void,
+  ): void => {
+    for (const [k, ivs] of m) {
+      const evs: Array<[number, number]> = [];
+      for (const [s, e] of ivs) {
+        if (e - s < 1e-9) continue;
+        evs.push([s, 1], [e, -1]);
+      }
+      evs.sort((p, q) => p[0] - q[0] || q[1] - p[1]);
+      let count = 0;
+      let start = 0;
+      const coord = k / 1e5;
+      for (const [x, d] of evs) {
+        const wasOdd = count % 2 === 1;
+        count += d;
+        const isOdd = count % 2 === 1;
+        if (!wasOdd && isOdd) start = x;
+        else if (wasOdd && !isOdd && x - start > 1e-9) emit(coord, start, x);
+      }
+    }
+  };
+  sweep(horiz, (v, s, e) => out.push([[s, v], [e, v]]));
+  sweep(vert, (u, s, e) => out.push([[u, s], [u, e]]));
+  return out;
+}
+
 // ── Plan-Zusammenbau ────────────────────────────────────────────────────────
 
 /** Optionen des Ansichts-Generators. */
@@ -799,12 +866,24 @@ export function generateElevationPlan(
   const items: Item[] = [];
   let seq = 0;
 
+  // Frontale Wand-/Deckenflächen (alle Ecken auf gleicher Tiefe) werden je
+  // Tiefen-Gruppe gesammelt: die Flächen selbst weiss OHNE Kontur, dann der
+  // XOR-Vereinigungs-Umriss der Gruppe als Linienzug — Innenkanten der
+  // Teilboxen (Pfeiler/Sturz/Geschossfugen) heben sich auf, übrig bleibt die
+  // Silhouette samt Öffnungslöchern (VW-Linienzeichnungs-Look).
+  const frontalGroups = new Map<number, { faces: ProjectedFace[]; depth: number }>();
   for (const f of faces) {
     const pts: Vec2[] = f.pts.map(([u, v]) => {
       acc(u, v);
       return { x: u, y: v };
     });
     const isRoof = f.role === "roof";
+    const frontal = !isRoof && f.depthMax - f.depthMin < 1e-4;
+    if (frontal) {
+      const gk = Math.round(f.depth * 1e4);
+      if (!frontalGroups.has(gk)) frontalGroups.set(gk, { faces: [], depth: f.depth });
+      frontalGroups.get(gk)!.faces.push(f);
+    }
     items.push({
       depth: f.depth,
       seq: seq++,
@@ -816,16 +895,32 @@ export function generateElevationPlan(
         kind: "polygon",
         pts,
         fill: fillFor(f.role),
-        // Nur das Dach trägt eine Kontur — die Fassade bleibt EINE ruhige
-        // Fläche (ihr Rand liest sich über den Kontrast zum Papier).
-        stroke: isRoof ? EDGE_INK : "none",
-        strokeWidthMm: isRoof ? EDGE_MM : 0,
+        // Dach + schräg angeschnittene Flächen tragen ihre eigene Kontur;
+        // frontale Flächen bekommen den Gruppen-Umriss (unten).
+        stroke: isRoof || !frontal ? EDGE_INK : "none",
+        strokeWidthMm: isRoof || !frontal ? EDGE_MM : 0,
         hatch: NO_HATCH,
         ...(f.wallId ? { wallId: f.wallId } : {}),
         ...(f.ceilingId ? { ceilingId: f.ceilingId } : {}),
         ...(f.roofId ? { roofId: f.roofId } : {}),
       },
     });
+  }
+  for (const g of frontalGroups.values()) {
+    for (const [a, b] of xorOutlineEdges(g.faces.map((f) => f.pts))) {
+      items.push({
+        depth: g.depth - EPS * 5,
+        seq: seq++,
+        prim: {
+          kind: "line",
+          a: { x: a[0], y: a[1] },
+          b: { x: b[0], y: b[1] },
+          cls: "elevation-outline",
+          weightMm: EDGE_MM,
+          color: EDGE_INK,
+        },
+      });
+    }
   }
 
   // Schatten (leicht VOR der Empfängertiefe, damit sie direkt nach der Fassade,
