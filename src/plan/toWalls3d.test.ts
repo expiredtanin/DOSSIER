@@ -406,7 +406,7 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     }
   });
 
-  it("Detailgrad steuert Rahmen/Sprossen im 3D (grob=0, mittel=Rahmen, fein=+Mittelpfosten+Flügelrahmen)", () => {
+  it("Detailgrad steuert Rahmen/Sprossen im 3D (grob=0, mittel=Rahmen+Flügel, fein=+Mittelpfosten+Sprossen)", () => {
     // O1 mit erzwungenem wingCount 2 (window-standard "drehkipp", öffenbar).
     const o1 = (sampleProject.openings ?? []).find((o) => o.id === "O1");
     if (!o1) throw new Error("O1 fehlt im sampleProject");
@@ -419,9 +419,10 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     const frameCount = (detail: "grob" | "mittel" | "fein"): number =>
       projectToModel3d(p, { detail }).meshes.filter(isFrame).length;
     expect(frameCount("grob")).toBe(0); // keine Rahmen/Sprossen
-    expect(frameCount("mittel")).toBe(4); // 2 Pfosten + Sturz + Schwelle (keine Sprossen/Flügelrahmen)
-    // fein: 4 Basis + 1 Mittelpfosten (wingCount 2) + 2 öffenbare Flügel × 4
-    // Flügelrahmen-Riegel = 4 + 1 + 8 = 13.
+    // mittel: 4 Basis (2 Pfosten + Sturz + Schwelle) + 2 öffenbare Flügel × 4
+    // verschachtelte Flügelrahmen-Riegel = 4 + 8 = 12 (keine Mittelpfosten/Sprossen).
+    expect(frameCount("mittel")).toBe(12);
+    // fein: mittel + 1 Flügel-Mittelpfosten (wingCount 2) = 12 + 1 = 13.
     expect(frameCount("fein")).toBe(13);
   });
 
@@ -750,6 +751,171 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     expect(meshes.some(isFrame)).toBe(false);
     // Alt-Verhalten bleibt unverändert: weiterhin genau EINE Vollscheibe.
     expect(meshes.filter(isGlass).length).toBe(1);
+  });
+});
+
+describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Flügelrahmen, Zargen-Umgriff", () => {
+  const isFrame = (m: { color: [number, number, number] }): boolean =>
+    m.color[0] === 0.85 && m.color[1] === 0.85 && m.color[2] === 0.83;
+  // SILL_RGB [0.8,0.8,0.78] und SYMBOL_RGB [0.25,0.27,0.3] sind bewusst nicht
+  // exportiert -> Filter per Literalwert, wie bei GLASS_RGB/FRAME_RGB.
+  const isSill = (m: { color: [number, number, number] }): boolean =>
+    m.color[0] === 0.8 && m.color[1] === 0.8 && m.color[2] === 0.78;
+  const isSymbol = (m: { color: [number, number, number] }): boolean =>
+    m.color[0] === 0.25 && m.color[1] === 0.27 && m.color[2] === 0.3;
+
+  // Ein Fenster (O1-Geometrie) mit gegebenem Fenstertyp auf W1.
+  const winProject = (
+    wt: NonNullable<Project["windowTypes"]>[number],
+  ): Project => ({
+    ...sampleProject,
+    windowTypes: [...(sampleProject.windowTypes ?? []), wt],
+    openings: [
+      {
+        id: "OS",
+        type: "opening",
+        hostWallId: "W1",
+        categoryCode: "21",
+        kind: "window",
+        typeId: wt.id,
+        position: 3.0,
+        width: 1.0,
+        height: 1.2,
+        sillHeight: 0.9,
+      },
+    ],
+    doors: [],
+    context: [],
+  });
+
+  const baseWin = {
+    id: "win-detail-test",
+    name: "Test Detail",
+    kind: "fest" as const,
+    wingCount: 1,
+    glazing: "einfach" as const,
+    frameThickness: 0.06,
+    frameWidth: 0.06,
+    defaultSillHeight: 0.9,
+    defaultWidth: 1.0,
+    defaultHeight: 1.2,
+  };
+
+  it("Fensterbank (Sims): 2 Bänder (Bank + Tropfkante) unter der Öffnung, Gating sillBoard + DetailLevel", () => {
+    // Default (kein sillBoard) -> zeichnen (wie 2D-Ansicht): 2 Sims-Bänder.
+    const pDefault = winProject({ ...baseWin });
+    const sills = projectToModel3d(pDefault).meshes.filter(isSill);
+    expect(sills.length).toBe(2);
+    // Beide Bänder liegen UNTER der Öffnungs-UK (sillHeight 0.9).
+    for (const s of sills) {
+      for (let i = 2; i < s.positions.length; i += 3) {
+        expect(s.positions[i]).toBeLessThanOrEqual(0.9 + 1e-6);
+      }
+    }
+    // sillBoard-Gating: "keine"/"innen" -> keine Bank; "aussen"/"beide" -> Bank.
+    const count = (sb: "keine" | "innen" | "aussen" | "beide"): number =>
+      projectToModel3d(winProject({ ...baseWin, id: `win-sb-${sb}`, sillBoard: sb })).meshes.filter(isSill).length;
+    expect(count("keine")).toBe(0);
+    expect(count("innen")).toBe(0);
+    expect(count("aussen")).toBe(2);
+    expect(count("beide")).toBe(2);
+    // DetailLevel: grob -> keine Bank; mittel/fein -> Bank.
+    const byDetail = (detail: "grob" | "mittel" | "fein"): number =>
+      projectToModel3d(pDefault, { detail }).meshes.filter(isSill).length;
+    expect(byDetail("grob")).toBe(0);
+    expect(byDetail("mittel")).toBe(2);
+    expect(byDetail("fein")).toBe(2);
+  });
+
+  it("DIN-Öffnungssymbole: nur fein, nur je NICHT-festem Flügel; Dreh=V, Kipp=V, Dreh-Kipp=beide", () => {
+    // Dreh-Kipp (öffenbar): Dreh (2 Diagonalen) + Kipp (2 Diagonalen) = 4 Symbol-Boxen.
+    const pDrehkipp = winProject({ ...baseWin, id: "win-drehkipp", kind: "drehkipp" });
+    expect(projectToModel3d(pDrehkipp).meshes.filter(isSymbol).length).toBe(4);
+    // Dreh -> 2, Kipp -> 2.
+    expect(
+      projectToModel3d(winProject({ ...baseWin, id: "win-dreh", kind: "dreh" })).meshes.filter(isSymbol).length,
+    ).toBe(2);
+    expect(
+      projectToModel3d(winProject({ ...baseWin, id: "win-kipp", kind: "kipp" })).meshes.filter(isSymbol).length,
+    ).toBe(2);
+    // Fest -> kein Symbol.
+    expect(
+      projectToModel3d(winProject({ ...baseWin, id: "win-fest2", kind: "fest" })).meshes.filter(isSymbol).length,
+    ).toBe(0);
+    // Symbole nur bei „fein" (mittel/grob: keine).
+    expect(projectToModel3d(pDrehkipp, { detail: "mittel" }).meshes.filter(isSymbol).length).toBe(0);
+    expect(projectToModel3d(pDrehkipp, { detail: "grob" }).meshes.filter(isSymbol).length).toBe(0);
+    // Symbol-Boxen sind sehr dünn (endliche, gültige Positionen) und liegen im
+    // Öffnungs-Höhenintervall (UK 0.9 .. OK 2.1).
+    for (const sym of projectToModel3d(pDrehkipp).meshes.filter(isSymbol)) {
+      expect(sym.positions.every((v) => Number.isFinite(v))).toBe(true);
+      for (let i = 2; i < sym.positions.length; i += 3) {
+        expect(sym.positions[i]).toBeGreaterThanOrEqual(0.9 - 1e-6);
+        expect(sym.positions[i]).toBeLessThanOrEqual(2.1 + 1e-6);
+      }
+    }
+  });
+
+  it("Verschachtelter Flügelrahmen steht ~12 mm vor dem Blendrahmen (nicht mehr flach)", () => {
+    // Fest vs. öffenbar, sonst identisch (flush, frameThickness gleich). Der
+    // Flügelrahmen des öffenbaren Fensters sitzt in einem nach aussen (nMax)
+    // vorstehenden Band -> seine Aussenkante ragt 0.012 m weiter hinaus als der
+    // Blendrahmen (bei W1 in Richtung negatives world-y, s. Inset-Test).
+    const minY = (p: Project): number => {
+      let m = Infinity;
+      for (const mesh of projectToModel3d(p).meshes.filter(isFrame)) {
+        for (let i = 1; i < mesh.positions.length; i += 3) m = Math.min(m, mesh.positions[i]);
+      }
+      return m;
+    };
+    const fixedMinY = minY(winProject({ ...baseWin, id: "win-proud-fixed", kind: "fest", sillBoard: "keine" }));
+    const openMinY = minY(winProject({ ...baseWin, id: "win-proud-open", kind: "drehkipp", sillBoard: "keine" }));
+    expect(fixedMinY - openMinY).toBeCloseTo(0.012, 6);
+  });
+
+  it("Tür-Zarge mit Umgriff: zarge -> 6 Bekleidungs-Riegel mehr als blockrahmen", () => {
+    const doorProject = (frameKind: "zarge" | "blockrahmen"): Project => ({
+      ...sampleProject,
+      doorTypes: [
+        {
+          id: `door-${frameKind}-test`,
+          name: `Test ${frameKind}`,
+          kind: "dreh",
+          leafCount: 1,
+          leafStyle: "glatt",
+          frameThickness: 0.05,
+          frameKind,
+          frameWidth: 0.06,
+          defaultWidth: 0.9,
+          defaultHeight: 2.0,
+        },
+      ],
+      openings: [
+        {
+          id: "DT",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "31",
+          kind: "door",
+          typeId: `door-${frameKind}-test`,
+          position: 3.0,
+          width: 0.9,
+          height: 2.0,
+          sillHeight: 0,
+        },
+      ],
+      doors: [],
+      context: [],
+    });
+    const frames = (frameKind: "zarge" | "blockrahmen"): number =>
+      projectToModel3d(doorProject(frameKind)).meshes.filter(isFrame).length;
+    // Zarge: Basis-Rahmen (2 Pfosten + Sturz, kein threshold) + 2 Wandseiten × 3
+    // Bekleidungs-Riegel = 3 + 6 = 9. Blockrahmen: nur Basis = 3.
+    expect(frames("blockrahmen")).toBe(3);
+    expect(frames("zarge")).toBe(9);
+    // Umgriff nur mittel/fein, nicht grob.
+    expect(projectToModel3d(doorProject("zarge"), { detail: "grob" }).meshes.filter(isFrame).length).toBe(0);
+    expect(projectToModel3d(doorProject("zarge"), { detail: "mittel" }).meshes.filter(isFrame).length).toBe(9);
   });
 });
 
