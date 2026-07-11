@@ -401,6 +401,22 @@ const GLASS_HALF_THICK = 0.01;
 const FRAME_RGB: RRgb = [0.85, 0.85, 0.83];
 /** Heller Grauton für den Rollladen-/Sonnenschutzkasten (s. {@link emitOpeningShading}). */
 const SHADING_RGB: RRgb = [0.88, 0.88, 0.9];
+/**
+ * Heller Stein-/Beton-Grauton der Fensterbank (Sims/Tropfkante) — bewusst etwas
+ * dunkler/kühler als der Rahmen ({@link FRAME_RGB}), damit die Bank im 3D als
+ * eigenes Bauteil (nicht als Rahmenfortsatz) liest (s. Sims-Zweig in
+ * {@link frameMeshesForOpening}).
+ */
+const SILL_RGB: RRgb = [0.8, 0.8, 0.78];
+/**
+ * Dunkles Grau der DIN-Öffnungssymbole (dünne Diagonalen AUF dem Glas, wie in der
+ * 2D-Ansicht) — feine dunkle Linien auf der Scheibe (s. Symbol-Zweig in
+ * {@link frameMeshesForOpening}). Als sehr dünne, in der Öffnungsebene gedrehte
+ * Prismen ({@link openingPlaneBox}) knapp vor der Glasebene.
+ */
+const SYMBOL_RGB: RRgb = [0.25, 0.27, 0.3];
+/** Halbe Breite der Symbol-Diagonalen (Meter) — ~5 mm Gesamtbreite, feine Linie. */
+const SYMBOL_HALF_WIDTH = 0.0025;
 /** Default-Ansichtsbreite des Rahmenprofils (Meter), wenn `TYPE.frameWidth` fehlt. */
 const DEFAULT_FRAME_WIDTH = 0.06;
 /** Warmer Terrakotta-Grauton für Dachflächen/-giebel (s. {@link emitRoofs}) — hebt das Dach klar von Wand/Decke/Kontext ab. */
@@ -1872,6 +1888,62 @@ function openingAxisBox(
   return { positions, indices: [...OPENING_BOX_TRIS], kind: "imported", color };
 }
 
+/**
+ * Baut EIN sehr dünnes Prisma mit FREI orientierter Längsachse IN der Öffnungs-
+ * ebene — die diagonale Schwester von {@link openingAxisBox}. Die Längsachse
+ * verläuft vom Punkt `(u0,h0)` zum Punkt `(u1,h1)`, beide in Öffnungsebenen-
+ * koordinaten: `u` = Meter entlang der Wandrichtung (ab `wall.start`), `h` =
+ * absolute Welthöhe (Meter). Der Querschnitt spannt `±halfWidth` senkrecht zur
+ * Längsachse INNERHALB der Ebene (gedreht mit) und `[nBack,nFront]` entlang der
+ * Grundriss-Normalen (quer zur Wand, Tiefe). Damit lassen sich die schrägen
+ * DIN-Öffnungssymbole (Dreh-/Kipp-Diagonalen) als dünne, gedrehte dunkle Riegel
+ * AUF dem Glas erzeugen — der Renderer kennt nur Dreiecks-Meshes, keine Linien.
+ * `null` bei entarteter Länge (≤ EPS). 8 Ecken, dieselbe {@link OPENING_BOX_TRIS}-
+ * Topologie (doppelseitig gerendert ⇒ Winding egal; die drei Bits parametrisieren
+ * hier Endpunkt/Quer-Versatz/Tiefe).
+ */
+function openingPlaneBox(
+  wall: Wall,
+  u0: number,
+  h0: number,
+  u1: number,
+  h1: number,
+  halfWidth: number,
+  nFront: number,
+  nBack: number,
+  color: RRgb,
+): RMesh | null {
+  const du = u1 - u0;
+  const dh = h1 - h0;
+  const segLen = Math.hypot(du, dh);
+  if (segLen < EPS) return null;
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const wlen = Math.hypot(dx, dy);
+  if (wlen < 1e-9) return null;
+  const ux = dx / wlen;
+  const uy = dy / wlen;
+  // Grundriss-Normale (Dicken-Achse) — dieselbe Konvention wie openingAxisBox.
+  const nx = uy;
+  const ny = -ux;
+  // In der Ebene senkrecht zur Längsachse (u entlang Wand, h = Welthöhe):
+  // Rotation der normierten Richtung um 90°. `pu` wirkt auf die u-Achse (Wand),
+  // `ph` auf die Höhe — beide in Metern, orthonormal ⇒ echte `halfWidth`-Breite.
+  const pu = -dh / segLen;
+  const ph = du / segLen;
+  const positions: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const ui = i & 1 ? u1 : u0;
+    const hi = i & 1 ? h1 : h0;
+    const s = i & 2 ? 1 : -1;
+    const t = i & 4 ? nFront : nBack;
+    const u = ui + s * halfWidth * pu;
+    const h = hi + s * halfWidth * ph;
+    positions.push(wall.start.x + ux * u + nx * t, wall.start.y + uy * u + ny * t, h);
+  }
+  return { positions, indices: [...OPENING_BOX_TRIS], kind: "imported", color };
+}
+
 /** Klemmt `v` auf `[lo,hi]`. */
 function clampRange(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -1967,6 +2039,18 @@ interface OpeningFrameParams {
    * (Schachtelung Blendrahmen → Flügelrahmen → Glas). Türen: leer.
    */
   sashes: SashDef[];
+  /** Halbe Wanddicke (Meter) — Bezug der Wand-Aussenfläche (+n) für Bank/Zargen-Umgriff. */
+  halfThickness: number;
+  /**
+   * Fensterbank (Sims) zeichnen: nur Fenster mit `sillBoard` ≠ "keine"/"innen"
+   * (fehlt ⇒ zeichnen, wie in der 2D-Ansicht). Türen: nie.
+   */
+  drawSill: boolean;
+  /**
+   * Zargen-Umgriff (Bekleidung VOR beiden Wandflächen) zeichnen: nur Türen mit
+   * `frameKind === "zarge"`. Blockrahmen bleibt bündig (false).
+   */
+  zargeCladding: boolean;
 }
 
 function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): OpeningFrameParams | null {
@@ -1997,6 +2081,10 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       // Teilverglasung: glazingRatio (Glasanteil oben) bei Glasblatt; sonst voll.
       glazedFraction: Math.max(0.05, Math.min(1, dt.glazingRatio ?? 1)),
       sashes: [],
+      halfThickness,
+      drawSill: false,
+      // Zarge umgreift die Wand (Bekleidung auf beiden Flächen); Blockrahmen bleibt bündig.
+      zargeCladding: (dt.frameKind ?? "zarge") === "zarge",
     };
   }
   const wt = getWindowType(project, op);
@@ -2037,6 +2125,10 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     glazingPanes: glazingPanesOf(wt),
     glazedFraction: 1,
     sashes,
+    halfThickness,
+    // Fensterbank zeichnen, ausser explizit "keine"/"innen" (fehlt ⇒ zeichnen).
+    drawSill: wt.sillBoard !== "keine" && wt.sillBoard !== "innen",
+    zargeCladding: false,
   };
 }
 
@@ -2046,21 +2138,44 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
  * ein Kämpfer-Riegel (Oberlicht-Trennung, `transomHeight>0`) sowie die
  * Flügel-Mittelpfosten (`wingCount−1`, vertikal) und Kämpfer-Zeilen
  * (`mullionRows−1`, horizontal) im Flügel-Bereich zwischen Schwelle/Sturz
- * bzw. Schwelle/Kämpfer. Alle Riegel in {@link FRAME_RGB}.
+ * bzw. Schwelle/Kämpfer. Alle Rahmen-Riegel in {@link FRAME_RGB}.
+ *
+ * DetailLevel-Staffelung (VW-Detailgrad „fein" als Referenz):
+ *  • „grob"  — wird gar nicht aufgerufen (s. {@link emitOpeningFrames}).
+ *  • „mittel"— Blendrahmen + Oberlicht-Kämpfer + Flügelrahmen (verschachtelt) +
+ *    Fensterbank/Zargen-Umgriff, aber KEINE Sprossen und KEINE DIN-Symbole.
+ *  • „fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen) und
+ *    die DIN-Öffnungssymbole ({@link openingPlaneBox}) auf dem Glas.
  */
 function frameMeshesForOpening(
   wall: Wall,
   iv: { from: number; to: number },
   vert: { zBottom: number; zTop: number },
   params: OpeningFrameParams,
-  fine = true,
+  detail: DetailLevel = "fein",
 ): RMesh[] {
   const out: RMesh[] = [];
+  const fine = detail === "fein";
+  const medium = detail === "mittel";
+  const sashesOn = fine || medium; // Flügelrahmen: mittel + fein
+  const detailBodies = fine || medium; // Bank + Zargen-Umgriff: mittel + fein
   const fw = params.frameWidth;
-  const push = (from: number, to: number, zBottom: number, zTop: number): void => {
-    const mesh = openingAxisBox(wall, from, to, zBottom, zTop, params.nMin, params.nMax, FRAME_RGB);
+  // Generischer Riegel mit frei wählbarem Quer-Band [nA,nB] und Farbe.
+  const pushC = (
+    from: number,
+    to: number,
+    zBottom: number,
+    zTop: number,
+    nA: number,
+    nB: number,
+    color: RRgb,
+  ): void => {
+    const mesh = openingAxisBox(wall, from, to, zBottom, zTop, nA, nB, color);
     if (mesh) out.push(mesh);
   };
+  // Blendrahmen-Riegel (volles Rahmen-Quer-Band nMin..nMax, Rahmenfarbe).
+  const push = (from: number, to: number, zBottom: number, zTop: number): void =>
+    pushC(from, to, zBottom, zTop, params.nMin, params.nMax, FRAME_RGB);
   // Pfosten (Laibungsseiten), über die volle Öffnungshöhe durchlaufend.
   push(iv.from, iv.from + fw, vert.zBottom, vert.zTop);
   push(iv.to - fw, iv.to, vert.zBottom, vert.zTop);
@@ -2099,27 +2214,107 @@ function frameMeshesForOpening(
         push(sashFrom, sashTo, center - fw / 2, center + fw / 2);
       }
     }
-    // Flügelrahmen je ÖFFENBAREM Flügel: ein Rahmen-Riegel-Ring (links/rechts/
-    // oben/unten) INNERHALB des Blendrahmen-Felds, um `reveal` eingerückt
-    // (Schachtelung Blendrahmen → Flügelrahmen → Glas). Feste Flügel bekommen
-    // keinen — so unterscheidet sich fest von öffenbar auch im 3D.
-    if (params.sashes.length > 0 && sashTo - sashFrom > EPS && sashTop - sashBottom > EPS) {
-      const segs = resolveSashSpans(params.sashes, sashFrom, sashTo);
-      const reveal = fw * 0.5;
-      const sfw = fw * 0.7;
-      for (const seg of segs) {
-        const s = seg.sash;
-        if (s.kind !== "fluegel" || !s.opening || s.opening === "fest") continue;
-        const cf = seg.from + fw + reveal;
-        const ct = seg.to - fw - reveal;
-        const bz = sashBottom + reveal;
-        const tz = sashTop - reveal;
-        if (ct - cf <= EPS || tz - bz <= EPS) continue;
-        push(cf, cf + sfw, bz, tz); // linker Flügelholm
-        push(ct - sfw, ct, bz, tz); // rechter Flügelholm
-        push(cf, ct, tz - sfw, tz); // oberer Flügelriegel
-        push(cf, ct, bz, bz + sfw); // unterer Flügelriegel
+  }
+  // Flügelrahmen je ÖFFENBAREM Flügel: ein eigener Rahmen-Riegel-Ring (links/
+  // rechts/oben/unten) INNERHALB des Blendrahmen-Felds, um `reveal` eingerückt
+  // (Schachtelung Blendrahmen → Flügelrahmen → Glas). Anders als bisher sitzt der
+  // Flügelrahmen in einem EIGENEN, nach aussen VORSTEHENDEN und flacheren Quer-
+  // Band (`sashBackN..sashFrontN`) — dadurch liest er sich als abgesetzter,
+  // verschachtelter Körper VOR dem Blendrahmen (VW „fein"), nicht mehr flach mit
+  // ihm verschmolzen. Zusätzlich (nur „fein") die DIN-Öffnungssymbole auf dem
+  // Glas. Feste Flügel bekommen weder Flügelrahmen noch Symbol.
+  if (sashesOn && params.sashes.length > 0 && sashTo - sashFrom > EPS && sashTop - sashBottom > EPS) {
+    const segs = resolveSashSpans(params.sashes, sashFrom, sashTo);
+    const reveal = fw * 0.5;
+    const sfw = fw * 0.7;
+    // Verschachteltes Flügelrahmen-Band: ~12 mm vor der Blendrahmen-Vorderkante
+    // (nMax = Aussenseite) und nur ~50 mm tief — abgesetzte, plastische Stufe.
+    const sashFrontN = params.nMax + 0.012;
+    const sashBackN = Math.max(params.nMin, params.nMax - 0.05);
+    // Glas-Vorderkante (s. glassPanesForOpening: n1 = nMax − 0.03); die Symbole
+    // liegen als ~2.5 mm dünne dunkle Prismen KNAPP davor (weiter aussen).
+    const glassFrontN = params.nMax - 0.03;
+    const symBackN = glassFrontN;
+    const symFrontN = glassFrontN + 0.003;
+    const pushSash = (from: number, to: number, zB: number, zT: number): void =>
+      pushC(from, to, zB, zT, sashBackN, sashFrontN, FRAME_RGB);
+    const pushSymbol = (u0: number, h0: number, u1: number, h1: number): void => {
+      const mesh = openingPlaneBox(wall, u0, h0, u1, h1, SYMBOL_HALF_WIDTH, symFrontN, symBackN, SYMBOL_RGB);
+      if (mesh) out.push(mesh);
+    };
+    for (const seg of segs) {
+      const s = seg.sash;
+      if (s.kind !== "fluegel" || !s.opening || s.opening === "fest") continue;
+      const cf = seg.from + fw + reveal;
+      const ct = seg.to - fw - reveal;
+      const bz = sashBottom + reveal;
+      const tz = sashTop - reveal;
+      if (ct - cf <= EPS || tz - bz <= EPS) continue;
+      pushSash(cf, cf + sfw, bz, tz); // linker Flügelholm
+      pushSash(ct - sfw, ct, bz, tz); // rechter Flügelholm
+      pushSash(cf, ct, tz - sfw, tz); // oberer Flügelriegel
+      pushSash(cf, ct, bz, bz + sfw); // unterer Flügelriegel
+      // DIN-Öffnungssymbole (nur „fein") auf dem Glasfeld INNERHALB des Flügel-
+      // rahmens — exakt wie in der 2D-Ansicht (s. toElevation): Dreh = V mit
+      // Spitze am Bandseiten-Mittel des Glasfelds, Kipp = V mit Spitze oben Mitte.
+      if (!fine) continue;
+      const gA = cf + sfw;
+      const gB = ct - sfw;
+      const gbz = bz + sfw;
+      const gtz = tz - sfw;
+      if (gB - gA <= EPS || gtz - gbz <= EPS) continue;
+      const kind = s.opening;
+      if (kind === "dreh" || kind === "drehkipp") {
+        const hingeLeft = (s.hingeSide ?? "left") === "left";
+        const apexU = hingeLeft ? gA : gB;
+        const apexH = (gbz + gtz) / 2;
+        const farU = hingeLeft ? gB : gA;
+        pushSymbol(farU, gbz, apexU, apexH);
+        pushSymbol(farU, gtz, apexU, apexH);
       }
+      if (kind === "kipp" || kind === "drehkipp") {
+        const apexU = (gA + gB) / 2;
+        pushSymbol(gA, gbz, apexU, gtz);
+        pushSymbol(gB, gbz, apexU, gtz);
+      }
+    }
+  }
+
+  // Fensterbank (Sims, VW „fein"/„mittel"): Bank-Quader unter der Öffnung,
+  // seitlich ~3 cm überstehend, nach aussen (Wand-Aussenfläche +halfThickness)
+  // auskragend, mit einer zweiten, dünneren Tropfkanten-Stufe an der Aussenkante
+  // darunter. Nur Fenster mit `params.drawSill` (sillBoard ≠ "keine"/"innen").
+  if (detailBodies && params.drawSill) {
+    const ov = 0.03; // seitlicher Überstand je Seite
+    const proj = 0.04; // Auskragung nach aussen (vor die Wandfläche)
+    const under = 0.02; // Einbindung unter den Rahmen (in den Reveal)
+    const bankH = 0.04; // Bankdicke
+    const dripH = 0.02; // Höhe der Tropfkanten-Stufe
+    const dripW = 0.02; // Tiefe der Tropfkante an der Aussenkante
+    const outerN = params.halfThickness; // Wand-Aussenfläche
+    const bankTop = vert.zBottom;
+    const bankBottom = bankTop - bankH;
+    // Bank
+    pushC(iv.from - ov, iv.to + ov, bankBottom, bankTop, outerN - under, outerN + proj, SILL_RGB);
+    // Tropfkante (dünnere Stufe darunter, an der Aussenkante)
+    pushC(iv.from - ov, iv.to + ov, bankBottom - dripH, bankBottom, outerN + proj - dripW, outerN + proj, SILL_RGB);
+  }
+
+  // Tür-Zarge mit Umgriff (VW): die Zarge umgreift die Wand — eine schmale
+  // Bekleidungs-Platte VOR beiden Wandflächen, als Ring (Pfosten links/rechts +
+  // Sturz) rund um die Öffnung, ~1.3 cm vor die Fläche vorstehend. Nur
+  // `frameKind === "zarge"`; Blockrahmen bleibt bündig (params.zargeCladding false).
+  if (detailBodies && params.zargeCladding) {
+    const proud = 0.013; // Vorstand vor die Wandfläche
+    const ext = 0.02; // Überstand auf die Wandfläche (über die Laibungskante hinaus)
+    const casW = fw; // Bekleidungsbreite (= Rahmenprofil)
+    for (const sign of [1, -1] as const) {
+      const faceN = sign * params.halfThickness;
+      const nA = faceN;
+      const nB = faceN + sign * proud;
+      pushC(iv.from - ext, iv.from + casW, vert.zBottom, vert.zTop + ext, nA, nB, FRAME_RGB); // Pfosten links
+      pushC(iv.to - casW, iv.to + ext, vert.zBottom, vert.zTop + ext, nA, nB, FRAME_RGB); // Pfosten rechts
+      pushC(iv.from - ext, iv.to + ext, vert.zTop - casW, vert.zTop + ext, nA, nB, FRAME_RGB); // Sturz
     }
   }
   return out;
@@ -2295,7 +2490,6 @@ function emitOpeningGlass(project: Project): RMesh[] {
 function emitOpeningFrames(project: Project, detail: DetailLevel = "fein"): RMesh[] {
   // Grob: keine Rahmen/Sprossen — die Öffnung bleibt Loch + Scheibe (schlank).
   if (detail === "grob") return [];
-  const fine = detail === "fein";
   const out: RMesh[] = [];
   for (const wall of project.walls) {
     for (const op of openingsOfWall(project, wall.id)) {
@@ -2305,7 +2499,7 @@ function emitOpeningFrames(project: Project, detail: DetailLevel = "fein"): RMes
       if (vert.zTop - vert.zBottom <= EPS) continue;
       const params = resolveOpeningFrame(project, wall, op);
       if (!params) continue;
-      out.push(...frameMeshesForOpening(wall, iv, vert, params, fine));
+      out.push(...frameMeshesForOpening(wall, iv, vert, params, detail));
     }
   }
   return out;
@@ -2412,11 +2606,15 @@ function computeJoinsByFloor(project: Project): Map<string, WallCuts> {
 export interface Model3dOptions {
   layeredWalls?: boolean;
   /**
-   * Detailgrad der Öffnungs-Darstellung im 3D (wie im 2D-Grundriss):
+   * Detailgrad der Öffnungs-Darstellung im 3D (wie im 2D-Grundriss, Referenz ist
+   * der VW-Detailgrad "fein"):
    *  • "grob"  — keine Rahmen/Sprossen (nur Loch + Scheibe).
-   *  • "mittel"— Rahmen (Pfosten/Sturz/Schwelle) + ggf. Kämpfer, keine Sprossen.
-   *  • "fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen).
-   * Fehlt es, gilt "fein" (= bisheriges Verhalten, volle Details).
+   *  • "mittel"— Blendrahmen (Pfosten/Sturz/Schwelle) + ggf. Kämpfer, dazu die
+   *    verschachtelten Flügelrahmen, Fensterbank (Sims) und Zargen-Umgriff — aber
+   *    KEINE Sprossen und KEINE DIN-Öffnungssymbole.
+   *  • "fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen) und
+   *    die DIN-Öffnungssymbole (Dreh/Kipp) auf dem Glas.
+   * Fehlt es, gilt "fein" (= volle Details).
    */
   detail?: DetailLevel;
 }
