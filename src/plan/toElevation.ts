@@ -423,7 +423,11 @@ interface ProjectedOpening {
   glass: Array<Array<[number, number]>>;
   /** Teilungslinien (Pfosten/Kämpfer) über den Rahmen. */
   divisions: Array<[[number, number], [number, number]]>;
-  /** Öffnungssymbol (DIN-Ansicht): gestrichelte Linien zum Bandseiten-Mittel. */
+  /** Flügelrahmen-Rechtecke (Kontur je öffenbarem/festem Flügel). */
+  sashRects: Array<Array<[number, number]>>;
+  /** Fensterbank (Sims): Bank + Tropfkante als zwei Bänder unter dem Rahmen. */
+  sill: Array<Array<[number, number]>>;
+  /** Öffnungssymbol (DIN-Ansicht): Linien exakt auf den Glasfeld-Ecken. */
   symbol: Array<[[number, number], [number, number]]>;
   /** Tür (Blatt-Fläche statt Glas, ausser Glas-Blatt). */
   isDoor: boolean;
@@ -476,7 +480,7 @@ function projectOpeningRect(
     if (depth <= EPS) continue;
     // pts-Reihenfolge: [unten-von, unten-bis, oben-bis, oben-von] — Basis für
     // die (fa, fz)-Interpolation der Flügel-/Glasfelder in collectOpenings.
-    return { pts, depth, glass: [], divisions: [], symbol: [], isDoor: false };
+    return { pts, depth, glass: [], divisions: [], sashRects: [], sill: [], symbol: [], isDoor: false };
   }
   return null;
 }
@@ -575,29 +579,57 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
           pr.divisions.push([quadAt(pr.pts, fm, fz), quadAt(pr.pts, fm, fieldTop)]);
           continue;
         }
-        pr.glass.push(rect(pr.pts, fa0 + fa * 0.3, fa1 - fa * 0.3, fz, fieldTop));
+        // Flügelrahmen (Kontur) + Glas darin eingerückt (VW: Blendrahmen →
+        // Flügelprofil → Glas als drei ablesbare Konturen).
+        pr.sashRects.push(rect(pr.pts, fa0, fa1, fz, fieldTop));
+        const spw = Math.min(0.06, Math.max(0.03, fw)); // Flügelprofil (m)
+        const gU = spw / Math.max(w, 1e-6);
+        const gV = spw / Math.max(h, 1e-6);
+        const gA = fa0 + gU;
+        const gB = fa1 - gU;
+        const gz0 = fz + gV;
+        const gz1 = fieldTop - gV;
+        if (gB - gA > 1e-6 && gz1 - gz0 > 1e-6) {
+          pr.glass.push(rect(pr.pts, gA, gB, gz0, gz1));
+        }
         // Trennlinie zum nächsten Feld (ausser am Rand).
         if (fa1 < 1 - fa - 1e-6) {
           pr.divisions.push([quadAt(pr.pts, fa1, fz), quadAt(pr.pts, fa1, fieldTop)]);
         }
-        // Öffnungssymbol (DIN-Ansicht, gestrichelt): Spitze am Bandseiten-Mittel.
+        // Öffnungssymbol (DIN): Linien starten/enden EXAKT auf den Glasfeld-
+        // Ecken (Nutzer-Report: Anker waren daneben). Dreh: Spitze am
+        // Bandseiten-Mittel des Glasfelds; Kipp: Spitze oben Mitte (VW).
         const kind = sd.opening ?? wt?.kind ?? "fest";
         if (kind === "dreh" || kind === "drehkipp") {
           const hingeLeft = (sd.hingeSide ?? "left") === "left";
-          const apex = quadAt(pr.pts, hingeLeft ? fa0 : fa1, (fz + fieldTop) / 2);
+          const apex = quadAt(pr.pts, hingeLeft ? gA : gB, (gz0 + gz1) / 2);
+          const farU = hingeLeft ? gB : gA;
           pr.symbol.push(
-            [quadAt(pr.pts, hingeLeft ? fa1 : fa0, fz), apex],
-            [quadAt(pr.pts, hingeLeft ? fa1 : fa0, fieldTop), apex],
+            [quadAt(pr.pts, farU, gz0), apex],
+            [quadAt(pr.pts, farU, gz1), apex],
           );
         }
         if (kind === "kipp" || kind === "drehkipp") {
-          const apex = quadAt(pr.pts, (fa0 + fa1) / 2, fz);
+          const apex = quadAt(pr.pts, (gA + gB) / 2, gz1);
           pr.symbol.push(
-            [quadAt(pr.pts, fa0, fieldTop), apex],
-            [quadAt(pr.pts, fa1, fieldTop), apex],
+            [quadAt(pr.pts, gA, gz0), apex],
+            [quadAt(pr.pts, gB, gz0), apex],
           );
         }
       }
+      // Fensterbank (Sims, VW): Bank + Tropfkante als zwei Bänder unter dem
+      // Rahmen, seitlich leicht überstehend. Default AN (sillBoard fehlt),
+      // aus bei "keine"/"innen".
+      const sb = wt?.sillBoard;
+      if (sb !== "keine" && sb !== "innen") {
+        const ov1 = 0.02 / Math.max(w, 1e-6);
+        const ov2 = 0.05 / Math.max(w, 1e-6);
+        const h1 = 0.035 / Math.max(h, 1e-6);
+        const h2 = 0.025 / Math.max(h, 1e-6);
+        pr.sill.push(rect(pr.pts, -ov1, 1 + ov1, -h1, 0));
+        pr.sill.push(rect(pr.pts, -ov2, 1 + ov2, -(h1 + h2), -h1));
+      }
+
       // Oberlicht: eigenes Glasfeld + Kämpferlinie.
       if (fTr > 0) {
         pr.glass.push(rect(pr.pts, fa, 1 - fa, fTr + fz / 2, 1 - fz));
@@ -969,6 +1001,36 @@ export function generateElevationPlan(
         hatch: NO_HATCH,
       },
     });
+    // Sims (Bank + Tropfkante) — weiss gefüllt (verdeckt die Fassade), Kontur.
+    for (const sRect of op.sill) {
+      items.push({
+        depth: d,
+        seq: seq++,
+        prim: {
+          kind: "polygon",
+          pts: toVec(sRect),
+          fill: mono ? "#ffffff" : FRAME_FILL,
+          stroke: EDGE_INK,
+          strokeWidthMm: EDGE_MM,
+          hatch: NO_HATCH,
+        },
+      });
+    }
+    // Flügelrahmen-Konturen (zwischen Blendrahmen und Glas).
+    for (const sRect of op.sashRects) {
+      items.push({
+        depth: d,
+        seq: seq++,
+        prim: {
+          kind: "polygon",
+          pts: toVec(sRect),
+          fill: "none",
+          stroke: EDGE_INK,
+          strokeWidthMm: EDGE_MM,
+          hatch: NO_HATCH,
+        },
+      });
+    }
     for (const g of op.glass) {
       items.push({
         depth: d,
