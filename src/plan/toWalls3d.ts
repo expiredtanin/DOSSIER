@@ -2298,6 +2298,17 @@ function frameMeshesForOpening(
         pushSymbol(gA, gbz, apexU, gtz);
         pushSymbol(gB, gbz, apexU, gtz);
       }
+      if (kind === "schiebe") {
+        // Schiebe: horizontaler Pfeil in Laufrichtung (Griff links ⇒ nach rechts).
+        const zc = (gbz + gtz) / 2;
+        const toRight = (s.hingeSide ?? "left") === "left";
+        const tail = toRight ? gA : gB;
+        const head = toRight ? gB : gA;
+        const barb = (head - tail) * 0.22;
+        pushSymbol(tail, zc, head, zc); // Schaft
+        pushSymbol(head - barb, gbz + (gtz - gbz) * 0.32, head, zc); // obere Spitze
+        pushSymbol(head - barb, gbz + (gtz - gbz) * 0.68, head, zc); // untere Spitze
+      }
     }
   }
 

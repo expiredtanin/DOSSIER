@@ -799,6 +799,22 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
             [quadAt(pr.pts, gB, gz0), apex],
           );
         }
+        if (kind === "schiebe") {
+          // Schiebeflügel: KEIN Dreieck (keine Bandseite), sondern ein Pfeil in
+          // Laufrichtung (horizontal) auf halber Glashöhe — die Griffseite
+          // (hingeSide) bestimmt die Pfeilrichtung. Klassische DIN-Konvention.
+          const zc = (gz0 + gz1) / 2;
+          const toRight = (sd.hingeSide ?? "left") === "left"; // Griff links ⇒ schiebt nach rechts
+          const tail = toRight ? gA : gB;
+          const head = toRight ? gB : gA;
+          const barb = (head - tail) * 0.22; // Pfeilspitzen-Rücksprung (Glasbreite-Anteil)
+          const headPt = quadAt(pr.pts, head, zc);
+          pr.symbol.push(
+            [quadAt(pr.pts, tail, zc), headPt], // Schaft
+            [quadAt(pr.pts, head - barb, gz0 + (gz1 - gz0) * 0.32), headPt], // obere Spitze
+            [quadAt(pr.pts, head - barb, gz0 + (gz1 - gz0) * 0.68), headPt], // untere Spitze
+          );
+        }
       }
       // Fensterbank (Sims, VW): Bank + Tropfkante als zwei Bänder unter dem
       // Rahmen, seitlich leicht überstehend. Default AN (sillBoard fehlt),

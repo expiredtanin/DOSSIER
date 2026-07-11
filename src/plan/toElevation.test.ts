@@ -353,6 +353,51 @@ describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
     expect(symbols.length).toBeGreaterThan(0);
   });
 
+  it("Öffnungssymbolik je Art: Schiebe=Pfeil (3 Linien), Fest=keine, Drehkipp=4", () => {
+    const base = elevationProject({ overhang: false });
+    const mkProject = (kind: "schiebe" | "fest" | "drehkipp"): Project =>
+      ({
+        ...base,
+        windowTypes: [
+          {
+            id: "wt",
+            name: "F",
+            kind,
+            wingCount: 1,
+            glazing: "zweifach",
+            frameWidth: 0.06,
+            defaultSillHeight: 0.9,
+            defaultWidth: 1,
+            defaultHeight: 1.2,
+          },
+        ],
+        openings: [
+          {
+            id: "op",
+            type: "opening",
+            hostWallId: "NEAR",
+            categoryCode: "21",
+            kind: "window",
+            typeId: "wt",
+            position: 1.5,
+            width: 1,
+            height: 1.2,
+            sillHeight: 0.9,
+          },
+        ],
+      }) as unknown as Project;
+    const symCount = (kind: "schiebe" | "fest" | "drehkipp"): number => {
+      const p = mkProject(kind);
+      const plan = generateElevationPlan(p, p.drawingLevels[1])!;
+      return plan.primitives.filter(
+        (pr) => pr.kind === "line" && (pr as { cls?: string }).cls === "elevation-opening-symbol",
+      ).length;
+    };
+    expect(symCount("schiebe")).toBe(3); // Pfeil: Schaft + 2 Spitzen
+    expect(symCount("fest")).toBe(0); // Festverglasung ohne Symbol
+    expect(symCount("drehkipp")).toBe(4); // Dreh (2) + Kipp (2)
+  });
+
   it("Reveal-Schatten: shadows=true erzeugt Öffnungs-Schattenbänder, false keine", () => {
     const project = openingProject();
     const level = project.drawingLevels[1];
