@@ -815,10 +815,11 @@ function splitSlabLayers(
  * (Achse entlang v, atan2(1,0) = 90°). Damit drehen wandrelative Muster
  * (Dämmung, Backstein) im Schnitt genauso mit der Wand wie im Grundriss.
  */
-// Wandachse im Schnitt: die geschnittene Wand STEHT (Band entlang v). Wand-
-// relative Muster (Dämmwellen laufen ENTLANG der Wand) müssen im Schnitt also
-// VERTIKAL laufen — Winkel 0 lieferte sie horizontal (90° falsch, Nutzer-Report).
-const SECTION_WALL_AXIS_ANGLE_DEG = 0;
+// Wandachse im Schnitt: die geschnittene Wand STEHT (Band entlang v) — wand-
+// relative Muster (Dämm-Sprossen QUER zur Schicht) brauchen den 90°-Achswinkel,
+// damit die Sprossen horizontal liegen (empirisch verifiziert am Demo-Schnitt;
+// die liegende Decke braucht spiegelbildlich denselben Wert, s. u.).
+const SECTION_WALL_AXIS_ANGLE_DEG = 90;
 // Deckenachse im Schnitt: die geschnittene Decke LIEGT (Band entlang u) —
 // wandrelative Muster laufen horizontal.
 const SECTION_SLAB_AXIS_ANGLE_DEG = 90;
