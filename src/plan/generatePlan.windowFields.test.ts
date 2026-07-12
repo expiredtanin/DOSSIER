@@ -390,6 +390,42 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
     expect(sill[0].kind === "line" && sill[0].weightMm).toBeCloseTo(0.4, 6);
   });
 
+  it("frameViewLine ohne Übersteuerung: die Rahmen-Kontur (Aufsicht) fällt auf frameLine zurück", () => {
+    const p = project(
+      { ...baseWindow, typeId: "wt1", frameLine: { color: "#ff0000", weight: 0.5 } },
+      [baseWindowType],
+    );
+    const frame = generatePlan(p, "eg", visible, undefined, "mittel").primitives.find(
+      (pr) => pr.kind === "polygon" && pr.openingId === "F1" && pr.stroke !== "none",
+    );
+    expect(frame).toBeDefined();
+    expect(frame!.kind === "polygon" && frame!.stroke).toBe("#ff0000");
+    expect(frame!.kind === "polygon" && frame!.strokeWidthMm).toBeCloseTo(0.5, 6);
+  });
+
+  it("frameViewLine übersteuert NUR die Rahmen-Kontur (Aufsicht) — die Laibungs-Blöcke (Schnitt) bleiben beim frameLine-Default", () => {
+    const p = project(
+      {
+        ...baseWindow,
+        typeId: "wt1",
+        frameLine: { color: "#ff0000", weight: 0.5 },
+        frameViewLine: { color: "#00ffff", weight: 0.2 },
+      },
+      [baseWindowType],
+    );
+    const out = generatePlan(p, "eg", visible, undefined, "mittel").primitives;
+    const frame = out.find((pr) => pr.kind === "polygon" && pr.openingId === "F1" && pr.stroke !== "none");
+    expect(frame!.kind === "polygon" && frame!.stroke).toBe("#00ffff");
+    expect(frame!.kind === "polygon" && frame!.strokeWidthMm).toBeCloseTo(0.2, 6);
+    // Laibungs-Blöcke (window-stulp) bleiben unverändert bei frameLine, NICHT frameViewLine.
+    const stulp = out.filter((pr) => pr.kind === "line" && pr.cls === "window-stulp");
+    expect(stulp.length).toBeGreaterThan(0);
+    for (const l of stulp) {
+      expect(l.kind === "line" && l.color).toBe("#ff0000");
+      expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.5, 6);
+    }
+  });
+
   it("sashLine wirkt auch bei 'grob' (1:100) auf die einzige dort sichtbare Glaslinie", () => {
     const p = project(
       { ...baseWindow, typeId: "wt1", sashLine: { color: "#00ff00", weight: 0.3 } },

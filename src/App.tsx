@@ -3374,6 +3374,9 @@ export default function App() {
       onSetOpeningFrameLine: (v) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { frameLine: v });
       },
+      onSetOpeningFrameViewLine: (v) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, { frameViewLine: v });
+      },
       onSetOpeningSashLine: (v) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { sashLine: v });
       },

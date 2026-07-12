@@ -1003,6 +1003,13 @@ export function OpeningSection({
             onChange={host.onSetOpeningFrameLine}
           />
           <LineStyleRow
+            label={t("objinfo.opening.frameViewLine")}
+            value={opening.frameViewLine}
+            fallbackColor={opening.frameLine?.color ?? OPENING_LINE_DEFAULT_COLOR}
+            fallbackWeight={opening.frameLine?.weight ?? OPENING_LINE_DEFAULT_WEIGHT}
+            onChange={host.onSetOpeningFrameViewLine}
+          />
+          <LineStyleRow
             label={t("objinfo.opening.sashLine")}
             value={opening.sashLine}
             fallbackColor={OPENING_LINE_DEFAULT_COLOR}

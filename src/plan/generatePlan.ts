@@ -2281,23 +2281,29 @@ function addOpeningSymbol(
       });
     }
   } else {
-    // Linien-Kategorien einzeln übersteuerbar (Nutzer-Wunsch): Rahmen (Blend-
-    // rahmen-Kontur + Stulp-/Laibungsblöcke), Fenster (Flügelrahmen/Sprossen),
-    // Sims (Auf-/Untersicht-Andeutung, s. u.). `undefined` ⇒ bisheriges
-    // Verhalten (strokeColor/SYMBOL_HAIRLINE_MM).
+    // Linien-Kategorien einzeln übersteuerbar (Nutzer-Wunsch): Rahmen-Schnitt
+    // (Laibungs-/Stulp-Blöcke, geschnittenes Profil), Rahmen-Aufsicht (die
+    // durchlaufende Kontur DAZWISCHEN, projiziert statt geschnitten), Fenster
+    // (Flügelrahmen/Sprossen), Sims (Auf-/Untersicht-Andeutung, s. u.).
+    // `undefined` ⇒ bisheriges Verhalten (strokeColor/SYMBOL_HAIRLINE_MM);
+    // `frameViewLine` fällt zusätzlich auf `frameLine` zurück (eine Farbe für
+    // Schnitt+Aufsicht, bis der Nutzer sie explizit trennt).
     const frameColor = o.frameLine?.color ?? strokeColor;
     const frameWeight = o.frameLine?.weight ?? lwMm;
     const frameHairline = o.frameLine?.weight ?? SYMBOL_HAIRLINE_MM;
+    const frameViewColor = o.frameViewLine?.color ?? frameColor;
+    const frameViewWeight = o.frameViewLine?.weight ?? frameWeight;
     const sashColor = o.sashLine?.color ?? strokeColor;
     const sashWeight = o.sashLine?.weight ?? SYMBOL_HAIRLINE_MM;
 
-    // Blendrahmen-Rechteck (mittel + fein).
+    // Blendrahmen-Rechteck in Aufsicht (mittel + fein) — die durchlaufende
+    // Kontur zwischen den geschnittenen Laibungs-/Stulp-Blöcken.
     out.push({
       kind: "polygon",
       pts: sym.frame,
       fill: "none",
-      stroke: frameColor,
-      strokeWidthMm: frameWeight,
+      stroke: frameViewColor,
+      strokeWidthMm: frameViewWeight,
       hatch: NO_HATCH,
       greyed,
       openingId: o.id,

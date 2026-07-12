@@ -311,8 +311,10 @@ export interface PanelHostValue {
   onSetOpeningDoorType: (doorType: "normal" | "wandoeffnung") => void;
   /** Setzt die Sturzlinien-Darstellung der Tür. */
   onSetOpeningLintelLines: (lintelLines: "keine" | "innen" | "aussen" | "beide") => void;
-  /** Übersteuert Farbe/Strichstärke des Blendrahmens + Stulp-/Laibungsblöcke. */
+  /** Übersteuert Farbe/Strichstärke der geschnittenen Laibungs-/Stulp-Blöcke. */
   onSetOpeningFrameLine: (v: { color?: string; weight?: number } | undefined) => void;
+  /** Übersteuert Farbe/Strichstärke der durchlaufenden Rahmen-Kontur in Aufsicht. */
+  onSetOpeningFrameViewLine: (v: { color?: string; weight?: number } | undefined) => void;
   /** Übersteuert Farbe/Strichstärke von Flügelrahmen/Sprossen. */
   onSetOpeningSashLine: (v: { color?: string; weight?: number } | undefined) => void;
   /** Übersteuert Farbe/Strichstärke der Auf-/Untersicht-Andeutung (Sims). */

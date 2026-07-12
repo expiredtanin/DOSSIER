@@ -1219,11 +1219,23 @@ export interface Opening {
    */
   color?: string;
   /**
-   * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke des
-   * Blendrahmens + Stulp-/Laibungsblöcke ({@link LineStyleOverride}).
-   * `undefined` ⇒ {@link Opening.color}, sonst Kategorie-Farbe/Haarlinie.
+   * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke der
+   * GESCHNITTENEN Blendrahmen-Querschnittsblöcke an den Laibungs-Enden
+   * ({@link LineStyleOverride}, entspricht `windowSymbol.jambMarks` — die
+   * Schnittfläche des Rahmenmaterials an der Wand-Laibung). `undefined` ⇒
+   * {@link Opening.color}, sonst Kategorie-Farbe/Haarlinie. Separat von
+   * {@link frameViewLine} (die durchlaufende Rahmen-Kontur in Aufsicht).
    */
   frameLine?: LineStyleOverride;
+  /**
+   * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke der
+   * durchlaufenden Blendrahmen-KONTUR in Aufsicht (das Rechteck aus
+   * `windowSymbol.frame` — die beiden Linien zwischen den geschnittenen
+   * Laibungs-/Stulp-Blöcken, NICHT geschnitten, sondern von oben/unten
+   * projiziert). `undefined` ⇒ fällt auf {@link frameLine} zurück (bisheriges
+   * Verhalten: eine gemeinsame Farbe/Stärke für Schnitt UND Aufsicht).
+   */
+  frameViewLine?: LineStyleOverride;
   /**
    * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke des
    * Flügelrahmens/der Sprossen (window-sash/window-mullion).

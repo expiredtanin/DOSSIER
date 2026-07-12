@@ -235,6 +235,7 @@ export interface OpeningInfo {
   zTop: number;
   /** Nur Fenster: Grundriss-Linien-Übersteuerungen je Kategorie. */
   frameLine?: { color?: string; weight?: number };
+  frameViewLine?: { color?: string; weight?: number };
   sashLine?: { color?: string; weight?: number };
   sillLineStyle?: { color?: string; weight?: number };
 }
@@ -728,6 +729,7 @@ function openingSelection(project: Project, o: Opening): Selection {
     zBottom: ext.zBottom,
     zTop: ext.zTop,
     frameLine: o.frameLine,
+    frameViewLine: o.frameViewLine,
     sashLine: o.sashLine,
     sillLineStyle: o.sillLineStyle,
   };
