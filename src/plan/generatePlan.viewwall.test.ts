@@ -83,6 +83,67 @@ describe("generatePlan — Schnitt vs. Ansicht nach Schnitthöhe", () => {
 
 // ── Decke über der Schnittebene → gestrichelte Überkopf-Umrisslinie ──────────
 
+// ── grob (1:100) → Wand-Poché IMMER vollschwarz (SIA 400 Fig. 36) ──────────
+
+/** Minimalprojekt mit einer Wand, deren Bauteil ein NICHT-"solid" Hatch-Pattern
+ *  hat (Backstein/diagonal — der Normalfall bei mehrschichtigen Wandtypen). */
+function nonSolidWallProject(): Project {
+  const wall: Wall = {
+    id: "W1",
+    type: "wall",
+    floorId: "eg",
+    categoryCode: "20",
+    start: { x: 0, y: 0 },
+    end: { x: 4, y: 0 },
+    wallTypeId: "aw",
+    height: 2.6,
+  };
+  return {
+    id: "t",
+    name: "T",
+    lineStyles: [{ id: "thin", name: "d", weight: 0.13, color: "#111", dash: null }],
+    hatches: [{ id: "diag", name: "Diagonal", pattern: "diagonal", scale: 1, angle: 45, color: "#111" }],
+    components: [{ id: "brick", name: "Backstein", color: "#c9a876", hatchId: "diag", joinPriority: 10 }],
+    wallTypes: [{ id: "aw", name: "AW", layers: [{ componentId: "brick", thickness: 0.3 }] }],
+    drawingLevels: [
+      { id: "eg", name: "EG", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0, baseElevation: 0 },
+    ],
+    layers: [{ code: "20", name: "Wände", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
+    walls: [wall],
+    doors: [],
+    openings: [],
+    ceilings: [],
+    stairs: [],
+    rooms: [],
+    drawings2d: [],
+    context: [],
+  };
+}
+
+describe("generatePlan — grob: Wand-Poché immer vollschwarz (SIA 400 Fig. 36)", () => {
+  const wallPolys = (plan: ReturnType<typeof generatePlan>, id: string) =>
+    plan.primitives.filter(
+      (p): p is Extract<typeof p, { kind: "polygon" }> => p.kind === "polygon" && p.wallId === id,
+    );
+
+  it("grob: Vollschwarz-Füllung auch wenn das Bauteil-Pattern NICHT 'solid' ist (Regression)", () => {
+    const plan = generatePlan(nonSolidWallProject(), "eg", new Set(["20"]), undefined, "grob");
+    const polys = wallPolys(plan, "W1");
+    expect(polys.length).toBeGreaterThan(0);
+    expect(polys.every((p) => p.fill === "#0f0f0f")).toBe(true);
+    expect(polys.every((p) => p.hatch.pattern === "none")).toBe(true);
+  });
+
+  it("mittel/fein: Füllung bleibt bauteilfarben (KEIN Vollschwarz-Zwang) — unverändertes Verhalten", () => {
+    for (const detail of ["mittel", "fein"] as const) {
+      const plan = generatePlan(nonSolidWallProject(), "eg", new Set(["20"]), undefined, detail);
+      const polys = wallPolys(plan, "W1");
+      expect(polys.length).toBeGreaterThan(0);
+      expect(polys.some((p) => p.fill !== "#0f0f0f")).toBe(true);
+    }
+  });
+});
+
 /** Minimalprojekt mit EINER Decke (Slab) ohne Wände → voller Umriss sichtbar. */
 function ceilingProject(): Project {
   return {

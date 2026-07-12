@@ -553,11 +553,13 @@ export interface SectionCutStyle {
 }
 
 /**
- * Löst das tragende Bauteil (höchste `joinPriority`) einer Wand auf — dieselbe
- * Regel wie {@link backbonePocheFill} für die grobe Grundriss-Poché — und liefert
- * dessen Poché-Füllung + echte Schraffur für die Schnitt-Poché. `null`, wenn Wandtyp
- * oder Bauteil nicht auflösbar sind (z. B. verwaistes `wallTypeId`); der
- * Aufrufer fällt dann auf die generische Schnitt-Schraffur zurück.
+ * Löst das tragende Bauteil (höchste `joinPriority`) einer Wand auf und liefert
+ * dessen Poché-Füllung + echte Schraffur für die Schnitt-Poché (mittel/fein).
+ * Die grobe Grundriss-Poché (1:100) folgt dieser Bauteil-Regel NICHT mehr —
+ * sie ist immer vollschwarz, unabhängig vom Bauteil-Pattern (SIA 400 Fig. 36,
+ * s. `addWallPoche`). `null`, wenn Wandtyp oder Bauteil nicht auflösbar sind
+ * (z. B. verwaistes `wallTypeId`); der Aufrufer fällt dann auf die generische
+ * Schnitt-Schraffur zurück.
  */
 export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCutStyle | null {
   try {
@@ -1565,9 +1567,7 @@ function addWallPoche(
 
   const outlineMm = wallLwMm * OUTLINE_DETAIL_FACTOR[detail];
   const layerLineMm = LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail];
-  // Vereinfachte Füllung (grob): neutrale SIA-Poché des tragenden Bauteils
-  // (höchste Priorität) — weiß, bzw. schwarz falls dessen Muster "solid" ist.
-  const simpleFill = backbonePocheFill(project, wt);
+  // Vereinfachte Füllung (grob): immer schwarze Vollfüllung, keine Schraffur
 
   // Durchgangswand-Aussparungen (Phase 1c): über diese Achsen-Intervalle × Quer-
   // Offsetbereiche wird die Nah-Putz-Zone der Durchgangswand echt ausgeschnitten
@@ -1617,10 +1617,11 @@ function addWallPoche(
 
     if (detail === "grob") {
       // Eine Sammelfläche über die volle Dicke, ohne Schraffur, dicker Umriss.
+      // Bei grob: immer Vollschwarz-Füllung gemäß SIA 400 Anhang B.9, Figur 36
       out.push({
         kind: "polygon",
         pts: clippedBand(p1, p2, refOff - total / 2, refOff + total / 2, startCut, endCut),
-        fill: simpleFill,
+        fill: HATCH_INK,
         stroke,
         strokeWidthMm: outlineMm,
         hatch: NO_HATCH,
@@ -1838,22 +1839,6 @@ function addWallPoche(
     if (holesHi.length) drawNearEdge(offHi, holesHi);
     if (holesLo.length) drawNearEdge(offLo, holesLo);
   }
-}
-
-/**
- * Neutrale SIA-Poché-Füllung des tragenden Bauteils (höchste joinPriority) für
- * die grobe Sammelfläche: Papier, bzw. Tinte falls dessen Schraffur "solid" ist.
- * (Ersetzt die frühere rohe Bauteil-Albedo — im Plan zählt die Poché, nicht die
- * 3D-Materialfarbe.)
- */
-function backbonePocheFill(project: Project, wt: Project["wallTypes"][number]): string {
-  let best: { pattern: HatchPattern; prio: number } | null = null;
-  for (const layer of wt.layers) {
-    const comp = getComponent(project, layer.componentId);
-    if (!best || comp.joinPriority > best.prio)
-      best = { pattern: getHatch(project, comp.hatchId).pattern, prio: comp.joinPriority };
-  }
-  return best ? pocheFill(best.pattern) : HATCH_PAPER;
 }
 
 /**
