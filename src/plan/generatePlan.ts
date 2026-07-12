@@ -2349,10 +2349,21 @@ function addOpeningSymbol(
       }
     }
   }
-  // Die frühere Brüstungslinie (Wandachse, unabhängig von der Rahmenposition)
-  // ist entfernt (Nutzer-Feedback: falsch positioniert, Dash rendert nicht
-  // sichtbar) — eine korrekte Andeutung kommt als Teil der geplanten Auf-/
-  // Untersicht-Option (aussen/innen, je nach Einbaulage) neu.
+  // Auf-/Untersicht-Andeutung ({@link WindowType.sillLine}): eine Referenzlinie
+  // an der Rahmen-Aussen-/Innenkante (NICHT der Wandachse — ersetzt die frühere,
+  // falsch positionierte Brüstungslinie), nur wenn der Typ es explizit wählt.
+  // "auf" (Aufsicht von oben, dünn gepunktet) vs. "unter" (Untersicht von unten,
+  // gestrichelt wie die übrigen Überkopf-Projektionen).
+  if (detail !== "grob" && wt?.sillLine) {
+    const { faces, view } = wt.sillLine;
+    const dash = view === "unter" ? OVERHEAD_DASH : [0.04, 0.08];
+    if (faces === "aussen" || faces === "beide") {
+      out.push({ kind: "line", a: sym.frame[0], b: sym.frame[1], cls: "window-sill", weightMm: SYMBOL_HAIRLINE_MM, dash, color: strokeColor, greyed, openingId: o.id });
+    }
+    if (faces === "innen" || faces === "beide") {
+      out.push({ kind: "line", a: sym.frame[3], b: sym.frame[2], cls: "window-sill", weightMm: SYMBOL_HAIRLINE_MM, dash, color: strokeColor, greyed, openingId: o.id });
+    }
+  }
   // Rollladen-/Sonnenschutzkasten (P0-Minimalfassung, reine 2D-Kontur): ein
   // gestricheltes Rechteck ÜBER der Öffnung, ausserhalb der Wand-Aussenfläche —
   // Breite = `shading.box.width` (0/fehlt ⇒ Öffnungsbreite), die zweite

@@ -348,6 +348,35 @@ function BasisPanel({
           min={0}
           onCommit={(n) => patchWt({ insetFromFace: n })}
         />
+        <SelField
+          label={t("oed.f.sillLineFaces")}
+          value={wt.sillLine?.faces ?? "off"}
+          options={[
+            { value: "off", label: t("oed.sillLine.off") },
+            { value: "aussen", label: t("oed.insetFace.aussen") },
+            { value: "innen", label: t("oed.insetFace.innen") },
+            { value: "beide", label: t("oed.sillLine.beide") },
+          ]}
+          onChange={(v) =>
+            patchWt({
+              sillLine:
+                v === "off"
+                  ? undefined
+                  : { faces: v as "aussen" | "innen" | "beide", view: wt.sillLine?.view ?? "auf" },
+            })
+          }
+        />
+        {wt.sillLine && (
+          <SelField
+            label={t("oed.f.sillLineView")}
+            value={wt.sillLine.view}
+            options={[
+              { value: "auf", label: t("oed.sillLine.auf") },
+              { value: "unter", label: t("oed.sillLine.unter") },
+            ]}
+            onChange={(v) => patchWt({ sillLine: { faces: wt.sillLine!.faces, view: v } })}
+          />
+        )}
       </>
     );
   }

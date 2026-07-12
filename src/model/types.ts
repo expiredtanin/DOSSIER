@@ -458,6 +458,15 @@ export interface WindowType {
    * (Meter), abgeteilt durch einen Kämpfer. 0/fehlt ⇒ kein Oberlicht.
    */
   transomHeight?: number;
+  /**
+   * Auf-/Untersicht-Andeutung im Grundriss (mittel/fein): eine Referenzlinie an
+   * der gewählten Fläche(n) — sinnvoll, wenn die Öffnung die Schnittebene NICHT
+   * regulär durchschneidet (z. B. bodentiefes Fenster oder hoch sitzendes
+   * Oberlicht). `faces` wählt aussen/innen/beide, `view` die Blickrichtung:
+   * "auf" (Aufsicht von oben, dünn) oder "unter" (Untersicht von unten,
+   * gestrichelt wie eine überkopf liegende Kante). Fehlt/undefined ⇒ keine Linie.
+   */
+  sillLine?: { faces: "aussen" | "innen" | "beide"; view: "auf" | "unter" };
   /** Default-Brüstungshöhe über Wand-UK (Meter). */
   defaultSillHeight: number;
   /** Default-Lichtbreite (Meter). */
