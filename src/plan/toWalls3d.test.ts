@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Project, Roof } from "../model/types";
+import type { Project, Roof, Wall } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
 import { selectionHighlightLines, projectToWalls3d, projectToModel3d, pickGeometry } from "./toWalls3d";
 import { resolveHatch } from "./generatePlan";
@@ -1282,13 +1282,120 @@ describe("Per-Schicht-Decken-Dominanz Wand/Decke (3D-Entsprechung der Schnitt-Bo
     expect(insul[0].baseElevation + insul[0].height).toBeCloseTo(2.6, 6);
   });
 
-  it("keine Subtraktion, wenn keine Decke im selben Geschoss überlappt (z.B. OG-Wände ohne Dach-Decke)", () => {
-    // W6 (OG) hat keine überlappende Decke im Sample-Projekt (C1 ist EG) ->
-    // unverändertes Verhalten (volle wall.height).
+  it("keine Deckensubtraktion, wenn keine Decke im selben Geschoss überlappt (z.B. OG-Wände ohne Dach-Decke)", () => {
+    // W6 (OG) hat keine überlappende Decke im Sample-Projekt (C1 ist EG) -> keine
+    // Deckenbedingte z-Aufteilung. Volle wall.height, AUSSER das Sample-Projekt
+    // hat auch ein Dach (RF1) über W6 (s. "Dach-Wand-Verschneidung" unten) — eine
+    // an der Gehrungsecke leicht über die Achse hinaus verlängerte, hauchdünne
+    // Putzschicht (0.02 m) reicht dort minimal unter den Dachüberstand und wird
+    // korrekt (nicht durch die Decken-, sondern die Dach-Logik) leicht gekappt.
     const w6 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W6");
     expect(w6.length).toBeGreaterThan(0);
+    const offHeight = w6.filter((seg) => Math.abs(seg.height - 2.6) > 1e-6);
+    expect(offHeight.length).toBe(1);
+    expect(offHeight[0].thickness).toBeCloseTo(0.02, 6); // die dünne Putz-Gehrungsspitze
+    expect(offHeight[0].height).toBeLessThan(2.6);
+    expect(offHeight[0].height).toBeGreaterThan(2.5); // nur ein paar cm gekappt
     for (const seg of w6) {
+      if (seg === offHeight[0]) continue;
       expect(seg.height).toBeCloseTo(2.6, 6);
+    }
+  });
+});
+
+describe("Dach-Wand-Verschneidung (clipPieceToRoofs) — Wand-Top folgt der Dach-Unterkante", () => {
+  // Giebelwand entlang Y (0..4), unter einem Satteldach (First entlang X bei
+  // y=2, Traufhöhe 3, Neigung 30°, Dicke 0.1). Wandhöhe 3.0 ⇒ an der Traufe
+  // (y=0/4) reicht die Wand exakt bis zur Dachfläche (baseElevation=3), muss
+  // dort also um die Dachdicke (0.1) gekappt werden; am First (y=2) liegt die
+  // Dachunterkante weit darüber ⇒ unverändert volle Höhe.
+  const gableRoof: Roof = {
+    id: "RG",
+    type: "roof",
+    floorId: "eg",
+    categoryCode: "35",
+    outline: [
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+      { x: 6, y: 4 },
+      { x: 0, y: 4 },
+    ],
+    shape: "sattel",
+    pitchDeg: 30,
+    overhang: 0,
+    ridgeAxis: "x",
+    baseElevation: 3,
+    thickness: 0.1,
+  };
+  const gableWall: Wall = {
+    id: "WG",
+    type: "wall",
+    floorId: "eg",
+    categoryCode: "20",
+    start: { x: 3, y: 0 },
+    end: { x: 3, y: 4 },
+    wallTypeId: sampleProject.walls[0].wallTypeId,
+    height: 3.0,
+  };
+
+  it("kappt die Wand nahe der Traufe, lässt sie am First unverändert", () => {
+    const project: Project = {
+      ...sampleProject,
+      walls: [gableWall],
+      roofs: [gableRoof],
+      doors: [],
+      openings: [],
+      ceilings: [],
+    };
+    const walls = projectToWalls3d(project).filter((w) => w.wallId === "WG");
+    expect(walls.length).toBeGreaterThan(0);
+    // EXAKT an der Traufe (start.y = 0 bzw. end nahe 4): das erste ~0.15-m-
+    // Achsenstück ist geklemmt (Dachunterkante dort knapp unter 3.0, s. o.); die
+    // Neigung steigt schnell genug, dass bereits das ZWEITE Achsenstück wieder
+    // unbeeinflusst ist — bewusst NUR das direkt an y=0 anliegende Stück prüfen.
+    const atEave = walls.filter((s) => s.start[1] < 1e-6 || s.end[1] > 4 - 1e-6);
+    expect(atEave.length).toBeGreaterThan(0);
+    for (const seg of atEave) {
+      expect(seg.height).toBeLessThan(3.0 - 0.05);
+      expect(seg.height).toBeGreaterThan(2.8); // nicht mehr als die Dachdicke gekappt
+    }
+    // Am First (y nahe 2): unverändert volle Höhe (Dachunterkante liegt weit darüber).
+    const nearRidge = walls.filter((s) => s.start[1] > 1.8 && s.start[1] < 2.2);
+    expect(nearRidge.length).toBeGreaterThan(0);
+    for (const seg of nearRidge) {
+      expect(seg.height).toBeCloseTo(3.0, 6);
+    }
+  });
+
+  it("ohne Dach im selben Geschoss: unverändertes Verhalten (volle Höhe, EIN Stück)", () => {
+    const project: Project = {
+      ...sampleProject,
+      walls: [gableWall],
+      roofs: [],
+      doors: [],
+      openings: [],
+      ceilings: [],
+    };
+    const walls = projectToWalls3d(project).filter((w) => w.wallId === "WG");
+    expect(walls.length).toBeGreaterThan(0);
+    for (const seg of walls) {
+      expect(seg.height).toBeCloseTo(3.0, 6);
+    }
+  });
+
+  it("Dach auf einem ANDEREN Geschoss wirkt nicht (floorId-Filter)", () => {
+    const project: Project = {
+      ...sampleProject,
+      walls: [gableWall],
+      roofs: [{ ...gableRoof, floorId: "og" }],
+      doors: [],
+      openings: [],
+      ceilings: [],
+    };
+    const walls = projectToWalls3d(project).filter((w) => w.wallId === "WG");
+    expect(walls.length).toBeGreaterThan(0);
+    for (const seg of walls) {
+      expect(seg.height).toBeCloseTo(3.0, 6);
     }
   });
 });

@@ -54,8 +54,8 @@ import { mergeHoles } from "../geometry/polygonHoles";
 import { openingInterval, openingVerticalExtent, openingJambs } from "../geometry/opening";
 import type { DetailLevel } from "../ui/TopBar";
 import { stairGeometry, stairBBox } from "../geometry/stair";
-import { roofGeometry, roofBaseElevation } from "../geometry/roof";
-import type { Vec3 as RoofVec3 } from "../geometry/roof";
+import { roofGeometry, roofBaseElevation, roofUndersideAt } from "../geometry/roof";
+import type { Vec3 as RoofVec3, RoofGeometry } from "../geometry/roof";
 import { extrudePolygon, extrudeCircle } from "../engine/truckSolid";
 import { computeJoins } from "../model/joins";
 import type { WallCuts } from "../model/joins";
@@ -1025,6 +1025,80 @@ function bandCutDistance(wall: Wall, u: Vec2, n: Vec2, bandOffset: number, cut: 
   return dot(sub(hit, wall.start), u);
 }
 
+/** Schrittweite (Meter) der Dach-Unterkanten-Annäherung, s. {@link clipPieceToRoofs}. */
+const ROOF_CLIP_STEP = 0.15;
+
+/**
+ * Kappt ein Wand-Achsenstück [a,bb] (z-Bereich [zb,zt]) an der Dach-UNTERKANTE
+ * (falls ein Dach darüber liegt) und emittiert es via `emit` — in FEINE Achsen-
+ * Schritte (~{@link ROOF_CLIP_STEP}) zerlegt, je Schritt auf die dort gemessene
+ * Dach-Unterkante geklemmt. Das ist eine TREPPENSTUFEN-Annäherung an eine echte
+ * geneigte Giebelwand-Stirnfläche (render3d-Wandkörper (`RWall`) haben nur einen
+ * FLACHEN Top — echte Schrägflächen bräuchten einen neuen Mesh-Pfad); bei der
+ * gewählten Schrittweite optisch glatt genug UND behebt das eigentliche Problem
+ * (Wand durchdringt die Dachfläche → Z-Fighting, s. PENDENZEN.md „Dach-Wand-
+ * Verschneidung"), ohne render3d/Rust anzufassen.
+ *
+ * Ohne Dächer (oder keinem, das dieses Wandstück überdeckt) läuft das Stück
+ * UNVERÄNDERT als EIN Body durch (kein Overhead im Normalfall).
+ */
+function clipPieceToRoofs(
+  project: Project,
+  wall: Wall,
+  u: Vec2,
+  n: Vec2,
+  bandOffset: number,
+  a: number,
+  bb: number,
+  zb: number,
+  zt: number,
+  emit: (a: number, bb: number, zb: number, zt: number) => void,
+): void {
+  if (zt - zb <= EPS || bb - a <= EPS) return;
+  const wallBounds = wallFootprintBounds(wall, Math.abs(bandOffset) + 0.01);
+  const roofs = (project.roofs ?? []).filter((r) => {
+    if (r.floorId !== wall.floorId) return false;
+    const eavesZ = roofBaseElevation(project, r);
+    // Grober Höhen-Ausschluss: Dach-Traufe weit unter dem Wandstück ⇒ kann nicht
+    // schneiden (übliche Dächer haben keine nach unten ausufernden Übermasse).
+    return eavesZ + 50 >= zb; // grosszügige Schranke statt exakter First-Höhe
+  });
+  if (roofs.length === 0) {
+    emit(a, bb, zb, zt);
+    return;
+  }
+  const roofData = roofs
+    .map((r) => {
+      const eavesZ = roofBaseElevation(project, r);
+      const geo = roofGeometry(r, eavesZ);
+      if (!boundsOverlap(wallBounds, outlineBounds(geo.eaves))) return null;
+      const total = roofLayers(project, r).reduce((s, l) => s + Math.max(0, l.thickness), 0);
+      return { geo, total };
+    })
+    .filter((d): d is { geo: RoofGeometry; total: number } => d !== null);
+  if (roofData.length === 0) {
+    emit(a, bb, zb, zt);
+    return;
+  }
+
+  const span = bb - a;
+  const steps = Math.max(1, Math.ceil(span / ROOF_CLIP_STEP));
+  const stepLen = span / steps;
+  for (let i = 0; i < steps; i++) {
+    const sa = a + i * stepLen;
+    const sb = a + (i + 1) * stepLen;
+    const mid = (sa + sb) / 2;
+    const p = add(add(wall.start, scale(u, mid)), scale(n, bandOffset));
+    let clip = zt;
+    for (const { geo, total } of roofData) {
+      const under = roofUndersideAt(geo, total, p.x, p.y);
+      if (under !== null && under < clip) clip = under;
+    }
+    const zte = Math.max(zb, clip);
+    if (zte - zb > EPS) emit(sa, sb, zb, zte);
+  }
+}
+
 /**
  * Emittiert die Wandkörper EINER Wand (mit oder ohne Öffnungen).
  *
@@ -1180,8 +1254,9 @@ function emitWall(out: RWall[], project: Project, wall: Wall, layered = true, cu
           .map((c) => ({ from: Math.max(a, c.from), to: Math.min(bb, c.to), zBottom: c.zBottom, zTop: c.zTop }))
           .filter((c) => c.to > c.from + EPS);
         if (local.length === 0) {
-          // Kein Decken-Überlapp auf diesem Achsenstück ⇒ volle Höhe (Band läuft durch).
-          emitPiece(a, bb, zBottom, zTop);
+          // Kein Decken-Überlapp auf diesem Achsenstück ⇒ volle Höhe (Band läuft
+          // durch) — ausser ein Dach kappt den Top (s. {@link clipPieceToRoofs}).
+          clipPieceToRoofs(project, wall, u, n, b.offset, a, bb, zBottom, zTop, emitPiece);
           continue;
         }
         // Achse [a,bb] an allen Überdeckungs-Grenzen in elementare Teilstücke
@@ -1205,7 +1280,7 @@ function emitWall(out: RWall[], project: Project, wall: Wall, layered = true, cu
           // endet die Wand an der Decke, statt oben wieder aufzutauchen (s.
           // {@link terminateOrSubtractSpans}). "both"/undefined = heutiges Verhalten.
           for (const [zb, zt] of terminateOrSubtractSpans(zBottom, zTop, zCutters, wall.sliceTermination)) {
-            emitPiece(xa, xb, zb, zt);
+            clipPieceToRoofs(project, wall, u, n, b.offset, xa, xb, zb, zt, emitPiece);
           }
         }
       }

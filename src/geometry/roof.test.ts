@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { roofGeometry, roofBBox } from "./roof";
+import { roofGeometry, roofBBox, roofUndersideAt } from "./roof";
 import type { Roof, Vec2 } from "../model/types";
 
 // Rechteck 6×4 (x:0..6, y:0..4), Neigung 45° (tan=1), Traufhöhe 10, kein Überstand.
@@ -179,5 +179,33 @@ describe("roofGeometry — Überstand", () => {
     const g = roofGeometry(roof({ shape: "sattel", overhang: 0.4 }), E);
     const bb = roofBBox(g.eaves);
     expect(bb).toEqual({ x0: -0.4, y0: -0.4, x1: 6.4, y1: 4.4 });
+  });
+});
+
+describe("roofUndersideAt — Dach-Unterkante an einem Grundriss-Punkt", () => {
+  // Sattel 6×4, First entlang X bei yc=2, Neigung 45° (tan=1) -> Firsthöhe 2.
+  // Fläche 1 (y0=0..yc=2): z(x,y) = 10 + y (linear, unabhängig von x).
+  const g = roofGeometry(roof({ shape: "sattel" }), E);
+
+  it("an der Traufe (y=0): Oberkante 10, Unterkante minus Schichtdicke", () => {
+    expect(roofUndersideAt(g, 0, 3, 0)).toBeCloseTo(10, 6);
+    expect(roofUndersideAt(g, 0.2, 3, 0)).toBeCloseTo(9.8, 6);
+  });
+
+  it("am First (y=2): Oberkante 12 (Firsthöhe 10+2)", () => {
+    expect(roofUndersideAt(g, 0, 3, 2)).toBeCloseTo(12, 6);
+  });
+
+  it("interpoliert linear zwischen Traufe und First (y=1 -> 11)", () => {
+    expect(roofUndersideAt(g, 0, 3, 1)).toBeCloseTo(11, 6);
+  });
+
+  it("ausserhalb des Dach-Umrisses -> null", () => {
+    expect(roofUndersideAt(g, 0, 3, -1)).toBeNull();
+    expect(roofUndersideAt(g, 0, 8, 1)).toBeNull();
+  });
+
+  it("negative/fehlende Schichtdicke wird auf 0 geklemmt (keine Anhebung)", () => {
+    expect(roofUndersideAt(g, -0.5, 3, 0)).toBeCloseTo(10, 6);
   });
 });

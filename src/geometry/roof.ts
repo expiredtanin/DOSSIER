@@ -362,3 +362,55 @@ export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
     ridgeHeight: g.ridgeHeight,
   };
 }
+
+/** Punkt-in-Polygon (Ray-Casting), 2D-Aufsicht. */
+function pointInPolygon2D(p: Vec2, poly: Vec2[]): boolean {
+  let inside = false;
+  const n = poly.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    const intersect =
+      a.y > p.y !== b.y > p.y &&
+      p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y || 1e-12) + a.x;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Dach-UNTERKANTE (Innenseite der untersten Schicht) an einem Grundriss-Punkt
+ * (x,y) — `null`, wenn der Punkt ausserhalb aller Dachflächen liegt (Aufsicht).
+ * Ebenengleichung je Fläche über die Newell-Normale (identische Herleitung wie
+ * `toSection.ts::appendRoofSections`, dort inline für den Vertikalschnitt) minus
+ * `totalLayerThickness` (Summe aller Dachschicht-Dicken, s. `roofLayers`).
+ * Dient dem Wand-Zuschnitt unter geneigten Dächern ({@link trimWallTopForRoofs}
+ * in `toWalls3d.ts`) — vermeidet, dass ein flacher Wand-Top die Dachfläche
+ * durchdringt (Z-Fighting).
+ */
+export function roofUndersideAt(
+  geo: RoofGeometry,
+  totalLayerThickness: number,
+  x: number,
+  y: number,
+): number | null {
+  for (const pl of geo.planes) {
+    const pts = pl.pts;
+    if (pts.length < 3) continue;
+    if (!pointInPolygon2D({ x, y }, pts.map((p) => ({ x: p[0], y: p[1] })))) continue;
+    let A = 0;
+    let B = 0;
+    let C = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const c = pts[i];
+      const d = pts[(i + 1) % pts.length];
+      A += (c[1] - d[1]) * (c[2] + d[2]);
+      B += (c[2] - d[2]) * (c[0] + d[0]);
+      C += (c[0] - d[0]) * (c[1] + d[1]);
+    }
+    if (Math.abs(C) < 1e-9) continue; // (nahezu) vertikale Fläche
+    const topZ = pts[0][2] - (A * (x - pts[0][0]) + B * (y - pts[0][1])) / C;
+    return topZ - Math.max(0, totalLayerThickness);
+  }
+  return null;
+}
