@@ -214,31 +214,37 @@ describe("generatePlan — Stulp-/Flügelstoss-Marken (SIA fig. 37/38, window-st
     ],
   };
 
-  it("mittel: EIN Stulp-Quadrat (4 Linien) je Flügel-Junction", () => {
+  // Jeder Block ist ein Rechteck über die VOLLE Rahmentiefe (4 Linien) — je EIN
+  // Block an JEDEM Laibungs-Ende (Blendrahmen-Querschnitt, immer vorhanden)
+  // plus die Flügelstoss-Blöcke an inneren Junctions (mittel 1, fein 2).
+
+  it("mittel: 2 Laibungs-Blöcke (Enden) + EIN Stulp-Block je Flügel-Junction", () => {
     const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
-    expect(stulpLineCount(p, "mittel")).toBe(4);
+    // 2 Laibungsenden + 1 Junction = 3 Blöcke × 4 Linien.
+    expect(stulpLineCount(p, "mittel")).toBe(12);
   });
 
-  it("fein: ZWEI Stulp-Quadrate (8 Linien) je Flügel-Junction", () => {
+  it("fein: 2 Laibungs-Blöcke (Enden) + ZWEI Stulp-Blöcke je Flügel-Junction", () => {
     const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
-    expect(stulpLineCount(p, "fein")).toBe(8);
+    // 2 Laibungsenden + 2 Junction-Blöcke = 4 Blöcke × 4 Linien.
+    expect(stulpLineCount(p, "fein")).toBe(16);
   });
 
-  it("grob: KEINE Stulp-Marken", () => {
+  it("grob: KEINE Rahmen-Blöcke", () => {
     const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
     expect(stulpLineCount(p, "grob")).toBe(0);
   });
 
-  it("Alt-Fall (kein typeId, nur wingCount) erzeugt KEINE Stulp-Marken — keine echte Flügeltabelle", () => {
+  it("Alt-Fall (kein typeId, nur wingCount) erzeugt KEINE Rahmen-Blöcke — keine echte Flügeltabelle", () => {
     const p = project({ ...baseWindow, wingCount: 3 });
     expect(stulpLineCount(p, "mittel")).toBe(0);
     expect(stulpLineCount(p, "fein")).toBe(0);
   });
 
-  it("einflügliges Fenster (keine Junction) erzeugt KEINE Stulp-Marken", () => {
+  it("einflügliges Fenster (keine Junction) zeigt trotzdem die 2 Laibungs-Blöcke an den Enden", () => {
     const p = project({ ...baseWindow, typeId: "wt1" }, [baseWindowType]);
-    expect(stulpLineCount(p, "mittel")).toBe(0);
-    expect(stulpLineCount(p, "fein")).toBe(0);
+    expect(stulpLineCount(p, "mittel")).toBe(8);
+    expect(stulpLineCount(p, "fein")).toBe(8);
   });
 });
 

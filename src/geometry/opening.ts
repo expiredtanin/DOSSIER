@@ -410,33 +410,38 @@ export function windowSymbol(
 
     const fein = detail === "fein";
     const axisWidth = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
-    const axisDir = normalize(sub(jambEnd, jambStart));
     const segs = sashSegments(spec.sashes, axisWidth);
     // Öffenbarer Flügel sitzt `reveal` tiefer im Blendrahmen (nur „fein").
     const reveal = fein ? Math.min(bandDepth * 0.3, fw * 0.7) : 0;
-    // Halbe Kantenlänge eines Stulp-Quadrats (SIA-Marke), an die Rahmenbreite gekoppelt.
-    const markHalf = Math.min(fw * 0.6, bandDepth * 0.4);
+    // Profil-Block über die VOLLE Rahmentiefe (aussen bis innen), Breite `2·halfU`
+    // entlang der Achse, zentriert bei `uCenter` (Achsabstand ab jambStart) — der
+    // Rahmenquerschnitt, wie er im Grundriss-Schnitt sichtbar ist (Nutzer:
+    // „Rahmen aussen als zwei Flächen gleichbreit wie das Fenster [tief]").
+    const frameBlock = (uCenter: number, halfU: number): Vec2[] => {
+      const a = along(jambStart, jambEnd, uCenter - halfU);
+      const b = along(jambStart, jambEnd, uCenter + halfU);
+      return [
+        add(a, scale(n, frameOuterN)),
+        add(b, scale(n, frameOuterN)),
+        add(b, scale(n, frameInnerN)),
+        add(a, scale(n, frameInnerN)),
+      ];
+    };
+    // Laibungs-Pfosten an beiden Enden (Blendrahmen-Querschnitt an der Wand-
+    // öffnung) — EIN Block je Seite, unabhängig vom Detailgrad.
+    meetingMarks.push(frameBlock(fw / 2, fw / 2), frameBlock(axisWidth - fw / 2, fw / 2));
 
     // Flügel-Trennlinien (Mittelpfosten) an den inneren Segmentgrenzen +
-    // Stulp-Quadrate: mittel 1, fein 2 (die beiden zusammenstossenden Profile).
+    // Stulp-Block: mittel 1, fein 2 (die beiden zusammenstossenden Profile) —
+    // je über die volle Rahmentiefe.
     for (let i = 0; i < segs.length - 1; i++) {
       const uPos = segs[i].to;
       const onAxis = along(jambStart, jambEnd, uPos);
       mullionLines.push([add(onAxis, scale(n, frameOuterN)), add(onAxis, scale(n, frameInnerN))]);
-      const center = add(onAxis, scale(n, gMidBase));
-      const square = (offU: number): Vec2[] => {
-        const c = add(center, scale(axisDir, offU));
-        return [
-          add(add(c, scale(axisDir, -markHalf)), scale(n, -markHalf)),
-          add(add(c, scale(axisDir, markHalf)), scale(n, -markHalf)),
-          add(add(c, scale(axisDir, markHalf)), scale(n, markHalf)),
-          add(add(c, scale(axisDir, -markHalf)), scale(n, markHalf)),
-        ];
-      };
       if (fein) {
-        meetingMarks.push(square(-markHalf), square(markHalf));
+        meetingMarks.push(frameBlock(uPos - fw / 2, fw / 2), frameBlock(uPos + fw / 2, fw / 2));
       } else {
-        meetingMarks.push(square(0));
+        meetingMarks.push(frameBlock(uPos, fw / 2));
       }
     }
 
