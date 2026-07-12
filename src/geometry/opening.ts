@@ -433,11 +433,11 @@ export function windowSymbol(
 
     // Flügel-Trennlinien (Mittelpfosten) an den inneren Segmentgrenzen +
     // Stulp-Block: mittel 1, fein 2 (die beiden zusammenstossenden Profile) —
-    // je über die volle Rahmentiefe.
+    // je über die volle Rahmentiefe. KEINE zusätzliche dünne Trennlinie mehr
+    // daneben (Nutzer-Feedback: „keine vertikale Trennlinie, sondern ein
+    // Rechteck") — der Block selbst markiert den Stoss.
     for (let i = 0; i < segs.length - 1; i++) {
       const uPos = segs[i].to;
-      const onAxis = along(jambStart, jambEnd, uPos);
-      mullionLines.push([add(onAxis, scale(n, frameOuterN)), add(onAxis, scale(n, frameInnerN))]);
       if (fein) {
         meetingMarks.push(frameBlock(uPos - fw / 2, fw / 2), frameBlock(uPos + fw / 2, fw / 2));
       } else {

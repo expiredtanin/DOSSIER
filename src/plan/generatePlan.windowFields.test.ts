@@ -98,15 +98,30 @@ function linesOfClass(p: Project, cls: string, detail: "grob" | "mittel" | "fein
   );
 }
 
+/** Mittelpunkt (x) jedes Rahmenblocks (4 Linien = ein Rechteck, s. windowSymbol
+ *  meetingMarks) unter den `window-stulp`-Primitiven, sortiert. */
+function stulpBlockCenters(p: Project, detail: "grob" | "mittel" | "fein" = "mittel"): number[] {
+  const lines = linesOfClass(p, "window-stulp", detail);
+  const centers: number[] = [];
+  for (let i = 0; i < lines.length; i += 4) {
+    const group = lines.slice(i, i + 4);
+    const xs = group.flatMap((pr) => (pr.kind === "line" ? [pr.a.x, pr.b.x] : []));
+    centers.push((Math.min(...xs) + Math.max(...xs)) / 2);
+  }
+  return centers.sort((a, b) => a - b);
+}
+
 describe("generatePlan — Flügeleinteilung aus sashes (Item 1)", () => {
   it("Alt-Fall (kein typeId/sashes, nur wingCount=3) erzeugt genau 2 Pfostenlinien — Regression", () => {
     const p = project({ ...baseWindow, wingCount: 3 });
     expect(linesOfClass(p, "window-mullion").length).toBe(2);
   });
 
-  it("WindowType MIT sashes (3 feste Flügelbreiten 0.4 m) erzeugt Pfostenlinien exakt an den Flügelgrenzen", () => {
+  it("WindowType MIT sashes (3 feste Flügelbreiten 0.4 m) erzeugt Rahmenblöcke (keine Linie mehr) exakt an den Flügelgrenzen", () => {
     // Öffnung 1.2 m breit, jambStart bei x=1.0 (position 1.0) -> jambEnd x=2.2.
-    // 3 Flügel à 0.4 m (autoWidth:false) -> Grenzen bei x=1.4 und x=1.8.
+    // 3 Flügel à 0.4 m (autoWidth:false) -> Stoss-Blöcke bei x=1.4 und x=1.8.
+    // KEINE separate window-mullion-Linie mehr (Nutzer-Feedback: nur der Block
+    // markiert den Stoss, keine zusätzliche dünne Trennlinie daneben).
     const wt: WindowType = {
       ...baseWindowType,
       sashes: [
@@ -116,28 +131,26 @@ describe("generatePlan — Flügeleinteilung aus sashes (Item 1)", () => {
       ],
     };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
-    const mullions = linesOfClass(p, "window-mullion");
-    expect(mullions.length).toBe(2);
-    const xs = mullions
-      .map((pr) => (pr.kind === "line" ? pr.a.x : NaN))
-      .sort((a, b) => a - b);
-    expect(xs[0]).toBeCloseTo(1.4, 6);
-    expect(xs[1]).toBeCloseTo(1.8, 6);
+    expect(linesOfClass(p, "window-mullion").length).toBe(0);
+    // 2 Laibungs-Blöcke (Enden, nahe x=1.0/2.2) + 2 Flügelstoss-Blöcke (1.4/1.8).
+    const junctionCenters = stulpBlockCenters(p, "mittel").filter((x) => x > 1.2 && x < 2.0);
+    expect(junctionCenters.length).toBe(2);
+    expect(junctionCenters[0]).toBeCloseTo(1.4, 6);
+    expect(junctionCenters[1]).toBeCloseTo(1.8, 6);
   });
 
-  it("WindowType MIT sashes, aber alle autoWidth (kein fixes width/pfosten) -> identische Grenzen wie die alte wingCount-Gleichverteilung", () => {
+  it("WindowType MIT sashes, aber alle autoWidth (kein fixes width/pfosten) -> Rahmenblöcke an denselben Positionen wie die alte wingCount-Gleichverteilung", () => {
     // 3 gleichmässige Flügel über sashesOfWindowType (kein `sashes` am Typ,
-    // nur `wingCount: 3`) müssen exakt dieselben Pfosten liefern wie der
-    // Alt-Fall ohne Typ (Regressionssicherheit der Ableitung).
+    // nur `wingCount: 3`) müssen an denselben Achspositionen einen Stoss haben
+    // wie der Alt-Fall ohne Typ (Regressionssicherheit der Ableitung) — der
+    // Alt-Fall zeigt sie weiterhin als Linie, der typisierte Pfad als Block.
     const wt: WindowType = { ...baseWindowType, wingCount: 3 };
     const withType = project({ ...baseWindow, typeId: "wt1" }, [wt]);
     const withoutType = project({ ...baseWindow, wingCount: 3 });
-    const linesOf = (p: Project) =>
-      linesOfClass(p, "window-mullion")
-        .map((pr) => (pr.kind === "line" ? pr.a.x : NaN))
-        .sort((a, b) => a - b);
-    const a = linesOf(withType);
-    const b = linesOf(withoutType);
+    const a = stulpBlockCenters(withType, "mittel").filter((x) => x > 1.2 && x < 2.0);
+    const b = linesOfClass(withoutType, "window-mullion")
+      .map((pr) => (pr.kind === "line" ? pr.a.x : NaN))
+      .sort((x, y) => x - y);
     expect(a.length).toBe(b.length);
     a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 9));
   });
