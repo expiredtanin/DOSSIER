@@ -159,15 +159,45 @@ pub fn build_mesh_edges(mesh: &Mesh) -> Vec<f32> {
 /// Entscheidet, ob eine Kante gezeichnet wird: Randkante (nur ein Dreieck) oder
 /// Knickkante (zwei angrenzende Dreiecke stehen ueber dem Crease-Winkel zuein-
 /// ander). Koplanare geteilte Kanten (Flaechendiagonalen) werden unterdrueckt.
+///
+/// DOPPELSEITIGE MESHES (Kontext/Dach/Fenster-Glas, s. `mesh.rs::push_ctx_tri` —
+/// jedes Dreieck wird dort MIT gespiegelter Rueckseite [-Normale] dupliziert,
+/// weil die Mesh-Pipeline Backface-Culling aktiv hat): jedes Original-Dreieck
+/// liefert dadurch IMMER ein exaktes +n/-n-Paar an jeder seiner Kanten. Ohne
+/// Beruecksichtigung wuerde das faelschlich als extremer Knick (dot ≈ -1)
+/// gewertet und JEDE Flaechen-Innendiagonale eines doppelseitigen Meshes
+/// gezeichnet (Nutzer-Report: Dreiecks-Diagonalen sichtbar auf Dach/Glas).
+/// Fix: zuerst Rueckseiten-Partner (dot ≈ -1 zueinander) einander zuordnen und
+/// nur EINEN Vertreter je Original-Dreieck behalten — danach greift dieselbe
+/// Rand-/Knick-Logik wie bei einseitigen Meshes (Waende), unabhaengig davon,
+/// ob doppelseitig gerendert wurde oder nicht.
 fn should_draw(normals: &[[f32; 3]]) -> bool {
-    match normals.len() {
+    let mut representatives: Vec<[f32; 3]> = Vec::new();
+    let mut used = vec![false; normals.len()];
+    for i in 0..normals.len() {
+        if used[i] {
+            continue;
+        }
+        used[i] = true;
+        representatives.push(normals[i]);
+        for j in (i + 1)..normals.len() {
+            if used[j] {
+                continue;
+            }
+            if dot(normals[i], normals[j]) < -CREASE_COS {
+                used[j] = true; // Rueckseiten-Duplikat desselben Dreiecks
+                break;
+            }
+        }
+    }
+    match representatives.len() {
         0 => false,
-        1 => true, // Silhouette/Rand: gehoert nur einem Dreieck
+        1 => true, // Silhouette/Rand: gehoert nur einem Original-Dreieck
         _ => {
             // Zeichnen, sobald irgendein Normalen-Paar deutlich abknickt.
-            for i in 0..normals.len() {
-                for j in (i + 1)..normals.len() {
-                    if dot(normals[i], normals[j]) < CREASE_COS {
+            for i in 0..representatives.len() {
+                for j in (i + 1)..representatives.len() {
+                    if dot(representatives[i], representatives[j]) < CREASE_COS {
                         return true;
                     }
                 }
@@ -246,5 +276,136 @@ mod tests {
     fn empty_mesh_yields_no_edges() {
         let m = Mesh::default();
         assert!(build_mesh_edges(&m).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod double_sided_tests {
+    // Deckt den Nutzer-Report ab (Dreiecks-Diagonalen sichtbar auf Dach/Glas):
+    // Kontext-Meshes werden von `mesh.rs::push_ctx_tri` IMMER doppelseitig
+    // aufgebaut (jedes Dreieck + gespiegelte Rueckseite [-Normale], weil die
+    // Mesh-Pipeline Backface-Culling aktiv hat). Diese Tests bauen genau dieses
+    // Muster nach (nicht die einfachen einseitigen Test-Meshes oben).
+    use super::*;
+
+    fn mesh_single_sided(positions: &[[f32; 3]], indices: &[u32]) -> Mesh {
+        let mut verts = Vec::new();
+        for p in positions {
+            verts.extend_from_slice(&[p[0], p[1], p[2], 0.0, 1.0, 0.0, 0.8, 0.8, 0.8]);
+        }
+        Mesh { verts, indices: indices.to_vec() }
+    }
+
+    /// Baut ein Mesh wie `mesh_single_sided`, aber verdoppelt JEDES Dreieck mit
+    /// umgekehrter Wicklung (a,c,b statt a,b,c) — exakt das Muster von
+    /// `mesh.rs::push_ctx_tri` (Vorder- + Rueckseite fuer doppelseitiges Rendering).
+    fn mesh_double_sided(positions: &[[f32; 3]], indices: &[u32]) -> Mesh {
+        let mut verts = Vec::new();
+        for p in positions {
+            verts.extend_from_slice(&[p[0], p[1], p[2], 0.0, 1.0, 0.0, 0.8, 0.8, 0.8]);
+        }
+        let mut doubled = Vec::with_capacity(indices.len() * 2);
+        for tri in indices.chunks_exact(3) {
+            doubled.extend_from_slice(&[tri[0], tri[1], tri[2]]);
+            doubled.extend_from_slice(&[tri[0], tri[2], tri[1]]); // gespiegelte Rueckseite
+        }
+        Mesh { verts, indices: doubled }
+    }
+
+    fn segment_count(v: &[f32]) -> usize {
+        v.len() / EDGE_FLOATS_PER_VERTEX / 2
+    }
+
+    #[test]
+    fn doubled_coplanar_quad_still_drops_shared_diagonal() {
+        // Dasselbe ebene Quad wie coplanar_quad_drops_shared_diagonal, aber
+        // doppelseitig aufgebaut — VOR dem Fix haette dies faelschlich 6 statt
+        // 4 Segmente geliefert (Diagonale faelschlich als Knick erkannt).
+        let m = mesh_double_sided(
+            &[
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+            ],
+            &[0, 1, 2, 0, 2, 3],
+        );
+        let e = build_mesh_edges(&m);
+        assert_eq!(segment_count(&e), 4);
+    }
+
+    #[test]
+    fn doubled_single_triangle_still_has_three_boundary_edges() {
+        // Silhouette-Kanten eines EINZELNEN Dreiecks muessen trotz Verdopplung
+        // (Vorder-/Rueckseite) weiterhin als Rand erkannt und gezeichnet werden.
+        let m = mesh_double_sided(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            &[0, 1, 2],
+        );
+        let e = build_mesh_edges(&m);
+        assert_eq!(segment_count(&e), 3);
+    }
+
+    #[test]
+    fn doubled_folded_quad_still_keeps_crease() {
+        // Echter 90°-Knick bleibt auch doppelseitig als Kante erhalten (keine
+        // Ueberkompensation, die auch echte Knicke unterdruecken wuerde).
+        let m = mesh_double_sided(
+            &[
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0],
+            ],
+            &[0, 1, 2, 0, 3, 1],
+        );
+        let e = build_mesh_edges(&m);
+        assert_eq!(segment_count(&e), 5);
+    }
+
+    #[test]
+    fn real_opening_box_topology_suppresses_face_diagonals_doubled() {
+        // Exakte Ecken-Reihenfolge/Indizes aus toWalls3d.ts::OPENING_BOX_TRIS,
+        // diesmal ECHT doppelseitig wie im tatsaechlichen Render-Pfad (die
+        // Fenster-Glas-/Rahmen-Boxen laufen ueber append_context_mesh).
+        let from = 0.0f32;
+        let to = 1.2f32;
+        let z_bottom = 0.9f32;
+        let z_top = 2.1f32;
+        let n_min = -0.03f32;
+        let n_max = 0.03f32;
+        let mut positions = Vec::new();
+        for i in 0..8u32 {
+            let s = if i & 1 != 0 { to } else { from };
+            let z = if i & 2 != 0 { z_top } else { z_bottom };
+            let t = if i & 4 != 0 { n_max } else { n_min };
+            positions.push([s, -t, z]);
+        }
+        let indices: Vec<u32> = vec![
+            0, 1, 3, 0, 3, 2,
+            4, 5, 7, 4, 7, 6,
+            0, 1, 5, 0, 5, 4,
+            2, 3, 7, 2, 7, 6,
+            0, 2, 6, 0, 6, 4,
+            1, 3, 7, 1, 7, 5,
+        ];
+        let m = mesh_double_sided(&positions, &indices);
+        let e = build_mesh_edges(&m);
+        // Ein Quader hat 12 echte Kanten (Silhouette); bei korrekter Diagonalen-
+        // Unterdrueckung sollten es GENAU 12 sein (nicht 12+6 Diagonalen=18).
+        assert_eq!(segment_count(&e), 12, "erwartet 12 Kanten (Quader-Silhouette), keine Flaechendiagonalen");
+    }
+
+    #[test]
+    fn single_sided_helper_matches_module_level_mesh_helper() {
+        // Absicherung: der lokale mesh_single_sided-Helfer verhaelt sich
+        // identisch zum bestehenden `tests::mesh` (keine versehentliche
+        // Abweichung beim Kopieren).
+        let m = mesh_single_sided(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            &[0, 1, 2],
+        );
+        let e = build_mesh_edges(&m);
+        assert_eq!(segment_count(&e), 3);
     }
 }
