@@ -460,6 +460,10 @@ export function windowSymbol(
       const gInnerN = frameInnerN + (operable ? reveal : 0);
       // Verschachtelter Flügelrahmen NUR bei „fein" (SIA fig. 38); „mittel" bleibt
       // beim reinen Blendrahmen-Band (SIA fig. 37).
+      // Keine Glaslinie mehr im Feld (auch nicht bei „fein") — Nutzer-Feedback:
+      // eine feine Haarlinie mittig im Glasfeld wird nicht gebraucht, unabhängig
+      // von der Fensterposition. Der Flügelrahmen (nur bei öffenbaren Flügeln)
+      // bleibt als einzige zusätzliche Kontur bei „fein" bestehen.
       if (operable) {
         const sFrom = along(jambStart, jambEnd, clearFrom);
         const sTo = along(jambStart, jambEnd, clearTo);
@@ -469,19 +473,6 @@ export function windowSymbol(
           add(sTo, scale(n, gInnerN)),
           add(sFrom, scale(n, gInnerN)),
         ]);
-      }
-      const gInsetU = operable ? fw * 0.6 : 0;
-      const gFrom = clearFrom + gInsetU;
-      const gTo = clearTo - gInsetU;
-      if (gTo - gFrom <= 1e-6) continue;
-      const gMid = (gOuterN + gInnerN) / 2;
-      const a = along(jambStart, jambEnd, gFrom);
-      const b = along(jambStart, jambEnd, gTo);
-      // Glas als Doppellinie (Isolierverglasung, ~15 mm Abstand) — nur „fein"
-      // erreicht diesen Punkt (mittel bricht oben früh ab, s. o.).
-      const half = Math.min(0.0075, bandDepth * 0.18);
-      for (const off of [gMid - half, gMid + half]) {
-        glassLines.push([add(a, scale(n, off)), add(b, scale(n, off))]);
       }
     }
     return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks };

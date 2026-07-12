@@ -191,15 +191,15 @@ describe("generatePlan — Verglasung glazingPanes (Item 2)", () => {
   const glassLineCount = (p: Project, detail: "grob" | "mittel" | "fein" = "mittel") =>
     linesOfClass(p, "window-glass", detail).length;
 
-  it("glazingPanes beeinflusst die 2D-Glaslinienzahl NICHT mehr — SIA-Detailgrad entscheidet (mittel zeigt noch KEINE Glaslinie, SIA fig. 37; Doppellinie/IV erst bei 'fein', unabhängig von der Scheibenzahl)", () => {
+  it("glazingPanes beeinflusst die 2D-Glaslinienzahl NICHT mehr — typisierte Fenster zeigen GAR KEINE Glaslinie im Grundriss (Nutzer-Feedback: keine Haarlinie mittig im Feld, unabhängig von Detailgrad/Fensterposition)", () => {
     const wt3: WindowType = { ...baseWindowType, id: "wt3", glazingPanes: 3 };
     const wt1: WindowType = { ...baseWindowType, id: "wt1", glazingPanes: 1 };
     const p3 = project({ ...baseWindow, typeId: "wt3" }, [wt3]);
     const p1 = project({ ...baseWindow, typeId: "wt1" }, [wt1]);
     expect(glassLineCount(p3, "mittel")).toBe(0);
     expect(glassLineCount(p1, "mittel")).toBe(0);
-    expect(glassLineCount(p3, "fein")).toBe(2);
-    expect(glassLineCount(p1, "fein")).toBe(2);
+    expect(glassLineCount(p3, "fein")).toBe(0);
+    expect(glassLineCount(p1, "fein")).toBe(0);
   });
 
   it("ohne typeId bleibt die alte Detailgrad-Regel (grob/mittel=1, fein=2) unverändert — Regression", () => {
