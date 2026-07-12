@@ -50,15 +50,17 @@ export type DetailLevel = "grob" | "mittel" | "fein";
 /**
  * Render-/Anzeigemodus der 3D-Ansicht: schattiert, einheitlich weiss (Clay-Look),
  * texturiert (echte PBR-Materialien je Bauteil), Drahtgitter, Verdeckte Kanten
- * (Hidden-Line). Wirkt nur in der Perspektive. Der Slot „section" (Schnitt-
- * schraffur, Welle B) ist bewusst freigelassen.
+ * (Hidden-Line), Schattiert mit Kanten (typischer BIM-Look: Bauteilfarben +
+ * Modell-Kanten obenauf). Wirkt nur in der Perspektive. Der Slot „section"
+ * (Schnittschraffur, Welle B) ist bewusst freigelassen.
  */
 export type RenderMode =
   | "shaded"
   | "white"
   | "textured"
   | "wireframe"
-  | "hidden";
+  | "hidden"
+  | "shaded-edges";
 
 /**
  * Kanonischer Blickwinkel der 3D-Ansicht (Vectorworks/DOSSIER-Stil). „front"/
@@ -1591,6 +1593,7 @@ export function ViewRibbonTab({
               title={t("display.style.hint")}
               options={[
                 { value: "shaded", label: t("display.style.shaded") },
+                { value: "shaded-edges", label: t("display.style.shadedEdges") },
                 { value: "white", label: t("display.style.white") },
                 { value: "textured", label: t("display.style.textured") },
                 { value: "wireframe", label: t("display.style.wireframe") },
@@ -1796,6 +1799,7 @@ export function Ribbon3dTab({
             title={t("display.style.hint")}
             options={[
               { value: "shaded", label: t("display.style.shaded") },
+              { value: "shaded-edges", label: t("display.style.shadedEdges") },
               { value: "white", label: t("display.style.white") },
               { value: "textured", label: t("display.style.textured") },
               { value: "wireframe", label: t("display.style.wireframe") },

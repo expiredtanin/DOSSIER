@@ -46,6 +46,11 @@ pub enum RenderStyle {
     /// Hidden-Line: flach-weisse Flaechen (fuellen den Depth-Buffer) + dunkle
     /// Kanten obenauf, tiefengetestet -> nur sichtbare Kanten erscheinen.
     Hidden,
+    /// "Schattiert mit Kanten" (typischer BIM-Look, z. B. Revit/ArchiCAD): wie
+    /// `Shaded` (echte Bauteilfarben, beleuchtet), ZUSAETZLICH die dunklen
+    /// Modell-Kanten obenauf (wie bei `Hidden`, aber mit Material- statt
+    /// Weiss-Flaechen).
+    ShadedEdges,
 }
 
 impl RenderStyle {
@@ -56,18 +61,20 @@ impl RenderStyle {
             "textured" => RenderStyle::Textured,
             "wireframe" => RenderStyle::Wireframe,
             "hidden" => RenderStyle::Hidden,
+            "shaded-edges" => RenderStyle::ShadedEdges,
             _ => RenderStyle::Shaded,
         }
     }
 
     /// `mode.x`-Wert fuer den Mesh-Shader (siehe shaders.rs): 0 = Material/shaded
-    /// (auch textured), 1 = weiss/Clay, 2 = flach-weisse Hidden-Line-Flaechen.
+    /// (auch textured/shaded-edges), 1 = weiss/Clay, 2 = flach-weisse
+    /// Hidden-Line-Flaechen.
     fn mesh_mode(self) -> f32 {
         match self {
             RenderStyle::White => 1.0,
             RenderStyle::Hidden => 2.0,
             // Shaded, Textured, Wireframe (Flaechen werden bei Wireframe eh nicht
-            // gezeichnet) -> Material.
+            // gezeichnet), ShadedEdges -> Material.
             _ => 0.0,
         }
     }
@@ -79,7 +86,19 @@ impl RenderStyle {
 
     /// Werden in diesem Stil Modell-Kanten gezeichnet?
     fn draws_edges(self) -> bool {
-        matches!(self, RenderStyle::Wireframe | RenderStyle::Hidden)
+        matches!(
+            self,
+            RenderStyle::Wireframe | RenderStyle::Hidden | RenderStyle::ShadedEdges
+        )
+    }
+
+    /// Braucht dieser Stil die leicht nach hinten gebiaste Flaechen-Pipeline,
+    /// damit die (tiefengetesteten) Kanten sauber obenauf liegen, statt mit den
+    /// Flaechen zu flackern (Z-Fighting)? Gilt fuer alle Stile, die BEIDES
+    /// zeichnen (Flaechen + Kanten) — bislang nur `Hidden`, jetzt auch
+    /// `ShadedEdges`.
+    fn needs_biased_face_pipeline(self) -> bool {
+        matches!(self, RenderStyle::Hidden | RenderStyle::ShadedEdges)
     }
 }
 
@@ -1343,7 +1362,7 @@ impl Renderer {
                         pass.draw_indexed(0..t.index_count, 0, 0..1);
                     }
                 } else if let Some(m) = &self.mesh {
-                    let face_pipeline = if self.style == RenderStyle::Hidden {
+                    let face_pipeline = if self.style.needs_biased_face_pipeline() {
                         &self.hidden_face_pipeline
                     } else {
                         &self.pipeline
@@ -1416,5 +1435,50 @@ impl Renderer {
             }
         }
         queue.submit(std::iter::once(encoder.finish()));
+    }
+}
+
+#[cfg(test)]
+mod render_style_tests {
+    use super::RenderStyle;
+
+    #[test]
+    fn shaded_edges_parses_from_api_string() {
+        assert_eq!(
+            RenderStyle::from_str_or_shaded("shaded-edges"),
+            RenderStyle::ShadedEdges
+        );
+    }
+
+    #[test]
+    fn unknown_style_falls_back_to_shaded() {
+        assert_eq!(RenderStyle::from_str_or_shaded("bogus"), RenderStyle::Shaded);
+    }
+
+    #[test]
+    fn shaded_edges_uses_material_colors_like_shaded() {
+        // mode.x = 0.0 -> Material/Bauteilfarben, NICHT weiss (1.0) oder
+        // Hidden-Line-Flaechen (2.0) — der BIM-Look behaelt echte Farben.
+        assert_eq!(RenderStyle::ShadedEdges.mesh_mode(), 0.0);
+        assert_eq!(RenderStyle::Shaded.mesh_mode(), RenderStyle::ShadedEdges.mesh_mode());
+    }
+
+    #[test]
+    fn shaded_edges_draws_both_faces_and_edges() {
+        assert!(RenderStyle::ShadedEdges.draws_faces());
+        assert!(RenderStyle::ShadedEdges.draws_edges());
+    }
+
+    #[test]
+    fn shaded_edges_needs_biased_face_pipeline_like_hidden() {
+        assert!(RenderStyle::ShadedEdges.needs_biased_face_pipeline());
+        assert!(RenderStyle::Hidden.needs_biased_face_pipeline());
+        assert!(!RenderStyle::Shaded.needs_biased_face_pipeline());
+    }
+
+    #[test]
+    fn plain_shaded_style_unaffected_by_new_variant() {
+        assert!(!RenderStyle::Shaded.draws_edges());
+        assert!(RenderStyle::Shaded.draws_faces());
     }
 }

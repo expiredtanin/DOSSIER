@@ -84,6 +84,7 @@ export const de = {
   "display.style.color": "Farbig",
   "display.style.mono": "Schwarz-Weiss",
   "display.style.shaded": "Schattiert",
+  "display.style.shadedEdges": "Schattiert mit Kanten",
   "display.style.white": "Weiss",
   "display.style.textured": "Texturiert",
   "display.style.wireframe": "Drahtgitter",

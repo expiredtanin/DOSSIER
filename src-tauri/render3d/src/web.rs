@@ -389,6 +389,9 @@ impl WebModelRenderer {
     ///  - `"wireframe"`— nur Modell-Kanten (Feature-Edges), keine Flaechen.
     ///  - `"hidden"`   — Hidden-Line: flach-weisse Flaechen fuellen den Depth-
     ///    Buffer, dunkle Kanten liegen tiefengetestet obenauf (nur sichtbare).
+    ///  - `"shaded-edges"` — "Schattiert mit Kanten" (typischer BIM-Look): wie
+    ///    `"shaded"` (echte Bauteilfarben), ZUSAETZLICH dunkle Modell-Kanten
+    ///    obenauf wie bei `"hidden"`.
     /// Unbekannte Werte fallen auf `"shaded"` zurueck. Wirkt erst beim naechsten
     /// `render`. Loest `set_render_mode_white` ab (das bleibt kompatibel).
     pub fn set_render_style(&mut self, style: &str) -> Result<(), JsValue> {

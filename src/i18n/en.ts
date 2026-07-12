@@ -83,6 +83,7 @@ export const en: Record<TranslationKey, string> = {
   "display.style.color": "Color",
   "display.style.mono": "Black & white",
   "display.style.shaded": "Shaded",
+  "display.style.shadedEdges": "Shaded with edges",
   "display.style.white": "White",
   "display.style.textured": "Textured",
   "display.style.wireframe": "Wireframe",
