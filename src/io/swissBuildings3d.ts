@@ -61,6 +61,14 @@ export interface FetchBuildings3dResult {
   meshes: ImportedMesh[];
   /** Tatsächlich gelieferte Version (nach evtl. v3→v2-Fallback). */
   versionUsed: BuildingsVersion;
+  /**
+   * Anzahl STAC-Kacheln, die NICHT geladen werden konnten (zu gross — DXF
+   * komprimiert stark, eine Kachel unter {@link MAX_ASSET_BYTES} kann
+   * entpackt trotzdem die max. Textlänge sprengen —, Netzwerkfehler oder
+   * fehlender Inhalt). Dient der UI, „0 Gebäude" von „X Kacheln übersprungen,
+   * zu gross" zu unterscheiden statt eines stummen Leer-Ergebnisses.
+   */
+  skippedTiles: number;
 }
 
 /**
@@ -82,24 +90,35 @@ export async function fetchBuildings3d(
   const origin = originIn ?? makeOrigin(center);
   const bboxWgs = lv95BboxToWgs84(bboxAround(center, radius));
 
-  const tryCollection = async (collectionId: string): Promise<ImportedMesh[]> => {
+  const tryCollection = async (
+    collectionId: string,
+  ): Promise<{ meshes: ImportedMesh[]; skipped: number }> => {
     const items = await stacQuery(collectionId, bboxWgs, ASSET_PRIORITY);
     const meshes: ImportedMesh[] = [];
+    let skipped = 0;
     for (const item of items) {
       const asset = pickAsset(item, ASSET_PRIORITY);
-      if (!asset) continue;
+      if (!asset) {
+        skipped++;
+        continue;
+      }
       const text = await downloadAssetText(asset, [".dxf"]);
-      if (!text) continue;
+      if (!text) {
+        skipped++;
+        continue;
+      }
       const parsed = parseDxf(text);
       for (const m of parsed.meshes) meshes.push(shiftMeshToOrigin(m, origin, item.id));
     }
-    return meshes;
+    return { meshes, skipped };
   };
 
   if (version === "v3") {
     const v3 = await tryCollection(COLLECTION_V3);
-    if (v3.length > 0) return { origin, meshes: v3, versionUsed: "v3" };
+    if (v3.meshes.length > 0) {
+      return { origin, meshes: v3.meshes, versionUsed: "v3", skippedTiles: v3.skipped };
+    }
   }
   const v2 = await tryCollection(COLLECTION_V2);
-  return { origin, meshes: v2, versionUsed: "v2" };
+  return { origin, meshes: v2.meshes, versionUsed: "v2", skippedTiles: v2.skipped };
 }

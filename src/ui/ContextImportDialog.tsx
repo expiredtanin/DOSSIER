@@ -135,6 +135,10 @@ export function ContextImportDialog({
       // Echte swissBUILDINGS3D-Meshes (v2/v3) landen direkt als ContextObject
       // (kein Footprint+Box-Umweg über GeoFeature/featuresToContextObjects).
       const extraObjs: ContextObject[] = [];
+      // Übersprungene Kacheln (zu gross entpackt, Netzwerkfehler o. Ä.) —
+      // damit „0 Gebäude" von „X Kacheln übersprungen" unterscheidbar bleibt
+      // statt eines stummen Leer-Ergebnisses (Nutzer-Report).
+      let buildingsSkipped = 0;
 
       if (sources.swissBuildings === "flach") {
         const r = await fetchBuildings(center, radius, origin);
@@ -149,6 +153,7 @@ export function ContextImportDialog({
         );
         origin = r.origin;
         extraObjs.push(...r.meshes);
+        buildingsSkipped = r.skippedTiles;
       }
 
       const osmSel: OsmSelection = {
@@ -186,7 +191,11 @@ export function ContextImportDialog({
       }
 
       if (all.length === 0 && !terrain && extraObjs.length === 0) {
-        setError(t("ctxImport.empty"));
+        setError(
+          buildingsSkipped > 0
+            ? t("ctxImport.buildingsSkipped", { count: buildingsSkipped })
+            : t("ctxImport.empty"),
+        );
         setStatus(null);
         return;
       }
@@ -196,10 +205,16 @@ export function ContextImportDialog({
       if (terrain) objs.push(terrain);
       onImport(objs);
       setStatus(
-        t("ctxImport.imported", {
-          count: all.length + extraObjs.length,
-          sets: objs.length,
-        }),
+        buildingsSkipped > 0
+          ? t("ctxImport.importedWithSkipped", {
+              count: all.length + extraObjs.length,
+              sets: objs.length,
+              skipped: buildingsSkipped,
+            })
+          : t("ctxImport.imported", {
+              count: all.length + extraObjs.length,
+              sets: objs.length,
+            }),
       );
       onClose();
     } catch {

@@ -75,26 +75,49 @@ export function pickAsset(item: StacItem, priority: string[]): StacAsset | null 
   return pool[0] ?? null;
 }
 
+/** Grobe jszip-interne Schätzung der UNKOMPRIMIERTEN Grösse eines Zip-Eintrags
+ *  (Bytes), falls verfügbar — `_data.uncompressedSize` ist kein offiziell
+ *  typisiertes API, aber ein stabiles, verbreitet genutztes internes Feld
+ *  (siehe `jszip/lib/compressedObject.js`). `null`, wenn nicht auslesbar. */
+function estimateUncompressedSize(entry: JSZip.JSZipObject): number | null {
+  const data = (entry as unknown as { _data?: { uncompressedSize?: number } })._data;
+  return typeof data?.uncompressedSize === "number" ? data.uncompressedSize : null;
+}
+
 /** Lädt ein Asset als Text; entpackt automatisch, wenn es ein `.zip` ist
  *  (liefert den Inhalt der ERSTEN enthaltenen Datei mit einer der `innerExt`-
  *  Endungen). `null` bei Fehler, fehlendem Inhalt im ZIP, oder wenn das Asset
- *  {@link MAX_ASSET_BYTES} überschreitet. */
+ *  {@link MAX_ASSET_BYTES} überschreitet (komprimiert ODER — DXF/Text
+ *  komprimiert stark — unkomprimiert, s. u.). Wirft NIE (fängt Netzwerk-/
+ *  ZIP-/String-Längen-Fehler ab und liefert `null`), damit eine einzelne
+ *  kaputte/überdimensionierte Kachel nicht den ganzen Import abbricht. */
 export async function downloadAssetText(
   asset: StacAsset,
   innerExt: string[],
 ): Promise<string | null> {
   if (asset.size != null && asset.size > MAX_ASSET_BYTES) return null;
-  const res = await fetch(viaProxy(asset.href));
-  if (!res.ok) return null;
-  if (asset.href.toLowerCase().endsWith(".zip")) {
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > MAX_ASSET_BYTES) return null;
-    const zip = await JSZip.loadAsync(buf);
-    const entry = Object.values(zip.files).find(
-      (f) => !f.dir && innerExt.some((ext) => f.name.toLowerCase().endsWith(ext)),
-    );
-    if (!entry) return null;
-    return entry.async("text");
+  try {
+    const res = await fetch(viaProxy(asset.href));
+    if (!res.ok) return null;
+    if (asset.href.toLowerCase().endsWith(".zip")) {
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength > MAX_ASSET_BYTES) return null;
+      const zip = await JSZip.loadAsync(buf);
+      const entry = Object.values(zip.files).find(
+        (f) => !f.dir && innerExt.some((ext) => f.name.toLowerCase().endsWith(ext)),
+      );
+      if (!entry) return null;
+      // Proaktiv prüfen: DXF/Text komprimiert stark, ein Zip unter dem Limit
+      // kann trotzdem eine Text-Datei enthalten, die die max. JS-String-Länge
+      // sprengt (führte zu einem harten Absturz statt einem übersprungenen
+      // Tile). Bekannte, aber unschätzbare Grösse (`null`) lässt es zu — der
+      // äussere try/catch fängt den Fall dann trotzdem sicher ab.
+      const uncompressed = estimateUncompressedSize(entry);
+      if (uncompressed != null && uncompressed > MAX_ASSET_BYTES) return null;
+      return await entry.async("text");
+    }
+    return await res.text();
+  } catch {
+    return null;
   }
-  return res.text();
 }

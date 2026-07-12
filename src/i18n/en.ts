@@ -1294,6 +1294,8 @@ export const en: Record<TranslationKey, string> = {
   "ctxImport.empty": "No geometry found in the selected area.",
   "ctxImport.importError": "Import failed.",
   "ctxImport.imported": "Imported {count} objects in {sets} sets.",
+  "ctxImport.importedWithSkipped": "Imported {count} objects in {sets} sets ({skipped} building tile(s) skipped, too large).",
+  "ctxImport.buildingsSkipped": "No buildings loaded — {count} tile(s) were too large (dense built-up area). Try a smaller radius or switch generation.",
 
   // Room command.
   "cmd.room.label": "Room",

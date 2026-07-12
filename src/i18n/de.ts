@@ -1306,6 +1306,8 @@ export const de = {
   "ctxImport.empty": "Keine Geometrie im gewählten Bereich gefunden.",
   "ctxImport.importError": "Import fehlgeschlagen.",
   "ctxImport.imported": "{count} Objekte in {sets} Sätzen importiert.",
+  "ctxImport.importedWithSkipped": "{count} Objekte in {sets} Sätzen importiert ({skipped} Gebäude-Kachel(n) übersprungen, zu gross).",
+  "ctxImport.buildingsSkipped": "Keine Gebäude geladen — {count} Kachel(n) waren zu gross (dicht bebautes Gebiet). Kleineren Radius versuchen oder Generation wechseln.",
 
   // ── Raum-Befehl ─────────────────────────────────────────────────────────────
   "cmd.room.label": "Raum",
