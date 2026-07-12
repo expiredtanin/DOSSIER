@@ -4494,13 +4494,15 @@ body {
   align-items: center;
   gap: 6px;
 }
-/* Swatch + natives Farb-Input — EIGENER Klick-Bereich (öffnet die Palette).
-   Der Hex-Text daneben ist jetzt ein separates <input> (ColorHexField),
-   damit er unabhängig editierbar ist statt nur die Palette zu öffnen. */
+/* Swatch = EINZIGES sichtbares Quadrat; das native Farb-Input liegt unsichtbar
+   (opacity 0) exakt darüber und öffnet beim Klick die native Palette — vorher
+   standen Swatch UND natives Input sichtbar nebeneinander ("zwei Farbfelder",
+   Nutzer-Report). Kein separates Hex-Textfeld mehr daneben. */
 .attr-color-swatch-wrap {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
 }
 .attr-color-swatch {
@@ -4511,43 +4513,21 @@ body {
   flex: 0 0 auto;
 }
 .attr-color input[type="color"] {
-  width: 22px;
-  height: 18px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: transparent;
+  border: none;
+  opacity: 0;
   cursor: pointer;
 }
-.attr-color-hex {
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-2);
-  font-size: 11px;
-}
-/* Editierbarer Hex-Code: sieht wie reiner Text aus, bis man klickt/fokussiert
-   — dann Rahmen + helle Schrift als Editier-Signal. */
-.attr-color-hex-input {
-  width: 8.5ch;
-  color: var(--ink-2);
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: 3px;
-  padding: 1px 3px;
-  font-family: var(--font-mono);
-  cursor: text;
-}
-.attr-color-hex-input:hover:not(:disabled) {
-  border-color: var(--border);
-}
-.attr-color-hex-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  background: var(--input);
-  color: var(--ink);
-}
 .attr-color input[type="color"]:disabled {
-  opacity: 0.4;
   cursor: not-allowed;
+}
+.attr-color-swatch-wrap:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 .attr-color-clear {
   border: 1px solid var(--line);
