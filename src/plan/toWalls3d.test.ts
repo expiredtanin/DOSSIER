@@ -527,7 +527,7 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
         ...(sampleProject.windowTypes ?? []),
         {
           id: "win-mullion-test",
-          name: "Test Sprossen",
+          name: "Test Fenster 2-flg",
           kind: "fest",
           wingCount: 2,
           mullionRows: 2,
@@ -541,7 +541,7 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
       ],
       openings: [
         {
-          id: "OM",
+          id: "OB",
           type: "opening",
           hostWallId: "W1",
           categoryCode: "21",
@@ -556,10 +556,93 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
       doors: [],
       context: [],
     };
-    const baseCount = projectToModel3d(baseline).meshes.filter(isFrame).length;
-    const mullionCount = projectToModel3d(withMullions).meshes.filter(isFrame).length;
-    // +1 Mittelpfosten (wingCount-1) +1 Kämpfer-Zeile (mullionRows-1).
-    expect(mullionCount).toBe(baseCount + 2);
+    const baselineFrames = projectToModel3d(baseline).meshes.filter(isFrame);
+    const withMullionsFrames = projectToModel3d(withMullions).meshes.filter(isFrame);
+    // Mit den Mittelpfosten (wingCount-1) und Kämpfern (mullionRows-1):
+    //   1 Flügelpfosten (wingCount−1)
+    //   1 Kämpfer (mullionRows−1)
+    // → zusammen 2 Riegel mehr als Basis (1×1 =1).
+    expect(withMullionsFrames.length).toBe(baselineFrames.length + 2);
+  });
+
+  it("wingCount=2 + mullionCols=2 -> je ein zusätzlicher Sprossen-Spalte", () => {
+    // Test um mullionCols zu prüfen (analog obigem mullionRows-Test).
+    const baseline: Project = {
+      ...sampleProject,
+      windowTypes: [
+        ...(sampleProject.windowTypes ?? []),
+        {
+          id: "win-fixed-base",
+          name: "Test Fest 1-flg",
+          kind: "fest",
+          wingCount: 1,
+          mullionCols: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+      openings: [
+        {
+          id: "OB",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-fixed-base",
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+      doors: [],
+      context: [],
+    };
+    const withMullions: Project = {
+      ...sampleProject,
+      windowTypes: [
+        ...(sampleProject.windowTypes ?? []),
+        {
+          id: "win-mullion-test",
+          name: "Test Fest 1-flg mit Sprossen-Spalte",
+          kind: "fest",
+          wingCount: 1,
+          mullionCols: 2,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+      openings: [
+        {
+          id: "OB",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-mullion-test",
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+      doors: [],
+      context: [],
+    };
+    const baselineFrames = projectToModel3d(baseline).meshes.filter(isFrame);
+    const withMullionsFrames = projectToModel3d(withMullions).meshes.filter(isFrame);
+    // wingCount bleibt in beiden Fällen 1 (isoliert den mullionCols-Effekt von
+    // wingCount, s. separater Mittelpfosten-Test oben): nur die Sprossen-Spalte
+    // (mullionCols−1) macht den Unterschied -> 1 Riegel mehr als Basis.
+    expect(withMullionsFrames.length).toBe(baselineFrames.length + 1);
   });
 
   it("öffenbarer Flügel bekommt einen Flügelrahmen-Ring (4 Riegel) im 3D; fest keinen", () => {

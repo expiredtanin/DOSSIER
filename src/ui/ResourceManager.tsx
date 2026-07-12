@@ -2336,6 +2336,15 @@ function WindowStylesTab({
               max={4}
             />
           </FieldRow>
+          <FieldRow label={t("resources.field.mullionCols")}>
+            <NumberField
+              value={win.mullionCols ?? 1}
+              onChange={(mullionCols) => patch({ mullionCols: Math.max(1, Math.round(mullionCols)) })}
+              step={1}
+              min={1}
+              max={4}
+            />
+          </FieldRow>
           <FieldRow label={t("resources.field.glazing")}>
             <SelectField
               value={win.glazing}

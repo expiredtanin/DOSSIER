@@ -776,15 +776,31 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
         // horizontale Scheiben geteilt (analog zum 3D, s. toWalls3d), mit einer
         // Trennlinie je Zeilengrenze über die Glasbreite. 1 = ungeteilt (bisher).
         const rows = Math.max(1, Math.round(wt?.mullionRows ?? 1));
+        // Sprossen-Spalten (mullionCols): das Glasfeld wird in `cols` vertikale
+        // Scheiben geteilt (analog zum 3D, s. toWalls3d), mit einer
+        // Trennlinie je Spaltengrenze über die Glasscheibenhöhe.
+        const cols = Math.max(1, Math.round(wt?.mullionCols ?? 1));
         if (gB - gA > 1e-6 && gz1 - gz0 > 1e-6) {
+          // Glasfelder: rows × cols Gitter aus Einzelscheiben.
           for (let r = 0; r < rows; r++) {
             const rz0 = gz0 + ((gz1 - gz0) * r) / rows + (r > 0 ? gV / 2 : 0);
             const rz1 = gz0 + ((gz1 - gz0) * (r + 1)) / rows - (r < rows - 1 ? gV / 2 : 0);
-            if (rz1 - rz0 > 1e-6) pr.glass.push(rect(pr.pts, gA, gB, rz0, rz1));
+            if (rz1 - rz0 <= 1e-6) continue;
+            for (let c = 0; c < cols; c++) {
+              const ca0 = gA + ((gB - gA) * c) / cols + (c > 0 ? gU / 2 : 0);
+              const ca1 = gA + ((gB - gA) * (c + 1)) / cols - (c < cols - 1 ? gU / 2 : 0);
+              if (ca1 - ca0 > 1e-6) pr.glass.push(rect(pr.pts, ca0, ca1, rz0, rz1));
+            }
           }
+          // Horizontale Trennlinien (Kämpfer)
           for (let r = 1; r < rows; r++) {
             const rz = gz0 + ((gz1 - gz0) * r) / rows;
             pr.divisions.push([quadAt(pr.pts, gA, rz), quadAt(pr.pts, gB, rz)]);
+          }
+          // Vertikale Trennlinien (Sprossen-Spalten)
+          for (let c = 1; c < cols; c++) {
+            const ca = gA + ((gB - gA) * c) / cols;
+            pr.divisions.push([quadAt(pr.pts, ca, gz0), quadAt(pr.pts, ca, gz1)]);
           }
         }
         // Trennlinie zum nächsten Feld (ausser am Rand).

@@ -408,6 +408,7 @@ export const en: Record<TranslationKey, string> = {
   "oed.f.frameWidth": "Frame face width (m)",
   "oed.f.transomHeight": "Transom height (m)",
   "oed.f.mullionRows": "Transom/muntin rows",
+  "oed.f.mullionCols": "Muntin columns",
   "oed.kind.dreh": "Casement",
   "oed.kind.kipp": "Tilt",
   "oed.kind.drehkipp": "Turn-tilt",

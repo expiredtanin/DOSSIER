@@ -492,6 +492,13 @@ function FluegelPanel({
         min={1}
         onCommit={(n) => patchWt({ mullionRows: Math.max(1, Math.round(n)) })}
       />
+      <NumField
+        label={t("oed.f.mullionCols")}
+        value={wt.mullionCols ?? 1}
+        step={1}
+        min={1}
+        onCommit={(n) => patchWt({ mullionCols: Math.max(1, Math.round(n)) })}
+      />
       <table className="oed-table">
         <thead>
           <tr>
@@ -874,6 +881,28 @@ function ElevationPreview({
                   y1={top + (fieldH * (k + 1)) / rows}
                   x2={pad + px(w)}
                   y2={top + (fieldH * (k + 1)) / rows}
+                  stroke={strokeMuted}
+                  strokeWidth={0.75}
+                />
+              ));
+            })()}
+          {/* Sprossen-Spalten (mullionCols − 1 vertikale Teiler im
+              Hauptfeld unterhalb eines etwaigen Oberlichts). */}
+          {!dt &&
+            wt &&
+            (() => {
+              const cols = Math.max(1, Math.round(wt.mullionCols ?? 1));
+              if (cols <= 1) return null;
+              const top = originY + px(wt.transomHeight ?? 0);
+              const fieldH = px(h) - px(wt.transomHeight ?? 0);
+              const fieldW = px(w);
+              return Array.from({ length: cols - 1 }, (_, k) => (
+                <line
+                  key={k}
+                  x1={pad + (fieldW * (k + 1)) / cols}
+                  y1={top}
+                  x2={pad + (fieldW * (k + 1)) / cols}
+                  y2={top + fieldH}
                   stroke={strokeMuted}
                   strokeWidth={0.75}
                 />

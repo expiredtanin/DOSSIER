@@ -400,7 +400,7 @@ describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
 
   it("Kämpfer-Zeilen (mullionRows): teilen das Glasfeld horizontal (Glas + Trennlinien)", () => {
     const base = elevationProject({ overhang: false });
-    const mk = (mullionRows: number): Project =>
+    const mk = (mullionRows: number): Project => 
       ({
         ...base,
         windowTypes: [
@@ -442,6 +442,52 @@ describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
     };
     expect(glassCount(1)).toBe(1); // fest, 1 Feld
     expect(glassCount(3)).toBe(3); // in 3 Zeilen geteilt
+  });
+
+  it("Sprossen-Spalten (mullionCols): teilen das Glasfeld vertikal (Glas + Trennlinien)", () => {
+    const base = elevationProject({ overhang: false });
+    const mk = (mullionCols: number): Project => 
+      ({
+        ...base,
+        windowTypes: [
+          {
+            id: "wt",
+            name: "F",
+            kind: "fest",
+            wingCount: 1,
+            glazing: "einfach",
+            frameWidth: 0.06,
+            mullionCols,
+            defaultSillHeight: 0.9,
+            defaultWidth: 1,
+            defaultHeight: 1.2,
+          },
+        ],
+        openings: [
+          {
+            id: "op",
+            type: "opening",
+            hostWallId: "NEAR",
+            categoryCode: "21",
+            kind: "window",
+            typeId: "wt",
+            position: 1.5,
+            width: 1,
+            height: 1.2,
+            sillHeight: 0.9,
+          },
+        ],
+      }) as unknown as Project;
+    const glassCount = (cols: number): number => {
+      const p = mk(cols);
+      const plan = generateElevationPlan(p, p.drawingLevels[1])!;
+      // Glasflächen = weiss/blau gefüllte Polygone mit Kontur, keine Öffnung/Rahmen.
+      return plan.primitives.filter(
+        (pr) => pr.kind === "polygon" && pr.fill === "#9fc2d9",
+      ).length;
+    };
+    expect(glassCount(1)).toBe(1); // fest, 1 Feld
+    expect(glassCount(3)).toBe(3); // in 3 Spalten geteilt
   });
 
   it("Reveal-Schatten: shadows=true erzeugt Öffnungs-Schattenbänder, false keine", () => {

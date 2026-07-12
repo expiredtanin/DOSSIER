@@ -427,6 +427,12 @@ export interface WindowType {
    * Sprossen-/Flügelraster. Fehlt es, gilt 1.
    */
   mullionRows?: number;
+  /**
+   * Anzahl vertikaler Felder (Sprossen-Spalten): 1 = keine Querteilung, 2 = ein
+   * Sprossen-Mittelpunkt (Spalte), usw. Zusammen mit {@link wingCount} (Spalten)
+   * ergibt sich das Sprossen-/Flügelraster. Fehlt es, gilt 1.
+   */
+  mullionCols?: number;
   /** Verglasung: Einfach/Zweifach/Dreifach (3D-Scheibenzahl). */
   glazing: "einfach" | "zweifach" | "dreifach";
   /** Rahmenstärke quer zur Wand (Meter). */

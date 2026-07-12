@@ -408,6 +408,7 @@ export const de = {
   "oed.f.frameWidth": "Rahmenbreite Ansicht (m)",
   "oed.f.transomHeight": "Oberlichthöhe (m)",
   "oed.f.mullionRows": "Kämpfer-/Sprossenzeilen",
+  "oed.f.mullionCols": "Sprossen-Spalten",
   "oed.kind.dreh": "Dreh",
   "oed.kind.kipp": "Kipp",
   "oed.kind.drehkipp": "Dreh-Kipp",

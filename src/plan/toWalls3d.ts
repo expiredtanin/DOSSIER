@@ -2035,6 +2035,8 @@ interface OpeningFrameParams {
   wingCount: number;
   /** Kämpfer-Zeilen (horizontale Teilung = mullionRows−1); Türen immer 1. */
   mullionRows: number;
+  /** Sprossen-Spalten (vertikale Teilung = mullionCols−1); Türen immer 1. */
+  mullionCols: number;
   /** Ob eine Glasscheibe gezeichnet wird (Fenster immer, Tür nur `leafStyle: "glas"`). */
   glazed: boolean;
   /**
@@ -2094,6 +2096,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       // Zweiflüglige Tür ⇒ 2 Flügel = ein mittiger Anschlagpfosten (Stulp) im 3D.
       wingCount: Math.max(1, Math.round(dt.leafCount ?? 1)),
       mullionRows: 1,
+      mullionCols: 1,
       glazed: dt.leafStyle === "glas",
       glazingPanes: 1,
       // Teilverglasung: glazingRatio (Glasanteil oben) bei Glasblatt; sonst voll.
@@ -2139,6 +2142,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     hasSill: true,
     wingCount,
     mullionRows: Math.max(1, Math.round(wt.mullionRows ?? 1)),
+    mullionCols: Math.max(1, Math.round(wt.mullionCols ?? 1)),
     glazed: true,
     glazingPanes: glazingPanesOf(wt),
     glazedFraction: 1,
@@ -2230,6 +2234,15 @@ function frameMeshesForOpening(
       for (let i = 1; i < params.mullionRows; i++) {
         const center = sashBottom + i * cell;
         push(sashFrom, sashTo, center - fw / 2, center + fw / 2);
+      }
+    }
+
+    // Sprossen-Spalten (vertikal, mullionCols−1) im Sash-Bereich.
+    if (params.mullionCols > 1 && sashTo - sashFrom > EPS) {
+      const cell = (sashTo - sashFrom) / params.mullionCols;
+      for (let i = 1; i < params.mullionCols; i++) {
+        const center = sashFrom + i * cell;
+        push(center - fw / 2, center + fw / 2, sashBottom, sashTop);
       }
     }
   }
