@@ -256,9 +256,18 @@ export interface WindowSymbol {
    * Flügel-Trennung ein kleines Rechteck-Polygon auf der Glasebene, das den
    * Anschlag der zwei zusammenstossenden Flügelprofile darstellt. Bei „mittel"
    * ein Quadrat je Stoss, bei „fein" zwei (die beiden Stulpprofile). „grob":
-   * leer. Der Aufrufer zeichnet sie als dünne Umriss-Rechtecke.
+   * leer. Zählt zur "Fenster"-Linien-Kategorie (Flügel/Sprossen), NICHT zum
+   * Blendrahmen — separat von {@link jambMarks} steuerbar. Der Aufrufer
+   * zeichnet sie als dünne Umriss-Rechtecke.
    */
   meetingMarks: Vec2[][];
+  /**
+   * Blendrahmen-Querschnittsblöcke an den beiden Laibungs-Enden (ein Block je
+   * Seite, unabhängig von Flügelanzahl/Detailgrad) — Teil des Blendrahmens,
+   * zählt zur "Rahmen"-Linien-Kategorie (im Unterschied zu {@link meetingMarks},
+   * die an inneren Flügelstössen sitzen und zur "Fenster"-Kategorie zählen).
+   */
+  jambMarks: Vec2[][];
 }
 
 /**
@@ -401,11 +410,12 @@ export function windowSymbol(
     const mullionLines: [Vec2, Vec2][] = [];
     const sashFrames: Vec2[][] = [];
     const meetingMarks: Vec2[][] = [];
+    const jambMarks: Vec2[][] = [];
 
     // grob (1:100): nur der Rahmenkasten + EINE Glaslinie über die ganze Öffnung.
     if (detail === "grob") {
       glassLines.push([add(jambStart, scale(n, gMidBase)), add(jambEnd, scale(n, gMidBase))]);
-      return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks };
+      return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks, jambMarks };
     }
 
     const fein = detail === "fein";
@@ -428,8 +438,10 @@ export function windowSymbol(
       ];
     };
     // Laibungs-Pfosten an beiden Enden (Blendrahmen-Querschnitt an der Wand-
-    // öffnung) — EIN Block je Seite, unabhängig vom Detailgrad.
-    meetingMarks.push(frameBlock(fw / 2, fw / 2), frameBlock(axisWidth - fw / 2, fw / 2));
+    // öffnung) — EIN Block je Seite, unabhängig vom Detailgrad. Teil des
+    // Blendrahmens (jambMarks), NICHT der Flügelstoss-Marken (meetingMarks) —
+    // separat steuerbar (Nutzer-Feedback).
+    jambMarks.push(frameBlock(fw / 2, fw / 2), frameBlock(axisWidth - fw / 2, fw / 2));
 
     // Flügel-Trennlinien (Mittelpfosten) an den inneren Segmentgrenzen +
     // Stulp-Block: mittel 1, fein 2 (die beiden zusammenstossenden Profile) —
@@ -475,7 +487,7 @@ export function windowSymbol(
         ]);
       }
     }
-    return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks };
+    return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks, jambMarks };
   }
 
   // ── Alt-Pfad (kein Typ auflösbar) ────────────────────────────────────────
@@ -506,5 +518,5 @@ export function windowSymbol(
       mullionLines.push([add(onAxis, scale(n, pOuter)), add(onAxis, scale(n, pInner))]);
     }
   }
-  return { frame, glassLines, mullionLines, sashFrames: [], sashOpeningLines: [], meetingMarks: [] };
+  return { frame, glassLines, mullionLines, sashFrames: [], sashOpeningLines: [], meetingMarks: [], jambMarks: [] };
 }

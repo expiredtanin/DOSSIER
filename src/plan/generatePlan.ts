@@ -2304,13 +2304,21 @@ function addOpeningSymbol(
         }
       }
     }
+    // Laibungs-Blöcke an den Öffnungsenden (Blendrahmen-Querschnitt) — Teil des
+    // Blendrahmens, zählt zu "Rahmen".
+    for (const mark of sym.jambMarks) {
+      for (let i = 0; i < mark.length; i++) {
+        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: frameHairline, color: frameColor, greyed, openingId: o.id });
+      }
+    }
     // Stulp-Mittelquadrat je Flügel-Junction (SIA-Signatur): mittel = EIN Quadrat,
     // fein = ZWEI anliegende Rechtecke (die beiden Stulp-Stäbe der Flügel) —
     // bereits tiefenkorrekt (inset-/insetFace-bewusst) in windowSymbol berechnet.
-    // Zählt als "Rahmen" (Laibungs-/Stossblock des Blendrahmens).
+    // Sitzt zwischen den Flügeln, zählt zu "Fenster" (separat vom Blendrahmen
+    // steuerbar — Nutzer-Feedback).
     for (const mark of sym.meetingMarks) {
       for (let i = 0; i < mark.length; i++) {
-        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: frameHairline, color: frameColor, greyed, openingId: o.id });
+        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: sashWeight, color: sashColor, greyed, openingId: o.id });
       }
     }
     // Glaslinien (Anzahl je Detailgrad/Verglasung, s. glassCount).

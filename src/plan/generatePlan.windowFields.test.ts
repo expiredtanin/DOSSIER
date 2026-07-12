@@ -341,10 +341,12 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
     for (const l of stulp) expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.02, 6);
   });
 
-  it("frameLine übersteuert Farbe+Stärke der Stulp-/Laibungsblöcke (window-stulp)", () => {
+  it("frameLine übersteuert Farbe+Stärke der Laibungs-Blöcke (window-stulp, einflügliges Fenster ohne Flügelstoss)", () => {
+    // Einflüglig -> nur jambMarks (Laibungs-Enden, "Rahmen"), keine
+    // Flügelstoss-Blöcke -> eindeutig zuordenbar.
     const p = project(
       { ...baseWindow, typeId: "wt1", frameLine: { color: "#ff0000", weight: 0.5 } },
-      [twoSashType],
+      [baseWindowType],
     );
     const stulp = linesOfClass(p, "window-stulp", "mittel");
     expect(stulp.length).toBeGreaterThan(0);
@@ -354,7 +356,7 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
     }
   });
 
-  it("sashLine übersteuert Farbe+Stärke des Flügelrahmens (window-sash, fein)", () => {
+  it("sashLine übersteuert Farbe+Stärke des Flügelrahmens (window-sash, fein) UND der Flügelstoss-Blöcke (window-stulp an der Junction) — NICHT die Laibungs-Enden", () => {
     const p = project(
       { ...baseWindow, typeId: "wt1", sashLine: { color: "#00ff00", weight: 0.3 } },
       [twoSashType],
@@ -365,6 +367,16 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
       expect(l.kind === "line" && l.color).toBe("#00ff00");
       expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.3, 6);
     }
+    // Öffnung 1.2 m breit ab x=1.0 -> Junction bei x=1.6 (Mitte), Laibungs-
+    // Enden bei x≈1.03/2.17 (fw/2 vom Rand). Nur die Junction-Blöcke (Mitte)
+    // reagieren auf sashLine; die Laibungs-Enden bleiben beim Default.
+    const stulp = linesOfClass(p, "window-stulp", "mittel");
+    const junction = stulp.filter((l) => l.kind === "line" && l.a.x > 1.3 && l.a.x < 1.9);
+    const jamb = stulp.filter((l) => l.kind === "line" && (l.a.x < 1.3 || l.a.x > 1.9));
+    expect(junction.length).toBeGreaterThan(0);
+    expect(jamb.length).toBeGreaterThan(0);
+    for (const l of junction) expect(l.kind === "line" && l.color).toBe("#00ff00");
+    for (const l of jamb) expect(l.kind === "line" && l.color).toBe("#1a1a1a");
   });
 
   it("sillLineStyle übersteuert Farbe+Stärke der Auf-/Untersicht-Linie (window-sill)", () => {
