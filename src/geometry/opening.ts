@@ -446,11 +446,16 @@ export function windowSymbol(
       const clearTo = seg.to - fw;
       if (clearTo - clearFrom <= 1e-6) continue;
       const operable = !!seg.sash.opening && seg.sash.opening !== "fest";
+      // „mittel" (SIA fig. 37) zeigt NUR Blendrahmen + Pfosten/Stulp — noch KEINE
+      // Glaslinie/Flügelrahmen (Nutzer-Vorgabe: „im 1:50 muss man die Fenster-
+      // linie noch nicht sehen, nur die Vierecke aussen/innen"). Das kommt erst
+      // bei „fein" (SIA fig. 38) dazu.
+      if (!fein) continue;
       const gOuterN = frameOuterN - (operable ? reveal : 0);
       const gInnerN = frameInnerN + (operable ? reveal : 0);
       // Verschachtelter Flügelrahmen NUR bei „fein" (SIA fig. 38); „mittel" bleibt
       // beim reinen Blendrahmen-Band (SIA fig. 37).
-      if (fein && operable) {
+      if (operable) {
         const sFrom = along(jambStart, jambEnd, clearFrom);
         const sTo = along(jambStart, jambEnd, clearTo);
         sashFrames.push([
@@ -460,22 +465,18 @@ export function windowSymbol(
           add(sFrom, scale(n, gInnerN)),
         ]);
       }
-      const gInsetU = fein && operable ? fw * 0.6 : 0;
+      const gInsetU = operable ? fw * 0.6 : 0;
       const gFrom = clearFrom + gInsetU;
       const gTo = clearTo - gInsetU;
       if (gTo - gFrom <= 1e-6) continue;
       const gMid = (gOuterN + gInnerN) / 2;
       const a = along(jambStart, jambEnd, gFrom);
       const b = along(jambStart, jambEnd, gTo);
-      // fein: Glas als Doppellinie (Isolierverglasung, ~15 mm Abstand); mittel:
-      // eine Glaslinie mittig.
-      if (fein) {
-        const half = Math.min(0.0075, bandDepth * 0.18);
-        for (const off of [gMid - half, gMid + half]) {
-          glassLines.push([add(a, scale(n, off)), add(b, scale(n, off))]);
-        }
-      } else {
-        glassLines.push([add(a, scale(n, gMid)), add(b, scale(n, gMid))]);
+      // Glas als Doppellinie (Isolierverglasung, ~15 mm Abstand) — nur „fein"
+      // erreicht diesen Punkt (mittel bricht oben früh ab, s. o.).
+      const half = Math.min(0.0075, bandDepth * 0.18);
+      for (const off of [gMid - half, gMid + half]) {
+        glassLines.push([add(a, scale(n, off)), add(b, scale(n, off))]);
       }
     }
     return { frame, glassLines, mullionLines, sashFrames, sashOpeningLines: [], meetingMarks };

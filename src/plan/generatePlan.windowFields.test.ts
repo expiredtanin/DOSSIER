@@ -178,13 +178,13 @@ describe("generatePlan — Verglasung glazingPanes (Item 2)", () => {
   const glassLineCount = (p: Project, detail: "grob" | "mittel" | "fein" = "mittel") =>
     linesOfClass(p, "window-glass", detail).length;
 
-  it("glazingPanes beeinflusst die 2D-Glaslinienzahl NICHT mehr — SIA-Detailgrad entscheidet (Doppellinie/IV nur bei 'fein', unabhängig von der Scheibenzahl)", () => {
+  it("glazingPanes beeinflusst die 2D-Glaslinienzahl NICHT mehr — SIA-Detailgrad entscheidet (mittel zeigt noch KEINE Glaslinie, SIA fig. 37; Doppellinie/IV erst bei 'fein', unabhängig von der Scheibenzahl)", () => {
     const wt3: WindowType = { ...baseWindowType, id: "wt3", glazingPanes: 3 };
     const wt1: WindowType = { ...baseWindowType, id: "wt1", glazingPanes: 1 };
     const p3 = project({ ...baseWindow, typeId: "wt3" }, [wt3]);
     const p1 = project({ ...baseWindow, typeId: "wt1" }, [wt1]);
-    expect(glassLineCount(p3, "mittel")).toBe(1);
-    expect(glassLineCount(p1, "mittel")).toBe(1);
+    expect(glassLineCount(p3, "mittel")).toBe(0);
+    expect(glassLineCount(p1, "mittel")).toBe(0);
     expect(glassLineCount(p3, "fein")).toBe(2);
     expect(glassLineCount(p1, "fein")).toBe(2);
   });
@@ -239,6 +239,32 @@ describe("generatePlan — Stulp-/Flügelstoss-Marken (SIA fig. 37/38, window-st
     const p = project({ ...baseWindow, typeId: "wt1" }, [baseWindowType]);
     expect(stulpLineCount(p, "mittel")).toBe(0);
     expect(stulpLineCount(p, "fein")).toBe(0);
+  });
+});
+
+describe("generatePlan — Fensterbank (window-sill) folgt der eingezogenen Rahmenkante", () => {
+  // Wand 0.3 m dick, Achse mittig (refOff=0) -> volle Wandfläche aussen wäre bei
+  // n=+0.15. Ein um 0.05 m eingezogener Rahmen (insetFromFace) sitzt aber bei
+  // n=+0.10 (halfT − inset) — die Fensterbank muss DORT ansetzen, nicht an der
+  // vollen Wandfläche (Regression für den Nutzer-Report "Sims sitzt falsch").
+  it("Fensterbank sitzt an der eingezogenen Rahmen-Aussenkante, nicht an der vollen Wandfläche", () => {
+    const wt: WindowType = {
+      ...baseWindowType,
+      sashes: [{ kind: "fluegel", autoWidth: true, opening: "fest" }],
+      insetFromFace: 0.05,
+      insetFace: "aussen",
+      frameDepth: 0.07,
+    };
+    const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
+    const sill = linesOfClass(p, "window-sill", "fein");
+    expect(sill.length).toBe(4);
+    const ys = sill
+      .flatMap((pr) => (pr.kind === "line" ? [pr.a.y, pr.b.y] : []))
+      .map((y) => Math.round(y * 1000) / 1000);
+    // Näher Rand der Fensterbank = Rahmen-Aussenkante (0.15 − 0.05 = 0.10),
+    // NICHT die volle Wandfläche (0.15 — der alte, fehlerhafte Wert).
+    expect(Math.min(...ys)).toBeCloseTo(0.1, 6);
+    expect(Math.min(...ys)).not.toBeCloseTo(0.15, 2);
   });
 });
 

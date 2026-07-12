@@ -2271,26 +2271,7 @@ function addOpeningSymbol(
   // fein (1:20): zusätzlich Flügelrahmen, Stulp als ZWEI Rechtecke, Fensterbank
   //   (aussen) und Anschlag-/Laibungskerben — deutlich reicher als mittel.
   const strokeColor = o.color ?? POCHE_STROKE;
-  const { u: wu, n: wn } = wallAxisFrame(wall);
-  const fpw = Math.max(0.03, wt?.frameWidth ?? 0.06); // Rahmenprofil-Breite (m)
-  // Kleines Rechteck (Stulp/Anschlag) um `center`, Halbmasse hu (Achse)/hn (quer).
-  const emitStulp = (center: Vec2, hu: number, hn: number): void => {
-    const c1 = add(add(center, scale(wu, -hu)), scale(wn, -hn));
-    const c2 = add(add(center, scale(wu, hu)), scale(wn, -hn));
-    const c3 = add(add(center, scale(wu, hu)), scale(wn, hn));
-    const c4 = add(add(center, scale(wu, -hu)), scale(wn, hn));
-    for (const [a, b] of [[c1, c2], [c2, c3], [c3, c4], [c4, c1]] as [Vec2, Vec2][]) {
-      out.push({ kind: "line", a, b, cls: "window-stulp", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
-    }
-  };
-  // Flügel-Junctions (Stulp-/Anschlagstelle zweier Flügel) = Mitten der Pfosten-
-  // Trennlinien. NUR im typisierten Pfad (`spec`) — der Alt-Pfad (reines
-  // `wingCount`) hat keine echte Flügeltabelle, seine Trennlinien sind nur eine
-  // gleichmässige Näherung ohne Stoss-Semantik (siehe windowSymbol-Kommentar).
-  // Bei einflügligen Fenstern leer ⇒ kein Mittelquadrat (korrekt).
-  const junctionCenters: Vec2[] = spec
-    ? sym.mullionLines.map(([a, b]) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }))
-    : [];
+  const { n: wn } = wallAxisFrame(wall);
 
   if (detail === "grob") {
     // SIA 1:100 — nur eine dünne Glaslinie mittig über die weisse Öffnung.
@@ -2324,13 +2305,11 @@ function addOpeningSymbol(
       }
     }
     // Stulp-Mittelquadrat je Flügel-Junction (SIA-Signatur): mittel = EIN Quadrat,
-    // fein = ZWEI anliegende Rechtecke (die beiden Stulp-Stäbe der Flügel).
-    for (const c of junctionCenters) {
-      if (detail === "fein") {
-        emitStulp(add(c, scale(wu, -fpw / 2)), fpw / 2, fpw / 2);
-        emitStulp(add(c, scale(wu, fpw / 2)), fpw / 2, fpw / 2);
-      } else {
-        emitStulp(c, fpw / 2, fpw / 2);
+    // fein = ZWEI anliegende Rechtecke (die beiden Stulp-Stäbe der Flügel) —
+    // bereits tiefenkorrekt (inset-/insetFace-bewusst) in windowSymbol berechnet.
+    for (const mark of sym.meetingMarks) {
+      for (let i = 0; i < mark.length; i++) {
+        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
       }
     }
     // Glaslinien (Anzahl je Detailgrad/Verglasung, s. glassCount).
@@ -2345,9 +2324,10 @@ function addOpeningSymbol(
       const jb = openingJambs(wall, o);
       if (jb) {
         const { jambStart, jambEnd } = jb;
-        const total = wallTypeThickness(getWallType(project, wall));
-        const refOff = wallReferenceOffset(wall, total);
-        const outerN = refOff + total / 2;
+        // Tatsächliche Rahmen-Aussenkante (NICHT pauschal die volle Wandfläche —
+        // ein eingezogener Rahmen, s. {@link WindowType.insetFromFace}, hat seine
+        // Aussenkante weiter innen; sym.frame[0]/[1] tragen das bereits korrekt).
+        const outerN = dot(sub(sym.frame[0], jambStart), wn);
         // Fensterbank: schmales Rechteck vor der Aussenfläche, seitlich ~3 cm
         // überstehend, ~4 cm auskragend (SIA-Sims-Andeutung im Grundriss).
         const ov = 0.03;
