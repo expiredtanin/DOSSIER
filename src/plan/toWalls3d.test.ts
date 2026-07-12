@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import type { Project, Roof, Wall } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
 import { selectionHighlightLines, projectToWalls3d, projectToModel3d, pickGeometry } from "./toWalls3d";
-import { resolveHatch } from "./generatePlan";
+import { resolveHatch, generatePlan } from "./generatePlan";
 import { roofGeometry, roofBaseElevation } from "../geometry/roof";
 
 const RGB: [number, number, number] = [1, 0.5, 0.1];
@@ -850,6 +850,72 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     // Bündig sitzt die Rahmen-Aussenkante weiter aussen (negativeres y); mit
     // Einzug rückt sie um insetFromFace (0.1 m) Richtung Wandmitte (grösseres y).
     expect(insetMinY - flushMinY).toBeCloseTo(0.1, 6);
+  });
+
+  it("2D (windowSymbol) und 3D (emitOpeningFrames) legen die 'aussen'-Rahmenkante auf DIESELBE Wandfläche — und die stimmt mit der echten Aussenschicht der Wand überein (Regression: 'im 2D innen bündig, im 3D aussen bündig')", () => {
+    // W1 (u=(1,0), Wandtyp "aw", Gesamtdicke 0.345 m, Achse mittig) -> die
+    // echte Aussenfläche (erste Schicht, render-ext) liegt bei WELT-y = -0.1725
+    // exakt (unabhängig von diesem Bug herleitbar: halbe Wanddicke). Ein
+    // bündiges Fenster (insetFace:"aussen", insetFromFace:0) muss in BEIDEN
+    // Ansichten exakt dort ansetzen.
+    const flushWindow: Project = {
+      ...sampleProject,
+      windowTypes: [
+        ...(sampleProject.windowTypes ?? []),
+        {
+          id: "win-consistency-test",
+          name: "Test bündig aussen",
+          kind: "fest",
+          wingCount: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          insetFromFace: 0,
+          insetFace: "aussen",
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+        },
+      ],
+      openings: [
+        {
+          id: "OC1",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-consistency-test",
+          position: 3.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+      doors: [],
+      context: [],
+    };
+    const trueAussenY = -0.345 / 2;
+
+    // 3D: minimale y-Koordinate aller Rahmen-Meshes dieser Öffnung.
+    const isFrame3d = (m: { color: [number, number, number] }): boolean =>
+      m.color[0] === 0.85 && m.color[1] === 0.85 && m.color[2] === 0.83;
+    let min3d = Infinity;
+    for (const mesh of projectToModel3d(flushWindow).meshes.filter(isFrame3d)) {
+      for (let i = 1; i < mesh.positions.length; i += 3) min3d = Math.min(min3d, mesh.positions[i]);
+    }
+    expect(min3d).toBeCloseTo(trueAussenY, 6);
+
+    // 2D: minimale y-Koordinate des Blendrahmen-Polygons (windowSymbol.frame,
+    // gerendert als "polygon" mit openingId — die unsichtbare Pick-Fläche hat
+    // stroke:"none" und wird ausgeschlossen).
+    const visible = new Set(["20", "21"]);
+    const plan = generatePlan(flushWindow, "eg", visible, undefined, "mittel");
+    const framePoly = plan.primitives.find(
+      (pr) => pr.kind === "polygon" && pr.openingId === "OC1" && pr.stroke !== "none",
+    );
+    expect(framePoly).toBeDefined();
+    const min2d = Math.min(...(framePoly!.kind === "polygon" ? framePoly!.pts.map((p) => p.y) : []));
+    expect(min2d).toBeCloseTo(trueAussenY, 6);
   });
 
   it("Öffnung ohne auflösbaren Typ -> KEIN Rahmen-Mesh (Rückwärtskompatibilität)", () => {

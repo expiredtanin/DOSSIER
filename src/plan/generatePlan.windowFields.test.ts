@@ -262,10 +262,14 @@ describe("generatePlan — Stulp-/Flügelstoss-Marken (SIA fig. 37/38, window-st
 });
 
 describe("generatePlan — Fensterbank (window-sill) folgt der eingezogenen Rahmenkante", () => {
-  // Wand 0.3 m dick, Achse mittig (refOff=0) -> volle Wandfläche aussen wäre bei
-  // n=+0.15. Ein um 0.05 m eingezogener Rahmen (insetFromFace) sitzt aber bei
-  // n=+0.10 (halfT − inset) — die Fensterbank muss DORT ansetzen, nicht an der
-  // vollen Wandfläche (Regression für den Nutzer-Report "Sims sitzt falsch").
+  // Wand 0.3 m dick, Achse mittig (refOff=0). "Aussen" liegt bei der NEGATIVEN
+  // Wandnormalen-Seite (erste Wandtyp-Schicht, s. addWallPoche/windowSymbol) —
+  // volle Wandfläche aussen wäre also bei n=−0.15. Ein um 0.05 m eingezogener
+  // Rahmen (insetFromFace) sitzt bei n=−0.10 (−halfT + inset) — die Fensterbank
+  // muss DORT ansetzen (nicht an der vollen Wandfläche −0.15) und kragt von dort
+  // WEITER nach aussen aus (−0.04, also bis −0.14) — Regression für den Nutzer-
+  // Report "Sims sitzt falsch" (ursprünglich) bzw. "2D innen bündig, 3D aussen
+  // bündig" (die zugrundeliegende aussen/innen-Vorzeichenverwechslung).
   it("Fensterbank sitzt an der eingezogenen Rahmen-Aussenkante, nicht an der vollen Wandfläche", () => {
     const wt: WindowType = {
       ...baseWindowType,
@@ -280,10 +284,12 @@ describe("generatePlan — Fensterbank (window-sill) folgt der eingezogenen Rahm
     const ys = sill
       .flatMap((pr) => (pr.kind === "line" ? [pr.a.y, pr.b.y] : []))
       .map((y) => Math.round(y * 1000) / 1000);
-    // Näher Rand der Fensterbank = Rahmen-Aussenkante (0.15 − 0.05 = 0.10),
-    // NICHT die volle Wandfläche (0.15 — der alte, fehlerhafte Wert).
-    expect(Math.min(...ys)).toBeCloseTo(0.1, 6);
-    expect(Math.min(...ys)).not.toBeCloseTo(0.15, 2);
+    // Näher Rand (wandseitig) = eingezogene Rahmen-Aussenkante (−0.10), NICHT
+    // die volle Wandfläche (−0.15 — der alte, fehlerhafte Wert vor dem Fix).
+    expect(Math.max(...ys)).toBeCloseTo(-0.1, 6);
+    expect(Math.max(...ys)).not.toBeCloseTo(-0.15, 2);
+    // Auskragung geht weiter nach aussen (algebraisch kleiner): −0.10 − 0.04.
+    expect(Math.min(...ys)).toBeCloseTo(-0.14, 6);
   });
 });
 

@@ -1973,7 +1973,10 @@ function openingAxisBox(
   if (len < 1e-9) return null;
   const ux = dx / len;
   const uy = dy / len;
-  // Grundriss-Normale (Dicken-Achse) — dieselbe Konvention wie pushSegment.
+  // Grundriss-Normale (Dicken-Achse) — RECHTE Normale (uy,−ux), bewusst NICHT
+  // leftNormal (anders als pushSegment/windowSymbol) — kombiniert mit dem
+  // (ebenfalls gespiegelten) Vorzeichen in resolveFrameNormalRange ergibt sich
+  // daraus physisch die korrekte aussen/innen-Seite (s. dortigen Kommentar).
   const nx = uy;
   const ny = -ux;
   const positions: number[] = [];

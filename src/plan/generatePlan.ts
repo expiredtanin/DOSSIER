@@ -1982,15 +1982,23 @@ function addOpeningFrameBand(
   const { n } = wallAxisFrame(wall);
   const total = wallTypeThickness(getWallType(project, wall));
   const refOff = wallReferenceOffset(wall, total);
-  const outerFace = refOff + total / 2; // "aussen"-Fläche (+n)
-  const innerFace = refOff - total / 2; // "innen"-Fläche (−n)
+  // "aussen" = die Fläche der ERSTEN Wandtyp-Schicht (kleinster Achs-Offset,
+  // s. addWallPoche/`off` startet bei `refOff-total/2`) — mit `n = leftNormal(u)`
+  // ist das die NEGATIVE Seite. Bug bis 2026-07-12: hier stand `+total/2` für
+  // "aussen" (positive Seite, tatsächlich "innen") — Türrahmenbänder mit
+  // insetFace:"aussen" landeten dadurch an der falschen Wandfläche.
+  const outerFace = refOff - total / 2; // "aussen"-Fläche (−n, erste Schicht)
+  const innerFace = refOff + total / 2; // "innen"-Fläche (+n, letzte Schicht)
 
   // Schichteinzug: die GEWÄHLTE Fläche rückt um `insetFromFace` nach innen; die
   // gegenüberliegende Fläche bleibt unverändert (der Rahmen reicht weiterhin
   // bis dorthin) — vgl. DoorType.insetFromFace/WindowType.insetFromFace.
   const clampedInset = Math.max(0, Math.min(spec.insetFromFace, total));
   const nearIsAussen = spec.insetFace !== "innen";
-  const faceNear = nearIsAussen ? outerFace - clampedInset : innerFace + clampedInset;
+  // "Nach innen" heisst: von der gewählten Fläche RICHTUNG WANDMITTE (refOff) —
+  // von aussen (negative Seite) aus AUFWÄRTS (+clampedInset), von innen
+  // (positive Seite) aus ABWÄRTS (−clampedInset).
+  const faceNear = nearIsAussen ? outerFace + clampedInset : innerFace - clampedInset;
   const faceFar = nearIsAussen ? innerFace : outerFace;
   const lo = Math.min(faceNear, faceFar);
   const hi = Math.max(faceNear, faceFar);
@@ -2014,10 +2022,12 @@ function addOpeningFrameBand(
     if (isBlock) {
       // Blockrahmen: volle Öffnungsbreite (kein Pfosten-Einzug), nur eine
       // Tiefenscheibe von frameWidth ab der Nah-Fläche — sitzt proud VOR/auf der
-      // Laibung, statt schmal darin zu verschwinden (Zargen-Optik).
+      // Laibung, statt schmal darin zu verschwinden (Zargen-Optik). "aussen"
+      // liegt bei `lo` (s. Kommentar zu outerFace/innerFace oben), die Scheibe
+      // beginnt dort und wächst RICHTUNG WANDMITTE (Richtung `hi`).
       const depth = Math.min(frameWidth, hi - lo);
-      bandLo = nearIsAussen ? hi - depth : lo;
-      bandHi = nearIsAussen ? hi : lo + depth;
+      bandLo = nearIsAussen ? lo : hi - depth;
+      bandHi = nearIsAussen ? lo + depth : hi;
       jStart = jambStart;
       jEnd = jambEnd;
       weightMm = SYMBOL_HAIRLINE_MM * 2.2;
@@ -2176,8 +2186,10 @@ function addOpeningSymbol(
         const total = wallTypeThickness(getWallType(project, wall));
         const refOff = wallReferenceOffset(wall, total);
         const halfD = total / 2;
-        const outerOff = refOff + halfD;
-        const innerOff = refOff - halfD;
+        // "aussen" = negative Seite (erste Wandtyp-Schicht), s. Kommentar in
+        // addOpeningFrameBand — Bug bis 2026-07-12: stand hier vertauscht.
+        const outerOff = refOff - halfD;
+        const innerOff = refOff + halfD;
         // Strichmuster: gestrichelt (Überkopf-Projektion, SIA-Konvention).
         const dash: number[] = [0.18, 0.09];
         const strokeColor = o.color ?? POCHE_STROKE;
@@ -2352,18 +2364,26 @@ function addOpeningSymbol(
         const { jambStart, jambEnd } = jb;
         // Tatsächliche Rahmen-Aussenkante (NICHT pauschal die volle Wandfläche —
         // ein eingezogener Rahmen, s. {@link WindowType.insetFromFace}, hat seine
-        // Aussenkante weiter innen; sym.frame[0]/[1] tragen das bereits korrekt).
-        const outerN = dot(sub(sym.frame[0], jambStart), wn);
+        // Aussenkante weiter innen). "Aussen" ist der ALGEBRAISCH KLEINERE der
+        // beiden Tiefen-Werte in sym.frame (s. windowSymbol: frontRel für
+        // insetFace:"aussen" ist negativ) — welcher der beiden Eckpunkt-Paare das
+        // ist, hängt von insetFace ab, daher robust über Math.min bestimmt statt
+        // fest über sym.frame[0].
+        const outerN = Math.min(
+          dot(sub(sym.frame[0], jambStart), wn),
+          dot(sub(sym.frame[2], jambStart), wn),
+        );
         // Fensterbank: schmales Rechteck vor der Aussenfläche, seitlich ~3 cm
         // überstehend, ~4 cm auskragend (SIA-Sims-Andeutung im Grundriss).
+        // Auskragung geht IMMER weiter nach aussen (algebraisch kleiner, s. o.).
         const ov = 0.03;
         const proj = 0.04;
         const s0 = along(jambStart, jambEnd, -ov);
         const s1 = along(jambEnd, jambStart, -ov);
         const b0 = add(s0, scale(wn, outerN));
         const b1 = add(s1, scale(wn, outerN));
-        const b2 = add(s1, scale(wn, outerN + proj));
-        const b3 = add(s0, scale(wn, outerN + proj));
+        const b2 = add(s1, scale(wn, outerN - proj));
+        const b3 = add(s0, scale(wn, outerN - proj));
         for (const [a, b] of [[b0, b1], [b1, b2], [b2, b3], [b3, b0]] as [Vec2, Vec2][]) {
           out.push({ kind: "line", a, b, cls: "window-sill", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
         }
@@ -2385,11 +2405,17 @@ function addOpeningSymbol(
     const dash = view === "unter" ? OVERHEAD_DASH : [0.04, 0.08];
     const sillColor = o.sillLineStyle?.color ?? strokeColor;
     const sillWeight = o.sillLineStyle?.weight ?? SYMBOL_HAIRLINE_MM;
+    // Welches der beiden sym.frame-Eckpunkt-Paare physisch "aussen" ist, hängt
+    // von insetFace ab (s. windowSymbol) — robust über den Tiefen-Vergleich
+    // entlang wn bestimmt statt fest über den Index.
+    const pair01IsOuter = dot(sym.frame[0], wn) <= dot(sym.frame[3], wn);
+    const outerPair: [Vec2, Vec2] = pair01IsOuter ? [sym.frame[0], sym.frame[1]] : [sym.frame[3], sym.frame[2]];
+    const innerPair: [Vec2, Vec2] = pair01IsOuter ? [sym.frame[3], sym.frame[2]] : [sym.frame[0], sym.frame[1]];
     if (faces === "aussen" || faces === "beide") {
-      out.push({ kind: "line", a: sym.frame[0], b: sym.frame[1], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
+      out.push({ kind: "line", a: outerPair[0], b: outerPair[1], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
     }
     if (faces === "innen" || faces === "beide") {
-      out.push({ kind: "line", a: sym.frame[3], b: sym.frame[2], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
+      out.push({ kind: "line", a: innerPair[0], b: innerPair[1], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
     }
   }
   // Rollladen-/Sonnenschutzkasten (P0-Minimalfassung, reine 2D-Kontur): ein
@@ -2405,7 +2431,10 @@ function addOpeningSymbol(
       const { u, n: nrm } = wallAxisFrame(wall);
       const total = wallTypeThickness(getWallType(project, wall));
       const refOff = wallReferenceOffset(wall, total);
-      const outerFace = refOff + total / 2;
+      // "aussen" = negative Seite (erste Wandtyp-Schicht), s. Kommentar in
+      // addOpeningFrameBand — Bug bis 2026-07-12: stand hier vertauscht (der
+      // Rollladenkasten landete an der Innenfläche statt aussen am Sturz).
+      const outerFace = refOff - total / 2;
       const axisWidth = Math.hypot(
         jambs.jambEnd.x - jambs.jambStart.x,
         jambs.jambEnd.y - jambs.jambStart.y,

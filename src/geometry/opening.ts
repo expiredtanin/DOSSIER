@@ -386,7 +386,15 @@ export function windowSymbol(
     const depth = Math.min(total, spec.frameDepth && spec.frameDepth > 1e-9 ? spec.frameDepth : DEFAULT_FRAME_DEPTH);
     const inset = Math.max(0, spec.insetFromFace ?? 0);
     const halfT = total / 2;
-    const sign = (spec.insetFace ?? "aussen") === "innen" ? -1 : 1;
+    // "aussen" = die Wandfläche, an der die ERSTE Wandtyp-Schicht (Aussenputz
+    // etc., "Schichten außen → innen") liegt — das ist die Seite mit dem
+    // NEGATIVEN Achs-Offset (s. addWallPoche: `off` startet bei `refOff-total/2`
+    // für die erste Schicht). Bug bis 2026-07-12: hier stand `+1` für "aussen"
+    // (positiver, NICHT negativer Offset) — der Rahmen landete dadurch bündig
+    // an der INNEREN statt der äusseren Wandfläche (Nutzer-Report: "im 2D innen
+    // bündig und im 3D aussen bündig" — das 3D-Pendant nutzt kompensierend eine
+    // gespiegelte Normale, s. resolveFrameNormalRange/openingAxisBox).
+    const sign = (spec.insetFace ?? "aussen") === "aussen" ? -1 : 1;
     // Rahmen-Vorderkante bündig mit der Bezugsfläche, um `inset` zurück; der
     // Körper reicht `depth` zur Wandmitte. Auf die Wanddicke geklemmt (mirror
     // von resolveFrameNormalRange im 3D). Alles relativ zur Referenzlinie.

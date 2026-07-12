@@ -215,14 +215,16 @@ describe("generatePlan — Schichteinzug (insetFromFace/insetFace)", () => {
 
     // Die Wandachse ist horizontal (u=(1,0)) ⇒ Wandnormale n=(0,1); die
     // y-Koordinate der Rahmenband-Punkte entspricht direkt dem Offset quer zur
-    // Wand. Die "aussen"-Fläche liegt bei +n — ihr Rahmenrand muss um genau
-    // `insetFromFace` (0.05 m) nach innen (kleineres y) rücken; die
-    // gegenüberliegende ("innen"-)Fläche bleibt unverändert.
+    // Wand. Die "aussen"-Fläche liegt bei −n (erste Wandtyp-Schicht, s.
+    // addWallPoche/addOpeningFrameBand) — ihr Rahmenrand muss um genau
+    // `insetFromFace` (0.05 m) nach innen (RICHTUNG WANDMITTE, also grösseres/
+    // weniger negatives y) rücken; die gegenüberliegende ("innen"-)Fläche bleibt
+    // unverändert.
     const insetYs = linesOfClass(inset, "opening-frame", "T1").flatMap((l) => [l.a.y, l.b.y]);
     const flushYs = linesOfClass(flush, "opening-frame", "T1").flatMap((l) => [l.a.y, l.b.y]);
 
-    expect(Math.max(...flushYs) - Math.max(...insetYs)).toBeCloseTo(0.05, 9);
-    expect(Math.min(...insetYs)).toBeCloseTo(Math.min(...flushYs), 9);
+    expect(Math.min(...insetYs) - Math.min(...flushYs)).toBeCloseTo(0.05, 9);
+    expect(Math.max(...insetYs)).toBeCloseTo(Math.max(...flushYs), 9);
   });
 });
 
