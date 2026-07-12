@@ -4630,6 +4630,31 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cim-geo-anchor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.imp-linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  text-decoration: underline;
+  flex: 0 0 auto;
+}
+.imp-linklike:hover {
+  opacity: 0.8;
+}
 .imp-section {
   display: flex;
   flex-direction: column;

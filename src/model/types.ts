@@ -2170,6 +2170,25 @@ export interface Project {
    * Feld noch nicht.
    */
   referenceElevationMasl?: number;
+  /**
+   * Georeferenzierung: verbindet EINEN Modell-Punkt (lokale Meter) mit seiner
+   * realen LV95-Koordinate. Wird beim ERSTEN Standort-Import automatisch
+   * gesetzt (Modell-Position per Default (0,0), editierbar) und danach für
+   * ALLE weiteren Importe (Gebäude/Terrain/OSM) wiederverwendet — vorher
+   * berechnete jeder Import unabhängig einen neuen Bezug aus der jeweils
+   * gesuchten Adresse, wodurch mehrere Importe lagefalsch zueinander landen
+   * konnten, sobald nicht exakt derselbe Suchbegriff verwendet wurde.
+   * `label` ist die Anzeige-Adresse (rein informativ). Optional, damit
+   * bestehende Projekte ohne Bezug gültig bleiben.
+   */
+  geoAnchor?: {
+    /** Reale Landeskoordinate (LV95/EPSG:2056, Meter). */
+    lv95: { e: number; n: number };
+    /** Zugehöriger Punkt im Modell (lokale Meter), Default (0,0). */
+    model: Vec2;
+    /** Anzeige-Adresse/Bezeichnung des Bezugspunkts. */
+    label?: string;
+  };
 }
 
 // ── Helfer ───────────────────────────────────────────────────────────────

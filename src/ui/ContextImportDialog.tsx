@@ -29,10 +29,22 @@ import type { ContextObject } from "../model/types";
  *  swissBUILDINGS3D-Geometrie (Wände+Dach) in einer der zwei Generationen. */
 export type SwissBuildingsMode = "off" | "flach" | "v2" | "v3";
 
+/** Georeferenzierungs-Bezug: welcher Modell-Punkt entspricht welcher realen
+ *  LV95-Koordinate (s. `Project.geoAnchor`). */
+export interface GeoAnchor {
+  lv95: { e: number; n: number };
+  model: { x: number; y: number };
+  label?: string;
+}
+
 export interface ContextImportDialogProps {
   /** Übernimmt die fertigen Kontext-Objekte (nach erfolgreichem Import). */
   onImport: (objs: ContextObject[]) => void;
   onClose: () => void;
+  /** Aktueller Georeferenzierungs-Bezug des Projekts (falls schon gesetzt). */
+  geoAnchor?: GeoAnchor;
+  /** Setzt/ersetzt (`undefined` löscht) den Georeferenzierungs-Bezug. */
+  onSetGeoAnchor: (anchor: GeoAnchor | undefined) => void;
 }
 
 type Sources = {
@@ -64,6 +76,8 @@ const DEFAULT_SOURCES: Sources = {
 export function ContextImportDialog({
   onImport,
   onClose,
+  geoAnchor,
+  onSetGeoAnchor,
 }: ContextImportDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -130,7 +144,13 @@ export function ContextImportDialog({
     setStatus(t("ctxImport.working"));
     try {
       const center = selected.lv95;
-      let origin: GeoOrigin | undefined;
+      // Bestehenden Georeferenzierungs-Bezug wiederverwenden, statt bei jedem
+      // Import einen neuen (inkonsistenten) zu berechnen — der Bezugspunkt
+      // bleibt fix im Modell, nur die GESUCHTE Stelle (center/radius) steuert,
+      // WOVON Daten geladen werden (s. Project.geoAnchor-Doc).
+      let origin: GeoOrigin | undefined = geoAnchor
+        ? { e: geoAnchor.lv95.e - geoAnchor.model.x, n: geoAnchor.lv95.n - geoAnchor.model.y }
+        : undefined;
       const all: GeoFeature[] = [];
       // Echte swissBUILDINGS3D-Meshes (v2/v3) landen direkt als ContextObject
       // (kein Footprint+Box-Umweg über GeoFeature/featuresToContextObjects).
@@ -200,6 +220,13 @@ export function ContextImportDialog({
         return;
       }
 
+      // Erster Import in diesem Projekt (noch kein Bezug) -> DIESEN Lauf als
+      // Georeferenzierungs-Bezug speichern (Modell-(0,0) = der gesuchte Ort),
+      // damit künftige Importe lagerichtig zueinander bleiben.
+      if (!geoAnchor && origin) {
+        onSetGeoAnchor({ lv95: { e: origin.e, n: origin.n }, model: { x: 0, y: 0 }, label: selected.label });
+      }
+
       const objs = featuresToContextObjects(all, selected.label);
       objs.push(...extraObjs);
       if (terrain) objs.push(terrain);
@@ -246,6 +273,21 @@ export function ContextImportDialog({
         </header>
 
         <div className="imp-body">
+          {/* Georeferenzierungs-Bezug: sobald gesetzt, teilen sich ALLE Importe
+              dieses Projekts denselben Modell↔LV95-Bezug (s. Project.geoAnchor). */}
+          {geoAnchor && (
+            <div className="cim-geo-anchor">
+              <span>{t("ctxImport.geoAnchor", { label: geoAnchor.label ?? "?" })}</span>
+              <button
+                type="button"
+                className="imp-linklike"
+                onClick={() => onSetGeoAnchor(undefined)}
+                title={t("ctxImport.geoAnchor.reset.hint")}
+              >
+                {t("ctxImport.geoAnchor.reset")}
+              </button>
+            </div>
+          )}
           {/* Ortssuche */}
           <section className="imp-section">
             <div className="imp-section-title">{t("ctxImport.location")}</div>

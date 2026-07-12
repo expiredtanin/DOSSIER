@@ -411,6 +411,14 @@ export interface PanelHostValue {
    * TerrainMesh-ID oder null (unbekannte ID / kein sinnvolles TIN).
    */
   onGenerateTerrain: (contourSetId: string) => string | null;
+  /**
+   * Setzt/ersetzt den Georeferenzierungs-Bezug (`Project.geoAnchor`) — welcher
+   * Modell-Punkt welcher realen LV95-Koordinate entspricht. `undefined` löscht
+   * den Bezug (nächster Import setzt ihn automatisch neu).
+   */
+  onSetGeoAnchor: (
+    anchor: { lv95: { e: number; n: number }; model: { x: number; y: number }; label?: string } | undefined,
+  ) => void;
   /** Öffnet den (in App montierten) versteckten DXF-Datei-Dialog. */
   onImportDxf: () => void;
 

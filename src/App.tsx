@@ -3534,6 +3534,9 @@ export default function App() {
       onAddContextObjects: addContextObjectsAndFit,
       onRemoveContextObject: removeContextObject,
       onGenerateTerrain: generateTerrain,
+      onSetGeoAnchor: (anchor) => {
+        setProject((p) => ({ ...p, geoAnchor: anchor }));
+      },
       onImportDxf: () => dxfInputRef.current?.click(),
       // ── Element-Baum (Elemente-Panel) ────────────────────────────────────
       onSelectScheduleRow: (
