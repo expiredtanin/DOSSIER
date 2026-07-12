@@ -5474,6 +5474,20 @@ body {
   color: var(--ink);
   cursor: pointer;
 }
+.cim-check-row {
+  justify-content: space-between;
+  cursor: default;
+}
+.cim-check-row select.cim-input {
+  width: auto;
+  min-width: 160px;
+}
+.cim-check-with-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
 .cim-status {
   color: var(--muted);
   font-size: 12px;

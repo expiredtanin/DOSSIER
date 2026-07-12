@@ -11,8 +11,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
-import { geocode, fetchBuildings, fetchTerrain } from "../io/swissTopo";
+import { geocode, fetchBuildings } from "../io/swissTopo";
 import type { GeocodeCandidate } from "../io/swissTopo";
+import { fetchBuildings3d } from "../io/swissBuildings3d";
+import type { BuildingsVersion } from "../io/swissBuildings3d";
+import { fetchTerrainXyz } from "../io/swissAlti3d";
+import type { TerrainResolution } from "../io/swissAlti3d";
 import { fetchOsm } from "../io/osm";
 import type { OsmSelection } from "../io/osm";
 import { featuresToContextObjects } from "../io/geoContext";
@@ -21,6 +25,10 @@ import { terrainMeshFromGrid } from "../model/terrain";
 import type { GeoOrigin } from "../io/lv95";
 import type { ContextObject } from "../model/types";
 
+/** Gebäude-Import-Modus: aus, vereinfachte Box (schnell, alt) oder echte
+ *  swissBUILDINGS3D-Geometrie (Wände+Dach) in einer der zwei Generationen. */
+export type SwissBuildingsMode = "off" | "flach" | "v2" | "v3";
+
 export interface ContextImportDialogProps {
   /** Übernimmt die fertigen Kontext-Objekte (nach erfolgreichem Import). */
   onImport: (objs: ContextObject[]) => void;
@@ -28,7 +36,7 @@ export interface ContextImportDialogProps {
 }
 
 type Sources = {
-  swissBuildings: boolean;
+  swissBuildings: SwissBuildingsMode;
   swissTerrain: boolean;
   osmBuildings: boolean;
   osmRoads: boolean;
@@ -40,7 +48,9 @@ type Sources = {
 };
 
 const DEFAULT_SOURCES: Sources = {
-  swissBuildings: true,
+  // v2 = stabile Generation (1-km-Tiles, ~50 MB) als Default; v3 (Beta) kann in
+  // Städten sehr grosse Kacheln liefern (s. swissBuildings3d.ts-Kommentar).
+  swissBuildings: "v2",
   swissTerrain: true,
   osmBuildings: false,
   osmRoads: true,
@@ -68,6 +78,8 @@ export function ContextImportDialog({
   const [selected, setSelected] = useState<GeocodeCandidate | null>(null);
   const [radius, setRadius] = useState(200);
   const [sources, setSources] = useState<Sources>(DEFAULT_SOURCES);
+  // 2 m = Default (schneller/kleinere Kacheln); 0.5 m für Detailarbeit.
+  const [terrainResolution, setTerrainResolution] = useState<TerrainResolution>("2");
 
   const [searching, setSearching] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -95,11 +107,13 @@ export function ContextImportDialog({
     }
   };
 
-  const toggle = (key: keyof Sources) =>
+  const toggle = (key: Exclude<keyof Sources, "swissBuildings">) =>
     setSources((s) => ({ ...s, [key]: !s[key] }));
+  const setSwissBuildingsMode = (mode: SwissBuildingsMode) =>
+    setSources((s) => ({ ...s, swissBuildings: mode }));
 
   const anySource =
-    sources.swissBuildings ||
+    sources.swissBuildings !== "off" ||
     sources.swissTerrain ||
     sources.osmBuildings ||
     sources.osmRoads ||
@@ -118,11 +132,23 @@ export function ContextImportDialog({
       const center = selected.lv95;
       let origin: GeoOrigin | undefined;
       const all: GeoFeature[] = [];
+      // Echte swissBUILDINGS3D-Meshes (v2/v3) landen direkt als ContextObject
+      // (kein Footprint+Box-Umweg über GeoFeature/featuresToContextObjects).
+      const extraObjs: ContextObject[] = [];
 
-      if (sources.swissBuildings) {
+      if (sources.swissBuildings === "flach") {
         const r = await fetchBuildings(center, radius, origin);
         origin = r.origin;
         all.push(...r.features);
+      } else if (sources.swissBuildings === "v2" || sources.swissBuildings === "v3") {
+        const r = await fetchBuildings3d(
+          center,
+          radius,
+          origin,
+          sources.swissBuildings as BuildingsVersion,
+        );
+        origin = r.origin;
+        extraObjs.push(...r.meshes);
       }
 
       const osmSel: OsmSelection = {
@@ -148,10 +174,10 @@ export function ContextImportDialog({
         all.push(...r.features);
       }
 
-      // Gelände-Höhenraster (swissALTI3D via geo.admin-Profil) → Terrain-Mesh.
+      // Gelände-Höhenraster (echtes swissALTI3D-XYZ, native Auflösung) → Terrain-Mesh.
       let terrain: ContextObject | null = null;
       if (sources.swissTerrain) {
-        const r = await fetchTerrain(center, radius, origin);
+        const r = await fetchTerrainXyz(center, radius, origin, terrainResolution);
         origin = r.origin;
         if (r.grid) {
           const mesh = terrainMeshFromGrid(r.grid);
@@ -159,17 +185,21 @@ export function ContextImportDialog({
         }
       }
 
-      if (all.length === 0 && !terrain) {
+      if (all.length === 0 && !terrain && extraObjs.length === 0) {
         setError(t("ctxImport.empty"));
         setStatus(null);
         return;
       }
 
       const objs = featuresToContextObjects(all, selected.label);
+      objs.push(...extraObjs);
       if (terrain) objs.push(terrain);
       onImport(objs);
       setStatus(
-        t("ctxImport.imported", { count: all.length, sets: objs.length }),
+        t("ctxImport.imported", {
+          count: all.length + extraObjs.length,
+          sets: objs.length,
+        }),
       );
       onClose();
     } catch {
@@ -272,21 +302,43 @@ export function ContextImportDialog({
           <section className="imp-section">
             <div className="imp-section-title">{t("ctxImport.sources")}</div>
             <div className="cim-checks">
-              <label className="cim-check">
-                <input
-                  type="checkbox"
-                  checked={sources.swissBuildings}
-                  onChange={() => toggle("swissBuildings")}
-                />
-                {t("ctxImport.src.swissBuildings")}
+              <label className="cim-check cim-check-row">
+                <span>{t("ctxImport.src.swissBuildings")}</span>
+                <select
+                  className="cim-input"
+                  value={sources.swissBuildings}
+                  onChange={(e) =>
+                    setSwissBuildingsMode(e.target.value as SwissBuildingsMode)
+                  }
+                  aria-label={t("ctxImport.src.swissBuildings")}
+                >
+                  <option value="off">{t("ctxImport.buildings.off")}</option>
+                  <option value="flach">{t("ctxImport.buildings.flach")}</option>
+                  <option value="v2">{t("ctxImport.buildings.v2")}</option>
+                  <option value="v3">{t("ctxImport.buildings.v3")}</option>
+                </select>
               </label>
-              <label className="cim-check">
-                <input
-                  type="checkbox"
-                  checked={sources.swissTerrain}
-                  onChange={() => toggle("swissTerrain")}
-                />
-                {t("ctxImport.src.swissTerrain")}
+              <label className="cim-check cim-check-row">
+                <span className="cim-check-with-box">
+                  <input
+                    type="checkbox"
+                    checked={sources.swissTerrain}
+                    onChange={() => toggle("swissTerrain")}
+                  />
+                  {t("ctxImport.src.swissTerrain")}
+                </span>
+                <select
+                  className="cim-input"
+                  value={terrainResolution}
+                  disabled={!sources.swissTerrain}
+                  onChange={(e) =>
+                    setTerrainResolution(e.target.value as TerrainResolution)
+                  }
+                  aria-label={t("ctxImport.terrain.resolution")}
+                >
+                  <option value="2">{t("ctxImport.terrain.res2")}</option>
+                  <option value="0.5">{t("ctxImport.terrain.res05")}</option>
+                </select>
               </label>
               <label className="cim-check">
                 <input

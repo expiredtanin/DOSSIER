@@ -3,13 +3,17 @@
 //   • geocode(query)   — Ortssuche/Adresse → Kandidaten mit LV95-Koordinaten.
 //                        Nutzt api3.geo.admin.ch SearchServer (sendet CORS `*`,
 //                        daher Direktabruf; Proxy nur als Fallback).
-//   • fetchBuildings() — Gebäude-GRUNDRISSE für eine LV95-Box → Ringe in
+//   • fetchBuildings() — Gebäude-GRUNDRISSE (vereinfachter 1:25'000-Kartografie-
+//                        Layer, KEINE Höhe) für eine LV95-Box → Ringe in
 //                        lokalen Modell-Metern. Nutzt den geo.admin
-//                        MapServer/identify auf `ch.swisstopo.vec25-gebaeude`
-//                        (liefert Polygon-`rings` in LV95, aus dem Browser
-//                        abrufbar). swissBUILDINGS3D-Kachel-Downloads (STAC)
-//                        sind für einen Live-Box-Query im Browser zu schwer und
-//                        werden bewusst NICHT verwendet.
+//                        MapServer/identify auf `ch.swisstopo.vec25-gebaeude`.
+//                        Schneller "Vorschau"-Pfad; für echte Gebäudegeometrie
+//                        (Wände+Dach, reale Höhe) s. `swissBuildings3d.ts`
+//                        (STAC-API, entgegen einer früheren Annahme hier DOCH
+//                        gut browser-tauglich — s. Recherche in PENDENZEN.md).
+//
+// Echtes Höhenraster (0.5 m/2 m): s. `swissAlti3d.ts::fetchTerrainXyz`
+// (ersetzt die frühere `fetchTerrain`-profile.json-Näherung in dieser Datei).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheiten: Meter.
 
@@ -17,7 +21,6 @@ import { bboxAround, makeOrigin, wgs84ToLv95 } from "./lv95";
 import type { GeoOrigin, LV95 } from "./lv95";
 import type { GeoFeature } from "./geoContext";
 import { viaProxy } from "./geoContext";
-import type { TerrainGrid } from "../model/terrain";
 
 const GEOADMIN = "https://api3.geo.admin.ch";
 
@@ -136,104 +139,7 @@ export async function fetchBuildings(
   return { origin, features };
 }
 
-/** Ein Punkt aus dem geo.admin-Höhenprofil (profile.json, sr=2056). */
-interface ProfilePoint {
-  dist: number;
-  easting: number;
-  northing: number;
-  alts?: { DTM2?: number; DTM25?: number; COMB?: number };
-}
-
-/**
- * Gelände-Höhenraster (swissALTI3D-DTM) für Zentrum + Radius laden.
- *
- * Statt schwerer swissALTI3D-Kachel-Downloads (STAC) nutzt der Port den
- * CORS-fähigen geo.admin `profile.json`-Dienst: pro Rasterzeile EIN Request
- * liefert die Höhen entlang einer Ost-West-Linie (nb_points Stützstellen). So
- * entsteht ein reguläres N×N-Höhenraster mit wenigen Requests, direkt aus dem
- * Browser.
- *
- * Die Höhen werden auf den Wert am Zentrum bezogen (z=0 im Zentrum), damit das
- * Gelände beim Modell-Ursprung liegt und lagerichtig zu den Gebäuden (Basis
- * z=0) sitzt. Rückgabe: das Raster in lokalen Metern + die verwendete Origin.
- */
-export async function fetchTerrain(
-  center: LV95,
-  radius: number,
-  originIn?: GeoOrigin,
-): Promise<{ origin: GeoOrigin; grid: TerrainGrid | null }> {
-  const origin = originIn ?? makeOrigin(center);
-  const [eMin, nMin, eMax] = bboxAround(center, radius);
-  const span = 2 * radius;
-  // Ziel-Rasterweite ~20 m, aber N in [6, 24] begrenzen (Request-Zahl zähmen).
-  const n = Math.max(6, Math.min(24, Math.round(span / 20) + 1));
-
-  // Achsen (LV95) + lokale Achsen.
-  const eAxis: number[] = [];
-  const nAxis: number[] = [];
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const e = eMin + (span * i) / (n - 1);
-    const nn = nMin + (span * i) / (n - 1);
-    eAxis.push(e);
-    nAxis.push(nn);
-    xs.push(e - origin.e);
-    ys.push(nn - origin.n);
-  }
-
-  // Eine Rasterzeile (konstantes N) via profile.json abrufen → Höhen je Spalte.
-  const fetchRow = async (north: number): Promise<(number | null)[]> => {
-    const geom = JSON.stringify({
-      type: "LineString",
-      coordinates: [
-        [eMin, north],
-        [eMax, north],
-      ],
-    });
-    const url =
-      `${GEOADMIN}/rest/services/profile.json` +
-      `?geom=${encodeURIComponent(geom)}` +
-      `&sr=2056&nb_points=${n}&distinct_points=true&offset=0`;
-    try {
-      const res = await fetch(viaProxy(url));
-      if (!res.ok) return new Array(n).fill(null);
-      const pts = (await res.json()) as ProfilePoint[];
-      const row: (number | null)[] = new Array(n).fill(null);
-      // Die Punkte kommen nach Distanz sortiert (West→Ost) — direkt Spalte i.
-      pts.forEach((p, i) => {
-        if (i >= n) return;
-        const z = p.alts?.DTM2 ?? p.alts?.COMB ?? p.alts?.DTM25;
-        row[i] = Number.isFinite(z as number) ? (z as number) : null;
-      });
-      return row;
-    } catch {
-      return new Array(n).fill(null);
-    }
-  };
-
-  // Alle Zeilen parallel (n ≤ 24 Requests).
-  const rows = await Promise.all(nAxis.map((north) => fetchRow(north)));
-
-  // Höhen-Nullpunkt: Wert am Rasterzentrum (fällt der aus, Mittel aller Werte).
-  const mid = Math.floor(n / 2);
-  let zRef = rows[mid]?.[mid] ?? null;
-  if (zRef == null || !Number.isFinite(zRef)) {
-    let sum = 0;
-    let cnt = 0;
-    for (const r of rows)
-      for (const v of r)
-        if (v != null && Number.isFinite(v)) {
-          sum += v;
-          cnt++;
-        }
-    zRef = cnt > 0 ? sum / cnt : null;
-  }
-  if (zRef == null) return { origin, grid: null };
-
-  // Höhen relativ zum Zentrum (z=0 im Zentrum).
-  const z: (number | null)[][] = rows.map((r) =>
-    r.map((v) => (v == null ? null : v - (zRef as number))),
-  );
-  return { origin, grid: { xs, ys, z, name: "Gelände (swisstopo)" } };
-}
+// Das frühere `fetchTerrain` (grobe `profile.json`-Näherung, ~20 m Raster-
+// weite über wenige Profillinien) ist durch `swissAlti3d.ts::fetchTerrainXyz`
+// ersetzt (echtes swissALTI3D-Raster bei 0.5 m/2 m nativer Punktdichte, STAC-
+// API, s. Referenz git.kgva.ch/karim/DOSSIER rhino/swisstopo.py).
