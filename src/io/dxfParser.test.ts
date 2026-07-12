@@ -537,3 +537,65 @@ describe("contoursToDrawings — HATCH-Füllung", () => {
     expect(d.fillColor).toBeUndefined();
   });
 });
+
+describe("parseDxf — Polyface-Mesh (POLYLINE Flag 64, swissBUILDINGS3D-Format)", () => {
+  // Regression: die installierte dxf-parser-Version liefert Face-Vertex-
+  // Indizes NICHT als `faces`-Array, sondern als vier einzelne Felder
+  // (Gruppencodes 71–74, faceA..faceD) — reale swissBUILDINGS3D-DXF-Kacheln
+  // ergaben dadurch 0 Dreiecke (Nutzer-Report „Gebäude-Import funktioniert
+  // nicht"). Rohes DXF (keine gemockte Entity-Form), damit auch die
+  // zugrundeliegende Bibliothek mitgeprüft wird.
+  it("ein Dreieck (3 Geometrie-Vertices + 1 Face-Record) ergibt genau 1 Dreieck", () => {
+    const lines = [
+      "0", "SECTION", "2", "ENTITIES",
+      "0", "POLYLINE", "8", "0", "70", "64",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "0.0", "20", "0.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "1.0", "20", "0.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "0.0", "20", "1.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "128", "10", "0.0", "20", "0.0", "30", "0.0",
+      "71", "1", "72", "2", "73", "3",
+      "0", "SEQEND",
+      "0", "ENDSEC", "0", "EOF",
+    ];
+    const res = parseDxf(lines.join("\n"));
+    expect(res.meshes).toHaveLength(1);
+    expect(res.meshes[0].positions.length / 3).toBe(3);
+    expect(res.meshes[0].indices).toEqual([0, 1, 2]);
+  });
+
+  it("ein Viereck (4 Geometrie-Vertices + 1 Face-Record mit faceD) ergibt 2 Dreiecke (Fan)", () => {
+    const lines = [
+      "0", "SECTION", "2", "ENTITIES",
+      "0", "POLYLINE", "8", "0", "70", "64",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "0.0", "20", "0.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "1.0", "20", "0.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "1.0", "20", "1.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "0.0", "20", "1.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "128", "10", "0.0", "20", "0.0", "30", "0.0",
+      "71", "1", "72", "2", "73", "3", "74", "4",
+      "0", "SEQEND",
+      "0", "ENDSEC", "0", "EOF",
+    ];
+    const res = parseDxf(lines.join("\n"));
+    expect(res.meshes).toHaveLength(1);
+    expect(res.meshes[0].positions.length / 3).toBe(4);
+    expect(res.meshes[0].indices.length / 3).toBe(2);
+  });
+
+  it("negative (unsichtbare-Kante) Face-Indizes werden per abs() aufgelöst", () => {
+    const lines = [
+      "0", "SECTION", "2", "ENTITIES",
+      "0", "POLYLINE", "8", "0", "70", "64",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "0.0", "20", "0.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "1.0", "20", "0.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "192", "10", "0.0", "20", "1.0", "30", "0.0",
+      "0", "VERTEX", "8", "0", "70", "128", "10", "0.0", "20", "0.0", "30", "0.0",
+      "71", "1", "72", "-2", "73", "3",
+      "0", "SEQEND",
+      "0", "ENDSEC", "0", "EOF",
+    ];
+    const res = parseDxf(lines.join("\n"));
+    expect(res.meshes).toHaveLength(1);
+    expect(res.meshes[0].indices).toEqual([0, 1, 2]);
+  });
+});

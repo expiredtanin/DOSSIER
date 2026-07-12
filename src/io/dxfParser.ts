@@ -58,8 +58,17 @@ interface DxfVertex {
   x?: number;
   y?: number;
   z?: number;
-  // Polyface-Mesh: 1-basierte, ggf. negative Vertex-Indizes (negativ = unsichtbare Kante).
-  faces?: number[];
+  // Polyface-Mesh-Face-Record (VERTEX mit polyfaceMeshVertex-Flag): 1-basierte,
+  // ggf. negative Vertex-Indizes (negativ = unsichtbare Kante) — die installierte
+  // dxf-parser-Version liefert sie NICHT als `faces`-Array, sondern als vier
+  // EINZELNE Felder (Gruppencodes 71–74, ein Dreieck nutzt nur faceA–faceC,
+  // ein Viereck alle vier). `polyfaceMeshVertex` markiert einen Face- statt
+  // Geometrie-Vertex (Gruppencode-70-Bit 128, s. isMeshPolyline/addPolyfaceMesh).
+  faceA?: number;
+  faceB?: number;
+  faceC?: number;
+  faceD?: number;
+  polyfaceMeshVertex?: boolean;
 }
 interface DxfEntity {
   type?: string;
@@ -295,18 +304,25 @@ function addMesh(positions: number[], indices: number[], e: DxfEntity): void {
   }
 }
 
+/** Rohe Face-Vertex-Indizes eines VERTEX-Records (faceA..faceD, nur gesetzte,
+ *  von Null verschiedene Felder — ein Dreieck belegt nur faceA–faceC). */
+function faceIndicesOf(v: DxfVertex): number[] {
+  return [v.faceA, v.faceB, v.faceC, v.faceD].filter(
+    (i): i is number => typeof i === "number" && i !== 0,
+  );
+}
+
 /** Ob eine POLYLINE eine Mesh-Variante ist (Polyface- oder Polygon-Gitter). */
 function isMeshPolyline(e: DxfEntity): boolean {
   if (e.isPolyfaceMesh === true || e.is3dPolygonMesh === true) return true;
-  // Heuristik: enthält irgendein Vertex eine `faces`-Liste → Polyface-Mesh.
-  return (e.vertices ?? []).some(
-    (v) => Array.isArray(v.faces) && v.faces.length > 0,
-  );
+  // Heuristik: enthält irgendein Vertex Face-Indizes → Polyface-Mesh.
+  return (e.vertices ?? []).some((v) => faceIndicesOf(v).length > 0);
 }
 
 /**
  * Polyface-Mesh (POLYLINE, Flag 64): erst Geometrie-Vertices, dann Face-Records
- * mit 1-basierten (ggf. negativen = unsichtbare Kante) Vertex-Indizes. Wir
+ * (VERTEX mit `polyfaceMeshVertex`-Flag, s. {@link DxfVertex}) mit 1-basierten
+ * (ggf. negativen = unsichtbare Kante) Vertex-Indizes in faceA..faceD. Wir
  * trennen Geometrie- von Face-Vertices und fan-triangulieren jede Face.
  */
 function addPolyfaceMesh(
@@ -315,8 +331,8 @@ function addPolyfaceMesh(
   e: DxfEntity,
 ): void {
   const all = e.vertices ?? [];
-  const geom = all.filter((v) => !(Array.isArray(v.faces) && v.faces.length));
-  const faceRecs = all.filter((v) => Array.isArray(v.faces) && v.faces.length);
+  const geom = all.filter((v) => faceIndicesOf(v).length === 0);
+  const faceRecs = all.filter((v) => faceIndicesOf(v).length > 0);
   if (geom.length < 3) return;
   const base = positions.length / 3;
   for (const v of geom) {
@@ -324,7 +340,7 @@ function addPolyfaceMesh(
   }
   for (const fr of faceRecs) {
     // 1-basierte Indizes; Vorzeichen markiert (un)sichtbare Kanten → abs().
-    const ring = (fr.faces ?? [])
+    const ring = faceIndicesOf(fr)
       .map((i) => Math.abs(i))
       .filter((i) => i >= 1)
       .map((i) => base + (i - 1));
