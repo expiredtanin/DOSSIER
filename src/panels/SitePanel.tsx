@@ -115,7 +115,13 @@ export function SitePanel() {
       ) : (
         <ul className="site-list">
           {objects.map((obj) => (
-            <li key={obj.id} className="site-row">
+            <li
+              key={obj.id}
+              className={
+                "site-row" +
+                (host.selectedContextObjectIds.includes(obj.id) ? " site-row-selected" : "")
+              }
+            >
               <span className="site-name" title={obj.name}>
                 {obj.name}
               </span>

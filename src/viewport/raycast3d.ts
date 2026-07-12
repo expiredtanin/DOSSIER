@@ -96,15 +96,29 @@ export interface PickRoof {
   roofId: string;
 }
 
+/**
+ * Minimal-Form eines Kontext-Meshes (importiertes Gebäude/Terrain, s.
+ * `ContextObject`) für den Raycast: rohe WORLD-Dreiecke (dieselbe Konvention
+ * wie {@link PickRoof} — model (x,y,z=Höhe) → world (x, z, y)), keine
+ * Vereinfachung auf ein Bounding-Prisma (Gebäude-Meshes sind zu unregelmässig
+ * dafür, ein grosszügiges Prisma stähle Klicks auf dahinterliegende Bauteile).
+ */
+export interface PickContextMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  contextObjectId: string;
+}
+
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling" | "opening" | "stair" | "roof";
+  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject";
   id: string;
   t: number;
   /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
   openingId?: string;
   /** Bei `kind:"stair"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
   stairId?: string;
+  /** Bei `kind:"contextObject"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
+  contextObjectId?: string;
 }
 
 const EPS = 1e-9;
@@ -362,6 +376,17 @@ function rayRoofTris(ray: Ray, roof: PickRoof): number | null {
   return best;
 }
 
+/** Kleinstes t über alle Dreiecke eines Kontext-Meshes, oder null — wie
+ *  {@link rayRoofTris}, dieselbe doppelseitige {@link rayTriangle}. */
+function rayContextMeshTris(ray: Ray, mesh: PickContextMesh): number | null {
+  let best: number | null = null;
+  for (const [a, b, c] of mesh.tris) {
+    const t = rayTriangle(ray, a, b, c);
+    if (t !== null && (best === null || t < best)) best = t;
+  }
+  return best;
+}
+
 // Overload OHNE Öffnungen/Treppen: bleibt exakt die bisherige Signatur, sodass
 // der bestehende Aufrufer (Wasm3DViewport.tsx: `pickNearest(ray, walls, slabs)`)
 // unverändert kompiliert — inklusive des dort erwarteten engen `kind`-Typs
@@ -372,7 +397,8 @@ export function pickNearest(
   walls: readonly PickWall[],
   slabs: readonly PickSlab[],
 ): (PickHit & { kind: "wall" | "ceiling" }) | null;
-// Erweiterter Overload MIT Öffnungen/Treppen/Dächern: `kind` deckt alle Arten ab.
+// Erweiterter Overload MIT Öffnungen/Treppen/Dächern/Kontext-Meshes: `kind`
+// deckt alle Arten ab.
 export function pickNearest(
   ray: Ray,
   walls: readonly PickWall[],
@@ -380,6 +406,7 @@ export function pickNearest(
   openings: readonly PickOpening[],
   stairs?: readonly PickStair[],
   roofs?: readonly PickRoof[],
+  contextMeshes?: readonly PickContextMesh[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -397,6 +424,7 @@ export function pickNearest(
   openings: readonly PickOpening[] = [],
   stairs: readonly PickStair[] = [],
   roofs: readonly PickRoof[] = [],
+  contextMeshes: readonly PickContextMesh[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -432,6 +460,13 @@ export function pickNearest(
   for (const r of roofs) {
     const t = rayRoofTris(ray, r);
     if (t !== null) consider({ kind: "roof", id: r.roofId, t }, 1);
+  }
+  // Kontext-Meshes (importierte Gebäude/Terrain): Rang wie Wand/Decke/Dach.
+  for (const m of contextMeshes) {
+    const t = rayContextMeshTris(ray, m);
+    if (t !== null) {
+      consider({ kind: "contextObject", id: m.contextObjectId, t, contextObjectId: m.contextObjectId }, 1);
+    }
   }
   return hit;
 }

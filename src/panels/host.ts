@@ -402,6 +402,8 @@ export interface PanelHostValue {
   // ── Site-/Kontext-Schicht (SitePanel) ───────────────────────────────────
   /** Aktuelle Kontext-Objekte (Meshes/Konturen/Gelände) aus `project.context`. */
   contextObjects: ContextObject[];
+  /** Im 3D-Viewport angewählte Kontext-Objekte (Umriss-Hervorhebung), s. selectionSlice. */
+  selectedContextObjectIds: string[];
   /** Fügt mehrere Kontext-Objekte hinzu (z. B. aus einem DXF-Import). */
   onAddContextObjects: (objs: ContextObject[]) => void;
   /** Entfernt ein Kontext-Objekt per ID. */

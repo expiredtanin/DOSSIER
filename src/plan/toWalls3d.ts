@@ -62,7 +62,7 @@ import type { WallCuts } from "../model/joins";
 import { add, dot, leftNormal, lineIntersect, normalize, scale, sub } from "../model/geometry";
 import type { Line } from "../model/geometry";
 import { resolveHatch } from "./generatePlan";
-import type { PickOpening, PickRoof, PickStair } from "../viewport/raycast3d";
+import type { PickOpening, PickRoof, PickStair, PickContextMesh } from "../viewport/raycast3d";
 
 /** World-Punkt [x, Höhe, y] für den Dach-Pick (Vec3-Konvention von raycast3d). */
 type RoofPickVec3 = [number, number, number];
@@ -2825,6 +2825,7 @@ export function pickGeometry(
   openings: PickOpening[];
   stairs: PickStair[];
   roofs: PickRoof[];
+  contextMeshes: PickContextMesh[];
 } {
   // Dächer: Dachflächen + Giebel als WORLD-Dreiecke (fan-trianguliert wie
   // emitRoofs; model [x,y,z=Höhe] → world [x, z, y]) — präzise geneigte
@@ -2878,7 +2879,27 @@ export function pickGeometry(
       stairId: st.id,
     });
   }
-  return { walls: projectToWalls3d(project), slabs: emitSlabs(project), openings, stairs, roofs };
+  // Kontext-Meshes (importierte Gebäude/Terrain, s. ContextObject): rohe
+  // WORLD-Dreiecke wie beim Dach, direkt aus dem Indexpuffer (kein Fan nötig —
+  // ImportedMesh/TerrainMesh liefern bereits ein echtes Dreiecksnetz). Kaputte
+  // Indizes robust überspringen statt abzustürzen (importierte Daten).
+  const contextMeshes: PickContextMesh[] = [];
+  for (const obj of project.context ?? []) {
+    if (obj.type === "contourSet") continue;
+    const pos = obj.positions;
+    const vcount = pos.length / 3;
+    const tris: [RoofPickVec3, RoofPickVec3, RoofPickVec3][] = [];
+    for (let i = 0; i + 2 < obj.indices.length; i += 3) {
+      const ia = obj.indices[i];
+      const ib = obj.indices[i + 1];
+      const ic = obj.indices[i + 2];
+      if (ia >= vcount || ib >= vcount || ic >= vcount) continue;
+      const at = (idx: number): RoofPickVec3 => [pos[idx * 3], pos[idx * 3 + 2], pos[idx * 3 + 1]];
+      tris.push([at(ia), at(ib), at(ic)]);
+    }
+    if (tris.length > 0) contextMeshes.push({ tris, contextObjectId: obj.id });
+  }
+  return { walls: projectToWalls3d(project), slabs: emitSlabs(project), openings, stairs, roofs, contextMeshes };
 }
 
 /**
@@ -2915,13 +2936,15 @@ export function selectionHighlightLines(
   openingIds: string[] = [],
   stairIds: string[] = [],
   roofIds: string[] = [],
+  contextObjectIds: string[] = [],
 ): Float32Array {
   if (
     wallIds.length === 0 &&
     ceilingIds.length === 0 &&
     openingIds.length === 0 &&
     stairIds.length === 0 &&
-    roofIds.length === 0
+    roofIds.length === 0 &&
+    contextObjectIds.length === 0
   ) {
     return new Float32Array(0);
   }
@@ -2931,6 +2954,7 @@ export function selectionHighlightLines(
   const openingSet = new Set(openingIds);
   const stairSet = new Set(stairIds);
   const roofSet = new Set(roofIds);
+  const contextObjSet = new Set(contextObjectIds);
   const out: number[] = [];
   const pushEdge = (a: RVec3, b: RVec3) => {
     out.push(a[0], a[1], a[2], rgb[0], rgb[1], rgb[2]);
@@ -3011,6 +3035,36 @@ export function selectionHighlightLines(
       };
       for (const pl of g.planes) polyEdges(pl.pts);
       for (const gab of g.gables) polyEdges(gab);
+    }
+  }
+  // Kontext-Objekt (importiertes Gebäude/Terrain): Umriss als achsenparallele
+  // Bounding-Box statt vollem Dreiecks-Wireframe — importierte Meshes haben oft
+  // tausende Dreiecke, deren Kanten einzeln zu zeichnen wäre unbrauchbar dicht.
+  if (contextObjSet.size > 0) {
+    for (const obj of project.context ?? []) {
+      if (obj.type === "contourSet" || !contextObjSet.has(obj.id)) continue;
+      const pos = obj.positions;
+      let minX = Infinity, maxX = -Infinity;
+      let minY = Infinity, maxY = -Infinity;
+      let minH = Infinity, maxH = -Infinity;
+      for (let i = 0; i + 2 < pos.length; i += 3) {
+        const x = pos[i], y = pos[i + 1], h = pos[i + 2];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (h < minH) minH = h;
+        if (h > maxH) maxH = h;
+      }
+      if (!isFinite(minX)) continue;
+      const corners: RVec3[] = [];
+      for (let i = 0; i < 8; i++) {
+        const x = i & 1 ? maxX : minX;
+        const h = i & 2 ? maxH : minH;
+        const y = i & 4 ? maxY : minY;
+        corners.push([x, h, y]);
+      }
+      for (const [i, j] of BOX_EDGES) pushEdge(corners[i], corners[j]);
     }
   }
   return new Float32Array(out);

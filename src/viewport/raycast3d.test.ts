@@ -9,6 +9,7 @@ import {
   type PickSlab,
   type PickOpening,
   type PickStair,
+  type PickContextMesh,
 } from "./raycast3d";
 
 // Kamera bei (0,1,10), Blick entlang -Z auf (0,1,0). Zentraler Strahl (ndc 0,0)
@@ -202,6 +203,72 @@ describe("pickNearest — Öffnungen und Treppen", () => {
     // bei Gleichstand gewinnen, weil hier gar kein Gleichstand vorliegt.
     const farOpening: PickOpening = { ...OPENING, start: [-0.5, 2], end: [0.5, 2], openingId: "op-far" };
     const hit = pickNearest({ origin: [0, 1, 10], dir: [0, 0, -1] }, [WALL], [], [farOpening]);
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe("wall");
+    expect(hit!.id).toBe("w1");
+  });
+});
+
+// Kontext-Mesh (importiertes Gebäude/Terrain): eine flache, senkrechte
+// Rechteckfläche bei model y=5 (world z=5), model x∈[-1,1], model z (Höhe)
+// ∈[0,2] — dieselbe Front wie WALL, aber als rohes Dreiecksnetz statt Quader.
+const CONTEXT_MESH: PickContextMesh = {
+  tris: [
+    [
+      [-1, 0, 5],
+      [1, 0, 5],
+      [1, 2, 5],
+    ],
+    [
+      [-1, 0, 5],
+      [1, 2, 5],
+      [-1, 2, 5],
+    ],
+  ],
+  contextObjectId: "ctx1",
+};
+
+describe("pickNearest — Kontext-Meshes", () => {
+  it("Strahl auf ein Kontext-Mesh liefert contextObjectId", () => {
+    const hit = pickNearest(
+      { origin: [0, 1, 10], dir: [0, 0, -1] },
+      [],
+      [],
+      [],
+      [],
+      [],
+      [CONTEXT_MESH],
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe("contextObject");
+    expect(hit!.contextObjectId).toBe("ctx1");
+    expect(hit!.t).toBeCloseTo(5, 6);
+  });
+
+  it("Strahl neben dem Mesh verfehlt", () => {
+    const hit = pickNearest(
+      { origin: [5, 1, 10], dir: [0, 0, -1] },
+      [],
+      [],
+      [],
+      [],
+      [],
+      [CONTEXT_MESH],
+    );
+    expect(hit).toBeNull();
+  });
+
+  it("bei näherer Wand gewinnt die Wand vor dem weiter entfernten Kontext-Mesh", () => {
+    // WALL-Front bei z=5.1 → t=4.9, näher als das Mesh bei z=5 (t=5).
+    const hit = pickNearest(
+      { origin: [0, 1, 10], dir: [0, 0, -1] },
+      [WALL],
+      [],
+      [],
+      [],
+      [],
+      [CONTEXT_MESH],
+    );
     expect(hit).not.toBeNull();
     expect(hit!.kind).toBe("wall");
     expect(hit!.id).toBe("w1");

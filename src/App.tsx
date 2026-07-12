@@ -609,6 +609,8 @@ export default function App() {
   const setSelectedColumnIds = useStore((s) => s.setSelectedColumnIds);
   const selectedColumnId =
     selectedColumnIds.length === 1 ? selectedColumnIds[0] : null;
+  const selectedContextObjectIds = useStore((s) => s.selectedContextObjectIds);
+  const setSelectedContextObjectIds = useStore((s) => s.setSelectedContextObjectIds);
 
   // ── Kontextmenüs (transienter UI-State, bleibt lokal) ─────────────────────
   // Eigenschaften-Zwischenablage des Ebenen-Kontextmenüs (Farbe + Linienstärke).
@@ -1905,7 +1907,8 @@ export default function App() {
         selectedRoomIds.length ||
         selectedExtrudedSolidIds.length ||
         selectedColumnIds.length ||
-        selectedRoofIds.length
+        selectedRoofIds.length ||
+        selectedContextObjectIds.length
       ) {
         const dids = new Set(selectedDrawingIds);
         const wids = new Set(selectedWallIds);
@@ -1916,6 +1919,7 @@ export default function App() {
         const exids = new Set(selectedExtrudedSolidIds);
         const colids = new Set(selectedColumnIds);
         const rfids = new Set(selectedRoofIds);
+        const ctxids = new Set(selectedContextObjectIds);
         setProject((p) => ({
           ...p,
           drawings2d: p.drawings2d.filter((d) => !dids.has(d.id)),
@@ -1931,6 +1935,7 @@ export default function App() {
           openings: (p.openings ?? []).filter(
             (o) => !oids.has(o.id) && !wids.has(o.hostWallId),
           ),
+          context: (p.context ?? []).filter((o) => !ctxids.has(o.id)),
         }));
         setSelectedDrawingIds([]);
         setSelectedWallIds([]);
@@ -1941,6 +1946,7 @@ export default function App() {
         setSelectedExtrudedSolidIds([]);
         setSelectedColumnIds([]);
         setSelectedRoofIds([]);
+        setSelectedContextObjectIds([]);
         setSelectedSectionLineId(null);
         e.preventDefault();
       }
@@ -1958,6 +1964,7 @@ export default function App() {
     selectedExtrudedSolidIds,
     selectedColumnIds,
     selectedRoofIds,
+    selectedContextObjectIds,
     selectedSectionLineId,
     project.walls,
     project.drawings2d,
@@ -3531,6 +3538,7 @@ export default function App() {
       },
       // ── Site-/Kontext-Schicht ──────────────────────────────────────────────
       contextObjects: project.context ?? [],
+      selectedContextObjectIds,
       onAddContextObjects: addContextObjectsAndFit,
       onRemoveContextObject: removeContextObject,
       onGenerateTerrain: generateTerrain,
@@ -3555,6 +3563,7 @@ export default function App() {
           setSelectedExtrudedSolidIds([]);
           setSelectedColumnIds([]);
           setSelectedRoofIds([]);
+          setSelectedContextObjectIds([]);
           setSelectedSectionLineId(null);
           switch (kind) {
             case "Wand":
@@ -3932,6 +3941,7 @@ export default function App() {
     sectionLine,
     selectedSectionLineId,
     selectedViewSnapshotId,
+    selectedContextObjectIds,
   ]);
 
   // ── Ausschnitt-Anwahl: „bleibt bis zur Abweichung" (DOSSIER A2) ───────────
@@ -4417,6 +4427,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedContextObjectIds([]);
     setSelectedSectionLineId(null);
     setStampEditorRoomId(roomId);
   };
@@ -4433,6 +4444,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedContextObjectIds([]);
     setSelectedSectionLineId(null);
     setEditTextId(drawingId);
   };
@@ -4546,6 +4558,7 @@ export default function App() {
       if (keep !== "extrudedSolid") setSelectedExtrudedSolidIds([]);
       if (keep !== "column") setSelectedColumnIds([]);
       if (keep !== "roof") setSelectedRoofIds([]);
+      setSelectedContextObjectIds([]);
       if (keep !== "sectionLine") setSelectedSectionLineId(null);
     };
     if (sel.sectionLineId) {
@@ -4596,6 +4609,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
+    setSelectedContextObjectIds([]);
     setSelectedSectionLineId(null);
   };
   // Rechts-Klick im Grundriss: Wand-Kontextmenü. Trifft der Klick eine Wand, die
@@ -4688,6 +4702,21 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedContextObjectIds([]);
+      setSelectedSectionLineId(null);
+      return;
+    }
+    if (hit.kind === "contextObject") {
+      setSelectedContextObjectIds([hit.id]);
+      setSelectedWallIds([]);
+      setSelectedCeilingIds([]);
+      setSelectedDrawingId(null);
+      setSelectedOpeningIds([]);
+      setSelectedStairIds([]);
+      setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
       setSelectedSectionLineId(null);
       return;
     }
@@ -4704,6 +4733,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedContextObjectIds([]);
       setSelectedSectionLineId(null);
       return;
     }
@@ -4717,6 +4747,7 @@ export default function App() {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
+      setSelectedContextObjectIds([]);
       setSelectedSectionLineId(null);
       return;
     }
@@ -4730,6 +4761,7 @@ export default function App() {
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
+      setSelectedContextObjectIds([]);
       return;
     }
     if (hit.kind === "wall") {
@@ -4746,6 +4778,7 @@ export default function App() {
     setSelectedDrawingId(null);
     setSelectedOpeningIds([]);
     setSelectedStairIds([]);
+    setSelectedContextObjectIds([]);
     setSelectedRoomIds([]);
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
@@ -5046,6 +5079,7 @@ export default function App() {
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
+          selectedContextObjectIds={selectedContextObjectIds}
           selectedSectionLineId={selectedSectionLineId}
           roomStamp={roomStamp}
           onStampMove={moveRoomStamp}
@@ -6185,6 +6219,7 @@ function Content({
   selectedColumnIds,
   selectedRoomIds,
   selectedRoofIds,
+  selectedContextObjectIds,
   selectedSectionLineId,
   roomStamp,
   onStampMove,
@@ -6265,6 +6300,7 @@ function Content({
   selectedColumnIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
+  selectedContextObjectIds: string[];
   selectedSectionLineId: string | null;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
@@ -6337,7 +6373,8 @@ function Content({
       selectedCeilingIds.length === 0 &&
       selectedOpeningIds.length === 0 &&
       selectedStairIds.length === 0 &&
-      selectedRoofIds.length === 0
+      selectedRoofIds.length === 0 &&
+      selectedContextObjectIds.length === 0
         ? null
         : selectionHighlightLines(
             project,
@@ -6347,6 +6384,7 @@ function Content({
             selectedOpeningIds,
             selectedStairIds,
             selectedRoofIds,
+            selectedContextObjectIds,
           ),
     [
       project,
@@ -6355,6 +6393,7 @@ function Content({
       selectedOpeningIds,
       selectedStairIds,
       selectedRoofIds,
+      selectedContextObjectIds,
     ],
   );
 

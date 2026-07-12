@@ -4043,6 +4043,10 @@ body {
 .site-panel .site-row:hover {
   background: var(--accent-dim);
 }
+.site-panel .site-row-selected {
+  background: var(--accent-dim);
+  outline: 1px solid var(--accent);
+}
 .site-panel .site-name {
   flex: 1 1 auto;
   min-width: 0;

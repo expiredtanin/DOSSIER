@@ -101,6 +101,48 @@ describe("selectionHighlightLines", () => {
   });
 });
 
+describe("selectionHighlightLines — Kontext-Objekte", () => {
+  // Ein einzelnes Dreieck als Kontext-Mesh (importiertes Gebäude): das
+  // Highlight zeichnet dessen achsenparallele Bounding-Box (12 Kanten), NICHT
+  // das volle Dreiecks-Wireframe (s. Kommentar in toWalls3d.ts).
+  const withContext: Project = {
+    ...sampleProject,
+    context: [
+      {
+        id: "CTX1",
+        type: "importedMesh",
+        name: "Testgebäude",
+        positions: [0, 0, 0, 2, 0, 0, 2, 3, 4],
+        indices: [0, 1, 2],
+      },
+    ],
+  };
+
+  it("leere Kontext-Auswahl -> leeres Array", () => {
+    const lines = selectionHighlightLines(withContext, [], [], RGB, [], [], [], []);
+    expect(lines.length).toBe(0);
+  });
+
+  it("unbekannte Kontext-Id -> leeres Array", () => {
+    const lines = selectionHighlightLines(withContext, [], [], RGB, [], [], [], ["does-not-exist"]);
+    expect(lines.length).toBe(0);
+  });
+
+  it("ein Kontext-Objekt -> Bounding-Box-Umriss (12 Kanten)", () => {
+    const lines = selectionHighlightLines(withContext, [], [], RGB, [], [], [], ["CTX1"]);
+    expect(lines.length).toBe(12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
+    expect(lines[3]).toBeCloseTo(RGB[0], 6);
+    expect(lines[5]).toBeCloseTo(RGB[2], 6);
+  });
+
+  it("Kontext-Objekt zusammen mit einer Wand -> Summe der Einzelgeometrien", () => {
+    const wallOnly = selectionHighlightLines(withContext, ["W2"], [], RGB);
+    const ctxOnly = selectionHighlightLines(withContext, [], [], RGB, [], [], [], ["CTX1"]);
+    const both = selectionHighlightLines(withContext, ["W2"], [], RGB, [], [], [], ["CTX1"]);
+    expect(both.length).toBe(wallOnly.length + ctxOnly.length);
+  });
+});
+
 describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:true)", () => {
   // Wand W1 (EG, Wandtyp "aw" = 4 Schichten) mit ZWEI Fenstern, deren Achsen-
   // Intervalle sich ÜBERLAPPEN, aber auf UNTERSCHIEDLICHER Höhe liegen:
@@ -1888,5 +1930,54 @@ describe("pickGeometry — Dächer (Ray-Dreieck-Pick)", () => {
     expect(roofs[0].tris.length).toBe(6);
     // Höhe liegt in der WORLD-Y-Komponente (Index 1) — alle über der Traufe > 0.
     for (const tri of roofs[0].tris) for (const p of tri) expect(p[1]).toBeGreaterThan(0);
+  });
+});
+
+describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () => {
+  const withContext: Project = {
+    ...sampleProject,
+    context: [
+      {
+        id: "CTX1",
+        type: "importedMesh",
+        name: "Testgebäude",
+        // model (x,y,z=Höhe) -> world (x, z, y): ein Dreieck.
+        positions: [0, 0, 0, 2, 0, 0, 2, 3, 4],
+        indices: [0, 1, 2],
+      },
+      {
+        id: "CONTOURS1",
+        type: "contourSet",
+        name: "Höhenlinien",
+        contours: [],
+      },
+    ],
+  };
+
+  it("liefert je Kontext-Objekt World-Dreiecke, contourSet wird übersprungen", () => {
+    const { contextMeshes } = pickGeometry(withContext);
+    expect(contextMeshes.length).toBe(1);
+    expect(contextMeshes[0].contextObjectId).toBe("CTX1");
+    expect(contextMeshes[0].tris.length).toBe(1);
+    // world = (x, z, y) — dasselbe Dreieck (0,0,0),(2,0,0),(2,3,4)
+    // -> world (0,0,0),(2,0,0),(2,4,3).
+    expect(contextMeshes[0].tris[0][2]).toEqual([2, 4, 3]);
+  });
+
+  it("kaputte Indizes werden robust übersprungen statt abzustürzen", () => {
+    const broken: Project = {
+      ...sampleProject,
+      context: [
+        {
+          id: "CTX2",
+          type: "importedMesh",
+          name: "Kaputt",
+          positions: [0, 0, 0, 1, 0, 0, 1, 1, 0],
+          indices: [0, 1, 99], // Index 99 existiert nicht
+        },
+      ],
+    };
+    const { contextMeshes } = pickGeometry(broken);
+    expect(contextMeshes.length).toBe(0);
   });
 });
