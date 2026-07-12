@@ -2349,26 +2349,10 @@ function addOpeningSymbol(
       }
     }
   }
-  // Brüstungslinie (gepunktet) — zeigt die Brüstung im Grundriss auf der Wandachse.
-  // Nur bei Fenstern mit Brüstungshöhe > 0. Entspricht der Sill-Linie in
-  // `_make_oeffnung_preview` und dem Brüstungs-Plansymbol im Rhino-Plugin.
-  if (o.sillHeight > 0 && detail !== "grob") {
-    const jambs = openingJambs(wall, o);
-    if (jambs) {
-      out.push({
-        kind: "line",
-        a: jambs.jambStart,
-        b: jambs.jambEnd,
-        cls: "window-sill",
-        weightMm: SYMBOL_HAIRLINE_MM,
-        // Gepunktet (dot-dash) wie in _make_oeffnung_preview DrawDottedLine.
-        dash: [0.04, 0.08],
-        color: o.color ?? POCHE_STROKE,
-        greyed,
-        openingId: o.id,
-      });
-    }
-  }
+  // Die frühere Brüstungslinie (Wandachse, unabhängig von der Rahmenposition)
+  // ist entfernt (Nutzer-Feedback: falsch positioniert, Dash rendert nicht
+  // sichtbar) — eine korrekte Andeutung kommt als Teil der geplanten Auf-/
+  // Untersicht-Option (aussen/innen, je nach Einbaulage) neu.
   // Rollladen-/Sonnenschutzkasten (P0-Minimalfassung, reine 2D-Kontur): ein
   // gestricheltes Rechteck ÜBER der Öffnung, ausserhalb der Wand-Aussenfläche —
   // Breite = `shading.box.width` (0/fehlt ⇒ Öffnungsbreite), die zweite
