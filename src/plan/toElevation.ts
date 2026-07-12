@@ -100,7 +100,7 @@ const FRAME_FILL_COLOR = "#d9d9d4";
 const SILL_FILL_COLOR = "#cccccb";
 /** Türblatt-Fläche. */
 const DOOR_LEAF_FILL_COLOR = "#ede6d9";
-/** Öffnungssymbol (DIN-Andeutung): dezente Annotation, nicht Bauteilkante. */
+/** Öffnungssymbol (SIA-Andeutung): dezente Annotation, nicht Bauteilkante. */
 const SYMBOL_INK = "#7d858f";
 /** Neutraler Dach-Grauton, falls keine Eindeckungs-Schicht/-Farbe auflösbar ist (wie `toWalls3d.ts::ROOF_RGB`). */
 const ROOF_RGB_FALLBACK: RRgb = [0.72, 0.45, 0.36];
@@ -610,7 +610,7 @@ interface ProjectedOpening {
   sashRects: Array<Array<[number, number]>>;
   /** Fensterbank (Sims): Bank + Tropfkante als zwei Bänder unter dem Rahmen. */
   sill: Array<Array<[number, number]>>;
-  /** Öffnungssymbol (DIN-Ansicht): Linien exakt auf den Glasfeld-Ecken. */
+  /** Öffnungssymbol (SIA-Ansicht): Linien exakt auf den Glasfeld-Ecken. */
   symbol: Array<[[number, number], [number, number]]>;
   /** Tür (Blatt-Fläche statt Glas, ausser Glas-Blatt). */
   isDoor: boolean;
@@ -791,9 +791,10 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
         if (fa1 < 1 - fa - 1e-6) {
           pr.divisions.push([quadAt(pr.pts, fa1, fz), quadAt(pr.pts, fa1, fieldTop)]);
         }
-        // Öffnungssymbol (DIN): Linien starten/enden EXAKT auf den Glasfeld-
-        // Ecken (Nutzer-Report: Anker waren daneben). Dreh: Spitze am
-        // Bandseiten-Mittel des Glasfelds; Kipp: Spitze oben Mitte (VW).
+        // Öffnungssymbol (SIA B.9.1.3): Linien starten/enden EXAKT auf den
+        // Glasfeld-Ecken (Nutzer-Report: Anker waren daneben). Dreh/Drehkipp:
+        // Spitze zeigt zur Bandseite (Anschlag), Basis zur Griffseite — SIA-
+        // Konvention. Kipp: Spitze oben Mitte (VW).
         const kind = sd.opening ?? wt?.kind ?? "fest";
         if (kind === "dreh" || kind === "drehkipp") {
           const hingeLeft = (sd.hingeSide ?? "left") === "left";
@@ -812,9 +813,10 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
           );
         }
         if (kind === "schiebe") {
-          // Schiebeflügel: KEIN Dreieck (keine Bandseite), sondern ein Pfeil in
-          // Laufrichtung (horizontal) auf halber Glashöhe — die Griffseite
-          // (hingeSide) bestimmt die Pfeilrichtung. Klassische DIN-Konvention.
+          // Schiebeflügel (SIA: „vertikales/horizontales Schiebefenster"):
+          // KEIN Dreieck (keine Bandseite), sondern ein Pfeil in Laufrichtung
+          // (horizontal) auf halber Glashöhe — die Griffseite (hingeSide)
+          // bestimmt die Pfeilrichtung.
           const zc = (gz0 + gz1) / 2;
           const toRight = (sd.hingeSide ?? "left") === "left"; // Griff links ⇒ schiebt nach rechts
           const tail = toRight ? gA : gB;
@@ -1484,7 +1486,7 @@ export function generateElevationPlan(
         },
       });
     }
-    // Öffnungssymbol (DIN): dünn gestrichelt über dem Glas.
+    // Öffnungssymbol (SIA): dünn gestrichelt über dem Glas.
     for (const [a, bLn] of op.symbol) {
       items.push({
         depth: d,

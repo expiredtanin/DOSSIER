@@ -416,7 +416,7 @@ const SHADING_RGB: RRgb = [0.88, 0.88, 0.9];
  */
 const SILL_RGB: RRgb = [0.8, 0.8, 0.78];
 /**
- * Dunkles Grau der DIN-Öffnungssymbole (dünne Diagonalen AUF dem Glas, wie in der
+ * Dunkles Grau der SIA-Öffnungssymbole (dünne Diagonalen AUF dem Glas, wie in der
  * 2D-Ansicht) — feine dunkle Linien auf der Scheibe (s. Symbol-Zweig in
  * {@link frameMeshesForOpening}). Als sehr dünne, in der Öffnungsebene gedrehte
  * Prismen ({@link openingPlaneBox}) knapp vor der Glasebene.
@@ -1919,7 +1919,7 @@ function openingAxisBox(
  * absolute Welthöhe (Meter). Der Querschnitt spannt `±halfWidth` senkrecht zur
  * Längsachse INNERHALB der Ebene (gedreht mit) und `[nBack,nFront]` entlang der
  * Grundriss-Normalen (quer zur Wand, Tiefe). Damit lassen sich die schrägen
- * DIN-Öffnungssymbole (Dreh-/Kipp-Diagonalen) als dünne, gedrehte dunkle Riegel
+ * SIA-Öffnungssymbole (Dreh-/Kipp-Diagonalen) als dünne, gedrehte dunkle Riegel
  * AUF dem Glas erzeugen — der Renderer kennt nur Dreiecks-Meshes, keine Linien.
  * `null` bei entarteter Länge (≤ EPS). 8 Ecken, dieselbe {@link OPENING_BOX_TRIS}-
  * Topologie (doppelseitig gerendert ⇒ Winding egal; die drei Bits parametrisieren
@@ -2161,9 +2161,9 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
  * DetailLevel-Staffelung (VW-Detailgrad „fein" als Referenz):
  *  • „grob"  — wird gar nicht aufgerufen (s. {@link emitOpeningFrames}).
  *  • „mittel"— Blendrahmen + Oberlicht-Kämpfer + Flügelrahmen (verschachtelt) +
- *    Fensterbank/Zargen-Umgriff, aber KEINE Sprossen und KEINE DIN-Symbole.
+ *    Fensterbank/Zargen-Umgriff, aber KEINE Sprossen und KEINE SIA-Symbole.
  *  • „fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen) und
- *    die DIN-Öffnungssymbole ({@link openingPlaneBox}) auf dem Glas.
+ *    die SIA-Öffnungssymbole ({@link openingPlaneBox}) auf dem Glas.
  */
 function frameMeshesForOpening(
   wall: Wall,
@@ -2240,7 +2240,7 @@ function frameMeshesForOpening(
   // über die Tiefe: der Flügelrahmen sitzt in einem EIGENEN, leicht ZURÜCK-
   // GESETZTEN und flacheren Quer-Band (`sashBackN..sashFrontN`) hinter der
   // Blendrahmen-Vorderkante — eine plastische Stufe nach innen (VW „fein"),
-  // ohne vor die Fassade auszukragen. Zusätzlich (nur „fein") die DIN-Öffnungs-
+  // ohne vor die Fassade auszukragen. Zusätzlich (nur „fein") die SIA-Öffnungs-
   // symbole auf dem Glas. Feste Flügel bekommen weder Flügelrahmen noch Symbol.
   if (sashesOn && params.sashes.length > 0 && sashTo - sashFrom > EPS && sashTop - sashBottom > EPS) {
     const segs = resolveSashSpans(params.sashes, sashFrom, sashTo);
@@ -2275,7 +2275,7 @@ function frameMeshesForOpening(
       pushSash(ct - sfw, ct, bz, tz); // rechter Flügelholm
       pushSash(cf, ct, tz - sfw, tz); // oberer Flügelriegel
       pushSash(cf, ct, bz, bz + sfw); // unterer Flügelriegel
-      // DIN-Öffnungssymbole (nur „fein") auf dem Glasfeld INNERHALB des Flügel-
+      // SIA-Öffnungssymbole (nur „fein") auf dem Glasfeld INNERHALB des Flügel-
       // rahmens — exakt wie in der 2D-Ansicht (s. toElevation): Dreh = V mit
       // Spitze am Bandseiten-Mittel des Glasfelds, Kipp = V mit Spitze oben Mitte.
       if (!fine) continue;
@@ -2686,9 +2686,9 @@ export interface Model3dOptions {
    *  • "grob"  — keine Rahmen/Sprossen (nur Loch + Scheibe).
    *  • "mittel"— Blendrahmen (Pfosten/Sturz/Schwelle) + ggf. Kämpfer, dazu die
    *    verschachtelten Flügelrahmen, Fensterbank (Sims) und Zargen-Umgriff — aber
-   *    KEINE Sprossen und KEINE DIN-Öffnungssymbole.
+   *    KEINE Sprossen und KEINE SIA-Öffnungssymbole.
    *  • "fein"  — zusätzlich Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen) und
-   *    die DIN-Öffnungssymbole (Dreh/Kipp) auf dem Glas.
+   *    die SIA-Öffnungssymbole (Dreh/Kipp) auf dem Glas.
    * Fehlt es, gilt "fein" (= volle Details).
    */
   detail?: DetailLevel;
