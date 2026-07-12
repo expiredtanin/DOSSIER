@@ -2060,21 +2060,11 @@ function addOpeningFrameBand(
     }
   }
 
-  // Oberlicht (Überkopf-Andeutung): eine gestrichelte Linie quer über die
-  // Öffnung auf der Wandachse — nur wenn der Typ ein Oberlicht definiert.
-  if (spec.transomHeight > 0) {
-    out.push({
-      kind: "line",
-      a: jambStart,
-      b: jambEnd,
-      cls: "opening-transom",
-      weightMm: SYMBOL_HAIRLINE_MM,
-      dash: OVERHEAD_DASH,
-      color,
-      greyed,
-      openingId: o.id,
-    });
-  }
+  // Die frühere Oberlicht-Andeutung (gestrichelte Linie quer über die ganze
+  // Öffnung bei transomHeight>0) ist entfernt (Nutzer-Report: erscheint immer
+  // auf der Wandachse, unabhängig davon, ob die Schnittebene den Kämpfer
+  // überhaupt trifft — im horizontalen Grundriss-Schnitt architektonisch nicht
+  // aussagekräftig, ein Kämpfer ist ein Höhen-, kein Grundriss-Merkmal).
 }
 
 /**

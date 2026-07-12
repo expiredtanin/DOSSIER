@@ -188,12 +188,10 @@ describe("generatePlan — zweiflügelige Tür (leafCount)", () => {
   });
 });
 
-describe("generatePlan — Oberlicht (opening-transom)", () => {
-  it("erscheint genau dann, wenn transomHeight > 0", () => {
+describe("generatePlan — Oberlicht (opening-transom, entfernt)", () => {
+  it("erscheint NICHT mehr im Grundriss, unabhängig von transomHeight (Nutzer-Report: falsch auf Wandachse, Kämpfer ist ein Höhen- kein Grundriss-Merkmal)", () => {
     const withTransom = project([{ ...baseWindow, typeId: "wt1" }], { windowTypes: [windowType] });
-    const transomLines = linesOfClass(withTransom, "opening-transom", "F1");
-    expect(transomLines.length).toBe(1);
-    expect(Array.isArray(transomLines[0].dash) && transomLines[0].dash!.length).toBeGreaterThan(0);
+    expect(linesOfClass(withTransom, "opening-transom", "F1").length).toBe(0);
 
     const noTransomType: WindowType = { ...windowType, id: "wt2", transomHeight: 0 };
     const withoutTransom = project([{ ...baseWindow, typeId: "wt2" }], { windowTypes: [noTransomType] });
