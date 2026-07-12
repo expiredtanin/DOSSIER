@@ -1111,6 +1111,8 @@ export const en: Record<TranslationKey, string> = {
   "cmd.import.prompt": "Choose DXF file …",
   "cmd.terrain.label": "Terrain",
   "cmd.terrain.prompt": "Generate terrain from contours …",
+  "cmd.georef.label": "New reference point",
+  "cmd.georef.prompt": "New origin (shifts the whole project):",
 
   // Area balance (SIA 416).
   "nav.roomBalance": "Area balance",
@@ -1261,6 +1263,8 @@ export const en: Record<TranslationKey, string> = {
 
   // Location import (geo.admin / OSM).
   "site.importLocation": "Import location",
+  "site.setGeoref": "New reference point",
+  "site.setGeoref.hint": "Click in the plan to shift the whole project — the clicked point becomes the new origin (0,0). The real-world reference is preserved.",
   "ctxImport.title": "Import location",
   "ctxImport.close": "Close",
   "ctxImport.geoAnchor": "Georeferenced from: {label}",

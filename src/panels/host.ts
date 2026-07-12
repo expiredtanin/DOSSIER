@@ -423,6 +423,14 @@ export interface PanelHostValue {
   ) => void;
   /** Öffnet den (in App montierten) versteckten DXF-Datei-Dialog. */
   onImportDxf: () => void;
+  /**
+   * Startet den Befehl „Neuer Bezugspunkt" (`georef`, Command-Engine): der
+   * nächste Klick im Grundriss verschiebt das GESAMTE Projekt so, dass der
+   * geklickte Punkt zum neuen Modell-Ursprung (0,0) wird — `geoAnchor` wandert
+   * automatisch mit (s. `model/geoRebase.ts`). Praktisch nach einem Kataster-/
+   * 3D-Import, der weit weg vom bisherigen Ursprung landen kann.
+   */
+  onStartGeoref: () => void;
 
   // ── Element-Baum (Elemente-Panel) ───────────────────────────────────────
   /**

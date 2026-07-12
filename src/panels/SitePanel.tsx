@@ -76,6 +76,14 @@ export function SitePanel() {
         >
           {t("site.importLocation")}
         </button>
+        <button
+          type="button"
+          className="site-btn"
+          title={t("site.setGeoref.hint")}
+          onClick={() => host.onStartGeoref()}
+        >
+          {t("site.setGeoref")}
+        </button>
       </div>
 
       {ctxImportOpen && (

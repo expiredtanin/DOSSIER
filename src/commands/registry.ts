@@ -30,6 +30,7 @@ import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
 import { measureCommand } from "./cmds/measure";
 import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
+import { georefCommand } from "./cmds/georef";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -62,6 +63,7 @@ export const COMMANDS: Record<string, Command> = {
   measure: measureCommand,
   sectionline: sectionLineCommand,
   viewline: viewLineCommand,
+  georef: georefCommand,
 };
 
 /**
@@ -110,6 +112,8 @@ export const ALIASES: Record<string, string> = {
   ter: "terrain",
   schnittlinie: "sectionline",
   ansichtslinie: "viewline",
+  bezugspunkt: "georef",
+  nullpunkt: "georef",
 };
 
 /** Liefert den Befehl zu einem exakten Namen (oder undefined). */

@@ -3546,6 +3546,7 @@ export default function App() {
         setProject((p) => ({ ...p, geoAnchor: anchor }));
       },
       onImportDxf: () => dxfInputRef.current?.click(),
+      onStartGeoref: () => onRunCommand("georef"),
       // ── Element-Baum (Elemente-Panel) ────────────────────────────────────
       onSelectScheduleRow: (
         kind: ScheduleKind,

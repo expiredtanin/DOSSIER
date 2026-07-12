@@ -1122,6 +1122,8 @@ export const de = {
   "cmd.import.prompt": "DXF-Datei wählen …",
   "cmd.terrain.label": "Gelände",
   "cmd.terrain.prompt": "Gelände aus Konturen erzeugen …",
+  "cmd.georef.label": "Neuer Bezugspunkt",
+  "cmd.georef.prompt": "Neuer Nullpunkt (verschiebt das ganze Projekt):",
 
   // ── Flächenbilanz (SIA 416) ──────────────────────────────────────────────
   "nav.roomBalance": "Flächenbilanz",
@@ -1273,6 +1275,8 @@ export const de = {
 
   // ── Standort-Import (geo.admin / OSM) ─────────────────────────────────────
   "site.importLocation": "Standort importieren",
+  "site.setGeoref": "Neuer Bezugspunkt",
+  "site.setGeoref.hint": "Klick im Grundriss verschiebt das ganze Projekt — der geklickte Punkt wird zum neuen Ursprung (0,0). Der reale Standort-Bezug bleibt erhalten.",
   "ctxImport.title": "Standort importieren",
   "ctxImport.close": "Schließen",
   "ctxImport.geoAnchor": "Georeferenziert ab: {label}",
