@@ -389,6 +389,17 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
     expect(sill[0].kind === "line" && sill[0].color).toBe("#0000ff");
     expect(sill[0].kind === "line" && sill[0].weightMm).toBeCloseTo(0.4, 6);
   });
+
+  it("sashLine wirkt auch bei 'grob' (1:100) auf die einzige dort sichtbare Glaslinie", () => {
+    const p = project(
+      { ...baseWindow, typeId: "wt1", sashLine: { color: "#00ff00", weight: 0.3 } },
+      [twoSashType],
+    );
+    const g = linesOfClass(p, "window-glass", "grob");
+    expect(g.length).toBe(1);
+    expect(g[0].kind === "line" && g[0].color).toBe("#00ff00");
+    expect(g[0].kind === "line" && g[0].weightMm).toBeCloseTo(0.3, 6);
+  });
 });
 
 describe("generatePlan — Rollladenkasten shading (Item 3)", () => {

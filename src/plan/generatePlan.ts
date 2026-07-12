@@ -2265,9 +2265,20 @@ function addOpeningSymbol(
 
   if (detail === "grob") {
     // SIA 1:100 — nur eine dünne Glaslinie mittig über die weisse Öffnung.
+    // Zählt zur "Fenster"-Kategorie (sashLine) — dieselbe Glaslinie, die bei
+    // mittel/fein früher sichtbar war (jetzt dort entfernt, s. Fenster-Session).
     const g = sym.glassLines[Math.floor(sym.glassLines.length / 2)] ?? sym.glassLines[0];
     if (g) {
-      out.push({ kind: "line", a: g[0], b: g[1], cls: "window-glass", weightMm: SYMBOL_HAIRLINE_MM, greyed, openingId: o.id });
+      out.push({
+        kind: "line",
+        a: g[0],
+        b: g[1],
+        cls: "window-glass",
+        weightMm: o.sashLine?.weight ?? SYMBOL_HAIRLINE_MM,
+        color: o.sashLine?.color ?? strokeColor,
+        greyed,
+        openingId: o.id,
+      });
     }
   } else {
     // Linien-Kategorien einzeln übersteuerbar (Nutzer-Wunsch): Rahmen (Blend-
