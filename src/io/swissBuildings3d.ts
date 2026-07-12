@@ -56,6 +56,55 @@ export function shiftMeshToOrigin(
   return { ...mesh, positions, name: `swissBUILDINGS3D ${sourceId}` };
 }
 
+/**
+ * Schneidet ein Mesh auf eine (bereits origin-verschobene, lokale) Bounding-Box
+ * zurecht: ein Dreieck bleibt, sobald MINDESTENS EIN Eckpunkt innerhalb der Box
+ * liegt (grosszügig — schneidet Gebäude am Rand nicht mittendurch ab). Nötig,
+ * weil eine einzelne swissBUILDINGS3D-DXF-Kachel (STAC-Tile) alle Gebäude der
+ * GANZEN Kachel als EIN gemeinsames Mesh liefert (s. `dxfParser.ts::parseDxf`
+ * — alle 3DFACE/Polyface-Entities eines Files landen im selben Positions-/
+ * Indexpuffer) — ohne diesen Zuschnitt liefert ein einzelner Import ALLES in
+ * der Kachel, auch weit ausserhalb des gesuchten Radius (bis zu mehreren km,
+ * je nach Kachelgrösse). `positions` wird dabei KOMPAKTIERT (nicht referenzierte
+ * Ecken entfernt, Indizes neu gemappt) — sonst sähe jeder Verbraucher, der roh
+ * über `positions` statt über `indices` iteriert (z. B. eine Bounding-Box/
+ * Kamera-Fit-Berechnung), weiterhin die volle, ungeschnittene Ausdehnung. Rein
+ * (kein Netzwerk), exportiert für Unit-Tests.
+ */
+export function clipMeshToBbox(
+  mesh: ImportedMesh,
+  bboxLocal: [number, number, number, number],
+): ImportedMesh {
+  const [xMin, yMin, xMax, yMax] = bboxLocal;
+  const pos = mesh.positions;
+  const inBox = (idx: number): boolean => {
+    const x = pos[idx * 3];
+    const y = pos[idx * 3 + 1];
+    return x >= xMin && x <= xMax && y >= yMin && y <= yMax;
+  };
+  const keptTris: [number, number, number][] = [];
+  for (let i = 0; i + 2 < mesh.indices.length; i += 3) {
+    const a = mesh.indices[i];
+    const b = mesh.indices[i + 1];
+    const c = mesh.indices[i + 2];
+    if (inBox(a) || inBox(b) || inBox(c)) keptTris.push([a, b, c]);
+  }
+  const remap = new Map<number, number>();
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const mapVertex = (old: number): number => {
+    let ni = remap.get(old);
+    if (ni === undefined) {
+      ni = positions.length / 3;
+      positions.push(pos[old * 3], pos[old * 3 + 1], pos[old * 3 + 2]);
+      remap.set(old, ni);
+    }
+    return ni;
+  };
+  for (const [a, b, c] of keptTris) indices.push(mapVertex(a), mapVertex(b), mapVertex(c));
+  return { ...mesh, positions, indices };
+}
+
 export interface FetchBuildings3dResult {
   origin: GeoOrigin;
   meshes: ImportedMesh[];
@@ -88,7 +137,17 @@ export async function fetchBuildings3d(
   version: BuildingsVersion = "v2",
 ): Promise<FetchBuildings3dResult> {
   const origin = originIn ?? makeOrigin(center);
-  const bboxWgs = lv95BboxToWgs84(bboxAround(center, radius));
+  const bboxLv95 = bboxAround(center, radius);
+  const bboxWgs = lv95BboxToWgs84(bboxLv95);
+  // Lokale (origin-verschobene) Zuschnitt-Box — s. clipMeshToBbox: eine STAC-
+  // Kachel liefert ALLE Gebäude der Kachel als EIN Mesh, nicht nur die im
+  // gesuchten Radius (kann mehrere km ausserhalb des Suchpunkts umfassen).
+  const clipBoxLocal: [number, number, number, number] = [
+    bboxLv95[0] - origin.e,
+    bboxLv95[1] - origin.n,
+    bboxLv95[2] - origin.e,
+    bboxLv95[3] - origin.n,
+  ];
 
   const tryCollection = async (
     collectionId: string,
@@ -108,7 +167,10 @@ export async function fetchBuildings3d(
         continue;
       }
       const parsed = parseDxf(text);
-      for (const m of parsed.meshes) meshes.push(shiftMeshToOrigin(m, origin, item.id));
+      for (const m of parsed.meshes) {
+        const clipped = clipMeshToBbox(shiftMeshToOrigin(m, origin, item.id), clipBoxLocal);
+        if (clipped.indices.length > 0) meshes.push(clipped);
+      }
     }
     return { meshes, skipped };
   };
