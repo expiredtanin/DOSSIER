@@ -2270,36 +2270,47 @@ function addOpeningSymbol(
       out.push({ kind: "line", a: g[0], b: g[1], cls: "window-glass", weightMm: SYMBOL_HAIRLINE_MM, greyed, openingId: o.id });
     }
   } else {
+    // Linien-Kategorien einzeln übersteuerbar (Nutzer-Wunsch): Rahmen (Blend-
+    // rahmen-Kontur + Stulp-/Laibungsblöcke), Fenster (Flügelrahmen/Sprossen),
+    // Sims (Auf-/Untersicht-Andeutung, s. u.). `undefined` ⇒ bisheriges
+    // Verhalten (strokeColor/SYMBOL_HAIRLINE_MM).
+    const frameColor = o.frameLine?.color ?? strokeColor;
+    const frameWeight = o.frameLine?.weight ?? lwMm;
+    const frameHairline = o.frameLine?.weight ?? SYMBOL_HAIRLINE_MM;
+    const sashColor = o.sashLine?.color ?? strokeColor;
+    const sashWeight = o.sashLine?.weight ?? SYMBOL_HAIRLINE_MM;
+
     // Blendrahmen-Rechteck (mittel + fein).
     out.push({
       kind: "polygon",
       pts: sym.frame,
       fill: "none",
-      stroke: strokeColor,
-      strokeWidthMm: lwMm,
+      stroke: frameColor,
+      strokeWidthMm: frameWeight,
       hatch: NO_HATCH,
       greyed,
       openingId: o.id,
     });
-    // Pfosten-/Flügel-Trennlinien.
+    // Pfosten-/Flügel-Trennlinien (Alt-Pfad ohne Typ — zählt als "Fenster").
     for (const [a, b] of sym.mullionLines) {
-      out.push({ kind: "line", a, b, cls: "window-mullion", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
+      out.push({ kind: "line", a, b, cls: "window-mullion", weightMm: sashWeight, color: sashColor, greyed, openingId: o.id });
     }
     // fein: Flügelrahmen (Flügelkontur) je öffenbarem Flügel — Schachtelung
     // Blendrahmen → Flügelrahmen → Glas (Feindetail, hebt fein klar von mittel ab).
     if (detail === "fein") {
       for (const pts of sym.sashFrames) {
         for (let i = 0; i < pts.length; i++) {
-          out.push({ kind: "line", a: pts[i], b: pts[(i + 1) % pts.length], cls: "window-sash", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
+          out.push({ kind: "line", a: pts[i], b: pts[(i + 1) % pts.length], cls: "window-sash", weightMm: sashWeight, color: sashColor, greyed, openingId: o.id });
         }
       }
     }
     // Stulp-Mittelquadrat je Flügel-Junction (SIA-Signatur): mittel = EIN Quadrat,
     // fein = ZWEI anliegende Rechtecke (die beiden Stulp-Stäbe der Flügel) —
     // bereits tiefenkorrekt (inset-/insetFace-bewusst) in windowSymbol berechnet.
+    // Zählt als "Rahmen" (Laibungs-/Stossblock des Blendrahmens).
     for (const mark of sym.meetingMarks) {
       for (let i = 0; i < mark.length; i++) {
-        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
+        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: frameHairline, color: frameColor, greyed, openingId: o.id });
       }
     }
     // Glaslinien (Anzahl je Detailgrad/Verglasung, s. glassCount).
@@ -2347,11 +2358,13 @@ function addOpeningSymbol(
   if (detail !== "grob" && wt?.sillLine) {
     const { faces, view } = wt.sillLine;
     const dash = view === "unter" ? OVERHEAD_DASH : [0.04, 0.08];
+    const sillColor = o.sillLineStyle?.color ?? strokeColor;
+    const sillWeight = o.sillLineStyle?.weight ?? SYMBOL_HAIRLINE_MM;
     if (faces === "aussen" || faces === "beide") {
-      out.push({ kind: "line", a: sym.frame[0], b: sym.frame[1], cls: "window-sill", weightMm: SYMBOL_HAIRLINE_MM, dash, color: strokeColor, greyed, openingId: o.id });
+      out.push({ kind: "line", a: sym.frame[0], b: sym.frame[1], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
     }
     if (faces === "innen" || faces === "beide") {
-      out.push({ kind: "line", a: sym.frame[3], b: sym.frame[2], cls: "window-sill", weightMm: SYMBOL_HAIRLINE_MM, dash, color: strokeColor, greyed, openingId: o.id });
+      out.push({ kind: "line", a: sym.frame[3], b: sym.frame[2], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
     }
   }
   // Rollladen-/Sonnenschutzkasten (P0-Minimalfassung, reine 2D-Kontur): ein

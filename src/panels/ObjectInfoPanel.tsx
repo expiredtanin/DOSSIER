@@ -15,6 +15,11 @@
 // Texte über t(...).
 
 import { useState } from "react";
+// Anzeige-Fallbacks für die Öffnungs-Linien-Übersteuerung (LineStyleRow) —
+// dieselben Werte wie POCHE_STROKE/SYMBOL_HAIRLINE_MM in plan/generatePlan.ts
+// (reine UI-Default-Anzeige, kein Re-Export nötig).
+const OPENING_LINE_DEFAULT_COLOR = "#1a1a1a";
+const OPENING_LINE_DEFAULT_WEIGHT = 0.02;
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { flattenCategories, formatM } from "../model/types";
@@ -30,6 +35,7 @@ import type {
 } from "../model/types";
 import { SIA_CATEGORIES, siaLabelFull } from "../geometry/roomArea";
 import { Dropdown } from "../ui/Dropdown";
+import { ColorHexField } from "../ui/ColorHexField";
 import { usePanelHost } from "./host";
 import type {
   CeilingInfo,
@@ -986,6 +992,30 @@ export function OpeningSection({
             min={1}
             onCommit={(v) => host.onSetOpeningWingCount(Math.max(1, Math.min(4, Math.round(v))))}
           />
+          {/* Grundriss-Linien je Kategorie: Rahmen (Blendrahmen+Stulp), Fenster
+              (Flügelrahmen/Sprossen), Sims (Auf-/Untersicht, nur wenn der
+              Fenstertyp sie aktiviert hat — s. WindowType.sillLine). */}
+          <LineStyleRow
+            label={t("objinfo.opening.frameLine")}
+            value={opening.frameLine}
+            fallbackColor={OPENING_LINE_DEFAULT_COLOR}
+            fallbackWeight={OPENING_LINE_DEFAULT_WEIGHT}
+            onChange={host.onSetOpeningFrameLine}
+          />
+          <LineStyleRow
+            label={t("objinfo.opening.sashLine")}
+            value={opening.sashLine}
+            fallbackColor={OPENING_LINE_DEFAULT_COLOR}
+            fallbackWeight={OPENING_LINE_DEFAULT_WEIGHT}
+            onChange={host.onSetOpeningSashLine}
+          />
+          <LineStyleRow
+            label={t("objinfo.opening.sillLine")}
+            value={opening.sillLineStyle}
+            fallbackColor={OPENING_LINE_DEFAULT_COLOR}
+            fallbackWeight={OPENING_LINE_DEFAULT_WEIGHT}
+            onChange={host.onSetOpeningSillLineStyle}
+          />
         </>
       )}
 
@@ -1528,11 +1558,15 @@ function DimensionField({
   value,
   onCommit,
   min = 0,
+  unit = "m",
+  step = 0.01,
 }: {
   label: string;
   value: number;
   onCommit: (v: number) => void;
   min?: number;
+  unit?: string;
+  step?: number;
 }) {
   // Entwurf als String, damit Zwischenzustände (leer, „1.") tippbar sind.
   // `null` = kein aktiver Entwurf → zeige den Host-Wert.
@@ -1553,7 +1587,7 @@ function DimensionField({
       <input
         className="objinfo-input"
         type="number"
-        step={0.01}
+        step={step}
         min={isFinite(min) ? min : undefined}
         value={shown}
         onChange={(e) => setDraft(e.target.value)}
@@ -1568,8 +1602,48 @@ function DimensionField({
           }
         }}
       />
-      <span className="objinfo-unit">m</span>
+      <span className="objinfo-unit">{unit}</span>
     </label>
+  );
+}
+
+/** Farbe + Strichstärke (mm) einer Linien-Kategorie, mit "System"-Fallback-
+ *  Anzeige (Override `undefined` ⇒ zeigt `fallbackColor`/`fallbackWeight`,
+ *  Ändern setzt sofort einen expliziten Override). */
+function LineStyleRow({
+  label,
+  value,
+  fallbackColor,
+  fallbackWeight,
+  onChange,
+}: {
+  label: string;
+  value: { color?: string; weight?: number } | undefined;
+  fallbackColor: string;
+  fallbackWeight: number;
+  onChange: (v: { color?: string; weight?: number } | undefined) => void;
+}) {
+  return (
+    <div className="objinfo-field">
+      <span className="objinfo-flabel">{label}</span>
+      <ColorHexField
+        value={value?.color ?? fallbackColor}
+        onChange={(color) => onChange({ ...value, color })}
+      />
+      <input
+        className="objinfo-input objinfo-input-narrow"
+        type="number"
+        step={0.01}
+        min={0}
+        value={(value?.weight ?? fallbackWeight).toFixed(2)}
+        onChange={(e) => {
+          const w = Number(e.target.value);
+          if (isFinite(w) && w >= 0) onChange({ ...value, weight: w });
+        }}
+        title={t("objinfo.lineWeight")}
+      />
+      <span className="objinfo-unit">mm</span>
+    </div>
   );
 }
 

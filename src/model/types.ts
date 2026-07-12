@@ -1218,6 +1218,31 @@ export interface Opening {
    * Kategorie-Farbe.
    */
   color?: string;
+  /**
+   * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke des
+   * Blendrahmens + Stulp-/Laibungsblöcke ({@link LineStyleOverride}).
+   * `undefined` ⇒ {@link Opening.color}, sonst Kategorie-Farbe/Haarlinie.
+   */
+  frameLine?: LineStyleOverride;
+  /**
+   * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke des
+   * Flügelrahmens/der Sprossen (window-sash/window-mullion).
+   */
+  sashLine?: LineStyleOverride;
+  /**
+   * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke der Auf-/
+   * Untersicht-Andeutung ({@link WindowType.sillLine}); nur wirksam, wenn der
+   * Fenstertyp dort eine Sims-Linie aktiviert hat.
+   */
+  sillLineStyle?: LineStyleOverride;
+}
+
+/** Optionale Farb-/Strichstärke-Übersteuerung einer Linien-Kategorie im Grundriss. */
+export interface LineStyleOverride {
+  /** Strichfarbe (Hex); fehlt ⇒ System-Default. */
+  color?: string;
+  /** Strichstärke in mm Papier; fehlt ⇒ System-Default (Haarlinie). */
+  weight?: number;
 }
 
 /**

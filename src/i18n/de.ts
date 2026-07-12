@@ -481,6 +481,10 @@ export const de = {
   "objinfo.opening.lintelLines.innen": "Innen",
   "objinfo.opening.lintelLines.aussen": "Außen",
   "objinfo.opening.lintelLines.beide": "Beide",
+  "objinfo.opening.frameLine": "Rahmen",
+  "objinfo.opening.sashLine": "Fenster (Flügel/Sprossen)",
+  "objinfo.opening.sillLine": "Sims",
+  "objinfo.lineWeight": "Strichstärke (mm)",
   // ── Treppen-Attribute (Object-Info-Panel) ───────────────────────────────
   "objinfo.stair.section": "Treppe",
   "objinfo.stair.shape": "Grundform",

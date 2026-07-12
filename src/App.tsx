@@ -3364,6 +3364,15 @@ export default function App() {
       onSetOpeningLintelLines: (lintelLines) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { lintelLines });
       },
+      onSetOpeningFrameLine: (v) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, { frameLine: v });
+      },
+      onSetOpeningSashLine: (v) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, { sashLine: v });
+      },
+      onSetOpeningSillLineStyle: (v) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, { sillLineStyle: v });
+      },
       // Typ-Zuweisung (Bibliothek): Tür-/Fenstertyp per typeId; leerer String löst
       // die Zuweisung wieder (Inline-Verhalten).
       onSetOpeningType: (typeId) => {

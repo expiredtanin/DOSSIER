@@ -324,6 +324,61 @@ describe("generatePlan — Auf-/Untersicht-Andeutung (WindowType.sillLine)", () 
   });
 });
 
+describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine/sashLine/sillLineStyle)", () => {
+  const twoSashType: WindowType = {
+    ...baseWindowType,
+    sashes: [
+      { kind: "fluegel", autoWidth: true, opening: "dreh", hingeSide: "left" },
+      { kind: "fluegel", autoWidth: true, opening: "dreh", hingeSide: "right" },
+    ],
+    sillLine: { faces: "aussen", view: "auf" },
+  };
+
+  it("ohne Übersteuerung: Stulp-/Sash-/Sims-Linien nutzen den Default (Opening.color bzw. Haarlinie)", () => {
+    const p = project({ ...baseWindow, typeId: "wt1" }, [twoSashType]);
+    const stulp = linesOfClass(p, "window-stulp", "mittel");
+    expect(stulp.length).toBeGreaterThan(0);
+    for (const l of stulp) expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.02, 6);
+  });
+
+  it("frameLine übersteuert Farbe+Stärke der Stulp-/Laibungsblöcke (window-stulp)", () => {
+    const p = project(
+      { ...baseWindow, typeId: "wt1", frameLine: { color: "#ff0000", weight: 0.5 } },
+      [twoSashType],
+    );
+    const stulp = linesOfClass(p, "window-stulp", "mittel");
+    expect(stulp.length).toBeGreaterThan(0);
+    for (const l of stulp) {
+      expect(l.kind === "line" && l.color).toBe("#ff0000");
+      expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.5, 6);
+    }
+  });
+
+  it("sashLine übersteuert Farbe+Stärke des Flügelrahmens (window-sash, fein)", () => {
+    const p = project(
+      { ...baseWindow, typeId: "wt1", sashLine: { color: "#00ff00", weight: 0.3 } },
+      [twoSashType],
+    );
+    const sash = linesOfClass(p, "window-sash", "fein");
+    expect(sash.length).toBeGreaterThan(0);
+    for (const l of sash) {
+      expect(l.kind === "line" && l.color).toBe("#00ff00");
+      expect(l.kind === "line" && l.weightMm).toBeCloseTo(0.3, 6);
+    }
+  });
+
+  it("sillLineStyle übersteuert Farbe+Stärke der Auf-/Untersicht-Linie (window-sill)", () => {
+    const p = project(
+      { ...baseWindow, typeId: "wt1", sillLineStyle: { color: "#0000ff", weight: 0.4 } },
+      [twoSashType],
+    );
+    const sill = linesOfClass(p, "window-sill", "mittel");
+    expect(sill.length).toBe(1);
+    expect(sill[0].kind === "line" && sill[0].color).toBe("#0000ff");
+    expect(sill[0].kind === "line" && sill[0].weightMm).toBeCloseTo(0.4, 6);
+  });
+});
+
 describe("generatePlan — Rollladenkasten shading (Item 3)", () => {
   const shadingLineCount = (p: Project) => linesOfClass(p, "window-shading").length;
 

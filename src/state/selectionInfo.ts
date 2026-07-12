@@ -233,6 +233,10 @@ export interface OpeningInfo {
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
+  /** Nur Fenster: Grundriss-Linien-Übersteuerungen je Kategorie. */
+  frameLine?: { color?: string; weight?: number };
+  sashLine?: { color?: string; weight?: number };
+  sillLineStyle?: { color?: string; weight?: number };
 }
 
 /**
@@ -723,6 +727,9 @@ function openingSelection(project: Project, o: Opening): Selection {
     typeId: o.typeId,
     zBottom: ext.zBottom,
     zTop: ext.zTop,
+    frameLine: o.frameLine,
+    sashLine: o.sashLine,
+    sillLineStyle: o.sillLineStyle,
   };
   return {
     kind: "opening",

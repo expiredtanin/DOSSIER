@@ -4267,6 +4267,11 @@ body {
   color: var(--muted);
   font-size: 11px;
 }
+.objinfo-input-narrow {
+  flex: 0 0 auto;
+  width: 48px;
+  min-width: 48px;
+}
 
 /* ── Element-Abschnitte IM Attribute-Panel dem .attr-Grid-Look angleichen ──────
    Die aus ObjectInfo verschobenen Sektionen (Wand/Decke/Öffnung/Treppe/Raum)
