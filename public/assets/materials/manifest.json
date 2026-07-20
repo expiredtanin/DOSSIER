@@ -1,7 +1,7 @@
 {
   "source": "ambientCG (ambientcg.com)",
   "license": "CC0 1.0 Universal (Public Domain)",
-  "resolution": "1K",
+  "resolution": "2K",
   "materials": [
     {
       "id": "Concrete048",
@@ -153,6 +153,901 @@
         "roughness": "/assets/materials/Ground103/roughness.jpg",
         "displacement": "/assets/materials/Ground103/displacement.jpg",
         "ao": "/assets/materials/Ground103/ao.jpg"
+      }
+    },
+    {
+      "id": "Asphalt023S",
+      "name": "Asphalt 1",
+      "category": "Asphalt",
+      "maps": {
+        "color": "/assets/materials/Asphalt023S/color.jpg",
+        "normal": "/assets/materials/Asphalt023S/normal.jpg",
+        "roughness": "/assets/materials/Asphalt023S/roughness.jpg",
+        "displacement": "/assets/materials/Asphalt023S/displacement.jpg",
+        "ao": "/assets/materials/Asphalt023S/ao.jpg"
+      }
+    },
+    {
+      "id": "Asphalt025C",
+      "name": "Asphalt 2",
+      "category": "Asphalt",
+      "maps": {
+        "color": "/assets/materials/Asphalt025C/color.jpg",
+        "normal": "/assets/materials/Asphalt025C/normal.jpg",
+        "roughness": "/assets/materials/Asphalt025C/roughness.jpg",
+        "displacement": "/assets/materials/Asphalt025C/displacement.jpg",
+        "ao": "/assets/materials/Asphalt025C/ao.jpg"
+      }
+    },
+    {
+      "id": "Asphalt031",
+      "name": "Asphalt 3",
+      "category": "Asphalt",
+      "maps": {
+        "color": "/assets/materials/Asphalt031/color.jpg",
+        "normal": "/assets/materials/Asphalt031/normal.jpg",
+        "roughness": "/assets/materials/Asphalt031/roughness.jpg",
+        "displacement": "/assets/materials/Asphalt031/displacement.jpg",
+        "ao": "/assets/materials/Asphalt031/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks051",
+      "name": "Backstein 1",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks051/color.jpg",
+        "normal": "/assets/materials/Bricks051/normal.jpg",
+        "roughness": "/assets/materials/Bricks051/roughness.jpg",
+        "displacement": "/assets/materials/Bricks051/displacement.jpg"
+      }
+    },
+    {
+      "id": "Bricks059",
+      "name": "Backstein 2",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks059/color.jpg",
+        "normal": "/assets/materials/Bricks059/normal.jpg",
+        "roughness": "/assets/materials/Bricks059/roughness.jpg",
+        "displacement": "/assets/materials/Bricks059/displacement.jpg",
+        "ao": "/assets/materials/Bricks059/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks060",
+      "name": "Backstein 3",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks060/color.jpg",
+        "normal": "/assets/materials/Bricks060/normal.jpg",
+        "roughness": "/assets/materials/Bricks060/roughness.jpg",
+        "displacement": "/assets/materials/Bricks060/displacement.jpg",
+        "ao": "/assets/materials/Bricks060/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks066",
+      "name": "Backstein 4",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks066/color.jpg",
+        "normal": "/assets/materials/Bricks066/normal.jpg",
+        "roughness": "/assets/materials/Bricks066/roughness.jpg",
+        "displacement": "/assets/materials/Bricks066/displacement.jpg",
+        "ao": "/assets/materials/Bricks066/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks074",
+      "name": "Backstein 5",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks074/color.jpg",
+        "normal": "/assets/materials/Bricks074/normal.jpg",
+        "roughness": "/assets/materials/Bricks074/roughness.jpg",
+        "displacement": "/assets/materials/Bricks074/displacement.jpg",
+        "ao": "/assets/materials/Bricks074/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks075A",
+      "name": "Backstein 6",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks075A/color.jpg",
+        "normal": "/assets/materials/Bricks075A/normal.jpg",
+        "roughness": "/assets/materials/Bricks075A/roughness.jpg",
+        "displacement": "/assets/materials/Bricks075A/displacement.jpg",
+        "ao": "/assets/materials/Bricks075A/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks084",
+      "name": "Backstein 7",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks084/color.jpg",
+        "normal": "/assets/materials/Bricks084/normal.jpg",
+        "roughness": "/assets/materials/Bricks084/roughness.jpg",
+        "displacement": "/assets/materials/Bricks084/displacement.jpg",
+        "ao": "/assets/materials/Bricks084/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks085",
+      "name": "Backstein 8",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks085/color.jpg",
+        "normal": "/assets/materials/Bricks085/normal.jpg",
+        "roughness": "/assets/materials/Bricks085/roughness.jpg",
+        "displacement": "/assets/materials/Bricks085/displacement.jpg",
+        "ao": "/assets/materials/Bricks085/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks089",
+      "name": "Backstein 9",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks089/color.jpg",
+        "normal": "/assets/materials/Bricks089/normal.jpg",
+        "roughness": "/assets/materials/Bricks089/roughness.jpg",
+        "displacement": "/assets/materials/Bricks089/displacement.jpg",
+        "ao": "/assets/materials/Bricks089/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks090",
+      "name": "Backstein 10",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks090/color.jpg",
+        "normal": "/assets/materials/Bricks090/normal.jpg",
+        "roughness": "/assets/materials/Bricks090/roughness.jpg",
+        "displacement": "/assets/materials/Bricks090/displacement.jpg",
+        "ao": "/assets/materials/Bricks090/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks091",
+      "name": "Backstein 11",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks091/color.jpg",
+        "normal": "/assets/materials/Bricks091/normal.jpg",
+        "roughness": "/assets/materials/Bricks091/roughness.jpg",
+        "displacement": "/assets/materials/Bricks091/displacement.jpg",
+        "ao": "/assets/materials/Bricks091/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks092",
+      "name": "Backstein 12",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks092/color.jpg",
+        "normal": "/assets/materials/Bricks092/normal.jpg",
+        "roughness": "/assets/materials/Bricks092/roughness.jpg",
+        "displacement": "/assets/materials/Bricks092/displacement.jpg",
+        "ao": "/assets/materials/Bricks092/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks093",
+      "name": "Backstein 13",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks093/color.jpg",
+        "normal": "/assets/materials/Bricks093/normal.jpg",
+        "roughness": "/assets/materials/Bricks093/roughness.jpg",
+        "displacement": "/assets/materials/Bricks093/displacement.jpg",
+        "ao": "/assets/materials/Bricks093/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks094",
+      "name": "Backstein 14",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks094/color.jpg",
+        "normal": "/assets/materials/Bricks094/normal.jpg",
+        "roughness": "/assets/materials/Bricks094/roughness.jpg",
+        "displacement": "/assets/materials/Bricks094/displacement.jpg",
+        "ao": "/assets/materials/Bricks094/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks097",
+      "name": "Backstein 15",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks097/color.jpg",
+        "normal": "/assets/materials/Bricks097/normal.jpg",
+        "roughness": "/assets/materials/Bricks097/roughness.jpg",
+        "displacement": "/assets/materials/Bricks097/displacement.jpg",
+        "ao": "/assets/materials/Bricks097/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks100",
+      "name": "Backstein 16",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks100/color.jpg",
+        "normal": "/assets/materials/Bricks100/normal.jpg",
+        "roughness": "/assets/materials/Bricks100/roughness.jpg",
+        "displacement": "/assets/materials/Bricks100/displacement.jpg",
+        "ao": "/assets/materials/Bricks100/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks101",
+      "name": "Backstein 17",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks101/color.jpg",
+        "normal": "/assets/materials/Bricks101/normal.jpg",
+        "roughness": "/assets/materials/Bricks101/roughness.jpg",
+        "displacement": "/assets/materials/Bricks101/displacement.jpg",
+        "ao": "/assets/materials/Bricks101/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks102",
+      "name": "Backstein 18",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks102/color.jpg",
+        "normal": "/assets/materials/Bricks102/normal.jpg",
+        "roughness": "/assets/materials/Bricks102/roughness.jpg",
+        "displacement": "/assets/materials/Bricks102/displacement.jpg",
+        "ao": "/assets/materials/Bricks102/ao.jpg"
+      }
+    },
+    {
+      "id": "Bricks103",
+      "name": "Backstein 19",
+      "category": "Bricks",
+      "maps": {
+        "color": "/assets/materials/Bricks103/color.jpg",
+        "normal": "/assets/materials/Bricks103/normal.jpg",
+        "roughness": "/assets/materials/Bricks103/roughness.jpg",
+        "displacement": "/assets/materials/Bricks103/displacement.jpg",
+        "ao": "/assets/materials/Bricks103/ao.jpg"
+      }
+    },
+    {
+      "id": "Chipboard004",
+      "name": "Sperrholz 1",
+      "category": "Chipboard",
+      "maps": {
+        "color": "/assets/materials/Chipboard004/color.jpg",
+        "normal": "/assets/materials/Chipboard004/normal.jpg",
+        "roughness": "/assets/materials/Chipboard004/roughness.jpg",
+        "displacement": "/assets/materials/Chipboard004/displacement.jpg"
+      }
+    },
+    {
+      "id": "Chipboard005",
+      "name": "Sperrholz 2",
+      "category": "Chipboard",
+      "maps": {
+        "color": "/assets/materials/Chipboard005/color.jpg",
+        "normal": "/assets/materials/Chipboard005/normal.jpg",
+        "roughness": "/assets/materials/Chipboard005/roughness.jpg",
+        "displacement": "/assets/materials/Chipboard005/displacement.jpg"
+      }
+    },
+    {
+      "id": "Chipboard007",
+      "name": "Sperrholz 3",
+      "category": "Chipboard",
+      "maps": {
+        "color": "/assets/materials/Chipboard007/color.jpg",
+        "normal": "/assets/materials/Chipboard007/normal.jpg",
+        "roughness": "/assets/materials/Chipboard007/roughness.jpg",
+        "displacement": "/assets/materials/Chipboard007/displacement.jpg"
+      }
+    },
+    {
+      "id": "Concrete024",
+      "name": "Beton 1",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete024/color.jpg",
+        "normal": "/assets/materials/Concrete024/normal.jpg",
+        "roughness": "/assets/materials/Concrete024/roughness.jpg",
+        "displacement": "/assets/materials/Concrete024/displacement.jpg"
+      }
+    },
+    {
+      "id": "Concrete025",
+      "name": "Beton 2",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete025/color.jpg",
+        "normal": "/assets/materials/Concrete025/normal.jpg",
+        "roughness": "/assets/materials/Concrete025/roughness.jpg",
+        "displacement": "/assets/materials/Concrete025/displacement.jpg",
+        "ao": "/assets/materials/Concrete025/ao.jpg"
+      }
+    },
+    {
+      "id": "Concrete030",
+      "name": "Beton 3",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete030/color.jpg",
+        "normal": "/assets/materials/Concrete030/normal.jpg",
+        "roughness": "/assets/materials/Concrete030/roughness.jpg",
+        "displacement": "/assets/materials/Concrete030/displacement.jpg",
+        "ao": "/assets/materials/Concrete030/ao.jpg"
+      }
+    },
+    {
+      "id": "Concrete031",
+      "name": "Beton 4",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete031/color.jpg",
+        "normal": "/assets/materials/Concrete031/normal.jpg",
+        "roughness": "/assets/materials/Concrete031/roughness.jpg",
+        "displacement": "/assets/materials/Concrete031/displacement.jpg",
+        "ao": "/assets/materials/Concrete031/ao.jpg"
+      }
+    },
+    {
+      "id": "Concrete032",
+      "name": "Beton 5",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete032/color.jpg",
+        "normal": "/assets/materials/Concrete032/normal.jpg",
+        "roughness": "/assets/materials/Concrete032/roughness.jpg",
+        "displacement": "/assets/materials/Concrete032/displacement.jpg",
+        "ao": "/assets/materials/Concrete032/ao.jpg"
+      }
+    },
+    {
+      "id": "Concrete033",
+      "name": "Beton 6",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete033/color.jpg",
+        "normal": "/assets/materials/Concrete033/normal.jpg",
+        "roughness": "/assets/materials/Concrete033/roughness.jpg",
+        "displacement": "/assets/materials/Concrete033/displacement.jpg",
+        "ao": "/assets/materials/Concrete033/ao.jpg"
+      }
+    },
+    {
+      "id": "Concrete034",
+      "name": "Beton 7",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete034/color.jpg",
+        "normal": "/assets/materials/Concrete034/normal.jpg",
+        "roughness": "/assets/materials/Concrete034/roughness.jpg",
+        "displacement": "/assets/materials/Concrete034/displacement.jpg"
+      }
+    },
+    {
+      "id": "Concrete036",
+      "name": "Beton 8",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete036/color.jpg",
+        "normal": "/assets/materials/Concrete036/normal.jpg",
+        "roughness": "/assets/materials/Concrete036/roughness.jpg",
+        "displacement": "/assets/materials/Concrete036/displacement.jpg"
+      }
+    },
+    {
+      "id": "Concrete040",
+      "name": "Beton 9",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete040/color.jpg",
+        "normal": "/assets/materials/Concrete040/normal.jpg",
+        "roughness": "/assets/materials/Concrete040/roughness.jpg",
+        "displacement": "/assets/materials/Concrete040/displacement.jpg",
+        "ao": "/assets/materials/Concrete040/ao.jpg"
+      }
+    },
+    {
+      "id": "Concrete042A",
+      "name": "Beton 10",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete042A/color.jpg",
+        "normal": "/assets/materials/Concrete042A/normal.jpg",
+        "roughness": "/assets/materials/Concrete042A/roughness.jpg",
+        "displacement": "/assets/materials/Concrete042A/displacement.jpg",
+        "ao": "/assets/materials/Concrete042A/ao.jpg",
+        "metalness": "/assets/materials/Concrete042A/metalness.jpg"
+      }
+    },
+    {
+      "id": "Concrete044C",
+      "name": "Beton 11",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete044C/color.jpg",
+        "normal": "/assets/materials/Concrete044C/normal.jpg",
+        "roughness": "/assets/materials/Concrete044C/roughness.jpg",
+        "displacement": "/assets/materials/Concrete044C/displacement.jpg",
+        "ao": "/assets/materials/Concrete044C/ao.jpg",
+        "metalness": "/assets/materials/Concrete044C/metalness.jpg"
+      }
+    },
+    {
+      "id": "Concrete044D",
+      "name": "Beton 12",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete044D/color.jpg",
+        "normal": "/assets/materials/Concrete044D/normal.jpg",
+        "roughness": "/assets/materials/Concrete044D/roughness.jpg",
+        "displacement": "/assets/materials/Concrete044D/displacement.jpg",
+        "ao": "/assets/materials/Concrete044D/ao.jpg",
+        "metalness": "/assets/materials/Concrete044D/metalness.jpg"
+      }
+    },
+    {
+      "id": "Concrete045",
+      "name": "Beton 13",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete045/color.jpg",
+        "normal": "/assets/materials/Concrete045/normal.jpg",
+        "roughness": "/assets/materials/Concrete045/roughness.jpg",
+        "displacement": "/assets/materials/Concrete045/displacement.jpg",
+        "ao": "/assets/materials/Concrete045/ao.jpg"
+      }
+    },
+    {
+      "id": "Concrete046",
+      "name": "Beton 14",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete046/color.jpg",
+        "normal": "/assets/materials/Concrete046/normal.jpg",
+        "roughness": "/assets/materials/Concrete046/roughness.jpg",
+        "displacement": "/assets/materials/Concrete046/displacement.jpg"
+      }
+    },
+    {
+      "id": "Concrete047A",
+      "name": "Beton 15",
+      "category": "Concrete",
+      "maps": {
+        "color": "/assets/materials/Concrete047A/color.jpg",
+        "normal": "/assets/materials/Concrete047A/normal.jpg",
+        "roughness": "/assets/materials/Concrete047A/roughness.jpg",
+        "displacement": "/assets/materials/Concrete047A/displacement.jpg",
+        "ao": "/assets/materials/Concrete047A/ao.jpg"
+      }
+    },
+    {
+      "id": "Fabric061",
+      "name": "Stoff 1",
+      "category": "Fabric",
+      "maps": {
+        "color": "/assets/materials/Fabric061/color.jpg",
+        "normal": "/assets/materials/Fabric061/normal.jpg",
+        "roughness": "/assets/materials/Fabric061/roughness.jpg",
+        "displacement": "/assets/materials/Fabric061/displacement.jpg",
+        "ao": "/assets/materials/Fabric061/ao.jpg"
+      }
+    },
+    {
+      "id": "Fabric066",
+      "name": "Stoff 2",
+      "category": "Fabric",
+      "maps": {
+        "color": "/assets/materials/Fabric066/color.jpg",
+        "normal": "/assets/materials/Fabric066/normal.jpg",
+        "roughness": "/assets/materials/Fabric066/roughness.jpg",
+        "displacement": "/assets/materials/Fabric066/displacement.jpg",
+        "ao": "/assets/materials/Fabric066/ao.jpg"
+      }
+    },
+    {
+      "id": "Fabric081C",
+      "name": "Stoff 3",
+      "category": "Fabric",
+      "maps": {
+        "color": "/assets/materials/Fabric081C/color.jpg",
+        "normal": "/assets/materials/Fabric081C/normal.jpg",
+        "roughness": "/assets/materials/Fabric081C/roughness.jpg",
+        "displacement": "/assets/materials/Fabric081C/displacement.jpg",
+        "ao": "/assets/materials/Fabric081C/ao.jpg"
+      }
+    },
+    {
+      "id": "Gravel023",
+      "name": "Kies 1",
+      "category": "Gravel",
+      "maps": {
+        "color": "/assets/materials/Gravel023/color.jpg",
+        "normal": "/assets/materials/Gravel023/normal.jpg",
+        "roughness": "/assets/materials/Gravel023/roughness.jpg",
+        "displacement": "/assets/materials/Gravel023/displacement.jpg",
+        "ao": "/assets/materials/Gravel023/ao.jpg"
+      }
+    },
+    {
+      "id": "Gravel041",
+      "name": "Kies 2",
+      "category": "Gravel",
+      "maps": {
+        "color": "/assets/materials/Gravel041/color.jpg",
+        "normal": "/assets/materials/Gravel041/normal.jpg",
+        "roughness": "/assets/materials/Gravel041/roughness.jpg",
+        "displacement": "/assets/materials/Gravel041/displacement.jpg",
+        "ao": "/assets/materials/Gravel041/ao.jpg"
+      }
+    },
+    {
+      "id": "Ground037",
+      "name": "Boden 1",
+      "category": "Ground",
+      "maps": {
+        "color": "/assets/materials/Ground037/color.jpg",
+        "normal": "/assets/materials/Ground037/normal.jpg",
+        "roughness": "/assets/materials/Ground037/roughness.jpg",
+        "displacement": "/assets/materials/Ground037/displacement.jpg",
+        "ao": "/assets/materials/Ground037/ao.jpg"
+      }
+    },
+    {
+      "id": "Ground054",
+      "name": "Boden 2",
+      "category": "Ground",
+      "maps": {
+        "color": "/assets/materials/Ground054/color.jpg",
+        "normal": "/assets/materials/Ground054/normal.jpg",
+        "roughness": "/assets/materials/Ground054/roughness.jpg",
+        "displacement": "/assets/materials/Ground054/displacement.jpg",
+        "ao": "/assets/materials/Ground054/ao.jpg"
+      }
+    },
+    {
+      "id": "Marble016",
+      "name": "Marmor 1",
+      "category": "Marble",
+      "maps": {
+        "color": "/assets/materials/Marble016/color.jpg",
+        "normal": "/assets/materials/Marble016/normal.jpg",
+        "roughness": "/assets/materials/Marble016/roughness.jpg",
+        "displacement": "/assets/materials/Marble016/displacement.jpg"
+      }
+    },
+    {
+      "id": "Marble021",
+      "name": "Marmor 2",
+      "category": "Marble",
+      "maps": {
+        "color": "/assets/materials/Marble021/color.jpg",
+        "normal": "/assets/materials/Marble021/normal.jpg",
+        "roughness": "/assets/materials/Marble021/roughness.jpg",
+        "displacement": "/assets/materials/Marble021/displacement.jpg"
+      }
+    },
+    {
+      "id": "Metal049A",
+      "name": "Metall 1",
+      "category": "Metal",
+      "maps": {
+        "color": "/assets/materials/Metal049A/color.jpg",
+        "normal": "/assets/materials/Metal049A/normal.jpg",
+        "roughness": "/assets/materials/Metal049A/roughness.jpg",
+        "displacement": "/assets/materials/Metal049A/displacement.jpg",
+        "metalness": "/assets/materials/Metal049A/metalness.jpg"
+      }
+    },
+    {
+      "id": "Metal055A",
+      "name": "Metall 2",
+      "category": "Metal",
+      "maps": {
+        "color": "/assets/materials/Metal055A/color.jpg",
+        "normal": "/assets/materials/Metal055A/normal.jpg",
+        "roughness": "/assets/materials/Metal055A/roughness.jpg",
+        "displacement": "/assets/materials/Metal055A/displacement.jpg",
+        "metalness": "/assets/materials/Metal055A/metalness.jpg"
+      }
+    },
+    {
+      "id": "OfficeCeiling001",
+      "name": "Bürodecke 1",
+      "category": "Office Ceiling",
+      "maps": {
+        "color": "/assets/materials/OfficeCeiling001/color.jpg",
+        "normal": "/assets/materials/OfficeCeiling001/normal.jpg",
+        "roughness": "/assets/materials/OfficeCeiling001/roughness.jpg",
+        "displacement": "/assets/materials/OfficeCeiling001/displacement.jpg",
+        "ao": "/assets/materials/OfficeCeiling001/ao.jpg",
+        "metalness": "/assets/materials/OfficeCeiling001/metalness.jpg"
+      }
+    },
+    {
+      "id": "OfficeCeiling002",
+      "name": "Bürodecke 2",
+      "category": "Office Ceiling",
+      "maps": {
+        "color": "/assets/materials/OfficeCeiling002/color.jpg",
+        "normal": "/assets/materials/OfficeCeiling002/normal.jpg",
+        "roughness": "/assets/materials/OfficeCeiling002/roughness.jpg",
+        "displacement": "/assets/materials/OfficeCeiling002/displacement.jpg",
+        "ao": "/assets/materials/OfficeCeiling002/ao.jpg",
+        "metalness": "/assets/materials/OfficeCeiling002/metalness.jpg"
+      }
+    },
+    {
+      "id": "OfficeCeiling003",
+      "name": "Bürodecke 3",
+      "category": "Office Ceiling",
+      "maps": {
+        "color": "/assets/materials/OfficeCeiling003/color.jpg",
+        "normal": "/assets/materials/OfficeCeiling003/normal.jpg",
+        "roughness": "/assets/materials/OfficeCeiling003/roughness.jpg",
+        "displacement": "/assets/materials/OfficeCeiling003/displacement.jpg",
+        "ao": "/assets/materials/OfficeCeiling003/ao.jpg",
+        "metalness": "/assets/materials/OfficeCeiling003/metalness.jpg"
+      }
+    },
+    {
+      "id": "PavingStones128",
+      "name": "Pflasterstein 1",
+      "category": "Paving Stones",
+      "maps": {
+        "color": "/assets/materials/PavingStones128/color.jpg",
+        "normal": "/assets/materials/PavingStones128/normal.jpg",
+        "roughness": "/assets/materials/PavingStones128/roughness.jpg",
+        "displacement": "/assets/materials/PavingStones128/displacement.jpg",
+        "ao": "/assets/materials/PavingStones128/ao.jpg"
+      }
+    },
+    {
+      "id": "PavingStones138",
+      "name": "Pflasterstein 2",
+      "category": "Paving Stones",
+      "maps": {
+        "color": "/assets/materials/PavingStones138/color.jpg",
+        "normal": "/assets/materials/PavingStones138/normal.jpg",
+        "roughness": "/assets/materials/PavingStones138/roughness.jpg",
+        "displacement": "/assets/materials/PavingStones138/displacement.jpg",
+        "ao": "/assets/materials/PavingStones138/ao.jpg"
+      }
+    },
+    {
+      "id": "Plaster002",
+      "name": "Putz 1",
+      "category": "Plaster",
+      "maps": {
+        "color": "/assets/materials/Plaster002/color.jpg",
+        "normal": "/assets/materials/Plaster002/normal.jpg",
+        "roughness": "/assets/materials/Plaster002/roughness.jpg",
+        "displacement": "/assets/materials/Plaster002/displacement.jpg"
+      }
+    },
+    {
+      "id": "Plaster007",
+      "name": "Putz 2",
+      "category": "Plaster",
+      "maps": {
+        "color": "/assets/materials/Plaster007/color.jpg",
+        "normal": "/assets/materials/Plaster007/normal.jpg",
+        "roughness": "/assets/materials/Plaster007/roughness.jpg",
+        "displacement": "/assets/materials/Plaster007/displacement.jpg",
+        "ao": "/assets/materials/Plaster007/ao.jpg"
+      }
+    },
+    {
+      "id": "Rock058",
+      "name": "Naturstein 1",
+      "category": "Rock",
+      "maps": {
+        "color": "/assets/materials/Rock058/color.jpg",
+        "normal": "/assets/materials/Rock058/normal.jpg",
+        "roughness": "/assets/materials/Rock058/roughness.jpg",
+        "displacement": "/assets/materials/Rock058/displacement.jpg",
+        "ao": "/assets/materials/Rock058/ao.jpg"
+      }
+    },
+    {
+      "id": "Rock063",
+      "name": "Naturstein 2",
+      "category": "Rock",
+      "maps": {
+        "color": "/assets/materials/Rock063/color.jpg",
+        "normal": "/assets/materials/Rock063/normal.jpg",
+        "roughness": "/assets/materials/Rock063/roughness.jpg",
+        "displacement": "/assets/materials/Rock063/displacement.jpg",
+        "ao": "/assets/materials/Rock063/ao.jpg"
+      }
+    },
+    {
+      "id": "Rock064",
+      "name": "Naturstein 3",
+      "category": "Rock",
+      "maps": {
+        "color": "/assets/materials/Rock064/color.jpg",
+        "normal": "/assets/materials/Rock064/normal.jpg",
+        "roughness": "/assets/materials/Rock064/roughness.jpg",
+        "displacement": "/assets/materials/Rock064/displacement.jpg",
+        "ao": "/assets/materials/Rock064/ao.jpg"
+      }
+    },
+    {
+      "id": "RoofingTiles012A",
+      "name": "Dach 1",
+      "category": "Roofing Tiles",
+      "maps": {
+        "color": "/assets/materials/RoofingTiles012A/color.jpg",
+        "normal": "/assets/materials/RoofingTiles012A/normal.jpg",
+        "roughness": "/assets/materials/RoofingTiles012A/roughness.jpg",
+        "displacement": "/assets/materials/RoofingTiles012A/displacement.jpg",
+        "ao": "/assets/materials/RoofingTiles012A/ao.jpg"
+      }
+    },
+    {
+      "id": "RoofingTiles013A",
+      "name": "Dach 2",
+      "category": "Roofing Tiles",
+      "maps": {
+        "color": "/assets/materials/RoofingTiles013A/color.jpg",
+        "normal": "/assets/materials/RoofingTiles013A/normal.jpg",
+        "roughness": "/assets/materials/RoofingTiles013A/roughness.jpg",
+        "displacement": "/assets/materials/RoofingTiles013A/displacement.jpg",
+        "ao": "/assets/materials/RoofingTiles013A/ao.jpg"
+      }
+    },
+    {
+      "id": "RoofingTiles014A",
+      "name": "Dach 3",
+      "category": "Roofing Tiles",
+      "maps": {
+        "color": "/assets/materials/RoofingTiles014A/color.jpg",
+        "normal": "/assets/materials/RoofingTiles014A/normal.jpg",
+        "roughness": "/assets/materials/RoofingTiles014A/roughness.jpg",
+        "displacement": "/assets/materials/RoofingTiles014A/displacement.jpg",
+        "ao": "/assets/materials/RoofingTiles014A/ao.jpg"
+      }
+    },
+    {
+      "id": "Terrazzo005",
+      "name": "Terrazzo 1",
+      "category": "Terrazzo",
+      "maps": {
+        "color": "/assets/materials/Terrazzo005/color.jpg",
+        "normal": "/assets/materials/Terrazzo005/normal.jpg",
+        "roughness": "/assets/materials/Terrazzo005/roughness.jpg",
+        "displacement": "/assets/materials/Terrazzo005/displacement.jpg"
+      }
+    },
+    {
+      "id": "Terrazzo013",
+      "name": "Terrazzo 2",
+      "category": "Terrazzo",
+      "maps": {
+        "color": "/assets/materials/Terrazzo013/color.jpg",
+        "normal": "/assets/materials/Terrazzo013/normal.jpg",
+        "roughness": "/assets/materials/Terrazzo013/roughness.jpg",
+        "displacement": "/assets/materials/Terrazzo013/displacement.jpg"
+      }
+    },
+    {
+      "id": "Terrazzo018",
+      "name": "Terrazzo 3",
+      "category": "Terrazzo",
+      "maps": {
+        "color": "/assets/materials/Terrazzo018/color.jpg",
+        "normal": "/assets/materials/Terrazzo018/normal.jpg",
+        "roughness": "/assets/materials/Terrazzo018/roughness.jpg",
+        "displacement": "/assets/materials/Terrazzo018/displacement.jpg"
+      }
+    },
+    {
+      "id": "Tiles139",
+      "name": "Fliesen 1",
+      "category": "Tiles",
+      "maps": {
+        "color": "/assets/materials/Tiles139/color.jpg",
+        "normal": "/assets/materials/Tiles139/normal.jpg",
+        "roughness": "/assets/materials/Tiles139/roughness.jpg",
+        "displacement": "/assets/materials/Tiles139/displacement.jpg"
+      }
+    },
+    {
+      "id": "Tiles140",
+      "name": "Fliesen 2",
+      "category": "Tiles",
+      "maps": {
+        "color": "/assets/materials/Tiles140/color.jpg",
+        "normal": "/assets/materials/Tiles140/normal.jpg",
+        "roughness": "/assets/materials/Tiles140/roughness.jpg",
+        "displacement": "/assets/materials/Tiles140/displacement.jpg"
+      }
+    },
+    {
+      "id": "Wood049",
+      "name": "Holz 1",
+      "category": "Wood",
+      "maps": {
+        "color": "/assets/materials/Wood049/color.jpg",
+        "normal": "/assets/materials/Wood049/normal.jpg",
+        "roughness": "/assets/materials/Wood049/roughness.jpg",
+        "displacement": "/assets/materials/Wood049/displacement.jpg"
+      }
+    },
+    {
+      "id": "Wood051",
+      "name": "Holz 2",
+      "category": "Wood",
+      "maps": {
+        "color": "/assets/materials/Wood051/color.jpg",
+        "normal": "/assets/materials/Wood051/normal.jpg",
+        "roughness": "/assets/materials/Wood051/roughness.jpg",
+        "displacement": "/assets/materials/Wood051/displacement.jpg"
+      }
+    },
+    {
+      "id": "Wood066",
+      "name": "Holz 3",
+      "category": "Wood",
+      "maps": {
+        "color": "/assets/materials/Wood066/color.jpg",
+        "normal": "/assets/materials/Wood066/normal.jpg",
+        "roughness": "/assets/materials/Wood066/roughness.jpg",
+        "displacement": "/assets/materials/Wood066/displacement.jpg"
+      }
+    },
+    {
+      "id": "Wood092",
+      "name": "Holz 4",
+      "category": "Wood",
+      "maps": {
+        "color": "/assets/materials/Wood092/color.jpg",
+        "normal": "/assets/materials/Wood092/normal.jpg",
+        "roughness": "/assets/materials/Wood092/roughness.jpg",
+        "displacement": "/assets/materials/Wood092/displacement.jpg"
+      }
+    },
+    {
+      "id": "Wood094",
+      "name": "Holz 5",
+      "category": "Wood",
+      "maps": {
+        "color": "/assets/materials/Wood094/color.jpg",
+        "normal": "/assets/materials/Wood094/normal.jpg",
+        "roughness": "/assets/materials/Wood094/roughness.jpg",
+        "displacement": "/assets/materials/Wood094/displacement.jpg"
+      }
+    },
+    {
+      "id": "WoodFloor064",
+      "name": "Holzboden 1",
+      "category": "Wood Floor",
+      "maps": {
+        "color": "/assets/materials/WoodFloor064/color.jpg",
+        "normal": "/assets/materials/WoodFloor064/normal.jpg",
+        "roughness": "/assets/materials/WoodFloor064/roughness.jpg",
+        "displacement": "/assets/materials/WoodFloor064/displacement.jpg"
+      }
+    },
+    {
+      "id": "WoodFloor070",
+      "name": "Holzboden 2",
+      "category": "Wood Floor",
+      "maps": {
+        "color": "/assets/materials/WoodFloor070/color.jpg",
+        "normal": "/assets/materials/WoodFloor070/normal.jpg",
+        "roughness": "/assets/materials/WoodFloor070/roughness.jpg",
+        "displacement": "/assets/materials/WoodFloor070/displacement.jpg"
       }
     }
   ]
