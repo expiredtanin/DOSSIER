@@ -923,18 +923,6 @@ export const MATERIAL_LIBRARY: MaterialAsset[] = [
     },
   },
   {
-    id: "RoofingTiles013A",
-    name: "Dach 2",
-    category: "Roofing Tiles",
-    maps: {
-      color: "/assets/materials/RoofingTiles013A/color.jpg",
-      normal: "/assets/materials/RoofingTiles013A/normal.jpg",
-      roughness: "/assets/materials/RoofingTiles013A/roughness.jpg",
-      displacement: "/assets/materials/RoofingTiles013A/displacement.jpg",
-      ao: "/assets/materials/RoofingTiles013A/ao.jpg",
-    },
-  },
-  {
     id: "RoofingTiles014A",
     name: "Dach 3",
     category: "Roofing Tiles",
