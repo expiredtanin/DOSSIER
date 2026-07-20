@@ -12,17 +12,20 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::edges::{build_mesh_edges, EDGE_FLOATS_PER_VERTEX};
+use crate::edges::{
+    build_edge_adjacency, build_mesh_edges, build_silhouette_edges, EdgeAdj, EDGE_FLOATS_PER_VERTEX,
+};
 use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::math::{view_projection, Mat4};
 use crate::mesh::{
-    build_scene_mesh, build_scene_mesh_textured, build_walls_mesh, build_walls_mesh_textured,
+    build_free_wall_end_caps, build_scene_mesh, build_scene_mesh_textured, build_terrain_mesh,
+    build_walls_mesh, build_walls_mesh_textured,
 };
 use crate::section::SectionPlane;
 use crate::section_fill::{
     build_cut_cap_lines, build_cut_caps, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
 };
-use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
+use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
 use crate::types::{
     Camera, Mesh, MeshInput, SlabInput, TexturedMesh, WallInput, FLOATS_PER_VERTEX,
     TEXTURED_FLOATS_PER_VERTEX,
@@ -51,6 +54,11 @@ pub enum RenderStyle {
     /// Modell-Kanten obenauf (wie bei `Hidden`, aber mit Material- statt
     /// Weiss-Flaechen).
     ShadedEdges,
+    /// „Nur Konturen" (Gipsmodell-Look): flach-weisse Flaechen wie `Hidden`, aber
+    /// obenauf NUR die blickabhaengige Silhouette (Umriss je Volumen), nicht die
+    /// inneren Knickkanten (Dachgrate). Die Silhouette wird je Kamera aus der
+    /// gecachten Kanten-Adjazenz neu abgeleitet (siehe `edges::build_silhouette_edges`).
+    Contour,
 }
 
 impl RenderStyle {
@@ -62,6 +70,7 @@ impl RenderStyle {
             "wireframe" => RenderStyle::Wireframe,
             "hidden" => RenderStyle::Hidden,
             "shaded-edges" => RenderStyle::ShadedEdges,
+            "contour" => RenderStyle::Contour,
             _ => RenderStyle::Shaded,
         }
     }
@@ -72,7 +81,8 @@ impl RenderStyle {
     fn mesh_mode(self) -> f32 {
         match self {
             RenderStyle::White => 1.0,
-            RenderStyle::Hidden => 2.0,
+            // Contour teilt den flach-weissen Flaechen-Look von Hidden (mode 2).
+            RenderStyle::Hidden | RenderStyle::Contour => 2.0,
             // Shaded, Textured, Wireframe (Flaechen werden bei Wireframe eh nicht
             // gezeichnet), ShadedEdges -> Material.
             _ => 0.0,
@@ -98,7 +108,10 @@ impl RenderStyle {
     /// zeichnen (Flaechen + Kanten) — bislang nur `Hidden`, jetzt auch
     /// `ShadedEdges`.
     fn needs_biased_face_pipeline(self) -> bool {
-        matches!(self, RenderStyle::Hidden | RenderStyle::ShadedEdges)
+        matches!(
+            self,
+            RenderStyle::Hidden | RenderStyle::ShadedEdges | RenderStyle::Contour
+        )
     }
 }
 
@@ -172,6 +185,19 @@ struct TexturedMeshBuffers {
     layer_vbo: wgpu::Buffer,
     ibo: wgpu::Buffer,
     index_count: u32,
+}
+
+/// GPU-Ressourcen EINES georeferenzierten Luftbilds (SWISSIMAGE), das aufs Gelaende
+/// drapiert wird (`gpu::aerial_pipeline`). Haelt Textur + View am Leben und die
+/// fertige Bind-Group (group 1: Textur + Sampler + Bbox-Uniform).
+struct AerialBuffers {
+    #[allow(dead_code)]
+    texture: wgpu::Texture,
+    #[allow(dead_code)]
+    view: wgpu::TextureView,
+    #[allow(dead_code)]
+    bbox: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
 /// Kantenlaenge der prozeduralen Test-Textur (Schachbrett), in Texeln.
@@ -268,6 +294,30 @@ pub struct Renderer {
     /// BITIDENTISCH zur Haupt-`pipeline` (sonst inkompatibler Render-Pass), nur
     /// Shader/Layout unterscheiden sich.
     textured_pipeline: wgpu::RenderPipeline,
+    /// Luftbild-Drape-Pipeline (`MESH_AERIAL_WGSL`): zeichnet das Terrain-Overlay
+    /// (`terrain_overlay`) ein zweites Mal mit einer Bild-Textur (group 1). Vertex-
+    /// Layout = Haupt-Mesh-Layout `[pos, normal, color]`. Leichter Depth-Bias zur
+    /// Kamera hin (wie `cap_pipeline`), damit das Overlay das deckungsgleiche
+    /// Terrain im Hauptpuffer ueberlagert statt zu flimmern.
+    aerial_pipeline: wgpu::RenderPipeline,
+    /// Bind-Group-Layout (group 1) des Luftbild-Pfades: Textur + Sampler + Bbox-
+    /// Uniform. Festgehalten fuer den Bind-Group-Neubau in `set_aerial_texture`.
+    aerial_bind_group_layout: wgpu::BindGroupLayout,
+    /// Sampler des Luftbilds (ClampToEdge/Linear — kein Kacheln, weiche Filterung).
+    aerial_sampler: wgpu::Sampler,
+    /// Das aktuell drapierte Luftbild (Textur + Bind-Group). None = kein Luftbild.
+    aerial: Option<AerialBuffers>,
+    /// Nur die Gelaende-Dreiecke (aus `build_terrain_mesh`) als eigener Puffer —
+    /// Grundlage des Luftbild-Overlays. Bei `upload_model` erzeugt; None = kein
+    /// Terrain. Wird nur gezeichnet, wenn zusaetzlich `aerial` gesetzt ist.
+    terrain_overlay: Option<MeshBuffers>,
+    /// Gecachte Kanten-Adjazenz des Modells (bei `upload_*` erzeugt) — Grundlage
+    /// der blickabhaengigen Silhouette (Stil `Contour`). Leer = kein Modell.
+    edge_adj: Vec<EdgeAdj>,
+    /// Zuletzt gebaute Silhouetten-LineList (Stil `Contour`) + die Kamera-Signatur,
+    /// fuer die sie gilt — bei Blickwechsel neu abgeleitet (nicht je Frame blind).
+    silhouette: Option<LineBuffers>,
+    silhouette_key: Option<[i64; 6]>,
     /// Bind-Group des Material-Textur-Arrays (group 1): Array-View + Sampler.
     /// Wird bei `set_material_textures` neu gebaut (mehr Ebenen); bis dahin haelt
     /// sie das 1-Ebenen-Array mit dem Fallback-Schachbrett.
@@ -310,6 +360,12 @@ pub struct Renderer {
     /// aktiv / keine Schnittgeometrie. Ueber `set_cut_caps` gesetzt/geloescht,
     /// gezeichnet NACH den Flaechen, VOR Kanten/Grid/Highlight.
     caps: Option<CapBuffers>,
+    /// STATISCHE Schraffur-Kappen an freien Wandenden (`mesh::build_free_wall_end_caps`,
+    /// kein Live-Schnitt noetig — unabhaengig von `caps`/`cut_lines`, die nur bei
+    /// aktivem Live-Schnitt existieren). Bei `upload_model` neu gebaut; None = keine
+    /// Wand hat eine offene, schraffierte Kante. Immer gezeichnet, wenn Flaechen
+    /// gezeichnet werden (nicht an den Live-Schnitt-Zustand gebunden).
+    wall_end_caps: Option<CapBuffers>,
     /// Schnitt-Umrisslinien (Cut-Cap-Kanten, P2) als Ribbon-TriangleList
     /// (`[pos, color]`). None = kein Schnitt aktiv / keine Kanten. Ueber
     /// `set_cut_lines` gesetzt/geloescht, gezeichnet NACH den Caps.
@@ -733,6 +789,115 @@ impl Renderer {
             cache: None,
         });
 
+        // ── Luftbild-Drape-Pfad (aerial_pipeline) ───────────────────────────────
+        // group 1: EINE 2D-Bild-Textur + Sampler + Bbox-Uniform (16 Byte, vec4).
+        // group 0 (Globals) bleibt geteilt. Vertex-Layout = Haupt-Mesh-Layout
+        // [pos, normal, color], damit der Terrain-Overlay-Puffer direkt passt.
+        let aerial_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("aerial.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(16),
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let aerial_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("3d.aerial.layout"),
+                bind_group_layouts: &[Some(&bind_group_layout), Some(&aerial_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let aerial_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mesh_aerial.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(MESH_AERIAL_WGSL.into()),
+        });
+        let aerial_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: (FLOATS_PER_VERTEX * 4) as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3],
+        };
+        let aerial_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mesh.aerial.pipeline"),
+            layout: Some(&aerial_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &aerial_module,
+                entry_point: Some("vs_main"),
+                buffers: &[aerial_vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &aerial_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                // Das Overlay nutzt EXAKT dieselbe Terrain-Geometrie wie der
+                // Hauptpuffer -> bit-identische Tiefe. Mit LessEqual gewinnt das
+                // NACH dem Terrain gezeichnete Overlay bei gleicher Tiefe
+                // deterministisch (kein Bias noetig). Ein Slope-Bias wuerde in
+                // ORTHO-Praesets (iso/axo) je nach Dreiecks-Neigung ungleich
+                // schieben und fleckige „Abschnitte" erzeugen — daher KEIN Bias.
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+        // ClampToEdge (Randpixel ausserhalb der Bbox) + Linear (weiche Filterung).
+        let aerial_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("aerial.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
         // Prozedurale 256x256-Schachbrett-Textur ANLEGEN (kein Asset). RGBA8-srgb,
         // damit die im Shader gesampelten Werte im linearen Raum landen (die
         // Beleuchtung rechnet linear) — analog zum srgb-Surface-Format. Das
@@ -809,6 +974,14 @@ impl Renderer {
             cap_pipeline,
             cut_line_pipeline,
             textured_pipeline,
+            aerial_pipeline,
+            aerial_bind_group_layout,
+            aerial_sampler,
+            aerial: None,
+            terrain_overlay: None,
+            edge_adj: Vec::new(),
+            silhouette: None,
+            silhouette_key: None,
             texture_bind_group,
             texture,
             texture_bind_group_layout,
@@ -823,6 +996,7 @@ impl Renderer {
             grid: None,
             highlight: None,
             caps: None,
+            wall_end_caps: None,
             cut_lines: None,
             grid_visible: false,
             style: RenderStyle::Shaded,
@@ -859,19 +1033,63 @@ impl Renderer {
             build_scene_mesh(walls, slabs, meshes),
             build_scene_mesh_textured(walls, slabs, meshes),
         );
+        // Terrain-Overlay-Puffer (nur Gelaende-Dreiecke) fuer das Luftbild-Drapieren.
+        let terrain = build_terrain_mesh(meshes);
+        self.terrain_overlay = if terrain.indices.is_empty() {
+            None
+        } else {
+            let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.overlay.vbo"),
+                contents: bytemuck::cast_slice(&terrain.verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let ibo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.overlay.ibo"),
+                contents: bytemuck::cast_slice(&terrain.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+            Some(MeshBuffers {
+                vbo,
+                ibo,
+                index_count: terrain.indices.len() as u32,
+            })
+        };
+        // Schraffur-Kappen an freien (unangeschlossenen) Wandenden — statisch aus
+        // der Wandkonnektivitaet, unabhaengig vom Live-Schnitt-Zustand.
+        let end_caps = build_free_wall_end_caps(walls);
+        self.wall_end_caps = if end_caps.is_empty() {
+            None
+        } else {
+            let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("wall_end_caps.vbo"),
+                contents: bytemuck::cast_slice(&end_caps),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            Some(CapBuffers {
+                vbo,
+                vertex_count: (end_caps.len() / CAP_FLOATS_PER_VERTEX) as u32,
+            })
+        };
     }
 
     /// Laedt ein fertiges Mesh in die GPU-Puffer (oder loescht es bei leer) und
     /// erzeugt ZUGLEICH die gecachten Modell-Kanten (Feature-Edges, edges.rs) fuer
     /// die Stile wireframe/hidden — einmalig hier, nicht je Frame.
     fn upload_mesh(&mut self, device: &wgpu::Device, mesh: Mesh, tex_mesh: TexturedMesh) {
+        // Silhouette-Cache verwerfen (neues Modell) — wird bei Bedarf neu gebaut.
+        self.silhouette = None;
+        self.silhouette_key = None;
         if mesh.indices.is_empty() {
             self.mesh = None;
             self.textured_mesh = None;
             self.edges = None;
+            self.edge_adj = Vec::new();
             return;
         }
 
+        // Kanten-Adjazenz einmalig ableiten: Grundlage der statischen Feature-Edges
+        // UND der blickabhaengigen Silhouette (Stil `Contour`).
+        self.edge_adj = build_edge_adjacency(&mesh);
         // Kanten aus der Mesh-Geometrie ableiten und (falls vorhanden) hochladen.
         let edge_verts = build_mesh_edges(&mesh);
         self.edges = if edge_verts.is_empty() {
@@ -1111,6 +1329,111 @@ impl Renderer {
     /// `WallInput::material_index` (1-basiert) auf seine Ebene; Baender ohne
     /// Material (`-1`) bleiben beim Schachbrett (Ebene 0). `layer_count == 0` (oder
     /// leere/zu kleine Daten) setzt auf das reine Schachbrett-Array zurueck.
+    /// Setzt/ersetzt das aufs Gelaende drapierte Luftbild (SWISSIMAGE). `rgba` =
+    /// dicht gepackte RGBA8-Bytes (`width*height*4`, zeilenweise von OBEN = Nord);
+    /// `bbox = [min_x, min_y, max_x, max_y]` die Modell-Meter-Bounding-Box, die das
+    /// Bild ausfuellt (x = Ost/world.x, y = Nord/world.z). Erzeugt Textur + Bind-
+    /// Group (group 1) fuer die `aerial_pipeline`. Ungueltige/leere Eingabe loescht
+    /// das Luftbild. Gezeichnet wird nur, wenn zusaetzlich Terrain vorliegt.
+    pub fn set_aerial_texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        bbox: [f32; 4],
+    ) {
+        let needed = (width as usize) * (height as usize) * 4;
+        if width == 0 || height == 0 || rgba.len() < needed {
+            self.aerial = None;
+            return;
+        }
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("aerial.texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // srgb: die gesampelten Werte landen linear (Beleuchtung rechnet linear).
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // write_texture verlangt bytes_per_row als Vielfaches von 256. Bei Bedarf
+        // Zeilen in einen gepolsterten Puffer kopieren (sonst 1:1 hochladen).
+        let unpadded = (width * 4) as usize;
+        let padded = unpadded.div_ceil(256) * 256;
+        let upload: std::borrow::Cow<[u8]> = if padded == unpadded {
+            std::borrow::Cow::Borrowed(&rgba[..needed])
+        } else {
+            let mut buf = vec![0u8; padded * height as usize];
+            for row in 0..height as usize {
+                let src = &rgba[row * unpadded..row * unpadded + unpadded];
+                buf[row * padded..row * padded + unpadded].copy_from_slice(src);
+            }
+            std::borrow::Cow::Owned(buf)
+        };
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &upload,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded as u32),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bbox_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aerial.bbox"),
+            contents: bytemuck::cast_slice(&bbox),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("aerial.bind"),
+            layout: &self.aerial_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.aerial_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: bbox_buf.as_entire_binding(),
+                },
+            ],
+        });
+        self.aerial = Some(AerialBuffers {
+            texture,
+            view,
+            bbox: bbox_buf,
+            bind_group,
+        });
+    }
+
+    /// Loescht das drapierte Luftbild (das Gelaende erscheint wieder einfarbig/shaded).
+    pub fn clear_aerial(&mut self) {
+        self.aerial = None;
+    }
+
     pub fn set_material_textures(
         &mut self,
         device: &wgpu::Device,
@@ -1307,6 +1630,51 @@ impl Renderer {
 
         self.ensure_depth(device, w, h);
         self.ensure_msaa(device, w, h);
+
+        // Silhouette (Stil `Contour`) je Blickwinkel neu ableiten — aber nur, wenn
+        // sich die Kamera merklich bewegt hat (Signatur-Cache), nicht blind je Frame.
+        if self.style == RenderStyle::Contour && !self.edge_adj.is_empty() {
+            let eye = camera.eye;
+            let mut fwd = [
+                camera.target[0] - eye[0],
+                camera.target[1] - eye[1],
+                camera.target[2] - eye[2],
+            ];
+            let fl = (fwd[0] * fwd[0] + fwd[1] * fwd[1] + fwd[2] * fwd[2]).sqrt();
+            if fl > 1e-6 {
+                fwd = [fwd[0] / fl, fwd[1] / fl, fwd[2] / fl];
+            }
+            let perspective = matches!(camera.projection, crate::types::Projection::Perspective);
+            // Signatur: Auge (0.01 m) + Blickrichtung (0.001). Perspektive haengt
+            // von der Auge-Position ab, Ortho nur von der Richtung — beide erfasst.
+            let q = |v: f32, s: f32| (v * s).round() as i64;
+            let key = [
+                q(eye[0], 100.0),
+                q(eye[1], 100.0),
+                q(eye[2], 100.0),
+                q(fwd[0], 1000.0),
+                q(fwd[1], 1000.0),
+                q(fwd[2], 1000.0),
+            ];
+            if self.silhouette.is_none() || self.silhouette_key != Some(key) {
+                let verts = build_silhouette_edges(&self.edge_adj, eye, fwd, perspective);
+                self.silhouette = if verts.is_empty() {
+                    None
+                } else {
+                    let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("silhouette.vbo"),
+                        contents: bytemuck::cast_slice(&verts),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    Some(LineBuffers {
+                        vbo,
+                        vertex_count: (verts.len() / EDGE_FLOATS_PER_VERTEX) as u32,
+                    })
+                };
+                self.silhouette_key = Some(key);
+            }
+        }
+
         let depth_view = &self.depth.as_ref().unwrap().view;
         let msaa_view = &self.msaa.as_ref().unwrap().view;
 
@@ -1375,6 +1743,38 @@ impl Renderer {
                 }
             }
 
+            // 1a) Luftbild-Drape: das Terrain-Overlay ein zweites Mal texturiert
+            //     ueber das (deckungsgleiche) Terrain im Hauptpuffer zeichnen. Nur
+            //     wenn Flaechen gezeichnet werden, ein Luftbild gesetzt ist UND ein
+            //     Terrain-Overlay vorliegt. Der Depth-Bias der Pipeline haelt es vor
+            //     dem Terrain (kein Z-Fighting). group 1 = Bild-Textur + Bbox.
+            if self.style.draws_faces() {
+                if let (Some(a), Some(t)) = (&self.aerial, &self.terrain_overlay) {
+                    pass.set_pipeline(&self.aerial_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_bind_group(1, &a.bind_group, &[]);
+                    pass.set_vertex_buffer(0, t.vbo.slice(..));
+                    pass.set_index_buffer(t.ibo.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..t.index_count, 0, 0..1);
+                }
+            }
+
+            // 1a2) Schraffur-Kappen an freien Wandenden (STATISCH, unabhaengig vom
+            //      Live-Schnitt-Zustand — `mesh::build_free_wall_end_caps`): ein
+            //      unangeschlossenes Wandende zeigt die Bauteil-Schraffur statt der
+            //      Flaechenfarbe, wie ein echter Schnitt. Dieselbe `cap_pipeline`
+            //      (Bias zur Kamera) wie die Live-Schnitt-Kappen — sitzt exakt auf
+            //      der (weiterhin vorhandenen) flach eingefaerbten End-Kappe im
+            //      Hauptpuffer und gewinnt den Tiefentest.
+            if self.style.draws_faces() {
+                if let Some(wc) = &self.wall_end_caps {
+                    pass.set_pipeline(&self.cap_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, wc.vbo.slice(..));
+                    pass.draw(0..wc.vertex_count, 0..1);
+                }
+            }
+
             // 1b) Schnittflaechen-Kappen (Cut-Caps) NACH den Flaechen, VOR den
             //     Kanten: sie fuellen die an der Schnittebene weggeschnittene Wunde
             //     mit der Diagonalschraffur (CAP_WGSL). Werden selbst NICHT gekappt.
@@ -1408,6 +1808,19 @@ impl Renderer {
                     pass.set_bind_group(0, &self.bind_group, &[]);
                     pass.set_vertex_buffer(0, e.vbo.slice(..));
                     pass.draw(0..e.vertex_count, 0..1);
+                }
+            }
+
+            // 2b) „Nur Konturen" (Stil Contour): die blickabhaengige Silhouette
+            //     obenauf (tiefengetestet gegen die gebiasten Flaechen -> nur
+            //     sichtbare Umrisslinien). Gleiche LineList-Pipeline wie die
+            //     Feature-Edges, aber der reduzierte Kantensatz.
+            if self.style == RenderStyle::Contour {
+                if let Some(s) = &self.silhouette {
+                    pass.set_pipeline(&self.grid_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, s.vbo.slice(..));
+                    pass.draw(0..s.vertex_count, 0..1);
                 }
             }
 

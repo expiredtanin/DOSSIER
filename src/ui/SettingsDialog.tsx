@@ -10,20 +10,26 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { ACCENT_SWATCHES } from "../theme/accents";
-import type { Project } from "../model/types";
 import { ColorHexField } from "./ColorHexField";
+import { LayoutMenu } from "./LayoutMenu";
 import type { RendererMode } from "./StatusBar";
+import type { LayoutState } from "../panels/types";
+import type { ThemeMode } from "../theme/themeMode";
 
 export interface SettingsDialogProps {
+  /** Hell/Dunkel — Standard ist Hell (siehe theme/themeMode.ts). */
+  themeMode: ThemeMode;
+  onThemeModeChange: (mode: ThemeMode) => void;
   marqueeColor: string;
   onMarqueeColorChange: (hex: string) => void;
   snapColor: string;
   onSnapColorChange: (hex: string) => void;
-  project: Project;
-  setProject: (next: Project | ((p: Project) => Project)) => void;
+  /** Referenzhöhe des Erdgeschosses (m ü. M.) — statt des ganzen Projekts nur
+   * dieses eine Feld + sein Setter (schmale Grenzfläche, s. `windowed`). */
+  referenceElevationMasl: number | undefined;
+  onReferenceElevationChange: (n: number | undefined) => void;
   /** Aktuell gewählter Plan-Renderer (aus dem `?engine`-URL-Param abgeleitet). */
   rendererMode: RendererMode;
   /** Ist `navigator.gpu` vorhanden? Steuert, ob „Nordstern" wählbar ist. */
@@ -33,23 +39,37 @@ export interface SettingsDialogProps {
    * Live-Remount der Renderer-Hooks).
    */
   onRendererModeChange: (mode: RendererMode) => void;
-  /** Arbeitsumgebung-Auswahl (Fenster-/Dock-Layouts) — früher in der TopBar. */
-  layoutMenu: ReactNode;
+  /** Arbeitsumgebung (Fenster-/Dock-Layouts) — LayoutMenu wird HIER gerendert
+   * (nicht mehr als vorgefertigtes ReactNode hereingereicht: JSX ist über eine
+   * Fenstergrenze nicht serialisierbar, s. `windowed`). */
+  layout: LayoutState;
+  onApplyLayout: (layout: LayoutState) => void;
   onClose: () => void;
+  /**
+   * Läuft in einem EIGENEN nativen Fenster (siehe native/settingsWindow.ts)
+   * statt als abgedunkelter Overlay-Dialog im Hauptfenster: kein Backdrop/
+   * Klick-aussen-schliesst (kein „aussen" in einem echten OS-Fenster), füllt
+   * die Fensterfläche, Kopfzeile wird zum Ziehbereich statt zum Schliessen-Klick.
+   */
+  windowed?: boolean;
 }
 
 export function SettingsDialog({
+  themeMode,
+  onThemeModeChange,
   marqueeColor,
   onMarqueeColorChange,
   snapColor,
   onSnapColorChange,
-  project,
-  setProject,
+  referenceElevationMasl,
+  onReferenceElevationChange,
   rendererMode,
   webGpuAvailable,
   onRendererModeChange,
-  layoutMenu,
+  layout,
+  onApplyLayout,
   onClose,
+  windowed = false,
 }: SettingsDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -64,47 +84,49 @@ export function SettingsDialog({
   // gerundeten Projektwert zu schreiben. Synchronisiert sich, wenn sich das
   // Projekt von aussen ändert (z. B. Undo/Import).
   const [elevationText, setElevationText] = useState(
-    project.referenceElevationMasl != null ? String(project.referenceElevationMasl) : "",
+    referenceElevationMasl != null ? String(referenceElevationMasl) : "",
   );
   useEffect(() => {
-    setElevationText(
-      project.referenceElevationMasl != null ? String(project.referenceElevationMasl) : "",
-    );
-  }, [project.referenceElevationMasl]);
+    setElevationText(referenceElevationMasl != null ? String(referenceElevationMasl) : "");
+  }, [referenceElevationMasl]);
 
   const commitElevation = (raw: string) => {
     setElevationText(raw);
     const trimmed = raw.trim();
     if (trimmed === "") {
-      setProject((p) => ({ ...p, referenceElevationMasl: undefined }));
+      onReferenceElevationChange(undefined);
       return;
     }
     const n = Number(trimmed);
     if (Number.isFinite(n)) {
-      setProject((p) => ({ ...p, referenceElevationMasl: n }));
+      onReferenceElevationChange(n);
     }
   };
 
-  return (
-    <div className="imp-overlay" onClick={onClose}>
+  const dialog = (
       <div
-        className="imp-dialog"
+        className={`imp-dialog${windowed ? " imp-dialog-embedded" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={t("settings.title")}
-        onClick={(e) => e.stopPropagation()}
+        onClick={windowed ? undefined : (e) => e.stopPropagation()}
       >
-        <header className="imp-head">
+        <header
+          className="imp-head"
+          {...(windowed ? { "data-tauri-drag-region": true } : {})}
+        >
           <span className="imp-head-title">{t("settings.title")}</span>
-          <button className="imp-close" onClick={onClose} aria-label={t("export.close")}>
-            ×
-          </button>
+          {!windowed && (
+            <button className="imp-close" onClick={onClose} aria-label={t("export.close")}>
+              ×
+            </button>
+          )}
         </header>
 
         <div className="imp-body">
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.workspace")}</div>
-            {layoutMenu}
+            <LayoutMenu layout={layout} onApply={onApplyLayout} />
           </section>
 
           <section className="imp-section">
@@ -136,6 +158,25 @@ export function SettingsDialog({
 
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.display")}</div>
+            <span className="settings-field-label">{t("settings.theme")}</span>
+            <span className="sb-renderer-toggle" role="group" aria-label={t("settings.theme")}>
+              <button
+                type="button"
+                className={`sb-renderer-btn${themeMode === "light" ? " active" : ""}`}
+                aria-pressed={themeMode === "light"}
+                onClick={() => onThemeModeChange("light")}
+              >
+                {t("settings.theme.light")}
+              </button>
+              <button
+                type="button"
+                className={`sb-renderer-btn${themeMode === "dark" ? " active" : ""}`}
+                aria-pressed={themeMode === "dark"}
+                onClick={() => onThemeModeChange("dark")}
+              >
+                {t("settings.theme.dark")}
+              </button>
+            </span>
             <AccentColorField
               label={t("settings.marqueeColor")}
               hint={t("settings.marqueeColor.hint")}
@@ -169,12 +210,20 @@ export function SettingsDialog({
           </section>
         </div>
 
-        <footer className="imp-foot">
-          <button className="imp-btn primary" onClick={onClose}>
-            {t("export.close")}
-          </button>
-        </footer>
+        {!windowed && (
+          <footer className="imp-foot">
+            <button className="imp-btn primary" onClick={onClose}>
+              {t("export.close")}
+            </button>
+          </footer>
+        )}
       </div>
+  );
+
+  if (windowed) return dialog;
+  return (
+    <div className="imp-overlay" onClick={onClose}>
+      {dialog}
     </div>
   );
 }

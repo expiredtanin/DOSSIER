@@ -135,9 +135,22 @@ export function Viewport3D(
      * Wasm3DViewport); die three.js-Sicht hebt die Auswahl weiterhin über ihr
      * eigenes Material hervor (highlightMat in ThreeViewport3D). */
     highlightLines?: Float32Array | null;
+    /** Aktive 3D-Schnittebene (nur WASM-Pfad) — s. Wasm3DViewport `section3d`.
+     * Bindet den Live-Schnitt an eine Grundriss-Schnittlinie. */
+    section3d?: { point: [number, number, number]; normal: [number, number, number] } | null;
+    /** Klick auf den gebundenen Schnitt-Knopf im WASM-Viewport → Bindung lösen. */
+    onClearSection3d?: () => void;
   },
 ) {
-  const { gridVisible, onToggleGrid, onPick3d, highlightLines, ...threeProps } = props;
+  const {
+    gridVisible,
+    onToggleGrid,
+    onPick3d,
+    highlightLines,
+    section3d,
+    onClearSection3d,
+    ...threeProps
+  } = props;
   if (WASM_ENGINE_ACTIVE) {
     return (
       <Wasm3DViewport
@@ -162,6 +175,8 @@ export function Viewport3D(
         onEditRoofPitch={props.onEditRoofPitch}
         onEditWallTop={props.onEditWallTop}
         onEditEnd={props.onEditEnd}
+        section3d={section3d}
+        onClearSection3d={onClearSection3d}
       />
     );
   }

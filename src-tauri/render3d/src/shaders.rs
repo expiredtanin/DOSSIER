@@ -220,6 +220,90 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// WGSL des LUFTBILD-Drapierens aufs Gelände (`gpu::aerial_pipeline`). Zeichnet die
+/// TERRAIN-Dreiecke ein zweites Mal, texturiert mit EINEM georeferenzierten Luftbild
+/// (SWISSIMAGE). Die UV kommen NICHT aus einem Vertex-Attribut, sondern werden im
+/// Fragment aus der WELT-Lage (world.x = Ost, world.z = Nord) und der Bild-Bounding-
+/// Box (group 1, Uniform `bbox = (min_x, min_y, max_x, max_y)` in Modell-Metern)
+/// berechnet — dadurch ist die Auflösung PIXELSCHARF (unabhängig von der TIN-Dichte,
+/// anders als die Pro-Vertex-Färbung). Beleuchtung identisch zu `MESH_WGSL`. Vertex-
+/// Layout = das Haupt-Mesh-Layout `[pos, normal, color]` (color wird ignoriert), damit
+/// derselbe Vertex-Puffer (Terrain-Overlay) ohne Re-Meshing genutzt werden kann.
+/// Bild-Zeile 0 liegt im NORDEN (+Y) -> die Textur-v-Achse wird gespiegelt (1 - v).
+pub const MESH_AERIAL_WGSL: &str = r#"
+struct Globals {
+    view_proj     : mat4x4<f32>,
+    light_dir     : vec4<f32>,
+    sky_color     : vec4<f32>,
+    ground_color  : vec4<f32>,
+    sun_color     : vec4<f32>,
+    mode          : vec4<f32>,
+    section_plane : vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> globals : Globals;
+
+// Luftbild-Textur + Sampler + Bounding-Box (group 1). `bbox = (min_x, min_y,
+// max_x, max_y)` in Modell-Metern (x = Ost/world.x, y = Nord/world.z).
+@group(1) @binding(0) var tex  : texture_2d<f32>;
+@group(1) @binding(1) var samp : sampler;
+struct Aerial { bbox : vec4<f32>, };
+@group(1) @binding(2) var<uniform> aerial : Aerial;
+
+struct VsIn {
+    @location(0) position : vec3<f32>,
+    @location(1) normal   : vec3<f32>,
+    @location(2) color    : vec3<f32>,
+};
+
+struct VsOut {
+    @builtin(position) clip_pos : vec4<f32>,
+    @location(0) world_normal : vec3<f32>,
+    @location(1) world_pos    : vec3<f32>,
+};
+
+@vertex
+fn vs_main(in : VsIn) -> VsOut {
+    var out : VsOut;
+    out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
+    out.world_normal = in.normal;
+    out.world_pos = in.position;
+    return out;
+}
+
+@fragment
+fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
+    // Live-Schnitt-Kappung identisch zur Mesh-Pipeline (mode.y > 0.5 = aktiv).
+    if (globals.mode.y > 0.5) {
+        if (dot(in.world_pos, globals.section_plane.xyz) + globals.section_plane.w > 0.0) {
+            discard;
+        }
+    }
+    let n = normalize(in.world_normal);
+    let l = normalize(globals.light_dir.xyz);
+
+    // Hemisphaerisches Ambient (identisch zu MESH_WGSL).
+    let hemi_t = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+    let ambient = mix(globals.ground_color.rgb, globals.sky_color.rgb, hemi_t);
+    let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb;
+    let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
+    let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
+        * vec3<f32>(0.24, 0.27, 0.30);
+
+    // UV aus der Welt-Lage + Bild-Bbox. world.x = Ost, world.z = Nord.
+    let span = vec2<f32>(aerial.bbox.z - aerial.bbox.x, aerial.bbox.w - aerial.bbox.y);
+    let u = (in.world_pos.x - aerial.bbox.x) / span.x;
+    let v = (in.world_pos.z - aerial.bbox.y) / span.y;
+    // Bild-Zeile 0 = Nord (+Y) -> v spiegeln. Ausserhalb [0,1] -> Randpixel (Clamp
+    // uebernimmt der Sampler mit ClampToEdge).
+    let albedo = textureSample(tex, samp, vec2<f32>(u, 1.0 - v)).rgb;
+
+    var shaded = albedo * (ambient + diffuse + fill);
+    let edge = 0.90 + 0.10 * abs(n.y);
+    shaded = shaded * edge;
+    return vec4<f32>(shaded, 1.0);
+}
+"#;
+
 /// WGSL des Referenz-Bodengitters (grid.rs). Eigene, schlanke `LineList`-Pipeline:
 /// KONSTANTE Farbe (unlit — unabhaengig von Normalen/Licht), nur View-Projektion
 /// aus demselben `Globals`-Uniform (group(0) binding(0)) wie die Mesh-Pipeline.

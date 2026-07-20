@@ -19,6 +19,8 @@ import type { ContextObject } from "../model/types";
 import { ContextImportDialog } from "../ui/ContextImportDialog";
 import { Dropdown } from "../ui/Dropdown";
 import { useStore } from "../state/appStore";
+import { isTauriRuntime } from "../io/projectFile";
+import { openContextImportWindowNative } from "../native/contextImportWindow";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -29,7 +31,41 @@ function typeBadgeKey(obj: ContextObject): TranslationKey {
       return "site.type.contours";
     case "terrainMesh":
       return "site.type.terrain";
+    case "image":
+      return "site.type.image";
   }
+}
+
+/** Ebenen-/Gruppenname eines Kontext-Objekts (aus `layer`, sonst Typ-Fallback). */
+function layerOf(obj: ContextObject): string {
+  if (obj.layer && obj.layer.trim() !== "") return obj.layer;
+  switch (obj.type) {
+    case "importedMesh":
+      return t("site.group.imported");
+    case "terrainMesh":
+      return t("site.group.terrain");
+    case "contourSet":
+      return t("site.group.contours");
+    case "image":
+      return t("site.group.image");
+  }
+}
+
+/** Gruppiert Kontext-Objekte nach Ebene, Reihenfolge des ersten Auftretens. */
+function groupByLayer(objects: ContextObject[]): { layer: string; items: ContextObject[] }[] {
+  const order: string[] = [];
+  const byLayer = new Map<string, ContextObject[]>();
+  for (const obj of objects) {
+    const layer = layerOf(obj);
+    let items = byLayer.get(layer);
+    if (!items) {
+      items = [];
+      byLayer.set(layer, items);
+      order.push(layer);
+    }
+    items.push(obj);
+  }
+  return order.map((layer) => ({ layer, items: byLayer.get(layer)! }));
 }
 
 export function SitePanel() {
@@ -72,7 +108,10 @@ export function SitePanel() {
         <button
           type="button"
           className="site-btn"
-          onClick={() => setCtxImportOpen(true)}
+          onClick={() => {
+            if (isTauriRuntime()) void openContextImportWindowNative();
+            else setCtxImportOpen(true);
+          }}
         >
           {t("site.importLocation")}
         </button>
@@ -117,37 +156,57 @@ export function SitePanel() {
 
       <div className="site-sep" />
 
-      {/* Liste der Kontext-Objekte (Name + Typ-Badge + Entfernen). */}
+      {/* Kontext-Objekte nach Ebene (`layer`) gruppiert: importierte Gebäude
+          liegen als EINZELNE, getrennt lösch-/anwählbare Elemente unter ihrer
+          Ebene (z. B. „Gebäude"), Terrain unter „Terrain". Je Gruppe ein Kopf
+          mit Anzahl + „ganze Ebene löschen". */}
       {objects.length === 0 ? (
         <div className="site-empty">{t("site.empty")}</div>
       ) : (
-        <ul className="site-list">
-          {objects.map((obj) => (
-            <li
-              key={obj.id}
-              className={
-                "site-row" +
-                (host.selectedContextObjectIds.includes(obj.id) ? " site-row-selected" : "")
-              }
-            >
-              <span className="site-name" title={obj.name}>
-                {obj.name}
-              </span>
-              <span className={"site-badge site-badge-" + obj.type}>
-                {t(typeBadgeKey(obj))}
-              </span>
+        groupByLayer(objects).map(({ layer, items }) => (
+          <div key={layer} className="site-group">
+            <div className="site-group-head">
+              <span className="site-group-name">{layer}</span>
+              <span className="site-group-count">{items.length}</span>
               <button
                 type="button"
                 className="site-remove"
-                title={t("site.delete")}
-                aria-label={t("site.delete")}
-                onClick={() => host.onRemoveContextObject(obj.id)}
+                title={t("site.deleteLayer")}
+                aria-label={t("site.deleteLayer")}
+                onClick={() => host.onRemoveContextObjects(items.map((o) => o.id))}
               >
                 ×
               </button>
-            </li>
-          ))}
-        </ul>
+            </div>
+            <ul className="site-list">
+              {items.map((obj) => (
+                <li
+                  key={obj.id}
+                  className={
+                    "site-row" +
+                    (host.selectedContextObjectIds.includes(obj.id) ? " site-row-selected" : "")
+                  }
+                >
+                  <span className="site-name" title={obj.name}>
+                    {obj.name}
+                  </span>
+                  <span className={"site-badge site-badge-" + obj.type}>
+                    {t(typeBadgeKey(obj))}
+                  </span>
+                  <button
+                    type="button"
+                    className="site-remove"
+                    title={t("site.delete")}
+                    aria-label={t("site.delete")}
+                    onClick={() => host.onRemoveContextObject(obj.id)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
       )}
 
       <div className="site-hint">{t("site.dwgHint")}</div>

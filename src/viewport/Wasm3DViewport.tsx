@@ -274,6 +274,14 @@ function fitTargetDist(project: Project): {
       grow(p[0], s.zTop, p[1]);
     }
   }
+  // Meshes (Dächer, Extrusionen, Stützen UND importierte Gebäude/Terrain) —
+  // ohne die kann „Alles einpassen" den (evtl. weit entfernten) Import nicht
+  // rahmen: model (x,y,z=Höhe) → world (x, z, y). Nutzer-Report: „im 3D
+  // funktioniert das Fokussieren / Alles-anzeigen nicht".
+  for (const m of model.meshes) {
+    const pos = m.positions;
+    for (let i = 0; i + 2 < pos.length; i += 3) grow(pos[i], pos[i + 2], pos[i + 1]);
+  }
   // Leeres Modell: neutraler Standpunkt (entspricht dem three.js-Start und dem
   // Rust-Fallback in `set_view_preset` bei fehlender Bounding-Box).
   if (!Number.isFinite(minX)) {
@@ -334,6 +342,8 @@ export function Wasm3DViewport({
   onEditRoofPitch,
   onEditWallTop,
   onEditEnd,
+  section3d = null,
+  onClearSection3d,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -393,6 +403,12 @@ export function Wasm3DViewport({
   onEditWallTop?: (wallId: string, topZ: number) => void;
   /** Ende eines Griff-Drags. */
   onEditEnd?: () => void;
+  /** Aktive 3D-Schnittebene (world point+normal) aus der gebundenen Schnittlinie
+   *  (App-State, `sectionPlaneFromLevel`), oder `null` = kein Live-Schnitt.
+   *  Ersetzt den früheren lokalen Hardcode-Toggle. */
+  section3d?: { point: [number, number, number]; normal: [number, number, number] } | null;
+  /** Klick auf den Viewport-Schnitt-Knopf: hebt die Bindung auf (App löscht die Id). */
+  onClearSection3d?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
@@ -438,11 +454,9 @@ export function Wasm3DViewport({
     ready,
     failed,
   } = useWasm3dRenderer(canvasRef, true);
-  // Live-Schnitt-Zustand (lokaler Overlay-Umschalter, MVP): vertikale
-  // Schnittebene durch die Modellmitte, Blick +Y (Grundriss-Y = world Z, s.
-  // section.rs `looking_plus_y`: normal = [0,0,1]). Kein Store-/App-Prop —
-  // reine Viewport-Ansichts-Option analog zum Grid-Overlay.
-  const [sectionActive, setSectionActive] = useState(false);
+  // Live-Schnitt: die aktive Ebene kommt jetzt aus `section3d` (App-State, an
+  // eine Schnittlinie gebunden — `sectionPlaneFromLevel`) statt aus einem
+  // lokalen Hardcode-Toggle. `null` = kein Schnitt.
   // Orbit-Zustand in einem Ref (kein React-State): Mausbewegungen zeichnen
   // direkt neu, ohne die Komponente je Frame zu re-rendern. Dient NUR der
   // freien Navigation NACH einem Praeset-Sprung (s. Datei-Kommentar).
@@ -515,36 +529,33 @@ export function Wasm3DViewport({
   }, [ready, renderMode, setRenderStyle]);
 
   // Boden-Referenzraster: bei Bereitschaft oder Wechsel von Sichtbarkeit/
-  // Geschoss-Hoehe neu setzen + zeichnen. Fixe Ausdehnung/Abstand (40 m /
-  // 1 m) — ausreichend fuer die ueblichen Grundriss-Groessen dieses Spikes.
+  // Geschoss-Hoehe neu setzen + zeichnen. Fixe Ausdehnung/Abstand (300 m /
+  // 1 m) — bei den bisherigen 40 m lief man bei flachem Blickwinkel (Iso/
+  // Perspektive) schnell auf den harten Gitterrand (wirkte wie ein Clipping-
+  // Bug, war aber nur das Ende der Flaeche). 300 m ist bei gleicher
+  // Liniendichte immer noch sehr billig (nur ein LineList-Puffer).
   useEffect(() => {
     if (!ready) return;
-    setGroundGrid(gridVisible, groundElevation, 40, 1);
+    setGroundGrid(gridVisible, groundElevation, 300, 1);
     redrawRef.current();
   }, [ready, gridVisible, groundElevation, setGroundGrid]);
 
-  // Live-Schnitt: bei Bereitschaft, Umschalten (`sectionActive`) oder
-  // Modelländerung neu setzen. MVP-Ebene = vertikal durch die Modellmitte
-  // (`fitTargetDist`-Ziel), Blick nach +Y -> Normale [0,0,1] (Grundriss-Y =
-  // world Z, s. section.rs `looking_plus_y`). Bei aktivem Schnitt baut Rust die
-  // Schnittflaechen-Schraffur (Caps) aus den gecachten Waenden/Decken.
+  // Live-Schnitt: die gebundene Schnittlinie liefert `section3d` = world
+  // point+normal (vertikale Ebene entlang der Grundriss-Linie, Blickrichtung
+  // aus `directionSign` — s. sectionPlaneFromLevel). Ohne Bindung (`null`) kein
+  // Schnitt. Bei aktivem Schnitt baut Rust die Schnittflaechen-Schraffur (Caps)
+  // aus den gecachten Waenden/Decken. Neu setzen bei Bereitschaft, Wechsel der
+  // Ebene oder Modelländerung (Caps folgen dem aktuellen Modell).
   useEffect(() => {
     if (!ready) return;
-    // Bei inaktivem Schnitt braucht es kein Ziel (Ebene ist ohnehin unsichtbar)
-    // — `fitTargetDist` NICHT aufrufen, das würde sonst bei JEDER Projekt-
-    // Änderung (auch waehrend eines Griff-Drags) unnoetig die komplette
-    // Wand-/Oeffnungs-/Decken-Geometrie erneut flatten, nur um eine Bounding-
-    // Box zu ziehen, die `updateModel` fuer denselben `project`-Stand gerade
-    // erst berechnet hat.
-    if (!sectionActive) {
+    if (!section3d) {
       setSectionPlane(false, [0, 0, 0], [0, 0, 1]);
       redrawRef.current();
       return;
     }
-    const { target } = fitTargetDist(project);
-    setSectionPlane(true, target, [0, 0, 1]);
+    setSectionPlane(true, section3d.point, section3d.normal);
     redrawRef.current();
-  }, [ready, sectionActive, project, setSectionPlane]);
+  }, [ready, section3d, project, setSectionPlane]);
 
   // Auswahl-Hervorhebung: bei Bereitschaft oder Änderung der Highlight-Linien
   // (Auswahl gewechselt/aufgehoben) neu setzen + zeichnen. Die Engine hält das
@@ -1030,37 +1041,39 @@ export function Wasm3DViewport({
           }}
         />
       ))}
-      {/* Live-Schnitt-Umschalter (eigener Overlay-Button, MVP): vertikale
-          Schnittebene durch die Modellmitte, Blick +Y. Sitzt ueber dem
-          Grid-Button (falls vorhanden). Reine Ansichts-Option des Viewports. */}
-      <button
-        type="button"
-        aria-label={t("viewport3d.section.label")}
-        onClick={() => setSectionActive((v) => !v)}
-        title={t(sectionActive ? "viewport3d.section.hide" : "viewport3d.section.show")}
-        aria-pressed={sectionActive}
-        style={{
-          position: "absolute",
-          right: 10,
-          bottom: onToggleGrid ? 48 : 10,
-          width: 30,
-          height: 30,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 0,
-          borderRadius: 7,
-          border: "1px solid rgba(255,255,255,0.14)",
-          background: sectionActive ? "rgba(255,255,255,0.14)" : "rgba(20,20,24,0.65)",
-          color: sectionActive ? "#f2f2f2" : "#9a9a9a",
-          cursor: "pointer",
-          backdropFilter: "blur(4px)",
-        }}
-      >
-        <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>
-          content_cut
-        </span>
-      </button>
+      {/* Live-Schnitt-Knopf: nur sichtbar, wenn eine Schnittlinie den 3D-Schnitt
+          treibt (`section3d` gebunden, Bindung im Objekt-Info gesetzt). Klick
+          hebt die Bindung auf. Sitzt ueber dem Grid-Button (falls vorhanden). */}
+      {section3d && (
+        <button
+          type="button"
+          aria-label={t("viewport3d.section.label")}
+          onClick={() => onClearSection3d?.()}
+          title={t("viewport3d.section.bound")}
+          aria-pressed
+          style={{
+            position: "absolute",
+            right: 10,
+            bottom: onToggleGrid ? 48 : 10,
+            width: 30,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+            borderRadius: 7,
+            border: "1px solid rgba(255,255,255,0.14)",
+            background: "rgba(255,255,255,0.14)",
+            color: "#f2f2f2",
+            cursor: "pointer",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>
+            content_cut
+          </span>
+        </button>
+      )}
       {onToggleGrid && (
         // Dezenter Overlay-Button (eigener DOM-Knoten neben dem Canvas, `.viewport`
         // ist `position: relative` — s. styles.css), stört die Maus-Navigation

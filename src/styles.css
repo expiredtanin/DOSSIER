@@ -1,69 +1,13 @@
-/* Erscheinungsbild nach DOSSIER ("RAPPORT": Creme + Petrol-Grün), inkl.
+/* Erscheinungsbild nach DOSSIER ("RAPPORT": Creme + Neutralgrau), inkl.
    Dark Mode. Der linke Navigator (Zeichnungsebenen + Ebenen-Baum) übernimmt
-   das DOSSIER-Look: aktive Zeile als Petrol-Pille, nicht-aktive gedimmt,
+   das DOSSIER-Look: aktive Zeile als neutrale Pille, nicht-aktive gedimmt,
    ausgeblendete grau; Augen-Schalter, Farbtupfer, eingerückte Kinder. */
 
-/* Dark ist der feste Standard (Nutzer-Wunsch, unabhängig von OS/Browser-
-   Präferenz — vorher hing das an `prefers-color-scheme` und zeigte je nach
-   Umgebung fälschlich Light). Light bleibt als Opt-in erhalten (`[data-theme=
-   "light"]`) für ein späteres manuelles Umschalt-Feature. */
+/* Hell (Standard) ist der feste Startzustand; Dunkel ist Opt-in über
+   `[data-theme="dark"]`, gesetzt/persistiert per Umschalter in den
+   Einstellungen (src/theme/themeMode.ts) — unabhängig von OS/Browser-
+   Präferenz, damit die App nicht je nach Umgebung unterschiedlich startet. */
 :root {
-  color-scheme: dark;
-  /* Gestufte Elevations-Palette (Wunsch: dunkler + mehr Tiefe). Tiefster
-     Grund hinten, Flächen werden nach vorn schrittweise heller — leicht
-     kühl-neutral, harmoniert mit dem Petrol-Akzent.
-       --bg      Ebene 0  — App-Grund / Rinnen hinter allem (am dunkelsten)
-       --panel   Ebene 1  — Oberleiste, Docks, Panel-Körper
-       --panel-2 Ebene 2  — angehobene Flächen: Panel-Köpfe, Hover-Zeilen
-       --input   versenkt  — Eingabefelder (dunkler als die Fläche → Inset) */
-  /* Zwei-Ton-Grundlage (Nutzer-Vorgabe): Fast-Schwarz hinten, dunkles
-     Neutralgrau für die Flächen. Neutral (kein Blaustich), mit dezenten
-     Elevations-Schritten für Tiefe. */
-  --bg: #0e0e0e;
-  --panel: #1d1d1d;
-  --panel-2: #262626;
-  --input: #0a0a0a;
-  --line: #2b2b2b;
-  --border: #383838;
-
-  /* --sheet bleibt bewusst hell (#f0f0f0): das Zeichenblatt ist immer
-     „Papier", unabhängig vom UI-Theme (Wunsch des Nutzers). */
-  --sheet: #f0f0f0;
-
-  --ink: #ededed;
-  --ink-2: #a8a8a8;
-  --muted: #6e6e6e;
-  --label: #c8c8c8;
-
-  /* Akzent NEUTRAL (kein Petrol-Grün, Nutzer-Vorgabe): helles Neutralgrau für
-     aktive/ausgewählte Flächen; weiße Schrift darauf bleibt lesbar. Hover/Dim
-     sind dezente weiße Aufhellungen. */
-  --accent: #4d4d4d;
-  --accent-light: #5e5e5e;
-  --accent-dim: rgba(255, 255, 255, 0.07);
-  --accent-border: rgba(255, 255, 255, 0.22);
-  --active: #6a6a6a;
-  --active-light: #7d7d7d;
-  --active-dim: rgba(255, 255, 255, 0.1);
-
-  --wall: #c8ccd2;
-  --swing: #7e8794;
-  --danger: #c85050;
-  --danger-light: #d86060;
-  /* Tiefere Schatten für klare Schichtung auf dunklem Grund. */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-2: 0 3px 12px rgba(0, 0, 0, 0.55);
-  --shadow-3: 0 12px 34px rgba(0, 0, 0, 0.62);
-  --overlay: rgba(0, 0, 0, 0.62);
-
-  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    sans-serif;
-  --font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
-}
-
-/* Light-Palette als Opt-in (aktuell von nichts gesetzt — bereit für einen
-   künftigen manuellen Theme-Umschalter in den Einstellungen). */
-:root[data-theme="light"] {
   color-scheme: light;
 
   --bg: #e0dbd4;
@@ -73,20 +17,27 @@
   --line: #d4cfc8;
   --border: #c8c2ba;
 
-  --sheet: #f0f0f0;
+  /* --sheet bleibt bewusst hell (#f0f0f0): das Zeichenblatt ist immer
+     „Papier", unabhängig vom UI-Theme (Wunsch des Nutzers). */
+  --sheet: #faf6ee;
 
   --ink: #1a1a18;
   --ink-2: #555550;
   --muted: #8a8580;
   --label: #1a1a18;
 
-  --accent: #2f5d54;
-  --accent-light: #4a8a7c;
-  --accent-dim: #e6efed;
-  --accent-border: rgba(47, 93, 84, 0.35);
-  --active: #1a655a;
-  --active-light: #2f8275;
-  --active-dim: rgba(26, 101, 90, 0.12);
+  /* Akzent NEUTRAL (kein Petrol-Grün, Nutzer-Vorgabe). */
+  --accent: #4a453e;
+  --accent-light: #6b655c;
+  --accent-dim: #f5f2ec;
+  --accent-border: rgba(58, 53, 46, 0.2);
+  --active: #3f3a33;
+  --active-light: #5c564d;
+  --active-dim: rgba(58, 53, 46, 0.12);
+  /* Helle, randlose Feldfläche (Dropdowns/Pillen der Oberleiste, Mockup-
+     Konvention) — bewusst heller als --panel/--input, damit Felder als
+     eigene Fläche erkennbar sind, OHNE Rahmen zu brauchen. */
+  --field-bg: #f5f2ec;
 
   --wall: #2b3039;
   --swing: #9aa3b2;
@@ -98,6 +49,55 @@
   --shadow-2: 0 2px 8px rgba(26, 26, 24, 0.14);
   --shadow-3: 0 6px 24px rgba(26, 26, 24, 0.18);
   --overlay: rgba(26, 26, 24, 0.36);
+
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
+}
+
+/* Dunkel-Palette als Opt-in (Einstellungen → Darstellung → Dunkelmodus). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* Gestufte Elevations-Palette: Tiefster Grund hinten, Flächen werden nach
+     vorn schrittweise heller — leicht kühl-neutral.
+       --bg      Ebene 0  — App-Grund / Rinnen hinter allem (am dunkelsten)
+       --panel   Ebene 1  — Oberleiste, Docks, Panel-Körper
+       --panel-2 Ebene 2  — angehobene Flächen: Panel-Köpfe, Hover-Zeilen
+       --input   versenkt  — Eingabefelder (dunkler als die Fläche → Inset) */
+  --bg: #0e0e0e;
+  --panel: #1d1d1d;
+  --panel-2: #262626;
+  --input: #0a0a0a;
+  --line: #2b2b2b;
+  --border: #383838;
+
+  --sheet: #faf6ee;
+
+  --ink: #ededed;
+  --ink-2: #a8a8a8;
+  --muted: #6e6e6e;
+  --label: #c8c8c8;
+
+  --accent: #4d4d4d;
+  --accent-light: #5e5e5e;
+  --accent-dim: rgba(255, 255, 255, 0.07);
+  --accent-border: rgba(255, 255, 255, 0.22);
+  --active: #6a6a6a;
+  --active-light: #7d7d7d;
+  --active-dim: rgba(255, 255, 255, 0.1);
+  /* Helle, randlose Feldfläche (Dropdowns/Pillen der Oberleiste) — angehoben
+     gegenüber --panel-2, analog zur hellen Palette. */
+  --field-bg: #2a2a2a;
+
+  --wall: #c8ccd2;
+  --swing: #7e8794;
+  --danger: #c85050;
+  --danger-light: #d86060;
+  /* Tiefere Schatten für klare Schichtung auf dunklem Grund. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 3px 12px rgba(0, 0, 0, 0.55);
+  --shadow-3: 0 12px 34px rgba(0, 0, 0, 0.62);
+  --overlay: rgba(0, 0, 0, 0.62);
 }
 
 * {
@@ -159,7 +159,9 @@ body {
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  height: 26px;
+  /* EINE Zeile für Chrome + Ansichts-Controls (Mockup) — hoch genug für die
+     24px-Pillen der View-/Zoom-/Text-Steuerung. */
+  height: 40px;
   border-bottom: 1px solid var(--line);
   /* Oberleiste auf Ebene 1 (angehoben über dem App-Grund) + weicher Schatten
      nach unten → trennt sich klar von der Zeichenfläche (Tiefe). */
@@ -167,18 +169,17 @@ body {
   box-shadow: var(--shadow-1);
   position: relative;
   z-index: 2;
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* Die Leiste selbst scrollt NICHT — nur der mittlere View-Controls-Block
+     (.ribbon-views) scrollt bei schmalen Fenstern. So bleiben Marke, Menü und
+     die rechte Gruppe (Datei-Aktionen + Projekt) IMMER sichtbar. */
+  overflow: visible;
   white-space: nowrap;
-  /* Dezente, normalerweise unsichtbare Scrollleiste (Firefox). */
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
 }
 /* Tauri/macOS: native Ampeln (titleBarStyle "Overlay") liegen oben links über
    dem Inhalt → Zeile links einrücken, damit `dossier.` frei bleibt (~3 Ampeln +
    Rand). */
 .topbar.topbar-native-inset {
-  padding-left: 78px;
+  padding-left: 88px;
 }
 /* Sehr ruhige eigene Scrollleiste (WebKit/Blink): Thumb nur beim Scrollen
    (`is-scrolling`, von TopBar gesetzt) oder beim Überfahren sichtbar. */
@@ -230,20 +231,25 @@ body {
   color: var(--muted);
 }
 
-/* Kompaktes Dropdown der Oberleiste (Detailgrad, Massstab). */
+/* Kompaktes Dropdown der Oberleiste (Detailgrad, Massstab) — flache Pille ohne
+   Rahmen (Mockup-Konvention): gefüllte Fläche in --field-bg, kein Rand. */
 .tb-select {
-  border: 1px solid var(--border);
-  background: var(--input);
+  border: none;
+  background: var(--field-bg);
   color: var(--ink);
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
-  padding: 3px 6px;
+  padding: 3px 7px;
   border-radius: 6px;
   cursor: pointer;
 }
 .tb-select:hover {
-  border-color: var(--accent-border);
+  background: var(--accent-dim);
+}
+.tb-select:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .tb-scale {
   font-family: var(--font-mono);
@@ -252,10 +258,9 @@ body {
 
 /* Gruppe aus Knöpfen (Zoom). */
 /* Aktions-Pillen (100 % · Einpassen · Auswahl · PDF) — optisch eine Familie mit
-   den Dropdown-Triggern (.tb-dd-trigger): jede Aktion ist eine eigene gerahmte,
-   abgesetzte dunkle Pill mit demselben Akzent-Hover (Rand → accent-border,
-   Fläche → accent-dim, Text → accent). Sie bleiben Buttons (Aktion ≠ Auswahl);
-   nur die Optik ist angeglichen. */
+   den Dropdown-Triggern (.tb-dd-trigger): flache, randlose Pille in
+   --field-bg, Text/Rand-Akzent bei Hover (Mockup-Konvention — kein „stets
+   dunkler" Sonderlook mehr). */
 .tb-btns {
   display: inline-flex;
   gap: 6px;
@@ -263,11 +268,9 @@ body {
 .tb-btn {
   display: inline-flex;
   align-items: center;
-  /* Gleiche stets-dunkle Fläche wie .tb-dd-trigger — einheitlicher Pillen-
-     Look über die ganze Oberleiste. */
-  border: 1px solid #4a4a4a;
-  background: #2c2c2c;
-  color: #e8e8e8;
+  border: none;
+  background: var(--field-bg);
+  color: var(--ink-2);
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -276,21 +279,17 @@ body {
   border-radius: 8px;
   cursor: pointer;
   outline: none;
-  transition: border-color 0.14s, background-color 0.14s, color 0.14s,
-    box-shadow 0.14s;
+  transition: background-color 0.14s, color 0.14s, box-shadow 0.14s;
 }
 .tb-btn:hover:not(:disabled) {
-  border-color: var(--accent-border);
-  background-color: rgba(255, 255, 255, 0.1);
-  color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .tb-btn:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
+  box-shadow: 0 0 0 2px var(--accent-border);
 }
 .tb-btn:disabled {
-  color: #8a8a8a;
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -329,11 +328,11 @@ body {
   text-align: right;
 }
 
-/* Pillen-Toggle der Oberleiste (Referenzlinien). */
+/* Pillen-Toggle der Oberleiste (Referenzlinien) — randlos, --field-bg. */
 .tb-toggle {
-  border: 1px solid #4a4a4a;
-  background: #2c2c2c;
-  color: #e8e8e8;
+  border: none;
+  background: var(--field-bg);
+  color: var(--ink-2);
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -341,70 +340,67 @@ body {
   padding: 6px 12px;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
 .tb-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: var(--accent-border);
-  color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .tb-toggle.active {
   background: var(--accent);
-  border-color: var(--accent);
   color: #fff;
 }
 
 /* ── DOSSIER-Grundprimitive: Segmentpille · Icon-Knopf · Zoom-Cluster ──────── */
 
-/* Segmentpille (3er/4er): Aussencontainer rund, Zellen gleich hoch, interne
-   Trenner über border-left. Genutzt für Zoom-Aktionen, B/I/U, L/C/R. Gleiche
-   stets-dunkle Fläche wie .tb-dd-trigger/.tb-btn (einheitlicher Pillen-Look). */
+/* Segmentpille (3er/4er): randloser Cluster OHNE interne Trennstriche
+   (Mockup-Konvention) — die Zellen sitzen als kleine Pillen auf --field-bg,
+   aktive Zelle in accent-dim. Gleiche 24px-Höhe wie die Dropdowns. */
 .tb-seg {
   display: inline-flex;
   align-items: stretch;
   height: 24px;
   box-sizing: border-box;
-  border: 1px solid #4a4a4a;
+  border: none;
   border-radius: 8px;
   overflow: hidden;
-  background: #2c2c2c;
+  background: var(--field-bg);
+  padding: 2px;
+  gap: 1px;
   flex: 0 0 auto;
 }
 /* Akzent-Rand, wenn ein Text-Ziel selektiert ist (Auswahl-Bewusstsein). */
 .tb-seg-accent {
-  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .tb-seg-cell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 1 1 0;
-  min-width: 26px;
+  min-width: 22px;
   padding: 0 6px;
   border: none;
-  border-left: 1px solid #4a4a4a;
+  border-radius: 5px;
   background: transparent;
-  color: #b0b0b0;
+  color: var(--ink-2);
   cursor: pointer;
   transition: background 0.14s, color 0.14s;
 }
-.tb-seg-cell:first-child {
-  border-left: none;
-}
 .tb-seg-cell:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f0f0f0;
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .tb-seg-cell.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .tb-seg-cell:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-/* Quadratischer Icon-Knopf (BarButton). */
+/* Quadratischer Icon-Knopf (BarButton) — randlos, --field-bg. */
 .tb-iconbtn {
   display: inline-flex;
   align-items: center;
@@ -413,17 +409,16 @@ body {
   height: 24px;
   box-sizing: border-box;
   padding: 0;
-  border: 1px solid #4a4a4a;
+  border: none;
   border-radius: 8px;
-  background: #2c2c2c;
-  color: #b0b0b0;
+  background: var(--field-bg);
+  color: var(--ink-2);
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
 .tb-iconbtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: var(--accent-border);
-  color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .tb-iconbtn:disabled {
   opacity: 0.4;
@@ -442,57 +437,49 @@ body {
   align-items: center;
   gap: 6px;
 }
+/* Mockup: Massstab/Zoom als zwei kompakte, nebeneinanderliegende Readout-Pillen
+   (1:100 · 142%) statt einer grossen 2-zeiligen Stat-Kachel. */
 .tb-stat {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  display: inline-flex;
   align-items: center;
-  width: 70px;
-  height: 50px;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
   box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--input);
-  /* Ring (Box-Shadow statt Border) für „am Massstab" — startet unsichtbar
-     (Alpha 0) und blendet weich ein/aus, statt die Fläche aufzuhellen. */
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0);
+  border: none;
+  border-radius: 6px;
+  background: var(--field-bg);
+  box-shadow: 0 0 0 1.5px transparent;
   transition: box-shadow 0.25s ease;
 }
 .tb-stat-scale {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
-  line-height: 1.3;
-  color: var(--accent);
-  width: 100%;
-  text-align: center;
-  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 .tb-stat-zoom {
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.3;
   color: var(--ink-2);
-  width: 100%;
-  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
-/* „am Massstab" (Live == gewählter Massstab): weisser Ring statt aufgehellter
-   Fläche — blendet dynamisch ein/aus (s. transition oben), Fläche bleibt
-   unverändert. */
+/* „am Massstab" (Live == gewählter Massstab): dezenter Akzent-Ring. */
 .tb-stat-atscale {
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1.5px var(--accent-border);
 }
 .tb-zoomcluster-right {
   display: inline-flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
   gap: 6px;
 }
 
-/* ── Text-Gruppe (immer sichtbar, 3×2) ───────────────────────────────────── */
+/* ── Text-Gruppe (Mockup: EINE kompakte inline Zeile) ─────────────────────── */
 .tb-textgroup {
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
   gap: 6px;
 }
 .tb-textgroup-row {
@@ -510,10 +497,10 @@ body {
   height: 24px;
   width: 80px;
   box-sizing: border-box;
-  border: 1px solid #4a4a4a;
+  border: none;
   border-radius: 8px;
   overflow: hidden;
-  background: #2c2c2c;
+  background: var(--field-bg);
   flex: 0 0 auto;
 }
 .tb-lineheight-btn {
@@ -524,13 +511,13 @@ body {
   width: 22px;
   border: none;
   background: transparent;
-  color: #b0b0b0;
+  color: var(--ink-2);
   cursor: pointer;
   transition: background 0.14s, color 0.14s;
 }
 .tb-lineheight-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f0f0f0;
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .tb-lineheight-value {
   flex: 1 1 auto;
@@ -539,9 +526,9 @@ body {
   justify-content: center;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #e8e8e8;
-  border-left: 1px solid #4a4a4a;
-  border-right: 1px solid #4a4a4a;
+  color: var(--ink);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 /* Marken-Gruppe: Wortmarke + kleiner Icon-Stapel daneben (Settings/Ressourcen),
@@ -582,6 +569,37 @@ body {
 .brand-dot {
   /* Petrolgrün wie im DOSSIER-Rhino-Plugin (fix, unabhängig vom Akzent). */
   color: #0f766e;
+}
+
+/* Menüleiste (Bearbeiten/Ansicht/Fenster, AppMenuBar) — sitzt neben der
+   Wortmarke. Flache Text-Trigger statt der sonst üblichen Dropdown-Pille
+   (.tb-dd-trigger), damit sich die Leiste wie eine klassische Menüzeile
+   liest statt wie eine Reihe Wert-Auswahlfelder. */
+.tb-menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.tb-menubar-item.tb-dd-trigger {
+  border: none;
+  background: none;
+  color: var(--ink-dim, #8a8a8a);
+  font-weight: 500;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+.tb-menubar-item.tb-dd-trigger:hover:not(:disabled) {
+  background-color: var(--accent-dim);
+  color: var(--accent);
+}
+.tb-menubar-item.tb-dd-trigger.active {
+  background-color: var(--accent-dim);
+  color: var(--accent);
+  box-shadow: none;
+}
+.tb-menubar-item .tb-dd-chevron {
+  display: none;
 }
 
 /* Export-Sammelmenü: Liste im Popover (fixed) über der Oberleiste. */
@@ -787,40 +805,87 @@ body {
   color: #fff;
 }
 
-/* ── Ansichten als kompaktes Icon-Grid (DOSSIER-Stil, 3 oben / 3 unten) ──── */
-.view-grid {
-  display: grid;
-  grid-template-columns: repeat(3, auto);
-  grid-auto-rows: 1fr;
-  gap: 3px;
+/* ── Ansichts-Umschalter + Blickwinkel (Mockup: viewtoggle + V/H/L/R/O) ────── */
+.tb-viewtoggle,
+.tb-views {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   flex: 0 0 auto;
 }
-.view-grid-4 {
-  grid-template-columns: repeat(4, auto);
-}
-.view-icon {
-  border: 1px solid #4a4a4a;
-  background: #2c2c2c;
-  color: #b0b0b0;
+.tb-vt-btn,
+.tb-view-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 31px;
-  height: 22px;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: 6px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 0.14s, color 0.14s;
+}
+.tb-view-btn {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.tb-vt-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.tb-vt-btn:hover:not(:disabled),
+.tb-view-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
+.tb-vt-btn.active,
+.tb-view-btn.active {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
+.tb-vt-btn:disabled,
+.tb-view-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── Ansichten als EINE kompakte Icon-Zeile (Mockup) ──────────────────────── */
+.view-grid {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.view-grid-4 {
+  /* keine Sonderbreite mehr — alle Ansichts-Icons in EINER Zeile. */
+}
+.view-icon {
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
   padding: 0;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
 .view-icon:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f0f0f0;
-  border-color: var(--accent-border);
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .view-icon.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .view-icon:disabled {
   opacity: 0.4;
@@ -838,36 +903,31 @@ body {
   display: inline-flex;
 }
 .view-icon-split-main {
-  width: 22px;
+  width: 24px;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
-  border-right: none;
 }
 .view-icon-caret {
-  width: 9px;
-  height: 22px;
+  width: 12px;
+  height: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #4a4a4a;
-  background: #2c2c2c;
-  color: #b0b0b0;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
   border-radius: 0 6px 6px 0;
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
 .view-icon-caret:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f0f0f0;
-  border-color: var(--accent-border);
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .view-icon-caret.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 .view-icon-caret:disabled {
   opacity: 0.4;
@@ -894,15 +954,23 @@ body {
   cursor: default;
 }
 
-/* Gestapelte Gruppe (Label-Felder untereinander, z. B. Ebenen-/Zeichn.-Komb.). */
+/* Mockup: EINE kompakte Zeile — die früher gestapelten Gruppen (Kombinationen,
+   Detailgrad/Darstellung) laufen jetzt inline nebeneinander. */
 .tb-group.tb-stack {
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
   gap: 6px;
 }
 .tb-field-row {
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  gap: 5px;
+}
+/* Feld-Labels sehr dezent halten (Mockup zeigt kompakte Pillen ohne grosse
+   Beschriftungen). */
+.tb-field .tb-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* Rumpf: Navigator + Inhalt nebeneinander. */
@@ -974,7 +1042,7 @@ body {
 .sb-sep {
   width: 1px;
   height: 12px;
-  background: var(--border);
+  background: var(--line);
 }
 
 /* Renderer-Umschalter (WebGL2 / Nordstern) — kleine Segmentpille; ursprünglich
@@ -986,16 +1054,16 @@ body {
   align-items: stretch;
   align-self: flex-start;
   height: 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 999px;
   overflow: hidden;
-  background: var(--input);
+  background: var(--field-bg);
 }
 .sb-renderer-btn {
   display: inline-flex;
   align-items: center;
   border: none;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--line);
   background: transparent;
   color: var(--muted);
   font-family: inherit;
@@ -1010,12 +1078,12 @@ body {
   border-left: none;
 }
 .sb-renderer-btn:hover:not(:disabled) {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--active-dim);
+  color: var(--active-light);
 }
 .sb-renderer-btn.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--active-dim);
+  color: var(--active-light);
 }
 .sb-renderer-btn:disabled {
   opacity: 0.4;
@@ -1026,27 +1094,27 @@ body {
 .sb-toggle {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
   font-family: inherit;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  padding: 2px 8px;
+  padding: 2px 10px;
   cursor: pointer;
   transition: background 0.14s, color 0.14s, border-color 0.14s;
 }
 .sb-toggle:hover:not(:disabled) {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-color: var(--accent);
+  background: var(--active-dim);
+  color: var(--active-light);
+  border-color: var(--line);
 }
 .sb-toggle.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--active-dim);
+  border-color: transparent;
+  color: var(--active-light);
 }
 .sb-toggle:disabled {
   opacity: 0.4;
@@ -1059,10 +1127,10 @@ body {
   display: inline-flex;
   align-items: stretch;
   height: 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 999px;
   overflow: hidden;
-  background: var(--input);
+  background: var(--field-bg);
 }
 .sb-seg.disabled {
   opacity: 0.4;
@@ -1071,7 +1139,7 @@ body {
   display: inline-flex;
   align-items: center;
   border: none;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--line);
   background: transparent;
   color: var(--muted);
   font-family: inherit;
@@ -1086,12 +1154,12 @@ body {
   border-left: none;
 }
 .sb-seg-btn:hover:not(:disabled) {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--active-dim);
+  color: var(--active-light);
 }
 .sb-seg-btn.active {
-  background: var(--accent);
-  color: #fff;
+  background: var(--active-dim);
+  color: var(--active-light);
 }
 .sb-seg-btn:disabled {
   opacity: 0.4;
@@ -1117,10 +1185,10 @@ body {
   margin: 0 0 6px;
   padding: 6px 0;
   min-width: 170px;
-  background: var(--panel, #1c2128);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   z-index: 200;
 }
 .sb-snap-row {
@@ -1336,23 +1404,77 @@ body {
   gap: 4px;
 }
 
-.nav-add {
-  border: 1px solid var(--border);
-  background: var(--input);
+/* Einheitlicher „+"-Knopf für neue Ebene / neue Zeichnungsebene: rundes
+   Kreis-Icon (kein Pill), dezent, accent-dim beim Überfahren. */
+.nav-add,
+.level-cat-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--field-bg);
   color: var(--ink-2);
   font-family: inherit;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 3px 9px;
-  border-radius: 999px;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
-.nav-add:hover {
+.nav-add:hover,
+.level-cat-add:hover {
   background: var(--accent-dim);
-  border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--ink);
+}
+
+/* Zahnrad in der Panel-Kopfzeile (Zeichnungsebenen/Ebenen) → Einstellungen.
+   Dezent, rund, wie der „+"-Knopf daneben. */
+.nav-settings {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 50%;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.nav-settings:hover {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
+.nav-settings .material-symbols-outlined {
+  font-size: 15px;
+}
+
+/* Sichtbarkeits-Umschalter im Panel-Körper (Ebenen/Zeichnungsebenen): kleine
+   „Sichtbarkeit"-Beschriftung über dem Modus-Dropdown. */
+.panel-vis {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px 12px;
+}
+.panel-vis-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.panel-vis .display-mode {
+  max-width: none;
+  width: 100%;
 }
 
 .nav-list {
@@ -1367,16 +1489,19 @@ body {
   flex-direction: column;
 }
 
+/* Randlos, kein Kasten mehr (Mockup-Konvention) — reiner uppercase-Text wie
+   .field-label, Chevron/Plus bleiben (Funktion), nur ohne Fläche. */
 .level-cat-head {
   display: flex;
   align-items: center;
   gap: 6px;
   min-height: 24px;
-  padding: 3px 10px 3px 6px;
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--line);
+  padding: 6px 10px 3px 6px;
+  background: transparent;
+  border-bottom: none;
   cursor: pointer;
   user-select: none;
+  border-radius: 6px;
 }
 .level-cat-head:hover {
   background: var(--accent-dim);
@@ -1620,13 +1745,15 @@ body {
 .cat-row {
   cursor: pointer; /* Zeile ist als „aktive Ebene wählen" klickbar */
 }
-/* Aktive Ebene (Zeichen-Ziel): Akzentstreifen links + leichte Akzentfüllung. */
+/* Aktive Ebene (Zeichen-Ziel): identisch zur Zeichnungsebenen-Auswahl
+   (.nav-row.active) — helle Pille (active-dim) statt Akzentstreifen. */
 .cat-row.active {
-  background: var(--accent-dim);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--active-dim);
+  border-radius: 999px;
+  border-bottom-color: transparent;
 }
 .cat-row.active .cat-name {
-  color: var(--text, #e6e6e6);
+  color: var(--active-light);
   font-weight: 600;
 }
 .cat-row.hidden {
@@ -1670,6 +1797,37 @@ body {
   font-weight: 500;
 }
 
+/* Zahnrad — öffnet die Ebeneneinstellungen (natives Fenster unter Tauri, s.
+   native/layerSettingsWindow.ts). Nur bei Zeilen-Hover eingeblendet, damit
+   die Liste nicht überladen wirkt (anders als das Auge, das den Zustand
+   dauerhaft zeigt). */
+.cat-settings {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 50%;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.cat-row:hover .cat-settings {
+  opacity: 1;
+}
+.cat-settings:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--ink);
+}
+.cat-settings .material-symbols-outlined {
+  font-size: 15px;
+}
+
 /* ── Inhalt (rechts) ─────────────────────────────────────────────────── */
 .content {
   flex: 1;
@@ -1695,11 +1853,14 @@ body {
    Leiste auf Ebene 1 (--panel), der aktive Tab hebt sich auf Ebene 2 an und
    verschmilzt unten mit dem Grund der Zeichenfläche darunter (--bg), wie bei
    klassischen Dokument-Tabs. */
+/* Geschoss-/Dokument-Tabs: keine Ordnerreiter mehr, sondern die gleiche helle
+   Pillen-Sprache wie Panels/Umschalter — flache Chips, aktiver Tab = helle
+   Füllung (field-bg) mit Akzent-Unterstrich statt gerahmter Reiter. */
 .drawing-tabs {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  padding: 6px 10px 0;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   overflow-x: auto;
@@ -1707,31 +1868,26 @@ body {
 }
 
 .drawing-tab {
-  border: 1px solid transparent;
-  border-bottom: none;
+  border: none;
   background: transparent;
   color: var(--muted);
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  padding: 7px 16px;
-  border-radius: 8px 8px 0 0;
+  padding: 5px 14px;
+  border-radius: 8px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s, box-shadow 0.14s;
 }
 .drawing-tab:hover {
-  background: var(--panel-2);
+  background: var(--accent-dim);
   color: var(--ink);
 }
 .drawing-tab.active {
-  background: var(--bg);
-  border-color: var(--line);
-  color: var(--ink);
-  /* Nahtloser Übergang: die Unterkante verschwindet im Zeichenflächen-Grund. */
-  position: relative;
-  top: 1px;
+  background: var(--active-dim);
+  color: var(--active-light);
 }
 .drawing-tab-label {
   pointer-events: none;
@@ -2017,7 +2173,7 @@ body {
 .plan-svg .snap-glyph {
   fill: none;
   stroke: #ffcc44;
-  stroke-width: 2.2;
+  stroke-width: 1.5;
 }
 .plan-svg .snap-glyph.snap-fill {
   fill: #ffcc44;
@@ -2028,62 +2184,85 @@ body {
   stroke-dasharray: 4 4;
   opacity: 0.8;
 }
-/* Cursor-HUD (Vectorworks-Stil): weisser Kasten, blauer Rahmen, blauer
-   Monospace-Text „L: 3.118m    W: 60.000°". */
-/* Cursor-HUD im Programm-Look: dieselbe dunkle Pille wie die Dropdown-Trigger
-   (.tb-dd-trigger #2c2c2c/#4a4a4a, helle Schrift) — sitzt wie die schwebenden
-   Viewport-Knöpfe dunkel über dem hellen Papier. */
+/* Cursor-HUD (Massband „L: 3.118m    W: 60.000°"). Themen-abhängig: im Light-
+   Mode eine helle Papier-Pille mit dunkler Schrift, im Dark-Mode die dunkle
+   Pille wie die Dropdown-Trigger. Basis = Light; Dark unten überschrieben. */
 .plan-svg .plan-hud-box {
-  fill: #2c2c2c;
-  fill-opacity: 0.94;
-  stroke: #4a4a4a;
+  fill: #fbf8f2;
+  fill-opacity: 0.96;
+  stroke: #cfc9c0;
   stroke-width: 1;
 }
 .plan-svg .plan-hud-text {
-  fill: #e8e8e8;
+  fill: #2a2926;
   font-family: var(--mono, ui-monospace, monospace);
   font-weight: 600;
 }
-/* Aktives Tab-Feld im HUD: leicht angehobene Pille (wie Hover-Flächen), weisser Text. */
+/* Aktives Tab-Feld im HUD: leicht abgesenkte Pille, dunklerer Text. */
 .plan-svg .plan-hud-active {
+  fill: #000000;
+  fill-opacity: 0.07;
+}
+.plan-svg .plan-hud-text.active {
+  fill: #111110;
+}
+/* Gelockter (getippter) Wert: voll dunkel + fett — hebt sich vom Live-Grau ab. */
+.plan-svg .plan-hud-text.locked {
+  fill: #000000;
+  font-weight: 700;
+}
+
+:root[data-theme="dark"] .plan-svg .plan-hud-box {
+  fill: #2c2c2c;
+  fill-opacity: 0.94;
+  stroke: #4a4a4a;
+}
+:root[data-theme="dark"] .plan-svg .plan-hud-text {
+  fill: #e8e8e8;
+}
+:root[data-theme="dark"] .plan-svg .plan-hud-active {
   fill: #ffffff;
   fill-opacity: 0.16;
 }
-.plan-svg .plan-hud-text.active {
+:root[data-theme="dark"] .plan-svg .plan-hud-text.active,
+:root[data-theme="dark"] .plan-svg .plan-hud-text.locked {
   fill: #ffffff;
-}
-/* Gelockter (getippter) Wert: voll weiss + fett — hebt sich vom Live-Grau ab. */
-.plan-svg .plan-hud-text.locked {
-  fill: #ffffff;
-  font-weight: 700;
 }
 
 /* Lineale (oben + links, VW-Stil): helle Papier-Leisten, Tinte-Ticks,
    gelber Cursor-Marker. */
-.plan-svg .plan-ruler-strip {
+/* .plan-ruler-overlay: eigenständiges Sibling-SVG des Lineals (s. PlanView.tsx
+   „screen-fix" Kommentar) — dieselben Regeln gelten daher für BEIDE Elternteile. */
+.plan-svg .plan-ruler-strip,
+.plan-ruler-overlay .plan-ruler-strip {
   fill: #f7f6f3;
   fill-opacity: 0.96;
 }
-.plan-svg .plan-ruler-border {
+.plan-svg .plan-ruler-border,
+.plan-ruler-overlay .plan-ruler-border {
   stroke: #b9b5ae;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
-.plan-svg .plan-ruler-tick {
+.plan-svg .plan-ruler-tick,
+.plan-ruler-overlay .plan-ruler-tick {
   stroke: #6d6a64;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
-.plan-svg .plan-ruler-text {
+.plan-svg .plan-ruler-text,
+.plan-ruler-overlay .plan-ruler-text {
   fill: #3c3a36;
   font-family: var(--mono, ui-monospace, monospace);
   font-weight: 500;
 }
-.plan-svg .plan-ruler-cursor {
+.plan-svg .plan-ruler-cursor,
+.plan-ruler-overlay .plan-ruler-cursor {
   fill: #e8c33c;
   fill-opacity: 0.9;
 }
-.plan-svg .plan-ruler-corner {
+.plan-svg .plan-ruler-corner,
+.plan-ruler-overlay .plan-ruler-corner {
   fill: #f0efec;
   stroke: #b9b5ae;
   stroke-width: 1;
@@ -2343,6 +2522,25 @@ body {
   box-shadow: var(--shadow-3, 0 12px 32px rgba(0, 0, 0, 0.45));
   overflow: hidden;
 }
+/* Eigenes natives Fenster (native/resourceWindow.ts) statt schwebendes
+   Overlay: füllt die ganze Fensterfläche, kein Rahmen/Schatten/rundes Eck
+   nötig (das IST schon das ganze Fenster), kein Move-Cursor auf der
+   Kopfzeile (das OS-Fenster übernimmt Verschieben/Grössenändern). */
+.res-window.res-window-embedded {
+  position: static;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.res-window.res-window-embedded .res-head {
+  cursor: default;
+  /* Platz für die macOS-Ampeln (titleBarStyle "overlay", s. windowChrome.ts) —
+     dieselbe Einrückung wie alle übrigen Fenster-Köpfe (76px). */
+  padding-left: 88px;
+}
 .res-window .res-head {
   cursor: move;
   touch-action: none;
@@ -2360,10 +2558,10 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  height: 52px;
+  height: 40px;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--panel);
 }
 .res-head-title {
   display: inline-flex;
@@ -2398,38 +2596,35 @@ body {
   color: var(--ink);
 }
 
-/* Tab-Leiste. */
+/* Tab-Leiste — Pille wie .tb-dd-trigger statt Ordnerlasche (Mockup-
+   Konvention): accent-dim-Hintergrund im aktiven Zustand, sonst transparent,
+   kein Rahmen/Verschmelzen mit dem Rand. */
 .res-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   padding: 10px 16px 0;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--line);
-  background: var(--bg);
 }
 .res-tab-btn {
-  border: 1px solid transparent;
-  border-bottom: none;
+  border: none;
   background: transparent;
   color: var(--muted);
   font-family: inherit;
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  padding: 8px 16px;
-  border-radius: 8px 8px 0 0;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 7px 14px;
+  border-radius: 7px;
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
 .res-tab-btn:hover {
-  background: var(--accent-dim);
-  color: var(--ink);
+  color: var(--ink-2);
 }
 .res-tab-btn.active {
-  background: var(--panel);
-  border-color: var(--line);
-  color: var(--accent);
-  margin-bottom: -1px;
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 
 /* Scrollbarer Körper. */
@@ -2864,20 +3059,21 @@ body {
 
 /* ── Master-Detail (Schraffuren / Linien): Liste links, Detail rechts ──────── */
 .res-md {
-  display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 14px;
-  align-items: start;
+  display: flex;
+  align-items: stretch;
   min-height: 320px;
 }
+/* Seitenleiste — nur noch eine Trennlinie (border-right), keine eigene Box
+   mit Rahmen/Radius/Hintergrund (Mockup-Konvention: liest sich als EIN
+   Fenster statt Karte-in-Karte). */
 .res-md-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-2);
+  width: 240px;
+  flex: 0 0 auto;
+  padding: 0 12px 0 0;
+  border-right: 1px solid var(--line);
   max-height: 62vh;
   overflow-y: auto;
 }
@@ -2887,23 +3083,24 @@ body {
   gap: 9px;
   width: 100%;
   padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: none;
+  border-radius: 7px;
   background: transparent;
-  color: var(--ink);
+  color: var(--ink-2);
   font-family: inherit;
   font-size: 12px;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
 .res-md-row:hover {
   background: var(--accent-dim);
+  color: var(--ink);
 }
 .res-md-row.active {
   background: var(--accent-dim);
-  border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
 }
 .res-md-row-thumb {
   flex: 0 0 auto;
@@ -2936,18 +3133,19 @@ body {
   color: var(--muted);
 }
 
-/* Detail-Panel (rechts). */
+/* Detail-Panel (rechts) — keine eigene Box mehr, sitzt direkt auf der
+   Panel-Fläche (Mockup-Konvention). */
 .res-md-detail {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-2);
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 300px;
+  padding: 0 0 0 16px;
 }
 .res-md-detail-inner {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 14px 16px 18px;
+  padding: 2px 0 4px;
 }
 .res-md-head {
   display: flex;
@@ -2964,9 +3162,9 @@ body {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 10px;
-  background: var(--input);
+  background: var(--field-bg);
   color: var(--ink);
 }
 .res-md-preview .res-line-preview {
@@ -3159,55 +3357,49 @@ body {
 }
 
 /* ── Tab-Leiste (Dock-Kopf) ──────────────────────────────────────────────── */
+/* Tab-Leiste: Icon-Pillen (Mockup-Konvention) statt Ordnerlaschen — aktive
+   Pille in accent-dim, keine Verschmelzung mit dem Körper, kein eigener
+   Tray-Hintergrund. */
 .tabstrip {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   flex: 0 0 auto;
-  padding: 8px 8px 0;
+  padding: 6px 8px 5px;
   border-bottom: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--panel);
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
-/* Dünne, dezente Scrollleiste, wenn viele Tabs umlaufen (WebKit). */
 .tabstrip::-webkit-scrollbar {
-  height: 5px;
-}
-.tabstrip::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 999px;
+  display: none;
 }
 
 .tab {
   flex: 0 0 auto;
-  width: 34px;
-  height: 30px;
+  width: 30px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
-  border-bottom: none;
+  border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--ink-2);
   font-family: inherit;
   padding: 0;
-  border-radius: 8px 8px 0 0;
+  border-radius: 7px;
   cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
+  transition: background 0.14s, color 0.14s;
 }
 .tab svg {
   flex: 0 0 auto;
 }
 .tab:hover {
-  background: var(--accent-dim);
   color: var(--ink);
 }
 .tab.active {
-  background: var(--panel);
-  border-color: var(--line);
-  color: var(--accent);
-  margin-bottom: -1px;
+  background: var(--accent-dim);
+  color: var(--ink);
 }
 
 /* ── Panel-Rahmen (Kopf + scrollbarer Körper) ────────────────────────────── */
@@ -3249,10 +3441,18 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #f0f0f0;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Aktions-Slot rechts in der Panel-Kopfzeile (headerActions + Darstellungs-
+   modus) — bündelt panel-eigene Aktionen in DER EINEN Kopfzeile. */
+.panel-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .panel-body {
@@ -3315,13 +3515,11 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  /* Trigger trägt dieselbe stets-dunkle Fläche wie sein Popover (.ctx-menu) —
-     beide sollen wie EIN durchgehendes Element wirken statt heller Knopf +
-     dunkles Menü darunter. .ctx-menu hängt per Portal ausserhalb dieses
-     DOM-Zweigs, darum hier dieselben Werte dupliziert statt geerbt. */
-  border: 1px solid #4a4a4a;
-  background: #2c2c2c;
-  color: #e8e8e8;
+  /* Randlose, helle Feldfläche (Mockup-Konvention) — das geöffnete Popover
+     (.ctx-menu) bleibt eine eigene, davon unabhängige dunkle Schwebe-Fläche. */
+  border: none;
+  background: var(--field-bg);
+  color: var(--ink);
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -3329,22 +3527,17 @@ body {
   border-radius: 8px;
   cursor: pointer;
   outline: none;
-  transition: border-color 0.14s, background-color 0.14s, color 0.14s,
-    box-shadow 0.14s;
+  transition: background-color 0.14s, color 0.14s, box-shadow 0.14s;
 }
 .tb-dd-trigger:hover:not(:disabled) {
-  border-color: var(--accent-border);
-  background-color: rgba(255, 255, 255, 0.1);
-  color: var(--accent);
+  background-color: var(--accent-dim);
 }
 .tb-dd-trigger.active,
 .tb-dd-trigger:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
+  box-shadow: 0 0 0 2px var(--accent-border);
 }
 .tb-dd-trigger:disabled {
-  color: #8a8a8a;
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: default;
 }
 .tb-dd-trigger-label {
@@ -3356,10 +3549,10 @@ body {
 }
 .tb-dd-chevron {
   flex: 0 0 auto;
-  color: #8a8a8a;
+  color: var(--muted);
 }
 .tb-dd-trigger:hover:not(:disabled) .tb-dd-chevron {
-  color: var(--accent);
+  color: var(--ink);
 }
 /* Monospace-Variante (Massstab) — ziffernbündig wie das frühere .tb-scale. */
 .tb-dd-mono .tb-dd-trigger-label {
@@ -3420,15 +3613,15 @@ body {
 }
 
 .ctx-menu {
-  /* Eigene, stets dunkle Palette (unabhängig vom Light/Dark-Theme). */
-  --ctx-surface: #2c2c2c;
-  --ctx-border: #4a4a4a;
-  --ctx-text: #e8e8e8;
-  --ctx-muted: #8a8a8a;
-  /* Hover NEUTRAL (kein Petrol-Grün mehr): dezente weiße Aufhellung, heller Text. */
-  --ctx-hover: rgba(255, 255, 255, 0.1);
-  --ctx-hover-text: #f0f0f0;
-  --ctx-danger: #d86060;
+  /* Theme-abhängig: helle Fläche im Light-Modus, dunkle im Dark-Modus
+     (folgt der App-Palette statt fix dunkel zu sein). */
+  --ctx-surface: var(--panel-2);
+  --ctx-border: var(--border);
+  --ctx-text: var(--ink);
+  --ctx-muted: var(--muted);
+  --ctx-hover: var(--accent-dim);
+  --ctx-hover-text: var(--ink);
+  --ctx-danger: var(--danger);
 
   position: fixed;
   z-index: 300;
@@ -3438,7 +3631,7 @@ body {
   background: var(--ctx-surface);
   border: 1px solid var(--ctx-border);
   border-radius: 10px;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-3);
   color: var(--ctx-text);
   font-family: var(--font);
   font-size: 11.5px;
@@ -3558,14 +3751,14 @@ body {
 }
 
 /* ── Inline-Editor (Ebene / Geschoss) ──────────────────────────────────────
-   Kleiner schwebender Editor am Anker, gleiche dunkle Palette wie das
-   Kontextmenü. Aus einem Menüpunkt geöffnet; schließt über Außenklick/Esc.
+   Kleiner schwebender Editor am Anker, folgt der App-Palette (hell im Light-
+   Modus). Aus einem Menüpunkt geöffnet; schließt über Außenklick/Esc.
    z-index 301 (knapp über dem Kontextmenü, unter Modals). */
 .ctx-editor {
-  --ctx-surface: #2c2c2c;
-  --ctx-border: #4a4a4a;
-  --ctx-text: #e8e8e8;
-  --ctx-muted: #8a8a8a;
+  --ctx-surface: var(--panel-2);
+  --ctx-border: var(--border);
+  --ctx-text: var(--ink);
+  --ctx-muted: var(--muted);
 
   position: fixed;
   z-index: 301;
@@ -3574,7 +3767,7 @@ body {
   background: var(--ctx-surface);
   border: 1px solid var(--ctx-border);
   border-radius: 13px;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-3);
   color: var(--ctx-text);
   font-family: var(--font);
   font-size: 13px;
@@ -3644,15 +3837,19 @@ body {
   align-items: center;
   min-width: 0;
 }
-/* Text-/Zahlenfelder im Editor: dunkel, volle Breite der Steuer-Spalte. */
+/* Text-/Zahlenfelder im Editor: randlos, --field-bg (Mockup-Konvention) —
+   das ist der Standard-Look (natives Ebeneneinstellungen-Fenster u. a.).
+   Der ältere Canvas-Popover (.ctx-editor, InlineEditor in App.tsx) bekommt
+   weiter unten seine eigene dunkle Schwebe-Optik zurück (gleiche Familie
+   wie .ctx-menu). */
 .editor-control input[type="text"],
 .editor-control input[type="number"] {
   width: 100%;
   padding: 5px 8px;
-  background: #1f1f1f;
-  border: 1px solid var(--ctx-border);
+  background: var(--field-bg);
+  border: none;
   border-radius: 7px;
-  color: var(--ctx-text);
+  color: var(--ink);
   font-family: inherit;
   font-size: 13px;
 }
@@ -3662,24 +3859,22 @@ body {
 }
 .editor-control input:focus {
   outline: none;
-  border-color: rgba(255, 255, 255, 0.4);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 0 2px var(--accent-border);
 }
 /* Auswahlfelder (z. B. Schraffur) wie die Text-/Zahlenfelder gestaltet. */
 .editor-control select {
   width: 100%;
   padding: 5px 8px;
-  background: #1f1f1f;
-  border: 1px solid var(--ctx-border);
+  background: var(--field-bg);
+  border: none;
   border-radius: 7px;
-  color: var(--ctx-text);
+  color: var(--ink);
   font-family: inherit;
   font-size: 13px;
 }
 .editor-control select:focus {
   outline: none;
-  border-color: rgba(255, 255, 255, 0.4);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 0 2px var(--accent-border);
 }
 /* Schraffur-Auswahl + kleine Vorschau nebeneinander. */
 .editor-hatch {
@@ -3701,7 +3896,7 @@ body {
   width: 40px;
   height: 26px;
   padding: 0;
-  border: 1px solid var(--ctx-border);
+  border: none;
   border-radius: 7px;
   background: transparent;
   cursor: pointer;
@@ -3904,71 +4099,142 @@ body {
   box-shadow: 0 0 0 1px var(--accent-dim);
 }
 
-/* Tools palette */
+/* ── Werkzeug-Palette ─────────────────────────────────────────────────────────
+   Einheitlicher Knopf-Look für Werkzeuge UND Befehle (`.tp-item`), zwei
+   Darstellungen: Liste (Icon + Name als Zeilen) oder Symbole (kompaktes
+   Icon-Raster). Umschalter oben (`.tp-viewtoggle`), Rubriken 2D · 3D ·
+   Bearbeiten (`.tp-section`). */
 .tools-panel {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px;
+  gap: 10px;
+  padding: 8px;
   overflow-y: auto;
   height: 100%;
   min-height: 0;
 }
-.tools-panel .tool-row {
+
+/* Anzeige-Umschalter (segmentiert). */
+.tools-panel .tp-head {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  margin: -8px -8px 0;
+  padding: 8px 8px 6px;
+  background: var(--panel, var(--bg));
+  border-bottom: 1px solid var(--line);
+}
+.tools-panel .tp-viewtoggle {
+  display: flex;
+  gap: 4px;
+}
+.tools-panel .tp-viewbtn {
+  flex: 1 1 0;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.tools-panel .tp-viewbtn:hover {
+  background: var(--active-dim);
+  color: var(--active-light);
+}
+/* Aktiv = helle Pille (active-dim), ohne Akzentstreifen. */
+.tools-panel .tp-viewbtn.active {
+  background: var(--active-dim);
+  color: var(--active-light);
+}
+
+/* Rubrik (2D / 3D / Bearbeiten). */
+.tools-panel .tp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tools-panel .tp-section-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+/* Gemeinsamer Knopf. Basis = Listenzeile (Icon + Name). */
+.tools-panel .tp-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   padding: 5px 8px;
-  border-radius: 6px;
   border: 1px solid transparent;
+  border-radius: 7px;
   background: transparent;
   color: var(--label);
   cursor: pointer;
   font-size: 12px;
   text-align: left;
+  transition: background 0.12s, color 0.12s;
 }
-.tools-panel .tool-row:hover {
+.tools-panel .tp-item:hover:not(.disabled) {
   background: var(--accent-dim);
+  color: var(--ink);
 }
-.tools-panel .tool-row.active {
-  background: var(--accent);
-  color: #fff;
+/* Aktiv = identisch zur Zeichnungsebenen-Auswahl (.nav-row.active): helle
+   Pille (active-dim) + active-light-Schrift, kein dunkler Akzent/Streifen. */
+.tools-panel .tp-item.active {
+  background: var(--active-dim);
+  color: var(--active-light);
 }
-.tools-panel .tool-row.disabled {
+.tools-panel .tp-item.active .tp-label {
+  font-weight: 600;
+}
+.tools-panel .tp-item.disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.tools-panel .tool-row svg {
+.tools-panel .tp-item svg {
   flex: 0 0 auto;
 }
-.tools-panel .tools-sep {
-  height: 1px;
-  background: var(--line);
-  margin: 6px 2px;
+.tools-panel .tp-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.tools-panel .tools-field {
+
+/* Auswahl-Werkzeug: immer volle Zeile. */
+.tools-panel .tp-select .tp-item {
+  width: 100%;
+}
+
+/* Listen-Darstellung: Knöpfe als volle Zeilen untereinander. */
+.tools-panel .tp-body {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 8px;
-  font-size: 12px;
+  flex-direction: column;
+  gap: 1px;
 }
-.tools-panel .tools-snap-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
+
+/* Symbol-Darstellung: kompaktes Icon-Raster, Namen ausgeblendet. */
+.tools-panel .tp-body.icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+  gap: 3px;
 }
-.tools-panel .tools-snap-row input {
-  accent-color: var(--accent);
+.tools-panel .tp-body.icons .tp-item {
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  padding: 0;
 }
-.tools-panel .tools-field input,
-.tools-panel .tools-field select {
-  width: 90px;
+.tools-panel .tp-body.icons .tp-item svg {
+  width: 15px;
+  height: 15px;
+}
+.tools-panel .tp-body.icons .tp-label {
+  display: none;
 }
 
 /* ── Gelände-/Kontext-Palette (SitePanel) ─────────────────────────────── */
@@ -4024,6 +4290,32 @@ body {
   color: var(--ink-2);
   padding: 8px 4px;
   line-height: 1.4;
+}
+.site-panel .site-group {
+  margin-bottom: 6px;
+}
+.site-panel .site-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.site-panel .site-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-panel .site-group-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-weight: 400;
 }
 .site-panel .site-list {
   list-style: none;
@@ -4573,15 +4865,31 @@ body {
   box-shadow: var(--shadow-3);
   overflow: hidden;
 }
+/* Eigenes natives Fenster (native/settingsWindow.ts) statt Overlay-Dialog:
+   füllt die ganze Fensterfläche, kein Rahmen/Schatten/rundes Eck nötig. */
+.imp-dialog.imp-dialog-embedded {
+  width: 100%;
+  max-height: 100vh;
+  height: 100vh;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow-y: auto;
+}
 .imp-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  height: 48px;
+  height: 40px;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--panel);
+}
+.imp-dialog-embedded .imp-head {
+  /* Platz für die macOS-Ampeln (titleBarStyle "overlay", windowChrome.ts) —
+     dieselbe Einrückung wie alle übrigen Fenster-Köpfe (76px). */
+  padding-left: 88px;
 }
 .imp-head-title {
   font-weight: 650;
@@ -4645,6 +4953,14 @@ body {
   border: 1px solid var(--line);
   font-size: 11px;
   color: var(--ink-2);
+}
+/* Roh-Import-Hinweis (kein Bezug gesetzt) — mehrzeilig, kein Button daneben. */
+.cim-geo-hint {
+  display: block;
+  line-height: 1.5;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--muted);
 }
 .imp-linklike {
   background: none;
@@ -4742,9 +5058,9 @@ body {
   font-family: inherit;
   font-size: 13px;
   padding: 6px 9px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 7px;
-  background: var(--input);
+  background: var(--field-bg);
   color: var(--ink);
   margin-left: 22px;
   width: calc(100% - 22px);
@@ -4773,7 +5089,7 @@ body {
   padding: 12px 16px;
   flex: 0 0 auto;
   border-top: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--panel);
 }
 .imp-btn {
   font-family: inherit;
@@ -5059,15 +5375,15 @@ body {
   font-family: inherit;
   font-size: 13px;
   padding: 6px 9px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 7px;
-  background: var(--input);
+  background: var(--field-bg);
   color: var(--ink);
   width: 120px;
 }
 .settings-num-input:focus {
   outline: none;
-  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-border);
 }
 
 /* ── App-weites Drop-Feedback ──────────────────────────────────────────────
@@ -6250,12 +6566,21 @@ body {
 /* „Ansichten"-Tab: die aus der TopBar gemergten Cluster (View-Grid, Kombis,
    Detail, Zoom, Darstellung) in EINER Zeile — nutzt die bestehenden `.tb-*`-
    Stile unverändert weiter. */
+/* ViewRibbonTab-Wurzel — sitzt jetzt inline in der Oberleiste (kein eigenes
+   Band). NUR dieser mittlere Block scrollt horizontal, wenn das Fenster zu
+   schmal wird — die rechte Gruppe (Datei-Aktionen + Projekt) bleibt sichtbar. */
 .ribbon-views {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  height: 100%;
-  overflow: hidden;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.ribbon-views::-webkit-scrollbar {
+  display: none;
 }
 
 /* ── Layout-Blatt im Haupt-Viewport (DOSSIER A3, Phase 2b) ─────────────────────

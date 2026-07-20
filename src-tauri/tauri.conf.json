@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "cad",
+  "productName": "Dossier",
   "version": "0.1.0",
   "identifier": "ch.dossier.cad",
   "build": {
@@ -11,12 +11,13 @@
     "windows": [
       {
         "label": "main",
-        "title": "cad",
+        "title": "Dossier",
         "width": 1400,
         "height": 900,
         "dragDropEnabled": false,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 20, "y": 22 }
       }
     ],
     "security": {

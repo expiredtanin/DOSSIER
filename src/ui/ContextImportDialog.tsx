@@ -17,13 +17,15 @@ import { fetchBuildings3d } from "../io/swissBuildings3d";
 import type { BuildingsVersion } from "../io/swissBuildings3d";
 import { fetchTerrainXyz } from "../io/swissAlti3d";
 import type { TerrainResolution } from "../io/swissAlti3d";
+import { fetchSwissImage } from "../io/swissImage";
 import { fetchOsm } from "../io/osm";
 import type { OsmSelection } from "../io/osm";
 import { featuresToContextObjects } from "../io/geoContext";
 import type { GeoFeature } from "../io/geoContext";
 import { terrainMeshFromGrid } from "../model/terrain";
-import type { GeoOrigin } from "../io/lv95";
-import type { ContextObject } from "../model/types";
+import { makeOrigin } from "../io/lv95";
+import type { GeoOrigin, LV95 } from "../io/lv95";
+import type { ContextObject, TerrainMesh } from "../model/types";
 
 /** Gebäude-Import-Modus: aus, vereinfachte Box (schnell, alt) oder echte
  *  swissBUILDINGS3D-Geometrie (Wände+Dach) in einer der zwei Generationen. */
@@ -33,6 +35,8 @@ export type SwissBuildingsMode = "off" | "flach" | "v2" | "v3";
  *  LV95-Koordinate (s. `Project.geoAnchor`). */
 export interface GeoAnchor {
   lv95: { e: number; n: number };
+  /** Reale Höhe (m ü. M.) des Bezugspunkts — informativ, s. Project.geoAnchor. */
+  height?: number;
   model: { x: number; y: number };
   label?: string;
 }
@@ -45,11 +49,21 @@ export interface ContextImportDialogProps {
   geoAnchor?: GeoAnchor;
   /** Setzt/ersetzt (`undefined` löscht) den Georeferenzierungs-Bezug. */
   onSetGeoAnchor: (anchor: GeoAnchor | undefined) => void;
+  /**
+   * Läuft in einem EIGENEN nativen Fenster (siehe native/contextImportWindow.ts)
+   * statt als abgedunkelter Overlay-Dialog im Hauptfenster — kein Backdrop,
+   * füllt die Fensterfläche, Kopfzeile wird zum Ziehbereich statt Schliessen-
+   * Knopf (Abbrechen/Importieren im Fuss bleiben — das sind echte Aktionen,
+   * kein reiner Schliessen-Button wie bei SettingsDialog).
+   */
+  windowed?: boolean;
 }
 
 type Sources = {
   swissBuildings: SwissBuildingsMode;
   swissTerrain: boolean;
+  swissImage: boolean;
+  swissImageDrape: boolean;
   osmBuildings: boolean;
   osmRoads: boolean;
   osmWater: boolean;
@@ -64,6 +78,8 @@ const DEFAULT_SOURCES: Sources = {
   // Städten sehr grosse Kacheln liefern (s. swissBuildings3d.ts-Kommentar).
   swissBuildings: "v2",
   swissTerrain: true,
+  swissImage: false,
+  swissImageDrape: false,
   osmBuildings: false,
   osmRoads: true,
   osmWater: true,
@@ -78,6 +94,7 @@ export function ContextImportDialog({
   onClose,
   geoAnchor,
   onSetGeoAnchor,
+  windowed = false,
 }: ContextImportDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -91,6 +108,14 @@ export function ContextImportDialog({
   const [candidates, setCandidates] = useState<GeocodeCandidate[]>([]);
   const [selected, setSelected] = useState<GeocodeCandidate | null>(null);
   const [radius, setRadius] = useState(200);
+  // Optionaler Bezugspunkt: welche LV95-Koordinate soll im Modell auf (0,0)
+  // liegen (der „neue Nullpunkt", z. B. ein amtlicher Vermessungspunkt aus dem
+  // Kataster). Leer = das Suchzentrum wird Modell-(0,0) (bisheriges Verhalten).
+  const [refPoint, setRefPoint] = useState<{ e: string; n: string; h: string }>({
+    e: "",
+    n: "",
+    h: "",
+  });
   const [sources, setSources] = useState<Sources>(DEFAULT_SOURCES);
   // 2 m = Default (schneller/kleinere Kacheln); 0.5 m für Detailarbeit.
   const [terrainResolution, setTerrainResolution] = useState<TerrainResolution>("2");
@@ -129,6 +154,8 @@ export function ContextImportDialog({
   const anySource =
     sources.swissBuildings !== "off" ||
     sources.swissTerrain ||
+    sources.swissImage ||
+    sources.swissImageDrape ||
     sources.osmBuildings ||
     sources.osmRoads ||
     sources.osmWater ||
@@ -144,13 +171,29 @@ export function ContextImportDialog({
     setStatus(t("ctxImport.working"));
     try {
       const center = selected.lv95;
-      // Bestehenden Georeferenzierungs-Bezug wiederverwenden, statt bei jedem
-      // Import einen neuen (inkonsistenten) zu berechnen — der Bezugspunkt
-      // bleibt fix im Modell, nur die GESUCHTE Stelle (center/radius) steuert,
-      // WOVON Daten geladen werden (s. Project.geoAnchor-Doc).
-      let origin: GeoOrigin | undefined = geoAnchor
+      // Optionaler Bezugspunkt (LV95): dieser Punkt wird zu Modell-(0,0). Leer
+      // -> das Suchzentrum wird der Nullpunkt (bisheriges Verhalten).
+      const refE = Number(refPoint.e);
+      const refN = Number(refPoint.n);
+      const hasRef =
+        refPoint.e.trim() !== "" &&
+        refPoint.n.trim() !== "" &&
+        Number.isFinite(refE) &&
+        Number.isFinite(refN);
+      const refLv95: LV95 = hasRef ? { e: refE, n: refN } : center;
+      // Optionale Höhe (m ü. M.) des Bezugspunkts — rein informativ (kein Shift).
+      const refH = Number(refPoint.h);
+      const hasRefH = refPoint.h.trim() !== "" && Number.isFinite(refH);
+      // Der gesuchte Ort landet nahe dem Modell-Nullpunkt (Modell rechnet in
+      // float32 — LV95-Koordinaten im Millionenbereich würden 2D/3D unbrauchbar
+      // ungenau darstellen). Der Bezug (geoAnchor) merkt sich „Modell-(0,0) =
+      // dieser LV95-Punkt", damit der IFC-/DXF-Export trotzdem die echten
+      // Landeskoordinaten schreibt und weitere Importe lagerichtig dazu liegen.
+      // Mit „Neuer Bezugspunkt" (georef) lässt sich der Ursprung später auf einen
+      // beliebigen Modellpunkt verschieben.
+      let origin: GeoOrigin = geoAnchor
         ? { e: geoAnchor.lv95.e - geoAnchor.model.x, n: geoAnchor.lv95.n - geoAnchor.model.y }
-        : undefined;
+        : makeOrigin(refLv95);
       const all: GeoFeature[] = [];
       // Echte swissBUILDINGS3D-Meshes (v2/v3) landen direkt als ContextObject
       // (kein Footprint+Box-Umweg über GeoFeature/featuresToContextObjects).
@@ -200,8 +243,10 @@ export function ContextImportDialog({
       }
 
       // Gelände-Höhenraster (echtes swissALTI3D-XYZ, native Auflösung) → Terrain-Mesh.
-      let terrain: ContextObject | null = null;
-      if (sources.swissTerrain) {
+      // Die Drapierung braucht das TIN -> Terrain auch dann holen, wenn nur
+      // „Luftbild aufs Gelände" (ohne eigenen Terrain-Haken) gewählt wäre.
+      let terrain: TerrainMesh | null = null;
+      if (sources.swissTerrain || sources.swissImageDrape) {
         const r = await fetchTerrainXyz(center, radius, origin, terrainResolution);
         origin = r.origin;
         if (r.grid) {
@@ -210,7 +255,30 @@ export function ContextImportDialog({
         }
       }
 
-      if (all.length === 0 && !terrain && extraObjs.length === 0) {
+      // SWISSIMAGE-Luftbild (WMS) → georeferenziertes Rasterbild (EIN ContextImage).
+      //  • `swissImage`  → 2D-Grundriss-Hintergrund.
+      //  • `swissImageDrape` → `drape:true`: der 3D-Viewer legt es pixelscharf als
+      //    Textur aufs Gelände (render3d `set_aerial_texture`).
+      // Beide Modi teilen dasselbe Bild; das Bild wird nur EINMAL geladen.
+      let image: ContextObject | null = null;
+      if (sources.swissImage || sources.swissImageDrape) {
+        const r = await fetchSwissImage(center, radius, origin);
+        origin = r.origin;
+        if (r.dataUrl) {
+          image = {
+            id: `img-${Date.now()}`,
+            type: "image",
+            name: `Luftbild ${selected.label}`,
+            layer: "Luftbild",
+            src: r.dataUrl,
+            min: r.min,
+            max: r.max,
+            drape: sources.swissImageDrape,
+          };
+        }
+      }
+
+      if (all.length === 0 && !terrain && !image && extraObjs.length === 0) {
         setError(
           buildingsSkipped > 0
             ? t("ctxImport.buildingsSkipped", { count: buildingsSkipped })
@@ -220,16 +288,26 @@ export function ContextImportDialog({
         return;
       }
 
-      // Erster Import in diesem Projekt (noch kein Bezug) -> DIESEN Lauf als
-      // Georeferenzierungs-Bezug speichern (Modell-(0,0) = der gesuchte Ort),
-      // damit künftige Importe lagerichtig zueinander bleiben.
-      if (!geoAnchor && origin) {
-        onSetGeoAnchor({ lv95: { e: origin.e, n: origin.n }, model: { x: 0, y: 0 }, label: selected.label });
+      // Erster Import in diesem Projekt (noch kein Bezug) -> Bezug speichern:
+      // Modell-(0,0) entspricht dem gesuchten Ort (LV95 `center`). Damit landet
+      // der Import nahe dem Ursprung (gut darstellbar) UND der Modell-Export
+      // kann später auf die echten LV95-Koordinaten zurückrechnen.
+      if (!geoAnchor) {
+        const anchorLabel = hasRef
+          ? t("ctxImport.refPoint.anchorLabel", { e: Math.round(refE), n: Math.round(refN) })
+          : selected.label;
+        onSetGeoAnchor({
+          lv95: refLv95,
+          height: hasRefH ? refH : undefined,
+          model: { x: 0, y: 0 },
+          label: anchorLabel,
+        });
       }
 
       const objs = featuresToContextObjects(all, selected.label);
       objs.push(...extraObjs);
       if (terrain) objs.push(terrain);
+      if (image) objs.push(image);
       onImport(objs);
       setStatus(
         buildingsSkipped > 0
@@ -252,32 +330,47 @@ export function ContextImportDialog({
     }
   };
 
-  return (
-    <div className="imp-overlay" onClick={onClose}>
+  const dialog = (
       <div
-        className="imp-dialog"
+        className={`imp-dialog${windowed ? " imp-dialog-embedded" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={t("ctxImport.title")}
-        onClick={(e) => e.stopPropagation()}
+        onClick={windowed ? undefined : (e) => e.stopPropagation()}
       >
-        <header className="imp-head">
+        <header
+          className="imp-head"
+          {...(windowed ? { "data-tauri-drag-region": true } : {})}
+        >
           <span className="imp-head-title">{t("ctxImport.title")}</span>
-          <button
-            className="imp-close"
-            onClick={onClose}
-            aria-label={t("ctxImport.close")}
-          >
-            ×
-          </button>
+          {!windowed && (
+            <button
+              className="imp-close"
+              onClick={onClose}
+              aria-label={t("ctxImport.close")}
+            >
+              ×
+            </button>
+          )}
         </header>
 
         <div className="imp-body">
           {/* Georeferenzierungs-Bezug: sobald gesetzt, teilen sich ALLE Importe
-              dieses Projekts denselben Modell↔LV95-Bezug (s. Project.geoAnchor). */}
-          {geoAnchor && (
+              dieses Projekts denselben Modell↔LV95-Bezug (s. Project.geoAnchor).
+              Ohne Bezug wird ROH importiert (echte LV95-Koordinaten, weit vom
+              Nullpunkt) — ein Hinweis erklärt den Folge-Schritt „Neuer
+              Bezugspunkt". */}
+          {geoAnchor ? (
             <div className="cim-geo-anchor">
-              <span>{t("ctxImport.geoAnchor", { label: geoAnchor.label ?? "?" })}</span>
+              <span>
+                {t("ctxImport.geoAnchor", { label: geoAnchor.label ?? "?" })}
+                {" — "}
+                {t("ctxImport.geoAnchor.coords", {
+                  e: geoAnchor.lv95.e.toFixed(2),
+                  n: geoAnchor.lv95.n.toFixed(2),
+                  h: typeof geoAnchor.height === "number" ? geoAnchor.height.toFixed(2) : "—",
+                })}
+              </span>
               <button
                 type="button"
                 className="imp-linklike"
@@ -287,6 +380,8 @@ export function ContextImportDialog({
                 {t("ctxImport.geoAnchor.reset")}
               </button>
             </div>
+          ) : (
+            <div className="cim-geo-anchor cim-geo-hint">{t("ctxImport.rawHint")}</div>
           )}
           {/* Ortssuche */}
           <section className="imp-section">
@@ -355,6 +450,45 @@ export function ContextImportDialog({
             </div>
           </section>
 
+          {/* Bezugspunkt (Modell-Nullpunkt): nur solange noch kein Bezug steht.
+              Leer -> Suchzentrum wird (0,0); gefüllt -> dieser LV95-Punkt wird
+              (0,0) (z. B. amtlicher Vermessungspunkt aus dem Kataster). */}
+          {!geoAnchor && (
+            <section className="imp-section">
+              <div className="imp-section-title">{t("ctxImport.refPoint")}</div>
+              <div className="cim-radius-row">
+                <input
+                  className="cim-input cim-input-num"
+                  type="number"
+                  step={0.01}
+                  value={refPoint.e}
+                  placeholder={t("ctxImport.refPoint.e")}
+                  onChange={(e) => setRefPoint((p) => ({ ...p, e: e.target.value }))}
+                  aria-label={t("ctxImport.refPoint.e")}
+                />
+                <input
+                  className="cim-input cim-input-num"
+                  type="number"
+                  step={0.01}
+                  value={refPoint.n}
+                  placeholder={t("ctxImport.refPoint.n")}
+                  onChange={(e) => setRefPoint((p) => ({ ...p, n: e.target.value }))}
+                  aria-label={t("ctxImport.refPoint.n")}
+                />
+                <input
+                  className="cim-input cim-input-num"
+                  type="number"
+                  step={0.01}
+                  value={refPoint.h}
+                  placeholder={t("ctxImport.refPoint.h")}
+                  onChange={(e) => setRefPoint((p) => ({ ...p, h: e.target.value }))}
+                  aria-label={t("ctxImport.refPoint.h")}
+                />
+              </div>
+              <div className="cim-geo-hint">{t("ctxImport.refPoint.hint")}</div>
+            </section>
+          )}
+
           {/* Quellen */}
           <section className="imp-section">
             <div className="imp-section-title">{t("ctxImport.sources")}</div>
@@ -396,6 +530,22 @@ export function ContextImportDialog({
                   <option value="2">{t("ctxImport.terrain.res2")}</option>
                   <option value="0.5">{t("ctxImport.terrain.res05")}</option>
                 </select>
+              </label>
+              <label className="cim-check">
+                <input
+                  type="checkbox"
+                  checked={sources.swissImage}
+                  onChange={() => toggle("swissImage")}
+                />
+                {t("ctxImport.src.swissImage")}
+              </label>
+              <label className="cim-check">
+                <input
+                  type="checkbox"
+                  checked={sources.swissImageDrape}
+                  onChange={() => toggle("swissImageDrape")}
+                />
+                {t("ctxImport.src.swissImageDrape")}
               </label>
               <label className="cim-check">
                 <input
@@ -473,6 +623,12 @@ export function ContextImportDialog({
           </button>
         </footer>
       </div>
+  );
+
+  if (windowed) return dialog;
+  return (
+    <div className="imp-overlay" onClick={onClose}>
+      {dialog}
     </div>
   );
 }

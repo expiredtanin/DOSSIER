@@ -835,6 +835,160 @@ fn compute_wall_miters(walls: &[WallInput]) -> Vec<WallMiters> {
     out
 }
 
+/// Ermittelt je Wand, ob ihr Start-/Endpunkt ein FREIES Ende ist — d. h. KEIN
+/// anderes Wandende (auch kein T-/X-Stoss) trifft sich dort im selben
+/// Hoehenbereich. Dieselbe Punkt-Rundung + Hoehen-Ueberlappungs-Clustering wie
+/// `compute_wall_miters`, aber OHNE dessen Zwei-Wandenden-Einschraenkung: jeder
+/// Cluster der Groesse ≥ 2 (Gehrung ODER T-/X-Stoss) gilt als "beruehrt", nur
+/// ein isolierter Cluster der Groesse 1 (nur die Wand selbst) bleibt frei.
+/// Grundlage der Schraffur-Kappen an unverbundenen Wandenden
+/// (`build_free_wall_end_caps`) — ein Wandende "ohne Anschluss" (Nutzer-Begriff)
+/// zeigt dort die Bauteil-Schraffur statt der Flaechenfarbe, wie ein echter
+/// Schnitt.
+fn compute_free_wall_ends(walls: &[WallInput]) -> Vec<(bool, bool)> {
+    let mut out = vec![(true, true); walls.len()];
+
+    let mut ends: Vec<EndRef> = Vec::with_capacity(walls.len() * 2);
+    for (i, w) in walls.iter().enumerate() {
+        let n = left_normal(w.start, w.end);
+        if n == [0.0, 0.0] {
+            continue; // entartete Wand: weder Ende gilt als "frei" (irrelevant)
+        }
+        let dir: Point2 = [n[1], -n[0]];
+        let z0 = w.base_elevation;
+        let z1 = w.base_elevation + w.height;
+        ends.push(EndRef { wall: i, is_start: true, point: w.start, dir, z0, z1 });
+        ends.push(EndRef { wall: i, is_start: false, point: w.end, dir, z0, z1 });
+    }
+
+    let mut groups: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (idx, e) in ends.iter().enumerate() {
+        groups.entry(round_key(e.point)).or_default().push(idx);
+    }
+
+    for members in groups.into_values() {
+        if members.len() < 2 {
+            continue; // einziges Ende an diesem Punkt -> bleibt frei (Default)
+        }
+        for cluster in cluster_by_height_overlap(&ends, &members) {
+            if cluster.len() < 2 {
+                continue; // eigener, hoehenmaessig isolierter Cluster -> frei
+            }
+            for &idx in &cluster {
+                let e = &ends[idx];
+                if e.is_start {
+                    out[e.wall].0 = false;
+                } else {
+                    out[e.wall].1 = false;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Haengt EINE Schraffur-Kappe (alle Schicht-Baender gestapelt) an einem
+/// Wand-Achsenende an `verts` an — Vertex-Format identisch zu
+/// `section_fill::build_cut_caps` (`CAP_FLOATS_PER_VERTEX`), damit dieselbe
+/// `cap_pipeline`/`CAP_WGSL` sie zeichnen kann. `(u,v)` = (Quer-Versatz `s` zur
+/// Wandachse, Welt-Hoehe) — metrisch, an den Schicht-Grenzen stetig.
+#[allow(clippy::too_many_arguments)]
+fn push_wall_end_cap(
+    verts: &mut Vec<f32>,
+    point: Point2,
+    n: Point2,
+    layers: &[WallLayer],
+    total: f32,
+    y0: f32,
+    y1: f32,
+    pattern: f32,
+    angle_rad: f32,
+    scale: f32,
+    line_weight: f32,
+) {
+    let corner = |s: f32, y: f32| -> [f32; 9] {
+        let p = [point[0] + n[0] * s, point[1] + n[1] * s];
+        [p[0], y, p[1], s, y, pattern, angle_rad, scale, line_weight]
+    };
+    let mut off_a = total * 0.5;
+    for layer in layers {
+        let off_b = off_a - layer.thickness;
+        let c0 = corner(off_a, y0);
+        let c1 = corner(off_b, y0);
+        let c2 = corner(off_b, y1);
+        let c3 = corner(off_a, y1);
+        // Fan-Triangulierung des Quads (Winding egal, cap_pipeline kennt kein
+        // Backface-Culling — siehe section_fill.rs-Moduldoc).
+        verts.extend_from_slice(&c0);
+        verts.extend_from_slice(&c1);
+        verts.extend_from_slice(&c2);
+        verts.extend_from_slice(&c0);
+        verts.extend_from_slice(&c2);
+        verts.extend_from_slice(&c3);
+        off_a = off_b;
+    }
+}
+
+/// Schraffur-Kappen an FREIEN Wandenden (kein Anschluss an eine andere Wand,
+/// s. `compute_free_wall_ends`): additive, ZWEITE Geometrie neben der
+/// (unveraendert weiterhin flach eingefaerbten) End-Kappe der normalen
+/// Extrusion — gezeichnet mit Tiefen-Bias VOR der Flaeche (analog dem
+/// Luftbild-Overlay `gpu::aerial_pipeline`), sodass sie diese optisch
+/// ueberdeckt, OHNE `extrude_layer_segment` selbst anzufassen (kein
+/// Regressionsrisiko fuer bestehende Vollkoerper-Tests). Nur Waende MIT
+/// explizit gesetzter `hatch` (Bauteil-Schraffur, `toWalls3d.ts` loest sie je
+/// Materialschicht auf) bekommen eine Kappe — ohne `hatch` (z. B. alle
+/// bestehenden Test-Fixtures) bleibt das Alt-Verhalten unangetastet. Bildet NUR
+/// die echten Achsen-Enden ab (Wandanfang/-ende), keine Oeffnungs-Laibungen —
+/// "Wand endet an Decke" (vertikale Terminierung) ist bewusst NICHT Teil dieser
+/// Kappen (separates, noch offenes Thema).
+pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
+    let free_ends = compute_free_wall_ends(walls);
+    let mut verts: Vec<f32> = Vec::new();
+
+    for (wi, wall) in walls.iter().enumerate() {
+        let Some(hatch) = wall.hatch else { continue };
+        let (free_start, free_end) = free_ends[wi];
+        if !free_start && !free_end {
+            continue;
+        }
+        let n = left_normal(wall.start, wall.end);
+        if n == [0.0, 0.0] || wall.height <= 1e-6 {
+            continue;
+        }
+        let y0 = wall.base_elevation;
+        let y1 = wall.base_elevation + wall.height;
+
+        let synthetic;
+        let layers: &[WallLayer] = match &wall.layers {
+            Some(ls) if !ls.is_empty() => ls.as_slice(),
+            _ => {
+                synthetic = [WallLayer { thickness: wall.thickness, color: wall.color }];
+                &synthetic
+            }
+        };
+        let total: f32 = layers.iter().map(|l| l.thickness).sum();
+        let pattern = hatch.pattern as f32;
+        let angle_rad = hatch.angle.to_radians();
+        let scale = hatch.scale.max(0.05);
+        let line_weight = hatch.line_weight.max(0.0);
+
+        if free_start {
+            push_wall_end_cap(
+                &mut verts, wall.start, n, layers, total, y0, y1, pattern, angle_rad, scale,
+                line_weight,
+            );
+        }
+        if free_end {
+            push_wall_end_cap(
+                &mut verts, wall.end, n, layers, total, y0, y1, pattern, angle_rad, scale,
+                line_weight,
+            );
+        }
+    }
+    verts
+}
+
 /// Grundriss-Fussabdruck EINER Wand (die vier Band-Eckpunkte g0..g3 in CCW),
 /// an ihren echten Achsenenden ggf. gehrt — bitgenau dieselbe Ecken-Konstruktion
 /// wie `extrude_layer_segment` fuer das Vollstueck (Einzel-Layer, keine
@@ -1026,7 +1180,10 @@ pub fn build_scene_mesh_textured(
     for m in meshes {
         let before = mesh.vertex_count();
         append_context_mesh(&mut mesh, m);
-        fill(&mesh, &mut layers, before, -1.0);
+        // Material-Ebene des Kontext-Meshes (aktuell nur Daecher setzen sie,
+        // s. `MeshInput::material_index`); ohne -> Fallback-Schachbrett.
+        let layer = m.material_index.map(|i| i as f32).unwrap_or(-1.0);
+        fill(&mesh, &mut layers, before, layer);
     }
 
     let mut tex = textured_from_mesh(&mesh);
@@ -1063,6 +1220,20 @@ pub fn build_scene_mesh(walls: &[WallInput], slabs: &[SlabInput], meshes: &[Mesh
     mesh
 }
 
+/// Baut NUR die Gelaende-Dreiecke (`MeshKind::Terrain`) zu EINEM Mesh — Grundlage
+/// des Luftbild-Overlays (`gpu::aerial_pipeline`): dieselbe Geometrie wie im
+/// Hauptpuffer, aber separat, damit sie ein zweites Mal texturiert obenauf
+/// gezeichnet werden kann. Leer, wenn kein Terrain vorliegt.
+pub fn build_terrain_mesh(meshes: &[MeshInput]) -> Mesh {
+    let mut mesh = Mesh::default();
+    for m in meshes {
+        if matches!(m.kind, crate::types::MeshKind::Terrain) {
+            append_context_mesh(&mut mesh, m);
+        }
+    }
+    mesh
+}
+
 // ── Rohe Kontext-Meshes (Terrain / importierte Volumen) ──────────────────────
 
 /// Haengt EIN rohes Dreiecks-Mesh (Terrain-TIN oder importiertes Volumen, siehe
@@ -1085,6 +1256,21 @@ pub fn append_context_mesh(mesh: &mut Mesh, input: &MeshInput) {
     let pos = &input.positions;
     let vcount = pos.len() / 3;
     let color = input.effective_color();
+    // Pro-Vertex-Farben nur nutzen, wenn genau ein RGB je Vertex vorliegt
+    // (sonst greift die Einzelfarbe fuers ganze Mesh). Beispiel: Luftbild-Drape.
+    let per_vertex = input.vertex_colors.len() >= vcount * 3 && vcount > 0;
+    let vcol = |i: usize| -> Rgb {
+        if per_vertex {
+            let b = i * 3;
+            [
+                input.vertex_colors[b],
+                input.vertex_colors[b + 1],
+                input.vertex_colors[b + 2],
+            ]
+        } else {
+            color
+        }
+    };
     // world-Position aus Modell (x, y, z=Hoehe): (x, hoehe, y).
     let vworld = |i: usize| -> [f32; 3] {
         let b = i * 3;
@@ -1099,6 +1285,7 @@ pub fn append_context_mesh(mesh: &mut Mesh, input: &MeshInput) {
         let a = vworld(ia);
         let b = vworld(ib);
         let c = vworld(ic);
+        let (ca, cb, cc) = (vcol(ia), vcol(ib), vcol(ic));
         // Flaechen-Normale (b-a) x (c-a); entartete Dreiecke ueberspringen.
         let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -1113,8 +1300,8 @@ pub fn append_context_mesh(mesh: &mut Mesh, input: &MeshInput) {
         }
         let n = [gn[0] / len, gn[1] / len, gn[2] / len];
         // Vorderseite + Rueckseite (siehe Moduldoc: doppelseitig).
-        push_ctx_tri(mesh, a, b, c, n, color);
-        push_ctx_tri(mesh, a, c, b, [-n[0], -n[1], -n[2]], color);
+        push_ctx_tri(mesh, a, b, c, n, [ca, cb, cc]);
+        push_ctx_tri(mesh, a, c, b, [-n[0], -n[1], -n[2]], [ca, cc, cb]);
     }
 }
 
@@ -1127,10 +1314,10 @@ fn push_ctx_tri(
     b: [f32; 3],
     c: [f32; 3],
     normal: [f32; 3],
-    color: Rgb,
+    colors: [Rgb; 3],
 ) {
     let base = (mesh.verts.len() / FLOATS_PER_VERTEX) as u32;
-    for p in [a, b, c] {
+    for (p, color) in [a, b, c].iter().zip(colors.iter()) {
         mesh.verts.extend_from_slice(&[
             p[0], p[1], p[2], normal[0], normal[1], normal[2], color[0], color[1], color[2],
         ]);

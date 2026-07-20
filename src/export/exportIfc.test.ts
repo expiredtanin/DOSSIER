@@ -308,6 +308,49 @@ describe("exportIfcSpf — IFC4-Export", () => {
     expect(ifcGuid("W2")).not.toBe(guid); // unterschiedliche IDs → unterschiedliche GUIDs
   });
 
+  it("georeferenziert: mit geoAnchor werden die ECHTEN LV95-Koordinaten geschrieben (lokal bearbeitet, weltweit lagerichtig)", () => {
+    // Modell lokal nahe (0,0), aber geoAnchor sagt: Modell (0,0) = LV95
+    // (2600000,1200000). Der Export muss die Profil-/Punkt-Koordinaten auf die
+    // echten Landeskoordinaten (Millionenbereich) verschoben schreiben.
+    const local = fixtureProject();
+    const withoutAnchor = exportIfcSpf(local);
+    // Ohne Bezug: lokale Koordinaten, KEINE Millionenwerte im Text.
+    expect(withoutAnchor).not.toMatch(/26000\d\d\./);
+
+    const geo: Project = {
+      ...local,
+      geoAnchor: { lv95: { e: 2600000, n: 1200000 }, model: { x: 0, y: 0 } },
+    };
+    const spf = exportIfcSpf(geo);
+    // W1.start (0,0) -> LV95 (2600000,1200000); W2.end (5,4) -> (2600005,1200004).
+    expect(spf).toContain("2600000.");
+    expect(spf).toContain("1200000.");
+    expect(spf).toContain("2600005.");
+    // Struktur bleibt valide (keine dangling refs / Duplikate).
+    const { defined, referenced, duplicates } = collectIds(spf);
+    expect(duplicates).toEqual([]);
+    expect([...referenced].filter((id) => !defined.has(id))).toEqual([]);
+  });
+
+  it("geoAnchor.height wird als IfcSite.RefElevation geschrieben (Vermessungspunkt-Höhe)", () => {
+    const local = fixtureProject();
+    const geo: Project = {
+      ...local,
+      geoAnchor: { lv95: { e: 2600000, n: 1200000 }, height: 683.5, model: { x: 0, y: 0 } },
+    };
+    const spf = exportIfcSpf(geo);
+    // Die IFCSITE-Zeile trägt die reale Datumshöhe (RefElevation, 12. Attribut).
+    const siteLine = spf.split("\n").find((l) => l.includes("=IFCSITE("));
+    expect(siteLine).toBeDefined();
+    expect(siteLine).toContain("683.5");
+    // Ohne Höhe bleibt RefElevation leer ($) — kein 683.5 irgendwo.
+    const noH = exportIfcSpf({
+      ...local,
+      geoAnchor: { lv95: { e: 2600000, n: 1200000 }, model: { x: 0, y: 0 } },
+    });
+    expect(noH).not.toContain("683.5");
+  });
+
   it("leeres Projekt ⇒ valider Minimal-IFC (Project/Site/Building, kein Crash)", () => {
     const proj = fixtureProject();
     proj.walls = [];

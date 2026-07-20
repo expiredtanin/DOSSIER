@@ -22,6 +22,9 @@ export interface SiteSlice {
   addContextObjects: (objs: ContextObject[]) => void;
   /** Entfernt ein Kontext-Objekt per ID (No-op bei unbekannter ID). */
   removeContextObject: (id: string) => void;
+  /** Entfernt mehrere Kontext-Objekte in EINEM Schritt (z. B. eine ganze
+   *  Ebene/Gruppe importierter Gebäude) — ein einziger Undo-Eintrag. */
+  removeContextObjects: (ids: string[]) => void;
   /**
    * Erzeugt aus einem ContourSet (per ID) ein Gelände-TIN und fügt es als
    * weiteres Kontext-Objekt hinzu. Liefert die ID des neuen TerrainMesh, oder
@@ -63,6 +66,12 @@ export function createSiteSlice(
 
     removeContextObject: (id) =>
       setContext((ctx) => ctx.filter((o) => o.id !== id)),
+
+    removeContextObjects: (ids) => {
+      if (ids.length === 0) return;
+      const drop = new Set(ids);
+      setContext((ctx) => ctx.filter((o) => !drop.has(o.id)));
+    },
 
     generateTerrain: (contourSetId) => {
       const ctx = get().project.context ?? [];

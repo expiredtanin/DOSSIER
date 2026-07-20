@@ -20,6 +20,7 @@ import { itemDisplay } from "./displayMode";
 import { usePanelHost } from "./host";
 import type { DrawingLevel } from "./host";
 import type { DisplayMode } from "./types";
+import { DisplayModeSelect } from "./DisplayModeSelect";
 import type { DrawingLevelKind } from "../model/types";
 import { t } from "../i18n";
 
@@ -31,8 +32,9 @@ const KIND_BADGE_KEY: Record<DrawingLevelKind, string> = {
   drawing: "badge.drawing",
 };
 
-/** Kategorien der Zeichnungsebenen, in Anzeigereihenfolge. */
-const CATEGORY_ORDER: DrawingLevelKind[] = [
+/** Kategorien der Zeichnungsebenen, in Anzeigereihenfolge. Exportiert für das
+ * native Zeichnungsebenen-Fenster (native/DrawingLevelsWindowApp.tsx). */
+export const CATEGORY_ORDER: DrawingLevelKind[] = [
   "floor",
   "section",
   "elevation",
@@ -40,7 +42,7 @@ const CATEGORY_ORDER: DrawingLevelKind[] = [
 ];
 
 /** i18n-Key des Kategorie-Titels. */
-const CATEGORY_TITLE_KEY: Record<DrawingLevelKind, string> = {
+export const CATEGORY_TITLE_KEY: Record<DrawingLevelKind, string> = {
   floor: "levelCat.floor",
   section: "levelCat.section",
   elevation: "levelCat.elevation",
@@ -48,7 +50,7 @@ const CATEGORY_TITLE_KEY: Record<DrawingLevelKind, string> = {
 };
 
 /** i18n-Key der Beschriftung des „+"-Glyphs (Tooltip/aria-label). */
-const CATEGORY_ADD_KEY: Record<DrawingLevelKind, string> = {
+export const CATEGORY_ADD_KEY: Record<DrawingLevelKind, string> = {
   floor: "levels.addFloor",
   section: "levels.addSection",
   elevation: "levels.addElevation",
@@ -93,10 +95,13 @@ export function DrawingLevelsPanel() {
 
   return (
     <section className="nav-group">
-      <header className="nav-group-head">
-        <span className="nav-group-title">{t("nav.drawingLevels")}</span>
-      </header>
-
+      {/* Kein eigener Titel/Kopf mehr — der PanelFrame liefert die EINE
+          Kopfzeile; die Fenster-Ausklinken-Aktion sitzt dort via headerActions
+          (DrawingLevelsHeaderActions), kein doppelter Titel. */}
+      <div className="panel-vis">
+        <span className="panel-vis-label">{t("nav.visibility")}</span>
+        <DisplayModeSelect value={displayMode.mode} onChange={displayMode.setMode} />
+      </div>
       {CATEGORY_ORDER.map((kind) => {
         const levelsOfKind = levelsTopDown.filter((l) => l.kind === kind);
         const isOpen = !collapsed[kind];
@@ -151,8 +156,28 @@ export function DrawingLevelsPanel() {
   );
 }
 
-/** Eine Zeile im Zeichnungsebenen-Bereich. */
-function LevelRow({
+/** Aktionen für die gemeinsame PanelFrame-Kopfzeile (statt eigener Titelzeile):
+ *  Zahnrad → Einstellungen (Darstellungsfarben/Projekt-Felder). */
+export function DrawingLevelsHeaderActions() {
+  const host = usePanelHost();
+  return (
+    <button
+      className="nav-settings"
+      aria-label={t("topbar.settings")}
+      title={t("topbar.settings")}
+      onClick={host.onOpenSettings}
+    >
+      <span className="material-symbols-outlined" aria-hidden="true">
+        settings
+      </span>
+    </button>
+  );
+}
+
+/** Eine Zeile im Zeichnungsebenen-Bereich. Exportiert, damit das native
+ * Zeichnungsebenen-Fenster (native/DrawingLevelsWindowApp.tsx) dieselbe
+ * Zeilen-Darstellung wiederverwendet statt sie zu duplizieren. */
+export function LevelRow({
   level,
   active,
   mode,

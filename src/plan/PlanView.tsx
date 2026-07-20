@@ -214,6 +214,12 @@ export interface PlanSelection {
    */
   sectionLineId: string | null;
   /**
+   * ID des getroffenen Kontext-Objekts (importiertes Gebäude/Terrain), wenn der
+   * Klick sein Grundriss-Pick-Band traf und KEIN Element höherer Priorität
+   * (alle anderen gehen vor, analog `roofId`); sonst `null`.
+   */
+  contextObjectId: string | null;
+  /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
    * ersetzen. Bei Leerraum-Klick mit Shift bleibt die Auswahl erhalten.
@@ -304,6 +310,12 @@ export interface PlanViewProps {
   /** Aktuell ausgewählte Dach-IDs (von App); die Ansicht markiert die Traufe. */
   selectedRoofIds?: string[];
   /**
+   * Aktuell ausgewählte Kontext-Objekt-IDs (importiertes Gebäude/Terrain; von
+   * App). Die Ansicht markiert das Grundriss-Pick-Band JEDES dieser Objekte mit
+   * einer Akzentkontur.
+   */
+  selectedContextObjectIds?: string[];
+  /**
    * Aktuell ausgewählte Schnitt-/Ansichtslinien-IDs (DrawingLevel; von App). Die
    * Ansicht markiert das Pick-Band JEDER dieser Linien mit einer Akzentkontur.
    */
@@ -331,6 +343,9 @@ export interface PlanViewProps {
   onStampEdit?: (roomId: string) => void;
   /** Doppelklick auf ein Text-2D-Element: Inhalt bearbeiten (Editor öffnen). */
   onEditDrawingText?: (drawingId: string) => void;
+  /** Doppelklick auf eine Schnittlinie: in deren 2D-Schnittansicht springen
+   *  (Zeichnungsebene aktivieren). */
+  onOpenSectionLevel?: (levelId: string) => void;
   /**
    * Links-Drag (Marquee): meldet die im Auswahl-Rechteck getroffenen Wände nach
    * der CAD-Konvention (siehe {@link MarqueeSelection}). Optional.
@@ -447,6 +462,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       selectedStairIds,
       selectedRoomIds,
       selectedRoofIds,
+      selectedContextObjectIds,
       selectedSectionLineIds,
       selectedExtrudedSolidIds,
       selectedColumnIds,
@@ -454,6 +470,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onStampMove,
       onStampEdit,
       onEditDrawingText,
+      onOpenSectionLevel,
       activeTool,
       toolInputActive,
       toolHandlers,
@@ -537,9 +554,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // „GPU-Canvas montieren?" — beide GPU-Pfade brauchen das Canvas (an der ABSICHT
   // montiert, nicht am ready, sonst könnte die Engine mangels Canvas nie starten).
   const wantGpu = wantGl || wantWasm;
+  // Georeferenzierte Hintergrund-Rasterbilder (Luftbild) vorhanden? Der GPU-
+  // Canvas löscht das Blatt UNDURCHSICHTIG (clearColor …,1) und würde ein
+  // dahinterliegendes Bild verdecken. Daher bei aktivem Luftbild bewusst den
+  // vollen SVG-Pfad nutzen — dort liegt das Bild als eigene Ebene ZWISCHEN
+  // Blatt-Hintergrund und Geometrie (sichtbar, ohne den GL-Renderer zu ändern).
+  const hasBgImages = (plan.backgroundImages?.length ?? 0) > 0;
   // Engine WIRKLICH aktiv? Steuert das Umschalten SVG↔GPU: bei false rendert der
   // volle SVG-Pfad (Fallback), bei true übernimmt die GPU-Ebene + Text-Overlay.
-  const useGpuRenderer = wantGpu && glReady;
+  const useGpuRenderer = wantGpu && glReady && !hasBgImages;
 
   // Stabiler Papier-Massstab-Nenner N (1:N) als REFERENZ für die Print-Strich-
   // breiten. BEWUSST NICHT der live aus dem Zoom abgeleitete N (der sich beim
@@ -1055,6 +1078,22 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const p = plan.primitives[i];
       if (p.kind === "polygon" && p.sectionLineId && pointInPolygon(m, p.pts)) {
         return p.sectionLineId;
+      }
+    }
+    return null;
+  };
+
+  // Getroffenes Kontext-Objekt (importiertes Gebäude/Terrain): sein unsichtbares
+  // Grundriss-Pick-Band (Bounding-Box) per Punkt-in-Polygon — macht es wie eine
+  // Wand irgendwo innerhalb seiner Fläche anklickbar, nicht nur exakt auf der
+  // dünnen Umrisslinie.
+  const pickContextObject = (clientX: number, clientY: number): string | null => {
+    const v = clientToView(clientX, clientY, view);
+    const m = viewToModel(v.x, v.y);
+    for (let i = plan.primitives.length - 1; i >= 0; i--) {
+      const p = plan.primitives[i];
+      if (p.kind === "polygon" && p.contextObjectId && pointInPolygon(m, p.pts)) {
+        return p.contextObjectId;
       }
     }
     return null;
@@ -1589,6 +1628,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             columnId: null,
             roofId: null,
             sectionLineId,
+            contextObjectId: null,
             shift: e.shiftKey,
           });
           return;
@@ -1644,6 +1684,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId
             ? null
             : pickRoof(e.clientX, e.clientY);
+        // Kontext-Objekt (Gebäude/Terrain) als ALLERLETZTE Priorität — seine
+        // Bbox-Pick-Fläche kann grosszügig überlappen, daher erst wenn wirklich
+        // nichts anderes getroffen wurde.
+        const contextObjectId =
+          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId || roofId
+            ? null
+            : pickContextObject(e.clientX, e.clientY);
         onSelect({
           model: viewToModel(v.x, v.y),
           hitIndex,
@@ -1657,6 +1704,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           columnId,
           roofId,
           sectionLineId: null,
+          contextObjectId,
           shift: e.shiftKey,
         });
       }
@@ -1726,6 +1774,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         stampHandleAt(e.clientX, e.clientY) ?? pickRoom(e.clientX, e.clientY);
       if (rid) {
         onStampEdit(rid);
+        return;
+      }
+    }
+    // Doppelklick auf eine Schnittlinie → in deren 2D-Schnittansicht springen.
+    if (onOpenSectionLevel) {
+      const sid = pickSectionLine(e.clientX, e.clientY);
+      if (sid) {
+        onOpenSectionLevel(sid);
         return;
       }
     }
@@ -1855,6 +1911,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         p.kind === "polygon" && p.roofId != null && ids.has(p.roofId),
     );
   }, [plan, selectedRoofIds]);
+
+  // Hervorhebung der selektierten Kontext-Objekte (Gebäude/Terrain): das
+  // (unsichtbare) Bbox-Pick-Band mit contextObjectId als Akzentkontur
+  // überzeichnen — analog zur Dach-/Raum-Auswahl.
+  const highlightContextObjectPolys = useMemo(() => {
+    const ids =
+      selectedContextObjectIds && selectedContextObjectIds.length
+        ? new Set(selectedContextObjectIds)
+        : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "polygon" }> =>
+        p.kind === "polygon" && p.contextObjectId != null && ids.has(p.contextObjectId),
+    );
+  }, [plan, selectedContextObjectIds]);
 
   // Hervorhebung der selektierten Schnitt-/Ansichtslinie: das (unsichtbare)
   // Pick-Band (Polygon mit sectionLineId) mit Akzentkontur überzeichnen.
@@ -1988,8 +2059,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           darüber erreichen. An `wantGpu` (Absicht) montiert — NICHT an `useGpuRenderer`
           (=wantGpu&&glReady), sonst könnte GL nie initialisieren (Canvas fehlt →
           glReady bleibt false → Deadlock). Bei WebGL-Fehler bleibt es leer hinten
-          und der volle SVG-Pfad übernimmt sichtbar. */}
-      {wantGpu && (
+          und der volle SVG-Pfad übernimmt sichtbar. NICHT montiert, wenn ein
+          Luftbild aktiv ist — dann rendert der SVG-Pfad alles inkl. Bild-Ebene. */}
+      {wantGpu && !hasBgImages && (
         <canvas
           ref={canvasRef}
           style={{
@@ -2058,6 +2130,28 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         className={useGpuRenderer ? undefined : "plan-bg"}
         fill={useGpuRenderer ? "transparent" : undefined}
       />
+      {/* Georeferenzierte Luftbilder ZWISCHEN Blatt-Hintergrund und Geometrie:
+          Modell-Meter × PX_PER_M mit negierter y-Achse (s. toScreen) → Bild-Norden
+          (max.y) oben bei y=−max.y·PX; das Bild zeichnet natürlich von oben (kein
+          Flip). Nur im SVG-Pfad relevant (bei Luftbild ist GPU deaktiviert). */}
+      {hasBgImages && plan.backgroundImages!.map((img) => {
+        const w = (img.max.x - img.min.x) * PX_PER_M;
+        const h = (img.max.y - img.min.y) * PX_PER_M;
+        if (w <= 0 || h <= 0) return null;
+        return (
+          <image
+            key={img.id}
+            href={img.src}
+            x={img.min.x * PX_PER_M}
+            y={-img.max.y * PX_PER_M}
+            width={w}
+            height={h}
+            opacity={img.opacity}
+            preserveAspectRatio="none"
+            pointerEvents="none"
+          />
+        );
+      })}
       {/* 2D-Zeichen-Linien mit drawingId werden gemergt (drawingRuns) als EIN Zug
           gezeichnet → gehrte Ecken statt Butt-Cap-Stufe; im Memo übersprungen. */}
       {primitiveEls}
@@ -2106,6 +2200,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {highlightRoofPolys.map((poly, i) => (
         <polygon
           key={`selrf-${i}`}
+          className="plan-selected"
+          points={poly.pts
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
+      {/* Auswahl-Hervorhebung der gewählten Kontext-Objekte (Bbox-Pick-Band). */}
+      {highlightContextObjectPolys.map((poly, i) => (
+        <polygon
+          key={`selctx-${i}`}
           className="plan-selected"
           points={poly.pts
             .map(toScreen)
@@ -2332,8 +2438,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           hudFields={hudFields ?? null}
         />
       )}
+      </svg>
       {/* Lineale (oben + links, VW-Stil): Modell-Meter mit Ticks, Beschriftung
-          und Cursor-Marker — screen-fix über den sichtbaren Ausschnitt gelegt. */}
+          und Cursor-Marker — screen-fix über den sichtbaren Ausschnitt gelegt.
+          BEWUSST ein eigenes Sibling-SVG (nicht mehr Kind von `svgRef`): beim
+          imperativen GL-Pan (`applySvgTransform`, s.o.) bekommt NUR `svgRef`
+          während der Geste einen CSS-transform verpasst — läge das Lineal
+          darin, würde es sichtbar mit dem Inhalt mitwandern statt am Rand
+          fixiert zu bleiben. Als eigenständiges Element bleibt es während der
+          Geste stehen (aktualisiert erst beim Loslassen, wenn `view` neu
+          gesetzt wird) — exakt das gewünschte „statische" Verhalten. */}
       {showRulers && (() => {
         const m = measure(view);
         if (!m.rect) return null;
@@ -2345,15 +2459,28 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           h: (m.rect.height || 1) / scale,
         };
         return (
-          <PlanRulers
-            vb={vb}
-            vbPerPx={1 / scale}
-            pxPerMeter={scale * PX_PER_M}
-            cursor={rulerCursor}
-          />
+          <svg
+            className="plan-ruler-overlay"
+            viewBox={`${vb.x0} ${vb.y0} ${vb.w} ${vb.h}`}
+            preserveAspectRatio="none"
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              zIndex: 2,
+              pointerEvents: "none",
+            }}
+          >
+            <PlanRulers
+              vb={vb}
+              vbPerPx={1 / scale}
+              pxPerMeter={scale * PX_PER_M}
+              cursor={rulerCursor}
+            />
+          </svg>
         );
       })()}
-      </svg>
     </div>
   );
 });
@@ -2385,7 +2512,7 @@ function DraftOverlay({
   } | null;
 }) {
   const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
-  const markSize = 6.5 * vbPerPx; // halbe Kantenlänge des Snap-Markers (grösser = besser sichtbar)
+  const markSize = 4.75 * vbPerPx; // halbe Kantenlänge des Snap-Markers (klein + fein)
   return (
     <g className="tool-overlay" pointerEvents="none">
       {/* Vorschau-Formen. */}
@@ -3271,8 +3398,29 @@ function buildDrawingRuns(prims: Primitive[]): DrawingRun[] {
   return runs;
 }
 
-/** Opazität gedimmter („grau") Primitive im Darstellungsmodus „andere grau". */
-const GREYED_OPACITY = 0.3;
+/**
+ * Fester Grauton gedimmter Primitive im Darstellungsmodus „andere grau" —
+ * ECHTE Umfärbung (nicht nur Deckkraft), da dünne Haarlinien auf dem hellen
+ * Zeichenblatt (--sheet: #f0f0f0) bei reiner Transparenz kaum erkennbar
+ * gedimmt wirken. Gleicher Ton in allen drei Render-Pfaden (SVG/WebGL/nativ,
+ * siehe glPlanCompile.ts `GREY_RGB` und toRenderScene.ts `GREY_RGB`).
+ */
+const GREYED_COLOR = "#8c8c8c";
+
+/** Ersetzt Fill-/Stroke-/Farbfelder (inkl. Schraffur) eines Primitivs durch den festen Grauton. */
+function greyColor(c: string | undefined): string | undefined {
+  return !c || c === "none" || c === "transparent" ? c : GREYED_COLOR;
+}
+
+/** Flache Kopie eines Primitivs mit allen Farbfeldern auf `GREYED_COLOR` umgefärbt. */
+function greyedCopy<T extends Primitive>(p: T): T {
+  const q: any = { ...p };
+  if ("fill" in q) q.fill = greyColor(q.fill);
+  if ("stroke" in q) q.stroke = greyColor(q.stroke);
+  if ("color" in q) q.color = greyColor(q.color);
+  if ("hatch" in q && q.hatch) q.hatch = { ...q.hatch, color: greyColor(q.hatch.color) };
+  return q;
+}
 
 /** Zeichnet einen gebündelten 2D-Zeichen-Zug als EIN Element (gehrte Ecken). */
 function DrawingRunShape({
@@ -3315,12 +3463,13 @@ function DrawingRunShape({
   // Punktmuster (dash enthält eine 0): runde Kappe, damit die 0-Längen-Segmente
   // als Dots erscheinen (Punktlinie / Strich-Punkt).
   const cap = dashHasDot(run.dash) ? ("round" as const) : undefined;
+  const stroke = run.greyed ? greyColor(run.color) : run.color;
   const shape = run.closed ? (
     <polygon
       points={pts}
       className={run.cls}
       fill="none"
-      stroke={run.color}
+      stroke={stroke}
       strokeWidth={sw}
       strokeDasharray={dashStr}
       strokeLinecap={cap}
@@ -3331,14 +3480,14 @@ function DrawingRunShape({
       points={pts}
       className={run.cls}
       fill="none"
-      stroke={run.color}
+      stroke={stroke}
       strokeWidth={sw}
       strokeDasharray={dashStr}
       strokeLinecap={cap}
       vectorEffect={vfx}
     />
   );
-  return run.greyed ? <g opacity={GREYED_OPACITY}>{shape}</g> : shape;
+  return shape;
 }
 
 function PrimitiveShape({
@@ -3354,12 +3503,9 @@ function PrimitiveShape({
   hairline: boolean;
   paperScale: number | null;
 }) {
-  // Gedimmte Elemente bekommen eine niedrige Gruppen-Opazität, sodass Strich
-  // UND Füllung gleichmäßig zurücktreten (best-effort, ohne Farbumrechnung).
-  const shape = renderPrimitive(p, index, toScreen, hairline, paperScale);
-  if (p.greyed) {
-    return <g opacity={GREYED_OPACITY}>{shape}</g>;
-  }
+  // Gedimmte Elemente werden auf den festen Grauton umgefärbt (Strich, Füllung
+  // UND Schraffur) — deutlich erkennbar unabhängig von Papierfarbe/Linienstärke.
+  const shape = renderPrimitive(p.greyed ? greyedCopy(p) : p, index, toScreen, hairline, paperScale);
   return shape;
 }
 
@@ -3887,17 +4033,17 @@ function PlanRulers({
         <>
           <rect
             className="plan-ruler-cursor"
-            x={cursor.x * PX_PER_M - 1.5 * vbPerPx}
+            x={cursor.x * PX_PER_M - 1 * vbPerPx}
             y={y0}
-            width={3 * vbPerPx}
+            width={2 * vbPerPx}
             height={TH}
           />
           <rect
             className="plan-ruler-cursor"
             x={x0}
-            y={-cursor.y * PX_PER_M - 1.5 * vbPerPx}
+            y={-cursor.y * PX_PER_M - 1 * vbPerPx}
             width={TH}
-            height={3 * vbPerPx}
+            height={2 * vbPerPx}
           />
         </>
       )}

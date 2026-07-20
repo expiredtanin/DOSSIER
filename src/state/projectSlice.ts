@@ -8,7 +8,7 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
-import { sampleProject } from "../model/sampleProject";
+import { emptyProject } from "../model/sampleProject";
 import {
   flattenCategories,
   recomputeFloorElevations,
@@ -363,7 +363,10 @@ export function createProjectSlice(
   return {
     ...history,
 
-    project: sampleProject,
+    // TEMPORÄR für manuellen Test (Nutzer-Wunsch): leeres Projekt statt Demo-
+    // Haus. NICHT committen — vor dem nächsten echten Commit zurück auf
+    // `sampleProject` stellen.
+    project: emptyProject,
 
     setProject,
 

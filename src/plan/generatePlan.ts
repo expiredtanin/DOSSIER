@@ -10,6 +10,7 @@ import type {
   Ceiling,
   Column,
   Component,
+  ContextObject,
   Drawing2D,
   ExtrudedSolid,
   HatchPattern,
@@ -191,19 +192,22 @@ export interface HatchRender {
 /**
  * Render-Entscheidung je Kategorie-Code für den Grundriss (vgl. ItemDisplay aus
  * dem Panel-Darstellungsmodus). `render`=false blendet die Kategorie ganz aus,
- * `greyed`=true zeichnet sie gedimmt. Wird kein Resolver übergeben, gilt für
- * jede sichtbare Kategorie {render:true, greyed:false} (bisheriges Verhalten).
+ * `greyed`=true zeichnet sie gedimmt, `locked`=true (nur Modus „grey_locked")
+ * verbietet die Anwahl (siehe App.tsx onPlanSelect). Wird kein Resolver
+ * übergeben, gilt für jede sichtbare Kategorie {render:true, greyed:false,
+ * locked:false} (bisheriges Verhalten).
  */
 export interface CategoryDisplay {
   render: boolean;
   greyed: boolean;
+  locked: boolean;
 }
 
 /** Funktion, die je Kategorie-Code die Render-Entscheidung liefert. */
 export type CategoryDisplayResolver = (code: string) => CategoryDisplay;
 
 /** Standard-Resolver: jede (bereits gefilterte) Kategorie normal zeichnen. */
-const SHOW_ALL: CategoryDisplayResolver = () => ({ render: true, greyed: false });
+const SHOW_ALL: CategoryDisplayResolver = () => ({ render: true, greyed: false, locked: false });
 
 export type Primitive =
   | {
@@ -257,6 +261,12 @@ export type Primitive =
        * Auswahl — heute nur zur Nachvollziehbarkeit getaggt, noch nicht verdrahtet).
        */
       extrudedSolidId?: string;
+      /**
+       * ID des Kontext-Objekts (importiertes Gebäude/Terrain, `project.context`),
+       * falls dieses (unsichtbare) Pick-Band dessen Grundriss-Bounding-Box
+       * umhüllt (Links-Klick-Auswahl — analog `sectionLineId`, s. u.).
+       */
+      contextObjectId?: string;
       /**
        * ID der Stütze (Column), falls dieses Polygon der Grundriss-Querschnitt
        * (Poché) einer Stütze ist (für die Links-Klick-Auswahl der Fläche).
@@ -628,9 +638,23 @@ export function resolveCeilingSectionStyle(
   }
 }
 
+/** Ein georeferenziertes Hintergrund-Rasterbild (Luftbild) im Grundriss —
+ *  Modell-Meter-Rechteck [min..max], das die interaktive Ansicht UNTER der
+ *  Geometrie zeichnet (Kontext-Schicht, `ContextImage`). NICHT Teil der
+ *  Vektor-`primitives` (DXF/PDF-Export lassen es aus). */
+export interface PlanImage {
+  id: string;
+  src: string;
+  min: Vec2;
+  max: Vec2;
+  opacity: number;
+}
+
 export interface Plan {
   primitives: Primitive[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  /** Hintergrund-Rasterbilder (Luftbild) — nur für die interaktive Ansicht. */
+  backgroundImages?: PlanImage[];
 }
 
 /**
@@ -908,9 +932,18 @@ export function generatePlan(
   // Musterlinien/Striche schwarz — so entsteht ein reiner S/W-Plan.
   if (mono) toMono(primitives);
 
+  // Georeferenzierte Luftbilder als Hintergrund-Ebenen (nur interaktive Ansicht,
+  // nicht Teil der Vektor-Primitive) — im Mono-Modus ausgeblendet (reiner S/W-Plan).
+  const backgroundImages: PlanImage[] = mono
+    ? []
+    : (project.context ?? [])
+        .filter((o): o is Extract<ContextObject, { type: "image" }> => o.type === "image")
+        .map((o) => ({ id: o.id, src: o.src, min: o.min, max: o.max, opacity: o.opacity ?? 1 }));
+
   return {
     primitives,
     bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs),
+    backgroundImages,
   };
 }
 
@@ -1059,32 +1092,162 @@ const CONTEXT_LINE_COLOR = "#9aa3ad";
 /** Strichstärke der Kontext-Konturen (mm Papier, dünn). */
 const CONTEXT_LINE_MM = 0.1;
 
+/** Höhen-Toleranz (Meter): Dreieckskanten, deren beide Endpunkte höchstens so
+ *  weit über der Objekt-Unterkante (minZ) liegen, gelten als „Sockelkante" und
+ *  bilden den Grundriss-Fussabdruck eines importierten Gebäudes. */
+const FOOTPRINT_Z_TOL = 0.6;
+
 /**
- * Zeichnet die Konturen (Höhenlinien) der Kontext-Schicht `project.context` als
- * dünne, gedämpfte Referenz-Linien in den Grundriss. Die Z-Höhe wird ignoriert
- * (reine 2D-Projektion). TerrainMeshes/ImportedMeshes erscheinen im Plan NICHT
- * (3D genügt). Rein additiv — Wand-/Drawing-Darstellung bleibt unberührt.
+ * Zeichnet die Kontext-Schicht `project.context` in den Grundriss:
+ *  • ContourSet (Höhenlinien) → dünne Referenz-Linien (Z ignoriert).
+ *  • ImportedMesh (Gebäude) → GRUNDRISS-FUSSABDRUCK: die Dreieckskanten nahe
+ *    der Objekt-Unterkante (Sockel), auf die XY-Ebene projiziert und über
+ *    quantisierte Endpunkte entdoppelt — so erscheint das importierte Haus als
+ *    erkennbarer Umriss im Plan (Nutzer-Wunsch: „ich sehe es sonst nicht"),
+ *    ohne das gesamte Dach-Drahtgitter dicht darüberzulegen.
+ *  • TerrainMesh → nur der 2D-Umriss (Bounding-Box), da ein volles TIN-Gitter
+ *    im Plan unbrauchbar dicht wäre.
+ * Rein additiv — Wand-/Drawing-Darstellung bleibt unberührt.
  */
 function addContextContours(out: Primitive[], project: Project): void {
   const context = project.context ?? [];
   for (const obj of context) {
-    if (obj.type !== "contourSet") continue;
-    for (const c of obj.contours) {
-      const pts = c.pts;
-      if (pts.length < 2) continue;
-      const segEnd = c.closed ? pts.length : pts.length - 1;
-      for (let i = 0; i < segEnd; i++) {
-        out.push({
-          kind: "line",
-          a: pts[i],
-          b: pts[(i + 1) % pts.length],
-          cls: "context-line",
-          weightMm: CONTEXT_LINE_MM,
-          color: CONTEXT_LINE_COLOR,
-        });
+    if (obj.type === "contourSet") {
+      for (const c of obj.contours) {
+        const pts = c.pts;
+        if (pts.length < 2) continue;
+        const segEnd = c.closed ? pts.length : pts.length - 1;
+        for (let i = 0; i < segEnd; i++) {
+          out.push({
+            kind: "line",
+            a: pts[i],
+            b: pts[(i + 1) % pts.length],
+            cls: "context-line",
+            weightMm: CONTEXT_LINE_MM,
+            color: CONTEXT_LINE_COLOR,
+          });
+        }
       }
+    } else if (obj.type === "importedMesh") {
+      addMeshFootprint(out, obj.positions, obj.indices);
+      addContextPickRegion(out, obj.positions, obj.id);
+    } else if (obj.type === "terrainMesh") {
+      addMeshBboxOutline(out, obj.positions);
+      addContextPickRegion(out, obj.positions, obj.id);
     }
   }
+}
+
+/**
+ * Zeichnet den Grundriss-Fussabdruck eines Meshes: Dreieckskanten nahe der
+ * Unterkante (minZ + {@link FOOTPRINT_Z_TOL}), auf XY projiziert, über
+ * quantisierte Endpunkt-Schlüssel entdoppelt. `positions` = flaches [x,y,z…]-
+ * Array (Modell-Meter, z = Höhe), `indices` = Dreiecks-Indizes.
+ */
+function addMeshFootprint(out: Primitive[], positions: number[], indices: number[]): void {
+  const vcount = Math.floor(positions.length / 3);
+  if (vcount < 3 || indices.length < 3) return;
+  let minZ = Infinity;
+  for (let i = 2; i < positions.length; i += 3) if (positions[i] < minZ) minZ = positions[i];
+  if (!Number.isFinite(minZ)) return;
+  const zLimit = minZ + FOOTPRINT_Z_TOL;
+  const q = (v: number) => Math.round(v * 100); // 1-cm-Quantisierung (Entdopplung)
+  const seen = new Set<string>();
+  const edge = (ia: number, ib: number) => {
+    if (ia >= vcount || ib >= vcount) return;
+    const za = positions[ia * 3 + 2];
+    const zb = positions[ib * 3 + 2];
+    if (za > zLimit || zb > zLimit) return; // nur Sockelkanten
+    const ax = positions[ia * 3], ay = positions[ia * 3 + 1];
+    const bx = positions[ib * 3], by = positions[ib * 3 + 1];
+    // Kanten-Schlüssel richtungsunabhängig (kleinerer Endpunkt zuerst).
+    const ka = `${q(ax)},${q(ay)}`;
+    const kb = `${q(bx)},${q(by)}`;
+    if (ka === kb) return;
+    const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      kind: "line",
+      a: { x: ax, y: ay },
+      b: { x: bx, y: by },
+      cls: "context-line",
+      weightMm: CONTEXT_LINE_MM,
+      color: CONTEXT_LINE_COLOR,
+    });
+  };
+  for (let i = 0; i + 2 < indices.length; i += 3) {
+    const a = indices[i], b = indices[i + 1], c = indices[i + 2];
+    edge(a, b);
+    edge(b, c);
+    edge(c, a);
+  }
+}
+
+/** Zeichnet nur den achsenparallelen 2D-Umriss (Bounding-Box) eines Meshes —
+ *  für Terrain, dessen volles TIN-Gitter im Plan zu dicht wäre. */
+function addMeshBboxOutline(out: Primitive[], positions: number[]): void {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    const x = positions[i], y = positions[i + 1];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX)) return;
+  const corners = [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY },
+  ];
+  for (let i = 0; i < 4; i++) {
+    out.push({
+      kind: "line",
+      a: corners[i],
+      b: corners[(i + 1) % 4],
+      cls: "context-line",
+      weightMm: CONTEXT_LINE_MM,
+      color: CONTEXT_LINE_COLOR,
+    });
+  }
+}
+
+/**
+ * Unsichtbares Pick-Band (Grundriss-Bounding-Box) für ein Kontext-Objekt
+ * (importiertes Gebäude/Terrain) — klickbar per Punkt-in-Polygon in PlanView,
+ * trägt die `ContextObject.id` (analog `sectionLineId`, s. dort). Macht das
+ * Objekt IRGENDWO innerhalb seiner Grundfläche anklickbar (nicht nur exakt auf
+ * der dünnen Umriss-/Fussabdrucklinie) — wie bei Wänden, deren Poché-Fläche
+ * ebenfalls als Ganzes klickbar ist (Nutzer-Wunsch: „eigene Elemente wie Wände").
+ * `positions` = flaches [x,y,z…]-Array (Modell-Meter); die Bbox nutzt NUR x/y,
+ * unabhängig von der Höhe.
+ */
+function addContextPickRegion(out: Primitive[], positions: number[], id: string): void {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    const x = positions[i], y = positions[i + 1];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX)) return;
+  out.push({
+    kind: "polygon",
+    pts: [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ],
+    fill: "none",
+    stroke: "none",
+    strokeWidthMm: 0,
+    hatch: NO_HATCH,
+    contextObjectId: id,
+  });
 }
 
 /**
@@ -2736,6 +2899,10 @@ function sectionLabelTag(name: string): string {
 function addSectionLines(out: Primitive[], project: Project): void {
   for (const level of project.drawingLevels) {
     if (level.kind !== "section" && level.kind !== "elevation") continue;
+    // Schnittebene ist ein-/ausblendbar wie andere Ebenen: eine unsichtbare
+    // Schnitt-/Ansichtsebene zeigt ihre Linie im Grundriss nicht (Nutzer-Vision
+    // „eigene Ebene Schnittebenen"). `visible` fehlt = sichtbar (Alt-Projekte).
+    if (level.visible === false) continue;
     const line = level.linePoints;
     if (!line) continue;
     const [p0, p1] = line;
@@ -3053,10 +3220,24 @@ function addStairSymbol(
       stairId,
     });
   }
-  // Auf-/Abpfeil an der Spitze der Lauflinie.
+  // Auf-/Abpfeil an der Spitze der Lauflinie. "filled" = gefülltes Dreieck
+  // (SIA-Vollpfeil), sonst der offene Winkelpfeil (zwei Linien, Default).
   const [h1, tip, h2] = geo.arrow.head;
-  out.push({ kind: "line", a: h1, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
-  out.push({ kind: "line", a: h2, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
+  if (stair.arrowStyle === "filled") {
+    out.push({
+      kind: "polygon",
+      pts: [h1, tip, h2],
+      fill: stroke,
+      stroke,
+      strokeWidthMm: lwMm,
+      hatch: NO_HATCH,
+      greyed,
+      stairId,
+    });
+  } else {
+    out.push({ kind: "line", a: h1, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
+    out.push({ kind: "line", a: h2, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
+  }
 
   // Aussenlinie (Outline) der Treppe — schliessendes Umriss-Polygon (gerade/L)
   // bzw. Innen-/Aussenbogen + radiale Schliesslinien (Wendel).
@@ -3121,10 +3302,20 @@ function computeBounds(
       acc({ x: g.center.x + g.r, y: g.center.y + g.r });
     } else if (g.shape === "text") acc(g.at);
   }
-  // Kontext-Konturen mit einrahmen, damit „Einpassen" sie ebenfalls zeigt.
+  // GESAMTE Kontext-Schicht (Konturen, importierte Gebäude/Terrain, Luftbild)
+  // mit einrahmen, damit „Einpassen"/die Standard-Ansicht sie zeigt — sonst
+  // sässe die Ansicht bei einem reinen Kontext-Import (keine Wände) leer am
+  // Ursprung und der Import wäre „unsichtbar" (Nutzer-Report).
   for (const obj of project.context ?? []) {
-    if (obj.type !== "contourSet") continue;
-    for (const c of obj.contours) for (const p of c.pts) acc(p);
+    if (obj.type === "contourSet") {
+      for (const c of obj.contours) for (const p of c.pts) acc(p);
+    } else if (obj.type === "image") {
+      acc(obj.min);
+      acc(obj.max);
+    } else {
+      const pos = obj.positions;
+      for (let i = 0; i + 1 < pos.length; i += 3) acc({ x: pos[i], y: pos[i + 1] });
+    }
   }
   if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: 1, maxY: 1 };
   return { minX, minY, maxX, maxY };

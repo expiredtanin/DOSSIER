@@ -97,16 +97,18 @@ export interface LayoutState {
 /**
  * Darstellungsmodus für ortsabhängige Inhalte (Navigator-Listen, 3D, Grundriss).
  * Steuert, welche Elemente bezogen auf die aktive Auswahl gezeigt werden — die
- * fünf DOSSIER-Modi (siehe docs/design/context-menu.md), für Ebenen UND
- * Zeichnungsebenen identisch:
+ * fünf DOSSIER-Modi (siehe docs/design/context-menu.md) plus eine eigene
+ * Ergänzung ("locked"), für Ebenen UND Zeichnungsebenen identisch:
  *   • "all_force"   — alle erzwungen sichtbar; Augen gedimmt; Klick aufs Auge
  *                     wechselt zu „Ausgewählte".
  *   • "all"         — sichtbar nach per-Zeile-Flag (Standard).
  *   • "active"      — nur das aktive Element; andere stark gedimmt.
  *   • "grey"        — aktives normal, andere 45 % (Sichtbarkeits-Flags gelten).
  *   • "grey_locked" — wie „grey", andere zusätzlich gesperrt.
+ *   • "locked"      — aktives normal, andere sichtbare UNVERÄNDERT farbig,
+ *                     aber gesperrt (nicht anwählbar/bearbeitbar).
  */
-export type DisplayMode = "all_force" | "all" | "active" | "grey" | "grey_locked";
+export type DisplayMode = "all_force" | "all" | "active" | "grey" | "grey_locked" | "locked";
 
 // ── Panel-Definition & Kontext ─────────────────────────────────────────────
 
@@ -151,6 +153,14 @@ export interface PanelDef {
    * Kopfzeile anbieten soll. Default: kein Umschalter.
    */
   hasDisplayMode?: boolean;
+  /**
+   * Optionale Aktions-Elemente rechts in der EINEN Kopfzeile des PanelFrame
+   * (z. B. „+ Kategorie", Fenster-Ausklinken). So bündeln Panels ihre Aktionen
+   * in der gemeinsamen Frame-Kopfzeile statt einer zweiten eigenen Titelzeile
+   * (kein doppelter Titel mehr). Wird INNERHALB des PanelHostContext gerendert,
+   * darf also `usePanelHost()` nutzen.
+   */
+  headerActions?: ReactNode;
 }
 
 // ── Host-Context (App-Zustand + Handler für Panels) ────────────────────────

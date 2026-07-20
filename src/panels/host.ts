@@ -74,6 +74,11 @@ export interface PanelHostValue {
   onSelectTool: (id: ToolId) => void;
   /** Werkzeuge nur im Grundriss eines Geschosses sinnvoll. */
   toolsEnabled: boolean;
+  /** Laufender Engine-Befehl (Highlight der Befehls-Knöpfe im ToolsPanel). */
+  activeCommand: string | null;
+  /** Engine-Befehl starten (Ändern-/BIM-Befehle im ToolsPanel — gleicher Pfad
+   *  wie das Tippen des Befehlsnamens in der Befehlszeile). */
+  onRunCommand: (name: string) => void;
   /** Aktiver Wandtyp (für das Wand-Werkzeug). */
   activeWallTypeId: string;
   onActiveWallTypeId: (id: string) => void;
@@ -112,6 +117,14 @@ export interface PanelHostValue {
    * Löschen) und hält das offene Menü.
    */
   onLayerContextMenu: (code: string, clientX: number, clientY: number) => void;
+  /** Öffnet die Ebeneneinstellungen direkt (Zahnrad-Symbol je Zeile) — unter
+   * Tauri als natives Fenster, sonst derselbe InlineEditor-Popover wie über
+   * das Kontextmenü (siehe App.tsx `openLayerSettings`). */
+  onOpenLayerSettings: (code: string, clientX: number, clientY: number) => void;
+  /** Öffnet das Einstellungs-Fenster (Darstellungsfarben, Projekt-Felder) —
+   * unter Tauri als natives Fenster, sonst als In-App-Dialog (App.openSettings).
+   * Als Zahnrad in den Panel-Kopfzeilen „Zeichnungsebenen"/„Ebenen". */
+  onOpenSettings: () => void;
 
   // Ressourcen-Handler (Bauteile / Schraffuren / Linienstile). Spiegelt
   // ResourceManagerHandlers, hier flach getippt, damit dieses Modul nicht von
@@ -352,6 +365,15 @@ export interface PanelHostValue {
    */
   onSetSectionLinePatch: (patch: Partial<DrawingLevel>) => void;
   /**
+   * Ob die aktuell im Objekt-Info gezeigte Schnittlinie (`sectionLine`) den
+   * 3D-Live-Schnitt treibt — der `Wasm3DViewport` clippt dann vertikal entlang
+   * dieser Ebene (`sectionPlaneFromLevel`). Reiner Ansichts-Zustand (nicht im
+   * Dokument).
+   */
+  section3dCutActive: boolean;
+  /** Bindet den 3D-Live-Schnitt an diese Schnittlinie / hebt die Bindung auf. */
+  onToggleSection3dCut: (id: string) => void;
+  /**
    * Löscht die Schnittlinie der gewählten Ebene (`linePoints` = undefined); die
    * Ebene selbst bleibt bestehen (der Schnitt zeigt dann wieder den Hinweis).
    */
@@ -368,6 +390,8 @@ export interface PanelHostValue {
   onSetStairRise: (totalRise: number) => void;
   /** Setzt die Laufrichtung (aufwärts/abwärts). */
   onSetStairUp: (up: boolean) => void;
+  /** Setzt die Pfeil-Darstellung (offener Winkel- vs. gefüllter Vollpfeil). */
+  onSetStairArrowStyle: (style: "line" | "filled") => void;
   /** Setzt den Referenzpunkt der Laufbreite (links/mitte/rechts). */
   onSetStairReferenz: (referenz: "links" | "mitte" | "rechts") => void;
   /** Weist der Treppe einen Treppentyp (Bibliothek) zu; "" löst die Zuweisung. */
@@ -410,6 +434,8 @@ export interface PanelHostValue {
   onAddContextObjects: (objs: ContextObject[]) => void;
   /** Entfernt ein Kontext-Objekt per ID. */
   onRemoveContextObject: (id: string) => void;
+  /** Entfernt mehrere Kontext-Objekte in einem Schritt (ganze Ebene/Gruppe). */
+  onRemoveContextObjects: (ids: string[]) => void;
   /**
    * Erzeugt aus einem ContourSet (per ID) ein Gelände-TIN. Liefert die neue
    * TerrainMesh-ID oder null (unbekannte ID / kein sinnvolles TIN).
@@ -421,7 +447,9 @@ export interface PanelHostValue {
    * den Bezug (nächster Import setzt ihn automatisch neu).
    */
   onSetGeoAnchor: (
-    anchor: { lv95: { e: number; n: number }; model: { x: number; y: number }; label?: string } | undefined,
+    anchor:
+      | { lv95: { e: number; n: number }; height?: number; model: { x: number; y: number }; label?: string }
+      | undefined,
   ) => void;
   /** Öffnet den (in App montierten) versteckten DXF-Datei-Dialog. */
   onImportDxf: () => void;

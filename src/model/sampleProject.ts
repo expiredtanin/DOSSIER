@@ -10,6 +10,7 @@ import { materialFromAsset } from "../materials/runtime";
 const PLASTER_ASSET = MATERIAL_LIBRARY.find((a) => a.id === "Plaster001")!;
 const BRICK_ASSET = MATERIAL_LIBRARY.find((a) => a.id === "Bricks104")!;
 const CONCRETE_ASSET = MATERIAL_LIBRARY.find((a) => a.id === "Concrete048")!;
+const ROOF_TILE_ASSET = MATERIAL_LIBRARY.find((a) => a.id === "RoofingTiles013A")!;
 
 // Demo-Haus mit zwei Geschossen:
 //   EG — rechteckiger Raum (5 × 4 m) mit einer Tür in der Südwand.
@@ -148,6 +149,19 @@ export const sampleProject: Project = {
       joinPriority: 10,
       material: materialFromAsset(PLASTER_ASSET),
     },
+    // Dacheindeckung (Tonziegel) — eigenes Bauteil statt des früheren
+    // "brick"-Platzhalters, damit Dächer eine ECHTE Ziegel-Textur zeigen
+    // (Stil „Texturiert") statt der Backstein-Fassadentextur. `color` (Flach-
+    // Fallback für „Schattiert") entspricht dem bisherigen `ROOF_RGB` in
+    // toWalls3d.ts, damit der Nicht-Textur-Look unverändert warm/terracotta bleibt.
+    {
+      id: "roof-tiles",
+      name: "Dachziegel",
+      color: "#b8735c",
+      hatchId: "sia-brick",
+      joinPriority: 15,
+      material: materialFromAsset(ROOF_TILE_ASSET),
+    },
     // Für spätere T-Stöße: Beton als durchlaufender Backbone (höchste Priorität).
     {
       id: "concrete",
@@ -208,7 +222,7 @@ export const sampleProject: Project = {
       name: "Steildach gedämmt",
       // Aussen (Eindeckung) → innen (Verkleidung); Bauteile aus der Bibliothek.
       layers: [
-        { componentId: "brick", thickness: 0.04 }, // Eindeckung (Ziegel, Platzhalter)
+        { componentId: "roof-tiles", thickness: 0.04 }, // Eindeckung (Tonziegel)
         { componentId: "insulation", thickness: 0.22, jointLineStyleId: "thin" }, // Sparren/Dämmung
         { componentId: "render-int", thickness: 0.0125 }, // Innenverkleidung (GK)
       ],
@@ -544,5 +558,26 @@ export const sampleProject: Project = {
   drawings2d: [],
   // Kontext-Schicht (importierte/abgeleitete Geometrie) — anfangs leer; wird
   // über den DXF-Import bzw. die Gelände-Generierung gefüllt.
+  context: [],
+};
+
+/**
+ * Leeres Projekt (nur Bibliotheken, keine Geometrie) — für manuelle Tests, die
+ * ohne das Demo-Haus starten wollen (z. B. Standort-Import auf leerer Fläche).
+ */
+export const emptyProject: Project = {
+  ...sampleProject,
+  id: "empty",
+  name: "Leeres Projekt",
+  walls: [],
+  doors: [],
+  openings: [],
+  ceilings: [],
+  roofs: [],
+  stairs: [],
+  rooms: [],
+  columns: [],
+  extrudedSolids: [],
+  drawings2d: [],
   context: [],
 };

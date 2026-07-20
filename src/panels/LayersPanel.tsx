@@ -4,14 +4,18 @@
 // Navigator: Farb-Swatch, Code, Name, EyeIcon zum Schalten, eingerückte
 // Kinder, Kopfzeile mit + Ebene. Daten/Handler über usePanelHost.
 //
-// Das Panel deklariert hasDisplayMode. Kategorien kennen keine „aktive"
-// Auswahl (anders als Zeichnungsebenen), daher ist isActive je Zeile false;
-// `itemDisplay` ergibt damit (fünf DOSSIER-Modi):
+// Das Panel deklariert hasDisplayMode. „Aktiv" ist die per Klick gewählte
+// Kategorie (activeCategoryCode, Zeichen-Ziel für neue Elemente); dieselbe
+// activeCategoryCode speist auch App.tsx' categoryDisplay-Resolver, der die
+// tatsächliche Grundriss-/3D-Darstellung steuert. `itemDisplay` ergibt damit
+// (fünf DOSSIER-Modi plus eigene Ergänzung "locked"):
 //   • "all_force"   — alle erzwungen sichtbar; Augen gedimmt.
 //   • "all"         — alle sichtbaren normal (Standard, wie bisher).
-//   • "active"      — keine Kategorie aktiv → alle gedimmt.
-//   • "grey"        — sichtbare Kategorien ausgegraut.
-//   • "grey_locked" — wie „grey", zusätzlich gesperrt.
+//   • "active"      — nur die gewählte Kategorie sichtbar, Rest ausgeblendet.
+//   • "grey"        — gewählte normal, übrige sichtbare ausgegraut.
+//   • "grey_locked" — wie „grey", übrige zusätzlich gesperrt.
+//   • "locked"      — gewählte normal, übrige sichtbare UNVERÄNDERT farbig,
+//                     nur gesperrt (nicht anwählbar/bearbeitbar).
 // Wie im Zeichnungsebenen-Panel bleibt jede Zeile bedienbar (die Liste ist die
 // Steuerung); statt auszublenden dimmen wir gedimmte Zeilen per Inline-Opacity
 // (styles.css bleibt unangetastet).
@@ -23,6 +27,7 @@ import { itemDisplay } from "./displayMode";
 import { usePanelHost } from "./host";
 import type { LayerCategory } from "./host";
 import type { DisplayMode } from "./types";
+import { DisplayModeSelect } from "./DisplayModeSelect";
 import { t } from "../i18n";
 
 /** Inhalt des Panels „Ebenen". */
@@ -46,15 +51,13 @@ export function LayersPanel() {
 
   return (
     <section className="nav-group">
-      <header className="nav-group-head">
-        <span className="nav-group-title">{t("nav.layers")}</span>
-        <span className="nav-group-actions">
-          <button className="nav-add" onClick={host.onAddCategory}>
-            {t("layers.addCategory")}
-          </button>
-        </span>
-      </header>
-
+      {/* Kein eigener Titel/Kopf mehr — der PanelFrame liefert die EINE
+          Kopfzeile; die „+ Kategorie"-Aktion sitzt dort via headerActions
+          (LayersHeaderActions), kein doppelter „Ebenen"-Titel. */}
+      <div className="panel-vis">
+        <span className="panel-vis-label">{t("nav.visibility")}</span>
+        <DisplayModeSelect value={displayMode.mode} onChange={displayMode.setMode} />
+      </div>
       <div className="nav-list">
         {project.layers.map((cat) => (
           <CategoryRow
@@ -66,6 +69,7 @@ export function LayersPanel() {
             onSelect={host.onSelectCategory}
             onToggle={toggle}
             onContext={onRowContext}
+            onSettings={host.onOpenLayerSettings}
           />
         ))}
       </div>
@@ -82,6 +86,7 @@ function CategoryRow({
   onSelect,
   onToggle,
   onContext,
+  onSettings,
 }: {
   category: LayerCategory;
   depth: number;
@@ -90,6 +95,7 @@ function CategoryRow({
   onSelect: (code: string) => void;
   onToggle: (code: string) => void;
   onContext: (code: string, e: React.MouseEvent) => void;
+  onSettings: (code: string, clientX: number, clientY: number) => void;
 }) {
   // „aktiv" = diese Kategorie ist das Zeichen-Ziel (per Klick gesetzt).
   const isActive = category.code === activeCode;
@@ -137,6 +143,19 @@ function CategoryRow({
         <span className="cat-code">{category.code}</span>
         <span className="cat-swatch" style={{ background: category.color }} />
         <span className="cat-name">{category.name}</span>
+        <button
+          className="cat-settings"
+          aria-label={t("nav.categorySettings", { name: category.name })}
+          title={t("nav.categorySettings", { name: category.name })}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSettings(category.code, e.clientX, e.clientY);
+          }}
+        >
+          <span className="material-symbols-outlined" aria-hidden="true">
+            settings
+          </span>
+        </button>
       </div>
       {category.children?.map((child) => (
         <CategoryRow
@@ -148,8 +167,38 @@ function CategoryRow({
           onSelect={onSelect}
           onToggle={onToggle}
           onContext={onContext}
+          onSettings={onSettings}
         />
       ))}
+    </>
+  );
+}
+
+/** Aktionen für die gemeinsame PanelFrame-Kopfzeile (statt eigener Titelzeile):
+ *  „+ Kategorie" + Zahnrad → Einstellungen (wie im Zeichnungsebenen-Kopf).
+ *  Läuft im PanelHostContext, nutzt daher usePanelHost. */
+export function LayersHeaderActions() {
+  const host = usePanelHost();
+  return (
+    <>
+      <button
+        className="nav-settings"
+        onClick={host.onOpenSettings}
+        aria-label={t("topbar.settings")}
+        title={t("topbar.settings")}
+      >
+        <span className="material-symbols-outlined" aria-hidden="true">
+          settings
+        </span>
+      </button>
+      <button
+        className="nav-add"
+        onClick={host.onAddCategory}
+        aria-label={t("layers.addCategory")}
+        title={t("layers.addCategory")}
+      >
+        +
+      </button>
     </>
   );
 }

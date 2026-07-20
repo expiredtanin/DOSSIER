@@ -91,11 +91,21 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// Baut die Feature-Edge-LineList aus dem Mesh (siehe Moduldoc).
-///
-/// Ausgabe: interleaved `[px,py,pz, r,g,b, ...]`, je 2 Vertices = 1 Segment.
-/// Leerer Vektor bei leerem/degeneriertem Mesh.
-pub fn build_mesh_edges(mesh: &Mesh) -> Vec<f32> {
+/// Eine Kante samt ihrer deduplizierten Repraesentanten-Normalen (Rueckseiten
+/// bereits gepaart, s. `representatives`). Grundlage BEIDER Kanten-Stile: die
+/// statischen Feature-Edges (`build_mesh_edges`) UND die blickabhaengigen
+/// Silhouetten-Konturen (`build_silhouette_edges`).
+pub struct EdgeAdj {
+    pub p0: [f32; 3],
+    pub p1: [f32; 3],
+    /// Flaechennormalen der (max. 2) angrenzenden Original-Dreiecke.
+    pub reps: Vec<[f32; 3]>,
+}
+
+/// Baut die Kanten-Adjazenz aus dem Mesh: je eindeutiger Kante die Endpunkte +
+/// die deduplizierten Repraesentanten-Normalen. GPU-frei; einmalig bei `set_model`
+/// berechnet und gecacht (die Silhouette wird daraus je Blickwinkel neu abgeleitet).
+pub fn build_edge_adjacency(mesh: &Mesh) -> Vec<EdgeAdj> {
     if mesh.indices.len() < 3 {
         return Vec::new();
     }
@@ -137,20 +147,83 @@ pub fn build_mesh_edges(mesh: &Mesh) -> Vec<f32> {
         }
     }
 
-    let mut verts: Vec<f32> = Vec::new();
-    let mut push = |p: [f32; 3]| {
-        verts.push(p[0]);
-        verts.push(p[1]);
-        verts.push(p[2]);
-        verts.push(EDGE_COLOR[0]);
-        verts.push(EDGE_COLOR[1]);
-        verts.push(EDGE_COLOR[2]);
-    };
+    edges
+        .into_values()
+        .map(|rec| EdgeAdj {
+            p0: rec.p0,
+            p1: rec.p1,
+            reps: representatives(&rec.normals),
+        })
+        .collect()
+}
 
-    for rec in edges.values() {
-        if should_draw(&rec.normals) {
-            push(rec.p0);
-            push(rec.p1);
+fn push_edge(verts: &mut Vec<f32>, p0: [f32; 3], p1: [f32; 3]) {
+    for p in [p0, p1] {
+        verts.extend_from_slice(&[p[0], p[1], p[2], EDGE_COLOR[0], EDGE_COLOR[1], EDGE_COLOR[2]]);
+    }
+}
+
+/// Baut die Feature-Edge-LineList aus dem Mesh (siehe Moduldoc).
+///
+/// Ausgabe: interleaved `[px,py,pz, r,g,b, ...]`, je 2 Vertices = 1 Segment.
+/// Leerer Vektor bei leerem/degeneriertem Mesh.
+pub fn build_mesh_edges(mesh: &Mesh) -> Vec<f32> {
+    let adj = build_edge_adjacency(mesh);
+    let mut verts: Vec<f32> = Vec::new();
+    for a in &adj {
+        if draws_crease(&a.reps) {
+            push_edge(&mut verts, a.p0, a.p1);
+        }
+    }
+    verts
+}
+
+/// Blickabhaengige Silhouetten-Konturen aus der gecachten Kanten-Adjazenz: gezeichnet
+/// werden Randkanten (nur ein Dreieck) UND echte Silhouetten-Kanten — solche, deren
+/// zwei angrenzende Flaechen aus Sicht der Kamera GEGENSAETZLICH orientiert sind
+/// (eine vorder-, eine rueckseitig). Ergebnis ist der reine Umriss (Gipsmodell-/
+/// Konturen-Look) ohne die inneren Knickkanten (Dachgrate). `eye` = Kameraposition
+/// (world), `forward` = Blickrichtung (world, von der Kamera ins Bild); `perspective`
+/// waehlt die pro-Kante-Blickrichtung (Perspektive) vs. die konstante (ortho).
+pub fn build_silhouette_edges(
+    adj: &[EdgeAdj],
+    eye: [f32; 3],
+    forward: [f32; 3],
+    perspective: bool,
+) -> Vec<f32> {
+    let mut verts: Vec<f32> = Vec::new();
+    for a in adj {
+        let draw = match a.reps.len() {
+            0 => false,
+            1 => true, // offene Randkante -> immer Teil der Kontur
+            _ => {
+                let mid = [
+                    (a.p0[0] + a.p1[0]) * 0.5,
+                    (a.p0[1] + a.p1[1]) * 0.5,
+                    (a.p0[2] + a.p1[2]) * 0.5,
+                ];
+                // Blickvektor von der Flaeche ZUR Kamera. Perspektive: eye - mid;
+                // ortho: entgegen der Blickrichtung (konstante Kamera).
+                let view = if perspective {
+                    sub(eye, mid)
+                } else {
+                    [-forward[0], -forward[1], -forward[2]]
+                };
+                let mut front = false;
+                let mut back = false;
+                for n in &a.reps {
+                    let d = dot(*n, view);
+                    if d > 0.0 {
+                        front = true;
+                    } else if d < 0.0 {
+                        back = true;
+                    }
+                }
+                front && back // Silhouette: eine Flaeche vorder-, eine rueckseitig
+            }
+        };
+        if draw {
+            push_edge(&mut verts, a.p0, a.p1);
         }
     }
     verts
@@ -171,15 +244,18 @@ pub fn build_mesh_edges(mesh: &Mesh) -> Vec<f32> {
 /// nur EINEN Vertreter je Original-Dreieck behalten — danach greift dieselbe
 /// Rand-/Knick-Logik wie bei einseitigen Meshes (Waende), unabhaengig davon,
 /// ob doppelseitig gerendert wurde oder nicht.
-fn should_draw(normals: &[[f32; 3]]) -> bool {
-    let mut representatives: Vec<[f32; 3]> = Vec::new();
+/// Dedupliziert die angrenzenden Normalen zu Repraesentanten: paart die von der
+/// doppelseitigen Emission stammenden Rueckseiten (dot ≈ -1) und behaelt je
+/// Original-Dreieck EINEN Vertreter (s. Moduldoc `should_draw`-Historie).
+fn representatives(normals: &[[f32; 3]]) -> Vec<[f32; 3]> {
+    let mut reps: Vec<[f32; 3]> = Vec::new();
     let mut used = vec![false; normals.len()];
     for i in 0..normals.len() {
         if used[i] {
             continue;
         }
         used[i] = true;
-        representatives.push(normals[i]);
+        reps.push(normals[i]);
         for j in (i + 1)..normals.len() {
             if used[j] {
                 continue;
@@ -190,14 +266,20 @@ fn should_draw(normals: &[[f32; 3]]) -> bool {
             }
         }
     }
-    match representatives.len() {
+    reps
+}
+
+/// Entscheidet fuer die STATISCHEN Feature-Edges, ob eine Kante gezeichnet wird:
+/// Randkante (ein Repraesentant) oder Knickkante (zwei stehen ueber dem Crease-
+/// Winkel zueinander). Koplanare geteilte Kanten (Flaechendiagonalen) fallen weg.
+fn draws_crease(reps: &[[f32; 3]]) -> bool {
+    match reps.len() {
         0 => false,
         1 => true, // Silhouette/Rand: gehoert nur einem Original-Dreieck
         _ => {
-            // Zeichnen, sobald irgendein Normalen-Paar deutlich abknickt.
-            for i in 0..representatives.len() {
-                for j in (i + 1)..representatives.len() {
-                    if dot(representatives[i], representatives[j]) < CREASE_COS {
+            for i in 0..reps.len() {
+                for j in (i + 1)..reps.len() {
+                    if dot(reps[i], reps[j]) < CREASE_COS {
                         return true;
                     }
                 }
@@ -276,6 +358,57 @@ mod tests {
     fn empty_mesh_yields_no_edges() {
         let m = Mesh::default();
         assert!(build_mesh_edges(&m).is_empty());
+    }
+
+    /// Ein geschlossener Wuerfel: 8 Ecken, 12 Dreiecke (6 Flaechen, aussen).
+    fn unit_cube() -> Mesh {
+        let c = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ];
+        #[rustfmt::skip]
+        let idx: Vec<u32> = vec![
+            0,3,2, 0,2,1, // -Z
+            4,5,6, 4,6,7, // +Z
+            0,1,5, 0,5,4, // -Y
+            3,7,6, 3,6,2, // +Y
+            0,4,7, 0,7,3, // -X
+            1,2,6, 1,6,5, // +X
+        ];
+        mesh(&c, &idx)
+    }
+
+    #[test]
+    fn cube_feature_edges_are_twelve() {
+        // Statische Feature-Edges: die 12 Wuerfelkanten (Flaechendiagonalen weg).
+        let e = build_mesh_edges(&unit_cube());
+        assert_eq!(segment_count(&e), 12);
+    }
+
+    #[test]
+    fn cube_silhouette_from_generic_view_is_hexagon() {
+        // Aus einer generischen Ecken-Sicht ist die Silhouette eines Wuerfels ein
+        // Sechseck = 6 Kanten (nur der Umriss, KEINE inneren Knickkanten).
+        let adj = build_edge_adjacency(&unit_cube());
+        let eye = [5.0, 6.0, 7.0];
+        let fwd = normalize(sub([0.5, 0.5, 0.5], eye)); // Blick auf die Mitte
+        let sil = build_silhouette_edges(&adj, eye, fwd, true);
+        assert_eq!(segment_count(&sil), 6);
+    }
+
+    #[test]
+    fn cube_silhouette_ortho_is_hexagon_too() {
+        // Auch orthografisch (konstante Blickrichtung) ergibt sich das Sechseck.
+        let adj = build_edge_adjacency(&unit_cube());
+        let fwd = normalize([-1.0, -1.2, -1.4]);
+        let sil = build_silhouette_edges(&adj, [0.0, 0.0, 0.0], fwd, false);
+        assert_eq!(segment_count(&sil), 6);
     }
 }
 

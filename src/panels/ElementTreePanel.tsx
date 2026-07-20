@@ -26,6 +26,8 @@ import { t } from "../i18n";
 const CLASS_ORDER: Exclude<ScheduleKind, "Tür">[] = [
   "Wand",
   "Decke",
+  "Dach",
+  "Stütze",
   "Fenster",
   "Öffnung",
   "Treppe",
@@ -36,6 +38,8 @@ const CLASS_ORDER: Exclude<ScheduleKind, "Tür">[] = [
 const CLASS_LABEL_KEY: Record<Exclude<ScheduleKind, "Tür">, string> = {
   Wand: "elements.kind.wall",
   Decke: "elements.kind.ceiling",
+  Dach: "elements.kind.roof",
+  Stütze: "elements.kind.column",
   Fenster: "elements.kind.window",
   Öffnung: "elements.kind.opening",
   Treppe: "elements.kind.stair",

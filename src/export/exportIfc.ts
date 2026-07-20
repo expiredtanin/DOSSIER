@@ -59,6 +59,7 @@ import {
   openingLabel,
   wallTypeThickness,
 } from "../model/types";
+import { projectToWorldCoords } from "../model/geoRebase";
 import {
   ceilingVerticalExtent,
   stairVerticalExtent,
@@ -283,7 +284,13 @@ interface Structure {
  * File). Reiner Rechenkern — kein Datei-IO. Leeres Projekt ⇒ valider Minimal-
  * IFC (Project/Site/Building, kein Crash).
  */
-export function exportIfcSpf(project: Project): string {
+export function exportIfcSpf(projectIn: Project): string {
+  // Georeferenziert exportieren: ist ein Standort-Bezug gesetzt (geoAnchor),
+  // wird die gesamte Geometrie auf die ECHTEN LV95-Weltkoordinaten verschoben,
+  // damit die IFC-Datei in anderer Software lagerichtig sitzt — auch wenn das
+  // Modell lokal nahe (0,0) bearbeitet wurde (s. projectToWorldCoords / der
+  // „Neuer Bezugspunkt"-Workflow). Ohne Bezug bleibt alles lokal (Identität).
+  const project = projectToWorldCoords(projectIn);
   const w = new StepWriter();
 
   // Geteilte Grundgeometrie: Ursprung, Z-Extrusionsrichtung, Identitäts-
@@ -341,9 +348,14 @@ export function exportIfcSpf(project: Project): string {
     "IFCPROJECT",
     `${S(ifcGuid(`${project.id}:project`))},#${ownerHistory},${S(project.name || "Projekt")},$,$,$,$,${LIST([`#${context}`])},#${unitAssignment}`,
   );
+  // RefElevation (m ü. M.): reale Datumshöhe des Standorts aus dem
+  // Georeferenzierungs-Bezug (wie ArchiCADs Vermessungspunkt). Rein informativ —
+  // die Geometrie wird NICHT verschoben (das Terrain trägt bereits reale Höhen).
+  const refElevation = project.geoAnchor?.height;
+  const siteRefElev = typeof refElevation === "number" ? R(refElevation) : "$";
   const siteId = w.add(
     "IFCSITE",
-    `${S(ifcGuid(`${project.id}:site`))},#${ownerHistory},${S("Standort")},$,$,#${sitePlacement},$,$,${ENUM("ELEMENT")},$,$,$,$,$`,
+    `${S(ifcGuid(`${project.id}:site`))},#${ownerHistory},${S("Standort")},$,$,#${sitePlacement},$,$,${ENUM("ELEMENT")},$,$,${siteRefElev},$,$`,
   );
   const buildingId = w.add(
     "IFCBUILDING",

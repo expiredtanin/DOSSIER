@@ -116,6 +116,34 @@ export function CommandIcon({ name }: { name: string }) {
           <rect x="6" y="6.5" width="4" height="3" strokeDasharray="1.4 1.2" />
         </svg>
       );
+    case "extrude":
+      // Extrusion: Grundfläche + nach oben herausgezogenes Volumen (Prisma).
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="7.5" width="7" height="5" />
+          <path d="M2.5 7.5 L5.5 4.5 L12.5 4.5 L9.5 7.5" />
+          <path d="M9.5 12.5 L12.5 9.5 L12.5 4.5" />
+        </svg>
+      );
+    case "sectionline":
+      // Schnittlinie: Achse mit Blickrichtungs-Winkeln (SIA-Schnittsymbol).
+      return (
+        <svg {...common}>
+          <line x1="2.5" y1="8" x2="13.5" y2="8" />
+          <polyline points="4.5,4.5 4.5,8 8,8" />
+          <polyline points="11.5,11.5 11.5,8 8,8" />
+        </svg>
+      );
+    case "viewline":
+      // Ansichtslinie: Standpunkt (Kreis) mit Blickkegel.
+      return (
+        <svg {...common}>
+          <circle cx="4" cy="8" r="1.6" />
+          <line x1="5.4" y1="8" x2="13" y2="4" />
+          <line x1="5.4" y1="8" x2="13" y2="12" />
+          <line x1="13" y1="4" x2="13" y2="12" />
+        </svg>
+      );
     default:
       return null;
   }

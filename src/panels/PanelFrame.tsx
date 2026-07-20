@@ -54,12 +54,15 @@ export function PanelFrame({
     <section className="panel-frame">
       <header className="panel-head">
         <span className="panel-title">{t(def.title)}</span>
-        {showMode && (
-          <DisplayModeSelect
-            value={displayMode as DisplayMode}
-            onChange={onDisplayModeChange as (m: DisplayMode) => void}
-          />
-        )}
+        <span className="panel-head-actions">
+          {def.headerActions}
+          {showMode && (
+            <DisplayModeSelect
+              value={displayMode as DisplayMode}
+              onChange={onDisplayModeChange as (m: DisplayMode) => void}
+            />
+          )}
+        </span>
       </header>
       <div className="panel-body">{def.render(ctx ?? {})}</div>
     </section>

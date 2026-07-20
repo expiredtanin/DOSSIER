@@ -216,6 +216,69 @@ describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:t
     }
   });
 
+  it("innerLayerRecess: nur die INNERSTE Schicht weicht rundum um ihre Dicke zurück, andere Schichten bündig", () => {
+    // Isolierte Wand W1 (wallTypeId "aw" = 4 Schichten aussen->innen: render-ext,
+    // insulation, brick, render-int) ohne Nachbarn (keine Gehrung), EIN Fenster
+    // mit `innerLayerRecess: true`. Die innerste Schicht (render-int, 0.015 m) muss
+    // an DIESEM Fenster ein rundum um 0.015 m grösseres Loch bekommen; die drei
+    // äusseren Schichten bleiben bei der bündigen (unveränderten) Öffnungsgrösse.
+    const w1 = sampleProject.walls.find((w) => w.id === "W1")!;
+    const p: Project = {
+      ...sampleProject,
+      walls: [w1],
+      doors: [],
+      ceilings: [],
+      context: [],
+      windowTypes: [
+        ...(sampleProject.windowTypes ?? []),
+        {
+          id: "win-recess-test",
+          name: "Test Schichteinzug",
+          kind: "fest",
+          wingCount: 1,
+          glazing: "einfach",
+          frameThickness: 0.06,
+          frameWidth: 0.06,
+          defaultSillHeight: 0.9,
+          defaultWidth: 1.0,
+          defaultHeight: 1.2,
+          innerLayerRecess: true,
+        },
+      ],
+      openings: [
+        {
+          id: "OR",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "21",
+          kind: "window",
+          typeId: "win-recess-test",
+          position: 2.0,
+          width: 1.0,
+          height: 1.2,
+          sillHeight: 0.9,
+        },
+      ],
+    };
+    const bodies = projectToWalls3d(p, true).filter((w) => w.wallId === "W1");
+    expect(bodies.length).toBe(4); // 4 Schicht-Bänder, keine Gehrung/Span-Brüche
+    const withHoles = bodies.filter((b) => b.holes && b.holes.length === 1);
+    expect(withHoles.length).toBe(4);
+    // Innerste Schicht = kleinster |offset| Richtung Innenseite -> hier einfach
+    // die mit der GRÖSSTEN Loch-Fläche identifizieren (der Rücksprung macht ihr
+    // Loch strikt grösser als die der anderen drei, bündigen Schichten).
+    const area = (h: { from: number; to: number; zBottom: number; zTop: number }) =>
+      (h.to - h.from) * (h.zTop - h.zBottom);
+    const holeAreas = withHoles.map((b) => area(b.holes![0]));
+    const sorted = [...holeAreas].sort((a, b) => a - b);
+    // 3 bündige Schichten: identische Lochfläche (1.0 × 1.2 = 1.2 m²).
+    expect(sorted[0]).toBeCloseTo(1.2, 6);
+    expect(sorted[1]).toBeCloseTo(1.2, 6);
+    expect(sorted[2]).toBeCloseTo(1.2, 6);
+    // Innerste Schicht: rundum +0.015 m (render-int-Dicke) -> (1.0+0.03)×(1.2+0.03).
+    expect(sorted[3]).toBeCloseTo(1.03 * 1.23, 6);
+  });
+
   it("layered=false (Schnitt-Pfad): unverändert segmentiert, KEINE holes", () => {
     const w1 = projectToWalls3d(twoOffsetWindows, false).filter((w) => w.wallId === "W1");
     // Der Schnitt-Pfad zerlegt weiter in Pfeiler/Brüstung/Sturz-Segmente (mehr
@@ -352,6 +415,26 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
     };
     const [a, b] = glassMeshes.map(yRange).sort((r1, r2) => r1.min - r2.min);
     expect(a.max).toBeLessThanOrEqual(b.min + 1e-9);
+  });
+
+  it("Legacy-Tür (project.doors, ohne Öffnungs-Typsystem) bekommt ein Blatt-Panel statt eines blanken Lochs", () => {
+    // D1 ist eine LEGACY-Tür (project.doors, kein typeId/Öffnungs-Typsystem) —
+    // vor der Behebung durchliefen emitOpeningGlass/emitOpeningFrames nur
+    // project.openings, D1 blieb im 3D ein reines Loch in der Wand (Nutzer-
+    // Report: "Türen fehlen im 3D komplett"). DOOR_LEAF_RGB = [0.93,0.9,0.85].
+    const { meshes } = projectToModel3d(sampleProject);
+    const leafMeshes = meshes.filter(
+      (m) => m.color[0] === 0.93 && m.color[1] === 0.9 && m.color[2] === 0.85,
+    );
+    expect(leafMeshes.length).toBe(1);
+    const leaf = leafMeshes[0];
+    expect(leaf.positions.length).toBe(24); // Quader: 8 Ecken
+    expect(leaf.indices.length).toBe(36); // 12 Dreiecke
+    // D1: height 2.1, sitzt am Wand-UK (0) -> Blatt UK 0 .. OK 2.1.
+    const zs: number[] = [];
+    for (let i = 2; i < leaf.positions.length; i += 3) zs.push(leaf.positions[i]);
+    expect(Math.min(...zs)).toBeCloseTo(0, 6);
+    expect(Math.max(...zs)).toBeCloseTo(2.1, 6);
   });
 
   it("Türen bekommen keine Scheibe; je Fenster genau 2 (window-standard = zweifach verglast)", () => {
@@ -1823,6 +1906,33 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     const expectedRidgeZ = roofBaseElevation(project, baseRoof) + g.ridgeHeight;
     const allHeights = roofMeshes.flatMap((m) => m.positions.filter((_, i) => i % 3 === 2));
     expect(Math.max(...allHeights)).toBeCloseTo(expectedRidgeZ, 6);
+  });
+
+  it("Dach mit Bauteil-Material (roofTypeId) bekommt eine Textur-Ebene (Stil 'Textured')", () => {
+    // Vorher waren Dächer im Textured-Modus IMMER auf das Fallback-Schachbrett
+    // geklemmt (Nutzer-Report: "Dach soll wie Dachziegel aussehen, nicht so
+    // billig"). Mehrschichtiges Dach über `roofTypeId: "roof-warm"` (sample-
+    // project), äusserste Schicht = "roof-tiles" (echtes Bibliotheks-Material).
+    const roof: Roof = { ...baseRoof, roofTypeId: "roof-warm" };
+    const project: Project = { ...sampleProject, roofs: [roof] };
+    const { meshes } = projectToModel3d(project);
+    // Die äusserste (Eindeckungs-)Schicht hat KEINE Roof.color-Übersteuerung ->
+    // trägt eine aufgelöste materialIndex (nicht mehr die ROOF_RGB-Testfarbe,
+    // deshalb hier nicht über isRoofMesh gefiltert, sondern über materialIndex).
+    const withMaterial = meshes.filter((m) => typeof m.materialIndex === "number");
+    expect(withMaterial.length).toBeGreaterThan(0);
+    expect(withMaterial.every((m) => (m.materialIndex ?? 0) >= 1)).toBe(true);
+  });
+
+  it("Roof.color-Übersteuerung unterdrückt die Material-Textur (bewusst einheitliche Farbe)", () => {
+    const roof: Roof = { ...baseRoof, roofTypeId: "roof-warm", color: "#ff0000" };
+    const project: Project = { ...sampleProject, roofs: [roof] };
+    const { meshes } = projectToModel3d(project);
+    const roofRedMeshes = meshes.filter(
+      (m) => m.color[0] === 1 && m.color[1] === 0 && m.color[2] === 0,
+    );
+    expect(roofRedMeshes.length).toBeGreaterThan(0);
+    expect(roofRedMeshes.every((m) => m.materialIndex === undefined)).toBe(true);
   });
 
   it("Walmdach: vier Dachflächen (2 Quader + 2 Dreiecke) korrekt trianguliert", () => {

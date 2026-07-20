@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Column, ExtrudedSolid, Project } from "./types";
 import { sampleProject } from "./sampleProject";
-import { translateProject } from "./geoRebase";
+import { translateProject, projectToWorldCoords, projectGeoOrigin } from "./geoRebase";
 
 const DX = 100;
 const DY = -50;
@@ -199,5 +199,51 @@ describe("translateProject", () => {
   it("kein geoAnchor gesetzt -> bleibt undefined", () => {
     const out = translateProject(sampleProject, DX, DY);
     expect(out.geoAnchor).toBeUndefined();
+  });
+});
+
+describe("projectGeoOrigin / projectToWorldCoords", () => {
+  it("ohne geoAnchor -> Origin null, projectToWorldCoords ist Identität", () => {
+    expect(projectGeoOrigin(sampleProject)).toBeNull();
+    expect(projectToWorldCoords(sampleProject)).toBe(sampleProject);
+  });
+
+  it("Origin = lv95 − model", () => {
+    const p: Project = {
+      ...sampleProject,
+      geoAnchor: { lv95: { e: 2600500, n: 1200300 }, model: { x: 500, y: 300 } },
+    };
+    expect(projectGeoOrigin(p)).toEqual({ e: 2600000, n: 1200000 });
+  });
+
+  it("Round-Trip: lokal bearbeitetes Modell exportiert an echten LV95-Koordinaten", () => {
+    // Rohimport (model == LV95): eine Wand steht an LV95 (2600010, 1200020).
+    // Danach per georef um (−2600000, −1200000) lokalisiert -> Wand bei (10,20),
+    // geoAnchor.model wandert mit. Der Welt-Export muss (2600010,1200020) liefern.
+    const raw: Project = {
+      ...sampleProject,
+      walls: [
+        {
+          id: "W1",
+          type: "wall",
+          floorId: "eg",
+          categoryCode: "20",
+          start: { x: 2600010, y: 1200020 },
+          end: { x: 2600015, y: 1200020 },
+          wallTypeId: "aw",
+          height: 2.6,
+        },
+      ],
+      geoAnchor: { lv95: { e: 2600000, n: 1200000 }, model: { x: 2600000, y: 1200000 } },
+    };
+    // georef: klick auf (2600000,1200000) -> translate um (−2600000,−1200000).
+    const local = translateProject(raw, -2600000, -1200000);
+    expect(local.walls[0].start).toEqual({ x: 10, y: 20 });
+    // geoAnchor.model ist mitgewandert, lv95 fix.
+    expect(local.geoAnchor).toEqual({ lv95: { e: 2600000, n: 1200000 }, model: { x: 0, y: 0 } });
+    // Welt-Export rechnet exakt auf die ursprünglichen LV95-Koordinaten zurück.
+    const world = projectToWorldCoords(local);
+    expect(world.walls[0].start).toEqual({ x: 2600010, y: 1200020 });
+    expect(world.walls[0].end).toEqual({ x: 2600015, y: 1200020 });
   });
 });

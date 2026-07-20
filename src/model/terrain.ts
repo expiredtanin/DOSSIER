@@ -13,6 +13,9 @@ import type { Contour, TerrainMesh } from "./types";
 
 let terrainSeq = 0;
 
+/** Sichtbarer Ebenen-/Gruppierungsname des Geländes (SitePanel). */
+export const TERRAIN_LAYER = "Terrain";
+
 /**
  * Erzeugt ein TIN aus Konturen.
  *
@@ -96,7 +99,7 @@ export function generateTerrainFromContours(contours: Contour[]): TerrainMesh {
     indices.push(a, b, c);
   }
 
-  return { id, type: "terrainMesh", name, positions, indices };
+  return { id, type: "terrainMesh", name, layer: TERRAIN_LAYER, positions, indices };
 }
 
 /**
@@ -153,5 +156,5 @@ export function terrainMeshFromGrid(grid: TerrainGrid): TerrainMesh {
   if (positions.length < 9 || indices.length < 3) {
     return { id, type: "terrainMesh", name, positions: [], indices: [] };
   }
-  return { id, type: "terrainMesh", name, positions, indices };
+  return { id, type: "terrainMesh", name, layer: TERRAIN_LAYER, positions, indices };
 }

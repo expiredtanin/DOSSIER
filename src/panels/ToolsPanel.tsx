@@ -1,18 +1,23 @@
-// Inhalts-Panel „Werkzeuge" — die vertikale Werkzeug-Palette (ArchiCAD-/
-// Vectorworks-Stil): eine Zeile je Zeichenwerkzeug, jeweils Icon + Name, das
-// aktive Werkzeug hervorgehoben. Darunter — wenn das Wand-Werkzeug aktiv ist —
-// ein Wandtyp-Auswahlfeld, und ein kompakter Fang-Abschnitt mit Checkboxen.
+// Inhalts-Panel „Werkzeuge" — die Werkzeug-Palette (ArchiCAD-/Vectorworks-Stil).
+// Oben ein Umschalter „Liste ↔ Symbole" (Icon+Name als Zeilen ODER kompaktes
+// Icon-Raster). Darunter drei einheitlich gestylte Rubriken: 2D (Zeichnen),
+// 3D (BIM-Bauteile) und Bearbeiten (Ändern-Aktionen) — Werkzeuge UND Befehle
+// teilen denselben Knopf-Look (`.tp-item`), damit „Ändern" nicht mehr optisch
+// aus der Reihe fällt.
 //
-// Daten/Handler kommen über usePanelHost (kein Prop-Drilling). Die Werkzeug-
-// Liste und ihre Metadaten stammen aus der Tools-Registry (TOOL_ORDER/getTool).
+// Daten/Handler kommen über usePanelHost (kein Prop-Drilling). Werkzeug-Metadaten
+// aus der Tools-Registry (getTool), Befehls-Labels aus der Command-Registry.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
+import { useState } from "react";
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import type { ToolId } from "./host";
-import { TOOL_ORDER, getTool } from "../tools/tools";
+import { getTool } from "../tools/tools";
+import { getCommand } from "../commands/registry";
+import { CommandIcon } from "../ui/ribbon/CommandIcon";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 // Keine echten Asset-Icons vorhanden: schlichte Inline-SVG-Glyphen je Werkzeug
@@ -31,18 +36,17 @@ export function ToolIcon({ id }: { id: ToolId }) {
   };
   switch (id) {
     case "select":
-      // Pfeil-Cursor.
+      // Pfeil-Cursor (klassischer Zeiger mit Schweif).
       return (
-        <svg {...common} fill="currentColor" stroke="none">
-          <path d="M3 2l9 5-3.6 1.1L10.4 13 8.5 13.7 6.6 9.4 3 11z" />
+        <svg {...common} fill="currentColor" stroke="currentColor" strokeWidth={0.8}>
+          <path d="M4 2.5 L4 13.2 L6.9 10.4 L8.9 14.6 L10.7 13.8 L8.7 9.7 L12.6 9.6 Z" />
         </svg>
       );
     case "wall":
-      // Zwei parallele Linien (Wandband).
+      // Wandband: zwei parallele Kanten mit geschlossenen Enden (Wandstück).
       return (
         <svg {...common}>
-          <line x1="2" y1="5.5" x2="14" y2="5.5" />
-          <line x1="2" y1="10.5" x2="14" y2="10.5" />
+          <rect x="2" y="5.5" width="12" height="5" />
         </svg>
       );
     case "ceiling":
@@ -55,29 +59,37 @@ export function ToolIcon({ id }: { id: ToolId }) {
         </svg>
       );
     case "window":
-      // Fenster: Rahmen-Rechteck mit Mittelsprosse (Verglasung).
+      // Fenster (SIA-Aufsicht): Wandöffnung mit doppelter Glaslinie.
       return (
         <svg {...common}>
-          <rect x="2.5" y="4" width="11" height="8" />
-          <line x1="8" y1="4" x2="8" y2="12" />
+          <line x1="2" y1="5.5" x2="14" y2="5.5" />
+          <line x1="2" y1="10.5" x2="14" y2="10.5" />
+          <line x1="2" y1="8" x2="14" y2="8" />
+          <line x1="2" y1="5.5" x2="2" y2="10.5" />
+          <line x1="14" y1="5.5" x2="14" y2="10.5" />
         </svg>
       );
     case "door":
-      // Tür: Pfosten + Türblatt mit Schwenkbogen.
+      // Tür (SIA-Aufsicht): Türblatt aufrecht + Viertelkreis-Schwenkbogen.
       return (
         <svg {...common}>
-          <line x1="3" y1="13" x2="3" y2="4" />
-          <line x1="3" y1="4" x2="11" y2="4" />
-          <path d="M3 13 A9 9 0 0 0 11 4" />
+          <line x1="3.5" y1="13" x2="3.5" y2="3" />
+          <path d="M3.5 3 A9.5 9.5 0 0 1 13 12.5" strokeDasharray="1.4 1.4" />
+          <line x1="3.5" y1="13" x2="13" y2="13" />
         </svg>
       );
     case "stair":
-      // Treppensymbol: gestufte Linie (Tritte) + Lauflinie mit Pfeil.
+      // Treppe (SIA-Aufsicht): Wangen, gleichmäßige Tritte, Lauflinie mit
+      // Aufwärts-Pfeil (Idee: Vollbogen ersetzt durch eine echte Treppe).
       return (
         <svg {...common}>
-          <polyline points="2,14 2,11 6,11 6,8 10,8 10,5 14,5 14,2" />
-          <line x1="4" y1="12.5" x2="12" y2="3.5" />
-          <polyline points="10.5,3 12,3.5 11.5,5" />
+          <rect x="3" y="2" width="10" height="12" />
+          <line x1="3" y1="4.4" x2="13" y2="4.4" />
+          <line x1="3" y1="6.8" x2="13" y2="6.8" />
+          <line x1="3" y1="9.2" x2="13" y2="9.2" />
+          <line x1="3" y1="11.6" x2="13" y2="11.6" />
+          <line x1="8" y1="13.2" x2="8" y2="3.4" />
+          <polyline points="6.3,5.1 8,3.2 9.7,5.1" />
         </svg>
       );
     case "room":
@@ -118,10 +130,12 @@ export function ToolIcon({ id }: { id: ToolId }) {
         </svg>
       );
     case "arc":
-      // Offener Halbbogen.
+      // Offener Bogen (gut 180°) mit Endpunkt-Markierungen.
       return (
         <svg {...common}>
-          <path d="M 2.5 12 A 5.5 5.5 0 0 1 13.5 12" fill="none" />
+          <path d="M 2.5 11 A 5.6 5.6 0 0 1 13.5 11" fill="none" />
+          <circle cx="2.5" cy="11" r="0.9" fill="currentColor" stroke="none" />
+          <circle cx="13.5" cy="11" r="0.9" fill="currentColor" stroke="none" />
         </svg>
       );
     case "text":
@@ -147,44 +161,131 @@ export function ToolIcon({ id }: { id: ToolId }) {
   }
 }
 
+// ── Kategorien ───────────────────────────────────────────────────────────────
+// Werkzeuge/Befehle in drei Rubriken sortiert (Nutzerwunsch: „sortiere nach 2D
+// und 3D und Bearbeiten"). Befehlsnamen spiegeln die Ribbon-Registry
+// (ui/ribbon/ribbonItems.ts) — dort liegt die kanonische Liste; hier nur die
+// Panel-Gruppierung (2D-Zeichnen · 3D/BIM-Bauteile · Bearbeiten-Aktionen).
+const TOOLS_2D: ToolId[] = ["line", "polyline", "rect", "circle", "arc", "text", "textbox"];
+const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
+const COMMANDS_3D = ["column", "ceilingopening", "roof", "extrude", "sectionline", "viewline"];
+const COMMANDS_EDIT = ["move", "copy", "rotate", "mirror", "offset", "trim", "join", "measure"];
+
+type ToolsView = "list" | "icons";
+const VIEW_STORAGE_KEY = "dossier.toolsPanel.view";
+
+function loadView(): ToolsView {
+  try {
+    return localStorage.getItem(VIEW_STORAGE_KEY) === "icons" ? "icons" : "list";
+  } catch {
+    return "list";
+  }
+}
+
 // ── Panel ────────────────────────────────────────────────────────────────────
 
 export function ToolsPanel() {
   const host = usePanelHost();
+  const [view, setView] = useState<ToolsView>(loadView);
+
+  const chooseView = (v: ToolsView) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, v);
+    } catch {
+      /* Persistenz ist Best-Effort (privater Modus o. ä.). */
+    }
+  };
+
+  // Ein Werkzeug-Knopf (Icon + Name). Boden-gebundene (`floorOnly`) Werkzeuge
+  // sind ohne aktives Geschoss gesperrt; freie 2D-Werkzeuge bleiben nutzbar.
+  const toolButton = (id: ToolId) => {
+    const tool = getTool(id);
+    const active = host.activeTool === id;
+    const disabled = !!tool.floorOnly && !host.toolsEnabled;
+    const label = t(tool.labelKey);
+    const title = disabled ? t("tool.floorOnlyDisabled") : t(tool.hintKey(tool.init()));
+    return (
+      <button
+        key={id}
+        type="button"
+        className={"tp-item" + (active ? " active" : "") + (disabled ? " disabled" : "")}
+        title={view === "icons" ? label : title}
+        disabled={disabled}
+        onClick={() => host.onSelectTool(id)}
+      >
+        <ToolIcon id={id} />
+        <span className="tp-label">{label}</span>
+      </button>
+    );
+  };
+
+  // Ein Befehls-Knopf (Ändern-/BIM-Kommando ohne eigenen Werkzeug-Modus) —
+  // gleicher Look wie die Werkzeuge (Nutzerwunsch: nicht „ganz anders").
+  const commandButton = (name: string) => {
+    const cmd = getCommand(name);
+    const label = cmd ? t(cmd.labelKey) : t(`cmd.${name}.label`);
+    const active = host.activeCommand === name;
+    return (
+      <button
+        key={name}
+        type="button"
+        className={"tp-item" + (active ? " active" : "")}
+        title={label}
+        onClick={() => host.onRunCommand(name)}
+      >
+        <CommandIcon name={name} />
+        <span className="tp-label">{label}</span>
+      </button>
+    );
+  };
+
+  const bodyClass = "tp-body" + (view === "icons" ? " icons" : "");
 
   return (
     <div className="tools-panel">
-      {/* Werkzeug-Zeilen: Icon + Name, aktives hervorgehoben. */}
-      {TOOL_ORDER.map((id) => {
-        const tool = getTool(id);
-        const active = host.activeTool === id;
-        // Nur Boden-gebundene (`floorOnly`) Werkzeuge sind ohne aktives Geschoss
-        // gesperrt; freie 2D-Werkzeuge (Linie/Kreis/Text/…) bleiben auf
-        // Zeichnungsebenen nutzbar — Parität mit dem Ribbon (RibbonBar).
-        const disabled = !!tool.floorOnly && !host.toolsEnabled;
-        const title = disabled
-          ? t("tool.floorOnlyDisabled")
-          : t(tool.hintKey(tool.init()));
-        const cls =
-          "tool-row" + (active ? " active" : "") + (disabled ? " disabled" : "");
-        return (
+      {/* Anzeige-Umschalter: nur Symbole ODER Symbol + Name (Liste). */}
+      <div className="tp-head">
+        <div className="tp-viewtoggle" role="group" aria-label={t("tools.view.label")}>
           <button
-            key={id}
             type="button"
-            className={cls}
-            title={title}
-            disabled={disabled}
-            onClick={() => host.onSelectTool(id)}
+            className={"tp-viewbtn" + (view === "list" ? " active" : "")}
+            aria-pressed={view === "list"}
+            onClick={() => chooseView("list")}
           >
-            <ToolIcon id={id} />
-            <span>{t(tool.labelKey)}</span>
+            {t("tools.view.list")}
           </button>
-        );
-      })}
+          <button
+            type="button"
+            className={"tp-viewbtn" + (view === "icons" ? " active" : "")}
+            aria-pressed={view === "icons"}
+            onClick={() => chooseView("icons")}
+          >
+            {t("tools.view.icons")}
+          </button>
+        </div>
+      </div>
 
-      {/* Wandtyp-/Deckentyp-Auswahl ist ins Attribute-Panel gewandert (Ribbon-UI
-          Phase 3: Werkzeug-Sidebar nicht mehr im Default-Layout). Der Picker
-          erscheint dort bei aktivem Wand-/Decken-Werkzeug. */}
+      {/* Auswahl-Werkzeug: immer als volle Zeile zuoberst (meistgenutzt). */}
+      <div className="tp-select">{toolButton("select")}</div>
+
+      <section className="tp-section">
+        <div className="tp-section-title">{t("tools.cat.2d")}</div>
+        <div className={bodyClass}>{TOOLS_2D.map(toolButton)}</div>
+      </section>
+
+      <section className="tp-section">
+        <div className="tp-section-title">{t("tools.cat.3d")}</div>
+        <div className={bodyClass}>
+          {TOOLS_3D.map(toolButton)}
+          {COMMANDS_3D.map(commandButton)}
+        </div>
+      </section>
+
+      <section className="tp-section">
+        <div className="tp-section-title">{t("tools.cat.edit")}</div>
+        <div className={bodyClass}>{COMMANDS_EDIT.map(commandButton)}</div>
+      </section>
     </div>
   );
 }

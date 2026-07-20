@@ -24,6 +24,7 @@ import type {
   Ceiling,
   Column,
   ColumnProfile,
+  ContextObject,
   Drawing2D,
   Drawing2DGeom,
   ExtrudedSolid,
@@ -41,6 +42,7 @@ import type {
   Wall,
   WallReferenceLine,
 } from "../model/types";
+import { localToLv95 } from "../io/lv95";
 import { columnVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
 import { evaluateRoom, polygonArea } from "../geometry/roomArea";
@@ -258,6 +260,8 @@ export interface StairInfo {
   treadDepth: number;
   /** Laufrichtung aufwärts (Auf-/Abpfeil-Richtung). */
   up: boolean;
+  /** Pfeil-Darstellung (offener Winkel- vs. gefüllter Vollpfeil). Fehlt → "line". */
+  arrowStyle?: "line" | "filled";
   /** Referenzpunkt der Laufbreite (links/mitte/rechts). Fehlt → "mitte". */
   referenz?: "links" | "mitte" | "rechts";
   /** Zugewiesener Treppentyp (Bibliothek, `Stair.typeId`) oder undefined. */
@@ -348,7 +352,8 @@ export interface Selection {
     | "door"
     | "extrudedSolid"
     | "column"
-    | "roof";
+    | "roof"
+    | "contextObject";
   id: string;
   /** Grafik-Kategorie (Ebene) des Elements. */
   categoryCode: string;
@@ -424,6 +429,20 @@ export interface Selection {
   extrudedSolid?: ExtrudedSolidInfo;
   /** Stützen-Attribute (nur bei `kind === "column"`). */
   column?: ColumnInfo;
+  /** Kontext-Objekt-Attribute (nur bei `kind === "contextObject"`). */
+  contextObject?: ContextObjectInfo;
+}
+
+/**
+ * Kontext-Objekt-spezifische Attribute (importiertes Mesh/Terrain/Konturen-
+ * Satz) für das Object-Info-Panel — v. a. zum Prüfen, OB/WOHIN georeferenziert
+ * importiert wurde (Nutzer-Wunsch: reale Koordinaten direkt sichtbar).
+ */
+export interface ContextObjectInfo {
+  objType: ContextObject["type"];
+  /** Reale LV95-Koordinate des Bbox-Mittelpunkts, falls `Project.geoAnchor`
+   *  gesetzt ist (sonst `undefined` — kein Bezug bekannt). */
+  lv95Center?: { e: number; n: number };
 }
 
 const WALL_FALLBACK_MM = 0.18;
@@ -765,6 +784,7 @@ function stairSelection(project: Project, s: Stair): Selection {
     riserHeight: geo.riserHeight,
     treadDepth: geo.treadDepth,
     up: s.up !== false,
+    arrowStyle: s.arrowStyle,
     referenz: s.referenz,
     typeId: s.typeId,
     floorId: s.floorId,
@@ -908,6 +928,53 @@ function columnSelection(project: Project, col: Column): Selection {
   };
 }
 
+/**
+ * Selektion für ein Kontext-Objekt (importiertes Mesh/Terrain/Konturen-Satz)
+ * ableiten. Bbox aus den rohen x/y-Koordinaten (Meshes: flaches [x,y,z…]-
+ * Array, nur x/y je Vertex; Konturen: `pts` je Kontur) — die Höhe (z) bleibt
+ * unberücksichtigt (2D-Bbox wie bei allen anderen Elementarten). `lv95Center`
+ * nur, wenn `project.geoAnchor` gesetzt ist (sonst kein Rückrechnungs-Bezug).
+ */
+function contextObjectSelection(project: Project, obj: ContextObject): Selection {
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  const consider = (x: number, y: number) => {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+  if (obj.type === "contourSet") {
+    for (const c of obj.contours) for (const p of c.pts) consider(p.x, p.y);
+  } else if (obj.type === "image") {
+    consider(obj.min.x, obj.min.y);
+    consider(obj.max.x, obj.max.y);
+  } else {
+    const pos = obj.positions;
+    for (let i = 0; i + 2 < pos.length; i += 3) consider(pos[i], pos[i + 1]);
+  }
+  if (!isFinite(minX)) minX = minY = maxX = maxY = 0;
+  const anchor = project.geoAnchor;
+  const lv95Center = anchor
+    ? localToLv95(
+        (minX + maxX) / 2,
+        (minY + maxY) / 2,
+        { e: anchor.lv95.e - anchor.model.x, n: anchor.lv95.n - anchor.model.y },
+      )
+    : undefined;
+  return {
+    kind: "contextObject",
+    id: obj.id,
+    categoryCode: "",
+    color: "#888888",
+    weightMm: WALL_FALLBACK_MM,
+    bbox: { minX, minY, maxX, maxY },
+    contextObject: { objType: obj.type, lv95Center },
+  };
+}
+
 /** Selektion für ein 2D-Zeichenelement ableiten (gleiche Auflösung wie generatePlan). */
 function drawingSelection(project: Project, d: Drawing2D): Selection {
   const ls = d.lineStyleId
@@ -963,7 +1030,12 @@ export function deriveSelection(
   selectedExtrudedSolidId: string | null = null,
   selectedColumnId: string | null = null,
   selectedRoofId: string | null = null,
+  selectedContextObjectId: string | null = null,
 ): Selection | null {
+  if (selectedContextObjectId) {
+    const o = (project.context ?? []).find((x) => x.id === selectedContextObjectId);
+    if (o) return contextObjectSelection(project, o);
+  }
   if (selectedDrawingId) {
     const d = project.drawings2d.find((x) => x.id === selectedDrawingId);
     return d ? drawingSelection(project, d) : null;

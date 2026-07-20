@@ -55,10 +55,13 @@ pub use types::{
 #[cfg(test)]
 mod tests {
     use super::mesh::{
-        build_walls_mesh, build_walls_mesh_textured, extrude_wall, INDICES_PER_BOX, VERTS_PER_BOX,
+        build_free_wall_end_caps, build_scene_mesh_textured, build_walls_mesh,
+        build_walls_mesh_textured, extrude_wall, INDICES_PER_BOX, VERTS_PER_BOX,
     };
+    use super::section_fill::CAP_FLOATS_PER_VERTEX;
     use super::types::{
-        Hole, Mesh, Opening, WallInput, WallLayer, FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
+        Hatch, Hole, Mesh, Opening, WallInput, WallLayer, FLOATS_PER_VERTEX,
+        TEXTURED_FLOATS_PER_VERTEX,
     };
 
     /// Bequemer Bau einer achsparallelen Wand entlang +X.
@@ -159,6 +162,65 @@ mod tests {
         // Kein Index zeigt ausserhalb des Puffers.
         let max_idx = *mesh.indices.iter().max().unwrap();
         assert!((max_idx as usize) < mesh.vertex_count());
+    }
+
+    /// `wall_x` mit gesetzter Bauteil-Schraffur (Voraussetzung fuer die Kappen).
+    fn wall_x_hatched(len: f32, thickness: f32, height: f32) -> WallInput {
+        WallInput {
+            hatch: Some(Hatch { pattern: 3, angle: 45.0, scale: 1.0, line_weight: 0.13 }),
+            ..wall_x(len, thickness, height)
+        }
+    }
+
+    #[test]
+    fn isolierte_wand_ohne_hatch_bekommt_keine_kappen() {
+        // Bestehende Test-Fixtures (kein `hatch`) bleiben unangetastet: keine
+        // Kappen-Geometrie, unabhaengig davon, dass beide Enden frei sind.
+        let caps = build_free_wall_end_caps(&[wall_x(3.0, 0.2, 2.5)]);
+        assert!(caps.is_empty());
+    }
+
+    #[test]
+    fn isolierte_wand_mit_hatch_bekommt_kappen_an_beiden_freien_enden() {
+        // Eine einzelne Wand hat KEINE Nachbarn -> beide Achsenenden sind frei ->
+        // je Ende eine Schraffur-Kappe (1 Schicht x 2 Dreiecke x 3 Vertices = 6
+        // Vertices je Ende, 12 insgesamt).
+        let caps = build_free_wall_end_caps(&[wall_x_hatched(3.0, 0.2, 2.5)]);
+        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 12);
+        // Jeder Kappen-Vertex traegt die Schraffur-Parameter (Muster 3 = crosshatch).
+        for v in caps.chunks_exact(CAP_FLOATS_PER_VERTEX) {
+            assert_eq!(v[5], 3.0, "pattern");
+            assert!((v[6] - 45.0_f32.to_radians()).abs() < 1e-5, "angle_rad");
+        }
+    }
+
+    #[test]
+    fn verbundene_wandenden_bekommen_keine_kappe_dort() {
+        // Zwei Waende treffen sich rechtwinklig bei (3,0) -> DIESES Ende ist bei
+        // beiden Waenden NICHT frei (Gehrung/Anschluss), die beiden anderen
+        // (freien) Enden bekommen weiterhin je eine Kappe -> 2 Kappen gesamt
+        // (nicht 4), macht 12 Vertices statt 24.
+        let a = wall_x_hatched(3.0, 0.2, 2.5); // (0,0) frei .. (3,0) verbunden
+        let b = WallInput {
+            start: [3.0, 0.0],
+            end: [3.0, 4.0],
+            ..wall_x_hatched(4.0, 0.2, 2.5) // (3,0) verbunden .. (3,4) frei
+        };
+        let caps = build_free_wall_end_caps(&[a, b]);
+        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 12, "nur die 2 freien Enden -> 2 Kappen");
+    }
+
+    #[test]
+    fn t_stoss_bekommt_ebenfalls_keine_kappe_am_knoten() {
+        // Drei Waende treffen sich am selben Punkt (T-Stoss, Gehrung bleibt
+        // rechtwinklig, s. compute_wall_miters) -> trotzdem gilt der Knoten als
+        // "beruehrt", KEINE der drei dortigen Enden bekommt eine Kappe.
+        let a = wall_x_hatched(3.0, 0.2, 2.5); // endet bei (3,0)
+        let b = WallInput { start: [3.0, 0.0], end: [3.0, 4.0], ..wall_x_hatched(4.0, 0.2, 2.5) };
+        let c = WallInput { start: [3.0, 0.0], end: [6.0, 0.0], ..wall_x_hatched(3.0, 0.2, 2.5) };
+        let caps = build_free_wall_end_caps(&[a, b, c]);
+        // Freie Enden: a.start(0,0), b.end(3,4), c.end(6,0) -> 3 Kappen (nicht 6).
+        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 18);
     }
 
     #[test]
@@ -840,6 +902,8 @@ mod tests {
             indices: vec![0, 1, 2],
             kind,
             color,
+            material_index: None,
+            vertex_colors: Vec::new(),
         }
     }
 
@@ -882,6 +946,73 @@ mod tests {
     }
 
     #[test]
+    fn context_mesh_pro_vertex_farbe_wird_uebernommen() {
+        // Luftbild-Drape: jeder Vertex traegt eine eigene Farbe. Wird 1:1 an die
+        // Ausgabe-Vertices durchgereicht (statt der Einzelfarbe).
+        let mut mesh = Mesh::default();
+        append_context_mesh(
+            &mut mesh,
+            &MeshInput {
+                positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                indices: vec![0, 1, 2],
+                kind: MeshKind::Terrain,
+                color: None,
+                material_index: None,
+                vertex_colors: vec![
+                    1.0, 0.0, 0.0, // Vertex 0 rot
+                    0.0, 1.0, 0.0, // Vertex 1 gruen
+                    0.0, 0.0, 1.0, // Vertex 2 blau
+                ],
+            },
+        );
+        // Vorderseite = erste 3 Vertices (Winding a,b,c): Farben 0,1,2.
+        assert_eq!([mesh.verts[6], mesh.verts[7], mesh.verts[8]], [1.0, 0.0, 0.0]);
+        assert_eq!([mesh.verts[15], mesh.verts[16], mesh.verts[17]], [0.0, 1.0, 0.0]);
+        assert_eq!([mesh.verts[24], mesh.verts[25], mesh.verts[26]], [0.0, 0.0, 1.0]);
+        // Zu kurzes vertex_colors-Array -> Einzelfarbe (kein Panic, kein Teilbezug).
+        let mut mesh2 = Mesh::default();
+        append_context_mesh(
+            &mut mesh2,
+            &MeshInput {
+                positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                indices: vec![0, 1, 2],
+                kind: MeshKind::Terrain,
+                color: None,
+                material_index: None,
+                vertex_colors: vec![1.0, 0.0, 0.0], // nur 1 Vertex -> ignoriert
+            },
+        );
+        assert_eq!(
+            [mesh2.verts[6], mesh2.verts[7], mesh2.verts[8]],
+            MeshKind::Terrain.default_color()
+        );
+    }
+
+    #[test]
+    fn kontext_mesh_materialindex_wandert_in_die_textured_layer() {
+        // Daecher (und potenziell andere Kontext-Meshes) koennen jetzt einen
+        // Material-Textur-Index tragen (`MeshInput::material_index`) — vorher
+        // war er fuer ALLE Kontext-Meshes hart auf -1 (Schachbrett) gesetzt, der
+        // Stil „Textured" konnte also nie eine echte Dachziegel-Textur zeigen.
+        let m = MeshInput {
+            positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            indices: vec![0, 1, 2],
+            kind: MeshKind::Extrusion,
+            color: None,
+            material_index: Some(2),
+            vertex_colors: Vec::new(),
+        };
+        let tex = build_scene_mesh_textured(&[], &[], std::slice::from_ref(&m));
+        assert!(!tex.layers.is_empty());
+        assert!(tex.layers.iter().all(|&l| l == 2.0), "alle Vertices Ebene 2");
+
+        // Ohne material_index bleibt der Fallback (-1 -> Schachbrett).
+        let m2 = MeshInput { material_index: None, ..m };
+        let tex2 = build_scene_mesh_textured(&[], &[], std::slice::from_ref(&m2));
+        assert!(tex2.layers.iter().all(|&l| l == -1.0));
+    }
+
+    #[test]
     fn context_mesh_ueberspringt_kaputte_indizes_und_entartung() {
         let mut mesh = Mesh::default();
         // Index 9 out-of-range (nur 3 Vertices) -> Dreieck verworfen, kein Panic.
@@ -892,6 +1023,8 @@ mod tests {
                 indices: vec![0, 1, 9],
                 kind: MeshKind::Imported,
                 color: None,
+                material_index: None,
+                vertex_colors: Vec::new(),
             },
         );
         assert_eq!(mesh.vertex_count(), 0);
@@ -903,6 +1036,8 @@ mod tests {
                 indices: vec![0, 1, 2],
                 kind: MeshKind::Imported,
                 color: None,
+                material_index: None,
+                vertex_colors: Vec::new(),
             },
         );
         assert_eq!(mesh.vertex_count(), 0);
@@ -1078,5 +1213,14 @@ mod tests {
         Validator::new(ValidationFlags::all(), Capabilities::all())
             .validate(&tex_module)
             .unwrap_or_else(|e| panic!("textured: WGSL-Validierung fehlgeschlagen: {e:?}"));
+
+        // Luftbild-Drape-Shader (Terrain-Overlay, Bild-Textur + Bbox-Uniform in
+        // group 1) ebenso headless validieren.
+        let aerial_src = super::shaders::MESH_AERIAL_WGSL;
+        let aerial_module = naga::front::wgsl::parse_str(aerial_src)
+            .unwrap_or_else(|e| panic!("aerial: WGSL-Parse-Fehler: {e:?}"));
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&aerial_module)
+            .unwrap_or_else(|e| panic!("aerial: WGSL-Validierung fehlgeschlagen: {e:?}"));
     }
 }

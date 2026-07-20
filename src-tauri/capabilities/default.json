@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Basis-Permissions + Fenstersteuerung fuer die randlose (decorations:false) Titelleiste: Minimieren/Maximieren/Schliessen + Ziehen der eigenen Titelleiste (data-tauri-drag-region).",
-  "windows": ["main"],
+  "description": "Basis-Permissions + Fenstersteuerung fuer die randlose (decorations:false) Titelleiste: Minimieren/Maximieren/Schliessen + Ziehen der eigenen Titelleiste (data-tauri-drag-region). Menu: fuer die native macOS-Systemmenueleiste (src/native/appMenu.ts). Webview/Event: fuer die nativen Ressourcen-/Einstellungs-/Zeichnungsebenen-/Ebeneneinstellungs-Fenster + ihre Sync-Bruecken (src/native/*Window.ts) - gilt fuer alle Fensterlabels, da jedes Events senden/empfangen muss.",
+  "windows": ["main", "resources", "settings", "drawing-levels", "layer-settings", "context-import"],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
@@ -12,6 +12,10 @@
     "core:window:allow-is-maximized",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
+    "core:window:allow-create",
+    "core:webview:allow-create-webview-window",
+    "core:menu:default",
+    "core:event:default",
     "dialog:allow-save",
     "fs:allow-write-text-file"
   ]

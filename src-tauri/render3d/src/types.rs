@@ -336,6 +336,20 @@ pub struct MeshInput {
     /// Default-Farbe je `kind` (siehe `effective_color`).
     #[serde(default)]
     pub color: Option<Rgb>,
+    /// Optionaler Material-Textur-Index fuer den Stil `Textured` (1-basiert,
+    /// Ebene 0 = Fallback-Schachbrett) — analog `WallInput::material_index`.
+    /// Bislang nutzen das nur Daecher (`toWalls3d.ts::emitRoofs`); andere
+    /// Kontext-Meshes (Terrain/Import) bleiben ohne (`None` -> Schachbrett).
+    #[serde(default, rename = "materialIndex")]
+    pub material_index: Option<u32>,
+    /// Optionale PRO-VERTEX-Albedo (flaches `[r,g,b, r,g,b, ...]`, 0..1) — ein
+    /// Wert je Positions-Vertex. Wird u. a. genutzt, um ein SWISSIMAGE-Luftbild
+    /// auf das Gelaende-TIN zu „drapieren" (jeder Vertex traegt den Bildpunkt an
+    /// seiner Lage). Ist das Array leer oder zu kurz, greift die Einzelfarbe
+    /// (`effective_color`) fuer das ganze Mesh. Die Farben werden im Shaded-Pfad
+    /// pro Vertex interpoliert (kein Textur-Sampler noetig).
+    #[serde(default, rename = "vertexColors")]
+    pub vertex_colors: Vec<f32>,
 }
 
 impl MeshInput {
@@ -398,8 +412,15 @@ fn default_ortho_half_height() -> f32 {
 fn default_near() -> f32 {
     0.05
 }
-fn default_far() -> f32 {
-    1000.0
+// `pub(crate)`, damit `web::set_camera` denselben Basiswert als Untergrenze fuer
+// die modellgroessen-abhaengige Far-Ebene nutzen kann (s. Moduldoc dort).
+// War 1000.0 — Nutzer-Report: Teile des Modells (und das Boden-Referenzgitter)
+// verschwanden abhaengig von Kamera-Distanz/-Winkel. Grosszuegig angehoben,
+// damit im ueblichen Gebrauch (auch grosse/georeferenzierte Situationen) nie
+// etwas am Fern-Clipping haengenbleibt; `set_camera` skaliert ohnehin
+// zusaetzlich mit der tatsaechlichen Modell-Bounding-Box nach oben.
+pub(crate) fn default_far() -> f32 {
+    50_000.0
 }
 
 impl Default for Camera {

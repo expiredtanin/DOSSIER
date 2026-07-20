@@ -5,7 +5,13 @@
 // `swissTopo.ts::fetchBuildings`/`geocode` (kein Fetch-Mocking im Repo).
 
 import { describe, it, expect } from "vitest";
-import { shiftMeshToOrigin, clipMeshToBbox } from "./swissBuildings3d";
+import {
+  shiftMeshToOrigin,
+  clipMeshToBbox,
+  splitMeshComponents,
+  stripOverhangSoffits,
+  BUILDING_LAYER,
+} from "./swissBuildings3d";
 import type { ImportedMesh } from "../model/types";
 
 describe("shiftMeshToOrigin", () => {
@@ -77,5 +83,139 @@ describe("clipMeshToBbox", () => {
     };
     const clipped = clipMeshToBbox(straddling, [-5, -5, 5, 5]);
     expect(clipped.indices).toEqual([0, 1, 2]);
+  });
+});
+
+describe("splitMeshComponents", () => {
+  // Zwei räumlich getrennte Dreiecke (kein gemeinsamer Vertex) = zwei Gebäude.
+  const twoBuildings: ImportedMesh = {
+    id: "m1",
+    type: "importedMesh",
+    name: "Kachel",
+    positions: [
+      0, 0, 0, 1, 0, 0, 0, 1, 0, // Gebäude A
+      100, 100, 0, 101, 100, 0, 100, 101, 0, // Gebäude B (weit weg)
+    ],
+    indices: [0, 1, 2, 3, 4, 5],
+  };
+
+  it("trennt zwei unverbundene Dreiecke in zwei Meshes mit eigener Id + Ebene", () => {
+    const parts = splitMeshComponents(twoBuildings);
+    expect(parts.length).toBe(2);
+    expect(parts[0].id).not.toBe(parts[1].id);
+    for (const p of parts) {
+      expect(p.layer).toBe(BUILDING_LAYER);
+      expect(p.indices.length).toBe(3); // je ein Dreieck
+      expect(p.positions.length).toBe(9); // kompaktiert: nur die 3 eigenen Vertices
+      // Indizes sind neu gemappt (0..2), zeigen nicht mehr auf die alten Globalindizes.
+      expect(Math.max(...p.indices)).toBeLessThan(3);
+    }
+  });
+
+  it("verschweisst geteilte Eckpunkte: zwei Dreiecke mit gemeinsamer Kante bleiben EIN Gebäude", () => {
+    // Zwei Dreiecke teilen die Kante (1,0)-(0,1), aber über DUPLIZIERTE Vertices
+    // (getrennte Indizes, gleiche Koordinaten) — das Welding muss sie verbinden.
+    const shared: ImportedMesh = {
+      id: "m2",
+      type: "importedMesh",
+      name: "Haus",
+      positions: [
+        0, 0, 0, 1, 0, 0, 0, 1, 0, // Dreieck 1: (0,0),(1,0),(0,1)
+        1, 0, 0, 0, 1, 0, 1, 1, 0, // Dreieck 2: (1,0),(0,1),(1,1) — dupl. Ecken
+      ],
+      indices: [0, 1, 2, 3, 4, 5],
+    };
+    const parts = splitMeshComponents(shared);
+    expect(parts.length).toBe(1);
+    expect(parts[0].indices.length).toBe(6);
+  });
+
+  it("ein einzelnes zusammenhängendes Mesh bleibt ein Mesh (bekommt aber die Ebene)", () => {
+    const one: ImportedMesh = {
+      id: "m3",
+      type: "importedMesh",
+      name: "Solo",
+      positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      indices: [0, 1, 2],
+    };
+    const parts = splitMeshComponents(one);
+    expect(parts.length).toBe(1);
+    expect(parts[0].layer).toBe(BUILDING_LAYER);
+  });
+
+  it("leeres/entartetes Mesh -> leeres Ergebnis (kein Crash)", () => {
+    const empty: ImportedMesh = { id: "e", type: "importedMesh", name: "x", positions: [], indices: [] };
+    expect(splitMeshComponents(empty)).toEqual([]);
+  });
+});
+
+describe("stripOverhangSoffits", () => {
+  // Sockel (z=0) + Soffit/Wandkopf-Ring (z=2.5, EINE Dreieck-Fläche zeigt nach
+  // unten = Überstand-Untersicht) + Dach (z=3, nach oben) + zwei Wanddreiecke
+  // (senkrecht, nz≈0). Simuliert einen minimalen swissBUILDINGS3D-Baukörper mit
+  // einer sichtbaren Dachüberstand-Untersicht (Nutzer-Report: "man sieht die
+  // Wände von unten").
+  it("entfernt eine nach unten zeigende Überstand-Untersicht oberhalb der Grundmauer", () => {
+    const mesh: ImportedMesh = {
+      id: "m1",
+      type: "importedMesh",
+      name: "Haus",
+      positions: [
+        0, 0, 0, // 0: Sockel
+        1, 0, 0, // 1: Sockel
+        0, 1, 0, // 2: Sockel
+        0, 0, 2.5, // 3: Wandkopf
+        1, 0, 2.5, // 4: Wandkopf
+        0, 1, 2.5, // 5: Wandkopf (nur vom Soffit referenziert)
+        0, 0, 3, // 6: Dach
+        1, 0, 3, // 7: Dach
+        0, 1, 3, // 8: Dach
+      ],
+      indices: [
+        0, 1, 2, // Sockel-Deckel (bleibt immer)
+        3, 5, 4, // Soffit (Normale zeigt nach unten, nz=-1) -> entfernt
+        6, 7, 8, // Dach (Normale zeigt nach oben, nz=+1) -> bleibt
+        0, 1, 4, // Wand (senkrecht, nz≈0) -> bleibt
+        0, 4, 3, // Wand (senkrecht, nz≈0) -> bleibt
+      ],
+    };
+    const out = stripOverhangSoffits(mesh);
+    // 5 Dreiecke -> 4 (Soffit weg) = 12 Indizes.
+    expect(out.indices.length).toBe(12);
+    // Vertex 5 wird nur vom Soffit referenziert -> nach Kompaktierung weg
+    // (8 statt 9 Vertices).
+    expect(out.positions.length).toBe(24);
+  });
+
+  it("lässt ein Mesh ohne Soffiten unverändert", () => {
+    const mesh: ImportedMesh = {
+      id: "m1",
+      type: "importedMesh",
+      name: "Dreieck",
+      positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      indices: [0, 1, 2],
+    };
+    const out = stripOverhangSoffits(mesh);
+    expect(out.indices).toEqual([0, 1, 2]);
+    expect(out.positions).toEqual(mesh.positions);
+  });
+
+  it("behält den Boden-/Sockel-Deckel unabhängig von seiner Windung", () => {
+    // Ein Dreieck exakt auf der Grundmauer-Höhe mit nach-unten-Windung -> die
+    // Boden-Ausnahme greift VOR der Normalen-Prüfung, bleibt also erhalten.
+    const mesh: ImportedMesh = {
+      id: "m1",
+      type: "importedMesh",
+      name: "Sockel",
+      positions: [0, 0, 0, 0, 1, 0, 1, 0, 0], // a,c,b-Reihenfolge -> nz=-1
+      indices: [0, 1, 2],
+    };
+    const out = stripOverhangSoffits(mesh);
+    expect(out.indices.length).toBe(3);
+  });
+
+  it("leeres/entartetes Mesh -> unverändert (kein Crash)", () => {
+    const empty: ImportedMesh = { id: "e", type: "importedMesh", name: "x", positions: [], indices: [] };
+    expect(stripOverhangSoffits(empty)).toBe(empty);
   });
 });

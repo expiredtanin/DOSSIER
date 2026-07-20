@@ -16,7 +16,7 @@
 // fünf DOSSIER-Modi): das Zeichnungsebenen-Panel steuert das 3D, das
 // Ebenen-Panel die Kategorie-Darstellung in Grundriss UND 3D.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   collectVisibleCodes,
   flattenCategories,
@@ -49,7 +49,7 @@ import type {
 } from "./model/types";
 import { generatePlan, generateSectionPlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
-import { computeSection } from "./plan/toSection";
+import { computeSection, sectionPlaneFromLevel } from "./plan/toSection";
 import type { SectionOutput } from "./plan/toSection";
 import { generateElevationPlan } from "./plan/toElevation";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
@@ -66,6 +66,7 @@ import { savePlanPdf } from "./export/exportPdf";
 import { ExportDxfDialog } from "./ui/ExportDxfDialog";
 import type { ExportDxfDecision } from "./ui/ExportDxfDialog";
 import { savePlanDxf } from "./export/exportDxf";
+import { projectToWorldCoords } from "./model/geoRebase";
 import { exportScheduleCsv } from "./export/exportSchedule";
 import { exportIfcSpf } from "./export/exportIfc";
 import { exportObj, exportStl } from "./export/exportMesh";
@@ -120,16 +121,34 @@ import {
 } from "./panels/layoutModel";
 import { saveFolderPdf } from "./export/layoutPdf";
 import { HatchSwatch } from "./ui/hatchPreview";
-import { TopBar, ViewRibbonTab, Ribbon3dTab } from "./ui/TopBar";
-import { RibbonBar } from "./ui/ribbon/RibbonBar";
-import type { RibbonTabId } from "./ui/ribbon/ribbonItems";
-import { Dropdown } from "./ui/Dropdown";
-import type { DropdownItem } from "./ui/Dropdown";
+import { TopBar, ViewRibbonTab } from "./ui/TopBar";
+import { AppMenuBar } from "./ui/AppMenuBar";
+import { EditorField } from "./ui/EditorField";
+import { useNativeAppMenu } from "./native/appMenu";
+import { openResourceWindowNative, useResourceWindowHost } from "./native/resourceWindow";
+import { openSettingsWindowNative, useSettingsWindowHost } from "./native/settingsWindow";
+import {
+  openDrawingLevelsWindowNative,
+  useDrawingLevelsWindowHost,
+} from "./native/drawingLevelsWindow";
+import {
+  openLayerSettingsWindowNative,
+  useLayerSettingsWindowHost,
+} from "./native/layerSettingsWindow";
+import {
+  openContextImportWindowNative,
+  useContextImportWindowHost,
+} from "./native/contextImportWindow";
 import { TextEditorDialog } from "./ui/TextEditorDialog";
 import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "./ui/TopBar";
 import { StatusBar, type RendererMode } from "./ui/StatusBar";
+import {
+  type ThemeMode,
+  getStoredThemeMode,
+  setStoredThemeMode,
+} from "./theme/themeMode";
 import { getTool } from "./tools/tools";
 import { applyAngleConstraint, computeSnap } from "./tools/snapping";
 import {
@@ -188,24 +207,14 @@ import { FloatingPanel } from "./panels/FloatingPanel";
 import { DragOverlay, usePanelDrag } from "./panels/panelDrag";
 import { itemDisplay } from "./panels/displayMode";
 import { PanelHostContext } from "./panels/types";
-import type {
-  DisplayMode,
-  DockId,
-  LayoutState,
-  PanelHost,
-} from "./panels/types";
+import type { DisplayMode, DockId, PanelHost } from "./panels/types";
 import type { PanelHostValue } from "./panels/host";
 import { deriveSelection } from "./state/selectionInfo";
 import { centroid as roomCentroid } from "./geometry/roomArea";
 import { docFromText, plainText } from "./text/richText";
 import type { RichTextDoc } from "./text/richText";
-import {
-  deleteNamedLayout,
-  listNamedLayouts,
-  loadNamedLayout,
-  saveLayout,
-  saveNamedLayout,
-} from "./panels/layout";
+import { revealPanel, saveLayout } from "./panels/layout";
+import { listPanels } from "./panels/registry";
 import {
   deleteDrawingCombo,
   deleteLayerCombo,
@@ -289,31 +298,6 @@ function coupledCommandFor(id: ToolId): string | null {
   return TOOL_COMMAND[id] ?? null;
 }
 
-/** localStorage-Schlüssel der modularen Custom-Bar (Ribbon-Tab „Eigene"). */
-const RIBBON_CUSTOM_KEY = "dossier.ribbon.customItems";
-
-/** Persistierte Custom-Bar-Item-Schlüssel lesen (leer bei Fehler/Erststart). */
-function loadCustomItems(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(RIBBON_CUSTOM_KEY);
-    const arr = raw ? JSON.parse(raw) : null;
-    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Custom-Bar-Item-Schlüssel persistieren (Fehler still schlucken). */
-function saveCustomItems(items: string[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(RIBBON_CUSTOM_KEY, JSON.stringify(items));
-  } catch {
-    // localStorage nicht verfügbar (privater Modus o. ä.) → ignorieren.
-  }
-}
-
 /** Umriss (bbox) aller Drawing2D-Geometrien in Modell-Metern (null = leer). */
 function drawingsBBox(
   drawings: Drawing2D[],
@@ -352,6 +336,9 @@ function contextObjectsBounds(objs: ContextObject[]): Vec2[] | null {
   for (const obj of objs) {
     if (obj.type === "contourSet") {
       for (const c of obj.contours) for (const p of c.pts) acc(p.x, p.y);
+    } else if (obj.type === "image") {
+      acc(obj.min.x, obj.min.y);
+      acc(obj.max.x, obj.max.y);
     } else {
       // importedMesh / terrainMesh: flaches (x,y,z…)-Array, Stride 3.
       const pos = obj.positions;
@@ -406,6 +393,8 @@ export default function App() {
   const notify = useStore((s) => s.notify);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
+  const canUndo = useStore((s) => s.canUndo);
+  const canRedo = useStore((s) => s.canRedo);
   const activeLevelId = useStore((s) => s.activeLevelId);
   const setActiveLevelId = useStore((s) => s.setActiveLevelId);
   const viewType = useStore((s) => s.viewType);
@@ -503,22 +492,6 @@ export default function App() {
   // Einstellungen sowie der laufende Werkzeug-Zustand (Ref, kein Re-Render je
   // Mausbewegung) und die Live-Vorschau (Draft → Overlay in PlanView).
   const [activeTool, setActiveTool] = useState<ToolId>("select");
-  // Aktiver Ribbon-Tab (2D/3D/BIM/Ansichten). Liegt hier (nicht in der RibbonBar),
-  // weil die Tab-Reiter in der TopBar-Zeile sitzen und der Ribbon-Inhalt darunter
-  // — beide teilen sich denselben aktiven Tab.
-  const [ribbonTab, setRibbonTab] = useState<RibbonTabId>("views");
-  // Modulare Custom-Bar (Ribbon-Tab „Eigene"): persistierte Item-Schlüssel. Der
-  // Picker im Tab wählt Werkzeuge/Befehle an/ab (localStorage-persistiert).
-  const [customItems, setCustomItems] = useState<string[]>(loadCustomItems);
-  const onToggleCustomItem = (key: string) => {
-    setCustomItems((prev) => {
-      const next = prev.includes(key)
-        ? prev.filter((k) => k !== key)
-        : [...prev, key];
-      saveCustomItems(next);
-      return next;
-    });
-  };
   const [activeWallTypeId, setActiveWallTypeId] = useState<string>(
     project.wallTypes[0].id,
   );
@@ -586,6 +559,9 @@ export default function App() {
   // Schnitt-/Ansichtslinien-Auswahl (Einzel-DrawingLevel-Id oder null).
   const selectedSectionLineId = useStore((s) => s.selectedSectionLineId);
   const setSelectedSectionLineId = useStore((s) => s.setSelectedSectionLineId);
+  // Welche Schnittlinie treibt den 3D-Live-Schnitt (reiner Ansichts-Zustand,
+  // unabhängig von der Auswahl — der Schnitt bleibt beim Klick woanders aktiv).
+  const [section3dCutId, setSection3dCutId] = useState<string | null>(null);
   const updateRoof = useStore((s) => s.updateRoof);
   const moveRoofGrip = useStore((s) => s.moveRoofGrip);
   const moveRoofBy = useStore((s) => s.moveRoofBy);
@@ -622,6 +598,9 @@ export default function App() {
   const [menu, setMenu] = useState<MenuState>(null);
   // Offener Inline-Editor (Ebene bzw. Geschoss) — aus einem Menüpunkt geöffnet.
   const [editor, setEditor] = useState<EditorState>(null);
+  // Welcher Ebenen-Code aktuell im nativen Ebeneneinstellungs-Fenster offen
+  // ist (Tauri) — Pendant zu `editor?.kind === "layer"` im Browser-Fallback.
+  const [nativeLayerSettingsCode, setNativeLayerSettingsCode] = useState<string | null>(null);
   // Offener Raum-Stempel-Editor (Rich-Text) — per Doppelklick/Button geöffnet.
   const [stampEditorRoomId, setStampEditorRoomId] = useState<string | null>(null);
   // Text-Inhalt-Editor: Id des per Doppelklick bearbeiteten Text-2D-Elements.
@@ -1837,6 +1816,72 @@ export default function App() {
     },
   };
 
+  // Ob irgendeine löschbare Auswahl ansteht — geteilt zwischen dem Entf-
+  // Tastatur-Handler unten und dem Menüpunkt „Bearbeiten > Löschen" (AppMenuBar).
+  const hasSelectionToDelete = () =>
+    !!(
+      selectedSectionLineId ||
+      selectedDrawingIds.length ||
+      selectedWallIds.length ||
+      selectedCeilingIds.length ||
+      selectedOpeningIds.length ||
+      selectedStairIds.length ||
+      selectedRoomIds.length ||
+      selectedExtrudedSolidIds.length ||
+      selectedColumnIds.length ||
+      selectedRoofIds.length ||
+      selectedContextObjectIds.length
+    );
+
+  // Löscht die AKTUELLE Auswahl (alle Kanäle) — geteilte Logik zwischen dem
+  // Entf-Tastatur-Handler und dem Menüpunkt „Bearbeiten > Löschen".
+  const deleteSelection = () => {
+    // Schnittlinie: Entf löscht NUR ihre Linie (linePoints), die Ebene bleibt.
+    if (selectedSectionLineId) {
+      patchLevel(selectedSectionLineId, { linePoints: undefined });
+      setSelectedSectionLineId(null);
+      return;
+    }
+    const dids = new Set(selectedDrawingIds);
+    const wids = new Set(selectedWallIds);
+    const cids = new Set(selectedCeilingIds);
+    const oids = new Set(selectedOpeningIds);
+    const stids = new Set(selectedStairIds);
+    const rmids = new Set(selectedRoomIds);
+    const exids = new Set(selectedExtrudedSolidIds);
+    const colids = new Set(selectedColumnIds);
+    const rfids = new Set(selectedRoofIds);
+    const ctxids = new Set(selectedContextObjectIds);
+    setProject((p) => ({
+      ...p,
+      drawings2d: p.drawings2d.filter((d) => !dids.has(d.id)),
+      walls: p.walls.filter((w) => !wids.has(w.id)),
+      ceilings: (p.ceilings ?? []).filter((c) => !cids.has(c.id)),
+      roofs: (p.roofs ?? []).filter((r) => !rfids.has(r.id)),
+      stairs: (p.stairs ?? []).filter((s) => !stids.has(s.id)),
+      rooms: (p.rooms ?? []).filter((r) => !rmids.has(r.id)),
+      extrudedSolids: (p.extrudedSolids ?? []).filter((s) => !exids.has(s.id)),
+      columns: (p.columns ?? []).filter((c) => !colids.has(c.id)),
+      doors: p.doors.filter((dr) => !wids.has(dr.hostWallId)),
+      // Öffnungen: eigene Auswahl löschen UND alle, deren Host-Wand entfällt.
+      openings: (p.openings ?? []).filter(
+        (o) => !oids.has(o.id) && !wids.has(o.hostWallId),
+      ),
+      context: (p.context ?? []).filter((o) => !ctxids.has(o.id)),
+    }));
+    setSelectedDrawingIds([]);
+    setSelectedWallIds([]);
+    setSelectedCeilingIds([]);
+    setSelectedOpeningIds([]);
+    setSelectedStairIds([]);
+    setSelectedRoomIds([]);
+    setSelectedExtrudedSolidIds([]);
+    setSelectedColumnIds([]);
+    setSelectedRoofIds([]);
+    setSelectedContextObjectIds([]);
+    setSelectedSectionLineId(null);
+  };
+
   // Tastatur im Auswahl-Werkzeug: Ctrl/Cmd+A = alles auf der aktiven Ebene
   // wählen; Entf/Backspace = ALLE Selektierten (Wände + 2D-Elemente) löschen.
   useEffect(() => {
@@ -1891,63 +1936,8 @@ export default function App() {
       }
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       if (activeTransform) return; // während einer Transformation nicht löschen
-      // Schnittlinie: Entf löscht NUR ihre Linie (linePoints), die Ebene bleibt.
-      if (selectedSectionLineId) {
-        patchLevel(selectedSectionLineId, { linePoints: undefined });
-        setSelectedSectionLineId(null);
-        e.preventDefault();
-        return;
-      }
-      if (
-        selectedDrawingIds.length ||
-        selectedWallIds.length ||
-        selectedCeilingIds.length ||
-        selectedOpeningIds.length ||
-        selectedStairIds.length ||
-        selectedRoomIds.length ||
-        selectedExtrudedSolidIds.length ||
-        selectedColumnIds.length ||
-        selectedRoofIds.length ||
-        selectedContextObjectIds.length
-      ) {
-        const dids = new Set(selectedDrawingIds);
-        const wids = new Set(selectedWallIds);
-        const cids = new Set(selectedCeilingIds);
-        const oids = new Set(selectedOpeningIds);
-        const stids = new Set(selectedStairIds);
-        const rmids = new Set(selectedRoomIds);
-        const exids = new Set(selectedExtrudedSolidIds);
-        const colids = new Set(selectedColumnIds);
-        const rfids = new Set(selectedRoofIds);
-        const ctxids = new Set(selectedContextObjectIds);
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.filter((d) => !dids.has(d.id)),
-          walls: p.walls.filter((w) => !wids.has(w.id)),
-          ceilings: (p.ceilings ?? []).filter((c) => !cids.has(c.id)),
-          roofs: (p.roofs ?? []).filter((r) => !rfids.has(r.id)),
-          stairs: (p.stairs ?? []).filter((s) => !stids.has(s.id)),
-          rooms: (p.rooms ?? []).filter((r) => !rmids.has(r.id)),
-          extrudedSolids: (p.extrudedSolids ?? []).filter((s) => !exids.has(s.id)),
-          columns: (p.columns ?? []).filter((c) => !colids.has(c.id)),
-          doors: p.doors.filter((dr) => !wids.has(dr.hostWallId)),
-          // Öffnungen: eigene Auswahl löschen UND alle, deren Host-Wand entfällt.
-          openings: (p.openings ?? []).filter(
-            (o) => !oids.has(o.id) && !wids.has(o.hostWallId),
-          ),
-          context: (p.context ?? []).filter((o) => !ctxids.has(o.id)),
-        }));
-        setSelectedDrawingIds([]);
-        setSelectedWallIds([]);
-        setSelectedCeilingIds([]);
-        setSelectedOpeningIds([]);
-        setSelectedStairIds([]);
-        setSelectedRoomIds([]);
-        setSelectedExtrudedSolidIds([]);
-        setSelectedColumnIds([]);
-        setSelectedRoofIds([]);
-        setSelectedContextObjectIds([]);
-        setSelectedSectionLineId(null);
+      if (hasSelectionToDelete()) {
+        deleteSelection();
         e.preventDefault();
       }
     };
@@ -2520,6 +2510,7 @@ export default function App() {
     if (pts) planViewRef.current?.fitBounds(pts);
   };
   const removeContextObject = useStore((s) => s.removeContextObject);
+  const removeContextObjects = useStore((s) => s.removeContextObjects);
   const generateTerrain = useStore((s) => s.generateTerrain);
   const moveGripOf = useStore((s) => s.moveGripOf);
   const moveElementByOf = useStore((s) => s.moveElementByOf);
@@ -2744,6 +2735,7 @@ export default function App() {
         selectedExtrudedSolidId,
         selectedColumnId,
         selectedRoofId,
+        selectedContextObjectIds.length === 1 ? selectedContextObjectIds[0] : null,
       ),
     [
       project,
@@ -2756,6 +2748,7 @@ export default function App() {
       selectedExtrudedSolidId,
       selectedColumnId,
       selectedRoofId,
+      selectedContextObjectIds,
     ],
   );
 
@@ -2772,6 +2765,25 @@ export default function App() {
           ) ?? null
         : null,
     [project.drawingLevels, selectedSectionLineId],
+  );
+
+  // Abgeleitete 3D-Schnittebene der gebundenen Schnittlinie (world point+normal
+  // via sectionPlaneFromLevel) — speist Viewport3D/Wasm3DViewport. Fehlt die
+  // Linie (gelöscht/ohne linePoints), liefert der Helfer null → kein Schnitt.
+  const section3dPlane = useMemo(() => {
+    if (!section3dCutId) return null;
+    const lvl = project.drawingLevels.find(
+      (z) =>
+        z.id === section3dCutId &&
+        (z.kind === "section" || z.kind === "elevation"),
+    );
+    return lvl ? sectionPlaneFromLevel(lvl) : null;
+  }, [project.drawingLevels, section3dCutId]);
+
+  // Bindet den 3D-Live-Schnitt an eine Schnittlinie (Toggle im Objekt-Info).
+  const onToggleSection3dCut = useCallback(
+    (id: string) => setSection3dCutId((cur) => (cur === id ? null : id)),
+    [],
   );
 
   // ── DXF/DWG-Import (Dialog) ───────────────────────────────────────────────
@@ -2949,6 +2961,56 @@ export default function App() {
       projectFileInputRef.current?.click();
     }
   };
+
+  // Panel-Liste für „Fenster > Panels" (native Menüleiste) — die Registry ist
+  // statisch (Panels tragen sich beim Modul-Import ein), daher einmalig.
+  const nativeMenuPanels = useMemo(
+    () => listPanels().map((p) => ({ id: p.id, label: t(p.title) })),
+    [],
+  );
+
+  // Native macOS-Systemmenüleiste (oben am Bildschirm) — dieselben Aktionen
+  // wie AppMenuBar/QuickAccess, nur als echter App-Menü-Baum. No-op ausserhalb
+  // von Tauri (isTauriRuntime-Guard steckt im Hook selbst).
+  useNativeAppMenu(
+    {
+      onOpenProject,
+      onSaveProject,
+      onImport: () => dxfInputRef.current?.click(),
+      onExportPdf: () => setExportOpen(true),
+      onExportDxf: () => setExportDxfOpen(true),
+      onExportSchedule,
+      onExportIfc,
+      onExportObj,
+      onExportStl,
+      onUndo: undo,
+      onRedo: redo,
+      onDeleteSelection: deleteSelection,
+      onMove: () => startTransformOp("move"),
+      onMirror: () => startTransformOp("mirror"),
+      onRotate: () => startTransformOp("rotate"),
+      onViewType: setViewType,
+      onView3d: setView3d,
+      onReferenceLines: setReferenceLines,
+      onToggleResources: () => toggleResources(),
+      onOpenSettings: () => openSettings(),
+      onOpenPanel: (panelId) => setLayout((l) => revealPanel(l, panelId)),
+      onOpenDrawingLevelsWindow: () => void openDrawingLevelsWindowNative(),
+      onOpenLayerSettingsWindow: () => openLayerSettings(activeCategoryCode, 0, 0),
+      onOpenContextImportWindow: () => void openContextImportWindowNative(),
+    },
+    {
+      canUndo,
+      canRedo,
+      hasSelection: hasSelectionToDelete(),
+      viewType,
+      view3d,
+      referenceLines,
+      resourcesOpen,
+    },
+    nativeMenuPanels,
+  );
+
   const onProjectFileChosen = (file: File) => {
     const r = new FileReader();
     r.onload = () => {
@@ -3017,6 +3079,8 @@ export default function App() {
       // Geschoss-Arbeitsebene (OKFF) projiziert und über onWorkplanePoint in
       // dieselbe Engine wie im Grundriss gespeist (Viewport3D).
       toolsEnabled: activeLevel.kind === "floor",
+      activeCommand: engineView.commandName,
+      onRunCommand,
       activeWallTypeId,
       onActiveWallTypeId: setActiveWallTypeId,
       snap,
@@ -3035,6 +3099,8 @@ export default function App() {
       onAddCategory: addCategory,
       onLayerContextMenu: (code, x, y) =>
         setMenu({ kind: "layer", code, x, y }),
+      onOpenLayerSettings: (code, x, y) => openLayerSettings(code, x, y),
+      onOpenSettings: () => openSettings(),
       onPatchComponent: patchComponent,
       onAddComponent: addComponent,
       onDeleteComponent: deleteComponent,
@@ -3390,8 +3456,7 @@ export default function App() {
           updateOpening(selection.id, { typeId: typeId || undefined });
       },
       onEditOpeningType: (kind) => {
-        setResourcesTab(kind === "door" ? "doorStyles" : "windowStyles");
-        setResourcesOpen(true);
+        openResources(kind === "door" ? "doorStyles" : "windowStyles");
       },
       onOpenOpeningEditor: (id) => setOpeningEditorId(id),
       // ── Dach-Attribute (nur bei selektiertem Dach) ─────────────────────────
@@ -3406,6 +3471,9 @@ export default function App() {
       onDeleteSectionLine: () => {
         if (selectedSectionLineId) patchLevel(selectedSectionLineId, { linePoints: undefined });
       },
+      // 3D-Live-Schnitt an die gewählte Schnittlinie binden (Toggle im Objekt-Info).
+      section3dCutActive: section3dCutId != null && section3dCutId === sectionLine?.id,
+      onToggleSection3dCut,
       // ── Treppen-Attribute (nur bei selektierter Treppe) ────────────────────
       onSetStairShape: (shape) => {
         if (selection?.kind === "stair") updateStair(selection.id, { shape });
@@ -3424,6 +3492,9 @@ export default function App() {
       },
       onSetStairUp: (up) => {
         if (selection?.kind === "stair") updateStair(selection.id, { up });
+      },
+      onSetStairArrowStyle: (arrowStyle) => {
+        if (selection?.kind === "stair") updateStair(selection.id, { arrowStyle });
       },
       onSetStairReferenz: (referenz) => {
         if (selection?.kind === "stair") updateStair(selection.id, { referenz });
@@ -3544,6 +3615,7 @@ export default function App() {
       selectedContextObjectIds,
       onAddContextObjects: addContextObjectsAndFit,
       onRemoveContextObject: removeContextObject,
+      onRemoveContextObjects: removeContextObjects,
       onGenerateTerrain: generateTerrain,
       onSetGeoAnchor: (anchor) => {
         setProject((p) => ({ ...p, geoAnchor: anchor }));
@@ -3585,6 +3657,12 @@ export default function App() {
               break;
             case "Extrusion":
               setSelectedExtrudedSolidIds([id]);
+              break;
+            case "Dach":
+              setSelectedRoofIds([id]);
+              break;
+            case "Stütze":
+              setSelectedColumnIds([id]);
               break;
             default:
               // z. B. Legacy-„Tür"-Datensätze (project.doors) — kein Auswahl-Kanal.
@@ -3934,6 +4012,7 @@ export default function App() {
     activeLevelId,
     activeCategoryCode,
     activeTool,
+    engineView.commandName,
     activeWallTypeId,
     snap,
     viewType,
@@ -3944,6 +4023,8 @@ export default function App() {
     selection,
     sectionLine,
     selectedSectionLineId,
+    section3dCutId,
+    onToggleSection3dCut,
     selectedViewSnapshotId,
     selectedContextObjectIds,
   ]);
@@ -4103,6 +4184,29 @@ export default function App() {
     onSetOverrideRules: setOverrideRules,
   };
 
+  // Ressourcen-Manager als eigenes natives Fenster (Tauri) statt Overlay im
+  // Hauptfenster — hält es (falls offen) synchron zum Projekt, wendet dessen
+  // Befehle auf die ECHTEN Handler oben an (siehe native/resourceWindow.ts).
+  // No-op ausserhalb von Tauri.
+  useResourceWindowHost(project, resourceHandlers);
+  // Öffnet die Ressourcen: unter Tauri das native Zweitfenster, sonst (reiner
+  // Browser, kein OS-Fenster-Konzept) das bisherige schwebende Overlay.
+  const openResources = (tab?: ResourceTabId) => {
+    if (isTauriRuntime()) {
+      void openResourceWindowNative(tab);
+    } else {
+      if (tab) setResourcesTab(tab);
+      setResourcesOpen(true);
+    }
+  };
+  const toggleResources = () => {
+    if (isTauriRuntime()) {
+      void openResourceWindowNative();
+    } else {
+      setResourcesOpen((v) => !v);
+    }
+  };
+
   // ── Layout-Blatt (DOSSIER A3, Phase 2b): das offene Blatt + Viewport-Handler ─
   // Das offene Layout wird live aus dem Projekt gelesen (Single Source of Truth);
   // wurde es zwischenzeitlich gelöscht, ist es undefined → der Haupt-Viewport
@@ -4144,16 +4248,19 @@ export default function App() {
       itemDisplay(drawingLevelsMode, id === activeLevelId, visible.get(id) ?? false);
   }, [project.drawingLevels, drawingLevelsMode, activeLevelId]);
 
-  // Resolver: je Kategorie-Code die Render-Entscheidung (Kategorien sind nie
-  // „aktiv"). Wirkt in Grundriss UND 3D.
+  // Resolver: je Kategorie-Code die Render-Entscheidung. „Aktiv" = die per
+  // Klick im Ebenen-Panel gewählte Kategorie (activeCategoryCode, wie schon
+  // in LayersPanel.tsx für die Zeilen-Hervorhebung genutzt). Wirkt in
+  // Grundriss UND 3D.
   const categoryDisplay: CategoryDisplayResolver & DisplayResolver = useMemo(
-    () => (code) => itemDisplay(layersMode, false, codeVisible.get(code) ?? false),
-    [layersMode, codeVisible],
+    () => (code) =>
+      itemDisplay(layersMode, code === activeCategoryCode, codeVisible.get(code) ?? false),
+    [layersMode, codeVisible, activeCategoryCode],
   );
 
   // Stabiler Schlüssel der 3D-Display-Entscheidungen (Resolver sind nicht
   // referenzstabil → triggert sonst keinen Neuaufbau).
-  const displayKey = `${drawingLevelsMode}|${layersMode}|${activeLevelId}`;
+  const displayKey = `${drawingLevelsMode}|${layersMode}|${activeLevelId}|${activeCategoryCode}`;
 
   // Dokument-Tabs der Zeichenflächen-Kopfzeile — ein Tab je Geschoss-
   // Grundriss (siehe DrawingTabs.tsx). Teilt sich `activeLevelId`/
@@ -4193,6 +4300,84 @@ export default function App() {
     else url.searchParams.delete("engine");
     window.location.assign(url.toString());
   };
+
+  // Hell/Dunkel (Einstellungen → Darstellung). Standard Hell (styles.css);
+  // Dunkel ist Opt-in und persistiert in localStorage.
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
+  const setThemeMode = (mode: ThemeMode) => {
+    setThemeModeState(mode);
+    setStoredThemeMode(mode);
+  };
+
+  // Einstellungen als eigenes natives Fenster (Tauri) statt Overlay-Dialog —
+  // hält es (falls offen) synchron zu den betroffenen Feldern, wendet dessen
+  // Befehle auf die echten Setter an (siehe native/settingsWindow.ts).
+  useSettingsWindowHost(
+    {
+      themeMode,
+      marqueeColor,
+      snapColor,
+      referenceElevationMasl: project.referenceElevationMasl,
+      rendererMode,
+      webGpuAvailable,
+      layout,
+    },
+    {
+      onThemeModeChange: setThemeMode,
+      onMarqueeColorChange: setMarqueeColor,
+      onSnapColorChange: setSnapColor,
+      onReferenceElevationChange: (n) =>
+        setProject((p) => ({ ...p, referenceElevationMasl: n })),
+      onRendererModeChange: setRendererMode,
+      onApplyLayout: (l) => setLayout(reconcileLayout(l)),
+    },
+  );
+  const openSettings = () => {
+    if (isTauriRuntime()) {
+      void openSettingsWindowNative();
+    } else {
+      setSettingsOpen(true);
+    }
+  };
+
+  // Ebeneneinstellungen als eigenes natives Fenster (DOSSIER-Rhino-Referenz)
+  // — ersetzt unter Tauri den InlineEditor-Popover, s. native/layerSettingsWindow.ts.
+  useLayerSettingsWindowHost(project, nativeLayerSettingsCode, patchCategory);
+  const openLayerSettings = (code: string, x: number, y: number) => {
+    if (isTauriRuntime()) {
+      setNativeLayerSettingsCode(code);
+      void openLayerSettingsWindowNative(code);
+    } else {
+      setEditor({ kind: "layer", code, x, y });
+    }
+  };
+
+  // Standort-Import als eigenes natives Fenster — s. native/contextImportWindow.ts.
+  useContextImportWindowHost(project.geoAnchor, {
+    onImport: (objs) => addContextObjectsAndFit(objs as ContextObject[]),
+    onSetGeoAnchor: (anchor) => setProject((p) => ({ ...p, geoAnchor: anchor })),
+  });
+
+  // Zeichnungsebenen-Manager als eigenes natives Fenster (DOSSIER-Rhino-
+  // Referenz) — additiv NEBEN dem bestehenden Dock-Panel, siehe
+  // native/drawingLevelsWindow.ts Kopfkommentar (Rechtsklick-Kontextmenü
+  // bewusst nicht mitgenommen).
+  useDrawingLevelsWindowHost(
+    {
+      drawingLevels: project.drawingLevels,
+      activeLevelId,
+      displayMode: drawingLevelsMode,
+    },
+    {
+      onSelectLevel: setActiveLevelId,
+      onToggleLevel: toggleLevelVisible,
+      onAddFloor: addFloor,
+      onAddSection: addSection,
+      onAddElevation: addElevation,
+      onAddDrawing: addDrawing,
+      onSetDisplayMode: (mode) => setModeFor(BUILTIN_PANEL_IDS.drawingLevels, mode),
+    },
+  );
   // Übernimmt ein Zeichenwerkzeug ODER eine laufende Transformation die linke
   // Maustaste der Plan-Ansicht? Dann liegt der Pointer-Input beim Tool/Transform
   // (statt Auswahl/Marquee), und die Editier-Griffe sind ausgeblendet.
@@ -4299,8 +4484,14 @@ export default function App() {
   // schreibt ihn als Modell-Space-DXF in echten Metern (1:1). Layer aus den
   // Kategorie-Ebenen; jede Entity auf ihrem Kategorie-Layer.
   const onExportDxf = (decision: ExportDxfDecision) => {
+    // Georeferenziert exportieren: bei gesetztem Standort-Bezug (geoAnchor)
+    // schreibt der Modell-DXF die ECHTEN LV95-Koordinaten (weit vom Nullpunkt),
+    // damit die Datei in anderer CAD-Software lagerichtig ankommt — auch wenn
+    // lokal nahe (0,0) gezeichnet wurde. Ohne Bezug bleibt alles lokal.
+    // (Der Papier-/Layout-Export bleibt bewusst in lokalen Koordinaten.)
+    const exportProject = projectToWorldCoords(project);
     const plan = generatePlan(
-      project,
+      exportProject,
       activeLevel.id,
       visibleCodes,
       categoryDisplay,
@@ -4308,7 +4499,7 @@ export default function App() {
       referenceLines,
       planColorMode === "mono",
     );
-    savePlanDxf(plan, project, {
+    savePlanDxf(plan, exportProject, {
       title: activeLevel.name,
       includeHatches: decision.includeHatches,
       fileName: `${project.name}-${activeLevel.name}`,
@@ -4469,7 +4660,32 @@ export default function App() {
     }
     setEditTextId(null);
   };
+  // Kategorie-Code des getroffenen Elements (für die Sperr-Prüfung unten) —
+  // nur die Kanäle, deren Modell-Typ eine categoryCode trägt (ExtrudedSolid/
+  // Kontext-Objekte bewusst ohne, siehe deren Typdefinitionen).
+  const categoryCodeOfSelection = (sel: PlanSelection): string | undefined => {
+    if (sel.wallId) return project.walls.find((w) => w.id === sel.wallId)?.categoryCode;
+    if (sel.ceilingId)
+      return (project.ceilings ?? []).find((c) => c.id === sel.ceilingId)?.categoryCode;
+    if (sel.openingId)
+      return (project.openings ?? []).find((o) => o.id === sel.openingId)?.categoryCode;
+    if (sel.stairId)
+      return (project.stairs ?? []).find((s) => s.id === sel.stairId)?.categoryCode;
+    if (sel.roomId) return (project.rooms ?? []).find((r) => r.id === sel.roomId)?.categoryCode;
+    if (sel.columnId)
+      return (project.columns ?? []).find((c) => c.id === sel.columnId)?.categoryCode;
+    if (sel.roofId) return (project.roofs ?? []).find((r) => r.id === sel.roofId)?.categoryCode;
+    if (sel.drawingId)
+      return project.drawings2d.find((d) => d.id === sel.drawingId)?.categoryCode;
+    return undefined;
+  };
+
   const onPlanSelect = (sel: PlanSelection) => {
+    // Darstellungsmodus „Andere grau & gesperrt": ein gesperrtes Element lässt
+    // sich nicht anwählen (und damit auch nicht verschieben/bearbeiten) — der
+    // Klick wird ignoriert, als läge dort nichts.
+    const hitCode = categoryCodeOfSelection(sel);
+    if (hitCode !== undefined && categoryDisplay(hitCode).locked) return;
     // Shift+Klick: Mehrfach-Auswahl — getroffenes Element zu-/abschalten, den
     // Rest behalten (Wände und 2D-Zeichnungen unabhängig, gemischte Auswahl
     // erlaubt). Leerraum-Klick mit Shift lässt die Auswahl unverändert.
@@ -4544,6 +4760,13 @@ export default function App() {
             ? selectedRoofIds.filter((x) => x !== id)
             : [...selectedRoofIds, id],
         );
+      } else if (sel.contextObjectId) {
+        const id = sel.contextObjectId;
+        setSelectedContextObjectIds(
+          selectedContextObjectIds.includes(id)
+            ? selectedContextObjectIds.filter((x) => x !== id)
+            : [...selectedContextObjectIds, id],
+        );
       }
       return;
     }
@@ -4562,7 +4785,7 @@ export default function App() {
       if (keep !== "extrudedSolid") setSelectedExtrudedSolidIds([]);
       if (keep !== "column") setSelectedColumnIds([]);
       if (keep !== "roof") setSelectedRoofIds([]);
-      setSelectedContextObjectIds([]);
+      if (keep !== "contextObject") setSelectedContextObjectIds([]);
       if (keep !== "sectionLine") setSelectedSectionLineId(null);
     };
     if (sel.sectionLineId) {
@@ -4595,6 +4818,9 @@ export default function App() {
     } else if (sel.roofId) {
       setSelectedRoofIds([sel.roofId]);
       clearOthers("roof");
+    } else if (sel.contextObjectId) {
+      setSelectedContextObjectIds([sel.contextObjectId]);
+      clearOthers("contextObject");
     } else {
       clearOthers("");
     }
@@ -4865,13 +5091,11 @@ export default function App() {
           e.target.value = "";
         }}
       />
-      {/* Schmale globale Leiste: Marke/Ressourcen · Text-Formatierung ·
-          Datei/Export/Einstellungen. Ansichts-/Zoom-/Darstellungs-Steuerung ist
-          in den „Ansichten"-Ribbon-Tab gewandert (ViewRibbonTab, unten). */}
+      {/* Schmale globale Leiste: Marke/Menü · Datei/Export/Einstellungen.
+          Ansichts-/Zoom-/Darstellungs-Steuerung folgt direkt darunter
+          (ViewRibbonTab, permanent — kein Tab-Umschalter mehr). */}
       <TopBar
         project={project}
-        ribbonTab={ribbonTab}
-        onRibbonTab={setRibbonTab}
         zoomEnabled={planActive}
         onExportPdf={() => setExportOpen(true)}
         onExportDxf={() => setExportDxfOpen(true)}
@@ -4884,27 +5108,31 @@ export default function App() {
         onFov={setFov}
         cameraEnabled={activeLevel.kind === "floor"}
         resourcesOpen={resourcesOpen}
-        onToggleResources={() => setResourcesOpen((v) => !v)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onToggleResources={() => toggleResources()}
+        onOpenSettings={() => openSettings()}
         onImport={() => dxfInputRef.current?.click()}
         onSaveProject={onSaveProject}
         onOpenProject={onOpenProject}
-      />
-
-      {/* Ribbon-Oberleiste (2D · 3D · BIM · Ansichten). Der „Ansichten"-Tab trägt
-          die aus der TopBar gemergte Ansichts-/Zoom-/Darstellungs-Steuerung
-          (ViewRibbonTab); die Werkzeug-Sidebar bleibt vorerst erhalten. */}
-      <RibbonBar
-        tab={ribbonTab}
-        activeTool={activeTool}
-        activeCommand={engineView.commandName}
-        toolsEnabled={activeLevel.kind === "floor"}
-        onSelectTool={onSelectTool}
-        onRunCommand={onRunCommand}
-        customItems={customItems}
-        onToggleCustomItem={onToggleCustomItem}
-        tabContent={{
-          views: (
+        menuBar={
+          <AppMenuBar
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onDeleteSelection={deleteSelection}
+            hasSelection={hasSelectionToDelete()}
+            viewType={viewType}
+            onViewType={setViewType}
+            view3d={view3d}
+            onView3d={setView3d}
+            referenceLines={referenceLines}
+            onReferenceLines={setReferenceLines}
+            resourcesOpen={resourcesOpen}
+            onToggleResources={() => toggleResources()}
+            onOpenSettings={() => openSettings()}
+          />
+        }
+        viewControls={
           <ViewRibbonTab
             viewToggleEnabled={activeLevel.kind === "floor"}
             viewType={viewType}
@@ -4913,8 +5141,8 @@ export default function App() {
             onView3d={setView3d}
             detail={detail}
             onDetail={setDetail}
-            // Detailgrad wirkt im Grundriss UND in der 3D-Sicht (projectToModel3d
-            // bekommt `detail` durchgereicht) — nicht mehr nur im Plan.
+            // Detailgrad wirkt im Grundriss UND in der 3D-Sicht
+            // (projectToModel3d bekommt `detail` durchgereicht).
             detailEnabled={planActive || viewType === "perspektive"}
             scaleDenominator={scaleDenominator}
             onApplyScale={applyScale}
@@ -4962,22 +5190,7 @@ export default function App() {
             }}
             textTarget={textTarget}
           />
-          ),
-          "3d": (
-            <Ribbon3dTab
-              viewToggleEnabled={activeLevel.kind === "floor"}
-              viewType={viewType}
-              onViewType={setViewType}
-              view3d={view3d}
-              onView3d={setView3d}
-              renderMode={renderMode}
-              onRenderMode={setRenderMode}
-              renderModeEnabled={viewType === "perspektive"}
-              onRunCommand={onRunCommand}
-              activeCommand={engineView.commandName}
-            />
-          ),
-        }}
+        }
       />
 
       <div className="body">
@@ -5066,6 +5279,8 @@ export default function App() {
           fov={fov}
           grid3dVisible={grid3dVisible}
           onToggleGrid3d={() => setGrid3dVisible(!grid3dVisible)}
+          section3d={section3dPlane}
+          onClearSection3d={() => setSection3dCutId(null)}
           mono={planColorMode === "mono"}
           drawings={drawings}
           onSelectLevel={setActiveLevelId}
@@ -5337,21 +5552,21 @@ export default function App() {
 
       {settingsOpen && (
         <SettingsDialog
+          themeMode={themeMode}
+          onThemeModeChange={setThemeMode}
           marqueeColor={marqueeColor}
           onMarqueeColorChange={setMarqueeColor}
           snapColor={snapColor}
           onSnapColorChange={setSnapColor}
-          project={project}
-          setProject={setProject}
+          referenceElevationMasl={project.referenceElevationMasl}
+          onReferenceElevationChange={(n) =>
+            setProject((p) => ({ ...p, referenceElevationMasl: n }))
+          }
           rendererMode={rendererMode}
           webGpuAvailable={webGpuAvailable}
           onRendererModeChange={setRendererMode}
-          layoutMenu={
-            <LayoutMenu
-              layout={layout}
-              onApply={(l) => setLayout(reconcileLayout(l))}
-            />
-          }
+          layout={layout}
+          onApplyLayout={(l) => setLayout(reconcileLayout(l))}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -5472,8 +5687,7 @@ export default function App() {
             project,
             selectedWallId,
             layerClipboard,
-            openLayerEditor: (code) =>
-              setEditor({ kind: "layer", code, x: menu.x, y: menu.y }),
+            openLayerEditor: (code) => openLayerSettings(code, menu.x, menu.y),
             openLevelEditor: (id) =>
               setEditor({ kind: "level", id, x: menu.x, y: menu.y }),
             addSubCategory,
@@ -6101,20 +6315,6 @@ function InlineEditor({
 }
 
 /** Eine Editor-Zeile: Beschriftung links, Steuerelement rechts. */
-function EditorField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="editor-field">
-      <span className="editor-label">{label}</span>
-      <span className="editor-control">{children}</span>
-    </label>
-  );
-}
 
 // ── Layout-Menü (Oberleiste) ─────────────────────────────────────────────────
 
@@ -6123,71 +6323,6 @@ function EditorField({
  * gespeichertes Layout wählen (oder löschen). Liest die Namen frisch aus dem
  * localStorage, sobald das Menü geöffnet wird.
  */
-function LayoutMenu({
-  layout,
-  onApply,
-}: {
-  layout: LayoutState;
-  onApply: (layout: LayoutState) => void;
-}) {
-  const [names, setNames] = useState<string[]>([]);
-  // Name-Erfassung über PromptDialog statt window.prompt (im Tauri-WKWebView
-  // deaktiviert — liefert sofort null, nichts würde je gespeichert).
-  const [saving, setSaving] = useState(false);
-
-  const refresh = () => setNames(listNamedLayouts());
-
-  const onSave = () => setSaving(true);
-  const commitSave = (name: string) => {
-    saveNamedLayout(name.trim(), layout);
-    refresh();
-    setSaving(false);
-  };
-
-  // Aktions-Menü (analog ComboMenu in TopBar.tsx): „Aktuelles speichern" oben,
-  // dann je eine Gruppe „Laden" und „Löschen" (Trenner statt <optgroup>, die
-  // die Dropdown-Komponente nicht kennt).
-  const items: DropdownItem[] = [];
-  items.push({ label: t("layout.saveCurrent"), onSelect: onSave });
-  if (names.length > 0) {
-    items.push({ divider: true });
-    for (const n of names) {
-      items.push({
-        label: n,
-        onSelect: () => {
-          const loaded = loadNamedLayout(n);
-          if (loaded) onApply(loaded);
-        },
-      });
-    }
-    items.push({ divider: true });
-    for (const n of names) {
-      items.push({
-        label: `✕ ${n}`,
-        danger: true,
-        onSelect: () => {
-          deleteNamedLayout(n);
-          refresh();
-        },
-      });
-    }
-  }
-
-  return (
-    <span onPointerDownCapture={refresh}>
-      <Dropdown items={items} placeholder={t("layout.placeholder")} title={t("layout.title")} />
-      {saving && (
-        <PromptDialog
-          title={t("layout.title")}
-          label={t("layout.savePrompt")}
-          onConfirm={commitSave}
-          onClose={() => setSaving(false)}
-        />
-      )}
-    </span>
-  );
-}
-
 // ── Inhalt (Mitte) ───────────────────────────────────────────────────────────
 
 /** Hauptinhalt — abhängig von der aktiven Zeichnungsebene und dem Ansichtstyp. */
@@ -6206,6 +6341,8 @@ function Content({
   fov,
   grid3dVisible,
   onToggleGrid3d,
+  section3d,
+  onClearSection3d,
   mono,
   drawings,
   onSelectLevel,
@@ -6283,6 +6420,11 @@ function Content({
   grid3dVisible: boolean;
   /** Klick auf den Grid-Umschalter-Button im 3D-Viewport (WASM-Pfad). */
   onToggleGrid3d: () => void;
+  /** Aktive 3D-Schnittebene (world point+normal) der gebundenen Schnittlinie,
+   *  oder null. Speist Viewport3D/Wasm3DViewport (Live-Schnitt). */
+  section3d: { point: [number, number, number]; normal: [number, number, number] } | null;
+  /** Schnitt-Bindung im 3D-Viewport lösen (Klick auf den gebundenen Knopf). */
+  onClearSection3d: () => void;
   /** Grundriss in Schwarz-Weiss (mono) statt mit Kategorie-/Element-Farben. */
   mono: boolean;
   /** Dokument-Tabs der Kopfzeile — ein Tab je Geschoss-Grundriss. */
@@ -6432,6 +6574,7 @@ function Content({
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          onOpenSectionLevel={onSelectLevel}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -6484,11 +6627,13 @@ function Content({
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
+          selectedContextObjectIds={selectedContextObjectIds}
           selectedSectionLineId={selectedSectionLineId}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          onOpenSectionLevel={onSelectLevel}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -6535,6 +6680,8 @@ function Content({
             gridElevation={level.baseElevation ?? 0}
             gridVisible={grid3dVisible}
             onToggleGrid={onToggleGrid3d}
+            section3d={section3d}
+            onClearSection3d={onClearSection3d}
             onSelectWall={onViewportSelectWall}
             onSelectCeiling={onViewportSelectCeiling}
             onSelectOpening={onViewportSelectOpening}
@@ -6581,11 +6728,13 @@ function Content({
           selectedColumnIds={selectedColumnIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
+          selectedContextObjectIds={selectedContextObjectIds}
           selectedSectionLineId={selectedSectionLineId}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          onOpenSectionLevel={onSelectLevel}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -6628,11 +6777,13 @@ function LevelPlanView({
   selectedColumnIds,
   selectedRoomIds,
   selectedRoofIds,
+  selectedContextObjectIds,
   selectedSectionLineId,
   roomStamp,
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  onOpenSectionLevel,
   onPlanSelect,
   onPlanMarquee,
   onSegmentCut,
@@ -6668,11 +6819,13 @@ function LevelPlanView({
   selectedColumnIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
+  selectedContextObjectIds?: string[];
   selectedSectionLineId: string | null;
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  onOpenSectionLevel?: (id: string) => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
   onSegmentCut: (drawingId: string, model: Vec2) => void;
@@ -6747,11 +6900,13 @@ function LevelPlanView({
         selectedColumnIds={selectedColumnIds}
         selectedRoomIds={selectedRoomIds}
         selectedRoofIds={selectedRoofIds}
+        selectedContextObjectIds={selectedContextObjectIds}
         selectedSectionLineIds={selectedSectionLineId ? [selectedSectionLineId] : []}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
+        onOpenSectionLevel={onOpenSectionLevel}
         onSelect={onPlanSelect}
         onMarquee={onPlanMarquee}
         onSegmentCut={onSegmentCut}
@@ -6807,6 +6962,7 @@ function SectionPlanView({
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  onOpenSectionLevel,
   onPlanSelect,
   onPlanMarquee,
   onSegmentCut,
@@ -6843,6 +6999,7 @@ function SectionPlanView({
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  onOpenSectionLevel?: (id: string) => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
   onSegmentCut: (drawingId: string, model: Vec2) => void;
@@ -6949,6 +7106,7 @@ function SectionPlanView({
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
+        onOpenSectionLevel={onOpenSectionLevel}
         onSelect={onPlanSelect}
         onMarquee={onPlanMarquee}
         onSegmentCut={onSegmentCut}

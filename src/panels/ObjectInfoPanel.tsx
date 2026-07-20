@@ -242,6 +242,35 @@ export function ObjectInfoPanel() {
           onCommit={(v) => host.onSetDrawingCircleRadius(v)}
         />
       )}
+      {/* Kontext-Objekt (importiertes Gebäude/Terrain/Konturen): reale LV95-
+          Koordinate des Bbox-Mittelpunkts — direkt sichtbar, ob/wohin
+          georeferenziert importiert wurde (Nutzer-Wunsch zum Prüfen). */}
+      {sel.contextObject && (
+        <>
+          <div className="objinfo-sep" />
+          <div className="objinfo-section-label">{t("objinfo.contextObject.section")}</div>
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.contextObject.type")}</span>
+            <span className="objinfo-fval">{t(`objinfo.contextObject.type.${sel.contextObject.objType}`)}</span>
+          </div>
+          {sel.contextObject.lv95Center ? (
+            <>
+              <div className="objinfo-field">
+                <span className="objinfo-flabel">{t("objinfo.contextObject.lv95E")}</span>
+                <span className="objinfo-fval">{sel.contextObject.lv95Center.e.toFixed(1)}</span>
+              </div>
+              <div className="objinfo-field">
+                <span className="objinfo-flabel">{t("objinfo.contextObject.lv95N")}</span>
+                <span className="objinfo-fval">{sel.contextObject.lv95Center.n.toFixed(1)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="objinfo-field">
+              <span className="objinfo-fval objinfo-muted">{t("objinfo.contextObject.noAnchor")}</span>
+            </div>
+          )}
+        </>
+      )}
       {/* Die element-spezifischen Abschnitte (Wand/Decke/Öffnung/Treppe/Raum)
           werden jetzt im Attribute-Panel gerendert (AttributesPanel importiert
           die exportierten *Section-Komponenten). */}
@@ -392,6 +421,20 @@ export function SectionLineSection({
       >
         {t("objinfo.sectionLine.flip")}
       </button>
+
+      {/* 3D-Live-Schnitt an diese Linie binden (nur mit gesetzter Linie sinnvoll):
+          der Viewport clippt dann vertikal entlang dieser Ebene. */}
+      {line && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.sectionLine.cut3d")}</span>
+          <input
+            type="checkbox"
+            checked={host.section3dCutActive}
+            onChange={() => host.onToggleSection3dCut(level.id)}
+            title={t("objinfo.sectionLine.cut3d")}
+          />
+        </div>
+      )}
 
       {/* Endpunkt-Koordinaten (nur wenn eine Linie gesetzt ist). */}
       {line && (
@@ -850,6 +893,27 @@ export function StairSection({
             onClick={() => host.onSetStairUp(false)}
           >
             {t("objinfo.stair.direction.down")}
+          </button>
+        </div>
+      </div>
+
+      {/* Pfeil-Darstellung (offener Winkel- oder gefüllter SIA-Vollpfeil). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.arrow")}</span>
+        <div className="objinfo-segment">
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + ((stair.arrowStyle ?? "line") === "line" ? " active" : "")}
+            onClick={() => host.onSetStairArrowStyle("line")}
+          >
+            {t("objinfo.stair.arrow.line")}
+          </button>
+          <button
+            type="button"
+            className={"objinfo-seg-btn" + (stair.arrowStyle === "filled" ? " active" : "")}
+            onClick={() => host.onSetStairArrowStyle("filled")}
+          >
+            {t("objinfo.stair.arrow.filled")}
           </button>
         </div>
       </div>

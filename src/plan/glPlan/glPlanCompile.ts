@@ -129,6 +129,18 @@ function parseColor(hex: string | undefined): Rgba | null {
   return [r / 255, g / 255, b / 255, a];
 }
 
+/**
+ * Fester Grauton gedimmter (greyed) Primitive — ECHTE Umfärbung statt
+ * Deckkraft (dünne Haarlinien auf dem hellen Zeichenblatt wären bei reiner
+ * Transparenz kaum erkennbar gedimmt). Gleicher Ton wie GREYED_COLOR in
+ * PlanView.tsx / GREY_RGB in toRenderScene.ts (#8c8c8c ≈ 0.549).
+ */
+const GREY_RGB = 0.549;
+
+/** Färbt auf den festen Grauton um, wenn das Primitiv im Darstellungsmodus „grau" ist. */
+function dim(color: Rgba, greyed: boolean | undefined): Rgba {
+  return greyed ? [GREY_RGB, GREY_RGB, GREY_RGB, color[3]] : color;
+}
 
 /**
  * Tessellliert Plan-Primitive zu GPU-Geometrie (MVP: gefüllte Polygone +
@@ -387,7 +399,7 @@ export function compilePrimitivesToGpu(
             track(pt.x, pt.y);
           }
           for (const t of tris) fillIdx.push(base + t);
-          addFillBatch(tris.length, fill);
+          addFillBatch(tris.length, dim(fill, prim.greyed));
         }
       }
       // Schraffur (nach der Füllung, vor/passend zum Umriss — wie der SVG stapelt):
@@ -414,7 +426,7 @@ export function compilePrimitivesToGpu(
         prim.hatch.pattern !== 'none' &&
         prim.hatch.pattern !== 'solid'
       ) {
-        const hatchColor = parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1];
+        const hatchColor = dim(parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1], prim.greyed);
         const hatchMm = prim.hatch.lineWeight > 0 ? prim.hatch.lineWeight : 0.13;
         const runs = applyDashRuns(buildHatchRuns(prim.pts, prim.hatch), prim.hatch.dash);
         for (const run of runs) strokePolyline(run, false, hatchColor, hatchMm, false);
@@ -424,10 +436,10 @@ export function compilePrimitivesToGpu(
       // zoomrichtig in px (wie SVG-printStrokeVb → GL == SVG).
       const stroke = parseColor(prim.stroke);
       if (stroke && prim.strokeWidthMm > 0 && prim.pts.length >= 2) {
-        strokePolygonOutline(prim.pts, stroke, prim.strokeWidthMm, prim.noStrokeEdges);
+        strokePolygonOutline(prim.pts, dim(stroke, prim.greyed), prim.strokeWidthMm, prim.noStrokeEdges);
       }
     } else if (prim.kind === 'line') {
-      const color = parseColor(prim.color) ?? [0.1, 0.1, 0.1, 1];
+      const color = dim(parseColor(prim.color) ?? [0.1, 0.1, 0.1, 1], prim.greyed);
       if (prim.zigzag) {
         // Zickzack-Linie → gehrter Polylinienzug (amplitude/wavelength Papier-mm
         // → Modell-Meter über dieselbe Kopplung wie Strichmuster).
@@ -444,7 +456,10 @@ export function compilePrimitivesToGpu(
       }
     } else if (prim.kind === 'arc') {
       // Bogen → ein gehrter Polylinienzug (glatt, keine Segment-Stufen).
-      const color = parseColor((prim as { color?: string }).color) ?? [0.1, 0.1, 0.1, 1];
+      const color = dim(
+        parseColor((prim as { color?: string }).color) ?? [0.1, 0.1, 0.1, 1],
+        prim.greyed,
+      );
       const strokeMm = prim.weightMm || 0.18;
       const c = prim.center;
       const a0 = Math.atan2(prim.from.y - c.y, prim.from.x - c.x);
@@ -482,7 +497,7 @@ export function compilePrimitivesToGpu(
       // kein Kreis-Primitiv → hier bildschirm-adaptiv tessellieren (wie 'arc').
       // Kreis = voller Umlauf (geschlossen, optional gefüllt), Bogen = a0..a1 (CCW,
       // offen). OHNE diesen Zweig blieben gezeichnete Kreise/Bögen im GL unsichtbar.
-      const stroke = parseColor(prim.stroke) ?? [0.1, 0.1, 0.1, 1];
+      const stroke = dim(parseColor(prim.stroke) ?? [0.1, 0.1, 0.1, 1], prim.greyed);
       const strokeMm = prim.weightMm || 0.18;
       const c = prim.center;
       const TAU = Math.PI * 2;
@@ -519,7 +534,7 @@ export function compilePrimitivesToGpu(
               track(pt.x, pt.y);
             }
             for (const t of tris) fillIdx.push(base + t);
-            addFillBatch(tris.length, fill);
+            addFillBatch(tris.length, dim(fill, prim.greyed));
           }
         }
       }

@@ -1,11 +1,29 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ResourceWindowApp } from "./native/ResourceWindowApp";
+import { SettingsWindowApp } from "./native/SettingsWindowApp";
+import { DrawingLevelsWindowApp } from "./native/DrawingLevelsWindowApp";
+import { LayerSettingsWindowApp } from "./native/LayerSettingsWindowApp";
+import { ContextImportWindowApp } from "./native/ContextImportWindowApp";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { getLanguage, setLanguage } from "./i18n";
 import type { Language } from "./i18n";
+import { applyThemeMode, getStoredThemeMode } from "./theme/themeMode";
 import "./styles.css";
 import "./text/fonts.css";
+
+// Hell/Dunkel VOR dem ersten Render setzen (jedes native Fenster ist ein
+// eigenes Dokument und mountet über dieselbe main.tsx) — verhindert einen
+// Hell/Dunkel-Flackerer beim Laden.
+applyThemeMode(getStoredThemeMode());
+
+/** Eigenes natives Nebenfenster statt der Haupt-App? Steuert per URL-Query,
+ * welcher Root gemountet wird (siehe native/resourceWindow.ts bzw.
+ * native/settingsWindow.ts, die die URL so setzen). `?window=resources`/
+ * `?window=settings` → nur der jeweilige Manager/Dialog, ohne den ganzen
+ * App-Baum (eigener Prozesskontext, kein gemeinsamer Store). */
+const windowKind = new URLSearchParams(window.location.search).get("window");
 
 // Sprach-Naht für Werkzeuge/Tests (und einen späteren Umschalter): die i18n-
 // Steuerung am window verfügbar machen. Identifier englisch; Werte übersetzbar.
@@ -52,10 +70,19 @@ document.addEventListener("dragstart", (e) => {
   if (!isTextEntry(e.target)) e.preventDefault();
 });
 
+function RootByWindowKind() {
+  if (windowKind === "resources") return <ResourceWindowApp />;
+  if (windowKind === "settings") return <SettingsWindowApp />;
+  if (windowKind === "drawing-levels") return <DrawingLevelsWindowApp />;
+  if (windowKind === "layer-settings") return <LayerSettingsWindowApp />;
+  if (windowKind === "context-import") return <ContextImportWindowApp />;
+  return <App />;
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <RootByWindowKind />
     </ErrorBoundary>
   </StrictMode>,
 );

@@ -40,7 +40,10 @@ import type {
 // als weiterer Tab in der rechten unteren Gruppe.
 // v11: Layouts-Panel ("layouts", DOSSIER A3 / ROADMAP Paragraf 11) als weiterer
 // Tab in der rechten unteren Gruppe.
-export const LAYOUT_VERSION = 11;
+// v12: Werkzeug-Palette ZURÜCK ins Default-Layout (Nutzer-Entscheid: Werkzeuge
+// gehören in ein andockbares Panel statt ins Ribbon-Band) — wieder oben links,
+// Attribute darunter (Vectorworks-Bild aus v6, vor dem Ribbon-UI-Phase-3-Bump).
+export const LAYOUT_VERSION = 12;
 
 /** localStorage-Schlüssel des zuletzt benutzten Layouts. */
 const CURRENT_KEY = "cad.layout";
@@ -64,11 +67,11 @@ const NAMED_PREFIX = "cad.layouts.";
  * OBEN, Zeichnungsebenen + Ebenen als Tab-Stapel UNTEN. (Ressourcen bleibt ein
  * schwebendes Fenster.) Jede Gruppe trägt ein Höhen-Gewicht.
  */
-// Ribbon-UI Phase 3: die Werkzeug-Sidebar ("tools") ist NICHT mehr im Default-
-// Layout — die Werkzeuge liegen im Ribbon, der Wandtyp-/Deckentyp-Picker im
-// Attribute-Panel. `ToolsPanel` bleibt registriert (per Fenster-Menü andockbar),
-// nur nicht mehr per Default sichtbar → Attribute bekommt die volle linke Höhe.
+// v12: Werkzeug-Palette ("tools") wieder im Default-Layout — oben links, mit
+// der Attribute-Palette darunter (Vectorworks-Bild). Das Ribbon-Band bleibt als
+// Reiter erreichbar, ist aber nicht mehr der primäre Weg zu den Werkzeugen.
 const DEFAULT_LEFT_GROUPS: DockGroup[] = [
+  { tabs: ["tools"], activeTab: "tools", weight: 1 },
   { tabs: ["attributes"], activeTab: "attributes", weight: 1 },
 ];
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
@@ -374,6 +377,26 @@ export function setActiveTab(
   if (gi < 0 || d.groups[gi].activeTab === panelId) return layout;
   const groups = d.groups.map((g, i) => (i === gi ? { ...g, activeTab: panelId } : g));
   return { ...layout, [dock]: { ...d, groups } };
+}
+
+/**
+ * Macht ein Panel sichtbar, gleich wo es gerade steckt — NIE destruktiv (schliesst/
+ * versteckt nie etwas anderes). Für „Fenster > Panels" (native Menüleiste,
+ * appMenu.ts) und künftige ähnliche Einstiege:
+ *   • schon schwebend      → nach vorne holen (bringToFront).
+ *   • angedockt, inaktiver Tab → als aktiven Tab seiner Gruppe setzen.
+ *   • nirgends vorhanden   → als neues schwebendes Fenster öffnen (Default-Rect).
+ */
+export function revealPanel(layout: LayoutState, panelId: string): LayoutState {
+  if (layout.floating.some((f) => f.panelId === panelId)) {
+    return bringToFront(layout, panelId);
+  }
+  for (const dock of ["left", "right"] as DockId[]) {
+    if (layout[dock].groups.some((g) => g.tabs.includes(panelId))) {
+      return setActiveTab(layout, dock, panelId);
+    }
+  }
+  return moveToFloat(layout, panelId, { x: 120, y: 120, w: 320, h: 420 });
 }
 
 // `otherDock` wird (noch) nicht extern gebraucht, ist aber Teil der Aufräum-

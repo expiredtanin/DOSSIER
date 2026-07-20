@@ -222,6 +222,11 @@ export function wallMaterialColorMaps(project: Project): string[] {
       // Kein auflösbarer Deckentyp.
     }
   }
+  for (const r of project.roofs ?? []) {
+    for (const l of roofLayers(project, r)) {
+      if (l.componentId) consider(l.componentId);
+    }
+  }
   materialMapCache.set(project, list);
   return list;
 }
@@ -367,6 +372,16 @@ export interface RMesh {
   indices: number[];
   kind: RMeshKind;
   color: RRgb;
+  /** Optionale Pro-Vertex-Albedo (flach `[r,g,b, …]`, 0..1) — ein Wert je
+   *  Positions-Vertex. Damit wird z. B. ein SWISSIMAGE-Luftbild aufs Gelände-TIN
+   *  „drapiert" (jeder Vertex trägt seinen Bildpunkt). Fehlt/zu kurz -> `color`
+   *  fürs ganze Mesh. Matcht `render3d::types::MeshInput.vertexColors`. */
+  vertexColors?: number[];
+  /** Material-Textur-Ebene (1-basiert, siehe {@link wallMaterialColorMaps}) für
+   *  den Stil „Textured" — bislang nur von Dach-Schichten gesetzt. Fehlt sie,
+   *  zeigt render3d das Fallback-Schachbrett. Matcht
+   *  `render3d::types::MeshInput.materialIndex`. */
+  materialIndex?: number;
 }
 
 /** Modell-Bündel für den nativen 3D-Renderer (Wände + Decken + Kontext-Meshes). */
@@ -1138,12 +1153,22 @@ function emitWall(out: RWall[], project: Project, wall: Wall, layered = true, cu
   //   • Öffnungen (project.openings, Fenster mit Brüstung/Sturz),
   //   • Legacy-Türen (project.doors, sitzen am Boden, nur Sturz).
   // Jeweils [from..to] auf die Achse geklemmt + vertikale Öffnungs-Ausdehnung.
-  const cutouts: Array<{ from: number; to: number; oBottom: number; oTop: number }> = [];
+  const cutouts: Array<{
+    from: number;
+    to: number;
+    oBottom: number;
+    oTop: number;
+    /** Schicht-Rücksprung der innersten Schicht an DIESER Öffnung (nur Fenster
+     *  mit `WindowType.innerLayerRecess`), s. {@link emitWall}-Moduldoc unten. */
+    recessInnerLayer: boolean;
+  }> = [];
   for (const op of openingsOfWall(project, wall.id)) {
     const iv = openingInterval(wall, op);
     if (!iv) continue;
     const v = openingVerticalExtent(project, wall, op);
-    cutouts.push({ from: iv.from, to: iv.to, oBottom: v.zBottom, oTop: v.zTop });
+    const recessInnerLayer =
+      op.kind === "window" && getWindowType(project, op)?.innerLayerRecess === true;
+    cutouts.push({ from: iv.from, to: iv.to, oBottom: v.zBottom, oTop: v.zTop, recessInnerLayer });
   }
   for (const d of project.doors ?? []) {
     if (d.hostWallId !== wall.id) continue;
@@ -1152,7 +1177,7 @@ function emitWall(out: RWall[], project: Project, wall: Wall, layered = true, cu
     if (to - from < EPS) continue;
     // Tür sitzt am Boden (UK der Wand), reicht bis zur lichten Türhöhe.
     const oTop = Math.min(zTop, zBottom + d.height);
-    cutouts.push({ from, to, oBottom: zBottom, oTop });
+    cutouts.push({ from, to, oBottom: zBottom, oTop, recessInnerLayer: false });
   }
   cutouts.sort((a, b) => a.from - b.from);
 
@@ -1174,11 +1199,12 @@ function emitWall(out: RWall[], project: Project, wall: Wall, layered = true, cu
   // auf dessen Achsen-Start umgerechnet (rebased), damit render3d sie relativ zum
   // jeweiligen Box-Start korrekt stanzt.
   if (layered) {
-    const holes: RHole[] = cutouts.map((c) => ({
+    const holes: (RHole & { recessInnerLayer: boolean })[] = cutouts.map((c) => ({
       from: c.from,
       to: c.to,
       zBottom: c.oBottom,
       zTop: c.oTop,
+      recessInnerLayer: c.recessInnerLayer,
     }));
     const startCut = cuts?.startCut ?? null;
     const endCut = cuts?.endCut ?? null;
@@ -1240,11 +1266,26 @@ function emitWall(out: RWall[], project: Project, wall: Wall, layered = true, cu
       }
 
       // Öffnungs-Löcher, die ein z-Teilstück vertikal berühren, auf den Box-Start
-      // `a` umrechnen (render3d klemmt u/z selbst auf die Box).
+      // `a` umrechnen (render3d klemmt u/z selbst auf die Box). An der INNERSTEN
+      // Schicht (li = letztes Band) weicht das Loch bei Fenstern mit
+      // `WindowType.innerLayerRecess` rundum um die eigene Schichtdicke zurück
+      // (Schicht-Rücksprung an der Laibung) — die anderen Schichten bleiben bündig.
+      const isInnermostBand = li === bands.length - 1;
+      const recessDepth = b.thickness;
       const emitPiece = (a: number, bb: number, zb: number, zt: number): void => {
         const segHoles = holes
           .filter((h) => h.zTop > zb + EPS && h.zBottom < zt - EPS)
-          .map((h) => ({ from: h.from - a, to: h.to - a, zBottom: h.zBottom, zTop: h.zTop }));
+          .map((h) => {
+            const widen = isInnermostBand && h.recessInnerLayer;
+            return widen
+              ? {
+                  from: h.from - a - recessDepth,
+                  to: h.to - a + recessDepth,
+                  zBottom: h.zBottom - recessDepth,
+                  zTop: h.zTop + recessDepth,
+                }
+              : { from: h.from - a, to: h.to - a, zBottom: h.zBottom, zTop: h.zTop };
+          });
         pushSegment(out, wall, a, bb, zb, zt, b.thickness, b.offset, b.color, wall.id, b.hatch, b.materialIndex, segHoles, bandCutMeta(b));
       };
 
@@ -1868,6 +1909,13 @@ function emitRoofs(project: Project): RMesh[] {
       const color =
         overrideColor ??
         (layer.componentId ? hexToRgb(getComponent(project, layer.componentId).color, ROOF_RGB) : ROOF_RGB);
+      // Material-Textur-Ebene fürs Textured-Rendering (z. B. echte Dachziegel-
+      // Textur der Eindeckung) — nur wenn KEIN Farb-Override greift (Override
+      // = bewusst eine einheitliche Farbe für alle Schichten, kein Bauteil-Bezug).
+      const materialIndex =
+        !overrideColor && layer.componentId
+          ? resolveComponentMaterialLayer(project, layer.componentId)
+          : undefined;
       const positions: number[] = [];
       const indices: number[] = [];
       for (const plane of g.planes) {
@@ -1881,7 +1929,7 @@ function emitRoofs(project: Project): RMesh[] {
         ]);
         pushRoofSlab(positions, indices, top, t);
       }
-      if (indices.length > 0) out.push({ positions, indices, kind: "extrusion", color });
+      if (indices.length > 0) out.push({ positions, indices, kind: "extrusion", color, materialIndex });
       return offsetAbove + t;
     }, 0);
     // Giebel (Endfüllung) als dünne Fläche, äusserste Schichtfarbe/Override.
@@ -1919,6 +1967,13 @@ function emitMeshes(project: Project): RMesh[] {
         indices: obj.indices,
         kind: obj.type === "terrainMesh" ? "terrain" : "imported",
         color: obj.type === "terrainMesh" ? TERRAIN_RGB : IMPORTED_RGB,
+        // Luftbild-Drape: das Gelände-TIN kann Pro-Vertex-Farben tragen (beim
+        // Import aus dem Luftbild gesampelt) — dann zeigt render3d das Ortho
+        // statt der Flächen-Grundfarbe.
+        vertexColors:
+          obj.type === "terrainMesh" && obj.vertexColors?.length
+            ? obj.vertexColors
+            : undefined,
       });
     }
   }
@@ -2646,6 +2701,48 @@ function emitOpeningGlass(project: Project): RMesh[] {
 }
 
 /**
+ * Emittiert je LEGACY-Tür (`project.doors` — das alte flache Türfeld VOR dem
+ * Öffnungs-Typsystem, z. B. `Door.hostWallId/position/width/height` ohne
+ * `typeId`) EIN Blatt-Panel als rohen Quader. `emitWall` schneidet für diese
+ * Türen zwar bereits ein Loch in die Wand, aber `emitOpeningGlass`/
+ * `emitOpeningFrames` durchlaufen NUR `project.openings` (das neue Typsystem) —
+ * ohne diese Funktion blieb eine Legacy-Tür ein blankes Loch, durch das man
+ * hindurchsieht (Nutzer-Report: "Türen fehlen im 3D komplett"). Analog zum
+ * Alt-Verhalten typloser Fenster ({@link emitOpeningGlass}: EINE Vollscheibe
+ * ohne Rahmen) — hier EIN Vollblatt ohne Rahmen/Zarge (das Rahmen-System gehört
+ * exklusiv zu `project.openings`, s. {@link resolveOpeningFrame}). `positions`
+ * in MODELL-Metern wie {@link emitMeshes}.
+ */
+function emitLegacyDoorLeaves(project: Project): RMesh[] {
+  const out: RMesh[] = [];
+  for (const wall of project.walls) {
+    const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
+    if (axisLen < 1e-9) continue;
+    const { zBottom } = wallVerticalExtent(project, wall);
+    for (const d of project.doors ?? []) {
+      if (d.hostWallId !== wall.id) continue;
+      const from = Math.max(0, Math.min(d.position, axisLen));
+      const to = Math.max(from, Math.min(d.position + d.width, axisLen));
+      if (to - from <= EPS) continue;
+      const zTop = zBottom + d.height;
+      if (zTop - zBottom <= EPS) continue;
+      const mesh = openingAxisBox(
+        wall,
+        from,
+        to,
+        zBottom,
+        zTop,
+        -DOOR_LEAF_THICK / 2,
+        DOOR_LEAF_THICK / 2,
+        DOOR_LEAF_RGB,
+      );
+      if (mesh) out.push(mesh);
+    }
+  }
+  return out;
+}
+
+/**
  * Emittiert je Öffnung MIT auflösbarem Typ ({@link getDoorType}/
  * {@link getWindowType}) die Rahmen-/Sprossen-Riegel (Zarge/Blendrahmen, Sturz,
  * Schwelle, Kämpfer, Mittelpfosten — s. {@link frameMeshesForOpening}) als rohe
@@ -2803,6 +2900,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     meshes: [
       ...emitMeshes(project),
       ...emitOpeningGlass(project),
+      ...emitLegacyDoorLeaves(project),
       ...emitOpeningFrames(project, detail),
       ...emitOpeningShading(project, detail),
       ...emitStairMeshes(project),
@@ -2888,7 +2986,7 @@ export function pickGeometry(
   // Indizes robust überspringen statt abzustürzen (importierte Daten).
   const contextMeshes: PickContextMesh[] = [];
   for (const obj of project.context ?? []) {
-    if (obj.type === "contourSet") continue;
+    if (obj.type === "contourSet" || obj.type === "image") continue;
     const pos = obj.positions;
     const vcount = pos.length / 3;
     const tris: [RoofPickVec3, RoofPickVec3, RoofPickVec3][] = [];
@@ -3045,7 +3143,7 @@ export function selectionHighlightLines(
   // tausende Dreiecke, deren Kanten einzeln zu zeichnen wäre unbrauchbar dicht.
   if (contextObjSet.size > 0) {
     for (const obj of project.context ?? []) {
-      if (obj.type === "contourSet" || !contextObjSet.has(obj.id)) continue;
+      if (obj.type === "contourSet" || obj.type === "image" || !contextObjSet.has(obj.id)) continue;
       const pos = obj.positions;
       let minX = Infinity, maxX = -Infinity;
       let minY = Infinity, maxY = -Infinity;

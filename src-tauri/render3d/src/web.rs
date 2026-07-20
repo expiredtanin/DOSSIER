@@ -114,7 +114,11 @@ pub struct WebModelRenderer {
 /// Decken. Mirror der TS-`fitTargetDist`-Grow-Schleife (Wasm3DViewport.tsx):
 /// Wand-Achsenpunkte auf Basis-/Firsthoehe, Decken-Umriss auf Unter-/Oberkante.
 /// `None` bei leerem Modell.
-fn model_bounds(walls: &[WallInput], slabs: &[SlabInput]) -> Option<([f32; 3], [f32; 3])> {
+fn model_bounds(
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    meshes: &[MeshInput],
+) -> Option<([f32; 3], [f32; 3])> {
     let mut min = [f32::INFINITY; 3];
     let mut max = [f32::NEG_INFINITY; 3];
     let mut grow = |x: f32, y: f32, z: f32| {
@@ -145,6 +149,17 @@ fn model_bounds(walls: &[WallInput], slabs: &[SlabInput]) -> Option<([f32; 3], [
         for p in &s.outline {
             grow(p[0], s.z_bottom, p[1]);
             grow(p[0], s.z_top, p[1]);
+        }
+    }
+    // Meshes (Daecher, Extrusionen, Stuetzen UND importierte Gebaeude/Terrain):
+    // model (x,y,z=Hoehe) -> world (x, z, y). Ohne sie kann ein Praeset/Fit den
+    // (evtl. weit entfernten) Import nicht rahmen.
+    for m in meshes {
+        let p = &m.positions;
+        let mut i = 0;
+        while i + 2 < p.len() {
+            grow(p[i], p[i + 2], p[i + 1]);
+            i += 3;
         }
     }
     if !min[0].is_finite() {
@@ -247,7 +262,7 @@ impl WebModelRenderer {
     pub fn set_model(&mut self, json: &str) -> Result<(), JsValue> {
         let model: ModelInput = serde_json::from_str(json)
             .map_err(|e| JsValue::from_str(&format!("Modell parsen: {e}")))?;
-        self.bounds = model_bounds(&model.walls, &model.slabs);
+        self.bounds = model_bounds(&model.walls, &model.slabs, &model.meshes);
         self.renderer
             .upload_model(&self.device, &model.walls, &model.slabs, &model.meshes);
         // Wand-/Decken-Eingabe fuer den Live-Schnitt cachen (Klon, da der Renderer
@@ -300,6 +315,15 @@ impl WebModelRenderer {
     /// (`ortho_half_height` = halbe Sichthoehe in Metern). Die TS-Seite berechnet
     /// `eye` aus Orbit-Winkeln/Distanz oder einem Praeset (front/top/side/iso/persp)
     /// — siehe `useWasm3dRenderer`/`Wasm3DViewport`.
+    ///
+    /// FAR-EBENE: die feste `Camera::default()`-Far-Ebene (1000 m) reicht bei
+    /// grossen georeferenzierten Importen (Suchradius bis 2000 m, Bounding-Kugel
+    /// entsprechend gross) nicht mehr — Teile des Modells wurden je nach
+    /// Blickwinkel/Distanz VOM FERN-CLIPPING abgeschnitten (Nutzer-Report: "Teile
+    /// im 3D nicht sichtbar in einem Winkel"). Die Far-Ebene wird deshalb hier je
+    /// Aufruf aus der zuletzt hochgeladenen Modell-Bounding-Box abgeleitet: der
+    /// weiteste Bbox-Eckpunkt vom Auge aus + Sicherheitsmarge, mindestens der
+    /// bisherige Default (kleine Modelle bleiben unveraendert).
     #[allow(clippy::too_many_arguments)]
     pub fn set_camera(
         &mut self,
@@ -316,6 +340,32 @@ impl WebModelRenderer {
         fov_y: f32,
         ortho_half_height: f32,
     ) {
+        let far = match self.bounds {
+            Some((min, max)) => {
+                let corners = [
+                    [min[0], min[1], min[2]],
+                    [max[0], min[1], min[2]],
+                    [min[0], max[1], min[2]],
+                    [max[0], max[1], min[2]],
+                    [min[0], min[1], max[2]],
+                    [max[0], min[1], max[2]],
+                    [min[0], max[1], max[2]],
+                    [max[0], max[1], max[2]],
+                ];
+                let mut max_dist = 0.0f32;
+                for c in corners {
+                    let dx = c[0] - eye_x;
+                    let dy = c[1] - eye_y;
+                    let dz = c[2] - eye_z;
+                    let d = (dx * dx + dy * dy + dz * dz).sqrt();
+                    if d > max_dist {
+                        max_dist = d;
+                    }
+                }
+                (max_dist * 1.5).max(crate::types::default_far())
+            }
+            None => crate::types::default_far(),
+        };
         self.camera = Camera {
             eye: [eye_x, eye_y, eye_z],
             target: [target_x, target_y, target_z],
@@ -327,6 +377,7 @@ impl WebModelRenderer {
             },
             fov_y,
             ortho_half_height,
+            far,
             ..Camera::default()
         };
     }
@@ -453,6 +504,39 @@ impl WebModelRenderer {
         self.renderer
             .set_material_textures(&self.device, &self.queue, rgba, layer_count);
         Ok(())
+    }
+
+    /// Setzt/ersetzt das aufs Gelaende drapierte Luftbild (SWISSIMAGE). `rgba` =
+    /// dicht gepackte RGBA8-Bytes (`width*height*4`, zeilenweise von OBEN = Nord),
+    /// die der JS-Aufrufer aus der Bild-Data-URL dekodiert (siehe
+    /// `viewport/aerialTexture.ts`). `min_x/min_y/max_x/max_y` = Modell-Meter-
+    /// Bounding-Box (x = Ost, y = Nord). Ungueltige/leere Eingabe loescht das
+    /// Luftbild. Wirkt erst beim naechsten `render`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_aerial_texture(
+        &mut self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        min_x: f32,
+        min_y: f32,
+        max_x: f32,
+        max_y: f32,
+    ) -> Result<(), JsValue> {
+        self.renderer.set_aerial_texture(
+            &self.device,
+            &self.queue,
+            rgba,
+            width,
+            height,
+            [min_x, min_y, max_x, max_y],
+        );
+        Ok(())
+    }
+
+    /// Loescht das drapierte Luftbild (Gelaende erscheint wieder einfarbig/shaded).
+    pub fn clear_aerial(&mut self) {
+        self.renderer.clear_aerial();
     }
 
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).

@@ -17,11 +17,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Project } from "../model/types";
+import type { ContextImage, Project } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
 import type { DetailLevel } from "../ui/TopBar";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
+import { decodeImageToRgba } from "../io/swissImage";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
 export interface Camera3d {
@@ -82,6 +83,22 @@ interface WebModelRendererLike {
    * die Karten belegen Ebenen 1..N (siehe `WallInput.materialIndex`). Optional —
    * ältere WASM-Builds ohne diesen Export lassen den Aufrufer still zurückfallen. */
   set_material_textures?(rgba: Uint8Array, layerCount: number): void;
+  /** Luftbild aufs Gelände drapieren (`web::set_aerial_texture`): `rgba` =
+   *  gepackte RGBA8-Bytes (`width*height*4`, zeilenweise von oben = Nord), plus
+   *  Modell-Meter-Bbox (min/max, x=Ost/y=Nord). render3d legt es pixelscharf als
+   *  Textur über das Terrain-TIN. Optional — ältere WASM-Builds ohne diesen
+   *  Export lassen den Aufrufer still zurückfallen. */
+  set_aerial_texture?(
+    rgba: Uint8Array,
+    width: number,
+    height: number,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  ): void;
+  /** Drapiertes Luftbild löschen (Gelände wieder einfarbig/shaded). Optional. */
+  clear_aerial?(): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -166,6 +183,9 @@ export function useWasm3dRenderer(
   // erneutes (teures) Dekodieren/Hochladen, wenn sich die Materialien nicht
   // geändert haben (updateModel läuft bei JEDER Projektänderung).
   const materialSigRef = useRef<string | null>(null);
+  // Signatur des zuletzt hochgeladenen Drape-Luftbilds (src + Bbox) — verhindert
+  // ein erneutes (teures) Dekodieren/Hochladen bei unveränderter Lage.
+  const aerialSigRef = useRef<string | null>(null);
 
   /** Modell bei Projektänderung neu setzen (re-extrudiert in Rust). `detail`
    *  steuert den Öffnungs-Detailgrad (grob/mittel/fein) im 3D wie im Grundriss. */
@@ -195,6 +215,47 @@ export function useWasm3dRenderer(
         else cur.set_material_textures(new Uint8Array(0), 0); // zurück auf Schachbrett
       } catch (e) {
         console.warn("render3d set_material_textures fehlgeschlagen:", e);
+      }
+    })();
+
+    // Luftbild aufs Gelände drapieren: ein ContextImage mit `drape:true` wird als
+    // GPU-Textur hochgeladen (render3d legt es pixelscharf über das Terrain).
+    // Wie die Materialien asynchron + signatur-gecacht (Bild ändert sich selten).
+    if (typeof r.set_aerial_texture !== "function") return;
+    void (async () => {
+      try {
+        const drape = project.context?.find(
+          (o): o is ContextImage => o.type === "image" && o.drape === true,
+        );
+        const sig = drape
+          ? `${drape.src.length}:${drape.src.slice(0, 64)}:${drape.min.x},${drape.min.y},${drape.max.x},${drape.max.y}`
+          : "";
+        if (sig === aerialSigRef.current) return; // unverändert
+        aerialSigRef.current = sig;
+        const cur = rendererRef.current;
+        if (!cur || typeof cur.set_aerial_texture !== "function") return;
+        if (!drape) {
+          cur.clear_aerial?.();
+          return;
+        }
+        const dec = await decodeImageToRgba(drape.src);
+        const cur2 = rendererRef.current;
+        if (!cur2 || typeof cur2.set_aerial_texture !== "function") return;
+        if (dec) {
+          cur2.set_aerial_texture(
+            dec.data,
+            dec.width,
+            dec.height,
+            drape.min.x,
+            drape.min.y,
+            drape.max.x,
+            drape.max.y,
+          );
+        } else {
+          cur2.clear_aerial?.();
+        }
+      } catch (e) {
+        console.warn("render3d set_aerial_texture fehlgeschlagen:", e);
       }
     })();
   }, []);

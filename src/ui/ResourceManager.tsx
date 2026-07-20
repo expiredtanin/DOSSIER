@@ -2393,6 +2393,14 @@ function WindowStylesTab({
               />
             </FieldRow>
           )}
+          <FieldRow label={t("resources.field.innerLayerRecess")}>
+            <input
+              type="checkbox"
+              checked={!!win.innerLayerRecess}
+              onChange={(e) => patch({ innerLayerRecess: e.target.checked })}
+              title={t("resources.field.innerLayerRecess.hint")}
+            />
+          </FieldRow>
           <FieldRow label={t("resources.field.transomHeight")}>
             <NumberField
               value={win.transomHeight ?? 0}
@@ -3114,12 +3122,20 @@ export function ResourceManager({
   onClose,
   handlers,
   initialTab,
+  windowed = false,
 }: {
   project: Project;
   onClose: () => void;
   handlers: ResourceManagerHandlers;
   /** Beim Öffnen (bzw. bei erneutem Sprung) direkt aktiver Tab, z. B. „doorStyles". */
   initialTab?: TabId;
+  /**
+   * Läuft in einem EIGENEN nativen Fenster (siehe native/resourceWindow.ts)
+   * statt als schwebendes Overlay im Hauptfenster: füllt die Fensterfläche
+   * komplett (kein eigenes Verschieben/Grössenändern per JS — das übernimmt
+   * das OS-Fenster), Kopfzeile bleibt nur als Tab-Träger ohne Drag-Cursor.
+   */
+  windowed?: boolean;
 }) {
   const [tab, setTab] = useState<TabId>(initialTab ?? "components");
   // Erneuter Sprung aus einem Element heraus (z. B. „Typ bearbeiten" an einer
@@ -3185,30 +3201,44 @@ export function ResourceManager({
 
   return (
       <aside
-        className="res-window"
+        className={`res-window${windowed ? " res-window-embedded" : ""}`}
         role="dialog"
         aria-label={t("resources.label")}
-        style={{
-          left: `${rect.x}px`,
-          top: `${rect.y}px`,
-          width: `${rect.w}px`,
-          height: `${rect.h}px`,
-        }}
+        style={
+          windowed
+            ? undefined
+            : {
+                left: `${rect.x}px`,
+                top: `${rect.y}px`,
+                width: `${rect.w}px`,
+                height: `${rect.h}px`,
+              }
+        }
       >
-        <header className="res-head" onPointerDown={onTitlePointerDown}>
+        <header
+          className="res-head"
+          onPointerDown={windowed ? undefined : onTitlePointerDown}
+          // Im eigenen nativen Fenster (randlos, s. BORDERLESS_WINDOW_CHROME)
+          // ist diese Kopfzeile der einzige Ziehbereich — genau wie die
+          // TopBar des Hauptfensters (`data-tauri-drag-region`). Ohne OS-
+          // Titelzeile bleibt so trotzdem EIN Griff zum Verschieben.
+          {...(windowed ? { "data-tauri-drag-region": true } : {})}
+        >
           <div className="res-head-title">
             <span className="res-head-icon">
               <EyeIcon open />
             </span>
             {t("resources.title")}
           </div>
-          <button
-            className="res-close"
-            onClick={onClose}
-            aria-label={t("resources.close")}
-          >
-            ×
-          </button>
+          {!windowed && (
+            <button
+              className="res-close"
+              onClick={onClose}
+              aria-label={t("resources.close")}
+            >
+              ×
+            </button>
+          )}
         </header>
 
         <nav className="res-tabs" role="tablist">
@@ -3309,14 +3339,17 @@ export function ResourceManager({
           )}
         </div>
 
-        {/* Greifer unten rechts (Größe ändern). */}
-        <div
-          className="floating-resize res-resize"
-          role="separator"
-          aria-label={t("dock.resizePanel")}
-          title={t("dock.resizePanel")}
-          onPointerDown={onResizePointerDown}
-        />
+        {/* Greifer unten rechts (Größe ändern) — im eigenen OS-Fenster übernimmt
+            das Betriebssystem das Grössenändern, daher windowed ohne Greifer. */}
+        {!windowed && (
+          <div
+            className="floating-resize res-resize"
+            role="separator"
+            aria-label={t("dock.resizePanel")}
+            title={t("dock.resizePanel")}
+            onPointerDown={onResizePointerDown}
+          />
+        )}
       </aside>
   );
 }

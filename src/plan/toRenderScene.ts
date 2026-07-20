@@ -132,20 +132,26 @@ const CLS_STROKE: Record<string, string> = {
   "door-swing": "#1a1a1a",
   "door-frame": "#1a1a1a",
   "window-glass": "#1a1a1a",
-  "wall-axis": "#2f5d54", // var(--accent) des hellen Standard-Themes
+  "wall-axis": "#4a453e", // var(--accent) des hellen Standard-Themes
 };
 const CLS_OPACITY: Record<string, number> = {
   "wall-axis": 0.85,
   "context-line": 0.7,
 };
 
-/** Deckkraft gedimmter (greyed) Primitive — wie GREYED_OPACITY in PlanView. */
-const GREYED_ALPHA = 0.3;
+/**
+ * Fester Grauton gedimmter (greyed) Primitive — ECHTE Umfärbung statt
+ * Deckkraft (dünne Haarlinien auf dem hellen Zeichenblatt wären bei reiner
+ * Transparenz kaum erkennbar gedimmt). Gleicher Ton wie GREYED_COLOR in
+ * PlanView.tsx / GREY_RGB in glPlanCompile.ts (#8c8c8c ≈ 0.549).
+ */
+const GREY_RGB = 0.549;
 
-/** Farbe mit Klassen-Deckkraft und Greyed-Dimmung multiplizieren. */
+/** Farbe mit Klassen-Deckkraft multiplizieren, bei Greyed-Dimmung auf den festen Grauton umfärben. */
 function withOpacity(col: RRgba, cls: string | undefined, greyed: boolean | undefined): RRgba {
-  const o = (cls ? CLS_OPACITY[cls] ?? 1 : 1) * (greyed ? GREYED_ALPHA : 1);
-  return o === 1 ? col : [col[0], col[1], col[2], col[3] * o];
+  const o = cls ? CLS_OPACITY[cls] ?? 1 : 1;
+  const rgb: RRgba = greyed ? [GREY_RGB, GREY_RGB, GREY_RGB, col[3]] : col;
+  return o === 1 ? rgb : [rgb[0], rgb[1], rgb[2], rgb[3] * o];
 }
 
 /** Strichfarbe einer line/arc-Primitive: CSS-Klassen-Farbe > Modell-Farbe > Tinte. */

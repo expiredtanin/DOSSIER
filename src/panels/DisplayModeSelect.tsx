@@ -13,8 +13,9 @@ import { t } from "../i18n";
 import { Dropdown } from "../ui/Dropdown";
 
 /**
- * Beschriftungs-Keys je Modus (Werte englisch, vgl. types.ts) — exakt die
- * fünf DOSSIER-Modi aus docs/design/context-menu.md.
+ * Beschriftungs-Keys je Modus (Werte englisch, vgl. types.ts) — die fünf
+ * DOSSIER-Modi aus docs/design/context-menu.md plus die eigene Ergänzung
+ * "locked" (aktiv farbig, andere gesperrt aber NICHT grau).
  */
 const MODE_OPTIONS: { value: DisplayMode; labelKey: string }[] = [
   { value: "all_force", labelKey: "display.all_force" },
@@ -22,6 +23,7 @@ const MODE_OPTIONS: { value: DisplayMode; labelKey: string }[] = [
   { value: "active", labelKey: "display.active" },
   { value: "grey", labelKey: "display.grey" },
   { value: "grey_locked", labelKey: "display.grey_locked" },
+  { value: "locked", labelKey: "display.locked" },
 ];
 
 /**

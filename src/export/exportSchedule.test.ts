@@ -199,3 +199,108 @@ describe("exportScheduleCsv — Bauteilliste", () => {
     expect(scheduleRows(proj)).toHaveLength(0);
   });
 });
+
+describe("scheduleRows — Dächer und Stützen (bisher fehlten sie in Liste/Element-Baum)", () => {
+  it("wertet ein Dach mit Dachtyp aus (Typname aus roofTypes, Dicke aus Schichtsumme via roof.thickness)", () => {
+    const proj = fixtureProject();
+    proj.roofTypes = [{ id: "rt", name: "Warmdach", layers: [{ componentId: "c", thickness: 0.35 }] }];
+    proj.roofs = [
+      {
+        id: "R1",
+        type: "roof",
+        floorId: "eg",
+        categoryCode: "31",
+        outline: [
+          { x: 0, y: 0 },
+          { x: 4, y: 0 },
+          { x: 4, y: 3 },
+          { x: 0, y: 3 },
+        ], // 4×3 = 12 m²
+        shape: "flach",
+        pitchDeg: 0,
+        overhang: 0,
+        ridgeAxis: "x",
+        thickness: 0.35,
+        roofTypeId: "rt",
+      },
+    ];
+    const rows = scheduleRows(proj).filter((r) => r.kind === "Dach");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "Dach",
+      id: "R1",
+      typeName: "Warmdach",
+      floor: "EG",
+      length: null,
+      heightM: null,
+      thickness: 0.35,
+      area: 12,
+    });
+  });
+
+  it("wertet eine rechteckige und eine runde Stütze aus (Profil-Masse als Länge/Dicke)", () => {
+    const proj = fixtureProject();
+    proj.columns = [
+      {
+        id: "C1",
+        type: "column",
+        floorId: "eg",
+        categoryCode: "50",
+        position: { x: 1, y: 1 },
+        profile: { kind: "rect", width: 0.3, depth: 0.4 },
+        rotation: 0,
+        height: 2.6,
+      },
+      {
+        id: "C2",
+        type: "column",
+        floorId: "eg",
+        categoryCode: "50",
+        position: { x: 2, y: 2 },
+        profile: { kind: "round", radius: 0.15 },
+        rotation: 0,
+        height: 2.6,
+      },
+    ];
+    const rows = scheduleRows(proj).filter((r) => r.kind === "Stütze");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      id: "C1",
+      typeName: "Rechteck",
+      length: 0.3,
+      heightM: 2.6,
+      thickness: 0.4,
+      area: null,
+    });
+    expect(rows[1]).toMatchObject({
+      id: "C2",
+      typeName: "Rund",
+      length: null,
+      heightM: 2.6,
+      thickness: 0.3, // 2 × Radius
+      area: null,
+    });
+  });
+
+  it("Räume bleiben bewusst ausgeschlossen (eigener CSV-Export, siehe Dateikopf)", () => {
+    const proj = fixtureProject();
+    proj.rooms = [
+      {
+        id: "RM1",
+        type: "room",
+        floorId: "eg",
+        categoryCode: "45",
+        siaCategory: "HNF",
+        name: "Wohnen",
+        boundary: [
+          { x: 0, y: 0 },
+          { x: 3, y: 0 },
+          { x: 3, y: 3 },
+          { x: 0, y: 3 },
+        ],
+        color: "#fff",
+      },
+    ];
+    expect(scheduleRows(proj).some((r) => r.id === "RM1")).toBe(false);
+  });
+});

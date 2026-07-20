@@ -79,6 +79,24 @@ describe("generatePlan — Schnittführungs-Symbol", () => {
     expect(prims.some((pr) => pr.kind === "line" && pr.cls === "section-line")).toBe(false);
   });
 
+  it("zeichnet NICHTS für eine unsichtbare Schnittebene (visible=false)", () => {
+    const p = baseProject([
+      floor,
+      {
+        id: "s-hidden",
+        name: "Schnitt C",
+        kind: "section",
+        visible: false,
+        locked: false,
+        linePoints: [{ x: 0, y: 2 }, { x: 6, y: 2 }],
+        directionSign: 1,
+      },
+    ]);
+    const prims = generatePlan(p, "eg", visible).primitives;
+    expect(prims.some((pr) => pr.kind === "polygon" && pr.sectionLineId === "s-hidden")).toBe(false);
+    expect(prims.some((pr) => pr.kind === "line" && pr.cls === "section-line")).toBe(false);
+  });
+
   it("behandelt Ansichtsebenen (elevation) gleich", () => {
     const p = baseProject([
       floor,

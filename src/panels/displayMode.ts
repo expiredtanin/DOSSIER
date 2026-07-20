@@ -32,8 +32,10 @@ export interface ItemDisplay {
  *                     ausgegraut.
  *   • "grey_locked" — wie „grey", übrige (sichtbare, nicht aktive) zusätzlich
  *                     gesperrt.
+ *   • "locked"      — aktives normal; übrige sichtbare UNVERÄNDERT farbig,
+ *                     aber gesperrt (nicht anwählbar/bearbeitbar).
  *
- * Das aktive Element wird in "active"/"grey"/"grey_locked" stets gezeichnet,
+ * Das aktive Element wird in "active"/"grey"/"grey_locked"/"locked" stets gezeichnet,
  * auch wenn seine Sichtbarkeit abgeschaltet ist — es ist der Arbeitsfokus. Ein
  * nicht aktives, unsichtbares Element wird (außer in "all_force") nie
  * gezeichnet.
@@ -64,6 +66,13 @@ export function itemDisplay(
       // Wie „grey", übrige sichtbare zusätzlich gesperrt.
       const other = isVisible && !isActive;
       return { render: isActive || isVisible, greyed: other, locked: other };
+    }
+
+    case "locked": {
+      // Wie „grey_locked", aber OHNE das Ausgrauen — übrige sichtbare bleiben
+      // farbig, sind nur nicht mehr anwählbar/bearbeitbar.
+      const other = isVisible && !isActive;
+      return { render: isActive || isVisible, greyed: false, locked: other };
     }
   }
 }

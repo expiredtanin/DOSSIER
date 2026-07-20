@@ -1,17 +1,14 @@
-// Ribbon-Inhaltsleiste (docs/design/ribbon-ui-plan.md) — rendert den INHALT des
-// aktiven Ribbon-Tabs. Die Tab-REITER selbst sitzen in der TopBar-Zeile (eine
-// Leiste: globales Chrome + Tabs), damit es nur ZWEI Bänder gibt: TopBar-Zeile
-// (mit Tabs) oben, Ribbon-Inhalt darunter. Der aktive Tab wird als `tab`-Prop
-// hereingereicht (State liegt in App, geteilt mit der TopBar).
+// Ribbon-Inhaltsleiste (docs/design/ribbon-ui-plan.md) — rendert die Gruppen
+// EINES festen Tabs (kein Tab-Umschalter mehr, v12: Werkzeuge leben im
+// ToolsPanel). App rendert mehrere `<RibbonBar tab="...">`-Instanzen permanent
+// nebeneinander (2d/bim/custom) statt einer einzigen, umschaltbaren — jede
+// zeigt nur die Befehls-Gruppen ohne Panel-Entsprechung.
 //
 // Werkzeug-Elemente laufen über `onSelectTool` (gekoppelte Befehle inklusive, wie
-// in der Sidebar); Befehls-Elemente über `onRunCommand` (engine.start). Der
-// „Ansichten"-Tab trägt reichen Custom-Inhalt (`viewsContent`, aus der TopBar
-// gemergt) statt datengetriebener Item-Gruppen.
+// im ToolsPanel); Befehls-Elemente über `onRunCommand` (engine.start).
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import type { ReactNode } from "react";
 import { t } from "../../i18n";
 import { ToolIcon } from "../../panels/ToolsPanel";
 import { getTool } from "../../tools/tools";
@@ -43,13 +40,6 @@ export interface RibbonBarProps {
   onSelectTool: (id: ToolId) => void;
   /** Engine-Befehl starten (Ändern-Gruppe u. a.). */
   onRunCommand: (name: string) => void;
-  /**
-   * Reicher Custom-Inhalt je Tab (statt datengetriebener Item-Gruppen) — z. B.
-   * „Ansichten" (`ViewRibbonTab`) und „Text" (`TextGroup`). Von App geliefert,
-   * damit deren Setter/State dort bleiben. Ein Tab ohne Custom-Inhalt und ohne
-   * Gruppen zeigt den Leer-Hinweis.
-   */
-  tabContent?: Partial<Record<RibbonTabId, ReactNode>>;
   /** Persistierte Item-Schlüssel der modularen Custom-Bar (Tab „Eigene"). */
   customItems: string[];
   /** Ein Item in der Custom-Bar an-/abwählen (Picker im „Eigene"-Tab). */
@@ -107,35 +97,6 @@ function RibbonButton({ item, ctx }: { item: RibbonItem; ctx: ButtonCtx }) {
 }
 
 /**
- * Die Tab-REITER — als eigene Komponente exportiert, weil sie in der TopBar-Zeile
- * gerendert werden (nicht hier). Rein gesteuert über `tab`/`onTab`.
- */
-export function RibbonTabs({
-  tab,
-  onTab,
-}: {
-  tab: RibbonTabId;
-  onTab: (id: RibbonTabId) => void;
-}) {
-  return (
-    <div className="ribbon-tabs" role="tablist">
-      {RIBBON_TABS.map((tt) => (
-        <button
-          key={tt.id}
-          type="button"
-          role="tab"
-          aria-selected={tt.id === tab}
-          className={`ribbon-tab${tt.id === tab ? " active" : ""}`}
-          onClick={() => onTab(tt.id)}
-        >
-          {t(tt.labelKey)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
  * Modulare Custom-Bar (Tab „Eigene") — rendert die vom Nutzer gewählten Items
  * plus einen „＋"-Picker, der ALLE verfügbaren Werkzeuge/Befehle mit Häkchen für
  * die bereits enthaltenen listet (Klick = an-/abwählen). Gleiche Item-Typen +
@@ -184,7 +145,6 @@ function CustomBar({
 
 export function RibbonBar(props: RibbonBarProps) {
   const current = RIBBON_TABS.find((tt) => tt.id === props.tab) ?? RIBBON_TABS[0];
-  const custom = props.tabContent?.[current.id];
   const ctx: ButtonCtx = {
     activeTool: props.activeTool,
     activeCommand: props.activeCommand,
@@ -195,9 +155,8 @@ export function RibbonBar(props: RibbonBarProps) {
 
   return (
     <div className="ribbon">
-      {/* Inhalt des aktiven Tabs. Tabs mit reichem Custom-Inhalt („Ansichten",
-          „Text") rendern diesen; der „Eigene"-Tab die modulare Custom-Bar; sonst
-          die datengetriebenen Item-Gruppen. */}
+      {/* Der „Eigene"-Tab rendert die modulare Custom-Bar; sonst die
+          datengetriebenen Item-Gruppen. */}
       <div className="ribbon-body">
         {current.id === "custom" ? (
           <CustomBar
@@ -205,8 +164,6 @@ export function RibbonBar(props: RibbonBarProps) {
             onToggle={props.onToggleCustomItem}
             ctx={ctx}
           />
-        ) : custom ? (
-          custom
         ) : current.groups.length === 0 ? (
           <div className="ribbon-empty">{t("ribbon.empty")}</div>
         ) : (

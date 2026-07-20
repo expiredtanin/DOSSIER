@@ -42,6 +42,9 @@ function shiftContextObject(obj: ContextObject, dx: number, dy: number): Context
   if (obj.type === "contourSet") {
     return { ...obj, contours: obj.contours.map((c) => shiftContour(c, dx, dy)) };
   }
+  if (obj.type === "image") {
+    return { ...obj, min: shift(obj.min, dx, dy), max: shift(obj.max, dx, dy) };
+  }
   const positions = obj.positions.slice();
   for (let i = 0; i + 2 < positions.length; i += 3) {
     positions[i] += dx;
@@ -117,4 +120,29 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
       ? { ...project.geoAnchor, model: shift(project.geoAnchor.model, dx, dy) }
       : undefined,
   };
+}
+
+/**
+ * Der LV95-Ursprung eines Projekts: die reale Landeskoordinate, die auf den
+ * Modell-Nullpunkt (0,0) abgebildet wird. Aus `geoAnchor` abgeleitet
+ * (`origin = lv95 − model`), oder `null`, wenn KEIN Standort-Bezug existiert.
+ */
+export function projectGeoOrigin(project: Project): { e: number; n: number } | null {
+  const a = project.geoAnchor;
+  if (!a) return null;
+  return { e: a.lv95.e - a.model.x, n: a.lv95.n - a.model.y };
+}
+
+/**
+ * Kopie des Projekts mit SÄMTLICHER Geometrie auf die REALEN Weltkoordinaten
+ * (LV95) verschoben — für georeferenzierte MODELL-Exporte (IFC/DXF): das Modell
+ * wird lokal nahe (0,0) bearbeitet, der Export schreibt aber die wahren
+ * Landeskoordinaten, damit die Datei in anderer CAD-/BIM-Software lagerichtig
+ * sitzt. Ohne `geoAnchor` (kein Bezug) bleibt das Projekt unverändert (Identität).
+ * NICHT für Papier-/Layout-Exporte (die bleiben in lokalen Koordinaten).
+ */
+export function projectToWorldCoords(project: Project): Project {
+  const origin = projectGeoOrigin(project);
+  if (!origin) return project;
+  return translateProject(project, origin.e, origin.n);
 }

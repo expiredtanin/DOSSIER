@@ -18,6 +18,8 @@ import type {
   Opening,
   Stair,
   ExtrudedSolid,
+  Roof,
+  Column,
 } from "../model/types";
 import {
   getWallType,
@@ -63,7 +65,9 @@ export type ScheduleKind =
   | "Fenster"
   | "Öffnung"
   | "Treppe"
-  | "Extrusion";
+  | "Extrusion"
+  | "Dach"
+  | "Stütze";
 
 /** Eine ausgewertete Zeile der Bauteilliste (je Bauteil-Vorkommen ein Datensatz). */
 export interface ScheduleRow {
@@ -215,12 +219,48 @@ function evalExtrudedSolid(project: Project, solid: ExtrudedSolid): ScheduleRow 
   };
 }
 
+/** Wertet ein Dach für die Bauteilliste aus (defensiv gegen fehlenden Dachtyp). */
+function evalRoof(project: Project, roof: Roof): ScheduleRow {
+  let typeName = roof.roofTypeId ?? roof.shape;
+  if (roof.roofTypeId) {
+    const rt = (project.roofTypes ?? []).find((t) => t.id === roof.roofTypeId);
+    if (rt) typeName = rt.name;
+  }
+  return {
+    kind: "Dach",
+    id: roof.id,
+    typeName,
+    floor: floorNameOf(project, roof.floorId),
+    floorId: roof.floorId,
+    length: null,
+    heightM: null,
+    thickness: roof.thickness,
+    area: polygonArea(roof.outline),
+  };
+}
+
+/** Wertet eine Stütze für die Bauteilliste aus (Querschnitt als „Dicke", Rechteck-Breite als „Länge"). */
+function evalColumn(project: Project, column: Column): ScheduleRow {
+  return {
+    kind: "Stütze",
+    id: column.id,
+    typeName: column.profile.kind === "round" ? "Rund" : "Rechteck",
+    floor: floorNameOf(project, column.floorId),
+    floorId: column.floorId,
+    length: column.profile.kind === "rect" ? column.profile.width : null,
+    heightM: column.height,
+    thickness:
+      column.profile.kind === "rect" ? column.profile.depth : column.profile.radius * 2,
+    area: null,
+  };
+}
+
 /**
  * Wertet ALLE Bauteil-Vorkommen eines Projekts aus (Wände, Decken, Türen,
- * Fenster/Öffnungen, Treppen, Extrusionen — Räume bewusst ausgenommen, siehe
- * Dateikopf). Reine Ableitung aus dem Modell — nichts wird gespeichert.
- * Reihenfolge: Wände, Decken, Türen, Öffnungen, Treppen, Extrusionen (je in
- * Dokumentreihenfolge).
+ * Fenster/Öffnungen, Treppen, Extrusionen, Dächer, Stützen — Räume bewusst
+ * ausgenommen, siehe Dateikopf). Reine Ableitung aus dem Modell — nichts wird
+ * gespeichert. Reihenfolge: Wände, Decken, Türen, Öffnungen, Treppen,
+ * Extrusionen, Dächer, Stützen (je in Dokumentreihenfolge).
  */
 export function scheduleRows(project: Project): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
@@ -230,6 +270,8 @@ export function scheduleRows(project: Project): ScheduleRow[] {
   for (const o of project.openings ?? []) rows.push(evalOpening(project, o));
   for (const s of project.stairs ?? []) rows.push(evalStair(project, s));
   for (const e of project.extrudedSolids ?? []) rows.push(evalExtrudedSolid(project, e));
+  for (const r of project.roofs ?? []) rows.push(evalRoof(project, r));
+  for (const c of project.columns ?? []) rows.push(evalColumn(project, c));
   return rows;
 }
 

@@ -454,6 +454,14 @@ export interface WindowType {
   /** Von welcher Wandfläche der {@link insetFromFace} gemessen wird; Default "aussen". */
   insetFace?: "aussen" | "innen";
   /**
+   * Schicht-Rücksprung an der Laibung: weicht die INNERSTE Wandschicht (meist
+   * Gipsplatte/Holzverkleidung) an diesem Fenster um ihre eigene Dicke von der
+   * Öffnung zurück, statt bündig mit den übrigen Schichten abzuschliessen —
+   * anders als {@link insetFromFace} (der Rahmen-Position), ändert dies die
+   * WAND-GEOMETRIE selbst an der Laibung. Default false (bündig, Alt-Verhalten).
+   */
+  innerLayerRecess?: boolean;
+  /**
    * Oberlicht: Höhe eines festen, verglasten Oberlichts über dem Hauptflügel
    * (Meter), abgeteilt durch einen Kämpfer. 0/fehlt ⇒ kein Oberlicht.
    */
@@ -1356,6 +1364,12 @@ export interface Stair {
    * Kategorie-Farbe.
    */
   color?: string;
+  /**
+   * Darstellung des Auf-/Abpfeils an der Lauflinie: "line" (offener
+   * Winkelpfeil, Default = heutiges Verhalten) oder "filled" (gefülltes
+   * Dreieck als SIA-Vollpfeil). Fehlt sie, gilt "line".
+   */
+  arrowStyle?: "line" | "filled";
 }
 
 /**
@@ -1761,12 +1775,49 @@ export interface TerrainMesh {
   id: string;
   type: "terrainMesh";
   name: string;
+  /** Ebenen-/Gruppierungsname (SitePanel), z. B. „Terrain". Optional. */
+  layer?: string;
   positions: number[];
   indices: number[];
+  /**
+   * Optionale Pro-Vertex-Albedo (flach `[r,g,b, …]`, 0..1) — ein Wert je
+   * Positions-Vertex, beim Import aus einem SWISSIMAGE-Luftbild gesampelt
+   * („Luftbild aufs Gelände drapieren"). render3d färbt das TIN dann pro Vertex
+   * statt mit der Grundfarbe. Fehlt es, bleibt das Gelände einfarbig.
+   */
+  vertexColors?: number[];
 }
 
-/** Ein Kontext-Objekt: importiertes Mesh, Konturen-Satz oder abgeleitetes TIN. */
-export type ContextObject = ImportedMesh | ContourSet | TerrainMesh;
+/**
+ * Ein georeferenziertes Rasterbild (Luftbild/SWISSIMAGE, eingefügtes Bild) —
+ * planar von oben auf die Modell-Ebene gelegt. `src` = Data-URL (PNG/JPEG),
+ * `min`/`max` = Modell-Meter-Bounding-Box, die das Bild ausfüllt (Bild-Oben =
+ * +Y). Wird im Grundriss als Hintergrund-Ebene gezeichnet (unter der Geometrie).
+ * Gelände-Drapierung im 3D ist Folge-Arbeit.
+ */
+export interface ContextImage {
+  id: string;
+  type: "image";
+  name: string;
+  /** Ebenen-/Gruppierungsname (SitePanel), z. B. „Luftbild". Optional. */
+  layer?: string;
+  /** Bildquelle als Data-URL (PNG/JPEG). */
+  src: string;
+  /** Modell-Meter Bounding-Box (das Bild füllt [min..max] planar von oben). */
+  min: Vec2;
+  max: Vec2;
+  /** Deckkraft 0..1 (Default 1). */
+  opacity?: number;
+  /**
+   * Aufs Gelände-TIN „drapieren": im 3D-Viewer wird das Bild als Textur über das
+   * Terrain gelegt (pixelscharf, s. render3d `set_aerial_texture`). Unabhängig von
+   * der 2D-Hintergrund-Darstellung. Default false.
+   */
+  drape?: boolean;
+}
+
+/** Ein Kontext-Objekt: importiertes Mesh, Konturen-Satz, TIN oder Rasterbild. */
+export type ContextObject = ImportedMesh | ContourSet | TerrainMesh | ContextImage;
 
 /** Das gesamte Projekt. */
 /**
@@ -2196,6 +2247,13 @@ export interface Project {
   geoAnchor?: {
     /** Reale Landeskoordinate (LV95/EPSG:2056, Meter). */
     lv95: { e: number; n: number };
+    /**
+     * Reale Höhe des Bezugspunkts in Metern über Meer (m ü. M.). Wie ArchiCADs
+     * „Vermessungspunkt" (Ost/Nord/Höhe): rein informativ verankert, VERSCHIEBT
+     * das Modell NICHT. Wird beim IFC-Export als `IfcSite.RefElevation`
+     * (Standort-Datumshöhe) geschrieben. Optional.
+     */
+    height?: number;
     /** Zugehöriger Punkt im Modell (lokale Meter), Default (0,0). */
     model: Vec2;
     /** Anzeige-Adresse/Bezeichnung des Bezugspunkts. */

@@ -15,8 +15,8 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { registerPanel } from "./registry";
-import { DrawingLevelsPanel } from "./DrawingLevelsPanel";
-import { LayersPanel } from "./LayersPanel";
+import { DrawingLevelsPanel, DrawingLevelsHeaderActions } from "./DrawingLevelsPanel";
+import { LayersPanel, LayersHeaderActions } from "./LayersPanel";
 import { ToolsPanel } from "./ToolsPanel";
 import { AttributesPanel } from "./AttributesPanel";
 import { ObjectInfoPanel } from "./ObjectInfoPanel";
@@ -82,7 +82,10 @@ registerPanel({
   // damit der Titel der gewählten Sprache folgt.
   title: "nav.drawingLevels",
   icon: <DrawingLevelsTabIcon />,
-  hasDisplayMode: true,
+  // Der Sichtbarkeits-Umschalter sitzt jetzt IM Körper mit „Sichtbarkeit"-
+  // Beschriftung (nicht mehr im PanelFrame-Kopf) — hasDisplayMode: false.
+  hasDisplayMode: false,
+  headerActions: <DrawingLevelsHeaderActions />,
   render: () => <DrawingLevelsPanel />,
 });
 
@@ -90,7 +93,8 @@ registerPanel({
   id: BUILTIN_PANEL_IDS.layers,
   title: "nav.layers",
   icon: <LayersTabIcon />,
-  hasDisplayMode: true,
+  hasDisplayMode: false,
+  headerActions: <LayersHeaderActions />,
   render: () => <LayersPanel />,
 });
 

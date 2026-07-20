@@ -28,7 +28,7 @@ export interface RibbonGroup {
 }
 
 /** Kennung eines Ribbon-Tabs (fest, für Tab-State + i18n). */
-export type RibbonTabId = "views" | "2d" | "3d" | "bim" | "custom";
+export type RibbonTabId = "2d" | "bim" | "custom";
 
 /** Ein Ribbon-Tab: Beschriftung + gruppierte Elemente. */
 export interface RibbonTab {
@@ -37,41 +37,24 @@ export interface RibbonTab {
   groups: RibbonGroup[];
 }
 
-const t = (id: ToolId): RibbonItem => ({ kind: "tool", id });
 const c = (name: string): RibbonItem => ({ kind: "command", name });
 
 /**
- * Die Ribbon-Tabs (Reihenfolge Ansichten·2D·3D·BIM). „Ansichten" ist der
- * Standard-Tab (zuerst, initial aktiv) und trägt reichen Custom-Inhalt: die aus
- * der TopBar gemergte Ansichts-/Zoom-/Darstellungs-Steuerung UND die Text-/Font-
- * Formatierung auf DERSELBEN Leiste (`ViewRibbonTab` — `groups` bleibt leer). 2D
- * (Zeichnen + Ändern) und BIM (Bauteile) sind datengetrieben aus Werkzeugen/
- * Befehlen; 3D ist vorerst leer (spätere Phase).
+ * Die Ribbon-Tabs (2D·BIM·Eigene) — keine Tab-Reiter mehr in der UI (v12,
+ * siehe layout.ts): App rendert alle drei permanent nebeneinander (kein
+ * Umschalter). Reine Werkzeug-Elemente (`t(...)`, persistentes Werkzeug wie
+ * Wand/Linie/Fenster) leben AUSSCHLIESSLICH im ToolsPanel (kein Doppel-
+ * Auftritt). Reine Befehls-Elemente (`c(...)`, Einmal-Aktionen wie
+ * Verschieben/Kopieren/Säule setzen ohne eigenen Werkzeug-Modus) bleiben hier,
+ * da sie im Panel keine Entsprechung haben. Ansichts-/Zoom-/Darstellungs-
+ * Steuerung + Text-Formatierung sitzen direkt in App (ViewRibbonTab), nicht
+ * in dieser Registry.
  */
 export const RIBBON_TABS: RibbonTab[] = [
-  {
-    // Custom-Inhalt (ViewRibbonTab): Ansichts-/Zoom-/Darstellungssteuerung + Text.
-    id: "views",
-    labelKey: "ribbon.tab.views",
-    groups: [],
-  },
   {
     id: "2d",
     labelKey: "ribbon.tab.2d",
     groups: [
-      {
-        titleKey: "ribbon.group.draw",
-        items: [
-          t("select"),
-          t("line"),
-          t("polyline"),
-          t("rect"),
-          t("circle"),
-          t("arc"),
-          t("text"),
-          t("textbox"),
-        ],
-      },
       {
         titleKey: "ribbon.group.modify",
         items: [
@@ -88,27 +71,15 @@ export const RIBBON_TABS: RibbonTab[] = [
     ],
   },
   {
-    id: "3d",
-    labelKey: "ribbon.tab.3d",
-    groups: [],
-  },
-  {
     id: "bim",
     labelKey: "ribbon.tab.bim",
     groups: [
       {
+        // "extrude" war vormals im (jetzt entfernten) 3D-Ribbon-Tab
+        // (Ribbon3dTab) — einziger Zugang zum Befehl, daher hier statt
+        // gestrichen.
         titleKey: "ribbon.group.components",
-        items: [
-          t("wall"),
-          t("window"),
-          t("door"),
-          t("stair"),
-          c("column"),
-          t("ceiling"),
-          c("ceilingopening"),
-          c("roof"),
-          t("room"),
-        ],
+        items: [c("column"), c("ceilingopening"), c("roof"), c("extrude")],
       },
       {
         titleKey: "ribbon.group.sections",
