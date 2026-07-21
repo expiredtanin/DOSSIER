@@ -162,6 +162,7 @@ import { buildMenuItems, menuTitle } from "./menus/contextMenu";
 import type { MenuState } from "./menus/contextMenu";
 import { InlineEditor } from "./views/InlineEditor";
 import { Content } from "./views/viewportContent";
+import { useDialogState } from "./state/useDialogState";
 import { CommandLine } from "./ui/CommandLine";
 import type { CommandLineHandle, CommandLineField, CommandLineOption } from "./ui/CommandLine";
 import { CommandEngine } from "./commands/engine";
@@ -376,44 +377,31 @@ export default function App() {
   const viewType = useStore((s) => s.viewType);
   const setViewType = useStore((s) => s.setViewType);
 
-  // Schwebendes Ressourcen-Fenster (Overlay über allem). Transienter UI-State,
-  // bleibt lokal. Wird über die Oberleiste geöffnet und über X / Hintergrund-
-  // Klick / Esc geschlossen.
-  const [resourcesOpen, setResourcesOpen] = useState(false);
-  // Angeforderter Start-Tab des Ressourcen-Fensters (z. B. „doorStyles", wenn man
-  // von einer gewählten Tür in den Typeditor springt).
-  const [resourcesTab, setResourcesTab] = useState<ResourceTabId>("components");
-  // Offener Fenster-/Tür-Einstellungsdialog (⚙ der OpeningSection) — ID der
-  // editierten Öffnung, oder null wenn geschlossen.
-  const [openingEditorId, setOpeningEditorId] = useState<string | null>(null);
-
-  // Aktives Layout-Blatt im HAUPT-Viewport (DOSSIER A3, Phase 2b): Id des offenen
-  // Layouts oder null (= normale Modell-Ansicht). Transienter UI-State; das
-  // Layout selbst lebt im Projekt (project.layouts). Ist es gesetzt, zeigt der
-  // Haupt-Viewport das Blatt (LayoutSheetView) statt Grundriss/3D.
-  const [activeLayoutId, setActiveLayoutId] = useState<string | null>(null);
-
-  // Modaler Import-Dialog (DXF/DWG). Offen, sobald eine Datei gewählt/fallen-
-  // gelassen wurde; hält Dateiname, geparstes Ergebnis (null bei DWG) und das
-  // DWG-Flag (kein Parser). null = kein Dialog offen. Transienter UI-State.
-  const [importState, setImportState] = useState<{
-    fileName: string;
-    isDwg: boolean;
-    parsed: DxfImportResult | null;
-    // true, solange DWG noch geparst wird (WASM lädt/läuft).
-    loading?: boolean;
-  } | null>(null);
-  // Modaler PDF-Export-Dialog (Grundriss → Vektor-PDF). true = offen.
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportDxfOpen, setExportDxfOpen] = useState(false);
-  // Modales Einstellungs-Fenster (Darstellungsfarben + Projekt-Felder).
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  // Offener Schnellexport-Dialog: Format (aus dem Menü) oder null = geschlossen.
-  const [exportSaveFormat, setExportSaveFormat] = useState<ExportSaveFormat | null>(null);
-  // Visuelles Drop-Feedback (dezenter Rahmen), solange eine Datei über die App
-  // gezogen wird. Zählt dragenter/dragleave aus, um Flackern bei Kind-Elementen
-  // zu vermeiden.
-  const [dropActive, setDropActive] = useState(false);
+  // Dialog-/Overlay-Sichtbarkeit der App-Shell (Ressourcen-Fenster, Layout-
+  // Ansicht, Import/Export/Einstellungen, Drop-Feedback) — rein lokaler UI-
+  // State, siehe state/useDialogState.ts.
+  const {
+    resourcesOpen,
+    setResourcesOpen,
+    resourcesTab,
+    setResourcesTab,
+    openingEditorId,
+    setOpeningEditorId,
+    activeLayoutId,
+    setActiveLayoutId,
+    importState,
+    setImportState,
+    exportOpen,
+    setExportOpen,
+    exportDxfOpen,
+    setExportDxfOpen,
+    settingsOpen,
+    setSettingsOpen,
+    exportSaveFormat,
+    setExportSaveFormat,
+    dropActive,
+    setDropActive,
+  } = useDialogState();
 
   // ── Oberleisten-/Status-Zustand (View-State, kein Modell) ─────────────────
   // detail wirkt im Grundriss (Symbole + Schraffuren/Linien), renderMode in der
