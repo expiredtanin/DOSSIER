@@ -108,8 +108,8 @@ const MONO_INK = "#111111";
 
 // ── Linienstärken in PAPIER-Millimeter (vgl. docs/design/plans-output.md §3.2) ──
 // Alle Stricharten sind in mm Papier definiert; die PlanView rechnet sie über
-// dpi = 96·devicePixelRatio in konstante Bildschirm-Pixel um (non-scaling-stroke),
-// damit Linien beim Zoomen ihre Papiergröße behalten und der Massstab stimmt.
+// dpi = 96 in konstante Bildschirm-Pixel um (non-scaling-stroke), damit Linien
+// beim Zoomen ihre Papiergröße behalten und der Massstab stimmt.
 
 /** Default-Schichtfuge zwischen den Materialschichten in mm — Haarlinie (0.02),
  *  gleiche Stärke wie die Schraffur-Tinte. Pro Fuge im Wandstil überschreibbar

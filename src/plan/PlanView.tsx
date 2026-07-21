@@ -78,13 +78,19 @@ function visibleEdgeRuns(scr: Vec2[], noStroke: number[]): Vec2[][] {
 
 /**
  * Papier-Massstab (docs/design/plans-output.md §3): Der Plan IST Papier-Space.
- * dpi = 96·devicePixelRatio (CSS definiert 1px = 1/96 inch). Strichstärken sind
- * in mm Papier definiert und werden über diese dpi in konstante Bildschirm-Pixel
- * umgerechnet (zusammen mit vector-effect:non-scaling-stroke bleiben sie beim
- * Zoomen papierkonstant). Live wird zusätzlich gelesen, falls sich der Monitor
- * (devicePixelRatio) ändert.
+ * dpi = 96 (CSS definiert 1 CSS-px = 1/96 inch, UNABHÄNGIG von devicePixelRatio —
+ * das gilt genauso auf Retina/HiDPI-Displays und bei OS-Skalierung, da der
+ * Browser CSS-px genau dafür physisch konstant hält, egal wie viele Geräte-px
+ * dahinterstecken). Strichstärken sind in mm Papier definiert und werden über
+ * diese dpi in konstante Bildschirm-Pixel umgerechnet (zusammen mit
+ * vector-effect:non-scaling-stroke bleiben sie beim Zoomen papierkonstant).
+ * BUGFIX: früher fälschlich `96 · devicePixelRatio` — das verwechselte die
+ * Geräte-px-Dichte (für Tessellierung/Rasterung relevant, siehe
+ * `pxPerMeterForView` weiter unten) mit der physischen CSS-px-Grösse und
+ * verdoppelte/halbierte den gemessenen Massstab auf jedem Retina-Bildschirm
+ * (per Lineal am Bildschirm nachgemessen falsch).
  */
-const dpi = (): number => 96 * (window.devicePixelRatio || 1);
+const dpi = (): number => 96;
 /** mm Papier → Bildschirm-Pixel (für non-scaling-stroke / dasharray). */
 const mmToPx = (mm: number): number => (mm / 25.4) * dpi();
 
