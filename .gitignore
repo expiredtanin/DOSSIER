@@ -12,25 +12,6 @@ scripts/*.png
 .DS_Store
 *.log
 
-# ── Broad material textures (fetched via scripts/fetch-materials.mjs) ─────────
-# Binary JPGs from the DOSSIER-LIBRARY mirror are NOT committed here — run:
-#   node scripts/fetch-materials.mjs --library <DOSSIER-LIBRARY-path>
-# to populate them locally. The 12 starter folders are explicitly excluded from
-# this ignore rule so they stay tracked in git.
-public/assets/materials/*/
-!public/assets/materials/Bricks104/
-!public/assets/materials/Concrete048/
-!public/assets/materials/Grass005/
-!public/assets/materials/Gravel043/
-!public/assets/materials/Ground103/
-!public/assets/materials/Marble012/
-!public/assets/materials/Metal063/
-!public/assets/materials/PavingStones150/
-!public/assets/materials/Plaster001/
-!public/assets/materials/Tiles141/
-!public/assets/materials/Wood095/
-!public/assets/materials/WoodFloor051/
-
 # Generierte native-Viewport-Szenen (aus sampleProject via scripts/dump-native-scene.mjs)
 src-tauri/assets/native2d_scene.json
 src-tauri/assets/native3d_walls.json
