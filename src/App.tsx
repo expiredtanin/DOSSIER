@@ -158,6 +158,7 @@ import { useContextMenuState } from "./menus/useContextMenuState";
 import { InlineEditor } from "./views/InlineEditor";
 import { Content } from "./views/viewportContent";
 import { useDialogState } from "./state/useDialogState";
+import { useTopBarState } from "./state/useTopBarState";
 import { useThemeModeState } from "./theme/useThemeMode";
 import { CommandLine } from "./ui/CommandLine";
 import type { CommandLineHandle, CommandLineField, CommandLineOption } from "./ui/CommandLine";
@@ -396,50 +397,37 @@ export default function App() {
   // ── Oberleisten-/Status-Zustand (View-State, kein Modell) ─────────────────
   // detail wirkt im Grundriss (Symbole + Schraffuren/Linien), renderMode in der
   // 3D-Ansicht (3 Modi), referenceLines schaltet die Wand-Achslinien.
-  const detail = useStore((s) => s.detail);
-  const setDetail = useStore((s) => s.setDetail);
-  const renderMode = useStore((s) => s.renderMode);
-  const setRenderMode = useStore((s) => s.setRenderMode);
-  const view3d = useStore((s) => s.view3d);
-  const setView3d = useStore((s) => s.setView3d);
-  const fov = useStore((s) => s.fov);
-  const setFov = useStore((s) => s.setFov);
-  // Boden-Referenzraster im 3D-Viewport (wirkt nur im WASM/Nordstern-Pfad,
-  // s. Wasm3DViewport.tsx) — Umschalter sitzt als Overlay-Button im Viewport.
-  const grid3dVisible = useStore((s) => s.grid3dVisible);
-  const setGrid3dVisible = useStore((s) => s.setGrid3dVisible);
-  const planColorMode = useStore((s) => s.planColorMode);
-  const setPlanColorMode = useStore((s) => s.setPlanColorMode);
-  const referenceLines = useStore((s) => s.referenceLines);
-  const setReferenceLines = useStore((s) => s.setReferenceLines);
-  const lineMode = useStore((s) => s.lineMode);
-  const setLineMode = useStore((s) => s.setLineMode);
-  const marqueeColor = useStore((s) => s.marqueeColor);
-  const setMarqueeColor = useStore((s) => s.setMarqueeColor);
-  const snapColor = useStore((s) => s.snapColor);
-  const setSnapColor = useStore((s) => s.setSnapColor);
-  const scaleDenominator = useStore((s) => s.scaleDenominator);
-  const setScaleDenominator = useStore((s) => s.setScaleDenominator);
-  // LIVE Papier-Massstab-Nenner aus der View-Transform (PlanView meldet ihn);
-  // null = keine Plan-Ansicht aktiv. Transienter UI-State, bleibt lokal.
-  const [liveScale, setLiveScale] = useState<number | null>(null);
-  // „Angewählter" Ausschnitt (View-Snapshot): bleibt gesetzt, solange der
-  // Live-Zustand EXAKT dem Ausschnitt entspricht (siehe Effekt weiter unten).
-  // Steuert die Footer-Bar + die Aktiv-Markierung im Ausschnitte-Panel.
-  const [selectedViewSnapshotId, setSelectedViewSnapshotId] = useState<
-    string | null
-  >(null);
-  // Cursor in Modell-Metern (aus der Plan-Ansicht) bzw. null (nicht über Plan).
-  const [cursor, setCursor] = useState<Vec2 | null>(null);
-  // Live-Zoom in Prozent RELATIV zum angewandten Papier-Massstab: 100 % =
-  // Live-Ansicht steht exakt im angewandten Massstab (liveScale == scaleDenominator).
-  // Reinzoomen > 100 %, Rauszoomen < 100 %. Einzige Quelle: angewandter Nenner
-  // (scaleDenominator) / Live-Nenner (liveScale). Ohne Live-Massstab (keine
-  // Plan-Ansicht) Fallback 100 %.
-  const zoomPercent =
-    liveScale != null && liveScale > 0
-      ? (scaleDenominator / liveScale) * 100
-      : 100;
+  const {
+    detail,
+    setDetail,
+    renderMode,
+    setRenderMode,
+    view3d,
+    setView3d,
+    fov,
+    setFov,
+    grid3dVisible,
+    setGrid3dVisible,
+    planColorMode,
+    setPlanColorMode,
+    referenceLines,
+    setReferenceLines,
+    lineMode,
+    setLineMode,
+    marqueeColor,
+    setMarqueeColor,
+    snapColor,
+    setSnapColor,
+    scaleDenominator,
+    setScaleDenominator,
+    liveScale,
+    setLiveScale,
+    selectedViewSnapshotId,
+    setSelectedViewSnapshotId,
+    cursor,
+    setCursor,
+    zoomPercent,
+  } = useTopBarState();
 
   // ── Zeichenwerkzeuge (transienter View-State; bleibt lokal) ───────────────
   // Aktives Werkzeug, Werkzeug-Parameter (Wandtyp/Kategorie/Linienstil), Snap-
