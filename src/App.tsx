@@ -132,11 +132,6 @@ import { TextEditorDialog } from "./ui/TextEditorDialog";
 import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
 import { StatusBar, type RendererMode } from "./ui/StatusBar";
-import {
-  type ThemeMode,
-  getStoredThemeMode,
-  setStoredThemeMode,
-} from "./theme/themeMode";
 import { getTool } from "./tools/tools";
 import { applyAngleConstraint, computeSnap } from "./tools/snapping";
 import {
@@ -163,6 +158,7 @@ import type { MenuState } from "./menus/contextMenu";
 import { InlineEditor } from "./views/InlineEditor";
 import { Content } from "./views/viewportContent";
 import { useDialogState } from "./state/useDialogState";
+import { useThemeModeState } from "./theme/useThemeMode";
 import { CommandLine } from "./ui/CommandLine";
 import type { CommandLineHandle, CommandLineField, CommandLineOption } from "./ui/CommandLine";
 import { CommandEngine } from "./commands/engine";
@@ -4267,11 +4263,7 @@ export default function App() {
 
   // Hell/Dunkel (Einstellungen → Darstellung). Standard Hell (styles.css);
   // Dunkel ist Opt-in und persistiert in localStorage.
-  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
-  const setThemeMode = (mode: ThemeMode) => {
-    setThemeModeState(mode);
-    setStoredThemeMode(mode);
-  };
+  const { themeMode, setThemeMode } = useThemeModeState();
 
   // Einstellungen als eigenes natives Fenster (Tauri) statt Overlay-Dialog —
   // hält es (falls offen) synchron zu den betroffenen Feldern, wendet dessen
