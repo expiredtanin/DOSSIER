@@ -175,7 +175,9 @@ function CategoryRow({
 }
 
 /** Aktionen für die gemeinsame PanelFrame-Kopfzeile (statt eigener Titelzeile):
- *  „+ Kategorie" + Zahnrad → Einstellungen (wie im Zeichnungsebenen-Kopf).
+ *  „+ Kategorie" + Zahnrad → Ebeneneinstellungen der aktiven Ebene (wie das
+ *  Zahnrad je Zeile, hier für activeCategoryCode; unter Tauri natives Fenster,
+ *  sonst InlineEditor-Popover — siehe onOpenLayerSettings).
  *  Läuft im PanelHostContext, nutzt daher usePanelHost. */
 export function LayersHeaderActions() {
   const host = usePanelHost();
@@ -183,9 +185,11 @@ export function LayersHeaderActions() {
     <>
       <button
         className="nav-settings"
-        onClick={host.onOpenSettings}
-        aria-label={t("topbar.settings")}
-        title={t("topbar.settings")}
+        onClick={(e) =>
+          host.onOpenLayerSettings(host.activeCategoryCode, e.clientX, e.clientY)
+        }
+        aria-label={t("ctx.layerSettings")}
+        title={t("ctx.layerSettings")}
       >
         <span className="material-symbols-outlined" aria-hidden="true">
           settings

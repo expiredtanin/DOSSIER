@@ -3052,6 +3052,9 @@ export default function App() {
       onLayerContextMenu: (code, x, y) =>
         setMenu({ kind: "layer", code, x, y }),
       onOpenLayerSettings: (code, x, y) => openLayerSettings(code, x, y),
+      onOpenDrawingLevelsWindow: () => {
+        if (isTauriRuntime()) void openDrawingLevelsWindowNative();
+      },
       onOpenSettings: () => openSettings(),
       onPatchComponent: patchComponent,
       onAddComponent: addComponent,

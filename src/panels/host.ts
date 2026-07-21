@@ -117,13 +117,19 @@ export interface PanelHostValue {
    * Löschen) und hält das offene Menü.
    */
   onLayerContextMenu: (code: string, clientX: number, clientY: number) => void;
-  /** Öffnet die Ebeneneinstellungen direkt (Zahnrad-Symbol je Zeile) — unter
-   * Tauri als natives Fenster, sonst derselbe InlineEditor-Popover wie über
-   * das Kontextmenü (siehe App.tsx `openLayerSettings`). */
+  /** Öffnet die Ebeneneinstellungen direkt (Zahnrad-Symbol je Zeile bzw.
+   * Panel-Kopfzeile, dort für die aktive Ebene) — unter Tauri als natives
+   * Fenster, sonst derselbe InlineEditor-Popover wie über das Kontextmenü
+   * (siehe App.tsx `openLayerSettings`). */
   onOpenLayerSettings: (code: string, clientX: number, clientY: number) => void;
+  /** Öffnet den Zeichnungsebenen-Manager als eigenes natives Fenster (Zahnrad
+   * in der Panel-Kopfzeile „Zeichnungsebenen") — Duplikat desselben Inhalts
+   * wie das Dock-Panel, additiv. No-op außerhalb von Tauri (kein eigenes
+   * Fenster-Konzept im Browser; das Dock-Panel zeigt dort bereits alles). */
+  onOpenDrawingLevelsWindow: () => void;
   /** Öffnet das Einstellungs-Fenster (Darstellungsfarben, Projekt-Felder) —
    * unter Tauri als natives Fenster, sonst als In-App-Dialog (App.openSettings).
-   * Als Zahnrad in den Panel-Kopfzeilen „Zeichnungsebenen"/„Ebenen". */
+   * Erreichbar über „Fenster"-Menü (AppMenuBar/native Menüleiste). */
   onOpenSettings: () => void;
 
   // Ressourcen-Handler (Bauteile / Schraffuren / Linienstile). Spiegelt

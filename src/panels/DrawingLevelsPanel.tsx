@@ -157,15 +157,16 @@ export function DrawingLevelsPanel() {
 }
 
 /** Aktionen für die gemeinsame PanelFrame-Kopfzeile (statt eigener Titelzeile):
- *  Zahnrad → Einstellungen (Darstellungsfarben/Projekt-Felder). */
+ *  Zahnrad → Zeichnungsebenen-Manager als eigenes natives Fenster öffnen
+ *  (Duplikat desselben Inhalts, additiv zum Dock-Panel). */
 export function DrawingLevelsHeaderActions() {
   const host = usePanelHost();
   return (
     <button
       className="nav-settings"
-      aria-label={t("topbar.settings")}
-      title={t("topbar.settings")}
-      onClick={host.onOpenSettings}
+      aria-label={t("nav.drawingLevelsWindow")}
+      title={t("nav.drawingLevelsWindow")}
+      onClick={host.onOpenDrawingLevelsWindow}
     >
       <span className="material-symbols-outlined" aria-hidden="true">
         settings
