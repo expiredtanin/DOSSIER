@@ -139,11 +139,9 @@ import {
   transformPreview,
 } from "./tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "./tools/transform";
-import { DEFAULT_SNAP } from "./tools/types";
 import type {
   MeasurementReadout,
   SnapResult,
-  SnapSettings,
   ToolContext,
   ToolDraft,
   ToolHandlers,
@@ -159,6 +157,7 @@ import { InlineEditor } from "./views/InlineEditor";
 import { Content } from "./views/viewportContent";
 import { useDialogState } from "./state/useDialogState";
 import { useTopBarState } from "./state/useTopBarState";
+import { useDrawingToolState } from "./state/useDrawingToolState";
 import { useThemeModeState } from "./theme/useThemeMode";
 import { CommandLine } from "./ui/CommandLine";
 import type { CommandLineHandle, CommandLineField, CommandLineOption } from "./ui/CommandLine";
@@ -433,40 +432,27 @@ export default function App() {
   // Aktives Werkzeug, Werkzeug-Parameter (Wandtyp/Kategorie/Linienstil), Snap-
   // Einstellungen sowie der laufende Werkzeug-Zustand (Ref, kein Re-Render je
   // Mausbewegung) und die Live-Vorschau (Draft → Overlay in PlanView).
-  const [activeTool, setActiveTool] = useState<ToolId>("select");
-  const [activeWallTypeId, setActiveWallTypeId] = useState<string>(
-    project.wallTypes[0].id,
-  );
-  const activeCategoryCode = useStore((s) => s.activeCategoryCode);
-  const setActiveCategoryCode = useStore((s) => s.setActiveCategoryCode);
-  const [activeLineStyleId] = useState<string>(project.lineStyles[0].id);
-  const [snap, setSnap] = useState<SnapSettings>(DEFAULT_SNAP);
-  const toolStateRef = useRef<ToolState>(getTool("select").init());
-  const [draft, setDraft] = useState<ToolDraft | null>(null);
-  // Aktive Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl — Vectorworks-
-  // Stil mit U/I/O/P-Modusleiste. null = keine Transformation läuft.
-  const [activeTransform, setActiveTransform] = useState<{
-    op: TransformOp;
-    copyMode: CopyMode;
-    count: number;
-    points: Vec2[];
-  } | null>(null);
-  // Letzter gesnappter Cursor der laufenden Transformation — für das Live-Feld
-  // (Winkel/Distanz) der Befehlszeile (analog gripDragInfoRef beim Vertex-Drag).
-  const transformDragInfoRef = useRef<{ cursor: Vec2 } | null>(null);
-  // Kopienanzahl für array/distribute wird über einen PromptDialog erfasst
-  // (window.prompt ist im Tauri-WKWebView deaktiviert) — `pendingCopyMode`
-  // hält den Modus, während der Dialog offen ist.
-  const [pendingCopyMode, setPendingCopyMode] = useState<"array" | "distribute" | null>(null);
-  const requestCopyCount = (mode: "array" | "distribute") => setPendingCopyMode(mode);
-  const commitCopyCount = (input: string) => {
-    const n = Math.round(Number(input));
-    if (Number.isFinite(n) && n >= 1 && pendingCopyMode) {
-      const mode = pendingCopyMode;
-      setActiveTransform((t) => (t ? { ...t, copyMode: mode, count: n } : t));
-    }
-    setPendingCopyMode(null);
-  };
+  const {
+    activeTool,
+    setActiveTool,
+    activeWallTypeId,
+    setActiveWallTypeId,
+    activeCategoryCode,
+    setActiveCategoryCode,
+    activeLineStyleId,
+    snap,
+    setSnap,
+    toolStateRef,
+    draft,
+    setDraft,
+    activeTransform,
+    setActiveTransform,
+    transformDragInfoRef,
+    pendingCopyMode,
+    setPendingCopyMode,
+    requestCopyCount,
+    commitCopyCount,
+  } = useDrawingToolState(project.wallTypes[0].id, project.lineStyles[0].id);
 
   // ── Auswahl (Store-Slice) ─────────────────────────────────────────────────
   const selectedWallIds = useStore((s) => s.selectedWallIds);
