@@ -2080,9 +2080,16 @@ body {
   opacity: 0.85;
 }
 
-/* Auswahl-Hervorhebung (Links-Klick): Akzentkontur + leichte Füllung. */
+/* Auswahl-Hervorhebung (Links-Klick): Akzentkontur + leichte Füllung.
+   `fill-opacity` erzwingt die Transparenz unabhängig vom Theme — im Hell-Theme
+   ist `--accent-dim` fast deckend weiss (Nutzung als UI-Hintergrundfarbe an
+   ~70 anderen Stellen), würde ohne eigene Opacity die Schraffur der gewählten
+   Wand/Decke/des Raums vollständig verdecken (nur im Dunkel-Theme zufällig
+   unauffällig, da dort selbst schon rgba mit niedriger Alpha). Gleiches Muster
+   wie .plan-marquee/.tool-preview-fill weiter unten. */
 .plan-svg .plan-selected {
   fill: var(--accent-dim);
+  fill-opacity: 0.35;
   stroke: var(--accent);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
