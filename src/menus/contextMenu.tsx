@@ -22,6 +22,12 @@ export type MenuState =
   | { kind: "viewport"; wallId: string | null; x: number; y: number }
   | null;
 
+/** Offener Inline-Editor (aus einem Menüpunkt). `x/y` = Anker in Viewport-Px. */
+export type EditorState =
+  | { kind: "layer"; code: string; x: number; y: number }
+  | { kind: "level"; id: string; x: number; y: number }
+  | null;
+
 /** Titel des Kontextmenüs je Quelle (Ebenenname / Geschossname / Wand/Ansicht). */
 export function menuTitle(menu: NonNullable<MenuState>, project: Project): string {
   switch (menu.kind) {

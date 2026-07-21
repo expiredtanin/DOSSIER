@@ -154,7 +154,7 @@ import type {
 } from "./tools/types";
 import { ContextMenu } from "./ui/ContextMenu";
 import { buildMenuItems, menuTitle } from "./menus/contextMenu";
-import type { MenuState } from "./menus/contextMenu";
+import { useContextMenuState } from "./menus/useContextMenuState";
 import { InlineEditor } from "./views/InlineEditor";
 import { Content } from "./views/viewportContent";
 import { useDialogState } from "./state/useDialogState";
@@ -237,12 +237,6 @@ import { deriveDrawings } from "./DrawingTabs";
  *   • "plan"     — Rechtsklick im Grundriss (optional getroffene Wand).
  *   • "viewport" — Rechtsklick im 3D (optional getroffene Wand).
  */
-/** Offener Inline-Editor (aus einem Menüpunkt). `x/y` = Anker in Viewport-Px. */
-type EditorState =
-  | { kind: "layer"; code: string; x: number; y: number }
-  | { kind: "level"; id: string; x: number; y: number }
-  | null;
-
 /**
  * GUI-Werkzeug → Befehlsname der Engine. Die Zeichen-Werkzeuge der Palette sind
  * in Wahrheit Engine-Befehle: ein Klick auf das Werkzeug startet diesen Befehl
@@ -549,22 +543,20 @@ export default function App() {
   const setSelectedContextObjectIds = useStore((s) => s.setSelectedContextObjectIds);
 
   // ── Kontextmenüs (transienter UI-State, bleibt lokal) ─────────────────────
-  // Eigenschaften-Zwischenablage des Ebenen-Kontextmenüs (Farbe + Linienstärke).
-  const [layerClipboard, setLayerClipboard] = useState<{
-    color: string;
-    lw: number;
-  } | null>(null);
-  // Offenes Kontextmenü (genau eines) — Quelle bestimmt die Einträge.
-  const [menu, setMenu] = useState<MenuState>(null);
-  // Offener Inline-Editor (Ebene bzw. Geschoss) — aus einem Menüpunkt geöffnet.
-  const [editor, setEditor] = useState<EditorState>(null);
-  // Welcher Ebenen-Code aktuell im nativen Ebeneneinstellungs-Fenster offen
-  // ist (Tauri) — Pendant zu `editor?.kind === "layer"` im Browser-Fallback.
-  const [nativeLayerSettingsCode, setNativeLayerSettingsCode] = useState<string | null>(null);
-  // Offener Raum-Stempel-Editor (Rich-Text) — per Doppelklick/Button geöffnet.
-  const [stampEditorRoomId, setStampEditorRoomId] = useState<string | null>(null);
-  // Text-Inhalt-Editor: Id des per Doppelklick bearbeiteten Text-2D-Elements.
-  const [editTextId, setEditTextId] = useState<string | null>(null);
+  const {
+    layerClipboard,
+    setLayerClipboard,
+    menu,
+    setMenu,
+    editor,
+    setEditor,
+    nativeLayerSettingsCode,
+    setNativeLayerSettingsCode,
+    stampEditorRoomId,
+    setStampEditorRoomId,
+    editTextId,
+    setEditTextId,
+  } = useContextMenuState();
 
   // Beim Geschosswechsel die Wand-Auswahl + offene Overlays zurücksetzen (die
   // Wände eines anderen Geschosses sind eine andere Menge). Der Ansichtswechsel
