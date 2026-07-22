@@ -977,7 +977,7 @@ function ComponentsTab({
             <div className="res-md-empty">{t("resources.components.empty")}</div>
           )}
           <div className="res-md-listfoot">
-            <button className="res-add" onClick={onAddComponent}>
+            <button className="res-add" onClick={() => onAddComponent()}>
               <span className="res-add-plus">+</span> {t("resources.add")}
             </button>
           </div>
@@ -1246,7 +1246,7 @@ function HatchesTab({
             <div className="res-md-empty">{t("resources.hatches.empty")}</div>
           )}
           <div className="res-md-listfoot">
-            <button className="res-add" onClick={onAddHatch}>
+            <button className="res-add" onClick={() => onAddHatch()}>
               <span className="res-add-plus">+</span> {t("resources.add")}
             </button>
             <FileImportButton
@@ -1549,7 +1549,7 @@ function LinesTab({
             <div className="res-md-empty">{t("resources.lines.empty")}</div>
           )}
           <div className="res-md-listfoot">
-            <button className="res-add" onClick={onAddLineStyle}>
+            <button className="res-add" onClick={() => onAddLineStyle()}>
               <span className="res-add-plus">+</span> {t("resources.add")}
             </button>
             <FileImportButton
@@ -1809,7 +1809,7 @@ function LayeredStylesTab({
             <div className="res-md-empty">{t(emptyKey)}</div>
           )}
           <div className="res-md-listfoot">
-            <button className="res-add" onClick={onAdd}>
+            <button className="res-add" onClick={() => onAdd()}>
               <span className="res-add-plus">+</span> {t("resources.add")}
             </button>
           </div>

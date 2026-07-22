@@ -66,7 +66,7 @@ export function ResourceWindowApp() {
           return (...args: unknown[]) => {
             void import("@tauri-apps/api/event").then(({ emitTo }) =>
               emitTo("main", "resource-command", { name: prop as HandlerName, args }).catch(
-                () => {},
+                (err) => console.error("[resource-window] emit resource-command failed", prop, err),
               ),
             );
           };

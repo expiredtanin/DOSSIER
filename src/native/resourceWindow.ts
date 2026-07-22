@@ -85,7 +85,11 @@ export function useResourceWindowHost(
       unlisten.push(
         await listen<{ name: string; args: unknown[] }>("resource-command", (e) => {
           const fn = (handlersRef.current as unknown as Record<string, unknown>)[e.payload.name];
-          if (typeof fn === "function") (fn as (...a: unknown[]) => void)(...e.payload.args);
+          if (typeof fn === "function") {
+            (fn as (...a: unknown[]) => void)(...e.payload.args);
+          } else {
+            console.error("[resource-window-host] unknown resource-command", e.payload.name);
+          }
         }),
       );
       unlisten.push(
