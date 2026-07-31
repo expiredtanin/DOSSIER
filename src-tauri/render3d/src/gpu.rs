@@ -1711,9 +1711,23 @@ impl Renderer {
                 multiview_mask: None,
             });
 
+            // Live-Schnitt aktiv? Dann erzwingen wir die Modell-Kanten ZUSAETZLICH
+            // zum aktuellen Stil (unabhaengig von `draws_edges()`) — Nutzer-Report:
+            // duenne, schraeg angeschnittene Bauteile (Zwischenwaende, Giebel-Enden,
+            // einzelne Material-Schichten) haben aus vielen Blickwinkeln eine fast
+            // unsichtbare (kantige) Stirnflaeche, waehrend ihre (flache) Schnitt-
+            // kappe voll sichtbar bleibt — das wirkt wie ein abgeloestes,
+            // "schwebendes" Element. Die dunklen Kanten (bereits vorhanden fuer
+            // wireframe/hidden/shaded-edges, `edges::build_mesh_edges`, tiefen-
+            // getestet + von der Schnittebene gekappt wie das Mesh selbst) zeichnen
+            // jede Bauteilkante nach, auch wenn ihre Flaeche praktisch auf Null
+            // Bildschirmbreite zusammenfaellt — das verbindet Kappe und Bauteil
+            // sichtbar, ohne die Kamera zu bewegen oder Geometrie zu aendern.
+            let force_edges_for_section = self.globals.mode[1] > 0.5;
             // 1) Gefuellte Flaechen — in allen Stilen ausser "wireframe". Im
             //    Hidden-Line-Stil die leicht nach hinten gebiaste Pipeline, damit
-            //    die folgenden Kanten sauber obenauf liegen.
+            //    die folgenden Kanten sauber obenauf liegen. Bei aktivem Schnitt
+            //    ebenso (die Kanten werden dann erzwungen, s.o.).
             if self.style.draws_faces() {
                 if self.style == RenderStyle::Textured {
                     // Texturierter Pfad: eigene Pipeline + zweiter Vertex-Puffer
@@ -1730,7 +1744,9 @@ impl Renderer {
                         pass.draw_indexed(0..t.index_count, 0, 0..1);
                     }
                 } else if let Some(m) = &self.mesh {
-                    let face_pipeline = if self.style.needs_biased_face_pipeline() {
+                    let face_pipeline = if self.style.needs_biased_face_pipeline()
+                        || force_edges_for_section
+                    {
                         &self.hidden_face_pipeline
                     } else {
                         &self.pipeline
@@ -1798,11 +1814,11 @@ impl Renderer {
                 pass.draw(0..cl.vertex_count, 0..1);
             }
 
-            // 2) Modell-Kanten (wireframe/hidden) — LineList-Pipeline (wie Grid).
-            //    Im Hidden-Stil obenauf, tiefengetestet gegen die (gebiasten)
-            //    Flaechen -> verdeckte Kanten fallen weg. Im Wireframe ohne
-            //    Flaechen -> alle Kanten sichtbar.
-            if self.style.draws_edges() {
+            // 2) Modell-Kanten (wireframe/hidden, ODER erzwungen bei aktivem
+            //    Schnitt, s.o.) — LineList-Pipeline (wie Grid). Tiefengetestet
+            //    gegen die (gebiasten) Flaechen -> verdeckte Kanten fallen weg.
+            //    Im Wireframe ohne Flaechen -> alle Kanten sichtbar.
+            if self.style.draws_edges() || force_edges_for_section {
                 if let Some(e) = &self.edges {
                     pass.set_pipeline(&self.grid_pipeline);
                     pass.set_bind_group(0, &self.bind_group, &[]);
