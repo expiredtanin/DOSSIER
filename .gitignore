@@ -15,3 +15,20 @@ scripts/*.png
 # Generierte native-Viewport-Szenen (aus sampleProject via scripts/dump-native-scene.mjs)
 src-tauri/assets/native2d_scene.json
 src-tauri/assets/native3d_walls.json
+
+# Interne Doku (Handover/Pendenzen/Design-Notizen) — nur lokal, nicht im
+# öffentlichen Gitea-Code-Browser. README.md bleibt als Repo-Beschreibung.
+/ARCHITECTURE.md
+/CONVENTIONS.md
+/HANDOVER.md
+/PENDENZEN.md
+/PORT_PLAN.md
+/RESEARCH_BAUTEILE_RHINO.md
+/RESEARCH_CAD_APPROACHES.md
+/ROADMAP.md
+/SPIKE_TEXTUR_render3d.md
+/STATUS.md
+/docs/*.md
+/docs/design/*.md
+/docs/research/*.md
+/docs/welle-c-hlr-spike/*.md
