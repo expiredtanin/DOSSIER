@@ -10,6 +10,8 @@
 
 import type { Project } from "../model/types";
 import { t } from "../i18n";
+import { checkForUpdate } from "../update/checkForUpdate";
+import { getRunningVersion } from "../update/version";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Dropdown } from "./Dropdown";
@@ -1020,6 +1022,11 @@ export const APP_VERSION = "0.1.0";
  * Wortmarke. Klick ausserhalb / Esc schliesst.
  */
 function AboutDialog({ onClose }: { onClose: () => void }) {
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [runningVersion, setRunningVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void getRunningVersion().then(setRunningVersion);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -1028,7 +1035,14 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  // Per Portal an document.body statt als DOM-Kind der .topbar rendern: die
+  // .topbar bildet (position:relative + z-index) einen eigenen Stacking-
+  // Context, der das hohe z-index:1000 von .about-overlay einsperrt — andere
+  // z-index:2-Elemente ausserhalb (z. B. das Lineal-Overlay im Grundriss)
+  // konnten dadurch trotzdem durch den abgedunkelten Hintergrund "durch-
+  // scheinen". Als Portal-Kind von body liegt der Dialog in keinem fremden
+  // Stacking-Context mehr.
+  return createPortal(
     <div className="about-overlay" onMouseDown={onClose}>
       <div
         className="about-dialog"
@@ -1041,7 +1055,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
           dossier<span className="brand-dot">.</span>
         </div>
         <div className="about-version">
-          {t("about.version")} {APP_VERSION}
+          {t("about.version")} {runningVersion ?? APP_VERSION}
         </div>
         <p className="about-desc">{t("about.desc")}</p>
         <div className="about-meta">
@@ -1059,11 +1073,29 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
           <li>LibreDWG — GPL-3.0</li>
           <li>acadrust — MPL-2.0</li>
         </ul>
-        <button type="button" className="about-close" onClick={onClose}>
-          {t("about.close")}
-        </button>
+        <div className="about-actions">
+          <button
+            type="button"
+            className="about-check-update"
+            disabled={checkingUpdate}
+            onClick={async () => {
+              setCheckingUpdate(true);
+              try {
+                await checkForUpdate(false);
+              } finally {
+                setCheckingUpdate(false);
+              }
+            }}
+          >
+            {checkingUpdate ? t("about.checkingUpdate") : t("about.checkUpdate")}
+          </button>
+          <button type="button" className="about-close" onClick={onClose}>
+            {t("about.close")}
+          </button>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

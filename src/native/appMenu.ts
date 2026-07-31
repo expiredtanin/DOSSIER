@@ -319,14 +319,27 @@ export function useNativeAppMenu(
 
       // macOS: der allererste Eintrag ist das App-Menü (Über/Beenden). Ohne ihn
       // rutscht „Datei" an die Stelle, an der macOS sonst den App-Namen zeigt.
-      // „Über Dossier" nutzt das NATIVE macOS-Info-Fenster (PredefinedMenuItem
+      // „Über dossier" nutzt das NATIVE macOS-Info-Fenster (PredefinedMenuItem
       // „About") statt des eigenen In-App-Dialogs (AboutDialog in TopBar.tsx) —
       // an dieser Stelle erwartet macOS exakt diesen Eintrag, kein Custom-Dialog.
+      // Metadaten spiegeln den In-App-Dialog: kleingeschriebener Name „dossier",
+      // Beschreibung + Lizenz/Suite als `credits` (macOS zeigt sie als Textblock
+      // unter der Version), Copyright unten. Das Icon zieht macOS aus dem Bundle
+      // (tauri.conf.json bundle.icon → icon.icns). Auf macOS NICHT unterstützt
+      // und daher weggelassen: authors/comments/license/website.
       const appMenu = await Submenu.new({
-        text: "Dossier",
+        text: "dossier",
         items: [
           await PredefinedMenuItem.new({
-            item: { About: { name: "Dossier", version: APP_VERSION } },
+            item: {
+              About: {
+                name: "dossier",
+                version: APP_VERSION,
+                shortVersion: APP_VERSION,
+                copyright: t("about.copyright"),
+                credits: `${t("about.desc")}\n\n${t("about.license")} · ${t("about.suite")}`,
+              },
+            },
             text: t("menu.native.about"),
           }),
           await PredefinedMenuItem.new({ item: "Separator" }),

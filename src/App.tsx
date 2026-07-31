@@ -74,6 +74,7 @@ import {
   isTauriRuntime,
 } from "./io/projectFile";
 import type { LockInfo } from "./io/projectFile";
+import { checkForUpdate } from "./update/checkForUpdate";
 import type {
   PlanViewHandle,
   PlanSelection,
@@ -539,6 +540,13 @@ export default function App() {
   useEffect(() => {
     setDxfImportTrigger(() => dxfInputRef.current?.click());
     return () => setDxfImportTrigger(null);
+  }, []);
+
+  // Selbst-Update: einmalig beim Start prüfen (still — meldet sich nur bei
+  // einem gefundenen Update oder einem echten Fehler, s. checkForUpdate.ts).
+  // No-op ausserhalb von Tauri (Vite-Dev-Server im Browser).
+  useEffect(() => {
+    checkForUpdate(true);
   }, []);
 
   // Panel-Layout (Docks/Tabs/Größen) — aus dem Store-Slice (Init lädt aus

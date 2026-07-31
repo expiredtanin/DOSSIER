@@ -51,7 +51,7 @@ export async function openDrawingLevelsWindowNative(): Promise<void> {
   }
   new WebviewWindow(DRAWING_LEVELS_WINDOW_LABEL, {
     url: "index.html?window=drawing-levels",
-    title: "Zeichnungsebenen — Dossier",
+    title: "Zeichnungsebenen — dossier",
     width: 340,
     height: 560,
     minWidth: 260,

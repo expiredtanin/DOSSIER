@@ -14,9 +14,25 @@ import { t } from "../i18n";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import { ColorHexField } from "./ColorHexField";
 import { LayoutMenu } from "./LayoutMenu";
+import { APP_VERSION } from "./TopBar";
 import type { RendererMode } from "./StatusBar";
 import type { LayoutState } from "../panels/types";
 import type { ThemeMode } from "../theme/themeMode";
+import { checkForUpdate, getUpdateSnoozeUntil, setUpdateSnooze } from "../update/checkForUpdate";
+import { getRunningVersion } from "../update/version";
+import {
+  fetchVersionHistory,
+  openVersionDownload,
+  type VersionEntry,
+} from "../update/versionHistory";
+
+/** Pausier-Optionen fuer den stillen Start-Check (s. checkForUpdate.ts). */
+const SNOOZE_OPTIONS = [
+  { id: "active", ms: null },
+  { id: "1day", ms: 24 * 60 * 60 * 1000 },
+  { id: "1week", ms: 7 * 24 * 60 * 60 * 1000 },
+  { id: "1month", ms: 30 * 24 * 60 * 60 * 1000 },
+] as const;
 
 export interface SettingsDialogProps {
   /** Hell/Dunkel — Standard ist Hell (siehe theme/themeMode.ts). */
@@ -71,6 +87,22 @@ export function SettingsDialog({
   onClose,
   windowed = false,
 }: SettingsDialogProps) {
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [runningVersion, setRunningVersion] = useState<string | null>(null);
+  const [snoozeUntil, setSnoozeUntilState] = useState<number | null>(() => getUpdateSnoozeUntil());
+  const [versionHistory, setVersionHistory] = useState<VersionEntry[] | null>(null);
+  const [selectedTag, setSelectedTag] = useState<string>("");
+
+  useEffect(() => {
+    void getRunningVersion().then(setRunningVersion);
+  }, []);
+  useEffect(() => {
+    void fetchVersionHistory().then((entries) => {
+      setVersionHistory(entries);
+      if (entries.length > 0) setSelectedTag(entries[0].tag);
+    });
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -207,6 +239,97 @@ export function SettingsDialog({
               placeholder="0.0"
             />
             <div className="imp-note">{t("settings.referenceElevation.hint")}</div>
+          </section>
+
+          <section className="imp-section">
+            <div className="imp-section-title">{t("settings.section.update")}</div>
+            <div className="imp-note">
+              {t("about.version")} {runningVersion ?? APP_VERSION}
+            </div>
+            <button
+              type="button"
+              className="imp-btn"
+              disabled={checkingUpdate}
+              onClick={async () => {
+                setCheckingUpdate(true);
+                try {
+                  await checkForUpdate(false);
+                } finally {
+                  setCheckingUpdate(false);
+                }
+              }}
+            >
+              {checkingUpdate ? t("about.checkingUpdate") : t("about.checkUpdate")}
+            </button>
+
+            <div className="settings-subsection">
+              <label className="settings-field-label" htmlFor="settings-update-snooze">
+                {t("settings.update.autoCheck")}
+              </label>
+              <select
+                id="settings-update-snooze"
+                className="settings-select"
+                value={snoozeUntil == null ? "active" : String(snoozeUntil)}
+                onChange={(e) => {
+                  const opt = SNOOZE_OPTIONS.find((o) => o.id === e.target.value);
+                  const until = opt?.ms == null ? null : Date.now() + opt.ms;
+                  setUpdateSnooze(until);
+                  setSnoozeUntilState(until);
+                }}
+              >
+                {SNOOZE_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {t(`settings.update.snooze.${o.id}` as const)}
+                  </option>
+                ))}
+              </select>
+              {snoozeUntil != null && (
+                <div className="imp-note">
+                  {t("settings.update.snoozedUntil", {
+                    date: new Date(snoozeUntil).toLocaleDateString(),
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="settings-subsection">
+              <label className="settings-field-label" htmlFor="settings-update-history">
+                {t("settings.update.versionHistory")}
+              </label>
+              {versionHistory == null ? (
+                <div className="imp-note">{t("settings.update.loadingHistory")}</div>
+              ) : versionHistory.length === 0 ? (
+                <div className="imp-note">{t("settings.update.noHistory")}</div>
+              ) : (
+                <>
+                  <div className="settings-history-row">
+                    <select
+                      id="settings-update-history"
+                      className="settings-select"
+                      value={selectedTag}
+                      onChange={(e) => setSelectedTag(e.target.value)}
+                    >
+                      {versionHistory.map((v) => (
+                        <option key={v.tag} value={v.tag}>
+                          {v.version} — {v.pub_date.slice(0, 10)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="imp-btn"
+                      onClick={() => {
+                        const entry = versionHistory.find((v) => v.tag === selectedTag);
+                        if (entry) void openVersionDownload(entry);
+                      }}
+                    >
+                      {t("settings.update.download")}
+                    </button>
+                  </div>
+                  <div className="imp-note">{t("settings.update.versionHistory.hint")}</div>
+                </>
+              )}
+            </div>
           </section>
         </div>
 

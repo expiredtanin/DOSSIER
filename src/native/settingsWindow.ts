@@ -52,7 +52,7 @@ export async function openSettingsWindowNative(): Promise<void> {
   }
   new WebviewWindow(SETTINGS_WINDOW_LABEL, {
     url: "index.html?window=settings",
-    title: "Einstellungen — Dossier",
+    title: "Einstellungen — dossier",
     width: 520,
     height: 640,
     minWidth: 420,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Dossier",
+  "productName": "dossier",
   "version": "0.1.0",
   "identifier": "ch.dossier.cad",
   "build": {
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Dossier",
+        "title": "dossier",
         "width": 1400,
         "height": 900,
         "dragDropEnabled": false,
@@ -27,6 +27,21 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png"]
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYyRDk3NkZGODQwRUJBNTQKUldSVXVnNkUvM2JaOHV2QWp0L05qZnpEUmt2TkN3ZWJBeFQwb1I0cExWNEpuZWU0UjZiazdQNU0K",
+      "endpoints": [
+        "https://git.openbureau.ch/karim/DOSSIER-STANDALONE/releases/download/latest/latest.json"
+      ]
+    }
   }
 }

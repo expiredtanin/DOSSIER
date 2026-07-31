@@ -54,7 +54,7 @@ export async function openLayerSettingsWindowNative(code: string): Promise<void>
   }
   new WebviewWindow(LAYER_SETTINGS_WINDOW_LABEL, {
     url: `index.html?window=layer-settings&code=${encodeURIComponent(code)}`,
-    title: "Ebeneneinstellungen — Dossier",
+    title: "Ebeneneinstellungen — dossier",
     width: 360,
     height: 420,
     minWidth: 300,

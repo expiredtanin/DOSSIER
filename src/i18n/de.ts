@@ -140,7 +140,7 @@ export const de = {
   "menu.native.view": "Ansicht",
   "menu.native.window": "Fenster",
   "menu.native.panels": "Panels",
-  "menu.native.about": "Über Dossier",
+  "menu.native.about": "Über dossier",
   "menu.native.quit": "Beenden",
 
   // ── Layout-Menü (Topbar) ─────────────────────────────────────────────────
@@ -1318,12 +1318,22 @@ export const de = {
   "exportSave.fmt.stl": "STL (3D-Mesh)",
   "about.title": "Über dossier",
   "about.version": "Version",
-  "about.desc": "Open-Source-CAAD (Computer Aided Architecture Design) — schöne, normgerechte Pläne aus einem semantischen Gebäudemodell. Als Desktop-App (vollständige Fassung) und im Browser zugänglich.",
+  "about.desc": "Open Source Computer Aided Architecture Design — 2D-Vektordesign sowie normgerechte Pläne aus einem semantischen Gebäudemodell.",
   "about.copyright": "© 2026 Karim Gabriele Varano",
   "about.license": "Lizenz: AGPL-3.0-or-later",
-  "about.suite": "Teil der openbureau-Suite",
+  "about.suite": "Teil von openbureau",
   "about.licenses": "Open-Source-Lizenzen (Drittkomponenten)",
   "about.close": "Schließen",
+  "about.checkUpdate": "Nach Updates suchen",
+  "about.checkingUpdate": "Suche nach Updates …",
+
+  "update.title": "Update",
+  "update.upToDate": "Du hast bereits die aktuellste Version.",
+  "update.availableBody": "Version {version} ist verfügbar. Jetzt herunterladen und installieren? Die App startet danach neu.",
+  "update.installNow": "Installieren",
+  "update.installLater": "Später",
+  "update.checkFailed": "Update-Prüfung fehlgeschlagen: {error}",
+  "update.installFailed": "Installation fehlgeschlagen: {error}",
 
   // ── Einstellungs-Fenster ──────────────────────────────────────────────────
   "topbar.settings": "Einstellungen",
@@ -1344,6 +1354,19 @@ export const de = {
   "settings.referenceElevation": "Referenzhöhe EG (m ü. M.)",
   "settings.referenceElevation.hint":
     "Nur gespeichert — wird noch nicht verwendet. Folgt für Terrain-Draping/reale Höhen relativ zum Erdgeschoss.",
+  "settings.section.update": "Update",
+  "settings.update.autoCheck": "Automatisch nach Updates suchen",
+  "settings.update.snooze.active": "Aktiv",
+  "settings.update.snooze.1day": "1 Tag pausieren",
+  "settings.update.snooze.1week": "1 Woche pausieren",
+  "settings.update.snooze.1month": "1 Monat pausieren",
+  "settings.update.snoozedUntil": "Pausiert bis {date}. Manuelles Suchen funktioniert weiterhin.",
+  "settings.update.versionHistory": "Frühere Versionen",
+  "settings.update.versionHistory.hint":
+    "Öffnet den Download im Browser — Installation bleibt manuell (ersetzt die aktuelle Version, wie beim ersten Installieren).",
+  "settings.update.loadingHistory": "Lade Versionsliste …",
+  "settings.update.noHistory": "Keine früheren Versionen verfügbar.",
+  "settings.update.download": "Herunterladen",
 
   // ── Drag & Drop (App-weiter Datei-Drop) ──────────────────────────────────
   "drop.hint": "DXF/DWG-Datei hier ablegen",

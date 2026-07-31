@@ -138,7 +138,7 @@ export const en: Record<TranslationKey, string> = {
   "menu.native.view": "View",
   "menu.native.window": "Window",
   "menu.native.panels": "Panels",
-  "menu.native.about": "About Dossier",
+  "menu.native.about": "About dossier",
   "menu.native.quit": "Quit",
 
   // Layout menu.
@@ -1305,12 +1305,22 @@ export const en: Record<TranslationKey, string> = {
   "exportSave.fmt.stl": "STL (3D mesh)",
   "about.title": "About dossier",
   "about.version": "Version",
-  "about.desc": "Open-source CAAD (Computer Aided Architecture Design) — beautiful, standard-compliant drawings from a semantic building model. Available as a desktop app (full version) and in the browser.",
+  "about.desc": "Open Source Computer Aided Architecture Design — 2D vector design plus standards-compliant drawings from a semantic building model.",
   "about.copyright": "© 2026 Karim Gabriele Varano",
   "about.license": "License: AGPL-3.0-or-later",
-  "about.suite": "Part of the openbureau suite",
+  "about.suite": "Part of openbureau",
   "about.licenses": "Open-source licenses (third-party)",
   "about.close": "Close",
+  "about.checkUpdate": "Check for updates",
+  "about.checkingUpdate": "Checking for updates …",
+
+  "update.title": "Update",
+  "update.upToDate": "You already have the latest version.",
+  "update.availableBody": "Version {version} is available. Download and install now? The app will restart afterwards.",
+  "update.installNow": "Install",
+  "update.installLater": "Later",
+  "update.checkFailed": "Update check failed: {error}",
+  "update.installFailed": "Installation failed: {error}",
 
   // Settings dialog.
   "topbar.settings": "Settings",
@@ -1331,6 +1341,19 @@ export const en: Record<TranslationKey, string> = {
   "settings.referenceElevation": "Ground floor reference elevation (m a.s.l.)",
   "settings.referenceElevation.hint":
     "Stored only — not used yet. Terrain draping / real-world elevations relative to the ground floor will follow.",
+  "settings.section.update": "Update",
+  "settings.update.autoCheck": "Check for updates automatically",
+  "settings.update.snooze.active": "Active",
+  "settings.update.snooze.1day": "Pause for 1 day",
+  "settings.update.snooze.1week": "Pause for 1 week",
+  "settings.update.snooze.1month": "Pause for 1 month",
+  "settings.update.snoozedUntil": "Paused until {date}. Manual checks still work.",
+  "settings.update.versionHistory": "Earlier versions",
+  "settings.update.versionHistory.hint":
+    "Opens the download in your browser — installation stays manual (replaces the current version, same as the first install).",
+  "settings.update.loadingHistory": "Loading version list …",
+  "settings.update.noHistory": "No earlier versions available.",
+  "settings.update.download": "Download",
 
   // Drag & drop (app-wide file drop).
   "drop.hint": "Drop a DXF/DWG file here",

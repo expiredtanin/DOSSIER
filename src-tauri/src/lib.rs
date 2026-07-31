@@ -72,6 +72,18 @@ pub fn run() {
         // im Tauri-Fenster einen echten Save-Dialog zeigen statt still zu laden.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // Selbst-Update: prueft beim Start gegen `endpoints` aus tauri.conf.json
+        // (Gitea-Release-Asset `latest.json`), Installation via JS-Seite
+        // (@tauri-apps/plugin-updater). `tauri_plugin_process` liefert `relaunch()`
+        // fuer den Neustart nach der Installation.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        // HTTP-Requests aus der Webview (Versionsverlauf, versions.json vom
+        // selben Gitea-Release) ohne Browser-CORS-Einschraenkung; Shell: oeffnet
+        // den DMG-Download einer aelteren Version im System-Browser (Rollback,
+        // s. src/update/checkForUpdate.ts).
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_shell::init())
         // Haelt die pro Instanz offen gelockten Projektdatei-Handles (lock.rs).
         .manage(lock::LockState::default())
         .setup(|_app| {

@@ -47,7 +47,7 @@ export async function openResourceWindowNative(initialTab?: TabId): Promise<void
     "index.html?window=resources" + (initialTab ? `&tab=${encodeURIComponent(initialTab)}` : "");
   new WebviewWindow(RESOURCE_WINDOW_LABEL, {
     url,
-    title: "Ressourcen — Dossier",
+    title: "Ressourcen — dossier",
     width: 780,
     height: 660,
     minWidth: 480,

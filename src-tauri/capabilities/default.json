@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Basis-Permissions + Fenstersteuerung fuer die randlose (decorations:false) Titelleiste: Minimieren/Maximieren/Schliessen + Ziehen der eigenen Titelleiste (data-tauri-drag-region). Menu: fuer die native macOS-Systemmenueleiste (src/native/appMenu.ts). Webview/Event: fuer die nativen Ressourcen-/Einstellungs-/Zeichnungsebenen-/Ebeneneinstellungs-Fenster + ihre Sync-Bruecken (src/native/*Window.ts) - gilt fuer alle Fensterlabels, da jedes Events senden/empfangen muss.",
+  "description": "Basis-Permissions + Fenstersteuerung fuer die randlose (decorations:false) Titelleiste: Minimieren/Maximieren/Schliessen + Ziehen der eigenen Titelleiste (data-tauri-drag-region). Menu: fuer die native macOS-Systemmenueleiste (src/native/appMenu.ts). Webview/Event: fuer die nativen Ressourcen-/Einstellungs-/Zeichnungsebenen-/Ebeneneinstellungs-Fenster + ihre Sync-Bruecken (src/native/*Window.ts) - gilt fuer alle Fensterlabels, da jedes Events senden/empfangen muss. Dialog/Fs: nativer Oeffnen- UND Speichern-Dialog fuer Projektdateien (.obp/.json) plus Lesen/Schreiben der gewaehlten Datei (io/projectFile.ts, io/saveFile.ts) - open+read fuer Projekt laden, save+write fuer Projekt/Export speichern. Updater/Process: Selbst-Update-Check beim Start (src/update/checkForUpdate.ts) + Neustart nach Installation. Http: Versionsverlauf (versions.json vom Gitea-Release) ohne Browser-CORS, Scope auf den eigenen Gitea-Host begrenzt. Shell:allow-open: oeffnet den DMG-Download einer aelteren Version im System-Browser (Rollback).",
   "windows": ["main", "resources", "settings", "drawing-levels", "layer-settings", "context-import"],
   "permissions": [
     "core:default",
@@ -16,7 +16,16 @@
     "core:webview:allow-create-webview-window",
     "core:menu:default",
     "core:event:default",
+    "dialog:allow-open",
     "dialog:allow-save",
-    "fs:allow-write-text-file"
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "updater:default",
+    "process:allow-restart",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://git.openbureau.ch/*" }]
+    },
+    "shell:allow-open"
   ]
 }

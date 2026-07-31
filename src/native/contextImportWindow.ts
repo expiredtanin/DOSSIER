@@ -41,7 +41,7 @@ export async function openContextImportWindowNative(): Promise<void> {
   }
   new WebviewWindow(CONTEXT_IMPORT_WINDOW_LABEL, {
     url: "index.html?window=context-import",
-    title: "Standort importieren — Dossier",
+    title: "Standort importieren — dossier",
     width: 480,
     height: 680,
     minWidth: 400,

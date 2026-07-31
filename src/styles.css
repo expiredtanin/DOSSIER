@@ -630,9 +630,9 @@ body {
   border: 1px solid var(--border, #3a3f47);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   color: var(--ink, #e6e8ea);
-  /* Der Dialog ist ein DOM-Kind der `.topbar` (white-space: nowrap) — ohne
-     dieses Reset liefe der mehrzeilige Beschreibungstext einzeilig aus dem
-     Dialog heraus. Hier wieder normalen Zeilenumbruch erzwingen. */
+  /* Defensiv gesetzt (unabhängig davon, ob ein Vorfahre white-space: nowrap
+     setzt) — ohne dieses Reset liefe der mehrzeilige Beschreibungstext
+     einzeilig aus dem Dialog heraus. */
   white-space: normal;
 }
 .about-brand {
@@ -676,9 +676,15 @@ body {
   line-height: 1.6;
   color: var(--label, #c4c8cd);
 }
-.about-close {
-  appearance: none;
+.about-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
   margin-top: 18px;
+}
+.about-close,
+.about-check-update {
+  appearance: none;
   padding: 6px 14px;
   border-radius: 6px;
   border: 1px solid var(--border, #3a3f47);
@@ -687,8 +693,13 @@ body {
   cursor: pointer;
   font-size: 12px;
 }
-.about-close:hover {
+.about-close:hover,
+.about-check-update:hover:not(:disabled) {
   background: var(--accent-dim, #33383f);
+}
+.about-check-update:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .tag {
@@ -5391,6 +5402,35 @@ body {
 .settings-num-input:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-border);
+}
+.settings-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.settings-select {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 7px;
+  background: var(--field-bg);
+  color: var(--ink);
+}
+.settings-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-border);
+}
+.settings-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-history-row .settings-select {
+  flex: 1;
 }
 
 /* ── App-weites Drop-Feedback ──────────────────────────────────────────────
