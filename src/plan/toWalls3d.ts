@@ -1099,18 +1099,32 @@ function clipPieceToRoofs(
   const span = bb - a;
   const steps = Math.max(1, Math.ceil(span / ROOF_CLIP_STEP));
   const stepLen = span / steps;
+  // Je Stufe die geklemmte Oberkante bestimmen …
+  const tops: number[] = [];
   for (let i = 0; i < steps; i++) {
-    const sa = a + i * stepLen;
-    const sb = a + (i + 1) * stepLen;
-    const mid = (sa + sb) / 2;
+    const mid = a + (i + 0.5) * stepLen;
     const p = add(add(wall.start, scale(u, mid)), scale(n, bandOffset));
     let clip = zt;
     for (const { geo, total } of roofData) {
       const under = roofUndersideAt(geo, total, p.x, p.y);
       if (under !== null && under < clip) clip = under;
     }
-    const zte = Math.max(zb, clip);
+    tops.push(Math.max(zb, clip));
+  }
+  // … und AUFEINANDERFOLGENDE Stufen gleicher Oberkante zu EINEM Body verschmelzen.
+  // Wo das Dach das Stück gar nicht klippt (Oberkante == zt über die ganze Länge,
+  // z. B. nahe dem First oder wenn kein Dach wirklich überdeckt), entsteht so wieder
+  // EIN durchgehender Body statt vieler identischer 0.15-m-Fragmente — nur der echt
+  // geneigte Bereich bleibt gestuft. Das entlastet auch den Live-Schnitt, der genau
+  // diese Wandkörper cuttet (weniger, saubere Schnitt-Kappen).
+  let runStart = 0;
+  for (let i = 1; i <= steps; i++) {
+    if (i < steps && Math.abs(tops[i] - tops[runStart]) <= EPS) continue;
+    const sa = a + runStart * stepLen;
+    const sb = a + i * stepLen;
+    const zte = tops[runStart];
     if (zte - zb > EPS) emit(sa, sb, zb, zte);
+    runStart = i;
   }
 }
 
@@ -1932,19 +1946,13 @@ function emitRoofs(project: Project): RMesh[] {
       if (indices.length > 0) out.push({ positions, indices, kind: "extrusion", color, materialIndex });
       return offsetAbove + t;
     }, 0);
-    // Giebel (Endfüllung) als dünne Fläche, äusserste Schichtfarbe/Override.
-    if (g.gables.length > 0) {
-      const gp: number[] = [];
-      const gi: number[] = [];
-      for (const gable of g.gables) pushFanTriangles(gp, gi, gable);
-      if (gi.length > 0) {
-        const first = layers[0];
-        const gc =
-          overrideColor ??
-          (first?.componentId ? hexToRgb(getComponent(project, first.componentId).color, ROOF_RGB) : ROOF_RGB);
-        out.push({ positions: gp, indices: gi, kind: "extrusion", color: gc });
-      }
-    }
+    // Giebel-ENDFÜLLUNG bewusst NICHT mehr emittieren: die dreieckige Giebelfläche
+    // wurde früher als papierdünne Einzelfläche gebaut ("komischer Abschluss" an
+    // den Sattel-/Mansard-Enden) und lag zudem deckungsgleich vor der Giebelwand,
+    // die ohnehin bis an die Dach-Unterkante hochgeklemmt wird (s.
+    // {@link clipPieceToRoofs}) — also doppelt und optisch als dünne 2D-Schicht
+    // sichtbar. Es wird nur noch das Dach SELBST (die geneigten Slab-Flächen)
+    // konstruiert; der Giebel entsteht aus der Wand darunter.
   }
   return out;
 }

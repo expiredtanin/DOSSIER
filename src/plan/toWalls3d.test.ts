@@ -1550,8 +1550,10 @@ describe("Dach-Wand-Verschneidung (clipPieceToRoofs) — Wand-Top folgt der Dach
       expect(seg.height).toBeLessThan(3.0 - 0.05);
       expect(seg.height).toBeGreaterThan(2.8); // nicht mehr als die Dachdicke gekappt
     }
-    // Am First (y nahe 2): unverändert volle Höhe (Dachunterkante liegt weit darüber).
-    const nearRidge = walls.filter((s) => s.start[1] > 1.8 && s.start[1] < 2.2);
+    // Am First (y=2): unverändert volle Höhe. Die ungeклippten Achsenstücke gleicher
+    // Oberkante werden zu EINEM Body verschmolzen, daher hier das Segment suchen, das
+    // y=2 ÜBERSPANNT (nicht mehr ein an y≈2 beginnendes 0.15-m-Stück).
+    const nearRidge = walls.filter((s) => Math.min(s.start[1], s.end[1]) <= 2 && Math.max(s.start[1], s.end[1]) >= 2);
     expect(nearRidge.length).toBeGreaterThan(0);
     for (const seg of nearRidge) {
       expect(seg.height).toBeCloseTo(3.0, 6);
@@ -1886,13 +1888,14 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     thickness: 0.3,
   };
 
-  it("Satteldach: Flächen + Giebel als EIN Roof-Mesh, First-Höhe passt zur Traufhöhe + ridgeHeight", () => {
+  it("Satteldach: nur die Dachflächen als Roof-Mesh (keine Giebel-Endfüllung), First-Höhe passt zur Traufhöhe + ridgeHeight", () => {
     const project: Project = { ...sampleProject, roofs: [baseRoof] };
     const { meshes } = projectToModel3d(project);
     const roofMeshes = meshes.filter(isRoofMesh);
-    // Einschichtiges Dach (thickness-Fallback): 1 Schicht-Slab-Mesh (Flächen) +
-    // 1 Giebel-Mesh (Endfüllung) = 2 Roof-Meshes (beide ROOF_RGB).
-    expect(roofMeshes.length).toBe(2);
+    // Einschichtiges Dach (thickness-Fallback): NUR das Schicht-Slab-Mesh der
+    // geneigten Flächen. Die Giebel-Endfüllung wird bewusst nicht mehr emittiert
+    // (der Giebel entsteht aus der Wand darunter) -> 1 Roof-Mesh.
+    expect(roofMeshes.length).toBe(1);
     for (const m of roofMeshes) {
       expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
       expect(m.indices.length % 3).toBe(0);
@@ -2024,9 +2027,9 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     const noField: Project = { ...sampleProject };
     delete (noField as { roofs?: unknown }).roofs;
     expect(projectToModel3d(noField).meshes.filter(isRoofMesh).length).toBe(0);
-    // sampleProject enthält ein Demo-Satteldach (RF1, einschichtig) -> 2 Roof-
-    // Meshes: Schicht-Slab (Flächen) + Giebel-Endfüllung.
-    expect(projectToModel3d(sampleProject).meshes.filter(isRoofMesh).length).toBe(2);
+    // sampleProject enthält ein Demo-Satteldach (RF1, einschichtig) -> 1 Roof-
+    // Mesh: nur der Schicht-Slab der Flächen (keine Giebel-Endfüllung mehr).
+    expect(projectToModel3d(sampleProject).meshes.filter(isRoofMesh).length).toBe(1);
   });
 });
 
