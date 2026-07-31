@@ -6880,3 +6880,136 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ── Splash + Startbildschirm (App.tsx: bootPhase splash → start → editor) ──
+   Immer dunkel (wie der Über-Dialog), unabhängig vom Hell/Dunkel-Theme —
+   eigener Marken-Moment vor dem eigentlichen Editor. */
+.splash-screen,
+.start-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #16181c;
+  color: #e6e8ea;
+}
+.splash-brand,
+.start-brand {
+  font-weight: 700;
+  font-size: 32px;
+  text-transform: lowercase;
+  letter-spacing: -0.01em;
+}
+.start-brand {
+  margin-bottom: 36px;
+}
+.start-actions {
+  display: flex;
+  gap: 14px;
+}
+.start-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 200px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid #3a3f47;
+  background: #23262b;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.start-action:hover {
+  border-color: var(--accent, #0f766e);
+  background: #292d33;
+}
+.start-action-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.start-action-hint {
+  font-size: 11px;
+  color: #9aa0a6;
+}
+.start-recent {
+  margin-top: 36px;
+  width: 420px;
+  max-width: calc(100vw - 48px);
+}
+.start-recent-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9aa0a6;
+  margin-bottom: 8px;
+}
+.start-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.start-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.start-recent-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.start-recent-item:hover {
+  background: #23262b;
+}
+.start-recent-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.start-recent-path {
+  font-size: 10.5px;
+  color: #767c83;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.start-recent-remove {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #767c83;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.start-recent-remove:hover {
+  background: #23262b;
+  color: #e6e8ea;
+}

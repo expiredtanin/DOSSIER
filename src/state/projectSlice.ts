@@ -8,7 +8,7 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
-import { emptyProject } from "../model/sampleProject";
+import { sampleProject } from "../model/sampleProject";
 import {
   flattenCategories,
   recomputeFloorElevations,
@@ -363,10 +363,11 @@ export function createProjectSlice(
   return {
     ...history,
 
-    // TEMPORÄR für manuellen Test (Nutzer-Wunsch): leeres Projekt statt Demo-
-    // Haus. NICHT committen — vor dem nächsten echten Commit zurück auf
-    // `sampleProject` stellen.
-    project: emptyProject,
+    // Store-Default beim Modul-Laden — sichtbar nur ganz kurz HINTER dem
+    // Splash/Startbildschirm (App.tsx bootPhase: splash → start → editor),
+    // bevor eine der drei Optionen (Neu/Öffnen/Zuletzt) das echte Projekt
+    // setzt. Der konkrete Wert spielt daher praktisch keine Rolle mehr.
+    project: sampleProject,
 
     setProject,
 

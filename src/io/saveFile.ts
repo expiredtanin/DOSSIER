@@ -26,6 +26,9 @@ export interface FileDialogFilter {
  * @param filters Optionale Datei-Endungsfilter fuer den nativen Dialog (z. B.
  *        Projekt-Endung). Additiv/optional, damit bestehende Aufrufer ohne
  *        Filter unveraendert funktionieren (Default-Verhalten: irgendeine Endung).
+ * @param onSavedPath Optionaler Callback mit dem gewaehlten Pfad, NUR bei
+ *        erfolgreichem Tauri-Speichern (z. B. fuer die Zuletzt-geoeffnet-Liste,
+ *        s. state/recentProjects.ts) — additiv, aendert den Rueckgabewert nicht.
  * @returns `true` wenn geschrieben/geladen wurde, `false` bei Abbruch (Dialog
  *          ohne Pfad). Bei einem Tauri-Fehler wird auf den Browser-Fallback
  *          zurueckgefallen.
@@ -35,6 +38,7 @@ export async function saveTextFile(
   defaultName: string,
   mime = "application/octet-stream",
   filters?: FileDialogFilter[],
+  onSavedPath?: (path: string) => void,
 ): Promise<boolean> {
   if (isTauri()) {
     try {
@@ -43,6 +47,7 @@ export async function saveTextFile(
       if (!path) return false; // Nutzer hat abgebrochen
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       await writeTextFile(path, content);
+      onSavedPath?.(path);
       return true;
     } catch (err) {
       if (!warnedFallback) {

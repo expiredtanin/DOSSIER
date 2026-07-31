@@ -1623,4 +1623,13 @@ export const en: Record<TranslationKey, string> = {
   "layouts.size.widthMm": "Width (mm)",
   "layouts.size.heightMm": "Height (mm)",
   "layouts.size.create": "Create",
+
+  // Start screen (after the splash, before the editor)
+  "start.newProject": "New project",
+  "start.newProject.hint": "Create a blank project",
+  "start.openProject": "Open project …",
+  "start.openProject.hint": "Choose an existing .obp file",
+  "start.recent": "Recently opened",
+  "start.recent.remove": "Remove from list",
+  "start.recentMissing": "File not found — removed from the list.",
 };

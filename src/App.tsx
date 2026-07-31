@@ -210,6 +210,9 @@ import {
 // Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
 import { BUILTIN_PANEL_IDS } from "./panels/builtinPanels";
 import { deriveDrawings } from "./DrawingTabs";
+import { SplashScreen } from "./ui/SplashScreen";
+import { StartScreen } from "./ui/StartScreen";
+import { emptyProject } from "./model/sampleProject";
 
 /**
  * Offenes Kontextmenü — genau eine Quelle. `x/y` sind Viewport-Pixel (clientX/Y).
@@ -265,6 +268,13 @@ export default function App() {
   // Sprachwechsel abonnieren: re-rendert den gesamten Baum, wenn die Sprache
   // umgeschaltet wird (alle Kinder lesen denselben modulweiten Zustand über t).
   useT();
+
+  // ── Boot-Sequenz: Splash → Startbildschirm (Neu/Öffnen/Zuletzt) → Editor ──
+  // Wie bei den meisten CAD-Programmen (s. ui/SplashScreen.tsx/StartScreen.tsx).
+  // Läuft NUR einmal pro Fensterstart; sobald "editor" erreicht ist, bleibt der
+  // volle Editor bestehen (auch bei späteren File>Neu/Öffnen-Aktionen, die
+  // weiterhin über das normale Menü laufen).
+  const [bootPhase, setBootPhase] = useState<"splash" | "start" | "editor">("splash");
 
   // ── Globaler Zustand aus dem Store (Slices: project/selection/view/layout) ─
   // Pro useStore-Aufruf EIN Feld selektieren (Referenz-Gleichheit, sonst
@@ -2158,6 +2168,7 @@ export default function App() {
     onExportObj,
     onExportStl,
     onOpenProject,
+    openProjectAtPath,
     onProjectFileChosen,
     runImport,
   } = useProjectFileActions(
@@ -4456,6 +4467,30 @@ export default function App() {
     const f = e.dataTransfer.files?.[0];
     if (f) openImportForFile(f);
   };
+
+  if (bootPhase === "splash") {
+    return <SplashScreen onDone={() => setBootPhase("start")} />;
+  }
+  if (bootPhase === "start") {
+    return (
+      <StartScreen
+        onNewProject={() => {
+          setProject(emptyProject);
+          setBootPhase("editor");
+        }}
+        onOpenProject={() => {
+          onOpenProject();
+          setBootPhase("editor");
+        }}
+        onOpenRecent={(path) => {
+          void openProjectAtPath(path).then((found) => {
+            if (!found) notify(t("start.recentMissing"), "error");
+          });
+          setBootPhase("editor");
+        }}
+      />
+    );
+  }
 
   return (
     <div

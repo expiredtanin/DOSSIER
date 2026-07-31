@@ -56,16 +56,42 @@ export async function openProjectFileNative(): Promise<OpenedProjectFile | null>
 }
 
 /**
+ * Öffnet eine Projektdatei über einen BEKANNTEN Pfad (kein Dialog) — für den
+ * Startbildschirm/„Zuletzt geöffnet" (state/recentProjects.ts): der Pfad kommt
+ * dort schon aus einem früheren Öffnen/Speichern. Nur unter Tauri sinnvoll.
+ *
+ * @returns `null` ohne Tauri oder wenn die Datei nicht mehr lesbar ist (z. B.
+ * gelöscht/verschoben) — der Aufrufer sollte den Eintrag dann aus der
+ * Zuletzt-geöffnet-Liste entfernen.
+ */
+export async function openProjectFileAtPath(path: string): Promise<OpenedProjectFile | null> {
+  if (!isTauriRuntime()) return null;
+  try {
+    const { readTextFile } = await import("@tauri-apps/plugin-fs");
+    const content = await readTextFile(path);
+    return { path, content };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Speichert das Projekt-JSON in eine `.obp`-Datei. Unter Tauri nativer
  * Speichern-Dialog mit Projekt-Filter, im Browser Blob-Download — beides via
  * {@link saveTextFile} (dort steckt die WKWebView-Härtung).
  *
  * @param json Fertig serialisiertes Projekt (JSON.stringify des ProjectSlice).
  * @param projectName `project.name` für den Standard-Dateinamen (Fallback "projekt").
+ * @param onSavedPath Optionaler Callback mit dem gewählten Pfad (Zuletzt-
+ *        geöffnet-Liste, s. state/recentProjects.ts).
  */
-export async function saveProjectFile(json: string, projectName: string): Promise<boolean> {
+export async function saveProjectFile(
+  json: string,
+  projectName: string,
+  onSavedPath?: (path: string) => void,
+): Promise<boolean> {
   const filename = `${projectName || "projekt"}.${PROJECT_EXT}`;
-  return saveTextFile(json, filename, "application/json", PROJECT_DIALOG_FILTERS);
+  return saveTextFile(json, filename, "application/json", PROJECT_DIALOG_FILTERS, onSavedPath);
 }
 
 // ── Lock gegen Doppelöffnung (nur Tauri) ────────────────────────────────────

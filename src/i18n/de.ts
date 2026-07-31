@@ -1636,6 +1636,15 @@ export const de = {
   "layouts.size.widthMm": "Breite (mm)",
   "layouts.size.heightMm": "Höhe (mm)",
   "layouts.size.create": "Erstellen",
+
+  // Startbildschirm (nach dem Splash, vor dem Editor)
+  "start.newProject": "Neues Projekt",
+  "start.newProject.hint": "Leeres Projekt anlegen",
+  "start.openProject": "Projekt öffnen …",
+  "start.openProject.hint": "Bestehende .obp-Datei auswählen",
+  "start.recent": "Zuletzt geöffnet",
+  "start.recent.remove": "Aus der Liste entfernen",
+  "start.recentMissing": "Datei nicht gefunden — aus der Liste entfernt.",
 } as const;
 
 export type TranslationKey = keyof typeof de;

@@ -21,12 +21,14 @@ import { saveTextFile } from "../io/saveFile";
 import {
   saveProjectFile,
   openProjectFileNative,
+  openProjectFileAtPath,
   acquireProjectLock,
   releaseProjectLock,
   registerLockAutoRelease,
   isTauriRuntime,
 } from "../io/projectFile";
 import type { LockInfo } from "../io/projectFile";
+import { addRecentProject, removeRecentProject } from "./recentProjects";
 import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
 import type { PlanViewHandle } from "../plan/PlanView";
 
@@ -187,7 +189,9 @@ export function useProjectFileActions(
   // erlaubt beide Endungen).
   const onSaveProject = () => {
     const json = JSON.stringify(project, null, 2);
-    void saveProjectFile(json, project.name);
+    void saveProjectFile(json, project.name, (path) =>
+      addRecentProject(path, project.name || "modell"),
+    );
   };
   // Gibt den Lock der zuletzt geöffneten Projektdatei frei (falls wir ihn
   // halten) und vergisst den Pfad — vor dem Wechsel auf ein anderes Projekt.
@@ -212,6 +216,7 @@ export function useProjectFileActions(
       setProject(parsed as Project);
       openedProjectPathRef.current = path;
       projectLockOwnedRef.current = lockOwned;
+      addRecentProject(path, (parsed as Project).name || "modell");
     } catch (err) {
       console.error("Projekt-Import fehlgeschlagen:", err);
     }
@@ -237,6 +242,24 @@ export function useProjectFileActions(
     } else {
       setLockConflict({ path: opened.path, content: opened.content, info: lock.info });
     }
+  };
+  // Öffnen über einen BEKANNTEN Pfad (Startbildschirm/„Zuletzt geöffnet",
+  // s. ui/StartScreen.tsx) — kein Dialog, sonst identischer Lock-Fluss wie
+  // `openProjectViaNativeDialog`. Ist die Datei nicht mehr lesbar (gelöscht/
+  // verschoben), wird der verwaiste Eintrag aus der Liste entfernt.
+  const openProjectAtPath = async (path: string): Promise<boolean> => {
+    const opened = await openProjectFileAtPath(path);
+    if (!opened) {
+      removeRecentProject(path);
+      return false;
+    }
+    const lock = await acquireProjectLock(opened.path);
+    if (lock.ok) {
+      applyOpenedProjectFile(opened.path, opened.content, true);
+    } else {
+      setLockConflict({ path: opened.path, content: opened.content, info: lock.info });
+    }
+    return true;
   };
   // Datei speichern: unter Tauri nativer „Speichern unter"-Dialog (Ordner + Name),
   // im Browser Blob-Download-Fallback — die gesamte Logik (inkl. WKWebView-
@@ -351,6 +374,7 @@ export function useProjectFileActions(
     releaseCurrentProjectLock,
     applyOpenedProjectFile,
     openProjectViaNativeDialog,
+    openProjectAtPath,
     downloadTextFile,
     projectFileName,
     runExport,
