@@ -4776,24 +4776,31 @@ export default function App() {
         onImport={() => dxfInputRef.current?.click()}
         onSaveProject={onSaveProject}
         onOpenProject={onOpenProject}
+        // Unter Tauri (macOS) übernimmt die native Systemmenüleiste (oben am
+        // Bildschirm, useNativeAppMenu) exakt dieselben Aktionen bereits —
+        // die In-App-Menüleiste wäre reine Dopplung und kostet nur Platz in
+        // der Kopfzeile. Im Browser/Electron (kein natives App-Menü) bleibt
+        // sie die einzige Quelle dafür.
         menuBar={
-          <AppMenuBar
-            onUndo={undo}
-            onRedo={redo}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            onDeleteSelection={deleteSelection}
-            hasSelection={hasSelectionToDelete()}
-            viewType={viewType}
-            onViewType={setViewType}
-            view3d={view3d}
-            onView3d={setView3d}
-            referenceLines={referenceLines}
-            onReferenceLines={setReferenceLines}
-            resourcesOpen={resourcesOpen}
-            onToggleResources={() => toggleResources()}
-            onOpenSettings={() => openSettings()}
-          />
+          isTauriRuntime() ? undefined : (
+            <AppMenuBar
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onDeleteSelection={deleteSelection}
+              hasSelection={hasSelectionToDelete()}
+              viewType={viewType}
+              onViewType={setViewType}
+              view3d={view3d}
+              onView3d={setView3d}
+              referenceLines={referenceLines}
+              onReferenceLines={setReferenceLines}
+              resourcesOpen={resourcesOpen}
+              onToggleResources={() => toggleResources()}
+              onOpenSettings={() => openSettings()}
+            />
+          )
         }
         viewControls={
           <ViewRibbonTab
