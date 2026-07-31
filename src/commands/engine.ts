@@ -169,6 +169,17 @@ export class CommandEngine {
   }
 
   /**
+   * Erwartet der aktuelle Schritt freien Text (z. B. das Textwerkzeug-Label)?
+   * Dort ist JEDE Taste — auch Ziffern — literaler Inhalt, im Unterschied zu
+   * einem reinen Punkt-Pick-Schritt (nur „point"/„number", keine Felder), wo
+   * Ziffern ansonsten ungenutzt sind.
+   */
+  acceptsFreeText(): boolean {
+    if (!this.command || !this.state) return false;
+    return this.command.accepts(this.state).includes("text");
+  }
+
+  /**
    * Setzt den Feld-Zustand zurück, wenn der Schritt wechselt — Signatur =
    * phase + Feld-IDs + lastPoint. Der lastPoint-Teil sorgt dafür, dass ein
    * mehrteiliger Befehl (Polyline) je gesetztem Punkt FRISCHE Felder/Locks

@@ -871,6 +871,19 @@ export default function App() {
   void engineTick;
   const engineView = engine.view();
   const commandActive = engineView.active;
+  // Fokus wieder freigeben, sobald ein Befehl fertig ist (Commit ODER Abbruch):
+  // beim Start wird das Befehlsfeld fokussiert (onSelectTool), bliebe es das
+  // auch danach, würde die nächste Zifferntaste im (inaktiven) Feld landen
+  // statt beim globalen Werkzeug-Kürzel anzukommen — Esc wäre nötig. Mit dem
+  // Blur bei aktiv→inaktiv wählt man wie in Vectorworks sofort das nächste
+  // Werkzeug per Zifferntaste, ohne dazwischen Esc zu drücken.
+  const prevCommandActiveRef = useRef(commandActive);
+  useEffect(() => {
+    if (prevCommandActiveRef.current && !commandActive) {
+      commandLineRef.current?.blur();
+    }
+    prevCommandActiveRef.current = commandActive;
+  }, [commandActive]);
   // Live-Echo des Befehlszeilen-Texts fürs Cursor-HUD: der getippte Wert
   // erscheint sofort im aktiven Tab-Feld am Cursor (VW-Verhalten).
   const [cmdTyped, setCmdTyped] = useState("");
@@ -1037,12 +1050,19 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
-  // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 2 Linie, 4
-  // Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum. Nur auf
-  // Geschoss-Tabs, nicht beim Tippen in Feldern und nicht mit Modifikator
-  // (Ctrl/Cmd/Alt bleiben frei). 1 (Text) und 3 (Kreis) sind bewusst noch
-  // unbelegt — dafür fehlt bislang ein Werkzeug. Der Handler wird einmal
-  // registriert und liest die aktuelle Auswahl-Funktion/Ebenen-Art über ein Ref.
+  // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 1 Text, 2 Linie,
+  // 3 Kreis, 4 Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum.
+  // Nur auf Geschoss-Tabs, nicht mit Modifikator (Ctrl/Cmd/Alt bleiben frei).
+  // Direkt nach dem Setzen eines Punkts (z. B. „Startpunkt angeben") steht der
+  // Fokus schon im Befehlsfeld (onSelectTool fokussiert es) — trotzdem soll die
+  // nächste Zifferntaste OHNE Esc gleich das nächste Werkzeug wählen, wie in
+  // Vectorworks. Das ist nur sicher, wenn dort gerade nichts Sinnvolles getippt
+  // werden könnte: das Feld ist noch leer UND der Schritt hat weder Tab-Felder
+  // (Länge/Winkel/Radius, hasFields()) noch erwartet er Freitext (Text-Label,
+  // acceptsFreeText()) — sonst wäre die Ziffer selbst Nutzinhalt (z. B. „Raum
+  // 101" oder eine getippte Koordinate) und darf nicht als Werkzeugwechsel
+  // verschluckt werden. Der Handler wird einmal registriert und liest die
+  // aktuelle Auswahl-Funktion/Ebenen-Art über ein Ref.
   const toolShortcutRef = useRef({
     onSelectTool,
     floor: activeLevel.kind === "floor",
@@ -1053,7 +1073,9 @@ export default function App() {
   };
   useEffect(() => {
     const MAP: Record<string, ToolId> = {
+      "1": "text",
       "2": "line",
+      "3": "circle",
       "4": "rect",
       "5": "polyline",
       "6": "wall",
@@ -1065,11 +1087,15 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
-      if (
-        el &&
-        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
-      ) {
-        return;
+      const isInput =
+        !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if (isInput) {
+        const isCmdLineInput = el.classList.contains("cmdline-input");
+        const empty = isCmdLineInput && (el as HTMLInputElement).value === "";
+        const eng = engineRef.current;
+        const cmdLineFreeToSwitch =
+          empty && !eng?.hasFields() && !eng?.acceptsFreeText();
+        if (!cmdLineFreeToSwitch) return;
       }
       const id = MAP[e.key];
       if (!id) return;

@@ -66,6 +66,13 @@ export interface CommandLineHandle {
    * Zeichnen, ohne dass das Feld fokussiert war): fokussiert + setzt den Text.
    */
   beginTyping: (seed: string) => void;
+  /**
+   * Gibt den Eingabefokus frei (z. B. wenn ein Befehl fertig ist), damit die
+   * nächste Zifferntaste sofort wieder das nächste Werkzeug wählt statt im
+   * Eingabefeld zu landen (Vectorworks-Verhalten: kein Esc nötig zwischen zwei
+   * Werkzeugen).
+   */
+  blur: () => void;
 }
 
 export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
@@ -87,6 +94,7 @@ export const CommandLine = forwardRef<CommandLineHandle, CommandLineProps>(
         setText(seed);
         inputRef.current?.focus();
       },
+      blur: () => inputRef.current?.blur(),
     }));
 
     // Autocomplete nur im Ruhezustand (Befehlsname tippen), nicht in einem Schritt.
