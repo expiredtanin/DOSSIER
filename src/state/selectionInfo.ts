@@ -353,8 +353,15 @@ export interface Selection {
     | "extrudedSolid"
     | "column"
     | "roof"
-    | "contextObject";
+    | "contextObject"
+    | "layoutAnnotation";
   id: string;
+  /**
+   * Konkrete Art der Layout-Annotation (nur `kind === "layoutAnnotation"`) —
+   * steuert z. B., ob die Strichstärke editierbar ist (Linie/Rechteck ja,
+   * Text/Bild nein).
+   */
+  annotKind?: "line" | "rect" | "text" | "image";
   /** Grafik-Kategorie (Ebene) des Elements. */
   categoryCode: string;
   /**
@@ -408,6 +415,13 @@ export interface Selection {
   hatchSource?: AttributeSource;
   /** Ob die Form geschlossen ist (rect/circle/closed polyline) — nur Drawing2D. */
   closed?: boolean;
+  /**
+   * Ob das Element ein Bild ist (Drawing2D `{shape:"image"}` ODER Layout-
+   * Annotation `kind:"image"`) — steuert die Deckkraft-Zeile im Attribute-Panel.
+   */
+  isImage?: boolean;
+  /** Deckkraft (0..1) — nur wenn `isImage`. */
+  opacity?: number;
   /** Achsparallele Bounding-Box in Modell-Metern. */
   bbox: SelectionBBox;
   /**
@@ -487,6 +501,7 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
       for (const p of g.pts) acc(p.x, p.y);
       break;
     case "rect":
+    case "image":
       acc(g.min.x, g.min.y);
       acc(g.max.x, g.max.y);
       break;
@@ -1009,6 +1024,8 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     strokeWeightSource: d.strokeWeightSource,
     hatchSource: closed ? d.hatchSource : undefined,
     closed,
+    isImage: d.geom.shape === "image",
+    opacity: d.geom.shape === "image" ? d.geom.opacity ?? 1 : undefined,
     bbox: geomBBox(d.geom),
   };
 }

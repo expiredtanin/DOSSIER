@@ -156,6 +156,15 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <line x1="4.5" y1="11" x2="9" y2="11" />
         </svg>
       );
+    case "image":
+      // Bild-Rahmen mit Bergsilhouette + Sonne (klassisches Bild-Icon).
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="3" width="11" height="10" fill="none" />
+          <circle cx="6" cy="6.5" r="1" fill="currentColor" stroke="none" />
+          <path d="M 3 12 L 7 8 L 9.5 10.5 L 11 9 L 13 12" fill="none" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -166,7 +175,7 @@ export function ToolIcon({ id }: { id: ToolId }) {
 // und 3D und Bearbeiten"). Befehlsnamen spiegeln die Ribbon-Registry
 // (ui/ribbon/ribbonItems.ts) — dort liegt die kanonische Liste; hier nur die
 // Panel-Gruppierung (2D-Zeichnen · 3D/BIM-Bauteile · Bearbeiten-Aktionen).
-const TOOLS_2D: ToolId[] = ["line", "polyline", "rect", "circle", "arc", "text", "textbox"];
+const TOOLS_2D: ToolId[] = ["line", "polyline", "rect", "circle", "arc", "text", "textbox", "image"];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "ceilingopening", "roof", "extrude", "sectionline", "viewline"];
 const COMMANDS_EDIT = ["move", "copy", "rotate", "mirror", "offset", "trim", "join", "measure"];

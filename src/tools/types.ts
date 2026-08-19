@@ -22,7 +22,8 @@ export type ToolId =
   | "circle"
   | "arc"
   | "text"
-  | "textbox";
+  | "textbox"
+  | "image";
 
 // ── Snapping ───────────────────────────────────────────────────────────────
 

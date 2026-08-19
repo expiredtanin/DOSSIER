@@ -25,6 +25,8 @@ import type { HatchRender, Plan, Primitive } from "../plan/generatePlan";
 import type { Vec2 } from "../model/types";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints } from "../plan/glPlan/glPlanHatch";
 import { dashHasDot } from "../ui/lineSegments";
+import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
+import { docFromText } from "../text/richText";
 
 /** SVG-Namespace für die programmatisch erzeugten Knoten. */
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -254,7 +256,111 @@ function appendPrimitive(
       svg.appendChild(node);
       break;
     }
+    case "drawingText": {
+      const node = drawingTextNode(p, map, mmPerM);
+      if (node) {
+        if (opacity) node.setAttribute("opacity", opacity);
+        svg.appendChild(node);
+      }
+      break;
+    }
+    case "drawingImage": {
+      const node = drawingImageNode(p, map, mmPerM);
+      if (node) {
+        if (p.opacity < 1) node.setAttribute("opacity", String(p.opacity * (p.greyed ? 0.45 : 1)));
+        else if (opacity) node.setAttribute("opacity", opacity);
+        svg.appendChild(node);
+      }
+      break;
+    }
   }
+}
+
+/**
+ * Modellverankerter Einzeltext (Text-Werkzeug/DXF-Import) als `<text>` mit
+ * `<tspan>`-Zeilen — analog zur Bildschirm-Darstellung (PlanView.tsx
+ * `case "drawingText"`), aber DOM-Knoten statt JSX. Bricht bei gesetzter
+ * Spaltenbreite wortweise um (Run-Grenzen bleiben erhalten).
+ */
+function drawingTextNode(
+  p: Extract<Primitive, { kind: "drawingText" }>,
+  map: Mapper,
+  mmPerM: number,
+): SVGTextElement | null {
+  const doc = p.doc ?? docFromText(p.text, p.marks ?? {});
+  const c = map(p.at);
+  const fontSizeMm = p.heightM * mmPerM;
+  const unitPerPt = (0.0254 / 72) * mmPerM;
+  const basePt = unitPerPt > 0 ? p.heightM / unitPerPt : 0;
+  const lineHeight = fontSizeMm * 1.25;
+  const wrapWidthUnits = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth * mmPerM : undefined;
+  const lines: SvgLine[] = wrapDocToLines(doc, {
+    x: 0,
+    y: 0,
+    lineHeight,
+    unitPerPt,
+    basePt,
+    color: p.color,
+    ...(wrapWidthUnits ? { wrapWidthUnits } : {}),
+  });
+  if (lines.length === 0) return null;
+
+  const el = document.createElementNS(SVG_NS, "text");
+  const deg = -(p.angle * 180) / Math.PI;
+  if (deg) el.setAttribute("transform", `rotate(${round(deg)} ${round(c.x)} ${round(c.y)})`);
+  let y = c.y;
+  lines.forEach((line, k) => {
+    if (k > 0) y += line.lineHeight;
+    const anchor = line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
+    const x = !wrapWidthUnits
+      ? c.x
+      : line.align === "center"
+        ? c.x + wrapWidthUnits / 2
+        : line.align === "right"
+          ? c.x + wrapWidthUnits
+          : c.x;
+    const lineTspan = document.createElementNS(SVG_NS, "tspan");
+    lineTspan.setAttribute("x", String(round(x)));
+    lineTspan.setAttribute("y", String(round(y)));
+    lineTspan.setAttribute("text-anchor", anchor);
+    if (line.tspans.length === 0) {
+      lineTspan.textContent = "​";
+    } else {
+      for (const ts of line.tspans) {
+        const run = document.createElementNS(SVG_NS, "tspan");
+        run.setAttribute("font-size", String(round(ts.fontSize)));
+        run.setAttribute("fill", ts.fill);
+        if (ts.fontWeight) run.setAttribute("font-weight", ts.fontWeight);
+        if (ts.fontStyle) run.setAttribute("font-style", ts.fontStyle);
+        run.setAttribute("font-family", ts.fontFamily ?? "Helvetica, Arial, sans-serif");
+        if (ts.textDecoration) run.setAttribute("text-decoration", ts.textDecoration);
+        run.textContent = ts.text;
+        lineTspan.appendChild(run);
+      }
+    }
+    el.appendChild(lineTspan);
+  });
+  return el;
+}
+
+/** Eingebettetes Rasterbild (Data-URL) als achsparalleles `<image>`. */
+function drawingImageNode(
+  p: Extract<Primitive, { kind: "drawingImage" }>,
+  map: Mapper,
+  mmPerM: number,
+): SVGImageElement | null {
+  const w = (p.max.x - p.min.x) * mmPerM;
+  const h = (p.max.y - p.min.y) * mmPerM;
+  if (w <= 0 || h <= 0) return null;
+  const topLeft = map({ x: p.min.x, y: p.max.y });
+  const el = document.createElementNS(SVG_NS, "image");
+  el.setAttribute("href", p.src);
+  el.setAttribute("x", String(round(topLeft.x)));
+  el.setAttribute("y", String(round(topLeft.y)));
+  el.setAttribute("width", String(round(w)));
+  el.setAttribute("height", String(round(h)));
+  el.setAttribute("preserveAspectRatio", "none");
+  return el;
 }
 
 /**

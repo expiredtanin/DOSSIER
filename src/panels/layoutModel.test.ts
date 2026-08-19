@@ -163,6 +163,19 @@ describe("createAnnotation — Defaults je Art", () => {
     const a = createAnnotation("a3", "text", { text: "EG", heightMm: 5 });
     expect(a).toMatchObject({ text: "EG", heightMm: 5 });
   });
+  it("text: init mit doc/widthMm (Rich-Text-Frame) wird übernommen", () => {
+    const doc = { version: 1 as const, paragraphs: [{ runs: [{ text: "Hi", marks: {} }] }] };
+    const a = createAnnotation("a3", "text", { doc, widthMm: 50 });
+    expect(a).toMatchObject({ doc, widthMm: 50 });
+  });
+  it("image: Default-Grösse, leere Quelle", () => {
+    const a = createAnnotation("a4", "image");
+    expect(a).toEqual({ id: "a4", kind: "image", xMm: 20, yMm: 20, widthMm: 60, heightMm: 40, src: "" });
+  });
+  it("image: init setzt Quelle + Grösse + Deckkraft", () => {
+    const a = createAnnotation("a4", "image", { src: "data:image/png;base64,x", widthMm: 30, heightMm: 20, opacity: 0.5 });
+    expect(a).toMatchObject({ src: "data:image/png;base64,x", widthMm: 30, heightMm: 20, opacity: 0.5 });
+  });
 });
 
 describe("Annotations-CRUD (immutabel)", () => {
@@ -199,7 +212,7 @@ describe("Annotations-CRUD (immutabel)", () => {
     const l = addAnnotation(base, createAnnotation("a1", "line", { color: "#111" }));
     const patched = patchAnnotation(l, "a1", { x1Mm: 42, color: "#0f0" });
     expect(patched.annotations![0]).toMatchObject({ x1Mm: 42, color: "#0f0" });
-    expect(l.annotations![0].color).toBe("#111");
+    expect((l.annotations![0] as { color?: string }).color).toBe("#111");
   });
 
   it("patchAnnotation: unbekannte Id → No-op (gleiche Werte, neue Liste)", () => {

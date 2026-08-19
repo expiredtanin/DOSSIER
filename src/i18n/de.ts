@@ -182,6 +182,11 @@ export const de = {
   "tool.text.hint": "Text: Ankerpunkt setzen, dann Text eintippen",
   "tool.textbox": "Textspalte",
   "tool.textbox.hint": "Textspalte: Anker, dann Spaltenbreite ziehen, dann Text eintippen",
+  "tool.image": "Bild/PDF",
+  "tool.image.hint": "Bild oder PDF einfügen (jede PDF-Seite wird als Bild eingebettet)",
+  "image.readError": "Bild konnte nicht gelesen werden.",
+  "image.pdfError": "PDF konnte nicht gelesen werden.",
+  "image.pdfEmpty": "PDF enthält keine Seiten.",
   // Ribbon-Oberleiste (Tabs + Gruppen)
   "ribbon.tab.2d": "2D",
   "ribbon.tab.3d": "3D",
@@ -300,6 +305,7 @@ export const de = {
   "attr.stroke": "Stift",
   "attr.color": "Farbe",
   "attr.weight": "Strichstärke (mm)",
+  "attr.opacity": "Deckkraft",
   "attr.lineStyle": "Linienstil",
   "attr.lineStyle.none": "Standard",
   "attr.fill": "Füllung",
@@ -344,6 +350,8 @@ export const de = {
   "objinfo.kind.column": "Stütze",
   "objinfo.kind.roof": "Dach",
   "objinfo.kind.contextObject": "Kontext-Objekt",
+  "objinfo.kind.layoutAnnotation": "Blatt-Markup",
+  "objinfo.layoutAnnotationHint": "Position/Grösse in mm direkt am Rahmen auf dem Blatt bearbeiten (Greifpunkte oder die Felder dort).",
   // ── Kontext-Objekt-Attribute (Object-Info-Panel) ────────────────────────
   "objinfo.contextObject.section": "Georeferenzierung",
   "objinfo.contextObject.type": "Art",
@@ -1569,6 +1577,7 @@ export const de = {
   // Editor
   "layouts.editorTitle": "Layout-Editor",
   "layouts.fit": "Einpassen",
+  "layouts.zoom100": "Echte Grösse (100 %, 1:1 auf dem Bildschirm)",
   "layouts.addViewport": "Viewport hinzufügen",
   "layouts.pickSnapshot": "Ausschnitt wählen …",
   "layouts.noSnapshots": "Keine Ausschnitte vorhanden. Zuerst einen Ausschnitt speichern.",
@@ -1589,19 +1598,21 @@ export const de = {
   "layouts.bindSnapshot": "Ausschnitt binden",
   "layouts.emptyViewports":
     "Noch keine Viewports. „Viewport aufziehen\" wählen und ein Rechteck auf dem Blatt ziehen.",
-  // Annotationen (Linie/Rechteck/Text) direkt auf dem Blatt
-  "layouts.annotLine": "Linie zeichnen",
-  "layouts.annotRect": "Rechteck zeichnen",
-  "layouts.annotText": "Text setzen",
+  // Annotationen (Linie/Rechteck/Text/Bild) direkt auf dem Blatt — gezeichnet
+  // mit denselben Werkzeugen wie im Grundriss (linkes Werkzeugpanel), kein
+  // eigenes Werkzeug nur fürs Layout.
   "layouts.annotTextTitle": "Text",
   "layouts.annotTextLabel": "Textinhalt:",
   "layouts.annotEditText": "Text ändern",
-  "layouts.annotColor": "Farbe",
-  "layouts.annotWeight": "Strichstärke (mm)",
   "layouts.annotRemove": "Annotation entfernen",
+  "layouts.annotX": "X (mm)",
+  "layouts.annotY": "Y (mm)",
+  "layouts.annotWidth": "Breite (mm)",
+  "layouts.annotHeight": "Höhe (mm)",
   "layouts.annot.line": "Linie",
   "layouts.annot.rect": "Rechteck",
   "layouts.annot.text": "Text",
+  "layouts.annot.image": "Bild",
   // Baum / „＋"-Menü / Ordner
   "layouts.add": "Neu …",
   "layouts.addFolder": "Ordner erstellen",

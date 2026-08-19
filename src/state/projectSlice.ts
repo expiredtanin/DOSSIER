@@ -25,6 +25,7 @@ import type {
 } from "../model/types";
 import { commitTransform } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
+import { uniqueId } from "../tools/types";
 import { centroid as roomCentroid } from "../geometry/roomArea";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
@@ -1417,6 +1418,18 @@ function resizeGeom(
       const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
       return { ...g, at: { x: ax + (g.at.x - ax) * sx, y: ay + (g.at.y - ay) * sy } };
     }
+    case "image": {
+      const box = bbox2([g.min, g.max]);
+      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
+      const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
+      const a = f(g.min);
+      const b = f(g.max);
+      return {
+        ...g,
+        min: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
+        max: { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
+      };
+    }
     default:
       return g;
   }
@@ -1432,7 +1445,7 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
   const g = d.geom;
   if (g.shape === "line") return [g.a, g.b];
   if (g.shape === "polyline") return [...g.pts];
-  if (g.shape === "rect") {
+  if (g.shape === "rect" || g.shape === "image") {
     return [
       g.min,
       { x: g.max.x, y: g.min.y },
@@ -1443,6 +1456,38 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
   // Text: EIN Griff am Ankerpunkt (zum Verschieben; siehe moveGrip).
   if (g.shape === "text") return [g.at];
   return [];
+}
+
+/**
+ * Fügt ein Bild-Zeichenelement (eingebettete Data-URL, z. B. Foto/Logo oder
+ * gerasterte PDF-Seite) achsparallel bei `[at .. at+size]` an — analog zu den
+ * Zeichenwerkzeugen, aber ohne Command (Datei-Auswahl ist async, s. App.tsx
+ * Bild-/PDF-Import). Direkt selektiert zurückgegeben, damit Griffe/Objekt-Info
+ * sofort zum Verschieben/Skalieren bereitstehen.
+ */
+export function addImageDrawing2d(
+  project: Project,
+  levelId: string,
+  categoryCode: string,
+  src: string,
+  at: Vec2,
+  widthM: number,
+  heightM: number,
+): { project: Project; id: string } {
+  const id = uniqueId("dr2d");
+  const d: Drawing2D = {
+    id,
+    type: "drawing2d",
+    levelId,
+    categoryCode,
+    geom: {
+      shape: "image",
+      min: at,
+      max: { x: at.x + widthM, y: at.y + heightM },
+      src,
+    },
+  };
+  return { project: { ...project, drawings2d: [...project.drawings2d, d] }, id };
 }
 
 /**
@@ -1469,7 +1514,7 @@ function moveGrip(
           const pts = g.pts.map((p, i) => (i === index ? pt : p));
           return { ...d, geom: { ...g, pts } };
         }
-        if (g.shape === "rect") {
+        if (g.shape === "rect" || g.shape === "image") {
           const corners = [
             g.min,
             { x: g.max.x, y: g.min.y },
@@ -1518,6 +1563,7 @@ function moveElementBy(
           case "polyline":
             return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
           case "rect":
+          case "image":
             return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
           case "circle":
           case "arc":
@@ -1573,7 +1619,7 @@ function moveEdge(
           const pts = g.pts.map((p, i) => (i === aIndex || i === bIndex ? mv(p) : p));
           return { ...d, geom: { ...g, pts } };
         }
-        if (g.shape === "rect") {
+        if (g.shape === "rect" || g.shape === "image") {
           // Ecken in derselben Reihenfolge wie drawingVertices, die zwei Kanten-
           // Ecken verschieben, dann bbox neu bilden (achsparallel halten).
           const corners = [

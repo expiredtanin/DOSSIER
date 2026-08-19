@@ -1,9 +1,9 @@
 // Compute-Grenze: der EINE Einstiegspunkt für rechenintensive Operationen.
-// Läuft die App unter Tauri, werden Ops an einen Rust-`#[tauri::command]`
-// geroutet; sonst greift die bestehende TS-Implementierung. In dieser PoC ist
-// nur `computeJoins` real an Rust angebunden — die übrigen Funktionen sind
-// dünne Pass-throughs auf ihre TS-Impls (Grenze etabliert, Migration
-// inkrementell).
+// War als Brücke zu einem Rust-`#[tauri::command]` gedacht (PoC), aber
+// ungenutzt: kein Aufrufer im Frontend, und die Rust-Seite (`compute_joins` +
+// das `geometry`-Crate) wurde entfernt (ungenutzter Totcode, s. PENDENZEN.md).
+// `computeJoins` läuft daher immer über den TS-Fallback; die übrigen
+// Funktionen waren schon vorher reine TS-Pass-throughs.
 
 import type { Project, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";

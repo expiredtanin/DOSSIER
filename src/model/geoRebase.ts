@@ -108,6 +108,8 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
           return { ...d, geom: { ...g, center: shift(g.center, dx, dy) } };
         case "text":
           return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
+        case "image":
+          return { ...d, geom: { ...g, min: shift(g.min, dx, dy), max: shift(g.max, dx, dy) } };
       }
     }),
     context: project.context?.map((o) => shiftContextObject(o, dx, dy)),

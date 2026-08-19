@@ -167,6 +167,81 @@ export function docToLines(doc: RichTextDoc, opts: SvgTextOptions): SvgLine[] {
   }));
 }
 
+/** Geschätzte Zeichenbreite als Vielfaches der Schriftgrösse (gleiche Heuristik
+ * wie der bisherige Wortumbruch für einheitlich formatierten Text, s.
+ * PlanView.tsx `case "drawingText"`) — kein echtes Font-Metrics-Messen, aber
+ * für die Platzierung von Zeilenumbrüchen ausreichend. */
+const CHAR_WIDTH_FACTOR = 0.55;
+
+/**
+ * Wie {@link docToLines}, bricht aber zusätzlich wortweise auf `wrapWidthUnits`
+ * um (in denselben Benutzereinheiten wie `SvgTextOptions.x`) — für Textfelder/
+ * -rahmen mit fester Breite (InDesign-artig). Ohne `wrapWidthUnits` identisch
+ * zu `docToLines` (eine Zeile je Absatz). Respektiert Run-Grenzen: ein Wort
+ * behält die Formatierung seines Runs, auch wenn die Zeile mehrere Runs mischt.
+ */
+export function wrapDocToLines(
+  doc: RichTextDoc,
+  opts: SvgTextOptions & { wrapWidthUnits?: number },
+): SvgLine[] {
+  if (!opts.wrapWidthUnits || opts.wrapWidthUnits <= 0) return docToLines(doc, opts);
+  const basePt = opts.basePt ?? 12;
+  const color = opts.color ?? "#000000";
+  const baseUnit = basePt * opts.unitPerPt;
+  const maxWidth = opts.wrapWidthUnits;
+
+  interface Token {
+    tspan: SvgTspan;
+    widthUnits: number;
+    isSpace: boolean;
+  }
+
+  const lines: SvgLine[] = [];
+  for (const p of doc.paragraphs) {
+    const lineHeight = p.lineHeight != null ? baseUnit * p.lineHeight : opts.lineHeight;
+    const align = p.align ?? "left";
+
+    const tokens: Token[] = [];
+    for (const run of p.runs) {
+      if (run.text.length === 0) continue;
+      const base = runToTspan(run, basePt, opts.unitPerPt, color);
+      for (const part of run.text.split(/(\s+)/).filter((s) => s.length > 0)) {
+        const isSpace = /^\s/.test(part);
+        tokens.push({
+          tspan: { ...base, text: part },
+          widthUnits: part.length * base.fontSize * CHAR_WIDTH_FACTOR,
+          isSpace,
+        });
+      }
+    }
+
+    if (tokens.length === 0) {
+      lines.push({ tspans: [], align, lineHeight });
+      continue;
+    }
+
+    let current: Token[] = [];
+    let currentWidth = 0;
+    const flush = () => {
+      while (current.length && current[current.length - 1].isSpace) current.pop();
+      lines.push({ tspans: current.map((t) => t.tspan), align, lineHeight });
+      current = [];
+      currentWidth = 0;
+    };
+    for (const tok of tokens) {
+      if (current.length === 0 && tok.isSpace) continue;
+      if (current.length > 0 && currentWidth + tok.widthUnits > maxWidth) {
+        flush();
+        if (tok.isSpace) continue;
+      }
+      current.push(tok);
+      currentWidth += tok.widthUnits;
+    }
+    flush();
+  }
+  return lines;
+}
+
 function runToTspan(run: TextRun, basePt: number, unitPerPt: number, color: string): SvgTspan {
   const m = run.marks;
   const script = m.super || m.sub;

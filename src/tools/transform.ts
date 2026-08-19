@@ -181,6 +181,20 @@ const mvGeom = (geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom => {
       return { ...geom, center: fn(geom.center) };
     case "text":
       return { ...geom, at: fn(geom.at) };
+    case "image": {
+      // Wie Text: nur die Position folgt der Transformation (Zentrum wandert
+      // dorthin, wo `fn` es abbildet); die Box bleibt achsparallel/unverzerrt —
+      // ein Bild kann nicht geschert/rotiert dargestellt werden (kein `angle`-Feld).
+      const oldCenter = { x: (geom.min.x + geom.max.x) / 2, y: (geom.min.y + geom.max.y) / 2 };
+      const newCenter = fn(oldCenter);
+      const dx = newCenter.x - oldCenter.x;
+      const dy = newCenter.y - oldCenter.y;
+      return {
+        ...geom,
+        min: { x: geom.min.x + dx, y: geom.min.y + dy },
+        max: { x: geom.max.x + dx, y: geom.max.y + dy },
+      };
+    }
   }
 };
 
@@ -213,6 +227,7 @@ function itemPreview(project: Project, item: AnyItem, fn: (p: Vec2) => Vec2): Dr
       return out;
     }
     case "rect":
+    case "image":
       return [{ kind: "poly", pts: [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }], closed: true }];
     default:
       return [];

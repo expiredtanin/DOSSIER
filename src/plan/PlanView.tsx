@@ -14,7 +14,7 @@ import {
   useState,
 } from "react";
 import type { HatchRender, Plan, Primitive } from "./generatePlan";
-import { docToLines, type SvgLine } from "../text/renderHtml";
+import { docToLines, wrapDocToLines, type SvgLine } from "../text/renderHtml";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { SnapResult, ToolDraft, ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
@@ -566,9 +566,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // vollen SVG-Pfad nutzen — dort liegt das Bild als eigene Ebene ZWISCHEN
   // Blatt-Hintergrund und Geometrie (sichtbar, ohne den GL-Renderer zu ändern).
   const hasBgImages = (plan.backgroundImages?.length ?? 0) > 0;
+  // Eingebettete Bild-Zeichenelemente (Drawing2D `{shape:"image"}`, Foto/Logo/
+  // PDF-Seite) kann das GPU-Backend ebenfalls nicht texturieren (kein Bild-
+  // Primitiv in render2d, s. toRenderScene.ts `RImage`-Kommentar) — dieselbe
+  // SVG-Fallback-Regel wie bei georeferenzierten Luftbildern.
+  const hasDrawingImages = plan.primitives.some((p) => p.kind === "drawingImage");
   // Engine WIRKLICH aktiv? Steuert das Umschalten SVG↔GPU: bei false rendert der
   // volle SVG-Pfad (Fallback), bei true übernimmt die GPU-Ebene + Text-Overlay.
-  const useGpuRenderer = wantGpu && glReady && !hasBgImages;
+  const useGpuRenderer = wantGpu && glReady && !hasBgImages && !hasDrawingImages;
 
   // Stabiler Papier-Massstab-Nenner N (1:N) als REFERENZ für die Print-Strich-
   // breiten. BEWUSST NICHT der live aus dem Zoom abgeleitete N (der sich beim
@@ -959,8 +964,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       }
     }
     if (bestId) return bestId;
-    // Kein Linien-Treffer: Text-Elemente prüfen (eigene Bounding-Box-Logik).
-    return pickDrawingText(clientX, clientY);
+    // Kein Linien-Treffer: Text- dann Bild-Elemente prüfen (eigene Bbox-Logik).
+    return pickDrawingText(clientX, clientY) ?? pickDrawingImage(clientX, clientY);
   };
 
   // Trifft der Klick ein Text-2D-Element (kind "drawingText")? Grosszügige Modell-
@@ -982,6 +987,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const minY = p.at.y - lines * p.heightM * 1.25 - pad;
       const maxY = p.at.y + p.heightM * 0.4 + pad;
       if (m.x >= minX && m.x <= maxX && m.y >= minY && m.y <= maxY) {
+        return p.drawingId;
+      }
+    }
+    return null;
+  };
+
+  // Trifft der Klick ein Bild-2D-Element (kind "drawingImage")? Reine
+  // Bounding-Box-Prüfung (achsparallel, keine Rotation). Liefert die drawingId
+  // oder null.
+  const pickDrawingImage = (clientX: number, clientY: number): string | null => {
+    const m = rawModelAt(clientX, clientY);
+    for (let i = plan.primitives.length - 1; i >= 0; i--) {
+      const p = plan.primitives[i];
+      if (p.kind !== "drawingImage" || !p.drawingId) continue;
+      if (m.x >= p.min.x && m.x <= p.max.x && m.y >= p.min.y && m.y <= p.max.y) {
         return p.drawingId;
       }
     }
@@ -3815,6 +3835,25 @@ function renderPrimitive(
         </text>
       );
     }
+    case "drawingImage": {
+      // Eingebettetes Rasterbild (Foto/Logo/gerasterte PDF-Seite), achsparallel.
+      // Screen-Y ist gespiegelt (toScreen) → oben-links = (min.x, max.y).
+      const topLeft = toScreen(p.max);
+      const w = (p.max.x - p.min.x) * PX_PER_M;
+      const h = (p.max.y - p.min.y) * PX_PER_M;
+      if (w <= 0 || h <= 0) return null;
+      return (
+        <image
+          href={p.src}
+          x={toScreen(p.min).x}
+          y={topLeft.y}
+          width={w}
+          height={h}
+          opacity={(p.greyed ? 0.45 : 1) * p.opacity}
+          preserveAspectRatio="none"
+        />
+      );
+    }
     case "drawingText": {
       // Modellverankerter Einzeltext (DXF-Import / Text-Werkzeug): Höhe in Metern →
       // viewBox-Einheiten (skaliert mit dem Zoom), Baseline am Ankerpunkt (links).
@@ -3822,6 +3861,76 @@ function renderPrimitive(
       const fontSize = p.heightM * PX_PER_M;
       // Modell-Winkel CCW; Screen-Y ist gespiegelt und SVG-rotate CW-positiv → -deg.
       const deg = -(p.angle * 180) / Math.PI;
+
+      // Reiches Textfeld (InDesign-artig, mehrere Absätze/gemischte Formatierung):
+      // hat Vorrang vor dem Alt-Pfad (einfacher String + einheitliche `marks`)
+      // weiter unten. Bricht bei gesetzter Spaltenbreite wortweise um (Run-Grenzen
+      // bleiben erhalten, s. `wrapDocToLines`).
+      if (p.doc) {
+        const unitPerPt = (0.0254 / 72) * PX_PER_M;
+        const basePt = (p.heightM / 0.0254) * 72;
+        const lineHeight = fontSize * 1.25;
+        const wrapWidthUnits = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth * PX_PER_M : undefined;
+        const docLines: SvgLine[] = wrapDocToLines(p.doc, {
+          x: 0,
+          y: 0,
+          lineHeight,
+          unitPerPt,
+          basePt,
+          color: p.color,
+          ...(wrapWidthUnits ? { wrapWidthUnits } : {}),
+        });
+        if (docLines.length === 0) return null;
+        const lineYs: number[] = [];
+        {
+          let y = c.y;
+          docLines.forEach((line, k) => {
+            if (k > 0) y += line.lineHeight;
+            lineYs.push(y);
+          });
+        }
+        return (
+          <text
+            opacity={p.greyed ? 0.45 : undefined}
+            transform={deg ? `rotate(${deg} ${c.x} ${c.y})` : undefined}
+            style={{ pointerEvents: "none", userSelect: "none" }}
+          >
+            {docLines.map((line, k) => {
+              const anchor =
+                line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
+              const x = !wrapWidthUnits
+                ? c.x
+                : line.align === "center"
+                ? c.x + wrapWidthUnits / 2
+                : line.align === "right"
+                ? c.x + wrapWidthUnits
+                : c.x;
+              return (
+                <tspan key={k} x={x} y={lineYs[k]} textAnchor={anchor}>
+                  {line.tspans.length === 0
+                    ? "​"
+                    : line.tspans.map((ts, j) => (
+                        <tspan
+                          key={j}
+                          fontSize={ts.fontSize}
+                          fontWeight={ts.fontWeight}
+                          fontStyle={ts.fontStyle}
+                          fontFamily={ts.fontFamily ?? "var(--font-ui, sans-serif)"}
+                          fill={ts.fill}
+                          textDecoration={ts.textDecoration}
+                        >
+                          {ts.text}
+                        </tspan>
+                      ))}
+                </tspan>
+              );
+            })}
+          </text>
+        );
+      }
+
+      // Alt-Pfad: einfacher String + einheitliche `marks` (Text-Werkzeug/DXF-Import
+      // ohne Rich-Doc) — unverändert.
       // Spaltentext: bei gesetzter `wrapWidth` den Text wortweise auf die Breite
       // umbrechen (Zeichenbreite ≈ 0.55·fontSize geschätzt), sonst eine Zeile.
       const lineH = fontSize * 1.25;

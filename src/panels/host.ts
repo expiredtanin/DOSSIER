@@ -13,7 +13,7 @@
 
 import { useContext } from "react";
 import { PanelHostContext } from "./types";
-import type { DisplayMode } from "./types";
+import type { DisplayMode, PanelHost } from "./types";
 import type {
   AttributeSource,
   CeilingType,
@@ -197,6 +197,11 @@ export interface PanelHostValue {
    * `null` entfernt die Füllfarbe (Fläche wieder transparent).
    */
   onSetSelectionFillColor: (color: string | null) => void;
+  /**
+   * Setzt die Deckkraft (0..1) — wirkt NUR auf Bild-Elemente (Drawing2D
+   * `{shape:"image"}` oder Layout-Annotation `kind:"image"`), sonst No-op.
+   */
+  onSetSelectionOpacity: (opacity: number) => void;
   /**
    * Setzt/entfernt den Vordergrund-Override (Muster-/Schraffurfarbe, „eigener
    * Wert") der Selektion — Wand, Decke oder geschlossene Drawing2D. `null` =
@@ -652,4 +657,29 @@ export function usePanelHost(): PanelHostValue {
     );
   }
   return host as unknown as PanelHostValue;
+}
+
+/**
+ * Baut den fertigen {@link PanelHost}-Wert aus dem memoisierten `base` +
+ * live injizierten Feldern (Messwerte, aktiver Darstellungsmodus je Tab).
+ */
+export function hostWithMode(
+  base: Omit<PanelHostValue, "displayMode">,
+  activeTab: string | null,
+  modeFor: (id: string | null) => DisplayMode,
+  setModeFor: (id: string | null, mode: DisplayMode) => void,
+  measurement: MeasurementReadout | null = null,
+): PanelHost {
+  const value: PanelHostValue = {
+    ...base,
+    // Live-Messwerte NICHT aus dem memoisierten `base` (dort wären sie eingefroren,
+    // da `draft` bewusst kein Memo-Dep ist — sonst würde der ganze Host bei jeder
+    // Mausbewegung neu gebaut). Hier bei jedem Render frisch injiziert.
+    measurement,
+    displayMode: {
+      mode: modeFor(activeTab),
+      setMode: (mode) => setModeFor(activeTab, mode),
+    },
+  };
+  return value as unknown as PanelHost;
 }

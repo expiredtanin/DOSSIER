@@ -580,6 +580,22 @@ const textboxTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Bild einfügen: KEIN Klick-Platzieren wie die übrigen Zeichen-Werkzeuge —
+// die Datei-Auswahl ist async (Dateidialog), daher fängt `onSelectTool`
+// (App.tsx) die ID VOR der normalen Werkzeug-Aktivierung ab und öffnet direkt
+// den Datei-Dialog (s. dortigen Kommentar). Dieses Objekt existiert nur, damit
+// `TOOLS`/`ToolsPanel` eine vollständige Abbildung + Label/Hint haben.
+const imageTool: Tool = {
+  id: "image",
+  labelKey: "tool.image",
+  hintKey: () => "tool.image.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 const TOOLS: Record<ToolId, Tool> = {
@@ -597,6 +613,7 @@ const TOOLS: Record<ToolId, Tool> = {
   arc: arcTool,
   text: textTool,
   textbox: textboxTool,
+  image: imageTool,
 };
 
 /** Liefert das Werkzeug zur ID. */
@@ -620,4 +637,5 @@ export const TOOL_ORDER: ToolId[] = [
   "arc",
   "text",
   "textbox",
+  "image",
 ];

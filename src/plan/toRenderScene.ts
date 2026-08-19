@@ -21,7 +21,8 @@
 
 import type { Plan, Primitive } from "./generatePlan";
 import { applyDashRuns, buildHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
-import { docToLines } from "../text/renderHtml";
+import { docToLines, wrapDocToLines } from "../text/renderHtml";
+import { docFromText } from "../text/richText";
 
 type LinePrim = Extract<Primitive, { kind: "line" }>;
 
@@ -100,6 +101,20 @@ export interface RBounds {
   maxX: number;
   maxY: number;
 }
+/**
+ * EIN eingebettetes Rasterbild (aus Drawing2D `{shape:"image"}`), achsparallel.
+ * Wie `bounds` additiv/rückwirkungsfrei fürs GPU-Backend (s. dort) — der native
+ * Renderer kennt keine Textur/kein Bild-Primitiv (GPU-Pfad wird bei Bildern im
+ * Plan ohnehin deaktiviert, s. PlanView.tsx `useGpuRenderer`/`hasBgImages`);
+ * `sceneToPrintSvg.ts` liest dieses Feld für den PDF-Export.
+ */
+export interface RImage {
+  min: RPoint;
+  max: RPoint;
+  src: string;
+  opacity: number;
+}
+
 export interface RScene {
   fills: RFill[];
   outlines: ROutline[];
@@ -107,6 +122,7 @@ export interface RScene {
   arcs: RArc[];
   lines: RLine[];
   texts: RText[];
+  images: RImage[];
   /**
    * Plan-Bounds (Modell-Meter) — additiv aus `Plan.bounds` übernommen, damit
    * Verbraucher (z. B. der Vektor-PDF-Serializer `sceneToPrintSvg.ts`) den
@@ -323,6 +339,7 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
   const arcs: RArc[] = [];
   const lines: RLine[] = [];
   const texts: RText[] = [];
+  const images: RImage[] = [];
 
   // Sichtbare Umriss-Läufe werden erst GESAMMELT (nach Stil gruppiert) und am
   // Ende über Polygon-Grenzen hinweg zusammengenäht — erst dadurch bekommen
@@ -562,6 +579,59 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
           });
         });
       }
+    } else if (p.kind === "drawingText") {
+      // Modellverankerter Einzeltext (Text-Werkzeug/DXF-Import) — wie "text"
+      // oben zeilenweise geflacht, aber TOP-DOWN ab `at` (kein vertikal
+      // zentrierter Block) und `heightM` (Modell-Meter) als Basisgrösse statt
+      // `basePt` (Papier-Punkt) — der Text bleibt so, wie bisher, massstabsfrei
+      // an der Modellgeometrie verankert (kein Papier-Punkt-Bezug nötig).
+      flushRun();
+      const doc = p.doc ?? docFromText(p.text, p.marks ?? {});
+      const defCol = withOpacity(toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1], undefined, p.greyed);
+      const unitPerPt = PT_TO_MM * mmToM; // pt (Run-Override) -> Papier-mm -> Modell-Meter.
+      const basePt = unitPerPt > 0 ? p.heightM / unitPerPt : 0;
+      const lineHeight = p.heightM * 1.25;
+      const wrapWidthUnits = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth : undefined;
+      const docLines = wrapDocToLines(doc, {
+        x: 0,
+        y: 0,
+        lineHeight,
+        unitPerPt,
+        basePt,
+        color: p.color,
+        ...(wrapWidthUnits ? { wrapWidthUnits } : {}),
+      });
+      let dy = 0;
+      docLines.forEach((line, k) => {
+        if (k > 0) dy += line.lineHeight;
+        const content = line.tspans.map((t) => t.text).join("");
+        if (!content.trim()) return;
+        const sizeM = line.tspans.length
+          ? Math.max(...line.tspans.map((t) => t.fontSize))
+          : p.heightM;
+        texts.push({
+          pos: [p.at.x, p.at.y - dy],
+          content,
+          sizeMm: unitPerPt > 0 ? sizeM / mmToM : sizeM,
+          color: withOpacity(
+            toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol,
+            undefined,
+            p.greyed,
+          ),
+          align: line.align,
+        });
+      });
+    } else if (p.kind === "drawingImage") {
+      // Eingebettetes Rasterbild — keine Rust-Textur (s. `RImage`); wird vom
+      // GPU-Backend ignoriert (`useGpuRenderer` schaltet bei Bildern im Plan
+      // ohnehin auf den SVG-Pfad um), `sceneToPrintSvg.ts` liest es für den PDF-Export.
+      flushRun();
+      images.push({
+        min: [p.min.x, p.min.y],
+        max: [p.max.x, p.max.y],
+        src: p.src,
+        opacity: p.opacity,
+      });
     }
   }
   flushRun();
@@ -579,5 +649,5 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
     }
   }
 
-  return { fills, outlines, polylines, arcs, lines, texts, bounds: { ...plan.bounds } };
+  return { fills, outlines, polylines, arcs, lines, texts, images, bounds: { ...plan.bounds } };
 }

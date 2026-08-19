@@ -321,9 +321,10 @@ export function handleAnchors(r: RectMm): { handle: Handle; xMm: number; yMm: nu
   ];
 }
 
-// ── Annotationen (Linie/Rechteck/Text) ──────────────────────────────────────
-// Annotationen tragen KEINE Resize-Griffe (nur verschieben + löschen) — daher
-// reicht ein einfacher Treffer-Test (kein Handle-Ergebnis wie bei Viewports).
+// ── Annotationen (Linie/Rechteck/Text/Bild) ─────────────────────────────────
+// Rechteck/Bild teilen sich die Viewport-Griff-Mathe (dieselbe RectMm-Form,
+// 8 Ecken/Kanten-Griffe). Linie bekommt zwei Endpunkt-Griffe (wie eine Linie
+// im Grundriss). Text bleibt vorerst griff-los (Rahmen kommt beim Aufziehen).
 
 /** Kürzester Abstand (mm) eines Punkts zu einem Liniensegment. */
 export function distanceToSegment(
@@ -351,18 +352,22 @@ export function distanceToSegment(
  * Baseline, die Box liegt daher oberhalb davon.
  */
 export function annotationBoundsMm(ann: LayoutAnnotation): RectMm {
-  if (ann.kind === "rect") {
+  if (ann.kind === "rect" || ann.kind === "image") {
     return { xMm: ann.xMm, yMm: ann.yMm, widthMm: ann.widthMm, heightMm: ann.heightMm };
   }
   if (ann.kind === "line") {
     return normalizeRect(ann.x1Mm, ann.y1Mm, ann.x2Mm, ann.y2Mm);
   }
-  const widthMm = Math.max(ann.heightMm, ann.text.length * ann.heightMm * 0.6);
+  // Text: grobe Box aus Zeichenzahl geschätzt (kein echtes Font-Measuring im
+  // SVG) — bei gesetzter Rahmenbreite (`widthMm`, Rich-Text-Frame) gilt diese
+  // statt der Schätzung; die Höhe bleibt eine grobe Zeilenschätzung.
+  const estWidthMm = Math.max(ann.heightMm, ann.text.length * ann.heightMm * 0.6);
+  const lines = ann.doc ? Math.max(1, ann.doc.paragraphs.length) : 1;
   return {
     xMm: ann.xMm,
     yMm: ann.yMm - ann.heightMm,
-    widthMm,
-    heightMm: ann.heightMm * 1.25,
+    widthMm: ann.widthMm ?? estWidthMm,
+    heightMm: ann.heightMm * 1.25 * lines,
   };
 }
 
@@ -380,7 +385,7 @@ export function annotationHit(
   if (ann.kind === "line") {
     return distanceToSegment(xMm, yMm, ann.x1Mm, ann.y1Mm, ann.x2Mm, ann.y2Mm) <= tolMm;
   }
-  if (ann.kind === "rect") {
+  if (ann.kind === "rect" || ann.kind === "image") {
     const r: RectMm = { xMm: ann.xMm, yMm: ann.yMm, widthMm: ann.widthMm, heightMm: ann.heightMm };
     return handleAt(r, xMm, yMm, tolMm) !== null;
   }
@@ -408,6 +413,112 @@ export function pickAnnotation(
     if (annotationHit(a, xMm, yMm, tolMm)) return a.id;
   }
   return null;
+}
+
+// ── Resize-Griffe für Annotationen (wie im Grundriss: Endpunkte/Ecken) ──────
+
+/** Griff einer Linien-Annotation: die beiden Endpunkte oder der Körper. */
+export type LineHandle = "p1" | "p2" | "body";
+
+/** Griff-Ergebnis für EINE Annotation — je Art ein anderer Griff-Typ. */
+export type AnnotHandleHit =
+  | { kind: "rect" | "image"; handle: Handle }
+  | { kind: "line"; handle: LineHandle };
+
+/**
+ * Griff (oder Körper) einer Linien-Annotation an einem mm-Punkt: die
+ * Endpunkte haben Vorrang vor dem Segment (wie ein Linien-Griff im Grundriss).
+ */
+export function lineHandleAt(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  xMm: number,
+  yMm: number,
+  tolMm: number,
+): LineHandle | null {
+  if (Math.hypot(xMm - x1, yMm - y1) <= tolMm) return "p1";
+  if (Math.hypot(xMm - x2, yMm - y2) <= tolMm) return "p2";
+  if (distanceToSegment(xMm, yMm, x1, y1, x2, y2) <= tolMm) return "body";
+  return null;
+}
+
+/**
+ * Griff (oder Körper) EINER Annotation an einem mm-Punkt — Linie liefert einen
+ * Endpunkt-Griff, Rechteck/Bild die 8 Viewport-artigen Ecken-/Kanten-Griffe
+ * (wiederverwendet {@link handleAt}). Text hat (noch) keine Griffe → `null`.
+ */
+export function annotationHandleAt(
+  ann: LayoutAnnotation,
+  xMm: number,
+  yMm: number,
+  tolMm: number,
+): AnnotHandleHit | null {
+  if (ann.kind === "line") {
+    const h = lineHandleAt(ann.x1Mm, ann.y1Mm, ann.x2Mm, ann.y2Mm, xMm, yMm, tolMm);
+    return h ? { kind: "line", handle: h } : null;
+  }
+  if (ann.kind === "rect" || ann.kind === "image") {
+    const r: RectMm = { xMm: ann.xMm, yMm: ann.yMm, widthMm: ann.widthMm, heightMm: ann.heightMm };
+    const h = handleAt(r, xMm, yMm, tolMm);
+    return h ? { kind: ann.kind, handle: h } : null;
+  }
+  return null;
+}
+
+/**
+ * Topmost Griff-Treffer über eine Annotations-Liste (wie {@link pickAnnotation},
+ * aber liefert zusätzlich den konkreten Griff für Resize statt nur Verschieben).
+ */
+export function pickAnnotationHandle(
+  annotations: LayoutAnnotation[],
+  xMm: number,
+  yMm: number,
+  tolMm: number,
+): { id: string; hit: AnnotHandleHit } | null {
+  for (let i = annotations.length - 1; i >= 0; i--) {
+    const a = annotations[i];
+    const hit = annotationHandleAt(a, xMm, yMm, tolMm);
+    if (hit) return { id: a.id, hit };
+    if (annotationHit(a, xMm, yMm, tolMm)) {
+      // Text (kein Griff-System) oder ein Nicht-Griff-Treffer im Inneren.
+      return { id: a.id, hit: { kind: "line", handle: "body" } };
+    }
+  }
+  return null;
+}
+
+/** Endpunkte einer Linien-Annotation als mm-Punkte (für die Griff-Darstellung). */
+export function lineHandleAnchors(ann: Extract<LayoutAnnotation, { kind: "line" }>): Mm[] {
+  return [
+    { xMm: ann.x1Mm, yMm: ann.y1Mm },
+    { xMm: ann.x2Mm, yMm: ann.y2Mm },
+  ];
+}
+
+/**
+ * Wendet einen Linien-Griff-Drag an: `p1`/`p2` verschiebt genau diesen
+ * Endpunkt, `body` das ganze Segment (Delta).
+ */
+export function applyLineHandleDrag(
+  start: Extract<LayoutAnnotation, { kind: "line" }>,
+  handle: LineHandle,
+  dxMm: number,
+  dyMm: number,
+): { x1Mm: number; y1Mm: number; x2Mm: number; y2Mm: number } {
+  if (handle === "p1") {
+    return { x1Mm: start.x1Mm + dxMm, y1Mm: start.y1Mm + dyMm, x2Mm: start.x2Mm, y2Mm: start.y2Mm };
+  }
+  if (handle === "p2") {
+    return { x1Mm: start.x1Mm, y1Mm: start.y1Mm, x2Mm: start.x2Mm + dxMm, y2Mm: start.y2Mm + dyMm };
+  }
+  return {
+    x1Mm: start.x1Mm + dxMm,
+    y1Mm: start.y1Mm + dyMm,
+    x2Mm: start.x2Mm + dxMm,
+    y2Mm: start.y2Mm + dyMm,
+  };
 }
 
 /** Verschiebt eine Annotation um ein mm-Delta — alle ihre Punkte wandern mit. */

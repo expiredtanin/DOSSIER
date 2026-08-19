@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { LayoutAnnotation, LayoutViewport } from "../model/types";
 import {
   annotationBoundsMm,
+  annotationHandleAt,
   applyHandleDrag,
+  applyLineHandleDrag,
   clampRectToSheet,
   distanceToSegment,
   fitTransform,
   handleAt,
+  lineHandleAt,
   mmToScreen,
   normalizeRect,
   panBy,
   pickAnnotation,
+  pickAnnotationHandle,
   pickViewport,
   screenToMm,
   translateAnnotation,
@@ -226,6 +230,15 @@ const text = (id: string, x: number, y: number, t: string, h = 3.5): LayoutAnnot
   text: t,
   heightMm: h,
 });
+const image = (id: string, x: number, y: number, w: number, h: number): LayoutAnnotation => ({
+  id,
+  kind: "image",
+  xMm: x,
+  yMm: y,
+  widthMm: w,
+  heightMm: h,
+  src: "data:image/png;base64,",
+});
 
 describe("distanceToSegment", () => {
   it("returns perpendicular distance for a point beside the segment", () => {
@@ -264,6 +277,14 @@ describe("annotationBoundsMm", () => {
     expect(b.heightMm).toBeCloseTo(5); // heightMm * 1.25
     expect(b.widthMm).toBeGreaterThan(0);
   });
+  it("image: its own rectangle, like rect", () => {
+    expect(annotationBoundsMm(image("i", 5, 5, 40, 30))).toEqual({
+      xMm: 5,
+      yMm: 5,
+      widthMm: 40,
+      heightMm: 30,
+    });
+  });
 });
 
 describe("pickAnnotation", () => {
@@ -286,6 +307,68 @@ describe("pickAnnotation", () => {
     const overlapping = [rect("a", 0, 0, 50, 50), rect("b", 10, 10, 50, 50)];
     expect(pickAnnotation(overlapping, 30, 30, 1)).toBe("b");
   });
+  it("hits an image on its border and its interior, like rect", () => {
+    const img = image("i", 20, 20, 10, 10);
+    expect(pickAnnotation([img], 20, 20, 1)).toBe("i"); // corner
+    expect(pickAnnotation([img], 25, 25, 1)).toBe("i"); // interior
+    expect(pickAnnotation([img], 100, 100, 1)).toBe(null);
+  });
+});
+
+describe("lineHandleAt", () => {
+  it("hits the first endpoint within tolerance", () => {
+    expect(lineHandleAt(0, 0, 10, 0, 0.5, 0.5, 2)).toBe("p1");
+  });
+  it("hits the second endpoint within tolerance", () => {
+    expect(lineHandleAt(0, 0, 10, 0, 9.5, 0.5, 2)).toBe("p2");
+  });
+  it("hits the body between the endpoints", () => {
+    expect(lineHandleAt(0, 0, 10, 0, 5, 1, 2)).toBe("body");
+  });
+  it("misses far away", () => {
+    expect(lineHandleAt(0, 0, 10, 0, 5, 20, 2)).toBe(null);
+  });
+});
+
+describe("annotationHandleAt / pickAnnotationHandle", () => {
+  it("line: endpoint takes priority over body", () => {
+    const l = line("l", 0, 0, 10, 0);
+    expect(annotationHandleAt(l, 0, 0.5, 2)).toEqual({ kind: "line", handle: "p1" });
+    expect(annotationHandleAt(l, 5, 0.5, 2)).toEqual({ kind: "line", handle: "body" });
+  });
+  it("rect: corner/edge/body like a viewport", () => {
+    const r = rect("r", 20, 20, 10, 10);
+    expect(annotationHandleAt(r, 20, 20, 1)).toEqual({ kind: "rect", handle: "nw" });
+    expect(annotationHandleAt(r, 25, 25, 1)).toEqual({ kind: "rect", handle: "body" });
+  });
+  it("image: same handle set as rect", () => {
+    const img = image("i", 20, 20, 10, 10);
+    expect(annotationHandleAt(img, 30, 30, 1)).toEqual({ kind: "image", handle: "se" });
+  });
+  it("text: no handle system, plain bbox hit still reported as pickAnnotationHandle body", () => {
+    const tx = text("t", 10, 20, "Hallo", 4);
+    expect(annotationHandleAt(tx, 12, 18, 1)).toBe(null);
+    expect(pickAnnotationHandle([tx], 12, 18, 1)).toEqual({
+      id: "t",
+      hit: { kind: "line", handle: "body" },
+    });
+  });
+  it("pickAnnotationHandle returns null outside every annotation", () => {
+    expect(pickAnnotationHandle([line("l", 0, 0, 10, 0)], 500, 500, 1)).toBe(null);
+  });
+});
+
+describe("applyLineHandleDrag", () => {
+  const l = line("l", 0, 0, 10, 0) as Extract<LayoutAnnotation, { kind: "line" }>;
+  it("p1 moves only the first endpoint", () => {
+    expect(applyLineHandleDrag(l, "p1", 2, 3)).toEqual({ x1Mm: 2, y1Mm: 3, x2Mm: 10, y2Mm: 0 });
+  });
+  it("p2 moves only the second endpoint", () => {
+    expect(applyLineHandleDrag(l, "p2", 2, 3)).toEqual({ x1Mm: 0, y1Mm: 0, x2Mm: 12, y2Mm: 3 });
+  });
+  it("body moves both endpoints", () => {
+    expect(applyLineHandleDrag(l, "body", 2, 3)).toEqual({ x1Mm: 2, y1Mm: 3, x2Mm: 12, y2Mm: 3 });
+  });
 });
 
 describe("translateAnnotation", () => {
@@ -300,5 +383,9 @@ describe("translateAnnotation", () => {
   it("moves the anchor point of a text annotation", () => {
     const moved = translateAnnotation(text("t", 10, 10, "Hi"), 1, 2);
     expect(moved).toMatchObject({ xMm: 11, yMm: 12, text: "Hi" });
+  });
+  it("moves the origin of an image, like rect", () => {
+    const moved = translateAnnotation(image("i", 10, 10, 20, 20), 3, 4);
+    expect(moved).toMatchObject({ xMm: 13, yMm: 14, widthMm: 20, heightMm: 20 });
   });
 });

@@ -1,15 +1,15 @@
 // Layout-Blatt als erstklassige Ansicht im HAUPT-Viewport (Phase 2b) — das Blatt
-// liegt auf einem dunklen „Tisch", ist pan-/zoombar (Zoom-to-Cursor) und die
-// platzierten Viewports lassen sich mit der Maus platzieren/verschieben/skalieren/
-// löschen (wie ArchiCAD/Vectorworks). Der Render-Kern (echter Plan je Viewport,
-// Master-Titelblock) lebt hier zentral (ViewportPlan, TitleBlockSvg unten) und
-// ersetzt das frühere schwebende Layout-Fenster (Phase 2a).
+// liegt auf einem papierartigen „Tisch", ist pan-/zoombar (Zoom-to-Cursor) und
+// die platzierten Viewports lassen sich mit der Maus platzieren/verschieben/
+// skalieren/löschen (wie ArchiCAD/Vectorworks). Der Render-Kern (echter Plan je
+// Viewport, Master-Titelblock) lebt hier zentral (ViewportPlan, TitleBlockSvg
+// unten) und ersetzt das frühere schwebende Layout-Fenster (Phase 2a).
 //
 // Geometrie/Transform/Trefferlogik liegen rein + testbar in layoutSheetMath.ts.
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import type {
   Layout,
   LayoutAnnotation,
@@ -32,23 +32,33 @@ import {
 import {
   annotationBoundsMm,
   applyHandleDrag,
+  applyLineHandleDrag,
   clampRectToSheet,
   fitTransform,
   handleAnchors,
   handleCursor,
+  lineHandleAnchors,
+  mmToScreen,
   normalizeRect,
   panBy,
-  pickAnnotation,
+  pickAnnotationHandle,
   pickViewport,
   screenToMm,
   translateAnnotation,
   vpRect,
   zoomAtCursor,
+  type AnnotHandleHit,
   type Handle,
+  type LineHandle,
   type RectMm,
   type SheetTransform,
 } from "./layoutSheetMath";
-import { PromptDialog } from "./PromptDialog";
+import { RichTextEditor } from "../text/RichTextEditor";
+import { docFromText } from "../text/richText";
+import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
+import { readImageFile, defaultImageSizeMm } from "../io/imageAsset";
+import { rasterizePdfPages } from "../io/pdfImport";
+import type { ToolId } from "../tools/types";
 import { t } from "../i18n";
 
 // ── Geteilter Render-Kern (auch vom schwebenden LayoutEditor genutzt) ─────────
@@ -179,8 +189,12 @@ export interface LayoutSheetHandlers {
     snapshotId: string,
     init: Partial<Omit<LayoutViewport, "id" | "snapshotId">>,
   ) => void;
-  /** Fügt eine neue Annotation (Linie/Rechteck/Text) mit gegebener Geometrie an. */
-  onAddAnnotation: (kind: LayoutAnnotation["kind"], init: LayoutAnnotationPatch) => void;
+  /**
+   * Fügt eine neue Annotation (Linie/Rechteck/Text/Bild) mit gegebener
+   * Geometrie an — liefert die neue Id zurück (z. B. um nach dem Aufziehen
+   * eines Text-Rahmens sofort inline hineinzuschreiben, s. `inlineEdit`).
+   */
+  onAddAnnotation: (kind: LayoutAnnotation["kind"], init: LayoutAnnotationPatch) => string;
   /** Ändert Felder einer Annotation (Position/Farbe/Strichstärke/Text). */
   onPatchAnnotation: (annotationId: string, patch: LayoutAnnotationPatch) => void;
   /** Entfernt eine Annotation per Id. */
@@ -197,19 +211,54 @@ const MIN_PLACE_MM = 6;
 const MIN_ANNOT_MM = 3;
 /** Default-Zeilenhöhe eines neuen Text-Markups (mm). */
 const DEFAULT_ANNOT_TEXT_MM = 3.5;
+/**
+ * CSS-Pixel pro Millimeter bei „echten" 100 % — der CSS-Referenzpixel ist per
+ * Spezifikation auf 1/96 Zoll fixiert (96 px = 25.4 mm), UNABHÄNGIG von der
+ * physischen Bildschirmauflösung (`devicePixelRatio` gleicht das pro Gerät
+ * wieder aus). `SheetTransform.scale` ist „Pixel pro Millimeter" — bei diesem
+ * Wert misst ein A4-Blatt (210 mm) auf dem Bildschirm also wirklich 21 cm
+ * (Nutzer-Wunsch), nicht nur „passt ins Fenster" wie bei „Einpassen".
+ */
+const PX_PER_MM_AT_100 = 96 / 25.4;
 
 /** Zeichenwerkzeug für die Annotations-Schicht (zusätzlich zum Viewport-„placing"). */
-type AnnotTool = "select" | "line" | "rect" | "text";
+type AnnotTool = "select" | "line" | "rect" | "text" | "image";
+
+/**
+ * Bildet das GLOBALE Werkzeug (linkes Werkzeugpanel, `ToolId`) auf ein
+ * `AnnotTool` ab — das Blatt hat keine eigene Werkzeugleiste mehr (Nutzer-
+ * Feedback: „ein Layout soll daherkommen wie eine normale Zeichnung, nur dass
+ * ein Blatt drin liegt" — dieselben Zeichenwerkzeuge links wie im Grundriss,
+ * nichts Eigenes nur fürs Layout). `textbox` zeichnet hier wie `text` (kein
+ * eigener Spaltenbreite-Ablauf im Blatt); alle übrigen Werkzeuge (Wand, Fenster,
+ * Kreis, …) ergeben auf dem Blatt keinen Sinn → „select".
+ */
+function annotToolFromGlobal(tool: ToolId): AnnotTool {
+  if (tool === "line" || tool === "rect" || tool === "image") return tool;
+  if (tool === "text" || tool === "textbox") return "text";
+  return "select";
+}
 
 type Drag =
   | { mode: "pan"; lastX: number; lastY: number }
   | { mode: "move"; id: string; start: RectMm; grabX: number; grabY: number }
   | { mode: "resize"; id: string; handle: Handle; start: RectMm; grabX: number; grabY: number }
   | { mode: "place"; x0: number; y0: number }
-  | { mode: "annot-line"; x0: number; y0: number }
-  | { mode: "annot-rect"; x0: number; y0: number }
   | { mode: "annot-move"; id: string; start: LayoutAnnotation; grabX: number; grabY: number }
+  | {
+      mode: "annot-resize";
+      id: string;
+      hit: AnnotHandleHit;
+      start: LayoutAnnotation;
+      grabX: number;
+      grabY: number;
+    }
   | null;
+
+/** Cursor für einen Linien-Endpunkt-Griff (kein direktes `Handle`-Äquivalent). */
+function lineHandleCursor(handle: LineHandle): string {
+  return handle === "body" ? "move" : "crosshair";
+}
 
 /** Annotation abzüglich `id`/`kind` als Patch — für den Commit nach Move/Draw. */
 function annotationPatch(a: LayoutAnnotation): LayoutAnnotationPatch {
@@ -221,11 +270,30 @@ export function LayoutSheetView({
   project,
   layout,
   handlers,
+  activeTool,
+  onToolChange,
+  selectedAnnotId,
+  onSelectAnnot,
 }: {
   project: Project;
   layout: Layout;
   handlers: LayoutSheetHandlers;
+  /** Globales Werkzeug (linkes Werkzeugpanel) — s. `annotToolFromGlobal`. */
+  activeTool: ToolId;
+  /** Setzt das globale Werkzeug (z. B. zurück auf „select" nach einer Platzierung). */
+  onToolChange: (id: ToolId) => void;
+  /**
+   * Gewählte Annotation — von App.tsx gehoben (statt lokalem State), damit die
+   * echte Attribute-Palette (rechtes Panel) dieselbe Auswahl sieht wie ein
+   * Drawing2D im Grundriss (Nutzer-Feedback: „Attribute genau wie bei
+   * normalen Linien beim Zeichnen").
+   */
+  selectedAnnotId: string | null;
+  onSelectAnnot: (id: string | null) => void;
 }) {
+  // Alias, damit die bestehenden `setSelectedAnnotId(...)`-Aufrufe unten
+  // unverändert bleiben (jetzt ein gehobener Prop-Setter statt lokalem State).
+  const setSelectedAnnotId = onSelectAnnot;
   const stageRef = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState({ w: 800, h: 600 });
   const [transform, setTransform] = useState<SheetTransform | null>(null);
@@ -244,15 +312,39 @@ export function LayoutSheetView({
   // ── Annotationen (Linie/Rechteck/Text) — eigenständige Zusatzschicht ────────
   // Werkzeug „select" = normale Auswahl/Verschieben von Viewports+Annotationen;
   // line/rect/text armieren das jeweilige Zeichnen (analog `placing` für Viewports).
-  const [annotTool, setAnnotTool] = useState<AnnotTool>("select");
-  const [selectedAnnotId, setSelectedAnnotId] = useState<string | null>(null);
+  // KEIN eigener Werkzeug-Zustand mehr — armiert wird über das globale Werkzeug
+  // (linkes Panel), s. `annotToolFromGlobal`.
+  const annotTool = annotToolFromGlobal(activeTool);
   // Ghost-Geometrie: beim Aufziehen einer NEUEN Linie/eines Rechtecks (id="draft")
   // ODER beim Verschieben einer bestehenden Annotation (id = deren echte Id).
   const [annotPreview, setAnnotPreview] = useState<LayoutAnnotation | null>(null);
-  // Textwerkzeug: nach dem Klick wartet die Position auf den PromptDialog-Text.
-  const [textPendingAt, setTextPendingAt] = useState<{ xMm: number; yMm: number } | null>(null);
-  // HUD „Text ändern" — öffnet den PromptDialog mit dem aktuellen Inhalt.
-  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  // Textwerkzeug: Rahmen aufziehen (Ghost, wie ein Rechteck) — direkt danach
+  // öffnet `inlineEdit` den Editor IM Rahmen (kein eigenes Fenster).
+  const [textFrameDraft, setTextFrameDraft] = useState<RectMm | null>(null);
+  // Erster Klick von Linie/Rechteck/Text: KEIN Ziehen nötig (Nutzer-Feedback —
+  // „alle 2D-Werkzeuge sollen sich gleich verhalten wie im Grundriss"), also
+  // Klick-Bewegen-Klick wie die Plan-Zeichenwerkzeuge (tools.ts `lineTool`/
+  // `rectTool`): erster Klick setzt diesen Punkt, die Maus bewegt den Ghost
+  // (`onPointerMove` läuft auch OHNE gehaltene Taste), der zweite Klick
+  // schliesst ab. `null` = kein Werkzeug wartet auf den zweiten Klick.
+  const [pendingPoint, setPendingPoint] = useState<
+    { tool: "line" | "rect" | "text"; xMm: number; yMm: number } | null
+  >(null);
+  // Wechselt der Nutzer das Werkzeug, während ein erster Klick offen ist (z. B.
+  // Escape/anderes Werkzeug im linken Panel), verwirft das den offenen Entwurf.
+  useEffect(() => {
+    setPendingPoint(null);
+    setAnnotPreview((p) => (p?.id === "draft" ? null : p));
+    setTextFrameDraft(null);
+  }, [annotTool]);
+  // Aktuell inline bearbeitete Text-Annotation (neu erstellt ODER per HUD „✎"
+  // geöffnet) — `minHeightMm` ist die beim Aufziehen gewählte Rahmenhöhe (rein
+  // fürs Editor-Startmass, nicht Teil des Modells — Text wächst mit dem Inhalt).
+  const [inlineEdit, setInlineEdit] = useState<{ id: string; minHeightMm: number } | null>(null);
+  // Bild-Werkzeug: nach dem Klick wartet die Position auf die Datei-Auswahl
+  // (async, s. imageInputRef weiter unten).
+  const [imagePendingAt, setImagePendingAt] = useState<{ xMm: number; yMm: number } | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const master = findMaster(project, layout);
   // Effektive Grösse respektiert freie Grösse (custom Width/Height) — bindet
@@ -297,6 +389,13 @@ export function LayoutSheetView({
   const fit = () => setTransform(fitTransform(sheet.w, sheet.h, canvas.w, canvas.h));
   const zoomStep = (factor: number) =>
     setTransform((t) => (t ? zoomAtCursor(t, factor, canvas.w / 2, canvas.h / 2) : t));
+  // Springt auf echte 1:1-Grösse (s. PX_PER_MM_AT_100), zentriert auf die
+  // Canvas-Mitte statt den Cursor (kein aktives Zoom-Gesten-Event hier).
+  const zoomTo100 = () =>
+    setTransform((t) =>
+      t ? zoomAtCursor(t, PX_PER_MM_AT_100 / t.scale, canvas.w / 2, canvas.h / 2) : t,
+    );
+  const zoomPercent = Math.round(((transform?.scale ?? 0) / PX_PER_MM_AT_100) * 100);
 
   // Leertaste = Pan-Modifikator (wie in CAD). Delete/Backspace löscht die Auswahl.
   useEffect(() => {
@@ -315,12 +414,11 @@ export function LayoutSheetView({
           setPlacing(false);
           setPreviewRect(null);
         } else if (annotTool !== "select") {
-          setAnnotTool("select");
+          onToolChange("select");
           setAnnotPreview(null);
+          setTextFrameDraft(null);
         } else if (pendingRect) {
           setPendingRect(null);
-        } else if (textPendingAt) {
-          setTextPendingAt(null);
         } else if (selectedAnnotId) {
           setSelectedAnnotId(null);
         } else {
@@ -351,8 +449,8 @@ export function LayoutSheetView({
     selectedId,
     selectedAnnotId,
     annotTool,
-    textPendingAt,
     handlers,
+    onToolChange,
   ]);
 
   // Bildschirm-Pixel (canvas-lokal) eines Pointer-Events.
@@ -379,6 +477,60 @@ export function LayoutSheetView({
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
+  // Schliesst Linie/Rechteck/Text-Rahmen beim ZWEITEN Klick ab (erster Punkt =
+  // `pendingPoint`, zweiter = `mm`) — dieselbe Zwei-Klick-Logik, die vorher am
+  // `pointerup` einer gehaltenen Ziehgeste hing (s. Git-Historie), jetzt ohne
+  // gehaltene Taste nötig.
+  const commitTwoPointAnnot = (
+    tool: "line" | "rect" | "text",
+    p0: { xMm: number; yMm: number },
+    p1: { xMm: number; yMm: number },
+  ) => {
+    if (tool === "line") {
+      const len = Math.hypot(p1.xMm - p0.xMm, p1.yMm - p0.yMm);
+      if (len >= MIN_ANNOT_MM) {
+        handlers.onAddAnnotation("line", {
+          x1Mm: round1(p0.xMm),
+          y1Mm: round1(p0.yMm),
+          x2Mm: round1(p1.xMm),
+          y2Mm: round1(p1.yMm),
+        });
+      }
+      return;
+    }
+    const r = normalizeRect(p0.xMm, p0.yMm, p1.xMm, p1.yMm);
+    if (tool === "rect") {
+      if (r.widthMm >= MIN_ANNOT_MM && r.heightMm >= MIN_ANNOT_MM) {
+        const clamped = clampRectToSheet(r, sheet.w, sheet.h);
+        handlers.onAddAnnotation("rect", {
+          xMm: round1(clamped.xMm),
+          yMm: round1(clamped.yMm),
+          widthMm: round1(clamped.widthMm),
+          heightMm: round1(clamped.heightMm),
+        });
+      }
+      return;
+    }
+    // Text: zu klein aufgezogen (praktisch ein Doppelklick auf der Stelle) →
+    // Default-Rahmen an der Klickstelle, statt eine Mini-Box zu erzwingen.
+    const tooSmall = r.widthMm < MIN_ANNOT_MM || r.heightMm < MIN_ANNOT_MM;
+    const widthMm = tooSmall ? 60 : r.widthMm;
+    const frameHeightMm = tooSmall ? 20 : r.heightMm;
+    const clamped = clampRectToSheet({ xMm: r.xMm, yMm: r.yMm, widthMm, heightMm: frameHeightMm }, sheet.w, sheet.h);
+    // `yMm` einer Text-Annotation ist die BASELINE der ersten Zeile (s.
+    // `annotationBoundsMm`) — der aufgezogene Rahmen liefert die OBERE Kante,
+    // daher + eine Zeilenhöhe (heightMm = Schriftgrösse).
+    const id = handlers.onAddAnnotation("text", {
+      xMm: round1(clamped.xMm),
+      yMm: round1(clamped.yMm + DEFAULT_ANNOT_TEXT_MM),
+      widthMm: round1(clamped.widthMm),
+      heightMm: DEFAULT_ANNOT_TEXT_MM,
+      text: "",
+    });
+    setSelectedAnnotId(id);
+    setInlineEdit({ id, minHeightMm: clamped.heightMm });
+  };
+
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!transform) return;
     // Klicks aus dem HUD/Popover (echte Bedienelemente) NICHT als Blatt-Geste werten.
@@ -402,26 +554,38 @@ export function LayoutSheetView({
       return;
     }
 
-    // Annotations-Werkzeuge: Linie/Rechteck aufziehen, Text sofort per Dialog.
-    if (annotTool === "text") {
-      setTextPendingAt({ xMm: mm.xMm, yMm: mm.yMm });
+    // Annotations-Werkzeuge Linie/Rechteck/Text: Klick-Bewegen-Klick wie im
+    // Grundriss (kein Ziehen nötig) — erster Klick merkt sich den Punkt
+    // (`pendingPoint`), der zweite (hier) schliesst ab. Bild bleibt ein
+    // Einzelklick, der sofort den Datei-Dialog öffnet (async, s. imageInputRef).
+    if (annotTool === "image") {
+      setImagePendingAt({ xMm: mm.xMm, yMm: mm.yMm });
+      imageInputRef.current?.click();
       return;
     }
-    if (annotTool === "line") {
-      dragRef.current = { mode: "annot-line", x0: mm.xMm, y0: mm.yMm };
-      setAnnotPreview({
-        id: "draft",
-        kind: "line",
-        x1Mm: mm.xMm,
-        y1Mm: mm.yMm,
-        x2Mm: mm.xMm,
-        y2Mm: mm.yMm,
-      });
-      return;
-    }
-    if (annotTool === "rect") {
-      dragRef.current = { mode: "annot-rect", x0: mm.xMm, y0: mm.yMm };
-      setAnnotPreview({ id: "draft", kind: "rect", xMm: mm.xMm, yMm: mm.yMm, widthMm: 0, heightMm: 0 });
+    if (annotTool === "line" || annotTool === "rect" || annotTool === "text") {
+      if (pendingPoint && pendingPoint.tool === annotTool) {
+        commitTwoPointAnnot(annotTool, pendingPoint, mm);
+        setPendingPoint(null);
+        setAnnotPreview(null);
+        setTextFrameDraft(null);
+        // Linie/Rechteck bleiben armiert für die nächste (Plan-Konvention:
+        // tools.ts `lineTool`/`rectTool` bleiben nach dem Commit ebenfalls
+        // aktiv statt auf „Auswahl" zu springen — mehrere Linien am Stück ohne
+        // erneuten Werkzeug-Klick). Text springt zurück auf „Auswahl": direkt
+        // danach öffnet der Inline-Editor, ein weiterer Klick soll den Cursor
+        // darin setzen, keinen neuen Rahmen aufziehen.
+        if (annotTool === "text") onToolChange("select");
+        return;
+      }
+      setPendingPoint({ tool: annotTool, xMm: mm.xMm, yMm: mm.yMm });
+      if (annotTool === "line") {
+        setAnnotPreview({ id: "draft", kind: "line", x1Mm: mm.xMm, y1Mm: mm.yMm, x2Mm: mm.xMm, y2Mm: mm.yMm });
+      } else if (annotTool === "rect") {
+        setAnnotPreview({ id: "draft", kind: "rect", xMm: mm.xMm, yMm: mm.yMm, widthMm: 0, heightMm: 0 });
+      } else {
+        setTextFrameDraft({ xMm: mm.xMm, yMm: mm.yMm, widthMm: 0, heightMm: 0 });
+      }
       return;
     }
 
@@ -452,16 +616,50 @@ export function LayoutSheetView({
       return;
     }
 
-    const annotId = pickAnnotation(annotations, mm.xMm, mm.yMm, tolMm);
-    if (annotId) {
+    const annotHit = pickAnnotationHandle(annotations, mm.xMm, mm.yMm, tolMm);
+    if (annotHit) {
       setSelectedId(null);
-      setSelectedAnnotId(annotId);
-      const ann = annotations.find((a) => a.id === annotId)!;
-      dragRef.current = { mode: "annot-move", id: annotId, start: ann, grabX: mm.xMm, grabY: mm.yMm };
+      setSelectedAnnotId(annotHit.id);
+      const ann = annotations.find((a) => a.id === annotHit.id)!;
+      if (annotHit.hit.handle === "body") {
+        dragRef.current = {
+          mode: "annot-move",
+          id: annotHit.id,
+          start: ann,
+          grabX: mm.xMm,
+          grabY: mm.yMm,
+        };
+      } else {
+        dragRef.current = {
+          mode: "annot-resize",
+          id: annotHit.id,
+          hit: annotHit.hit,
+          start: ann,
+          grabX: mm.xMm,
+          grabY: mm.yMm,
+        };
+      }
     } else {
       setSelectedId(null);
       setSelectedAnnotId(null);
     }
+  };
+
+  // Doppelklick auf ein bestehendes Textfeld öffnet die Bearbeitung wieder —
+  // wie InDesign/Affinity (bisher nur über den „✎"-Knopf im HUD erreichbar).
+  const onDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!transform || annotTool !== "select") return;
+    if ((e.target as HTMLElement).closest("[data-sheet-ui]")) return;
+    const { x, y } = localXY(e);
+    const mm = screenToMm(transform, x, y);
+    const tolMm = HANDLE_TOL_PX / transform.scale;
+    const hit = pickAnnotationHandle(annotations, mm.xMm, mm.yMm, tolMm);
+    if (!hit) return;
+    const ann = annotations.find((a) => a.id === hit.id);
+    if (!ann || ann.kind !== "text") return;
+    setSelectedId(null);
+    setSelectedAnnotId(ann.id);
+    setInlineEdit({ id: ann.id, minHeightMm: annotationBoundsMm(ann).heightMm });
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -470,18 +668,42 @@ export function LayoutSheetView({
     const drag = dragRef.current;
 
     if (!drag) {
+      // Wartet Linie/Rechteck/Text auf den zweiten Klick (`pendingPoint`), folgt
+      // der Ghost dem Cursor auch OHNE gehaltene Taste (Klick-Bewegen-Klick wie
+      // im Grundriss) — kein Hover-Cursor-Update nötig, das Werkzeug ist eh aktiv.
+      if (pendingPoint) {
+        const mm = screenToMm(transform, x, y);
+        if (pendingPoint.tool === "line") {
+          setAnnotPreview({
+            id: "draft",
+            kind: "line",
+            x1Mm: pendingPoint.xMm,
+            y1Mm: pendingPoint.yMm,
+            x2Mm: mm.xMm,
+            y2Mm: mm.yMm,
+          });
+        } else if (pendingPoint.tool === "rect") {
+          const r = normalizeRect(pendingPoint.xMm, pendingPoint.yMm, mm.xMm, mm.yMm);
+          setAnnotPreview({ id: "draft", kind: "rect", ...r });
+        } else {
+          setTextFrameDraft(normalizeRect(pendingPoint.xMm, pendingPoint.yMm, mm.xMm, mm.yMm));
+        }
+        return;
+      }
       // Nur Hover-Cursor aktualisieren (Griffe/Körper), wenn nicht am Ziehen.
       const mm = screenToMm(transform, x, y);
       const tolMm = HANDLE_TOL_PX / transform.scale;
       const hit = pickViewport(layout.viewports, mm.xMm, mm.yMm, tolMm);
-      const annotHit = !hit ? pickAnnotation(annotations, mm.xMm, mm.yMm, tolMm) : null;
+      const annotHit = !hit ? pickAnnotationHandle(annotations, mm.xMm, mm.yMm, tolMm) : null;
       setHoverCursor(
         placing || annotTool !== "select"
           ? "crosshair"
           : hit
           ? handleCursor(hit.handle)
           : annotHit
-          ? "move"
+          ? annotHit.hit.kind === "line"
+            ? lineHandleCursor(annotHit.hit.handle)
+            : handleCursor(annotHit.hit.handle)
           : "default",
       );
       return;
@@ -511,19 +733,29 @@ export function LayoutSheetView({
       setPreviewRect(applyHandleDrag(drag.start, drag.handle, dx, dy, MIN_VP_MM));
       return;
     }
-    if (drag.mode === "annot-line") {
-      setAnnotPreview({ id: "draft", kind: "line", x1Mm: drag.x0, y1Mm: drag.y0, x2Mm: mm.xMm, y2Mm: mm.yMm });
-      return;
-    }
-    if (drag.mode === "annot-rect") {
-      const r = normalizeRect(drag.x0, drag.y0, mm.xMm, mm.yMm);
-      setAnnotPreview({ id: "draft", kind: "rect", ...r });
-      return;
-    }
     if (drag.mode === "annot-move") {
       const dx = mm.xMm - drag.grabX;
       const dy = mm.yMm - drag.grabY;
       setAnnotPreview(translateAnnotation(drag.start, dx, dy));
+      return;
+    }
+    if (drag.mode === "annot-resize") {
+      const dx = mm.xMm - drag.grabX;
+      const dy = mm.yMm - drag.grabY;
+      if (drag.hit.kind === "line") {
+        if (drag.start.kind === "line") {
+          setAnnotPreview({ ...drag.start, ...applyLineHandleDrag(drag.start, drag.hit.handle, dx, dy) });
+        }
+      } else if (drag.start.kind === "rect" || drag.start.kind === "image") {
+        const r = applyHandleDrag(
+          { xMm: drag.start.xMm, yMm: drag.start.yMm, widthMm: drag.start.widthMm, heightMm: drag.start.heightMm },
+          drag.hit.handle,
+          dx,
+          dy,
+          MIN_ANNOT_MM,
+        );
+        setAnnotPreview({ ...drag.start, ...r });
+      }
       return;
     }
   };
@@ -563,43 +795,7 @@ export function LayoutSheetView({
     }
     setPreviewRect(null);
 
-    if (drag.mode === "annot-line") {
-      const p = annotPreview;
-      setAnnotPreview(null);
-      setAnnotTool("select");
-      if (p && p.kind === "line") {
-        const len = Math.hypot(p.x2Mm - p.x1Mm, p.y2Mm - p.y1Mm);
-        if (len >= MIN_ANNOT_MM) {
-          handlers.onAddAnnotation("line", {
-            x1Mm: round1(p.x1Mm),
-            y1Mm: round1(p.y1Mm),
-            x2Mm: round1(p.x2Mm),
-            y2Mm: round1(p.y2Mm),
-          });
-        }
-      }
-      return;
-    }
-    if (drag.mode === "annot-rect") {
-      const p = annotPreview;
-      setAnnotPreview(null);
-      setAnnotTool("select");
-      if (p && p.kind === "rect" && p.widthMm >= MIN_ANNOT_MM && p.heightMm >= MIN_ANNOT_MM) {
-        const clamped = clampRectToSheet(
-          { xMm: p.xMm, yMm: p.yMm, widthMm: p.widthMm, heightMm: p.heightMm },
-          sheet.w,
-          sheet.h,
-        );
-        handlers.onAddAnnotation("rect", {
-          xMm: round1(clamped.xMm),
-          yMm: round1(clamped.yMm),
-          widthMm: round1(clamped.widthMm),
-          heightMm: round1(clamped.heightMm),
-        });
-      }
-      return;
-    }
-    if (drag.mode === "annot-move") {
+    if (drag.mode === "annot-move" || drag.mode === "annot-resize") {
       if (annotPreview) {
         handlers.onPatchAnnotation(drag.id, annotationPatch(annotPreview));
       }
@@ -636,7 +832,8 @@ export function LayoutSheetView({
       {/* Werkzeugleiste (Blatt-Navigation + Platzieren + Zurück). */}
       <div className="layout-sheet-toolbar" data-sheet-ui>
         <button className="nav-add" onClick={handlers.onBack} title={t("layouts.backToModel")}>
-          ‹ {t("layouts.backToModel")}
+          <span className="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+          {t("layouts.backToModel")}
         </button>
         <span className="layout-sheet-name">{layout.name}</span>
         <button
@@ -644,7 +841,7 @@ export function LayoutSheetView({
           onClick={() => {
             setPlacing((v) => !v);
             setPendingRect(null);
-            setAnnotTool("select");
+            onToolChange("select");
             setAnnotPreview(null);
           }}
           disabled={snapshots.length === 0}
@@ -654,60 +851,21 @@ export function LayoutSheetView({
         >
           ＋ {t("layouts.placeViewport")}
         </button>
-        <span className="layout-sheet-toolbar-sep" />
-        <button
-          className={`nav-add${annotTool === "line" ? " active" : ""}`}
-          onClick={() => {
-            setAnnotTool((v) => (v === "line" ? "select" : "line"));
-            setAnnotPreview(null);
-            setPlacing(false);
-            setPreviewRect(null);
-          }}
-          title={t("layouts.annotLine")}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14">
-            <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.6" />
-          </svg>
-        </button>
-        <button
-          className={`nav-add${annotTool === "rect" ? " active" : ""}`}
-          onClick={() => {
-            setAnnotTool((v) => (v === "rect" ? "select" : "rect"));
-            setAnnotPreview(null);
-            setPlacing(false);
-            setPreviewRect(null);
-          }}
-          title={t("layouts.annotRect")}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14">
-            <rect x="2" y="3" width="10" height="8" fill="none" stroke="currentColor" strokeWidth="1.4" />
-          </svg>
-        </button>
-        <button
-          className={`nav-add${annotTool === "text" ? " active" : ""}`}
-          onClick={() => {
-            setAnnotTool((v) => (v === "text" ? "select" : "text"));
-            setAnnotPreview(null);
-            setPlacing(false);
-            setPreviewRect(null);
-          }}
-          title={t("layouts.annotText")}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14">
-            <text x="2" y="11" fontSize="10" fontFamily="Helvetica, Arial, sans-serif" fill="currentColor">
-              T
-            </text>
-          </svg>
-        </button>
         <span style={{ flex: 1 }} />
         <button className="nav-add" onClick={() => zoomStep(1 / 1.12)} title="−">−</button>
+        {/* Zeigt den echten Massstab (100 % = 1:1 auf dem Bildschirm, s.
+            PX_PER_MM_AT_100) und setzt ihn per Klick — wie die %-Anzeige in
+            Affinity/Figma, nicht nur „Einpassen" (das passt bloss ins Fenster). */}
+        <button className="nav-add layout-sheet-zoom-pct" onClick={zoomTo100} title={t("layouts.zoom100")}>
+          {zoomPercent}%
+        </button>
         <button className="nav-add" onClick={fit} title={t("layouts.fit")}>
           {t("layouts.fit")}
         </button>
         <button className="nav-add" onClick={() => zoomStep(1.12)} title="+">+</button>
       </div>
 
-      {/* Blatt-Tisch: dunkler Hintergrund, weisses Blatt zentriert. */}
+      {/* Blatt-Tisch: papierartiger Hintergrund, weisses Blatt zentriert. */}
       <div
         ref={stageRef}
         className="layout-sheet-stage"
@@ -716,6 +874,7 @@ export function LayoutSheetView({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onDoubleClick={onDoubleClick}
       >
         {/* Weisses Papier. */}
         <div
@@ -831,6 +990,39 @@ export function LayoutSheetView({
               />
             ))}
 
+          {/* Auswahl-Griffe der gewählten Annotation — Rechteck/Bild wie ein
+              Viewport (8 Ecken/Kanten), Linie mit ihren zwei Endpunkten (wie im
+              Grundriss). Text hat (noch) keine Griffe. */}
+          {selectedAnnot &&
+            (() => {
+              const display =
+                annotPreview && annotPreview.id === selectedAnnot.id ? annotPreview : selectedAnnot;
+              if (display.kind === "rect" || display.kind === "image") {
+                return handleAnchors({
+                  xMm: display.xMm,
+                  yMm: display.yMm,
+                  widthMm: display.widthMm,
+                  heightMm: display.heightMm,
+                }).map((a) => (
+                  <div
+                    key={a.handle}
+                    className="layout-sheet-grip"
+                    style={{ left: a.xMm * tf.scale, top: a.yMm * tf.scale, cursor: handleCursor(a.handle) }}
+                  />
+                ));
+              }
+              if (display.kind === "line") {
+                return lineHandleAnchors(display).map((p, i) => (
+                  <div
+                    key={i}
+                    className="layout-sheet-grip"
+                    style={{ left: p.xMm * tf.scale, top: p.yMm * tf.scale, cursor: "crosshair" }}
+                  />
+                ));
+              }
+              return null;
+            })()}
+
           {/* Ghost-Rechteck beim Aufziehen (Platzieren). */}
           {previewRect && dragRef.current?.mode === "place" && (
             <div
@@ -840,6 +1032,19 @@ export function LayoutSheetView({
                 top: previewRect.yMm * tf.scale,
                 width: previewRect.widthMm * tf.scale,
                 height: previewRect.heightMm * tf.scale,
+              }}
+            />
+          )}
+
+          {/* Ghost-Rahmen beim Aufziehen eines neuen Textfelds. */}
+          {textFrameDraft && (
+            <div
+              className="layout-sheet-ghost"
+              style={{
+                left: textFrameDraft.xMm * tf.scale,
+                top: textFrameDraft.yMm * tf.scale,
+                width: textFrameDraft.widthMm * tf.scale,
+                height: textFrameDraft.heightMm * tf.scale,
               }}
             />
           )}
@@ -885,7 +1090,7 @@ export function LayoutSheetView({
                   }
                   title={t("layouts.scaleReset")}
                 >
-                  ↺
+                  <span className="material-symbols-outlined" aria-hidden="true">restart_alt</span>
                 </button>
               )}
               <button
@@ -896,54 +1101,114 @@ export function LayoutSheetView({
                 }}
                 title={t("layouts.removeViewport")}
               >
-                🗑
+                <span className="material-symbols-outlined" aria-hidden="true">delete</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* HUD: Eigenschaften der gewählten Annotation (Farbe/Strichstärke/Text/Löschen). */}
+        {/* HUD: Eigenschaften der gewählten Annotation (Farbe/Strichstärke/Text/
+            Bild-Grösse/Löschen — je nach Art). */}
         {selectedAnnot && (
           <div className="layout-sheet-hud" data-sheet-ui>
             <div className="layout-sheet-hud-title">{t(`layouts.annot.${selectedAnnot.kind}`)}</div>
-            <label className="layout-sheet-hud-row">
-              <span>{t("layouts.annotColor")}</span>
-              <input
-                type="color"
-                value={selectedAnnot.color ?? "#111111"}
-                onChange={(e) =>
-                  handlers.onPatchAnnotation(selectedAnnot.id, { color: e.target.value })
-                }
-              />
-            </label>
-            {selectedAnnot.kind !== "text" && (
-              <label className="layout-sheet-hud-row">
-                <span>{t("layouts.annotWeight")}</span>
-                <input
-                  type="number"
-                  className="res-input mono num"
-                  min={0.05}
-                  step={0.05}
-                  value={selectedAnnot.weightMm ?? 0.25}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    if (Number.isFinite(v) && v > 0)
-                      handlers.onPatchAnnotation(selectedAnnot.id, { weightMm: v });
-                  }}
-                />
-              </label>
-            )}
+            {/* Position (mm, Blattkoordinaten oben-links) — für ALLE Arten über
+                dieselbe Bbox-Ableitung wie die Griffe (`annotationBoundsMm`);
+                der Commit verschiebt die ganze Annotation um das Delta
+                (`translateAnnotation`, dieselbe Funktion wie beim Ziehen).
+                Das ist der eigentliche Ort für X/Y einer Blatt-Annotation
+                (Papier-Millimeter) — NICHT das Objekt-Info-Panel (Modell-Meter,
+                zeigt für Layout-Markups bewusst „nicht anwendbar" statt 0/0). */}
+            {(() => {
+              const b = annotationBoundsMm(selectedAnnot);
+              const moveTo = (nxMm: number, nyMm: number) => {
+                const moved = translateAnnotation(selectedAnnot, nxMm - b.xMm, nyMm - b.yMm);
+                handlers.onPatchAnnotation(selectedAnnot.id, annotationPatch(moved));
+              };
+              return (
+                <>
+                  <label className="layout-sheet-hud-row">
+                    <span>{t("layouts.annotX")}</span>
+                    <input
+                      type="number"
+                      className="res-input mono num"
+                      step={1}
+                      value={Math.round(b.xMm)}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) moveTo(v, b.yMm);
+                      }}
+                    />
+                  </label>
+                  <label className="layout-sheet-hud-row">
+                    <span>{t("layouts.annotY")}</span>
+                    <input
+                      type="number"
+                      className="res-input mono num"
+                      step={1}
+                      value={Math.round(b.yMm)}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (Number.isFinite(v)) moveTo(b.xMm, v);
+                      }}
+                    />
+                  </label>
+                </>
+              );
+            })()}
+            {/* Farbe/Strichstärke stehen jetzt in der echten Attribute-Palette
+                (dieselbe wie bei einer Linie im Grundriss, Nutzer-Feedback) —
+                hier nur noch Position + Grösse (Bild) + Aktionen, keine Dopplung. */}
             {selectedAnnot.kind === "text" && (
               <div className="layout-sheet-hud-size">{clip(selectedAnnot.text, 40)}</div>
+            )}
+            {selectedAnnot.kind === "image" && (
+              <>
+                <label className="layout-sheet-hud-row">
+                  <span>{t("layouts.annotWidth")}</span>
+                  <input
+                    type="number"
+                    className="res-input mono num"
+                    min={2}
+                    step={1}
+                    value={Math.round(selectedAnnot.widthMm)}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v) && v > 0)
+                        handlers.onPatchAnnotation(selectedAnnot.id, { widthMm: v });
+                    }}
+                  />
+                </label>
+                <label className="layout-sheet-hud-row">
+                  <span>{t("layouts.annotHeight")}</span>
+                  <input
+                    type="number"
+                    className="res-input mono num"
+                    min={2}
+                    step={1}
+                    value={Math.round(selectedAnnot.heightMm)}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (Number.isFinite(v) && v > 0)
+                        handlers.onPatchAnnotation(selectedAnnot.id, { heightMm: v });
+                    }}
+                  />
+                </label>
+              </>
             )}
             <div className="layout-sheet-hud-actions">
               {selectedAnnot.kind === "text" && (
                 <button
                   className="nav-add"
-                  onClick={() => setEditingTextId(selectedAnnot.id)}
+                  onClick={() =>
+                    setInlineEdit({
+                      id: selectedAnnot.id,
+                      minHeightMm: annotationBoundsMm(selectedAnnot).heightMm,
+                    })
+                  }
                   title={t("layouts.annotEditText")}
                 >
-                  ✎
+                  <span className="material-symbols-outlined" aria-hidden="true">edit</span>
                 </button>
               )}
               <button
@@ -954,7 +1219,7 @@ export function LayoutSheetView({
                 }}
                 title={t("layouts.annotRemove")}
               >
-                🗑
+                <span className="material-symbols-outlined" aria-hidden="true">delete</span>
               </button>
             </div>
           </div>
@@ -980,10 +1245,10 @@ export function LayoutSheetView({
                 ))}
               </select>
               <button className="nav-add" disabled={!bindSnapId} onClick={confirmBind}>
-                ✓
+                <span className="material-symbols-outlined" aria-hidden="true">check</span>
               </button>
               <button className="nav-add" onClick={() => setPendingRect(null)}>
-                ×
+                <span className="material-symbols-outlined" aria-hidden="true">close</span>
               </button>
             </div>
           </div>
@@ -1004,46 +1269,107 @@ export function LayoutSheetView({
           )}
       </div>
 
-      {/* Textwerkzeug: Position gesetzt, Inhalt kommt per Dialog (kein window.prompt). */}
-      {textPendingAt && (
-        <PromptDialog
-          title={t("layouts.annotTextTitle")}
-          label={t("layouts.annotTextLabel")}
-          onConfirm={(value) => {
-            handlers.onAddAnnotation("text", {
-              xMm: round1(textPendingAt.xMm),
-              yMm: round1(textPendingAt.yMm),
-              text: value,
-              heightMm: DEFAULT_ANNOT_TEXT_MM,
-            });
-            setTextPendingAt(null);
-            setAnnotTool("select");
-          }}
-          onClose={() => {
-            setTextPendingAt(null);
-            setAnnotTool("select");
-          }}
-        />
-      )}
-
-      {/* HUD „Text ändern" für eine ausgewählte Text-Annotation. */}
-      {editingTextId &&
+      {/* Inline-Text-Editor DIREKT im Rahmen auf dem Blatt (kein eigenes Fenster,
+          Nutzer-Feedback) — für eine neu aufgezogene Text-Annotation (sofort
+          nach dem Aufziehen) ODER eine per HUD „✎" geöffnete bestehende. Jede
+          Änderung schreibt sofort zurück (`onPatchAnnotation`); ein Klick
+          daneben (Backdrop) oder Escape schliesst nur, es gibt nichts zu
+          verwerfen. Skaliert die feste 12-pt-Basisgrösse des RichTextEditor
+          (s. RichTextEditor.tsx `renderHtml`) via CSS-Transform auf die
+          Schriftgrösse der Annotation UND den aktuellen Blatt-Zoom — Breite
+          bricht dadurch zoomunabhängig bei `widthMm` um. */}
+      {inlineEdit &&
         (() => {
-          const ann = annotations.find((a) => a.id === editingTextId);
+          const ann = annotations.find((a) => a.id === inlineEdit.id);
           if (!ann || ann.kind !== "text") return null;
+          const doc = ann.doc ?? docFromText(ann.text);
+          const widthMm = ann.widthMm ?? 60;
+          const contentHeightMm = annotationBoundsMm(ann).heightMm;
+          const heightMm = Math.max(inlineEdit.minHeightMm, contentHeightMm);
+          const FONT_PX_AT_12PT = 16; // 12pt @ 96dpi (RichTextEditor-Default).
+          const scale = (ann.heightMm * tf.scale) / FONT_PX_AT_12PT;
+          const unscaledWidth = widthMm * (FONT_PX_AT_12PT / ann.heightMm);
+          const unscaledMinHeight = heightMm * (FONT_PX_AT_12PT / ann.heightMm);
+          const screen = mmToScreen(tf, { xMm: ann.xMm, yMm: ann.yMm - ann.heightMm });
+          const commit = (edited: typeof doc) =>
+            handlers.onPatchAnnotation(ann.id, {
+              doc: edited,
+              text: edited.paragraphs.map((p) => p.runs.map((r) => r.text).join("")).join("\n"),
+            });
           return (
-            <PromptDialog
-              title={t("layouts.annotTextTitle")}
-              label={t("layouts.annotTextLabel")}
-              defaultValue={ann.text}
-              onConfirm={(value) => {
-                handlers.onPatchAnnotation(editingTextId, { text: value });
-                setEditingTextId(null);
-              }}
-              onClose={() => setEditingTextId(null)}
-            />
+            <>
+              <div
+                className="layout-sheet-inline-backdrop"
+                data-sheet-ui
+                onPointerDown={() => setInlineEdit(null)}
+              />
+              <div
+                className="layout-sheet-inline-text"
+                data-sheet-ui
+                style={{
+                  left: screen.x,
+                  top: screen.y,
+                  width: unscaledWidth,
+                  minHeight: unscaledMinHeight,
+                  transform: `scale(${scale})`,
+                  transformOrigin: "0 0",
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                    setInlineEdit(null);
+                  }
+                }}
+              >
+                <RichTextEditor value={doc} onChange={commit} autoFocus />
+              </div>
+            </>
           );
         })()}
+
+      {/* Verstecktes Bild/PDF-Datei-Input (Werkzeug „image"). */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*,.pdf,application/pdf"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          onToolChange("select");
+          const at = imagePendingAt;
+          setImagePendingAt(null);
+          if (!f || !at) return;
+          const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+          if (isPdf) {
+            void rasterizePdfPages(f).then((pages) => {
+              pages.forEach((pg, i) => {
+                const { widthMm, heightMm } = defaultImageSizeMm(pg.naturalWidth, pg.naturalHeight);
+                const cascade = i * 6;
+                handlers.onAddAnnotation("image", {
+                  xMm: at.xMm - widthMm / 2 + cascade,
+                  yMm: at.yMm - heightMm / 2 + cascade,
+                  widthMm,
+                  heightMm,
+                  src: pg.src,
+                });
+              });
+            });
+          } else {
+            void readImageFile(f).then(({ src, naturalWidth, naturalHeight }) => {
+              const { widthMm, heightMm } = defaultImageSizeMm(naturalWidth, naturalHeight);
+              handlers.onAddAnnotation("image", {
+                xMm: at.xMm - widthMm / 2,
+                yMm: at.yMm - heightMm / 2,
+                widthMm,
+                heightMm,
+                src,
+              });
+            });
+          }
+        }}
+      />
     </section>
   );
 }
@@ -1093,6 +1419,67 @@ function AnnotationSvg({
         strokeDasharray={dash}
         opacity={opacity}
       />
+    );
+  }
+  if (ann.kind === "image") {
+    return (
+      <image
+        href={ann.src}
+        x={ann.xMm}
+        y={ann.yMm}
+        width={ann.widthMm}
+        height={ann.heightMm}
+        opacity={(ann.opacity ?? 1) * opacity}
+        preserveAspectRatio="none"
+      />
+    );
+  }
+  // Text: reiches Doc (mehrere Absätze/gemischte Formatierung) hat Vorrang vor
+  // dem einfachen String — bricht bei gesetzter Rahmenbreite (`widthMm`)
+  // wortweise um (Run-Grenzen bleiben erhalten, s. `wrapDocToLines`).
+  if (ann.doc) {
+    const lineHeight = ann.heightMm * 1.25;
+    const lines: SvgLine[] = wrapDocToLines(ann.doc, {
+      x: 0,
+      y: 0,
+      lineHeight,
+      unitPerPt: 25.4 / 72,
+      basePt: (ann.heightMm / 25.4) * 72,
+      color: ann.color ?? "#111111",
+      ...(ann.widthMm && ann.widthMm > 0 ? { wrapWidthUnits: ann.widthMm } : {}),
+    });
+    let y = ann.yMm;
+    return (
+      <text opacity={opacity}>
+        {lines.map((line, k) => {
+          if (k > 0) y += line.lineHeight;
+          const anchor = line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
+          const x =
+            !ann.widthMm ? ann.xMm
+              : line.align === "center" ? ann.xMm + ann.widthMm / 2
+              : line.align === "right" ? ann.xMm + ann.widthMm
+              : ann.xMm;
+          return (
+            <tspan key={k} x={x} y={y} textAnchor={anchor}>
+              {line.tspans.length === 0
+                ? "​"
+                : line.tspans.map((ts, j) => (
+                    <tspan
+                      key={j}
+                      fontSize={ts.fontSize}
+                      fontWeight={ts.fontWeight}
+                      fontStyle={ts.fontStyle}
+                      fontFamily={ts.fontFamily ?? "Helvetica, Arial, sans-serif"}
+                      fill={selected ? selectedColor : ts.fill}
+                      textDecoration={ts.textDecoration}
+                    >
+                      {ts.text}
+                    </tspan>
+                  ))}
+            </tspan>
+          );
+        })}
+      </text>
     );
   }
   return (

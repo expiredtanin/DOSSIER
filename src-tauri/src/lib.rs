@@ -1,5 +1,4 @@
-// Tauri-v2-Einstieg. Die eigentliche Geometrie liegt im serde-only Crate
-// `geometry`; hier nur die Befehls-Bruecke und der App-Start.
+// Tauri-v2-Einstieg: die Befehls-Bruecke und der App-Start.
 
 // M2: native wgpu-Viewports (2D und/oder 3D) im Tauri-Prozess. EIN Modul, EINE
 // winit-Event-Loop fuer beide Fenster (winit erlaubt nur eine Loop pro Prozess).
@@ -30,14 +29,6 @@ fn acquire_project_lock(
 #[tauri::command]
 fn release_project_lock(path: String, state: State<lock::LockState>) {
     lock::release(&state, &PathBuf::from(path));
-}
-
-/// Berechnet die Wand-Gehrungen im Rust-Kern und liefert sie ans Frontend.
-#[tauri::command]
-async fn compute_joins(
-    input: geometry::JoinInput,
-) -> Result<Vec<geometry::WallCuts>, String> {
-    Ok(geometry::compute_joins(input))
 }
 
 // Live-Spiegelung: die Webview schiebt bei jeder Modellaenderung (debounced)
@@ -96,7 +87,6 @@ pub fn run() {
 
     #[cfg(any(feature = "native2d", feature = "native3d"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        compute_joins,
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
@@ -104,7 +94,6 @@ pub fn run() {
     ]);
     #[cfg(not(any(feature = "native2d", feature = "native3d")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        compute_joins,
         acquire_project_lock,
         release_project_lock
     ]);

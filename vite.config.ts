@@ -21,24 +21,6 @@ const wasmPath = fileURLToPath(
   ),
 );
 
-// opencascade.js (Welle-C-HLR-Spike) verpackt Emscripten-Glue + `.wasm` in
-// `dist/`, ohne sinnvolle `exports`. Analog zu LibreDWG mappen wir zwei
-// virtuelle Module auf die echten Dateien, damit Vite die (große) WASM als
-// gehashtes Asset ausgibt (Dev mit korrektem MIME, Build als Asset). Der Import
-// im Code ist dynamisch → die WASM bleibt aus dem Haupt-Bundle heraus.
-const occtGluePath = fileURLToPath(
-  new URL(
-    "./node_modules/opencascade.js/dist/opencascade.wasm.js",
-    import.meta.url,
-  ),
-);
-const occtWasmPath = fileURLToPath(
-  new URL(
-    "./node_modules/opencascade.js/dist/opencascade.wasm.wasm",
-    import.meta.url,
-  ),
-);
-
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -51,14 +33,7 @@ export default defineConfig({
     alias: {
       "virtual:libredwg-glue": gluePath,
       "virtual:libredwg-wasm-url": wasmPath + "?url",
-      "virtual:occt-glue": occtGluePath,
-      "virtual:occt-wasm-url": occtWasmPath + "?url",
     },
-  },
-  // Emscripten-Glue nicht vor-bündeln (esbuild kommt mit dem UMD-Wrapper +
-  // Node-Shims nicht klar); der dynamische Import lädt sie zur Laufzeit.
-  optimizeDeps: {
-    exclude: ["opencascade.js"],
   },
   server: {
     host: true,

@@ -16,7 +16,7 @@ export function drawingGripVertices(d: Drawing2D): Vec2[] {
   const g = d.geom;
   if (g.shape === "line") return [g.a, g.b];
   if (g.shape === "polyline") return [...g.pts];
-  if (g.shape === "rect") {
+  if (g.shape === "rect" || g.shape === "image") {
     return [
       g.min,
       { x: g.max.x, y: g.min.y },

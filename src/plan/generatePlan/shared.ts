@@ -1,0 +1,521 @@
+// Gemeinsame Grundlage des Grundriss-Generators: das `Primitive`-Vokabular
+// (das EINZIGE Austauschformat zwischen `generatePlan()`/`generateSectionPlan()`
+// und allen Bauteil-Domänen unter `generatePlan/`), die By-Layer/By-Object-
+// Attribut-Auflösung (`resolve*`) sowie die Papier-mm-/Tinten-Konstanten, die
+// über mehrere Domänen hinweg identisch gelten müssen (SIA-Poché, Haarlinien).
+//
+// Jede Datei unter `generatePlan/` importiert von hier, NIE von `../generatePlan`
+// selbst — das hielte die Orchestrator-Datei (`generatePlan.ts`) andernfalls in
+// einem Zirkelimport mit jeder einzelnen Domäne.
+
+import type {
+  AttributeSource,
+  Component,
+  HatchPattern,
+  LayerCategory,
+  Project,
+  Vec2,
+} from "../../model/types";
+import { getHatch, getLineStyle } from "../../model/types";
+import type { Marks, RichTextDoc } from "../../text/richText";
+import type { RoomStampLine } from "../../model/roomStamp";
+
+/**
+ * Detailgrad der Plan-Darstellung (Oberleiste „grob/mittel/fein"). Steuert hier
+ * konkret zwei Dinge im Grundriss:
+ *  • Tür-/Fenstersymbole: grob = nur Öffnungs-Lücke + gerade Türblatt-Linie;
+ *    mittel = + Schwenkbogen; fein = + Rahmen/Anschlag-Striche.
+ *  • Schraffuren + Linienfeinheit: grob = vereinfachte Poché (eine Sammelfläche
+ *    ohne Schraffur, dickere Umrisslinie); mittel = aktueller mehrschichtiger
+ *    Aufbau mit Schraffuren; fein = volle Schraffuren + dünnere Linien.
+ *
+ * NOCH OFFEN (folgt, sobald die Features existieren — hier bewusst KEIN
+ * Schein-Effekt): Bemaßung/Beschriftung werden mit dem Detailgrad auf-/abblenden
+ * (Maßketten, Raumstempel), und die 3D-Geometrie-Auflösung (z. B. Profil-
+ * Rundungen, Tritt-/Setzstufen) wird ebenfalls dem Detailgrad folgen, sobald
+ * Bemaßung bzw. eine feinere 3D-Tessellierung implementiert sind.
+ */
+export type DetailLevel = "grob" | "mittel" | "fein";
+
+/** Stroke-Farbe der Schicht-Polygone (neutrales Schwarz, geteilte Tinte mit der Schraffur). */
+export const POCHE_STROKE = "#1a1a1a";
+
+/** Tinte für den Schwarz-Weiss-Modus: einheitliches Dunkel für alle Striche. */
+export const MONO_INK = "#111111";
+
+// ── Linienstärken in PAPIER-Millimeter (vgl. docs/design/plans-output.md §3.2) ──
+// Alle Stricharten sind in mm Papier definiert; die PlanView rechnet sie über
+// dpi = 96 in konstante Bildschirm-Pixel um (non-scaling-stroke), damit Linien
+// beim Zoomen ihre Papiergröße behalten und der Massstab stimmt.
+
+/** Default-Schichtfuge zwischen den Materialschichten in mm — Haarlinie (0.02),
+ *  gleiche Stärke wie die Schraffur-Tinte. Pro Fuge im Wandstil überschreibbar
+ *  (z. B. 0.13, wenn zwei massive Materialien aufeinandertreffen). */
+export const LAYER_LINE_MM = 0.02;
+/** Haarlinie für Tür-/Fenstersymbole (Flügel, Bogen, Rahmen, Glas) in mm. */
+export const SYMBOL_HAIRLINE_MM = 0.02;
+/** Strichmuster (mm Papier) für ÜBERKOPF-Ansichtslinien: Bauteile über der
+ *  Grundriss-Schnittebene (Decken-/Slab-Überstände, Unterzüge) werden nach
+ *  BIM-Konvention gestrichelt gezeichnet (Aufsicht auf ein Bauteil über einem). */
+export const OVERHEAD_DASH: number[] = [0.4, 0.25];
+/** Strichstärken der Dach-Grundrisslinien (mm Papier): Traufe = mittlere
+ *  Haarlinie, First etwas kräftiger als die Traufe, Grat dazwischen, Knick dünn
+ *  + gestrichelt (vgl. addRoof). */
+export const ROOF_EAVES_MM = 0.13;
+export const ROOF_RIDGE_MM = 0.25;
+export const ROOF_HIP_MM = 0.18;
+export const ROOF_BREAK_MM = 0.09;
+/** Strichmuster (mm Papier) der Dach-Knicklinie (Mansarde). */
+export const ROOF_BREAK_DASH: number[] = [0.12, 0.08];
+/** Stärke der Wand-Umrisslinie je Detailgrad, als Faktor auf die Ebenen-lw. */
+export const OUTLINE_DETAIL_FACTOR: Record<DetailLevel, number> = {
+  grob: 1.6, // dickere Sammellinie
+  mittel: 1.0, // wie die Kategorie-Strichstärke
+  fein: 0.6, // feiner
+};
+/** Stärke der Schichtfugen je Detailgrad (mittel/fein; grob hat keine Fugen). */
+export const LAYER_DETAIL_FACTOR: Record<DetailLevel, number> = {
+  grob: 1.0,
+  mittel: 1.0,
+  fein: 0.7,
+};
+/** Default-Umrandungs-Strichstärke (mm), falls die Kategorie keine lw trägt
+   (Grundeinstellung für „normale Elemente"). */
+export const WALL_FALLBACK_MM = 0.18;
+
+/**
+ * Aufgelöste Schraffur eines Polygons — alle Werte stammen aus einer
+ * HatchStyle-Ressource (Muster/Maßstab/Winkel/Farbe) plus dem optional
+ * verknüpften LineStyle (Linienstärke/Strichmuster der Musterlinien). Die
+ * PlanView ist damit rein darstellend und kennt das Projekt nicht.
+ */
+export interface HatchRender {
+  pattern: HatchPattern;
+  scale: number;
+  angle: number;
+  /**
+   * AUFGELÖSTE Farbe der Musterlinien bzw. der Vollfüllung (pattern==="solid").
+   * Ergebnis der Farb-Resolve-Kette (siehe {@link resolveHatch}): Vordergrund =
+   * (Attribut-Override) ?? (Component.foreground) ?? (HatchStyle.color, Backward-
+   * Compat) ?? Default. Der heutige SVG-/GL-/DXF-Renderer liest weiterhin nur
+   * dieses Feld — die Kette ist zur Renderzeit bereits kollabiert.
+   */
+  color: string;
+  /** Linienstärke der Musterlinien in mm. */
+  lineWeight: number;
+  /** Strichmuster der Musterlinien in mm; null = durchgezogen. */
+  dash: number[] | null;
+  /**
+   * Schraffur-Typ (additiv). `undefined`/"vector" ⇒ Muster nach `pattern` (heutiges
+   * Verhalten); "image" ⇒ Bild-Muster (`image`). Bestehende Renderer ignorieren
+   * `kind` und zeichnen nach `pattern` → unbekannte kinds fallen auf heute zurück.
+   */
+  kind?: "vector" | "image";
+  /** Vektor-Untermodus (additiv). `undefined`/"parallel" ⇒ regelmäßig; "random" ⇒ zufällig. */
+  lines?: "parallel" | "random";
+  /** Bild-Muster-Parameter (nur `kind==="image"`); durchgereicht aus dem HatchStyle. */
+  image?: { src: string; scaleX: number; scaleY: number; rotation: number };
+  /**
+   * Steuer-Parameter der Random-Vektor-Streuung (nur `lines==="random"`), 1:1 aus
+   * dem HatchStyle durchgereicht. Alle optional — die eigentliche Erzeugung/
+   * Default-Auflösung liegt zentral in `glPlan/glPlanHatch.ts` (single render truth).
+   */
+  seed?: number;
+  density?: number;
+  lengthMin?: number;
+  lengthMax?: number;
+}
+
+/**
+ * Render-Entscheidung je Kategorie-Code für den Grundriss (vgl. ItemDisplay aus
+ * dem Panel-Darstellungsmodus). `render`=false blendet die Kategorie ganz aus,
+ * `greyed`=true zeichnet sie gedimmt, `locked`=true (nur Modus „grey_locked")
+ * verbietet die Anwahl (siehe App.tsx onPlanSelect). Wird kein Resolver
+ * übergeben, gilt für jede sichtbare Kategorie {render:true, greyed:false,
+ * locked:false} (bisheriges Verhalten).
+ */
+export interface CategoryDisplay {
+  render: boolean;
+  greyed: boolean;
+  locked: boolean;
+}
+
+/** Funktion, die je Kategorie-Code die Render-Entscheidung liefert. */
+export type CategoryDisplayResolver = (code: string) => CategoryDisplay;
+
+/** Standard-Resolver: jede (bereits gefilterte) Kategorie normal zeichnen. */
+export const SHOW_ALL: CategoryDisplayResolver = () => ({ render: true, greyed: false, locked: false });
+
+export type Primitive =
+  | {
+      kind: "polygon";
+      pts: Vec2[];
+      /** Füllfarbe (Component-Poché) bzw. "none" für reine Umrisslinien. */
+      fill: string;
+      stroke: string;
+      /** Umriss-Strichstärke in PAPIER-Millimeter (siehe oben). */
+      strokeWidthMm: number;
+      hatch: HatchRender;
+      /** Gedimmt zeichnen (Darstellungsmodus „andere grau"). */
+      greyed?: boolean;
+      /**
+       * Kanten-Indizes, die NICHT umrissen (gestrichen) werden dürfen — die Füllung
+       * bleibt das volle Polygon. Kante `i` läuft von `pts[i]` nach `pts[(i+1)%n]`.
+       * Damit werden die inneren Gehrungs-/Stoß-Stirnflächen an einer Wandecke
+       * unterdrückt: die Diagonale, an der GLEICHFARBIGE Schichten zweier Wände
+       * aneinanderstoßen, würde sonst als sichtbare 45°-Naht erscheinen und der
+       * Umriss würde als Barbe über den Eck-Apex hinausschießen (Gehrungs-Spitze).
+       * Längskanten (Schichtfugen zwischen VERSCHIEDENEN Materialien) bleiben
+       * gestrichen — nur die Stoß-Stirnkanten am Knoten entfallen.
+       */
+      noStrokeEdges?: number[];
+      /**
+       * ID der Wand, zu der dieses Schicht-/Umriss-Polygon gehört (für die
+       * Links-Klick-Auswahl: die PlanView markiert ALLE Polygone derselben
+       * Wand und meldet die wallId nach oben). Reine Umriss-/Symbol-Primitive
+       * ohne Wandbezug lassen das Feld weg.
+       */
+      wallId?: string;
+      /**
+       * ID des 2D-Zeichenelements (Drawing2D), falls dieses gefüllte Polygon eine
+       * geschlossene 2D-Form ist (für die Links-Klick-Auswahl der Fläche).
+       */
+      drawingId?: string;
+      /**
+       * ID der Decke (Ceiling), falls dieses Polygon eine Decken-Fläche/-Umriss
+       * ist (für die Links-Klick-Auswahl der Decke).
+       */
+      ceilingId?: string;
+      /** ID der Öffnung (Fenster/Tür), z. B. der Fensterrahmen (Auswahl). */
+      openingId?: string;
+      /** ID der Treppe (Stair), falls dieses Polygon ein Tritt/Podest ist (Auswahl). */
+      stairId?: string;
+      /** ID des Raums (Room), falls dieses Polygon eine Raum-Fläche ist (Auswahl). */
+      roomId?: string;
+      /**
+       * ID des extrudierten Körpers (truck-Integration), falls dieses Polygon der
+       * Grundriss-Footprint einer Extrusion ist (für eine spätere Links-Klick-
+       * Auswahl — heute nur zur Nachvollziehbarkeit getaggt, noch nicht verdrahtet).
+       */
+      extrudedSolidId?: string;
+      /**
+       * ID des Kontext-Objekts (importiertes Gebäude/Terrain, `project.context`),
+       * falls dieses (unsichtbare) Pick-Band dessen Grundriss-Bounding-Box
+       * umhüllt (Links-Klick-Auswahl — analog `sectionLineId`, s. u.).
+       */
+      contextObjectId?: string;
+      /**
+       * ID der Stütze (Column), falls dieses Polygon der Grundriss-Querschnitt
+       * (Poché) einer Stütze ist (für die Links-Klick-Auswahl der Fläche).
+       */
+      columnId?: string;
+      /** ID des Dachs (Roof), falls dieses (unsichtbare) Polygon der Traufe-Umriss ist (Auswahl). */
+      roofId?: string;
+      /**
+       * ID der Schnitt-/Ansichtslinie (DrawingLevel), falls dieses (unsichtbare)
+       * Pick-Band das Schnittführungs-Symbol umhüllt (für die Links-Klick-Auswahl
+       * der Schnittlinie im Grundriss).
+       */
+      sectionLineId?: string;
+    }
+  | {
+      kind: "line";
+      a: Vec2;
+      b: Vec2;
+      cls: string;
+      /** Strichstärke in mm Papier (non-scaling). */
+      weightMm: number;
+      /** Strichmuster in mm Papier; null/undefined = durchgezogen. */
+      dash?: number[] | null;
+      /**
+       * Zickzack-/Wellen-Parameter (aus einem LineStyle mit `kind==="zigzag"`),
+       * beide in mm Papier. Ist es gesetzt, zeichnen die Renderer die Linie als
+       * Zickzack-Pfad statt als gerade (ggf. gestrichelte) Linie — ADDITIV, ohne
+       * die bestehenden Strich/Dash-Linien zu verändern (Feld fehlt ⇒ heute).
+       */
+      zigzag?: { amplitude: number; wavelength: number };
+      /**
+       * Frei gezeichnetes Wiederhol-Motiv (aus einem LineStyle mit
+       * `kind==="custom"`): eine offene Polylinie in einer Einheitszelle, `points`
+       * in mm Papier, `length` = Wiederhollänge in mm Papier. Ist es gesetzt,
+       * kacheln die Renderer das Motiv entlang der Linie (analog `zigzag`) —
+       * ADDITIV; fehlt es, bleibt die Linie gerade/gestrichelt.
+       */
+      motif?: { points: Vec2[]; length: number };
+      /** Optionale explizite Strichfarbe (überschreibt die CSS-Klasse). */
+      color?: string;
+      /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl von Drawing2D). */
+      drawingId?: string;
+      /** ID der Öffnung (für Links-Klick-Auswahl von Fenster/Tür-Symbolen). */
+      openingId?: string;
+      /** ID der Treppe (für Links-Klick-Auswahl von Treppen-Symbollinien). */
+      stairId?: string;
+      greyed?: boolean;
+    }
+  | {
+      kind: "arc";
+      center: Vec2;
+      from: Vec2;
+      to: Vec2;
+      r: number;
+      cls: string;
+      /** Strichstärke in mm Papier (non-scaling). */
+      weightMm: number;
+      /** Strichmuster in mm Papier; null/undefined = durchgezogen. */
+      dash?: number[] | null;
+      /** ID der Öffnung (für Links-Klick-Auswahl von Tür-Schwenkbögen). */
+      openingId?: string;
+      /** ID der Treppe (für Links-Klick-Auswahl von Wendel-Outline-Bögen). */
+      stairId?: string;
+      greyed?: boolean;
+    }
+  | {
+      kind: "text";
+      /** Ankerpunkt im Modell (Meter). */
+      at: Vec2;
+      /**
+       * Frei editierbarer Stempel-Text (Rich-Text). Wird zuerst gezeichnet;
+       * `align` je Absatz steuert die Ausrichtung.
+       */
+      doc: RichTextDoc;
+      /**
+       * LIVE-Zusatzzeilen (z. B. Fläche „24.30 m²" + SIA-Tag), UNTER dem Doc
+       * gezeichnet — unabhängig vom editierten Text, stets aktuell. Jede Zeile
+       * trägt ihre eigene Ausrichtung (`align`).
+       */
+      extraLines: RoomStampLine[];
+      /** Basis-Schriftgrösse in PUNKT (für Runs ohne eigene Grösse + Zusatzzeilen). */
+      basePt: number;
+      /** Textfarbe (hex) als Default. */
+      color: string;
+      /** ID des Raums (Room), zu dem dieser Stempel gehört (Auswahl). */
+      roomId?: string;
+      greyed?: boolean;
+    }
+  | {
+      // Schlichter, modellverankerter Einzeltext (aus Drawing2D `{shape:"text"}`,
+      // z. B. DXF-Import). Anders als `kind:"text"` (Raum-Stempel, RichText) trägt
+      // er nur einen String mit Höhe in Metern + Drehung — rein SVG-gerendert.
+      kind: "drawingText";
+      /** Ankerpunkt im Modell (Meter). */
+      at: Vec2;
+      text: string;
+      /** Schrifthöhe in Modell-Metern. */
+      heightM: number;
+      /** Drehung in RADIANT (CCW im Modell). */
+      angle: number;
+      color: string;
+      /** Optionale einheitliche Formatierung (Schriftfamilie/fett/kursiv/…). */
+      marks?: Marks;
+      /**
+       * Optionale Spaltenbreite in Modell-Metern (Textspalte): ist sie gesetzt,
+       * bricht der Renderer den Text wortweise auf diese Breite um. Fehlt sie,
+       * bleibt es einzeiliger Text.
+       */
+      wrapWidth?: number;
+      /**
+       * Reiches Textfeld (mehrere Absätze, gemischte Formatierung) — Vorrang vor
+       * `text`/`marks` beim Rendern, s. `Drawing2DGeom["text"].doc`. Bricht bei
+       * gesetztem `wrapWidth` wortweise um (Run-Grenzen bleiben erhalten).
+       */
+      doc?: RichTextDoc;
+      /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl). */
+      drawingId?: string;
+      greyed?: boolean;
+    }
+  | {
+      // Eingebettetes Rasterbild (aus Drawing2D `{shape:"image"}`, Foto/Logo/
+      // gerasterte PDF-Seite) — achsparalleles Rechteck, Data-URL als Quelle.
+      kind: "drawingImage";
+      min: Vec2;
+      max: Vec2;
+      src: string;
+      opacity: number;
+      drawingId?: string;
+      greyed?: boolean;
+    }
+  | {
+      // Glatter Kreis (aus Drawing2D `{shape:"circle"}`, z. B. DXF-CIRCLE) — als
+      // echtes `<circle>` gerendert (rund bei jedem Zoom), nicht als Vieleck.
+      kind: "drawingCircle";
+      center: Vec2;
+      /** Radius in Modell-Metern. */
+      r: number;
+      /** Vollton-Füllfarbe oder "none". */
+      fill: string;
+      stroke: string;
+      weightMm: number;
+      dash?: number[] | null;
+      drawingId?: string;
+      greyed?: boolean;
+    }
+  | {
+      // Glatter Bogen (aus Drawing2D `{shape:"arc"}`, z. B. DXF-ARC) — als
+      // SVG-Bogenpfad gerendert; Winkel in RADIANT (CCW im Modell).
+      kind: "drawingArc";
+      center: Vec2;
+      r: number;
+      a0: number;
+      a1: number;
+      stroke: string;
+      weightMm: number;
+      dash?: number[] | null;
+      drawingId?: string;
+      greyed?: boolean;
+    };
+
+/**
+ * Löst eine HatchStyle-Ressource (per id) zu einer darstellungsfertigen
+ * {@link HatchRender} auf. Der Linienstil der Musterlinien wird, falls gesetzt,
+ * aus dem Line Manager nachgeschlagen; sonst gilt ein dünner Default.
+ *
+ * VORDERGRUND (Muster-/Schraffurlinienfarbe bzw. Vollfüllung): AKTUELL fest auf
+ * {@link HATCH_INK} gezwungen (Nutzer-Vorgabe 2026-07-04) — Schnitt- WIE
+ * Oberflächen-/Ansichtsschraffur zeigen dieselbe dunkle Tinte, unabhängig von
+ * Material-/Bauteilfarbe, HatchStyle.color oder einem By-Layer/By-Object-
+ * Vordergrund-Override. `_foreground` bleibt Teil der Signatur — alle Aufrufer
+ * reichen weiterhin den über {@link resolveForeground} aufgelösten Bauteil-
+ * Vordergrund durch (z. B. für eine spätere Wiederherstellung der materialtreuen
+ * Schraffur) —, fließt aber bewusst nicht mehr in `color` ein.
+ */
+export function resolveHatch(
+  project: Project,
+  hatchId: string,
+  wallAngleDeg?: number,
+  _foreground?: string,
+): HatchRender {
+  const h = getHatch(project, hatchId);
+  const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
+  // Wandbezogener Winkel: `HatchRender.angle` wird von allen Renderern in der
+  // SVG-Konvention (im Uhrzeigersinn, Bildschirm-Y nach unten) verstanden — der
+  // Modell-Renderer negiert ihn in `toModelAngleRad`. Die Wandachse `wallAngleDeg`
+  // ist dagegen ein MODELL-Winkel (atan2 der Richtung, gegen den Uhrzeigersinn,
+  // Y nach oben). Wegen der Y-Spiegelung entspricht die Wandrichtung am Bildschirm
+  // dem Winkel −wallAngleDeg; das Muster folgt der Wand also, indem der
+  // Wandwinkel SUBTRAHIERT wird. Ohne Wandkontext (Decke) bleibt `angle` absolut.
+  const angle =
+    h.relativeToWall && wallAngleDeg != null ? h.angle - wallAngleDeg : h.angle;
+  return {
+    pattern: h.pattern,
+    scale: h.scale,
+    angle,
+    // Fest auf die Monochrom-Tinte gezwungen (siehe JSDoc oben) — weder
+    // `_foreground` noch `HatchStyle.color` (Material-/Bauteilfarbe) fließen ein.
+    color: HATCH_INK,
+    lineWeight: ls?.weight ?? 0.13,
+    dash: ls?.dash ?? null,
+    kind: h.kind,
+    lines: h.lines,
+    image: h.image,
+    // Random-Streu-Parameter unverändert durchreichen (Erzeugung in glPlanHatch).
+    seed: h.seed,
+    density: h.density,
+    lengthMin: h.lengthMin,
+    lengthMax: h.lengthMax,
+  };
+}
+
+/**
+ * Kollabiert die Vordergrund-Farbkette (Muster-/Schraffurlinienfarbe) eines
+ * Bauteils zu einem einzelnen Wert für {@link resolveHatch}. AUFLÖSUNGSREIHENFOLGE
+ * (By-Layer/By-Object, siehe `docs`/Attribut-Panel):
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
+ *   (`Component.foreground`) ?? `undefined`.
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ * `undefined` als Endergebnis heißt „Nach System" — die Kette läuft dann in
+ * resolveHatch auf den HatchStyle.color-Backward-Compat-Fallback weiter
+ * (Sample-Verhalten: kein Element setzt `override`/`source`, also identisch).
+ */
+export function resolveForeground(
+  comp: Component,
+  override?: string,
+  category?: LayerCategory,
+  source?: AttributeSource,
+): string | undefined {
+  if (override != null) return override;
+  if (source === "layer") return category?.color ?? comp.foreground;
+  return comp.foreground;
+}
+
+/**
+ * Kollabiert die Hintergrund-/Füllfarbkette (Poché) eines Bauteils, analog zu
+ * {@link resolveForeground}:
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
+ *   (`Component.background`) ?? `Component.color`.
+ * Immer definiert (endet spätestens bei `Component.color` = heutiges Verhalten).
+ */
+export function resolveBackground(
+  comp: Component,
+  override?: string,
+  category?: LayerCategory,
+  source?: AttributeSource,
+): string {
+  if (override != null) return override;
+  if (source === "layer") return category?.color ?? comp.background ?? comp.color;
+  return comp.background ?? comp.color;
+}
+
+/**
+ * Kollabiert die Schraffur-Referenz (Hatch Manager) eines Elements zu einer
+ * einzelnen `hatchId` für {@link resolveHatch} — By-Layer/By-Object, analog zu
+ * {@link resolveForeground}:
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.hatch`) ??
+ *   `fallback` (Bauteil-Schraffur, z. B. `Component.hatchId`/`viewHatchId`, oder
+ *   `undefined` bei Drawing2D ohne Bauteil-Bezug).
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ * Ergebnis kann `undefined` sein — der Aufrufer fällt dann auf `NO_HATCH` zurück.
+ */
+export function resolveHatchId(
+  override: string | undefined,
+  source: AttributeSource | undefined,
+  category: LayerCategory | undefined,
+  fallback?: string,
+): string | undefined {
+  if (override != null) return override;
+  if (source === "layer") return category?.hatch ?? fallback;
+  return fallback;
+}
+
+/**
+ * Kollabiert die Strichstärke-Kette (mm Papier) eines Elements, By-Layer/By-
+ * Object, analog zu {@link resolveHatchId}:
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.lw`) ??
+ *   `fallback` (bisherige Bauteil-/LineStyle-/Kategorie-Default-Kette des
+ *   Aufrufers — heutiges Verhalten).
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ */
+export function resolveStrokeWeight(
+  override: number | undefined,
+  source: AttributeSource | undefined,
+  category: LayerCategory | undefined,
+  fallback: number,
+): number {
+  if (override != null) return override;
+  if (source === "layer") return category?.lw ?? fallback;
+  return fallback;
+}
+
+// ── SIA-Poché-Füllung + monochrome Schraffur-Tinte ──────────────────────────
+// Die 2D-Poché einer (auch mehrschichtigen) Wand trägt NICHT die rohe Bauteil-
+// Albedo (3D-Materialfarbe), sondern einen neutralen Hintergrund, auf dem die
+// Schraffur-Musterlinien liegen: Vollmuster ("solid") = dunkle Tinten-Poché
+// (kein Linienmuster), jedes andere Muster (inkl. "none") = HELLER Hintergrund.
+// Dieselben zwei Werte sind AKTUELL auch die feste Schraffur-Vordergrundfarbe
+// (siehe {@link resolveHatch}) — Schnitt- wie Oberflächen-Schraffur zeigen also
+// einheitlich Tinte auf hellem Papier, unabhängig von Material-/Bauteilfarbe.
+export const HATCH_PAPER = "#f0f0f0";
+export const HATCH_INK = "#0f0f0f";
+/** Neutrale Poché-Füllfarbe für ein Muster: "solid" → Tinte, sonst Papier. */
+export function pocheFill(pattern: HatchPattern): string {
+  return pattern === "solid" ? HATCH_INK : HATCH_PAPER;
+}
+
+/** Schraffur-Platzhalter „ohne" (für reine Umriss-/Sammelflächen). */
+export const NO_HATCH: HatchRender = {
+  pattern: "none",
+  scale: 1,
+  angle: 0,
+  color: POCHE_STROKE,
+  lineWeight: LAYER_LINE_MM,
+  dash: null,
+};

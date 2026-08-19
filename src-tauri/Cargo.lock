@@ -394,7 +394,6 @@ name = "cad-tauri"
 version = "0.1.0"
 dependencies = [
  "fs4",
- "geometry",
  "pollster",
  "render2d",
  "render3d",
@@ -1583,16 +1582,6 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
-]
-
-[[package]]
-name = "geometry"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "serde",
- "serde_json",
- "wasm-bindgen",
 ]
 
 [[package]]

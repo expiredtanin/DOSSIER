@@ -546,6 +546,18 @@ export function createAnnotation(
       ...(init.weightMm !== undefined ? { weightMm: init.weightMm } : {}),
     };
   }
+  if (kind === "image") {
+    return {
+      id,
+      kind: "image",
+      xMm: init.xMm ?? 20,
+      yMm: init.yMm ?? 20,
+      widthMm: init.widthMm ?? 60,
+      heightMm: init.heightMm ?? 40,
+      src: init.src ?? "",
+      ...(init.opacity !== undefined ? { opacity: init.opacity } : {}),
+    };
+  }
   return {
     id,
     kind: "text",
@@ -554,6 +566,8 @@ export function createAnnotation(
     text: init.text ?? "",
     heightMm: init.heightMm ?? 3.5,
     ...colorPatch,
+    ...(init.doc !== undefined ? { doc: init.doc } : {}),
+    ...(init.widthMm !== undefined ? { widthMm: init.widthMm } : {}),
   };
 }
 

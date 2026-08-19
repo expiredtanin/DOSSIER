@@ -158,89 +158,102 @@ export function ObjectInfoPanel() {
 
       <div className="objinfo-sep" />
 
-      {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
-          rechts daneben (Nutzer-Wunsch). */}
-      <div className="objinfo-section-label">{t("objinfo.refpoint")}</div>
-      <div className="objinfo-refrow">
-        <div className="objinfo-cube" role="group" aria-label={t("objinfo.refpoint")}>
-          {FRACTIONS.map((fy) =>
-            FRACTIONS.map((fx) => {
-              const active = anchor.fx === fx && anchor.fy === fy;
-              return (
-                <button
-                  key={anchorKey(fx, fy)}
-                  type="button"
-                  className={"objinfo-anchor" + (active ? " active" : "")}
-                  title={t("objinfo.setRefpoint")}
-                  aria-pressed={active}
-                  onClick={() => setAnchor({ fx, fy })}
-                >
-                  <span className="objinfo-dot" />
-                </button>
-              );
-            }),
-          )}
-        </div>
+      {/* Bezugspunkt/X-Y/Maße sind MODELL-Meter (Grundriss) — für eine Layout-
+          Annotation (Papier-Millimeter, eigenes Koordinatensystem) gibt es
+          keinen sinnvollen Bezugspunkt hier; Position/Grösse editiert man
+          direkt am Rahmen auf dem Blatt (Greifpunkte + das dortige HUD in
+          mm — `layout-sheet-hud` in LayoutSheet.tsx). Sonst zeigte dieses
+          Panel für sie fest 0/0 (Selection.bbox ist für sie ein Platzhalter,
+          s. App.tsx) — verwirrend statt nur „nicht anwendbar". */}
+      {sel.kind === "layoutAnnotation" ? (
+        <div className="objinfo-empty">{t("objinfo.layoutAnnotationHint")}</div>
+      ) : (
+        <>
+          {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
+              rechts daneben (Nutzer-Wunsch). */}
+          <div className="objinfo-section-label">{t("objinfo.refpoint")}</div>
+          <div className="objinfo-refrow">
+            <div className="objinfo-cube" role="group" aria-label={t("objinfo.refpoint")}>
+              {FRACTIONS.map((fy) =>
+                FRACTIONS.map((fx) => {
+                  const active = anchor.fx === fx && anchor.fy === fy;
+                  return (
+                    <button
+                      key={anchorKey(fx, fy)}
+                      type="button"
+                      className={"objinfo-anchor" + (active ? " active" : "")}
+                      title={t("objinfo.setRefpoint")}
+                      aria-pressed={active}
+                      onClick={() => setAnchor({ fx, fy })}
+                    >
+                      <span className="objinfo-dot" />
+                    </button>
+                  );
+                }),
+              )}
+            </div>
 
-        {/* X / Y des gewählten Bezugspunkts (editierbar) + Z (read-only) + ein
-            Dreh-Feld, als Spalte. */}
-        <div className="objinfo-xyzcol">
-          <DimensionField
-            label={t("objinfo.x")}
-            value={px}
-            min={-Infinity}
-            onCommit={(nx) => host.onMoveSelectionBy(nx - px, 0)}
-          />
-          <DimensionField
-            label={t("objinfo.y")}
-            value={py}
-            min={-Infinity}
-            onCommit={(ny) => host.onMoveSelectionBy(0, ny - py)}
-          />
-          {/* Z ehrlich: Das Modell ist 2D pro Ebene; es gibt keine Z am Element.
-              Daher „—" statt einer gefakten 0, mit kurzem Hinweis im Titel. */}
-          <div className="objinfo-field">
-            <span className="objinfo-flabel">{t("objinfo.z")}</span>
-            <span className="objinfo-fval objinfo-muted" title={t("objinfo.zHint")}>
-              —
-            </span>
+            {/* X / Y des gewählten Bezugspunkts (editierbar) + Z (read-only) + ein
+                Dreh-Feld, als Spalte. */}
+            <div className="objinfo-xyzcol">
+              <DimensionField
+                label={t("objinfo.x")}
+                value={px}
+                min={-Infinity}
+                onCommit={(nx) => host.onMoveSelectionBy(nx - px, 0)}
+              />
+              <DimensionField
+                label={t("objinfo.y")}
+                value={py}
+                min={-Infinity}
+                onCommit={(ny) => host.onMoveSelectionBy(0, ny - py)}
+              />
+              {/* Z ehrlich: Das Modell ist 2D pro Ebene; es gibt keine Z am Element.
+                  Daher „—" statt einer gefakten 0, mit kurzem Hinweis im Titel. */}
+              <div className="objinfo-field">
+                <span className="objinfo-flabel">{t("objinfo.z")}</span>
+                <span className="objinfo-fval objinfo-muted" title={t("objinfo.zHint")}>
+                  —
+                </span>
+              </div>
+              {/* Drehen: Delta-Winkel (Grad) um den gewählten Bezugspunkt — kein
+                  persistenter Zustand, das Feld zeigt nach dem Commit wieder „0". */}
+              <RotateField onCommit={(deg) => host.onRotateSelectionAround(px, py, deg)} />
+            </div>
           </div>
-          {/* Drehen: Delta-Winkel (Grad) um den gewählten Bezugspunkt — kein
-              persistenter Zustand, das Feld zeigt nach dem Commit wieder „0". */}
-          <RotateField onCommit={(deg) => host.onRotateSelectionAround(px, py, deg)} />
-        </div>
-      </div>
 
-      <div className="objinfo-sep" />
+          <div className="objinfo-sep" />
 
-      {/* Maße (editierbar) — Commit auf blur/Enter skaliert um den Anker. */}
-      <div className="objinfo-section-label">{t("objinfo.dimensions")}</div>
-      <DimensionField
-        label={t("objinfo.width")}
-        value={width}
-        onCommit={(w) => commitSize(w, height)}
-      />
-      <DimensionField
-        label={t("objinfo.height")}
-        value={height}
-        onCommit={(h) => commitSize(width, h)}
-      />
-      {/* Linien-Länge bzw. Kreis-Radius (nur wenn die Selektion genau eine
-          Linie/ein Kreis ist — das Modell gibt das direkt her, andere Formen
-          bleiben ohne Zusatzfeld). */}
-      {drawingShape === "line" && (
-        <DimensionField
-          label={t("objinfo.drawing.length")}
-          value={Math.hypot(width, height)}
-          onCommit={(v) => host.onSetDrawingLineLength(v)}
-        />
-      )}
-      {drawingShape === "circle" && (
-        <DimensionField
-          label={t("objinfo.drawing.radius")}
-          value={width / 2}
-          onCommit={(v) => host.onSetDrawingCircleRadius(v)}
-        />
+          {/* Maße (editierbar) — Commit auf blur/Enter skaliert um den Anker. */}
+          <div className="objinfo-section-label">{t("objinfo.dimensions")}</div>
+          <DimensionField
+            label={t("objinfo.width")}
+            value={width}
+            onCommit={(w) => commitSize(w, height)}
+          />
+          <DimensionField
+            label={t("objinfo.height")}
+            value={height}
+            onCommit={(h) => commitSize(width, h)}
+          />
+          {/* Linien-Länge bzw. Kreis-Radius (nur wenn die Selektion genau eine
+              Linie/ein Kreis ist — das Modell gibt das direkt her, andere Formen
+              bleiben ohne Zusatzfeld). */}
+          {drawingShape === "line" && (
+            <DimensionField
+              label={t("objinfo.drawing.length")}
+              value={Math.hypot(width, height)}
+              onCommit={(v) => host.onSetDrawingLineLength(v)}
+            />
+          )}
+          {drawingShape === "circle" && (
+            <DimensionField
+              label={t("objinfo.drawing.radius")}
+              value={width / 2}
+              onCommit={(v) => host.onSetDrawingCircleRadius(v)}
+            />
+          )}
+        </>
       )}
       {/* Kontext-Objekt (importiertes Gebäude/Terrain/Konturen): reale LV95-
           Koordinate des Bbox-Mittelpunkts — direkt sichtbar, ob/wohin

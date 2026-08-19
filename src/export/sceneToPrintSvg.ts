@@ -25,6 +25,7 @@
 import type {
   RArc,
   RFill,
+  RImage,
   RLine,
   ROutline,
   RPoint,
@@ -141,6 +142,11 @@ export function sceneToPrintSvg(scene: RScene, opts: PrintSceneOptions): PrintSc
   bg.setAttribute("height", String(opts.pageHeightMm));
   bg.setAttribute("fill", "#ffffff");
   svg.appendChild(bg);
+
+  // Eingebettete Bilder (Foto/Logo/PDF-Seite) ZWISCHEN Blatt und Vektorgeometrie
+  // — dieselbe Schicht-Reihenfolge wie georeferenzierte Luftbilder im SVG-Pfad
+  // (PlanView.tsx), damit darübergezeichnete Linien/Schraffuren sichtbar bleiben.
+  for (const img of scene.images) appendImage(svg, img, map, k);
 
   // ── Maler-Reihenfolge: Fuellungen/Umrisse/Polylinien/Linien gemeinsam nach
   // `z` sortieren (stabiler Sort => Einfuegereihenfolge bricht Gleichstaende
@@ -316,6 +322,25 @@ function appendArc(svg: SVGSVGElement, a: RArc, map: Mapper, mmPerM: number): vo
   if (a.dash && a.dash.length) {
     el.setAttribute("stroke-dasharray", a.dash.map((x) => round(x)).join(" "));
   }
+  svg.appendChild(el);
+}
+
+/** Eingebettetes Rasterbild (Data-URL) als achsparalleles `<image>`. */
+function appendImage(svg: SVGSVGElement, img: RImage, map: Mapper, mmPerM: number): void {
+  const w = (img.max[0] - img.min[0]) * mmPerM;
+  const h = (img.max[1] - img.min[1]) * mmPerM;
+  if (w <= 0 || h <= 0) return;
+  // Papier-Y zeigt nach unten -> oben-links = (min.x, max.y) im Welt-Raum.
+  const [x] = map(img.min);
+  const [, y] = map([img.min[0], img.max[1]]);
+  const el = document.createElementNS(SVG_NS, "image");
+  el.setAttribute("href", img.src);
+  el.setAttribute("x", String(round(x)));
+  el.setAttribute("y", String(round(y)));
+  el.setAttribute("width", String(round(w)));
+  el.setAttribute("height", String(round(h)));
+  el.setAttribute("preserveAspectRatio", "none");
+  if (img.opacity < 1) setOpacityAttr(el, "opacity", img.opacity);
   svg.appendChild(el);
 }
 

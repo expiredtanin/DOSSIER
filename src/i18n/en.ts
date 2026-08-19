@@ -180,6 +180,11 @@ export const en: Record<TranslationKey, string> = {
   "tool.text.hint": "Text: set anchor point, then type the text",
   "tool.textbox": "Text column",
   "tool.textbox.hint": "Text column: anchor, drag column width, then type the text",
+  "tool.image": "Image/PDF",
+  "tool.image.hint": "Insert an image or PDF (each PDF page is embedded as an image)",
+  "image.readError": "Could not read image.",
+  "image.pdfError": "Could not read PDF.",
+  "image.pdfEmpty": "PDF has no pages.",
   // Ribbon top bar (tabs + groups)
   "ribbon.tab.2d": "2D",
   "ribbon.tab.3d": "3D",
@@ -298,6 +303,7 @@ export const en: Record<TranslationKey, string> = {
   "attr.stroke": "Pen",
   "attr.color": "Color",
   "attr.weight": "Line weight (mm)",
+  "attr.opacity": "Opacity",
   "attr.lineStyle": "Line style",
   "attr.lineStyle.none": "Default",
   "attr.fill": "Fill",
@@ -342,6 +348,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.kind.column": "Column",
   "objinfo.kind.roof": "Roof",
   "objinfo.kind.contextObject": "Context object",
+  "objinfo.kind.layoutAnnotation": "Sheet markup",
+  "objinfo.layoutAnnotationHint": "Edit position/size in mm directly on the frame on the sheet (grips or the fields there).",
   // ── Context object attributes (object info panel) ───────────────────────
   "objinfo.contextObject.section": "Georeferencing",
   "objinfo.contextObject.type": "Type",
@@ -1556,6 +1564,7 @@ export const en: Record<TranslationKey, string> = {
   // Editor
   "layouts.editorTitle": "Layout editor",
   "layouts.fit": "Fit",
+  "layouts.zoom100": "True size (100%, 1:1 on screen)",
   "layouts.addViewport": "Add viewport",
   "layouts.pickSnapshot": "Pick a view …",
   "layouts.noSnapshots": "No views available. Save a view first.",
@@ -1576,19 +1585,20 @@ export const en: Record<TranslationKey, string> = {
   "layouts.bindSnapshot": "Bind snapshot",
   "layouts.emptyViewports":
     "No viewports yet. Choose “Draw viewport” and drag a rectangle on the sheet.",
-  // Annotations (line/rect/text) drawn directly on the sheet
-  "layouts.annotLine": "Draw line",
-  "layouts.annotRect": "Draw rectangle",
-  "layouts.annotText": "Place text",
+  // Annotations (line/rect/text/image) drawn directly on the sheet — with the
+  // same tools as the plan (left tools panel), no layout-only tool.
   "layouts.annotTextTitle": "Text",
   "layouts.annotTextLabel": "Text content:",
   "layouts.annotEditText": "Edit text",
-  "layouts.annotColor": "Color",
-  "layouts.annotWeight": "Line weight (mm)",
   "layouts.annotRemove": "Remove annotation",
+  "layouts.annotX": "X (mm)",
+  "layouts.annotY": "Y (mm)",
+  "layouts.annotWidth": "Width (mm)",
+  "layouts.annotHeight": "Height (mm)",
   "layouts.annot.line": "Line",
   "layouts.annot.rect": "Rectangle",
   "layouts.annot.text": "Text",
+  "layouts.annot.image": "Image",
   // Tree / “＋” menu / folders
   "layouts.add": "New …",
   "layouts.addFolder": "Create folder",

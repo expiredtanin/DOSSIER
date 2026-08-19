@@ -1442,6 +1442,10 @@ body {
   background: var(--accent-dim);
   color: var(--ink);
 }
+.nav-add .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
 
 /* Zahnrad in der Panel-Kopfzeile (Zeichnungsebenen/Ebenen) → Einstellungen.
    Dezent, rund, wie der „+"-Knopf daneben. */
@@ -6649,6 +6653,18 @@ body {
   flex: 0 0 auto;
   z-index: 3;
 }
+/* Nur Navigations-Knöpfe hier (Zurück/Viewport aufziehen/Zoom/Einpassen) — die
+   Zeichenwerkzeuge kommen aus dem linken Werkzeugpanel (kein Blatt-eigenes
+   Werkzeug mehr). `.nav-add` ist sonst ein runder 20px-Icon-Knopf; hier tragen
+   mehrere Knöpfe zusätzlich Text, daher eigene Breite/Form + kein Umbruch. */
+.layout-sheet-toolbar .nav-add {
+  width: auto;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  gap: 4px;
+  white-space: nowrap;
+}
 
 .layout-sheet-name {
   font-size: 11px;
@@ -6667,9 +6683,11 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  /* Dunkler „Tisch" mit dezentem Verlauf, damit das weisse Blatt abhebt. */
-  background:
-    radial-gradient(circle at 50% 40%, #2a2a2a 0%, #161616 70%, #101010 100%);
+  /* Papierartiger „Tisch" (dieselbe Papierfarbe wie die Zeichenfläche im
+     Grundriss, `--sheet`) statt eines dunklen Tischs — das Blatt selbst
+     bleibt reinweiss (.layout-sheet-paper) und hebt sich per Randlinie +
+     Schatten ab, nicht per Hell/Dunkel-Kontrast. */
+  background: var(--sheet);
   touch-action: none;
   user-select: none;
 }
@@ -6677,7 +6695,8 @@ body {
 .layout-sheet-paper {
   position: absolute;
   background: #ffffff;
-  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(26, 26, 24, 0.18);
+  box-shadow: 0 4px 22px rgba(26, 26, 24, 0.22);
 }
 
 .layout-sheet-vp {
@@ -6722,6 +6741,33 @@ body {
   background: rgba(59, 130, 246, 0.12);
   z-index: 4;
   pointer-events: none;
+}
+
+/* Transparenter Vollflächen-Fänger hinter dem Inline-Text-Editor — ein Klick
+   daneben schliesst ihn (jede Änderung ist bereits live gespeichert). */
+.layout-sheet-inline-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+}
+
+/* Inline-Text-Editor DIREKT auf dem Blatt (kein schwebendes Fenster) — weisser
+   Rahmen wie Papier, blauer Rand während der Bearbeitung. `transform: scale()`
+   (inline, s. LayoutSheet.tsx) bringt die feste 12-pt-Basisgrösse des
+   RichTextEditor auf die Schriftgrösse der Annotation beim aktuellen Zoom. */
+.layout-sheet-inline-text {
+  position: absolute;
+  z-index: 7;
+  background: #ffffff;
+  outline: 1.5px solid #3b82f6;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.layout-sheet-inline-text .rt-editor {
+  min-height: inherit;
+}
+.layout-sheet-inline-text .rt-surface {
+  min-height: 1.4em;
+  padding: 2px 4px;
 }
 
 /* HUD (Eigenschaften des gewählten VP) unten links. */
@@ -6882,8 +6928,14 @@ body {
 }
 
 /* ── Splash + Startbildschirm (App.tsx: bootPhase splash → start → editor) ──
-   Immer dunkel (wie der Über-Dialog), unabhängig vom Hell/Dunkel-Theme —
-   eigener Marken-Moment vor dem eigentlichen Editor. */
+   Eigenes, KLEINES Fenster (App.tsx resized das Tauri-Fenster waehrend dieser
+   beiden Phasen, s. dortigen Effekt) — wie das kompakte Start-Fenster der
+   meisten CAD-Programme, nicht die volle Editor-Fenstergroesse. Hintergrund
+   ist das "Papier" (--sheet, IMMER hell, wie das Zeichenblatt), UNABHAENGIG
+   vom Hell/Dunkel-Theme. Deshalb hier FESTE (nicht themeabhaengige) Ink-Farben
+   statt --ink/--muted/--border/--field-bg/--accent* — Papier ist immer hell,
+   die Schrift darauf muss deshalb immer dunkel bleiben, sonst verschwindet sie
+   im Dunkelmodus auf dem hellen Papier (exakte Werte = Licht-Palette oben). */
 .splash-screen,
 .start-screen {
   position: fixed;
@@ -6891,62 +6943,81 @@ body {
   z-index: 2000;
   display: flex;
   flex-direction: column;
+  background: var(--sheet);
+  color: #1a1a18;
+}
+.splash-screen {
   align-items: center;
   justify-content: center;
-  background: #16181c;
-  color: #e6e8ea;
+}
+/* Startbildschirm: Inhalt vertikal zentriert (.start-main), die Fusszeile
+   (Version) sitzt fix unten — wie ein klassisches Programm-Start-Fenster. */
+.start-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.start-footer {
+  flex: 0 0 auto;
+  padding: 8px 0 12px;
+  font-size: 10px;
+  color: #8a8580;
+  text-align: center;
 }
 .splash-brand,
 .start-brand {
   font-weight: 700;
-  font-size: 32px;
+  font-size: 22px;
   text-transform: lowercase;
   letter-spacing: -0.01em;
 }
 .start-brand {
-  margin-bottom: 36px;
+  margin-bottom: 20px;
 }
 .start-actions {
   display: flex;
-  gap: 14px;
+  gap: 10px;
 }
 .start-action {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  min-width: 200px;
-  padding: 16px 18px;
-  border-radius: 10px;
-  border: 1px solid #3a3f47;
-  background: #23262b;
+  gap: 3px;
+  min-width: 160px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #c8c2ba;
+  background: #f5f2ec;
   color: inherit;
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s;
 }
 .start-action:hover {
-  border-color: var(--accent, #0f766e);
-  background: #292d33;
+  border-color: #4a453e;
+  background: #ece8e2;
 }
 .start-action-title {
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: 600;
 }
 .start-action-hint {
-  font-size: 11px;
-  color: #9aa0a6;
+  font-size: 10.5px;
+  color: #8a8580;
 }
 .start-recent {
-  margin-top: 36px;
-  width: 420px;
-  max-width: calc(100vw - 48px);
+  margin-top: 22px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
 }
 .start-recent-title {
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #9aa0a6;
-  margin-bottom: 8px;
+  color: #8a8580;
+  margin-bottom: 6px;
 }
 .start-recent-list {
   list-style: none;
@@ -6955,7 +7026,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 220px;
+  max-height: 140px;
   overflow-y: auto;
 }
 .start-recent-row {
@@ -6970,8 +7041,8 @@ body {
   align-items: flex-start;
   gap: 1px;
   min-width: 0;
-  padding: 7px 10px;
-  border-radius: 7px;
+  padding: 6px 8px;
+  border-radius: 6px;
   border: none;
   background: transparent;
   color: inherit;
@@ -6979,10 +7050,10 @@ body {
   text-align: left;
 }
 .start-recent-item:hover {
-  background: #23262b;
+  background: #ece8e2;
 }
 .start-recent-name {
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -6990,26 +7061,32 @@ body {
   max-width: 100%;
 }
 .start-recent-path {
-  font-size: 10.5px;
-  color: #767c83;
+  font-size: 9.5px;
+  color: #8a8580;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
 }
+.start-recent-time {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  color: #8a8580;
+  white-space: nowrap;
+}
 .start-recent-remove {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   border: none;
   background: transparent;
-  color: #767c83;
+  color: #8a8580;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
 }
 .start-recent-remove:hover {
-  background: #23262b;
-  color: #e6e8ea;
+  background: #ece8e2;
+  color: #1a1a18;
 }

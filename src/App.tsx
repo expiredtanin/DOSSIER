@@ -20,10 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   collectVisibleCodes,
   flattenCategories,
-  getWallType,
-  wallTypeThickness,
 } from "./model/types";
-import { wallCorners } from "./model/geometry";
 import { add, dot, leftNormal, normalize, scale, sub } from "./model/geometry";
 import type {
   Ceiling,
@@ -44,12 +41,7 @@ import { roofBaseElevation, roofGeometry } from "./geometry/roof";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
 import { ImportDialog } from "./ui/ImportDialog";
 import { ExportPdfDialog } from "./ui/ExportPdfDialog";
-import type { ExportPdfDecision } from "./ui/ExportPdfDialog";
-import { savePlanPdf } from "./export/exportPdf";
 import { ExportDxfDialog } from "./ui/ExportDxfDialog";
-import type { ExportDxfDecision } from "./ui/ExportDxfDialog";
-import { savePlanDxf } from "./export/exportDxf";
-import { projectToWorldCoords } from "./model/geoRebase";
 import type { ScheduleKind } from "./export/exportSchedule";
 import { SettingsDialog } from "./ui/SettingsDialog";
 import { OpeningEditorDialog } from "./ui/OpeningEditorDialog";
@@ -118,7 +110,6 @@ import {
 } from "./tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "./tools/transform";
 import type {
-  MeasurementReadout,
   SnapResult,
   ToolContext,
   ToolDraft,
@@ -139,6 +130,19 @@ import { useDrawingToolState } from "./state/useDrawingToolState";
 import { useSelectionState } from "./state/useSelectionState";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useProjectActions } from "./state/useProjectActions";
+import {
+  useActiveToolKeys,
+  useBooleanOpsShortcut,
+  useCommandTabShortcut,
+  useDrawingClipboardShortcut,
+  useSelectAllAndDeleteShortcut,
+  useSplitJoinShortcut,
+  useToolNumberShortcuts,
+  useTransformShortcuts,
+  useUndoRedoShortcut,
+} from "./state/useKeyboardShortcuts";
+import { useFileDropImport, useImageImportHandling } from "./state/useImportHandling";
+import { useExportHandlers } from "./state/useExportHandlers";
 import { useThemeModeState } from "./theme/useThemeMode";
 import { CommandLine } from "./ui/CommandLine";
 import type { CommandLineHandle, CommandLineField, CommandLineOption } from "./ui/CommandLine";
@@ -176,9 +180,12 @@ import { FloatingPanel } from "./panels/FloatingPanel";
 import { DragOverlay, usePanelDrag } from "./panels/panelDrag";
 import { itemDisplay } from "./panels/displayMode";
 import { PanelHostContext } from "./panels/types";
-import type { DisplayMode, DockId, PanelHost } from "./panels/types";
+import type { DockId } from "./panels/types";
+import { hostWithMode } from "./panels/host";
 import type { PanelHostValue } from "./panels/host";
+import { hitTestWall } from "./viewport/planHitTest";
 import { deriveSelection } from "./state/selectionInfo";
+import type { Selection } from "./state/selectionInfo";
 import { centroid as roomCentroid } from "./geometry/roomArea";
 import { docFromText, plainText } from "./text/richText";
 import type { RichTextDoc } from "./text/richText";
@@ -275,6 +282,27 @@ export default function App() {
   // volle Editor bestehen (auch bei späteren File>Neu/Öffnen-Aktionen, die
   // weiterhin über das normale Menü laufen).
   const [bootPhase, setBootPhase] = useState<"splash" | "start" | "editor">("splash");
+
+  // Fenstergrösse an die Boot-Phase anpassen: Splash/Startbildschirm sind ein
+  // kleines, kompaktes Fenster (wie das Start-Fenster gängiger CAD-Programme),
+  // NICHT die volle Editor-Fenstergrösse — sonst wirkt der Startbildschirm wie
+  // leerer Raum in einem viel zu grossen Fenster. Beim Wechsel in "editor" auf
+  // die Standardgrösse aus tauri.conf.json zurück + zentrieren. Nur unter
+  // Tauri relevant (Browser-Fenster lässt sich per Web-API nicht sinnvoll
+  // resizen).
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void (async () => {
+      const [{ getCurrentWindow }, { LogicalSize }] = await Promise.all([
+        import("@tauri-apps/api/window"),
+        import("@tauri-apps/api/dpi"),
+      ]);
+      const win = getCurrentWindow();
+      const [w, h] = bootPhase === "editor" ? [1400, 900] : [520, 420];
+      await win.setSize(new LogicalSize(w, h));
+      await win.center();
+    })();
+  }, [bootPhase]);
 
   // ── Globaler Zustand aus dem Store (Slices: project/selection/view/layout) ─
   // Pro useStore-Aufruf EIN Feld selektieren (Referenz-Gleichheit, sonst
@@ -437,6 +465,13 @@ export default function App() {
     setEditTextId,
   } = useContextMenuState();
 
+  // Gewählte Annotation auf einem offenen Layout-Blatt (Linie/Rechteck/Text/
+  // Bild) — gehoben aus LayoutSheetView, damit die Attribute-Palette (rechtes
+  // Panel) dieselbe Auswahl sieht wie ein Drawing2D im Grundriss.
+  const [selectedLayoutAnnotationId, setSelectedLayoutAnnotationId] = useState<string | null>(
+    null,
+  );
+
   // Beim Geschosswechsel die Wand-Auswahl + offene Overlays zurücksetzen (die
   // Wände eines anderen Geschosses sind eine andere Menge). Der Ansichtswechsel
   // (Grundriss ↔ 3D) lässt die Auswahl bestehen — dieselbe wallId gilt in
@@ -470,6 +505,11 @@ export default function App() {
   // Der Klick auf „DXF importieren" triggert .click() dieses Inputs; onChange
   // liest die Datei als Text und reicht sie durch parseDxf → addContextObjects.
   const dxfInputRef = useRef<HTMLInputElement>(null);
+
+  // Verstecktes Datei-Input für „Bild einfügen" (Werkzeug „image", s. tools.ts-
+  // Kommentar) — akzeptiert auch PDF (jede Seite wird gerastert, s. pdfImport.ts);
+  // beides landet als Drawing2D `{shape:"image"}`, direkt selektiert.
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // Den DXF-Datei-Dialog-Öffner für den „import"-Befehl registrieren (entkoppelt
   // über den Modul-Hook). Beim Unmount wieder abmelden.
@@ -848,7 +888,28 @@ export default function App() {
   // Ein Klick auf ein gekoppeltes Zeichen-Werkzeug (Wand/Linie/Rechteck/Polylinie)
   // STARTET den passenden Befehl in der Engine und fokussiert das Befehlsfeld
   // („Dialog drin"). „Auswahl" beendet einen laufenden Befehl (Auswahl-Modus).
+  // Zeichenwerkzeuge, die auf einem offenen Layout-Blatt sinnvoll sind (Markups
+  // in Papier-mm, s. LayoutSheet.tsx `annotToolFromGlobal`) — dieselben Tool-IDs
+  // wie im Grundriss, KEIN eigenes Werkzeug nur fürs Layout (Nutzer-Feedback).
+  const LAYOUT_ANNOT_TOOLS: ToolId[] = ["line", "rect", "text", "textbox", "image"];
+
   const onSelectTool = (id: ToolId) => {
+    if (activeLayout) {
+      // Ein Layout-Blatt ist offen: PlanView/die Befehls-Engine haben keinen
+      // sichtbaren Canvas (LayoutSheetView ersetzt die Mitte) — Zeichenwerkzeuge
+      // wertet dort `activeTool` direkt aus (Klick + ggf. Datei-Dialog fürs
+      // Bild), alles andere (Wand/Raum/… — auf dem Blatt ohne Bedeutung) fällt
+      // auf „Auswahl" zurück statt eine Befehls-Engine ohne Canvas zu starten.
+      setActiveTool(LAYOUT_ANNOT_TOOLS.includes(id) ? id : "select");
+      return;
+    }
+    if (id === "image") {
+      // Datei-Auswahl ist async (Dateidialog) — kein Klick-Platzieren wie bei
+      // den übrigen Zeichen-Werkzeugen, daher hier abgefangen statt über die
+      // Befehls-Engine/`activeTool` zu laufen (s. tools.ts `imageTool`-Kommentar).
+      imageInputRef.current?.click();
+      return;
+    }
     const cmd = coupledCommandFor(id);
     if (cmd) {
       // Den gekoppelten Befehl in DERSELBEN Engine starten wie das Tippen von
@@ -919,180 +980,15 @@ export default function App() {
     if (eng?.isActive()) eng.confirm();
   };
 
-  // Globaler Tab-Handler: läuft ein Befehl MIT Feldern (§2.7), zyklt Tab das
-  // aktive Feld (Präzisionseingabe), ohne den Fokus zu stehlen — so kann man bei
-  // der Maus bleiben. Sonst fokussiert/öffnet Tab die Command-Line. Gleicher
-  // INPUT/TEXTAREA/contentEditable-Guard wie die bestehenden keydown-Handler
-  // (das CommandLine-Input selbst behandelt Tab eigenständig).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const inInput =
-        !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-      // Direktes Zahlen-Tippen beim Zeichnen (VW-Verhalten): läuft ein Befehl
-      // mit Tab-Feldern und tippt man eine Ziffer (oder . , -), ohne dass ein
-      // Eingabefeld fokussiert ist, startet das die Werteingabe in der
-      // Befehlszeile — der Wert erscheint live im Cursor-HUD UND unten im Feld.
-      if (
-        !inInput &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        /^[0-9.,-]$/.test(e.key) &&
-        engineRef.current?.isActive() &&
-        engineRef.current.hasFields()
-      ) {
-        e.preventDefault();
-        commandLineRef.current?.beginTyping(e.key);
-        return;
-      }
-      if (e.key !== "Tab") return;
-      if (inInput) {
-        return;
-      }
-      e.preventDefault();
-      const eng = engineRef.current;
-      if (eng?.isActive() && eng.hasFields()) {
-        eng.cycleField();
-        return;
-      }
-      // (c) Läuft ein Vertex-Griff-Drag, öffnet/zyklt Tab das Editier-Feld
-      // (Länge/Winkel relativ zur Nachbarecke). Beim ersten Tab wird zusätzlich
-      // das Befehlsfeld fokussiert, damit man den Zahlenwert direkt tippen kann.
-      if (gripDragInfoRef.current) {
-        const wasOpen = gripEditRef.current !== null;
-        cycleGripEditFieldRef.current?.();
-        if (!wasOpen) commandLineRef.current?.focus();
-        return;
-      }
-      commandLineRef.current?.focus();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Globaler Undo/Redo-Shortcut: Ctrl+Z / Cmd+Z, Ctrl+Shift+Z / Cmd+Shift+Z
-  // bzw. Ctrl+Y für redo. Gleicher Eingabe-Guard wie die übrigen globalen
-  // keydown-Handler (Tab-Zyklus, Zahlen-Shortcuts).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
-      if (!mod || (key !== "z" && key !== "y")) return;
-      const el = e.target as HTMLElement | null;
-      if (
-        el &&
-        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
-      ) {
-        return;
-      }
-      e.preventDefault();
-      if (key === "y" || (key === "z" && e.shiftKey)) redo();
-      else undo();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+  // Globaler Undo/Redo-Shortcut — siehe state/useKeyboardShortcuts.ts.
+  useUndoRedoShortcut(undo, redo);
 
   // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 1 Text, 2 Linie,
-  // 3 Kreis, 4 Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum.
-  // Nur auf Geschoss-Tabs, nicht mit Modifikator (Ctrl/Cmd/Alt bleiben frei).
-  // Direkt nach dem Setzen eines Punkts (z. B. „Startpunkt angeben") steht der
-  // Fokus schon im Befehlsfeld (onSelectTool fokussiert es) — trotzdem soll die
-  // nächste Zifferntaste OHNE Esc gleich das nächste Werkzeug wählen, wie in
-  // Vectorworks. Das ist nur sicher, wenn dort gerade nichts Sinnvolles getippt
-  // werden könnte: das Feld ist noch leer UND der Schritt hat weder Tab-Felder
-  // (Länge/Winkel/Radius, hasFields()) noch erwartet er Freitext (Text-Label,
-  // acceptsFreeText()) — sonst wäre die Ziffer selbst Nutzinhalt (z. B. „Raum
-  // 101" oder eine getippte Koordinate) und darf nicht als Werkzeugwechsel
-  // verschluckt werden. Der Handler wird einmal registriert und liest die
-  // aktuelle Auswahl-Funktion/Ebenen-Art über ein Ref.
-  const toolShortcutRef = useRef({
-    onSelectTool,
-    floor: activeLevel.kind === "floor",
-  });
-  toolShortcutRef.current = {
-    onSelectTool,
-    floor: activeLevel.kind === "floor",
-  };
-  useEffect(() => {
-    const MAP: Record<string, ToolId> = {
-      "1": "text",
-      "2": "line",
-      "3": "circle",
-      "4": "rect",
-      "5": "polyline",
-      "6": "wall",
-      "7": "ceiling",
-      "8": "window",
-      "9": "door",
-      "0": "room",
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const el = e.target as HTMLElement | null;
-      const isInput =
-        !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-      if (isInput) {
-        const isCmdLineInput = el.classList.contains("cmdline-input");
-        const empty = isCmdLineInput && (el as HTMLInputElement).value === "";
-        const eng = engineRef.current;
-        const cmdLineFreeToSwitch =
-          empty && !eng?.hasFields() && !eng?.acceptsFreeText();
-        if (!cmdLineFreeToSwitch) return;
-      }
-      const id = MAP[e.key];
-      if (!id) return;
-      if (!toolShortcutRef.current.floor) return; // Werkzeuge nur auf Geschossen
-      e.preventDefault();
-      toolShortcutRef.current.onSelectTool(id);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Tastatur für aktive Zeichenwerkzeuge: Esc verwirft den Entwurf (bzw. schaltet
-  // im Ruhezustand zurück auf Auswahl), Enter schließt mehrteilige Werkzeuge ab,
-  // Backspace nimmt den letzten Punkt zurück. In echten Eingaben inaktiv.
-  useEffect(() => {
-    if (activeTool === "select") return;
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
-        return;
-      }
-      // Läuft ein gekoppelter Befehl (Linie/Rechteck/Polylinie über die Engine),
-      // gehören Esc/Enter/Backspace der Engine bzw. dem Befehlsfeld — der Legacy-
-      // Werkzeug-Pfad bleibt stumm (keine doppelte Mechanik).
-      if (engineRef.current?.isActive()) return;
-      const tool = getTool(activeTool);
-      const drawing = toolStateRef.current.phase !== "idle";
-      if (e.key === "Escape") {
-        if (drawing) {
-          const [st] = tool.onCancel(toolStateRef.current);
-          toolStateRef.current = st;
-          setDraft(null);
-        } else {
-          setActiveTool("select");
-        }
-        e.preventDefault();
-      } else if (e.key === "Enter") {
-        const [st, res] = tool.onCommitGesture(toolStateRef.current, toolCtx);
-        toolStateRef.current = st;
-        if (res.commit) setProject(res.commit);
-        setDraft(null);
-        if (res.done) toolStateRef.current = tool.init();
-        e.preventDefault();
-      } else if (e.key === "Backspace" && tool.onUndoPoint) {
-        const [st, res] = tool.onUndoPoint(toolStateRef.current, toolCtx);
-        toolStateRef.current = st;
-        setDraft(res.draft);
-        e.preventDefault();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [activeTool, toolCtx]);
+  // 3 Kreis, 4 Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum
+  // — sowie Esc/Enter/Backspace für das aktive Zeichenwerkzeug. Siehe
+  // state/useKeyboardShortcuts.ts.
+  useToolNumberShortcuts(onSelectTool, activeLevel.kind === "floor", engineRef);
+  useActiveToolKeys(activeTool, toolCtx, engineRef, toolStateRef, setDraft, setActiveTool, setProject);
 
   // ── Editier-Griffe (Grips) des einzeln selektierten Elements ──────────────
   // Genau eine Wand ODER ein 2D-Element → dessen Eckpunkte als ziehbare Griffe.
@@ -1236,7 +1132,7 @@ export default function App() {
     };
     if (selectedDrawing) {
       const g = selectedDrawing.geom;
-      if (g.shape === "rect") return ringEdges(grips);
+      if (g.shape === "rect" || g.shape === "image") return ringEdges(grips);
       if (g.shape === "polyline" && g.closed) return ringEdges(grips);
       if (g.shape === "polyline" && !g.closed) return openEdges(grips);
       if (g.shape === "line") return openEdges(grips);
@@ -1429,6 +1325,9 @@ export default function App() {
     );
   };
   cycleGripEditFieldRef.current = cycleGripEditField;
+
+  // Globaler Tab-Handler (Feld-Zyklus/Zahlen-Tippen) — siehe state/useKeyboardShortcuts.ts.
+  useCommandTabShortcut(engineRef, commandLineRef, gripDragInfoRef, gripEditRef, cycleGripEditFieldRef);
 
   // Getippte Zahl im Vertex-Drag: aktives Feld locken, aufs nächste vorrücken und
   // den Zielpunkt sofort mit dem gelockten Wert neu setzen.
@@ -1724,89 +1623,34 @@ export default function App() {
     setSelectedSectionLineId(null);
   };
 
-  // Tastatur im Auswahl-Werkzeug: Ctrl/Cmd+A = alles auf der aktiven Ebene
-  // wählen; Entf/Backspace = ALLE Selektierten (Wände + 2D-Elemente) löschen.
-  useEffect(() => {
-    if (activeTool !== "select") return;
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
-        return;
-      }
-      // Alles auswählen (Wände + Zeichnungen des aktiven Geschosses/der Ebene).
-      if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
-        const wallIds = project.walls
-          .filter((w) => w.floorId === activeLevel.id)
-          .map((w) => w.id);
-        const drawingIds = project.drawings2d
-          .filter((d) => d.levelId === activeLevel.id)
-          .map((d) => d.id);
-        const ceilingIds = (project.ceilings ?? [])
-          .filter((c) => c.floorId === activeLevel.id)
-          .map((c) => c.id);
-        const stairIds = (project.stairs ?? [])
-          .filter((s) => s.floorId === activeLevel.id)
-          .map((s) => s.id);
-        const roomIds = (project.rooms ?? [])
-          .filter((r) => r.floorId === activeLevel.id)
-          .map((r) => r.id);
-        const extrudedSolidIds = (project.extrudedSolids ?? [])
-          .filter((s) => s.levelId === activeLevel.id)
-          .map((s) => s.id);
-        const columnIds = (project.columns ?? [])
-          .filter((c) => c.floorId === activeLevel.id)
-          .map((c) => c.id);
-        if (
-          wallIds.length ||
-          drawingIds.length ||
-          ceilingIds.length ||
-          stairIds.length ||
-          roomIds.length ||
-          extrudedSolidIds.length ||
-          columnIds.length
-        ) {
-          setSelectedWallIds(wallIds);
-          setSelectedDrawingIds(drawingIds);
-          setSelectedCeilingIds(ceilingIds);
-          setSelectedStairIds(stairIds);
-          setSelectedRoomIds(roomIds);
-          setSelectedExtrudedSolidIds(extrudedSolidIds);
-          setSelectedColumnIds(columnIds);
-          e.preventDefault();
-        }
-        return;
-      }
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
-      if (activeTransform) return; // während einer Transformation nicht löschen
-      if (hasSelectionToDelete()) {
-        deleteSelection();
-        e.preventDefault();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
+  // Tastatur im Auswahl-Werkzeug: Ctrl/Cmd+A = alles wählen, Entf/Backspace =
+  // Auswahl löschen — siehe state/useKeyboardShortcuts.ts.
+  useSelectAllAndDeleteShortcut({
     activeTool,
     activeTransform,
+    project,
+    activeLevelId: activeLevel.id,
     selectedDrawingIds,
     selectedWallIds,
     selectedCeilingIds,
     selectedOpeningIds,
     selectedStairIds,
+    selectedRoomIds,
     selectedExtrudedSolidIds,
     selectedColumnIds,
     selectedRoofIds,
     selectedContextObjectIds,
     selectedSectionLineId,
-    project.walls,
-    project.drawings2d,
-    project.ceilings,
-    project.roofs,
-    project.stairs,
-    project.extrudedSolids,
-    project.columns,
-    activeLevel.id,
-  ]);
+    setSelectedWallIds,
+    setSelectedDrawingIds,
+    setSelectedCeilingIds,
+    setSelectedStairIds,
+    setSelectedRoomIds,
+    setSelectedExtrudedSolidIds,
+    setSelectedColumnIds,
+    hasSelectionToDelete,
+    deleteSelection,
+  });
 
   // Split der gewählten 2D-Elemente an einem Punkt in mehrere Stücke (shared von
   // Ctrl+S und einem etwaigen Menü-Eintrag). Ersetzt jedes Quell-Drawing durch ≥1
@@ -1838,101 +1682,13 @@ export default function App() {
     setSelectedWallIds([]);
   };
 
-  // Ctrl/Cmd+S = Split, Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente.
-  // Join läuft über DENSELBEN Engine-Befehl wie getipptes „join" (§Task C, ein
-  // Pfad). Split bleibt vorerst die direkte Aktion (kein Split-Engine-Befehl
-  // gefordert). Beide rufen preventDefault (sonst Browser-Speichern/-Lesezeichen).
-  // Wände sind ausgenommen (no-op). Tool-unabhängig, solange eine 2D-Auswahl steht.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      if (k !== "s" && k !== "j") return;
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
-        return;
-      }
-      const ids = selectedDrawingIds;
-      if (ids.length === 0) return; // nur 2D-Auswahl bedient; Wände → no-op
-      e.preventDefault();
+  // Ctrl/Cmd+S = Split, Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente —
+  // siehe state/useKeyboardShortcuts.ts.
+  useSplitJoinShortcut(selectedDrawingIds, engine, runSplit, setSelectedDrawingIds, setSelectedWallIds);
 
-      if (k === "s") {
-        runSplit(ids);
-        return;
-      }
-      // Join: exakt derselbe Befehl wie „join" tippen (Sofort-Befehl, autoRun).
-      // Nach dem Verbinden zeigt die alte Auswahl auf ersetzte IDs → aufräumen.
-      engine.start("join");
-      setSelectedDrawingIds([]);
-      setSelectedWallIds([]);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, engine]);
-
-  // Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen. Kopieren legt
-  // die GEWÄHLTEN Drawing2D tief in die Zwischenablage; Einfügen erzeugt Klone mit
-  // neuen IDs auf dem AKTIVEN Geschoss (Zeichnungsebene) und wählt sie aus — so
-  // wandert z. B. importiertes Mobiliar von einem Geschoss auf ein anderes. Im
-  // Textfeld bleibt das native Copy/Paste; ohne 2D-Auswahl kein preventDefault.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (k !== "c" && k !== "v") return;
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
-        return;
-      }
-      if (k === "c") {
-        const ids = new Set(selectedDrawingIds);
-        if (ids.size === 0) return; // nur bei 2D-Auswahl (sonst Browser-Copy)
-        const picked = project.drawings2d.filter((d) => ids.has(d.id));
-        if (picked.length === 0) return;
-        e.preventDefault();
-        setDrawingClipboard(picked.map((d) => structuredClone(d)));
-        return;
-      }
-      // Einfügen: Klone auf dem aktiven Geschoss, neue IDs, danach ausgewählt.
-      if (drawingClipboard.length === 0) return;
-      e.preventDefault();
-      const stamp = Date.now();
-      const pasted: Drawing2D[] = drawingClipboard.map((d, i) => ({
-        ...structuredClone(d),
-        id: `drawing-${stamp}-${i}`,
-        levelId: activeLevelId,
-      }));
-      importDrawings(pasted);
-      setSelectedDrawingIds(pasted.map((p) => p.id));
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, drawingClipboard, activeLevelId, project.drawings2d]);
-
-  // Ctrl/Cmd+Shift+U/D/I = Boolean Vereinigung/Subtraktion/Schnitt der gewählten
-  // geschlossenen Drawing2D. preventDefault (sonst Browser-Aktionen). Braucht ≥2
-  // geschlossene Flächen; sonst No-op. (Menü spiegelt diese Aktionen.)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
-      const k = e.key.toLowerCase();
-      if (k !== "u" && k !== "d" && k !== "i") return;
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
-        return;
-      }
-      if (selectedDrawingIds.length < 2) return;
-      e.preventDefault();
-      if (k === "u") applyBoolean(unionDrawings);
-      else if (k === "d") applyBoolean(differenceDrawings);
-      else applyBoolean(intersectionDrawings);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, project.drawings2d]);
+  // Ctrl/Cmd+Shift+U/D/I = Boolean Vereinigung/Subtraktion/Schnitt — siehe
+  // state/useKeyboardShortcuts.ts. (Ctrl/Cmd+C/V-Kopieren/Einfügen folgt weiter
+  // unten, nach `importDrawings`.)
 
   // 2D-Boolean-Operation (Union / Subtract / Intersect) auf die gewählten
   // geschlossenen Drawing2D anwenden. Reihenfolge der Auswahl = Reihenfolge in
@@ -1962,6 +1718,7 @@ export default function App() {
     setSelectedDrawingIds(result.created.map((d) => d.id));
     setSelectedWallIds([]);
   };
+  useBooleanOpsShortcut(selectedDrawingIds, project.drawings2d, applyBoolean);
 
   // Alt+Klick im Grundriss = Segment löschen (Schere): PlanView meldet das
   // getroffene Drawing2D + den Modellpunkt; App ermittelt daraus die nächst-
@@ -1988,74 +1745,22 @@ export default function App() {
     if (removed) setSelectedDrawingIds([]);
   };
 
-  // Transformations-Shortcuts (nur im Auswahl-Werkzeug):
-  //  m = Bewegen, s = Spiegeln, d = Drehen (startet auf der Auswahl);
-  //  während einer Transformation: u/i/o/p = Modus (move/copy/array/distribute),
-  //  Esc = abbrechen. O/P fragen die Kopienanzahl ab.
-  useEffect(() => {
-    if (activeTool !== "select") return;
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
-        return;
-      }
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (activeTransform) {
-        const k = e.key.toLowerCase();
-        if (k === "u") setActiveTransform((t) => (t ? { ...t, copyMode: "move" } : t));
-        else if (k === "i") setActiveTransform((t) => (t ? { ...t, copyMode: "copy" } : t));
-        else if (k === "o") {
-          requestCopyCount("array");
-        } else if (k === "p") {
-          requestCopyCount("distribute");
-        } else if (e.key === "Escape") {
-          setActiveTransform(null);
-          setDraft(null);
-        } else return;
-        e.preventDefault();
-        return;
-      }
-      // „q" = Messen (Distanz/Winkel) — braucht KEINE Auswahl, daher vor hasSel.
-      if (e.key.toLowerCase() === "q") {
-        onRunCommand("measure");
-        e.preventDefault();
-        return;
-      }
-      // Transformierbar sind Wände, 2D-Zeichnungen, extrudierte Körper und Stützen
-      // (dieselben Arten wie transformSel). Öffnungen/Treppen laufen bewusst NICHT
-      // hierüber, sondern über ihre eigenen Bewegpunkte (Grips) — sie sind wand-
-      // bzw. geschossgebunden.
-      const hasSel =
-        selectedWallIds.length > 0 ||
-        !!selectedDrawingId ||
-        !!selectedExtrudedSolidId ||
-        !!selectedColumnId;
-      if (!hasSel) return;
-      const k = e.key.toLowerCase();
-      // Bewegen/Spiegeln/Drehen laufen ALLE über die interaktive Transformation
-      // (`activeTransform`) mit den U/I/O/P-Kopiermodi (Bewegen/Kopie/Reihe/
-      // Verteilen). Prompt + Optionen + Live-Feld speisen die Command-Line; die
-      // Kürzel U/I/O/P wirken dort auch bei fokussiertem Eingabefeld (options.key).
-      const op: TransformOp | null =
-        k === "m" ? "move" : k === "s" ? "mirror" : k === "d" ? "rotate" : null;
-      if (op) {
-        setActiveTransform({ op, copyMode: "move", count: 1, points: [] });
-        setDraft(null);
-        requestAnimationFrame(() => commandLineRef.current?.focus());
-        e.preventDefault();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
+  // Transformations-Shortcuts (m/s/d, U/I/O/P-Modusleiste, „q" Messen) — siehe
+  // state/useKeyboardShortcuts.ts.
+  useTransformShortcuts(
     activeTool,
     activeTransform,
+    setActiveTransform,
     selectedWallIds,
     selectedDrawingId,
     selectedExtrudedSolidId,
     selectedColumnId,
     engine,
-  ]);
+    setDraft,
+    requestCopyCount,
+    onRunCommand,
+    commandLineRef,
+  );
 
   // ── Projekt-Mutationen (aus dem Store-Slice) ─────────────────────────────
   // Sämtliche immutablen Projekt-Mutationen + Ressourcen-Typ-CRUD (Wand-/
@@ -2151,6 +1856,18 @@ export default function App() {
     setRoomStamp,
   } = useProjectActions(setProject, notify, planViewRef);
 
+  // Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen — siehe
+  // state/useKeyboardShortcuts.ts.
+  useDrawingClipboardShortcut(
+    selectedDrawingIds,
+    drawingClipboard,
+    setDrawingClipboard,
+    activeLevelId,
+    project.drawings2d,
+    importDrawings,
+    setSelectedDrawingIds,
+  );
+
   // Projektdatei-I/O (Speichern/Öffnen/Lock), Schnellexport (CSV/IFC/OBJ/STL)
   // und die Ausführung eines bestätigten DXF/DWG-Imports — gebündelt in
   // useProjectFileActions(), siehe dort.
@@ -2184,6 +1901,16 @@ export default function App() {
     planViewRef,
   );
 
+  // Gewählte Layout-Annotation als echtes Objekt (statt nur ihrer Id) — liegt
+  // in `Layout.annotations` (Papier-mm), NICHT im Modell, daher separat von
+  // `deriveSelection` (die nur Projekt-Bauteile kennt) aufgelöst. Muss VOR
+  // `textTarget`/`selection` stehen (beide lesen sie synchron im selben Render).
+  const selectedLayoutAnnotation = useMemo(() => {
+    if (activeLayoutId === null || !selectedLayoutAnnotationId) return null;
+    const layout = (project.layouts ?? []).find((l) => l.id === activeLayoutId);
+    return layout?.annotations?.find((a) => a.id === selectedLayoutAnnotationId) ?? null;
+  }, [project.layouts, activeLayoutId, selectedLayoutAnnotationId]);
+
   // Text-Ziel der Oberleisten-Text-Gruppe: der Stempel-Text des (einzeln)
   // gewählten Raums. Ohne aktive Editor-Auswahl wirkt Formatierung auf das ganze
   // Doc (range: null). Ist kein Raum gewählt → null (Controls setzen nur
@@ -2204,20 +1931,51 @@ export default function App() {
       const d = project.drawings2d.find((x) => x.id === selectedDrawingId);
       if (d && d.geom.shape === "text") {
         const g = d.geom;
+        // Trägt das Element bereits ein reiches Doc (Doppelklick-Editor), wirkt
+        // die Oberleiste per Bereichs-Operation (toggleMark/applyMark) DARAUF —
+        // Mischformatierung anderer Runs bleibt erhalten. Ohne Doc (Alt-Element)
+        // bleibt das bisherige Uniform-Verhalten (ein `marks`-Objekt fürs Ganze).
+        const doc = g.doc ?? docFromText(g.text, g.marks ?? {});
         return {
-          doc: docFromText(g.text, g.marks ?? {}),
+          doc,
           range: null,
-          apply: (doc: RichTextDoc) => {
-            const runMarks = doc.paragraphs.flatMap((p) => p.runs)[0]?.marks ?? {};
+          apply: (newDoc: RichTextDoc) => {
+            const runMarks = newDoc.paragraphs.flatMap((p) => p.runs)[0]?.marks ?? {};
             const marks = { ...runMarks };
             delete marks.sizePt; // Grösse folgt der Modell-Höhe, nicht dem pt-Wert.
-            updateDrawing2D(d.id, { geom: { ...g, text: plainText(doc), marks } });
+            const patch = g.doc
+              ? { doc: newDoc, text: plainText(newDoc), marks }
+              : { text: plainText(newDoc), marks };
+            updateDrawing2D(d.id, { geom: { ...g, ...patch } });
           },
         };
       }
     }
+    // Ausgewähltes Text-Markup auf einem offenen Layout-Blatt: wie Raum-Stempel
+    // OHNE Grössen-Kopplung ans Modell (Papier-mm-Kontext, `heightMm` ist bereits
+    // der Basiswert für Runs ohne eigene `sizePt`) — die Oberleisten-Grösse
+    // wirkt hier also normal, anders als bei freiem Grundriss-Text oben.
+    if (selectedLayoutAnnotation && selectedLayoutAnnotation.kind === "text" && activeLayoutId !== null) {
+      const ann = selectedLayoutAnnotation;
+      return {
+        doc: ann.doc ?? docFromText(ann.text),
+        range: null,
+        apply: (newDoc: RichTextDoc) =>
+          patchOpenLayout(activeLayoutId, (l) =>
+            patchAnnotationInLayout(l, ann.id, { doc: newDoc, text: plainText(newDoc) }),
+          ),
+      };
+    }
     return null;
-  }, [selectedRoom, setRoomStampDoc, selectedDrawingId, project.drawings2d, updateDrawing2D]);
+  }, [
+    selectedRoom,
+    setRoomStampDoc,
+    selectedDrawingId,
+    project.drawings2d,
+    updateDrawing2D,
+    selectedLayoutAnnotation,
+    activeLayoutId,
+  ]);
 
   // ── 3D-Editier-Griffe (direkt im Viewport3D) ──────────────────────────────
   // Genau EINE gewählte Wand (kein 2D-Element) bzw. genau EIN 2D-Element liefert
@@ -2363,22 +2121,41 @@ export default function App() {
 
   // ── Selektions-Attribut-Kontrakt (Attributes-/Object-Info-Paletten) ───────
   // Normalisierte, effektiv aufgelöste Sicht auf das erste selektierte Element.
-  const selection = useMemo(
-    () =>
-      deriveSelection(
-        project,
-        selectedWallIds,
-        selectedDrawingId,
-        selectedCeilingId,
-        selectedOpeningId,
-        selectedStairId,
-        selectedRoomId,
-        selectedExtrudedSolidId,
-        selectedColumnId,
-        selectedRoofId,
-        selectedContextObjectIds.length === 1 ? selectedContextObjectIds[0] : null,
-      ),
-    [
+  // Eine gewählte Layout-Annotation hat Vorrang (eigener, minimaler Zweig —
+  // sie ist kein Projekt-Bauteil, `deriveSelection` kennt sie nicht): Farbe
+  // (Linie/Rechteck/Text) + Strichstärke (nur Linie/Rechteck, s. `annotKind`-
+  // Prüfung in AttributesPanel) landen so in DERSELBEN Palette wie ein
+  // Drawing2D im Grundriss (Nutzer-Feedback).
+  const selection = useMemo((): Selection | null => {
+    if (selectedLayoutAnnotation) {
+      const a = selectedLayoutAnnotation;
+      return {
+        kind: "layoutAnnotation",
+        annotKind: a.kind,
+        id: a.id,
+        categoryCode: "",
+        color: ("color" in a ? a.color : undefined) ?? "#111111",
+        weightMm: ("weightMm" in a ? a.weightMm : undefined) ?? 0.25,
+        isImage: a.kind === "image",
+        opacity: a.kind === "image" ? a.opacity ?? 1 : undefined,
+        bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+      };
+    }
+    return deriveSelection(
+      project,
+      selectedWallIds,
+      selectedDrawingId,
+      selectedCeilingId,
+      selectedOpeningId,
+      selectedStairId,
+      selectedRoomId,
+      selectedExtrudedSolidId,
+      selectedColumnId,
+      selectedRoofId,
+      selectedContextObjectIds.length === 1 ? selectedContextObjectIds[0] : null,
+    );
+  }, [
+      selectedLayoutAnnotation,
       project,
       selectedWallIds,
       selectedDrawingId,
@@ -2550,13 +2327,21 @@ export default function App() {
           updateStair(selection.id, { color });
         else if (selection.kind === "room")
           updateRoom(selection.id, { color });
+        else if (selection.kind === "layoutAnnotation" && activeLayout)
+          patchOpenLayout(activeLayout.id, (l) =>
+            patchAnnotationInLayout(l, selection.id, { color }),
+          );
       },
       onSetSelectionWeight: (weightMm) => {
-        // Strichstärke-Override: Wand/Decke (`strokeWeight`) oder Drawing2D
-        // (`weightMm`, Alt-Feldname bleibt).
+        // Strichstärke-Override: Wand/Decke (`strokeWeight`) oder Drawing2D/
+        // Layout-Annotation (`weightMm`, Alt-Feldname bleibt).
         if (selection?.kind === "wall") updateWall(selection.id, { strokeWeight: weightMm });
         else if (selection?.kind === "ceiling")
           updateCeiling(selection.id, { strokeWeight: weightMm });
+        else if (selection?.kind === "layoutAnnotation" && activeLayout)
+          patchOpenLayout(activeLayout.id, (l) =>
+            patchAnnotationInLayout(l, selection.id, { weightMm }),
+          );
         else if (selection?.kind === "drawing2d")
           setElementWeight(selection.id, weightMm);
       },
@@ -2579,6 +2364,23 @@ export default function App() {
         // Vollton-Füllfarbe nur bei Drawing2D (geschlossene Formen).
         if (selection?.kind === "drawing2d")
           setElementFillColor(selection.id, color);
+      },
+      onSetSelectionOpacity: (opacity) => {
+        // Deckkraft nur bei Bild-Elementen (Drawing2D `{shape:"image"}` im
+        // Plan, Layout-Annotation `kind:"image"` auf dem Blatt).
+        if (selection?.kind === "drawing2d")
+          setProject((p) => ({
+            ...p,
+            drawings2d: p.drawings2d.map((d) =>
+              d.id === selection.id && d.geom.shape === "image"
+                ? { ...d, geom: { ...d.geom, opacity } }
+                : d,
+            ),
+          }));
+        else if (selection?.kind === "layoutAnnotation" && activeLayout)
+          patchOpenLayout(activeLayout.id, (l) =>
+            patchAnnotationInLayout(l, selection.id, { opacity }),
+          );
       },
       onSetSelectionForeground: (color) => {
         // Vordergrund-Override: Wand, Decke oder Drawing2D.
@@ -3868,53 +3670,19 @@ export default function App() {
   // (Geschoss, sichtbare Codes, Darstellungsmodus, Detailgrad, Referenzlinien,
   // Farb-/Mono-Modus) und schreibt ihn massstäblich als Vektor-PDF. Reines
   // Modell → SVG → PDF, unabhängig vom Bildschirm-DOM.
-  const onExportPdf = async (decision: ExportPdfDecision) => {
-    const plan = generatePlan(
-      project,
-      activeLevel.id,
-      visibleCodes,
-      categoryDisplay,
-      detail,
-      referenceLines,
-      planColorMode === "mono",
-    );
-    await savePlanPdf(plan, {
-      scaleDenominator: decision.scaleDenominator,
-      paper: decision.paper,
-      orientation: decision.orientation,
-      title: activeLevel.name,
-      subtitle: project.name,
-      fileName: `${project.name}-${activeLevel.name}`,
-    });
-    setExportOpen(false);
-  };
-
-  // DXF-Export: erzeugt den Plan mit EXAKT denselben Eingaben wie die Ansicht und
-  // schreibt ihn als Modell-Space-DXF in echten Metern (1:1). Layer aus den
-  // Kategorie-Ebenen; jede Entity auf ihrem Kategorie-Layer.
-  const onExportDxf = (decision: ExportDxfDecision) => {
-    // Georeferenziert exportieren: bei gesetztem Standort-Bezug (geoAnchor)
-    // schreibt der Modell-DXF die ECHTEN LV95-Koordinaten (weit vom Nullpunkt),
-    // damit die Datei in anderer CAD-Software lagerichtig ankommt — auch wenn
-    // lokal nahe (0,0) gezeichnet wurde. Ohne Bezug bleibt alles lokal.
-    // (Der Papier-/Layout-Export bleibt bewusst in lokalen Koordinaten.)
-    const exportProject = projectToWorldCoords(project);
-    const plan = generatePlan(
-      exportProject,
-      activeLevel.id,
-      visibleCodes,
-      categoryDisplay,
-      detail,
-      referenceLines,
-      planColorMode === "mono",
-    );
-    savePlanDxf(plan, exportProject, {
-      title: activeLevel.name,
-      includeHatches: decision.includeHatches,
-      fileName: `${project.name}-${activeLevel.name}`,
-    });
-    setExportDxfOpen(false);
-  };
+  // PDF-/DXF-Plan-Export — siehe state/useExportHandlers.ts.
+  const { onExportPdf, onExportDxf } = useExportHandlers({
+    project,
+    activeLevelId: activeLevel.id,
+    activeLevelName: activeLevel.name,
+    visibleCodes,
+    categoryDisplay,
+    detail,
+    referenceLines,
+    planColorMode,
+    setExportOpen,
+    setExportDxfOpen,
+  });
 
   // Modusleiste-Wechsel: array/distribute fragen die Kopienanzahl ab.
   const onTransformMode = (mode: CopyMode) => {
@@ -4052,17 +3820,38 @@ export default function App() {
     setSelectedSectionLineId(null);
     setEditTextId(drawingId);
   };
-  // Bearbeiteten Text-Inhalt übernehmen (immutabel; nur bei Text-Geometrie).
-  const commitTextEdit = (value: string) => {
+
+  // „Bild einfügen" (Werkzeug „image") — siehe state/useImportHandling.ts.
+  const { onImageOrPdfFileChosen } = useImageImportHandling({
+    project,
+    activeLevelId: activeLevel.id,
+    activeCategoryCode,
+    setProject,
+    notify,
+    setSelectedDrawingId,
+    setSelectedWallIds,
+    setSelectedCeilingIds,
+    setSelectedOpeningIds,
+    setSelectedStairIds,
+    setSelectedRoomIds,
+    setSelectedExtrudedSolidIds,
+    setSelectedColumnIds,
+    setSelectedRoofIds,
+    setSelectedContextObjectIds,
+    setSelectedSectionLineId,
+  });
+  // Bearbeitetes Rich-Text-Dokument übernehmen (immutabel; nur bei Text-Geometrie).
+  // `text` bleibt als Reintext-Spiegel bestehen (DXF-Export, Suche, Alt-Konsumenten).
+  const commitTextEdit = (doc: RichTextDoc) => {
     const id = editTextId;
     if (!id) return;
-    const text = value.trim();
+    const text = plainText(doc).trim();
     if (text !== "") {
       setProject((p) => ({
         ...p,
         drawings2d: p.drawings2d.map((d) =>
           d.id === id && d.geom.shape === "text"
-            ? { ...d, geom: { ...d.geom, text } }
+            ? { ...d, geom: { ...d.geom, doc, text: plainText(doc) } }
             : d,
         ),
       }));
@@ -4437,36 +4226,11 @@ export default function App() {
     });
   };
 
-  // ── App-weites Drag & Drop einer DXF/DWG-Datei ────────────────────────────
-  // dragover muss preventDefault rufen, sonst lässt der Browser nicht fallen.
-  // dragenter/leave wird ausgezählt (Kind-Elemente lösen sonst Flackern aus).
-  const dragDepthRef = useRef(0);
-  const hasFiles = (e: React.DragEvent) =>
-    Array.from(e.dataTransfer?.types ?? []).includes("Files");
-  const onAppDragEnter = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    dragDepthRef.current += 1;
-    setDropActive(true);
-  };
-  const onAppDragOver = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  };
-  const onAppDragLeave = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setDropActive(false);
-  };
-  const onAppDrop = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    dragDepthRef.current = 0;
-    setDropActive(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) openImportForFile(f);
-  };
+  // App-weites Drag & Drop einer DXF/DWG-Datei — siehe state/useImportHandling.ts.
+  const { onAppDragEnter, onAppDragOver, onAppDragLeave, onAppDrop } = useFileDropImport(
+    setDropActive,
+    openImportForFile,
+  );
 
   if (bootPhase === "splash") {
     return <SplashScreen onDone={() => setBootPhase("start")} />;
@@ -4509,6 +4273,18 @@ export default function App() {
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) openImportForFile(f);
+          e.target.value = "";
+        }}
+      />
+      {/* Verstecktes Bild/PDF-Datei-Input (Werkzeug „image"). */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*,.pdf,application/pdf"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onImageOrPdfFileChosen(f);
           e.target.value = "";
         }}
       />
@@ -4665,8 +4441,21 @@ export default function App() {
           <LayoutSheetView
             project={project}
             layout={activeLayout}
+            activeTool={activeTool}
+            onToolChange={onSelectTool}
+            selectedAnnotId={selectedLayoutAnnotationId}
+            onSelectAnnot={setSelectedLayoutAnnotationId}
             handlers={{
-              onBack: () => setActiveLayoutId(null),
+              onBack: () => {
+                setActiveLayoutId(null);
+                setSelectedLayoutAnnotationId(null);
+                // Ein auf dem Blatt armiertes Zeichenwerkzeug (line/rect/text/
+                // image) hat im Grundriss KEINEN laufenden Befehl in der Engine
+                // (der wird für ein offenes Layout bewusst nicht gestartet, s.
+                // `onSelectTool`) — zurück auf „Auswahl", sonst zeigt das
+                // Werkzeugpanel ein „aktives" Werkzeug ohne echten Befehl dahinter.
+                setActiveTool("select");
+              },
               onPatchViewport: (viewportId, patch) =>
                 patchOpenLayout(activeLayout.id, (l) =>
                   patchViewportInLayout(l, viewportId, patch),
@@ -4682,13 +4471,13 @@ export default function App() {
                     createViewport(`vp-${Date.now()}`, snapshotId, init),
                   ),
                 ),
-              onAddAnnotation: (kind, init) =>
+              onAddAnnotation: (kind, init) => {
+                const id = `ann-${Date.now()}`;
                 patchOpenLayout(activeLayout.id, (l) =>
-                  addAnnotationToLayout(
-                    l,
-                    createAnnotation(`ann-${Date.now()}`, kind, init),
-                  ),
-                ),
+                  addAnnotationToLayout(l, createAnnotation(id, kind, init)),
+                );
+                return id;
+              },
               onPatchAnnotation: (annotationId, patch) =>
                 patchOpenLayout(activeLayout.id, (l) =>
                   patchAnnotationInLayout(l, annotationId, patch),
@@ -5051,22 +4840,21 @@ export default function App() {
         />
       )}
 
-      {/* Text-Inhalt-Editor: per Doppelklick auf ein Text-2D-Element geöffnet.
-          Einzeilige Bearbeitung des Textinhalts (Absätze der Textspalte per „\n"
-          werden dabei zu einer Zeile zusammengezogen — für mehrzeilige Spalten
-          bleibt die Ersteingabe massgeblich). */}
+      {/* Rich-Text-Editor: per Doppelklick auf ein Text-2D-Element geöffnet (wie
+          beim Raum-Stempel) — mehrere Absätze, gemischte Formatierung pro
+          Zeichen (InDesign-/Affinity-artig). Alt-Elemente ohne `doc` starten
+          aus ihrem bisherigen String + einheitlichen `marks`. */}
       {editTextId &&
         (() => {
           const d = project.drawings2d.find((x) => x.id === editTextId);
           if (!d || d.geom.shape !== "text") return null;
+          const g = d.geom;
+          const doc = g.doc ?? docFromText(g.text, g.marks ?? {});
           return (
-            <PromptDialog
-              title={t("cmd.text.label")}
-              label={t("cmd.text.enter")}
-              defaultValue={d.geom.text}
-              type="text"
-              onConfirm={commitTextEdit}
-              onClose={() => setEditTextId(null)}
+            <TextEditorDialog
+              value={doc}
+              onApply={commitTextEdit}
+              onCancel={() => setEditTextId(null)}
             />
           );
         })()}
@@ -5305,77 +5093,4 @@ export default function App() {
       <Toast />
     </div>
   );
-}
-
-// ── Host-Helfer ──────────────────────────────────────────────────────────────
-
-/**
- * Baut den vollständigen Host-Wert für den Context, indem an den gemeinsamen
- * `base` der zum aktiven Tab des Docks gehörende Darstellungsmodus angehängt
- * wird. So liest das gerade gerenderte Panel über `usePanelHost().displayMode`
- * genau seinen Modus. Rückgabe als `PanelHost` (Record), das der Context
- * erwartet — die Verengung auf `PanelHostValue` macht `usePanelHost`.
- */
-function hostWithMode(
-  base: Omit<PanelHostValue, "displayMode">,
-  activeTab: string | null,
-  modeFor: (id: string | null) => DisplayMode,
-  setModeFor: (id: string | null, mode: DisplayMode) => void,
-  measurement: MeasurementReadout | null = null,
-): PanelHost {
-  const value: PanelHostValue = {
-    ...base,
-    // Live-Messwerte NICHT aus dem memoisierten `base` (dort wären sie eingefroren,
-    // da `draft` bewusst kein Memo-Dep ist — sonst würde der ganze Host bei jeder
-    // Mausbewegung neu gebaut). Hier bei jedem Render frisch injiziert.
-    measurement,
-    displayMode: {
-      mode: modeFor(activeTab),
-      setMode: (mode) => setModeFor(activeTab, mode),
-    },
-  };
-  return value as unknown as PanelHost;
-}
-
-// ── Wand-Trefferprüfung im Modellraum (für das Grundriss-Kontextmenü) ────────
-
-/**
- * Liefert die ID der obersten Wand, deren (gehrtes) Band den Modellpunkt
- * enthält — gefiltert auf das aktive Geschoss + sichtbare Kategorien, in
- * umgekehrter Wand-Reihenfolge (zuletzt gezeichnet zuerst). Spiegelt die
- * Trefferlogik der PlanView, arbeitet aber direkt auf den Wand-Polygonen, da
- * das Grundriss-Kontextmenü nur den Modellpunkt kennt. `null` bei Leerraum.
- */
-function hitTestWall(
-  project: Project,
-  floorId: string,
-  visibleCodes: Set<string>,
-  m: Vec2,
-): string | null {
-  const walls = project.walls.filter(
-    (w) => w.floorId === floorId && visibleCodes.has(w.categoryCode),
-  );
-  for (let i = walls.length - 1; i >= 0; i--) {
-    const w = walls[i];
-    const thickness = wallTypeThickness(getWallType(project, w));
-    const corners = wallCorners(w.start, w.end, thickness);
-    if (pointInPoly(m, corners)) return w.id;
-  }
-  return null;
-}
-
-/** Punkt-in-Polygon (Ray-Casting) im Modellraum — wie in der PlanView. */
-function pointInPoly(pt: Vec2, poly: Vec2[]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x;
-    const yi = poly[i].y;
-    const xj = poly[j].x;
-    const yj = poly[j].y;
-    const intersect =
-      yi > pt.y !== yj > pt.y &&
-      pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
 }

@@ -1513,6 +1513,26 @@ export type Drawing2DGeom =
        * (Modell-Meter) geführt, nicht über `marks.sizePt`.
        */
       marks?: Marks;
+      /**
+       * Reiches Textfeld (mehrere Absätze, gemischte Formatierung pro Zeichen —
+       * InDesign-/Affinity-artig): gesetzt über den Doppelklick-Editor
+       * (TextEditorDialog/RichTextEditor). Ist `doc` gesetzt, hat es Vorrang vor
+       * `text`/`marks` beim Rendern; `text` wird beim Schreiben als Reintext-
+       * Spiegel nachgeführt (DXF-Export, Suche, Alt-Konsumenten lesen weiter
+       * `text`). `width` bricht wie gehabt wortweise um.
+       */
+      doc?: RichTextDoc;
+    }
+  | {
+      shape: "image";
+      /** Obere-linke Ecke der Bild-Box (Modell-Meter). */
+      min: Vec2;
+      /** Untere-rechte Ecke der Bild-Box (Modell-Meter). */
+      max: Vec2;
+      /** Bildquelle als Data-URL (PNG/JPEG) — eingebettet, keine externe Datei. */
+      src: string;
+      /** Deckkraft 0..1 (Default 1). */
+      opacity?: number;
     };
 
 /** Ein freies 2D-Zeichenelement auf einer Zeichnungsebene. */
@@ -1597,8 +1617,6 @@ export interface EdgeGrip {
    */
   free?: boolean;
 }
-
-export type Element = Wall | Ceiling | Opening | Door | Stair | Room | Drawing2D;
 
 // ── Extrudierter Körper (truck-Integration, docs/design/truck-plan.md) ─────
 // Ein per `extrude`-Befehl aus einem geschlossenen 2D-Profil (Polylinie-Ring/
@@ -2016,6 +2034,24 @@ export type LayoutAnnotation =
       text: string;
       heightMm: number;
       color?: string;
+      /**
+       * Reiches Textfeld (mehrere Absätze, gemischte Formatierung) — Vorrang vor
+       * `text`, s. gleichnamiges Feld bei `Drawing2DGeom["text"]`.
+       */
+      doc?: RichTextDoc;
+      /** Optionale Rahmenbreite (mm) — bricht `doc` wortweise um; fehlt sie: einzeilig. */
+      widthMm?: number;
+    }
+  | {
+      id: string;
+      kind: "image";
+      xMm: number;
+      yMm: number;
+      widthMm: number;
+      heightMm: number;
+      /** Bildquelle als Data-URL (PNG/JPEG) — eingebettet, keine externe Datei. */
+      src: string;
+      opacity?: number;
     };
 
 /**
@@ -2036,6 +2072,9 @@ export type LayoutAnnotationPatch = Partial<{
   text: string;
   color: string;
   weightMm: number;
+  doc: RichTextDoc;
+  src: string;
+  opacity: number;
 }>;
 
 /**

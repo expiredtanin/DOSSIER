@@ -15,7 +15,7 @@
 // Es werden NUR Eigenschaften angeboten, die der Host-Kontrakt tatsächlich
 // setzen kann — keine Stubs/Fake-Setter (Konvention wire-dont-stub). Felder ohne
 // echten Setter (Linienstil) werden read-only/informativ gezeigt; Felder, die
-// das Modell gar nicht trägt (Deckkraft, Caps, Schlagschatten), werden bewusst
+// das Modell gar nicht trägt (Caps, Schlagschatten), werden bewusst
 // weggelassen, um die Palette ehrlich und schlank zu halten.
 //
 // DOSSIER-Tabellen-Look: KEINE wiederholten Feld-Labels pro Zeile — ein kompaktes
@@ -107,10 +107,20 @@ export function AttributesPanel() {
   }
 
   const isDrawing = sel.kind === "drawing2d";
+  // Layout-Annotation (Linie/Rechteck/Text/Bild auf einem Blatt) — kein
+  // Projekt-Bauteil, daher ohne Ebene/Bauteil-Vererbung: Farbe/Strichstärke
+  // sind IMMER ein eigener Wert (kein 3-Quellen-Dropdown, keine Füllung/
+  // Schraffur/Masse — s. Ausblendungen weiter unten).
+  const isAnnotation = sel.kind === "layoutAnnotation";
   // Strichstärke: Wand/Decke/Drawing2D tragen einen eigenen Override
   // (`strokeWeight`/`weightMm`) + Quellen-Dropdown; andere Elementarten erben
-  // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar).
-  const weightEditable = sel.kind === "wall" || sel.kind === "ceiling" || isDrawing;
+  // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar). Bei
+  // Annotationen nur Linie/Rechteck (Text/Bild kennen keine Strichstärke).
+  const weightEditable =
+    sel.kind === "wall" ||
+    sel.kind === "ceiling" ||
+    isDrawing ||
+    (isAnnotation && (sel.annotKind === "line" || sel.annotKind === "rect"));
   // Schraffur: Wand/Decke (Schnitt-/Ansichts-Schraffur) oder geschlossene 2D-Form.
   const fillEditable =
     sel.kind === "wall" || sel.kind === "ceiling" || (isDrawing && sel.closed === true);
@@ -223,97 +233,165 @@ export function AttributesPanel() {
           <ColorHexField value={sel.color} onChange={host.onSetSelectionColor} />
         </span>
 
-        {/* Strichstärke (mm) — Wand/Decke/Drawing2D, mit Nach-Ebene/Nach-Bauteil/
-            eigener-Wert-Quelle; andere Elementarten erben stets aus der Kategorie. */}
-        {sourceRow(
-          "attr.weight",
-          weightEditable,
-          weightUi,
-          onWeightSourceChange,
-          <>
-            <input
-              className="attr-num"
-              style={{ width: 72 }}
-              type="number"
-              step={0.01}
-              min={0}
-              list="attr-pen-weights"
-              value={sel.weightMm}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (Number.isFinite(v)) host.onSetSelectionWeight(v);
-              }}
-            />
-            <datalist id="attr-pen-weights">
-              {PEN_WEIGHTS.map((w) => (
-                <option key={w} value={w} />
-              ))}
-            </datalist>
-          </>,
+        {/* Strichstärke (mm): Wand/Decke/Drawing2D mit Nach-Ebene/Nach-Bauteil/
+            eigener-Wert-Quelle; eine Layout-Annotation kennt diese Vererbung
+            nicht (kein Bauteil/keine Ebene) — dort ein schlichtes Zahlenfeld
+            ohne Quellen-Dropdown, wenn die Art überhaupt eine Strichstärke
+            trägt (Linie/Rechteck, nicht Text/Bild). */}
+        {isAnnotation ? (
+          weightEditable && (
+            <>
+              <span className="attr-key">{t("attr.weight")}</span>
+              <span className="attr-val">
+                <input
+                  className="attr-num"
+                  style={{ width: 72 }}
+                  type="number"
+                  step={0.01}
+                  min={0}
+                  list="attr-pen-weights"
+                  value={sel.weightMm}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) host.onSetSelectionWeight(v);
+                  }}
+                />
+              </span>
+            </>
+          )
+        ) : (
+          sourceRow(
+            "attr.weight",
+            weightEditable,
+            weightUi,
+            onWeightSourceChange,
+            <>
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={0.01}
+                min={0}
+                list="attr-pen-weights"
+                value={sel.weightMm}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v)) host.onSetSelectionWeight(v);
+                }}
+              />
+              <datalist id="attr-pen-weights">
+                {PEN_WEIGHTS.map((w) => (
+                  <option key={w} value={w} />
+                ))}
+              </datalist>
+            </>,
+          )
         )}
 
-        {/* Linienstil — nur Drawing2D trägt ihn (Wand/Decke/etc. read-only). */}
-        <span className="attr-key">{t("attr.lineStyle")}</span>
-        <span className="attr-val">
-          {isDrawing ? (
-            <Dropdown
-              value={drawing?.lineStyleId ?? "__none__"}
-              onChange={(v) =>
-                host.onSetSelectionLineStyle(v === "__none__" ? undefined : v)
-              }
-              options={[
-                { value: "__none__", label: t("attr.lineStyle.none") },
-                ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
-              ]}
-            />
-          ) : (
-            <span className="attr-readonly">{lineStyle ? lineStyle.name : "—"}</span>
-          )}
-        </span>
+        {/* Deckkraft (0..1) — nur Bild-Elemente (Drawing2D `{shape:"image"}`
+            im Plan, Layout-Annotation `kind:"image"`). Schlichtes Zahlenfeld
+            wie die Strichstärke bei Annotationen: kein Bauteil/keine Ebene,
+            also keine Quellen-Vererbung. */}
+        {sel.isImage && (
+          <>
+            <span className="attr-key">{t("attr.opacity")}</span>
+            <span className="attr-val">
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={0.05}
+                min={0}
+                max={1}
+                value={sel.opacity ?? 1}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v)) host.onSetSelectionOpacity(Math.max(0, Math.min(1, v)));
+                }}
+              />
+            </span>
+          </>
+        )}
+
+        {/* Linienstil — nur Drawing2D trägt ihn (Wand/Decke/Annotation etc.
+            read-only), Rest wie gehabt. */}
+        {!isAnnotation && (
+          <>
+            <span className="attr-key">{t("attr.lineStyle")}</span>
+            <span className="attr-val">
+              {isDrawing ? (
+                <Dropdown
+                  value={drawing?.lineStyleId ?? "__none__"}
+                  onChange={(v) =>
+                    host.onSetSelectionLineStyle(v === "__none__" ? undefined : v)
+                  }
+                  options={[
+                    { value: "__none__", label: t("attr.lineStyle.none") },
+                    ...project.lineStyles.map((l) => ({ value: l.id, label: l.name })),
+                  ]}
+                />
+              ) : (
+                <span className="attr-readonly">{lineStyle ? lineStyle.name : "—"}</span>
+              )}
+            </span>
+          </>
+        )}
 
         {/* ── Füllung (Vordergrund/Hintergrund + Schraffur) ─────────── */}
         {/* Vordergrund = Muster-/Schraffurfarbe, Hintergrund = Füllfarbe/
             Poché. Jedes Feld: Nach Ebene (LayerCategory erzwingt den Wert) /
-            Nach Bauteil (erbt vom Component-Manager, Default) / eigener Wert. */}
-        <div className="attr-section-label">{t("attr.fill")}</div>
+            Nach Bauteil (erbt vom Component-Manager, Default) / eigener Wert.
+            Eine Layout-Annotation kennt keine Füllung (nur Umriss) — Sektion
+            entfällt komplett statt drei bedeutungslose Dropdowns zu zeigen. */}
+        {!isAnnotation && (
+          <>
+            <div className="attr-section-label">{t("attr.fill")}</div>
 
-        {sourceRow(
-          "attr.foreground",
-          pocheEditable,
-          fgUi,
-          onForegroundSourceChange,
-          colorValue(sel.foreground, host.onSetSelectionForeground),
+            {sourceRow(
+              "attr.foreground",
+              pocheEditable,
+              fgUi,
+              onForegroundSourceChange,
+              colorValue(sel.foreground, host.onSetSelectionForeground),
+            )}
+
+            {sourceRow(
+              "attr.background",
+              pocheEditable,
+              bgUi,
+              onBackgroundSourceChange,
+              colorValue(sel.background, host.onSetSelectionBackground),
+            )}
+
+            {sourceRow(
+              "attr.hatch",
+              fillEditable,
+              hatchUi,
+              onHatchSourceChange,
+              <Dropdown
+                value={sel.fillHatchId ?? ""}
+                onChange={(v) => host.onSetSelectionFill(v || null)}
+                options={[
+                  { value: "", label: t("attr.none") },
+                  ...project.hatches.map((h) => ({ value: h.id, label: h.name })),
+                ]}
+              />,
+            )}
+          </>
         )}
 
-        {sourceRow(
-          "attr.background",
-          pocheEditable,
-          bgUi,
-          onBackgroundSourceChange,
-          colorValue(sel.background, host.onSetSelectionBackground),
+        {/* ── Masse (informativ, aus der bbox) — bei einer Layout-Annotation
+            in Papier-mm statt Modell-Metern geführt (`formatM` passt nicht),
+            daher hier weggelassen; Grösse steht bereits im Blatt-HUD. */}
+        {!isAnnotation && (
+          <>
+            <div className="attr-section-label">{t("attr.size")}</div>
+            <span className="attr-key">{t("attr.width")}</span>
+            <span className="attr-val attr-readonly">{formatM(bboxW)}</span>
+            <span className="attr-key">{t("attr.height")}</span>
+            <span className="attr-val attr-readonly">{formatM(bboxH)}</span>
+          </>
         )}
-
-        {sourceRow(
-          "attr.hatch",
-          fillEditable,
-          hatchUi,
-          onHatchSourceChange,
-          <Dropdown
-            value={sel.fillHatchId ?? ""}
-            onChange={(v) => host.onSetSelectionFill(v || null)}
-            options={[
-              { value: "", label: t("attr.none") },
-              ...project.hatches.map((h) => ({ value: h.id, label: h.name })),
-            ]}
-          />,
-        )}
-
-        {/* ── Maße (informativ, aus der bbox) ───────────────────────── */}
-        <div className="attr-section-label">{t("attr.size")}</div>
-        <span className="attr-key">{t("attr.width")}</span>
-        <span className="attr-val attr-readonly">{formatM(bboxW)}</span>
-        <span className="attr-key">{t("attr.height")}</span>
-        <span className="attr-val attr-readonly">{formatM(bboxH)}</span>
       </div>
 
       {/* Element-spezifische Abschnitte (aus ObjectInfo hierher verschoben) —
