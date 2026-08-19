@@ -21,16 +21,13 @@ import {
   collectVisibleCodes,
   flattenCategories,
 } from "./model/types";
-import { add, dot, leftNormal, normalize, scale, sub } from "./model/geometry";
 import type {
   Ceiling,
   ContextObject,
   Drawing2D,
-  EdgeGrip,
   Layout,
   Project,
   Roof,
-  Stair,
   Vec2,
   Wall,
 } from "./model/types";
@@ -103,7 +100,7 @@ import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
 import { StatusBar, type RendererMode } from "./ui/StatusBar";
 import { getTool } from "./tools/tools";
-import { applyAngleConstraint, computeSnap } from "./tools/snapping";
+import { computeSnap } from "./tools/snapping";
 import {
   requiredPoints,
   transformPreview,
@@ -128,12 +125,12 @@ import { useDialogState } from "./state/useDialogState";
 import { useTopBarState } from "./state/useTopBarState";
 import { useDrawingToolState } from "./state/useDrawingToolState";
 import { useSelectionState } from "./state/useSelectionState";
+import { useGripEditing } from "./state/useGripEditing";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useProjectActions } from "./state/useProjectActions";
 import {
   useActiveToolKeys,
   useBooleanOpsShortcut,
-  useCommandTabShortcut,
   useDrawingClipboardShortcut,
   useSelectAllAndDeleteShortcut,
   useSplitJoinShortcut,
@@ -167,11 +164,7 @@ import type { BooleanResult } from "./editors/booleanOps";
 
 // Globaler Store (Slices: project/selection/view/layout).
 import { useStore } from "./state/appStore";
-import {
-  categoryLabel,
-  drawingVertices,
-  findCategory,
-} from "./state/projectSlice";
+import { categoryLabel, findCategory } from "./state/projectSlice";
 import { reconcileLayout } from "./state/layoutSlice";
 
 // Panel-System.
@@ -1015,547 +1008,8 @@ export default function App() {
         : null,
     [selectedRoom],
   );
-  // Bewegpunkt (Move-Handle) einer Treppe: liegt auf der Treppe (Mitte des
-  // ersten Laufs bei gerade/L, Zentrum bei Wendel) und verschiebt beim Ziehen
-  // die GANZE Treppe (moveStairBy mit dem Delta). Ein einzelner, gut sichtbarer
-  // Griff — analog zum Öffnungs-Mittelpunkt.
-  const stairMoveHandle = (st: Stair): Vec2 => {
-    if (st.shape === "spiral") return st.center ?? st.start;
-    const d = normalize(st.dir);
-    return add(st.start, scale(d, st.runLength / 2));
-  };
-  const grips: Vec2[] = useMemo(() => {
-    // Öffnung (Fenster/Tür): EIN Mittelpunkt-Griff auf der Wandachse. Ziehen
-    // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
-    // `position`). Nur bei genau einer selektierten Öffnung (Auswahl exklusiv).
-    if (selectedOpeningId) {
-      const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
-      const w = op && project.walls.find((x) => x.id === op.hostWallId);
-      if (op && w) {
-        const axis = normalize(sub(w.end, w.start));
-        return [add(w.start, scale(axis, op.position + op.width / 2))];
-      }
-      return [];
-    }
-    // Treppe: EIN Bewegpunkt (siehe stairMoveHandle); Ziehen verschiebt die
-    // ganze Treppe (applyGrip → moveStairBy). Auswahl exklusiv.
-    if (selectedStairId) {
-      const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
-      return st ? [stairMoveHandle(st)] : [];
-    }
-    if (selectedDrawing) return drawingVertices(selectedDrawing);
-    if (selectedWallIds.length === 1 && !selectedDrawingId) {
-      const w = project.walls.find((x) => x.id === selectedWallIds[0]);
-      if (w) return [w.start, w.end];
-    }
-    // Decke: die Umriss-Vertices als Griffe (nur bei genau einer gewählten Decke).
-    if (selectedCeiling && !selectedDrawingId && selectedWallIds.length === 0) {
-      return [...selectedCeiling.outline];
-    }
-    // Raum: die Umriss-Vertices als Griffe (nur bei genau einem gewählten Raum).
-    if (
-      selectedRoom &&
-      !selectedDrawingId &&
-      selectedWallIds.length === 0 &&
-      !selectedCeiling
-    ) {
-      return [...selectedRoom.boundary];
-    }
-    return [];
-  }, [
-    selectedDrawing,
-    selectedCeiling,
-    selectedRoom,
-    selectedOpeningId,
-    selectedStairId,
-    selectedWallIds,
-    selectedDrawingId,
-    project.walls,
-    project.openings,
-    project.stairs,
-  ]);
-
-  // ── Kanten-/Seiten-Griffe (Edge Grips) ───────────────────────────────────
-  // Pro Seite des selektierten Elements ein Griff: Kanten-Mittelpunkt + nach
-  // AUSSEN zeigende Einheitsnormale + die beiden Vertex-Indizes (passend zur
-  // `grips`-/`drawingVertices`-Reihenfolge). Die Außenrichtung wird über das
-  // Vorzeichen des Skalarprodukts der Kanten-Normale mit (mid − centroid)
-  // gewählt (vom Polygon-Schwerpunkt weg).
-  //  • rect: 4 Kanten (geschlossen).
-  //  • polyline mit `closed`: Kanten zwischen aufeinanderfolgenden Vertices
-  //    inkl. Schlusskante (letzter → erster).
-  //  • Wand: eine Kante [0,1]; Außennormale = leftNormal der Achse. Ziehen
-  //    verschiebt beide Enden (ganze Wand senkrecht).
-  //  • offene Polylinie/Linie: je Segment ein Kanten-Griff. Ziehen verschiebt DAS
-  //    Segment (seine beiden Endpunkte) um das volle Drag-Delta — die geteilten
-  //    Ecken wandern mit, die Nachbar-Segmente dehnen sich nach (Parallel-
-  //    Verschieben EINER Kante einer komplexen Polylinie, §Task B).
-  const edgeGrips: EdgeGrip[] = useMemo(() => {
-    // Geschlossener Ring aus Vertices → Kanten-Griffe mit Außennormale.
-    const ringEdges = (verts: Vec2[]): EdgeGrip[] => {
-      const n = verts.length;
-      if (n < 3) return [];
-      // Schwerpunkt (Mittel der Eckpunkte) als Innenbezug.
-      let cx = 0, cy = 0;
-      for (const v of verts) { cx += v.x; cy += v.y; }
-      const centroid: Vec2 = { x: cx / n, y: cy / n };
-      const out: EdgeGrip[] = [];
-      for (let i = 0; i < n; i++) {
-        const a = verts[i];
-        const b = verts[(i + 1) % n];
-        const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const edge = sub(b, a);
-        let nrm = normalize(leftNormal(edge));
-        // Nach außen orientieren: Normale soll von centroid → mid weisen.
-        const outward = sub(mid, centroid);
-        if (nrm.x * outward.x + nrm.y * outward.y < 0) nrm = scale(nrm, -1);
-        out.push({ mid, normal: nrm, aIndex: i, bIndex: (i + 1) % n });
-      }
-      return out;
-    };
-    // Offene Kette (Linie/offene Polylinie) → ein Griff je Segment, OHNE
-    // Schlusskante. `normal` dient nur der Griff-Darstellung (leftNormal der
-    // Kante); die Bewegung ist frei (volles Delta), nicht auf die Normale
-    // beschränkt — daher `free: true`.
-    const openEdges = (verts: Vec2[]): EdgeGrip[] => {
-      const n = verts.length;
-      if (n < 2) return [];
-      const out: EdgeGrip[] = [];
-      for (let i = 0; i < n - 1; i++) {
-        const a = verts[i];
-        const b = verts[i + 1];
-        const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const nrm = normalize(leftNormal(sub(b, a)));
-        out.push({ mid, normal: nrm, aIndex: i, bIndex: i + 1, free: true });
-      }
-      return out;
-    };
-    if (selectedDrawing) {
-      const g = selectedDrawing.geom;
-      if (g.shape === "rect" || g.shape === "image") return ringEdges(grips);
-      if (g.shape === "polyline" && g.closed) return ringEdges(grips);
-      if (g.shape === "polyline" && !g.closed) return openEdges(grips);
-      if (g.shape === "line") return openEdges(grips);
-      return [];
-    }
-    if (selectedWallIds.length === 1 && !selectedDrawingId) {
-      const w = project.walls.find((x) => x.id === selectedWallIds[0]);
-      if (w) {
-        const mid: Vec2 = { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 };
-        const nrm = normalize(leftNormal(sub(w.end, w.start)));
-        return [{ mid, normal: nrm, aIndex: 0, bIndex: 1 }];
-      }
-    }
-    // Decke: geschlossener Ring aus dem Umriss.
-    if (selectedCeiling && !selectedDrawingId && selectedWallIds.length === 0) {
-      return ringEdges(grips);
-    }
-    // Raum: geschlossener Ring aus dem Umriss.
-    if (
-      selectedRoom &&
-      !selectedDrawingId &&
-      selectedWallIds.length === 0 &&
-      !selectedCeiling
-    ) {
-      return ringEdges(grips);
-    }
-    return [];
-  }, [
-    selectedDrawing,
-    selectedCeiling,
-    selectedRoom,
-    grips,
-    selectedWallIds,
-    selectedDrawingId,
-    project.walls,
-  ]);
-
-  // Snapping beim Griff-Ziehen: das gezogene Element selbst aus den Quellen
-  // nehmen (sonst fängt der Punkt an sich selbst). Live-Mutation über setProject.
-  // Zuletzt angewandter Kanten-Offset während eines Edge-Grip-Drags (Anker).
-  // null = kein laufender Drag; der erste Move-Event verankert nur (kein Sprung).
-  const edgeDragOffsetRef = useRef<number | null>(null);
-  // Freies Kanten-Ziehen (offene Polylinie/Linie): letzter roher Cursor, gegen den
-  // das inkrementelle 2D-Delta gebildet wird. null = Drag noch nicht verankert.
-  const edgeFreeLastRef = useRef<Vec2 | null>(null);
-  // Körper-Verschieben (2D): koinzidente Endpunkte ANDERER gewählter Elemente, die
-  // an einer Ecke des verschobenen Elements hängen, werden um dasselbe Delta
-  // mitgeführt (gemeinsame Ecke bleibt verbunden). Lazy beim ersten Move-Event
-  // bestimmt (Snapshot der Selektion), je Drag in onGripEnd zurückgesetzt. null =
-  // noch nicht bestimmt.
-  const moveCoincidentRef = useRef<
-    | { drawingId: string | null; wallId: string | null; index: number; pos: Vec2 }[]
-    | null
-  >(null);
-  // Eckpunkte eines selektierten Elements (Wand: start/end; 2D: drawingVertices).
-  const elementCorners = (drawingId: string | null, wallId: string | null): Vec2[] => {
-    if (drawingId) {
-      const d = project.drawings2d.find((x) => x.id === drawingId);
-      return d ? drawingVertices(d) : [];
-    }
-    if (wallId) {
-      const w = project.walls.find((x) => x.id === wallId);
-      return w ? [w.start, w.end] : [];
-    }
-    return [];
-  };
-  // Koinzidente Sibling-Vertices (unter den ÜBRIGEN gewählten Elementen) an JEDER
-  // Ecke des verschobenen Elements. Toleranz wie beim 3D-Drag (gemeinsame Ecke).
-  const COINCIDENT_TOL_2D = 0.05; // m
-  const findMoveCoincident2D = (
-    selfDrawingId: string | null,
-    selfWallId: string | null,
-  ): { drawingId: string | null; wallId: string | null; index: number; pos: Vec2 }[] => {
-    const corners = elementCorners(selfDrawingId, selfWallId);
-    if (corners.length === 0) return [];
-    const near = (p: Vec2, q: Vec2) => Math.hypot(p.x - q.x, p.y - q.y) <= COINCIDENT_TOL_2D;
-    const seen = new Set<string>();
-    const out: { drawingId: string | null; wallId: string | null; index: number; pos: Vec2 }[] = [];
-    const add = (drawingId: string | null, wallId: string | null, index: number, pos: Vec2) => {
-      const key = `${drawingId ?? ""}|${wallId ?? ""}|${index}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ drawingId, wallId, index, pos: { ...pos } });
-    };
-    for (const corner of corners) {
-      for (const id of selectedWallIds) {
-        if (id === selfWallId) continue;
-        const w = project.walls.find((x) => x.id === id);
-        if (!w) continue;
-        if (near(corner, w.start)) add(null, id, 0, w.start);
-        if (near(corner, w.end)) add(null, id, 1, w.end);
-      }
-      for (const id of selectedDrawingIds) {
-        if (id === selfDrawingId) continue;
-        const d = project.drawings2d.find((x) => x.id === id);
-        if (!d) continue;
-        drawingVertices(d).forEach((v, i) => {
-          if (near(corner, v)) add(id, null, i, v);
-        });
-      }
-    }
-    return out;
-  };
-  // ── (c) Präzise Werteingabe beim Editieren (Tab im Vertex-Griff-Drag) ───────
-  // Editieren läuft AD-HOC (gripHandlers → moveGripOf), NICHT durch die Engine.
-  // Damit „Tab → Länge/Winkel" wie beim Zeichnen funktioniert, ohne die Engine
-  // umzubauen, hält App einen kleinen FELD-Controller, der NUR während eines
-  // Vertex-Griff-Drags aktiv ist: er belegt das Befehlsfeld (Prompt/Felder/
-  // Eingabe) und liefert gelockte Länge/Winkel relativ zum Anker (Nachbarecke).
-  // `onGripMove` liest diese Locks und zwingt den Zielpunkt darauf — so setzt ein
-  // getippter Wert den exakten Endpunkt. Foundation: heute 2D-Vertex; dieselbe
-  // Lock-Auflösung (polar um den Anker) ist auf 3D-Vertex/Körper erweiterbar.
-  const [gripEdit, setGripEdit] = useState<{
-    /** Fixer Bezug (Nachbarecke), relativ zu dem Länge/Winkel gelten. */
-    anchor: Vec2;
-    /** Aktives Tab-Feld (zyklt length ↔ angle). */
-    active: "length" | "angle";
-    /** Gelockte Werte (getippt). length in m, angle in Grad. */
-    locks: { length?: number; angle?: number };
-  } | null>(null);
-  // Live-Spiegel für Handler ohne Re-Render-Abhängigkeit (Drag liest synchron).
-  const gripEditRef = useRef<typeof gripEdit>(null);
-  gripEditRef.current = gripEdit;
-  // Letzter roher Cursor des laufenden Vertex-Drags (für die Lock-Auflösung beim
-  // Tippen, wenn gerade kein Move-Event kommt). Plus der gezogene Griff-Index.
-  const gripDragInfoRef = useRef<{ index: number; raw: Vec2 } | null>(null);
-
-  // Endpunkt aus Anker + (gelockten/Live-)Länge/Winkel — wie lineEndFromFields,
-  // hier für den Vertex-Drag. Ungelockte Größen folgen dem rohen Cursor `raw`.
-  const gripEditPoint = (
-    anchor: Vec2,
-    locks: { length?: number; angle?: number },
-    raw: Vec2,
-  ): Vec2 => {
-    const DEG = Math.PI / 180;
-    const dx = raw.x - anchor.x;
-    const dy = raw.y - anchor.y;
-    const length = locks.length != null ? locks.length : Math.hypot(dx, dy);
-    const angleDeg = locks.angle != null ? locks.angle : (Math.atan2(dy, dx) * 180) / Math.PI;
-    const a = angleDeg * DEG;
-    return { x: anchor.x + Math.cos(a) * length, y: anchor.y + Math.sin(a) * length };
-  };
-
-  // Felder fürs Befehlsfeld während des Vertex-Drags (Live ODER gelockt).
-  const gripEditFields = (): {
-    id: string;
-    labelKey: string;
-    value: number | null;
-    locked: boolean;
-    active: boolean;
-  }[] => {
-    const ge = gripEdit;
-    const info = gripDragInfoRef.current;
-    if (!ge || !info) return [];
-    const dx = info.raw.x - ge.anchor.x;
-    const dy = info.raw.y - ge.anchor.y;
-    const liveLen = Math.hypot(dx, dy);
-    const liveAng = ((((Math.atan2(dy, dx) * 180) / Math.PI) % 360) + 360) % 360;
-    return [
-      {
-        id: "length",
-        labelKey: "cmd.field.length",
-        value: ge.locks.length ?? liveLen,
-        locked: ge.locks.length != null,
-        active: ge.active === "length",
-      },
-      {
-        id: "angle",
-        labelKey: "cmd.field.angle",
-        value: ge.locks.angle ?? liveAng,
-        locked: ge.locks.angle != null,
-        active: ge.active === "angle",
-      },
-    ];
-  };
-
-  // Stabiler Ref auf cycleGripEditField (der globale Tab-Handler hat leere Deps).
-  const cycleGripEditFieldRef = useRef<() => void>(() => {});
-  // Tab im Vertex-Drag: Feld-Controller öffnen/zyklen (length ↔ angle).
-  const cycleGripEditField = () => {
-    const info = gripDragInfoRef.current;
-    if (!info) return;
-    const refIndex = info.index > 0 ? info.index - 1 : grips.length > 1 ? 1 : -1;
-    const anchor = refIndex >= 0 ? grips[refIndex] : null;
-    if (!anchor) return; // ohne Anker keine polare Eingabe möglich
-    setGripEdit((prev) =>
-      prev
-        ? { ...prev, active: prev.active === "length" ? "angle" : "length" }
-        : { anchor, active: "length", locks: {} },
-    );
-  };
-  cycleGripEditFieldRef.current = cycleGripEditField;
-
-  // Globaler Tab-Handler (Feld-Zyklus/Zahlen-Tippen) — siehe state/useKeyboardShortcuts.ts.
-  useCommandTabShortcut(engineRef, commandLineRef, gripDragInfoRef, gripEditRef, cycleGripEditFieldRef);
-
-  // Getippte Zahl im Vertex-Drag: aktives Feld locken, aufs nächste vorrücken und
-  // den Zielpunkt sofort mit dem gelockten Wert neu setzen.
-  const submitGripEditValue = (value: number) => {
-    const ge = gripEditRef.current;
-    const info = gripDragInfoRef.current;
-    if (!ge || !info) return;
-    const locks = { ...ge.locks, [ge.active]: value };
-    const next = ge.active === "length" ? "angle" : "length";
-    setGripEdit({ ...ge, locks, active: next });
-    // Zielpunkt mit dem frischen Lock anwenden (live, ohne Maus-Bewegung).
-    const pt = gripEditPoint(ge.anchor, locks, info.raw);
-    applyGrip(info.index, pt);
-  };
-
-  // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
-  // auf die Wand/2D-Aktionen. So teilen Plan- UND 3D-Griffe denselben Pfad.
-  const applyGrip = (index: number, pt: Vec2) => {
-    // Öffnung: den gezogenen Punkt auf die Wandachse projizieren → neue
-    // `position` (Abstand des ersten Pfostens vom Wand-Start), sodass die
-    // Öffnung entlang der Wand gleitet. Griff sitzt in der Öffnungsmitte, daher
-    // width/2 abziehen; auf [0, Wandlänge − Breite] klemmen (Öffnung bleibt drin).
-    if (selectedOpeningId) {
-      const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
-      const w = op && project.walls.find((x) => x.id === op.hostWallId);
-      if (op && w) {
-        const d = sub(w.end, w.start);
-        const len = Math.hypot(d.x, d.y);
-        if (len > 1e-9) {
-          const axis = scale(d, 1 / len);
-          const t = dot(sub(pt, w.start), axis);
-          const pos = Math.max(0, Math.min(len - op.width, t - op.width / 2));
-          updateOpening(op.id, { position: pos });
-        }
-      }
-      return;
-    }
-    // Treppe: den Bewegpunkt verfolgen → ganze Treppe um das Delta (Ziel −
-    // aktueller Handle) verschieben. Handle wird identisch zu grips gebildet,
-    // sodass er nach dem Move exakt unter dem Cursor sitzt.
-    if (selectedStairId) {
-      const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
-      if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
-      return;
-    }
-    if (selectedRoomId) moveRoomGrip(selectedRoomId, index, pt);
-    else if (selectedCeilingId) moveCeilingGrip(selectedCeilingId, index, pt);
-    else moveGripOf(selectedDrawingId, selectedWallId, index, pt);
-  };
-  const applyEdge = (aIndex: number, bIndex: number, delta: Vec2) => {
-    if (selectedRoomId) moveRoomEdge(selectedRoomId, aIndex, bIndex, delta);
-    else if (selectedCeilingId) moveCeilingEdge(selectedCeilingId, aIndex, bIndex, delta);
-    else moveEdgeOf(selectedDrawingId, selectedWallId, aIndex, bIndex, delta);
-  };
-
-  const gripHandlers = {
-    onGripMove: (index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
-      // (c) Vertex-Drag mit aktivem Feld-Controller + Locks: den Zielpunkt polar
-      // aus Anker + gelockter Länge/Winkel bilden (ungelockt folgt dem Cursor).
-      const ge = gripEditRef.current;
-      gripDragInfoRef.current = { index, raw };
-      if (ge && (ge.locks.length != null || ge.locks.angle != null)) {
-        const pt = gripEditPoint(ge.anchor, ge.locks, raw);
-        applyGrip(index, pt);
-        setDraft({ preview: [], vertices: [], snap: null });
-        return;
-      }
-      const snapProject: Project = selectedRoomId
-        ? { ...project, rooms: (project.rooms ?? []).filter((r) => r.id !== selectedRoomId) }
-        : selectedCeilingId
-        ? { ...project, ceilings: (project.ceilings ?? []).filter((c) => c.id !== selectedCeilingId) }
-        : selectedDrawingId
-        ? { ...project, drawings2d: project.drawings2d.filter((d) => d.id !== selectedDrawingId) }
-        : { ...project, walls: project.walls.filter((w) => w.id !== selectedWallId) };
-      // Bezugspunkt für Shift-Ortho: ein Nachbar-Griff (festes Ende), relativ zu
-      // dem die Bewegung auf H/V eingerastet wird.
-      const refIndex = index > 0 ? index - 1 : grips.length > 1 ? 1 : -1;
-      const anchor = refIndex >= 0 ? grips[refIndex] : null;
-      // Shift = Ortho-Lock: den gezogenen Punkt auf H/V gegenüber dem FIXEN Anker
-      // zwingen (Achse = die nähere; applyAngleConstraint mit 90°, wie Ortho beim
-      // Zeichnen). Der Lock dominiert (kein Snap), damit die Endkoordinate
-      // garantiert eine Achse mit dem Anker teilt — identisch zum 3D-Vertex-Drag.
-      if (mods.shift && anchor) {
-        const pt = applyAngleConstraint(anchor, raw, 90);
-        applyGrip(index, pt);
-        setDraft({ preview: [], vertices: [], snap: null });
-        return;
-      }
-      const snapResult = computeSnap({
-        raw,
-        project: snapProject,
-        levelId: activeLevel.id,
-        visibleCodes,
-        settings: snap,
-        draftPoints: [],
-        lastPoint: anchor,
-        pxPerMeter,
-        shift: mods.shift,
-        ctrl: mods.ctrl,
-      });
-      const pt = snapResult?.point ?? raw;
-      applyGrip(index, pt);
-      setDraft({ preview: [], vertices: [], snap: snapResult });
-    },
-    onMoveBody: (
-      delta: Vec2,
-      target?: { wallId?: string; drawingId?: string },
-      mods?: ToolMods,
-    ) => {
-      // Shift = Ortho: das Delta auf die dominante Achse (H/V) zwingen —
-      // dieselbe Regel wie beim freien Kanten-Zug (onEdgeMove) und beim
-      // Vertex-Griff (onGripMove). Bisher wirkte Shift beim Körper-Verschieben
-      // (Wand/2D-Element/Decke/Treppe/Raum als Ganzes) gar nicht (Nutzer-Report
-      // 2026-07-06) — `mods` kam von PlanView schlicht nicht bis hierher.
-      if (mods?.shift) {
-        if (Math.abs(delta.x) >= Math.abs(delta.y)) delta = { x: delta.x, y: 0 };
-        else delta = { x: 0, y: delta.y };
-      }
-      // Decke: ganzen Umriss verschieben (kein Multi-Koinzidenz-Handling nötig).
-      if (selectedCeilingId && !target) {
-        moveCeilingBy(selectedCeilingId, delta);
-        return;
-      }
-      // Treppe: ganzen Antritt (+ Zentrum) verschieben.
-      if (selectedStairId && !target) {
-        moveStairBy(selectedStairId, delta);
-        return;
-      }
-      // Raum: ganzen Umriss (+ Stempel-Anker) verschieben.
-      if (selectedRoomId && !target) {
-        moveRoomBy(selectedRoomId, delta);
-        return;
-      }
-      // Gegriffenes Element: bei Mehrfachauswahl das unter dem Cursor (target),
-      // sonst das einzeln selektierte. Wand UND 2D schließen sich aus.
-      const moveDrawingId = target ? target.drawingId ?? null : selectedDrawingId;
-      const moveWallId = target ? target.wallId ?? null : selectedWallId;
-      moveElementByOf(moveDrawingId, moveWallId, delta);
-      // Beim ersten Move-Event die Koinzidenz-Gruppe einmalig bestimmen (Snapshot
-      // VOR der ersten Mutation der Siblings). Danach inkrementell mitführen.
-      if (moveCoincidentRef.current === null) {
-        moveCoincidentRef.current = findMoveCoincident2D(moveDrawingId, moveWallId);
-      }
-      for (const c of moveCoincidentRef.current) {
-        c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
-        moveGripOf(c.drawingId, c.wallId, c.index, c.pos);
-      }
-    },
-    // Kanten-Griff ziehen. Zwei Verhalten:
-    //  • free (offene Polylinie/Linie, §Task B): das Segment folgt dem VOLLEN
-    //    Cursor-Delta — beide Endpunkte wandern gleich, die geteilten Ecken ziehen
-    //    die Nachbar-Segmente nach. Shift = Ortho (H/V) auf das Gesamt-Delta.
-    //  • sonst (rect/geschlossene Polylinie/Wand): NUR die Komponente senkrecht
-    //    zur Kante (Seite verschiebt sich parallel nach außen/innen). Fängt an
-    //    eingeschalteten Geometrie-Snaps (Endpunkt/Mittelpunkt/Schnittpunkt/…);
-    //    ohne Geometrie-Snap wird der Offset wie bisher aufs Raster gerundet.
-    onEdgeMove: (edge: EdgeGrip, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
-      if (edge.free) {
-        // Freier Fall arbeitet mit einem inkrementellen Cursor-DELTA (nicht
-        // einem absoluten Punkt) — eine Geometrie-Snap-Projektion auf die
-        // Normale ergibt hier keinen Sinn, da es keine feste Kanten-Normale
-        // gibt, an die sich ein gefangener Punkt anlehnen könnte. Bleibt beim
-        // bisherigen Raster-Delta-Verhalten.
-        //
-        // Inkrementelles 2D-Delta gegen den letzten rohen Cursor. Erster Event
-        // verankert nur (kein Sprung, da der Griff am Kanten-Mittelpunkt sitzt).
-        const last = edgeFreeLastRef.current;
-        edgeFreeLastRef.current = raw;
-        if (last === null) return;
-        let dx = raw.x - last.x;
-        let dy = raw.y - last.y;
-        // Raster-Schritt auf das Delta (Snap aktiv, nicht per Ctrl unterdrückt).
-        const gs = snap.gridSize;
-        if (!mods.ctrl && snap.enabled && snap.grid && gs > 0) {
-          dx = Math.round(dx / gs) * gs;
-          dy = Math.round(dy / gs) * gs;
-          if (dx === 0 && dy === 0) {
-            edgeFreeLastRef.current = last; // noch kein voller Rasterschritt → warten
-            return;
-          }
-        }
-        // Shift = Ortho: das Delta auf die dominante Achse (H/V) zwingen.
-        if (mods.shift) {
-          if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
-          else dx = 0;
-        }
-        if (dx === 0 && dy === 0) return;
-        applyEdge(edge.aIndex, edge.bIndex, { x: dx, y: dy });
-        setDraft({ preview: [], vertices: [], snap: null });
-        return;
-      }
-      // Cursor zuerst durch die Snap-Engine schicken (Ctrl unterdrückt Snap
-      // wie überall sonst, siehe computeSnap). Ein GEOMETRIE-Snap (Endpunkt/
-      // Mittelpunkt/Schnittpunkt/…, nicht Raster/Ortho) liefert den gefangenen
-      // Punkt, der dann auf die Außennormale projiziert wird — so rastet die
-      // Kante an reale Geometrie statt nur ans Raster.
-      const snapResult = snapFor(raw, pxPerMeter, mods);
-      const isGeometrySnap = !!snapResult && snapResult.kind !== "grid" && snapResult.kind !== "ortho";
-      const cursor = isGeometrySnap ? snapResult!.point : raw;
-      // Senkrechte Projektion von (Cursor − Grab-Mittelpunkt) auf die Außennormale.
-      const rel = sub(cursor, edge.mid);
-      let offset = rel.x * edge.normal.x + rel.y * edge.normal.y;
-      // Raster-Schritt (Snap) nur, wenn kein Geometrie-Snap gefangen wurde —
-      // sonst gewinnt der gefangene Punkt.
-      const step = snap.gridSize;
-      if (!isGeometrySnap && !mods.ctrl && snap.enabled && snap.grid && step > 0) {
-        offset = Math.round(offset / step) * step;
-      }
-      // INKREMENTELL + Grab-Anker: moveEdge verschiebt additiv, daher nur die
-      // Änderung seit dem letzten Event anwenden. Erster Event verankert nur
-      // (kein Sprung beim Greifen, da das Dreieck am Mittelpunkt sitzt).
-      const prev = edgeDragOffsetRef.current;
-      edgeDragOffsetRef.current = offset;
-      if (prev === null) return;
-      const inc = offset - prev;
-      if (inc === 0) return;
-      applyEdge(edge.aIndex, edge.bIndex, scale(edge.normal, inc));
-      setDraft({ preview: [], vertices: [], snap: isGeometrySnap ? snapResult : null });
-    },
-    onGripEnd: () => {
-      setDraft(null);
-      edgeDragOffsetRef.current = null; // Drag beendet → Anker zurücksetzen
-      edgeFreeLastRef.current = null; // freien Kanten-Drag-Anker zurücksetzen
-      moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
-      gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
-      setGripEdit(null); // (c) Feld-Controller schließen
-    },
-  };
+  // Editier-Griffe/Kanten-Griffe + Feld-Controller (Tab-Länge/Winkel im Vertex-Drag)
+  // → state/useGripEditing.ts (Hook-Aufruf weiter unten, nach useProjectActions()).
 
   // Ob irgendeine löschbare Auswahl ansteht — geteilt zwischen dem Entf-
   // Tastatur-Handler unten und dem Menüpunkt „Bearbeiten > Löschen" (AppMenuBar).
@@ -1855,6 +1309,50 @@ export default function App() {
     setRoomStampDoc,
     setRoomStamp,
   } = useProjectActions(setProject, notify, planViewRef);
+
+  // 2D-Griff-Editieren (Eckpunkt-/Kanten-Griffe + Feld-Controller) der aktuellen
+  // Auswahl — siehe state/useGripEditing.ts.
+  const {
+    grips,
+    edgeGrips,
+    gripHandlers,
+    gripEdit,
+    setGripEdit,
+    gripEditFields,
+    cycleGripEditField,
+    submitGripEditValue,
+  } = useGripEditing({
+    project,
+    selectedDrawing,
+    selectedCeiling,
+    selectedRoom,
+    selectedOpeningId,
+    selectedStairId,
+    selectedRoomId,
+    selectedCeilingId,
+    selectedDrawingId,
+    selectedWallId,
+    selectedWallIds,
+    selectedDrawingIds,
+    levelId: activeLevel.id,
+    visibleCodes,
+    snap,
+    setDraft,
+    snapFor,
+    engineRef,
+    commandLineRef,
+    updateOpening,
+    moveStairBy,
+    moveRoomGrip,
+    moveCeilingGrip,
+    moveGripOf,
+    moveRoomEdge,
+    moveCeilingEdge,
+    moveEdgeOf,
+    moveRoomBy,
+    moveCeilingBy,
+    moveElementByOf,
+  });
 
   // Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen — siehe
   // state/useKeyboardShortcuts.ts.
