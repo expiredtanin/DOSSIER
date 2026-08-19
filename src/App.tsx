@@ -118,6 +118,7 @@ import { useDrawingToolState } from "./state/useDrawingToolState";
 import { useSelectionState } from "./state/useSelectionState";
 import { useGripEditing } from "./state/useGripEditing";
 import { usePanelHostBase } from "./state/usePanelHostBase";
+import { useDockDragState } from "./state/useDockDragState";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useProjectActions } from "./state/useProjectActions";
 import {
@@ -162,10 +163,9 @@ import { reconcileLayout } from "./state/layoutSlice";
 // Panel-System.
 import { Dock } from "./panels/Dock";
 import { FloatingPanel } from "./panels/FloatingPanel";
-import { DragOverlay, usePanelDrag } from "./panels/panelDrag";
+import { DragOverlay } from "./panels/panelDrag";
 import { itemDisplay } from "./panels/displayMode";
 import { PanelHostContext } from "./panels/types";
-import type { DockId } from "./panels/types";
 import { hostWithMode } from "./panels/host";
 import { hitTestWall } from "./viewport/planHitTest";
 import { deriveSelection } from "./state/selectionInfo";
@@ -1785,60 +1785,25 @@ export default function App() {
   const redockFloat = useStore((s) => s.redockFloat);
   const dockFloatTo = useStore((s) => s.dockFloatTo);
 
-  // ── Tab-Drag-Steuerung (Reorder / Einreihen / Stapeln / Lösen) ────────────
-  // Der Controller (usePanelDrag) klärt anhand der Bewegung Klick vs. Ziehen
-  // und löst beim Loslassen das Ziel auf; die Auflösung selbst macht der Slice.
-  const { drag, startTabDrag } = usePanelDrag({
-    onActivate: activateTab,
-    onJoinGroup: joinGroup,
-    onNewGroup: newGroup,
-    onDropFloat: dropFloat,
+  // Tab-Drag-Steuerung (Reorder/Einreihen/Stapeln/Lösen) + Float-Titel-Drag
+  // über Rand-Andockzonen — siehe state/useDockDragState.ts.
+  const {
+    drag,
+    startTabDrag,
+    onFloatTitleDrop,
+    onFloatTitleDrag,
+    leftHasTabs,
+    rightHasTabs,
+    dragActive,
+    activeZone,
+  } = useDockDragState({
+    layout,
+    activateTab,
+    joinGroup,
+    newGroup,
+    dropFloat,
+    dockFloatTo,
   });
-
-  // Zustand für die Rand-Zonen-Hervorhebung beim Titel-Drag eines Fensters.
-  // `floatDragging` schaltet die Zonen ein (sobald die Titelleiste gezogen
-  // wird), `floatDragHover` markiert die gerade überfahrene Zone.
-  const [floatDragging, setFloatDragging] = useState(false);
-  const [floatDragHover, setFloatDragHover] = useState<DockId | null>(null);
-
-  // Titel-Drag eines schwebenden Fensters über eine Rand-Zone: liefert true,
-  // wenn das Fenster angedockt wurde (dann unterbleibt das reine Verschieben).
-  // Trefferprüfung über die Datenattribute der Rand-Zonen (data-drop-zone).
-  const onFloatTitleDrop = (panelId: string, clientX: number, clientY: number): boolean => {
-    setFloatDragging(false);
-    setFloatDragHover(null);
-    const zone = document
-      .elementsFromPoint(clientX, clientY)
-      .find((el) => (el as HTMLElement).dataset?.dropZone !== undefined) as
-      | HTMLElement
-      | undefined;
-    if (!zone) return false;
-    const dock = zone.dataset.dropZone as DockId;
-    dockFloatTo(panelId, dock);
-    return true;
-  };
-
-  const onFloatTitleDrag = (_panelId: string, clientX: number, clientY: number) => {
-    if (!floatDragging) setFloatDragging(true);
-    const zone = document
-      .elementsFromPoint(clientX, clientY)
-      .find((el) => (el as HTMLElement).dataset?.dropZone !== undefined) as
-      | HTMLElement
-      | undefined;
-    setFloatDragHover(zone ? (zone.dataset.dropZone as DockId) : null);
-  };
-
-  // Ein Dock wird nur gerendert, wenn es Tabs hat — ein leeres Dock soll die
-  // Mitte nicht stauchen. (Rechtes Dock ist standardmäßig leer: Ressourcen ist
-  // ein schwebendes Fenster.)
-  const leftHasTabs = layout.left.groups.length > 0;
-  const rightHasTabs = layout.right.groups.length > 0;
-  // Rand-Andock-Zonen sind aktiv, solange irgendeine Drag-Geste läuft (Tab-Drag
-  // ODER Titel-Drag eines schwebenden Fensters). Die gerade überfahrene Zone
-  // (für die Hervorhebung) kommt aus dem Tab-Drag-Hover bzw. dem Float-Hover.
-  const dragActive = drag !== null || floatDragging;
-  const activeZone: DockId | null =
-    drag && drag.hover.kind === "zone" ? drag.hover.dock : floatDragHover;
 
   // Handler-Bündel für das schwebende Ressourcen-Fenster (ResourceManager).
   const resourceHandlers: ResourceManagerHandlers = {
