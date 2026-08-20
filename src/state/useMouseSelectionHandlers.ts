@@ -121,19 +121,38 @@ export function useMouseSelectionHandlers(opts: {
 
   // Bearbeitetes Rich-Text-Dokument übernehmen (immutabel; nur bei Text-Geometrie).
   // `text` bleibt als Reintext-Spiegel bestehen (DXF-Export, Suche, Alt-Konsumenten).
+  // LIVE bei jedem Tastendruck (Inline-Editor auf der Zeichenfläche, kein Dialog
+  // mehr) — schreibt AUCH einen leeren Zustand zurück (kein Guard mehr), damit
+  // Löschen bis auf null Zeichen sich sofort im Modell spiegelt; das eigentliche
+  // Aufräumen eines leer verlassenen NEUEN Elements übernimmt `closeTextEdit`.
   const commitTextEdit = (doc: RichTextDoc) => {
     const id = editTextId;
     if (!id) return;
-    const text = plainText(doc).trim();
-    if (text !== "") {
-      setProject((p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) =>
-          d.id === id && d.geom.shape === "text"
-            ? { ...d, geom: { ...d.geom, doc, text: plainText(doc) } }
-            : d,
-        ),
-      }));
+    setProject((p) => ({
+      ...p,
+      drawings2d: p.drawings2d.map((d) =>
+        d.id === id && d.geom.shape === "text"
+          ? { ...d, geom: { ...d.geom, doc, text: plainText(doc) } }
+          : d,
+      ),
+    }));
+  };
+
+  // Inline-Editor schliessen (Backdrop-Klick/Escape): bleibt das Element leer
+  // (frisch über `text`/`textbox` erzeugt, nie befüllt, oder komplett wieder
+  // geleert), wird es entfernt statt als leere Leiche im Modell zu bleiben.
+  const closeTextEdit = () => {
+    const id = editTextId;
+    if (id) {
+      setProject((p) => {
+        const d = p.drawings2d.find((x) => x.id === id);
+        // `text` ist immer der Reintext-Spiegel von `doc` (s. commitTextEdit) —
+        // reicht daher allein als Leer-Test, egal ob `doc` je gesetzt wurde.
+        if (d && d.geom.shape === "text" && d.geom.text.trim() === "") {
+          return { ...p, drawings2d: p.drawings2d.filter((x) => x.id !== id) };
+        }
+        return p;
+      });
     }
     setEditTextId(null);
   };
@@ -509,6 +528,7 @@ export function useMouseSelectionHandlers(opts: {
     onOpenStampEditor,
     onEditDrawingText,
     commitTextEdit,
+    closeTextEdit,
     onPlanSelect,
     onPlanMarquee,
     onPlanContextMenu,

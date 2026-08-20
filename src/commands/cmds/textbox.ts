@@ -1,9 +1,14 @@
 // Textspalte (Absatztext) — wie das Text-Werkzeug, aber mit einer Spaltenbreite:
-// der Text bricht beim Rendern wortweise auf diese Breite um. Schritte:
+// der Text bricht beim Rendern UND beim Editieren wortweise auf diese Breite
+// um (InDesign-artiges Textrahmen-Verhalten, Nutzer-Wunsch). Schritte:
 //   1) „Ankerpunkt:"     → Punkt (oben-links der Spalte)
 //   2) „Spaltenbreite:"   → Punkt (die horizontale Distanz zum Anker = Breite;
 //                            Live-Vorschau der Breitenlinie)
-//   3) „Text:"            → getippte Zeile → commit Drawing2D {shape:"text", width}
+//   Committet danach SOFORT ein leeres Text-Element (mit `width`) und meldet
+//   `focusDrawingId` — die UI (PlanView) öffnet den Inline-Rich-Text-Editor
+//   direkt auf der Zeichenfläche, mit der Spaltenbreite als CSS-Breite (echter
+//   Wortumbruch beim Tippen, kein Dialog). Bleibt der Editor leer, verwirft
+//   `commitTextEdit` (App.tsx) das Element wieder.
 //
 // Reuse des bestehenden {shape:"text"}-Elements (mit `width`) — so erben Selektion,
 // Verschieben und Griff automatisch vom Einzeltext; nur die Breite kommt hinzu.
@@ -33,12 +38,7 @@ interface TbWidth extends CommandState {
   at: Vec2;
   cursor: Vec2 | null;
 }
-interface TbLabel extends CommandState {
-  phase: "label";
-  at: Vec2;
-  width: number;
-}
-type TbState = TbPoint | TbWidth | TbLabel;
+type TbState = TbPoint | TbWidth;
 
 /** Horizontale Spaltenbreite aus Anker + Cursor (Betrag der x-Differenz, geklemmt). */
 function widthOf(at: Vec2, cursor: Vec2): number {
@@ -56,21 +56,13 @@ function widthDraft(at: Vec2, cursor: Vec2): ToolDraft {
   };
 }
 
-function appendTextbox(
-  p: Project,
-  at: Vec2,
-  width: number,
-  text: string,
-  ctx: CommandContext,
-): Project {
-  const label = text.trim();
-  if (label === "") return p;
+function appendEmptyTextbox(p: Project, id: string, at: Vec2, width: number, ctx: CommandContext): Project {
   const d: Drawing2D = {
-    id: uniqueId("dr2d"),
+    id,
     type: "drawing2d",
     levelId: ctx.level.id,
     categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "text", at, text: label, height: DEFAULT_TEXT_HEIGHT_M, angle: 0, width },
+    geom: { shape: "text", at, text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0, width },
   };
   return { ...p, drawings2d: [...p.drawings2d, d] };
 }
@@ -83,35 +75,30 @@ const idle = (): [CommandState, CommandResult] => [
 export const textboxCommand: Command = {
   name: "textbox",
   labelKey: "cmd.textbox.label",
-  prompt: (s) => {
-    const ts = s as TbState;
-    if (ts.phase === "label") return "cmd.textbox.enter";
-    if (ts.phase === "width") return "cmd.textbox.width";
-    return "cmd.textbox.point";
-  },
-  accepts: (s) => ((s as TbState).phase === "label" ? ["text"] : ["point"]),
+  prompt: (s) => ((s as TbState).phase === "width" ? "cmd.textbox.width" : "cmd.textbox.point"),
+  accepts: () => ["point"],
   options: () => [],
   init: (): TbPoint => ({ phase: "point", lastPoint: null }),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as TbState;
+    if (input.kind !== "point") return [s, { draft: null }];
     if (s.phase === "point") {
-      if (input.kind !== "point") return [s, { draft: null }];
       const ns: TbWidth = { phase: "width", at: input.point, cursor: input.point, lastPoint: input.point };
       return [ns, { draft: widthDraft(input.point, input.point) }];
     }
-    if (s.phase === "width") {
-      if (input.kind !== "point") return [s, { draft: s.cursor ? widthDraft(s.at, s.cursor) : null }];
-      const width = widthOf(s.at, input.point);
-      const ns: TbLabel = { phase: "label", at: s.at, width, lastPoint: input.point };
-      return [ns, { draft: null }];
-    }
-    // label
-    if (input.kind !== "text") return [s, { draft: null }];
-    const { at, width } = s;
+    // phase === "width"
+    const width = widthOf(s.at, input.point);
+    const id = uniqueId("dr2d");
+    const at = s.at;
     return [
       { phase: "point", lastPoint: null } as TbPoint,
-      { draft: null, done: true, commit: (p) => appendTextbox(p, at, width, input.text, ctx) },
+      {
+        draft: null,
+        done: true,
+        commit: (p) => appendEmptyTextbox(p, id, at, width, ctx),
+        focusDrawingId: id,
+      },
     ];
   },
 

@@ -6770,6 +6770,30 @@ body {
   padding: 2px 4px;
 }
 
+/* Inline-Text-Editor auf der 2D-Zeichenfläche (PlanView) — dasselbe Prinzip
+   wie .layout-sheet-inline-text/-backdrop, nur `position:fixed` mit echten
+   Client-Pixeln (vbToClient), da PlanView kein eigenes mm-Koordinatensystem
+   hat wie das Layout-Blatt. */
+.planview-inline-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+}
+.planview-inline-text {
+  position: fixed;
+  z-index: 7;
+  background: #ffffff;
+  outline: 1.5px solid #3b82f6;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.planview-inline-text .rt-editor {
+  min-height: inherit;
+}
+.planview-inline-text .rt-surface {
+  min-height: 1.4em;
+  padding: 2px 4px;
+}
+
 /* HUD (Eigenschaften des gewählten VP) unten links. */
 .layout-sheet-hud {
   position: absolute;

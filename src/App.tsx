@@ -796,6 +796,25 @@ export default function App() {
       setDraft: (d) => cmdLatest.current.setDraft(d),
       commit: (mutate) => cmdLatest.current.setProject(mutate),
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
+      // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
+      // (kein Lookup nötig — der Commit hat es bereits angehängt, s. engine.ts
+      // applyResult-Reihenfolge commit→focusDrawing). Auswahl-Löschen wie
+      // onEditDrawingText (useMouseSelectionHandlers.ts), damit kein anderes
+      // Element gleichzeitig markiert bleibt.
+      focusDrawing: (id) => {
+        setSelectedWallIds([]);
+        setSelectedCeilingIds([]);
+        setSelectedOpeningIds([]);
+        setSelectedStairIds([]);
+        setSelectedRoomIds([]);
+        setSelectedExtrudedSolidIds([]);
+        setSelectedColumnIds([]);
+        setSelectedRoofIds([]);
+        setSelectedContextObjectIds([]);
+        setSelectedSectionLineId(null);
+        setSelectedDrawingId(id);
+        setEditTextId(id);
+      },
     };
     engineRef.current = new CommandEngine(host);
   }
@@ -2226,6 +2245,7 @@ export default function App() {
     onOpenStampEditor,
     onEditDrawingText,
     commitTextEdit,
+    closeTextEdit,
     onPlanSelect,
     onPlanMarquee,
     onPlanContextMenu,
@@ -2715,6 +2735,9 @@ export default function App() {
           onStampMove={moveRoomStamp}
           onStampEdit={onOpenStampEditor}
           onEditDrawingText={onEditDrawingText}
+          editTextId={editTextId}
+          onCommitTextEdit={commitTextEdit}
+          onCloseTextEdit={closeTextEdit}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
@@ -3022,24 +3045,11 @@ export default function App() {
         />
       )}
 
-      {/* Rich-Text-Editor: per Doppelklick auf ein Text-2D-Element geöffnet (wie
-          beim Raum-Stempel) — mehrere Absätze, gemischte Formatierung pro
-          Zeichen (InDesign-/Affinity-artig). Alt-Elemente ohne `doc` starten
-          aus ihrem bisherigen String + einheitlichen `marks`. */}
-      {editTextId &&
-        (() => {
-          const d = project.drawings2d.find((x) => x.id === editTextId);
-          if (!d || d.geom.shape !== "text") return null;
-          const g = d.geom;
-          const doc = g.doc ?? docFromText(g.text, g.marks ?? {});
-          return (
-            <TextEditorDialog
-              value={doc}
-              onApply={commitTextEdit}
-              onCancel={() => setEditTextId(null)}
-            />
-          );
-        })()}
+      {/* Inline-Text-Editor für Drawing2D-Text (`editTextId`) rendert PlanView
+          jetzt direkt auf der Zeichenfläche (kein Dialog mehr, Nutzer-Wunsch —
+          gleiches Prinzip wie der Layout-Blatt-Inline-Editor). Ausgelöst über
+          `text`/`textbox` (sofort nach Platzieren, s. host.focusDrawing) oder
+          Doppelklick auf ein bestehendes Element (onEditDrawingText). */}
 
       {/* Text-Editor (schwebendes Fenster): Doppelklick auf einen Raumstempel bzw.
           Button in der Objekt-Info öffnet ihn. „Übernehmen" schreibt das

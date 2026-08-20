@@ -109,6 +109,13 @@ export interface CommandResult {
   commit?: (p: Project) => Project;
   /** true → Befehl ist fertig und kehrt in den Ruhezustand zurück. */
   done?: boolean;
+  /**
+   * Bei Abschluss: die Engine soll dieses neu erzeugte Drawing2D-Element
+   * sofort fokussieren (z. B. Inline-Text-Editor öffnen, wie `text`/`textbox`
+   * nach dem Platzieren). Reiner Passthrough an `EngineHost.focusDrawing`;
+   * die Engine selbst wertet die ID nicht aus.
+   */
+  focusDrawingId?: string;
 }
 
 // ── Befehls-Zustand ──────────────────────────────────────────────────────────

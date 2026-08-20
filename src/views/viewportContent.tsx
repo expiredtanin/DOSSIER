@@ -22,6 +22,7 @@ import type {
 } from "../model/types";
 import { generatePlan, generateSectionPlan } from "../plan/generatePlan";
 import type { CategoryDisplayResolver } from "../plan/generatePlan";
+import type { RichTextDoc } from "../text/richText";
 import { computeSection } from "../plan/toSection";
 import type { SectionOutput } from "../plan/toSection";
 import { generateElevationPlan } from "../plan/toElevation";
@@ -91,6 +92,9 @@ export function Content({
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  editTextId,
+  onCommitTextEdit,
+  onCloseTextEdit,
   onPlanSelect,
   onPlanMarquee,
   onSegmentCut,
@@ -177,6 +181,9 @@ export function Content({
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  editTextId?: string | null;
+  onCommitTextEdit?: (doc: RichTextDoc) => void;
+  onCloseTextEdit?: () => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
   onSegmentCut: (drawingId: string, model: Vec2) => void;
@@ -299,6 +306,9 @@ export function Content({
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          editTextId={editTextId}
+          onCommitTextEdit={onCommitTextEdit}
+          onCloseTextEdit={onCloseTextEdit}
           onOpenSectionLevel={onSelectLevel}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
@@ -358,6 +368,9 @@ export function Content({
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          editTextId={editTextId}
+          onCommitTextEdit={onCommitTextEdit}
+          onCloseTextEdit={onCloseTextEdit}
           onOpenSectionLevel={onSelectLevel}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
@@ -459,6 +472,9 @@ export function Content({
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          editTextId={editTextId}
+          onCommitTextEdit={onCommitTextEdit}
+          onCloseTextEdit={onCloseTextEdit}
           onOpenSectionLevel={onSelectLevel}
           onPlanSelect={onPlanSelect}
           onPlanMarquee={onPlanMarquee}
@@ -508,6 +524,9 @@ function LevelPlanView({
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  editTextId,
+  onCommitTextEdit,
+  onCloseTextEdit,
   onOpenSectionLevel,
   onPlanSelect,
   onPlanMarquee,
@@ -550,6 +569,9 @@ function LevelPlanView({
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  editTextId?: string | null;
+  onCommitTextEdit?: (doc: RichTextDoc) => void;
+  onCloseTextEdit?: () => void;
   onOpenSectionLevel?: (id: string) => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
@@ -631,6 +653,9 @@ function LevelPlanView({
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
+        editTextId={editTextId}
+        onCommitTextEdit={onCommitTextEdit}
+        onCloseTextEdit={onCloseTextEdit}
         onOpenSectionLevel={onOpenSectionLevel}
         onSelect={onPlanSelect}
         onMarquee={onPlanMarquee}
@@ -687,6 +712,9 @@ function SectionPlanView({
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  editTextId,
+  onCommitTextEdit,
+  onCloseTextEdit,
   onOpenSectionLevel,
   onPlanSelect,
   onPlanMarquee,
@@ -724,6 +752,9 @@ function SectionPlanView({
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  editTextId?: string | null;
+  onCommitTextEdit?: (doc: RichTextDoc) => void;
+  onCloseTextEdit?: () => void;
   onOpenSectionLevel?: (id: string) => void;
   onPlanSelect: (sel: PlanSelection) => void;
   onPlanMarquee: (sel: MarqueeSelection) => void;
@@ -831,6 +862,9 @@ function SectionPlanView({
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
+        editTextId={editTextId}
+        onCommitTextEdit={onCommitTextEdit}
+        onCloseTextEdit={onCloseTextEdit}
         onOpenSectionLevel={onOpenSectionLevel}
         onSelect={onPlanSelect}
         onMarquee={onPlanMarquee}

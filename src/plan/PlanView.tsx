@@ -16,6 +16,9 @@ import {
 import type { HatchRender, Plan, Primitive } from "./generatePlan";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
+import type { RichTextDoc } from "../text/richText";
+import { docFromText } from "../text/richText";
+import { RichTextEditor } from "../text/RichTextEditor";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
@@ -301,6 +304,19 @@ export interface PlanViewProps {
   onStampEdit?: (roomId: string) => void;
   /** Doppelklick auf ein Text-2D-Element: Inhalt bearbeiten (Editor öffnen). */
   onEditDrawingText?: (drawingId: string) => void;
+  /**
+   * Drawing2D-ID, deren Inhalt gerade inline auf der Zeichenfläche editiert
+   * wird (frisch über `text`/`textbox` erzeugt ODER per Doppelklick auf ein
+   * bestehendes Element geöffnet) — `null`/undefined = kein Inline-Editor
+   * offen. PlanView rendert dafür einen `RichTextEditor`-Overlay direkt über
+   * dem Element (kein Dialog), positioniert/skaliert über den aktuellen
+   * Ausschnitt.
+   */
+  editTextId?: string | null;
+  /** Jede Änderung im Inline-Text-Editor (live, pro Tastendruck). */
+  onCommitTextEdit?: (doc: RichTextDoc) => void;
+  /** Inline-Text-Editor schliessen (Backdrop-Klick/Escape). */
+  onCloseTextEdit?: () => void;
   /** Doppelklick auf eine Schnittlinie: in deren 2D-Schnittansicht springen
    *  (Zeichnungsebene aktivieren). */
   onOpenSectionLevel?: (levelId: string) => void;
@@ -428,6 +444,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onStampMove,
       onStampEdit,
       onEditDrawingText,
+      editTextId,
+      onCommitTextEdit,
+      onCloseTextEdit,
       onOpenSectionLevel,
       activeTool,
       toolInputActive,
@@ -2450,6 +2469,60 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         />
       )}
       </svg>
+      {/* Inline-Text-Editor DIREKT auf der Zeichenfläche (kein Dialog, Nutzer-
+          Feedback) — für ein frisch über `text`/`textbox` erzeugtes Element
+          (sofort nach dem Platzieren, s. App.tsx host.focusDrawing) ODER ein
+          per Doppelklick geöffnetes bestehendes. `RichTextEditor` bringt seine
+          eigene Mini-Toolbar mit (erscheint darüber, wie im Layout-Editor).
+          `at` ist die Baseline-links der ersten Zeile (s. primitives.tsx
+          "drawingText") — der Editor-Rahmen sitzt daher ~eine Zeilenhöhe
+          darüber. OHNE `wrapWidth` (Text-Werkzeug) bleibt die Breite frei
+          (kein Wortumbruch, nur Enter erzeugt neue Zeilen); MIT `wrapWidth`
+          (Textspalte) bricht der Editor live um wie ein InDesign-Textrahmen —
+          `position:"fixed"` mit echten Client-Pixeln (vbToClient), damit die
+          Positionierung unabhängig vom umgebenden Layout stimmt. */}
+      {editTextId &&
+        (() => {
+          const prim = plan.primitives.find(
+            (p): p is Extract<Primitive, { kind: "drawingText" }> =>
+              p.kind === "drawingText" && p.drawingId === editTextId,
+          );
+          if (!prim) return null;
+          const doc = prim.doc ?? docFromText(prim.text, prim.marks ?? {});
+          const pxPerM = currentPxPerMeter();
+          const topAnchor = toScreen({ x: prim.at.x, y: prim.at.y + prim.heightM });
+          const screen = vbToClient(topAnchor.x, topAnchor.y);
+          const FONT_PX_AT_12PT = 16; // 12pt @ 96dpi (RichTextEditor-Default, s. LayoutSheet.tsx).
+          const scale = (prim.heightM * pxPerM) / FONT_PX_AT_12PT;
+          const widthPx = prim.wrapWidth ? (prim.wrapWidth * pxPerM) / scale : undefined;
+          return (
+            <>
+              <div
+                className="planview-inline-backdrop"
+                onPointerDown={() => onCloseTextEdit?.()}
+              />
+              <div
+                className="planview-inline-text"
+                style={{
+                  left: screen.x,
+                  top: screen.y,
+                  width: widthPx,
+                  transform: `scale(${scale})`,
+                  transformOrigin: "0 0",
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                    onCloseTextEdit?.();
+                  }
+                }}
+              >
+                <RichTextEditor value={doc} onChange={(d) => onCommitTextEdit?.(d)} autoFocus />
+              </div>
+            </>
+          );
+        })()}
       {/* Lineale (oben + links, VW-Stil): Modell-Meter mit Ticks, Beschriftung
           und Cursor-Marker — screen-fix über den sichtbaren Ausschnitt gelegt.
           BEWUSST ein eigenes Sibling-SVG (nicht mehr Kind von `svgRef`): beim

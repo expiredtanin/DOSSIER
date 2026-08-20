@@ -52,6 +52,12 @@ export interface EngineHost {
   commit(mutate: (p: Project) => Project): void;
   /** Ist die aktive Ebene ein Geschoss? (für floorOnly-Befehle). */
   isFloor(): boolean;
+  /**
+   * Optional: ein frisch erzeugtes Drawing2D-Element fokussieren (Passthrough
+   * von `CommandResult.focusDrawingId`, z. B. um sofort den Inline-Text-Editor
+   * zu öffnen). Fehlt der Host-Handler, ist das ein No-op.
+   */
+  focusDrawing?(drawingId: string): void;
 }
 
 /** Öffentlicher Schnappschuss für die Command-Line-UI (rein lesend). */
@@ -476,6 +482,7 @@ export class CommandEngine {
 
   private applyResult(res: CommandResult): void {
     if (res.commit) this.host.commit(res.commit);
+    if (res.focusDrawingId) this.host.focusDrawing?.(res.focusDrawingId);
     if (res.draft) this.host.setDraft(res.draft);
     else this.host.setDraft(null);
     if (res.done) {
