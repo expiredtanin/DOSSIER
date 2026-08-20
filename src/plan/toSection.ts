@@ -18,7 +18,7 @@
 // v = absolute Höhe (world.y). Siehe src-tauri/render3d/src/section.rs.
 
 import type { Ceiling, DrawingLevel, Project, Vec2, Wall } from "../model/types";
-import { getCeilingType, getComponent, getWallType, openingsOfWall, roofLayers } from "../model/types";
+import { getCeilingType, getComponent, getLayerCategory, getWallType, openingsOfWall, roofLayers } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { dot, leftNormal, normalize, sub } from "../model/geometry";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
@@ -28,9 +28,11 @@ import { loadEngine3d } from "../engine/engine3d";
 import {
   HATCH_INK,
   HATCH_PAPER,
+  resolveBackground,
   resolveCeilingSectionStyle,
   resolveForeground,
   resolveHatch,
+  resolveHatchId,
   resolveWallSectionStyle,
 } from "./generatePlan";
 import type { HatchRender } from "./generatePlan";
@@ -343,7 +345,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     if (owner) {
       const wt = getCeilingType(project, owner);
       if (wt.layers.length > 1) {
-        bands.push(...splitSlabLayers(cp, project, wt));
+        bands.push(...splitSlabLayers(cp, project, wt, owner));
         continue;
       }
       const style = resolveCeilingSectionStyle(project, owner);
@@ -761,10 +763,11 @@ function bandFromRect(src: SectionCutPolygon, r: Rect): SectionCutPolygon {
  * aneinanderstoßenden Rechtecken (jedes bekommt in `generateSectionPlan` die
  * generische Schnitt-Umrisslinie).
  */
-function splitSlabLayers(
+export function splitSlabLayers(
   cp: SectionCutPolygon,
   project: Project,
   wt: ReturnType<typeof getCeilingType>,
+  owner: Ceiling,
 ): SectionCutPolygon[] {
   const totalT = wt.layers.reduce((s, l) => s + l.thickness, 0);
   const us = cp.pts.map((p) => p[0]);
@@ -776,17 +779,23 @@ function splitSlabLayers(
   const vSpan = vMax - vMin;
   if (totalT <= 1e-9 || vSpan <= 1e-9) return [cp];
   const scale = vSpan / totalT;
+  // Attribut-Override der Decke (By-Layer/By-Object) gilt uniform für ALLE
+  // Schichten — analog zu splitWallLayers und dem Grundriss (addCeilingPoche).
+  const category = getLayerCategory(project, owner.categoryCode);
 
   const out: SectionCutPolygon[] = [];
   let acc = 0; // kumulierte Dicke von OK (oben) nach UK (unten)
   for (const layer of wt.layers) {
     const comp = getComponent(project, layer.componentId);
+    const hatchId =
+      resolveHatchId(owner.hatchId, owner.hatchSource, category, comp.hatchId) ?? comp.hatchId;
     const hatch = resolveHatch(
       project,
-      comp.hatchId,
+      hatchId,
       SECTION_SLAB_AXIS_ANGLE_DEG,
-      resolveForeground(comp),
+      resolveForeground(comp, owner.foreground, category, owner.foregroundSource),
     );
+    const bgOverride = resolveBackground(comp, owner.background, category, owner.backgroundSource);
     const vTop = vMax - acc * scale;
     acc += layer.thickness;
     const vBottom = vMax - acc * scale;
@@ -799,7 +808,7 @@ function splitSlabLayers(
         [uMax, vBottom],
         [uMin, vBottom],
       ],
-      fill: hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER,
+      fill: bgOverride ?? (hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER),
       hatch,
       joinPriority: comp.joinPriority,
       componentId: comp.id,
@@ -870,6 +879,9 @@ export function splitWallLayers(
   // Aussen/Innen-Orientierung: per Default liegt layers[0] an uMin; zeigt die
   // Wand-Aufbaurichtung gegen die Schnitt-u-Achse, werden die Bänder gespiegelt.
   const layers = wallLayersReversedInU(owner, uWorld) ? [...wt.layers].reverse() : wt.layers;
+  // Attribut-Override der Wand (By-Layer/By-Object) gilt uniform für ALLE
+  // Schichten — analog zum Grundriss (addWallPoche in walls.ts).
+  const category = getLayerCategory(project, owner.categoryCode);
 
   const out: SectionCutPolygon[] = [];
   let acc = 0; // kumulierte Dicke von uMin (erste einsortierte Schicht) nach uMax
@@ -880,7 +892,15 @@ export function splitWallLayers(
     // entlang v, Modellwinkel 90°). Wie im Grundriss (`addWallPoche` übergibt
     // die Wandachse) wird der Achswinkel mitgegeben, sonst liefe die Dämmung
     // vertikal statt quer zur Wanddicke (horizontal).
-    const hatch = resolveHatch(project, comp.hatchId, SECTION_WALL_AXIS_ANGLE_DEG, resolveForeground(comp));
+    const hatchId =
+      resolveHatchId(owner.hatchId, owner.hatchSource, category, comp.hatchId) ?? comp.hatchId;
+    const hatch = resolveHatch(
+      project,
+      hatchId,
+      SECTION_WALL_AXIS_ANGLE_DEG,
+      resolveForeground(comp, owner.foreground, category, owner.foregroundSource),
+    );
+    const bgOverride = resolveBackground(comp, owner.background, category, owner.backgroundSource);
     const uLeft = uMin + acc * scale;
     acc += layer.thickness;
     const uRight = uMin + acc * scale;
@@ -893,7 +913,7 @@ export function splitWallLayers(
         [uRight, vMin],
         [uLeft, vMin],
       ],
-      fill: hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER,
+      fill: bgOverride ?? (hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER),
       hatch,
       joinPriority: comp.joinPriority,
       componentId: comp.id,

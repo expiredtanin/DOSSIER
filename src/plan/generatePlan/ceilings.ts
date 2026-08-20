@@ -13,8 +13,8 @@ import {
   OVERHEAD_DASH,
   POCHE_STROKE,
   LAYER_DETAIL_FACTOR,
-  LAYER_LINE_MM,
   pocheFill,
+  resolveBackground,
   resolveForeground,
   resolveHatch,
   resolveHatchId,
@@ -38,7 +38,8 @@ import { segmentInsideWallBand, subtractIntervals, type WallFootprint } from "./
  * hier. Im Detailgrad „grob" entfällt die Schraffur (nur Fläche + Umriss);
  * „mittel"/„fein" zeigen die Ansichts-Schraffur des Bauteils (`viewHatchId`,
  * Default weiss) — die frontal gesehene Aufsicht ist kein Schnitt. `lwMm` ist
- * die Kategorie-Strichstärke.
+ * die aufgelöste Umriss-Strichstärke (Attribut-Override > Kategorie > Fallback,
+ * vom Aufrufer via `resolveStrokeWeight` bestimmt, analog zur Wand).
  */
 export function addCeilingPoche(
   out: Primitive[],
@@ -48,6 +49,7 @@ export function addCeilingPoche(
   detail: DetailLevel,
   category: LayerCategory | undefined,
   wallFootprints: WallFootprint[],
+  lwMm: number,
 ): void {
   const pts = ceiling.outline;
   if (pts.length < 3) return;
@@ -86,6 +88,11 @@ export function addCeilingPoche(
           resolveForeground(comp, ceiling.foreground, category, ceiling.foregroundSource),
         )
       : NO_HATCH;
+  // Poché-Füllfarbe: Attribut-Override (By-Layer/By-Object) hat Vorrang vor der
+  // neutralen SIA-Fläche, analog zur Wand-Poché (siehe walls.ts).
+  const bgOverride = comp
+    ? resolveBackground(comp, ceiling.background, category, ceiling.backgroundSource)
+    : undefined;
   // Gefüllte Fläche OHNE eigenen Umriss (stroke:"none"): die Decke liegt unter
   // der Wand-Poché; ihre Kante wird separat als verdeckungs-geclippte Linie
   // gezeichnet (s. u.), damit sie nicht durch die darüberstehenden Wände schlägt.
@@ -93,7 +100,7 @@ export function addCeilingPoche(
   out.push({
     kind: "polygon",
     pts: ring,
-    fill: comp ? pocheFill(hatch.pattern) : "none",
+    fill: comp ? bgOverride ?? pocheFill(hatch.pattern) : "none",
     stroke: "none",
     strokeWidthMm: 0,
     hatch,
@@ -128,8 +135,9 @@ export function addCeilingPoche(
         b: add(a, scale(d, t1)),
         cls: "ceiling-outline",
         // Überkopf-Ansichtslinie (Decke liegt als Slab über der Schnittebene) →
-        // gestrichelte Haarlinie statt kräftiger Volllinie (BIM-Konvention).
-        weightMm: LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail],
+        // gestrichelt statt durchgezogen (BIM-Konvention) — die DICKE folgt
+        // aber ceiling.strokeWeight/-Source wie bei der Wand (s. Aufrufer).
+        weightMm: lwMm * LAYER_DETAIL_FACTOR[detail],
         dash: OVERHEAD_DASH,
         color: stroke,
         greyed,

@@ -28,6 +28,7 @@ import {
   NO_HATCH,
   OUTLINE_DETAIL_FACTOR,
   POCHE_STROKE,
+  resolveBackground,
   resolveForeground,
   resolveHatch,
   resolveHatchId,
@@ -341,6 +342,7 @@ export function addWallPoche(
       // Schichtschraffur (fest in HATCH_INK, siehe resolveHatch) liegt darüber;
       // Vollmuster ("solid") = Tinten-Poché.
       const layerSolid = layerHatch.pattern === "solid";
+      const bgOverride = resolveBackground(comp, wall.background, category, wall.backgroundSource);
       const layerStartCut = s <= 1e-6 ? (layerCuts ? layerCuts.start[li] : startCut) : null;
       const layerEndCut = e >= axisLen - 1e-6 ? (layerCuts ? layerCuts.end[li] : endCut) : null;
       // Durchgangswand-Aussparung: liegt der Quer-Offsetbereich dieses Bandes
@@ -363,7 +365,7 @@ export function addWallPoche(
         out.push({
           kind: "polygon",
           pts: clippedBand(axisPt(a), axisPt(b), off, off + layer.thickness, sc, ec),
-          fill: layerSolid ? HATCH_INK : HATCH_PAPER,
+          fill: bgOverride ?? (layerSolid ? HATCH_INK : HATCH_PAPER),
           // Band ohne Umriss: keine Schichtfuge über die Bandkante, keine 45°-Naht
           // am Knoten. Die Fugen kommen als separate `line`-Primitive (siehe unten).
           stroke: "none",

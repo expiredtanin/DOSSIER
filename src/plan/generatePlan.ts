@@ -58,6 +58,7 @@ import {
   MONO_INK,
   SHOW_ALL,
   WALL_FALLBACK_MM,
+  resolveBackground,
   resolveForeground,
   resolveHatch,
   resolveHatchId,
@@ -81,7 +82,7 @@ import { addReferenceLine, addWallPoche, buildWallFootprints, wallGaps } from ".
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (Export-Pipeline,
 // PlanView, toSection.ts, toWalls3d.ts, toRenderScene.ts, …) importieren
 // weiterhin ausschliesslich von hier, unverändert zur Zeit vor dem Domänen-Split.
-export { HATCH_INK, HATCH_PAPER, resolveForeground, resolveHatch };
+export { HATCH_INK, HATCH_PAPER, resolveBackground, resolveForeground, resolveHatch, resolveHatchId };
 export type { CategoryDisplayResolver, DetailLevel, HatchRender, Primitive };
 
 /**
@@ -309,9 +310,16 @@ export function generatePlan(
   for (const ceiling of ceilings) {
     const greyed = categoryDisplay(ceiling.categoryCode).greyed;
     const category = catByCode.get(ceiling.categoryCode);
-    // Kein lwMm mehr: der Decken-Umriss ist eine feste Überkopf-Haarlinie
-    // (gestrichelt), unabhängig von der Kategorie-Strichstärke.
-    addCeilingPoche(primitives, project, ceiling, greyed, detail, category, wallFootprints);
+    // Strichstärke wie bei der Wand (Attribut-Override > Kategorie > Fallback);
+    // der Umriss bleibt trotzdem eine gestrichelte Überkopf-Ansichtslinie
+    // (Dash-Muster unverändert, s. addCeilingPoche) — nur die Dicke ist editierbar.
+    const ceilingLwMm = resolveStrokeWeight(
+      ceiling.strokeWeight,
+      ceiling.strokeWeightSource,
+      category,
+      lwByCode.get(ceiling.categoryCode) ?? LAYER_LINE_MM,
+    );
+    addCeilingPoche(primitives, project, ceiling, greyed, detail, category, wallFootprints, ceilingLwMm);
   }
 
   // Dächer dieses Geschosses (Dachaufsicht): reine Grundriss-Linien (Traufe/

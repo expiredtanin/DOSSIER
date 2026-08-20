@@ -438,21 +438,25 @@ export function resolveForeground(
 }
 
 /**
- * Kollabiert die Hintergrund-/Füllfarbkette (Poché) eines Bauteils, analog zu
- * {@link resolveForeground}:
+ * Kollabiert die Hintergrund-/Füllfarbkette (Poché-Override) eines Bauteils zu
+ * einem einzelnen Wert, exakt analog zu {@link resolveForeground}:
  *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
- *   (`Component.background`) ?? `Component.color`.
- * Immer definiert (endet spätestens bei `Component.color` = heutiges Verhalten).
+ *   (`Component.background`) ?? `undefined`.
+ * `undefined` als Endergebnis heißt „kein Override gesetzt" — Aufrufer fallen
+ * dann auf ihren eigenen Default zurück (bei Wand/Decke die neutrale SIA-
+ * Poché-Farbe HATCH_INK/HATCH_PAPER, NICHT `Component.color` — die reale
+ * Bauteilfarbe soll die Schnitt-Konvention nicht überschreiben, nur ein
+ * bewusster Override).
  */
 export function resolveBackground(
   comp: Component,
   override?: string,
   category?: LayerCategory,
   source?: AttributeSource,
-): string {
+): string | undefined {
   if (override != null) return override;
-  if (source === "layer") return category?.color ?? comp.background ?? comp.color;
-  return comp.background ?? comp.color;
+  if (source === "layer") return category?.color ?? comp.background;
+  return comp.background;
 }
 
 /**
