@@ -24,9 +24,8 @@ Konkret heißt das auch: Der Grundriss entsteht nicht aus einem zerschnittenen
 3D-Mesh, sondern **analytisch aus den Bauteil-Parametern** (Wandachsen + Dicken →
 Linien, Öffnungen → Lücken + Symbol). PDF-Export ist derselbe Plan, nur mit
 echten mm-Stiftstärken statt Bildschirm-Hairlines. Schnitte und Ansichten laufen
-über eine eigene, analytische Rust-Pipeline (kein Hidden-Line-Removal nötig,
-siehe [ARCHITECTURE.md](ARCHITECTURE.md) §4.3) und sind seit Juli live im
-3D-Viewport verdrahtet, nicht nur ein Spike.
+über eine eigene, analytische Rust-Pipeline (kein Hidden-Line-Removal nötig)
+und sind seit Juli live im 3D-Viewport verdrahtet, nicht nur ein Spike.
 
 ## Stand heute
 
@@ -34,11 +33,10 @@ Aus dem ursprünglichen Risiko-Spike ist binnen weniger Wochen ein
 **funktionsreiches Desktop-BIM-Tool** geworden: eigenes semantisches
 Gebäudemodell, zwei eigene Rust/WASM-Rendering-Engines, IFC/DXF/PDF/STL/OBJ-
 Export, Swisstopo-Import, SIA-416-Flächen, Materialbibliothek, Layouts/
-Plansätze, native Tauri-Fenster. Eine vollständige, ehrliche Bestandsaufnahme
-(inklusive offener Punkte und bekannter technischer Schulden) steht in
-**[STATUS.md](STATUS.md)**.
+Plansätze, native Tauri-Fenster. ~91.000 Zeilen TypeScript + ~19.500 Zeilen
+Rust (ohne Tests), 891 Vitest-Tests, alle grün.
 
-**Funktioniert (Auszug — volle Liste in STATUS.md §3):**
+**Funktioniert (Auszug, nicht abschliessend):**
 - Semantisches Modell mit **mehrschichtigen Wänden**, L-Eck-Gehrung **und**
   Prioritäts-T-/X-Stössen (`joinPriority` am Component) — konsistent in
   Grundriss, 3D-Viewport und 3D-Live-Schnitt.
@@ -65,7 +63,7 @@ Plansätze, native Tauri-Fenster. Eine vollständige, ehrliche Bestandsaufnahme
 - **Resource Manager** (Component/Hatch/Line/Typ-Editoren), regelbasierte
   Overrides, Panel-System (dockbar/floatend), i18n (de/en).
 
-**Bewusst noch offen** (Details + volle Liste: STATUS.md §4.7):
+**Bewusst noch offen** (Auszug):
 - **Echtes Mesh-Boolean für Öffnungen** — funktioniert heute über achsparallele
   Rechteck-Löcher; ein generisches CSG-Boolean existiert bereits
   (`trucksolid`/`csgrs`), ist aber nicht an die Wand-Pipeline angeschlossen.
@@ -90,11 +88,9 @@ Plansätze, native Tauri-Fenster. Eine vollständige, ehrliche Bestandsaufnahme
 | Import | `dxf-parser`, `@mlightcad/libredwg-web` (DWG), eigene `.lin`/`.pat`-Parser |
 | Materialien | `jszip` (ambientCG-Zip-Entpacken), `three.js` `TextureLoader` |
 
-`opencascade.js` steht noch als Dependency in `package.json`, wird aber nur
-noch von totem Code (`src/section/hlr.ts`, superseded durch die Rust-
-Schnitt-Pipeline) importiert. Details zu allen Rust-Crates (inkl. zwei
-aktuell unbenutzten WASM-Builds) in [ARCHITECTURE.md](ARCHITECTURE.md) §1
-und [STATUS.md](STATUS.md) §4.1.
+Der ursprünglich geplante OCCT/`opencascade.js`-HLR-Pfad für Schnitte ist
+komplett entfernt (weder Dependency noch Code) — abgelöst durch die
+analytische Rust-Schnitt-Pipeline (siehe Grundgedanke oben).
 
 ## Entwicklung
 
@@ -130,17 +126,16 @@ src/
   tools/       interaktive Zeichenwerkzeuge + Snapping + Transformationen
   plan/        Grundriss-Ableitung (generatePlan) + PlanView (SVG) + glPlan (WebGL2) + Rust-Bindings
   viewport/    Viewport3D (Three.js) + Wasm3DViewport (Rust/wgpu „Nordstern", Default)
-  section/     TOTER Code (OCCT-HLR-Spike) — Schnitt läuft über render3d, siehe ARCHITECTURE.md §4.3
   export/      IFC4-, PDF-, DXF-, STL/OBJ-, CSV-Export aus derselben Plan-/Modell-Struktur
   materials/   ambientCG-Live-Suche + gebündelte Starter-Bibliothek + PBR-Runtime
   panels/      dockbares Panel-System + die einzelnen Paletten
   state/       eigener Store (useSyncExternalStore) + Slices (project/selection/view/layout/…)
   native/      Tauri-only: native Fenster, macOS-Menüleiste, Fenster-Chrome
-  ui/          App.tsx-Shell, Top-Bar, Resource Manager, Kontextmenü, Kommandozeile, Ribbon
+  ui/          App.tsx-Shell, Top-Bar, Resource Manager, Kontextmenü, Kommandozeile
   io/          Import/Export (DXF, DWG, .lin, .pat), Swisstopo/LV95, OSM-Kontext
   i18n/        Wörterbücher de/en
-src-tauri/     6 Rust-Crates (render2d/render3d/geometry/kernel2d/trucksolid/dwgimport,
-               je headless UND per wasm-pack baubar) + der Tauri-Host selbst
+src-tauri/     5 eigenständige Rust-Crates (render2d/render3d/kernel2d/trucksolid/
+               dwgimport, je headless UND per wasm-pack baubar) + der Tauri-Host selbst
 ```
 
 ## Konventionen
@@ -149,18 +144,14 @@ src-tauri/     6 Rust-Crates (render2d/render3d/geometry/kernel2d/trucksolid/dwg
   (Design Layer, Component, Hatch, Wall Style). **UI-Texte sind deutsch**, immer
   über `t('key')` — keine hartcodierten Strings im JSX.
 - Intern alles in **Metern**; Anzeige via `formatM`.
-- Verbindliches in [CONVENTIONS.md](CONVENTIONS.md).
 
 ## Weiterlesen
 
-- [STATUS.md](STATUS.md) — **vollständige, ehrliche Bestandsaufnahme**: Zahlen,
-  Feature-Inventar, Mist-Liste, Doku-Widersprüche, Tag-1-Vision vs. heute
-- [ARCHITECTURE.md](ARCHITECTURE.md) — technische Architektur im Detail (Ist-Zustand)
-- [ROADMAP.md](ROADMAP.md) — ursprüngliche Produktvision (Tag-1-Stand, historisch)
-- [HANDOVER.md](HANDOVER.md) / [PENDENZEN.md](PENDENZEN.md) — laufendes
-  Arbeitsprotokoll bzw. Backlog (Single Source of Truth für offene Punkte)
-- [docs/](docs/) — Design-Specs (teils ebenfalls Tag-1-Vision, siehe Hinweis
-  in `docs/README.md`)
+Dieses README ist die einzige Doku im öffentlichen Repo — `STATUS.md`,
+`ARCHITECTURE.md`, `ROADMAP.md`, `HANDOVER.md`, `PENDENZEN.md`,
+`CONVENTIONS.md` und `docs/` sind bewusst per `.gitignore` ausgeschlossen
+(interne Arbeitsnotizen/Backlog, kein öffentlicher Anspruch auf Vollständigkeit
+oder Aktualität) und daher hier absichtlich **nicht** verlinkt.
 
 ## Lizenz
 
