@@ -1438,8 +1438,10 @@ function resizeGeom(
 // ── Editier-Griffe (verschoben aus App.tsx, 1:1) ─────────────────────────────
 
 /**
- * Editier-Griffe (Eckpunkte) eines 2D-Zeichenelements in Modell-Metern. Phase 4
- * unterstützt line/polyline/rect; circle/arc/text bekommen (noch) keine Griffe.
+ * Editier-Griffe (Eckpunkte) eines 2D-Zeichenelements in Modell-Metern.
+ * line/polyline/rect: Eckpunkte. circle: EIN Radius-Griff (Ost, Index 0).
+ * arc: Start-/End-Winkel-Griff (Index 0/1, ändern a0/a1) + ein Radius-Griff
+ * auf halbem Bogen (Index 2, ändert r) — siehe {@link moveGrip}.
  */
 export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
   const g = d.geom;
@@ -1451,6 +1453,17 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
       { x: g.max.x, y: g.min.y },
       g.max,
       { x: g.min.x, y: g.max.y },
+    ];
+  }
+  if (g.shape === "circle") {
+    return [{ x: g.center.x + g.r, y: g.center.y }];
+  }
+  if (g.shape === "arc") {
+    const mid = (g.a0 + g.a1) / 2;
+    return [
+      { x: g.center.x + g.r * Math.cos(g.a0), y: g.center.y + g.r * Math.sin(g.a0) },
+      { x: g.center.x + g.r * Math.cos(g.a1), y: g.center.y + g.r * Math.sin(g.a1) },
+      { x: g.center.x + g.r * Math.cos(mid), y: g.center.y + g.r * Math.sin(mid) },
     ];
   }
   // Text: EIN Griff am Ankerpunkt (zum Verschieben; siehe moveGrip).
@@ -1528,6 +1541,21 @@ function moveGrip(
         }
         // Text: der einzige Griff (Index 0) sitzt am Ankerpunkt → verschiebt ihn.
         if (g.shape === "text") return { ...d, geom: { ...g, at: pt } };
+        // Kreis: der einzige Griff (Index 0) ändert nur den Radius.
+        if (g.shape === "circle") {
+          const r = Math.max(1e-3, Math.hypot(pt.x - g.center.x, pt.y - g.center.y));
+          return { ...d, geom: { ...g, r } };
+        }
+        // Bogen: Griff 0/1 (Start-/End-Winkel, s. drawingVertices) ändert a0/a1;
+        // Griff 2 (Bogenmitte) ändert nur den Radius (Winkel bleiben fest).
+        if (g.shape === "arc") {
+          if (index === 2) {
+            const r = Math.max(1e-3, Math.hypot(pt.x - g.center.x, pt.y - g.center.y));
+            return { ...d, geom: { ...g, r } };
+          }
+          const ang = Math.atan2(pt.y - g.center.y, pt.x - g.center.x);
+          return { ...d, geom: index === 0 ? { ...g, a0: ang } : { ...g, a1: ang } };
+        }
         return d;
       }),
     };

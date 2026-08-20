@@ -900,23 +900,56 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return null;
   };
 
+  // Abstand (Bildschirm-Pixel) eines Klicks vom Ring eines Kreis/Bogen-2D-
+  // Elements — bei gefüllten Kreisen zählt auch INNERHALB als Treffer (d=0).
+  // Bögen zusätzlich auf ihre Winkel-Spanne begrenzt (CCW, Modell-Radiant, s.
+  // toRenderScene.ts für dieselbe Normalisierung).
+  const distToDrawingRing = (
+    clientX: number,
+    clientY: number,
+    p: Extract<Primitive, { kind: "drawingCircle" | "drawingArc" }>,
+  ): number => {
+    const m = rawModelAt(clientX, clientY);
+    const distFromCenter = Math.hypot(m.x - p.center.x, m.y - p.center.y);
+    if (p.kind === "drawingArc") {
+      const TAU = Math.PI * 2;
+      const sweep = (((p.a1 - p.a0) % TAU) + TAU) % TAU || TAU;
+      const ang = Math.atan2(m.y - p.center.y, m.x - p.center.x);
+      const rel = (((ang - p.a0) % TAU) + TAU) % TAU;
+      // Kleiner Winkel-Toleranzsaum (in Bogenmass, radiusabhängig), damit die
+      // Enden eines kurzen Bogens nicht unerreichbar schmal werden.
+      const angTolRad = distFromCenter > 1e-6 ? LINE_PICK_PX / (currentPxPerMeter() * Math.max(distFromCenter, 0.05)) : Infinity;
+      if (rel > sweep + angTolRad && TAU - rel > angTolRad) return Infinity;
+    }
+    const filled = p.kind === "drawingCircle" && p.fill !== "none";
+    const dMeters = filled ? Math.max(0, distFromCenter - p.r) : Math.abs(distFromCenter - p.r);
+    return dMeters * currentPxPerMeter();
+  };
+
   // Nächstgelegenes 2D-Zeichenelement (Drawing2D) zum Cursor per Linien-Nähe in
   // Bildschirm-Pixeln (zoom-unabhängige Toleranz). Liefert die drawingId oder null.
   const pickDrawing = (clientX: number, clientY: number): string | null => {
     let bestId: string | null = null;
     let bestDist = LINE_PICK_PX;
     for (const p of plan.primitives) {
-      if (p.kind !== "line" || !p.drawingId) continue;
-      const a = vbToClient(toScreen(p.a).x, toScreen(p.a).y);
-      const b = vbToClient(toScreen(p.b).x, toScreen(p.b).y);
-      const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
-      if (d < bestDist) {
-        bestDist = d;
-        bestId = p.drawingId;
+      if (p.kind === "line" && p.drawingId) {
+        const a = vbToClient(toScreen(p.a).x, toScreen(p.a).y);
+        const b = vbToClient(toScreen(p.b).x, toScreen(p.b).y);
+        const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
+        if (d < bestDist) {
+          bestDist = d;
+          bestId = p.drawingId;
+        }
+      } else if ((p.kind === "drawingCircle" || p.kind === "drawingArc") && p.drawingId) {
+        const d = distToDrawingRing(clientX, clientY, p);
+        if (d < bestDist) {
+          bestDist = d;
+          bestId = p.drawingId;
+        }
       }
     }
     if (bestId) return bestId;
-    // Kein Linien-Treffer: Text- dann Bild-Elemente prüfen (eigene Bbox-Logik).
+    // Kein Linien-/Kreis-/Bogen-Treffer: Text- dann Bild-Elemente prüfen (eigene Bbox-Logik).
     return pickDrawingText(clientX, clientY) ?? pickDrawingImage(clientX, clientY);
   };
 

@@ -246,6 +246,34 @@ export function marqueeHit(
  * den Linien-/Polygon-Primitiven; crossing = irgendein Punkt/Kante im Rechteck,
  * window = alle Punkte vollständig eingeschlossen.
  */
+/** Punkte auf einem Kreis-/Bogen-Ring (Modell-Meter), für Marquee-Zwecke abgetastet. */
+function ringSamplePoints(center: Vec2, r: number, a0?: number, a1?: number): Vec2[] {
+  const TAU = Math.PI * 2;
+  const full = a0 === undefined || a1 === undefined;
+  const start = full ? 0 : a0;
+  const sweep = full ? TAU : (((a1 - a0) % TAU) + TAU) % TAU || TAU;
+  const steps = full ? 32 : Math.max(4, Math.round((sweep / TAU) * 32));
+  const pts: Vec2[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = start + (sweep * i) / steps;
+    pts.push({ x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) });
+  }
+  return pts;
+}
+
+/** Bounding-Box-Eckpunkte eines `drawingText`-Primitivs, analog zur Einzelklick-Bbox in PlanView.tsx. */
+function drawingTextBboxPoints(p: Extract<Primitive, { kind: "drawingText" }>): Vec2[] {
+  const singleW = Math.max(1, p.text.length) * p.heightM * 0.6;
+  const w = p.wrapWidth && p.wrapWidth > 0 ? p.wrapWidth : singleW;
+  const lines = p.wrapWidth && p.wrapWidth > 0 ? Math.max(1, Math.ceil(singleW / p.wrapWidth)) : 1;
+  const pad = p.heightM * 0.6;
+  const minX = p.at.x - pad;
+  const maxX = p.at.x + w + pad;
+  const minY = p.at.y - lines * p.heightM * 1.25 - pad;
+  const maxY = p.at.y + p.heightM * 0.4 + pad;
+  return [{ x: minX, y: minY }, { x: maxX, y: minY }, { x: maxX, y: maxY }, { x: minX, y: maxY }];
+}
+
 export function marqueeHitDrawings(
   prims: Primitive[],
   rect: ModelRect,
@@ -260,6 +288,17 @@ export function marqueeHitDrawings(
   for (const p of prims) {
     if (p.kind === "line" && p.drawingId) collect(p.drawingId, [p.a, p.b]);
     else if (p.kind === "polygon" && p.drawingId) collect(p.drawingId, p.pts);
+    else if (p.kind === "drawingCircle" && p.drawingId) collect(p.drawingId, ringSamplePoints(p.center, p.r));
+    else if (p.kind === "drawingArc" && p.drawingId) collect(p.drawingId, ringSamplePoints(p.center, p.r, p.a0, p.a1));
+    else if (p.kind === "drawingText" && p.drawingId) collect(p.drawingId, drawingTextBboxPoints(p));
+    else if (p.kind === "drawingImage" && p.drawingId) {
+      collect(p.drawingId, [
+        p.min,
+        { x: p.max.x, y: p.min.y },
+        p.max,
+        { x: p.min.x, y: p.max.y },
+      ]);
+    }
   }
   const out: string[] = [];
   for (const [id, pts] of byDrawing) {
