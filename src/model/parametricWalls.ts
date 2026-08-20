@@ -561,9 +561,5 @@ function isExteriorWall(wall: Wall, ctx: RuleCtx): boolean {
   return isOnEdge(wall.start) && isOnEdge(wall.end);
 }
 
-// ── Re-Export der Kontexttypen für Unit-Tests / Integration ──────────────
-// (ermöglicht Import ohne Direktverweis auf interne RuleCtx)
-export type { ParametricContext as ResolveContext };
-
 // DrawingLevel-Re-Export für Konsumenten, die keinen eigenen types-Import wollen.
 export type { DrawingLevel };

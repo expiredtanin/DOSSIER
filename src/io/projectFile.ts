@@ -107,8 +107,8 @@ export type LockResult = { ok: true } | { ok: false; info: LockInfo | null };
 
 /**
  * Holt (ungeguardet) die Tauri-`invoke`-Funktion, oder `null` ohne Tauri-Core.
- * Anders als das Muster in compute/index.ts bzw. plan/nativeSync.ts schluckt
- * dieser Helfer KEINE Fehler aus dem eigentlichen Aufruf — ein `Err(...)` vom
+ * Anders als das Muster in plan/nativeSync.ts schluckt dieser Helfer KEINE
+ * Fehler aus dem eigentlichen Aufruf — ein `Err(...)` vom
  * Rust-Command (hier: „schon gelockt", inkl. {@link LockInfo}-Payload) muss bis
  * zum Aufrufer durchgereicht werden.
  */

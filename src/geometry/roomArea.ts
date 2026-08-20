@@ -124,14 +124,6 @@ export const SIA_CATEGORIES: readonly SiaCategory[] = [
   "AGF",
 ] as const;
 
-/** Deutsche Bezeichnungen (Kurz + Lang) je SIA-416-Schlüssel. */
-export interface SiaLabel {
-  /** Kürzel, z. B. „HNF". */
-  code: SiaKey;
-  /** Ausgeschriebene deutsche Bezeichnung. */
-  name: string;
-}
-
 const SIA_LABELS: Record<SiaKey, string> = {
   HNF: "Hauptnutzfläche",
   NNF: "Nebennutzfläche",

@@ -172,9 +172,8 @@ export function ToolIcon({ id }: { id: ToolId }) {
 
 // ── Kategorien ───────────────────────────────────────────────────────────────
 // Werkzeuge/Befehle in drei Rubriken sortiert (Nutzerwunsch: „sortiere nach 2D
-// und 3D und Bearbeiten"). Befehlsnamen spiegeln die Ribbon-Registry
-// (ui/ribbon/ribbonItems.ts) — dort liegt die kanonische Liste; hier nur die
-// Panel-Gruppierung (2D-Zeichnen · 3D/BIM-Bauteile · Bearbeiten-Aktionen).
+// und 3D und Bearbeiten"): reine Panel-Gruppierung (2D-Zeichnen · 3D/BIM-
+// Bauteile · Bearbeiten-Aktionen).
 const TOOLS_2D: ToolId[] = ["line", "polyline", "rect", "circle", "arc", "text", "textbox", "image"];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "ceilingopening", "roof", "extrude", "sectionline", "viewline"];

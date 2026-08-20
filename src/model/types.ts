@@ -2353,10 +2353,6 @@ export const roofLayers = (project: Project, roof: Roof): Layer[] => {
   return [{ componentId: "", thickness: Math.max(0, roof.thickness) }];
 };
 
-/** Gesamtdicke eines Daches (Meter, senkrecht zur Fläche) = Summe der Schichten. */
-export const roofTotalThickness = (project: Project, roof: Roof): number =>
-  roofLayers(project, roof).reduce((s, l) => s + Math.max(0, l.thickness), 0);
-
 /**
  * Löst den {@link DoorType} einer Tür-Öffnung auf, oder `undefined` (keine
  * `typeId` bzw. unbekannt ⇒ Inline-Verhalten). Bewusst NICHT werfend — der

@@ -8,7 +8,6 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import Delaunator from "delaunator";
-import type { GeoOrigin } from "./lv95";
 import type { ContextObject, Contour, ImportedMesh } from "../model/types";
 
 /** Fachliche Kategorie einer importierten Kontext-Linie. */
@@ -38,12 +37,6 @@ export interface GeoFeature {
 
 /** Default-Gebäudehöhe (m), wenn keine Höhe aus der Quelle vorliegt. */
 export const DEFAULT_BUILDING_HEIGHT = 9;
-
-/** Ergebnis eines Import-Laufs: Features + verwendete Origin. */
-export interface GeoImportResult {
-  origin: GeoOrigin;
-  features: GeoFeature[];
-}
 
 /** Menschlicher Layer-/Objektname je Kategorie (deutsch, für die Kontext-Liste). */
 const CATEGORY_LABEL: Record<GeoCategory, string> = {

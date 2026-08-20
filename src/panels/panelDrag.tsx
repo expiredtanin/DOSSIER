@@ -36,12 +36,6 @@ const DRAG_THRESHOLD = 5;
 export const DEFAULT_FLOAT_W = 300;
 export const DEFAULT_FLOAT_H = 360;
 
-/** Ein aufgelöstes Ablageziel beim Loslassen. */
-export type DropTarget =
-  | { kind: "join"; dock: DockId; group: number; index?: number }
-  | { kind: "newgroup"; dock: DockId; at: number }
-  | { kind: "float"; x: number; y: number };
-
 /** Laufender Drag-Zustand (für Geist + Hervorhebung). */
 interface DragState {
   panelId: string;

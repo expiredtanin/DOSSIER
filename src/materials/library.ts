@@ -24,10 +24,6 @@ export interface MaterialAsset {
   maps: Partial<Record<MaterialMapKind, string>>;
 }
 
-export const MATERIAL_LIBRARY_SOURCE = "ambientCG (ambientcg.com)";
-export const MATERIAL_LIBRARY_LICENSE = "CC0 1.0 Universal (Public Domain)";
-export const MATERIAL_LIBRARY_RESOLUTION = "2K";
-
 export const MATERIAL_LIBRARY: MaterialAsset[] = [
   {
     id: "Concrete048",
