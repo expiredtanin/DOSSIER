@@ -91,6 +91,23 @@ export function CommandIcon({ name }: { name: string }) {
           <circle cx="8" cy="13" r="1.4" fill="currentColor" stroke="none" />
         </svg>
       );
+    case "fillet":
+      // Eckpunkt-Verrundung: gerade Schenkel, Ecke durch einen Bogen ersetzt.
+      return (
+        <svg {...common}>
+          <path d="M3,13 L3,8 Q3,3 8,3 L13,3" />
+        </svg>
+      );
+    case "extend":
+      // Linie, die bis zu einer Grenze verlängert wird (Pfeil + Ziellinie).
+      return (
+        <svg {...common}>
+          <line x1="2.5" y1="10" x2="9" y2="6" />
+          <line x1="9" y1="6" x2="12.5" y2="3.7" strokeDasharray="1.6 1.6" />
+          <polyline points="10,2.8 13,3 12.8,6" />
+          <line x1="12.5" y1="9.5" x2="12.5" y2="13.5" />
+        </svg>
+      );
     case "column":
       // Stütze: Quadrat-Querschnitt mit vertikalen Kanten (Pfeiler).
       return (

@@ -26,6 +26,8 @@ import { copyCommand } from "./cmds/copy";
 import { offsetCommand } from "./cmds/offset";
 import { extrudeCommand } from "./cmds/extrude";
 import { trimCommand } from "./cmds/trim";
+import { extendCommand } from "./cmds/extend";
+import { filletCommand } from "./cmds/fillet";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
 import { measureCommand } from "./cmds/measure";
@@ -58,6 +60,8 @@ export const COMMANDS: Record<string, Command> = {
   offset: offsetCommand,
   extrude: extrudeCommand,
   trim: trimCommand,
+  extend: extendCommand,
+  fillet: filletCommand,
   import: importCommand,
   terrain: terrainCommand,
   measure: measureCommand,
@@ -108,6 +112,11 @@ export const ALIASES: Record<string, string> = {
   o: "offset",
   ex: "extrude",
   tr: "trim",
+  ext: "extend",
+  verlaengern: "extend",
+  verlängern: "extend",
+  fi: "fillet",
+  verrunden: "fillet",
   imp: "import",
   ter: "terrain",
   schnittlinie: "sectionline",

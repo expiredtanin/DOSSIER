@@ -1182,6 +1182,13 @@ export const de = {
   // Trim (Quick-Trim): auf den wegzuschneidenden Abschnitt klicken; wiederholend.
   "cmd.trim.label": "Stutzen",
   "cmd.trim.pick": "Abschnitt zum Wegschneiden anklicken (Esc beendet):",
+  // Extend: Gegenstück zu Trim — verlängert eine offene Kurve bis zur nächsten anderen Kurve.
+  "cmd.extend.label": "Verlängern",
+  "cmd.extend.pick": "Kurve nahe dem zu verlängernden Ende anklicken (Esc beendet):",
+  // Fillet: Eckpunkt-Verrundung mit Radius (Maus oder getippt).
+  "cmd.fillet.label": "Verrunden",
+  "cmd.fillet.pick": "Ecke wählen:",
+  "cmd.fillet.radius": "Radius:",
   // Editier-Werkzeuge Split / Join / Segment-Löschen (Tastatur: Ctrl+S / Ctrl+J /
   // Alt+Klick). Labels für Befehlsleiste/Menüs.
   "edit.split.label": "Teilen",

@@ -1170,6 +1170,13 @@ export const en: Record<TranslationKey, string> = {
   // Trim (quick-trim): click the part to cut away; repeats until Esc.
   "cmd.trim.label": "Trim",
   "cmd.trim.pick": "Click the part to trim away (Esc to finish):",
+  // Extend: counterpart to Trim — extends an open curve to the next other curve.
+  "cmd.extend.label": "Extend",
+  "cmd.extend.pick": "Click the curve near the end to extend (Esc to finish):",
+  // Fillet: corner rounding with a radius (mouse or typed).
+  "cmd.fillet.label": "Fillet",
+  "cmd.fillet.pick": "Select corner:",
+  "cmd.fillet.radius": "Radius:",
   // Edit tools Split / Join / Delete segment (keyboard: Ctrl+S / Ctrl+J /
   // Alt+Click). Labels for the command line / menus.
   "edit.split.label": "Split",
