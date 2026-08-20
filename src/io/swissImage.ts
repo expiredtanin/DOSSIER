@@ -111,40 +111,6 @@ export function sampleColorsFromImageData(
   return out;
 }
 
-/**
- * Dekodiert eine Bild-Data-URL und sampelt daraus die Pro-Vertex-Albedo für ein
- * Gelände-TIN (siehe {@link sampleColorsFromImageData}). Nutzt `createImageBitmap`
- * + `OffscreenCanvas` (im App-/WebView-Kontext vorhanden; in Node/Tests fehlen sie
- * — dann `null`, kein Wurf). So bleibt der Render-Pfad synchron: gesampelt wird
- * EINMAL beim Import, das Ergebnis lebt auf `TerrainMesh.vertexColors`.
- */
-export async function sampleTerrainColors(
-  dataUrl: string,
-  positions: readonly number[],
-  min: { x: number; y: number },
-  max: { x: number; y: number },
-): Promise<number[] | null> {
-  if (
-    typeof createImageBitmap !== "function" ||
-    typeof OffscreenCanvas !== "function"
-  ) {
-    return null;
-  }
-  try {
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    const bmp = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bmp.width, bmp.height);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(bmp, 0, 0);
-    const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
-    return sampleColorsFromImageData(img.data, bmp.width, bmp.height, positions, min, max);
-  } catch {
-    return null;
-  }
-}
-
 /** Dekodiertes Bild: dichte RGBA8-Bytes + Maße (zeilenweise von oben). */
 export interface DecodedImage {
   data: Uint8Array;

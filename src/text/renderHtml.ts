@@ -152,7 +152,7 @@ export interface SvgTextOptions {
 /**
  * Zerlegt das Dokument in Zeilen/Tspans mit bereits in Benutzereinheiten
  * umgerechneten Grössen. Der Aufrufer positioniert die Zeilen selbst (Baseline
- * der Zeile i = `y + Σ lineHeight[0..i-1]`, s. `docToSvgText`).
+ * der Zeile i = `y + Σ lineHeight[0..i-1]`).
  */
 export function docToLines(doc: RichTextDoc, opts: SvgTextOptions): SvgLine[] {
   const basePt = opts.basePt ?? 12;
@@ -262,38 +262,3 @@ function runToTspan(run: TextRun, basePt: number, unitPerPt: number, color: stri
   return tspan;
 }
 
-/**
- * Baut ein komplettes `<text>`-SVG-Element als String. Jede Zeile ist ein
- * `<tspan x=… dy=…>`, darin ein `<tspan>` je Run. `text-anchor` folgt der
- * Absatz-Ausrichtung (left→start, center→middle, right→end).
- */
-export function docToSvgText(doc: RichTextDoc, opts: SvgTextOptions): string {
-  const lines = docToLines(doc, opts);
-  const parts: string[] = [];
-  lines.forEach((line, i) => {
-    const dy = i === 0 ? 0 : line.lineHeight;
-    const anchor = line.align === "center" ? "middle" : line.align === "right" ? "end" : "start";
-    const runSpans = line.tspans.map((t) => tspanToSvg(t)).join("");
-    // Leere Zeile: ein Zero-Width-Space, damit dy dennoch wirkt.
-    const content = runSpans || "&#8203;";
-    parts.push(
-      `<tspan x="${round(opts.x)}" dy="${round(dy)}" text-anchor="${anchor}">${content}</tspan>`,
-    );
-  });
-  return `<text x="${round(opts.x)}" y="${round(opts.y)}">${parts.join("")}</text>`;
-}
-
-function tspanToSvg(t: SvgTspan): string {
-  const attrs: string[] = [`font-size="${t.fontSize}"`, `fill="${escapeAttr(t.fill)}"`];
-  if (t.fontWeight) attrs.push(`font-weight="${t.fontWeight}"`);
-  if (t.fontStyle) attrs.push(`font-style="${t.fontStyle}"`);
-  if (t.fontFamily) attrs.push(`font-family="${escapeAttr(t.fontFamily)}"`);
-  if (t.textDecoration) attrs.push(`text-decoration="${t.textDecoration}"`);
-  if (t.baselineShift) attrs.push(`dy="${-t.baselineShift}"`);
-  const body = escapeText(t.text);
-  // Bei baseline-shift den dy nach dem Run zurücksetzen, damit die Grundlinie hält.
-  if (t.baselineShift) {
-    return `<tspan ${attrs.join(" ")}>${body}</tspan><tspan dy="${t.baselineShift}">&#8203;</tspan>`;
-  }
-  return `<tspan ${attrs.join(" ")}>${body}</tspan>`;
-}

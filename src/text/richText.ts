@@ -103,11 +103,6 @@ export function plainText(doc: RichTextDoc): string {
     .join("\n");
 }
 
-/** Ist das Dokument (nach Reintext) leer? */
-export function isEmpty(doc: RichTextDoc): boolean {
-  return plainText(doc).length === 0;
-}
-
 /** Gesamtlänge in Zeichen (inkl. Absatzumbrüche als je 1 Zeichen). */
 export function docLength(doc: RichTextDoc): number {
   return plainText(doc).length;
@@ -374,41 +369,6 @@ export function serialize(doc: RichTextDoc): string {
     return obj;
   });
   return JSON.stringify({ version: 1, paragraphs });
-}
-
-/**
- * Liest ein Dokument aus JSON. Robust gegenüber fehlenden Feldern; unbekannter
- * Input ergibt ein leeres Dokument statt eines Fehlers.
- */
-export function deserialize(json: string): RichTextDoc {
-  try {
-    const raw = JSON.parse(json) as unknown;
-    return fromJson(raw);
-  } catch {
-    return emptyDoc();
-  }
-}
-
-/** Wandelt ein bereits geparstes Objekt in ein valides Dokument. */
-export function fromJson(raw: unknown): RichTextDoc {
-  if (!raw || typeof raw !== "object") return emptyDoc();
-  const obj = raw as { paragraphs?: unknown };
-  if (!Array.isArray(obj.paragraphs)) return emptyDoc();
-  const paragraphs: Paragraph[] = obj.paragraphs.map((p) => {
-    const pp = (p ?? {}) as { runs?: unknown; align?: unknown };
-    const runs: TextRun[] = Array.isArray(pp.runs)
-      ? pp.runs.map((r) => {
-          const rr = (r ?? {}) as { text?: unknown; marks?: unknown };
-          const text = typeof rr.text === "string" ? rr.text : "";
-          const marks = normalizeMarks((rr.marks ?? {}) as Marks);
-          return { text, marks };
-        })
-      : [];
-    const para: Paragraph = { runs };
-    if (pp.align === "center" || pp.align === "right") para.align = pp.align;
-    return para;
-  });
-  return normalizeDoc({ version: 1, paragraphs });
 }
 
 // ── Style-Presets ──────────────────────────────────────────────────────────

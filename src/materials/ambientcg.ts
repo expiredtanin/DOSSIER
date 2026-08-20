@@ -267,3 +267,26 @@ export async function fetchMaterialMaps(
 export function revokeMaterial(blobUrls: string[]): void {
   for (const u of blobUrls) URL.revokeObjectURL(u);
 }
+
+const MATERIAL_MAP_KEYS: (keyof ComponentMaterial)[] = [
+  "color",
+  "normal",
+  "roughness",
+  "metalness",
+  "displacement",
+  "ao",
+];
+
+/**
+ * Gibt die Blob-URLs eines bereits zugewiesenen `ComponentMaterial` frei (Karten
+ * aus ambientCG-Download ODER lokalem Upload — beide nutzen `createObjectURL`).
+ * Bibliotheks-Assets (`materialFromAsset`) liefern statische Pfade, keine
+ * Blob-URLs, und bleiben daher unangetastet.
+ */
+export function revokeMaterialUrls(material: ComponentMaterial | undefined): void {
+  if (!material) return;
+  const blobUrls = MATERIAL_MAP_KEYS.map((k) => material[k]).filter(
+    (u): u is string => typeof u === "string" && u.startsWith("blob:"),
+  );
+  revokeMaterial(blobUrls);
+}

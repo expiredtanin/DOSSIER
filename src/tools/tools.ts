@@ -621,21 +621,3 @@ export function getTool(id: ToolId): Tool {
   return TOOLS[id];
 }
 
-/** Reihenfolge der Werkzeuge in der Werkzeugleiste. */
-export const TOOL_ORDER: ToolId[] = [
-  "select",
-  "wall",
-  "ceiling",
-  "window",
-  "door",
-  "stair",
-  "room",
-  "line",
-  "polyline",
-  "rect",
-  "circle",
-  "arc",
-  "text",
-  "textbox",
-  "image",
-];

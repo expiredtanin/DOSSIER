@@ -98,14 +98,14 @@ export interface ResourceManagerHandlers {
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
   /**
    * Grafische Override-Regeln: ersetzt die GANZE Regelliste (Reihenfolge =
-   * Priorität). Optional, damit bestehende Einbettungen (z. B. ResourcesPanel)
-   * ohne Änderung weiter kompilieren — ohne Handler ist der Tab nur lesend.
+   * Priorität). Optional, damit ältere Einbettungen ohne diesen Handler
+   * weiter kompilieren — ohne Handler ist der Tab nur lesend.
    */
   onSetOverrideRules?: (rules: OverrideRule[]) => void;
   /**
    * Bauteil-Typen (Tür/Fenster/Treppe) — Bibliotheks-CRUD, analog Wand-/
-   * Deckentypen. Optional, damit bestehende Einbettungen (z. B. ResourcesPanel)
-   * ohne Änderung weiter kompilieren; ohne Handler bleiben die Tabs verborgen.
+   * Deckentypen. Optional, damit ältere Einbettungen ohne diesen Handler
+   * weiter kompilieren; ohne Handler bleiben die Tabs verborgen.
    */
   onAddDoorType?: () => void;
   onPatchDoorType?: (id: string, patch: Partial<DoorType>) => void;

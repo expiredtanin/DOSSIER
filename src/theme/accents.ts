@@ -48,7 +48,3 @@ export const DEFAULT_MARQUEE_COLOR = "#CEB188";
  */
 export const DEFAULT_SNAP_COLOR = "#E0BE5A";
 
-/** Liefert einen Swatch nach `id`, oder `undefined`. */
-export function findAccentSwatch(id: string): AccentSwatch | undefined {
-  return ACCENT_SWATCHES.find((s) => s.id === id);
-}

@@ -10,6 +10,7 @@ import { materialFromAsset, DEFAULT_TILE_SIZE_M } from "../../materials/runtime"
 import {
   searchMaterials,
   fetchMaterialMaps,
+  revokeMaterialUrls,
   AMBIENT_CATEGORIES,
   type AmbientMaterial,
   type AmbientResolution,
@@ -55,9 +56,13 @@ function MaterialCell({
         <MaterialPicker
           material={material}
           onAssign={(m) => {
+            // Vorheriges Material ersetzt: dessen Blob-URLs (Download/Upload)
+            // sind ab jetzt unerreichbar — sonst leckt jeder Material-Wechsel.
+            revokeMaterialUrls(material);
             onAssign(m);
           }}
           onClear={() => {
+            revokeMaterialUrls(material);
             onClear();
           }}
           onClose={() => setOpen(false)}
@@ -726,7 +731,10 @@ export function ComponentsTab({
               component={selected}
               hatches={project.hatches}
               onPatch={(patch) => onPatchComponent(selected.id, patch)}
-              onDelete={() => onDeleteComponent(selected.id)}
+              onDelete={() => {
+                revokeMaterialUrls(selected.material);
+                onDeleteComponent(selected.id);
+              }}
             />
           ) : (
             <div className="res-md-empty">{t("resources.components.empty")}</div>

@@ -348,20 +348,6 @@ export function removeFloat(layout: LayoutState, panelId: string): LayoutState {
 }
 
 /**
- * Entfernt ein Panel aus einem Dock (immutabel). Dünne, benannte Hülle um
- * `removeFromDock` auf Layout-Ebene; nützlich, um ein Panel ganz zu schließen.
- */
-export function removeFromDockLayout(
-  layout: LayoutState,
-  dock: DockId,
-  panelId: string,
-): LayoutState {
-  const next = removeFromDock(layout[dock], panelId);
-  if (next === layout[dock]) return layout;
-  return { ...layout, [dock]: next };
-}
-
-/**
  * Setzt das Panel als aktiven Tab innerhalb seiner Gruppe (immutabel). Sucht
  * die Gruppe im Dock, die das Panel enthält, und macht es dort aktiv. Liegt die
  * ID in keiner Gruppe des Docks (oder ist sie schon aktiv), kommt das Layout

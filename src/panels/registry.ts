@@ -42,10 +42,3 @@ export function hasPanel(id: string): boolean {
   return registry.has(id);
 }
 
-/**
- * Entfernt ein Panel aus der Registry. Liefert `true`, wenn etwas entfernt
- * wurde. Vor allem für Tests und das Entladen von Plugins gedacht.
- */
-export function unregisterPanel(id: string): boolean {
-  return registry.delete(id);
-}

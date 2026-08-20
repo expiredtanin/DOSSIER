@@ -1141,8 +1141,7 @@ export interface ViewRibbonTabProps {
  * „Ansichten"-Tab des Ribbons — trägt die aus der TopBar gemergten Mittelcluster:
  * 2D/3D-Ansichts-Raster (+ Kamera-FOV), Sichtbarkeits-Kombinationen, Detailgrad,
  * Massstab/Zoom-Cluster und Darstellungsart. EIN Ribbon für alles; Handler/Setter
- * kommen unverändert von App (gleiche Props wie zuvor an die TopBar). Wird von
- * `RibbonBar` als Inhalt des „Ansichten"-Tabs gerendert.
+ * kommen unverändert von App (gleiche Props wie zuvor an die TopBar).
  */
 export function ViewRibbonTab({
   viewToggleEnabled,
