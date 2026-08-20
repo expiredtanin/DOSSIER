@@ -2496,23 +2496,24 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           );
           if (!prim) return null;
           const doc = prim.doc ?? docFromText(prim.text, prim.marks ?? {});
-          const pxPerM = currentPxPerMeter();
+          // Anker-POSITION folgt weiter dem echten Zoom (vbToClient/toScreen) —
+          // die Box soll am richtigen Ort aufgehen. Die Editor-GRÖSSE (Schrift +
+          // Toolbar) bleibt dagegen bewusst zoomUNabhängig (keine transform:scale
+          // mehr): bei nahem Zoom wurde das vorher riesig (Toolbar skalierte mit
+          // hoch), bei fernem Zoom unbenutzbar winzig — Nutzer-Report. Die
+          // Editor-Breite folgt bei der Textspalte trotzdem der Modell-Breite,
+          // aber über eine FESTE (nicht Live-Zoom-)Umrechnung, damit der Rahmen
+          // nicht bei jedem Rein-/Rauszoomen während des Tippens die Zeilen
+          // neu umbricht.
+          const EDIT_PX_PER_M = 220;
           const topAnchor = toScreen({ x: prim.at.x, y: prim.at.y + prim.heightM });
           const screen = vbToClient(topAnchor.x, topAnchor.y);
-          const FONT_PX_AT_12PT = 16; // 12pt @ 96dpi (RichTextEditor-Default, s. LayoutSheet.tsx).
-          const scale = (prim.heightM * pxPerM) / FONT_PX_AT_12PT;
-          // MIT wrapWidth (Textspalte): feste Breite, Editor bricht live um (nowrap
-          // AUS). OHNE (Text-Werkzeug): keine feste Breite — `.planview-inline-text
-          // .rt-surface` steht auf nowrap (s. styles.css), die Box wächst mit jedem
-          // Zeichen; eine Mindestbreite verhindert eine unsichtbare 0px-Box beim
-          // leeren Start (der eigentliche Grund, warum der Anker bisher unsichtbar
-          // blieb — `width:undefined` kollabierte auf shrink-to-fit von NICHTS).
           const hasWrap = !!prim.wrapWidth;
-          const widthPx = hasWrap ? (prim.wrapWidth! * pxPerM) / scale : undefined;
+          const widthPx = hasWrap ? prim.wrapWidth! * EDIT_PX_PER_M : undefined;
           const minWidthPx = hasWrap ? undefined : 160;
           // Aufgezogener Textspalten-Rahmen (textbox.ts): dessen Höhe als
           // Mindesthöhe des Editors — wächst bei mehr Text darüber hinaus.
-          const minHeightPx = editTextMinHeightM ? (editTextMinHeightM * pxPerM) / scale : undefined;
+          const minHeightPx = editTextMinHeightM ? editTextMinHeightM * EDIT_PX_PER_M : undefined;
           return (
             <>
               <div
@@ -2527,8 +2528,6 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
                   width: widthPx,
                   minWidth: minWidthPx,
                   minHeight: minHeightPx,
-                  transform: `scale(${scale})`,
-                  transformOrigin: "0 0",
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => {
