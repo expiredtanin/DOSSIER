@@ -98,6 +98,13 @@ export function CommandIcon({ name }: { name: string }) {
           <path d="M3,13 L3,8 Q3,3 8,3 L13,3" />
         </svg>
       );
+    case "chamfer":
+      // Eckpunkt-Fasung: gerade Schenkel, Ecke durch eine gerade Schräge ersetzt.
+      return (
+        <svg {...common}>
+          <path d="M3,13 L3,6 L6,3 L13,3" />
+        </svg>
+      );
     case "extend":
       // Linie, die bis zu einer Grenze verlängert wird (Pfeil + Ziellinie).
       return (

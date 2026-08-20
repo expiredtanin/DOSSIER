@@ -1177,6 +1177,10 @@ export const en: Record<TranslationKey, string> = {
   "cmd.fillet.label": "Fillet",
   "cmd.fillet.pick": "Select corner:",
   "cmd.fillet.radius": "Radius:",
+  // Chamfer: corner bevel with a distance (mouse or typed) — like Fillet, no arc.
+  "cmd.chamfer.label": "Chamfer",
+  "cmd.chamfer.pick": "Select corner:",
+  "cmd.chamfer.distance": "Distance:",
   // Edit tools Split / Join / Delete segment (keyboard: Ctrl+S / Ctrl+J /
   // Alt+Click). Labels for the command line / menus.
   "edit.split.label": "Split",

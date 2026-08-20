@@ -572,6 +572,44 @@ export function filletCorner(
   return { center, radius: r, tangentA, tangentB, startAngle, endAngle };
 }
 
+/** Ergebnis einer Eck-Fasung. */
+export interface Chamfer {
+  /** Punkt auf dem ersten Schenkel (corner→p1), im Abstand `distance` vom Eck. */
+  a: Vec2;
+  /** Punkt auf dem zweiten Schenkel (corner→p2), im Abstand `distance` vom Eck. */
+  b: Vec2;
+}
+
+/**
+ * Fast die Ecke bei `corner` (Schenkel corner→p1, corner→p2) mit einer geraden
+ * Abschrägung: gleicher Abstand `distance` vom Eck auf BEIDEN Schenkeln,
+ * verbunden durch eine gerade Linie (klassischer Gleichabstands-Chamfer, wie
+ * `filletCorner`, nur ohne Bogen — die Ecke fällt weg, der Schnitt bleibt
+ * gerade). Liefert `null` bei (nahezu) kollinearen Schenkeln oder wenn
+ * `distance` länger als ein Schenkel ist.
+ */
+export function chamferCorner(
+  corner: Vec2,
+  p1: Vec2,
+  p2: Vec2,
+  distance: number,
+): Chamfer | null {
+  const u1 = normalize(sub(p1, corner));
+  const u2 = normalize(sub(p2, corner));
+  const cosTheta = Math.max(-1, Math.min(1, dot(u1, u2)));
+  const theta = Math.acos(cosTheta);
+  if (theta < 1e-4 || Math.PI - theta < 1e-4) return null; // kollinear
+  if (
+    distance > len(sub(p1, corner)) + EPS ||
+    distance > len(sub(p2, corner)) + EPS
+  ) {
+    return null;
+  }
+  const a = add(corner, scale(u1, distance));
+  const b = add(corner, scale(u2, distance));
+  return { a, b };
+}
+
 // ── Split / Join / Segment-Löschen (Drawing2D-Editieren) ─────────────────────
 // Reine Geometrie auf Polylinien (`Vec2[]` + `closed`). Die Operations-Schicht
 // (`src/editors/splitJoin.ts`) wandelt Drawing2D ↔ {pts, closed} und ruft diese

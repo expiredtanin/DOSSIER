@@ -1189,6 +1189,10 @@ export const de = {
   "cmd.fillet.label": "Verrunden",
   "cmd.fillet.pick": "Ecke wählen:",
   "cmd.fillet.radius": "Radius:",
+  // Chamfer: Eckpunkt-Fasung mit Distanz (Maus oder getippt) — wie Fillet, ohne Bogen.
+  "cmd.chamfer.label": "Fasen",
+  "cmd.chamfer.pick": "Ecke wählen:",
+  "cmd.chamfer.distance": "Distanz:",
   // Editier-Werkzeuge Split / Join / Segment-Löschen (Tastatur: Ctrl+S / Ctrl+J /
   // Alt+Klick). Labels für Befehlsleiste/Menüs.
   "edit.split.label": "Teilen",

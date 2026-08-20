@@ -28,6 +28,7 @@ import { extrudeCommand } from "./cmds/extrude";
 import { trimCommand } from "./cmds/trim";
 import { extendCommand } from "./cmds/extend";
 import { filletCommand } from "./cmds/fillet";
+import { chamferCommand } from "./cmds/chamfer";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
 import { measureCommand } from "./cmds/measure";
@@ -62,6 +63,7 @@ export const COMMANDS: Record<string, Command> = {
   trim: trimCommand,
   extend: extendCommand,
   fillet: filletCommand,
+  chamfer: chamferCommand,
   import: importCommand,
   terrain: terrainCommand,
   measure: measureCommand,
@@ -117,6 +119,8 @@ export const ALIASES: Record<string, string> = {
   verlängern: "extend",
   fi: "fillet",
   verrunden: "fillet",
+  ch: "chamfer",
+  fasen: "chamfer",
   imp: "import",
   ter: "terrain",
   schnittlinie: "sectionline",
