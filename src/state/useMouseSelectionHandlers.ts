@@ -51,7 +51,7 @@ export function useMouseSelectionHandlers(opts: {
   >;
   contextMenuState: Pick<
     ReturnType<typeof useContextMenuState>,
-    "setMenu" | "setStampEditorRoomId" | "editTextId" | "setEditTextId"
+    "setMenu" | "setStampEditorRoomId" | "editTextId" | "setEditTextId" | "setEditTextMinHeightM"
   >;
 }) {
   const { project, setProject, activeLevelId, visibleCodes, categoryDisplay, selectionState, contextMenuState } = opts;
@@ -80,7 +80,7 @@ export function useMouseSelectionHandlers(opts: {
     selectedSectionLineId,
     setSelectedSectionLineId,
   } = selectionState;
-  const { setMenu, setStampEditorRoomId, editTextId, setEditTextId } = contextMenuState;
+  const { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM } = contextMenuState;
 
   // ── Maus-Schema: Auswahl + Kontextmenü aus Grundriss / 3D ─────────────────
   // Links-Klick im Grundriss: genau eine Wand wählen (Menge ersetzen) bzw.
@@ -116,6 +116,10 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedRoofIds([]);
     setSelectedContextObjectIds([]);
     setSelectedSectionLineId(null);
+    // Bestehendes Element per Doppelklick: keine Rahmen-Mindesthöhe (nur bei
+    // frisch aufgezogener Textspalte relevant, s. textbox.ts focusMinHeightM)
+    // — sonst könnte eine vorige Textspalten-Erstellung hier nachwirken.
+    setEditTextMinHeightM(null);
     setEditTextId(drawingId);
   };
 
@@ -155,6 +159,7 @@ export function useMouseSelectionHandlers(opts: {
       });
     }
     setEditTextId(null);
+    setEditTextMinHeightM(null);
   };
   // Kategorie-Code des getroffenen Elements (für die Sperr-Prüfung unten) —
   // nur die Kanäle, deren Modell-Typ eine categoryCode trägt (ExtrudedSolid/

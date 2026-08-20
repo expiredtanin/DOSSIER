@@ -1141,11 +1141,9 @@ export const de = {
   "cmd.arc.end": "Endpunkt (Endwinkel):",
   "cmd.text.label": "Text",
   "cmd.text.point": "Ankerpunkt:",
-  "cmd.text.enter": "Text eingeben:",
   "cmd.textbox.label": "Textspalte",
-  "cmd.textbox.point": "Ankerpunkt:",
-  "cmd.textbox.width": "Spaltenbreite (zweiter Punkt):",
-  "cmd.textbox.enter": "Text eingeben:",
+  "cmd.textbox.first": "Erste Ecke:",
+  "cmd.textbox.second": "Gegenecke (Breite × Höhe):",
   // Editierbefehle (Tier 1): Move/Copy/Offset operieren auf der Auswahl.
   "cmd.move.label": "Verschieben",
   "cmd.move.base": "Basispunkt:",

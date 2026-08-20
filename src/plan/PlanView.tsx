@@ -313,6 +313,12 @@ export interface PlanViewProps {
    * Ausschnitt.
    */
   editTextId?: string | null;
+  /**
+   * Mindesthöhe (Meter) des Inline-Editors, wenn `editTextId` aus einem
+   * frisch aufgezogenen Textspalten-RAHMEN kommt (s. textbox.ts). `null`/
+   * undefined = keine Mindesthöhe, der Inhalt bestimmt die Höhe allein.
+   */
+  editTextMinHeightM?: number | null;
   /** Jede Änderung im Inline-Text-Editor (live, pro Tastendruck). */
   onCommitTextEdit?: (doc: RichTextDoc) => void;
   /** Inline-Text-Editor schliessen (Backdrop-Klick/Escape). */
@@ -445,6 +451,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onStampEdit,
       onEditDrawingText,
       editTextId,
+      editTextMinHeightM,
       onCommitTextEdit,
       onCloseTextEdit,
       onOpenSectionLevel,
@@ -2494,7 +2501,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           const screen = vbToClient(topAnchor.x, topAnchor.y);
           const FONT_PX_AT_12PT = 16; // 12pt @ 96dpi (RichTextEditor-Default, s. LayoutSheet.tsx).
           const scale = (prim.heightM * pxPerM) / FONT_PX_AT_12PT;
-          const widthPx = prim.wrapWidth ? (prim.wrapWidth * pxPerM) / scale : undefined;
+          // MIT wrapWidth (Textspalte): feste Breite, Editor bricht live um (nowrap
+          // AUS). OHNE (Text-Werkzeug): keine feste Breite — `.planview-inline-text
+          // .rt-surface` steht auf nowrap (s. styles.css), die Box wächst mit jedem
+          // Zeichen; eine Mindestbreite verhindert eine unsichtbare 0px-Box beim
+          // leeren Start (der eigentliche Grund, warum der Anker bisher unsichtbar
+          // blieb — `width:undefined` kollabierte auf shrink-to-fit von NICHTS).
+          const hasWrap = !!prim.wrapWidth;
+          const widthPx = hasWrap ? (prim.wrapWidth! * pxPerM) / scale : undefined;
+          const minWidthPx = hasWrap ? undefined : 160;
+          // Aufgezogener Textspalten-Rahmen (textbox.ts): dessen Höhe als
+          // Mindesthöhe des Editors — wächst bei mehr Text darüber hinaus.
+          const minHeightPx = editTextMinHeightM ? (editTextMinHeightM * pxPerM) / scale : undefined;
           return (
             <>
               <div
@@ -2502,11 +2520,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
                 onPointerDown={() => onCloseTextEdit?.()}
               />
               <div
-                className="planview-inline-text"
+                className={"planview-inline-text" + (hasWrap ? "" : " planview-inline-text-free")}
                 style={{
                   left: screen.x,
                   top: screen.y,
                   width: widthPx,
+                  minWidth: minWidthPx,
+                  minHeight: minHeightPx,
                   transform: `scale(${scale})`,
                   transformOrigin: "0 0",
                 }}

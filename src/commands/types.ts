@@ -116,6 +116,13 @@ export interface CommandResult {
    * die Engine selbst wertet die ID nicht aus.
    */
   focusDrawingId?: string;
+  /**
+   * Nur zusammen mit `focusDrawingId`: die vom Nutzer aufgezogene Rahmenhöhe
+   * (Meter) als MINDESTHöhe des Inline-Editors (InDesign-Textrahmen — wächst
+   * bei Bedarf über diese Höhe hinaus, schrumpft aber nicht darunter). Fehlt
+   * sie, bestimmt allein der Inhalt die Höhe (Text-Werkzeug ohne Rahmen).
+   */
+  focusMinHeightM?: number;
 }
 
 // ── Befehls-Zustand ──────────────────────────────────────────────────────────

@@ -93,6 +93,7 @@ export function Content({
   onStampEdit,
   onEditDrawingText,
   editTextId,
+  editTextMinHeightM,
   onCommitTextEdit,
   onCloseTextEdit,
   onPlanSelect,
@@ -182,6 +183,7 @@ export function Content({
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
   editTextId?: string | null;
+  editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
   onCloseTextEdit?: () => void;
   onPlanSelect: (sel: PlanSelection) => void;
@@ -307,6 +309,7 @@ export function Content({
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
           editTextId={editTextId}
+          editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
           onCloseTextEdit={onCloseTextEdit}
           onOpenSectionLevel={onSelectLevel}
@@ -369,6 +372,7 @@ export function Content({
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
           editTextId={editTextId}
+          editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
           onCloseTextEdit={onCloseTextEdit}
           onOpenSectionLevel={onSelectLevel}
@@ -473,6 +477,7 @@ export function Content({
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
           editTextId={editTextId}
+          editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
           onCloseTextEdit={onCloseTextEdit}
           onOpenSectionLevel={onSelectLevel}
@@ -525,6 +530,7 @@ function LevelPlanView({
   onStampEdit,
   onEditDrawingText,
   editTextId,
+  editTextMinHeightM,
   onCommitTextEdit,
   onCloseTextEdit,
   onOpenSectionLevel,
@@ -570,6 +576,7 @@ function LevelPlanView({
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
   editTextId?: string | null;
+  editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
   onCloseTextEdit?: () => void;
   onOpenSectionLevel?: (id: string) => void;
@@ -654,6 +661,7 @@ function LevelPlanView({
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
         editTextId={editTextId}
+        editTextMinHeightM={editTextMinHeightM}
         onCommitTextEdit={onCommitTextEdit}
         onCloseTextEdit={onCloseTextEdit}
         onOpenSectionLevel={onOpenSectionLevel}
@@ -713,6 +721,7 @@ function SectionPlanView({
   onStampEdit,
   onEditDrawingText,
   editTextId,
+  editTextMinHeightM,
   onCommitTextEdit,
   onCloseTextEdit,
   onOpenSectionLevel,
@@ -753,6 +762,7 @@ function SectionPlanView({
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
   editTextId?: string | null;
+  editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
   onCloseTextEdit?: () => void;
   onOpenSectionLevel?: (id: string) => void;
@@ -863,6 +873,7 @@ function SectionPlanView({
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
         editTextId={editTextId}
+        editTextMinHeightM={editTextMinHeightM}
         onCommitTextEdit={onCommitTextEdit}
         onCloseTextEdit={onCloseTextEdit}
         onOpenSectionLevel={onOpenSectionLevel}

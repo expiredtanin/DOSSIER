@@ -419,6 +419,8 @@ export default function App() {
     setStampEditorRoomId,
     editTextId,
     setEditTextId,
+    editTextMinHeightM,
+    setEditTextMinHeightM,
   } = useContextMenuState();
 
   // Gewählte Annotation auf einem offenen Layout-Blatt (Linie/Rechteck/Text/
@@ -801,7 +803,7 @@ export default function App() {
       // applyResult-Reihenfolge commit→focusDrawing). Auswahl-Löschen wie
       // onEditDrawingText (useMouseSelectionHandlers.ts), damit kein anderes
       // Element gleichzeitig markiert bleibt.
-      focusDrawing: (id) => {
+      focusDrawing: (id, minHeightM) => {
         setSelectedWallIds([]);
         setSelectedCeilingIds([]);
         setSelectedOpeningIds([]);
@@ -813,6 +815,7 @@ export default function App() {
         setSelectedContextObjectIds([]);
         setSelectedSectionLineId(null);
         setSelectedDrawingId(id);
+        setEditTextMinHeightM(minHeightM ?? null);
         setEditTextId(id);
       },
     };
@@ -2286,7 +2289,7 @@ export default function App() {
       selectedSectionLineId,
       setSelectedSectionLineId,
     },
-    contextMenuState: { setMenu, setStampEditorRoomId, editTextId, setEditTextId },
+    contextMenuState: { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM },
   });
 
   // „Bild einfügen" (Werkzeug „image") — siehe state/useImportHandling.ts.
@@ -2736,6 +2739,7 @@ export default function App() {
           onStampEdit={onOpenStampEditor}
           onEditDrawingText={onEditDrawingText}
           editTextId={editTextId}
+          editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={commitTextEdit}
           onCloseTextEdit={closeTextEdit}
           onPlanSelect={onPlanSelect}

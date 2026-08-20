@@ -1,17 +1,23 @@
-// Textspalte (Absatztext) — wie das Text-Werkzeug, aber mit einer Spaltenbreite:
-// der Text bricht beim Rendern UND beim Editieren wortweise auf diese Breite
-// um (InDesign-artiges Textrahmen-Verhalten, Nutzer-Wunsch). Schritte:
-//   1) „Ankerpunkt:"     → Punkt (oben-links der Spalte)
-//   2) „Spaltenbreite:"   → Punkt (die horizontale Distanz zum Anker = Breite;
-//                            Live-Vorschau der Breitenlinie)
+// Textspalte (Absatztext) — wie das Text-Werkzeug, aber als aufgezogener
+// RAHMEN: Breite UND Höhe kommen aus einem Rechteck (zwei diagonale Punkte),
+// nicht nur einer Breitenlinie (InDesign-artiges Textrahmen-Verhalten,
+// Nutzer-Wunsch). Schritte:
+//   1) „Erste Ecke:"  → Punkt
+//   2) „Gegenecke:"    → Punkt (Live-Vorschau des Rahmens, beliebige Richtung)
 //   Committet danach SOFORT ein leeres Text-Element (mit `width`) und meldet
-//   `focusDrawingId` — die UI (PlanView) öffnet den Inline-Rich-Text-Editor
-//   direkt auf der Zeichenfläche, mit der Spaltenbreite als CSS-Breite (echter
-//   Wortumbruch beim Tippen, kein Dialog). Bleibt der Editor leer, verwirft
-//   `commitTextEdit` (App.tsx) das Element wieder.
+//   `focusDrawingId` + `focusMinHeightM` (die aufgezogene Rahmenhöhe als
+//   MINDESThöhe, s. types.ts) — die UI (PlanView) öffnet den Inline-Rich-
+//   Text-Editor direkt auf der Zeichenfläche, mit der Spaltenbreite als CSS-
+//   Breite (echter Wortumbruch beim Tippen, kein Dialog) und dem Rahmen als
+//   Mindesthöhe (wächst bei mehr Text darüber hinaus). Bleibt der Editor
+//   leer, verwirft `commitTextEdit`/`closeTextEdit` (App.tsx) das Element
+//   wieder.
 //
-// Reuse des bestehenden {shape:"text"}-Elements (mit `width`) — so erben Selektion,
-// Verschieben und Griff automatisch vom Einzeltext; nur die Breite kommt hinzu.
+// Reuse des bestehenden {shape:"text"}-Elements (mit `width`) — so erben
+// Selektion, Verschieben und Griff automatisch vom Einzeltext; die Modell-
+// Geometrie selbst kennt aber keine feste Rahmenhöhe (nur `width` für den
+// Wortumbruch) — die Höhe bleibt reine Editor-Startgrösse (PlanView-lokal,
+// s. focusMinHeightM), die Textmenge bestimmt die tatsächliche Höhe.
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
@@ -20,39 +26,61 @@ import type {
   CommandContext,
   CommandResult,
   CommandState,
+  DraftShape,
   Project,
-  ToolDraft,
   Vec2,
 } from "../types";
 
-/** Default-Schrifthöhe einer Textspalte in Modell-Metern. */
+/** Default-Schrifthöhe einer Textspalte in Modell-Metern (= Baseline-Versatz vom Rahmen-Top). */
 const DEFAULT_TEXT_HEIGHT_M = 0.25;
-/** Kleinste sinnvolle Spaltenbreite (Meter). */
-const MIN_WIDTH_M = 0.2;
+/** Kleinste sinnvolle Rahmen-Breite/-Höhe (Meter). */
+const MIN_SIZE_M = 0.2;
 
-interface TbPoint extends CommandState {
-  phase: "point";
+interface TbFirst extends CommandState {
+  phase: "first";
 }
-interface TbWidth extends CommandState {
-  phase: "width";
-  at: Vec2;
+interface TbSecond extends CommandState {
+  phase: "second";
+  a: Vec2;
   cursor: Vec2 | null;
 }
-type TbState = TbPoint | TbWidth;
+type TbState = TbFirst | TbSecond;
 
-/** Horizontale Spaltenbreite aus Anker + Cursor (Betrag der x-Differenz, geklemmt). */
-function widthOf(at: Vec2, cursor: Vec2): number {
-  return Math.max(MIN_WIDTH_M, Math.abs(cursor.x - at.x));
+/** Normalisiertes Rechteck aus zwei diagonalen Punkten (beliebige Zugrichtung). */
+function rectOf(a: Vec2, b: Vec2): { minX: number; maxX: number; minY: number; maxY: number } {
+  return {
+    minX: Math.min(a.x, b.x),
+    maxX: Math.max(a.x, b.x),
+    minY: Math.min(a.y, b.y),
+    maxY: Math.max(a.y, b.y),
+  };
 }
 
-/** Vorschau: waagrechte Breitenlinie am Anker (zeigt die Spaltenbreite). */
-function widthDraft(at: Vec2, cursor: Vec2): ToolDraft {
-  const w = widthOf(at, cursor);
-  const b: Vec2 = { x: at.x + w, y: at.y };
+/** Breite/Höhe (geklemmt auf MIN_SIZE_M) + die Textanker-Position (oben-links, als Baseline). */
+function frameOf(a: Vec2, b: Vec2): { at: Vec2; width: number; heightM: number } {
+  const r = rectOf(a, b);
+  const width = Math.max(MIN_SIZE_M, r.maxX - r.minX);
+  const heightM = Math.max(MIN_SIZE_M, r.maxY - r.minY);
+  // `at` ist die Baseline-links der ERSTEN Zeile (s. drawing2d.ts/primitives.tsx);
+  // die Rahmen-Oberkante liegt eine Zeilenhöhe darüber → at.y = Rahmen-Top − Zeilenhöhe.
+  return { at: { x: r.minX, y: r.maxY - DEFAULT_TEXT_HEIGHT_M }, width, heightM };
+}
+
+/** Vorschau: Rahmen-Rechteck zwischen den beiden Ecken. */
+function frameDraft(a: Vec2, cursor: Vec2): { preview: DraftShape[]; vertices: Vec2[]; hud: { at: Vec2; text: string } } {
+  const r = rectOf(a, cursor);
+  const pts: Vec2[] = [
+    { x: r.minX, y: r.minY },
+    { x: r.maxX, y: r.minY },
+    { x: r.maxX, y: r.maxY },
+    { x: r.minX, y: r.maxY },
+  ];
+  const w = Math.max(MIN_SIZE_M, r.maxX - r.minX);
+  const h = Math.max(MIN_SIZE_M, r.maxY - r.minY);
   return {
-    preview: [{ kind: "line", a: at, b }],
-    vertices: [at, b],
-    hud: { at: b, text: `${w.toFixed(2)} m` },
+    preview: [{ kind: "poly", pts, closed: true }],
+    vertices: [a, cursor],
+    hud: { at: cursor, text: `${w.toFixed(2)} × ${h.toFixed(2)} m` },
   };
 }
 
@@ -68,45 +96,45 @@ function appendEmptyTextbox(p: Project, id: string, at: Vec2, width: number, ctx
 }
 
 const idle = (): [CommandState, CommandResult] => [
-  { phase: "point", lastPoint: null } as TbPoint,
+  { phase: "first", lastPoint: null } as TbFirst,
   { draft: null, done: true },
 ];
 
 export const textboxCommand: Command = {
   name: "textbox",
   labelKey: "cmd.textbox.label",
-  prompt: (s) => ((s as TbState).phase === "width" ? "cmd.textbox.width" : "cmd.textbox.point"),
+  prompt: (s) => ((s as TbState).phase === "second" ? "cmd.textbox.second" : "cmd.textbox.first"),
   accepts: () => ["point"],
   options: () => [],
-  init: (): TbPoint => ({ phase: "point", lastPoint: null }),
+  init: (): TbFirst => ({ phase: "first", lastPoint: null }),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as TbState;
     if (input.kind !== "point") return [s, { draft: null }];
-    if (s.phase === "point") {
-      const ns: TbWidth = { phase: "width", at: input.point, cursor: input.point, lastPoint: input.point };
-      return [ns, { draft: widthDraft(input.point, input.point) }];
+    if (s.phase === "first") {
+      const ns: TbSecond = { phase: "second", a: input.point, cursor: input.point, lastPoint: input.point };
+      return [ns, { draft: { preview: [], vertices: [input.point] } }];
     }
-    // phase === "width"
-    const width = widthOf(s.at, input.point);
+    // phase === "second"
+    const { at, width, heightM } = frameOf(s.a, input.point);
     const id = uniqueId("dr2d");
-    const at = s.at;
     return [
-      { phase: "point", lastPoint: null } as TbPoint,
+      { phase: "first", lastPoint: null } as TbFirst,
       {
         draft: null,
         done: true,
         commit: (p) => appendEmptyTextbox(p, id, at, width, ctx),
         focusDrawingId: id,
+        focusMinHeightM: heightM,
       },
     ];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => {
     const s = state as TbState;
-    if (s.phase !== "width") return [s, { draft: null }];
-    const ns: TbWidth = { ...s, cursor: point };
-    return [ns, { draft: widthDraft(s.at, point) }];
+    if (s.phase !== "second") return [s, { draft: null }];
+    const ns: TbSecond = { ...s, cursor: point };
+    return [ns, { draft: frameDraft(s.a, point) }];
   },
 
   onConfirm: (): [CommandState, CommandResult] => idle(),

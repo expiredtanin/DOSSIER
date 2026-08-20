@@ -6793,6 +6793,16 @@ body {
   min-height: 1.4em;
   padding: 2px 4px;
 }
+/* Text-Werkzeug ohne Spaltenbreite: kein Wortumbruch — die Box wächst in der
+   Breite mit dem Inhalt (Enter erzeugt trotzdem weitere Zeilen), statt am
+   Editor-Rand umzubrechen wie die Textspalte. */
+.planview-inline-text-free .rt-editor,
+.planview-inline-text-free .rt-surface {
+  width: max-content;
+}
+.planview-inline-text-free .rt-surface {
+  white-space: pre;
+}
 
 /* HUD (Eigenschaften des gewählten VP) unten links. */
 .layout-sheet-hud {

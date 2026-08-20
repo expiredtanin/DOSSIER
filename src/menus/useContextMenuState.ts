@@ -27,6 +27,11 @@ export function useContextMenuState() {
   const [stampEditorRoomId, setStampEditorRoomId] = useState<string | null>(null);
   // Text-Inhalt-Editor: Id des per Doppelklick bearbeiteten Text-2D-Elements.
   const [editTextId, setEditTextId] = useState<string | null>(null);
+  // Mindesthöhe (Meter) des Inline-Editors, wenn `editTextId` aus einem frisch
+  // aufgezogenen Textspalten-Rahmen kommt (s. textbox.ts focusMinHeightM);
+  // null = keine Mindesthöhe (Text-Werkzeug bzw. Doppelklick-Edit bestehender
+  // Elemente — dort bestimmt allein der Inhalt die Höhe).
+  const [editTextMinHeightM, setEditTextMinHeightM] = useState<number | null>(null);
 
   return {
     layerClipboard,
@@ -41,5 +46,7 @@ export function useContextMenuState() {
     setStampEditorRoomId,
     editTextId,
     setEditTextId,
+    editTextMinHeightM,
+    setEditTextMinHeightM,
   };
 }
