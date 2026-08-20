@@ -1181,6 +1181,12 @@ export const en: Record<TranslationKey, string> = {
   "cmd.chamfer.label": "Chamfer",
   "cmd.chamfer.pick": "Select corner:",
   "cmd.chamfer.distance": "Distance:",
+  // Multiline: base line + N-1 parallel copies in one gesture (builds on Offset).
+  "cmd.multiline.label": "Parallel lines",
+  "cmd.multiline.start": "Start point:",
+  "cmd.multiline.end": "End point:",
+  "cmd.multiline.spacing": "Spacing/side (\"Count\" option cycles line count):",
+  "cmd.multiline.count": "Count",
   // Edit tools Split / Join / Delete segment (keyboard: Ctrl+S / Ctrl+J /
   // Alt+Click). Labels for the command line / menus.
   "edit.split.label": "Split",

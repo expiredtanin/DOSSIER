@@ -177,7 +177,7 @@ export function ToolIcon({ id }: { id: ToolId }) {
 const TOOLS_2D: ToolId[] = ["line", "polyline", "rect", "circle", "arc", "text", "textbox", "image"];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "ceilingopening", "roof", "extrude", "sectionline", "viewline"];
-const COMMANDS_EDIT = ["move", "copy", "rotate", "mirror", "offset", "trim", "extend", "fillet", "chamfer", "join", "measure"];
+const COMMANDS_EDIT = ["move", "copy", "rotate", "mirror", "offset", "multiline", "trim", "extend", "fillet", "chamfer", "join", "measure"];
 
 type ToolsView = "list" | "icons";
 const VIEW_STORAGE_KEY = "dossier.toolsPanel.view";

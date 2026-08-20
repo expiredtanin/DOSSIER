@@ -73,6 +73,15 @@ export function CommandIcon({ name }: { name: string }) {
           <polyline points="6,12 6,7 14,7" />
         </svg>
       );
+    case "multiline":
+      // Drei parallele Linien (Basislinie + Kopien).
+      return (
+        <svg {...common}>
+          <line x1="2.5" y1="4" x2="13.5" y2="4" />
+          <line x1="2.5" y1="8" x2="13.5" y2="8" />
+          <line x1="2.5" y1="12" x2="13.5" y2="12" />
+        </svg>
+      );
     case "trim":
       // Schere (Stutzen).
       return (

@@ -1193,6 +1193,12 @@ export const de = {
   "cmd.chamfer.label": "Fasen",
   "cmd.chamfer.pick": "Ecke wählen:",
   "cmd.chamfer.distance": "Distanz:",
+  // Multiline: Basislinie + N-1 parallele Kopien in einer Geste (baut auf Offset auf).
+  "cmd.multiline.label": "Parallellinien",
+  "cmd.multiline.start": "Startpunkt:",
+  "cmd.multiline.end": "Endpunkt:",
+  "cmd.multiline.spacing": "Abstand/Seite (Option Anzahl zyklt die Linienzahl):",
+  "cmd.multiline.count": "Anzahl",
   // Editier-Werkzeuge Split / Join / Segment-Löschen (Tastatur: Ctrl+S / Ctrl+J /
   // Alt+Klick). Labels für Befehlsleiste/Menüs.
   "edit.split.label": "Teilen",
