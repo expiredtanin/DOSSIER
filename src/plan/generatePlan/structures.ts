@@ -12,6 +12,7 @@ import {
   MONO_INK,
   NO_HATCH,
   SYMBOL_HAIRLINE_MM,
+  resolveBackground,
   resolveForeground,
   resolveHatch,
   resolveHatchId,
@@ -67,15 +68,19 @@ export function addColumnPoche(
     try {
       const comp = getComponent(project, column.componentId);
       const hatchId =
-        resolveHatchId(undefined, undefined, category, comp.hatchId) ?? comp.hatchId;
+        resolveHatchId(column.hatchId, column.hatchSource, category, comp.hatchId) ?? comp.hatchId;
       const resolved = resolveHatch(
         project,
         hatchId,
         undefined,
-        resolveForeground(comp, undefined, category, undefined),
+        resolveForeground(comp, column.foreground, category, column.foregroundSource),
       );
       hatch = resolved;
-      fill = resolved.pattern === "solid" ? HATCH_INK : HATCH_PAPER;
+      // SIA-Poché: neutraler Hintergrund (Tinte/Papier je nach Muster) statt
+      // Bauteil-Albedo, es sei denn ein expliziter Hintergrund-Override greift
+      // (analog addWallPoche: bgOverride ?? neutrale Poché).
+      const bgOverride = resolveBackground(comp, column.background, category, column.backgroundSource);
+      fill = bgOverride ?? (resolved.pattern === "solid" ? HATCH_INK : HATCH_PAPER);
     } catch {
       // Bauteil nicht auflösbar → neutrale Poché (Fallback bleibt bestehen).
     }

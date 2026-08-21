@@ -121,29 +121,36 @@ export function AttributesPanel() {
   // sind IMMER ein eigener Wert (kein 3-Quellen-Dropdown, keine Füllung/
   // Schraffur/Masse — s. Ausblendungen weiter unten).
   const isAnnotation = sel.kind === "layoutAnnotation";
-  // Strichstärke: Wand/Decke/Drawing2D tragen einen eigenen Override
+  // Strichstärke: Wand/Decke/Stütze/Drawing2D tragen einen eigenen Override
   // (`strokeWeight`/`weightMm`) + Quellen-Dropdown; andere Elementarten erben
   // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar). Bei
   // Annotationen nur Linie/Rechteck (Text/Bild kennen keine Strichstärke).
   const weightEditable =
     sel.kind === "wall" ||
     sel.kind === "ceiling" ||
+    sel.kind === "column" ||
     isDrawing ||
     (isAnnotation && (sel.annotKind === "line" || sel.annotKind === "rect"));
-  // Schraffur: Wand/Decke (Schnitt-/Ansichts-Schraffur) oder geschlossene 2D-Form.
+  // Schraffur: Wand/Decke/Stütze (Schnitt-/Ansichts-Schraffur) oder
+  // geschlossene 2D-Form.
   const fillEditable =
-    sel.kind === "wall" || sel.kind === "ceiling" || (isDrawing && sel.closed === true);
-  // Vordergrund/Hintergrund (Muster-/Füllfarbe) tragen Wand, Decke und
+    sel.kind === "wall" ||
+    sel.kind === "ceiling" ||
+    sel.kind === "column" ||
+    (isDrawing && sel.closed === true);
+  // Vordergrund/Hintergrund (Muster-/Füllfarbe) tragen Wand, Decke, Stütze und
   // geschlossene 2D-Formen als Override; `undefined` = „Nach System".
   const pocheEditable =
     sel.kind === "wall" ||
     sel.kind === "ceiling" ||
+    sel.kind === "column" ||
     (isDrawing && sel.closed === true);
 
   // Ein Drawing2D hat KEIN eigenes Bauteil (Component) — „Nach Bauteil" wäre
   // dort bedeutungslos (resolveForeground & Co. fallen dann auf gar keinen
-  // Wert zurück, s. selectionInfo.ts `noComponent`). Nur Wand/Decke bieten
-  // die Option daher an.
+  // Wert zurück, s. selectionInfo.ts `noComponent`). Wand/Decke/Stütze haben
+  // alle ein echtes Bauteil (Schicht-Component bzw. `Column.componentId`) und
+  // bieten die Option daher an.
   const allowObjectSource = !isDrawing;
 
   // Der Quellen-Dropdown (Nach Ebene/Nach Bauteil/eigener Wert), gemeinsam für

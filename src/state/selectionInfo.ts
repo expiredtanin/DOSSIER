@@ -43,7 +43,12 @@ import type {
   WallReferenceLine,
 } from "../model/types";
 import { localToLv95 } from "../io/lv95";
-import { resolveForeground, resolveBackground, resolveHatchId } from "../plan/generatePlan/shared";
+import {
+  resolveForeground,
+  resolveBackground,
+  resolveHatchId,
+  resolveStrokeWeight,
+} from "../plan/generatePlan/shared";
 import { columnVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
 import { evaluateRoom, polygonArea } from "../geometry/roomArea";
@@ -985,13 +990,42 @@ function columnSelection(project: Project, col: Column): Selection {
     zBottom,
     zTop,
   };
+  // Effektive Vordergrund-/Hintergrund-/Schraffur-/Strichstärke-Vorschau — s.
+  // Kommentar in wallSelection (dieselbe Kette, das zugewiesene Bauteil als
+  // Repräsentant statt der äussersten Schicht, da Column nur EIN componentId
+  // trägt statt eines geschichteten Aufbaus).
+  // `getComponent` wirft bei unbekannter ID (z. B. gelöschtes Bauteil) — die
+  // Panel-Vorschau soll dabei nicht abstürzen (analog dem try/catch in
+  // structures.ts addColumnPoche), einfach auf "kein Bauteil" zurückfallen.
+  const comp = col.componentId
+    ? project.components.find((c) => c.id === col.componentId)
+    : undefined;
+  const effectiveForeground = comp
+    ? resolveForeground(comp, col.foreground, category, col.foregroundSource)
+    : col.foreground;
+  const effectiveBackground = comp
+    ? resolveBackground(comp, col.background, category, col.backgroundSource)
+    : col.background;
+  const effectiveHatchId = resolveHatchId(col.hatchId, col.hatchSource, category, comp?.hatchId);
+  const weightMm = resolveStrokeWeight(col.strokeWeight, col.strokeWeightSource, category, WALL_FALLBACK_MM);
   return {
     kind: "column",
     id: col.id,
     categoryCode: col.categoryCode,
     floorId: col.floorId,
     color: col.color ?? category?.color ?? COLUMN_COLOR,
-    weightMm: WALL_FALLBACK_MM,
+    weightMm,
+    fillHatchId: col.hatchId,
+    foreground: col.foreground,
+    background: col.background,
+    foregroundSource: col.foregroundSource,
+    backgroundSource: col.backgroundSource,
+    effectiveForeground,
+    effectiveBackground,
+    effectiveHatchId,
+    strokeWeightOverride: col.strokeWeight,
+    strokeWeightSource: col.strokeWeightSource,
+    hatchSource: col.hatchSource,
     bbox: { minX, minY, maxX, maxY },
     column: info,
   };

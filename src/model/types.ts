@@ -1721,6 +1721,36 @@ export interface Column {
    * Kategorie-Farbe.
    */
   color?: string;
+  /**
+   * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Stütze.
+   * `undefined` = „Nach System" (erben → Component.foreground), analog `Wall.
+   * foreground`.
+   */
+  foreground?: string;
+  /**
+   * Attribut-Override der Füllfarbe (Hintergrund/Poché) DIESER Stütze.
+   * `undefined` = „Nach System" (neutrale SIA-Poché HATCH_INK/HATCH_PAPER je
+   * nach Schraffur-Muster), analog `Wall.background`.
+   */
+  background?: string;
+  /**
+   * Attribut-Override der Strichstärke (mm Papier) DIESER Stütze. `undefined`
+   * = „Nach System" (erben → `strokeWeightSource`), analog `Wall.strokeWeight`.
+   */
+  strokeWeight?: number;
+  /**
+   * Attribut-Override der Schnitt-Schraffur (Hatch Manager) DIESER Stütze.
+   * `undefined` = „Nach System" (erben → `hatchSource`), analog `Wall.hatchId`.
+   */
+  hatchId?: string;
+  /** Quelle des Vordergrunds, wenn kein explizites `foreground` gesetzt ist — analog `Wall.foregroundSource`. */
+  foregroundSource?: AttributeSource;
+  /** Quelle des Hintergrunds, analog {@link Column.foregroundSource}. */
+  backgroundSource?: AttributeSource;
+  /** Quelle der Strichstärke, analog {@link Column.foregroundSource}. */
+  strokeWeightSource?: AttributeSource;
+  /** Quelle der Schraffur, analog {@link Column.foregroundSource}. */
+  hatchSource?: AttributeSource;
 }
 
 // ── Kontext-Geometrie (importiert / abgeleitet, NICHT semantisch) ───────────

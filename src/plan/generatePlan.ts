@@ -437,7 +437,13 @@ export function generatePlan(
     const category = catByCode.get(column.categoryCode);
     const ov = overrideFor(column.categoryCode, columnLabel(column));
     const lwMm =
-      ov.lineweight ?? resolveStrokeWeight(undefined, undefined, category, lwByCode.get(column.categoryCode) ?? WALL_FALLBACK_MM);
+      ov.lineweight ??
+      resolveStrokeWeight(
+        column.strokeWeight,
+        column.strokeWeightSource,
+        category,
+        lwByCode.get(column.categoryCode) ?? WALL_FALLBACK_MM,
+      );
     const effCol = ov.color !== undefined ? { ...column, color: ov.color } : column;
     addColumnPoche(primitives, project, effCol, greyed, lwMm, category);
   }
