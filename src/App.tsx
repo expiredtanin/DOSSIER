@@ -860,6 +860,9 @@ export default function App() {
   const LAYOUT_ANNOT_TOOLS: ToolId[] = ["line", "rect", "text", "textbox", "image"];
 
   const onSelectTool = (id: ToolId) => {
+    // Erneuter Klick auf das bereits AKTIVE Werkzeug schaltet zurück auf
+    // „Auswahl" (Nutzer-Wunsch) — statt das Werkzeug einfach neu zu starten.
+    if (id !== "select" && id === activeTool) id = "select";
     if (activeLayout) {
       // Ein Layout-Blatt ist offen: PlanView/die Befehls-Engine haben keinen
       // sichtbaren Canvas (LayoutSheetView ersetzt die Mitte) — Zeichenwerkzeuge
