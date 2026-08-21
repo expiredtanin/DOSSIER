@@ -23,6 +23,7 @@ import type {
   Project,
   Vec2,
 } from "../model/types";
+import { lineIntersect } from "../model/geometry";
 import { commitTransform } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
@@ -908,9 +909,7 @@ export function createProjectSlice(
       setProject(
         (p) => mapCeiling(p, ceilingId, (c) => ({
           ...c,
-          outline: c.outline.map((v, i) =>
-            i === aIndex || i === bIndex ? { x: v.x + delta.x, y: v.y + delta.y } : v,
-          ),
+          outline: movePolygonEdge(c.outline, aIndex, bIndex, delta, true),
         })),
         `moveCeilingEdge:${ceilingId}:${aIndex}:${bIndex}`,
       ),
@@ -1030,11 +1029,7 @@ export function createProjectSlice(
         (p) =>
           mapRoom(p, roomId, (r) => ({
             ...r,
-            boundary: r.boundary.map((v, i) =>
-              i === aIndex || i === bIndex
-                ? { x: v.x + delta.x, y: v.y + delta.y }
-                : v,
-            ),
+            boundary: movePolygonEdge(r.boundary, aIndex, bIndex, delta, true),
           })),
         `moveRoomEdge:${roomId}:${aIndex}:${bIndex}`,
       ),
@@ -1616,11 +1611,96 @@ function moveElementBy(
 }
 
 /**
+ * Neue Position eines Eckpunkts, dessen EINE Kante parallel um `delta`
+ * verschoben wird: der Punkt bleibt NICHT einfach delta-verschoben, sondern
+ * wandert entlang seiner ANDEREN (unverschobenen) Nachbarkante — deren
+ * Richtung bleibt exakt erhalten (nur ihre Länge ändert sich), statt sich mit
+ * zu drehen. Nutzer-Report: bei Vielecken mit mehr als 4/5 Ecken (nicht
+ * rechtwinklige Anschlüsse) kippten die Nachbarkanten bisher im Winkel, weil
+ * der Eckpunkt stur um `delta` versetzt wurde (korrekt nur bei rechtwinkligen
+ * Anschlüssen — Zufall bei Rechtecken, da rect ohnehin nur achsparallele
+ * Ecken kennt). Berechnet als Schnittpunkt der verschobenen Kanten-Linie mit
+ * der (unendlich verlängerten) Nachbarkanten-Linie durch den fixen
+ * Nachbarpunkt — dasselbe Prinzip wie die Wandstoß-Gehrung in `model/
+ * joins.ts`. Fällt bei fehlendem Nachbarn (offenes Kettenende) oder (fast)
+ * paralleler Nachbarkante (kein/instabiler Schnittpunkt) auf die einfache
+ * Delta-Verschiebung zurück.
+ */
+function edgeMoveVertex(
+  vertexOrig: Vec2,
+  neighborFixed: Vec2 | null,
+  shiftedLinePoint: Vec2,
+  edgeDir: Vec2,
+  delta: Vec2,
+): Vec2 {
+  const fallback: Vec2 = { x: vertexOrig.x + delta.x, y: vertexOrig.y + delta.y };
+  if (!neighborFixed) return fallback;
+  const neighborDir: Vec2 = {
+    x: vertexOrig.x - neighborFixed.x,
+    y: vertexOrig.y - neighborFixed.y,
+  };
+  if (Math.hypot(neighborDir.x, neighborDir.y) < 1e-9) return fallback; // entartete Nachbarkante
+  return lineIntersect(neighborFixed, neighborDir, shiftedLinePoint, edgeDir) ?? fallback;
+}
+
+/**
+ * Nachbar-Index in einem Vertex-Ring/einer -Kette in Richtung `dir`. `null`,
+ * wenn `i` am offenen Ende liegt und `closed` falsch ist (kein Nachbar dort)
+ * ODER der Nachbar auf die andere Kanten-Ecke selbst fiele (entartetes
+ * 2-Punkt-„Polygon" — kein sinnvoller dritter Bezugspunkt).
+ */
+function ringNeighbor(
+  i: number,
+  n: number,
+  closed: boolean,
+  dir: 1 | -1,
+  excluding: number,
+): number | null {
+  const j = i + dir;
+  const k = j >= 0 && j < n ? j : closed ? ((j % n) + n) % n : null;
+  return k !== null && k !== excluding ? k : null;
+}
+
+/**
+ * Verschiebt die Kante (aIndex,bIndex) eines Vertex-Rings/einer -Kette um
+ * `delta`, winkeltreu an den beiden Nachbar-Ecken (s. `edgeMoveVertex`).
+ * `closed`: Ring (Raum/Decke/geschlossene Polylinie) oder offene Kette
+ * (offene Polylinie).
+ */
+function movePolygonEdge(
+  pts: Vec2[],
+  aIndex: number,
+  bIndex: number,
+  delta: Vec2,
+  closed: boolean,
+): Vec2[] {
+  const n = pts.length;
+  const A = pts[aIndex];
+  const B = pts[bIndex];
+  const shiftedA: Vec2 = { x: A.x + delta.x, y: A.y + delta.y };
+  const edgeDir: Vec2 = { x: B.x - A.x, y: B.y - A.y };
+  const prevOfA = ringNeighbor(aIndex, n, closed, -1, bIndex);
+  const nextOfB = ringNeighbor(bIndex, n, closed, 1, aIndex);
+  return pts.map((p, i) => {
+    if (i === aIndex) {
+      return edgeMoveVertex(A, prevOfA != null ? pts[prevOfA] : null, shiftedA, edgeDir, delta);
+    }
+    if (i === bIndex) {
+      return edgeMoveVertex(B, nextOfB != null ? pts[nextOfB] : null, shiftedA, edgeDir, delta);
+    }
+    return p;
+  });
+}
+
+/**
  * Verschiebt eine SEITE (Kante) des selektierten Elements: beide Vertices der
- * Kante um `delta` (immutabel). Für 2D-Elemente:
+ * Kante um `delta` (immutabel), winkeltreu an den Nachbarkanten (s. o.). Für
+ * 2D-Elemente:
  *  • rect: die zwei betroffenen Ecken (per Index) verschieben und min/max neu
- *    normalisieren — so wächst/schrumpft das Rechteck an genau dieser Seite.
- *  • polyline: die zwei Vertices `aIndex`/`bIndex` um `delta` verschieben.
+ *    normalisieren — so wächst/schrumpft das Rechteck an genau dieser Seite
+ *    (immer rechtwinklig, `movePolygonEdge` nicht nötig).
+ *  • polyline: die zwei Vertices `aIndex`/`bIndex` um `delta` verschieben,
+ *    winkeltreu über `movePolygonEdge`.
  *  • line: beide Endpunkte verschieben (das gesamte Segment senkrecht).
  * Für die Wand: start+end gemeinsam (die ganze Wand senkrecht zur Achse).
  */
@@ -1644,7 +1724,7 @@ function moveEdge(
           return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
         }
         if (g.shape === "polyline") {
-          const pts = g.pts.map((p, i) => (i === aIndex || i === bIndex ? mv(p) : p));
+          const pts = movePolygonEdge(g.pts, aIndex, bIndex, delta, !!g.closed);
           return { ...d, geom: { ...g, pts } };
         }
         if (g.shape === "rect" || g.shape === "image") {
