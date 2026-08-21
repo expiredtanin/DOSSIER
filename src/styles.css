@@ -6789,8 +6789,16 @@ body {
 .planview-inline-text .rt-editor {
   min-height: inherit;
 }
+/* WYSIWYG: die Schriftgrösse UND die Feldhöhe der Textfläche folgen dem
+   echten Zoom (--rt-font-size/--rt-min-height, inline von PlanView.tsx
+   gesetzt, per CSS-Var-Vererbung bis hierher durchgereicht) — NUR die
+   Textfläche, NICHT die Toolbar (.rt-toolbar bleibt bei ihrer normalen,
+   immer bedienbaren Grösse). So sieht der getippte Text wie der später
+   gerenderte aus, ohne dass Buttons/Dropdowns beim Reinzoomen riesig werden
+   (der vorige Bug mit transform:scale() auf die GANZE Box). */
 .planview-inline-text .rt-surface {
-  min-height: 1.4em;
+  font-size: var(--rt-font-size, 13px);
+  min-height: var(--rt-min-height, 1.4em);
   padding: 2px 4px;
 }
 /* Text-Werkzeug ohne Spaltenbreite: kein Wortumbruch — die Box wächst in der

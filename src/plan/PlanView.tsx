@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { CSSProperties } from "react";
 import type { HatchRender, Plan, Primitive } from "./generatePlan";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
@@ -2496,24 +2497,29 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           );
           if (!prim) return null;
           const doc = prim.doc ?? docFromText(prim.text, prim.marks ?? {});
-          // Anker-POSITION folgt weiter dem echten Zoom (vbToClient/toScreen) —
-          // die Box soll am richtigen Ort aufgehen. Die Editor-GRÖSSE (Schrift +
-          // Toolbar) bleibt dagegen bewusst zoomUNabhängig (keine transform:scale
-          // mehr): bei nahem Zoom wurde das vorher riesig (Toolbar skalierte mit
-          // hoch), bei fernem Zoom unbenutzbar winzig — Nutzer-Report. Die
-          // Editor-Breite folgt bei der Textspalte trotzdem der Modell-Breite,
-          // aber über eine FESTE (nicht Live-Zoom-)Umrechnung, damit der Rahmen
-          // nicht bei jedem Rein-/Rauszoomen während des Tippens die Zeilen
-          // neu umbricht.
-          const EDIT_PX_PER_M = 220;
+          // WYSIWYG: Position, Breite, Feldhöhe UND Schriftgrösse folgen alle dem
+          // echten Zoom (currentPxPerMeter) — die Box soll exakt so aussehen wie
+          // der spätere gerenderte Text, in genau der Grösse des gezeichneten
+          // Feldes (Nutzer-Wunsch). Die Schriftgrösse geht NICHT über
+          // transform:scale() auf die ganze Box (das skalierte vorher die
+          // Toolbar mit hoch und sprengte sie beim Reinzoomen), sondern NUR auf
+          // die Textfläche via CSS-Variable (--rt-font-size/--rt-min-height,
+          // s. styles.css `.planview-inline-text .rt-surface`) — die Toolbar
+          // bleibt dadurch immer normal gross und bedienbar.
+          const pxPerM = currentPxPerMeter();
           const topAnchor = toScreen({ x: prim.at.x, y: prim.at.y + prim.heightM });
           const screen = vbToClient(topAnchor.x, topAnchor.y);
           const hasWrap = !!prim.wrapWidth;
-          const widthPx = hasWrap ? prim.wrapWidth! * EDIT_PX_PER_M : undefined;
+          const widthPx = hasWrap ? prim.wrapWidth! * pxPerM : undefined;
           const minWidthPx = hasWrap ? undefined : 160;
+          const fontSizePx = Math.max(9, prim.heightM * pxPerM);
           // Aufgezogener Textspalten-Rahmen (textbox.ts): dessen Höhe als
-          // Mindesthöhe des Editors — wächst bei mehr Text darüber hinaus.
-          const minHeightPx = editTextMinHeightM ? editTextMinHeightM * EDIT_PX_PER_M : undefined;
+          // Mindesthöhe der Textfläche — wächst bei mehr Text darüber hinaus.
+          const minHeightPx = editTextMinHeightM ? editTextMinHeightM * pxPerM : undefined;
+          const cssVars = {
+            "--rt-font-size": `${fontSizePx}px`,
+            ...(minHeightPx ? { "--rt-min-height": `${minHeightPx}px` } : {}),
+          } as CSSProperties;
           return (
             <>
               <div
@@ -2527,7 +2533,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
                   top: screen.y,
                   width: widthPx,
                   minWidth: minWidthPx,
-                  minHeight: minHeightPx,
+                  ...cssVars,
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => {
