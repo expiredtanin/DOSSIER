@@ -121,8 +121,9 @@ export function resolveWallSectionStyle(project: Project, wall: Wall): SectionCu
       wallAngleDeg,
       resolveForeground(best, wall.foreground, category, wall.foregroundSource),
     );
-    // Poché-Hintergrund neutral (Papier) statt Bauteil-Albedo; Vollmuster → Tinte.
-    // `hatch.color` ist bereits über {@link resolveHatch} auf HATCH_INK gezwungen.
+    // Poché-Hintergrund neutral (Papier) statt Bauteil-Albedo; Vollmuster → Tinte
+    // (unabhängig von `hatch.color`, das jetzt den aufgelösten Vordergrund tragen
+    // kann, s. {@link resolveHatch}).
     const solid = hatch.pattern === "solid";
     return {
       fill: solid ? HATCH_INK : HATCH_PAPER,

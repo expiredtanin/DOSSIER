@@ -116,4 +116,16 @@ describe("addColumnPoche — Attribut-Override greift", () => {
     );
     expect(polygonOf(out).hatch.pattern).toBe("none");
   });
+
+  it("ohne gesetzten Vordergrund: Schraffurfarbe bleibt die neutrale Tinte (Default unverändert)", () => {
+    const out: Primitive[] = [];
+    addColumnPoche(out, project(), column(), false, 0.35, category);
+    expect(polygonOf(out).hatch.color).toBe("#0f0f0f");
+  });
+
+  it("mit explizitem foreground-Override: die Schraffurfarbe wird die Override-Farbe (vorher wirkungslos)", () => {
+    const out: Primitive[] = [];
+    addColumnPoche(out, project(), column({ foreground: "#00ff88" }), false, 0.35, category);
+    expect(polygonOf(out).hatch.color).toBe("#00ff88");
+  });
 });

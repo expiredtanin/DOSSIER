@@ -369,20 +369,20 @@ export type Primitive =
  * {@link HatchRender} auf. Der Linienstil der Musterlinien wird, falls gesetzt,
  * aus dem Line Manager nachgeschlagen; sonst gilt ein dünner Default.
  *
- * VORDERGRUND (Muster-/Schraffurlinienfarbe bzw. Vollfüllung): AKTUELL fest auf
- * {@link HATCH_INK} gezwungen (Nutzer-Vorgabe 2026-07-04) — Schnitt- WIE
- * Oberflächen-/Ansichtsschraffur zeigen dieselbe dunkle Tinte, unabhängig von
- * Material-/Bauteilfarbe, HatchStyle.color oder einem By-Layer/By-Object-
- * Vordergrund-Override. `_foreground` bleibt Teil der Signatur — alle Aufrufer
- * reichen weiterhin den über {@link resolveForeground} aufgelösten Bauteil-
- * Vordergrund durch (z. B. für eine spätere Wiederherstellung der materialtreuen
- * Schraffur) —, fließt aber bewusst nicht mehr in `color` ein.
+ * VORDERGRUND (Muster-/Schraffurlinienfarbe bzw. Vollfüllung): der über
+ * {@link resolveForeground} aufgelöste Vordergrund gewinnt, wenn gesetzt (Nach
+ * Ebene/Nach Bauteil/eigener Wert); OHNE aufgelösten Wert bleibt es bei der
+ * neutralen Tinte {@link HATCH_INK} (bisheriges Verhalten — 2026-07-04 war die
+ * Vordergrund-Kette hier noch fest auf HATCH_INK gezwungen, unabhängig vom
+ * Ergebnis; auf Nutzer-Wunsch wieder aufgehoben, da „Vordergrund" im Attribut-
+ * Panel sonst wirkungslos bliebe — betrifft nur Elemente mit tatsächlich
+ * gesetztem Vordergrund, unverändertes Verhalten für alle anderen).
  */
 export function resolveHatch(
   project: Project,
   hatchId: string,
   wallAngleDeg?: number,
-  _foreground?: string,
+  foreground?: string,
 ): HatchRender {
   const h = getHatch(project, hatchId);
   const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
@@ -399,9 +399,8 @@ export function resolveHatch(
     pattern: h.pattern,
     scale: h.scale,
     angle,
-    // Fest auf die Monochrom-Tinte gezwungen (siehe JSDoc oben) — weder
-    // `_foreground` noch `HatchStyle.color` (Material-/Bauteilfarbe) fließen ein.
-    color: HATCH_INK,
+    // Aufgelöster Vordergrund gewinnt (s. JSDoc oben), sonst neutrale Tinte.
+    color: foreground ?? HATCH_INK,
     lineWeight: ls?.weight ?? 0.13,
     dash: ls?.dash ?? null,
     kind: h.kind,
