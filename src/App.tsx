@@ -1290,15 +1290,15 @@ export default function App() {
     edgeGrips,
     gripHandlers,
     gripEdit,
-    setGripEdit,
     gripEditFields,
     cycleGripEditField,
     submitGripEditValue,
+    closeGripEditField,
     edgeEdit,
-    setEdgeEdit,
     edgeEditFields,
     cycleEdgeEditField,
     submitEdgeEditValue,
+    closeEdgeEditField,
     gripDragInfoRef,
     edgeDragInfoRef,
   } = useGripEditing({
@@ -2886,9 +2886,9 @@ export default function App() {
           }
           onCancel={() =>
             gripEdit
-              ? setGripEdit(null)
+              ? closeGripEditField()
               : edgeEdit
-              ? setEdgeEdit(null)
+              ? closeEdgeEditField()
               : activeTransform
               ? cancelTransform()
               : engine.cancel()
