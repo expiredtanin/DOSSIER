@@ -356,6 +356,17 @@ function SnapMarker({
           vectorEffect="non-scaling-stroke"
         />
       )}
+      {/* Teilpunkt (nur fangbar nach Verweilen, s. computeSnap-Dwell) — kleine
+          gefüllte Raute, bewusst anders als Mittelpunkt (Linie) und Raster
+          (Kreis), damit „warum snappt es hier" nachvollziehbar bleibt. */}
+      {snap.kind === "divide" && (
+        <polygon
+          className="snap-glyph snap-fill"
+          points={`${s.x},${s.y - r} ${s.x + r},${s.y} ${s.x},${s.y + r} ${s.x - r},${s.y}`}
+          style={fillStyle}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
       {snap.kind === "intersection" && (
         <>
           <line className="snap-glyph" x1={s.x - r} y1={s.y - r} x2={s.x + r} y2={s.y + r} style={glyphStyle} vectorEffect="non-scaling-stroke" />

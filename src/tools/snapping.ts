@@ -28,6 +28,7 @@ const PRIORITY: Record<SnapKind, number> = {
   ortho: 0,
   extension: 0,
   angle: 0,
+  divide: 3,
 };
 
 export interface SnapInput {
@@ -141,6 +142,58 @@ function perpFoot(p: Vec2, a: Vec2, b: Vec2): Vec2 {
   return { x: a.x + dx * t, y: a.y + dy * t };
 }
 
+// ── Verweil-Erkennung fürs Teilpunkte-Snapping ("divide") ───────────────────
+// Modul-weiter Zustand (wie `lastCoalesceKey` in projectSlice.ts) statt in
+// SnapInput/computeSnap-Parametern: computeSnap wird von mehreren, völlig
+// unabhängigen Stellen aufgerufen (Zeichnen über die Command-Engine UND die
+// älteren Legacy-Werkzeuge, Griff-Ziehen, Transformieren) — der Verweil-
+// Zustand muss all diese Aufrufer TEILEN, damit "verweilt der Cursor lange
+// genug auf derselben Linie" aufrufer-übergreifend gilt (Nutzer-Wunsch:
+// "wenn der Snappunkt eines neuen Elements auch [z. B. 200ms] auf der Linie
+// ist, sollten die Teilpunkte auch snapbar sein — aber NUR dann").
+let dwellSegKey: string | null = null;
+let dwellSince = 0;
+let dwellRevealedSeg: Seg | null = null;
+
+const segKey = (seg: Seg): string =>
+  `${seg[0].x},${seg[0].y}|${seg[1].x},${seg[1].y}`;
+
+/** Nächstgelegene Strecke zu `raw` innerhalb der Fangtoleranz (Meter), oder null. */
+function nearestSegment(raw: Vec2, segs: Seg[], tolM: number): Seg | null {
+  let best: Seg | null = null;
+  let bestD = tolM;
+  for (const seg of segs) {
+    const d = dist(perpFoot(raw, seg[0], seg[1]), raw);
+    if (d < bestD) {
+      bestD = d;
+      best = seg;
+    }
+  }
+  return best;
+}
+
+/**
+ * Verankert/verwirft den Verweil-Zustand für den aktuellen Cursor und liefert
+ * die "freigegebene" Strecke (Teilpunkte fangbar), sobald der Cursor lange
+ * genug (`delayMs`) auf DERSELBEN Strecke geblieben ist — sonst `null`. Ein
+ * Streckenwechsel (auch zu "keine Strecke") setzt die Verweildauer zurück.
+ */
+function updateDwell(raw: Vec2, segs: Seg[], delayMs: number, tolM: number): Seg | null {
+  const seg = nearestSegment(raw, segs, tolM);
+  const key = seg ? segKey(seg) : null;
+  const now = Date.now();
+  if (key !== dwellSegKey) {
+    dwellSegKey = key;
+    dwellSince = now;
+    dwellRevealedSeg = null;
+    return null;
+  }
+  if (seg && dwellRevealedSeg === null && now - dwellSince >= delayMs) {
+    dwellRevealedSeg = seg;
+  }
+  return dwellRevealedSeg;
+}
+
 /**
  * Bestimmt den effektiven Snap für den rohen Cursor-Punkt (oder null).
  * Punkt-Snaps haben Vorrang vor Ortho und Raster (Prioritäts-Bonus).
@@ -164,10 +217,22 @@ export function computeSnap(input: SnapInput): SnapResult | null {
     }
   };
 
-  const segs =
-    settings.midpoint || settings.intersection || settings.onEdge || settings.endpoint
-      ? collectSegments(input)
-      : [];
+  const needSegs =
+    settings.midpoint || settings.intersection || settings.onEdge || settings.endpoint;
+  const segs = needSegs ? collectSegments(input) : [];
+
+  // Teilpunkt-Verweilerkennung: braucht dieselben Strecken wie oben. Ohne sie
+  // (alle vier Objekt-Snap-Arten aus) bleibt "divide" ebenfalls inaktiv —
+  // konsistent dazu, dass dann ohnehin keine Linien-bezogenen Snaps gelten.
+  const revealed = updateDwell(raw, segs, settings.hoverDivideDelayMs, tolM);
+  if (revealed) {
+    const [a, b] = revealed;
+    const n = Math.max(2, Math.round(settings.hoverDivideCount));
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      consider({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, "divide");
+    }
+  }
 
   // endpoint (Strecken-Endpunkte + Draft-Knoten + Raum-Stempel-Anker).
   if (settings.endpoint) {

@@ -9,7 +9,7 @@
  *    Wandschicht statt nur an Achse/Aussenkante enden kann.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { computeSnap, snapCommonAngle, wallLayerBoundarySegments } from "./snapping";
 import { DEFAULT_SNAP } from "./types";
 import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
@@ -368,3 +368,48 @@ function wall2d(start: Vec2, end: Vec2): Wall {
     height: 2.6,
   };
 }
+
+// ── Teilpunkte (divide) — nur fangbar nach Verweilen ────────────────────────
+// computeSnap hält den Verweil-Zustand modulweit (mehrere, unabhängige
+// Aufrufer teilen ihn sich, s. Kommentar dort) — Date.now()-basiert, daher
+// hier mit Fake-Timern gesteuert statt echter Wartezeit.
+describe("computeSnap — Teilpunkte (divide) nach Verweilen", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fängt NICHT auf dem Drittelpunkt, solange der Cursor noch nicht lange genug verweilt hat", () => {
+    const project = drawProject([{ shape: "line", a: { x: 0, y: 0 }, b: { x: 9, y: 0 } }]);
+    const settings = { ...DEFAULT_SNAP, hoverDivideDelayMs: 300, hoverDivideCount: 3 };
+    const result = snapAt(project, { x: 3, y: 0.02 }, settings);
+    expect(result?.kind).not.toBe("divide");
+  });
+
+  it("fängt auf dem Drittelpunkt, sobald der Cursor lange genug auf derselben Linie verweilt hat", () => {
+    const project = drawProject([{ shape: "line", a: { x: 0, y: 0 }, b: { x: 9, y: 0 } }]);
+    const settings = { ...DEFAULT_SNAP, hoverDivideDelayMs: 300, hoverDivideCount: 3 };
+    const raw: Vec2 = { x: 3, y: 0.02 };
+    snapAt(project, raw, settings); // erster Aufruf verankert nur den Verweil-Beginn
+    vi.advanceTimersByTime(350);
+    const result = snapAt(project, raw, settings);
+    expect(result?.kind).toBe("divide");
+    expect(result?.point.x).toBeCloseTo(3, 6); // 1/3 von 9
+    expect(result?.point.y).toBeCloseTo(0, 6);
+  });
+
+  it("verwirft den Verweil, sobald der Cursor zwischenzeitlich auf eine ANDERE Linie wechselt", () => {
+    const project = drawProject([
+      { shape: "line", a: { x: 0, y: 0 }, b: { x: 9, y: 0 } },
+      { shape: "line", a: { x: 0, y: 5 }, b: { x: 9, y: 5 } },
+    ]);
+    const settings = { ...DEFAULT_SNAP, hoverDivideDelayMs: 300, hoverDivideCount: 3 };
+    snapAt(project, { x: 3, y: 0.02 }, settings);
+    vi.advanceTimersByTime(350);
+    snapAt(project, { x: 3, y: 5.02 }, settings); // andere Linie dazwischen
+    const result = snapAt(project, { x: 3, y: 0.02 }, settings);
+    expect(result?.kind).not.toBe("divide");
+  });
+});

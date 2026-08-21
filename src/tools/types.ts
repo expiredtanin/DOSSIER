@@ -37,7 +37,15 @@ export type SnapKind =
   | "grid"
   | "ortho"
   | "extension"
-  | "angle";
+  | "angle"
+  /**
+   * Teilpunkt einer Linie, NUR fangbar, solange der Cursor lange genug (s.
+   * `SnapSettings.hoverDivideDelayMs`) auf DERSELBEN Linie verweilt hat (s.
+   * `computeSnap`s Verweil-Erkennung) — bewusst NICHT dauerhaft aktiv wie die
+   * übrigen Snap-Arten, sonst würde jede N-tel-Position jeder Linie den
+   * Fang-Kandidatenraum überfluten.
+   */
+  | "divide";
 
 export interface SnapResult {
   /** Gefangener Punkt (Meter). */
