@@ -1294,7 +1294,13 @@ export default function App() {
     gripEditFields,
     cycleGripEditField,
     submitGripEditValue,
+    edgeEdit,
+    setEdgeEdit,
+    edgeEditFields,
+    cycleEdgeEditField,
+    submitEdgeEditValue,
     gripDragInfoRef,
+    edgeDragInfoRef,
   } = useGripEditing({
     project,
     selectedDrawing,
@@ -1330,30 +1336,39 @@ export default function App() {
 
   // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 1 Text, 2 Linie,
   // 3 Kreis, 4 Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum.
-  // Siehe state/useKeyboardShortcuts.ts. Braucht gripDragInfoRef (s. o.), daher
-  // erst hier nach useGripEditing() registriert.
-  useToolNumberShortcuts(onSelectTool, activeLevel.kind === "floor", engineRef, gripDragInfoRef);
+  // Siehe state/useKeyboardShortcuts.ts. Braucht gripDragInfoRef/edgeDragInfoRef
+  // (s. o.), daher erst hier nach useGripEditing() registriert.
+  useToolNumberShortcuts(
+    onSelectTool,
+    activeLevel.kind === "floor",
+    engineRef,
+    gripDragInfoRef,
+    edgeDragInfoRef,
+  );
 
-  // Feld-Zustand fürs Cursor-HUD (neben der Maus, VW-Stil): läuft ein
-  // Punkt-Griff-Drag, hat er Vorrang (dieselben Felder wie unten in der
-  // Befehlszeile — Länge/Winkel-Tab-Zyklus), sonst die Befehls-Engine-Felder
-  // beim Zeichnen. Vorher zeigte das Cursor-HUD beim Griff-Ziehen GAR KEINE
-  // Länge/Winkel-Werte an (nur die Befehlszeile unten) — Nutzer-Wunsch: „du
-  // kannst [Länge/Winkel] gleich bei der Maus anzeigen wie beim Erstellen".
+  // Feld-Zustand fürs Cursor-HUD (neben der Maus, VW-Stil): läuft ein Punkt-
+  // ODER Kanten-Griff-Drag, hat er Vorrang (dieselben Felder wie unten in der
+  // Befehlszeile — Länge/Winkel- bzw. Abstand-Tab-Zyklus), sonst die Befehls-
+  // Engine-Felder beim Zeichnen. Vorher zeigte das Cursor-HUD beim Griff-Ziehen
+  // GAR KEINE Länge/Winkel-Werte an (nur die Befehlszeile unten) — Nutzer-
+  // Wunsch: „du kannst [Länge/Winkel] gleich bei der Maus anzeigen wie beim
+  // Erstellen".
   const hudFields =
     gripEdit
       ? { fields: gripEditFields(), typed: cmdTyped }
-      : commandActive && engineView.fields.length > 0
-        ? {
-            fields: engineView.fields.map((f) => ({
-              id: f.id,
-              value: f.value,
-              locked: f.locked,
-              active: f.active,
-            })),
-            typed: cmdTyped,
-          }
-        : null;
+      : edgeEdit
+        ? { fields: edgeEditFields(), typed: cmdTyped }
+        : commandActive && engineView.fields.length > 0
+          ? {
+              fields: engineView.fields.map((f) => ({
+                id: f.id,
+                value: f.value,
+                locked: f.locked,
+                active: f.active,
+              })),
+              typed: cmdTyped,
+            }
+          : null;
 
   // Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen — siehe
   // state/useKeyboardShortcuts.ts.
@@ -2796,14 +2811,17 @@ export default function App() {
             Prompt + klickbare Inline-Optionen + Texteingabe + Autocomplete. */}
         <CommandLine
           ref={commandLineRef}
-          // (c) Während eines Vertex-Griff-Drags belegt der Feld-Controller das
-          // Befehlsfeld (Länge/Winkel). Läuft eine Auswahl-Transformation (Drehen
-          // etc.), belegt sie Prompt + U/I/O/P + Winkel-/Distanzfeld. Sonst gilt die
-          // Engine (Zeichnen/Ruhe). Griff-Drag hat Vorrang (schließen sich sonst aus).
-          active={gripEdit ? true : activeTransform ? true : engineView.active}
+          // (c) Während eines Vertex- ODER Kanten-Griff-Drags belegt der Feld-
+          // Controller das Befehlsfeld (Länge/Winkel bzw. Abstand). Läuft eine
+          // Auswahl-Transformation (Drehen etc.), belegt sie Prompt + U/I/O/P +
+          // Winkel-/Distanzfeld. Sonst gilt die Engine (Zeichnen/Ruhe). Griff-/
+          // Kanten-Drag haben Vorrang (schließen sich sonst aus).
+          active={gripEdit ? true : edgeEdit ? true : activeTransform ? true : engineView.active}
           promptKey={
             gripEdit
               ? "cmd.edit.point"
+              : edgeEdit
+              ? "cmd.edit.edge"
               : activeTransform
               ? `transform.hint.${activeTransform.op}.${Math.min(
                   activeTransform.points.length,
@@ -2811,9 +2829,17 @@ export default function App() {
                 )}`
               : engineView.promptKey
           }
-          options={gripEdit ? [] : activeTransform ? transformOptions() : engineView.options}
+          options={
+            gripEdit || edgeEdit ? [] : activeTransform ? transformOptions() : engineView.options
+          }
           fields={
-            gripEdit ? gripEditFields() : activeTransform ? transformFields() : engineView.fields
+            gripEdit
+              ? gripEditFields()
+              : edgeEdit
+              ? edgeEditFields()
+              : activeTransform
+              ? transformFields()
+              : engineView.fields
           }
           onSubmit={(text) => {
             if (gripEdit) {
@@ -2824,6 +2850,12 @@ export default function App() {
               // gelockte Werte) und schließt die Griff-Bearbeitung ab. Vorher
               // ein Totdruck (Nutzer-Report: Enter tat nichts).
               else planViewRef.current?.confirmGripEdit();
+              return;
+            }
+            if (edgeEdit) {
+              const v = parseFloat(text.replace(",", "."));
+              if (isFinite(v)) submitEdgeEditValue(v);
+              else planViewRef.current?.confirmEdgeEdit();
               return;
             }
             if (activeTransform) {
@@ -2844,10 +2876,22 @@ export default function App() {
             activeTransform ? onTransformMode(id as CopyMode) : engine.chooseOption(id)
           }
           onCycleField={() =>
-            gripEdit ? cycleGripEditField() : activeTransform ? undefined : engine.cycleField()
+            gripEdit
+              ? cycleGripEditField()
+              : edgeEdit
+              ? cycleEdgeEditField()
+              : activeTransform
+              ? undefined
+              : engine.cycleField()
           }
           onCancel={() =>
-            gripEdit ? setGripEdit(null) : activeTransform ? cancelTransform() : engine.cancel()
+            gripEdit
+              ? setGripEdit(null)
+              : edgeEdit
+              ? setEdgeEdit(null)
+              : activeTransform
+              ? cancelTransform()
+              : engine.cancel()
           }
           suggest={(prefix) => engine.suggest(prefix)}
           onTextChange={setCmdTyped}

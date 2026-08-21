@@ -1211,6 +1211,7 @@ export const de = {
   "cmd.field.distance": "Distanz",
   "cmd.field.thickness": "Dicke",
   "cmd.edit.point": "Griff ziehen (Tab: Länge/Winkel):",
+  "cmd.edit.edge": "Seite verschieben (Tab: Abstand):",
 
   // ── Befehle: Import / Gelände ────────────────────────────────────────────
   "cmd.import.label": "Importieren",

@@ -1199,6 +1199,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.field.distance": "Distance",
   "cmd.field.thickness": "Thickness",
   "cmd.edit.point": "Drag grip (Tab: length/angle):",
+  "cmd.edit.edge": "Move side (Tab: offset):",
 
   // Commands: import / terrain.
   "cmd.import.label": "Import",

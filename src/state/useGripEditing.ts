@@ -304,12 +304,17 @@ export function useGripEditing(opts: {
     return out;
   })();
 
-  // Zuletzt angewandter Kanten-Offset während eines Edge-Grip-Drags (Anker).
-  // null = kein laufender Drag; der erste Move-Event verankert nur (kein Sprung).
-  const edgeDragOffsetRef = useRef<number | null>(null);
-  // Freies Kanten-Ziehen (offene Polylinie/Linie): letzter roher Cursor, gegen den
-  // das inkrementelle 2D-Delta gebildet wird. null = Drag noch nicht verankert.
-  const edgeFreeLastRef = useRef<Vec2 | null>(null);
+  // Bereits angewandtes 2D-Delta seit Grab-Beginn eines Kanten-Drags, relativ
+  // zum ORIGINALEN Kanten-Mittelpunkt (`edge.mid` — die beim Grab erfasste
+  // Momentaufnahme, ändert sich während des Drags nicht). null = noch kein
+  // Move-Event verarbeitet (erstes Event verankert nur, kein Sprung). Ein
+  // ABSOLUTER Zielpunkt (aus Maus ODER gelocktem Feldwert) wird jeden Frame neu
+  // berechnet; angewandt wird nur die Differenz zum zuletzt angewandten Delta
+  // (moveEdgeOf/moveRoomEdge/moveCeilingEdge sind additiv). Dieselbe Formel
+  // trägt sowohl den geführten (Normalen-)Fall als auch den freien Fall — vorher
+  // zwei getrennte, rein inkrementelle Mechanismen ohne Bezug zum Ursprung, was
+  // eine getippte Ziel-Distanz (s. edgeEdit unten) unmöglich gemacht hätte.
+  const edgeAppliedDeltaRef = useRef<Vec2 | null>(null);
   // Körper-Verschieben (2D): koinzidente Endpunkte ANDERER gewählter Elemente, die
   // an einer Ecke des verschobenen Elements hängen, werden um dasselbe Delta
   // mitgeführt (gemeinsame Ecke bleibt verbunden). Lazy beim ersten Move-Event
@@ -472,9 +477,6 @@ export function useGripEditing(opts: {
   };
   cycleGripEditFieldRef.current = cycleGripEditField;
 
-  // Globaler Tab-Handler (Feld-Zyklus/Zahlen-Tippen) — siehe state/useKeyboardShortcuts.ts.
-  useCommandTabShortcut(engineRef, commandLineRef, gripDragInfoRef, gripEditRef, cycleGripEditFieldRef);
-
   // Getippte Zahl im Vertex-Drag: aktives Feld locken, aufs nächste vorrücken und
   // den Zielpunkt sofort mit dem gelockten Wert neu setzen.
   const submitGripEditValue = (value: number) => {
@@ -487,6 +489,121 @@ export function useGripEditing(opts: {
     // Zielpunkt mit dem frischen Lock anwenden (live, ohne Maus-Bewegung).
     const pt = gripEditPoint(ge.anchor, locks, info.raw);
     applyGrip(info.index, pt);
+  };
+
+  // Dasselbe Feld-Controller-Muster wie oben (gripEdit), jetzt für einen Kanten-
+  // Griff (Dreieck-Anfasser, „Seite parallel verschieben"). Ein Feld genügt für
+  // geführte Kanten (rect/geschlossene Polylinie/Wand — Bewegung ist auf die
+  // Normale beschränkt, "Länge" ist der vorzeichenbehaftete Abstand); freie
+  // Kanten (offene Polylinie/Linie) bekommen wie ein Punkt-Griff Länge+Winkel.
+  const [edgeEdit, setEdgeEdit] = useState<{
+    /** Kanten-Mittelpunkt bei Grab-Beginn (fix für die ganze Dauer des Drags). */
+    anchor: Vec2;
+    active: "length" | "angle";
+    locks: { length?: number; angle?: number };
+  } | null>(null);
+  const edgeEditRef = useRef<typeof edgeEdit>(null);
+  edgeEditRef.current = edgeEdit;
+  // Letzter roher Cursor + der gezogene Kanten-Griff (Momentaufnahme vom Grab).
+  const edgeDragInfoRef = useRef<{ edge: EdgeGrip; raw: Vec2 } | null>(null);
+
+  // Zielpunkt aus Anker + (gelockten/Live-)Werten — bei freien Kanten wie ein
+  // Punkt-Griff (polar), bei geführten Kanten nur entlang der festen Normale.
+  const edgeEditPoint = (
+    edge: EdgeGrip,
+    anchor: Vec2,
+    locks: { length?: number; angle?: number },
+    raw: Vec2,
+  ): Vec2 => {
+    if (edge.free) return gripEditPoint(anchor, locks, raw);
+    const live = dot(sub(raw, anchor), edge.normal);
+    const len = locks.length != null ? locks.length : live;
+    return add(anchor, scale(edge.normal, len));
+  };
+
+  // Felder fürs Befehlsfeld während des Kanten-Drags. Geführte Kanten zeigen
+  // NUR "Länge" (kein Winkel — der ist durch die feste Normale vorgegeben).
+  const edgeEditFields = (): GripEditFieldsState[] => {
+    const ee = edgeEdit;
+    const info = edgeDragInfoRef.current;
+    if (!ee || !info) return [];
+    const { edge, raw } = info;
+    if (!edge.free) {
+      const live = dot(sub(raw, ee.anchor), edge.normal);
+      return [
+        {
+          id: "length",
+          labelKey: "cmd.field.length",
+          value: ee.locks.length ?? live,
+          locked: ee.locks.length != null,
+          active: true,
+        },
+      ];
+    }
+    const dx = raw.x - ee.anchor.x;
+    const dy = raw.y - ee.anchor.y;
+    const liveLen = Math.hypot(dx, dy);
+    const liveAng = ((((Math.atan2(dy, dx) * 180) / Math.PI) % 360) + 360) % 360;
+    return [
+      {
+        id: "length",
+        labelKey: "cmd.field.length",
+        value: ee.locks.length ?? liveLen,
+        locked: ee.locks.length != null,
+        active: ee.active === "length",
+      },
+      {
+        id: "angle",
+        labelKey: "cmd.field.angle",
+        value: ee.locks.angle ?? liveAng,
+        locked: ee.locks.angle != null,
+        active: ee.active === "angle",
+      },
+    ];
+  };
+
+  const cycleEdgeEditFieldRef = useRef<() => void>(() => {});
+  // Tab im Kanten-Drag: Feld-Controller öffnen; bei freien Kanten zykelt es
+  // zusätzlich Länge ↔ Winkel (geführte Kanten haben nur das eine Feld).
+  const cycleEdgeEditField = () => {
+    const info = edgeDragInfoRef.current;
+    if (!info) return;
+    const { edge } = info;
+    setEdgeEdit((prev) =>
+      prev
+        ? edge.free
+          ? { ...prev, active: prev.active === "length" ? "angle" : "length" }
+          : prev
+        : { anchor: edge.mid, active: "length", locks: {} },
+    );
+  };
+  cycleEdgeEditFieldRef.current = cycleEdgeEditField;
+
+  // Globaler Tab-Handler (Feld-Zyklus/Zahlen-Tippen, Punkt- UND Kanten-Griff) —
+  // siehe state/useKeyboardShortcuts.ts.
+  useCommandTabShortcut(
+    engineRef,
+    commandLineRef,
+    gripDragInfoRef,
+    gripEditRef,
+    cycleGripEditFieldRef,
+    edgeDragInfoRef,
+    edgeEditRef,
+    cycleEdgeEditFieldRef,
+  );
+
+  // Getippte Zahl im Kanten-Drag: Feld locken, bei freien Kanten aufs nächste
+  // Feld vorrücken, Zielpunkt sofort mit dem gelockten Wert neu anwenden.
+  const submitEdgeEditValue = (value: number) => {
+    const ee = edgeEditRef.current;
+    const info = edgeDragInfoRef.current;
+    if (!ee || !info) return;
+    const { edge, raw } = info;
+    const locks = { ...ee.locks, [ee.active]: value };
+    const next = edge.free ? (ee.active === "length" ? "angle" : "length") : ee.active;
+    setEdgeEdit({ ...ee, locks, active: next });
+    const pt = edgeEditPoint(edge, ee.anchor, locks, raw);
+    applyEdgeToward(edge, ee.anchor, pt);
   };
 
   // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
@@ -533,6 +650,20 @@ export function useGripEditing(opts: {
     else if (selectedCeilingId) moveCeilingEdge(selectedCeilingId, edge.aIndex, edge.bIndex, delta);
     else moveEdgeOf(edge.owner?.drawingId ?? selectedDrawingId, edge.owner?.wallId ?? selectedWallId, edge.aIndex, edge.bIndex, delta);
   };
+  // Kante auf einen ABSOLUTEN Zielpunkt (relativ zum ORIGINALEN Anker) bewegen —
+  // moveEdge* ist additiv, daher nur die Differenz zum zuletzt angewandten Delta
+  // anwenden (s. edgeAppliedDeltaRef). Trägt sowohl Maus-geführte Bewegung als
+  // auch gelockte Feldwerte UND das Verwerfen (Ziel = Anker selbst → Delta 0,
+  // die Differenz zum vorherigen Delta macht die ganze Verschiebung rückgängig).
+  const applyEdgeToward = (edge: EdgeGrip, anchor: Vec2, pt: Vec2) => {
+    const desired = sub(pt, anchor);
+    const prev = edgeAppliedDeltaRef.current;
+    edgeAppliedDeltaRef.current = desired;
+    if (prev === null) return; // erster Event verankert nur (kein Sprung beim Greifen)
+    const inc = sub(desired, prev);
+    if (inc.x === 0 && inc.y === 0) return;
+    applyEdge(edge, inc);
+  };
 
   // Maß-/Winkel-HUD am Cursor für einen gezogenen Punkt-Griff — dieselbe
   // Darstellung wie beim Zeichnen (DraftHud, VW-Stil). Ohne Anker (Einzelgriff-
@@ -545,16 +676,32 @@ export function useGripEditing(opts: {
     const angleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
     return { at: pt, length: Math.hypot(dx, dy), angleDeg };
   };
+  // Dasselbe für einen gezogenen Kanten-Griff: freie Kanten zeigen Länge+Winkel
+  // (wie ein Punkt-Griff), geführte Kanten nur EINEN Wert (Abstand entlang der
+  // Normale) — dafür reicht das HUD-Schema nicht (length+angleDeg gehören
+  // zusammen), daher als freier Text `Δ: …m`.
+  const edgeHudFor = (edge: EdgeGrip, anchor: Vec2, pt: Vec2): NonNullable<ToolDraft["hud"]> => {
+    const dx = pt.x - anchor.x;
+    const dy = pt.y - anchor.y;
+    if (edge.free) {
+      const angleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+      return { at: pt, length: Math.hypot(dx, dy), angleDeg };
+    }
+    const offset = dx * edge.normal.x + dy * edge.normal.y;
+    return { at: pt, text: `Δ: ${offset.toFixed(3)}m` };
+  };
 
-  // Aufräumen nach Abschluss/Verwerfen eines Griff-Drags (geteilt von onGripEnd
-  // und onGripCancel).
-  const endGripEditing = () => {
+  // Aufräumen nach Abschluss/Verwerfen eines Griff- ODER Kanten-Drags (geteilt
+  // von onGripEnd/onGripCancel/onEdgeEnd/onEdgeCancel — nie beide gleichzeitig
+  // aktiv, ein gemeinsames Aufräumen ist daher unschädlich und einfacher).
+  const endEditing = () => {
     setDraft(null);
-    edgeDragOffsetRef.current = null; // Drag beendet → Anker zurücksetzen
-    edgeFreeLastRef.current = null; // freien Kanten-Drag-Anker zurücksetzen
+    edgeAppliedDeltaRef.current = null; // Kanten-Drag beendet → Anker zurücksetzen
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
     gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
     setGripEdit(null); // (c) Feld-Controller schließen
+    edgeDragInfoRef.current = null; // Kanten-Drag-Info verwerfen
+    setEdgeEdit(null); // Kanten-Feld-Controller schließen
   };
 
   const gripHandlers = {
@@ -659,47 +806,45 @@ export function useGripEditing(opts: {
         moveGripOf(c.drawingId, c.wallId, c.index, c.pos);
       }
     },
-    // Kanten-Griff ziehen. Zwei Verhalten:
+    // Kanten-Griff ziehen. Zwei Verhalten (Zielpunkt jeweils ABSOLUT relativ
+    // zum ORIGINALEN Anker `edge.mid`, angewandt über applyEdgeToward — s. dort):
     //  • free (offene Polylinie/Linie, §Task B): das Segment folgt dem VOLLEN
     //    Cursor-Delta — beide Endpunkte wandern gleich, die geteilten Ecken ziehen
-    //    die Nachbar-Segmente nach. Shift = Ortho (H/V) auf das Gesamt-Delta.
+    //    die Nachbar-Segmente nach. Shift = Ortho (H/V) auf den Gesamt-Vektor.
     //  • sonst (rect/geschlossene Polylinie/Wand): NUR die Komponente senkrecht
     //    zur Kante (Seite verschiebt sich parallel nach außen/innen). Fängt an
     //    eingeschalteten Geometrie-Snaps (Endpunkt/Mittelpunkt/Schnittpunkt/…);
     //    ohne Geometrie-Snap wird der Offset wie bisher aufs Raster gerundet.
     onEdgeMove: (edge: EdgeGrip, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+      edgeDragInfoRef.current = { edge, raw };
+      const anchor = edge.mid; // Momentaufnahme vom Grab, ändert sich während des Drags nicht
+      const ee = edgeEditRef.current;
+      // Feld-Controller mit Lock aktiv: Zielpunkt aus Anker + gelocktem Wert
+      // (Maus wirkt für das gelockte Feld nicht mehr — Lock dominiert).
+      if (ee && (ee.locks.length != null || ee.locks.angle != null)) {
+        const pt = edgeEditPoint(edge, anchor, ee.locks, raw);
+        applyEdgeToward(edge, anchor, pt);
+        setDraft({ preview: [], vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
+        return;
+      }
       if (edge.free) {
-        // Freier Fall arbeitet mit einem inkrementellen Cursor-DELTA (nicht
-        // einem absoluten Punkt) — eine Geometrie-Snap-Projektion auf die
-        // Normale ergibt hier keinen Sinn, da es keine feste Kanten-Normale
-        // gibt, an die sich ein gefangener Punkt anlehnen könnte. Bleibt beim
-        // bisherigen Raster-Delta-Verhalten.
-        //
-        // Inkrementelles 2D-Delta gegen den letzten rohen Cursor. Erster Event
-        // verankert nur (kein Sprung, da der Griff am Kanten-Mittelpunkt sitzt).
-        const last = edgeFreeLastRef.current;
-        edgeFreeLastRef.current = raw;
-        if (last === null) return;
-        let dx = raw.x - last.x;
-        let dy = raw.y - last.y;
-        // Raster-Schritt auf das Delta (Snap aktiv, nicht per Ctrl unterdrückt).
+        // Keine Geometrie-Snap-Projektion (keine feste Kanten-Normale, an die
+        // sich ein gefangener Punkt anlehnen könnte) — der Cursor bewegt den
+        // Zielpunkt direkt, nur Ortho/Raster wirken.
+        let pt = raw;
+        if (mods.shift) {
+          const dx = raw.x - anchor.x;
+          const dy = raw.y - anchor.y;
+          pt = Math.abs(dx) >= Math.abs(dy) ? { x: raw.x, y: anchor.y } : { x: anchor.x, y: raw.y };
+        }
         const gs = snap.gridSize;
         if (!mods.ctrl && snap.enabled && snap.grid && gs > 0) {
-          dx = Math.round(dx / gs) * gs;
-          dy = Math.round(dy / gs) * gs;
-          if (dx === 0 && dy === 0) {
-            edgeFreeLastRef.current = last; // noch kein voller Rasterschritt → warten
-            return;
-          }
+          const dx = Math.round((pt.x - anchor.x) / gs) * gs;
+          const dy = Math.round((pt.y - anchor.y) / gs) * gs;
+          pt = { x: anchor.x + dx, y: anchor.y + dy };
         }
-        // Shift = Ortho: das Delta auf die dominante Achse (H/V) zwingen.
-        if (mods.shift) {
-          if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
-          else dx = 0;
-        }
-        if (dx === 0 && dy === 0) return;
-        applyEdge(edge, { x: dx, y: dy });
-        setDraft({ preview: [], vertices: [], snap: null });
+        applyEdgeToward(edge, anchor, pt);
+        setDraft({ preview: [], vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
         return;
       }
       // Cursor zuerst durch die Snap-Engine schicken (Ctrl unterdrückt Snap
@@ -710,8 +855,8 @@ export function useGripEditing(opts: {
       const snapResult = snapFor(raw, pxPerMeter, mods);
       const isGeometrySnap = !!snapResult && snapResult.kind !== "grid" && snapResult.kind !== "ortho";
       const cursor = isGeometrySnap ? snapResult!.point : raw;
-      // Senkrechte Projektion von (Cursor − Grab-Mittelpunkt) auf die Außennormale.
-      const rel = sub(cursor, edge.mid);
+      // Senkrechte Projektion von (Cursor − Anker) auf die Außennormale.
+      const rel = sub(cursor, anchor);
       let offset = rel.x * edge.normal.x + rel.y * edge.normal.y;
       // Raster-Schritt (Snap) nur, wenn kein Geometrie-Snap gefangen wurde —
       // sonst gewinnt der gefangene Punkt.
@@ -719,26 +864,34 @@ export function useGripEditing(opts: {
       if (!isGeometrySnap && !mods.ctrl && snap.enabled && snap.grid && step > 0) {
         offset = Math.round(offset / step) * step;
       }
-      // INKREMENTELL + Grab-Anker: moveEdge verschiebt additiv, daher nur die
-      // Änderung seit dem letzten Event anwenden. Erster Event verankert nur
-      // (kein Sprung beim Greifen, da das Dreieck am Mittelpunkt sitzt).
-      const prev = edgeDragOffsetRef.current;
-      edgeDragOffsetRef.current = offset;
-      if (prev === null) return;
-      const inc = offset - prev;
-      if (inc === 0) return;
-      applyEdge(edge, scale(edge.normal, inc));
-      setDraft({ preview: [], vertices: [], snap: isGeometrySnap ? snapResult : null });
+      const pt = add(anchor, scale(edge.normal, offset));
+      applyEdgeToward(edge, anchor, pt);
+      setDraft({
+        preview: [],
+        vertices: [],
+        snap: isGeometrySnap ? snapResult : null,
+        hud: edgeHudFor(edge, anchor, pt),
+      });
     },
     onGripEnd: () => {
-      endGripEditing();
+      endEditing();
     },
     // Bewaffneten Punkt-Griff verwerfen (Escape): exakt auf `origin`
     // zurücksetzen — ohne Snap/Ortho-Neuauswertung, ein reiner Revert — und
     // danach wie onGripEnd aufräumen.
     onGripCancel: (index: number, origin: Vec2) => {
       applyGrip(index, origin);
-      endGripEditing();
+      endEditing();
+    },
+    onEdgeEnd: () => {
+      endEditing();
+    },
+    // Bewaffneten Kanten-Griff verwerfen (Escape): Ziel = Anker selbst (Delta
+    // 0) — applyEdgeToward macht dadurch die komplette bisherige Verschiebung
+    // in einem Schritt rückgängig (negatives Delta zum zuletzt angewandten).
+    onEdgeCancel: (edge: EdgeGrip, anchor: Vec2) => {
+      applyEdgeToward(edge, anchor, anchor);
+      endEditing();
     },
   };
 
@@ -751,10 +904,17 @@ export function useGripEditing(opts: {
     gripEditFields,
     cycleGripEditField,
     submitGripEditValue,
-    // Für useToolNumberShortcuts: solange ein Griff bewaffnet ist, dürfen
-    // Zifferntasten NICHT als Werkzeug-Wechsel interpretiert werden (auch
-    // nicht, wenn das Befehlsfeld fokussiert und leer ist — die Zeichen-
-    // Engine selbst läuft ja nicht, daher griff dieser Wächter sonst nicht).
+    edgeEdit,
+    setEdgeEdit,
+    edgeEditFields,
+    cycleEdgeEditField,
+    submitEdgeEditValue,
+    // Für useToolNumberShortcuts: solange ein Punkt- ODER Kanten-Griff
+    // bewaffnet ist, dürfen Zifferntasten NICHT als Werkzeug-Wechsel
+    // interpretiert werden (auch nicht, wenn das Befehlsfeld fokussiert und
+    // leer ist — die Zeichen-Engine selbst läuft ja nicht, daher greift
+    // dieser Wächter sonst nicht).
     gripDragInfoRef,
+    edgeDragInfoRef,
   };
 }

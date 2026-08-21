@@ -119,6 +119,8 @@ export interface PlanViewHandle {
    * No-op ohne bewaffneten Griff.
    */
   confirmGripEdit: () => void;
+  /** Dasselbe für einen bewaffneten Kanten-Griff (s. edgeDrag). */
+  confirmEdgeEdit: () => void;
 }
 
 /** Ergebnis eines Links-Klicks (Auswahl) an einer Modellposition. */
@@ -438,6 +440,14 @@ export interface GripHandlers {
    * {@link onGripEnd} auf.
    */
   onGripCancel(index: number, origin: Vec2): void;
+  /** Bewaffneten Kanten-Griff an seiner aktuellen Position abschließen. */
+  onEdgeEnd(): void;
+  /**
+   * Bewaffneten Kanten-Griff verwerfen (Escape): setzt ihn exakt auf `anchor`
+   * (den originalen Kanten-Mittelpunkt) zurück und räumt danach wie
+   * {@link onEdgeEnd} auf.
+   */
+  onEdgeCancel(edge: EdgeGrip, anchor: Vec2): void;
 }
 
 export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
@@ -737,6 +747,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           gripHandlersRef.current?.onGripEnd();
         }
       },
+      confirmEdgeEdit: () => {
+        if (edgeDrag.current) {
+          edgeDrag.current = null;
+          gripHandlersRef.current?.onEdgeEnd();
+        }
+      },
       fitSelection: () => {
         const sel = selectedRef.current;
         const prim = sel !== null ? planRef.current.primitives[sel] : undefined;
@@ -808,7 +824,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     null,
   );
   // Transiente Kanten-Griff-Zieh-Daten (linke Taste auf einem Dreieck-Anfasser).
-  // Hält den gegriffenen EdgeGrip; die Mutation läuft live über onEdgeMove.
+  // Hält den gegriffenen EdgeGrip (Momentaufnahme vom Grab — sein `.mid` ist der
+  // Anker für Feld-Eingabe/Escape-Revert); die Mutation läuft live über
+  // onEdgeMove. Dasselbe „bewaffnet"-Verhalten wie gripDrag oben: Loslassen
+  // beendet die Bearbeitung NICHT, erst ein weiterer Klick/Enter (bestätigt)
+  // oder Escape (verwirft zurück auf `edge.mid`).
   const edgeDrag = useRef<{ pointerId: number; edge: EdgeGrip } | null>(null);
   // Transiente „Körper verschieben"-Daten: letzter Modellpunkt, gegen den das
   // inkrementelle Delta gebildet wird (parallel-Verschiebung des Elements).
@@ -826,23 +846,31 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Erkennung auf Raum-Stempel (Pointer-Capture unterdrückt natives dblclick).
   const lastClickRef = useRef<{ t: number; x: number; y: number } | null>(null);
 
-  // Tastatur-Abschluss eines bewaffneten Punkt-Griffs (s. gripDrag oben): Escape
-  // verwirft (zurück auf `origin`), Enter bestätigt die aktuelle Position — beide
-  // NUR wenn kein Eingabefeld fokussiert ist (die Befehlszeile behandelt ihr
-  // eigenes Enter für getippte Länge/Winkel-Werte selbst, s. App.tsx).
+  // Tastatur-Abschluss eines bewaffneten Punkt- ODER Kanten-Griffs (s. gripDrag/
+  // edgeDrag oben): Escape verwirft (zurück auf die Ursprungsposition), Enter
+  // bestätigt die aktuelle Position — beide NUR wenn kein Eingabefeld
+  // fokussiert ist (die Befehlszeile behandelt ihr eigenes Enter für getippte
+  // Werte selbst, s. App.tsx).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const gd = gripDrag.current;
-      if (!gd || !gripHandlers) return;
+      const ed = edgeDrag.current;
+      if ((!gd && !ed) || !gripHandlers) return;
       if (e.key !== "Escape" && e.key !== "Enter") return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
         return;
       }
       e.preventDefault();
-      gripDrag.current = null;
-      if (e.key === "Escape") gripHandlers.onGripCancel(gd.index, gd.origin);
-      else gripHandlers.onGripEnd();
+      if (gd) {
+        gripDrag.current = null;
+        if (e.key === "Escape") gripHandlers.onGripCancel(gd.index, gd.origin);
+        else gripHandlers.onGripEnd();
+      } else if (ed) {
+        edgeDrag.current = null;
+        if (e.key === "Escape") gripHandlers.onEdgeCancel(ed.edge, ed.edge.mid);
+        else gripHandlers.onEdgeEnd();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1258,14 +1286,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Maus-Schema (docs/design/context-menu.md): MITTE = schwenken (Pan),
   // LINKS = Auswahl, RECHTS = Kontextmenü, RAD = Zoom.
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    // Ein Punkt-Griff ist bereits „bewaffnet" (Maus wurde losgelassen, der
-    // Punkt folgt seither dem Cursor) — JEDER weitere Linksklick bestätigt nur
-    // die aktuelle Position, statt irgendeine andere Aktion (Doppelklick,
-    // Schere, neue Auswahl, …) an derselben Stelle auszulösen.
+    // Ein Punkt- ODER Kanten-Griff ist bereits „bewaffnet" (Maus wurde
+    // losgelassen, der Griff folgt seither dem Cursor) — JEDER weitere
+    // Linksklick bestätigt nur die aktuelle Position, statt irgendeine andere
+    // Aktion (Doppelklick, Schere, neue Auswahl, …) an derselben Stelle
+    // auszulösen.
     if (e.button === 0 && gripDrag.current && gripHandlers) {
       e.preventDefault();
       gripDrag.current = null;
       gripHandlers.onGripEnd();
+      return;
+    }
+    if (e.button === 0 && edgeDrag.current && gripHandlers) {
+      e.preventDefault();
+      edgeDrag.current = null;
+      gripHandlers.onEdgeEnd();
       return;
     }
     // Doppelklick (zweiter Klick der Sequenz) auf einen Raum-Stempel/-Fläche →
@@ -1353,12 +1388,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         gripDrag.current = { pointerId: e.pointerId, index: gi, origin: grips![gi] };
         return;
       }
-      // Linke Taste auf einem Kanten-Anfasser (Dreieck): Seite ziehen.
+      // Linke Taste auf einem Kanten-Anfasser (Dreieck): Seite ziehen. KEIN
+      // Pointer-Capture — dasselbe „bewaffnet nach Loslassen"-Verhalten wie
+      // beim Punkt-Griff (s. Kommentar an der edgeDrag-Deklaration).
       if (edgeGripsActive) {
         const eg = edgeGripAt(e.clientX, e.clientY);
         if (eg) {
           e.preventDefault();
-          e.currentTarget.setPointerCapture(e.pointerId);
           edgeDrag.current = { pointerId: e.pointerId, edge: eg };
           return;
         }
@@ -1631,14 +1667,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       stampDrag.current = null;
       return;
     }
-    // Kanten-Griff loslassen: Ziehen abschließen.
-    const ed = edgeDrag.current;
-    if (ed && ed.pointerId === e.pointerId) {
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      }
-      edgeDrag.current = null;
-      gripHandlers!.onGripEnd();
+    // Kanten-Griff: Maus loslassen beendet die Bearbeitung NICHT mehr — kein
+    // Pointer-Capture gehalten, der Griff bleibt bewaffnet und folgt weiter dem
+    // Cursor. Abschluss erst per erneutem Klick (oben in onPointerDown) oder
+    // Enter, Verwerfen per Escape (beides im Tastatur-Effekt unten).
+    if (edgeDrag.current && edgeDrag.current.pointerId === e.pointerId) {
       return;
     }
 

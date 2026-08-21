@@ -69,6 +69,12 @@ export function useCommandTabShortcut(
     locks: { length?: number; angle?: number };
   } | null>,
   cycleGripEditFieldRef: RefObject<() => void>,
+  // Dasselbe für einen Kanten-Griff (Seite parallel verschieben) — separater
+  // Drag-Kanal, aber identisches Tab-Verhalten (öffnen/zyklen + Befehlsfeld
+  // fokussieren).
+  edgeDragInfoRef?: RefObject<{ edge: unknown; raw: Vec2 } | null>,
+  edgeEditRef?: RefObject<unknown>,
+  cycleEdgeEditFieldRef?: RefObject<() => void>,
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -105,6 +111,13 @@ export function useCommandTabShortcut(
         if (!wasOpen) commandLineRef.current?.focus();
         return;
       }
+      // Dasselbe für einen laufenden Kanten-Drag (Seite parallel verschieben).
+      if (edgeDragInfoRef?.current) {
+        const wasOpen = edgeEditRef?.current != null;
+        cycleEdgeEditFieldRef?.current?.();
+        if (!wasOpen) commandLineRef.current?.focus();
+        return;
+      }
       commandLineRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
@@ -125,6 +138,7 @@ export function useToolNumberShortcuts(
   isFloor: boolean,
   engineRef: RefObject<CommandEngine | null>,
   gripDragInfoRef?: RefObject<{ index: number; raw: Vec2 } | null>,
+  edgeDragInfoRef?: RefObject<unknown>,
 ): void {
   const toolShortcutRef = useRef({ onSelectTool, floor: isFloor });
   toolShortcutRef.current = { onSelectTool, floor: isFloor };
@@ -150,6 +164,7 @@ export function useToolNumberShortcuts(
       // getippter Wert schaltete auf das per Ziffer gemappte Zeichenwerkzeug
       // um, sobald das leere, fokussierte Befehlsfeld erkannt wurde).
       if (gripDragInfoRef?.current) return;
+      if (edgeDragInfoRef?.current) return;
       const el = e.target as HTMLElement | null;
       const isInput =
         !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
