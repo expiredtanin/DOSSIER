@@ -111,6 +111,14 @@ export interface PlanViewHandle {
    * Leere Punktmenge → No-op (kein Fit, kein Crash).
    */
   fitBounds: (pts: Vec2[]) => void;
+  /**
+   * Einen bewaffneten Punkt-Griff (s. gripDrag) an seiner AKTUELLEN Position
+   * abschließen — dieselbe Aktion wie ein bestätigender Klick/Enter auf der
+   * Zeichenfläche, aber von der Befehlszeile aus angestoßen (Enter dort MIT
+   * leerem Eingabetext: kein neuer Wert zu locken, nur „fertig, so lassen").
+   * No-op ohne bewaffneten Griff.
+   */
+  confirmGripEdit: () => void;
 }
 
 /** Ergebnis eines Links-Klicks (Auswahl) an einer Modellposition. */
@@ -707,12 +715,28 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
 
+  // Frischer Spiegel der gripHandlers-Prop für das (unten stabil mit leeren
+  // Deps memoisierte) Imperativ-Handle — direkt referenzieren würde die Prop
+  // vom ERSTEN Render einfrieren (stale closure, s. Kommentar dort).
+  const gripHandlersRef = useRef(gripHandlers);
+  gripHandlersRef.current = gripHandlers;
+
   // Imperatives Steuerhandle für die Oberleiste (Einpassen / Auswahl / Massstab).
   // Stabil (leere Deps); liest den frischen Ausschnitt + die Auswahl aus Refs.
   useImperativeHandle(
     ref,
     () => ({
       fit: () => setView(defaultViewRef.current),
+      confirmGripEdit: () => {
+        // Von der Befehlszeile aus angestoßen (Enter mit leerem Eingabetext,
+        // s. App.tsx) — dieselbe Aktion wie ein bestätigender Klick auf der
+        // Zeichenfläche (siehe onPointerDown-Kopf unten), nur eben nicht über
+        // ein Pointer-Event.
+        if (gripDrag.current) {
+          gripDrag.current = null;
+          gripHandlersRef.current?.onGripEnd();
+        }
+      },
       fitSelection: () => {
         const sel = selectedRef.current;
         const prim = sel !== null ? planRef.current.primitives[sel] : undefined;

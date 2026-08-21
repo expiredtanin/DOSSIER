@@ -2819,6 +2819,11 @@ export default function App() {
             if (gripEdit) {
               const v = parseFloat(text.replace(",", "."));
               if (isFinite(v)) submitGripEditValue(v);
+              // Leere Eingabe: kein neuer Wert zu locken — Enter bestätigt
+              // stattdessen die aktuelle Position (Maus- oder bereits
+              // gelockte Werte) und schließt die Griff-Bearbeitung ab. Vorher
+              // ein Totdruck (Nutzer-Report: Enter tat nichts).
+              else planViewRef.current?.confirmGripEdit();
               return;
             }
             if (activeTransform) {
