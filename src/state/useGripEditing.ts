@@ -363,12 +363,23 @@ export function useGripEditing(opts: {
 
   // Stabiler Ref auf cycleGripEditField (der globale Tab-Handler hat leere Deps).
   const cycleGripEditFieldRef = useRef<() => void>(() => {});
-  // Tab im Vertex-Drag: Feld-Controller öffnen/zyklen (length ↔ angle).
+  // Tab im Vertex-Drag: Feld-Controller öffnen/zyklen (length ↔ angle). Der
+  // Anker ist normalerweise die BENACHBARTE Ecke (Polylinien-Semantik: Länge/
+  // Winkel relativ zum Nachbarpunkt) — bei Kreis/Bogen ist das falsch (deren
+  // Griffe liegen auf dem Ring, "Länge" muss der RADIUS sein, also relativ
+  // zum ZENTRUM). Ohne diese Sonderfälle blieb der Kreis-Radius-Griff sogar
+  // ganz ohne Anker (nur 1 Griff, kein Nachbar) → Tab tat nichts.
   const cycleGripEditField = () => {
     const info = gripDragInfoRef.current;
     if (!info) return;
-    const refIndex = info.index > 0 ? info.index - 1 : grips.length > 1 ? 1 : -1;
-    const anchor = refIndex >= 0 ? grips[refIndex] : null;
+    const g = selectedDrawing?.geom;
+    const anchor =
+      g && (g.shape === "circle" || g.shape === "arc")
+        ? g.center
+        : (() => {
+            const refIndex = info.index > 0 ? info.index - 1 : grips.length > 1 ? 1 : -1;
+            return refIndex >= 0 ? grips[refIndex] : null;
+          })();
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     setGripEdit((prev) =>
       prev
