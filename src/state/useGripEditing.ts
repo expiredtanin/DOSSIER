@@ -104,6 +104,32 @@ export function useGripEditing(opts: {
     return add(st.start, scale(d, st.runLength / 2));
   };
 
+  // Welchem Element + lokalem Vertex-Index ein Griff im flachen `grips`-Array
+  // gehört (Mehrfachauswahl, Nutzer-Report: Griffe verschwanden komplett,
+  // sobald 2 Elemente gewählt waren — die alte Logik kannte nur GENAU EIN
+  // selektiertes Element). Leer (`{}`) bei den exklusiven Einzel-Fällen
+  // (Öffnung/Treppe/Decke/Raum), die weiterhin nur einzeln editierbar sind.
+  interface GripOwner {
+    drawingId?: string;
+    wallId?: string;
+    localIndex: number;
+  }
+  const gripOwners: GripOwner[] = [];
+  // [ersterFlachIndex, letzterFlachIndex] DESSELBEN Elements — für die Anker-
+  // Auflösung (Shift-Ortho, Tab-Feld-Controller): der "Nachbar-Griff" muss aus
+  // demselben Element kommen, nicht irgendeinem anderen der Mehrfachauswahl.
+  const gripOwnerRange: [number, number][] = [];
+
+  // Bei Mehrfachauswahl fehlt `selectedDrawingIds` manchmal trotzdem (nur die
+  // Einzel-ID `selectedDrawingId` gesetzt, s. useSelectionState-Konvention) —
+  // derselbe Fallback wie an anderen Stellen im Projekt.
+  const effectiveDrawingIds =
+    selectedDrawingIds.length > 0
+      ? selectedDrawingIds
+      : selectedDrawingId
+        ? [selectedDrawingId]
+        : [];
+
   const grips: Vec2[] = (() => {
     // Öffnung (Fenster/Tür): EIN Mittelpunkt-Griff auf der Wandachse. Ziehen
     // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
@@ -113,7 +139,10 @@ export function useGripEditing(opts: {
       const w = op && project.walls.find((x) => x.id === op.hostWallId);
       if (op && w) {
         const axis = normalize(sub(w.end, w.start));
-        return [add(w.start, scale(axis, op.position + op.width / 2))];
+        const pt = add(w.start, scale(axis, op.position + op.width / 2));
+        gripOwners.push({ localIndex: 0 });
+        gripOwnerRange.push([0, 0]);
+        return [pt];
       }
       return [];
     }
@@ -121,34 +150,74 @@ export function useGripEditing(opts: {
     // ganze Treppe (applyGrip → moveStairBy). Auswahl exklusiv.
     if (selectedStairId) {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
-      return st ? [stairMoveHandle(st)] : [];
+      if (!st) return [];
+      gripOwners.push({ localIndex: 0 });
+      gripOwnerRange.push([0, 0]);
+      return [stairMoveHandle(st)];
     }
-    if (selectedDrawing) return drawingVertices(selectedDrawing);
-    if (selectedWallIds.length === 1 && !selectedDrawingId) {
-      const w = project.walls.find((x) => x.id === selectedWallIds[0]);
-      if (w) return [w.start, w.end];
-    }
-    // Decke: die Umriss-Vertices als Griffe (nur bei genau einer gewählten Decke).
-    if (selectedCeiling && !selectedDrawingId && selectedWallIds.length === 0) {
-      return [...selectedCeiling.outline];
+    // Decke: die Umriss-Vertices als Griffe (nur bei genau einer gewählten Decke,
+    // solange kein 2D-Element/Wand mitgewählt ist — kein Multi-Select für Decken).
+    if (selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      const pts = [...selectedCeiling.outline];
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
     }
     // Raum: die Umriss-Vertices als Griffe (nur bei genau einem gewählten Raum).
     if (
       selectedRoom &&
-      !selectedDrawingId &&
+      effectiveDrawingIds.length === 0 &&
       selectedWallIds.length === 0 &&
       !selectedCeiling
     ) {
-      return [...selectedRoom.boundary];
+      const pts = [...selectedRoom.boundary];
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
     }
-    return [];
+    // Mehrfachauswahl (Regel- UND Standardfall): je gewähltem 2D-Element bzw.
+    // je gewählter Wand ein eigener, in sich zusammenhängender Vertex-Block.
+    // Wand UND 2D-Element schliessen sich weiterhin gegenseitig aus (wie schon
+    // bei der Auswahl selbst — s. die vielen `!selectedDrawingId`-Wächter, die
+    // dieses Modul vorher hatte).
+    const out: Vec2[] = [];
+    const pushGroup = (pts: Vec2[], owner: { drawingId?: string; wallId?: string }) => {
+      if (pts.length === 0) return;
+      const start = out.length;
+      pts.forEach((p, i) => {
+        out.push(p);
+        gripOwners.push({ ...owner, localIndex: i });
+      });
+      const end = out.length - 1;
+      for (let i = start; i <= end; i++) gripOwnerRange.push([start, end]);
+    };
+    for (const id of effectiveDrawingIds) {
+      const d = project.drawings2d.find((x) => x.id === id);
+      if (d) pushGroup(drawingVertices(d), { drawingId: id });
+    }
+    if (effectiveDrawingIds.length === 0) {
+      for (const id of selectedWallIds) {
+        const w = project.walls.find((x) => x.id === id);
+        if (w) pushGroup([w.start, w.end], { wallId: id });
+      }
+    }
+    return out;
   })();
 
-  // Pro Seite des selektierten Elements ein Griff: Kanten-Mittelpunkt + nach
-  // AUSSEN zeigende Einheitsnormale + die beiden Vertex-Indizes (passend zur
-  // `grips`-/`drawingVertices`-Reihenfolge). Die Außenrichtung wird über das
-  // Vorzeichen des Skalarprodukts der Kanten-Normale mit (mid − centroid)
-  // gewählt (vom Polygon-Schwerpunkt weg).
+  // Nachbar-Griff-Index INNERHALB desselben Elements (für Anker-Auflösung).
+  // null = kein Nachbar möglich (Einzelgriff-Element wie Kreis/Öffnung/Treppe).
+  const neighborGripIndex = (index: number): number | null => {
+    const range = gripOwnerRange[index];
+    if (!range) return null;
+    const [start, end] = range;
+    if (index > start) return index - 1;
+    if (end > start) return start + 1;
+    return null;
+  };
+
+  // Pro Seite JEDES gewählten Elements ein Griff: Kanten-Mittelpunkt + nach
+  // AUSSEN zeigende Einheitsnormale + die beiden lokalen Vertex-Indizes +
+  // `owner` (welchem Element diese Kante gehört — Mehrfachauswahl). Die
+  // Außenrichtung wird über das Vorzeichen des Skalarprodukts der Kanten-
+  // Normale mit (mid − centroid) gewählt (vom Polygon-Schwerpunkt weg).
   //  • rect: 4 Kanten (geschlossen).
   //  • polyline mit `closed`: Kanten zwischen aufeinanderfolgenden Vertices
   //    inkl. Schlusskante (letzter → erster).
@@ -160,7 +229,7 @@ export function useGripEditing(opts: {
   //    Verschieben EINER Kante einer komplexen Polylinie, §Task B).
   const edgeGrips: EdgeGrip[] = (() => {
     // Geschlossener Ring aus Vertices → Kanten-Griffe mit Außennormale.
-    const ringEdges = (verts: Vec2[]): EdgeGrip[] => {
+    const ringEdges = (verts: Vec2[], owner: { drawingId?: string; wallId?: string }): EdgeGrip[] => {
       const n = verts.length;
       if (n < 3) return [];
       // Schwerpunkt (Mittel der Eckpunkte) als Innenbezug.
@@ -177,7 +246,7 @@ export function useGripEditing(opts: {
         // Nach außen orientieren: Normale soll von centroid → mid weisen.
         const outward = sub(mid, centroid);
         if (nrm.x * outward.x + nrm.y * outward.y < 0) nrm = scale(nrm, -1);
-        out.push({ mid, normal: nrm, aIndex: i, bIndex: (i + 1) % n });
+        out.push({ mid, normal: nrm, aIndex: i, bIndex: (i + 1) % n, owner });
       }
       return out;
     };
@@ -185,7 +254,7 @@ export function useGripEditing(opts: {
     // Schlusskante. `normal` dient nur der Griff-Darstellung (leftNormal der
     // Kante); die Bewegung ist frei (volles Delta), nicht auf die Normale
     // beschränkt — daher `free: true`.
-    const openEdges = (verts: Vec2[]): EdgeGrip[] => {
+    const openEdges = (verts: Vec2[], owner: { drawingId?: string; wallId?: string }): EdgeGrip[] => {
       const n = verts.length;
       if (n < 2) return [];
       const out: EdgeGrip[] = [];
@@ -194,40 +263,45 @@ export function useGripEditing(opts: {
         const b = verts[i + 1];
         const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         const nrm = normalize(leftNormal(sub(b, a)));
-        out.push({ mid, normal: nrm, aIndex: i, bIndex: i + 1, free: true });
+        out.push({ mid, normal: nrm, aIndex: i, bIndex: i + 1, free: true, owner });
       }
       return out;
     };
-    if (selectedDrawing) {
-      const g = selectedDrawing.geom;
-      if (g.shape === "rect" || g.shape === "image") return ringEdges(grips);
-      if (g.shape === "polyline" && g.closed) return ringEdges(grips);
-      if (g.shape === "polyline" && !g.closed) return openEdges(grips);
-      if (g.shape === "line") return openEdges(grips);
-      return [];
-    }
-    if (selectedWallIds.length === 1 && !selectedDrawingId) {
-      const w = project.walls.find((x) => x.id === selectedWallIds[0]);
-      if (w) {
-        const mid: Vec2 = { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 };
-        const nrm = normalize(leftNormal(sub(w.end, w.start)));
-        return [{ mid, normal: nrm, aIndex: 0, bIndex: 1 }];
-      }
-    }
-    // Decke: geschlossener Ring aus dem Umriss.
-    if (selectedCeiling && !selectedDrawingId && selectedWallIds.length === 0) {
-      return ringEdges(grips);
+    // Decke: geschlossener Ring aus dem Umriss (Auswahl exklusiv, wie bei grips).
+    if (selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      return ringEdges(selectedCeiling.outline, {});
     }
     // Raum: geschlossener Ring aus dem Umriss.
     if (
       selectedRoom &&
-      !selectedDrawingId &&
+      effectiveDrawingIds.length === 0 &&
       selectedWallIds.length === 0 &&
       !selectedCeiling
     ) {
-      return ringEdges(grips);
+      return ringEdges(selectedRoom.boundary, {});
     }
-    return [];
+    const out: EdgeGrip[] = [];
+    for (const id of effectiveDrawingIds) {
+      const d = project.drawings2d.find((x) => x.id === id);
+      if (!d) continue;
+      const verts = drawingVertices(d);
+      const g = d.geom;
+      const owner = { drawingId: id };
+      if (g.shape === "rect" || g.shape === "image") out.push(...ringEdges(verts, owner));
+      else if (g.shape === "polyline" && g.closed) out.push(...ringEdges(verts, owner));
+      else if (g.shape === "polyline" && !g.closed) out.push(...openEdges(verts, owner));
+      else if (g.shape === "line") out.push(...openEdges(verts, owner));
+    }
+    if (effectiveDrawingIds.length === 0) {
+      for (const id of selectedWallIds) {
+        const w = project.walls.find((x) => x.id === id);
+        if (!w) continue;
+        const mid: Vec2 = { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 };
+        const nrm = normalize(leftNormal(sub(w.end, w.start)));
+        out.push({ mid, normal: nrm, aIndex: 0, bIndex: 1, owner: { wallId: id } });
+      }
+    }
+    return out;
   })();
 
   // Zuletzt angewandter Kanten-Offset während eines Edge-Grip-Drags (Anker).
@@ -372,13 +446,20 @@ export function useGripEditing(opts: {
   const cycleGripEditField = () => {
     const info = gripDragInfoRef.current;
     if (!info) return;
-    const g = selectedDrawing?.geom;
+    // Bei Mehrfachauswahl gehört der gezogene Griff evtl. NICHT dem einzeln
+    // selektierten `selectedDrawing`, sondern einem anderen Element der
+    // Auswahl — das eigentliche Element über `gripOwners` auflösen.
+    const owner = gripOwners[info.index];
+    const ownerDrawing = owner?.drawingId
+      ? project.drawings2d.find((d) => d.id === owner.drawingId)
+      : selectedDrawing;
+    const g = ownerDrawing?.geom;
     const anchor =
       g && (g.shape === "circle" || g.shape === "arc")
         ? g.center
         : (() => {
-            const refIndex = info.index > 0 ? info.index - 1 : grips.length > 1 ? 1 : -1;
-            return refIndex >= 0 ? grips[refIndex] : null;
+            const refIndex = neighborGripIndex(info.index);
+            return refIndex != null ? grips[refIndex] : null;
           })();
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     setGripEdit((prev) =>
@@ -438,12 +519,17 @@ export function useGripEditing(opts: {
     }
     if (selectedRoomId) moveRoomGrip(selectedRoomId, index, pt);
     else if (selectedCeilingId) moveCeilingGrip(selectedCeilingId, index, pt);
-    else moveGripOf(selectedDrawingId, selectedWallId, index, pt);
+    else {
+      // Mehrfachauswahl: welchem Element dieser Griff gehört, kommt aus
+      // `gripOwners` (nicht mehr aus den singulären selectedDrawingId/-WallId).
+      const owner = gripOwners[index];
+      moveGripOf(owner?.drawingId ?? selectedDrawingId, owner?.wallId ?? selectedWallId, owner?.localIndex ?? index, pt);
+    }
   };
-  const applyEdge = (aIndex: number, bIndex: number, delta: Vec2) => {
-    if (selectedRoomId) moveRoomEdge(selectedRoomId, aIndex, bIndex, delta);
-    else if (selectedCeilingId) moveCeilingEdge(selectedCeilingId, aIndex, bIndex, delta);
-    else moveEdgeOf(selectedDrawingId, selectedWallId, aIndex, bIndex, delta);
+  const applyEdge = (edge: EdgeGrip, delta: Vec2) => {
+    if (selectedRoomId) moveRoomEdge(selectedRoomId, edge.aIndex, edge.bIndex, delta);
+    else if (selectedCeilingId) moveCeilingEdge(selectedCeilingId, edge.aIndex, edge.bIndex, delta);
+    else moveEdgeOf(edge.owner?.drawingId ?? selectedDrawingId, edge.owner?.wallId ?? selectedWallId, edge.aIndex, edge.bIndex, delta);
   };
 
   const gripHandlers = {
@@ -458,17 +544,23 @@ export function useGripEditing(opts: {
         setDraft({ preview: [], vertices: [], snap: null });
         return;
       }
+      // Mehrfachauswahl: das Element, dem DIESER Griff gehört (nicht zwingend
+      // das singuläre selectedDrawingId/selectedWallId) — von den eigenen
+      // Snap-Kandidaten ausschließen (sonst fängt der Punkt an sich selbst).
+      const owner = gripOwners[index];
       const snapProject: Project = selectedRoomId
         ? { ...project, rooms: (project.rooms ?? []).filter((r) => r.id !== selectedRoomId) }
         : selectedCeilingId
         ? { ...project, ceilings: (project.ceilings ?? []).filter((c) => c.id !== selectedCeilingId) }
-        : selectedDrawingId
-        ? { ...project, drawings2d: project.drawings2d.filter((d) => d.id !== selectedDrawingId) }
-        : { ...project, walls: project.walls.filter((w) => w.id !== selectedWallId) };
-      // Bezugspunkt für Shift-Ortho: ein Nachbar-Griff (festes Ende), relativ zu
-      // dem die Bewegung auf H/V eingerastet wird.
-      const refIndex = index > 0 ? index - 1 : grips.length > 1 ? 1 : -1;
-      const anchor = refIndex >= 0 ? grips[refIndex] : null;
+        : owner?.drawingId
+        ? { ...project, drawings2d: project.drawings2d.filter((d) => d.id !== owner.drawingId) }
+        : owner?.wallId
+        ? { ...project, walls: project.walls.filter((w) => w.id !== owner.wallId) }
+        : project;
+      // Bezugspunkt für Shift-Ortho: ein Nachbar-Griff DESSELBEN Elements
+      // (festes Ende), relativ zu dem die Bewegung auf H/V eingerastet wird.
+      const refIndex = neighborGripIndex(index);
+      const anchor = refIndex != null ? grips[refIndex] : null;
       // Shift = Ortho-Lock: den gezogenen Punkt auf H/V gegenüber dem FIXEN Anker
       // zwingen (Achse = die nähere; applyAngleConstraint mit 90°, wie Ortho beim
       // Zeichnen). Der Lock dominiert (kein Snap), damit die Endkoordinate
@@ -581,7 +673,7 @@ export function useGripEditing(opts: {
           else dx = 0;
         }
         if (dx === 0 && dy === 0) return;
-        applyEdge(edge.aIndex, edge.bIndex, { x: dx, y: dy });
+        applyEdge(edge, { x: dx, y: dy });
         setDraft({ preview: [], vertices: [], snap: null });
         return;
       }
@@ -610,7 +702,7 @@ export function useGripEditing(opts: {
       if (prev === null) return;
       const inc = offset - prev;
       if (inc === 0) return;
-      applyEdge(edge.aIndex, edge.bIndex, scale(edge.normal, inc));
+      applyEdge(edge, scale(edge.normal, inc));
       setDraft({ preview: [], vertices: [], snap: isGeometrySnap ? snapResult : null });
     },
     onGripEnd: () => {

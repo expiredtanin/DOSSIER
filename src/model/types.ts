@@ -1616,6 +1616,13 @@ export interface EdgeGrip {
    * entlang der Außennormale wie bisher.
    */
   free?: boolean;
+  /**
+   * Zu welchem Element diese Kante gehört (für Mehrfachauswahl — mehrere
+   * gewählte Elemente liefern je eigene Kanten-Griffe). Fehlt bei den
+   * exklusiven Einzel-Fällen (Decke/Raum), die weiterhin über die separat
+   * gehaltene `selectedCeilingId`/`selectedRoomId` aufgelöst werden.
+   */
+  owner?: { drawingId?: string; wallId?: string };
 }
 
 // ── Extrudierter Körper (truck-Integration, docs/design/truck-plan.md) ─────
