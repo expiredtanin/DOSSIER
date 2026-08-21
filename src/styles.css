@@ -2143,6 +2143,16 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+/* Bezier-Hilfslinien (Anker → Kontrollpunkt-Griff): dünn, gestrichelt, deutlich
+   zurückhaltender als der Kurven-Umriss selbst — reine Steuerungshilfe. */
+.plan-svg .plan-grip-line {
+  stroke: var(--accent-light);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+  fill: none;
+}
+
 /* Kanten-/Seiten-Griffe (Edge Grips): dreieckiger Anfasser je Seite, Spitze
    nach außen. Gleiche Akzent-/Rand-Farben wie die Eckpunkt-Griffe. */
 .plan-svg .plan-edge-grip {

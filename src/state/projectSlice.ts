@@ -1452,6 +1452,24 @@ function resizeGeom(
   }
 }
 
+/**
+ * Kreis, solange rx≈ry (relative Toleranz 0.5%) — sonst Ellipse (rotation 0).
+ * Trägt den Kreis-zu-Ellipse-Formwandel beim Griff-Ziehen (Nutzer-Wunsch:
+ * „Kreis wird wie bisher erstellt, kann beim Bearbeiten zur Ellipse werden");
+ * symmetrisch nutzbar auch für die Rückrichtung (Ellipse → Kreis, wenn man
+ * die Halbachsen wieder aneinander annähert).
+ */
+function ellipseOrCircle(
+  center: Vec2,
+  rx: number,
+  ry: number,
+): import("../model/types").Drawing2DGeom {
+  if (Math.abs(rx - ry) <= 0.005 * Math.max(rx, ry)) {
+    return { shape: "circle", center, r: (rx + ry) / 2 };
+  }
+  return { shape: "ellipse", center, rx, ry, rotation: 0 };
+}
+
 // ── Editier-Griffe (verschoben aus App.tsx, 1:1) ─────────────────────────────
 
 /**
@@ -1472,8 +1490,16 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
       { x: g.min.x, y: g.max.y },
     ];
   }
+  // Kreis: zwei Griffe (Ost/Nord, wie bei der Ellipse) — zieht man EINEN der
+  // beiden unabhängig, wird der Kreis zur Ellipse (s. `moveGrip`). So bleibt
+  // ein Kreis ein Kreis, solange man ihn nicht gezielt verzerrt (Nutzer-
+  // Wunsch: „Kreis erstellen wie bisher, beim Bearbeiten kann er zur Ellipse
+  // werden").
   if (g.shape === "circle") {
-    return [{ x: g.center.x + g.r, y: g.center.y }];
+    return [
+      { x: g.center.x + g.r, y: g.center.y },
+      { x: g.center.x, y: g.center.y + g.r },
+    ];
   }
   if (g.shape === "arc") {
     const mid = (g.a0 + g.a1) / 2;
@@ -1569,10 +1595,14 @@ function moveGrip(
         }
         // Text: der einzige Griff (Index 0) sitzt am Ankerpunkt → verschiebt ihn.
         if (g.shape === "text") return { ...d, geom: { ...g, at: pt } };
-        // Kreis: der einzige Griff (Index 0) ändert nur den Radius.
+        // Kreis: Griff 0 (Ost) bzw. 1 (Nord) — zieht man die beiden Achsen
+        // unabhängig auseinander, wird der Kreis zur Ellipse (rotation 0);
+        // bleiben rx/ry (fast) gleich, bleibt es ein Kreis (s. `ellipseOrCircle`).
         if (g.shape === "circle") {
-          const r = Math.max(1e-3, Math.hypot(pt.x - g.center.x, pt.y - g.center.y));
-          return { ...d, geom: { ...g, r } };
+          const dx = pt.x - g.center.x, dy = pt.y - g.center.y;
+          const rx = index === 0 ? Math.max(1e-3, Math.abs(dx)) : g.r;
+          const ry = index === 0 ? g.r : Math.max(1e-3, Math.abs(dy));
+          return { ...d, geom: ellipseOrCircle(g.center, rx, ry) };
         }
         // Bogen: Griff 0/1 (Start-/End-Winkel, s. drawingVertices) ändert a0/a1;
         // Griff 2 (Bogenmitte) ändert nur den Radius (Winkel bleiben fest).
@@ -1592,8 +1622,13 @@ function moveGrip(
           const dx = pt.x - g.center.x, dy = pt.y - g.center.y;
           const lx = dx * c + dy * s;
           const ly = -dx * s + dy * c;
-          if (index === 0) return { ...d, geom: { ...g, rx: Math.max(1e-3, Math.abs(lx)) } };
-          return { ...d, geom: { ...g, ry: Math.max(1e-3, Math.abs(ly)) } };
+          const rx = index === 0 ? Math.max(1e-3, Math.abs(lx)) : g.rx;
+          const ry = index === 0 ? g.ry : Math.max(1e-3, Math.abs(ly));
+          // Nur bei rotation 0 kann eine (fast) gleichseitige Ellipse wieder
+          // zum Kreis kollabieren — eine gedrehte Ellipse mit rx≈ry ist optisch
+          // bereits ein Kreis, „Drehung" wäre dann aber wieder bedeutungslos.
+          if (g.rotation === 0) return { ...d, geom: ellipseOrCircle(g.center, rx, ry) };
+          return { ...d, geom: { ...g, rx, ry } };
         }
         return d;
       }),

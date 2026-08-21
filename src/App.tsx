@@ -1293,6 +1293,7 @@ export default function App() {
   // Auswahl — siehe state/useGripEditing.ts.
   const {
     grips,
+    gripHandleLines,
     edgeGrips,
     gripHandlers,
     gripEdit,
@@ -2800,6 +2801,7 @@ export default function App() {
           toolHandlers={toolHandlers}
           hudFields={hudFields}
           grips={grips}
+          gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
           selectedDrawingIds={selectedDrawingIds}

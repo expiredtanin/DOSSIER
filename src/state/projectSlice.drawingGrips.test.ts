@@ -40,9 +40,9 @@ beforeEach(() => {
 });
 
 describe("drawingVertices — Kreis/Bogen", () => {
-  it("Kreis liefert einen Radius-Griff auf der Ost-Seite", () => {
+  it("Kreis liefert zwei Griffe (Ost/Nord) — wie eine Ellipse", () => {
     const v = drawingVertices(circleDrawing);
-    expect(v).toEqual([{ x: 3, y: 3 }]);
+    expect(v).toEqual([{ x: 3, y: 3 }, { x: 2, y: 4 }]);
   });
 
   it("Bogen liefert Start-/End-/Mittel-Winkel-Griffe", () => {
@@ -55,8 +55,21 @@ describe("drawingVertices — Kreis/Bogen", () => {
 });
 
 describe("moveGripOf — Kreis/Bogen", () => {
-  it("Kreis-Griff ziehen ändert nur den Radius, nicht das Zentrum", () => {
-    getState().moveGripOf("d-circle", null, 0, { x: 5, y: 3 }); // 3m vom Zentrum
+  it("Kreis-Ost-Griff auf denselben Radius gezogen bleibt ein Kreis", () => {
+    getState().moveGripOf("d-circle", null, 0, { x: 3, y: 3 }); // weiterhin 1m Ost
+    const g = getState().project.drawings2d.find((d) => d.id === "d-circle")!.geom;
+    expect(g).toMatchObject({ shape: "circle", center: { x: 2, y: 3 }, r: 1 });
+  });
+
+  it("Kreis-Ost-Griff auf einen ANDEREN Radius gezogen wird zur Ellipse (Nutzer-Wunsch: Kreis kann beim Bearbeiten zur Ellipse werden)", () => {
+    getState().moveGripOf("d-circle", null, 0, { x: 5, y: 3 }); // 3m Ost statt 1m
+    const g = getState().project.drawings2d.find((d) => d.id === "d-circle")!.geom;
+    expect(g).toMatchObject({ shape: "ellipse", center: { x: 2, y: 3 }, rx: 3, ry: 1, rotation: 0 });
+  });
+
+  it("Ellipse-Griff zurück auf (fast) gleiche Halbachsen gezogen wird wieder zum Kreis", () => {
+    getState().moveGripOf("d-circle", null, 0, { x: 5, y: 3 }); // → Ellipse rx=3, ry=1
+    getState().moveGripOf("d-circle", null, 1, { x: 2, y: 6 }); // Nord-Griff auf ry=3
     const g = getState().project.drawings2d.find((d) => d.id === "d-circle")!.geom;
     expect(g).toMatchObject({ shape: "circle", center: { x: 2, y: 3 }, r: 3 });
   });

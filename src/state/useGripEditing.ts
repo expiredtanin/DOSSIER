@@ -202,6 +202,26 @@ export function useGripEditing(opts: {
     return out;
   })();
 
+  // Bezier-Hilfslinien (Anker → Kontrollpunkt-Griff), gestrichelt gerendert,
+  // damit sichtbar/nachvollziehbar ist, welcher Griff welchen Kurvenabschnitt
+  // steuert (Nutzer-Wunsch: „Hilfslinien sollten schon sichtbar sein um sie
+  // zu steuern" — wie bei Illustrator/Inkscape üblich). `pts` folgt dem Muster
+  // Anker·Griff·Griff·Anker·… (s. `Drawing2DGeom["bezier"]`); jeder Anker
+  // bekommt eine Linie zu seinem/seinen benachbarten Griff(en).
+  const gripHandleLines: { a: Vec2; b: Vec2 }[] = (() => {
+    const out: { a: Vec2; b: Vec2 }[] = [];
+    for (const id of effectiveDrawingIds) {
+      const d = project.drawings2d.find((x) => x.id === id);
+      const g = d?.geom;
+      if (!g || g.shape !== "bezier") continue;
+      for (let i = 0; i + 3 < g.pts.length; i += 3) {
+        out.push({ a: g.pts[i], b: g.pts[i + 1] }); // Anker → Griff 1
+        out.push({ a: g.pts[i + 3], b: g.pts[i + 2] }); // nächster Anker → Griff 2
+      }
+    }
+    return out;
+  })();
+
   // Nachbar-Griff-Index INNERHALB desselben Elements (für Anker-Auflösung).
   // null = kein Nachbar möglich (Einzelgriff-Element wie Kreis/Öffnung/Treppe).
   const neighborGripIndex = (index: number): number | null => {
@@ -1048,6 +1068,7 @@ export function useGripEditing(opts: {
 
   return {
     grips,
+    gripHandleLines,
     edgeGrips,
     gripHandlers,
     gripEdit,

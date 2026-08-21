@@ -117,6 +117,7 @@ export function Content({
   toolHandlers,
   hudFields,
   grips,
+  gripHandleLines,
   edgeGrips,
   selectedDrawingId,
   selectedDrawingIds,
@@ -218,6 +219,7 @@ export function Content({
   toolHandlers: ToolHandlers;
   hudFields: HudFieldsState | null;
   grips: Vec2[];
+  gripHandleLines: { a: Vec2; b: Vec2 }[];
   edgeGrips: EdgeGrip[];
   selectedDrawingId: string | null;
   selectedDrawingIds?: string[];
@@ -328,6 +330,7 @@ export function Content({
           toolHandlers={toolHandlers}
           hudFields={hudFields}
           grips={grips}
+          gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
           selectedDrawingIds={selectedDrawingIds}
@@ -393,6 +396,7 @@ export function Content({
           toolHandlers={toolHandlers}
           hudFields={hudFields}
           grips={grips}
+          gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
           selectedDrawingIds={selectedDrawingIds}
@@ -500,6 +504,7 @@ export function Content({
           toolHandlers={toolHandlers}
           hudFields={hudFields}
           grips={grips}
+          gripHandleLines={gripHandleLines}
           edgeGrips={edgeGrips}
           selectedDrawingId={selectedDrawingId}
           selectedDrawingIds={selectedDrawingIds}
@@ -555,6 +560,7 @@ function LevelPlanView({
   toolHandlers,
   hudFields,
   grips,
+  gripHandleLines,
   edgeGrips,
   selectedDrawingId,
   selectedDrawingIds,
@@ -607,6 +613,7 @@ function LevelPlanView({
   toolHandlers: ToolHandlers;
   hudFields: HudFieldsState | null;
   grips: Vec2[];
+  gripHandleLines: { a: Vec2; b: Vec2 }[];
   edgeGrips: EdgeGrip[];
   selectedDrawingId: string | null;
   selectedDrawingIds?: string[];
@@ -688,6 +695,7 @@ function LevelPlanView({
         toolHandlers={toolHandlers}
           hudFields={hudFields}
         grips={grips}
+        gripHandleLines={gripHandleLines}
         edgeGrips={edgeGrips}
         hairline={hairline}
         marqueeColor={marqueeColor}
@@ -752,6 +760,7 @@ function SectionPlanView({
   toolHandlers,
   hudFields,
   grips,
+  gripHandleLines,
   edgeGrips,
   selectedDrawingId,
   selectedDrawingIds,
@@ -795,6 +804,7 @@ function SectionPlanView({
   toolHandlers: ToolHandlers;
   hudFields: HudFieldsState | null;
   grips: Vec2[];
+  gripHandleLines: { a: Vec2; b: Vec2 }[];
   edgeGrips: EdgeGrip[];
   selectedDrawingId: string | null;
   selectedDrawingIds?: string[];
@@ -906,6 +916,7 @@ function SectionPlanView({
         toolHandlers={toolHandlers}
           hudFields={hudFields}
         grips={grips}
+        gripHandleLines={gripHandleLines}
         edgeGrips={edgeGrips}
         hairline={hairline}
         marqueeColor={marqueeColor}

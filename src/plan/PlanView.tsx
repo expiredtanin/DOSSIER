@@ -383,6 +383,12 @@ export interface PlanViewProps {
    */
   grips?: Vec2[];
   /**
+   * Bezier-Hilfslinien (Anker → Kontrollpunkt-Griff) des selektierten
+   * Elements — gestrichelt gerendert, damit sichtbar bleibt, welcher Griff
+   * welchen Kurvenabschnitt steuert (s. `useGripEditing.ts`).
+   */
+  gripHandleLines?: { a: Vec2; b: Vec2 }[];
+  /**
    * Kanten-/Seiten-Griffe (Edge Grips) des selektierten Elements: je Seite ein
    * dreieckiger Anfasser am Kanten-Mittelpunkt, dessen Spitze nach AUSSEN zeigt.
    * Ziehen meldet sich über {@link GripHandlers.onEdgeMove}. Nur sichtbar/aktiv,
@@ -499,6 +505,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       showRulers = true,
       hudFields,
       grips,
+      gripHandleLines,
       edgeGrips,
       hairline,
       selectedDrawingId,
@@ -2581,6 +2588,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           pointerEvents="none"
         />
       )}
+      {/* Bezier-Hilfslinien (Anker → Griff), gestrichelt — VOR den Griff-
+          Quadraten gezeichnet, damit die Griffe oben liegen (anklickbar). */}
+      {gripsActive &&
+        gripHandleLines &&
+        gripHandleLines.map((l, i) => (
+          <line
+            key={`gripline-${i}`}
+            className="plan-grip-line"
+            x1={toScreen(l.a).x}
+            y1={toScreen(l.a).y}
+            x2={toScreen(l.b).x}
+            y2={toScreen(l.b).y}
+            pointerEvents="none"
+          />
+        ))}
       {/* Editier-Griffe des selektierten Elements (Wand-Enden / 2D-Vertices):
           ziehbare Quadrate. Bildschirmkonstante Größe über die meet-Skala. */}
       {gripsActive &&
