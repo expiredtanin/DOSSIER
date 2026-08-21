@@ -231,6 +231,7 @@ export const en: Record<TranslationKey, string> = {
   "snap.enabled": "Snap on",
   "snap.endpoint": "Endpoint",
   "snap.midpoint": "Midpoint",
+  "snap.center": "Circle center/quadrants (0/90/180/270°)",
   "snap.intersection": "Intersection",
   "snap.onEdge": "On edge (perp.)",
   "snap.grid": "Grid",

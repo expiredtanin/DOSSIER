@@ -175,6 +175,15 @@ function SnapControl({
           <label className="sb-snap-row">
             <input
               type="checkbox"
+              checked={snap.center}
+              disabled={!snap.enabled}
+              onChange={(e) => onSnapChange({ ...snap, center: e.target.checked })}
+            />
+            <span>{t("snap.center")}</span>
+          </label>
+          <label className="sb-snap-row">
+            <input
+              type="checkbox"
               checked={snap.intersection}
               disabled={!snap.enabled}
               onChange={(e) =>

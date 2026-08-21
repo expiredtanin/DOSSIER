@@ -93,13 +93,18 @@ export interface SnapSettings {
   hoverDivideCount: number;
 }
 
-/** Default-Snap-Einstellungen (endpoint/midpoint/intersection/onEdge + grid). */
+/**
+ * Default-Snap-Einstellungen (endpoint/midpoint/intersection/onEdge/center +
+ * grid). `center` (Kreis-/Bogen-Mittelpunkt + Quadranten 0/90/180/270°) war
+ * lange im Modell vorhanden, aber ohne UI-Schalter unerreichbar (Default
+ * `false`) — auf Nutzer-Wunsch jetzt an UND im Footer (StatusBar) umschaltbar.
+ */
 export const DEFAULT_SNAP: SnapSettings = {
   enabled: true,
   endpoint: true,
   midpoint: true,
   intersection: true,
-  center: false,
+  center: true,
   onEdge: true,
   grid: true,
   gridSize: 0.1,

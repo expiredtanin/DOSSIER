@@ -233,6 +233,7 @@ export const de = {
   "snap.enabled": "Fang aktiv",
   "snap.endpoint": "Endpunkt",
   "snap.midpoint": "Mittelpunkt",
+  "snap.center": "Kreismitte/Quadranten (0/90/180/270°)",
   "snap.intersection": "Schnittpunkt",
   "snap.onEdge": "Auf Kante (Lot)",
   "snap.grid": "Raster",
