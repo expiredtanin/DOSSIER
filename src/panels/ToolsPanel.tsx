@@ -138,6 +138,36 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <circle cx="13.5" cy="11" r="0.9" fill="currentColor" stroke="none" />
         </svg>
       );
+    case "ellipse":
+      // Ellipse-Umriss (geneigt, unterscheidbar vom Kreis).
+      return (
+        <svg {...common}>
+          <ellipse cx="8" cy="8" rx="6" ry="4" />
+        </svg>
+      );
+    case "spline":
+      // Glatte S-Kurve durch drei Wegpunkte.
+      return (
+        <svg {...common}>
+          <path d="M 2.5 12.5 C 2.5 6 6 10 8 8 C 10 6 10.5 3.5 13.5 3.5" fill="none" />
+          <circle cx="2.5" cy="12.5" r="0.9" fill="currentColor" stroke="none" />
+          <circle cx="8" cy="8" r="0.9" fill="currentColor" stroke="none" />
+          <circle cx="13.5" cy="3.5" r="0.9" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "bezier":
+      // Kubische Bezier-Kurve mit sichtbaren Kontrollpunkt-Griffen.
+      return (
+        <svg {...common}>
+          <path d="M 2.5 12.5 C 5 4 8 13 13.5 3.5" fill="none" />
+          <line x1="2.5" y1="12.5" x2="5" y2="4" strokeDasharray="1.5 1.2" />
+          <line x1="13.5" y1="3.5" x2="8" y2="13" strokeDasharray="1.5 1.2" />
+          <circle cx="2.5" cy="12.5" r="0.9" fill="currentColor" stroke="none" />
+          <circle cx="13.5" cy="3.5" r="0.9" fill="currentColor" stroke="none" />
+          <rect x="4.2" y="2.7" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+          <rect x="7.2" y="12.2" width="1.6" height="1.6" fill="currentColor" stroke="none" />
+        </svg>
+      );
     case "text":
       // Serifen-„A" als Text-Symbol.
       return (
@@ -174,7 +204,19 @@ export function ToolIcon({ id }: { id: ToolId }) {
 // Werkzeuge/Befehle in drei Rubriken sortiert (Nutzerwunsch: „sortiere nach 2D
 // und 3D und Bearbeiten"): reine Panel-Gruppierung (2D-Zeichnen · 3D/BIM-
 // Bauteile · Bearbeiten-Aktionen).
-const TOOLS_2D: ToolId[] = ["line", "polyline", "rect", "circle", "arc", "text", "textbox", "image"];
+const TOOLS_2D: ToolId[] = [
+  "line",
+  "polyline",
+  "rect",
+  "circle",
+  "arc",
+  "ellipse",
+  "spline",
+  "bezier",
+  "text",
+  "textbox",
+  "image",
+];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "ceilingopening", "roof", "extrude", "sectionline", "viewline"];
 const COMMANDS_EDIT = ["move", "copy", "rotate", "mirror", "offset", "multiline", "trim", "extend", "fillet", "chamfer", "join", "measure"];

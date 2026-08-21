@@ -1407,6 +1407,28 @@ function resizeGeom(
       };
       return { ...g, center, r };
     }
+    case "ellipse": {
+      // bbox: rotation=0 angenommen (das Werkzeug erzeugt nur achsparallele
+      // Ellipsen); rx/ry unabhängig skaliert, Mittelpunkt um den Anker verschoben.
+      const box = {
+        minX: g.center.x - g.rx,
+        minY: g.center.y - g.ry,
+        maxX: g.center.x + g.rx,
+        maxY: g.center.y + g.ry,
+      };
+      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
+      const center: Vec2 = {
+        x: ax + (g.center.x - ax) * sx,
+        y: ay + (g.center.y - ay) * sy,
+      };
+      return { ...g, center, rx: Math.max(1e-3, g.rx * sx), ry: Math.max(1e-3, g.ry * sy) };
+    }
+    case "bezier":
+    case "spline": {
+      const { ax, ay, sx, sy } = scaleAround(bbox2(g.pts), w, h, anchor);
+      const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
+      return { ...g, pts: g.pts.map(f) };
+    }
     case "text": {
       // Text: nur die Einfügeposition um den Anker schieben (Höhe bleibt).
       const box = { minX: g.at.x, minY: g.at.y, maxX: g.at.x, maxY: g.at.y };
@@ -1461,6 +1483,17 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
       { x: g.center.x + g.r * Math.cos(mid), y: g.center.y + g.r * Math.sin(mid) },
     ];
   }
+  // Ellipse: zwei Griffe (Index 0 = rx-Achse, Index 1 = ry-Achse), gedreht um
+  // `rotation` (0 beim heutigen Werkzeug) — siehe `moveGrip`.
+  if (g.shape === "ellipse") {
+    const c = Math.cos(g.rotation), s = Math.sin(g.rotation);
+    return [
+      { x: g.center.x + g.rx * c, y: g.center.y + g.rx * s },
+      { x: g.center.x - g.ry * s, y: g.center.y + g.ry * c },
+    ];
+  }
+  // Bezier/Spline: alle Kontroll-/Wegpunkte als Griffe (wie polyline).
+  if (g.shape === "bezier" || g.shape === "spline") return [...g.pts];
   // Text: EIN Griff am Ankerpunkt (zum Verschieben; siehe moveGrip).
   if (g.shape === "text") return [g.at];
   return [];
@@ -1518,7 +1551,7 @@ function moveGrip(
         if (g.shape === "line") {
           return { ...d, geom: index === 0 ? { ...g, a: pt } : { ...g, b: pt } };
         }
-        if (g.shape === "polyline") {
+        if (g.shape === "polyline" || g.shape === "bezier" || g.shape === "spline") {
           const pts = g.pts.map((p, i) => (i === index ? pt : p));
           return { ...d, geom: { ...g, pts } };
         }
@@ -1550,6 +1583,17 @@ function moveGrip(
           }
           const ang = Math.atan2(pt.y - g.center.y, pt.x - g.center.x);
           return { ...d, geom: index === 0 ? { ...g, a0: ang } : { ...g, a1: ang } };
+        }
+        // Ellipse: Griff 0 (rx-Achse) bzw. 1 (ry-Achse) — der gezogene Punkt wird
+        // ins lokale (gedrehte) Achsensystem projiziert, nur die jeweils
+        // betroffene Halbachse ändert sich.
+        if (g.shape === "ellipse") {
+          const c = Math.cos(g.rotation), s = Math.sin(g.rotation);
+          const dx = pt.x - g.center.x, dy = pt.y - g.center.y;
+          const lx = dx * c + dy * s;
+          const ly = -dx * s + dy * c;
+          if (index === 0) return { ...d, geom: { ...g, rx: Math.max(1e-3, Math.abs(lx)) } };
+          return { ...d, geom: { ...g, ry: Math.max(1e-3, Math.abs(ly)) } };
         }
         return d;
       }),
@@ -1590,7 +1634,11 @@ function moveElementBy(
             return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
           case "circle":
           case "arc":
+          case "ellipse":
             return { ...d, geom: { ...g, center: mv(g.center) } };
+          case "bezier":
+          case "spline":
+            return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
           case "text":
             return { ...d, geom: { ...g, at: mv(g.at) } };
           default:
@@ -1723,7 +1771,7 @@ function moveEdge(
           // Linie hat nur eine Kante [0,1] → das ganze Segment verschieben.
           return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
         }
-        if (g.shape === "polyline") {
+        if (g.shape === "polyline" || g.shape === "spline") {
           const pts = movePolygonEdge(g.pts, aIndex, bIndex, delta, !!g.closed);
           return { ...d, geom: { ...g, pts } };
         }

@@ -21,6 +21,9 @@ export type ToolId =
   | "rect"
   | "circle"
   | "arc"
+  | "ellipse"
+  | "spline"
+  | "bezier"
   | "text"
   | "textbox"
   | "image";

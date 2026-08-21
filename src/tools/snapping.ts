@@ -12,6 +12,7 @@ import { add, leftNormal, lineIntersect, normalize, scale, sub } from "../model/
 import { wallReferenceOffset } from "../model/wall";
 import { centroid as roomCentroid } from "../geometry/roomArea";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
+import { sampleBezierChain, sampleCatmullRom } from "./curves";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -101,6 +102,14 @@ function collectSegments(input: SnapInput): Seg[] {
       const c1 = g.min, c3 = g.max;
       const c2 = { x: g.max.x, y: g.min.y }, c4 = { x: g.min.x, y: g.max.y };
       segs.push([c1, c2], [c2, c3], [c3, c4], [c4, c1]);
+    } else if (g.shape === "bezier") {
+      const pts = sampleBezierChain(g.pts);
+      for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
+    } else if (g.shape === "spline") {
+      const closed = g.closed && g.pts.length > 2;
+      const pts = sampleCatmullRom(g.pts, closed);
+      for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
+      if (closed) segs.push([pts[pts.length - 1], pts[0]]);
     }
   }
   // Bereits gesetzte Draft-Segmente (Polylinie/Wand im Bau).
@@ -296,6 +305,15 @@ export function computeSnap(input: SnapInput): SnapResult | null {
       if (settings.endpoint && c.arc) {
         consider(onCircle(c, c.arc.a0), "endpoint");
         consider(onCircle(c, c.arc.a1), "endpoint");
+      }
+    }
+    // Ellipse: nur der Mittelpunkt (keine Quadranten — bei gedrehter Ellipse
+    // wären die "Achsenpunkte" ohnehin keine Kreis-Quadranten mehr).
+    if (settings.center) {
+      for (const d of input.project.drawings2d) {
+        if (d.levelId !== input.levelId) continue;
+        if (!input.visibleCodes.has(d.categoryCode)) continue;
+        if (d.geom.shape === "ellipse") consider(d.geom.center, "center");
       }
     }
   }

@@ -179,6 +179,12 @@ const mvGeom = (geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom => {
       return { ...geom, center: fn(geom.center) };
     case "arc":
       return { ...geom, center: fn(geom.center) };
+    case "ellipse":
+      return { ...geom, center: fn(geom.center) };
+    case "bezier":
+      return { ...geom, pts: geom.pts.map(fn) };
+    case "spline":
+      return { ...geom, pts: geom.pts.map(fn) };
     case "text":
       return { ...geom, at: fn(geom.at) };
     case "image": {

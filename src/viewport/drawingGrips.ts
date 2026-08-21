@@ -24,6 +24,7 @@ export function drawingGripVertices(d: Drawing2D): Vec2[] {
       { x: g.min.x, y: g.max.y },
     ];
   }
+  if (g.shape === "bezier" || g.shape === "spline") return [...g.pts];
   return [];
 }
 
@@ -44,7 +45,7 @@ export function drawingMoveAnchor(d: Drawing2D, verts: Vec2[]): Vec2 | null {
     return { x: sx / verts.length, y: sy / verts.length };
   }
   const g = d.geom;
-  if (g.shape === "circle" || g.shape === "arc") return g.center;
+  if (g.shape === "circle" || g.shape === "arc" || g.shape === "ellipse") return g.center;
   if (g.shape === "text") return g.at;
   return null;
 }

@@ -219,6 +219,9 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   rect: "rect",
   circle: "circle",
   arc: "arc",
+  ellipse: "ellipse",
+  spline: "spline",
+  bezier: "bezier",
   text: "text",
   textbox: "textbox",
 };

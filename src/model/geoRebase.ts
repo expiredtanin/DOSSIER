@@ -106,6 +106,12 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
           return { ...d, geom: { ...g, center: shift(g.center, dx, dy) } };
         case "arc":
           return { ...d, geom: { ...g, center: shift(g.center, dx, dy) } };
+        case "ellipse":
+          return { ...d, geom: { ...g, center: shift(g.center, dx, dy) } };
+        case "bezier":
+          return { ...d, geom: { ...g, pts: shiftAll(g.pts, dx, dy) } };
+        case "spline":
+          return { ...d, geom: { ...g, pts: shiftAll(g.pts, dx, dy) } };
         case "text":
           return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
         case "image":

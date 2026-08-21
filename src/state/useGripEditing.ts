@@ -290,6 +290,8 @@ export function useGripEditing(opts: {
       if (g.shape === "rect" || g.shape === "image") out.push(...ringEdges(verts, owner));
       else if (g.shape === "polyline" && g.closed) out.push(...ringEdges(verts, owner));
       else if (g.shape === "polyline" && !g.closed) out.push(...openEdges(verts, owner));
+      else if (g.shape === "spline" && g.closed) out.push(...ringEdges(verts, owner));
+      else if (g.shape === "spline" && !g.closed) out.push(...openEdges(verts, owner));
       else if (g.shape === "line") out.push(...openEdges(verts, owner));
     }
     if (effectiveDrawingIds.length === 0) {
@@ -462,7 +464,7 @@ export function useGripEditing(opts: {
       ? project.drawings2d.find((d) => d.id === owner.drawingId)
       : selectedDrawing;
     const g = ownerDrawing?.geom;
-    if (g && (g.shape === "circle" || g.shape === "arc")) return g.center;
+    if (g && (g.shape === "circle" || g.shape === "arc" || g.shape === "ellipse")) return g.center;
     const refIndex = neighborGripIndex(index);
     return refIndex != null ? grips[refIndex] : null;
   };
@@ -505,7 +507,8 @@ export function useGripEditing(opts: {
     const d = project.drawings2d.find((x) => x.id === owner.drawingId);
     const g = d?.geom;
     if (!g) return none;
-    if (g.shape === "polyline") return ringNeighborPts(g.pts, owner.localIndex, !!g.closed);
+    if (g.shape === "polyline" || g.shape === "spline")
+      return ringNeighborPts(g.pts, owner.localIndex, !!g.closed);
     if (g.shape === "rect" || g.shape === "image") {
       const corners = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
       return ringNeighborPts(corners, owner.localIndex, true);

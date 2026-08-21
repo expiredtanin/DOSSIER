@@ -17,6 +17,9 @@ import { roomCommand } from "./cmds/room";
 import { rectCommand } from "./cmds/rect";
 import { circleCommand } from "./cmds/circle";
 import { arcCommand } from "./cmds/arc";
+import { ellipseCommand } from "./cmds/ellipse";
+import { splineCommand } from "./cmds/spline";
+import { bezierCommand } from "./cmds/bezier";
 import { textCommand } from "./cmds/text";
 import { textboxCommand } from "./cmds/textbox";
 import { moveCommand } from "./cmds/move";
@@ -53,6 +56,9 @@ export const COMMANDS: Record<string, Command> = {
   rect: rectCommand,
   circle: circleCommand,
   arc: arcCommand,
+  ellipse: ellipseCommand,
+  spline: splineCommand,
+  bezier: bezierCommand,
   text: textCommand,
   textbox: textboxCommand,
   move: moveCommand,
@@ -104,6 +110,9 @@ export const ALIASES: Record<string, string> = {
   c: "circle",
   a: "arc",
   bogen: "arc",
+  el: "ellipse",
+  sp: "spline",
+  bz: "bezier",
   tx: "text",
   txt: "text",
   beschriftung: "text",

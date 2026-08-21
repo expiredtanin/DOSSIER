@@ -1502,6 +1502,28 @@ export type Drawing2DGeom =
   | { shape: "rect"; min: Vec2; max: Vec2 }
   | { shape: "circle"; center: Vec2; r: number }
   | { shape: "arc"; center: Vec2; r: number; a0: number; a1: number }
+  /**
+   * Ellipse — achsparalleles Zentrum + zwei Halbachsen + Drehung (Radiant,
+   * CCW). Das Zeichen-Werkzeug erzeugt bewusst nur `rotation: 0`; das Feld
+   * existiert für zukünftige Dreh-Bearbeitung bzw. gedrehte Ellipsen aus
+   * anderen Quellen. Rendering/Snapping/Griffe tessellieren sie (wie ehemals
+   * `circle`), kein eigenes glattes SVG-Primitiv (s. `generatePlan/drawing2d.ts`).
+   */
+  | { shape: "ellipse"; center: Vec2; rx: number; ry: number; rotation: number }
+  /**
+   * Kubische Bezier-Kette: `pts.length` ≡ 1 (mod 3), ≥ 4 — Punkte im Muster
+   * Anker·Griff·Griff·Anker·Griff·Griff·Anker·… (jedes weitere Segment fügt
+   * 3 Punkte an). Manuell gesetzte Kontrollpunkte (klassisches Bezier-
+   * Werkzeug), im Unterschied zu `spline` (Kurve DURCH Punkte, automatisch
+   * geglättet). Immer offen (kein `closed`-Feld).
+   */
+  | { shape: "bezier"; pts: Vec2[] }
+  /**
+   * Glatte Kurve DURCH `pts` (uniformer Catmull-Rom), analog `polyline`, aber
+   * mit gerundetem statt geradem Verlauf zwischen den Wegpunkten. `closed`
+   * schliesst den Ring (letzter Wegpunkt → erster).
+   */
+  | { shape: "spline"; pts: Vec2[]; closed: boolean }
   | {
       shape: "text";
       at: Vec2;

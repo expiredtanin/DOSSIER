@@ -494,7 +494,9 @@ function isClosedGeom(g: Drawing2DGeom): boolean {
   return (
     g.shape === "rect" ||
     g.shape === "circle" ||
-    (g.shape === "polyline" && g.closed)
+    g.shape === "ellipse" ||
+    (g.shape === "polyline" && g.closed) ||
+    (g.shape === "spline" && g.closed)
   );
 }
 
@@ -527,6 +529,20 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
     case "arc":
       acc(g.center.x - g.r, g.center.y - g.r);
       acc(g.center.x + g.r, g.center.y + g.r);
+      break;
+    case "ellipse": {
+      // Präzise Bounding-Box unter Berücksichtigung der Drehung (rotation=0
+      // beim heutigen Werkzeug, Feld existiert für spätere Quellen).
+      const c = Math.cos(g.rotation), s = Math.sin(g.rotation);
+      const hw = Math.hypot(g.rx * c, g.ry * s);
+      const hh = Math.hypot(g.rx * s, g.ry * c);
+      acc(g.center.x - hw, g.center.y - hh);
+      acc(g.center.x + hw, g.center.y + hh);
+      break;
+    }
+    case "bezier":
+    case "spline":
+      for (const p of g.pts) acc(p.x, p.y);
       break;
     case "text":
       acc(g.at.x, g.at.y);

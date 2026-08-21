@@ -554,6 +554,45 @@ const arcTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Ellipse: Platzhalter-Werkzeug, gekoppelt an den `ellipse`-Befehl (zwei
+// Bounding-Box-Ecken). Wie Kreis/Bogen nicht floorOnly.
+const ellipseTool: Tool = {
+  id: "ellipse",
+  labelKey: "tool.ellipse",
+  hintKey: () => "tool.ellipse.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Spline: Platzhalter-Werkzeug, gekoppelt an den `spline`-Befehl (Wegpunkte,
+// wie Polylinie, aber geglättet). Nicht floorOnly.
+const splineTool: Tool = {
+  id: "spline",
+  labelKey: "tool.spline",
+  hintKey: () => "tool.spline.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Bezier: Platzhalter-Werkzeug, gekoppelt an den `bezier`-Befehl (manuelle
+// Kontrollpunkt-Kette). Nicht floorOnly.
+const bezierTool: Tool = {
+  id: "bezier",
+  labelKey: "tool.bezier",
+  hintKey: () => "tool.bezier.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // Text: Platzhalter-Werkzeug, gekoppelt an den `text`-Befehl (Ankerpunkt →
 // getippte Zeile). Wie Kreis/Bogen nicht floorOnly (freies 2D-Element).
 const textTool: Tool = {
@@ -611,6 +650,9 @@ const TOOLS: Record<ToolId, Tool> = {
   rect: rectTool,
   circle: circleTool,
   arc: arcTool,
+  ellipse: ellipseTool,
+  spline: splineTool,
+  bezier: bezierTool,
   text: textTool,
   textbox: textboxTool,
   image: imageTool,

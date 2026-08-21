@@ -49,6 +49,11 @@ function drawingsBBox(
     else if (g.shape === "circle" || g.shape === "arc") {
       acc(g.center.x - g.r, g.center.y - g.r);
       acc(g.center.x + g.r, g.center.y + g.r);
+    } else if (g.shape === "ellipse") {
+      acc(g.center.x - g.rx, g.center.y - g.ry);
+      acc(g.center.x + g.rx, g.center.y + g.ry);
+    } else if (g.shape === "bezier" || g.shape === "spline") {
+      for (const p of g.pts) acc(p.x, p.y);
     } else if (g.shape === "text") acc(g.at.x, g.at.y);
   }
   return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
@@ -64,6 +69,9 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
     case "rect": return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
     case "circle": return { ...d, geom: { ...g, center: mv(g.center) } };
     case "arc": return { ...d, geom: { ...g, center: mv(g.center) } };
+    case "ellipse": return { ...d, geom: { ...g, center: mv(g.center) } };
+    case "bezier": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
+    case "spline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "text": return { ...d, geom: { ...g, at: mv(g.at) } };
     default: return d;
   }

@@ -13,6 +13,7 @@ import {
   resolveStrokeWeight,
   type Primitive,
 } from "./shared";
+import { ellipsePts, sampleBezierChain, sampleCatmullRom } from "../../tools/curves";
 
 export function addDrawing2D(
   out: Primitive[],
@@ -135,6 +136,27 @@ export function addDrawing2D(
         drawingId: d.id,
       });
       break;
+    case "ellipse": {
+      // Tessellierte Kontur (wie polyline/rect) statt eigenem SVG-Primitiv —
+      // konsistent mit dem übrigen 2D-Zeichnen-Werkzeugsatz, keine eigene
+      // Grip-/Snap-/Export-Sonderbehandlung nötig.
+      const pts = ellipsePts(g.center, g.rx, g.ry, g.rotation);
+      fillPoly(pts);
+      for (let i = 0; i < pts.length; i++) seg(pts[i], pts[(i + 1) % pts.length]);
+      break;
+    }
+    case "bezier": {
+      const pts = sampleBezierChain(g.pts);
+      for (let i = 0; i < pts.length - 1; i++) seg(pts[i], pts[i + 1]);
+      break;
+    }
+    case "spline": {
+      const pts = sampleCatmullRom(g.pts, g.closed && g.pts.length > 2);
+      if (g.closed && g.pts.length > 2) fillPoly(pts);
+      for (let i = 0; i < pts.length - 1; i++) seg(pts[i], pts[i + 1]);
+      if (g.closed && g.pts.length > 2) seg(pts[pts.length - 1], pts[0]);
+      break;
+    }
     case "text":
       out.push({
         kind: "drawingText",
