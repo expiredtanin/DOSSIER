@@ -124,6 +124,7 @@ export function useToolNumberShortcuts(
   onSelectTool: (id: ToolId) => void,
   isFloor: boolean,
   engineRef: RefObject<CommandEngine | null>,
+  gripDragInfoRef?: RefObject<{ index: number; raw: Vec2 } | null>,
 ): void {
   const toolShortcutRef = useRef({ onSelectTool, floor: isFloor });
   toolShortcutRef.current = { onSelectTool, floor: isFloor };
@@ -142,6 +143,13 @@ export function useToolNumberShortcuts(
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Ein Punkt-Griff ist bewaffnet (s. useGripEditing.ts) — Zifferntasten
+      // gehören dann IMMER dessen Länge/Winkel-Feld, nie dem Werkzeug-Wechsel.
+      // Die `eng?.hasFields()`-Prüfung unten greift hier nicht, weil während
+      // der Griff-Bearbeitung gar kein Zeichenbefehl der Engine läuft (Bug:
+      // getippter Wert schaltete auf das per Ziffer gemappte Zeichenwerkzeug
+      // um, sobald das leere, fokussierte Befehlsfeld erkannt wurde).
+      if (gripDragInfoRef?.current) return;
       const el = e.target as HTMLElement | null;
       const isInput =
         !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);

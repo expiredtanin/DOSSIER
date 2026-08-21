@@ -751,5 +751,10 @@ export function useGripEditing(opts: {
     gripEditFields,
     cycleGripEditField,
     submitGripEditValue,
+    // Für useToolNumberShortcuts: solange ein Griff bewaffnet ist, dürfen
+    // Zifferntasten NICHT als Werkzeug-Wechsel interpretiert werden (auch
+    // nicht, wenn das Befehlsfeld fokussiert und leer ist — die Zeichen-
+    // Engine selbst läuft ja nicht, daher griff dieser Wächter sonst nicht).
+    gripDragInfoRef,
   };
 }

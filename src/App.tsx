@@ -949,11 +949,11 @@ export default function App() {
   // Globaler Undo/Redo-Shortcut — siehe state/useKeyboardShortcuts.ts.
   useUndoRedoShortcut(undo, redo);
 
-  // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 1 Text, 2 Linie,
-  // 3 Kreis, 4 Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum
-  // — sowie Esc/Enter/Backspace für das aktive Zeichenwerkzeug. Siehe
-  // state/useKeyboardShortcuts.ts.
-  useToolNumberShortcuts(onSelectTool, activeLevel.kind === "floor", engineRef);
+  // Esc/Enter/Backspace für das aktive Zeichenwerkzeug. Siehe
+  // state/useKeyboardShortcuts.ts. Die Zifferntasten-Werkzeugwahl
+  // (useToolNumberShortcuts) folgt weiter unten, NACH useGripEditing() — sie
+  // braucht dessen gripDragInfoRef, um Zifferntasten während einer Griff-
+  // Bearbeitung nicht als Werkzeug-Wechsel misszuverstehen.
   useActiveToolKeys(activeTool, toolCtx, engineRef, toolStateRef, setDraft, setActiveTool, setProject);
 
   // ── Editier-Griffe (Grips) des einzeln selektierten Elements ──────────────
@@ -1294,6 +1294,7 @@ export default function App() {
     gripEditFields,
     cycleGripEditField,
     submitGripEditValue,
+    gripDragInfoRef,
   } = useGripEditing({
     project,
     selectedDrawing,
@@ -1326,6 +1327,12 @@ export default function App() {
     moveCeilingBy,
     moveElementByOf,
   });
+
+  // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 1 Text, 2 Linie,
+  // 3 Kreis, 4 Rechteck, 5 Polylinie, 6 Wand, 7 Decke, 8 Fenster, 9 Türe, 0 Raum.
+  // Siehe state/useKeyboardShortcuts.ts. Braucht gripDragInfoRef (s. o.), daher
+  // erst hier nach useGripEditing() registriert.
+  useToolNumberShortcuts(onSelectTool, activeLevel.kind === "floor", engineRef, gripDragInfoRef);
 
   // Feld-Zustand fürs Cursor-HUD (neben der Maus, VW-Stil): läuft ein
   // Punkt-Griff-Drag, hat er Vorrang (dieselben Felder wie unten in der
