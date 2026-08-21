@@ -51,9 +51,10 @@ import {
 type UiSource = "layer" | "object" | "custom";
 
 /** Leitet den UI-Quellen-Zustand ab: ein gesetzter Wert gewinnt immer („eigener
- *  Wert"), sonst das rohe Source-Feld (`undefined` ⇒ „Nach Bauteil", Default). */
+ *  Wert"), sonst das rohe Source-Feld (`undefined` ⇒ „Nach Ebene", Default —
+ *  s. AttributeSource in model/types.ts). */
 function uiSourceOf(hasValue: boolean, raw: AttributeSource | undefined): UiSource {
-  return hasValue ? "custom" : raw ?? "object";
+  return hasValue ? "custom" : raw ?? "layer";
 }
 
 export function AttributesPanel() {
@@ -131,13 +132,21 @@ export function AttributesPanel() {
     sel.kind === "ceiling" ||
     (isDrawing && sel.closed === true);
 
-  // Der 3-Optionen-Quellen-Dropdown, gemeinsam für alle vier Felder. Deaktiviert,
-  // wenn das Feld für diese Elementart gar nicht gilt (z. B. Strichstärke bei
-  // einer Treppe).
+  // Ein Drawing2D hat KEIN eigenes Bauteil (Component) — „Nach Bauteil" wäre
+  // dort bedeutungslos (resolveForeground & Co. fallen dann auf gar keinen
+  // Wert zurück, s. selectionInfo.ts `noComponent`). Nur Wand/Decke bieten
+  // die Option daher an.
+  const allowObjectSource = !isDrawing;
+
+  // Der Quellen-Dropdown (Nach Ebene/Nach Bauteil/eigener Wert), gemeinsam für
+  // alle vier Felder. Deaktiviert, wenn das Feld für diese Elementart gar
+  // nicht gilt (z. B. Strichstärke bei einer Treppe); „Nach Bauteil" fehlt bei
+  // Drawing2D (s. o.).
   const sourceSelect = (
     editable: boolean,
     ui: UiSource,
     onChange: (next: UiSource) => void,
+    allowObject: boolean,
   ) => (
     <Dropdown
       value={ui}
@@ -145,33 +154,39 @@ export function AttributesPanel() {
       onChange={(v) => onChange(v as UiSource)}
       options={[
         { value: "layer", label: t("attr.source.layer") },
-        { value: "object", label: t("attr.source.object") },
+        ...(allowObject ? [{ value: "object", label: t("attr.source.object") }] : []),
         { value: "custom", label: t("attr.source.custom") },
       ]}
     />
   );
 
-  // Farb-Swatch-Eingabe für „eigener Wert" (Vordergrund/Hintergrund). Erscheint
-  // nur, wenn die Quelle „custom" ist — sonst zeigt allein der Dropdown den
-  // Zustand.
-  const colorValue = (value: string | undefined, onSet: (color: string) => void) => (
-    <ColorHexField value={value ?? "#808080"} onChange={onSet} />
-  );
+  // Farb-Swatch — IMMER sichtbar (Nutzer-Wunsch: den aktuell EFFEKTIVEN Wert
+  // (welche Farbe auch immer Ebene/Bauteil/Override gerade liefert) jederzeit
+  // sehen, nicht nur bei „eigener Wert"). Ändert man ihn direkt, wird
+  // automatisch „eigener Wert": der Setter schreibt den Override, wodurch
+  // `uiSourceOf` beim nächsten Render „custom" ableitet (kein separater
+  // Umschalt-Schritt nötig).
+  const colorValue = (
+    value: string | undefined,
+    onSet: (color: string) => void,
+    editable: boolean,
+  ) => <ColorHexField value={value ?? "#808080"} onChange={onSet} disabled={!editable} />;
 
-  // Eine Attribut-Zeile: Label + Quellen-Dropdown + (nur bei „eigener Wert")
-  // das passende Eingabe-Element.
+  // Eine Attribut-Zeile: Label + IMMER sichtbares Eingabe-Element (zeigt den
+  // effektiven Wert) + Quellen-Dropdown.
   const sourceRow = (
     labelKey: string,
     editable: boolean,
     ui: UiSource,
     onSource: (next: UiSource) => void,
     valueEditor: ReactNode,
+    allowObject: boolean = allowObjectSource,
   ) => (
     <>
       <span className="attr-key">{t(labelKey)}</span>
       <span className="attr-val">
-        {ui === "custom" && valueEditor}
-        {sourceSelect(editable, ui, onSource)}
+        {valueEditor}
+        {sourceSelect(editable, ui, onSource, allowObject)}
       </span>
     </>
   );
@@ -187,12 +202,17 @@ export function AttributesPanel() {
     sel.hatchSource,
   );
 
+  // Wechsel auf „eigener Wert" per Dropdown (nicht durchs Editieren des Felds
+  // selbst, s. colorValue-Kommentar oben) sät den Override mit dem gerade
+  // ANGEZEIGTEN effektiven Wert — sonst würde die Farbe beim Umschalten
+  // unerwartet springen (z. B. auf sel.color statt der tatsächlich sichtbaren
+  // Ebenen-/Bauteilfarbe).
   const onForegroundSourceChange = (next: UiSource) => {
-    if (next === "custom") host.onSetSelectionForeground(sel.foreground ?? sel.color);
+    if (next === "custom") host.onSetSelectionForeground(sel.effectiveForeground ?? sel.color);
     else host.onSetSelectionForegroundSource(next);
   };
   const onBackgroundSourceChange = (next: UiSource) => {
-    if (next === "custom") host.onSetSelectionBackground(sel.background ?? sel.color);
+    if (next === "custom") host.onSetSelectionBackground(sel.effectiveBackground ?? sel.color);
     else host.onSetSelectionBackgroundSource(next);
   };
   const onWeightSourceChange = (next: UiSource) => {
@@ -200,8 +220,11 @@ export function AttributesPanel() {
     else host.onSetSelectionStrokeWeightSource(next);
   };
   const onHatchSourceChange = (next: UiSource) => {
-    if (next === "custom") host.onSetSelectionFill(project.hatches[0]?.id ?? null);
-    else host.onSetSelectionHatchSource(next);
+    if (next === "custom") {
+      host.onSetSelectionFill(sel.effectiveHatchId ?? project.hatches[0]?.id ?? null);
+    } else {
+      host.onSetSelectionHatchSource(next);
+    }
   };
 
   // Effektiver Linienstil rein informativ (kein Setter im Kontrakt → kein Fake).
@@ -272,6 +295,7 @@ export function AttributesPanel() {
                 type="number"
                 step={0.01}
                 min={0}
+                disabled={!weightEditable}
                 list="attr-pen-weights"
                 value={sel.weightMm}
                 onChange={(e) => {
@@ -352,7 +376,7 @@ export function AttributesPanel() {
               pocheEditable,
               fgUi,
               onForegroundSourceChange,
-              colorValue(sel.foreground, host.onSetSelectionForeground),
+              colorValue(sel.effectiveForeground, host.onSetSelectionForeground, pocheEditable),
             )}
 
             {sourceRow(
@@ -360,7 +384,7 @@ export function AttributesPanel() {
               pocheEditable,
               bgUi,
               onBackgroundSourceChange,
-              colorValue(sel.background, host.onSetSelectionBackground),
+              colorValue(sel.effectiveBackground, host.onSetSelectionBackground, pocheEditable),
             )}
 
             {sourceRow(
@@ -369,7 +393,8 @@ export function AttributesPanel() {
               hatchUi,
               onHatchSourceChange,
               <Dropdown
-                value={sel.fillHatchId ?? ""}
+                value={sel.effectiveHatchId ?? ""}
+                disabled={!fillEditable}
                 onChange={(v) => host.onSetSelectionFill(v || null)}
                 options={[
                   { value: "", label: t("attr.none") },

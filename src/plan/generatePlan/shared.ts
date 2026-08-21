@@ -419,12 +419,12 @@ export function resolveHatch(
  * Kollabiert die Vordergrund-Farbkette (Muster-/Schraffurlinienfarbe) eines
  * Bauteils zu einem einzelnen Wert für {@link resolveHatch}. AUFLÖSUNGSREIHENFOLGE
  * (By-Layer/By-Object, siehe `docs`/Attribut-Panel):
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
+ *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.color`) ??
  *   (`Component.foreground`) ?? `undefined`.
- * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
- * `undefined` als Endergebnis heißt „Nach System" — die Kette läuft dann in
- * resolveHatch auf den HatchStyle.color-Backward-Compat-Fallback weiter
- * (Sample-Verhalten: kein Element setzt `override`/`source`, also identisch).
+ * `source` fehlt/`"layer"` ⇒ „Nach Ebene" (DEFAULT — ein neu erzeugtes Element
+ * ohne explizites Source-Feld folgt der Ebene, nicht dem Bauteil; „Nach
+ * Bauteil" muss aktiv gewählt werden). Nur ein EXPLIZITES `"object"` fällt auf
+ * die Bauteil-Kette zurück.
  */
 export function resolveForeground(
   comp: Component,
@@ -433,14 +433,14 @@ export function resolveForeground(
   source?: AttributeSource,
 ): string | undefined {
   if (override != null) return override;
-  if (source === "layer") return category?.color ?? comp.foreground;
+  if (source !== "object") return category?.color ?? comp.foreground;
   return comp.foreground;
 }
 
 /**
  * Kollabiert die Hintergrund-/Füllfarbkette (Poché-Override) eines Bauteils zu
  * einem einzelnen Wert, exakt analog zu {@link resolveForeground}:
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
+ *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.color`) ??
  *   (`Component.background`) ?? `undefined`.
  * `undefined` als Endergebnis heißt „kein Override gesetzt" — Aufrufer fallen
  * dann auf ihren eigenen Default zurück (bei Wand/Decke die neutrale SIA-
@@ -455,7 +455,7 @@ export function resolveBackground(
   source?: AttributeSource,
 ): string | undefined {
   if (override != null) return override;
-  if (source === "layer") return category?.color ?? comp.background;
+  if (source !== "object") return category?.color ?? comp.background;
   return comp.background;
 }
 
@@ -463,10 +463,10 @@ export function resolveBackground(
  * Kollabiert die Schraffur-Referenz (Hatch Manager) eines Elements zu einer
  * einzelnen `hatchId` für {@link resolveHatch} — By-Layer/By-Object, analog zu
  * {@link resolveForeground}:
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.hatch`) ??
+ *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.hatch`) ??
  *   `fallback` (Bauteil-Schraffur, z. B. `Component.hatchId`/`viewHatchId`, oder
  *   `undefined` bei Drawing2D ohne Bauteil-Bezug).
- * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ * `source` fehlt/`"layer"` ⇒ „Nach Ebene" (DEFAULT, s. {@link resolveForeground}).
  * Ergebnis kann `undefined` sein — der Aufrufer fällt dann auf `NO_HATCH` zurück.
  */
 export function resolveHatchId(
@@ -476,17 +476,17 @@ export function resolveHatchId(
   fallback?: string,
 ): string | undefined {
   if (override != null) return override;
-  if (source === "layer") return category?.hatch ?? fallback;
+  if (source !== "object") return category?.hatch ?? fallback;
   return fallback;
 }
 
 /**
  * Kollabiert die Strichstärke-Kette (mm Papier) eines Elements, By-Layer/By-
  * Object, analog zu {@link resolveHatchId}:
- *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.lw`) ??
+ *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.lw`) ??
  *   `fallback` (bisherige Bauteil-/LineStyle-/Kategorie-Default-Kette des
  *   Aufrufers — heutiges Verhalten).
- * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (heutiges Verhalten, unverändert).
+ * `source` fehlt/`"layer"` ⇒ „Nach Ebene" (DEFAULT, s. {@link resolveForeground}).
  */
 export function resolveStrokeWeight(
   override: number | undefined,
@@ -495,7 +495,7 @@ export function resolveStrokeWeight(
   fallback: number,
 ): number {
   if (override != null) return override;
-  if (source === "layer") return category?.lw ?? fallback;
+  if (source !== "object") return category?.lw ?? fallback;
   return fallback;
 }
 

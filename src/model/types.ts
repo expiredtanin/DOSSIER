@@ -831,12 +831,14 @@ export interface LayerCategory {
  * Quelle eines vererbbaren Attributs (Vordergrund/Hintergrund/Strichstärke/
  * Schraffur), wenn KEIN expliziter Wert am Element gesetzt ist:
  *   • "layer"  — „Nach Ebene": die LayerCategory des Elements erzwingt den Wert
- *     (`color`/`lw`/`hatch`).
+ *     (`color`/`lw`/`hatch`). Das ist auch der DEFAULT, wenn das Source-Feld
+ *     fehlt (`undefined`) — ein frisch erzeugtes Element (Source-Feld nie
+ *     gesetzt) folgt also der Ebene, nicht dem Bauteil.
  *   • "object" — „Nach Bauteil": erbt vom Bauteil (Component) bzw. dessen
- *     bisheriger Fallback-Kette. Das ist auch der Default, wenn das Source-Feld
- *     fehlt (`undefined`) — damit bleibt das heutige Verhalten unverändert.
+ *     bisheriger Fallback-Kette. Muss aktiv im Attribut-Panel gewählt werden
+ *     (nur bei Wand/Decke anwendbar — ein Drawing2D hat kein Bauteil).
  * Ein gesetzter expliziter Wert (z. B. `foreground`) gewinnt IMMER, unabhängig
- * von der Source (s. Resolve-Reihenfolge in `plan/generatePlan.ts`).
+ * von der Source (s. Resolve-Reihenfolge in `plan/generatePlan/shared.ts`).
  */
 export type AttributeSource = "layer" | "object";
 

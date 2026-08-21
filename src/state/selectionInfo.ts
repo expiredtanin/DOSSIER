@@ -43,6 +43,7 @@ import type {
   WallReferenceLine,
 } from "../model/types";
 import { localToLv95 } from "../io/lv95";
+import { resolveForeground, resolveBackground, resolveHatchId } from "../plan/generatePlan/shared";
 import { columnVerticalExtent } from "../model/wall";
 import { columnFootprint } from "../geometry/column";
 import { evaluateRoom, polygonArea } from "../geometry/roomArea";
@@ -413,6 +414,18 @@ export interface Selection {
   strokeWeightSource?: AttributeSource;
   /** Quelle der Schraffur, wenn kein `fillHatchId` gesetzt ist. */
   hatchSource?: AttributeSource;
+  /**
+   * EFFEKTIV aufgelöster Vordergrund (Override ?? Ebene ?? Bauteil, s.
+   * `resolveForeground` — dieselbe Kette wie beim Rendern), für die IMMER
+   * sichtbare Vorschau im Attribut-Panel (Nutzer-Wunsch: „man sollte immer
+   * sehen welche Farbe [gilt]"), unabhängig von der aktuellen Quelle.
+   * `undefined` = kein Wert an keiner Stelle der Kette (echtes „Nach System").
+   */
+  effectiveForeground?: string;
+  /** Effektiv aufgelöster Hintergrund, analog zu {@link Selection.effectiveForeground}. */
+  effectiveBackground?: string;
+  /** Effektiv aufgelöste Schraffur-ID, analog zu {@link Selection.effectiveForeground}. */
+  effectiveHatchId?: string | null;
   /** Ob die Form geschlossen ist (rect/circle/closed polyline) — nur Drawing2D. */
   closed?: boolean;
   /**
@@ -533,6 +546,26 @@ function wallSelection(project: Project, wall: Wall): Selection {
   // Wand-Attribute auflösen (Referenzlinie, Aufbau, Referenzgeschoss, UK/OK).
   const wt = getWallType(project, wall);
   const thickness = wallTypeThickness(wt);
+  // Effektive Vordergrund-/Hintergrund-/Schraffur-Vorschau fürs Attribut-Panel
+  // (Nutzer-Wunsch: immer den TATSÄCHLICHEN Wert sehen, nicht nur ein leeres
+  // Override-Feld) — dieselbe Resolve-Kette wie beim Rendern (resolveForeground
+  // & Co.), als Bauteil-Repräsentant die ÄUSSERSTE Schicht (wie `abbrevOf`
+  // unten). Bei mehrschichtigem Aufbau nur eine Annäherung (jede Schicht kann
+  // im Schnitt ihre EIGENE Bauteilfarbe zeigen) — für die Panel-Vorschau
+  // ausreichend, der Override selbst wirkt ohnehin einheitlich auf alle Schichten.
+  const outerComponent = getComponent(project, wt.layers[0]?.componentId);
+  const effectiveForeground = outerComponent
+    ? resolveForeground(outerComponent, wall.foreground, cat, wall.foregroundSource)
+    : wall.foreground;
+  const effectiveBackground = outerComponent
+    ? resolveBackground(outerComponent, wall.background, cat, wall.backgroundSource)
+    : wall.background;
+  const effectiveHatchId = resolveHatchId(
+    wall.hatchId,
+    wall.hatchSource,
+    cat,
+    outerComponent?.hatchId,
+  );
   const floor = project.drawingLevels.find((z) => z.id === wall.floorId);
   const { zBottom, zTop } = wallVerticalExtent(project, wall);
   const above = nextFloorAbove(project, wall);
@@ -606,6 +639,9 @@ function wallSelection(project: Project, wall: Wall): Selection {
     background: wall.background,
     foregroundSource: wall.foregroundSource,
     backgroundSource: wall.backgroundSource,
+    effectiveForeground,
+    effectiveBackground,
+    effectiveHatchId,
     strokeWeightOverride: wall.strokeWeight,
     strokeWeightSource: wall.strokeWeightSource,
     hatchSource: wall.hatchSource,
@@ -623,6 +659,21 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
   const box = outlineBBox(ceiling.outline);
   const wt = getCeilingType(project, ceiling);
   const thickness = ceilingThickness(project, ceiling);
+  // Effektive Vordergrund-/Hintergrund-/Schraffur-Vorschau — s. Kommentar in
+  // wallSelection (dieselbe Kette, äusserste Schicht als Bauteil-Repräsentant).
+  const outerComponent = getComponent(project, wt.layers[0]?.componentId);
+  const effectiveForeground = outerComponent
+    ? resolveForeground(outerComponent, ceiling.foreground, cat, ceiling.foregroundSource)
+    : ceiling.foreground;
+  const effectiveBackground = outerComponent
+    ? resolveBackground(outerComponent, ceiling.background, cat, ceiling.backgroundSource)
+    : ceiling.background;
+  const effectiveHatchId = resolveHatchId(
+    ceiling.hatchId,
+    ceiling.hatchSource,
+    cat,
+    outerComponent?.hatchId,
+  );
   const floor = project.drawingLevels.find((z) => z.id === ceiling.floorId);
   const { zBottom, zTop } = ceilingVerticalExtent(project, ceiling);
   const ceilingInfo: CeilingInfo = {
@@ -666,6 +717,9 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     background: ceiling.background,
     foregroundSource: ceiling.foregroundSource,
     backgroundSource: ceiling.backgroundSource,
+    effectiveForeground,
+    effectiveBackground,
+    effectiveHatchId,
     strokeWeightOverride: ceiling.strokeWeight,
     strokeWeightSource: ceiling.strokeWeightSource,
     hatchSource: ceiling.hatchSource,
@@ -998,15 +1052,32 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
   const cat = findCategory(project.layers, d.categoryCode);
   const color = d.color ?? ls?.color ?? cat?.color ?? DRAW_FALLBACK_COLOR;
   // Effektive Strichstärke, dieselbe Kette wie generatePlan/addDrawing2D
-  // (resolveStrokeWeight): Override zuerst, "layer" erzwingt die Kategorie
-  // (umgeht das LineStyle-Gewicht), sonst die heutige LineStyle-/Kategorie-Kette.
+  // (resolveStrokeWeight): Override zuerst, Source ≠ "object" (also "layer"
+  // ODER fehlend, s. AttributeSource-Default) erzwingt die Kategorie (umgeht
+  // das LineStyle-Gewicht), sonst die LineStyle-/Kategorie-Kette.
   const weightMm =
     d.weightMm ??
-    (d.strokeWeightSource === "layer" ? cat?.lw : undefined) ??
+    (d.strokeWeightSource !== "object" ? cat?.lw : undefined) ??
     ls?.weight ??
     cat?.lw ??
     WALL_FALLBACK_MM;
   const closed = isClosedGeom(d.geom);
+  // Effektive Vordergrund-/Hintergrund-/Schraffur-Vorschau — s. Kommentar in
+  // wallSelection. Ein Drawing2D hat KEIN eigenes Bauteil (daher auch keine
+  // „Nach Bauteil"-Option im Panel, s. AttributesPanel.tsx) — als Platzhalter
+  // ein leeres Bauteil, dessen foreground/background/hatchId immer fehlen,
+  // sodass die Kette bei einem (aus Alt-Daten) expliziten `source:"object"`
+  // korrekt auf „kein Wert" statt einer erfundenen Bauteilfarbe fällt.
+  const noComponent = { id: "", name: "", color, hatchId: "", joinPriority: 0 };
+  const effectiveForeground = closed
+    ? resolveForeground(noComponent, d.foreground, cat, d.foregroundSource)
+    : undefined;
+  const effectiveBackground = closed
+    ? resolveBackground(noComponent, d.background, cat, d.backgroundSource)
+    : undefined;
+  const effectiveHatchId = closed
+    ? resolveHatchId(d.hatchId, d.hatchSource, cat, undefined)
+    : null;
   return {
     kind: "drawing2d",
     id: d.id,
@@ -1020,6 +1091,9 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     background: closed ? d.background : undefined,
     foregroundSource: closed ? d.foregroundSource : undefined,
     backgroundSource: closed ? d.backgroundSource : undefined,
+    effectiveForeground,
+    effectiveBackground,
+    effectiveHatchId,
     strokeWeightOverride: d.weightMm,
     strokeWeightSource: d.strokeWeightSource,
     hatchSource: closed ? d.hatchSource : undefined,
