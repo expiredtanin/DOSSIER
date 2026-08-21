@@ -540,36 +540,45 @@ export function useGripEditing(opts: {
 
   // Stabiler Ref auf cycleGripEditField (der globale Tab-Handler hat leere Deps).
   const cycleGripEditFieldRef = useRef<() => void>(() => {});
-  // Eingefrorene Zielposition, solange das Feld offen, aber noch KEIN Wert
-  // getippt ist (s. Kommentar an onGripMove). null = nicht eingefroren.
-  const gripFrozenPointRef = useRef<Vec2 | null>(null);
-  // Tab im Vertex-Drag: Feld-Controller öffnen/zyklen (length ↔ angle). Beim
-  // ÖFFNEN (noch kein gripEdit) friert die AKTUELLE Position ein — Nutzer-
-  // Wunsch: „wenn ich mit Tab in die Werte springe, soll die Maus nicht mehr
-  // steuern, bis man den ersten Wert eingegeben hat" (verhindert, dass ein
-  // Zittern der Hand beim Greifen zur Tastatur den Punkt noch verschiebt).
+  // Tab im Vertex-Drag: Feld-Controller öffnen/zyklen (length ↔ angle).
+  //  • ÖFFNEN (noch kein gripEdit): friert BEIDE Werte an der aktuellen
+  //    Position ein (`locks` sofort vollständig befüllt statt leer) — die
+  //    Maus hat ab jetzt keinen Einfluss mehr, bis man explizit wieder in ein
+  //    Feld tabbt (verhindert, dass ein Zittern der Hand beim Greifen zur
+  //    Tastatur den Punkt noch verschiebt).
+  //  • ZYKELN (gripEdit schon offen): wechselt zum anderen Feld und LÖST
+  //    dessen Lock (frei für die Maus) — das Feld, das man verlässt, bleibt
+  //    exakt auf seinem letzten Wert fixiert (getippt oder eingefroren).
+  //    Nutzer-Wunsch: nach dem ersten getippten Wert soll das ANDERE Feld
+  //    nicht sofort wieder der Maus folgen, sondern erst nach explizitem Tab
+  //    dorthin — sonst „wird der Winkel nie richtig fix".
   const cycleGripEditField = () => {
     const info = gripDragInfoRef.current;
     if (!info) return;
     const anchor = resolveGripAnchor(info.index);
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     setGripEdit((prev) => {
-      if (prev) return { ...prev, active: prev.active === "length" ? "angle" : "length" };
-      gripFrozenPointRef.current = grips[info.index];
-      return { anchor, active: "length", locks: {} };
+      if (!prev) {
+        const frozen = grips[info.index];
+        const dx = frozen.x - anchor.x;
+        const dy = frozen.y - anchor.y;
+        const angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+        return { anchor, active: "length", locks: { length: Math.hypot(dx, dy), angle } };
+      }
+      const active = prev.active === "length" ? "angle" : "length";
+      const locks = { ...prev.locks };
+      delete locks[active];
+      return { ...prev, active, locks };
     });
   };
   cycleGripEditFieldRef.current = cycleGripEditField;
 
-  // Getippte Zahl im Vertex-Drag: aktives Feld locken, aufs nächste vorrücken und
-  // den Zielpunkt sofort mit dem gelockten Wert neu setzen. Der erste getippte
-  // Wert löst das Einfrieren (s. o.) — ab jetzt gilt wieder die normale
-  // Locked/Live-Mischung (gelockte Felder fest, ungelockte folgen der Maus).
+  // Getippte Zahl im Vertex-Drag: aktives Feld locken, aufs nächste vorrücken
+  // (das andere Feld bleibt unverändert fixiert, s. o.).
   const submitGripEditValue = (value: number) => {
     const ge = gripEditRef.current;
     const info = gripDragInfoRef.current;
     if (!ge || !info) return;
-    gripFrozenPointRef.current = null;
     const locks = { ...ge.locks, [ge.active]: value };
     const next = ge.active === "length" ? "angle" : "length";
     setGripEdit({ ...ge, locks, active: next });
@@ -579,11 +588,10 @@ export function useGripEditing(opts: {
   };
 
   // Feld-Controller schließen (Escape MIT Fokus in der Befehlszeile, s.
-  // App.tsx) — löst NUR das Einfrieren/den Feld-Prompt, beendet NICHT den
-  // ganzen Griff-Drag (der bleibt bewaffnet, Maus steuert wieder normal).
+  // App.tsx) — beendet NICHT den ganzen Griff-Drag (der bleibt bewaffnet,
+  // Maus steuert wieder normal wie vor dem ersten Tab).
   const closeGripEditField = () => {
     setGripEdit(null);
-    gripFrozenPointRef.current = null;
   };
 
   // Dasselbe Feld-Controller-Muster wie oben (gripEdit), jetzt für einen Kanten-
@@ -658,22 +666,33 @@ export function useGripEditing(opts: {
   };
 
   const cycleEdgeEditFieldRef = useRef<() => void>(() => {});
-  // Eingefrorene Zielposition, solange das Feld offen, aber noch KEIN Wert
-  // getippt ist — dasselbe Prinzip wie gripFrozenPointRef oben.
-  const edgeFrozenPointRef = useRef<Vec2 | null>(null);
-  // Tab im Kanten-Drag: Feld-Controller öffnen (friert dabei die aktuelle
-  // Position ein, s. o.); bei freien Kanten zykelt es zusätzlich Länge ↔
-  // Winkel (geführte Kanten haben nur das eine Feld).
+  // Tab im Kanten-Drag: Feld-Controller öffnen/zyklen — dasselbe Muster wie
+  // cycleGripEditField oben (Öffnen friert BEIDE Werte ein, Zykeln löst NUR
+  // das neu aktive Feld). Geführte Kanten haben nur ein Feld ("Länge" =
+  // Abstand entlang der Normale) → Zykeln tut dort nichts, das eine Feld
+  // bleibt beim Öffnen ohnehin schon eingefroren/fixiert.
   const cycleEdgeEditField = () => {
     const info = edgeDragInfoRef.current;
     if (!info) return;
     const { edge, raw } = info;
     setEdgeEdit((prev) => {
-      if (prev) {
-        return edge.free ? { ...prev, active: prev.active === "length" ? "angle" : "length" } : prev;
+      if (!prev) {
+        const anchor = edge.mid;
+        const frozen = edgeEditPoint(edge, anchor, {}, raw);
+        const dx = frozen.x - anchor.x;
+        const dy = frozen.y - anchor.y;
+        if (edge.free) {
+          const angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+          return { anchor, active: "length", locks: { length: Math.hypot(dx, dy), angle } };
+        }
+        const offset = dx * edge.normal.x + dy * edge.normal.y;
+        return { anchor, active: "length", locks: { length: offset } };
       }
-      edgeFrozenPointRef.current = edgeEditPoint(edge, edge.mid, {}, raw);
-      return { anchor: edge.mid, active: "length", locks: {} };
+      if (!edge.free) return prev; // geführte Kante: nur ein Feld, nichts zu zykeln
+      const active = prev.active === "length" ? "angle" : "length";
+      const locks = { ...prev.locks };
+      delete locks[active];
+      return { ...prev, active, locks };
     });
   };
   cycleEdgeEditFieldRef.current = cycleEdgeEditField;
@@ -697,7 +716,6 @@ export function useGripEditing(opts: {
     const ee = edgeEditRef.current;
     const info = edgeDragInfoRef.current;
     if (!ee || !info) return;
-    edgeFrozenPointRef.current = null;
     const { edge, raw } = info;
     const locks = { ...ee.locks, [ee.active]: value };
     const next = edge.free ? (ee.active === "length" ? "angle" : "length") : ee.active;
@@ -706,11 +724,10 @@ export function useGripEditing(opts: {
     applyEdgeToward(edge, ee.anchor, pt);
   };
 
-  // Feld-Controller schließen (Escape MIT Fokus in der Befehlszeile) — löst
-  // nur das Einfrieren/den Feld-Prompt, beendet NICHT den Kanten-Drag.
+  // Feld-Controller schließen (Escape MIT Fokus in der Befehlszeile) — beendet
+  // NICHT den Kanten-Drag (der bleibt bewaffnet, Maus steuert wieder normal).
   const closeEdgeEditField = () => {
     setEdgeEdit(null);
-    edgeFrozenPointRef.current = null;
   };
 
   // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
@@ -807,10 +824,8 @@ export function useGripEditing(opts: {
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
     gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
-    gripFrozenPointRef.current = null; // Einfrieren verwerfen
     setGripEdit(null); // (c) Feld-Controller schließen
     edgeDragInfoRef.current = null; // Kanten-Drag-Info verwerfen
-    edgeFrozenPointRef.current = null; // Einfrieren verwerfen
     setEdgeEdit(null); // Kanten-Feld-Controller schließen
   };
 
@@ -820,26 +835,17 @@ export function useGripEditing(opts: {
       // AKTUELLE — hier noch unveränderte — Position als Flucht-Bezugspunkt
       // verankern (s. Kommentar an gripOriginRef).
       if (gripDragInfoRef.current === null) gripOriginRef.current = grips[index];
-      // (c) Vertex-Drag mit aktivem Feld-Controller: solange EIN Wert gelockt
-      // ist, gilt die polare Locked/Live-Mischung wie bisher. Ist das Feld
-      // offen, aber NOCH KEIN Wert getippt, hält `gripFrozenPointRef` den
-      // Punkt fest (Maus wirkungslos) — s. Kommentar an cycleGripEditField.
+      // (c) Vertex-Drag mit aktivem Feld-Controller: `locks` ist ab dem
+      // ÖFFNEN (Tab) immer für BEIDE Felder befüllt (s. cycleGripEditField),
+      // die Maus wirkt also erst wieder, sobald ein Feld per Tab explizit
+      // gelöst wurde — kein separater „eingefroren"-Zustand mehr nötig.
       const ge = gripEditRef.current;
       gripDragInfoRef.current = { index, raw };
-      if (ge) {
-        const hasLock = ge.locks.length != null || ge.locks.angle != null;
-        if (hasLock) {
-          const pt = gripEditPoint(ge.anchor, ge.locks, raw);
-          applyGrip(index, pt);
-          setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
-          return;
-        }
-        if (gripFrozenPointRef.current) {
-          const pt = gripFrozenPointRef.current;
-          applyGrip(index, pt);
-          setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
-          return;
-        }
+      if (ge && (ge.locks.length != null || ge.locks.angle != null)) {
+        const pt = gripEditPoint(ge.anchor, ge.locks, raw);
+        applyGrip(index, pt);
+        setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
+        return;
       }
       // Mehrfachauswahl: das Element, dem DIESER Griff gehört (nicht zwingend
       // das singuläre selectedDrawingId/selectedWallId) — von den eigenen
@@ -960,24 +966,14 @@ export function useGripEditing(opts: {
       edgeDragInfoRef.current = { edge, raw };
       const anchor = edge.mid; // Momentaufnahme vom Grab, ändert sich während des Drags nicht
       const ee = edgeEditRef.current;
-      // Feld-Controller mit Lock aktiv: Zielpunkt aus Anker + gelocktem Wert
-      // (Maus wirkt für das gelockte Feld nicht mehr — Lock dominiert). Feld
-      // offen, aber noch kein Wert getippt: `edgeFrozenPointRef` hält den
-      // Punkt fest (Maus wirkungslos) — s. Kommentar an cycleEdgeEditField.
-      if (ee) {
-        const hasLock = ee.locks.length != null || ee.locks.angle != null;
-        if (hasLock) {
-          const pt = edgeEditPoint(edge, anchor, ee.locks, raw);
-          applyEdgeToward(edge, anchor, pt);
-          setDraft({ preview: [], vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
-          return;
-        }
-        if (edgeFrozenPointRef.current) {
-          const pt = edgeFrozenPointRef.current;
-          applyEdgeToward(edge, anchor, pt);
-          setDraft({ preview: [], vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
-          return;
-        }
+      // Feld-Controller mit Lock aktiv: Zielpunkt aus Anker + gelocktem Wert.
+      // `locks` ist ab dem Öffnen (Tab) immer befüllt (s. cycleEdgeEditField),
+      // die Maus wirkt also erst wieder, sobald ein Feld per Tab gelöst wurde.
+      if (ee && (ee.locks.length != null || ee.locks.angle != null)) {
+        const pt = edgeEditPoint(edge, anchor, ee.locks, raw);
+        applyEdgeToward(edge, anchor, pt);
+        setDraft({ preview: [], vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
+        return;
       }
       if (edge.free) {
         // Keine Geometrie-Snap-Projektion (keine feste Kanten-Normale, an die
