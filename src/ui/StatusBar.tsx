@@ -245,6 +245,35 @@ function SnapControl({
               }
             />
           </label>
+          {/* Hover-Teilpunkte (rein visuell, unabhängig vom Fang selbst — daher
+              NICHT an snap.enabled gekoppelt): Ruht der Cursor auf einer Linie,
+              erscheinen nach der Verzögerung ihre Teilpunkte mit Akzentfarbe. */}
+          <label className="sb-snap-row sb-snap-row-num">
+            <span>{t("snap.hoverDivideDelayMs")}</span>
+            <input
+              type="number"
+              step={50}
+              min={0}
+              max={3000}
+              value={snap.hoverDivideDelayMs}
+              onChange={(e) =>
+                onSnapChange({ ...snap, hoverDivideDelayMs: Number(e.target.value) })
+              }
+            />
+          </label>
+          <label className="sb-snap-row sb-snap-row-num">
+            <span>{t("snap.hoverDivideCount")}</span>
+            <input
+              type="number"
+              step={1}
+              min={2}
+              max={12}
+              value={snap.hoverDivideCount}
+              onChange={(e) =>
+                onSnapChange({ ...snap, hoverDivideCount: Number(e.target.value) })
+              }
+            />
+          </label>
         </div>
       )}
     </span>

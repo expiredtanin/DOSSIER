@@ -2739,6 +2739,8 @@ export default function App() {
           hairline={lineMode === "display"}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
+          hoverDivideDelayMs={snap.hoverDivideDelayMs}
+          hoverDivideCount={snap.hoverDivideCount}
           renderMode={renderMode}
           view3d={view3d}
           fov={fov}

@@ -239,6 +239,8 @@ export const en: Record<TranslationKey, string> = {
   "snap.angleStep": "Angle step",
   "snap.commonAngles": "Common angles",
   "snap.commonAngleTolerance": "Angle tolerance (°)",
+  "snap.hoverDivideDelayMs": "Hover delay (ms)",
+  "snap.hoverDivideCount": "Division points (count)",
 
   // Transform (move/mirror/rotate) + mode bar.
   "transform.bar": "Transform",

@@ -71,6 +71,18 @@ export interface SnapSettings {
   commonAngles: boolean;
   /** Toleranz (Grad) für das weiche Winkel-Einrasten. */
   commonAngleTolerance: number;
+  /**
+   * Verweilt der Cursor länger als diese Zeit (ms) ruhig auf einer Linie
+   * (2D-Element, kein aktiver Zug/Werkzeug), werden ihre Teilpunkte (s.
+   * `hoverDivideCount`) kurz mit Akzentfarbe eingeblendet — reine
+   * Sichtbarkeits-Hilfe, kein zusätzliches Snap-Ziel.
+   */
+  hoverDivideDelayMs: number;
+  /**
+   * In wie viele gleiche Teile die gehoverte Linie dabei angezeigt wird
+   * (2 = nur der Mittelpunkt, 3 = zwei Drittelpunkte, usw.).
+   */
+  hoverDivideCount: number;
 }
 
 /** Default-Snap-Einstellungen (endpoint/midpoint/intersection/onEdge + grid). */
@@ -88,6 +100,8 @@ export const DEFAULT_SNAP: SnapSettings = {
   tolerancePx: 12,
   commonAngles: true,
   commonAngleTolerance: 2.5,
+  hoverDivideDelayMs: 300,
+  hoverDivideCount: 2,
 };
 
 // ── Werkzeug-Schnittstelle ──────────────────────────────────────────────────

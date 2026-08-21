@@ -410,6 +410,19 @@ export interface PlanViewProps {
    * Einstellungs-Fenster (State in ViewSlice); Default = Akzent „Sora".
    */
   snapColor?: string;
+  /**
+   * Ruht der Cursor (kein Werkzeug/Drag aktiv) länger als diese Zeit (ms) auf
+   * einer 2D-Linie, erscheinen ihre Teilpunkte (s. `hoverDivideCount`) kurz
+   * mit Akzentfarbe — reine Sichtbarkeits-Hilfe, kein Snap-Ziel. Einstellbar
+   * im Footer (`SnapSettings.hoverDivideDelayMs`); Default 300 ms.
+   */
+  hoverDivideDelayMs?: number;
+  /**
+   * In wie viele gleiche Teile die gehoverte Linie dabei angezeigt wird
+   * (2 = nur der Mittelpunkt). Einstellbar im Footer
+   * (`SnapSettings.hoverDivideCount`); Default 2.
+   */
+  hoverDivideCount?: number;
 }
 
 /** Treiber für das Ziehen von Editier-Griffen (von App bereitgestellt). */
@@ -493,6 +506,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       gripHandlers,
       marqueeColor = DEFAULT_MARQUEE_COLOR,
       snapColor = DEFAULT_SNAP_COLOR,
+      hoverDivideDelayMs = 300,
+      hoverDivideCount = 2,
     },
     ref,
   ) {
@@ -813,6 +828,50 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     crossing: boolean;
   } | null>(null);
 
+  // Hover-Teilpunkte (Nutzer-Wunsch): ruht der Cursor im Auswahl-Ruhezustand
+  // (kein Werkzeug/Drag/Marquee — s. Aufruf in onPointerMove) länger als
+  // `hoverDivideDelayMs` auf einem 2D-Linien-Segment, werden dessen gleiche
+  // Teilpunkte (Anzahl `hoverDivideCount`, 2 = nur Mitte) kurz mit
+  // Akzentfarbe eingeblendet. Reine Sichtbarkeits-Hilfe, kein Snap-Ziel.
+  const [hoverDivideSeg, setHoverDivideSeg] = useState<{ a: Vec2; b: Vec2 } | null>(null);
+  // Zuletzt erkanntes Segment (Serialisiert als Schlüssel) — erkennt einen
+  // Wechsel, ohne bei jedem Move-Event neu zu timern.
+  const hoverDivideKeyRef = useRef<string | null>(null);
+  const hoverDivideTimerRef = useRef<number | null>(null);
+
+  // Nächstliegendes Linien-Segment unterm Cursor ermitteln und die
+  // Hover-Teilpunkte-Anzeige entsprechend (neu) timern/verwerfen.
+  const updateHoverDivide = (clientX: number, clientY: number) => {
+    const seg = nearestLineSegment(clientX, clientY);
+    const key = seg ? `${seg.a.x},${seg.a.y}|${seg.b.x},${seg.b.y}` : null;
+    if (key === hoverDivideKeyRef.current) return; // dasselbe Segment (oder weiter keins)
+    hoverDivideKeyRef.current = key;
+    if (hoverDivideTimerRef.current !== null) {
+      window.clearTimeout(hoverDivideTimerRef.current);
+      hoverDivideTimerRef.current = null;
+    }
+    setHoverDivideSeg(null); // Segment gewechselt → alte Anzeige sofort weg
+    if (!seg) return;
+    hoverDivideTimerRef.current = window.setTimeout(() => {
+      hoverDivideTimerRef.current = null;
+      setHoverDivideSeg(seg);
+    }, hoverDivideDelayMs);
+  };
+  const clearHoverDivide = () => {
+    if (hoverDivideTimerRef.current !== null) {
+      window.clearTimeout(hoverDivideTimerRef.current);
+      hoverDivideTimerRef.current = null;
+    }
+    hoverDivideKeyRef.current = null;
+    setHoverDivideSeg(null);
+  };
+  // Weg, sobald ein Werkzeug aktiv wird (sonst könnte eine veraltete Anzeige
+  // ohne weiteres Move-Event über einem neuen Werkzeug-Entwurf stehen bleiben).
+  useEffect(() => {
+    if (toolActive) clearHoverDivide();
+  }, [toolActive]);
+  useEffect(() => () => clearHoverDivide(), []);
+
   // Transiente Griff-Zieh-Daten (linke Taste auf einem Grip). Kein State je
   // Bewegung; die Modell-Mutation läuft live über gripHandlers.onGripMove.
   // Anders als bei Kante/Körper braucht das Loslassen der Maus die Bearbeitung
@@ -1065,6 +1124,28 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (bestId) return bestId;
     // Kein Linien-/Kreis-/Bogen-Treffer: Text- dann Bild-Elemente prüfen (eigene Bbox-Logik).
     return pickDrawingText(clientX, clientY) ?? pickDrawingImage(clientX, clientY);
+  };
+
+  // Nächstgelegenes EINZELNES Geraden-Segment (nicht das ganze Element) für
+  // die Hover-Teilpunkte-Anzeige (s. hoverDivideSeg unten) — dieselbe Nähe-
+  // Logik wie pickDrawing, liefert aber die zwei Endpunkte des getroffenen
+  // Segments selbst: eine Polylinie besteht aus mehreren "line"-Primitiven
+  // (eins je Segment, gleiche drawingId), unterteilt werden soll nur das
+  // konkret gehoverte Segment, nicht das ganze Element.
+  const nearestLineSegment = (clientX: number, clientY: number): { a: Vec2; b: Vec2 } | null => {
+    let best: { a: Vec2; b: Vec2 } | null = null;
+    let bestDist = LINE_PICK_PX;
+    for (const p of plan.primitives) {
+      if (p.kind !== "line" || !p.drawingId) continue;
+      const a = vbToClient(toScreen(p.a).x, toScreen(p.a).y);
+      const b = vbToClient(toScreen(p.b).x, toScreen(p.b).y);
+      const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { a: p.a, b: p.b };
+      }
+    }
+    return best;
   };
 
   // Trifft der Klick ein Text-2D-Element (kind "drawingText")? Grosszügige Modell-
@@ -1615,7 +1696,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     }
 
     const d = drag.current;
-    if (!d || d.pointerId !== e.pointerId) return;
+    if (!d || d.pointerId !== e.pointerId) {
+      // Echter Ruhezustand (kein Drag/Werkzeug/Marquee/Pan) — Hover-
+      // Teilpunkte-Erkennung.
+      updateHoverDivide(e.clientX, e.clientY);
+      return;
+    }
     const { scale } = measure(d.startView);
     // Bildschirm-Delta → viewBox-Einheiten; Inhalt folgt dem Cursor, also
     // verschiebt sich der Ausschnitt entgegengesetzt.
@@ -2224,7 +2310,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onPointerLeave={() => { setRulerCursor(null); onCursor?.(null); }}
+        onPointerLeave={() => { setRulerCursor(null); onCursor?.(null); clearHoverDivide(); }}
         onWheel={onWheel}
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenuHandler}
@@ -2577,6 +2663,36 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           hudFields={hudFields ?? null}
         />
       )}
+      {/* Hover-Teilpunkte (s. hoverDivideSeg oben): kleine Punkte in Akzentfarbe
+          an den `hoverDivideCount`-gleichen Teilpunkten des gehoverten Segments
+          (2 = nur Mitte). Nur im Ruhezustand (kein Werkzeug aktiv). */}
+      {hoverDivideSeg && !toolActive && (() => {
+        const vbPerPx = 1 / (meetScale(view, svgRef.current) ?? 1);
+        const r = 3.5 * vbPerPx;
+        const n = Math.max(2, Math.round(hoverDivideCount));
+        const { a, b } = hoverDivideSeg;
+        const pts = Array.from({ length: n - 1 }, (_, i) => {
+          const t = (i + 1) / n;
+          return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        });
+        return (
+          <g className="plan-hover-divide" pointerEvents="none">
+            {pts.map((pt, i) => {
+              const s = toScreen(pt);
+              return (
+                <circle
+                  key={i}
+                  cx={s.x}
+                  cy={s.y}
+                  r={r}
+                  style={{ fill: snapColor, stroke: snapColor }}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            })}
+          </g>
+        );
+      })()}
       </svg>
       {/* Inline-Text-Editor DIREKT auf der Zeichenfläche (kein Dialog, Nutzer-
           Feedback) — für ein frisch über `text`/`textbox` erzeugtes Element

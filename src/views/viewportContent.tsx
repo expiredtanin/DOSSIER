@@ -62,6 +62,8 @@ export function Content({
   hairline,
   marqueeColor,
   snapColor,
+  hoverDivideDelayMs,
+  hoverDivideCount,
   renderMode,
   view3d,
   fov,
@@ -141,6 +143,8 @@ export function Content({
   marqueeColor: string;
   /** Farbe der Snap-/Endpunkt-Hervorhebung im Grundriss. */
   snapColor: string;
+  hoverDivideDelayMs?: number;
+  hoverDivideCount?: number;
   renderMode: RenderMode;
   /** Kanonischer 3D-Blickwinkel (Preset) der Perspektive. */
   view3d: View3d;
@@ -291,6 +295,8 @@ export function Content({
           hairline={hairline}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
+          hoverDivideDelayMs={hoverDivideDelayMs}
+          hoverDivideCount={hoverDivideCount}
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
@@ -353,6 +359,8 @@ export function Content({
           hairline={hairline}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
+          hoverDivideDelayMs={hoverDivideDelayMs}
+          hoverDivideCount={hoverDivideCount}
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
@@ -458,6 +466,8 @@ export function Content({
           hairline={hairline}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
+          hoverDivideDelayMs={hoverDivideDelayMs}
+          hoverDivideCount={hoverDivideCount}
           mono={mono}
           planViewRef={planViewRef}
           onCursor={onCursor}
@@ -511,6 +521,8 @@ function LevelPlanView({
   hairline,
   marqueeColor,
   snapColor,
+  hoverDivideDelayMs,
+  hoverDivideCount,
   mono,
   planViewRef,
   onCursor,
@@ -557,6 +569,8 @@ function LevelPlanView({
   hairline: boolean;
   marqueeColor: string;
   snapColor: string;
+  hoverDivideDelayMs?: number;
+  hoverDivideCount?: number;
   mono: boolean;
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
@@ -678,6 +692,8 @@ function LevelPlanView({
         hairline={hairline}
         marqueeColor={marqueeColor}
         snapColor={snapColor}
+        hoverDivideDelayMs={hoverDivideDelayMs}
+        hoverDivideCount={hoverDivideCount}
         selectedDrawingId={selectedDrawingId}
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
@@ -703,6 +719,8 @@ function SectionPlanView({
   hairline,
   marqueeColor,
   snapColor,
+  hoverDivideDelayMs,
+  hoverDivideCount,
   mono,
   planViewRef,
   onCursor,
@@ -744,6 +762,8 @@ function SectionPlanView({
   hairline: boolean;
   marqueeColor: string;
   snapColor: string;
+  hoverDivideDelayMs?: number;
+  hoverDivideCount?: number;
   mono: boolean;
   planViewRef: React.RefObject<PlanViewHandle>;
   onCursor: (model: Vec2 | null) => void;
@@ -890,6 +910,8 @@ function SectionPlanView({
         hairline={hairline}
         marqueeColor={marqueeColor}
         snapColor={snapColor}
+        hoverDivideDelayMs={hoverDivideDelayMs}
+        hoverDivideCount={hoverDivideCount}
         selectedDrawingId={selectedDrawingId}
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}

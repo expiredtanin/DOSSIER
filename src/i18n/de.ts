@@ -241,6 +241,8 @@ export const de = {
   "snap.angleStep": "Winkelraster",
   "snap.commonAngles": "Gängige Winkel",
   "snap.commonAngleTolerance": "Winkeltoleranz (°)",
+  "snap.hoverDivideDelayMs": "Hover-Verzögerung (ms)",
+  "snap.hoverDivideCount": "Teilpunkte (Anzahl)",
 
   // ── Transformation (Bewegen/Spiegeln/Drehen) + Modusleiste ───────────────
   "transform.bar": "Transformation",
