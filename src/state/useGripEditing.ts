@@ -396,6 +396,12 @@ export function useGripEditing(opts: {
   // Letzter roher Cursor des laufenden Vertex-Drags (für die Lock-Auflösung beim
   // Tippen, wenn gerade kein Move-Event kommt). Plus der gezogene Griff-Index.
   const gripDragInfoRef = useRef<{ index: number; raw: Vec2 } | null>(null);
+  // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
+  // Grab verankert) — Bezugspunkt für die Flucht-Kandidaten unten (die
+  // Nachbarkanten müssen an ihrer URSPRÜNGLICHEN, nicht der schon verschobenen
+  // Position gemessen werden, sonst würde die Richtung während des Ziehens
+  // mitdriften).
+  const gripOriginRef = useRef<Vec2 | null>(null);
 
   // Endpunkt aus Anker + (gelockten/Live-)Länge/Winkel — wie lineEndFromFields,
   // hier für den Vertex-Drag. Ungelockte Größen folgen dem rohen Cursor `raw`.
@@ -459,6 +465,77 @@ export function useGripEditing(opts: {
     if (g && (g.shape === "circle" || g.shape === "arc")) return g.center;
     const refIndex = neighborGripIndex(index);
     return refIndex != null ? grips[refIndex] : null;
+  };
+
+  // Die beiden (fixen) Polygon-Nachbarn eines gezogenen Punkt-Griffs — für die
+  // Flucht-Kandidaten unten. Anders als `neighborGripIndex` (EIN Nachbar,
+  // reicht für Länge/Winkel-Anker) werden hier BEIDE gebraucht: ein Vielecks-
+  // Eckpunkt hängt an ZWEI Kanten, jede liefert eine eigene mögliche Flucht-
+  // Richtung. Kennt geschlossene Ringe (rect/geschlossene Polylinie/Raum/
+  // Decke — Nachbar 0/n-1 wickelt um) vs. offene Ketten (offene Polylinie/
+  // Linie — Enden haben nur einen Nachbarn). Kreis/Bogen/Wand/Öffnung/Treppe
+  // haben keine Polygon-Nachbarn (kein Vielecks-Eckpunkt) → {null,null}.
+  const ringNeighborPts = (
+    pts: Vec2[],
+    i: number,
+    closed: boolean,
+  ): { prev: Vec2 | null; next: Vec2 | null } => {
+    const n = pts.length;
+    const prevIdx = i > 0 ? i - 1 : closed ? n - 1 : null;
+    const nextIdx = i < n - 1 ? i + 1 : closed ? 0 : null;
+    return {
+      prev: prevIdx != null && prevIdx !== i ? pts[prevIdx] : null,
+      next: nextIdx != null && nextIdx !== i && nextIdx !== prevIdx ? pts[nextIdx] : null,
+    };
+  };
+  const resolvePolygonNeighbors = (index: number): { prev: Vec2 | null; next: Vec2 | null } => {
+    const owner = gripOwners[index];
+    const none = { prev: null, next: null };
+    if (!owner?.drawingId && !owner?.wallId) {
+      // Raum/Decke (exklusiv) — kein Owner, `localIndex` fehlt dann auch, also
+      // ist der flache `index` selbst der Ring-Index.
+      const pts = selectedCeiling
+        ? selectedCeiling.outline
+        : selectedRoom
+        ? selectedRoom.boundary
+        : null;
+      return pts ? ringNeighborPts(pts, owner?.localIndex ?? index, true) : none;
+    }
+    if (owner.wallId) return none; // Wand: nur 2 Punkte, kein Vielecks-Nachbar
+    const d = project.drawings2d.find((x) => x.id === owner.drawingId);
+    const g = d?.geom;
+    if (!g) return none;
+    if (g.shape === "polyline") return ringNeighborPts(g.pts, owner.localIndex, !!g.closed);
+    if (g.shape === "rect" || g.shape === "image") {
+      const corners = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
+      return ringNeighborPts(corners, owner.localIndex, true);
+    }
+    if (g.shape === "line") return ringNeighborPts([g.a, g.b], owner.localIndex, false);
+    return none; // circle/arc: kein Vielecks-Eckpunkt
+  };
+
+  // Rohen Cursor `raw` auf die nächstliegende von mehreren Kandidaten-Achsen
+  // projizieren (jeweils Stützpunkt + Richtung) — "nächstliegend" = kleinster
+  // senkrechter Abstand von `raw` zur (unendlich verlängerten) Achse. Deckt
+  // Shift-Ortho (Welt-H/V) UND Flucht-Snap (Richtung anliegender, fixer
+  // Kanten) in einem einheitlichen Mechanismus ab.
+  const closestAxisPoint = (raw: Vec2, candidates: { point: Vec2; dir: Vec2 }[]): Vec2 | null => {
+    let best: Vec2 | null = null;
+    let bestDist = Infinity;
+    for (const c of candidates) {
+      const len = Math.hypot(c.dir.x, c.dir.y);
+      if (len < 1e-9) continue; // entartete Richtung (koinzidenter Nachbar) → überspringen
+      const u = { x: c.dir.x / len, y: c.dir.y / len };
+      const rel = sub(raw, c.point);
+      const t = rel.x * u.x + rel.y * u.y;
+      const proj = add(c.point, scale(u, t));
+      const dist = Math.hypot(raw.x - proj.x, raw.y - proj.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = proj;
+      }
+    }
+    return best;
   };
 
   // Stabiler Ref auf cycleGripEditField (der globale Tab-Handler hat leere Deps).
@@ -699,6 +776,7 @@ export function useGripEditing(opts: {
     edgeAppliedDeltaRef.current = null; // Kanten-Drag beendet → Anker zurücksetzen
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
     gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
+    gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
     setGripEdit(null); // (c) Feld-Controller schließen
     edgeDragInfoRef.current = null; // Kanten-Drag-Info verwerfen
     setEdgeEdit(null); // Kanten-Feld-Controller schließen
@@ -706,6 +784,10 @@ export function useGripEditing(opts: {
 
   const gripHandlers = {
     onGripMove: (index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+      // Erster Move-Event nach dem Grab (gripDragInfoRef noch leer): die
+      // AKTUELLE — hier noch unveränderte — Position als Flucht-Bezugspunkt
+      // verankern (s. Kommentar an gripOriginRef).
+      if (gripDragInfoRef.current === null) gripOriginRef.current = grips[index];
       // (c) Vertex-Drag mit aktivem Feld-Controller + Locks: den Zielpunkt polar
       // aus Anker + gelockter Länge/Winkel bilden (ungelockt folgt dem Cursor).
       const ge = gripEditRef.current;
@@ -733,12 +815,28 @@ export function useGripEditing(opts: {
       // (festes Ende), relativ zu dem die Bewegung auf H/V eingerastet wird.
       const refIndex = neighborGripIndex(index);
       const anchor = refIndex != null ? grips[refIndex] : null;
-      // Shift = Ortho-Lock: den gezogenen Punkt auf H/V gegenüber dem FIXEN Anker
-      // zwingen (Achse = die nähere; applyAngleConstraint mit 90°, wie Ortho beim
-      // Zeichnen). Der Lock dominiert (kein Snap), damit die Endkoordinate
-      // garantiert eine Achse mit dem Anker teilt — identisch zum 3D-Vertex-Drag.
+      // Shift = Achsen-Lock: den gezogenen Punkt auf eine von mehreren
+      // Kandidaten-Achsen zwingen (welche gewinnt, s. closestAxisPoint) — Welt-
+      // H/V UND, bei einem Vielecks-Eckpunkt (zwei anliegende Kanten), zusätzlich
+      // die FLUCHT der beiden fixen Nachbarkanten in ihrer ursprünglichen
+      // Richtung. Nutzer-Wunsch: „wenn ein Punkt aus zwei Linien besteht, die
+      // nicht in 0/90° liegen, sollte Shift auch in DIESE Richtung snappen" —
+      // vorher war Shift stur auf Welt-H/V beschränkt, bei schrägen Anschlüssen
+      // also nutzlos für „entlang der bestehenden Kante weiterziehen". Der Lock
+      // dominiert (kein Snap), damit die Endkoordinate garantiert eine Achse
+      // trifft — identisch zum bisherigen Ortho-Verhalten.
       if (mods.shift && anchor) {
-        const pt = applyAngleConstraint(anchor, raw, 90);
+        const candidates: { point: Vec2; dir: Vec2 }[] = [
+          { point: anchor, dir: { x: 1, y: 0 } },
+          { point: anchor, dir: { x: 0, y: 1 } },
+        ];
+        const origin = gripOriginRef.current;
+        if (origin) {
+          const { prev, next } = resolvePolygonNeighbors(index);
+          if (prev) candidates.push({ point: prev, dir: sub(origin, prev) });
+          if (next) candidates.push({ point: next, dir: sub(next, origin) });
+        }
+        const pt = closestAxisPoint(raw, candidates) ?? applyAngleConstraint(anchor, raw, 90);
         applyGrip(index, pt);
         setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
