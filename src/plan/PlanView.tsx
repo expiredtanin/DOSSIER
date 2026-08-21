@@ -424,6 +424,12 @@ export interface GripHandlers {
    */
   onEdgeMove(edge: EdgeGrip, raw: Vec2, pxPerMeter: number, mods: ToolMods): void;
   onGripEnd(): void;
+  /**
+   * Bewaffneten Punkt-Griff verwerfen (Escape): setzt den Punkt exakt auf
+   * `origin` zurück (ohne Snap/Ortho-Neuauswertung) und räumt danach wie
+   * {@link onGripEnd} auf.
+   */
+  onGripCancel(index: number, origin: Vec2): void;
 }
 
 export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
@@ -769,7 +775,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
 
   // Transiente Griff-Zieh-Daten (linke Taste auf einem Grip). Kein State je
   // Bewegung; die Modell-Mutation läuft live über gripHandlers.onGripMove.
-  const gripDrag = useRef<{ pointerId: number; index: number } | null>(null);
+  // Anders als bei Kante/Körper braucht das Loslassen der Maus die Bearbeitung
+  // NICHT mehr zu beenden: der Griff bleibt „bewaffnet" (kein Pointer-Capture),
+  // folgt dem Cursor beim Schweben weiter — wie beim Zeichnen (Klick → Punkt
+  // setzen, Maus bewegt sich frei, Wert tippbar, nächster Klick/Enter bestätigt,
+  // Escape verwirft zur ursprünglichen Position `origin` zurück).
+  const gripDrag = useRef<{ pointerId: number; index: number; origin: Vec2 } | null>(
+    null,
+  );
   // Transiente Kanten-Griff-Zieh-Daten (linke Taste auf einem Dreieck-Anfasser).
   // Hält den gegriffenen EdgeGrip; die Mutation läuft live über onEdgeMove.
   const edgeDrag = useRef<{ pointerId: number; edge: EdgeGrip } | null>(null);
@@ -788,6 +801,28 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Letzter Links-Klick (Zeit + Bildschirmposition) für die manuelle Doppelklick-
   // Erkennung auf Raum-Stempel (Pointer-Capture unterdrückt natives dblclick).
   const lastClickRef = useRef<{ t: number; x: number; y: number } | null>(null);
+
+  // Tastatur-Abschluss eines bewaffneten Punkt-Griffs (s. gripDrag oben): Escape
+  // verwirft (zurück auf `origin`), Enter bestätigt die aktuelle Position — beide
+  // NUR wenn kein Eingabefeld fokussiert ist (die Befehlszeile behandelt ihr
+  // eigenes Enter für getippte Länge/Winkel-Werte selbst, s. App.tsx).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const gd = gripDrag.current;
+      if (!gd || !gripHandlers) return;
+      if (e.key !== "Escape" && e.key !== "Enter") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      e.preventDefault();
+      gripDrag.current = null;
+      if (e.key === "Escape") gripHandlers.onGripCancel(gd.index, gd.origin);
+      else gripHandlers.onGripEnd();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [gripHandlers]);
 
   /** Bildschirm-px-Distanz Cursor → Stempel-Griff; null = kein einzelner Raum. */
   const stampHandleAt = (clientX: number, clientY: number): string | null => {
@@ -1199,6 +1234,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Maus-Schema (docs/design/context-menu.md): MITTE = schwenken (Pan),
   // LINKS = Auswahl, RECHTS = Kontextmenü, RAD = Zoom.
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    // Ein Punkt-Griff ist bereits „bewaffnet" (Maus wurde losgelassen, der
+    // Punkt folgt seither dem Cursor) — JEDER weitere Linksklick bestätigt nur
+    // die aktuelle Position, statt irgendeine andere Aktion (Doppelklick,
+    // Schere, neue Auswahl, …) an derselben Stelle auszulösen.
+    if (e.button === 0 && gripDrag.current && gripHandlers) {
+      e.preventDefault();
+      gripDrag.current = null;
+      gripHandlers.onGripEnd();
+      return;
+    }
     // Doppelklick (zweiter Klick der Sequenz) auf einen Raum-Stempel/-Fläche →
     // Stempel-Editor öffnen. Manuell über Zeit/Abstand erkannt, weil PlanView
     // Pointer-Capture nutzt und der Browser dann kein natives `dblclick`
@@ -1278,8 +1323,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const gi = gripAt(e.clientX, e.clientY);
       if (gi !== null) {
         e.preventDefault();
-        e.currentTarget.setPointerCapture(e.pointerId);
-        gripDrag.current = { pointerId: e.pointerId, index: gi };
+        // KEIN Pointer-Capture: der Griff bleibt nach dem Loslassen bewaffnet
+        // und folgt via normalem Hover-onPointerMove weiter dem Cursor (s.
+        // Kommentar an der gripDrag-Deklaration).
+        gripDrag.current = { pointerId: e.pointerId, index: gi, origin: grips![gi] };
         return;
       }
       // Linke Taste auf einem Kanten-Anfasser (Dreieck): Seite ziehen.
@@ -1571,14 +1618,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       return;
     }
 
-    // Editier-Griff loslassen: Ziehen abschließen.
-    const gd = gripDrag.current;
-    if (gd && gd.pointerId === e.pointerId) {
-      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      }
-      gripDrag.current = null;
-      gripHandlers!.onGripEnd();
+    // Editier-Griff: Maus loslassen beendet die Bearbeitung NICHT mehr — kein
+    // Pointer-Capture gehalten, der Griff bleibt bewaffnet und folgt weiter dem
+    // Cursor. Abschluss erst per erneutem Klick (oben in onPointerDown) oder
+    // Enter, Verwerfen per Escape (beides im Tastatur-Effekt unten).
+    if (gripDrag.current && gripDrag.current.pointerId === e.pointerId) {
       return;
     }
 

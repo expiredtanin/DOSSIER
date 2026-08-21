@@ -435,32 +435,34 @@ export function useGripEditing(opts: {
     ];
   };
 
-  // Stabiler Ref auf cycleGripEditField (der globale Tab-Handler hat leere Deps).
-  const cycleGripEditFieldRef = useRef<() => void>(() => {});
-  // Tab im Vertex-Drag: Feld-Controller öffnen/zyklen (length ↔ angle). Der
-  // Anker ist normalerweise die BENACHBARTE Ecke (Polylinien-Semantik: Länge/
-  // Winkel relativ zum Nachbarpunkt) — bei Kreis/Bogen ist das falsch (deren
-  // Griffe liegen auf dem Ring, "Länge" muss der RADIUS sein, also relativ
-  // zum ZENTRUM). Ohne diese Sonderfälle blieb der Kreis-Radius-Griff sogar
-  // ganz ohne Anker (nur 1 Griff, kein Nachbar) → Tab tat nichts.
-  const cycleGripEditField = () => {
-    const info = gripDragInfoRef.current;
-    if (!info) return;
+  // Fixer Bezug (Anker) für Länge/Winkel eines gezogenen Punkt-Griffs. Normal
+  // die BENACHBARTE Ecke DESSELBEN Elements (Polylinien-Semantik) — bei Kreis/
+  // Bogen ist das falsch (deren Griffe liegen auf dem Ring, "Länge" muss der
+  // RADIUS sein, also relativ zum ZENTRUM). Ohne diesen Sonderfall blieb der
+  // Kreis-Radius-Griff sogar ganz ohne Anker (nur 1 Griff, kein Nachbar).
+  // Gemeinsam genutzt vom Tab-Feld-Controller UND dem Shift-Ortho-Bezug UND
+  // dem Cursor-HUD (Länge/Winkel-Anzeige neben der Maus).
+  const resolveGripAnchor = (index: number): Vec2 | null => {
     // Bei Mehrfachauswahl gehört der gezogene Griff evtl. NICHT dem einzeln
     // selektierten `selectedDrawing`, sondern einem anderen Element der
     // Auswahl — das eigentliche Element über `gripOwners` auflösen.
-    const owner = gripOwners[info.index];
+    const owner = gripOwners[index];
     const ownerDrawing = owner?.drawingId
       ? project.drawings2d.find((d) => d.id === owner.drawingId)
       : selectedDrawing;
     const g = ownerDrawing?.geom;
-    const anchor =
-      g && (g.shape === "circle" || g.shape === "arc")
-        ? g.center
-        : (() => {
-            const refIndex = neighborGripIndex(info.index);
-            return refIndex != null ? grips[refIndex] : null;
-          })();
+    if (g && (g.shape === "circle" || g.shape === "arc")) return g.center;
+    const refIndex = neighborGripIndex(index);
+    return refIndex != null ? grips[refIndex] : null;
+  };
+
+  // Stabiler Ref auf cycleGripEditField (der globale Tab-Handler hat leere Deps).
+  const cycleGripEditFieldRef = useRef<() => void>(() => {});
+  // Tab im Vertex-Drag: Feld-Controller öffnen/zyklen (length ↔ angle).
+  const cycleGripEditField = () => {
+    const info = gripDragInfoRef.current;
+    if (!info) return;
+    const anchor = resolveGripAnchor(info.index);
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     setGripEdit((prev) =>
       prev
@@ -532,6 +534,29 @@ export function useGripEditing(opts: {
     else moveEdgeOf(edge.owner?.drawingId ?? selectedDrawingId, edge.owner?.wallId ?? selectedWallId, edge.aIndex, edge.bIndex, delta);
   };
 
+  // Maß-/Winkel-HUD am Cursor für einen gezogenen Punkt-Griff — dieselbe
+  // Darstellung wie beim Zeichnen (DraftHud, VW-Stil). Ohne Anker (Einzelgriff-
+  // Elemente wie Öffnung/Treppe) gibt es keine sinnvolle Länge/Winkel-Anzeige.
+  const hudFor = (index: number, pt: Vec2): NonNullable<ToolDraft["hud"]> | undefined => {
+    const anchor = resolveGripAnchor(index);
+    if (!anchor) return undefined;
+    const dx = pt.x - anchor.x;
+    const dy = pt.y - anchor.y;
+    const angleDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+    return { at: pt, length: Math.hypot(dx, dy), angleDeg };
+  };
+
+  // Aufräumen nach Abschluss/Verwerfen eines Griff-Drags (geteilt von onGripEnd
+  // und onGripCancel).
+  const endGripEditing = () => {
+    setDraft(null);
+    edgeDragOffsetRef.current = null; // Drag beendet → Anker zurücksetzen
+    edgeFreeLastRef.current = null; // freien Kanten-Drag-Anker zurücksetzen
+    moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
+    gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
+    setGripEdit(null); // (c) Feld-Controller schließen
+  };
+
   const gripHandlers = {
     onGripMove: (index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
       // (c) Vertex-Drag mit aktivem Feld-Controller + Locks: den Zielpunkt polar
@@ -541,7 +566,7 @@ export function useGripEditing(opts: {
       if (ge && (ge.locks.length != null || ge.locks.angle != null)) {
         const pt = gripEditPoint(ge.anchor, ge.locks, raw);
         applyGrip(index, pt);
-        setDraft({ preview: [], vertices: [], snap: null });
+        setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
       }
       // Mehrfachauswahl: das Element, dem DIESER Griff gehört (nicht zwingend
@@ -568,7 +593,7 @@ export function useGripEditing(opts: {
       if (mods.shift && anchor) {
         const pt = applyAngleConstraint(anchor, raw, 90);
         applyGrip(index, pt);
-        setDraft({ preview: [], vertices: [], snap: null });
+        setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
       }
       // Snap gegen das Projekt OHNE das gerade gezogene Element (sonst fängt der
@@ -588,7 +613,7 @@ export function useGripEditing(opts: {
       });
       const pt = snapResult?.point ?? raw;
       applyGrip(index, pt);
-      setDraft({ preview: [], vertices: [], snap: snapResult });
+      setDraft({ preview: [], vertices: [], snap: snapResult, hud: hudFor(index, pt) });
     },
     onMoveBody: (
       delta: Vec2,
@@ -706,12 +731,14 @@ export function useGripEditing(opts: {
       setDraft({ preview: [], vertices: [], snap: isGeometrySnap ? snapResult : null });
     },
     onGripEnd: () => {
-      setDraft(null);
-      edgeDragOffsetRef.current = null; // Drag beendet → Anker zurücksetzen
-      edgeFreeLastRef.current = null; // freien Kanten-Drag-Anker zurücksetzen
-      moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
-      gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
-      setGripEdit(null); // (c) Feld-Controller schließen
+      endGripEditing();
+    },
+    // Bewaffneten Punkt-Griff verwerfen (Escape): exakt auf `origin`
+    // zurücksetzen — ohne Snap/Ortho-Neuauswertung, ein reiner Revert — und
+    // danach wie onGripEnd aufräumen.
+    onGripCancel: (index: number, origin: Vec2) => {
+      applyGrip(index, origin);
+      endGripEditing();
     },
   };
 

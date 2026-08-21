@@ -849,18 +849,6 @@ export default function App() {
   // Live-Echo des Befehlszeilen-Texts fürs Cursor-HUD: der getippte Wert
   // erscheint sofort im aktiven Tab-Feld am Cursor (VW-Verhalten).
   const [cmdTyped, setCmdTyped] = useState("");
-  const hudFields =
-    commandActive && engineView.fields.length > 0
-      ? {
-          fields: engineView.fields.map((f) => ({
-            id: f.id,
-            value: f.value,
-            locked: f.locked,
-            active: f.active,
-          })),
-          typed: cmdTyped,
-        }
-      : null;
 
   // ── GUI-Werkzeug ↔ Befehls-Engine (ein Eingabe-Hub) ───────────────────────
   // Ein Klick auf ein gekoppeltes Zeichen-Werkzeug (Wand/Linie/Rechteck/Polylinie)
@@ -1338,6 +1326,27 @@ export default function App() {
     moveCeilingBy,
     moveElementByOf,
   });
+
+  // Feld-Zustand fürs Cursor-HUD (neben der Maus, VW-Stil): läuft ein
+  // Punkt-Griff-Drag, hat er Vorrang (dieselben Felder wie unten in der
+  // Befehlszeile — Länge/Winkel-Tab-Zyklus), sonst die Befehls-Engine-Felder
+  // beim Zeichnen. Vorher zeigte das Cursor-HUD beim Griff-Ziehen GAR KEINE
+  // Länge/Winkel-Werte an (nur die Befehlszeile unten) — Nutzer-Wunsch: „du
+  // kannst [Länge/Winkel] gleich bei der Maus anzeigen wie beim Erstellen".
+  const hudFields =
+    gripEdit
+      ? { fields: gripEditFields(), typed: cmdTyped }
+      : commandActive && engineView.fields.length > 0
+        ? {
+            fields: engineView.fields.map((f) => ({
+              id: f.id,
+              value: f.value,
+              locked: f.locked,
+              active: f.active,
+            })),
+            typed: cmdTyped,
+          }
+        : null;
 
   // Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen — siehe
   // state/useKeyboardShortcuts.ts.
