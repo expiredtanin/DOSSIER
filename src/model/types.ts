@@ -831,12 +831,18 @@ export interface LayerCategory {
  * Quelle eines vererbbaren Attributs (Vordergrund/Hintergrund/Strichstärke/
  * Schraffur), wenn KEIN expliziter Wert am Element gesetzt ist:
  *   • "layer"  — „Nach Ebene": die LayerCategory des Elements erzwingt den Wert
- *     (`color`/`lw`/`hatch`). Das ist auch der DEFAULT, wenn das Source-Feld
- *     fehlt (`undefined`) — ein frisch erzeugtes Element (Source-Feld nie
- *     gesetzt) folgt also der Ebene, nicht dem Bauteil.
+ *     (`color`/`lw`/`hatch`).
  *   • "object" — „Nach Bauteil": erbt vom Bauteil (Component) bzw. dessen
- *     bisheriger Fallback-Kette. Muss aktiv im Attribut-Panel gewählt werden
- *     (nur bei Wand/Decke anwendbar — ein Drawing2D hat kein Bauteil).
+ *     bisheriger Fallback-Kette (bei Wand/Decke u. a. die neutrale SIA-Poché-
+ *     Konvention, s. `resolveBackground`). Das ist auch der DEFAULT bei Wand/
+ *     Decke, wenn das Source-Feld fehlt (`undefined`) — bewusst NICHT „Nach
+ *     Ebene": eine frisch erzeugte Wand soll die neutrale Bauteil-Konvention
+ *     zeigen (weisser Grund, schwarzer Vordergrund), nicht die rohe
+ *     Ebenenfarbe.
+ * Ein Drawing2D hat KEIN eigenes Bauteil — „Nach Bauteil" ist dort im
+ * Attribut-Panel gar nicht erst wählbar, ein fehlendes Source-Feld wird dort
+ * vom Aufrufer (`selectionInfo.ts`) auf „Nach Ebene" gemappt (die einzig
+ * sinnvolle Alternative zum expliziten Wert bei einem bauteillosen Element).
  * Ein gesetzter expliziter Wert (z. B. `foreground`) gewinnt IMMER, unabhängig
  * von der Source (s. Resolve-Reihenfolge in `plan/generatePlan/shared.ts`).
  */

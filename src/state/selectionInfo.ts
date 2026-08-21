@@ -1067,16 +1067,19 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
   // „Nach Bauteil"-Option im Panel, s. AttributesPanel.tsx) — als Platzhalter
   // ein leeres Bauteil, dessen foreground/background/hatchId immer fehlen,
   // sodass die Kette bei einem (aus Alt-Daten) expliziten `source:"object"`
-  // korrekt auf „kein Wert" statt einer erfundenen Bauteilfarbe fällt.
+  // korrekt auf „kein Wert" statt einer erfundenen Bauteilfarbe fällt. Anders
+  // als bei Wand/Decke (Default „Nach Bauteil") gilt bei Drawing2D „Nach
+  // Ebene" als Default — daher hier explizit `?? "layer"` VOR dem Resolver
+  // (der selbst weiterhin generisch „Nach Bauteil" als Default kennt).
   const noComponent = { id: "", name: "", color, hatchId: "", joinPriority: 0 };
   const effectiveForeground = closed
-    ? resolveForeground(noComponent, d.foreground, cat, d.foregroundSource)
+    ? resolveForeground(noComponent, d.foreground, cat, d.foregroundSource ?? "layer")
     : undefined;
   const effectiveBackground = closed
-    ? resolveBackground(noComponent, d.background, cat, d.backgroundSource)
+    ? resolveBackground(noComponent, d.background, cat, d.backgroundSource ?? "layer")
     : undefined;
   const effectiveHatchId = closed
-    ? resolveHatchId(d.hatchId, d.hatchSource, cat, undefined)
+    ? resolveHatchId(d.hatchId, d.hatchSource ?? "layer", cat, undefined)
     : null;
   return {
     kind: "drawing2d",

@@ -419,12 +419,15 @@ export function resolveHatch(
  * Kollabiert die Vordergrund-Farbkette (Muster-/Schraffurlinienfarbe) eines
  * Bauteils zu einem einzelnen Wert für {@link resolveHatch}. AUFLÖSUNGSREIHENFOLGE
  * (By-Layer/By-Object, siehe `docs`/Attribut-Panel):
- *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.color`) ??
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
  *   (`Component.foreground`) ?? `undefined`.
- * `source` fehlt/`"layer"` ⇒ „Nach Ebene" (DEFAULT — ein neu erzeugtes Element
- * ohne explizites Source-Feld folgt der Ebene, nicht dem Bauteil; „Nach
- * Bauteil" muss aktiv gewählt werden). Nur ein EXPLIZITES `"object"` fällt auf
- * die Bauteil-Kette zurück.
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" — bei WAND/DECKE bewusst der
+ * DEFAULT (die Bauteil-Kette liefert die neutrale SIA-Poché, s.
+ * {@link resolveBackground}). Ein Drawing2D hat KEIN eigenes Bauteil und
+ * bietet „Nach Bauteil" im Attribut-Panel gar nicht erst an — dort wird ein
+ * fehlendes Source-Feld vom AUFRUFER (`selectionInfo.ts`) explizit auf
+ * `"layer"` gemappt, bevor er hier ankommt (dieser Resolver selbst bleibt
+ * Bauteil-Default, unabhängig von der Elementart).
  */
 export function resolveForeground(
   comp: Component,
@@ -433,20 +436,22 @@ export function resolveForeground(
   source?: AttributeSource,
 ): string | undefined {
   if (override != null) return override;
-  if (source !== "object") return category?.color ?? comp.foreground;
+  if (source === "layer") return category?.color ?? comp.foreground;
   return comp.foreground;
 }
 
 /**
  * Kollabiert die Hintergrund-/Füllfarbkette (Poché-Override) eines Bauteils zu
  * einem einzelnen Wert, exakt analog zu {@link resolveForeground}:
- *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.color`) ??
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.color`) ??
  *   (`Component.background`) ?? `undefined`.
  * `undefined` als Endergebnis heißt „kein Override gesetzt" — Aufrufer fallen
  * dann auf ihren eigenen Default zurück (bei Wand/Decke die neutrale SIA-
  * Poché-Farbe HATCH_INK/HATCH_PAPER, NICHT `Component.color` — die reale
  * Bauteilfarbe soll die Schnitt-Konvention nicht überschreiben, nur ein
- * bewusster Override).
+ * bewusster Override). Genau DIESE neutrale Poché ist bei Wand/Decke der
+ * gewünschte Default („weisser Grund, schwarzer Vordergrund") — deshalb
+ * bleibt „Nach Bauteil" dort der Default, nicht „Nach Ebene".
  */
 export function resolveBackground(
   comp: Component,
@@ -455,7 +460,7 @@ export function resolveBackground(
   source?: AttributeSource,
 ): string | undefined {
   if (override != null) return override;
-  if (source !== "object") return category?.color ?? comp.background;
+  if (source === "layer") return category?.color ?? comp.background;
   return comp.background;
 }
 
@@ -463,10 +468,11 @@ export function resolveBackground(
  * Kollabiert die Schraffur-Referenz (Hatch Manager) eines Elements zu einer
  * einzelnen `hatchId` für {@link resolveHatch} — By-Layer/By-Object, analog zu
  * {@link resolveForeground}:
- *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.hatch`) ??
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.hatch`) ??
  *   `fallback` (Bauteil-Schraffur, z. B. `Component.hatchId`/`viewHatchId`, oder
  *   `undefined` bei Drawing2D ohne Bauteil-Bezug).
- * `source` fehlt/`"layer"` ⇒ „Nach Ebene" (DEFAULT, s. {@link resolveForeground}).
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (DEFAULT bei Wand/Decke, s.
+ * {@link resolveForeground}).
  * Ergebnis kann `undefined` sein — der Aufrufer fällt dann auf `NO_HATCH` zurück.
  */
 export function resolveHatchId(
@@ -476,17 +482,18 @@ export function resolveHatchId(
   fallback?: string,
 ): string | undefined {
   if (override != null) return override;
-  if (source !== "object") return category?.hatch ?? fallback;
+  if (source === "layer") return category?.hatch ?? fallback;
   return fallback;
 }
 
 /**
  * Kollabiert die Strichstärke-Kette (mm Papier) eines Elements, By-Layer/By-
  * Object, analog zu {@link resolveHatchId}:
- *   (Attribut-Override `override`) ?? (`source!=="object"` ⇒ `category.lw`) ??
+ *   (Attribut-Override `override`) ?? (`source==="layer"` ⇒ `category.lw`) ??
  *   `fallback` (bisherige Bauteil-/LineStyle-/Kategorie-Default-Kette des
  *   Aufrufers — heutiges Verhalten).
- * `source` fehlt/`"layer"` ⇒ „Nach Ebene" (DEFAULT, s. {@link resolveForeground}).
+ * `source` fehlt/`"object"` ⇒ „Nach Bauteil" (DEFAULT bei Wand/Decke, s.
+ * {@link resolveForeground}).
  */
 export function resolveStrokeWeight(
   override: number | undefined,
@@ -495,7 +502,7 @@ export function resolveStrokeWeight(
   fallback: number,
 ): number {
   if (override != null) return override;
-  if (source !== "object") return category?.lw ?? fallback;
+  if (source === "layer") return category?.lw ?? fallback;
   return fallback;
 }
 

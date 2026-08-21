@@ -1,10 +1,13 @@
 /**
  * `resolveForeground`/`resolveBackground`/`resolveHatchId`/`resolveStrokeWeight`
- * — By-Layer/By-Object-Auflösung. Nutzer-Report: ein neu erzeugtes Element
- * (Source-Feld nie gesetzt) zeigte im Attribut-Panel „Nach Bauteil" als
- * Default, obwohl „Nach Ebene" der gewünschte Standard ist. Fix: `source`
- * fehlend/`"layer"` liefert jetzt die Kategorie, NUR ein explizites
- * `"object"` fällt auf das Bauteil zurück (vorher umgekehrt).
+ * — By-Layer/By-Object-Auflösung. Der Resolver selbst bleibt „Nach Bauteil"
+ * (Component) als Default, wenn `source` fehlt/`"object"` ist — das liefert
+ * bei Wand/Decke die neutrale SIA-Poché-Konvention (weisser Grund, schwarzer
+ * Vordergrund), NICHT die rohe Ebenenfarbe (Nutzer-Bestätigung: „eine Wand
+ * usw soll weiterhin nach Bauteil haben"). Ein Drawing2D hat kein eigenes
+ * Bauteil und bietet „Nach Bauteil" im Attribut-Panel gar nicht an — DORT
+ * mappt der Aufrufer (`selectionInfo.ts`) ein fehlendes Source-Feld explizit
+ * auf `"layer"`, bevor er diese Resolver aufruft (separat unten geprüft).
  */
 
 import { describe, it, expect } from "vitest";
@@ -36,46 +39,52 @@ const category: LayerCategory = {
   hatch: "sia-wall",
 };
 
-describe("resolveForeground/resolveBackground — Default fehlender Source ist jetzt 'Nach Ebene'", () => {
-  it("kein Override, Source fehlt: liefert die Kategorie-Farbe (nicht mehr die Bauteilfarbe)", () => {
-    expect(resolveForeground(comp, undefined, category, undefined)).toBe(category.color);
-    expect(resolveBackground(comp, undefined, category, undefined)).toBe(category.color);
+describe("resolveForeground/resolveBackground — Default bleibt 'Nach Bauteil'", () => {
+  it("kein Override, Source fehlt: liefert weiterhin die Bauteilfarbe (Default unverändert)", () => {
+    expect(resolveForeground(comp, undefined, category, undefined)).toBe(comp.foreground);
+    expect(resolveBackground(comp, undefined, category, undefined)).toBe(comp.background);
   });
 
-  it("kein Override, Source explizit 'layer': unverändert die Kategorie-Farbe", () => {
-    expect(resolveForeground(comp, undefined, category, "layer")).toBe(category.color);
-    expect(resolveBackground(comp, undefined, category, "layer")).toBe(category.color);
-  });
-
-  it("kein Override, Source explizit 'object': fällt weiterhin auf die Bauteilfarbe zurück", () => {
+  it("kein Override, Source explizit 'object': unverändert die Bauteilfarbe", () => {
     expect(resolveForeground(comp, undefined, category, "object")).toBe(comp.foreground);
     expect(resolveBackground(comp, undefined, category, "object")).toBe(comp.background);
   });
 
+  it("kein Override, Source explizit 'layer': liefert die Kategorie-Farbe", () => {
+    expect(resolveForeground(comp, undefined, category, "layer")).toBe(category.color);
+    expect(resolveBackground(comp, undefined, category, "layer")).toBe(category.color);
+  });
+
   it("ein gesetzter Override gewinnt immer, unabhängig von der Source", () => {
-    expect(resolveForeground(comp, "#ff00ff", category, "object")).toBe("#ff00ff");
+    expect(resolveForeground(comp, "#ff00ff", category, "layer")).toBe("#ff00ff");
     expect(resolveForeground(comp, "#ff00ff", category, undefined)).toBe("#ff00ff");
   });
+});
 
-  it("ohne Kategorie fällt 'Nach Ebene' auf die Bauteilfarbe zurück (kein Crash)", () => {
-    expect(resolveForeground(comp, undefined, undefined, undefined)).toBe(comp.foreground);
+describe("resolveHatchId — Default bleibt 'Nach Bauteil'", () => {
+  it("kein Override, Source fehlt: liefert den Fallback (Bauteil-Schraffur)", () => {
+    expect(resolveHatchId(undefined, undefined, category, comp.hatchId)).toBe(comp.hatchId);
+  });
+  it("kein Override, Source explizit 'layer': liefert die Kategorie-Schraffur", () => {
+    expect(resolveHatchId(undefined, "layer", category, comp.hatchId)).toBe(category.hatch);
   });
 });
 
-describe("resolveHatchId — Default fehlender Source ist jetzt 'Nach Ebene'", () => {
-  it("kein Override, Source fehlt: liefert die Kategorie-Schraffur", () => {
-    expect(resolveHatchId(undefined, undefined, category, comp.hatchId)).toBe(category.hatch);
+describe("resolveStrokeWeight — Default bleibt 'Nach Bauteil'", () => {
+  it("kein Override, Source fehlt: liefert den Fallback", () => {
+    expect(resolveStrokeWeight(undefined, undefined, category, 0.13)).toBe(0.13);
   });
-  it("kein Override, Source explizit 'object': liefert den Fallback (Bauteil-Schraffur)", () => {
-    expect(resolveHatchId(undefined, "object", category, comp.hatchId)).toBe(comp.hatchId);
+  it("kein Override, Source explizit 'layer': liefert die Kategorie-Strichstärke", () => {
+    expect(resolveStrokeWeight(undefined, "layer", category, 0.13)).toBe(category.lw);
   });
 });
 
-describe("resolveStrokeWeight — Default fehlender Source ist jetzt 'Nach Ebene'", () => {
-  it("kein Override, Source fehlt: liefert die Kategorie-Strichstärke", () => {
-    expect(resolveStrokeWeight(undefined, undefined, category, 0.13)).toBe(category.lw);
-  });
-  it("kein Override, Source explizit 'object': liefert den Fallback", () => {
-    expect(resolveStrokeWeight(undefined, "object", category, 0.13)).toBe(0.13);
+describe("Drawing2D-Panel-Vorschau (selectionInfo.ts) — mappt fehlende Source explizit auf 'layer'", () => {
+  it("simuliert das Aufrufer-Mapping `d.foregroundSource ?? \"layer\"`: liefert die Kategorie-Farbe für ein Drawing2D ohne Bauteil", () => {
+    const noComponent: Component = { id: "", name: "", color: "#000", hatchId: "", joinPriority: 0 };
+    const drawingSource: "layer" | undefined = undefined; // wie ein frisches Drawing2D
+    expect(resolveForeground(noComponent, undefined, category, drawingSource ?? "layer")).toBe(
+      category.color,
+    );
   });
 });

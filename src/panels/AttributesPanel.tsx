@@ -50,11 +50,19 @@ import {
  *  selbst gespeichert). */
 type UiSource = "layer" | "object" | "custom";
 
-/** Leitet den UI-Quellen-Zustand ab: ein gesetzter Wert gewinnt immer („eigener
- *  Wert"), sonst das rohe Source-Feld (`undefined` ⇒ „Nach Ebene", Default —
- *  s. AttributeSource in model/types.ts). */
-function uiSourceOf(hasValue: boolean, raw: AttributeSource | undefined): UiSource {
-  return hasValue ? "custom" : raw ?? "layer";
+/**
+ * Leitet den UI-Quellen-Zustand ab: ein gesetzter Wert gewinnt immer („eigener
+ * Wert"), sonst das rohe Source-Feld — dessen DEFAULT unterscheidet sich nach
+ * Elementart (s. AttributeSource in model/types.ts): Wand/Decke „Nach Bauteil"
+ * (neutrale SIA-Poché), Drawing2D „Nach Ebene" (kein eigenes Bauteil, „Nach
+ * Bauteil" wird dort im Dropdown gar nicht erst angeboten).
+ */
+function uiSourceOf(
+  hasValue: boolean,
+  raw: AttributeSource | undefined,
+  isDrawing: boolean,
+): UiSource {
+  return hasValue ? "custom" : raw ?? (isDrawing ? "layer" : "object");
 }
 
 export function AttributesPanel() {
@@ -191,15 +199,21 @@ export function AttributesPanel() {
     </>
   );
 
-  // Vordergrund/Hintergrund: „eigener Wert" ⇒ auf Quelle "object" (Nach
-  // Bauteil, Default) zurückfallen; „Nach Ebene"/„Nach Bauteil" schreiben die
-  // Quelle direkt (der Host löscht dabei den expliziten Wert).
-  const fgUi = uiSourceOf(sel.foreground !== undefined, sel.foregroundSource);
-  const bgUi = uiSourceOf(sel.background !== undefined, sel.backgroundSource);
-  const weightUi = uiSourceOf(sel.strokeWeightOverride !== undefined, sel.strokeWeightSource);
+  // Vordergrund/Hintergrund: „eigener Wert" ⇒ auf den elementart-abhängigen
+  // Default zurückfallen (Wand/Decke „Nach Bauteil", Drawing2D „Nach Ebene",
+  // s. uiSourceOf); „Nach Ebene"/„Nach Bauteil" schreiben die Quelle direkt
+  // (der Host löscht dabei den expliziten Wert).
+  const fgUi = uiSourceOf(sel.foreground !== undefined, sel.foregroundSource, isDrawing);
+  const bgUi = uiSourceOf(sel.background !== undefined, sel.backgroundSource, isDrawing);
+  const weightUi = uiSourceOf(
+    sel.strokeWeightOverride !== undefined,
+    sel.strokeWeightSource,
+    isDrawing,
+  );
   const hatchUi = uiSourceOf(
     sel.fillHatchId !== undefined && sel.fillHatchId !== null,
     sel.hatchSource,
+    isDrawing,
   );
 
   // Wechsel auf „eigener Wert" per Dropdown (nicht durchs Editieren des Felds
