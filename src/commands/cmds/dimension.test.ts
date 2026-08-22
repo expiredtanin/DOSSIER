@@ -1,6 +1,8 @@
 /**
- * `dimensionCommand` — zwei Punkte + Lage der Masslinie → `shape:"dimension"`.
- * Die Masszahl wird NICHT gespeichert (aus dist(a,b) beim Rendern abgeleitet).
+ * `dimensionCommand` — Punktreihe (wie Polylinie) + EIN Offset-Klick →
+ * eine oder mehrere `shape:"dimension"`-Elemente (Reihenbemassung, SIA 400
+ * Figur 14). Die Masszahl wird NICHT gespeichert (aus dist(a,b) beim Rendern
+ * abgeleitet).
  */
 
 import { describe, it, expect } from "vitest";
@@ -43,7 +45,7 @@ function makeCtx(p: Project): CommandContext {
 }
 
 describe("dimensionCommand", () => {
-  it("zwei Punkte + Offset-Klick (links positiv) → shape:dimension mit korrektem Vorzeichen", () => {
+  it("zwei Punkte + Enter + Offset-Klick (links positiv) → ein shape:dimension mit korrektem Vorzeichen", () => {
     const p = project();
     const ctx = makeCtx(p);
     let [state] = dimensionCommand.onInput(
@@ -52,6 +54,7 @@ describe("dimensionCommand", () => {
       ctx,
     );
     [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 10, y: 0 } }, ctx);
+    [state] = dimensionCommand.onConfirm(state, ctx);
     // Cursor bei y=2 (oberhalb von a→b, entlang +x) → Links-Normale zeigt nach +y.
     const [, result] = dimensionCommand.onInput(state, { kind: "point", point: { x: 5, y: 2 } }, ctx);
     expect(result.commit).toBeDefined();
@@ -66,7 +69,7 @@ describe("dimensionCommand", () => {
     }
   });
 
-  it("getippte Offset-Zahl committet direkt (kein Punkt-Klick nötig)", () => {
+  it("Fertig-Option (statt Enter) beendet die Punktreihe identisch", () => {
     const p = project();
     const ctx = makeCtx(p);
     let [state] = dimensionCommand.onInput(
@@ -74,14 +77,54 @@ describe("dimensionCommand", () => {
       { kind: "point", point: { x: 0, y: 0 } },
       ctx,
     );
-    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 0, y: 5 } }, ctx);
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 4, y: 0 } }, ctx);
+    [state] = dimensionCommand.onInput(state, { kind: "option", id: "finish" }, ctx);
     const [, result] = dimensionCommand.onInput(state, { kind: "number", value: 1.5 }, ctx);
     const next = result.commit!(p);
     const g = next.drawings2d[0].geom;
     if (g.shape === "dimension") expect(g.offset).toBe(1.5);
   });
 
-  it("Null-Strecke (a===b) committet nichts", () => {
+  it("Kette aus drei Punkten (Reihenbemassung) → zwei Segmente mit demselben Offset", () => {
+    const p = project();
+    const ctx = makeCtx(p);
+    let [state] = dimensionCommand.onInput(
+      dimensionCommand.init(),
+      { kind: "point", point: { x: 0, y: 0 } },
+      ctx,
+    );
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 4, y: 0 } }, ctx);
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 10, y: 0 } }, ctx);
+    [state] = dimensionCommand.onConfirm(state, ctx);
+    const [, result] = dimensionCommand.onInput(state, { kind: "number", value: 2 }, ctx);
+    const next = result.commit!(p);
+    expect(next.drawings2d.length).toBe(2);
+    const segs = next.drawings2d.map((d) => d.geom).filter((g) => g.shape === "dimension");
+    expect(segs[0]).toMatchObject({ a: { x: 0, y: 0 }, b: { x: 4, y: 0 }, offset: 2 });
+    expect(segs[1]).toMatchObject({ a: { x: 4, y: 0 }, b: { x: 10, y: 0 }, offset: 2 });
+  });
+
+  it("Zurück-Option entfernt den letzten Punkt", () => {
+    const p = project();
+    const ctx = makeCtx(p);
+    let [state] = dimensionCommand.onInput(
+      dimensionCommand.init(),
+      { kind: "point", point: { x: 0, y: 0 } },
+      ctx,
+    );
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 4, y: 0 } }, ctx);
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 9, y: 0 } }, ctx);
+    [state] = dimensionCommand.onInput(state, { kind: "option", id: "undo" }, ctx);
+    [state] = dimensionCommand.onConfirm(state, ctx);
+    const [, result] = dimensionCommand.onInput(state, { kind: "number", value: 1 }, ctx);
+    const next = result.commit!(p);
+    // Nach Zurück nur noch [0,0]→[4,0] übrig → ein Segment.
+    expect(next.drawings2d.length).toBe(1);
+    const g = next.drawings2d[0].geom;
+    if (g.shape === "dimension") expect(g.b).toEqual({ x: 4, y: 0 });
+  });
+
+  it("entartetes Segment (identische Punkte) innerhalb der Kette wird übersprungen", () => {
     const p = project();
     const ctx = makeCtx(p);
     let [state] = dimensionCommand.onInput(
@@ -89,7 +132,22 @@ describe("dimensionCommand", () => {
       { kind: "point", point: { x: 3, y: 3 } },
       ctx,
     );
-    const [, result] = dimensionCommand.onInput(state, { kind: "point", point: { x: 3, y: 3 } }, ctx);
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 3, y: 3 } }, ctx);
+    [state] = dimensionCommand.onConfirm(state, ctx);
+    const [, result] = dimensionCommand.onInput(state, { kind: "number", value: 1 }, ctx);
+    const next = result.commit!(p);
+    expect(next.drawings2d.length).toBe(0);
+  });
+
+  it("Enter mit nur einem Punkt bricht ohne commit ab", () => {
+    const p = project();
+    const ctx = makeCtx(p);
+    const [state] = dimensionCommand.onInput(
+      dimensionCommand.init(),
+      { kind: "point", point: { x: 0, y: 0 } },
+      ctx,
+    );
+    const [, result] = dimensionCommand.onConfirm(state, ctx);
     expect(result.commit).toBeUndefined();
     expect(result.done).toBe(true);
   });
