@@ -1533,7 +1533,15 @@ export type Drawing2DGeom =
    * beim Verschieben der Griffe automatisch korrekt. Rein 2D (kein Bezug auf
    * andere Elemente — Assoziativität nur über die eigenen Endpunkte).
    */
-  | { shape: "dimension"; a: Vec2; b: Vec2; offset: number }
+  /**
+   * `pts.length` ≥ 2, IMMER kollinear (Werkzeug erzwingt das beim Zeichnen/
+   * Ergänzen — eine Masskette ist eine Gerade, kein Zickzack-Pfad). Jedes
+   * aufeinanderfolgende Punktpaar ist EIN gemessenes Segment (Reihenbemassung,
+   * SIA 400 Figur 14), alle teilen denselben `offset`. EIN Element für die
+   * ganze Kette (nicht mehrere) — spätere Bearbeitung kann Punkte ergänzen
+   * (verlängern ODER dazwischen einfügen, s. `commands/cmds/dimension.ts`).
+   */
+  | { shape: "dimension"; pts: Vec2[]; offset: number }
   /**
    * Höhenkote (SIA 400 B.5.4, Figur 18): Dreieck-Symbol + Höhenwert (Meter,
    * ±0.00-Referenz frei wählbar, s. Norm) an einem Punkt. `kind` bestimmt

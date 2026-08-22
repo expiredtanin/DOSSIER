@@ -30,6 +30,77 @@ function formatDimLabel(m: number): string {
   return m.toFixed(2);
 }
 
+/**
+ * Ein einzelnes Mass-Segment (Masshilfslinien + Masslinie + Massstriche +
+ * Masszahl) zwischen `a` und `b` bei gegebenem `offset` — s. `formatDimLabel`.
+ * Extrahiert, damit eine Masskette (`shape:"dimension"`, `pts.length` ≥ 2)
+ * je aufeinanderfolgendem Punktpaar dasselbe Rendering wiederverwenden kann.
+ */
+function addDimensionSegment(
+  out: Primitive[],
+  a: Vec2,
+  b: Vec2,
+  offset: number,
+  weightMm: number,
+  dash: number[] | null,
+  color: string,
+  greyed: boolean,
+  drawingId: string,
+): void {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const lineLen = Math.hypot(dx, dy);
+  if (lineLen < 1e-6) return;
+  const ux = dx / lineLen, uy = dy / lineLen; // Einheitsrichtung a→b
+  const nx = -uy, ny = ux; // Links-Normale (Einheit) — Richtung des Offsets
+  const sign = offset >= 0 ? 1 : -1;
+  const dimA: Vec2 = { x: a.x + nx * offset, y: a.y + ny * offset };
+  const dimB: Vec2 = { x: b.x + nx * offset, y: b.y + ny * offset };
+  const extLine = (from: Vec2, to: Vec2) =>
+    out.push({ kind: "line", a: from, b: to, cls: "draw2d", weightMm, dash, color, greyed, drawingId });
+  extLine(
+    { x: a.x + nx * DIM_GAP_M * sign, y: a.y + ny * DIM_GAP_M * sign },
+    { x: dimA.x + nx * DIM_OVERSHOOT_M * sign, y: dimA.y + ny * DIM_OVERSHOOT_M * sign },
+  );
+  extLine(
+    { x: b.x + nx * DIM_GAP_M * sign, y: b.y + ny * DIM_GAP_M * sign },
+    { x: dimB.x + nx * DIM_OVERSHOOT_M * sign, y: dimB.y + ny * DIM_OVERSHOOT_M * sign },
+  );
+  extLine(dimA, dimB);
+  // Massstriche: 45°-Diagonale (Winkelhalbierende von Richtung/Normale), an
+  // beiden Enden PARALLEL (nicht gespiegelt) — wie in SIA 400 Figur 13.
+  const tx = (ux + nx) / Math.SQRT2, ty = (uy + ny) / Math.SQRT2;
+  const half = DIM_TICK_LEN_M / 2;
+  const tick = (pt: Vec2) =>
+    out.push({
+      kind: "line",
+      a: { x: pt.x - tx * half, y: pt.y - ty * half },
+      b: { x: pt.x + tx * half, y: pt.y + ty * half },
+      cls: "draw2d",
+      weightMm: weightMm * 2,
+      dash: null,
+      color,
+      greyed,
+      drawingId,
+    });
+  tick(dimA);
+  tick(dimB);
+  // Masszahl: Mitte der Masslinie, leicht abgesetzt, nie kopfüber lesbar.
+  let angle = Math.atan2(dy, dx);
+  if (Math.cos(angle) < 0) angle += Math.PI;
+  const upx = -Math.sin(angle), upy = Math.cos(angle); // Links-Normale der ENDGÜLTIGEN Richtung
+  const mid: Vec2 = { x: (dimA.x + dimB.x) / 2, y: (dimA.y + dimB.y) / 2 };
+  out.push({
+    kind: "drawingText",
+    at: { x: mid.x + upx * DIM_TEXT_HEIGHT_M * 0.6, y: mid.y + upy * DIM_TEXT_HEIGHT_M * 0.6 },
+    text: formatDimLabel(lineLen),
+    heightM: DIM_TEXT_HEIGHT_M,
+    angle,
+    color,
+    greyed,
+    drawingId,
+  });
+}
+
 // ── Höhenkote (SIA 400 B.5.4) ────────────────────────────────────────────────
 const KOTE_TRI_SIZE_M = 0.15; // Dreieck-Grösse (Spitze bis Basis)
 const KOTE_TRI_HALF_W_M = KOTE_TRI_SIZE_M * 0.6;
@@ -185,62 +256,11 @@ export function addDrawing2D(
       break;
     }
     case "dimension": {
-      // SIA 400 B.5.3: Masshilfslinien + Masslinie in der dünnsten Linie;
-      // Massbegrenzungslinien (Massstriche) doppelt so dick; Masszahl aus
-      // dist(a,b) — nicht gespeichert, folgt Griff-Änderungen automatisch.
-      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
-      const lineLen = Math.hypot(dx, dy);
-      if (lineLen < 1e-6) break;
-      const ux = dx / lineLen, uy = dy / lineLen; // Einheitsrichtung a→b
-      const nx = -uy, ny = ux; // Links-Normale (Einheit) — Richtung des Offsets
-      const off = g.offset;
-      const sign = off >= 0 ? 1 : -1;
-      const dimA: Vec2 = { x: g.a.x + nx * off, y: g.a.y + ny * off };
-      const dimB: Vec2 = { x: g.b.x + nx * off, y: g.b.y + ny * off };
-      const extLine = (from: Vec2, to: Vec2) =>
-        out.push({ kind: "line", a: from, b: to, cls: "draw2d", weightMm, dash, color, greyed, drawingId: d.id });
-      extLine(
-        { x: g.a.x + nx * DIM_GAP_M * sign, y: g.a.y + ny * DIM_GAP_M * sign },
-        { x: dimA.x + nx * DIM_OVERSHOOT_M * sign, y: dimA.y + ny * DIM_OVERSHOOT_M * sign },
-      );
-      extLine(
-        { x: g.b.x + nx * DIM_GAP_M * sign, y: g.b.y + ny * DIM_GAP_M * sign },
-        { x: dimB.x + nx * DIM_OVERSHOOT_M * sign, y: dimB.y + ny * DIM_OVERSHOOT_M * sign },
-      );
-      extLine(dimA, dimB);
-      // Massstriche: 45°-Diagonale (Winkelhalbierende von Richtung/Normale),
-      // an beiden Enden PARALLEL (nicht gespiegelt) — wie in SIA 400 Figur 13.
-      const tx = (ux + nx) / Math.SQRT2, ty = (uy + ny) / Math.SQRT2;
-      const half = DIM_TICK_LEN_M / 2;
-      const tick = (pt: Vec2) =>
-        out.push({
-          kind: "line",
-          a: { x: pt.x - tx * half, y: pt.y - ty * half },
-          b: { x: pt.x + tx * half, y: pt.y + ty * half },
-          cls: "draw2d",
-          weightMm: weightMm * 2,
-          dash: null,
-          color,
-          greyed,
-          drawingId: d.id,
-        });
-      tick(dimA);
-      tick(dimB);
-      // Masszahl: Mitte der Masslinie, leicht abgesetzt, nie kopfüber lesbar.
-      let angle = Math.atan2(dy, dx);
-      if (Math.cos(angle) < 0) angle += Math.PI;
-      const upx = -Math.sin(angle), upy = Math.cos(angle); // Links-Normale der ENDGÜLTIGEN Richtung
-      const mid: Vec2 = { x: (dimA.x + dimB.x) / 2, y: (dimA.y + dimB.y) / 2 };
-      out.push({
-        kind: "drawingText",
-        at: { x: mid.x + upx * DIM_TEXT_HEIGHT_M * 0.6, y: mid.y + upy * DIM_TEXT_HEIGHT_M * 0.6 },
-        text: formatDimLabel(lineLen),
-        heightM: DIM_TEXT_HEIGHT_M,
-        angle,
-        color,
-        greyed,
-        drawingId: d.id,
-      });
+      // SIA 400 B.5.3, Figur 14 (Reihenbemassung): jedes aufeinanderfolgende
+      // Punktpaar der Kette ist ein eigenes Mass-Segment, alle teilen `offset`.
+      for (let i = 0; i < g.pts.length - 1; i++) {
+        addDimensionSegment(out, g.pts[i], g.pts[i + 1], g.offset, weightMm, dash, color, greyed, d.id);
+      }
       break;
     }
     case "kote": {

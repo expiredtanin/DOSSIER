@@ -4,14 +4,20 @@
 // Klick setzt den Startpunkt, der zweite legt die Richtung fest — jeder
 // weitere Klick wird auf diese Gerade projiziert (Reihenbemassung misst
 // mehrere Punkte entlang EINER Referenzlinie, z. B. einer Wand, nie einen
-// Zickzack-Pfad). Schritte:
+// Zickzack-Pfad). Die ganze Kette ist EIN Element (`pts.length` ≥ 2).
+//
+// Neu zeichnen:
 //   1) „Erster Punkt:"                    → Punkt
 //   2) „Nächster Punkt ( Fertig Zurück ):" → Punkt … (ab dem 3. Punkt auf die
 //      durch Punkt 1/2 definierte Gerade projiziert)
-//   3) „Lage der Masslinie:"               → Punkt/Zahl (EIN Normalabstand
-//      für ALLE Segmente) → commit: je aufeinanderfolgendem Punktpaar EIN
-//      `shape:"dimension"`-Element (unabhängig editierbar, teilt nur den
-//      beim Zeichnen gewählten Offset).
+//   3) „Lage der Masslinie:"               → Punkt/Zahl → commit neues Element
+//
+// Ergänzen einer bestehenden Kette (Rhino-Muster: erst selektieren, dann
+// Befehl — s. `ctx.selection`): ist beim Start eine `dimension`-Kette
+// gewählt, lädt der Befehl deren Punkte/Offset vor und der erste Klick wird
+// per Geraden-Projektion in die Kette EINSORTIERT (`insertIntoChain`) — vor
+// dem ersten, nach dem letzten (verlängert) ODER zwischen zwei bestehenden
+// Punkten (fügt ein). Der Commit ersetzt dasselbe Element (keine Kopie).
 //
 // Die Masszahl wird beim Rendern aus dist(a,b) abgeleitet (nicht gespeichert)
 // — bleibt beim späteren Griff-Ziehen automatisch korrekt.
@@ -52,6 +58,37 @@ function projectOnLine(p0: Vec2, p1: Vec2, pt: Vec2): Vec2 {
   return { x: p0.x + dx * t, y: p0.y + dy * t };
 }
 
+/**
+ * Sortiert `raw` (auf die Kettengerade projiziert) an die richtige Stelle in
+ * `pts` ein — VOR dem ersten (verlängert rückwärts), NACH dem letzten
+ * (verlängert vorwärts) oder ZWISCHEN zwei bestehenden Punkten (fügt ein).
+ * `pts` muss bereits kollinear sein (≥ 2 Punkte); die Skalarposition entlang
+ * der durch `pts[0]`/`pts[1]` festgelegten Geraden entscheidet die Reihenfolge.
+ */
+function insertIntoChain(pts: Vec2[], raw: Vec2): Vec2[] {
+  if (pts.length < 2) return [...pts, raw];
+  const p0 = pts[0], p1 = pts[1];
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len2 = dx * dx + dy * dy || 1;
+  const tOf = (p: Vec2): number => ((p.x - p0.x) * dx + (p.y - p0.y) * dy) / len2;
+  const placed = projectOnLine(p0, p1, raw);
+  const newT = tOf(placed);
+  let idx = pts.findIndex((p) => newT < tOf(p));
+  if (idx === -1) idx = pts.length;
+  const out = [...pts];
+  out.splice(idx, 0, placed);
+  return out;
+}
+
+/** Bestehende, selektierte Masskette (Rhino: erst selektieren, dann Befehl) oder null. */
+function selectedChain(ctx: CommandContext): { id: string; pts: Vec2[]; offset: number } | null {
+  const id = ctx.selection.drawingId;
+  if (!id) return null;
+  const d = ctx.project.drawings2d.find((x) => x.id === id);
+  if (!d || d.geom.shape !== "dimension") return null;
+  return { id: d.id, pts: d.geom.pts, offset: d.geom.offset };
+}
+
 /** Endpunkte der um `offset` parallel verschobenen Masslinie (Strecke a-b). */
 function offsetPoints(a: Vec2, b: Vec2, offset: number): { a: Vec2; b: Vec2 } {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -67,11 +104,14 @@ interface DimNext extends CommandState {
   phase: "next";
   pts: Vec2[];
   cursor: Vec2 | null;
+  /** ID der bearbeiteten Kette (Ergänzen-Modus) — null = neue Kette. */
+  editId: string | null;
 }
 interface DimOffset extends CommandState {
   phase: "offset";
   pts: Vec2[];
   cursor: Vec2 | null;
+  editId: string | null;
 }
 type DimState = DimStart | DimNext | DimOffset;
 
@@ -110,21 +150,26 @@ function offsetDraft(pts: Vec2[], offset: number, at: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendDimensionChain(p: Project, pts: Vec2[], offset: number, ctx: CommandContext): Project {
-  const added: Drawing2D[] = [];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i], b = pts[i + 1];
-    if (dist(a, b) < EPS) continue;
-    added.push({
-      id: uniqueId("dr2d"),
-      type: "drawing2d",
-      levelId: ctx.level.id,
-      categoryCode: ctx.defaultCategoryCode,
-      geom: { shape: "dimension", a, b, offset },
-    });
+/** Committet eine Kette: neu anhängen (editId null) ODER dasselbe Element ersetzen. */
+function commitChain(p: Project, pts: Vec2[], offset: number, editId: string | null, ctx: CommandContext): Project {
+  const cleaned = pts.filter((pt, i) => i === 0 || dist(pts[i - 1], pt) >= EPS);
+  if (cleaned.length < 2) return p; // zu wenig gültige Punkte → nichts committen/ändern
+  if (editId) {
+    return {
+      ...p,
+      drawings2d: p.drawings2d.map((d) =>
+        d.id === editId ? { ...d, geom: { shape: "dimension", pts: cleaned, offset } } : d,
+      ),
+    };
   }
-  if (added.length === 0) return p;
-  return { ...p, drawings2d: [...p.drawings2d, ...added] };
+  const d: Drawing2D = {
+    id: uniqueId("dr2d"),
+    type: "drawing2d",
+    levelId: ctx.level.id,
+    categoryCode: ctx.defaultCategoryCode,
+    geom: { shape: "dimension", pts: cleaned, offset },
+  };
+  return { ...p, drawings2d: [...p.drawings2d, d] };
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -154,11 +199,11 @@ export const dimensionCommand: Command = {
       if (input.id === "undo") {
         const pts = s.pts.slice(0, -1);
         if (pts.length === 0) return [{ phase: "start", lastPoint: null }, { draft: null }];
-        const ns: DimNext = { phase: "next", pts, cursor: s.cursor, lastPoint: pts[pts.length - 1] };
+        const ns: DimNext = { phase: "next", pts, cursor: s.cursor, editId: s.editId, lastPoint: pts[pts.length - 1] };
         return [ns, { draft: chainDraft(pts, s.cursor) }];
       }
       if (input.id === "finish" && s.pts.length >= 2) {
-        const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, lastPoint: s.lastPoint };
+        const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, editId: s.editId, lastPoint: s.lastPoint };
         return [ns, { draft: offsetDraft(s.pts, 0, null) }];
       }
       return [s, { draft: chainDraft(s.pts, s.cursor) }];
@@ -168,14 +213,19 @@ export const dimensionCommand: Command = {
       if (input.kind !== "point") return [s, { draft: null }];
       const pt = input.point;
       if (s.phase !== "next") {
-        const ns: DimNext = { phase: "next", pts: [pt], cursor: pt, lastPoint: pt };
-        return [ns, { draft: chainDraft([pt], pt) }];
+        // Erster Klick: bei selektierter Kette wird er EINSORTIERT (Ergänzen);
+        // sonst startet er eine neue Kette.
+        const existing = selectedChain(ctx);
+        const pts = existing ? insertIntoChain(existing.pts, pt) : [pt];
+        const editId = existing ? existing.id : null;
+        const ns: DimNext = { phase: "next", pts, cursor: pt, editId, lastPoint: pt };
+        return [ns, { draft: chainDraft(pts, pt) }];
       }
-      // Ab dem dritten Punkt: auf die durch Punkt 1/2 festgelegte Gerade projizieren.
-      const placed = s.pts.length >= 2 ? projectOnLine(s.pts[0], s.pts[1], pt) : pt;
-      const pts = [...s.pts, placed];
-      const ns: DimNext = { phase: "next", pts, cursor: placed, lastPoint: placed };
-      return [ns, { draft: chainDraft(pts, placed) }];
+      // Ab dem dritten Punkt (bzw. jedem weiteren Klick im Ergänzen-Modus):
+      // auf die durch Punkt 1/2 festgelegte Gerade projizieren/einsortieren.
+      const pts = s.pts.length >= 2 ? insertIntoChain(s.pts, pt) : [...s.pts, pt];
+      const ns: DimNext = { phase: "next", pts, cursor: pt, editId: s.editId, lastPoint: pt };
+      return [ns, { draft: chainDraft(pts, pt) }];
     }
 
     // Offset-Schritt: Zahl = direkter Abstand, Punkt = Abstand zum Cursor.
@@ -184,9 +234,10 @@ export const dimensionCommand: Command = {
     else if (input.kind === "point") offset = signedOffset(s.pts[0], s.pts[1], input.point);
     else return [s, { draft: offsetDraft(s.pts, 0, null) }];
     const pts = s.pts;
+    const editId = s.editId;
     return [
       { phase: "start", lastPoint: null },
-      { draft: null, done: true, commit: (p) => appendDimensionChain(p, pts, offset, ctx) },
+      { draft: null, done: true, commit: (p) => commitChain(p, pts, offset, editId, ctx) },
     ];
   },
 
@@ -212,7 +263,7 @@ export const dimensionCommand: Command = {
   onConfirm: (state): [CommandState, CommandResult] => {
     const s = state as DimState;
     if (s.phase === "next" && s.pts.length >= 2) {
-      const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, lastPoint: s.lastPoint };
+      const ns: DimOffset = { phase: "offset", pts: s.pts, cursor: s.cursor, editId: s.editId, lastPoint: s.lastPoint };
       return [ns, { draft: offsetDraft(s.pts, 0, null) }];
     }
     return idle();

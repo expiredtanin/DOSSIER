@@ -55,8 +55,7 @@ function drawingsBBox(
     } else if (g.shape === "bezier" || g.shape === "spline") {
       for (const p of g.pts) acc(p.x, p.y);
     } else if (g.shape === "dimension") {
-      acc(g.a.x, g.a.y);
-      acc(g.b.x, g.b.y);
+      for (const p of g.pts) acc(p.x, p.y);
     } else if (g.shape === "kote") acc(g.at.x, g.at.y);
     else if (g.shape === "text") acc(g.at.x, g.at.y);
   }
@@ -76,7 +75,7 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
     case "ellipse": return { ...d, geom: { ...g, center: mv(g.center) } };
     case "bezier": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "spline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
-    case "dimension": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
+    case "dimension": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "kote": return { ...d, geom: { ...g, at: mv(g.at) } };
     case "text": return { ...d, geom: { ...g, at: mv(g.at) } };
     default: return d;

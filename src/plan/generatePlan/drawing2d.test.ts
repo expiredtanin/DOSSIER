@@ -129,7 +129,7 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
       type: "drawing2d",
       levelId: "eg",
       categoryCode: "20",
-      geom: { shape: "dimension", a: { x: 0, y: 0 }, b: { x: 4, y: 0 }, offset: 1 },
+      geom: { shape: "dimension", pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }], offset: 1 },
     };
     const out: Primitive[] = [];
     addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
@@ -152,7 +152,7 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
       type: "drawing2d",
       levelId: "eg",
       categoryCode: "20",
-      geom: { shape: "dimension", a: { x: 0, y: 0 }, b: { x: 3, y: 4 }, offset: 0.5 }, // 3-4-5-Dreieck → 5m
+      geom: { shape: "dimension", pts: [{ x: 0, y: 0 }, { x: 3, y: 4 }], offset: 0.5 }, // 3-4-5-Dreieck → 5m
     };
     const out: Primitive[] = [];
     addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
@@ -167,7 +167,7 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
       type: "drawing2d",
       levelId: "eg",
       categoryCode: "20",
-      geom: { shape: "dimension", a: { x: 2, y: 2 }, b: { x: 2, y: 2 }, offset: 1 },
+      geom: { shape: "dimension", pts: [{ x: 2, y: 2 }, { x: 2, y: 2 }], offset: 1 },
     };
     const out: Primitive[] = [];
     addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);

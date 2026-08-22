@@ -24,8 +24,7 @@ export function drawingGripVertices(d: Drawing2D): Vec2[] {
       { x: g.min.x, y: g.max.y },
     ];
   }
-  if (g.shape === "bezier" || g.shape === "spline") return [...g.pts];
-  if (g.shape === "dimension") return [g.a, g.b];
+  if (g.shape === "bezier" || g.shape === "spline" || g.shape === "dimension") return [...g.pts];
   return [];
 }
 

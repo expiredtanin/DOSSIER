@@ -730,8 +730,7 @@ function computeBounds(
     } else if (g.shape === "bezier" || g.shape === "spline") {
       g.pts.forEach(acc);
     } else if (g.shape === "dimension") {
-      acc(g.a);
-      acc(g.b);
+      g.pts.forEach(acc);
     } else if (g.shape === "kote") acc(g.at);
     else if (g.shape === "text") acc(g.at);
     else if (g.shape === "image") { acc(g.min); acc(g.max); }

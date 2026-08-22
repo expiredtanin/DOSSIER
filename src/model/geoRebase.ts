@@ -113,7 +113,7 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
         case "spline":
           return { ...d, geom: { ...g, pts: shiftAll(g.pts, dx, dy) } };
         case "dimension":
-          return { ...d, geom: { ...g, a: shift(g.a, dx, dy), b: shift(g.b, dx, dy) } };
+          return { ...d, geom: { ...g, pts: shiftAll(g.pts, dx, dy) } };
         case "kote":
           return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
         case "text":

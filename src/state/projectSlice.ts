@@ -1520,14 +1520,16 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
   }
   // Bezier/Spline: alle Kontroll-/Wegpunkte als Griffe (wie polyline).
   if (g.shape === "bezier" || g.shape === "spline") return [...g.pts];
-  // Bemassung: Griff 0/1 = die beiden gemessenen Punkte (a/b); Griff 2 sitzt
-  // AUF der Masslinie (Mitte) — ihn zu ziehen ändert nur `offset` (s. moveGrip).
+  // Bemassung: Griff 0..N-1 = jeder Punkt der Kette (wie polyline); EIN
+  // zusätzlicher Griff (Index N) sitzt AUF der Masslinie (Mitte der Kette) —
+  // ihn zu ziehen ändert nur `offset`, nicht die Punkte (s. moveGrip).
   if (g.shape === "dimension") {
-    const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+    const a = g.pts[0], b = g.pts[g.pts.length - 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
     const len = Math.hypot(dx, dy) || 1;
     const nx = (-dy / len) * g.offset, ny = (dx / len) * g.offset;
-    const mid: Vec2 = { x: (g.a.x + g.b.x) / 2 + nx, y: (g.a.y + g.b.y) / 2 + ny };
-    return [g.a, g.b, mid];
+    const mid: Vec2 = { x: (a.x + b.x) / 2 + nx, y: (a.y + b.y) / 2 + ny };
+    return [...g.pts, mid];
   }
   // Kote: EIN Griff an der Dreieck-Spitze (zum Verschieben; siehe moveGrip).
   if (g.shape === "kote") return [g.at];
@@ -1592,16 +1594,20 @@ function moveGrip(
           const pts = g.pts.map((p, i) => (i === index ? pt : p));
           return { ...d, geom: { ...g, pts } };
         }
-        // Bemassung: Griff 0/1 verschiebt den gemessenen Punkt a/b (Masszahl
-        // folgt automatisch, s. Rendering); Griff 2 (auf der Masslinie) ändert
-        // nur `offset` — Normalabstand von `pt` zur (unveränderten) Strecke a-b.
+        // Bemassung: Griff 0..N-1 verschiebt den jeweiligen Kettenpunkt
+        // (Masszahlen folgen automatisch, s. Rendering); der LETZTE Griff
+        // (auf der Masslinie) ändert nur `offset` — Normalabstand von `pt`
+        // zur (unveränderten) Punktreihe.
         if (g.shape === "dimension") {
-          if (index === 0) return { ...d, geom: { ...g, a: pt } };
-          if (index === 1) return { ...d, geom: { ...g, b: pt } };
-          const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+          if (index < g.pts.length) {
+            const pts = g.pts.map((p, i) => (i === index ? pt : p));
+            return { ...d, geom: { ...g, pts } };
+          }
+          const a = g.pts[0], b = g.pts[g.pts.length - 1];
+          const dx = b.x - a.x, dy = b.y - a.y;
           const len = Math.hypot(dx, dy) || 1;
           const nx = -dy / len, ny = dx / len;
-          const offset = (pt.x - g.a.x) * nx + (pt.y - g.a.y) * ny;
+          const offset = (pt.x - a.x) * nx + (pt.y - a.y) * ny;
           return { ...d, geom: { ...g, offset } };
         }
         if (g.shape === "rect" || g.shape === "image") {
@@ -1698,9 +1704,8 @@ function moveElementBy(
             return { ...d, geom: { ...g, center: mv(g.center) } };
           case "bezier":
           case "spline":
-            return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
           case "dimension":
-            return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
+            return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
           case "kote":
             return { ...d, geom: { ...g, at: mv(g.at) } };
           case "text":

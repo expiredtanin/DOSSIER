@@ -545,13 +545,14 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
       for (const p of g.pts) acc(p.x, p.y);
       break;
     case "dimension": {
-      acc(g.a.x, g.a.y);
-      acc(g.b.x, g.b.y);
-      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = (-dy / len) * g.offset, ny = (dx / len) * g.offset;
-      acc(g.a.x + nx, g.a.y + ny);
-      acc(g.b.x + nx, g.b.y + ny);
+      for (const p of g.pts) acc(p.x, p.y);
+      if (g.pts.length >= 2) {
+        const a = g.pts[0], b = g.pts[g.pts.length - 1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = (-dy / len) * g.offset, ny = (dx / len) * g.offset;
+        for (const p of g.pts) acc(p.x + nx, p.y + ny);
+      }
       break;
     }
     case "kote":
