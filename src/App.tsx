@@ -2857,6 +2857,7 @@ export default function App() {
           selectedStairIds={selectedStairIds}
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
+          selectedGroupIds={selectedGroupIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
           selectedContextObjectIds={selectedContextObjectIds}
@@ -2866,6 +2867,7 @@ export default function App() {
           onStampEdit={onOpenStampEditor}
           onEditDrawingText={onEditDrawingText}
           onEnterGroup={onEnterGroup}
+          onLeaveGroup={onLeaveGroup}
           groupPath={groupPath}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
@@ -2906,19 +2908,6 @@ export default function App() {
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
         />
-        {/* "Gruppe verlassen" (Vectorworks-artig): sichtbar, solange eine
-            Gruppe betreten ist (Isolation — alles andere gedimmt/gesperrt,
-            s. viewportContent.tsx). Verlässt genau EIN Level. */}
-        {groupPath.length > 0 && (
-          <button
-            type="button"
-            className="plan-leave-group-btn"
-            onClick={onLeaveGroup}
-            title={t("group.leave.hint")}
-          >
-            {t("group.leave")}
-          </button>
-        )}
         {/* Command-Line (Rhino-artig) UNTER dem Viewport — nur Viewport-breit.
             Prompt + klickbare Inline-Optionen + Texteingabe + Autocomplete. */}
         <CommandLine

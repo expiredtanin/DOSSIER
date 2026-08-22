@@ -88,6 +88,7 @@ export function Content({
   selectedStairIds,
   selectedExtrudedSolidIds,
   selectedColumnIds,
+  selectedGroupIds,
   selectedRoomIds,
   selectedRoofIds,
   selectedContextObjectIds,
@@ -98,6 +99,7 @@ export function Content({
   onEditDrawingText,
   onEnterGroup,
   groupPath,
+  onLeaveGroup,
   editTextId,
   editTextMinHeightM,
   onCommitTextEdit,
@@ -183,6 +185,7 @@ export function Content({
   selectedStairIds: string[];
   selectedExtrudedSolidIds: string[];
   selectedColumnIds: string[];
+  selectedGroupIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
   selectedContextObjectIds: string[];
@@ -193,6 +196,7 @@ export function Content({
   onEditDrawingText?: (drawingId: string) => void;
   onEnterGroup?: (hit: GroupableHit) => boolean;
   groupPath: string[];
+  onLeaveGroup?: () => void;
   editTextId?: string | null;
   editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
@@ -315,6 +319,7 @@ export function Content({
           selectedStairIds={selectedStairIds}
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
+          selectedGroupIds={selectedGroupIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
           selectedSectionLineId={selectedSectionLineId}
@@ -324,6 +329,7 @@ export function Content({
           onEditDrawingText={onEditDrawingText}
           onEnterGroup={onEnterGroup}
           groupPath={groupPath}
+          onLeaveGroup={onLeaveGroup}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
@@ -382,6 +388,7 @@ export function Content({
           selectedStairIds={selectedStairIds}
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
+          selectedGroupIds={selectedGroupIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
           selectedContextObjectIds={selectedContextObjectIds}
@@ -392,6 +399,7 @@ export function Content({
           onEditDrawingText={onEditDrawingText}
           onEnterGroup={onEnterGroup}
           groupPath={groupPath}
+          onLeaveGroup={onLeaveGroup}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
@@ -492,6 +500,7 @@ export function Content({
           selectedStairIds={selectedStairIds}
           selectedExtrudedSolidIds={selectedExtrudedSolidIds}
           selectedColumnIds={selectedColumnIds}
+          selectedGroupIds={selectedGroupIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
           selectedContextObjectIds={selectedContextObjectIds}
@@ -502,6 +511,7 @@ export function Content({
           onEditDrawingText={onEditDrawingText}
           onEnterGroup={onEnterGroup}
           groupPath={groupPath}
+          onLeaveGroup={onLeaveGroup}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
@@ -550,6 +560,7 @@ function LevelPlanView({
   selectedStairIds,
   selectedExtrudedSolidIds,
   selectedColumnIds,
+  selectedGroupIds,
   selectedRoomIds,
   selectedRoofIds,
   selectedContextObjectIds,
@@ -560,6 +571,7 @@ function LevelPlanView({
   onEditDrawingText,
   onEnterGroup,
   groupPath,
+  onLeaveGroup,
   editTextId,
   editTextMinHeightM,
   onCommitTextEdit,
@@ -601,6 +613,7 @@ function LevelPlanView({
   selectedStairIds: string[];
   selectedExtrudedSolidIds: string[];
   selectedColumnIds: string[];
+  selectedGroupIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
   selectedContextObjectIds?: string[];
@@ -611,6 +624,7 @@ function LevelPlanView({
   onEditDrawingText?: (drawingId: string) => void;
   onEnterGroup?: (hit: GroupableHit) => boolean;
   groupPath: string[];
+  onLeaveGroup?: () => void;
   editTextId?: string | null;
   editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
@@ -683,12 +697,22 @@ function LevelPlanView({
       });
 
   return (
-    <section className="pane">
+    <section className={groupPath.length > 0 ? "pane pane-isolated" : "pane"}>
       <div className="pane-title">
         {isDrawing
           ? t("content.drawingTitle", { name: level.name })
           : t("content.grundrissTitle", { name: level.name })}
       </div>
+      {groupPath.length > 0 && (
+        <button
+          type="button"
+          className="pane-leave-group-btn"
+          onClick={onLeaveGroup}
+          title={t("group.leave.hint")}
+        >
+          {t("group.leave")}
+        </button>
+      )}
       <PlanView
         ref={planViewRef}
         plan={plan}
@@ -701,6 +725,7 @@ function LevelPlanView({
         selectedStairIds={selectedStairIds}
         selectedExtrudedSolidIds={selectedExtrudedSolidIds}
         selectedColumnIds={selectedColumnIds}
+        selectedGroupIds={selectedGroupIds}
         selectedRoomIds={selectedRoomIds}
         selectedRoofIds={selectedRoofIds}
         selectedContextObjectIds={selectedContextObjectIds}
@@ -768,6 +793,7 @@ function SectionPlanView({
   selectedStairIds,
   selectedExtrudedSolidIds,
   selectedColumnIds,
+  selectedGroupIds,
   selectedRoomIds,
   selectedRoofIds,
   selectedSectionLineId,
@@ -777,6 +803,7 @@ function SectionPlanView({
   onEditDrawingText,
   onEnterGroup,
   groupPath,
+  onLeaveGroup,
   editTextId,
   editTextMinHeightM,
   onCommitTextEdit,
@@ -814,6 +841,7 @@ function SectionPlanView({
   selectedStairIds: string[];
   selectedExtrudedSolidIds: string[];
   selectedColumnIds: string[];
+  selectedGroupIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
   selectedSectionLineId: string | null;
@@ -823,6 +851,7 @@ function SectionPlanView({
   onEditDrawingText?: (drawingId: string) => void;
   onEnterGroup?: (hit: GroupableHit) => boolean;
   groupPath: string[];
+  onLeaveGroup?: () => void;
   editTextId?: string | null;
   editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
@@ -921,10 +950,20 @@ function SectionPlanView({
   }
 
   return (
-    <section className="pane">
+    <section className={groupPath.length > 0 ? "pane pane-isolated" : "pane"}>
       <div className="pane-title">
         {t("content.sectionTitle", { name: level.name, kind: kindLabel })}
       </div>
+      {groupPath.length > 0 && (
+        <button
+          type="button"
+          className="pane-leave-group-btn"
+          onClick={onLeaveGroup}
+          title={t("group.leave.hint")}
+        >
+          {t("group.leave")}
+        </button>
+      )}
       <PlanView
         ref={planViewRef}
         plan={plan}
@@ -937,6 +976,7 @@ function SectionPlanView({
         selectedStairIds={selectedStairIds}
         selectedExtrudedSolidIds={selectedExtrudedSolidIds}
         selectedColumnIds={selectedColumnIds}
+        selectedGroupIds={selectedGroupIds}
         selectedRoomIds={selectedRoomIds}
         selectedRoofIds={selectedRoofIds}
         selectedSectionLineIds={selectedSectionLineId ? [selectedSectionLineId] : []}

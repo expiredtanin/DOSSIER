@@ -2110,6 +2110,23 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+/* Gruppen-Auswahl (Vectorworks-artig): statt jedes Mitglieds-Umrisses nur eine
+   gestrichelte Bounding-Box mit vier Eckpunkt-Griffen — dieselbe Akzentfarbe
+   wie die normale Auswahl, aber gestrichelt (sofort als "Gruppe" erkennbar). */
+.plan-svg .plan-group-bbox {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+}
+.plan-svg .plan-group-bbox-corner {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
 /* Hervorhebung selektierter 2D-Zeichenelemente (Mehrfach/Marquee): Akzentkontur
    über der Geometrie, keine Füllung. */
 .plan-svg .plan-sel-draw {
@@ -2119,25 +2136,34 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
-/* "Gruppe verlassen" (Vectorworks-artig): schwebender Knopf oben links über
-   dem Grundriss, sichtbar nur solange eine Gruppe betreten ist (Isolation). */
-.plan-leave-group-btn {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 20;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--accent);
-  background: var(--field-bg);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+/* Gruppen-Isolation (Vectorworks „Gruppe betreten"): sichtbarer Rahmen um
+   die ganze Ansicht, solange eine Gruppe betreten ist — dieselbe visuelle
+   Sprache wie Vectorworks' "Ansichtsbereich"-Rahmen. */
+.pane-isolated {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
-.plan-leave-group-btn:hover {
+
+/* "Gruppe verlassen": Knopf oben RECHTS in der Ansicht (analog `.pane-title`
+   oben links), sichtbar nur solange eine Gruppe betreten ist. */
+.pane-leave-group-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-border);
   background: var(--accent-dim);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.pane-leave-group-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* Auswahl-Rechteck (Marquee, Links-Drag): gestrichelte Akzentkontur, leichte

@@ -328,6 +328,13 @@ export interface PlanViewProps {
    */
   selectedColumnIds?: string[];
   /**
+   * IDs der gewählten GRUPPEN (Vectorworks-artig). Nicht-leer → die Ansicht
+   * zeigt statt der einzelnen Mitglieds-Umrisse nur eine Bounding-Box mit vier
+   * Eckpunkten (s. `groupBBox`); die per-Kind-`selected…Ids`-Felder tragen
+   * weiterhin die volle Mitgliedschaft (für Verschieben/Griffe/Löschen).
+   */
+  selectedGroupIds?: string[];
+  /**
    * Der Stempel-Griff des (einzeln) gewählten Raums: sein Anker (Meter) + ID.
    * PlanView zeichnet einen ziehbaren Griff und meldet Bewegung/Doppelklick.
    * `null` = kein einzelner Raum gewählt.
@@ -525,6 +532,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       selectedSectionLineIds,
       selectedExtrudedSolidIds,
       selectedColumnIds,
+      selectedGroupIds,
       roomStamp,
       onStampMove,
       onStampEdit,
@@ -2270,6 +2278,48 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     );
   }, [plan, selectedColumnIds]);
 
+  // Ist eine GRUPPE gewählt (statt einzelner Elemente), zeigt die Auswahl NUR
+  // eine einfache Bounding-Box mit vier Eckpunkten statt jedes einzelnen
+  // Mitglieds-Umrisses (Nutzer-Wunsch, Vectorworks-Vorbild: „einfach vier
+  // Aussenpunkte zeigen") — vereint dieselben Hervorhebungs-Listen, die sonst
+  // einzeln gezeichnet würden.
+  const groupBBox = useMemo(() => {
+    if (!selectedGroupIds || selectedGroupIds.length === 0) return null;
+    const pts: Vec2[] = [];
+    for (const poly of highlightPolys) pts.push(...poly.pts);
+    for (const poly of highlightCeilingPolys) pts.push(...poly.pts);
+    for (const poly of highlightRoomPolys) pts.push(...poly.pts);
+    for (const poly of highlightRoofPolys) pts.push(...poly.pts);
+    for (const poly of highlightColumnPolys) pts.push(...poly.pts);
+    const fromLineOrPoly = (p: { kind: string; a?: Vec2; b?: Vec2; from?: Vec2; to?: Vec2; center?: Vec2; pts?: Vec2[] }) => {
+      if (p.kind === "line" && p.a && p.b) pts.push(p.a, p.b);
+      else if (p.kind === "arc" && p.from && p.to) pts.push(p.from, p.to);
+      else if (p.pts) pts.push(...p.pts);
+    };
+    for (const p of highlightDrawPrims) fromLineOrPoly(p);
+    for (const p of highlightOpeningPrims) fromLineOrPoly(p);
+    for (const p of highlightStairPrims) fromLineOrPoly(p);
+    if (pts.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    return { minX, minY, maxX, maxY };
+  }, [
+    selectedGroupIds,
+    highlightPolys,
+    highlightCeilingPolys,
+    highlightRoomPolys,
+    highlightRoofPolys,
+    highlightColumnPolys,
+    highlightDrawPrims,
+    highlightOpeningPrims,
+    highlightStairPrims,
+  ]);
+
   // Zusammenhängende 2D-Zeichen-Linien (gleiche drawingId + Stil) zu Zügen
   // bündeln, damit sie als EIN <polyline>/<polygon> gezeichnet werden können —
   // so gehren dicke Ecken sauber (kein Butt-Cap-Sprung). generatePlan schiebt die
@@ -2461,6 +2511,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           CAD-typische Gehrung an den Ecken (stroke-linejoin), keine Stufe bei
           dicken Linien. Nach der Haupt-Ebene gezeichnet (2D liegt ohnehin oben). */}
       {drawingRunEls}
+      {/* Ist eine GRUPPE gewählt, ersetzt die Bounding-Box unten die einzelnen
+          Mitglieds-Hervorhebungen (s. `groupBBox`) — dieser ganze Block bleibt
+          dann aus. */}
+      {!groupBBox && (
+      <>
       {/* Auswahl-Hervorhebung: alle Bänder der gewählten Wand (bzw. das lokal
           getroffene Polygon) mit Akzentkontur überzeichnen. */}
       {highlightPolys.map((poly, i) => (
@@ -2640,6 +2695,38 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           />
         ),
       )}
+      </>
+      )}
+      {/* Gruppen-Auswahl: nur eine Bounding-Box mit vier Eckpunkten (kein
+          Umriss jedes einzelnen Mitglieds) — s. `groupBBox`. */}
+      {groupBBox && (() => {
+        const c1 = toScreen({ x: groupBBox.minX, y: groupBBox.minY });
+        const c2 = toScreen({ x: groupBBox.maxX, y: groupBBox.minY });
+        const c3 = toScreen({ x: groupBBox.maxX, y: groupBBox.maxY });
+        const c4 = toScreen({ x: groupBBox.minX, y: groupBBox.maxY });
+        const size = 5 / (meetScale(view, svgRef.current) ?? 1);
+        const corners = [c1, c2, c3, c4];
+        return (
+          <>
+            <polygon
+              className="plan-group-bbox"
+              points={corners.map((s) => `${s.x},${s.y}`).join(" ")}
+              pointerEvents="none"
+            />
+            {corners.map((s, i) => (
+              <rect
+                key={`gbb-${i}`}
+                className="plan-group-bbox-corner"
+                x={s.x - size}
+                y={s.y - size}
+                width={size * 2}
+                height={size * 2}
+                pointerEvents="none"
+              />
+            ))}
+          </>
+        );
+      })()}
       {/* Auswahl-Rechteck (Marquee). Gestrichelt; die crossing-Variante (rechts→
           links, berührend) hebt sich farblich/strichlich ab. Das Rechteck steht
           bereits in viewBox-Einheiten → direkt setzbar. */}
