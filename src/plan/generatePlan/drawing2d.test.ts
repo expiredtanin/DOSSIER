@@ -146,7 +146,7 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
     expect(thick).toBeCloseTo(thin * 2, 6);
   });
 
-  it("Masszahl entspricht dist(a,b) mit Komma-Dezimaltrennzeichen (SIA 400 B.5.2)", () => {
+  it("Masszahl entspricht dist(a,b), 2 Dezimalstellen (SIA 400 Figur 13/14: Punkt-Notation)", () => {
     const d: Drawing2D = {
       id: "dim2",
       type: "drawing2d",
@@ -158,7 +158,7 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
     addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
     const text = out.find((p) => p.kind === "drawingText");
     expect(text).toBeDefined();
-    if (text?.kind === "drawingText") expect(text.text).toBe("5,00");
+    if (text?.kind === "drawingText") expect(text.text).toBe("5.00");
   });
 
   it("entartete Strecke (a===b) erzeugt keine Primitive", () => {
@@ -172,5 +172,62 @@ describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
     const out: Primitive[] = [];
     addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
     expect(out.length).toBe(0);
+  });
+});
+
+describe("addDrawing2D — kote (SIA 400 B.5.4)", () => {
+  it("OK fertig: hohles Dreieck (Spitze nach unten) + formatierte Zahl mit +", () => {
+    const d: Drawing2D = {
+      id: "k1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "kote", at: { x: 0, y: 0 }, value: 3.25, kind: "okFertig", rotation: 0 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const poly = out.find((p) => p.kind === "polygon");
+    const text = out.find((p) => p.kind === "drawingText");
+    expect(poly).toBeDefined();
+    expect(text).toBeDefined();
+    if (poly?.kind === "polygon") {
+      expect(poly.fill).toBe("none"); // fertig = hohl
+      expect(poly.pts[0]).toEqual({ x: 0, y: 0 }); // Spitze = at
+      expect(poly.pts[1].y).toBeGreaterThan(0); // OK: Basis oberhalb der Spitze
+    }
+    if (text?.kind === "drawingText") expect(text.text).toBe("+3.25");
+  });
+
+  it("UK roh: gefülltes Dreieck (Spitze nach oben), Basis unterhalb", () => {
+    const d: Drawing2D = {
+      id: "k2",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "kote", at: { x: 0, y: 0 }, value: -0.1, kind: "ukRoh", rotation: 0 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const poly = out.find((p) => p.kind === "polygon");
+    const text = out.find((p) => p.kind === "drawingText");
+    if (poly?.kind === "polygon") {
+      expect(poly.fill).not.toBe("none"); // roh = gefüllt
+      expect(poly.pts[1].y).toBeLessThan(0); // UK: Basis unterhalb der Spitze
+    }
+    if (text?.kind === "drawingText") expect(text.text).toBe("-0.10");
+  });
+
+  it("Wert 0 wird als ±0.00 formatiert", () => {
+    const d: Drawing2D = {
+      id: "k3",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "kote", at: { x: 0, y: 0 }, value: 0, kind: "okFertig", rotation: 0 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const text = out.find((p) => p.kind === "drawingText");
+    if (text?.kind === "drawingText") expect(text.text).toBe("±0.00");
   });
 });

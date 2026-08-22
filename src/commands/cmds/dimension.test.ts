@@ -104,6 +104,29 @@ describe("dimensionCommand", () => {
     expect(segs[1]).toMatchObject({ a: { x: 4, y: 0 }, b: { x: 10, y: 0 }, offset: 2 });
   });
 
+  it("dritter Punkt ausserhalb der Geraden wird auf sie projiziert (keine Polylinie, immer gerade)", () => {
+    const p = project();
+    const ctx = makeCtx(p);
+    let [state] = dimensionCommand.onInput(
+      dimensionCommand.init(),
+      { kind: "point", point: { x: 0, y: 0 } },
+      ctx,
+    );
+    // Richtung: entlang +x (y=0).
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 4, y: 0 } }, ctx);
+    // Dritter Klick liegt bewusst NICHT auf der Geraden (y=3) → wird projiziert.
+    [state] = dimensionCommand.onInput(state, { kind: "point", point: { x: 10, y: 3 } }, ctx);
+    [state] = dimensionCommand.onConfirm(state, ctx);
+    const [, result] = dimensionCommand.onInput(state, { kind: "number", value: 1 }, ctx);
+    const next = result.commit!(p);
+    expect(next.drawings2d.length).toBe(2);
+    const second = next.drawings2d[1].geom;
+    if (second.shape === "dimension") {
+      expect(second.b.y).toBeCloseTo(0, 6); // auf die Gerade y=0 projiziert
+      expect(second.b.x).toBeCloseTo(10, 6); // x-Komponente bleibt (Projektion entlang x)
+    }
+  });
+
   it("Zurück-Option entfernt den letzten Punkt", () => {
     const p = project();
     const ctx = makeCtx(p);

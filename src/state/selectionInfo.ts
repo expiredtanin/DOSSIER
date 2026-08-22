@@ -554,6 +554,7 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
       acc(g.b.x + nx, g.b.y + ny);
       break;
     }
+    case "kote":
     case "text":
       acc(g.at.x, g.at.y);
       break;

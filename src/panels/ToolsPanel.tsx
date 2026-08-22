@@ -179,6 +179,15 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <line x1="12.7" y1="6.6" x2="14.3" y2="9.4" strokeWidth="1.6" />
         </svg>
       );
+    case "kote":
+      // Höhenkote: Dreieck (Spitze unten, OK) + Zahl.
+      return (
+        <svg {...common}>
+          <polygon points="8,10 5,5 11,5" fill="none" />
+          <line x1="10.5" y1="6.5" x2="14" y2="6.5" />
+          <line x1="10.5" y1="9" x2="14" y2="9" />
+        </svg>
+      );
     case "text":
       // Serifen-„A" als Text-Symbol.
       return (
@@ -225,6 +234,7 @@ const TOOLS_2D: ToolId[] = [
   "spline",
   "bezier",
   "dimension",
+  "kote",
   "text",
   "textbox",
   "image",

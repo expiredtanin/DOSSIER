@@ -21,6 +21,7 @@ import { ellipseCommand } from "./cmds/ellipse";
 import { splineCommand } from "./cmds/spline";
 import { bezierCommand } from "./cmds/bezier";
 import { dimensionCommand } from "./cmds/dimension";
+import { koteCommand } from "./cmds/kote";
 import { textCommand } from "./cmds/text";
 import { textboxCommand } from "./cmds/textbox";
 import { moveCommand } from "./cmds/move";
@@ -61,6 +62,7 @@ export const COMMANDS: Record<string, Command> = {
   spline: splineCommand,
   bezier: bezierCommand,
   dimension: dimensionCommand,
+  kote: koteCommand,
   text: textCommand,
   textbox: textboxCommand,
   move: moveCommand,
@@ -116,6 +118,8 @@ export const ALIASES: Record<string, string> = {
   sp: "spline",
   dim: "dimension",
   bemassung: "dimension",
+  kt: "kote",
+  hoehenkote: "kote",
   bz: "bezier",
   tx: "text",
   txt: "text",

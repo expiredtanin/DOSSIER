@@ -606,6 +606,19 @@ const dimensionTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Höhenkote: Platzhalter-Werkzeug, gekoppelt an den `kote`-Befehl (Punkt →
+// getippter Höhenwert). Nicht floorOnly.
+const koteTool: Tool = {
+  id: "kote",
+  labelKey: "tool.kote",
+  hintKey: () => "tool.kote.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // Text: Platzhalter-Werkzeug, gekoppelt an den `text`-Befehl (Ankerpunkt →
 // getippte Zeile). Wie Kreis/Bogen nicht floorOnly (freies 2D-Element).
 const textTool: Tool = {
@@ -667,6 +680,7 @@ const TOOLS: Record<ToolId, Tool> = {
   spline: splineTool,
   bezier: bezierTool,
   dimension: dimensionTool,
+  kote: koteTool,
   text: textTool,
   textbox: textboxTool,
   image: imageTool,

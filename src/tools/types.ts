@@ -25,6 +25,7 @@ export type ToolId =
   | "spline"
   | "bezier"
   | "dimension"
+  | "kote"
   | "text"
   | "textbox"
   | "image";

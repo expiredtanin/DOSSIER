@@ -1534,6 +1534,22 @@ export type Drawing2DGeom =
    * andere Elemente — Assoziativität nur über die eigenen Endpunkte).
    */
   | { shape: "dimension"; a: Vec2; b: Vec2; offset: number }
+  /**
+   * Höhenkote (SIA 400 B.5.4, Figur 18): Dreieck-Symbol + Höhenwert (Meter,
+   * ±0.00-Referenz frei wählbar, s. Norm) an einem Punkt. `kind` bestimmt
+   * Dreieck-Richtung (OK = Spitze nach unten, UK = Spitze nach oben) UND
+   * Füllung (fertig = Kontur/hohl, roh = voll gefüllt) — vier norm-genaue
+   * Varianten, die fünfte („OK fertig UND roh kombiniert") ist nicht gebaut.
+   * `at` ist die SPITZE des Dreiecks (der exakte referenzierte Punkt).
+   */
+  | {
+      shape: "kote";
+      at: Vec2;
+      value: number;
+      kind: "okFertig" | "ukFertig" | "okRoh" | "ukRoh";
+      /** Drehung (Radiant); Werkzeug erzeugt bewusst nur 0, s. Ellipse-Muster. */
+      rotation: number;
+    }
   | {
       shape: "text";
       at: Vec2;

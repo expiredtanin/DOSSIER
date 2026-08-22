@@ -25,9 +25,21 @@ const DIM_OVERSHOOT_M = 0.05; // Überstand der Masshilfslinie über die Masslin
 const DIM_TICK_LEN_M = 0.15; // Länge des Massstrichs (Diagonale an den Masslinien-Enden)
 const DIM_TEXT_HEIGHT_M = 0.2; // Schrifthöhe der Masszahl
 
-/** Formatiert eine Länge (Meter) als Masszahl: 2 Dezimalstellen, Komma (SIA 400 B.5.2, „2,75"). */
+/** Formatiert eine Länge (Meter) als Masszahl: 2 Dezimalstellen (SIA 400 B.5.2/B.5.4, „3.25"/„518.60"). */
 function formatDimLabel(m: number): string {
-  return m.toFixed(2).replace(".", ",");
+  return m.toFixed(2);
+}
+
+// ── Höhenkote (SIA 400 B.5.4) ────────────────────────────────────────────────
+const KOTE_TRI_SIZE_M = 0.15; // Dreieck-Grösse (Spitze bis Basis)
+const KOTE_TRI_HALF_W_M = KOTE_TRI_SIZE_M * 0.6;
+const KOTE_TEXT_HEIGHT_M = 0.2;
+const KOTE_TEXT_GAP_M = 0.08; // Abstand Dreieck-Basis → Zahl
+
+/** Formatiert einen Höhenwert (SIA 400 B.5.4, Figur 18): „+3.25" · „±0.00" · „-0.10". */
+function formatKoteLabel(value: number): string {
+  if (Math.abs(value) < 1e-6) return "±0.00";
+  return (value > 0 ? "+" : "") + value.toFixed(2);
 }
 
 export function addDrawing2D(
@@ -225,6 +237,38 @@ export function addDrawing2D(
         text: formatDimLabel(lineLen),
         heightM: DIM_TEXT_HEIGHT_M,
         angle,
+        color,
+        greyed,
+        drawingId: d.id,
+      });
+      break;
+    }
+    case "kote": {
+      // SIA 400 B.5.4/Figur 18: OK = Spitze nach unten, UK = Spitze nach oben;
+      // fertig = Kontur (hohl), roh = voll gefüllt. `at` ist die Spitze.
+      const up = g.kind === "okFertig" || g.kind === "okRoh" ? 1 : -1;
+      const filled = g.kind === "okRoh" || g.kind === "ukRoh";
+      const pts: Vec2[] = [
+        g.at,
+        { x: g.at.x - KOTE_TRI_HALF_W_M, y: g.at.y + up * KOTE_TRI_SIZE_M },
+        { x: g.at.x + KOTE_TRI_HALF_W_M, y: g.at.y + up * KOTE_TRI_SIZE_M },
+      ];
+      out.push({
+        kind: "polygon",
+        pts,
+        fill: filled ? color : "none",
+        stroke: color,
+        strokeWidthMm: weightMm,
+        hatch: NO_HATCH,
+        greyed,
+        drawingId: d.id,
+      });
+      out.push({
+        kind: "drawingText",
+        at: { x: g.at.x + KOTE_TRI_HALF_W_M + KOTE_TEXT_GAP_M, y: g.at.y + up * KOTE_TRI_SIZE_M * 0.5 },
+        text: formatKoteLabel(g.value),
+        heightM: KOTE_TEXT_HEIGHT_M,
+        angle: 0,
         color,
         greyed,
         drawingId: d.id,

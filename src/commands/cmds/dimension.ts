@@ -1,10 +1,13 @@
 // Bemassung (lineare Masslinie(n), SIA 400 B.5.3, Figur 14 „Reihenbemassung").
-// Wie eine Polylinie: beliebig viele Punkte, dann EIN weiterer Klick für die
-// Lage der Masslinie(n) — erzeugt eine ganze Massketten in einer Geste.
-// Schritte:
+// Bedienung wie eine Polylinie (beliebig viele Klicks, Doppelklick/Enter
+// beendet), das ERGEBNIS ist aber IMMER eine GERADE Punktreihe: der erste
+// Klick setzt den Startpunkt, der zweite legt die Richtung fest — jeder
+// weitere Klick wird auf diese Gerade projiziert (Reihenbemassung misst
+// mehrere Punkte entlang EINER Referenzlinie, z. B. einer Wand, nie einen
+// Zickzack-Pfad). Schritte:
 //   1) „Erster Punkt:"                    → Punkt
-//   2) „Nächster Punkt ( Fertig Zurück ):" → Punkt … (Doppelklick/Enter
-//      beendet die Punktreihe, sobald ≥2 Punkte gesetzt sind)
+//   2) „Nächster Punkt ( Fertig Zurück ):" → Punkt … (ab dem 3. Punkt auf die
+//      durch Punkt 1/2 definierte Gerade projiziert)
 //   3) „Lage der Masslinie:"               → Punkt/Zahl (EIN Normalabstand
 //      für ALLE Segmente) → commit: je aufeinanderfolgendem Punktpaar EIN
 //      `shape:"dimension"`-Element (unabhängig editierbar, teilt nur den
@@ -38,6 +41,15 @@ function signedOffset(a: Vec2, b: Vec2, pt: Vec2): number {
   if (len < EPS) return 0;
   const nx = -dy / len, ny = dx / len;
   return (pt.x - a.x) * nx + (pt.y - a.y) * ny;
+}
+
+/** Projiziert `pt` auf die Gerade durch `p0` in Richtung `p1` (Kette bleibt gerade ab Punkt 3). */
+function projectOnLine(p0: Vec2, p1: Vec2, pt: Vec2): Vec2 {
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < EPS) return pt;
+  const t = ((pt.x - p0.x) * dx + (pt.y - p0.y) * dy) / len2;
+  return { x: p0.x + dx * t, y: p0.y + dy * t };
 }
 
 /** Endpunkte der um `offset` parallel verschobenen Masslinie (Strecke a-b). */
@@ -159,9 +171,11 @@ export const dimensionCommand: Command = {
         const ns: DimNext = { phase: "next", pts: [pt], cursor: pt, lastPoint: pt };
         return [ns, { draft: chainDraft([pt], pt) }];
       }
-      const pts = [...s.pts, pt];
-      const ns: DimNext = { phase: "next", pts, cursor: pt, lastPoint: pt };
-      return [ns, { draft: chainDraft(pts, pt) }];
+      // Ab dem dritten Punkt: auf die durch Punkt 1/2 festgelegte Gerade projizieren.
+      const placed = s.pts.length >= 2 ? projectOnLine(s.pts[0], s.pts[1], pt) : pt;
+      const pts = [...s.pts, placed];
+      const ns: DimNext = { phase: "next", pts, cursor: placed, lastPoint: placed };
+      return [ns, { draft: chainDraft(pts, placed) }];
     }
 
     // Offset-Schritt: Zahl = direkter Abstand, Punkt = Abstand zum Cursor.
@@ -179,8 +193,9 @@ export const dimensionCommand: Command = {
   onMove: (state, point): [CommandState, CommandResult] => {
     const s = state as DimState;
     if (s.phase === "next") {
-      const ns: DimNext = { ...s, cursor: point };
-      return [ns, { draft: chainDraft(s.pts, point) }];
+      const cursor = s.pts.length >= 2 ? projectOnLine(s.pts[0], s.pts[1], point) : point;
+      const ns: DimNext = { ...s, cursor };
+      return [ns, { draft: chainDraft(s.pts, cursor) }];
     }
     if (s.phase === "offset") {
       // Offset relativ zum ERSTEN Segment (repräsentativ für die ganze Kette).

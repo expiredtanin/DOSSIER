@@ -1529,6 +1529,8 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
     const mid: Vec2 = { x: (g.a.x + g.b.x) / 2 + nx, y: (g.a.y + g.b.y) / 2 + ny };
     return [g.a, g.b, mid];
   }
+  // Kote: EIN Griff an der Dreieck-Spitze (zum Verschieben; siehe moveGrip).
+  if (g.shape === "kote") return [g.at];
   // Text: EIN Griff am Ankerpunkt (zum Verschieben; siehe moveGrip).
   if (g.shape === "text") return [g.at];
   return [];
@@ -1616,6 +1618,8 @@ function moveGrip(
         }
         // Text: der einzige Griff (Index 0) sitzt am Ankerpunkt → verschiebt ihn.
         if (g.shape === "text") return { ...d, geom: { ...g, at: pt } };
+        // Kote: der einzige Griff (Index 0) sitzt an der Dreieck-Spitze.
+        if (g.shape === "kote") return { ...d, geom: { ...g, at: pt } };
         // Kreis: Griff 0 (Ost) bzw. 1 (Nord) — zieht man die beiden Achsen
         // unabhängig auseinander, wird der Kreis zur Ellipse (rotation 0);
         // bleiben rx/ry (fast) gleich, bleibt es ein Kreis (s. `ellipseOrCircle`).
@@ -1697,6 +1701,8 @@ function moveElementBy(
             return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
           case "dimension":
             return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
+          case "kote":
+            return { ...d, geom: { ...g, at: mv(g.at) } };
           case "text":
             return { ...d, geom: { ...g, at: mv(g.at) } };
           default:

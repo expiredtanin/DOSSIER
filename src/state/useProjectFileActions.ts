@@ -57,7 +57,8 @@ function drawingsBBox(
     } else if (g.shape === "dimension") {
       acc(g.a.x, g.a.y);
       acc(g.b.x, g.b.y);
-    } else if (g.shape === "text") acc(g.at.x, g.at.y);
+    } else if (g.shape === "kote") acc(g.at.x, g.at.y);
+    else if (g.shape === "text") acc(g.at.x, g.at.y);
   }
   return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
 }
@@ -76,6 +77,7 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
     case "bezier": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "spline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "dimension": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
+    case "kote": return { ...d, geom: { ...g, at: mv(g.at) } };
     case "text": return { ...d, geom: { ...g, at: mv(g.at) } };
     default: return d;
   }

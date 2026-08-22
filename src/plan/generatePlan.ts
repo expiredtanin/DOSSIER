@@ -732,7 +732,8 @@ function computeBounds(
     } else if (g.shape === "dimension") {
       acc(g.a);
       acc(g.b);
-    } else if (g.shape === "text") acc(g.at);
+    } else if (g.shape === "kote") acc(g.at);
+    else if (g.shape === "text") acc(g.at);
     else if (g.shape === "image") { acc(g.min); acc(g.max); }
   }
   // GESAMTE Kontext-Schicht (Konturen, importierte Gebäude/Terrain, Luftbild)
