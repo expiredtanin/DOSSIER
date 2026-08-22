@@ -2146,19 +2146,29 @@ body {
    Plan weiterhin durchgehen. */
 .pane-isolation-frame {
   position: absolute;
-  inset: 0;
+  /* Oben/links um die Lineal-Dicke eingerückt (TH=20 Bildschirm-px in
+     PlanRulers.tsx) — der Rahmen soll NUR den eigentlichen Zeichenbereich
+     umranden, nicht das Lineal überdecken (Nutzer-Wunsch: „respektiere das
+     Lineal, wirklich nur Viewport selber"). Rechts/unten gibt es kein
+     Lineal → bis an den Rand. */
+  top: 20px;
+  left: 20px;
+  right: 0;
+  bottom: 0;
   z-index: 5;
   pointer-events: none;
   box-shadow: inset 0 0 0 8px rgba(230, 126, 34, 0.35);
 }
 
-/* "Gruppe verlassen": Knopf oben RECHTS in der Ansicht (analog `.pane-title`
-   oben links), sichtbar nur solange eine Gruppe betreten ist. */
+/* "Gruppe verlassen": Knopf oben RECHTS in der Ansicht, sichtbar nur solange
+   eine Gruppe betreten ist. `top` unter dem Lineal (TH=20px, s. PlanRulers.tsx)
+   UND unter dem Isolations-Rahmenband (8px ab dessen 20px-Einrückung) —
+   Nutzer-Report: Pill sass vorher zu hoch, überlappte Lineal-Beschriftung. */
 .pane-leave-group-btn {
   position: absolute;
-  top: 12px;
+  top: 36px;
   right: 12px;
-  z-index: 3;
+  z-index: 6;
   padding: 5px 11px;
   border-radius: 6px;
   border: 1px solid var(--accent-border);

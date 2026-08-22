@@ -9,7 +9,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { t } from "../i18n";
-import { formatM } from "../model/types";
 import type {
   Ceiling,
   Drawing2D,
@@ -687,22 +686,8 @@ function LevelPlanView({
     pushNativeWalls(project);
   }, [project]);
 
-  // Bei einer freien Zeichnung gibt es keine Schnitthöhe → eigene Legende/Titel.
-  const isDrawing = level.kind === "drawing";
-  const caption = isDrawing
-    ? t("content.drawingLegend")
-    : t("content.grundrissLegend", {
-        name: level.name,
-        cutHeight: formatM(level.cutHeight ?? 0),
-      });
-
   return (
     <section className="pane">
-      <div className="pane-title">
-        {isDrawing
-          ? t("content.drawingTitle", { name: level.name })
-          : t("content.grundrissTitle", { name: level.name })}
-      </div>
       {groupPath.length > 0 && (
         <button
           type="button"
@@ -763,7 +748,6 @@ function LevelPlanView({
       {/* NACH PlanView gerendert (nicht als box-shadow auf .pane), damit der
           Isolations-Rahmen über der PlanView-SVG sichtbar bleibt. */}
       {groupPath.length > 0 && <div className="pane-isolation-frame" />}
-      <div className="plan-legend">{caption}</div>
     </section>
   );
 }
