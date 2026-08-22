@@ -37,6 +37,9 @@ import {
   pointSegDistPx,
   marqueeHit,
   marqueeHitDrawings,
+  marqueeHitCeilings,
+  marqueeHitRooms,
+  marqueeHitStairs,
 } from "./planView/geometry";
 import {
   polyUsesPattern,
@@ -208,6 +211,10 @@ export interface MarqueeSelection {
   wallIds: string[];
   /** Getroffene 2D-Zeichenelemente (gleiche window/crossing-Konvention). */
   drawingIds: string[];
+  /** Getroffene Decken/Räume/Treppen (gleiche window/crossing-Konvention). */
+  ceilingIds: string[];
+  roomIds: string[];
+  stairIds: string[];
   /**
    * Zieh-Richtung: `false` = links→rechts (positiv Δx) → nur VOLLSTÄNDIG
    * eingeschlossene Wände; `true` = rechts→links (negativ Δx) → auch berührte/
@@ -1825,6 +1832,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           onMarquee({
             wallIds: marqueeHit(plan.primitives, rect, crossing),
             drawingIds: marqueeHitDrawings(plan.primitives, rect, crossing),
+            ceilingIds: marqueeHitCeilings(plan.primitives, rect, crossing),
+            roomIds: marqueeHitRooms(plan.primitives, rect, crossing),
+            stairIds: marqueeHitStairs(plan.primitives, rect, crossing),
             crossing,
           });
         }

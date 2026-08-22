@@ -331,12 +331,14 @@ export function useMouseSelectionHandlers(opts: {
   const onPlanMarquee = (sel: MarqueeSelection) => {
     setSelectedWallIds(sel.wallIds);
     setSelectedDrawingIds(sel.drawingIds ?? []);
-    // Decken/Öffnungen/Treppen/Räume/Extrusionen/Dächer sind (noch) nicht Teil
-    // des Marquee → beim Aufziehen abwählen.
-    setSelectedCeilingIds([]);
+    setSelectedCeilingIds(sel.ceilingIds ?? []);
+    setSelectedStairIds(sel.stairIds ?? []);
+    setSelectedRoomIds(sel.roomIds ?? []);
+    // Öffnungen/Extrusionen/Stützen/Dächer/Kontext-Objekte sind (noch) nicht
+    // Teil des Marquee (Nutzer-Report betraf nur Decken/Räume/Treppen; Stütze/
+    // Dach liessen sich mit derselben `marqueeHitByField`-Mechanik ergänzen,
+    // falls gewünscht) → beim Aufziehen abwählen.
     setSelectedOpeningIds([]);
-    setSelectedStairIds([]);
-    setSelectedRoomIds([]);
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);

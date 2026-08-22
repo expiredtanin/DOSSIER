@@ -222,22 +222,54 @@ export function marqueeHit(
   rect: ModelRect,
   crossing: boolean,
 ): string[] {
-  // Polygone je Wand sammeln (nur Primitive mit Wandbezug zählen für die Auswahl).
-  const byWall = new Map<string, Vec2[][]>();
+  return marqueeHitByField(prims, "wallId", rect, crossing);
+}
+
+/**
+ * Generische Variante von {@link marqueeHit} für ein beliebiges Polygon-ID-
+ * Feld (`ceilingId`/`roomId`/`stairId`/`columnId`/`roofId`/…) — dieselbe
+ * window/crossing-Konvention, nur auf ein anderes Element bezogen. Deckt
+ * Nutzer-Report: „Auswahlrahmen kann Decken/Räume/Treppen nicht anwählen"
+ * (bisher nur Wände über `marqueeHit`, alles andere fehlte komplett).
+ */
+function marqueeHitByField(
+  prims: Primitive[],
+  field: "wallId" | "ceilingId" | "roomId" | "stairId" | "columnId" | "roofId",
+  rect: ModelRect,
+  crossing: boolean,
+): string[] {
+  const byId = new Map<string, Vec2[][]>();
   for (const p of prims) {
-    if (p.kind !== "polygon" || p.wallId == null) continue;
-    const list = byWall.get(p.wallId);
+    if (p.kind !== "polygon") continue;
+    const id = p[field];
+    if (id == null) continue;
+    const list = byId.get(id);
     if (list) list.push(p.pts);
-    else byWall.set(p.wallId, [p.pts]);
+    else byId.set(id, [p.pts]);
   }
   const out: string[] = [];
-  for (const [wallId, polys] of byWall) {
+  for (const [id, polys] of byId) {
     const hit = crossing
       ? polys.some((poly) => polyTouchesRect(poly, rect))
       : polys.every((poly) => polyEnclosedByRect(poly, rect));
-    if (hit) out.push(wallId);
+    if (hit) out.push(id);
   }
   return out;
+}
+
+/** Vom Auswahl-Rechteck getroffene Decken-IDs (gleiche Konvention wie {@link marqueeHit}). */
+export function marqueeHitCeilings(prims: Primitive[], rect: ModelRect, crossing: boolean): string[] {
+  return marqueeHitByField(prims, "ceilingId", rect, crossing);
+}
+
+/** Vom Auswahl-Rechteck getroffene Raum-IDs (gleiche Konvention wie {@link marqueeHit}). */
+export function marqueeHitRooms(prims: Primitive[], rect: ModelRect, crossing: boolean): string[] {
+  return marqueeHitByField(prims, "roomId", rect, crossing);
+}
+
+/** Vom Auswahl-Rechteck getroffene Treppen-IDs (gleiche Konvention wie {@link marqueeHit}). */
+export function marqueeHitStairs(prims: Primitive[], rect: ModelRect, crossing: boolean): string[] {
+  return marqueeHitByField(prims, "stairId", rect, crossing);
 }
 
 /**
