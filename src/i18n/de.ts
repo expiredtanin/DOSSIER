@@ -210,6 +210,8 @@ export const de = {
   "ribbon.group.custom": "Eigene Leiste",
   "tools.view.label": "Darstellung",
   "tools.view.list": "Liste",
+  "group.leave": "Gruppe verlassen",
+  "group.leave.hint": "Isolation verlassen — zurück zur normalen Ansicht (ein Level)",
   "tools.view.icons": "Symbole",
   "tools.cat.2d": "2D",
   "tools.cat.3d": "3D",

@@ -74,6 +74,12 @@ export function useSelectionState() {
     selectedColumnIds.length === 1 ? selectedColumnIds[0] : null;
   const selectedContextObjectIds = useStore((s) => s.selectedContextObjectIds);
   const setSelectedContextObjectIds = useStore((s) => s.setSelectedContextObjectIds);
+  // Gruppen (Vectorworks-artig): gewählte Gruppen-IDs + Isolations-Pfad
+  // ("Gruppe betreten"), s. `groupActions.ts`.
+  const selectedGroupIds = useStore((s) => s.selectedGroupIds);
+  const setSelectedGroupIds = useStore((s) => s.setSelectedGroupIds);
+  const groupPath = useStore((s) => s.groupPath);
+  const setGroupPath = useStore((s) => s.setGroupPath);
 
   return {
     selectedWallIds,
@@ -115,5 +121,9 @@ export function useSelectionState() {
     selectedColumnId,
     selectedContextObjectIds,
     setSelectedContextObjectIds,
+    selectedGroupIds,
+    setSelectedGroupIds,
+    groupPath,
+    setGroupPath,
   };
 }

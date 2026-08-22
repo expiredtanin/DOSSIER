@@ -30,6 +30,16 @@ export interface SelectionSlice {
   // Gewählte Schnitt-/Ansichtslinie (DrawingLevel-Id) — EINZELauswahl (eine Linie
   // zur Zeit), getrennt von den übrigen Kanälen. `null` = keine Linie gewählt.
   selectedSectionLineId: string | null;
+  // Gewählte Gruppen (Vectorworks-artig) als MENGE von IDs — rein informativ/
+  // fürs UI (Bounding-Box, Doppelklick-Ziel); die eigentlichen Mitglieder
+  // stehen zusätzlich in den übrigen `selected…Ids`-Kanälen (Verschieben/
+  // Löschen/etc. brauchen so keine Gruppen-Sonderbehandlung), s. `groupActions.ts`.
+  selectedGroupIds: string[];
+  // Isolations-Pfad (Vectorworks „Gruppe betreten"): Stapel der Gruppen-IDs,
+  // in die per Doppelklick navigiert wurde — leer = nicht isoliert (normal),
+  // letztes Element = die AKTIVE (innerste) Gruppe. Alles ausserhalb ihrer
+  // transitiven Mitgliedschaft wird gedimmt/gesperrt (s. `groupActions.ts`).
+  groupPath: string[];
 
   setSelectedWallIds: (ids: string[]) => void;
   setSelectedDrawingIds: (ids: string[]) => void;
@@ -42,6 +52,8 @@ export interface SelectionSlice {
   setSelectedRoofIds: (ids: string[]) => void;
   setSelectedContextObjectIds: (ids: string[]) => void;
   setSelectedSectionLineId: (id: string | null) => void;
+  setSelectedGroupIds: (ids: string[]) => void;
+  setGroupPath: (path: string[]) => void;
   /** Auswahl (Wände + Decken + Öffnungen + Treppen + Dächer + 2D-Elemente) leeren. */
   clearSelection: () => void;
 }
@@ -62,6 +74,8 @@ export function createSelectionSlice(
     selectedRoofIds: [],
     selectedContextObjectIds: [],
     selectedSectionLineId: null,
+    selectedGroupIds: [],
+    groupPath: [],
     setSelectedWallIds: (ids) => set({ selectedWallIds: ids }),
     setSelectedDrawingIds: (ids) => set({ selectedDrawingIds: ids }),
     setSelectedCeilingIds: (ids) => set({ selectedCeilingIds: ids }),
@@ -73,6 +87,8 @@ export function createSelectionSlice(
     setSelectedRoofIds: (ids) => set({ selectedRoofIds: ids }),
     setSelectedContextObjectIds: (ids) => set({ selectedContextObjectIds: ids }),
     setSelectedSectionLineId: (id) => set({ selectedSectionLineId: id }),
+    setSelectedGroupIds: (ids) => set({ selectedGroupIds: ids }),
+    setGroupPath: (path) => set({ groupPath: path }),
     clearSelection: () =>
       set({
         selectedWallIds: [],
@@ -86,6 +102,11 @@ export function createSelectionSlice(
         selectedRoofIds: [],
         selectedContextObjectIds: [],
         selectedSectionLineId: null,
+        selectedGroupIds: [],
+        // groupPath (Isolation) bleibt bewusst erhalten — Leerraum-Klick INNERHALB
+        // einer betretenen Gruppe soll nur deren Auswahl leeren, nicht aus der
+        // Gruppe hinauswerfen (Vectorworks-Verhalten). Verlassen ist ein
+        // expliziter Schritt (Knopf/Escape, s. `useGroupHandlers.ts`).
       }),
   };
 }

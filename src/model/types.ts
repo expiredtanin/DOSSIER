@@ -2232,6 +2232,27 @@ export interface LayoutFolder {
   kind?: "layout" | "master";
 }
 
+/**
+ * Gruppe (Vectorworks-artig) — reine Mitgliedschaft je Elementart, siehe
+ * {@link Project.groups}. Alle ID-Listen sind additiv; ein Element gehört
+ * NIE zu mehr als einer Gruppe auf derselben Ebene (das Werkzeug/der Befehl
+ * stellt das beim Gruppieren sicher, nicht das Modell selbst).
+ */
+export interface Group {
+  id: string;
+  name?: string;
+  wallIds: string[];
+  drawingIds: string[];
+  ceilingIds: string[];
+  roomIds: string[];
+  stairIds: string[];
+  columnIds: string[];
+  roofIds: string[];
+  openingIds: string[];
+  /** Verschachtelte Gruppen (diese Gruppe enthält andere Gruppen als Ganzes). */
+  groupIds: string[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -2318,6 +2339,18 @@ export interface Project {
    * Projekte/Tests ohne `columns` gültig bleiben (Default: leer behandeln).
    */
   columns?: Column[];
+  /**
+   * Gruppen (Vectorworks-artig: Cmd+G fasst die Auswahl zu einer Einheit
+   * zusammen; Doppelklick betritt die Gruppe zum Bearbeiten, alles andere
+   * wird dabei gedimmt/gesperrt — s. `state/useGroupState.ts`). Eine Gruppe
+   * ist reine MITGLIEDSCHAFT (IDs je Elementart, wie eine gespeicherte
+   * Mehrfachauswahl) — kein eigenes Geometrie-/Transform-Objekt, damit
+   * Verschieben/Kopieren/Löschen weiterhin dieselbe Maschinerie nutzen wie
+   * eine normale Mehrfachauswahl. `groupIds` erlaubt Verschachtelung (eine
+   * Gruppe kann andere Gruppen enthalten). Optional, damit bestehende
+   * Projekte/Tests ohne `groups` gültig bleiben (Default: leer behandeln).
+   */
+  groups?: Group[];
   /**
    * Bibliothek parametrischer Wand-Regelwerke. Optional, damit bestehende
    * Projekte ohne `parametricWalls` gültig bleiben (Default: leer behandeln).

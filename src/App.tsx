@@ -115,12 +115,15 @@ import { useGripEditing } from "./state/useGripEditing";
 import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
+import { containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
+import type { GroupMembership } from "./state/groupActions";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useProjectActions } from "./state/useProjectActions";
 import {
   useActiveToolKeys,
   useBooleanOpsShortcut,
   useDrawingClipboardShortcut,
+  useGroupShortcut,
   useSelectAllAndDeleteShortcut,
   useSplitJoinShortcut,
   useToolNumberShortcuts,
@@ -408,6 +411,10 @@ export default function App() {
     selectedColumnId,
     selectedContextObjectIds,
     setSelectedContextObjectIds,
+    selectedGroupIds,
+    setSelectedGroupIds,
+    groupPath,
+    setGroupPath,
   } = useSelectionState();
 
   // ── Kontextmenüs (transienter UI-State, bleibt lokal) ─────────────────────
@@ -1154,6 +1161,81 @@ export default function App() {
     setSelectedWallIds([]);
   };
   useBooleanOpsShortcut(selectedDrawingIds, project.drawings2d, applyBoolean);
+
+  // Ctrl/Cmd+G / Ctrl/Cmd+Shift+G = Gruppieren/Auflösen (Vectorworks-artig,
+  // s. state/groupActions.ts). `applyGroupSelection` setzt nach dem Gruppieren/
+  // Auflösen alle betroffenen Auswahl-Kanäle auf einen Schlag.
+  const applyGroupSelection = (mem: GroupMembership, groupIds: string[]) => {
+    setSelectedWallIds(mem.wallIds);
+    setSelectedDrawingIds(mem.drawingIds);
+    setSelectedCeilingIds(mem.ceilingIds);
+    setSelectedOpeningIds(mem.openingIds);
+    setSelectedStairIds(mem.stairIds);
+    setSelectedRoomIds(mem.roomIds);
+    setSelectedColumnIds(mem.columnIds);
+    setSelectedRoofIds(mem.roofIds);
+    setSelectedGroupIds(groupIds);
+  };
+  useGroupShortcut(
+    project,
+    setProject,
+    {
+      wallIds: selectedWallIds,
+      drawingIds: selectedDrawingIds,
+      ceilingIds: selectedCeilingIds,
+      roomIds: selectedRoomIds,
+      stairIds: selectedStairIds,
+      columnIds: selectedColumnIds,
+      roofIds: selectedRoofIds,
+      openingIds: selectedOpeningIds,
+    },
+    selectedGroupIds,
+    applyGroupSelection,
+  );
+
+  // Doppelklick auf ein gruppiertes Element → Gruppe betreten (Isolation):
+  // alles ausserhalb wird gedimmt/gesperrt gerendert (s. viewportContent.tsx/
+  // PlanView „greyed"-Pass) und lässt sich nicht mehr anwählen (s.
+  // useMouseSelectionHandlers.ts). Auswahl wird geleert, damit man sauber
+  // "in" der Gruppe startet.
+  const onEnterGroup = (hit: {
+    wallId?: string;
+    drawingId?: string;
+    ceilingId?: string;
+    roomId?: string;
+    stairId?: string;
+    columnId?: string;
+    roofId?: string;
+  }): boolean => {
+    const kind = hit.wallId
+      ? "wallIds"
+      : hit.drawingId
+        ? "drawingIds"
+        : hit.ceilingId
+          ? "ceilingIds"
+          : hit.roomId
+            ? "roomIds"
+            : hit.stairId
+              ? "stairIds"
+              : hit.columnId
+                ? "columnIds"
+                : hit.roofId
+                  ? "roofIds"
+                  : null;
+    const id = hit.wallId ?? hit.drawingId ?? hit.ceilingId ?? hit.roomId ?? hit.stairId ?? hit.columnId ?? hit.roofId;
+    if (!kind || !id) return false;
+    const gid = containingGroupId(project, kind, id, groupPath);
+    if (!gid) return false;
+    setGroupPath([...groupPath, gid]);
+    applyGroupSelection({ ...EMPTY_MEMBERSHIP }, []);
+    return true;
+  };
+  // "Gruppe verlassen"-Knopf (oben links im Grundriss): verlässt genau EIN
+  // Isolations-Level (Vectorworks-Verhalten bei verschachtelten Gruppen).
+  const onLeaveGroup = () => {
+    setGroupPath(groupPath.slice(0, -1));
+    applyGroupSelection({ ...EMPTY_MEMBERSHIP }, []);
+  };
 
   // Alt+Klick im Grundriss = Segment löschen (Schere): PlanView meldet das
   // getroffene Drawing2D + den Modellpunkt; App ermittelt daraus die nächst-
@@ -2328,6 +2410,9 @@ export default function App() {
       setSelectedContextObjectIds,
       selectedSectionLineId,
       setSelectedSectionLineId,
+      selectedGroupIds,
+      setSelectedGroupIds,
+      groupPath,
     },
     contextMenuState: { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM },
   });
@@ -2780,6 +2865,8 @@ export default function App() {
           onStampMove={moveRoomStamp}
           onStampEdit={onOpenStampEditor}
           onEditDrawingText={onEditDrawingText}
+          onEnterGroup={onEnterGroup}
+          groupPath={groupPath}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={commitTextEdit}
@@ -2819,6 +2906,19 @@ export default function App() {
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
         />
+        {/* "Gruppe verlassen" (Vectorworks-artig): sichtbar, solange eine
+            Gruppe betreten ist (Isolation — alles andere gedimmt/gesperrt,
+            s. viewportContent.tsx). Verlässt genau EIN Level. */}
+        {groupPath.length > 0 && (
+          <button
+            type="button"
+            className="plan-leave-group-btn"
+            onClick={onLeaveGroup}
+            title={t("group.leave.hint")}
+          >
+            {t("group.leave")}
+          </button>
+        )}
         {/* Command-Line (Rhino-artig) UNTER dem Viewport — nur Viewport-breit.
             Prompt + klickbare Inline-Optionen + Texteingabe + Autocomplete. */}
         <CommandLine

@@ -223,6 +223,23 @@ export interface MarqueeSelection {
   crossing: boolean;
 }
 
+/**
+ * Ein per Doppelklick getroffenes, potenziell gruppiertes Element — genau
+ * EIN Feld gesetzt (analog `PlanSelection`, aber ohne die Klick-spezifischen
+ * Felder). Für Gruppen-Eintritt (`onEnterGroup`); Formen ohne eigenes
+ * Polygon-Primitiv (z. B. reine Linien-2D-Elemente) werden hier nicht
+ * erkannt (kleine, bewusste Vereinfachung — s. `anyGroupableHit`).
+ */
+export interface GroupableHit {
+  wallId?: string;
+  drawingId?: string;
+  ceilingId?: string;
+  roomId?: string;
+  stairId?: string;
+  columnId?: string;
+  roofId?: string;
+}
+
 export interface PlanViewProps {
   plan: Plan;
   /**
@@ -322,6 +339,17 @@ export interface PlanViewProps {
   onStampEdit?: (roomId: string) => void;
   /** Doppelklick auf ein Text-2D-Element: Inhalt bearbeiten (Editor öffnen). */
   onEditDrawingText?: (drawingId: string) => void;
+  /**
+   * Doppelklick auf IRGENDEIN Element (Wand/2D/Decke/Raum/Treppe/Stütze/
+   * Dach): meldet, welches Element getroffen wurde (genau EIN Feld gesetzt).
+   * Der Aufrufer prüft, ob es zu einer Gruppe gehört (Vectorworks „Gruppe
+   * betreten") und liefert `true`, wenn er die Gruppe betreten hat — dann
+   * bricht `onDoubleClick` sofort ab, VOR allen anderen Doppelklick-Aktionen
+   * (Gruppen-Eintritt hat Vorrang, wie in Vectorworks). `false`/kein Handler
+   * → die übrigen Doppelklick-Prüfungen (Text/Raum-Stempel/Schnittlinie) laufen
+   * normal weiter.
+   */
+  onEnterGroup?: (hit: GroupableHit) => boolean;
   /**
    * Drawing2D-ID, deren Inhalt gerade inline auf der Zeichenfläche editiert
    * wird (frisch über `text`/`textbox` erzeugt ODER per Doppelklick auf ein
@@ -501,6 +529,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onStampMove,
       onStampEdit,
       onEditDrawingText,
+      onEnterGroup,
       editTextId,
       editTextMinHeightM,
       onCommitTextEdit,
@@ -1085,6 +1114,30 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (p.kind === "polygon" && pointInPolygon(m, p.pts)) return i;
     }
     return null;
+  };
+
+  // Irgendein Element (Wand/Decke/Raum/Treppe/Stütze/Dach/2D) unter dem
+  // Cursor — für Gruppen-Eintritt per Doppelklick (`onEnterGroup`). Nutzt
+  // `hitTest` (Polygon-Primitive, deckt alle flächigen Bauteile ab) und
+  // fällt für linienbasierte 2D-Elemente auf `pickDrawing` zurück (das
+  // selbst erst nach dessen Definition unten verfügbar ist, daher als
+  // separate Closure statt inline hier).
+  const anyGroupableHit = (clientX: number, clientY: number): GroupableHit | null => {
+    const idx = hitTest(clientX, clientY);
+    if (idx !== null) {
+      const p = plan.primitives[idx];
+      if (p.kind === "polygon") {
+        if (p.wallId) return { wallId: p.wallId };
+        if (p.ceilingId) return { ceilingId: p.ceilingId };
+        if (p.roomId) return { roomId: p.roomId };
+        if (p.stairId) return { stairId: p.stairId };
+        if (p.columnId) return { columnId: p.columnId };
+        if (p.roofId) return { roofId: p.roofId };
+        if (p.drawingId) return { drawingId: p.drawingId };
+      }
+    }
+    const did = pickDrawing(clientX, clientY);
+    return did ? { drawingId: did } : null;
   };
 
   // Abstand (Bildschirm-Pixel) eines Klicks vom Ring eines Kreis/Bogen-2D-
@@ -2001,6 +2054,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (toolActive) {
       toolHandlers!.onToolCommit();
       return;
+    }
+    // Gruppen betreten hat VORRANG vor allen anderen Doppelklick-Aktionen
+    // (Vectorworks: ein gruppiertes Element öffnet zuerst die Gruppe — erst
+    // ein weiterer Doppelklick INNERHALB träfe dann z. B. den Text-Editor).
+    if (onEnterGroup) {
+      const hit = anyGroupableHit(e.clientX, e.clientY);
+      if (hit && onEnterGroup(hit)) return;
     }
     // Doppelklick auf ein Text-2D-Element → Inhalt bearbeiten (Vorrang vor Raum).
     if (onEditDrawingText) {

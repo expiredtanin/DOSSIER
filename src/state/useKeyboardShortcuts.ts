@@ -20,6 +20,8 @@ import type { CommandLineHandle } from "../ui/CommandLine";
 import type { Drawing2D, Project, Vec2 } from "../model/types";
 import { differenceDrawings, intersectionDrawings, unionDrawings } from "../editors/booleanOps";
 import type { BooleanResult } from "../editors/booleanOps";
+import { groupSelection, mergeMembership, ungroup, EMPTY_MEMBERSHIP } from "./groupActions";
+import type { GroupMembership } from "./groupActions";
 
 /** Aktive Transformation (Bewegen/Spiegeln/Drehen) — Form aus useDrawingToolState. */
 type ActiveTransform = {
@@ -569,4 +571,54 @@ export function useTransformShortcuts(
     selectedColumnId,
     engine,
   ]);
+}
+
+/**
+ * Ctrl/Cmd+G = Auswahl gruppieren (Vectorworks-artig); Ctrl/Cmd+Shift+G =
+ * gewählte Gruppe(n) auflösen (EIN Level — Untergruppen bleiben bestehen).
+ * `applySelection` setzt danach alle betroffenen `selected…Ids`-Kanäle +
+ * `selectedGroupIds` auf einen Schlag (s. App.tsx, dieselbe Form wie die
+ * Gruppen-Erweiterung beim Klicken in `useMouseSelectionHandlers.ts`).
+ */
+export function useGroupShortcut(
+  project: Project,
+  setProject: (updater: (p: Project) => Project) => void,
+  currentSelection: GroupMembership,
+  selectedGroupIds: string[],
+  applySelection: (mem: GroupMembership, groupIds: string[]) => void,
+): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key.toLowerCase() !== "g") return;
+      if (isEditableTarget(e)) return;
+      e.preventDefault();
+      if (e.shiftKey) {
+        // Ungruppieren: für jede gewählte Gruppe eine Hülle auflösen; ihre
+        // direkten Mitglieder (+ Untergruppen) werden die neue Auswahl.
+        if (selectedGroupIds.length === 0) return;
+        let p = project;
+        let members: GroupMembership = { ...EMPTY_MEMBERSHIP };
+        const newGroupIds: string[] = [];
+        for (const gid of selectedGroupIds) {
+          const res = ungroup(p, gid);
+          if (!res) continue;
+          p = res.project;
+          members = mergeMembership(members, res.members);
+          newGroupIds.push(...res.subGroupIds);
+        }
+        setProject(() => p);
+        applySelection(members, newGroupIds);
+        return;
+      }
+      // Gruppieren: aktuelle Auswahl (+ bereits gewählte Gruppen als Untergruppen).
+      const res = groupSelection(project, currentSelection, selectedGroupIds);
+      if (!res) return;
+      setProject(() => res.project);
+      applySelection(currentSelection, [res.groupId]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, currentSelection, selectedGroupIds]);
 }

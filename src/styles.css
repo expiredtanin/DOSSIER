@@ -2119,6 +2119,27 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+/* "Gruppe verlassen" (Vectorworks-artig): schwebender Knopf oben links über
+   dem Grundriss, sichtbar nur solange eine Gruppe betreten ist (Isolation). */
+.plan-leave-group-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 20;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--field-bg);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+.plan-leave-group-btn:hover {
+  background: var(--accent-dim);
+}
+
 /* Auswahl-Rechteck (Marquee, Links-Drag): gestrichelte Akzentkontur, leichte
    Füllung. Strichstärke + Strichmuster papierkonstant (non-scaling-stroke). Die
    Default-Variante (links→rechts, „einschließend") ist durchgezogen; die

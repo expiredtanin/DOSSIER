@@ -28,9 +28,11 @@ import type { SectionOutput } from "../plan/toSection";
 import { generateElevationPlan } from "../plan/toElevation";
 import { pushNativeScene, pushNativeWalls } from "../plan/nativeSync";
 import { selectionHighlightLines } from "../plan/toWalls3d";
+import { applyGroupDimming } from "../state/groupActions";
 import { PlanView } from "../plan/PlanView";
 import type {
   GripHandlers,
+  GroupableHit,
   HudFieldsState,
   MarqueeSelection,
   PlanSelection,
@@ -94,6 +96,8 @@ export function Content({
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  onEnterGroup,
+  groupPath,
   editTextId,
   editTextMinHeightM,
   onCommitTextEdit,
@@ -187,6 +191,8 @@ export function Content({
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  onEnterGroup?: (hit: GroupableHit) => boolean;
+  groupPath: string[];
   editTextId?: string | null;
   editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
@@ -316,6 +322,8 @@ export function Content({
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          onEnterGroup={onEnterGroup}
+          groupPath={groupPath}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
@@ -382,6 +390,8 @@ export function Content({
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          onEnterGroup={onEnterGroup}
+          groupPath={groupPath}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
@@ -490,6 +500,8 @@ export function Content({
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
           onEditDrawingText={onEditDrawingText}
+          onEnterGroup={onEnterGroup}
+          groupPath={groupPath}
           editTextId={editTextId}
           editTextMinHeightM={editTextMinHeightM}
           onCommitTextEdit={onCommitTextEdit}
@@ -546,6 +558,8 @@ function LevelPlanView({
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  onEnterGroup,
+  groupPath,
   editTextId,
   editTextMinHeightM,
   onCommitTextEdit,
@@ -595,6 +609,8 @@ function LevelPlanView({
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  onEnterGroup?: (hit: GroupableHit) => boolean;
+  groupPath: string[];
   editTextId?: string | null;
   editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
@@ -621,19 +637,31 @@ function LevelPlanView({
 }) {
   // Detailgrad + Referenzlinien fließen in die Plan-Erzeugung ein (Symbole,
   // Schraffuren/Linienfeinheit bzw. Wand-Achslinien).
-  const plan = useMemo(
-    () =>
-      generatePlan(
-        project,
-        level.id,
-        visibleCodes,
-        categoryDisplay,
-        detail,
-        referenceLines,
-        mono,
-      ),
-    [project, level.id, visibleCodes, categoryDisplay, detail, referenceLines, mono],
-  );
+  const plan = useMemo(() => {
+    const p = generatePlan(
+      project,
+      level.id,
+      visibleCodes,
+      categoryDisplay,
+      detail,
+      referenceLines,
+      mono,
+    );
+    // Gruppen-Isolation ("Gruppe betreten"): alles ausserhalb der aktiven
+    // Gruppe gedimmt, s. state/groupActions.ts::applyGroupDimming.
+    return groupPath.length === 0
+      ? p
+      : { ...p, primitives: applyGroupDimming(p.primitives, project, groupPath) };
+  }, [
+    project,
+    level.id,
+    visibleCodes,
+    categoryDisplay,
+    detail,
+    referenceLines,
+    mono,
+    groupPath,
+  ]);
 
   // Live-Spiegelung in die nativen wgpu-Fenster (No-op ohne Tauri, debounced):
   // EXAKT der sichtbare Plan (gleiches Geschoss, gleicher Detailgrad) fürs
@@ -681,6 +709,7 @@ function LevelPlanView({
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
+        onEnterGroup={onEnterGroup}
         editTextId={editTextId}
         editTextMinHeightM={editTextMinHeightM}
         onCommitTextEdit={onCommitTextEdit}
@@ -746,6 +775,8 @@ function SectionPlanView({
   onStampMove,
   onStampEdit,
   onEditDrawingText,
+  onEnterGroup,
+  groupPath,
   editTextId,
   editTextMinHeightM,
   onCommitTextEdit,
@@ -790,6 +821,8 @@ function SectionPlanView({
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
   onEditDrawingText?: (drawingId: string) => void;
+  onEnterGroup?: (hit: GroupableHit) => boolean;
+  groupPath: string[];
   editTextId?: string | null;
   editTextMinHeightM?: number | null;
   onCommitTextEdit?: (doc: RichTextDoc) => void;
@@ -858,7 +891,16 @@ function SectionPlanView({
         : null,
     [isElevation, output, mono, level.hiddenLines],
   );
-  const plan = isElevation ? elevationPlan : sectionPlan;
+  const rawPlan = isElevation ? elevationPlan : sectionPlan;
+  // Gruppen-Isolation ("Gruppe betreten") gilt auch für Schnitt-/Ansichts-
+  // Pläne, s. state/groupActions.ts::applyGroupDimming.
+  const plan = useMemo(
+    () =>
+      rawPlan && groupPath.length > 0
+        ? { ...rawPlan, primitives: applyGroupDimming(rawPlan.primitives, project, groupPath) }
+        : rawPlan,
+    [rawPlan, project, groupPath],
+  );
   const effStatus = isElevation ? (elevationPlan ? "ready" : "empty") : status;
 
   const kindLabel = level.kind === "section" ? t("stub.section") : t("stub.elevation");
@@ -902,6 +944,7 @@ function SectionPlanView({
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
         onEditDrawingText={onEditDrawingText}
+        onEnterGroup={onEnterGroup}
         editTextId={editTextId}
         editTextMinHeightM={editTextMinHeightM}
         onCommitTextEdit={onCommitTextEdit}

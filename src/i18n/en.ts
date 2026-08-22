@@ -208,6 +208,8 @@ export const en: Record<TranslationKey, string> = {
   "ribbon.group.custom": "Custom bar",
   "tools.view.label": "Display",
   "tools.view.list": "List",
+  "group.leave": "Leave group",
+  "group.leave.hint": "Leave isolation — back to normal view (one level)",
   "tools.view.icons": "Icons",
   "tools.cat.2d": "2D",
   "tools.cat.3d": "3D",

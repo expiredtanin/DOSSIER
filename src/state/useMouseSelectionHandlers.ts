@@ -16,6 +16,26 @@ import { plainText } from "../text/richText";
 import { hitTestWall } from "../viewport/planHitTest";
 import type { useSelectionState } from "./useSelectionState";
 import type { useContextMenuState } from "../menus/useContextMenuState";
+import {
+  EMPTY_MEMBERSHIP,
+  expandToGroups,
+  isInsideActiveGroup,
+  type GroupMembership,
+  type MemberKind,
+} from "./groupActions";
+
+/** `PlanSelection`s einzelnes Treffer-Feld als (Art, ID) — oder `null` (Leerraum). */
+function selHit(sel: PlanSelection): { kind: MemberKind; id: string } | null {
+  if (sel.wallId) return { kind: "wallIds", id: sel.wallId };
+  if (sel.drawingId) return { kind: "drawingIds", id: sel.drawingId };
+  if (sel.ceilingId) return { kind: "ceilingIds", id: sel.ceilingId };
+  if (sel.openingId) return { kind: "openingIds", id: sel.openingId };
+  if (sel.stairId) return { kind: "stairIds", id: sel.stairId };
+  if (sel.roomId) return { kind: "roomIds", id: sel.roomId };
+  if (sel.columnId) return { kind: "columnIds", id: sel.columnId };
+  if (sel.roofId) return { kind: "roofIds", id: sel.roofId };
+  return null;
+}
 
 export function useMouseSelectionHandlers(opts: {
   project: Project;
@@ -48,6 +68,9 @@ export function useMouseSelectionHandlers(opts: {
     | "setSelectedContextObjectIds"
     | "selectedSectionLineId"
     | "setSelectedSectionLineId"
+    | "selectedGroupIds"
+    | "setSelectedGroupIds"
+    | "groupPath"
   >;
   contextMenuState: Pick<
     ReturnType<typeof useContextMenuState>,
@@ -79,6 +102,8 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedContextObjectIds,
     selectedSectionLineId,
     setSelectedSectionLineId,
+    setSelectedGroupIds,
+    groupPath,
   } = selectionState;
   const { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM } = contextMenuState;
 
@@ -187,6 +212,11 @@ export function useMouseSelectionHandlers(opts: {
     // Klick wird ignoriert, als läge dort nichts.
     const hitCode = categoryCodeOfSelection(sel);
     if (hitCode !== undefined && categoryDisplay(hitCode).locked) return;
+    // Gruppen-Isolation (Vectorworks „Gruppe betreten"): ausserhalb der
+    // aktiven Gruppe ist alles gesperrt (gedimmt gerendert, s. PlanView) —
+    // derselbe Ignorier-Kurzschluss wie beim normalen Sperren oben.
+    const hit = selHit(sel);
+    if (hit && !isInsideActiveGroup(project, hit.kind, hit.id, groupPath)) return;
     // Shift+Klick: Mehrfach-Auswahl — getroffenes Element zu-/abschalten, den
     // Rest behalten (Wände und 2D-Zeichnungen unabhängig, gemischte Auswahl
     // erlaubt). Leerraum-Klick mit Shift lässt die Auswahl unverändert.
@@ -271,6 +301,34 @@ export function useMouseSelectionHandlers(opts: {
       }
       return;
     }
+    // Gruppen-Erweiterung: gehört das getroffene Element zu einer (im
+    // aktuellen Isolations-Kontext sichtbaren) Gruppe, wird die GANZE Gruppe
+    // gewählt statt nur dieses eine Element (Vectorworks: eine Gruppe
+    // verhält sich wie ein einzelnes Objekt, bis man per Doppelklick
+    // hineingeht — s. `onEnterGroup`/`groupPath`).
+    if (hit) {
+      const { expanded, groupIds } = expandToGroups(
+        project,
+        { ...EMPTY_MEMBERSHIP, [hit.kind]: [hit.id] },
+        groupPath,
+      );
+      if (groupIds.length > 0) {
+        setSelectedWallIds(expanded.wallIds);
+        setSelectedDrawingIds(expanded.drawingIds);
+        setSelectedCeilingIds(expanded.ceilingIds);
+        setSelectedOpeningIds(expanded.openingIds);
+        setSelectedStairIds(expanded.stairIds);
+        setSelectedRoomIds(expanded.roomIds);
+        setSelectedColumnIds(expanded.columnIds);
+        setSelectedRoofIds(expanded.roofIds);
+        setSelectedExtrudedSolidIds([]);
+        setSelectedContextObjectIds([]);
+        setSelectedSectionLineId(null);
+        setSelectedGroupIds(groupIds);
+        return;
+      }
+    }
+    setSelectedGroupIds([]);
     // Ohne Shift: ersetzen. Öffnung hat Vorrang (ihr Symbol liegt in der Lücke),
     // dann Wand, dann 2D-Element, dann Decke; sonst leeren. Die Kanäle schließen
     // sich gegenseitig aus.
@@ -329,11 +387,40 @@ export function useMouseSelectionHandlers(opts: {
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
   // (nach CAD-Konvention von PlanView bestimmt). Ersetzt die bisherige Auswahl.
   const onPlanMarquee = (sel: MarqueeSelection) => {
-    setSelectedWallIds(sel.wallIds);
-    setSelectedDrawingIds(sel.drawingIds ?? []);
-    setSelectedCeilingIds(sel.ceilingIds ?? []);
-    setSelectedStairIds(sel.stairIds ?? []);
-    setSelectedRoomIds(sel.roomIds ?? []);
+    const raw: GroupMembership = {
+      wallIds: sel.wallIds,
+      drawingIds: sel.drawingIds ?? [],
+      ceilingIds: sel.ceilingIds ?? [],
+      roomIds: sel.roomIds ?? [],
+      stairIds: sel.stairIds ?? [],
+      columnIds: [],
+      roofIds: [],
+      openingIds: [],
+    };
+    // Gruppen-Isolation: ausserhalb der aktiven Gruppe getroffene Elemente
+    // sind gesperrt (werden ignoriert), wie beim Einzelklick.
+    const filtered: GroupMembership =
+      groupPath.length === 0
+        ? raw
+        : {
+            wallIds: raw.wallIds.filter((id) => isInsideActiveGroup(project, "wallIds", id, groupPath)),
+            drawingIds: raw.drawingIds.filter((id) => isInsideActiveGroup(project, "drawingIds", id, groupPath)),
+            ceilingIds: raw.ceilingIds.filter((id) => isInsideActiveGroup(project, "ceilingIds", id, groupPath)),
+            roomIds: raw.roomIds.filter((id) => isInsideActiveGroup(project, "roomIds", id, groupPath)),
+            stairIds: raw.stairIds.filter((id) => isInsideActiveGroup(project, "stairIds", id, groupPath)),
+            columnIds: [],
+            roofIds: [],
+            openingIds: [],
+          };
+    // Gruppen-Erweiterung: jedes getroffene Element, das zu einer sichtbaren
+    // Gruppe gehört, zieht deren ganze (transitive) Mitgliedschaft nach.
+    const { expanded, groupIds } = expandToGroups(project, filtered, groupPath);
+    setSelectedWallIds(expanded.wallIds);
+    setSelectedDrawingIds(expanded.drawingIds);
+    setSelectedCeilingIds(expanded.ceilingIds);
+    setSelectedStairIds(expanded.stairIds);
+    setSelectedRoomIds(expanded.roomIds);
+    setSelectedGroupIds(groupIds);
     // Öffnungen/Extrusionen/Stützen/Dächer/Kontext-Objekte sind (noch) nicht
     // Teil des Marquee (Nutzer-Report betraf nur Decken/Räume/Treppen; Stütze/
     // Dach liessen sich mit derselben `marqueeHitByField`-Mechanik ergänzen,
