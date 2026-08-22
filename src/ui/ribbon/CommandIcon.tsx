@@ -36,6 +36,15 @@ export function CommandIcon({ name }: { name: string }) {
           <rect x="5.5" y="5.5" width="8" height="8" />
         </svg>
       );
+    case "array":
+      // Drei Kopien eines Quadrats entlang eines Richtungspfeils (Feld).
+      return (
+        <svg {...common}>
+          <rect x="1.5" y="10.5" width="3.6" height="3.6" />
+          <rect x="6.2" y="6" width="3.6" height="3.6" strokeDasharray="1.6 1.2" />
+          <rect x="10.9" y="1.5" width="3.6" height="3.6" strokeDasharray="1.6 1.2" />
+        </svg>
+      );
     case "measure":
       // Lineal/Massband: Strecke mit Endmarken + kleiner Skala.
       return (

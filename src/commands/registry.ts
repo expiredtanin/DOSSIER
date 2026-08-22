@@ -28,6 +28,7 @@ import { moveCommand } from "./cmds/move";
 import { mirrorCommand } from "./cmds/mirror";
 import { joinCommand } from "./cmds/join";
 import { copyCommand } from "./cmds/copy";
+import { arrayCommand } from "./cmds/array";
 import { offsetCommand } from "./cmds/offset";
 import { extrudeCommand } from "./cmds/extrude";
 import { trimCommand } from "./cmds/trim";
@@ -69,6 +70,7 @@ export const COMMANDS: Record<string, Command> = {
   mirror: mirrorCommand,
   join: joinCommand,
   copy: copyCommand,
+  array: arrayCommand,
   offset: offsetCommand,
   extrude: extrudeCommand,
   trim: trimCommand,
@@ -130,6 +132,8 @@ export const ALIASES: Record<string, string> = {
   j: "join",
   verbinden: "join",
   cp: "copy",
+  ar: "array",
+  feld: "array",
   o: "offset",
   ex: "extrude",
   tr: "trim",
