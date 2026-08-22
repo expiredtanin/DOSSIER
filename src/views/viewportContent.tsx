@@ -697,7 +697,7 @@ function LevelPlanView({
       });
 
   return (
-    <section className={groupPath.length > 0 ? "pane pane-isolated" : "pane"}>
+    <section className="pane">
       <div className="pane-title">
         {isDrawing
           ? t("content.drawingTitle", { name: level.name })
@@ -760,6 +760,9 @@ function LevelPlanView({
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
       />
+      {/* NACH PlanView gerendert (nicht als box-shadow auf .pane), damit der
+          Isolations-Rahmen über der PlanView-SVG sichtbar bleibt. */}
+      {groupPath.length > 0 && <div className="pane-isolation-frame" />}
       <div className="plan-legend">{caption}</div>
     </section>
   );
@@ -950,7 +953,7 @@ function SectionPlanView({
   }
 
   return (
-    <section className={groupPath.length > 0 ? "pane pane-isolated" : "pane"}>
+    <section className="pane">
       <div className="pane-title">
         {t("content.sectionTitle", { name: level.name, kind: kindLabel })}
       </div>
@@ -1010,6 +1013,9 @@ function SectionPlanView({
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
       />
+      {/* NACH PlanView gerendert (nicht als box-shadow auf .pane), damit der
+          Isolations-Rahmen über der PlanView-SVG sichtbar bleibt. */}
+      {groupPath.length > 0 && <div className="pane-isolation-frame" />}
       <div className="plan-legend">{t("section.legend", { kind: kindLabel })}</div>
     </section>
   );

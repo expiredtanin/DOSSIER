@@ -2139,10 +2139,16 @@ body {
 /* Gruppen-Isolation (Vectorworks „Gruppe betreten"): halbtransparenter
    Orange-Rahmen (Band) am Rand der ganzen Ansicht, solange eine Gruppe
    betreten ist — dieselbe visuelle Sprache wie Vectorworks' "Ansichtsbereich"-
-   Rahmen (Screenshot-Referenz, 2026-08-22). `box-shadow: inset` statt
-   `outline`, weil es eine feste rgba-Farbe trägt (kein CSS-Var-Farbmix nötig)
-   und als Band nach INNEN geht, ohne Layout/Grösse der Ansicht zu ändern. */
-.pane-isolated {
+   Rahmen (Screenshot-Referenz, 2026-08-22). EIGENES Overlay-Element, NACH
+   PlanView im DOM gerendert (nicht `box-shadow` auf `.pane` selbst — das läge
+   HINTER der eigenen Kind-SVG von PlanView und wäre unsichtbar, s. Nutzer-
+   Report "ich seh es nicht"). `pointer-events: none`, damit Klicks/Griffe im
+   Plan weiterhin durchgehen. */
+.pane-isolation-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
   box-shadow: inset 0 0 0 8px rgba(230, 126, 34, 0.35);
 }
 
