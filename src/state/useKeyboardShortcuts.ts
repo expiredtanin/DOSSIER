@@ -502,6 +502,7 @@ export function useTransformShortcuts(
   ) => void,
   selectedWallIds: string[],
   selectedDrawingId: string | null,
+  selectedDrawingIds: string[],
   selectedExtrudedSolidId: string | null,
   selectedColumnId: string | null,
   engine: CommandEngine,
@@ -543,6 +544,7 @@ export function useTransformShortcuts(
       const hasSel =
         selectedWallIds.length > 0 ||
         !!selectedDrawingId ||
+        selectedDrawingIds.length > 0 ||
         !!selectedExtrudedSolidId ||
         !!selectedColumnId;
       if (!hasSel) return;
@@ -567,6 +569,7 @@ export function useTransformShortcuts(
     activeTransform,
     selectedWallIds,
     selectedDrawingId,
+    selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
     engine,

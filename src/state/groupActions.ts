@@ -227,6 +227,47 @@ export function applyGroupDimming(
   });
 }
 
+/** IDs, die in `after` neu hinzugekommen sind (in `before` noch nicht vorhanden). */
+function newIds(before: { id: string }[], after: { id: string }[]): string[] {
+  const beforeIds = new Set(before.map((x) => x.id));
+  return after.filter((x) => !beforeIds.has(x.id)).map((x) => x.id);
+}
+
+/**
+ * Zeichnet man WÄHREND man eine Gruppe betreten hat (Isolation) ein neues
+ * Element, wird es automatisch Mitglied dieser (innersten) Gruppe — man
+ * zeichnet ja SICHTLICH „in" ihr (Nutzer-Wunsch, Vectorworks-Verhalten).
+ * Vergleicht `before`/`after` je Elementart auf neu hinzugekommene IDs (Diff
+ * über die commit-Mutation) und hängt sie an die aktive Gruppe an. `before`
+ * === `after` (keine Änderung) oder `groupPath` leer → `after` unverändert.
+ */
+export function addNewElementsToActiveGroup(
+  before: Project,
+  after: Project,
+  groupPath: string[],
+): Project {
+  if (groupPath.length === 0 || before === after) return after;
+  const activeId = groupPath[groupPath.length - 1];
+  const g = (after.groups ?? []).find((x) => x.id === activeId);
+  if (!g) return after;
+  const added: GroupMembership = {
+    wallIds: newIds(before.walls, after.walls),
+    drawingIds: newIds(before.drawings2d, after.drawings2d),
+    ceilingIds: newIds(before.ceilings ?? [], after.ceilings ?? []),
+    roomIds: newIds(before.rooms ?? [], after.rooms ?? []),
+    stairIds: newIds(before.stairs ?? [], after.stairs ?? []),
+    columnIds: newIds(before.columns ?? [], after.columns ?? []),
+    roofIds: newIds(before.roofs ?? [], after.roofs ?? []),
+    openingIds: newIds(before.openings ?? [], after.openings ?? []),
+  };
+  if (KEYS.every((k) => added[k].length === 0)) return after;
+  const merged: Group = { ...g, ...mergeMembership(g, added) };
+  return {
+    ...after,
+    groups: (after.groups ?? []).map((x) => (x.id === activeId ? merged : x)),
+  };
+}
+
 /**
  * Erzeugt eine neue Gruppe aus einer Mengen-Auswahl (+ optional bereits
  * gewählte Gruppen, die dabei als Untergruppen verschachtelt werden — „zwei

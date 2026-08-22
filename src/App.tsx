@@ -115,7 +115,7 @@ import { useGripEditing } from "./state/useGripEditing";
 import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
-import { containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
+import { addNewElementsToActiveGroup, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
 import type { GroupMembership } from "./state/groupActions";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useProjectActions } from "./state/useProjectActions";
@@ -621,6 +621,7 @@ export default function App() {
   const transformSel: TransformSelection = {
     wallIds: selectedWallIds,
     drawingId: selectedDrawingId,
+    drawingIds: selectedDrawingIds,
     extrudedSolidId: selectedExtrudedSolidId,
     columnId: selectedColumnId,
   };
@@ -745,6 +746,7 @@ export default function App() {
     selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
+    groupPath,
     setProject,
     setDraft,
   });
@@ -761,6 +763,7 @@ export default function App() {
     selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
+    groupPath,
     setProject,
     setDraft,
   };
@@ -808,7 +811,15 @@ export default function App() {
       },
       pxPerMeter: () => planViewRef.current?.pxPerMeter() ?? 90,
       setDraft: (d) => cmdLatest.current.setDraft(d),
-      commit: (mutate) => cmdLatest.current.setProject(mutate),
+      // Zeichnet man WÄHREND man eine Gruppe betreten hat (Isolation), wird
+      // das neue Element automatisch Mitglied dieser Gruppe (Nutzer-Wunsch:
+      // „wenn man etwas neu zeichnet ... zeichnet man in der Gruppe") — s.
+      // state/groupActions.ts::addNewElementsToActiveGroup (Diff vor/nach
+      // Commit über alle Elementarten, additiv zur eigentlichen Mutation).
+      commit: (mutate) =>
+        cmdLatest.current.setProject((p) =>
+          addNewElementsToActiveGroup(p, mutate(p), cmdLatest.current.groupPath),
+        ),
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
       // (kein Lookup nötig — der Commit hat es bereits angehängt, s. engine.ts
@@ -1270,6 +1281,7 @@ export default function App() {
     setActiveTransform,
     selectedWallIds,
     selectedDrawingId,
+    selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
     engine,

@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  addNewElementsToActiveGroup,
   applyGroupDimming,
   containingGroupId,
   expandToGroups,
@@ -182,6 +183,51 @@ describe("applyGroupDimming", () => {
   it("Primitive ohne jede ID (Raster o. Ä.) werden nie gedimmt", () => {
     const out = applyGroupDimming([noOwner], p, ["g1"]);
     expect(out[0].greyed).toBeUndefined();
+  });
+});
+
+describe("addNewElementsToActiveGroup", () => {
+  const g1: Group = { id: "g1", wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
+  const line = (id: string) =>
+    ({ id, type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } } }) as Project["drawings2d"][number];
+
+  it("neu gezeichnetes Element wird Mitglied der aktiven (innersten) Gruppe", () => {
+    const before = project([g1]);
+    const after: Project = { ...before, drawings2d: [line("d1")] };
+    const result = addNewElementsToActiveGroup(before, after, ["g1"]);
+    const g = result.groups!.find((x) => x.id === "g1")!;
+    expect(g.drawingIds).toEqual(["d1"]);
+    expect(g.wallIds).toEqual(["w1"]); // bestehende Mitgliedschaft bleibt
+  });
+
+  it("ohne aktive Gruppe (groupPath leer) bleibt das Projekt unverändert", () => {
+    const before = project([g1]);
+    const after: Project = { ...before, drawings2d: [line("d1")] };
+    const result = addNewElementsToActiveGroup(before, after, []);
+    expect(result).toBe(after); // unverändert (Referenzgleichheit)
+  });
+
+  it("keine Änderung (before === after) ist ein No-op", () => {
+    const p = project([g1]);
+    expect(addNewElementsToActiveGroup(p, p, ["g1"])).toBe(p);
+  });
+
+  it("mehrere neue Elemente auf einmal (z. B. Feld/Array) werden alle Mitglied", () => {
+    const before = project([g1]);
+    const after: Project = { ...before, drawings2d: [line("d1"), line("d2"), line("d3")] };
+    const result = addNewElementsToActiveGroup(before, after, ["g1"]);
+    const g = result.groups!.find((x) => x.id === "g1")!;
+    expect(g.drawingIds.sort()).toEqual(["d1", "d2", "d3"]);
+  });
+
+  it("verschachtelt: neues Element landet in der INNERSTEN (aktiven) Gruppe, nicht der äusseren", () => {
+    const inner: Group = { id: "g1", wallIds: [], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
+    const outer: Group = { id: "g2", wallIds: [], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: ["g1"] };
+    const before = project([inner, outer]);
+    const after: Project = { ...before, drawings2d: [line("d1")] };
+    const result = addNewElementsToActiveGroup(before, after, ["g2", "g1"]);
+    expect(result.groups!.find((x) => x.id === "g1")!.drawingIds).toEqual(["d1"]);
+    expect(result.groups!.find((x) => x.id === "g2")!.drawingIds).toEqual([]);
   });
 });
 

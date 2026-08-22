@@ -30,11 +30,25 @@ export type CopyMode = "move" | "copy" | "array" | "distribute"; // U / I / O / 
 /** Welche Auswahl transformiert wird. */
 export interface TransformSelection {
   wallIds: string[];
+  /**
+   * Einzeln gewähltes 2D-Element (Legacy-Feld, s. `CommandSelection.drawingId`).
+   * `drawingIds` (Mehrfachauswahl) wird bevorzugt ausgewertet; beide zusammen
+   * ergeben die MENGE der zu transformierenden 2D-Elemente (Union, dedupliziert).
+   */
   drawingId: string | null;
+  /** ALLE gewählten 2D-Elemente (Mehrfachauswahl) — s. `CommandSelection.drawingIds`. */
+  drawingIds?: string[];
   /** Gewählter extrudierter Körper (truck-Integration); nur move.ts setzt ihn. */
   extrudedSolidId?: string | null;
   /** Gewählte Stütze (Tragwerk); von move/copy/mirror gesetzt. */
   columnId?: string | null;
+}
+
+/** Vereinigt `drawingId`/`drawingIds` zu einer eindeutigen ID-Menge (dedupliziert). */
+function drawingIdSet(sel: TransformSelection): Set<string> {
+  const ids = new Set(sel.drawingIds ?? []);
+  if (sel.drawingId) ids.add(sel.drawingId);
+  return ids;
 }
 
 /** Wie viele Klickpunkte die Operation braucht (Drehen = 3, sonst 2). */
@@ -116,10 +130,8 @@ function gatherItems(project: Project, sel: TransformSelection): AnyItem[] {
   const items: AnyItem[] = [];
   const ids = new Set(sel.wallIds);
   for (const w of project.walls) if (ids.has(w.id)) items.push({ kind: "wall", wall: w });
-  if (sel.drawingId) {
-    const d = project.drawings2d.find((x) => x.id === sel.drawingId);
-    if (d) items.push({ kind: "drawing", drawing: d });
-  }
+  const drawIds = drawingIdSet(sel);
+  for (const d of project.drawings2d) if (drawIds.has(d.id)) items.push({ kind: "drawing", drawing: d });
   if (sel.extrudedSolidId) {
     const s = (project.extrudedSolids ?? []).find((x) => x.id === sel.extrudedSolidId);
     if (s) items.push({ kind: "extrudedSolid", solid: s });
@@ -292,9 +304,10 @@ export function commitTransform(
   if (movesOriginal(mode)) {
     const fn = transformFn(op, pts, 1);
     walls = walls.map((w) => (wallIds.has(w.id) ? { ...w, start: fn(w.start), end: fn(w.end) } : w));
-    if (sel.drawingId) {
+    const moveDrawIds = drawingIdSet(sel);
+    if (moveDrawIds.size > 0) {
       drawings2d = drawings2d.map((d) =>
-        d.id === sel.drawingId ? { ...d, geom: mvGeom(d.geom, fn) } : d,
+        moveDrawIds.has(d.id) ? { ...d, geom: mvGeom(d.geom, fn) } : d,
       );
     }
     if (sel.extrudedSolidId) {
