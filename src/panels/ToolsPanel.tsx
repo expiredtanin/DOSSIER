@@ -168,6 +168,17 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <rect x="7.2" y="12.2" width="1.6" height="1.6" fill="currentColor" stroke="none" />
         </svg>
       );
+    case "dimension":
+      // Masslinie mit Massstrichen (Diagonalstriche) an beiden Enden.
+      return (
+        <svg {...common}>
+          <line x1="2.5" y1="4" x2="2.5" y2="11" strokeWidth="0.9" />
+          <line x1="13.5" y1="4" x2="13.5" y2="11" strokeWidth="0.9" />
+          <line x1="2.5" y1="8" x2="13.5" y2="8" />
+          <line x1="1.7" y1="6.6" x2="3.3" y2="9.4" strokeWidth="1.6" />
+          <line x1="12.7" y1="6.6" x2="14.3" y2="9.4" strokeWidth="1.6" />
+        </svg>
+      );
     case "text":
       // Serifen-„A" als Text-Symbol.
       return (
@@ -213,6 +224,7 @@ const TOOLS_2D: ToolId[] = [
   "ellipse",
   "spline",
   "bezier",
+  "dimension",
   "text",
   "textbox",
   "image",

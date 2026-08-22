@@ -1524,6 +1524,16 @@ export type Drawing2DGeom =
    * schliesst den Ring (letzter Wegpunkt → erster).
    */
   | { shape: "spline"; pts: Vec2[]; closed: boolean }
+  /**
+   * Masslinie (lineare Bemassung, SIA 400 B.5.3): misst den Abstand `a`↔`b`.
+   * `offset` ist der VORZEICHENBEHAFTETE Normalabstand (Modell-Meter, links
+   * von a→b positiv), in dem die eigentliche Masslinie parallel zu a-b liegt
+   * — Masshilfslinien laufen von a/b bis zu dieser Linie. Die Masszahl wird
+   * beim Rendern aus `dist(a,b)` abgeleitet (nicht gespeichert), bleibt also
+   * beim Verschieben der Griffe automatisch korrekt. Rein 2D (kein Bezug auf
+   * andere Elemente — Assoziativität nur über die eigenen Endpunkte).
+   */
+  | { shape: "dimension"; a: Vec2; b: Vec2; offset: number }
   | {
       shape: "text";
       at: Vec2;

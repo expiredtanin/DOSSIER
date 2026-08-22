@@ -1520,6 +1520,15 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
   }
   // Bezier/Spline: alle Kontroll-/Wegpunkte als Griffe (wie polyline).
   if (g.shape === "bezier" || g.shape === "spline") return [...g.pts];
+  // Bemassung: Griff 0/1 = die beiden gemessenen Punkte (a/b); Griff 2 sitzt
+  // AUF der Masslinie (Mitte) — ihn zu ziehen ändert nur `offset` (s. moveGrip).
+  if (g.shape === "dimension") {
+    const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = (-dy / len) * g.offset, ny = (dx / len) * g.offset;
+    const mid: Vec2 = { x: (g.a.x + g.b.x) / 2 + nx, y: (g.a.y + g.b.y) / 2 + ny };
+    return [g.a, g.b, mid];
+  }
   // Text: EIN Griff am Ankerpunkt (zum Verschieben; siehe moveGrip).
   if (g.shape === "text") return [g.at];
   return [];
@@ -1580,6 +1589,18 @@ function moveGrip(
         if (g.shape === "polyline" || g.shape === "bezier" || g.shape === "spline") {
           const pts = g.pts.map((p, i) => (i === index ? pt : p));
           return { ...d, geom: { ...g, pts } };
+        }
+        // Bemassung: Griff 0/1 verschiebt den gemessenen Punkt a/b (Masszahl
+        // folgt automatisch, s. Rendering); Griff 2 (auf der Masslinie) ändert
+        // nur `offset` — Normalabstand von `pt` zur (unveränderten) Strecke a-b.
+        if (g.shape === "dimension") {
+          if (index === 0) return { ...d, geom: { ...g, a: pt } };
+          if (index === 1) return { ...d, geom: { ...g, b: pt } };
+          const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const nx = -dy / len, ny = dx / len;
+          const offset = (pt.x - g.a.x) * nx + (pt.y - g.a.y) * ny;
+          return { ...d, geom: { ...g, offset } };
         }
         if (g.shape === "rect" || g.shape === "image") {
           const corners = [
@@ -1674,6 +1695,8 @@ function moveElementBy(
           case "bezier":
           case "spline":
             return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
+          case "dimension":
+            return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
           case "text":
             return { ...d, geom: { ...g, at: mv(g.at) } };
           default:

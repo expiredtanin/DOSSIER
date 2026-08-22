@@ -24,6 +24,7 @@ export type ToolId =
   | "ellipse"
   | "spline"
   | "bezier"
+  | "dimension"
   | "text"
   | "textbox"
   | "image";

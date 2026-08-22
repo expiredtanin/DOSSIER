@@ -593,6 +593,19 @@ const bezierTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Bemassung: Platzhalter-Werkzeug, gekoppelt an den `dimension`-Befehl (zwei
+// Punkte + Lage der Masslinie). Nicht floorOnly.
+const dimensionTool: Tool = {
+  id: "dimension",
+  labelKey: "tool.dimension",
+  hintKey: () => "tool.dimension.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // Text: Platzhalter-Werkzeug, gekoppelt an den `text`-Befehl (Ankerpunkt →
 // getippte Zeile). Wie Kreis/Bogen nicht floorOnly (freies 2D-Element).
 const textTool: Tool = {
@@ -653,6 +666,7 @@ const TOOLS: Record<ToolId, Tool> = {
   ellipse: ellipseTool,
   spline: splineTool,
   bezier: bezierTool,
+  dimension: dimensionTool,
   text: textTool,
   textbox: textboxTool,
   image: imageTool,

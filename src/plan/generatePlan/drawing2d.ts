@@ -15,6 +15,21 @@ import {
 } from "./shared";
 import { ellipsePts, sampleBezierChain, sampleCatmullRom } from "../../tools/curves";
 
+// ── Bemassung (SIA 400 B.5.3) ────────────────────────────────────────────────
+// Modell-Meter-Konstanten für rein grafische (nicht reale) Bemassungs-Details
+// — analog zu DEFAULT_TEXT_HEIGHT_M (text.ts): fest gewählt, damit sie bei der
+// üblichen Plan-Massstäben (1:50…1:100) lesbar wirken, nicht dynamisch an den
+// Massstab gekoppelt (wie auch die übrige Textgrösse im Plan).
+const DIM_GAP_M = 0.05; // Abstand Masshilfslinie → bemessener Punkt
+const DIM_OVERSHOOT_M = 0.05; // Überstand der Masshilfslinie über die Masslinie hinaus
+const DIM_TICK_LEN_M = 0.15; // Länge des Massstrichs (Diagonale an den Masslinien-Enden)
+const DIM_TEXT_HEIGHT_M = 0.2; // Schrifthöhe der Masszahl
+
+/** Formatiert eine Länge (Meter) als Masszahl: 2 Dezimalstellen, Komma (SIA 400 B.5.2, „2,75"). */
+function formatDimLabel(m: number): string {
+  return m.toFixed(2).replace(".", ",");
+}
+
 export function addDrawing2D(
   out: Primitive[],
   project: Project,
@@ -155,6 +170,65 @@ export function addDrawing2D(
       if (g.closed && g.pts.length > 2) fillPoly(pts);
       for (let i = 0; i < pts.length - 1; i++) seg(pts[i], pts[i + 1]);
       if (g.closed && g.pts.length > 2) seg(pts[pts.length - 1], pts[0]);
+      break;
+    }
+    case "dimension": {
+      // SIA 400 B.5.3: Masshilfslinien + Masslinie in der dünnsten Linie;
+      // Massbegrenzungslinien (Massstriche) doppelt so dick; Masszahl aus
+      // dist(a,b) — nicht gespeichert, folgt Griff-Änderungen automatisch.
+      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+      const lineLen = Math.hypot(dx, dy);
+      if (lineLen < 1e-6) break;
+      const ux = dx / lineLen, uy = dy / lineLen; // Einheitsrichtung a→b
+      const nx = -uy, ny = ux; // Links-Normale (Einheit) — Richtung des Offsets
+      const off = g.offset;
+      const sign = off >= 0 ? 1 : -1;
+      const dimA: Vec2 = { x: g.a.x + nx * off, y: g.a.y + ny * off };
+      const dimB: Vec2 = { x: g.b.x + nx * off, y: g.b.y + ny * off };
+      const extLine = (from: Vec2, to: Vec2) =>
+        out.push({ kind: "line", a: from, b: to, cls: "draw2d", weightMm, dash, color, greyed, drawingId: d.id });
+      extLine(
+        { x: g.a.x + nx * DIM_GAP_M * sign, y: g.a.y + ny * DIM_GAP_M * sign },
+        { x: dimA.x + nx * DIM_OVERSHOOT_M * sign, y: dimA.y + ny * DIM_OVERSHOOT_M * sign },
+      );
+      extLine(
+        { x: g.b.x + nx * DIM_GAP_M * sign, y: g.b.y + ny * DIM_GAP_M * sign },
+        { x: dimB.x + nx * DIM_OVERSHOOT_M * sign, y: dimB.y + ny * DIM_OVERSHOOT_M * sign },
+      );
+      extLine(dimA, dimB);
+      // Massstriche: 45°-Diagonale (Winkelhalbierende von Richtung/Normale),
+      // an beiden Enden PARALLEL (nicht gespiegelt) — wie in SIA 400 Figur 13.
+      const tx = (ux + nx) / Math.SQRT2, ty = (uy + ny) / Math.SQRT2;
+      const half = DIM_TICK_LEN_M / 2;
+      const tick = (pt: Vec2) =>
+        out.push({
+          kind: "line",
+          a: { x: pt.x - tx * half, y: pt.y - ty * half },
+          b: { x: pt.x + tx * half, y: pt.y + ty * half },
+          cls: "draw2d",
+          weightMm: weightMm * 2,
+          dash: null,
+          color,
+          greyed,
+          drawingId: d.id,
+        });
+      tick(dimA);
+      tick(dimB);
+      // Masszahl: Mitte der Masslinie, leicht abgesetzt, nie kopfüber lesbar.
+      let angle = Math.atan2(dy, dx);
+      if (Math.cos(angle) < 0) angle += Math.PI;
+      const upx = -Math.sin(angle), upy = Math.cos(angle); // Links-Normale der ENDGÜLTIGEN Richtung
+      const mid: Vec2 = { x: (dimA.x + dimB.x) / 2, y: (dimA.y + dimB.y) / 2 };
+      out.push({
+        kind: "drawingText",
+        at: { x: mid.x + upx * DIM_TEXT_HEIGHT_M * 0.6, y: mid.y + upy * DIM_TEXT_HEIGHT_M * 0.6 },
+        text: formatDimLabel(lineLen),
+        heightM: DIM_TEXT_HEIGHT_M,
+        angle,
+        color,
+        greyed,
+        drawingId: d.id,
+      });
       break;
     }
     case "text":

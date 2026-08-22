@@ -121,3 +121,56 @@ describe("addDrawing2D — spline", () => {
     expect(last.b).toEqual(lines[0].a);
   });
 });
+
+describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
+  it("gibt 2 Masshilfslinien + 1 Masslinie (dünn) + 2 Massstriche (doppelte Stärke) + 1 Masszahl-Text aus", () => {
+    const d: Drawing2D = {
+      id: "dim1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "dimension", a: { x: 0, y: 0 }, b: { x: 4, y: 0 }, offset: 1 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const lines = out.filter((p): p is Extract<Primitive, { kind: "line" }> => p.kind === "line");
+    const texts = out.filter((p) => p.kind === "drawingText");
+    expect(lines.length).toBe(5); // 2 Masshilfslinien + 1 Masslinie + 2 Massstriche
+    expect(texts.length).toBe(1);
+    const weights = lines.map((l) => l.weightMm).sort((a, b) => a - b);
+    const thin = weights[0];
+    const thick = weights[weights.length - 1];
+    // 3× dünn (Masshilfslinien + Masslinie), 2× doppelt so dick (Massstriche).
+    expect(weights.filter((w) => w === thin).length).toBe(3);
+    expect(weights.filter((w) => w === thick).length).toBe(2);
+    expect(thick).toBeCloseTo(thin * 2, 6);
+  });
+
+  it("Masszahl entspricht dist(a,b) mit Komma-Dezimaltrennzeichen (SIA 400 B.5.2)", () => {
+    const d: Drawing2D = {
+      id: "dim2",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "dimension", a: { x: 0, y: 0 }, b: { x: 3, y: 4 }, offset: 0.5 }, // 3-4-5-Dreieck → 5m
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const text = out.find((p) => p.kind === "drawingText");
+    expect(text).toBeDefined();
+    if (text?.kind === "drawingText") expect(text.text).toBe("5,00");
+  });
+
+  it("entartete Strecke (a===b) erzeugt keine Primitive", () => {
+    const d: Drawing2D = {
+      id: "dim3",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "dimension", a: { x: 2, y: 2 }, b: { x: 2, y: 2 }, offset: 1 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(0);
+  });
+});

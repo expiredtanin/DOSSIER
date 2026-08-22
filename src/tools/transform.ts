@@ -185,6 +185,8 @@ const mvGeom = (geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom => {
       return { ...geom, pts: geom.pts.map(fn) };
     case "spline":
       return { ...geom, pts: geom.pts.map(fn) };
+    case "dimension":
+      return { ...geom, a: fn(geom.a), b: fn(geom.b) };
     case "text":
       return { ...geom, at: fn(geom.at) };
     case "image": {

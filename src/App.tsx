@@ -222,6 +222,7 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   ellipse: "ellipse",
   spline: "spline",
   bezier: "bezier",
+  dimension: "dimension",
   text: "text",
   textbox: "textbox",
 };

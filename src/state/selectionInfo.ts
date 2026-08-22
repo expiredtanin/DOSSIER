@@ -544,6 +544,16 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
     case "spline":
       for (const p of g.pts) acc(p.x, p.y);
       break;
+    case "dimension": {
+      acc(g.a.x, g.a.y);
+      acc(g.b.x, g.b.y);
+      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = (-dy / len) * g.offset, ny = (dx / len) * g.offset;
+      acc(g.a.x + nx, g.a.y + ny);
+      acc(g.b.x + nx, g.b.y + ny);
+      break;
+    }
     case "text":
       acc(g.at.x, g.at.y);
       break;

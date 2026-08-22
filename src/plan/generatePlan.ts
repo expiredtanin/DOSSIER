@@ -729,6 +729,9 @@ function computeBounds(
       acc({ x: g.center.x + g.rx, y: g.center.y + g.ry });
     } else if (g.shape === "bezier" || g.shape === "spline") {
       g.pts.forEach(acc);
+    } else if (g.shape === "dimension") {
+      acc(g.a);
+      acc(g.b);
     } else if (g.shape === "text") acc(g.at);
     else if (g.shape === "image") { acc(g.min); acc(g.max); }
   }
