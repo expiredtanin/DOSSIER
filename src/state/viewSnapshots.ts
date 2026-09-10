@@ -87,7 +87,7 @@ export function readViewSnapshot(snap: ViewSnapshot): ViewSnapshotState {
 }
 
 /** Deep-Equal zweier `Record<string, boolean>`-Maps: gleiche Keys UND Werte. */
-function boolMapEqual(
+export function boolMapEqual(
   a: Record<string, boolean>,
   b: Record<string, boolean>,
 ): boolean {
@@ -98,6 +98,25 @@ function boolMapEqual(
     if (a[k] !== b[k]) return false;
   }
   return true;
+}
+
+/**
+ * Sucht unter den gespeicherten Kombinationen (`names` + `load`) diejenige,
+ * deren Map EXAKT `target` entspricht — liefert den Namen oder `null`. Basis
+ * der Footer-Anzeige im Ausschnitte-Panel UND der Auto-Benennung neuer
+ * Ausschnitt-Tabs (Nutzer-Wunsch: Tab heisst wie die aktive Zeichnungs-
+ * kombination, falls eine exakt passt).
+ */
+export function matchingComboName(
+  names: string[],
+  load: (name: string) => Record<string, boolean> | null,
+  target: Record<string, boolean>,
+): string | null {
+  for (const name of names) {
+    const map = load(name);
+    if (map && boolMapEqual(map, target)) return name;
+  }
+  return null;
 }
 
 /** Mengengleichheit zweier Id-Listen (Reihenfolge egal, Duplikate ignoriert). */

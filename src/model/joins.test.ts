@@ -186,6 +186,66 @@ describe("computeJoins — Mittelspannen-T-Stoß (Ende trifft Wandseite)", () =>
   });
 });
 
+describe("computeJoins — „+\"-Kreuzung (zwei kollineare Enden kreuzen eine durchlaufende Wand)", () => {
+  it("schneidet BEIDE kollinearen Hälften gegen die jeweils zugewandte (gegenüberliegende) Fläche der durchlaufenden Wand", () => {
+    // Vertikale Durchgangswand V (6,2)→(6,11), T=0.3 → halbe Dicke 0.15. Zwei
+    // kollineare horizontale Hälften HL (0,6)→(6,6) und HR (6,6)→(12,6) treffen
+    // sich exakt AUF DER ACHSE von V (x=6) — eine reale „+"-Kreuzung, wie sie
+    // beim Zeichnen einer durchlaufenden Trennwand entsteht, die von einer
+    // weiteren durchlaufenden Wand gekreuzt wird (Regressionstest für den per
+    // Massstabsprobe gefundenen Bug: vorher blieb V für Fall 1 unsichtbar, weil
+    // sie an diesem Punkt keinen eigenen Endpunkt hat, und Fall 2 prüfte nur
+    // echte EINZEL-Enden — HL/HR bekamen dadurch gar keinen Schnitt).
+    const proj = threeWallProject(
+      wall("V", { x: 6, y: 2 }, { x: 6, y: 11 }),
+      wall("HL", { x: 0, y: 6 }, { x: 6, y: 6 }),
+      wall("HR", { x: 6, y: 6 }, { x: 12, y: 6 }),
+      0.3,
+    );
+    const joins = computeJoins(proj, proj.walls);
+
+    // Die Durchgangswand V bleibt an ihren (freien) Enden unangetastet.
+    expect(joins.get("V")!.startCut).toBeNull();
+    expect(joins.get("V")!.endCut).toBeNull();
+
+    // HL läuft nach −x aus → Schnitt an der LINKEN Fläche von V (x=5.85).
+    const cutL = joins.get("HL")!.endCut;
+    expect(cutL).not.toBeNull();
+    expect(distToLine(cutL!, { x: 5.85, y: 2 })).toBeCloseTo(0, 6);
+    expect(distToLine(cutL!, { x: 5.85, y: 11 })).toBeCloseTo(0, 6);
+
+    // HR läuft nach +x aus → Schnitt an der RECHTEN Fläche von V (x=6.15) —
+    // die GEGENÜBERLIEGENDE Fläche, nicht dieselbe wie HL (der eigentliche Bug:
+    // beide Enden teilen sich denselben Kreuzungspunkt, `perp` allein kann sie
+    // nicht unterscheiden — erst die eigene Auslaufrichtung tut das).
+    const cutR = joins.get("HR")!.startCut;
+    expect(cutR).not.toBeNull();
+    expect(distToLine(cutR!, { x: 6.15, y: 2 })).toBeCloseTo(0, 6);
+    expect(distToLine(cutR!, { x: 6.15, y: 11 })).toBeCloseTo(0, 6);
+    expect(distToLine(cutL!, { x: 6.15, y: 6 })).not.toBeCloseTo(0, 3);
+  });
+
+  it("lässt einen echten Stern-Knoten (4 Wandenden treffen sich, keine läuft durch) weiterhin rechtwinklig", () => {
+    // Vier Wand-STUMMEL enden alle exakt bei (5,5), keiner läuft darüber
+    // hinaus weiter — kein Durchgang erkennbar, bewusst dokumentierte
+    // Restlücke (s. Kommentar in computeJoins).
+    const proj: Project = twoWallProject(
+      wall("A", { x: 0, y: 5 }, { x: 5, y: 5 }),
+      wall("B", { x: 5, y: 5 }, { x: 10, y: 5 }),
+      0.3,
+    );
+    proj.walls.push(
+      wall("C", { x: 5, y: 5 }, { x: 5, y: 0 }),
+      wall("D", { x: 5, y: 5 }, { x: 5, y: 10 }),
+    );
+    const joins = computeJoins(proj, proj.walls);
+    for (const id of ["A", "B", "C", "D"]) {
+      const c = joins.get(id)!;
+      expect(c.startCut ?? c.endCut).toBeNull();
+    }
+  });
+});
+
 describe("resolveJoinPriority — Ordnungslogik zweier Bauteile am Stoss", () => {
   const brick: Component = { id: "brick", name: "Backstein", color: "#8c5544", hatchId: "none", joinPriority: 50 };
   const brick2: Component = { id: "brick", name: "Backstein (Kopie)", color: "#000", hatchId: "none", joinPriority: 50 };

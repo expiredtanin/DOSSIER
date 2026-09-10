@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import type { Project, Wall } from "../model/types";
 import type { RModel3d, RSlab, RWall } from "./toWalls3d";
 import type { SectionPlaneSpec } from "./toSection";
+import type { CategoryDisplayResolver } from "./generatePlan";
 import {
   buildShadows,
   collectElevationFaces,
@@ -91,6 +92,7 @@ describe("toElevation — Painter-Reihenfolge", () => {
       ],
       slabs: [],
       meshes: [],
+      roofLayers: [],
     };
     const faces = collectElevationFaces(model, frame);
     const near = faces.find((f) => f.wallId === "NEAR")!;
@@ -119,7 +121,7 @@ describe("toElevation — Schlagschatten", () => {
     const frame = elevationFrame(PLANE_SOUTH);
     // Wandfläche (Fassade) hinter dem Überstand.
     const wallFaces = collectElevationFaces(
-      { walls: [wall()], slabs: [], meshes: [] },
+      { walls: [wall()], slabs: [], meshes: [], roofLayers: [] },
       frame,
     );
     // Überstand-Slab, der VOR der Wand (näher, z < −0.1) liegt und sie u-seitig
@@ -137,7 +139,7 @@ describe("toElevation — Schlagschatten", () => {
       ceilingId: "R",
     };
     const slabFaces = collectElevationFaces(
-      { walls: [], slabs: [slab], meshes: [] },
+      { walls: [], slabs: [slab], meshes: [], roofLayers: [] },
       frame,
     );
     const shadows = buildShadows(wallFaces, slabFaces);
@@ -147,7 +149,7 @@ describe("toElevation — Schlagschatten", () => {
   it("buildShadows: kein Überlapp → keine Schatten", () => {
     const frame = elevationFrame(PLANE_SOUTH);
     const wallFaces = collectElevationFaces(
-      { walls: [wall({ start: [0, 0], end: [4, 0] })], slabs: [], meshes: [] },
+      { walls: [wall({ start: [0, 0], end: [4, 0] })], slabs: [], meshes: [], roofLayers: [] },
       frame,
     );
     // Slab weit seitlich versetzt (u außerhalb der Wand).
@@ -164,7 +166,7 @@ describe("toElevation — Schlagschatten", () => {
       ceilingId: "R",
     };
     const slabFaces = collectElevationFaces(
-      { walls: [], slabs: [slab], meshes: [] },
+      { walls: [], slabs: [slab], meshes: [], roofLayers: [] },
       frame,
     );
     expect(buildShadows(wallFaces, slabFaces).length).toBe(0);
@@ -190,6 +192,71 @@ describe("toElevation — Fallback", () => {
     const project = elevationProject({ overhang: false });
     const bare = { ...project.drawingLevels[1], linePoints: undefined };
     expect(generateElevationPlan(project, bare)).toBeNull();
+  });
+});
+
+describe("toElevation — Ebenen-Panel-Sichtbarkeit (Nutzer-Report: 'Kategorien sollten auch in der Ansicht wirken')", () => {
+  it("eine kategorie-ausgeblendete Wand verschwindet vollständig aus der Ansicht", () => {
+    const project = elevationProject({ overhang: false });
+    const level = project.drawingLevels[1];
+    const hideAll: CategoryDisplayResolver = () => ({ render: false, greyed: false, locked: false });
+    const plan = generateElevationPlan(project, level, {
+      visibleCodes: new Set(["20"]),
+      categoryDisplay: hideAll,
+    })!;
+    const wallPolys = plan.primitives.filter((p) => p.kind === "polygon" && p.wallId != null);
+    expect(wallPolys.length).toBe(0);
+  });
+
+  it("bleibt sichtbar, wenn die Kategorie erlaubt ist", () => {
+    const project = elevationProject({ overhang: false });
+    const level = project.drawingLevels[1];
+    const showAll: CategoryDisplayResolver = () => ({ render: true, greyed: false, locked: false });
+    const plan = generateElevationPlan(project, level, {
+      visibleCodes: new Set(["20"]),
+      categoryDisplay: showAll,
+    })!;
+    const wallPolys = plan.primitives.filter((p) => p.kind === "polygon" && p.wallId != null);
+    expect(wallPolys.length).toBeGreaterThan(0);
+  });
+
+  it("eine ausgeblendete NÄHERE Wand verdeckt die fernere nicht mehr (fällt auch als Occluder weg)", () => {
+    const project = elevationProject({ overhang: false });
+    const level = project.drawingLevels[1];
+    // NEAR (categoryCode "20") ausblenden — FAR bleibt sichtbar UND wird nicht
+    // mehr von NEAR verdeckt (anders als eine normale Verdeckung).
+    const hideCat: CategoryDisplayResolver = () => ({ render: false, greyed: false, locked: false });
+    const plan = generateElevationPlan(project, level, {
+      visibleCodes: new Set([]),
+      categoryDisplay: hideCat,
+    })!;
+    const near = plan.primitives.find((p) => p.kind === "polygon" && p.wallId === "NEAR");
+    const far = plan.primitives.find((p) => p.kind === "polygon" && p.wallId === "FAR");
+    expect(near).toBeUndefined();
+    expect(far).toBeUndefined(); // beide tragen categoryCode "20", beide ausgeblendet
+  });
+
+  it("ohne visibleCodes/categoryDisplay (Export-/Print-Pfad) bleibt alles sichtbar wie bisher", () => {
+    const project = elevationProject({ overhang: false });
+    const level = project.drawingLevels[1];
+    const plan = generateElevationPlan(project, level)!;
+    const wallPolys = plan.primitives.filter((p) => p.kind === "polygon" && p.wallId != null);
+    expect(wallPolys.length).toBeGreaterThan(0);
+  });
+
+  it("markiert eine sichtbare, aber gedimmte Kategorie als greyed (nicht ausgeblendet)", () => {
+    const project = elevationProject({ overhang: false });
+    const level = project.drawingLevels[1];
+    const greyCat: CategoryDisplayResolver = () => ({ render: true, greyed: true, locked: false });
+    const plan = generateElevationPlan(project, level, {
+      visibleCodes: new Set(["20"]),
+      categoryDisplay: greyCat,
+    })!;
+    const wallPolys = plan.primitives.filter(
+      (p): p is Extract<typeof p, { kind: "polygon" }> => p.kind === "polygon" && p.wallId != null,
+    );
+    expect(wallPolys.length).toBeGreaterThan(0);
+    for (const p of wallPolys) expect(p.greyed).toBe(true);
   });
 });
 
@@ -547,5 +614,74 @@ describe("Dächer in der Ansicht (roofWorldFacesAll)", () => {
       ...roofPolys.flatMap((pr) => (pr as { pts: { y: number }[] }).pts.map((q) => q.y)),
     );
     expect(maxV).toBeCloseTo(ridge, 5);
+  });
+});
+
+describe("toElevation — Tür-Teilverglasung (glazingRatio)", () => {
+  const GLASS_FILL_COLOR = "#9fc2d9";
+  const DOOR_LEAF_FILL_COLOR = "#ede6d9";
+
+  function doorProject(dt: {
+    leafStyle: "glatt" | "kassette" | "glas";
+    glazingRatio?: number;
+  }): Project {
+    const base = elevationProject({ overhang: false });
+    const doorType = {
+      id: "dt",
+      name: "Tür",
+      kind: "dreh" as const,
+      leafCount: 1 as const,
+      leafStyle: dt.leafStyle,
+      glazingRatio: dt.glazingRatio,
+      frameThickness: 0.05,
+    };
+    const opening = {
+      id: "op",
+      type: "opening" as const,
+      hostWallId: "NEAR",
+      categoryCode: "21",
+      kind: "door" as const,
+      typeId: "dt",
+      position: 1.5,
+      width: 1,
+      height: 2.1,
+      sillHeight: 0,
+    };
+    return {
+      ...base,
+      doorTypes: [doorType],
+      openings: [opening],
+    } as unknown as Project;
+  }
+
+  function fillsOf(project: Project): string[] {
+    const plan = generateElevationPlan(project, project.drawingLevels[1])!;
+    return plan.primitives
+      .filter((p) => p.kind === "polygon")
+      .map((p) => (p as { fill: string }).fill);
+  }
+
+  it("glattes Blatt (kein Glas): nur die Blattfarbe, keine Glasfläche", () => {
+    const fills = fillsOf(doorProject({ leafStyle: "glatt" }));
+    expect(fills).toContain(DOOR_LEAF_FILL_COLOR);
+    expect(fills).not.toContain(GLASS_FILL_COLOR);
+  });
+
+  it("Glasblatt, glazingRatio=1 (voll verglast): nur Glasfarbe, keine Blattfläche", () => {
+    const fills = fillsOf(doorProject({ leafStyle: "glas", glazingRatio: 1 }));
+    expect(fills).toContain(GLASS_FILL_COLOR);
+    expect(fills).not.toContain(DOOR_LEAF_FILL_COLOR);
+  });
+
+  it("Glasblatt, glazingRatio=0.5 (teilverglast): BEIDE Farben + Trennlinie", () => {
+    const project = doorProject({ leafStyle: "glas", glazingRatio: 0.5 });
+    const fills = fillsOf(project);
+    expect(fills).toContain(GLASS_FILL_COLOR);
+    expect(fills).toContain(DOOR_LEAF_FILL_COLOR);
+    const plan = generateElevationPlan(project, project.drawingLevels[1])!;
+    const divisionLines = plan.primitives.filter(
+      (p) => p.kind === "line" && (p as { cls?: string }).cls === "elevation-division",
+    );
+    expect(divisionLines.length).toBeGreaterThan(0);
   });
 });

@@ -38,6 +38,48 @@ function line(id: string, x: number): Drawing2D {
   };
 }
 
+describe("commitTransform — mirror kehrt das Bulge-Vorzeichen einer Polylinie um", () => {
+  it("Spiegelung an der X-Achse negiert bulge (sonst wandert der Bogen auf die falsche Seite)", () => {
+    const poly: Drawing2D = {
+      id: "d-poly",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: {
+        shape: "polyline",
+        pts: [{ x: 0, y: 2 }, { x: 4, y: 2 }],
+        closed: false,
+        bulge: [0.6],
+      },
+    };
+    const p = project([poly]);
+    const sel: TransformSelection = { wallIds: [], drawingId: "d-poly", drawingIds: ["d-poly"] };
+    // Spiegelachse = X-Achse (y=0).
+    const next = commitTransform(p, sel, "mirror", [{ x: 0, y: 0 }, { x: 1, y: 0 }], "move", 1);
+    const g = next.drawings2d[0].geom;
+    expect(g.shape).toBe("polyline");
+    if (g.shape === "polyline") {
+      expect(g.pts).toEqual([{ x: 0, y: -2 }, { x: 4, y: -2 }]);
+      expect(g.bulge?.[0]).toBeCloseTo(-0.6, 6);
+    }
+  });
+
+  it("reine Verschiebung (move) lässt bulge unverändert (keine Orientierungsumkehr)", () => {
+    const poly: Drawing2D = {
+      id: "d-poly",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "polyline", pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }], closed: false, bulge: [0.6] },
+    };
+    const p = project([poly]);
+    const sel: TransformSelection = { wallIds: [], drawingId: "d-poly", drawingIds: ["d-poly"] };
+    const next = commitTransform(p, sel, "move", [{ x: 0, y: 0 }, { x: 2, y: 3 }], "move", 1);
+    const g = next.drawings2d[0].geom;
+    if (g.shape === "polyline") expect(g.bulge?.[0]).toBeCloseTo(0.6, 6);
+  });
+});
+
 describe("commitTransform — Mehrfachauswahl (drawingIds)", () => {
   it("move: verschiebt ALLE gewählten 2D-Elemente, nicht nur eines", () => {
     const p = project([line("d1", 0), line("d2", 5), line("d3", 10)]);

@@ -19,6 +19,7 @@ pub mod grid;
 pub mod math;
 pub mod mesh;
 pub(crate) mod openings;
+pub mod roof_cut;
 pub mod section;
 pub mod section_boolean;
 pub mod section_fill;

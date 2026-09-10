@@ -12,13 +12,20 @@
 //
 // Geschlossene Formen (rect, geschlossene polyline) und reine Punktformen
 // (circle/arc/text) sind nicht extend-fähig — ein geschlossener Ring hat kein
-// "Ende". Reine Geometrie liegt im Kernel (`extendSegment`); hier nur
-// Treffer-Bestimmung, Drawing2D ↔ {pts,closed} und der Commit.
+// "Ende". Reine Geometrie liegt im Kernel (`extendSegment`/`extendBulgeSegment`);
+// hier nur Treffer-Bestimmung, Drawing2D ↔ {pts,closed,bulge} und der Commit.
+//
+// Bogen-Enden: ist das äusserste Segment ein echter Bogen (bulge), verlängert
+// `extendBulgeSegment` denselben Kreis (Mittelpunkt/Radius unverändert, nur
+// die Schwenk-Spanne wächst) bis zum nächsten Schneider — Cutter bleiben
+// bewusst GERADE (wie überall bei Trim/Extend, s. `cuttersFor`).
 //
 // Bezeichner englisch, Kommentare/UI deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { bulgeArcPoints, hasRealBulge } from "../../geometry/bulge";
 import {
+  extendBulgeSegment,
   extendSegment,
   pointSegmentDistance,
   polylineEdges,
@@ -37,13 +44,31 @@ const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Kurvenwahl
 interface Curve {
   pts: Vec2[];
   closed: boolean;
+  bulge?: number[];
 }
 
 /** Wandelt eine extend-fähige 2D-Form (offen) in eine Punktliste oder null. */
 function geomToOpenCurve(g: Drawing2DGeom): Curve | null {
   if (g.shape === "line") return { pts: [g.a, g.b], closed: false };
-  if (g.shape === "polyline" && !g.closed) return { pts: g.pts, closed: false };
+  if (g.shape === "polyline" && !g.closed) return { pts: g.pts, closed: false, bulge: g.bulge };
   return null; // rect/geschlossene polyline/circle/arc/text: kein Ende zum Verlängern
+}
+
+/**
+ * Treffer-Kanten einer (evtl. bulge-tragenden) Kurve für Pick/Preview: bei
+ * echten Bogen-Segmenten wird tesselliert (Kreisbogen ≠ Sehne), sonst bleiben
+ * es die rohen Polylinien-Kanten. Wortgetreu wie `offset.ts`/`trim.ts`.
+ */
+function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
+  if (!hasRealBulge(curve.bulge)) return polylineEdges(curve.pts, curve.closed);
+  const n = curve.pts.length;
+  const edgeCount = curve.closed ? n : n - 1;
+  const chain: Vec2[] = [curve.pts[0]];
+  for (let i = 0; i < edgeCount; i++) {
+    const seg = bulgeArcPoints(curve.pts[i], curve.pts[(i + 1) % n], curve.bulge?.[i]);
+    chain.push(...seg.slice(1));
+  }
+  return polylineEdges(chain, false);
 }
 
 /** Alle trim/extend-fähigen Drawing2D der Ebene als Cutter-Kurven (auch geschlossene). */
@@ -54,7 +79,9 @@ function cuttersFor(project: Project, levelId: string, exceptId: string): Curve[
     if (d.levelId !== levelId) continue;
     const g = d.geom;
     if (g.shape === "line") out.push({ pts: [g.a, g.b], closed: false });
-    else if (g.shape === "polyline") out.push({ pts: g.pts, closed: g.closed });
+    // Als Cutter würde eine Bogen-Polylinie fälschlich als Gerade behandelt
+    // (falscher Schnittpunkt) — lieber als Cutter ignorieren als falsch rechnen.
+    else if (g.shape === "polyline" && !hasRealBulge(g.bulge)) out.push({ pts: g.pts, closed: g.closed });
     else if (g.shape === "rect") {
       out.push({
         pts: [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }],
@@ -73,7 +100,7 @@ function pickOpenCurveAt(project: Project, levelId: string, pt: Vec2): Drawing2D
     if (d.levelId !== levelId) continue;
     const curve = geomToOpenCurve(d.geom);
     if (!curve) continue;
-    for (const [a, b] of polylineEdges(curve.pts, curve.closed)) {
+    for (const [a, b] of curveHitEdges(curve)) {
       const dd = pointSegmentDistance(pt, a, b);
       if (dd < bestD) {
         bestD = dd;
@@ -87,21 +114,44 @@ function pickOpenCurveAt(project: Project, levelId: string, pt: Vec2): Drawing2D
 /**
  * Verlängert die Kurve am Ende, das dem Klickpunkt am nächsten liegt, bis zum
  * nächsten Schnitt mit den Cuttern (jenseits dieses Endes). Liefert die neuen
- * Punkte, oder `null`, wenn kein Cutter getroffen wird (kein Effekt).
+ * Punkte (+ ggf. bulge-Array), oder `null`, wenn kein Cutter getroffen wird
+ * (kein Effekt). Ist das betroffene ÄUSSERSTE Segment ein echter Bogen, läuft
+ * die Verlängerung über `extendBulgeSegment` (gleicher Kreis, grössere
+ * Schwenk-Spanne) statt über die Geraden-Variante.
  */
-function extendCurve(curve: Curve, cutters: Curve[], pick: Vec2): Vec2[] | null {
+function extendCurve(curve: Curve, cutters: Curve[], pick: Vec2): Curve | null {
   const n = curve.pts.length;
   if (n < 2) return null;
   const distStart = Math.hypot(pick.x - curve.pts[0].x, pick.y - curve.pts[0].y);
   const distEnd = Math.hypot(pick.x - curve.pts[n - 1].x, pick.y - curve.pts[n - 1].y);
   const extendStart = distStart <= distEnd;
+  const segIdx = extendStart ? 0 : n - 2; // bulge-Index des äussersten Segments
+  const bulgeVal = curve.bulge?.[segIdx] ?? 0;
+
+  if (Math.abs(bulgeVal) > 1e-9) {
+    const a = curve.pts[segIdx];
+    const b = curve.pts[segIdx + 1];
+    const result = extendBulgeSegment(a, b, bulgeVal, extendStart ? "start" : "end", cutters);
+    if (!result) return null;
+    const nextPts = [...curve.pts];
+    const nextBulge = curve.bulge ? [...curve.bulge] : new Array(n - 1).fill(0);
+    if (extendStart) {
+      nextPts[0] = result.point;
+      nextBulge[0] = result.bulge;
+    } else {
+      nextPts[n - 1] = result.point;
+      nextBulge[n - 2] = result.bulge;
+    }
+    return { pts: nextPts, closed: false, bulge: nextBulge };
+  }
+
   const idxA = extendStart ? 1 : n - 2;
   const idxB = extendStart ? 0 : n - 1;
   const result = extendSegment(curve.pts[idxA], curve.pts[idxB], "end", cutters);
   if (!result) return null;
   const next = [...curve.pts];
   next[idxB] = result[1];
-  return next;
+  return { pts: next, closed: false, bulge: curve.bulge };
 }
 
 /** Wendet Extend auf das Projekt an: ersetzt die getroffene Kurve durch ihre verlängerte Form. */
@@ -112,23 +162,35 @@ function applyExtend(p: Project, target: Drawing2D, pick: Vec2): Project {
   const next = extendCurve(curve, cutters, pick);
   if (!next) return p;
   const geom: Drawing2DGeom =
-    next.length === 2 && target.geom.shape === "line"
-      ? { shape: "line", a: next[0], b: next[1] }
-      : { shape: "polyline", pts: next, closed: false };
+    next.pts.length === 2 && target.geom.shape === "line" && !hasRealBulge(next.bulge)
+      ? { shape: "line", a: next.pts[0], b: next.pts[1] }
+      : {
+          shape: "polyline",
+          pts: next.pts,
+          closed: false,
+          ...(hasRealBulge(next.bulge) ? { bulge: next.bulge } : {}),
+        };
   return {
     ...p,
     drawings2d: p.drawings2d.map((d) => (d.id === target.id ? { ...d, geom } : d)),
   };
 }
 
-/** Vorschau-Form der verlängerten Kurve (für den Draft). */
+/** Vorschau-Form der verlängerten Kurve (für den Draft — Bogen tesselliert, s. `curveHitEdges`). */
 function extendPreview(project: Project, target: Drawing2D, pick: Vec2): DraftShape[] {
   const curve = geomToOpenCurve(target.geom);
   if (!curve) return [];
   const cutters = cuttersFor(project, target.levelId, target.id);
   const next = extendCurve(curve, cutters, pick);
   if (!next) return [];
-  return [{ kind: "poly", pts: next, closed: false }];
+  const pts = hasRealBulge(next.bulge)
+    ? curveHitEdges(next).reduce<Vec2[]>((acc, [a, b], i) => {
+        if (i === 0) acc.push(a);
+        acc.push(b);
+        return acc;
+      }, [])
+    : next.pts;
+  return [{ kind: "poly", pts, closed: false }];
 }
 
 // ── Zustand ───────────────────────────────────────────────────────────────────

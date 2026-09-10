@@ -38,7 +38,7 @@ export function useImageImportHandling(opts: {
   setSelectedColumnIds: (ids: string[]) => void;
   setSelectedRoofIds: (ids: string[]) => void;
   setSelectedContextObjectIds: (ids: string[]) => void;
-  setSelectedSectionLineId: (id: string | null) => void;
+  setSelectedSectionLineIds: (ids: string[]) => void;
 }): {
   insertImageDrawings: (assets: { src: string; naturalWidth: number; naturalHeight: number }[]) => void;
   onImageOrPdfFileChosen: (file: File) => void;
@@ -59,7 +59,7 @@ export function useImageImportHandling(opts: {
     setSelectedColumnIds,
     setSelectedRoofIds,
     setSelectedContextObjectIds,
-    setSelectedSectionLineId,
+    setSelectedSectionLineIds,
   } = opts;
 
   const insertImageDrawings = (
@@ -87,7 +87,7 @@ export function useImageImportHandling(opts: {
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
       setSelectedContextObjectIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
     }
   };
 

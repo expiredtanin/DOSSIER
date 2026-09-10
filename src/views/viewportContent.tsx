@@ -19,8 +19,8 @@ import type {
   Vec2,
   Wall,
 } from "../model/types";
-import { generatePlan, generateSectionPlan } from "../plan/generatePlan";
-import type { CategoryDisplayResolver } from "../plan/generatePlan";
+import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../plan/generatePlan";
+import type { CategoryDisplayResolver, Primitive } from "../plan/generatePlan";
 import type { RichTextDoc } from "../text/richText";
 import { computeSection } from "../plan/toSection";
 import type { SectionOutput } from "../plan/toSection";
@@ -41,7 +41,7 @@ import { Viewport3D } from "../viewport/Viewport3D";
 import type { DisplayResolver, ViewportContextInfo } from "../viewport/Viewport3D";
 import type { Pick3dHit } from "../viewport/Wasm3DViewport";
 import { DrawingTabs } from "../DrawingTabs";
-import type { Drawing } from "../DrawingTabs";
+import type { ViewSnapshotTabsHandlers } from "../DrawingTabs";
 import type { ToolDraft, ToolHandlers, ToolId } from "../tools/types";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../ui/TopBar";
 
@@ -73,7 +73,7 @@ export function Content({
   section3d,
   onClearSection3d,
   mono,
-  drawings,
+  viewSnapshotTabs,
   onSelectLevel,
   floorDisplay,
   categoryDisplay,
@@ -91,7 +91,7 @@ export function Content({
   selectedRoomIds,
   selectedRoofIds,
   selectedContextObjectIds,
-  selectedSectionLineId,
+  selectedSectionLineIds,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -167,12 +167,13 @@ export function Content({
   onClearSection3d: () => void;
   /** Grundriss in Schwarz-Weiss (mono) statt mit Kategorie-/Element-Farben. */
   mono: boolean;
-  /** Dokument-Tabs der Kopfzeile — ein Tab je Geschoss-Grundriss. */
-  drawings: Drawing[];
+  /** Ausschnitt-Tab-Leiste der Kopfzeile — ein Tab je gespeichertem Ausschnitt
+   *  (ViewSnapshot), siehe DrawingTabs.tsx. */
+  viewSnapshotTabs: ViewSnapshotTabsHandlers;
   /** Aktiviert eine Zeichnungsebene (Geschoss) — geteilt mit dem Panel
-   *  „Zeichnungsebenen"; siehe DrawingTabs.tsx. */
+   *  „Zeichnungsebenen". */
   onSelectLevel: (id: string) => void;
-  floorDisplay: DisplayResolver;
+  floorDisplay: CategoryDisplayResolver & DisplayResolver;
   categoryDisplay: CategoryDisplayResolver & DisplayResolver;
   displayKey: string;
   planViewRef: React.RefObject<PlanViewHandle>;
@@ -188,7 +189,7 @@ export function Content({
   selectedRoomIds: string[];
   selectedRoofIds: string[];
   selectedContextObjectIds: string[];
-  selectedSectionLineId: string | null;
+  selectedSectionLineIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -295,14 +296,15 @@ export function Content({
   if (level.kind === "section" || level.kind === "elevation") {
     return (
       <main className="content">
-        <DrawingTabs
-          drawings={drawings}
-          activeLevelId={level.id}
-          onSelectLevel={onSelectLevel}
-        />
+        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
         <SectionPlanView
           project={project}
           level={level}
+          visibleCodes={visibleCodes}
+          categoryDisplay={categoryDisplay}
+          floorDisplay={floorDisplay}
+          detail={detail}
+          referenceLines={referenceLines}
           hairline={hairline}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
@@ -321,7 +323,7 @@ export function Content({
           selectedGroupIds={selectedGroupIds}
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
-          selectedSectionLineId={selectedSectionLineId}
+          selectedSectionLineIds={selectedSectionLineIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -360,16 +362,13 @@ export function Content({
   if (level.kind === "drawing") {
     return (
       <main className="content">
-        <DrawingTabs
-          drawings={drawings}
-          activeLevelId={level.id}
-          onSelectLevel={onSelectLevel}
-        />
+        <DrawingTabs project={project} handlers={viewSnapshotTabs} />
         <LevelPlanView
           project={project}
           level={level}
           visibleCodes={visibleCodes}
           categoryDisplay={categoryDisplay}
+          floorDisplay={floorDisplay}
           detail={detail}
           referenceLines={referenceLines}
           hairline={hairline}
@@ -391,7 +390,7 @@ export function Content({
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
           selectedContextObjectIds={selectedContextObjectIds}
-          selectedSectionLineId={selectedSectionLineId}
+          selectedSectionLineIds={selectedSectionLineIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -428,11 +427,7 @@ export function Content({
   // Geschoss im Panel „Zeichnungsebenen"), nicht mehr hier in der Kopfzeile.
   return (
     <main className="content">
-      <DrawingTabs
-        drawings={drawings}
-        activeLevelId={level.id}
-        onSelectLevel={onSelectLevel}
-      />
+      <DrawingTabs project={project} handlers={viewSnapshotTabs} />
       {viewType === "perspektive" ? (
         <section className="pane">
           <div className="pane-title">
@@ -482,6 +477,7 @@ export function Content({
           level={level}
           visibleCodes={visibleCodes}
           categoryDisplay={categoryDisplay}
+          floorDisplay={floorDisplay}
           detail={detail}
           referenceLines={referenceLines}
           hairline={hairline}
@@ -503,7 +499,7 @@ export function Content({
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
           selectedContextObjectIds={selectedContextObjectIds}
-          selectedSectionLineId={selectedSectionLineId}
+          selectedSectionLineIds={selectedSectionLineIds}
           roomStamp={roomStamp}
           onStampMove={onStampMove}
           onStampEdit={onStampEdit}
@@ -536,12 +532,127 @@ export function Content({
   );
 }
 
+// Auswahl-Felder (wallId/ceilingId/…) aus einer Referenz-Überlagerung entfernen:
+// die Geometrie stammt aus einer FREMDEN Projektion (z. B. Schnitt-Koordinaten
+// im X/Y-Raum eines Grundrisses) — ein Klick darauf darf niemals das
+// eigentliche (real positionierte) Bauteil selektieren.
+const OVERLAY_SELECTABLE_ID_KEYS = [
+  "wallId",
+  "drawingId",
+  "ceilingId",
+  "openingId",
+  "stairId",
+  "roomId",
+  "columnId",
+  "roofId",
+  "extrudedSolidId",
+  "contextObjectId",
+  "sectionLineId",
+] as const;
+function stripSelectableIds(pr: Primitive): Primitive {
+  const copy: Record<string, unknown> = { ...(pr as unknown as Record<string, unknown>) };
+  for (const k of OVERLAY_SELECTABLE_ID_KEYS) delete copy[k];
+  return copy as unknown as Primitive;
+}
+
+/**
+ * Fremd-Art-Referenzüberlagerung: zeigt jede andere sichtbare Zeichnungsebene,
+ * deren KIND vom aktiven Level abweicht (Geschoss/Zeichnung/Schnitt/Ansicht —
+ * Auge an + Darstellungsmodus über `floorDisplay`), als nicht-interaktive
+ * Kalkierpapier-Unterlage. Gleiche Art (z. B. andere Geschosse im Grundriss)
+ * läuft stattdessen über `generateVisibleLevelsPlan` (echte X/Y-Überlagerung
+ * im selben Koordinatenraum) — hier geht es um GRUNDSÄTZLICH andere
+ * Projektionsachsen (Schnitt/Ansicht: Länge×Höhe statt X×Y), die sich nur als
+ * lose, nicht exakt ausgerichtete Referenz überlagern lassen. Schnitte
+ * brauchen die asynchrone WASM-Pipeline (computeSection, gecacht je Ebene-ID);
+ * Ansichten/Grundrisse/Zeichnungen laufen synchron.
+ */
+function useCrossKindOverlay(
+  project: Project,
+  activeLevel: DrawingLevel,
+  floorDisplay: CategoryDisplayResolver,
+  visibleCodes: Set<string>,
+  categoryDisplay: CategoryDisplayResolver,
+  detail: DetailLevel,
+  referenceLines: boolean,
+  mono: boolean,
+): Primitive[] {
+  const overlayLevels = useMemo(
+    () =>
+      project.drawingLevels.filter(
+        (l) => l.kind !== activeLevel.kind && floorDisplay(l.id).render,
+      ),
+    [project.drawingLevels, activeLevel.kind, floorDisplay],
+  );
+  const [sectionOutputs, setSectionOutputs] = useState<Record<string, SectionOutput | null>>({});
+  useEffect(() => {
+    const sectionLevels = overlayLevels.filter((l) => l.kind === "section");
+    if (sectionLevels.length === 0) return;
+    let disposed = false;
+    void Promise.all(
+      sectionLevels.map(async (l) => {
+        try {
+          return [l.id, await computeSection(project, l)] as const;
+        } catch (e) {
+          console.warn("render3d-Schnitt (Referenz-Überlagerung) fehlgeschlagen:", e);
+          return [l.id, null] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (disposed) return;
+      setSectionOutputs((prev) => {
+        const next = { ...prev };
+        for (const [id, out] of entries) next[id] = out;
+        return next;
+      });
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [project, overlayLevels]);
+
+  return useMemo(() => {
+    const out: Primitive[] = [];
+    for (const l of overlayLevels) {
+      const greyed = floorDisplay(l.id).greyed;
+      let prims: Primitive[];
+      if (l.kind === "elevation") {
+        prims =
+          generateElevationPlan(project, l, { mono, visibleCodes, categoryDisplay })?.primitives ?? [];
+      } else if (l.kind === "section") {
+        const sOut = sectionOutputs[l.id];
+        prims = sOut
+          ? generateSectionPlan(sOut, mono, { hiddenLines: l.hiddenLines, visibleCodes, categoryDisplay })
+              .primitives
+          : [];
+      } else {
+        // Geschoss ODER freie Zeichnung: dieselbe Grundriss-Pipeline, aber ohne
+        // die projektglobalen Zutaten (Kontext-Konturen/Schnittlinien) — die
+        // liefert bereits die aktive Ebene selbst (kein Doppel-Zeichnen).
+        prims = generatePlan(
+          project,
+          l.id,
+          visibleCodes,
+          categoryDisplay,
+          detail,
+          referenceLines,
+          mono,
+          false,
+        ).primitives;
+      }
+      for (const pr of prims) out.push(stripSelectableIds(greyed ? { ...pr, greyed: true } : pr));
+    }
+    return out;
+  }, [overlayLevels, sectionOutputs, project, mono, floorDisplay, visibleCodes, categoryDisplay, detail, referenceLines]);
+}
+
 /** Abgeleiteter Grundriss eines Geschosses. */
 function LevelPlanView({
   project,
   level,
   visibleCodes,
   categoryDisplay,
+  floorDisplay,
   detail,
   referenceLines,
   hairline,
@@ -563,7 +674,7 @@ function LevelPlanView({
   selectedRoomIds,
   selectedRoofIds,
   selectedContextObjectIds,
-  selectedSectionLineId,
+  selectedSectionLineIds,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -595,6 +706,7 @@ function LevelPlanView({
   level: DrawingLevel;
   visibleCodes: Set<string>;
   categoryDisplay: CategoryDisplayResolver;
+  floorDisplay: CategoryDisplayResolver;
   detail: DetailLevel;
   referenceLines: boolean;
   hairline: boolean;
@@ -616,7 +728,7 @@ function LevelPlanView({
   selectedRoomIds: string[];
   selectedRoofIds: string[];
   selectedContextObjectIds?: string[];
-  selectedSectionLineId: string | null;
+  selectedSectionLineIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -648,10 +760,30 @@ function LevelPlanView({
   selectedDrawingIds?: string[];
   gripHandlers: GripHandlers;
 }) {
+  // Fremd-Art-Referenz-Unterlage (Nutzer-Wunsch: "will mal etwas vom Schnitt
+  // abzeichnen" — UND umgekehrt "in der Ansicht auch mal einen Grundriss
+  // zeigen"): jede andere sichtbare Zeichnungsebene ANDERER Art (Auge an,
+  // Modus "andere grau" dimmt sie) erscheint als Kalkierpapier-Unterlage,
+  // s. useCrossKindOverlay.
+  const overlayPrimitives = useCrossKindOverlay(
+    project,
+    level,
+    floorDisplay,
+    visibleCodes,
+    categoryDisplay,
+    detail,
+    referenceLines,
+    mono,
+  );
+
   // Detailgrad + Referenzlinien fließen in die Plan-Erzeugung ein (Symbole,
   // Schraffuren/Linienfeinheit bzw. Wand-Achslinien).
   const plan = useMemo(() => {
-    const p = generatePlan(
+    // Überlagert ALLE sichtbaren Geschoss-/Zeichnungs-Ebenen derselben Art wie
+    // `level` in einem Plan (aktive Ebene farbig, andere je Darstellungsmodus
+    // gedimmt/gesperrt — Nutzer-Wunsch "mehrere Geschosse gleichzeitig
+    // einschaltbar", s. plan/generatePlan.ts::generateVisibleLevelsPlan).
+    const p = generateVisibleLevelsPlan(
       project,
       level.id,
       visibleCodes,
@@ -659,12 +791,17 @@ function LevelPlanView({
       detail,
       referenceLines,
       mono,
+      floorDisplay,
     );
+    const withOverlay =
+      overlayPrimitives.length === 0
+        ? p
+        : { ...p, primitives: [...p.primitives, ...overlayPrimitives] };
     // Gruppen-Isolation ("Gruppe betreten"): alles ausserhalb der aktiven
     // Gruppe gedimmt, s. state/groupActions.ts::applyGroupDimming.
     return groupPath.length === 0
-      ? p
-      : { ...p, primitives: applyGroupDimming(p.primitives, project, groupPath) };
+      ? withOverlay
+      : { ...withOverlay, primitives: applyGroupDimming(withOverlay.primitives, project, groupPath) };
   }, [
     project,
     level.id,
@@ -673,6 +810,8 @@ function LevelPlanView({
     detail,
     referenceLines,
     mono,
+    floorDisplay,
+    overlayPrimitives,
     groupPath,
   ]);
 
@@ -714,7 +853,7 @@ function LevelPlanView({
         selectedRoomIds={selectedRoomIds}
         selectedRoofIds={selectedRoofIds}
         selectedContextObjectIds={selectedContextObjectIds}
-        selectedSectionLineIds={selectedSectionLineId ? [selectedSectionLineId] : []}
+        selectedSectionLineIds={selectedSectionLineIds}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}
@@ -765,6 +904,11 @@ function LevelPlanView({
 function SectionPlanView({
   project,
   level,
+  visibleCodes,
+  categoryDisplay,
+  floorDisplay,
+  detail,
+  referenceLines,
   hairline,
   marqueeColor,
   snapColor,
@@ -783,7 +927,7 @@ function SectionPlanView({
   selectedGroupIds,
   selectedRoomIds,
   selectedRoofIds,
-  selectedSectionLineId,
+  selectedSectionLineIds,
   roomStamp,
   onStampMove,
   onStampEdit,
@@ -813,6 +957,11 @@ function SectionPlanView({
 }: {
   project: Project;
   level: DrawingLevel;
+  visibleCodes: Set<string>;
+  categoryDisplay: CategoryDisplayResolver;
+  floorDisplay: CategoryDisplayResolver;
+  detail: DetailLevel;
+  referenceLines: boolean;
   hairline: boolean;
   marqueeColor: string;
   snapColor: string;
@@ -831,7 +980,7 @@ function SectionPlanView({
   selectedGroupIds: string[];
   selectedRoomIds: string[];
   selectedRoofIds: string[];
-  selectedSectionLineId: string | null;
+  selectedSectionLineIds: string[];
   roomStamp: { roomId: string; anchor: Vec2 } | null;
   onStampMove: (roomId: string, delta: Vec2) => void;
   onStampEdit: (roomId: string) => void;
@@ -896,26 +1045,54 @@ function SectionPlanView({
   // Ansichts-Plan: gefüllte Fassadenansicht inkl. optionalem Schatten
   // (level.shadows). Liefert null, wenn die Ebene keine Ansichtslinie trägt.
   const elevationPlan = useMemo(
-    () => (isElevation ? generateElevationPlan(project, level, { mono }) : null),
-    [isElevation, project, level, mono],
+    () =>
+      isElevation
+        ? generateElevationPlan(project, level, { mono, visibleCodes, categoryDisplay })
+        : null,
+    [isElevation, project, level, mono, visibleCodes, categoryDisplay],
   );
 
   const sectionPlan = useMemo(
     () =>
       !isElevation && output
-        ? generateSectionPlan(output, mono, { hiddenLines: level.hiddenLines })
+        ? generateSectionPlan(output, mono, {
+            hiddenLines: level.hiddenLines,
+            visibleCodes,
+            categoryDisplay,
+          })
         : null,
-    [isElevation, output, mono, level.hiddenLines],
+    [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay],
   );
   const rawPlan = isElevation ? elevationPlan : sectionPlan;
+  // Fremd-Art-Referenz-Unterlage (Nutzer-Wunsch: "in der Ansicht auch mal
+  // einen Grundriss zeigen können") — dieselbe Überlagerung wie im Grundriss/
+  // 2D-Arbeitsblatt, nur umgekehrt: hier ist Schnitt/Ansicht die aktive Ebene,
+  // andere Geschosse/Zeichnungen/Schnitte/Ansichten erscheinen als Unterlage.
+  const overlayPrimitives = useCrossKindOverlay(
+    project,
+    level,
+    floorDisplay,
+    visibleCodes,
+    categoryDisplay,
+    detail,
+    referenceLines,
+    mono,
+  );
+  const withOverlay = useMemo(
+    () =>
+      rawPlan && overlayPrimitives.length > 0
+        ? { ...rawPlan, primitives: [...rawPlan.primitives, ...overlayPrimitives] }
+        : rawPlan,
+    [rawPlan, overlayPrimitives],
+  );
   // Gruppen-Isolation ("Gruppe betreten") gilt auch für Schnitt-/Ansichts-
   // Pläne, s. state/groupActions.ts::applyGroupDimming.
   const plan = useMemo(
     () =>
-      rawPlan && groupPath.length > 0
-        ? { ...rawPlan, primitives: applyGroupDimming(rawPlan.primitives, project, groupPath) }
-        : rawPlan,
-    [rawPlan, project, groupPath],
+      withOverlay && groupPath.length > 0
+        ? { ...withOverlay, primitives: applyGroupDimming(withOverlay.primitives, project, groupPath) }
+        : withOverlay,
+    [withOverlay, project, groupPath],
   );
   const effStatus = isElevation ? (elevationPlan ? "ready" : "empty") : status;
 
@@ -966,7 +1143,7 @@ function SectionPlanView({
         selectedGroupIds={selectedGroupIds}
         selectedRoomIds={selectedRoomIds}
         selectedRoofIds={selectedRoofIds}
-        selectedSectionLineIds={selectedSectionLineId ? [selectedSectionLineId] : []}
+        selectedSectionLineIds={selectedSectionLineIds}
         roomStamp={roomStamp}
         onStampMove={onStampMove}
         onStampEdit={onStampEdit}

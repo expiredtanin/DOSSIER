@@ -1086,19 +1086,54 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
         expect(s.positions[i]).toBeLessThanOrEqual(0.9 + 1e-6);
       }
     }
-    // sillBoard-Gating: "keine"/"innen" -> keine Bank; "aussen"/"beide" -> Bank.
+    // sillBoard-Gating: "keine" -> keine Bank; "aussen" -> Aussenbank (2 Meshes:
+    // Bank+Tropfkante); "innen" -> Innenbank (1 Mesh, keine Tropfkante, s. eigener
+    // Test unten); "beide" -> beide zusammen (3 Meshes).
     const count = (sb: "keine" | "innen" | "aussen" | "beide"): number =>
       projectToModel3d(winProject({ ...baseWin, id: `win-sb-${sb}`, sillBoard: sb })).meshes.filter(isSill).length;
     expect(count("keine")).toBe(0);
-    expect(count("innen")).toBe(0);
+    expect(count("innen")).toBe(1);
     expect(count("aussen")).toBe(2);
-    expect(count("beide")).toBe(2);
+    expect(count("beide")).toBe(3);
     // DetailLevel: grob -> keine Bank; mittel/fein -> Bank.
     const byDetail = (detail: "grob" | "mittel" | "fein"): number =>
       projectToModel3d(pDefault, { detail }).meshes.filter(isSill).length;
     expect(byDetail("grob")).toBe(0);
     expect(byDetail("mittel")).toBe(2);
     expect(byDetail("fein")).toBe(2);
+  });
+
+  it("Innen-Fensterbank (Ablage): eigenes Band auf der GEGENÜBERLIEGENDEN Seite der Aussenbank, ohne Tropfkante", () => {
+    // "innen" -> genau 1 Band (keine Tropfkante, das ist eine Aussen-Witterungskante).
+    const innerOnly = projectToModel3d(winProject({ ...baseWin, id: "win-innen", sillBoard: "innen" })).meshes.filter(
+      isSill,
+    );
+    expect(innerOnly.length).toBe(1);
+    // "beide" -> 3 Bänder (2 aussen: Bank+Tropfkante, 1 innen: Bank).
+    const both = projectToModel3d(winProject({ ...baseWin, id: "win-beide", sillBoard: "beide" })).meshes.filter(
+      isSill,
+    );
+    expect(both.length).toBe(3);
+    // Die Innenbank liegt auf der GEGENÜBERLIEGENDEN Seite der Wandachse (y-Vorzeichen
+    // umgekehrt) zur Aussenbank — unabhängig von der konkreten Achsen-Konvention der
+    // Wand robust geprüft (relativ zueinander statt ein hartes Vorzeichen anzunehmen).
+    const outerOnly = projectToModel3d(winProject({ ...baseWin, id: "win-aussen", sillBoard: "aussen" })).meshes.filter(
+      isSill,
+    );
+    const avgY = (meshes: typeof outerOnly): number => {
+      let sum = 0;
+      let n = 0;
+      for (const m of meshes) {
+        for (let i = 1; i < m.positions.length; i += 3) {
+          sum += m.positions[i];
+          n++;
+        }
+      }
+      return sum / n;
+    };
+    const outerY = avgY(outerOnly);
+    const innerY = avgY(innerOnly);
+    expect(Math.sign(outerY)).not.toBe(Math.sign(innerY));
   });
 
   it("DIN-Öffnungssymbole: nur fein, nur je NICHT-festem Flügel; Dreh=V, Kipp=V, Dreh-Kipp=beide", () => {
@@ -1258,6 +1293,63 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
     // Umgriff nur mittel/fein, nicht grob.
     expect(projectToModel3d(doorProject("zarge"), { detail: "grob" }).meshes.filter(isFrame).length).toBe(0);
     expect(projectToModel3d(doorProject("zarge"), { detail: "mittel" }).meshes.filter(isFrame).length).toBe(9);
+  });
+
+  it("Echtes Schwellenprofil: nur Tür mit `threshold`, eigenes SILL_RGB-Band über die Wanddicke", () => {
+    // frameKind explizit "blockrahmen" (kein Zargen-Umgriff) — hält den Test
+    // unabhängig vom Umgriff-Fund oben (dessen Bekleidungs-Riegel sind
+    // ebenfalls FRAME_RGB und würden die y-Spanne verfälschen).
+    const doorProject = (threshold?: boolean): Project => ({
+      ...sampleProject,
+      doorTypes: [
+        {
+          id: "door-threshold-test",
+          name: "Test Schwelle",
+          kind: "dreh",
+          leafCount: 1,
+          leafStyle: "glatt",
+          frameThickness: 0.05,
+          frameKind: "blockrahmen",
+          frameWidth: 0.06,
+          defaultWidth: 0.9,
+          defaultHeight: 2.0,
+          threshold,
+        },
+      ],
+      openings: [
+        {
+          id: "DTH",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "31",
+          kind: "door",
+          typeId: "door-threshold-test",
+          position: 3.0,
+          width: 0.9,
+          height: 2.0,
+          sillHeight: 0,
+        },
+      ],
+      doors: [],
+      context: [],
+    });
+    // Ohne threshold: der Blendrahmen-Riegel (FRAME_RGB) fehlt bereits (hasSill
+    // folgt derselben Bedingung) UND das neue Schwellenprofil (SILL_RGB) auch.
+    expect(projectToModel3d(doorProject(false)).meshes.filter(isSill).length).toBe(0);
+    // Mit threshold: genau EIN zusätzliches SILL_RGB-Band — additiv zum
+    // (weiterhin FRAME_RGB-farbenen) Blendrahmen-Riegel, nicht dessen Ersatz.
+    const withThreshold = projectToModel3d(doorProject(true)).meshes.filter(isSill);
+    expect(withThreshold.length).toBe(1);
+    // Nur mittel/fein (detailBodies-Gating wie bei der Fensterbank), nicht grob.
+    expect(projectToModel3d(doorProject(true), { detail: "grob" }).meshes.filter(isSill).length).toBe(0);
+    expect(projectToModel3d(doorProject(true), { detail: "mittel" }).meshes.filter(isSill).length).toBe(1);
+    // Das Profil überspannt die GANZE Wanddicke (nicht nur die Rahmentiefe,
+    // die bei „aw" 0.07 m beträgt) — W1 ist die 0.345-m-Aussenwand.
+    const sillYs: number[] = [];
+    for (const m of withThreshold) {
+      for (let i = 1; i < m.positions.length; i += 3) sillYs.push(m.positions[i]);
+    }
+    expect(Math.max(...sillYs) - Math.min(...sillYs)).toBeCloseTo(0.345, 6);
   });
 });
 
@@ -1838,6 +1930,165 @@ describe("Wand-Joins im 3D (L-/T-Stösse, identisch zum 2D-Grundriss/Schnitt)", 
   });
 });
 
+describe("Wand-Referenzlinie (referenceLine) im Standard-3D — Achsversatz", () => {
+  // Bug bis 2026-08-30: `resolveWallBands` zentrierte den Schichtstapel immer
+  // auf die Wandachse, unabhängig von `Wall.referenceLine`/`referenceOffset` —
+  // obwohl der 2D-Plan UND die Gehrungs-/Anschluss-Cuts an Ecken
+  // (`model/joins.ts::miterLine`) den Versatz längst berücksichtigten. Eine
+  // Wand mit `referenceLine:"left"`/`"right"` sass dadurch im Standard-3D
+  // mittig, obwohl ihre Ecken schon versetzt geschnitten waren.
+  const withRef = (referenceLine: Wall["referenceLine"]): Project => ({
+    ...sampleProject,
+    walls: sampleProject.walls.map((w) => (w.id === "W1" ? { ...w, referenceLine } : w)),
+  });
+  // Die render-ext-Schicht (0.02 m dick) ist wie im Join-Test oben eindeutig
+  // über ihre Dicke identifizierbar, unabhängig von Eck-Gehrung (die betrifft
+  // nur die Achsen-/x-Ausdehnung, nicht den Quer-/y-Versatz).
+  const outerBandY = (p: Project): number => {
+    const w1 = projectToWalls3d(p, true).filter((w) => w.wallId === "W1");
+    const outer = w1.find((s) => Math.abs(s.thickness - 0.02) < 1e-9)!;
+    expect(outer.start[1]).toBeCloseTo(outer.end[1], 9); // W1 ist achsparallel zu Welt-x
+    return outer.start[1];
+  };
+
+  it("'left'/'right' verschieben den Schichtstapel um ±die halbe Wanddicke gegenüber 'center'", () => {
+    const centerY = outerBandY(withRef(undefined));
+    const leftY = outerBandY(withRef("left"));
+    const rightY = outerBandY(withRef("right"));
+    // aw-Wandtyp (W1): Gesamtdicke 0.345 m -> halbe Dicke 0.1725 m Versatz.
+    expect(leftY - centerY).toBeCloseTo(0.1725, 6);
+    expect(centerY - rightY).toBeCloseTo(0.1725, 6);
+  });
+
+  it("freier `referenceOffset` übersteuert die benannte Referenzlinie 1:1", () => {
+    const centerY = outerBandY(withRef(undefined));
+    const p: Project = {
+      ...sampleProject,
+      walls: sampleProject.walls.map((w) => (w.id === "W1" ? { ...w, referenceOffset: 0.05 } : w)),
+    };
+    expect(outerBandY(p) - centerY).toBeCloseTo(0.05, 6);
+  });
+});
+
+describe("emitStairs — Trittkanten-Nase (nosing) im WASM-Default-3D", () => {
+  // Feld existierte im Modell + der ResourceManager-UI, wurde aber vom
+  // WASM/wgpu-Default-Renderer nie gelesen (nur der Three.js-Fallback-Pfad
+  // las es) — hier ans Default-3D nachgezogen (s. PENDENZEN.md).
+  const stairType = (
+    structure: "wange" | "massiv",
+    nosing?: number,
+  ): NonNullable<Project["stairTypes"]>[number] => ({
+    id: "st-nosing-test",
+    name: "Test Nase",
+    structure,
+    closedRisers: false,
+    treadThickness: 0.04,
+    nosing,
+    defaultWidth: 1.0,
+  });
+  const stairProject = (structure: "wange" | "massiv", nosing?: number): Project => ({
+    ...sampleProject,
+    stairTypes: [stairType(structure, nosing)],
+    stairs: [
+      {
+        id: "STN",
+        type: "stair",
+        floorId: "eg",
+        categoryCode: "40",
+        shape: "straight",
+        typeId: "st-nosing-test",
+        start: { x: 3.7, y: 0.4 },
+        dir: { x: 0, y: 1 },
+        runLength: 3.2,
+        width: 1.0,
+        totalRise: 2.6,
+        stepCount: 15,
+        up: true,
+      },
+    ],
+  });
+  // Y-Spanne (Lauf-/Nase-Achse, `dir={0,1}`) des ERSTEN Tritts (hat immer
+  // einen Nachfolger, damit die Vorderkante eindeutig bestimmt ist).
+  const firstTreadYExtent = (p: Project): number => {
+    const { slabs } = projectToModel3d(p);
+    const ownSlabs = slabs.filter((s) => s.ceilingId === "STN");
+    const ys = ownSlabs[0].outline.map(([, y]) => y);
+    return Math.max(...ys) - Math.min(...ys);
+  };
+
+  it("offene Tragart (wange) + nosing: die Tritt-Vorderkante wird um `nosing` verlängert", () => {
+    const without = firstTreadYExtent(stairProject("wange", 0));
+    const withNosingV = firstTreadYExtent(stairProject("wange", 0.05));
+    expect(withNosingV).toBeCloseTo(without + 0.05, 3);
+  });
+
+  it("massiv ignoriert nosing (Vollblock hat keinen sichtbaren Trittkanten-Vorstand)", () => {
+    const a = firstTreadYExtent(stairProject("massiv", 0));
+    const b = firstTreadYExtent(stairProject("massiv", 0.05));
+    expect(b).toBeCloseTo(a, 6);
+  });
+});
+
+describe("emitStairs — geschlossene Setzstufen (closedRisers) im WASM-Default-3D", () => {
+  // Derselbe Bug-Typ wie bei `nosing` oben: Feld existierte im Modell + der
+  // ResourceManager-UI, wurde aber vom WASM/wgpu-Default-Renderer nie gelesen.
+  const stairType = (
+    structure: "wange" | "massiv",
+    closedRisers: boolean,
+  ): NonNullable<Project["stairTypes"]>[number] => ({
+    id: "st-riser-test",
+    name: "Test Setzstufe",
+    structure,
+    closedRisers,
+    treadThickness: 0.04,
+    defaultWidth: 1.0,
+  });
+  const stairProject = (structure: "wange" | "massiv", closedRisers: boolean): Project => ({
+    ...sampleProject,
+    stairTypes: [stairType(structure, closedRisers)],
+    stairs: [
+      {
+        id: "STR",
+        type: "stair",
+        floorId: "eg",
+        categoryCode: "40",
+        shape: "straight",
+        typeId: "st-riser-test",
+        start: { x: 3.7, y: 0.4 },
+        dir: { x: 0, y: 1 },
+        runLength: 3.2,
+        width: 1.0,
+        totalRise: 2.6,
+        stepCount: 15,
+        up: true,
+      },
+    ],
+  });
+  const ownSlabs = (p: Project) => projectToModel3d(p).slabs.filter((s) => s.ceilingId === "STR");
+
+  it("offene Tragart (wange) + closedRisers: eine zusätzliche dünne Setzstufen-Platte je Tritt", () => {
+    // Ohne: nur die Tritt-Platten (15). Mit: zusätzlich 15 Setzstufen-Platten = 30.
+    expect(ownSlabs(stairProject("wange", false)).length).toBe(15);
+    const withRisers = ownSlabs(stairProject("wange", true));
+    expect(withRisers.length).toBe(30);
+    // Jede Setzstufen-Platte überspannt vertikal GENAU eine Steighöhe
+    // (baseRise..topRise desselben Tritts); Tritt-Platten sind dünn
+    // (treadThickness=0.04) — beide Sorten unterscheidbar am Span.
+    const riserHeight = 2.6 / 15;
+    for (const s of withRisers) {
+      const span = s.zTop - s.zBottom;
+      const isRiserSpan = Math.abs(span - riserHeight) < 1e-6;
+      const isTreadSpan = Math.abs(span - 0.04) < 1e-6;
+      expect(isRiserSpan || isTreadSpan).toBe(true);
+    }
+  });
+
+  it("massiv ignoriert closedRisers (Vollblock hat schon eine geschlossene Front)", () => {
+    expect(ownSlabs(stairProject("massiv", false)).length).toBe(15);
+    expect(ownSlabs(stairProject("massiv", true)).length).toBe(15);
+  });
+});
+
 describe("emitStairMeshes (Betontreppe: glatte Laufplatte als Mesh)", () => {
   it("gerade Betontreppe -> Mesh mit 8 Ecken je Tritt, glatte schräge Untersicht", () => {
     // Sample-Treppe ST1: Typ "stair-standard" (Tragart "beton"), gerade,
@@ -1909,6 +2160,23 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     const expectedRidgeZ = roofBaseElevation(project, baseRoof) + g.ridgeHeight;
     const allHeights = roofMeshes.flatMap((m) => m.positions.filter((_, i) => i % 3 === 2));
     expect(Math.max(...allHeights)).toBeCloseTo(expectedRidgeZ, 6);
+  });
+
+  it("emitRoofCutLayers: eine Eingabe je (Schicht, geneigte Fläche) für den 3D-Live-Schnitt", () => {
+    // Satteldach: 2 geneigte Flächen (g.planes), einschichtig (thickness-Fallback)
+    // -> genau 2 RoofLayer-Einträge (kein zusammengefasstes Mesh wie bei emitRoofs).
+    const project: Project = { ...sampleProject, roofs: [baseRoof] };
+    const { roofLayers } = projectToModel3d(project);
+    expect(roofLayers.length).toBe(2);
+    for (const layer of roofLayers) {
+      expect(layer.polygon.length).toBeGreaterThanOrEqual(3);
+      expect(layer.polygon.every((p) => p.every((v) => Number.isFinite(v)))).toBe(true);
+      // Normale ist normalisiert (Länge ≈ 1).
+      const [nx, ny, nz] = layer.normal;
+      expect(Math.hypot(nx, ny, nz)).toBeCloseTo(1, 5);
+      expect(layer.thickness).toBeCloseTo(baseRoof.thickness!, 6);
+      expect(layer.color).toEqual(ROOF_RGB);
+    }
   });
 
   it("Dach mit Bauteil-Material (roofTypeId) bekommt eine Textur-Ebene (Stil 'Textured')", () => {

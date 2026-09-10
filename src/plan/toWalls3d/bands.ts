@@ -22,7 +22,7 @@ import {
   roofLayers,
   wallTypeThickness,
 } from "../../model/types";
-import { ceilingVerticalExtent, wallVerticalExtent } from "../../model/wall";
+import { ceilingVerticalExtent, wallReferenceOffset, wallVerticalExtent } from "../../model/wall";
 import { pointInOutline } from "../../geometry/ceiling";
 import { openingInterval, openingVerticalExtent } from "../../geometry/opening";
 import { roofBaseElevation, roofGeometry, roofUndersideAt } from "../../geometry/roof";
@@ -112,11 +112,19 @@ function bandCutMeta(b: WallBand): RCutMeta | undefined {
 /**
  * Löst den Schichtstapel EINER Wand auf: je Materiallage ein {@link WallBand}
  * mit ihrer Dicke, Component-Farbe und dem Mitten-Versatz entlang der Normalen.
- * Die Versätze zentrieren den Stapel um die Wandachse; als Gesamtdicke T dient
- * die SUMME der tatsächlichen Lagen-Dicken (nicht `wallTypeThickness`, falls es
+ * Die Versätze zentrieren den Stapel um die Wandachse UND verschieben ihn um
+ * {@link wallReferenceOffset} (`Wall.referenceLine`/`referenceOffset` — links/
+ * Mitte/rechts/frei), damit die Achse bei „außen"/„innen" tatsächlich auf der
+ * gewählten Wandfläche liegt statt immer mittig — dieselbe Grösse, die der 2D-
+ * Plan (`generatePlan/walls.ts`) UND die Gehrungs-/Anschluss-Cuts an Ecken
+ * (`model/joins.ts::miterLine`) bereits verwenden. Bis 2026-08-30 rechnete
+ * dieser Pfad NICHT damit (Bug: Wände mit `referenceLine !== "center"` sassen
+ * im Standard-3D mittig, obwohl die Eckenverschneidung schon den Versatz
+ * annahm → Geraden und Ecken liefen auseinander). Als Gesamtdicke T dient die
+ * SUMME der tatsächlichen Lagen-Dicken (nicht `wallTypeThickness`, falls es
  * abweicht) — so schließen die Bänder lückenlos aneinander an. Kein auflösbarer
  * WallType / keine Lagen ⇒ EIN Vollkörper-Band über die volle Dicke im
- * neutralen Grundton (heutiges Fallback-Verhalten).
+ * neutralen Grundton (heutiges Fallback-Verhalten), ebenfalls Referenz-versetzt.
  */
 function resolveWallBands(project: Project, wall: Wall, layered = true): WallBand[] {
   try {
@@ -125,6 +133,7 @@ function resolveWallBands(project: Project, wall: Wall, layered = true): WallBan
       // Gesamtdicke = Summe der Lagen (konsistent mit den Offsets); wenn diese
       // von wallTypeThickness abwiche, gewinnt die Lagen-Summe (keine Lücken).
       const total = wt.layers.reduce((s, l) => s + l.thickness, 0);
+      const refOff = wallReferenceOffset(wall, total);
       // Schnitt-Eingabe (layered=false): EINE Voll-Box über die ganze Dicke statt
       // je Lage eine Box. So bleibt die Emission 1:1 Wand→Rechteck — passend zu
       // `wallSegmentOwners`/`splitWallLayers` in toSection.ts, die die Schicht-
@@ -136,7 +145,7 @@ function resolveWallBands(project: Project, wall: Wall, layered = true): WallBan
           {
             thickness: total,
             color: dominantLayerColor(wt.layers, project, WALL_RGB),
-            offset: 0,
+            offset: refOff,
             hatch: dominantLayerHatch(wt.layers, project, SECTION_WALL_AXIS_ANGLE_DEG),
             materialIndex: resolveComponentMaterialLayer(project, dominant.componentId),
           },
@@ -151,7 +160,7 @@ function resolveWallBands(project: Project, wall: Wall, layered = true): WallBan
         bands.push({
           thickness: l.thickness,
           color,
-          offset: -total / 2 + prefix + l.thickness / 2,
+          offset: refOff - total / 2 + prefix + l.thickness / 2,
           priority: comp.joinPriority,
           componentId: comp.id,
           cutLineColor: lineStyle?.color,
@@ -164,10 +173,12 @@ function resolveWallBands(project: Project, wall: Wall, layered = true): WallBan
       return bands;
     }
     // WallType ohne Schichten: EIN Vollkörper über die Typ-Gesamtdicke.
-    return [{ thickness: wallTypeThickness(wt), color: WALL_RGB, offset: 0 }];
+    const total = wallTypeThickness(wt);
+    return [{ thickness: total, color: WALL_RGB, offset: wallReferenceOffset(wall, total) }];
   } catch {
     // Kein auflösbarer WallType: EIN Vollkörper mit Default-Dicke/Grundton.
-    return [{ thickness: 0.2, color: WALL_RGB, offset: 0 }];
+    const total = 0.2;
+    return [{ thickness: total, color: WALL_RGB, offset: wallReferenceOffset(wall, total) }];
   }
 }
 

@@ -18,6 +18,7 @@
 import type {
   Ceiling,
   Component,
+  ContextImage,
   ContextObject,
   Drawing2D,
   LayerCategory,
@@ -46,7 +47,7 @@ import {
 } from "../model/types";
 import { roofGeometry } from "../geometry/roof";
 import { effectiveOverrides, hasOverrides } from "../overrides/engine";
-import { stairVerticalExtent } from "../model/wall";
+import { stairVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { stairGeometry } from "../geometry/stair";
 import { wallCorners } from "../model/geometry";
 import { computeJoins } from "../model/joins";
@@ -180,6 +181,8 @@ export interface PlanImage {
   min: Vec2;
   max: Vec2;
   opacity: number;
+  /** Bildkorrektur, s. `ContextImage.filters` — durchgereicht, unverändert. */
+  filters?: ContextImage["filters"];
 }
 
 export interface Plan {
@@ -205,6 +208,11 @@ export function generatePlan(
   detail: DetailLevel = "mittel",
   showReferenceLines = false,
   mono = false,
+  // Schalter für die projektglobalen Zutaten (Kontext-Konturen, Schnittlinien,
+  // Luftbilder): beim Überlagern mehrerer Geschosse (siehe
+  // `generateVisibleLevelsPlan`) dürfen diese NICHT je Geschoss dupliziert
+  // werden — nur der aktive Aufruf liefert sie.
+  includeGlobal = true,
 ): Plan {
   const primitives: Primitive[] = [];
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
@@ -375,10 +383,16 @@ export function generatePlan(
     const gaps = wallGaps(wall, doors, openings);
     const cuts = joins.get(wall.id) ?? { startCut: null, endCut: null };
     // Schnitt vs. Ansicht nach Schnitthöhe (BIM-Standard): erreicht die Wand die
-    // Grundriss-Schnittebene nicht (Höhe < Schnitthöhe des Geschosses, z. B. eine
-    // Brüstung/ein Podestrand), wird sie nur als Ansichts-Umriss gezeichnet —
-    // keine Schnitt-Poché. Normale Wände (Höhe ≥ Schnitthöhe) sind unberührt.
-    const wallViewOnly = wall.height < (floor?.cutHeight ?? 1.0);
+    // Grundriss-Schnittebene nicht (z. B. eine Brüstung/ein Podestrand), wird sie
+    // nur als Ansichts-Umriss gezeichnet — keine Schnitt-Poché. Normale Wände
+    // (Schnittebene liegt in ihrer vertikalen Ausdehnung) sind unberührt. Über
+    // `wallVerticalExtent` aufgelöst (nicht nur `wall.height`), damit ein
+    // `bottom`/`top`-Override (VerticalAnchor) korrekt einfliesst — sonst würde
+    // z. B. eine hochgesetzte Wand (angehobenes UK, Höhe allein sieht „hoch genug"
+    // aus) fälschlich als Schnitt-Poché statt als Ansichts-Umriss gezeichnet.
+    const { zBottom: wallZBottom, zTop: wallZTop } = wallVerticalExtent(project, wall);
+    const cutPlaneZ = (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0);
+    const wallViewOnly = wallZTop < cutPlaneZ || wallZBottom > cutPlaneZ;
     addWallPoche(
       primitives, project, wall, gaps, cuts, wallGreyed, detail, wallLwMm, wallCategory, wallViewOnly,
     );
@@ -465,12 +479,16 @@ export function generatePlan(
 
   // Kontext-Konturen (Höhenlinien) als dezente Linien zeichnen — UNTER der
   // Wand-Poché wäre ideal, aber da sie eine eigene gedämpfte Farbe tragen, ist
-  // die Reihenfolge unkritisch; wir hängen sie als Referenz an.
-  addContextContours(primitives, project);
+  // die Reihenfolge unkritisch; wir hängen sie als Referenz an. Projektglobal
+  // (nicht je Geschoss) → nur beim aktiven Aufruf einer Mehrfach-Überlagerung.
+  if (includeGlobal) {
+    addContextContours(primitives, project, visibleCodes, categoryDisplay);
 
-  // Schnittführungs-Symbole (klassische Schnittlinien) aller Schnitt-/Ansichts-
-  // ebenen mit gesetzter Linie — projektglobale Referenzgeometrie über dem Plan.
-  addSectionLines(primitives, project);
+    // Schnittführungs-Symbole (klassische Schnittlinien) aller Schnitt-/
+    // Ansichtsebenen mit gesetzter Linie — ebenfalls projektglobal. Sichtbarkeit
+    // läuft über die Kategorie "90" (Referenzen), wie jedes andere Bauteil.
+    addSectionLines(primitives, project, visibleCodes, categoryDisplay);
+  }
 
   // Schwarz-Weiss (mono): nachträglich alle Farben auf reine Tinte zwingen.
   // Element-/Kategorie-/Hatch-Farben werden ignoriert, Füllungen werden weiss,
@@ -479,17 +497,94 @@ export function generatePlan(
 
   // Georeferenzierte Luftbilder als Hintergrund-Ebenen (nur interaktive Ansicht,
   // nicht Teil der Vektor-Primitive) — im Mono-Modus ausgeblendet (reiner S/W-Plan).
-  const backgroundImages: PlanImage[] = mono
+  // Projektglobal (nicht je Geschoss), s. `includeGlobal` oben.
+  const backgroundImages: PlanImage[] = !includeGlobal || mono
     ? []
     : (project.context ?? [])
         .filter((o): o is Extract<ContextObject, { type: "image" }> => o.type === "image")
-        .map((o) => ({ id: o.id, src: o.src, min: o.min, max: o.max, opacity: o.opacity ?? 1 }));
+        .map((o) => ({
+          id: o.id,
+          src: o.src,
+          min: o.min,
+          max: o.max,
+          opacity: o.opacity ?? 1,
+          filters: o.filters,
+        }));
 
   return {
     primitives,
     bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs),
     backgroundImages,
   };
+}
+
+/**
+ * Wie `generatePlan`, überlagert aber ZUSÄTZLICH alle sichtbaren Geschoss-
+ * oder Zeichnungs-Ebenen DERSELBEN Art wie `activeLevelId` in EINEM Plan —
+ * das Vectorworks-Bild „andere Ebenen als Referenz einblenden": die aktive
+ * Ebene farbig/bearbeitbar, die übrigen je Darstellungsmodus gedimmt
+ * (`levelDisplay`, derselbe Resolver wie für Geschosse im Panel/3D). Schnitt-/
+ * Ansichts-Ebenen bleiben Einzel-Pane (andere Projektionsachse — ein
+ * Überlagern mehrerer Schnitte ergäbe kein sinnvolles Bild).
+ */
+export function generateVisibleLevelsPlan(
+  project: Project,
+  activeLevelId: string,
+  visibleCodes: Set<string>,
+  categoryDisplay: CategoryDisplayResolver = SHOW_ALL,
+  detail: DetailLevel = "mittel",
+  showReferenceLines = false,
+  mono = false,
+  levelDisplay: CategoryDisplayResolver = SHOW_ALL,
+): Plan {
+  const active = project.drawingLevels.find((l) => l.id === activeLevelId);
+  const siblings =
+    active && (active.kind === "floor" || active.kind === "drawing")
+      ? project.drawingLevels.filter((l) => l.kind === active.kind && l.id !== activeLevelId)
+      : [];
+
+  const primitives: Primitive[] = [];
+  const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const extend = (b: Plan["bounds"]) => {
+    bounds.minX = Math.min(bounds.minX, b.minX);
+    bounds.minY = Math.min(bounds.minY, b.minY);
+    bounds.maxX = Math.max(bounds.maxX, b.maxX);
+    bounds.maxY = Math.max(bounds.maxY, b.maxY);
+  };
+
+  // Andere sichtbare Ebenen ZUERST (unten als Referenz), die aktive zuletzt
+  // (obenauf) — wie `buildBuilding` in meshBuilders.ts für die 3D-Szene.
+  for (const l of siblings) {
+    const d = levelDisplay(l.id);
+    if (!d.render) continue;
+    const p = generatePlan(
+      project,
+      l.id,
+      visibleCodes,
+      categoryDisplay,
+      detail,
+      showReferenceLines,
+      mono,
+      false, // includeGlobal: Schnittlinien/Kontext/Luftbilder nur einmal (aktiv)
+    );
+    primitives.push(...(d.greyed ? p.primitives.map((pr) => ({ ...pr, greyed: true })) : p.primitives));
+    extend(p.bounds);
+  }
+
+  const activePlan = generatePlan(
+    project,
+    activeLevelId,
+    visibleCodes,
+    categoryDisplay,
+    detail,
+    showReferenceLines,
+    mono,
+    true,
+  );
+  primitives.push(...activePlan.primitives);
+  extend(activePlan.bounds);
+
+  return { primitives, bounds, backgroundImages: activePlan.backgroundImages };
 }
 
 // ── Schnitt/Ansicht (abgeleitete Projektion aus render3d::section) ──────────────
@@ -536,12 +631,20 @@ const SECTION_HATCH: HatchRender = {
  * Baut aus einem {@link SectionOutput} (render3d::section, (u, v)-Meter) den
  * Plan eines Schnitts/einer Ansicht. `u` wird zur Plan-X, `v` (absolute Höhe)
  * zur Plan-Y — die PlanView zeigt Y nach oben, also erscheint der Schnitt
- * aufrecht. Rein darstellend; kennt das Projekt nicht.
+ * aufrecht. Rein darstellend; kennt das Projekt NICHT direkt — `visibleCodes`/
+ * `categoryDisplay` (optional) filtern/dimmen jedes Cut-Band trotzdem über
+ * `cp.categoryCode` (von `toSection.ts::attachCutStyles` aufgelöst), damit das
+ * Ebenen-Panel auch im Schnitt/in der Ansicht wirkt, wie im Grundriss. Ein
+ * Band ohne `categoryCode` (unauflösbares Bauteil) bleibt immer sichtbar.
  */
 export function generateSectionPlan(
   output: SectionOutput,
   mono = false,
-  opts: { hiddenLines?: boolean } = {},
+  opts: {
+    hiddenLines?: boolean;
+    visibleCodes?: Set<string>;
+    categoryDisplay?: CategoryDisplayResolver;
+  } = {},
 ): Plan {
   const primitives: Primitive[] = [];
   let minX = Infinity,
@@ -554,6 +657,7 @@ export function generateSectionPlan(
     if (x > maxX) maxX = x;
     if (y > maxY) maxY = y;
   };
+  const catDisplay = opts.categoryDisplay ?? SHOW_ALL;
 
   // Cut-Polygone: gefüllte Poché-Fläche + Schnitt-Schraffur + kräftige
   // Umrisslinie — wie eine geschnittene Wand im Grundriss. `toSection.ts`
@@ -565,6 +669,12 @@ export function generateSectionPlan(
   // monochrom, auch im Fallback-Fall).
   for (const cp of output.cutPolygons) {
     if (cp.pts.length < 3) continue;
+    // Ebenen-Panel-Sichtbarkeit: nur wenn das Quell-Bauteil aufgelöst werden
+    // konnte (categoryCode gesetzt) — sonst (Fallback) immer zeichnen.
+    if (cp.categoryCode !== undefined) {
+      if (opts.visibleCodes && !opts.visibleCodes.has(cp.categoryCode)) continue;
+      if (!catDisplay(cp.categoryCode).render) continue;
+    }
     const pts: Vec2[] = cp.pts.map(([u, v]) => {
       acc(u, v);
       return { x: u, y: v };
@@ -594,6 +704,7 @@ export function generateSectionPlan(
       wallId: kind === "wall" ? sourceId : undefined,
       ceilingId: kind === "slab" ? sourceId : undefined,
       roofId: kind === "roof" ? sourceId : undefined,
+      greyed: cp.categoryCode !== undefined && catDisplay(cp.categoryCode).greyed,
     });
   }
 

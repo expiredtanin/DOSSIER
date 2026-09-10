@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import type { DrawingLevelKind, ImportedMesh, Project } from "../model/types";
+import { flattenCategories } from "../model/types";
 import type { DxfImportResult, ImportDiagnostics } from "../io/dxfParser";
 import {
   contoursToDrawings,
@@ -385,8 +386,13 @@ export function buildDrawings(
 ) {
   // Layer-Name → Kategorie-Code: bevorzugt eine Kategorie mit demselben Namen
   // (case-insensitiv), sonst der aktive Code. Identifier bleiben so stabil.
+  // `flattenCategories`, NICHT `project.layers` direkt: manche Kategorien
+  // (z. B. „Gebäude"/„Situation") liegen als KINDER unter „05 Kontext" (s.
+  // sampleProject.ts) — ein flacher Scan hätte sie beim Namensabgleich
+  // übersehen (Regression, beim Verschachteln der Kontext-Kategorien
+  // gefunden).
   const byName = new Map<string, string>();
-  for (const c of project.layers) byName.set(c.name.toLowerCase(), c.code);
+  for (const c of flattenCategories(project.layers)) byName.set(c.name.toLowerCase(), c.code);
   const layerToCode = (layerName: string): string =>
     byName.get(layerName.toLowerCase()) ?? activeCategoryCode;
   const fromContours = contoursToDrawings(

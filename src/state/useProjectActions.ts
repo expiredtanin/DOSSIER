@@ -98,6 +98,16 @@ export function useProjectActions(
   const patchLineStyle = useStore((s) => s.patchLineStyle);
   const addLineStyle = useStore((s) => s.addLineStyle);
   const deleteLineStyle = useStore((s) => s.deleteLineStyle);
+  const addPen = useStore((s) => s.addPen);
+  const renamePen = useStore((s) => s.renamePen);
+  const deletePen = useStore((s) => s.deletePen);
+  const addPenSet = useStore((s) => s.addPenSet);
+  const renamePenSet = useStore((s) => s.renamePenSet);
+  const deletePenSet = useStore((s) => s.deletePenSet);
+  const setActivePenSet = useStore((s) => s.setActivePenSet);
+  const patchPenSetColor = useStore((s) => s.patchPenSetColor);
+  const patchPenSetWeight = useStore((s) => s.patchPenSetWeight);
+  const seedStandardPenSet = useStore((s) => s.seedStandardPenSet);
   // Wandstile: immutable Patch eines Wandtyps (z. B. Schichtfugen-Stile). Kein
   // eigener Store-Slice nötig — läuft direkt über setProject wie die übrigen
   // Ressourcen-Mutationen.
@@ -373,6 +383,7 @@ export function useProjectActions(
   const setElementBackground = useStore((s) => s.setElementBackground);
   const updateDrawing2D = useStore((s) => s.updateDrawing2D);
   const reorderDrawings = useStore((s) => s.reorderDrawings);
+  const reorderDrawingLevels = useStore((s) => s.reorderDrawingLevels);
   const resizeElement = useStore((s) => s.resizeElement);
   const updateWall = useStore((s) => s.updateWall);
   const setWallThickness = useStore((s) => s.setWallThickness);
@@ -423,6 +434,16 @@ export function useProjectActions(
     patchLineStyle,
     addLineStyle,
     deleteLineStyle,
+    addPen,
+    renamePen,
+    deletePen,
+    addPenSet,
+    renamePenSet,
+    deletePenSet,
+    setActivePenSet,
+    patchPenSetColor,
+    patchPenSetWeight,
+    seedStandardPenSet,
     patchWallType,
     setOverrideRules,
     patchCeilingType,
@@ -462,6 +483,7 @@ export function useProjectActions(
     setElementBackground,
     updateDrawing2D,
     reorderDrawings,
+    reorderDrawingLevels,
     resizeElement,
     updateWall,
     setWallThickness,

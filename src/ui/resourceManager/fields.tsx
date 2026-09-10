@@ -69,25 +69,35 @@ export function NumberField({
  * Farb-Swatch mit nativem Color-Picker. Das <label> umschließt einen
  * sichtbaren Swatch und den unsichtbaren color-input — Klick öffnet den
  * Picker, der Swatch zeigt die Farbe live (nach DOSSIER ColorBar).
+ * `disabled` sperrt den Picker (Farbe kommt von einem Stift, s. `PenColorField`)
+ * — der Swatch bleibt sichtbar (zeigt die gebackene Farbe), nur nicht editierbar.
  */
 export function ColorField({
   color,
   onChange,
+  disabled = false,
 }: {
   color: string;
   onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="res-color" title={color}>
+    <label className={`res-color${disabled ? " res-color-disabled" : ""}`} title={color}>
       <span className="res-color-swatch" style={{ background: color }} />
       <input
         type="color"
         value={color}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       />
     </label>
   );
 }
+
+// Die frühere `PenColorField` hier (Swatch + einfaches Namens-Dropdown) wurde
+// durch die reichhaltigere, geteilte `ui/PenColorField.tsx` ersetzt (Frei/
+// Stift-Umschalter + Stift-Nummer-Eingabe + Paletten-Popover) — ComponentsTab
+// importiert sie jetzt von dort, analog dem Ebenen-Editor/Attribut-Panel.
 
 /** Pill-Dropdown (nutzt die gemeinsame Dropdown-Komponente statt <select>). */
 export function SelectField<T extends string>({

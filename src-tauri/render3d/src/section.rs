@@ -130,7 +130,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::math;
-use crate::types::{CutBandMeta, Hatch, Opening, Point2, Rgb, SlabInput, WallInput};
+use crate::types::{CutBandMeta, Hatch, Opening, Point2, Rgb, RoofLayerInput, SlabInput, WallInput};
 
 /// Toleranz fuer "naeher an der Ebene" / Grenzwert-Vergleiche (Meter, Tiefe/Hoehe).
 const EPS: f32 = 1e-4;
@@ -248,6 +248,9 @@ fn to_world(p: Point2, height: f32) -> [f32; 3] {
 pub enum ComponentKind {
     Wall,
     Slab,
+    /// Dach-Schicht (`RoofLayerInput`) — läuft NICHT über `Prism` (s. dortige
+    /// Moduldoc), sondern über `roof_cut::cut_roof_layer`.
+    Roof,
 }
 
 /// Referenz auf das Ursprungs-Bauteil eines Cut-Polygons/einer Kante: Art +
@@ -967,8 +970,19 @@ fn compute_view_edges(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Fuehrt einen Schnitt/eine Ansicht entlang `plane` gegen das Modell (Waende +
-/// Decken) aus. Siehe Moduldoc fuer Format/Konventionen.
-pub fn cut_section(plane: &SectionPlane, walls: &[WallInput], slabs: &[SlabInput]) -> SectionOutput {
+/// Decken + optional Dach-Schichten) aus. Siehe Moduldoc fuer Format/
+/// Konventionen. Dach-Schichten (`roofs`) laufen NICHT ueber die `Prism`-
+/// Pipeline (kein vertikales Prisma, s. `roof_cut.rs`-Moduldoc) — ihre
+/// Cut-Polygone werden separat berechnet und additiv angehaengt; sie tragen
+/// bewusst keine `join_priority`, nehmen also nicht an der Boolean-Dominanz
+/// (`section_boolean::subtract_dominant_bands`, aufgerufen in `section_fill.rs`)
+/// teil.
+pub fn cut_section(
+    plane: &SectionPlane,
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
+) -> SectionOutput {
     let mut prisms: Vec<Prism> = Vec::new();
     // Gehrte Wand-Fussabdruecke einmalig ueber die gesamte Wandkonnektivitaet
     // (dieselbe Verschneidung wie das 3D-Mesh, siehe `mesh::wall_mitered_footprints`).
@@ -1003,6 +1017,14 @@ pub fn cut_section(plane: &SectionPlane, walls: &[WallInput], slabs: &[SlabInput
                     cut: prism.cut.clone(),
                 });
             }
+        }
+    }
+
+    // Dach-Schichten: separater Pfad (kein Prisma), additiv angehaengt.
+    for (i, layer) in roofs.iter().enumerate() {
+        if let Some(mut poly) = crate::roof_cut::cut_roof_layer(layer, plane) {
+            poly.component.index = i;
+            cut_polygons.push(poly);
         }
     }
 
@@ -1125,7 +1147,7 @@ mod tests {
         // (Achse x in [0,3]), aber ausserhalb von Schenkel A (Band x in
         // [-0.1,0.1]) und schneidet die volle Bodenplatte (x in [-0.5,3.5]).
         let plane = SectionPlane::looking_plus_x(1.5);
-        let out = cut_section(&plane, &walls, &slabs);
+        let out = cut_section(&plane, &walls, &slabs, &[]);
 
         assert_eq!(
             out.cut_polygons.len(),
@@ -1168,7 +1190,7 @@ mod tests {
         let (walls, slabs) = l_wall_scene();
         // x = 10 liegt weit ausserhalb aller Fussabdruecke.
         let plane = SectionPlane::looking_plus_x(10.0);
-        let out = cut_section(&plane, &walls, &slabs);
+        let out = cut_section(&plane, &walls, &slabs, &[]);
         assert!(out.cut_polygons.is_empty());
     }
 
@@ -1180,7 +1202,7 @@ mod tests {
         // Ebene bei x = -2, Blick nach +X: das gesamte Modell liegt dahinter
         // (kleinste Fussabdruck-X ist -0.5 bei der Bodenplatte).
         let plane = SectionPlane::looking_plus_x(-2.0);
-        let out = cut_section(&plane, &walls, &slabs);
+        let out = cut_section(&plane, &walls, &slabs, &[]);
 
         assert!(
             out.cut_polygons.is_empty(),
@@ -1249,7 +1271,7 @@ mod tests {
         let (walls, _) = l_wall_scene();
         let wall_a = vec![walls[0].clone()];
         let plane = SectionPlane::looking_plus_x(-2.0);
-        let out = cut_section(&plane, &wall_a, &[]);
+        let out = cut_section(&plane, &wall_a, &[], &[]);
         assert_eq!(out.visible_edges.len(), 4, "Vorderseite: 2 vertikale + Boden + Deckel");
         assert_eq!(out.hidden_edges.len(), 4, "Rueckseite: 2 vertikale + Boden + Deckel");
         // Alle sichtbaren Kanten liegen bei der naeheren Tiefe (kleinerer
@@ -1271,7 +1293,7 @@ mod tests {
         // sauber aneinander, ohne Ueberlappung.
         let (walls, _) = l_wall_scene();
         let plane = SectionPlane::looking_plus_x(0.05);
-        let out = cut_section(&plane, &walls, &[]);
+        let out = cut_section(&plane, &walls, &[], &[]);
 
         let wall_cuts: Vec<&CutPolygon> = out
             .cut_polygons
@@ -1333,7 +1355,7 @@ mod tests {
         // entstehen: Bruestung (0..1.0) und Sturz (2.0..2.5).
         let wall = wall_with_window();
         let plane = SectionPlane::looking_plus_x(2.0);
-        let out = cut_section(&plane, &[wall], &[]);
+        let out = cut_section(&plane, &[wall], &[], &[]);
 
         assert_eq!(out.cut_polygons.len(), 2, "Bruestung + Sturz statt Vollrechteck");
 
@@ -1377,7 +1399,7 @@ mod tests {
         // (1.5..2.5) -> Regressionsfall, unveraendert ein Vollrechteck.
         let wall = wall_with_window();
         let plane = SectionPlane::looking_plus_x(0.5);
-        let out = cut_section(&plane, &[wall], &[]);
+        let out = cut_section(&plane, &[wall], &[], &[]);
 
         assert_eq!(out.cut_polygons.len(), 1, "kein Fenster an dieser Stelle -> ein Vollrechteck");
         let c = &out.cut_polygons[0];
@@ -1415,7 +1437,7 @@ mod tests {
         };
         // Blick von y = -2 nach +Y: beide Waende (y=0 bzw. y=1) liegen dahinter.
         let plane = SectionPlane::looking_plus_y(-2.0);
-        let out = cut_section(&plane, &[w0, w1], &[]);
+        let out = cut_section(&plane, &[w0, w1], &[], &[]);
 
         // -- Fensterrahmen (Wand 0) ist vollstaendig sichtbar (nichts davor). --
         // Leibungen bei u=-1.5 und u=-2.5 (Fenster-Enden), v von 1.0 (Bruestung)
@@ -1508,5 +1530,71 @@ mod tests {
             e.component.kind == ComponentKind::Wall && e.component.index == 1 && (e.a[0] + 4.0).abs() < 1e-3
         });
         assert!(!w1_closed_wall_visible, "u=-4.0 (hinter geschlossener Wand) darf nicht sichtbar sein");
+    }
+
+    /// Integrationstest: `cut_section` mit Wand + Dach-Schicht zusammen — deckt
+    /// die eigentliche Verdrahtung ab (nicht nur die isolierte Geometrie in
+    /// `roof_cut.rs`s eigenen Tests): das Dach-Cut-Polygon landet im selben
+    /// `cut_polygons`, unter `ComponentKind::Roof`, mit korrektem Array-Index,
+    /// UNBEEINFLUSST von einer gleichzeitig geschnittenen Wand.
+    #[test]
+    fn cut_section_mit_wand_und_dach_liefert_beide_cut_polygone() {
+        let wall = WallInput {
+            start: [2.0, -1.0],
+            end: [2.0, 1.0],
+            thickness: 0.3,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: None,
+            holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
+        };
+        // Pultdach-Flaeche wie in roof_cut.rs-Tests: First entlang Welt-Z,
+        // steigt von X=0 (Traufe) zu X=4 (First) an.
+        let roof = RoofLayerInput {
+            // Modell-Meter (x,y,z=Höhe) — `cut_roof_layer` macht den
+            // Modell->Welt-Wechsel selbst (s. `roof_cut::to_world`).
+            polygon: vec![
+                [0.0, 0.0, 3.0],
+                [0.0, 5.0, 3.0],
+                [4.0, 5.0, 6.0],
+                [4.0, 0.0, 6.0],
+            ],
+            normal: crate::math::normalize([-15.0, 0.0, 20.0]),
+            thickness: 0.2,
+            color: [0.7, 0.4, 0.3],
+            hatch: None,
+            cut: Some(CutBandMeta {
+                join_priority: None,
+                component_id: None,
+                line_color: Some([0.2, 0.1, 0.05]),
+                line_weight: Some(0.4),
+            }),
+        };
+        let plane = SectionPlane::looking_plus_x(2.0);
+        let out = cut_section(&plane, &[wall], &[], &[roof]);
+
+        let wall_polys: Vec<_> = out
+            .cut_polygons
+            .iter()
+            .filter(|p| p.component.kind == ComponentKind::Wall)
+            .collect();
+        let roof_polys: Vec<_> = out
+            .cut_polygons
+            .iter()
+            .filter(|p| p.component.kind == ComponentKind::Roof)
+            .collect();
+        assert!(!wall_polys.is_empty(), "Wand muss weiterhin ihr Cut-Polygon liefern");
+        assert_eq!(roof_polys.len(), 1, "genau ein Dach-Cut-Polygon");
+        assert_eq!(roof_polys[0].component.index, 0);
+        assert_eq!(roof_polys[0].pts.len(), 4);
+        // Der Fugenlinien-Stil aus `RoofLayerInput::cut` bleibt erhalten.
+        let meta = roof_polys[0].cut.as_ref().expect("cut-Metadaten erwartet");
+        assert_eq!(meta.line_color, Some([0.2, 0.1, 0.05]));
+        assert_eq!(meta.line_weight, Some(0.4));
     }
 }

@@ -34,6 +34,7 @@
 import type { DrawingLevel, Project, Vec2, Wall } from "../model/types";
 import {
   getComponent,
+  getDoorType,
   getWallType,
   getWindowType,
   openingsOfWall,
@@ -48,7 +49,7 @@ import { projectToModel3d } from "./toWalls3d";
 import type { RModel3d, RRgb, RSlab, RVec2, RWall } from "./toWalls3d";
 import { sectionPlaneFromLevel } from "./toSection";
 import type { SectionPlaneSpec } from "./toSection";
-import type { HatchRender, Plan, Primitive } from "./generatePlan";
+import type { CategoryDisplayResolver, HatchRender, Plan, Primitive } from "./generatePlan";
 
 /** Welt-3D-Punkt (x, Höhe/y, z) — Y-up, identisch zur render3d-Weltkonvention. */
 export type V3 = [number, number, number];
@@ -604,6 +605,14 @@ interface ProjectedOpening {
   depth: number;
   /** Glasfelder (je Flügel/Feld) innerhalb des Blendrahmens. */
   glass: Array<Array<[number, number]>>;
+  /**
+   * Blinde (undurchsichtige) Türblatt-Felder — Gegenstück zu `glass` bei Türen:
+   * ein Glasblatt (`DoorType.leafStyle==="glas"`) mit `glazingRatio<1` teilt
+   * sich in einen Glas-Anteil (oben, → `glass`) und einen blinden Blattanteil
+   * (unten, → `doorLeaf`); ein nicht-verglastes Blatt landet komplett hier.
+   * Fenster füllen dieses Feld nie.
+   */
+  doorLeaf: Array<Array<[number, number]>>;
   /** Teilungslinien (Pfosten/Kämpfer) über den Rahmen. */
   divisions: Array<[[number, number], [number, number]]>;
   /** Flügelrahmen-Rechtecke (Kontur je öffenbarem/festem Flügel). */
@@ -663,7 +672,7 @@ function projectOpeningRect(
     if (depth <= EPS) continue;
     // pts-Reihenfolge: [unten-von, unten-bis, oben-bis, oben-von] — Basis für
     // die (fa, fz)-Interpolation der Flügel-/Glasfelder in collectOpenings.
-    return { pts, depth, glass: [], divisions: [], sashRects: [], sill: [], symbol: [], isDoor: false };
+    return { pts, depth, glass: [], doorLeaf: [], divisions: [], sashRects: [], sill: [], symbol: [], isDoor: false };
   }
   return null;
 }
@@ -718,9 +727,25 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
       const w = iv.to - iv.from;
       const h = v.zTop - v.zBottom;
       if (op.kind === "door") {
-        // Türen im Projekt-`openings`-Array: Blatt-Fläche (kein Glasraster).
+        // Türen im Projekt-`openings`-Array: Blatt-Fläche, bei Glasblatt mit
+        // Teilverglasung (`glazingRatio`, Kämpferhöhe von OBEN gemessen wie
+        // beim Fenster-Oberlicht) — Glasanteil oben (`glass`), blinder Rest
+        // unten (`doorLeaf`), Trennlinie dazwischen ab Kämpfer.
         pr.isDoor = true;
-        pr.glass.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
+        const dt = getDoorType(project, op);
+        if (dt?.leafStyle === "glas") {
+          const ratio = Math.max(0.05, Math.min(1, dt.glazingRatio ?? 1));
+          if (ratio >= 1 - EPS) {
+            pr.glass.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
+          } else {
+            const splitZ = 0.97 * (1 - ratio);
+            pr.glass.push(rect(pr.pts, 0.04, 0.96, splitZ, 0.97));
+            pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, splitZ));
+            pr.divisions.push([quadAt(pr.pts, 0.04, splitZ), quadAt(pr.pts, 0.96, splitZ)]);
+          }
+        } else {
+          pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
+        }
         out.push(pr);
         continue;
       }
@@ -874,7 +899,7 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
       const pr = projectOpeningRect(frame, wall, from, to, zBottom, oTop, thickness);
       if (pr) {
         pr.isDoor = true;
-        pr.glass.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
+        pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, 0.97)); // Legacy-Tür: kein Typ, kein Glasblatt
         out.push(pr);
       }
     }
@@ -1167,6 +1192,16 @@ export interface ElevationOptions {
   shadows?: boolean;
   /** Schwarz-Weiss-Modus (neutralisierte Füllungen). */
   mono?: boolean;
+  /**
+   * Ebenen-Panel-Sichtbarkeit (wie im Grundriss/Schnitt): eine Fläche, deren
+   * Quell-Bauteil (Wand/Decke/Dach, über `wallId`/`ceilingId`/`roofId`) einer
+   * NICHT sichtbaren Kategorie angehört, wird VOLLSTÄNDIG entfernt — vor der
+   * Verdeckungsberechnung, damit sie auch nichts mehr verdeckt (wie eine
+   * ausgeblendete Wand im Grundriss). Fehlt eine der beiden Optionen, bleibt
+   * jede Fläche sichtbar (Export-/Print-Pfad ohne Ebenen-Filter).
+   */
+  visibleCodes?: Set<string>;
+  categoryDisplay?: CategoryDisplayResolver;
 }
 
 /**
@@ -1189,12 +1224,40 @@ export function generateElevationPlan(
   const model = projectToModel3d(project, { layeredWalls: false });
   // Ansichts-u-Achse in Grundriss-Koordinaten (Welt x,z = Modell x,y).
   extendWallCornersForElevation(project, model.walls, { x: frame.U[0], y: frame.U[2] });
-  const faces = collectElevationFaces(model, frame);
+  let faces = collectElevationFaces(model, frame);
   // Dächer analytisch (roofGeometry) — nicht Teil von RModel3d walls/slabs.
   for (const rf of roofWorldFacesAll(project)) {
     const pf = projectFace(frame, rf);
     if (pf) faces.push(pf);
   }
+  // Grafik-Kategorie einer projizierten Fläche (Quell-Wand/-Decke/-Dach) — für
+  // Ebenen-Panel-Sichtbarkeit UND -Dimmen (s. u.).
+  const categoryCodeOfFace = (f: ProjectedFace): string | undefined => {
+    if (f.wallId) return project.walls.find((w) => w.id === f.wallId)?.categoryCode;
+    if (f.ceilingId) return (project.ceilings ?? []).find((c) => c.id === f.ceilingId)?.categoryCode;
+    if (f.roofId) return (project.roofs ?? []).find((r) => r.id === f.roofId)?.categoryCode;
+    return undefined;
+  };
+  // Ebenen-Panel-Sichtbarkeit: kategorie-ausgeblendete Flächen VOR der
+  // Verdeckungsberechnung entfernen (s. ElevationOptions.visibleCodes) — wie
+  // im Grundriss verdeckt eine ausgeblendete Wand dann auch nichts mehr.
+  if (opts.visibleCodes && opts.categoryDisplay) {
+    const { visibleCodes, categoryDisplay } = opts;
+    faces = faces.filter((f) => {
+      const code = categoryCodeOfFace(f);
+      if (code === undefined) return true;
+      return visibleCodes.has(code) && categoryDisplay(code).render;
+    });
+  }
+  // Ebenen-Panel-Dimmen ("Andere grau"): je Fläche, ob ihre Kategorie gedimmt
+  // ist — wirkt NUR auf die Flächen-Füllung selbst (Silhouetten-/Kanten-Linien
+  // fassen ggf. MEHRERE Flächen gleicher Tiefe zu EINEM Umriss zusammen, s.
+  // `frontalGroups` unten, und tragen deshalb keine eindeutige Kategorie).
+  const isFaceGreyed = (f: ProjectedFace): boolean => {
+    if (!opts.categoryDisplay) return false;
+    const code = categoryCodeOfFace(f);
+    return code !== undefined && opts.categoryDisplay(code).greyed;
+  };
   const wallFaces = faces.filter((f) => f.role === "wall");
   const slabFaces = faces.filter((f) => f.role === "slab");
   const roofFaces = faces.filter((f) => f.role === "roof");
@@ -1333,6 +1396,7 @@ export function generateElevationPlan(
         stroke: "none",
         strokeWidthMm: 0,
         hatch: NO_HATCH,
+        greyed: isFaceGreyed(f),
         ...(f.wallId ? { wallId: f.wallId } : {}),
         ...(f.ceilingId ? { ceilingId: f.ceilingId } : {}),
         ...(f.roofId ? { roofId: f.roofId } : {}),
@@ -1447,7 +1511,22 @@ export function generateElevationPlan(
         prim: {
           kind: "polygon",
           pts: toVec(g),
-          fill: mono ? GLASS_FILL_MONO : op.isDoor ? DOOR_LEAF_FILL_COLOR : GLASS_FILL_COLOR,
+          fill: mono ? GLASS_FILL_MONO : GLASS_FILL_COLOR,
+          stroke: EDGE_INK,
+          strokeWidthMm: EDGE_MM,
+          hatch: NO_HATCH,
+        },
+      });
+    }
+    // Blinde Türblatt-Felder (Gegenstück zu `glass`, s. `ProjectedOpening.doorLeaf`).
+    for (const g of op.doorLeaf) {
+      items.push({
+        depth: d,
+        seq: seq++,
+        prim: {
+          kind: "polygon",
+          pts: toVec(g),
+          fill: mono ? "#ffffff" : DOOR_LEAF_FILL_COLOR,
           stroke: EDGE_INK,
           strokeWidthMm: EDGE_MM,
           hatch: NO_HATCH,

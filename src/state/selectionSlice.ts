@@ -27,9 +27,9 @@ export interface SelectionSlice {
   selectedRoofIds: string[];
   // Gewählte Kontext-Objekte (importierte Gebäude/Terrain) als MENGE von IDs.
   selectedContextObjectIds: string[];
-  // Gewählte Schnitt-/Ansichtslinie (DrawingLevel-Id) — EINZELauswahl (eine Linie
-  // zur Zeit), getrennt von den übrigen Kanälen. `null` = keine Linie gewählt.
-  selectedSectionLineId: string | null;
+  // Gewählte Schnitt-/Ansichtslinien (DrawingLevel-Ids) als MENGE von IDs —
+  // getrennt von den übrigen Kanälen (Shift-Klick togglet, Cmd/Ctrl+A wählt alle).
+  selectedSectionLineIds: string[];
   // Gewählte Gruppen (Vectorworks-artig) als MENGE von IDs — rein informativ/
   // fürs UI (Bounding-Box, Doppelklick-Ziel); die eigentlichen Mitglieder
   // stehen zusätzlich in den übrigen `selected…Ids`-Kanälen (Verschieben/
@@ -51,7 +51,7 @@ export interface SelectionSlice {
   setSelectedColumnIds: (ids: string[]) => void;
   setSelectedRoofIds: (ids: string[]) => void;
   setSelectedContextObjectIds: (ids: string[]) => void;
-  setSelectedSectionLineId: (id: string | null) => void;
+  setSelectedSectionLineIds: (ids: string[]) => void;
   setSelectedGroupIds: (ids: string[]) => void;
   setGroupPath: (path: string[]) => void;
   /** Auswahl (Wände + Decken + Öffnungen + Treppen + Dächer + 2D-Elemente) leeren. */
@@ -73,7 +73,7 @@ export function createSelectionSlice(
     selectedColumnIds: [],
     selectedRoofIds: [],
     selectedContextObjectIds: [],
-    selectedSectionLineId: null,
+    selectedSectionLineIds: [],
     selectedGroupIds: [],
     groupPath: [],
     setSelectedWallIds: (ids) => set({ selectedWallIds: ids }),
@@ -86,7 +86,7 @@ export function createSelectionSlice(
     setSelectedColumnIds: (ids) => set({ selectedColumnIds: ids }),
     setSelectedRoofIds: (ids) => set({ selectedRoofIds: ids }),
     setSelectedContextObjectIds: (ids) => set({ selectedContextObjectIds: ids }),
-    setSelectedSectionLineId: (id) => set({ selectedSectionLineId: id }),
+    setSelectedSectionLineIds: (ids) => set({ selectedSectionLineIds: ids }),
     setSelectedGroupIds: (ids) => set({ selectedGroupIds: ids }),
     setGroupPath: (path) => set({ groupPath: path }),
     clearSelection: () =>
@@ -101,7 +101,7 @@ export function createSelectionSlice(
         selectedColumnIds: [],
         selectedRoofIds: [],
         selectedContextObjectIds: [],
-        selectedSectionLineId: null,
+        selectedSectionLineIds: [],
         selectedGroupIds: [],
         // groupPath (Isolation) bleibt bewusst erhalten — Leerraum-Klick INNERHALB
         // einer betretenen Gruppe soll nur deren Auswahl leeren, nicht aus der

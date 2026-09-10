@@ -22,6 +22,7 @@ import {
   saveProjectFile,
   openProjectFileNative,
   openProjectFileAtPath,
+  openProjectTemplateNative,
   acquireProjectLock,
   releaseProjectLock,
   registerLockAutoRelease,
@@ -29,6 +30,7 @@ import {
 } from "../io/projectFile";
 import type { LockInfo } from "../io/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
+import { emptyProject, sampleProject } from "../model/sampleProject";
 import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
 import type { PlanViewHandle } from "../plan/PlanView";
 
@@ -43,7 +45,7 @@ function drawingsBBox(
   };
   for (const d of drawings) {
     const g = d.geom;
-    if (g.shape === "line") { acc(g.a.x, g.a.y); acc(g.b.x, g.b.y); }
+    if (g.shape === "line" || g.shape === "xline") { acc(g.a.x, g.a.y); acc(g.b.x, g.b.y); }
     else if (g.shape === "polyline") for (const p of g.pts) acc(p.x, p.y);
     else if (g.shape === "rect") { acc(g.min.x, g.min.y); acc(g.max.x, g.max.y); }
     else if (g.shape === "circle" || g.shape === "arc") {
@@ -58,6 +60,7 @@ function drawingsBBox(
       for (const p of g.pts) acc(p.x, p.y);
     } else if (g.shape === "kote") acc(g.at.x, g.at.y);
     else if (g.shape === "text") acc(g.at.x, g.at.y);
+    else if (g.shape === "block") acc(g.at.x, g.at.y);
   }
   return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
 }
@@ -68,6 +71,7 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
   const g = d.geom;
   switch (g.shape) {
     case "line": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
+    case "xline": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
     case "polyline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "rect": return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
     case "circle": return { ...d, geom: { ...g, center: mv(g.center) } };
@@ -77,7 +81,17 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
     case "spline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "dimension": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "kote": return { ...d, geom: { ...g, at: mv(g.at) } };
-    case "text": return { ...d, geom: { ...g, at: mv(g.at) } };
+    case "text":
+      return {
+        ...d,
+        geom: {
+          ...g,
+          at: mv(g.at),
+          ...(g.leaderTarget ? { leaderTarget: mv(g.leaderTarget) } : {}),
+          ...(g.pathPts ? { pathPts: g.pathPts.map(mv) } : {}),
+        },
+      };
+    case "block": return { ...d, geom: { ...g, at: mv(g.at) } };
     default: return d;
   }
 }
@@ -107,6 +121,9 @@ export function useProjectFileActions(
   // über den nativen Dialog (openProjectFileNative), der einen echten Pfad für
   // den Lock liefert (File-API im Browser hat keinen echten Dateipfad).
   const projectFileInputRef = useRef<HTMLInputElement>(null);
+  // Verstecktes Datei-Input für „Neu aus Vorlage" (Datei wählen) — derselbe
+  // Browser-Fallback wie `projectFileInputRef`, nur mit `.obpt`-Filter.
+  const projectTemplateFileInputRef = useRef<HTMLInputElement>(null);
   // Pfad + Lock-Status der aktuell offenen .obp/.json-Datei (nur Tauri; sonst
   // bleibt beides null/false — Browser-Blob-Pfad hat keinen echten Pfad).
   const openedProjectPathRef = useRef<string | null>(null);
@@ -206,6 +223,65 @@ export function useProjectFileActions(
       addRecentProject(path, project.name || "modell"),
     );
   };
+  // „Neu" (Datei-Menü): leeres Projekt, wie am Startbildschirm — löst dabei
+  // einen evtl. gehaltenen Datei-Lock der bisherigen Projektdatei und vergisst
+  // deren Pfad (das leere Projekt ist noch NICHT gespeichert).
+  const onNewProject = () => {
+    releaseCurrentProjectLock();
+    setProject(emptyProject);
+  };
+
+  // Übernimmt ein neues, noch UNGESPEICHERTES Projekt aus Vorlagen-Inhalt
+  // (Musterhaus ODER eine gewählte `.obpt`-Datei): grobe Form-Prüfung wie beim
+  // normalen Öffnen, aber bewusst OHNE Pfad/Lock zu setzen — die Vorlage
+  // bleibt unangetastet, das nächste „Speichern" fragt nach einem neuen Ort.
+  const applyTemplateContent = (content: string): boolean => {
+    try {
+      const parsed = JSON.parse(content) as Partial<Project>;
+      if (!Array.isArray(parsed.walls) || !Array.isArray(parsed.layers)) {
+        console.warn("Vorlagen-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
+        return false;
+      }
+      releaseCurrentProjectLock();
+      setProject(parsed as Project);
+      return true;
+    } catch (err) {
+      console.error("Vorlage konnte nicht geladen werden:", err);
+      return false;
+    }
+  };
+  // „Neu aus Vorlage: Musterhaus" — das eingebaute Demo-Haus (model/sampleProject.ts)
+  // als Start eines neuen Projekts. `structuredClone`, damit spätere Bearbeitung
+  // nicht das gemeinsame Modul-Singleton mutiert (es dient auch als Store-
+  // Startzustand, s. state/projectSlice.ts).
+  const onNewProjectFromSample = () => {
+    releaseCurrentProjectLock();
+    setProject(structuredClone(sampleProject));
+  };
+  // „Neu aus Vorlage: Datei wählen…" — native `.obpt`-Dialog unter Tauri, sonst
+  // das versteckte `<input type=file>` (projectTemplateFileInputRef).
+  const onNewProjectFromTemplate = () => {
+    if (isTauriRuntime()) {
+      void (async () => {
+        let opened: Awaited<ReturnType<typeof openProjectTemplateNative>>;
+        try {
+          opened = await openProjectTemplateNative();
+        } catch (err) {
+          console.error("Vorlage konnte nicht geöffnet werden:", err);
+          return;
+        }
+        if (opened) applyTemplateContent(opened.content);
+      })();
+    } else {
+      projectTemplateFileInputRef.current?.click();
+    }
+  };
+  const onProjectTemplateFileChosen = (file: File) => {
+    const r = new FileReader();
+    r.onload = () => applyTemplateContent(String(r.result ?? ""));
+    r.readAsText(file);
+  };
+
   // Gibt den Lock der zuletzt geöffneten Projektdatei frei (falls wir ihn
   // halten) und vergisst den Pfad — vor dem Wechsel auf ein anderes Projekt.
   const releaseCurrentProjectLock = () => {
@@ -378,12 +454,17 @@ export function useProjectFileActions(
 
   return {
     projectFileInputRef,
+    projectTemplateFileInputRef,
     openedProjectPathRef,
     projectLockOwnedRef,
     lockConflict,
     setLockConflict,
     openImportForFile,
     onSaveProject,
+    onNewProject,
+    onNewProjectFromSample,
+    onNewProjectFromTemplate,
+    onProjectTemplateFileChosen,
     releaseCurrentProjectLock,
     applyOpenedProjectFile,
     openProjectViaNativeDialog,

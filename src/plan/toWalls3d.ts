@@ -69,7 +69,7 @@ import { emitStairMeshes, emitStairs } from "./toWalls3d/stairs";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
 import { emitDrawingLines } from "./toWalls3d/drawing2d";
 import { emitColumns } from "./toWalls3d/columns";
-import { emitRoofs } from "./toWalls3d/roofs";
+import { emitRoofCutLayers, emitRoofs } from "./toWalls3d/roofs";
 import { emitLegacyDoorLeaves, emitOpeningFrames, emitOpeningGlass, emitOpeningShading } from "./toWalls3d/openings";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
@@ -210,6 +210,10 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
       ...emitStairMeshes(project),
       ...emitRoofs(project),
     ],
+    // Dach-Schicht-Eingabe für den 3D-Live-Schnitt (render3d::roof_cut) — s.
+    // Kopfkommentar bei `RRoofLayer`/`emitRoofCutLayers`: getrennt von `meshes`,
+    // weil `section.rs` beliebige Dreiecksnetze nicht schneiden kann.
+    roofLayers: emitRoofCutLayers(project),
   };
 }
 

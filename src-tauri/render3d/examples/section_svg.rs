@@ -176,7 +176,7 @@ fn main() {
     // section.rs-Tests). Zeigt also geschnittenes Material UND eine gemischte
     // sichtbar/verdeckt-Ansicht MIT Oeffnung in einem Bild.
     let plane = SectionPlane::looking_plus_x(-0.3);
-    let out = cut_section(&plane, &walls, &slabs);
+    let out = cut_section(&plane, &walls, &slabs, &[]);
 
     println!(
         "cut_polygons={}, visible_edges={}, hidden_edges={}",

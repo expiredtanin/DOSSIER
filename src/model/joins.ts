@@ -113,9 +113,15 @@ interface WallEnd {
 /**
  * Berechnet für jede Wand die Gehrungs-/Anschluss-Schnittlinien.
  * Behandelt werden: L-Ecken (genau zwei Wandenden treffen sich), T-Knoten
- * (drei Wandenden treffen sich, zwei davon kollinear) und Mittelspannen-
- * T-Stöße (ein freies Wandende trifft auf die Seite einer anderen Wand).
- * X-Stöße (vier und mehr Enden) bleiben vorerst rechtwinklig.
+ * (drei Wandenden treffen sich, zwei davon kollinear), Mittelspannen-T-Stöße
+ * (ein freies Wandende trifft auf die Seite einer anderen Wand) UND „+"-
+ * Kreuzungen (zwei kollineare Wandenden treffen sich exakt auf der Achse einer
+ * dritten, durchlaufenden Wand — z. B. wenn eine durchgehende Trennwand von
+ * einer weiteren durchgehenden Wand gekreuzt wird). Nur echte Stern-Knoten
+ * (vier oder mehr Wand-STUMMEL enden alle exakt am selben Punkt, OHNE dass
+ * eine von ihnen als Durchgang erkennbar ist) bleiben rechtwinklig — dafür
+ * fehlt eine eindeutige Rangfolge, welches Ende „durch" und welches „Abzweig"
+ * wäre.
  *
  * `walls` ist die bereits gefilterte Wandmenge (z. B. ein Geschoss); die
  * Gehrung wird nur innerhalb dieser Menge gebildet.
@@ -163,16 +169,35 @@ export function computeJoins(
       continue;
     }
 
-    // X-Stöße u. ä. (>3 Enden): vorerst rechtwinklig lassen (Folge-Arbeit).
+    // Echte Stern-Knoten (≥4 WANDENDEN treffen sich exakt hier, KEINS läuft
+    // als Durchgangswand weiter) bleiben vorerst rechtwinklig (Folge-Arbeit) —
+    // dafür gibt es (noch) keine eindeutige Rangfolge, welches Ende „durch"
+    // und welches „Abzweig" ist. Der weit häufigere Fall — eine durchlaufende
+    // Wand wird von zwei (oder mehr) an ihrem Knoten endenden Wänden gekreuzt,
+    // eine „+"/„X"-Kreuzung — greift unten in Fall 2, weil dort JEDES noch
+    // ungeschnittene Ende zusätzlich gegen die Mittelspanne aller anderen
+    // Wände geprüft wird (nicht nur echte Einzel-Enden wie bisher).
   }
 
-  // Fall 2: Mittelspannen-T-Stoß. Ein freies Wandende (kein anderes Wandende
-  // teilt sich seinen Knoten) kann trotzdem auf die Seite einer anderen Wand
-  // treffen (nicht an deren Endpunkten). In dem Fall bekommt das freie Ende
-  // einen Schnitt entlang der zugewandten Fläche dieser Wand.
+  // Fall 2: Mittelspannen-T-Stoß, verallgemeinert. Jedes Wandende, das nach
+  // Fall 1 noch UNGESCHNITTEN ist — das schliesst nicht nur echte Einzel-Enden
+  // ein, sondern auch die beiden kollinearen Hälften eines 2er-/3er-Knotens
+  // (die bewusst ungeschnitten bleiben, s. o.) —, wird zusätzlich geprüft, ob
+  // es auf die Mittelspanne (nicht das Ende) einer WEITEREN, an diesem Knoten
+  // gar nicht beteiligten Wand trifft. Das deckt genau die „+"-Kreuzung ab:
+  // zwei kollineare Wandhälften enden an einem Punkt, DURCH den eine dritte,
+  // durchlaufende Wand hindurchläuft (sonst für Fall 1 unsichtbar, weil sie
+  // dort keinen eigenen Endpunkt hat) — beide Hälften bekommen unabhängig
+  // voneinander (mit jeweils eigenem Vorzeichen/zugewandter Fläche) einen
+  // Schnitt gegen die durchlaufende Wand, die selbst unangetastet bleibt.
+  // Bereits geschnittene Enden (L-Ecke, T-Abzweig) werden NICHT erneut
+  // angefasst — additiv, bit-identisch zum bisherigen Verhalten überall sonst.
   for (const [, ends] of junctions) {
-    if (ends.length !== 1) continue;
-    applyMidSpanTee(project, byId, walls, ends[0], result);
+    for (const end of ends) {
+      const cuts = result.get(end.wallId)!;
+      if (end.end === "start" ? cuts.startCut : cuts.endCut) continue;
+      applyMidSpanTee(project, byId, walls, end, result);
+    }
   }
 
   return result;
@@ -534,7 +559,20 @@ function applyMidSpanTee(
   const uW = dirOf(w);
   const nW = leftNormal(uW);
   const offW = wallReferenceOffset(w, tw);
-  const sign = best.perp >= 0 ? 1 : -1;
+  // Zugewandte Seite: primär aus der AUSLAUFRICHTUNG des freien Endes in
+  // seinen eigenen Körper (wie `dBranch`/`sign` in applyTJunction) — nicht aus
+  // der lateralen Position `perp`. Bei einer „+"-Kreuzung (zwei kollineare
+  // Enden treffen exakt auf der ACHSE der durchlaufenden Wand, `perp≈0`) ist
+  // `perp` für beide Enden identisch und liefert für BEIDE dieselbe (falsche)
+  // Seite; die Auslaufrichtung unterscheidet sie dagegen korrekt (linke Hälfte
+  // läuft nach −u aus, rechte nach +u — je die gegenüberliegende Fläche der
+  // Durchgangswand). Nur wenn die Auslaufrichtung (nahezu) parallel zur
+  // Durchgangsachse liegt (dot≈0 — geometrisch entartet für einen T-Stoss),
+  // bleibt `perp` als Fallback (bisheriges Verhalten).
+  const dFree =
+    freeEnd.end === "start" ? dirOf(freeWall) : scale(dirOf(freeWall), -1);
+  const facing = dot(nW, dFree);
+  const sign = Math.abs(facing) > 1e-6 ? (facing >= 0 ? 1 : -1) : best.perp >= 0 ? 1 : -1;
   const facePoint = add(w.start, scale(nW, offW + sign * (tw / 2)));
   const faceCut: Line = { point: facePoint, dir: uW };
 

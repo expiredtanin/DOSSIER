@@ -14,10 +14,12 @@
 // Vorzeichen, wenn negativ getippt.
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { bulgeArcPoints, hasRealBulge } from "../../geometry/bulge";
 import { uniqueId } from "../../tools/types";
 import { leftNormal, normalize, sub } from "../../model/geometry";
 import {
   offsetPolyline,
+  offsetPolylineWithBulge,
   offsetSegment,
   pointSegmentDistance,
   polylineEdges,
@@ -51,12 +53,14 @@ let lastSign = 1;
 interface Curve {
   pts: Vec2[];
   closed: boolean;
+  /** Bogen-Segmente (DXF-bulge, s. `geometry/bulge.ts`) — nur bei polyline. */
+  bulge?: number[];
 }
 
-/** Wandelt eine offset-fähige 2D-Form in eine Punktliste (+closed) oder null. */
+/** Wandelt eine offset-fähige 2D-Form in eine Punktliste (+closed[/bulge]) oder null. */
 function geomToCurve(g: Drawing2DGeom): Curve | null {
   if (g.shape === "line") return { pts: [g.a, g.b], closed: false };
-  if (g.shape === "polyline") return { pts: g.pts, closed: g.closed };
+  if (g.shape === "polyline") return { pts: g.pts, closed: g.closed, bulge: g.bulge };
   if (g.shape === "rect") {
     // Rechteck als geschlossene 4-Punkt-Polylinie offsetten (Task).
     return {
@@ -74,7 +78,8 @@ function geomToCurve(g: Drawing2DGeom): Curve | null {
 
 /** Ist diese Form offset-fähig (line/polyline/rect)? */
 function isOffsetable(d: Drawing2D): boolean {
-  return d.geom.shape === "line" || d.geom.shape === "polyline" || d.geom.shape === "rect";
+  const g = d.geom;
+  return g.shape === "line" || g.shape === "polyline" || g.shape === "rect";
 }
 
 /** Genau ein passendes Drawing2D vorselektiert? Dann liefere es. */
@@ -85,6 +90,25 @@ function singleSelectedCurve(project: Project, sel: CommandSelection): Drawing2D
   return null;
 }
 
+/**
+ * Kanten für Klick-Trefftests/Vorschau: bei Bogen-Segmenten (bulge) wird die
+ * Kurve zu Geradenstücken tesselliert (`bulgeArcPoints`), damit Klick-/Seiten-
+ * Tests entlang der TATSÄCHLICHEN (runden) Kontur funktionieren statt entlang
+ * der geraden Sehne. Die eigentliche Offset-Geometrie bleibt exakt (bulge-
+ * erhaltend, s. `offsetPolylineWithBulge`) — nur diese Hilfsfunktion approximiert.
+ */
+function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
+  if (!hasRealBulge(curve.bulge)) return polylineEdges(curve.pts, curve.closed);
+  const n = curve.pts.length;
+  const edgeCount = curve.closed ? n : n - 1;
+  const chain: Vec2[] = [curve.pts[0]];
+  for (let i = 0; i < edgeCount; i++) {
+    const seg = bulgeArcPoints(curve.pts[i], curve.pts[(i + 1) % n], curve.bulge?.[i]);
+    chain.push(...seg.slice(1));
+  }
+  return polylineEdges(chain, false); // Schlusskante (falls closed) ist bereits mit-tesselliert
+}
+
 /** Nächstes offset-fähiges Drawing2D zum Klickpunkt (innerhalb Toleranz). */
 function pickCurveAt(project: Project, levelId: string, pt: Vec2): Drawing2D | null {
   let best: Drawing2D | null = null;
@@ -93,7 +117,7 @@ function pickCurveAt(project: Project, levelId: string, pt: Vec2): Drawing2D | n
     if (d.levelId !== levelId) continue;
     const curve = geomToCurve(d.geom);
     if (!curve) continue;
-    for (const [a, b] of polylineEdges(curve.pts, curve.closed)) {
+    for (const [a, b] of curveHitEdges(curve)) {
       const dd = pointSegmentDistance(pt, a, b);
       if (dd < bestD) {
         bestD = dd;
@@ -113,7 +137,7 @@ function pickCurveAt(project: Project, levelId: string, pt: Vec2): Drawing2D | n
 function sideSign(curve: Curve, pt: Vec2): number {
   let bestD = Infinity;
   let sign = lastSign;
-  for (const [a, b] of polylineEdges(curve.pts, curve.closed)) {
+  for (const [a, b] of curveHitEdges(curve)) {
     const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     const dd = pointSegmentDistance(pt, a, b);
     if (dd < bestD) {
@@ -128,38 +152,46 @@ function sideSign(curve: Curve, pt: Vec2): number {
   return sign;
 }
 
-/** Offset einer Kurve um die vorzeichenbehaftete Distanz `d` → neue Punktliste. */
-function offsetCurve(curve: Curve, d: number): Vec2[] {
-  if (!curve.closed && curve.pts.length === 2) {
+/** Offset einer Kurve um die vorzeichenbehaftete Distanz `d` → neue Geometrie (bulge-erhaltend). */
+function offsetCurveGeom(curve: Curve, d: number): { pts: Vec2[]; bulge?: number[] } {
+  if (!curve.closed && curve.pts.length === 2 && !hasRealBulge(curve.bulge)) {
     const [a, b] = offsetSegment(curve.pts[0], curve.pts[1], d);
-    return [a, b];
+    return { pts: [a, b] };
   }
-  return offsetPolyline(curve.pts, d, curve.closed);
+  if (hasRealBulge(curve.bulge)) {
+    return offsetPolylineWithBulge(curve.pts, curve.bulge, d, curve.closed);
+  }
+  return { pts: offsetPolyline(curve.pts, d, curve.closed) };
 }
 
 /** Versetzte Form als neues Drawing2D (gleiche Attribute, neue ID/Geometrie). */
 function offsetGeom(src: Drawing2D, d: number): Drawing2DGeom | null {
-  const g = src.geom;
-  if (g.shape === "line") {
-    const [a, b] = offsetSegment(g.a, g.b, d);
-    return { shape: "line", a, b };
+  const curve = geomToCurve(src.geom);
+  if (!curve) return null;
+  const { pts, bulge } = offsetCurveGeom(curve, d);
+  if (src.geom.shape === "line" && pts.length === 2) {
+    return { shape: "line", a: pts[0], b: pts[1] };
   }
-  if (g.shape === "polyline") {
-    return { shape: "polyline", pts: offsetPolyline(g.pts, d, g.closed), closed: g.closed };
-  }
-  if (g.shape === "rect") {
-    const curve = geomToCurve(g)!;
-    return { shape: "polyline", pts: offsetPolyline(curve.pts, d, true), closed: true };
-  }
-  return null;
+  const geom: Drawing2DGeom = { shape: "polyline", pts, closed: curve.closed };
+  if (bulge && hasRealBulge(bulge)) geom.bulge = bulge;
+  return geom;
 }
 
-/** Vorschau-Formen der versetzten Kurve (für den Draft). */
+/** Vorschau-Formen der versetzten Kurve (für den Draft — tesselliert, s. `DraftShape`). */
 function offsetDraftShapes(curve: Curve, d: number): DraftShape[] {
-  const pts = offsetCurve(curve, d);
+  const { pts, bulge } = offsetCurveGeom(curve, d);
   if (pts.length < 2) return [];
-  if (!curve.closed && pts.length === 2) return [{ kind: "line", a: pts[0], b: pts[1] }];
-  return [{ kind: "poly", pts, closed: curve.closed }];
+  if (!curve.closed && pts.length === 2 && !hasRealBulge(bulge)) {
+    return [{ kind: "line", a: pts[0], b: pts[1] }];
+  }
+  const tess = hasRealBulge(bulge)
+    ? curveHitEdges({ pts, closed: curve.closed, bulge }).reduce<Vec2[]>((out, [a, b], i) => {
+        if (i === 0) out.push(a);
+        out.push(b);
+        return out;
+      }, [])
+    : pts;
+  return [{ kind: "poly", pts: tess, closed: curve.closed }];
 }
 
 function appendOffset(p: Project, src: Drawing2D, d: number): Project {

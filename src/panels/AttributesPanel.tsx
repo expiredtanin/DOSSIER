@@ -22,6 +22,7 @@
 // Label→Wert-Grid. Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 // Alle sichtbaren Texte über t(...).
 
+import { Fragment } from "react";
 import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { formatM, wallTypeLabel } from "../model/types";
@@ -29,7 +30,8 @@ import { PEN_WEIGHTS } from "../model/types";
 import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
 import { Dropdown } from "../ui/Dropdown";
-import { ColorHexField } from "../ui/ColorHexField";
+import { PenColorField } from "../ui/PenColorField";
+import { activePenSet, resolvePenWeight } from "../model/penSets";
 // Element-spezifische Attribut-Abschnitte (Wand/Decke/Öffnung/Treppe/Raum) —
 // aus ObjectInfoPanel hierher verschoben (Ribbon Phase 3: ObjectInfo trägt nur
 // noch Bezugspunkt + Masse).
@@ -175,18 +177,6 @@ export function AttributesPanel() {
     />
   );
 
-  // Farb-Swatch — IMMER sichtbar (Nutzer-Wunsch: den aktuell EFFEKTIVEN Wert
-  // (welche Farbe auch immer Ebene/Bauteil/Override gerade liefert) jederzeit
-  // sehen, nicht nur bei „eigener Wert"). Ändert man ihn direkt, wird
-  // automatisch „eigener Wert": der Setter schreibt den Override, wodurch
-  // `uiSourceOf` beim nächsten Render „custom" ableitet (kein separater
-  // Umschalt-Schritt nötig).
-  const colorValue = (
-    value: string | undefined,
-    onSet: (color: string) => void,
-    editable: boolean,
-  ) => <ColorHexField value={value ?? "#808080"} onChange={onSet} disabled={!editable} />;
-
   // Eine Attribut-Zeile: Label + IMMER sichtbares Eingabe-Element (zeigt den
   // effektiven Wert) + Quellen-Dropdown.
   const sourceRow = (
@@ -271,17 +261,34 @@ export function AttributesPanel() {
         {/* ── Stift/Strich ──────────────────────────────────────────── */}
         <div className="attr-section-label">{t("attr.stroke")}</div>
 
-        {/* Farbe — gilt für Wand UND Drawing2D (Kontrakt setzt beide). */}
+        {/* Farbe — gilt für Wand, Decke, Öffnung, Treppe, Raum UND Drawing2D
+            (Kontrakt setzt sie alle). Ein Stift trägt Farbe UND Strichstärke
+            zusammen (s. model/penSets.ts) — daher `showWeight`, wenn diese
+            Elementart überhaupt ein eigenes Strichstärke-Feld hat
+            (`weightEditable`, nicht bei reinen Annotationen ohne Bauteil-
+            Bezug relevant, aber harmlos, falls doch angeklickt). */}
         <span className="attr-key">{t("attr.color")}</span>
         <span className="attr-val">
-          <ColorHexField value={sel.color} onChange={host.onSetSelectionColor} />
+          <PenColorField
+            color={sel.color}
+            penId={sel.colorPenId}
+            pens={project.pens ?? []}
+            activeStyles={activePenSet(project)?.pens}
+            showWeight={weightEditable}
+            onColorChange={host.onSetSelectionColor}
+            onPenChange={host.onSetSelectionColorPen}
+          />
         </span>
 
         {/* Strichstärke (mm): Wand/Decke/Drawing2D mit Nach-Ebene/Nach-Bauteil/
             eigener-Wert-Quelle; eine Layout-Annotation kennt diese Vererbung
             nicht (kein Bauteil/keine Ebene) — dort ein schlichtes Zahlenfeld
             ohne Quellen-Dropdown, wenn die Art überhaupt eine Strichstärke
-            trägt (Linie/Rechteck, nicht Text/Bild). */}
+            trägt (Linie/Rechteck, nicht Text/Bild). Ist die Farbe oben an
+            einen Stift gekoppelt (`sel.colorPenId`), ist dieses Feld
+            GESPERRT und zeigt die Strichstärke DES STIFTS (ein Stift trägt
+            beides zusammen, s. model/penSets.ts) statt des sonst aufgelösten
+            `weightMm`. */}
         {isAnnotation ? (
           weightEditable && (
             <>
@@ -306,7 +313,7 @@ export function AttributesPanel() {
         ) : (
           sourceRow(
             "attr.weight",
-            weightEditable,
+            weightEditable && !sel.colorPenId,
             weightUi,
             onWeightSourceChange,
             <>
@@ -316,9 +323,9 @@ export function AttributesPanel() {
                 type="number"
                 step={0.01}
                 min={0}
-                disabled={!weightEditable}
+                disabled={!weightEditable || !!sel.colorPenId}
                 list="attr-pen-weights"
-                value={sel.weightMm}
+                value={sel.colorPenId ? resolvePenWeight(project, sel.colorPenId) : sel.weightMm}
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   if (Number.isFinite(v)) host.onSetSelectionWeight(v);
@@ -358,6 +365,44 @@ export function AttributesPanel() {
           </>
         )}
 
+        {/* Bildkorrektur (Sättigung/Helligkeit/Kontrast/Graustufen) — NUR
+            Kontext-Objekt-Luftbilder (`ContextImage.filters`); Drawing2D-/
+            Layout-Bilder haben (noch) keine Korrektur. Neutral-Defaults
+            (1/1/1/0), damit ein fehlendes `filters`-Objekt als "kein Effekt"
+            angezeigt wird statt als 0/0/0/0. */}
+        {sel.kind === "contextObject" && sel.isImage && (
+          <>
+            {(
+              [
+                ["saturation", "attr.saturation", 1, 0, 2] as const,
+                ["brightness", "attr.brightness", 1, 0, 2] as const,
+                ["contrast", "attr.contrast", 1, 0, 2] as const,
+                ["grayscale", "attr.grayscale", 0, 0, 1] as const,
+              ]
+            ).map(([key, labelKey, neutral, min, max]) => (
+              <Fragment key={key}>
+                <span className="attr-key">{t(labelKey)}</span>
+                <span className="attr-val">
+                  <input
+                    className="attr-num"
+                    style={{ width: 72 }}
+                    type="number"
+                    step={0.05}
+                    min={min}
+                    max={max}
+                    value={sel.imageFilters?.[key] ?? neutral}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v))
+                        host.onSetSelectionImageFilters({ [key]: Math.max(min, Math.min(max, v)) });
+                    }}
+                  />
+                </span>
+              </Fragment>
+            ))}
+          </>
+        )}
+
         {/* Linienstil — nur Drawing2D trägt ihn (Wand/Decke/Annotation etc.
             read-only), Rest wie gehabt. */}
         {!isAnnotation && (
@@ -392,12 +437,26 @@ export function AttributesPanel() {
           <>
             <div className="attr-section-label">{t("attr.fill")}</div>
 
+            {/* Swatch — IMMER sichtbar (zeigt den effektiven Wert, welche
+                Ebene/Bauteil/Override auch immer gerade liefert), aber nur bei
+                „eigener Wert" editierbar (`disabled`). Trägt wie die Strich-
+                farbe oben eine eigene Stift-Kopplung (`foregroundPenId`/
+                `backgroundPenId`) — Frei/Stift + Popover-Palette identisch zur
+                Stift-Zeile, nur pro Element statt pro Bauteil gekoppelt. */}
             {sourceRow(
               "attr.foreground",
               pocheEditable,
               fgUi,
               onForegroundSourceChange,
-              colorValue(sel.effectiveForeground, host.onSetSelectionForeground, pocheEditable),
+              <PenColorField
+                color={sel.effectiveForeground ?? "#808080"}
+                penId={sel.foregroundPenId}
+                pens={project.pens ?? []}
+                activeStyles={activePenSet(project)?.pens}
+                disabled={!pocheEditable}
+                onColorChange={host.onSetSelectionForeground}
+                onPenChange={host.onSetSelectionForegroundPen}
+              />,
             )}
 
             {sourceRow(
@@ -405,7 +464,15 @@ export function AttributesPanel() {
               pocheEditable,
               bgUi,
               onBackgroundSourceChange,
-              colorValue(sel.effectiveBackground, host.onSetSelectionBackground, pocheEditable),
+              <PenColorField
+                color={sel.effectiveBackground ?? "#808080"}
+                penId={sel.backgroundPenId}
+                pens={project.pens ?? []}
+                activeStyles={activePenSet(project)?.pens}
+                disabled={!pocheEditable}
+                onColorChange={host.onSetSelectionBackground}
+                onPenChange={host.onSetSelectionBackgroundPen}
+              />,
             )}
 
             {sourceRow(

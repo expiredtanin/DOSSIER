@@ -26,6 +26,7 @@ import { terrainMeshFromGrid } from "../model/terrain";
 import { makeOrigin } from "../io/lv95";
 import type { GeoOrigin, LV95 } from "../io/lv95";
 import type { ContextObject, TerrainMesh } from "../model/types";
+import { IMAGE_CATEGORY } from "../model/contextCategories";
 
 /** Gebäude-Import-Modus: aus, vereinfachte Box (schnell, alt) oder echte
  *  swissBUILDINGS3D-Geometrie (Wände+Dach) in einer der zwei Generationen. */
@@ -74,9 +75,14 @@ type Sources = {
 };
 
 const DEFAULT_SOURCES: Sources = {
-  // v2 = stabile Generation (1-km-Tiles, ~50 MB) als Default; v3 (Beta) kann in
-  // Städten sehr grosse Kacheln liefern (s. swissBuildings3d.ts-Kommentar).
-  swissBuildings: "v2",
+  // v3 als Default (2026-08-31): liest DWG „separated" über die LibreDWG-
+  // Low-Level-API (s. swissBuildings3d.ts-Moduldoc) und liefert Dach getrennt
+  // von Wand/Boden (eigene, ausblendbare Ebene „Dächer") — pro Kachel robust
+  // (einzelne kaputte/zu grosse Kacheln werden übersprungen, kein Absturz des
+  // gesamten Imports); fällt bei leeren v3-Treffern automatisch auf v2 zurück.
+  // In sehr dicht bebauten Städten können v3-Kacheln dennoch riesig sein (s.
+  // Kommentar dort) — dann hilft ein kleinerer Radius oder manuell v2 wählen.
+  swissBuildings: "v3",
   swissTerrain: true,
   swissImage: false,
   swissImageDrape: false,
@@ -270,6 +276,7 @@ export function ContextImportDialog({
             type: "image",
             name: `Luftbild ${selected.label}`,
             layer: "Luftbild",
+            categoryCode: IMAGE_CATEGORY.code,
             src: r.dataUrl,
             min: r.min,
             max: r.max,

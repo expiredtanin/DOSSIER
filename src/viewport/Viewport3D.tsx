@@ -63,6 +63,17 @@ export interface ViewportContextInfo {
 }
 
 /**
+ * Grund, warum three.js statt der wgpu-Engine aktiv ist — `null`, solange die
+ * Engine läuft. Speist den fett hervorgehobenen "FALLBACK MODE"-Badge (s.
+ * `ThreeViewport3D`), damit ein aktiver Fallback nie stillschweigend im
+ * Browser-Devtools-Log (`console.warn`) verschwindet, sondern IM Viewport
+ * sichtbar ist — sonst merkt niemand, dass man gerade den ungepflegten
+ * Zweitrenderer sieht (s. PENDENZEN „3D-Elemente-Parität-Audit": three.js ist
+ * bewusst kein Paritätsziel mehr, nur Notfall-Fallback).
+ */
+let THREE_FALLBACK_REASON: string | null = null;
+
+/**
  * Engine-Umschalter für die 3D-Sicht. Die Engine (render3d/wgpu) ist der
  * STANDARD-3D-Renderer; three.js ist nur noch Fallback — aktiv, wenn WebGPU
  * fehlt oder explizit WebGL2 gewählt ist (`?engine=webgl2` bzw. Statusleiste →
@@ -73,12 +84,15 @@ export interface ViewportContextInfo {
 const WASM_ENGINE_ACTIVE: boolean = (() => {
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
   const fromUrl = new URLSearchParams(window.location.search).get("engine");
-  const wanted = fromUrl
-    ? fromUrl === "wasm"
-    : window.localStorage.getItem("cad.rendererMode") !== "webgl2";
-  if (!wanted) return false;
+  const explicitWebgl2 = fromUrl ? fromUrl === "webgl2" : window.localStorage.getItem("cad.rendererMode") === "webgl2";
+  const wanted = fromUrl ? fromUrl === "wasm" : !explicitWebgl2;
+  if (!wanted) {
+    THREE_FALLBACK_REASON = explicitWebgl2 ? "manuell auf WebGL2 gestellt" : "wgpu-Engine nicht angefragt";
+    return false;
+  }
   if (!("gpu" in navigator)) {
     console.warn("engine=wasm angefragt, aber navigator.gpu fehlt → three.js-Fallback (3D)");
+    THREE_FALLBACK_REASON = "kein WebGPU im Browser (navigator.gpu fehlt)";
     return false;
   }
   return true;
@@ -1581,6 +1595,11 @@ function ThreeViewport3D({
             weiterhin. So aktivierst du 3D in Firefox: <code>about:config</code> →
             <code>webgl.disabled</code> auf <code>false</code> setzen.
           </span>
+        </div>
+      )}
+      {!unavailable && (
+        <div className="viewport-engine-badge" title={THREE_FALLBACK_REASON ?? undefined}>
+          FALLBACK MODE
         </div>
       )}
     </div>

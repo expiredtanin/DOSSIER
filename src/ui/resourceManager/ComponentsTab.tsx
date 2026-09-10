@@ -19,7 +19,16 @@ import { requestMaterialPreview, cancelMaterialPreview } from "../../materials/s
 import { Dropdown } from "../Dropdown";
 import { HatchSwatch } from "../hatchPreview";
 import { t } from "../../i18n";
-import { DeleteButton, FieldRow, ImagePickButton, TextField, ColorField, NumberField, SelectField } from "./fields";
+import { activePenSet, resolvePenColor } from "../../model/penSets";
+import { PenColorField } from "../PenColorField";
+import {
+  DeleteButton,
+  FieldRow,
+  ImagePickButton,
+  TextField,
+  NumberField,
+  SelectField,
+} from "./fields";
 
 /**
  * Material-Zelle der Bauteil-Tabelle: ein Button, der den aktuellen Material-
@@ -562,14 +571,19 @@ function ComponentMaterialSphere({
 function ComponentDetail({
   component,
   hatches,
+  project,
   onPatch,
   onDelete,
 }: {
   component: Component;
   hatches: Project["hatches"];
+  /** Für die Stift-Kopplung (`PenColorField`): `project.pens` + aktiver Stiftsatz. */
+  project: Project;
   onPatch: (patch: Partial<Component>) => void;
   onDelete: () => void;
 }) {
+  const pens = project.pens ?? [];
+  const activeStyles = activePenSet(project)?.pens;
   const hatchOptions = hatches.map((h) => ({ value: h.id, label: h.name }));
   // Ansichts-Schraffur ist optional; Leer-Eintrag = keine Schraffur (weiss).
   const viewHatchOptions = [
@@ -610,15 +624,46 @@ function ComponentDetail({
             placeholder={t("resources.col.abbrev.placeholder")}
           />
         </FieldRow>
+        <FieldRow label={t("resources.col.color")} hint={t("resources.col.color.hint")}>
+          {/* Grundfarbe = 3D-Diffusfarbe + Fallback für Vorder-/Hintergrund. */}
+          <PenColorField
+            color={component.colorPenId ? resolvePenColor(project, component.colorPenId) : component.color}
+            penId={component.colorPenId}
+            pens={pens}
+            activeStyles={activeStyles}
+            onColorChange={(color) => onPatch({ color, colorPenId: undefined })}
+            onPenChange={(colorPenId) =>
+              onPatch(
+                colorPenId
+                  ? { colorPenId, color: resolvePenColor(project, colorPenId) }
+                  : { colorPenId: undefined },
+              )
+            }
+          />
+        </FieldRow>
         <FieldRow
           label={t("resources.col.foreground")}
           hint={t("resources.col.foreground.hint")}
         >
           {/* Vordergrund = Farbe der Muster-/Schraffurlinien. Fehlt sie, greift
               als Anzeige-Fallback `color`; das Setzen definiert `foreground`. */}
-          <ColorField
-            color={component.foreground ?? component.color}
-            onChange={(foreground) => onPatch({ foreground })}
+          <PenColorField
+            color={
+              component.foregroundPenId
+                ? resolvePenColor(project, component.foregroundPenId)
+                : component.foreground ?? component.color
+            }
+            penId={component.foregroundPenId}
+            pens={pens}
+            activeStyles={activeStyles}
+            onColorChange={(foreground) => onPatch({ foreground, foregroundPenId: undefined })}
+            onPenChange={(foregroundPenId) =>
+              onPatch(
+                foregroundPenId
+                  ? { foregroundPenId, foreground: resolvePenColor(project, foregroundPenId) }
+                  : { foregroundPenId: undefined },
+              )
+            }
           />
         </FieldRow>
         <FieldRow
@@ -626,9 +671,23 @@ function ComponentDetail({
           hint={t("resources.col.background.hint")}
         >
           {/* Hintergrund = Füllung (Poché). Fehlt sie, gilt `color` als Fallback. */}
-          <ColorField
-            color={component.background ?? component.color}
-            onChange={(background) => onPatch({ background })}
+          <PenColorField
+            color={
+              component.backgroundPenId
+                ? resolvePenColor(project, component.backgroundPenId)
+                : component.background ?? component.color
+            }
+            penId={component.backgroundPenId}
+            pens={pens}
+            activeStyles={activeStyles}
+            onColorChange={(background) => onPatch({ background, backgroundPenId: undefined })}
+            onPenChange={(backgroundPenId) =>
+              onPatch(
+                backgroundPenId
+                  ? { backgroundPenId, background: resolvePenColor(project, backgroundPenId) }
+                  : { backgroundPenId: undefined },
+              )
+            }
           />
         </FieldRow>
         <FieldRow label={t("resources.col.hatch")}>
@@ -730,6 +789,7 @@ export function ComponentsTab({
               key={selected.id}
               component={selected}
               hatches={project.hatches}
+              project={project}
               onPatch={(patch) => onPatchComponent(selected.id, patch)}
               onDelete={() => {
                 revokeMaterialUrls(selected.material);

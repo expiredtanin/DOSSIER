@@ -282,10 +282,28 @@ interface OpeningFrameParams {
    */
   drawSill: boolean;
   /**
+   * Innen-Fensterbank zeichnen: nur Fenster mit `sillBoard` === "innen"/"beide".
+   * Gegenstück zu {@link drawSill} auf der Wand-Innenfläche (kein Überstand/
+   * keine Tropfkante — das ist eine reine Innenausbau-Ablage, keine
+   * Witterungskante). Türen: nie.
+   */
+  drawInteriorSill: boolean;
+  /**
    * Zargen-Umgriff (Bekleidung VOR beiden Wandflächen) zeichnen: nur Türen mit
    * `frameKind === "zarge"`. Blockrahmen bleibt bündig (false).
    */
   zargeCladding: boolean;
+  /**
+   * Echtes Schwellenprofil (dünne, farblich abgesetzte Leiste über die GANZE
+   * Wanddicke am Fussboden, analog zur Fensterbank-Leiste) zeichnen: nur
+   * Türen mit `threshold === true`. Zusätzlich zum bisherigen, strukturellen
+   * Blendrahmen-Riegel ({@link hasSill}) — der bleibt unverändert (steuert
+   * weiterhin, wo der Flügel-/Blatt-Bereich beginnt), das Profil kommt als
+   * eigenständiges, sichtbar unterscheidbares Bauteil obendrauf, nicht als
+   * dessen Ersatz. Fenster: nie (ihre Schwelle ist die `hasSill`-Sohlbank,
+   * kein Bodenanschlag).
+   */
+  drawThresholdProfile: boolean;
 }
 
 function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): OpeningFrameParams | null {
@@ -319,8 +337,10 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       sashes: [],
       halfThickness,
       drawSill: false,
+      drawInteriorSill: false,
       // Zarge umgreift die Wand (Bekleidung auf beiden Flächen); Blockrahmen bleibt bündig.
       zargeCladding: (dt.frameKind ?? "zarge") === "zarge",
+      drawThresholdProfile: dt.threshold === true,
     };
   }
   const wt = getWindowType(project, op);
@@ -365,7 +385,10 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     halfThickness,
     // Fensterbank zeichnen, ausser explizit "keine"/"innen" (fehlt ⇒ zeichnen).
     drawSill: wt.sillBoard !== "keine" && wt.sillBoard !== "innen",
+    // Innen-Fensterbank nur bei explizit "innen"/"beide".
+    drawInteriorSill: wt.sillBoard === "innen" || wt.sillBoard === "beide",
     zargeCladding: false,
+    drawThresholdProfile: false,
   };
 }
 
@@ -420,6 +443,24 @@ function frameMeshesForOpening(
   push(iv.from + fw, iv.to - fw, vert.zTop - fw, vert.zTop);
   // Schwelle: Fenster immer, Tür nur mit Bodenanschlag (threshold).
   if (params.hasSill) push(iv.from + fw, iv.to - fw, vert.zBottom, vert.zBottom + fw);
+  // Echtes Schwellenprofil (Tür, `threshold`): eine dünne, farblich abgesetzte
+  // Leiste ÜBER DIE GANZE WANDDICKE am Fussboden (nicht nur die Rahmentiefe
+  // wie der Blendrahmen-Riegel oben) — analog zur Fensterbank-Leiste
+  // (SILL_RGB statt FRAME_RGB), zeigt den realen Bodenanschlag (Stein/Metall-
+  // Streifen) statt eines rahmenfarbenen Riegels. Zusätzlich zum bestehenden
+  // Riegel, nicht dessen Ersatz (der bleibt für die Flügel-/Blatt-Z-Basis unten).
+  if (detailBodies && params.drawThresholdProfile) {
+    const stripH = 0.02; // Schwellen-Dicke
+    pushC(
+      iv.from + fw,
+      iv.to - fw,
+      vert.zBottom,
+      vert.zBottom + stripH,
+      -params.halfThickness,
+      params.halfThickness,
+      SILL_RGB,
+    );
+  }
 
   // Flügel-/Sash-Bereich zwischen Schwelle und Sturz, ggf. durch den Kämpfer
   // (Oberlicht-Trennung) oben beschnitten.
@@ -558,6 +599,21 @@ function frameMeshesForOpening(
     pushC(iv.from - ov, iv.to + ov, bankBottom, bankTop, outerN - under, outerN + proj, SILL_RGB);
     // Tropfkante (dünnere Stufe darunter, an der Aussenkante)
     pushC(iv.from - ov, iv.to + ov, bankBottom - dripH, bankBottom, outerN + proj - dripW, outerN + proj, SILL_RGB);
+  }
+
+  // Innen-Fensterbank (Ablage, VW „fein"/„mittel"): wie die Aussenbank
+  // gespiegelt auf die Wand-INNENfläche, aber ohne Tropfkante (reine
+  // Innenausbau-Ablage, keine Witterungskante) — `params.drawInteriorSill`
+  // (sillBoard "innen"/"beide").
+  if (detailBodies && params.drawInteriorSill) {
+    const ov = 0.03;
+    const proj = 0.04;
+    const under = 0.02;
+    const bankH = 0.04;
+    const innerN = -params.halfThickness; // Wand-Innenfläche
+    const bankTop = vert.zBottom;
+    const bankBottom = bankTop - bankH;
+    pushC(iv.from - ov, iv.to + ov, bankBottom, bankTop, innerN - proj, innerN + under, SILL_RGB);
   }
 
   // Tür-Zarge mit Umgriff (VW): die Zarge umgreift die Wand — eine schmale

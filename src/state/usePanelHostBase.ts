@@ -9,6 +9,7 @@
 
 import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Layout, Project } from "../model/types";
+import { resolvePenColor } from "../model/penSets";
 import type { ToolId } from "../tools/types";
 import type { ViewType } from "../ui/TopBar";
 import type { TransformSelection } from "../tools/transform";
@@ -24,6 +25,7 @@ import { t } from "../i18n";
 import {
   applyOverrideRuleEnabled,
   captureViewSnapshot,
+  matchingComboName,
   readViewSnapshot,
   type ViewSnapshotState,
 } from "./viewSnapshots";
@@ -164,7 +166,7 @@ export function usePanelHostBase(opts: {
     | "setSelectedRoofIds"
     | "setSelectedContextObjectIds"
     | "selectedSectionLineId"
-    | "setSelectedSectionLineId"
+    | "setSelectedSectionLineIds"
     | "section3dCutId"
   >;
   toolState: Pick<
@@ -284,7 +286,7 @@ export function usePanelHostBase(opts: {
     setSelectedRoofIds,
     setSelectedContextObjectIds,
     selectedSectionLineId,
-    setSelectedSectionLineId,
+    setSelectedSectionLineIds,
     section3dCutId,
   } = selectionState;
   const { activeTool, activeWallTypeId, setActiveWallTypeId, activeCategoryCode, setActiveCategoryCode, snap, setSnap } =
@@ -380,6 +382,23 @@ export function usePanelHostBase(opts: {
             patchAnnotationInLayout(l, selection.id, { color }),
           );
       },
+      // Stift-Kopplung der Farbe oben (s. `Selection.colorPenId`-Doku) —
+      // dieselben Selektionsarten wie `onSetSelectionColor`, MINUS Layout-
+      // Annotation (kein `colorPenId`-Feld dort, bewusster Scope-Schnitt s.
+      // PENDENZEN.md). `penId` gesetzt ⇒ Farbe sofort aus dem aktiven
+      // Stiftsatz backen; `undefined` ⇒ nur die Kopplung lösen, letzter
+      // gebackener Wert bleibt als freie Farbe stehen.
+      onSetSelectionColorPen: (penId) => {
+        if (!selection) return;
+        const color = penId ? resolvePenColor(project, penId) : undefined;
+        const patch = color !== undefined ? { colorPenId: penId, color } : { colorPenId: penId };
+        if (selection.kind === "wall") updateWall(selection.id, patch);
+        else if (selection.kind === "drawing2d") updateDrawing2D(selection.id, patch);
+        else if (selection.kind === "ceiling") updateCeiling(selection.id, patch);
+        else if (selection.kind === "opening") updateOpening(selection.id, patch);
+        else if (selection.kind === "stair") updateStair(selection.id, patch);
+        else if (selection.kind === "room") updateRoom(selection.id, patch);
+      },
       onSetSelectionWeight: (weightMm) => {
         // Strichstärke-Override: Wand/Decke (`strokeWeight`) oder Drawing2D/
         // Layout-Annotation (`weightMm`, Alt-Feldname bleibt).
@@ -415,7 +434,8 @@ export function usePanelHostBase(opts: {
       },
       onSetSelectionOpacity: (opacity) => {
         // Deckkraft nur bei Bild-Elementen (Drawing2D `{shape:"image"}` im
-        // Plan, Layout-Annotation `kind:"image"` auf dem Blatt).
+        // Plan, Layout-Annotation `kind:"image"` auf dem Blatt, Kontext-Objekt
+        // `type:"image"` = importiertes Luftbild).
         if (selection?.kind === "drawing2d")
           setProject((p) => ({
             ...p,
@@ -429,6 +449,27 @@ export function usePanelHostBase(opts: {
           patchOpenLayout(activeLayout.id, (l) =>
             patchAnnotationInLayout(l, selection.id, { opacity }),
           );
+        else if (selection?.kind === "contextObject")
+          setProject((p) => ({
+            ...p,
+            context: (p.context ?? []).map((o) =>
+              o.id === selection.id && o.type === "image" ? { ...o, opacity } : o,
+            ),
+          }));
+      },
+      onSetSelectionImageFilters: (filters) => {
+        // Nur Kontext-Objekt-Bilder tragen `filters` (s. `ContextImage`) —
+        // gemergt mit den bestehenden Werten (Teil-Update, ein Slider ändert
+        // nur SEINEN eigenen Wert).
+        if (selection?.kind !== "contextObject") return;
+        setProject((p) => ({
+          ...p,
+          context: (p.context ?? []).map((o) =>
+            o.id === selection.id && o.type === "image"
+              ? { ...o, filters: { ...o.filters, ...filters } }
+              : o,
+          ),
+        }));
       },
       onSetSelectionForeground: (color) => {
         // Vordergrund-Override: Wand, Decke oder Drawing2D.
@@ -447,6 +488,36 @@ export function usePanelHostBase(opts: {
           selection?.kind === "drawing2d"
         )
           setElementBackground(selection.kind, selection.id, color);
+      },
+      // Stift-Kopplung von Vordergrund/Hintergrund (s. `Selection.
+      // foregroundPenId`/`backgroundPenId`-Doku) — dieselben Selektionsarten
+      // wie `onSetSelectionForeground`/`onSetSelectionBackground` (Wand/Decke/
+      // Drawing2D; Stütze trägt zwar dasselbe Feld im Modell, hat aber ebenso
+      // wie bei `onSetSelectionColorPen` noch KEINEN UI-Schreibpfad — s.
+      // PENDENZEN.md-Scope-Entscheid). `penId` gesetzt ⇒ sofort aus dem aktiven
+      // Stiftsatz backen; `undefined` ⇒ nur die Kopplung lösen, letzter
+      // gebackener Wert bleibt als freier Override stehen.
+      onSetSelectionForegroundPen: (penId) => {
+        if (!selection) return;
+        const foreground = penId ? resolvePenColor(project, penId) : undefined;
+        const patch =
+          foreground !== undefined
+            ? { foregroundPenId: penId, foreground }
+            : { foregroundPenId: penId };
+        if (selection.kind === "wall") updateWall(selection.id, patch);
+        else if (selection.kind === "ceiling") updateCeiling(selection.id, patch);
+        else if (selection.kind === "drawing2d") updateDrawing2D(selection.id, patch);
+      },
+      onSetSelectionBackgroundPen: (penId) => {
+        if (!selection) return;
+        const background = penId ? resolvePenColor(project, penId) : undefined;
+        const patch =
+          background !== undefined
+            ? { backgroundPenId: penId, background }
+            : { backgroundPenId: penId };
+        if (selection.kind === "wall") updateWall(selection.id, patch);
+        else if (selection.kind === "ceiling") updateCeiling(selection.id, patch);
+        else if (selection.kind === "drawing2d") updateDrawing2D(selection.id, patch);
       },
       // ── By-Layer/By-Object-Quellen (Vordergrund/Hintergrund/Strichstärke/
       // Schraffur): "layer" erzwingt die Ebene, "object" erbt vom Bauteil —
@@ -903,7 +974,7 @@ export function usePanelHostBase(opts: {
           setSelectedColumnIds([]);
           setSelectedRoofIds([]);
           setSelectedContextObjectIds([]);
-          setSelectedSectionLineId(null);
+          setSelectedSectionLineIds([]);
           switch (kind) {
             case "Wand":
               setSelectedWallIds([id]);
@@ -948,9 +1019,9 @@ export function usePanelHostBase(opts: {
       // Erfassen: aktuellen Darstellungszustand einsammeln (View-State +
       // Sichtbarkeits-Snapshots + aktive Overrides) → pure captureViewSnapshot →
       // an project.viewSnapshots anhängen (im Dokument, nicht localStorage).
-      onCaptureViewSnapshot: (name: string, folderId?: string) => {
+      onCaptureViewSnapshot: (name: string, folderId?: string): string => {
         const trimmed = name.trim();
-        if (!trimmed) return;
+        if (!trimmed) return "";
         const st: ViewSnapshotState = {
           viewType,
           view3d,
@@ -972,6 +1043,40 @@ export function usePanelHostBase(opts: {
           ...p,
           viewSnapshots: [...(p.viewSnapshots ?? []), full],
         }));
+        return full.id;
+      },
+
+      // Wie `onCaptureViewSnapshot`, aber OHNE getippten Namen: die Ausschnitt-
+      // Tab-Leiste (DrawingTabs.tsx) legt per „+" einen neuen Tab aus dem
+      // aktuellen Stand an — Name automatisch die aktive Zeichnungskombination
+      // (falls deren Sichtbarkeits-Map exakt passt) oder sonst das aktive Blatt
+      // (Nutzer-Wunsch). Wählt den neuen Ausschnitt sofort an (Tab wird aktiv).
+      onCaptureViewSnapshotAuto: (): string => {
+        const drawingVisibility = snapshotDrawingVisibility();
+        const combo = matchingComboName(listDrawingCombos(), loadDrawingCombo, drawingVisibility);
+        const levelName =
+          project.drawingLevels.find((l) => l.id === activeLevelId)?.name ?? activeLevelId;
+        const name = combo ?? levelName;
+        const st: ViewSnapshotState = {
+          viewType,
+          view3d,
+          fov,
+          scaleDenominator,
+          detail,
+          activeLevelId,
+          layerVisibility: snapshotLayerVisibility(),
+          drawingVisibility,
+          enabledOverrideRuleIds: (project.overrideRules ?? [])
+            .filter((r) => r.enabled)
+            .map((r) => r.id),
+        };
+        const snap = captureViewSnapshot(`vs-${Date.now()}`, name, st);
+        setProject((p) => ({
+          ...p,
+          viewSnapshots: [...(p.viewSnapshots ?? []), snap],
+        }));
+        setSelectedViewSnapshotId(snap.id);
+        return snap.id;
       },
 
       // Wiederherstellen: ALLE Felder zurückspielen. Reihenfolge: Geschoss ZUERST

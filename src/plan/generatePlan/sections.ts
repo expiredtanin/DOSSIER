@@ -6,7 +6,17 @@
 
 import { leftNormal, normalize, sub } from "../../model/geometry";
 import type { Project } from "../../model/types";
-import { NO_HATCH, type Primitive } from "./shared";
+import { NO_HATCH, SHOW_ALL, type CategoryDisplayResolver, type Primitive } from "./shared";
+
+/**
+ * Kategorie-Code der Schnittführungs-Symbole — feste Zuordnung zu "90"
+ * (Referenzen), derselben Kategorie wie Kontext-Konturen/Höhenlinien:
+ * Schnittlinien sind Dokumentations-/Referenzelemente, keine Bauteile, und
+ * bekommen deshalb kein eigenes Sichtbarkeits-Flag mehr am DrawingLevel —
+ * sie sind ein Element AUF einer Ebene und werden NUR darüber (Ebenen-Panel,
+ * visibleCodes/categoryDisplay) ein-/ausgeblendet, wie jedes andere Bauteil.
+ */
+const SECTION_LINE_CATEGORY = "90";
 
 /** Tinte der Schnittführungs-Linie/Marken (kräftiges Grau). */
 const SECTION_LINE_INK = "#1f242c";
@@ -40,14 +50,25 @@ function sectionLabelTag(name: string): string {
  * auf der Blickseite (`directionSign`) und das Schnitt-Label (Kurz-Tag) daneben.
  * Zusätzlich ein unsichtbares Pick-Band (Polygon mit `sectionLineId`), damit die
  * Linie im Grundriss anklickbar ist (analog dem Dach-Traufe-Pick-Polygon).
+ *
+ * Sichtbarkeit/Dimmen läuft über die Kategorie "90" (Referenzen) — genau wie
+ * bei Wänden/Decken/Räumen, NICHT über das eigene Sichtbarkeits-Flag der
+ * Schnitt-/Ansichtsebene (Nutzer-Feedback: "diese sollten Elemente sein, die
+ * sich auf einer Ebene befinden und nur damit ein-/ausgeblendet werden").
+ * `visibleCodes`/`categoryDisplay` fehlen sie (Export-/Print-Pfad ohne
+ * Ebenen-Filter) → immer sichtbar, wie bisher.
  */
-export function addSectionLines(out: Primitive[], project: Project): void {
+export function addSectionLines(
+  out: Primitive[],
+  project: Project,
+  visibleCodes?: Set<string>,
+  categoryDisplay: CategoryDisplayResolver = SHOW_ALL,
+): void {
+  const d = categoryDisplay(SECTION_LINE_CATEGORY);
+  if ((visibleCodes && !visibleCodes.has(SECTION_LINE_CATEGORY)) || !d.render) return;
+  const greyed = d.greyed;
   for (const level of project.drawingLevels) {
     if (level.kind !== "section" && level.kind !== "elevation") continue;
-    // Schnittebene ist ein-/ausblendbar wie andere Ebenen: eine unsichtbare
-    // Schnitt-/Ansichtsebene zeigt ihre Linie im Grundriss nicht (Nutzer-Vision
-    // „eigene Ebene Schnittebenen"). `visible` fehlt = sichtbar (Alt-Projekte).
-    if (level.visible === false) continue;
     const line = level.linePoints;
     if (!line) continue;
     const [p0, p1] = line;
@@ -68,6 +89,7 @@ export function addSectionLines(out: Primitive[], project: Project): void {
       weightMm: SECTION_LINE_MM,
       dash: SECTION_LINE_DASH,
       color: SECTION_LINE_INK,
+      greyed,
     });
 
     // Endmarken (Querstrich + Richtungspfeil + Label) an beiden Enden.
@@ -83,6 +105,7 @@ export function addSectionLines(out: Primitive[], project: Project): void {
         cls: "section-line",
         weightMm: SECTION_LINE_MARK_MM,
         color: SECTION_LINE_INK,
+        greyed,
       });
       // Richtungspfeil: vom Querstrich-Ende auf der Blickseite entlang bn.
       const base = { x: end.x + bn.x * half, y: end.y + bn.y * half };
@@ -92,7 +115,7 @@ export function addSectionLines(out: Primitive[], project: Project): void {
         y: tip.y - bn.y * SECTION_MARK_LEN * 0.4,
       };
       const w = SECTION_MARK_LEN * 0.25;
-      out.push({ kind: "line", a: base, b: tip, cls: "section-line", weightMm: SECTION_LINE_MARK_MM, color: SECTION_LINE_INK });
+      out.push({ kind: "line", a: base, b: tip, cls: "section-line", weightMm: SECTION_LINE_MARK_MM, color: SECTION_LINE_INK, greyed });
       out.push({
         kind: "line",
         a: tip,
@@ -100,6 +123,7 @@ export function addSectionLines(out: Primitive[], project: Project): void {
         cls: "section-line",
         weightMm: SECTION_LINE_MARK_MM,
         color: SECTION_LINE_INK,
+        greyed,
       });
       out.push({
         kind: "line",
@@ -108,6 +132,7 @@ export function addSectionLines(out: Primitive[], project: Project): void {
         cls: "section-line",
         weightMm: SECTION_LINE_MARK_MM,
         color: SECTION_LINE_INK,
+        greyed,
       });
       // Label (Kurz-Tag) etwas hinter dem Pfeil, horizontal.
       const labelAt = {
@@ -121,6 +146,7 @@ export function addSectionLines(out: Primitive[], project: Project): void {
         heightM: SECTION_LABEL_H,
         angle: 0,
         color: SECTION_LINE_INK,
+        greyed,
       });
     }
 

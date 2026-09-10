@@ -19,6 +19,7 @@ import type {
   CeilingType,
   RoofType,
   Component,
+  ContextImage,
   ContextObject,
   DrawingLevel,
   HatchStyle,
@@ -176,6 +177,14 @@ export interface PanelHostValue {
   /** Setzt die (Strich-)Farbe der aktuellen Selektion (Wand oder Drawing2D). */
   onSetSelectionColor: (color: string) => void;
   /**
+   * Koppelt/entkoppelt die Farbe oben an einen Stift (ArchiCAD-Stiftsatz-
+   * Muster, `model/penSets.ts`) — `undefined` = „Frei" (zurück zur normalen
+   * Farbwahl, letzter Wert bleibt stehen). Wirkt auf jede Selektionsart mit
+   * eigenem `colorPenId`-Feld (Wand/Decke/Dach/Öffnung/Treppe/Raum/Stütze/
+   * Drawing2D); No-op bei den übrigen Arten.
+   */
+  onSetSelectionColorPen: (penId: string | undefined) => void;
+  /**
    * Setzt den Strichstärke-Override (mm, „eigener Wert") — Wand/Decke
    * (`strokeWeight`) oder Drawing2D (`weightMm`). Die Quelle (Ebene/Bauteil)
    * setzt {@link onSetSelectionStrokeWeightSource}.
@@ -199,9 +208,17 @@ export interface PanelHostValue {
   onSetSelectionFillColor: (color: string | null) => void;
   /**
    * Setzt die Deckkraft (0..1) — wirkt NUR auf Bild-Elemente (Drawing2D
-   * `{shape:"image"}` oder Layout-Annotation `kind:"image"`), sonst No-op.
+   * `{shape:"image"}`, Layout-Annotation `kind:"image"` oder Kontext-Objekt
+   * `type:"image"`), sonst No-op.
    */
   onSetSelectionOpacity: (opacity: number) => void;
+  /**
+   * Setzt eine oder mehrere Bildkorrektur-Werte (Sättigung/Helligkeit/
+   * Kontrast/Graustufen) — wirkt NUR auf Kontext-Objekt-Bilder (`ContextImage`,
+   * `sel.kind === "contextObject"` mit `isImage`), sonst No-op. Merged mit den
+   * bestehenden Werten (Teil-Update, wie bei `onSetSelectionOpacity`).
+   */
+  onSetSelectionImageFilters: (filters: Partial<NonNullable<ContextImage["filters"]>>) => void;
   /**
    * Setzt/entfernt den Vordergrund-Override (Muster-/Schraffurfarbe, „eigener
    * Wert") der Selektion — Wand, Decke oder geschlossene Drawing2D. `null` =
@@ -215,6 +232,14 @@ export interface PanelHostValue {
    * System" (siehe {@link onSetSelectionBackgroundSource}).
    */
   onSetSelectionBackground: (color: string | null) => void;
+  /**
+   * Koppelt/entkoppelt den Vordergrund-Override oben an einen Stift, analog
+   * {@link onSetSelectionColorPen} — wirkt auf Wand, Decke oder geschlossene
+   * Drawing2D (dieselben Arten wie {@link onSetSelectionForeground}).
+   */
+  onSetSelectionForegroundPen: (penId: string | undefined) => void;
+  /** Koppelt/entkoppelt den Hintergrund-Override, analog {@link onSetSelectionForegroundPen}. */
+  onSetSelectionBackgroundPen: (penId: string | undefined) => void;
   /**
    * Setzt die Quelle des Vordergrunds, wenn KEIN „eigener Wert" gilt: "layer" =
    * Nach Ebene, "object" = Nach Bauteil. Löscht dabei IMMER den expliziten
@@ -498,9 +523,17 @@ export interface PanelHostValue {
   /**
    * Erfasst den aktuellen Darstellungszustand als neuen, benannten Ausschnitt.
    * `folderId` legt ihn direkt im angegebenen Ordner ab (sonst Wurzelebene) —
-   * additiv, Alt-Aufrufe ohne Ordner-Argument bleiben gültig.
+   * additiv, Alt-Aufrufe ohne Ordner-Argument bleiben gültig. Liefert die neue
+   * Ausschnitt-Id (leer bei leerem/ungetrimmtem Namen).
    */
-  onCaptureViewSnapshot: (name: string, folderId?: string) => void;
+  onCaptureViewSnapshot: (name: string, folderId?: string) => string;
+  /**
+   * Wie `onCaptureViewSnapshot`, aber mit automatisch bestimmtem Namen (aktive
+   * Zeichnungskombination falls exakt passend, sonst das aktive Blatt) — für
+   * die Ausschnitt-Tab-Leiste ("+"-Knopf, s. DrawingTabs.tsx). Wählt den neuen
+   * Ausschnitt sofort an.
+   */
+  onCaptureViewSnapshotAuto: () => string;
   /** Stellt alle Felder eines Ausschnitts wieder her (Geschoss/Sichtbarkeit/Overrides/Ansicht). */
   onApplyViewSnapshot: (id: string) => void;
   /** Benennt einen Ausschnitt um. */

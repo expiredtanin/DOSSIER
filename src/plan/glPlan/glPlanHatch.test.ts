@@ -327,6 +327,39 @@ describe('buildHatchRuns', () => {
     const runs = buildHatchRuns(sq, hatch({ pattern: 'diagonal', scale: 0 }));
     expect(runs.length).toBeGreaterThan(0);
   });
+
+  it('custom OHNE gesetztes Motiv fällt auf gerade 2-Punkt-Läufe zurück (wie diagonal)', () => {
+    const runs = buildHatchRuns(sq, hatch({ pattern: 'custom' }));
+    expect(runs.length).toBeGreaterThan(0);
+    for (const r of runs) expect(r.length).toBe(2);
+  });
+
+  it('custom MIT Motiv tesseliert jede Musterlinie zu einer Motiv-Polylinie (>2 Punkte)', () => {
+    const motif = {
+      points: [
+        { x: 0, y: 0 },
+        { x: 1, y: 1.5 },
+        { x: 2, y: 0 },
+        { x: 3, y: -1.5 },
+        { x: 4, y: 0 },
+      ],
+      length: 4,
+    };
+    const withMotif = buildHatchRuns(sq, hatch({ pattern: 'custom', motif }));
+    const withoutMotif = buildHatchRuns(sq, hatch({ pattern: 'diagonal' }));
+    expect(withMotif.length).toBe(withoutMotif.length); // gleiche Anzahl Musterlinien
+    // Mindestens ein Lauf ist eine echte, tesselierte Polylinie (nicht nur 2 Punkte).
+    expect(withMotif.some((r) => r.length > 2)).toBe(true);
+    // Alle Punkte endlich (kein NaN/Infinity) — der Quer-Versatz des Motivs
+    // kann die Läufe leicht über die Original-Musterlinie hinaus versetzen
+    // (wie bei "insulation" oben, das ebenfalls nur x prüft, nicht y).
+    for (const r of withMotif) {
+      for (const p of r) {
+        expect(Number.isFinite(p.x)).toBe(true);
+        expect(Number.isFinite(p.y)).toBe(true);
+      }
+    }
+  });
 });
 
 describe('applyDashRuns', () => {

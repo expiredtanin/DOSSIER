@@ -12,6 +12,10 @@ scripts/*.png
 .DS_Store
 *.log
 
+# Lokale Test-/Demo-Projektdateien (kein Quellcode)
+*.obp
+*.obp.lock
+
 # Generierte native-Viewport-Szenen (aus sampleProject via scripts/dump-native-scene.mjs)
 src-tauri/assets/native2d_scene.json
 src-tauri/assets/native3d_walls.json

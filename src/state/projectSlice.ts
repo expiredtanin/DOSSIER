@@ -14,20 +14,30 @@ import {
   recomputeFloorElevations,
 } from "../model/types";
 import type {
+  ColorPen,
   Component,
   Drawing2D,
   DrawingLevel,
   HatchStyle,
   LayerCategory,
   LineStyle,
+  PenSet,
   Project,
   Vec2,
 } from "../model/types";
+import {
+  activePenSet,
+  rebakePenColors,
+  seedStandardPenSet as buildStandardPenSet,
+  PEN_FALLBACK_COLOR,
+  PEN_FALLBACK_WEIGHT,
+} from "../model/penSets";
 import { lineIntersect } from "../model/geometry";
 import { commitTransform } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
 import { centroid as roomCentroid } from "../geometry/roomArea";
+import { bulgeFromSagittaPoint, bulgePointAt } from "../geometry/bulge";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
 import { createHistorySlice, pushHistoryPatch } from "./historySlice";
@@ -97,6 +107,25 @@ export interface ProjectSlice {
   deleteLineStyle: (id: string) => void;
   importLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   importHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
+
+  // ── Stiftsätze (ArchiCAD-Stiftsatz-Muster, s. model/penSets.ts) ───────────
+  /** Neuer Stift-Platzhalter (Name, keine Farbe) — landet in JEDEM bestehenden Stiftsatz. */
+  addPen: () => void;
+  renamePen: (id: string, name: string) => void;
+  /** Entfernt den Stift-Platzhalter + seinen Eintrag in allen Stiftsätzen; löst betroffene `xxxPenId`-Verweise (Farbe bleibt der letzte gebackene Wert). */
+  deletePen: (id: string) => void;
+  /** Neuer Stiftsatz — übernimmt die Farben des aktiven Satzes (falls vorhanden), sonst den Fallback; wird aktiv, wenn es der erste Satz ist. */
+  addPenSet: () => void;
+  renamePenSet: (id: string, name: string) => void;
+  /** Blockiert (mit Hinweis), wenn `id` der aktive Satz ist — zuerst einen anderen aktivieren. */
+  deletePenSet: (id: string) => void;
+  /** Setzt den aktiven Stiftsatz und bäckt sofort alle Stift-gekoppelten Farben neu. */
+  setActivePenSet: (id: string) => void;
+  /** Ändert die Farbe EINES Stifts in EINEM Stiftsatz; bäckt neu, wenn dieser Satz aktiv ist. */
+  patchPenSetColor: (setId: string, penId: string, color: string) => void;
+  patchPenSetWeight: (setId: string, penId: string, weight: number) => void;
+  /** Ersetzt `pens`/legt einen neuen Satz mit der 255er-CAD-Standardpalette an (s. `model/penSets.ts`). */
+  seedStandardPenSet: () => void;
 
   // ── Editier-Griffe + Body-Move des selektierten Elements ──────────────────
   moveGripOf: (
@@ -174,6 +203,20 @@ export interface ProjectSlice {
    * - "forward"/"backward": Auswahl je einen Schritt Richtung Ende/Anfang.
    */
   reorderDrawings: (
+    ids: string[],
+    op: "front" | "back" | "forward" | "backward",
+  ) => void;
+  /**
+   * Sortiert die gewählten Zeichnungsebenen in `drawingLevels` um — dieselbe
+   * "front"/"back"/"forward"/"backward"-Semantik wie `reorderDrawings`, nur
+   * für Geschosse/Schnitte/Ansichten/2D-Zeichnungen statt Drawing2D-Elemente.
+   * Die Array-Reihenfolge bestimmt die Überlagerungs-Reihenfolge bei mehreren
+   * gleichzeitig sichtbaren Ebenen (s. generatePlan.ts::generateVisibleLevelsPlan,
+   * viewportContent.tsx::overlaySectionLevels) — Nutzer-Wunsch "Ansichten in
+   * den Hintergrund legen können". Panel-Liste zeigt die REVERSE Array-
+   * Reihenfolge (oben = zuletzt im Array = vorne/obenauf), s. DrawingLevelsPanel.
+   */
+  reorderDrawingLevels: (
     ids: string[],
     op: "front" | "back" | "forward" | "backward",
   ) => void;
@@ -770,6 +813,137 @@ export function createProjectSlice(
         ],
       })),
 
+    // ── Stiftsätze ─────────────────────────────────────────────────────────
+    addPen: () =>
+      setProject((p) => {
+        const pen: ColorPen = { id: `pen-${Date.now()}`, name: t("default.penName") };
+        return {
+          ...p,
+          pens: [...(p.pens ?? []), pen],
+          // Neuer Stift bekommt in JEDEM bestehenden Stiftsatz sofort einen
+          // Eintrag (Fallback-Grauton+Stärke) — Stiftsätze bleiben dadurch
+          // immer deckungsgleich zur `pens`-Liste, keine "fehlt in Satz X"-Lücken.
+          penSets: p.penSets?.map((s) => ({
+            ...s,
+            pens: { ...s.pens, [pen.id]: { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT } },
+          })),
+        };
+      }),
+
+    renamePen: (id, name) =>
+      setProject((p) => ({
+        ...p,
+        pens: p.pens?.map((pen) => (pen.id === id ? { ...pen, name } : pen)),
+      })),
+
+    deletePen: (id) =>
+      setProject((p) => {
+        const clearPenRefs = <T extends { colorPenId?: string; foregroundPenId?: string; backgroundPenId?: string }>(x: T): T =>
+          x.colorPenId === id || x.foregroundPenId === id || x.backgroundPenId === id
+            ? {
+                ...x,
+                colorPenId: x.colorPenId === id ? undefined : x.colorPenId,
+                foregroundPenId: x.foregroundPenId === id ? undefined : x.foregroundPenId,
+                backgroundPenId: x.backgroundPenId === id ? undefined : x.backgroundPenId,
+              }
+            : x;
+        const clearCategoryPenRefs = (cat: LayerCategory): LayerCategory => ({
+          ...(cat.colorPenId === id ? { ...cat, colorPenId: undefined } : cat),
+          ...(cat.children ? { children: cat.children.map(clearCategoryPenRefs) } : {}),
+        });
+        return {
+          ...p,
+          pens: p.pens?.filter((pen) => pen.id !== id),
+          penSets: p.penSets?.map((s) => {
+            const { [id]: _removed, ...rest } = s.pens;
+            return { ...s, pens: rest };
+          }),
+          components: p.components.map(clearPenRefs),
+          layers: p.layers.map(clearCategoryPenRefs),
+        };
+      }),
+
+    addPenSet: () =>
+      setProject((p) => {
+        const current = activePenSet(p);
+        const penSet: PenSet = {
+          id: `penset-${Date.now()}`,
+          name: t("default.penSetName"),
+          pens: current
+            ? { ...current.pens }
+            : Object.fromEntries(
+                (p.pens ?? []).map((pen) => [pen.id, { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }]),
+              ),
+        };
+        const penSets = [...(p.penSets ?? []), penSet];
+        // Erster Stiftsatz überhaupt: automatisch aktivieren (sonst löst jeder
+        // Stift-Verweis bis zur ersten manuellen Aktivierung auf den Fallback auf).
+        return {
+          ...p,
+          penSets,
+          activePenSetId: p.activePenSetId ?? penSet.id,
+        };
+      }),
+
+    renamePenSet: (id, name) =>
+      setProject((p) => ({
+        ...p,
+        penSets: p.penSets?.map((s) => (s.id === id ? { ...s, name } : s)),
+      })),
+
+    deletePenSet: (id) =>
+      setProject((p) => {
+        if (p.activePenSetId === id) {
+          const name = p.penSets?.find((s) => s.id === id)?.name ?? id;
+          get().notify(t("alert.penSetIsActive", { name }), "warning");
+          return p;
+        }
+        return { ...p, penSets: p.penSets?.filter((s) => s.id !== id) };
+      }),
+
+    setActivePenSet: (id) =>
+      setProject((p) => rebakePenColors({ ...p, activePenSetId: id })),
+
+    patchPenSetColor: (setId, penId, color) =>
+      setProject((p) => {
+        const next = {
+          ...p,
+          penSets: p.penSets?.map((s) =>
+            s.id === setId
+              ? {
+                  ...s,
+                  pens: {
+                    ...s.pens,
+                    [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), color },
+                  },
+                }
+              : s,
+          ),
+        };
+        return setId === p.activePenSetId ? rebakePenColors(next) : next;
+      }),
+
+    patchPenSetWeight: (setId, penId, weight) =>
+      setProject((p) => {
+        const next = {
+          ...p,
+          penSets: p.penSets?.map((s) =>
+            s.id === setId
+              ? {
+                  ...s,
+                  pens: {
+                    ...s.pens,
+                    [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), weight },
+                  },
+                }
+              : s,
+          ),
+        };
+        return setId === p.activePenSetId ? rebakePenColors(next) : next;
+      }),
+
+    seedStandardPenSet: () => setProject((p) => buildStandardPenSet(p)),
+
     // ── Editier-Griffe ─────────────────────────────────────────────────────
     // Diese Aktionen laufen AD-HOC bei jedem Maus-Move-Schritt eines Drags
     // (kein Draft/Commit-Muster wie bei den Zeichenwerkzeugen) — daher mit
@@ -864,6 +1038,12 @@ export function createProjectSlice(
       setProject((p) => ({
         ...p,
         drawings2d: reorderDrawings2D(p.drawings2d, ids, op),
+      })),
+
+    reorderDrawingLevels: (ids, op) =>
+      setProject((p) => ({
+        ...p,
+        drawingLevels: reorderDrawingLevelsArr(p.drawingLevels, ids, op),
       })),
 
     // ── Größe (Resize um Anker) ────────────────────────────────────────────
@@ -1159,6 +1339,42 @@ function reorderDrawings2D(
   return arr;
 }
 
+/**
+ * Wie `reorderDrawings2D`, nur für `DrawingLevel[]` (Zeichnungsebenen statt
+ * Drawing2D-Elemente) — identische "front"/"back"/"forward"/"backward"-Logik,
+ * bewusst dupliziert statt genericisiert (zwei kleine, unabhängige Domänen).
+ */
+function reorderDrawingLevelsArr(
+  levels: DrawingLevel[],
+  ids: string[],
+  op: "front" | "back" | "forward" | "backward",
+): DrawingLevel[] {
+  const selected = new Set(ids.filter((id) => levels.some((l) => l.id === id)));
+  if (selected.size === 0) return levels;
+
+  if (op === "front" || op === "back") {
+    const picked = levels.filter((l) => selected.has(l.id));
+    const rest = levels.filter((l) => !selected.has(l.id));
+    return op === "front" ? [...rest, ...picked] : [...picked, ...rest];
+  }
+
+  const arr = levels.slice();
+  if (op === "forward") {
+    for (let i = arr.length - 2; i >= 0; i--) {
+      if (selected.has(arr[i].id) && !selected.has(arr[i + 1].id)) {
+        [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
+      }
+    }
+  } else {
+    for (let i = 1; i < arr.length; i++) {
+      if (selected.has(arr[i].id) && !selected.has(arr[i - 1].id)) {
+        [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]];
+      }
+    }
+  }
+  return arr;
+}
+
 function mapCeiling(
   project: Project,
   ceilingId: string,
@@ -1363,7 +1579,8 @@ function resizeGeom(
   anchor: { fx: number; fy: number },
 ): import("../model/types").Drawing2DGeom {
   switch (g.shape) {
-    case "line": {
+    case "line":
+    case "xline": {
       const { ax, ay, sx, sy } = scaleAround(bbox2([g.a, g.b]), w, h, anchor);
       const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
       return { ...g, a: f(g.a), b: f(g.b) };
@@ -1435,6 +1652,13 @@ function resizeGeom(
       const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
       return { ...g, at: { x: ax + (g.at.x - ax) * sx, y: ay + (g.at.y - ay) * sy } };
     }
+    case "block": {
+      // Wie Text: nur der Einfügepunkt wandert (kein Skalierungsfaktor am
+      // Symbol selbst in v1).
+      const box = { minX: g.at.x, minY: g.at.y, maxX: g.at.x, maxY: g.at.y };
+      const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
+      return { ...g, at: { x: ax + (g.at.x - ax) * sx, y: ay + (g.at.y - ay) * sy } };
+    }
     case "image": {
       const box = bbox2([g.min, g.max]);
       const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
@@ -1480,8 +1704,22 @@ function ellipseOrCircle(
  */
 export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
   const g = d.geom;
-  if (g.shape === "line") return [g.a, g.b];
-  if (g.shape === "polyline") return [...g.pts];
+  if (g.shape === "line" || g.shape === "xline") return [g.a, g.b];
+  // Polylinie: Eckpunkt-Griffe (Index 0..n-1) PLUS ein Bulge-Griff je Segment
+  // (Index n..; Apex des aktuellen Bogens, oder Sehnen-Mitte bei bulge=0) —
+  // senkrecht zur Sehne ziehen krümmt genau dieses Segment (s. moveGrip).
+  if (g.shape === "polyline") {
+    const n = g.pts.length;
+    const closeSeg = g.closed && n > 2;
+    const segCount = Math.max(0, n - 1) + (closeSeg ? 1 : 0);
+    const bulgeGrips: Vec2[] = [];
+    for (let i = 0; i < segCount; i++) {
+      const a = g.pts[i];
+      const b = i === n - 1 ? g.pts[0] : g.pts[i + 1];
+      bulgeGrips.push(bulgePointAt(a, b, g.bulge?.[i] ?? 0, 0.5));
+    }
+    return [...g.pts, ...bulgeGrips];
+  }
   if (g.shape === "rect" || g.shape === "image") {
     return [
       g.min,
@@ -1533,8 +1771,17 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
   }
   // Kote: EIN Griff an der Dreieck-Spitze (zum Verschieben; siehe moveGrip).
   if (g.shape === "kote") return [g.at];
-  // Text: EIN Griff am Ankerpunkt (zum Verschieben; siehe moveGrip).
-  if (g.shape === "text") return [g.at];
+  // Text: Griff 0 am Ankerpunkt; trägt der Text einen Leader, zusätzlich Griff
+  // 1 an dessen Zielpunkt (Pfeilspitze unabhängig verschiebbar; s. moveGrip).
+  // Text-entlang-Pfad: die Pfadpunkte SELBST sind die Griffe (wie polyline),
+  // ersetzt das Anker/Leader-Griffmodell komplett (schliessen sich aus).
+  if (g.shape === "text") {
+    if (g.pathPts) return [...g.pathPts];
+    return g.leaderTarget ? [g.at, g.leaderTarget] : [g.at];
+  }
+  // Block-Instanz: EIN Griff am Einfügepunkt (Rotation läuft über move/mirror,
+  // kein eigener Rotations-Griff in v1; s. moveGrip).
+  if (g.shape === "block") return [g.at];
   return [];
 }
 
@@ -1587,10 +1834,27 @@ function moveGrip(
       drawings2d: project.drawings2d.map((d) => {
         if (d.id !== drawingId) return d;
         const g = d.geom;
-        if (g.shape === "line") {
+        if (g.shape === "line" || g.shape === "xline") {
           return { ...d, geom: index === 0 ? { ...g, a: pt } : { ...g, b: pt } };
         }
-        if (g.shape === "polyline" || g.shape === "bezier" || g.shape === "spline") {
+        if (g.shape === "polyline") {
+          const n = g.pts.length;
+          if (index < n) {
+            const pts = g.pts.map((p, i) => (i === index ? pt : p));
+            return { ...d, geom: { ...g, pts } };
+          }
+          // Bulge-Griff (Index ≥ n): Segment-Mitte senkrecht zur Sehne gezogen
+          // → neuer Bogen-Faktor für GENAU dieses Segment (s. drawingVertices).
+          const segIndex = index - n;
+          const a = g.pts[segIndex];
+          const b = segIndex === n - 1 ? g.pts[0] : g.pts[segIndex + 1];
+          const bulgeVal = bulgeFromSagittaPoint(a, b, pt);
+          const bulge = [...(g.bulge ?? [])];
+          while (bulge.length <= segIndex) bulge.push(0);
+          bulge[segIndex] = bulgeVal;
+          return { ...d, geom: { ...g, bulge } };
+        }
+        if (g.shape === "bezier" || g.shape === "spline") {
           const pts = g.pts.map((p, i) => (i === index ? pt : p));
           return { ...d, geom: { ...g, pts } };
         }
@@ -1622,10 +1886,21 @@ function moveGrip(
           const max = { x: Math.max(pt.x, opp.x), y: Math.max(pt.y, opp.y) };
           return { ...d, geom: { ...g, min, max } };
         }
-        // Text: der einzige Griff (Index 0) sitzt am Ankerpunkt → verschiebt ihn.
-        if (g.shape === "text") return { ...d, geom: { ...g, at: pt } };
+        // Text: Griff 0 = Ankerpunkt; Griff 1 (nur bei Leader) = Zielpunkt;
+        // trägt der Text einen Pfad, adressiert der Index einen Pfadpunkt.
+        if (g.shape === "text") {
+          if (g.pathPts) {
+            const pathPts = g.pathPts.map((pp, i) => (i === index ? pt : pp));
+            return { ...d, geom: { ...g, pathPts } };
+          }
+          return index === 1 && g.leaderTarget
+            ? { ...d, geom: { ...g, leaderTarget: pt } }
+            : { ...d, geom: { ...g, at: pt } };
+        }
         // Kote: der einzige Griff (Index 0) sitzt an der Dreieck-Spitze.
         if (g.shape === "kote") return { ...d, geom: { ...g, at: pt } };
+        // Block-Instanz: der einzige Griff (Index 0) sitzt am Einfügepunkt.
+        if (g.shape === "block") return { ...d, geom: { ...g, at: pt } };
         // Kreis: Griff 0 (Ost) bzw. 1 (Nord) — zieht man die beiden Achsen
         // unabhängig auseinander, wird der Kreis zur Ellipse (rotation 0);
         // bleiben rx/ry (fast) gleich, bleibt es ein Kreis (s. `ellipseOrCircle`).

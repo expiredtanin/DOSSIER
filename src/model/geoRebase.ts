@@ -97,6 +97,7 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
       const g = d.geom;
       switch (g.shape) {
         case "line":
+        case "xline":
           return { ...d, geom: { ...g, a: shift(g.a, dx, dy), b: shift(g.b, dx, dy) } };
         case "polyline":
           return { ...d, geom: { ...g, pts: shiftAll(g.pts, dx, dy) } };
@@ -117,6 +118,16 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
         case "kote":
           return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
         case "text":
+          return {
+            ...d,
+            geom: {
+              ...g,
+              at: shift(g.at, dx, dy),
+              ...(g.leaderTarget ? { leaderTarget: shift(g.leaderTarget, dx, dy) } : {}),
+              ...(g.pathPts ? { pathPts: shiftAll(g.pathPts, dx, dy) } : {}),
+            },
+          };
+        case "block":
           return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
         case "image":
           return { ...d, geom: { ...g, min: shift(g.min, dx, dy), max: shift(g.max, dx, dy) } };

@@ -6,6 +6,7 @@
 import type { Command } from "./types";
 import { lineCommand } from "./cmds/line";
 import { polylineCommand } from "./cmds/polyline";
+import { xlineCommand } from "./cmds/xline";
 import { wallCommand } from "./cmds/wall";
 import { ceilingCommand } from "./cmds/ceiling";
 import { openingCommand, fensterCommand, tuerCommand } from "./cmds/opening";
@@ -18,11 +19,14 @@ import { rectCommand } from "./cmds/rect";
 import { circleCommand } from "./cmds/circle";
 import { arcCommand } from "./cmds/arc";
 import { ellipseCommand } from "./cmds/ellipse";
+import { polygonCommand } from "./cmds/polygon";
 import { splineCommand } from "./cmds/spline";
 import { bezierCommand } from "./cmds/bezier";
 import { dimensionCommand } from "./cmds/dimension";
 import { koteCommand } from "./cmds/kote";
 import { textCommand } from "./cmds/text";
+import { leaderCommand } from "./cmds/leader";
+import { textpathCommand } from "./cmds/textpath";
 import { textboxCommand } from "./cmds/textbox";
 import { moveCommand } from "./cmds/move";
 import { mirrorCommand } from "./cmds/mirror";
@@ -41,6 +45,8 @@ import { terrainCommand } from "./cmds/terrain";
 import { measureCommand } from "./cmds/measure";
 import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
 import { georefCommand } from "./cmds/georef";
+import { blockCommand } from "./cmds/block";
+import { defblockCommand } from "./cmds/defblock";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -56,15 +62,19 @@ export const COMMANDS: Record<string, Command> = {
   room: roomCommand,
   line: lineCommand,
   polyline: polylineCommand,
+  xline: xlineCommand,
   rect: rectCommand,
   circle: circleCommand,
   arc: arcCommand,
   ellipse: ellipseCommand,
+  polygon: polygonCommand,
   spline: splineCommand,
   bezier: bezierCommand,
   dimension: dimensionCommand,
   kote: koteCommand,
   text: textCommand,
+  leader: leaderCommand,
+  textpath: textpathCommand,
   textbox: textboxCommand,
   move: moveCommand,
   mirror: mirrorCommand,
@@ -84,6 +94,8 @@ export const COMMANDS: Record<string, Command> = {
   sectionline: sectionLineCommand,
   viewline: viewLineCommand,
   georef: georefCommand,
+  block: blockCommand,
+  defblock: defblockCommand,
 };
 
 /**
@@ -112,11 +124,20 @@ export const ALIASES: Record<string, string> = {
   rm: "room",
   l: "line",
   pl: "polyline",
+  xl: "xline",
+  hilfslinie: "xline",
+  konstruktionslinie: "xline",
+  bl: "block",
+  symbol: "block",
+  db: "defblock",
+  blockdef: "defblock",
   rec: "rect",
   c: "circle",
   a: "arc",
   bogen: "arc",
   el: "ellipse",
+  vg: "polygon",
+  vieleck: "polygon",
   sp: "spline",
   dim: "dimension",
   bemassung: "dimension",
@@ -126,6 +147,10 @@ export const ALIASES: Record<string, string> = {
   tx: "text",
   txt: "text",
   beschriftung: "text",
+  ld: "leader",
+  vorführer: "leader",
+  txp: "textpath",
+  pfadtext: "textpath",
   m: "move",
   s: "mirror",
   spiegeln: "mirror",

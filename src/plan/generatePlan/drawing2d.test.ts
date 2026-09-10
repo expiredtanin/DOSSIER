@@ -231,3 +231,195 @@ describe("addDrawing2D — kote (SIA 400 B.5.4)", () => {
     if (text?.kind === "drawingText") expect(text.text).toBe("±0.00");
   });
 });
+
+describe("addDrawing2D — xline (Konstruktionslinie)", () => {
+  it("verlängert weit über a/b hinaus, in beide Richtungen entlang a→b", () => {
+    const d: Drawing2D = {
+      id: "x1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "xline", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(1);
+    const l = out[0];
+    if (l.kind === "line") {
+      expect(l.a.x).toBeLessThan(-500);
+      expect(l.b.x).toBeGreaterThan(500);
+      expect(l.a.y).toBeCloseTo(0, 6);
+      expect(l.b.y).toBeCloseTo(0, 6);
+      expect(l.dash).not.toBeNull();
+      expect(l.drawingId).toBe("x1");
+    } else {
+      throw new Error("expected a line primitive");
+    }
+  });
+
+  it("entartet (a===b) erzeugt kein Primitiv", () => {
+    const d: Drawing2D = {
+      id: "x2",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "xline", a: { x: 2, y: 2 }, b: { x: 2, y: 2 } },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(0);
+  });
+});
+
+describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
+  it("ohne bulge: unverändertes Verhalten (gerade Segmente, ein Primitiv je Segment)", () => {
+    const d: Drawing2D = {
+      id: "pl1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "polyline", pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }], closed: false },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const lines = out.filter((p) => p.kind === "line");
+    expect(lines.length).toBe(2);
+  });
+
+  it("mit bulge an einem Segment: tessellierter Bogen statt einer Geraden", () => {
+    const d: Drawing2D = {
+      id: "pl2",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: {
+        shape: "polyline",
+        pts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 4, y: 0 }],
+        closed: false,
+        bulge: [1, 0],
+      },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const lines = out.filter((p) => p.kind === "line");
+    // Segment 0 (Halbkreis, bulge=1) tessellierter Bogen → mehrere Teilstücke;
+    // Segment 1 bleibt eine einzelne Gerade → insgesamt > 2 (statt 2 wie oben).
+    expect(lines.length).toBeGreaterThan(2);
+    // Erster und letzter Punkt der gesamten Kette bleiben exakt die echten Endpunkte.
+    if (lines[0].kind === "line") {
+      expect(lines[0].a).toEqual({ x: 0, y: 0 });
+    }
+    if (lines[lines.length - 1].kind === "line") {
+      expect(lines[lines.length - 1].b).toEqual({ x: 4, y: 0 });
+    }
+  });
+
+  it("geschlossene Bogen-Polylinie füllt eine korrekte (tessellierte) Fläche", () => {
+    const d: Drawing2D = {
+      id: "pl3",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: {
+        shape: "polyline",
+        pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }],
+        closed: true,
+        bulge: [0, 0, 0.5, 0],
+      },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const poly = out.find((p) => p.kind === "polygon");
+    expect(poly).toBeDefined();
+    if (poly?.kind === "polygon") {
+      // Mehr Punkte als die 4 Ecken, weil eine Seite tessellierter Bogen ist.
+      expect(poly.pts.length).toBeGreaterThan(4);
+    }
+  });
+});
+
+describe("addDrawing2D — text mit pathPts (Text-entlang-Pfad)", () => {
+  it("gibt ein drawingTextPath-Primitiv statt drawingText aus, wenn pathPts ≥2 gesetzt ist", () => {
+    const d: Drawing2D = {
+      id: "tp1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: {
+        shape: "text",
+        at: { x: 0, y: 0 },
+        text: "Bachlauf",
+        height: 0.3,
+        angle: 0,
+        pathPts: [{ x: 0, y: 0 }, { x: 2, y: 1 }, { x: 4, y: 0 }],
+      },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(1);
+    const p = out[0];
+    expect(p.kind).toBe("drawingTextPath");
+    if (p.kind === "drawingTextPath") {
+      expect(p.text).toBe("Bachlauf");
+      expect(p.pathPts.length).toBe(3);
+      expect(p.drawingId).toBe("tp1");
+    }
+  });
+
+  it("ohne pathPts (normaler Text) bleibt es beim bestehenden drawingText-Primitiv", () => {
+    const d: Drawing2D = {
+      id: "t1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "text", at: { x: 0, y: 0 }, text: "Normal", height: 0.3, angle: 0 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(1);
+    expect(out[0].kind).toBe("drawingText");
+  });
+});
+
+describe("addDrawing2D — block (Symbol-Instanz)", () => {
+  it("expandiert die BlockDef-Geometrie rotiert+verschoben um at/rotation", () => {
+    const proj = project();
+    proj.blockDefs = [
+      { id: "blk1", name: "Stuhl", geom2d: [{ shape: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } }] },
+    ];
+    const d: Drawing2D = {
+      id: "i1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "block", blockDefId: "blk1", at: { x: 5, y: 5 }, rotation: Math.PI / 2 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, proj, d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(1);
+    const l = out[0];
+    if (l.kind === "line") {
+      // Lokal (0,0)→(1,0), um 90° gedreht → (0,0)→(0,1), verschoben um (5,5).
+      expect(l.a.x).toBeCloseTo(5, 6);
+      expect(l.a.y).toBeCloseTo(5, 6);
+      expect(l.b.x).toBeCloseTo(5, 6);
+      expect(l.b.y).toBeCloseTo(6, 6);
+      expect(l.drawingId).toBe("i1");
+    } else {
+      throw new Error("expected a line primitive");
+    }
+  });
+
+  it("unbekannte blockDefId rendert nichts (kein Crash)", () => {
+    const d: Drawing2D = {
+      id: "i2",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "block", blockDefId: "ghost", at: { x: 0, y: 0 }, rotation: 0 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(0);
+  });
+});

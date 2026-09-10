@@ -12,6 +12,7 @@
 
 import { generateTerrainFromContours } from "../model/terrain";
 import type { ContextObject, Project } from "../model/types";
+import { ensureContextCategories } from "../model/contextCategories";
 import type { StoreApi } from "./store";
 
 /** Felder/Actions, die diese Slice in den RootState beisteuert. */
@@ -58,11 +59,27 @@ export function createSiteSlice(
     get().setProject((p) => ({ ...p, context: update(p.context ?? []) }));
   };
 
-  return {
-    addContextObject: (obj) => setContext((ctx) => [...ctx, obj]),
+  // Wie `setContext`, aber fürs HINZUFÜGEN: ergänzt zusätzlich jede fehlende
+  // Grafik-Kategorie der neu ankommenden Objekte in `project.layers` (s.
+  // `ensureContextCategories`), damit sie sofort im Ebenen-Panel erscheinen
+  // und über dessen Sichtbarkeit/Grau/Sperren steuerbar sind — genau wie
+  // Wand/Decke/Dach, statt wie bisher immer unconditional gezeichnet zu werden.
+  const addToContext = (added: ContextObject[]): void => {
+    if (added.length === 0) return;
+    const codes = added
+      .map((o) => o.categoryCode)
+      .filter((c): c is string => !!c);
+    get().setProject((p) => ({
+      ...p,
+      context: [...(p.context ?? []), ...added],
+      layers: ensureContextCategories(p.layers, codes),
+    }));
+  };
 
-    addContextObjects: (objs) =>
-      setContext((ctx) => (objs.length ? [...ctx, ...objs] : ctx)),
+  return {
+    addContextObject: (obj) => addToContext([obj]),
+
+    addContextObjects: (objs) => addToContext(objs),
 
     removeContextObject: (id) =>
       setContext((ctx) => ctx.filter((o) => o.id !== id)),
@@ -81,7 +98,7 @@ export function createSiteSlice(
       if (!set || set.type !== "contourSet") return null;
       const terrain = generateTerrainFromContours(set.contours);
       if (terrain.indices.length === 0) return null; // kein sinnvolles TIN
-      setContext((c) => [...c, terrain]);
+      addToContext([terrain]);
       return terrain.id;
     },
 

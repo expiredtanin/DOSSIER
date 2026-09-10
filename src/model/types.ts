@@ -30,6 +30,46 @@ import type { DetailLevel, View3d, ViewType } from "../ui/TopBar";
 // Geometrie eingebacken (siehe docs/design/resources-graphics.md).
 
 /** Ein wiederverwendbarer Linienstil (Line Manager). */
+/**
+ * Ein Stift (ArchiCAD-Stiftsatz-Muster): ein reiner NAME/PLATZHALTER, der
+ * projektweit über alle {@link PenSet}s hinweg dieselbe Identität `id` behält.
+ * Ein Stift trägt selbst KEINE Farbe — welche Farbe er zeigt, bestimmt der
+ * jeweils AKTIVE Stiftsatz (`Project.activePenSetId`). Ein Bauteil/eine Ebene,
+ * die statt einer freien Farbe auf einen Stift zeigt (`xxxPenId`), übernimmt
+ * dadurch automatisch jede Farbänderung des Stifts bzw. jeden Stiftsatz-
+ * Wechsel — ohne selbst angefasst zu werden.
+ */
+export interface ColorPen {
+  id: string;
+  name: string;
+}
+
+/**
+ * Ein Stiftsatz — ordnet JEDEM Stift (`ColorPen.id`) eine konkrete Farbe zu.
+ * Mehrere Stiftsätze können nebeneinander existieren (z. B. „Standard",
+ * „Plot S/W", „Präsentation"); nur einer ist je Projekt AKTIV
+ * (`Project.activePenSetId`). Fehlt ein Stift im `colors`-Objekt (z. B. neu
+ * angelegt, aber in diesem Satz noch nicht befüllt), gilt `PEN_FALLBACK_COLOR`
+ * (s. `model/penSets.ts`).
+ */
+/**
+ * Farbe + Strichstärke EINES Stifts in EINEM Stiftsatz — wie ein echter
+ * ArchiCAD-/AutoCAD-Stift wandern beide zusammen, wenn ein Element/eine Ebene
+ * auf diesen Stift gestellt wird (s. `Component.colorPenId`-Doku).
+ */
+export interface PenStyle {
+  color: string;
+  /** Strichstärke in Millimetern. */
+  weight: number;
+}
+
+export interface PenSet {
+  id: string;
+  name: string;
+  /** Stift-ID (`ColorPen.id`) → Farbe+Strichstärke. */
+  pens: Record<string, PenStyle>;
+}
+
 export interface LineStyle {
   id: string;
   name: string;
@@ -89,7 +129,14 @@ export type HatchPattern =
   | "solid"
   | "insulation"
   | "diagonal"
-  | "crosshatch";
+  | "crosshatch"
+  /**
+   * Frei gezeichnetes Wiederhol-Motiv (Parameter in {@link HatchStyle.motif},
+   * gleiche Form wie `LineStyle.motif` — der Editor `MotifEditor.tsx` ist
+   * bereits generisch für beide gebaut). Ohne gesetztes `motif` degradiert die
+   * Fläche zu geraden Parallel-Musterlinien (wie „diagonal").
+   */
+  | "custom";
 
 /** Eine wiederverwendbare Schraffur (Hatch Manager). */
 export interface HatchStyle {
@@ -160,6 +207,16 @@ export interface HatchStyle {
   lengthMin?: number;
   /** Maximale Strichlänge in mm (Papier). Fehlt es, greift die `scale`-abhängige Default-Länge. */
   lengthMax?: number;
+  /**
+   * Frei gezeichnetes Wiederhol-Motiv (nur `pattern==="custom"`) — gleiche Form
+   * wie `LineStyle.motif`: eine offene Polylinie in Papier-mm, `x` läuft
+   * 0..`length` (Wiederhollänge ENTLANG der Musterlinie), `y` = Versatz quer zur
+   * Musterlinie. Wird alle `length` Papier-mm entlang jeder Musterlinie
+   * gekachelt UND (wie bei diagonal/crosshatch) im Abstand von `scale`-
+   * abhängigen 8 px quer versetzt wiederholt. Fehlt es, zeichnet „custom" wie
+   * „diagonal" (gerade Linien) — kein Absturz bei frisch angelegten Hatches.
+   */
+  motif?: { points: Vec2[]; length: number };
 }
 
 /**
@@ -214,6 +271,22 @@ export interface Component {
    * `color`. Migrationsabsicht: `background` ⇐ `color`.
    */
   background?: string;
+  /**
+   * Stift-Kopplung (ArchiCAD-Stiftsatz-Muster, s. {@link ColorPen}/{@link
+   * PenSet}): ist eines dieser Felder gesetzt, wird `color`/`foreground`/
+   * `background` NICHT frei editiert, sondern bei jedem Stiftsatz-Wechsel
+   * bzw. jeder Stift-Farbänderung automatisch aus dem aktiven Stiftsatz NEU
+   * GESCHRIEBEN (`rebakePenColors`, `model/penSets.ts`) — die drei Felder
+   * bleiben dadurch für ALLE bestehenden Leser (2D-Plan, beide 3D-Renderer,
+   * Export) unverändert die eine gültige, aufgelöste Farbe; nur die Herkunft
+   * ist jetzt ein Stift statt eine freie Wahl. Ein gesetzter `xxxPenId` gilt
+   * genauso als „eigen" (explizit) wie eine frei gewählte Farbe — beides sind
+   * Werte AM Bauteil, kein Verweis auf eine Ebene (anders als `foregroundSource`
+   * an Wand/Decke/etc.).
+   */
+  colorPenId?: string;
+  foregroundPenId?: string;
+  backgroundPenId?: string;
   /** Schnitt-Schraffur → Hatch Manager. Gilt, wo das Bauteil echt geschnitten ist. */
   hatchId: string;
   /**
@@ -289,6 +362,21 @@ export interface RoofType {
   name: string;
   /** Aussen (Eindeckung) → innen (Verkleidung), analog `WallType.layers`. */
   layers: Layer[];
+}
+
+/**
+ * Wiederverwendbares 2D-Symbol (Möbelblock, Sanitär-/Normsymbol, Nordpfeil
+ * u. Ä.) — s. `Project.blockDefs` + `Drawing2DGeom["block"]`. `geom2d` ist
+ * LOKALE Geometrie (Ursprung = Einfügepunkt der Instanz, Winkel 0 = wie
+ * definiert); jede Instanz transformiert sie beim Rendern per `at`/`rotation`.
+ * Bewusst KEIN verschachtelter `"block"`-Shape in `geom2d` (keine Blöcke in
+ * Blöcken, v1) — nicht technisch erzwungen, nur Konvention der Autoren-Seite
+ * (`commands/cmds/defblock.ts`).
+ */
+export interface BlockDef {
+  id: string;
+  name: string;
+  geom2d: Drawing2DGeom[];
 }
 
 // ── Bauteil-Typen: Tür / Fenster / Treppe ──────────────────────────────────
@@ -817,6 +905,14 @@ export interface LayerCategory {
   name: string;
   /** Darstellungsfarbe (hex). */
   color: string;
+  /**
+   * Stift-Kopplung (s. `Component.colorPenId`): ist sie gesetzt, wird `color`
+   * bei jedem Stiftsatz-Wechsel automatisch aus dem aktiven Stiftsatz neu
+   * geschrieben. Zeichnet ein Objekt „nach Ebene", übernimmt es dadurch den
+   * Stift dieser Ebene — bleibt aber selbst bei einer FREIEN Farbe, keinem
+   * eigenen Stift-Verweis (nur `color` wandert mit).
+   */
+  colorPenId?: string;
   /** Linienstärke in Millimetern. */
   lw: number;
   visible: boolean;
@@ -890,6 +986,8 @@ export interface Wall {
    * nicht die Schicht-Füllfarben/Schraffuren.
    */
   color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
   /**
    * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Wand-
    * Instanz. `undefined` = „Nach System" (erben → Component.foreground →
@@ -901,6 +999,10 @@ export interface Wall {
    * `undefined` = „Nach System" (erben → Component.background → Component.color).
    */
   background?: string;
+  /** Stift-Kopplung von `foreground` (s. `Component.foregroundPenId`-Doku). */
+  foregroundPenId?: string;
+  /** Stift-Kopplung von `background`, analog {@link Wall.foregroundPenId}. */
+  backgroundPenId?: string;
   /**
    * Attribut-Override der Strichstärke (mm Papier) DIESER Wand-Instanz (Umriss/
    * Schichtfugen). `undefined` = „Nach System" (erben → `strokeWeightSource`).
@@ -1028,6 +1130,8 @@ export interface Ceiling {
    * Kategorie-Farbe.
    */
   color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
   /**
    * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Decken-
    * Instanz. `undefined` = „Nach System" (erben → Component.foreground →
@@ -1039,6 +1143,10 @@ export interface Ceiling {
    * `undefined` = „Nach System" (erben → Component.background → Component.color).
    */
   background?: string;
+  /** Stift-Kopplung von `foreground` (s. `Component.foregroundPenId`-Doku). */
+  foregroundPenId?: string;
+  /** Stift-Kopplung von `background`, analog {@link Wall.foregroundPenId}. */
+  backgroundPenId?: string;
   /**
    * Attribut-Override der Strichstärke (mm Papier) DIESER Decken-Instanz.
    * `undefined` = „Nach System" (erben → `strokeWeightSource`).
@@ -1144,6 +1252,8 @@ export interface Roof {
   roofTypeId?: string;
   /** Optionale Übersteuerung der Strich-/Umrissfarbe; sonst Kategorie-Farbe. */
   color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
 }
 
 /** Schwenkrichtung der Tür relativ zur Wandachse. */
@@ -1234,6 +1344,8 @@ export interface Opening {
    * Kategorie-Farbe.
    */
   color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
   /**
    * Nur Fenster, Grundriss: Übersteuerung von Farbe/Strichstärke der
    * GESCHNITTENEN Blendrahmen-Querschnittsblöcke an den Laibungs-Enden
@@ -1372,6 +1484,8 @@ export interface Stair {
    * Kategorie-Farbe.
    */
   color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
   /**
    * Darstellung des Auf-/Abpfeils an der Lauflinie: "line" (offener
    * Winkelpfeil, Default = heutiges Verhalten) oder "filled" (gefülltes
@@ -1409,6 +1523,8 @@ export interface Room {
   boundary: Vec2[];
   /** Strich-/Füllfarbe des Raums (hex). */
   color: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
   /**
    * Anker des Raum-Stempels (Meter). Wird bei der Erstellung EINMAL auf den
    * Zentroid gesetzt und danach nie automatisch neu berechnet — der Stempel ist
@@ -1498,7 +1614,34 @@ export interface Door {
 /** Geometrie-Form eines 2D-Zeichenelements. */
 export type Drawing2DGeom =
   | { shape: "line"; a: Vec2; b: Vec2 }
-  | { shape: "polyline"; pts: Vec2[]; closed: boolean }
+  /**
+   * Konstruktionslinie (Hilfslinie): unendliche Ausrichtungslinie durch `a`
+   * und `b`, nur zwei gesetzte Punkte gespeichert — beim Rendern/Picken WEIT
+   * über beide hinaus verlängert (s. `XLINE_EXTEND_M`), damit sie optisch/
+   * funktional unendlich wirkt, ohne echte Unendlichkeits-Sonderfälle in der
+   * SVG-/PDF-/DXF-Pipeline zu brauchen. Bewusst NICHT offset-/trim-/
+   * extend-/join-fähig (reine Ausrichtungshilfe, kein reales Bauteil).
+   */
+  | { shape: "xline"; a: Vec2; b: Vec2 }
+  | {
+      shape: "polyline";
+      pts: Vec2[];
+      closed: boolean;
+      /**
+       * Optionale Bogen-Segmente (DXF-„Bulge"-Konvention): `bulge[i]` krümmt
+       * das Segment `pts[i] → pts[i+1]` (bei `closed` zusätzlich `bulge[pts.
+       * length-1]` für das Schliess-Segment `pts[letzter] → pts[0]`) zu einem
+       * Kreisbogen statt einer Geraden. `bulge[i] = tan(Δ/4)` (Δ = Öffnungs-
+       * winkel des Bogens); Vorzeichen bestimmt die Seite (positiv = links von
+       * a→b, s. `geometry/bulge.ts::bulgeArcPoints`). Fehlt der Eintrag oder
+       * ist er 0/nahe 0 (`< 1e-9`), bleibt das Segment gerade — rein additiv,
+       * jede bestehende Polylinie ohne `bulge` verhält sich exakt wie bisher.
+       * Nur DIESES Feld unterscheidet eine „echte" Bogen-Polylinie von der
+       * bisherigen rein geradlinigen; Rendering/Fläche/Export tessellieren den
+       * Bogen (kein eigenes SVG-Arc-Primitiv, analog Ellipse/Spline/Bezier).
+       */
+      bulge?: number[];
+    }
   | { shape: "rect"; min: Vec2; max: Vec2 }
   | { shape: "circle"; center: Vec2; r: number }
   | { shape: "arc"; center: Vec2; r: number; a0: number; a1: number }
@@ -1586,7 +1729,34 @@ export type Drawing2DGeom =
        * `text`). `width` bricht wie gehabt wortweise um.
        */
       doc?: RichTextDoc;
+      /**
+       * Legenden-/Vorführungspfeil (Leader): optionale Zielposition, auf die
+       * eine dünne Linie + Pfeilspitze vom Text aus zeigt (z. B. Beschriftung
+       * eines entfernten Details). Kein eigener Shape — erbt dadurch die
+       * komplette Inline-Text-Editor-Infrastruktur (analog `width` bei der
+       * Textspalte). Gesetzt vom `leader`-Befehl, am normalen `text`-Werkzeug
+       * unverändert `undefined`.
+       */
+      leaderTarget?: Vec2;
+      /**
+       * Text-entlang-Pfad: mind. 2 Stützpunkte, entlang derer der Text (nur
+       * `text`, KEIN `doc`/Rich-Formatting — v1 bewusst einstilig) über ein
+       * echtes SVG `<textPath>` fliesst. Ist gesetzt, bestimmt der Pfad die
+       * Position/Neigung jedes Zeichens; `at`/`angle` werden dann ignoriert
+       * (bleiben nur als Fallback für Alt-Konsumenten, die `pathPts` nicht
+       * kennen — s. `drawing2d.ts`). Griffe sind dann die Pfadpunkte selbst
+       * (wie bei `polyline`), nicht der einzelne Anker.
+       */
+      pathPts?: Vec2[];
     }
+  /**
+   * Platzierte Instanz eines wiederverwendbaren 2D-Symbols (`Project.
+   * blockDefs`, s. dort). `rotation` in Radiant. Trägt selbst KEINE Geometrie
+   * — die kommt beim Rendern/Picken/Snapping aus `blockDefId` + dieser
+   * Transformation. Verweist die Instanz auf eine gelöschte/unbekannte
+   * `blockDefId`, rendert sie schlicht nichts (kein Crash, s. `drawing2d.ts`).
+   */
+  | { shape: "block"; blockDefId: string; at: Vec2; rotation: number }
   | {
       shape: "image";
       /** Obere-linke Ecke der Bild-Box (Modell-Meter). */
@@ -1625,8 +1795,14 @@ export interface Drawing2D {
    * hat es Vorrang vor `fillColor` (der Poché-Hintergrund der geschlossenen Form).
    */
   background?: string;
+  /** Stift-Kopplung von `foreground` (s. `Component.foregroundPenId`-Doku). */
+  foregroundPenId?: string;
+  /** Stift-Kopplung von `background`, analog {@link Wall.foregroundPenId}. */
+  backgroundPenId?: string;
   /** Optionale explizite Strichfarbe; sonst Kategorie-Farbe. */
   color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
   /**
    * Optionale Vollton-Füllfarbe für geschlossene Formen (getrennt von der
    * Strichfarbe `color`). Fehlt sie, ist die Fläche transparent (nur Schraffur
@@ -1777,6 +1953,8 @@ export interface Column {
    * Kategorie-Farbe.
    */
   color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
   /**
    * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Stütze.
    * `undefined` = „Nach System" (erben → Component.foreground), analog `Wall.
@@ -1789,6 +1967,10 @@ export interface Column {
    * nach Schraffur-Muster), analog `Wall.background`.
    */
   background?: string;
+  /** Stift-Kopplung von `foreground` (s. `Component.foregroundPenId`-Doku). */
+  foregroundPenId?: string;
+  /** Stift-Kopplung von `background`, analog {@link Wall.foregroundPenId}. */
+  backgroundPenId?: string;
   /**
    * Attribut-Override der Strichstärke (mm Papier) DIESER Stütze. `undefined`
    * = „Nach System" (erben → `strokeWeightSource`), analog `Wall.strokeWeight`.
@@ -1827,6 +2009,13 @@ export interface ImportedMesh {
   name: string;
   /** Ursprünglicher DXF-Layer-Name (für spätere Kategorisierung). */
   layer?: string;
+  /**
+   * Grafik-Kategorie-Code (s. {@link LayerCategory}, `model/contextCategories.ts`)
+   * — steuert Sichtbarkeit/Grau/Sperren wie bei jedem anderen Bauteil (Ebenen-
+   * Panel). Fehlt er (ältere Importe vor dieser Erweiterung), bleibt das Objekt
+   * IMMER sichtbar (Rückwärtskompatibilität), s. `generatePlan/context.ts`.
+   */
+  categoryCode?: string;
   positions: number[];
   indices: number[];
 }
@@ -1882,6 +2071,8 @@ export interface ContourSet {
   name: string;
   /** Ursprünglicher DXF-Layer-Name (für spätere Kategorisierung). */
   layer?: string;
+  /** Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}. */
+  categoryCode?: string;
   contours: Contour[];
 }
 
@@ -1896,6 +2087,8 @@ export interface TerrainMesh {
   name: string;
   /** Ebenen-/Gruppierungsname (SitePanel), z. B. „Terrain". Optional. */
   layer?: string;
+  /** Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}. */
+  categoryCode?: string;
   positions: number[];
   indices: number[];
   /**
@@ -1920,6 +2113,8 @@ export interface ContextImage {
   name: string;
   /** Ebenen-/Gruppierungsname (SitePanel), z. B. „Luftbild". Optional. */
   layer?: string;
+  /** Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}. */
+  categoryCode?: string;
   /** Bildquelle als Data-URL (PNG/JPEG). */
   src: string;
   /** Modell-Meter Bounding-Box (das Bild füllt [min..max] planar von oben). */
@@ -1933,6 +2128,22 @@ export interface ContextImage {
    * der 2D-Hintergrund-Darstellung. Default false.
    */
   drape?: boolean;
+  /**
+   * Bildkorrektur (2D-Grundriss, CSS-`filter`-Semantik) — alle Werte optional,
+   * fehlend = neutral (kein visueller Unterschied zu keinem Filter). `grayscale`
+   * ist eine STETIGE 0..1-Blendung (nicht der binäre `mono`-Druckmodus von
+   * `generatePlan()`, der Luftbilder ganz ausblendet — unabhängige Konzepte).
+   */
+  filters?: {
+    /** 0 = Graustufen, 1 = Original, >1 = übersättigt. Default 1. */
+    saturation?: number;
+    /** 0 = schwarz, 1 = Original, >1 = heller. Default 1. */
+    brightness?: number;
+    /** 0 = flaches Grau, 1 = Original, >1 = kontrastreicher. Default 1. */
+    contrast?: number;
+    /** 0 = kein Effekt, 1 = vollständig Graustufen. Default 0. */
+    grayscale?: number;
+  };
 }
 
 /** Ein Kontext-Objekt: importiertes Mesh, Konturen-Satz, TIN oder Rasterbild. */
@@ -2276,6 +2487,14 @@ export interface Project {
    */
   roofTypes?: RoofType[];
   /**
+   * Wiederverwendbare 2D-Symbol-Bibliothek (Möbelblöcke, Sanitär-/Norm-
+   * symbole u. Ä.) — analog `wallTypes`: einmal definieren, beliebig oft als
+   * `{shape:"block"}`-Instanz platzieren. V1 bewusst NUR 2D (kein 3D-Körper,
+   * keine verschachtelten Blöcke). Optional, damit bestehende Projekte ohne
+   * `blockDefs` gültig bleiben.
+   */
+  blockDefs?: BlockDef[];
+  /**
    * Türtypen-Bibliothek (Türstile), analog `wallTypes`. Optional, damit
    * bestehende Projekte/Tests ohne `doorTypes` gültig bleiben; Türen ohne
    * `typeId` verhalten sich wie bisher (Inline-Felder).
@@ -2289,6 +2508,22 @@ export interface Project {
    * Treppentypen-Bibliothek (Treppenstile). Optional (siehe `doorTypes`).
    */
   stairTypes?: StairType[];
+  /**
+   * Stift-Bibliothek (ArchiCAD-Stiftsatz-Muster, s. {@link ColorPen}):
+   * projektweite Liste der Stift-IDs/-Namen. Optional, damit bestehende
+   * Projekte/Tests ohne Stifte gültig bleiben.
+   */
+  pens?: ColorPen[];
+  /**
+   * Stiftsätze (s. {@link PenSet}) — je einer eine vollständige Stift→Farbe-
+   * Zuordnung. Optional (siehe `pens`).
+   */
+  penSets?: PenSet[];
+  /**
+   * ID des aktuell AKTIVEN Stiftsatzes (`penSets`). Fehlt sie (kein Stiftsatz
+   * angelegt/aktiviert), lösen Stift-Verweise auf `PEN_FALLBACK_COLOR` auf.
+   */
+  activePenSetId?: string;
   /** Oberste Schnitte: Geschosse + Schnitte/Ansichten. */
   drawingLevels: DrawingLevel[];
   /** Grafik-Kategorie-Baum (geschossübergreifend). */

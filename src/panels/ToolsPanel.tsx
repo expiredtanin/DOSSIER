@@ -108,6 +108,14 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <line x1="3" y1="13" x2="13" y2="3" />
         </svg>
       );
+    case "xline":
+      // Volle Diagonale (randberührend) im Strich-Punkt-Muster — deutet die
+      // „unendliche" Konstruktionslinie an.
+      return (
+        <svg {...common}>
+          <line x1="0.5" y1="14.5" x2="15.5" y2="1.5" strokeDasharray="3 1.2 0.6 1.2" />
+        </svg>
+      );
     case "polyline":
       // Dreisegmentiger Zickzack.
       return (
@@ -143,6 +151,23 @@ export function ToolIcon({ id }: { id: ToolId }) {
       return (
         <svg {...common}>
           <ellipse cx="8" cy="8" rx="6" ry="4" />
+        </svg>
+      );
+    case "polygon":
+      // Regelmässiges Sechseck als generisches Vieleck-Symbol.
+      return (
+        <svg {...common}>
+          <polygon points="8,2.5 13,5.5 13,10.5 8,13.5 3,10.5 3,5.5" />
+        </svg>
+      );
+    case "block":
+      // Gestricheltes Symbol-Rechteck (gruppierter Inhalt) + Einfügepunkt
+      // (gefüllter Punkt am Ursprung).
+      return (
+        <svg {...common}>
+          <rect x="4.5" y="2.5" width="9" height="9" strokeDasharray="2 1.4" />
+          <circle cx="2.5" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
+          <line x1="2.5" y1="13.5" x2="6" y2="10" strokeDasharray="1.5 1.2" />
         </svg>
       );
     case "spline":
@@ -196,6 +221,24 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <path d="M 5.5 9.5 L 10.5 9.5" fill="none" />
         </svg>
       );
+    case "leader":
+      // Pfeil zu einem Zielpunkt + kurze Textzeile (Legenden-/Vorführungspfeil).
+      return (
+        <svg {...common}>
+          <line x1="9" y1="9" x2="13.5" y2="4" />
+          <polygon points="13.5,4 10.7,4.4 13.1,6.8" fill="currentColor" stroke="none" />
+          <line x1="2.5" y1="9" x2="9" y2="9" />
+          <line x1="2.5" y1="12" x2="6.5" y2="12" />
+        </svg>
+      );
+    case "textpath":
+      // „A" auf einer gebogenen Grundlinie — deutet Text-entlang-Pfad an.
+      return (
+        <svg {...common}>
+          <path d="M 2 12 Q 8 2 14 12" fill="none" strokeDasharray="1.5 1.2" />
+          <path d="M 6 9.8 L 8 4.5 L 10 9.8 M 6.7 8 L 9.3 8" fill="none" />
+        </svg>
+      );
     case "textbox":
       // Spalten-Rahmen mit drei Textzeilen (Absatztext).
       return (
@@ -226,22 +269,27 @@ export function ToolIcon({ id }: { id: ToolId }) {
 // Bauteile · Bearbeiten-Aktionen).
 const TOOLS_2D: ToolId[] = [
   "line",
+  "xline",
   "polyline",
   "rect",
   "circle",
   "arc",
   "ellipse",
+  "polygon",
+  "block",
   "spline",
   "bezier",
   "dimension",
   "kote",
   "text",
+  "leader",
+  "textpath",
   "textbox",
   "image",
 ];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "ceilingopening", "roof", "extrude", "sectionline", "viewline"];
-const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "extend", "fillet", "chamfer", "join", "measure"];
+const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "extend", "fillet", "chamfer", "join", "defblock", "measure"];
 
 type ToolsView = "list" | "icons";
 const VIEW_STORAGE_KEY = "dossier.toolsPanel.view";

@@ -159,12 +159,27 @@ function mvColumn(col: Column, fn: (p: Vec2) => Vec2): Column {
   return { ...col, position: nb, rotation: Math.atan2(nt.y - nb.y, nt.x - nb.x) };
 }
 
-const mvGeom = (geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom => {
+/** Bildet jeden Punkt einer 2D-Zeichengeometrie unter `fn` ab (Move/Mirror/Rotate/Array + Block-Rendering). */
+export const mvGeom = (geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom => {
   switch (geom.shape) {
     case "line":
+    case "xline":
       return { ...geom, a: fn(geom.a), b: fn(geom.b) };
-    case "polyline":
-      return { ...geom, pts: geom.pts.map(fn) };
+    case "polyline": {
+      const pts = geom.pts.map(fn);
+      if (!geom.bulge) return { ...geom, pts };
+      // Bulge-Vorzeichen ist rein relativ zur Zeichenrichtung definiert (links
+      // von a→b) — eine Spiegelung kehrt die Umlauf-Orientierung um und muss
+      // daher auch jeden Bogen umkehren, sonst wandert er auf die falsche
+      // Seite. Erkannt über die Umlauf-Orientierung eines Test-Dreiecks unter
+      // `fn` (negativ ⇒ `fn` spiegelt) statt eine Spiegel-Op explizit zu
+      // markieren — funktioniert für JEDE Isometrie (Move/Rotate/Mirror sind
+      // alle nur `fn`-Closures, kein eigener Spiegel-Sonderpfad nötig).
+      const p0 = fn({ x: 0, y: 0 }), p1 = fn({ x: 1, y: 0 }), p2 = fn({ x: 0, y: 1 });
+      const signedArea = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
+      const bulge = signedArea < 0 ? geom.bulge.map((b) => -b) : geom.bulge;
+      return { ...geom, pts, bulge };
+    }
     case "rect": {
       // Achsparallel nur bei reiner Verschiebung erhaltbar; sonst → Polylinie.
       const c = [
@@ -202,7 +217,25 @@ const mvGeom = (geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom => {
     case "kote":
       return { ...geom, at: fn(geom.at) };
     case "text":
-      return { ...geom, at: fn(geom.at) };
+      // Leader-Ziel bzw. Pfadpunkte (Text-entlang-Pfad) müssen mitwandern,
+      // sonst zeigt der Pfeil/Pfad nach einem Move/Mirror/Rotate/Array auf die
+      // alte Position.
+      return {
+        ...geom,
+        at: fn(geom.at),
+        ...(geom.leaderTarget ? { leaderTarget: fn(geom.leaderTarget) } : {}),
+        ...(geom.pathPts ? { pathPts: geom.pathPts.map(fn) } : {}),
+      };
+    case "block": {
+      // Wie Column: Winkel aus einem transformierten Richtungspunkt zurück-
+      // rechnen, damit Rotate/Mirror auch die Instanz-Ausrichtung mitnehmen
+      // (nicht nur den Einfügepunkt) — reine Translation liesse die Symbole
+      // beim Drehen der Auswahl in der alten Orientierung stehen.
+      const tip = { x: geom.at.x + Math.cos(geom.rotation), y: geom.at.y + Math.sin(geom.rotation) };
+      const nb = fn(geom.at);
+      const nt = fn(tip);
+      return { ...geom, at: nb, rotation: Math.atan2(nt.y - nb.y, nt.x - nb.x) };
+    }
     case "image": {
       // Wie Text: nur die Position folgt der Transformation (Zentrum wandert
       // dorthin, wo `fn` es abbildet); die Box bleibt achsparallel/unverzerrt —

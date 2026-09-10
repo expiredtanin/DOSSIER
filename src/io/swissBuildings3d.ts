@@ -2,25 +2,42 @@
 // Dachformen) statt der pauschal auf DEFAULT_BUILDING_HEIGHT extrudierten
 // VEC25-Footprints (s. `swissTopo.ts::fetchBuildings`). Zwei Datensatz-
 // Generationen, beide über dieselbe offene STAC-API (`stacApi.ts`):
-//   • v2 ("ch.swisstopo.swissbuildings3d_2")   — stabil, 1-km-Tiles, ~50 MB.
-//   • v3 ("ch.swisstopo.swissbuildings3d_3_0") — Beta, Solid/Separated-
-//     Varianten, in Städten teils >150 MB/Tile (nicht 1-km-strukturiert) →
-//     wir fallen bei leeren/zu grossen v3-Treffern automatisch auf v2 zurück.
+//   • v2 ("ch.swisstopo.swissbuildings3d_2")   — stabil, 1-km-Tiles, ~50 MB,
+//     liefert `.dxf`/`.dxf.zip` → `parseDxf`.
+//   • v3 ("ch.swisstopo.swissbuildings3d_3_0") — Beta, liefert NUR noch
+//     `.dwg.zip`/`.gdb.zip` (kein `.dxf` mehr), in Städten teils >150 MB/Tile
+//     (nicht 1-km-strukturiert) → wir fallen bei leeren/zu grossen v3-Treffern
+//     automatisch auf v2 zurück. Das Zip bündelt ZWEI DWG-Varianten
+//     („…_separated_….dwg" + „…_solid_….dwg"); NUR „separated" ist mit
+//     LibreDWG lesbar (`downloadAssetBinary(..., "separated")` wählt sie
+//     gezielt aus) — „solid" liefert 0 Entities (vermutlich ACIS-Volumenkörper
+//     statt Polyface-Mesh, an echten Kacheln verifiziert). Die Geometrie
+//     selbst ist ein ganz normales AutoCAD-Polyface-Mesh (DWG-Typ 29), NUR
+//     über die Low-Level-API lesbar (s. `dwgParser.ts::
+//     extractPfaceMeshesByLayer`) und NACH DXF-LAYER GRUPPIERT geliefert:
+//     „Roof"/„Wall"/„Floor" je Gebäudefläche.
 // Referenz-Implementierung (Rhino-Vorgänger-Plugin, 1:1 als Blaupause genutzt):
 // git.kgva.ch/karim/DOSSIER, Datei rhino/swisstopo.py.
 //
 // Assets liegen als DXF/DWG/OBJ/IFC vor (teils `.zip`) — wir wählen bevorzugt
 // DXF: `parseDxf` (dxfParser.ts) liest 3DFACE/MESH/Polyface-Entities bereits
-// verlustfrei zu `ImportedMesh` (positions/indices, echtes Z) — kein neuer
-// Parser nötig.
+// verlustfrei zu `ImportedMesh` (positions/indices, echtes Z); fehlt DXF (v3),
+// liest `parseDwg` (dwgParser.ts, LibreDWG-WASM, lazy geladen) dieselbe
+// Geometrie aus dem DWG. „Roof"-Layer-Meshes bekommen die Dächer-Kategorie
+// ({@link IMPORTED_ROOF_CATEGORY}), alle übrigen (Wand/Boden/ungruppiert) die
+// normale Gebäude-Kategorie — VOR dem Zuschnitt zusammengeführt, damit
+// Wand+Boden EINES Gebäudes weiterhin ein einziges, löschbares Objekt bleiben
+// (nur das Dach wird als eigenes Objekt/Ebene abgespalten, s. Nutzer-Wunsch
+// „Dach als eigene, ausblendbare Sub-Ebene").
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheiten: Meter.
 
 import { bboxAround, lv95BboxToWgs84, makeOrigin } from "./lv95";
 import type { GeoOrigin, LV95 } from "./lv95";
-import { stacQuery, pickAsset, downloadAssetText } from "./stacApi";
+import { stacQuery, pickAsset, downloadAssetText, downloadAssetBinary } from "./stacApi";
 import { parseDxf } from "./dxfParser";
 import type { ImportedMesh } from "../model/types";
+import { GEO_CATEGORY_DEFS, IMPORTED_ROOF_CATEGORY } from "../model/contextCategories";
 
 const COLLECTION_V2 = "ch.swisstopo.swissbuildings3d_2";
 const COLLECTION_V3 = "ch.swisstopo.swissbuildings3d_3_0";
@@ -177,7 +194,15 @@ export function splitMeshComponents(mesh: ImportedMesh, weldMm = 1): ImportedMes
     }
     g.push(a, b, c);
   }
-  if (groups.size <= 1) return [{ ...mesh, layer: mesh.layer ?? BUILDING_LAYER }];
+  if (groups.size <= 1) {
+    return [
+      {
+        ...mesh,
+        layer: mesh.layer ?? BUILDING_LAYER,
+        categoryCode: mesh.categoryCode ?? GEO_CATEGORY_DEFS.building.code,
+      },
+    ];
+  }
 
   // 4) Je Komponente ein eigenes Mesh (Positions kompaktiert, Indizes neu gemappt).
   const out: ImportedMesh[] = [];
@@ -200,12 +225,38 @@ export function splitMeshComponents(mesh: ImportedMesh, weldMm = 1): ImportedMes
       id: `${mesh.id}-b${n}`,
       name: `${mesh.name} #${n + 1}`,
       layer: mesh.layer ?? BUILDING_LAYER,
+      categoryCode: mesh.categoryCode ?? GEO_CATEGORY_DEFS.building.code,
       positions,
       indices,
     });
     n++;
   }
   return out;
+}
+
+/**
+ * Führt mehrere Meshes zu einem zusammen (Positions/Indizes je Teil versetzt
+ * angehängt) — leere Teile (kein Dreieck) werden übersprungen. `null` bei
+ * ausschliesslich leeren Teilen, das EINE übrige Mesh unverändert bei genau
+ * einem nicht-leeren Teil (kein unnötiges Kopieren). Metadaten (`layer` etc.)
+ * kommen vom ersten nicht-leeren Teil — wird vom Aufrufer ohnehin überschrieben
+ * (`categoryCode`), s. `fetchBuildings3d`. Rein, exportiert für Unit-Tests.
+ */
+export function concatMeshes(parts: ImportedMesh[]): ImportedMesh | null {
+  const withGeom = parts.filter((p) => p.indices.length >= 3);
+  if (withGeom.length === 0) return null;
+  if (withGeom.length === 1) return withGeom[0];
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (const p of withGeom) {
+    const base = positions.length / 3;
+    // KEIN `push(...p.positions)`: bei grossen Kacheln sprengt der Spread-
+    // Operator die Argumentzahl-Grenze von `push` (RangeError, s. dwgParser.ts
+    // an derselben Stelle — an einer echten 2000-Gebäude-v3-Kachel verifiziert).
+    for (const v of p.positions) positions.push(v);
+    for (const i of p.indices) indices.push(base + i);
+  }
+  return { ...withGeom[0], positions, indices };
 }
 
 /** Ab welcher Höhe (Meter) über der Grundmauer ein Dreieck NICHT mehr als
@@ -344,21 +395,79 @@ export async function fetchBuildings3d(
         skipped++;
         continue;
       }
-      const text = await downloadAssetText(asset, [".dxf"]);
-      if (!text) {
+      // v3 liefert kein `.dxf` mehr (nur `.dwg.zip`/`.gdb.zip`, s. Moduldoc) —
+      // Asset-Endung entscheidet, welcher Parser läuft.
+      const isDwg = /\.dwg(\.zip)?$/i.test(asset.href);
+      let rawMeshes: ImportedMesh[];
+      try {
+        if (isDwg) {
+          // Zip bündelt „separated" + „solid"-DWG; nur „separated" ist lesbar
+          // (s. Moduldoc) — gezielt auswählen statt der Zip-internen
+          // Reihenfolge zu vertrauen.
+          const buf = await downloadAssetBinary(asset, [".dwg"], "separated");
+          if (!buf) {
+            skipped++;
+            continue;
+          }
+          const { parseDwg } = await import("./dwgParser");
+          rawMeshes = (await parseDwg(buf)).meshes;
+        } else {
+          const text = await downloadAssetText(asset, [".dxf"]);
+          if (!text) {
+            skipped++;
+            continue;
+          }
+          rawMeshes = parseDxf(text).meshes;
+        }
+      } catch (err) {
+        // `parseDwg`/`parseDxf` werfen bei fatalen Parse-Fehlern BEWUSST (s.
+        // deren Moduldoc) — richtig für einen einzelnen Nutzer-Import, aber
+        // hier iterieren wir über MEHRERE STAC-Kacheln: eine einzelne kaputte/
+        // von LibreDWG-WASM nicht unterstützte Kachel darf nicht den gesamten
+        // Mehr-Kachel-Import abbrechen. An einer echten v3-Kachel reproduziert:
+        // „RuntimeError: function signature mismatch" tief in LibreDWG-WASM
+        // (`dwg_dynapi_header_value`) — vermutlich eine Format-Eigenheit, die
+        // dieser WASM-Build nicht abdeckt, kein Fehler in unserem Code.
+        console.warn(`[swissBuildings3d] Kachel ${item.id} übersprungen (Parse-Fehler):`, err);
         skipped++;
         continue;
       }
-      const parsed = parseDxf(text);
-      for (const m of parsed.meshes) {
-        const clipped = clipMeshToBbox(shiftMeshToOrigin(m, origin, item.id), clipBoxLocal);
+      // „Roof"-Layer-Meshes (v3 „separated") getrennt von allen übrigen
+      // (Wand/Boden/ungruppiert, inkl. dem einzelnen v2-Mesh ohne Layer) —
+      // je Gruppe VOR dem Zuschnitt zusammengeführt, damit Wand+Boden EINES
+      // Gebäudes ein Objekt bleiben und nur das Dach separat abgespalten wird
+      // (s. Moduldoc).
+      const roofRaw: ImportedMesh[] = [];
+      const bodyRaw: ImportedMesh[] = [];
+      for (const m of rawMeshes) {
+        ((m.layer ?? "").toLowerCase() === "roof" ? roofRaw : bodyRaw).push(m);
+      }
+      for (const [group, isRoof] of [
+        [bodyRaw, false],
+        [roofRaw, true],
+      ] as const) {
+        const merged = concatMeshes(group);
+        if (!merged) continue;
+        const clipped = clipMeshToBbox(shiftMeshToOrigin(merged, origin, item.id), clipBoxLocal);
         if (clipped.indices.length < 3) continue;
         // In EINZELNE Gebäude aufteilen (eine Kachel = ein Mesh mit allen
         // Häusern) — so ist jedes Haus getrennt anwähl-/löschbar. Je Gebäude
         // die Dachüberstand-Untersichten (Soffiten) entfernen (Gipsmodell-Look,
         // s. stripOverhangSoffits-Moduldoc).
         for (const b of splitMeshComponents(clipped)) {
-          meshes.push(stripOverhangSoffits(b));
+          meshes.push({
+            ...stripOverhangSoffits(b),
+            categoryCode: isRoof ? IMPORTED_ROOF_CATEGORY.code : GEO_CATEGORY_DEFS.building.code,
+            // `.layer` (kosmetischer SitePanel-Gruppierungs-String, s.
+            // SitePanel.tsx::layerOf/groupByLayer) explizit setzen — sonst
+            // trägt er den rohen DXF-Layernamen aus dwgParser.ts ("Wall"/
+            // "Floor"/"Roof") weiter, den `splitMeshComponents`s Fallback
+            // `mesh.layer ?? BUILDING_LAYER` NICHT ersetzt (nur bei leerem
+            // `.layer`, nicht bei einem bereits vorhandenen Wert). Ohne diesen
+            // Fix zerfällt die SitePanel-Gruppierung eines v3-Imports in
+            // „Wall"/„Floor"/„Roof" statt „Gebäude"/„Dächer".
+            layer: isRoof ? IMPORTED_ROOF_CATEGORY.name : BUILDING_LAYER,
+          });
         }
       }
     }

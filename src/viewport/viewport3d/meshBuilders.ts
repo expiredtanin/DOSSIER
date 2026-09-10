@@ -13,6 +13,7 @@ import {
   stairsOfFloor,
   wallTypeThickness,
   type Ceiling,
+  type Column,
   type Contour,
   type ContextObject,
   type Drawing2D,
@@ -25,6 +26,7 @@ import {
 } from "../../model/types";
 import { along, clippedBand } from "../../model/geometry";
 import { stairGeometry } from "../../geometry/stair";
+import { columnFootprint } from "../../geometry/column";
 import {
   doorSymbol,
   openingInterval,
@@ -34,10 +36,12 @@ import {
 import { computeJoins, type WallCuts } from "../../model/joins";
 import {
   ceilingVerticalExtent,
+  columnVerticalExtent,
   stairVerticalExtent,
   wallReferenceOffset,
   wallVerticalExtent,
 } from "../../model/wall";
+import { emitExtrudedSolids } from "../../plan/toWalls3d/extrusions";
 import { MaterialRuntime } from "../../materials/runtime";
 import type { RenderMode } from "../../ui/TopBar";
 import type { DisplayResolver } from "../Viewport3D";
@@ -166,6 +170,16 @@ export function buildBuilding(
     if (!d.render) continue;
     buildFloor(group, project, floor, visibleCodes, categoryDisplay, d.greyed, opts);
   }
+  // Stützen (Column) + truck-Profil-Extrusionen (ExtrudedSolid): PARITÄT zum
+  // WASM-Default-3D-Pfad (`toWalls3d.ts::emitMeshes`), der beide ebenfalls
+  // projektweit UNGEFILTERT emittiert (kein Geschoss-/Kategorie-Gating) —
+  // dieselbe Nicht-Filterung hier, statt eine im Primärrenderer gar nicht
+  // existierende Filterlogik zu erfinden. Vorher fehlten beide Bauteilarten
+  // im Three.js-Fallback komplett (s. PENDENZEN „3D-Elemente-Parität-Audit").
+  for (const column of project.columns ?? []) {
+    addColumnMeshes(group, project, column, opts);
+  }
+  addExtrudedSolidMeshes(group, project, opts);
   return group;
 }
 
@@ -753,6 +767,146 @@ function addCeilingMesh(
     mesh.add(new THREE.LineSegments(edges, opts.edgeMat));
   }
   group.add(mesh);
+}
+
+/** Neutraler Tragwerks-Grauton für Stützen ohne Bauteil (identisch zu `COLUMN_RGB` in `toWalls3d/columns.ts`). */
+const COLUMN_FALLBACK_COLOR = new THREE.Color(0.7, 0.7, 0.72);
+
+/**
+ * Material einer Stütze: mit `componentId` dasselbe gecachte Bauteil-Material
+ * wie Wand/Decke (`layerMaterial`); ohne `componentId` ein eigener, ebenfalls
+ * gecachter neutraler Grauton (Schlüssel `__column-fallback__`, kollisionsfrei
+ * mit echten Component-IDs).
+ */
+function columnMaterial(
+  project: Project,
+  componentId: string | undefined,
+  greyed: boolean,
+  opts: BuildOpts,
+): THREE.MeshStandardMaterial {
+  if (componentId) return layerMaterial(project, componentId, greyed, opts);
+  const { mats } = opts;
+  const wireframe = opts.renderMode === "wireframe";
+  const cache = greyed ? mats.greyed : mats.normal;
+  const key = "__column-fallback__";
+  let mat = cache.get(key);
+  if (!mat) {
+    const color = COLUMN_FALLBACK_COLOR.clone();
+    if (greyed) {
+      color.lerp(new THREE.Color(0x9aa0a6), 0.7);
+      mat = new THREE.MeshStandardMaterial({
+        color,
+        wireframe,
+        roughness: 0.9,
+        metalness: 0,
+        envMapIntensity: 0.6,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+      });
+    } else {
+      mat = new THREE.MeshStandardMaterial({
+        color,
+        wireframe,
+        roughness: 0.9,
+        metalness: 0,
+        envMapIntensity: 0.6,
+      });
+    }
+    cache.set(key, mat);
+  }
+  return mat;
+}
+
+/**
+ * Eine Stütze als extrudiertes Prisma (Rechteck- oder Kreis-Profil aus
+ * `columnFootprint`, vertikale Lage aus `columnVerticalExtent`) — dieselben
+ * reinen Geometrie-Funktionen wie der WASM-Default-3D-Pfad (`toWalls3d/
+ * columns.ts::emitColumns`), damit beide Renderer Kontur und Lage identisch
+ * zeigen. Bewusst OHNE Geschoss-/Kategorie-Filterung UND ohne Raycast-Auswahl
+ * (`userData.columnId` bewusst NICHT gesetzt) — Parität zum WASM-Pfad, der
+ * Stützen ebenfalls projektweit ungefiltert emittiert (s. Aufrufer in
+ * `buildBuilding`); Interaktion bleibt dem Standard-3D vorbehalten, dieser
+ * Fix schliesst nur die Sichtbarkeits-Lücke im Fallback.
+ */
+function addColumnMeshes(
+  group: THREE.Group,
+  project: Project,
+  column: Column,
+  opts: BuildOpts,
+): void {
+  if (column.height <= 0) return;
+  const foot = columnFootprint(column);
+  if (foot.length < 3) return;
+  const { zBottom, zTop } = columnVerticalExtent(project, column);
+  const depth = zTop - zBottom;
+  if (depth <= 1e-6) return;
+
+  const mat =
+    opts.renderMode === "hidden"
+      ? opts.hiddenFace
+      : opts.renderMode === "white"
+        ? opts.whiteFace
+        : columnMaterial(project, column.componentId, false, opts);
+
+  const shape = new THREE.Shape();
+  foot.forEach((v, i) => (i === 0 ? shape.moveTo(v.x, v.y) : shape.lineTo(v.x, v.y)));
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  // Plan (x,y) → Three (x, z=y); Extrusion zeigt nach −Y, daher an OK setzen.
+  mesh.rotation.x = Math.PI / 2;
+  mesh.position.y = zTop;
+  if (opts.renderMode === "hidden") {
+    const edges = new THREE.EdgesGeometry(geo, 1);
+    mesh.add(new THREE.LineSegments(edges, opts.edgeMat));
+  }
+  group.add(mesh);
+}
+
+/**
+ * Baut alle `project.extrudedSolids` (truck-Profil-Extrusionen) als Three-
+ * Meshes — bislang liess der Three.js-Fallback sie komplett aus (s. PENDENZEN
+ * „3D-Elemente-Parität-Audit"). Wiederverwendet `emitExtrudedSolids`
+ * (identischer async-truck-Lade-Cache wie der WASM-Pfad, liefert bereits
+ * fertige `RMesh`s in Modell-Koordinaten) + den generischen RMesh→Three-
+ * Konverter `buildContextMesh` (Modell (x,y,z) → Three (x,z,y), wie bei
+ * Kontext-Meshes). Bewusst OHNE Raycast-Auswahl, analog `addColumnMeshes`.
+ */
+function addExtrudedSolidMeshes(group: THREE.Group, project: Project, opts: BuildOpts): void {
+  const meshes = emitExtrudedSolids(project);
+  if (meshes.length === 0) return;
+  const mat =
+    opts.renderMode === "hidden"
+      ? opts.hiddenFace
+      : opts.renderMode === "white"
+        ? opts.whiteFace
+        : extrusionMaterial(opts);
+  for (const rmesh of meshes) {
+    const mesh = buildContextMesh(rmesh.positions, rmesh.indices, mat);
+    if (mesh) group.add(mesh);
+  }
+}
+
+/** Warmes Orange für truck-Extrusionen im Fallback — identisch zu `EXTRUSION_RGB` in `toWalls3d/extrusions.ts`. */
+const EXTRUSION_FALLBACK_COLOR = new THREE.Color(0.85, 0.55, 0.25);
+
+/** Gecachtes, gemeinsames Material für alle truck-Extrusionen im Fallback (fixe Farbe, kein Bauteil-Bezug). */
+function extrusionMaterial(opts: BuildOpts): THREE.MeshStandardMaterial {
+  const key = "__extrusion-fallback__";
+  let mat = opts.mats.normal.get(key);
+  if (!mat) {
+    mat = new THREE.MeshStandardMaterial({
+      color: EXTRUSION_FALLBACK_COLOR.clone(),
+      wireframe: opts.renderMode === "wireframe",
+      roughness: 0.85,
+      metalness: 0,
+      envMapIntensity: 0.6,
+    });
+    opts.mats.normal.set(key, mat);
+  }
+  return mat;
 }
 
 /**

@@ -27,8 +27,8 @@ use crate::section_fill::{
 };
 use crate::shaders::{CAP_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL};
 use crate::types::{
-    Camera, Mesh, MeshInput, SlabInput, TexturedMesh, WallInput, FLOATS_PER_VERTEX,
-    TEXTURED_FLOATS_PER_VERTEX,
+    Camera, Mesh, MeshInput, RoofLayerInput, SlabInput, TexturedMesh, WallInput,
+    FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
 };
 
 /// Darstellungsart des 3D-Renderers (Oberleiste: shaded/white/textured/
@@ -1296,6 +1296,7 @@ impl Renderer {
     /// Waenden/Decken neu bauen — bei `active == false` werden Uniform-Flag und
     /// Caps geloescht. Buendelt `set_section_plane` + `build_cut_caps` +
     /// `set_cut_caps`, damit `web.rs` nur EINEN Aufruf braucht.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_section(
         &mut self,
         device: &wgpu::Device,
@@ -1304,15 +1305,16 @@ impl Renderer {
         normal: [f32; 3],
         walls: &[WallInput],
         slabs: &[SlabInput],
+        roofs: &[RoofLayerInput],
     ) {
         self.set_section_plane(active, point, normal);
         if active {
             let plane = SectionPlane::new(point, normal);
-            let caps = build_cut_caps(&plane, walls, slabs);
+            let caps = build_cut_caps(&plane, walls, slabs, roofs);
             self.set_cut_caps(device, &caps);
             // P2: die Schnitt-Umrisslinien (Fugen-/Materiallinien) je ueberlebendem
             // Cut-Cap-Rechteck aus DERSELBEN, dominanz-verschnittenen Rechteck-Menge.
-            let lines = build_cut_cap_lines(&plane, walls, slabs);
+            let lines = build_cut_cap_lines(&plane, walls, slabs, roofs);
             self.set_cut_lines(device, &lines);
         } else {
             self.set_cut_caps(device, &[]);

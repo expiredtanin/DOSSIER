@@ -40,6 +40,7 @@ import { WindowStylesTab } from "./resourceManager/WindowStylesTab";
 import { StairStylesTab } from "./resourceManager/StairStylesTab";
 import { MaterialsTab } from "./resourceManager/MaterialsTab";
 import { OverridesTab } from "./resourceManager/OverridesTab";
+import { PenSetsTab } from "./resourceManager/PenSetsTab";
 
 // ── Manager-Schublade ──────────────────────────────────────────────────────
 
@@ -54,12 +55,14 @@ export type TabId =
   | "windowStyles"
   | "stairStyles"
   | "materials"
-  | "overrides";
+  | "overrides"
+  | "pens";
 
 const TABS: { id: TabId; labelKey: string }[] = [
   { id: "components", labelKey: "resources.tab.components" },
   { id: "hatches", labelKey: "resources.tab.hatches" },
   { id: "lines", labelKey: "resources.tab.lines" },
+  { id: "pens", labelKey: "resources.tab.pens" },
   { id: "wallStyles", labelKey: "resources.tab.wallStyles" },
   { id: "ceilingStyles", labelKey: "resources.tab.ceilingStyles" },
   { id: "roofStyles", labelKey: "resources.tab.roofStyles" },
@@ -116,6 +119,22 @@ export interface ResourceManagerHandlers {
   onAddStairType?: () => void;
   onPatchStairType?: (id: string, patch: Partial<StairType>) => void;
   onDeleteStairType?: (id: string) => void;
+  /**
+   * Stiftsätze (ArchiCAD-Stiftsatz-Muster, s. `model/penSets.ts`). Optional,
+   * damit ältere Einbettungen ohne diese Handler weiter kompilieren; ohne
+   * Handler bleibt der Tab nur lesend (Aktiv-Anzeige, keine Editier-Buttons).
+   */
+  onAddPen?: () => void;
+  onRenamePen?: (id: string, name: string) => void;
+  onDeletePen?: (id: string) => void;
+  onAddPenSet?: () => void;
+  onRenamePenSet?: (id: string, name: string) => void;
+  onDeletePenSet?: (id: string) => void;
+  onSetActivePenSet?: (id: string) => void;
+  onPatchPenSetColor?: (setId: string, penId: string, color: string) => void;
+  onPatchPenSetWeight?: (setId: string, penId: string, weight: number) => void;
+  /** Ersetzt `pens`/legt einen neuen Satz mit der 255er-CAD-Standardpalette an. */
+  onSeedStandardPenSet?: () => void;
 }
 
 // ── Schwebendes Fenster (nicht-modal) ──────────────────────────────────────
@@ -369,6 +388,21 @@ export function ResourceManager({
               onAddStairType={handlers.onAddStairType}
               onPatchStairType={handlers.onPatchStairType}
               onDeleteStairType={handlers.onDeleteStairType}
+            />
+          )}
+          {tab === "pens" && (
+            <PenSetsTab
+              project={project}
+              onAddPen={handlers.onAddPen}
+              onRenamePen={handlers.onRenamePen}
+              onDeletePen={handlers.onDeletePen}
+              onAddPenSet={handlers.onAddPenSet}
+              onRenamePenSet={handlers.onRenamePenSet}
+              onDeletePenSet={handlers.onDeletePenSet}
+              onSetActivePenSet={handlers.onSetActivePenSet}
+              onPatchPenSetColor={handlers.onPatchPenSetColor}
+              onPatchPenSetWeight={handlers.onPatchPenSetWeight}
+              onSeedStandardPenSet={handlers.onSeedStandardPenSet}
             />
           )}
           {tab === "materials" && <MaterialsTab />}

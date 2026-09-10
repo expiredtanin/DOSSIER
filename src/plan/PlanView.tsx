@@ -14,7 +14,7 @@ import {
   useState,
 } from "react";
 import type { CSSProperties } from "react";
-import type { HatchRender, Plan, Primitive } from "./generatePlan";
+import type { HatchRender, Plan, PlanImage, Primitive } from "./generatePlan";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import type { RichTextDoc } from "../text/richText";
@@ -47,6 +47,7 @@ import {
   buildDrawingRuns,
   DrawingRunShape,
   PrimitiveShape,
+  greyColor,
 } from "./planView/primitives";
 import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
@@ -509,6 +510,28 @@ export interface GripHandlers {
    * {@link onEdgeEnd} auf.
    */
   onEdgeCancel(edge: EdgeGrip, anchor: Vec2): void;
+}
+
+/**
+ * Baut die CSS-`filter`-Kette für ein Hintergrund-Luftbild aus
+ * `ContextImage.filters` (Sättigung/Helligkeit/Kontrast/Graustufen). `null`
+ * bei fehlenden/neutralen Werten (kein `style`-Attribut nötig — vermeidet
+ * unnötige Re-Renders/DOM-Diffs für das Gros der Bilder ohne Korrektur).
+ * Reihenfolge (saturate→brightness→contrast→grayscale) ist beliebig, da jeder
+ * Filter unabhängig auf den vorherigen Zustand wirkt.
+ */
+export function cssImageFilter(filters: PlanImage["filters"]): string | undefined {
+  if (!filters) return undefined;
+  const { saturation = 1, brightness = 1, contrast = 1, grayscale = 0 } = filters;
+  if (saturation === 1 && brightness === 1 && contrast === 1 && grayscale === 0) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  if (saturation !== 1) parts.push(`saturate(${saturation})`);
+  if (brightness !== 1) parts.push(`brightness(${brightness})`);
+  if (contrast !== 1) parts.push(`contrast(${contrast})`);
+  if (grayscale !== 0) parts.push(`grayscale(${grayscale})`);
+  return parts.join(" ");
 }
 
 export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
@@ -2328,12 +2351,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const drawingRuns = useMemo(() => buildDrawingRuns(plan.primitives), [plan]);
 
   // Pro Polygon mit Linien-/Kreuz-Schraffur ein eigenes <pattern> sammeln.
-  // Vollfüllung ("solid") und "none" brauchen kein Muster.
+  // Vollfüllung ("solid") und "none" brauchen kein Muster. Gedimmte Polygone
+  // (greyed) bekommen HIER separat dieselbe Grau-Umfärbung wie `greyedCopy` in
+  // primitives.tsx — die <pattern>-Definition ist eine eigene, vom Primitiv
+  // losgelöste Ressource (nur über `url(#hatch-i)` referenziert) und würde
+  // sonst weiterhin in der ORIGINAL-Bauteilfarbe erscheinen.
   const hatched = useMemo(() => {
     const list: HatchedPoly[] = [];
     plan.primitives.forEach((p, i) => {
       if (p.kind === "polygon" && polyUsesPattern(p.hatch)) {
-        list.push({ patternId: `hatch-${i}`, hatch: p.hatch });
+        const hatch = p.greyed ? { ...p.hatch, color: greyColor(p.hatch.color) ?? p.hatch.color } : p.hatch;
+        list.push({ patternId: `hatch-${i}`, hatch });
       }
     });
     return list;
@@ -2490,6 +2518,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const w = (img.max.x - img.min.x) * PX_PER_M;
         const h = (img.max.y - img.min.y) * PX_PER_M;
         if (w <= 0 || h <= 0) return null;
+        const filter = cssImageFilter(img.filters);
         return (
           <image
             key={img.id}
@@ -2499,6 +2528,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             width={w}
             height={h}
             opacity={img.opacity}
+            style={filter ? { filter } : undefined}
             preserveAspectRatio="none"
             pointerEvents="none"
           />
@@ -2704,7 +2734,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const c2 = toScreen({ x: groupBBox.maxX, y: groupBBox.minY });
         const c3 = toScreen({ x: groupBBox.maxX, y: groupBBox.maxY });
         const c4 = toScreen({ x: groupBBox.minX, y: groupBBox.maxY });
-        const size = 5 / (meetScale(view, svgRef.current) ?? 1);
+        const size = 4 / (meetScale(view, svgRef.current) ?? 1);
         const corners = [c1, c2, c3, c4];
         return (
           <>
@@ -2714,13 +2744,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               pointerEvents="none"
             />
             {corners.map((s, i) => (
-              <rect
+              <circle
                 key={`gbb-${i}`}
-                className="plan-group-bbox-corner"
-                x={s.x - size}
-                y={s.y - size}
-                width={size * 2}
-                height={size * 2}
+                className="plan-grip plan-group-bbox-corner"
+                cx={s.x}
+                cy={s.y}
+                r={size}
                 pointerEvents="none"
               />
             ))}
@@ -2761,19 +2790,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           />
         ))}
       {/* Editier-Griffe des selektierten Elements (Wand-Enden / 2D-Vertices):
-          ziehbare Quadrate. Bildschirmkonstante Größe über die meet-Skala. */}
+          ziehbare Kreise. Bildschirmkonstante Größe über die meet-Skala.
+          Radius bewusst kleiner als der Treffer-Radius (GRIP_HIT_PX) — die
+          Klickfläche bleibt grosszügig, nur die sichtbare Form schrumpft. */}
       {gripsActive &&
         grips!.map((g, i) => {
           const s = toScreen(g);
-          const size = 6 / (meetScale(view, svgRef.current) ?? 1);
+          const size = 4.5 / (meetScale(view, svgRef.current) ?? 1);
           return (
-            <rect
+            <circle
               key={`grip-${i}`}
               className="plan-grip"
-              x={s.x - size}
-              y={s.y - size}
-              width={size * 2}
-              height={size * 2}
+              cx={s.x}
+              cy={s.y}
+              r={size}
               pointerEvents="none"
             />
           );
@@ -2784,7 +2814,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {roomStamp &&
         (() => {
           const s = toScreen(roomStamp.anchor);
-          const size = 5 / (meetScale(view, svgRef.current) ?? 1);
+          const size = 4 / (meetScale(view, svgRef.current) ?? 1);
           const pts = [
             `${s.x},${s.y - size}`,
             `${s.x + size},${s.y}`,

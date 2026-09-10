@@ -10,6 +10,8 @@ import {
   readViewSnapshot,
   applyOverrideRuleEnabled,
   snapshotMatchesLiveState,
+  boolMapEqual,
+  matchingComboName,
   type ViewSnapshotState,
 } from "./viewSnapshots";
 
@@ -192,5 +194,36 @@ describe("viewSnapshots — snapshotMatchesLiveState", () => {
   it("enabledOverrideRuleIds weicht ab (andere Regel) → false", () => {
     const live = { ...sampleState(), enabledOverrideRuleIds: ["r1", "r2"] };
     expect(snapshotMatchesLiveState(sampleState(), live)).toBe(false);
+  });
+});
+
+describe("viewSnapshots — boolMapEqual", () => {
+  it("gleiche Keys/Werte → true, unabhängig von der Einfüge-Reihenfolge", () => {
+    expect(boolMapEqual({ a: true, b: false }, { b: false, a: true })).toBe(true);
+  });
+  it("unterschiedliche Werte → false", () => {
+    expect(boolMapEqual({ a: true }, { a: false })).toBe(false);
+  });
+  it("unterschiedliche Key-Menge → false", () => {
+    expect(boolMapEqual({ a: true, b: true }, { a: true })).toBe(false);
+  });
+});
+
+describe("viewSnapshots — matchingComboName (Grundlage der Ausschnitt-Tab-Auto-Benennung)", () => {
+  const combos: Record<string, Record<string, boolean>> = {
+    "Nur EG": { eg: true, og: false },
+    "Alles": { eg: true, og: true },
+  };
+  const load = (name: string) => combos[name] ?? null;
+  const names = () => Object.keys(combos);
+
+  it("findet den Namen der exakt passenden Kombination", () => {
+    expect(matchingComboName(names(), load, { eg: true, og: false })).toBe("Nur EG");
+  });
+  it("liefert null, wenn keine Kombination exakt passt", () => {
+    expect(matchingComboName(names(), load, { eg: false, og: false })).toBeNull();
+  });
+  it("liefert null bei leerer Kombinationsliste", () => {
+    expect(matchingComboName([], load, { eg: true })).toBeNull();
   });
 });

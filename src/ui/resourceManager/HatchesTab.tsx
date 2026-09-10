@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { HatchPattern, HatchStyle, LineStyle, Project } from "../../model/types";
 import { parsePat } from "../../io/patParser";
 import { HatchSwatch } from "../hatchPreview";
+import { MotifEditor } from "../MotifEditor";
 import { t } from "../../i18n";
 import {
   DeleteButton,
@@ -24,7 +25,24 @@ const PATTERN_OPTIONS: { value: HatchPattern; labelKey: string }[] = [
   { value: "insulation", labelKey: "pattern.insulation" },
   { value: "diagonal", labelKey: "pattern.diagonal" },
   { value: "crosshatch", labelKey: "pattern.crosshatch" },
+  { value: "custom", labelKey: "pattern.custom" },
 ];
+
+/**
+ * Default-Motiv beim Umschalten auf „Custom": dieselbe Dreieckszelle wie beim
+ * Linien-Custom-Motiv (`LinesTab.tsx`) — konsistenter Startpunkt, der Nutzer
+ * passt sie im MotifEditor an.
+ */
+const DEFAULT_MOTIF: NonNullable<HatchStyle["motif"]> = {
+  points: [
+    { x: 0, y: 0 },
+    { x: 1, y: 1.5 },
+    { x: 2, y: 0 },
+    { x: 3, y: -1.5 },
+    { x: 4, y: 0 },
+  ],
+  length: 4,
+};
 
 /** Detail-Panel EINER Schraffur (rechte Seite des Master-Detail-Layouts). */
 function HatchDetail({
@@ -52,6 +70,15 @@ function HatchDetail({
       onPatch({ kind: k, image: { src: "", scaleX: 1, scaleY: 1, rotation: 0 } });
     } else {
       onPatch({ kind: k });
+    }
+  };
+
+  /** Wechselt das Muster; beim erstmaligen Umschalten auf „Custom" ein Default-Motiv setzen. */
+  const setPattern = (pattern: HatchPattern) => {
+    if (pattern === "custom" && !hatch.motif) {
+      onPatch({ pattern, motif: DEFAULT_MOTIF });
+    } else {
+      onPatch({ pattern });
     }
   };
 
@@ -123,13 +150,22 @@ function HatchDetail({
             <FieldRow label={t("resources.col.pattern")}>
               <SelectField
                 value={hatch.pattern}
-                onChange={(pattern) => onPatch({ pattern })}
+                onChange={setPattern}
                 options={PATTERN_OPTIONS.map((o) => ({
                   value: o.value,
                   label: t(o.labelKey),
                 }))}
               />
             </FieldRow>
+            {hatch.pattern === "custom" && (
+              <FieldRow label={t("resources.field.motif")}>
+                <MotifEditor
+                  points={hatch.motif?.points ?? DEFAULT_MOTIF.points}
+                  length={hatch.motif?.length ?? DEFAULT_MOTIF.length}
+                  onChange={(points, length) => onPatch({ motif: { points, length } })}
+                />
+              </FieldRow>
+            )}
             <FieldRow label={t("resources.col.scale")}>
               <NumberField
                 value={hatch.scale}

@@ -34,8 +34,8 @@
 //! Rechteck (4 Ecken, siehe `section.rs`) — Fan-Triangulierung genuegt.
 
 use crate::section::{cut_section, CutPolygon, SectionPlane};
-use crate::section_boolean::{rect_of_poly, subtract_dominant_bands};
-use crate::types::{SlabInput, WallInput};
+use crate::section_boolean::subtract_dominant_bands;
+use crate::types::{RoofLayerInput, SlabInput, WallInput};
 
 /// f32 pro Cap-Vertex: [pos.x, pos.y, pos.z, u, v, pattern, angle_rad, scale,
 /// line_weight_mm]. Spiegel des Vertex-Layouts der `cap_pipeline` (gpu.rs) und des
@@ -99,8 +99,13 @@ const FALLBACK_PATTERN: f32 = 2.0;
 /// (`toSection.ts::attachCutStyles` Phase 2). Gemeinsame Basis der Cut-Cap-Flaechen
 /// (`build_cut_caps`) UND der Cut-Umrisslinien (`build_cut_cap_lines`), damit beide
 /// auf DERSELBEN, ueberlappungsfreien Rechteck-Menge arbeiten.
-fn cut_cap_polys(plane: &SectionPlane, walls: &[WallInput], slabs: &[SlabInput]) -> Vec<CutPolygon> {
-    let out = cut_section(plane, walls, slabs);
+fn cut_cap_polys(
+    plane: &SectionPlane,
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
+) -> Vec<CutPolygon> {
+    let out = cut_section(plane, walls, slabs, roofs);
     subtract_dominant_bands(out.cut_polygons)
 }
 
@@ -108,8 +113,9 @@ pub fn build_cut_caps(
     plane: &SectionPlane,
     walls: &[WallInput],
     slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
 ) -> Vec<f32> {
-    let polys = cut_cap_polys(plane, walls, slabs);
+    let polys = cut_cap_polys(plane, walls, slabs, roofs);
     let point = plane.point;
     let u_axis = plane.u_axis();
     // (u, v) -> Welt: horizontale Lage aus point + u*u_axis, Hoehe = v.
@@ -155,8 +161,8 @@ pub fn build_cut_caps(
     verts
 }
 
-/// Erzeugt die Schnitt-UMRISSLINIEN (P2): fuer JEDES ueberlebende Cut-Cap-Rechteck
-/// seine vier Kanten als flache Ribbon-Dreiecke auf der Schnittebene, in Welt-
+/// Erzeugt die Schnitt-UMRISSLINIEN (P2): fuer JEDES ueberlebende Cut-Cap-Polygon
+/// seine Kanten als flache Ribbon-Dreiecke auf der Schnittebene, in Welt-
 /// Koordinaten (dieselbe (u,v)->Welt-Ruecktransformation wie `build_cut_caps`).
 /// Rueckgabe = interleaved `[px,py,pz, r,g,b]` (`CUT_LINE_FLOATS_PER_VERTEX`,
 /// TriangleList), leer wenn die Ebene das Modell nicht schneidet.
@@ -169,12 +175,21 @@ pub fn build_cut_caps(
 /// (2 Dreiecke) um ihre Mittellinie gelegt, mit der Ribbon-Breite senkrecht zur
 /// Kante IN der Ebene; alle Ribbons um `CUT_LINE_LIFT` zur Kamera versetzt, damit
 /// sie nicht an der Ebene weggeclippt werden und vor den Caps liegen.
+///
+/// Laeuft ueber `poly.pts` DIREKT (nicht mehr ueber dessen achsparallele
+/// Bounding-Box, `rect_of_poly`) — fuer Wand-/Decken-Baender identisch (deren
+/// `pts` SIND bereits genau die vier Bbox-Ecken in derselben Reihenfolge, siehe
+/// `section.rs`/`poly_from_rect`), aber notwendig fuer NICHT achsparallele
+/// Polygone (Dach-Schichten, `roof_cut::cut_roof_layer` — ein Dach wird von einer
+/// vertikalen Schnittebene i. A. als schiefes Parallelogramm/Trapez getroffen,
+/// dessen Bbox-Rechteck die Kanten falsch wiedergeben wuerde).
 pub fn build_cut_cap_lines(
     plane: &SectionPlane,
     walls: &[WallInput],
     slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
 ) -> Vec<f32> {
-    let polys = cut_cap_polys(plane, walls, slabs);
+    let polys = cut_cap_polys(plane, walls, slabs, roofs);
     let point = plane.point;
     let u_axis = plane.u_axis();
     let normal = plane.normal;
@@ -194,9 +209,10 @@ pub fn build_cut_cap_lines(
 
     let mut verts: Vec<f32> = Vec::new();
     for poly in &polys {
-        let Some(r) = rect_of_poly(poly) else {
+        let n = poly.pts.len();
+        if n < 2 {
             continue;
-        };
+        }
         // Stil aus den Band-Metadaten (oder Default).
         let (color, weight_mm) = match &poly.cut {
             Some(meta) => (
@@ -207,16 +223,10 @@ pub fn build_cut_cap_lines(
         };
         let half_w = (weight_mm.max(0.0) * CUT_LINE_MM_TO_WORLD * 0.5).max(1e-4);
 
-        // Die vier Rechteck-Ecken (u,v) im Umlauf; je Kante ein Ribbon.
-        let corners = [
-            [r.u_min, r.v_min],
-            [r.u_max, r.v_min],
-            [r.u_max, r.v_max],
-            [r.u_min, r.v_max],
-        ];
-        for k in 0..4 {
-            let a = to_world(corners[k]);
-            let b = to_world(corners[(k + 1) % 4]);
+        // Die tatsaechlichen Polygon-Ecken (u,v) im Umlauf; je Kante ein Ribbon.
+        for k in 0..n {
+            let a = to_world(poly.pts[k]);
+            let b = to_world(poly.pts[(k + 1) % n]);
             push_line_ribbon(&mut verts, a, b, normal, half_w, color);
         }
     }
@@ -298,7 +308,7 @@ mod tests {
             cut: None,
         };
         let plane = SectionPlane::looking_plus_x(1.5);
-        let verts = build_cut_caps(&plane, &[wall], &[]);
+        let verts = build_cut_caps(&plane, &[wall], &[], &[]);
 
         assert!(!verts.is_empty(), "Schnitt liefert Cap-Geometrie");
         assert_eq!(
@@ -338,7 +348,7 @@ mod tests {
             cut: None,
         };
         let plane = SectionPlane::looking_plus_x(1.5);
-        let verts = build_cut_caps(&plane, &[wall], &[]);
+        let verts = build_cut_caps(&plane, &[wall], &[], &[]);
         assert!(!verts.is_empty());
         assert_eq!(verts[5], FALLBACK_PATTERN, "Fallback = Diagonale (2)");
         assert_eq!(verts[6], 0.0, "Fallback-Winkel 0");
@@ -391,7 +401,7 @@ mod tests {
             }),
         };
         let plane = SectionPlane::looking_plus_x(1.5);
-        let verts = build_cut_caps(&plane, &[wall], &[slab]);
+        let verts = build_cut_caps(&plane, &[wall], &[slab], &[]);
         assert!(!verts.is_empty());
 
         // Die Wand-Caps tragen pattern==2 (diagonal), die Beton-Caps pattern==1
@@ -478,7 +488,7 @@ mod tests {
             }),
         };
         let plane = SectionPlane::looking_plus_x(1.5);
-        let verts = build_cut_caps(&plane, &[wall], &[screed, insulation]);
+        let verts = build_cut_caps(&plane, &[wall], &[screed, insulation], &[]);
         assert!(!verts.is_empty());
 
         // Wand-u-Intervall (=y) ist [-0.2,0.2]. Fuer JEDES Estrich- (Muster 3) oder
@@ -529,7 +539,7 @@ mod tests {
             }),
         };
         let plane = SectionPlane::looking_plus_x(1.5);
-        let verts = build_cut_cap_lines(&plane, &[wall.clone()], &[]);
+        let verts = build_cut_cap_lines(&plane, &[wall.clone()], &[], &[]);
         assert!(!verts.is_empty());
         assert_eq!(
             verts.len() % CUT_LINE_FLOATS_PER_VERTEX,
@@ -573,7 +583,7 @@ mod tests {
             line_color: Some(color),
             line_weight: Some(0.2),
         });
-        let thin_verts = build_cut_cap_lines(&plane, &[thin], &[]);
+        let thin_verts = build_cut_cap_lines(&plane, &[thin], &[], &[]);
         assert!(
             bbox_y(&verts) > bbox_y(&thin_verts) + 1e-4,
             "dickere Strichstaerke -> groessere v-Ausdehnung der Ribbons"

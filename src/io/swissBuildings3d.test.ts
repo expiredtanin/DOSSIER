@@ -10,6 +10,7 @@ import {
   clipMeshToBbox,
   splitMeshComponents,
   stripOverhangSoffits,
+  concatMeshes,
   BUILDING_LAYER,
 } from "./swissBuildings3d";
 import type { ImportedMesh } from "../model/types";
@@ -217,5 +218,44 @@ describe("stripOverhangSoffits", () => {
   it("leeres/entartetes Mesh -> unverändert (kein Crash)", () => {
     const empty: ImportedMesh = { id: "e", type: "importedMesh", name: "x", positions: [], indices: [] };
     expect(stripOverhangSoffits(empty)).toBe(empty);
+  });
+});
+
+describe("concatMeshes", () => {
+  const tri = (id: string, ox: number): ImportedMesh => ({
+    id,
+    type: "importedMesh",
+    name: id,
+    layer: id,
+    positions: [ox, 0, 0, ox + 1, 0, 0, ox, 1, 0],
+    indices: [0, 1, 2],
+  });
+
+  it("führt Positions/Indizes mehrerer Meshes versetzt zusammen", () => {
+    const merged = concatMeshes([tri("a", 0), tri("b", 10)]);
+    expect(merged?.positions).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 11, 0, 0, 10, 1, 0]);
+    // zweites Dreieck referenziert um 3 (erste Mesh-Vertexzahl) versetzte Indizes.
+    expect(merged?.indices).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it("leere Teile (kein Dreieck) werden übersprungen, kein Beitrag zu Positions/Indizes", () => {
+    const emptyPart: ImportedMesh = { id: "e", type: "importedMesh", name: "e", positions: [1, 2, 3], indices: [] };
+    const merged = concatMeshes([emptyPart, tri("a", 0)]);
+    expect(merged?.positions).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  });
+
+  it("genau EIN nicht-leerer Teil -> dieselbe Referenz (kein unnötiges Kopieren)", () => {
+    const only = tri("a", 0);
+    expect(concatMeshes([only])).toBe(only);
+  });
+
+  it("ausschliesslich leere Teile -> null", () => {
+    const empty: ImportedMesh = { id: "e", type: "importedMesh", name: "e", positions: [], indices: [] };
+    expect(concatMeshes([empty, empty])).toBeNull();
+  });
+
+  it("übernimmt Metadaten (z. B. `layer`) vom ERSTEN nicht-leeren Teil", () => {
+    const merged = concatMeshes([tri("a", 0), tri("b", 10)]);
+    expect(merged?.layer).toBe("a");
   });
 });

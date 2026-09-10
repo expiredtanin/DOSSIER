@@ -28,6 +28,7 @@
 
 import DxfParser from "dxf-parser";
 import type { Contour, ContourSet, ImportedMesh, ImportedText, Vec2 } from "../model/types";
+import { GENERIC_IMPORT_CATEGORY } from "../model/contextCategories";
 
 /**
  * Optionale Import-Diagnose: Histogramm der gelesenen Entity-Typen (Typ → Anzahl)
@@ -191,6 +192,7 @@ export function parseDxf(text: string): DxfImportResult {
       id: nextId("imported"),
       type: "importedMesh",
       name: "DXF-Mesh",
+      categoryCode: GENERIC_IMPORT_CATEGORY.code,
       positions: meshTriangles,
       indices: meshIndices,
     });
@@ -202,6 +204,7 @@ export function parseDxf(text: string): DxfImportResult {
       id: nextId("contours"),
       type: "contourSet",
       name: "DXF-Konturen",
+      categoryCode: GENERIC_IMPORT_CATEGORY.code,
       contours,
     });
   }

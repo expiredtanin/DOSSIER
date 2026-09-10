@@ -86,6 +86,29 @@ describe("filletCommand", () => {
       pts.some((p) => Math.hypot(p.x - x, p.y - y) < 1e-6);
     expect(hasNear(1.5, 0)).toBe(true); // Tangente auf dem ersten Schenkel
     expect(hasNear(2, 0.5)).toBe(true); // Tangente auf dem zweiten Schenkel
+    // Echter Bogen (kein tessellierter Punkthaufen): genau 4 Punkte, mit
+    // einem von 0 verschiedenen bulge-Wert an der Tangente↔Tangente-Kante.
+    expect(pts.length).toBe(4);
+    expect(poly.geom.bulge?.[1]).toBeDefined();
+    expect(Math.abs(poly.geom.bulge![1])).toBeGreaterThan(0.1);
+  });
+
+  it("Polylinie mit echtem bulge-Segment gilt als nicht fillet-fähig (Datenverlust-Schutz)", () => {
+    const p = project();
+    p.drawings2d[0].geom = {
+      shape: "polyline",
+      pts: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }],
+      closed: false,
+      bulge: [0.4, 0],
+    };
+    const ctx = makeCtx(p);
+    const [state, result] = filletCommand.onInput(
+      filletCommand.init(),
+      { kind: "point", point: { x: 2, y: 0 } },
+      ctx,
+    );
+    expect(result.commit).toBeUndefined();
+    expect((state as { phase: string }).phase).toBe("pick");
   });
 
   it("daneben geklickt → Befehl bleibt im pick-Zustand (kein Treffer)", () => {

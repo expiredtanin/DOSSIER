@@ -29,6 +29,7 @@ import {
   buildViewSnapshotTree,
   type ViewSnapshotFolderNode,
 } from "../state/viewSnapshotFolders";
+import { matchingComboName } from "../state/viewSnapshots";
 import { t } from "../i18n";
 
 // ── Baum-Icons (inline-SVG im Panel-Stil: 14px, stroke currentColor 1.4) ──────
@@ -129,36 +130,6 @@ function RenameInput({
       onBlur={onCommit}
     />
   );
-}
-
-/** Deep-Equal zweier `Record<string, boolean>`-Maps (gleiche Keys UND Werte). */
-function boolMapEqual(
-  a: Record<string, boolean>,
-  b: Record<string, boolean>,
-): boolean {
-  const ka = Object.keys(a);
-  if (ka.length !== Object.keys(b).length) return false;
-  for (const k of ka) {
-    if (a[k] !== b[k]) return false;
-  }
-  return true;
-}
-
-/**
- * Sucht unter den gespeicherten Kombinationen (`names` + `load`) diejenige,
- * deren Map EXAKT `target` entspricht — liefert den Namen oder `null`. Grundlage
- * der Footer-Anzeige „welche Ebenen-/Zeichnungskombi war aktiv".
- */
-function matchingComboName(
-  names: string[],
-  load: (name: string) => Record<string, boolean> | null,
-  target: Record<string, boolean>,
-): string | null {
-  for (const name of names) {
-    const map = load(name);
-    if (map && boolMapEqual(map, target)) return name;
-  }
-  return null;
 }
 
 /** Welche Zeilenart gerade inline umbenannt wird (Commit unterscheidet sich). */

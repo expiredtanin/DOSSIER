@@ -43,6 +43,10 @@ export function useMouseSelectionHandlers(opts: {
   activeLevelId: string;
   visibleCodes: Set<string>;
   categoryDisplay: CategoryDisplayResolver & DisplayResolver;
+  /** Darstellungsmodus-Resolver je Zeichnungsebene-ID (wie categoryDisplay,
+   * nur für Geschoss/Zeichnung) — sperrt Elemente einer nicht-aktiven,
+   * überlagerten Ebene analog zum Kategorie-Sperren unten. */
+  floorDisplay: CategoryDisplayResolver & DisplayResolver;
   selectionState: Pick<
     ReturnType<typeof useSelectionState>,
     | "selectedWallIds"
@@ -66,8 +70,8 @@ export function useMouseSelectionHandlers(opts: {
     | "setSelectedRoofIds"
     | "selectedContextObjectIds"
     | "setSelectedContextObjectIds"
-    | "selectedSectionLineId"
-    | "setSelectedSectionLineId"
+    | "selectedSectionLineIds"
+    | "setSelectedSectionLineIds"
     | "selectedGroupIds"
     | "setSelectedGroupIds"
     | "groupPath"
@@ -77,7 +81,7 @@ export function useMouseSelectionHandlers(opts: {
     "setMenu" | "setStampEditorRoomId" | "editTextId" | "setEditTextId" | "setEditTextMinHeightM"
   >;
 }) {
-  const { project, setProject, activeLevelId, visibleCodes, categoryDisplay, selectionState, contextMenuState } = opts;
+  const { project, setProject, activeLevelId, visibleCodes, categoryDisplay, floorDisplay, selectionState, contextMenuState } = opts;
   const {
     selectedWallIds,
     setSelectedWallIds,
@@ -100,8 +104,8 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedRoofIds,
     selectedContextObjectIds,
     setSelectedContextObjectIds,
-    selectedSectionLineId,
-    setSelectedSectionLineId,
+    selectedSectionLineIds,
+    setSelectedSectionLineIds,
     setSelectedGroupIds,
     groupPath,
   } = selectionState;
@@ -123,7 +127,7 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
     setSelectedContextObjectIds([]);
-    setSelectedSectionLineId(null);
+    setSelectedSectionLineIds([]);
     setStampEditorRoomId(roomId);
   };
   // Doppelklick auf ein Text-2D-Element: selektieren + Inhalts-Editor öffnen.
@@ -140,7 +144,7 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
     setSelectedContextObjectIds([]);
-    setSelectedSectionLineId(null);
+    setSelectedSectionLineIds([]);
     // Bestehendes Element per Doppelklick: keine Rahmen-Mindesthöhe (nur bei
     // frisch aufgezogener Textspalte relevant, s. textbox.ts focusMinHeightM)
     // — sonst könnte eine vorige Textspalten-Erstellung hier nachwirken.
@@ -206,12 +210,36 @@ export function useMouseSelectionHandlers(opts: {
     return undefined;
   };
 
+  // Zeichnungsebene (Geschoss/Zeichnung) des getroffenen Elements — für die
+  // Sperr-Prüfung bei überlagerten (nicht-aktiven) Ebenen, s. `floorDisplay`
+  // und `generateVisibleLevelsPlan`. Öffnungen gehören zur Wand (keine eigene
+  // Ebenen-Referenz) — bewusst ausgelassen, wie schon bei categoryCodeOfSelection.
+  const floorIdOfSelection = (sel: PlanSelection): string | undefined => {
+    if (sel.wallId) return project.walls.find((w) => w.id === sel.wallId)?.floorId;
+    if (sel.ceilingId) return (project.ceilings ?? []).find((c) => c.id === sel.ceilingId)?.floorId;
+    if (sel.stairId) return (project.stairs ?? []).find((s) => s.id === sel.stairId)?.floorId;
+    if (sel.roomId) return (project.rooms ?? []).find((r) => r.id === sel.roomId)?.floorId;
+    if (sel.columnId) return (project.columns ?? []).find((c) => c.id === sel.columnId)?.floorId;
+    if (sel.roofId) return (project.roofs ?? []).find((r) => r.id === sel.roofId)?.floorId;
+    if (sel.drawingId) return project.drawings2d.find((d) => d.id === sel.drawingId)?.levelId;
+    return undefined;
+  };
+
   const onPlanSelect = (sel: PlanSelection) => {
     // Darstellungsmodus „Andere grau & gesperrt": ein gesperrtes Element lässt
     // sich nicht anwählen (und damit auch nicht verschieben/bearbeiten) — der
     // Klick wird ignoriert, als läge dort nichts.
     const hitCode = categoryCodeOfSelection(sel);
     if (hitCode !== undefined && categoryDisplay(hitCode).locked) return;
+    // Dasselbe für eine überlagerte, nicht-aktive Zeichnungsebene (mehrere
+    // Geschosse gleichzeitig sichtbar, Modus „Andere grau & gesperrt"/„Nur
+    // aktive gesperrt"): das Element bleibt sichtbar, ist aber nicht anwählbar.
+    const hitFloorId = floorIdOfSelection(sel);
+    if (hitFloorId !== undefined && hitFloorId !== activeLevelId && floorDisplay(hitFloorId).locked)
+      return;
+    // Schnitt-/Ansichtslinie: dieselbe Sperr-Prüfung direkt über ihre eigene
+    // Zeichnungsebene-ID (sie hat keinen Wirts-Floor wie eine Wand).
+    if (sel.sectionLineId && floorDisplay(sel.sectionLineId).locked) return;
     // Gruppen-Isolation (Vectorworks „Gruppe betreten"): ausserhalb der
     // aktiven Gruppe ist alles gesperrt (gedimmt gerendert, s. PlanView) —
     // derselbe Ignorier-Kurzschluss wie beim normalen Sperren oben.
@@ -221,10 +249,12 @@ export function useMouseSelectionHandlers(opts: {
     // Rest behalten (Wände und 2D-Zeichnungen unabhängig, gemischte Auswahl
     // erlaubt). Leerraum-Klick mit Shift lässt die Auswahl unverändert.
     if (sel.shift) {
-      // Schnittlinie ist Einzelauswahl — Shift+Klick togglet sie an/aus.
       if (sel.sectionLineId) {
-        setSelectedSectionLineId(
-          selectedSectionLineId === sel.sectionLineId ? null : sel.sectionLineId,
+        const id = sel.sectionLineId;
+        setSelectedSectionLineIds(
+          selectedSectionLineIds.includes(id)
+            ? selectedSectionLineIds.filter((s) => s !== id)
+            : [...selectedSectionLineIds, id],
         );
         return;
       }
@@ -323,7 +353,7 @@ export function useMouseSelectionHandlers(opts: {
         setSelectedRoofIds(expanded.roofIds);
         setSelectedExtrudedSolidIds([]);
         setSelectedContextObjectIds([]);
-        setSelectedSectionLineId(null);
+        setSelectedSectionLineIds([]);
         setSelectedGroupIds(groupIds);
         return;
       }
@@ -345,10 +375,10 @@ export function useMouseSelectionHandlers(opts: {
       if (keep !== "column") setSelectedColumnIds([]);
       if (keep !== "roof") setSelectedRoofIds([]);
       if (keep !== "contextObject") setSelectedContextObjectIds([]);
-      if (keep !== "sectionLine") setSelectedSectionLineId(null);
+      if (keep !== "sectionLine") setSelectedSectionLineIds([]);
     };
     if (sel.sectionLineId) {
-      setSelectedSectionLineId(sel.sectionLineId);
+      setSelectedSectionLineIds([sel.sectionLineId]);
       clearOthers("sectionLine");
     } else if (sel.openingId) {
       setSelectedOpeningIds([sel.openingId]);
@@ -430,7 +460,7 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
     setSelectedContextObjectIds([]);
-    setSelectedSectionLineId(null);
+    setSelectedSectionLineIds([]);
   };
   // Rechts-Klick im Grundriss: Wand-Kontextmenü. Trifft der Klick eine Wand, die
   // NICHT bereits in der Auswahl ist, wird die Auswahl auf sie gesetzt (damit die
@@ -457,7 +487,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Treppe wählen (Einzelauswahl).
@@ -472,7 +502,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Decke wählen (Einzelauswahl).
@@ -487,7 +517,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
     }
   };
   // Links-Klick im 3D: per Raycast getroffene Öffnung wählen (Einzelauswahl).
@@ -502,7 +532,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
     }
   };
   // Links-KLICK im Nordstern-3D-Viewport (WASM, TS-Raycast): getroffenes Bauteil
@@ -523,7 +553,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
       setSelectedContextObjectIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
       return;
     }
     if (hit.kind === "contextObject") {
@@ -537,7 +567,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedExtrudedSolidIds([]);
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
       return;
     }
     // Öffnung (Fenster/Tür) und Treppe sind jetzt auch im WASM-Viewport pickbar
@@ -554,7 +584,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
       setSelectedContextObjectIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
       return;
     }
     if (hit.kind === "stair") {
@@ -568,7 +598,7 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedColumnIds([]);
       setSelectedRoofIds([]);
       setSelectedContextObjectIds([]);
-      setSelectedSectionLineId(null);
+      setSelectedSectionLineIds([]);
       return;
     }
     if (hit.kind === "roof") {
@@ -603,7 +633,7 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
-    setSelectedSectionLineId(null);
+    setSelectedSectionLineIds([]);
   };
   // Rechts-Klick im 3D: Wand-Kontextmenü an der Cursorposition.
   const onViewportContextMenu = (info: ViewportContextInfo) => {

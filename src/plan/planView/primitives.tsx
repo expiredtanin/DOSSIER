@@ -4,6 +4,7 @@
 // Zugriff auf PlanView-internen State.
 
 import type { HatchRender, Primitive } from "../generatePlan";
+import { NO_HATCH } from "../generatePlan/shared";
 import { docToLines, wrapDocToLines, type SvgLine } from "../../text/renderHtml";
 import type { Vec2 } from "../../model/types";
 import { quantizePen } from "../../export/sceneToPrintSvg";
@@ -19,7 +20,8 @@ export function needsPattern(pattern: HatchRender["pattern"]): boolean {
   return (
     pattern === "insulation" ||
     pattern === "diagonal" ||
-    pattern === "crosshatch"
+    pattern === "crosshatch" ||
+    pattern === "custom"
   );
 }
 
@@ -121,7 +123,46 @@ export function HatchPattern({
     );
   }
 
-  // Diagonal + Crosshatch: dünne Linien, Winkel via patternTransform.
+  if (
+    hatch.pattern === "custom" &&
+    hatch.motif &&
+    hatch.motif.points.length >= 2 &&
+    hatch.motif.length > 1e-6
+  ) {
+    // Frei gezeichnetes Motiv: EINE Wiederhollänge (Papier-mm → viewBox über
+    // `hatch.scale`) per `motifPoints` entlang eines vertikalen Referenz-
+    // segments (0,0)→(0,period) tesselliert und als <path> in die Kachel
+    // gelegt — dieselbe „Musterlinie läuft entlang der Kachel-y-Achse"-
+    // Konvention wie diagonal/crosshatch (Zeilenabstand `rowSpacing` = Kachel-
+    // breite, wie deren `tile`; das Motiv selbst bestimmt die Kachelhöhe).
+    const rowSpacing = 8 * hatch.scale;
+    const period = hatch.motif.length * hatch.scale;
+    const pts = motifPoints({ x: 0, y: 0 }, { x: 0, y: period }, hatch.motif, hatch.scale);
+    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" ");
+    return (
+      <pattern
+        id={id}
+        patternUnits="userSpaceOnUse"
+        width={rowSpacing}
+        height={period}
+        patternTransform={`rotate(${hatch.angle})`}
+      >
+        <path
+          d={d}
+          fill="none"
+          stroke={hatch.color}
+          strokeWidth={sw}
+          strokeDasharray={dashes}
+          strokeLinecap={dashCap}
+          vectorEffect={vfx}
+        />
+      </pattern>
+    );
+  }
+
+  // Diagonal + Crosshatch (+ "custom" ohne gesetztes Motiv, s. o. — degradiert
+  // bewusst zu geraden Linien statt abzustürzen): dünne Linien, Winkel via
+  // patternTransform.
   // Kachel 8×8 × Maßstab; crosshatch fügt eine zweite, senkrechte Schar hinzu.
   const tile = 8 * hatch.scale;
   return (
@@ -289,13 +330,27 @@ export function greyColor(c: string | undefined): string | undefined {
   return !c || c === "none" || c === "transparent" ? c : GREYED_COLOR;
 }
 
-/** Flache Kopie eines Primitivs mit allen Farbfeldern auf `GREYED_COLOR` umgefärbt. */
+/**
+ * Flache Kopie eines Primitivs, gedimmt für den Hintergrund: die Flächen-
+ * Grundfüllung bleibt WEISS (Nutzer-Wunsch: "im Hintergrund nicht als graue
+ * Fläche gefüllt"), aber echte Schraffur-LINIEN (Kreuz/Parallel/Dämmung/Kies)
+ * bleiben sichtbar — nur grau eingefärbt statt in ihrer Bauteilfarbe (Nutzer-
+ * Präzisierung: "Schraffuren selber sollten sichtbar sein, also die Linien
+ * davon"). Nur eine reine VOLLFÜLLUNG ("solid", hat keine eigenen Linien) und
+ * Bild-Schraffuren (keine sinnvolle Grau-Variante) weichen auf `NO_HATCH` —
+ * sonst bliebe die Fläche grau bzw. in voller Bild-Farbe gefüllt.
+ */
 export function greyedCopy<T extends Primitive>(p: T): T {
   const q: any = { ...p };
-  if ("fill" in q) q.fill = greyColor(q.fill);
+  if ("fill" in q && q.fill && q.fill !== "none") q.fill = "#ffffff";
   if ("stroke" in q) q.stroke = greyColor(q.stroke);
   if ("color" in q) q.color = greyColor(q.color);
-  if ("hatch" in q && q.hatch) q.hatch = { ...q.hatch, color: greyColor(q.hatch.color) };
+  if ("hatch" in q && q.hatch) {
+    const noLines = q.hatch.pattern === "solid" || q.hatch.kind === "image";
+    q.hatch = noLines
+      ? { ...NO_HATCH, color: greyColor(q.hatch.color) }
+      : { ...q.hatch, color: greyColor(q.hatch.color) };
+  }
   return q;
 }
 
@@ -816,6 +871,29 @@ export function renderPrimitive(
             ))
           )}
         </text>
+      );
+    }
+    case "drawingTextPath": {
+      // Text-entlang-Pfad: unsichtbarer `<path>` (nur Geometrie-Träger) +
+      // `<text><textPath>` — der Browser übernimmt die Zeichen-Positionierung
+      // entlang der Kurve, keine eigene Glyphen-Transform-Mathematik nötig.
+      if (p.pathPts.length < 2 || !p.text) return null;
+      const screenPts = p.pathPts.map(toScreen);
+      const d = `M ${screenPts.map((s) => `${s.x} ${s.y}`).join(" L ")}`;
+      const fontSize = p.heightM * PX_PER_M;
+      const pathId = `textpath-${p.drawingId ?? index}`;
+      return (
+        <>
+          <path id={pathId} d={d} fill="none" style={{ pointerEvents: "none" }} />
+          <text
+            fontSize={fontSize}
+            fill={p.color}
+            opacity={p.greyed ? 0.45 : undefined}
+            style={{ pointerEvents: "none", userSelect: "none" }}
+          >
+            <textPath href={`#${pathId}`}>{p.text}</textPath>
+          </text>
+        </>
       );
     }
     case "drawingCircle": {

@@ -9,6 +9,7 @@
 
 import Delaunator from "delaunator";
 import type { ContextObject, Contour, ImportedMesh } from "../model/types";
+import { GEO_CATEGORY_DEFS } from "../model/contextCategories";
 
 /** Fachliche Kategorie einer importierten Kontext-Linie. */
 export type GeoCategory =
@@ -99,6 +100,7 @@ export function featuresToContextObjects(
       type: "contourSet",
       name: `${CATEGORY_LABEL[cat]} (${sourceLabel})`,
       layer: CATEGORY_LAYER[cat],
+      categoryCode: GEO_CATEGORY_DEFS[cat].code,
       contours,
     });
   }
@@ -141,6 +143,7 @@ export function buildingsToMesh(
     type: "importedMesh",
     name: `Gebäude 3D (${sourceLabel})`,
     layer: CATEGORY_LAYER.building,
+    categoryCode: GEO_CATEGORY_DEFS.building.code,
     positions,
     indices,
   };

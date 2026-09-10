@@ -7,18 +7,22 @@
 
 import type { Drawing2D, Drawing2DGeom, Vec2 } from "../model/types";
 import {
-  joinChains,
+  joinChainsWithBulge,
   removeSegment,
+  removeSegmentWithBulge,
   splitAtIntersections,
   splitClosedByChord,
   splitPolylineAtParam,
   vecEqual,
 } from "../geometry/kernel2d";
+import { bulgeArcPoints, hasRealBulge } from "../geometry/bulge";
 
 /** Eine Polylinien-Darstellung eines Drawing2D (für die Kernel-Funktionen). */
 export interface PolyForm {
   pts: Vec2[];
   closed: boolean;
+  /** Bogen-Segmente (DXF-bulge, s. `geometry/bulge.ts`) — nur bei `toPolyFormAllowBulge`. */
+  bulge?: number[];
 }
 
 /**
@@ -30,6 +34,11 @@ export function toPolyForm(geom: Drawing2DGeom): PolyForm | null {
     case "line":
       return { pts: [geom.a, geom.b], closed: false };
     case "polyline":
+      // Bogen-Segmente (bulge) hier noch nicht unterstützt — Split/Segment-
+      // Löschen bauen pts komplett neu auf und würden bestehende Bögen
+      // stillschweigend zu Geraden entarten lassen, s. offset.ts. (Join hat
+      // eine eigene, bulge-erhaltende Variante, s. `toPolyFormAllowBulge`.)
+      if (hasRealBulge(geom.bulge)) return null;
       return { pts: geom.pts.slice(), closed: geom.closed };
     case "rect":
       return {
@@ -47,16 +56,28 @@ export function toPolyForm(geom: Drawing2DGeom): PolyForm | null {
 }
 
 /**
+ * Wie {@link toPolyForm}, aber lässt Bogen-Segmente (bulge) durch — nur für
+ * Join (`joinDrawings`), das die Kette per {@link joinChainsWithBulge} bulge-
+ * erhaltend verkettet statt sie geometrisch neu aufzubauen.
+ */
+function toPolyFormAllowBulge(geom: Drawing2DGeom): PolyForm | null {
+  if (geom.shape === "polyline") return { pts: geom.pts.slice(), closed: geom.closed, bulge: geom.bulge };
+  return toPolyForm(geom);
+}
+
+/**
  * Baut aus einer Polylinien-Form die passende Drawing2D-Geometrie. Zwei Punkte +
  * offen → `line`; sonst `polyline` (geschlossen oder offen). Rechtecke werden
  * NICHT rekonstruiert (nach dem Schneiden sind die Teile beliebige Polygone).
  */
 export function fromPolyForm(form: PolyForm): Drawing2DGeom {
   const pts = form.pts;
-  if (pts.length === 2 && !form.closed) {
+  if (pts.length === 2 && !form.closed && !hasRealBulge(form.bulge)) {
     return { shape: "line", a: pts[0], b: pts[1] };
   }
-  return { shape: "polyline", pts, closed: form.closed };
+  const geom: Drawing2DGeom = { shape: "polyline", pts, closed: form.closed };
+  if (hasRealBulge(form.bulge)) geom.bulge = form.bulge;
+  return geom;
 }
 
 let counter = 0;
@@ -205,16 +226,16 @@ export function joinDrawings(srcs: Drawing2D[]): Drawing2D[] {
   const joinable: { form: PolyForm; src: Drawing2D }[] = [];
   const passthrough: Drawing2D[] = [];
   for (const d of srcs) {
-    const form = toPolyForm(d.geom);
+    const form = toPolyFormAllowBulge(d.geom);
     if (form) joinable.push({ form, src: d });
     else passthrough.push(d);
   }
   if (joinable.length === 0) return srcs;
 
-  const chains = joinChains(joinable.map((j) => j.form));
+  const chains = joinChainsWithBulge(joinable.map((j) => j.form));
   const template = joinable[0].src;
   const joined = chains.map((c) =>
-    inherit(template, fromPolyForm({ pts: c.pts, closed: c.closed })),
+    inherit(template, fromPolyForm({ pts: c.pts, closed: c.closed, bulge: c.bulge })),
   );
   return [...joined, ...passthrough];
 }
@@ -223,12 +244,15 @@ export function joinDrawings(srcs: Drawing2D[]): Drawing2D[] {
  * Segment-Löschen (Schere): entfernt das Segment `edgeIndex` aus einem
  * Drawing2D. Geschlossene Form → offene Polylinie. Liefert das geänderte
  * Drawing2D, oder `null`, wenn weniger als 2 Punkte übrig blieben (Element
- * komplett löschen) bzw. die Form nicht unterstützt wird.
+ * komplett löschen) bzw. die Form nicht unterstützt wird. Bogen-Segmente
+ * (bulge) bleiben dabei an ihrem Punktepaar erhalten (s. `removeSegmentWithBulge`).
  */
 export function cutSegment(src: Drawing2D, edgeIndex: number): Drawing2D | null {
-  const form = toPolyForm(src.geom);
+  const form = toPolyFormAllowBulge(src.geom);
   if (!form) return src; // nicht unterstützte Form unverändert lassen
-  const res = removeSegment(form.pts, form.closed, edgeIndex);
+  const res = hasRealBulge(form.bulge)
+    ? removeSegmentWithBulge(form.pts, form.bulge!, form.closed, edgeIndex)
+    : removeSegment(form.pts, form.closed, edgeIndex);
   if (res.pts.length < 2) return null;
   return inherit(src, fromPolyForm(res));
 }
@@ -236,26 +260,28 @@ export function cutSegment(src: Drawing2D, edgeIndex: number): Drawing2D | null 
 /**
  * Liefert den Index der Kante eines Drawing2D, die dem Modellpunkt `p` am
  * nächsten liegt (für Alt+Klick = Segment-Löschen). `null`, wenn die Form keine
- * Kanten hat (circle/arc/text) oder zu wenige Punkte. Reuse: Polyline-Form +
- * Punkt-Strecke-Distanz.
+ * Kanten hat (circle/arc/text) oder zu wenige Punkte. Bei Bogen-Segmenten
+ * (bulge) wird der Abstand gegen die tessellierte Bogenkurve gemessen (nicht
+ * gegen die Sehne), der Index bleibt aber der der ORIGINAL-Kante — wichtig,
+ * da `cutSegment` denselben Index gegen das bulge-Array auflöst.
  */
 export function nearestEdgeIndex(geom: Drawing2DGeom, p: Vec2): number | null {
-  const form = toPolyForm(geom);
+  const form = toPolyFormAllowBulge(geom);
   if (!form || form.pts.length < 2) return null;
-  const edges: [number, Vec2, Vec2][] = [];
-  for (let i = 0; i < form.pts.length - 1; i++) {
-    edges.push([i, form.pts[i], form.pts[i + 1]]);
-  }
-  if (form.closed && form.pts.length > 2) {
-    edges.push([form.pts.length - 1, form.pts[form.pts.length - 1], form.pts[0]]);
-  }
+  const n = form.pts.length;
+  const edgeCount = form.closed ? n : n - 1;
   let best: number | null = null;
   let bestD = Infinity;
-  for (const [i, a, b] of edges) {
-    const d = segDist(p, a, b);
-    if (d < bestD) {
-      bestD = d;
-      best = i;
+  for (let i = 0; i < edgeCount; i++) {
+    const a = form.pts[i];
+    const b = form.pts[(i + 1) % n];
+    const arcPts = hasRealBulge(form.bulge) ? bulgeArcPoints(a, b, form.bulge?.[i]) : [a, b];
+    for (let k = 0; k < arcPts.length - 1; k++) {
+      const d = segDist(p, arcPts[k], arcPts[k + 1]);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
     }
   }
   return best;

@@ -20,6 +20,9 @@ import type { View3d, ViewType } from "../ui/TopBar";
 
 /** Alle Aktionen, die die native Menüleiste auslösen kann. */
 export interface NativeAppMenuHandlers {
+  onNewProject: () => void;
+  onNewProjectFromSample: () => void;
+  onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
   onImport: () => void;
@@ -130,6 +133,25 @@ export function useNativeAppMenu(
       const fileMenu = await Submenu.new({
         text: t("menu.native.file"),
         items: [
+          await MenuItem.new({
+            text: t("menu.native.new"),
+            accelerator: "CmdOrCtrl+N",
+            action: () => handlersRef.current.onNewProject(),
+          }),
+          await Submenu.new({
+            text: t("menu.native.newFromTemplate"),
+            items: [
+              await MenuItem.new({
+                text: t("menu.native.newFromSample"),
+                action: () => handlersRef.current.onNewProjectFromSample(),
+              }),
+              await MenuItem.new({
+                text: t("menu.native.newFromTemplateFile"),
+                action: () => handlersRef.current.onNewProjectFromTemplate(),
+              }),
+            ],
+          }),
+          await PredefinedMenuItem.new({ item: "Separator" }),
           await MenuItem.new({
             text: t("menu.native.open"),
             accelerator: "CmdOrCtrl+O",

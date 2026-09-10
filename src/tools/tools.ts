@@ -410,6 +410,20 @@ function appendPolyline(project: Project, pts: Vec2[], closed: boolean, ctx: Too
   return { ...project, drawings2d: [...project.drawings2d, d] };
 }
 
+// Konstruktionslinie: Platzhalter-Werkzeug, gekoppelt an den `xline`-Befehl
+// (zwei Punkte legen die Richtung fest, Rendering/Snapping verlängern weit
+// darüber hinaus). Nicht floorOnly (freies 2D-Element).
+const xlineTool: Tool = {
+  id: "xline",
+  labelKey: "tool.xline",
+  hintKey: () => "tool.xline.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 const polylineTool: Tool = {
   id: "polyline",
   labelKey: "tool.polyline",
@@ -567,6 +581,33 @@ const ellipseTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Regelmässiges Vieleck: Platzhalter-Werkzeug, gekoppelt an den `polygon`-
+// Befehl (Mittelpunkt → Radius, Ecken-Zahl per Inline-Option). Wie Kreis/
+// Bogen/Ellipse nicht floorOnly; committet als geschlossene Polylinie.
+const polygonTool: Tool = {
+  id: "polygon",
+  labelKey: "tool.polygon",
+  hintKey: () => "tool.polygon.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Block einfügen: Platzhalter-Werkzeug, gekoppelt an den `block`-Befehl
+// (Einfügepunkt, aktive Definition per Inline-Option). Nicht floorOnly.
+const blockTool: Tool = {
+  id: "block",
+  labelKey: "tool.block",
+  hintKey: () => "tool.block.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // Spline: Platzhalter-Werkzeug, gekoppelt an den `spline`-Befehl (Wegpunkte,
 // wie Polylinie, aber geglättet). Nicht floorOnly.
 const splineTool: Tool = {
@@ -632,6 +673,32 @@ const textTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Leader: Platzhalter-Werkzeug, gekoppelt an den `leader`-Befehl (Zielpunkt →
+// Textanker → getippte Zeile, wie Text). Freies 2D-Element (nicht floorOnly).
+const leaderTool: Tool = {
+  id: "leader",
+  labelKey: "tool.leader",
+  hintKey: () => "tool.leader.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Text-entlang-Pfad: Platzhalter-Werkzeug, gekoppelt an den `textpath`-Befehl
+// (≥2 Pfadpunkte → getippte Zeile, wie Text). Freies 2D-Element.
+const textpathTool: Tool = {
+  id: "textpath",
+  labelKey: "tool.textpath",
+  hintKey: () => "tool.textpath.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // Textspalte: Platzhalter-Werkzeug, gekoppelt an den `textbox`-Befehl (Anker →
 // Spaltenbreite → getippte Zeile). Freies 2D-Element (nicht floorOnly).
 const textboxTool: Tool = {
@@ -672,16 +739,21 @@ const TOOLS: Record<ToolId, Tool> = {
   stair: stairTool,
   room: roomTool,
   line: lineTool,
+  xline: xlineTool,
   polyline: polylineTool,
   rect: rectTool,
   circle: circleTool,
   arc: arcTool,
   ellipse: ellipseTool,
+  polygon: polygonTool,
+  block: blockTool,
   spline: splineTool,
   bezier: bezierTool,
   dimension: dimensionTool,
   kote: koteTool,
   text: textTool,
+  leader: leaderTool,
+  textpath: textpathTool,
   textbox: textboxTool,
   image: imageTool,
 };

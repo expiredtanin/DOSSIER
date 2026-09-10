@@ -23,6 +23,17 @@ export const PROJECT_DIALOG_FILTERS = [
   { name: "openbureau-Projekt (alt, JSON)", extensions: ["json"] },
 ];
 
+/** Datei-Endung für VORLAGEN (dasselbe JSON-Format wie `.obp`, aber als Start-
+ *  punkt für ein neues, noch ungespeichertes Projekt gedacht — "Neu aus
+ *  Vorlage" öffnet sie, hängt sich aber NICHT an ihren Pfad (kein Lock, kein
+ *  Überschreiben der Vorlage beim nächsten Speichern). */
+export const PROJECT_TEMPLATE_EXT = "obpt";
+
+/** Dialog-Filter für den nativen Vorlage-Öffnen-Dialog. */
+export const PROJECT_TEMPLATE_DIALOG_FILTERS = [
+  { name: "openbureau-Vorlage", extensions: [PROJECT_TEMPLATE_EXT] },
+];
+
 /** Erkennt Tauri wie an anderen Stellen (saveFile.ts, nativeSync.ts). */
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -50,6 +61,29 @@ export async function openProjectFileNative(): Promise<OpenedProjectFile | null>
     filters: PROJECT_DIALOG_FILTERS,
   });
   if (!selected || Array.isArray(selected)) return null; // Abbruch (oder Mehrfachauswahl, sollte hier nicht vorkommen)
+  const { readTextFile } = await import("@tauri-apps/plugin-fs");
+  const content = await readTextFile(selected);
+  return { path: selected, content };
+}
+
+/**
+ * Öffnet eine VORLAGEN-Datei (`.obpt`) über den nativen Öffnen-Dialog. Nur
+ * unter Tauri sinnvoll — liefert `null` im Browser, dort greift der
+ * `<input type=file accept=".obpt">`-Fluss (analog `openProjectFileNative`).
+ * Anders als beim Projekt-Öffnen wird der zurückgegebene Pfad NICHT als
+ * "aktuell offene Datei" gemerkt — die Vorlage bleibt unverändert.
+ *
+ * @returns `null` bei Abbruch/ohne Tauri, sonst Pfad + Textinhalt.
+ */
+export async function openProjectTemplateNative(): Promise<OpenedProjectFile | null> {
+  if (!isTauriRuntime()) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: PROJECT_TEMPLATE_DIALOG_FILTERS,
+  });
+  if (!selected || Array.isArray(selected)) return null;
   const { readTextFile } = await import("@tauri-apps/plugin-fs");
   const content = await readTextFile(selected);
   return { path: selected, content };

@@ -170,6 +170,16 @@ function withOpacity(col: RRgba, cls: string | undefined, greyed: boolean | unde
   return o === 1 ? rgb : [rgb[0], rgb[1], rgb[2], rgb[3] * o];
 }
 
+/**
+ * Wie `withOpacity`, aber für FLÄCHEN-Füllung: gedimmte Flächen bleiben WEISS
+ * statt grau eingefärbt — nur der Umriss (weiterhin `withOpacity`) macht das
+ * Element als gedimmt erkennbar (Nutzer-Wunsch: "im Hintergrund nicht als
+ * graue Fläche gefüllt, sondern weiss mit nur den Linien sichtbar").
+ */
+function withFillOpacity(col: RRgba, greyed: boolean | undefined): RRgba {
+  return greyed ? [1, 1, 1, col[3]] : col;
+}
+
 /** Strichfarbe einer line/arc-Primitive: CSS-Klassen-Farbe > Modell-Farbe > Tinte. */
 function strokeColorFor(cls: string | undefined, color: string | undefined): RRgba {
   const css = cls ? CLS_STROKE[cls] : undefined;
@@ -389,7 +399,7 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
       // Füllung
       const fillCol = toRgba(p.fill, 1);
       if (fillCol && pts.length >= 3) {
-        fills.push({ pts, color: withOpacity(fillCol, undefined, p.greyed), z: zc++ });
+        fills.push({ pts, color: withFillOpacity(fillCol, p.greyed), z: zc++ });
       }
 
       // Schraffur: die aufs Polygon geclippten Musterlinien wie im Browser

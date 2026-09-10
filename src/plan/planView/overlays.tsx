@@ -60,13 +60,12 @@ export function DraftOverlay({
       {draft.vertices.map((v, i) => {
         const s = toScreen(v);
         return (
-          <rect
+          <circle
             key={`v${i}`}
             className="tool-vertex"
-            x={s.x - vertSize}
-            y={s.y - vertSize}
-            width={vertSize * 2}
-            height={vertSize * 2}
+            cx={s.x}
+            cy={s.y}
+            r={vertSize}
             vectorEffect="non-scaling-stroke"
           />
         );

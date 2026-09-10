@@ -95,6 +95,20 @@ function collectSegments(input: SnapInput): Seg[] {
     if (!input.visibleCodes.has(d.categoryCode)) continue;
     const g = d.geom;
     if (g.shape === "line") segs.push([g.a, g.b]);
+    else if (g.shape === "xline") {
+      // Weit verlängert (wie beim Rendern) — Lot-/Nächster-Punkt-Snap soll
+      // entlang der ganzen (optisch unendlichen) Linie greifen, nicht nur
+      // zwischen den beiden gesetzten Punkten.
+      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 1e-6) {
+        const ux = dx / len, uy = dy / len, ext = 1000;
+        segs.push([
+          { x: g.a.x - ux * ext, y: g.a.y - uy * ext },
+          { x: g.b.x + ux * ext, y: g.b.y + uy * ext },
+        ]);
+      }
+    }
     else if (g.shape === "polyline") {
       for (let i = 0; i < g.pts.length - 1; i++) segs.push([g.pts[i], g.pts[i + 1]]);
       if (g.closed && g.pts.length > 2) segs.push([g.pts[g.pts.length - 1], g.pts[0]]);

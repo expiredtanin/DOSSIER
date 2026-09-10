@@ -4,7 +4,7 @@
 // nicht das volle Drahtgitter.
 
 import type { Project } from "../../model/types";
-import { NO_HATCH, type Primitive } from "./shared";
+import { NO_HATCH, SHOW_ALL, type CategoryDisplayResolver, type Primitive } from "./shared";
 
 /** Dezente Plan-Farbe der Kontext-Konturen (gedämpftes Grau). */
 const CONTEXT_LINE_COLOR = "#9aa3ad";
@@ -27,10 +27,28 @@ const FOOTPRINT_Z_TOL = 0.6;
  *  • TerrainMesh → nur der 2D-Umriss (Bounding-Box), da ein volles TIN-Gitter
  *    im Plan unbrauchbar dicht wäre.
  * Rein additiv — Wand-/Drawing-Darstellung bleibt unberührt.
+ *
+ * SICHTBARKEIT: jedes Objekt trägt (seit der Ebenen-Zuordnung der Kontext-
+ * Schicht) optional eine `categoryCode` (s. `model/contextCategories.ts`) —
+ * genau wie jedes andere Bauteil wird sie gegen `visibleCodes`/
+ * `categoryDisplay` geprüft (Muster 1:1 aus `sections.ts::addSectionLines`).
+ * Objekte OHNE `categoryCode` (ältere Importe vor dieser Erweiterung) bleiben
+ * bewusst IMMER sichtbar (Rückwärtskompatibilität) statt stillschweigend zu
+ * verschwinden.
  */
-export function addContextContours(out: Primitive[], project: Project): void {
+export function addContextContours(
+  out: Primitive[],
+  project: Project,
+  visibleCodes?: Set<string>,
+  categoryDisplay: CategoryDisplayResolver = SHOW_ALL,
+): void {
   const context = project.context ?? [];
   for (const obj of context) {
+    const code = obj.categoryCode;
+    if (code !== undefined) {
+      const d = categoryDisplay(code);
+      if ((visibleCodes && !visibleCodes.has(code)) || !d.render) continue;
+    }
     if (obj.type === "contourSet") {
       for (const c of obj.contours) {
         const pts = c.pts;

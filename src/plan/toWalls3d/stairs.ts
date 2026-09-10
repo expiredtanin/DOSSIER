@@ -16,6 +16,101 @@ const STAIR_RGB: RRgb = hexToRgb("#9aa0a6", SLAB_RGB);
 /** Laufplattendicke einer Ortbetontreppe (Meter). */
 const CONCRETE_WAIST = 0.18;
 
+/** Schwerpunkt eines Tritt-Polygons (Grundriss). */
+function centroidOf(pts: Vec2[]): Vec2 {
+  let x = 0, y = 0;
+  for (const p of pts) { x += p.x; y += p.y; }
+  return { x: x / pts.length, y: y / pts.length };
+}
+
+/**
+ * Bestimmt die "vordere" Kante eines Tritt-Vielecks (die Kante in Richtung
+ * des nächsten Tritts) — für die Nasen-Verlängerung ({@link StairType.nosing}).
+ * `target` ist der Schwerpunkt eines Nachbartritts; `preferNear` wählt die dem
+ * Ziel NÄCHSTE Kante (Nachbar = nächster Tritt), sonst die FERNSTE (Nachbar =
+ * vorheriger Tritt, Vorderkante liegt entgegengesetzt). Liefert die Indizes
+ * der beiden Eckpunkte der Vorderkante + deren Richtung (Trittschwerpunkt →
+ * Kantenmitte, normiert). Wortgetreu portiert vom Three.js-Pfad
+ * (`viewport/viewport3d/meshBuilders.ts::frontEdgeOf`), wo dieselbe Logik
+ * bereits für `nosing` verwendet wird.
+ */
+function frontEdgeOf(
+  pts: Vec2[],
+  target: Vec2,
+  preferNear: boolean,
+): { a: number; b: number; dir: Vec2 } {
+  const c = centroidOf(pts);
+  let best = 0;
+  let bestDist = preferNear ? Infinity : -Infinity;
+  for (let e = 0; e < pts.length; e++) {
+    const p0 = pts[e];
+    const p1 = pts[(e + 1) % pts.length];
+    const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+    const d = Math.hypot(mid.x - target.x, mid.y - target.y);
+    if (preferNear ? d < bestDist : d > bestDist) {
+      bestDist = d;
+      best = e;
+    }
+  }
+  const p0 = pts[best];
+  const p1 = pts[(best + 1) % pts.length];
+  const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+  const dx = mid.x - c.x;
+  const dy = mid.y - c.y;
+  const len = Math.hypot(dx, dy) || 1e-9;
+  return { a: best, b: (best + 1) % pts.length, dir: { x: dx / len, y: dy / len } };
+}
+
+/**
+ * Verlängert die Vorderkante eines Tritts um `nosing` Meter (Trittkanten-
+ * Überstand/Nase, {@link StairType.nosing}) — nur bei OFFENEN Tragarten
+ * sinnvoll (dünne Tritt-Platte mit sichtbarem Vorstand vor der Setzstufe
+ * darunter), daher nur aus dem `structure !== "massiv"`-Zweig aufgerufen.
+ */
+function withNosing(pts: Vec2[], neighbors: Vec2[][], k: number, nosing: number): Vec2[] {
+  if (nosing <= 1e-6) return pts;
+  const hasNext = k + 1 < neighbors.length;
+  const hasPrev = k > 0;
+  const ref = hasNext ? neighbors[k + 1] : hasPrev ? neighbors[k - 1] : null;
+  if (!ref) return pts;
+  const { a, b, dir } = frontEdgeOf(pts, centroidOf(ref), hasNext);
+  const nosed = pts.slice();
+  nosed[a] = { x: pts[a].x + dir.x * nosing, y: pts[a].y + dir.y * nosing };
+  nosed[b] = { x: pts[b].x + dir.x * nosing, y: pts[b].y + dir.y * nosing };
+  return nosed;
+}
+
+/**
+ * Grundriss einer geschlossenen Setzstufen-Platte ({@link StairType.closedRisers}):
+ * eine DÜNNE Fläche an der RÜCKKante des Tritts `k` (= Vorderkante des
+ * Vorgängers, Gegenkante zur eigenen Vorderkante), leicht in Vorderkanten-
+ * Richtung aufgeweitet, damit ein extrudierbares Vieleck entsteht (statt einer
+ * entarteten Linie). `null`, wenn kein Nachbartritt zur Vorderkanten-
+ * Bestimmung existiert (Einzeltritt). Wortgetreu portiert vom Three.js-Pfad
+ * (`meshBuilders.ts::addStairMeshes`), inkl. der Verwendung der ROHEN
+ * (nicht genasten) Trittpunkte — die Nase betrifft nur die Trittplatte selbst.
+ */
+function closedRiserOutline(
+  trPts: Vec2[],
+  neighbors: Vec2[][],
+  k: number,
+  treadThickness: number,
+): Vec2[] | null {
+  const hasNext = k + 1 < neighbors.length;
+  const ref = hasNext ? neighbors[k + 1] : k > 0 ? neighbors[k - 1] : null;
+  if (!ref) return null;
+  const front = frontEdgeOf(trPts, centroidOf(ref), hasNext);
+  const n = trPts.length;
+  const backA = (front.a + Math.floor(n / 2)) % n;
+  const backB = (front.b + Math.floor(n / 2)) % n;
+  const riserA = trPts[backA];
+  const riserB = trPts[backB];
+  const thin = Math.min(treadThickness, 0.02) || 0.01;
+  const offA = { x: riserA.x - front.dir.x * thin, y: riserA.y - front.dir.y * thin };
+  const offB = { x: riserB.x - front.dir.x * thin, y: riserB.y - front.dir.y * thin };
+  return [riserA, riserB, offB, offA];
+}
+
 /**
  * Emittiert Treppen als RSlabs (extrudierte Grundriss-Polygone) — der WASM/wgpu-
  * Renderer kennt sonst KEINE Treppen (nur Wände/Decken/Meshes), sodass Treppen im
@@ -29,8 +124,16 @@ const CONCRETE_WAIST = 0.18;
  *    OFFENE Untersicht der klassischen Betontreppe.
  *  • "wange"/"aufgesattelt"/"spindel" — nur eine dünne Tritt-Platte der Dicke
  *    `treadThickness` an der Tritt-OK, darunter offen.
- * Podest (L/Wendel) als Vollblock bis zur halben Steighöhe. Setzstufen/Nase/
- * Geländer sind Verfeinerungen (Three.js-Pfad) — hier zählt zuerst die SICHTBARKEIT.
+ * Podest (L/Wendel) als Vollblock bis zur halben Steighöhe. Bei OFFENEN
+ * Tragarten (nicht "massiv") wird die Vorderkante jedes Tritts zusätzlich um
+ * `StairType.nosing` (Trittkanten-Überstand) verlängert und — bei
+ * `StairType.closedRisers` — eine dünne Setzstufen-Platte an der Rückkante
+ * ergänzt (sonst bleibt die Treppe dort offen) — wortgetreu wie im Three.js-
+ * Pfad, hier ans WASM/wgpu-Default-3D nachgezogen (beide Felder waren dort
+ * unwirksam: existierten im Modell + der ResourceManager-UI, aber der
+ * Standard-Renderer las sie nie, s. PENDENZEN.md). Geländer sind weiterhin
+ * eine Verfeinerung (Three.js-Pfad, dort selbst noch als TODO markiert) —
+ * hier zählt zuerst die SICHTBARKEIT.
  * `ceilingId` trägt hier die Treppen-Id (nur TS-seitiges Tagging; render3d ignoriert
  * das Feld, und der Pick läuft separat über `pickGeometry`).
  */
@@ -48,8 +151,13 @@ export function emitStairs(project: Project): RSlab[] {
     if (structure === "beton" && stair.shape === "straight") continue;
     const treadThickness = st?.treadThickness ?? 0.04;
     const riser = geo.riserHeight;
-    for (const tr of geo.treads) {
+    const open = structure !== "massiv";
+    const nosing = open ? st?.nosing ?? 0 : 0;
+    const neighborPts = geo.treads.map((t) => t.pts);
+    for (let k = 0; k < geo.treads.length; k++) {
+      const tr = geo.treads[k];
       if (tr.pts.length < 3) continue;
+      const pts = withNosing(tr.pts, neighborPts, k, nosing);
       const top = zBottom + tr.topRise;
       const bottom =
         structure === "massiv"
@@ -57,14 +165,27 @@ export function emitStairs(project: Project): RSlab[] {
           : structure === "beton"
             ? Math.max(zBottom, top - riser - CONCRETE_WAIST) // schräge Laufplatte
             : top - treadThickness; // offene Tritte (Wange/aufgesattelt/Spindel)
-      if (top - bottom <= EPS) continue;
-      out.push({
-        outline: tr.pts.map((p) => [p.x, p.y] as RVec2),
-        zBottom: bottom,
-        zTop: top,
-        color: STAIR_RGB,
-        ceilingId: stair.id,
-      });
+      if (top - bottom > EPS) {
+        out.push({
+          outline: pts.map((p) => [p.x, p.y] as RVec2),
+          zBottom: bottom,
+          zTop: top,
+          color: STAIR_RGB,
+          ceilingId: stair.id,
+        });
+      }
+      if (open && st?.closedRisers) {
+        const riserOutline = closedRiserOutline(tr.pts, neighborPts, k, treadThickness);
+        if (riserOutline) {
+          out.push({
+            outline: riserOutline.map((p) => [p.x, p.y] as RVec2),
+            zBottom: zBottom + tr.baseRise,
+            zTop: zBottom + tr.topRise,
+            color: STAIR_RGB,
+            ceilingId: stair.id,
+          });
+        }
+      }
     }
     if (geo.landing && geo.landing.length >= 3) {
       out.push({

@@ -189,6 +189,42 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
     expect(plan.primitives.some((pr) => (pr as { kind?: string }).kind === "image")).toBe(false);
   });
 
+  it("reicht `filters` (Sättigung/Helligkeit/Kontrast/Graustufen) unverändert durch", () => {
+    const p = projectWith([
+      {
+        id: "IMG1",
+        type: "image",
+        name: "Luftbild",
+        src: "data:image/jpeg;base64,AAAA",
+        min: { x: 0, y: 0 },
+        max: { x: 10, y: 10 },
+        filters: { saturation: 0.4, brightness: 1.1, contrast: 1.2, grayscale: 0.6 },
+      },
+    ]);
+    const plan = generatePlan(p, "eg", visible);
+    expect(plan.backgroundImages![0].filters).toEqual({
+      saturation: 0.4,
+      brightness: 1.1,
+      contrast: 1.2,
+      grayscale: 0.6,
+    });
+  });
+
+  it("`filters` fehlt bei einem Bild ohne Korrektur (kein leeres Objekt erfunden)", () => {
+    const p = projectWith([
+      {
+        id: "IMG1",
+        type: "image",
+        name: "Luftbild",
+        src: "data:image/jpeg;base64,AAAA",
+        min: { x: 0, y: 0 },
+        max: { x: 10, y: 10 },
+      },
+    ]);
+    const plan = generatePlan(p, "eg", visible);
+    expect(plan.backgroundImages![0].filters).toBeUndefined();
+  });
+
   it("im Mono-Modus wird das Luftbild ausgeblendet (reiner S/W-Plan)", () => {
     const p = projectWith([
       {
@@ -202,5 +238,47 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
     ]);
     const plan = generatePlan(p, "eg", visible, undefined, "mittel", false, true);
     expect(plan.backgroundImages).toHaveLength(0);
+  });
+});
+
+describe("generatePlan — Kontext-Objekte: Ebenen-Sichtbarkeit (categoryCode)", () => {
+  // Ein Kontext-Objekt MIT `categoryCode` respektiert dieselbe visibleCodes-
+  // Allowlist wie jedes andere Bauteil (Wand/Dach/…) — Nutzer-Report: "sollten
+  // wie Gebäude/Dächer ausblendbar sein". Objekte OHNE categoryCode (ältere
+  // Importe) bleiben unabhängig davon immer sichtbar (Rückwärtskompatibilität).
+  const buildingMesh = (id: string, categoryCode?: string) => ({
+    id,
+    type: "importedMesh" as const,
+    name: "Haus",
+    categoryCode,
+    positions: [0, 0, 0, 2, 0, 0, 2, 3, 0, 0, 3, 0],
+    indices: [0, 1, 2, 0, 2, 3],
+  });
+
+  it("visibleCodes ohne den categoryCode des Objekts blendet es aus", () => {
+    const p = projectWith([buildingMesh("B1", "12")]);
+    const visibleWithoutBuildings = new Set<string>(["20"]); // nur Wände sichtbar
+    const lines = generatePlan(p, "eg", visibleWithoutBuildings).primitives.filter(
+      (pr) => pr.kind === "line" && (pr as { cls?: string }).cls === "context-line",
+    );
+    expect(lines.length).toBe(0);
+  });
+
+  it("visibleCodes MIT dem categoryCode des Objekts zeigt es normal", () => {
+    const p = projectWith([buildingMesh("B1", "12")]);
+    const visibleWithBuildings = new Set<string>(["12"]);
+    const lines = generatePlan(p, "eg", visibleWithBuildings).primitives.filter(
+      (pr) => pr.kind === "line" && (pr as { cls?: string }).cls === "context-line",
+    );
+    expect(lines.length).toBeGreaterThan(0);
+  });
+
+  it("ein Objekt OHNE categoryCode bleibt immer sichtbar (Altbestand)", () => {
+    const p = projectWith([buildingMesh("B1", undefined)]);
+    const visibleEmpty = new Set<string>(); // schliesst alles Benannte aus
+    const lines = generatePlan(p, "eg", visibleEmpty).primitives.filter(
+      (pr) => pr.kind === "line" && (pr as { cls?: string }).cls === "context-line",
+    );
+    expect(lines.length).toBeGreaterThan(0);
   });
 });

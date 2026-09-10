@@ -14,6 +14,8 @@ import {
   type Primitive,
 } from "./shared";
 import { ellipsePts, sampleBezierChain, sampleCatmullRom } from "../../tools/curves";
+import { mvGeom } from "../../tools/transform";
+import { bulgeArcPoints } from "../../geometry/bulge";
 
 // ── Bemassung (SIA 400 B.5.3) ────────────────────────────────────────────────
 // Modell-Meter-Konstanten für rein grafische (nicht reale) Bemassungs-Details
@@ -113,6 +115,48 @@ function formatKoteLabel(value: number): string {
   return (value > 0 ? "+" : "") + value.toFixed(2);
 }
 
+// ── Konstruktionslinie (Hilfslinie) ─────────────────────────────────────────
+const XLINE_EXTEND_M = 1000; // Verlängerung über a/b hinaus je Richtung
+const XLINE_WEIGHT_MM = 0.13; // dünnste übliche Linienstärke (nie dicker als das Objekt)
+const XLINE_DASH: number[] = [0.3, 0.1, 0.03, 0.1]; // Strich-Punkt (CAD-Mittellinien-Konvention)
+
+// ── Leader (Vorführungspfeil) ────────────────────────────────────────────────
+const LEADER_ARROW_LEN_M = 0.12;
+const LEADER_ARROW_HALF_W_M = 0.045;
+
+/** Dünne Linie `from`→`to` + gefüllte Pfeilspitze bei `to` (Ziel des Leaders). */
+function addLeaderLine(
+  out: Primitive[],
+  from: Vec2,
+  to: Vec2,
+  weightMm: number,
+  color: string,
+  greyed: boolean,
+  drawingId: string,
+): void {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return;
+  const ux = dx / len, uy = dy / len;
+  const nx = -uy, ny = ux;
+  const base: Vec2 = { x: to.x - ux * LEADER_ARROW_LEN_M, y: to.y - uy * LEADER_ARROW_LEN_M };
+  out.push({ kind: "line", a: from, b: base, cls: "draw2d", weightMm, dash: null, color, greyed, drawingId });
+  out.push({
+    kind: "polygon",
+    pts: [
+      to,
+      { x: base.x + nx * LEADER_ARROW_HALF_W_M, y: base.y + ny * LEADER_ARROW_HALF_W_M },
+      { x: base.x - nx * LEADER_ARROW_HALF_W_M, y: base.y - ny * LEADER_ARROW_HALF_W_M },
+    ],
+    fill: color,
+    stroke: color,
+    strokeWidthMm: weightMm,
+    hatch: NO_HATCH,
+    greyed,
+    drawingId,
+  });
+}
+
 export function addDrawing2D(
   out: Primitive[],
   project: Project,
@@ -184,11 +228,44 @@ export function addDrawing2D(
     case "line":
       seg(g.a, g.b);
       break;
+    case "xline": {
+      // Konstruktionslinie: weit über a/b hinaus verlängert (wirkt unendlich),
+      // immer im Strich-Punkt-Muster gezeichnet (überstimmt den LineStyle-
+      // Strich — Erkennbarkeit als Hilfslinie hat Vorrang vor Objektstil).
+      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) break;
+      const ux = dx / len, uy = dy / len;
+      out.push({
+        kind: "line",
+        a: { x: g.a.x - ux * XLINE_EXTEND_M, y: g.a.y - uy * XLINE_EXTEND_M },
+        b: { x: g.b.x + ux * XLINE_EXTEND_M, y: g.b.y + uy * XLINE_EXTEND_M },
+        cls: "draw2d",
+        weightMm: Math.min(weightMm, XLINE_WEIGHT_MM),
+        dash: XLINE_DASH,
+        color,
+        greyed,
+        drawingId: d.id,
+      });
+      break;
+    }
     case "polyline": {
-      // Geschlossene Polylinie: zuerst die gefüllte Fläche (Vollton/Schraffur).
-      if (g.closed && g.pts.length > 2) fillPoly(g.pts);
-      for (let i = 0; i < g.pts.length - 1; i++) seg(g.pts[i], g.pts[i + 1]);
-      if (g.closed && g.pts.length > 2) seg(g.pts[g.pts.length - 1], g.pts[0]);
+      // Bogen-Segmente (`bulge`, DXF-Konvention) zu Geradenstücken tessellieren
+      // — ohne `bulge` liefert `bulgeArcPoints` exakt `[a,b]`, das Ergebnis ist
+      // dann bitgleich zum alten reinen Geradenzug (kein Sonderpfad nötig).
+      const ring: Vec2[] = [g.pts[0]];
+      for (let i = 0; i < g.pts.length - 1; i++) {
+        const sub = bulgeArcPoints(g.pts[i], g.pts[i + 1], g.bulge?.[i]);
+        for (let k = 1; k < sub.length; k++) ring.push(sub[k]);
+      }
+      if (g.closed && g.pts.length > 2) {
+        const sub = bulgeArcPoints(g.pts[g.pts.length - 1], g.pts[0], g.bulge?.[g.pts.length - 1]);
+        for (let k = 1; k < sub.length; k++) ring.push(sub[k]);
+        // Letzter Punkt dupliziert ring[0] (Schliess-Segment endet dort) — für
+        // die Füllfläche nicht nötig, das SVG-`<polygon>` schliesst implizit.
+        fillPoly(ring.slice(0, -1));
+      }
+      for (let i = 0; i < ring.length - 1; i++) seg(ring[i], ring[i + 1]);
       break;
     }
     case "rect": {
@@ -296,6 +373,20 @@ export function addDrawing2D(
       break;
     }
     case "text":
+      if (g.pathPts && g.pathPts.length >= 2) {
+        // Text-entlang-Pfad: eigener Primitive-Typ (echtes SVG textPath),
+        // Rich-Doc/marks/Leader bewusst ignoriert (v1 nur schlichter String).
+        out.push({
+          kind: "drawingTextPath",
+          pathPts: g.pathPts,
+          text: g.text,
+          heightM: g.height,
+          color: g.marks?.color ?? color,
+          greyed,
+          drawingId: d.id,
+        });
+        break;
+      }
       out.push({
         kind: "drawingText",
         at: g.at,
@@ -310,7 +401,29 @@ export function addDrawing2D(
         greyed,
         drawingId: d.id,
       });
+      if (g.leaderTarget) {
+        addLeaderLine(out, g.at, g.leaderTarget, weightMm, color, greyed, d.id);
+      }
       break;
+    case "block": {
+      // Block-Instanz trägt selbst keine Geometrie: Definition nachschlagen,
+      // jede Teilgeometrie per `mvGeom` (Rotation um den Ursprung + Verschiebung
+      // um `at`) transformieren und REKURSIV über denselben Renderpfad ausgeben
+      // — eine synthetische Drawing2D-Hülle mit derselben Ebene/Kategorie/
+      // Farb-Overrides wie die Instanz selbst (Sub-Elemente tragen in v1 keinen
+      // eigenen Stil). Unbekannte/gelöschte `blockDefId` ⇒ nichts rendern.
+      const def = project.blockDefs?.find((b) => b.id === g.blockDefId);
+      if (!def) break;
+      const c = Math.cos(g.rotation), s = Math.sin(g.rotation);
+      const xf = (p: Vec2): Vec2 => ({
+        x: g.at.x + p.x * c - p.y * s,
+        y: g.at.y + p.x * s + p.y * c,
+      });
+      for (const sub of def.geom2d) {
+        addDrawing2D(out, project, { ...d, geom: mvGeom(sub, xf) }, greyed, lwByCode, colorByCode, catByCode);
+      }
+      break;
+    }
     case "image":
       out.push({
         kind: "drawingImage",

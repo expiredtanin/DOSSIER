@@ -372,11 +372,24 @@ export const sampleProject: Project = {
   layers: [
     { code: "00", name: "Raster", color: "#484850", lw: 0.13, visible: true, locked: false },
     { code: "01", name: "Vermessung", color: "#707078", lw: 0.18, visible: true, locked: false },
-    { code: "10", name: "Situation", color: "#909090", lw: 0.18, visible: true, locked: false },
-    { code: "11", name: "Strasse", color: "#a89070", lw: 0.18, visible: true, locked: false },
-    { code: "12", name: "Gebäude", color: "#888888", lw: 0.25, visible: true, locked: false },
-    { code: "13", name: "Bäume", color: "#50a050", lw: 0.13, visible: true, locked: false },
-    { code: "14", name: "Höhenlinien", color: "#909050", lw: 0.18, visible: true, locked: false },
+    // "05 Kontext" bündelt Bestand/Umgebung (manuell gezeichnet ODER importiert,
+    // s. `contextCategories.ts::CONTEXT_PARENT_CATEGORY`) als Kinder statt als
+    // gleichrangige Top-Level-Einträge (Nutzer-Wunsch 2026-08-31).
+    {
+      code: "05",
+      name: "Kontext",
+      color: "#707078",
+      lw: 0.13,
+      visible: true,
+      locked: false,
+      children: [
+        { code: "10", name: "Situation", color: "#909090", lw: 0.18, visible: true, locked: false },
+        { code: "11", name: "Strasse", color: "#a89070", lw: 0.18, visible: true, locked: false },
+        { code: "12", name: "Gebäude", color: "#888888", lw: 0.25, visible: true, locked: false },
+        { code: "13", name: "Bäume", color: "#50a050", lw: 0.13, visible: true, locked: false },
+        { code: "14", name: "Höhenlinien", color: "#909050", lw: 0.18, visible: true, locked: false },
+      ],
+    },
     {
       code: "20",
       name: "Wände",

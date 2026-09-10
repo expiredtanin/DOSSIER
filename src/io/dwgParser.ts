@@ -21,6 +21,12 @@
 // Unterstützte Entities (Modellraum + expandierte Blöcke):
 //   • 3DFACE                         → Dreiecks-Mesh (3 bzw. 4 Ecken → 1–2 Tri).
 //   • POLYLINE2D (Polyface, Flag 64) → Dreiecks-Mesh (Polyface-Faces).
+//   • POLYLINE_PFACE (DWG-Typ 29)    → Dreiecks-Mesh, NACH DXF-LAYER GRUPPIERT
+//                                       (s. `extractPfaceMeshesByLayer` — eigener
+//                                       Low-Level-Pfad, da `convert()` diesen Typ
+//                                       nicht auf `.entities` abbildet; verifiziert
+//                                       gegen swissBUILDINGS3D-v3-„separated"-
+//                                       Kacheln, dort „Roof"/„Wall"/„Floor").
 //   • LWPOLYLINE / POLYLINE2D / 3D   → Kontur (z aus elevation/Vertex-Z).
 //   • LINE                           → Kontur (zwei-Punkt-Linienzug).
 //   • ARC                            → Kontur (Bogen, ~6° je Segment, offen).
@@ -39,6 +45,7 @@
 
 import type { Contour, ContourSet, ImportedMesh, Vec2 } from "../model/types";
 import type { DxfImportResult, ImportDiagnostics } from "./dxfParser";
+import { GENERIC_IMPORT_CATEGORY } from "../model/contextCategories";
 
 // Lose getippte Sicht auf die libredwg-web-Entities (wir greifen tolerant auf die
 // Felder zu, die wir brauchen; alle Punkte sind {x,y,z}).
@@ -89,21 +96,58 @@ interface DwgEntityLike {
 }
 
 // Block-Record-Tabelleneintrag: Block-Name → Entities (siehe blockRecord.d.ts).
-interface DwgBlockRecordLike {
+// `handle` (Hex-String, z. B. "5E") wird für die POLYLINE_PFACE-Owner-Auflösung
+// gebraucht (s. {@link extractPfaceMeshesByLayer}) — dieselbe Form wie bei
+// {@link DwgLayerEntry}.
+export interface DwgBlockRecordLike {
   name?: string;
+  handle?: string;
   entities?: DwgEntityLike[];
 }
 
+/** LAYER-Tabelleneintrag (Name + Hex-Handle) — für die Layer-Namensauflösung
+ *  von POLYLINE_PFACE-Entities (s. {@link extractPfaceMeshesByLayer}). */
+export interface DwgLayerEntry {
+  name?: string;
+  handle?: string;
+}
+
+/** Rückgabeform von `dwg_dynapi_entity_value`/`dwg_dynapi_entity_data`
+ *  (generische Feld-Introspektion) — `data` ist je Feldtyp verschieden geformt
+ *  (Zahl, `{x,y,z}`-Punkt, roher Heap-Pointer bei Array-/Handle-Feldern). */
+export interface DwgDynapiResult {
+  success: boolean;
+  data?: unknown;
+}
+
+/** Aufgelöste Handle-Referenz (`Dwg_Object_Ref`) — `obj` ist der aufgelöste
+ *  Objekt-Pointer (0/null = nicht auflösbar), `absolute_ref` das Handle selbst
+ *  (Zahl ODER BigInt, je nach WASM-Build). */
+export interface DwgObjectRefLike {
+  obj: number;
+  absolute_ref: number | bigint;
+}
+
 // Schmale Sicht auf die LibreDWG-Instanz (nur die Methoden, die wir nutzen).
-interface LibreDwgApi {
+export interface LibreDwgApi {
   dwg_read_data(data: ArrayBuffer, fileType: number): number | undefined;
   convert(ptr: number): {
     entities?: unknown[];
     tables?: {
       BLOCK_RECORD?: { entries?: DwgBlockRecordLike[] };
+      LAYER?: { entries?: DwgLayerEntry[] };
     };
   };
   dwg_free(ptr: number): void;
+  // ── Low-Level-API für POLYLINE_PFACE (s. Moduldoc bei {@link extractPfaceMeshesByLayer}) ──
+  dwg_getall_entity_by_type(dwgPtr: number, type: number): number[];
+  dwg_dynapi_entity_value(objOrTio: number, field: string): DwgDynapiResult;
+  dwg_object_to_entity_tio(objPtr: number): number;
+  dwg_object_entity_get_layer_object_ref(entityPtr: number): DwgObjectRefLike;
+  dwg_object_entity_get_ownerhandle_object(entityPtr: number): DwgObjectRefLike;
+  dwg_ptr_to_object_ref_array(ptr: number, size: number): DwgObjectRefLike[];
+  dwg_dynapi_entity_field_offset(tio: number, field: string): number;
+  dwg_ptr_to_int16_t_array(ptr: number, size: number): number[];
 }
 
 // Singleton der WASM-Instanz (einmal laden, dann wiederverwenden).
@@ -246,13 +290,183 @@ function insertTransform(e: DwgEntityLike): Transform2D {
   };
 }
 
+/** Positions-/Indexpuffer EINER Mesh-Gruppe (s. {@link Accum.meshesByLayer}). */
+interface MeshBucket {
+  positions: number[];
+  indices: number[];
+}
+
 // Aufnahme-Kontext für ein Mapping-Durchlauf (Meshes + Konturen + Histogramm).
+// Meshes werden NACH DXF-LAYER-NAMEN gruppiert (statt in einem einzigen Puffer)
+// — swissBUILDINGS3D v3 „separated" liefert z. B. „Roof"/„Wall"/„Floor" als
+// eigene Layer je Gebäudefläche; damit sich das (Nutzer-Wunsch: Dach als eigene,
+// ausblendbare Sub-Ebene) im Ergebnis widerspiegelt, MUSS die Gruppierung schon
+// hier beim Parsen erhalten bleiben statt in einem Layer-losen Blob zu verschwinden.
+// Ein DWG ohne (oder mit nur einem) Layer ergibt weiterhin genau EIN Mesh — die
+// Gruppierung ist rein additiv, kein Verhaltensbruch für den generischen Fall.
 interface Accum {
-  meshTriangles: number[];
-  meshIndices: number[];
+  meshesByLayer: Map<string, MeshBucket>;
   contours: Contour[];
   entityCounts: Record<string, number>;
   total: number;
+}
+
+/** Liefert (und legt bei Bedarf an) den Mesh-Puffer für einen DXF-Layernamen;
+ *  leerer/fehlender Layername fällt auf `"0"` zurück (AutoCAD-Konvention für
+ *  „kein eigener Layer"). */
+function meshBucket(acc: Accum, layer: string | undefined): MeshBucket {
+  const key = layer && layer.length > 0 ? layer : "0";
+  let b = acc.meshesByLayer.get(key);
+  if (!b) {
+    b = { positions: [], indices: [] };
+    acc.meshesByLayer.set(key, b);
+  }
+  return b;
+}
+
+// DWG_TYPE_POLYLINE_PFACE (29) — Polyface-Mesh, wie in libredwgs `dwg.h`
+// (`_dwg_entity_POLYLINE_PFACE`) benannt. Literal (statt Enum-Import), damit
+// kein zusätzlicher Typ-Import den lazy WASM-Chunk aufbläht — analog zu
+// `FILE_TYPE_DWG` oben.
+const DWG_TYPE_POLYLINE_PFACE = 29;
+
+/** Baut eine Hex-Handle → Name-Map aus einer Tabelle (LAYER oder BLOCK_RECORD).
+ *  `handle`/`absolute_ref` sind teils `number`, teils `bigint` (je WASM-Build)
+ *  — als `BigInt` normalisiert, damit der Vergleich unabhängig davon stimmt. */
+function handleToNameMap(
+  entries: { name?: string; handle?: string }[] | undefined,
+): Map<bigint, string> {
+  const map = new Map<bigint, string>();
+  for (const e of entries ?? []) {
+    if (!e.name || !e.handle) continue;
+    const h = Number.parseInt(e.handle, 16);
+    if (Number.isFinite(h)) map.set(BigInt(h), e.name);
+  }
+  return map;
+}
+
+/** Baut Blockname → Einfüge-Transform aus den Modellraum-INSERT-Entities
+ *  (bereits von `convert()` korrekt geliefert, inkl. `layer`) — s. Moduldoc
+ *  bei {@link extractPfaceMeshesByLayer}: jeder anonyme FME-Block wird genau
+ *  EINMAL per INSERT platziert, dessen Transform auf die Block-lokalen
+ *  POLYLINE_PFACE-Punktkoordinaten angewendet werden muss. */
+function buildInsertTransformsByBlockName(
+  modelSpaceEntities: DwgEntityLike[],
+): Map<string, Transform2D> {
+  const map = new Map<string, Transform2D>();
+  for (const e of modelSpaceEntities) {
+    if ((e.type ?? "").toUpperCase() !== "INSERT" || !e.name) continue;
+    map.set(e.name, insertTransform(e));
+  }
+  return map;
+}
+
+/**
+ * Extrahiert POLYLINE_PFACE-Entities (Polyface-Mesh, DWG-Typ 29) NACH LAYER
+ * GRUPPIERT — direkt über die Low-Level-LibreDWG-API, weil `convert()` diesen
+ * Entity-Typ NICHT auf `Dwg_Entity`-Objekte abbildet (leeres `.entities` an
+ * jedem betroffenen `BLOCK_RECORD`, empirisch verifiziert gegen echte
+ * swissBUILDINGS3D-v3-„separated"-Kacheln — nicht dokumentiert, kein Bug-Report
+ * dazu gefunden). Die für den Zugriff nötige Ableitungskette (an echten Daten
+ * durchgetestet, jeder Schritt reproduzierbar):
+ *  1. `dwg_getall_entity_by_type(dwgPtr, 29)` → TIO-Pointer je Polyface-Mesh.
+ *  2. `dwg_dynapi_entity_value(tio, "num_owned"/"vertex")` → Anzahl + Pointer
+ *     auf das Handle-Array der referenzierten VERTEX_PFACE/_FACE-Kinder.
+ *  3. `dwg_dynapi_entity_value(tio, "parent")` → `Dwg_Object_Entity*` (NICHT
+ *     mit dem TIO identisch — TIO ist ein weiterer Zeiger-Schritt tiefer).
+ *  4. Über `parent`: `dwg_object_entity_get_layer_object_ref`/
+ *     `..._get_ownerhandle_object` → Layer- bzw. Owner-Block-Handle, gegen die
+ *     LAYER-/BLOCK_RECORD-Tabelle aufgelöst (Schritt 3 ist zwingend — dieselben
+ *     Funktionen mit dem TIO direkt aufgerufen liefern nur Nullen).
+ *  5. `dwg_ptr_to_object_ref_array(vertexPtr, numOwned)` löst das Handle-Array
+ *     zu `{obj}`-Objekten auf; `dwg_object_to_entity_tio(ref.obj)` + erneutes
+ *     `dwg_dynapi_entity_value(..., "point")` liefert je nach Kind entweder
+ *     einen Geometriepunkt (VERTEX_PFACE) ODER (Erfolg `false`) eine Face.
+ *  6. Für Faces ist `vertind` (4× int16, DXF 71–74) ein FESTES C-Array — weder
+ *     `dwg_dynapi_entity_value` NOCH `..._data` liefern es (leer/`undefined`,
+ *     vermutlich in diesem WASM-Build nicht kompiliert); einziger funktio-
+ *     nierender Weg: `dwg_dynapi_entity_field_offset(tio, "vertind")` (Byte-
+ *     Offset im Struct) + `dwg_ptr_to_int16_t_array(tio + offset, 4)`.
+ * Punkte werden mit der zum Owner-Block gehörenden INSERT-Transform (s.
+ * {@link buildInsertTransformsByBlockName}) in Welt-/Tile-lokale Koordinaten
+ * gebracht — Punkte liegen block-lokal nahe (0,0,0), ohne diese Transform
+ * bekäme man keine brauchbaren (LV95-nahen) Koordinaten.
+ */
+export function extractPfaceMeshesByLayer(
+  libredwg: LibreDwgApi,
+  dwgPtr: number,
+  db: ReturnType<LibreDwgApi["convert"]>,
+  modelSpaceEntities: DwgEntityLike[],
+): Map<string, MeshBucket> {
+  const result = new Map<string, MeshBucket>();
+  const layerNames = handleToNameMap(db.tables?.LAYER?.entries);
+  const blockNames = handleToNameMap(db.tables?.BLOCK_RECORD?.entries);
+  const xformByBlock = buildInsertTransformsByBlockName(modelSpaceEntities);
+
+  const bucketFor = (layer: string): MeshBucket => {
+    let b = result.get(layer);
+    if (!b) {
+      b = { positions: [], indices: [] };
+      result.set(layer, b);
+    }
+    return b;
+  };
+
+  let pfaces: number[];
+  try {
+    pfaces = libredwg.dwg_getall_entity_by_type(dwgPtr, DWG_TYPE_POLYLINE_PFACE);
+  } catch {
+    return result; // WASM-Build ohne diese Low-Level-Funktion — kein harter Fehler.
+  }
+
+  for (const tio of pfaces) {
+    const numOwned = libredwg.dwg_dynapi_entity_value(tio, "num_owned").data;
+    const vertexArrPtr = libredwg.dwg_dynapi_entity_value(tio, "vertex").data;
+    if (typeof numOwned !== "number" || numOwned <= 0 || typeof vertexArrPtr !== "number" || !vertexArrPtr) {
+      continue;
+    }
+    const entityPtr = libredwg.dwg_dynapi_entity_value(tio, "parent").data;
+    if (typeof entityPtr !== "number" || !entityPtr) continue;
+
+    const layerRef = libredwg.dwg_object_entity_get_layer_object_ref(entityPtr);
+    const layerName = layerNames.get(BigInt(layerRef.absolute_ref ?? 0)) ?? "0";
+    const ownerRef = libredwg.dwg_object_entity_get_ownerhandle_object(entityPtr);
+    const blockName = blockNames.get(BigInt(ownerRef.absolute_ref ?? 0));
+    const xform = (blockName ? xformByBlock.get(blockName) : undefined) ?? IDENTITY;
+
+    const bucket = bucketFor(layerName);
+    const base = bucket.positions.length / 3;
+    const faceRecords: number[][] = [];
+    for (const ref of libredwg.dwg_ptr_to_object_ref_array(vertexArrPtr, numOwned)) {
+      if (!ref.obj) continue;
+      const childTio = libredwg.dwg_object_to_entity_tio(ref.obj);
+      if (!childTio) continue;
+      const point = libredwg.dwg_dynapi_entity_value(childTio, "point");
+      if (point.success && point.data && typeof point.data === "object") {
+        const p = point.data as { x: number; y: number; z: number };
+        const xy = applyXY(xform, p.x, p.y);
+        bucket.positions.push(xy.x, xy.y, applyZ(xform, p.z));
+        continue;
+      }
+      // Kein Punkt → Face-Record (vertind, s. Moduldoc Schritt 6).
+      const off = libredwg.dwg_dynapi_entity_field_offset(childTio, "vertind");
+      if (!off) continue;
+      faceRecords.push(libredwg.dwg_ptr_to_int16_t_array(childTio + off, 4));
+    }
+    for (const vertind of faceRecords) {
+      // 1-basiert, ggf. negativ (unsichtbare Kante) — wie DXF-Faces (s.
+      // `faceIndicesOf`/`dxfParser.ts`); 0 = ungenutzter 4. Slot bei Dreiecken.
+      const ring = vertind
+        .map((i) => Math.abs(i))
+        .filter((i) => i >= 1)
+        .map((i) => base + (i - 1));
+      if (ring.length < 3) continue;
+      for (let i = 1; i + 1 < ring.length; i++) {
+        pushTri(bucket.indices, bucket.positions, ring[0], ring[i], ring[i + 1]);
+      }
+    }
+  }
+  return result;
 }
 
 /**
@@ -263,6 +477,10 @@ interface Accum {
  * Reale DWGs stecken Geometrie oft in BLÖCKEN, die nur per INSERT referenziert
  * werden; wir lesen die Block-Definitionen aus `db.tables.BLOCK_RECORD` und
  * expandieren jedes INSERT mit Transformation (rekursiv, Tiefen-Limit).
+ * Zusätzlich (s. {@link extractPfaceMeshesByLayer}) werden POLYLINE_PFACE-
+ * Polyface-Meshes über die Low-Level-API gelesen und NACH LAYER GRUPPIERT
+ * zurückgegeben — bei swissBUILDINGS3D v3 „separated" ergeben sich so z. B.
+ * eigene Meshes je „Roof"/„Wall"/„Floor" statt eines einzigen Blobs.
  */
 export async function parseDwg(data: ArrayBuffer): Promise<DxfImportResult> {
   const libredwg = await createLibreDwg();
@@ -289,8 +507,7 @@ export async function parseDwg(data: ArrayBuffer): Promise<DxfImportResult> {
     }
 
     const acc: Accum = {
-      meshTriangles: [],
-      meshIndices: [],
+      meshesByLayer: new Map(),
       contours: [],
       entityCounts: {},
       total: 0,
@@ -299,14 +516,36 @@ export async function parseDwg(data: ArrayBuffer): Promise<DxfImportResult> {
     // Modellraum-Entities mappen (INSERTs expandieren Blöcke rekursiv).
     mapEntities(entities, IDENTITY, blocks, 0, acc);
 
+    // POLYLINE_PFACE-Meshes (von `convert()` nicht abgedeckt) additiv dazu.
+    for (const [layer, pfaceBucket] of extractPfaceMeshesByLayer(
+      libredwg,
+      dwgPtr,
+      db,
+      entities,
+    )) {
+      if (pfaceBucket.indices.length === 0) continue;
+      const bucket = meshBucket(acc, layer);
+      const base = bucket.positions.length / 3;
+      // KEIN `push(...pfaceBucket.positions)`: bei grossen Kacheln (v3-
+      // Städtetiles, tausende Gebäude) sprengt der Spread-Operator die
+      // Argumentzahl-Grenze von `push`/`apply` (RangeError „Maximum call
+      // stack size exceeded" — an einer echten 2000-Gebäude-Kachel verifiziert).
+      for (const p of pfaceBucket.positions) bucket.positions.push(p);
+      for (const i of pfaceBucket.indices) bucket.indices.push(base + i);
+    }
+
     const meshes: ImportedMesh[] = [];
-    if (acc.meshIndices.length > 0) {
+    const multiLayer = acc.meshesByLayer.size > 1;
+    for (const [layer, bucket] of acc.meshesByLayer) {
+      if (bucket.indices.length === 0) continue;
       meshes.push({
         id: nextId("imported"),
         type: "importedMesh",
-        name: "DWG-Mesh",
-        positions: acc.meshTriangles,
-        indices: acc.meshIndices,
+        name: multiLayer ? `DWG-Mesh (${layer})` : "DWG-Mesh",
+        categoryCode: GENERIC_IMPORT_CATEGORY.code,
+        layer: layer === "0" ? undefined : layer,
+        positions: bucket.positions,
+        indices: bucket.indices,
       });
     }
 
@@ -316,6 +555,7 @@ export async function parseDwg(data: ArrayBuffer): Promise<DxfImportResult> {
         id: nextId("contours"),
         type: "contourSet",
         name: "DWG-Konturen",
+        categoryCode: GENERIC_IMPORT_CATEGORY.code,
         contours: acc.contours,
       });
     }
@@ -442,8 +682,9 @@ function mapEntities(
  * Punkte werden mit der aktiven Transform in den Modellraum gebracht.
  */
 function addFace(acc: Accum, e: DwgEntityLike, xform: Transform2D): void {
-  const positions = acc.meshTriangles;
-  const indices = acc.meshIndices;
+  const bucket = meshBucket(acc, e.layer);
+  const positions = bucket.positions;
+  const indices = bucket.indices;
   const corners = [e.corner1, e.corner2, e.corner3, e.corner4].filter(
     (c): c is DwgPoint => !!c && Number.isFinite(c.x) && Number.isFinite(c.y),
   );
@@ -490,8 +731,9 @@ function addPolyfaceMesh(
   e: DwgEntityLike,
   xform: Transform2D,
 ): void {
-  const positions = acc.meshTriangles;
-  const indices = acc.meshIndices;
+  const bucket = meshBucket(acc, e.layer);
+  const positions = bucket.positions;
+  const indices = bucket.indices;
   const all = e.vertices ?? [];
   const hasFaceIdx = (v: DwgVertexLike): boolean =>
     !!(

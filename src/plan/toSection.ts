@@ -87,6 +87,14 @@ export interface SectionCutPolygon {
    * Fehlt (unauflösbares Bauteil), bleibt das Band ohne Auswahlbezug.
    */
   sourceId?: string;
+  /**
+   * Grafik-Kategorie-Code des QUELL-Elements (wie `sourceId`, aus derselben
+   * Auflösung in `attachCutStyles`) — `generateSectionPlan` filtert/dimmt jedes
+   * Cut-Band darüber wie jedes andere Bauteil (`visibleCodes`/`categoryDisplay`),
+   * damit das Ebenen-Panel auch im Schnitt/in der Ansicht wirkt, nicht nur im
+   * Grundriss. Fehlt (unauflösbares Bauteil), bleibt das Band immer sichtbar.
+   */
+  categoryCode?: string;
 }
 
 /** Ein projiziertes Liniensegment in (u, v)-Metern. */
@@ -306,13 +314,16 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     // aufgelöst; keine Boolean-Dominanz (joinPriority undefined) — unverändert
     // übernehmen. WICHTIG vor dem Slab-Zweig (sonst falscher owner-Lookup).
     if (ref.kind === "roof") {
-      cp.sourceId = (project.roofs ?? [])[ref.index]?.id;
+      const owner = (project.roofs ?? [])[ref.index];
+      cp.sourceId = owner?.id;
+      cp.categoryCode = owner?.categoryCode;
       bands.push(cp);
       continue;
     }
     if (ref.kind === "wall") {
       const owner = walls[ref.index];
       cp.sourceId = owner?.id;
+      cp.categoryCode = owner?.categoryCode;
       // Wand: bei mehrschichtigem Wandtyp wird das EINE geschnittene Rechteck in
       // stehende Teil-Rechtecke je Schicht quer zur Dicke (u) aufgeteilt — das
       // vertikale Gegenstück zur Decken-Zerlegung (dort quer zur Höhe v), siehe
@@ -342,6 +353,7 @@ function attachCutStyles(output: SectionOutput, project: Project, plane: Section
     // `addCeilingPoche`).
     const owner = slabs[ref.index];
     cp.sourceId = owner?.id;
+    cp.categoryCode = owner?.categoryCode;
     if (owner) {
       const wt = getCeilingType(project, owner);
       if (wt.layers.length > 1) {
@@ -813,6 +825,7 @@ export function splitSlabLayers(
       joinPriority: comp.joinPriority,
       componentId: comp.id,
       sourceId: cp.sourceId,
+      categoryCode: cp.categoryCode,
     });
   }
   return out;
@@ -918,6 +931,7 @@ export function splitWallLayers(
       joinPriority: comp.joinPriority,
       componentId: comp.id,
       sourceId: cp.sourceId,
+      categoryCode: cp.categoryCode,
     });
   }
   return out;

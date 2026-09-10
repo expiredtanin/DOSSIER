@@ -268,6 +268,50 @@ pub struct SlabInput {
     pub cut: Option<CutBandMeta>,
 }
 
+/// EINE Dachflächen-Schicht für den 3D-Live-Schnitt (`crate::roof_cut`).
+///
+/// Anders als `WallInput`/`SlabInput` ist das KEIN vertikales Prisma (2D-
+/// Grundriss extrudiert über `[z0,z1]`) — eine Dachfläche ist ein GENEIGTES
+/// Polygon, extrudiert entlang ihrer EIGENEN Flächennormalen (nicht vertikal).
+/// `section.rs`s gesamter Ansatz ("jedes Bauteil ist ein vertikales Prisma,
+/// daher ist der Schnitt mit einer vertikalen Ebene immer ein Rechteck")
+/// funktioniert für ein geneigtes Bauteil nicht — daher ein eigener,
+/// paralleler Pfad (`roof_cut::cut_roof_layer`) statt Wiederverwendung von
+/// `Prism`. Das Ergebnis landet trotzdem im selben `CutPolygon`-Format
+/// (`section::CutPolygon`, `component.kind = ComponentKind::Roof`) und läuft
+/// durch dieselbe Cap-/Linien-Pipeline (`section_fill.rs`) wie Wand/Decke.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoofLayerInput {
+    /// Eckpunkte der OBERSEITE dieser Schicht (näher am First/aussen), planar,
+    /// in MODELL-Metern `(x, y, z=Höhe)` — dieselbe Konvention wie
+    /// `MeshInput::positions` (NICHT vorab nach Welt umgerechnet; `roof_cut::
+    /// cut_roof_layer` macht den Modell->Welt-Wechsel `(x,y,z)->(x,z,y)`
+    /// selbst, wie `mesh.rs` es für Meshes tut). Schlusspunkt NICHT dupliziert.
+    pub polygon: Vec<[f32; 3]>,
+    /// Nach AUSSEN/OBEN zeigende Flächennormale (normalisiert, MODELL-Meter,
+    /// dieselbe `(x,y,z)`-Konvention wie `polygon`) — exakt dieselbe wie
+    /// `toWalls3d/roofs.ts::planeNormalUp` (dort TS-seitig berechnet und 1:1
+    /// mitgegeben, statt hier erneut hergeleitet — vermeidet ein Konventions-/
+    /// Vorzeichen-Auseinanderlaufen zwischen Render-Mesh und Schnitt-Geometrie).
+    pub normal: [f32; 3],
+    /// Schichtdicke (Meter), Extrusion entlang `-normal` (nach INNEN, wie
+    /// `pushRoofSlab`: `bottom = top - normal*thickness`).
+    pub thickness: f32,
+    /// Albedo-Farbe dieser Schicht.
+    pub color: Rgb,
+    /// Optionale Schnitt-Schraffur (siehe `WallInput::hatch`).
+    #[serde(default)]
+    pub hatch: Option<Hatch>,
+    /// Schnitt-Verschneidungs-/Linienstil-Metadaten (siehe `WallInput::cut`).
+    /// `join_priority`/`component_id` bleiben für Dach-Schichten bewusst
+    /// `None` (keine Teilnahme an `section_boolean::subtract_dominant_bands`
+    /// — ein nicht-achsparalleles Cut-Polygon als Bounding-Box zu behandeln
+    /// wäre falsch; die Dominanz-Subtraktion bleibt Wand/Decke vorbehalten).
+    /// `line_color`/`line_weight` (aus `jointLineStyleId`) wirken trotzdem.
+    #[serde(default)]
+    pub cut: Option<CutBandMeta>,
+}
+
 fn default_slab_color() -> Rgb {
     [0.86, 0.86, 0.88]
 }

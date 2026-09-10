@@ -60,6 +60,9 @@ export interface MenuActions {
   patchCategory: (code: string, patch: Partial<LayerCategory>) => void;
   duplicateLevel: (id: string) => void;
   deleteLevel: (id: string) => void;
+  /** Sortiert eine Zeichnungsebene in der Überlagerungs-Reihenfolge um (z. B.
+   *  eine Ansicht als Kalkierpapier-Unterlage nach hinten legen). */
+  reorderLevel: (id: string, op: "front" | "back" | "forward" | "backward") => void;
   clearSelection: () => void;
   fit: () => void;
   fitSelection: () => void;
@@ -176,6 +179,31 @@ function levelMenuItems(id: string, a: MenuActions): ContextMenuItem[] {
       label: t("ctx.duplicate"),
       icon: <MenuIcon name="content_copy" />,
       onClick: () => a.duplicateLevel(id),
+    },
+    { divider: true },
+    // Überlagerungs-Reihenfolge (wie beim 2D-z-Anordnen): wirkt, sobald mehrere
+    // Ebenen gleichzeitig sichtbar sind (Geschoss-/Zeichnungs-Überlagerung,
+    // Schnitt-/Ansichts-Referenzüberlagerung) — Nutzer-Wunsch "Ansichten in den
+    // Hintergrund legen können".
+    {
+      label: t("ctx.arrange.front"),
+      icon: <MenuIcon name="flip_to_front" />,
+      onClick: () => a.reorderLevel(id, "front"),
+    },
+    {
+      label: t("ctx.arrange.forward"),
+      icon: <MenuIcon name="arrow_upward" />,
+      onClick: () => a.reorderLevel(id, "forward"),
+    },
+    {
+      label: t("ctx.arrange.backward"),
+      icon: <MenuIcon name="arrow_downward" />,
+      onClick: () => a.reorderLevel(id, "backward"),
+    },
+    {
+      label: t("ctx.arrange.back"),
+      icon: <MenuIcon name="flip_to_back" />,
+      onClick: () => a.reorderLevel(id, "back"),
     },
     { divider: true },
     {

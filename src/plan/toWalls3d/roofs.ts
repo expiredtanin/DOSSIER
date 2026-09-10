@@ -7,7 +7,16 @@ import type { Project } from "../../model/types";
 import { getComponent, roofLayers } from "../../model/types";
 import { roofBaseElevation, roofGeometry } from "../../geometry/roof";
 import type { Vec3 as RoofVec3 } from "../../geometry/roof";
-import { EPS, hexToRgb, resolveComponentMaterialLayer, type RMesh, type RRgb } from "./shared";
+import {
+  EPS,
+  hexToRgb,
+  resolveComponentMaterialLayer,
+  resolveCutLineStyle,
+  type RCutMeta,
+  type RMesh,
+  type RRgb,
+  type RRoofLayer,
+} from "./shared";
 
 /** Warmer Terrakotta-Grauton für Dachflächen/-giebel — hebt das Dach klar von Wand/Decke/Kontext ab. */
 const ROOF_RGB: RRgb = [0.72, 0.45, 0.36];
@@ -142,6 +151,51 @@ export function emitRoofs(project: Project): RMesh[] {
     // `../bands.ts::clipPieceToRoofs`) — also doppelt und optisch als dünne
     // 2D-Schicht sichtbar. Es wird nur noch das Dach SELBST (die geneigten
     // Slab-Flächen) konstruiert; der Giebel entsteht aus der Wand darunter.
+  }
+  return out;
+}
+
+/**
+ * Baut die Dach-Schicht-Eingabe für den 3D-Live-Schnitt (`RRoofLayer[]`,
+ * `render3d::roof_cut::cut_roof_layer`) — GETRENNT von {@link emitRoofs} (dem
+ * Render-Mesh), weil `section.rs` beliebige Dreiecksnetze nicht schneiden
+ * kann (nur Wand-Boxen/Decken-Polygone; eine Dachfläche ist kein vertikales
+ * Prisma, s. `RRoofLayer`-Doc in `shared.ts`). EIN Eintrag je (Dach, Schicht,
+ * geneigte Fläche) — ein mehrflächiges Dach (Sattel/Walm/Mansarde) hat
+ * mehrere `g.planes`, jede mit ihrer eigenen Normalen, anders als beim
+ * gemeinsam tessellierten Render-Mesh also KEIN zusammengefasster Eintrag.
+ * Punkte/Normalen bleiben in MODELL-Metern (wie `emitRoofs`) — render3d macht
+ * den Modell->Welt-Wechsel selbst (dieselbe Konvention wie `RMesh`).
+ */
+export function emitRoofCutLayers(project: Project): RRoofLayer[] {
+  const out: RRoofLayer[] = [];
+  for (const roof of project.roofs ?? []) {
+    const eavesZ = roofBaseElevation(project, roof);
+    const g = roofGeometry(roof, eavesZ);
+    const overrideColor = roof.color ? hexToRgb(roof.color, ROOF_RGB) : null;
+    const layers = roofLayers(project, roof);
+    layers.reduce((offsetAbove, layer) => {
+      const t = Math.max(0, layer.thickness);
+      if (t <= EPS) return offsetAbove;
+      const color =
+        overrideColor ??
+        (layer.componentId ? hexToRgb(getComponent(project, layer.componentId).color, ROOF_RGB) : ROOF_RGB);
+      const lineStyle = resolveCutLineStyle(project, layer.jointLineStyleId);
+      const cut: RCutMeta | undefined =
+        lineStyle && (lineStyle.color !== undefined || lineStyle.weight !== undefined)
+          ? { lineColor: lineStyle.color, lineWeight: lineStyle.weight }
+          : undefined;
+      for (const plane of g.planes) {
+        const nrm = planeNormalUp(plane.pts);
+        const top: RoofVec3[] = plane.pts.map((p) => [
+          p[0] - nrm[0] * offsetAbove,
+          p[1] - nrm[1] * offsetAbove,
+          p[2] - nrm[2] * offsetAbove,
+        ]);
+        out.push({ polygon: top, normal: nrm, thickness: t, color, cut });
+      }
+      return offsetAbove + t;
+    }, 0);
   }
   return out;
 }

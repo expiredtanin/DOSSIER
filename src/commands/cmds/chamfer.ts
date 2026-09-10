@@ -9,6 +9,7 @@
 // ist von Natur aus gerade, also ein exaktes (nicht approximiertes) Ergebnis.
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { hasRealBulge } from "../../geometry/bulge";
 import { chamferCorner, type Chamfer } from "../../geometry/kernel2d";
 import type {
   Command,
@@ -34,7 +35,8 @@ interface Curve {
 
 /** Wandelt eine chamfer-fähige 2D-Form (polyline/rect) in eine Punktliste oder null. */
 function geomToCurve(g: Drawing2DGeom): Curve | null {
-  if (g.shape === "polyline") return { pts: g.pts, closed: g.closed };
+  // Bogen-Segmente (bulge) hier noch nicht unterstützt, s. fillet.ts/offset.ts.
+  if (g.shape === "polyline" && !hasRealBulge(g.bulge)) return { pts: g.pts, closed: g.closed };
   if (g.shape === "rect") {
     return {
       pts: [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }],

@@ -109,6 +109,15 @@ export function CommandIcon({ name }: { name: string }) {
           <circle cx="8" cy="13" r="1.4" fill="currentColor" stroke="none" />
         </svg>
       );
+    case "defblock":
+      // Mehrere Formen → gestricheltes Rechteck (macht aus der Auswahl EIN Symbol).
+      return (
+        <svg {...common}>
+          <rect x="2" y="9" width="4.5" height="4.5" />
+          <circle cx="11" cy="5" r="2.4" />
+          <rect x="1" y="1.5" width="14" height="13.5" strokeDasharray="1.6 1.2" />
+        </svg>
+      );
     case "fillet":
       // Eckpunkt-Verrundung: gerade Schenkel, Ecke durch einen Bogen ersetzt.
       return (

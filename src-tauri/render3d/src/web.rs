@@ -33,7 +33,7 @@ use web_sys::HtmlCanvasElement;
 use crate::gpu::Renderer;
 use crate::math::preset_camera;
 use crate::section::{cut_section, SectionPlane};
-use crate::types::{Camera, CameraPreset, MeshInput, Projection, SlabInput, WallInput};
+use crate::types::{Camera, CameraPreset, MeshInput, Projection, RoofLayerInput, SlabInput, WallInput};
 
 /// JSON-Eingabe des Modells: Waende (bereits in Teilquader zerlegt, siehe
 /// `projectToWalls3d`) + Deckenplatten. `slabs` optional (leeres Modell ohne
@@ -47,6 +47,13 @@ struct ModelInput {
     /// haelt aeltere Payloads ohne `meshes` gueltig.
     #[serde(default)]
     meshes: Vec<MeshInput>,
+    /// Dach-Schichten fuer den Live-Schnitt (`section::cut_section`/
+    /// `roof_cut::cut_roof_layer`) — separat von `meshes` (die reine
+    /// Render-Geometrie, kein Prisma-kompatibles Format). `#[serde(default)]`
+    /// haelt aeltere Payloads ohne `roofLayers` gueltig (Daecher zeigen dann
+    /// im Live-Schnitt weiterhin keine Cut-Flaeche/-Fugenlinien, wie bisher).
+    #[serde(default, rename = "roofLayers")]
+    roof_layers: Vec<RoofLayerInput>,
 }
 
 /// Berechnet einen Schnitt/eine Ansicht (`section::cut_section`) gegen das Modell
@@ -79,7 +86,7 @@ pub fn cut_section_json(
     let model: ModelInput = serde_json::from_str(model_json)
         .map_err(|e| JsValue::from_str(&format!("Modell parsen: {e}")))?;
     let plane = SectionPlane::new([px, py, pz], [nx, ny, nz]);
-    let out = cut_section(&plane, &model.walls, &model.slabs);
+    let out = cut_section(&plane, &model.walls, &model.slabs, &model.roof_layers);
     serde_json::to_string(&out)
         .map_err(|e| JsValue::from_str(&format!("SectionOutput serialisieren: {e}")))
 }
@@ -105,6 +112,9 @@ pub struct WebModelRenderer {
     /// Cut-Cap-Geometrie neu berechnen koennen muss (GPU-frei, `cut_section`).
     walls: Vec<WallInput>,
     slabs: Vec<SlabInput>,
+    /// Gecachte Dach-Schichten (analog `walls`/`slabs`) fuer denselben Zweck —
+    /// der Live-Schnitt braucht sie bei jedem `set_section_plane`/`set_model`.
+    roof_layers: Vec<RoofLayerInput>,
     /// Aktueller Live-Schnitt-Zustand: aktiv? + Ebene (point/normal). Gemerkt,
     /// damit ein `set_model` bei aktivem Schnitt die Caps automatisch neu baut.
     section: Option<([f32; 3], [f32; 3])>,
@@ -251,6 +261,7 @@ impl WebModelRenderer {
             bounds: None,
             walls: Vec::new(),
             slabs: Vec::new(),
+            roof_layers: Vec::new(),
             section: None,
         })
     }
@@ -265,10 +276,11 @@ impl WebModelRenderer {
         self.bounds = model_bounds(&model.walls, &model.slabs, &model.meshes);
         self.renderer
             .upload_model(&self.device, &model.walls, &model.slabs, &model.meshes);
-        // Wand-/Decken-Eingabe fuer den Live-Schnitt cachen (Klon, da der Renderer
-        // sie nur zu GPU-Puffern verarbeitet und verwirft).
+        // Wand-/Decken-/Dach-Eingabe fuer den Live-Schnitt cachen (Klon, da der
+        // Renderer sie nur zu GPU-Puffern verarbeitet und verwirft).
         self.walls = model.walls;
         self.slabs = model.slabs;
+        self.roof_layers = model.roof_layers;
         // Ist der Schnitt aktiv, die Caps am neuen Modell neu aufbauen.
         if let Some((point, normal)) = self.section {
             self.renderer.update_section(
@@ -278,6 +290,7 @@ impl WebModelRenderer {
                 normal,
                 &self.walls,
                 &self.slabs,
+                &self.roof_layers,
             );
         }
         Ok(())
@@ -304,8 +317,15 @@ impl WebModelRenderer {
         let point = [px, py, pz];
         let normal = [nx, ny, nz];
         self.section = if active { Some((point, normal)) } else { None };
-        self.renderer
-            .update_section(&self.device, active, point, normal, &self.walls, &self.slabs);
+        self.renderer.update_section(
+            &self.device,
+            active,
+            point,
+            normal,
+            &self.walls,
+            &self.slabs,
+            &self.roof_layers,
+        );
         Ok(())
     }
 

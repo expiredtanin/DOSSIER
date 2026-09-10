@@ -11,7 +11,7 @@
 
 import { useState } from "react";
 import { useStore } from "./appStore";
-import type { Drawing2D } from "../model/types";
+import type { ElementClipboard } from "../editors/elementClipboard";
 
 export function useSelectionState() {
   const selectedWallIds = useStore((s) => s.selectedWallIds);
@@ -26,11 +26,12 @@ export function useSelectionState() {
     selectedDrawingIds.length === 1 ? selectedDrawingIds[0] : null;
   const setSelectedDrawingId = (id: string | null) =>
     setSelectedDrawingIds(id ? [id] : []);
-  // Zwischenablage für 2D-Zeichenelemente (Ctrl/Cmd+C/V). Kopiert die GEWÄHLTEN
-  // Drawing2D tief; Einfügen legt Klone mit neuen IDs auf dem AKTIVEN Geschoss
-  // (Zeichnungsebene) an — so lässt sich z. B. importiertes Mobiliar über
-  // Geschosse hinweg wiederverwenden. Kategorie/Stil bleiben erhalten.
-  const [drawingClipboard, setDrawingClipboard] = useState<Drawing2D[]>([]);
+  // Zwischenablage für ALLE Bauteil-Arten (Ctrl/Cmd+C/V) — Wand/Decke/Dach/
+  // Öffnung/Treppe/Raum/Extrusion/Stütze + 2D-Zeichenelemente, s.
+  // `editors/elementClipboard.ts`. Kopiert die GEWÄHLTEN Elemente tief;
+  // Einfügen legt Klone mit neuen IDs auf dem AKTIVEN Geschoss an — so lässt
+  // sich z. B. importiertes Mobiliar über Geschosse hinweg wiederverwenden.
+  const [elementClipboard, setElementClipboard] = useState<ElementClipboard | null>(null);
   // Bequemer Einzel-Selektor (erste gewählte Wand).
   const selectedWallId = selectedWallIds[0] ?? null;
   // Decken-Auswahl (MENGE); für die Einzel-Element-Maschinerie der „eine"
@@ -43,9 +44,12 @@ export function useSelectionState() {
   const selectedRoofIds = useStore((s) => s.selectedRoofIds);
   const setSelectedRoofIds = useStore((s) => s.setSelectedRoofIds);
   const selectedRoofId = selectedRoofIds.length === 1 ? selectedRoofIds[0] : null;
-  // Schnitt-/Ansichtslinien-Auswahl (Einzel-DrawingLevel-Id oder null).
-  const selectedSectionLineId = useStore((s) => s.selectedSectionLineId);
-  const setSelectedSectionLineId = useStore((s) => s.setSelectedSectionLineId);
+  // Schnitt-/Ansichtslinien-Auswahl (MENGE); Einzel-Element bei genau einer
+  // gewählten Linie (Attribut-/Patch-Logik bleibt darauf zugeschnitten).
+  const selectedSectionLineIds = useStore((s) => s.selectedSectionLineIds);
+  const setSelectedSectionLineIds = useStore((s) => s.setSelectedSectionLineIds);
+  const selectedSectionLineId =
+    selectedSectionLineIds.length === 1 ? selectedSectionLineIds[0] : null;
   // Welche Schnittlinie treibt den 3D-Live-Schnitt (reiner Ansichts-Zustand,
   // unabhängig von der Auswahl — der Schnitt bleibt beim Klick woanders aktiv).
   const [section3dCutId, setSection3dCutId] = useState<string | null>(null);
@@ -88,8 +92,8 @@ export function useSelectionState() {
     setSelectedDrawingIds,
     selectedDrawingId,
     setSelectedDrawingId,
-    drawingClipboard,
-    setDrawingClipboard,
+    elementClipboard,
+    setElementClipboard,
     selectedWallId,
     selectedCeilingIds,
     setSelectedCeilingIds,
@@ -97,8 +101,9 @@ export function useSelectionState() {
     selectedRoofIds,
     setSelectedRoofIds,
     selectedRoofId,
+    selectedSectionLineIds,
+    setSelectedSectionLineIds,
     selectedSectionLineId,
-    setSelectedSectionLineId,
     section3dCutId,
     setSection3dCutId,
     updateRoof,

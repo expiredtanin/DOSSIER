@@ -11,17 +11,20 @@
 //
 // Linie → wird gekürzt/aufgeteilt; Polylinie → der getroffene Abschnitt fällt
 // raus (kann die Polylinie in Stücke teilen). Reine Geometrie liegt im Kernel
-// (`trimPolyline`); hier nur Treffer-Bestimmung, Drawing2D ↔ {pts,closed} und der
-// Commit. Wände sind ausgenommen (nur Drawing2D).
+// (`trimPolylineWithBulge`, auch für reine Geraden-Ziele — s. Kopfkommentar
+// bei `trimCurve`); hier nur Treffer-Bestimmung, Drawing2D ↔ {pts,closed,
+// bulge} und der Commit. Wände sind ausgenommen (nur Drawing2D). Sowohl
+// Ziel-Kurve als auch Schneider dürfen Bogen-Segmente (bulge) tragen.
 //
 // Bezeichner englisch, Kommentare/UI deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { bulgeArcPoints, hasRealBulge } from "../../geometry/bulge";
 import { uniqueId } from "../../tools/types";
 import {
   pointSegmentDistance,
   polylineEdges,
-  trimPolyline,
+  trimPolylineWithBulge,
   vecEqual,
 } from "../../geometry/kernel2d";
 import type {
@@ -40,12 +43,14 @@ const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Kurvenwahl
 interface Curve {
   pts: Vec2[];
   closed: boolean;
+  /** Bogen-Segmente (DXF-bulge, s. `geometry/bulge.ts`) — nur bei polyline. */
+  bulge?: number[];
 }
 
-/** Wandelt eine trim-fähige 2D-Form in eine Punktliste (+closed) oder null. */
+/** Wandelt eine trim-fähige 2D-Form in eine Punktliste (+closed[/bulge]) oder null. */
 function geomToCurve(g: Drawing2DGeom): Curve | null {
   if (g.shape === "line") return { pts: [g.a, g.b], closed: false };
-  if (g.shape === "polyline") return { pts: g.pts, closed: g.closed };
+  if (g.shape === "polyline") return { pts: g.pts, closed: g.closed, bulge: g.bulge };
   if (g.shape === "rect") {
     return {
       pts: [
@@ -57,16 +62,31 @@ function geomToCurve(g: Drawing2DGeom): Curve | null {
       closed: true,
     };
   }
-  return null; // circle/arc/text: hier nicht trim-fähig (offener Punkt)
+  return null; // circle/arc/text: hier nicht trim-fähig
 }
 
 /** Ist diese Form trim-fähig (line/polyline/rect)? */
 function isTrimmable(d: Drawing2D): boolean {
-  return (
-    d.geom.shape === "line" ||
-    d.geom.shape === "polyline" ||
-    d.geom.shape === "rect"
-  );
+  const g = d.geom;
+  return g.shape === "line" || g.shape === "polyline" || g.shape === "rect";
+}
+
+/**
+ * Kanten für Klick-Trefftests: bei Bogen-Segmenten (bulge) wird die Kurve zu
+ * Geradenstücken tesselliert, damit der Trefftest entlang der TATSÄCHLICHEN
+ * (runden) Kontur funktioniert statt entlang der geraden Sehne — s. gleiches
+ * Vorgehen in offset.ts (`curveHitEdges`).
+ */
+function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
+  if (!hasRealBulge(curve.bulge)) return polylineEdges(curve.pts, curve.closed);
+  const n = curve.pts.length;
+  const edgeCount = curve.closed ? n : n - 1;
+  const chain: Vec2[] = [curve.pts[0]];
+  for (let i = 0; i < edgeCount; i++) {
+    const seg = bulgeArcPoints(curve.pts[i], curve.pts[(i + 1) % n], curve.bulge?.[i]);
+    chain.push(...seg.slice(1));
+  }
+  return polylineEdges(chain, false);
 }
 
 /** Nächstes trim-fähiges Drawing2D der Ebene zum Klickpunkt (innerhalb Toleranz). */
@@ -82,7 +102,7 @@ function pickCurveAt(
     if (!isTrimmable(d)) continue;
     const curve = geomToCurve(d.geom);
     if (!curve) continue;
-    for (const [a, b] of polylineEdges(curve.pts, curve.closed)) {
+    for (const [a, b] of curveHitEdges(curve)) {
       const dd = pointSegmentDistance(pt, a, b);
       if (dd < bestD) {
         bestD = dd;
@@ -93,7 +113,11 @@ function pickCurveAt(
   return best;
 }
 
-/** Alle anderen trim-fähigen Drawing2D der Ebene als Cutter-Kurven. */
+/**
+ * Alle anderen trim-fähigen Drawing2D der Ebene als Cutter-Kurven — Bogen-
+ * Segmente (bulge) sind als Schneider zugelassen (`trimPolylineWithBulge`
+ * schneidet Kreis↔Gerade UND Kreis↔Kreis, s. `edgeIntersectTs`).
+ */
 function cuttersFor(
   project: Project,
   levelId: string,
@@ -119,17 +143,33 @@ function sameChain(a: { pts: Vec2[]; closed: boolean }, b: Curve): boolean {
 }
 
 /** Eine getrimmte Rest-Kette als passende Drawing2D-Geometrie. */
-function chainToGeom(chain: { pts: Vec2[]; closed: boolean }): Drawing2DGeom {
-  if (chain.pts.length === 2 && !chain.closed) {
+function chainToGeom(chain: { pts: Vec2[]; closed: boolean; bulge?: number[] }): Drawing2DGeom {
+  if (chain.pts.length === 2 && !chain.closed && !hasRealBulge(chain.bulge)) {
     return { shape: "line", a: chain.pts[0], b: chain.pts[1] };
   }
-  return { shape: "polyline", pts: chain.pts, closed: chain.closed };
+  const geom: Drawing2DGeom = { shape: "polyline", pts: chain.pts, closed: chain.closed };
+  if (hasRealBulge(chain.bulge)) geom.bulge = chain.bulge;
+  return geom;
 }
 
 /**
  * Wendet einen Trim auf das Projekt an: ersetzt das getroffene Element durch
  * seine Rest-Ketten (Attribute geerbt). Bleibt nichts übrig, fällt es weg.
  */
+/**
+ * Trimmt eine Kurve gegen ihre Schneider (bulge-erhaltend). Läuft IMMER über
+ * `trimPolylineWithBulge` — sie ist eine echte Obermenge von `trimPolyline`
+ * (Gerade-only ist der Sonderfall bulge=undefined) und wird jetzt auch für
+ * reine Geraden-Ziele gebraucht, sobald ein Bogen-CUTTER im Spiel ist.
+ */
+function trimCurve(
+  curve: Curve,
+  cutters: { pts: Vec2[]; closed: boolean; bulge?: number[] }[],
+  pick: Vec2,
+): { pts: Vec2[]; closed: boolean; bulge?: number[] }[] {
+  return trimPolylineWithBulge(curve.pts, curve.bulge, curve.closed, cutters, pick);
+}
+
 function applyTrim(
   p: Project,
   target: Drawing2D,
@@ -140,8 +180,9 @@ function applyTrim(
   const cutters = cuttersFor(p, target.levelId, target.id).map((c) => ({
     pts: c.pts,
     closed: c.closed,
+    bulge: c.bulge,
   }));
-  const rest = trimPolyline(curve.pts, curve.closed, cutters, pick);
+  const rest = trimCurve(curve, cutters, pick);
   // Echtes No-op: genau eine Kette, identisch (gleiche Punkte) zur Quelle →
   // nichts wurde weggeschnitten (kein Schnitt mit Cuttern).
   if (rest.length === 1 && sameChain(rest[0], curve)) return p;
@@ -152,7 +193,7 @@ function applyTrim(
   return { ...p, drawings2d: [...others, ...replacements] };
 }
 
-/** Vorschau-Formen der NACH dem Trim verbleibenden Ketten (für den Draft). */
+/** Vorschau-Formen der NACH dem Trim verbleibenden Ketten (für den Draft — tesselliert, s. `DraftShape`). */
 function trimPreview(
   project: Project,
   target: Drawing2D,
@@ -163,15 +204,23 @@ function trimPreview(
   const cutters = cuttersFor(project, target.levelId, target.id).map((c) => ({
     pts: c.pts,
     closed: c.closed,
+    bulge: c.bulge,
   }));
-  const rest = trimPolyline(curve.pts, curve.closed, cutters, pick);
+  const rest = trimCurve(curve, cutters, pick);
   const out: DraftShape[] = [];
   for (const c of rest) {
     if (c.pts.length < 2) continue;
-    if (c.pts.length === 2 && !c.closed) {
-      out.push({ kind: "line", a: c.pts[0], b: c.pts[1] });
+    const pts = hasRealBulge(c.bulge)
+      ? curveHitEdges({ pts: c.pts, closed: c.closed, bulge: c.bulge }).reduce<Vec2[]>((acc, [a, b], i) => {
+          if (i === 0) acc.push(a);
+          acc.push(b);
+          return acc;
+        }, [])
+      : c.pts;
+    if (pts.length === 2 && !c.closed) {
+      out.push({ kind: "line", a: pts[0], b: pts[1] });
     } else {
-      out.push({ kind: "poly", pts: c.pts, closed: c.closed });
+      out.push({ kind: "poly", pts, closed: c.closed });
     }
   }
   return out;

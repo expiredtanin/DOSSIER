@@ -10,6 +10,7 @@
 import type { HatchPattern, Layer, Project } from "../../model/types";
 import { getCeilingType, getComponent, getWallType, roofLayers } from "../../model/types";
 import { resolveHatch } from "../generatePlan";
+import type { Vec3 as RoofVec3 } from "../../geometry/roof";
 
 export type RVec2 = [number, number];
 export type RRgb = [number, number, number];
@@ -313,11 +314,39 @@ export interface RMesh {
   materialIndex?: number;
 }
 
+/**
+ * EINE Dachflächen-Schicht für den 3D-Live-Schnitt (`render3d::types::
+ * RoofLayerInput`/`roof_cut::cut_roof_layer`) — GETRENNT vom Render-Mesh
+ * ({@link RMesh}, `kind:"extrusion"`), weil `section.rs` kein beliebiges
+ * Dreiecksnetz schneiden kann (nur Wand-Boxen/Decken-Polygone, s. dessen
+ * Moduldoc „jedes Bauteil ist ein vertikales Prisma"). Eine Dachfläche ist
+ * KEIN vertikales Prisma (geneigtes Polygon, entlang der eigenen Normalen
+ * statt vertikal extrudiert) — daher dieser eigene, parallele Eingabetyp statt
+ * Wiederverwendung von `RWall`/`RSlab`.
+ */
+export interface RRoofLayer {
+  /** Eckpunkte der OBERSEITE dieser Schicht (näher am First/aussen), Welt-Meter. */
+  polygon: RoofVec3[];
+  /** Nach aussen/oben zeigende Flächennormale (normalisiert) — identisch zu
+   *  der Normalen, mit der {@link RMesh} für dieselbe Schicht gebaut wird
+   *  (`planeNormalUp`), damit Render-Mesh und Schnitt-Geometrie nicht
+   *  auseinanderlaufen. */
+  normal: RoofVec3;
+  /** Schichtdicke (Meter), Extrusion entlang `-normal`. */
+  thickness: number;
+  color: RRgb;
+  hatch?: RHatch;
+  cut?: RCutMeta;
+}
+
 /** Modell-Bündel für den nativen 3D-Renderer (Wände + Decken + Kontext-Meshes). */
 export interface RModel3d {
   walls: RWall[];
   slabs: RSlab[];
   meshes: RMesh[];
+  /** Dach-Schichten für den Live-Schnitt (s. {@link RRoofLayer}) — separat von
+   *  `meshes`, da render3d sie über einen eigenen Pfad schneidet. */
+  roofLayers: RRoofLayer[];
 }
 
 /** Warmer, neutraler Wand-Grundton (wie render3d default). */

@@ -12,6 +12,7 @@ import type {
   AttributeSource,
   Component,
   HatchPattern,
+  HatchStyle,
   LayerCategory,
   Project,
   Vec2,
@@ -124,6 +125,8 @@ export interface HatchRender {
   density?: number;
   lengthMin?: number;
   lengthMax?: number;
+  /** Frei gezeichnetes Wiederhol-Motiv (nur `pattern==="custom"`); 1:1 aus dem HatchStyle durchgereicht. */
+  motif?: HatchStyle["motif"];
 }
 
 /**
@@ -324,6 +327,20 @@ export type Primitive =
       greyed?: boolean;
     }
   | {
+      // Text-entlang-Pfad (aus Drawing2D `{shape:"text", pathPts}` mit ≥2
+      // Stützpunkten) — echtes SVG `<textPath>`, nur schlichter String (kein
+      // Rich-Doc/mehrere Formate in v1). Eigener Primitive-Typ statt einer
+      // Variante von `drawingText`, damit der bestehende Rich-Text-Renderpfad
+      // unangetastet bleibt.
+      kind: "drawingTextPath";
+      pathPts: Vec2[];
+      text: string;
+      heightM: number;
+      color: string;
+      drawingId?: string;
+      greyed?: boolean;
+    }
+  | {
       // Eingebettetes Rasterbild (aus Drawing2D `{shape:"image"}`, Foto/Logo/
       // gerasterte PDF-Seite) — achsparalleles Rechteck, Data-URL als Quelle.
       kind: "drawingImage";
@@ -411,6 +428,7 @@ export function resolveHatch(
     density: h.density,
     lengthMin: h.lengthMin,
     lengthMax: h.lengthMax,
+    motif: h.motif,
   };
 }
 

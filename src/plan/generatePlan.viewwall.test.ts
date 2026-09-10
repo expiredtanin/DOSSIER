@@ -79,6 +79,39 @@ describe("generatePlan — Schnitt vs. Ansicht nach Schnitthöhe", () => {
     );
     expect(low.some((pr) => pr.fill !== "none")).toBe(true);
   });
+
+  // Regression: `wall.bottom`/`wall.top` (VerticalAnchor-Override) muss die
+  // Schnitt-vs-Ansicht-Entscheidung über die ECHTE vertikale Ausdehnung
+  // (`wallVerticalExtent`) treffen, nicht nur über `wall.height` — sonst
+  // rutscht eine hochgesetzte Wand fälschlich in die falsche Kategorie.
+  it("behandelt eine hochgesetzte Wand (bottom-Override ÜBER der Schnittebene) als Ansicht, obwohl ihre Höhe allein 'hoch genug' aussieht", () => {
+    const p = project();
+    // HI (2.6 m hoch) auf ein UK von 1.5 m angehoben → Spanne [1.5, 4.1],
+    // Schnittebene bei 1.0 m liegt UNTER der Wand → reine Ansicht erwartet.
+    p.walls[0].bottom = { mode: "custom", z: 1.5 };
+    const plan = generatePlan(p, "eg", visible, undefined, "mittel");
+    const hi = plan.primitives.filter(
+      (pr): pr is Extract<typeof pr, { kind: "polygon" }> =>
+        pr.kind === "polygon" && pr.wallId === "HI",
+    );
+    expect(hi.length).toBeGreaterThan(0);
+    expect(hi.every((pr) => pr.fill === "none")).toBe(true);
+  });
+
+  it("behandelt eine hochgesetzte Wand als geschnitten, wenn die Schnittebene weiterhin in ihrer Spanne liegt", () => {
+    const p = project();
+    // HI von [1.5, 4.1] angehoben, Schnittebene mit angehoben auf 2.0 m → liegt
+    // weiterhin INNERHALB der Wand-Spanne → Poché erwartet.
+    p.walls[0].bottom = { mode: "custom", z: 1.5 };
+    p.drawingLevels[0].cutHeight = 2.0;
+    const plan = generatePlan(p, "eg", visible, undefined, "mittel");
+    const hi = plan.primitives.filter(
+      (pr): pr is Extract<typeof pr, { kind: "polygon" }> =>
+        pr.kind === "polygon" && pr.wallId === "HI",
+    );
+    expect(hi.length).toBeGreaterThan(0);
+    expect(hi.some((pr) => pr.fill !== "none")).toBe(true);
+  });
 });
 
 // ── Decke über der Schnittebene → gestrichelte Überkopf-Umrisslinie ──────────

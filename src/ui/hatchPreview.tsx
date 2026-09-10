@@ -201,8 +201,41 @@ function hatchInner(hatch: HatchStyle, w: number, h: number, uid: string): React
       );
     }
     inner = out;
+  } else if (hatch.pattern === "custom" && hatch.motif && hatch.motif.points.length >= 2 && hatch.motif.length > 1e-6) {
+    // Eigenes Motiv: EINE Wiederhollänge als <pattern>-Kachel (analog zur
+    // Bild-Schraffur oben) — motif.x (0..length) läuft entlang der Kachel-
+    // Höhe (wie die Musterlinie bei diagonal/crosshatch), motif.y (Versatz
+    // quer) entlang der Kachelbreite. Bewusst eigenständig tesseliert (KEIN
+    // Import aus glPlanHatch, s. Moduldoc oben) — schematisch/px, wie der
+    // übrige Swatch, nicht deckungsgleich mit dem Plan-Renderer.
+    const PX_PER_MM = 2;
+    const rowSpacing = Math.max(3, 8 / Math.sqrt(scale));
+    const period = Math.max(4, hatch.motif.length * scale * PX_PER_MM);
+    const d = hatch.motif.points
+      .map((p, i) => {
+        const x = (p.y * scale * PX_PER_MM).toFixed(1);
+        const y = (p.x * scale * PX_PER_MM).toFixed(1);
+        return `${i === 0 ? "M" : "L"} ${x} ${y}`;
+      })
+      .join(" ");
+    inner = (
+      <>
+        <defs>
+          <pattern
+            id={patId}
+            patternUnits="userSpaceOnUse"
+            width={rowSpacing}
+            height={period}
+            patternTransform={`rotate(${angle})`}
+          >
+            <path d={d} fill="none" stroke="currentColor" strokeWidth={0.8} />
+          </pattern>
+        </defs>
+        <rect x={0} y={0} width={w} height={h} fill={`url(#${patId})`} />
+      </>
+    );
   } else {
-    // "diagonal" (Default): eine parallele Schar.
+    // "diagonal" (Default, auch "custom" ohne gesetztes Motiv): eine parallele Schar.
     inner = parallelLines(w, h, angle, spacing, 0.8, "d");
   }
 

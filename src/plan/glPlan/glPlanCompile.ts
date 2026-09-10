@@ -143,6 +143,16 @@ function dim(color: Rgba, greyed: boolean | undefined): Rgba {
 }
 
 /**
+ * Wie `dim`, aber für FLÄCHEN-Füllung: gedimmte Flächen bleiben WEISS statt
+ * grau eingefärbt — nur der Umriss (weiterhin `dim`) macht das Element als
+ * gedimmt erkennbar (Nutzer-Wunsch: "im Hintergrund nicht als graue Fläche
+ * gefüllt, sondern weiss mit nur den Linien sichtbar").
+ */
+function dimFill(color: Rgba, greyed: boolean | undefined): Rgba {
+  return greyed ? [1, 1, 1, color[3]] : color;
+}
+
+/**
  * Tessellliert Plan-Primitive zu GPU-Geometrie (MVP: gefüllte Polygone +
  * bildschirmkonstante Striche). Text/Bögen bleiben im SVG-Overlay.
  */
@@ -399,7 +409,7 @@ export function compilePrimitivesToGpu(
             track(pt.x, pt.y);
           }
           for (const t of tris) fillIdx.push(base + t);
-          addFillBatch(tris.length, dim(fill, prim.greyed));
+          addFillBatch(tris.length, dimFill(fill, prim.greyed));
         }
       }
       // Schraffur (nach der Füllung, vor/passend zum Umriss — wie der SVG stapelt):

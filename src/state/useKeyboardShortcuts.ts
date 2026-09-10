@@ -22,6 +22,12 @@ import { differenceDrawings, intersectionDrawings, unionDrawings } from "../edit
 import type { BooleanResult } from "../editors/booleanOps";
 import { groupSelection, mergeMembership, ungroup, EMPTY_MEMBERSHIP } from "./groupActions";
 import type { GroupMembership } from "./groupActions";
+import {
+  collectElementClipboard,
+  isClipboardEmpty,
+  pasteElementClipboard,
+} from "../editors/elementClipboard";
+import type { ElementClipboard, ElementSelectionIds } from "../editors/elementClipboard";
 
 /** Aktive Transformation (Bewegen/Spiegeln/Drehen) — Form aus useDrawingToolState. */
 type ActiveTransform = {
@@ -262,14 +268,18 @@ export function useSelectAllAndDeleteShortcut(opts: {
   selectedColumnIds: string[];
   selectedRoofIds: string[];
   selectedContextObjectIds: string[];
-  selectedSectionLineId: string | null;
+  selectedSectionLineIds: string[];
   setSelectedWallIds: (ids: string[]) => void;
   setSelectedDrawingIds: (ids: string[]) => void;
   setSelectedCeilingIds: (ids: string[]) => void;
+  setSelectedOpeningIds: (ids: string[]) => void;
   setSelectedStairIds: (ids: string[]) => void;
   setSelectedRoomIds: (ids: string[]) => void;
   setSelectedExtrudedSolidIds: (ids: string[]) => void;
   setSelectedColumnIds: (ids: string[]) => void;
+  setSelectedRoofIds: (ids: string[]) => void;
+  setSelectedContextObjectIds: (ids: string[]) => void;
+  setSelectedSectionLineIds: (ids: string[]) => void;
   hasSelectionToDelete: () => boolean;
   deleteSelection: () => void;
 }): void {
@@ -281,10 +291,13 @@ export function useSelectAllAndDeleteShortcut(opts: {
     setSelectedWallIds,
     setSelectedDrawingIds,
     setSelectedCeilingIds,
+    setSelectedOpeningIds,
     setSelectedStairIds,
     setSelectedRoomIds,
     setSelectedExtrudedSolidIds,
     setSelectedColumnIds,
+    setSelectedRoofIds,
+    setSelectedSectionLineIds,
     hasSelectionToDelete,
     deleteSelection,
   } = opts;
@@ -292,17 +305,24 @@ export function useSelectAllAndDeleteShortcut(opts: {
     if (activeTool !== "select") return;
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e)) return;
-      // Alles auswählen (Wände + Zeichnungen des aktiven Geschosses/der Ebene).
+      // Alles auswählen (alle Bauteilarten des aktiven Geschosses/der Ebene +
+      // die Schnittlinien-Symbole, die auf JEDEM Grundriss erscheinen).
       if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
         const wallIds = project.walls
           .filter((w) => w.floorId === activeLevelId)
           .map((w) => w.id);
+        const wallIdSet = new Set(wallIds);
         const drawingIds = project.drawings2d
           .filter((d) => d.levelId === activeLevelId)
           .map((d) => d.id);
         const ceilingIds = (project.ceilings ?? [])
           .filter((c) => c.floorId === activeLevelId)
           .map((c) => c.id);
+        // Öffnungen haben kein eigenes floorId (das Geschoss ergibt sich aus
+        // der Wirtswand) — über die bereits geschossgefilterten Wand-Ids.
+        const openingIds = (project.openings ?? [])
+          .filter((o) => wallIdSet.has(o.hostWallId))
+          .map((o) => o.id);
         const stairIds = (project.stairs ?? [])
           .filter((s) => s.floorId === activeLevelId)
           .map((s) => s.id);
@@ -315,22 +335,42 @@ export function useSelectAllAndDeleteShortcut(opts: {
         const columnIds = (project.columns ?? [])
           .filter((c) => c.floorId === activeLevelId)
           .map((c) => c.id);
+        const roofIds = (project.roofs ?? [])
+          .filter((r) => r.floorId === activeLevelId)
+          .map((r) => r.id);
+        // Schnittführungs-Symbole sind projektweit (kein floorId-Bezug — sie
+        // werden auf JEDEM Grundriss gezeichnet, s. generatePlan/sections.ts::
+        // addSectionLines), anders als die übrigen, geschossgefilterten Kanäle.
+        const sectionLineIds = project.drawingLevels
+          .filter((l) => (l.kind === "section" || l.kind === "elevation") && l.linePoints)
+          .map((l) => l.id);
+        // Kontext-Objekte (importierte Gebäude/Terrain) sind ebenfalls
+        // projektweit, aber bewusst NICHT Teil von „Alles auswählen" — anders
+        // als Schnittlinien sind sie Hintergrund-/Referenzgeometrie, kein
+        // Geschossinhalt; ein versehentliches Löschen wäre riskanter als
+        // hilfreich. Bleibt daher unverändert (kein Clear, kein Select).
         if (
           wallIds.length ||
           drawingIds.length ||
           ceilingIds.length ||
+          openingIds.length ||
           stairIds.length ||
           roomIds.length ||
           extrudedSolidIds.length ||
-          columnIds.length
+          columnIds.length ||
+          roofIds.length ||
+          sectionLineIds.length
         ) {
           setSelectedWallIds(wallIds);
           setSelectedDrawingIds(drawingIds);
           setSelectedCeilingIds(ceilingIds);
+          setSelectedOpeningIds(openingIds);
           setSelectedStairIds(stairIds);
           setSelectedRoomIds(roomIds);
           setSelectedExtrudedSolidIds(extrudedSolidIds);
           setSelectedColumnIds(columnIds);
+          setSelectedRoofIds(roofIds);
+          setSelectedSectionLineIds(sectionLineIds);
           e.preventDefault();
         }
         return;
@@ -356,14 +396,17 @@ export function useSelectAllAndDeleteShortcut(opts: {
     opts.selectedColumnIds,
     opts.selectedRoofIds,
     opts.selectedContextObjectIds,
-    opts.selectedSectionLineId,
+    opts.selectedSectionLineIds,
     opts.project.walls,
     opts.project.drawings2d,
     opts.project.ceilings,
+    opts.project.openings,
     opts.project.roofs,
     opts.project.stairs,
+    opts.project.rooms,
     opts.project.extrudedSolids,
     opts.project.columns,
+    opts.project.drawingLevels,
     opts.activeLevelId,
   ]);
 }
@@ -410,20 +453,33 @@ export function useSplitJoinShortcut(
 }
 
 /**
- * Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen. Kopieren legt
- * die GEWÄHLTEN Drawing2D tief in die Zwischenablage; Einfügen erzeugt Klone mit
- * neuen IDs auf dem AKTIVEN Geschoss (Zeichnungsebene) und wählt sie aus — so
- * wandert z. B. importiertes Mobiliar von einem Geschoss auf ein anderes. Im
- * Textfeld bleibt das native Copy/Paste; ohne 2D-Auswahl kein preventDefault.
+ * Ctrl/Cmd+C / Ctrl/Cmd+V = Bauteile kopieren/einfügen — über ALLE 9 Auswahl-
+ * Kanäle hinweg (Wand/Decke/Dach/Öffnung/Treppe/Raum/Extrusion/Stütze +
+ * 2D-Zeichenelemente), s. `editors/elementClipboard.ts` für die reine Logik
+ * (inkl. der Öffnung↔Wand-Paarkopplung). Einfügen erzeugt Klone mit neuen IDs
+ * auf dem AKTIVEN Geschoss (an denselben Modell-Koordinaten) und wählt sie
+ * aus — so wandert z. B. importiertes Mobiliar von einem Geschoss auf ein
+ * anderes. Im Textfeld bleibt das native Copy/Paste; ohne Auswahl kein
+ * preventDefault (Browser-Copy bleibt möglich).
  */
-export function useDrawingClipboardShortcut(
-  selectedDrawingIds: string[],
-  drawingClipboard: Drawing2D[],
-  setDrawingClipboard: (items: Drawing2D[]) => void,
+export function useElementClipboardShortcut(
+  sel: ElementSelectionIds,
+  elementClipboard: ElementClipboard | null,
+  setElementClipboard: (c: ElementClipboard | null) => void,
   activeLevelId: string,
-  drawings2d: Drawing2D[],
-  importDrawings: (drawings: Drawing2D[]) => void,
-  setSelectedDrawingIds: (ids: string[]) => void,
+  project: Project,
+  setProject: (next: Project | ((p: Project) => Project)) => void,
+  setSelected: {
+    wallIds: (ids: string[]) => void;
+    drawingIds: (ids: string[]) => void;
+    ceilingIds: (ids: string[]) => void;
+    roofIds: (ids: string[]) => void;
+    openingIds: (ids: string[]) => void;
+    stairIds: (ids: string[]) => void;
+    roomIds: (ids: string[]) => void;
+    extrudedSolidIds: (ids: string[]) => void;
+    columnIds: (ids: string[]) => void;
+  },
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -432,30 +488,35 @@ export function useDrawingClipboardShortcut(
       if (k !== "c" && k !== "v") return;
       if (isEditableTarget(e)) return;
       if (k === "c") {
-        const ids = new Set(selectedDrawingIds);
-        if (ids.size === 0) return; // nur bei 2D-Auswahl (sonst Browser-Copy)
-        const picked = drawings2d.filter((d) => ids.has(d.id));
-        if (picked.length === 0) return;
+        const clip = collectElementClipboard(project, sel);
+        if (!clip) return; // nichts gewählt → natives Browser-Copy zulassen
         e.preventDefault();
-        setDrawingClipboard(picked.map((d) => structuredClone(d)));
+        setElementClipboard(clip);
         return;
       }
       // Einfügen: Klone auf dem aktiven Geschoss, neue IDs, danach ausgewählt.
-      if (drawingClipboard.length === 0) return;
+      if (!elementClipboard || isClipboardEmpty(elementClipboard)) return;
       e.preventDefault();
-      const stamp = Date.now();
-      const pasted: Drawing2D[] = drawingClipboard.map((d, i) => ({
-        ...structuredClone(d),
-        id: `drawing-${stamp}-${i}`,
-        levelId: activeLevelId,
-      }));
-      importDrawings(pasted);
-      setSelectedDrawingIds(pasted.map((p) => p.id));
+      const { project: next, pastedIds } = pasteElementClipboard(
+        project,
+        elementClipboard,
+        activeLevelId,
+      );
+      setProject(next);
+      setSelected.wallIds(pastedIds.wallIds);
+      setSelected.drawingIds(pastedIds.drawingIds);
+      setSelected.ceilingIds(pastedIds.ceilingIds);
+      setSelected.roofIds(pastedIds.roofIds);
+      setSelected.openingIds(pastedIds.openingIds);
+      setSelected.stairIds(pastedIds.stairIds);
+      setSelected.roomIds(pastedIds.roomIds);
+      setSelected.extrudedSolidIds(pastedIds.extrudedSolidIds);
+      setSelected.columnIds(pastedIds.columnIds);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, drawingClipboard, activeLevelId, drawings2d]);
+  }, [sel, elementClipboard, activeLevelId, project]);
 }
 
 /**

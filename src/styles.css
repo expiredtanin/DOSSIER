@@ -1907,6 +1907,42 @@ body {
 .drawing-tab-label {
   pointer-events: none;
 }
+.drawing-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.drawing-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.55;
+}
+.drawing-tab-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.12);
+}
+.drawing-tab-add {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1;
+}
+.drawing-tab-add:hover {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
 
 /* Eine Ansicht füllt die Restfläche. */
 .pane {
@@ -2019,6 +2055,26 @@ body {
   font-size: 12px;
 }
 
+/* Fett hervorgehobener Hinweis, wenn die 3D-Sicht auf dem three.js-
+   Notfall-Fallback läuft statt der wgpu-Standard-Engine (kein WebGPU im
+   Browser, oder manuell auf WebGL2 gestellt) — three.js ist kein
+   Paritätsziel mehr, daher muss sichtbar sein, wenn man ihn gerade sieht. */
+.viewport-engine-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  padding: 4px 9px;
+  background: #b02a1e;
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  border-radius: 4px;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
 /* ── Grundriss (SVG) ─────────────────────────────────────────────────── */
 .plan-legend {
   position: absolute;
@@ -2120,12 +2176,8 @@ body {
   stroke-dasharray: 6 4;
   vector-effect: non-scaling-stroke;
 }
-.plan-svg .plan-group-bbox-corner {
-  fill: var(--accent);
-  stroke: #fff;
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
+/* Erbt Form/Farbe komplett von .plan-grip (Element trägt beide Klassen) —
+   keine eigenen Farbregeln mehr nötig. */
 
 /* Hervorhebung selektierter 2D-Zeichenelemente (Mehrfach/Marquee): Akzentkontur
    über der Geometrie, keine Füllung. */
@@ -2199,13 +2251,16 @@ body {
   stroke-dasharray: 5 4;
 }
 
-/* Editier-Griffe (Grips) des selektierten Elements: gefüllte Akzent-Quadrate
-   mit hellem Rand. Ziehbar (Treffer in PlanView per Bildschirm-Pixel). */
+/* Editier-Griffe (Grips) des selektierten Elements: papierfarbene Kreise mit
+   Akzent-Ring + weichem Schatten (statt der alten gefüllten Quadrate) — wirkt
+   wie ein modernes Vektor-Tool statt AutoCAD-Grip. Ziehbar (Treffer in
+   PlanView per Bildschirm-Pixel, unabhängig von der gerenderten Form). */
 .plan-svg .plan-grip {
-  fill: var(--accent-light);
-  stroke: #fff;
-  stroke-width: 1.5;
+  fill: var(--sheet);
+  stroke: var(--accent);
+  stroke-width: 1.75;
   vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
 /* Bezier-Hilfslinien (Anker → Kontrollpunkt-Griff): dünn, gestrichelt, deutlich
@@ -2219,12 +2274,16 @@ body {
 }
 
 /* Kanten-/Seiten-Griffe (Edge Grips): dreieckiger Anfasser je Seite, Spitze
-   nach außen. Gleiche Akzent-/Rand-Farben wie die Eckpunkt-Griffe. */
+   nach außen. Gleiche papierfarbene + Akzent-Ring-Sprache wie die Eckpunkt-
+   Griffe, nur mit runden statt spitzen Ecken (stroke-linejoin überstimmt die
+   globale Miter-Regel für Plan-Polygone via höherer Selektor-Spezifität). */
 .plan-svg .plan-edge-grip {
-  fill: var(--accent);
-  stroke: #fff;
+  fill: var(--sheet);
+  stroke: var(--accent);
   stroke-width: 1.5;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
 /* ── Freie 2D-Zeichengeometrie (Drawing2D) ───────────────────────────────
@@ -2263,9 +2322,10 @@ body {
   stroke-width: 1.25;
 }
 .plan-svg .tool-vertex {
-  fill: var(--accent);
-  stroke: #fff;
-  stroke-width: 1;
+  fill: var(--sheet);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 .plan-svg .snap-glyph {
   fill: none;
@@ -2997,6 +3057,216 @@ body {
   margin: 0;
   cursor: pointer;
   background: transparent;
+}
+/* Farbe an einen Stift gekoppelt (s. model/penSets.ts) — Swatch bleibt
+   sichtbar (zeigt die gebackene Farbe), der native Picker ist gesperrt: die
+   Farbe kommt jetzt aus dem aktiven Stiftsatz, nicht mehr aus freier Wahl. */
+.res-color-disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+.res-color-disabled .res-color-swatch::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.25) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+/* Farbfeld mit Stift-Umschalter (ComponentsTab, Ebenen-Editor): Swatch + ein
+   Dropdown „Frei"/Stiftname daneben. */
+.res-pen-color {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Eine Stift-Zeile im Stiftsatz-Detail: Name + Farbe + Löschen nebeneinander. */
+.res-pen-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.res-pen-row .res-input {
+  flex: 1;
+}
+
+/* Aktiv-Kennzeichnung eines Stiftsatzes in der Master-Liste. */
+.res-pen-active-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* ── PenColorField (ui/PenColorField.tsx) — Farbe+Stift, gemeinsam für
+   ComponentsTab/Ebenen-Editor/Attribut-Panel ────────────────────────────── */
+.pen-color-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* Hält Swatch + Nummer-Badge zusammen; das Badge sitzt absolut relativ zu
+   DIESEM Wrapper (nicht mehr im <button> verschachtelt — ein <input> als
+   Kind eines <button> wäre ungültiges HTML, s. Badge-Inline-Edit unten). */
+.pen-color-swatch-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+.pen-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.pen-color-swatch:hover {
+  border-color: var(--accent);
+}
+.pen-color-swatch-disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.pen-color-swatch-disabled:hover {
+  border-color: var(--border);
+}
+/* Kleines Nummer-Badge in der Swatch-Ecke — einziger Hinweis in der Basiszeile,
+   dass die Farbe von einem Stift kommt (statt frei gewählt zu sein). Ein
+   eigener, klickbarer Button (Nutzer-Wunsch): Klick springt DIREKT in ein
+   Inline-Zahlenfeld, ohne erst das ganze Popover öffnen zu müssen. */
+.pen-color-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 13px;
+  padding: 0 2px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--panel);
+  cursor: pointer;
+}
+.pen-color-badge:hover {
+  box-shadow: 0 0 0 1.5px var(--panel), 0 0 0 2.5px var(--accent);
+}
+.pen-color-badge:disabled {
+  cursor: default;
+}
+.pen-color-badge-input {
+  width: 26px;
+  height: 15px;
+  min-width: 0;
+  padding: 0 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--ink);
+  background: var(--input);
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1.5px var(--panel);
+}
+.pen-color-weight-hint {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pen-color-popover {
+  padding: 8px;
+  max-width: 220px;
+}
+/* Kopfzeile im Popover: Frei/Stift-Umschalter links, getipptes Feld
+   (Stiftnummer bzw. #Hex) rechts davon. */
+.pen-color-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pen-color-input {
+  width: 64px;
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--ink);
+  font-size: 11.5px;
+  text-align: center;
+}
+.pen-color-input.mono {
+  font-family: var(--font-mono);
+}
+.pen-color-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.pen-color-grid-pens {
+  grid-template-columns: repeat(10, 1fr);
+}
+.pen-color-cell {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  padding: 0;
+}
+.pen-color-cell.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.pen-color-cell-num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 6px;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  line-height: 1;
+}
+.pen-color-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+}
+.pen-color-custom input[type="color"] {
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
 }
 
 /* Linienstil-Vorschau (füllt die Vorschau-Zelle). */
@@ -6128,13 +6398,8 @@ body {
 
 /* ── Raum: Stempel-Griff, Objekt-Info-Steuerung, Stempel-Editor, Bilanz ── */
 
-/* Ziehbare Stempel-Raute im Grundriss (Akzentfarbe). */
-.plan-svg .plan-stamp-grip {
-  fill: var(--accent);
-  stroke: #ffffff;
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
+/* Ziehbare Stempel-Raute im Grundriss: erbt Form/Farbe von .plan-grip
+   (Element trägt beide Klassen), keine eigenen Farbregeln mehr nötig. */
 
 /* Objekt-Info: Textfeld + Aktions-Button (Raum-Abschnitt). */
 .objinfo-text {

@@ -6,14 +6,16 @@
 //      wird gewählt; ein einzelnes `line`-Element hat keine eigene Ecke)
 //   2) „Radius:"       → Punkt (Abstand von der Ecke) ODER getippte Zahl → commit
 //
-// EINSCHRÄNKUNG (ehrlich, nicht verschwiegen): Polylinien kennen im Modell
-// bisher keine Bogen-Segmente (kein „Bulge" — siehe PENDENZEN.md, 2D-
-// Vervollständigung). Die Verrundung wird daher als kurze Punktfolge entlang
-// des Bogens TESSELLIERT (approximiert), nicht als echtes Arc-Segment
-// gespeichert — optisch rund, aber kein editierbares Bogen-Objekt. Ein rect
-// wird beim ersten Fillet zu einer polyline (kein reines Rechteck mehr).
+// Die Verrundung wird als ECHTES Bogen-Segment gespeichert (`bulge`, s.
+// `geometry/bulge.ts`), nicht mehr tesselliert — editierbar wie jeder andere
+// Bulge-Bogen (Griff zieht die Krümmung, Rendering bleibt exakt rund unabhängig
+// vom Massstab). Quellkurven, die an der gewählten Ecke bereits ein Bogen-
+// Segment tragen, bleiben ausgenommen (`geomToCurve`) — die Tangenten-Setback-
+// Rechnung geht von geraden Schenkeln aus. Ein rect wird beim ersten Fillet zu
+// einer polyline (kein reines Rechteck mehr).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { bulgeFromSagittaPoint, hasRealBulge } from "../../geometry/bulge";
 import { filletCorner, type Fillet } from "../../geometry/kernel2d";
 import type {
   Command,
@@ -39,14 +41,18 @@ interface Curve {
 
 /** Wandelt eine fillet-fähige 2D-Form (polyline/rect) in eine Punktliste oder null. */
 function geomToCurve(g: Drawing2DGeom): Curve | null {
-  if (g.shape === "polyline") return { pts: g.pts, closed: g.closed };
+  // Bogen-Segmente (bulge) hier noch nicht unterstützt — der Fillet-Commit
+  // baut die Polylinie komplett neu aus reinen Punkten auf und würde ein
+  // bestehendes bulge-Array an anderen Segmenten sonst stillschweigend
+  // verlieren, s. offset.ts.
+  if (g.shape === "polyline" && !hasRealBulge(g.bulge)) return { pts: g.pts, closed: g.closed };
   if (g.shape === "rect") {
     return {
       pts: [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }],
       closed: true,
     };
   }
-  return null; // line (keine eigene Ecke), circle/arc/text: nicht fillet-fähig
+  return null; // line (keine eigene Ecke), circle/arc/text/Bogen-Polylinie: nicht fillet-fähig
 }
 
 /** Ein Treffer: das Element + der Eckpunkt-Index (mit gültigen beiden Nachbarn). */
@@ -101,14 +107,25 @@ function tessellateFillet(f: Fillet, segments = 12): Vec2[] {
   return pts;
 }
 
-/** Ersetzt den Eckpunkt durch die tessellierte Bogen-Punktfolge (Tangente↔Tangente). */
+/** Ersetzt den Eckpunkt durch die beiden Tangentenpunkte (Tangente↔Tangente). */
 function applyFilletPoints(hit: CornerHit, f: Fillet): Vec2[] {
-  const arc = tessellateFillet(f);
   return [
     ...hit.curve.pts.slice(0, hit.index),
-    ...arc,
+    f.tangentA,
+    f.tangentB,
     ...hit.curve.pts.slice(hit.index + 1),
   ];
+}
+
+/** Bulge-Wert des Verrundungs-Bogens (tangentA→tangentB), aus einem echten Bogenpunkt hergeleitet. */
+function filletBulge(f: Fillet): number {
+  const TAU = Math.PI * 2;
+  let delta = f.endAngle - f.startAngle;
+  while (delta > Math.PI) delta -= TAU;
+  while (delta < -Math.PI) delta += TAU;
+  const mid = f.startAngle + delta / 2;
+  const apex: Vec2 = { x: f.center.x + f.radius * Math.cos(mid), y: f.center.y + f.radius * Math.sin(mid) };
+  return bulgeFromSagittaPoint(f.tangentA, f.tangentB, apex);
 }
 
 function filletDraft(hit: CornerHit, r: number, at: Vec2 | null): ToolDraft {
@@ -125,7 +142,10 @@ function commitFillet(p: Project, hit: CornerHit, r: number): Project {
   const f = filletFor(hit, r);
   if (!f) return p; // Radius zu gross für die Schenkellänge, oder Ecke (fast) gerade → No-op
   const pts = applyFilletPoints(hit, f);
-  const geom: Drawing2DGeom = { shape: "polyline", pts, closed: hit.curve.closed };
+  const edgeCount = hit.curve.closed ? pts.length : pts.length - 1;
+  const bulge = new Array(edgeCount).fill(0);
+  bulge[hit.index] = filletBulge(f); // Kante tangentA→tangentB (an Position hit.index)
+  const geom: Drawing2DGeom = { shape: "polyline", pts, closed: hit.curve.closed, bulge };
   return {
     ...p,
     drawings2d: p.drawings2d.map((d) => (d.id === hit.drawing.id ? { ...d, geom } : d)),

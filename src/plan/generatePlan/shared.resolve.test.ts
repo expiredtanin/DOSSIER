@@ -16,8 +16,9 @@ import {
   resolveBackground,
   resolveHatchId,
   resolveStrokeWeight,
+  resolveHatch,
 } from "./shared";
-import type { Component, LayerCategory } from "../../model/types";
+import type { Component, HatchStyle, LayerCategory, Project } from "../../model/types";
 
 const comp: Component = {
   id: "c1",
@@ -76,6 +77,37 @@ describe("resolveStrokeWeight — Default bleibt 'Nach Bauteil'", () => {
   });
   it("kein Override, Source explizit 'layer': liefert die Kategorie-Strichstärke", () => {
     expect(resolveStrokeWeight(undefined, "layer", category, 0.13)).toBe(category.lw);
+  });
+});
+
+describe("resolveHatch — reicht `motif` (custom-Muster) unverändert durch", () => {
+  const motif: NonNullable<HatchStyle["motif"]> = {
+    points: [{ x: 0, y: 0 }, { x: 2, y: 1 }, { x: 4, y: 0 }],
+    length: 4,
+  };
+  const hatchStyle: HatchStyle = {
+    id: "h-custom",
+    name: "Eigenes Motiv",
+    pattern: "custom",
+    scale: 1,
+    angle: 0,
+    color: "#000",
+    motif,
+  };
+  const project = {
+    hatches: [hatchStyle],
+    lineStyles: [],
+  } as unknown as Project;
+
+  it("HatchRender.motif entspricht dem HatchStyle.motif", () => {
+    const render = resolveHatch(project, "h-custom");
+    expect(render.motif).toEqual(motif);
+  });
+
+  it("ein Hatch OHNE motif liefert HatchRender.motif === undefined (kein erfundener Default)", () => {
+    const diagonal: HatchStyle = { id: "h-diag", name: "Diagonal", pattern: "diagonal", scale: 1, angle: 0, color: "#000" };
+    const p2 = { hatches: [diagonal], lineStyles: [] } as unknown as Project;
+    expect(resolveHatch(p2, "h-diag").motif).toBeUndefined();
   });
 });
 

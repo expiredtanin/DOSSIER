@@ -24,6 +24,7 @@ import type {
   Ceiling,
   Column,
   ColumnProfile,
+  ContextImage,
   ContextObject,
   Drawing2D,
   Drawing2DGeom,
@@ -378,6 +379,16 @@ export interface Selection {
   floorId?: string;
   /** Effektiv aufgelöste Strich-/Umrandungsfarbe (hex). */
   color: string;
+  /**
+   * Stift-Kopplung der Farbe oben (ArchiCAD-Stiftsatz-Muster, s.
+   * `model/penSets.ts`): gesetzt, wenn DIESES Element (nicht Bauteil/Ebene)
+   * seine eigene Farbe an einen Stift gekoppelt hat. `color` bleibt auch dann
+   * die aufgelöste (gebackene) Farbe — die Kopplung ist nur fürs Panel-UI
+   * relevant (Dropdown „Frei"/Stiftname). Gesetzt bei Wand/Decke/Dach/
+   * Öffnung/Treppe/Raum/Stütze/Drawing2D; bei den übrigen `kind`s (Tür,
+   * Extrusion, Kontext-Objekt, Layout-Annotation) `undefined`.
+   */
+  colorPenId?: string;
   /** Effektiv aufgelöste Strichstärke in Millimetern. */
   weightMm: number;
   /**
@@ -397,10 +408,18 @@ export interface Selection {
    */
   foreground?: string;
   /**
+   * Stift-Kopplung von `foreground`, analog {@link Selection.colorPenId} —
+   * gesetzt bei Wand, Decke, Stütze und Drawing2D (dieselben `kind`s wie
+   * `foreground` selbst).
+   */
+  foregroundPenId?: string;
+  /**
    * Hintergrund-Override (Füllfarbe/Poché) des Elements; `undefined` = „Nach
    * System". Nachfolger von `fillColor`; hat im Plan Vorrang.
    */
   background?: string;
+  /** Stift-Kopplung von `background`, analog {@link Selection.foregroundPenId}. */
+  backgroundPenId?: string;
   /**
    * Quelle des Vordergrunds, wenn `foreground` NICHT gesetzt ist ("layer" =
    * Nach Ebene, "object"/`undefined` = Nach Bauteil, Default). Gesetzt bei
@@ -434,12 +453,19 @@ export interface Selection {
   /** Ob die Form geschlossen ist (rect/circle/closed polyline) — nur Drawing2D. */
   closed?: boolean;
   /**
-   * Ob das Element ein Bild ist (Drawing2D `{shape:"image"}` ODER Layout-
-   * Annotation `kind:"image"`) — steuert die Deckkraft-Zeile im Attribute-Panel.
+   * Ob das Element ein Bild ist (Drawing2D `{shape:"image"}`, Layout-
+   * Annotation `kind:"image"` ODER Kontext-Objekt `type:"image"`) — steuert
+   * die Deckkraft-Zeile im Attribute-Panel.
    */
   isImage?: boolean;
   /** Deckkraft (0..1) — nur wenn `isImage`. */
   opacity?: number;
+  /**
+   * Bildkorrektur (Sättigung/Helligkeit/Kontrast/Graustufen) — NUR bei
+   * Kontext-Objekt-Bildern gesetzt (`ContextImage.filters`, s. dort); Drawing2D-
+   * und Layout-Bilder haben (noch) keine Korrektur.
+   */
+  imageFilters?: ContextImage["filters"];
   /** Achsparallele Bounding-Box in Modell-Metern. */
   bbox: SelectionBBox;
   /**
@@ -514,6 +540,7 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
   };
   switch (g.shape) {
     case "line":
+    case "xline":
       acc(g.a.x, g.a.y);
       acc(g.b.x, g.b.y);
       break;
@@ -557,6 +584,7 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
     }
     case "kote":
     case "text":
+    case "block":
       acc(g.at.x, g.at.y);
       break;
   }
@@ -665,11 +693,14 @@ function wallSelection(project: Project, wall: Wall): Selection {
     categoryCode: wall.categoryCode,
     floorId: wall.floorId,
     color,
+    colorPenId: wall.colorPenId,
     weightMm,
     fillHatchId: wall.hatchId,
     fillColor: undefined,
     foreground: wall.foreground,
+    foregroundPenId: wall.foregroundPenId,
     background: wall.background,
+    backgroundPenId: wall.backgroundPenId,
     foregroundSource: wall.foregroundSource,
     backgroundSource: wall.backgroundSource,
     effectiveForeground,
@@ -743,11 +774,14 @@ function ceilingSelection(project: Project, ceiling: Ceiling): Selection {
     categoryCode: ceiling.categoryCode,
     floorId: ceiling.floorId,
     color,
+    colorPenId: ceiling.colorPenId,
     weightMm,
     fillHatchId: ceiling.hatchId,
     fillColor: undefined,
     foreground: ceiling.foreground,
+    foregroundPenId: ceiling.foregroundPenId,
     background: ceiling.background,
+    backgroundPenId: ceiling.backgroundPenId,
     foregroundSource: ceiling.foregroundSource,
     backgroundSource: ceiling.backgroundSource,
     effectiveForeground,
@@ -796,6 +830,7 @@ function roofSelection(project: Project, roof: Roof): Selection {
     categoryCode: roof.categoryCode,
     floorId: roof.floorId,
     color,
+    colorPenId: roof.colorPenId,
     weightMm,
     closed: true,
     bbox: { minX: bb.x0, minY: bb.y0, maxX: bb.x1, maxY: bb.y1 },
@@ -859,6 +894,7 @@ function openingSelection(project: Project, o: Opening): Selection {
     id: o.id,
     categoryCode: o.categoryCode,
     color,
+    colorPenId: o.colorPenId,
     weightMm,
     fillHatchId: undefined,
     fillColor: undefined,
@@ -900,6 +936,7 @@ function stairSelection(project: Project, s: Stair): Selection {
     categoryCode: s.categoryCode,
     floorId: s.floorId,
     color,
+    colorPenId: s.colorPenId,
     weightMm,
     fillHatchId: undefined,
     fillColor: undefined,
@@ -941,6 +978,7 @@ function roomSelection(project: Project, r: Room): Selection {
     categoryCode: r.categoryCode,
     floorId: r.floorId,
     color,
+    colorPenId: r.colorPenId,
     weightMm,
     fillHatchId: undefined,
     fillColor: undefined,
@@ -1042,10 +1080,13 @@ function columnSelection(project: Project, col: Column): Selection {
     categoryCode: col.categoryCode,
     floorId: col.floorId,
     color: col.color ?? category?.color ?? COLUMN_COLOR,
+    colorPenId: col.colorPenId,
     weightMm,
     fillHatchId: col.hatchId,
     foreground: col.foreground,
+    foregroundPenId: col.foregroundPenId,
     background: col.background,
+    backgroundPenId: col.backgroundPenId,
     foregroundSource: col.foregroundSource,
     backgroundSource: col.backgroundSource,
     effectiveForeground,
@@ -1095,6 +1136,7 @@ function contextObjectSelection(project: Project, obj: ContextObject): Selection
         { e: anchor.lv95.e - anchor.model.x, n: anchor.lv95.n - anchor.model.y },
       )
     : undefined;
+  const isImage = obj.type === "image";
   return {
     kind: "contextObject",
     id: obj.id,
@@ -1103,6 +1145,12 @@ function contextObjectSelection(project: Project, obj: ContextObject): Selection
     weightMm: WALL_FALLBACK_MM,
     bbox: { minX, minY, maxX, maxY },
     contextObject: { objType: obj.type, lv95Center },
+    // Deckkraft + Bildkorrektur nur bei Luftbildern (`ContextImage`) — steuert
+    // die (wiederverwendete) Deckkraft-Zeile + die neue Bildkorrektur-Sektion
+    // im Attribute-Panel, s. `AttributesPanel.tsx`.
+    isImage,
+    opacity: isImage ? ((obj as ContextImage).opacity ?? 1) : undefined,
+    imageFilters: isImage ? (obj as ContextImage).filters : undefined,
   };
 }
 
@@ -1149,11 +1197,14 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     categoryCode: d.categoryCode,
     floorId: d.levelId,
     color,
+    colorPenId: d.colorPenId,
     weightMm,
     fillHatchId: closed ? d.hatchId ?? null : null,
     fillColor: closed ? d.fillColor ?? null : null,
     foreground: closed ? d.foreground : undefined,
+    foregroundPenId: closed ? d.foregroundPenId : undefined,
     background: closed ? d.background : undefined,
+    backgroundPenId: closed ? d.backgroundPenId : undefined,
     foregroundSource: closed ? d.foregroundSource : undefined,
     backgroundSource: closed ? d.backgroundSource : undefined,
     effectiveForeground,

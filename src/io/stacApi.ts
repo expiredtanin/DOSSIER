@@ -84,6 +84,55 @@ function estimateUncompressedSize(entry: JSZip.JSZipObject): number | null {
   return typeof data?.uncompressedSize === "number" ? data.uncompressedSize : null;
 }
 
+/** Wählt den passenden ZIP-Eintrag: eine der `innerExt`-Endungen, optional
+ *  bevorzugt nach `preferNameIncludes` (Teilstring, klein geschrieben) —
+ *  swissBUILDINGS3D-v3-Kacheln bündeln z. B. „…_separated_….dwg" UND
+ *  „…_solid_….dwg" im selben Zip; nur `separated` lässt sich mit LibreDWG
+ *  lesen (`solid` liefert 0 Entities, vermutlich ACIS-Volumenkörper statt
+ *  Polyface-Mesh). Ohne Treffer auf den Präferenz-Teilstring fällt es auf den
+ *  ersten `innerExt`-Treffer zurück (unverändertes Verhalten). */
+function pickZipEntry(
+  zip: JSZip,
+  innerExt: string[],
+  preferNameIncludes?: string,
+): JSZip.JSZipObject | null {
+  const candidates = Object.values(zip.files).filter(
+    (f) => !f.dir && innerExt.some((ext) => f.name.toLowerCase().endsWith(ext)),
+  );
+  if (candidates.length === 0) return null;
+  if (preferNameIncludes) {
+    const preferred = candidates.find((f) =>
+      f.name.toLowerCase().includes(preferNameIncludes),
+    );
+    if (preferred) return preferred;
+  }
+  return candidates[0];
+}
+
+/** Lädt ein Asset als `Response`, sofern es unter {@link MAX_ASSET_BYTES}
+ *  bleibt (STAC-`size` UND — falls vorhanden — `Content-Length`-Header
+ *  VOR dem Body-Download geprüft, s. Doc bei den Aufrufern). `null` bei
+ *  Netzwerkfehler oder Grössenüberschreitung; wirft nie. */
+async function fetchAssetWithinLimit(asset: StacAsset): Promise<Response | null> {
+  if (asset.size != null && asset.size > MAX_ASSET_BYTES) return null;
+  const res = await fetch(viaProxy(asset.href));
+  if (!res.ok) return null;
+  // STAC-Metadaten (`file:size`) fehlen manchmal (leeres `file:size`-Feld,
+  // z. B. bei swissBUILDINGS3D v3) — dann greift die Prüfung oben NICHT, und
+  // ohne diesen zweiten, `Content-Length`-basierten Check würde eine riesige
+  // Kachel (in Städten teils >150 MB, im Extremfall >800 MB) komplett
+  // heruntergeladen, bevor der spätere `byteLength`-Check sie verwirft —
+  // unnötiger Bandbreiten-/Zeitverbrauch für ein Ergebnis, das ohnehin
+  // verworfen wird. `Content-Length` selbst kann fehlen (chunked transfer) —
+  // dann bleibt es beim (späteren) Grössen-Check nach dem Download.
+  const contentLength = res.headers.get("content-length");
+  if (contentLength != null) {
+    const len = Number.parseInt(contentLength, 10);
+    if (Number.isFinite(len) && len > MAX_ASSET_BYTES) return null;
+  }
+  return res;
+}
+
 /** Lädt ein Asset als Text; entpackt automatisch, wenn es ein `.zip` ist
  *  (liefert den Inhalt der ERSTEN enthaltenen Datei mit einer der `innerExt`-
  *  Endungen). `null` bei Fehler, fehlendem Inhalt im ZIP, oder wenn das Asset
@@ -95,17 +144,14 @@ export async function downloadAssetText(
   asset: StacAsset,
   innerExt: string[],
 ): Promise<string | null> {
-  if (asset.size != null && asset.size > MAX_ASSET_BYTES) return null;
   try {
-    const res = await fetch(viaProxy(asset.href));
-    if (!res.ok) return null;
+    const res = await fetchAssetWithinLimit(asset);
+    if (!res) return null;
     if (asset.href.toLowerCase().endsWith(".zip")) {
       const buf = await res.arrayBuffer();
       if (buf.byteLength > MAX_ASSET_BYTES) return null;
       const zip = await JSZip.loadAsync(buf);
-      const entry = Object.values(zip.files).find(
-        (f) => !f.dir && innerExt.some((ext) => f.name.toLowerCase().endsWith(ext)),
-      );
+      const entry = pickZipEntry(zip, innerExt);
       if (!entry) return null;
       // Proaktiv prüfen: DXF/Text komprimiert stark, ein Zip unter dem Limit
       // kann trotzdem eine Text-Datei enthalten, die die max. JS-String-Länge
@@ -117,6 +163,39 @@ export async function downloadAssetText(
       return await entry.async("text");
     }
     return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+/** Wie {@link downloadAssetText}, aber liefert den rohen Binärinhalt (für
+ *  DWG-Assets, die als `ArrayBuffer` an `parseDwg`/LibreDWG-WASM gehen —
+ *  ein binäres Format als Text zu lesen würde die Daten korrumpieren).
+ *  `preferNameIncludes` wählt bei mehreren Zip-Treffern gezielt einen aus
+ *  (s. {@link pickZipEntry}). */
+export async function downloadAssetBinary(
+  asset: StacAsset,
+  innerExt: string[],
+  preferNameIncludes?: string,
+): Promise<ArrayBuffer | null> {
+  try {
+    const res = await fetchAssetWithinLimit(asset);
+    if (!res) return null;
+    if (asset.href.toLowerCase().endsWith(".zip")) {
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength > MAX_ASSET_BYTES) return null;
+      const zip = await JSZip.loadAsync(buf);
+      const entry = pickZipEntry(zip, innerExt, preferNameIncludes);
+      if (!entry) return null;
+      const uncompressed = estimateUncompressedSize(entry);
+      if (uncompressed != null && uncompressed > MAX_ASSET_BYTES) return null;
+      const arrBuf = await entry.async("arraybuffer");
+      if (arrBuf.byteLength > MAX_ASSET_BYTES) return null;
+      return arrBuf;
+    }
+    const arrBuf = await res.arrayBuffer();
+    if (arrBuf.byteLength > MAX_ASSET_BYTES) return null;
+    return arrBuf;
   } catch {
     return null;
   }

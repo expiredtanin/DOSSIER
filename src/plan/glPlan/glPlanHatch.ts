@@ -403,7 +403,16 @@ export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
   const dir1 = rotate({ x: 0, y: -1 }, rot);
   const a1 = Math.atan2(dir1.y, dir1.x);
   // Gerade Musterlinien → 2-Punkt-Läufe (visuell identisch zu Butt-Cap-Segmenten).
-  const runs: HatchRun[] = hatchLineFamily(poly, a1, spacingM, 0).map((s) => [s.a, s.b]);
+  // „custom" mit gesetztem Motiv: jede Musterlinie wird per `motifPoints` entlang
+  // ihrer eigenen Länge tesselliert (Papier-mm → Modell-Meter über dieselbe
+  // Kopplung wie bei Linien-Motiven, DASH_MM_TO_M, zusätzlich mit `scale`
+  // verknüpft — konsistent zur Zeilenabstand-Formel oben). Ohne Motiv (frisch
+  // angelegter Hatch) fällt „custom" auf gerade Linien zurück (kein Absturz).
+  const runs: HatchRun[] = hatchLineFamily(poly, a1, spacingM, 0).map((s) =>
+    pattern === 'custom' && hatch.motif
+      ? motifPoints(s.a, s.b, hatch.motif, scale * DASH_MM_TO_M)
+      : [s.a, s.b],
+  );
 
   if (pattern === 'crosshatch') {
     // Zweite Schar: die SVG-Kachel trägt zusätzlich eine horizontale Linie

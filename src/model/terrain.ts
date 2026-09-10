@@ -10,6 +10,7 @@
 
 import Delaunator from "delaunator";
 import type { Contour, TerrainMesh } from "./types";
+import { TERRAIN_CATEGORY } from "./contextCategories";
 
 let terrainSeq = 0;
 
@@ -55,7 +56,7 @@ export function generateTerrainFromContours(contours: Contour[]): TerrainMesh {
 
   // Zu wenige Punkte für ein Dreieck → triviales leeres Mesh.
   if (xs.length < 3) {
-    return { id, type: "terrainMesh", name, positions: [], indices: [] };
+    return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, positions: [], indices: [] };
   }
 
   // 2. Delaunay über die (x,y)-Projektion. Delaunator erwartet ein flaches
@@ -71,7 +72,7 @@ export function generateTerrainFromContours(contours: Contour[]): TerrainMesh {
   try {
     triangles = new Delaunator(coords2d).triangles;
   } catch {
-    return { id, type: "terrainMesh", name, positions: [], indices: [] };
+    return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, positions: [], indices: [] };
   }
 
   // 3. positions (x,y,z) aufbauen; Z aus zs je Vertex.
@@ -99,7 +100,15 @@ export function generateTerrainFromContours(contours: Contour[]): TerrainMesh {
     indices.push(a, b, c);
   }
 
-  return { id, type: "terrainMesh", name, layer: TERRAIN_LAYER, positions, indices };
+  return {
+    id,
+    type: "terrainMesh",
+    name,
+    layer: TERRAIN_LAYER,
+    categoryCode: TERRAIN_CATEGORY.code,
+    positions,
+    indices,
+  };
 }
 
 /**
@@ -154,7 +163,15 @@ export function terrainMeshFromGrid(grid: TerrainGrid): TerrainMesh {
   }
 
   if (positions.length < 9 || indices.length < 3) {
-    return { id, type: "terrainMesh", name, positions: [], indices: [] };
+    return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, positions: [], indices: [] };
   }
-  return { id, type: "terrainMesh", name, layer: TERRAIN_LAYER, positions, indices };
+  return {
+    id,
+    type: "terrainMesh",
+    name,
+    layer: TERRAIN_LAYER,
+    categoryCode: TERRAIN_CATEGORY.code,
+    positions,
+    indices,
+  };
 }

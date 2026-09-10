@@ -31,6 +31,8 @@ import type {
   Vec2,
   Wall,
 } from "./model/types";
+import { activePenSet, resolvePenColor, resolvePenWeight } from "./model/penSets";
+import { PenColorField } from "./ui/PenColorField";
 import { generatePlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
 import { sectionPlaneFromLevel } from "./plan/toSection";
@@ -45,7 +47,7 @@ import { ExportSaveDialog } from "./ui/ExportSaveDialog";
 import { PromptDialog } from "./ui/PromptDialog";
 import { LockConflictDialog } from "./ui/LockConflictDialog";
 import { Toast } from "./ui/Toast";
-import { isTauriRuntime } from "./io/projectFile";
+import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./io/projectFile";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./plan/PlanView";
 import type { DisplayResolver } from "./viewport/Viewport3D";
@@ -122,7 +124,7 @@ import { useProjectActions } from "./state/useProjectActions";
 import {
   useActiveToolKeys,
   useBooleanOpsShortcut,
-  useDrawingClipboardShortcut,
+  useElementClipboardShortcut,
   useGroupShortcut,
   useSelectAllAndDeleteShortcut,
   useSplitJoinShortcut,
@@ -190,10 +192,8 @@ import {
 } from "./state/viewSnapshots";
 // Seiteneffekt: registriert die zwei dockbaren Kern-Panels in der Registry.
 import { BUILTIN_PANEL_IDS } from "./panels/builtinPanels";
-import { deriveDrawings } from "./DrawingTabs";
 import { SplashScreen } from "./ui/SplashScreen";
 import { StartScreen } from "./ui/StartScreen";
-import { emptyProject } from "./model/sampleProject";
 
 /**
  * Offenes Kontextmenü — genau eine Quelle. `x/y` sind Viewport-Pixel (clientX/Y).
@@ -218,16 +218,21 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   stair: "stair",
   room: "room",
   line: "line",
+  xline: "xline",
   polyline: "polyline",
   rect: "rect",
   circle: "circle",
   arc: "arc",
   ellipse: "ellipse",
+  polygon: "polygon",
+  block: "block",
   spline: "spline",
   bezier: "bezier",
   dimension: "dimension",
   kote: "kote",
   text: "text",
+  leader: "leader",
+  textpath: "textpath",
   textbox: "textbox",
 };
 /** Befehlsname für ein gekoppeltes Werkzeug (oder null, wenn keiner). */
@@ -378,8 +383,8 @@ export default function App() {
     setSelectedDrawingIds,
     selectedDrawingId,
     setSelectedDrawingId,
-    drawingClipboard,
-    setDrawingClipboard,
+    elementClipboard,
+    setElementClipboard,
     selectedWallId,
     selectedCeilingIds,
     setSelectedCeilingIds,
@@ -387,8 +392,9 @@ export default function App() {
     selectedRoofIds,
     setSelectedRoofIds,
     selectedRoofId,
+    selectedSectionLineIds,
+    setSelectedSectionLineIds,
     selectedSectionLineId,
-    setSelectedSectionLineId,
     section3dCutId,
     setSection3dCutId,
     updateRoof,
@@ -456,7 +462,7 @@ export default function App() {
     setSelectedExtrudedSolidIds([]);
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
-    setSelectedSectionLineId(null);
+    setSelectedSectionLineIds([]);
     setMenu(null);
     setEditor(null);
   }, [activeLevelId]);
@@ -836,7 +842,7 @@ export default function App() {
         setSelectedColumnIds([]);
         setSelectedRoofIds([]);
         setSelectedContextObjectIds([]);
-        setSelectedSectionLineId(null);
+        setSelectedSectionLineIds([]);
         setSelectedDrawingId(id);
         setEditTextMinHeightM(minHeightM ?? null);
         setEditTextId(id);
@@ -1014,7 +1020,7 @@ export default function App() {
   // Tastatur-Handler unten und dem Menüpunkt „Bearbeiten > Löschen" (AppMenuBar).
   const hasSelectionToDelete = () =>
     !!(
-      selectedSectionLineId ||
+      selectedSectionLineIds.length ||
       selectedDrawingIds.length ||
       selectedWallIds.length ||
       selectedCeilingIds.length ||
@@ -1030,11 +1036,12 @@ export default function App() {
   // Löscht die AKTUELLE Auswahl (alle Kanäle) — geteilte Logik zwischen dem
   // Entf-Tastatur-Handler und dem Menüpunkt „Bearbeiten > Löschen".
   const deleteSelection = () => {
-    // Schnittlinie: Entf löscht NUR ihre Linie (linePoints), die Ebene bleibt.
-    if (selectedSectionLineId) {
-      patchLevel(selectedSectionLineId, { linePoints: undefined });
-      setSelectedSectionLineId(null);
-      return;
+    // Schnittlinie(n): Entf löscht NUR ihre Linie (linePoints), die Ebene
+    // bleibt — ADDITIV zu den übrigen Kanälen unten (nicht mehr exklusiv:
+    // seit Cmd/Ctrl+A Schnittlinien zusammen mit Wänden/etc. mitselektiert,
+    // würde ein frühes `return` hier die übrigen Kanäle stumm überspringen).
+    if (selectedSectionLineIds.length) {
+      for (const id of selectedSectionLineIds) patchLevel(id, { linePoints: undefined });
     }
     const dids = new Set(selectedDrawingIds);
     const wids = new Set(selectedWallIds);
@@ -1073,7 +1080,7 @@ export default function App() {
     setSelectedColumnIds([]);
     setSelectedRoofIds([]);
     setSelectedContextObjectIds([]);
-    setSelectedSectionLineId(null);
+    setSelectedSectionLineIds([]);
   };
 
   // Tastatur im Auswahl-Werkzeug: Ctrl/Cmd+A = alles wählen, Entf/Backspace =
@@ -1093,14 +1100,18 @@ export default function App() {
     selectedColumnIds,
     selectedRoofIds,
     selectedContextObjectIds,
-    selectedSectionLineId,
+    selectedSectionLineIds,
     setSelectedWallIds,
     setSelectedDrawingIds,
     setSelectedCeilingIds,
+    setSelectedOpeningIds,
     setSelectedStairIds,
     setSelectedRoomIds,
     setSelectedExtrudedSolidIds,
     setSelectedColumnIds,
+    setSelectedRoofIds,
+    setSelectedContextObjectIds,
+    setSelectedSectionLineIds,
     hasSelectionToDelete,
     deleteSelection,
   });
@@ -1326,6 +1337,16 @@ export default function App() {
     patchLineStyle,
     addLineStyle,
     deleteLineStyle,
+    addPen,
+    renamePen,
+    deletePen,
+    addPenSet,
+    renamePenSet,
+    deletePenSet,
+    setActivePenSet,
+    patchPenSetColor,
+    patchPenSetWeight,
+    seedStandardPenSet,
     patchWallType,
     setOverrideRules,
     patchCeilingType,
@@ -1365,6 +1386,7 @@ export default function App() {
     setElementBackground,
     updateDrawing2D,
     reorderDrawings,
+    reorderDrawingLevels,
     resizeElement,
     updateWall,
     setWallThickness,
@@ -1473,16 +1495,36 @@ export default function App() {
             }
           : null;
 
-  // Ctrl/Cmd+C / Ctrl/Cmd+V = 2D-Zeichenelemente kopieren/einfügen — siehe
-  // state/useKeyboardShortcuts.ts.
-  useDrawingClipboardShortcut(
-    selectedDrawingIds,
-    drawingClipboard,
-    setDrawingClipboard,
+  // Ctrl/Cmd+C / Ctrl/Cmd+V = Bauteile kopieren/einfügen (alle 9 Auswahl-Kanäle,
+  // nicht nur 2D-Zeichenelemente) — siehe state/useKeyboardShortcuts.ts.
+  useElementClipboardShortcut(
+    {
+      wallIds: selectedWallIds,
+      drawingIds: selectedDrawingIds,
+      ceilingIds: selectedCeilingIds,
+      roofIds: selectedRoofIds,
+      openingIds: selectedOpeningIds,
+      stairIds: selectedStairIds,
+      roomIds: selectedRoomIds,
+      extrudedSolidIds: selectedExtrudedSolidIds,
+      columnIds: selectedColumnIds,
+    },
+    elementClipboard,
+    setElementClipboard,
     activeLevelId,
-    project.drawings2d,
-    importDrawings,
-    setSelectedDrawingIds,
+    project,
+    setProject,
+    {
+      wallIds: setSelectedWallIds,
+      drawingIds: setSelectedDrawingIds,
+      ceilingIds: setSelectedCeilingIds,
+      roofIds: setSelectedRoofIds,
+      openingIds: setSelectedOpeningIds,
+      stairIds: setSelectedStairIds,
+      roomIds: setSelectedRoomIds,
+      extrudedSolidIds: setSelectedExtrudedSolidIds,
+      columnIds: setSelectedColumnIds,
+    },
   );
 
   // Projektdatei-I/O (Speichern/Öffnen/Lock), Schnellexport (CSV/IFC/OBJ/STL)
@@ -1490,10 +1532,15 @@ export default function App() {
   // useProjectFileActions(), siehe dort.
   const {
     projectFileInputRef,
+    projectTemplateFileInputRef,
     lockConflict,
     setLockConflict,
     openImportForFile,
     onSaveProject,
+    onNewProject,
+    onNewProjectFromSample,
+    onNewProjectFromTemplate,
+    onProjectTemplateFileChosen,
     applyOpenedProjectFile,
     projectFileName,
     runExport,
@@ -1833,6 +1880,9 @@ export default function App() {
   // von Tauri (isTauriRuntime-Guard steckt im Hook selbst).
   useNativeAppMenu(
     {
+      onNewProject,
+      onNewProjectFromSample,
+      onNewProjectFromTemplate,
       onOpenProject,
       onSaveProject,
       onImport: () => dxfInputRef.current?.click(),
@@ -1988,6 +2038,16 @@ export default function App() {
     onImportLineStyles: importLineStyles,
     onImportHatches: importHatches,
     onSetOverrideRules: setOverrideRules,
+    onAddPen: addPen,
+    onRenamePen: renamePen,
+    onDeletePen: deletePen,
+    onAddPenSet: addPenSet,
+    onRenamePenSet: renamePenSet,
+    onDeletePenSet: deletePenSet,
+    onSetActivePenSet: setActivePenSet,
+    onPatchPenSetColor: patchPenSetColor,
+    onPatchPenSetWeight: patchPenSetWeight,
+    onSeedStandardPenSet: seedStandardPenSet,
   };
 
   // Ressourcen-Manager als eigenes natives Fenster (Tauri) statt Overlay im
@@ -2046,7 +2106,7 @@ export default function App() {
 
   // Resolver: je Geschoss-ID die Render-Entscheidung (aktiv = Arbeitsfokus).
   // Memoisiert, damit Plan/3D nicht bei jedem Render neu rechnen.
-  const floorDisplay: DisplayResolver = useMemo(() => {
+  const floorDisplay: CategoryDisplayResolver & DisplayResolver = useMemo(() => {
     const visible = new Map(
       project.drawingLevels.map((z) => [z.id, z.visible]),
     );
@@ -2067,14 +2127,6 @@ export default function App() {
   // Stabiler Schlüssel der 3D-Display-Entscheidungen (Resolver sind nicht
   // referenzstabil → triggert sonst keinen Neuaufbau).
   const displayKey = `${drawingLevelsMode}|${layersMode}|${activeLevelId}|${activeCategoryCode}`;
-
-  // Dokument-Tabs der Zeichenflächen-Kopfzeile — ein Tab je Geschoss-
-  // Grundriss (siehe DrawingTabs.tsx). Teilt sich `activeLevelId`/
-  // `setActiveLevelId` mit dem Panel „Zeichnungsebenen".
-  const drawings = useMemo(
-    () => deriveDrawings(project.drawingLevels),
-    [project.drawingLevels],
-  );
 
   // ── Ableitungen für Oberleiste + Status-Leiste ────────────────────────────
   // Eine zoom-/cursor-fähige Plan-Ansicht ist nur im Grundriss eines Geschosses
@@ -2398,6 +2450,7 @@ export default function App() {
     activeLevelId: activeLevel.id,
     visibleCodes,
     categoryDisplay,
+    floorDisplay,
     selectionState: {
       selectedWallIds,
       setSelectedWallIds,
@@ -2420,8 +2473,8 @@ export default function App() {
       setSelectedRoofIds,
       selectedContextObjectIds,
       setSelectedContextObjectIds,
-      selectedSectionLineId,
-      setSelectedSectionLineId,
+      selectedSectionLineIds,
+      setSelectedSectionLineIds,
       selectedGroupIds,
       setSelectedGroupIds,
       groupPath,
@@ -2446,7 +2499,7 @@ export default function App() {
     setSelectedColumnIds,
     setSelectedRoofIds,
     setSelectedContextObjectIds,
-    setSelectedSectionLineId,
+    setSelectedSectionLineIds,
   });
 
   // App-weites Drag & Drop einer DXF/DWG-Datei — siehe state/useImportHandling.ts.
@@ -2546,7 +2599,7 @@ export default function App() {
       setSelectedRoofIds,
       setSelectedContextObjectIds,
       selectedSectionLineId,
-      setSelectedSectionLineId,
+      setSelectedSectionLineIds,
       section3dCutId,
     },
     toolState: {
@@ -2581,7 +2634,7 @@ export default function App() {
     return (
       <StartScreen
         onNewProject={() => {
-          setProject(emptyProject);
+          onNewProject();
           setBootPhase("editor");
         }}
         onOpenProject={() => {
@@ -2642,6 +2695,18 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {/* Verstecktes Vorlagen-Datei-Input („Neu aus Vorlage" → Datei wählen). */}
+      <input
+        ref={projectTemplateFileInputRef}
+        type="file"
+        accept={`.${PROJECT_TEMPLATE_EXT}`}
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onProjectTemplateFileChosen(f);
+          e.target.value = "";
+        }}
+      />
       {/* Schmale globale Leiste: Marke/Menü · Datei/Export/Einstellungen.
           Ansichts-/Zoom-/Darstellungs-Steuerung folgt direkt darunter
           (ViewRibbonTab, permanent — kein Tab-Umschalter mehr). */}
@@ -2672,6 +2737,12 @@ export default function App() {
         menuBar={
           isTauriRuntime() ? undefined : (
             <AppMenuBar
+              onNewProject={onNewProject}
+              onNewProjectFromSample={onNewProjectFromSample}
+              onNewProjectFromTemplate={onNewProjectFromTemplate}
+              onOpenProject={onOpenProject}
+              onSaveProject={onSaveProject}
+              onImport={() => dxfInputRef.current?.click()}
               onUndo={undo}
               onRedo={redo}
               canUndo={canUndo}
@@ -2855,7 +2926,12 @@ export default function App() {
           section3d={section3dPlane}
           onClearSection3d={() => setSection3dCutId(null)}
           mono={planColorMode === "mono"}
-          drawings={drawings}
+          viewSnapshotTabs={{
+            selectedId: baseHost.selectedViewSnapshotId,
+            onApply: baseHost.onApplyViewSnapshot,
+            onCaptureAuto: baseHost.onCaptureViewSnapshotAuto,
+            onDelete: baseHost.onDeleteViewSnapshot,
+          }}
           onSelectLevel={setActiveLevelId}
           floorDisplay={floorDisplay}
           categoryDisplay={categoryDisplay}
@@ -2873,7 +2949,7 @@ export default function App() {
           selectedRoomIds={selectedRoomIds}
           selectedRoofIds={selectedRoofIds}
           selectedContextObjectIds={selectedContextObjectIds}
-          selectedSectionLineId={selectedSectionLineId}
+          selectedSectionLineIds={selectedSectionLineIds}
           roomStamp={roomStamp}
           onStampMove={moveRoomStamp}
           onStampEdit={onOpenStampEditor}
@@ -3316,6 +3392,7 @@ export default function App() {
             bringForward: () => reorderDrawings(selectedDrawingIds, "forward"),
             sendBackward: () => reorderDrawings(selectedDrawingIds, "backward"),
             sendToBack: () => reorderDrawings(selectedDrawingIds, "back"),
+            reorderLevel: (id, op) => reorderDrawingLevels([id], op),
           })}
           onClose={() => setMenu(null)}
         />
@@ -3345,11 +3422,20 @@ export default function App() {
                 />
               </EditorField>
               <EditorField label={t("editor.color")}>
-                <input
-                  type="color"
-                  value={cat.color}
-                  onChange={(e) =>
-                    patchCategory(cat.code, { color: e.target.value })
+                <PenColorField
+                  color={cat.colorPenId ? resolvePenColor(project, cat.colorPenId) : cat.color}
+                  penId={cat.colorPenId}
+                  pens={project.pens ?? []}
+                  activeStyles={activePenSet(project)?.pens}
+                  showWeight
+                  onColorChange={(color) => patchCategory(cat.code, { color, colorPenId: undefined })}
+                  onPenChange={(colorPenId) =>
+                    patchCategory(cat.code, {
+                      colorPenId,
+                      ...(colorPenId
+                        ? { color: resolvePenColor(project, colorPenId), lw: resolvePenWeight(project, colorPenId) }
+                        : {}),
+                    })
                   }
                 />
               </EditorField>
@@ -3360,6 +3446,7 @@ export default function App() {
                     step={0.01}
                     min={0.01}
                     value={cat.lw}
+                    disabled={!!cat.colorPenId}
                     onChange={(e) =>
                       patchCategory(cat.code, { lw: Number(e.target.value) })
                     }

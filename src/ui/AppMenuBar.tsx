@@ -12,6 +12,14 @@ import { t } from "../i18n";
 import type { View3d, ViewType } from "./TopBar";
 
 export interface AppMenuBarProps {
+  /** Datei: Neu/Neu aus Vorlage/Öffnen/Speichern/Importieren. */
+  onNewProject: () => void;
+  onNewProjectFromSample: () => void;
+  onNewProjectFromTemplate: () => void;
+  onOpenProject: () => void;
+  onSaveProject: () => void;
+  onImport: () => void;
+
   /** Bearbeiten: Undo/Redo (Store) + Löschen der aktuellen Auswahl. */
   onUndo: () => void;
   onRedo: () => void;
@@ -37,6 +45,12 @@ export interface AppMenuBarProps {
 
 /** Menüleiste (Bearbeiten/Ansicht/Fenster) — sitzt in der TopBar neben der Wortmarke. */
 export function AppMenuBar({
+  onNewProject,
+  onNewProjectFromSample,
+  onNewProjectFromTemplate,
+  onOpenProject,
+  onSaveProject,
+  onImport,
   onUndo,
   onRedo,
   canUndo,
@@ -53,6 +67,17 @@ export function AppMenuBar({
   onToggleResources,
   onOpenSettings,
 }: AppMenuBarProps) {
+  const fileItems: DropdownItem[] = [
+    { label: t("file.new"), onSelect: onNewProject },
+    { label: t("file.newFromSample"), onSelect: onNewProjectFromSample },
+    { label: t("file.newFromTemplateFile"), onSelect: onNewProjectFromTemplate },
+    { divider: true },
+    { label: t("file.open"), onSelect: onOpenProject },
+    { label: t("file.save"), onSelect: onSaveProject },
+    { divider: true },
+    { label: t("file.import"), onSelect: onImport },
+  ];
+
   const editItems: DropdownItem[] = [
     { label: t("menu.edit.undo"), onSelect: onUndo, disabled: !canUndo },
     { label: t("menu.edit.redo"), onSelect: onRedo, disabled: !canRedo },
@@ -112,6 +137,12 @@ export function AppMenuBar({
 
   return (
     <div className="tb-menubar" role="menubar">
+      <Dropdown
+        items={fileItems}
+        placeholder={t("file.menu")}
+        title={t("file.menu")}
+        triggerClassName="tb-menubar-item"
+      />
       <Dropdown
         items={editItems}
         placeholder={t("menu.edit")}
