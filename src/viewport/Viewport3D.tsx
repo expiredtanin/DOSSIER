@@ -14,7 +14,9 @@ import { Wasm3DViewport } from "./Wasm3DViewport";
 import type { Pick3dHit } from "./Wasm3DViewport";
 import type { DetailLevel, RenderMode, View3d } from "../ui/TopBar";
 import type { ToolDraft } from "../tools/types";
+import type { HudFieldsState } from "../tools/hudFormat";
 import { applyAngleConstraint } from "../tools/snapping";
+import type { EngineMods } from "../commands/engine";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 import { visibleFloorKey, updateOrthoFrustum, applyView3d } from "./viewport3d/camera";
 import {
@@ -126,6 +128,18 @@ export function Viewport3D(
     section3d?: { point: [number, number, number]; normal: [number, number, number] } | null;
     /** Klick auf den gebundenen Schnitt-Knopf im WASM-Viewport → Bindung lösen. */
     onClearSection3d?: () => void;
+    /** Tab-Feld-Zyklus-Zustand der Befehlszeile (s. `ui/CommandLine.tsx`) fürs
+     * Cursor-HUD beim Zeichnen — wirkt NUR im WASM-Pfad (der 3D-HUD ist ein
+     * DOM-Overlay über dem Canvas, s. Wasm3DViewport); die three.js-Sicht
+     * zeigt bislang kein Cursor-HUD (kein Paritätsziel, s. Datei-Kommentar). */
+    hudFields?: HudFieldsState | null;
+    /** Tab während eines laufenden 3D-Griff-Drags (Endpunkt/Verschieben): Feld-
+     * Controller fürs Cursor-HUD öffnen/zykeln — wirkt NUR im WASM-Pfad (die
+     * three.js-Griffe kennen keine getippte Werteingabe, kein Paritätsziel). */
+    onGrip3dEditTab?: () => void;
+    /** Escape während eines laufenden 3D-Griff-Drags: abbrechen (Undo) —
+     * wirkt NUR im WASM-Pfad, s. `onGrip3dEditTab`-Doc. */
+    onGrip3dEditCancel?: () => void;
   },
 ) {
   const {
@@ -135,6 +149,9 @@ export function Viewport3D(
     highlightLines,
     section3d,
     onClearSection3d,
+    hudFields,
+    onGrip3dEditTab,
+    onGrip3dEditCancel,
     ...threeProps
   } = props;
   if (WASM_ENGINE_ACTIVE) {
@@ -163,6 +180,16 @@ export function Viewport3D(
         onEditEnd={props.onEditEnd}
         section3d={section3d}
         onClearSection3d={onClearSection3d}
+        // Zeichnen-Modus (Workplane, s. Wasm3DViewport.tsx-Dateikommentar):
+        // dieselben Props wie die three.js-Sicht (`threeProps` unten trägt sie
+        // ohnehin schon mit, hier explizit für den WASM-Zweig durchgereicht).
+        commandActive={props.commandActive}
+        draft={props.draft}
+        onWorkplanePoint={props.onWorkplanePoint}
+        onWorkplaneConfirm={props.onWorkplaneConfirm}
+        hudFields={hudFields}
+        onGrip3dEditTab={onGrip3dEditTab}
+        onGrip3dEditCancel={onGrip3dEditCancel}
       />
     );
   }
@@ -271,9 +298,12 @@ function ThreeViewport3D({
   /**
    * Punkt-Eingang in die ansichts-agnostische CommandEngine. `kind="move"` =
    * Hover-Vorschau, `kind="pick"` = Klick. `model` ist der auf die Geschoss-
-   * Arbeitsebene projizierte Modell-`Vec2` (Meter).
+   * Arbeitsebene projizierte Modell-`Vec2` (Meter). `mods` (Shift/Ctrl) reicht
+   * bis zu `CommandEngine.move`/`.pick` durch, die es 1:1 an `host.snap`
+   * weitergeben — Shift-Ortho-Lock/additive Snap-Ausschlüsse wirken damit im
+   * 3D-Zeichnen genauso wie im 2D-Plan (`PlanView.tsx`).
    */
-  onWorkplanePoint?: (kind: "move" | "pick", model: Vec2) => void;
+  onWorkplanePoint?: (kind: "move" | "pick", model: Vec2, mods?: EngineMods) => void;
   /** Befehl bestätigen/beenden (Rechtsklick/Enter/Doppelklick im 3D). */
   onWorkplaneConfirm?: () => void;
   /**
@@ -1348,7 +1378,7 @@ function ThreeViewport3D({
       if (e.button === 0 && downButton === 0) {
         if (commandActiveRef.current) {
           const m = workplaneModel(e.clientX, e.clientY);
-          if (m) onWorkplanePointRef.current?.("pick", m);
+          if (m) onWorkplanePointRef.current?.("pick", m, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
         } else {
           selectAt(e.clientX, e.clientY);
         }
@@ -1422,7 +1452,7 @@ function ThreeViewport3D({
       }
       if (!commandActiveRef.current) return;
       const m = workplaneModel(e.clientX, e.clientY);
-      if (m) onWorkplanePointRef.current?.("move", m);
+      if (m) onWorkplanePointRef.current?.("move", m, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
     };
     // Doppelklick im Erstellungs-Modus = bestätigen/beenden (z. B. Polylinie).
     const onDblClickDom = (e: MouseEvent) => {

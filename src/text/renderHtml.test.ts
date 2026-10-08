@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { docFromText, makeRun, type RichTextDoc } from "./richText";
-import { docToLines, wrapDocToLines } from "./renderHtml";
+import { docToHtml, docToLines, runCssProps, wrapDocToLines } from "./renderHtml";
 
 const OPTS = { x: 0, y: 0, lineHeight: 10, unitPerPt: 1, basePt: 10, color: "#000000" };
 
@@ -54,5 +54,52 @@ describe("wrapDocToLines", () => {
     const lines = wrapDocToLines(doc, { ...OPTS, wrapWidthUnits: 1 });
     const words = lines.map((l) => l.tspans.map((t) => t.text).join("").trim());
     expect(words).toEqual(["aa", "bb", "cc"]);
+  });
+});
+
+// ── sizeUnit: "pt" (absolut, Dialog) vs. "em" (relativ, Zoom-Inline-Editoren) ──
+// REGRESSION für "Editor ist immer unterschiedlich gross wie der Text": ohne
+// "em" schrieb jeder Run eine ABSOLUTE pt-Grösse als Inline-Style, die die vom
+// Container (PlanView/LayoutSheet, aus dem echten Zoom berechnet) geerbte
+// Schriftgrösse ignorierte — der Text skalierte beim Zoomen nie mit.
+
+describe("runCssProps — sizeUnit", () => {
+  it("Default 'pt': absolute Grösse, unabhängig vom Container", () => {
+    expect(runCssProps({}, 12)["font-size"]).toBe("12pt");
+    expect(runCssProps({ sizePt: 18 }, 12)["font-size"]).toBe("18pt");
+  });
+
+  it("'em': Grösse relativ zu basePt — Runs OHNE eigene sizePt ergeben 1em", () => {
+    expect(runCssProps({}, 12, "em")["font-size"]).toBe("1em");
+    expect(runCssProps({ sizePt: 18 }, 12, "em")["font-size"]).toBe("1.5em");
+    expect(runCssProps({ sizePt: 6 }, 12, "em")["font-size"]).toBe("0.5em");
+  });
+
+  it("'em' bei Hoch-/Tiefstellung skaliert wie 'pt' zusätzlich mit SCRIPT_SCALE (0.7)", () => {
+    expect(runCssProps({ super: true }, 12, "em")["font-size"]).toBe("0.7em");
+  });
+});
+
+describe("docToHtml — sizeUnit reicht bis in jeden Run-Span durch", () => {
+  it("Default 'pt': jeder Span trägt eine absolute pt-Grösse", () => {
+    const doc = docFromText("hallo");
+    const html = docToHtml(doc, { basePt: 12 });
+    expect(html).toContain("font-size:12pt");
+  });
+
+  it("'em': jeder Span trägt eine relative em-Grösse, KEINE absolute pt-Grösse", () => {
+    const doc = docFromText("hallo");
+    const html = docToHtml(doc, { basePt: 12, sizeUnit: "em" });
+    expect(html).toContain("font-size:1em");
+    expect(html).not.toContain("pt");
+  });
+
+  it("'em': ein Run mit eigener sizePt bleibt relativ zu basePt, nicht absolut", () => {
+    const doc: RichTextDoc = {
+      version: 1,
+      paragraphs: [{ runs: [makeRun("Titel", { sizePt: 18 })] }],
+    };
+    const html = docToHtml(doc, { basePt: 12, sizeUnit: "em" });
+    expect(html).toContain("font-size:1.5em");
   });
 });

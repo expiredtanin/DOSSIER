@@ -100,9 +100,16 @@ export class CommandEngine {
   /** Identität des Schritts, für den der Feld-Zustand gilt (Reset bei Wechsel). */
   private fieldPhaseKey: string | null = null;
   private listeners = new Set<() => void>();
+  /** Nutzer-Kürzel-Übersteuerungen (s. `state/commandAliasOverrides.ts`); leer bis gesetzt. */
+  private aliasOverrides: Record<string, string> = {};
 
   constructor(host: EngineHost) {
     this.host = host;
+  }
+
+  /** Setzt die aktuellen Nutzer-Kürzel-Übersteuerungen (Remap-UI). */
+  setAliasOverrides(overrides: Record<string, string>): void {
+    this.aliasOverrides = overrides;
   }
 
   // ── Abo / Snapshot ─────────────────────────────────────────────────────────
@@ -258,7 +265,7 @@ export class CommandEngine {
 
   /** Startet einen Befehl per Name/Alias/Präfix. Liefert true bei Erfolg. */
   start(nameOrPrefix: string): boolean {
-    const cmd = resolveCommand(nameOrPrefix) ?? getCommand(nameOrPrefix);
+    const cmd = resolveCommand(nameOrPrefix, this.aliasOverrides) ?? getCommand(nameOrPrefix);
     if (!cmd) return false;
     return this.startCommand(cmd);
   }

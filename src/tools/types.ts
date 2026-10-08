@@ -18,6 +18,7 @@ export type ToolId =
   | "room"
   | "line"
   | "xline"
+  | "ray"
   | "polyline"
   | "rect"
   | "circle"
@@ -29,6 +30,11 @@ export type ToolId =
   | "bezier"
   | "dimension"
   | "kote"
+  | "detailref"
+  | "scalebar"
+  | "revcloud"
+  | "pointmarker"
+  | "wipeout"
   | "text"
   | "leader"
   | "textpath"
@@ -55,7 +61,31 @@ export type SnapKind =
    * übrigen Snap-Arten, sonst würde jede N-tel-Position jeder Linie den
    * Fang-Kandidatenraum überfluten.
    */
-  | "divide";
+  | "divide"
+  /**
+   * Lotfusspunkt einer nahen Strecke — NICHT vom Cursor aus wie `onEdge`,
+   * sondern vom LETZTEN gesetzten Punkt aus konstruiert (die Strecke vom
+   * letzten Punkt zu diesem Fangpunkt steht im rechten Winkel zur Strecke).
+   * Nur aktiv, solange ein `lastPoint` existiert.
+   */
+  | "perpendicular"
+  /**
+   * Tangentenpunkt an einen nahen Kreis/Bogen, konstruiert vom LETZTEN
+   * gesetzten Punkt aus (klassische Tangente-von-aussen-Konstruktion, zwei
+   * Lösungen pro Kreis). Nur aktiv, solange ein `lastPoint` ausserhalb des
+   * Kreises existiert; bei einem Bogen nur, wenn der Tangentenpunkt selbst
+   * im Bogen-Bereich liegt.
+   */
+  | "tangent"
+  /**
+   * Punkt auf der Parallelen durch den letzten gesetzten Punkt zu einer
+   * REFERENZ-Strecke — die Referenz muss erst wie bei „divide" durch kurzes
+   * Verweilen des Cursors „erfasst" werden (dieselbe Verweil-Erkennung).
+   * Bleibt danach STICKY erfasst, auch wenn der Cursor die Linie wieder
+   * verlässt (Richtung Zielpunkt) — bis eine andere Strecke neu erfasst
+   * wird. Nur aktiv, solange ein `lastPoint` existiert.
+   */
+  | "parallel";
 
 export interface SnapResult {
   /** Gefangener Punkt (Meter). */
@@ -76,9 +106,33 @@ export interface SnapSettings {
   intersection: boolean;
   center: boolean;
   onEdge: boolean;
+  /**
+   * Senkrecht zum letzten Punkt (Nutzer-Wunsch: „Senkrecht-/Tangential-/
+   * Parallel-zu-Referenz-Modus" fehlt). Bietet den Lotfusspunkt vom letzten
+   * gesetzten Punkt auf nahe Strecken an — braucht daher zwingend einen
+   * bereits gesetzten `lastPoint`, sonst wirkungslos.
+   */
+  perpendicular: boolean;
+  /** Tangentenpunkt an einen nahen Kreis/Bogen, vom letzten Punkt aus konstruiert. */
+  tangent: boolean;
+  /**
+   * Parallel zu einer per kurzem Hover „erfassten" Referenzstrecke (dieselbe
+   * Verweil-Erkennung wie `divide`) durch den letzten gesetzten Punkt.
+   */
+  parallel: boolean;
   grid: boolean;
   /** Rasterweite in Metern. */
   gridSize: number;
+  /**
+   * Zeichnet ein sichtbares Hintergrund-Raster in der Planansicht (Nutzer-
+   * Wunsch: „Kein sichtbares 2D-Zeichenraster" — bisher steuerte `gridSize`
+   * NUR den Fang, nichts wurde gezeichnet). Unabhängig von `grid` (Fang) —
+   * rein optisch, beeinflusst keine Snap-Logik. Die tatsächliche Linien-
+   * dichte richtet sich NICHT nach `gridSize` (bei typischem Zoom viel zu
+   * fein), sondern adaptiv nach dem Zoom (s. `PlanGrid.tsx` `rulerStep`,
+   * dieselbe Logik wie die Lineal-Hauptstriche).
+   */
+  showGrid: boolean;
   /** Ortho/Winkelraster (Shift erzwingt zusätzlich). */
   ortho: boolean;
   /** Winkelraster in Grad (z. B. 90 = H/V). */
@@ -116,8 +170,17 @@ export const DEFAULT_SNAP: SnapSettings = {
   intersection: true,
   center: true,
   onEdge: true,
+  // Default AUS (anders als endpoint/midpoint/center/onEdge): diese drei sind
+  // situative Konstruktions-Hilfen (brauchen zwingend einen `lastPoint`/eine
+  // per Hover erfasste Referenz), keine ständig sinnvollen Fangpunkte wie
+  // Endpunkt/Mittelpunkt — ein stiller Default-Wechsel für alle Bestands-
+  // projekte wäre hier unpassend, anders als seinerzeit bei `center`.
+  perpendicular: false,
+  tangent: false,
+  parallel: false,
   grid: true,
   gridSize: 0.1,
+  showGrid: false,
   ortho: false,
   angleStep: 90,
   tolerancePx: 12,

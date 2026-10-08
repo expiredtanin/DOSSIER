@@ -197,33 +197,16 @@ export function ContextImportDialog({
       // Landeskoordinaten schreibt und weitere Importe lagerichtig dazu liegen.
       // Mit „Neuer Bezugspunkt" (georef) lässt sich der Ursprung später auf einen
       // beliebigen Modellpunkt verschieben.
-      let origin: GeoOrigin = geoAnchor
+      // `origin` steht schon hier VOLLSTÄNDIG fest (aus geoAnchor/refLv95) —
+      // jede fetch*-Funktion bekommt sie nur durchgereicht und berechnet nie
+      // eine eigene (s. `originIn ?? makeOrigin(center)`-Muster überall in
+      // io/*.ts). Die vier Quellen unten sind also NICHT voneinander abhängig
+      // und laufen parallel statt sequentiell (Nutzer-Report: „dauert etwas
+      // lange" — bei mehreren gewählten Quellen war die Wartezeit bisher die
+      // SUMME aller Einzel-Abrufe statt des langsamsten).
+      const origin: GeoOrigin = geoAnchor
         ? { e: geoAnchor.lv95.e - geoAnchor.model.x, n: geoAnchor.lv95.n - geoAnchor.model.y }
         : makeOrigin(refLv95);
-      const all: GeoFeature[] = [];
-      // Echte swissBUILDINGS3D-Meshes (v2/v3) landen direkt als ContextObject
-      // (kein Footprint+Box-Umweg über GeoFeature/featuresToContextObjects).
-      const extraObjs: ContextObject[] = [];
-      // Übersprungene Kacheln (zu gross entpackt, Netzwerkfehler o. Ä.) —
-      // damit „0 Gebäude" von „X Kacheln übersprungen" unterscheidbar bleibt
-      // statt eines stummen Leer-Ergebnisses (Nutzer-Report).
-      let buildingsSkipped = 0;
-
-      if (sources.swissBuildings === "flach") {
-        const r = await fetchBuildings(center, radius, origin);
-        origin = r.origin;
-        all.push(...r.features);
-      } else if (sources.swissBuildings === "v2" || sources.swissBuildings === "v3") {
-        const r = await fetchBuildings3d(
-          center,
-          radius,
-          origin,
-          sources.swissBuildings as BuildingsVersion,
-        );
-        origin = r.origin;
-        extraObjs.push(...r.meshes);
-        buildingsSkipped = r.skippedTiles;
-      }
 
       const osmSel: OsmSelection = {
         buildings: sources.osmBuildings,
@@ -234,31 +217,68 @@ export function ContextImportDialog({
         railway: sources.osmRailway,
         forest: sources.osmForest,
       };
-      if (
+      const wantsOsm =
         osmSel.buildings ||
         osmSel.roads ||
         osmSel.water ||
         osmSel.green ||
         osmSel.parking ||
         osmSel.railway ||
-        osmSel.forest
-      ) {
-        const r = await fetchOsm(center, radius, osmSel, origin);
-        origin = r.origin;
-        all.push(...r.features);
+        osmSel.forest;
+      // Die Drapierung braucht das Gelände-TIN auch dann, wenn nur „Luftbild
+      // aufs Gelände" (ohne eigenen Terrain-Haken) gewählt wäre.
+      const wantsTerrain = sources.swissTerrain || sources.swissImageDrape;
+      const wantsImage = sources.swissImage || sources.swissImageDrape;
+
+      const buildingsPromise =
+        sources.swissBuildings === "flach"
+          ? fetchBuildings(center, radius, origin)
+          : sources.swissBuildings === "v2" || sources.swissBuildings === "v3"
+            ? fetchBuildings3d(center, radius, origin, sources.swissBuildings as BuildingsVersion)
+            : null;
+      const osmPromise = wantsOsm ? fetchOsm(center, radius, osmSel, origin) : null;
+      const terrainPromise = wantsTerrain
+        ? fetchTerrainXyz(center, radius, origin, terrainResolution)
+        : null;
+      const imagePromise = wantsImage ? fetchSwissImage(center, radius, origin) : null;
+
+      const [buildingsResult, osmResult, terrainResult, imageResult] = await Promise.all([
+        buildingsPromise,
+        osmPromise,
+        terrainPromise,
+        imagePromise,
+      ]);
+
+      const all: GeoFeature[] = [];
+      // Echte swissBUILDINGS3D-Meshes (v2/v3) landen direkt als ContextObject
+      // (kein Footprint+Box-Umweg über GeoFeature/featuresToContextObjects).
+      const extraObjs: ContextObject[] = [];
+      // Übersprungene Kacheln (zu gross entpackt, Netzwerkfehler o. Ä.) —
+      // damit „0 Gebäude" von „X Kacheln übersprungen" unterscheidbar bleibt
+      // statt eines stummen Leer-Ergebnisses (Nutzer-Report).
+      let buildingsSkipped = 0;
+      // KEIN `arr.push(...grosseArray)`: bei einem grossflächigen Import (ganze
+      // Stadt) können `meshes`/`features` hunderttausende Einträge haben — der
+      // Spread-Operator sprengt dann die Argumentzahl-Grenze von `push`
+      // (RangeError "Maximum call stack size exceeded"), dieselbe, bereits
+      // dokumentierte Falle wie in `swissBuildings3d.ts::concatMeshes`/
+      // `dwgParser.ts` (dort an einer echten 2000-Gebäude-Kachel verifiziert).
+      // Reine `for`-Schleifen sind unbegrenzt sicher.
+      if (buildingsResult) {
+        if ("meshes" in buildingsResult) {
+          for (const m of buildingsResult.meshes) extraObjs.push(m);
+          buildingsSkipped = buildingsResult.skippedTiles;
+        } else {
+          for (const f of buildingsResult.features) all.push(f);
+        }
       }
+      if (osmResult) for (const f of osmResult.features) all.push(f);
 
       // Gelände-Höhenraster (echtes swissALTI3D-XYZ, native Auflösung) → Terrain-Mesh.
-      // Die Drapierung braucht das TIN -> Terrain auch dann holen, wenn nur
-      // „Luftbild aufs Gelände" (ohne eigenen Terrain-Haken) gewählt wäre.
       let terrain: TerrainMesh | null = null;
-      if (sources.swissTerrain || sources.swissImageDrape) {
-        const r = await fetchTerrainXyz(center, radius, origin, terrainResolution);
-        origin = r.origin;
-        if (r.grid) {
-          const mesh = terrainMeshFromGrid(r.grid);
-          if (mesh.positions.length >= 9) terrain = mesh;
-        }
+      if (terrainResult?.grid) {
+        const mesh = terrainMeshFromGrid(terrainResult.grid);
+        if (mesh.positions.length >= 9) terrain = mesh;
       }
 
       // SWISSIMAGE-Luftbild (WMS) → georeferenziertes Rasterbild (EIN ContextImage).
@@ -267,22 +287,18 @@ export function ContextImportDialog({
       //    Textur aufs Gelände (render3d `set_aerial_texture`).
       // Beide Modi teilen dasselbe Bild; das Bild wird nur EINMAL geladen.
       let image: ContextObject | null = null;
-      if (sources.swissImage || sources.swissImageDrape) {
-        const r = await fetchSwissImage(center, radius, origin);
-        origin = r.origin;
-        if (r.dataUrl) {
-          image = {
-            id: `img-${Date.now()}`,
-            type: "image",
-            name: `Luftbild ${selected.label}`,
-            layer: "Luftbild",
-            categoryCode: IMAGE_CATEGORY.code,
-            src: r.dataUrl,
-            min: r.min,
-            max: r.max,
-            drape: sources.swissImageDrape,
-          };
-        }
+      if (imageResult?.dataUrl) {
+        image = {
+          id: `img-${Date.now()}`,
+          type: "image",
+          name: `Luftbild ${selected.label}`,
+          layer: "Luftbild",
+          categoryCode: IMAGE_CATEGORY.code,
+          src: imageResult.dataUrl,
+          min: imageResult.min,
+          max: imageResult.max,
+          drape: sources.swissImageDrape,
+        };
       }
 
       if (all.length === 0 && !terrain && !image && extraObjs.length === 0) {
@@ -312,7 +328,7 @@ export function ContextImportDialog({
       }
 
       const objs = featuresToContextObjects(all, selected.label);
-      objs.push(...extraObjs);
+      for (const o of extraObjs) objs.push(o);
       if (terrain) objs.push(terrain);
       if (image) objs.push(image);
       onImport(objs);

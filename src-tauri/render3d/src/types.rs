@@ -355,11 +355,14 @@ impl MeshKind {
 /// nur noch die Flaechen-Normalen (Flat Shading, wie Wand/Slab) und speist es in
 /// denselben GPU-Pfad ein.
 ///
-/// KOORDINATEN wie WallInput/SlabInput: die TS-Seite (`projectToModel3d`) liefert
-/// `positions` im MODELL-System als flaches `[x, y, z, ...]`-Array (z = Hoehe, in
-/// Metern); `mesh.rs` bildet jeden Vertex nach world ab: model `(x, y, z)` ->
-/// world `(x, z, y)`, d. h. Grundriss in der XZ-Ebene, Hoehe entlang +Y (exakt wie
-/// `Viewport3D.tsx` die rohen positions konsumiert).
+/// KOORDINATEN: die TS-Seite (`projectToModel3d`) liefert `positions` im
+/// MODELL-System als flaches `[x, y, z, ...]`-Array (z = Hoehe, in Metern);
+/// `mesh.rs::append_context_mesh` bildet jeden Vertex nach world ab: model
+/// `(x, y, z)` -> world `(x, z, -y)` — die Nord-Achse (Modell-y) wird NEGIERT
+/// (anders als bei WallInput/SlabInput, die ueber eine orientierungserhaltende
+/// Extrusion entstehen und daher OHNE Vorzeichenwechsel auskommen — reines
+/// Achsen-Vertauschen eines allgemeinen xyz-Punktsatzes waere sonst eine
+/// Spiegelung, s. `append_context_mesh`-Doc).
 ///
 /// DOPPELSEITIG: Terrain-/Import-Meshes tragen KEIN garantiertes Winding (die
 /// three.js-Sicht rendert sie mit `DoubleSide`, siehe `io/geoContext.ts`). Da der

@@ -11,6 +11,7 @@
 // eine einzige inverse Winkelfunktion aus bulge ableiten.
 
 import type { Vec2 } from "../model/types";
+import { lineIntersect } from "../model/geometry";
 
 const EPS = 1e-9;
 
@@ -109,9 +110,66 @@ export function bulgePointAt(a: Vec2, b: Vec2, bulge: number, t: number): Vec2 {
   return pts[Math.max(0, Math.min(pts.length - 1, idx))];
 }
 
+/**
+ * Bulge eines Kreisbogens, der von `a` über `through` nach `b` läuft — der
+ * klassische Drei-Punkt-Bogen. Anders als die Tangenten-Variante hängt er NUR
+ * von diesen drei Punkten ab, nicht vom vorherigen Segment: Radius und
+ * Wölbung sind damit pro Segment frei wählbar (Nutzer-Anforderung).
+ *
+ * Liegen die drei Punkte (nahezu) auf einer Geraden, gibt es keinen Kreis —
+ * dann 0 (gerade).
+ */
+export function bulgeThroughPoint(a: Vec2, through: Vec2, b: Vec2): number {
+  // Umkreismittelpunkt über die Schnittpunkt-Formel der Mittelsenkrechten.
+  const d = 2 * (a.x * (through.y - b.y) + through.x * (b.y - a.y) + b.x * (a.y - through.y));
+  if (Math.abs(d) < EPS) return 0;
+  const a2 = a.x * a.x + a.y * a.y;
+  const t2 = through.x * through.x + through.y * through.y;
+  const b2 = b.x * b.x + b.y * b.y;
+  const center = {
+    x: (a2 * (through.y - b.y) + t2 * (b.y - a.y) + b2 * (a.y - through.y)) / d,
+    y: (a2 * (b.x - through.x) + t2 * (a.x - b.x) + b2 * (through.x - a.x)) / d,
+  };
+  const r = Math.hypot(a.x - center.x, a.y - center.y);
+  if (r < EPS) return 0;
+  const ang = (p: Vec2) => Math.atan2(p.y - center.y, p.x - center.x);
+  const TAU = Math.PI * 2;
+  const norm = (x: number) => ((x % TAU) + TAU) % TAU;
+  // Schwenkrichtung ist die, bei der `through` unterwegs passiert wird.
+  const aFrom = ang(a);
+  const ccwToThrough = norm(ang(through) - aFrom);
+  const ccwToB = norm(ang(b) - aFrom);
+  const sweepSign: 1 | -1 = ccwToThrough <= ccwToB ? 1 : -1;
+  return bulgeBetweenAngles(center, r, aFrom, ang(b), sweepSign);
+}
+
 /** Punkt auf einem Kreis (center, r) beim Winkel `a` (Radiant). */
 export function pointOnCircle(center: Vec2, r: number, a: number): Vec2 {
   return { x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) };
+}
+
+/**
+ * Kreisbogen-Parameter (Mittelpunkt/Radius/Start-/Endwinkel) durch drei Punkte
+ * `a`→`through`→`b` — der klassische Drei-Punkt-Bogen, hier direkt als
+ * `{center,r,a0,a1}` statt als `bulge` (für Werkzeuge, die einen eigenständigen
+ * `{shape:"arc"}` erzeugen, z. B. `commands/cmds/arc.ts`, statt ein
+ * Polylinien-Segment). `a0`/`a1` sind IMMER so geordnet, dass der Bogen CCW von
+ * a0 nach a1 läuft (Konvention von `{shape:"arc"}`, s. dort) — anders als
+ * `bulgeThroughPoint`, dessen Vorzeichen die Sehnen-Richtung a→b behält.
+ * `null` bei (nahezu) kollinearen Punkten (kein Kreis).
+ */
+export function arcThroughPoints(
+  a: Vec2,
+  through: Vec2,
+  b: Vec2,
+): { center: Vec2; r: number; a0: number; a1: number } | null {
+  const bulge = bulgeThroughPoint(a, through, b);
+  if (Math.abs(bulge) < EPS) return null;
+  const arc = bulgeArc(a, b, bulge);
+  if (!arc) return null;
+  return arc.sweep < 0
+    ? { center: arc.center, r: arc.r, a0: arc.a1, a1: arc.a0 }
+    : { center: arc.center, r: arc.r, a0: arc.a0, a1: arc.a1 };
 }
 
 /**
@@ -138,4 +196,86 @@ export function bulgeBetweenAngles(
   const Q = pointOnCircle(center, r, aTo);
   const M = pointOnCircle(center, r, mid);
   return bulgeFromSagittaPoint(P, Q, M);
+}
+
+/**
+ * Kreisbogen-Parameter durch zwei Endpunkte `a`→`b` mit vorgegebenem Radius
+ * `r` — die zweite fehlende Bogen-Konstruktionsmethode aus der Recherche
+ * „Grösster Hebel" (`commands/cmds/arc.ts`, Methode „Start-Ende-Radius").
+ * `near` (typischerweise der Cursor) entscheidet, auf welche Seite der Sehne
+ * sich der Bogen wölbt — analog zu einem gezogenen Bulge-Griff. Liefert
+ * immer den KLEINEREN der beiden möglichen Bögen (Sehnenwinkel ≤ 180°): der
+ * Radius allein legt zwei Kreise fest (Zentrum auf einer der beiden Seiten
+ * der Sehne), aber erst zusammen mit „welcher Bogen dieses Kreises" ergäbe
+ * sich sonst eine dritte, unnötige Mehrdeutigkeit — der kleinere Bogen ist
+ * die für eine Zieh-Geste erwartbare, stetige Wahl (grosser Radius ⇒ flacher
+ * Bogen, kleiner Radius (nahe der halben Sehnenlänge) ⇒ Halbkreis).
+ * `null`, wenn `r` kleiner als die halbe Sehnenlänge ist (kein Kreis möglich)
+ * oder die Sehne entartet (a≈b).
+ */
+export function arcFromStartEndRadius(
+  a: Vec2,
+  b: Vec2,
+  r: number,
+  near: Vec2,
+): { center: Vec2; r: number; a0: number; a1: number } | null {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const chord = Math.hypot(dx, dy);
+  if (chord < EPS) return null;
+  const h = chord / 2;
+  if (r < h - EPS) return null;
+  const rr = Math.max(r, h);
+  const s = rr - Math.sqrt(Math.max(0, rr * rr - h * h)); // Sagitta des kleineren Bogens
+  const ux = dx / chord, uy = dy / chord;
+  const nx = -uy, ny = ux; // Links-Normale von a→b, wie `bulgeArc`
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  const sideSign = (near.x - mx) * nx + (near.y - my) * ny >= 0 ? 1 : -1;
+  const bulge = (sideSign * s) / h;
+  const arc = bulgeArc(a, b, bulge);
+  if (!arc) return null;
+  return arc.sweep < 0
+    ? { center: arc.center, r: arc.r, a0: arc.a1, a1: arc.a0 }
+    : { center: arc.center, r: arc.r, a0: arc.a0, a1: arc.a1 };
+}
+
+/**
+ * Kreisbogen-Parameter durch zwei Endpunkte `a`→`b`, tangential zu einer bei
+ * `a` vorgegebenen Richtung (`dir`, ein Punkt AUF dem Tangentenstrahl, nicht
+ * zwingend auf dem Bogen selbst) — dritte fehlende Bogen-Konstruktions-
+ * methode. Der Kreismittelpunkt steht per Definition senkrecht zur Tangente
+ * bei `a` UND auf der Mittelsenkrechten von a-b — beide Geraden geschnitten
+ * (`lineIntersect`) ergeben ihn eindeutig, ohne Fallunterscheidung. Die
+ * Schwenkrichtung (CCW/CW von a0 nach a1) wird so gewählt, dass die
+ * Bogen-Tangente bei a tatsächlich in Richtung `dir` zeigt (nicht rückwärts).
+ * `null` bei entarteter Tangente (`dir`≈`a`) oder wenn die Tangente exakt
+ * entlang der Sehne a-b zeigt (Mittelsenkrechte und Tangenten-Normale
+ * parallel — kein eindeutiger Kreis, Grenzfall „Gerade").
+ */
+export function arcFromStartEndDirection(
+  a: Vec2,
+  b: Vec2,
+  dir: Vec2,
+): { center: Vec2; r: number; a0: number; a1: number } | null {
+  const tx = dir.x - a.x, ty = dir.y - a.y;
+  const tLen = Math.hypot(tx, ty);
+  if (tLen < EPS) return null;
+  const ux = tx / tLen, uy = ty / tLen;
+  const tangentNormal = { x: -uy, y: ux }; // senkrecht zur Tangente bei a
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const chordNormal = { x: -(b.y - a.y), y: b.x - a.x }; // senkrecht zur Sehne a-b
+  const center = lineIntersect(a, tangentNormal, mid, chordNormal);
+  if (!center) return null;
+  const r = Math.hypot(a.x - center.x, a.y - center.y);
+  if (r < EPS) return null;
+  const a0raw = Math.atan2(a.y - center.y, a.x - center.x);
+  const a1raw = Math.atan2(b.y - center.y, b.x - center.x);
+  // CCW-Tangentenrichtung bei a0raw ist die Ableitung von (cos,sin) nach
+  // wachsendem Winkel: (−sin,cos). Zeigt sie NICHT in Richtung (ux,uy), muss
+  // der Bogen stattdessen CW laufen (a0/a1 vertauscht, wie `arcThroughPoints`
+  // bei negativem `sweep`).
+  const tangentCCW = { x: -Math.sin(a0raw), y: Math.cos(a0raw) };
+  const matchesCCW = tangentCCW.x * ux + tangentCCW.y * uy >= 0;
+  return matchesCCW
+    ? { center, r, a0: a0raw, a1: a1raw }
+    : { center, r, a0: a1raw, a1: a0raw };
 }

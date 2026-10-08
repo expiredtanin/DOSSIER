@@ -23,7 +23,6 @@ import {
   applyPreset,
   commonMarkValue,
   DEFAULT_LINE_HEIGHT,
-  DEFAULT_PRESETS,
   docLength,
   isMarkActive,
   toggleMark,
@@ -33,6 +32,7 @@ import type {
   BoolMark,
   RichTextDoc,
   TextRange,
+  TextStylePreset,
 } from "../text/richText";
 
 /** Ansichtstyp eines Geschosses (wie in App). */
@@ -429,9 +429,10 @@ function ViewSplitMenu({
 
 /**
  * Parst eine Massstab-Eingabe „1:35" ODER „35" zum Nenner N (gerundet, > 0).
- * Liefert null bei ungültiger/leerer Eingabe.
+ * Liefert null bei ungültiger/leerer Eingabe. Exportiert — `ExportPdfDialog.tsx`
+ * nutzt dieselbe Funktion für seinen eigenen Freitext-Massstab.
  */
-function parseScaleInput(input: string | null): number | null {
+export function parseScaleInput(input: string | null): number | null {
   if (!input) return null;
   // Teil nach einem ':' nehmen, falls vorhanden („1:35" → „35").
   const raw = input.includes(":") ? input.split(":").pop() ?? "" : input;
@@ -614,7 +615,7 @@ function Segment({
  * deterministisch sein. Ein spaeterer Einstellungen-Dialog kann weitere
  * Schriften nachladen; das hier ist die Standardliste.
  */
-const TEXT_FONTS: string[] = [
+export const TEXT_FONTS: string[] = [
   "Inter",
   "Work Sans",
   "IBM Plex Sans",
@@ -643,8 +644,11 @@ const TEXT_SIZES: number[] = [8, 9, 10, 11, 12, 14, 18, 24, 36, 48];
  */
 export function TextGroup({
   textTarget,
+  textStyles,
 }: {
   textTarget: TextTarget | null;
+  /** Projekteigene Textstil-Bibliothek (Fallback: `DEFAULT_PRESETS`), s. ResourceManager-Tab „Textstile". */
+  textStyles: TextStylePreset[];
 }) {
   // Defaults für neuen Text, solange nichts Text-artiges selektiert ist. Bei
   // aktivem Ziel spiegeln die Controls die gemeinsamen Werte des Ziels wider.
@@ -733,7 +737,7 @@ export function TextGroup({
   };
 
   const applyPresetValue = (id: string) => {
-    const preset = DEFAULT_PRESETS.find((p) => p.id === id);
+    const preset = textStyles.find((p) => p.id === id);
     if (!preset) return;
     if (textTarget) {
       const r = textTarget.range ?? { start: 0, end: 0 };
@@ -749,7 +753,7 @@ export function TextGroup({
   // ── Options-Listen ─────────────────────────────────────────────────────────
   const styleOptions: DropdownOption[] = [
     { value: "__none__", label: t("text.style.none") },
-    ...DEFAULT_PRESETS.map((p) => ({ value: p.id, label: p.label })),
+    ...textStyles.map((p) => ({ value: p.id, label: p.label })),
   ];
   const fontOptions: DropdownOption[] = TEXT_FONTS.map((f) => ({
     value: f,
@@ -1135,6 +1139,8 @@ export interface ViewRibbonTabProps {
   /** Text-/Font-Formatierung auf DERSELBEN Leiste (Raumstempel-Ziel; `null` =
    *  nur Defaults). Liegt bewusst im „Ansichten"-Tab (Nutzer-Wunsch). */
   textTarget: TextTarget | null;
+  /** Projekteigene Textstil-Bibliothek (Fallback: `DEFAULT_PRESETS`), s. ResourceManager-Tab „Textstile". */
+  textStyles: TextStylePreset[];
 }
 
 /**
@@ -1170,6 +1176,7 @@ export function ViewRibbonTab({
   onShadows,
   combos,
   textTarget,
+  textStyles,
 }: ViewRibbonTabProps) {
   // „frei" wird über einen In-App-Dialog erfasst (window.prompt ist im Tauri-
   // WKWebView deaktiviert); akzeptiert „1:35" ODER „35".
@@ -1415,7 +1422,7 @@ export function ViewRibbonTab({
       {/* Text-/Font-Formatierung auf DERSELBEN Leiste (Nutzer-Wunsch: Text und
           Ansichten zusammen) — Stil/Schrift/Grösse + B/I/U · L/C/R + Zeilenhöhe,
           formatiert das aktuelle Text-Ziel (Raumstempel) live. */}
-      <TextGroup textTarget={textTarget} />
+      <TextGroup textTarget={textTarget} textStyles={textStyles} />
       {scalePromptOpen && (
         <PromptDialog
           title={t("topbar.scale.custom")}

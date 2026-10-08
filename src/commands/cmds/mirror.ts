@@ -12,8 +12,7 @@
 // hängt das Spiegelbild als KOPIE an (das Original bleibt stehen). Das ist das
 // klassische Mirror „Kopie spiegeln" (Rhino/Vectorworks-Default).
 
-import { commitTransform } from "../../tools/transform";
-import type { TransformSelection } from "../../tools/transform";
+import { commitTransform, hasTransformSelection, toTransformSel } from "../../tools/transform";
 import { transformPreview } from "../../tools/transform";
 import type {
   Command,
@@ -29,28 +28,6 @@ const segLen = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
 const segAngleDeg = (a: Vec2, b: Vec2): number =>
   (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
 const EPS = 1e-6;
-
-/** Hat die Auswahl überhaupt etwas Spiegelbares? */
-function hasSelection(sel: CommandSelection): boolean {
-  return (
-    sel.wallIds.length > 0 ||
-    sel.drawingId !== null ||
-    (sel.drawingIds?.length ?? 0) > 0 ||
-    !!sel.extrudedSolidId ||
-    !!sel.columnId
-  );
-}
-
-/** Auswahl → TransformSelection (gleiche Form). */
-function toTransformSel(sel: CommandSelection): TransformSelection {
-  return {
-    wallIds: sel.wallIds,
-    drawingId: sel.drawingId,
-    drawingIds: sel.drawingIds,
-    extrudedSolidId: sel.extrudedSolidId,
-    columnId: sel.columnId,
-  };
-}
 
 // Zustand: erst ersten Achsenpunkt setzen, dann den zweiten (mit Auswahl-Snapshot).
 interface MirrorFirst extends CommandState {
@@ -122,7 +99,7 @@ export const mirrorCommand: Command = {
     const s = state as MirrorState;
     if (s.phase === "done") return idle();
     // Leere Auswahl → nichts zu spiegeln (No-op + Hinweis, dann beenden).
-    if (!hasSelection(ctx.selection)) {
+    if (!hasTransformSelection(ctx.selection)) {
       return [{ phase: "done", lastPoint: null } as MirrorDone, { draft: null, done: true }];
     }
     if (input.kind !== "point") {

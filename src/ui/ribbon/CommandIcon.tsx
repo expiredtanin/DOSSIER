@@ -101,6 +101,16 @@ export function CommandIcon({ name }: { name: string }) {
           <circle cx="4" cy="5" r="2" />
         </svg>
       );
+    case "break":
+      // Linie mit Lücke in der Mitte (Unterbrechen) + zwei Marker an den Bruchstellen.
+      return (
+        <svg {...common}>
+          <line x1="2.5" y1="8" x2="6" y2="8" />
+          <line x1="10" y1="8" x2="13.5" y2="8" />
+          <line x1="5.3" y1="5.3" x2="7.3" y2="10.7" />
+          <line x1="8.7" y1="5.3" x2="10.7" y2="10.7" />
+        </svg>
+      );
     case "join":
       // Zwei Segmente, die sich an einer Ecke treffen (Verbinden).
       return (

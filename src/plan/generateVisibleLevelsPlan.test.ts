@@ -138,6 +138,32 @@ describe("generateVisibleLevelsPlan", () => {
     expect(bands.length).toBe(1);
   });
 
+  it("Regression: sehr viele Primitive (grossflächiger Import) lösen keinen Stack-Overflow aus", () => {
+    // Nutzer-Report 2026-10-08: Import eines Kataster-DXF einer ganzen Stadt
+    // (~400 MB, hunderttausende Elemente) liess die App mit "Maximum call
+    // stack size exceeded" abstürzen — Ursache war `primitives.push(...grosses
+    // Array)`, das V8s Argumentzahl-Grenze für Funktionsaufrufe sprengt (anders
+    // als Array-LITERAL-Spread `[...a,...b]`, der KEIN Funktionsaufruf ist und
+    // beliebig gross sein darf). Reproduziert hier mit genug Elementen, um die
+    // Grenze (~65–130k, engine-abhängig) sicher zu überschreiten.
+    const N = 200_000;
+    const drawings2d: Project["drawings2d"] = [];
+    for (let i = 0; i < N; i++) {
+      drawings2d.push({
+        id: `d${i}`,
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: { shape: "line", a: { x: 0, y: i * 0.001 }, b: { x: 1, y: i * 0.001 } },
+      } as unknown as Project["drawings2d"][number]);
+    }
+    const p = { ...baseProject([floor("eg", "EG")], []), drawings2d };
+    const visibleWide = new Set(["20", "90", "2d-line"]);
+    expect(() =>
+      generateVisibleLevelsPlan(p, "eg", visibleWide, SHOW_ALL, "mittel", false, false, SHOW_ALL),
+    ).not.toThrow();
+  });
+
   it("Schnitt/Ansicht-Ebenen bleiben Einzel-Pane (kein Stapeln über kind-Grenze)", () => {
     const p = baseProject(
       [

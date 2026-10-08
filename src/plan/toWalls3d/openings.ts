@@ -124,7 +124,9 @@ function openingAxisBox(
     const t = i & 4 ? nMax : nMin;
     positions.push(wall.start.x + ux * s + nx * t, wall.start.y + uy * s + ny * t, z);
   }
-  return { positions, indices: [...OPENING_BOX_TRIS], kind: "imported", color };
+  // "extrusion", NICHT "imported" — s. Moduldoc an emitOpeningGlass (Nord-
+  // Achsen-Negation in append_context_mesh gilt nur für echte Import-Kinds).
+  return { positions, indices: [...OPENING_BOX_TRIS], kind: "extrusion", color };
 }
 
 /**
@@ -180,7 +182,8 @@ function openingPlaneBox(
     const h = hi + s * halfWidth * ph;
     positions.push(wall.start.x + ux * u + nx * t, wall.start.y + uy * u + ny * t, h);
   }
-  return { positions, indices: [...OPENING_BOX_TRIS], kind: "imported", color };
+  // "extrusion", NICHT "imported" — s. Moduldoc an emitOpeningGlass.
+  return { positions, indices: [...OPENING_BOX_TRIS], kind: "extrusion", color };
 }
 
 /** Klemmt `v` auf `[lo,hi]`. */
@@ -304,6 +307,15 @@ interface OpeningFrameParams {
    * kein Bodenanschlag).
    */
   drawThresholdProfile: boolean;
+  /**
+   * Kassettentür-Blatt (Rahmen aus Stegen/Pfosten + vertiefte Felder statt
+   * einer glatten Platte) zeichnen: nur Türen mit `leafStyle === "kassette"`.
+   * Fenster: nie.
+   */
+  panelled: boolean;
+  /** Kassetten-Raster horizontal/vertikal (nur bei {@link panelled} relevant). */
+  panelCols: number;
+  panelRows: number;
 }
 
 function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): OpeningFrameParams | null {
@@ -341,6 +353,9 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       // Zarge umgreift die Wand (Bekleidung auf beiden Flächen); Blockrahmen bleibt bündig.
       zargeCladding: (dt.frameKind ?? "zarge") === "zarge",
       drawThresholdProfile: dt.threshold === true,
+      panelled: dt.leafStyle === "kassette",
+      panelCols: Math.max(1, Math.round(dt.panelCols ?? 2)),
+      panelRows: Math.max(1, Math.round(dt.panelRows ?? 3)),
     };
   }
   const wt = getWindowType(project, op);
@@ -389,6 +404,9 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
     drawInteriorSill: wt.sillBoard === "innen" || wt.sillBoard === "beide",
     zargeCladding: false,
     drawThresholdProfile: false,
+    panelled: false,
+    panelCols: 1,
+    panelRows: 1,
   };
 }
 
@@ -734,13 +752,16 @@ function glassPanesForOpening(
 }
 
 /**
- * Türblatt EINER typisierten Tür als solide Blatt-Tafel im Hauptfeld (zwischen
- * den Rahmen-Pfosten, über Schwelle bis Sturz bzw. Kämpfer): Vollblatt
- * (`leafStyle` ≠ "glas") füllt das ganze Feld, Teilverglasung
- * (`glazingRatio` < 1) nur den blinden UNTEREN Rest unter dem Glasanteil
- * (Anteil von OBEN gemessen, s. {@link glassPanesForOpening}). Das Blatt liegt
- * mittig um die Glasebene (nMax − 0.03), ~4 cm dick ({@link DOOR_LEAF_THICK}),
- * in {@link DOOR_LEAF_RGB} — damit Türen im 3D als Türen lesbar sind statt als
+ * Türblatt EINER typisierten Tür als Füllung im Hauptfeld (zwischen den
+ * Rahmen-Pfosten, über Schwelle bis Sturz bzw. Kämpfer): Vollblatt
+ * (`leafStyle` ∈ {"glatt","kassette"}) füllt das ganze Feld, Teilverglasung
+ * (`glazingRatio` < 1 bei `leafStyle: "glas"`) nur den blinden UNTEREN Rest
+ * unter dem Glasanteil (Anteil von OBEN gemessen, s. {@link
+ * glassPanesForOpening}). Bei `leafStyle === "kassette"` ist das Feld selbst
+ * kein glatter Quader, sondern ein Rahmen-Raster mit vertieften Feldern (s.
+ * {@link kassettePanels}). Das Blatt liegt mittig um die Glasebene
+ * (nMax − 0.03), ~4 cm dick ({@link DOOR_LEAF_THICK}), in
+ * {@link DOOR_LEAF_RGB} — damit Türen im 3D als Türen lesbar sind statt als
  * offene Löcher mit Rahmen. Fenster: nie (glazedFraction = 1 ⇒ kein Blatt).
  */
 function doorLeafPanels(
@@ -765,8 +786,94 @@ function doorLeafPanels(
   if (leafTop - leafBottom <= EPS || leafTo - leafFrom <= EPS) return out;
   const n1 = params.nMax - 0.02 + DOOR_LEAF_THICK / 2;
   const n0 = Math.max(params.nMin, n1 - DOOR_LEAF_THICK);
+  if (params.panelled) {
+    return kassettePanels(wall, leafFrom, leafTo, leafBottom, leafTop, n0, n1, params);
+  }
   const mesh = openingAxisBox(wall, leafFrom, leafTo, leafBottom, leafTop, n0, n1, DOOR_LEAF_RGB);
   if (mesh) out.push(mesh);
+  return out;
+}
+
+/** Stegbreite der Kassetten-Füllstäbe (Rahmen ums Feld + Trennstege), Meter. */
+const PANEL_STILE_WIDTH = 0.06;
+/**
+ * Vertiefung der Kassetten-Füllung gegenüber den Stegen (je Seite, Meter) —
+ * dieselbe „Tiefenstufe"-Technik wie die Flügelrahmen-Verschachtelung bei
+ * Fenstern ({@link frameMeshesForOpening}s `sashFrontN`/`sashBackN`): ein
+ * zweiter, dünnerer Quader mittig im Blatt sitzt um {@link PANEL_RECESS}
+ * zurückversetzt ⇒ wirkt von beiden Seiten vertieft.
+ */
+const PANEL_RECESS = 0.012;
+
+/**
+ * Kassettentür-Blatt (`DoorType.leafStyle === "kassette"`): statt einer
+ * glatten Blatt-Tafel ({@link doorLeafPanels}) ein Raster aus
+ * `panelRows × panelCols` Feldern — äusserer Rahmen + Trennstege in voller
+ * Blattdicke ({@link DOOR_LEAF_THICK}, dieselbe Technik wie die Sprossen-
+ * Raster-Riegel bei Fenstern, `mullionRows`/`mullionCols` in
+ * {@link frameMeshesForOpening}), die Felder selbst dünner und um
+ * {@link PANEL_RECESS} zurückversetzt (vertiefter Kassetten-Look). Steg- und
+ * Feld-Quader überlappen an den Rändern geringfügig (das vertiefte Feld
+ * verschwindet dort einfach hinter dem dickeren Steg) — bewusst in Kauf
+ * genommen statt pixelgenauer Spaltberechnung, rein dekorative Geometrie
+ * ohne Boolean-Anspruch.
+ */
+function kassettePanels(
+  wall: Wall,
+  leafFrom: number,
+  leafTo: number,
+  leafBottom: number,
+  leafTop: number,
+  n0: number,
+  n1: number,
+  params: OpeningFrameParams,
+): RMesh[] {
+  const out: RMesh[] = [];
+  const push = (from: number, to: number, zB: number, zT: number, a: number, b: number) => {
+    const m = openingAxisBox(wall, from, to, zB, zT, a, b, DOOR_LEAF_RGB);
+    if (m) out.push(m);
+  };
+  const cols = params.panelCols;
+  const rows = params.panelRows;
+  const sw = Math.min(
+    PANEL_STILE_WIDTH,
+    (leafTo - leafFrom) / (2 * cols),
+    (leafTop - leafBottom) / (2 * rows),
+  );
+  if (sw <= EPS) {
+    // Blatt zu schmal fürs Raster (Mini-Tür/Degenerat) — Fallback Vollblatt.
+    push(leafFrom, leafTo, leafBottom, leafTop, n0, n1);
+    return out;
+  }
+  // Äusserer Rahmen (Stile/Riegel) — volle Blattdicke.
+  push(leafFrom, leafTo, leafBottom, leafBottom + sw, n0, n1); // unterer Riegel
+  push(leafFrom, leafTo, leafTop - sw, leafTop, n0, n1); // oberer Riegel
+  push(leafFrom, leafFrom + sw, leafBottom, leafTop, n0, n1); // linker Pfosten
+  push(leafTo - sw, leafTo, leafBottom, leafTop, n0, n1); // rechter Pfosten
+  const cellW = (leafTo - leafFrom) / cols;
+  const cellH = (leafTop - leafBottom) / rows;
+  // Trennstege zwischen den Feldern — volle Blattdicke.
+  for (let c = 1; c < cols; c++) {
+    const x = leafFrom + c * cellW;
+    push(x - sw / 2, x + sw / 2, leafBottom, leafTop, n0, n1);
+  }
+  for (let r = 1; r < rows; r++) {
+    const y = leafBottom + r * cellH;
+    push(leafFrom, leafTo, y - sw / 2, y + sw / 2, n0, n1);
+  }
+  // Vertiefte Kassetten-Felder — dünner, mittig zurückversetzt.
+  const n0p = n0 + PANEL_RECESS;
+  const n1p = Math.max(n0p + 0.004, n1 - PANEL_RECESS);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const fx0 = leafFrom + c * cellW + sw / 2;
+      const fx1 = leafFrom + (c + 1) * cellW - sw / 2;
+      const fy0 = leafBottom + r * cellH + sw / 2;
+      const fy1 = leafBottom + (r + 1) * cellH - sw / 2;
+      if (fx1 - fx0 <= EPS || fy1 - fy0 <= EPS) continue;
+      push(fx0, fx1, fy0, fy1, n0p, n1p);
+    }
+  }
   return out;
 }
 
@@ -793,8 +900,15 @@ function doorLeafPanels(
  * `positions` liegen — wie bei den übrigen Meshes — in MODELL-Metern als
  * flaches (x, y, z=Höhe)-Array; render3d bildet sie selbst nach world
  * (x, Höhe, y) ab und rendert die Meshes doppelseitig (append_context_mesh),
- * daher ist die Winding-Reihenfolge der Dreiecke unerheblich. `kind: "imported"`
- * mit gesetzter `color` ⇒ render3d zeichnet die Scheibe in GLASS_RGB.
+ * daher ist die Winding-Reihenfolge der Dreiecke unerheblich. `kind:
+ * "extrusion"` (NICHT "imported"!) mit gesetzter `color` ⇒ render3d zeichnet
+ * die Scheibe in GLASS_RGB — "extrusion" ist zugleich die Weiche gegen die
+ * Nord-Achsen-Negation, die `append_context_mesh` NUR für `"imported"`/
+ * `"terrain"` anwendet (echte, unabhängige Import-Rohdaten); Öffnungs-Boxen
+ * entstehen dagegen orientierungserhaltend aus der Wandachse wie eine Wand
+ * selbst (Fund 2026-09-27: mit `kind:"imported"` wäre die Scheibe/der Rahmen
+ * für jede Wand ausserhalb y=0 an der falschen Stelle gerendert worden —
+ * s. PENDENZEN.md).
  */
 export function emitOpeningGlass(project: Project): RMesh[] {
   const out: RMesh[] = [];

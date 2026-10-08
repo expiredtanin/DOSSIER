@@ -137,9 +137,16 @@ function parseColor(hex: string | undefined): Rgba | null {
  */
 const GREY_RGB = 0.549;
 
-/** Färbt auf den festen Grauton um, wenn das Primitiv im Darstellungsmodus „grau" ist. */
-function dim(color: Rgba, greyed: boolean | undefined): Rgba {
-  return greyed ? [GREY_RGB, GREY_RGB, GREY_RGB, color[3]] : color;
+/**
+ * Färbt auf den festen Grauton um, wenn das Primitiv im Darstellungsmodus
+ * „grau" ist, und multipliziert die Objekt-Transparenz (`Drawing2D.opacity`)
+ * in den Alphakanal. Beides ist unabhängig: gedimmt wird UMGEFÄRBT (damit
+ * dünne Linien erkennbar bleiben), transparent wird über Alpha.
+ */
+function dim(color: Rgba, greyed: boolean | undefined, opacity?: number): Rgba {
+  const c: Rgba = greyed ? [GREY_RGB, GREY_RGB, GREY_RGB, color[3]] : color;
+  if (opacity === undefined || opacity >= 1) return c;
+  return [c[0], c[1], c[2], c[3] * Math.max(0, opacity)];
 }
 
 /**
@@ -148,8 +155,10 @@ function dim(color: Rgba, greyed: boolean | undefined): Rgba {
  * gedimmt erkennbar (Nutzer-Wunsch: "im Hintergrund nicht als graue Fläche
  * gefüllt, sondern weiss mit nur den Linien sichtbar").
  */
-function dimFill(color: Rgba, greyed: boolean | undefined): Rgba {
-  return greyed ? [1, 1, 1, color[3]] : color;
+function dimFill(color: Rgba, greyed: boolean | undefined, opacity?: number): Rgba {
+  const c: Rgba = greyed ? [1, 1, 1, color[3]] : color;
+  if (opacity === undefined || opacity >= 1) return c;
+  return [c[0], c[1], c[2], c[3] * Math.max(0, opacity)];
 }
 
 /**
@@ -409,7 +418,7 @@ export function compilePrimitivesToGpu(
             track(pt.x, pt.y);
           }
           for (const t of tris) fillIdx.push(base + t);
-          addFillBatch(tris.length, dimFill(fill, prim.greyed));
+          addFillBatch(tris.length, dimFill(fill, prim.greyed, prim.opacity));
         }
       }
       // Schraffur (nach der Füllung, vor/passend zum Umriss — wie der SVG stapelt):
@@ -427,16 +436,18 @@ export function compilePrimitivesToGpu(
       // deckungsgleich mit den Schichtfugen in beiden Modi.
       // `hatch.dash` wird geometrisch (Strich/Lücke) aufgelöst, da die GL-
       // Linien-Pipeline kein Dash kennt.
-      // Bild-Schraffur (kind==="image"): WebGL2-Ebene kennt keine Muster-Textur →
-      // FALLBACK auf die neutrale Poché-Füllung (oben), keine Musterlinien. Der
-      // Random-Untermodus läuft transparent über `buildHatchRuns` (Streu-Striche).
+      // Bild-/Verlauf-Schraffur (kind==="image"/"gradient"): WebGL2-Ebene kennt
+      // weder Muster-Textur noch echten Farbverlauf → FALLBACK auf die neutrale
+      // Poché-Füllung (oben), keine Musterlinien. Der Random-Untermodus läuft
+      // transparent über `buildHatchRuns` (Streu-Striche).
       if (
         prim.hatch &&
         prim.hatch.kind !== 'image' &&
+        prim.hatch.kind !== 'gradient' &&
         prim.hatch.pattern !== 'none' &&
         prim.hatch.pattern !== 'solid'
       ) {
-        const hatchColor = dim(parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1], prim.greyed);
+        const hatchColor = dim(parseColor(prim.hatch.color) ?? [0.1, 0.1, 0.1, 1], prim.greyed, prim.opacity);
         const hatchMm = prim.hatch.lineWeight > 0 ? prim.hatch.lineWeight : 0.13;
         const runs = applyDashRuns(buildHatchRuns(prim.pts, prim.hatch), prim.hatch.dash);
         for (const run of runs) strokePolyline(run, false, hatchColor, hatchMm, false);
@@ -446,10 +457,10 @@ export function compilePrimitivesToGpu(
       // zoomrichtig in px (wie SVG-printStrokeVb → GL == SVG).
       const stroke = parseColor(prim.stroke);
       if (stroke && prim.strokeWidthMm > 0 && prim.pts.length >= 2) {
-        strokePolygonOutline(prim.pts, dim(stroke, prim.greyed), prim.strokeWidthMm, prim.noStrokeEdges);
+        strokePolygonOutline(prim.pts, dim(stroke, prim.greyed, prim.opacity), prim.strokeWidthMm, prim.noStrokeEdges);
       }
     } else if (prim.kind === 'line') {
-      const color = dim(parseColor(prim.color) ?? [0.1, 0.1, 0.1, 1], prim.greyed);
+      const color = dim(parseColor(prim.color) ?? [0.1, 0.1, 0.1, 1], prim.greyed, prim.opacity);
       if (prim.zigzag) {
         // Zickzack-Linie → gehrter Polylinienzug (amplitude/wavelength Papier-mm
         // → Modell-Meter über dieselbe Kopplung wie Strichmuster).
@@ -469,6 +480,7 @@ export function compilePrimitivesToGpu(
       const color = dim(
         parseColor((prim as { color?: string }).color) ?? [0.1, 0.1, 0.1, 1],
         prim.greyed,
+        prim.opacity,
       );
       const strokeMm = prim.weightMm || 0.18;
       const c = prim.center;
@@ -507,7 +519,7 @@ export function compilePrimitivesToGpu(
       // kein Kreis-Primitiv → hier bildschirm-adaptiv tessellieren (wie 'arc').
       // Kreis = voller Umlauf (geschlossen, optional gefüllt), Bogen = a0..a1 (CCW,
       // offen). OHNE diesen Zweig blieben gezeichnete Kreise/Bögen im GL unsichtbar.
-      const stroke = dim(parseColor(prim.stroke) ?? [0.1, 0.1, 0.1, 1], prim.greyed);
+      const stroke = dim(parseColor(prim.stroke) ?? [0.1, 0.1, 0.1, 1], prim.greyed, prim.opacity);
       const strokeMm = prim.weightMm || 0.18;
       const c = prim.center;
       const TAU = Math.PI * 2;
@@ -544,7 +556,7 @@ export function compilePrimitivesToGpu(
               track(pt.x, pt.y);
             }
             for (const t of tris) fillIdx.push(base + t);
-            addFillBatch(tris.length, dim(fill, prim.greyed));
+            addFillBatch(tris.length, dim(fill, prim.greyed, prim.opacity));
           }
         }
       }

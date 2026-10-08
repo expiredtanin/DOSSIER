@@ -1,11 +1,13 @@
 /**
  * `leaderCommand` — Zielpunkt + Textanker → leeres `text`-Element mit
  * `leaderTarget` gesetzt, meldet `focusDrawingId` (öffnet den Inline-Editor).
+ * Nutzer-Wunsch „kein Knick-Punkt wie bei AutoCADs Multileader": optionale
+ * Knickpunkte über die Option „bends" (Default 0 = unverändertes Verhalten).
  */
 
 import { describe, it, expect } from "vitest";
 import { leaderCommand } from "./leader";
-import type { CommandContext, Project } from "../types";
+import type { CommandContext, CommandState, Project } from "../types";
 
 function project(): Project {
   return {
@@ -68,5 +70,61 @@ describe("leaderCommand", () => {
       expect(g.leaderTarget).toEqual({ x: 10, y: 10 });
     }
     expect(next.drawings2d[0].id).toBe(result.focusDrawingId);
+  });
+});
+
+/** Zyklt die "bends"-Option, bis der gewünschte Wert erreicht ist (unabhängig
+ *  vom aktuellen Stand — Option ist ein persistentes Modul-Singleton, s.
+ *  `lastBendCount`, dasselbe Muster wie `lastCount` bei Array). */
+function setBends(state: CommandState, ctx: CommandContext, target: number): CommandState {
+  let s = state;
+  for (let i = 0; i <= 4; i++) {
+    if (leaderCommand.options(s)[0].value === String(target)) return s;
+    [s] = leaderCommand.onInput(s, { kind: "option", id: "bends" }, ctx);
+  }
+  return s;
+}
+
+describe("leaderCommand — Knickpunkte (Multileader-Stil)", () => {
+  it("Default (0 Knicke): keine leaderBendPoints im committeten Element", () => {
+    const p = project();
+    const ctx = makeCtx(p);
+    const state = setBends(leaderCommand.init(), ctx, 0);
+    const [afterTarget] = leaderCommand.onInput(state, { kind: "point", point: { x: 10, y: 10 } }, ctx);
+    const [, result] = leaderCommand.onInput(afterTarget, { kind: "point", point: { x: 2, y: 2 } }, ctx);
+    const g = result.commit!(p).drawings2d[0].geom;
+    if (g.shape === "text") expect(g.leaderBendPoints).toBeUndefined();
+  });
+
+  it("1 Knick: Ziel → Knick → Anker committet leaderTarget UND leaderBendPoints", () => {
+    const p = project();
+    const ctx = makeCtx(p);
+    let state = setBends(leaderCommand.init(), ctx, 1);
+    [state] = leaderCommand.onInput(state, { kind: "point", point: { x: 10, y: 10 } }, ctx); // Ziel
+    expect(leaderCommand.prompt(state)).toBe("cmd.leader.bend");
+    [state] = leaderCommand.onInput(state, { kind: "point", point: { x: 6, y: 8 } }, ctx); // Knick
+    expect(leaderCommand.prompt(state)).toBe("cmd.leader.anchor");
+    const [, result] = leaderCommand.onInput(state, { kind: "point", point: { x: 2, y: 2 } }, ctx); // Anker
+    const g = result.commit!(p).drawings2d[0].geom;
+    expect(g.shape).toBe("text");
+    if (g.shape === "text") {
+      expect(g.at).toEqual({ x: 2, y: 2 });
+      expect(g.leaderTarget).toEqual({ x: 10, y: 10 });
+      expect(g.leaderBendPoints).toEqual([{ x: 6, y: 8 }]);
+    }
+  });
+
+  it("2 Knicke: beide Punkte landen in leaderBendPoints, in Klick-Reihenfolge", () => {
+    const p = project();
+    const ctx = makeCtx(p);
+    let state = setBends(leaderCommand.init(), ctx, 2);
+    [state] = leaderCommand.onInput(state, { kind: "point", point: { x: 0, y: 0 } }, ctx); // Ziel
+    [state] = leaderCommand.onInput(state, { kind: "point", point: { x: 1, y: 1 } }, ctx); // Knick 1
+    [state] = leaderCommand.onInput(state, { kind: "point", point: { x: 2, y: 1 } }, ctx); // Knick 2
+    const [, result] = leaderCommand.onInput(state, { kind: "point", point: { x: 3, y: 0 } }, ctx); // Anker
+    const g = result.commit!(p).drawings2d[0].geom;
+    if (g.shape === "text") {
+      expect(g.leaderBendPoints).toEqual([{ x: 1, y: 1 }, { x: 2, y: 1 }]);
+    }
   });
 });

@@ -1,10 +1,30 @@
 // Tab „Türtypen" — Bauart, Blattausführung/-zahl, Zarge und Standardmaße.
 // Nutzt den generischen {@link TypeLibraryTab}-Rumpf (siehe dort).
 
-import type { DoorType, Project } from "../../model/types";
+import type { DoorType, Opening, Project } from "../../model/types";
 import { t } from "../../i18n";
 import { FieldRow, NumberField, Segmented, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
+import { ElevationPreview } from "../ElevationPreview";
+
+/**
+ * Synthetische Öffnungs-Instanz NUR für die Vorschau — s. WindowStylesTab.
+ * Türen sitzen am Boden (`sillHeight` = 0, wie bei einer echten Tür-Instanz).
+ */
+function previewOpeningFor(door: DoorType): Opening {
+  return {
+    id: "preview",
+    type: "opening",
+    hostWallId: "",
+    categoryCode: "",
+    kind: "door",
+    position: 0,
+    width: door.defaultWidth,
+    height: door.defaultHeight,
+    sillHeight: 0,
+    typeId: door.id,
+  };
+}
 
 const DOOR_KIND_OPTIONS: { value: DoorType["kind"]; labelKey: string }[] = [
   { value: "dreh", labelKey: "resources.doorKind.dreh" },
@@ -46,6 +66,9 @@ export function DoorStylesTab({
       onDelete={onDeleteDoorType}
       renderFields={(door, patch) => (
         <>
+          <div className="res-md-preview">
+            <ElevationPreview opening={previewOpeningFor(door)} dt={door} />
+          </div>
           <FieldRow label={t("resources.field.doorKind")}>
             <SelectField
               value={door.kind}
@@ -80,6 +103,28 @@ export function DoorStylesTab({
                 max={1}
               />
             </FieldRow>
+          )}
+          {door.leafStyle === "kassette" && (
+            <>
+              <FieldRow label={t("resources.field.panelCols")}>
+                <NumberField
+                  value={door.panelCols ?? 2}
+                  onChange={(panelCols) => patch({ panelCols: Math.round(panelCols) })}
+                  step={1}
+                  min={1}
+                  max={6}
+                />
+              </FieldRow>
+              <FieldRow label={t("resources.field.panelRows")}>
+                <NumberField
+                  value={door.panelRows ?? 3}
+                  onChange={(panelRows) => patch({ panelRows: Math.round(panelRows) })}
+                  step={1}
+                  min={1}
+                  max={8}
+                />
+              </FieldRow>
+            </>
           )}
           <FieldRow label={t("resources.field.frameThickness")}>
             <NumberField

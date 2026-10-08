@@ -9,8 +9,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { t } from "../i18n";
-import { parseDxf } from "../io/dxfParser";
 import type { DxfImportResult } from "../io/dxfParser";
+import { parseDxfAsync } from "../io/dxfParserAsync";
 import { buildDrawings } from "../ui/ImportDialog";
 import type { ImportDecision } from "../ui/ImportDialog";
 import { exportScheduleCsv } from "../export/exportSchedule";
@@ -45,7 +45,7 @@ function drawingsBBox(
   };
   for (const d of drawings) {
     const g = d.geom;
-    if (g.shape === "line" || g.shape === "xline") { acc(g.a.x, g.a.y); acc(g.b.x, g.b.y); }
+    if (g.shape === "line" || g.shape === "xline" || g.shape === "ray") { acc(g.a.x, g.a.y); acc(g.b.x, g.b.y); }
     else if (g.shape === "polyline") for (const p of g.pts) acc(p.x, p.y);
     else if (g.shape === "rect") { acc(g.min.x, g.min.y); acc(g.max.x, g.max.y); }
     else if (g.shape === "circle" || g.shape === "arc") {
@@ -59,6 +59,12 @@ function drawingsBBox(
     } else if (g.shape === "dimension") {
       for (const p of g.pts) acc(p.x, p.y);
     } else if (g.shape === "kote") acc(g.at.x, g.at.y);
+    else if (g.shape === "detailref") acc(g.at.x, g.at.y);
+    else if (g.shape === "scalebar") {
+      acc(g.at.x, g.at.y);
+      acc(g.at.x + g.segmentLength * g.segments, g.at.y);
+    }
+    else if (g.shape === "pointmarker") acc(g.at.x, g.at.y);
     else if (g.shape === "text") acc(g.at.x, g.at.y);
     else if (g.shape === "block") acc(g.at.x, g.at.y);
   }
@@ -72,6 +78,7 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
   switch (g.shape) {
     case "line": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
     case "xline": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
+    case "ray": return { ...d, geom: { ...g, a: mv(g.a), b: mv(g.b) } };
     case "polyline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "rect": return { ...d, geom: { ...g, min: mv(g.min), max: mv(g.max) } };
     case "circle": return { ...d, geom: { ...g, center: mv(g.center) } };
@@ -81,6 +88,9 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
     case "spline": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "dimension": return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
     case "kote": return { ...d, geom: { ...g, at: mv(g.at) } };
+    case "detailref": return { ...d, geom: { ...g, at: mv(g.at) } };
+    case "scalebar": return { ...d, geom: { ...g, at: mv(g.at) } };
+    case "pointmarker": return { ...d, geom: { ...g, at: mv(g.at) } };
     case "text":
       return {
         ...d,
@@ -88,6 +98,7 @@ function translateDrawing(d: Drawing2D, dx: number, dy: number): Drawing2D {
           ...g,
           at: mv(g.at),
           ...(g.leaderTarget ? { leaderTarget: mv(g.leaderTarget) } : {}),
+          ...(g.leaderBendPoints ? { leaderBendPoints: g.leaderBendPoints.map(mv) } : {}),
           ...(g.pathPts ? { pathPts: g.pathPts.map(mv) } : {}),
         },
       };
@@ -135,6 +146,27 @@ export function useProjectFileActions(
     content: string;
     info: LockInfo | null;
   } | null>(null);
+  // Referenz-Identität des zuletzt gespeicherten/geladenen Projekt-Stands.
+  // `setProject` liefert bei JEDER echten Änderung eine NEUE `Project`-Referenz
+  // (structural sharing, s. historySlice.ts) — ein reiner `!==`-Vergleich
+  // genügt daher als billiger "ungespeicherte Änderungen"-Test, ganz ohne
+  // JSON-Diff. Start = das beim allerersten Render aktive Projekt (Startzustand
+  // gilt als "gespeichert", noch nichts zu verlieren).
+  const lastSavedProjectRef = useRef(project);
+  // Eine verworfene Aktion (Neu/Öffnen), die erst nach Bestätigung des
+  // "Ungespeicherte Änderungen"-Dialogs ausgeführt wird — s. `guardDiscard`.
+  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
+  /**
+   * Führt `action` (Projekt ERSETZEN — Neu/Öffnen) nur direkt aus, wenn seit
+   * dem letzten Speichern/Laden nichts geändert wurde; sonst wird sie als
+   * `pendingDiscard` geparkt und der Nutzer über `UnsavedChangesDialog`
+   * gefragt (Speichern/Nicht speichern/Abbrechen) — ersetzt das bisherige
+   * kommentarlose Überschreiben (Bug: Cmd+N löschte bisher stillschweigend).
+   */
+  const guardDiscard = (action: () => void) => {
+    if (project !== lastSavedProjectRef.current) setPendingDiscard(() => action);
+    else action();
+  };
 
   // Best-effort Lock-Freigabe beim Fenster-Schliessen (sauberes Timing; der
   // OS-Lock fällt bei Prozessende/Absturz ohnehin automatisch weg). No-op ohne Tauri.
@@ -194,16 +226,23 @@ export function useProjectFileActions(
       r.readAsArrayBuffer(file);
       return;
     }
+    // Async-Zustand (identisches Muster zum DWG-Zweig oben): Dialog öffnet
+    // sofort und zeigt einen Ladehinweis, während `parseDxf` in einem Web
+    // Worker läuft — bei sehr grossen Dateien (Kataster-Import einer ganzen
+    // Stadt, Nutzer-Report 2026-10-08) blockierte das zuvor für die GESAMTE
+    // Parse-Dauer den Haupt-Thread/die UI (s. `io/dxfParserAsync.ts`).
+    setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true });
     const r = new FileReader();
     r.onload = () => {
-      let parsed: DxfImportResult | null = null;
-      try {
-        parsed = parseDxf(String(r.result ?? ""));
-      } catch (err) {
-        console.error("DXF-Import fehlgeschlagen:", err);
-        parsed = { meshes: [], contours: [] };
-      }
-      setImportState({ fileName: file.name, isDwg: false, parsed });
+      parseDxfAsync(String(r.result ?? ""))
+        .then((parsed) => {
+          setImportState({ fileName: file.name, isDwg: false, parsed, loading: false });
+        })
+        .catch((err) => {
+          console.error("DXF-Import fehlgeschlagen:", err);
+          const parsed: DxfImportResult = { meshes: [], contours: [] };
+          setImportState({ fileName: file.name, isDwg: false, parsed, loading: false });
+        });
     };
     r.readAsText(file);
   };
@@ -217,24 +256,33 @@ export function useProjectFileActions(
   // Shape-Sanity-Check (walls/layers als Array), damit ein fremdes/kaputtes
   // JSON nicht die App zerlegt. Alte „.json"-Projekte bleiben ladbar (Filter
   // erlaubt beide Endungen).
-  const onSaveProject = () => {
+  // Liefert `true`, wenn wirklich gespeichert wurde (nicht bei abgebrochenem
+  // nativem Dialog) — `guardDiscard`-Aufrufer verlassen sich darauf, um NICHT
+  // zu verwerfen, wenn der Nutzer den Speichern-Dialog abbricht.
+  const onSaveProject = (): Promise<boolean> => {
     const json = JSON.stringify(project, null, 2);
-    void saveProjectFile(json, project.name, (path) =>
+    return saveProjectFile(json, project.name, (path) =>
       addRecentProject(path, project.name || "modell"),
-    );
+    ).then((saved) => {
+      if (saved) lastSavedProjectRef.current = project;
+      return saved;
+    });
   };
   // „Neu" (Datei-Menü): leeres Projekt, wie am Startbildschirm — löst dabei
   // einen evtl. gehaltenen Datei-Lock der bisherigen Projektdatei und vergisst
-  // deren Pfad (das leere Projekt ist noch NICHT gespeichert).
-  const onNewProject = () => {
+  // deren Pfad (das leere Projekt ist noch NICHT gespeichert). Über
+  // `guardDiscard`: bei ungespeicherten Änderungen erst der Dialog, s. o.
+  const onNewProject = () => guardDiscard(() => {
     releaseCurrentProjectLock();
     setProject(emptyProject);
-  };
+    lastSavedProjectRef.current = emptyProject;
+  });
 
   // Übernimmt ein neues, noch UNGESPEICHERTES Projekt aus Vorlagen-Inhalt
   // (Musterhaus ODER eine gewählte `.obpt`-Datei): grobe Form-Prüfung wie beim
   // normalen Öffnen, aber bewusst OHNE Pfad/Lock zu setzen — die Vorlage
   // bleibt unangetastet, das nächste „Speichern" fragt nach einem neuen Ort.
+  // Ersetzt ebenfalls das bisherige Projekt → über `guardDiscard`.
   const applyTemplateContent = (content: string): boolean => {
     try {
       const parsed = JSON.parse(content) as Partial<Project>;
@@ -242,8 +290,11 @@ export function useProjectFileActions(
         console.warn("Vorlagen-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
         return false;
       }
-      releaseCurrentProjectLock();
-      setProject(parsed as Project);
+      guardDiscard(() => {
+        releaseCurrentProjectLock();
+        setProject(parsed as Project);
+        lastSavedProjectRef.current = parsed as Project;
+      });
       return true;
     } catch (err) {
       console.error("Vorlage konnte nicht geladen werden:", err);
@@ -254,10 +305,12 @@ export function useProjectFileActions(
   // als Start eines neuen Projekts. `structuredClone`, damit spätere Bearbeitung
   // nicht das gemeinsame Modul-Singleton mutiert (es dient auch als Store-
   // Startzustand, s. state/projectSlice.ts).
-  const onNewProjectFromSample = () => {
+  const onNewProjectFromSample = () => guardDiscard(() => {
     releaseCurrentProjectLock();
-    setProject(structuredClone(sampleProject));
-  };
+    const next = structuredClone(sampleProject);
+    setProject(next);
+    lastSavedProjectRef.current = next;
+  });
   // „Neu aus Vorlage: Datei wählen…" — native `.obpt`-Dialog unter Tauri, sonst
   // das versteckte `<input type=file>` (projectTemplateFileInputRef).
   const onNewProjectFromTemplate = () => {
@@ -301,11 +354,14 @@ export function useProjectFileActions(
         console.warn("Projekt-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
         return;
       }
-      releaseCurrentProjectLock();
-      setProject(parsed as Project);
-      openedProjectPathRef.current = path;
-      projectLockOwnedRef.current = lockOwned;
-      addRecentProject(path, (parsed as Project).name || "modell");
+      guardDiscard(() => {
+        releaseCurrentProjectLock();
+        setProject(parsed as Project);
+        lastSavedProjectRef.current = parsed as Project;
+        openedProjectPathRef.current = path;
+        projectLockOwnedRef.current = lockOwned;
+        addRecentProject(path, (parsed as Project).name || "modell");
+      });
     } catch (err) {
       console.error("Projekt-Import fehlgeschlagen:", err);
     }
@@ -408,8 +464,11 @@ export function useProjectFileActions(
         }
         // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
         // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
-        releaseCurrentProjectLock();
-        setProject(parsed as Project);
+        guardDiscard(() => {
+          releaseCurrentProjectLock();
+          setProject(parsed as Project);
+          lastSavedProjectRef.current = parsed as Project;
+        });
       } catch (err) {
         console.error("Projekt-Import fehlgeschlagen:", err);
       }
@@ -459,6 +518,8 @@ export function useProjectFileActions(
     projectLockOwnedRef,
     lockConflict,
     setLockConflict,
+    pendingDiscard,
+    setPendingDiscard,
     openImportForFile,
     onSaveProject,
     onNewProject,

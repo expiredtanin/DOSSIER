@@ -26,14 +26,18 @@ export function needsPattern(pattern: HatchRender["pattern"]): boolean {
 }
 
 /**
- * Ob ein Polygon ein SVG-`<pattern>` (in `<defs>`) braucht:
+ * Ob ein Polygon einen SVG-Fill-Server aus `<defs>` braucht (`<pattern>` ODER
+ * `<linearGradient>`/`<radialGradient>` — beide lassen sich identisch per
+ * `fill="url(#id)"` referenzieren):
  *  • Bild-Schraffur (`kind==="image"`) → ja (gekacheltes Bild-Muster).
+ *  • Verlauf-Schraffur (`kind==="gradient"`) → ja (Farbverlauf).
  *  • Random-Vektor (`lines==="random"`) → NEIN: die Streu-Striche werden als
  *    geclippte Polylinien direkt gezeichnet (Determinismus, Parität zu GL/PDF).
  *  • sonst die klassischen Parallel-/Kreuz-/Dämmungs-Muster.
  */
 export function polyUsesPattern(h: HatchRender): boolean {
   if (h.kind === "image") return !!h.image;
+  if (h.kind === "gradient") return !!h.gradient;
   if (h.lines === "random") return false;
   return needsPattern(h.pattern);
 }
@@ -89,6 +93,32 @@ export function HatchPattern({
       >
         <image href={img.src} x={0} y={0} width={w} height={h} preserveAspectRatio="none" />
       </pattern>
+    );
+  }
+
+  if (hatch.kind === "gradient" && hatch.gradient) {
+    // Verlauf-Schraffur: <linearGradient>/<radialGradient> statt <pattern> —
+    // SVG referenziert beide identisch über `fill="url(#id)"`, der Aufrufer
+    // (renderPrimitive) muss NICHT unterscheiden. objectBoundingBox (SVG-
+    // Default) spannt 0..1 relativ zur Polygon-Bbox auf, unabhängig vom
+    // aktuellen Zoom/Massstab.
+    const g = hatch.gradient;
+    if (g.type === "radial") {
+      return (
+        <radialGradient id={id}>
+          <stop offset="0%" stopColor={g.color1} />
+          <stop offset="100%" stopColor={g.color2} />
+        </radialGradient>
+      );
+    }
+    const rad = (g.angle * Math.PI) / 180;
+    const dx = Math.cos(rad) / 2;
+    const dy = Math.sin(rad) / 2;
+    return (
+      <linearGradient id={id} x1={0.5 - dx} y1={0.5 - dy} x2={0.5 + dx} y2={0.5 + dy}>
+        <stop offset="0%" stopColor={g.color1} />
+        <stop offset="100%" stopColor={g.color2} />
+      </linearGradient>
     );
   }
 
@@ -438,6 +468,17 @@ export function PrimitiveShape({
   // Gedimmte Elemente werden auf den festen Grauton umgefärbt (Strich, Füllung
   // UND Schraffur) — deutlich erkennbar unabhängig von Papierfarbe/Linienstärke.
   const shape = renderPrimitive(p.greyed ? greyedCopy(p) : p, index, toScreen, hairline, paperScale);
+  // Objekt-Transparenz (Drawing2D.opacity, in addDrawing2D aufgestempelt) als
+  // eine Hülle darüber — so muss sie nicht in jeden Primitiv-Zweig eingebaut
+  // werden und wirkt gleichermassen auf Strich, Füllung und Schraffur.
+  const op = p.kind === "drawingImage" ? undefined : p.opacity;
+  if (op !== undefined && op < 1 && shape) {
+    return (
+      <g opacity={Math.max(0, op)} key={index}>
+        {shape}
+      </g>
+    );
+  }
   return shape;
 }
 
@@ -513,6 +554,17 @@ export function renderPrimitive(
         return (
           <g>
             <polygon points={pts} fill={p.fill} stroke="none" />
+            <polygon points={pts} fill={`url(#hatch-${index})`} stroke="none" />
+            {outline()}
+          </g>
+        );
+      }
+      // Verlauf-Schraffur: der Verlauf (<linearGradient>/<radialGradient> aus
+      // <defs>, id=hatch-index) deckt die Fläche vollständig ab — keine
+      // separate Grundfüllung nötig, unabhängig vom `pattern`-Feld.
+      if (p.hatch.kind === "gradient" && p.hatch.gradient) {
+        return (
+          <g>
             <polygon points={pts} fill={`url(#hatch-${index})`} stroke="none" />
             {outline()}
           </g>

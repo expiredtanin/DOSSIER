@@ -10,11 +10,14 @@ import type { CategoryDisplayResolver } from "../plan/generatePlan";
 import type { DetailLevel } from "../ui/TopBar";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import { savePlanPdf } from "../export/exportPdf";
+import { savePlanSvg } from "../export/exportSvg";
 import { savePlanDxf } from "../export/exportDxf";
 import type { ExportPdfDecision } from "../ui/ExportPdfDialog";
 import type { ExportDxfDecision } from "../ui/ExportDxfDialog";
 import { projectToWorldCoords } from "../model/geoRebase";
 import type { Project } from "../model/types";
+import { filterProjectToSelection } from "./exportScope";
+import type { GroupMembership } from "./groupActions";
 
 export function useExportHandlers(opts: {
   project: Project;
@@ -25,10 +28,13 @@ export function useExportHandlers(opts: {
   detail: DetailLevel;
   referenceLines: boolean;
   planColorMode: "color" | "mono";
+  /** Aktuelle Auswahl (alle Arten) — für den „nur Auswahl exportieren"-Scope. */
+  selectionMembers: Partial<GroupMembership>;
   setExportOpen: (open: boolean) => void;
   setExportDxfOpen: (open: boolean) => void;
 }): {
   onExportPdf: (decision: ExportPdfDecision) => Promise<void>;
+  onExportSvg: (decision: ExportPdfDecision) => void;
   onExportDxf: (decision: ExportDxfDecision) => void;
 } {
   const {
@@ -40,19 +46,26 @@ export function useExportHandlers(opts: {
     detail,
     referenceLines,
     planColorMode,
+    selectionMembers,
     setExportOpen,
     setExportDxfOpen,
   } = opts;
 
+  const scopedProject = (selectionOnly: boolean): Project =>
+    selectionOnly ? filterProjectToSelection(project, selectionMembers) : project;
+
   const onExportPdf = async (decision: ExportPdfDecision) => {
     const plan = generatePlan(
-      project,
+      scopedProject(decision.selectionOnly),
       activeLevelId,
       visibleCodes,
       categoryDisplay,
       detail,
       referenceLines,
       planColorMode === "mono",
+      true, // includeGlobal (Default, explizit weil forPrint danach folgt)
+      undefined, // scaleDenominator (Default — der ECHTE Export-Massstab wirkt separat in savePlanPdf)
+      true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
     );
     await savePlanPdf(plan, {
       scaleDenominator: decision.scaleDenominator,
@@ -60,6 +73,31 @@ export function useExportHandlers(opts: {
       orientation: decision.orientation,
       title: activeLevelName,
       subtitle: project.name,
+      fileName: `${project.name}-${activeLevelName}`,
+    });
+    setExportOpen(false);
+  };
+
+  // SVG-Export: dieselbe Plan-Erzeugung + denselben Massstab/Papier/
+  // Ausrichtung wie der PDF-Export (Nutzer-Wunsch „Kein SVG-Export"), nur
+  // ohne den jsPDF/svg2pdf-Umweg — reiner Download des Druck-SVG.
+  const onExportSvg = (decision: ExportPdfDecision) => {
+    const plan = generatePlan(
+      scopedProject(decision.selectionOnly),
+      activeLevelId,
+      visibleCodes,
+      categoryDisplay,
+      detail,
+      referenceLines,
+      planColorMode === "mono",
+      true, // includeGlobal (Default)
+      undefined, // scaleDenominator (Default)
+      true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
+    );
+    savePlanSvg(plan, {
+      scaleDenominator: decision.scaleDenominator,
+      paper: decision.paper,
+      orientation: decision.orientation,
       fileName: `${project.name}-${activeLevelName}`,
     });
     setExportOpen(false);
@@ -74,7 +112,7 @@ export function useExportHandlers(opts: {
     // damit die Datei in anderer CAD-Software lagerichtig ankommt — auch wenn
     // lokal nahe (0,0) gezeichnet wurde. Ohne Bezug bleibt alles lokal.
     // (Der Papier-/Layout-Export bleibt bewusst in lokalen Koordinaten.)
-    const exportProject = projectToWorldCoords(project);
+    const exportProject = projectToWorldCoords(scopedProject(decision.selectionOnly));
     const plan = generatePlan(
       exportProject,
       activeLevelId,
@@ -83,6 +121,9 @@ export function useExportHandlers(opts: {
       detail,
       referenceLines,
       planColorMode === "mono",
+      true, // includeGlobal (Default)
+      undefined, // scaleDenominator (Default)
+      true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
     );
     savePlanDxf(plan, exportProject, {
       title: activeLevelName,
@@ -92,5 +133,5 @@ export function useExportHandlers(opts: {
     setExportDxfOpen(false);
   };
 
-  return { onExportPdf, onExportDxf };
+  return { onExportPdf, onExportSvg, onExportDxf };
 }

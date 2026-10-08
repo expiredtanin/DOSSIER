@@ -46,6 +46,6 @@ export function drawingMoveAnchor(d: Drawing2D, verts: Vec2[]): Vec2 | null {
   }
   const g = d.geom;
   if (g.shape === "circle" || g.shape === "arc" || g.shape === "ellipse") return g.center;
-  if (g.shape === "text" || g.shape === "kote") return g.at;
+  if (g.shape === "text" || g.shape === "kote" || g.shape === "detailref" || g.shape === "scalebar" || g.shape === "pointmarker") return g.at;
   return null;
 }

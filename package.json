@@ -36,6 +36,7 @@
     "dxf-parser": "^1.1.2",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
+    "lcms-wasm": "^1.0.5",
     "pdfjs-dist": "^6.2.108",
     "polygon-clipping": "^0.15.7",
     "react": "^18.3.1",

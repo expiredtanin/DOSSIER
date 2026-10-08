@@ -46,8 +46,19 @@ import { useEffect, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
-import { projectToModel3d, pickGeometry, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
+import { projectToModel3d, pickGeometry, draftWorldLines, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
 import type { DetailLevel, RenderMode, View3d } from "../ui/TopBar";
+import type { ToolDraft } from "../tools/types";
+import { hudSegments, type HudFieldsState } from "../tools/hudFormat";
+import type { EngineMods } from "../commands/engine";
+import { applyAngleConstraint } from "../tools/snapping";
+import {
+  neighbor3dVertex,
+  findCoincidentVertices,
+  findMoveCoincidentVertices,
+  type CoincidentVertex,
+  type MoveCoincidentVertex,
+} from "./grip3dHud";
 import { t } from "../i18n";
 import { useWasm3dRenderer } from "./useWasm3dRenderer";
 import type { Camera3d } from "./useWasm3dRenderer";
@@ -57,7 +68,7 @@ import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
-  | { kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject"; id: string }
+  | { kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing"; id: string }
   | null;
 
 /** Klick-vs-Drag-Schwelle (Pixel): bleibt die Maus zwischen pointerdown und
@@ -83,6 +94,18 @@ const CLICK_THRESHOLD_PX = 4;
 // GUI-Element aus. Kosten: die Bildschirm-Position muss der Kamera folgen —
 // `useEffect` unten pollt sie per `requestAnimationFrame`, solange Griffe
 // aktiv sind (billige 2D-Projektion, kein WASM/GPU-Aufruf).
+//
+// INTERAKTION: Klick-Zug-Klick statt Halten-und-Ziehen (Nutzer-Report „ein
+// Klick reicht nicht, man muss immer noch halten" — ein erster Versuch nutzte
+// klassisches `setPointerCapture`-Drag wie ein natives HTML5-Drag, das
+// verlangte durchgehend gedrückte Maustaste). Ein Klick auf einen Griff
+// bewaffnet ihn (`gripDragRef`, KEIN `setPointerCapture`); danach folgt er
+// JEDER Mausbewegung über einen FENSTER-weiten `pointermove`-Listener,
+// unabhängig von der Maustaste. Ein weiterer Klick — auf den Canvas, einen
+// (denselben ODER anderen) Griff, per Rechtsklick oder Doppelklick —
+// bestätigt/beendet ihn. Kamera-Orbit ist währenddessen unterdrückt (wie im
+// Zeichnen-Modus/`commandActive`), damit ein Links-Ziehen nicht gleichzeitig
+// die Kamera dreht.
 type GripKind = "vertex" | "height" | "move" | "edge" | "roofpitch";
 interface Grip {
   kind: GripKind;
@@ -344,6 +367,13 @@ export function Wasm3DViewport({
   onEditEnd,
   section3d = null,
   onClearSection3d,
+  commandActive = false,
+  draft = null,
+  onWorkplanePoint,
+  onWorkplaneConfirm,
+  hudFields = null,
+  onGrip3dEditTab,
+  onGrip3dEditCancel,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -384,11 +414,20 @@ export function Wasm3DViewport({
   editCeilings?: Ceiling[];
   /** Gewählte Dächer — Quelle der 3D-Eckpunkt-/Verschiebe-/First-Griffe. */
   editRoofs?: Roof[];
-  /** Endpunkt-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index` des Elements. */
+  /**
+   * Endpunkt-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index` des
+   * Elements. Optionale `excludeWallIds`/`excludeDrawingIds` = Koinzidenz-
+   * Gruppe (s. `grip3dHud.ts::findCoincidentVertices`) — nur DANN snappt
+   * der Aufrufer den Punkt gegen andere Geometrie; ohne Angabe (z. B. beim
+   * Mitführen koinzidenter Sibling-Ecken) wird `model` unverändert angewandt.
+   * Liefert den effektiv angewandten (ggf. gesnappten) Punkt zurück.
+   */
   onEditVertex?: (
     target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     index: number,
     model: Vec2,
+    excludeWallIds?: Set<string>,
+    excludeDrawingIds?: Set<string>,
   ) => Vec2;
   /** Verschiebe-Griff gezogen: das Element um `delta` (XY) verschieben. */
   onEditBody?: (
@@ -409,6 +448,33 @@ export function Wasm3DViewport({
   section3d?: { point: [number, number, number]; normal: [number, number, number] } | null;
   /** Klick auf den Viewport-Schnitt-Knopf: hebt die Bindung auf (App löscht die Id). */
   onClearSection3d?: () => void;
+  /** Läuft gerade ein Zeichenbefehl (Command-Engine)? Bei `true`: LINKS setzt
+   * Punkte auf der Arbeitsebene statt zu orbiten/zu picken (s. Datei-Kommentar
+   * „Erstellungs-Modus"), analog zum three.js-Pfad (`Viewport3D.tsx`). */
+  commandActive?: boolean;
+  /** Laufende Werkzeug-Vorschau (Rubber-Band) — wird als Linien-Overlay auf der
+   * Arbeitsebene gezeichnet (s. `draftWorldLines`, `plan/toWalls3d.ts`). */
+  draft?: ToolDraft | null;
+  /** Punkt auf der Arbeitsebene gesetzt/bewegt (Modell-XY) — „pick" bei Klick,
+   * „move" bei reiner Cursor-Bewegung (Live-Vorschau). */
+  onWorkplanePoint?: (kind: "move" | "pick", model: Vec2, mods?: EngineMods) => void;
+  /** Doppelklick bzw. Rechtsklick ohne Drag im Zeichenmodus: Befehl abschliessen
+   * (z. B. offene Polylinie beenden). */
+  onWorkplaneConfirm?: () => void;
+  /** Tab-Feld-Zyklus-Zustand der Befehlszeile (s. `ui/CommandLine.tsx`) — speist
+   * das Cursor-HUD (Länge/Winkel, VW-Stil) als DOM-Overlay über dem Canvas,
+   * exakt wie im 2D-Plan (`PlanView.tsx`/`DraftHud`, gemeinsame Formatierung
+   * in `tools/hudFormat.ts`). `null` = kein aktives Feld (Ruhezustand). */
+  hudFields?: HudFieldsState | null;
+  /** Tab während eines laufenden Endpunkt-/Verschiebe-Griff-Drags: Feld-
+   * Controller fürs Cursor-HUD öffnen/zykeln (getippte Werteingabe, s.
+   * `App.tsx::cycleGrip3dEditField`). Ohne Angabe bleibt Tab wirkungslos. */
+  onGrip3dEditTab?: () => void;
+  /** Escape während eines laufenden Griff-Drags (alle 5 Arten): den
+   * zugrundeliegenden `project`-Zustand VOR den Undo-Aufruf zurücksetzen
+   * (`App.tsx::cancelGrip3dEdit`, ruft `undo()`) — diese Komponente selbst
+   * beendet danach zusätzlich ihren lokalen Drag-Zustand (`endGripDrag`). */
+  onGrip3dEditCancel?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
@@ -439,6 +505,23 @@ export function Wasm3DViewport({
   onEditWallTopRef.current = onEditWallTop;
   const onEditEndRef = useRef(onEditEnd);
   onEditEndRef.current = onEditEnd;
+  const onGrip3dEditTabRef = useRef(onGrip3dEditTab);
+  onGrip3dEditTabRef.current = onGrip3dEditTab;
+  const onGrip3dEditCancelRef = useRef(onGrip3dEditCancel);
+  onGrip3dEditCancelRef.current = onGrip3dEditCancel;
+  // Zeichnen-Modus (Erstellungs-Ebene): dieselben Refs wie oben, damit der
+  // stabile Pointer-Listener-Effekt stets den aktuellen Befehlszustand liest.
+  const commandActiveRef = useRef(commandActive);
+  commandActiveRef.current = commandActive;
+  const onWorkplanePointRef = useRef(onWorkplanePoint);
+  onWorkplanePointRef.current = onWorkplanePoint;
+  const onWorkplaneConfirmRef = useRef(onWorkplaneConfirm);
+  onWorkplaneConfirmRef.current = onWorkplaneConfirm;
+  // `draft` selbst (nicht nur die Callbacks) gespiegelt, damit der HUD-rAF-
+  // Loop unten (s. `draftHudScreen`) je Frame den aktuellen Cursor-Punkt liest,
+  // ohne bei jeder Mausbewegung (= jedem neuen `draft`-Objekt) neu zu starten.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const groundElevationRef = useRef(groundElevation);
   groundElevationRef.current = groundElevation;
   const detailRef = useRef(detail);
@@ -557,16 +640,23 @@ export function Wasm3DViewport({
     redrawRef.current();
   }, [ready, section3d, project, setSectionPlane]);
 
-  // Auswahl-Hervorhebung: bei Bereitschaft oder Änderung der Highlight-Linien
-  // (Auswahl gewechselt/aufgehoben) neu setzen + zeichnen. Die Engine hält das
-  // Highlight, bis es erneut gesetzt wird — Kamerabewegungen (Orbit/Pan/Zoom)
-  // lösen hier KEINEN neuen `setHighlightLines`-Aufruf aus, das Highlight
-  // bleibt einfach über den nächsten `render()`-Aufruf hinweg sichtbar.
+  // Auswahl-Hervorhebung ODER Zeichnen-Vorschau (derselbe Kanal, s. Datei-
+  // Kommentar oben): läuft gerade ein Befehl (`commandActive`), hat die
+  // Werkzeug-Vorschau (`draft`) Vorrang vor der (dann ohnehin meist
+  // irrelevanten) Auswahl — exakt wie drawDraft/die Auswahl-Umrisslinie im
+  // three.js-Pfad einander ausschliessen. Neu setzen bei Bereitschaft oder
+  // Änderung von Highlight/Draft/Zeichenmodus. Die Engine hält das Highlight,
+  // bis es erneut gesetzt wird — Kamerabewegungen (Orbit/Pan/Zoom) lösen hier
+  // KEINEN neuen `setHighlightLines`-Aufruf aus, das Highlight bleibt einfach
+  // über den nächsten `render()`-Aufruf hinweg sichtbar.
   useEffect(() => {
     if (!ready) return;
-    setHighlightLines(highlightLines ?? new Float32Array(0));
+    const lines = commandActive
+      ? draftWorldLines(draft, groundElevationRef.current)
+      : (highlightLines ?? new Float32Array(0));
+    setHighlightLines(lines);
     redrawRef.current();
-  }, [ready, highlightLines, setHighlightLines]);
+  }, [ready, highlightLines, commandActive, draft, groundElevation, setHighlightLines]);
 
   // Griff-Bildschirmpositionen: solange Wände/2D-Zeichnungen zum Editieren
   // gewählt sind, pollt ein rAF-Loop ihre Griffpunkte durch die aktuelle
@@ -615,6 +705,80 @@ export function Wasm3DViewport({
     return () => cancelAnimationFrame(raf);
   }, [ready, editWalls, editDrawings, editCeilings, editRoofs]);
 
+  // Cursor-HUD-Bildschirmposition (Länge/Winkel beim Zeichnen ODER Δx/Δy/
+  // Länge-Winkel während eines Griff-Drags, s. `hudFields`-Doc): derselbe
+  // rAF-Projektions-Loop wie `gripScreens` oben, aber für `draft.hud.at`
+  // (Modell-XY) statt Griffpunkte. Läuft durchgehend (nicht auf `commandActive`
+  // gegated) — `draft.hud` wird jetzt AUCH von den 3D-Griff-Callbacks gesetzt
+  // (`App.tsx::onEdit3dVertex`/`onEdit3dBody`, Nutzer-Report „beim Verschieben
+  // von Elementen zeigt es die Werte nicht an"), nicht nur vom Zeichnen-Modus.
+  // Höhe: während eines laufenden Griff-Drags dessen EIGENE Arbeitsebene
+  // (`gripDragRef.current.planeY` — Wand-UK, Decken-OK, Geschossebene je nach
+  // Ziel), sonst die aktive Geschossebene (`groundElevationRef`, Zeichnen-
+  // Modus) — ein Griff auf einem ANDEREN Geschoss als dem aktiven sässe sonst
+  // auf der falschen Höhe.
+  const [draftHudScreen, setDraftHudScreen] = useState<{ x: number; y: number } | null>(null);
+  // Bildschirm-Endpunkte der Achsen-Lock-Führungslinie (Pfeiltasten, s.
+  // `axisLockRef`-Doc) — SketchUp-Stil farbige Linie durch den Anker, solange
+  // eine Achse gesperrt ist. Derselbe rAF-Tick wie `draftHudScreen` (billige
+  // 2D-Projektion, kein zusätzlicher Loop nötig).
+  const [axisLockGuideScreen, setAxisLockGuideScreen] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    axis: "x" | "y";
+  } | null>(null);
+  useEffect(() => {
+    if (!ready) {
+      setDraftHudScreen(null);
+      setAxisLockGuideScreen(null);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const canvas = canvasRef.current;
+      const o = orbitRef.current;
+      const hud = draftRef.current?.hud;
+      if (canvas && o && hud) {
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const cam = orbitCamera(o);
+          const drag = gripDragRef.current;
+          const planeY = drag && "planeY" in drag ? drag.planeY : groundElevationRef.current;
+          const world: Vec3 = [hud.at.x, planeY, hud.at.y];
+          const p = worldToScreen(cam, world, rect.width, rect.height);
+          setDraftHudScreen(p);
+        }
+      } else {
+        setDraftHudScreen(null);
+      }
+      const axis = axisLockRef.current;
+      const anchor = axisLockAnchorRef.current;
+      if (canvas && o && axis && anchor) {
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const cam = orbitCamera(o);
+          const drag = gripDragRef.current;
+          const planeY = drag && "planeY" in drag ? drag.planeY : groundElevationRef.current;
+          const EXTEND = 30; // Welt-Meter in jede Richtung — grosszügig für die meisten Szenen.
+          const a: Vec3 =
+            axis === "x" ? [anchor.x - EXTEND, planeY, anchor.y] : [anchor.x, planeY, anchor.y - EXTEND];
+          const b: Vec3 =
+            axis === "x" ? [anchor.x + EXTEND, planeY, anchor.y] : [anchor.x, planeY, anchor.y + EXTEND];
+          const p1 = worldToScreen(cam, a, rect.width, rect.height);
+          const p2 = worldToScreen(cam, b, rect.width, rect.height);
+          setAxisLockGuideScreen(p1 && p2 ? { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, axis } : null);
+        }
+      } else {
+        setAxisLockGuideScreen(null);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, commandActive]);
+
   // Canvas-Größe beobachten: bei Layout-Änderung mit aktueller Kamera neu
   // zeichnen (die Surface-Anpassung übernimmt der Hook im render()).
   useEffect(() => {
@@ -636,12 +800,46 @@ export function Wasm3DViewport({
   // auf eine Höhenänderung abbildet.
   type GripTarget = { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string };
   type GripDrag =
-    | { kind: "vertex"; target: GripTarget; index: number; planeY: number }
-    | { kind: "move"; target: GripTarget; planeY: number; lastModel: Vec2 | null }
+    | {
+        kind: "vertex";
+        target: GripTarget;
+        index: number;
+        planeY: number;
+        // Koinzidenz-Gruppe (gemeinsame Ecke mit ANDEREN gewählten Wänden/
+        // Zeichnungen) — beim Greifen einmal bestimmt, s. `grip3dHud.ts::
+        // findCoincidentVertices`. `coincident` wird mitgeführt, die Exclude-
+        // Sets verhindern, dass der Punkt an sich selbst/den Mitgeführten fängt.
+        coincident: CoincidentVertex[];
+        excludeWallIds: Set<string>;
+        excludeDrawingIds: Set<string>;
+      }
+    | {
+        kind: "move";
+        target: GripTarget;
+        planeY: number;
+        lastModel: Vec2 | null;
+        start: Vec2;
+        // Koinzidente Sibling-Ecken (ANDERER gewählter Elemente), die um
+        // dasselbe Delta mitwandern — s. `grip3dHud.ts::findMoveCoincidentVertices`.
+        moveCoincident: MoveCoincidentVertex[];
+      }
     | { kind: "edge"; ceilingId: string; a: number; b: number; planeY: number; lastModel: Vec2 | null }
     | { kind: "height"; wallId: string }
     | { kind: "roofpitch"; roofId: string; apexXZ: readonly [number, number] };
   const gripDragRef = useRef<GripDrag | null>(null);
+  // Welt-Achsen-Lock (Pfeiltasten, SketchUp-Vorbild — Nutzer-Wunsch nach
+  // Recherche „was andere Apps können": SketchUp sperrt per Pfeiltaste auf
+  // eine BESTIMMTE globale Achse, unabhängig davon, wohin die Maus gerade
+  // zeigt — stärker als der bestehende Shift-Lock, der nur die dem Cursor
+  // NÄCHSTLIEGENDE 45°-Richtung wählt). Links/Rechts = Modell-X, Hoch/Runter
+  // = Modell-Y ("Nord"); erneutes Drücken derselben Richtung hebt die Sperre
+  // wieder auf. `axisLockAnchorRef` ist der Fixpunkt, durch den die gesperrte
+  // Achse verläuft (Nachbarpunkt bzw. `drag.start`) — einmal beim Aktivieren
+  // bestimmt, nicht pro Frame neu (der Anker bewegt sich während des Drags
+  // nicht). Nur für Endpunkt-/Verschiebe-Griff (dieselbe Einschränkung wie
+  // Shift-Lock/Feld-Controller).
+  const axisLockRef = useRef<"x" | "y" | null>(null);
+  const axisLockAnchorRef = useRef<Vec2 | null>(null);
   // Arbeitsebene (world-Y) eines Griffs: Wand-UK, Decken-OK, Dach-Traufe bzw. Geschossebene.
   const gripPlaneY = (target: GripTarget): number | null => {
     if (target.wallId) {
@@ -662,6 +860,14 @@ export function Wasm3DViewport({
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    if (gripDragRef.current) {
+      // Ein Griff ist bereits „in der Hand" (folgt seit dem ersten Klick frei
+      // der Maus, s. u.) — ein weiterer Klick (auf DENSELBEN oder einen
+      // ANDEREN Griff) bestätigt/beendet ihn jetzt, statt sofort einen neuen
+      // zu bewaffnen. „Zweites Klicken setzt" (Nutzer-Wunsch).
+      endGripDrag();
+      return;
+    }
     if (grip.kind === "height") {
       if (!grip.target.wallId) return;
       gripDragRef.current = { kind: "height", wallId: grip.target.wallId };
@@ -673,7 +879,31 @@ export function Wasm3DViewport({
       const planeY = gripPlaneY(grip.target);
       if (planeY == null) return;
       if (grip.kind === "vertex") {
-        gripDragRef.current = { kind: "vertex", target: grip.target, index: grip.index, planeY };
+        // Koinzidenz-Gruppe (gemeinsame Ecke mit ANDEREN gewählten Wänden/
+        // Zeichnungen) einmal beim Greifen bestimmen — Nutzer-Wunsch „3D ist
+        // noch so unterentwickelt": vorher riss ein gezogener Eckpunkt sich
+        // von anderen Wänden mit derselben Ecke los UND Objekt-Snap war
+        // beim 3D-Vertex-Drag komplett inaktiv (kein Exclude-Set wurde je
+        // übergeben). Jetzt Parität mit dem 2D-Plan/three.js-Fallback.
+        const selfPoint: Vec2 = { x: grip.pos[0], y: grip.pos[2] };
+        const coincident = findCoincidentVertices(projectRef.current, selfPoint, grip.target);
+        const excludeWallIds = new Set<string>();
+        const excludeDrawingIds = new Set<string>();
+        const addExclude = (t: GripTarget) => {
+          if (t.wallId) excludeWallIds.add(t.wallId);
+          if (t.drawingId) excludeDrawingIds.add(t.drawingId);
+        };
+        addExclude(grip.target);
+        coincident.forEach((c) => addExclude(c.target));
+        gripDragRef.current = {
+          kind: "vertex",
+          target: grip.target,
+          index: grip.index,
+          planeY,
+          coincident,
+          excludeWallIds,
+          excludeDrawingIds,
+        };
       } else if (grip.kind === "edge" && grip.target.ceilingId && grip.index2 != null) {
         gripDragRef.current = {
           kind: "edge",
@@ -684,31 +914,52 @@ export function Wasm3DViewport({
           lastModel: null,
         };
       } else {
-        gripDragRef.current = { kind: "move", target: grip.target, planeY, lastModel: null };
+        gripDragRef.current = {
+          kind: "move",
+          target: grip.target,
+          planeY,
+          lastModel: null,
+          start: { x: grip.pos[0], y: grip.pos[2] },
+          moveCoincident: findMoveCoincidentVertices(projectRef.current, grip.target),
+        };
       }
     }
-    (e.target as Element).setPointerCapture(e.pointerId);
+    // KEIN `setPointerCapture` mehr — der Griff soll NICHT an die gedrückt
+    // gehaltene Maustaste gebunden sein (s. Fenster-Listener oben); ein Klick
+    // bewaffnet ihn, danach folgt er der Maus frei, auch nach dem Loslassen.
   };
-  const onGripPointerMove = (e: React.PointerEvent) => {
+  const onGripPointerMove = (clientX: number, clientY: number, shiftKey: boolean) => {
     const drag = gripDragRef.current;
     const o = orbitRef.current;
     const canvas = canvasRef.current;
     if (!drag || !o || !canvas) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const ndcY = 1 - ((e.clientY - rect.top) / rect.height) * 2;
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
     const ray = cameraRay(orbitCamera(o), ndcX, ndcY, rect.width / rect.height);
 
     if (drag.kind === "height") {
+      // Kamera-zugewandte vertikale Ebene (wie beim First-Griff unten) statt
+      // einer an der WANDACHSE fixierten Normale — Bug (Nutzer-Report „das
+      // Anklicken und man hat es in der Hand geht bei Höhenpunkten nicht"):
+      // die alte Normale war die Wand-Achsrichtung selbst. Aus der üblichsten
+      // Betrachtung (frontal auf die Wandfläche, Blickrichtung ≈ senkrecht
+      // ZUR Achse) steht der Kamerastrahl dann fast PARALLEL zu dieser Ebene
+      // — `rayPlane` liefert reihenweise `null`, der Griff „klebte" nicht am
+      // Cursor. Eine kamera-zugewandte Ebene (Normale = horizontale Richtung
+      // Kamera→Wandmitte) bleibt aus JEDER Draufsicht gut konditioniert.
       const wall = editWallsRef.current.find((w) => w.id === drag.wallId);
       if (!wall) return;
-      const ux = wall.end.x - wall.start.x;
-      const uy = wall.end.y - wall.start.y;
-      const len = Math.hypot(ux, uy) || 1;
       const midX = (wall.start.x + wall.end.x) / 2;
       const midY = (wall.start.y + wall.end.y) / 2;
-      const hit = rayPlane(ray, [midX, 0, midY], [ux / len, 0, uy / len]);
+      const cam = orbitCamera(o);
+      let nx = cam.eye[0] - midX;
+      let nz = cam.eye[2] - midY;
+      const nlen = Math.hypot(nx, nz) || 1;
+      nx /= nlen;
+      nz /= nlen;
+      const hit = rayPlane(ray, [midX, 0, midY], [nx, 0, nz]);
       if (!hit) return;
       onEditWallTopRef.current?.(drag.wallId, hit[1]);
       return;
@@ -734,7 +985,42 @@ export function Wasm3DViewport({
     if (!hit) return;
     const model: Vec2 = { x: hit[0], y: hit[2] };
     if (drag.kind === "vertex") {
-      onEditVertexRef.current?.(drag.target, drag.index, model);
+      // Pfeiltasten-Achsen-Lock (s. Datei-Kommentar an `axisLockRef`) hat
+      // Vorrang vor Shift — ein bewusst per Taste gewählter Anker/Achse soll
+      // nicht vom „nächstliegende 45°-Richtung"-Shift überstimmt werden.
+      // Shift sperrt sonst den Punkt auf ein Vielfaches von 45° relativ zum
+      // Nachbarpunkt (derselbe Nachbar wie das Cursor-HUD, s.
+      // `grip3dHud.ts::neighbor3dVertex`) — analog `applyAngleConstraint`
+      // beim Zeichnen. Beide Locks dominieren (kein Snap währenddessen) —
+      // exakt wie im three.js-Pfad (`Viewport3D.tsx::onPointerMoveDom`,
+      // „orthoLock").
+      const axisLock = axisLockRef.current;
+      const anchor = axisLock
+        ? axisLockAnchorRef.current
+        : shiftKey
+          ? neighbor3dVertex(projectRef.current, drag.target, drag.index)
+          : null;
+      const constrained = !anchor
+        ? null
+        : axisLock === "x"
+          ? { x: model.x, y: anchor.y }
+          : axisLock === "y"
+            ? { x: anchor.x, y: model.y }
+            : applyAngleConstraint(anchor, model, 45);
+      const applied = constrained
+        ? (onEditVertexRef.current?.(drag.target, drag.index, constrained) ?? constrained)
+        : (onEditVertexRef.current?.(
+            drag.target,
+            drag.index,
+            model,
+            drag.excludeWallIds,
+            drag.excludeDrawingIds,
+          ) ?? model);
+      // Koinzidente Endpunkte ANDERER gewählter Elemente mitführen — exakt
+      // auf denselben (ggf. gesnappten) Punkt, ohne erneut zu snappen.
+      for (const c of drag.coincident) {
+        onEditVertexRef.current?.(c.target, c.index, applied);
+      }
       return;
     }
     if (drag.kind === "edge") {
@@ -747,18 +1033,119 @@ export function Wasm3DViewport({
       drag.lastModel = model;
       return;
     }
-    // "move": inkrementelles Delta wie im three.js-Pendant (workplaneModel + lastModel).
+    // "move": inkrementelles Delta wie im three.js-Pendant (workplaneModel +
+    // lastModel). Shift sperrt die GESAMTE Verschiebung (seit Drag-Beginn,
+    // `drag.start`) auf ein Vielfaches von 45° — dieselbe Mechanik wie der
+    // Shift-Ortho-Lock beim Zeichnen (`applyAngleConstraint`, s.
+    // `tools/snapping.ts`), hier erstmals auch fürs EDITIEREN bestehender
+    // Elemente im 3D (Nutzer-Wunsch „auch so ein Shiftdrücken … bei
+    // Verschieben/Ändern von Dingen, nicht nur beim Zeichnen").
+    // Pfeiltasten-Achsen-Lock (Vorrang) — Anker ist `drag.start` (die
+    // Achse durch den Startpunkt), s. Datei-Kommentar an `axisLockRef`.
+    const moveAxisLock = axisLockRef.current;
+    const constrainedModel = moveAxisLock
+      ? moveAxisLock === "x"
+        ? { x: model.x, y: drag.start.y }
+        : { x: drag.start.x, y: model.y }
+      : shiftKey
+        ? applyAngleConstraint(drag.start, model, 45)
+        : model;
     if (drag.lastModel) {
-      const delta: Vec2 = { x: model.x - drag.lastModel.x, y: model.y - drag.lastModel.y };
-      if (delta.x !== 0 || delta.y !== 0) onEditBodyRef.current?.(drag.target, delta);
+      const delta: Vec2 = {
+        x: constrainedModel.x - drag.lastModel.x,
+        y: constrainedModel.y - drag.lastModel.y,
+      };
+      if (delta.x !== 0 || delta.y !== 0) {
+        onEditBodyRef.current?.(drag.target, delta);
+        // Koinzidente Sibling-Ecken (ANDERER gewählter Elemente) um dasselbe
+        // Delta mitführen — ihre LIVE-Position wird inkrementell
+        // fortgeschrieben und absolut neu gesetzt (kein Snap).
+        for (const c of drag.moveCoincident) {
+          c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
+          onEditVertexRef.current?.(c.target, c.index, c.pos);
+        }
+      }
     }
-    drag.lastModel = model;
+    drag.lastModel = constrainedModel;
   };
   const endGripDrag = () => {
     if (!gripDragRef.current) return;
     gripDragRef.current = null;
+    axisLockRef.current = null;
+    axisLockAnchorRef.current = null;
     onEditEndRef.current?.();
   };
+  // Klick-Zug-Klick statt Halten-und-Ziehen (Nutzer-Wunsch: „einmal anklicken
+  // und man zieht es, zweites Klicken setzt" — bisher musste man die Maustaste
+  // die GANZE Bewegung über gedrückt halten, s. `startGripDrag`/Canvas-Klick-
+  // Bestätigung unten): sobald `gripDragRef` bewaffnet ist, folgt der Griff
+  // JEDER Mausbewegung — unabhängig von der Maustaste UND unabhängig davon,
+  // ob der Cursor noch über dem (nur 16×16px kleinen) Griff-Knopf steht.
+  // Fenster-weiter statt Canvas- oder Griff-Element-Listener, weil der Cursor
+  // beim freien Folgen zwangsläufig den Griff-Knopf verlässt.
+  useEffect(() => {
+    const onWindowPointerMove = (e: PointerEvent) => {
+      if (!gripDragRef.current) return;
+      onGripPointerMove(e.clientX, e.clientY, e.shiftKey);
+    };
+    window.addEventListener("pointermove", onWindowPointerMove);
+    return () => window.removeEventListener("pointermove", onWindowPointerMove);
+  }, []);
+
+  // Tab während eines laufenden Endpunkt-/Verschiebe-Griff-Drags: Feld-
+  // Controller öffnen/zykeln (Nutzer-Report „man sieht Länge/Winkel, aber man
+  // kann nichts eingeben") — analog dem globalen Tab-Handler des 2D-Plans
+  // (`useKeyboardShortcuts.ts::useCommandTabShortcut`), hier lokal, weil nur
+  // diese Komponente `gripDragRef` kennt (Höhen-/First-Griff bewusst aussen
+  // vor — 1-dimensionale Werte, kein Länge/Winkel-Feld sinnvoll, s. PENDENZEN).
+  // Escape bricht JEDEN laufenden Griff-Drag ab (alle 5 Griff-Arten) — seit
+  // der Umstellung auf Klick-Zug-Klick (s. Datei-Kommentar oben) gab es KEINEN
+  // Weg mehr, eine Positionierung zu verwerfen (nur noch bestätigen); jeder
+  // Mutations-Kanal coalesced seine Schritte zu GENAU einem Undo-Eintrag pro
+  // Drag (`state/projectSlice.ts`), daher genügt EIN `undo()` zum Abbrechen.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (!gripDragRef.current) return;
+        e.preventDefault();
+        onGrip3dEditCancelRef.current?.();
+        endGripDrag();
+        return;
+      }
+      if (
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight" ||
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown"
+      ) {
+        const drag = gripDragRef.current;
+        if (!drag || (drag.kind !== "vertex" && drag.kind !== "move")) return;
+        e.preventDefault();
+        const axis = e.key === "ArrowLeft" || e.key === "ArrowRight" ? "x" : "y";
+        if (axisLockRef.current === axis) {
+          // Dieselbe Achse erneut gedrückt: Sperre lösen (SketchUp-Verhalten).
+          axisLockRef.current = null;
+          axisLockAnchorRef.current = null;
+          return;
+        }
+        const anchor =
+          drag.kind === "move"
+            ? drag.start
+            : neighbor3dVertex(projectRef.current, drag.target, drag.index);
+        if (!anchor) return; // ohne Anker keine Achse konstruierbar (isolierter Punkt)
+        axisLockRef.current = axis;
+        axisLockAnchorRef.current = anchor;
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const drag = gripDragRef.current;
+      if (!drag || (drag.kind !== "vertex" && drag.kind !== "move")) return;
+      e.preventDefault();
+      onGrip3dEditTabRef.current?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Maus-Navigation (LINKS = Orbit, MITTE/RECHTS = Pan, RAD = Zoom, s.
   // Datei-Kommentar MAUS-SCHEMA). Verlässt damit IMMER die Praeset-Kamera und
@@ -785,6 +1172,9 @@ export function Wasm3DViewport({
       downY: number;
       moved: boolean;
     } | null = null;
+    // Knopf+Bewegung der zuletzt ABGESCHLOSSENEN Pointer-Geste (s. onContextMenu
+    // unten — `contextmenu` feuert NACH pointerup, wenn `drag` schon `null` ist).
+    let lastGesture: { button: number; moved: boolean } | null = null;
 
     const redraw = () => redrawRef.current();
 
@@ -800,6 +1190,28 @@ export function Wasm3DViewport({
       };
     };
 
+    // Cursor-Pixel → Kamerastrahl → Schnitt mit der horizontalen Arbeitsebene
+    // (Geschoss-Höhe) → Modell-XY. Exakt dasselbe Vorgehen wie `workplaneModel`
+    // im three.js-Pfad (`Viewport3D.tsx`): model.x = hit.x, model.y = hit.z,
+    // KEIN Vorzeichen-/Z-Flip (dieselbe orientierungserhaltende Konvention wie
+    // Wand-/Zeichnungslinien, s. `draftWorldLines`-Doc).
+    const workplaneModel = (clientX: number, clientY: number): Vec2 | null => {
+      const o = orbitRef.current;
+      const ndc = toNdc(clientX, clientY);
+      if (!o || !ndc) return null;
+      const ray = cameraRay(orbitCamera(o), ndc.ndcX, ndc.ndcY, ndc.aspect);
+      const hit = rayPlaneY(ray, groundElevationRef.current);
+      if (!hit) return null;
+      return { x: hit[0], y: hit[2] };
+    };
+    // Shift/Ctrl aus dem Pointer-Event — reicht bis zu `CommandEngine.move`/
+    // `.pick` durch (s. `onWorkplanePoint`-Doc), damit Shift-Ortho-Lock im 3D
+    // genauso wirkt wie im 2D-Plan.
+    const modsOf = (e: PointerEvent): EngineMods => ({
+      shift: e.shiftKey,
+      ctrl: e.ctrlKey || e.metaKey,
+    });
+
     // Cursor-Pixel → Kamerastrahl (aktuelle Orbit-Kamera) → nächstes Bauteil.
     // Meldet den Treffer (oder null) an den Aufrufer; `additive` wird vom
     // pointerup-Modifier bestimmt. Frische Pick-Geometrie je Klick (selten genug).
@@ -809,10 +1221,14 @@ export function Wasm3DViewport({
       const ndc = toNdc(clientX, clientY);
       if (!cb || !o || !ndc) return;
       const ray = cameraRay(orbitCamera(o), ndc.ndcX, ndc.ndcY, ndc.aspect);
-      const { walls, slabs, openings, stairs, roofs, contextMeshes } = pickGeometry(projectRef.current);
+      const { walls, slabs, openings, stairs, roofs, contextMeshes, drawings } = pickGeometry(
+        projectRef.current,
+      );
       // Erweiterter Pick inkl. Öffnungen (Fenster/Türen) + Treppen + Kontext-
-      // Meshes — sonst wären im WASM-Viewport nur Wände/Decken anwählbar.
-      const hit = pickNearest(ray, walls, slabs, openings, stairs, roofs, contextMeshes);
+      // Meshes + freie 2D-Zeichnungen (Linie/Polylinie/Rechteck, s.
+      // `pickDrawingSegs`) — sonst wären im WASM-Viewport 2D-Elemente NIE
+      // anwählbar gewesen (Nutzer-Report).
+      const hit = pickNearest(ray, walls, slabs, openings, stairs, roofs, contextMeshes, drawings);
       cb(hit ? { kind: hit.kind, id: hit.id } : null, additive);
     };
 
@@ -835,7 +1251,16 @@ export function Wasm3DViewport({
 
     const onPointerMove = (e: PointerEvent) => {
       const o = orbitRef.current;
-      if (!drag || !o) return;
+      if (!drag || !o) {
+        // Kein Orbit-/Pan-Drag aktiv (z. B. weil LINKS im Zeichenmodus keinen
+        // startet, s. onPointerDown): im Zeichenmodus trotzdem die Live-
+        // Vorschau am Cursor nachführen (Rubber-Band).
+        if (commandActiveRef.current) {
+          const m = workplaneModel(e.clientX, e.clientY);
+          if (m) onWorkplanePointRef.current?.("move", m, modsOf(e));
+        }
+        return;
+      }
       // Bewegung über die Schwelle ⇒ echter Drag (kein Klick beim Loslassen).
       if (
         !drag.moved &&
@@ -847,6 +1272,22 @@ export function Wasm3DViewport({
       const dy = e.clientY - drag.y;
       drag.x = e.clientX;
       drag.y = e.clientY;
+      // Zeichenmodus: LINKS (mode "orbit") bleibt frei für die Vorschau statt
+      // zu orbiten (analog OrbitControls.LEFT=-1 im three.js-Pfad) — MITTE/
+      // RECHTS (mode "pan") pannen weiterhin normal, auch während eines
+      // laufenden Befehls (three.js-Parität, s. `onContextMenu` unten).
+      // Dieselbe Unterdrückung, solange ein Griff „in der Hand" ist (Klick-
+      // Zug-Klick, s. `startGripDrag`) — sonst würde ein versehentliches
+      // Links-Ziehen beim Positionieren gleichzeitig die Kamera drehen. Die
+      // Griff-Position selbst aktualisiert der fensterweite Listener oben
+      // bereits, hier nur die Kamera-Rotation unterdrücken.
+      if (drag.mode === "orbit" && (commandActiveRef.current || gripDragRef.current)) {
+        if (commandActiveRef.current) {
+          const m = workplaneModel(e.clientX, e.clientY);
+          if (m) onWorkplanePointRef.current?.("move", m, modsOf(e));
+        }
+        return;
+      }
       const h = canvas.clientHeight || 1;
       if (drag.mode === "orbit") {
         // Winkel je Pixel wie OrbitControls: voller Umlauf über die Viewport-Höhe.
@@ -892,13 +1333,29 @@ export function Wasm3DViewport({
     };
 
     // Loslassen: war es ein LINKS-Klick ohne nennenswerte Bewegung (kein Orbit),
-    // löse einen Pick aus. Sonst nur aufräumen. additive = Shift/Ctrl/Meta.
+    // im Zeichenmodus einen Punkt setzen, sonst einen Pick auslösen. additive =
+    // Shift/Ctrl/Meta (nur ausserhalb des Zeichenmodus relevant).
     const onPointerUp = (e: PointerEvent) => {
       if (!drag) return;
       const wasClick = drag.button === 0 && drag.mode === "orbit" && !drag.moved;
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+      lastGesture = { button: drag.button, moved: drag.moved };
       releaseDrag(e);
-      if (wasClick) doPick(e.clientX, e.clientY, additive);
+      if (!wasClick) return;
+      // Klick auf den Canvas (nicht auf einen Griff-Knopf) während ein Griff
+      // „in der Hand" ist: bestätigt/beendet ihn (Klick-Zug-Klick, s. o.) —
+      // Vorrang vor Pick/Zeichnen-Klick, die sonst denselben Klick verbrauchen
+      // würden.
+      if (gripDragRef.current) {
+        endGripDrag();
+        return;
+      }
+      if (commandActiveRef.current) {
+        const m = workplaneModel(e.clientX, e.clientY);
+        if (m) onWorkplanePointRef.current?.("pick", m, modsOf(e));
+        return;
+      }
+      doPick(e.clientX, e.clientY, additive);
     };
 
     // Abgebrochene Geste (z. B. Fensterwechsel) — nie als Klick werten.
@@ -963,9 +1420,40 @@ export function Wasm3DViewport({
       redraw();
     };
 
-    // Browser-Kontextmenü unterdrücken (RECHTS navigiert jetzt selbst, s. o.;
-    // ein eigenes Kontextmenü gibt es im Engine-Pfad noch nicht).
-    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+    // Browser-Kontextmenü unterdrücken (RECHTS navigiert jetzt selbst, s. o.).
+    // Im Zeichenmodus bestätigt ein RECHTSKLICK OHNE Bewegung den Befehl
+    // (analog `onContextMenuDom` im three.js-Pfad) — `lastGesture` merkt sich
+    // Knopf+Bewegung der zuletzt abgeschlossenen Pointer-Geste, da `drag` beim
+    // Feuern von `contextmenu` (NACH pointerup) bereits wieder `null` ist.
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (gripDragRef.current) {
+        endGripDrag();
+        return;
+      }
+      if (
+        commandActiveRef.current &&
+        lastGesture &&
+        lastGesture.button === 2 &&
+        !lastGesture.moved
+      ) {
+        onWorkplaneConfirmRef.current?.();
+      }
+    };
+    // Doppelklick im Zeichenmodus bestätigt ebenfalls (z. B. offene Polylinie
+    // beenden) — analog `onDblClickDom` im three.js-Pfad. Bei einem „in der
+    // Hand" gehaltenen Griff (Klick-Zug-Klick, s. o.) bestätigt Doppelklick
+    // ihn ebenso.
+    const onDblClick = (e: MouseEvent) => {
+      if (gripDragRef.current) {
+        e.preventDefault();
+        endGripDrag();
+        return;
+      }
+      if (!commandActiveRef.current) return;
+      e.preventDefault();
+      onWorkplaneConfirmRef.current?.();
+    };
 
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
@@ -973,6 +1461,7 @@ export function Wasm3DViewport({
     canvas.addEventListener("pointercancel", onPointerCancel);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("contextmenu", onContextMenu);
+    canvas.addEventListener("dblclick", onDblClick);
     return () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -980,6 +1469,7 @@ export function Wasm3DViewport({
       canvas.removeEventListener("pointercancel", onPointerCancel);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
+      canvas.removeEventListener("dblclick", onDblClick);
     };
   }, [ready, render]);
 
@@ -990,57 +1480,161 @@ export function Wasm3DViewport({
           Darstellungsart kommen von der Oberleiste (TopBar); das Grid-Overlay
           unten ist der einzige eigene Umschalter hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
+      {/* Achsen-Lock-Führungslinie (Pfeiltasten während eines Endpunkt-/
+          Verschiebe-Griff-Drags, s. `axisLockRef`-Dateikommentar) — SketchUp-
+          Vorbild: eine durchgezogene farbige Linie durch den Anker markiert
+          die gesperrte Weltachse (Rot=X analog dem Modell-x, Grün=Y analog
+          "Nord"). Volle Breite/Höhe des Viewports, `pointerEvents:none`
+          (reine Anzeige, blockiert keine Klicks). */}
+      {axisLockGuideScreen && (
+        <svg
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+        >
+          <line
+            x1={axisLockGuideScreen.x1}
+            y1={axisLockGuideScreen.y1}
+            x2={axisLockGuideScreen.x2}
+            y2={axisLockGuideScreen.y2}
+            stroke={axisLockGuideScreen.axis === "x" ? "#ff5555" : "#4ddb6a"}
+            strokeWidth={1.5}
+            style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,0.6))" }}
+          />
+        </svg>
+      )}
+      {/* Cursor-HUD (Länge/Winkel beim Zeichnen ODER während eines Griff-Drags,
+          VW-Stil) — DOM-Overlay statt SVG (kein SVG über dem Canvas), Position
+          via `draftHudScreen` (rAF-Projektions-Loop, s. o.). Text-Segmente
+          identisch zum 2D-Plan (`tools/hudFormat.ts`), damit L/W- bzw. Δx/Δy-
+          Anzeige und der Live-Tipp-Zustand (aktives Tab-Feld) exakt gleich
+          aussehen. NICHT auf `commandActive` gegated — `draft.hud` kommt jetzt
+          auch vom Griff-Drag (App.tsx::onEdit3dVertex/onEdit3dBody). */}
+      {draftHudScreen &&
+        draft?.hud &&
+        (() => {
+          const segs = hudSegments(draft.hud, hudFields);
+          if (segs.length === 0) return null;
+          return (
+            <div
+              style={{
+                position: "absolute",
+                left: draftHudScreen.x + 14,
+                top: draftHudScreen.y + 14,
+                display: "flex",
+                gap: 8,
+                padding: "4px 6px",
+                borderRadius: 6,
+                background: "rgba(44,44,44,0.94)",
+                border: "1px solid #4a4a4a",
+                pointerEvents: "none",
+                fontFamily: "var(--mono, ui-monospace, monospace)",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+                zIndex: 5,
+              }}
+            >
+              {segs.map((s, i) => (
+                <span
+                  key={i}
+                  style={{
+                    padding: "1.5px 4px",
+                    borderRadius: 5,
+                    background: s.active ? "rgba(255,255,255,0.16)" : "transparent",
+                    color: "#e8e8e8",
+                    fontWeight: s.locked ? 700 : 600,
+                  }}
+                >
+                  {s.text}
+                </span>
+              ))}
+            </div>
+          );
+        })()}
       {/* 3D-Editier-Griffe: echte DOM-Buttons statt In-Szene-Geometrie, s.
           Datei-Kommentar oben. Position folgt der Kamera via `gripScreens`
-          (rAF-Loop). Farben wie die three.js-Griffe (`Viewport3D.tsx`,
-          gripVertMat/gripHeightMat/gripMoveMat): Vertex orange, Höhe blau,
-          Verschieben grün. */}
-      {gripScreens.map(({ grip, x, y }) => (
-        <div
-          key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId ?? grip.target.ceilingId ?? grip.target.roofId}:${grip.index}`}
-          onPointerDown={startGripDrag(grip)}
-          onPointerMove={onGripPointerMove}
-          onPointerUp={endGripDrag}
-          onPointerCancel={endGripDrag}
-          title={t(
-            grip.kind === "height"
-              ? "viewport3d.grip.height"
-              : grip.kind === "roofpitch"
-              ? "viewport3d.grip.roofpitch"
-              : grip.kind === "move"
-              ? "viewport3d.grip.move"
-              : grip.kind === "edge"
-              ? "viewport3d.grip.edge"
-              : "viewport3d.grip.vertex",
-          )}
-          style={{
-            position: "absolute",
-            left: x - 8,
-            top: y - 8,
-            width: 16,
-            height: 16,
-            // Kanten-Griffe rautenförmig + eigene Farbe, damit sie sich klar von
-            // den Eckpunkt-Griffen abheben (Nutzer-Wunsch: „an allen seiten").
-            borderRadius: grip.kind === "edge" ? "3px" : "50%",
-            transform: grip.kind === "edge" ? "rotate(45deg)" : undefined,
-            background:
+          (rAF-Loop). DIESELBE papierfarbene + Akzent-Ring-Optik wie die 2D-
+          Griffe (`.plan-grip`/`.plan-edge-grip` in styles.css — `var(--sheet)`-
+          Füllung, `var(--accent)`-Kontur, `drop-shadow`) statt der früheren
+          bunten Vollton-Punkte (Nutzer-Report: „farbige Punkte, hässlich").
+          Die FORM unterscheidet die Griff-Art (wie im 2D: Kreis = Eckpunkt,
+          Dreieck = Kante), Farbe bleibt für ALLE gleich. Höhen-/First-Griff
+          (kein 2D-Äquivalent) bleiben Kreise, tragen aber ein kleines Pfeil-
+          Glyph als Hinweis auf die vertikale Zug-Richtung. */}
+      {gripScreens.map(({ grip, x, y }) => {
+        const isVertical = grip.kind === "height" || grip.kind === "roofpitch";
+        const glyphStrokeWidth = grip.kind === "edge" ? 1.5 : 1.75;
+        return (
+          <div
+            key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId ?? grip.target.ceilingId ?? grip.target.roofId}:${grip.index}`}
+            onPointerDown={startGripDrag(grip)}
+            title={t(
               grip.kind === "height"
-                ? "#2f8fff"
+                ? "viewport3d.grip.height"
                 : grip.kind === "roofpitch"
-                ? "#ff4d9d"
+                ? "viewport3d.grip.roofpitch"
                 : grip.kind === "move"
-                ? "#18b85a"
+                ? "viewport3d.grip.move"
                 : grip.kind === "edge"
-                ? "#b06cff"
-                : "#ff8c1a",
-            border: "2px solid rgba(0,0,0,0.6)",
-            boxShadow: "0 0 5px rgba(0,0,0,0.55)",
-            cursor:
-              grip.kind === "height" || grip.kind === "roofpitch" ? "ns-resize" : "grab",
-            touchAction: "none",
-          }}
-        />
-      ))}
+                ? "viewport3d.grip.edge"
+                : "viewport3d.grip.vertex",
+            )}
+            style={{
+              position: "absolute",
+              left: x - 8,
+              top: y - 8,
+              width: 16,
+              height: 16,
+              cursor: isVertical ? "ns-resize" : "grab",
+              touchAction: "none",
+            }}
+          >
+            <svg
+              width={16}
+              height={16}
+              style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.45))" }}
+            >
+              {grip.kind === "edge" ? (
+                <polygon
+                  points="8,2 14,13 2,13"
+                  fill="var(--sheet)"
+                  stroke="var(--accent)"
+                  strokeWidth={glyphStrokeWidth}
+                  strokeLinejoin="round"
+                />
+              ) : grip.kind === "move" ? (
+                <polygon
+                  points="8,1 15,8 8,15 1,8"
+                  fill="var(--sheet)"
+                  stroke="var(--accent)"
+                  strokeWidth={glyphStrokeWidth}
+                  strokeLinejoin="round"
+                />
+              ) : (
+                <circle
+                  cx={8}
+                  cy={8}
+                  r={6}
+                  fill="var(--sheet)"
+                  stroke="var(--accent)"
+                  strokeWidth={glyphStrokeWidth}
+                />
+              )}
+              {isVertical && (
+                <text
+                  x={8}
+                  y={11}
+                  fontSize={9}
+                  textAnchor="middle"
+                  fill="var(--accent)"
+                  stroke="none"
+                  pointerEvents="none"
+                >
+                  ↕
+                </text>
+              )}
+            </svg>
+          </div>
+        );
+      })}
       {/* Live-Schnitt-Knopf: nur sichtbar, wenn eine Schnittlinie den 3D-Schnitt
           treibt (`section3d` gebunden, Bindung im Objekt-Info gesetzt). Klick
           hebt die Bindung auf. Sitzt ueber dem Grid-Button (falls vorhanden). */}

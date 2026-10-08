@@ -404,13 +404,15 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
 
       // Schraffur: die aufs Polygon geclippten Musterlinien wie im Browser
       // (glPlanHatch — identische Geometrie), als Polylinien. "none"/"solid"
-      // brauchen keine Linien (solid deckt die Füllung farbig ab). Bild-Schraffuren
-      // (kind==="image") kann die render2d-Szene nicht tragen (keine Textur) →
-      // FALLBACK: nur die neutrale Poché-Füllung (oben), keine Musterlinien. Der
-      // Random-Untermodus läuft transparent über `buildHatchRuns` (Streu-Striche).
+      // brauchen keine Linien (solid deckt die Füllung farbig ab). Bild-/
+      // Verlauf-Schraffuren (kind==="image"/"gradient") kann die render2d-
+      // Szene nicht tragen (keine Textur/kein echter Verlauf) → FALLBACK: nur
+      // die neutrale Poché-Füllung (oben), keine Musterlinien. Der Random-
+      // Untermodus läuft transparent über `buildHatchRuns` (Streu-Striche).
       if (
         p.hatch &&
         p.hatch.kind !== "image" &&
+        p.hatch.kind !== "gradient" &&
         p.hatch.pattern !== "none" &&
         p.hatch.pattern !== "solid"
       ) {

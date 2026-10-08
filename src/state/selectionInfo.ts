@@ -43,6 +43,7 @@ import type {
   Wall,
   WallReferenceLine,
 } from "../model/types";
+import type { DetailLevel } from "../ui/TopBar";
 import { localToLv95 } from "../io/lv95";
 import {
   resolveForeground,
@@ -239,6 +240,8 @@ export interface OpeningInfo {
   lintelLines?: "keine" | "innen" | "aussen" | "beide";
   /** Zugewiesener Tür-/Fenstertyp (Bibliothek, `Opening.typeId`) oder undefined. */
   typeId?: string;
+  /** Per-Element-Übersteuerung der Detailstufe; fehlt → Ansichts-Detailstufe gilt. */
+  detailLevel?: DetailLevel;
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
@@ -489,6 +492,23 @@ export interface Selection {
   column?: ColumnInfo;
   /** Kontext-Objekt-Attribute (nur bei `kind === "contextObject"`). */
   contextObject?: ContextObjectInfo;
+  /**
+   * Detail-/Schnitt-Verweis-Attribute (nur bei `kind === "drawing2d"` mit
+   * `geom.shape === "detailref"`).
+   */
+  detailRef?: DetailRefInfo;
+}
+
+/**
+ * Detail-/Schnitt-Verweis-Attribute (Drawing2D `{shape:"detailref"}`) fürs
+ * Object-Info-/Attribute-Panel: Bezeichner + Blattverknüpfung (samt der
+ * verfügbaren Blätter für das Auswahl-Dropdown).
+ */
+export interface DetailRefInfo {
+  label: string;
+  sheetLayoutId?: string;
+  sheetLabel?: string;
+  availableLayouts: { id: string; name: string }[];
 }
 
 /**
@@ -526,8 +546,12 @@ function isClosedGeom(g: Drawing2DGeom): boolean {
   );
 }
 
-/** Bounding-Box einer 2D-Form. */
-function geomBBox(g: Drawing2DGeom): SelectionBBox {
+/**
+ * Bounding-Box einer 2D-Form. Exportiert, weil auch die Editier-Werkzeuge sie
+ * brauchen (Ausrichten/Verteilen, `editors/align.ts`) — dieselbe Herleitung
+ * wie fürs Attribut-Panel, damit beide Seiten nie auseinanderlaufen.
+ */
+export function geomBBox(g: Drawing2DGeom): SelectionBBox {
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
@@ -541,6 +565,7 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
   switch (g.shape) {
     case "line":
     case "xline":
+    case "ray":
       acc(g.a.x, g.a.y);
       acc(g.b.x, g.b.y);
       break;
@@ -585,7 +610,13 @@ function geomBBox(g: Drawing2DGeom): SelectionBBox {
     case "kote":
     case "text":
     case "block":
+    case "detailref":
+    case "pointmarker":
       acc(g.at.x, g.at.y);
+      break;
+    case "scalebar":
+      acc(g.at.x, g.at.y);
+      acc(g.at.x + g.segmentLength * g.segments, g.at.y);
       break;
   }
   if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
@@ -882,6 +913,7 @@ function openingSelection(project: Project, o: Opening): Selection {
     doorType: o.doorType,
     lintelLines: o.lintelLines,
     typeId: o.typeId,
+    detailLevel: o.detailLevel,
     zBottom: ext.zBottom,
     zTop: ext.zTop,
     frameLine: o.frameLine,
@@ -1215,8 +1247,19 @@ function drawingSelection(project: Project, d: Drawing2D): Selection {
     hatchSource: closed ? d.hatchSource : undefined,
     closed,
     isImage: d.geom.shape === "image",
-    opacity: d.geom.shape === "image" ? d.geom.opacity ?? 1 : undefined,
+    // Deckkraft: beim BILD die eigene Bild-Deckkraft, sonst die
+    // Objekt-Transparenz des Elements (`Drawing2D.opacity`).
+    opacity: d.geom.shape === "image" ? (d.geom.opacity ?? 1) : d.opacity,
     bbox: geomBBox(d.geom),
+    detailRef:
+      d.geom.shape === "detailref"
+        ? {
+            label: d.geom.label,
+            sheetLayoutId: d.geom.sheetLayoutId,
+            sheetLabel: d.geom.sheetLabel,
+            availableLayouts: (project.layouts ?? []).map((l) => ({ id: l.id, name: l.name })),
+          }
+        : undefined,
   };
 }
 

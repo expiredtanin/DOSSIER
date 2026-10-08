@@ -116,6 +116,15 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <line x1="0.5" y1="14.5" x2="15.5" y2="1.5" strokeDasharray="3 1.2 0.6 1.2" />
         </svg>
       );
+    case "ray":
+      // Diagonale mit festem Startpunkt (Kreis) und nur EINSEITIGER
+      // Verlängerung im Strich-Punkt-Muster — deutet den Strahl an.
+      return (
+        <svg {...common}>
+          <circle cx="3" cy="13" r="1.2" fill="currentColor" stroke="none" />
+          <line x1="3" y1="13" x2="15.5" y2="1.5" strokeDasharray="3 1.2 0.6 1.2" />
+        </svg>
+      );
     case "polyline":
       // Dreisegmentiger Zickzack.
       return (
@@ -213,6 +222,58 @@ export function ToolIcon({ id }: { id: ToolId }) {
           <line x1="10.5" y1="9" x2="14" y2="9" />
         </svg>
       );
+    case "detailref":
+      // Zweigeteilte Verweisblase: Kreis + waagrechte Trennlinie + zwei Zeilen.
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5.5" fill="none" />
+          <line x1="2.5" y1="8" x2="13.5" y2="8" />
+          <line x1="5.5" y1="5.5" x2="10.5" y2="5.5" strokeWidth="0.9" />
+          <line x1="6" y1="10.5" x2="10" y2="10.5" strokeWidth="0.9" />
+        </svg>
+      );
+    case "scalebar":
+      // Balken mit abwechselnd gefüllten Segmenten (Massstabsbalken).
+      return (
+        <svg {...common}>
+          <rect x="2" y="7" width="3" height="3" fill="currentColor" stroke="none" />
+          <rect x="5" y="7" width="3" height="3" fill="none" />
+          <rect x="8" y="7" width="3" height="3" fill="currentColor" stroke="none" />
+          <line x1="2" y1="7" x2="2" y2="5.5" />
+          <line x1="11" y1="7" x2="11" y2="5.5" />
+        </svg>
+      );
+    case "revcloud":
+      // Wolkenförmige Kette kleiner Bögen (Revisionswolke).
+      return (
+        <svg {...common}>
+          <path
+            d="M 3 10 Q 1.5 8.5 3 7 Q 2 5 4 4.3 Q 4.5 2.5 6.5 2.8 Q 8 1.5 9.8 2.8 Q 12 2.5 12 4.8 Q 14 5.5 13 7.5 Q 14 9 12 10 Q 11.5 11.5 9.5 11 Q 8 12.5 6 11.3 Q 4 12 3 10 Z"
+            fill="none"
+          />
+        </svg>
+      );
+    case "pointmarker":
+      // Kreuz-in-Kreis (Punkt-/Knotenmarker).
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="3" fill="none" />
+          <line x1="8" y1="2" x2="8" y2="14" />
+          <line x1="2" y1="8" x2="14" y2="8" />
+        </svg>
+      );
+    case "wipeout":
+      // Weisse Fläche mit gestricheltem Umriss (Maskenregion — deckt ab).
+      return (
+        <svg {...common}>
+          <polygon
+            points="3,11 3,5 7,3 13,5 13,10 9,13 5,12"
+            fill="white"
+            stroke="currentColor"
+            strokeDasharray="1.6 1.2"
+          />
+        </svg>
+      );
     case "text":
       // Serifen-„A" als Text-Symbol.
       return (
@@ -270,6 +331,7 @@ export function ToolIcon({ id }: { id: ToolId }) {
 const TOOLS_2D: ToolId[] = [
   "line",
   "xline",
+  "ray",
   "polyline",
   "rect",
   "circle",
@@ -281,6 +343,11 @@ const TOOLS_2D: ToolId[] = [
   "bezier",
   "dimension",
   "kote",
+  "detailref",
+  "scalebar",
+  "revcloud",
+  "pointmarker",
+  "wipeout",
   "text",
   "leader",
   "textpath",
@@ -289,7 +356,7 @@ const TOOLS_2D: ToolId[] = [
 ];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "ceilingopening", "roof", "extrude", "sectionline", "viewline"];
-const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "extend", "fillet", "chamfer", "join", "defblock", "measure"];
+const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "break", "extend", "fillet", "chamfer", "join", "defblock", "measure"];
 
 type ToolsView = "list" | "icons";
 const VIEW_STORAGE_KEY = "dossier.toolsPanel.view";

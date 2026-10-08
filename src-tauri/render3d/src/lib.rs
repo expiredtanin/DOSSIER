@@ -934,6 +934,45 @@ mod tests {
     }
 
     #[test]
+    fn context_mesh_negiert_nord_achse_nur_fuer_terrain_und_imported_nicht_fuer_extrusion() {
+        // Nutzer-Report 2026-09-27 "gewisse Dinge sind noch gespiegelt im 3D":
+        // der 2026-09-24-Fix negierte die Nord-Achse PAUSCHAL fuer jeden
+        // `append_context_mesh`-Aufruf und brach dabei unbemerkt Dach/Treppe/
+        // Stuetze/truck-Extrusion/2D-Zeichnungs-Bodenspuren (alle `kind:
+        // Extrusion`, orientierungserhaltend wie eine Wand) — nur echte Import-
+        // Rohdaten (Terrain/Imported) duerfen negiert werden.
+        let mut terrain = Mesh::default();
+        append_context_mesh(&mut terrain, &flat_context_tri(2.0, MeshKind::Terrain, None));
+        let (tmin, tmax) = terrain.bounds();
+        assert!(
+            tmin[2] < -0.99 && tmax[2].abs() < 1e-5,
+            "Terrain: Modell-y in [0,1] wird negiert -> world.z in [-1,0], war {:?}..{:?}",
+            tmin,
+            tmax
+        );
+
+        let mut imported = Mesh::default();
+        append_context_mesh(&mut imported, &flat_context_tri(2.0, MeshKind::Imported, None));
+        let (imin, imax) = imported.bounds();
+        assert!(
+            imin[2] < -0.99 && imax[2].abs() < 1e-5,
+            "Imported: Modell-y in [0,1] wird negiert -> world.z in [-1,0], war {:?}..{:?}",
+            imin,
+            imax
+        );
+
+        let mut extrusion = Mesh::default();
+        append_context_mesh(&mut extrusion, &flat_context_tri(2.0, MeshKind::Extrusion, None));
+        let (emin, emax) = extrusion.bounds();
+        assert!(
+            emin[2].abs() < 1e-5 && emax[2] > 0.99,
+            "Extrusion: Modell-y in [0,1] bleibt UNVERAENDERT -> world.z in [0,1], war {:?}..{:?}",
+            emin,
+            emax
+        );
+    }
+
+    #[test]
     fn context_mesh_default_farbe_je_kind() {
         // Ohne explizite Farbe greift die kind-Default-Farbe (three.js mats.*).
         let mut mesh = Mesh::default();

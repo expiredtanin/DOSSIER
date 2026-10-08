@@ -13,16 +13,25 @@ import { Dropdown } from "./Dropdown";
 /** Entscheidung, die der Dialog beim Bestätigen liefert. */
 export interface ExportDxfDecision {
   includeHatches: boolean;
+  /** „nur Auswahl" statt des ganzen Plans (nur relevant, wenn `selectionCount > 0`). */
+  selectionOnly: boolean;
 }
 
 export interface ExportDxfDialogProps {
   /** Titel/Geschossname (nur Anzeige im Dialogkopf). */
   planTitle: string;
+  /** s. `ExportPdfDialogProps.selectionCount`. */
+  selectionCount?: number;
   onExport: (decision: ExportDxfDecision) => void;
   onClose: () => void;
 }
 
-export function ExportDxfDialog({ planTitle, onExport, onClose }: ExportDxfDialogProps) {
+export function ExportDxfDialog({
+  planTitle,
+  selectionCount = 0,
+  onExport,
+  onClose,
+}: ExportDxfDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -32,8 +41,10 @@ export function ExportDxfDialog({ planTitle, onExport, onClose }: ExportDxfDialo
   }, [onClose]);
 
   const [includeHatches, setIncludeHatches] = useState(true);
+  const [selectionOnly, setSelectionOnly] = useState(false);
 
-  const onConfirm = () => onExport({ includeHatches });
+  const onConfirm = () =>
+    onExport({ includeHatches, selectionOnly: selectionCount > 0 && selectionOnly });
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -73,6 +84,19 @@ export function ExportDxfDialog({ planTitle, onExport, onClose }: ExportDxfDialo
           </section>
 
           <div className="imp-note">{t("exportDxf.unitsNote")}</div>
+
+          {selectionCount > 0 && (
+            <section className="imp-section">
+              <label className="imp-check">
+                <input
+                  type="checkbox"
+                  checked={selectionOnly}
+                  onChange={(e) => setSelectionOnly(e.target.checked)}
+                />
+                <span>{t("export.selectionOnly", { count: String(selectionCount) })}</span>
+              </label>
+            </section>
+          )}
         </div>
 
         <footer className="imp-foot">

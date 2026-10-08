@@ -7,6 +7,7 @@ import type { Command } from "./types";
 import { lineCommand } from "./cmds/line";
 import { polylineCommand } from "./cmds/polyline";
 import { xlineCommand } from "./cmds/xline";
+import { rayCommand } from "./cmds/ray";
 import { wallCommand } from "./cmds/wall";
 import { ceilingCommand } from "./cmds/ceiling";
 import { openingCommand, fensterCommand, tuerCommand } from "./cmds/opening";
@@ -24,18 +25,28 @@ import { splineCommand } from "./cmds/spline";
 import { bezierCommand } from "./cmds/bezier";
 import { dimensionCommand } from "./cmds/dimension";
 import { koteCommand } from "./cmds/kote";
+import { detailrefCommand } from "./cmds/detailref";
+import { scalebarCommand } from "./cmds/scalebar";
+import { revcloudCommand } from "./cmds/revcloud";
+import { pointmarkerCommand } from "./cmds/pointmarker";
+import { wipeoutCommand } from "./cmds/wipeout";
 import { textCommand } from "./cmds/text";
 import { leaderCommand } from "./cmds/leader";
 import { textpathCommand } from "./cmds/textpath";
 import { textboxCommand } from "./cmds/textbox";
 import { moveCommand } from "./cmds/move";
 import { mirrorCommand } from "./cmds/mirror";
+import { rotateCommand } from "./cmds/rotate";
+import { scaleCommand } from "./cmds/scale";
+import { explodeCommand } from "./cmds/explode";
+import { alignCommand } from "./cmds/align";
 import { joinCommand } from "./cmds/join";
 import { copyCommand } from "./cmds/copy";
 import { arrayCommand } from "./cmds/array";
 import { offsetCommand } from "./cmds/offset";
 import { extrudeCommand } from "./cmds/extrude";
 import { trimCommand } from "./cmds/trim";
+import { breakCommand } from "./cmds/break";
 import { extendCommand } from "./cmds/extend";
 import { filletCommand } from "./cmds/fillet";
 import { chamferCommand } from "./cmds/chamfer";
@@ -63,6 +74,7 @@ export const COMMANDS: Record<string, Command> = {
   line: lineCommand,
   polyline: polylineCommand,
   xline: xlineCommand,
+  ray: rayCommand,
   rect: rectCommand,
   circle: circleCommand,
   arc: arcCommand,
@@ -72,18 +84,28 @@ export const COMMANDS: Record<string, Command> = {
   bezier: bezierCommand,
   dimension: dimensionCommand,
   kote: koteCommand,
+  detailref: detailrefCommand,
+  scalebar: scalebarCommand,
+  revcloud: revcloudCommand,
+  pointmarker: pointmarkerCommand,
+  wipeout: wipeoutCommand,
   text: textCommand,
   leader: leaderCommand,
   textpath: textpathCommand,
   textbox: textboxCommand,
   move: moveCommand,
   mirror: mirrorCommand,
+  rotate: rotateCommand,
+  scale: scaleCommand,
+  explode: explodeCommand,
+  align: alignCommand,
   join: joinCommand,
   copy: copyCommand,
   array: arrayCommand,
   offset: offsetCommand,
   extrude: extrudeCommand,
   trim: trimCommand,
+  break: breakCommand,
   extend: extendCommand,
   fillet: filletCommand,
   chamfer: chamferCommand,
@@ -127,6 +149,8 @@ export const ALIASES: Record<string, string> = {
   xl: "xline",
   hilfslinie: "xline",
   konstruktionslinie: "xline",
+  ry: "ray",
+  strahl: "ray",
   bl: "block",
   symbol: "block",
   db: "defblock",
@@ -143,6 +167,21 @@ export const ALIASES: Record<string, string> = {
   bemassung: "dimension",
   kt: "kote",
   hoehenkote: "kote",
+  dr: "detailref",
+  detail: "detailref",
+  verweis: "detailref",
+  sb: "scalebar",
+  massstabsbalken: "scalebar",
+  massstab: "scalebar",
+  rv: "revcloud",
+  wolke: "revcloud",
+  revisionswolke: "revcloud",
+  pm: "pointmarker",
+  punkt: "pointmarker",
+  knoten: "pointmarker",
+  wo: "wipeout",
+  maske: "wipeout",
+  maskierung: "wipeout",
   bz: "bezier",
   tx: "text",
   txt: "text",
@@ -154,6 +193,14 @@ export const ALIASES: Record<string, string> = {
   m: "move",
   s: "mirror",
   spiegeln: "mirror",
+  ro: "rotate",
+  drehen: "rotate",
+  sc: "scale",
+  skalieren: "scale",
+  x: "explode",
+  aufloesen: "explode",
+  al: "align",
+  ausrichten: "align",
   j: "join",
   verbinden: "join",
   cp: "copy",
@@ -162,6 +209,8 @@ export const ALIASES: Record<string, string> = {
   o: "offset",
   ex: "extrude",
   tr: "trim",
+  br: "break",
+  unterbrechen: "break",
   ext: "extend",
   verlaengern: "extend",
   verlängern: "extend",
@@ -185,18 +234,30 @@ export function getCommand(name: string): Command | undefined {
 }
 
 /**
- * Löst eine getippte Eingabe zu einem Befehl auf: erst exakter Name, dann Alias,
- * dann eindeutiges Präfix (case-insensitiv). Mehrdeutige/leere Präfixe → null.
+ * Löst eine getippte Eingabe zu einem Befehl auf: erst exakter Name, dann
+ * NUTZER-Kürzel (`customAliases`, s. `state/commandAliasOverrides.ts` —
+ * Nutzer-Wunsch „Befehls-Kürzel sind hart codiert, keine Remap-UI"), dann das
+ * eingebaute Kürzel, dann eindeutiges Präfix (case-insensitiv). Mehrdeutige/
+ * leere Präfixe → null. Ein Nutzer-Kürzel kann ein EINGEBAUTES Kürzel
+ * überschreiben (gleicher Schlüssel, anderes Ziel), aber NIE einen exakten
+ * Befehlsnamen (der gewinnt immer zuerst — sonst würde getipptes „wall"
+ * plötzlich etwas anderes tun).
  */
-export function resolveCommand(raw: string): Command | null {
+export function resolveCommand(raw: string, customAliases?: Record<string, string>): Command | null {
   const q = raw.trim().toLowerCase();
   if (q === "") return null;
   if (COMMANDS[q]) return COMMANDS[q];
+  if (customAliases?.[q]) return COMMANDS[customAliases[q]] ?? null;
   if (ALIASES[q]) return COMMANDS[ALIASES[q]] ?? null;
   const matches = autocomplete(q);
   if (matches.length === 1) return COMMANDS[matches[0]] ?? null;
   // Exaktes Präfix, das auch ein Alias ist, hat Vorrang, wenn eindeutig.
   return null;
+}
+
+/** Alle bekannten Befehlsnamen, alphabetisch — für die Kürzel-Remap-UI. */
+export function allCommandNames(): string[] {
+  return Object.keys(COMMANDS).sort();
 }
 
 /**

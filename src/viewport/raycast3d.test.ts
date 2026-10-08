@@ -3,13 +3,16 @@ import {
   cameraRay,
   rayWallBox,
   raySlabPrism,
+  rayDrawingSeg,
   pickNearest,
+  DRAWING_PICK_TOLERANCE,
   type RayCamera,
   type PickWall,
   type PickSlab,
   type PickOpening,
   type PickStair,
   type PickContextMesh,
+  type PickDrawingSeg,
 } from "./raycast3d";
 
 // Kamera bei (0,1,10), Blick entlang -Z auf (0,1,0). Zentraler Strahl (ndc 0,0)
@@ -268,6 +271,63 @@ describe("pickNearest — Kontext-Meshes", () => {
       [],
       [],
       [CONTEXT_MESH],
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe("wall");
+    expect(hit!.id).toBe("w1");
+  });
+});
+
+// 2D-Zeichnungs-Spur: dieselbe Achse/Front wie WALL (model (-1,5)→(1,5)),
+// aber als dünne Pick-Box knapp über Höhe 0 (s. `pickDrawingSegs`).
+const DRAWING_SEG: PickDrawingSeg = {
+  start: [-1, 5],
+  end: [1, 5],
+  baseElevation: -DRAWING_PICK_TOLERANCE / 2,
+  drawingId: "d1",
+};
+
+describe("rayDrawingSeg / pickNearest — 2D-Zeichnungs-Spuren", () => {
+  it("senkrechter Strahl von oben trifft die Pick-Box der Boden-Spur", () => {
+    const t = rayDrawingSeg({ origin: [0, 10, 5], dir: [0, -1, 0] }, DRAWING_SEG);
+    expect(t).not.toBeNull();
+    expect(t!).toBeCloseTo(10 - DRAWING_PICK_TOLERANCE / 2, 6);
+  });
+
+  it("Strahl jenseits der Segment-Länge verfehlt", () => {
+    const t = rayDrawingSeg({ origin: [5, 10, 5], dir: [0, -1, 0] }, DRAWING_SEG);
+    expect(t).toBeNull();
+  });
+
+  it("pickNearest liefert die drawingId bei Treffer", () => {
+    const hit = pickNearest(
+      { origin: [0, 10, 5], dir: [0, -1, 0] },
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [DRAWING_SEG],
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.kind).toBe("drawing");
+    expect(hit!.drawingId).toBe("d1");
+  });
+
+  it("bei näherer Wand (Oberkante liegt im Strahlweg) gewinnt die Wand trotz konkurrierender Spur", () => {
+    // Senkrechter Strahl bei x=0,z=5 trifft zuerst die Wand-Oberkante (y=2 →
+    // t=8), erst dahinter läge die hauchdünne Zeichnungs-Spur nahe y=0
+    // (t≈9.94) — die Wand muss gewinnen (kleineres t), nicht die Priorität.
+    const hit = pickNearest(
+      { origin: [0, 10, 5], dir: [0, -1, 0] },
+      [WALL],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [DRAWING_SEG],
     );
     expect(hit).not.toBeNull();
     expect(hit!.kind).toBe("wall");

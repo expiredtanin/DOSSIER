@@ -37,6 +37,16 @@ export interface RichTextEditorProps {
   onChange: (doc: RichTextDoc) => void;
   presets?: TextStylePreset[];
   autoFocus?: boolean;
+  /**
+   * "pt" (Default) — absolute Schriftgrösse, passend für ein schwebendes
+   * Dialogfenster ohne Zoom-Bezug (TextEditorDialog). "em" — Grösse relativ
+   * zur geerbten Schriftgrösse des `.rt-surface`-Containers: für die beiden
+   * Inline-Editoren AUF der Zeichenfläche/dem Blatt (PlanView/LayoutSheet),
+   * die die Basisgrösse selbst per CSS-Variable aus dem echten Zoom setzen —
+   * mit "pt" hätte jeder Run diese Vorgabe per Inline-Style überschrieben und
+   * beim Zoomen nie mitskaliert. S. `renderHtml.ts` `runCssProps`.
+   */
+  sizeUnit?: "pt" | "em";
 }
 
 // ── DOM ↔ Modell-Offset-Übersetzung ─────────────────────────────────────────
@@ -377,6 +387,7 @@ export function RichTextEditor({
   onChange,
   presets,
   autoFocus,
+  sizeUnit = "pt",
 }: RichTextEditorProps): JSX.Element {
   const editorRef = useRef<HTMLDivElement>(null);
   // Letzter in innerHTML geschriebener serialisierter Zustand — verhindert
@@ -396,9 +407,10 @@ export function RichTextEditor({
 
   // ── HTML-Renderer ──────────────────────────────────────────────────────────
 
-  const renderHtml = useCallback((d: RichTextDoc): string => {
-    return docToHtml(d, { basePt: 12, color: "var(--ink)" });
-  }, []);
+  const renderHtml = useCallback(
+    (d: RichTextDoc): string => docToHtml(d, { basePt: 12, color: "var(--ink)", sizeUnit }),
+    [sizeUnit],
+  );
 
   /**
    * Setzt innerHTML direkt. `suppressInput` steuert, ob das daraus folgende
@@ -480,61 +492,9 @@ export function RichTextEditor({
     setSelRange(currentSel);
   }, [renderHtml]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const el = editorRef.current;
-      if (!el) return;
-      const currentSel = readSelection(el);
-
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const cur = valueRef.current;
-        const pos = currentSel?.start ?? plainTextFromDoc(cur).length;
-        const newDoc = insertParagraphBreak(cur, pos);
-        onChangeRef.current(newDoc);
-        const newSel: TextRange = { start: pos + 1, end: pos + 1 };
-        setEditorHtml(newDoc, newSel, true);
-        setSelRange(newSel);
-        return;
-      }
-
-      if (e.key === "Backspace") {
-        if (currentSel && currentSel.start !== currentSel.end) {
-          return;
-        }
-        const pos = currentSel?.start ?? 0;
-        if (pos === 0) return;
-        e.preventDefault();
-        const cur = valueRef.current;
-        const newDoc = deleteCharAt(cur, pos - 1);
-        const newPos = pos - 1;
-        onChangeRef.current(newDoc);
-        const newSel: TextRange = { start: newPos, end: newPos };
-        setEditorHtml(newDoc, newSel, true);
-        setSelRange(newSel);
-        return;
-      }
-
-      if (e.key === "Delete") {
-        if (currentSel && currentSel.start !== currentSel.end) {
-          return;
-        }
-        const pos = currentSel?.start ?? 0;
-        const cur = valueRef.current;
-        const plain = plainTextFromDoc(cur);
-        if (pos >= plain.length) return;
-        e.preventDefault();
-        const newDoc = deleteCharAt(cur, pos);
-        onChangeRef.current(newDoc);
-        const newSel: TextRange = { start: pos, end: pos };
-        setEditorHtml(newDoc, newSel, true);
-        setSelRange(newSel);
-      }
-    },
-    [setEditorHtml],
-  );
-
   // ── Toolbar-Aktionen ───────────────────────────────────────────────────────
+  // Vor `handleKeyDown` definiert (nicht nach ihr wie ursprünglich), damit die
+  // Tastenkürzel unten (Cmd/Ctrl+B/I/U) `handleToggleMark` referenzieren können.
 
   const effectiveRange = useCallback((): TextRange => {
     if (selRange && selRange.start !== selRange.end) return selRange;
@@ -586,6 +546,107 @@ export function RichTextEditor({
     [effectivePresets, selRange, setEditorHtml],
   );
 
+  // ── Tastatur/Einfügen ──────────────────────────────────────────────────────
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const el = editorRef.current;
+      if (!el) return;
+
+      // Standard-WYSIWYG-Kürzel (Cmd auf macOS, Ctrl sonst) — bisher fehlten
+      // sie komplett, nur die Toolbar-Buttons konnten Marks umschalten.
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === "b" || k === "i" || k === "u") {
+          e.preventDefault();
+          handleToggleMark(k === "b" ? "bold" : k === "i" ? "italic" : "underline");
+          return;
+        }
+      }
+
+      const currentSel = readSelection(el);
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const cur = valueRef.current;
+        const pos = currentSel?.start ?? plainTextFromDoc(cur).length;
+        const newDoc = insertParagraphBreak(cur, pos);
+        onChangeRef.current(newDoc);
+        const newSel: TextRange = { start: pos + 1, end: pos + 1 };
+        setEditorHtml(newDoc, newSel, true);
+        setSelRange(newSel);
+        return;
+      }
+
+      if (e.key === "Backspace") {
+        if (currentSel && currentSel.start !== currentSel.end) {
+          return;
+        }
+        const pos = currentSel?.start ?? 0;
+        if (pos === 0) return;
+        e.preventDefault();
+        const cur = valueRef.current;
+        const newDoc = deleteCharAt(cur, pos - 1);
+        const newPos = pos - 1;
+        onChangeRef.current(newDoc);
+        const newSel: TextRange = { start: newPos, end: newPos };
+        setEditorHtml(newDoc, newSel, true);
+        setSelRange(newSel);
+        return;
+      }
+
+      if (e.key === "Delete") {
+        if (currentSel && currentSel.start !== currentSel.end) {
+          return;
+        }
+        const pos = currentSel?.start ?? 0;
+        const cur = valueRef.current;
+        const plain = plainTextFromDoc(cur);
+        if (pos >= plain.length) return;
+        e.preventDefault();
+        const newDoc = deleteCharAt(cur, pos);
+        onChangeRef.current(newDoc);
+        const newSel: TextRange = { start: pos, end: pos };
+        setEditorHtml(newDoc, newSel, true);
+        setSelRange(newSel);
+      }
+    },
+    [setEditorHtml, handleToggleMark],
+  );
+
+  /**
+   * Einfügen (Cmd/Ctrl+V bzw. Kontextmenü). Bisher KEIN eigener Handler — der
+   * Browser hätte das rohe Zwischenablage-HTML (aus Word/Browser kopiert)
+   * direkt in die contentEditable geschrieben, am Dokumentmodell vorbei; erst
+   * das NÄCHSTE `onInput` hätte grob wieder repariert (nur Reintext-Diff,
+   * s. `rebuildDocFromText`) — mit Risiko kaputter Absatzgrenzen bei
+   * mehrzeiligem HTML-Paste (fremde `<div>`-Verschachtelung passt nicht zur
+   * "ein `<div>` = ein Absatz"-Annahme von `editorInnerText`). Bewusst NUR
+   * Reintext einfügen (`text/plain`) statt fremdes Markup zu übernehmen — der
+   * eingefügte Text erbt die Marks der Umgebung, wie eingetippter Text auch
+   * (über denselben Zeichen-Diff-Pfad wie `handleInput`).
+   */
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
+    if (!text) return;
+    const el = editorRef.current;
+    if (!el) return;
+    const cur = valueRef.current;
+    const plain = plainTextFromDoc(cur);
+    const sel = readSelection(el) ?? { start: plain.length, end: plain.length };
+    const start = Math.max(0, Math.min(sel.start, sel.end));
+    const end = Math.max(sel.start, sel.end);
+    const newPlain = plain.slice(0, start) + text + plain.slice(end);
+    const newDoc = rebuildDocFromText(cur, newPlain);
+    onChangeRef.current(newDoc);
+    const newPos = start + text.length;
+    const newSel: TextRange = { start: newPos, end: newPos };
+    setEditorHtml(newDoc, newSel, true);
+    setSelRange(newSel);
+  }, [setEditorHtml]);
+
   // ── Toolbar-Zustand berechnen ──────────────────────────────────────────────
 
   const queryRange: TextRange =
@@ -613,7 +674,7 @@ export function RichTextEditor({
         <button
           type="button"
           className={`rt-btn${isBold ? " rt-btn--active" : ""}`}
-          title={t("rt.bold")}
+          title={`${t("rt.bold")} (Cmd/Ctrl+B)`}
           onMouseDown={(e) => {
             e.preventDefault();
             handleToggleMark("bold");
@@ -626,7 +687,7 @@ export function RichTextEditor({
         <button
           type="button"
           className={`rt-btn${isItalic ? " rt-btn--active" : ""}`}
-          title={t("rt.italic")}
+          title={`${t("rt.italic")} (Cmd/Ctrl+I)`}
           onMouseDown={(e) => {
             e.preventDefault();
             handleToggleMark("italic");
@@ -639,7 +700,7 @@ export function RichTextEditor({
         <button
           type="button"
           className={`rt-btn${isUnderline ? " rt-btn--active" : ""}`}
-          title={t("rt.underline")}
+          title={`${t("rt.underline")} (Cmd/Ctrl+U)`}
           onMouseDown={(e) => {
             e.preventDefault();
             handleToggleMark("underline");
@@ -739,6 +800,7 @@ export function RichTextEditor({
         spellCheck={false}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
         onSelect={captureSelection}
         onKeyUp={captureSelection}
         onMouseUp={captureSelection}

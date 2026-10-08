@@ -32,6 +32,12 @@ import { usePanelHost } from "./host";
 import { Dropdown } from "../ui/Dropdown";
 import { PenColorField } from "../ui/PenColorField";
 import { activePenSet, resolvePenWeight } from "../model/penSets";
+import { DIM_DEFAULTS_MM } from "../model/dimension";
+import { END_MARK_DEFAULT_SIZE_MM } from "../plan/generatePlan/endMarks";
+import type { EndMark } from "../model/types";
+
+/** Auswahl der Linienenden (Reihenfolge = Anzeige im Dropdown). */
+const END_MARK_OPTIONS: EndMark[] = ["none", "arrow", "arrowOpen", "dot", "tick", "square"];
 // Element-spezifische Attribut-Abschnitte (Wand/Decke/Öffnung/Treppe/Raum) —
 // aus ObjectInfoPanel hierher verschoben (Ribbon Phase 3: ObjectInfo trägt nur
 // noch Bezugspunkt + Masse).
@@ -45,6 +51,7 @@ import {
   ExtrudedSolidSection,
   ColumnSection,
   SectionLineSection,
+  DetailRefSection,
 } from "./ObjectInfoPanel";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
@@ -240,6 +247,16 @@ export function AttributesPanel() {
 
   // Effektiver Linienstil rein informativ (kein Setter im Kontrakt → kein Fake).
   // Wir leiten ihn aus dem Modell-Element ab, wenn explizit gesetzt; sonst „—".
+  // Offene Formen tragen Linienenden; geschlossene (Rechteck/Kreis/Ellipse/
+  // Ring) und die Bemassung (eigene SIA-Massstriche) bewusst nicht.
+  const openEndsShape = (() => {
+    const g = isDrawing ? project.drawings2d.find((x) => x.id === sel.id)?.geom : undefined;
+    if (!g) return false;
+    if (g.shape === "line" || g.shape === "arc" || g.shape === "bezier") return true;
+    if (g.shape === "polyline" || g.shape === "spline") return !g.closed;
+    if (g.shape === "text") return !!g.leaderTarget;
+    return false;
+  })();
   const drawing = isDrawing
     ? project.drawings2d.find((d) => d.id === sel.id)
     : undefined;
@@ -273,6 +290,9 @@ export function AttributesPanel() {
             color={sel.color}
             penId={sel.colorPenId}
             pens={project.pens ?? []}
+            customPalettes={project.customPalettes}
+            builtinBanks={project.builtinPaletteBanks}
+            onSaveColor={host.onAddColorToCustomPalette}
             activeStyles={activePenSet(project)?.pens}
             showWeight={weightEditable}
             onColorChange={host.onSetSelectionColor}
@@ -340,11 +360,12 @@ export function AttributesPanel() {
           )
         )}
 
-        {/* Deckkraft (0..1) — nur Bild-Elemente (Drawing2D `{shape:"image"}`
-            im Plan, Layout-Annotation `kind:"image"`). Schlichtes Zahlenfeld
+        {/* Deckkraft (0..1) — bei BILDERN deren eigene Bild-Deckkraft, bei
+            allen übrigen 2D-Formen die Objekt-Transparenz (wirkt auf Strich
+            UND Füllung, s. `Drawing2D.opacity`). Schlichtes Zahlenfeld
             wie die Strichstärke bei Annotationen: kein Bauteil/keine Ebene,
             also keine Quellen-Vererbung. */}
-        {sel.isImage && (
+        {(sel.isImage || isDrawing) && (
           <>
             <span className="attr-key">{t("attr.opacity")}</span>
             <span className="attr-val">
@@ -427,6 +448,218 @@ export function AttributesPanel() {
           </>
         )}
 
+        {/* Strichmuster-Massstab (LTSCALE je Objekt): streckt Striche und
+            Lücken des Linienstils, ohne den Stil selbst zu ändern. */}
+        {isDrawing && (
+          <>
+            <span className="attr-key">{t("attr.dashScale")}</span>
+            <span className="attr-val">
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={0.25}
+                min={0.01}
+                value={drawing?.dashScale ?? 1}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v > 0) host.onSetDashScale(drawing!.id, v);
+                }}
+              />
+            </span>
+          </>
+        )}
+
+        {/* Schraffur-Platzierung an DIESEM Objekt: Winkel ersetzt den der
+            Ressource, Massstab multipliziert sie, der Anker verschiebt das
+            Musterraster (leer = Modellursprung, damit benachbarte Flächen
+            dieselbe Phase teilen). Nur sinnvoll, wenn das Element überhaupt
+            eine Schraffur zeigt. */}
+        {isDrawing && sel.effectiveHatchId && (
+          <>
+            <span className="attr-key">{t("attr.hatch.angle")}</span>
+            <span className="attr-val">
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={5}
+                value={drawing?.hatchAngleDeg ?? ""}
+                placeholder={t("attr.hatch.fromStyle")}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? null : Number(e.target.value);
+                  if (v === null || Number.isFinite(v))
+                    host.onSetHatchPlacement(drawing!.id, { angleDeg: v });
+                }}
+              />
+            </span>
+            <span className="attr-key">{t("attr.hatch.scale")}</span>
+            <span className="attr-val">
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={0.1}
+                min={0.01}
+                value={drawing?.hatchScale ?? ""}
+                placeholder={t("attr.hatch.fromStyle")}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? null : Number(e.target.value);
+                  if (v === null || (Number.isFinite(v) && v > 0))
+                    host.onSetHatchPlacement(drawing!.id, { scale: v });
+                }}
+              />
+            </span>
+            <span className="attr-key">{t("attr.hatch.origin")}</span>
+            <span className="attr-val">
+              <button
+                className="attr-btn"
+                title={t("attr.hatch.origin.hint")}
+                onClick={() =>
+                  host.onSetHatchPlacement(drawing!.id, {
+                    // Ankerpunkt = untere linke Ecke der Objekt-Bbox: das ist
+                    // die Ecke, an der man ein Plattenraster üblicherweise
+                    // ansetzen lässt. Erneuter Klick setzt zurück.
+                    origin: drawing?.hatchOrigin
+                      ? null
+                      : { x: sel.bbox.minX, y: sel.bbox.minY },
+                  })
+                }
+              >
+                {drawing?.hatchOrigin ? t("attr.hatch.origin.reset") : t("attr.hatch.origin.corner")}
+              </button>
+            </span>
+          </>
+        )}
+
+        {/* ── Linienenden (Pfeilspitzen) ────────────────────────────────
+            Nur bei OFFENEN 2D-Formen und beim Text mit Hinweislinie —
+            geschlossene Formen haben keine Enden. Grösse in Papier-mm
+            (massstabsunabhängig, wie die Bemassungswerte). */}
+        {openEndsShape && (
+          <>
+            <div className="attr-section-label">{t("attr.ends.section")}</div>
+            {(
+              [
+                ["start", "attr.ends.start"],
+                ["end", "attr.ends.end"],
+              ] as const
+            ).map(([key, labelKey]) => (
+              <Fragment key={key}>
+                <span className="attr-key">{t(labelKey)}</span>
+                <span className="attr-val">
+                  <Dropdown
+                    value={drawing?.endMarks?.[key] ?? "none"}
+                    onChange={(v) =>
+                      host.onSetEndMarks(drawing!.id, { [key]: v as EndMark })
+                    }
+                    options={END_MARK_OPTIONS.map((o) => ({
+                      value: o,
+                      label: t(`attr.ends.${o}`),
+                    }))}
+                  />
+                </span>
+              </Fragment>
+            ))}
+            <span className="attr-key">{t("attr.ends.size")}</span>
+            <span className="attr-val">
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={0.5}
+                min={0}
+                value={drawing?.endMarks?.sizeMm ?? END_MARK_DEFAULT_SIZE_MM}
+                onChange={(e) => {
+                  const mm = Number(e.target.value);
+                  if (Number.isFinite(mm)) host.onSetEndMarks(drawing!.id, { sizeMm: mm });
+                }}
+              />
+            </span>
+          </>
+        )}
+
+        {/* ── Bemassung: Darstellungs-Feinheiten (SIA 400 B.5.3) ────────
+            Nur bei einer selektierten Masskette. Alle Werte in Zentimetern
+            (Modellmass, s. `model/dimension.ts`); leer/0 fällt auf den
+            Standard zurück. Die Masszahl selbst wird direkt im Plan am
+            eigenen Griff verschoben (rastet nahe der Standardlage ein). */}
+        {drawing?.geom.shape === "dimension" && (
+          <>
+            <div className="attr-section-label">{t("attr.dim.section")}</div>
+            {/* Abstände/Grössen in PAPIER-mm (massstabsunabhängig, wie die
+                Strichstärken darunter) — beim Erzeugen des Plans wird mit
+                dessen Massstab in Modellmass umgerechnet. */}
+            {(
+              [
+                ["gapMm", "attr.dim.gap", DIM_DEFAULTS_MM.gap],
+                ["overshootMm", "attr.dim.overshoot", DIM_DEFAULTS_MM.overshoot],
+                ["tickLenMm", "attr.dim.tick", DIM_DEFAULTS_MM.tickLen],
+                ["textHeightMm", "attr.dim.textHeight", DIM_DEFAULTS_MM.textHeight],
+              ] as const
+            ).map(([key, labelKey, fallback]) => {
+              const geom = drawing.geom as Extract<typeof drawing.geom, { shape: "dimension" }>;
+              return (
+                <Fragment key={key}>
+                  <span className="attr-key">{t(labelKey)}</span>
+                  <span className="attr-val">
+                    <input
+                      className="attr-num"
+                      style={{ width: 72 }}
+                      type="number"
+                      step={0.5}
+                      min={0}
+                      value={geom[key] ?? fallback}
+                      onChange={(e) => {
+                        const mm = Number(e.target.value);
+                        if (Number.isFinite(mm)) host.onSetDimensionStyle(drawing.id, { [key]: mm });
+                      }}
+                    />
+                  </span>
+                </Fragment>
+              );
+            })}
+          </>
+        )}
+
+        {/* Strichstärken der drei Bestandteile — anders als die Abstände
+            oben sind das echte PAPIER-mm (wie jede Strichstärke hier),
+            also massstabsunabhängig. Leer gelassen (0) = Standard: Mass-
+            und Hilfslinie erben die Elementstärke, der Massstrich wird
+            doppelt so dick gezeichnet. */}
+        {drawing?.geom.shape === "dimension" &&
+          (
+            [
+              ["lineWeightMm", "attr.dim.lineWeight"],
+              ["extWeightMm", "attr.dim.extWeight"],
+              ["tickWeightMm", "attr.dim.tickWeight"],
+            ] as const
+          ).map(([key, labelKey]) => {
+            const geom = drawing.geom as Extract<typeof drawing.geom, { shape: "dimension" }>;
+            const fallback = key === "tickWeightMm" ? sel.weightMm * 2 : sel.weightMm;
+            return (
+              <Fragment key={key}>
+                <span className="attr-key">{t(labelKey)}</span>
+                <span className="attr-val">
+                  <input
+                    className="attr-num"
+                    style={{ width: 72 }}
+                    type="number"
+                    step={0.01}
+                    min={0}
+                    list="attr-pen-weights"
+                    value={geom[key] ?? Number(fallback.toFixed(2))}
+                    onChange={(e) => {
+                      const mm = Number(e.target.value);
+                      if (Number.isFinite(mm))
+                        host.onSetDimensionStyle(drawing.id, { [key]: mm });
+                    }}
+                  />
+                </span>
+              </Fragment>
+            );
+          })}
+
         {/* ── Füllung (Vordergrund/Hintergrund + Schraffur) ─────────── */}
         {/* Vordergrund = Muster-/Schraffurfarbe, Hintergrund = Füllfarbe/
             Poché. Jedes Feld: Nach Ebene (LayerCategory erzwingt den Wert) /
@@ -452,6 +685,9 @@ export function AttributesPanel() {
                 color={sel.effectiveForeground ?? "#808080"}
                 penId={sel.foregroundPenId}
                 pens={project.pens ?? []}
+                customPalettes={project.customPalettes}
+                builtinBanks={project.builtinPaletteBanks}
+                onSaveColor={host.onAddColorToCustomPalette}
                 activeStyles={activePenSet(project)?.pens}
                 disabled={!pocheEditable}
                 onColorChange={host.onSetSelectionForeground}
@@ -468,6 +704,9 @@ export function AttributesPanel() {
                 color={sel.effectiveBackground ?? "#808080"}
                 penId={sel.backgroundPenId}
                 pens={project.pens ?? []}
+                customPalettes={project.customPalettes}
+                builtinBanks={project.builtinPaletteBanks}
+                onSaveColor={host.onAddColorToCustomPalette}
                 activeStyles={activePenSet(project)?.pens}
                 disabled={!pocheEditable}
                 onColorChange={host.onSetSelectionBackground}
@@ -518,6 +757,7 @@ export function AttributesPanel() {
       {sel.room && <RoomSection room={sel.room} roomId={sel.id} host={host} />}
       {sel.extrudedSolid && <ExtrudedSolidSection solid={sel.extrudedSolid} host={host} />}
       {sel.column && <ColumnSection column={sel.column} host={host} />}
+      {sel.detailRef && <DetailRefSection detailRef={sel.detailRef} drawingId={sel.id} host={host} />}
     </div>
   );
 }

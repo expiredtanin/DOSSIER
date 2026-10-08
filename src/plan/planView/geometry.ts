@@ -134,6 +134,29 @@ export function viewForScale(
 }
 
 /**
+ * Ziel-Ausschnitt, der eine bestimmte MODELL-Bildmitte bei einem bestimmten
+ * Zoom (`targetPxPerMeter`, Bildschirm-px je Meter) zeigt — die Kamera-Hälfte
+ * von {@link viewForScale} (das hält die BISHERIGE Mitte, hier wird eine
+ * NEUE gesetzt). Setzt die viewBox auf das Canvas-Seitenverhältnis (kein
+ * Letterbox). Für „gespeicherter Ausschnitt merkt sich auch WOHIN man
+ * schaut" (`ViewSnapshot.cameraCenter`/`cameraPxPerMeter`). Ohne Messung
+ * `null` (kein Sprung blind).
+ */
+export function viewForCamera(
+  centerModel: Vec2,
+  targetPxPerMeter: number,
+  el: SVGSVGElement | null,
+): ViewBox | null {
+  const rect = el?.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0 || !(targetPxPerMeter > 0)) return null;
+  const targetMeetScale = targetPxPerMeter / PX_PER_M;
+  const w = rect.width / targetMeetScale;
+  const h = rect.height / targetMeetScale;
+  const c = toScreen(centerModel);
+  return { x: c.x - w / 2, y: c.y - h / 2, w, h };
+}
+
+/**
  * Einpass-Ausschnitt für ein Polygon (in Modell-Metern): dessen Bounding-Box
  * → viewBox-Einheiten (über toScreen) mit etwas Rand. Für „auf Auswahl einpassen".
  */

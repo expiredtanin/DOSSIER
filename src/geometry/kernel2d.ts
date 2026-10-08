@@ -884,6 +884,64 @@ export function circleCircleIntersect(
   return [add(mid, scale(n, h)), add(mid, scale(n, -h))];
 }
 
+// ── Tangente-Tangente-Radius (Apollonius-Spezialfall) ───────────────────────
+
+/** Ein Tangentialobjekt für `tangentCircleCenters`: Gerade (durch a/b, unendlich gedacht) oder Kreis. */
+export type TangentTarget = { kind: "line"; a: Vec2; b: Vec2 } | { kind: "circle"; center: Vec2; r: number };
+
+/** Der geometrische Ort aller Mittelpunkte von Kreisen mit Radius `r`, die `t` berühren. */
+function tangentLoci(t: TangentTarget, r: number): TangentTarget[] {
+  if (t.kind === "line") {
+    const [a1, b1] = offsetSegment(t.a, t.b, r);
+    const [a2, b2] = offsetSegment(t.a, t.b, -r);
+    return [
+      { kind: "line", a: a1, b: b1 },
+      { kind: "line", a: a2, b: b2 },
+    ];
+  }
+  // Kreis: zwei Fälle sind geometrisch gültig — äussere Berührung (Radien
+  // addieren sich) und innere Berührung (Radien-Differenz, ein Kreis liegt im
+  // anderen). Beide werden als Kandidaten geliefert; welcher plausibel ist,
+  // entscheidet der Aufrufer über einen Referenzpunkt (Klickposition).
+  const out: TangentTarget[] = [{ kind: "circle", center: t.center, r: t.r + r }];
+  const inner = Math.abs(t.r - r);
+  if (inner > EPS) out.push({ kind: "circle", center: t.center, r: inner });
+  return out;
+}
+
+function intersectLoci(l1: TangentTarget, l2: TangentTarget): Vec2[] {
+  if (l1.kind === "line") {
+    if (l2.kind === "line") {
+      const p = lineIntersect(l1.a, sub(l1.b, l1.a), l2.a, sub(l2.b, l2.a));
+      return p ? [p] : [];
+    }
+    return lineCircleIntersect(l1.a, l1.b, l2.center, l2.r);
+  }
+  if (l2.kind === "line") return lineCircleIntersect(l2.a, l2.b, l1.center, l1.r);
+  return circleCircleIntersect(l1.center, l1.r, l2.center, l2.r);
+}
+
+/**
+ * Alle geometrisch gültigen Mittelpunkt-Kandidaten für einen Kreis mit
+ * gegebenem Radius `r`, der tangential an BEIDE `t1` und `t2` liegt
+ * (Tangente-Tangente-Radius / TTR-Konstruktion, Spezialfall des Apollonius-
+ * Problems mit bekanntem Radius statt drei tangentialen Objekten). Jedes
+ * Tangentialobjekt hat 1-2 gültige „Loci" (Gerade: beide Seiten; Kreis:
+ * innere/äussere Berührung) — alle Loci-Paare werden geschnitten, das
+ * Ergebnis ist UNSORTIERT/undedupliziert. Der Aufrufer wählt über einen
+ * Referenzpunkt (typischerweise die Klickpunkte, mit denen die beiden
+ * Objekte gewählt wurden) den plausiblen Kandidaten aus.
+ */
+export function tangentCircleCenters(t1: TangentTarget, t2: TangentTarget, r: number): Vec2[] {
+  const out: Vec2[] = [];
+  for (const l1 of tangentLoci(t1, r)) {
+    for (const l2 of tangentLoci(t2, r)) {
+      out.push(...intersectLoci(l1, l2));
+    }
+  }
+  return out;
+}
+
 // ── Polygon-Fläche / Wicklung ───────────────────────────────────────────────
 
 /** Vorzeichenbehaftete Polygonfläche (Shoelace); >0 = CCW, <0 = CW. */
@@ -1168,6 +1226,56 @@ export function removeSegmentWithBulge(
   return leftPts.length >= rightPts.length
     ? { pts: leftPts, closed: false, bulge: leftBulge }
     : { pts: rightPts, closed: false, bulge: rightBulge };
+}
+
+/** Position auf einer OFFENEN Kurve: Kantenindex + Parameter (0..1) auf dieser Kante. */
+export interface CurveHit {
+  edgeIndex: number;
+  t: number;
+}
+
+/**
+ * Nächste Position auf einer (offenen ODER geschlossenen) Punktfolge zu `pt` —
+ * Kantenindex + geklemmter Parameter. `null` bei < 2 Punkten. Grundlage für
+ * BREAK (zwei Klicks → zwei Positionen auf DERSELBEN Kurve).
+ */
+export function nearestOnPolyline(pts: Vec2[], closed: boolean, pt: Vec2): CurveHit | null {
+  const n = pts.length;
+  if (n < 2) return null;
+  const edgeCount = closed ? n : n - 1;
+  let best: CurveHit | null = null;
+  let bestD = Infinity;
+  for (let i = 0; i < edgeCount; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const t = Math.max(0, Math.min(1, projectParam(pt, a, b)));
+    const d = dist(pt, lerp(a, b, t));
+    if (d < bestD) {
+      bestD = d;
+      best = { edgeIndex: i, t };
+    }
+  }
+  return best;
+}
+
+/**
+ * Entfernt den Abschnitt ZWISCHEN zwei Positionen auf einer OFFENEN Kurve
+ * (AutoCADs BREAK, Zwei-Punkt-Variante) — Klick-Reihenfolge ist irrelevant,
+ * die Positionen werden nach Kanten-Fortschritt sortiert. Liefert bis zu ZWEI
+ * Reststücke (vor der ersten, nach der zweiten Position); liegen beide
+ * Positionen auf demselben Rand (Kurvenanfang/-ende), kann ein Stück leer
+ * ausfallen. GESCHLOSSENE Kurven werden hier bewusst NICHT unterstützt (die
+ * Klick-Reihenfolge würde dort bestimmen, welcher der beiden Ring-Bögen
+ * übrig bleibt — eigener, grösserer Scope, s. PENDENZEN.md).
+ */
+export function breakCurve(pts: Vec2[], hit1: CurveHit, hit2: CurveHit): Vec2[][] {
+  const posOf = (h: CurveHit) => h.edgeIndex + h.t;
+  const [lo, hi] = posOf(hit1) <= posOf(hit2) ? [hit1, hit2] : [hit2, hit1];
+  const p1 = lerp(pts[lo.edgeIndex], pts[lo.edgeIndex + 1], lo.t);
+  const p2 = lerp(pts[hi.edgeIndex], pts[hi.edgeIndex + 1], hi.t);
+  const left = dedupeConsecutive([...pts.slice(0, lo.edgeIndex + 1), p1]);
+  const right = dedupeConsecutive([p2, ...pts.slice(hi.edgeIndex + 1)]);
+  return [left, right].filter((s) => s.length >= 2);
 }
 
 /** Ein Schnitt-Treffer auf einer Ziel-Kante: Kantenindex + Parameter + Punkt. */

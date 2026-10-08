@@ -71,6 +71,7 @@ import {
 } from "./generatePlan/shared";
 import { addCeilingPoche } from "./generatePlan/ceilings";
 import { addContextContours } from "./generatePlan/context";
+import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { addDrawing2D } from "./generatePlan/drawing2d";
 import { addDoorSymbol, addOpeningSymbol } from "./generatePlan/openings";
 import { addRoof } from "./generatePlan/roofs";
@@ -213,6 +214,24 @@ export function generatePlan(
   // `generateVisibleLevelsPlan`) dürfen diese NICHT je Geschoss dupliziert
   // werden — nur der aktive Aufruf liefert sie.
   includeGlobal = true,
+  /**
+   * Papier-Massstab (1:N) DIESES Plans — nur für Bemassungs-Feinheiten, die
+   * in Papier-mm angegeben sind (s. `model/dimension.ts`). Der Plan wird je
+   * Ziel eigens erzeugt (Bildschirm bzw. Layout-Viewport), der Massstab ist
+   * hier also eindeutig. Default 1:100, damit bestehende Aufrufer/Tests
+   * unverändert bleiben.
+   */
+  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
+  /**
+   * Export-Modus (PDF/SVG/DXF): schliesst Elemente mit `Drawing2D.noPrint`
+   * aus (analog einer „Non-Plotting"-Ebene, nur pro Objekt statt pro Ebene —
+   * Nutzer-Wunsch „Kein 'nicht druckend'-Flag im Modell"). Default `false`
+   * (Bildschirm/Editieren) — ein als `noPrint` markiertes Element bleibt dort
+   * normal sichtbar, nur der Export lässt es weg. Bewusst als LETZTER
+   * Parameter angehängt (nicht zwischen bestehende einsortiert), damit keine
+   * bestehende Aufrufstelle mit positionalen Argumenten verrutscht.
+   */
+  forPrint = false,
 ): Plan {
   const primitives: Primitive[] = [];
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
@@ -275,7 +294,8 @@ export function generatePlan(
       (d) =>
         d.levelId === floorId &&
         visibleCodes.has(d.categoryCode) &&
-        categoryDisplay(d.categoryCode).render,
+        categoryDisplay(d.categoryCode).render &&
+        (!forPrint || !d.noPrint),
     )
     .map((d) => {
       // `object_name` matcht bei freier 2D-Geometrie den Formnamen
@@ -418,7 +438,10 @@ export function generatePlan(
         const oLwMm =
           ov.lineweight ?? lwByCode.get(o.categoryCode) ?? LAYER_LINE_MM;
         const effO = ov.color !== undefined ? { ...o, color: ov.color } : o;
-        addOpeningSymbol(primitives, project, wall, effO, d.greyed, detail, oLwMm);
+        // Per-Element-Detailstufe (`Opening.detailLevel`) übersteuert die
+        // ansichtsweite `detail`, sonst gilt Letztere unverändert.
+        const effDetail = o.detailLevel ?? detail;
+        addOpeningSymbol(primitives, project, wall, effO, d.greyed, effDetail, oLwMm);
       }
     }
   }
@@ -466,7 +489,7 @@ export function generatePlan(
   // 2D-Zeichengeometrie zuletzt (über der Poché).
   for (const d of drawings) {
     const greyed = categoryDisplay(d.categoryCode).greyed;
-    addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode);
+    addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
   }
 
   // Extrudierte Körper (truck-Integration): das Quell-Profil wurde beim
@@ -536,6 +559,7 @@ export function generateVisibleLevelsPlan(
   showReferenceLines = false,
   mono = false,
   levelDisplay: CategoryDisplayResolver = SHOW_ALL,
+  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
 ): Plan {
   const active = project.drawingLevels.find((l) => l.id === activeLevelId);
   const siblings =
@@ -566,8 +590,19 @@ export function generateVisibleLevelsPlan(
       showReferenceLines,
       mono,
       false, // includeGlobal: Schnittlinien/Kontext/Luftbilder nur einmal (aktiv)
+      scaleDenominator,
     );
-    primitives.push(...(d.greyed ? p.primitives.map((pr) => ({ ...pr, greyed: true })) : p.primitives));
+    // KEIN `primitives.push(...p.primitives)`: bei grossen Importen (z. B. ein
+    // Kataster-DXF einer ganzen Stadt, hunderttausende Drawing2D-Elemente →
+    // ebenso viele Primitives) sprengt der Spread-Operator die Argumentzahl-
+    // Grenze von `push` (RangeError "Maximum call stack size exceeded") — s.
+    // dieselbe, bereits dokumentierte Falle in `swissBuildings3d.ts::concatMeshes`/
+    // `dwgParser.ts`. Reine `for`-Schleife ist unbegrenzt sicher.
+    if (d.greyed) {
+      for (const pr of p.primitives) primitives.push({ ...pr, greyed: true });
+    } else {
+      for (const pr of p.primitives) primitives.push(pr);
+    }
     extend(p.bounds);
   }
 
@@ -580,8 +615,9 @@ export function generateVisibleLevelsPlan(
     showReferenceLines,
     mono,
     true,
+    scaleDenominator,
   );
-  primitives.push(...activePlan.primitives);
+  for (const pr of activePlan.primitives) primitives.push(pr);
   extend(activePlan.bounds);
 
   return { primitives, bounds, backgroundImages: activePlan.backgroundImages };
@@ -843,6 +879,12 @@ function computeBounds(
     } else if (g.shape === "dimension") {
       g.pts.forEach(acc);
     } else if (g.shape === "kote") acc(g.at);
+    else if (g.shape === "detailref") acc(g.at);
+    else if (g.shape === "scalebar") {
+      acc(g.at);
+      acc({ x: g.at.x + g.segmentLength * g.segments, y: g.at.y });
+    }
+    else if (g.shape === "pointmarker") acc(g.at);
     else if (g.shape === "text") acc(g.at);
     else if (g.shape === "image") { acc(g.min); acc(g.max); }
   }

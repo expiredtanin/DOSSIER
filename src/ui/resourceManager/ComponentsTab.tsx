@@ -574,6 +574,7 @@ function ComponentDetail({
   project,
   onPatch,
   onDelete,
+  onSaveColor,
 }: {
   component: Component;
   hatches: Project["hatches"];
@@ -581,6 +582,8 @@ function ComponentDetail({
   project: Project;
   onPatch: (patch: Partial<Component>) => void;
   onDelete: () => void;
+  /** Aktuelle Farbe in einer eigenen Palette ablegen (s. `FreeColorPicker`). */
+  onSaveColor?: (paletteId: string, hex: string) => void;
 }) {
   const pens = project.pens ?? [];
   const activeStyles = activePenSet(project)?.pens;
@@ -631,6 +634,9 @@ function ComponentDetail({
             penId={component.colorPenId}
             pens={pens}
             activeStyles={activeStyles}
+            customPalettes={project.customPalettes}
+            builtinBanks={project.builtinPaletteBanks}
+            onSaveColor={onSaveColor}
             onColorChange={(color) => onPatch({ color, colorPenId: undefined })}
             onPenChange={(colorPenId) =>
               onPatch(
@@ -656,6 +662,9 @@ function ComponentDetail({
             penId={component.foregroundPenId}
             pens={pens}
             activeStyles={activeStyles}
+            customPalettes={project.customPalettes}
+            builtinBanks={project.builtinPaletteBanks}
+            onSaveColor={onSaveColor}
             onColorChange={(foreground) => onPatch({ foreground, foregroundPenId: undefined })}
             onPenChange={(foregroundPenId) =>
               onPatch(
@@ -680,6 +689,9 @@ function ComponentDetail({
             penId={component.backgroundPenId}
             pens={pens}
             activeStyles={activeStyles}
+            customPalettes={project.customPalettes}
+            builtinBanks={project.builtinPaletteBanks}
+            onSaveColor={onSaveColor}
             onColorChange={(background) => onPatch({ background, backgroundPenId: undefined })}
             onPenChange={(backgroundPenId) =>
               onPatch(
@@ -737,11 +749,13 @@ export function ComponentsTab({
   onPatchComponent,
   onAddComponent,
   onDeleteComponent,
+  onAddColorToCustomPalette,
 }: {
   project: Project;
   onPatchComponent: (id: string, patch: Partial<Component>) => void;
   onAddComponent: () => void;
   onDeleteComponent: (id: string) => void;
+  onAddColorToCustomPalette?: (paletteId: string | undefined, hex: string) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const components = project.components;
@@ -790,6 +804,7 @@ export function ComponentsTab({
               component={selected}
               hatches={project.hatches}
               project={project}
+              onSaveColor={onAddColorToCustomPalette}
               onPatch={(patch) => onPatchComponent(selected.id, patch)}
               onDelete={() => {
                 revokeMaterialUrls(selected.material);

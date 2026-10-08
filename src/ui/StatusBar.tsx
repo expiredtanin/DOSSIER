@@ -204,6 +204,33 @@ function SnapControl({
           <label className="sb-snap-row">
             <input
               type="checkbox"
+              checked={snap.perpendicular}
+              disabled={!snap.enabled}
+              onChange={(e) => onSnapChange({ ...snap, perpendicular: e.target.checked })}
+            />
+            <span>{t("snap.perpendicular")}</span>
+          </label>
+          <label className="sb-snap-row">
+            <input
+              type="checkbox"
+              checked={snap.tangent}
+              disabled={!snap.enabled}
+              onChange={(e) => onSnapChange({ ...snap, tangent: e.target.checked })}
+            />
+            <span>{t("snap.tangent")}</span>
+          </label>
+          <label className="sb-snap-row">
+            <input
+              type="checkbox"
+              checked={snap.parallel}
+              disabled={!snap.enabled}
+              onChange={(e) => onSnapChange({ ...snap, parallel: e.target.checked })}
+            />
+            <span>{t("snap.parallel")}</span>
+          </label>
+          <label className="sb-snap-row">
+            <input
+              type="checkbox"
               checked={snap.grid}
               disabled={!snap.enabled}
               onChange={(e) => onSnapChange({ ...snap, grid: e.target.checked })}
@@ -220,6 +247,20 @@ function SnapControl({
             <span>{t("snap.ortho")}</span>
           </label>
           <label className="sb-snap-row sb-snap-row-num">
+            <span>{t("snap.angleStep")}</span>
+            <input
+              type="number"
+              step={5}
+              min={1}
+              max={180}
+              disabled={!snap.enabled}
+              value={snap.angleStep}
+              onChange={(e) =>
+                onSnapChange({ ...snap, angleStep: Number(e.target.value) })
+              }
+            />
+          </label>
+          <label className="sb-snap-row sb-snap-row-num">
             <span>{t("snap.gridSize")}</span>
             <input
               type="number"
@@ -230,6 +271,14 @@ function SnapControl({
                 onSnapChange({ ...snap, gridSize: Number(e.target.value) })
               }
             />
+          </label>
+          <label className="sb-snap-row">
+            <input
+              type="checkbox"
+              checked={snap.showGrid}
+              onChange={(e) => onSnapChange({ ...snap, showGrid: e.target.checked })}
+            />
+            <span>{t("snap.showGrid")}</span>
           </label>
           <label className="sb-snap-row">
             <input

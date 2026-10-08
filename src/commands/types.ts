@@ -71,6 +71,14 @@ export interface CommandSelection {
   extrudedSolidId?: string | null;
   /** Gewählte Stütze (Tragwerk), falls eine selektiert ist. */
   columnId?: string | null;
+  /** Gewählte Decken (Mehrfachauswahl). */
+  ceilingIds?: string[];
+  /** Gewählte Dächer (Mehrfachauswahl); s. `TransformSelection.roofIds`. */
+  roofIds?: string[];
+  /** Gewählte Treppen (Mehrfachauswahl). */
+  stairIds?: string[];
+  /** Gewählte Räume (Mehrfachauswahl). */
+  roomIds?: string[];
 }
 
 /** Live-Kontext, den ein Befehl bei jedem Schritt erhält (analog ToolContext). */

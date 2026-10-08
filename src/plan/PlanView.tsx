@@ -17,8 +17,11 @@ import type { CSSProperties } from "react";
 import type { HatchRender, Plan, PlanImage, Primitive } from "./generatePlan";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
+import type { HudFieldsState } from "../tools/hudFormat";
 import type { RichTextDoc } from "../text/richText";
 import { docFromText } from "../text/richText";
+import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../text/fontMetrics";
+import { textFrameCorners } from "../text/textFrame";
 import { RichTextEditor } from "../text/RichTextEditor";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
@@ -32,6 +35,7 @@ import {
   meetScale,
   scaleFromView,
   viewForScale,
+  viewForCamera,
   fitBoxFor,
   pointInPolygon,
   pointSegDistPx,
@@ -51,16 +55,14 @@ import {
 } from "./planView/primitives";
 import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
+import { PlanGrid } from "./planView/PlanGrid";
 
 /**
- * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7): Werte je
- * Feld (gelockt oder live), aktives Tab-Ziel und der gerade getippte Text —
- * das HUD spiegelt die Eingabe LIVE am Cursor (VW-Verhalten).
+ * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7) — Typ
+ * lebt in `tools/hudFormat.ts` (dort auch von der 3D-Ansicht genutzt);
+ * hier nur re-exportiert (bestehende Importe aus `./PlanView` bleiben gültig).
  */
-export interface HudFieldsState {
-  fields: { id: string; value: number | null; locked: boolean; active: boolean }[];
-  typed: string;
-}
+export type { HudFieldsState } from "../tools/hudFormat";
 
 // Zoom-Grenzen relativ zur eingepassten Default-Ansicht. Kleinere viewBox-
 // Breite = stärkerer Zoom. ZOOM_MAX → max. Hineinzoomen, ZOOM_MIN → Herauszoomen.
@@ -109,6 +111,13 @@ export interface PlanViewHandle {
   pxPerMeter: () => number;
   /** Mitte des aktuellen Ausschnitts in Modell-Metern (z. B. für Import-Platzierung). */
   viewCenterModel: () => Vec2;
+  /**
+   * Setzt die Bildmitte + den Zoom (Bildschirm-px je Meter) direkt — Gegenstück
+   * zu `viewCenterModel`/`pxPerMeter` (Auslesen). Für „gespeicherter Ausschnitt
+   * wiederherstellen": stellt WOHIN man schaut wieder her, nicht nur WAS
+   * sichtbar ist. No-op ohne Messung (SVG noch nicht gemountet).
+   */
+  setCamera: (center: Vec2, pxPerMeter: number) => void;
   /**
    * Auf eine beliebige Punktmenge (Modell-Meter) einpassen, z. B. die Bounding-
    * Box neu importierter Kontext-Objekte (Auto-Zoom nach Geo-/DXF-Import).
@@ -410,6 +419,8 @@ export interface PlanViewProps {
   toolHandlers?: ToolHandlers;
   /** Lineale (oben + links, VW-Stil) einblenden. Default an. */
   showRulers?: boolean;
+  /** Sichtbares Hintergrund-Raster (rein visuell, unabhängig vom Fang-Raster). Default aus. */
+  showGrid?: boolean;
   /**
    * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7):
    * gelockte/live Werte je Feld, aktives Tab-Ziel und der gerade getippte
@@ -570,6 +581,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       toolInputActive,
       toolHandlers,
       showRulers = true,
+      showGrid = false,
       hudFields,
       grips,
       gripHandleLines,
@@ -864,6 +876,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         // Mitte der frischen viewBox (aus Ref) → Modell (inverse toScreen).
         const v = viewRef.current;
         return { x: (v.x + v.w / 2) / PX_PER_M, y: -(v.y + v.h / 2) / PX_PER_M };
+      },
+      setCamera: (center, pxPerMeter) => {
+        const target = viewForCamera(center, pxPerMeter, svgRef.current);
+        if (target) setView(target);
       },
       fitBounds: (pts) => {
         if (pts.length === 0) return; // leerer Import → kein Fit, kein Crash
@@ -2177,6 +2193,24 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     );
   }, [plan, selectedDrawingIds]);
 
+  // Hervorhebung ausgewählter TEXT-Objekte (Auswahl-Rahmen, Nutzer-Wunsch):
+  // `drawingText` hat keine `pts`/`a`/`b` wie Linie/Polygon, daher eigener
+  // Zweig statt `highlightDrawPrims` — der Rahmen wird geschätzt, s.
+  // `text/textFrame.ts` `textFrameCorners`. Während des Inline-Editors (`editTextId`) NICHT
+  // zusätzlich zeichnen — der Editor-Rahmen selbst übernimmt dort die Anzeige.
+  const highlightTextFrames = useMemo(() => {
+    const ids =
+      selectedDrawingIds && selectedDrawingIds.length ? new Set(selectedDrawingIds) : null;
+    if (!ids) return [];
+    return plan.primitives.filter(
+      (p): p is Extract<Primitive, { kind: "drawingText" }> =>
+        p.kind === "drawingText" &&
+        p.drawingId != null &&
+        ids.has(p.drawingId) &&
+        p.drawingId !== editTextId,
+    );
+  }, [plan, selectedDrawingIds, editTextId]);
+
   // Hervorhebung der selektierten Decken: alle Polygone JEDER gewählten Decke
   // (Fläche + Umriss) mit Akzentkontur überzeichnen — analog zur Wand-Auswahl.
   const highlightCeilingPolys = useMemo(() => {
@@ -2360,7 +2394,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const list: HatchedPoly[] = [];
     plan.primitives.forEach((p, i) => {
       if (p.kind === "polygon" && polyUsesPattern(p.hatch)) {
-        const hatch = p.greyed ? { ...p.hatch, color: greyColor(p.hatch.color) ?? p.hatch.color } : p.hatch;
+        // Verlauf-Schraffuren tragen ihre eigentliche Farbe in `gradient.color1/
+        // color2` (nicht in `hatch.color`, das dort ungenutzt ist) — beide
+        // Stops müssen separat eingegraut werden, sonst bliebe ein gedimmtes
+        // Bauteil mit einer Verlauf-Schraffur trotzdem knallfarbig.
+        const hatch = p.greyed
+          ? {
+              ...p.hatch,
+              color: greyColor(p.hatch.color) ?? p.hatch.color,
+              gradient: p.hatch.gradient && {
+                ...p.hatch.gradient,
+                color1: greyColor(p.hatch.gradient.color1) ?? p.hatch.gradient.color1,
+                color2: greyColor(p.hatch.gradient.color2) ?? p.hatch.gradient.color2,
+              },
+            }
+          : p.hatch;
         list.push({ patternId: `hatch-${i}`, hatch });
       }
     });
@@ -2384,6 +2432,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         // `drawingText` (importierter Einzeltext) rendert IMMER im SVG — der GL-
         // wie der WASM-Renderer zeichnet ihn nicht. Der Raum-Stempel (`text`)
         // bleibt: unter WASM rastert ihn render2d selbst (sonst doppelt).
+        // ZUSÄTZLICH: das gerade im Inline-Editor offene Text-Element NIE
+        // statisch mitzeichnen — Bug-Meldung ("sonst alles io" nach den
+        // Positions-Fixes, aber sichtbare Text-Dopplung): das SVG bricht
+        // Zeilen nach einer GESCHÄTZTEN Zeichenbreite um
+        // (`CHAR_WIDTH_FACTOR`), der Browser im Editor nach ECHTER
+        // Font-Metrik — beide Umbrüche weichen leicht voneinander ab, sodass
+        // der (weisse, aber nicht überall deckende) Editor-Rahmen Reste des
+        // statischen Texts sichtbar unbedeckt liess.
+        (p.kind === "drawingText" && p.drawingId === editTextId) ||
         (useGpuRenderer
           ? wantWasm
             ? p.kind !== "drawingText"
@@ -2401,7 +2458,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
-    [plan, hairline, paperScale, useGpuRenderer, wantWasm],
+    [plan, hairline, paperScale, useGpuRenderer, wantWasm, editTextId],
   );
   const drawingRunEls = useMemo(
     () =>
@@ -2510,6 +2567,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         className={useGpuRenderer ? undefined : "plan-bg"}
         fill={useGpuRenderer ? "transparent" : undefined}
       />
+      {/* Sichtbares Hintergrund-Raster (rein visuell, unabhängig vom Fang) —
+          MUSS hinter Luftbildern/Geometrie liegen, sonst überdeckt es die
+          Zeichnung. */}
+      {showGrid && (
+        <PlanGrid
+          vb={{ x0: view.x, y0: view.y, w: view.w, h: view.h }}
+          pxPerMeter={currentPxPerMeter()}
+        />
+      )}
       {/* Georeferenzierte Luftbilder ZWISCHEN Blatt-Hintergrund und Geometrie:
           Modell-Meter × PX_PER_M mit negierter y-Achse (s. toScreen) → Bild-Norden
           (max.y) oben bei y=−max.y·PX; das Bild zeichnet natürlich von oben (kein
@@ -2725,6 +2791,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           />
         ),
       )}
+      {/* Auswahl-Rahmen für Text-Objekte (geschätzte Box, kein echter Umriss
+          wie bei Linie/Polygon — s. `text/textFrame.ts` `textFrameCorners`). Gestrichelt
+          statt durchgezogen wie `.plan-sel-draw`, um sichtbar zu machen: das
+          ist eine SCHÄTZUNG, keine exakt nachgezeichnete Geometrie. */}
+      {highlightTextFrames.map((p) => (
+        <polygon
+          key={`selt-${p.drawingId}`}
+          className="plan-sel-text-frame"
+          points={textFrameCorners(p)
+            .map(toScreen)
+            .map((s) => `${s.x},${s.y}`)
+            .join(" ")}
+          pointerEvents="none"
+        />
+      ))}
       </>
       )}
       {/* Gruppen-Auswahl: nur eine Bounding-Box mit vier Eckpunkten (kein
@@ -2907,14 +2988,23 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           Feedback) — für ein frisch über `text`/`textbox` erzeugtes Element
           (sofort nach dem Platzieren, s. App.tsx host.focusDrawing) ODER ein
           per Doppelklick geöffnetes bestehendes. `RichTextEditor` bringt seine
-          eigene Mini-Toolbar mit (erscheint darüber, wie im Layout-Editor).
-          `at` ist die Baseline-links der ersten Zeile (s. primitives.tsx
-          "drawingText") — der Editor-Rahmen sitzt daher ~eine Zeilenhöhe
-          darüber. OHNE `wrapWidth` (Text-Werkzeug) bleibt die Breite frei
-          (kein Wortumbruch, nur Enter erzeugt neue Zeilen); MIT `wrapWidth`
-          (Textspalte) bricht der Editor live um wie ein InDesign-Textrahmen —
-          `position:"fixed"` mit echten Client-Pixeln (vbToClient), damit die
-          Positionierung unabhängig vom umgebenden Layout stimmt. */}
+          eigene Mini-Toolbar mit; die schwebt PER CSS (s. styles.css
+          `.planview-inline-text .rt-toolbar`, `position:absolute;
+          bottom:100%`) OBERHALB der Textfläche, ausserhalb von deren
+          Layout-Fluss — sie darf die Fläche NICHT nach unten schieben
+          (Bug-Meldung "Editor ist tiefer als der Text": vorher stand die
+          Toolbar noch im normalen Fluss ÜBER der Fläche und schob sie um
+          ihre eigene, zoomunabhängige Höhe nach unten, während hier nur mit
+          EINER Zeilenhöhe Versatz gerechnet wird — bei üblichem Zoom kleiner
+          als die Toolbar-Höhe). `at` ist die Baseline-links der ersten Zeile
+          (s. primitives.tsx "drawingText") — der Editor-Rahmen (= die
+          Textfläche, jetzt ohne die Toolbar davor) sitzt daher ~eine
+          Zeilenhöhe darüber. OHNE `wrapWidth` (Text-Werkzeug) bleibt die
+          Breite frei (kein Wortumbruch, nur Enter erzeugt neue Zeilen); MIT
+          `wrapWidth` (Textspalte) bricht der Editor live um wie ein
+          InDesign-Textrahmen — `position:"fixed"` mit echten Client-Pixeln
+          (vbToClient), damit die Positionierung unabhängig vom umgebenden
+          Layout stimmt. */}
       {editTextId &&
         (() => {
           const prim = plan.primitives.find(
@@ -2933,7 +3023,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           // s. styles.css `.planview-inline-text .rt-surface`) — die Toolbar
           // bleibt dadurch immer normal gross und bedienbar.
           const pxPerM = currentPxPerMeter();
-          const topAnchor = toScreen({ x: prim.at.x, y: prim.at.y + prim.heightM });
+          // Baseline → Box-Oberkante: ECHTES Font-Measuring statt der groben
+          // "ganzes heightM = Ascent"-Näherung (Bug-Meldung "Sprung nach
+          // rechts oben" — Rest-Y-Versatz nach dem Toolbar-Fluss-/Schrift-Fix).
+          const baselineFromTop = contentFontBaselineFromTop(TEXT_LINE_HEIGHT_MULT);
+          const topAnchor = toScreen({ x: prim.at.x, y: prim.at.y + prim.heightM * baselineFromTop });
           const screen = vbToClient(topAnchor.x, topAnchor.y);
           const hasWrap = !!prim.wrapWidth;
           const widthPx = hasWrap ? prim.wrapWidth! * pxPerM : undefined;
@@ -2969,7 +3063,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
                   }
                 }}
               >
-                <RichTextEditor value={doc} onChange={(d) => onCommitTextEdit?.(d)} autoFocus />
+                <RichTextEditor
+                  value={doc}
+                  onChange={(d) => onCommitTextEdit?.(d)}
+                  autoFocus
+                  sizeUnit="em"
+                />
               </div>
             </>
           );

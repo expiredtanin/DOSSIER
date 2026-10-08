@@ -38,6 +38,8 @@ export function useGripEditing(opts: {
   selectedDrawingIds: string[];
   levelId: string;
   visibleCodes: Set<string>;
+  /** Papier-Massstab (1:N) — die Bemassungs-Griffe hängen daran (Papier-mm). */
+  scaleDenominator: number;
   snap: SnapSettings;
   setDraft: (draft: ToolDraft | null) => void;
   snapFor: (raw: Vec2, pxPerMeter: number, mods: ToolMods) => SnapResult | null;
@@ -47,7 +49,13 @@ export function useGripEditing(opts: {
   moveStairBy: (id: string, delta: Vec2) => void;
   moveRoomGrip: (id: string, index: number, pt: Vec2) => void;
   moveCeilingGrip: (id: string, index: number, pt: Vec2) => void;
-  moveGripOf: (drawingId: string | null, wallId: string | null, index: number, pt: Vec2) => void;
+  moveGripOf: (
+    drawingId: string | null,
+    wallId: string | null,
+    index: number,
+    pt: Vec2,
+    scaleDenominator?: number,
+  ) => void;
   moveRoomEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   moveCeilingEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   moveEdgeOf: (
@@ -76,6 +84,7 @@ export function useGripEditing(opts: {
     selectedDrawingIds,
     levelId,
     visibleCodes,
+    scaleDenominator,
     snap,
     setDraft,
     snapFor,
@@ -191,7 +200,7 @@ export function useGripEditing(opts: {
     };
     for (const id of effectiveDrawingIds) {
       const d = project.drawings2d.find((x) => x.id === id);
-      if (d) pushGroup(drawingVertices(d), { drawingId: id });
+      if (d) pushGroup(drawingVertices(d, scaleDenominator), { drawingId: id });
     }
     if (effectiveDrawingIds.length === 0) {
       for (const id of selectedWallIds) {
@@ -304,7 +313,7 @@ export function useGripEditing(opts: {
     for (const id of effectiveDrawingIds) {
       const d = project.drawings2d.find((x) => x.id === id);
       if (!d) continue;
-      const verts = drawingVertices(d);
+      const verts = drawingVertices(d, scaleDenominator);
       const g = d.geom;
       const owner = { drawingId: id };
       if (g.shape === "rect" || g.shape === "image") out.push(...ringEdges(verts, owner));
@@ -350,7 +359,7 @@ export function useGripEditing(opts: {
   const elementCorners = (drawingId: string | null, wallId: string | null): Vec2[] => {
     if (drawingId) {
       const d = project.drawings2d.find((x) => x.id === drawingId);
-      return d ? drawingVertices(d) : [];
+      return d ? drawingVertices(d, scaleDenominator) : [];
     }
     if (wallId) {
       const w = project.walls.find((x) => x.id === wallId);
@@ -388,7 +397,7 @@ export function useGripEditing(opts: {
         if (id === selfDrawingId) continue;
         const d = project.drawings2d.find((x) => x.id === id);
         if (!d) continue;
-        drawingVertices(d).forEach((v, i) => {
+        drawingVertices(d, scaleDenominator).forEach((v, i) => {
           if (near(corner, v)) add2(id, null, i, v);
         });
       }
@@ -789,7 +798,13 @@ export function useGripEditing(opts: {
       // Mehrfachauswahl: welchem Element dieser Griff gehört, kommt aus
       // `gripOwners` (nicht mehr aus den singulären selectedDrawingId/-WallId).
       const owner = gripOwners[index];
-      moveGripOf(owner?.drawingId ?? selectedDrawingId, owner?.wallId ?? selectedWallId, owner?.localIndex ?? index, pt);
+      moveGripOf(
+        owner?.drawingId ?? selectedDrawingId,
+        owner?.wallId ?? selectedWallId,
+        owner?.localIndex ?? index,
+        pt,
+        scaleDenominator,
+      );
     }
   };
   const applyEdge = (edge: EdgeGrip, delta: Vec2) => {
@@ -973,7 +988,7 @@ export function useGripEditing(opts: {
       }
       for (const c of moveCoincidentRef.current) {
         c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
-        moveGripOf(c.drawingId, c.wallId, c.index, c.pos);
+        moveGripOf(c.drawingId, c.wallId, c.index, c.pos, scaleDenominator);
       }
     },
     // Kanten-Griff ziehen. Zwei Verhalten (Zielpunkt jeweils ABSOLUT relativ

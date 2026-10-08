@@ -36,19 +36,23 @@ import type {
   Vec2,
 } from "../types";
 
-const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Kurvenwahl
+export const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Kurvenwahl
 
 // ── Kurven-Abstraktion: line/polyline/rect → Punktliste + closed ──────────────
 
-interface Curve {
+export interface Curve {
   pts: Vec2[];
   closed: boolean;
   /** Bogen-Segmente (DXF-bulge, s. `geometry/bulge.ts`) — nur bei polyline. */
   bulge?: number[];
 }
 
-/** Wandelt eine trim-fähige 2D-Form in eine Punktliste (+closed[/bulge]) oder null. */
-function geomToCurve(g: Drawing2DGeom): Curve | null {
+/**
+ * Wandelt eine trim-fähige 2D-Form in eine Punktliste (+closed[/bulge]) oder
+ * null. Exportiert — `break.ts` (BREAK-Befehl) nutzt dieselbe Kurven-
+ * Abstraktion + Hit-Test wie trim/extend, statt sie zu duplizieren.
+ */
+export function geomToCurve(g: Drawing2DGeom): Curve | null {
   if (g.shape === "line") return { pts: [g.a, g.b], closed: false };
   if (g.shape === "polyline") return { pts: g.pts, closed: g.closed, bulge: g.bulge };
   if (g.shape === "rect") {
@@ -65,8 +69,8 @@ function geomToCurve(g: Drawing2DGeom): Curve | null {
   return null; // circle/arc/text: hier nicht trim-fähig
 }
 
-/** Ist diese Form trim-fähig (line/polyline/rect)? */
-function isTrimmable(d: Drawing2D): boolean {
+/** Ist diese Form trim-fähig (line/polyline/rect)? Exportiert, s. `geomToCurve`. */
+export function isTrimmable(d: Drawing2D): boolean {
   const g = d.geom;
   return g.shape === "line" || g.shape === "polyline" || g.shape === "rect";
 }
@@ -77,7 +81,7 @@ function isTrimmable(d: Drawing2D): boolean {
  * (runden) Kontur funktioniert statt entlang der geraden Sehne — s. gleiches
  * Vorgehen in offset.ts (`curveHitEdges`).
  */
-function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
+export function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
   if (!hasRealBulge(curve.bulge)) return polylineEdges(curve.pts, curve.closed);
   const n = curve.pts.length;
   const edgeCount = curve.closed ? n : n - 1;
@@ -90,13 +94,14 @@ function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
 }
 
 /** Nächstes trim-fähiges Drawing2D der Ebene zum Klickpunkt (innerhalb Toleranz). */
-function pickCurveAt(
+export function pickCurveAt(
   project: Project,
   levelId: string,
   pt: Vec2,
+  tol = HIT_TOL,
 ): Drawing2D | null {
   let best: Drawing2D | null = null;
-  let bestD = HIT_TOL;
+  let bestD = tol;
   for (const d of project.drawings2d) {
     if (d.levelId !== levelId) continue;
     if (!isTrimmable(d)) continue;
@@ -142,8 +147,8 @@ function sameChain(a: { pts: Vec2[]; closed: boolean }, b: Curve): boolean {
   return true;
 }
 
-/** Eine getrimmte Rest-Kette als passende Drawing2D-Geometrie. */
-function chainToGeom(chain: { pts: Vec2[]; closed: boolean; bulge?: number[] }): Drawing2DGeom {
+/** Eine getrimmte Rest-Kette als passende Drawing2D-Geometrie. Exportiert, s. `geomToCurve`. */
+export function chainToGeom(chain: { pts: Vec2[]; closed: boolean; bulge?: number[] }): Drawing2DGeom {
   if (chain.pts.length === 2 && !chain.closed && !hasRealBulge(chain.bulge)) {
     return { shape: "line", a: chain.pts[0], b: chain.pts[1] };
   }

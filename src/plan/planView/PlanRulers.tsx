@@ -3,8 +3,13 @@
 import type { Vec2 } from "../../model/types";
 import { PX_PER_M } from "./geometry";
 
-/** Schrittweite (Meter) fürs Lineal: 1/2/5·10^n, sodass Major-Ticks ≥ ~64 px auseinander liegen. */
-function rulerStep(pxPerMeter: number): number {
+/**
+ * Schrittweite (Meter) fürs Lineal: 1/2/5·10^n, sodass Major-Ticks ≥ ~64 px
+ * auseinander liegen. Exportiert — `PlanGrid.tsx` nutzt dieselbe Funktion für
+ * den Zeilenabstand des sichtbaren Hintergrund-Rasters (identisches
+ * "welcher Abstand ist bei diesem Zoom sinnvoll"-Problem).
+ */
+export function rulerStep(pxPerMeter: number): number {
   const minPx = 64;
   let step = Math.pow(10, Math.ceil(Math.log10(minPx / pxPerMeter)));
   for (const f of [0.2, 0.5, 1]) {

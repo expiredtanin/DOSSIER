@@ -102,3 +102,55 @@ export function sampleCatmullRom(pts: Vec2[], closed: boolean, segsPerSpan = 16)
   if (!closed) out.push(pts[pts.length - 1]);
   return out;
 }
+
+/** Punkt auf einem uniformen kubischen B-Spline-Segment (Standard-Basis, 4 Kontrollpunkte). */
+function bsplineSegPoint(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const b0 = (1 - t) ** 3 / 6;
+  const b1 = (3 * t3 - 6 * t2 + 4) / 6;
+  const b2 = (-3 * t3 + 3 * t2 + 3 * t + 1) / 6;
+  const b3 = t3 / 6;
+  return {
+    x: p0.x * b0 + p1.x * b1 + p2.x * b2 + p3.x * b3,
+    y: p0.y * b0 + p1.y * b1 + p2.y * b2 + p3.y * b3,
+  };
+}
+
+/**
+ * Tessellierte Punkte eines kubischen B-Splines über den KONTROLLPUNKTEN
+ * `pts` — Gegenstück zu `sampleCatmullRom`: die Kurve verläuft NICHT durch
+ * die inneren Punkte, sie wird nur von ihnen „gezogen" (Kontrollnetz statt
+ * Durchgangspunkte, wie CV-Modus in AutoCAD/Rhino). Offen: GEKLEMMT — die
+ * Kurve berührt exakt `pts[0]`/`pts[n-1]` (Rand-Kontrollpunkte werden intern
+ * je 2× zusätzlich dupliziert, Multiplizität 3 an beiden Enden — der
+ * Standard-Trick für kubische B-Splines, ohne eine generische
+ * Knotenvektor-Auswertung/Cox-de-Boor-Rekursion zu brauchen). Geschlossen:
+ * periodisch (Kontrollpunkte laufen zyklisch um), die Kurve berührt dann
+ * KEINEN der Punkte. Mit weniger als 3 Punkten identisches
+ * Fallback-Verhalten wie `sampleCatmullRom` (Rohpunkte, Gummiband-Vorschau).
+ */
+export function sampleUniformBSpline(pts: Vec2[], closed: boolean, segsPerSpan = 16): Vec2[] {
+  if (pts.length < 3) return [...pts];
+  const out: Vec2[] = [];
+  if (closed) {
+    const n = pts.length;
+    const at = (i: number) => pts[((i % n) + n) % n];
+    for (let i = 0; i < n; i++) {
+      for (let s = 0; s < segsPerSpan; s++) {
+        out.push(bsplineSegPoint(at(i - 1), at(i), at(i + 1), at(i + 2), s / segsPerSpan));
+      }
+    }
+    return out;
+  }
+  const last = pts[pts.length - 1];
+  const padded = [pts[0], pts[0], ...pts, last, last];
+  const spans = padded.length - 3;
+  for (let i = 0; i < spans; i++) {
+    for (let s = 0; s < segsPerSpan; s++) {
+      out.push(bsplineSegPoint(padded[i], padded[i + 1], padded[i + 2], padded[i + 3], s / segsPerSpan));
+    }
+  }
+  out.push(last);
+  return out;
+}

@@ -164,3 +164,42 @@ describe("generatePlan — Fenster Anschlag-Striche (Item 8)", () => {
     expect(windowRevealCount(projectWithOpening({ ...baseWindow }), "mittel")).toBe(0);
   });
 });
+
+describe("generatePlan — Opening.detailLevel (Per-Element-Übersteuerung der Ansichts-Detailstufe)", () => {
+  /** Zählt Schwenkbögen (arc) für eine Tür bei einer gegebenen ANSICHTS-Detailstufe. */
+  const doorArcCount = (opening: Opening, viewDetail: "grob" | "mittel" | "fein") =>
+    generatePlan(projectWithOpening(opening), "eg", visible, undefined, viewDetail).primitives.filter(
+      (pr) => pr.kind === "arc",
+    ).length;
+
+  it("ohne detailLevel gilt weiterhin die Ansichts-Detailstufe (rückwärtskompatibel)", () => {
+    expect(doorArcCount(baseDoor, "grob")).toBe(0); // grob: kein Schwenkbogen
+    expect(doorArcCount(baseDoor, "mittel")).toBe(1); // mittel+: Schwenkbogen
+  });
+
+  it("detailLevel='grob' unterdrückt den Schwenkbogen, AUCH wenn die Ansicht 'fein' zeigt", () => {
+    expect(doorArcCount({ ...baseDoor, detailLevel: "grob" }, "fein")).toBe(0);
+  });
+
+  it("detailLevel='fein' zeigt den Schwenkbogen, AUCH wenn die Ansicht 'grob' zeigt", () => {
+    expect(doorArcCount({ ...baseDoor, detailLevel: "fein" }, "grob")).toBe(1);
+  });
+
+  it("wirkt NUR auf die übersteuerte Öffnung, andere Öffnungen bleiben bei der Ansichts-Detailstufe", () => {
+    const wall: Wall = {
+      id: "W1",
+      type: "wall",
+      floorId: "eg",
+      categoryCode: "20",
+      start: { x: 0, y: 0 },
+      end: { x: 6, y: 0 },
+      wallTypeId: "aw",
+      height: 2.6,
+    };
+    const doorFein: Opening = { ...baseDoor, id: "T1", detailLevel: "fein" };
+    const doorPlain: Opening = { ...baseDoor, id: "T2", position: 3.0 };
+    const p: Project = { ...projectWithOpening(doorFein), walls: [wall], openings: [doorFein, doorPlain] };
+    const plan = generatePlan(p, "eg", visible, undefined, "grob");
+    expect(plan.primitives.filter((pr) => pr.kind === "arc").length).toBe(1);
+  });
+});

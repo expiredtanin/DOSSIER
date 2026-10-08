@@ -14,8 +14,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import type { ColorPen, PenStyle } from "../model/types";
-import { FREE_COLOR_PALETTE } from "../model/penSets";
+import type { BuiltinPaletteBanks, ColorPen, CustomPalette, PenStyle } from "../model/types";
+import { Swatch } from "./ColorSwatchCell";
+import { FreeColorPicker } from "./FreeColorPicker";
 import { Segmented } from "./resourceManager/fields";
 import { t } from "../i18n";
 
@@ -45,33 +46,11 @@ export interface PenColorFieldProps {
    * „eigener Wert" editierbar sind (analog `ColorField.disabled`).
    */
   disabled?: boolean;
-}
-
-/** Ein Popover-Swatch (Freie Palette ODER Stift-Raster teilen dieselbe Zelle). */
-function Swatch({
-  color,
-  active,
-  title,
-  label,
-  onClick,
-}: {
-  color: string;
-  active: boolean;
-  title: string;
-  label?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`pen-color-cell${active ? " active" : ""}`}
-      style={{ background: color }}
-      title={title}
-      onClick={onClick}
-    >
-      {label && <span className="pen-color-cell-num">{label}</span>}
-    </button>
-  );
+  /** Eigene Paletten + Bank-Sichtbarkeit fürs „Frei"-Raster (s. `FreeColorPicker`). */
+  customPalettes?: CustomPalette[];
+  builtinBanks?: BuiltinPaletteBanks;
+  /** Legt die aktuelle Farbe in einer eigenen Palette ab („+"-Zelle im Raster). */
+  onSaveColor?: (paletteId: string, hex: string) => void;
 }
 
 export function PenColorField({
@@ -83,6 +62,9 @@ export function PenColorField({
   onPenChange,
   showWeight,
   disabled,
+  customPalettes,
+  builtinBanks,
+  onSaveColor,
 }: PenColorFieldProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ left: 0, top: 0 });
@@ -136,14 +118,25 @@ export function PenColorField({
       if (popRef.current?.contains(tgt) || btnRef.current?.contains(tgt)) return;
       close();
     };
-    const onScrollOrResize = () => close();
+    // Scrollt der Nutzer INNERHALB des Popovers (langes Paletten-Raster, z. B.
+    // RAL mit 168 Farben), darf das Popover NICHT schliessen — der Listener
+    // läuft in der Capture-Phase und sieht sonst auch das Scrollen des eigenen
+    // Rasters (Nutzer-Report: „bei RAL lässt es sich nicht scrollen").
+    // Geschlossen wird nur bei Scrollen AUSSERHALB (Plan/Panel bewegt sich weg
+    // unter dem Popover) und bei Resize.
+    const onScroll = (e: Event) => {
+      const tgt = e.target as Node | null;
+      if (tgt && popRef.current?.contains(tgt)) return;
+      close();
+    };
+    const onResize = () => close();
     window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
   }, [open]);
 
@@ -262,7 +255,7 @@ export function PenColorField({
               )}
             </div>
             {isPen ? (
-              <div className="pen-color-grid pen-color-grid-pens">
+              <div className="pen-color-grid">
                 {pens.map((p) => (
                   <Swatch
                     key={p.id}
@@ -279,30 +272,13 @@ export function PenColorField({
                 {pens.length === 0 && <div className="res-empty">{t("resources.pens.empty")}</div>}
               </div>
             ) : (
-              <>
-                <div className="pen-color-grid">
-                  {FREE_COLOR_PALETTE.map((hex) => (
-                    <Swatch
-                      key={hex}
-                      color={hex}
-                      active={hex.toLowerCase() === color.toLowerCase()}
-                      title={hex}
-                      onClick={() => {
-                        pickFree(hex);
-                        close();
-                      }}
-                    />
-                  ))}
-                </div>
-                <label className="pen-color-custom">
-                  {t("pen.customColor")}
-                  <input
-                    type="color"
-                    value={color}
-                    onChange={(e) => pickFree(e.target.value)}
-                  />
-                </label>
-              </>
+              <FreeColorPicker
+                color={color}
+                onChange={pickFree}
+                customPalettes={customPalettes}
+                builtinBanks={builtinBanks}
+                onSaveColor={onSaveColor}
+              />
             )}
           </div>,
           document.body,

@@ -37,8 +37,27 @@ const SCRIPT_SCALE = 0.7;
 /**
  * CSS-Deklarationen (als `{prop: value}`) für einen Run. `basePt` ist die
  * Basisschriftgrösse in pt, falls der Run selbst keine `sizePt` trägt.
+ *
+ * `sizeUnit`:
+ *  • "pt" (Default) — ABSOLUTE CSS-`pt`-Grösse, unabhängig vom umgebenden
+ *    Kontext. Richtig für ein schwebendes Dialogfenster ohne "echten"
+ *    Massstab (TextEditorDialog).
+ *  • "em" — Grösse RELATIV zur geerbten Schriftgrösse des Containers
+ *    (`sizePt/basePt` als `em`). Nötig für die beiden Inline-Editoren AUF
+ *    der Zeichenfläche/dem Blatt (PlanView/LayoutSheet): die setzen die
+ *    Basisgrösse selbst über die CSS-Variable `--rt-font-size` (aus dem
+ *    echten Zoom berechnet) auf den Container — mit "pt" hätte JEDER Run
+ *    (auch der ohne eigene `sizePt`, der ja `basePt` erbt) eine FESTE
+ *    Pixelgrösse erzwungen und diese Container-Vorgabe ignoriert, weil ein
+ *    Inline-`style`-Attribut auf dem `<span>` die geerbte Grösse immer
+ *    überschreibt — der Text hätte beim Zoomen nie mitskaliert (Bug-Meldung:
+ *    "Editor ist immer unterschiedlich gross wie der Text").
  */
-export function runCssProps(marks: Marks, basePt = 12): Record<string, string> {
+export function runCssProps(
+  marks: Marks,
+  basePt = 12,
+  sizeUnit: "pt" | "em" = "pt",
+): Record<string, string> {
   const css: Record<string, string> = {};
   if (marks.bold) css["font-weight"] = "700";
   if (marks.italic) css["font-style"] = "italic";
@@ -46,7 +65,8 @@ export function runCssProps(marks: Marks, basePt = 12): Record<string, string> {
   if (deco) css["text-decoration"] = deco;
   if (marks.font) css["font-family"] = marks.font;
   const sizePt = (marks.sizePt ?? basePt) * (marks.super || marks.sub ? SCRIPT_SCALE : 1);
-  css["font-size"] = `${round(sizePt)}pt`;
+  css["font-size"] =
+    sizeUnit === "em" ? `${round(sizePt / basePt)}em` : `${round(sizePt)}pt`;
   if (marks.color) css["color"] = marks.color;
   if (marks.super) css["vertical-align"] = "super";
   if (marks.sub) css["vertical-align"] = "sub";
@@ -70,6 +90,8 @@ export interface HtmlOptions {
   basePt?: number;
   /** Standardfarbe (CSS) falls kein Run eine Farbe setzt. */
   color?: string;
+  /** s. `runCssProps` — "pt" (Default) oder "em" (Zoom-gebundene Inline-Editoren). */
+  sizeUnit?: "pt" | "em";
 }
 
 /**
@@ -79,23 +101,24 @@ export interface HtmlOptions {
  */
 export function docToHtml(doc: RichTextDoc, opts: HtmlOptions = {}): string {
   const basePt = opts.basePt ?? 12;
+  const sizeUnit = opts.sizeUnit ?? "pt";
   return doc.paragraphs
-    .map((p) => paragraphToHtml(p, basePt, opts.color))
+    .map((p) => paragraphToHtml(p, basePt, sizeUnit, opts.color))
     .join("");
 }
 
-function paragraphToHtml(p: Paragraph, basePt: number, color?: string): string {
+function paragraphToHtml(p: Paragraph, basePt: number, sizeUnit: "pt" | "em", color?: string): string {
   const styles: string[] = [];
   if (p.align && p.align !== "left") styles.push(`text-align:${p.align}`);
   if (p.lineHeight != null) styles.push(`line-height:${p.lineHeight}`);
   const style = styles.length ? ` style="${styles.join(";")}"` : "";
   if (p.runs.length === 0) return `<div${style}><br></div>`;
-  const inner = p.runs.map((r) => runToHtmlSpan(r, basePt, color)).join("");
+  const inner = p.runs.map((r) => runToHtmlSpan(r, basePt, sizeUnit, color)).join("");
   return `<div${style}>${inner}</div>`;
 }
 
-function runToHtmlSpan(run: TextRun, basePt: number, color?: string): string {
-  const css = runCssProps(run.marks, basePt);
+function runToHtmlSpan(run: TextRun, basePt: number, sizeUnit: "pt" | "em", color?: string): string {
+  const css = runCssProps(run.marks, basePt, sizeUnit);
   if (color && !css["color"]) css["color"] = color;
   const style = cssPropsToString(css);
   const text = escapeText(run.text) || "";

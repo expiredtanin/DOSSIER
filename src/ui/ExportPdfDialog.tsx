@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
-import { SCALE_PRESETS } from "./TopBar";
+import { SCALE_PRESETS, parseScaleInput } from "./TopBar";
 import type { Orientation, PaperFormat } from "../export/exportPdf";
 import { pageSizeMm } from "../export/exportPdf";
 
@@ -19,6 +19,8 @@ export interface ExportPdfDecision {
   scaleDenominator: number;
   paper: PaperFormat;
   orientation: Orientation;
+  /** „nur Auswahl" statt des ganzen Plans (nur relevant, wenn `selectionCount > 0`). */
+  selectionOnly: boolean;
 }
 
 export interface ExportPdfDialogProps {
@@ -31,7 +33,18 @@ export interface ExportPdfDialogProps {
    * „passt aufs Blatt?"-Warnung. Optional.
    */
   contentMeters?: { w: number; h: number };
+  /**
+   * Anzahl aktuell ausgewählter Elemente (über alle Arten) — > 0 blendet den
+   * „nur Auswahl exportieren"-Schalter ein (Nutzer-Wunsch: „Export
+   * exportiert immer den GANZEN Plan"). 0/fehlend: kein Schalter, Export
+   * bleibt wie bisher immer der ganze Plan.
+   */
+  selectionCount?: number;
   onExport: (decision: ExportPdfDecision) => void;
+  /** Zweiter Export-Weg (Nutzer-Wunsch „Kein SVG-Export") — nutzt dieselbe
+   *  Massstab/Papier/Ausrichtung-Auswahl wie der PDF-Export, nur als
+   *  eigenständiger SVG-Download statt eines gerenderten PDF. */
+  onExportSvg?: (decision: ExportPdfDecision) => void;
   onClose: () => void;
 }
 
@@ -39,7 +52,9 @@ export function ExportPdfDialog({
   initialScale,
   planTitle,
   contentMeters,
+  selectionCount = 0,
   onExport,
+  onExportSvg,
   onClose,
 }: ExportPdfDialogProps) {
   useEffect(() => {
@@ -53,6 +68,20 @@ export function ExportPdfDialog({
   const [scale, setScale] = useState<number>(initialScale);
   const [paper, setPaper] = useState<PaperFormat>("a4");
   const [orientation, setOrientation] = useState<Orientation>("landscape");
+  const [selectionOnly, setSelectionOnly] = useState(false);
+  // Freitext-Massstab (Nutzer-Wunsch: „PDF-Export-Massstab nur 9 feste
+  // Presets, kein Freitext für z. B. 1:75") — eigenes Feld statt eines
+  // dritten `__custom__`-Dropdown-Eintrags mit Popup-Prompt (wie im
+  // TopBar-Vorbild): hier läuft der Dialog bereits selbst als Overlay mit
+  // eigenem Escape-Handler, ein verschachtelter zweiter Overlay-Dialog
+  // (`PromptDialog`) würde bei Escape BEIDE schliessen (window-weite
+  // Listener, keine Bubbling-Trennung). `parseScaleInput` (dieselbe
+  // Funktion wie im TopBar) akzeptiert „1:75" ODER „75".
+  const [customScaleText, setCustomScaleText] = useState("");
+  const applyCustomScale = () => {
+    const n = parseScaleInput(customScaleText);
+    if (n != null) setScale(n);
+  };
 
   // Passt der Plan im gewählten Massstab aufs Blatt (abzüglich Rand)? Best-effort-
   // Hinweis; der Export läuft trotzdem (Plan ragt dann über den Blattrand).
@@ -67,12 +96,20 @@ export function ExportPdfDialog({
     );
   })();
 
-  const onConfirm = () => onExport({ scaleDenominator: scale, paper, orientation });
+  const decision = (): ExportPdfDecision => ({
+    scaleDenominator: scale,
+    paper,
+    orientation,
+    selectionOnly: selectionCount > 0 && selectionOnly,
+  });
+  const onConfirm = () => onExport(decision());
+  const onConfirmSvg = () => onExportSvg?.(decision());
 
-  const scaleOptions = SCALE_PRESETS.map((n) => ({
-    value: String(n),
-    label: `1:${n}`,
-  }));
+  const inPresets = SCALE_PRESETS.includes(scale);
+  const scaleOptions = [
+    ...(inPresets ? [] : [{ value: String(scale), label: `1:${scale}` }]),
+    ...SCALE_PRESETS.map((n) => ({ value: String(n), label: `1:${n}` })),
+  ];
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -111,6 +148,19 @@ export function ExportPdfDialog({
               triggerClassName="tb-dd-mono"
               options={scaleOptions}
             />
+            <div className="imp-scale-custom">
+              <input
+                className="imp-input"
+                type="text"
+                placeholder={t("export.scale.customPlaceholder")}
+                value={customScaleText}
+                onChange={(e) => setCustomScaleText(e.target.value)}
+                onBlur={applyCustomScale}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applyCustomScale();
+                }}
+              />
+            </div>
           </section>
 
           <section className="imp-section">
@@ -139,6 +189,19 @@ export function ExportPdfDialog({
             />
           </section>
 
+          {selectionCount > 0 && (
+            <section className="imp-section">
+              <label className="imp-check">
+                <input
+                  type="checkbox"
+                  checked={selectionOnly}
+                  onChange={(e) => setSelectionOnly(e.target.checked)}
+                />
+                <span>{t("export.selectionOnly", { count: String(selectionCount) })}</span>
+              </label>
+            </section>
+          )}
+
           {!fits && <div className="imp-warn">{t("export.warnFit")}</div>}
         </div>
 
@@ -146,8 +209,13 @@ export function ExportPdfDialog({
           <button className="imp-btn" onClick={onClose}>
             {t("export.cancel")}
           </button>
+          {onExportSvg && (
+            <button className="imp-btn" onClick={onConfirmSvg}>
+              {t("export.confirmSvg")}
+            </button>
+          )}
           <button className="imp-btn primary" onClick={onConfirm}>
-            {t("export.confirm")}
+            {onExportSvg ? t("export.confirmPdf") : t("export.confirm")}
           </button>
         </footer>
       </div>

@@ -9,7 +9,11 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
+import type {
+  PointerEvent as ReactPointerEvent,
+  MouseEvent as ReactMouseEvent,
+  CSSProperties,
+} from "react";
 import type {
   Layout,
   LayoutAnnotation,
@@ -56,6 +60,7 @@ import {
 import { RichTextEditor } from "../text/RichTextEditor";
 import { docFromText } from "../text/richText";
 import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
+import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../text/fontMetrics";
 import { readImageFile, defaultImageSizeMm } from "../io/imageAsset";
 import { rasterizePdfPages } from "../io/pdfImport";
 import type { ToolId } from "../tools/types";
@@ -88,6 +93,9 @@ export function ViewportPlan({
     }
     try {
       const codes = visibleCodesFromSnapshot(snap);
+      // Massstab ZUERST auflösen: er geht in die Plan-Erzeugung ein, weil
+      // Bemassungs-Feinheiten in Papier-mm angegeben sind (s. model/dimension.ts).
+      const scaleN = resolveViewportScale(viewport, snap);
       const plan = generatePlan(
         project,
         snap.activeLevelId,
@@ -96,8 +104,9 @@ export function ViewportPlan({
         snap.detail,
         false,
         false,
+        true,
+        scaleN,
       );
-      const scaleN = resolveViewportScale(viewport, snap);
       const print = planToPrintSvg(plan, {
         scaleDenominator: scaleN,
         pageWidthMm: viewport.widthMm,
@@ -195,8 +204,17 @@ export interface LayoutSheetHandlers {
    * eines Text-Rahmens sofort inline hineinzuschreiben, s. `inlineEdit`).
    */
   onAddAnnotation: (kind: LayoutAnnotation["kind"], init: LayoutAnnotationPatch) => string;
-  /** Ändert Felder einer Annotation (Position/Farbe/Strichstärke/Text). */
-  onPatchAnnotation: (annotationId: string, patch: LayoutAnnotationPatch) => void;
+  /**
+   * Ändert Felder einer Annotation (Position/Farbe/Strichstärke/Text).
+   * `coalesceKey`: s. `projectSlice.ts` `setProject` — vom Inline-Text-Editor
+   * genutzt, damit EIN Tipp-Vorgang EINEN Undo-Schritt erzeugt statt bei
+   * jedem Tastendruck einen neuen zu pushen (s. `inlineEdit`-Block unten).
+   */
+  onPatchAnnotation: (
+    annotationId: string,
+    patch: LayoutAnnotationPatch,
+    coalesceKey?: string,
+  ) => void;
   /** Entfernt eine Annotation per Id. */
   onRemoveAnnotation: (annotationId: string) => void;
 }
@@ -947,6 +965,13 @@ export function LayoutSheetView({
             style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
           >
             {annotations.map((ann) => {
+              // Während des Inline-Editors NICHT zusätzlich statisch zeichnen
+              // (nur bei Text-Annotationen möglich, s. `inlineEdit`-Block
+              // unten) — sonst blieben Reste des alten Umbruchs sichtbar,
+              // weil das SVG nach geschätzter Zeichenbreite umbricht, der
+              // Editor-Browser aber nach echter Font-Metrik (leicht andere
+              // Zeilenumbrüche, Editor-Weiss deckt nicht jede Abweichung).
+              if (ann.id === inlineEdit?.id) return null;
               const a = annotPreview && annotPreview.id === ann.id ? annotPreview : ann;
               return <AnnotationSvg key={ann.id} ann={a} selected={ann.id === selectedAnnotId} />;
             })}
@@ -1274,10 +1299,25 @@ export function LayoutSheetView({
           nach dem Aufziehen) ODER eine per HUD „✎" geöffnete bestehende. Jede
           Änderung schreibt sofort zurück (`onPatchAnnotation`); ein Klick
           daneben (Backdrop) oder Escape schliesst nur, es gibt nichts zu
-          verwerfen. Skaliert die feste 12-pt-Basisgrösse des RichTextEditor
-          (s. RichTextEditor.tsx `renderHtml`) via CSS-Transform auf die
-          Schriftgrösse der Annotation UND den aktuellen Blatt-Zoom — Breite
-          bricht dadurch zoomunabhängig bei `widthMm` um. */}
+          verwerfen. WYSIWYG: Schriftgrösse UND Feldhöhe folgen dem echten
+          Blatt-Zoom über die CSS-Variablen `--rt-font-size`/`--rt-min-height`
+          (identisches Muster wie PlanView.tsx, s. dort) — NUR die Textfläche
+          skaliert, NICHT die Toolbar. Vorher lief das über ein
+          `transform:scale()` auf die GANZE Box (inkl. Toolbar, die dadurch
+          beim Reinzoomen riesig/unbedienbar wurde) UND `RichTextEditor`
+          schrieb pro Run trotzdem eine ABSOLUTE `pt`-Grösse (per Inline-
+          `style` auf jedem `<span>`), die die geerbte Container-Grösse
+          ignoriert hätte, ohne den Transform-Umweg — beides zusammen war der
+          Bug hinter "Editor ist immer unterschiedlich gross wie der Text".
+          `sizeUnit="em"` auf `RichTextEditor` lässt Runs jetzt relativ zur
+          geerbten Grösse skalieren, s. `text/renderHtml.ts`. ZUSÄTZLICHER
+          Positions-Fix (Folgemeldung "Editor ist tiefer als der Text"): die
+          Toolbar stand bisher im normalen Fluss ÜBER der Textfläche und
+          schob sie um ihre eigene, zoomunabhängige Höhe nach unten — bei
+          üblichem Zoom mehr als die EINE Zeilenhöhe Versatz, mit der die
+          Box positioniert wird. `.rt-toolbar` schwebt jetzt per CSS
+          (`position:absolute; bottom:100%`, s. styles.css) OBERHALB der
+          Fläche, ausserhalb von deren Layout-Fluss. */}
       {inlineEdit &&
         (() => {
           const ann = annotations.find((a) => a.id === inlineEdit.id);
@@ -1286,16 +1326,29 @@ export function LayoutSheetView({
           const widthMm = ann.widthMm ?? 60;
           const contentHeightMm = annotationBoundsMm(ann).heightMm;
           const heightMm = Math.max(inlineEdit.minHeightMm, contentHeightMm);
-          const FONT_PX_AT_12PT = 16; // 12pt @ 96dpi (RichTextEditor-Default).
-          const scale = (ann.heightMm * tf.scale) / FONT_PX_AT_12PT;
-          const unscaledWidth = widthMm * (FONT_PX_AT_12PT / ann.heightMm);
-          const unscaledMinHeight = heightMm * (FONT_PX_AT_12PT / ann.heightMm);
-          const screen = mmToScreen(tf, { xMm: ann.xMm, yMm: ann.yMm - ann.heightMm });
+          const fontSizePx = Math.max(9, ann.heightMm * tf.scale);
+          const widthPx = widthMm * tf.scale;
+          const minHeightPx = heightMm * tf.scale;
+          // Baseline → Box-Oberkante: echtes Font-Measuring statt der groben
+          // "ganzes heightMm"-Näherung (s. PlanView.tsx, identischer Fix).
+          const baselineFromTop = contentFontBaselineFromTop(TEXT_LINE_HEIGHT_MULT);
+          const screen = mmToScreen(tf, {
+            xMm: ann.xMm,
+            yMm: ann.yMm - ann.heightMm * baselineFromTop,
+          });
+          const cssVars = {
+            "--rt-font-size": `${fontSizePx}px`,
+            "--rt-min-height": `${minHeightPx}px`,
+          } as CSSProperties;
           const commit = (edited: typeof doc) =>
-            handlers.onPatchAnnotation(ann.id, {
-              doc: edited,
-              text: edited.paragraphs.map((p) => p.runs.map((r) => r.text).join("")).join("\n"),
-            });
+            handlers.onPatchAnnotation(
+              ann.id,
+              {
+                doc: edited,
+                text: edited.paragraphs.map((p) => p.runs.map((r) => r.text).join("")).join("\n"),
+              },
+              `layoutAnnotationText:${ann.id}`,
+            );
           return (
             <>
               <div
@@ -1309,10 +1362,8 @@ export function LayoutSheetView({
                 style={{
                   left: screen.x,
                   top: screen.y,
-                  width: unscaledWidth,
-                  minHeight: unscaledMinHeight,
-                  transform: `scale(${scale})`,
-                  transformOrigin: "0 0",
+                  width: widthPx,
+                  ...cssVars,
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => {
@@ -1322,7 +1373,7 @@ export function LayoutSheetView({
                   }
                 }}
               >
-                <RichTextEditor value={doc} onChange={commit} autoFocus />
+                <RichTextEditor value={doc} onChange={commit} autoFocus sizeUnit="em" />
               </div>
             </>
           );

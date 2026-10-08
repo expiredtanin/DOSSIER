@@ -8,7 +8,9 @@
 import { describe, it, expect } from "vitest";
 import type { Project, Roof, Wall } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
-import { selectionHighlightLines, projectToWalls3d, projectToModel3d, pickGeometry } from "./toWalls3d";
+import { selectionHighlightLines, projectToWalls3d, projectToModel3d, pickGeometry, draftWorldLines } from "./toWalls3d";
+import { hexToRgb } from "./toWalls3d/shared";
+import type { ToolDraft } from "../tools/types";
 import { resolveHatch, generatePlan } from "./generatePlan";
 import { roofGeometry, roofBaseElevation } from "../geometry/roof";
 
@@ -1250,6 +1252,66 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
     expect(projectToModel3d(winProject({ ...baseWin, id: "win-no-leaf" })).meshes.filter(isLeaf).length).toBe(0);
   });
 
+  it("Kassettentür (leafStyle: kassette): Rahmen-Raster statt Vollblatt, Felder vertieft", () => {
+    const isLeaf = (m: { color: [number, number, number] }): boolean =>
+      m.color[0] === 0.93 && m.color[1] === 0.9 && m.color[2] === 0.85;
+    const doorProject = (dt: NonNullable<Project["doorTypes"]>[number]): Project => ({
+      ...sampleProject,
+      doorTypes: [dt],
+      openings: [
+        {
+          id: "DL",
+          type: "opening",
+          hostWallId: "W1",
+          categoryCode: "31",
+          kind: "door",
+          typeId: dt.id,
+          position: 3.0,
+          width: 0.9,
+          height: 2.0,
+          sillHeight: 0,
+        },
+      ],
+      doors: [],
+      context: [],
+    });
+    const baseDoor = {
+      id: "door-kassette-test",
+      name: "Kassette-Test",
+      kind: "dreh" as const,
+      leafCount: 1 as const,
+      leafStyle: "kassette" as const,
+      frameThickness: 0.05,
+      frameWidth: 0.06,
+      defaultWidth: 0.9,
+      defaultHeight: 2.0,
+    };
+    // Default-Raster (fehlt panelCols/panelRows -> 2x3): 4 Rahmen-Riegel +
+    // (cols-1) Trennstege + (rows-1) Trennstege + cols*rows vertiefte Felder.
+    const defaultGrid = projectToModel3d(doorProject(baseDoor)).meshes.filter(isLeaf);
+    expect(defaultGrid.length).toBe(4 + 1 + 2 + 2 * 3);
+    // Auch bei "grob" vorhanden (Füllung ist kein "fein"-Detail, wie beim Vollblatt).
+    expect(
+      projectToModel3d(doorProject(baseDoor), { detail: "grob" }).meshes.filter(isLeaf).length,
+    ).toBe(defaultGrid.length);
+    // Explizites 1x1-Raster -> nur Rahmen (4) + EIN vertieftes Feld.
+    const single = projectToModel3d(
+      doorProject({ ...baseDoor, id: "door-kassette-1x1", panelCols: 1, panelRows: 1 }),
+    ).meshes.filter(isLeaf);
+    expect(single.length).toBe(4 + 1);
+    // Explizites 3x4-Raster -> 4 + (3-1) + (4-1) + 3*4 Felder.
+    const grid34 = projectToModel3d(
+      doorProject({ ...baseDoor, id: "door-kassette-3x4", panelCols: 3, panelRows: 4 }),
+    ).meshes.filter(isLeaf);
+    expect(grid34.length).toBe(4 + 2 + 3 + 3 * 4);
+    // "glatt" bleibt unverändert bei genau 1 Blatt-Mesh (keine Regression durch den neuen Zweig).
+    expect(
+      projectToModel3d(doorProject({ ...baseDoor, id: "door-glatt-check", leafStyle: "glatt" })).meshes.filter(
+        isLeaf,
+      ).length,
+    ).toBe(1);
+  });
+
   it("Tür-Zarge mit Umgriff: zarge -> 6 Bekleidungs-Riegel mehr als blockrahmen", () => {
     const doorProject = (frameKind: "zarge" | "blockrahmen"): Project => ({
       ...sampleProject,
@@ -2089,6 +2151,95 @@ describe("emitStairs — geschlossene Setzstufen (closedRisers) im WASM-Default-
   });
 });
 
+describe("emitStairRailings (Handlauf/Geländer, StairType.railing)", () => {
+  // Derselbe Bug-Typ wie nosing/closedRisers oben: `StairType.railing`
+  // existierte im Modell + im ResourceManager (`StairStylesTab`) + den
+  // i18n-Labels, wurde aber von KEINEM Renderer je gelesen.
+  const stairType = (
+    railing: "keine" | "links" | "rechts" | "beide",
+  ): NonNullable<Project["stairTypes"]>[number] => ({
+    id: "st-railing-test",
+    name: "Test Geländer",
+    structure: "wange",
+    closedRisers: false,
+    treadThickness: 0.04,
+    defaultWidth: 1.0,
+    railing,
+  });
+  const stairProject = (
+    railing: "keine" | "links" | "rechts" | "beide",
+    shape: "straight" | "L" = "straight",
+  ): Project => ({
+    ...sampleProject,
+    stairTypes: [stairType(railing)],
+    stairs: [
+      {
+        id: "STG",
+        type: "stair",
+        floorId: "eg",
+        categoryCode: "40",
+        shape,
+        typeId: "st-railing-test",
+        start: { x: 3.7, y: 0.4 },
+        dir: { x: 0, y: 1 },
+        runLength: 3.2,
+        width: 1.0,
+        totalRise: 2.6,
+        stepCount: 15,
+        up: true,
+      },
+    ],
+  });
+  const railMeshes = (p: Project) => {
+    const rgb = hexToRgb("#74797f");
+    return projectToModel3d(p).meshes.filter(
+      (m) => m.color[0] === rgb[0] && m.color[1] === rgb[1] && m.color[2] === rgb[2],
+    );
+  };
+  // Je Seite: 1 Handlauf-Segment + (stepCount Pfosten je Tritt-Vorderkante + 1 Fusspfosten).
+
+  it('"keine" (Default) -> kein Geländer-Mesh', () => {
+    expect(railMeshes(stairProject("keine")).length).toBe(0);
+    // Fehlender railing-Wert verhält sich wie "keine" (Default im Code).
+    const noField: Project = {
+      ...sampleProject,
+      stairTypes: [{ ...stairType("keine"), railing: undefined }],
+      stairs: stairProject("keine").stairs,
+    };
+    expect(railMeshes(noField).length).toBe(0);
+  });
+
+  it('"links"/"rechts" -> genau eine Seite (1 Handlauf + 16 Pfosten)', () => {
+    expect(railMeshes(stairProject("links")).length).toBe(1 + 16);
+    expect(railMeshes(stairProject("rechts")).length).toBe(1 + 16);
+  });
+
+  it('"beide" -> doppelte Menge (beide Seiten)', () => {
+    expect(railMeshes(stairProject("beide")).length).toBe(2 * (1 + 16));
+  });
+
+  it("L-Treppe: bewusst (noch) kein Geländer (nur gerade Läufe unterstützt)", () => {
+    expect(railMeshes(stairProject("beide", "L")).length).toBe(0);
+  });
+
+  it("Handlauf-Oberkante liegt RAIL_HEIGHT (0.9 m) über Boden- bzw. Austrittshöhe", () => {
+    const meshes = railMeshes(stairProject("links"));
+    let minZ = Infinity, maxZ = -Infinity;
+    for (const m of meshes) {
+      for (let i = 2; i < m.positions.length; i += 3) {
+        minZ = Math.min(minZ, m.positions[i]);
+        maxZ = Math.max(maxZ, m.positions[i]);
+      }
+    }
+    // Treppe startet bei EG-UK (0) und steigt 2.6 m; Handlauf 0.9 m darüber
+    // am oberen Ende -> Maximalhöhe der Pfosten/des Handlaufs ~ 2.6+0.9=3.5 m
+    // (Pfostenbreite RAIL_THICK vernachlässigbar für diese grobe Prüfung).
+    expect(maxZ).toBeGreaterThan(2.6 + 0.9 - 0.1);
+    expect(maxZ).toBeLessThan(2.6 + 0.9 + 0.1);
+    expect(minZ).toBeGreaterThan(0 - 0.1);
+  });
+});
+
 describe("emitStairMeshes (Betontreppe: glatte Laufplatte als Mesh)", () => {
   it("gerade Betontreppe -> Mesh mit 8 Ecken je Tritt, glatte schräge Untersicht", () => {
     // Sample-Treppe ST1: Typ "stair-standard" (Tragart "beton"), gerade,
@@ -2380,6 +2531,49 @@ describe("pickGeometry — Dächer (Ray-Dreieck-Pick)", () => {
   });
 });
 
+describe("pickGeometry — freie 2D-Zeichnungen (Boden-Spuren, Nutzer-Report „2D-Elemente können nicht angewählt werden\")", () => {
+  const withDrawing: Project = {
+    ...sampleProject,
+    drawings2d: [
+      {
+        id: "D1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: { shape: "line", a: { x: -1, y: 5 }, b: { x: 1, y: 5 } },
+      },
+    ],
+  };
+
+  it("liefert je Linien-Segment eine Pick-Box mit drawingId, world (x, ≈0, y)", () => {
+    const { drawings } = pickGeometry(withDrawing);
+    expect(drawings.length).toBe(1);
+    expect(drawings[0].drawingId).toBe("D1");
+    expect(drawings[0].start).toEqual([-1, 5]);
+    expect(drawings[0].end).toEqual([1, 5]);
+    // EG liegt bei baseElevation 0 → die Pick-Box sitzt knapp darüber (+Epsilon
+    // gegen Z-Fighting), NICHT exakt bei 0 (s. `drawingElevation`).
+    expect(drawings[0].baseElevation).toBeGreaterThan(-0.1);
+    expect(drawings[0].baseElevation).toBeLessThan(0.1);
+  });
+
+  it("Kreis/Bogen/Text ohne Segment-Zerlegung liefern keine Pick-Box (Parität zu emitDrawingLines)", () => {
+    const withCircle: Project = {
+      ...sampleProject,
+      drawings2d: [
+        {
+          id: "D2",
+          type: "drawing2d",
+          levelId: "eg",
+          categoryCode: "2d-line",
+          geom: { shape: "circle", center: { x: 0, y: 0 }, r: 1 },
+        },
+      ],
+    };
+    expect(pickGeometry(withCircle).drawings).toEqual([]);
+  });
+});
+
 describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () => {
   const withContext: Project = {
     ...sampleProject,
@@ -2388,7 +2582,7 @@ describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () =>
         id: "CTX1",
         type: "importedMesh",
         name: "Testgebäude",
-        // model (x,y,z=Höhe) -> world (x, z, y): ein Dreieck.
+        // model (x,y,z=Höhe) -> world (x, z, -y): ein Dreieck.
         positions: [0, 0, 0, 2, 0, 0, 2, 3, 4],
         indices: [0, 1, 2],
       },
@@ -2406,9 +2600,10 @@ describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () =>
     expect(contextMeshes.length).toBe(1);
     expect(contextMeshes[0].contextObjectId).toBe("CTX1");
     expect(contextMeshes[0].tris.length).toBe(1);
-    // world = (x, z, y) — dasselbe Dreieck (0,0,0),(2,0,0),(2,3,4)
-    // -> world (0,0,0),(2,0,0),(2,4,3).
-    expect(contextMeshes[0].tris[0][2]).toEqual([2, 4, 3]);
+    // world = (x, z, -y) — dasselbe Dreieck (0,0,0),(2,0,0),(2,3,4)
+    // -> world (0,0,0),(2,0,0),(2,4,-3). Die Nord-Achse (y) wird negiert
+    // (Spiegelungs-Fix, s. `viewport3d/meshBuilders.ts::buildContext`).
+    expect(contextMeshes[0].tris[0][2]).toEqual([2, 4, -3]);
   });
 
   it("kaputte Indizes werden robust übersprungen statt abzustürzen", () => {
@@ -2426,5 +2621,118 @@ describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () =>
     };
     const { contextMeshes } = pickGeometry(broken);
     expect(contextMeshes.length).toBe(0);
+  });
+});
+
+describe("draftWorldLines — Zeichnen-Vorschau für den WASM-3D-Viewport", () => {
+  it("leerer/fehlender Draft -> leeres Array", () => {
+    expect(draftWorldLines(null, 0).length).toBe(0);
+    const empty: ToolDraft = { preview: [], vertices: [] };
+    expect(draftWorldLines(empty, 0).length).toBe(0);
+  });
+
+  it("eine 'line'-Form -> genau EINE Kante (2 Vertices), Modell (x,y) -> world (x, planeY, y) OHNE Vorzeichenwechsel", () => {
+    const draft: ToolDraft = {
+      preview: [{ kind: "line", a: { x: 1, y: 2 }, b: { x: 3, y: 4 } }],
+      vertices: [],
+    };
+    const out = draftWorldLines(draft, 5);
+    // 2 Vertices x 6 Floats (pos+rgb).
+    expect(out.length).toBe(12);
+    expect(Array.from(out.slice(0, 3))).toEqual([1, 5, 2]);
+    expect(Array.from(out.slice(6, 9))).toEqual([3, 5, 4]);
+  });
+
+  it("eine offene 'poly' mit 3 Punkten -> 2 Kanten, kein Schluss-Segment", () => {
+    const draft: ToolDraft = {
+      preview: [
+        { kind: "poly", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }], closed: false },
+      ],
+      vertices: [],
+    };
+    const out = draftWorldLines(draft, 0);
+    expect(out.length).toBe(2 * 12); // 2 Kanten x 2 Vertices x 6 Floats
+  });
+
+  it("eine GESCHLOSSENE 'poly' mit 3 Punkten -> 3 Kanten (inkl. Schluss-Segment zurück zum Start)", () => {
+    const draft: ToolDraft = {
+      preview: [
+        { kind: "poly", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }], closed: true },
+      ],
+      vertices: [],
+    };
+    const out = draftWorldLines(draft, 0);
+    expect(out.length).toBe(3 * 12);
+    // Letzte Kante schliesst von pts[2] zurück zu pts[0].
+    const lastEdgeStart = out.length - 12;
+    expect(Array.from(out.slice(lastEdgeStart, lastEdgeStart + 3))).toEqual([1, 0, 1]);
+    expect(Array.from(out.slice(lastEdgeStart + 6, lastEdgeStart + 9))).toEqual([0, 0, 0]);
+  });
+
+  it("mehrere preview-Formen werden aneinandergehängt (Reihenfolge erhalten)", () => {
+    const draft: ToolDraft = {
+      preview: [
+        { kind: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+        { kind: "line", a: { x: 2, y: 0 }, b: { x: 3, y: 0 } },
+      ],
+      vertices: [],
+    };
+    const out = draftWorldLines(draft, 0);
+    expect(out.length).toBe(2 * 12);
+  });
+
+  it("Fang-Marker (Quadrat, 4 Kanten) erscheint am Snap-Punkt, AUCH ohne preview (erster Klick)", () => {
+    // Leeres preview (noch kein Punkt gesetzt) — der Marker muss trotzdem
+    // erscheinen, sonst zeigt der allererste Klick keine Fang-Rückmeldung.
+    const draft: ToolDraft = {
+      preview: [],
+      vertices: [],
+      snap: { point: { x: 2, y: 3 }, kind: "endpoint", distPx: 1 },
+    };
+    const out = draftWorldLines(draft, 0);
+    expect(out.length).toBe(4 * 12); // 4 Kanten x 2 Vertices x 6 Floats
+    // Marker-RGB (gelb) an jedem Vertex (Float32 -> toBeCloseTo statt toEqual).
+    const rgb = Array.from(out.slice(3, 6));
+    expect(rgb[0]).toBeCloseTo(1, 5);
+    expect(rgb[1]).toBeCloseTo(0.8, 5);
+    expect(rgb[2]).toBeCloseTo(0, 5);
+  });
+
+  it("Ortho-/Verlängerungs-Fang zeichnet zusätzlich die Bezugslinie refA->Punkt (unverlängert)", () => {
+    const draft: ToolDraft = {
+      preview: [],
+      vertices: [],
+      snap: { point: { x: 5, y: 0 }, kind: "ortho", refA: { x: 0, y: 0 }, distPx: 1 },
+    };
+    const out = draftWorldLines(draft, 0);
+    // Marker (4 Kanten) + 1 Bezugslinie = 5 Kanten.
+    expect(out.length).toBe(5 * 12);
+    const guideStart = 4 * 12;
+    expect(Array.from(out.slice(guideStart, guideStart + 3))).toEqual([0, 0, 0]);
+    expect(Array.from(out.slice(guideStart + 6, guideStart + 9))).toEqual([5, 0, 0]);
+  });
+
+  it("weicher Winkel-Fang verlängert die Führungslinie über den Punkt hinaus", () => {
+    const draft: ToolDraft = {
+      preview: [],
+      vertices: [],
+      snap: { point: { x: 4, y: 0 }, kind: "angle", refA: { x: 0, y: 0 }, angleDeg: 0, distPx: 1 },
+    };
+    const out = draftWorldLines(draft, 0);
+    expect(out.length).toBe(5 * 12);
+    const guideStart = 4 * 12;
+    expect(Array.from(out.slice(guideStart, guideStart + 3))).toEqual([0, 0, 0]);
+    // Verlängert um SNAP_ANGLE_GUIDE_EXTEND_M (6m) über den Punkt (4,0) hinaus -> (10,0).
+    expect(Array.from(out.slice(guideStart + 6, guideStart + 9))).toEqual([10, 0, 0]);
+  });
+
+  it("Grid-/Divide-Fang OHNE refA zeigt nur den Marker, keine Bezugslinie", () => {
+    const draft: ToolDraft = {
+      preview: [],
+      vertices: [],
+      snap: { point: { x: 1, y: 1 }, kind: "grid", distPx: 1 },
+    };
+    const out = draftWorldLines(draft, 0);
+    expect(out.length).toBe(4 * 12);
   });
 });

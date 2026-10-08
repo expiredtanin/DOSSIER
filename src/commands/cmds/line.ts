@@ -1,9 +1,24 @@
 // Line — erster Befehl der Command-Engine (portiert lineTool aus
 // src/tools/tools.ts). Zwei Punkte → Drawing2D{shape:"line"}.
 //
+// Durchgehendes Verketten (Nutzer-Wunsch: „genau EIN Segment pro Aufruf,
+// kein durchgehendes Verketten mehrerer EINZEL-Linien in einer Geste — nur
+// `polyline` bietet Mehrpunkt-Zug, aber als EIN zusammenhängendes Objekt
+// statt N Linien"): nach dem zweiten Klick committet die Linie WIE BISHER
+// (eigenständiges `Drawing2D{shape:"line"}`), der Befehl bleibt aber aktiv
+// (`done` NICHT gesetzt) — der eben gesetzte Endpunkt wird sofort zum
+// Startpunkt des nächsten Segments. Jedes Segment ist damit ein SEPARATES
+// Element (anders als `polyline`, absichtlich — z. B. für Elemente, die
+// später einzeln verschoben/gelöscht werden sollen). Enter/Rechtsklick/Esc
+// beendet die Kette (kein abschliessendes Segment zum Cursor). Ein Klick auf
+// denselben Punkt (Nulllänge) wird ignoriert statt die Kette zu beenden —
+// anders als früher, wo ein solcher Klick den GESAMTEN (Einzel-)Befehl
+// verwarf; das ergäbe bei einer laufenden Kette eine Überraschung.
+//
 // Schritte:
 //   1) „Start of line:"  → Punkt (Klick ODER getippt: 0,0 / r3,0 / 3<45)
-//   2) „End of line:"     → Punkt → commit Drawing2D line → done
+//   2) „End of line:"     → Punkt → commit Drawing2D line, Kette geht weiter
+//      (Enter/Rechtsklick/Esc beendet)
 //
 // Akzeptiert in JEDEM Punkt-Schritt sowohl Maus-Picks (gesnappt) als auch
 // getippte Koordinaten — das ist die Kern-Vereinheitlichung gegenüber dem alten
@@ -95,15 +110,14 @@ export const lineCommand: Command = {
       const next: LineDrawing = { phase: "end", a: pt, cursor: pt, lastPoint: pt };
       return [next, { draft: lineDraft(pt, pt) }];
     }
-    // Zweiter Punkt: Null-Strecke verwerfen, sonst committen.
+    // Nächster Punkt: Null-Strecke ignorieren (Klick abgeprallt/Doppelklick),
+    // ansonsten committen und die Kette am eben gesetzten Endpunkt fortsetzen.
     if (segLen(s.a, pt) < EPS) {
-      return [{ phase: "start", lastPoint: null }, { draft: null, done: true }];
+      return [s, { draft: lineDraft(s.a, s.cursor) }];
     }
     const a = s.a;
-    return [
-      { phase: "start", lastPoint: null },
-      { draft: null, done: true, commit: (p) => appendLine(p, a, pt, ctx) },
-    ];
+    const next: LineDrawing = { phase: "end", a: pt, cursor: pt, lastPoint: pt };
+    return [next, { draft: lineDraft(pt, pt), commit: (p) => appendLine(p, a, pt, ctx) }];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => {

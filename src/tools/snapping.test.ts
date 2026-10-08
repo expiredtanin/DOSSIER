@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { computeSnap, snapCommonAngle, wallLayerBoundarySegments } from "./snapping";
 import { DEFAULT_SNAP } from "./types";
-import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
+import type { Ceiling, Column, Drawing2D, Project, Roof, Room, Stair, Vec2, Wall } from "../model/types";
 
 /** Minimalprojekt mit einer dreischichtigen Wand (0.1 / 0.15 / 0.2 m). */
 function wallProject(wall: Wall): Project {
@@ -411,5 +411,299 @@ describe("computeSnap — Teilpunkte (divide) nach Verweilen", () => {
     snapAt(project, { x: 3, y: 5.02 }, settings); // andere Linie dazwischen
     const result = snapAt(project, { x: 3, y: 0.02 }, settings);
     expect(result?.kind).not.toBe("divide");
+  });
+});
+
+// ── Raum-/Decken-/Dach-/Treppen-/Stützen-Umrisse (bisher komplett blind) ────
+
+function bimSnapProject(overrides: Partial<Project>): Project {
+  return { ...drawProject([]), ...overrides };
+}
+
+function ceiling(outline: Vec2[], openings?: Vec2[][]): Ceiling {
+  return { id: "c1", type: "ceiling", floorId: "eg", categoryCode: "20", outline, openings, wallTypeId: "wt1" };
+}
+
+function room(boundary: Vec2[]): Room {
+  return { id: "r1", type: "room", floorId: "eg", categoryCode: "20", siaCategory: "HNF", name: "R", boundary, color: "#fff" };
+}
+
+function roof(outline: Vec2[]): Roof {
+  return { id: "rf1", type: "roof", floorId: "eg", categoryCode: "20", outline, shape: "flach", pitchDeg: 0, overhang: 0.5, ridgeAxis: "x", thickness: 0.3 };
+}
+
+function straightStair(): Stair {
+  return { id: "s1", type: "stair", floorId: "eg", categoryCode: "20", shape: "straight", start: { x: 0, y: 0 }, dir: { x: 1, y: 0 }, runLength: 3, width: 1.2, stepCount: 18 };
+}
+
+function spiralStair(): Stair {
+  return {
+    id: "s2", type: "stair", floorId: "eg", categoryCode: "20", shape: "spiral",
+    start: { x: 1, y: 0 }, dir: { x: 0, y: 1 }, runLength: 0, width: 1, stepCount: 12,
+    center: { x: 0, y: 0 }, radius: 1, sweep: 270,
+  };
+}
+
+function rectColumn(): Column {
+  return { id: "col1", type: "column", floorId: "eg", categoryCode: "20", position: { x: 5, y: 5 }, profile: { kind: "rect", width: 0.4, depth: 0.4 }, rotation: 0, height: 2.6 };
+}
+
+function roundColumn(): Column {
+  return { id: "col2", type: "column", floorId: "eg", categoryCode: "20", position: { x: -3, y: -3 }, profile: { kind: "round", radius: 0.25 }, rotation: 0, height: 2.6 };
+}
+
+describe("computeSnap — Raum-/Decken-/Dach-Umriss (Endpunkt/Kante)", () => {
+  it("fängt eine Raum-Ecke", () => {
+    const p = bimSnapProject({ rooms: [room([{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }])] });
+    const r = snapAt(p, { x: 4.02, y: 0.01 });
+    expect(r?.kind).toBe("endpoint");
+    expect(r!.point).toEqual({ x: 4, y: 0 });
+  });
+
+  it("fängt den Lotfusspunkt auf einer Raumkante (onEdge)", () => {
+    const p = bimSnapProject({ rooms: [room([{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }])] });
+    // x=1.3 bewusst NICHT der Kantenmittelpunkt (x=2, sonst gewönne "midpoint").
+    const r = snapAt(p, { x: 1.3, y: 0.02 });
+    expect(r?.kind).toBe("onEdge");
+    expect(r!.point.x).toBeCloseTo(1.3, 6);
+    expect(r!.point.y).toBeCloseTo(0, 6);
+  });
+
+  it("fängt eine Decken-Ecke UND eine Aussparungs-Ecke", () => {
+    const p = bimSnapProject({
+      ceilings: [ceiling([{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }], [[{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 2, y: 2 }, { x: 1, y: 2 }]])],
+    });
+    const outer = snapAt(p, { x: 4.02, y: 0.01 });
+    expect(outer?.point).toEqual({ x: 4, y: 0 });
+    const hole = snapAt(p, { x: 1.98, y: 1.01 });
+    expect(hole?.point).toEqual({ x: 2, y: 1 });
+  });
+
+  it("fängt eine Dach-Ecke", () => {
+    const p = bimSnapProject({ roofs: [roof([{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 8 }, { x: 0, y: 8 }])] });
+    const r = snapAt(p, { x: 0.02, y: 8.01 });
+    expect(r?.point).toEqual({ x: 0, y: 8 });
+  });
+});
+
+describe("computeSnap — Treppen-Umriss", () => {
+  it("fängt eine Ecke einer geraden Treppe", () => {
+    const p = bimSnapProject({ stairs: [straightStair()] });
+    // Lauf 3m × Breite 1.2m entlang +x ab (0,0), mittig referenziert → Ecke bei (3,0.6).
+    const r = snapAt(p, { x: 3.01, y: 0.59 });
+    expect(r?.kind).toBe("endpoint");
+    expect(r!.point.x).toBeCloseTo(3, 6);
+    expect(r!.point.y).toBeCloseTo(0.6, 6);
+  });
+
+  it("fängt das Zentrum einer Wendeltreppe (center aktiv)", () => {
+    const p = bimSnapProject({ stairs: [spiralStair()] });
+    // intersection aus: die beiden radialen Abschlusslinien schneiden sich als
+    // UNENDLICHE Geraden ebenfalls im Zentrum — hier soll isoliert der
+    // eigene Kreis-Center-Kandidat (aus `spiral.arcs`) geprüft werden.
+    const withCenter = { ...DEFAULT_SNAP, center: true, intersection: false };
+    const c = snapAt(p, { x: 0.02, y: -0.01 }, withCenter);
+    expect(c?.kind).toBe("center");
+    expect(c!.point).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("computeSnap — Stützen (rechteckig via Kanten, rund via Zentrum)", () => {
+  it("fängt eine Ecke einer rechteckigen Stütze", () => {
+    const p = bimSnapProject({ columns: [rectColumn()] });
+    const r = snapAt(p, { x: 5.21, y: 5.19 });
+    expect(r?.kind).toBe("endpoint");
+    expect(r!.point.x).toBeCloseTo(5.2, 6);
+    expect(r!.point.y).toBeCloseTo(5.2, 6);
+  });
+
+  it("fängt das Zentrum einer runden Stütze (center aktiv), keine Vieleck-Ecken", () => {
+    const p = bimSnapProject({ columns: [roundColumn()] });
+    const withCenter = { ...DEFAULT_SNAP, center: true };
+    const c = snapAt(p, { x: -2.99, y: -3.01 }, withCenter);
+    expect(c?.kind).toBe("center");
+    expect(c!.point).toEqual({ x: -3, y: -3 });
+  });
+});
+
+// ── Senkrecht/Tangential/Parallel zu Referenz (Nutzer-Wunsch, s. PENDENZEN) ──
+// Alle drei brauchen zwingend einen `lastPoint` — daher hier über einen
+// eigenen Helper statt `snapAt` (der `lastPoint` fest auf `null` setzt), und
+// mit ansonsten ALLEN Objekt-Snaps aus (isoliert), um Interferenzen mit den
+// bereits oben getesteten Fang-Arten auszuschliessen.
+const ISOLATED_OFF = {
+  ...DEFAULT_SNAP,
+  endpoint: false,
+  midpoint: false,
+  intersection: false,
+  onEdge: false,
+  center: false,
+  perpendicular: false,
+  tangent: false,
+  parallel: false,
+  grid: false,
+  ortho: false,
+  commonAngles: false,
+};
+
+function snapFrom(
+  project: Project,
+  raw: Vec2,
+  lastPoint: Vec2 | null,
+  settings: typeof DEFAULT_SNAP,
+) {
+  return computeSnap({
+    raw,
+    project,
+    levelId: "eg",
+    visibleCodes: new Set(["20"]),
+    settings,
+    draftPoints: [],
+    lastPoint,
+    pxPerMeter: 100,
+    shift: false,
+    ctrl: false,
+  });
+}
+
+describe("computeSnap — Senkrecht zum letzten Punkt (perpendicular)", () => {
+  it("fängt den Lotfusspunkt VOM LETZTEN PUNKT aus (nicht vom Cursor)", () => {
+    const p = drawProject([{ shape: "line", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } }]);
+    const settings = { ...ISOLATED_OFF, perpendicular: true };
+    // lastPoint (2,3) → Lot auf die Linie y=0 liegt bei (2,0); der Cursor muss
+    // nur NAHE (2,0) sein, nicht selbst auf der Linie.
+    const r = snapFrom(p, { x: 2.01, y: 0.02 }, { x: 2, y: 3 }, settings);
+    expect(r?.kind).toBe("perpendicular");
+    expect(r!.point.x).toBeCloseTo(2, 6);
+    expect(r!.point.y).toBeCloseTo(0, 6);
+  });
+
+  it("bleibt wirkungslos ohne lastPoint", () => {
+    const p = drawProject([{ shape: "line", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } }]);
+    const settings = { ...ISOLATED_OFF, perpendicular: true };
+    const r = snapFrom(p, { x: 2.01, y: 0.02 }, null, settings);
+    expect(r).toBeNull();
+  });
+});
+
+describe("computeSnap — Tangential an Kreis/Bogen (tangent)", () => {
+  it("fängt einen der beiden Tangentenpunkte von aussen (rechtwinklig zum Radius)", () => {
+    const center = { x: 5, y: 0 };
+    const r = 2;
+    const lastPoint = { x: 5, y: 6 };
+    const p = drawProject([{ shape: "circle", center, r }]);
+    const d = Math.hypot(lastPoint.x - center.x, lastPoint.y - center.y);
+    const thetaCP = Math.atan2(lastPoint.y - center.y, lastPoint.x - center.x);
+    const angAtC = Math.acos(r / d);
+    const t1 = {
+      x: center.x + r * Math.cos(thetaCP + angAtC),
+      y: center.y + r * Math.sin(thetaCP + angAtC),
+    };
+    const settings = { ...ISOLATED_OFF, tangent: true };
+    const result = snapFrom(p, t1, lastPoint, settings);
+    expect(result?.kind).toBe("tangent");
+    expect(result!.point.x).toBeCloseTo(t1.x, 6);
+    expect(result!.point.y).toBeCloseTo(t1.y, 6);
+    // Geometrische Gegenprobe: Tangente steht rechtwinklig auf dem Radius.
+    const toLast = { x: lastPoint.x - result!.point.x, y: lastPoint.y - result!.point.y };
+    const toCenter = { x: center.x - result!.point.x, y: center.y - result!.point.y };
+    expect(toLast.x * toCenter.x + toLast.y * toCenter.y).toBeCloseTo(0, 6);
+  });
+
+  it("bietet keine Tangente an, wenn lastPoint innerhalb des Kreises liegt", () => {
+    const p = drawProject([{ shape: "circle", center: { x: 0, y: 0 }, r: 2 }]);
+    const settings = { ...ISOLATED_OFF, tangent: true };
+    const r = snapFrom(p, { x: 1, y: 0 }, { x: 0, y: 0 }, settings);
+    expect(r).toBeNull();
+  });
+
+  it("bietet einen Tangentenpunkt AUSSERHALB der Bogen-Spanne NICHT an", () => {
+    // Halbkreis 0..180° (a0=0, a1=π): ein von UNTEN (negatives y) angesetzter
+    // lastPoint hätte seinen Tangentenpunkt ausserhalb dieser Spanne.
+    const center = { x: 0, y: 0 };
+    const r = 1;
+    const p = drawProject([{ shape: "arc", center, r, a0: 0, a1: Math.PI }]);
+    const settings = { ...ISOLATED_OFF, tangent: true };
+    const lastPoint = { x: 0, y: -5 }; // deutlich unterhalb des Bogens
+    // Beide Tangentenpunkte einer Kreis-von-unten-Konstruktion liegen im
+    // UNTEREN Halbkreis (ausserhalb 0..π) — kein Treffer erwartet, egal wo
+    // der Cursor auf dem (vollen) Kreis steht.
+    const r1 = snapFrom(p, { x: -0.99, y: -0.14 }, lastPoint, settings);
+    expect(r1?.kind).not.toBe("tangent");
+  });
+});
+
+describe("computeSnap — Parallel zu erfasster Referenz (parallel)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fängt NICHT parallel, solange die Referenzlinie noch nicht lange genug erfasst wurde", () => {
+    const p = drawProject([{ shape: "line", a: { x: 0, y: 0 }, b: { x: 9, y: 0 } }]);
+    const settings = { ...ISOLATED_OFF, parallel: true, hoverDivideDelayMs: 300 };
+    const r = snapFrom(p, { x: 3, y: 0.02 }, { x: 1, y: 5 }, settings);
+    expect(r?.kind).not.toBe("parallel");
+  });
+
+  it("fängt auf der Parallelen DURCH lastPoint, sobald die Referenz erfasst ist", () => {
+    const p = drawProject([{ shape: "line", a: { x: 0, y: 0 }, b: { x: 9, y: 0 } }]);
+    const settings = { ...ISOLATED_OFF, parallel: true, hoverDivideDelayMs: 300 };
+    const lastPoint = { x: 1, y: 5 };
+    const onLine = { x: 3, y: 0.02 };
+    // Erfassen: Cursor lange genug auf DERSELBEN Stelle der Referenzlinie
+    // halten (zwei Aufrufe, wie bei "divide" — der erste verankert nur den
+    // Verweil-Beginn, erst der zweite NACH Ablauf der Verweilzeit erfasst).
+    snapFrom(p, onLine, lastPoint, settings);
+    vi.advanceTimersByTime(350);
+    snapFrom(p, onLine, lastPoint, settings);
+    // Jetzt zum eigentlichen Zielbereich bewegen: die Parallele zu y=0 durch
+    // lastPoint (1,5) ist die Gerade y=5 — der Cursor muss dort fangen (die
+    // Erfassung bleibt STICKY bestehen), NICHT mehr auf der Referenzlinie
+    // selbst sein.
+    const result = snapFrom(p, { x: 6.01, y: 5.02 }, lastPoint, settings);
+    expect(result?.kind).toBe("parallel");
+    // Projektion auf die Parallele (horizontal, durch lastPoint bei y=5): die
+    // y-Koordinate wird auf 5 eingerastet, die x-Koordinate folgt frei dem
+    // Cursor (keine Rundung) — daher x bleibt 6.01, nur y wird zu 5.
+    expect(result!.point.x).toBeCloseTo(6.01, 6);
+    expect(result!.point.y).toBeCloseTo(5, 6);
+  });
+
+  it("bleibt wirkungslos ohne lastPoint (nur die Referenz wäre erfasst)", () => {
+    const p = drawProject([{ shape: "line", a: { x: 0, y: 0 }, b: { x: 9, y: 0 } }]);
+    const settings = { ...ISOLATED_OFF, parallel: true, hoverDivideDelayMs: 300 };
+    snapFrom(p, { x: 3, y: 0.02 }, null, settings);
+    vi.advanceTimersByTime(350);
+    const result = snapFrom(p, { x: 6, y: 5 }, null, settings);
+    expect(result?.kind).not.toBe("parallel");
+  });
+});
+
+describe("computeSnap — Spline (fit- vs. control-Modus)", () => {
+  const pts = [{ x: 0, y: 0 }, { x: 2, y: 10 }, { x: 6, y: 10 }, { x: 8, y: 0 }];
+
+  it("fit-Modus (Default): fängt AUF dem inneren Wegpunkt (Catmull-Rom interpoliert, taucht als Vertex der Tessellierung auf)", () => {
+    const p = drawProject([{ shape: "spline", pts, closed: false, mode: "fit" }]);
+    const r = snapAt(p, { x: 2, y: 10 });
+    expect(r?.kind).toBe("endpoint");
+    expect(r!.point.x).toBeCloseTo(2, 6);
+    expect(r!.point.y).toBeCloseTo(10, 6);
+  });
+
+  it("control-Modus: fängt NICHT auf dem inneren Kontrollpunkt (B-Spline berührt/nähert ihn nicht — kein endpoint-/onEdge-Treffer)", () => {
+    const p = drawProject([{ shape: "spline", pts, closed: false, mode: "control" }]);
+    const r = snapAt(p, { x: 2, y: 10 });
+    expect(r?.kind).not.toBe("endpoint");
+    expect(r?.kind).not.toBe("onEdge");
+  });
+
+  it("control-Modus: fängt trotzdem auf dem geklemmten Start-/Endpunkt", () => {
+    const p = drawProject([{ shape: "spline", pts, closed: false, mode: "control" }]);
+    const r = snapAt(p, { x: 8, y: 0 });
+    expect(r?.point.x).toBeCloseTo(8, 6);
+    expect(r?.point.y).toBeCloseTo(0, 6);
   });
 });

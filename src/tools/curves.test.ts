@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ellipsePts, sampleBezierChain, sampleCatmullRom } from "./curves";
+import { ellipsePts, sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "./curves";
 
 describe("ellipsePts", () => {
   it("liegt auf der Ellipse (rotation 0): Ost/Nord-Punkte bei rx/ry", () => {
@@ -87,5 +87,54 @@ describe("sampleCatmullRom", () => {
     const pts = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }];
     const out = sampleCatmullRom(pts, true, 6);
     expect(out.length).toBe(pts.length * 6);
+  });
+});
+
+describe("sampleUniformBSpline (Kontrollpunkt-/CV-Modus)", () => {
+  it("weniger als 3 Punkte: Rohpunkte unverändert (Gummiband-Vorschau, wie sampleCatmullRom)", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 3, y: 4 }];
+    expect(sampleUniformBSpline(pts, false, 8)).toEqual(pts);
+  });
+
+  it("offen, geklemmt: berührt exakt Start- und Endpunkt", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 2, y: 5 }, { x: 6, y: 5 }, { x: 8, y: 0 }];
+    const out = sampleUniformBSpline(pts, false, 10);
+    expect(out[0]).toEqual(pts[0]);
+    const last = out[out.length - 1];
+    expect(last.x).toBeCloseTo(8, 9);
+    expect(last.y).toBeCloseTo(0, 9);
+  });
+
+  it("offen, geklemmt: berührt die INNEREN Kontrollpunkte NICHT (Gegensatz zu Catmull-Rom, das interpoliert)", () => {
+    // Zwei Kontrollpunkte weit ausserhalb der Verbindungslinie Start-Ende —
+    // eine interpolierende Kurve (Catmull-Rom) würde exakt durch sie
+    // verlaufen; die B-Spline-Kurve wird nur "angezogen".
+    const pts = [{ x: 0, y: 0 }, { x: 2, y: 10 }, { x: 6, y: 10 }, { x: 8, y: 0 }];
+    const out = sampleUniformBSpline(pts, false, 20);
+    const touchesInner = out.some(
+      (p) => Math.hypot(p.x - 2, p.y - 10) < 1e-6 || Math.hypot(p.x - 6, p.y - 10) < 1e-6,
+    );
+    expect(touchesInner).toBe(false);
+    // Bleibt aber innerhalb der konvexen Hülle der Kontrollpunkte (y ≤ 10).
+    for (const p of out) expect(p.y).toBeLessThanOrEqual(10 + 1e-9);
+  });
+
+  it("zwei effektive Kontrollpunkte (Start/Ende mehrfach dupliziert) ergeben eine echte Gerade", () => {
+    // Mit 3 kollinearen Punkten bleibt die Kurve (als Kombination kollinearer
+    // Kontrollpunkte) exakt auf der Verbindungsgeraden.
+    const pts = [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 6, y: 0 }];
+    const out = sampleUniformBSpline(pts, false, 8);
+    for (const p of out) expect(p.y).toBeCloseTo(0, 9);
+    expect(out[0]).toEqual(pts[0]);
+    expect(out[out.length - 1]).toEqual(pts[2]);
+  });
+
+  it("geschlossen (periodisch): liefert keinen doppelten Schlusspunkt UND berührt keinen der Kontrollpunkte", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }];
+    const out = sampleUniformBSpline(pts, true, 6);
+    expect(out.length).toBe(pts.length * 6);
+    for (const cp of pts) {
+      expect(out.some((p) => Math.hypot(p.x - cp.x, p.y - cp.y) < 1e-6)).toBe(false);
+    }
   });
 });

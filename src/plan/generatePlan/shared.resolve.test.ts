@@ -111,6 +111,38 @@ describe("resolveHatch — reicht `motif` (custom-Muster) unverändert durch", (
   });
 });
 
+describe("resolveHatch — reicht `gradient` (Verlauf-Schraffur) unverändert durch", () => {
+  const gradient: NonNullable<HatchStyle["gradient"]> = {
+    color1: "#ffffff",
+    color2: "#000000",
+    angle: 45,
+    type: "radial",
+  };
+  const hatchStyle: HatchStyle = {
+    id: "h-gradient",
+    name: "Verlauf",
+    kind: "gradient",
+    pattern: "diagonal", // Restwert vom vorherigen Vektor-Modus, wird ignoriert
+    scale: 1,
+    angle: 0,
+    color: "#000",
+    gradient,
+  };
+  const project = { hatches: [hatchStyle], lineStyles: [] } as unknown as Project;
+
+  it("HatchRender.kind/gradient entsprechen dem HatchStyle", () => {
+    const render = resolveHatch(project, "h-gradient");
+    expect(render.kind).toBe("gradient");
+    expect(render.gradient).toEqual(gradient);
+  });
+
+  it("ein Hatch OHNE gradient liefert HatchRender.gradient === undefined (kein erfundener Default)", () => {
+    const diagonal: HatchStyle = { id: "h-diag2", name: "Diagonal", pattern: "diagonal", scale: 1, angle: 0, color: "#000" };
+    const p2 = { hatches: [diagonal], lineStyles: [] } as unknown as Project;
+    expect(resolveHatch(p2, "h-diag2").gradient).toBeUndefined();
+  });
+});
+
 describe("Drawing2D-Panel-Vorschau (selectionInfo.ts) — mappt fehlende Source explizit auf 'layer'", () => {
   it("simuliert das Aufrufer-Mapping `d.foregroundSource ?? \"layer\"`: liefert die Kategorie-Farbe für ein Drawing2D ohne Bauteil", () => {
     const noComponent: Component = { id: "", name: "", color: "#000", hatchId: "", joinPriority: 0 };

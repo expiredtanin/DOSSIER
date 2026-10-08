@@ -230,6 +230,9 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 /// Layout = das Haupt-Mesh-Layout `[pos, normal, color]` (color wird ignoriert), damit
 /// derselbe Vertex-Puffer (Terrain-Overlay) ohne Re-Meshing genutzt werden kann.
 /// Bild-Zeile 0 liegt im NORDEN (+Y) -> die Textur-v-Achse wird gespiegelt (1 - v).
+/// world.z entspricht dabei dem NEGIERTEN Modell-y (s. `mesh.rs::
+/// append_context_mesh`) — die v-Berechnung negiert `world_pos.z` daher zurück,
+/// bevor sie gegen die (unveränderte, modell-raumige) `bbox` verglichen wird.
 pub const MESH_AERIAL_WGSL: &str = r#"
 struct Globals {
     view_proj     : mat4x4<f32>,
@@ -289,10 +292,15 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
         * vec3<f32>(0.24, 0.27, 0.30);
 
-    // UV aus der Welt-Lage + Bild-Bbox. world.x = Ost, world.z = Nord.
+    // UV aus der Welt-Lage + Bild-Bbox. world.x = Ost, world.z = -Nord (Modell-y
+    // wird beim Mesh-Bau negiert, s. `mesh.rs::append_context_mesh` — Fund
+    // "swisstopo-Import im 3D gespiegelt", 2026-09-24: NACH diesem Fix zeigt
+    // world.z in die GEGENGESETZTE Richtung von Modell-y, die v-Berechnung
+    // hier muss das kompensieren, sonst liegt das drapierte Luftbild wieder
+    // spiegelverkehrt auf dem jetzt korrekt positionierten Terrain-Mesh).
     let span = vec2<f32>(aerial.bbox.z - aerial.bbox.x, aerial.bbox.w - aerial.bbox.y);
     let u = (in.world_pos.x - aerial.bbox.x) / span.x;
-    let v = (in.world_pos.z - aerial.bbox.y) / span.y;
+    let v = (-in.world_pos.z - aerial.bbox.y) / span.y;
     // Bild-Zeile 0 = Nord (+Y) -> v spiegeln. Ausserhalb [0,1] -> Randpixel (Clamp
     // uebernimmt der Sampler mit ClampToEdge).
     let albedo = textureSample(tex, samp, vec2<f32>(u, 1.0 - v)).rgb;

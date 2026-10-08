@@ -178,10 +178,15 @@ export function ImportDialog({
           </div>
 
           {loading ? (
-            // DWG wird gelesen (WASM lädt/parst) → Ladehinweis, nur Abbrechen.
+            // Datei wird gelesen/geparst (DWG: WASM; DXF: Web Worker, s.
+            // dxfParserAsync.ts) → Ladehinweis, nur Abbrechen.
             <section className="imp-section">
-              <div className="imp-section-title">{t("import.dwg.heading")}</div>
-              <div className="imp-dwg-hint">{t("import.dwg.loading")}</div>
+              <div className="imp-section-title">
+                {t(isDwg ? "import.dwg.heading" : "import.loading.heading")}
+              </div>
+              <div className="imp-dwg-hint">
+                {t(isDwg ? "import.dwg.loading" : "import.loading.hint")}
+              </div>
             </section>
           ) : isDwg ? (
             // DWG konnte nicht gelesen werden → ODA-Fallback-Hinweis.

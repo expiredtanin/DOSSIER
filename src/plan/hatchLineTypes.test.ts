@@ -229,6 +229,47 @@ describe("Bild-Schraffur — Fallback in der (texturlosen) RenderScene", () => {
   });
 });
 
+describe("Verlauf-Schraffur — Fallback in der (verlauflosen) RenderScene", () => {
+  it("erzeugt KEINE Musterlinien (nur neutrale Füllung, wie bei Bild-Schraffur)", () => {
+    const poly: Primitive = {
+      kind: "polygon",
+      pts: SQUARE,
+      fill: "#eeeeee",
+      stroke: "none",
+      strokeWidthMm: 0,
+      hatch: hatch({
+        kind: "gradient",
+        pattern: "crosshatch", // würde OHNE gradient-Fallback ein Kreuzmuster zeichnen
+        gradient: { color1: "#ffffff", color2: "#000000", angle: 45, type: "linear" },
+      }),
+    };
+    const scene = planToRenderScene(planOf([poly]));
+    expect(scene.polylines.length).toBe(0); // Fallback: keine Vektor-Musterlinien
+    expect(scene.fills.length).toBe(1); // neutrale Poché-Füllung bleibt
+  });
+
+  it("buildHatchRuns ignoriert lines:'random' bei gradient-Schraffuren (wie bei Bild-Schraffuren) — liefert dasselbe wie 'parallel'", () => {
+    const gradientParams = { color1: "#fff", color2: "#000", angle: 0, type: "linear" as const };
+    const asRandom = buildHatchRuns(
+      SQUARE,
+      hatch({ kind: "gradient", lines: "random", gradient: gradientParams }),
+    );
+    const asParallel = buildHatchRuns(
+      SQUARE,
+      hatch({ kind: "gradient", lines: "parallel", gradient: gradientParams }),
+    );
+    // 'random' wird für gradient NICHT als Streu-Muster interpretiert (sonst
+    // wären beide Ergebnisse strukturell verschieden — Streu-Striche vs. die
+    // reguläre Parallelschar).
+    expect(asRandom).toEqual(asParallel);
+    // Gegenprobe: für eine normale Vektor-Schraffur macht 'random' sehr wohl
+    // einen Unterschied (sonst wäre der obige Vergleich nichtssagend).
+    const vectorRandom = buildHatchRuns(SQUARE, hatch({ kind: "vector", lines: "random" }));
+    const vectorParallel = buildHatchRuns(SQUARE, hatch({ kind: "vector", lines: "parallel" }));
+    expect(vectorRandom).not.toEqual(vectorParallel);
+  });
+});
+
 // ── Print-SVG (planToPrintSvg): Bild-<pattern>/<image> + Zickzack-<polyline> ──
 // Node-Umgebung ohne DOM → minimaler document-Stub (nur die von planToPrintSvg
 // genutzten Methoden). So lässt sich der erzeugte SVG-Knotenbaum inspizieren.

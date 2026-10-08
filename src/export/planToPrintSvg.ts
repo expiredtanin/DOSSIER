@@ -220,7 +220,12 @@ function appendPrimitive(
   map: Mapper,
   mmPerM: number,
 ): void {
-  const opacity = p.greyed ? "0.3" : undefined;
+  // Gedimmt (0.3) und Objekt-Transparenz multiplizieren sich; Bilder tragen
+  // ihre eigene Deckkraft separat (s. dortiger Zweig).
+  const objOpacity = p.kind === "drawingImage" ? 1 : (p.opacity ?? 1);
+  const dim = p.greyed ? 0.3 : 1;
+  const combined = dim * Math.max(0, objOpacity);
+  const opacity = combined < 1 ? String(combined) : undefined;
   switch (p.kind) {
     case "polygon":
       appendPolygon(svg, p, map, mmPerM, opacity);
@@ -252,6 +257,29 @@ function appendPrimitive(
     }
     case "arc": {
       const node = arcNode(p, map, mmPerM);
+      if (opacity) node.setAttribute("opacity", opacity);
+      svg.appendChild(node);
+      break;
+    }
+    case "drawingCircle": {
+      const c = map(p.center);
+      const el = document.createElementNS(SVG_NS, "circle");
+      el.setAttribute("cx", String(round(c.x)));
+      el.setAttribute("cy", String(round(c.y)));
+      el.setAttribute("r", String(round(p.r * mmPerM)));
+      el.setAttribute("fill", p.fill && p.fill !== "none" ? p.fill : "none");
+      el.setAttribute("stroke", p.stroke);
+      el.setAttribute("stroke-width", String(quantizePen(p.weightMm)));
+      if (p.dash && p.dash.length) {
+        el.setAttribute("stroke-dasharray", p.dash.map((x) => round(x)).join(" "));
+        if (dashHasDot(p.dash)) el.setAttribute("stroke-linecap", "round");
+      }
+      if (opacity) el.setAttribute("opacity", opacity);
+      svg.appendChild(el);
+      break;
+    }
+    case "drawingArc": {
+      const node = drawingArcNode(p, map, mmPerM);
       if (opacity) node.setAttribute("opacity", opacity);
       svg.appendChild(node);
       break;
@@ -511,6 +539,39 @@ function arcNode(
   if (p.dash && p.dash.length) {
     el.setAttribute("stroke-dasharray", p.dash.map((x) => round(x)).join(" "));
     // Punktmuster (dash enthält eine 0): runde Kappe → Dots am Bogen.
+    if (dashHasDot(p.dash)) el.setAttribute("stroke-linecap", "round");
+  }
+  return el;
+}
+
+/**
+ * `drawingArc` → glatter SVG-Bogen. Konvention wie im Bildschirm-Renderer
+ * (`planView/primitives.tsx`): die Winkel laufen im MODELL immer gegen den
+ * Uhrzeigersinn von `a0` nach `a1`; da die Ziel-Y-Achse gespiegelt ist, wird
+ * daraus am Papier ein Uhrzeigersinn-Bogen (sweep-flag 1). `large-arc` aus
+ * der normierten Spannweite.
+ */
+function drawingArcNode(
+  p: Extract<Primitive, { kind: "drawingArc" }>,
+  map: Mapper,
+  mmPerM: number,
+): SVGElement {
+  const TAU = Math.PI * 2;
+  const from = map({ x: p.center.x + p.r * Math.cos(p.a0), y: p.center.y + p.r * Math.sin(p.a0) });
+  const to = map({ x: p.center.x + p.r * Math.cos(p.a1), y: p.center.y + p.r * Math.sin(p.a1) });
+  const r = p.r * mmPerM;
+  const sweep = (((p.a1 - p.a0) % TAU) + TAU) % TAU;
+  const largeArc = sweep > Math.PI ? 1 : 0;
+  const el = document.createElementNS(SVG_NS, "path");
+  el.setAttribute(
+    "d",
+    `M ${round(from.x)} ${round(from.y)} A ${round(r)} ${round(r)} 0 ${largeArc} 1 ${round(to.x)} ${round(to.y)}`,
+  );
+  el.setAttribute("fill", "none");
+  el.setAttribute("stroke", p.stroke);
+  el.setAttribute("stroke-width", String(quantizePen(p.weightMm)));
+  if (p.dash && p.dash.length) {
+    el.setAttribute("stroke-dasharray", p.dash.map((x) => round(x)).join(" "));
     if (dashHasDot(p.dash)) el.setAttribute("stroke-linecap", "round");
   }
   return el;

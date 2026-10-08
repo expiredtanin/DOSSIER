@@ -231,6 +231,12 @@ export function hatchLineFamily(
   angleRad: number,
   spacingM: number,
   offsetM = 0,
+  /**
+   * Ankerpunkt des Rasters. Default ist der MODELL-URSPRUNG (s. Kommentar
+   * unten); ein Objekt kann ihn über `Drawing2D.hatchOrigin` verschieben,
+   * um das Muster z. B. an einer Raumecke ansetzen zu lassen.
+   */
+  anchor: Vec2 = { x: 0, y: 0 },
 ): HatchSegment[] {
   if (poly.length < 3 || spacingM <= 1e-9) return [];
   const bb = bbox(poly);
@@ -245,7 +251,7 @@ export function hatchLineFamily(
   // (Ursprung (0,0) = Modell-Ursprung). Nur mit demselben Anker liegen die
   // Musterlinien deckungsgleich zum SVG-Referenzpfad — und benachbarte Polygone
   // teilen dieselbe Muster-Phase statt je eigener (bbox-abhängiger) Versätze.
-  const center: Vec2 = { x: 0, y: 0 };
+  const center: Vec2 = anchor;
   let dMin = Infinity, dMax = -Infinity;
   for (const p of poly) {
     const d = (p.x - center.x) * nrm.x + (p.y - center.y) * nrm.y;
@@ -380,10 +386,11 @@ export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
   const scale = hatch.scale > 1e-6 ? hatch.scale : 1;
 
   // Random-Vektor-Untermodus (Kies/Splitt): kurze, deterministisch gestreute
-  // Striche statt der regelmäßigen Parallel-/Kreuzschar. Bild-Schraffuren
-  // (kind==="image") werden hier NICHT als Vektorlinien erzeugt — sie fallen im
-  // Aufrufer auf eine neutrale Füllung zurück (RScene/GL kennen keine Textur).
-  if (hatch.kind !== 'image' && hatch.lines === 'random') {
+  // Striche statt der regelmäßigen Parallel-/Kreuzschar. Bild-/Verlauf-
+  // Schraffuren (kind==="image"/"gradient") werden hier NICHT als Vektorlinien
+  // erzeugt — sie fallen im Aufrufer auf eine neutrale Füllung zurück
+  // (RScene/GL kennen weder Textur noch echten Farbverlauf).
+  if (hatch.kind !== 'image' && hatch.kind !== 'gradient' && hatch.lines === 'random') {
     return buildRandomHatchRuns(poly, hatch, scale);
   }
 
@@ -408,7 +415,8 @@ export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
   // Kopplung wie bei Linien-Motiven, DASH_MM_TO_M, zusätzlich mit `scale`
   // verknüpft — konsistent zur Zeilenabstand-Formel oben). Ohne Motiv (frisch
   // angelegter Hatch) fällt „custom" auf gerade Linien zurück (kein Absturz).
-  const runs: HatchRun[] = hatchLineFamily(poly, a1, spacingM, 0).map((s) =>
+  const anchor = hatch.origin ?? { x: 0, y: 0 };
+  const runs: HatchRun[] = hatchLineFamily(poly, a1, spacingM, 0, anchor).map((s) =>
     pattern === 'custom' && hatch.motif
       ? motifPoints(s.a, s.b, hatch.motif, scale * DASH_MM_TO_M)
       : [s.a, s.b],
@@ -417,7 +425,7 @@ export function buildHatchRuns(poly: Vec2[], hatch: HatchRender): HatchRun[] {
   if (pattern === 'crosshatch') {
     // Zweite Schar: die SVG-Kachel trägt zusätzlich eine horizontale Linie
     // (x-Achse der Kachel) → 90° zur ersten, gleicher Abstand.
-    for (const s of hatchLineFamily(poly, a1 + Math.PI / 2, spacingM, 0)) runs.push([s.a, s.b]);
+    for (const s of hatchLineFamily(poly, a1 + Math.PI / 2, spacingM, 0, anchor)) runs.push([s.a, s.b]);
   }
   return runs;
 }

@@ -35,11 +35,13 @@ import type {
 } from "../model/types";
 import { SIA_CATEGORIES, siaLabelFull } from "../geometry/roomArea";
 import { Dropdown } from "../ui/Dropdown";
+import type { DetailLevel } from "../ui/TopBar";
 import { ColorHexField } from "../ui/ColorHexField";
 import { usePanelHost } from "./host";
 import type {
   CeilingInfo,
   ColumnInfo,
+  DetailRefInfo,
   ExtrudedSolidInfo,
   OpeningInfo,
   RoofInfo,
@@ -57,6 +59,11 @@ const FRACTIONS = [0, 0.5, 1] as const;
 /** Stabiler Schlüssel je Anker (z. B. "0-0.5"), unabhängig von Float-Anzeige. */
 function anchorKey(fx: number, fy: number): string {
   return `${fx}-${fy}`;
+}
+
+/** Radiant → Grad, normiert auf [0, 360) (für Winkel-Anzeigefelder). */
+function toDeg360(rad: number): number {
+  return (((rad * 180) / Math.PI) % 360 + 360) % 360;
 }
 
 export function ObjectInfoPanel() {
@@ -91,9 +98,9 @@ export function ObjectInfoPanel() {
   // X/Y des gewählten Bezugspunkts (Modell-Meter). Editierbar: Commit
   // verschiebt die Selektion so, dass der gewählte Bezugspunkt auf die
   // eingegebene Koordinate wandert (Delta = neu − aktuell → generischer Move
-  // über den Host). Bei Elementarten, die der Transform-Kern nicht kennt
-  // (Decke/Öffnung/Treppe/Raum), ist der Host-Aufruf ein No-op — das Feld
-  // zeigt danach wieder den unveränderten Wert (wie bei Breite/Höhe oben).
+  // über den Host). Bei Öffnungen (wandgebunden, kein freier 2D-Punkt) ist der
+  // Host-Aufruf ein No-op — das Feld zeigt danach wieder den unveränderten
+  // Wert (wie bei Breite/Höhe oben).
   const px = bbox.minX + anchor.fx * width;
   const py = bbox.minY + anchor.fy * height;
 
@@ -236,15 +243,29 @@ export function ObjectInfoPanel() {
             value={height}
             onCommit={(h) => commitSize(width, h)}
           />
-          {/* Linien-Länge bzw. Kreis-Radius (nur wenn die Selektion genau eine
-              Linie/ein Kreis ist — das Modell gibt das direkt her, andere Formen
-              bleiben ohne Zusatzfeld). */}
-          {drawingShape === "line" && (
-            <DimensionField
-              label={t("objinfo.drawing.length")}
-              value={Math.hypot(width, height)}
-              onCommit={(v) => host.onSetDrawingLineLength(v)}
-            />
+          {/* Formspezifische Zusatzfelder (nur wenn das Modell den Wert direkt
+              hergibt — andere Formen bleiben ohne Zusatzfeld, s. Dateikopf). */}
+          {drawingShape === "line" && rawDrawing?.geom.shape === "line" && (
+            <>
+              <DimensionField
+                label={t("objinfo.drawing.length")}
+                value={Math.hypot(width, height)}
+                onCommit={(v) => host.onSetDrawingLineLength(v)}
+              />
+              <DimensionField
+                label={t("objinfo.drawing.angle")}
+                value={toDeg360(
+                  Math.atan2(
+                    rawDrawing.geom.b.y - rawDrawing.geom.a.y,
+                    rawDrawing.geom.b.x - rawDrawing.geom.a.x,
+                  ),
+                )}
+                min={-Infinity}
+                step={1}
+                unit="°"
+                onCommit={(v) => host.onSetDrawingLineAngle(v)}
+              />
+            </>
           )}
           {drawingShape === "circle" && (
             <DimensionField
@@ -252,6 +273,31 @@ export function ObjectInfoPanel() {
               value={width / 2}
               onCommit={(v) => host.onSetDrawingCircleRadius(v)}
             />
+          )}
+          {drawingShape === "arc" && rawDrawing?.geom.shape === "arc" && (
+            <>
+              <DimensionField
+                label={t("objinfo.drawing.radius")}
+                value={rawDrawing.geom.r}
+                onCommit={(v) => host.onSetDrawingArcRadius(v)}
+              />
+              <DimensionField
+                label={t("objinfo.drawing.startAngle")}
+                value={toDeg360(rawDrawing.geom.a0)}
+                min={-Infinity}
+                step={1}
+                unit="°"
+                onCommit={(v) => host.onSetDrawingArcStartAngle(v)}
+              />
+              <DimensionField
+                label={t("objinfo.drawing.endAngle")}
+                value={toDeg360(rawDrawing.geom.a1)}
+                min={-Infinity}
+                step={1}
+                unit="°"
+                onCommit={(v) => host.onSetDrawingArcEndAngle(v)}
+              />
+            </>
           )}
         </>
       )}
@@ -497,6 +543,66 @@ export function SectionLineSection({
       <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>
         {t("objinfo.sectionLine.delete")}
       </button>
+    </>
+  );
+}
+
+// ── Detail-/Schnitt-Verweis-Attribut-Abschnitt ──────────────────────────────
+// Bezeichner (obere Zeile) + Blattverknüpfung (Dropdown der Project.layouts,
+// „kein Verweis" löst sie); ohne Verknüpfung zusätzlich ein manueller
+// Blattname-Platzhalter (untere Zeile, s. `DetailRefInfo`-Kommentar).
+export function DetailRefSection({
+  detailRef,
+  drawingId,
+  host,
+}: {
+  detailRef: DetailRefInfo;
+  drawingId: string;
+  host: ReturnType<typeof usePanelHost>;
+}) {
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label">{t("objinfo.detailRef.section")}</div>
+
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.detailRef.label")}</span>
+        <input
+          type="text"
+          className="objinfo-text"
+          value={detailRef.label}
+          onChange={(e) => host.onSetDetailRefLabel(drawingId, e.target.value)}
+          title={t("objinfo.detailRef.label")}
+        />
+      </div>
+
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.detailRef.sheet")}</span>
+        <Dropdown
+          value={detailRef.sheetLayoutId ?? ""}
+          onChange={(v) => host.onSetDetailRefSheetLayout(drawingId, v === "" ? undefined : v)}
+          options={[
+            { value: "", label: t("objinfo.detailRef.sheet.none") },
+            ...detailRef.availableLayouts.map((l) => ({ value: l.id, label: l.name })),
+          ]}
+          title={t("objinfo.detailRef.sheet")}
+          width={130}
+        />
+      </div>
+
+      {!detailRef.sheetLayoutId && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.detailRef.sheetLabel")}</span>
+          <input
+            type="text"
+            className="objinfo-text"
+            value={detailRef.sheetLabel ?? ""}
+            placeholder={t("objinfo.detailRef.sheetLabel.hint")}
+            onChange={(e) => host.onSetDetailRefSheetLabel(drawingId, e.target.value)}
+            title={t("objinfo.detailRef.sheetLabel")}
+          />
+        </div>
+      )}
     </>
   );
 }
@@ -1183,6 +1289,28 @@ export function OpeningSection({
           />
         </>
       )}
+
+      {/* Detailstufe-Übersteuerung — fehlt sie ("" = Ansicht), gilt die
+          ansichtsweite Detailstufe (Grundriss-Kopfzeile). Wirkt auf dasselbe
+          grob/mittel/fein-Symbol wie die Ansichts-Detailstufe (Türblatt-Bogen,
+          Rahmen/Glaslinien), nur PRO ELEMENT statt für den ganzen Plan. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.detailLevel")}</span>
+        <Dropdown
+          value={opening.detailLevel ?? ""}
+          onChange={(v) =>
+            host.onSetOpeningDetailLevel(v === "" ? undefined : (v as DetailLevel))
+          }
+          options={[
+            { value: "", label: t("objinfo.detailLevel.view") },
+            { value: "grob", label: t("topbar.detail.grob") },
+            { value: "mittel", label: t("topbar.detail.mittel") },
+            { value: "fein", label: t("topbar.detail.fein") },
+          ]}
+          title={t("objinfo.opening.detailLevel")}
+          width={130}
+        />
+      </div>
 
       <div className="objinfo-sep" />
 

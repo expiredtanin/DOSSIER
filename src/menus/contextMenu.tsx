@@ -8,7 +8,8 @@
 // Kommentare deutsch (CONVENTIONS.md).
 
 import { t } from "../i18n";
-import type { LayerCategory, Project } from "../model/types";
+import { nearestPolylineTarget, toleranceFor } from "../geometry/polylinePoint";
+import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { findCategory } from "../state/projectSlice";
 import { MenuIcon } from "../ui/ContextMenu";
@@ -18,7 +19,7 @@ import type { ContextMenuItem } from "../ui/ContextMenu";
 export type MenuState =
   | { kind: "layer"; code: string; x: number; y: number }
   | { kind: "level"; id: string; x: number; y: number }
-  | { kind: "plan"; wallId: string | null; x: number; y: number }
+  | { kind: "plan"; wallId: string | null; model: Vec2; x: number; y: number }
   | { kind: "viewport"; wallId: string | null; x: number; y: number }
   | null;
 
@@ -71,12 +72,43 @@ export interface MenuActions {
   union: () => void;
   difference: () => void;
   intersect: () => void;
-  /** Anzahl aktuell selektierter 2D-Zeichnungselemente (z-Anordnen-Menü). */
+  /** Anzahl aktuell selektierter 2D-Zeichnungselemente (z-Anordnen-Menü +
+   *  „Eigenschaften übertragen"). */
   drawingSelectionCount: number;
   bringToFront: () => void;
   bringForward: () => void;
   sendBackward: () => void;
   sendToBack: () => void;
+  /**
+   * Einzeln selektierte Polylinie (2D) — Grundlage für „Punkt einfügen/
+   * löschen" im Grundriss-Kontextmenü. `null`, wenn nichts oder etwas
+   * anderes selektiert ist; dann entfallen die beiden Einträge.
+   */
+  selectedPolyline: { id: string; pts: Vec2[]; closed: boolean } | null;
+  /** Ob eine Element-Stil-Zwischenablage gefüllt ist (aktiviert „Einfügen"). */
+  hasDrawingStyleClipboard: boolean;
+  /** Kopiert das Aussehen des ERSTEN gewählten 2D-Elements. */
+  copyDrawingStyle: () => void;
+  /** Überträgt das kopierte Aussehen auf alle gewählten 2D-Elemente. */
+  pasteDrawingStyle: () => void;
+  insertPolylinePoint: (id: string, segIndex: number, pt: Vec2) => void;
+  deletePolylinePoint: (id: string, index: number) => void;
+  /** Anzahl aktuell selektierter Elemente ÜBER ALLE Arten (Wand/2D/Decke/
+   *  Raum/Treppe/Stütze/Dach/Öffnung) — Grundlage für „Sperren"/„Entsperren". */
+  lockableSelectionCount: number;
+  /** Sind ALLE aktuell gewählten Elemente bereits gesperrt? Bestimmt Label/Icon. */
+  selectionAllLocked: boolean;
+  /** Sperrt/entsperrt die gesamte aktuelle Auswahl in einem Zug. */
+  toggleSelectionLock: () => void;
+  /**
+   * Sind ALLE aktuell gewählten 2D-Zeichnungen bereits `noPrint`? Bestimmt
+   * Label/Icon von „Nicht drucken"/„Drucken" — nur `Drawing2D` kennt das
+   * Feld (Nutzer-Wunsch „Kein 'nicht druckend'-Flag"), daher an
+   * `drawingSelectionCount` gekoppelt statt einer eigenen Zählung.
+   */
+  selectionAllNoPrint: boolean;
+  /** Setzt/löscht `noPrint` für die gesamte aktuelle 2D-Auswahl in einem Zug. */
+  toggleSelectionNoPrint: () => void;
 }
 
 /**
@@ -94,7 +126,7 @@ export function buildMenuItems(
     case "level":
       return levelMenuItems(menu.id, a);
     case "plan":
-      return planMenuItems(menu.wallId, a);
+      return planMenuItems(menu.wallId, menu.model, a);
     case "viewport":
       return viewportMenuItems(menu.wallId, a);
   }
@@ -225,8 +257,79 @@ function levelMenuItems(id: string, a: MenuActions): ContextMenuItem[] {
  */
 function planMenuItems(
   wallId: string | null,
+  model: Vec2,
   a: MenuActions,
 ): ContextMenuItem[] {
+  // Stützpunkt-Einträge NUR, wenn genau eine Polylinie selektiert ist UND der
+  // Rechtsklick nahe genug an ihr liegt (sonst würde „Punkt löschen" einen
+  // weit entfernten, nicht gemeinten Eckpunkt treffen).
+  const poly = a.selectedPolyline;
+  const target = poly ? nearestPolylineTarget(poly, model, toleranceFor(poly)) : null;
+  const pointItems: ContextMenuItem[] = [];
+  if (poly && target?.kind === "segment") {
+    pointItems.push({
+      label: t("ctx.insertPoint"),
+      icon: <MenuIcon name="add_circle" />,
+      onClick: () => a.insertPolylinePoint(poly.id, target.segIndex, target.at),
+    });
+  }
+  if (poly && target?.kind === "vertex") {
+    const min = poly.closed ? 4 : 3;
+    const enabled = poly.pts.length >= min;
+    pointItems.push({
+      label: t("ctx.deletePoint"),
+      icon: <MenuIcon name="do_not_disturb_on" />,
+      disabled: !enabled,
+      title: enabled ? undefined : t("alert.polylineMinPoints"),
+      onClick: () => a.deletePolylinePoint(poly.id, target.index),
+    });
+  }
+  // Eigenschaften übertragen — dasselbe Muster wie im Ebenen-Menü, nur für
+  // 2D-Elemente. Kopieren ab einem gewählten Element, Einfügen sobald etwas
+  // in der Zwischenablage liegt.
+  const styleItems: ContextMenuItem[] =
+    a.drawingSelectionCount >= 1
+      ? [
+          {
+            label: t("ctx.copyProps"),
+            icon: <MenuIcon name="content_copy" />,
+            onClick: a.copyDrawingStyle,
+          },
+          {
+            label: t("ctx.pasteProps"),
+            icon: <MenuIcon name="content_paste" />,
+            disabled: !a.hasDrawingStyleClipboard,
+            title: a.hasDrawingStyleClipboard ? undefined : t("ctx.pasteProps.disabled"),
+            onClick: a.pasteDrawingStyle,
+          },
+        ]
+      : [];
+
+  // Objekt sperren/entsperren — wirkt auf die GANZE aktuelle Auswahl (nicht
+  // nur 2D-Zeichnungen wie `styleItems`/`arrangeItems`), ein Undo-Schritt.
+  const lockItems: ContextMenuItem[] =
+    a.lockableSelectionCount >= 1
+      ? [
+          {
+            label: a.selectionAllLocked ? t("ctx.unlock") : t("ctx.lock"),
+            icon: <MenuIcon name={a.selectionAllLocked ? "lock_open" : "lock"} />,
+            onClick: a.toggleSelectionLock,
+          },
+        ]
+      : [];
+
+  // Nicht drucken/Drucken — nur für die 2D-Auswahl (`Drawing2D.noPrint`).
+  const noPrintItems: ContextMenuItem[] =
+    a.drawingSelectionCount >= 1
+      ? [
+          {
+            label: a.selectionAllNoPrint ? t("ctx.print") : t("ctx.noPrint"),
+            icon: <MenuIcon name={a.selectionAllNoPrint ? "print" : "print_disabled"} />,
+            onClick: a.toggleSelectionNoPrint,
+          },
+        ]
+      : [];
+
   // Boolean-Einträge (Vereinigen/Subtrahieren/Schneiden) auf die 2D-Auswahl.
   // Aktiv ab 2 geschlossenen Flächen; sonst deaktiviert mit erklärendem Tooltip.
   const boolEnabled = a.closedSelectionCount >= 2;
@@ -293,6 +396,14 @@ function planMenuItems(
 
   if (wallId) {
     return [
+      ...pointItems,
+      ...(pointItems.length ? [{ divider: true } as ContextMenuItem] : []),
+      ...styleItems,
+      ...(styleItems.length ? [{ divider: true } as ContextMenuItem] : []),
+      ...lockItems,
+      ...(lockItems.length ? [{ divider: true } as ContextMenuItem] : []),
+      ...noPrintItems,
+      ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
       {
         label: t("ctx.fitSelection"),
         icon: <MenuIcon name="center_focus_strong" />,
@@ -316,6 +427,14 @@ function planMenuItems(
     ];
   }
   return [
+    ...pointItems,
+    ...(pointItems.length ? [{ divider: true } as ContextMenuItem] : []),
+    ...styleItems,
+    ...(styleItems.length ? [{ divider: true } as ContextMenuItem] : []),
+    ...lockItems,
+    ...(lockItems.length ? [{ divider: true } as ContextMenuItem] : []),
+    ...noPrintItems,
+    ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...booleanItems,
     { divider: true },
     ...arrangeItems,

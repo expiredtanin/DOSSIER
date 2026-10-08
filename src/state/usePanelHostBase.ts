@@ -71,7 +71,34 @@ function singleTransformSel(kind: string, id: string): TransformSelection | null
   if (kind === "drawing2d") return { wallIds: [], drawingId: id };
   if (kind === "extrudedSolid") return { wallIds: [], drawingId: null, extrudedSolidId: id };
   if (kind === "column") return { wallIds: [], drawingId: null, columnId: id };
+  if (kind === "ceiling") return { wallIds: [], drawingId: null, ceilingIds: [id] };
+  // Dach: Move geht (Umriss verschiebt sich), Rotate no-opt bewusst (s.
+  // TransformSelection.roofIds) — der Host-Aufruf degradiert dafür von
+  // selbst über `gatherItems`, kein Sonderfall hier nötig.
+  if (kind === "roof") return { wallIds: [], drawingId: null, roofIds: [id] };
+  if (kind === "stair") return { wallIds: [], drawingId: null, stairIds: [id] };
+  if (kind === "room") return { wallIds: [], drawingId: null, roomIds: [id] };
   return null;
+}
+
+/**
+ * Grundriss-Kamera für einen View-Snapshot einsammeln (Bildmitte + Zoom) —
+ * nur möglich, wenn gerade ein Grundriss gemountet ist (`viewType==="grundriss"`,
+ * `planViewRef.current` also nicht null); sonst leeres Objekt (kein Feld
+ * gesetzt), damit `{...captureCameraState(...)}` additiv in ein
+ * `ViewSnapshotState`-Objektliteral eingemischt werden kann, ohne `undefined`-
+ * Werte explizit zu setzen.
+ */
+function captureCameraState(
+  planViewRef: RefObject<PlanViewHandle | null>,
+  viewType: ViewType,
+): Partial<Pick<ViewSnapshotState, "cameraCenter" | "cameraPxPerMeter">> {
+  if (viewType !== "grundriss") return {};
+  const pv = planViewRef.current;
+  if (!pv) return {};
+  const pxPerMeter = pv.pxPerMeter();
+  if (!(pxPerMeter > 0)) return {};
+  return { cameraCenter: pv.viewCenterModel(), cameraPxPerMeter: pxPerMeter };
 }
 
 export function usePanelHostBase(opts: {
@@ -119,6 +146,9 @@ export function usePanelHostBase(opts: {
     | "patchLineStyle"
     | "addLineStyle"
     | "deleteLineStyle"
+    | "patchTextStyle"
+    | "addTextStyle"
+    | "deleteTextStyle"
     | "patchWallType"
     | "addWallType"
     | "deleteWallType"
@@ -150,6 +180,7 @@ export function usePanelHostBase(opts: {
     | "setCeilingThickness"
     | "updateStair"
     | "updateRoom"
+    | "addColorToCustomPalette"
   >;
   selectionState: Pick<
     ReturnType<typeof useSelectionState>,
@@ -240,6 +271,9 @@ export function usePanelHostBase(opts: {
     patchLineStyle,
     addLineStyle,
     deleteLineStyle,
+    patchTextStyle,
+    addTextStyle,
+    deleteTextStyle,
     patchWallType,
     addWallType,
     deleteWallType,
@@ -271,6 +305,7 @@ export function usePanelHostBase(opts: {
     setCeilingThickness,
     updateStair,
     updateRoom,
+    addColorToCustomPalette,
   } = projectActions;
   const {
     updateRoof,
@@ -350,6 +385,9 @@ export function usePanelHostBase(opts: {
       onPatchLineStyle: patchLineStyle,
       onAddLineStyle: addLineStyle,
       onDeleteLineStyle: deleteLineStyle,
+      onPatchTextStyle: patchTextStyle,
+      onAddTextStyle: addTextStyle,
+      onDeleteTextStyle: deleteTextStyle,
       onPatchWallType: patchWallType,
       onAddWallType: addWallType,
       onDeleteWallType: deleteWallType,
@@ -433,17 +471,20 @@ export function usePanelHostBase(opts: {
           setElementFillColor(selection.id, color);
       },
       onSetSelectionOpacity: (opacity) => {
-        // Deckkraft nur bei Bild-Elementen (Drawing2D `{shape:"image"}` im
-        // Plan, Layout-Annotation `kind:"image"` auf dem Blatt, Kontext-Objekt
-        // `type:"image"` = importiertes Luftbild).
+        // Deckkraft eines 2D-Elements. Bei BILDERN bleibt es die Deckkraft der
+        // Bildgeometrie (bestehendes Verhalten, eigenes Feld); bei allen
+        // übrigen Formen die neue OBJEKT-Transparenz, die auf Striche UND
+        // Füllungen wirkt (`Drawing2D.opacity`). Nur EIN Bedienfeld — welches
+        // Feld gesetzt wird, entscheidet die Form.
         if (selection?.kind === "drawing2d")
           setProject((p) => ({
             ...p,
-            drawings2d: p.drawings2d.map((d) =>
-              d.id === selection.id && d.geom.shape === "image"
+            drawings2d: p.drawings2d.map((d) => {
+              if (d.id !== selection.id) return d;
+              return d.geom.shape === "image"
                 ? { ...d, geom: { ...d.geom, opacity } }
-                : d,
-            ),
+                : { ...d, opacity };
+            }),
           }));
         else if (selection?.kind === "layoutAnnotation" && activeLayout)
           patchOpenLayout(activeLayout.id, (l) =>
@@ -508,6 +549,73 @@ export function usePanelHostBase(opts: {
         else if (selection.kind === "ceiling") updateCeiling(selection.id, patch);
         else if (selection.kind === "drawing2d") updateDrawing2D(selection.id, patch);
       },
+      onAddColorToCustomPalette: (paletteId, hex) => addColorToCustomPalette(paletteId, hex),
+      onSetDashScale: (drawingId, scale) =>
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) => (d.id === drawingId ? { ...d, dashScale: scale } : d)),
+        })),
+      onSetDetailRefLabel: (drawingId, label) =>
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) =>
+            d.id === drawingId && d.geom.shape === "detailref"
+              ? { ...d, geom: { ...d.geom, label } }
+              : d,
+          ),
+        })),
+      onSetDetailRefSheetLayout: (drawingId, sheetLayoutId) =>
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) => {
+            if (d.id !== drawingId || d.geom.shape !== "detailref") return d;
+            const geom = { ...d.geom };
+            if (sheetLayoutId) geom.sheetLayoutId = sheetLayoutId;
+            else delete geom.sheetLayoutId;
+            return { ...d, geom };
+          }),
+        })),
+      onSetDetailRefSheetLabel: (drawingId, sheetLabel) =>
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) =>
+            d.id === drawingId && d.geom.shape === "detailref"
+              ? { ...d, geom: { ...d.geom, sheetLabel } }
+              : d,
+          ),
+        })),
+      onSetHatchPlacement: (drawingId, patch) =>
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) => {
+            if (d.id !== drawingId) return d;
+            const next = { ...d };
+            // `null` = zurück auf die Ressource (Feld entfernen).
+            if ("angleDeg" in patch)
+              patch.angleDeg === null ? delete next.hatchAngleDeg : (next.hatchAngleDeg = patch.angleDeg);
+            if ("scale" in patch)
+              patch.scale === null ? delete next.hatchScale : (next.hatchScale = patch.scale);
+            if ("origin" in patch)
+              patch.origin === null ? delete next.hatchOrigin : (next.hatchOrigin = patch.origin);
+            return next;
+          }),
+        })),
+      onSetEndMarks: (drawingId, patch) =>
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) =>
+            d.id === drawingId ? { ...d, endMarks: { ...d.endMarks, ...patch } } : d,
+          ),
+        })),
+      onSetDimensionStyle: (drawingId, patch) =>
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) =>
+            d.id === drawingId && d.geom.shape === "dimension"
+              ? { ...d, geom: { ...d.geom, ...patch } }
+              : d,
+          ),
+        })),
       onSetSelectionBackgroundPen: (penId) => {
         if (!selection) return;
         const background = penId ? resolvePenColor(project, penId) : undefined;
@@ -658,11 +766,41 @@ export function usePanelHostBase(opts: {
           geom: { ...d.geom, b: { x: a.x + ux * length, y: a.y + uy * length } },
         });
       },
+      onSetDrawingLineAngle: (deg) => {
+        if (selection?.kind !== "drawing2d" || !isFinite(deg)) return;
+        const d = project.drawings2d.find((x) => x.id === selection.id);
+        if (!d || d.geom.shape !== "line") return;
+        const { a, b } = d.geom;
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 1e-9) return;
+        const rad = (deg * Math.PI) / 180;
+        updateDrawing2D(selection.id, {
+          geom: { ...d.geom, b: { x: a.x + Math.cos(rad) * len, y: a.y + Math.sin(rad) * len } },
+        });
+      },
       onSetDrawingCircleRadius: (radius) => {
         if (selection?.kind !== "drawing2d" || !isFinite(radius) || radius <= 0) return;
         const d = project.drawings2d.find((x) => x.id === selection.id);
         if (!d || d.geom.shape !== "circle") return;
         updateDrawing2D(selection.id, { geom: { ...d.geom, r: radius } });
+      },
+      onSetDrawingArcRadius: (radius) => {
+        if (selection?.kind !== "drawing2d" || !isFinite(radius) || radius <= 0) return;
+        const d = project.drawings2d.find((x) => x.id === selection.id);
+        if (!d || d.geom.shape !== "arc") return;
+        updateDrawing2D(selection.id, { geom: { ...d.geom, r: radius } });
+      },
+      onSetDrawingArcStartAngle: (deg) => {
+        if (selection?.kind !== "drawing2d" || !isFinite(deg)) return;
+        const d = project.drawings2d.find((x) => x.id === selection.id);
+        if (!d || d.geom.shape !== "arc") return;
+        updateDrawing2D(selection.id, { geom: { ...d.geom, a0: (deg * Math.PI) / 180 } });
+      },
+      onSetDrawingArcEndAngle: (deg) => {
+        if (selection?.kind !== "drawing2d" || !isFinite(deg)) return;
+        const d = project.drawings2d.find((x) => x.id === selection.id);
+        if (!d || d.geom.shape !== "arc") return;
+        updateDrawing2D(selection.id, { geom: { ...d.geom, a1: (deg * Math.PI) / 180 } });
       },
       // ── Wand-Attribute (nur bei selektierter Wand) ─────────────────────────
       onSetWallReferenceLine: (ref) => {
@@ -770,6 +908,9 @@ export function usePanelHostBase(opts: {
       },
       onSetOpeningLintelLines: (lintelLines) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { lintelLines });
+      },
+      onSetOpeningDetailLevel: (detailLevel) => {
+        if (selection?.kind === "opening") updateOpening(selection.id, { detailLevel });
       },
       onSetOpeningFrameLine: (v) => {
         if (selection?.kind === "opening") updateOpening(selection.id, { frameLine: v });
@@ -1034,6 +1175,7 @@ export function usePanelHostBase(opts: {
           enabledOverrideRuleIds: (project.overrideRules ?? [])
             .filter((r) => r.enabled)
             .map((r) => r.id),
+          ...captureCameraState(planViewRef, viewType),
         };
         const snap = captureViewSnapshot(`vs-${Date.now()}`, trimmed, st);
         // Neuer Ausschnitt landet im aktiven Ordner (falls das Panel einen
@@ -1069,6 +1211,7 @@ export function usePanelHostBase(opts: {
           enabledOverrideRuleIds: (project.overrideRules ?? [])
             .filter((r) => r.enabled)
             .map((r) => r.id),
+          ...captureCameraState(planViewRef, viewType),
         };
         const snap = captureViewSnapshot(`vs-${Date.now()}`, name, st);
         setProject((p) => ({
@@ -1104,9 +1247,19 @@ export function usePanelHostBase(opts: {
             st.enabledOverrideRuleIds,
           ),
         }));
-        requestAnimationFrame(() =>
-          planViewRef.current?.applyScale(st.scaleDenominator),
-        );
+        requestAnimationFrame(() => {
+          planViewRef.current?.applyScale(st.scaleDenominator);
+          // Kamera NACH `applyScale` restaurieren (nicht statt): `applyScale`
+          // setzt auch die Papier-Massstab-Referenz für Strichbreiten
+          // (`setPaperScale`, s. `PlanView.tsx`), hält dabei aber die BISHERIGE
+          // Bildmitte. `setCamera` schwenkt danach im selben Tick (kein
+          // sichtbares Doppel-Springen) auf die erfasste Mitte — nur wenn der
+          // Ausschnitt eine Kamera trägt (Alt-Ausschnitte/3D-Erfassung: Mitte
+          // bleibt wie bisher unverändert).
+          if (st.cameraCenter && st.cameraPxPerMeter) {
+            planViewRef.current?.setCamera(st.cameraCenter, st.cameraPxPerMeter);
+          }
+        });
         // Klick = Anwenden UND Anwählen: der Ausschnitt bleibt markiert, bis der
         // Nutzer eine erfasste Grösse ändert (Abweichungs-Effekt löscht ihn dann).
         setSelectedViewSnapshotId(id);

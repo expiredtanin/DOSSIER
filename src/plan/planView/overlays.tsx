@@ -4,6 +4,7 @@
 
 import type { Vec2 } from "../../model/types";
 import type { SnapResult, ToolDraft } from "../../tools/types";
+import { hudSegments, type HudFieldsState } from "../../tools/hudFormat";
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /
@@ -26,10 +27,7 @@ export function DraftOverlay({
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
   snapColor: string;
-  hudFields?: {
-    fields: { id: string; value: number | null; locked: boolean; active: boolean }[];
-    typed: string;
-  } | null;
+  hudFields?: HudFieldsState | null;
 }) {
   const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
   const markSize = 4.75 * vbPerPx; // halbe Kantenlänge des Snap-Markers (klein + fein)
@@ -107,55 +105,11 @@ function DraftHud({
   hud: NonNullable<ToolDraft["hud"]>;
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
-  hudFields?: {
-    fields: { id: string; value: number | null; locked: boolean; active: boolean }[];
-    typed: string;
-  } | null;
+  hudFields?: HudFieldsState | null;
 }) {
-  // Segmente: mit Befehlszeilen-Feldern (Tab-Zyklus) spiegelt das HUD deren
-  // Zustand — getippter Text erscheint LIVE im aktiven Feld (VW-Verhalten),
-  // gelockte Werte fest, ungelockte folgen der Maus (draft.hud-Livewerte als
-  // Fallback je Feld-Id). Ohne Felder: bisherige L/W- bzw. Text-Anzeige.
-  interface Seg {
-    text: string;
-    active: boolean;
-    locked: boolean;
-  }
-  const liveFor = (id: string): number | null =>
-    id === "length"
-      ? (hud.length ?? null)
-      : id === "angle"
-        ? (hud.angleDeg ?? null)
-        : id === "width"
-          ? (hud.dx ?? null)
-          : id === "height"
-            ? (hud.dy ?? null)
-            : null;
-  // Feld-Beschriftung: Länge/Winkel als L/W, Rechteck-Masse als Δx/Δy (VW).
-  const labelFor = (id: string): string =>
-    id === "length" ? "L" : id === "angle" ? "W" : id === "width" ? "Δx" : id === "height" ? "Δy" : id;
-  const segs: Seg[] = [];
-  if (hudFields && hudFields.fields.length > 0) {
-    for (const f of hudFields.fields) {
-      const label = labelFor(f.id);
-      const unit = f.id === "angle" ? "°" : "m";
-      const typedHere = f.active && hudFields.typed.trim() !== "";
-      const value = typedHere
-        ? hudFields.typed
-        : f.value != null
-          ? f.value.toFixed(3)
-          : (liveFor(f.id)?.toFixed(3) ?? "—");
-      segs.push({ text: `${label}: ${value}${unit}`, active: f.active, locked: f.locked });
-    }
-  } else if (hud.dx != null && hud.dy != null) {
-    segs.push({ text: `Δx: ${hud.dx.toFixed(3)}m`, active: false, locked: false });
-    segs.push({ text: `Δy: ${hud.dy.toFixed(3)}m`, active: false, locked: false });
-  } else if (hud.length != null && hud.angleDeg != null) {
-    segs.push({ text: `L: ${hud.length.toFixed(3)}m`, active: false, locked: false });
-    segs.push({ text: `W: ${hud.angleDeg.toFixed(3)}°`, active: false, locked: false });
-  } else if (hud.text) {
-    segs.push({ text: hud.text, active: false, locked: false });
-  }
+  // Segmente: gemeinsame Formatierung mit dem 3D-Pendant (Wasm3DViewport.tsx),
+  // s. `tools/hudFormat.ts`.
+  const segs = hudSegments(hud, hudFields);
   if (segs.length === 0) return null;
 
   const p = toScreen(hud.at);
@@ -382,6 +336,40 @@ function SnapMarker({
           style={glyphStyle}
           vectorEffect="non-scaling-stroke"
         />
+      )}
+      {/* Senkrecht: ein rechter Winkel (⌐), wie das klassische CAD-Perpendicular-
+          Glyph — unterscheidet sich bewusst von „onEdge" (Raute), da die
+          Konstruktion vom letzten Punkt aus geschieht, nicht vom Cursor. */}
+      {snap.kind === "perpendicular" && (
+        <polyline
+          className="snap-glyph"
+          points={`${s.x - r},${s.y} ${s.x - r},${s.y + r} ${s.x},${s.y + r}`}
+          style={glyphStyle}
+          fill="none"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      {/* Tangente: kleiner Kreis (wie „center") plus eine kurze Berührlinie. */}
+      {snap.kind === "tangent" && (
+        <>
+          <circle className="snap-glyph" cx={s.x} cy={s.y} r={r * 0.7} style={glyphStyle} vectorEffect="non-scaling-stroke" />
+          <line
+            className="snap-glyph"
+            x1={s.x - r}
+            y1={s.y + r}
+            x2={s.x + r}
+            y2={s.y - r}
+            style={glyphStyle}
+            vectorEffect="non-scaling-stroke"
+          />
+        </>
+      )}
+      {/* Parallel: zwei kurze parallele Striche (∥). */}
+      {snap.kind === "parallel" && (
+        <>
+          <line className="snap-glyph" x1={s.x - r} y1={s.y - r} x2={s.x - r * 0.3} y2={s.y + r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
+          <line className="snap-glyph" x1={s.x + r * 0.3} y1={s.y - r} x2={s.x + r} y2={s.y + r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
+        </>
       )}
       {(snap.kind === "endpoint" || snap.kind === "ortho" || snap.kind === "extension") && (
         <circle

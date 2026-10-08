@@ -53,6 +53,18 @@
   --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     sans-serif;
   --font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
+  /* Schrift für GEZEICHNETEN Planinhalt (Text-/Textspalten-Objekte, Raum-
+     Stempel) — bewusst NICHT `--font` (das ist die App-UI-Schrift für
+     Buttons/Panels/Dialoge). Deckt sich mit dem Export-Font-Stack
+     (`TEXT_FONT_FAMILY` in export/sceneToPrintSvg.ts, ebenso
+     planToPrintSvg.ts/layoutPdf.ts), damit Bildschirm und PDF/Druck
+     dieselbe Schrift zeigen. Wurde in primitives.tsx (SVG-Textrendering)
+     bereits referenziert, war aber nie definiert (fiel auf den generischen
+     `sans-serif`-Fallback zurück) — REGRESSION-Fix für den restlichen,
+     leichten Versatz zwischen Inline-Editor (der `--font`/Inter nutzte) und
+     dem statischen Text (effektiv `sans-serif`): unterschiedliche Schriften
+     haben unterschiedliche Ascent-/Zeilenabstand-Metriken. */
+  --font-ui: Helvetica, Arial, sans-serif;
 }
 
 /* Dunkel-Palette als Opt-in (Einstellungen → Darstellung → Dunkelmodus). */
@@ -2104,6 +2116,15 @@ body {
   fill: var(--sheet);
 }
 
+/* Sichtbares Hintergrund-Raster (PlanGrid.tsx) — rein dekorativ, dezent
+   hinter der Zeichnung, unabhängig vom Fang-Raster (`snap.grid`). */
+.plan-grid line {
+  stroke: var(--line);
+  stroke-opacity: 0.5;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
 /* CAD-typische Ecken: alle Plan-Striche gehren (miter) statt an dicken Ecken eine
    Stufe/Butt-Cap-Lücke zu zeigen. Der Miter-Grenzwert verhindert überlange Spitzen
    bei sehr spitzen Winkeln (dann kappen die Enden rund). Gilt für Poché-Umrisse
@@ -2185,6 +2206,19 @@ body {
   fill: none;
   stroke: var(--accent);
   stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Auswahl-Rahmen für Text-Objekte (Nutzer-Wunsch: beim blossen Anwählen,
+   nicht erst im Editor, soll ein Rahmen sichtbar sein — wie in
+   LayoutSheet.tsx schon für Blatt-Annotationen). Gestrichelt statt
+   durchgezogen wie .plan-sel-draw: markiert bewusst eine GESCHÄTZTE Box
+   (kein echtes Font-Measuring im SVG), keinen exakt nachgezeichneten Umriss. */
+.plan-svg .plan-sel-text-frame {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
   vector-effect: non-scaling-stroke;
 }
 
@@ -3190,7 +3224,8 @@ body {
 }
 .pen-color-popover {
   padding: 8px;
-  max-width: 220px;
+  /* Breit genug für 12 Swatches pro Reihe: 12*20 + 11*3 = 273px + 2*8 Padding. */
+  max-width: 292px;
 }
 /* Kopfzeile im Popover: Frei/Stift-Umschalter links, getipptes Feld
    (Stiftnummer bzw. #Hex) rechts davon. */
@@ -3214,15 +3249,21 @@ body {
 .pen-color-input.mono {
   font-family: var(--font-mono);
 }
+/* Feste Spaltenzahl UND feste Spaltenbreite (NICHT 1fr): mit `1fr` verteilt
+   sich der Leerraum je nach Spaltenzahl unterschiedlich, der Swatch-Abstand
+   wirkte dann von Bank zu Bank ungleich; mit `auto-fill` schwankte zusätzlich
+   die Spaltenzahl je nach verfügbarer Breite. Jetzt gilt überall dasselbe
+   Raster: genau 12 Swatches pro Reihe, Abstand immer exakt `gap` (einfache
+   Palette/Tango/Material/RAL/eigene/Stift-Raster sehen identisch aus). */
 .pen-color-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(12, 20px);
   gap: 3px;
   max-height: 240px;
   overflow-y: auto;
-}
-.pen-color-grid-pens {
-  grid-template-columns: repeat(10, 1fr);
+  /* Eigener Scroll-Kontext: das Popover selbst wächst nicht mit, lange
+     Paletten (RAL: 168 Farben) scrollen hier drin. */
+  overscroll-behavior: contain;
 }
 .pen-color-cell {
   position: relative;
@@ -3249,25 +3290,227 @@ body {
   pointer-events: none;
   line-height: 1;
 }
-.pen-color-custom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
+/* Hinweiszeile unter der RAL-Palette (Näherungswerte, s. model/color.ts). */
+.pen-color-hint {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.35;
   color: var(--muted);
 }
-.pen-color-custom input[type="color"] {
-  width: 24px;
-  height: 20px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0;
-  cursor: pointer;
+
+/* ── FreeColorPicker (ui/FreeColorPicker.tsx) — Paletten-Umschalter + Mischer ── */
+.free-color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
+
+/* ── ColorMixer (ui/ColorMixer.tsx) — RGB/CMYK-Kanal-Slider ─────────────── */
+.color-mixer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.color-mixer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  /* Notausgang: passt die Modell-Leiste neben die Vorschau nicht mehr,
+     rutscht sie auf eine eigene Zeile statt überzulaufen. */
+  flex-wrap: wrap;
+}
+
+/* Im Farbwahl-Popover ist der Platz eng (292px): die Segment-Pills
+   (Bank-Leiste oben, Modell-Leiste im Mischer) bekommen dort weniger
+   Innenabstand als in den Ressourcen-Tabs, wo Breite kein Thema ist —
+   sonst passen fünf Modelle (Spektrum/RGB/CMYK/HSL/HSV) nicht in eine Zeile. */
+.pen-color-popover .res-seg {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.pen-color-popover .res-seg-btn {
+  padding: 4px 8px;
+  letter-spacing: 0;
+}
+/* Live-Vorschau der aktuell im Mischer eingestellten Farbe — ohne sie sieht
+   man beim Schieben der Regler nur Zahlen, keine Farbe (Nutzer-Wunsch). */
+.color-mixer-preview {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.color-mixer-row {
+  display: grid;
+  grid-template-columns: 14px 1fr 40px;
+  align-items: center;
+  gap: 6px;
+}
+.color-mixer-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+}
+.color-mixer-row input[type="range"] {
+  width: 100%;
+}
+.color-mixer-num {
+  width: 40px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: center;
+}
+/* ── Spektrum-Wähler (ui/SpectrumPicker.tsx) ─────────────────────────────── */
+.spectrum-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+/* Fläche: Sättigung (X) × Hellwert (Y) über der vollgesättigten Farbtonfarbe. */
+.spectrum-area {
+  position: relative;
+  height: 110px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: crosshair;
+  touch-action: none;
+  overflow: hidden;
+}
+.spectrum-area-white,
+.spectrum-area-black {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.spectrum-area-white {
+  background: linear-gradient(to right, #fff, rgba(255, 255, 255, 0));
+}
+.spectrum-area-black {
+  background: linear-gradient(to top, #000, rgba(0, 0, 0, 0));
+}
+/* Farbton-Regler (voller Farbkreis als Verlauf). */
+.spectrum-hue {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: ew-resize;
+  touch-action: none;
+  background: linear-gradient(
+    to right,
+    #f00 0%,
+    #ff0 17%,
+    #0f0 33%,
+    #0ff 50%,
+    #00f 67%,
+    #f0f 83%,
+    #f00 100%
+  );
+}
+/* Griff: heller Ring, auf beiden Untergründen sichtbar. */
+.spectrum-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.spectrum-handle-hue {
+  top: 50%;
+}
+.color-mixer-hint {
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* ── Eigene Paletten: „+"-Zelle im Raster (ui/FreeColorPicker.tsx) + Tab
+   „Paletten" (ui/resourceManager/PalettesTab.tsx) ───────────────────────── */
+/* „+"-Zelle: sieht wie ein Swatch aus, ist aber eine Aktion (aktuelle Farbe
+   ablegen) — gestrichelter Rand statt Vollfläche macht das sichtbar. */
+.pen-color-cell-add {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pen-color-cell-add:hover {
+  border-color: var(--accent);
+}
+/* Farbstreifen-Vorschau einer Bank/Palette im Ressourcen-Tab. */
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.palette-strip {
+  display: inline-flex;
+  gap: 2px;
+}
+.palette-strip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+.palette-colors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.palette-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.palette-color-swatch {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+.palette-color-hex {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.res-md-row-meta {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.res-section-label {
+  margin: 10px 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+/* Kompakter "+"-Knopf für eine neue Palette, gleiche Grösse wie DeleteButton (.res-delete). */
 
 /* Linienstil-Vorschau (füllt die Vorschau-Zelle). */
 .res-line-preview {
@@ -5432,6 +5675,16 @@ body {
   margin-left: 22px;
   width: calc(100% - 22px);
 }
+/* Freitext-Massstab im PDF-Export-Dialog, direkt unter dem Preset-Dropdown —
+   `.imp-input` ist sonst für Checkbox-eingerückte Felder gedacht (22px
+   margin-left), hier ohne Einrückung. */
+.imp-scale-custom {
+  margin-top: 6px;
+}
+.imp-scale-custom .imp-input {
+  margin-left: 0;
+  width: 100%;
+}
 .imp-note,
 .imp-warn,
 .imp-dwg-hint {
@@ -5780,6 +6033,128 @@ body {
 }
 .settings-history-row .settings-select {
   flex: 1;
+}
+
+/* Befehls-Kürzel-Remap-Sektion (Einstellungen). */
+.settings-alias-remap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-alias-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-alias-row .settings-select {
+  flex: 1;
+}
+.settings-alias-key {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-weight: 600;
+  min-width: 3ch;
+  color: var(--ink);
+}
+.settings-alias-arrow {
+  color: var(--muted);
+}
+.settings-alias-key-input {
+  width: 90px;
+}
+.settings-alias-new {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+/* Tab-Leiste im Einstellungs-Dialog — gleiche Pillen-Konvention wie .res-tabs. */
+.settings-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 10px 16px 0;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+.settings-tab-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 7px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.settings-tab-btn:hover {
+  color: var(--ink-2);
+}
+.settings-tab-btn.active {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
+
+/* Tastenkombinations-Remap-Sektion (Einstellungen → Tastenkürzel). */
+.settings-shortcut-remap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-shortcut-category + .settings-shortcut-category {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.settings-shortcut-category-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.settings-shortcut-label {
+  flex: 1;
+  min-width: 140px;
+  color: var(--ink);
+}
+.settings-shortcut-combo {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-weight: 600;
+  min-width: 8ch;
+  text-align: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--ink);
+}
+.settings-shortcut-combo.recording {
+  background: var(--accent-dim);
+  color: var(--accent);
+  animation: settings-shortcut-pulse 1s ease-in-out infinite;
+}
+@keyframes settings-shortcut-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.settings-shortcut-row .imp-warn {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ── App-weites Drop-Feedback ──────────────────────────────────────────────
@@ -6364,7 +6739,11 @@ body {
   background: var(--input);
   color: var(--ink);
   font-size: 13px;
-  font-family: var(--font);
+  /* NICHT --font (App-UI-Schrift) — RichTextEditor bearbeitet immer
+     GEZEICHNETEN Planinhalt (Text/Textspalte, Raum-Stempel), der mit
+     --font-ui gerendert/exportiert wird; dieselbe Schrift hier verhindert
+     einen Ascent-/Zeilenabstand-Versatz zwischen Editor und Ergebnis. */
+  font-family: var(--font-ui);
   line-height: 1.55;
   outline: none;
   overflow-y: auto;
@@ -7092,9 +7471,12 @@ body {
 }
 
 /* Inline-Text-Editor DIREKT auf dem Blatt (kein schwebendes Fenster) — weisser
-   Rahmen wie Papier, blauer Rand während der Bearbeitung. `transform: scale()`
-   (inline, s. LayoutSheet.tsx) bringt die feste 12-pt-Basisgrösse des
-   RichTextEditor auf die Schriftgrösse der Annotation beim aktuellen Zoom. */
+   Rahmen wie Papier, blauer Rand während der Bearbeitung. WYSIWYG: Schrift-
+   grösse UND Feldhöhe der Textfläche folgen dem echten Blatt-Zoom über
+   `--rt-font-size`/`--rt-min-height` (inline von LayoutSheet.tsx gesetzt) —
+   NUR die Textfläche, NICHT die Toolbar (dasselbe Muster wie
+   .planview-inline-text, s. dort; ersetzt das vorige `transform:scale()` auf
+   die GANZE Box, das die Toolbar beim Reinzoomen mit aufblies). */
 .layout-sheet-inline-text {
   position: absolute;
   z-index: 7;
@@ -7104,10 +7486,57 @@ body {
 }
 .layout-sheet-inline-text .rt-editor {
   min-height: inherit;
+  /* Toolbar verlässt den Fluss (s. .rt-toolbar unten) — nur noch die
+     Textfläche bleibt im normalen Fluss, damit ihre Oberkante GENAU an der
+     positionierten Box-Oberkante liegt (= Zeilenanfang der Annotation).
+     `overflow:visible` (Basisregel setzt `hidden`), sonst würde die frei
+     schwebende Toolbar oben abgeschnitten. `border:none` (Basisregel: 1px) —
+     jeder Rahmen/jedes Padding auf `.rt-editor`/`.rt-surface` verschiebt den
+     sichtbaren Text nach rechts/unten relativ zur positionierten Ecke (Bug-
+     Meldung "Sprung nach rechts oben"); die blaue `outline` auf
+     `.layout-sheet-inline-text` selbst übernimmt weiterhin die visuelle
+     Rahmen-Anzeige (outline verschiebt den Inhalt NICHT, da ausserhalb der
+     Box gezeichnet). */
+  display: block;
+  overflow: visible;
+  border: none;
+  /* s. .planview-inline-text .rt-editor — explizite Breite gegen "Wort läuft
+     aus der Fläche raus statt umzubrechen" (die Aussen-Box hat eine feste
+     `width` per Inline-Style, aber ohne diese Zeile war das für lange,
+     leerzeichenlose Wörter nicht garantiert). */
+  width: 100%;
+  box-sizing: border-box;
+}
+/* REGRESSION-Fix "Editor ist tiefer als der Text": vorher stand die Toolbar
+   IM normalen Fluss ÜBER der Textfläche (column-flex in .rt-editor) — ihre
+   feste, zoomunabhängige Höhe (~38px: Padding+Button+Rahmen) schob die
+   Fläche um diesen Betrag nach unten, während die Positionierung (JS) nur
+   mit EINER Zeilenhöhe Abstand zur Baseline rechnete. Bei üblichem Zoom ist
+   eine Zeilenhöhe kleiner als die Toolbar-Höhe → die Fläche landete UNTER
+   dem eigentlichen Text. Jetzt schwebt die Toolbar frei OBERHALB der Box,
+   ausserhalb ihres Flusses — sie verschiebt die Textfläche nicht mehr. */
+.layout-sheet-inline-text .rt-toolbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-1);
 }
 .layout-sheet-inline-text .rt-surface {
-  min-height: 1.4em;
-  padding: 2px 4px;
+  font-size: var(--rt-font-size, 16px);
+  line-height: 1.25; /* deckt sich mit primitives.tsx "drawingText" (fontSize*1.25) */
+  min-height: var(--rt-min-height, 1.4em);
+  padding: 0; /* kein Padding — verschiebt sonst den Text relativ zur Anker-Ecke */
+  /* s. .planview-inline-text .rt-surface — harter Umbruch auch mitten im
+     Wort statt Überlauf, plus Sicherheitsnetz gegen intrinsische
+     Mindestbreite. */
+  width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 /* Inline-Text-Editor auf der 2D-Zeichenfläche (PlanView) — dasselbe Prinzip
@@ -7128,18 +7557,60 @@ body {
 }
 .planview-inline-text .rt-editor {
   min-height: inherit;
+  /* s. .layout-sheet-inline-text .rt-editor — Toolbar verlässt den Fluss,
+     damit die Textfläche exakt an der positionierten Box-Oberkante beginnt;
+     `border:none` (Basisregel: 1px), sonst Text-Versatz nach rechts/unten
+     (Bug-Meldung "Sprung nach rechts oben") — die blaue `outline` auf
+     `.planview-inline-text` übernimmt die Rahmen-Anzeige. `width:100%` +
+     `box-sizing:border-box` EXPLIZIT (nicht nur aufs Block-Fill verlassen) —
+     Bug-Meldung "Wort endet nicht im Feld, läuft einfach raus": die
+     Aussen-Box (`.planview-inline-text`) hat eine feste `width` (inline
+     style, aus `wrapWidth`), aber ohne eine explizite Breite HIER konnte ein
+     einzelnes, sehr langes (leerzeichenloses) Wort die Fläche aufziehen statt
+     umzubrechen. */
+  display: block;
+  overflow: visible;
+  border: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* REGRESSION-Fix "Editor ist tiefer als der Text" — s. ausführlicher
+   Kommentar bei .layout-sheet-inline-text .rt-toolbar (identischer Bug,
+   identischer Fix): die Toolbar schwebt jetzt frei OBERHALB der Textfläche,
+   ausserhalb ihres Flusses, statt sie nach unten zu schieben. */
+.planview-inline-text .rt-toolbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-1);
 }
 /* WYSIWYG: die Schriftgrösse UND die Feldhöhe der Textfläche folgen dem
    echten Zoom (--rt-font-size/--rt-min-height, inline von PlanView.tsx
    gesetzt, per CSS-Var-Vererbung bis hierher durchgereicht) — NUR die
-   Textfläche, NICHT die Toolbar (.rt-toolbar bleibt bei ihrer normalen,
-   immer bedienbaren Grösse). So sieht der getippte Text wie der später
-   gerenderte aus, ohne dass Buttons/Dropdowns beim Reinzoomen riesig werden
-   (der vorige Bug mit transform:scale() auf die GANZE Box). */
+   Textfläche, NICHT die Toolbar (bleibt bei ihrer normalen, immer
+   bedienbaren Grösse). `line-height:1.25` deckt sich mit primitives.tsx
+   "drawingText" (fontSize*1.25) — Basisregel (1.55) würde die Baseline der
+   ersten Zeile spürbar tiefer setzen als im späteren gerenderten Text. */
 .planview-inline-text .rt-surface {
   font-size: var(--rt-font-size, 13px);
+  line-height: 1.25;
   min-height: var(--rt-min-height, 1.4em);
-  padding: 2px 4px;
+  padding: 0; /* kein Padding — verschiebt sonst den Text relativ zur Anker-Ecke */
+  /* s. .rt-editor oben — dieselbe explizite Breite + harter Umbruch, auch
+     mitten im Wort, statt aus der Fläche hinauszulaufen (`overflow-wrap:
+     anywhere` ist die moderne, verlässlichere Variante von `word-break:
+     break-word` aus der Basisregel; beide zusammen sind robuster als eine
+     allein). `min-width:0`: Sicherheitsnetz gegen intrinsische Mindestbreite
+     (verhindert sonst in machen Layout-Kontexten das Schrumpfen unter die
+     Inhaltsbreite eines einzelnen langen Worts). */
+  width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 /* Text-Werkzeug ohne Spaltenbreite: kein Wortumbruch — die Box wächst in der
    Breite mit dem Inhalt (Enter erzeugt trotzdem weitere Zeilen), statt am

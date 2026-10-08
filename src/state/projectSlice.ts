@@ -14,6 +14,7 @@ import {
   recomputeFloorElevations,
 } from "../model/types";
 import type {
+  BuiltinPaletteBank,
   ColorPen,
   Component,
   Drawing2D,
@@ -37,7 +38,17 @@ import { commitTransform } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
 import { centroid as roomCentroid } from "../geometry/roomArea";
-import { bulgeFromSagittaPoint, bulgePointAt } from "../geometry/bulge";
+import { bulgeArc, bulgeBetweenAngles, bulgeFromSagittaPoint, bulgePointAt, pointOnCircle } from "../geometry/bulge";
+import {
+  DEFAULT_SCALE_DENOMINATOR,
+  DIM_DEFAULTS_MM,
+  dimTextOffsetFromPoint,
+  dimTextPos,
+  mmToModel,
+  modelToMm,
+} from "../model/dimension";
+import { textFrameCorners } from "../text/textFrame";
+import { DEFAULT_PRESETS, type TextStylePreset } from "../text/richText";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
 import { createHistorySlice, pushHistoryPatch } from "./historySlice";
@@ -49,8 +60,14 @@ export interface ProjectSlice {
   project: Project;
 
   // ── Projekt direkt setzen (für Werkzeuge/Transformationen aus App) ────────
-  /** Ersetzt das Projekt (Teil-/Updater wie React-setState). */
-  setProject: (next: Project | ((p: Project) => Project)) => void;
+  /**
+   * Ersetzt das Projekt (Teil-/Updater wie React-setState). `coalesceKey`:
+   * NUR für bekannte Hochfrequenz-Aktionen (Griff-Ziehen, Inline-Text-Tippen)
+   * — verschmilzt aufeinanderfolgende Aufrufe mit demselben Key innerhalb
+   * `COALESCE_WINDOW_MS` zu EINEM Undo-Schritt, s. Kommentar bei der
+   * Implementierung unten.
+   */
+  setProject: (next: Project | ((p: Project) => Project), coalesceKey?: string) => void;
 
   // ── Zeichnungsebenen (Levels/Geschosse) ──────────────────────────────────
   toggleLevelVisible: (id: string) => void;
@@ -107,6 +124,9 @@ export interface ProjectSlice {
   deleteLineStyle: (id: string) => void;
   importLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   importHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
+  patchTextStyle: (id: string, patch: Partial<TextStylePreset>) => void;
+  addTextStyle: () => void;
+  deleteTextStyle: (id: string) => void;
 
   // ── Stiftsätze (ArchiCAD-Stiftsatz-Muster, s. model/penSets.ts) ───────────
   /** Neuer Stift-Platzhalter (Name, keine Farbe) — landet in JEDEM bestehenden Stiftsatz. */
@@ -127,12 +147,50 @@ export interface ProjectSlice {
   /** Ersetzt `pens`/legt einen neuen Satz mit der 255er-CAD-Standardpalette an (s. `model/penSets.ts`). */
   seedStandardPenSet: () => void;
 
+  // ── Benutzerdefinierte Farbpaletten (s. model/types.ts::CustomPalette) ────
+  addCustomPalette: () => void;
+  renameCustomPalette: (id: string, name: string) => void;
+  deleteCustomPalette: (id: string) => void;
+  /**
+   * Fügt `hex` VORNE in die Palette ein (zuletzt gespeicherte Farbe zuerst
+   * sichtbar) — dedupliziert case-insensitive (erneutes Speichern verschiebt
+   * die Farbe nur nach vorn, statt sie zu duplizieren). `paletteId`
+   * unbekannt/undefined ⇒ legt automatisch eine neue Palette an (Farbmischer
+   * kann so "+" drücken, ohne dass vorher zwingend eine Palette existiert).
+   */
+  addColorToCustomPalette: (paletteId: string | undefined, hex: string) => void;
+  removeColorFromCustomPalette: (paletteId: string, hex: string) => void;
+  /** Blendet EINE eigene Palette im Farbwahl-Popover ein/aus (Daten bleiben erhalten). */
+  setCustomPaletteVisible: (id: string, visible: boolean) => void;
+  /** Blendet EINE mitgelieferte Bank (Einfach/Tango/Material/RAL) im Popover ein/aus. */
+  setBuiltinPaletteVisible: (bank: BuiltinPaletteBank, visible: boolean) => void;
+
+  // ── Polylinien-Stützpunkte (Kontextmenü im Grundriss) ────────────────────
+  /**
+   * Fügt einen Stützpunkt in das Segment `segIndex` (= zwischen `pts[segIndex]`
+   * und dem Folgepunkt; bei geschlossener Polylinie ist das letzte Segment der
+   * Schluss zurück zu `pts[0]`) ein. Bei GERADEM Segment landet der Punkt auf
+   * `pt` (i. d. R. der auf die Sehne projizierte Klickpunkt), bei einem
+   * BOGEN-Segment stattdessen exakt auf dem Bogenmittelpunkt — und der Bogen
+   * wird in zwei Teilbögen mit passenden Bulge-Werten zerlegt, sonst würde der
+   * Bogen beim Einfügen still zu zwei Geraden zusammenfallen.
+   */
+  insertDrawingPoint: (drawingId: string, segIndex: number, pt: Vec2) => void;
+  /**
+   * Entfernt den Stützpunkt `index` (samt zugehörigem Bulge-Eintrag).
+   * Blockiert (mit Hinweis), wenn zu wenige Punkte übrig blieben: offene
+   * Polylinie braucht ≥2, geschlossene ≥3.
+   */
+  deleteDrawingPoint: (drawingId: string, index: number) => void;
+
   // ── Editier-Griffe + Body-Move des selektierten Elements ──────────────────
   moveGripOf: (
     drawingId: string | null,
     wallId: string | null,
     index: number,
     pt: Vec2,
+    /** Papier-Massstab (1:N), nur für den Masszahl-Griff der Bemassung. */
+    scaleDenominator?: number,
   ) => void;
   moveElementByOf: (
     drawingId: string | null,
@@ -242,8 +300,18 @@ export interface ProjectSlice {
   ) => void;
 
   // ── Wand-Attribute (Object-Info-Panel) ────────────────────────────────────
-  /** Generischer immutabler Patch auf eine Wand (per ID). */
-  updateWall: (id: string, patch: Partial<import("../model/types").Wall>) => void;
+  /**
+   * Generischer immutabler Patch auf eine Wand (per ID). `coalesceKey`
+   * optional (Default: kein Coalescing, jeder Aufruf ein eigener Undo-
+   * Schritt — Panel-Feld-Edits) — der 3D-Höhen-Griff (`App.tsx::
+   * onEdit3dWallTop`) übergibt einen festen Schlüssel je Wand, damit EIN
+   * Drag (viele Maus-Move-Schritte) EINEN Undo-Schritt erzeugt statt vieler.
+   */
+  updateWall: (
+    id: string,
+    patch: Partial<import("../model/types").Wall>,
+    coalesceKey?: string,
+  ) => void;
   /**
    * Setzt die Gesamtdicke einer EINSCHICHTIGEN Wand. Ansatz: editiert die
    * Schichtdicke des Wandtyps. Ist der Wandtyp mehrschichtig oder von mehr als
@@ -280,10 +348,15 @@ export interface ProjectSlice {
     patch: Partial<import("../model/types").Opening>,
   ) => void;
 
-  /** Immutable Änderung eines Dachs (Form/Neigung/Überstand/Firstrichtung/Dicke). */
+  /**
+   * Immutable Änderung eines Dachs (Form/Neigung/Überstand/Firstrichtung/
+   * Dicke). `coalesceKey` optional — s. `updateWall`-Doc (derselbe Zweck,
+   * hier vom 3D-First-Griff `App.tsx::onEdit3dRoofPitch` genutzt).
+   */
   updateRoof: (
     id: string,
     patch: Partial<import("../model/types").Roof>,
+    coalesceKey?: string,
   ) => void;
   /** Dach-Eckgriff (3D): Umriss-Ecke `index` auf `pt`, Gegenecke fix (Rechteck). */
   moveRoofGrip: (roofId: string, index: number, pt: import("../model/types").Vec2) => void;
@@ -804,6 +877,30 @@ export function createProjectSlice(
         ],
       })),
 
+    patchTextStyle: (id, patch) =>
+      setProject((p) => ({
+        ...p,
+        textStyles: (p.textStyles ?? DEFAULT_PRESETS).map((s) =>
+          s.id === id ? { ...s, ...patch, marks: { ...s.marks, ...patch.marks } } : s,
+        ),
+      })),
+
+    addTextStyle: () =>
+      setProject((p) => {
+        const style: TextStylePreset = {
+          id: `ts-${Date.now()}`,
+          label: t("default.textStyleName"),
+          marks: { sizePt: 10 },
+        };
+        return { ...p, textStyles: [...(p.textStyles ?? DEFAULT_PRESETS), style] };
+      }),
+
+    deleteTextStyle: (id) =>
+      setProject((p) => ({
+        ...p,
+        textStyles: (p.textStyles ?? DEFAULT_PRESETS).filter((s) => s.id !== id),
+      })),
+
     importHatches: (hatches) =>
       setProject((p) => ({
         ...p,
@@ -944,13 +1041,124 @@ export function createProjectSlice(
 
     seedStandardPenSet: () => setProject((p) => buildStandardPenSet(p)),
 
+    addCustomPalette: () =>
+      setProject((p) => ({
+        ...p,
+        customPalettes: [
+          ...(p.customPalettes ?? []),
+          { id: `palette-${Date.now()}`, name: t("default.customPaletteName"), colors: [] },
+        ],
+      })),
+
+    renameCustomPalette: (id, name) =>
+      setProject((p) => ({
+        ...p,
+        customPalettes: p.customPalettes?.map((c) => (c.id === id ? { ...c, name } : c)),
+      })),
+
+    deleteCustomPalette: (id) =>
+      setProject((p) => ({
+        ...p,
+        customPalettes: p.customPalettes?.filter((c) => c.id !== id),
+      })),
+
+    addColorToCustomPalette: (paletteId, hex) =>
+      setProject((p) => {
+        const palettes = p.customPalettes ?? [];
+        const target = palettes.find((c) => c.id === paletteId);
+        if (!target) {
+          const created = { id: `palette-${Date.now()}`, name: t("default.customPaletteName"), colors: [hex] };
+          return { ...p, customPalettes: [...palettes, created] };
+        }
+        const withoutDupe = target.colors.filter((c) => c.toLowerCase() !== hex.toLowerCase());
+        const updated = { ...target, colors: [hex, ...withoutDupe] };
+        return { ...p, customPalettes: palettes.map((c) => (c.id === target.id ? updated : c)) };
+      }),
+
+    removeColorFromCustomPalette: (paletteId, hex) =>
+      setProject((p) => ({
+        ...p,
+        customPalettes: p.customPalettes?.map((c) =>
+          c.id === paletteId ? { ...c, colors: c.colors.filter((h) => h.toLowerCase() !== hex.toLowerCase()) } : c,
+        ),
+      })),
+
+    setCustomPaletteVisible: (id, visible) =>
+      setProject((p) => ({
+        ...p,
+        customPalettes: p.customPalettes?.map((c) => (c.id === id ? { ...c, visible } : c)),
+      })),
+
+    setBuiltinPaletteVisible: (bank, visible) =>
+      setProject((p) => ({
+        ...p,
+        builtinPaletteBanks: { ...p.builtinPaletteBanks, [bank]: visible },
+      })),
+
+    insertDrawingPoint: (drawingId, segIndex, pt) =>
+      setProject((p) => ({
+        ...p,
+        drawings2d: p.drawings2d.map((d) => {
+          if (d.id !== drawingId || d.geom.shape !== "polyline") return d;
+          const g = d.geom;
+          const n = g.pts.length;
+          const last = segIndex === n - 1;
+          if (segIndex < 0 || segIndex >= n || (last && !g.closed)) return d;
+          const a = g.pts[segIndex];
+          const b = last ? g.pts[0] : g.pts[segIndex + 1];
+          // Bogen: exakt über die Kreisgeometrie in der Winkel-Mitte teilen —
+          // dieselbe Technik, mit der kernel2d Bogen-Segmente zuschneidet
+          // (`bulgeBetweenAngles`). Eine Näherung über tessellierte Punkte
+          // (`bulgePointAt`) wäre hier zu ungenau, weil sie auf Stützstellen
+          // rundet und der Sagitta-Rückschluss den Fehler verstärkt.
+          const arc = bulgeArc(a, b, g.bulge?.[segIndex] ?? 0);
+          const aMid = arc ? arc.a0 + arc.sweep / 2 : 0;
+          const insertPt = arc ? pointOnCircle(arc.center, arc.r, aMid) : pt;
+          const sweepSign: 1 | -1 = arc && arc.sweep < 0 ? -1 : 1;
+          const b1 = arc ? bulgeBetweenAngles(arc.center, arc.r, arc.a0, aMid, sweepSign) : 0;
+          const b2 = arc ? bulgeBetweenAngles(arc.center, arc.r, aMid, arc.a1, sweepSign) : 0;
+          const pts = [...g.pts.slice(0, segIndex + 1), insertPt, ...g.pts.slice(segIndex + 1)];
+          // Bulge-Array nur mitführen, wenn es eines gab (additiv bleiben).
+          const nextBulge = g.bulge
+            ? [...g.bulge.slice(0, segIndex), b1, b2, ...g.bulge.slice(segIndex + 1)]
+            : undefined;
+          return { ...d, geom: { ...g, pts, ...(nextBulge ? { bulge: nextBulge } : {}) } };
+        }),
+      })),
+
+    deleteDrawingPoint: (drawingId, index) =>
+      setProject((p) => {
+        const d = p.drawings2d.find((x) => x.id === drawingId);
+        if (!d || d.geom.shape !== "polyline") return p;
+        const g = d.geom;
+        const min = g.closed ? 4 : 3;
+        if (g.pts.length < min) {
+          get().notify(t("alert.polylineMinPoints"), "warning");
+          return p;
+        }
+        if (index < 0 || index >= g.pts.length) return p;
+        const pts = g.pts.filter((_, i) => i !== index);
+        // Zwei Segmente werden zu einem: der Bulge des ENTFERNTEN Segments
+        // fällt weg, das verbleibende behält seinen Wert (die exakte
+        // Bogenform lässt sich nicht erhalten, wenn ihr Stützpunkt entfällt).
+        const bulge = g.bulge ? g.bulge.filter((_, i) => i !== index) : undefined;
+        return {
+          ...p,
+          drawings2d: p.drawings2d.map((x) =>
+            x.id === drawingId
+              ? { ...x, geom: { ...g, pts, ...(bulge ? { bulge } : {}) } }
+              : x,
+          ),
+        };
+      }),
+
     // ── Editier-Griffe ─────────────────────────────────────────────────────
     // Diese Aktionen laufen AD-HOC bei jedem Maus-Move-Schritt eines Drags
     // (kein Draft/Commit-Muster wie bei den Zeichenwerkzeugen) — daher mit
     // coalesceKey, damit EIN Drag EINEN Undo-Schritt erzeugt statt vieler.
-    moveGripOf: (drawingId, wallId, index, pt) =>
+    moveGripOf: (drawingId, wallId, index, pt, scaleDenominator) =>
       setProject(
-        (p) => moveGrip(p, drawingId, wallId, index, pt),
+        (p) => moveGrip(p, drawingId, wallId, index, pt, scaleDenominator),
         `moveGripOf:${drawingId ?? ""}:${wallId ?? ""}:${index}`,
       ),
 
@@ -1055,11 +1263,14 @@ export function createProjectSlice(
       setProject((p) => commitTransform(p, sel, op, points, copyMode, count)),
 
     // ── Wand-Attribute ─────────────────────────────────────────────────────
-    updateWall: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        walls: p.walls.map((w) => (w.id === id ? { ...w, ...patch } : w)),
-      })),
+    updateWall: (id, patch, coalesceKey) =>
+      setProject(
+        (p) => ({
+          ...p,
+          walls: p.walls.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+        }),
+        coalesceKey,
+      ),
 
     setWallThickness: (wallId, thickness) =>
       setProject((p) => setWallThickness(p, wallId, thickness)),
@@ -1108,11 +1319,14 @@ export function createProjectSlice(
       })),
 
     // ── Dach-Editieren ─────────────────────────────────────────────────────
-    updateRoof: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        roofs: (p.roofs ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
-      })),
+    updateRoof: (id, patch, coalesceKey) =>
+      setProject(
+        (p) => ({
+          ...p,
+          roofs: (p.roofs ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+        }),
+        coalesceKey,
+      ),
 
     // Dach-Eckgriff (3D): der gezogene Umriss-Eckpunkt `index` wandert auf `pt`;
     // die GEGENÜBERLIEGENDE Ecke bleibt fix → der Umriss bleibt ein achsparalleles
@@ -1580,7 +1794,8 @@ function resizeGeom(
 ): import("../model/types").Drawing2DGeom {
   switch (g.shape) {
     case "line":
-    case "xline": {
+    case "xline":
+    case "ray": {
       const { ax, ay, sx, sy } = scaleAround(bbox2([g.a, g.b]), w, h, anchor);
       const f = (p: Vec2): Vec2 => ({ x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy });
       return { ...g, a: f(g.a), b: f(g.b) };
@@ -1702,9 +1917,14 @@ function ellipseOrCircle(
  * arc: Start-/End-Winkel-Griff (Index 0/1, ändern a0/a1) + ein Radius-Griff
  * auf halbem Bogen (Index 2, ändert r) — siehe {@link moveGrip}.
  */
-export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
+export function drawingVertices(
+  d: import("../model/types").Drawing2D,
+  /** Papier-Massstab (1:N) — nur für die Bemassungs-Griffe, deren Lage von
+   *  der in Papier-mm angegebenen Schrifthöhe abhängt. */
+  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
+): Vec2[] {
   const g = d.geom;
-  if (g.shape === "line" || g.shape === "xline") return [g.a, g.b];
+  if (g.shape === "line" || g.shape === "xline" || g.shape === "ray") return [g.a, g.b];
   // Polylinie: Eckpunkt-Griffe (Index 0..n-1) PLUS ein Bulge-Griff je Segment
   // (Index n..; Apex des aktuellen Bogens, oder Sehnen-Mitte bei bulge=0) —
   // senkrecht zur Sehne ziehen krümmt genau dieses Segment (s. moveGrip).
@@ -1767,17 +1987,59 @@ export function drawingVertices(d: import("../model/types").Drawing2D): Vec2[] {
     const len = Math.hypot(dx, dy) || 1;
     const nx = (-dy / len) * g.offset, ny = (dx / len) * g.offset;
     const mid: Vec2 = { x: (a.x + b.x) / 2 + nx, y: (a.y + b.y) / 2 + ny };
-    return [...g.pts, mid];
+    // Reihenfolge: Kettenpunkte · Offset-Griff · JE SEGMENT ein Masszahl-Griff
+    // (verschiebt nur die Zahl, s. moveGrip) — dieselbe Ordnung erwartet
+    // moveGrip beim Auflösen des Index.
+    const heightM = mmToModel(g.textHeightMm ?? DIM_DEFAULTS_MM.textHeight, scaleDenominator);
+    const textGrips = g.pts.slice(0, -1).map((p0, i) => {
+      const off = g.textOffsetsMm?.[i];
+      return dimTextPos(
+        p0,
+        g.pts[i + 1],
+        g.offset,
+        heightM,
+        off
+          ? { along: mmToModel(off.along, scaleDenominator), perp: mmToModel(off.perp, scaleDenominator) }
+          : undefined,
+      );
+    });
+    return [...g.pts, mid, ...textGrips];
   }
   // Kote: EIN Griff an der Dreieck-Spitze (zum Verschieben; siehe moveGrip).
   if (g.shape === "kote") return [g.at];
-  // Text: Griff 0 am Ankerpunkt; trägt der Text einen Leader, zusätzlich Griff
-  // 1 an dessen Zielpunkt (Pfeilspitze unabhängig verschiebbar; s. moveGrip).
+  // Detail-/Schnitt-Verweis: EIN Griff am Kreis-Zentrum (zum Verschieben).
+  if (g.shape === "detailref") return [g.at];
+  // Massstabsbalken: EIN Griff an der linken unteren Ecke (zum Verschieben).
+  if (g.shape === "scalebar") return [g.at];
+  // Punkt-/Knotenmarker: EIN Griff am Zentrum (zum Verschieben).
+  if (g.shape === "pointmarker") return [g.at];
+  // Text: Griff 0 am Ankerpunkt; trägt der Text einen Leader, zusätzlich ein
+  // Griff je Knickpunkt (`leaderBendPoints`, falls gesetzt) und ein
+  // ABSCHLIESSENDER Griff an der Spitze (Pfeilspitze unabhängig verschiebbar;
+  // s. moveGrip) — Reihenfolge Anker→Knicke→Spitze, wie der Pfad gerendert wird.
   // Text-entlang-Pfad: die Pfadpunkte SELBST sind die Griffe (wie polyline),
   // ersetzt das Anker/Leader-Griffmodell komplett (schliessen sich aus).
+  // Textspalte (`width` gesetzt, kein Leader/Pfad): VIER Rahmen-Eckpunkte als
+  // Griffe (Nutzer-Wunsch: "nicht nur ein Griff unten links bei der ersten
+  // Glyphe") — Ziehen ändert NUR die Spaltenbreite (InDesign-Verhalten,
+  // Nutzer-Entscheidung), s. `moveGrip`. Dieselbe Rahmen-Berechnung wie der
+  // Auswahl-Rahmen im Grundriss (`text/textFrame.ts`), damit Griffe und
+  // sichtbarer Rahmen immer übereinstimmen.
   if (g.shape === "text") {
     if (g.pathPts) return [...g.pathPts];
-    return g.leaderTarget ? [g.at, g.leaderTarget] : [g.at];
+    if (g.leaderTarget) return [g.at, ...(g.leaderBendPoints ?? []), g.leaderTarget];
+    if (g.width && g.width > 0) {
+      return textFrameCorners({
+        at: g.at,
+        text: g.text,
+        heightM: g.height,
+        angle: g.angle,
+        marks: g.marks,
+        doc: g.doc,
+        wrapWidth: g.width,
+      });
+    }
+    return [g.at];
   }
   // Block-Instanz: EIN Griff am Einfügepunkt (Rotation läuft über move/mirror,
   // kein eigener Rotations-Griff in v1; s. moveGrip).
@@ -1827,14 +2089,20 @@ function moveGrip(
   wallId: string | null,
   index: number,
   pt: Vec2,
+  /** Papier-Massstab (1:N) — nur für den Masszahl-Griff, s. `drawingVertices`. */
+  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
 ): Project {
+  // Objekt-Sperre: gesperrte Elemente lassen sich anwählen, aber nicht
+  // ziehen (s. Kommentar bei `onPlanSelect` in useMouseSelectionHandlers.ts).
+  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return project;
+  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return project;
   if (drawingId) {
     return {
       ...project,
       drawings2d: project.drawings2d.map((d) => {
         if (d.id !== drawingId) return d;
         const g = d.geom;
-        if (g.shape === "line" || g.shape === "xline") {
+        if (g.shape === "line" || g.shape === "xline" || g.shape === "ray") {
           return { ...d, geom: index === 0 ? { ...g, a: pt } : { ...g, b: pt } };
         }
         if (g.shape === "polyline") {
@@ -1867,12 +2135,30 @@ function moveGrip(
             const pts = g.pts.map((p, i) => (i === index ? pt : p));
             return { ...d, geom: { ...g, pts } };
           }
-          const a = g.pts[0], b = g.pts[g.pts.length - 1];
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const len = Math.hypot(dx, dy) || 1;
-          const nx = -dy / len, ny = dx / len;
-          const offset = (pt.x - a.x) * nx + (pt.y - a.y) * ny;
-          return { ...d, geom: { ...g, offset } };
+          if (index === g.pts.length) {
+            const a = g.pts[0], b = g.pts[g.pts.length - 1];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const nx = -dy / len, ny = dx / len;
+            const offset = (pt.x - a.x) * nx + (pt.y - a.y) * ny;
+            return { ...d, geom: { ...g, offset } };
+          }
+          // Masszahl-Griff: verschiebt NUR die Zahl des betroffenen Segments
+          // (Geometrie bleibt unangetastet) und rastet nahe der Standardlage
+          // ein, s. `model/dimension.ts::dimTextOffsetFromPoint`.
+          const seg = index - g.pts.length - 1;
+          if (seg < 0 || seg >= g.pts.length - 1) return d;
+          const height = mmToModel(g.textHeightMm ?? DIM_DEFAULTS_MM.textHeight, scaleDenominator);
+          const m = dimTextOffsetFromPoint(g.pts[seg], g.pts[seg + 1], g.offset, height, pt);
+          // Zurück in Papier-mm speichern (Einheit des Modells).
+          const next = {
+            along: modelToMm(m.along, scaleDenominator),
+            perp: modelToMm(m.perp, scaleDenominator),
+          };
+          const textOffsetsMm = Array.from({ length: g.pts.length - 1 }, (_, i) =>
+            i === seg ? next : (g.textOffsetsMm?.[i] ?? { along: 0, perp: 0 }),
+          );
+          return { ...d, geom: { ...g, textOffsetsMm } };
         }
         if (g.shape === "rect" || g.shape === "image") {
           const corners = [
@@ -1886,19 +2172,63 @@ function moveGrip(
           const max = { x: Math.max(pt.x, opp.x), y: Math.max(pt.y, opp.y) };
           return { ...d, geom: { ...g, min, max } };
         }
-        // Text: Griff 0 = Ankerpunkt; Griff 1 (nur bei Leader) = Zielpunkt;
-        // trägt der Text einen Pfad, adressiert der Index einen Pfadpunkt.
+        // Text: Griff 0 = Ankerpunkt; bei Leader zusätzlich ein Griff je
+        // Knickpunkt UND ein ABSCHLIESSENDER Griff am Zielpunkt (Reihenfolge
+        // wie `drawingVertices`: Anker→Knicke→Spitze); trägt der Text einen
+        // Pfad, adressiert der Index einen Pfadpunkt; Textspalte (kein
+        // Leader/Pfad, `width` gesetzt) hat 4 Rahmen-Eck-Griffe (s.
+        // drawingVertices) — dieselbe Reihenfolge (pathPts > leaderTarget >
+        // Breiten-Ecken > einzelner Anker) MUSS hier gespiegelt werden, sonst
+        // adressiert ein Griff-Index das falsche Verhalten.
         if (g.shape === "text") {
           if (g.pathPts) {
             const pathPts = g.pathPts.map((pp, i) => (i === index ? pt : pp));
             return { ...d, geom: { ...g, pathPts } };
           }
-          return index === 1 && g.leaderTarget
-            ? { ...d, geom: { ...g, leaderTarget: pt } }
-            : { ...d, geom: { ...g, at: pt } };
+          if (g.leaderTarget) {
+            const bends = g.leaderBendPoints ?? [];
+            const tipIndex = bends.length + 1;
+            if (index === 0) return { ...d, geom: { ...g, at: pt } };
+            if (index === tipIndex) return { ...d, geom: { ...g, leaderTarget: pt } };
+            if (index > 0 && index < tipIndex) {
+              const leaderBendPoints = bends.map((bp, i) => (i === index - 1 ? pt : bp));
+              return { ...d, geom: { ...g, leaderBendPoints } };
+            }
+            return d;
+          }
+          if (g.width && g.width > 0 && index >= 0 && index < 4) {
+            // Nur die Breite ändert sich (InDesign-Textrahmen-Verhalten,
+            // Nutzer-Entscheidung) — Höhe bleibt inhaltsgetrieben. Ziehen wird
+            // auf die LOKALE x-Achse projiziert (rotationsfest): linke Ecken
+            // (Index 0/3, s. textFrameCorners-Reihenfolge oben-links/oben-
+            // rechts/unten-rechts/unten-links) verschieben zusätzlich `at`,
+            // damit die RECHTE Kante fest bleibt; rechte Ecken (1/2) lassen
+            // `at`/die linke Kante fest.
+            const cos = Math.cos(g.angle);
+            const sin = Math.sin(g.angle);
+            const dx = pt.x - g.at.x;
+            const dy = pt.y - g.at.y;
+            const localX = dx * cos + dy * sin;
+            const MIN_WIDTH = 0.1;
+            const isLeft = index === 0 || index === 3;
+            if (isLeft) {
+              const width = Math.max(MIN_WIDTH, g.width - localX);
+              const at = { x: g.at.x + localX * cos, y: g.at.y + localX * sin };
+              return { ...d, geom: { ...g, at, width } };
+            }
+            const width = Math.max(MIN_WIDTH, localX);
+            return { ...d, geom: { ...g, width } };
+          }
+          return { ...d, geom: { ...g, at: pt } };
         }
         // Kote: der einzige Griff (Index 0) sitzt an der Dreieck-Spitze.
         if (g.shape === "kote") return { ...d, geom: { ...g, at: pt } };
+        // Detail-/Schnitt-Verweis: der einzige Griff (Index 0) sitzt am Kreis-Zentrum.
+        if (g.shape === "detailref") return { ...d, geom: { ...g, at: pt } };
+        // Massstabsbalken: der einzige Griff (Index 0) sitzt an der linken unteren Ecke.
+        if (g.shape === "scalebar") return { ...d, geom: { ...g, at: pt } };
+        // Punkt-/Knotenmarker: der einzige Griff (Index 0) sitzt am Zentrum.
+        if (g.shape === "pointmarker") return { ...d, geom: { ...g, at: pt } };
         // Block-Instanz: der einzige Griff (Index 0) sitzt am Einfügepunkt.
         if (g.shape === "block") return { ...d, geom: { ...g, at: pt } };
         // Kreis: Griff 0 (Ost) bzw. 1 (Nord) — zieht man die beiden Achsen
@@ -1958,6 +2288,9 @@ function moveElementBy(
   wallId: string | null,
   delta: Vec2,
 ): Project {
+  // Objekt-Sperre: s. Kommentar in `moveGrip` oben.
+  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return project;
+  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return project;
   const mv = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
   if (drawingId) {
     return {
@@ -1982,6 +2315,12 @@ function moveElementBy(
           case "dimension":
             return { ...d, geom: { ...g, pts: g.pts.map(mv) } };
           case "kote":
+            return { ...d, geom: { ...g, at: mv(g.at) } };
+          case "detailref":
+            return { ...d, geom: { ...g, at: mv(g.at) } };
+          case "scalebar":
+            return { ...d, geom: { ...g, at: mv(g.at) } };
+          case "pointmarker":
             return { ...d, geom: { ...g, at: mv(g.at) } };
           case "text":
             return { ...d, geom: { ...g, at: mv(g.at) } };
@@ -2104,6 +2443,9 @@ function moveEdge(
   bIndex: number,
   delta: Vec2,
 ): Project {
+  // Objekt-Sperre: s. Kommentar in `moveGrip` oben.
+  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return project;
+  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return project;
   const mv = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
   if (drawingId) {
     return {

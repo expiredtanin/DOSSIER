@@ -10,7 +10,8 @@ import type { ColorPen, PenSet, Project } from "../../model/types";
 import { PEN_WEIGHTS } from "../../model/types";
 import { PEN_FALLBACK_COLOR, PEN_FALLBACK_WEIGHT } from "../../model/penSets";
 import { t } from "../../i18n";
-import { ColorField, DeleteButton, FieldRow, NumberField, TextField } from "./fields";
+import { PenSwatchPicker } from "../PenSwatchPicker";
+import { DeleteButton, FieldRow, NumberField, TextField } from "./fields";
 
 /**
  * Detail-Panel EINES Stiftsatzes: Umbenennen/Löschen + Tabelle Farbe+
@@ -26,6 +27,8 @@ function PenSetDetail({
   onActivate,
   onPatchColor,
   onPatchWeight,
+  project,
+  onSaveColor,
   onAddPen,
   onRenamePen,
   onDeletePen,
@@ -37,6 +40,8 @@ function PenSetDetail({
   onDelete: () => void;
   onActivate: () => void;
   onPatchColor: (penId: string, color: string) => void;
+  project: Project;
+  onSaveColor?: (paletteId: string, hex: string) => void;
   onPatchWeight: (penId: string, weight: number) => void;
   onAddPen?: () => void;
   onRenamePen?: (id: string, name: string) => void;
@@ -69,7 +74,13 @@ function PenSetDetail({
             <FieldRow key={pen.id} label={pen.id}>
               <div className="res-pen-row">
                 <TextField value={pen.name} onChange={(name) => onRenamePen?.(pen.id, name)} />
-                <ColorField color={style.color} onChange={(color) => onPatchColor(pen.id, color)} />
+                <PenSwatchPicker
+                  color={style.color}
+                  onChange={(color) => onPatchColor(pen.id, color)}
+                  customPalettes={project.customPalettes}
+                  builtinBanks={project.builtinPaletteBanks}
+                  onSaveColor={onSaveColor}
+                />
                 <NumberField
                   value={style.weight}
                   onChange={(weight) => onPatchWeight(pen.id, weight)}
@@ -108,6 +119,7 @@ export function PenSetsTab({
   onPatchPenSetColor,
   onPatchPenSetWeight,
   onSeedStandardPenSet,
+  onAddColorToCustomPalette,
 }: {
   project: Project;
   onAddPen?: () => void;
@@ -120,6 +132,7 @@ export function PenSetsTab({
   onPatchPenSetColor?: (setId: string, penId: string, color: string) => void;
   onPatchPenSetWeight?: (setId: string, penId: string, weight: number) => void;
   onSeedStandardPenSet?: () => void;
+  onAddColorToCustomPalette?: (paletteId: string | undefined, hex: string) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const pens = project.pens ?? [];
@@ -171,6 +184,8 @@ export function PenSetsTab({
               key={selected.id}
               penSet={selected}
               pens={pens}
+              project={project}
+              onSaveColor={onAddColorToCustomPalette}
               isActive={project.activePenSetId === selected.id}
               onRename={(name) => onRenamePenSet?.(selected.id, name)}
               onDelete={() => onDeletePenSet?.(selected.id)}

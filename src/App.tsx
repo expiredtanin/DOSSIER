@@ -46,11 +46,24 @@ import { OpeningEditorDialog } from "./ui/OpeningEditorDialog";
 import { ExportSaveDialog } from "./ui/ExportSaveDialog";
 import { PromptDialog } from "./ui/PromptDialog";
 import { LockConflictDialog } from "./ui/LockConflictDialog";
+import { UnsavedChangesDialog } from "./ui/UnsavedChangesDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./io/projectFile";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./plan/PlanView";
 import type { DisplayResolver } from "./viewport/Viewport3D";
+import {
+  neighbor3dVertex,
+  bodyMoveAnchor,
+  hudFromAnchor,
+  grip3dTargetKey,
+  grip3dEditPoint,
+  cycleGrip3dEditState,
+  nextGrip3dEditState,
+  grip3dEditFields,
+  type Grip3dTarget,
+  type Grip3dEditState,
+} from "./viewport/grip3dHud";
 import { ResourceManager } from "./ui/ResourceManager";
 import type { ResourceManagerHandlers, TabId as ResourceTabId } from "./ui/ResourceManager";
 import { LayoutSheetView } from "./ui/LayoutSheet";
@@ -92,6 +105,7 @@ import { computeSnap } from "./tools/snapping";
 import {
   requiredPoints,
   transformPreview,
+  rotateGizmoShapes,
 } from "./tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "./tools/transform";
 import type {
@@ -118,7 +132,8 @@ import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
 import { addNewElementsToActiveGroup, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
-import type { GroupMembership } from "./state/groupActions";
+import type { GroupMembership, MemberKind } from "./state/groupActions";
+import { isLocked, setLockedForMembers } from "./state/objectLock";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useProjectActions } from "./state/useProjectActions";
 import {
@@ -138,7 +153,13 @@ import { useThemeModeState } from "./theme/useThemeMode";
 import { CommandLine } from "./ui/CommandLine";
 import type { CommandLineHandle, CommandLineField, CommandLineOption } from "./ui/CommandLine";
 import { CommandEngine } from "./commands/engine";
-import type { EngineHost } from "./commands/engine";
+import { loadAliasOverrides, saveAliasOverrides } from "./state/commandAliasOverrides";
+import {
+  loadShortcutOverrides,
+  saveShortcutOverrides,
+  type ShortcutOverrides,
+} from "./state/keyboardShortcuts";
+import type { EngineHost, EngineMods } from "./commands/engine";
 import type { CommandContext } from "./commands/types";
 import { t, useT } from "./i18n";
 import {
@@ -155,6 +176,7 @@ import {
   unionDrawings,
 } from "./editors/booleanOps";
 import type { BooleanResult } from "./editors/booleanOps";
+import { applyDrawingStyle, readDrawingStyle } from "./editors/matchProps";
 
 // Globaler Store (Slices: project/selection/view/layout).
 import { useStore } from "./state/appStore";
@@ -171,7 +193,7 @@ import { hostWithMode } from "./panels/host";
 import { deriveSelection } from "./state/selectionInfo";
 import type { Selection } from "./state/selectionInfo";
 import { centroid as roomCentroid } from "./geometry/roomArea";
-import { docFromText, plainText } from "./text/richText";
+import { docFromText, plainText, DEFAULT_PRESETS } from "./text/richText";
 import type { RichTextDoc } from "./text/richText";
 import { revealPanel, saveLayout } from "./panels/layout";
 import { listPanels } from "./panels/registry";
@@ -219,6 +241,7 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   room: "room",
   line: "line",
   xline: "xline",
+  ray: "ray",
   polyline: "polyline",
   rect: "rect",
   circle: "circle",
@@ -230,6 +253,11 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
   bezier: "bezier",
   dimension: "dimension",
   kote: "kote",
+  detailref: "detailref",
+  scalebar: "scalebar",
+  revcloud: "revcloud",
+  pointmarker: "pointmarker",
+  wipeout: "wipeout",
   text: "text",
   leader: "leader",
   textpath: "textpath",
@@ -427,6 +455,8 @@ export default function App() {
   const {
     layerClipboard,
     setLayerClipboard,
+    drawingStyleClipboard,
+    setDrawingStyleClipboard,
     menu,
     setMenu,
     editor,
@@ -622,14 +652,19 @@ export default function App() {
 
   // ── Transformation (Bewegen/Spiegeln/Drehen) auf der Auswahl ──────────────
   // Trägt ALLE von der Transform-Engine unterstützten Elementarten (Wände, 2D-
-  // Zeichnungen, extrudierte Körper, Stützen) — sonst wirken die Kürzel m/s/d nur
-  // auf Wände/2D, obwohl `commitTransform` auch Extrude/Stütze bewegt.
+  // Zeichnungen, extrudierte Körper, Stützen, Decken/Dächer/Treppen/Räume) —
+  // sonst wirken die Kürzel m/s/d nur auf einen Teil dessen, was
+  // `commitTransform` tatsächlich bewegt.
   const transformSel: TransformSelection = {
     wallIds: selectedWallIds,
     drawingId: selectedDrawingId,
     drawingIds: selectedDrawingIds,
     extrudedSolidId: selectedExtrudedSolidId,
     columnId: selectedColumnId,
+    ceilingIds: selectedCeilingIds,
+    roofIds: selectedRoofIds,
+    stairIds: selectedStairIds,
+    roomIds: selectedRoomIds,
   };
   const snapForTransform = (raw: Vec2, pxPerMeter: number, mods: ToolMods, points: Vec2[]) =>
     computeSnap({
@@ -657,7 +692,25 @@ export default function App() {
       eff.length === need
         ? transformPreview(project, transformSel, tr.op, eff, tr.copyMode, tr.count)
         : [];
-    setDraft({ preview, vertices: tr.points, snap: snapResult });
+    // Dreh-Gizmo (Radius-Kreis + Referenz-/Winkel-Strahl) ZUSÄTZLICH zur
+    // transformierten Vorschau, sobald Zentrum+Referenzpunkt stehen und der
+    // dritte Punkt (Winkel) noch läuft — Nutzer-Wunsch „bei Drehen auch eine
+    // Darstellung". Über denselben `preview`-Kanal wie oben → zeichnet sich
+    // automatisch in 2D UND 3D (s. `tools/transform.ts::rotateGizmoShapes`-Doc).
+    const gizmo =
+      tr.op === "rotate" && tr.points.length === 2
+        ? rotateGizmoShapes(tr.points[0], tr.points[1], cursor)
+        : [];
+    // `hud.at` positioniert die Cursor-HUD-Box (Werte selbst kommen aus
+    // `transformFields()`/`hudFields`, s. o. — Nutzer-Wunsch „bei Drehen auch
+    // eine Darstellung"); ohne `hud` bliebe die Box unsichtbar (2D UND 3D),
+    // auch wenn `hudFields` bereits gültige Felder liefert.
+    setDraft({
+      preview: [...preview, ...gizmo],
+      vertices: tr.points,
+      snap: snapResult,
+      hud: { at: cursor },
+    });
   };
   const transformClick = (raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
     const tr = activeTransform!;
@@ -752,6 +805,10 @@ export default function App() {
     selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
+    selectedCeilingIds,
+    selectedRoofIds,
+    selectedStairIds,
+    selectedRoomIds,
     groupPath,
     setProject,
     setDraft,
@@ -769,6 +826,10 @@ export default function App() {
     selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
+    selectedCeilingIds,
+    selectedRoofIds,
+    selectedStairIds,
+    selectedRoomIds,
     groupPath,
     setProject,
     setDraft,
@@ -794,6 +855,10 @@ export default function App() {
             drawingIds: c.selectedDrawingIds,
             extrudedSolidId: c.selectedExtrudedSolidId,
             columnId: c.selectedColumnId,
+            ceilingIds: c.selectedCeilingIds,
+            roofIds: c.selectedRoofIds,
+            stairIds: c.selectedStairIds,
+            roomIds: c.selectedRoomIds,
           },
         };
       },
@@ -851,6 +916,51 @@ export default function App() {
     engineRef.current = new CommandEngine(host);
   }
   const engine = engineRef.current;
+
+  // Nutzer-Kürzel-Übersteuerungen (Einstellungen → Remap) — aus localStorage
+  // geladen, bei jeder Änderung sofort an die Engine gereicht (s. `commands/
+  // engine.ts::setAliasOverrides`, `state/commandAliasOverrides.ts`).
+  const [aliasOverrides, setAliasOverridesState] = useState<Record<string, string>>(() =>
+    loadAliasOverrides(),
+  );
+  useEffect(() => engine.setAliasOverrides(aliasOverrides), [engine, aliasOverrides]);
+  const setAliasOverrides = (next: Record<string, string>) => {
+    setAliasOverridesState(next);
+    saveAliasOverrides(next);
+  };
+  // Ändert das native Einstellungs-Fenster (separates Tauri-Fenster) die
+  // Kürzel, landen sie zwar in localStorage, aber das `storage`-Event feuert
+  // NIE im Fenster, das selbst geschrieben hat — nur in den ANDEREN Fenstern
+  // (Web-Storage-API-Standardverhalten). Genau der Fall hier: dieses
+  // (Haupt-)Fenster empfängt die Änderung darüber und zieht sie nach.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "cad.commandAliasOverrides") setAliasOverridesState(loadAliasOverrides());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Nutzer-Übersteuerungen der echten Tastatur-Shortcuts (Einstellungen →
+  // Tastenkürzel) — analoges Muster zu `aliasOverrides` oben, aber für
+  // `state/keyboardShortcuts.ts` (Ctrl/Cmd+Z usw.) statt der Befehlszeilen-
+  // Kürzel. Direkt an alle betroffenen Hooks unten durchgereicht.
+  const [shortcutOverrides, setShortcutOverridesState] = useState<ShortcutOverrides>(() =>
+    loadShortcutOverrides(),
+  );
+  const setShortcutOverrides = (next: ShortcutOverrides) => {
+    setShortcutOverridesState(next);
+    saveShortcutOverrides(next);
+  };
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "dossier.keyboardShortcutOverrides") {
+        setShortcutOverridesState(loadShortcutOverrides());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Auf Engine-Zustandsänderungen re-rendern (Prompt/Optionen aktualisieren).
   const [engineTick, setEngineTick] = useState(0);
@@ -938,8 +1048,13 @@ export default function App() {
     const hasSel =
       selectedWallIds.length > 0 ||
       !!selectedDrawingId ||
+      selectedDrawingIds.length > 0 ||
       !!selectedExtrudedSolidId ||
-      !!selectedColumnId;
+      !!selectedColumnId ||
+      selectedCeilingIds.length > 0 ||
+      selectedRoofIds.length > 0 ||
+      selectedStairIds.length > 0 ||
+      selectedRoomIds.length > 0;
     if (!hasSel) {
       notify(t("transform.needSelection"), "info");
       return;
@@ -967,19 +1082,41 @@ export default function App() {
   // ihn in DIESELBE ansichts-agnostische CommandEngine wie PlanView (move/pick).
   // Snapping/Tab-Felder/Commit laufen unverändert über den EngineHost; die neuen
   // Elemente landen auf dem aktiven Geschoss (host.context().level).
-  const onWorkplanePoint = (kind: "move" | "pick", model: Vec2) => {
+  const onWorkplanePoint = (kind: "move" | "pick", model: Vec2, mods?: EngineMods) => {
+    // Läuft eine interaktive Transformation (m/s/d — Bewegen/Spiegeln/Drehen
+    // der Auswahl), hat sie Vorrang — exakt wie `toolHandlers.onToolMove`/
+    // `onToolClick` das für den 2D-Plan schon tun (s. o.). Bisher war das hier
+    // NICHT verdrahtet: ein Klick im 3D-Viewport während m/s/d tat schlicht
+    // nichts, Drehen/Verschieben/Spiegeln funktionierten im 3D also gar nicht
+    // (Nutzer-Wunsch „bei Drehen auch eine Darstellung" — die Vorschau kommt
+    // jetzt über denselben `draft`-Kanal wie das Zeichnen, s. `transformMove`).
+    // 3D hat kein echtes pxPerMeter (Perspektive) — derselbe feste Näherungs-
+    // wert wie `snapFor3dVertex` oben.
+    if (activeTransform) {
+      const toolMods: ToolMods = { shift: !!mods?.shift, ctrl: !!mods?.ctrl, alt: false };
+      if (kind === "move") transformMove(model, 90, toolMods);
+      else transformClick(model, 90, toolMods);
+      return;
+    }
     const eng = engineRef.current;
     if (!eng?.isActive()) return;
-    if (kind === "move") eng.move(model);
-    else eng.pick(model);
+    if (kind === "move") eng.move(model, mods);
+    else eng.pick(model, mods);
   };
   const onWorkplaneConfirm = () => {
+    // Rechtsklick-ohne-Drag/Doppelklick im 3D während einer Transformation =
+    // abbrechen — dasselbe Verhalten wie `onToolCommit` im 2D-Plan (§ s. o.).
+    if (activeTransform) {
+      setActiveTransform(null);
+      setDraft(null);
+      return;
+    }
     const eng = engineRef.current;
     if (eng?.isActive()) eng.confirm();
   };
 
   // Globaler Undo/Redo-Shortcut — siehe state/useKeyboardShortcuts.ts.
-  useUndoRedoShortcut(undo, redo);
+  useUndoRedoShortcut(undo, redo, shortcutOverrides);
 
   // Esc/Enter/Backspace für das aktive Zeichenwerkzeug. Siehe
   // state/useKeyboardShortcuts.ts. Die Zifferntasten-Werkzeugwahl
@@ -1043,15 +1180,21 @@ export default function App() {
     if (selectedSectionLineIds.length) {
       for (const id of selectedSectionLineIds) patchLevel(id, { linePoints: undefined });
     }
-    const dids = new Set(selectedDrawingIds);
-    const wids = new Set(selectedWallIds);
-    const cids = new Set(selectedCeilingIds);
-    const oids = new Set(selectedOpeningIds);
-    const stids = new Set(selectedStairIds);
-    const rmids = new Set(selectedRoomIds);
+    // Objekt-Sperre: gesperrte Elemente aus der Löschung ausnehmen (s.
+    // `moveGrip`/`moveElementBy` in projectSlice.ts für dieselbe Prüfung
+    // beim Ziehen). ExtrudedSolid/Kontext-Objekte haben kein `locked`-Feld
+    // (s. deren Typdefinitionen) — bleiben ungefiltert.
+    const notLocked = (kind: MemberKind, ids: string[]) =>
+      ids.filter((id) => !isLocked(project, kind, id));
+    const dids = new Set(notLocked("drawingIds", selectedDrawingIds));
+    const wids = new Set(notLocked("wallIds", selectedWallIds));
+    const cids = new Set(notLocked("ceilingIds", selectedCeilingIds));
+    const oids = new Set(notLocked("openingIds", selectedOpeningIds));
+    const stids = new Set(notLocked("stairIds", selectedStairIds));
+    const rmids = new Set(notLocked("roomIds", selectedRoomIds));
     const exids = new Set(selectedExtrudedSolidIds);
-    const colids = new Set(selectedColumnIds);
-    const rfids = new Set(selectedRoofIds);
+    const colids = new Set(notLocked("columnIds", selectedColumnIds));
+    const rfids = new Set(notLocked("roofIds", selectedRoofIds));
     const ctxids = new Set(selectedContextObjectIds);
     setProject((p) => ({
       ...p,
@@ -1090,6 +1233,7 @@ export default function App() {
     activeTransform,
     project,
     activeLevelId: activeLevel.id,
+    shortcutOverrides,
     selectedDrawingIds,
     selectedWallIds,
     selectedCeilingIds,
@@ -1148,7 +1292,14 @@ export default function App() {
 
   // Ctrl/Cmd+S = Split, Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente —
   // siehe state/useKeyboardShortcuts.ts.
-  useSplitJoinShortcut(selectedDrawingIds, engine, runSplit, setSelectedDrawingIds, setSelectedWallIds);
+  useSplitJoinShortcut(
+    selectedDrawingIds,
+    engine,
+    runSplit,
+    setSelectedDrawingIds,
+    setSelectedWallIds,
+    shortcutOverrides,
+  );
 
   // Ctrl/Cmd+Shift+U/D/I = Boolean Vereinigung/Subtraktion/Schnitt — siehe
   // state/useKeyboardShortcuts.ts. (Ctrl/Cmd+C/V-Kopieren/Einfügen folgt weiter
@@ -1182,7 +1333,62 @@ export default function App() {
     setSelectedDrawingIds(result.created.map((d) => d.id));
     setSelectedWallIds([]);
   };
-  useBooleanOpsShortcut(selectedDrawingIds, project.drawings2d, applyBoolean);
+  useBooleanOpsShortcut(selectedDrawingIds, project.drawings2d, applyBoolean, shortcutOverrides);
+
+  // „Eigenschaften übertragen" (2D-Kontextmenü) — dasselbe Zwischenablage-
+  // Muster wie beim Ebenen-Menü (`layerClipboard`), nur für den vollen
+  // Aussehen-Stil eines 2D-Elements (s. `editors/matchProps.ts`).
+  const copyDrawingStyle = () => {
+    const d = project.drawings2d.find((x) => x.id === selectedDrawingIds[0]);
+    if (d) setDrawingStyleClipboard(readDrawingStyle(d));
+  };
+  const pasteDrawingStyle = () => {
+    if (!drawingStyleClipboard || selectedDrawingIds.length === 0) return;
+    setProject((p) => applyDrawingStyle(p, selectedDrawingIds, drawingStyleClipboard));
+  };
+
+  // Objekt sperren/entsperren (Kontextmenü) — wirkt auf die GANZE aktuelle
+  // Auswahl (alle Elementarten, nicht nur 2D-Zeichnungen), ein Undo-Schritt.
+  // Anders als der Ebenen-/Geschoss-Sperrmodus (`DisplayMode`, session-lokal)
+  // ist `locked` hier ein persistiertes Feld am Element selbst, s.
+  // `state/objectLock.ts`.
+  const selectionLockMembers: Partial<Record<MemberKind, string[]>> = {
+    wallIds: selectedWallIds,
+    drawingIds: selectedDrawingIds,
+    ceilingIds: selectedCeilingIds,
+    roomIds: selectedRoomIds,
+    stairIds: selectedStairIds,
+    columnIds: selectedColumnIds,
+    roofIds: selectedRoofIds,
+    openingIds: selectedOpeningIds,
+  };
+  const selectionLockIds = (
+    Object.entries(selectionLockMembers) as [MemberKind, string[]][]
+  ).flatMap(([kind, ids]) => ids.map((id) => [kind, id] as const));
+  const selectionAllLocked =
+    selectionLockIds.length > 0 &&
+    selectionLockIds.every(([kind, id]) => isLocked(project, kind, id));
+  const toggleSelectionLock = () => {
+    if (selectionLockIds.length === 0) return;
+    setProject((p) => setLockedForMembers(p, selectionLockMembers, !selectionAllLocked));
+  };
+
+  // „Nicht drucken"/„Drucken" (Kontextmenü) — nur `Drawing2D` kennt
+  // `noPrint` (Nutzer-Wunsch „Kein 'nicht druckend'-Flag im Modell"), daher
+  // simpler als die Sperre oben: direkt über `selectedDrawingIds`.
+  const selectionAllNoPrint =
+    selectedDrawingIds.length > 0 &&
+    selectedDrawingIds.every((id) => project.drawings2d.find((d) => d.id === id)?.noPrint);
+  const toggleSelectionNoPrint = () => {
+    if (selectedDrawingIds.length === 0) return;
+    const next = !selectionAllNoPrint;
+    setProject((p) => ({
+      ...p,
+      drawings2d: p.drawings2d.map((d) =>
+        selectedDrawingIds.includes(d.id) ? { ...d, noPrint: next } : d,
+      ),
+    }));
+  };
 
   // Ctrl/Cmd+G / Ctrl/Cmd+Shift+G = Gruppieren/Auflösen (Vectorworks-artig,
   // s. state/groupActions.ts). `applyGroupSelection` setzt nach dem Gruppieren/
@@ -1213,6 +1419,7 @@ export default function App() {
     },
     selectedGroupIds,
     applyGroupSelection,
+    shortcutOverrides,
   );
 
   // Doppelklick auf ein gruppiertes Element → Gruppe betreten (Isolation):
@@ -1295,11 +1502,16 @@ export default function App() {
     selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
+    selectedCeilingIds,
+    selectedRoofIds,
+    selectedStairIds,
+    selectedRoomIds,
     engine,
     setDraft,
     requestCopyCount,
     onRunCommand,
     commandLineRef,
+    shortcutOverrides,
   );
 
   // ── Projekt-Mutationen (aus dem Store-Slice) ─────────────────────────────
@@ -1337,6 +1549,9 @@ export default function App() {
     patchLineStyle,
     addLineStyle,
     deleteLineStyle,
+    patchTextStyle,
+    addTextStyle,
+    deleteTextStyle,
     addPen,
     renamePen,
     deletePen,
@@ -1347,6 +1562,15 @@ export default function App() {
     patchPenSetColor,
     patchPenSetWeight,
     seedStandardPenSet,
+    addCustomPalette,
+    renameCustomPalette,
+    deleteCustomPalette,
+    addColorToCustomPalette,
+    removeColorFromCustomPalette,
+    setCustomPaletteVisible,
+    setBuiltinPaletteVisible,
+    insertDrawingPoint,
+    deleteDrawingPoint,
     patchWallType,
     setOverrideRules,
     patchCeilingType,
@@ -1441,6 +1665,8 @@ export default function App() {
     selectedDrawingIds,
     levelId: activeLevel.id,
     visibleCodes,
+    scaleDenominator,
+   
     snap,
     setDraft,
     snapFor,
@@ -1467,33 +1693,10 @@ export default function App() {
     onSelectTool,
     activeLevel.kind === "floor",
     engineRef,
+    shortcutOverrides,
     gripDragInfoRef,
     edgeDragInfoRef,
   );
-
-  // Feld-Zustand fürs Cursor-HUD (neben der Maus, VW-Stil): läuft ein Punkt-
-  // ODER Kanten-Griff-Drag, hat er Vorrang (dieselben Felder wie unten in der
-  // Befehlszeile — Länge/Winkel- bzw. Abstand-Tab-Zyklus), sonst die Befehls-
-  // Engine-Felder beim Zeichnen. Vorher zeigte das Cursor-HUD beim Griff-Ziehen
-  // GAR KEINE Länge/Winkel-Werte an (nur die Befehlszeile unten) — Nutzer-
-  // Wunsch: „du kannst [Länge/Winkel] gleich bei der Maus anzeigen wie beim
-  // Erstellen".
-  const hudFields =
-    gripEdit
-      ? { fields: gripEditFields(), typed: cmdTyped }
-      : edgeEdit
-        ? { fields: edgeEditFields(), typed: cmdTyped }
-        : commandActive && engineView.fields.length > 0
-          ? {
-              fields: engineView.fields.map((f) => ({
-                id: f.id,
-                value: f.value,
-                locked: f.locked,
-                active: f.active,
-              })),
-              typed: cmdTyped,
-            }
-          : null;
 
   // Ctrl/Cmd+C / Ctrl/Cmd+V = Bauteile kopieren/einfügen (alle 9 Auswahl-Kanäle,
   // nicht nur 2D-Zeichenelemente) — siehe state/useKeyboardShortcuts.ts.
@@ -1525,6 +1728,7 @@ export default function App() {
       extrudedSolidIds: setSelectedExtrudedSolidIds,
       columnIds: setSelectedColumnIds,
     },
+    shortcutOverrides,
   );
 
   // Projektdatei-I/O (Speichern/Öffnen/Lock), Schnellexport (CSV/IFC/OBJ/STL)
@@ -1535,6 +1739,8 @@ export default function App() {
     projectTemplateFileInputRef,
     lockConflict,
     setLockConflict,
+    pendingDiscard,
+    setPendingDiscard,
     openImportForFile,
     onSaveProject,
     onNewProject,
@@ -1722,12 +1928,59 @@ export default function App() {
       ctrl: false,
     });
   };
+  // Cursor-HUD (Länge/Winkel bzw. Δx/Δy) für einen 3D-Griff-Drag — Nutzer-
+  // Report „beim Verschieben von Elementen zeigt es die Werte nicht an": die
+  // 3D-Griffe (`onEdit3dVertex`/`onEdit3dBody`) mutierten das Modell bisher
+  // OHNE je `setDraft(...)` mit einem `hud` zu füllen (anders als die 2D-
+  // Griff-Bearbeitung, `state/useGripEditing.ts::hudFor`/`edgeHudFor`, die das
+  // von Anfang an tat) — der Cursor-HUD blieb daher leer, obwohl der Kanal
+  // (`hudFields`/`draft.hud`, s. `Wasm3DViewport.tsx`) längst bis in den 3D-
+  // Viewport durchgereicht ist. Die reine Geometrie (Nachbar-/Anker-Auflösung)
+  // lebt in `viewport/grip3dHud.ts` (eigenständig testbar).
+  //
+  // Läuft während eines „move"-Griff-Drags (ganzes Element verschieben): sammelt
+  // die seit Drag-Beginn angewandten Deltas je Ziel-Element, damit das HUD die
+  // GESAMTE Verschiebung zeigt statt des winzigen Pro-Event-Deltas. `rawTotal`
+  // = reine Maus-Summe (auch bei aktivem Feld-Controller weitergeführt, damit
+  // ein entsperrtes Feld sofort wieder der Maus folgt); `appliedTotal` = was
+  // TATSÄCHLICH aufs Modell angewandt wurde (kann bei Locks abweichen). Reset
+  // bei Ziel-Wechsel (neuer Drag) UND in `onEdit3dEnd` (Drag-Ende).
+  const bodyDragRef = useRef<{ key: string; anchor: Vec2; rawTotal: Vec2; appliedTotal: Vec2 } | null>(
+    null,
+  );
+  // Feld-Controller (Tab-Zyklus, getippte Werte) für einen laufenden 3D-Griff-
+  // Drag — Nutzer-Report „man sieht Länge/Winkel, aber man kann nichts
+  // eingeben". Eigenständiges 3D-Äquivalent zu `useGripEditing.ts`s `gripEdit`
+  // (s. `viewport/grip3dHud.ts`-Dateikommentar für das „warum eigenständig").
+  const [grip3dEdit, setGrip3dEdit] = useState<Grip3dEditState | null>(null);
+  // Letzter bekannter roh (maus-getriebener, UN-gelockter) Zustand des
+  // laufenden 3D-Griff-Drags — Grundlage fürs ÖFFNEN des Feld-Controllers
+  // (Tab friert die AKTUELLE Position ein, s. `cycleGrip3dEditState`).
+  const last3dDragRef = useRef<
+    { target: Grip3dTarget; index: number; kind: "vertex" | "move"; anchor: Vec2; raw: Vec2 } | null
+  >(null);
   // Ein 3D-Vertex-Griff wurde gezogen. `target` benennt das konkrete Element
   // (Wand-ID ODER Drawing-ID), `index` den Vertex. Liefert den effektiv
   // angewandten (gesnappten) Punkt zurück — der 3D-Viewport nutzt ihn, um
   // koinzidente Endpunkte anderer gewählter Elemente mitzuführen und den
   // Snap-Marker zu zeigen. `snapped=false` (für mitgeführte Geschwister) wendet
   // den Punkt direkt an, ohne erneut zu snappen.
+  // Reine Mutations-Anwender OHNE Lock-/Snap-/HUD-Logik — von `onEdit3dVertex`/
+  // `onEdit3dBody` (Maus-Pfad) UND `submitGrip3dEditValue` (Tastatur-Pfad)
+  // gemeinsam genutzt, damit Letzterer NICHT `onEdit3dVertex`/`onEdit3dBody`
+  // rekursiv aufruft — das würde `grip3dEdit`/`bodyDragRef` über einen VERALTETEN
+  // Closure-Wert lesen (React-State ist innerhalb desselben Funktionsaufrufs
+  // noch nicht aktualisiert) und den gerade getippten Wert wieder verwerfen.
+  const applyVertexPoint = (target: Grip3dTarget, index: number, pt: Vec2) => {
+    if (target.roofId) moveRoofGrip(target.roofId, index, pt);
+    else if (target.ceilingId) moveCeilingGrip(target.ceilingId, index, pt);
+    else moveGripOf(target.drawingId ?? null, target.wallId ?? null, index, pt);
+  };
+  const applyBodyDelta = (target: Grip3dTarget, delta: Vec2) => {
+    if (target.roofId) moveRoofBy(target.roofId, delta);
+    else if (target.ceilingId) moveCeilingBy(target.ceilingId, delta);
+    else moveElementByOf(target.drawingId ?? null, target.wallId ?? null, delta);
+  };
   const onEdit3dVertex = (
     target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     index: number,
@@ -1735,8 +1988,22 @@ export default function App() {
     excludeWallIds?: Set<string>,
     excludeDrawingIds?: Set<string>,
   ): Vec2 => {
+    // Nachbarpunkt VOR der Mutation auflösen (Wand/Zeichnung/Decke/Dach ändern
+    // sich hier nur am gezogenen `index`, der Nachbar bleibt stabil).
+    const neighbor = neighbor3dVertex(project, target, index);
     let pt = model;
-    if (excludeWallIds || excludeDrawingIds) {
+    const ge = grip3dEdit;
+    if (
+      ge &&
+      ge.kind === "vertex" &&
+      ge.index === index &&
+      grip3dTargetKey(ge.target) === grip3dTargetKey(target) &&
+      (ge.locks.length != null || ge.locks.angle != null)
+    ) {
+      // Feld-Controller aktiv: getippte/eingefrorene Werte übersteuern die
+      // Maus — kein Snap währenddessen (deckungsgleich mit 2D `onGripMove`).
+      pt = grip3dEditPoint(ge.anchor, ge.locks, model);
+    } else if (excludeWallIds || excludeDrawingIds) {
       const snapResult = snapFor3dVertex(
         model,
         excludeWallIds ?? new Set(),
@@ -1744,18 +2011,101 @@ export default function App() {
       );
       pt = snapResult?.point ?? model;
     }
-    if (target.roofId) moveRoofGrip(target.roofId, index, pt);
-    else if (target.ceilingId) moveCeilingGrip(target.ceilingId, index, pt);
-    else moveGripOf(target.drawingId ?? null, target.wallId ?? null, index, pt);
+    applyVertexPoint(target, index, pt);
+    if (neighbor) last3dDragRef.current = { target, index, kind: "vertex", anchor: neighbor, raw: model };
+    setDraft({
+      preview: [],
+      vertices: [],
+      snap: null,
+      hud: neighbor ? hudFromAnchor(neighbor, pt) : undefined,
+    });
     return pt;
   };
   const onEdit3dBody = (
     target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     delta: Vec2,
   ) => {
-    if (target.roofId) moveRoofBy(target.roofId, delta);
-    else if (target.ceilingId) moveCeilingBy(target.ceilingId, delta);
-    else moveElementByOf(target.drawingId ?? null, target.wallId ?? null, delta);
+    const key = grip3dTargetKey(target);
+    if (!bodyDragRef.current || bodyDragRef.current.key !== key) {
+      bodyDragRef.current = {
+        key,
+        anchor: bodyMoveAnchor(project, target) ?? { x: 0, y: 0 },
+        rawTotal: { x: 0, y: 0 },
+        appliedTotal: { x: 0, y: 0 },
+      };
+    }
+    const st = bodyDragRef.current;
+    st.rawTotal = { x: st.rawTotal.x + delta.x, y: st.rawTotal.y + delta.y };
+    const rawPoint: Vec2 = { x: st.anchor.x + st.rawTotal.x, y: st.anchor.y + st.rawTotal.y };
+    const ge = grip3dEdit;
+    const desiredPoint =
+      ge && ge.kind === "move" && grip3dTargetKey(ge.target) === key && (ge.locks.length != null || ge.locks.angle != null)
+        ? grip3dEditPoint(ge.anchor, ge.locks, rawPoint)
+        : rawPoint;
+    const desiredTotal: Vec2 = { x: desiredPoint.x - st.anchor.x, y: desiredPoint.y - st.anchor.y };
+    const appliedDelta: Vec2 = {
+      x: desiredTotal.x - st.appliedTotal.x,
+      y: desiredTotal.y - st.appliedTotal.y,
+    };
+    applyBodyDelta(target, appliedDelta);
+    st.appliedTotal = desiredTotal;
+    last3dDragRef.current = { target, index: -1, kind: "move", anchor: st.anchor, raw: rawPoint };
+    setDraft({
+      preview: [],
+      vertices: [],
+      snap: null,
+      hud: { at: desiredPoint, dx: desiredTotal.x, dy: desiredTotal.y },
+    });
+  };
+  // Tab während eines laufenden 3D-Griff-Drags (Endpunkt ODER Verschieben):
+  // Feld-Controller öffnen/zykeln — analog `useGripEditing.ts::
+  // cycleGripEditField`, aber auf `last3dDragRef` als Zustandsquelle statt
+  // der 2D-Grips-Liste. `Wasm3DViewport.tsx` ruft dies auf einem eigenen
+  // Tastatur-Listener auf (nur solange EIN 3D-Griff-Drag läuft — s. dort).
+  const cycleGrip3dEditField = () => {
+    const info = last3dDragRef.current;
+    if (!info) return;
+    setGrip3dEdit((prev) => cycleGrip3dEditState(prev, info));
+    requestAnimationFrame(() => commandLineRef.current?.focus());
+  };
+  // Escape während eines laufenden 3D-Griff-Drags: abbrechen. ALLE fünf
+  // Griff-Mutationen coalescen ihre Schritte zu GENAU einem Undo-Eintrag pro
+  // Drag (s. `state/projectSlice.ts::moveGripOf`/`updateWall`/… -Doc), ein
+  // einzelner `undo()` reicht also, um den GESAMTEN Drag zu verwerfen statt
+  // nur den letzten Mikro-Schritt. `Wasm3DViewport.tsx` räumt seinen eigenen
+  // (lokalen) Drag-Zustand danach selbst auf (`endGripDrag`); hier nur der
+  // Modell-Zustand + der App-seitige Aufräum-Teil (`onEdit3dEnd`).
+  const cancelGrip3dEdit = () => {
+    undo();
+    onEdit3dEnd();
+  };
+  // Getippter Zahlenwert im 3D-Feld-Controller — analog `submitGripEditValue`.
+  // Nutzt `applyVertexPoint`/`applyBodyDelta` (NICHT `onEdit3dVertex`/
+  // `onEdit3dBody` selbst, s. deren Dateikommentar oben).
+  const submitGrip3dEditValue = (value: number) => {
+    const ge = grip3dEdit;
+    if (!ge) return;
+    const next = nextGrip3dEditState(ge, value);
+    setGrip3dEdit(next);
+    const raw = last3dDragRef.current?.raw ?? next.anchor;
+    const pt = grip3dEditPoint(next.anchor, next.locks, raw);
+    if (next.kind === "vertex") {
+      applyVertexPoint(next.target, next.index, pt);
+      last3dDragRef.current = { target: next.target, index: next.index, kind: "vertex", anchor: next.anchor, raw };
+      setDraft({ preview: [], vertices: [], snap: null, hud: hudFromAnchor(next.anchor, pt) });
+      return;
+    }
+    const st = bodyDragRef.current;
+    if (!st) return;
+    const desiredTotal: Vec2 = { x: pt.x - st.anchor.x, y: pt.y - st.anchor.y };
+    const appliedDelta: Vec2 = {
+      x: desiredTotal.x - st.appliedTotal.x,
+      y: desiredTotal.y - st.appliedTotal.y,
+    };
+    applyBodyDelta(next.target, appliedDelta);
+    st.appliedTotal = desiredTotal;
+    last3dDragRef.current = { target: next.target, index: -1, kind: "move", anchor: next.anchor, raw };
+    setDraft({ preview: [], vertices: [], snap: null, hud: { at: pt, dx: desiredTotal.x, dy: desiredTotal.y } });
   };
   // First-Griff: neue First-Höhe (world-Y = Modell-Höhe) → Dachneigung. Aus der
   // aktuellen Neigung die halbe Spannweite ableiten und daraus den neuen Winkel
@@ -1771,15 +2121,49 @@ export default function App() {
     // Halbe Spannweite aus aktueller Geometrie (First/tan(Neigung)).
     const halfSpan = currentRidge > 1e-4 ? currentRidge / Math.tan(curPitch || 1e-3) : 1;
     const newPitch = (Math.atan(newRidge / Math.max(0.05, halfSpan)) * 180) / Math.PI;
-    updateRoof(roofId, { pitchDeg: Math.max(1, Math.min(85, newPitch)) });
+    // coalesceKey: EIN First-Drag (viele Maus-Move-Schritte) soll EINEN Undo-
+    // Schritt erzeugen, s. `state/projectSlice.ts::updateRoof`-Doc.
+    updateRoof(roofId, { pitchDeg: Math.max(1, Math.min(85, newPitch)) }, `onEdit3dRoofPitch:${roofId}`);
+    // Cursor-HUD (First-Höhe) — bislang zeigten Höhen-/Kanten-/First-Griff als
+    // einzige 3D-Griffe GAR KEINEN Wert (Nutzer-Wunsch „generell weiter
+    // optimieren"). Anker = Dach-Schwerpunkt (`bodyMoveAnchor`, dieselbe
+    // Formel wie der Verschiebe-Griff).
+    const at = bodyMoveAnchor(project, { roofId });
+    if (at) setDraft({ preview: [], vertices: [], snap: null, hud: { at, text: `First: ${apexHeight.toFixed(3)}m` } });
   };
+  // Läuft während eines Kanten-Griff-Drags (Decke): sammelt die seit Drag-
+  // Beginn angewandte Verschiebung fürs Δ-HUD — analog `bodyDragRef`, aber
+  // ohne Lock-Unterstützung (kein Feld-Controller für Kanten, s. PENDENZEN).
+  const edgeDragRef = useRef<{ key: string; total: Vec2 } | null>(null);
   const onEdit3dEdge = (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => {
     moveCeilingEdge(ceilingId, aIndex, bIndex, delta);
+    const key = `${ceilingId}:${aIndex}:${bIndex}`;
+    if (!edgeDragRef.current || edgeDragRef.current.key !== key) {
+      edgeDragRef.current = { key, total: { x: 0, y: 0 } };
+    }
+    const st = edgeDragRef.current;
+    st.total = { x: st.total.x + delta.x, y: st.total.y + delta.y };
+    const c = (project.ceilings ?? []).find((x) => x.id === ceilingId);
+    const a = c?.outline[aIndex];
+    const b = c?.outline[bIndex];
+    if (a && b) {
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const dist = Math.hypot(st.total.x, st.total.y);
+      setDraft({ preview: [], vertices: [], snap: null, hud: { at: mid, text: `Δ: ${dist.toFixed(3)}m` } });
+    }
   };
   const onEdit3dWallTop = (wallId: string, topZ: number) => {
-    updateWall(wallId, { top: { mode: "custom", z: topZ } });
+    // coalesceKey: EIN Höhen-Drag soll EINEN Undo-Schritt erzeugen, s.
+    // `state/projectSlice.ts::updateWall`-Doc.
+    updateWall(wallId, { top: { mode: "custom", z: topZ } }, `onEdit3dWallTop:${wallId}`);
+    const at = bodyMoveAnchor(project, { wallId });
+    if (at) setDraft({ preview: [], vertices: [], snap: null, hud: { at, text: `OK: ${topZ.toFixed(3)}m` } });
   };
   const onEdit3dEnd = () => {
+    bodyDragRef.current = null;
+    edgeDragRef.current = null;
+    last3dDragRef.current = null;
+    setGrip3dEdit(null);
     setDraft(null);
   };
 
@@ -2037,6 +2421,9 @@ export default function App() {
     onDeleteLineStyle: deleteLineStyle,
     onImportLineStyles: importLineStyles,
     onImportHatches: importHatches,
+    onPatchTextStyle: patchTextStyle,
+    onAddTextStyle: addTextStyle,
+    onDeleteTextStyle: deleteTextStyle,
     onSetOverrideRules: setOverrideRules,
     onAddPen: addPen,
     onRenamePen: renamePen,
@@ -2048,6 +2435,13 @@ export default function App() {
     onPatchPenSetColor: patchPenSetColor,
     onPatchPenSetWeight: patchPenSetWeight,
     onSeedStandardPenSet: seedStandardPenSet,
+    onAddCustomPalette: addCustomPalette,
+    onRenameCustomPalette: renameCustomPalette,
+    onDeleteCustomPalette: deleteCustomPalette,
+    onRemoveColorFromCustomPalette: removeColorFromCustomPalette,
+    onSetCustomPaletteVisible: setCustomPaletteVisible,
+    onSetBuiltinPaletteVisible: setBuiltinPaletteVisible,
+    onAddColorToCustomPalette: addColorToCustomPalette,
   };
 
   // Ressourcen-Manager als eigenes natives Fenster (Tauri) statt Overlay im
@@ -2082,11 +2476,14 @@ export default function App() {
     activeLayoutId !== null
       ? (project.layouts ?? []).find((l) => l.id === activeLayoutId)
       : undefined;
-  const patchOpenLayout = (id: string, fn: (l: Layout) => Layout) =>
-    setProject((p) => ({
-      ...p,
-      layouts: (p.layouts ?? []).map((l) => (l.id === id ? fn(l) : l)),
-    }));
+  const patchOpenLayout = (id: string, fn: (l: Layout) => Layout, coalesceKey?: string) =>
+    setProject(
+      (p) => ({
+        ...p,
+        layouts: (p.layouts ?? []).map((l) => (l.id === id ? fn(l) : l)),
+      }),
+      coalesceKey,
+    );
 
   // ── Effektive Darstellung für die Hauptansicht ────────────────────────────
   // 3D: Geschosse nach dem Modus des Zeichnungsebenen-Panels, Kategorien nach
@@ -2314,7 +2711,7 @@ export default function App() {
   // Farb-/Mono-Modus) und schreibt ihn massstäblich als Vektor-PDF. Reines
   // Modell → SVG → PDF, unabhängig vom Bildschirm-DOM.
   // PDF-/DXF-Plan-Export — siehe state/useExportHandlers.ts.
-  const { onExportPdf, onExportDxf } = useExportHandlers({
+  const { onExportPdf, onExportSvg, onExportDxf } = useExportHandlers({
     project,
     activeLevelId: activeLevel.id,
     activeLevelName: activeLevel.name,
@@ -2323,6 +2720,7 @@ export default function App() {
     detail,
     referenceLines,
     planColorMode,
+    selectionMembers: selectionLockMembers,
     setExportOpen,
     setExportDxfOpen,
   });
@@ -2390,6 +2788,41 @@ export default function App() {
       { id: "distance", labelKey: "cmd.field.distance", value: dist, locked: false, active: true },
     ];
   };
+
+  // Feld-Zustand fürs Cursor-HUD (neben der Maus, VW-Stil): läuft ein Punkt-
+  // ODER Kanten-Griff-Drag, hat er Vorrang (dieselben Felder wie unten in der
+  // Befehlszeile — Länge/Winkel- bzw. Abstand-Tab-Zyklus), dann eine laufende
+  // Transformation (m/s/d — Winkel beim Drehen bzw. Distanz beim Bewegen,
+  // Nutzer-Wunsch „bei Drehen auch eine Darstellung"), sonst die Befehls-
+  // Engine-Felder beim Zeichnen. Vorher zeigte das Cursor-HUD beim Griff-Ziehen
+  // GAR KEINE Länge/Winkel-Werte an (nur die Befehlszeile unten) — Nutzer-
+  // Wunsch: „du kannst [Länge/Winkel] gleich bei der Maus anzeigen wie beim
+  // Erstellen". Nach `transformFields` platziert (nicht weiter oben), weil es
+  // deren Deklaration direkt aufruft (keine Ref/Closure-Indirektion nötig).
+  const activeTransformFields = activeTransform ? transformFields() : [];
+  const hudFields =
+    gripEdit
+      ? { fields: gripEditFields(), typed: cmdTyped }
+      : edgeEdit
+        ? { fields: edgeEditFields(), typed: cmdTyped }
+        : grip3dEdit
+          ? {
+              fields: grip3dEditFields(grip3dEdit, last3dDragRef.current?.raw ?? grip3dEdit.anchor),
+              typed: cmdTyped,
+            }
+          : activeTransformFields.length > 0
+          ? { fields: activeTransformFields, typed: cmdTyped }
+          : commandActive && engineView.fields.length > 0
+            ? {
+                fields: engineView.fields.map((f) => ({
+                  id: f.id,
+                  value: f.value,
+                  locked: f.locked,
+                  active: f.active,
+                })),
+                typed: cmdTyped,
+              }
+            : null;
 
   // Getippte Zahl in der Transformation: als Wert des aktiven Feldes deuten und
   // über denselben Pfad wie transformClick committen.
@@ -2553,6 +2986,9 @@ export default function App() {
       patchLineStyle,
       addLineStyle,
       deleteLineStyle,
+      patchTextStyle,
+      addTextStyle,
+      deleteTextStyle,
       patchWallType,
       addWallType,
       deleteWallType,
@@ -2584,6 +3020,7 @@ export default function App() {
       setCeilingThickness,
       updateStair,
       updateRoom,
+      addColorToCustomPalette,
     },
     selectionState: {
       updateRoof,
@@ -2818,6 +3255,7 @@ export default function App() {
               deleteDrawingCombo,
             }}
             textTarget={textTarget}
+            textStyles={project.textStyles ?? DEFAULT_PRESETS}
           />
         }
       />
@@ -2891,9 +3329,11 @@ export default function App() {
                 );
                 return id;
               },
-              onPatchAnnotation: (annotationId, patch) =>
-                patchOpenLayout(activeLayout.id, (l) =>
-                  patchAnnotationInLayout(l, annotationId, patch),
+              onPatchAnnotation: (annotationId, patch, coalesceKey) =>
+                patchOpenLayout(
+                  activeLayout.id,
+                  (l) => patchAnnotationInLayout(l, annotationId, patch),
+                  coalesceKey,
                 ),
               onRemoveAnnotation: (annotationId) =>
                 patchOpenLayout(activeLayout.id, (l) =>
@@ -2913,7 +3353,9 @@ export default function App() {
           visibleCodes={visibleCodes}
           detail={detail}
           referenceLines={referenceLines}
+          scaleDenominator={scaleDenominator}
           hairline={lineMode === "display"}
+          showGrid={snap.showGrid}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
           hoverDivideDelayMs={snap.hoverDivideDelayMs}
@@ -2971,7 +3413,12 @@ export default function App() {
           onViewportSelectStair={onViewportSelectStair}
           onViewportContextMenu={onViewportContextMenu}
           onViewport3dPick={onViewport3dPick}
-          commandActive={commandActive}
+          // Zeichnen-Modus des 3D-Viewports gilt AUCH während einer
+          // interaktiven Transformation (m/s/d) — sonst würde ein Klick im 3D
+          // während des Drehens/Verschiebens/Spiegelns weiterhin als Orbit/
+          // Auswahl interpretiert statt als Transformations-Punkt (s.
+          // `onWorkplanePoint`-Doc oben).
+          commandActive={commandActive || !!activeTransform}
           draft={draft}
           onWorkplanePoint={onWorkplanePoint}
           onWorkplaneConfirm={onWorkplaneConfirm}
@@ -2995,6 +3442,8 @@ export default function App() {
           onEdit3dRoofPitch={onEdit3dRoofPitch}
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
+          onGrip3dEditTab={cycleGrip3dEditField}
+          onGrip3dEditCancel={cancelGrip3dEdit}
         />
         {/* Command-Line (Rhino-artig) UNTER dem Viewport — nur Viewport-breit.
             Prompt + klickbare Inline-Optionen + Texteingabe + Autocomplete. */}
@@ -3005,12 +3454,24 @@ export default function App() {
           // Auswahl-Transformation (Drehen etc.), belegt sie Prompt + U/I/O/P +
           // Winkel-/Distanzfeld. Sonst gilt die Engine (Zeichnen/Ruhe). Griff-/
           // Kanten-Drag haben Vorrang (schließen sich sonst aus).
-          active={gripEdit ? true : edgeEdit ? true : activeTransform ? true : engineView.active}
+          active={
+            gripEdit
+              ? true
+              : edgeEdit
+              ? true
+              : grip3dEdit
+              ? true
+              : activeTransform
+              ? true
+              : engineView.active
+          }
           promptKey={
             gripEdit
               ? "cmd.edit.point"
               : edgeEdit
               ? "cmd.edit.edge"
+              : grip3dEdit
+              ? "cmd.edit.point"
               : activeTransform
               ? `transform.hint.${activeTransform.op}.${Math.min(
                   activeTransform.points.length,
@@ -3019,13 +3480,19 @@ export default function App() {
               : engineView.promptKey
           }
           options={
-            gripEdit || edgeEdit ? [] : activeTransform ? transformOptions() : engineView.options
+            gripEdit || edgeEdit || grip3dEdit
+              ? []
+              : activeTransform
+              ? transformOptions()
+              : engineView.options
           }
           fields={
             gripEdit
               ? gripEditFields()
               : edgeEdit
               ? edgeEditFields()
+              : grip3dEdit
+              ? grip3dEditFields(grip3dEdit, last3dDragRef.current?.raw ?? grip3dEdit.anchor)
               : activeTransform
               ? transformFields()
               : engineView.fields
@@ -3045,6 +3512,15 @@ export default function App() {
               const v = parseFloat(text.replace(",", "."));
               if (isFinite(v)) submitEdgeEditValue(v);
               else planViewRef.current?.confirmEdgeEdit();
+              return;
+            }
+            if (grip3dEdit) {
+              const v = parseFloat(text.replace(",", "."));
+              if (isFinite(v)) submitGrip3dEditValue(v);
+              // Leere Eingabe: Feld-Controller schliessen, Maus steuert den
+              // laufenden Griff-Drag wieder normal weiter (kein 3D-Äquivalent
+              // zu `confirmGripEdit` — die Maustaste bleibt physisch gedrückt).
+              else setGrip3dEdit(null);
               return;
             }
             if (activeTransform) {
@@ -3069,6 +3545,8 @@ export default function App() {
               ? cycleGripEditField()
               : edgeEdit
               ? cycleEdgeEditField()
+              : grip3dEdit
+              ? cycleGrip3dEditField()
               : activeTransform
               ? undefined
               : engine.cycleField()
@@ -3078,6 +3556,8 @@ export default function App() {
               ? closeGripEditField()
               : edgeEdit
               ? closeEdgeEditField()
+              : grip3dEdit
+              ? setGrip3dEdit(null)
               : activeTransform
               ? cancelTransform()
               : engine.cancel()
@@ -3221,14 +3701,16 @@ export default function App() {
         />
       )}
 
-      {/* PDF-Export-Dialog (Grundriss → Vektor-PDF). Nur im Grundriss eines
-          Geschosses sinnvoll; der Button ist sonst deaktiviert. */}
+      {/* PDF-/SVG-Export-Dialog (Grundriss → Vektor-PDF oder -SVG). Nur im
+          Grundriss eines Geschosses sinnvoll; der Button ist sonst deaktiviert. */}
       {exportOpen && (
         <ExportPdfDialog
           initialScale={scaleDenominator}
           planTitle={activeLevel.name}
           contentMeters={exportContentMeters}
+          selectionCount={selectionLockIds.length}
           onExport={onExportPdf}
+          onExportSvg={onExportSvg}
           onClose={() => setExportOpen(false)}
         />
       )}
@@ -3237,6 +3719,7 @@ export default function App() {
       {exportDxfOpen && (
         <ExportDxfDialog
           planTitle={activeLevel.name}
+          selectionCount={selectionLockIds.length}
           onExport={onExportDxf}
           onClose={() => setExportDxfOpen(false)}
         />
@@ -3259,6 +3742,8 @@ export default function App() {
           onRendererModeChange={setRendererMode}
           layout={layout}
           onApplyLayout={(l) => setLayout(reconcileLayout(l))}
+          onAliasOverridesChange={setAliasOverrides}
+          onShortcutOverridesChange={setShortcutOverrides}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -3289,6 +3774,17 @@ export default function App() {
             applyOpenedProjectFile(lockConflict.path, lockConflict.content, false);
             setLockConflict(null);
           }}
+        />
+      )}
+
+      {pendingDiscard && (
+        <UnsavedChangesDialog
+          onCancel={() => setPendingDiscard(null)}
+          onDiscard={() => {
+            pendingDiscard();
+            setPendingDiscard(null);
+          }}
+          onSave={onSaveProject}
         />
       )}
 
@@ -3388,10 +3884,29 @@ export default function App() {
             difference: () => applyBoolean(differenceDrawings),
             intersect: () => applyBoolean(intersectionDrawings),
             drawingSelectionCount: selectedDrawingIds.length,
+            hasDrawingStyleClipboard: drawingStyleClipboard !== null,
+            copyDrawingStyle,
+            pasteDrawingStyle,
+            lockableSelectionCount: selectionLockIds.length,
+            selectionAllLocked,
+            toggleSelectionLock,
+            selectionAllNoPrint: !!selectionAllNoPrint,
+            toggleSelectionNoPrint,
             bringToFront: () => reorderDrawings(selectedDrawingIds, "front"),
             bringForward: () => reorderDrawings(selectedDrawingIds, "forward"),
             sendBackward: () => reorderDrawings(selectedDrawingIds, "backward"),
             sendToBack: () => reorderDrawings(selectedDrawingIds, "back"),
+            // Stützpunkt-Einträge nur bei GENAU EINER selektierten Polylinie
+            // (mehrere gleichzeitig hätten keinen eindeutigen Klick-Bezug).
+            selectedPolyline: (() => {
+              if (selectedDrawingIds.length !== 1) return null;
+              const d = project.drawings2d.find((x) => x.id === selectedDrawingIds[0]);
+              return d && d.geom.shape === "polyline"
+                ? { id: d.id, pts: d.geom.pts, closed: d.geom.closed }
+                : null;
+            })(),
+            insertPolylinePoint: insertDrawingPoint,
+            deletePolylinePoint: deleteDrawingPoint,
             reorderLevel: (id, op) => reorderDrawingLevels([id], op),
           })}
           onClose={() => setMenu(null)}
@@ -3427,6 +3942,9 @@ export default function App() {
                   penId={cat.colorPenId}
                   pens={project.pens ?? []}
                   activeStyles={activePenSet(project)?.pens}
+                  customPalettes={project.customPalettes}
+                  builtinBanks={project.builtinPaletteBanks}
+                  onSaveColor={addColorToCustomPalette}
                   showWeight
                   onColorChange={(color) => patchCategory(cat.code, { color, colorPenId: undefined })}
                   onPenChange={(colorPenId) =>

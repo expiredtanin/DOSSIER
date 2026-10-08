@@ -1,10 +1,32 @@
 // Tab „Fenstertypen" — Öffnungsart, Flügelzahl, Verglasung, Zarge, Brüstung.
 // Nutzt den generischen {@link TypeLibraryTab}-Rumpf (siehe dort).
 
-import type { Project, WindowType } from "../../model/types";
+import type { Opening, Project, WindowType } from "../../model/types";
 import { t } from "../../i18n";
 import { FieldRow, NumberField, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
+import { ElevationPreview } from "../ElevationPreview";
+
+/**
+ * Synthetische Öffnungs-Instanz NUR für die Vorschau: `ElevationPreview`
+ * braucht `opening.width`/`.height`, alles andere kommt aus dem Fenstertyp
+ * selbst — es gibt hier (Typ-Bibliothek, keine platzierte Instanz) keine
+ * echte Wand/Position. Werte kommen aus den Typ-Defaults.
+ */
+function previewOpeningFor(win: WindowType): Opening {
+  return {
+    id: "preview",
+    type: "opening",
+    hostWallId: "",
+    categoryCode: "",
+    kind: "window",
+    position: 0,
+    width: win.defaultWidth,
+    height: win.defaultHeight,
+    sillHeight: win.defaultSillHeight,
+    typeId: win.id,
+  };
+}
 
 const WINDOW_KIND_OPTIONS: { value: WindowType["kind"]; labelKey: string }[] = [
   { value: "dreh", labelKey: "resources.windowKind.dreh" },
@@ -50,6 +72,9 @@ export function WindowStylesTab({
       onDelete={onDeleteWindowType}
       renderFields={(win, patch) => (
         <>
+          <div className="res-md-preview">
+            <ElevationPreview opening={previewOpeningFor(win)} wt={win} />
+          </div>
           <FieldRow label={t("resources.field.windowKind")}>
             <SelectField
               value={win.kind}

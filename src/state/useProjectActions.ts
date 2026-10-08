@@ -98,6 +98,9 @@ export function useProjectActions(
   const patchLineStyle = useStore((s) => s.patchLineStyle);
   const addLineStyle = useStore((s) => s.addLineStyle);
   const deleteLineStyle = useStore((s) => s.deleteLineStyle);
+  const patchTextStyle = useStore((s) => s.patchTextStyle);
+  const addTextStyle = useStore((s) => s.addTextStyle);
+  const deleteTextStyle = useStore((s) => s.deleteTextStyle);
   const addPen = useStore((s) => s.addPen);
   const renamePen = useStore((s) => s.renamePen);
   const deletePen = useStore((s) => s.deletePen);
@@ -108,6 +111,15 @@ export function useProjectActions(
   const patchPenSetColor = useStore((s) => s.patchPenSetColor);
   const patchPenSetWeight = useStore((s) => s.patchPenSetWeight);
   const seedStandardPenSet = useStore((s) => s.seedStandardPenSet);
+  const addCustomPalette = useStore((s) => s.addCustomPalette);
+  const renameCustomPalette = useStore((s) => s.renameCustomPalette);
+  const deleteCustomPalette = useStore((s) => s.deleteCustomPalette);
+  const addColorToCustomPalette = useStore((s) => s.addColorToCustomPalette);
+  const removeColorFromCustomPalette = useStore((s) => s.removeColorFromCustomPalette);
+  const setCustomPaletteVisible = useStore((s) => s.setCustomPaletteVisible);
+  const setBuiltinPaletteVisible = useStore((s) => s.setBuiltinPaletteVisible);
+  const insertDrawingPoint = useStore((s) => s.insertDrawingPoint);
+  const deleteDrawingPoint = useStore((s) => s.deleteDrawingPoint);
   // Wandstile: immutable Patch eines Wandtyps (z. B. Schichtfugen-Stile). Kein
   // eigener Store-Slice nötig — läuft direkt über setProject wie die übrigen
   // Ressourcen-Mutationen.
@@ -434,6 +446,9 @@ export function useProjectActions(
     patchLineStyle,
     addLineStyle,
     deleteLineStyle,
+    patchTextStyle,
+    addTextStyle,
+    deleteTextStyle,
     addPen,
     renamePen,
     deletePen,
@@ -444,6 +459,15 @@ export function useProjectActions(
     patchPenSetColor,
     patchPenSetWeight,
     seedStandardPenSet,
+    addCustomPalette,
+    renameCustomPalette,
+    deleteCustomPalette,
+    addColorToCustomPalette,
+    removeColorFromCustomPalette,
+    setCustomPaletteVisible,
+    setBuiltinPaletteVisible,
+    insertDrawingPoint,
+    deleteDrawingPoint,
     patchWallType,
     setOverrideRules,
     patchCeilingType,

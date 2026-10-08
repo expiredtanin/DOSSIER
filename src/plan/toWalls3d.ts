@@ -40,8 +40,9 @@
 // truck-Extrusionen, freie 2D-Geometrie) hat ihre eigene Datei unter
 // `toWalls3d/` — siehe dort für die konkrete Emissions-Logik je Bauteil.
 
-import type { Project, Wall } from "../model/types";
+import type { Project, Vec2, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
+import type { ToolDraft } from "../tools/types";
 import { stairVerticalExtent } from "../model/wall";
 import { openingJambs, openingVerticalExtent } from "../geometry/opening";
 import type { DetailLevel } from "../ui/TopBar";
@@ -50,7 +51,7 @@ import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import type { Vec3 as RoofVec3 } from "../geometry/roof";
 import { computeJoins } from "../model/joins";
 import type { WallCuts } from "../model/joins";
-import type { PickOpening, PickRoof, PickStair, PickContextMesh } from "../viewport/raycast3d";
+import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "../viewport/raycast3d";
 import {
   EPS,
   IMPORTED_RGB,
@@ -65,9 +66,9 @@ import {
 } from "./toWalls3d/shared";
 import { emitWall } from "./toWalls3d/bands";
 import { emitSlabs } from "./toWalls3d/ceilings";
-import { emitStairMeshes, emitStairs } from "./toWalls3d/stairs";
+import { emitStairMeshes, emitStairRailings, emitStairs } from "./toWalls3d/stairs";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
-import { emitDrawingLines } from "./toWalls3d/drawing2d";
+import { emitDrawingLines, pickDrawingSegs } from "./toWalls3d/drawing2d";
 import { emitColumns } from "./toWalls3d/columns";
 import { emitRoofCutLayers, emitRoofs } from "./toWalls3d/roofs";
 import { emitLegacyDoorLeaves, emitOpeningFrames, emitOpeningGlass, emitOpeningShading } from "./toWalls3d/openings";
@@ -114,9 +115,17 @@ function emitMeshes(project: Project): RMesh[] {
       });
     }
   }
-  out.push(...emitExtrudedSolids(project));
-  out.push(...emitColumns(project));
-  out.push(...emitDrawingLines(project));
+  // KEIN `out.push(...emitDrawingLines(project))`: bei grossen Importen (z. B.
+  // ein Kataster-DXF einer ganzen Stadt → hunderttausende Drawing2D-Elemente,
+  // je eins ein Mesh) sprengt der Spread-Operator die Argumentzahl-Grenze von
+  // `push` (RangeError "Maximum call stack size exceeded") — dieselbe, bereits
+  // dokumentierte Falle wie in `swissBuildings3d.ts::concatMeshes`/
+  // `dwgParser.ts`. `emitExtrudedSolids`/`emitColumns` sind praktisch nie so
+  // gross (Nutzer-platzierte BIM-Elemente), aber aus Konsistenz gleich
+  // behandelt.
+  for (const m of emitExtrudedSolids(project)) out.push(m);
+  for (const m of emitColumns(project)) out.push(m);
+  for (const m of emitDrawingLines(project)) out.push(m);
   return out;
 }
 
@@ -208,6 +217,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
       ...emitOpeningFrames(project, detail),
       ...emitOpeningShading(project, detail),
       ...emitStairMeshes(project),
+      ...emitStairRailings(project),
       ...emitRoofs(project),
     ],
     // Dach-Schicht-Eingabe für den 3D-Live-Schnitt (render3d::roof_cut) — s.
@@ -222,8 +232,10 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
  * Wand-Teilquader (mit `wallId`) und Decken-Prismen (mit `ceilingId`) desselben
  * geflachten Modells wie {@link projectToModel3d}, aber ohne die Kontext-Meshes
  * (die sind für die Bauteil-Auswahl irrelevant), PLUS die Öffnungs- (Fenster/
- * Türen) und Treppen-Boxen fürs Raycast-Picking. Reine TS-Nutzung — geht NICHT
- * an render3d; die Records tragen dieselben Geometriefelder wie die Serde-
+ * Türen) und Treppen-Boxen sowie die (tolerant aufgeweiteten) Boden-Spuren
+ * freier 2D-Zeichnungen (`drawings`, s. `toWalls3d/drawing2d.ts::
+ * pickDrawingSegs`) fürs Raycast-Picking. Reine TS-Nutzung — geht NICHT an
+ * render3d; die Records tragen dieselben Geometriefelder wie die Serde-
  * Payload, plus die Ids fürs Picking.
  */
 export function pickGeometry(
@@ -235,6 +247,7 @@ export function pickGeometry(
   stairs: PickStair[];
   roofs: PickRoof[];
   contextMeshes: PickContextMesh[];
+  drawings: PickDrawingSeg[];
 } {
   // Dächer: Dachflächen + Giebel als WORLD-Dreiecke (fan-trianguliert wie
   // emitRoofs; model [x,y,z=Höhe] → world [x, z, y]) — präzise geneigte
@@ -289,9 +302,15 @@ export function pickGeometry(
     });
   }
   // Kontext-Meshes (importierte Gebäude/Terrain, s. ContextObject): rohe
-  // WORLD-Dreiecke wie beim Dach, direkt aus dem Indexpuffer (kein Fan nötig —
-  // ImportedMesh/TerrainMesh liefern bereits ein echtes Dreiecksnetz). Kaputte
-  // Indizes robust überspringen statt abzustürzen (importierte Daten).
+  // WORLD-Dreiecke, direkt aus dem Indexpuffer (kein Fan nötig — ImportedMesh/
+  // TerrainMesh liefern bereits ein echtes Dreiecksnetz). Kaputte Indizes
+  // robust überspringen statt abzustürzen (importierte Daten).
+  // Modell (x,y,z) → world (x, z, −y) — Nord-Achse NEGIERT, damit der Pick
+  // dieselbe (gespiegelte→korrigierte) Lage trifft wie die sichtbare Geometrie
+  // in `viewport3d/meshBuilders.ts::buildContextMesh` (dort ausführlich
+  // begründet: reines Achsen-Vertauschen ohne Vorzeichenwechsel ist für einen
+  // allgemeinen xyz-Punktsatz eine Spiegelung, anders als bei Wand/Dach, die
+  // über eine orientierungserhaltende Rotation/Fächer-Triangulation entstehen).
   const contextMeshes: PickContextMesh[] = [];
   for (const obj of project.context ?? []) {
     if (obj.type === "contourSet" || obj.type === "image") continue;
@@ -303,12 +322,21 @@ export function pickGeometry(
       const ib = obj.indices[i + 1];
       const ic = obj.indices[i + 2];
       if (ia >= vcount || ib >= vcount || ic >= vcount) continue;
-      const at = (idx: number): RoofPickVec3 => [pos[idx * 3], pos[idx * 3 + 2], pos[idx * 3 + 1]];
+      const at = (idx: number): RoofPickVec3 => [pos[idx * 3], pos[idx * 3 + 2], -pos[idx * 3 + 1]];
       tris.push([at(ia), at(ib), at(ic)]);
     }
     if (tris.length > 0) contextMeshes.push({ tris, contextObjectId: obj.id });
   }
-  return { walls: projectToWalls3d(project), slabs: emitSlabs(project), openings, stairs, roofs, contextMeshes };
+  const drawings = pickDrawingSegs(project);
+  return {
+    walls: projectToWalls3d(project),
+    slabs: emitSlabs(project),
+    openings,
+    stairs,
+    roofs,
+    contextMeshes,
+    drawings,
+  };
 }
 
 /**
@@ -474,6 +502,89 @@ export function selectionHighlightLines(
         corners.push([x, h, y]);
       }
       for (const [i, j] of BOX_EDGES) pushEdge(corners[i], corners[j]);
+    }
+  }
+  return new Float32Array(out);
+}
+
+/** Blau-Akzent der Zeichnen-Vorschau — identisch zu `Viewport3D.tsx`s `draftLineMat` (0x2f8fff). */
+const DRAFT_LINE_RGB: RRgb = [0x2f / 255, 0x8f / 255, 0xff / 255];
+/** Warmes Gelb für Fang-Marker/-Führungslinien (Objekt-Snap, Ortho/Extension,
+ * weicher Winkel-Snap) — analog dem 2D-Snap-Akzent (`PlanView`s `snapColor`-
+ * Prop), hier als fester Wert (der 3D-Viewport hat noch keine eigene
+ * einstellbare Snap-Farbe, s. PENDENZEN „ArchiCAD-Wunschliste"). */
+const SNAP_GUIDE_RGB: RRgb = [1, 0.8, 0];
+/** Halbe Kantenlänge des Fang-Markers (Welt-Meter) — deutlich grösser als die
+ * 0.008m Zeichnungs-Linienbreite, aber klein genug, den Punkt nicht zu
+ * verdecken. */
+const SNAP_MARKER_HALF = 0.06;
+/** Länge der weichen-Winkel-Führungslinie über den Fangpunkt hinaus (Welt-
+ * Meter) — bewusst ENDLICH (anders als die 2D-SVG-Version, die bis zum
+ * Viewport-Rand läuft; im 3D gibt es keine sinnvolle "Rand"-Grenze, eine
+ * unendliche Linie liefe unkontrolliert durchs ganze Modell). */
+const SNAP_ANGLE_GUIDE_EXTEND_M = 6;
+
+/**
+ * Wandelt den aktiven Werkzeug-Draft (`ToolDraft.preview`, Modell-Meter,
+ * Grundriss-Ebene) in dasselbe flache Weltraum-LineList-Format wie
+ * {@link selectionHighlightLines} (`[px,py,pz,r,g,b, ...]`, world-Meter, je 2
+ * Vertices = 1 Kante) — reicht denselben `set_highlight_lines`-Kanal der
+ * WASM-Engine, um im 3D-Viewport eine Live-Vorschau beim Zeichnen zu zeigen
+ * (Parität zum three.js-Pfad, dessen `drawDraft` dieselben `DraftShape`s auf
+ * derselben Ebene rendert). Modell (x,y) → world (x, planeY, y) — KEIN
+ * Vorzeichenwechsel (dieselbe unveränderte, orientierungserhaltende
+ * Konvention wie Wand-/Zeichnungslinien; s. `addDrawingLines`/`toWalls3d/
+ * drawing2d.ts` — anders als die Kontext-Mesh-Konvention, s. PENDENZEN.md).
+ *
+ * ZUSÄTZLICH (Nutzer-Wunsch „generell im 3D auch Snapping einbauen"): bei
+ * gesetztem `draft.snap` ein kleines Quadrat am Fangpunkt (JEDE Fang-Art,
+ * analog der 2D-`SnapMarker`) sowie — bei Ortho-/Verlängerungs-Fang bzw.
+ * weichem Winkel-Fang — die zugehörige Bezugslinie/-Führungslinie (analog
+ * `snap-helper-line`/`AngleGuide` im 2D-Plan). Läuft VOR jedem gesetzten
+ * Punkt (auch beim allerersten Klick, ohne `preview`), zeigt der Marker also
+ * schon, wohin der erste Punkt fängt — deshalb NICHT mehr früh bei leerem
+ * `preview` abgebrochen.
+ */
+export function draftWorldLines(draft: ToolDraft | null, planeY: number): Float32Array {
+  if (!draft) return new Float32Array(0);
+  const out: number[] = [];
+  const pushSeg = (a: Vec2, bPt: Vec2, rgb: RRgb = DRAFT_LINE_RGB) => {
+    const [cr, cg, cb] = rgb;
+    out.push(a.x, planeY, a.y, cr, cg, cb);
+    out.push(bPt.x, planeY, bPt.y, cr, cg, cb);
+  };
+  for (const shape of draft.preview) {
+    if (shape.kind === "line") {
+      pushSeg(shape.a, shape.b);
+    } else {
+      const n = shape.pts.length;
+      for (let i = 0; i + 1 < n; i++) pushSeg(shape.pts[i], shape.pts[i + 1]);
+      if (shape.closed && n > 2) pushSeg(shape.pts[n - 1], shape.pts[0]);
+    }
+  }
+  const snap = draft.snap;
+  if (snap) {
+    const p = snap.point;
+    const h = SNAP_MARKER_HALF;
+    const c1 = { x: p.x - h, y: p.y - h };
+    const c2 = { x: p.x + h, y: p.y - h };
+    const c3 = { x: p.x + h, y: p.y + h };
+    const c4 = { x: p.x - h, y: p.y + h };
+    pushSeg(c1, c2, SNAP_GUIDE_RGB);
+    pushSeg(c2, c3, SNAP_GUIDE_RGB);
+    pushSeg(c3, c4, SNAP_GUIDE_RGB);
+    pushSeg(c4, c1, SNAP_GUIDE_RGB);
+    if (snap.refA && (snap.kind === "ortho" || snap.kind === "extension")) {
+      pushSeg(snap.refA, p, SNAP_GUIDE_RGB);
+    } else if (snap.refA && snap.kind === "angle") {
+      const dx = p.x - snap.refA.x;
+      const dy = p.y - snap.refA.y;
+      const len = Math.hypot(dx, dy);
+      const ext =
+        len > 1e-6
+          ? { x: p.x + (dx / len) * SNAP_ANGLE_GUIDE_EXTEND_M, y: p.y + (dy / len) * SNAP_ANGLE_GUIDE_EXTEND_M }
+          : p;
+      pushSeg(snap.refA, ext, SNAP_GUIDE_RGB);
     }
   }
   return new Float32Array(out);

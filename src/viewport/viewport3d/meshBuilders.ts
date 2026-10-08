@@ -81,8 +81,29 @@ export interface ContextMats {
  *   • ContourSet               → LineSegments je Kontur auf ihrer Z-Höhe.
  *
  * Achs-Konvention: das Modell speichert (x, y, z) mit z = Höhe; Three nutzt y als
- * Höhe. Wir bilden Modell (x,y,z) → Three (x, z, y) ab (wie die übrige Szene, in
- * der Plan-Y auf die Three-Z-Achse fällt und die Höhe auf Three-Y).
+ * Höhe. Wir bilden Modell (x,y,z) → Three (x, z, −y) ab: x/Höhe wie die übrige
+ * Szene (Plan-Y fällt auf Three-Z, Höhe auf Three-Y), die Nord-Achse (Plan-Y)
+ * wird dabei NEGIERT.
+ *
+ * FUND (Nutzer-Report „swisstopo-Import komplett gespiegelt", 2026-09-24): die
+ * übrige Szene (Wände via `addLayerPrism`, 2D-Linien via `addDrawing2DLines`)
+ * bildet Plan-Y zwar ebenfalls unnegiert auf Three-Z ab, erreicht das aber über
+ * eine ECHTE 3D-ROTATION einer zunächst flachen Extrusion (`ExtrudeGeometry` +
+ * `mesh.rotation.x = Math.PI/2`) — eine Rotation ist immer orientierungserhaltend
+ * (det=+1), unabhängig davon, welche lokale Achse dabei wohin fällt. Die
+ * Kontext-Meshes/-Konturen HIER haben dagegen von Anfang an drei ECHTE,
+ * unabhängige Koordinaten (x=Ost, y=Nord, z=Höhe aus den importierten Rohdaten)
+ * — ein reines KOMPONENTEN-VERTAUSCHEN zweier Achsen OHNE Vorzeichenwechsel ist
+ * für einen solchen allgemeinen Punkt-/Dreieckssatz IMMER eine Spiegelung
+ * (Determinante -1, nachgerechnet: Matrix [[1,0,0],[0,0,1],[0,1,0]]). Die
+ * Wände blieben davon verschont (andere Konstruktionsmethode), aber JEDE
+ * importierte Geometrie (swisstopo/OSM: Gebäude, Terrain, Strassen-Konturen)
+ * erschien dadurch komplett gespiegelt — position der Elemente ZUEINANDER
+ * (z. B. „Strasse rechts vom Bahnhof") war betroffen, die Lage relativ zu den
+ * eigenen Wänden bleibt eine offene Frage (s. PENDENZEN.md), da eine Korrektur
+ * ohne Spiegelung x/Höhe unangetastet lassen MUSS (sonst bräche die x/z-
+ * Übereinstimmung mit den Wänden) — die einzig verbleibende, orientierungs-
+ * erhaltende Korrektur ist die Vorzeichenumkehr der Nord-Achse.
  */
 export function buildContext(
   context: ContextObject[],
@@ -112,12 +133,13 @@ function buildContextMesh(
   mat: THREE.Material,
 ): THREE.Mesh | null {
   if (positions.length < 9 || indices.length < 3) return null;
-  // Modell (x,y,z) → Three (x, z, y).
+  // Modell (x,y,z) → Three (x, z, −y) — Nord-Achse NEGIERT (Spiegelungs-Fix,
+  // s. Kommentar bei `buildContext`).
   const verts = new Float32Array(positions.length);
   for (let i = 0; i < positions.length; i += 3) {
     verts[i] = positions[i]; // x
     verts[i + 1] = positions[i + 2]; // y(Three) = z(Modell) = Höhe
-    verts[i + 2] = positions[i + 1]; // z(Three) = y(Modell)
+    verts[i + 2] = -positions[i + 1]; // z(Three) = -y(Modell)
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(verts, 3));
@@ -140,8 +162,9 @@ function buildContourLines(
     for (let i = 0; i < segCount; i++) {
       const a = c.pts[i];
       const b = c.pts[(i + 1) % n];
-      // Modell (x,y,z=c.z) → Three (x, z, y).
-      pos.push(a.x, c.z, a.y, b.x, c.z, b.y);
+      // Modell (x,y,z=c.z) → Three (x, z, −y) — Nord-Achse NEGIERT (Spiegelungs-
+      // Fix, s. Kommentar bei `buildContext`).
+      pos.push(a.x, c.z, -a.y, b.x, c.z, -b.y);
     }
   }
   if (pos.length === 0) return null;

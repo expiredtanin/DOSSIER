@@ -13,8 +13,7 @@
 // mode:"move") statt eine zweite Verschiebe-Logik zu duplizieren — er bewegt
 // Wände UND alle 2D-Formen immutabel an die Endlage.
 
-import { commitTransform } from "../../tools/transform";
-import type { TransformSelection } from "../../tools/transform";
+import { commitTransform, hasTransformSelection, toTransformSel } from "../../tools/transform";
 import { transformPreview } from "../../tools/transform";
 import type {
   Command,
@@ -45,28 +44,6 @@ function targetFromFields(base: Vec2, locks: Record<string, number>, cursor: Vec
   const angleDeg = "angle" in locks ? locks.angle : segAngleDeg(base, ref);
   const ang = angleDeg * DEG;
   return { x: base.x + Math.cos(ang) * length, y: base.y + Math.sin(ang) * length };
-}
-
-/** Hat die Auswahl überhaupt etwas Verschiebbares? */
-function hasSelection(sel: CommandSelection): boolean {
-  return (
-    sel.wallIds.length > 0 ||
-    sel.drawingId !== null ||
-    (sel.drawingIds?.length ?? 0) > 0 ||
-    !!sel.extrudedSolidId ||
-    !!sel.columnId
-  );
-}
-
-/** Auswahl → TransformSelection (gleiche Form). */
-function toTransformSel(sel: CommandSelection): TransformSelection {
-  return {
-    wallIds: sel.wallIds,
-    drawingId: sel.drawingId,
-    drawingIds: sel.drawingIds,
-    extrudedSolidId: sel.extrudedSolidId,
-    columnId: sel.columnId,
-  };
 }
 
 // Zustand: erst Basispunkt setzen, dann Ziel (mit Auswahl-Snapshot vom Start).
@@ -139,7 +116,7 @@ export const moveCommand: Command = {
     const s = state as MoveState;
     if (s.phase === "done") return idle();
     // Leere Auswahl → nichts zu verschieben (No-op + Hinweis, dann beenden).
-    if (!hasSelection(ctx.selection)) {
+    if (!hasTransformSelection(ctx.selection)) {
       return [{ phase: "done", lastPoint: null } as MoveDone, { draft: null, done: true }];
     }
     if (input.kind !== "point") {

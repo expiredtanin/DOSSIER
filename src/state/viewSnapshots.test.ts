@@ -68,6 +68,58 @@ describe("viewSnapshots — captureViewSnapshot", () => {
   });
 });
 
+describe("viewSnapshots — Kamera (cameraCenter/cameraPxPerMeter)", () => {
+  it("captureViewSnapshot übernimmt eine gegebene Kamera", () => {
+    const st = { ...sampleState(), cameraCenter: { x: 3, y: -4 }, cameraPxPerMeter: 72 };
+    const snap = captureViewSnapshot("vs-1", "Mit Kamera", st);
+    expect(snap.cameraCenter).toEqual({ x: 3, y: -4 });
+    expect(snap.cameraPxPerMeter).toBe(72);
+  });
+
+  it("captureViewSnapshot lässt die Kamera weg, wenn sie im Kernzustand fehlt", () => {
+    const snap = captureViewSnapshot("vs-1", "Ohne Kamera", sampleState());
+    expect(snap.cameraCenter).toBeUndefined();
+    expect(snap.cameraPxPerMeter).toBeUndefined();
+  });
+
+  it("koppelt cameraCenter vom Live-Zustand ab (Kopie, keine Referenz)", () => {
+    const camera = { x: 1, y: 2 };
+    const st = { ...sampleState(), cameraCenter: camera, cameraPxPerMeter: 50 };
+    const snap = captureViewSnapshot("a", "n", st);
+    camera.x = 999;
+    expect(snap.cameraCenter).toEqual({ x: 1, y: 2 });
+  });
+
+  it("Roundtrip capture → read erhält die Kamera", () => {
+    const st = { ...sampleState(), cameraCenter: { x: 3, y: -4 }, cameraPxPerMeter: 72 };
+    const snap = captureViewSnapshot("vs-1", "Mit Kamera", st);
+    expect(readViewSnapshot(snap)).toEqual(st);
+  });
+
+  it("readViewSnapshot liefert undefined für einen Alt-Ausschnitt ohne Kamera (kein Crash)", () => {
+    const legacy: ViewSnapshot = {
+      id: "old",
+      name: "Alt",
+      viewType: "grundriss",
+      view3d: "perspective",
+      scaleDenominator: 100,
+      detail: "mittel",
+      activeLevelId: "floor-1",
+      layerVisibility: {},
+      drawingVisibility: {},
+    };
+    const st = readViewSnapshot(legacy);
+    expect(st.cameraCenter).toBeUndefined();
+    expect(st.cameraPxPerMeter).toBeUndefined();
+  });
+
+  it("snapshotMatchesLiveState ignoriert eine abweichende Kamera (bewusst ausgenommen)", () => {
+    const snap = { ...sampleState(), cameraCenter: { x: 0, y: 0 }, cameraPxPerMeter: 50 };
+    const live = { ...sampleState(), cameraCenter: { x: 999, y: 999 }, cameraPxPerMeter: 5 };
+    expect(snapshotMatchesLiveState(snap, live)).toBe(true);
+  });
+});
+
 describe("viewSnapshots — readViewSnapshot", () => {
   it("Roundtrip: capture → read ergibt denselben Kernzustand", () => {
     const st = sampleState();

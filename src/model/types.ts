@@ -16,7 +16,7 @@ export type Vec2 = { x: number; y: number };
 import type { SiaCategory } from "../geometry/roomArea";
 export type { SiaCategory } from "../geometry/roomArea";
 // Rich-Text-Dokument für den Raum-Stempel (frei editierbarer Teil).
-import type { RichTextDoc, Align, Marks } from "../text/richText";
+import type { RichTextDoc, Align, Marks, TextStylePreset } from "../text/richText";
 export type { RichTextDoc } from "../text/richText";
 // Ansichts-Enums für Ausschnitte/View-Snapshots (Ansichtstyp, Kamera-Preset,
 // Detailgrad). Rein type-only importiert — zur Laufzeit erased, kein Zyklus
@@ -69,6 +69,45 @@ export interface PenSet {
   /** Stift-ID (`ColorPen.id`) → Farbe+Strichstärke. */
   pens: Record<string, PenStyle>;
 }
+
+/**
+ * Eine benutzerdefinierte Farbpalette (Farbmischer → „Diese Farbe
+ * speichern", `ui/FreeColorPicker.tsx`). Anders als Stiftsätze: reine
+ * Farb-Sammlung ohne Kopplungs-/Baking-Semantik — ein Klick auf einen
+ * Swatch übernimmt einfach den Hex-Wert wie bei den mitgelieferten
+ * Paletten (Einfach/Tango/Material/RAL), nur eben frei befüllbar. Mehrere
+ * Paletten können nebeneinander existieren (z. B. „Fassade Projekt X",
+ * „Innenausbau"); keine ist „aktiv" — alle sind gleichzeitig über den
+ * Paletten-Umschalter erreichbar.
+ */
+export interface CustomPalette {
+  id: string;
+  name: string;
+  /** Hex-Werte, Reihenfolge = Anzeigereihenfolge im Raster. */
+  colors: string[];
+  /**
+   * Im Farbwahl-Popover anzeigen? Fehlt das Feld, gilt `true` (sichtbar) —
+   * so bleiben bestehende Projekte unverändert. Umschaltbar im Ressourcen-
+   * Manager (Tab „Paletten"), damit die Bank-Leiste im Popover kurz bleibt.
+   */
+  visible?: boolean;
+}
+
+/**
+ * Sichtbarkeit der MITGELIEFERTEN Farbpaletten-Bänke im Farbwahl-Popover
+ * (`ui/FreeColorPicker.tsx`). Fehlt ein Schlüssel (oder das ganze Objekt),
+ * gilt die Bank als sichtbar — nur ein explizites `false` blendet sie aus
+ * (z. B. RAL, wenn im Projekt nie mit Fassadenfarben gearbeitet wird).
+ */
+export interface BuiltinPaletteBanks {
+  simple?: boolean;
+  tango?: boolean;
+  material?: boolean;
+  ral?: boolean;
+}
+
+/** Schlüssel einer mitgelieferten Palette-Bank (s. {@link BuiltinPaletteBanks}). */
+export type BuiltinPaletteBank = keyof BuiltinPaletteBanks;
 
 export interface LineStyle {
   id: string;
@@ -144,15 +183,23 @@ export interface HatchStyle {
   name: string;
   /**
    * Schraffur-Typ (additiv, Default `undefined` ⇒ "vector"):
-   *   • "vector" — Musterlinien (die bestehenden `pattern`/`scale`/`angle`/
+   *   • "vector"   — Musterlinien (die bestehenden `pattern`/`scale`/`angle`/
    *     `relativeToWall`/`lineStyleId` sind die Vektor-Parameter). Untermodus
    *     über `lines` (parallel vs. random).
-   *   • "image"  — ein Bild wird als Muster (Pattern-Fill) geladen; Parameter in
+   *   • "image"    — ein Bild wird als Muster (Pattern-Fill) geladen; Parameter in
    *     `image` (Skalierung/Verzerrung/Rotation).
-   * Fehlt `kind`, gilt „vector"; heutige Renderer ignorieren `kind` und zeichnen
-   * weiterhin nach `pattern` (Backward-Compat).
+   *   • "gradient" — ein zweifarbiger Farbverlauf (linear/radial) füllt die
+   *     Fläche; Parameter in `gradient`. Wie „image" unabhängig vom `pattern`-
+   *     Feld. GL-/3D-Szene und DXF-Export kennen keine echten Verläufe (wie
+   *     bei „image" bereits der Fall) und fallen auf eine neutrale Füllung
+   *     zurück — nur die SVG-basierten Renderer (PlanView-Anzeige, Druck-/PDF-
+   *     Export) zeichnen den echten Verlauf, da SVG-`<linearGradient>`/
+   *     `<radialGradient>` sich genau wie ein `<pattern>` als `fill="url(#…)"`
+   *     referenzieren lassen — keine neue Fill-Mechanik nötig.
+   * Fehlt `kind`, gilt „vector"; heutige Renderer ignorieren unbekannte `kind`-
+   * Werte und zeichnen weiterhin nach `pattern` (Backward-Compat).
    */
-  kind?: "vector" | "image";
+  kind?: "vector" | "image" | "gradient";
   /**
    * Untermodus einer Vektor-Schraffur (nur `kind` fehlt/"vector", Default
    * `undefined` ⇒ "parallel"):
@@ -166,6 +213,14 @@ export interface HatchStyle {
    * = Drehung in Grad. Bei `kind==="vector"` ungenutzt.
    */
   image?: { src: string; scaleX: number; scaleY: number; rotation: number };
+  /**
+   * Farbverlauf (nur `kind==="gradient"`). `type`: "linear" (entlang `angle`,
+   * SVG-Konvention wie `HatchStyle.angle`) oder "radial" (vom Flächenzentrum
+   * nach aussen, `angle` dann ungenutzt). `angle` in Grad. Kein Gewicht/keine
+   * Zwischenfarben (Zweifarben-Verlauf, kein Multi-Stop-Editor) — deckt den
+   * Hauptfall ab, s. PENDENZEN.md für die bewusste Vereinfachung.
+   */
+  gradient?: { color1: string; color2: string; angle: number; type: "linear" | "radial" };
   /** Muster-Typ. */
   pattern: HatchPattern;
   /** Grundmaßstab des Musters (1 = Standardteilung). */
@@ -410,6 +465,10 @@ export interface DoorType {
   leafStyle: "glatt" | "kassette" | "glas";
   /** Glasanteil des Blatts (0..1); nur bei `leafStyle: "glas"` relevant. */
   glazingRatio?: number;
+  /** Anzahl Kassetten-Felder horizontal; nur bei `leafStyle: "kassette"` relevant. Default 2. */
+  panelCols?: number;
+  /** Anzahl Kassetten-Felder vertikal; nur bei `leafStyle: "kassette"` relevant. Default 3. */
+  panelRows?: number;
   /** Zargen-/Rahmenstärke quer zur Wand (Meter). */
   frameThickness: number;
   /** Rahmen-/Zargen-Tiefe in Wandrichtung (Meter); fehlt ⇒ aus Wanddicke. */
@@ -972,6 +1031,10 @@ export interface Wall {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "20" für Wände. */
   categoryCode: string;
+  /** Objekt-Sperre: gesperrte Elemente lassen sich nicht anwählen (daher
+   *  auch nicht verschieben/bearbeiten/löschen) — anders als der Ebenen-/
+   *  Geschoss-Sperrmodus (`DisplayMode`) ist das hier persistiert. */
+  locked?: boolean;
   /** Achs-Startpunkt im Grundriss (Meter). */
   start: Vec2;
   /** Achs-Endpunkt im Grundriss (Meter). */
@@ -1099,6 +1162,8 @@ export interface Ceiling {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "30" für Decken. */
   categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
   /**
    * Geschlossener Umriss im Grundriss (Meter). Der Schlusspunkt wird NICHT
    * dupliziert (die letzte Kante läuft von outline[n-1] zu outline[0]).
@@ -1206,6 +1271,8 @@ export interface Roof {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "35" für Dächer. */
   categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
   /** Geschlossener Grundriss-Umriss (Meter); Geometrie nutzt die Bounding-Box. */
   outline: Vec2[];
   /** Dachform. */
@@ -1282,6 +1349,8 @@ export interface Opening {
   hostWallId: string;
   /** Grafik-Kategorie (Ebene), z. B. "21" für Türen/Fenster. */
   categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
   /** Fenster oder Tür. */
   kind: "window" | "door";
   /** Abstand des ersten Pfostens vom Wand-Startpunkt entlang der Achse (Meter). */
@@ -1422,6 +1491,8 @@ export interface Stair {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "40" für Treppen. */
   categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
   /** Grundform (gerade / L / Wendel). */
   shape: StairShape;
   /** Startpunkt der Lauflinie im Grundriss (Meter). */
@@ -1511,6 +1582,8 @@ export interface Room {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "45" für Räume. */
   categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
   /** SIA-416-Blatt-Kategorie (HNF/NNF/VF/FF/KGF). */
   siaCategory: SiaCategory;
   /** Raum-Name, z. B. „Wohnen". */
@@ -1612,6 +1685,19 @@ export interface Door {
 // (keine vorab erzeugten Plan-Primitive). Siehe docs/design/drawing-tools.md §7.
 
 /** Geometrie-Form eines 2D-Zeichenelements. */
+/**
+ * Linienende (Pfeilspitze & Co.) an einer OFFENEN 2D-Form — in jedem CAD eine
+ * Standard-Objekteigenschaft, vor allem für Beschriftungen. Rein grafisch,
+ * kein Bezug auf andere Elemente.
+ *   • "none"      — offenes Ende (Default)
+ *   • "arrow"     — gefüllte Pfeilspitze (wie bisher fest am Leader)
+ *   • "arrowOpen" — offene Pfeilspitze (zwei Striche)
+ *   • "dot"       — gefüllter Punkt
+ *   • "tick"      — Schrägstrich (45°, wie der Massstrich der Bemassung)
+ *   • "square"    — gefülltes Quadrat
+ */
+export type EndMark = "none" | "arrow" | "arrowOpen" | "dot" | "tick" | "square";
+
 export type Drawing2DGeom =
   | { shape: "line"; a: Vec2; b: Vec2 }
   /**
@@ -1623,6 +1709,15 @@ export type Drawing2DGeom =
    * extend-/join-fähig (reine Ausrichtungshilfe, kein reales Bauteil).
    */
   | { shape: "xline"; a: Vec2; b: Vec2 }
+  /**
+   * Strahl (Nutzer-Wunsch: „Ray, halb-unendliche Linie — nur `xline`,
+   * beidseitig unendlich, existiert"): `a` ist der FESTE Anker (wird NICHT
+   * verlängert), `b` bestimmt nur die Richtung — beim Rendern/Picken weit
+   * über `b` hinaus verlängert (dieselbe `XLINE_EXTEND_M`-Konstante), aber
+   * NICHT über `a` hinaus. Sonst wie `xline`: bewusst NICHT offset-/trim-/
+   * extend-/join-fähig.
+   */
+  | { shape: "ray"; a: Vec2; b: Vec2 }
   | {
       shape: "polyline";
       pts: Vec2[];
@@ -1662,11 +1757,17 @@ export type Drawing2DGeom =
    */
   | { shape: "bezier"; pts: Vec2[] }
   /**
-   * Glatte Kurve DURCH `pts` (uniformer Catmull-Rom), analog `polyline`, aber
-   * mit gerundetem statt geradem Verlauf zwischen den Wegpunkten. `closed`
-   * schliesst den Ring (letzter Wegpunkt → erster).
+   * Glatte Kurve über `pts`, analog `polyline`, aber mit gerundetem statt
+   * geradem Verlauf zwischen den Wegpunkten. `closed` schliesst den Ring
+   * (letzter Wegpunkt → erster). `mode` (optional, Default `"fit"` bei
+   * Fehlen — additiv wie üblich): `"fit"` = Kurve verläuft DURCH `pts`
+   * (uniformer Catmull-Rom, das bisherige/einzige Verhalten); `"control"` =
+   * `pts` sind Kontrollpunkte eines kubischen B-Splines (CV-Modus), die
+   * Kurve wird nur von ihnen gezogen, berührt sie i. A. NICHT (Ausnahme:
+   * Start/Ende bei offener Kurve, geklemmt). S. `tools/curves.ts::
+   * sampleUniformBSpline` für die Geometrie.
    */
-  | { shape: "spline"; pts: Vec2[]; closed: boolean }
+  | { shape: "spline"; pts: Vec2[]; closed: boolean; mode?: "fit" | "control" }
   /**
    * Masslinie (lineare Bemassung, SIA 400 B.5.3): misst den Abstand `a`↔`b`.
    * `offset` ist der VORZEICHENBEHAFTETE Normalabstand (Modell-Meter, links
@@ -1684,7 +1785,49 @@ export type Drawing2DGeom =
    * ganze Kette (nicht mehrere) — spätere Bearbeitung kann Punkte ergänzen
    * (verlängern ODER dazwischen einfügen, s. `commands/cmds/dimension.ts`).
    */
-  | { shape: "dimension"; pts: Vec2[]; offset: number }
+  | {
+      shape: "dimension";
+      pts: Vec2[];
+      offset: number;
+      /**
+       * Darstellungs-Feinheiten der Bemassung, ALLE optional und in
+       * PAPIER-MILLIMETERN — so, wie die Zeichnungsnorm sie angibt
+       * („Überstand 2 mm"), also unabhängig vom Massstab. Umgerechnet wird
+       * beim Erzeugen des jeweiligen Plans (`model/dimension.ts::mmToModel`);
+       * der Plan wird je Ziel — Bildschirm bzw. Layout-Viewport — eigens
+       * erzeugt, der Massstab ist dort also bekannt und eindeutig.
+       * Fehlt ein Wert, gilt `DIM_DEFAULTS_MM`.
+       */
+      /** Abstand Masshilfslinie → bemessener Punkt (Default 1 mm). */
+      gapMm?: number;
+      /** Überstand der Masshilfslinie ÜBER die Masslinie hinaus (Default 1 mm). */
+      overshootMm?: number;
+      /** Länge der Massstriche an den Masslinien-Enden (Default 3 mm). */
+      tickLenMm?: number;
+      /** Schrifthöhe der Masszahl (Default 4 mm). */
+      textHeightMm?: number;
+      /**
+       * Strichstärken der drei Bestandteile, in PAPIER-MILLIMETERN (wie jede
+       * andere Strichstärke hier — erst beim Rendern aufgelöst und daher
+       * massstabsunabhängig; im Gegensatz zu den Abständen oben, die
+       * zwangsläufig Modellmass sind). Fehlt ein Wert, gilt der bisherige
+       * Default: Masslinie und Masshilfslinien erben die Strichstärke des
+       * Elements, die Massstriche werden doppelt so dick gezeichnet
+       * (Erkennbarkeit, SIA 400 Figur 13).
+       */
+      lineWeightMm?: number;
+      extWeightMm?: number;
+      tickWeightMm?: number;
+      /**
+       * Verschiebung der Masszahl aus ihrer Standardlage, ebenfalls in
+       * PAPIER-MILLIMETERN, im Segment-Koordinatensystem: `along` entlang
+       * der Masslinie (+ = Richtung b), `perp` quer dazu (+ = von der
+       * Masslinie weg). Fehlt es, sitzt die Zahl mittig knapp über der
+       * Masslinie. Bei einer Masskette gilt der Versatz je Segment,
+       * Index = Segmentnummer.
+       */
+      textOffsetsMm?: { along: number; perp: number }[];
+    }
   /**
    * Höhenkote (SIA 400 B.5.4, Figur 18): Dreieck-Symbol + Höhenwert (Meter,
    * ±0.00-Referenz frei wählbar, s. Norm) an einem Punkt. `kind` bestimmt
@@ -1701,6 +1844,64 @@ export type Drawing2DGeom =
       /** Drehung (Radiant); Werkzeug erzeugt bewusst nur 0, s. Ellipse-Muster. */
       rotation: number;
     }
+  /**
+   * Detail-/Schnitt-Verweis-Symbol (Nutzer-Wunsch: „Nur `leaderTarget` an
+   * Text — kein zweiteiliges Verweis-Symbol, das eine Sheet/Layout-ID
+   * trägt"). Klassische zweigeteilte Verweisblase: Kreis mit waagrechter
+   * Trennlinie, `label` oben (Detail-/Schnitt-Bezeichner, z. B. „A"/„1"),
+   * Blattbezeichnung unten (`sheetLayoutId` verweist auf ein echtes
+   * `Project.layouts`-Blatt und LÖST seinen Namen zur Anzeige auf; fehlt der
+   * Verweis oder ist das Blatt gelöscht, zeigt `sheetLabel` einen manuell
+   * getippten Platzhalter). Fixe Modell-Meter-Grösse wie beim strukturell
+   * ähnlichen `kote`-Symbol (keine Papier-mm-Skalierung — dieselbe bewusste
+   * Vereinfachung).
+   */
+  | {
+      shape: "detailref";
+      /** Zentrum des Kreises. */
+      at: Vec2;
+      /** Obere Zeile: Detail-/Schnitt-Bezeichner. */
+      label: string;
+      /** Verknüpftes Blatt (`Project.layouts[].id`); `undefined` = kein Verweis. */
+      sheetLayoutId?: string;
+      /**
+       * Untere Zeile OHNE Verweis (oder als Blatt gelöscht wurde): manuell
+       * getippter Platzhalter. Mit gültigem `sheetLayoutId` wird stattdessen
+       * der ECHTE Blattname angezeigt (immer aktuell, keine Duplizierung).
+       */
+      sheetLabel?: string;
+    }
+  /**
+   * Massstabsbalken (Nutzer-Wunsch: „kein Massstabsbalken existiert"). Anders
+   * als Bemassung/Kote/Detail-Verweis ist die BALKENLÄNGE bewusst in ECHTEN
+   * Modell-Metern angegeben (nicht Papier-mm): der ganze Plan wird ohnehin im
+   * Papier-Massstab abgebildet, ein 1-Meter-Segment erscheint dadurch
+   * automatisch in der richtigen Papiergrösse für JEDEN Massstab — keine
+   * eigene Umrechnung nötig. Nur die Balkenhöhe/Beschriftungsgrösse sind
+   * (wie bei Bemassung/Kote) Papier-mm, damit sie unabhängig vom Massstab
+   * lesbar bleiben. Achsparallel (horizontal) — keine Drehung in v1, analog
+   * zur bewusst einfachen Ellipse-Erzeugung.
+   */
+  | {
+      shape: "scalebar";
+      /** Linke untere Ecke des Balkens. */
+      at: Vec2;
+      /** Länge EINES Segments in ECHTEN Modell-Metern. */
+      segmentLength: number;
+      /** Anzahl Segmente (abwechselnd gefüllt/leer). */
+      segments: number;
+    }
+  /**
+   * Punkt-/Knotenmarker (Nutzer-Wunsch: „Punkt-/Knotenmarker" aus der
+   * Werkzeug-Lücken-Liste). Kleines, fest grosses Kreuz-in-Kreis-Symbol an
+   * `at` — markiert einen einzelnen Referenz-/Vermessungspunkt im Plan (z. B.
+   * einen Fixpunkt), OHNE selbst Bemassung/Text zu tragen. Fixe Modell-
+   * Meter-Grösse wie `kote`/`detailref` (keine Papier-mm-Skalierung) — ein
+   * physischer Bodenpunkt hat eine reale, vom Papier-Massstab unabhängige
+   * Grösse ist hier bewusst NICHT das Ziel; wie bei `kote` geht es um
+   * gleichbleibende Lesbarkeit im Plan.
+   */
+  | { shape: "pointmarker"; at: Vec2 }
   | {
       shape: "text";
       at: Vec2;
@@ -1739,6 +1940,16 @@ export type Drawing2DGeom =
        */
       leaderTarget?: Vec2;
       /**
+       * Zwischen-Knickpunkte der Hinweislinie, zwischen `at` (Textanker) und
+       * `leaderTarget` (Spitze) — Nutzer-Wunsch: „Hinweislinie hat nur EIN
+       * Segment, kein Knick-Punkt wie bei AutoCADs Multileader". Reihenfolge
+       * vom TEXTANKER zur SPITZE (wie die Zeichenrichtung im `leader`-Befehl:
+       * erst Spitze, dann rückwärts über die Knicke zum Text). Fehlt das
+       * Feld (Alt-Daten/einfache Hinweislinie), bleibt es bei der bisherigen
+       * geraden Linie `at → leaderTarget` — rein additiv, kein Format-Bruch.
+       */
+      leaderBendPoints?: Vec2[];
+      /**
        * Text-entlang-Pfad: mind. 2 Stützpunkte, entlang derer der Text (nur
        * `text`, KEIN `doc`/Rich-Formatting — v1 bewusst einstilig) über ein
        * echtes SVG `<textPath>` fliesst. Ist gesetzt, bestimmt der Pfad die
@@ -1756,7 +1967,22 @@ export type Drawing2DGeom =
    * Transformation. Verweist die Instanz auf eine gelöschte/unbekannte
    * `blockDefId`, rendert sie schlicht nichts (kein Crash, s. `drawing2d.ts`).
    */
-  | { shape: "block"; blockDefId: string; at: Vec2; rotation: number }
+  | {
+      shape: "block";
+      blockDefId: string;
+      at: Vec2;
+      rotation: number;
+      /**
+       * Uniformer Skalierungsfaktor der Blockinstanz (Default 1, additiv/
+       * optional — alte Projektdateien ohne dieses Feld bleiben gültig).
+       * Nutzer-Wunsch: „Skalierung beim Einfügen" — zuvor gab es dafür kein
+       * Modellfeld, ein `scale`-Transform auf eine Blockinstanz war damit ein
+       * kompletter No-Op (kein Feld zum Multiplizieren). Bewusst NUR ein
+       * uniformer Skalar (keine unabhängigen x/y-Faktoren) — konsistent mit
+       * `rotation` (auch nur EIN Winkel, keine Scherung).
+       */
+      scale?: number;
+    }
   | {
       shape: "image";
       /** Obere-linke Ecke der Bild-Box (Modell-Meter). */
@@ -1777,6 +2003,16 @@ export interface Drawing2D {
   levelId: string;
   /** Grafik-Kategorie (Ebene) — liefert Farbe/Strichstärke als Default. */
   categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
+  /**
+   * Sichtbar am Bildschirm, aber von PDF-/SVG-/DXF-Export ausgeschlossen —
+   * wie eine „Non-Plotting"-Ebene, nur pro Objekt statt pro ganzer Ebene
+   * (z. B. für eine Konstruktions-/Hilfslinie, s. `xline`). Wirkt nur bei
+   * `generatePlan(..., forPrint: true)` (den drei Export-Aufrufstellen in
+   * `state/useExportHandlers.ts`) — die Bildschirmansicht ignoriert das Feld.
+   */
+  noPrint?: boolean;
   geom: Drawing2DGeom;
   /** Optionaler Linienstil (Line Manager); sonst Kategorie-Default. */
   lineStyleId?: string;
@@ -1803,6 +2039,45 @@ export interface Drawing2D {
   color?: string;
   /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
   colorPenId?: string;
+  /**
+   * Massstab des Strichmusters DIESES Elements (multipliziert die Strich-/
+   * Lückenlängen des Linienstils; Default 1). Entspricht dem LTSCALE je Objekt
+   * in AutoCAD: dieselbe Strichlinie soll in 1:50 und 1:200 nicht gleich
+   * „dicht" wirken. Ohne Wert bleibt das Muster exakt wie im Linienstil.
+   */
+  dashScale?: number;
+  /**
+   * Platzierung der Schraffur AN DIESEM OBJEKT (alle optional). Die Ressource
+   * (`HatchStyle`) legt Muster/Massstab/Winkel grundsätzlich fest; hier lässt
+   * sich das je Objekt nachjustieren — in AutoCAD eine der meistgenutzten
+   * Objekteigenschaften, etwa damit ein Plattenraster an der Raumecke ansetzt
+   * statt am Weltnullpunkt.
+   *   • `hatchAngleDeg`  — ERSETZT den Winkel der Ressource (Grad)
+   *   • `hatchScale`     — MULTIPLIZIERT den Massstab der Ressource
+   *   • `hatchOrigin`    — Ankerpunkt des Musterrasters (Modellkoordinaten);
+   *                        ohne Angabe bleibt es der Modellursprung, damit
+   *                        benachbarte Flächen dieselbe Musterphase teilen.
+   */
+  hatchAngleDeg?: number;
+  hatchScale?: number;
+  hatchOrigin?: Vec2;
+  /**
+   * Objekt-Transparenz 0..1 (Default 1 = deckend) — wirkt auf Striche UND
+   * Füllungen dieses Elements. In Vectorworks/AutoCAD eine Standard-
+   * Objekteigenschaft (Bestand hinterlegen, Abbruch, durchscheinende
+   * Flächen). Der DXF-Export trägt sie nicht mit (bewusst, s. PENDENZEN.md).
+   */
+  opacity?: number;
+  /**
+   * Linienenden an OFFENEN Formen (Linie, offene Polylinie, Bogen, Spline,
+   * Bezier) sowie an der Hinweislinie eines Textes. `start`/`end` beziehen
+   * sich auf die Zeichenrichtung der Form; `sizeMm` ist die Grösse in
+   * PAPIER-MILLIMETERN (massstabsunabhängig, wie die Bemassungs-Feinheiten —
+   * s. `model/dimension.ts`), Default `END_MARK_DEFAULT_SIZE_MM`.
+   * Geschlossene Formen (Rechteck, Kreis, Ellipse, geschlossene Polylinie)
+   * haben keine Enden und ignorieren das Feld.
+   */
+  endMarks?: { start?: EndMark; end?: EndMark; sizeMm?: number };
   /**
    * Optionale Vollton-Füllfarbe für geschlossene Formen (getrennt von der
    * Strichfarbe `color`). Fehlt sie, ist die Fläche transparent (nur Schraffur
@@ -1928,6 +2203,8 @@ export interface Column {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk. */
   categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
   /** Einfügepunkt (Profil-Mitte) im Grundriss (Meter). */
   position: Vec2;
   /** Querschnitt (Rechteck oder Kreis). */
@@ -2199,6 +2476,18 @@ export interface ViewSnapshot {
    * gesetzt. Optional, damit hand-/altangelegte Snapshots ohne Feld gültig sind.
    */
   enabledOverrideRuleIds?: string[];
+  /**
+   * Kameraposition im Grundriss (Nutzer-Wunsch: „Ein gespeicherter Ausschnitt
+   * ändert, WAS sichtbar ist, nicht WOHIN man schaut" — bisher merkte sich ein
+   * Ausschnitt nie Bildmitte/Zoom). Beide Felder optional UND nur ein Paar
+   * (nicht einzeln sinnvoll) — fehlen sie (Alt-Ausschnitte vor dieser
+   * Ergänzung, oder beim Erfassen war kein Grundriss gemountet, z. B. 3D-
+   * Ansicht/Schnitt), bleibt die Bildmitte beim Wiederherstellen unverändert
+   * (nur der Massstab wird gesetzt, wie bisher).
+   */
+  cameraCenter?: Vec2;
+  /** Zoom (Bildschirm-Pixel je Meter) beim Erfassen — zusammen mit `cameraCenter`. */
+  cameraPxPerMeter?: number;
 }
 
 /**
@@ -2469,6 +2758,18 @@ export interface Project {
   name: string;
   /** Linienstil-Bibliothek (Line Manager). */
   lineStyles: LineStyle[];
+  /**
+   * Textstil-Bibliothek (Nutzer-Wunsch: „Textstil-Bibliothek" — bisher gab es
+   * nur 4 FEST verdrahtete `DEFAULT_PRESETS` in `text/richText.ts`, nirgends
+   * im Projekt gespeichert, nirgends im ResourceManager editierbar). Optional
+   * mit Fallback auf `DEFAULT_PRESETS` (wie `layouts` — additiv, alte
+   * Projektdateien ohne dieses Feld bleiben gültig). Wiederverwendet den
+   * bereits vorhandenen `TextStylePreset`-Typ (Marks-Vorlage) UND die
+   * bereits vorhandene `applyPreset()`-Anwendungslogik aus `richText.ts` —
+   * neu ist NUR, dass die Liste jetzt projektbezogen + editierbar ist statt
+   * hart codiert.
+   */
+  textStyles?: TextStylePreset[];
   /** Schraffur-Bibliothek (Hatch Manager). */
   hatches: HatchStyle[];
   /** Bauteil-Material-Bibliothek (Component Manager). */
@@ -2524,6 +2825,17 @@ export interface Project {
    * angelegt/aktiviert), lösen Stift-Verweise auf `PEN_FALLBACK_COLOR` auf.
    */
   activePenSetId?: string;
+  /**
+   * Benutzerdefinierte Farbpaletten (s. {@link CustomPalette}) — im
+   * Farbmischer-Popover per „Diese Farbe speichern" befüllt. Optional
+   * (siehe `pens`).
+   */
+  customPalettes?: CustomPalette[];
+  /**
+   * Welche MITGELIEFERTEN Paletten-Bänke im Farbwahl-Popover erscheinen
+   * (s. {@link BuiltinPaletteBanks}). Fehlt das Objekt, sind alle sichtbar.
+   */
+  builtinPaletteBanks?: BuiltinPaletteBanks;
   /** Oberste Schnitte: Geschosse + Schnitte/Ansichten. */
   drawingLevels: DrawingLevel[];
   /** Grafik-Kategorie-Baum (geschossübergreifend). */

@@ -98,6 +98,7 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
       switch (g.shape) {
         case "line":
         case "xline":
+        case "ray":
           return { ...d, geom: { ...g, a: shift(g.a, dx, dy), b: shift(g.b, dx, dy) } };
         case "polyline":
           return { ...d, geom: { ...g, pts: shiftAll(g.pts, dx, dy) } };
@@ -117,6 +118,12 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
           return { ...d, geom: { ...g, pts: shiftAll(g.pts, dx, dy) } };
         case "kote":
           return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
+        case "detailref":
+          return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
+        case "scalebar":
+          return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
+        case "pointmarker":
+          return { ...d, geom: { ...g, at: shift(g.at, dx, dy) } };
         case "text":
           return {
             ...d,
@@ -124,6 +131,7 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
               ...g,
               at: shift(g.at, dx, dy),
               ...(g.leaderTarget ? { leaderTarget: shift(g.leaderTarget, dx, dy) } : {}),
+              ...(g.leaderBendPoints ? { leaderBendPoints: shiftAll(g.leaderBendPoints, dx, dy) } : {}),
               ...(g.pathPts ? { pathPts: shiftAll(g.pathPts, dx, dy) } : {}),
             },
           };

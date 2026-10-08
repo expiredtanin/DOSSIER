@@ -8,9 +8,12 @@
 // Der Commit nutzt `commitTransform` (op:"move", mode:"copy") — eine Kopie der
 // Auswahl an die Endlage, Original unverändert; neue IDs via uniqueId (dort).
 
-import { commitTransform } from "../../tools/transform";
-import type { TransformSelection } from "../../tools/transform";
-import { transformPreview } from "../../tools/transform";
+import {
+  commitTransform,
+  hasTransformSelection,
+  toTransformSel,
+  transformPreview,
+} from "../../tools/transform";
 import type {
   Command,
   CommandField,
@@ -39,25 +42,6 @@ function targetFromFields(base: Vec2, locks: Record<string, number>, cursor: Vec
   const angleDeg = "angle" in locks ? locks.angle : segAngleDeg(base, ref);
   const ang = angleDeg * DEG;
   return { x: base.x + Math.cos(ang) * length, y: base.y + Math.sin(ang) * length };
-}
-
-function hasSelection(sel: CommandSelection): boolean {
-  return (
-    sel.wallIds.length > 0 ||
-    sel.drawingId !== null ||
-    (sel.drawingIds?.length ?? 0) > 0 ||
-    !!sel.extrudedSolidId ||
-    !!sel.columnId
-  );
-}
-function toTransformSel(sel: CommandSelection): TransformSelection {
-  return {
-    wallIds: sel.wallIds,
-    drawingId: sel.drawingId,
-    drawingIds: sel.drawingIds,
-    extrudedSolidId: sel.extrudedSolidId,
-    columnId: sel.columnId,
-  };
 }
 
 interface CopyBase extends CommandState {
@@ -122,7 +106,7 @@ export const copyCommand: Command = {
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as CopyState;
     if (s.phase === "done") return finish();
-    if (!hasSelection(ctx.selection)) {
+    if (!hasTransformSelection(ctx.selection)) {
       return [{ phase: "done", lastPoint: null } as CopyDone, { draft: null, done: true }];
     }
     if (input.kind !== "point") {

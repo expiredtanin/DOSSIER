@@ -60,7 +60,9 @@ export function Content({
   visibleCodes,
   detail,
   referenceLines,
+  scaleDenominator,
   hairline,
+  showGrid,
   marqueeColor,
   snapColor,
   hoverDivideDelayMs,
@@ -137,6 +139,8 @@ export function Content({
   onEdit3dRoofPitch,
   onEdit3dWallTop,
   onEdit3dEnd,
+  onGrip3dEditTab,
+  onGrip3dEditCancel,
 }: {
   project: Project;
   level: DrawingLevel;
@@ -144,7 +148,11 @@ export function Content({
   visibleCodes: Set<string>;
   detail: DetailLevel;
   referenceLines: boolean;
+  /** Papier-Massstab (1:N) — nur für Bemassungs-Feinheiten in Papier-mm. */
+  scaleDenominator: number;
   hairline: boolean;
+  /** Sichtbares Hintergrund-Raster im Grundriss (rein visuell, s. `SnapSettings.showGrid`). */
+  showGrid?: boolean;
   /** Farbe des Auswahlrahmens (Marquee) im Grundriss. */
   marqueeColor: string;
   /** Farbe der Snap-/Endpunkt-Hervorhebung im Grundriss. */
@@ -256,6 +264,12 @@ export function Content({
   onEdit3dRoofPitch: (roofId: string, apexHeight: number) => void;
   onEdit3dWallTop: (wallId: string, topZ: number) => void;
   onEdit3dEnd: () => void;
+  /** Tab während eines laufenden 3D-Griff-Drags (Endpunkt/Verschieben): Feld-
+   * Controller fürs Cursor-HUD öffnen/zykeln, s. App.tsx `cycleGrip3dEditField`. */
+  onGrip3dEditTab?: () => void;
+  /** Escape während eines laufenden 3D-Griff-Drags: abbrechen (Undo), s.
+   * App.tsx `cancelGrip3dEdit`. */
+  onGrip3dEditCancel?: () => void;
 }) {
   // Auswahl-Hervorhebung im WASM-3D-Viewport: Umriss der gewählten Wand(e)/
   // Decke(n) in Akzent-Orange, immer obenauf (s. selectionHighlightLines in
@@ -305,7 +319,9 @@ export function Content({
           floorDisplay={floorDisplay}
           detail={detail}
           referenceLines={referenceLines}
+          scaleDenominator={scaleDenominator}
           hairline={hairline}
+          showGrid={showGrid}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
           hoverDivideDelayMs={hoverDivideDelayMs}
@@ -371,7 +387,9 @@ export function Content({
           floorDisplay={floorDisplay}
           detail={detail}
           referenceLines={referenceLines}
+          scaleDenominator={scaleDenominator}
           hairline={hairline}
+          showGrid={showGrid}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
           hoverDivideDelayMs={hoverDivideDelayMs}
@@ -459,6 +477,7 @@ export function Content({
             draft={draft}
             onWorkplanePoint={onWorkplanePoint}
             onWorkplaneConfirm={onWorkplaneConfirm}
+            hudFields={hudFields}
             editWalls={edit3dWalls}
             editDrawings={edit3dDrawings}
             editCeilings={edit3dCeilings}
@@ -469,6 +488,8 @@ export function Content({
             onEditRoofPitch={onEdit3dRoofPitch}
             onEditWallTop={onEdit3dWallTop}
             onEditEnd={onEdit3dEnd}
+            onGrip3dEditTab={onGrip3dEditTab}
+            onGrip3dEditCancel={onGrip3dEditCancel}
           />
         </section>
       ) : (
@@ -480,7 +501,9 @@ export function Content({
           floorDisplay={floorDisplay}
           detail={detail}
           referenceLines={referenceLines}
+          scaleDenominator={scaleDenominator}
           hairline={hairline}
+          showGrid={showGrid}
           marqueeColor={marqueeColor}
           snapColor={snapColor}
           hoverDivideDelayMs={hoverDivideDelayMs}
@@ -576,6 +599,7 @@ function useCrossKindOverlay(
   detail: DetailLevel,
   referenceLines: boolean,
   mono: boolean,
+  scaleDenominator: number,
 ): Primitive[] {
   const overlayLevels = useMemo(
     () =>
@@ -638,6 +662,7 @@ function useCrossKindOverlay(
           referenceLines,
           mono,
           false,
+          scaleDenominator,
         ).primitives;
       }
       for (const pr of prims) out.push(stripSelectableIds(greyed ? { ...pr, greyed: true } : pr));
@@ -655,7 +680,9 @@ function LevelPlanView({
   floorDisplay,
   detail,
   referenceLines,
+  scaleDenominator,
   hairline,
+  showGrid,
   marqueeColor,
   snapColor,
   hoverDivideDelayMs,
@@ -709,7 +736,10 @@ function LevelPlanView({
   floorDisplay: CategoryDisplayResolver;
   detail: DetailLevel;
   referenceLines: boolean;
+  /** Papier-Massstab (1:N) — nur für Bemassungs-Feinheiten in Papier-mm. */
+  scaleDenominator: number;
   hairline: boolean;
+  showGrid?: boolean;
   marqueeColor: string;
   snapColor: string;
   hoverDivideDelayMs?: number;
@@ -774,6 +804,7 @@ function LevelPlanView({
     detail,
     referenceLines,
     mono,
+    scaleDenominator,
   );
 
   // Detailgrad + Referenzlinien fließen in die Plan-Erzeugung ein (Symbole,
@@ -792,6 +823,7 @@ function LevelPlanView({
       referenceLines,
       mono,
       floorDisplay,
+      scaleDenominator,
     );
     const withOverlay =
       overlayPrimitives.length === 0
@@ -876,6 +908,7 @@ function LevelPlanView({
         gripHandleLines={gripHandleLines}
         edgeGrips={edgeGrips}
         hairline={hairline}
+        showGrid={showGrid}
         marqueeColor={marqueeColor}
         snapColor={snapColor}
         hoverDivideDelayMs={hoverDivideDelayMs}
@@ -909,7 +942,9 @@ function SectionPlanView({
   floorDisplay,
   detail,
   referenceLines,
+  scaleDenominator,
   hairline,
+  showGrid,
   marqueeColor,
   snapColor,
   hoverDivideDelayMs,
@@ -962,7 +997,10 @@ function SectionPlanView({
   floorDisplay: CategoryDisplayResolver;
   detail: DetailLevel;
   referenceLines: boolean;
+  /** Papier-Massstab (1:N) — nur für Bemassungs-Feinheiten in Papier-mm. */
+  scaleDenominator: number;
   hairline: boolean;
+  showGrid?: boolean;
   marqueeColor: string;
   snapColor: string;
   hoverDivideDelayMs?: number;
@@ -1077,6 +1115,7 @@ function SectionPlanView({
     detail,
     referenceLines,
     mono,
+    scaleDenominator,
   );
   const withOverlay = useMemo(
     () =>
@@ -1166,6 +1205,7 @@ function SectionPlanView({
         gripHandleLines={gripHandleLines}
         edgeGrips={edgeGrips}
         hairline={hairline}
+        showGrid={showGrid}
         marqueeColor={marqueeColor}
         snapColor={snapColor}
         hoverDivideDelayMs={hoverDivideDelayMs}

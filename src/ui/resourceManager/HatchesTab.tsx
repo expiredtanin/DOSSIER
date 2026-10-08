@@ -9,6 +9,7 @@ import { HatchSwatch } from "../hatchPreview";
 import { MotifEditor } from "../MotifEditor";
 import { t } from "../../i18n";
 import {
+  ColorField,
   DeleteButton,
   FieldRow,
   FileImportButton,
@@ -64,13 +65,25 @@ function HatchDetail({
   const kind = hatch.kind ?? "vector";
   const lines = hatch.lines ?? "parallel";
 
-  /** Wechselt den Typ; beim Umschalten auf „Bild" Default-Bildparameter setzen. */
-  const setKind = (k: "vector" | "image") => {
+  /**
+   * Wechselt den Typ; beim ERSTEN Umschalten auf „Bild"/„Verlauf" Default-
+   * Parameter setzen (danach bleiben eigene Werte beim Hin- und Herschalten
+   * erhalten, wie bei „Custom"-Motiven).
+   */
+  const setKind = (k: "vector" | "image" | "gradient") => {
     if (k === "image" && !hatch.image) {
       onPatch({ kind: k, image: { src: "", scaleX: 1, scaleY: 1, rotation: 0 } });
+    } else if (k === "gradient" && !hatch.gradient) {
+      onPatch({ kind: k, gradient: { color1: "#d9d9d9", color2: "#8c8c8c", angle: 0, type: "linear" } });
     } else {
       onPatch({ kind: k });
     }
+  };
+
+  /** Merge-Patch für die Verlauf-Parameter (behält bestehende Werte). */
+  const patchGradient = (part: Partial<NonNullable<HatchStyle["gradient"]>>) => {
+    const cur = hatch.gradient ?? { color1: "#d9d9d9", color2: "#8c8c8c", angle: 0, type: "linear" as const };
+    onPatch({ gradient: { ...cur, ...part } });
   };
 
   /** Wechselt das Muster; beim erstmaligen Umschalten auf „Custom" ein Default-Motiv setzen. */
@@ -131,6 +144,7 @@ function HatchDetail({
             options={[
               { value: "vector", label: t("resources.hatchKind.vector") },
               { value: "image", label: t("resources.hatchKind.image") },
+              { value: "gradient", label: t("resources.hatchKind.gradient") },
             ]}
           />
         </FieldRow>
@@ -232,7 +246,7 @@ function HatchDetail({
               </>
             )}
           </>
-        ) : (
+        ) : kind === "image" ? (
           <>
             <FieldRow label={t("resources.field.image")}>
               <ImagePickButton onFile={loadImage} />
@@ -260,6 +274,40 @@ function HatchDetail({
                 step={5}
               />
             </FieldRow>
+          </>
+        ) : (
+          <>
+            <FieldRow label={t("resources.field.gradientType")}>
+              <Segmented
+                value={hatch.gradient?.type ?? "linear"}
+                onChange={(v) => patchGradient({ type: v })}
+                options={[
+                  { value: "linear", label: t("resources.gradientType.linear") },
+                  { value: "radial", label: t("resources.gradientType.radial") },
+                ]}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.field.gradientColor1")}>
+              <ColorField
+                color={hatch.gradient?.color1 ?? "#d9d9d9"}
+                onChange={(color1) => patchGradient({ color1 })}
+              />
+            </FieldRow>
+            <FieldRow label={t("resources.field.gradientColor2")}>
+              <ColorField
+                color={hatch.gradient?.color2 ?? "#8c8c8c"}
+                onChange={(color2) => patchGradient({ color2 })}
+              />
+            </FieldRow>
+            {(hatch.gradient?.type ?? "linear") === "linear" && (
+              <FieldRow label={t("resources.col.angle")}>
+                <NumberField
+                  value={hatch.gradient?.angle ?? 0}
+                  onChange={(angle) => patchGradient({ angle })}
+                  step={5}
+                />
+              </FieldRow>
+            )}
           </>
         )}
       </div>

@@ -28,6 +28,8 @@ import {
   pasteElementClipboard,
 } from "../editors/elementClipboard";
 import type { ElementClipboard, ElementSelectionIds } from "../editors/elementClipboard";
+import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
+import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
 
 /** Aktive Transformation (Bewegen/Spiegeln/Drehen) — Form aus useDrawingToolState. */
 type ActiveTransform = {
@@ -42,21 +44,39 @@ const isEditableTarget = (e: KeyboardEvent): boolean => {
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
 };
 
-/** Globaler Undo/Redo-Shortcut: Ctrl+Z / Cmd+Z, Ctrl+Shift+Z / Cmd+Shift+Z bzw. Ctrl+Y für redo. */
-export function useUndoRedoShortcut(undo: () => void, redo: () => void): void {
+/**
+ * Globaler Undo/Redo-Shortcut: rebindbare Haupt-Kombination (Default Ctrl/
+ * Cmd+Z bzw. Ctrl/Cmd+Shift+Z, s. `state/keyboardShortcuts.ts::SHORTCUT_DEFS`)
+ * + fest verdrahtete Ctrl/Cmd+Y-Zusatzbelegung für Redo (Excel/Windows-
+ * Konvention, bleibt IMMER aktiv, unabhängig von einer Übersteuerung).
+ */
+export function useUndoRedoShortcut(
+  undo: () => void,
+  redo: () => void,
+  overrides: ShortcutOverrides,
+): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
-      if (!mod || (key !== "z" && key !== "y")) return;
       if (isEditableTarget(e)) return;
-      e.preventDefault();
-      if (key === "y" || (key === "z" && e.shiftKey)) redo();
-      else undo();
+      if (matchesShortcut(e, "redo", overrides)) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (matchesShortcut(e, "undo", overrides)) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+  }, [undo, redo, overrides]);
 }
 
 /**
@@ -141,28 +161,31 @@ export function useCommandTabShortcut(
  * Ebenen-Art über ein Ref (sonst müsste der Effekt bei jedem Render neu
  * registrieren).
  */
+/** Reihenfolge/Zuordnung Ziffer→Werkzeug — Ids der rebindbaren Kombination in `keyboardShortcuts.ts`. */
+const TOOL_SHORTCUT_IDS: { id: ShortcutId; tool: ToolId }[] = [
+  { id: "toolText", tool: "text" },
+  { id: "toolLine", tool: "line" },
+  { id: "toolCircle", tool: "circle" },
+  { id: "toolRect", tool: "rect" },
+  { id: "toolPolyline", tool: "polyline" },
+  { id: "toolWall", tool: "wall" },
+  { id: "toolCeiling", tool: "ceiling" },
+  { id: "toolWindow", tool: "window" },
+  { id: "toolDoor", tool: "door" },
+  { id: "toolRoom", tool: "room" },
+];
+
 export function useToolNumberShortcuts(
   onSelectTool: (id: ToolId) => void,
   isFloor: boolean,
   engineRef: RefObject<CommandEngine | null>,
+  overrides: ShortcutOverrides,
   gripDragInfoRef?: RefObject<{ index: number; raw: Vec2 } | null>,
   edgeDragInfoRef?: RefObject<unknown>,
 ): void {
-  const toolShortcutRef = useRef({ onSelectTool, floor: isFloor });
-  toolShortcutRef.current = { onSelectTool, floor: isFloor };
+  const toolShortcutRef = useRef({ onSelectTool, floor: isFloor, overrides });
+  toolShortcutRef.current = { onSelectTool, floor: isFloor, overrides };
   useEffect(() => {
-    const MAP: Record<string, ToolId> = {
-      "1": "text",
-      "2": "line",
-      "3": "circle",
-      "4": "rect",
-      "5": "polyline",
-      "6": "wall",
-      "7": "ceiling",
-      "8": "window",
-      "9": "door",
-      "0": "room",
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Ein Punkt-Griff ist bewaffnet (s. useGripEditing.ts) — Zifferntasten
@@ -184,11 +207,13 @@ export function useToolNumberShortcuts(
           empty && !eng?.hasFields() && !eng?.acceptsFreeText();
         if (!cmdLineFreeToSwitch) return;
       }
-      const id = MAP[e.key];
-      if (!id) return;
+      const match = TOOL_SHORTCUT_IDS.find(({ id }) =>
+        matchesShortcut(e, id, toolShortcutRef.current.overrides),
+      );
+      if (!match) return;
       if (!toolShortcutRef.current.floor) return; // Werkzeuge nur auf Geschossen
       e.preventDefault();
-      toolShortcutRef.current.onSelectTool(id);
+      toolShortcutRef.current.onSelectTool(match.tool);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -258,6 +283,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
   activeTransform: ActiveTransform;
   project: Project;
   activeLevelId: string;
+  shortcutOverrides: ShortcutOverrides;
   selectedDrawingIds: string[];
   selectedWallIds: string[];
   selectedCeilingIds: string[];
@@ -288,6 +314,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
     activeTransform,
     project,
     activeLevelId,
+    shortcutOverrides,
     setSelectedWallIds,
     setSelectedDrawingIds,
     setSelectedCeilingIds,
@@ -307,7 +334,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
       if (isEditableTarget(e)) return;
       // Alles auswählen (alle Bauteilarten des aktiven Geschosses/der Ebene +
       // die Schnittlinien-Symbole, die auf JEDEM Grundriss erscheinen).
-      if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+      if (matchesShortcut(e, "selectAll", shortcutOverrides)) {
         const wallIds = project.walls
           .filter((w) => w.floorId === activeLevelId)
           .map((w) => w.id);
@@ -375,7 +402,12 @@ export function useSelectAllAndDeleteShortcut(opts: {
         }
         return;
       }
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      // Backspace bleibt fest verdrahtete Zusatzbelegung (bare, kein Modifikator)
+      // neben der rebindbaren Haupt-Kombination (Default "Delete").
+      const isDelete =
+        matchesShortcut(e, "deleteSelection", shortcutOverrides) ||
+        (e.key === "Backspace" && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey);
+      if (!isDelete) return;
       if (activeTransform) return; // während einer Transformation nicht löschen
       if (hasSelectionToDelete()) {
         deleteSelection();
@@ -387,6 +419,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
   }, [
     opts.activeTool,
     opts.activeTransform,
+    opts.shortcutOverrides,
     opts.selectedDrawingIds,
     opts.selectedWallIds,
     opts.selectedCeilingIds,
@@ -425,18 +458,19 @@ export function useSplitJoinShortcut(
   runSplit: (ids: string[]) => void,
   setSelectedDrawingIds: (ids: string[]) => void,
   setSelectedWallIds: (ids: string[]) => void,
+  overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      if (k !== "s" && k !== "j") return;
       if (isEditableTarget(e)) return;
+      const isSplit = matchesShortcut(e, "split", overrides);
+      const isJoin = !isSplit && matchesShortcut(e, "join", overrides);
+      if (!isSplit && !isJoin) return;
       const ids = selectedDrawingIds;
       if (ids.length === 0) return; // nur 2D-Auswahl bedient; Wände → no-op
       e.preventDefault();
 
-      if (k === "s") {
+      if (isSplit) {
         runSplit(ids);
         return;
       }
@@ -449,7 +483,7 @@ export function useSplitJoinShortcut(
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, engine]);
+  }, [selectedDrawingIds, engine, overrides]);
 }
 
 /**
@@ -461,6 +495,18 @@ export function useSplitJoinShortcut(
  * aus — so wandert z. B. importiertes Mobiliar von einem Geschoss auf ein
  * anderes. Im Textfeld bleibt das native Copy/Paste; ohne Auswahl kein
  * preventDefault (Browser-Copy bleibt möglich).
+ *
+ * OS-Zwischenablage (Nutzer-Wunsch: „kein Copy/Paste zwischen zwei Fenstern/
+ * Projekten derselben App"): Kopieren schreibt ZUSÄTZLICH zum React-State
+ * einen markierten JSON-Text via `navigator.clipboard.writeText` (s.
+ * `editors/elementClipboardSerialize.ts`) — bestes Bemühen, Fehler (Rechte
+ * verweigert, API fehlt) werden verschluckt, der In-App-State bleibt der
+ * verlässliche Pfad. Einfügen liest ZUERST `navigator.clipboard.readText()`
+ * (deshalb async): parst der Text erfolgreich als unsere Marke, hat er
+ * Vorrang (ermöglicht Einfügen aus einem ANDEREN Fenster/derselben-App-
+ * Instanz); scheitert das (fremder Text, keine Berechtigung, API fehlt),
+ * fällt es auf den In-App-`elementClipboard`-State zurück — unverändertes
+ * Verhalten für den bisherigen Innerhalb-eines-Fensters-Fall.
  */
 export function useElementClipboardShortcut(
   sel: ElementSelectionIds,
@@ -480,43 +526,58 @@ export function useElementClipboardShortcut(
     extrudedSolidIds: (ids: string[]) => void;
     columnIds: (ids: string[]) => void;
   },
+  overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (k !== "c" && k !== "v") return;
+      const isCopy = matchesShortcut(e, "copyElements", overrides);
+      const isPaste = !isCopy && matchesShortcut(e, "pasteElements", overrides);
+      if (!isCopy && !isPaste) return;
       if (isEditableTarget(e)) return;
-      if (k === "c") {
+      if (isCopy) {
         const clip = collectElementClipboard(project, sel);
         if (!clip) return; // nichts gewählt → natives Browser-Copy zulassen
         e.preventDefault();
         setElementClipboard(clip);
+        // Bestes Bemühen, OS-weit verfügbar zu machen — Fehler (Rechte
+        // verweigert, API fehlt in diesem Webview) verschluckt, der In-App-
+        // State oben ist bereits gesetzt und bleibt der verlässliche Pfad.
+        navigator.clipboard?.writeText(serializeClipboardText(clip)).catch(() => {});
         return;
       }
-      // Einfügen: Klone auf dem aktiven Geschoss, neue IDs, danach ausgewählt.
-      if (!elementClipboard || isClipboardEmpty(elementClipboard)) return;
+      // Einfügen: erst OS-Zwischenablage versuchen (ermöglicht Fenster-
+      // übergreifend), sonst die In-App-Zwischenablage. `preventDefault`
+      // sofort (synchron) — wir sind hier NIE in einem Textfeld
+      // (isEditableTarget oben hat das schon ausgeschlossen), also gibt es
+      // kein natives Paste-Ziel, das verloren gehen könnte.
       e.preventDefault();
-      const { project: next, pastedIds } = pasteElementClipboard(
-        project,
-        elementClipboard,
-        activeLevelId,
-      );
-      setProject(next);
-      setSelected.wallIds(pastedIds.wallIds);
-      setSelected.drawingIds(pastedIds.drawingIds);
-      setSelected.ceilingIds(pastedIds.ceilingIds);
-      setSelected.roofIds(pastedIds.roofIds);
-      setSelected.openingIds(pastedIds.openingIds);
-      setSelected.stairIds(pastedIds.stairIds);
-      setSelected.roomIds(pastedIds.roomIds);
-      setSelected.extrudedSolidIds(pastedIds.extrudedSolidIds);
-      setSelected.columnIds(pastedIds.columnIds);
+      const paste = (clip: ElementClipboard | null) => {
+        if (!clip || isClipboardEmpty(clip)) return;
+        const { project: next, pastedIds } = pasteElementClipboard(project, clip, activeLevelId);
+        setProject(next);
+        setSelected.wallIds(pastedIds.wallIds);
+        setSelected.drawingIds(pastedIds.drawingIds);
+        setSelected.ceilingIds(pastedIds.ceilingIds);
+        setSelected.roofIds(pastedIds.roofIds);
+        setSelected.openingIds(pastedIds.openingIds);
+        setSelected.stairIds(pastedIds.stairIds);
+        setSelected.roomIds(pastedIds.roomIds);
+        setSelected.extrudedSolidIds(pastedIds.extrudedSolidIds);
+        setSelected.columnIds(pastedIds.columnIds);
+      };
+      if (navigator.clipboard?.readText) {
+        navigator.clipboard
+          .readText()
+          .then((text) => paste(parseClipboardText(text) ?? elementClipboard))
+          .catch(() => paste(elementClipboard));
+      } else {
+        paste(elementClipboard);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel, elementClipboard, activeLevelId, project]);
+  }, [sel, elementClipboard, activeLevelId, project, overrides]);
 }
 
 /**
@@ -529,23 +590,27 @@ export function useBooleanOpsShortcut(
   selectedDrawingIds: string[],
   drawings2d: Drawing2D[],
   applyBoolean: (op: (srcs: Drawing2D[]) => BooleanResult) => void,
+  overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
-      const k = e.key.toLowerCase();
-      if (k !== "u" && k !== "d" && k !== "i") return;
       if (isEditableTarget(e)) return;
       if (selectedDrawingIds.length < 2) return;
-      e.preventDefault();
-      if (k === "u") applyBoolean(unionDrawings);
-      else if (k === "d") applyBoolean(differenceDrawings);
-      else applyBoolean(intersectionDrawings);
+      if (matchesShortcut(e, "booleanUnion", overrides)) {
+        e.preventDefault();
+        applyBoolean(unionDrawings);
+      } else if (matchesShortcut(e, "booleanDifference", overrides)) {
+        e.preventDefault();
+        applyBoolean(differenceDrawings);
+      } else if (matchesShortcut(e, "booleanIntersection", overrides)) {
+        e.preventDefault();
+        applyBoolean(intersectionDrawings);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, drawings2d]);
+  }, [selectedDrawingIds, drawings2d, overrides]);
 }
 
 /**
@@ -566,11 +631,16 @@ export function useTransformShortcuts(
   selectedDrawingIds: string[],
   selectedExtrudedSolidId: string | null,
   selectedColumnId: string | null,
+  selectedCeilingIds: string[],
+  selectedRoofIds: string[],
+  selectedStairIds: string[],
+  selectedRoomIds: string[],
   engine: CommandEngine,
   setDraft: (draft: ToolDraft | null) => void,
   requestCopyCount: (mode: "array" | "distribute") => void,
   onRunCommand: (name: string) => void,
   commandLineRef: RefObject<CommandLineHandle | null>,
+  overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
     if (activeTool !== "select") return;
@@ -593,29 +663,38 @@ export function useTransformShortcuts(
         return;
       }
       // „q" = Messen (Distanz/Winkel) — braucht KEINE Auswahl, daher vor hasSel.
-      if (e.key.toLowerCase() === "q") {
+      if (matchesShortcut(e, "measure", overrides)) {
         onRunCommand("measure");
         e.preventDefault();
         return;
       }
-      // Transformierbar sind Wände, 2D-Zeichnungen, extrudierte Körper und Stützen
-      // (dieselben Arten wie transformSel). Öffnungen/Treppen laufen bewusst NICHT
-      // hierüber, sondern über ihre eigenen Bewegpunkte (Grips) — sie sind wand-
-      // bzw. geschossgebunden.
+      // Transformierbar sind Wände, 2D-Zeichnungen, extrudierte Körper, Stützen,
+      // Decken/Dächer/Treppen/Räume (dieselben Arten wie transformSel). Öffnungen
+      // laufen bewusst NICHT hierüber, sondern über ihre eigenen Bewegpunkte
+      // (Grips) — sie sind wandgebunden (Position = Abstand entlang der
+      // Wandachse), kein freier 2D-Punkt.
       const hasSel =
         selectedWallIds.length > 0 ||
         !!selectedDrawingId ||
         selectedDrawingIds.length > 0 ||
         !!selectedExtrudedSolidId ||
-        !!selectedColumnId;
+        !!selectedColumnId ||
+        selectedCeilingIds.length > 0 ||
+        selectedRoofIds.length > 0 ||
+        selectedStairIds.length > 0 ||
+        selectedRoomIds.length > 0;
       if (!hasSel) return;
-      const k = e.key.toLowerCase();
       // Bewegen/Spiegeln/Drehen laufen ALLE über die interaktive Transformation
       // (`activeTransform`) mit den U/I/O/P-Kopiermodi (Bewegen/Kopie/Reihe/
       // Verteilen). Prompt + Optionen + Live-Feld speisen die Command-Line; die
       // Kürzel U/I/O/P wirken dort auch bei fokussiertem Eingabefeld (options.key).
-      const op: TransformOp | null =
-        k === "m" ? "move" : k === "s" ? "mirror" : k === "d" ? "rotate" : null;
+      const op: TransformOp | null = matchesShortcut(e, "transformMove", overrides)
+        ? "move"
+        : matchesShortcut(e, "transformMirror", overrides)
+          ? "mirror"
+          : matchesShortcut(e, "transformRotate", overrides)
+            ? "rotate"
+            : null;
       if (op) {
         setActiveTransform({ op, copyMode: "move", count: 1, points: [] });
         setDraft(null);
@@ -633,7 +712,12 @@ export function useTransformShortcuts(
     selectedDrawingIds,
     selectedExtrudedSolidId,
     selectedColumnId,
+    selectedCeilingIds,
+    selectedRoofIds,
+    selectedStairIds,
+    selectedRoomIds,
     engine,
+    overrides,
   ]);
 }
 
@@ -650,14 +734,16 @@ export function useGroupShortcut(
   currentSelection: GroupMembership,
   selectedGroupIds: string[],
   applySelection: (mem: GroupMembership, groupIds: string[]) => void,
+  overrides: ShortcutOverrides,
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key.toLowerCase() !== "g") return;
+      const isUngroup = matchesShortcut(e, "ungroup", overrides);
+      const isGroup = !isUngroup && matchesShortcut(e, "group", overrides);
+      if (!isUngroup && !isGroup) return;
       if (isEditableTarget(e)) return;
       e.preventDefault();
-      if (e.shiftKey) {
+      if (isUngroup) {
         // Ungruppieren: für jede gewählte Gruppe eine Hülle auflösen; ihre
         // direkten Mitglieder (+ Untergruppen) werden die neue Auswahl.
         if (selectedGroupIds.length === 0) return;
@@ -684,5 +770,5 @@ export function useGroupShortcut(
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, currentSelection, selectedGroupIds]);
+  }, [project, currentSelection, selectedGroupIds, overrides]);
 }

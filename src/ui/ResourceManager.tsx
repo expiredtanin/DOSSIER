@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type {
+  BuiltinPaletteBank,
   CeilingType,
   Component,
   DoorType,
@@ -41,6 +42,10 @@ import { StairStylesTab } from "./resourceManager/StairStylesTab";
 import { MaterialsTab } from "./resourceManager/MaterialsTab";
 import { OverridesTab } from "./resourceManager/OverridesTab";
 import { PenSetsTab } from "./resourceManager/PenSetsTab";
+import { PalettesTab } from "./resourceManager/PalettesTab";
+import { TextStylesTab } from "./resourceManager/TextStylesTab";
+import { DEFAULT_PRESETS } from "../text/richText";
+import type { TextStylePreset } from "../text/richText";
 
 // ── Manager-Schublade ──────────────────────────────────────────────────────
 
@@ -48,6 +53,7 @@ export type TabId =
   | "components"
   | "hatches"
   | "lines"
+  | "textStyles"
   | "wallStyles"
   | "ceilingStyles"
   | "roofStyles"
@@ -56,13 +62,16 @@ export type TabId =
   | "stairStyles"
   | "materials"
   | "overrides"
-  | "pens";
+  | "pens"
+  | "palettes";
 
 const TABS: { id: TabId; labelKey: string }[] = [
   { id: "components", labelKey: "resources.tab.components" },
   { id: "hatches", labelKey: "resources.tab.hatches" },
   { id: "lines", labelKey: "resources.tab.lines" },
+  { id: "textStyles", labelKey: "resources.tab.textStyles" },
   { id: "pens", labelKey: "resources.tab.pens" },
+  { id: "palettes", labelKey: "resources.tab.palettes" },
   { id: "wallStyles", labelKey: "resources.tab.wallStyles" },
   { id: "ceilingStyles", labelKey: "resources.tab.ceilingStyles" },
   { id: "roofStyles", labelKey: "resources.tab.roofStyles" },
@@ -100,6 +109,13 @@ export interface ResourceManagerHandlers {
   onImportLineStyles: (styles: Omit<LineStyle, "id">[]) => void;
   onImportHatches: (hatches: Omit<HatchStyle, "id">[]) => void;
   /**
+   * Textstil-Bibliothek (benannte Marks-Vorlagen, s. `Project.textStyles`).
+   * Optional, damit ältere Einbettungen ohne diese Handler weiter kompilieren.
+   */
+  onPatchTextStyle?: (id: string, patch: Partial<TextStylePreset>) => void;
+  onAddTextStyle?: () => void;
+  onDeleteTextStyle?: (id: string) => void;
+  /**
    * Grafische Override-Regeln: ersetzt die GANZE Regelliste (Reihenfolge =
    * Priorität). Optional, damit ältere Einbettungen ohne diesen Handler
    * weiter kompilieren — ohne Handler ist der Tab nur lesend.
@@ -135,6 +151,18 @@ export interface ResourceManagerHandlers {
   onPatchPenSetWeight?: (setId: string, penId: string, weight: number) => void;
   /** Ersetzt `pens`/legt einen neuen Satz mit der 255er-CAD-Standardpalette an. */
   onSeedStandardPenSet?: () => void;
+  /**
+   * Farbpaletten (Tab „Paletten"): eigene Paletten verwalten + Sichtbarkeit
+   * der Bänke im Farbwahl-Popover. Optional wie die Stift-Handler.
+   */
+  onAddCustomPalette?: () => void;
+  onRenameCustomPalette?: (id: string, name: string) => void;
+  onDeleteCustomPalette?: (id: string) => void;
+  onRemoveColorFromCustomPalette?: (paletteId: string, hex: string) => void;
+  onSetCustomPaletteVisible?: (id: string, visible: boolean) => void;
+  onSetBuiltinPaletteVisible?: (bank: BuiltinPaletteBank, visible: boolean) => void;
+  /** „+"-Zelle im Farbwahl-Raster: aktuelle Farbe in einer eigenen Palette ablegen. */
+  onAddColorToCustomPalette?: (paletteId: string | undefined, hex: string) => void;
 }
 
 // ── Schwebendes Fenster (nicht-modal) ──────────────────────────────────────
@@ -322,6 +350,7 @@ export function ResourceManager({
               onPatchComponent={handlers.onPatchComponent}
               onAddComponent={handlers.onAddComponent}
               onDeleteComponent={handlers.onDeleteComponent}
+              onAddColorToCustomPalette={handlers.onAddColorToCustomPalette}
             />
           )}
           {tab === "hatches" && (
@@ -340,6 +369,14 @@ export function ResourceManager({
               onAddLineStyle={handlers.onAddLineStyle}
               onDeleteLineStyle={handlers.onDeleteLineStyle}
               onImportLineStyles={handlers.onImportLineStyles}
+            />
+          )}
+          {tab === "textStyles" && handlers.onPatchTextStyle && handlers.onAddTextStyle && handlers.onDeleteTextStyle && (
+            <TextStylesTab
+              styles={project.textStyles ?? DEFAULT_PRESETS}
+              onPatchTextStyle={handlers.onPatchTextStyle}
+              onAddTextStyle={handlers.onAddTextStyle}
+              onDeleteTextStyle={handlers.onDeleteTextStyle}
             />
           )}
           {tab === "wallStyles" && (
@@ -403,6 +440,18 @@ export function ResourceManager({
               onPatchPenSetColor={handlers.onPatchPenSetColor}
               onPatchPenSetWeight={handlers.onPatchPenSetWeight}
               onSeedStandardPenSet={handlers.onSeedStandardPenSet}
+              onAddColorToCustomPalette={handlers.onAddColorToCustomPalette}
+            />
+          )}
+          {tab === "palettes" && (
+            <PalettesTab
+              project={project}
+              onAddCustomPalette={handlers.onAddCustomPalette}
+              onRenameCustomPalette={handlers.onRenameCustomPalette}
+              onDeleteCustomPalette={handlers.onDeleteCustomPalette}
+              onRemoveColorFromCustomPalette={handlers.onRemoveColorFromCustomPalette}
+              onSetCustomPaletteVisible={handlers.onSetCustomPaletteVisible}
+              onSetBuiltinPaletteVisible={handlers.onSetBuiltinPaletteVisible}
             />
           )}
           {tab === "materials" && <MaterialsTab />}

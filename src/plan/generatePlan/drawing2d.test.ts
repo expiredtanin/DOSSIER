@@ -120,6 +120,33 @@ describe("addDrawing2D — spline", () => {
     const last = lines[lines.length - 1];
     expect(last.b).toEqual(lines[0].a);
   });
+
+  it("mode:'control' rendert einen B-Spline (Kontrollpunkt-Modus) statt Catmull-Rom — berührt den inneren Kontrollpunkt NICHT", () => {
+    const d: Drawing2D = {
+      id: "s3",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: {
+        shape: "spline",
+        pts: [{ x: 0, y: 0 }, { x: 2, y: 10 }, { x: 6, y: 10 }, { x: 8, y: 0 }],
+        closed: false,
+        mode: "control",
+      },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    const lines = out.filter((p): p is Extract<Primitive, { kind: "line" }> => p.kind === "line");
+    expect(lines[0].a).toEqual({ x: 0, y: 0 }); // geklemmt: Start exakt getroffen
+    const last = lines[lines.length - 1];
+    expect(last.b.x).toBeCloseTo(8, 6);
+    expect(last.b.y).toBeCloseTo(0, 6);
+    // Der innere Kontrollpunkt (2,10) darf NICHT auf der Kurve liegen (Gegensatz
+    // zu Catmull-Rom, das interpoliert) — sonst wäre es fälschlich derselbe
+    // Sampler wie im Default-Modus.
+    const touchesInner = lines.some((ln) => Math.hypot(ln.a.x - 2, ln.a.y - 10) < 1e-6);
+    expect(touchesInner).toBe(false);
+  });
 });
 
 describe("addDrawing2D — dimension (SIA 400 B.5.3)", () => {
@@ -271,6 +298,46 @@ describe("addDrawing2D — xline (Konstruktionslinie)", () => {
   });
 });
 
+describe("addDrawing2D — ray (Strahl)", () => {
+  it("verlängert NUR über b hinaus — a bleibt der feste Anker", () => {
+    const d: Drawing2D = {
+      id: "r1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "ray", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(1);
+    const l = out[0];
+    if (l.kind === "line") {
+      // a bleibt EXAKT der Anker (keine Verlängerung rückwärts).
+      expect(l.a).toEqual({ x: 0, y: 0 });
+      // b wird weit über den Richtungspunkt hinaus verlängert.
+      expect(l.b.x).toBeGreaterThan(500);
+      expect(l.b.y).toBeCloseTo(0, 6);
+      expect(l.dash).not.toBeNull();
+      expect(l.drawingId).toBe("r1");
+    } else {
+      throw new Error("expected a line primitive");
+    }
+  });
+
+  it("entartet (a===b) erzeugt kein Primitiv", () => {
+    const d: Drawing2D = {
+      id: "r2",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "ray", a: { x: 2, y: 2 }, b: { x: 2, y: 2 } },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(0);
+  });
+});
+
 describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
   it("ohne bulge: unverändertes Verhalten (gerade Segmente, ein Primitiv je Segment)", () => {
     const d: Drawing2D = {
@@ -286,7 +353,7 @@ describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
     expect(lines.length).toBe(2);
   });
 
-  it("mit bulge an einem Segment: tessellierter Bogen statt einer Geraden", () => {
+  it("mit bulge an einem Segment: ECHTER Bogen (drawingArc) statt Geradenstücken", () => {
     const d: Drawing2D = {
       id: "pl2",
       type: "drawing2d",
@@ -301,16 +368,37 @@ describe("addDrawing2D — polyline mit bulge (Bogen-Segmente)", () => {
     };
     const out: Primitive[] = [];
     addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+
+    // Segment 0 (Halbkreis, bulge=1) → EIN Bogen-Primitiv; Segment 1 (gerade)
+    // → EINE Linie. Früher war der Bogen in ~15 Geradenstücke tesselliert,
+    // wodurch er im DXF als Kette von LINEs landete statt als ARC.
+    const arcs = out.filter((p) => p.kind === "drawingArc");
     const lines = out.filter((p) => p.kind === "line");
-    // Segment 0 (Halbkreis, bulge=1) tessellierter Bogen → mehrere Teilstücke;
-    // Segment 1 bleibt eine einzelne Gerade → insgesamt > 2 (statt 2 wie oben).
-    expect(lines.length).toBeGreaterThan(2);
-    // Erster und letzter Punkt der gesamten Kette bleiben exakt die echten Endpunkte.
-    if (lines[0].kind === "line") {
-      expect(lines[0].a).toEqual({ x: 0, y: 0 });
+    expect(arcs.length).toBe(1);
+    expect(lines.length).toBe(1);
+
+    // Halbkreis über der Sehne (0,0)→(2,0): Mittelpunkt (1,0), Radius 1.
+    const arc = arcs[0];
+    if (arc.kind === "drawingArc") {
+      expect(arc.center.x).toBeCloseTo(1, 9);
+      expect(arc.center.y).toBeCloseTo(0, 9);
+      expect(arc.r).toBeCloseTo(1, 9);
+      expect(arc.drawingId).toBe("pl2");
+      // Die Winkel beschreiben exakt die Endpunkte des Segments (in der
+      // CCW-Konvention von `drawingArc` ggf. vertauscht).
+      const p0 = { x: arc.center.x + arc.r * Math.cos(arc.a0), y: arc.center.y + arc.r * Math.sin(arc.a0) };
+      const p1 = { x: arc.center.x + arc.r * Math.cos(arc.a1), y: arc.center.y + arc.r * Math.sin(arc.a1) };
+      const ends = [p0, p1].sort((u, v) => u.x - v.x);
+      expect(ends[0].x).toBeCloseTo(0, 9);
+      expect(ends[0].y).toBeCloseTo(0, 9);
+      expect(ends[1].x).toBeCloseTo(2, 9);
+      expect(ends[1].y).toBeCloseTo(0, 9);
     }
-    if (lines[lines.length - 1].kind === "line") {
-      expect(lines[lines.length - 1].b).toEqual({ x: 4, y: 0 });
+
+    // Das gerade Segment bleibt unverändert eine Linie mit den echten Endpunkten.
+    if (lines[0].kind === "line") {
+      expect(lines[0].a).toEqual({ x: 2, y: 0 });
+      expect(lines[0].b).toEqual({ x: 4, y: 0 });
     }
   });
 
@@ -410,6 +498,51 @@ describe("addDrawing2D — block (Symbol-Instanz)", () => {
     }
   });
 
+  it("scale zieht sowohl Position ALS AUCH Grössenfelder mit (REGRESSION: circle.r skalierte nicht mit)", () => {
+    const proj = project();
+    proj.blockDefs = [
+      { id: "blk1", name: "Kreis-Symbol", geom2d: [{ shape: "circle", center: { x: 1, y: 0 }, r: 1 }] },
+    ];
+    const d: Drawing2D = {
+      id: "i1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "block", blockDefId: "blk1", at: { x: 10, y: 10 }, rotation: 0, scale: 2 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, proj, d, false, lwByCode, colorByCode, catByCode);
+    expect(out.length).toBe(1);
+    const c = out[0];
+    if (c.kind === "drawingCircle") {
+      // Lokal (1,0) r=1, skaliert ×2 → (2,0), r=2, verschoben um (10,10).
+      expect(c.center.x).toBeCloseTo(12, 6);
+      expect(c.center.y).toBeCloseTo(10, 6);
+      expect(c.r).toBeCloseTo(2, 6);
+    } else {
+      throw new Error("expected a drawingCircle primitive");
+    }
+  });
+
+  it("fehlendes scale-Feld verhält sich wie scale=1 (unverändert)", () => {
+    const proj = project();
+    proj.blockDefs = [
+      { id: "blk1", name: "Kreis-Symbol", geom2d: [{ shape: "circle", center: { x: 0, y: 0 }, r: 1 }] },
+    ];
+    const d: Drawing2D = {
+      id: "i1",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: { shape: "block", blockDefId: "blk1", at: { x: 0, y: 0 }, rotation: 0 },
+    };
+    const out: Primitive[] = [];
+    addDrawing2D(out, proj, d, false, lwByCode, colorByCode, catByCode);
+    const c = out[0];
+    if (c.kind === "drawingCircle") expect(c.r).toBeCloseTo(1, 6);
+    else throw new Error("expected a drawingCircle primitive");
+  });
+
   it("unbekannte blockDefId rendert nichts (kein Crash)", () => {
     const d: Drawing2D = {
       id: "i2",
@@ -421,5 +554,280 @@ describe("addDrawing2D — block (Symbol-Instanz)", () => {
     const out: Primitive[] = [];
     addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
     expect(out.length).toBe(0);
+  });
+});
+
+describe("addDrawing2D — Bemassung: Strichstärken je Bestandteil", () => {
+  const dim = (extra: Record<string, unknown> = {}): Drawing2D => ({
+    id: "dim1",
+    type: "drawing2d",
+    levelId: "eg",
+    categoryCode: "20",
+    geom: { shape: "dimension", pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }], offset: 1, ...extra },
+  });
+
+  /** Alle Linien-Primitive der Bemassung nach Strichstärke gruppiert. */
+  const weights = (d: Drawing2D) => {
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode);
+    return out.filter((p) => p.kind === "line").map((p) => (p.kind === "line" ? p.weightMm : 0));
+  };
+
+  it("Default unverändert: Mass-/Hilfslinien erben die Elementstärke, Massstriche doppelt", () => {
+    const w = weights(dim());
+    const base = Math.min(...w);
+    // 2 Hilfslinien + 1 Masslinie mit Basisstärke, 2 Massstriche doppelt.
+    expect(w.filter((x) => x === base).length).toBe(3);
+    expect(w.filter((x) => Math.abs(x - base * 2) < 1e-9).length).toBe(2);
+  });
+
+  it("jede der drei Stärken ist einzeln übersteuerbar", () => {
+    const w = weights(dim({ lineWeightMm: 0.5, extWeightMm: 0.13, tickWeightMm: 0.7 }));
+    expect(w.filter((x) => x === 0.13).length).toBe(2); // Hilfslinien
+    expect(w.filter((x) => x === 0.5).length).toBe(1); // Masslinie
+    expect(w.filter((x) => x === 0.7).length).toBe(2); // Massstriche
+  });
+
+  it("Teil-Übersteuerung lässt die übrigen auf ihrem Default", () => {
+    const w = weights(dim({ tickWeightMm: 0.9 }));
+    const base = Math.min(...w);
+    expect(w.filter((x) => x === base).length).toBe(3);
+    expect(w.filter((x) => x === 0.9).length).toBe(2);
+  });
+});
+
+describe("addDrawing2D — Bemassung: Papier-mm statt Modellmass", () => {
+  const dim: Drawing2D = {
+    id: "dimS",
+    type: "drawing2d",
+    levelId: "eg",
+    categoryCode: "20",
+    geom: {
+      shape: "dimension",
+      pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }],
+      offset: 1,
+      tickLenMm: 4,
+    },
+  };
+
+  /** Länge des ersten Massstrichs (Diagonale) im erzeugten Plan. */
+  const tickLength = (scale: number) => {
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), dim, false, lwByCode, colorByCode, catByCode, scale);
+    // Massstriche sind die kürzesten Linien (Diagonalen an den Enden).
+    const lens = out
+      .filter((p) => p.kind === "line")
+      .map((p) => (p.kind === "line" ? Math.hypot(p.b.x - p.a.x, p.b.y - p.a.y) : 0));
+    return Math.min(...lens);
+  };
+
+  it("derselbe Papierwert ergibt bei grösserem Massstab ein grösseres Modellmass", () => {
+    // 4 mm Papier: 1:50 → 0.2 m, 1:100 → 0.4 m im Modell.
+    expect(tickLength(50)).toBeCloseTo(0.2, 9);
+    expect(tickLength(100)).toBeCloseTo(0.4, 9);
+  });
+
+  it("das Verhältnis folgt exakt dem Massstabsverhältnis (gleiche Wirkung auf dem Papier)", () => {
+    expect(tickLength(200) / tickLength(50)).toBeCloseTo(4, 9);
+  });
+
+  it("ohne gesetzten Wert gilt der Default — ebenfalls massstabsabhängig", () => {
+    const plain: Drawing2D = { ...dim, geom: { ...dim.geom, tickLenMm: undefined } as typeof dim.geom };
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), plain, false, lwByCode, colorByCode, catByCode, 50);
+    const lens = out
+      .filter((p) => p.kind === "line")
+      .map((p) => (p.kind === "line" ? Math.hypot(p.b.x - p.a.x, p.b.y - p.a.y) : 0));
+    // Default 3 mm bei 1:50 = 0.15 m (der frühere feste Modellwert).
+    expect(Math.min(...lens)).toBeCloseTo(0.15, 9);
+  });
+});
+
+describe("addDrawing2D — Linienenden (Pfeilspitzen & Co.)", () => {
+  const line = (endMarks?: Drawing2D["endMarks"]): Drawing2D => ({
+    id: "em1",
+    type: "drawing2d",
+    levelId: "eg",
+    categoryCode: "20",
+    geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+    endMarks,
+  });
+  const render = (d: Drawing2D, scale = 50) => {
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode, scale);
+    return out;
+  };
+
+  it("ohne Angabe bleibt alles wie bisher: nur die Linie, keine Zusatzgeometrie", () => {
+    const out = render(line());
+    expect(out.length).toBe(1);
+    expect(out[0].kind).toBe("line");
+  });
+
+  it("gefüllter Pfeil erzeugt ein Dreieck UND verkürzt die Linie dort", () => {
+    const out = render(line({ end: "arrow", sizeMm: 4 }));
+    const polys = out.filter((p) => p.kind === "polygon");
+    expect(polys.length).toBe(1);
+    if (polys[0].kind === "polygon") expect(polys[0].pts.length).toBe(3);
+    // 4 mm bei 1:50 = 0.2 m Rückzug → Linie endet bei x = 3.8.
+    const ln = out.find((p) => p.kind === "line");
+    if (ln?.kind === "line") expect(ln.b.x).toBeCloseTo(3.8, 9);
+  });
+
+  it("offene Spitze zeichnet zwei Striche und lässt die Linie durchlaufen", () => {
+    const out = render(line({ end: "arrowOpen" }));
+    const lines = out.filter((p) => p.kind === "line");
+    expect(lines.length).toBe(3); // Linie + zwei Schenkel
+    const main = lines[0];
+    if (main.kind === "line") expect(main.b.x).toBeCloseTo(4, 9);
+  });
+
+  it("Punkt-Ende erzeugt einen Kreis, Quadrat-Ende ein Viereck", () => {
+    expect(render(line({ start: "dot" })).some((p) => p.kind === "drawingCircle")).toBe(true);
+    const sq = render(line({ end: "square" })).find((p) => p.kind === "polygon");
+    if (sq?.kind === "polygon") expect(sq.pts.length).toBe(4);
+  });
+
+  it("beide Enden gleichzeitig, und die Grösse folgt dem Massstab (Papier-mm)", () => {
+    const at50 = render(line({ start: "arrow", end: "arrow", sizeMm: 4 }), 50);
+    const at100 = render(line({ start: "arrow", end: "arrow", sizeMm: 4 }), 100);
+    expect(at50.filter((p) => p.kind === "polygon").length).toBe(2);
+    const seg50 = at50.find((p) => p.kind === "line");
+    const seg100 = at100.find((p) => p.kind === "line");
+    // Rückzug 0.2 m bei 1:50, 0.4 m bei 1:100 — an BEIDEN Enden.
+    if (seg50?.kind === "line" && seg100?.kind === "line") {
+      expect(seg50.a.x).toBeCloseTo(0.2, 9);
+      expect(seg100.a.x).toBeCloseTo(0.4, 9);
+    }
+  });
+
+  it("geschlossene Formen ignorieren Linienenden (sie haben keine)", () => {
+    const ring: Drawing2D = {
+      id: "em2",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: {
+        shape: "polyline",
+        pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }],
+        closed: true,
+      },
+      endMarks: { start: "arrow", end: "arrow" },
+    };
+    expect(render(ring).some((p) => p.kind === "polygon" && p.pts.length === 3 && p.fill !== "none")).toBe(
+      false,
+    );
+  });
+
+  it("an einem Bogen-Segment folgt die Spitze der BOGEN-Tangente, nicht der Sehne", () => {
+    const d: Drawing2D = {
+      id: "em3",
+      type: "drawing2d",
+      levelId: "eg",
+      categoryCode: "20",
+      geom: {
+        shape: "polyline",
+        pts: [{ x: 0, y: 0 }, { x: 2, y: 0 }],
+        closed: false,
+        bulge: [1], // Halbkreis
+      },
+      endMarks: { end: "arrow", sizeMm: 4 },
+    };
+    const poly = render(d).find((p) => p.kind === "polygon");
+    expect(poly).toBeDefined();
+    if (poly?.kind === "polygon") {
+      // Halbkreis über (0,0)→(2,0): im Endpunkt (2,0) steht die Tangente
+      // SENKRECHT zur Sehne. Die Spitze sitzt auf (2,0), ihr Fusspunkt liegt
+      // daher senkrecht darüber/darunter — nicht seitlich.
+      const tip = poly.pts[0];
+      expect(tip.x).toBeCloseTo(2, 9);
+      expect(tip.y).toBeCloseTo(0, 9);
+      const baseMid = {
+        x: (poly.pts[1].x + poly.pts[2].x) / 2,
+        y: (poly.pts[1].y + poly.pts[2].y) / 2,
+      };
+      expect(Math.abs(baseMid.x - tip.x)).toBeLessThan(1e-6);
+      expect(Math.abs(baseMid.y - tip.y)).toBeGreaterThan(0.1);
+    }
+  });
+});
+
+describe("addDrawing2D — Objekt-Transparenz", () => {
+  const poly = (opacity?: number): Drawing2D => ({
+    id: "op1",
+    type: "drawing2d",
+    levelId: "eg",
+    categoryCode: "20",
+    geom: {
+      shape: "polyline",
+      pts: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }],
+      closed: true,
+    },
+    // Füllung über die Vollton-Füllfarbe (die Fixture führt keine Schraffuren).
+    fillColor: "#cccccc",
+    opacity,
+  });
+  const render = (d: Drawing2D) => {
+    const out: Primitive[] = [];
+    addDrawing2D(out, project(), d, false, lwByCode, colorByCode, catByCode, 50);
+    return out;
+  };
+
+  it("ohne Angabe tragen die Primitive keine Deckkraft (unverändertes Verhalten)", () => {
+    expect(render(poly()).every((p) => p.opacity === undefined)).toBe(true);
+  });
+
+  it("wird auf ALLE Primitive des Elements gestempelt — Striche wie Füllung", () => {
+    const out = render(poly(0.5));
+    expect(out.length).toBeGreaterThan(1);
+    expect(out.every((p) => p.opacity === 0.5)).toBe(true);
+    // Es sind wirklich beide Sorten dabei (sonst wäre der Test wertlos).
+    expect(out.some((p) => p.kind === "line")).toBe(true);
+    expect(out.some((p) => p.kind === "polygon")).toBe(true);
+  });
+
+  it("Deckkraft 1 stempelt nichts (kein unnötiges Feld im Plan)", () => {
+    expect(render(poly(1)).every((p) => p.opacity === undefined)).toBe(true);
+  });
+
+  it("negative Werte werden auf 0 geklemmt", () => {
+    expect(render(poly(-3)).every((p) => p.opacity === 0)).toBe(true);
+  });
+});
+
+describe("addDrawing2D — Strichmuster-Massstab (LTSCALE je Objekt)", () => {
+  const dashed = (dashScale?: number): Drawing2D => ({
+    id: "ds1",
+    type: "drawing2d",
+    levelId: "eg",
+    categoryCode: "20",
+    geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+    lineStyleId: "dash",
+    dashScale,
+  });
+  const dashOf = (d: Drawing2D) => {
+    const out: Primitive[] = [];
+    const p = { ...project(), lineStyles: [{ id: "dash", name: "Strich", weight: 0.2, color: "#000", dash: [2, 1] }] };
+    addDrawing2D(out, p, d, false, lwByCode, colorByCode, catByCode, 50);
+    const ln = out.find((x) => x.kind === "line");
+    return ln?.kind === "line" ? ln.dash : undefined;
+  };
+
+  it("ohne Angabe bleibt das Muster exakt wie im Linienstil", () => {
+    expect(dashOf(dashed())).toEqual([2, 1]);
+  });
+
+  it("streckt Striche UND Lücken um denselben Faktor", () => {
+    expect(dashOf(dashed(2))).toEqual([4, 2]);
+    expect(dashOf(dashed(0.5))).toEqual([1, 0.5]);
+  });
+
+  it("Faktor 1 lässt das Muster unangetastet (dieselbe Referenz)", () => {
+    expect(dashOf(dashed(1))).toEqual([2, 1]);
+  });
+
+  it("unsinnige Faktoren (0/negativ) werden ignoriert statt das Muster zu verschlucken", () => {
+    expect(dashOf(dashed(0))).toEqual([2, 1]);
+    expect(dashOf(dashed(-2))).toEqual([2, 1]);
   });
 });

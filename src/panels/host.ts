@@ -16,6 +16,7 @@ import { PanelHostContext } from "./types";
 import type { DisplayMode, PanelHost } from "./types";
 import type {
   AttributeSource,
+  EndMark,
   CeilingType,
   RoofType,
   Component,
@@ -32,13 +33,16 @@ import type {
   SiaCategory,
   SliceTermination,
   StairShape,
+  Vec2,
   VerticalAnchor,
   WallReferenceLine,
   WallType,
 } from "../model/types";
 import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
 import type { Selection } from "../state/selectionInfo";
+import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
+import type { DetailLevel } from "../ui/TopBar";
 
 // ── Darstellungsmodus-Steuerung je Dock-Inhalt ────────────────────────────
 
@@ -145,6 +149,9 @@ export interface PanelHostValue {
   onPatchLineStyle: (id: string, patch: Partial<LineStyle>) => void;
   onAddLineStyle: () => void;
   onDeleteLineStyle: (id: string) => void;
+  onPatchTextStyle: (id: string, patch: Partial<TextStylePreset>) => void;
+  onAddTextStyle: () => void;
+  onDeleteTextStyle: (id: string) => void;
   /** Wandstile: immutable Änderung eines Wandtyps (Schichtfugen-Stile). */
   onPatchWallType: (id: string, patch: Partial<WallType>) => void;
   onAddWallType: () => void;
@@ -241,6 +248,54 @@ export interface PanelHostValue {
   /** Koppelt/entkoppelt den Hintergrund-Override, analog {@link onSetSelectionForegroundPen}. */
   onSetSelectionBackgroundPen: (penId: string | undefined) => void;
   /**
+   * Legt eine Farbe in einer EIGENEN Farbpalette ab (`Project.customPalettes`,
+   * „+"-Zelle im Farbwahl-Raster). `paletteId` unbekannt/undefined ⇒ es wird
+   * automatisch eine neue Palette angelegt (s. `projectSlice.ts`).
+   */
+  onAddColorToCustomPalette: (paletteId: string | undefined, hex: string) => void;
+  /**
+   * Ändert die Darstellungs-Feinheiten EINER Masskette (Abstand/Überstand der
+   * Masshilfslinien, Massstrich-Länge, Schrifthöhe — alles Modell-Meter,
+   * s. `model/dimension.ts`). Teil-Patch; fehlende Felder bleiben.
+   */
+  /**
+   * Setzt die Linienenden (Pfeilspitze & Co.) einer offenen 2D-Form bzw. der
+   * Text-Hinweislinie. Teil-Patch; fehlende Felder bleiben.
+   */
+  /**
+   * Platzierung der Schraffur AM OBJEKT (Winkel/Massstab/Ankerpunkt, s.
+   * `Drawing2D.hatchAngleDeg`). Teil-Patch; `null` je Feld setzt zurück.
+   */
+  /** Setzt den Strichmuster-Massstab eines 2D-Elements (LTSCALE je Objekt). */
+  onSetDashScale: (drawingId: string, scale: number) => void;
+  /** Setzt den Bezeichner eines Detail-/Schnitt-Verweis-Symbols (obere Zeile). */
+  onSetDetailRefLabel: (drawingId: string, label: string) => void;
+  /** Verknüpft (oder löst, `undefined`) das Blatt eines Detail-/Schnitt-Verweises. */
+  onSetDetailRefSheetLayout: (drawingId: string, sheetLayoutId: string | undefined) => void;
+  /** Manueller Blattname-Platzhalter, nur relevant OHNE Blattverknüpfung. */
+  onSetDetailRefSheetLabel: (drawingId: string, sheetLabel: string) => void;
+  onSetHatchPlacement: (
+    drawingId: string,
+    patch: { angleDeg?: number | null; scale?: number | null; origin?: Vec2 | null },
+  ) => void;
+  onSetEndMarks: (
+    drawingId: string,
+    patch: { start?: EndMark; end?: EndMark; sizeMm?: number },
+  ) => void;
+  onSetDimensionStyle: (
+    drawingId: string,
+    patch: {
+      gapMm?: number;
+      overshootMm?: number;
+      tickLenMm?: number;
+      textHeightMm?: number;
+      /** Strichstärken in Papier-mm (s. `Drawing2DGeom.dimension`). */
+      lineWeightMm?: number;
+      extWeightMm?: number;
+      tickWeightMm?: number;
+    },
+  ) => void;
+  /**
    * Setzt die Quelle des Vordergrunds, wenn KEIN „eigener Wert" gilt: "layer" =
    * Nach Ebene, "object" = Nach Bauteil. Löscht dabei IMMER den expliziten
    * Vordergrund-Override (die Quelle gewinnt nur, wenn kein Wert gesetzt ist).
@@ -292,10 +347,28 @@ export interface PanelHostValue {
    */
   onSetDrawingLineLength: (length: number) => void;
   /**
+   * Dreht eine Linien-Drawing2D auf einen absoluten Winkel (Grad, wie
+   * Bildschirm-X-Achse = 0°); Startpunkt + Länge bleiben fix, nur der
+   * Endpunkt wandert auf den neuen Winkel. No-op, wenn die Selektion keine
+   * Linie ist.
+   */
+  onSetDrawingLineAngle: (deg: number) => void;
+  /**
    * Setzt den Radius einer Kreis-Drawing2D (Mittelpunkt bleibt fix). No-op,
    * wenn die Selektion kein Kreis ist.
    */
   onSetDrawingCircleRadius: (radius: number) => void;
+  /**
+   * Setzt den Radius eines Bogens (Mittelpunkt + Winkel bleiben fix). No-op,
+   * wenn die Selektion kein Bogen ist.
+   */
+  onSetDrawingArcRadius: (radius: number) => void;
+  /**
+   * Setzt den Start- bzw. Endwinkel eines Bogens (Grad, CCW wie `a0`/`a1` im
+   * Modell). No-op, wenn die Selektion kein Bogen ist.
+   */
+  onSetDrawingArcStartAngle: (deg: number) => void;
+  onSetDrawingArcEndAngle: (deg: number) => void;
 
   // ── Wand-Attribute (Object-Info-Panel; wirken NUR auf die selektierte Wand) ─
   /** Setzt die Lage der Wandachse über die Dicke (außen/mitte/innen). */
@@ -360,6 +433,8 @@ export interface PanelHostValue {
   onSetOpeningDoorType: (doorType: "normal" | "wandoeffnung") => void;
   /** Setzt die Sturzlinien-Darstellung der Tür. */
   onSetOpeningLintelLines: (lintelLines: "keine" | "innen" | "aussen" | "beide") => void;
+  /** Übersteuert die Detailstufe dieser Öffnung; `undefined` = Ansichts-Detailstufe gilt. */
+  onSetOpeningDetailLevel: (detailLevel: DetailLevel | undefined) => void;
   /** Übersteuert Farbe/Strichstärke der geschnittenen Laibungs-/Stulp-Blöcke. */
   onSetOpeningFrameLine: (v: { color?: string; weight?: number } | undefined) => void;
   /** Übersteuert Farbe/Strichstärke der durchlaufenden Rahmen-Kontur in Aufsicht. */

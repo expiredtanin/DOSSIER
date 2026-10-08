@@ -1,14 +1,22 @@
 // Leader (Legenden-/Vorführungspfeil) — wie `text`, aber mit vorangestelltem
-// Zielpunkt: Schritte:
-//   1) „Zielpunkt:" → Punkt (Pfeilspitze, zeigt auf das referenzierte Detail)
-//   2) „Textanker:" → Punkt (Textposition)
-//   Committet SOFORT ein leeres Text-Element mit `leaderTarget` gesetzt und
-//   meldet `focusDrawingId` — dieselbe Inline-Editor-Infrastruktur wie beim
-//   `text`-Befehl (kein neuer Shape, s. `Drawing2DGeom["text"].leaderTarget`).
+// Zielpunkt UND optionalen Knickpunkten dazwischen (Nutzer-Wunsch: „Hinweis-
+// linie hat nur EIN Segment, kein Knick-Punkt wie bei AutoCADs Multileader").
+// Anzahl Knicke über die Option „Knicke" (klickbar im Feld-Row, tippbar als
+// „k", zyklisch 0..4 — Default 0 = EXAKT das bisherige Verhalten, zwei Klicks,
+// keine Verhaltensänderung für den Normalfall).
+//
+//   1) „Zielpunkt:"        → Punkt (Pfeilspitze, zeigt auf das referenzierte Detail)
+//   2) „Knick N/M:"        → Punkt, je Knick EINMAL (nur wenn „Knicke" > 0)
+//   3) „Textanker:"        → Punkt (Textposition)
+//   Committet SOFORT ein leeres Text-Element mit `leaderTarget` (+ ggf.
+//   `leaderBendPoints`) gesetzt und meldet `focusDrawingId` — dieselbe
+//   Inline-Editor-Infrastruktur wie beim `text`-Befehl (kein neuer Shape,
+//   s. `Drawing2DGeom["text"].leaderTarget`/`.leaderBendPoints`).
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
 import type {
+  CmdOption,
   Command,
   CommandContext,
   CommandResult,
@@ -18,27 +26,55 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
+import type { TranslationKey } from "../../i18n";
 
 const DEFAULT_TEXT_HEIGHT_M = 0.25;
-const EPS = 1e-6;
+const MAX_BENDS = 4;
+
+/** Persistente Knick-Anzahl über Aufrufe hinweg (wie `lastCount` bei Array). */
+let lastBendCount = 0;
+
+const BEND_OPTION: CmdOption = { id: "bends", labelKey: "cmd.leader.bends" };
 
 interface LeaderTarget extends CommandState {
   phase: "target";
 }
+interface LeaderBend extends CommandState {
+  phase: "bend";
+  target: Vec2;
+  bends: Vec2[];
+  cursor: Vec2 | null;
+}
 interface LeaderAnchor extends CommandState {
   phase: "anchor";
   target: Vec2;
+  bends: Vec2[];
   cursor: Vec2 | null;
 }
-type LeaderState = LeaderTarget | LeaderAnchor;
+type LeaderState = LeaderTarget | LeaderBend | LeaderAnchor;
 
-function appendEmptyLeaderText(p: Project, id: string, at: Vec2, target: Vec2, ctx: CommandContext): Project {
+function appendLeaderText(
+  p: Project,
+  id: string,
+  at: Vec2,
+  target: Vec2,
+  bends: Vec2[],
+  ctx: CommandContext,
+): Project {
   const d: Drawing2D = {
     id,
     type: "drawing2d",
     levelId: ctx.level.id,
     categoryCode: ctx.defaultCategoryCode,
-    geom: { shape: "text", at, text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0, leaderTarget: target },
+    geom: {
+      shape: "text",
+      at,
+      text: "",
+      height: DEFAULT_TEXT_HEIGHT_M,
+      angle: 0,
+      leaderTarget: target,
+      ...(bends.length > 0 ? { leaderBendPoints: bends } : {}),
+    },
   };
   return { ...p, drawings2d: [...p.drawings2d, d] };
 }
@@ -48,38 +84,66 @@ const idle = (): [CommandState, CommandResult] => [
   { draft: null, done: true },
 ];
 
-function anchorDraft(target: Vec2, cursor: Vec2 | null): ToolDraft {
-  if (!cursor || Math.hypot(cursor.x - target.x, cursor.y - target.y) < EPS) {
-    return { preview: [], vertices: [target] };
-  }
-  const preview: DraftShape[] = [{ kind: "line", a: cursor, b: target }];
+/** Vorschau: der bisherige Pfad (Zielpunkt → platzierte Knicke) + Gummiband zum Cursor. */
+function pathDraft(target: Vec2, bends: Vec2[], cursor: Vec2 | null): ToolDraft {
+  const pts = [target, ...bends, ...(cursor ? [cursor] : [])];
+  if (pts.length < 2) return { preview: [], vertices: [target] };
+  const preview: DraftShape[] = [{ kind: "poly", pts, closed: false }];
   return { preview, vertices: [target] };
+}
+
+function promptKey(s: LeaderState): TranslationKey {
+  if (s.phase === "bend") return "cmd.leader.bend";
+  if (s.phase === "anchor") return "cmd.leader.anchor";
+  return "cmd.leader.target";
 }
 
 export const leaderCommand: Command = {
   name: "leader",
   labelKey: "cmd.leader.label",
-  prompt: (s) => ((s as LeaderState).phase === "anchor" ? "cmd.leader.anchor" : "cmd.leader.target"),
-  accepts: () => ["point"],
-  options: () => [],
+  prompt: (s) => promptKey(s as LeaderState),
+  accepts: () => ["point", "option"],
+  options: () => [{ ...BEND_OPTION, value: String(lastBendCount) }],
   init: (): LeaderTarget => ({ phase: "target", lastPoint: null }),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as LeaderState;
-    if (input.kind !== "point") return [s, { draft: null }];
-    if (s.phase !== "anchor") {
-      const next: LeaderAnchor = { phase: "anchor", target: input.point, cursor: input.point, lastPoint: input.point };
-      return [next, { draft: anchorDraft(input.point, input.point) }];
+
+    if (input.kind === "option") {
+      if (input.id === "bends") lastBendCount = (lastBendCount + 1) % (MAX_BENDS + 1);
+      return [s, { draft: null }];
     }
+    if (input.kind !== "point") return [s, { draft: null }];
+    const pt = input.point;
+
+    if (s.phase === "target") {
+      if (lastBendCount > 0) {
+        const next: LeaderBend = { phase: "bend", target: pt, bends: [], cursor: pt, lastPoint: pt };
+        return [next, { draft: pathDraft(pt, [], pt) }];
+      }
+      const next: LeaderAnchor = { phase: "anchor", target: pt, bends: [], cursor: pt, lastPoint: pt };
+      return [next, { draft: pathDraft(pt, [], pt) }];
+    }
+
+    if (s.phase === "bend") {
+      const bends = [...s.bends, pt];
+      if (bends.length < lastBendCount) {
+        const next: LeaderBend = { phase: "bend", target: s.target, bends, cursor: pt, lastPoint: pt };
+        return [next, { draft: pathDraft(s.target, bends, pt) }];
+      }
+      const next: LeaderAnchor = { phase: "anchor", target: s.target, bends, cursor: pt, lastPoint: pt };
+      return [next, { draft: pathDraft(s.target, bends, pt) }];
+    }
+
+    // phase "anchor": Textposition setzen, Leader committen.
     const id = uniqueId("dr2d");
-    const at = input.point;
-    const target = s.target;
+    const { target, bends } = s;
     return [
       idle()[0],
       {
         draft: null,
         done: true,
-        commit: (p) => appendEmptyLeaderText(p, id, at, target, ctx),
+        commit: (p) => appendLeaderText(p, id, pt, target, bends, ctx),
         focusDrawingId: id,
       },
     ];
@@ -87,9 +151,8 @@ export const leaderCommand: Command = {
 
   onMove: (state, point): [CommandState, CommandResult] => {
     const s = state as LeaderState;
-    if (s.phase !== "anchor") return [s, { draft: null }];
-    const ns: LeaderAnchor = { ...s, cursor: point };
-    return [ns, { draft: anchorDraft(s.target, point) }];
+    if (s.phase === "target") return [s, { draft: null }];
+    return [{ ...s, cursor: point } as LeaderState, { draft: pathDraft(s.target, s.bends, point) }];
   },
 
   onConfirm: (): [CommandState, CommandResult] => idle(),

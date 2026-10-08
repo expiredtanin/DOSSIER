@@ -13,7 +13,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { OverrideRule, ViewSnapshot } from "../model/types";
+import type { OverrideRule, ViewSnapshot, Vec2 } from "../model/types";
 import type { DetailLevel, View3d, ViewType } from "../ui/TopBar";
 
 /**
@@ -33,6 +33,13 @@ export interface ViewSnapshotState {
   drawingVisibility: Record<string, boolean>;
   /** Ids der aktiven (`enabled`) Override-Regeln zum Erfassungszeitpunkt. */
   enabledOverrideRuleIds: string[];
+  /**
+   * Grundriss-Kameraposition (Bildmitte in Modell-Metern + Zoom als px/m) —
+   * fehlt, wenn beim Erfassen kein Grundriss gemountet war (3D-Ansicht/
+   * Schnitt) oder bei Alt-Ausschnitten. S. `ViewSnapshot.cameraCenter`.
+   */
+  cameraCenter?: Vec2;
+  cameraPxPerMeter?: number;
 }
 
 /**
@@ -61,6 +68,8 @@ export function captureViewSnapshot(
     enabledOverrideRuleIds: [...state.enabledOverrideRuleIds],
   };
   if (folder && folder.trim()) snap.folder = folder.trim();
+  if (state.cameraCenter) snap.cameraCenter = { ...state.cameraCenter };
+  if (state.cameraPxPerMeter !== undefined) snap.cameraPxPerMeter = state.cameraPxPerMeter;
   return snap;
 }
 
@@ -83,6 +92,8 @@ export function readViewSnapshot(snap: ViewSnapshot): ViewSnapshotState {
     enabledOverrideRuleIds: snap.enabledOverrideRuleIds
       ? [...snap.enabledOverrideRuleIds]
       : [],
+    cameraCenter: snap.cameraCenter ? { ...snap.cameraCenter } : undefined,
+    cameraPxPerMeter: snap.cameraPxPerMeter,
   };
 }
 
@@ -137,6 +148,13 @@ function idSetEqual(a: string[], b: string[]): boolean {
  * nur EIN Feld ab → `false`. Pure/testbar; der Aufrufer (App.tsx) normalisiert
  * den gespeicherten Snapshot vorher über `readViewSnapshot`, damit fehlende
  * optionale Felder (fov/overrides) fair verglichen werden.
+ *
+ * ABSICHTLICH ausgenommen: `cameraCenter`/`cameraPxPerMeter`. Anders als die
+ * übrigen (diskreten) Felder ändert sich die Kamera bei jedem Pan/Zoom in
+ * winzigen Fliesskomma-Schritten — eine strikte Gleichheitsprüfung würde die
+ * „bleibt angewählt, bis etwas abweicht"-Anzeige praktisch bei jeder
+ * Mausbewegung sofort auflösen. Die Kamera wird beim Erfassen/Wiederherstellen
+ * mitgenommen, zählt aber nicht zur „entspricht exakt"-Definition.
  */
 export function snapshotMatchesLiveState(
   snap: ViewSnapshotState,

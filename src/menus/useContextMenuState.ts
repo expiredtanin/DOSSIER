@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import type { EditorState, MenuState } from "./contextMenu";
+import type { DrawingStyle } from "../editors/matchProps";
 
 export function useContextMenuState() {
   // Eigenschaften-Zwischenablage des Ebenen-Kontextmenüs (Farbe + Linienstärke).
@@ -14,6 +15,12 @@ export function useContextMenuState() {
     color: string;
     lw: number;
   } | null>(null);
+  // Eigenschaften-Zwischenablage „Eigenschaften übertragen" (2D-Element-
+  // Kontextmenü) — dasselbe Muster wie `layerClipboard`, nur der Stil eines
+  // 2D-Elements statt Farbe+Strichstärke einer Ebene.
+  const [drawingStyleClipboard, setDrawingStyleClipboard] = useState<DrawingStyle | null>(
+    null,
+  );
   // Offenes Kontextmenü (genau eines) — Quelle bestimmt die Einträge.
   const [menu, setMenu] = useState<MenuState>(null);
   // Offener Inline-Editor (Ebene bzw. Geschoss) — aus einem Menüpunkt geöffnet.
@@ -36,6 +43,8 @@ export function useContextMenuState() {
   return {
     layerClipboard,
     setLayerClipboard,
+    drawingStyleClipboard,
+    setDrawingStyleClipboard,
     menu,
     setMenu,
     editor,

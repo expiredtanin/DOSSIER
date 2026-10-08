@@ -39,7 +39,10 @@ function selHit(sel: PlanSelection): { kind: MemberKind; id: string } | null {
 
 export function useMouseSelectionHandlers(opts: {
   project: Project;
-  setProject: (updater: (p: Project) => Project) => void;
+  /** `coalesceKey`: s. `projectSlice.ts` `setProject` — von `commitTextEdit`
+   *  genutzt, damit EIN Tipp-Vorgang EINEN Undo-Schritt erzeugt (wie beim
+   *  Griff-Ziehen), statt bei jedem Tastendruck einen neuen zu pushen. */
+  setProject: (updater: (p: Project) => Project, coalesceKey?: string) => void;
   activeLevelId: string;
   visibleCodes: Set<string>;
   categoryDisplay: CategoryDisplayResolver & DisplayResolver;
@@ -158,17 +161,24 @@ export function useMouseSelectionHandlers(opts: {
   // mehr) — schreibt AUCH einen leeren Zustand zurück (kein Guard mehr), damit
   // Löschen bis auf null Zeichen sich sofort im Modell spiegelt; das eigentliche
   // Aufräumen eines leer verlassenen NEUEN Elements übernimmt `closeTextEdit`.
+  // `coalesceKey`: OHNE das würde JEDER Tastendruck einen eigenen Undo-Schritt
+  // pushen (bei HISTORY_LIMIT=100 wäre nach 100 Zeichen der Stand VOR dem
+  // Editieren aus dem Undo-Stack gefallen) — dasselbe Koaleszenz-Muster wie
+  // beim Griff-Ziehen (`moveGripOf` & Co., s. `projectSlice.ts`).
   const commitTextEdit = (doc: RichTextDoc) => {
     const id = editTextId;
     if (!id) return;
-    setProject((p) => ({
-      ...p,
-      drawings2d: p.drawings2d.map((d) =>
-        d.id === id && d.geom.shape === "text"
-          ? { ...d, geom: { ...d.geom, doc, text: plainText(doc) } }
-          : d,
-      ),
-    }));
+    setProject(
+      (p) => ({
+        ...p,
+        drawings2d: p.drawings2d.map((d) =>
+          d.id === id && d.geom.shape === "text"
+            ? { ...d, geom: { ...d.geom, doc, text: plainText(doc) } }
+            : d,
+        ),
+      }),
+      `commitTextEdit:${id}`,
+    );
   };
 
   // Inline-Editor schliessen (Backdrop-Klick/Escape): bleibt das Element leer
@@ -245,6 +255,14 @@ export function useMouseSelectionHandlers(opts: {
     // derselbe Ignorier-Kurzschluss wie beim normalen Sperren oben.
     const hit = selHit(sel);
     if (hit && !isInsideActiveGroup(project, hit.kind, hit.id, groupPath)) return;
+    // Objekt-Sperre (`Wall.locked` & Co., s. `state/objectLock.ts`): bewusst
+    // NICHT die Auswahl blockieren (sonst kein Weg mehr zurück zum
+    // Kontextmenü-„Entsperren", sobald die Selektion einmal woanders hin
+    // wechselt — Sackgasse). Ein gesperrtes Element bleibt anwähl-/
+    // inspizierbar; blockiert wird die MODIFIKATION direkt an den
+    // Mutations-Stellen (`moveGrip`/`moveElementBy` in projectSlice.ts,
+    // `deleteSelection` in App.tsx) — dieselbe Semantik wie AutoCADs
+    // Layer-„Lock" (weiterhin wählbar, nicht editierbar).
     // Shift+Klick: Mehrfach-Auswahl — getroffenes Element zu-/abschalten, den
     // Rest behalten (Wände und 2D-Zeichnungen unabhängig, gemischte Auswahl
     // erlaubt). Leerraum-Klick mit Shift lässt die Auswahl unverändert.
@@ -417,6 +435,9 @@ export function useMouseSelectionHandlers(opts: {
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
   // (nach CAD-Konvention von PlanView bestimmt). Ersetzt die bisherige Auswahl.
   const onPlanMarquee = (sel: MarqueeSelection) => {
+    // Objekt-Sperre: NICHT hier filtern (s. Kommentar bei `onPlanSelect`) —
+    // Auswahl bleibt für gesperrte Elemente uneingeschränkt möglich, die
+    // Mutations-Stellen selbst prüfen `isLocked`.
     const raw: GroupMembership = {
       wallIds: sel.wallIds,
       drawingIds: sel.drawingIds ?? [],
@@ -473,7 +494,7 @@ export function useMouseSelectionHandlers(opts: {
   }) => {
     const wallId = hitTestWall(project, activeLevelId, visibleCodes, info.model);
     if (wallId && !selectedWallIds.includes(wallId)) setSelectedWallIds([wallId]);
-    setMenu({ kind: "plan", x: info.clientX, y: info.clientY, wallId });
+    setMenu({ kind: "plan", x: info.clientX, y: info.clientY, wallId, model: info.model });
   };
   // Links-Klick im 3D: per Raycast getroffene Wand wählen (Einzelauswahl).
   const onViewportSelectWall = (wallId: string | null) => {
@@ -578,6 +599,23 @@ export function useMouseSelectionHandlers(opts: {
       setSelectedWallIds([]);
       setSelectedCeilingIds([]);
       setSelectedDrawingId(null);
+      setSelectedStairIds([]);
+      setSelectedRoomIds([]);
+      setSelectedExtrudedSolidIds([]);
+      setSelectedColumnIds([]);
+      setSelectedRoofIds([]);
+      setSelectedContextObjectIds([]);
+      setSelectedSectionLineIds([]);
+      return;
+    }
+    if (hit.kind === "drawing") {
+      setSelectedDrawingIds(
+        additive ? Array.from(new Set([...selectedDrawingIds, hit.id])) : [hit.id],
+      );
+      setSelectedDrawingId(hit.id);
+      setSelectedWallIds([]);
+      setSelectedCeilingIds([]);
+      setSelectedOpeningIds([]);
       setSelectedStairIds([]);
       setSelectedRoomIds([]);
       setSelectedExtrudedSolidIds([]);

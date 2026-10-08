@@ -131,9 +131,9 @@ function closedRiserOutline(
  * ergänzt (sonst bleibt die Treppe dort offen) — wortgetreu wie im Three.js-
  * Pfad, hier ans WASM/wgpu-Default-3D nachgezogen (beide Felder waren dort
  * unwirksam: existierten im Modell + der ResourceManager-UI, aber der
- * Standard-Renderer las sie nie, s. PENDENZEN.md). Geländer sind weiterhin
- * eine Verfeinerung (Three.js-Pfad, dort selbst noch als TODO markiert) —
- * hier zählt zuerst die SICHTBARKEIT.
+ * Standard-Renderer las sie nie, s. PENDENZEN.md). Handlauf/Geländer
+ * (`StairType.railing`) sind separat in {@link emitStairRailings} (nur
+ * gerade Läufe, s. dort).
  * `ceilingId` trägt hier die Treppen-Id (nur TS-seitiges Tagging; render3d ignoriert
  * das Feld, und der Pick läuft separat über `pickGeometry`).
  */
@@ -271,6 +271,125 @@ export function emitStairMeshes(project: Project): RMesh[] {
     }
     if (indices.length === 0) continue;
     out.push({ positions, indices, kind: "extrusion", color: STAIR_RGB });
+  }
+  return out;
+}
+
+/** Neutrales Metallgrau für Handlauf + Pfosten. */
+const RAIL_RGB: RRgb = hexToRgb("#74797f", SLAB_RGB);
+/** Handlaufhöhe über der Trittvorderkante (SIA-üblich), Meter. */
+const RAIL_HEIGHT = 0.9;
+/** Handlauf-/Pfosten-Querschnitt (Kantenlänge), Meter. */
+const RAIL_THICK = 0.04;
+
+type Vec3 = { x: number; y: number; z: number };
+
+/**
+ * Schlanker Quader zwischen zwei beliebigen 3D-Punkten (Modell-Meter, NICHT
+ * an eine Wandachse gebunden — anders als die übrigen Quader-Helfer in
+ * `openings.ts`, die alle wand-lokale Achsen voraussetzen). Querschnitt-Achsen
+ * werden aus einem festen Welt-„oben" (0,0,1) abgeleitet (fällt bei fast
+ * senkrechten Segmenten — Pfosten — auf die X-Achse zurück, damit das
+ * Kreuzprodukt nicht entartet). `null` bei entartetem (zu kurzem) Segment.
+ */
+function strutBox(a: Vec3, b: Vec3, half: number, color: RRgb): RMesh | null {
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < EPS) return null;
+  const d = { x: dx / len, y: dy / len, z: dz / len };
+  const upRef: Vec3 = Math.abs(d.z) > 0.98 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 };
+  let rx = d.y * upRef.z - d.z * upRef.y;
+  let ry = d.z * upRef.x - d.x * upRef.z;
+  let rz = d.x * upRef.y - d.y * upRef.x;
+  const rl = Math.hypot(rx, ry, rz) || 1;
+  rx /= rl; ry /= rl; rz /= rl;
+  const ux = ry * d.z - rz * d.y;
+  const uy = rz * d.x - rx * d.z;
+  const uz = rx * d.y - ry * d.x;
+  const corners: Vec3[] = [];
+  for (const p of [a, b]) {
+    for (const [sr, su] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+      corners.push({
+        x: p.x + rx * sr * half + ux * su * half,
+        y: p.y + ry * sr * half + uy * su * half,
+        z: p.z + rz * sr * half + uz * su * half,
+      });
+    }
+  }
+  const positions: number[] = [];
+  for (const c of corners) positions.push(c.x, c.y, c.z);
+  const indices: number[] = [];
+  const quad = (a0: number, b0: number, c0: number, d0: number) =>
+    indices.push(a0, b0, c0, a0, c0, d0);
+  quad(0, 1, 2, 3); // Stirnfläche bei a
+  quad(7, 6, 5, 4); // Stirnfläche bei b
+  quad(0, 4, 5, 1);
+  quad(1, 5, 6, 2);
+  quad(2, 6, 7, 3);
+  quad(3, 7, 4, 0);
+  return { positions, indices, kind: "extrusion", color };
+}
+
+/**
+ * Handlauf + Pfosten (`StairType.railing`: "keine"|"links"|"rechts"|"beide")
+ * — bislang ein „totes" Feld: im Modell, im ResourceManager (`StairStylesTab`)
+ * und in den i18n-Labels längst vorhanden, aber von KEINEM Renderer je
+ * gelesen (weder dem alten Three.js-Pfad — dort selbst als TODO markiert —
+ * noch diesem WASM/wgpu-Default-3D). Nur für GERADE Läufe umgesetzt: bei
+ * einer geraden Treppe liegt die Vorderkante jedes Tritts (das Eckpunktpaar
+ * mit dem GRÖSSEREN Lauf-Parameter, s. `treadRect`/`stairGeometry`) exakt auf
+ * der linearen Rampen-Geraden (Steigung totalRise/runLength ist über den
+ * ganzen Lauf konstant) — Handlauf und Pfosten lassen sich daher als EIN
+ * gerades, schräges Segment je Seite + ein Pfosten je Trittvorderkante bauen,
+ * ohne die Stufen einzeln nachzubilden. L-Läufe/Wendeltreppen (Richtungs-
+ * wechsel bzw. keine lineare Rampe) bleiben bewusst aussen vor — eigener,
+ * grösserer Folgeschritt (Rampen-Polyline müsste knickweise bzw. als Spirale
+ * gebaut werden), kein Blocker für die Sichtbarkeit bei geraden Treppen, dem
+ * mit Abstand häufigsten Fall.
+ */
+export function emitStairRailings(project: Project): RMesh[] {
+  const out: RMesh[] = [];
+  for (const stair of project.stairs ?? []) {
+    if (stair.shape !== "straight") continue;
+    const st = getStairType(project, stair);
+    const railing = st?.railing ?? "keine";
+    if (railing === "keine") continue;
+    const { zBottom, zTop } = stairVerticalExtent(project, stair);
+    const totalRise = zTop - zBottom;
+    if (totalRise <= EPS) continue;
+    const geo = stairGeometry(stair, totalRise);
+    if (geo.treads.length === 0) continue;
+    const sides: ("left" | "right")[] =
+      railing === "beide" ? ["left", "right"] : railing === "links" ? ["left"] : ["right"];
+    for (const side of sides) {
+      // Tritt-Eckpunkte (s. treadRect): 0/1 = linke Kante (Start/Ende),
+      // 3/2 = rechte Kante (Start/Ende). Die „Ende"-Ecke jedes Tritts ist
+      // dessen Vorderkante (liegt auf der Rampen-Geraden, s. Funktionsdoc).
+      const iStart = side === "left" ? 0 : 3;
+      const iEnd = side === "left" ? 1 : 2;
+      const first = geo.treads[0];
+      const startPt = first.pts[iStart];
+      const last = geo.treads[geo.treads.length - 1];
+      const endPt = last.pts[iEnd];
+      const rail = strutBox(
+        { x: startPt.x, y: startPt.y, z: zBottom + RAIL_HEIGHT },
+        { x: endPt.x, y: endPt.y, z: zTop + RAIL_HEIGHT },
+        RAIL_THICK / 2,
+        RAIL_RGB,
+      );
+      if (rail) out.push(rail);
+      const postAt = (p: Vec2, topZ: number) => {
+        const post = strutBox(
+          { x: p.x, y: p.y, z: topZ },
+          { x: p.x, y: p.y, z: topZ + RAIL_HEIGHT },
+          RAIL_THICK / 2,
+          RAIL_RGB,
+        );
+        if (post) out.push(post);
+      };
+      postAt(startPt, zBottom); // Fusspfosten am Bodenanschluss.
+      for (const tr of geo.treads) postAt(tr.pts[iEnd], zBottom + tr.topRise);
+    }
   }
   return out;
 }

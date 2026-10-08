@@ -11,8 +11,10 @@ import { getWallType, wallTypeThickness } from "../model/types";
 import { add, leftNormal, lineIntersect, normalize, scale, sub } from "../model/geometry";
 import { wallReferenceOffset } from "../model/wall";
 import { centroid as roomCentroid } from "../geometry/roomArea";
+import { columnFootprint } from "../geometry/column";
+import { stairOutline } from "../geometry/stair";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
-import { sampleBezierChain, sampleCatmullRom } from "./curves";
+import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "./curves";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -30,6 +32,9 @@ const PRIORITY: Record<SnapKind, number> = {
   extension: 0,
   angle: 0,
   divide: 3,
+  perpendicular: 1,
+  tangent: 1,
+  parallel: 1,
 };
 
 export interface SnapInput {
@@ -81,6 +86,14 @@ export function wallLayerBoundarySegments(project: Project, wall: Wall): Seg[] {
   return out;
 }
 
+/** Kanten eines geschlossenen Polygons (Schlusspunkt nicht dupliziert). */
+function closedPolySegs(pts: Vec2[]): Seg[] {
+  const segs: Seg[] = [];
+  for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
+  if (pts.length > 2) segs.push([pts[pts.length - 1], pts[0]]);
+  return segs;
+}
+
 /** Sammelt alle sichtbaren Strecken des Geschosses (Wandachsen + 2D-Segmente). */
 function collectSegments(input: SnapInput): Seg[] {
   const segs: Seg[] = [];
@@ -89,6 +102,38 @@ function collectSegments(input: SnapInput): Seg[] {
     if (!input.visibleCodes.has(w.categoryCode)) continue;
     segs.push([w.start, w.end]);
     for (const seg of wallLayerBoundarySegments(input.project, w)) segs.push(seg);
+  }
+  // Raum-/Decken-/Dach-/Treppen-/Stützen-Umrisse: bisher komplett blind (nur
+  // der Raum-Stempel-Anker war als Endpunkt fangbar, s. u.) — eine Wand oder
+  // Bemassung liess sich nicht bündig an eine Raum-/Dachkante setzen.
+  for (const room of input.project.rooms ?? []) {
+    if (room.floorId !== input.levelId) continue;
+    if (!input.visibleCodes.has(room.categoryCode)) continue;
+    segs.push(...closedPolySegs(room.boundary));
+  }
+  for (const c of input.project.ceilings ?? []) {
+    if (c.floorId !== input.levelId) continue;
+    if (!input.visibleCodes.has(c.categoryCode)) continue;
+    segs.push(...closedPolySegs(c.outline));
+    for (const hole of c.openings ?? []) segs.push(...closedPolySegs(hole));
+  }
+  for (const r of input.project.roofs ?? []) {
+    if (r.floorId !== input.levelId) continue;
+    if (!input.visibleCodes.has(r.categoryCode)) continue;
+    segs.push(...closedPolySegs(r.outline));
+  }
+  for (const s of input.project.stairs ?? []) {
+    if (s.floorId !== input.levelId) continue;
+    if (!input.visibleCodes.has(s.categoryCode)) continue;
+    const { polygon, spiral } = stairOutline(s, 0);
+    if (polygon) segs.push(...closedPolySegs(polygon));
+    else if (spiral) for (const line of spiral.lines) segs.push(line); // Innen-/Aussenbögen s. collectCircles
+  }
+  for (const col of input.project.columns ?? []) {
+    if (col.floorId !== input.levelId) continue;
+    if (!input.visibleCodes.has(col.categoryCode)) continue;
+    if (col.profile.kind === "rect") segs.push(...closedPolySegs(columnFootprint(col)));
+    // Runde Stützen: s. collectCircles (Zentrum/Quadranten statt Vieleck-Kanten).
   }
   for (const d of input.project.drawings2d) {
     if (d.levelId !== input.levelId) continue;
@@ -109,6 +154,15 @@ function collectSegments(input: SnapInput): Seg[] {
         ]);
       }
     }
+    else if (g.shape === "ray") {
+      // Wie xline, aber NUR über `b` hinaus verlängert (Anker `a` bleibt fest).
+      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 1e-6) {
+        const ux = dx / len, uy = dy / len, ext = 1000;
+        segs.push([g.a, { x: g.b.x + ux * ext, y: g.b.y + uy * ext }]);
+      }
+    }
     else if (g.shape === "polyline") {
       for (let i = 0; i < g.pts.length - 1; i++) segs.push([g.pts[i], g.pts[i + 1]]);
       if (g.closed && g.pts.length > 2) segs.push([g.pts[g.pts.length - 1], g.pts[0]]);
@@ -121,7 +175,7 @@ function collectSegments(input: SnapInput): Seg[] {
       for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
     } else if (g.shape === "spline") {
       const closed = g.closed && g.pts.length > 2;
-      const pts = sampleCatmullRom(g.pts, closed);
+      const pts = g.mode === "control" ? sampleUniformBSpline(g.pts, closed) : sampleCatmullRom(g.pts, closed);
       for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
       if (closed) segs.push([pts[pts.length - 1], pts[0]]);
     }
@@ -141,7 +195,11 @@ interface CircleGeom {
   arc: { a0: number; a1: number } | null;
 }
 
-/** Sammelt sichtbare Kreise/Bögen des aktiven Geschosses (aus `drawings2d`). */
+/**
+ * Sammelt sichtbare Kreise/Bögen des aktiven Geschosses: `drawings2d`
+ * (circle/arc), runde Stützen (Zentrum/Quadranten statt Vieleck-Näherung)
+ * und die Innen-/Aussenbögen von Wendeltreppen (s. `stairOutline`).
+ */
 function collectCircles(input: SnapInput): CircleGeom[] {
   const out: CircleGeom[] = [];
   for (const d of input.project.drawings2d) {
@@ -151,6 +209,22 @@ function collectCircles(input: SnapInput): CircleGeom[] {
     if (g.shape === "circle") out.push({ center: g.center, r: g.r, arc: null });
     else if (g.shape === "arc")
       out.push({ center: g.center, r: g.r, arc: { a0: g.a0, a1: g.a1 } });
+  }
+  for (const col of input.project.columns ?? []) {
+    if (col.floorId !== input.levelId) continue;
+    if (!input.visibleCodes.has(col.categoryCode)) continue;
+    if (col.profile.kind === "round") {
+      out.push({ center: col.position, r: col.profile.radius, arc: null });
+    }
+  }
+  for (const s of input.project.stairs ?? []) {
+    if (s.floorId !== input.levelId) continue;
+    if (!input.visibleCodes.has(s.categoryCode)) continue;
+    const { spiral } = stairOutline(s, 0);
+    if (!spiral) continue;
+    for (const a of spiral.arcs) {
+      out.push({ center: { x: a.cx, y: a.cy }, r: a.r, arc: { a0: a.a0, a1: a.a1 } });
+    }
   }
   return out;
 }
@@ -177,6 +251,18 @@ function perpFoot(p: Vec2, a: Vec2, b: Vec2): Vec2 {
 let dwellSegKey: string | null = null;
 let dwellSince = 0;
 let dwellRevealedSeg: Seg | null = null;
+
+/**
+ * „Erfasste" Parallel-Referenz — bewusst SEPARAT vom obigen `dwellRevealedSeg`:
+ * "divide" soll seine Teilpunkte NUR zeigen, solange der Cursor tatsächlich
+ * auf der Linie bleibt (reine Hover-Sichtbarkeitshilfe), aber „parallel"
+ * braucht die Referenzrichtung gerade dann noch, wenn der Cursor die Linie
+ * schon längst wieder VERLASSEN hat (Richtung Ziel-Punkt). Wird gesetzt,
+ * sobald "divide"s Verweil-Erkennung eine Strecke freigibt UND `parallel`
+ * aktiv ist — bleibt danach bestehen, bis eine ANDERE Strecke neu erfasst
+ * wird (kein Reset beim blossen Wegbewegen).
+ */
+let acquiredParallelSeg: Seg | null = null;
 
 const segKey = (seg: Seg): string =>
   `${seg[0].x},${seg[0].y}|${seg[1].x},${seg[1].y}`;
@@ -241,12 +327,17 @@ export function computeSnap(input: SnapInput): SnapResult | null {
   };
 
   const needSegs =
-    settings.midpoint || settings.intersection || settings.onEdge || settings.endpoint;
+    settings.midpoint ||
+    settings.intersection ||
+    settings.onEdge ||
+    settings.endpoint ||
+    settings.perpendicular ||
+    settings.parallel;
   const segs = needSegs ? collectSegments(input) : [];
 
   // Teilpunkt-Verweilerkennung: braucht dieselben Strecken wie oben. Ohne sie
-  // (alle vier Objekt-Snap-Arten aus) bleibt "divide" ebenfalls inaktiv —
-  // konsistent dazu, dass dann ohnehin keine Linien-bezogenen Snaps gelten.
+  // (alle Objekt-Snap-Arten aus) bleiben "divide"/"parallel" ebenfalls inaktiv
+  // — konsistent dazu, dass dann ohnehin keine Linien-bezogenen Snaps gelten.
   const revealed = updateDwell(raw, segs, settings.hoverDivideDelayMs, tolM);
   if (revealed) {
     const [a, b] = revealed;
@@ -254,6 +345,44 @@ export function computeSnap(input: SnapInput): SnapResult | null {
     for (let i = 1; i < n; i++) {
       const t = i / n;
       consider({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, "divide");
+    }
+  }
+
+  // parallel: sobald "divide"s Verweil-Erkennung eine Strecke freigibt,
+  // dieselbe Strecke zusätzlich als STICKY Parallel-Referenz übernehmen (s.
+  // Kommentar bei `acquiredParallelSeg` — bleibt bestehen, auch wenn der
+  // Cursor die Linie danach wieder verlässt).
+  if (settings.parallel && revealed) acquiredParallelSeg = revealed;
+
+  // parallel: die erfasste Referenzstrecke liefert nur die RICHTUNG — der
+  // Fangpunkt liegt auf der Parallelen DURCH den letzten gesetzten Punkt, an
+  // der Stelle, die dem Cursor am nächsten ist (Projektion von `raw` auf
+  // diese Gerade).
+  if (settings.parallel && input.lastPoint && acquiredParallelSeg) {
+    const [ra, rb] = acquiredParallelSeg;
+    const dirX = rb.x - ra.x;
+    const dirY = rb.y - ra.y;
+    const dirLen = Math.hypot(dirX, dirY);
+    if (dirLen > 1e-9) {
+      const ux = dirX / dirLen;
+      const uy = dirY / dirLen;
+      const vx = raw.x - input.lastPoint.x;
+      const vy = raw.y - input.lastPoint.y;
+      const t = vx * ux + vy * uy;
+      consider(
+        { x: input.lastPoint.x + ux * t, y: input.lastPoint.y + uy * t },
+        "parallel",
+        input.lastPoint,
+      );
+    }
+  }
+
+  // perpendicular: Lotfusspunkt VOM LETZTEN PUNKT (nicht vom Cursor wie
+  // "onEdge") auf nahe Strecken — die Strecke lastPoint→Fangpunkt steht im
+  // rechten Winkel zur Referenz-Strecke.
+  if (settings.perpendicular && input.lastPoint) {
+    for (const [a, b] of segs) {
+      consider(perpFoot(input.lastPoint, a, b), "perpendicular", input.lastPoint);
     }
   }
 
@@ -297,28 +426,50 @@ export function computeSnap(input: SnapInput): SnapResult | null {
 
   // Kreis-/Bogen-Snaps: Mittelpunkt + Quadranten (Ost/Nord/West/Süd); bei Bögen
   // nur die Quadranten IM Bogen-Bereich, plus die beiden Bogen-Endpunkte. Center/
-  // Quadrant hängen an der `center`-Einstellung, die Endpunkte an `endpoint`.
-  if (settings.center || settings.endpoint) {
+  // Quadrant hängen an der `center`-Einstellung, die Endpunkte an `endpoint`,
+  // die Tangentenpunkte an `tangent` (+ zwingend `lastPoint`).
+  if (settings.center || settings.endpoint || settings.tangent) {
     const TAU = Math.PI * 2;
     const norm = (x: number) => ((x % TAU) + TAU) % TAU;
     const onCircle = (c: CircleGeom, ang: number): Vec2 => ({
       x: c.center.x + c.r * Math.cos(ang),
       y: c.center.y + c.r * Math.sin(ang),
     });
+    const inArc = (c: CircleGeom, ang: number): boolean => {
+      if (!c.arc) return true;
+      const sweep = norm(c.arc.a1 - c.arc.a0) || TAU;
+      return norm(ang - c.arc.a0) <= sweep + 1e-9;
+    };
     for (const c of collectCircles(input)) {
       if (settings.center) {
         consider(c.center, "center");
         // Volle CCW-Spanne (0 ⇒ Vollkreis); Quadrant nur, wenn im Bogen liegt.
-        const sweep = c.arc ? norm(c.arc.a1 - c.arc.a0) || TAU : TAU;
         for (let q = 0; q < 4; q++) {
           const ang = q * (Math.PI / 2);
-          if (c.arc && norm(ang - c.arc.a0) > sweep + 1e-9) continue;
-          consider(onCircle(c, ang), "quadrant");
+          if (inArc(c, ang)) consider(onCircle(c, ang), "quadrant");
         }
       }
       if (settings.endpoint && c.arc) {
         consider(onCircle(c, c.arc.a0), "endpoint");
         consider(onCircle(c, c.arc.a1), "endpoint");
+      }
+      // Tangente von aussen (lastPoint) an den Kreis: klassische Konstruktion
+      // — zwei Lösungen, Dreieck center/lastPoint/Tangentenpunkt ist bei T
+      // rechtwinklig, daher angAtC = acos(r/d) der Winkel zwischen center→
+      // lastPoint und center→T. Innerhalb/auf dem Kreis (d ≤ r) gibt es keine
+      // Tangente von aussen.
+      if (settings.tangent && input.lastPoint) {
+        const dx = input.lastPoint.x - c.center.x;
+        const dy = input.lastPoint.y - c.center.y;
+        const d = Math.hypot(dx, dy);
+        if (d > c.r + 1e-9) {
+          const thetaCP = Math.atan2(dy, dx);
+          const angAtC = Math.acos(Math.min(1, c.r / d));
+          for (const sign of [1, -1]) {
+            const ang = thetaCP + sign * angAtC;
+            if (inArc(c, ang)) consider(onCircle(c, ang), "tangent", input.lastPoint);
+          }
+        }
       }
     }
     // Ellipse: nur der Mittelpunkt (keine Quadranten — bei gedrehter Ellipse

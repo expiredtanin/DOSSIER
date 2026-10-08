@@ -135,6 +135,18 @@ function emitPrimitive(
       emitArc(dxf, p, layer);
       break;
 
+    // Gezeichnete Kreise/Bögen (2D-Elemente) waren bisher gar nicht im DXF —
+    // der Writer kann beides längst, es fehlte nur der Zweig. `drawingArc`
+    // läuft per Konvention immer CCW von a0 nach a1 (s. planView/primitives),
+    // genau wie DXF-Bögen; daher direkte Grad-Umrechnung ohne Tausch.
+    case "drawingCircle":
+      dxf.addCircle(layer, p.center, p.r);
+      break;
+
+    case "drawingArc":
+      dxf.addArc(layer, p.center, p.r, (p.a0 * 180) / Math.PI, (p.a1 * 180) / Math.PI);
+      break;
+
     case "polygon": {
       const pts = p.pts;
       if (pts.length < 2) break;
@@ -143,13 +155,15 @@ function emitPrimitive(
       dxf.addPolyline(layer, pts, true);
       // Schraffur als geklippte Linien (optional). Vollfüllung/„none" tragen keine
       // sichtbaren Musterlinien → wir geben nur echte Muster (nicht solid/none) aus.
-      // Bild-Schraffur (kind==="image"): DXF trägt keine Rasterbilder →
-      // FALLBACK ohne Musterlinien (nur die Umriss-Polylinie oben). Als
-      // Folge-Arbeit dokumentiert. Random-Vektor: deterministische Streu-Striche
+      // Bild-/Verlauf-Schraffur (kind==="image"/"gradient"): DXF trägt weder
+      // Rasterbilder noch (hier) echte Farbverläufe → FALLBACK ohne
+      // Musterlinien (nur die Umriss-Polylinie oben). Als Folge-Arbeit
+      // dokumentiert. Random-Vektor: deterministische Streu-Striche
       // (Modell-Meter, identischer Seed wie Bildschirm/PDF).
       if (
         includeHatches &&
         p.hatch.kind !== "image" &&
+        p.hatch.kind !== "gradient" &&
         p.hatch.pattern !== "none" &&
         p.hatch.pattern !== "solid"
       ) {

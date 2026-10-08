@@ -63,6 +63,29 @@ export interface PickOpening {
   openingId: string;
 }
 
+/**
+ * Minimal-Form eines Segments einer freien 2D-Zeichnung (Linie/Polylinie/
+ * Rechteck) für den Raycast — dieselbe orientierte-Quader-Form wie
+ * `PickOpening`, aber mit fester (grosszügiger) Klick-Toleranz statt echter
+ * Bauteildicke: die sichtbare Boden-Spur im 3D ist nur 0.008m breit (s.
+ * `toWalls3d/drawing2d.ts::DRAWING_LINE_HALF_WIDTH`) — zu schmal, um
+ * zuverlässig zu treffen. `baseElevation` ist bereits die UNTERE Kante der
+ * Pick-Box (Boden-Spur-Höhe minus halbe Toleranzhöhe), s. `pickDrawingSegs`.
+ */
+export interface PickDrawingSeg {
+  start: readonly [number, number];
+  end: readonly [number, number];
+  baseElevation: number;
+  drawingId: string;
+}
+
+/** Klick-Toleranz für 2D-Zeichnungs-Boden-Spuren im 3D (Welt-Meter, s.
+ * {@link PickDrawingSeg}) — quer zur Linie UND vertikal, je zur Hälfte um die
+ * sichtbare Spur zentriert. Analog dem 2D-Plan-Pick-Radius
+ * (`PlanView.tsx::LINE_PICK_PX`), hier als fester Welt-Wert statt Pixel-
+ * Toleranz (im 3D gibt es keinen globalen Pixel/Meter-Faktor). */
+export const DRAWING_PICK_TOLERANCE = 0.12;
+
 /** Minimal-Form eines Decken-Prismas für den Raycast (RSlab erfüllt sie strukturell). */
 export interface PickSlab {
   outline: ReadonlyArray<readonly [number, number]>;
@@ -110,7 +133,7 @@ export interface PickContextMesh {
 
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject";
+  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing";
   id: string;
   t: number;
   /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
@@ -119,6 +142,8 @@ export interface PickHit {
   stairId?: string;
   /** Bei `kind:"contextObject"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
   contextObjectId?: string;
+  /** Bei `kind:"drawing"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
+  drawingId?: string;
 }
 
 const EPS = 1e-9;
@@ -265,6 +290,21 @@ export function rayOpeningBox(ray: Ray, opening: PickOpening): number | null {
   );
 }
 
+/**
+ * Schnitt-Distanz des Strahls mit der (grosszügig tolerierten) Pick-Box eines
+ * 2D-Zeichnungs-Segments, oder null — s. {@link PickDrawingSeg}/{@link rayOrientedBoxXZ}.
+ */
+export function rayDrawingSeg(ray: Ray, seg: PickDrawingSeg): number | null {
+  return rayOrientedBoxXZ(
+    ray,
+    seg.start,
+    seg.end,
+    DRAWING_PICK_TOLERANCE,
+    DRAWING_PICK_TOLERANCE,
+    seg.baseElevation,
+  );
+}
+
 /** Punkt-in-Polygon (XZ-Ebene), klassisches Ray-Casting (ungerade Kreuzungen). */
 function pointInPolyXZ(
   x: number,
@@ -407,6 +447,7 @@ export function pickNearest(
   stairs?: readonly PickStair[],
   roofs?: readonly PickRoof[],
   contextMeshes?: readonly PickContextMesh[],
+  drawings?: readonly PickDrawingSeg[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -425,6 +466,7 @@ export function pickNearest(
   stairs: readonly PickStair[] = [],
   roofs: readonly PickRoof[] = [],
   contextMeshes: readonly PickContextMesh[] = [],
+  drawings: readonly PickDrawingSeg[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -450,6 +492,13 @@ export function pickNearest(
   for (const o of openings) {
     const t = rayOpeningBox(ray, o);
     if (t !== null) consider({ kind: "opening", id: o.openingId, t, openingId: o.openingId }, 0);
+  }
+  // 2D-Zeichnungs-Spuren: Rang wie Öffnung/Treppe (0) — ihre Boden-Spur liegt
+  // auf derselben Fläche wie die Wand-/Deckenoberkante darunter und würde vom
+  // fast gleich-weiten Wandtreffer sonst verdeckt.
+  for (const d of drawings) {
+    const t = rayDrawingSeg(ray, d);
+    if (t !== null) consider({ kind: "drawing", id: d.drawingId, t, drawingId: d.drawingId }, 0);
   }
   for (const st of stairs) {
     const t = rayStairPrism(ray, st);

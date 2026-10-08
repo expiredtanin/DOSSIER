@@ -133,6 +133,41 @@ function hatchInner(hatch: HatchStyle, w: number, h: number, uid: string): React
         </text>
       );
     }
+  } else if (hatch.kind === "gradient" && hatch.gradient) {
+    // Farbverlauf: linear entlang `angle` bzw. radial vom Zentrum aus —
+    // dieselbe objectBoundingBox-Technik wie der echte Plan-Renderer
+    // (`plan/planView/primitives.tsx`). Hier mit den ECHTEN Verlauffarben
+    // (nicht `currentColor`), da `HatchStyle.gradient.color1/2` die einzige
+    // Farbquelle dieses Modus sind (kein Bauteil-Vordergrund beteiligt).
+    const g = hatch.gradient;
+    if (g.type === "radial") {
+      inner = (
+        <>
+          <defs>
+            <radialGradient id={patId}>
+              <stop offset="0%" stopColor={g.color1} />
+              <stop offset="100%" stopColor={g.color2} />
+            </radialGradient>
+          </defs>
+          <rect x={0} y={0} width={w} height={h} fill={`url(#${patId})`} />
+        </>
+      );
+    } else {
+      const rad = (g.angle * Math.PI) / 180;
+      const dx = Math.cos(rad) / 2;
+      const dy = Math.sin(rad) / 2;
+      inner = (
+        <>
+          <defs>
+            <linearGradient id={patId} x1={0.5 - dx} y1={0.5 - dy} x2={0.5 + dx} y2={0.5 + dy}>
+              <stop offset="0%" stopColor={g.color1} />
+              <stop offset="100%" stopColor={g.color2} />
+            </linearGradient>
+          </defs>
+          <rect x={0} y={0} width={w} height={h} fill={`url(#${patId})`} />
+        </>
+      );
+    }
   } else if (hatch.pattern === "solid") {
     inner = <rect x={0} y={0} width={w} height={h} fill="currentColor" />;
   } else if (hatch.pattern === "none") {

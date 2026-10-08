@@ -424,6 +424,19 @@ const xlineTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Strahl: Platzhalter-Werkzeug, gekoppelt an den `ray`-Befehl (wie `xline`,
+// aber nur einseitig verlängert). Nicht floorOnly (freies 2D-Element).
+const rayTool: Tool = {
+  id: "ray",
+  labelKey: "tool.ray",
+  hintKey: () => "tool.ray.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 const polylineTool: Tool = {
   id: "polyline",
   labelKey: "tool.polyline",
@@ -660,6 +673,74 @@ const koteTool: Tool = {
   onCancel: (s) => [s, { draft: null, done: true }],
 };
 
+// Detail-/Schnitt-Verweis: Platzhalter-Werkzeug, gekoppelt an den
+// `detailref`-Befehl (ein Klick → Verweisblase, Label/Blattverknüpfung
+// danach im Attribute-Panel). Freies 2D-Element (nicht floorOnly).
+const detailrefTool: Tool = {
+  id: "detailref",
+  labelKey: "tool.detailref",
+  hintKey: () => "tool.detailref.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Massstabsbalken: Platzhalter-Werkzeug, gekoppelt an den `scalebar`-Befehl
+// (ein Klick, Segmentlänge/-anzahl per Option). Freies 2D-Element.
+const scalebarTool: Tool = {
+  id: "scalebar",
+  labelKey: "tool.scalebar",
+  hintKey: () => "tool.scalebar.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Revisionswolke: Platzhalter-Werkzeug, gekoppelt an den `revcloud`-Befehl
+// (Punktfolge → Beulen-Kontur). Freies 2D-Element (nicht floorOnly).
+const revcloudTool: Tool = {
+  id: "revcloud",
+  labelKey: "tool.revcloud",
+  hintKey: () => "tool.revcloud.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Punkt-/Knotenmarker: Platzhalter-Werkzeug, gekoppelt an den
+// `pointmarker`-Befehl (ein Klick → Kreuz-in-Kreis-Symbol). Freies
+// 2D-Element (nicht floorOnly).
+const pointmarkerTool: Tool = {
+  id: "pointmarker",
+  labelKey: "tool.pointmarker",
+  hintKey: () => "tool.pointmarker.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
+// Wipeout/Maskenregion: Platzhalter-Werkzeug, gekoppelt an den
+// `wipeout`-Befehl (Punktfolge, schliesst automatisch → weisse Maskenfläche).
+// Freies 2D-Element (nicht floorOnly).
+const wipeoutTool: Tool = {
+  id: "wipeout",
+  labelKey: "tool.wipeout",
+  hintKey: () => "tool.wipeout.hint",
+  init: () => ({ phase: "idle" }),
+  onClick: (s) => [s, { draft: null }],
+  onMove: (s) => [s, { draft: null }],
+  onCommitGesture: (s) => [s, { draft: null, done: true }],
+  onCancel: (s) => [s, { draft: null, done: true }],
+};
+
 // Text: Platzhalter-Werkzeug, gekoppelt an den `text`-Befehl (Ankerpunkt →
 // getippte Zeile). Wie Kreis/Bogen nicht floorOnly (freies 2D-Element).
 const textTool: Tool = {
@@ -740,6 +821,7 @@ const TOOLS: Record<ToolId, Tool> = {
   room: roomTool,
   line: lineTool,
   xline: xlineTool,
+  ray: rayTool,
   polyline: polylineTool,
   rect: rectTool,
   circle: circleTool,
@@ -751,6 +833,11 @@ const TOOLS: Record<ToolId, Tool> = {
   bezier: bezierTool,
   dimension: dimensionTool,
   kote: koteTool,
+  detailref: detailrefTool,
+  scalebar: scalebarTool,
+  revcloud: revcloudTool,
+  pointmarker: pointmarkerTool,
+  wipeout: wipeoutTool,
   text: textTool,
   leader: leaderTool,
   textpath: textpathTool,

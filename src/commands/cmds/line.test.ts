@@ -85,3 +85,64 @@ describe("lineCommand — Cursor-HUD (Länge/Winkel)", () => {
     expect(res.draft).toBeNull();
   });
 });
+
+describe("lineCommand — durchgehendes Verketten", () => {
+  it("committet JEDES Segment einzeln, der Befehl bleibt zwischendurch aktiv (kein done)", () => {
+    const p = project();
+    const ctx = makeCtx(null);
+    let state = lineCommand.init();
+    [state] = lineCommand.onInput(state, { kind: "point", point: { x: 0, y: 0 } }, ctx);
+    const [afterSeg1, res1] = lineCommand.onInput(state, { kind: "point", point: { x: 3, y: 0 } }, ctx);
+    expect(res1.done).toBeFalsy();
+    expect(res1.commit).toBeDefined();
+    let next = res1.commit!(p);
+    expect(next.drawings2d.length).toBe(1);
+
+    // Zweites Segment startet dort, wo das erste endete (3,0) — kein neuer Klick auf den Start nötig.
+    const [, res2] = lineCommand.onInput(afterSeg1, { kind: "point", point: { x: 3, y: 5 } }, ctx);
+    expect(res2.done).toBeFalsy();
+    next = res2.commit!(next);
+    expect(next.drawings2d.length).toBe(2);
+    const g1 = next.drawings2d[0].geom;
+    const g2 = next.drawings2d[1].geom;
+    expect(g1.shape).toBe("line");
+    expect(g2.shape).toBe("line");
+    if (g1.shape === "line" && g2.shape === "line") {
+      expect(g1.a).toEqual({ x: 0, y: 0 });
+      expect(g1.b).toEqual({ x: 3, y: 0 });
+      // Zweites Segment knüpft am Endpunkt des ersten an.
+      expect(g2.a).toEqual({ x: 3, y: 0 });
+      expect(g2.b).toEqual({ x: 3, y: 5 });
+    }
+  });
+
+  it("Klick auf denselben Punkt (Nulllänge) wird ignoriert, Kette bleibt aktiv", () => {
+    const ctx = makeCtx(null);
+    let state = lineCommand.init();
+    [state] = lineCommand.onInput(state, { kind: "point", point: { x: 1, y: 1 } }, ctx);
+    const [after, res] = lineCommand.onInput(state, { kind: "point", point: { x: 1, y: 1 } }, ctx);
+    expect(res.commit).toBeUndefined();
+    expect(res.done).toBeFalsy();
+    expect((after as { phase: string }).phase).toBe("end");
+  });
+
+  it("Enter (onConfirm) beendet die Kette ohne abschliessendes Segment zum Cursor", () => {
+    const ctx = makeCtx(null);
+    let state = lineCommand.init();
+    [state] = lineCommand.onInput(state, { kind: "point", point: { x: 0, y: 0 } }, ctx);
+    [state] = lineCommand.onInput(state, { kind: "point", point: { x: 3, y: 0 } }, ctx);
+    const [after, res] = lineCommand.onConfirm(state, ctx);
+    expect(res.done).toBe(true);
+    expect(res.commit).toBeUndefined();
+    expect((after as { phase: string }).phase).toBe("start");
+  });
+
+  it("Escape (onCancel) beendet die Kette ebenso", () => {
+    const ctx = makeCtx(null);
+    let state = lineCommand.init();
+    [state] = lineCommand.onInput(state, { kind: "point", point: { x: 0, y: 0 } }, ctx);
+    const [after, res] = lineCommand.onCancel(state);
+    expect(res.done).toBe(true);
+    expect((after as { phase: string }).phase).toBe("start");
+  });
+});

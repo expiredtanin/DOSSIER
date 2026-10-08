@@ -102,20 +102,29 @@ export interface HatchRender {
    * dieses Feld — die Kette ist zur Renderzeit bereits kollabiert.
    */
   color: string;
+  /**
+   * Ankerpunkt des Musterrasters (Modellkoordinaten). Fehlt er, ist es der
+   * Modellursprung — dadurch teilen benachbarte Flächen dieselbe Musterphase
+   * (s. `hatchLineFamily`). Gesetzt wird er über `Drawing2D.hatchOrigin`.
+   */
+  origin?: Vec2;
   /** Linienstärke der Musterlinien in mm. */
   lineWeight: number;
   /** Strichmuster der Musterlinien in mm; null = durchgezogen. */
   dash: number[] | null;
   /**
    * Schraffur-Typ (additiv). `undefined`/"vector" ⇒ Muster nach `pattern` (heutiges
-   * Verhalten); "image" ⇒ Bild-Muster (`image`). Bestehende Renderer ignorieren
-   * `kind` und zeichnen nach `pattern` → unbekannte kinds fallen auf heute zurück.
+   * Verhalten); "image" ⇒ Bild-Muster (`image`); "gradient" ⇒ Farbverlauf
+   * (`gradient`). Bestehende Renderer ignorieren `kind` und zeichnen nach
+   * `pattern` → unbekannte kinds fallen auf heute zurück.
    */
-  kind?: "vector" | "image";
+  kind?: "vector" | "image" | "gradient";
   /** Vektor-Untermodus (additiv). `undefined`/"parallel" ⇒ regelmäßig; "random" ⇒ zufällig. */
   lines?: "parallel" | "random";
   /** Bild-Muster-Parameter (nur `kind==="image"`); durchgereicht aus dem HatchStyle. */
   image?: { src: string; scaleX: number; scaleY: number; rotation: number };
+  /** Farbverlauf-Parameter (nur `kind==="gradient"`); durchgereicht aus dem HatchStyle. */
+  gradient?: { color1: string; color2: string; angle: number; type: "linear" | "radial" };
   /**
    * Steuer-Parameter der Random-Vektor-Streuung (nur `lines==="random"`), 1:1 aus
    * dem HatchStyle durchgereicht. Alle optional — die eigentliche Erzeugung/
@@ -161,6 +170,13 @@ export type Primitive =
       hatch: HatchRender;
       /** Gedimmt zeichnen (Darstellungsmodus „andere grau"). */
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
       /**
        * Kanten-Indizes, die NICHT umrissen (gestrichen) werden dürfen — die Füllung
        * bleibt das volle Polygon. Kante `i` läuft von `pts[i]` nach `pts[(i+1)%n]`.
@@ -254,6 +270,13 @@ export type Primitive =
       /** ID der Treppe (für Links-Klick-Auswahl von Treppen-Symbollinien). */
       stairId?: string;
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
     }
   | {
       kind: "arc";
@@ -271,6 +294,13 @@ export type Primitive =
       /** ID der Treppe (für Links-Klick-Auswahl von Wendel-Outline-Bögen). */
       stairId?: string;
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
     }
   | {
       kind: "text";
@@ -294,6 +324,13 @@ export type Primitive =
       /** ID des Raums (Room), zu dem dieser Stempel gehört (Auswahl). */
       roomId?: string;
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
     }
   | {
       // Schlichter, modellverankerter Einzeltext (aus Drawing2D `{shape:"text"}`,
@@ -325,6 +362,13 @@ export type Primitive =
       /** ID des 2D-Zeichenelements (für Links-Klick-Auswahl). */
       drawingId?: string;
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
     }
   | {
       // Text-entlang-Pfad (aus Drawing2D `{shape:"text", pathPts}` mit ≥2
@@ -339,6 +383,13 @@ export type Primitive =
       color: string;
       drawingId?: string;
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
     }
   | {
       // Eingebettetes Rasterbild (aus Drawing2D `{shape:"image"}`, Foto/Logo/
@@ -347,6 +398,7 @@ export type Primitive =
       min: Vec2;
       max: Vec2;
       src: string;
+      /** Deckkraft 0..1 — beim Bild bereits Pflichtfeld (eigene Bild-Deckkraft). */
       opacity: number;
       drawingId?: string;
       greyed?: boolean;
@@ -365,6 +417,13 @@ export type Primitive =
       dash?: number[] | null;
       drawingId?: string;
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
     }
   | {
       // Glatter Bogen (aus Drawing2D `{shape:"arc"}`, z. B. DXF-ARC) — als
@@ -379,6 +438,13 @@ export type Primitive =
       dash?: number[] | null;
       drawingId?: string;
       greyed?: boolean;
+      /**
+       * Deckkraft 0..1 dieses Primitivs (Default 1 = deckend). Kommt von der
+       * Objekt-Transparenz eines 2D-Elements (`Drawing2D.opacity`) und wird in
+       * `addDrawing2D` EINMAL auf alle erzeugten Primitive gestempelt, statt an
+       * jeder Push-Stelle mitgeführt zu werden.
+       */
+      opacity?: number;
     };
 
 /**
@@ -400,6 +466,12 @@ export function resolveHatch(
   hatchId: string,
   wallAngleDeg?: number,
   foreground?: string,
+  /**
+   * Platzierung am OBJEKT (s. `Drawing2D.hatchAngleDeg`/`hatchScale`/
+   * `hatchOrigin`): Winkel ersetzt, Massstab multipliziert, Anker verschiebt
+   * das Raster. Ohne Angabe bleibt alles bei der Ressource.
+   */
+  placement?: { angleDeg?: number; scale?: number; origin?: Vec2 },
 ): HatchRender {
   const h = getHatch(project, hatchId);
   const ls = h.lineStyleId ? getLineStyle(project, h.lineStyleId) : null;
@@ -410,12 +482,17 @@ export function resolveHatch(
   // Y nach oben). Wegen der Y-Spiegelung entspricht die Wandrichtung am Bildschirm
   // dem Winkel −wallAngleDeg; das Muster folgt der Wand also, indem der
   // Wandwinkel SUBTRAHIERT wird. Ohne Wandkontext (Decke) bleibt `angle` absolut.
+  // Objekt-Winkel ERSETZT den der Ressource (danach greift die Wandbindung
+  // weiterhin, damit „relativ zur Wand" auch mit eigenem Winkel funktioniert).
+  const baseAngle = placement?.angleDeg ?? h.angle;
   const angle =
-    h.relativeToWall && wallAngleDeg != null ? h.angle - wallAngleDeg : h.angle;
+    h.relativeToWall && wallAngleDeg != null ? baseAngle - wallAngleDeg : baseAngle;
   return {
     pattern: h.pattern,
-    scale: h.scale,
+    // Objekt-Massstab MULTIPLIZIERT (die Ressource bleibt die Grundteilung).
+    scale: h.scale * (placement?.scale ?? 1),
     angle,
+    origin: placement?.origin,
     // Aufgelöster Vordergrund gewinnt (s. JSDoc oben), sonst neutrale Tinte.
     color: foreground ?? HATCH_INK,
     lineWeight: ls?.weight ?? 0.13,
@@ -423,6 +500,7 @@ export function resolveHatch(
     kind: h.kind,
     lines: h.lines,
     image: h.image,
+    gradient: h.gradient,
     // Random-Streu-Parameter unverändert durchreichen (Erzeugung in glPlanHatch).
     seed: h.seed,
     density: h.density,
