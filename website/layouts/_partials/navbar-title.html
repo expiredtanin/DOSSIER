@@ -1,0 +1,7 @@
+{{- /* Site-Override der Theme-Wortmarke oben links: statt Logo-Bild + Site-Titel
+   die echte App-Wortmarke — "dossier" klein, Punkt im neutralen App-Akzent,
+   exakt wie in TopBar.tsx/StartScreen.tsx (siehe assets/css/custom.css
+   .dossier-logo). */ -}}
+<a class="hx:flex hx:items-center hx:hover:opacity-75 hx:ltr:mr-auto hx:rtl:ml-auto" href="{{ .Site.Home.RelPermalink }}">
+  <span class="dossier-logo">dossier<span class="dossier-logo__dot">.</span></span>
+</a>

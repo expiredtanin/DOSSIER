@@ -1,0 +1,123 @@
+baseURL = "https://dossier.openbureau.ch/"
+title = "DOSSIER"
+theme = "hextra"
+enableRobotsTXT = true
+enableEmoji = true
+
+defaultContentLanguage = "de"
+[languages.de]
+  label = "Deutsch"
+  weight = 1
+  title = "DOSSIER"
+  contentDir = "content"
+
+[module]
+  [module.hugoVersion]
+    extended = true
+    min = "0.146.0"
+
+[markup]
+  [markup.highlight]
+    noClasses = false
+  [markup.goldmark.renderer]
+    unsafe = true
+
+enableInlineShortcodes = true
+
+[[menu.main]]
+  identifier = "produkt"
+  name = "Produkt"
+  pageRef = "/"
+  weight = 1
+
+[[menu.main]]
+  identifier = "documentation"
+  name = "Dokumentation"
+  pageRef = "/docs"
+  weight = 2
+
+[[menu.main]]
+  identifier = "forum"
+  name = "Forum"
+  url = "https://dossier.openbureau.ch/forum"
+  weight = 3
+
+[[menu.main]]
+  name = "Search"
+  weight = 4
+  [menu.main.params]
+    type = "search"
+
+[[menu.main]]
+  name = "Theme"
+  weight = 5
+  [menu.main.params]
+    type = "theme-toggle"
+
+[[menu.main]]
+  identifier = "quellcode"
+  name = "Quellcode ↗"
+  url = "https://git.openbureau.ch/karim/DOSSIER-STANDALONE"
+  weight = 6
+
+[params]
+  description = "DOSSIER ist eine Open-Source-Design-Suite für Architekten: klassisches 2D-Zeichnen und ein semantisches 3D-Gebäudemodell in einem Programm — daraus abgeleitet saubere, normgerechte Pläne. Eigenständige Desktop-App."
+  externalLinkDecoration = false
+
+  [params.navbar]
+    displayTitle = true
+    displayLogo = false
+    width = "normal"
+
+  [params.theme]
+    default = "light"
+    displayToggle = true
+
+  [params.footer]
+    enable = true
+    displayCopyright = true
+    displayPoweredBy = false
+    width = "normal"
+
+  [params.page]
+    width = "normal"
+
+  displayUpdatedDate = false
+
+  [params.search]
+    enable = true
+    type = "flexsearch"
+    [params.search.flexsearch]
+      index = "content"
+      tokenize = "forward"
+
+  [params.editURL]
+    enable = false
+
+  [params.toc]
+    displayTags = false
+
+  # ---- eigene Inhalte für die bespoke Startseite (layouts/hextra-home.html) ----
+  [params.dossier]
+    wordmark = "DOSSIER"
+    role     = "Design-Suite für Architekten — 2D-Zeichnen & semantisches 3D-Modell"
+
+    hookMain   = "2D zeichnen. 3D modellieren."
+    hookAccent = "Ein Programm, ein Modell."
+    lead = "DOSSIER ist eine Design-Suite für Architekten, kein reines BIM-Tool: klassisches 2D-Zeichnen (Linien, Polylinien, Bemassung, Rhino-artige Kommandozeile) und ein semantisches 3D-Gebäudemodell (Wände, Türen, Treppen, Dächer als echte Bauteile) im selben Programm. Jeder Plan — Grundriss, Schnitt, Ansicht, PDF — wird aus diesem einen Modell abgeleitet."
+
+    meta = "macOS · Linux · Browser — Rust / WASM / WebGPU — AGPL-3.0"
+
+    ansatzTitle = "Ein Modell. Keine Kopien."
+    ansatzBody  = "Es gibt ein semantisches Modell als einzige Wahrheit. Jede Ansicht wird daraus abgeleitet — Darstellung (Detailgrad, Linienstärken, Schraffuren) wird erst beim Rendern angewandt, nie in die Geometrie eingebacken. Wer eine Wand verschiebt, verschiebt sie überall."
+    ansatzViews = "3D-Viewport → Grundriss → Schnitt → Ansicht → PDF-Plansatz → IFC / DXF"
+
+    originTitle = "Aus dem Rhino-Plugin herausgewachsen — jetzt eigenständig."
+    originBody  = "DOSSIER ist die eigenständige Neuimplementierung des gleichnamigen Rhino-Plugins: dieselbe Denkweise — Geschosse, Kategorie-Ebenen, mehrschichtige Bauteile, Prioritäts-Verschneidung — jetzt mit eigenem Datenmodell und eigener Rendering-Engine."
+
+    repo    = "https://git.openbureau.ch/karim/DOSSIER-STANDALONE"
+    license = "https://git.openbureau.ch/karim/DOSSIER-STANDALONE/raw/branch/master/LICENSE"
+    bureau  = "https://openbureau.ch"
+    rapport = "https://rapport.openbureau.ch"
+    forum   = "https://dossier.openbureau.ch/forum"
+    forumSoon = false

@@ -1,0 +1,210 @@
+/* DOSSIER — Custom-CSS-Einstiegspunkt des Hextra-Themes (wird von
+   layouts/_partials/head.html automatisch nach main.css eingebunden).
+
+   Alles hier ist bewusst unter eigenen Klassen (.dossier-*) und einem
+   eigenen Token-Namespace (--do-*) gekapselt, statt html/body global zu
+   überschreiben — das Theme bringt sein eigenes, ausgereiftes Hell/Dunkel-
+   System mit (Tailwind, .dark auf <html>), das wir für Suche, Docs-Sidebar,
+   Code-Blöcke etc. unverändert weiterverwenden wollen.
+
+   Wo wir bewusst "wie das eigentliche Programm" aussehen wollen — Startseite,
+   Wortmarke oben links —, holen wir uns die echten Farben/den echten Font aus
+   src/styles.css (App-Hell-Theme) in diesen eigenen Namespace. */
+
+@font-face {
+  font-family: "archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/archivo.woff2") format("woff2");
+}
+
+.dossier-home,
+.dossier-logo {
+  --do-font: "archivo", system-ui, sans-serif;
+  --do-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* 1:1 aus src/styles.css :root (App-Hell-Theme). Akzent bewusst NEUTRAL —
+     kein Petrol-Grün/Teal/Gelb: das war eine veraltete Annahme, die App hat
+     seit einer Nutzer-Vorgabe nur noch diesen einen neutralen Akzent. */
+  --do-panel:      #e0dbd4;
+  --do-panel-2:    #d4cfc8;
+  --do-field:      #f5f2ec;
+  --do-ink:        #1a1a18;
+  --do-dim:        #555550;
+  --do-muted:      #8a8580;
+  --do-border:      #c8c2ba;
+  --do-accent:      #4a453e;
+  --do-accent-light: #6b655c;
+  --do-accent-dim:  #f5f2ec;
+  --do-accent-border: rgba(58, 53, 46, 0.2);
+  /* --input in der App — Sekundär-Button-Fläche (s. .imp-btn in styles.css). */
+  --do-input:       #ece8e2;
+
+  --do-radius: 3px;
+}
+
+html.dark .dossier-home,
+html.dark .dossier-logo {
+  /* 1:1 aus src/styles.css :root[data-theme="dark"]. */
+  --do-panel:      #1d1d1d;
+  --do-panel-2:    #262626;
+  --do-field:      #2a2a2a;
+  --do-ink:        #ededed;
+  --do-dim:        #a8a8a8;
+  --do-muted:      #6e6e6e;
+  --do-border:      #383838;
+  --do-accent:      #4d4d4d;
+  --do-accent-light: #5e5e5e;
+  --do-accent-dim:  rgba(255, 255, 255, 0.07);
+  --do-accent-border: rgba(255, 255, 255, 0.22);
+  --do-input:       #0a0a0a;
+}
+
+/* ---- Wortmarke oben links — identisch zur App: "dossier" klein, Punkt im
+   neutralen App-Akzent. Ersetzt den generischen Hextra-Seitentitel. ---- */
+.dossier-logo {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--do-font);
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+  text-transform: lowercase;
+  color: var(--do-ink);
+  white-space: nowrap;
+}
+.dossier-logo__dot {
+  color: var(--do-accent);
+}
+a:hover > .dossier-logo .dossier-logo__dot {
+  filter: brightness(1.25);
+}
+
+/* ---- "bald"-Badge im Hauptmenü (Forum-Link, hugo.toml). ---- */
+.navbar-badge {
+  display: inline-block;
+  font-size: .62em; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: #fff; background: #9a948a; padding: .1em .45em; border-radius: 999px;
+  margin-left: .4em; vertical-align: middle;
+}
+html.dark .navbar-badge { background: #6b665c; }
+
+/* ==================================================================
+   Startseite — eigenes Layout (layouts/index.html), eingehängt in
+   Hextra's Standard-Navbar/Footer/Content-Breite.
+   ================================================================== */
+.dossier-home {
+  font-family: var(--do-font);
+  color: var(--do-ink);
+  max-width: 56rem;
+  margin-inline: auto;
+  padding-block: 0.5rem 2rem;
+}
+.dossier-home h1,
+.dossier-home h2 { font-family: var(--do-font); margin: 0; text-wrap: balance; }
+.dossier-home p { margin: 0; }
+.dossier-home a { text-decoration: none; }
+
+.dh-section { padding-block: clamp(2.2rem, 5vw, 3.4rem); }
+.dh-section + .dh-section { border-top: 1px dashed var(--do-border); }
+
+.dh-label {
+  display: flex; align-items: center; gap: .55em;
+  font-size: .72rem; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--do-accent); margin-bottom: 1rem;
+}
+.dh-label::before {
+  content: ""; width: 6px; height: 6px; flex: none;
+  background: var(--do-accent); border-radius: 1px;
+}
+
+/* ---- Hero ---- */
+.dh-hero { padding-block: clamp(1.6rem, 5vw, 2.6rem) clamp(2.2rem, 5vw, 3.2rem); }
+.dh-hero .dh-hook {
+  font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 800; line-height: 1.08;
+  letter-spacing: -.02em; max-width: 24ch;
+}
+.dh-hero .dh-hook .accent { color: var(--do-accent); }
+.dh-hero .dh-lead { font-size: clamp(1.02rem, 1.6vw, 1.14rem); color: var(--do-dim); max-width: 38rem; margin-top: 1.3rem; }
+.dh-hero .dh-actions { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.8rem; }
+.dh-hero .dh-meta { font-size: .85rem; color: var(--do-muted); margin-top: 1.8rem; }
+
+/* Wie .imp-btn in der App (Import-Dialog, src/styles.css) — Pille statt
+   eckigem Button, das ist der tatsächliche Button-Stil des Programms. */
+.dh-btn {
+  display: inline-flex; align-items: center; gap: .4em;
+  font-family: var(--do-font);
+  font-size: .85rem; font-weight: 600;
+  padding: .55em 1.35em; border: 1px solid var(--do-border); border-radius: 999px;
+  background: var(--do-input);
+  color: var(--do-dim);
+  transition: background .14s, border-color .14s, color .14s;
+}
+.dh-btn:hover { color: var(--do-ink); border-color: var(--do-accent-border); }
+.dh-btn--primary { background: var(--do-accent); border-color: var(--do-accent); color: #fff; }
+.dh-btn--primary:hover { background: var(--do-accent-light); border-color: var(--do-accent-light); color: #fff; }
+
+/* ---- App-Mockup unter dem Hero: eine Miniatur der echten Ansichts-
+   Segmentpille + Kommandozeile, rein aus CSS, in den echten Programmfarben
+   — statt eines Screenshots, der sofort veraltet. ---- */
+.dh-mockup {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  margin-top: 2.2rem; padding: .6rem .7rem;
+  background: var(--do-panel); border: 1px solid var(--do-border); border-radius: 8px;
+  font-family: var(--do-font);
+}
+.dh-seg {
+  display: inline-flex; align-items: stretch; height: 24px;
+  border-radius: 8px; overflow: hidden; background: var(--do-field);
+  padding: 2px; gap: 1px;
+}
+.dh-seg__cell {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 .6rem; border-radius: 5px; font-size: .74rem; font-weight: 600;
+  color: var(--do-dim); background: transparent;
+}
+.dh-seg__cell.is-active { background: var(--do-panel-2); color: var(--do-ink); }
+.dh-cmd {
+  display: inline-flex; align-items: center; gap: .5em;
+  height: 24px; padding-inline: .65rem; border-radius: 6px;
+  background: var(--do-field); color: var(--do-dim); font-size: .78rem;
+  font-family: var(--do-font-mono);
+}
+.dh-cmd::before { content: "›"; color: var(--do-accent); font-family: var(--do-font); font-weight: 700; }
+
+/* ---- Ansatz ---- */
+.dh-ansatz h2 { font-size: clamp(1.35rem, 2.4vw, 1.8rem); font-weight: 700; letter-spacing: -.01em; }
+.dh-ansatz p:not(.dh-views) { margin-top: 1rem; max-width: 38rem; color: var(--do-ink); }
+.dh-ansatz .dh-views { margin-top: 1.3rem; font-size: .85rem; color: var(--do-dim); font-family: var(--do-font-mono); }
+
+/* ---- Feature-Liste — ein Datenblatt, keine Karten: Zeilen reagieren
+   dezent auf Hover, wie Zeilen einer Bauteilliste im Programm selbst. ---- */
+.dh-features h2, .dh-features .dh-label { margin-bottom: 1.1rem; }
+.dh-feature-list { margin: 0; }
+.dh-feature-row {
+  display: grid; grid-template-columns: 12.5rem 1fr; gap: 1.4rem;
+  padding: 1rem .7rem; margin-inline: -.7rem;
+  border-top: 1px dashed var(--do-border);
+  transition: background .15s;
+}
+.dh-feature-row:first-child { border-top: 1px solid var(--do-border); }
+.dh-feature-row:hover { background: var(--do-panel-2); }
+.dh-feature-row dt { font-weight: 700; }
+.dh-feature-row dd { margin: 0; color: var(--do-dim); max-width: 34rem; }
+@media (max-width: 640px) {
+  .dh-feature-row { grid-template-columns: 1fr; gap: .3rem; }
+}
+
+/* ---- Stack ---- */
+.dh-stack { display: flex; align-items: baseline; gap: 1.4rem; flex-wrap: wrap; }
+.dh-stack .dh-label { margin-bottom: 0; }
+.dh-stack-list { color: var(--do-dim); font-size: .9rem; }
+
+/* ---- Herkunft ---- */
+.dh-origin h2 { font-size: clamp(1.25rem, 2.1vw, 1.5rem); font-weight: 700; max-width: 32ch; }
+.dh-origin p { margin-top: 1rem; color: var(--do-dim); max-width: 38rem; }
+
+.dh-cta { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.6rem; }
+
+@media (prefers-reduced-motion: reduce) { .dossier-home * { transition: none !important; } }
