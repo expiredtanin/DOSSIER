@@ -29,12 +29,15 @@ und sind seit Juli live im 3D-Viewport verdrahtet, nicht nur ein Spike.
 
 ## Stand heute
 
-Aus dem ursprünglichen Risiko-Spike ist binnen weniger Wochen ein
+_(Momentaufnahme Oktober 2026 — bei einem Projekt in diesem Tempo veraltet
+jede genaue Zahl schnell; als Grössenordnung gedacht, nicht als Versprechen.)_
+
+Aus dem ursprünglichen Risiko-Spike ist binnen weniger Monate ein
 **funktionsreiches Desktop-BIM-Tool** geworden: eigenes semantisches
 Gebäudemodell, zwei eigene Rust/WASM-Rendering-Engines, IFC/DXF/PDF/STL/OBJ-
 Export, Swisstopo-Import, SIA-416-Flächen, Materialbibliothek, Layouts/
-Plansätze, native Tauri-Fenster. ~91.000 Zeilen TypeScript + ~19.500 Zeilen
-Rust (ohne Tests), 891 Vitest-Tests, alle grün.
+Plansätze, native Tauri-Fenster. ~116.000 Zeilen TypeScript + ~20.000 Zeilen
+Rust (ohne Tests), über 1700 Vitest-Tests, alle grün.
 
 **Funktioniert (Auszug, nicht abschliessend):**
 - Semantisches Modell mit **mehrschichtigen Wänden**, L-Eck-Gehrung **und**
@@ -56,19 +59,33 @@ Rust (ohne Tests), 891 Vitest-Tests, alle grün.
 - **Layouts/Plansätze** mit mehreren Viewports pro Blatt, Ausschnitte
   (View-Snapshots), Kamera-Presets, Norden-Rotation.
 - **Import:** DXF/DWG, Swisstopo (swissBUILDINGS3D/-ALTI3D/SWISSIMAGE,
-  radiusgenau zugeschnitten), OSM-Kontextimport, `.lin`/`.pat`.
+  radiusgenau zugeschnitten), OSM-Kontextimport, `.lin`/`.pat`. Grosse DXF-
+  Dateien (Kataster-Import ganzer Städte) parsen in einem Web Worker, damit
+  die UI währenddessen nicht einfriert.
 - **Native Desktop-Integration** (Tauri): eigene randlose Fenster, native
   Speichern/Öffnen-Dialoge, eigenes `.obp`-Dateiformat mit OS-Level-Lock gegen
   Doppelöffnen, mehrere native Zusatzfenster (Resources, Settings, …).
 - **Resource Manager** (Component/Hatch/Line/Typ-Editoren), regelbasierte
   Overrides, Panel-System (dockbar/floatend), i18n (de/en).
+- **3D-Griffsystem** auf 2D-Niveau: Feld-Controller (getippte Länge/Winkel
+  relativ zum Ausgangspunkt, Tab-Zyklus wie im 2D), Kollisionsgruppen-
+  Snapping (verbundene Ecken ziehen mit), Klick-Bewegen-Klick statt
+  Drag-Halten, Rotations-Gizmo.
+- **Stiftsätze** (ArchiCAD-Vorbild): Bauteile/Ebenen lassen sich auf einen
+  Stift statt eine feste Farbe legen — ein Satzwechsel färbt alle daran
+  gekoppelten Elemente sofort um, ohne jede Farbe einzeln anzufassen.
+- **Einstellungen**, in Tabs organisiert: frei belegbare Tastenkürzel (mit
+  Kollisions-Erkennung) zusätzlich zu den schon länger anpassbaren
+  Befehlszeilen-Kürzeln.
+- Erweiterte 2D-Zeichen-/Annotationswerkzeuge: Bogen/Bulge-Polylinien,
+  Rechteck mit Fasen, Bruchlinie (Revision Cloud), Massstabsbalken,
+  Detailverweis, Punktmarker, Ausblend-Maske, Ausrichten, Explodieren —
+  samt ICC-Farbmanagement (Mischer, Spektral-Picker) für die Farbwahl.
 
 **Bewusst noch offen** (Auszug):
 - **Echtes Mesh-Boolean für Öffnungen** — funktioniert heute über achsparallele
   Rechteck-Löcher; ein generisches CSG-Boolean existiert bereits
   (`trucksolid`/`csgrs`), ist aber nicht an die Wand-Pipeline angeschlossen.
-- **3D-Griffsystem**: Feld-Controller (Tab-Zyklus) und Snapping fehlen für
-  3D-Grip-Drag (im 2D vollständig vorhanden).
 - **DWG/DXF-Domänenimport** (Entitäten → echte Wände/Öffnungen) — Lesen
   funktioniert, das Mapping auf das Modell ist unbegonnen; DWG-Schreiben fehlt.
 - **`make2D`**-Kommando (3D-Ansicht → flacher 2D-Plan mit Füllungen).
@@ -133,6 +150,9 @@ src/
   native/      Tauri-only: native Fenster, macOS-Menüleiste, Fenster-Chrome
   ui/          App.tsx-Shell, Top-Bar, Resource Manager, Kontextmenü, Kommandozeile
   io/          Import/Export (DXF, DWG, .lin, .pat), Swisstopo/LV95, OSM-Kontext
+  editors/     reine Editier-Logik (Ausrichten, Explodieren, Eigenschaften
+               übertragen, Elemente-Zwischenablage, 2D-Booleans)
+  text/        Schriftmetriken + Textrahmen-Umbruch
   i18n/        Wörterbücher de/en
 src-tauri/     5 eigenständige Rust-Crates (render2d/render3d/kernel2d/trucksolid/
                dwgimport, je headless UND per wasm-pack baubar) + der Tauri-Host selbst
@@ -147,11 +167,17 @@ src-tauri/     5 eigenständige Rust-Crates (render2d/render3d/kernel2d/trucksol
 
 ## Weiterlesen
 
-Dieses README ist die einzige Doku im öffentlichen Repo — `STATUS.md`,
+Dieses README ist die einzige Doku **im Code selbst** — `STATUS.md`,
 `ARCHITECTURE.md`, `ROADMAP.md`, `HANDOVER.md`, `PENDENZEN.md`,
 `CONVENTIONS.md` und `docs/` sind bewusst per `.gitignore` ausgeschlossen
 (interne Arbeitsnotizen/Backlog, kein öffentlicher Anspruch auf Vollständigkeit
 oder Aktualität) und daher hier absichtlich **nicht** verlinkt.
+
+Eine ausführlichere, nutzer-/entwicklerorientierte Dokumentation entsteht
+separat unter [`website/`](website/) (Hugo, Hextra-Theme, Ziel-URL
+`dossier.openbureau.ch`) — Anleitung (Erste Schritte, Bauteile, Export/Import,
+Layouts, Troubleshooting) und Entwickler-Doku (Aufbau, Technik-Stack,
+Konventionen, aktueller Stand).
 
 ## Lizenz
 
