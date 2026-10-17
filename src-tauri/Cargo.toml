@@ -22,10 +22,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 # Standard: reine Tauri-App (Webview + invoke). KEIN wgpu/winit.
 default = []
-# M2-Spike: nativer wgpu-2D-Viewport im Tauri-Prozess (eigenes winit-Fenster).
-# Zieht render2d(+window) sowie winit/wgpu/pollster. Bewusst OPT-IN, damit der
-# normale Build unveraendert schlank bleibt.
-native2d = ["dep:render2d", "dep:winit", "dep:wgpu", "dep:pollster"]
+# M2-Spike: nativer wgpu-2D-Viewport im Tauri-Prozess (eigenes winit-Fenster
+# auf Nicht-macOS; auf macOS ein webview-loses Tauri-Fenster, s.
+# native_tauri_window.rs). Zieht render2d(+window) sowie winit/wgpu/pollster.
+# "tauri/unstable" NUR fuer macOS: `tauri::window::WindowBuilder`/`Window`
+# (ein Fenster OHNE Webview — noetig, weil eine `WebviewWindow` IMMER eine
+# eigene (deckende, weisse) Webview-Kindansicht mitbringt, die jeden direkt
+# ans Fenster gehaengten wgpu-Inhalt verdeckt haette, empirisch bestaetigt).
+# Bewusst OPT-IN, damit der normale Build unveraendert schlank bleibt.
+native2d = ["dep:render2d", "dep:winit", "dep:wgpu", "dep:pollster", "tauri/unstable"]
 # M2-Spike: nativer wgpu-3D-Viewport im Tauri-Prozess (eigenes winit-Fenster).
 # Zieht render3d(+window) sowie winit/wgpu/pollster. Kann gemeinsam mit `native2d`
 # aktiviert werden (dann zwei native Fenster). Ebenfalls OPT-IN.

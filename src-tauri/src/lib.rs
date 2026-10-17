@@ -1,9 +1,18 @@
 // Tauri-v2-Einstieg: die Befehls-Bruecke und der App-Start.
 
-// M2: native wgpu-Viewports (2D und/oder 3D) im Tauri-Prozess. EIN Modul, EINE
-// winit-Event-Loop fuer beide Fenster (winit erlaubt nur eine Loop pro Prozess).
-#[cfg(any(feature = "native2d", feature = "native3d"))]
+// M2: native wgpu-Viewports (2D und/oder 3D) im Tauri-Prozess, ueber eine
+// eigene winit-Event-Loop auf einem Hintergrund-Thread. NICHT auf macOS
+// (winit verlangt dort den Hauptthread) — dort s. `native_tauri_window` (2D).
+// `native3d` hat (noch) keinen macOS-Weg und ist dort ein No-op.
+#[cfg(all(any(feature = "native2d", feature = "native3d"), not(target_os = "macos")))]
 mod native;
+
+// macOS-Pendant zu `native.rs` fuer den 2D-Viewport: ein ECHTES Tauri-Fenster
+// als wgpu-Surface-Ziel statt einer zweiten Event-Loop (s. Modul-Kommentar
+// dort — der naheliegende Ansatz, Tauris und winits Loop manuell zu
+// verschraenken, wurde GETESTET und verworfen: dauerhaft ~100% CPU-Busy-Loop).
+#[cfg(all(feature = "native2d", target_os = "macos"))]
+mod native_tauri_window;
 
 // Lock-Datei gegen gleichzeitiges Oeffnen derselben Projektdatei aus zwei
 // App-Instanzen (OS-Advisory-Lock via `fs4`, siehe lock.rs).
@@ -32,26 +41,35 @@ fn release_project_lock(path: String, state: State<lock::LockState>) {
 }
 
 // Live-Spiegelung: die Webview schiebt bei jeder Modellaenderung (debounced)
-// die aktuelle 2D-Szene bzw. die 3D-Waende hierher; native.rs stellt sie ueber
-// einen EventLoopProxy in die winit-Loop zu. Die Payload kommt als rohes JSON
-// (`serde_json::Value`) an und wird erst in native.rs in die render2d-/render3d-
-// Typen deserialisiert — so existieren beide Commands unter EINEM cfg, egal
-// welche Feature-Kombination gebaut wird.
+// die aktuelle 2D-Szene bzw. die 3D-Waende hierher. Auf macOS (nur native2d)
+// geht das direkt an `native_tauri_window` (Tauri-Fenster als Surface); sonst
+// (Linux, oder native3d auf jeder Plattform) ueber `native.rs`s
+// EventLoopProxy in die winit-Loop. Die Payload kommt als rohes JSON
+// (`serde_json::Value`) an und wird erst dort in die render2d-/render3d-Typen
+// deserialisiert — so existieren beide Commands unter EINEM cfg, egal welche
+// Feature-Kombination gebaut wird.
 #[cfg(any(feature = "native2d", feature = "native3d"))]
 #[tauri::command]
-fn push_native_scene(scene: serde_json::Value) {
-    #[cfg(feature = "native2d")]
-    native::push_scene(scene);
+fn push_native_scene(app: tauri::AppHandle, scene: serde_json::Value) {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    native_tauri_window::push_scene(&app, scene);
+    #[cfg(all(feature = "native2d", not(target_os = "macos")))]
+    {
+        let _ = &app;
+        native::push_scene(scene);
+    }
     #[cfg(not(feature = "native2d"))]
-    let _ = scene;
+    {
+        let _ = (app, scene);
+    }
 }
 
 #[cfg(any(feature = "native2d", feature = "native3d"))]
 #[tauri::command]
 fn push_native_walls(walls: serde_json::Value) {
-    #[cfg(feature = "native3d")]
+    #[cfg(all(feature = "native3d", not(target_os = "macos")))]
     native::push_walls(walls);
-    #[cfg(not(feature = "native3d"))]
+    #[cfg(not(all(feature = "native3d", not(target_os = "macos"))))]
     let _ = walls;
 }
 
@@ -76,12 +94,22 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
         // Haelt die pro Instanz offen gelockten Projektdatei-Handles (lock.rs).
-        .manage(lock::LockState::default())
-        .setup(|_app| {
-        // Native GPU-Fenster (2D und/oder 3D je nach Feature) auf einem eigenen
-        // Thread hochfahren, damit der Tauri-/GTK-Hauptthread frei bleibt.
-        #[cfg(any(feature = "native2d", feature = "native3d"))]
+        .manage(lock::LockState::default());
+
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    let builder = builder.manage(native_tauri_window::NativePlanWindowState::default());
+
+    let builder = builder.setup(|_app| {
+        // Native GPU-Fenster auf einem eigenen Thread hochfahren, damit der
+        // Tauri-Hauptthread frei bleibt. NICHT auf macOS (winit verlangt dort
+        // den Hauptthread) — dort s. `open_native2d_window`/`native_tauri_window`.
+        #[cfg(all(any(feature = "native2d", feature = "native3d"), not(target_os = "macos")))]
         native::spawn();
+        // macOS: natives 2D-Fenster direkt beim Start oeffnen (Stufe-1-Diagnose-
+        // Feature; ein Menuepunkt/Shortcut kann das spaeter ersetzen, sobald
+        // Stufe 1 den Performance-Gewinn bestaetigt hat).
+        #[cfg(all(feature = "native2d", target_os = "macos"))]
+        native_tauri_window::open(&_app.handle().clone());
         Ok(())
     });
 

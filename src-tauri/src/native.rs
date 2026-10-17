@@ -753,6 +753,20 @@ impl ApplicationHandler<UserEvent> for App {
 /// Baut die winit-Event-Loop so, dass sie auf DIESEM (Nicht-Haupt-)Thread laufen
 /// darf. Auf Linux/Wayland via `EventLoopBuilderExtWayland::with_any_thread`, auf
 /// X11 das Pendant. Ohne diese Freigabe panict winit (Event-Loop nur Hauptthread).
+///
+/// NICHT fuer macOS gedacht — dort gibt es dieses Opt-in nicht (winit verlangt
+/// zwingend den Hauptthread) UND der naheliegende Ersatz (Tauris eigene
+/// Hauptschleife manuell per `App::run_iteration` + winit `pump_app_events`
+/// verschraenkt takten) wurde GETESTET und verworfen: das frisst dauerhaft
+/// ~100 % CPU (busy-loop), unabhaengig vom Pacing (4 ms wie 100 ms Schlaf pro
+/// Tick identisch schlecht) — `run_iteration` ist in Tauri 2.11 als "busy-loopt
+/// in einer Schleife" dokumentiert-deprecated, und das bestaetigt sich hart.
+/// macOS nutzt stattdessen `native_tauri_window.rs`: ein ECHTES Tauri-Fenster
+/// (`tauri::WebviewWindow` implementiert bereits `raw_window_handle::
+/// HasWindowHandle`) als wgpu-Surface-Ziel — keine zweite Event-Loop noetig,
+/// Tauris eigene (nachweislich korrekt leerlaufende, 0 % CPU im Leerlauf)
+/// Schleife treibt alles.
+#[cfg(not(target_os = "macos"))]
 fn build_event_loop() -> EventLoop<UserEvent> {
     let mut builder = EventLoop::<UserEvent>::with_user_event();
 
@@ -771,6 +785,8 @@ fn build_event_loop() -> EventLoop<UserEvent> {
 }
 
 /// Blockierender Lauf der nativen Event-Loop (fuer einen dedizierten Thread).
+/// NICHT auf macOS (s. Kommentar bei `build_event_loop`).
+#[cfg(not(target_os = "macos"))]
 fn run_blocking() {
     let event_loop = build_event_loop();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
@@ -782,7 +798,9 @@ fn run_blocking() {
 }
 
 /// Startet die nativen Fenster (2D und/oder 3D, je nach Feature) auf EINEM eigenen
-/// Thread und kehrt sofort zurueck — die Tauri-/GTK-Hauptschleife bleibt frei.
+/// Thread und kehrt sofort zurueck — die Tauri-Hauptschleife bleibt frei.
+/// NICHT auf macOS (dort s. `native_tauri_window.rs`).
+#[cfg(not(target_os = "macos"))]
 pub fn spawn() {
     std::thread::Builder::new()
         .name("cad-native".into())
