@@ -15,6 +15,66 @@ import { applyDashRuns, buildHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M 
 
 const PX_PER_M = 90;
 
+/**
+ * Wachsender Typed-Array-Puffer statt `number[]` für die Vertex-/Index-Daten.
+ * Normale JS-Arrays sind in V8/JSC praktisch auf ~134 Mio. Elemente begrenzt
+ * (`FixedArray::kMaxLength`) — ein ganzer Kataster-Import (3,7 Mio. Linien-
+ * Segmente, reproduziert mit der 439-MB-Luzerner-DXF) überschreitet das beim
+ * Linien-Vertexpuffer (`RangeError: Invalid array length`). Typed Arrays haben
+ * diese Grenze nicht und brauchen nur 4 statt 8 Byte je Wert. Die hochgeladenen
+ * Daten sind identisch: der Upload hat schon bisher nach Float32/Uint32 gewandelt.
+ */
+class GrowBuffer<T extends Float32Array | Uint32Array> {
+  private buf: T;
+  length = 0;
+  constructor(private readonly make: (n: number) => T) {
+    this.buf = make(1024);
+  }
+  private ensure(extra: number): void {
+    const need = this.length + extra;
+    if (need <= this.buf.length) return;
+    let cap = this.buf.length * 2;
+    while (cap < need) cap *= 2;
+    const next = this.make(cap);
+    next.set(this.buf.subarray(0, this.length));
+    this.buf = next;
+  }
+  push1(a: number): void {
+    this.ensure(1);
+    this.buf[this.length++] = a;
+  }
+  push2(a: number, b: number): void {
+    this.ensure(2);
+    const o = this.length;
+    this.buf[o] = a;
+    this.buf[o + 1] = b;
+    this.length = o + 2;
+  }
+  push3(a: number, b: number, c: number): void {
+    this.ensure(3);
+    const o = this.length;
+    this.buf[o] = a;
+    this.buf[o + 1] = b;
+    this.buf[o + 2] = c;
+    this.length = o + 3;
+  }
+  push6(a: number, b: number, c: number, d: number, e: number, f: number): void {
+    this.ensure(6);
+    const o = this.length;
+    this.buf[o] = a;
+    this.buf[o + 1] = b;
+    this.buf[o + 2] = c;
+    this.buf[o + 3] = d;
+    this.buf[o + 4] = e;
+    this.buf[o + 5] = f;
+    this.length = o + 6;
+  }
+  /** Gefüllter Bereich (View, keine Kopie). */
+  view(): T {
+    return this.buf.subarray(0, this.length) as T;
+  }
+}
+
 /** Modell-Meter → Bildschirm-Raum (identisch zu PlanView.toScreen). */
 function toScreen(p: Vec2): Vec2 {
   return { x: p.x * PX_PER_M, y: -p.y * PX_PER_M };
@@ -213,13 +273,13 @@ export function compilePrimitivesToGpu(
   pxPerMeter = 0,
 ): GpuGeometry {
   // Füll-Puffer (Bildschirm-Raum Positionen + Indizes).
-  const fillPos: number[] = [];
-  const fillIdx: number[] = [];
+  const fillPos = new GrowBuffer((n) => new Float32Array(n));
+  const fillIdx = new GrowBuffer((n) => new Uint32Array(n));
   const fillBatches: GpuGeometry['fill']['batches'] = [];
 
   // Linien-Puffer (interleaved [x,y, nx,ny, side]).
-  const lineVerts: number[] = [];
-  const lineIdx: number[] = [];
+  const lineVerts = new GrowBuffer((n) => new Float32Array(n));
+  const lineIdx = new GrowBuffer((n) => new Uint32Array(n));
   const lineBatches: GpuGeometry['line']['batches'] = [];
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -307,7 +367,7 @@ export function compilePrimitivesToGpu(
     const vBase = lineVerts.length / 6;
     let vcount = 0;
     const pushVert = (p: Vec2, nx: number, ny: number, side: number): number => {
-      lineVerts.push(p.x, p.y, nx, ny, side, 1);
+      lineVerts.push6(p.x, p.y, nx, ny, side, 1);
       vcount++;
       return vBase + vcount - 1;
     };
@@ -327,7 +387,7 @@ export function compilePrimitivesToGpu(
       const i1 = pushVert(a, n.x, n.y, -1);
       const i2 = pushVert(b, n.x, n.y, +1);
       const i3 = pushVert(b, n.x, n.y, -1);
-      lineIdx.push(i0, i1, i2, i1, i3, i2);
+      lineIdx.push6(i0, i1, i2, i1, i3, i2);
     }
 
     // Kreisbogen-Fächer (Zentrum = Vertex, Radius = halbe Strichbreite, per
@@ -341,7 +401,7 @@ export function compilePrimitivesToGpu(
       for (let s = 1; s <= steps; s++) {
         const t = aFrom + (delta * s) / steps;
         const cur = pushVert(p, Math.cos(t), Math.sin(t), 1);
-        lineIdx.push(iCenter, prev, cur);
+        lineIdx.push3(iCenter, prev, cur);
         prev = cur;
       }
     };
@@ -441,7 +501,73 @@ export function compilePrimitivesToGpu(
     }
   };
 
-  for (const prim of primitives) {
+  // Zusammenhängende, gleich gestylte 'line'-Primitive (typischerweise die
+  // EINZELNEN Segmente einer importierten Polylinie/Kontur — s. `seg()` in
+  // `generatePlan/drawing2d.ts`, das pro Punktpaar ein eigenes 'line'-Primitiv
+  // erzeugt) werden hier VOR dem Stricheln zu EINEM zusammenhängenden Zug
+  // zusammengefasst. Grund: `strokePolyline` setzt an jedem OFFENEN Ende einen
+  // vollen Rundkappen-Fächer (`addRoundCap`, s. u.); bei N unabhängigen
+  // 2-Punkt-Segmenten macht das aus einer durchgehenden Kontur 2N teure
+  // Kappen statt der 2 echten Enden + (N-1) günstigerer Rund-ÜBERGÄNGE
+  // (`addRoundJoin`, nur auf der Aussenseite). Bei einem Kataster-Import mit
+  // Millionen solcher Segmente (reproduziert mit der echten 439-MB-Luzerner-
+  // Datei: 69'107 Konturen, Ø ~53 Punkte → 3,68 Mio. 'line'-Primitive) hat das
+  // den Linien-Vertexpuffer bis zur `RangeError: Invalid array length`
+  // aufgebläht. NUR eine Rendering-Optimierung — `primitives[i]` bleibt für
+  // Auswahl/Hit-Testing (PlanView.tsx indiziert direkt in `plan.primitives`)
+  // unverändert einzeln adressierbar; am Primitiv-Modell ändert sich nichts,
+  // nur daran, wie die GPU-Geometrie daraus kompiliert wird.
+  const mergedLineRun = new Set<number>();
+  {
+    let i = 0;
+    while (i < primitives.length) {
+      const p0 = primitives[i];
+      if (p0.kind !== 'line' || p0.zigzag || p0.motif) {
+        i++;
+        continue;
+      }
+      const pts: Vec2[] = [p0.a, p0.b];
+      let j = i + 1;
+      while (j < primitives.length) {
+        const pj = primitives[j];
+        if (
+          pj.kind !== 'line' ||
+          pj.zigzag ||
+          pj.motif ||
+          // `drawingId` MUSS übereinstimmen: ohne das verketten sich sonst
+          // ZWEI VERSCHIEDENE (gleich gestylte) Drawing2D-Elemente, die
+          // zufällig einen Eckpunkt teilen (bei Kataster-Daten der Normalfall
+          // — Nachbarparzellen teilen Grenzpunkte) zu EINEM künstlichen,
+          // potenziell riesigen Polylinienzug — genau das hat beim echten
+          // Luzerner Import einen einzelnen `strokePolyline`-Aufruf auf
+          // Milliarden Vertices aufgebläht (`RangeError: Invalid array
+          // length`, reproduziert).
+          pj.drawingId !== p0.drawingId ||
+          pj.color !== p0.color ||
+          pj.weightMm !== p0.weightMm ||
+          pj.greyed !== p0.greyed ||
+          pj.opacity !== p0.opacity ||
+          pj.dash !== p0.dash ||
+          pj.a.x !== pts[pts.length - 1].x ||
+          pj.a.y !== pts[pts.length - 1].y
+        ) {
+          break;
+        }
+        pts.push(pj.b);
+        j++;
+      }
+      if (j - i > 1) {
+        const color = dim(parseColor(p0.color) ?? [0.1, 0.1, 0.1, 1], p0.greyed, p0.opacity);
+        strokePolyline(pts, false, color, p0.weightMm || 0.18);
+        for (let k = i; k < j; k++) mergedLineRun.add(k);
+      }
+      i = j;
+    }
+  }
+
+  for (let primIdx = 0; primIdx < primitives.length; primIdx++) {
+    const prim = primitives[primIdx];
+    if (mergedLineRun.has(primIdx)) continue;
     if (prim.kind === 'polygon') {
       // Füllung (falls vorhanden).
       const fill = parseColor(prim.fill);
@@ -451,10 +577,10 @@ export function compilePrimitivesToGpu(
           const base = fillPos.length / 2;
           for (const pt of prim.pts) {
             const s = toScreen(pt);
-            fillPos.push(s.x, s.y);
+            fillPos.push2(s.x, s.y);
             track(pt.x, pt.y);
           }
-          for (const t of tris) fillIdx.push(base + t);
+          for (const t of tris) fillIdx.push1(base + t);
           addFillBatch(tris.length, dimFill(fill, prim.greyed, prim.opacity));
         }
       }
@@ -589,10 +715,10 @@ export function compilePrimitivesToGpu(
             const base = fillPos.length / 2;
             for (const pt of ring) {
               const s = toScreen(pt);
-              fillPos.push(s.x, s.y);
+              fillPos.push2(s.x, s.y);
               track(pt.x, pt.y);
             }
-            for (const t of tris) fillIdx.push(base + t);
+            for (const t of tris) fillIdx.push1(base + t);
             addFillBatch(tris.length, dim(fill, prim.greyed, prim.opacity));
           }
         }
@@ -603,20 +729,20 @@ export function compilePrimitivesToGpu(
   }
 
   // Puffer hochladen.
-  const uploadArray = (data: number[]): WebGLBuffer | null => {
+  const uploadArray = (data: GrowBuffer<Float32Array>): WebGLBuffer | null => {
     if (!data.length) return null;
     const buf = gl.createBuffer();
     if (!buf) return null;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, data.view(), gl.STATIC_DRAW);
     return buf;
   };
-  const uploadIndex = (data: number[]): WebGLBuffer | null => {
+  const uploadIndex = (data: GrowBuffer<Uint32Array>): WebGLBuffer | null => {
     if (!data.length) return null;
     const buf = gl.createBuffer();
     if (!buf) return null;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(data), gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data.view(), gl.STATIC_DRAW);
     return buf;
   };
 

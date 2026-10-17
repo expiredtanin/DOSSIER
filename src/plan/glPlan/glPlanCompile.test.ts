@@ -4,9 +4,58 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { triangulate } from './glPlanCompile';
+import { compilePrimitivesToGpu, triangulate } from './glPlanCompile';
 import { computeOrthoMatrix } from './glPlanRender';
 import type { Vec2 } from '../../model/types';
+import type { Primitive } from '../generatePlan';
+
+/** Minimaler WebGL2-Ersatz: die Tessellierung braucht nur die Upload-Aufrufe. */
+const glStub = {
+  createBuffer: () => ({}),
+  bindBuffer: () => {},
+  bufferData: () => {},
+  ARRAY_BUFFER: 1,
+  ELEMENT_ARRAY_BUFFER: 2,
+  STATIC_DRAW: 3,
+} as unknown as WebGL2RenderingContext;
+
+const lineIndexCount = (prims: Primitive[]): number =>
+  compilePrimitivesToGpu(glStub, prims, 90).line.batches.reduce((s, b) => s + b.indexCount, 0);
+
+const seg = (ax: number, ay: number, bx: number, by: number, drawingId: string): Primitive => ({
+  kind: 'line',
+  a: { x: ax, y: ay },
+  b: { x: bx, y: by },
+  cls: 'draw2d',
+  weightMm: 0.18,
+  color: '#000000',
+  drawingId,
+});
+
+describe('compilePrimitivesToGpu: zusammenhängende Linien-Segmente', () => {
+  // Regression (Kataster-Import, 3,7 Mio. Einzelsegmente): jedes 'line'-
+  // Primitiv bekam zwei volle Rundkappen, auch an inneren Polylinien-Ecken.
+  it('fasst verbundene Segmente desselben Elements zu einem Zug zusammen', () => {
+    const single = lineIndexCount([seg(0, 0, 1, 0, 'a')]);
+    const merged = lineIndexCount([seg(0, 0, 1, 0, 'a'), seg(1, 0, 2, 0, 'a'), seg(2, 0, 3, 0, 'a')]);
+    // Drei Quads, aber nur die zwei echten Endkappen (gerade Ecken brauchen
+    // keinen Übergang) — deutlich weniger als drei unabhängige Linien.
+    expect(merged).toBeLessThan(3 * single);
+    expect(merged).toBe(single + 2 * 6);
+  });
+
+  it('verkettet NICHT über Elementgrenzen, auch bei gemeinsamem Eckpunkt', () => {
+    const single = lineIndexCount([seg(0, 0, 1, 0, 'a')]);
+    const twoDrawings = lineIndexCount([seg(0, 0, 1, 0, 'a'), seg(1, 0, 2, 0, 'b')]);
+    expect(twoDrawings).toBe(2 * single);
+  });
+
+  it('verkettet NICHT bei unterschiedlichem Stil', () => {
+    const single = lineIndexCount([seg(0, 0, 1, 0, 'a')]);
+    const thick = { ...seg(1, 0, 2, 0, 'a'), weightMm: 0.5 } as Primitive;
+    expect(lineIndexCount([seg(0, 0, 1, 0, 'a'), thick])).toBe(2 * single);
+  });
+});
 
 /** Summierte Dreiecksfläche (Betrag) aus Indizes über pts. */
 function triArea(pts: Vec2[], idx: number[]): number {
