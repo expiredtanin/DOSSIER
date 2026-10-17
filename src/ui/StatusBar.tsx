@@ -8,8 +8,8 @@
 // Rein gesteuert (controlled): alle Werte kommen aus App (Modell + View-State),
 // keine eigene Logik. Bezeichner englisch, UI-Text/Kommentare deutsch.
 
+import { useCursor } from "../state/cursorStore";
 import { useEffect, useRef, useState } from "react";
-import type { Vec2 } from "../model/types";
 import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
 
@@ -19,8 +19,9 @@ export type RendererMode = "webgl2" | "wasm";
 export interface StatusBarProps {
   /** Kontextueller Werkzeug-Hinweis links (z. B. „Auswahl"). */
   hint: string;
-  /** Cursor in Modell-Metern oder `null` (nicht über dem Plan). */
-  cursor: Vec2 | null;
+  /** Cursor-Koordinaten anzeigen (nur bei aktiver Plan-Ansicht). Der Wert selbst
+   *  kommt aus `cursorStore` — so rendert bei Mausbewegung nur die Statusleiste. */
+  showCursor: boolean;
   /** Einheit aus dem Projekt (vorerst fix „m"). */
   unit: string;
   /** Referenzlinien (Wandachsen) an/aus — sitzt jetzt in der Statusleiste. */
@@ -358,7 +359,7 @@ const fmt = (n: number): string => n.toFixed(3);
 
 export function StatusBar({
   hint,
-  cursor,
+  showCursor,
   unit,
   referenceLines,
   onReferenceLines,
@@ -371,6 +372,8 @@ export function StatusBar({
   snap,
   onSnapChange,
 }: StatusBarProps) {
+  const liveCursor = useCursor();
+  const cursor = showCursor ? liveCursor : null;
   const coords = cursor
     ? `${fmt(cursor.x)}, ${fmt(cursor.y)}`
     : "—";

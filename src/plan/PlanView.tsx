@@ -13,7 +13,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { CSSProperties } from "react";
+import type { ComponentProps, CSSProperties } from "react";
 import type { HatchRender, Plan, PlanImage, Primitive } from "./generatePlan";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
@@ -57,6 +57,8 @@ import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, primitivesInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
+import { buildSegmentIndex, nearestSegment, pointSegDist } from "./planView/segmentIndex";
+import { createCursorStore, useCursorValue, type CursorStore } from "../state/cursorStore";
 
 /**
  * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7) — Typ
@@ -85,6 +87,11 @@ const MIN_RELATIVE_TEXT_HEIGHT = 0.005;
 // zu streng und Text, der beim aktuellen Zoom längst lesbar wäre, bliebe
 // unsichtbar.
 const CULL_RESCALE_FACTOR = 0.3;
+
+/** Lineale, die den Cursor selbst abonnieren — nur sie rendern bei Mausbewegung. */
+function LiveRulers({ store, ...rest }: Omit<ComponentProps<typeof PlanRulers>, "cursor"> & { store: CursorStore }) {
+  return <PlanRulers {...rest} cursor={useCursorValue(store)} />;
+}
 
 interface CullState {
   region: Bounds;
@@ -693,6 +700,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // NICHT, ein View, der nur kleiner wird, bleibt sonst fälschlich innerhalb
   // der alten, zu grosszügigen Region) wird neu gerechnet.
   const needsCull = plan.primitives.length > CULL_THRESHOLD;
+  // Raster-Index der 2D-Zeichenlinien für Hover-/Pick-Abfragen (s. segmentIndex.ts).
+  const segmentIndex = useMemo(() => buildSegmentIndex(plan.primitives), [plan.primitives]);
   const [cullState, setCullState] = useState<CullState | null>(() => {
     if (!needsCull) return null;
     return computeCullState(defaultView);
@@ -1216,10 +1225,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     alt: e.altKey,
   });
 
-  // Cursor in Modell-Metern nach oben melden (für die Status-Leiste) und
-  // lokal für die Lineal-Marker halten (App re-rendert bei jedem Move ohnehin
-  // über onCursor → X/Y-Anzeige; das lokale State-Update kostet nichts extra).
-  const [rulerCursor, setRulerCursor] = useState<Vec2 | null>(null);
+  // Cursor in Modell-Metern nach oben melden (Statusleiste) und für die
+  // Lineal-Marker halten — beides KEIN React-State dieser Komponente (s.
+  // cursorStore.ts): sonst renderte jede Mausbewegung den ganzen Plan neu.
+  const rulerCursor = useMemo(() => createCursorStore(), []);
+  const setRulerCursor = rulerCursor.set;
   const reportCursor = (clientX: number, clientY: number) => {
     const v = clientToView(clientX, clientY, view);
     const m = viewToModel(v.x, v.y);
@@ -1297,16 +1307,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickDrawing = (clientX: number, clientY: number): string | null => {
     let bestId: string | null = null;
     let bestDist = LINE_PICK_PX;
+    if (segmentIndex) {
+      const pxPerM = currentPxPerMeter();
+      const m = rawModelAt(clientX, clientY);
+      const i = nearestSegment(segmentIndex, plan.primitives, m, LINE_PICK_PX / pxPerM);
+      if (i !== null) {
+        const p = plan.primitives[i] as Extract<Primitive, { kind: "line" }>;
+        bestId = p.drawingId!;
+        bestDist = pointSegDist(m, p.a, p.b) * pxPerM;
+      }
+    }
     for (const p of plan.primitives) {
-      if (p.kind === "line" && p.drawingId) {
-        const a = vbToClient(toScreen(p.a).x, toScreen(p.a).y);
-        const b = vbToClient(toScreen(p.b).x, toScreen(p.b).y);
-        const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
-        if (d < bestDist) {
-          bestDist = d;
-          bestId = p.drawingId;
-        }
-      } else if ((p.kind === "drawingCircle" || p.kind === "drawingArc") && p.drawingId) {
+      if ((p.kind === "drawingCircle" || p.kind === "drawingArc") && p.drawingId) {
         const d = distToDrawingRing(clientX, clientY, p);
         if (d < bestDist) {
           bestDist = d;
@@ -1326,19 +1338,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // (eins je Segment, gleiche drawingId), unterteilt werden soll nur das
   // konkret gehoverte Segment, nicht das ganze Element.
   const nearestLineSegment = (clientX: number, clientY: number): { a: Vec2; b: Vec2 } | null => {
-    let best: { a: Vec2; b: Vec2 } | null = null;
-    let bestDist = LINE_PICK_PX;
-    for (const p of plan.primitives) {
-      if (p.kind !== "line" || !p.drawingId) continue;
-      const a = vbToClient(toScreen(p.a).x, toScreen(p.a).y);
-      const b = vbToClient(toScreen(p.b).x, toScreen(p.b).y);
-      const d = pointSegDistPx({ x: clientX, y: clientY }, a, b);
-      if (d < bestDist) {
-        bestDist = d;
-        best = { a: p.a, b: p.b };
-      }
-    }
-    return best;
+    if (!segmentIndex) return null;
+    const i = nearestSegment(
+      segmentIndex,
+      plan.primitives,
+      rawModelAt(clientX, clientY),
+      LINE_PICK_PX / currentPxPerMeter(),
+    );
+    if (i === null) return null;
+    const p = plan.primitives[i] as Extract<Primitive, { kind: "line" }>;
+    return { a: p.a, b: p.b };
   };
 
   // Trifft der Klick ein Text-2D-Element (kind "drawingText")? Grosszügige Modell-
@@ -3197,11 +3206,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               pointerEvents: "none",
             }}
           >
-            <PlanRulers
+            <LiveRulers
               vb={vb}
               vbPerPx={1 / scale}
               pxPerMeter={scale * PX_PER_M}
-              cursor={rulerCursor}
+              store={rulerCursor}
             />
           </svg>
         );

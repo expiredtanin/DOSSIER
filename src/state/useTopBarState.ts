@@ -10,7 +10,6 @@
 
 import { useState } from "react";
 import { useStore } from "./appStore";
-import type { Vec2 } from "../model/types";
 
 export function useTopBarState() {
   const detail = useStore((s) => s.detail);
@@ -46,8 +45,6 @@ export function useTopBarState() {
   const [selectedViewSnapshotId, setSelectedViewSnapshotId] = useState<
     string | null
   >(null);
-  // Cursor in Modell-Metern (aus der Plan-Ansicht) bzw. null (nicht über Plan).
-  const [cursor, setCursor] = useState<Vec2 | null>(null);
   // Live-Zoom in Prozent RELATIV zum angewandten Papier-Massstab: 100 % =
   // Live-Ansicht steht exakt im angewandten Massstab (liveScale == scaleDenominator).
   // Reinzoomen > 100 %, Rauszoomen < 100 %. Einzige Quelle: angewandter Nenner
@@ -85,8 +82,6 @@ export function useTopBarState() {
     setLiveScale,
     selectedViewSnapshotId,
     setSelectedViewSnapshotId,
-    cursor,
-    setCursor,
     zoomPercent,
   };
 }

@@ -125,6 +125,7 @@ import { InlineEditor } from "./views/InlineEditor";
 import { Content } from "./views/viewportContent";
 import { useDialogState } from "./state/useDialogState";
 import { useTopBarState } from "./state/useTopBarState";
+import { setCursor } from "./state/cursorStore";
 import { useDrawingToolState } from "./state/useDrawingToolState";
 import { useSelectionState } from "./state/useSelectionState";
 import { useGripEditing } from "./state/useGripEditing";
@@ -372,8 +373,6 @@ export default function App() {
     setLiveScale,
     selectedViewSnapshotId,
     setSelectedViewSnapshotId,
-    cursor,
-    setCursor,
     zoomPercent,
   } = useTopBarState();
 
@@ -3640,7 +3639,7 @@ export default function App() {
           Cursor/Zoom nur, wenn eine Plan-Ansicht aktiv ist (sonst „—"). */}
       <StatusBar
         hint={toolHint}
-        cursor={planActive ? cursor : null}
+        showCursor={planActive}
         unit="m"
         referenceLines={referenceLines}
         onReferenceLines={setReferenceLines}
