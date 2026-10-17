@@ -1570,6 +1570,12 @@ export const en: Record<TranslationKey, string> = {
   "import.loading.heading": "DXF file",
   "import.loading.hint":
     "Reading DXF … this can take a moment for very large files (e.g. a cadastral import of an entire city).",
+  "import.loading.phase.structure": "Analyzing file structure …",
+  "import.loading.phase.parseSingle": "Parsing geometry …",
+  "import.loading.phase.parseParallel": "Parsing geometry (spread across {n} cores) …",
+  "import.applying.heading": "Importing into project",
+  "import.applying.hint":
+    "Attaching geometry to the project and rebuilding plan/3D … this can take a moment for very many elements.",
   "import.confirm": "Import",
   "import.cancel": "Cancel",
   "import.badge.floor": "Floor",

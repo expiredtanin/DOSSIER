@@ -113,6 +113,9 @@ export type ImportDialogState = {
   isDwg: boolean;
   parsed: DxfImportResult | null;
   loading?: boolean;
+  /** Grober Phasenname während `loading` (DXF via `parseDxfAsync`'s
+   *  `onProgress`) — rein informativ, s. `ImportDialog.tsx`. */
+  progress?: string;
 } | null;
 
 export function useProjectFileActions(
@@ -234,7 +237,9 @@ export function useProjectFileActions(
     setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true });
     const r = new FileReader();
     r.onload = () => {
-      parseDxfAsync(String(r.result ?? ""))
+      parseDxfAsync(String(r.result ?? ""), (progress) => {
+        setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true, progress });
+      })
         .then((parsed) => {
           setImportState({ fileName: file.name, isDwg: false, parsed, loading: false });
         })

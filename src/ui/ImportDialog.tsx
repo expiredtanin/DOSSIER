@@ -47,6 +47,22 @@ export interface ImportDecision {
   parsed: DxfImportResult;
 }
 
+/**
+ * Übersetzt den groben Phasencode aus `parseDxfAsync`'s `onProgress`
+ * (`"structure"` | `"parse-single"` | `"parse-parallel:<N>"`) in einen
+ * sichtbaren Status-Text. `null` = noch keine Phase bekannt (ganz am Anfang,
+ * bevor der erste Fortschritts-Callback feuert) — der Aufrufer zeigt dann
+ * den generischen `import.loading.hint`.
+ */
+function dxfProgressText(progress: string | undefined): string | null {
+  if (!progress) return null;
+  if (progress === "structure") return t("import.loading.phase.structure");
+  if (progress === "parse-single") return t("import.loading.phase.parseSingle");
+  const m = /^parse-parallel:(\d+)$/.exec(progress);
+  if (m) return t("import.loading.phase.parseParallel", { n: m[1] });
+  return null;
+}
+
 /** i18n-Badge-Key je Zeichnungsebenen-Art. */
 function kindBadgeKey(kind: DrawingLevelKind): TranslationKey {
   switch (kind) {
@@ -86,6 +102,10 @@ export interface ImportDialogProps {
   isDwg: boolean;
   /** true, solange eine DWG-Datei noch geparst wird (WASM lädt/läuft). */
   loading?: boolean;
+  /** Grober Phasenname während `loading` (nur DXF, s. `dxfParserAsync.ts`'s
+   *  `onProgress`) — `"structure"`, `"parse-single"` oder
+   *  `"parse-parallel:<N>"`; `undefined` = noch keine Phase bekannt/DWG. */
+  progress?: string;
   /** Geparstes Ergebnis (null während Laden / bei DWG-Parse-Fehler). */
   parsed: DxfImportResult | null;
   project: Project;
@@ -98,6 +118,7 @@ export function ImportDialog({
   fileName,
   isDwg,
   loading = false,
+  progress,
   parsed,
   project,
   activeCategoryCode,
@@ -135,9 +156,18 @@ export function ImportDialog({
   );
   const [importMeshes, setImportMeshes] = useState<boolean>(true);
   const [placement, setPlacement] = useState<"origin" | "viewCenter">("origin");
+  // Zwischen Klick auf „Importieren" und dem (synchronen, u. U. mehrere
+  // Sekunden dauernden — Drawings ins Projekt einhängen + Plan/3D neu bauen)
+  // `onImport`: zeigt einen Ladehinweis, STATT sofort zu blockieren (Nutzer-
+  // Report 2026-10-09: nach Klick auf „Importieren" keine Rückmeldung, nicht
+  // unterscheidbar von einem Hänger). `setTimeout` statt direktem Aufruf gibt
+  // dem Browser einen Frame, um diesen Zustand VOR dem schweren synchronen
+  // Teil zu malen — sonst würde React den State-Update-Commit gar nicht mehr
+  // vor dem Block zum Zug kommen lassen.
+  const [applying, setApplying] = useState(false);
 
   const canImport =
-    !isDwg && !loading && (hasDrawings || (hasMeshes && importMeshes));
+    !isDwg && !loading && !applying && (hasDrawings || (hasMeshes && importMeshes));
 
   const onConfirm = () => {
     if (!parsed || !canImport) return;
@@ -145,7 +175,8 @@ export function ImportDialog({
       targetKind === "existing"
         ? ({ kind: "existing", levelId: existingLevelId } as const)
         : ({ kind: "new", name: newName } as const);
-    onImport({ target, categoryMode, importMeshes, placement, parsed });
+    setApplying(true);
+    setTimeout(() => onImport({ target, categoryMode, importMeshes, placement, parsed }), 0);
   };
 
   return (
@@ -177,15 +208,29 @@ export function ImportDialog({
             </span>
           </div>
 
-          {loading ? (
+          {applying ? (
+            // Klick auf „Importieren" ist erfolgt, `onImport` (synchron,
+            // Drawings einhängen + Plan/3D neu bauen) läuft gleich — derselbe
+            // Ladehinweis wie beim Parsen, damit dieser Schritt nicht wie ein
+            // Hänger aussieht (s. Kommentar bei `applying` oben).
+            <section className="imp-section">
+              <div className="imp-section-title">{t("import.applying.heading")}</div>
+              <div className="imp-dwg-hint">{t("import.applying.hint")}</div>
+            </section>
+          ) : loading ? (
             // Datei wird gelesen/geparst (DWG: WASM; DXF: Web Worker, s.
-            // dxfParserAsync.ts) → Ladehinweis, nur Abbrechen.
+            // dxfParserAsync.ts) → Ladehinweis, nur Abbrechen. `progress`
+            // (nur DXF) macht die Phase sichtbar (Nutzer-Report 2026-10-09:
+            // "keine Rückmeldung, kein Status" — ohne das sieht ein mehrere
+            // Sekunden dauernder Import wie ein Hänger aus).
             <section className="imp-section">
               <div className="imp-section-title">
                 {t(isDwg ? "import.dwg.heading" : "import.loading.heading")}
               </div>
               <div className="imp-dwg-hint">
-                {t(isDwg ? "import.dwg.loading" : "import.loading.hint")}
+                {isDwg
+                  ? t("import.dwg.loading")
+                  : dxfProgressText(progress) ?? t("import.loading.hint")}
               </div>
             </section>
           ) : isDwg ? (
@@ -358,7 +403,7 @@ export function ImportDialog({
         </div>
 
         <footer className="imp-foot">
-          <button className="imp-btn" onClick={onClose}>
+          <button className="imp-btn" onClick={onClose} disabled={applying}>
             {t("import.cancel")}
           </button>
           <button

@@ -40,6 +40,8 @@ export function useDialogState() {
     parsed: DxfImportResult | null;
     // true, solange DWG noch geparst wird (WASM lädt/läuft).
     loading?: boolean;
+    // Grober Phasenname während `loading` (nur DXF), s. ImportDialog.tsx.
+    progress?: string;
   } | null>(null);
   // Modaler PDF-Export-Dialog (Grundriss → Vektor-PDF). true = offen.
   const [exportOpen, setExportOpen] = useState(false);

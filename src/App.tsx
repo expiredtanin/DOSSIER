@@ -3693,6 +3693,7 @@ export default function App() {
           fileName={importState.fileName}
           isDwg={importState.isDwg}
           loading={importState.loading ?? false}
+          progress={importState.progress}
           parsed={importState.parsed}
           project={project}
           activeCategoryCode={activeCategoryCode}

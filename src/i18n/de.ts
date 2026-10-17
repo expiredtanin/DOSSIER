@@ -1582,6 +1582,12 @@ export const de = {
   "import.loading.heading": "DXF-Datei",
   "import.loading.hint":
     "DXF wird gelesen … Bei sehr grossen Dateien (z. B. ein Kataster-Import einer ganzen Stadt) kann das einen Moment dauern.",
+  "import.loading.phase.structure": "Analysiere Dateistruktur …",
+  "import.loading.phase.parseSingle": "Parse Geometrie …",
+  "import.loading.phase.parseParallel": "Parse Geometrie (über {n} Kerne verteilt) …",
+  "import.applying.heading": "Importiere ins Projekt",
+  "import.applying.hint":
+    "Geometrie wird ins Projekt eingehängt und Grundriss/3D neu aufgebaut … Bei sehr vielen Elementen kann das einen Moment dauern.",
   "import.confirm": "Importieren",
   "import.cancel": "Abbrechen",
   "import.badge.floor": "Geschoss",
