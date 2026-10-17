@@ -161,12 +161,20 @@ export function primitivesInRegion(
   region: Bounds,
   minTextHeightVb = 0,
 ): Array<{ p: Primitive; i: number }> {
+  return indexedInRegion(primitives.map((p, i) => ({ p, i })), region, minTextHeightVb);
+}
+
+/** Wie {@link primitivesInRegion}, aber über eine schon vorgefilterte, indizierte Liste. */
+export function indexedInRegion(
+  items: ReadonlyArray<{ p: Primitive; i: number }>,
+  region: Bounds,
+  minTextHeightVb = 0,
+): Array<{ p: Primitive; i: number }> {
   const out: Array<{ p: Primitive; i: number }> = [];
-  for (let i = 0; i < primitives.length; i++) {
-    const p = primitives[i];
-    if (isTooSmallToRead(p, minTextHeightVb)) continue;
-    const b = primitiveBoundsVb(p);
-    if (b === null || intersects(b, region)) out.push({ p, i });
+  for (const item of items) {
+    if (isTooSmallToRead(item.p, minTextHeightVb)) continue;
+    const b = primitiveBoundsVb(item.p);
+    if (b === null || intersects(b, region)) out.push(item);
   }
   return out;
 }

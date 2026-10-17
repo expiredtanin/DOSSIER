@@ -56,7 +56,7 @@ import {
 import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
-import { expandRegion, primitivesInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
+import { expandRegion, indexedInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
 import { buildSegmentIndex, nearestSegment, pointSegDist } from "./planView/segmentIndex";
 import { createCursorStore, useCursorValue, type CursorStore } from "../state/cursorStore";
 
@@ -699,23 +699,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // zoomen (view schrumpft stark — reines "liegt noch drin" reicht hier
   // NICHT, ein View, der nur kleiner wird, bleibt sonst fälschlich innerhalb
   // der alten, zu grosszügigen Region) wird neu gerechnet.
-  const needsCull = plan.primitives.length > CULL_THRESHOLD;
   // Raster-Index der 2D-Zeichenlinien für Hover-/Pick-Abfragen (s. segmentIndex.ts).
   const segmentIndex = useMemo(() => buildSegmentIndex(plan.primitives), [plan.primitives]);
-  const [cullState, setCullState] = useState<CullState | null>(() => {
-    if (!needsCull) return null;
-    return computeCullState(defaultView);
-  });
-  useEffect(() => {
-    if (!needsCull) {
-      if (cullState !== null) setCullState(null);
-      return;
-    }
-    if (!cullState || cullStateStale(cullState, view)) {
-      setCullState(computeCullState(view));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, needsCull, plan]);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -766,6 +751,42 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Engine WIRKLICH aktiv? Steuert das Umschalten SVG↔GPU: bei false rendert der
   // volle SVG-Pfad (Fallback), bei true übernimmt die GPU-Ebene + Text-Overlay.
   const useGpuRenderer = wantGpu && glReady && !hasBgImages && !hasDrawingImages;
+
+  // Nur die Primitive, die das SVG überhaupt selbst zeichnet (der Rest kommt aus
+  // WebGL/WASM bzw. — ohne GPU — aus `drawingRuns`), einmal je Plan/Modus
+  // vorgefiltert. Sonst liefen Culling UND der React-Abgleich der Kinderliste
+  // bei jedem Render über ALLE Primitive — bei einem Kataster-Import 3,7 Mio.
+  // GL-Linien, von denen das SVG keine einzige zeichnet (gemessen: 120–170 ms
+  // je Zoom-Schritt allein fürs Culling, für am Ende ~500 sichtbare Texte).
+  const svgCandidates = useMemo(() => {
+    const out: Array<{ p: Primitive; i: number }> = [];
+    const prims = plan.primitives;
+    for (let i = 0; i < prims.length; i++) {
+      const p = prims[i];
+      const drawnElsewhere = useGpuRenderer
+        ? wantWasm
+          ? p.kind !== "drawingText"
+          : p.kind !== "text" && p.kind !== "drawingText"
+        : p.kind === "line" && !!p.drawingId;
+      if (!drawnElsewhere) out.push({ p, i });
+    }
+    return out;
+  }, [plan.primitives, useGpuRenderer, wantWasm]);
+  const needsCull = svgCandidates.length > CULL_THRESHOLD;
+  const [cullState, setCullState] = useState<CullState | null>(() => {
+    if (!needsCull) return null;
+    return computeCullState(defaultView);
+  });
+  useEffect(() => {
+    if (!needsCull) {
+      if (cullState !== null) setCullState(null);
+      return;
+    }
+    if (!cullState || cullStateStale(cullState, view)) {
+      setCullState(computeCullState(view));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, needsCull, plan]);
 
   // Stabiler Papier-Massstab-Nenner N (1:N) als REFERENZ für die Print-Strich-
   // breiten. BEWUSST NICHT der live aus dem Zoom abgeleitete N (der sich beim
@@ -2510,9 +2531,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // indizieren in `plan.primitives[i]`, s. `cullPrimitives.ts`). Ohne aktives
   // Culling (`cullState === null`, der Normalfall) identisch zu vorher.
   const culledIndexed = useMemo(() => {
-    if (!cullState) return plan.primitives.map((p, i) => ({ p, i }));
-    return primitivesInRegion(plan.primitives, cullState.region, cullState.minTextHeightVb);
-  }, [plan, cullState]);
+    if (!cullState) return svgCandidates;
+    return indexedInRegion(svgCandidates, cullState.region, cullState.minTextHeightVb);
+  }, [svgCandidates, cullState]);
 
   // Perf: die Primitiv-Elemente hängen NUR an `culledIndexed` (+ Haarlinie/
   // Massstab), NICHT an `view` direkt. Ohne Memo würde jedes Schwenken/Zoomen
@@ -2522,31 +2543,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // nur noch das viewBox-Attribut (ausser `cullState` wechselt, s. o.).
   const primitiveEls = useMemo(
     () =>
+      // `culledIndexed` enthält nur, was das SVG selbst zeichnen muss (s.
+      // `svgCandidates`: bei GL nur Text, bei WASM nur `drawingText`, ohne GPU
+      // alles ausser den gebündelten 2D-Zeichenlinien). ZUSÄTZLICH das gerade im
+      // Inline-Editor offene Text-Element NIE statisch mitzeichnen — der Editor
+      // bricht nach echter Font-Metrik um, das SVG nach geschätzter Zeichenbreite;
+      // die Abweichung liess sonst Reste des statischen Texts sichtbar.
       culledIndexed.map(({ p, i }) =>
-        // Bei aktivem GL zeichnet die WebGL-Ebene Poché/Linien/Bögen; das SVG wird
-        // zur reinen Text-Overlay-Ebene (scharfe Schrift, DOM-Hit-Test) → hier nur
-        // noch Text-Primitive. Bei aktiver WASM-Engine rastert render2d den
-        // Raum-Stempel selbst (glyphon) — das SVG darf ihn NICHT zusätzlich
-        // zeichnen (sonst doppelter Text), also entfällt dort auch das Textoverlay.
-        // Sonst (reines SVG): alles außer den gebündelten 2D-Zeichenlinien.
-        // `drawingText` (importierter Einzeltext) rendert IMMER im SVG — der GL-
-        // wie der WASM-Renderer zeichnet ihn nicht. Der Raum-Stempel (`text`)
-        // bleibt: unter WASM rastert ihn render2d selbst (sonst doppelt).
-        // ZUSÄTZLICH: das gerade im Inline-Editor offene Text-Element NIE
-        // statisch mitzeichnen — Bug-Meldung ("sonst alles io" nach den
-        // Positions-Fixes, aber sichtbare Text-Dopplung): das SVG bricht
-        // Zeilen nach einer GESCHÄTZTEN Zeichenbreite um
-        // (`CHAR_WIDTH_FACTOR`), der Browser im Editor nach ECHTER
-        // Font-Metrik — beide Umbrüche weichen leicht voneinander ab, sodass
-        // der (weisse, aber nicht überall deckende) Editor-Rahmen Reste des
-        // statischen Texts sichtbar unbedeckt liess.
-        (p.kind === "drawingText" && p.drawingId === editTextId) ||
-        (useGpuRenderer
-          ? wantWasm
-            ? p.kind !== "drawingText"
-            : p.kind !== "text" && p.kind !== "drawingText"
-          : p.kind === "line" && p.drawingId)
-          ? null : (
+        p.kind === "drawingText" && p.drawingId === editTextId ? null : (
           <PrimitiveShape
             key={i}
             p={p}
@@ -2558,7 +2562,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
-    [culledIndexed, hairline, paperScale, useGpuRenderer, wantWasm, editTextId],
+    [culledIndexed, hairline, paperScale, editTextId],
   );
   const drawingRunEls = useMemo(
     () =>
