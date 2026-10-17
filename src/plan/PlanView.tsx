@@ -56,6 +56,7 @@ import {
 import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
+import { expandRegion, primitivesInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
 
 /**
  * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7) — Typ
@@ -63,6 +64,46 @@ import { PlanGrid } from "./planView/PlanGrid";
  * hier nur re-exportiert (bestehende Importe aus `./PlanView` bleiben gültig).
  */
 export type { HudFieldsState } from "../tools/hudFormat";
+
+// Viewport-Culling (s. `cullPrimitives.ts`): erst ab dieser Primitiv-Anzahl
+// aktiv — normale Projekte liegen weit darunter und bleiben unverändert.
+const CULL_THRESHOLD = 5000;
+// Puffer um `view` als Vielfaches der View-Grösse je Seite (50 % → ein
+// Schwenk muss schon über die halbe Bildschirmbreite hinausgehen, bevor neu
+// gerechnet wird).
+const CULL_MARGIN_FACTOR = 0.5;
+const cullMargin = (vb: ViewBox) => Math.max(vb.w, vb.h) * CULL_MARGIN_FACTOR;
+// Text-Primitive unter dieser Höhe (als Anteil der aktuellen View-Höhe)
+// gelten als unleserlich und werden gar nicht erst gerendert (s.
+// `isTooSmallToRead` in cullPrimitives.ts) — unabhängig von der Position.
+// 0.5 % einer typischen Bildschirmhöhe (~800 px) sind ~4 px, die Schwelle,
+// ab der Text praktisch ohnehin nicht mehr lesbar ist.
+const MIN_RELATIVE_TEXT_HEIGHT = 0.005;
+// Deutlich reingezoomt seit der letzten Neuberechnung (View < 30 % der
+// gepufferten Region) → neu rechnen, auch wenn `view` noch "drin liegt" —
+// sonst bliebe die LOD-Schwelle (an der ALTEN, grösseren View-Höhe bemessen)
+// zu streng und Text, der beim aktuellen Zoom längst lesbar wäre, bliebe
+// unsichtbar.
+const CULL_RESCALE_FACTOR = 0.3;
+
+interface CullState {
+  region: Bounds;
+  minTextHeightVb: number;
+  forViewW: number;
+  forViewH: number;
+}
+function computeCullState(view: ViewBox): CullState {
+  return {
+    region: expandRegion(view, cullMargin(view)),
+    minTextHeightVb: view.h * MIN_RELATIVE_TEXT_HEIGHT,
+    forViewW: view.w,
+    forViewH: view.h,
+  };
+}
+function cullStateStale(s: CullState, view: ViewBox): boolean {
+  if (!regionContains(s.region, view)) return true;
+  return view.w < s.forViewW * CULL_RESCALE_FACTOR || view.h < s.forViewH * CULL_RESCALE_FACTOR;
+}
 
 // Zoom-Grenzen relativ zur eingepassten Default-Ansicht. Kleinere viewBox-
 // Breite = stärkerer Zoom. ZOOM_MAX → max. Hineinzoomen, ZOOM_MIN → Herauszoomen.
@@ -628,6 +669,44 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     setView(defaultView);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
+
+  // Viewport-/LOD-Culling für `primitiveEls` (s. cullPrimitives.ts) — NUR
+  // aktiv bei sehr vielen Primitiven (Kataster-DXF-Import, Nutzer-Report
+  // 2026-10-09: 59'391 Einzel-Textbeschriftungen liessen die App nach dem
+  // Import hängen, weil React/SVG ALLE auf einmal als DOM-Knoten erzeugte,
+  // egal ob sichtbar oder lesbar) — bei normalen Projekten bleibt das
+  // Verhalten exakt wie zuvor (kein Overhead, `cullState` bleibt `null`).
+  //
+  // ZWEI Kriterien, nicht nur Position: direkt nach einem Import zeigt die
+  // "eingepasste" Übersicht den GESAMTEN Umriss (bei Luzern: 2158×2583 m) —
+  // technisch liegen dann ALLE 59'391 Labels "im Bild", wären aber jedes nur
+  // ein paar Pixel gross und unleserlich. `minTextHeightVb` filtert zusätzlich
+  // nach Lesbarkeit bei der aktuellen Zoomstufe (unabhängig von der Position) —
+  // erst damit bleibt auch der ALLERERSTE Blick nach dem Import schnell.
+  //
+  // Puffer+Hysterese (CULL_MARGIN_FACTOR, `cullStateStale`), damit kleine
+  // Schwenks/Zoom-Schritte KEINE Neuberechnung auslösen — dieselbe Überlegung
+  // wie beim bestehenden `primitiveEls`-Memo weiter unten, das bewusst NICHT
+  // an `view` hängt (sonst Ruckler auf WebKitGTK bei jedem Pan/Zoom, s.
+  // Kommentar dort): nur bei einem GRÖSSEREN Schwenk ODER spürbarem Hinein-
+  // zoomen (view schrumpft stark — reines "liegt noch drin" reicht hier
+  // NICHT, ein View, der nur kleiner wird, bleibt sonst fälschlich innerhalb
+  // der alten, zu grosszügigen Region) wird neu gerechnet.
+  const needsCull = plan.primitives.length > CULL_THRESHOLD;
+  const [cullState, setCullState] = useState<CullState | null>(() => {
+    if (!needsCull) return null;
+    return computeCullState(defaultView);
+  });
+  useEffect(() => {
+    if (!needsCull) {
+      if (cullState !== null) setCullState(null);
+      return;
+    }
+    if (!cullState || cullStateStale(cullState, view)) {
+      setCullState(computeCullState(view));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, needsCull, plan]);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -2415,14 +2494,26 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return list;
   }, [plan]);
 
-  // Perf: die Primitiv-Elemente hängen NUR am Plan (+ Haarlinie/Massstab), NICHT
-  // an `view`. Ohne Memo würde jedes Schwenken/Zoomen (das nur die viewBox ändert)
-  // den gesamten Element-Baum neu erzeugen und React ihn komplett abgleichen —
-  // auf WebKitGTK (Tauri-Desktop) der spürbare Ruckler. Memoisiert bleibt der Baum
-  // referenzstabil, Pan/Zoom aktualisiert nur noch das viewBox-Attribut.
+  // `cullState` (s. o.) reduziert bei sehr vielen Primitiven die Menge VOR
+  // dem eigentlichen JSX-Mapping — gleiche Eigenschaft wie zuvor (hängt NICHT
+  // direkt an `view`, nur am per Hysterese gepufferten `cullState`), behält
+  // aber den URSPRÜNGLICHEN Index `i` (Auswahl/Hit-Testing + Hatch-Pattern-IDs
+  // indizieren in `plan.primitives[i]`, s. `cullPrimitives.ts`). Ohne aktives
+  // Culling (`cullState === null`, der Normalfall) identisch zu vorher.
+  const culledIndexed = useMemo(() => {
+    if (!cullState) return plan.primitives.map((p, i) => ({ p, i }));
+    return primitivesInRegion(plan.primitives, cullState.region, cullState.minTextHeightVb);
+  }, [plan, cullState]);
+
+  // Perf: die Primitiv-Elemente hängen NUR an `culledIndexed` (+ Haarlinie/
+  // Massstab), NICHT an `view` direkt. Ohne Memo würde jedes Schwenken/Zoomen
+  // (das nur die viewBox ändert) den gesamten Element-Baum neu erzeugen und
+  // React ihn komplett abgleichen — auf WebKitGTK (Tauri-Desktop) der spürbare
+  // Ruckler. Memoisiert bleibt der Baum referenzstabil, Pan/Zoom aktualisiert
+  // nur noch das viewBox-Attribut (ausser `cullState` wechselt, s. o.).
   const primitiveEls = useMemo(
     () =>
-      plan.primitives.map((p, i) =>
+      culledIndexed.map(({ p, i }) =>
         // Bei aktivem GL zeichnet die WebGL-Ebene Poché/Linien/Bögen; das SVG wird
         // zur reinen Text-Overlay-Ebene (scharfe Schrift, DOM-Hit-Test) → hier nur
         // noch Text-Primitive. Bei aktiver WASM-Engine rastert render2d den
@@ -2458,7 +2549,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toScreen ist modulweit konstant
-    [plan, hairline, paperScale, useGpuRenderer, wantWasm, editTextId],
+    [culledIndexed, hairline, paperScale, useGpuRenderer, wantWasm, editTextId],
   );
   const drawingRunEls = useMemo(
     () =>
