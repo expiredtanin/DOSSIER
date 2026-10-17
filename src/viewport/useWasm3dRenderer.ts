@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
-import { projectToModel3d } from "../plan/toWalls3d";
+import { emitDrawingLineVerts, projectToModel3d } from "../plan/toWalls3d";
 import type { DetailLevel } from "../ui/TopBar";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
@@ -77,6 +77,15 @@ interface WebModelRendererLike {
    * aktuell gewählten Bauteils. Leeres Array löscht das Highlight. Wirkt erst
    * beim nächsten `render`. */
   set_highlight_lines(vertices: Float32Array): void;
+  /**
+   * 2D-Zeichnungs-Unterlage setzen (`web::set_drawing_lines`): dasselbe
+   * LineList-Format wie `set_highlight_lines`, aber tiefengetestet gezeichnet
+   * (Bauteile verdecken die Unterlage korrekt). Leeres Array löscht sie.
+   * BINÄRER Kanal statt Teil von `set_model`, weil ein Kataster-Import (Mio.
+   * Segmente) als JSON weder serialisierbar noch speicherbar wäre — s.
+   * `toWalls3d/drawing2d.ts::emitDrawingLineVerts`. Optional — ältere
+   * WASM-Builds ohne diesen Export lassen den Aufrufer still zurückfallen. */
+  set_drawing_lines?(vertices: Float32Array): void;
   /** Material-Farbkarten (Stil „textured") als Textur-Array hochladen
    * (`web::set_material_textures`). `rgba` = gepackte RGBA8-Bytes von
    * `layerCount` 256×256-Ebenen; Ebene 0 bleibt intern das Fallback-Schachbrett,
@@ -196,6 +205,18 @@ export function useWasm3dRenderer(
       r.set_model(JSON.stringify(projectToModel3d(project, { detail })));
     } catch (e) {
       console.warn("render3d set_model fehlgeschlagen:", e);
+    }
+    // 2D-Boden-Spuren als eigener BINÄRER LineList-Kanal — bewusst NICHT Teil
+    // des JSON-Modells oben: ein Kataster-DXF (Mio. Segmente) sprengt als
+    // Ribbon-Meshes im JSON die String-Längengrenze komplett (Nutzer-Report
+    // 2026-10-08, s. `emitDrawingLineVerts`). Eigener try/catch, damit ein
+    // Fehler hier das bereits gesetzte Modell nicht mit wegreisst.
+    if (typeof r.set_drawing_lines === "function") {
+      try {
+        r.set_drawing_lines(emitDrawingLineVerts(project));
+      } catch (e) {
+        console.warn("render3d set_drawing_lines fehlgeschlagen:", e);
+      }
     }
     // Material-Farbkarten (Stil „textured") ASYNCHRON dekodieren + hochladen.
     // Fire-and-forget: bis die Texturen ankommen, zeigt render3d für die

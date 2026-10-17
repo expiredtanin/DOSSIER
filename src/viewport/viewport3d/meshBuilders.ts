@@ -288,6 +288,30 @@ function buildFloor(
   }
 }
 
+/**
+ * Kategorie-Farben (Code → Hex), gecacht auf dem `layers`-Array. Vorher baute
+ * {@link drawing2DColor} über `flattenCategories(...)` den GESAMTEN Kategorie-
+ * Baum je Zeichenelement neu auf — bei einem Kataster-Import mit >100'000
+ * Elementen zweistellige Millionen Allokationen je Szenenaufbau. Der Store
+ * teilt strukturell, die Array-Identität ändert sich also genau dann, wenn
+ * sich die Ebenen wirklich ändern → der Cache invalidiert von selbst.
+ * (Gegenstück im WASM-Pfad: `toWalls3d/drawing2d.ts::buildDrawingColorMaps`.)
+ */
+const categoryColorCache = new WeakMap<object, Map<string, string>>();
+
+function categoryColorsOf(project: Project): Map<string, string> {
+  const key = project.layers as unknown as object;
+  let map = categoryColorCache.get(key);
+  if (!map) {
+    map = new Map<string, string>();
+    for (const c of flattenCategories(project.layers)) {
+      if (c.color) map.set(c.code, c.color);
+    }
+    categoryColorCache.set(key, map);
+  }
+  return map;
+}
+
 /** Modellfarbe eines 2D-Zeichenelements (color → LineStyle → Kategorie). */
 function drawing2DColor(project: Project, d: Drawing2D): string {
   if (d.color) return d.color;
@@ -295,8 +319,7 @@ function drawing2DColor(project: Project, d: Drawing2D): string {
     ? project.lineStyles.find((l) => l.id === d.lineStyleId)
     : undefined;
   if (ls?.color) return ls.color;
-  const cat = flattenCategories(project.layers).find((c) => c.code === d.categoryCode);
-  return cat?.color ?? "#888888";
+  return categoryColorsOf(project).get(d.categoryCode) ?? "#888888";
 }
 
 /** Strecken eines 2D-Zeichenelements (line/polyline/rect); andere → leer. */

@@ -1,68 +1,178 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../../model/types";
 import { sampleProject } from "../../model/sampleProject";
-import { emitDrawingLines } from "./drawing2d";
+import { emitDrawingLineVerts } from "./drawing2d";
 
-// Regression fürs Nord-Achsen-Vorzeichen der 2D-Boden-Spuren im 3D (Nutzer-
-// Report 2026-09-25: "eine in 3D gezeichnete Linie erscheint danach
-// gespiegelt — nur bei 2D-Elementen"; 2026-09-27 auf weitere Bauteile
-// ausgeweitet). `emitDrawingLines` geht über `RMesh.kind:"extrusion"` an
-// render3d — `append_context_mesh` (Rust) negiert die Nord-Achse NUR für
-// `"imported"`/`"terrain"` (echte, unabhängige Import-Rohdaten), NICHT für
-// `"extrusion"` (orientierungserhaltende, plan-abgeleitete Geometrie wie
-// Wand/Dach/Treppe/Öffnung). Die JS-Seite gibt die Positionen daher
-// UNVERÄNDERT (kein manuelles Vorzeichen-Spiel mehr nötig) — dieselbe
-// Konvention wie das drei.js-Pendant `addDrawing2DLines`.
-describe("emitDrawingLines — Nord-Achsen-Vorzeichen (kind:\"extrusion\" statt \"imported\")", () => {
-  it("lässt Modell-x/-y unverändert (keine Negation), kind ist \"extrusion\"", () => {
-    const withLine: Project = {
-      ...sampleProject,
-      drawings2d: [
-        {
-          id: "D1",
-          type: "drawing2d",
-          levelId: "eg",
-          categoryCode: "2d-line",
-          // Reine "Nord"-Linie (kein x-Versatz) — am einfachsten zu prüfen:
-          // model (0,0) -> (0,5), Ribbon-Breite vernachlässigbar (0.008m).
-          geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 0, y: 5 } },
-        },
-      ],
-    };
-    const meshes = emitDrawingLines(withLine);
-    expect(meshes).toHaveLength(1);
-    expect(meshes[0].kind).toBe("extrusion");
-    const pos = meshes[0].positions;
-    // 4 Vertices (Ribbon-Quad) x 3 Floats, Reihenfolge a+nx, a-nx, b-nx, b+nx
-    // (s. `emitDrawingLines`) — Vertex 0/1 liegen also bei a (Modell-y=0),
-    // Vertex 2/3 bei b (Modell-y=5). Der Quer-Versatz (nx, senkrecht zur
-    // Nord-Süd-Richtung) ist die halbe Ribbon-Breite (0.008m) auf der
-    // x-Achse; der Längs-Versatz (ny) ist bei dieser Linienrichtung null.
-    const yOf = (vertexIdx: number) => pos[vertexIdx * 3 + 1];
-    const xOf = (vertexIdx: number) => pos[vertexIdx * 3];
-    expect(yOf(0)).toBeCloseTo(0, 6);
-    expect(yOf(1)).toBeCloseTo(0, 6);
-    // b-Ende (Modell-y=5): bleibt +5 (KEINE Negation mehr).
-    expect(yOf(2)).toBeCloseTo(5, 6);
-    expect(yOf(3)).toBeCloseTo(5, 6);
-    // x um die halbe Ribbon-Breite versetzt (±0.008m).
-    for (const i of [0, 1, 2, 3]) expect(Math.abs(xOf(i))).toBeCloseTo(0.008, 6);
+// `emitDrawingLineVerts` liefert die 2D-Boden-Spuren als LineList-Vertices für
+// render3ds `set_drawing_lines` (binärer Float32Array-Kanal) — interleaved
+// `[px, py, pz, r, g, b]` in WORLD-Metern, je 2 Vertices ein Segment.
+//
+// Vorher war das je Zeichnung ein Ribbon-MESH im JSON-Modell; das scheiterte
+// bei einem Kataster-Import (Nutzer-Report 2026-10-08, ~3,6 Mio. Segmente)
+// hart an der JS-String-Längengrenze. Zwei Eigenschaften sind daher
+// regressionskritisch und hier abgedeckt: die WORLD-Abbildung (Modell
+// `(x, y, z=Höhe)` → world `(x, Höhe, y)`, OHNE Nord-Negation — das war der
+// Mirror-Bug 2026-09-27) und die exakte Puffergrösse.
+
+const FLOATS_PER_VERTEX = 6;
+
+function projectWith(drawings: Project["drawings2d"]): Project {
+  return { ...sampleProject, drawings2d: drawings };
+}
+
+describe("emitDrawingLineVerts — WORLD-Abbildung und Puffergrösse", () => {
+  it("bildet Modell (x, y) auf world (x, Höhe, y) ab — KEINE Nord-Negation", () => {
+    const p = projectWith([
+      {
+        id: "D1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        // Reine "Nord"-Linie: model (0,0) → (0,5).
+        geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 0, y: 5 } },
+      },
+    ] as unknown as Project["drawings2d"]);
+
+    const v = emitDrawingLineVerts(p);
+    // Ein Segment = 2 Vertices × 6 Floats.
+    expect(v.length).toBe(2 * FLOATS_PER_VERTEX);
+    // Vertex 0 = Startpunkt: world.x = model.x, world.z = model.y (NICHT -y).
+    expect(v[0]).toBeCloseTo(0, 6); // px
+    expect(v[2]).toBeCloseTo(0, 6); // pz (= model y)
+    // Vertex 1 = Endpunkt: world.z muss +5 sein (negiert wäre der Mirror-Bug).
+    expect(v[FLOATS_PER_VERTEX + 0]).toBeCloseTo(0, 6); // px
+    expect(v[FLOATS_PER_VERTEX + 2]).toBeCloseTo(5, 6); // pz
   });
 
-  it("Höhe (dritte Komponente) bleibt unverändert positiv (Geschoss-UK + Epsilon)", () => {
-    const withLine: Project = {
-      ...sampleProject,
-      drawings2d: [
-        {
-          id: "D1",
-          type: "drawing2d",
-          levelId: "eg",
-          categoryCode: "2d-line",
-          geom: { shape: "line", a: { x: 1, y: 1 }, b: { x: 2, y: 1 } },
+  it("legt die Spur knapp ÜBER die Geschossebene (Höhe = world-y, positiv)", () => {
+    const p = projectWith([
+      {
+        id: "D1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: { shape: "line", a: { x: 1, y: 1 }, b: { x: 2, y: 1 } },
+      },
+    ] as unknown as Project["drawings2d"]);
+
+    const v = emitDrawingLineVerts(p);
+    // Beide Vertices tragen dieselbe, positive Höhe (Index 1 = world y).
+    expect(v[1]).toBeGreaterThan(0);
+    expect(v[FLOATS_PER_VERTEX + 1]).toBeCloseTo(v[1], 6);
+  });
+
+  it("dimensioniert den Puffer exakt: n Segmente → n × 2 × 6 Floats", () => {
+    // Offene Polylinie mit 5 Punkten = 4 Segmente; dazu eine Linie = 1 Segment.
+    const p = projectWith([
+      {
+        id: "P1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: {
+          shape: "polyline",
+          pts: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+            { x: 3, y: 0 },
+            { x: 4, y: 0 },
+          ],
+          closed: false,
         },
-      ],
-    };
-    const pos = emitDrawingLines(withLine)[0].positions;
-    for (let i = 0; i < 4; i++) expect(pos[i * 3 + 2]).toBeGreaterThan(0);
+      },
+      {
+        id: "L1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: { shape: "line", a: { x: 0, y: 9 }, b: { x: 1, y: 9 } },
+      },
+    ] as unknown as Project["drawings2d"]);
+
+    expect(emitDrawingLineVerts(p).length).toBe(5 * 2 * FLOATS_PER_VERTEX);
+  });
+
+  it("geschlossene Polylinie bekommt das Schlusssegment (Vorab-Zählung stimmt mit der Emission überein)", () => {
+    const closed = projectWith([
+      {
+        id: "P1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: {
+          shape: "polyline",
+          pts: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 1, y: 1 },
+          ],
+          closed: true,
+        },
+      },
+    ] as unknown as Project["drawings2d"]);
+    // 3 Punkte geschlossen = 3 Segmente (2 offen + 1 Schluss).
+    expect(emitDrawingLineVerts(closed).length).toBe(3 * 2 * FLOATS_PER_VERTEX);
+  });
+
+  it("Rechteck liefert vier Segmente", () => {
+    const p = projectWith([
+      {
+        id: "R1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: { shape: "rect", min: { x: 0, y: 0 }, max: { x: 2, y: 1 } },
+      },
+    ] as unknown as Project["drawings2d"]);
+    expect(emitDrawingLineVerts(p).length).toBe(4 * 2 * FLOATS_PER_VERTEX);
+  });
+
+  it("entartete (nullängige) Segmente werden übersprungen, der Puffer entsprechend gekürzt", () => {
+    const p = projectWith([
+      {
+        id: "P1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        geom: {
+          shape: "polyline",
+          // Mittlerer Punkt doppelt → ein Segment der Länge 0.
+          pts: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+          ],
+          closed: false,
+        },
+      },
+    ] as unknown as Project["drawings2d"]);
+    // 3 Segmente gezählt, nur 2 emittiert.
+    expect(emitDrawingLineVerts(p).length).toBe(2 * 2 * FLOATS_PER_VERTEX);
+  });
+
+  it("ohne 2D-Zeichnungen: leerer Puffer (löscht die Unterlage in render3d)", () => {
+    expect(emitDrawingLineVerts(projectWith([])).length).toBe(0);
+  });
+
+  it("explizite Elementfarbe landet als 0..1-RGB an beiden Vertices", () => {
+    const p = projectWith([
+      {
+        id: "D1",
+        type: "drawing2d",
+        levelId: "eg",
+        categoryCode: "2d-line",
+        color: "#ff0000",
+        geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+      },
+    ] as unknown as Project["drawings2d"]);
+
+    const v = emitDrawingLineVerts(p);
+    expect(v[3]).toBeCloseTo(1, 5); // r
+    expect(v[4]).toBeCloseTo(0, 5); // g
+    expect(v[5]).toBeCloseTo(0, 5); // b
+    // Zweiter Vertex trägt dieselbe Farbe.
+    expect(v[FLOATS_PER_VERTEX + 3]).toBeCloseTo(1, 5);
   });
 });

@@ -68,7 +68,7 @@ import { emitWall } from "./toWalls3d/bands";
 import { emitSlabs } from "./toWalls3d/ceilings";
 import { emitStairMeshes, emitStairRailings, emitStairs } from "./toWalls3d/stairs";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
-import { emitDrawingLines, pickDrawingSegs } from "./toWalls3d/drawing2d";
+import { emitDrawingLineVerts, pickDrawingSegs } from "./toWalls3d/drawing2d";
 import { emitColumns } from "./toWalls3d/columns";
 import { emitRoofCutLayers, emitRoofs } from "./toWalls3d/roofs";
 import { emitLegacyDoorLeaves, emitOpeningFrames, emitOpeningGlass, emitOpeningShading } from "./toWalls3d/openings";
@@ -77,6 +77,10 @@ import { emitLegacyDoorLeaves, emitOpeningFrames, emitOpeningGlass, emitOpeningS
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
 // ausschliesslich von hier, unverändert zur Zeit vor dem Domänen-Split.
 export { wallMaterialColorMaps, TRUCK_MESH_READY_EVENT };
+// 2D-Boden-Spuren gehen NICHT über `RModel3d`, sondern als LineList über den
+// binären `set_drawing_lines`-Kanal (s. dortige Funktionsdoc) — der Viewport
+// holt sie direkt hier ab.
+export { emitDrawingLineVerts };
 export type { RVec2, RRgb, RWall, RSlab, RModel3d };
 
 /** World-Punkt [x, Höhe, y] für den Dach-Pick (Vec3-Konvention von raycast3d). */
@@ -115,17 +119,17 @@ function emitMeshes(project: Project): RMesh[] {
       });
     }
   }
-  // KEIN `out.push(...emitDrawingLines(project))`: bei grossen Importen (z. B.
-  // ein Kataster-DXF einer ganzen Stadt → hunderttausende Drawing2D-Elemente,
-  // je eins ein Mesh) sprengt der Spread-Operator die Argumentzahl-Grenze von
-  // `push` (RangeError "Maximum call stack size exceeded") — dieselbe, bereits
-  // dokumentierte Falle wie in `swissBuildings3d.ts::concatMeshes`/
-  // `dwgParser.ts`. `emitExtrudedSolids`/`emitColumns` sind praktisch nie so
-  // gross (Nutzer-platzierte BIM-Elemente), aber aus Konsistenz gleich
-  // behandelt.
+  // 2D-Zeichnungen sind hier bewusst NICHT dabei: sie gehen als LineList über
+  // den binären `set_drawing_lines`-Kanal (s. `emitDrawingLineVerts`), weil ein
+  // Kataster-Import als Meshes im JSON-Modell weder serialisierbar noch
+  // speicherbar wäre (s. dortige Funktionsdoc).
+  //
+  // KEIN `out.push(...emitX(project))`: der Spread-Operator sprengt bei grossen
+  // Arrays die Argumentzahl-Grenze von `push` (RangeError "Maximum call stack
+  // size exceeded") — dieselbe, bereits dokumentierte Falle wie in
+  // `swissBuildings3d.ts::concatMeshes`/`dwgParser.ts`.
   for (const m of emitExtrudedSolids(project)) out.push(m);
   for (const m of emitColumns(project)) out.push(m);
-  for (const m of emitDrawingLines(project)) out.push(m);
   return out;
 }
 

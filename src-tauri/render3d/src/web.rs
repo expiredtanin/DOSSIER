@@ -209,12 +209,20 @@ impl WebModelRenderer {
                 JsValue::from_str(&format!("kein WebGPU-Adapter (navigator.gpu?): {e}"))
             })?;
 
+        // `downlevel_webgl2_defaults()` setzt u. a. `max_buffer_size` fix auf den
+        // konservativen WebGL2-Kompatibilitätswert — `using_resolution` hebt davon
+        // NUR die auflösungsbezogenen Felder (Textur-/Viewport-Grössen) auf die
+        // Adapter-Werte an, `max_buffer_size` bleibt unberührt klein. Für diese
+        // App irrelevant (nur `Backends::BROWSER_WEBGPU`, kein WebGL2-Fallback),
+        // aber real limitierend: der binäre Linienbuffer für grosse 2D-Importe
+        // (`set_drawing_lines`, Nutzer-Report 2026-10-09: 439-MB-Kataster-Import,
+        // ~168 MB Vertexdaten) überschreitet den WebGL2-Downlevel-Wert locker.
+        // Stattdessen direkt die ECHTEN Adapter-Limits anfordern.
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("render3d.web.device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                    .using_resolution(adapter.limits()),
+                required_limits: adapter.limits(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
@@ -509,6 +517,23 @@ impl WebModelRenderer {
     /// Wirkt erst beim naechsten `render`.
     pub fn set_highlight_lines(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
         self.renderer.set_highlight_lines(&self.device, vertices);
+        Ok(())
+    }
+
+    /// Setzt die 2D-Zeichnungs-Unterlage (Boden-Spuren der `Drawing2D`-Elemente)
+    /// als LineList. `vertices` = interleaved `[px,py,pz, r,g,b, ...]`
+    /// (world-Meter, je 2 Vertices = 1 Segment), dasselbe Format wie
+    /// `set_highlight_lines`. Leeres Slice loescht die Unterlage.
+    ///
+    /// Bewusst ein eigener BINAERER Kanal statt Teil von `set_model`: Letzteres
+    /// nimmt EINEN JSON-String, und ein Kataster-DXF (Amtliche Vermessung einer
+    /// ganzen Stadt, ~3,6 Mio. Segmente) sprengt damit die JS-String-Laengen-
+    /// grenze komplett (`RangeError: Invalid string length`) — gemessen an
+    /// `AMTVER_Luzern_RAW.dxf`. `&[f32]` bindet wasm-bindgen direkt an ein
+    /// JS-`Float32Array`: roher Byte-Kopiervorgang, keine Textkodierung, keine
+    /// Laengengrenze. Wirkt erst beim naechsten `render`.
+    pub fn set_drawing_lines(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
+        self.renderer.set_drawing_lines(&self.device, vertices);
         Ok(())
     }
 

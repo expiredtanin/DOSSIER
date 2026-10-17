@@ -356,6 +356,13 @@ pub struct Renderer {
     /// `set_highlight_lines` gesetzt/geloescht; im Render-Pass als ALLERLETZTES
     /// (ohne Tiefentest) gezeichnet.
     highlight: Option<LineBuffers>,
+    /// 2D-Zeichnungs-Unterlage (Boden-Spuren der `Drawing2D`-Elemente) als
+    /// LineList. Bewusst KEINE Meshes: ein Kataster-Import kann Millionen
+    /// Segmente haben — als Dreiecks-Ribbons (`append_context_mesh`, beidseitig
+    /// + de-indiziert) waeren das GB-weise Vertexdaten, als LineList sind es
+    /// 2 Vertices je Segment. Ueber `set_drawing_lines` gesetzt/geloescht;
+    /// tiefengetestet wie das Gitter gezeichnet (Bauteile verdecken korrekt).
+    drawing_lines: Option<LineBuffers>,
     /// Schnittflaechen-Kappen (Cut-Caps) des Live-Schnitts. None = kein Schnitt
     /// aktiv / keine Schnittgeometrie. Ueber `set_cut_caps` gesetzt/geloescht,
     /// gezeichnet NACH den Flaechen, VOR Kanten/Grid/Highlight.
@@ -995,6 +1002,7 @@ impl Renderer {
             edges: None,
             grid: None,
             highlight: None,
+            drawing_lines: None,
             caps: None,
             wall_end_caps: None,
             cut_lines: None,
@@ -1234,6 +1242,34 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         self.highlight = Some(LineBuffers {
+            vbo,
+            vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
+        });
+    }
+
+    /// Setzt/loescht die 2D-Zeichnungs-Unterlage (Boden-Spuren der
+    /// `Drawing2D`-Elemente). Gleiches Format wie Grid-/Edge-/Highlight-Vertices:
+    /// interleaved `[px,py,pz, r,g,b, ...]` (world), je 2 Vertices = 1 Segment.
+    /// Leeres Slice -> Unterlage loeschen.
+    ///
+    /// Bewusst eine eigene LineList statt `MeshInput`-Ribbons: ein Kataster-DXF
+    /// (Amtliche Vermessung einer Stadt) liefert Millionen Segmente. Als Ribbon-
+    /// Meshes waeren das ueber `append_context_mesh` (jedes Dreieck doppelt,
+    /// de-indiziert fuer Flat-Shading) GB-weise Vertexdaten — und der Weg dorthin
+    /// (`set_model` als EIN JSON-String) sprengt vorher schon die
+    /// JS-String-Laengengrenze. Als LineList + `&[f32]`-Binaertransfer bleibt es
+    /// bei 2 Vertices je Segment ohne jede Textkodierung.
+    pub fn set_drawing_lines(&mut self, device: &wgpu::Device, verts: &[f32]) {
+        if verts.is_empty() {
+            self.drawing_lines = None;
+            return;
+        }
+        let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("drawing_lines.vbo"),
+            contents: bytemuck::cast_slice(verts),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.drawing_lines = Some(LineBuffers {
             vbo,
             vertex_count: (verts.len() / GRID_FLOATS_PER_VERTEX) as u32,
         });
@@ -1840,6 +1876,18 @@ impl Renderer {
                     pass.set_vertex_buffer(0, s.vbo.slice(..));
                     pass.draw(0..s.vertex_count, 0..1);
                 }
+            }
+
+            // 2c) 2D-Zeichnungs-Unterlage (Boden-Spuren der Drawing2D-Elemente)
+            //     als LineList — dieselbe tiefengetestete Pipeline wie Gitter/
+            //     Kanten, damit Bauteile die Unterlage korrekt verdecken. Stil-
+            //     unabhaengig: die Referenzlinien gehoeren in jeder Darstellung
+            //     dazu (s. `set_drawing_lines`).
+            if let Some(dl) = &self.drawing_lines {
+                pass.set_pipeline(&self.grid_pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, dl.vbo.slice(..));
+                pass.draw(0..dl.vertex_count, 0..1);
             }
 
             // 3) Bodengitter NACH dem Modell zeichnen (gemeinsamer Tiefenpuffer ->

@@ -71,12 +71,19 @@ impl WebPlanRenderer {
                 JsValue::from_str(&format!("kein WebGPU-Adapter (navigator.gpu?): {e}"))
             })?;
 
+        // `downlevel_webgl2_defaults()` setzt u. a. `max_buffer_size` fix auf den
+        // konservativen WebGL2-Kompatibilitätswert — `using_resolution` hebt davon
+        // NUR die auflösungsbezogenen Felder (Textur-/Viewport-Grössen) auf die
+        // Adapter-Werte an, `max_buffer_size` bleibt unberührt klein. Für diese
+        // App irrelevant (nur `Backends::BROWSER_WEBGPU`, kein WebGL2-Fallback),
+        // aber real limitierend für grosse `set_scene`-Tessellierungen (Nutzer-
+        // Report 2026-10-09, Kataster-Import). Stattdessen direkt die ECHTEN
+        // Adapter-Limits anfordern (s. render3d/src/web.rs, gleicher Fix).
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("render2d.web.device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                    .using_resolution(adapter.limits()),
+                required_limits: adapter.limits(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
