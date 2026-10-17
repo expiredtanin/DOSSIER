@@ -78,6 +78,30 @@ describe('triangulate', () => {
     expect(idx.length).toBe(6);
     expect(triArea(cw, idx)).toBeCloseTo(polyArea(cw), 6);
   });
+
+  // Regression (Nutzer-Report 2026-10: App hängt nach Import einer grossen
+  // Kataster-DXF). Ein grosses, ÜBERWIEGEND KONVEXES Polygon (viele Stütz-
+  // punkte, wie eine detaillierte Parzellen-/HATCH-Kontur) liess die alte
+  // O(n³)-Fassung praktisch einfrieren. Dieser Test braucht mit dem Fix nur
+  // Millisekunden — läuft er in den Default-Timeout von vitest (5 s), ist
+  // die Komplexität wieder explodiert.
+  it('trianguliert ein grosses, überwiegend konvexes Polygon performant (Regression)', () => {
+    const n = 4000;
+    // Fast-Kreis mit EINER kleinen konkaven Kerbe (reflex-Ecke) — typisch für
+    // eine detaillierte, nicht perfekt konvexe Flurstücksgrenze.
+    const big: Vec2[] = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      const r = i === 0 ? 5 : 10; // ein einzelner eingezogener Punkt = Kerbe
+      big.push({ x: Math.cos(t) * r, y: Math.sin(t) * r });
+    }
+    const t0 = performance.now();
+    const idx = triangulate(big);
+    const ms = performance.now() - t0;
+    expect(idx.length).toBe((n - 2) * 3);
+    expect(triArea(big, idx)).toBeCloseTo(polyArea(big), 0);
+    expect(ms).toBeLessThan(1000);
+  });
 });
 
 describe('computeOrthoMatrix', () => {

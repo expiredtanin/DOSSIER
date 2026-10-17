@@ -46,59 +46,96 @@ function pointInTri(a: Vec2, b: Vec2, c: Vec2, p: Vec2): boolean {
 
 /**
  * Ear-Clipping-Triangulierung eines einfachen (lochfreien) Polygons. Robust für
- * konvexe UND konkave Ringe. O(n²) — für Plan-Polygone (wenige Ecken) völlig
- * ausreichend. Gibt Dreiecks-Indizes (0-basiert auf `pts`) zurück; [] bei <3
- * Ecken oder Degeneration.
+ * konvexe UND konkave Ringe. Gibt Dreiecks-Indizes (0-basiert auf `pts`)
+ * zurück; [] bei <3 Ecken oder Degeneration.
+ *
+ * PERFORMANCE (Nutzer-Report 2026-10: App hängt nach Import einer grossen
+ * Kataster-DXF, 69k Konturen): die naive Fassung war O(n) Ohren × O(n)
+ * Kandidatensuche × O(n) Enthalten-Test (plus O(n) `Array.splice` pro Ohr)
+ * — für ein paar Dutzend Handzeichnungs-Ecken unmerklich, aber bei einem
+ * einzelnen gefüllten Polygon mit tausenden Stützpunkten (z. B. eine
+ * detaillierte Parzellen-/Flächen-HATCH-Kontur aus einer amtlichen
+ * Vermessung) effektiv O(n³) — EIN solches Polygon konnte die App für
+ * Minuten einfrieren. Fix, ohne das Ergebnis zu ändern: nur REFLEXE (konkave)
+ * Ecken können in einem Ohr liegen (Standard-Resultat der Ear-Clipping-
+ * Literatur) — der Enthalten-Test scannt daher nur die (meist kleine)
+ * Reflex-Menge statt aller Ecken, und das Abschneiden eines Ohrs läuft über
+ * eine verkettete Liste (O(1)) statt `splice` (O(n)). Für überwiegend konvexe
+ * Polygone (die Mehrheit realer Gebäude-/Parzellen-Umrisse) sinkt die
+ * Gesamtkosten dadurch von O(n³) auf nahe O(n · r) mit r = Anzahl Reflex-
+ * Ecken (oft einstellig, unabhängig von n); echter Worst-Case (ALLE Ecken
+ * reflex, z. B. ein Zickzack) bleibt bei O(n²) — nie schlechter als vorher.
  */
 export function triangulate(pts: Vec2[]): number[] {
   const n = pts.length;
   if (n < 3) return [];
 
   // Ohr-Test unten nutzt cross>0 = konvex, was CCW voraussetzt. Bei CW-Polygonen
-  // die Index-Reihenfolge umdrehen (Triangulierung ist raum-affin-invariant, die
+  // die Reihenfolge umdrehen (Triangulierung ist raum-affin-invariant, die
   // Indizes gelten danach auch für die Bildschirm-Raum-Vertices).
-  const idx: number[] = [];
-  for (let i = 0; i < n; i++) idx.push(i);
-  if (signedArea(pts) < 0) idx.reverse(); // <0 = CW → auf CCW drehen
+  const order: number[] = [];
+  for (let i = 0; i < n; i++) order.push(i);
+  if (signedArea(pts) < 0) order.reverse(); // <0 = CW → auf CCW drehen
+
+  // Doppelt verkettete Liste über die (ggf. gedrehte) Reihenfolge — macht das
+  // Entfernen eines abgeschnittenen Ohrs O(1) (Nachbarn neu verknüpfen statt
+  // Array-splice).
+  const next = new Int32Array(n);
+  const prev = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    next[order[i]] = order[(i + 1) % n];
+    prev[order[i]] = order[(i - 1 + n) % n];
+  }
+
+  const isReflex = (i: number): boolean => cross(pts[prev[i]], pts[i], pts[next[i]]) <= 0;
+  const reflex = new Set<number>();
+  for (const i of order) if (isReflex(i)) reflex.add(i);
 
   const tris: number[] = [];
+  let remaining = n;
+  let i = order[0];
+  let noEarStreak = 0;
   let guard = 0;
   const maxGuard = n * n + 16;
 
-  while (idx.length > 3 && guard++ < maxGuard) {
-    let clipped = false;
-    for (let i = 0; i < idx.length; i++) {
-      const iPrev = idx[(i + idx.length - 1) % idx.length];
-      const iCur = idx[i];
-      const iNext = idx[(i + 1) % idx.length];
-      const a = pts[iPrev];
-      const b = pts[iCur];
-      const c = pts[iNext];
-
-      // Konvexe Ecke? (bei CCW: cross > 0)
-      if (cross(a, b, c) <= 0) continue;
-
-      // Kein anderer Vertex im Ohr?
-      let contains = false;
-      for (let k = 0; k < idx.length; k++) {
-        const vi = idx[k];
-        if (vi === iPrev || vi === iCur || vi === iNext) continue;
-        if (pointInTri(a, b, c, pts[vi])) {
-          contains = true;
+  while (remaining > 3 && guard++ < maxGuard) {
+    const a = prev[i];
+    const b = i;
+    const c = next[i];
+    // Konvexe Ecke (nicht reflex) UND kein anderer (notwendig reflexer)
+    // Vertex im Ohr-Dreieck → gültiges Ohr.
+    let isEar = !reflex.has(b);
+    if (isEar) {
+      for (const vi of reflex) {
+        if (vi === a || vi === b || vi === c) continue;
+        if (pointInTri(pts[a], pts[b], pts[c], pts[vi])) {
+          isEar = false;
           break;
         }
       }
-      if (contains) continue;
-
-      // Ohr abschneiden.
-      tris.push(iPrev, iCur, iNext);
-      idx.splice(i, 1);
-      clipped = true;
-      break;
     }
-    if (!clipped) break; // Degeneriert → abbrechen (kein Absturz).
+
+    if (isEar) {
+      tris.push(a, b, c);
+      next[a] = c;
+      prev[c] = a;
+      reflex.delete(b);
+      remaining--;
+      // Nachbarn können durch die neue Kante ihre Konvexität wechseln (in
+      // beide Richtungen) — Reflex-Menge entsprechend nachführen.
+      if (isReflex(a)) reflex.add(a); else reflex.delete(a);
+      if (isReflex(c)) reflex.add(c); else reflex.delete(c);
+      i = a; // nach einem Schnitt zuerst den Vorgänger erneut prüfen (üblich)
+      noEarStreak = 0;
+    } else {
+      i = c;
+      // Kein Ohr nach einer vollen Runde über den Restring gefunden →
+      // degeneriert (z. B. selbstüberschneidend). Abbrechen statt endlos
+      // weiterzusuchen (kein Crash, wie zuvor).
+      if (++noEarStreak > remaining) break;
+    }
   }
-  if (idx.length === 3) tris.push(idx[0], idx[1], idx[2]);
+  if (remaining === 3) tris.push(prev[i], i, next[i]);
   return tris;
 }
 
