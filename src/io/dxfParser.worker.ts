@@ -6,10 +6,26 @@
 // im Haupt-Thread (`useProjectFileActions.ts::openImportForFile`), was die App
 // für die gesamte Parse-Dauer blockierte. Nutzer-Report 2026-10-08.
 //
-// Einfaches Einmal-Protokoll (ein Worker wird pro Import frisch erzeugt und
-// danach terminiert, s. `dxfParserAsync.ts`):
-//   → { type: "parse", text: string }
+// Zwei Nachrichtentypen (ein Worker wird pro Aufruf frisch erzeugt und danach
+// terminiert, s. `dxfParserAsync.ts`):
+//   → { type: "parse", text: string, idPrefix?: string }
 //   ← { type: "result", result: DxfImportResult } | { type: "error", message: string }
+//
+//   → { type: "split", text: string, chunkCount: number }
+//   ← { type: "splitOffsets", offsets: DxfSplitOffsets | null } | { type: "error", ... }
+//
+// `idPrefix` wird nur für die parallele Chunk-Variante gesetzt (mehrere
+// Worker parsen gleichzeitig je einen Ausschnitt derselben Datei) — ohne
+// Präfix würden gleichzeitig laufende Worker (je ein eigener JS-Realm, der
+// modul-globale `importSeq`-Zähler in `dxfParser.ts` startet in jedem bei 0)
+// kollidierende IDs erzeugen.
+//
+// `"split"` lagert das Finden sicherer Chunk-Grenzen selbst in einen Worker
+// aus (Nutzer-Report 2026-10-09: der Scan allein braucht bei 439 MB ~2 s —
+// im Haupt-Thread aufgerufen, friert genau DAS die UI wieder ein, obwohl das
+// eigentliche Parsen längst im Worker läuft). `dxfParserAsync.ts` holt sich
+// hier nur die Zahlen (Offsets, winziges Payload) und slict die eigentlichen
+// Chunk-Strings billig selbst im Haupt-Thread (`buildDxfChunks`).
 //
 // `parseDxf` selbst ist "three-frei" (reine Datentransformation, keine DOM-
 // Zugriffe) und läuft daher unverändert im Worker-Kontext — s. Kopfkommentar
@@ -17,18 +33,28 @@
 
 import { parseDxf } from "./dxfParser";
 import type { DxfImportResult } from "./dxfParser";
+import { computeDxfSplitOffsets } from "./dxfEntityChunker";
+import type { DxfSplitOffsets } from "./dxfEntityChunker";
 
-export type DxfWorkerRequest = { type: "parse"; text: string };
+export type DxfWorkerRequest =
+  | { type: "parse"; text: string; idPrefix?: string }
+  | { type: "split"; text: string; chunkCount: number };
 export type DxfWorkerResponse =
   | { type: "result"; result: DxfImportResult }
+  | { type: "splitOffsets"; offsets: DxfSplitOffsets | null }
   | { type: "error"; message: string };
 
 self.onmessage = (e: MessageEvent<DxfWorkerRequest>) => {
-  if (e.data?.type !== "parse") return;
   try {
-    const result = parseDxf(e.data.text);
-    const response: DxfWorkerResponse = { type: "result", result };
-    (self as unknown as Worker).postMessage(response);
+    if (e.data?.type === "parse") {
+      const result = parseDxf(e.data.text, e.data.idPrefix);
+      const response: DxfWorkerResponse = { type: "result", result };
+      (self as unknown as Worker).postMessage(response);
+    } else if (e.data?.type === "split") {
+      const offsets = computeDxfSplitOffsets(e.data.text, e.data.chunkCount);
+      const response: DxfWorkerResponse = { type: "splitOffsets", offsets };
+      (self as unknown as Worker).postMessage(response);
+    }
   } catch (err) {
     const response: DxfWorkerResponse = {
       type: "error",

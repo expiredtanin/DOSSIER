@@ -135,15 +135,22 @@ interface DxfDocument {
 }
 
 let importSeq = 0;
-const nextId = (prefix: string) =>
-  `${prefix}-${Date.now()}-${importSeq++}`;
+const nextId = (prefix: string, idPrefix: string) =>
+  `${idPrefix}${prefix}-${Date.now()}-${importSeq++}`;
 
 /**
  * Parst DXF-Text in Kontext-Geometrie. Tolerant gegen fehlende Felder; nicht
  * unterstützte/leere Entities werden übersprungen. Ein fataler Parse-Fehler wird
  * geworfen (der Aufrufer kann ihn anzeigen) — pro-Entity-Fehler nicht.
+ *
+ * `idPrefix` ist nur für die parallele Chunk-Variante relevant
+ * (`dxfParserAsync.ts`): `importSeq` ist ein modul-globaler Zähler, der in
+ * jedem Worker (= eigener JS-Realm) bei 0 startet — ohne Präfix könnten zwei
+ * parallel geparste Chunks dieselbe `id` erzeugen (Kollision beim Merge in
+ * `project.context`). Für den normalen Einzel-Aufruf bleibt er leer und
+ * ändert nichts am bisherigen `id`-Format.
  */
-export function parseDxf(text: string): DxfImportResult {
+export function parseDxf(text: string, idPrefix = ""): DxfImportResult {
   const parser = new DxfParser();
   // dxf-parser bringt keinen HATCH-Handler mit (verwirft HATCH sonst stumm).
   // Eigenen registrieren, der die rohen Gruppencodes einsammelt; die Auswertung
@@ -189,7 +196,7 @@ export function parseDxf(text: string): DxfImportResult {
   const meshes: ImportedMesh[] = [];
   if (meshIndices.length > 0) {
     meshes.push({
-      id: nextId("imported"),
+      id: nextId("imported", idPrefix),
       type: "importedMesh",
       name: "DXF-Mesh",
       categoryCode: GENERIC_IMPORT_CATEGORY.code,
@@ -201,7 +208,7 @@ export function parseDxf(text: string): DxfImportResult {
   const contourSets: ContourSet[] = [];
   if (contours.length > 0) {
     contourSets.push({
-      id: nextId("contours"),
+      id: nextId("contours", idPrefix),
       type: "contourSet",
       name: "DXF-Konturen",
       categoryCode: GENERIC_IMPORT_CATEGORY.code,
