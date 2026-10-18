@@ -72,7 +72,13 @@ import {
 import { addCeilingPoche } from "./generatePlan/ceilings";
 import { addContextContours } from "./generatePlan/context";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
-import { addDrawing2D } from "./generatePlan/drawing2d";
+import {
+  addDrawing2D,
+  addDrawing2DWithoutLines,
+  drawingLinePrims,
+  isCompactUnderlayEligible,
+} from "./generatePlan/drawing2d";
+import { drawingBox } from "./generatePlan/drawingBounds";
 import { addDoorSymbol, addOpeningSymbol } from "./generatePlan/openings";
 import { addRoof } from "./generatePlan/roofs";
 import { addRoomArea } from "./generatePlan/rooms";
@@ -200,6 +206,65 @@ export interface Plan {
    * {@link materializeGreyed} auf.
    */
   greyedRanges?: Array<[number, number]>;
+  /**
+   * KOMPAKTE Linien-Unterlage (nur in der interaktiven Ansicht, s.
+   * {@link UnderlayGroup}): Zeichnungen, deren 'line'-Primitive NICHT in
+   * `primitives` stehen. Alle Verbraucher, die diese Linien als Primitive
+   * brauchen (SVG-Fallback, WASM, nativ, Gruppen-Isolation), rufen
+   * {@link materializeUnderlay}.
+   */
+  underlay?: UnderlayGroup[];
+}
+
+/**
+ * Eine Gruppe kompakt gehaltener Zeichnungen. Ihre Linien entstehen erst beim
+ * Kompilieren eines GPU-Chunks (kurzlebig, `build`), nicht als dauerhafte
+ * Primitive: bei einem Kataster-Import 3,7 Mio. Objekte weniger im Speicher und
+ * keine O(N)-Durchgänge mehr bei jeder Änderung.
+ */
+export interface UnderlayGroup {
+  drawings: Drawing2D[];
+  /** Linien dieser Zeichnungen sind per Kategorie gedimmt (in `build` eingebacken). */
+  catGreyed: boolean;
+  /** Ganze Gruppe gedimmt darstellen (andere Ebene als Referenz) — beim Zeichnen. */
+  tint: boolean;
+  /** true = über den übrigen Primitiven zeichnen (aktive Ebene), false = darunter (Referenz-Ebene). */
+  above: boolean;
+  /** Referenzen, von denen die erzeugten Linien abhängen (Cache-Schlüssel des GPU-Chunks). */
+  ctx: readonly unknown[];
+  /** Erzeugt die 'line'-Primitive der gegebenen Zeichnungen (Teilmenge dieser Gruppe). */
+  build: (drawings: Drawing2D[]) => Primitive[];
+}
+
+/**
+ * Macht aus `plan.underlay` wieder gewöhnliche 'line'-Primitive (für Verbraucher,
+ * die Primitive brauchen). Reihenfolge: Referenz-Ebenen unten, aktive oben;
+ * gedimmte Referenz-Linien werden über `greyedRanges` markiert.
+ */
+export function materializeUnderlay(plan: Plan): Plan {
+  const groups = plan.underlay;
+  if (!groups || groups.length === 0) return plan;
+  const below: Primitive[] = [];
+  const above: Primitive[] = [];
+  const belowGreyed: Array<[number, number]> = [];
+  for (const g of groups) {
+    const target = g.above ? above : below;
+    const from = target.length;
+    for (const pr of g.build(g.drawings)) target.push(pr);
+    if (!g.above && g.tint && target.length > from) belowGreyed.push([from, target.length]);
+  }
+  const primitives: Primitive[] = [];
+  for (const pr of below) primitives.push(pr);
+  for (const pr of plan.primitives) primitives.push(pr);
+  for (const pr of above) primitives.push(pr);
+  const shifted = (plan.greyedRanges ?? []).map(([a, b]): [number, number] => [a + below.length, b + below.length]);
+  const ranges = [...belowGreyed, ...shifted];
+  return {
+    ...plan,
+    primitives,
+    underlay: undefined,
+    greyedRanges: ranges.length ? ranges : undefined,
+  };
 }
 
 /** Ob Index `i` in einem der (sortierten, disjunkten) Bereiche liegt. */
@@ -268,6 +333,12 @@ export function generatePlan(
    * bestehende Aufrufstelle mit positionalen Argumenten verrutscht.
    */
   forPrint = false,
+  /**
+   * Kompakte Linien-Unterlage statt dauerhafter 'line'-Primitive (s.
+   * {@link UnderlayGroup}) — NUR für die interaktive GPU-Ansicht. Aus bei
+   * Export/mono (toMono mutiert Linienfarben).
+   */
+  compactUnderlay = false,
 ): Plan {
   const primitives: Primitive[] = [];
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
@@ -523,10 +594,37 @@ export function generatePlan(
   }
 
   // 2D-Zeichengeometrie zuletzt (über der Poché).
+  const compact = compactUnderlay && !mono && !forPrint;
+  const underNormal: Drawing2D[] = [];
+  const underGreyed: Drawing2D[] = [];
   for (const d of drawings) {
     const greyed = categoryDisplay(d.categoryCode).greyed;
-    addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator, !mono);
+    if (compact && isCompactUnderlayEligible(d)) {
+      addDrawing2DWithoutLines(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
+      (greyed ? underGreyed : underNormal).push(d);
+    } else {
+      addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator, !mono);
+    }
   }
+  const underlay: UnderlayGroup[] = [];
+  const mkGroup = (ds: Drawing2D[], catGreyed: boolean): UnderlayGroup => ({
+    drawings: ds,
+    catGreyed,
+    tint: false,
+    above: true,
+    // Alles, wovon `build` abhängt (s. drawingPrimCache): ändert sich eine davon,
+    // müssen die GPU-Chunks dieser Gruppe neu erzeugt werden.
+    ctx: [project.lineStyles, project.hatches, project.layers, scaleDenominator],
+    build: (list) => {
+      const out: Primitive[] = [];
+      for (const d of list) {
+        drawingLinePrims(out, project, d, catGreyed, lwByCode, colorByCode, catByCode, scaleDenominator);
+      }
+      return out;
+    },
+  });
+  if (underNormal.length) underlay.push(mkGroup(underNormal, false));
+  if (underGreyed.length) underlay.push(mkGroup(underGreyed, true));
 
   // Extrudierte Körper (truck-Integration): das Quell-Profil wurde beim
   // Extrudieren aus `drawings2d` entfernt (s. `extrude.ts` appendExtrudedSolid)
@@ -574,6 +672,7 @@ export function generatePlan(
     primitives,
     bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs),
     backgroundImages,
+    ...(underlay.length ? { underlay } : {}),
   };
 }
 
@@ -613,6 +712,8 @@ export function generateVisibleLevelsPlan(
   mono = false,
   levelDisplay: CategoryDisplayResolver = SHOW_ALL,
   scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
+  /** Kompakte Linien-Unterlage (s. `UnderlayGroup`) — nur die interaktive GPU-Ansicht. */
+  compactUnderlay = false,
 ): Plan {
   const active = project.drawingLevels.find((l) => l.id === activeLevelId);
   const siblings =
@@ -622,6 +723,7 @@ export function generateVisibleLevelsPlan(
 
   const primitives: Primitive[] = [];
   const greyedRanges: Array<[number, number]> = [];
+  const underlay: UnderlayGroup[] = [];
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   const extend = (b: Plan["bounds"]) => {
     bounds.minX = Math.min(bounds.minX, b.minX);
@@ -645,7 +747,10 @@ export function generateVisibleLevelsPlan(
       mono,
       false, // includeGlobal: Schnittlinien/Kontext/Luftbilder nur einmal (aktiv)
       scaleDenominator,
+      false,
+      compactUnderlay,
     );
+    for (const g of p.underlay ?? []) underlay.push({ ...g, tint: d.greyed, above: false });
     // KEIN `primitives.push(...p.primitives)`: bei grossen Importen (z. B. ein
     // Kataster-DXF einer ganzen Stadt, hunderttausende Drawing2D-Elemente →
     // ebenso viele Primitives) sprengt der Spread-Operator die Argumentzahl-
@@ -658,7 +763,7 @@ export function generateVisibleLevelsPlan(
     // Leere Ebenen melden als Platzhalter (0,0)–(1,1) — NICHT mitzählen: sonst zog
     // jede leere Nachbar-Ebene den Ausschnitt bis zum Ursprung (bei Landes-
     // koordinaten ~2,7 Mio. m daneben → "Einpassen" zeigte nichts).
-    if (p.primitives.length > 0) extend(p.bounds);
+    if (p.primitives.length > 0 || p.underlay) extend(p.bounds);
   }
 
   const activePlan = generatePlan(
@@ -671,16 +776,20 @@ export function generateVisibleLevelsPlan(
     mono,
     true,
     scaleDenominator,
+    false,
+    compactUnderlay,
   );
   for (const pr of activePlan.primitives) primitives.push(pr);
+  for (const g of activePlan.underlay ?? []) underlay.push(g);
   // Aktive Ebene leer UND keine Nachbar-Ebene mit Inhalt → Platzhalter-Ausmass.
-  if (activePlan.primitives.length > 0 || bounds.minX === Infinity) extend(activePlan.bounds);
+  if (activePlan.primitives.length > 0 || activePlan.underlay || bounds.minX === Infinity) extend(activePlan.bounds);
 
   return {
     primitives,
     bounds,
     backgroundImages: activePlan.backgroundImages,
     ...(greyedRanges.length ? { greyedRanges } : {}),
+    ...(underlay.length ? { underlay } : {}),
   };
 }
 
@@ -926,8 +1035,14 @@ function computeBounds(
   }
   for (const d of drawings) {
     const g = d.geom;
-    if (g.shape === "line") { acc(g.a); acc(g.b); }
-    else if (g.shape === "polyline") g.pts.forEach(acc);
+    if (g.shape === "line" || g.shape === "polyline") {
+      // Box je Zeichnung gecacht (drawingBounds.ts) statt über alle Punkte.
+      const b = drawingBox(d);
+      if (isFinite(b.minX)) {
+        acc({ x: b.minX, y: b.minY });
+        acc({ x: b.maxX, y: b.maxY });
+      }
+    }
     else if (g.shape === "rect") { acc(g.min); acc(g.max); }
     else if (g.shape === "circle" || g.shape === "arc") {
       acc({ x: g.center.x - g.r, y: g.center.y - g.r });

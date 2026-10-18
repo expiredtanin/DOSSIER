@@ -22,7 +22,8 @@
  * Bögen neu tesselliert.
  */
 
-import type { Primitive } from '../generatePlan';
+import type { Primitive, UnderlayGroup } from '../generatePlan';
+import type { Drawing2D } from '../../model/types';
 import { compilePrimitivesToGpu } from './glPlanCompile';
 import type { GpuGeometry } from './glPlanTypes';
 
@@ -96,6 +97,110 @@ export interface ChunkStats {
   recompiled: number;
 }
 
+/** Chunk-Grenzen für Zeichnungen (inhaltsbasiert über Hash der `id`). */
+export function splitDrawingsIntoChunks(drawings: readonly Drawing2D[]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const mask = (1 << BOUNDARY_BITS) - 1;
+  let start = 0;
+  for (let i = 1; i < drawings.length; i++) {
+    if ((hashId(drawings[i].id) & mask) === 0) {
+      out.push([start, i]);
+      start = i;
+    }
+  }
+  if (drawings.length) out.push([start, drawings.length]);
+  return out;
+}
+
+interface UnderChunk {
+  drawings: Drawing2D[];
+  catGreyed: boolean;
+  ctx: readonly unknown[];
+  geometry: GpuGeometry;
+}
+
+function sameDrawings(a: readonly Drawing2D[], b: readonly Drawing2D[], offset: number): boolean {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[offset + i]) return false;
+  return true;
+}
+function sameCtx(a: readonly unknown[], b: readonly unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * GPU-Chunks der kompakten Linien-Unterlage (`Plan.underlay`): jeder Chunk ist
+ * eine Folge von Zeichnungen; seine Linien-Primitive entstehen erst beim
+ * Kompilieren (kurzlebig) und werden nie dauerhaft gehalten. Wiederverwendung,
+ * wenn jede Zeichnung dasselbe OBJEKT ist und der Kontext (`ctx`) gleich blieb.
+ * Gleiche Zwei-Generationen-Aufbewahrung wie {@link GpuChunkCache}.
+ */
+class UnderlayChunkCache {
+  private chunks: UnderChunk[] = [];
+  private previous: UnderChunk[] = [];
+  recompiled = 0;
+
+  constructor(private readonly gl: WebGL2RenderingContext) {}
+
+  /** Liefert je Gruppe die Geometrien ihrer Chunks (in Reihenfolge). */
+  update(groups: readonly UnderlayGroup[]): GpuGeometry[][] {
+    const pool = [...this.chunks, ...this.previous];
+    const old = new Map<Drawing2D, UnderChunk[]>();
+    for (const c of pool) {
+      const list = old.get(c.drawings[0]);
+      if (list) list.push(c);
+      else old.set(c.drawings[0], [c]);
+    }
+    const next: UnderChunk[] = [];
+    const reused = new Set<UnderChunk>();
+    const perGroup: GpuGeometry[][] = [];
+    this.recompiled = 0;
+    for (const g of groups) {
+      const geoms: GpuGeometry[] = [];
+      for (const [start, end] of splitDrawingsIntoChunks(g.drawings)) {
+        const hit = old.get(g.drawings[start])?.find(
+          (c) =>
+            !reused.has(c) &&
+            c.drawings.length === end - start &&
+            c.catGreyed === g.catGreyed &&
+            sameCtx(c.ctx, g.ctx) &&
+            sameDrawings(c.drawings, g.drawings, start),
+        );
+        let chunk = hit;
+        if (chunk) reused.add(chunk);
+        else {
+          const slice = g.drawings.slice(start, end);
+          chunk = {
+            drawings: slice,
+            catGreyed: g.catGreyed,
+            ctx: g.ctx,
+            // Linien nur kurzlebig erzeugen; sie sind nach dem Kompilieren Garbage.
+            geometry: compilePrimitivesToGpu(this.gl, g.build(slice), 0),
+          };
+          this.recompiled++;
+        }
+        next.push(chunk);
+        geoms.push(g.tint ? { ...chunk.geometry, greyed: true } : chunk.geometry);
+      }
+      perGroup.push(geoms);
+    }
+    const nextSet = new Set(next);
+    const keepPrevious = this.chunks.filter((c) => !nextSet.has(c));
+    const keep = new Set<UnderChunk>([...next, ...keepPrevious]);
+    for (const c of pool) if (!keep.has(c)) disposeGeometry(this.gl, c.geometry);
+    this.chunks = next;
+    this.previous = keepPrevious;
+    return perGroup;
+  }
+
+  dispose(): void {
+    for (const c of [...this.chunks, ...this.previous]) disposeGeometry(this.gl, c.geometry);
+    this.chunks = [];
+    this.previous = [];
+  }
+}
+
 export class GpuChunkCache {
   private chunks: Chunk[] = [];
   /**
@@ -109,7 +214,11 @@ export class GpuChunkCache {
   /** Statistik des letzten `update`-Laufs (Tests/Diagnose). */
   lastStats: ChunkStats = { chunks: 0, recompiled: 0 };
 
-  constructor(private readonly gl: WebGL2RenderingContext) {}
+  private readonly under: UnderlayChunkCache;
+
+  constructor(private readonly gl: WebGL2RenderingContext) {
+    this.under = new UnderlayChunkCache(gl);
+  }
 
   /** Geometrien in Zeichenreihenfolge (nur bei `update`/`dispose` neu aufgebaut). */
   geometries: GpuGeometry[] = [];
@@ -119,6 +228,7 @@ export class GpuChunkCache {
     pxPerMeter: number,
     lodBucket: number,
     greyedRanges?: ReadonlyArray<[number, number]>,
+    underlay?: readonly UnderlayGroup[],
   ): void {
     const cuts = new Set<number>();
     for (const [a, b] of greyedRanges ?? []) {
@@ -172,16 +282,25 @@ export class GpuChunkCache {
     this.previous = keepPrevious;
     // Gedimmt wird erst beim Zeichnen: dieselbe kompilierte Geometrie dient der
     // normalen UND der gedimmten Darstellung. Der Wrapper teilt die Puffer.
-    this.geometries = next.map((c, i) =>
+    const primGeoms = next.map((c, i) =>
       inRanges(greyedRanges, chunkStarts[i]) ? { ...c.geometry, greyed: true } : c.geometry,
     );
-    this.lastStats = { chunks: next.length, recompiled };
+    // Kompakte Unterlage: Referenz-Ebenen darunter, aktive Ebene darüber.
+    const groups = underlay ?? [];
+    const underGeoms = this.under.update(groups);
+    const below: GpuGeometry[] = [];
+    const above: GpuGeometry[] = [];
+    groups.forEach((g, i) => (g.above ? above : below).push(...underGeoms[i]));
+    this.geometries = [...below, ...primGeoms, ...above];
+    recompiled += this.under.recompiled;
+    this.lastStats = { chunks: this.geometries.length, recompiled };
   }
 
   dispose(): void {
     for (const c of [...this.chunks, ...this.previous]) disposeGeometry(this.gl, c.geometry);
     this.chunks = [];
     this.previous = [];
+    this.under.dispose();
     this.geometries = [];
   }
 }

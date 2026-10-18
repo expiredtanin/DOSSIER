@@ -333,6 +333,8 @@ export function marqueeHitDrawings(
   prims: Primitive[],
   rect: ModelRect,
   crossing: boolean,
+  /** Zeichnungen, die der Aufrufer selbst prüft (kompakte Unterlage) — hier überspringen. */
+  skipIds?: ReadonlyMap<string, unknown>,
 ): string[] {
   const byDrawing = new Map<string, Vec2[]>();
   const collect = (id: string, pts: Vec2[]) => {
@@ -341,6 +343,7 @@ export function marqueeHitDrawings(
     else byDrawing.set(id, [...pts]);
   };
   for (const p of prims) {
+    if (skipIds && "drawingId" in p && p.drawingId && skipIds.has(p.drawingId)) continue;
     if (p.kind === "line" && p.drawingId) collect(p.drawingId, [p.a, p.b]);
     else if (p.kind === "polygon" && p.drawingId) collect(p.drawingId, p.pts);
     else if (p.kind === "drawingCircle" && p.drawingId) collect(p.drawingId, ringSamplePoints(p.center, p.r));

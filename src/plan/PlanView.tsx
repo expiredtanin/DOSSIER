@@ -15,8 +15,8 @@ import {
 } from "react";
 import type { ComponentProps, CSSProperties } from "react";
 import type { HatchRender, Plan, PlanImage, Primitive } from "./generatePlan";
-import { materializeGreyed } from "./generatePlan";
-import type { EdgeGrip, Vec2 } from "../model/types";
+import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "./generatePlan";
+import type { Drawing2D, EdgeGrip, Vec2 } from "../model/types";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import type { HudFieldsState } from "../tools/hudFormat";
 import type { RichTextDoc } from "../text/richText";
@@ -42,6 +42,7 @@ import {
   pointSegDistPx,
   marqueeHit,
   marqueeHitDrawings,
+  type ModelRect,
   marqueeHitCeilings,
   marqueeHitRooms,
   marqueeHitStairs,
@@ -60,6 +61,12 @@ import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
 import { buildSegmentIndex, nearestSegment, pointSegDist } from "./planView/segmentIndex";
 import { buildOwnerIndex, ownedBy, type OwnerField, type OwnerIndex } from "./planView/ownerIndex";
+import {
+  buildDrawingIndex,
+  marqueeHitUnderlay,
+  nearestInDrawings,
+  type DrawingIndex,
+} from "./planView/underlayAccess";
 import { endBusyAfterPaint } from "../state/busyStore";
 import { createCursorStore, useCursorValue, type CursorStore } from "../state/cursorStore";
 
@@ -777,10 +784,47 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // übrigen Verbraucher (SVG-Overlay, Schraffur-Muster, WASM) lesen `greyed`
   // direkt am Primitiv und bekommen deshalb diese materialisierte Variante.
   // Linien werden nur geklont, wenn sie NICHT der WebGL-Pfad zeichnet.
-  const plan = useMemo(
-    () => materializeGreyed(planRaw, !useGpuRenderer || wantWasm),
-    [planRaw, useGpuRenderer, wantWasm],
-  );
+  const plan = useMemo(() => {
+    // Die kompakte Linien-Unterlage (planRaw.underlay) zeichnet nur der WebGL-Pfad
+    // selbst; alle anderen Wege brauchen echte 'line'-Primitive.
+    const lines = !useGpuRenderer || wantWasm;
+    return materializeGreyed(lines ? materializeUnderlay(planRaw) : planRaw, lines);
+  }, [planRaw, useGpuRenderer, wantWasm]);
+
+  // Kompakte Linien-Unterlage (nur im reinen WebGL-Modus noch als `plan.underlay`
+  // vorhanden): Hover/Pick/Marquee/Hervorhebung greifen direkt auf die Zeichnungen
+  // zu, Strukturen entstehen LAZY je Plan (s. planView/underlayAccess.ts).
+  const underlayRef = useRef<{
+    key: UnderlayGroup[];
+    drawings: Drawing2D[];
+    index?: DrawingIndex | null;
+    ids?: Map<string, UnderlayGroup>;
+  } | null>(null);
+  const getUnderlay = () => {
+    const groups = plan.underlay;
+    if (!groups || groups.length === 0) return null;
+    let c = underlayRef.current;
+    if (!c || c.key !== groups) {
+      c = { key: groups, drawings: groups.flatMap((g) => g.drawings) };
+      underlayRef.current = c;
+    }
+    return c;
+  };
+  const getUnderlayIndex = (): DrawingIndex | null => {
+    const c = getUnderlay();
+    if (!c) return null;
+    if (c.index === undefined) c.index = buildDrawingIndex(c.drawings);
+    return c.index;
+  };
+  const getUnderlayIds = (): Map<string, UnderlayGroup> | null => {
+    const c = getUnderlay();
+    if (!c) return null;
+    if (!c.ids) {
+      c.ids = new Map();
+      for (const g of c.key) for (const d of g.drawings) c.ids.set(d.id, g);
+    }
+    return c.ids;
+  };
 
   // Nur die Primitive, die das SVG überhaupt selbst zeichnet (der Rest kommt aus
   // WebGL/WASM bzw. — ohne GPU — aus `drawingRuns`), einmal je Plan/Modus
@@ -1376,6 +1420,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         bestDist = pointSegDist(m, p.a, p.b) * pxPerM;
       }
     }
+    const uIndex = getUnderlayIndex();
+    if (uIndex) {
+      const pxPerM = currentPxPerMeter();
+      const hit = nearestInDrawings(uIndex, rawModelAt(clientX, clientY), bestDist / pxPerM);
+      if (hit) {
+        bestId = hit.drawing.id;
+        bestDist = hit.dist * pxPerM;
+      }
+    }
     for (const p of plan.primitives) {
       if ((p.kind === "drawingCircle" || p.kind === "drawingArc") && p.drawingId) {
         const d = distToDrawingRing(clientX, clientY, p);
@@ -1397,17 +1450,25 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // (eins je Segment, gleiche drawingId), unterteilt werden soll nur das
   // konkret gehoverte Segment, nicht das ganze Element.
   const nearestLineSegment = (clientX: number, clientY: number): { a: Vec2; b: Vec2 } | null => {
+    const m = rawModelAt(clientX, clientY);
+    const maxDist = LINE_PICK_PX / currentPxPerMeter();
+    let best: { a: Vec2; b: Vec2 } | null = null;
+    let bestDist = maxDist;
     const segmentIndex = getSegmentIndex();
-    if (!segmentIndex) return null;
-    const i = nearestSegment(
-      segmentIndex,
-      plan.primitives,
-      rawModelAt(clientX, clientY),
-      LINE_PICK_PX / currentPxPerMeter(),
-    );
-    if (i === null) return null;
-    const p = plan.primitives[i] as Extract<Primitive, { kind: "line" }>;
-    return { a: p.a, b: p.b };
+    if (segmentIndex) {
+      const i = nearestSegment(segmentIndex, plan.primitives, m, maxDist);
+      if (i !== null) {
+        const p = plan.primitives[i] as Extract<Primitive, { kind: "line" }>;
+        best = { a: p.a, b: p.b };
+        bestDist = pointSegDist(m, p.a, p.b);
+      }
+    }
+    const uIndex = getUnderlayIndex();
+    if (uIndex) {
+      const hit = nearestInDrawings(uIndex, m, bestDist);
+      if (hit) best = { a: hit.a, b: hit.b };
+    }
+    return best;
   };
 
   // Trifft der Klick ein Text-2D-Element (kind "drawingText")? Grosszügige Modell-
@@ -1624,6 +1685,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (id && selDraws.has(id)) return { drawingId: id };
     }
     return null;
+  };
+
+  // Marquee über Zeichnungen: Primitive (ohne die der kompakten Unterlage, deren
+  // Polygon-Punkte allein sonst ein anderes Ergebnis lieferten) + Unterlage.
+  const marqueeHitAll = (rect: ModelRect, crossing: boolean): string[] => {
+    const ids = getUnderlayIds();
+    const fromPrims = marqueeHitDrawings(plan.primitives, rect, crossing, ids ?? undefined);
+    const u = getUnderlay();
+    return u ? [...fromPrims, ...marqueeHitUnderlay(u.drawings, rect, crossing)] : fromPrims;
   };
 
   // Maus-Schema (docs/design/context-menu.md): MITTE = schwenken (Pan),
@@ -2079,7 +2149,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         if (onMarquee) {
           onMarquee({
             wallIds: marqueeHit(plan.primitives, rect, crossing),
-            drawingIds: marqueeHitDrawings(plan.primitives, rect, crossing),
+            drawingIds: marqueeHitAll(rect, crossing),
             ceilingIds: marqueeHitCeilings(plan.primitives, rect, crossing),
             roomIds: marqueeHitRooms(plan.primitives, rect, crossing),
             stairIds: marqueeHitStairs(plan.primitives, rect, crossing),
@@ -2346,7 +2416,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ? new Set(selectedDrawingIds)
         : null;
     if (!ids) return [];
-    return primsOwnedBy("drawingId", selectedDrawingIds, (p): p is Extract<Primitive, { kind: "line" | "polygon" }> => p.kind === "line" || p.kind === "polygon");
+    const fromPrims = primsOwnedBy("drawingId", selectedDrawingIds, (p): p is Extract<Primitive, { kind: "line" | "polygon" }> => p.kind === "line" || p.kind === "polygon");
+    // Linien kompakt gehaltener Zeichnungen entstehen nur für die gewählten (wenige).
+    const underIds = getUnderlayIds();
+    if (!underIds || !selectedDrawingIds) return fromPrims;
+    const extra: Array<Extract<Primitive, { kind: "line" | "polygon" }>> = [];
+    for (const id of selectedDrawingIds) {
+      const g = underIds.get(id);
+      const d = g?.drawings.find((x) => x.id === id);
+      if (g && d) for (const pr of g.build([d])) if (pr.kind === "line") extra.push(pr);
+    }
+    return extra.length ? [...fromPrims, ...extra] : fromPrims;
   }, [plan, selectedDrawingIds]);
 
   // Hervorhebung ausgewählter TEXT-Objekte (Auswahl-Rahmen, Nutzer-Wunsch):

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { Primitive } from '../generatePlan';
+import type { Primitive, UnderlayGroup } from '../generatePlan';
+import type { Drawing2D } from '../../model/types';
 import { GpuChunkCache, splitIntoChunks } from './glPlanChunks';
 
 const line = (x: number, drawingId: string): Primitive => ({
@@ -156,5 +157,59 @@ describe('GpuChunkCache', () => {
     cache.dispose();
     expect(deleted.length).toBeGreaterThan(0);
     expect(cache.geometries).toEqual([]);
+  });
+});
+
+describe('GpuChunkCache: kompakte Unterlage', () => {
+  const drawing = (id: string, x: number) =>
+    ({ id, type: 'drawing2d', levelId: 'L', categoryCode: '60', geom: { shape: 'line', a: { x, y: 0 }, b: { x: x + 1, y: 0 } } }) as unknown as Drawing2D;
+  const many = (n: number): Drawing2D[] => Array.from({ length: n }, (_, i) => drawing(`u${i}`, i));
+  const group = (drawings: Drawing2D[], over: Partial<UnderlayGroup> = {}): UnderlayGroup => ({
+    drawings,
+    catGreyed: false,
+    tint: false,
+    above: true,
+    ctx: [1],
+    build: (ds) => ds.map((d) => line((d.geom as any).a.x, d.id)),
+    ...over,
+  });
+
+  it('kompiliert beim zweiten Lauf nichts neu; eine geänderte Zeichnung nur ihren Chunk', () => {
+    const { gl, deleted } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const ds = many(2000);
+    cache.update([], 90, 6, undefined, [group(ds)]);
+    const total = cache.lastStats.chunks;
+    expect(total).toBeGreaterThan(2);
+    cache.update([], 90, 6, undefined, [group(ds)]);
+    expect(cache.lastStats.recompiled).toBe(0);
+    const edited = ds.slice();
+    edited[1000] = drawing('u1000', 5000);
+    cache.update([], 90, 6, undefined, [group(edited)]);
+    expect(cache.lastStats.recompiled).toBe(1);
+    cache.update([], 90, 6, undefined, [group(edited)]);
+    expect(deleted.length).toBeGreaterThan(0);
+  });
+
+  it('geänderter Kontext (ctx) erzwingt Neukompilierung aller Chunks', () => {
+    const { gl } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const ds = many(2000);
+    cache.update([], 90, 6, undefined, [group(ds, { ctx: [1] })]);
+    const total = cache.lastStats.chunks;
+    cache.update([], 90, 6, undefined, [group(ds, { ctx: [2] })]);
+    expect(cache.lastStats.recompiled).toBe(total);
+  });
+
+  it('Reihenfolge: Referenz-Ebenen unten, Primitive, aktive Ebene oben; Tönung nur bei tint', () => {
+    const { gl } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const below = group(many(3), { above: false, tint: true });
+    const above = group([0, 1, 2].map((i) => drawing(`a${i}`, i)), { above: true });
+    cache.update(scene().slice(0, 6), 90, 6, undefined, [above, below]);
+    const g = cache.geometries;
+    expect(g[0].greyed).toBe(true); // unten, getönt
+    expect(g[g.length - 1].greyed).toBeFalsy(); // oben, normal
+    expect(g.length).toBe(3); // 1 unten + 1 Primitiv-Chunk + 1 oben
   });
 });

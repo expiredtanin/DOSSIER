@@ -220,6 +220,95 @@ export function addDrawing2D(
 }
 
 /**
+ * KOMPAKTER Unterlagen-Pfad (s. `Plan.underlay`): Zeichnungen, deren Primitive
+ * nur aus Linien-Segmenten (plus ggf. einem Flächen-Polygon bei geschlossenen
+ * Konturen) bestehen. Bei einem Kataster-Import sind das 3,7 Mio. 'line'-
+ * Primitive, die sich beim Bearbeiten NIE ändern — als dauerhafte JS-Objekte
+ * kosteten sie ~0,5 GB, GC-Last und bei jeder Änderung mehrere O(N)-Durchgänge.
+ * Statt dessen bleiben diese Zeichnungen als `Drawing2D` und ihre Linien werden
+ * nur bei Bedarf (GPU-Chunk neu zu kompilieren) kurzlebig erzeugt.
+ *
+ * Ausgeschlossen: Bogen-Segmente (Bulge → `drawingArc`), Linienenden (Pfeile/
+ * Kreise → eigene Primitive). `line`/offene und geschlossene Polylinien sonst
+ * immer.
+ */
+export function isCompactUnderlayEligible(d: Drawing2D): boolean {
+  const g = d.geom;
+  if (g.shape === "line") return !d.endMarks?.start && !d.endMarks?.end;
+  if (g.shape !== "polyline") return false;
+  if (d.endMarks?.start || d.endMarks?.end) return false;
+  return !g.bulge || g.bulge.every((b) => !b);
+}
+
+/**
+ * Wie {@link addDrawing2D}, aber OHNE die 'line'-Primitive (die liefert
+ * {@link drawingLinePrims} bei Bedarf): übrig bleiben z. B. das Polygon einer
+ * geschlossenen Kontur (Auswahl/Füllung/Schraffur). Gecacht je Drawing2D-Objekt.
+ */
+export function addDrawing2DWithoutLines(
+  out: Primitive[],
+  project: Project,
+  d: Drawing2D,
+  greyed: boolean,
+  lwByCode: Map<string, number>,
+  colorByCode: Map<string, string>,
+  catByCode: Map<string, LayerCategory>,
+  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
+): void {
+  const hit = withoutLinesCache.get(d);
+  if (
+    hit &&
+    hit.lineStyles === project.lineStyles &&
+    hit.hatches === project.hatches &&
+    hit.layers === project.layers &&
+    hit.greyed === greyed &&
+    hit.scaleDenominator === scaleDenominator
+  ) {
+    for (const p of hit.prims) out.push(p);
+    return;
+  }
+  const tmp: Primitive[] = [];
+  addDrawing2D(tmp, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
+  const kept = tmp.filter((p) => p.kind !== "line");
+  withoutLinesCache.set(d, {
+    lineStyles: project.lineStyles,
+    hatches: project.hatches,
+    layers: project.layers,
+    greyed,
+    scaleDenominator,
+    prims: kept,
+  });
+  for (const p of kept) out.push(p);
+}
+const withoutLinesCache = new WeakMap<
+  Drawing2D,
+  {
+    lineStyles: Project["lineStyles"];
+    hatches: Project["hatches"];
+    layers: Project["layers"];
+    greyed: boolean;
+    scaleDenominator: number;
+    prims: Primitive[];
+  }
+>();
+
+/** Nur die 'line'-Primitive einer Zeichnung (kurzlebig, für GPU-Chunk-Kompilierung). */
+export function drawingLinePrims(
+  out: Primitive[],
+  project: Project,
+  d: Drawing2D,
+  greyed: boolean,
+  lwByCode: Map<string, number>,
+  colorByCode: Map<string, string>,
+  catByCode: Map<string, LayerCategory>,
+  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
+): void {
+  const tmp: Primitive[] = [];
+  addDrawing2D(tmp, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
+  for (const p of tmp) if (p.kind === "line") out.push(p);
+}
+
+/**
  * Cache der erzeugten Primitive je Drawing2D-OBJEKT. Projekt-Updates sind
  * immutabel mit Structural Sharing — ein unveränderte Zeichnung bleibt dasselbe
  * Objekt; ihre Primitive müssen dann nicht neu erzeugt werden (bei einem

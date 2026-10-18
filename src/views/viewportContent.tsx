@@ -19,7 +19,7 @@ import type {
   Vec2,
   Wall,
 } from "../model/types";
-import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../plan/generatePlan";
+import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan, materializeUnderlay } from "../plan/generatePlan";
 import type { CategoryDisplayResolver, Primitive } from "../plan/generatePlan";
 import type { RichTextDoc } from "../text/richText";
 import { computeSection } from "../plan/toSection";
@@ -824,6 +824,9 @@ function LevelPlanView({
       mono,
       floorDisplay,
       scaleDenominator,
+      // Kompakte Linien-Unterlage (s. Plan.underlay): hält Kataster-Importe
+      // handhabbar; PlanView materialisiert sie, wo echte Primitive nötig sind.
+      true,
     );
     const withOverlay =
       overlayPrimitives.length === 0
@@ -831,9 +834,13 @@ function LevelPlanView({
         : { ...p, primitives: [...p.primitives, ...overlayPrimitives] };
     // Gruppen-Isolation ("Gruppe betreten"): alles ausserhalb der aktiven
     // Gruppe gedimmt, s. state/groupActions.ts::applyGroupDimming.
+    // applyGroupDimming arbeitet auf Primitiven → Unterlage vorher materialisieren.
     return groupPath.length === 0
       ? withOverlay
-      : { ...withOverlay, primitives: applyGroupDimming(withOverlay.primitives, project, groupPath) };
+      : (() => {
+          const full = materializeUnderlay(withOverlay);
+          return { ...full, primitives: applyGroupDimming(full.primitives, project, groupPath) };
+        })();
   }, [
     project,
     level.id,

@@ -10,7 +10,7 @@
 // geschluckt (console.debug), damit die App nie daran scheitert.
 
 import type { Plan } from "./generatePlan";
-import { materializeGreyed } from "./generatePlan";
+import { materializeGreyed, materializeUnderlay } from "./generatePlan";
 import type { Project } from "../model/types";
 import { planToRenderScene } from "./toRenderScene";
 import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "./toWalls3d";
@@ -72,7 +72,7 @@ export function pushNativeScene(plan: Plan): void {
   sceneTimer = setTimeout(async () => {
     if (!(await isNativeEnabled())) return;
     // planToRenderScene liest `greyed` am Primitiv → gedimmte Referenz-Ebenen materialisieren.
-    void invokeNative("push_native_scene", { scene: planToRenderScene(materializeGreyed(plan, true)) });
+    void invokeNative("push_native_scene", { scene: planToRenderScene(materializeGreyed(materializeUnderlay(plan), true)) });
   }, DEBOUNCE_MS);
 }
 

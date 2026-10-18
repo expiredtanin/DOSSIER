@@ -105,6 +105,7 @@ export function useGlPlanRenderer(
         pxPerMeter,
         pxPerMeter > 0 ? Math.round(Math.log2(pxPerMeter)) : -Infinity,
         plan.greyedRanges,
+        plan.underlay,
       );
     } catch (e) {
       console.warn('Tessellierung fehlgeschlagen:', e);
