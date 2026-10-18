@@ -23,6 +23,30 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/**
+ * Gibt es in diesem Build überhaupt ein natives Fenster (Rust-Features
+ * native2d/native3d)? Einmal beim ersten Push erfragt. Ohne diese Prüfung
+ * wurde bei JEDER Planänderung die komplette Szene in JS umgewandelt und per
+ * IPC an einen Befehl geschickt, den es im Standard-Build nicht gibt —
+ * bei einem Kataster-Import (3,7 Mio. Primitive) mehrere Sekunden
+ * Hauptthread-Arbeit, nur um dann zu scheitern. Fehlt der Befehl selbst
+ * (älterer Build), gilt das ebenfalls als "nein".
+ */
+let nativeEnabled: Promise<boolean> | null = null;
+function isNativeEnabled(): Promise<boolean> {
+  nativeEnabled ??= (async () => {
+    try {
+      // @ts-ignore optionales Paket
+      const mod = await import(/* @vite-ignore */ "@tauri-apps/api/core").catch(() => null);
+      if (!mod || typeof (mod as any).invoke !== "function") return false;
+      return (await (mod as any).invoke("native_viewport_enabled")) === true;
+    } catch {
+      return false;
+    }
+  })();
+  return nativeEnabled;
+}
+
 /** Geguardeter Invoke (Muster wie src/compute): nie werfen, Fehler nur debuggen. */
 async function invokeNative(cmd: string, args: Record<string, unknown>): Promise<void> {
   try {
@@ -45,7 +69,8 @@ let wallsTimer: ReturnType<typeof setTimeout> | undefined;
 export function pushNativeScene(plan: Plan): void {
   if (!isTauri()) return;
   clearTimeout(sceneTimer);
-  sceneTimer = setTimeout(() => {
+  sceneTimer = setTimeout(async () => {
+    if (!(await isNativeEnabled())) return;
     // planToRenderScene liest `greyed` am Primitiv → gedimmte Referenz-Ebenen materialisieren.
     void invokeNative("push_native_scene", { scene: planToRenderScene(materializeGreyed(plan, true)) });
   }, DEBOUNCE_MS);
@@ -60,7 +85,8 @@ export function pushNativeWalls(project: Project): void {
   if (!isTauri()) return;
   lastProject = project;
   clearTimeout(wallsTimer);
-  wallsTimer = setTimeout(() => {
+  wallsTimer = setTimeout(async () => {
+    if (!(await isNativeEnabled())) return;
     void invokeNative("push_native_walls", { walls: projectToModel3d(project) });
   }, DEBOUNCE_MS);
 }

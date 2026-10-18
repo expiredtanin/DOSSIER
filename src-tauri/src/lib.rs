@@ -73,6 +73,16 @@ fn push_native_walls(walls: serde_json::Value) {
     let _ = walls;
 }
 
+/// Ob dieser Build ein natives wgpu-Fenster hat, das die Webview mit Szenen
+/// füttern kann (Features native2d/native3d). Die Webview fragt einmal und
+/// pusht nur dann — sonst würde sie bei JEDER Planänderung die gesamte Szene
+/// (bei Kataster-Importen Millionen Primitive) serialisieren und an einen
+/// nicht vorhandenen Befehl schicken.
+#[tauri::command]
+fn native_viewport_enabled() -> bool {
+    cfg!(any(feature = "native2d", feature = "native3d"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -115,6 +125,7 @@ pub fn run() {
 
     #[cfg(any(feature = "native2d", feature = "native3d"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        native_viewport_enabled,
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
@@ -122,6 +133,7 @@ pub fn run() {
     ]);
     #[cfg(not(any(feature = "native2d", feature = "native3d")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        native_viewport_enabled,
         acquire_project_lock,
         release_project_lock
     ]);
