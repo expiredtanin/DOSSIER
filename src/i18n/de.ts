@@ -1568,6 +1568,7 @@ export const de = {
   "import.target.newNamePlaceholder": "Name der neuen Zeichnung",
   "import.layers.heading": "Ebenen-Handling (DXF-Layer)",
   "import.layers.asCategories": "DXF-Layer als Kategorien übernehmen",
+  "import.layers.parentName": "Import: {name}",
   "import.layers.toActive": "Alles auf die aktive Kategorie ({code})",
   "import.placement.heading": "Platzierung",
   "import.placement.origin": "An DXF-Koordinaten (relativ zum Nullpunkt)",

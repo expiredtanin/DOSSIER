@@ -86,12 +86,15 @@ function mergeResults(results: DxfImportResult[]): DxfImportResult {
   const meshes: ImportedMesh[] = [];
   const contours: ContourSet[] = [];
   const texts: ImportedText[] = [];
+  const layerColors: Record<string, string> = {};
   for (const r of results) {
     for (const m of r.meshes) meshes.push(m);
     for (const c of r.contours) contours.push(c);
     for (const t of r.texts ?? []) texts.push(t);
+    // Jeder Chunk trägt dieselbe Präambel (inkl. LAYER-Tabelle) — Vereinigung reicht.
+    Object.assign(layerColors, r.layerColors);
   }
-  return { meshes, contours, texts };
+  return { meshes, contours, texts, layerColors };
 }
 
 /**

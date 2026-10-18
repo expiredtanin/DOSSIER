@@ -12,6 +12,7 @@ import { t } from "../i18n";
 import type { DxfImportResult } from "../io/dxfParser";
 import { parseDxfAsync } from "../io/dxfParserAsync";
 import { buildDrawings } from "../ui/ImportDialog";
+import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings";
 import type { ImportDecision } from "../ui/ImportDialog";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf } from "../export/exportIfc";
@@ -31,6 +32,7 @@ import {
 import type { LockInfo } from "../io/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
+import { flattenCategories } from "../model/types";
 import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
 import type { PlanViewHandle } from "../plan/PlanView";
 
@@ -481,6 +483,9 @@ export function useProjectFileActions(
     r.readAsText(file);
   };
 
+  const importParentName = (decision: ImportDecision): string =>
+    decision.target.kind === "new" ? decision.target.name : "DXF";
+
   // Bestätigte Import-Entscheidung ausführen: ggf. neue Zeichnung anlegen, die
   // 2D-Konturen als Drawing2D anhängen, optional die Meshes als Kontext
   // übernehmen. Reihenfolge: erst Ebene (echte ID), dann Drawings/Kontext.
@@ -489,11 +494,30 @@ export function useProjectFileActions(
       decision.target.kind === "new"
         ? addDrawingLevel(decision.target.name)
         : decision.target.levelId;
+    // „DXF-Layer als Kategorien": fehlende Layer als Unterkategorien einer neuen
+    // Elternkategorie anlegen (vorher fielen sie ALLE auf die aktive Kategorie,
+    // bei Kataster-Importen „Wände"). Die Kategorien müssen VOR den Drawings im
+    // Projekt stehen, damit deren `categoryCode` auf etwas zeigt.
+    let codeByLayer: Map<string, string> | undefined;
+    if (decision.categoryMode === "byLayer") {
+      const plan = planImportCategories(
+        distinctImportLayers(decision.parsed.contours, decision.parsed.texts ?? []),
+        flattenCategories(project.layers),
+        t("import.layers.parentName", { name: importParentName(decision) }),
+        decision.parsed.layerColors,
+      );
+      codeByLayer = plan.codeByLayer;
+      if (plan.parent) {
+        const parent = plan.parent;
+        setProject((p) => ({ ...p, layers: [...p.layers, parent] }));
+      }
+    }
     let drawings = buildDrawings(
       decision,
       levelId,
       project,
       activeCategoryCode,
+      codeByLayer,
     );
     // Platzierung „viewCenter": den Gesamt-Umriss so verschieben, dass seine
     // Mitte auf die Mitte des aktuellen Ausschnitts fällt (sonst bleibt alles an

@@ -15,7 +15,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Contour, ContourSet, Drawing2D, Drawing2DGeom, ImportedText } from "../model/types";
+import type { Contour, ContourSet, Drawing2D, Drawing2DGeom, ImportedText, LayerCategory } from "../model/types";
 
 /** Wie DXF-Layer auf Kategorien abgebildet werden. */
 export type CategoryMode = "active" | "byLayer";
@@ -122,6 +122,72 @@ function contourGeom(contour: Contour): Drawing2DGeom | null {
   };
 }
 
+/**
+ * Kategorien für DXF-Layer, die im Projekt noch KEINE gleichnamige Kategorie
+ * haben (Namensvergleich case-insensitiv, über den ganzen Baum). Sie werden als
+ * Unterkategorien EINER neuen Elternkategorie `parentName` angelegt, damit ein
+ * Import mit Dutzenden Layern (amtliche Vermessung) das Ebenen-Panel nicht flutet.
+ * Codes: fortlaufend ab dem grössten bestehenden numerischen Code (wie
+ * `nextFreeCode`). Liefert die neue Elternkategorie (oder null, wenn alle Layer
+ * schon existieren) und das Mapping Layer-Name → Code für ALLE Layer.
+ */
+export function planImportCategories(
+  layerNames: readonly string[],
+  existing: readonly LayerCategory[],
+  parentName: string,
+  layerColors: Readonly<Record<string, string>> = {},
+): { parent: LayerCategory | null; codeByLayer: Map<string, string> } {
+  const used = new Set<string>();
+  const byName = new Map<string, string>();
+  const walk = (list: readonly LayerCategory[]) => {
+    for (const c of list) {
+      used.add(c.code);
+      byName.set(c.name.toLowerCase(), c.code);
+      if (c.children) walk(c.children);
+    }
+  };
+  walk(existing);
+  let next = Math.max(0, ...[...used].map((c) => parseInt(c, 10)).filter((n) => !isNaN(n))) + 1;
+  const allocate = (): string => {
+    while (used.has(String(next).padStart(2, "0"))) next++;
+    const code = String(next++).padStart(2, "0");
+    used.add(code);
+    return code;
+  };
+
+  const codeByLayer = new Map<string, string>();
+  const children: LayerCategory[] = [];
+  for (const name of layerNames) {
+    const known = byName.get(name.toLowerCase());
+    if (known) {
+      codeByLayer.set(name, known);
+      continue;
+    }
+    const code = allocate();
+    byName.set(name.toLowerCase(), code); // Dubletten mit anderer Schreibweise teilen sich die Kategorie
+    codeByLayer.set(name, code);
+    children.push({
+      code,
+      name,
+      color: layerColors[name] ?? "#707078",
+      lw: 0.18,
+      visible: true,
+      locked: false,
+    });
+  }
+  if (children.length === 0) return { parent: null, codeByLayer };
+  const parent: LayerCategory = {
+    code: allocate(),
+    name: parentName,
+    color: "#707078",
+    lw: 0.18,
+    visible: true,
+    locked: false,
+    children,
+  };
+  return { parent, codeByLayer };
+}
+
 /** Liste der unterschiedlichen DXF-Layer-Namen über alle Konturen-Sätze. */
 export function distinctLayers(sets: ContourSet[]): string[] {
   const seen = new Set<string>();
@@ -131,6 +197,13 @@ export function distinctLayers(sets: ContourSet[]): string[] {
       if (name) seen.add(name);
     }
   }
+  return [...seen];
+}
+
+/** Wie {@link distinctLayers}, aber über Konturen UND Texte (beide tragen einen Layer). */
+export function distinctImportLayers(sets: ContourSet[], texts: readonly ImportedText[]): string[] {
+  const seen = new Set<string>(distinctLayers(sets));
+  for (const it of texts) if (it.layer) seen.add(it.layer);
   return [...seen];
 }
 

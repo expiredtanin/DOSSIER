@@ -51,6 +51,8 @@ export interface DxfImportResult {
   texts?: ImportedText[];
   /** Optionale Diagnose (Entity-Typ-Histogramm); vom DWG-Parser gefüllt. */
   diagnostics?: ImportDiagnostics;
+  /** Farbe je DXF-Layer (Hex) aus der LAYER-Tabelle — für neu angelegte Kategorien. */
+  layerColors?: Record<string, string>;
 }
 
 // Lose getippte Sicht auf die dxf-parser-Ausgabe (das Paket liefert keine engen
@@ -132,6 +134,22 @@ interface DxfBlock {
 interface DxfDocument {
   entities?: DxfEntity[];
   blocks?: Record<string, DxfBlock>;
+  tables?: { layer?: { layers?: Record<string, { name?: string; color?: number }> } };
+}
+
+/**
+ * Layer-Farben aus der LAYER-Tabelle als Hex. ACI 7 („weiss/schwarz", je nach
+ * Hintergrund) kommt als #ffffff an — auf dem hellen Plan wäre das unsichtbar,
+ * daher wie in CAD-Programmen auf dunkle Tinte gekippt.
+ */
+function readLayerColors(doc: DxfDocument): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, layer] of Object.entries(doc.tables?.layer?.layers ?? {})) {
+    if (typeof layer.color !== "number") continue;
+    const hex = `#${(layer.color & 0xffffff).toString(16).padStart(6, "0")}`;
+    out[name] = hex === "#ffffff" ? "#1a1a1a" : hex;
+  }
+  return out;
 }
 
 let importSeq = 0;
@@ -216,7 +234,7 @@ export function parseDxf(text: string, idPrefix = ""): DxfImportResult {
     });
   }
 
-  return { meshes, contours: contourSets, texts };
+  return { meshes, contours: contourSets, texts, layerColors: readLayerColors(doc) };
 }
 
 // ── TEXT / MTEXT ─────────────────────────────────────────────────────────────

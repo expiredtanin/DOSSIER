@@ -1556,6 +1556,7 @@ export const en: Record<TranslationKey, string> = {
   "import.target.newNamePlaceholder": "New drawing name",
   "import.layers.heading": "Layer handling (DXF layers)",
   "import.layers.asCategories": "Keep DXF layers as categories",
+  "import.layers.parentName": "Import: {name}",
   "import.layers.toActive": "Everything onto the active category ({code})",
   "import.placement.heading": "Placement",
   "import.placement.origin": "At DXF coordinates (relative to origin)",

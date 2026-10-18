@@ -433,6 +433,7 @@ export function buildDrawings(
   levelId: string,
   project: Project,
   activeCategoryCode: string,
+  codeByLayer?: ReadonlyMap<string, string>,
 ) {
   // Layer-Name → Kategorie-Code: bevorzugt eine Kategorie mit demselben Namen
   // (case-insensitiv), sonst der aktive Code. Identifier bleiben so stabil.
@@ -443,8 +444,11 @@ export function buildDrawings(
   // gefunden).
   const byName = new Map<string, string>();
   for (const c of flattenCategories(project.layers)) byName.set(c.name.toLowerCase(), c.code);
+  // `codeByLayer` (aus `planImportCategories`) hat Vorrang: dort sind auch die
+  // beim Import NEU angelegten Kategorien enthalten, die `project` hier (Stand
+  // vor dem Import) noch nicht kennt.
   const layerToCode = (layerName: string): string =>
-    byName.get(layerName.toLowerCase()) ?? activeCategoryCode;
+    codeByLayer?.get(layerName) ?? byName.get(layerName.toLowerCase()) ?? activeCategoryCode;
   const fromContours = contoursToDrawings(
     decision.parsed.contours,
     levelId,
