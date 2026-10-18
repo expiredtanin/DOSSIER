@@ -79,6 +79,12 @@ export interface GpuGeometry {
    * `dim`/`dimFill` in glPlanCompile.ts, nur zur Zeichenzeit statt beim Kompilieren.
    */
   greyed?: boolean;
+  /**
+   * Lokaler Ursprung (Bildschirm-Raum), relativ zu dem alle Vertices dieser
+   * Geometrie abgelegt sind. Fehlt er → (0,0). Der Renderer verschiebt die
+   * Ansicht in doppelter Genauigkeit um diesen Wert.
+   */
+  origin?: { x: number; y: number };
   /** Gefüllte Polygone (Poché/Räume/Decken) — Bildschirm-Raum. */
   fill: {
     /** Interleaved [x,y, x,y, …] in Bildschirm-Raum. */

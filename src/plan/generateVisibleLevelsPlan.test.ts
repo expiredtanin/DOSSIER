@@ -108,6 +108,15 @@ describe("generateVisibleLevelsPlan", () => {
     if (lineIdx >= 0) expect(noLines.primitives[lineIdx]).toBe(plan.primitives[lineIdx]);
   });
 
+  it("leere Nachbar-Ebene zieht das Ausmass NICHT zum Ursprung (Landeskoordinaten)", () => {
+    // Wand weit weg vom Nullpunkt (Landeskoordinaten) auf EG; OG ist leer.
+    const far = wallOf("w-far", "eg", 2_665_000);
+    const p = baseProject([floor("eg", "EG"), floor("og", "OG")], [far]);
+    const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, SHOW_ALL);
+    // Früher: Platzhalter (0,0)–(1,1) der leeren Ebene → minX = 0 → Ausschnitt ~2,7 Mio. m breit.
+    expect(plan.bounds.minX).toBeGreaterThan(2_000_000);
+  });
+
   it("Modus 'active' (render=false für andere): zeigt NUR die aktive Ebene", () => {
     const p = baseProject(
       [floor("eg", "EG"), floor("og", "OG")],

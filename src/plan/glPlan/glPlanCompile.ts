@@ -280,6 +280,26 @@ export function compilePrimitivesToGpu(
   // Linien-Puffer (interleaved [x,y, nx,ny, side]).
   const lineVerts = new GrowBuffer((n) => new Float32Array(n));
   const lineIdx = new GrowBuffer((n) => new Uint32Array(n));
+
+  // LOKALER URSPRUNG dieser Geometrie: alle Vertices werden relativ zum ersten
+  // Punkt abgelegt, der Renderer zieht den Ursprung beim Zeichnen in doppelter
+  // Genauigkeit von der Ansicht ab (s. glPlanRender.ts). Hintergrund: Vertices
+  // sind float32; bei Landeskoordinaten (~2,7 Mio. m × 90 px/m = 2,4·10⁸) beträgt
+  // die Auflösung dort ~16 Einheiten → Linien sprangen/verzerrten beim
+  // Hineinzoomen ("Ansicht bugt"). Relativ zu einem Punkt im Chunk bleiben die
+  // Werte klein, auch wenn die Zeichnung weit vom Nullpunkt liegt.
+  let originX = 0;
+  let originY = 0;
+  let originSet = false;
+  const scr = (p: Vec2): Vec2 => {
+    const s = toScreen(p);
+    if (!originSet) {
+      originX = s.x;
+      originY = s.y;
+      originSet = true;
+    }
+    return { x: s.x - originX, y: s.y - originY };
+  };
   const lineBatches: GpuGeometry['line']['batches'] = [];
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -343,7 +363,7 @@ export function compilePrimitivesToGpu(
     // Auf Bildschirm-Raum abbilden + aufeinanderfolgende Duplikate entfernen.
     const S: Vec2[] = [];
     for (const p of ptsM) {
-      const s = toScreen(p);
+      const s = scr(p);
       if (S.length && Math.abs(S[S.length - 1].x - s.x) < 1e-6 && Math.abs(S[S.length - 1].y - s.y) < 1e-6)
         continue;
       S.push(s);
@@ -576,7 +596,7 @@ export function compilePrimitivesToGpu(
         if (tris.length) {
           const base = fillPos.length / 2;
           for (const pt of prim.pts) {
-            const s = toScreen(pt);
+            const s = scr(pt);
             fillPos.push2(s.x, s.y);
             track(pt.x, pt.y);
           }
@@ -714,7 +734,7 @@ export function compilePrimitivesToGpu(
           if (tris.length) {
             const base = fillPos.length / 2;
             for (const pt of ring) {
-              const s = toScreen(pt);
+              const s = scr(pt);
               fillPos.push2(s.x, s.y);
               track(pt.x, pt.y);
             }
@@ -757,6 +777,7 @@ export function compilePrimitivesToGpu(
       indexBuffer: uploadIndex(lineIdx),
       batches: lineBatches,
     },
+    origin: { x: originX, y: originY },
     bounds: {
       minX: isFinite(minX) ? minX : 0,
       minY: isFinite(minY) ? minY : 0,

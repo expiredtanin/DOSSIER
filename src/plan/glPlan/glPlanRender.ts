@@ -58,11 +58,12 @@ function viewBoxEqual(a: ViewBox, b: ViewBox): boolean {
  * zusätzliche Meter-Skalierung. Bildschirm-Y zeigt nach unten → top=vb.y,
  * bottom=vb.y+vb.h (kleineres Y oben → Clip +1).
  */
-export function computeOrthoMatrix(
+/** Auf das Canvas-Seitenverhältnis erweiterter Ausschnitt (doppelte Genauigkeit). */
+export function orthoBounds(
   viewBox: ViewBox,
   canvasW: number,
   canvasH: number,
-): Float32Array {
+): { left: number; right: number; bottom: number; top: number } {
   let { x, y, w, h } = viewBox;
   if (canvasW > 0 && canvasH > 0 && w > 0 && h > 0) {
     const cAspect = canvasW / canvasH;
@@ -80,7 +81,16 @@ export function computeOrthoMatrix(
     }
   }
   // top = y (Bildschirm-Y oben, kleiner), bottom = y + h.
-  return mat4Ortho(x, x + w, y + h, y);
+  return { left: x, right: x + w, bottom: y + h, top: y };
+}
+
+export function computeOrthoMatrix(
+  viewBox: ViewBox,
+  canvasW: number,
+  canvasH: number,
+): Float32Array {
+  const b = orthoBounds(viewBox, canvasW, canvasH);
+  return mat4Ortho(b.left, b.right, b.bottom, b.top);
 }
 
 /** Wiederverwendeter Farbpuffer fürs Dimmen (kein Array je Batch und Frame). */
@@ -104,6 +114,8 @@ export class PlanGpuRenderer {
   private lastViewBox: ViewBox | null = null;
   private lastCanvas: { w: number; h: number } = { w: 0, h: 0 };
   private projMatrix: Float32Array;
+  private projBounds = { left: 0, right: 1, bottom: 1, top: 0 };
+  private readonly projScratch = new Float32Array(16);
 
   constructor(
     gl: WebGL2RenderingContext,
@@ -128,6 +140,21 @@ export class PlanGpuRenderer {
     this.gl.clearColor(r, g, b, 1);
   }
 
+  /**
+   * Projektion relativ zum lokalen Ursprung einer Geometrie. Der Ursprung wird in
+   * DOPPELTER Genauigkeit von den Ausschnittsgrenzen abgezogen, erst das kleine
+   * Ergebnis geht als float32 an die GPU (s. `GpuGeometry.origin`).
+   */
+  private projectionFor(origin: { x: number; y: number } | undefined): Float32Array {
+    if (!origin || (origin.x === 0 && origin.y === 0)) return this.projMatrix;
+    const b = this.projBounds;
+    const m = this.projScratch;
+    m.set(this.projMatrix);
+    m[12] = -((b.right - origin.x) + (b.left - origin.x)) / (b.right - b.left);
+    m[13] = -((b.top - origin.y) + (b.bottom - origin.y)) / (b.top - b.bottom);
+    return m;
+  }
+
   /** Projektionsmatrix nur bei viewBox-/Canvas-Änderung neu berechnen. */
   private updateProjection(viewBox: ViewBox, canvasW: number, canvasH: number): void {
     if (
@@ -136,7 +163,8 @@ export class PlanGpuRenderer {
       this.lastCanvas.w !== canvasW ||
       this.lastCanvas.h !== canvasH
     ) {
-      this.projMatrix = computeOrthoMatrix(viewBox, canvasW, canvasH);
+      this.projBounds = orthoBounds(viewBox, canvasW, canvasH);
+      this.projMatrix = mat4Ortho(this.projBounds.left, this.projBounds.right, this.projBounds.bottom, this.projBounds.top);
       this.lastViewBox = { ...viewBox };
       this.lastCanvas = { w: canvasW, h: canvasH };
     }
@@ -188,7 +216,7 @@ export class PlanGpuRenderer {
 
     gl.useProgram(prog.program);
     if (prog.uniforms.viewProj) {
-      gl.uniformMatrix4fv(prog.uniforms.viewProj, false, this.projMatrix);
+      gl.uniformMatrix4fv(prog.uniforms.viewProj, false, this.projectionFor(geometry.origin));
     }
 
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -230,7 +258,7 @@ export class PlanGpuRenderer {
 
     gl.useProgram(prog.program);
     if (prog.uniforms.viewProj) {
-      gl.uniformMatrix4fv(prog.uniforms.viewProj, false, this.projMatrix);
+      gl.uniformMatrix4fv(prog.uniforms.viewProj, false, this.projectionFor(geometry.origin));
     }
     if (prog.uniforms.viewportPx) {
       gl.uniform2f(prog.uniforms.viewportPx, viewport.width, viewport.height);

@@ -655,7 +655,10 @@ export function generateVisibleLevelsPlan(
     const from = primitives.length;
     for (const pr of p.primitives) primitives.push(pr);
     if (d.greyed && primitives.length > from) greyedRanges.push([from, primitives.length]);
-    extend(p.bounds);
+    // Leere Ebenen melden als Platzhalter (0,0)–(1,1) — NICHT mitzählen: sonst zog
+    // jede leere Nachbar-Ebene den Ausschnitt bis zum Ursprung (bei Landes-
+    // koordinaten ~2,7 Mio. m daneben → "Einpassen" zeigte nichts).
+    if (p.primitives.length > 0) extend(p.bounds);
   }
 
   const activePlan = generatePlan(
@@ -670,7 +673,8 @@ export function generateVisibleLevelsPlan(
     scaleDenominator,
   );
   for (const pr of activePlan.primitives) primitives.push(pr);
-  extend(activePlan.bounds);
+  // Aktive Ebene leer UND keine Nachbar-Ebene mit Inhalt → Platzhalter-Ausmass.
+  if (activePlan.primitives.length > 0 || bounds.minX === Infinity) extend(activePlan.bounds);
 
   return {
     primitives,
