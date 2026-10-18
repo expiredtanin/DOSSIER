@@ -232,7 +232,7 @@ function parseColor(hex: string | undefined): Rgba | null {
  * Transparenz kaum erkennbar gedimmt). Gleicher Ton wie GREYED_COLOR in
  * PlanView.tsx / GREY_RGB in toRenderScene.ts (#8c8c8c ≈ 0.549).
  */
-const GREY_RGB = 0.549;
+export const GREY_RGB = 0.549;
 
 /**
  * Färbt auf den festen Grauton um, wenn das Primitiv im Darstellungsmodus
@@ -719,7 +719,7 @@ export function compilePrimitivesToGpu(
               track(pt.x, pt.y);
             }
             for (const t of tris) fillIdx.push1(base + t);
-            addFillBatch(tris.length, dim(fill, prim.greyed, prim.opacity));
+            addFillBatch(tris.length, dimFill(fill, prim.greyed, prim.opacity));
           }
         }
       }

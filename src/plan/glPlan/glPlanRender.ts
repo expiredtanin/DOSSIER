@@ -7,6 +7,7 @@
  */
 
 import type { GpuGeometry, ShaderProgram, ViewBox } from './glPlanTypes';
+import { GREY_RGB } from './glPlanCompile';
 
 /** viewBox-Einheiten je Meter (identisch zu PlanView/toScreen). */
 const PX_PER_M = 90;
@@ -80,6 +81,16 @@ export function computeOrthoMatrix(
   }
   // top = y (Bildschirm-Y oben, kleiner), bottom = y + h.
   return mat4Ortho(x, x + w, y + h, y);
+}
+
+/** Wiederverwendeter Farbpuffer fürs Dimmen (kein Array je Batch und Frame). */
+const tintScratch = new Float32Array(4);
+function tint(r: number, g: number, b: number, a: number): Float32Array {
+  tintScratch[0] = r;
+  tintScratch[1] = g;
+  tintScratch[2] = b;
+  tintScratch[3] = a;
+  return tintScratch;
 }
 
 /**
@@ -189,7 +200,7 @@ export class PlanGpuRenderer {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 
     for (const b of batches) {
-      if (prog.uniforms.color) gl.uniform4fv(prog.uniforms.color, b.color);
+      if (prog.uniforms.color) gl.uniform4fv(prog.uniforms.color, geometry.greyed ? tint(1, 1, 1, b.color[3]) : b.color);
       gl.drawElements(gl.TRIANGLES, b.indexCount, gl.UNSIGNED_INT, b.startIndex * 4);
     }
     if (pos !== undefined && pos >= 0) gl.disableVertexAttribArray(pos);
@@ -255,7 +266,9 @@ export class PlanGpuRenderer {
     // sichtbar, MSAA via antialias:true), damit sehr feine Gewichte beim
     // Rauszoomen nicht verschwinden.
     for (const b of batches) {
-      if (prog.uniforms.color) gl.uniform4fv(prog.uniforms.color, b.color);
+      if (prog.uniforms.color) {
+        gl.uniform4fv(prog.uniforms.color, geometry.greyed ? tint(GREY_RGB, GREY_RGB, GREY_RGB, b.color[3]) : b.color);
+      }
       if (prog.uniforms.strokePx) gl.uniform1f(prog.uniforms.strokePx, b.strokeMm);
       if (prog.uniforms.strokeScale) {
         gl.uniform1f(prog.uniforms.strokeScale, b.screenPx ? meet : mmToDevicePx);

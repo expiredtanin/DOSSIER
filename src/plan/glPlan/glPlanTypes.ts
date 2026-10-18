@@ -73,6 +73,12 @@ export interface LineBatch {
  * treibt nur die Projektionsmatrix Pan/Zoom.
  */
 export interface GpuGeometry {
+  /**
+   * Beim Zeichnen gedimmt darstellen (Referenz-Ebene): Linien → festes Grau,
+   * Füllungen → Weiss, jeweils mit erhaltenem Alpha — dieselbe Abbildung wie
+   * `dim`/`dimFill` in glPlanCompile.ts, nur zur Zeichenzeit statt beim Kompilieren.
+   */
+  greyed?: boolean;
   /** Gefüllte Polygone (Poché/Räume/Decken) — Bildschirm-Raum. */
   fill: {
     /** Interleaved [x,y, x,y, …] in Bildschirm-Raum. */

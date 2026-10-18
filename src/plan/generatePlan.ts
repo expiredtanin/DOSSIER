@@ -191,6 +191,42 @@ export interface Plan {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   /** Hintergrund-Rasterbilder (Luftbild) — nur für die interaktive Ansicht. */
   backgroundImages?: PlanImage[];
+  /**
+   * Index-Bereiche [von, bis) in `primitives`, die GEDIMMT darzustellen sind
+   * (andere Ebenen als Referenz), OHNE dass die Primitive dafür geklont wurden.
+   * Bei einem Kataster-Import (3,7 Mio. Primitive) kostete das Klonen bei jedem
+   * Ebenenwechsel ~1,2 s plus GC. Verbraucher: der GPU-Pfad dimmt per Farb-
+   * Mapping beim Zeichnen; alle anderen (SVG, WASM, nativ) rufen
+   * {@link materializeGreyed} auf.
+   */
+  greyedRanges?: Array<[number, number]>;
+}
+
+/** Ob Index `i` in einem der (sortierten, disjunkten) Bereiche liegt. */
+export function inGreyedRange(ranges: ReadonlyArray<[number, number]> | undefined, i: number): boolean {
+  if (!ranges) return false;
+  for (const [a, b] of ranges) if (i >= a && i < b) return true;
+  return false;
+}
+
+/**
+ * Wandelt `greyedRanges` in echte `greyed`-Primitive um (gleiche Indizes, gleiche
+ * Länge). Mit `includeLines=false` bleiben 'line'-Primitive unverändert — für den
+ * GPU-Pfad, der Linien selbst dimmt; Polygone/Texte/Bögen werden geklont, weil
+ * SVG-Overlay und Schraffur-Muster `greyed` direkt am Primitiv lesen.
+ */
+export function materializeGreyed(plan: Plan, includeLines: boolean): Plan {
+  const ranges = plan.greyedRanges;
+  if (!ranges || ranges.length === 0) return plan;
+  const primitives = plan.primitives.slice();
+  for (const [a, b] of ranges) {
+    for (let i = a; i < b; i++) {
+      const p = primitives[i];
+      if (!includeLines && p.kind === "line") continue;
+      primitives[i] = greyedClone(p);
+    }
+  }
+  return { ...plan, primitives, greyedRanges: undefined };
 }
 
 /**
@@ -550,6 +586,23 @@ export function generatePlan(
  * Ansichts-Ebenen bleiben Einzel-Pane (andere Projektionsachse — ein
  * Überlagern mehrerer Schnitte ergäbe kein sinnvolles Bild).
  */
+/**
+ * Gedimmte Variante eines Primitivs, pro Quell-Objekt EINMAL erzeugt. Ohne den
+ * Cache entstanden bei jedem Plan-Aufbau (jeder Ebenenwechsel!) Millionen neuer
+ * Objekte — GC-Last, und weil sie nie identisch zum letzten Lauf waren, konnte
+ * der GPU-Chunk-Cache (`glPlanChunks.ts`) nichts wiederverwenden.
+ */
+const greyedClones = new WeakMap<Primitive, Primitive>();
+function greyedClone(pr: Primitive): Primitive {
+  if ((pr as { greyed?: boolean }).greyed) return pr;
+  let c = greyedClones.get(pr);
+  if (!c) {
+    c = { ...pr, greyed: true } as Primitive;
+    greyedClones.set(pr, c);
+  }
+  return c;
+}
+
 export function generateVisibleLevelsPlan(
   project: Project,
   activeLevelId: string,
@@ -568,6 +621,7 @@ export function generateVisibleLevelsPlan(
       : [];
 
   const primitives: Primitive[] = [];
+  const greyedRanges: Array<[number, number]> = [];
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   const extend = (b: Plan["bounds"]) => {
     bounds.minX = Math.min(bounds.minX, b.minX);
@@ -598,11 +652,9 @@ export function generateVisibleLevelsPlan(
     // Grenze von `push` (RangeError "Maximum call stack size exceeded") — s.
     // dieselbe, bereits dokumentierte Falle in `swissBuildings3d.ts::concatMeshes`/
     // `dwgParser.ts`. Reine `for`-Schleife ist unbegrenzt sicher.
-    if (d.greyed) {
-      for (const pr of p.primitives) primitives.push({ ...pr, greyed: true });
-    } else {
-      for (const pr of p.primitives) primitives.push(pr);
-    }
+    const from = primitives.length;
+    for (const pr of p.primitives) primitives.push(pr);
+    if (d.greyed && primitives.length > from) greyedRanges.push([from, primitives.length]);
     extend(p.bounds);
   }
 
@@ -620,7 +672,12 @@ export function generateVisibleLevelsPlan(
   for (const pr of activePlan.primitives) primitives.push(pr);
   extend(activePlan.bounds);
 
-  return { primitives, bounds, backgroundImages: activePlan.backgroundImages };
+  return {
+    primitives,
+    bounds,
+    backgroundImages: activePlan.backgroundImages,
+    ...(greyedRanges.length ? { greyedRanges } : {}),
+  };
 }
 
 // ── Schnitt/Ansicht (abgeleitete Projektion aus render3d::section) ──────────────

@@ -10,6 +10,7 @@
 // geschluckt (console.debug), damit die App nie daran scheitert.
 
 import type { Plan } from "./generatePlan";
+import { materializeGreyed } from "./generatePlan";
 import type { Project } from "../model/types";
 import { planToRenderScene } from "./toRenderScene";
 import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "./toWalls3d";
@@ -45,7 +46,8 @@ export function pushNativeScene(plan: Plan): void {
   if (!isTauri()) return;
   clearTimeout(sceneTimer);
   sceneTimer = setTimeout(() => {
-    void invokeNative("push_native_scene", { scene: planToRenderScene(plan) });
+    // planToRenderScene liest `greyed` am Primitiv → gedimmte Referenz-Ebenen materialisieren.
+    void invokeNative("push_native_scene", { scene: planToRenderScene(materializeGreyed(plan, true)) });
   }, DEBOUNCE_MS);
 }
 

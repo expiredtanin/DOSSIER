@@ -15,6 +15,7 @@ import {
 } from "react";
 import type { ComponentProps, CSSProperties } from "react";
 import type { HatchRender, Plan, PlanImage, Primitive } from "./generatePlan";
+import { materializeGreyed } from "./generatePlan";
 import type { EdgeGrip, Vec2 } from "../model/types";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import type { HudFieldsState } from "../tools/hudFormat";
@@ -597,7 +598,7 @@ export function cssImageFilter(filters: PlanImage["filters"]): string | undefine
 export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   function PlanView(
     {
-      plan,
+      plan: planRaw,
       resetKey,
       onCursor,
       onScale,
@@ -658,14 +659,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // toScreen-Abbildung. Reset-/Einpassen-Ziel + Bezug für die Zoom-Grenzen; wird
   // NICHT automatisch angewandt (nur bei resetKey-Wechsel und „Einpassen").
   const defaultView = useMemo<ViewBox>(() => {
-    const { minX, minY, maxX, maxY } = plan.bounds;
+    const { minX, minY, maxX, maxY } = planRaw.bounds;
     return {
       x: minX * PX_PER_M - PAD,
       y: -maxY * PX_PER_M - PAD,
       w: (maxX - minX) * PX_PER_M + PAD * 2,
       h: (maxY - minY) * PX_PER_M + PAD * 2,
     };
-  }, [plan]);
+  }, [planRaw]);
 
   // Aktueller Ausschnitt; treibt die viewBox des SVG. Initial = eingepasst.
   const [view, setView] = useState<ViewBox>(defaultView);
@@ -701,7 +702,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // NICHT, ein View, der nur kleiner wird, bleibt sonst fälschlich innerhalb
   // der alten, zu grosszügigen Region) wird neu gerechnet.
   // Raster-Index der 2D-Zeichenlinien für Hover-/Pick-Abfragen (s. segmentIndex.ts).
-  const segmentIndex = useMemo(() => buildSegmentIndex(plan.primitives), [plan.primitives]);
+  // LAZY (erst beim ersten Hover/Klick je Plan): der Aufbau kostet bei 3,7 Mio.
+  // Segmenten ~250 ms und lief sonst bei JEDEM Plan-/Ebenenwechsel.
+  const segmentIndexRef = useRef<{ prims: readonly Primitive[]; index: ReturnType<typeof buildSegmentIndex> } | null>(null);
+  const getSegmentIndex = () => {
+    const cached = segmentIndexRef.current;
+    if (cached && cached.prims === planRaw.primitives) return cached.index;
+    const index = buildSegmentIndex(planRaw.primitives);
+    segmentIndexRef.current = { prims: planRaw.primitives, index };
+    return index;
+  };
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -743,15 +753,29 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // dahinterliegendes Bild verdecken. Daher bei aktivem Luftbild bewusst den
   // vollen SVG-Pfad nutzen — dort liegt das Bild als eigene Ebene ZWISCHEN
   // Blatt-Hintergrund und Geometrie (sichtbar, ohne den GL-Renderer zu ändern).
-  const hasBgImages = (plan.backgroundImages?.length ?? 0) > 0;
+  const hasBgImages = (planRaw.backgroundImages?.length ?? 0) > 0;
   // Eingebettete Bild-Zeichenelemente (Drawing2D `{shape:"image"}`, Foto/Logo/
   // PDF-Seite) kann das GPU-Backend ebenfalls nicht texturieren (kein Bild-
   // Primitiv in render2d, s. toRenderScene.ts `RImage`-Kommentar) — dieselbe
   // SVG-Fallback-Regel wie bei georeferenzierten Luftbildern.
-  const hasDrawingImages = plan.primitives.some((p) => p.kind === "drawingImage");
+  // useMemo: lief sonst bei JEDEM Render über alle Primitive (3,7 Mio. bei Kataster).
+  const hasDrawingImages = useMemo(
+    () => planRaw.primitives.some((p) => p.kind === "drawingImage"),
+    [planRaw.primitives],
+  );
   // Engine WIRKLICH aktiv? Steuert das Umschalten SVG↔GPU: bei false rendert der
   // volle SVG-Pfad (Fallback), bei true übernimmt die GPU-Ebene + Text-Overlay.
   const useGpuRenderer = wantGpu && glReady && !hasBgImages && !hasDrawingImages;
+
+  // `planRaw.greyedRanges` (andere Ebenen als gedimmte Referenz) ohne Klonen der
+  // Primitive: der WebGL-Pfad dimmt selbst beim Zeichnen (nur planRaw), alle
+  // übrigen Verbraucher (SVG-Overlay, Schraffur-Muster, WASM) lesen `greyed`
+  // direkt am Primitiv und bekommen deshalb diese materialisierte Variante.
+  // Linien werden nur geklont, wenn sie NICHT der WebGL-Pfad zeichnet.
+  const plan = useMemo(
+    () => materializeGreyed(planRaw, !useGpuRenderer || wantWasm),
+    [planRaw, useGpuRenderer, wantWasm],
+  );
 
   // Nur die Primitive, die das SVG überhaupt selbst zeichnet (der Rest kommt aus
   // WebGL/WASM bzw. — ohne GPU — aus `drawingRuns`), einmal je Plan/Modus
@@ -865,18 +889,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   useEffect(() => {
     if (!useGpuRenderer) return;
     const v = viewRef.current;
-    updateGeometry(plan, pxPerMeterForView(v));
+    updateGeometry(wantWasm ? plan : planRaw, pxPerMeterForView(v));
     lodBucketRef.current = lodBucketForView(v);
     renderGl(v, paperScaleForGl(v), textScaleForGl());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useGpuRenderer, plan, updateGeometry, renderGl]);
+  }, [useGpuRenderer, planRaw, wantWasm ? plan : null, updateGeometry, renderGl]);
 
   // Import-Hinweis (busyStore) beenden, sobald der neue Plan aufgebaut UND
   // gezeichnet ist — deklariert NACH dem Geometrie-Effekt oben, läuft also
   // danach; das Beenden wartet zusätzlich auf den nächsten gemalten Frame.
   useEffect(() => {
     endBusyAfterPaint();
-  }, [plan]);
+  }, [planRaw]);
 
   // GL bei jeder Ausschnittsänderung (Pan/Zoom) neu zeichnen. Normalfall: NUR
   // Matrix-Uniform (keine Re-Tessellierung → flüssig). Ausnahme: hat der Zoom
@@ -889,7 +913,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const bucket = lodBucketForView(view);
     if (bucket !== lodBucketRef.current) {
       lodBucketRef.current = bucket;
-      updateGeometry(plan, pxPerMeterForView(view));
+      updateGeometry(wantWasm ? plan : planRaw, pxPerMeterForView(view));
     }
     renderGl(view, paperScaleForGl(view), textScaleForGl());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1336,6 +1360,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const pickDrawing = (clientX: number, clientY: number): string | null => {
     let bestId: string | null = null;
     let bestDist = LINE_PICK_PX;
+    const segmentIndex = getSegmentIndex();
     if (segmentIndex) {
       const pxPerM = currentPxPerMeter();
       const m = rawModelAt(clientX, clientY);
@@ -1367,6 +1392,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // (eins je Segment, gleiche drawingId), unterteilt werden soll nur das
   // konkret gehoverte Segment, nicht das ganze Element.
   const nearestLineSegment = (clientX: number, clientY: number): { a: Vec2; b: Vec2 } | null => {
+    const segmentIndex = getSegmentIndex();
     if (!segmentIndex) return null;
     const i = nearestSegment(
       segmentIndex,

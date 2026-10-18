@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { generateVisibleLevelsPlan } from "./generatePlan";
+import { generateVisibleLevelsPlan, inGreyedRange, materializeGreyed } from "./generatePlan";
 import type { CategoryDisplayResolver } from "./generatePlan";
 import type { DrawingLevel, Project, Wall } from "../model/types";
 
@@ -77,7 +77,7 @@ describe("generateVisibleLevelsPlan", () => {
     expect(wallIds).toContain("w-og");
   });
 
-  it("gedimmte (nicht-aktive) Ebene: ihre Primitive tragen greyed=true", () => {
+  it("gedimmte (nicht-aktive) Ebene: als greyedRanges markiert (ohne Klonen), materialisiert greyed=true", () => {
     const p = baseProject(
       [floor("eg", "EG"), floor("og", "OG")],
       [wallOf("w-eg", "eg", 0), wallOf("w-og", "og", 10)],
@@ -88,14 +88,24 @@ describe("generateVisibleLevelsPlan", () => {
       locked: false,
     });
     const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, levelDisplay);
-    const ogPoche = plan.primitives.find(
-      (pr) => (pr as { wallId?: string }).wallId === "w-og" && pr.kind === "polygon",
-    ) as { greyed?: boolean } | undefined;
-    const egPoche = plan.primitives.find(
-      (pr) => (pr as { wallId?: string }).wallId === "w-eg" && pr.kind === "polygon",
-    ) as { greyed?: boolean } | undefined;
-    expect(ogPoche?.greyed).toBe(true);
-    expect(egPoche?.greyed).toBeFalsy();
+    const idx = (wallId: string) =>
+      plan.primitives.findIndex((pr) => (pr as { wallId?: string }).wallId === wallId && pr.kind === "polygon");
+    // Rohplan: Primitive unverändert, nur der OG-Bereich ist als gedimmt markiert.
+    expect(plan.greyedRanges?.length).toBe(1);
+    expect(inGreyedRange(plan.greyedRanges, idx("w-og"))).toBe(true);
+    expect(inGreyedRange(plan.greyedRanges, idx("w-eg"))).toBe(false);
+    expect((plan.primitives[idx("w-og")] as { greyed?: boolean }).greyed).toBeFalsy();
+    // Materialisiert: gleiche Indizes, OG-Primitive tragen greyed=true, EG nicht.
+    const m = materializeGreyed(plan, true);
+    expect(m.primitives).toHaveLength(plan.primitives.length);
+    expect((m.primitives[idx("w-og")] as { greyed?: boolean }).greyed).toBe(true);
+    expect((m.primitives[idx("w-eg")] as { greyed?: boolean }).greyed).toBeFalsy();
+    // Ohne Bereiche bleibt der Plan unverändert (gleiches Objekt).
+    expect(materializeGreyed({ ...plan, greyedRanges: undefined }, true).primitives).toBe(plan.primitives);
+    // Linien-Ausnahme für den GPU-Pfad.
+    const noLines = materializeGreyed(plan, false);
+    const lineIdx = plan.primitives.findIndex((pr, i) => pr.kind === "line" && inGreyedRange(plan.greyedRanges, i));
+    if (lineIdx >= 0) expect(noLines.primitives[lineIdx]).toBe(plan.primitives[lineIdx]);
   });
 
   it("Modus 'active' (render=false für andere): zeigt NUR die aktive Ebene", () => {

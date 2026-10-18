@@ -98,7 +98,7 @@ describe('GpuChunkCache', () => {
     expect(total).toBeGreaterThan(2);
   });
 
-  it('eine Änderung kompiliert nur den betroffenen Chunk und gibt dessen GPU-Puffer frei', () => {
+  it('eine Änderung kompiliert nur den betroffenen Chunk; der alte bleibt nur bis zum nächsten Lauf erhalten', () => {
     const { gl, deleted } = makeGl();
     const cache = new GpuChunkCache(gl);
     const prims = scene();
@@ -107,7 +107,46 @@ describe('GpuChunkCache', () => {
     edited[3001] = line(9999, (prims[3001] as any).drawingId); // neues Objekt
     cache.update(edited, 90, 6);
     expect(cache.lastStats.recompiled).toBe(1);
-    expect(deleted.length).toBeGreaterThan(0);
+    expect(deleted.length).toBe(0); // alter Chunk noch als "andere Variante" behalten
+    cache.update(edited, 90, 6);
+    expect(cache.lastStats.recompiled).toBe(0);
+    expect(deleted.length).toBeGreaterThan(0); // nicht mehr gebrauchte Variante jetzt freigegeben
+  });
+
+  it('Hin- und Herwechseln zwischen zwei Varianten kompiliert nichts neu', () => {
+    const { gl } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const a = scene();
+    const b = a.map((p) => ({ ...p, greyed: true }) as Primitive); // z. B. Ebene als Referenz gedimmt
+    cache.update(a, 90, 6);
+    cache.update(b, 90, 6);
+    expect(cache.lastStats.recompiled).toBe(cache.lastStats.chunks);
+    cache.update(a, 90, 6);
+    expect(cache.lastStats.recompiled).toBe(0);
+    cache.update(b, 90, 6);
+    expect(cache.lastStats.recompiled).toBe(0);
+  });
+
+  it('gedimmte Bereiche: dieselbe Geometrie wird nur anders markiert, nichts wird neu kompiliert', () => {
+    const { gl } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const prims = scene();
+    cache.update(prims, 90, 6);
+    expect(cache.geometries.some((g) => g.greyed)).toBe(false);
+    const half = Math.floor(prims.length / 2);
+    cache.update(prims, 90, 6, [[half, prims.length]]);
+    // Beide Seiten der Bereichsgrenze sind eigene Chunks → höchstens diese zwei neu.
+    expect(cache.lastStats.recompiled).toBeLessThanOrEqual(2);
+    expect(cache.geometries.some((g) => g.greyed)).toBe(true);
+    expect(cache.geometries.some((g) => !g.greyed)).toBe(true);
+    const flags = cache.geometries.map((g) => !!g.greyed);
+    // Gedimmt ist genau ein zusammenhängender Block am Ende.
+    expect(flags.indexOf(true)).toBeGreaterThan(0);
+    expect(flags.slice(flags.indexOf(true)).every(Boolean)).toBe(true);
+    // Zurück auf "nicht gedimmt": keine Neukompilierung.
+    cache.update(prims, 90, 6);
+    expect(cache.lastStats.recompiled).toBeLessThanOrEqual(2);
+    expect(cache.geometries.some((g) => g.greyed)).toBe(false);
   });
 
   it('dispose gibt alle Puffer frei', () => {

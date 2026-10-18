@@ -44,14 +44,27 @@ function hashId(id: string): number {
   return h >>> 0;
 }
 
-/** Index-Bereiche [start, end) der Chunks. */
-export function splitIntoChunks(prims: readonly Primitive[]): Array<[number, number]> {
+/**
+ * Index-Bereiche [start, end) der Chunks. `cuts` sind Indizes, an denen IMMER
+ * geschnitten wird (Grenzen gedimmter Bereiche, damit ein Chunk entweder ganz
+ * gedimmt ist oder gar nicht).
+ */
+export function splitIntoChunks(
+  prims: readonly Primitive[],
+  cuts: ReadonlySet<number> = new Set(),
+): Array<[number, number]> {
   const out: Array<[number, number]> = [];
   const mask = (1 << BOUNDARY_BITS) - 1;
   let start = 0;
   let prevId: string | undefined = prims.length ? (prims[0] as { drawingId?: string }).drawingId : undefined;
   for (let i = 1; i < prims.length; i++) {
     const id = (prims[i] as { drawingId?: string }).drawingId;
+    if (cuts.has(i)) {
+      out.push([start, i]);
+      start = i;
+      prevId = id;
+      continue;
+    }
     if (id === prevId) continue;
     // Elementwechsel: hier DARF geschnitten werden.
     if (id !== undefined && ((hashId(id) & mask) === 0 || i - start >= MAX_CHUNK_PRIMS)) {
@@ -85,6 +98,14 @@ export interface ChunkStats {
 
 export class GpuChunkCache {
   private chunks: Chunk[] = [];
+  /**
+   * Chunks der VORLETZTEN Generation, die im letzten Lauf nicht wiederverwendet
+   * wurden. Sie bleiben einen Lauf lang erhalten, damit das Hin- und Herwechseln
+   * zwischen zwei Varianten derselben Daten (z. B. Ebene aktiv ↔ gedimmt als
+   * Referenz) nicht jedes Mal neu kompiliert werden muss. Kostet GPU-Speicher
+   * für höchstens eine zusätzliche Variante.
+   */
+  private previous: Chunk[] = [];
   /** Statistik des letzten `update`-Laufs (Tests/Diagnose). */
   lastStats: ChunkStats = { chunks: 0, recompiled: 0 };
 
@@ -93,23 +114,41 @@ export class GpuChunkCache {
   /** Geometrien in Zeichenreihenfolge (nur bei `update`/`dispose` neu aufgebaut). */
   geometries: GpuGeometry[] = [];
 
-  update(primitives: readonly Primitive[], pxPerMeter: number, lodBucket: number): void {
-    // Alte Chunks nach erstem Primitiv indizieren (Referenz-Identität).
-    const old = new Map<Primitive, Chunk>();
-    for (const c of this.chunks) if (c.prims.length) old.set(c.prims[0], c);
+  update(
+    primitives: readonly Primitive[],
+    pxPerMeter: number,
+    lodBucket: number,
+    greyedRanges?: ReadonlyArray<[number, number]>,
+  ): void {
+    const cuts = new Set<number>();
+    for (const [a, b] of greyedRanges ?? []) {
+      cuts.add(a);
+      cuts.add(b);
+    }
+    // Aktuelle + vorherige Generation nach erstem Primitiv indizieren (Referenz-Identität).
+    const pool = [...this.chunks, ...this.previous];
+    const old = new Map<Primitive, Chunk[]>();
+    for (const c of pool) {
+      if (!c.prims.length) continue;
+      const list = old.get(c.prims[0]);
+      if (list) list.push(c);
+      else old.set(c.prims[0], [c]);
+    }
 
     const next: Chunk[] = [];
+    const chunkStarts: number[] = [];
     const reused = new Set<Chunk>();
     let recompiled = 0;
-    for (const [start, end] of splitIntoChunks(primitives)) {
-      const hit = old.get(primitives[start]);
-      if (
-        hit &&
-        !reused.has(hit) &&
-        hit.prims.length === end - start &&
-        (!hit.dynamic || hit.bucket === lodBucket) &&
-        sameRefs(hit.prims, primitives, start)
-      ) {
+    for (const [start, end] of splitIntoChunks(primitives, cuts)) {
+      const hit = old.get(primitives[start])?.find(
+        (c) =>
+          !reused.has(c) &&
+          c.prims.length === end - start &&
+          (!c.dynamic || c.bucket === lodBucket) &&
+          sameRefs(c.prims, primitives, start),
+      );
+      chunkStarts.push(start);
+      if (hit) {
         reused.add(hit);
         next.push(hit);
         continue;
@@ -123,15 +162,26 @@ export class GpuChunkCache {
       });
       recompiled++;
     }
-    for (const c of this.chunks) if (!reused.has(c)) disposeGeometry(this.gl, c.geometry);
+    const nextSet = new Set(next);
+    // Behalten: die neue Generation + die bisher aktuellen Chunks, die nicht mehr
+    // gebraucht wurden (= die "andere Variante"). Alles andere wird freigegeben.
+    const keepPrevious = this.chunks.filter((c) => !nextSet.has(c));
+    const keep = new Set<Chunk>([...next, ...keepPrevious]);
+    for (const c of pool) if (!keep.has(c)) disposeGeometry(this.gl, c.geometry);
     this.chunks = next;
-    this.geometries = next.map((c) => c.geometry);
+    this.previous = keepPrevious;
+    // Gedimmt wird erst beim Zeichnen: dieselbe kompilierte Geometrie dient der
+    // normalen UND der gedimmten Darstellung. Der Wrapper teilt die Puffer.
+    this.geometries = next.map((c, i) =>
+      inRanges(greyedRanges, chunkStarts[i]) ? { ...c.geometry, greyed: true } : c.geometry,
+    );
     this.lastStats = { chunks: next.length, recompiled };
   }
 
   dispose(): void {
-    for (const c of this.chunks) disposeGeometry(this.gl, c.geometry);
+    for (const c of [...this.chunks, ...this.previous]) disposeGeometry(this.gl, c.geometry);
     this.chunks = [];
+    this.previous = [];
     this.geometries = [];
   }
 }
@@ -139,4 +189,10 @@ export class GpuChunkCache {
 function sameRefs(a: readonly Primitive[], b: readonly Primitive[], offset: number): boolean {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[offset + i]) return false;
   return true;
+}
+
+function inRanges(ranges: ReadonlyArray<[number, number]> | undefined, i: number): boolean {
+  if (!ranges) return false;
+  for (const [a, b] of ranges) if (i >= a && i < b) return true;
+  return false;
 }

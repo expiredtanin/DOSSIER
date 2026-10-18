@@ -100,7 +100,12 @@ export function useGlPlanRenderer(
     try {
       // LOD-Bucket wie in PlanView (log2 des Massstabs): nur Chunks mit Bögen/
       // Kreisen hängen davon ab und werden bei einem Wechsel neu kompiliert.
-      cache.update(plan.primitives, pxPerMeter, pxPerMeter > 0 ? Math.round(Math.log2(pxPerMeter)) : -Infinity);
+      cache.update(
+        plan.primitives,
+        pxPerMeter,
+        pxPerMeter > 0 ? Math.round(Math.log2(pxPerMeter)) : -Infinity,
+        plan.greyedRanges,
+      );
     } catch (e) {
       console.warn('Tessellierung fehlgeschlagen:', e);
       cache.dispose();
