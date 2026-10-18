@@ -160,7 +160,7 @@ export function ImportDialog({
   // Sekunden dauernden — Drawings ins Projekt einhängen + Plan/3D neu bauen)
   // `onImport`: zeigt einen Ladehinweis, STATT sofort zu blockieren (Nutzer-
   // Report 2026-10-09: nach Klick auf „Importieren" keine Rückmeldung, nicht
-  // unterscheidbar von einem Hänger). `setTimeout` statt direktem Aufruf gibt
+  // unterscheidbar von einem Hänger). Zwei `requestAnimationFrame` statt direktem Aufruf geben
   // dem Browser einen Frame, um diesen Zustand VOR dem schweren synchronen
   // Teil zu malen — sonst würde React den State-Update-Commit gar nicht mehr
   // vor dem Block zum Zug kommen lassen.
@@ -176,7 +176,12 @@ export function ImportDialog({
         ? ({ kind: "existing", levelId: existingLevelId } as const)
         : ({ kind: "new", name: newName } as const);
     setApplying(true);
-    setTimeout(() => onImport({ target, categoryMode, importMeshes, placement, parsed }), 0);
+    // Zwei Frames warten: erst dann ist der "Importiere …"-Zustand tatsächlich
+    // GEMALT. Ein setTimeout(0) feuert oft vor dem Paint — der Dialog sah dann
+    // bis zum Ende des (blockierenden) Imports unverändert eingefroren aus.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => onImport({ target, categoryMode, importMeshes, placement, parsed })),
+    );
   };
 
   return (

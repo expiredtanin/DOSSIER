@@ -58,6 +58,7 @@ import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
 import { buildSegmentIndex, nearestSegment, pointSegDist } from "./planView/segmentIndex";
+import { endBusyAfterPaint } from "../state/busyStore";
 import { createCursorStore, useCursorValue, type CursorStore } from "../state/cursorStore";
 
 /**
@@ -869,6 +870,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     renderGl(v, paperScaleForGl(v), textScaleForGl());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useGpuRenderer, plan, updateGeometry, renderGl]);
+
+  // Import-Hinweis (busyStore) beenden, sobald der neue Plan aufgebaut UND
+  // gezeichnet ist — deklariert NACH dem Geometrie-Effekt oben, läuft also
+  // danach; das Beenden wartet zusätzlich auf den nächsten gemalten Frame.
+  useEffect(() => {
+    endBusyAfterPaint();
+  }, [plan]);
 
   // GL bei jeder Ausschnittsänderung (Pan/Zoom) neu zeichnen. Normalfall: NUR
   // Matrix-Uniform (keine Re-Tessellierung → flüssig). Ausnahme: hat der Zoom

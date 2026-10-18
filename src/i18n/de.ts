@@ -1586,6 +1586,7 @@ export const de = {
   "import.loading.phase.structure": "Analysiere Dateistruktur …",
   "import.loading.phase.parseSingle": "Parse Geometrie …",
   "import.loading.phase.parseParallel": "Parse Geometrie (über {n} Kerne verteilt) …",
+  "busy.import": "Plan wird aufgebaut …",
   "import.applying.heading": "Importiere ins Projekt",
   "import.applying.hint":
     "Geometrie wird ins Projekt eingehängt und Grundriss/3D neu aufgebaut … Bei sehr vielen Elementen kann das einen Moment dauern.",

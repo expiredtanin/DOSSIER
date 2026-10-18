@@ -11,6 +11,7 @@ import type { RefObject } from "react";
 import { t } from "../i18n";
 import type { DxfImportResult } from "../io/dxfParser";
 import { parseDxfAsync } from "../io/dxfParserAsync";
+import { beginBusy } from "./busyStore";
 import { buildDrawings } from "../ui/ImportDialog";
 import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings";
 import type { ImportDecision } from "../ui/ImportDialog";
@@ -490,6 +491,9 @@ export function useProjectFileActions(
   // 2D-Konturen als Drawing2D anhängen, optional die Meshes als Kontext
   // übernehmen. Reihenfolge: erst Ebene (echte ID), dann Drawings/Kontext.
   const runImport = (decision: ImportDecision) => {
+    // Hinweis bleibt, bis PlanView den neuen Plan gezeichnet hat (endBusyAfterPaint):
+    // der Aufbau nach dem Einhängen blockiert noch einmal mehrere Sekunden.
+    beginBusy(t("busy.import"));
     const levelId =
       decision.target.kind === "new"
         ? addDrawingLevel(decision.target.name)

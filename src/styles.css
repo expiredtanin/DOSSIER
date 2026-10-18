@@ -7943,3 +7943,37 @@ body {
   background: #ece8e2;
   color: #1a1a18;
 }
+
+/* "Bitte warten" während lange blockierender Schritte (Import grosser Dateien). */
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: progress;
+}
+.busy-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-3);
+  color: var(--text);
+}
+.busy-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent, currentColor);
+  border-radius: 50%;
+  animation: busy-spin 0.8s linear infinite;
+}
+@keyframes busy-spin {
+  to { transform: rotate(360deg); }
+}

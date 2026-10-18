@@ -39,6 +39,7 @@ import { sectionPlaneFromLevel } from "./plan/toSection";
 import { roofBaseElevation, roofGeometry } from "./geometry/roof";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
 import { ImportDialog } from "./ui/ImportDialog";
+import { BusyOverlay } from "./ui/BusyOverlay";
 import { ExportPdfDialog } from "./ui/ExportPdfDialog";
 import { ExportDxfDialog } from "./ui/ExportDxfDialog";
 import { SettingsDialog } from "./ui/SettingsDialog";
@@ -3683,6 +3684,8 @@ export default function App() {
           onClose={() => setOpeningEditorId(null)}
         />
       )}
+
+      <BusyOverlay />
 
       {/* Modaler Import-Dialog (DXF/DWG) — offen, sobald eine Datei gewählt/
           fallengelassen wurde. Liefert eine strukturierte Entscheidung an
