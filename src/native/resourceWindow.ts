@@ -106,13 +106,27 @@ export function useResourceWindowHost(
     };
   }, []);
 
-  // Bei jeder Projektänderung ans (evtl. offene) Ressourcen-Fenster pushen.
-  // `emitTo` auf ein nicht existierendes Fenster ist harmlos (kein Empfänger).
+  // Bei jeder Projektänderung ans Ressourcen-Fenster pushen — ABER NUR, wenn es
+  // offen ist. `emitTo` auf ein nicht existierendes Fenster scheitert zwar
+  // harmlos, serialisiert den Payload aber vorher trotzdem komplett: bei einem
+  // Kataster-Import (128k Zeichnungen) mehrere Sekunden Hauptthread-Last nach
+  // JEDER Änderung (z. B. beim Zuweisen einer Schraffur), für ein Fenster, das
+  // gar nicht da ist. Kurz gebündelt, damit schnelle Folgeänderungen (Ziehen)
+  // nicht jedes Mal das ganze Projekt serialisieren.
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    void (async () => {
-      const { emitTo } = await import("@tauri-apps/api/event");
-      await emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-project", project).catch(() => {});
-    })();
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+        if (cancelled || !(await WebviewWindow.getByLabel(RESOURCE_WINDOW_LABEL))) return;
+        const { emitTo } = await import("@tauri-apps/api/event");
+        await emitTo(RESOURCE_WINDOW_LABEL, "resource-sync-project", project).catch(() => {});
+      })();
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [project]);
 }

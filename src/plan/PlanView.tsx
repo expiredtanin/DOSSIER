@@ -59,6 +59,7 @@ import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
 import { buildSegmentIndex, nearestSegment, pointSegDist } from "./planView/segmentIndex";
+import { buildOwnerIndex, ownedBy, type OwnerField, type OwnerIndex } from "./planView/ownerIndex";
 import { endBusyAfterPaint } from "../state/busyStore";
 import { createCursorStore, useCursorValue, type CursorStore } from "../state/cursorStore";
 
@@ -83,12 +84,16 @@ const cullMargin = (vb: ViewBox) => Math.max(vb.w, vb.h) * CULL_MARGIN_FACTOR;
 // 0.5 % einer typischen Bildschirmhöhe (~800 px) sind ~4 px, die Schwelle,
 // ab der Text praktisch ohnehin nicht mehr lesbar ist.
 const MIN_RELATIVE_TEXT_HEIGHT = 0.005;
-// Deutlich reingezoomt seit der letzten Neuberechnung (View < 30 % der
-// gepufferten Region) → neu rechnen, auch wenn `view` noch "drin liegt" —
-// sonst bliebe die LOD-Schwelle (an der ALTEN, grösseren View-Höhe bemessen)
-// zu streng und Text, der beim aktuellen Zoom längst lesbar wäre, bliebe
-// unsichtbar.
-const CULL_RESCALE_FACTOR = 0.3;
+// Reingezoomt seit der letzten Neuberechnung (View < 75 % der Grösse, für die
+// die Lesbarkeits-Schwelle berechnet wurde) → neu rechnen, auch wenn `view`
+// noch in der gepufferten Region liegt — sonst bliebe die Schwelle (an der
+// ALTEN, grösseren View-Höhe bemessen) zu streng und Text, der beim aktuellen
+// Zoom längst lesbar wäre, bliebe unsichtbar. Früher 30 %: da lief das Culling
+// noch über ALLE Primitive (Mio. bei Kataster-Importen) und durfte selten
+// laufen; seit `svgCandidates` filtert es nur noch die SVG-Elemente (Texte,
+// ~10^4–10^5) und ist billig — bei 30 % blieben Beschriftungen beim Reinzoomen
+// bis zu 3,3× zu lange ausgeblendet.
+const CULL_RESCALE_FACTOR = 0.75;
 
 /** Lineale, die den Cursor selbst abonnieren — nur sie rendern bei Mausbewegung. */
 function LiveRulers({ store, ...rest }: Omit<ComponentProps<typeof PlanRulers>, "cursor"> & { store: CursorStore }) {
@@ -2304,13 +2309,26 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // gewählten Wand umrandet. Ohne Wand-Auswahl greift die lokale Klick-
   // Hervorhebung (ein einzelnes Polygon per hitIndex), z. B. für Polygone ohne
   // Wandbezug.
+  // Besitzer-Index (s. planView/ownerIndex.ts): EIN Durchgang je Plan, lazy beim
+  // ersten Bedarf — statt je Elementart ein `plan.primitives.filter`.
+  const ownerIndexRef = useRef<{ prims: readonly Primitive[]; index: OwnerIndex } | null>(null);
+  const primsOwnedBy = <K extends Primitive>(
+    field: OwnerField,
+    ids: ReadonlyArray<string> | undefined,
+    keep: (p: Primitive) => p is K,
+  ): K[] => {
+    if (!ids || ids.length === 0) return [];
+    let cached = ownerIndexRef.current;
+    if (!cached || cached.prims !== plan.primitives) {
+      cached = { prims: plan.primitives, index: buildOwnerIndex(plan.primitives) };
+      ownerIndexRef.current = cached;
+    }
+    return ownedBy(cached.index, plan.primitives, field, ids).filter(keep);
+  };
+
   const highlightPolys = useMemo(() => {
-    const ids = selectedWallIds && selectedWallIds.length ? new Set(selectedWallIds) : null;
-    if (ids) {
-      return plan.primitives.filter(
-        (p): p is Extract<Primitive, { kind: "polygon" }> =>
-          p.kind === "polygon" && p.wallId != null && ids.has(p.wallId),
-      );
+    if (selectedWallIds && selectedWallIds.length) {
+      return primsOwnedBy("wallId", selectedWallIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
     }
     if (selected !== null) {
       const p = plan.primitives[selected];
@@ -2328,12 +2346,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ? new Set(selectedDrawingIds)
         : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "line" | "polygon" }> =>
-        (p.kind === "line" || p.kind === "polygon") &&
-        p.drawingId != null &&
-        ids.has(p.drawingId),
-    );
+    return primsOwnedBy("drawingId", selectedDrawingIds, (p): p is Extract<Primitive, { kind: "line" | "polygon" }> => p.kind === "line" || p.kind === "polygon");
   }, [plan, selectedDrawingIds]);
 
   // Hervorhebung ausgewählter TEXT-Objekte (Auswahl-Rahmen, Nutzer-Wunsch):
@@ -2345,13 +2358,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const ids =
       selectedDrawingIds && selectedDrawingIds.length ? new Set(selectedDrawingIds) : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "drawingText" }> =>
-        p.kind === "drawingText" &&
-        p.drawingId != null &&
-        ids.has(p.drawingId) &&
-        p.drawingId !== editTextId,
-    );
+    return primsOwnedBy("drawingId", selectedDrawingIds, (p): p is Extract<Primitive, { kind: "drawingText" }> => p.kind === "drawingText" && p.drawingId !== editTextId);
   }, [plan, selectedDrawingIds, editTextId]);
 
   // Hervorhebung der selektierten Decken: alle Polygone JEDER gewählten Decke
@@ -2362,10 +2369,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ? new Set(selectedCeilingIds)
         : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.ceilingId != null && ids.has(p.ceilingId),
-    );
+    return primsOwnedBy("ceilingId", selectedCeilingIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedCeilingIds]);
 
   // Hervorhebung der selektierten Öffnungen: alle Symbol-Primitive (Linien/Bögen/
@@ -2376,12 +2380,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ? new Set(selectedOpeningIds)
         : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "line" | "arc" | "polygon" }> =>
-        (p.kind === "line" || p.kind === "arc" || p.kind === "polygon") &&
-        p.openingId != null &&
-        ids.has(p.openingId),
-    );
+    return primsOwnedBy("openingId", selectedOpeningIds, (p): p is Extract<Primitive, { kind: "line" | "arc" | "polygon" }> => p.kind === "line" || p.kind === "arc" || p.kind === "polygon");
   }, [plan, selectedOpeningIds]);
 
   // Hervorhebung der selektierten Treppen: alle Tritt-/Symbol-Primitive (Polygone
@@ -2390,12 +2389,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const ids =
       selectedStairIds && selectedStairIds.length ? new Set(selectedStairIds) : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "line" | "polygon" }> =>
-        (p.kind === "line" || p.kind === "polygon") &&
-        p.stairId != null &&
-        ids.has(p.stairId),
-    );
+    return primsOwnedBy("stairId", selectedStairIds, (p): p is Extract<Primitive, { kind: "line" | "polygon" }> => p.kind === "line" || p.kind === "polygon");
   }, [plan, selectedStairIds]);
 
   // Hervorhebung der selektierten Räume: die Fläche JEDES gewählten Raums (Polygon
@@ -2404,10 +2398,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const ids =
       selectedRoomIds && selectedRoomIds.length ? new Set(selectedRoomIds) : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.roomId != null && ids.has(p.roomId),
-    );
+    return primsOwnedBy("roomId", selectedRoomIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedRoomIds]);
 
   // Hervorhebung der selektierten Dächer: das (unsichtbare) Traufe-Pick-Polygon
@@ -2416,10 +2407,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const ids =
       selectedRoofIds && selectedRoofIds.length ? new Set(selectedRoofIds) : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.roofId != null && ids.has(p.roofId),
-    );
+    return primsOwnedBy("roofId", selectedRoofIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedRoofIds]);
 
   // Hervorhebung der selektierten Kontext-Objekte (Gebäude/Terrain): das
@@ -2431,10 +2419,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ? new Set(selectedContextObjectIds)
         : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.contextObjectId != null && ids.has(p.contextObjectId),
-    );
+    return primsOwnedBy("contextObjectId", selectedContextObjectIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedContextObjectIds]);
 
   // Hervorhebung der selektierten Schnitt-/Ansichtslinie: das (unsichtbare)
@@ -2445,10 +2430,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ? new Set(selectedSectionLineIds)
         : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.sectionLineId != null && ids.has(p.sectionLineId),
-    );
+    return primsOwnedBy("sectionLineId", selectedSectionLineIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedSectionLineIds]);
 
   // Hervorhebung der selektierten extrudierten Körper (truck-Integration): der
@@ -2460,10 +2442,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ? new Set(selectedExtrudedSolidIds)
         : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.extrudedSolidId != null && ids.has(p.extrudedSolidId),
-    );
+    return primsOwnedBy("extrudedSolidId", selectedExtrudedSolidIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedExtrudedSolidIds]);
 
   // Hervorhebung der selektierten Stützen (Tragwerk): der Querschnitt-Umriss
@@ -2472,10 +2451,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const ids =
       selectedColumnIds && selectedColumnIds.length ? new Set(selectedColumnIds) : null;
     if (!ids) return [];
-    return plan.primitives.filter(
-      (p): p is Extract<Primitive, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.columnId != null && ids.has(p.columnId),
-    );
+    return primsOwnedBy("columnId", selectedColumnIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedColumnIds]);
 
   // Ist eine GRUPPE gewählt (statt einzelner Elemente), zeigt die Auswahl NUR
@@ -2525,7 +2501,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // so gehren dicke Ecken sauber (kein Butt-Cap-Sprung). generatePlan schiebt die
   // Kanten eines Elements aufeinanderfolgend + End-an-Start verkettet ein, daher
   // genügt greedy-Anhängen benachbarter Segmente.
-  const drawingRuns = useMemo(() => buildDrawingRuns(plan.primitives), [plan]);
+  // Nur der reine SVG-Pfad zeichnet die gebündelten Linienzüge; bei GPU (WebGL/
+  // WASM) übernimmt die GPU-Ebene — dort wäre der Durchgang über alle Primitive
+  // (bei Kataster 3,7 Mio.) reine Verschwendung bei jeder Plan-Änderung.
+  const drawingRuns = useMemo(
+    () => (useGpuRenderer ? [] : buildDrawingRuns(plan.primitives)),
+    [plan, useGpuRenderer],
+  );
 
   // Pro Polygon mit Linien-/Kreuz-Schraffur ein eigenes <pattern> sammeln.
   // Vollfüllung ("solid") und "none" brauchen kein Muster. Gedimmte Polygone
@@ -2535,6 +2517,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // sonst weiterhin in der ORIGINAL-Bauteilfarbe erscheinen.
   const hatched = useMemo(() => {
     const list: HatchedPoly[] = [];
+    // Im WebGL-Modus zeichnet das SVG nur Texte (keine Polygone → keine Muster).
+    if (useGpuRenderer && !wantWasm) return list;
     plan.primitives.forEach((p, i) => {
       if (p.kind === "polygon" && polyUsesPattern(p.hatch)) {
         // Verlauf-Schraffuren tragen ihre eigentliche Farbe in `gradient.color1/
@@ -2556,7 +2540,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       }
     });
     return list;
-  }, [plan]);
+  }, [plan, useGpuRenderer, wantWasm]);
 
   // `cullState` (s. o.) reduziert bei sehr vielen Primitiven die Menge VOR
   // dem eigentlichen JSX-Mapping — gleiche Eigenschaft wie zuvor (hängt NICHT
