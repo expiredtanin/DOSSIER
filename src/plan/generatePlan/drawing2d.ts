@@ -171,21 +171,90 @@ export function addDrawing2D(
   colorByCode: Map<string, string>,
   catByCode: Map<string, LayerCategory>,
   scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
+  /**
+   * Ergebnis je Drawing2D-OBJEKT wiederverwenden (s. `drawingPrimCache`). NUR
+   * setzen, wenn der Aufrufer die erzeugten Primitive danach NICHT verändert
+   * (`toMono` mutiert in place → dort aus).
+   */
+  useCache = false,
 ): void {
+  const cacheable = useCache && CACHEABLE_SHAPES.has(d.geom.shape);
+  if (cacheable) {
+    const hit = drawingPrimCache.get(d);
+    if (
+      hit &&
+      hit.lineStyles === project.lineStyles &&
+      hit.hatches === project.hatches &&
+      hit.layers === project.layers &&
+      hit.greyed === greyed &&
+      hit.scaleDenominator === scaleDenominator
+    ) {
+      for (const p of hit.prims) out.push(p);
+      return;
+    }
+  }
   const start = out.length;
   addDrawing2DInner(out, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
   const op = d.opacity;
-  if (op === undefined || op >= 1) return;
-  const clamped = Math.max(0, op);
-  for (let i = start; i < out.length; i++) {
-    const p = out[i];
-    // Bilder tragen bereits eine eigene Deckkraft — beide multiplizieren sich.
-    out[i] =
-      p.kind === "drawingImage"
-        ? { ...p, opacity: p.opacity * clamped }
-        : { ...p, opacity: (p.opacity ?? 1) * clamped };
+  if (op !== undefined && op < 1) {
+    const clamped = Math.max(0, op);
+    for (let i = start; i < out.length; i++) {
+      const p = out[i];
+      // Bilder tragen bereits eine eigene Deckkraft — beide multiplizieren sich.
+      out[i] =
+        p.kind === "drawingImage"
+          ? { ...p, opacity: p.opacity * clamped }
+          : { ...p, opacity: (p.opacity ?? 1) * clamped };
+    }
+  }
+  if (cacheable) {
+    drawingPrimCache.set(d, {
+      lineStyles: project.lineStyles,
+      hatches: project.hatches,
+      layers: project.layers,
+      greyed,
+      scaleDenominator,
+      prims: out.slice(start),
+    });
   }
 }
+
+/**
+ * Cache der erzeugten Primitive je Drawing2D-OBJEKT. Projekt-Updates sind
+ * immutabel mit Structural Sharing — ein unveränderte Zeichnung bleibt dasselbe
+ * Objekt; ihre Primitive müssen dann nicht neu erzeugt werden (bei einem
+ * Kataster-Import 128k Elemente bei JEDER Projektänderung) UND bleiben als
+ * Objekte identisch, wodurch der GPU-Chunk-Cache (`glPlanChunks.ts`) ihre
+ * Geometrie wiederverwendet. Der Schlüssel enthält alles, was die Ausgabe
+ * ausser `d` selbst bestimmt.
+ */
+const drawingPrimCache = new WeakMap<
+  Drawing2D,
+  {
+    lineStyles: Project["lineStyles"];
+    hatches: Project["hatches"];
+    layers: Project["layers"];
+    greyed: boolean;
+    scaleDenominator: number;
+    prims: Primitive[];
+  }
+>();
+
+/**
+ * Formen, deren Primitive nur von `d` + dem Cache-Schlüssel abhängen. `block`
+ * (liest `blockDefs`, rekursiv) und `detailref` (liest `layouts`) bewusst nicht.
+ */
+const CACHEABLE_SHAPES: ReadonlySet<string> = new Set([
+  "line",
+  "polyline",
+  "rect",
+  "circle",
+  "arc",
+  "ellipse",
+  "bezier",
+  "spline",
+  "text",
+]);
 
 function addDrawing2DInner(
   out: Primitive[],

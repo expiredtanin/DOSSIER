@@ -9,4 +9,5 @@ export {
   createLineProgram,
 } from './glPlanShaders';
 export { compilePrimitivesToGpu, triangulate } from './glPlanCompile';
+export { GpuChunkCache } from './glPlanChunks';
 export { PlanGpuRenderer, computeOrthoMatrix } from './glPlanRender';

@@ -9,11 +9,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Plan } from './generatePlan';
 import {
-  compilePrimitivesToGpu,
+  GpuChunkCache,
   createFillProgram,
   createLineProgram,
   PlanGpuRenderer,
-  type GpuGeometry,
   type ViewBox,
 } from './glPlan';
 
@@ -37,7 +36,7 @@ export function useGlPlanRenderer(
 ) {
   const glRef = useRef<WebGL2RenderingContext | null>(null);
   const rendererRef = useRef<PlanGpuRenderer | null>(null);
-  const geomRef = useRef<GpuGeometry | null>(null);
+  const cacheRef = useRef<GpuChunkCache | null>(null);
   // GL WIRKLICH aktiv (Kontext + Shader ok)? Steuert den SVG-Fallback: bei false
   // rendert der Aufrufer den vollen SVG-Pfad, bei true übernimmt die GL-Ebene.
   const [ready, setReady] = useState(false);
@@ -67,6 +66,7 @@ export function useGlPlanRenderer(
       }
       if (disposed) return;
       glRef.current = gl;
+      cacheRef.current = new GpuChunkCache(gl);
       const renderer = new PlanGpuRenderer(gl, fillProg, lineProg);
       // Löschfarbe theme-sicher aus --sheet (Zeichenblatt ist immer „Papier").
       const sheet = readCssColor('--sheet');
@@ -81,6 +81,8 @@ export function useGlPlanRenderer(
     }
     return () => {
       disposed = true;
+      cacheRef.current?.dispose();
+      cacheRef.current = null;
       setReady(false);
     };
   }, [enabled, canvasRef]);
@@ -93,13 +95,15 @@ export function useGlPlanRenderer(
    * zoom-unabhängiger Rückfall.
    */
   const updateGeometry = useCallback((plan: Plan, pxPerMeter = 0) => {
-    const gl = glRef.current;
-    if (!gl || !plan) return;
+    const cache = cacheRef.current;
+    if (!cache || !plan) return;
     try {
-      geomRef.current = compilePrimitivesToGpu(gl, plan.primitives, pxPerMeter);
+      // LOD-Bucket wie in PlanView (log2 des Massstabs): nur Chunks mit Bögen/
+      // Kreisen hängen davon ab und werden bei einem Wechsel neu kompiliert.
+      cache.update(plan.primitives, pxPerMeter, pxPerMeter > 0 ? Math.round(Math.log2(pxPerMeter)) : -Infinity);
     } catch (e) {
       console.warn('Tessellierung fehlgeschlagen:', e);
-      geomRef.current = null;
+      cache.dispose();
     }
   }, []);
 
@@ -119,7 +123,7 @@ export function useGlPlanRenderer(
         canvas.width = w;
         canvas.height = h;
       }
-      renderer.render(geomRef.current, viewBox, { width: w, height: h }, paperScaleN);
+      renderer.render(cacheRef.current?.geometries ?? null, viewBox, { width: w, height: h }, paperScaleN);
     },
     [canvasRef],
   );

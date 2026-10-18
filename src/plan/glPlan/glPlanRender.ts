@@ -133,13 +133,14 @@ export class PlanGpuRenderer {
 
   /**
    * Zeichnet einen Frame.
-   * @param geometry GPU-Geometrie (Fill + Line); null → nur löschen.
+   * @param geometry GPU-Geometrie (Fill + Line) bzw. eine Liste davon (Chunks, in
+   *   Zeichenreihenfolge: erst alle Füllungen, dann alle Linien); null → nur löschen.
    * @param viewBox Aktueller Ausschnitt (Bildschirm-Einheiten).
    * @param viewport Zeichenpuffer-Größe in Geräte-Pixeln.
    * @param paperScaleN Papier-Massstab-Nenner (1:N) für echte mm-Strichbreiten.
    */
   render(
-    geometry: GpuGeometry | null,
+    geometry: GpuGeometry | readonly GpuGeometry[] | null,
     viewBox: ViewBox,
     viewport: { width: number; height: number },
     paperScaleN = 100,
@@ -159,8 +160,11 @@ export class PlanGpuRenderer {
     const meet = Math.min(viewport.width / viewBox.w, viewport.height / viewBox.h);
     const mmToDevicePx = (paperScaleN / 1000) * PX_PER_M * meet;
 
-    this.drawFills(geometry);
-    this.drawLines(geometry, viewport, mmToDevicePx, meet);
+    const list: readonly GpuGeometry[] = Array.isArray(geometry)
+      ? (geometry as readonly GpuGeometry[])
+      : [geometry as GpuGeometry];
+    for (const g of list) this.drawFills(g);
+    for (const g of list) this.drawLines(g, viewport, mmToDevicePx, meet);
   }
 
   /** Gefüllte Polygone (Poché). */

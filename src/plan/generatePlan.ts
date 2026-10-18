@@ -489,7 +489,7 @@ export function generatePlan(
   // 2D-Zeichengeometrie zuletzt (über der Poché).
   for (const d of drawings) {
     const greyed = categoryDisplay(d.categoryCode).greyed;
-    addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
+    addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator, !mono);
   }
 
   // Extrudierte Körper (truck-Integration): das Quell-Profil wurde beim
