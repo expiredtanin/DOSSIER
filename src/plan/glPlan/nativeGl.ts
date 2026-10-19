@@ -23,7 +23,7 @@ export interface NativeChunkLayout {
   fill_batches: { start: number; count: number; color: number[] }[];
   line_vtx: number | null;
   line_idx: number | null;
-  line_batches: { start: number; count: number; color: number[]; stroke_mm: number; screen_px: boolean }[];
+  line_batches: { start: number; count: number; color: number[]; stroke_mm: number; screen_px: boolean; device_px?: boolean }[];
   origin: [number, number];
   greyed: boolean;
 }

@@ -332,6 +332,39 @@ export function useSelectAllAndDeleteShortcut(opts: {
     if (activeTool !== "select") return;
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e)) return;
+      // Escape = Auswahl aufheben. Erst NACH den anderen Escape-Handlern prüfen
+      // (bewaffneter Griff, Entwurf, Dialoge verbrauchen Esc per preventDefault) —
+      // daher im Mikro-Task: nur wenn niemand sonst Esc beansprucht hat.
+      if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        queueMicrotask(() => {
+          if (e.defaultPrevented) return;
+          const any =
+            opts.selectedDrawingIds.length > 0 ||
+            opts.selectedWallIds.length > 0 ||
+            opts.selectedCeilingIds.length > 0 ||
+            opts.selectedOpeningIds.length > 0 ||
+            opts.selectedStairIds.length > 0 ||
+            opts.selectedRoomIds.length > 0 ||
+            opts.selectedExtrudedSolidIds.length > 0 ||
+            opts.selectedColumnIds.length > 0 ||
+            opts.selectedRoofIds.length > 0 ||
+            opts.selectedContextObjectIds.length > 0 ||
+            opts.selectedSectionLineIds.length > 0;
+          if (!any) return;
+          setSelectedWallIds([]);
+          setSelectedDrawingIds([]);
+          setSelectedCeilingIds([]);
+          setSelectedOpeningIds([]);
+          setSelectedStairIds([]);
+          setSelectedRoomIds([]);
+          setSelectedExtrudedSolidIds([]);
+          setSelectedColumnIds([]);
+          setSelectedRoofIds([]);
+          opts.setSelectedContextObjectIds([]);
+          setSelectedSectionLineIds([]);
+        });
+        return;
+      }
       // Alles auswählen (alle Bauteilarten des aktiven Geschosses/der Ebene +
       // die Schnittlinien-Symbole, die auf JEDEM Grundriss erscheinen).
       if (matchesShortcut(e, "selectAll", shortcutOverrides)) {
@@ -425,6 +458,7 @@ export function useSelectAllAndDeleteShortcut(opts: {
     opts.selectedCeilingIds,
     opts.selectedOpeningIds,
     opts.selectedStairIds,
+    opts.selectedRoomIds,
     opts.selectedExtrudedSolidIds,
     opts.selectedColumnIds,
     opts.selectedRoofIds,

@@ -28,7 +28,7 @@ import { RichTextEditor } from "../text/RichTextEditor";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useNativeAvailable, useNativePlanRenderer } from "./useNativePlanRenderer";
 import { isGpuText } from "./nativeText";
-import { LiveMeet, createMeetStore } from "./planView/liveMeet";
+import { LiveMeet, LiveValue, createMeetStore, createValueStore } from "./planView/liveMeet";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 import {
@@ -942,6 +942,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   viewRef.current = view;
   // Live-Massstab für bildschirmkonstante Overlays während Pan/Zoom (s. liveMeet.tsx).
   const meetStore = useMemo(() => createMeetStore(), []);
+  // Live-Ausschnitt (Lineal) während Pan/Zoom.
+  const viewStore = useMemo(() => createValueStore<ViewBox>(), []);
   const defaultViewRef = useRef(defaultView);
   defaultViewRef.current = defaultView;
   const toScreenRef = useRef(toScreen);
@@ -1995,9 +1997,27 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const v0 = panStartView.current;
     if (!v || !v0) return;
     viewRef.current = v; // abgeleitete Reads (Snap-Toleranz etc.) frisch halten
-    meetStore.set(meetScale(v, canvasRef.current ?? svgRef.current)); // Griffe/Fangpunkt in Pixelgrösse halten
-    applySvgTransform(v0, v); // SVG per GPU-Composit (kein Re-Raster)
-    renderGl(v, paperScaleForGl(v), textScaleForGl()); // GL exakt auf V (Strich in echten Papier-mm)
+    // Overlay (SVG-Ausschnitt, Griffe/Fangpunkt-Grösse, Lineal) wird im SELBEN
+    // Takt wie die Geometrie angewendet: die native Fläche bestätigt ihren Frame
+    // erst nach dem Schnittstellen-Aufruf — liefe das Overlay voraus, würden
+    // Pfeile/Griffe sichtbar gegen die Linien wandern ("spinnen").
+    const apply = () => {
+      if (panPending.current !== v) return; // überholt oder bereits festgeschrieben
+      applySvgTransform(v0, v); // SVG: echter viewBox (scharf) bzw. CSS-Transform
+      meetStore.set(meetScale(v, canvasRef.current ?? svgRef.current));
+      viewStore.set(v);
+    };
+    if (wantNative) {
+      (renderGl as (vb: ViewBox, ps: number, ts: number, onApplied: () => void) => void)(
+        v,
+        paperScaleForGl(v),
+        textScaleForGl(),
+        apply,
+      );
+    } else {
+      renderGl(v, paperScaleForGl(v), textScaleForGl()); // GL exakt auf V (Strich in echten Papier-mm)
+      apply();
+    }
   };
   /** Pan-/Zoom-Ziel imperativ anwenden (rAF-gedrosselt), ohne React-Render. */
   const enqueuePan = (v: ViewBox) => {
@@ -2016,6 +2036,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       if (svgRef.current) svgRef.current.style.transform = "";
       setView(panPending.current);
       meetStore.set(null);
+      viewStore.set(null);
       panPending.current = null;
     }
     panStartView.current = null;
@@ -2789,7 +2810,24 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Auswahl-Hervorhebung als EIN <path> je Art statt eines DOM-Elements je Objekt:
   // bei tausenden gewählten Katasterobjekten war der DOM-Aufbau (nicht die Auswahl)
   // der Engpass. Aussehen identisch (beide Klassen: fill none, Kontur).
+  // Native Fläche aktiv → sie zeichnet die Auswahl-Hervorhebung selbst (GPU).
+  const nativeHighlight = useGpuRenderer && wantNative;
+  const setNativeHighlight = nativeHook.setHighlight;
+  useEffect(() => {
+    if (!nativeHighlight) return;
+    const accent =
+      typeof document !== "undefined"
+        ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2f6fed"
+        : "#2f6fed";
+    setNativeHighlight(highlightDrawPrims, accent);
+  }, [nativeHighlight, highlightDrawPrims, setNativeHighlight]);
+  useEffect(() => {
+    // Beim Verlassen des nativen Modus die native Hervorhebung leeren.
+    if (!nativeHighlight) return;
+    return () => setNativeHighlight([], "#000");
+  }, [nativeHighlight, setNativeHighlight]);
   const highlightDrawPath = useMemo(() => {
+    if (nativeHighlight) return "";
     const parts: string[] = [];
     for (const p of highlightDrawPrims) {
       if (p.kind === "line") {
@@ -2802,7 +2840,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     }
     return parts.join("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightDrawPrims]);
+  }, [highlightDrawPrims, nativeHighlight]);
   overlayHeavyRef.current = highlightDrawPath.length > 300_000;
   const highlightTextPath = useMemo(() => {
     const parts: string[] = [];
@@ -3705,7 +3743,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           fixiert zu bleiben. Als eigenständiges Element bleibt es während der
           Geste stehen (aktualisiert erst beim Loslassen, wenn `view` neu
           gesetzt wird) — exakt das gewünschte „statische" Verhalten. */}
-      {showRulers && (() => {
+      {showRulers && (<LiveValue store={viewStore} base={view}>{(liveView) => {
+        const view = liveView;
         const m = measure(view);
         if (!m.rect) return null;
         const scale = m.scale || 1;
@@ -3737,7 +3776,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             />
           </svg>
         );
-      })()}
+      }}</LiveValue>)}
       {pickList && (
         <div
           className="pick-list"

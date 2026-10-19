@@ -10,7 +10,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Plan } from './generatePlan';
-import { GpuChunkCache, type ViewBox } from './glPlan';
+import { GpuChunkCache, compilePrimitivesToGpu, type GpuGeometry, type ViewBox } from './glPlan';
+import type { Primitive } from './generatePlan';
 import { NativeGl, type NativeInvoke } from './glPlan/nativeGl';
 import { readCssColor } from './useGlPlanRenderer';
 import { NativeTextSync } from './nativeText';
@@ -78,6 +79,9 @@ export function useNativePlanRenderer(
   const textSync = useRef(new NativeTextSync());
   const textsDisabled = useRef(false);
   const lastPlan = useRef<Plan | null>(null);
+  // Auswahl-Hervorhebung als eigene native Geometrie (zuoberst, konstante Pixelbreite).
+  const highlightGeom = useRef<GpuGeometry | null>(null);
+  const lastPxPerMeter = useRef(0);
   const excludedText = useRef<string | null>(null);
 
   const pushTexts = useCallback((plan: Plan | null) => {
@@ -188,6 +192,7 @@ export function useNativePlanRenderer(
         const { remove } = textSync.current.delta([]);
         if (remove.length) void invoke('native2d_texts', { upsert: [], remove }).catch(() => {});
         lastPlan.current = null;
+        highlightGeom.current = null;
         setGpuTexts(false);
         const { delete: del } = glRef.current.takeLayout([]);
         void invoke('native2d_layout', { layout: [], delete: del }).catch(() => {});
@@ -199,6 +204,55 @@ export function useNativePlanRenderer(
       setReady(false);
     };
   }, [enabled, canvasRef, syncRect]);
+
+  /** Layout = Plan-Chunks + (optional) Auswahl-Hervorhebung zuoberst. */
+  const takeFullLayout = useCallback(() => {
+    const gl = glRef.current!;
+    const geoms = cacheRef.current?.geometries ?? [];
+    const hl = highlightGeom.current;
+    const res = gl.takeLayout(hl ? [...geoms, hl] : geoms);
+    if (hl && res.layout.length) {
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      const last = res.layout[res.layout.length - 1];
+      last.line_batches = last.line_batches.map((b) => ({ ...b, stroke_mm: 2.5 * dpr, device_px: true }));
+    }
+    return res;
+  }, []);
+
+  /**
+   * Auswahl-Hervorhebung nativ zeichnen (statt eines riesigen SVG-Pfads, dessen
+   * Rastern bei grossen Kataster-Auswahlen beim An-/Abwählen Hunderte ms kostete).
+   */
+  const setHighlight = useCallback(
+    (prims: readonly Primitive[], color: string) => {
+      const gl = glRef.current;
+      const invoke = invokeRef.current;
+      if (!gl || !invoke) return;
+      const old = highlightGeom.current;
+      if (old) {
+        gl.deleteBuffer(old.fill.positionBuffer);
+        gl.deleteBuffer(old.fill.indexBuffer);
+        gl.deleteBuffer(old.line.vertexBuffer);
+        gl.deleteBuffer(old.line.indexBuffer);
+        highlightGeom.current = null;
+      }
+      if (prims.length) {
+        const lines: Primitive[] = [];
+        const mk = (a: { x: number; y: number }, b: { x: number; y: number }, drawingId?: string) =>
+          lines.push({ kind: 'line', a, b, cls: 'sel', weightMm: 0.3, color, drawingId } as Primitive);
+        for (const p of prims) {
+          if (p.kind === 'line') mk(p.a, p.b, p.drawingId);
+          else if (p.kind === 'polygon' && p.pts.length > 1) {
+            for (let i = 0; i < p.pts.length; i++) mk(p.pts[i], p.pts[(i + 1) % p.pts.length], p.drawingId);
+          }
+        }
+        highlightGeom.current = compilePrimitivesToGpu(gl, lines, lastPxPerMeter.current);
+      }
+      const { layout, delete: del } = takeFullLayout();
+      void invoke('native2d_layout', { layout, delete: del }).catch(() => {});
+    },
+    [takeFullLayout],
+  );
 
   const updateGeometry = useCallback((plan: Plan, pxPerMeter = 0) => {
     const cache = cacheRef.current;
@@ -217,19 +271,23 @@ export function useNativePlanRenderer(
       console.warn('Tessellierung fehlgeschlagen:', e);
       cache.dispose();
     }
-    const { layout, delete: del } = gl.takeLayout(cache.geometries);
+    lastPxPerMeter.current = pxPerMeter;
+    const { layout, delete: del } = takeFullLayout();
     lastPlan.current = plan;
     // Direkt (nicht über sendFrame): Reihenfolge nach den Puffer-Uploads ist wichtig.
     void invoke('native2d_layout', { layout, delete: del }).catch((e) =>
       console.debug('native2d_layout fehlgeschlagen', e),
     );
     pushTexts(plan);
-  }, [pushTexts]);
+  }, [pushTexts, takeFullLayout]);
 
   const render = useCallback(
-    (viewBox: ViewBox, paperScaleN = 100) => {
+    (viewBox: ViewBox, paperScaleN = 100, _textScale?: number, onApplied?: () => void) => {
       const invoke = invokeRef.current;
-      if (!invoke) return;
+      if (!invoke) {
+        onApplied?.();
+        return;
+      }
       syncRect();
       const sheet = readCssColor('--sheet');
       sendFrame(() =>
@@ -237,11 +295,20 @@ export function useNativePlanRenderer(
           view: viewBox,
           paperScale: paperScaleN,
           clear: sheet ? [sheet[0], sheet[1], sheet[2]] : null,
-        }),
+        }).then(
+          (r) => {
+            onApplied?.();
+            return r;
+          },
+          (e) => {
+            onApplied?.();
+            throw e;
+          },
+        ),
       );
     },
     [sendFrame, syncRect],
   );
 
-  return { render, updateGeometry, ready, gpuTexts, setExcludedText };
+  return { render, updateGeometry, ready, gpuTexts, setExcludedText, setHighlight };
 }

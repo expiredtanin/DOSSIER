@@ -11,14 +11,16 @@
 
 import { useSyncExternalStore, type ReactNode } from "react";
 
-export interface MeetStore {
-  get(): number | null;
-  set(v: number | null): void;
+export interface ValueStore<T> {
+  get(): T | null;
+  set(v: T | null): void;
   subscribe(l: () => void): () => void;
 }
+export type MeetStore = ValueStore<number>;
 
-export function createMeetStore(): MeetStore {
-  let value: number | null = null;
+/** Kleiner externer Wert-Speicher (für useSyncExternalStore). */
+export function createValueStore<T>(): ValueStore<T> {
+  let value: T | null = null;
   const listeners = new Set<() => void>();
   return {
     get: () => value,
@@ -35,7 +37,17 @@ export function createMeetStore(): MeetStore {
 }
 
 /** Rendert `children(meet)` mit dem Live-Massstab (null → `base` aus dem React-State). */
+export function createMeetStore(): MeetStore {
+  return createValueStore<number>();
+}
+
 export function LiveMeet({ store, base, children }: { store: MeetStore; base: number; children: (meet: number) => ReactNode }) {
+  const live = useSyncExternalStore(store.subscribe, store.get);
+  return <>{children(live ?? base)}</>;
+}
+
+/** Wie {@link LiveMeet}, für beliebige Live-Werte (z. B. den Ausschnitt fürs Lineal). */
+export function LiveValue<T>({ store, base, children }: { store: ValueStore<T>; base: T; children: (v: T) => ReactNode }) {
   const live = useSyncExternalStore(store.subscribe, store.get);
   return <>{children(live ?? base)}</>;
 }

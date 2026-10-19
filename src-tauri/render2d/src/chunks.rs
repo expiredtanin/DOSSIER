@@ -170,6 +170,9 @@ pub struct LineBatch {
     pub stroke_mm: f32,
     #[serde(default)]
     pub screen_px: bool,
+    /// Breite ist bereits in GERAETE-px (zoom-unabhaengig, z. B. Auswahl-Hervorhebung).
+    #[serde(default)]
+    pub device_px: bool,
 }
 
 /// Ein Chunk (== `GpuGeometry` der Webview): Puffer-IDs statt GL-Puffer.
@@ -569,7 +572,7 @@ impl ChunkRenderer {
                     color: c,
                     viewport_px: vp,
                     stroke_px: b.stroke_mm,
-                    stroke_scale: if b.screen_px { meet as f32 } else { mm_px as f32 },
+                    stroke_scale: if b.device_px { 1.0 } else if b.screen_px { meet as f32 } else { mm_px as f32 },
                 });
             }
         }
