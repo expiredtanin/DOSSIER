@@ -120,6 +120,7 @@ export function useProjectActions(
   const setBuiltinPaletteVisible = useStore((s) => s.setBuiltinPaletteVisible);
   const insertDrawingPoint = useStore((s) => s.insertDrawingPoint);
   const deleteDrawingPoint = useStore((s) => s.deleteDrawingPoint);
+  const setPolylineVertexType = useStore((s) => s.setPolylineVertexType);
   // Wandstile: immutable Patch eines Wandtyps (z. B. Schichtfugen-Stile). Kein
   // eigener Store-Slice nötig — läuft direkt über setProject wie die übrigen
   // Ressourcen-Mutationen.
@@ -468,6 +469,7 @@ export function useProjectActions(
     setBuiltinPaletteVisible,
     insertDrawingPoint,
     deleteDrawingPoint,
+    setPolylineVertexType,
     patchWallType,
     setOverrideRules,
     patchCeilingType,

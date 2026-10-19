@@ -1602,6 +1602,7 @@ export default function App() {
     setBuiltinPaletteVisible,
     insertDrawingPoint,
     deleteDrawingPoint,
+    setPolylineVertexType,
     patchWallType,
     setOverrideRules,
     patchCeilingType,
@@ -3939,11 +3940,12 @@ export default function App() {
               if (selectedDrawingIds.length !== 1) return null;
               const d = project.drawings2d.find((x) => x.id === selectedDrawingIds[0]);
               return d && d.geom.shape === "polyline"
-                ? { id: d.id, pts: d.geom.pts, closed: d.geom.closed }
+                ? { id: d.id, pts: d.geom.pts, closed: d.geom.closed, bulge: d.geom.bulge }
                 : null;
             })(),
             insertPolylinePoint: insertDrawingPoint,
             deletePolylinePoint: deleteDrawingPoint,
+            setPolylineVertexType,
             reorderLevel: (id, op) => reorderDrawingLevels([id], op),
           })}
           onClose={() => setMenu(null)}

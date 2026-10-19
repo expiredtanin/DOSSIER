@@ -8,6 +8,7 @@
 // Kommentare deutsch (CONVENTIONS.md).
 
 import { t } from "../i18n";
+import { canSetVertexType, vertexTypeOf, type PolylineVertexType } from "../geometry/polylineVertexType";
 import { nearestPolylineTarget, toleranceFor } from "../geometry/polylinePoint";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
@@ -84,7 +85,7 @@ export interface MenuActions {
    * löschen" im Grundriss-Kontextmenü. `null`, wenn nichts oder etwas
    * anderes selektiert ist; dann entfallen die beiden Einträge.
    */
-  selectedPolyline: { id: string; pts: Vec2[]; closed: boolean } | null;
+  selectedPolyline: { id: string; pts: Vec2[]; closed: boolean; bulge?: number[] } | null;
   /** Ob eine Element-Stil-Zwischenablage gefüllt ist (aktiviert „Einfügen"). */
   hasDrawingStyleClipboard: boolean;
   /** Kopiert das Aussehen des ERSTEN gewählten 2D-Elements. */
@@ -93,6 +94,7 @@ export interface MenuActions {
   pasteDrawingStyle: () => void;
   insertPolylinePoint: (id: string, segIndex: number, pt: Vec2) => void;
   deletePolylinePoint: (id: string, index: number) => void;
+  setPolylineVertexType: (id: string, index: number, type: PolylineVertexType) => void;
   /** Anzahl aktuell selektierter Elemente ÜBER ALLE Arten (Wand/2D/Decke/
    *  Raum/Treppe/Stütze/Dach/Öffnung) — Grundlage für „Sperren"/„Entsperren". */
   lockableSelectionCount: number;
@@ -289,6 +291,23 @@ function planMenuItems(
       title: enabled ? undefined : t("alert.polylineMinPoints"),
       onClick: () => a.deletePolylinePoint(poly.id, target.index),
     });
+    // Punkttyp (ArchiCAD/Vectorworks): Eckpunkt / Bogenpunkt / Splinepunkt.
+    const current = vertexTypeOf(poly, target.index);
+    const typeItem = (type: PolylineVertexType, key: string, icon: string): ContextMenuItem => {
+      const possible = canSetVertexType(poly, target.index, type);
+      return {
+        label: `${current === type ? "✓ " : ""}${t(key)}`,
+        icon: <MenuIcon name={icon} />,
+        disabled: !possible,
+        title: possible ? undefined : t("ctx.vertexType.needsNeighbors"),
+        onClick: () => a.setPolylineVertexType(poly.id, target.index, type),
+      };
+    };
+    pointItems.push(
+      typeItem("corner", "ctx.vertexType.corner", "north_east"),
+      typeItem("arc", "ctx.vertexType.arc", "radio_button_unchecked"),
+      typeItem("spline", "ctx.vertexType.spline", "gesture"),
+    );
   }
   // Eigenschaften übertragen — dasselbe Muster wie im Ebenen-Menü, nur für
   // 2D-Elemente. Kopieren ab einem gewählten Element, Einfügen sobald etwas

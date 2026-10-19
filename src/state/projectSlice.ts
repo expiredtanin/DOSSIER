@@ -8,6 +8,7 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
+import { withVertexType, type PolylineVertexType } from "../geometry/polylineVertexType";
 import { sampleProject } from "../model/sampleProject";
 import {
   flattenCategories,
@@ -182,6 +183,12 @@ export interface ProjectSlice {
    * Polylinie braucht ≥2, geschlossene ≥3.
    */
   deleteDrawingPoint: (drawingId: string, index: number) => void;
+  /**
+   * Punkttyp eines Polylinien-Stützpunkts setzen (Eckpunkt/Bogenpunkt/Splinepunkt),
+   * s. `geometry/polylineVertexType.ts` — rechnet nur die Bulges der beiden
+   * anliegenden Segmente um.
+   */
+  setPolylineVertexType: (drawingId: string, index: number, type: PolylineVertexType) => void;
 
   // ── Editier-Griffe + Body-Move des selektierten Elements ──────────────────
   moveGripOf: (
@@ -1123,6 +1130,18 @@ export function createProjectSlice(
             ? [...g.bulge.slice(0, segIndex), b1, b2, ...g.bulge.slice(segIndex + 1)]
             : undefined;
           return { ...d, geom: { ...g, pts, ...(nextBulge ? { bulge: nextBulge } : {}) } };
+        }),
+      })),
+
+    setPolylineVertexType: (drawingId, index, type) =>
+      setProject((p) => ({
+        ...p,
+        drawings2d: p.drawings2d.map((d) => {
+          if (d.id !== drawingId || d.geom.shape !== "polyline" || d.locked) return d;
+          const g = d.geom;
+          const bulge = withVertexType(g, index, type);
+          const { bulge: _old, ...rest } = g;
+          return { ...d, geom: bulge.some((b) => b !== 0) ? { ...rest, bulge } : rest };
         }),
       })),
 
