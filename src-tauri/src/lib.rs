@@ -7,13 +7,6 @@
 #[cfg(all(any(feature = "native2d", feature = "native3d"), not(target_os = "macos")))]
 mod native;
 
-// macOS-Pendant zu `native.rs` fuer den 2D-Viewport: ein ECHTES Tauri-Fenster
-// als wgpu-Surface-Ziel statt einer zweiten Event-Loop (s. Modul-Kommentar
-// dort — der naheliegende Ansatz, Tauris und winits Loop manuell zu
-// verschraenken, wurde GETESTET und verworfen: dauerhaft ~100% CPU-Busy-Loop).
-#[cfg(all(feature = "native2d", target_os = "macos"))]
-mod native_tauri_window;
-
 // Stufe 2 (macOS): native Metal-Flaeche als Kind-View im Hauptfenster, unter der
 // transparenten Webview (s. Modul-Kommentar).
 #[cfg(all(feature = "native2d", target_os = "macos"))]
@@ -57,7 +50,11 @@ fn release_project_lock(path: String, state: State<lock::LockState>) {
 #[tauri::command]
 fn push_native_scene(app: tauri::AppHandle, scene: serde_json::Value) {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
-    native_tauri_window::push_scene(&app, scene);
+    {
+        // macOS: die 2D-Ansicht laeuft ueber `native_embed` (Chunk-Upload), nicht
+        // ueber eine JSON-Szene.
+        let _ = (&app, &scene);
+    }
     #[cfg(all(feature = "native2d", not(target_os = "macos")))]
     {
         let _ = &app;
@@ -93,6 +90,66 @@ fn native2d_embed_rect(app: tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) {
     let _ = (app, x, y, w, h);
 }
 
+/// Gibt es in diesem Build die eingebettete native 2D-Flaeche (macOS + native2d)?
+#[tauri::command]
+fn native2d_embed_available() -> bool {
+    cfg!(all(feature = "native2d", target_os = "macos"))
+}
+
+#[tauri::command]
+fn native2d_embed_hide(app: tauri::AppHandle) {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    native_embed::hide(&app);
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    let _ = app;
+}
+
+/// Binaerer Puffer-Upload (Header `x-buf-id`, Body = rohe Bytes). Synchroner
+/// Command → laeuft auf dem Hauptthread, Reihenfolge der Aufrufe bleibt erhalten.
+#[tauri::command]
+fn native2d_upload(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let id: u32 = request
+            .headers()
+            .get("x-buf-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .ok_or("x-buf-id fehlt")?;
+        let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+            return Err("Rohdaten erwartet".into());
+        };
+        native_embed::upload(&app, id, bytes);
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    let _ = (app, request);
+    Ok(())
+}
+
+#[tauri::command]
+fn native2d_layout(app: tauri::AppHandle, layout: serde_json::Value, delete: Vec<u32>) -> Result<(), String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let layout = serde_json::from_value(layout).map_err(|e| e.to_string())?;
+        native_embed::set_layout(&app, layout, delete);
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    let _ = (app, layout, delete);
+    Ok(())
+}
+
+#[tauri::command]
+fn native2d_frame(app: tauri::AppHandle, view: serde_json::Value, paper_scale: f64, clear: Option<[f64; 3]>) -> Result<(), String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let view = serde_json::from_value(view).map_err(|e| e.to_string())?;
+        native_embed::frame(&app, view, paper_scale, clear);
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    let _ = (app, view, paper_scale, clear);
+    Ok(())
+}
+
 #[tauri::command]
 fn native_viewport_enabled() -> bool {
     cfg!(any(feature = "native2d", feature = "native3d"))
@@ -122,9 +179,6 @@ pub fn run() {
         .manage(lock::LockState::default());
 
     #[cfg(all(feature = "native2d", target_os = "macos"))]
-    let builder = builder.manage(native_tauri_window::NativePlanWindowState::default());
-
-    #[cfg(all(feature = "native2d", target_os = "macos"))]
     let builder = builder.manage(native_embed::EmbedState::default());
 
     let builder = builder.setup(|_app| {
@@ -133,20 +187,9 @@ pub fn run() {
         // den Hauptthread) — dort s. `open_native2d_window`/`native_tauri_window`.
         #[cfg(all(any(feature = "native2d", feature = "native3d"), not(target_os = "macos")))]
         native::spawn();
-        // macOS: natives 2D-Fenster direkt beim Start oeffnen (Stufe-1-Diagnose-
-        // Feature; ein Menuepunkt/Shortcut kann das spaeter ersetzen, sobald
-        // Stufe 1 den Performance-Gewinn bestaetigt hat).
-        #[cfg(all(feature = "native2d", target_os = "macos"))]
-        native_tauri_window::open(&_app.handle().clone());
-        // SPIKE: DOSSIER_EMBED_TEST=1 → native Flaeche nach 4 s im Hauptfenster.
-        #[cfg(all(feature = "native2d", target_os = "macos"))]
-        if std::env::var("DOSSIER_EMBED_TEST").is_ok() {
-            let h = _app.handle().clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(4));
-                native_embed::set_rect(&h, 300.0, 200.0, 500.0, 350.0);
-            });
-        }
+        // macOS: das separate Diagnose-Fenster (`native_tauri_window::open`) wird
+        // nicht mehr automatisch geoeffnet — die 2D-Ansicht ist jetzt in das
+        // Hauptfenster eingebettet (`native_embed`).
         Ok(())
     });
 
@@ -154,6 +197,11 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         native_viewport_enabled,
         native2d_embed_rect,
+        native2d_embed_available,
+        native2d_embed_hide,
+        native2d_upload,
+        native2d_layout,
+        native2d_frame,
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
@@ -163,6 +211,11 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         native_viewport_enabled,
         native2d_embed_rect,
+        native2d_embed_available,
+        native2d_embed_hide,
+        native2d_upload,
+        native2d_layout,
+        native2d_frame,
         acquire_project_lock,
         release_project_lock
     ]);

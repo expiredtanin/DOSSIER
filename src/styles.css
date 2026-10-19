@@ -8034,3 +8034,9 @@ body {
   fill: #1c7ed6;
   fill-opacity: 0.22;
 }
+
+/* Native 2D-Fläche (macOS): die Webview ist über dem Plan-Bereich durchsichtig. */
+[data-native-hole],
+[data-native-hole] body {
+  background: transparent !important;
+}

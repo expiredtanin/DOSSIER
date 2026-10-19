@@ -25,7 +25,7 @@
 import type { Primitive, UnderlayGroup } from '../generatePlan';
 import type { Drawing2D } from '../../model/types';
 import { compilePrimitivesToGpu } from './glPlanCompile';
-import type { GpuGeometry } from './glPlanTypes';
+import type { BufferGl, GpuGeometry } from './glPlanTypes';
 
 /** Ziel: im Mittel so viele Elemente (drawingIds) je Chunk = 2^BITS. */
 const BOUNDARY_BITS = 8;
@@ -85,7 +85,7 @@ interface Chunk {
   geometry: GpuGeometry;
 }
 
-function disposeGeometry(gl: WebGL2RenderingContext, g: GpuGeometry): void {
+function disposeGeometry(gl: BufferGl, g: GpuGeometry): void {
   gl.deleteBuffer(g.fill.positionBuffer);
   gl.deleteBuffer(g.fill.indexBuffer);
   gl.deleteBuffer(g.line.vertexBuffer);
@@ -141,7 +141,7 @@ class UnderlayChunkCache {
   private previous: UnderChunk[] = [];
   recompiled = 0;
 
-  constructor(private readonly gl: WebGL2RenderingContext) {}
+  constructor(private readonly gl: BufferGl) {}
 
   /** Liefert je Gruppe die Geometrien ihrer Chunks (in Reihenfolge). */
   update(groups: readonly UnderlayGroup[]): GpuGeometry[][] {
@@ -216,7 +216,7 @@ export class GpuChunkCache {
 
   private readonly under: UnderlayChunkCache;
 
-  constructor(private readonly gl: WebGL2RenderingContext) {
+  constructor(private readonly gl: BufferGl) {
     this.under = new UnderlayChunkCache(gl);
   }
 

@@ -10,7 +10,7 @@
 
 import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
-import type { GpuGeometry, Rgba } from './glPlanTypes';
+import type { BufferGl, GpuGeometry, Rgba } from './glPlanTypes';
 import { applyDashRuns, buildHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from './glPlanHatch';
 
 const PX_PER_M = 90;
@@ -263,7 +263,7 @@ function dimFill(color: Rgba, greyed: boolean | undefined, opacity?: number): Rg
  * bildschirmkonstante Striche). Text/Bögen bleiben im SVG-Overlay.
  */
 export function compilePrimitivesToGpu(
-  gl: WebGL2RenderingContext,
+  gl: BufferGl,
   primitives: Primitive[],
   // Bildschirm-Massstab (Geräte-px je Modell-Meter) beim aktuellen Zoom. Steuert
   // NUR die adaptive Bogen-Tessellierung (siehe 'arc'-Zweig): je stärker

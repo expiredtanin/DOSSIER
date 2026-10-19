@@ -110,3 +110,18 @@ export interface ViewBox {
   w: number;
   h: number;
 }
+
+/**
+ * Der Teil des GL-Kontexts, den Kompilierung + Chunk-Cache wirklich brauchen:
+ * Puffer anlegen/befüllen/freigeben. WebGL2 erfüllt das direkt; der native
+ * Renderer (nativeGl.ts) liefert eine Attrappe, die die Bytes an Rust schickt.
+ */
+export interface BufferGl {
+  readonly ARRAY_BUFFER: number;
+  readonly ELEMENT_ARRAY_BUFFER: number;
+  readonly STATIC_DRAW: number;
+  createBuffer(): WebGLBuffer | null;
+  bindBuffer(target: number, buffer: WebGLBuffer | null): void;
+  bufferData(target: number, data: ArrayBufferView, usage: number): void;
+  deleteBuffer(buffer: WebGLBuffer | null): void;
+}

@@ -17,7 +17,7 @@ import {
 } from './glPlan';
 
 /** Liest eine CSS-Custom-Property (z. B. "--sheet") als RGB[0..1] oder null. */
-function readCssColor(varName: string): [number, number, number] | null {
+export function readCssColor(varName: string): [number, number, number] | null {
   if (typeof window === 'undefined') return null;
   const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
   let h = raw.startsWith('#') ? raw.slice(1) : raw;
