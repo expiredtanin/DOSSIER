@@ -17,6 +17,7 @@ import type { ComponentProps, CSSProperties } from "react";
 import type { HatchRender, Plan, PlanImage, Primitive } from "./generatePlan";
 import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "./generatePlan";
 import type { Drawing2D, EdgeGrip, Vec2 } from "../model/types";
+import { t } from "../i18n";
 import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
 import type { HudFieldsState } from "../tools/hudFormat";
 import type { RichTextDoc } from "../text/richText";
@@ -59,10 +60,11 @@ import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
 import { expandRegion, indexedInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
-import { buildSegmentIndex, nearestSegment, pointSegDist } from "./planView/segmentIndex";
+import { buildSegmentIndex, nearestSegment, pointSegDist, segmentsNear } from "./planView/segmentIndex";
 import { buildOwnerIndex, ownedBy, type OwnerField, type OwnerIndex } from "./planView/ownerIndex";
 import {
   buildDrawingIndex,
+  drawingsWithinDistance,
   marqueeHitUnderlay,
   nearestInDrawings,
   type DrawingIndex,
@@ -197,6 +199,48 @@ export interface PlanViewHandle {
   /** Dasselbe für einen bewaffneten Kanten-Griff (s. edgeDrag). */
   confirmEdgeEdit: () => void;
 }
+
+/** Art eines auswählbaren Objekts an einer Klickstelle (Reihenfolge = Standard-Priorität). */
+export type PickKind =
+  | "section" | "opening" | "wall" | "column" | "drawing" | "solid"
+  | "ceiling" | "stair" | "room" | "roof" | "context";
+
+const PICK_ORDER: readonly PickKind[] = [
+  "section", "opening", "wall", "column", "drawing", "solid",
+  "ceiling", "stair", "room", "roof", "context",
+];
+
+/** Ein Objekt unter dem Cursor — für das Durchschalten übereinanderliegender Objekte. */
+export interface PickCandidate {
+  kind: PickKind;
+  id: string;
+  /** Polygon-Index (für die lokale Hervorhebung), falls aus einem Polygon. */
+  hitIndex: number | null;
+  /** Kurzbezeichnung für die Liste (z. B. "Wand", "Linie"). */
+  label: string;
+}
+
+/** Ids einer Auswahl OHNE Klickposition/Shift — Ergebnis von `defaultPick`. */
+type PickIds = Omit<PlanSelection, "model" | "shift">;
+
+const EMPTY_PICK: PickIds = {
+  hitIndex: null,
+  wallId: null,
+  drawingId: null,
+  ceilingId: null,
+  openingId: null,
+  stairId: null,
+  roomId: null,
+  extrudedSolidId: null,
+  columnId: null,
+  roofId: null,
+  sectionLineId: null,
+  contextObjectId: null,
+};
+
+/** Mac: Cmd+Klick; sonst Strg+Klick (Alt+Klick ist die Schere, Ctrl+Klick unter macOS das Kontextmenü). */
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const cycleModifier = (e: { metaKey: boolean; ctrlKey: boolean }): boolean => (IS_MAC ? e.metaKey : e.ctrlKey);
 
 /** Ergebnis eines Links-Klicks (Auswahl) an einer Modellposition. */
 export interface PlanSelection {
@@ -1813,7 +1857,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         }
       }
       // Sonst: auf dem Körper eines gewählten Elements? → Parallel-Verschieben.
-      const body = grabbedBody(e.clientX, e.clientY);
+      // Cmd/Strg+Klick = nächstes Objekt wählen, NICHT den gewählten Körper greifen.
+      const body = cycleModifier(e) ? null : grabbedBody(e.clientX, e.clientY);
       if (body) {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -1825,7 +1870,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // Griffe inaktiv): Links-Drag auf einem gewählten Körper verschiebt es; die
     // koinzidenten Enden der übrigen gewählten Elemente wandern mit (App).
     if (e.button === 0 && !toolActive && !!gripHandlers && !gripsActive) {
-      const body = grabbedBody(e.clientX, e.clientY);
+      // Cmd/Strg+Klick = nächstes Objekt wählen, NICHT den gewählten Körper greifen.
+      const body = cycleModifier(e) ? null : grabbedBody(e.clientX, e.clientY);
       if (body) {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -2051,6 +2097,312 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     else setView(next);
   };
 
+  // Standard-Auswahl an einer Stelle (genau die BISHERIGE Prioritätskette: Schnitt-
+  // linie > Öffnung > Wand > Stütze > 2D > Körper > Decke > Treppe > Raum > Dach >
+  // Kontext). Liefert nur die Ids + Polygon-Index; `model`/`shift` ergänzt der Aufrufer.
+  const defaultPick = (clientX: number, clientY: number): PickIds => {
+    const hitIndex = hitTest(clientX, clientY);
+    const hit = hitIndex !== null ? plan.primitives[hitIndex] : undefined;
+    // Öffnung (Fenster/Tür) zuerst: ihr Symbol sitzt in der ausgesparten Lücke
+    // bzw. schlägt über die Wand — ein Klick nahe am Symbol wählt die Öffnung.
+    // Schnitt-/Ansichtslinie zuerst: ihr schmales Band liegt über allem, ein
+    // Klick genau darauf meint die Linie (nicht die darunterliegende Wand) —
+    // dann sofort melden (kein anderes Element konkurriert).
+    const sectionLineId = pickSectionLine(clientX, clientY);
+    if (sectionLineId) {
+      return { ...EMPTY_PICK, hitIndex, sectionLineId };
+    }
+    const openingId = pickOpening(clientX, clientY);
+    const wallId =
+      openingId ? null : hit && hit.kind === "polygon" ? hit.wallId ?? null : null;
+    // Stütze (Tragwerk): ihre Querschnitt-Poché liegt ÜBER der Wand-Poché —
+    // ein direkter Klick auf sie trifft zuerst die Stütze (hit.columnId), sonst
+    // die Fläche per Punkt-in-Polygon. Priorität direkt nach Öffnung/Wand.
+    const polyColumnId =
+      hit && hit.kind === "polygon" ? hit.columnId ?? null : null;
+    const columnId =
+      openingId || wallId
+        ? null
+        : polyColumnId ?? pickColumn(clientX, clientY);
+    // Traf der Klick KEINE Wand/Öffnung/Stütze: zuerst eine getroffene gefüllte
+    // 2D-Fläche (Polygon mit drawingId), sonst die 2D-Linien (Drawing2D) per Nähe.
+    const polyDrawingId =
+      hit && hit.kind === "polygon" ? hit.drawingId ?? null : null;
+    const drawingId =
+      openingId || wallId || columnId
+        ? null
+        : polyDrawingId ?? pickDrawing(clientX, clientY);
+    // Extrudierter Körper (truck-Integration): sein Footprint-Umriss ersetzt
+    // die frühere Drawing2D-Fläche, also gleiche Priorität wie drawingId.
+    const polyExtrudedSolidId =
+      hit && hit.kind === "polygon" ? hit.extrudedSolidId ?? null : null;
+    const extrudedSolidId =
+      openingId || wallId || columnId || drawingId
+        ? null
+        : polyExtrudedSolidId ?? pickExtrudedSolid(clientX, clientY);
+    // Decke nur, wenn weder Öffnung/Wand noch 2D-Element getroffen wurde. Da die
+    // Decken-Polygone UNTER der Wand-Poché liegen, trifft ein direkter Klick
+    // auf die Wand zuerst die Wand; freie Deckenfläche trifft die Decke.
+    const hitCeilingId =
+      hit && hit.kind === "polygon" ? hit.ceilingId ?? null : null;
+    const ceilingId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId ? null : hitCeilingId;
+    // Treppe nur, wenn nichts anderes getroffen wurde (Tritte liegen frei).
+    const stairId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId
+        ? null
+        : pickStair(clientX, clientY);
+    // Raum als vorletzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
+    const roomId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId
+        ? null
+        : pickRoom(clientX, clientY);
+    // Dach als LETZTE Priorität: die Traufe-Fläche deckt den ganzen Grundriss
+    // ab, daher erst wählen, wenn wirklich nichts anderes getroffen wurde.
+    const roofId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId
+        ? null
+        : pickRoof(clientX, clientY);
+    // Kontext-Objekt (Gebäude/Terrain) als ALLERLETZTE Priorität — seine
+    // Bbox-Pick-Fläche kann grosszügig überlappen, daher erst wenn wirklich
+    // nichts anderes getroffen wurde.
+    const contextObjectId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId || roofId
+        ? null
+        : pickContextObject(clientX, clientY);
+    return {
+      hitIndex,
+      wallId,
+      drawingId,
+      ceilingId,
+      openingId,
+      stairId,
+      roomId,
+      extrudedSolidId,
+      columnId,
+      roofId,
+      sectionLineId: null,
+      contextObjectId,
+    };
+  };
+
+  // ── Übereinanderliegende Objekte durchschalten ────────────────────────────
+  // Cmd+Klick (Mac) / Strg+Klick wählt das nächste Objekt UNTER dem Cursor;
+  // wiederholtes Klicken an derselben Stelle läuft zyklisch durch alle. Eine
+  // kleine Liste zeigt alle Objekte an der Stelle (direkt anklickbar). Der
+  // normale Klick bleibt die bisherige Prioritätskette (`defaultPick`).
+  const [pickList, setPickList] = useState<{ x: number; y: number; items: PickCandidate[]; idx: number } | null>(null);
+  const cycleRef = useRef<{
+    x: number;
+    y: number;
+    prims: readonly Primitive[];
+    items: PickCandidate[];
+    idx: number;
+    model: Vec2;
+  } | null>(null);
+  // Liste/Zyklus verwerfen, sobald sich Ausschnitt oder Plan ändern.
+  useEffect(() => {
+    setPickList(null);
+    cycleRef.current = null;
+  }, [view, planRaw]);
+  useEffect(() => {
+    if (!pickList) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setPickList(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickList]);
+
+  /** Alle Polygone unter dem Cursor, oberstes zuerst. */
+  const hitTestAll = (clientX: number, clientY: number): number[] => {
+    const m = rawModelAt(clientX, clientY);
+    const prims = plan.primitives;
+    const out: number[] = [];
+    for (let i = prims.length - 1; i >= 0; i--) {
+      const p = prims[i];
+      if (p.kind === "polygon" && pointInPolygon(m, p.pts)) out.push(i);
+    }
+    return out;
+  };
+
+  /** Bezeichnung eines 2D-Elements nach Form (Linie/Fläche/Text/Kreis/…). */
+  const drawingLabel = (id: string): string => {
+    const g = getUnderlayIds()?.get(id);
+    const ud = g?.drawings.find((x) => x.id === id);
+    if (ud) {
+      return ud.geom.shape === "line"
+        ? t("pick.shape.line")
+        : ud.geom.shape === "polyline" && ud.geom.closed
+          ? t("pick.shape.area")
+          : t("pick.shape.polyline");
+    }
+    for (const p of plan.primitives) {
+      if (!("drawingId" in p) || p.drawingId !== id) continue;
+      switch (p.kind) {
+        case "line": return t("pick.shape.line");
+        case "polygon": return t("pick.shape.area");
+        case "drawingText":
+        case "drawingTextPath": return t("pick.shape.text");
+        case "drawingCircle": return t("pick.shape.circle");
+        case "drawingArc": return t("pick.shape.arc");
+        case "drawingImage": return t("pick.shape.image");
+        default: break;
+      }
+    }
+    return t("pick.kind.drawing");
+  };
+
+  /** IDs ALLER 2D-Elemente nahe am Cursor (nächste zuerst). */
+  const nearDrawingIds = (clientX: number, clientY: number): string[] => {
+    const pxPerM = currentPxPerMeter();
+    const m = rawModelAt(clientX, clientY);
+    const tol = LINE_PICK_PX / pxPerM;
+    const found: Array<{ id: string; d: number }> = [];
+    const segIdx = getSegmentIndex();
+    if (segIdx) {
+      for (const { i, dist } of segmentsNear(segIdx, plan.primitives, m, tol)) {
+        const id = (plan.primitives[i] as Extract<Primitive, { kind: "line" }>).drawingId;
+        if (id) found.push({ id, d: dist });
+      }
+    }
+    const uIdx = getUnderlayIndex();
+    if (uIdx) for (const h of drawingsWithinDistance(uIdx, m, tol)) found.push({ id: h.drawing.id, d: h.dist });
+    for (const p of plan.primitives) {
+      if ((p.kind === "drawingCircle" || p.kind === "drawingArc") && p.drawingId) {
+        const dpx = distToDrawingRing(clientX, clientY, p);
+        if (dpx < LINE_PICK_PX) found.push({ id: p.drawingId, d: dpx / pxPerM });
+      }
+    }
+    const textId = pickDrawingText(clientX, clientY);
+    if (textId) found.push({ id: textId, d: tol * 2 });
+    const imgId = pickDrawingImage(clientX, clientY);
+    if (imgId) found.push({ id: imgId, d: tol * 3 });
+    found.sort((a, b) => a.d - b.d);
+    return found.map((f) => f.id);
+  };
+
+  /** Alle Objekte unter dem Cursor; Eintrag 0 ist IMMER die bisherige Standardauswahl. */
+  const collectCandidates = (clientX: number, clientY: number, dp: PickIds): PickCandidate[] => {
+    const out: PickCandidate[] = [];
+    const seen = new Set<string>();
+    const add = (kind: PickKind, id: string | null | undefined, hitIndex: number | null) => {
+      if (!id) return;
+      const key = `${kind}:${id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ kind, id, hitIndex, label: kind === "drawing" ? drawingLabel(id) : t(`pick.kind.${kind}`) });
+    };
+    // 1) Standard-Treffer zuerst.
+    add("section", dp.sectionLineId, dp.hitIndex);
+    add("opening", dp.openingId, dp.hitIndex);
+    add("wall", dp.wallId, dp.hitIndex);
+    add("column", dp.columnId, dp.hitIndex);
+    add("drawing", dp.drawingId, dp.hitIndex);
+    add("solid", dp.extrudedSolidId, dp.hitIndex);
+    add("ceiling", dp.ceilingId, dp.hitIndex);
+    add("stair", dp.stairId, dp.hitIndex);
+    add("room", dp.roomId, dp.hitIndex);
+    add("roof", dp.roofId, dp.hitIndex);
+    add("context", dp.contextObjectId, dp.hitIndex);
+    const first = out.slice();
+    // 2) Alles Übrige an dieser Stelle, nach Standard-Priorität sortiert.
+    const rest: PickCandidate[] = [];
+    const addRest = (kind: PickKind, id: string | null | undefined, hitIndex: number | null) => {
+      const before = out.length;
+      add(kind, id, hitIndex);
+      if (out.length > before) rest.push(out.pop()!);
+    };
+    for (const idx of hitTestAll(clientX, clientY)) {
+      const p = plan.primitives[idx];
+      if (p.kind !== "polygon") continue;
+      addRest("opening", p.openingId, idx);
+      addRest("wall", p.wallId, idx);
+      addRest("column", p.columnId, idx);
+      addRest("drawing", p.drawingId, idx);
+      addRest("solid", p.extrudedSolidId, idx);
+      addRest("ceiling", p.ceilingId, idx);
+      addRest("stair", p.stairId, idx);
+      addRest("room", p.roomId, idx);
+      addRest("roof", p.roofId, idx);
+      addRest("context", p.contextObjectId, idx);
+      addRest("section", p.sectionLineId, idx);
+    }
+    for (const id of nearDrawingIds(clientX, clientY)) addRest("drawing", id, null);
+    addRest("opening", pickOpening(clientX, clientY), null);
+    addRest("column", pickColumn(clientX, clientY), null);
+    addRest("solid", pickExtrudedSolid(clientX, clientY), null);
+    addRest("stair", pickStair(clientX, clientY), null);
+    addRest("room", pickRoom(clientX, clientY), null);
+    addRest("roof", pickRoof(clientX, clientY), null);
+    addRest("context", pickContextObject(clientX, clientY), null);
+    addRest("section", pickSectionLine(clientX, clientY), null);
+    // Stabil nach Standard-Priorität ordnen (innerhalb einer Art bleibt die Fundreihenfolge).
+    const ordered = rest
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => PICK_ORDER.indexOf(a.c.kind) - PICK_ORDER.indexOf(b.c.kind) || a.i - b.i)
+      .map((e) => e.c);
+    return [...first, ...ordered];
+  };
+
+  const applyCandidate = (c: PickCandidate, model: Vec2, shift: boolean) => {
+    if (!onSelect) return;
+    setSelected(c.hitIndex);
+    onSelect({
+      ...EMPTY_PICK,
+      model,
+      hitIndex: c.hitIndex,
+      shift,
+      wallId: c.kind === "wall" ? c.id : null,
+      drawingId: c.kind === "drawing" ? c.id : null,
+      ceilingId: c.kind === "ceiling" ? c.id : null,
+      openingId: c.kind === "opening" ? c.id : null,
+      stairId: c.kind === "stair" ? c.id : null,
+      roomId: c.kind === "room" ? c.id : null,
+      extrudedSolidId: c.kind === "solid" ? c.id : null,
+      columnId: c.kind === "column" ? c.id : null,
+      roofId: c.kind === "roof" ? c.id : null,
+      sectionLineId: c.kind === "section" ? c.id : null,
+      contextObjectId: c.kind === "context" ? c.id : null,
+    });
+  };
+
+  /**
+   * Cmd/Strg+Klick: nächstes Objekt unter dem Cursor wählen. Liefert true, wenn
+   * behandelt (sonst läuft der normale Klick weiter, z. B. bei leerer Stelle).
+   */
+  const cycleSelect = (e: React.PointerEvent<SVGSVGElement>): boolean => {
+    const prev = cycleRef.current;
+    const same =
+      prev &&
+      prev.prims === plan.primitives &&
+      Math.hypot(e.clientX - prev.x, e.clientY - prev.y) <= 5;
+    let items: PickCandidate[];
+    let idx: number;
+    let model: Vec2;
+    if (same) {
+      items = prev!.items;
+      idx = (prev!.idx + 1) % items.length;
+      model = prev!.model;
+    } else {
+      items = collectCandidates(e.clientX, e.clientY, defaultPick(e.clientX, e.clientY));
+      if (items.length === 0) return false;
+      idx = items.length > 1 ? 1 : 0; // erster Cmd-Klick: das Objekt UNTER dem Standard-Treffer
+      const v = clientToView(e.clientX, e.clientY, view);
+      model = viewToModel(v.x, v.y);
+    }
+    cycleRef.current = { x: e.clientX, y: e.clientY, prims: plan.primitives, items, idx, model };
+    applyCandidate(items[idx], model, e.shiftKey);
+    const rect = svgRef.current?.getBoundingClientRect();
+    setPickList({
+      x: e.clientX - (rect?.left ?? 0) + 14,
+      y: e.clientY - (rect?.top ?? 0) + 14,
+      items,
+      idx,
+    });
+    return true;
+  };
+
   const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
     // Perf: einen anhängigen (rAF-gedrosselten) Drag mit der FINALEN Position
     // sofort anwenden, damit das Objekt exakt an der Loslass-Stelle landet, bevor
@@ -2161,112 +2513,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         setMarqueeRect(null);
         return;
       }
-      // Kein Drag → Klick: Wand unter dem Cursor wählen bzw. Auswahl löschen.
+      // Kein Drag → Klick: Objekt unter dem Cursor wählen bzw. Auswahl löschen.
       setMarqueeRect(null);
-      const hitIndex = hitTest(e.clientX, e.clientY);
-      setSelected(hitIndex);
+      if (onSelect && cycleModifier(e) && cycleSelect(e)) return;
+      setPickList(null);
+      cycleRef.current = null;
+      const dp = defaultPick(e.clientX, e.clientY);
+      setSelected(dp.hitIndex);
       if (onSelect) {
         const v = clientToView(e.clientX, e.clientY, view);
-        const hit = hitIndex !== null ? plan.primitives[hitIndex] : undefined;
-        // Öffnung (Fenster/Tür) zuerst: ihr Symbol sitzt in der ausgesparten Lücke
-        // bzw. schlägt über die Wand — ein Klick nahe am Symbol wählt die Öffnung.
-        // Schnitt-/Ansichtslinie zuerst: ihr schmales Band liegt über allem, ein
-        // Klick genau darauf meint die Linie (nicht die darunterliegende Wand) —
-        // dann sofort melden (kein anderes Element konkurriert).
-        const sectionLineId = pickSectionLine(e.clientX, e.clientY);
-        if (sectionLineId) {
-          onSelect({
-            model: viewToModel(v.x, v.y),
-            hitIndex,
-            wallId: null,
-            drawingId: null,
-            ceilingId: null,
-            openingId: null,
-            stairId: null,
-            roomId: null,
-            extrudedSolidId: null,
-            columnId: null,
-            roofId: null,
-            sectionLineId,
-            contextObjectId: null,
-            shift: e.shiftKey,
-          });
-          return;
-        }
-        const openingId = pickOpening(e.clientX, e.clientY);
-        const wallId =
-          openingId ? null : hit && hit.kind === "polygon" ? hit.wallId ?? null : null;
-        // Stütze (Tragwerk): ihre Querschnitt-Poché liegt ÜBER der Wand-Poché —
-        // ein direkter Klick auf sie trifft zuerst die Stütze (hit.columnId), sonst
-        // die Fläche per Punkt-in-Polygon. Priorität direkt nach Öffnung/Wand.
-        const polyColumnId =
-          hit && hit.kind === "polygon" ? hit.columnId ?? null : null;
-        const columnId =
-          openingId || wallId
-            ? null
-            : polyColumnId ?? pickColumn(e.clientX, e.clientY);
-        // Traf der Klick KEINE Wand/Öffnung/Stütze: zuerst eine getroffene gefüllte
-        // 2D-Fläche (Polygon mit drawingId), sonst die 2D-Linien (Drawing2D) per Nähe.
-        const polyDrawingId =
-          hit && hit.kind === "polygon" ? hit.drawingId ?? null : null;
-        const drawingId =
-          openingId || wallId || columnId
-            ? null
-            : polyDrawingId ?? pickDrawing(e.clientX, e.clientY);
-        // Extrudierter Körper (truck-Integration): sein Footprint-Umriss ersetzt
-        // die frühere Drawing2D-Fläche, also gleiche Priorität wie drawingId.
-        const polyExtrudedSolidId =
-          hit && hit.kind === "polygon" ? hit.extrudedSolidId ?? null : null;
-        const extrudedSolidId =
-          openingId || wallId || columnId || drawingId
-            ? null
-            : polyExtrudedSolidId ?? pickExtrudedSolid(e.clientX, e.clientY);
-        // Decke nur, wenn weder Öffnung/Wand noch 2D-Element getroffen wurde. Da die
-        // Decken-Polygone UNTER der Wand-Poché liegen, trifft ein direkter Klick
-        // auf die Wand zuerst die Wand; freie Deckenfläche trifft die Decke.
-        const hitCeilingId =
-          hit && hit.kind === "polygon" ? hit.ceilingId ?? null : null;
-        const ceilingId =
-          openingId || wallId || columnId || drawingId || extrudedSolidId ? null : hitCeilingId;
-        // Treppe nur, wenn nichts anderes getroffen wurde (Tritte liegen frei).
-        const stairId =
-          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId
-            ? null
-            : pickStair(e.clientX, e.clientY);
-        // Raum als vorletzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
-        const roomId =
-          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId
-            ? null
-            : pickRoom(e.clientX, e.clientY);
-        // Dach als LETZTE Priorität: die Traufe-Fläche deckt den ganzen Grundriss
-        // ab, daher erst wählen, wenn wirklich nichts anderes getroffen wurde.
-        const roofId =
-          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId
-            ? null
-            : pickRoof(e.clientX, e.clientY);
-        // Kontext-Objekt (Gebäude/Terrain) als ALLERLETZTE Priorität — seine
-        // Bbox-Pick-Fläche kann grosszügig überlappen, daher erst wenn wirklich
-        // nichts anderes getroffen wurde.
-        const contextObjectId =
-          openingId || wallId || columnId || drawingId || extrudedSolidId || ceilingId || stairId || roomId || roofId
-            ? null
-            : pickContextObject(e.clientX, e.clientY);
-        onSelect({
-          model: viewToModel(v.x, v.y),
-          hitIndex,
-          wallId,
-          drawingId,
-          ceilingId,
-          openingId,
-          stairId,
-          roomId,
-          extrudedSolidId,
-          columnId,
-          roofId,
-          sectionLineId: null,
-          contextObjectId,
-          shift: e.shiftKey,
-        });
+        onSelect({ model: viewToModel(v.x, v.y), ...dp, shift: e.shiftKey });
       }
       return;
     }
@@ -3317,6 +3573,38 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           </svg>
         );
       })()}
+      {pickList && (
+        <div
+          className="pick-list"
+          role="listbox"
+          aria-label={t("pick.list.title")}
+          style={{ left: pickList.x, top: pickList.y }}
+          onPointerDown={(ev) => ev.stopPropagation()}
+          onClick={(ev) => ev.stopPropagation()}
+        >
+          <div className="pick-list-head">
+            {t("pick.list.title", { n: pickList.items.length })}
+          </div>
+          {pickList.items.map((c, i) => (
+            <button
+              key={`${c.kind}:${c.id}`}
+              type="button"
+              role="option"
+              aria-selected={i === pickList.idx}
+              className={`pick-list-item${i === pickList.idx ? " is-current" : ""}`}
+              onClick={() => {
+                const cur = cycleRef.current;
+                if (cur) cur.idx = i;
+                applyCandidate(c, cur?.model ?? { x: 0, y: 0 }, false);
+                setPickList({ ...pickList, idx: i });
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
+          <div className="pick-list-hint">{t(IS_MAC ? "pick.list.hint.mac" : "pick.list.hint.other")}</div>
+        </div>
+      )}
     </div>
   );
 });

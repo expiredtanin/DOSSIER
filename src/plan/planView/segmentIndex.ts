@@ -131,3 +131,33 @@ export function nearestSegment(
   }
   return best;
 }
+
+/** ALLE indizierten Segmente mit Abstand < `maxDist` (Modell-Einheiten), nächste zuerst. */
+export function segmentsNear(
+  index: SegmentIndex,
+  prims: readonly Primitive[],
+  m: Vec2,
+  maxDist: number,
+): Array<{ i: number; dist: number }> {
+  const { minX, minY, cell, cols, rows, cellStart, items, long } = index;
+  const found = new Map<number, number>();
+  const consider = (i: number) => {
+    const p = prims[i] as Extract<Primitive, { kind: "line" }>;
+    const d = pointSegDist(m, p.a, p.b);
+    if (d < maxDist) found.set(i, d);
+  };
+  for (const i of long) consider(i);
+  const x0 = Math.floor((m.x - maxDist - minX) / cell);
+  const x1 = Math.floor((m.x + maxDist - minX) / cell);
+  const y0 = Math.floor((m.y - maxDist - minY) / cell);
+  const y1 = Math.floor((m.y + maxDist - minY) / cell);
+  if (!(x1 < 0 || y1 < 0 || x0 >= cols || y0 >= rows)) {
+    for (let y = Math.max(0, y0); y <= Math.min(rows - 1, y1); y++) {
+      for (let x = Math.max(0, x0); x <= Math.min(cols - 1, x1); x++) {
+        const c = y * cols + x;
+        for (let k = cellStart[c]; k < cellStart[c + 1]; k++) consider(items[k]);
+      }
+    }
+  }
+  return [...found].map(([i, dist]) => ({ i, dist })).sort((a, b) => a.dist - b.dist);
+}

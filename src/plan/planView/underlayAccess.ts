@@ -9,7 +9,7 @@ import type { ModelRect } from "./geometry";
 import { polyEnclosedByRect, polyTouchesRect } from "./geometry";
 import { drawingBox } from "../../geometry/drawingBounds";
 import { forEachSegment } from "../../geometry/drawingIndex";
-export { buildDrawingIndex, nearestInDrawings, type DrawingIndex } from "../../geometry/drawingIndex";
+export { buildDrawingIndex, drawingsWithinDistance, nearestInDrawings, type DrawingIndex } from "../../geometry/drawingIndex";
 
 // ── Marquee ─────────────────────────────────────────────────────────────────
 

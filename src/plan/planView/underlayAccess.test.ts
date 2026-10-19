@@ -75,3 +75,14 @@ describe("underlayAccess == Primitiv-Varianten", () => {
     }
   });
 });
+
+describe("drawingsWithinDistance", () => {
+  it("liefert alle Zeichnungen in Reichweite, nächste zuerst", async () => {
+    const { drawingsWithinDistance, buildDrawingIndex: build } = await import("../../geometry/drawingIndex");
+    const mk = (id: string, y: number) =>
+      ({ id, type: "drawing2d", levelId: "L", categoryCode: "60", geom: { shape: "line", a: { x: 0, y }, b: { x: 10, y } } }) as Drawing2D;
+    const ds = [mk("near", 0.3), mk("nearer", 0.1), mk("far", 9)];
+    const hits = drawingsWithinDistance(build(ds)!, { x: 5, y: 0 }, 1);
+    expect(hits.map((h) => h.drawing.id)).toEqual(["nearer", "near"]);
+  });
+});

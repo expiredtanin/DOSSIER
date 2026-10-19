@@ -153,3 +153,18 @@ export function nearestInDrawings(index: DrawingIndex, m: Vec2, maxDist: number)
   }
   return best;
 }
+
+/** ALLE Zeichnungen mit einem Segment näher als `maxDist` an `m`, nächste zuerst (je Zeichnung ihr nächstes Segment). */
+export function drawingsWithinDistance(index: DrawingIndex, m: Vec2, maxDist: number): NearestHit[] {
+  const out: NearestHit[] = [];
+  for (const i of drawingsNear(index, m, maxDist)) {
+    const d = index.drawings[i];
+    let best: NearestHit | null = null;
+    forEachSegment(d, (a, b) => {
+      const dist = pointSegDist(m, a, b);
+      if (dist < maxDist && (!best || dist < best.dist)) best = { drawing: d, a, b, dist };
+    });
+    if (best) out.push(best);
+  }
+  return out.sort((x, y) => x.dist - y.dist);
+}

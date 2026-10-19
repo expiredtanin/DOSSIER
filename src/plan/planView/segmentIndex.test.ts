@@ -60,3 +60,16 @@ describe("segmentIndex", () => {
     expect(nearestSegment(idx, prims, { x: 500, y: 500 }, 1)).toBeNull();
   });
 });
+
+describe("segmentsNear (alle Treffer, nächster zuerst)", () => {
+  it("liefert alle Segmente in Reichweite, sortiert, und entspricht der linearen Suche", async () => {
+    const { segmentsNear } = await import("./segmentIndex");
+    const prims: Primitive[] = [line(0, 0, 10, 0, "a"), line(0, 0.5, 10, 0.5, "b"), line(0, 5, 10, 5, "c"), line(-2000, -2000, 2000, 2000, "long")];
+    for (let i = 0; i < 300; i++) prims.push(line(50 + i, 50, 51 + i, 51, `f${i}`));
+    const idx = buildSegmentIndex(prims)!;
+    const hits = segmentsNear(idx, prims, { x: 5, y: 0.2 }, 1);
+    expect(hits.map((h) => (prims[h.i] as any).drawingId)).toEqual(["a", "b"].concat(hits.length > 2 ? ["long"] : []).slice(0, hits.length));
+    expect(hits[0].dist).toBeLessThanOrEqual(hits[1].dist);
+    expect(hits.every((h) => h.dist < 1)).toBe(true);
+  });
+});

@@ -7977,3 +7977,42 @@ body {
 @keyframes busy-spin {
   to { transform: rotate(360deg); }
 }
+
+/* Liste der Objekte an der Klickstelle (Cmd/Strg+Klick = nächstes Objekt). */
+.pick-list {
+  position: absolute;
+  z-index: 5;
+  min-width: 190px;
+  max-height: 60%;
+  overflow: auto;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-3);
+  font-size: 12px;
+  color: var(--text);
+}
+.pick-list-head {
+  padding: 4px 8px 6px;
+  font-weight: 600;
+  color: var(--text-dim, var(--text));
+}
+.pick-list-item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+}
+.pick-list-item:hover { background: var(--hover, rgba(128, 128, 128, 0.15)); }
+.pick-list-item.is-current { background: var(--accent-soft, rgba(255, 140, 0, 0.22)); font-weight: 600; }
+.pick-list-hint {
+  padding: 6px 8px 2px;
+  opacity: 0.65;
+  font-size: 11px;
+}
