@@ -5,7 +5,8 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { Group, Project } from "../model/types";
+import type { Drawing2D, Group, Project } from "../model/types";
+import type { Plan, UnderlayGroup } from "../plan/generatePlan";
 import { uniqueId } from "../tools/types";
 import type { Primitive } from "../plan/generatePlan/shared";
 
@@ -225,6 +226,29 @@ export function applyGroupDimming(
     }
     return hasId && !inside ? { ...p, greyed: true } : p;
   });
+}
+
+/**
+ * Wie `applyGroupDimming`, aber auf einem ganzen Plan: die kompakte Linien-
+ * Unterlage (`plan.underlay`, bei Kataster-Importen Millionen Linien) bleibt
+ * kompakt — ihre Zeichnungen ausserhalb der aktiven Gruppe wandern in eine
+ * zusätzlich gedimmte Untergruppe (`tint`), statt dass alle Linien zu einzelnen
+ * Primitiven materialisiert und geklont werden.
+ */
+export function applyGroupDimmingToPlan(plan: Plan, project: Project, groupPath: string[]): Plan {
+  if (groupPath.length === 0) return plan;
+  const primitives = applyGroupDimming(plan.primitives, project, groupPath);
+  if (!plan.underlay || plan.underlay.length === 0) return { ...plan, primitives };
+  const inside = new Set(transitiveMembership(project, groupPath[groupPath.length - 1]).drawingIds);
+  const underlay: UnderlayGroup[] = [];
+  for (const g of plan.underlay) {
+    const inn: Drawing2D[] = [];
+    const out: Drawing2D[] = [];
+    for (const d of g.drawings) (inside.has(d.id) ? inn : out).push(d);
+    if (inn.length) underlay.push(out.length ? { ...g, drawings: inn } : g);
+    if (out.length) underlay.push({ ...g, drawings: out, tint: true });
+  }
+  return { ...plan, primitives, underlay };
 }
 
 /** IDs, die in `after` neu hinzugekommen sind (in `before` noch nicht vorhanden). */

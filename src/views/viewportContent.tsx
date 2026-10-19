@@ -21,7 +21,7 @@ import type {
 } from "../model/types";
 import { categoryNameForPick } from "../plan/pickLabels";
 import type { PickKind } from "../plan/PlanView";
-import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan, materializeUnderlay } from "../plan/generatePlan";
+import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../plan/generatePlan";
 import type { CategoryDisplayResolver, Primitive } from "../plan/generatePlan";
 import type { RichTextDoc } from "../text/richText";
 import { computeSection } from "../plan/toSection";
@@ -29,7 +29,7 @@ import type { SectionOutput } from "../plan/toSection";
 import { generateElevationPlan } from "../plan/toElevation";
 import { pushNativeScene, pushNativeWalls } from "../plan/nativeSync";
 import { selectionHighlightLines } from "../plan/toWalls3d";
-import { applyGroupDimming } from "../state/groupActions";
+import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { PlanView } from "../plan/PlanView";
 import type {
   GripHandlers,
@@ -835,14 +835,9 @@ function LevelPlanView({
         ? p
         : { ...p, primitives: [...p.primitives, ...overlayPrimitives] };
     // Gruppen-Isolation ("Gruppe betreten"): alles ausserhalb der aktiven
-    // Gruppe gedimmt, s. state/groupActions.ts::applyGroupDimming.
-    // applyGroupDimming arbeitet auf Primitiven → Unterlage vorher materialisieren.
-    return groupPath.length === 0
-      ? withOverlay
-      : (() => {
-          const full = materializeUnderlay(withOverlay);
-          return { ...full, primitives: applyGroupDimming(full.primitives, project, groupPath) };
-        })();
+    // Gruppe gedimmt, s. state/groupActions.ts::applyGroupDimmingToPlan (die
+    // kompakte Linien-Unterlage bleibt dabei kompakt).
+    return applyGroupDimmingToPlan(withOverlay, project, groupPath);
   }, [
     project,
     level.id,
@@ -1145,7 +1140,7 @@ function SectionPlanView({
   const plan = useMemo(
     () =>
       withOverlay && groupPath.length > 0
-        ? { ...withOverlay, primitives: applyGroupDimming(withOverlay.primitives, project, groupPath) }
+        ? applyGroupDimmingToPlan(withOverlay, project, groupPath)
         : withOverlay,
     [withOverlay, project, groupPath],
   );

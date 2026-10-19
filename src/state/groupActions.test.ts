@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   addNewElementsToActiveGroup,
   applyGroupDimming,
+  applyGroupDimmingToPlan,
   containingGroupId,
   expandToGroups,
   groupSelection,
@@ -18,7 +19,8 @@ import {
   ungroup,
 } from "./groupActions";
 import type { Primitive } from "../plan/generatePlan/shared";
-import type { Group, Project } from "../model/types";
+import { materializeUnderlay, type Plan } from "../plan/generatePlan";
+import type { Drawing2D, Group, Project } from "../model/types";
 
 const EMPTY_MEM = {
   wallIds: [] as string[],
@@ -183,6 +185,35 @@ describe("applyGroupDimming", () => {
   it("Primitive ohne jede ID (Raster o. Ä.) werden nie gedimmt", () => {
     const out = applyGroupDimming([noOwner], p, ["g1"]);
     expect(out[0].greyed).toBeUndefined();
+  });
+});
+
+describe("applyGroupDimmingToPlan", () => {
+  const g1: Group = { id: "g1", wallIds: [], drawingIds: ["din"], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
+  const p = project([g1]);
+  const din = { id: "din" } as unknown as Drawing2D;
+  const dout = { id: "dout" } as unknown as Drawing2D;
+  const mkLine = (d: Drawing2D) => ({ kind: "line", drawingId: d.id }) as unknown as Primitive;
+  const underlay = [{ drawings: [din, dout], catGreyed: false, tint: false, above: true, ctx: [], build: (ds: Drawing2D[]) => ds.map(mkLine) }];
+  const plan = { primitives: [], underlay } as unknown as Plan;
+
+  it("ohne Isolation unverändert", () => {
+    expect(applyGroupDimmingToPlan(plan, p, [])).toBe(plan);
+  });
+
+  it("Unterlage bleibt kompakt: Zeichnungen ausserhalb in gedimmte Untergruppe", () => {
+    const out = applyGroupDimmingToPlan(plan, p, ["g1"]);
+    expect(out.underlay).toHaveLength(2);
+    expect(out.underlay![0].drawings).toEqual([din]);
+    expect(out.underlay![0].tint).toBe(false);
+    expect(out.underlay![1].drawings).toEqual([dout]);
+    expect(out.underlay![1].tint).toBe(true);
+  });
+
+  it("materializeUnderlay markiert gedimmte obere Gruppen als greyedRange", () => {
+    const m = materializeUnderlay(applyGroupDimmingToPlan(plan, p, ["g1"]));
+    expect(m.primitives).toHaveLength(2);
+    expect(m.greyedRanges).toEqual([[1, 2]]);
   });
 });
 

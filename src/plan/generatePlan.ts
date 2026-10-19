@@ -248,18 +248,24 @@ export function materializeUnderlay(plan: Plan): Plan {
   const below: Primitive[] = [];
   const above: Primitive[] = [];
   const belowGreyed: Array<[number, number]> = [];
+  const aboveGreyed: Array<[number, number]> = [];
   for (const g of groups) {
     const target = g.above ? above : below;
     const from = target.length;
     for (const pr of g.build(g.drawings)) target.push(pr);
-    if (!g.above && g.tint && target.length > from) belowGreyed.push([from, target.length]);
+    if (g.tint && target.length > from) (g.above ? aboveGreyed : belowGreyed).push([from, target.length]);
   }
   const primitives: Primitive[] = [];
   for (const pr of below) primitives.push(pr);
   for (const pr of plan.primitives) primitives.push(pr);
   for (const pr of above) primitives.push(pr);
   const shifted = (plan.greyedRanges ?? []).map(([a, b]): [number, number] => [a + below.length, b + below.length]);
-  const ranges = [...belowGreyed, ...shifted];
+  const aboveShift = below.length + plan.primitives.length;
+  const ranges = [
+    ...belowGreyed,
+    ...shifted,
+    ...aboveGreyed.map(([a, b]): [number, number] => [a + aboveShift, b + aboveShift]),
+  ];
   return {
     ...plan,
     primitives,
