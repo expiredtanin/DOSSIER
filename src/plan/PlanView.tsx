@@ -1373,8 +1373,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // sitzt AUF der Linie (am Kanten-Mittelpunkt), die Spitze zeigt nach außen.
   // Flacher, breiter Pfeil (Apex ~124°, also flacher als 120°) statt spitzem
   // Dreieck: breitere Basis, geringere Höhe.
-  const EDGE_GRIP_H_PX = 8;
-  const EDGE_GRIP_HALF_PX = 15;
+  const EDGE_GRIP_H_PX = 7;
+  const EDGE_GRIP_HALF_PX = 9;
   const screenNormal = (n: Vec2): Vec2 => ({ x: n.x, y: -n.y });
   // Index des Kanten-Griffs unter dem Cursor (Bildschirm-Pixel) oder null. Die
   // Trefferfläche liegt um die Dreiecks-Mitte (etwas außerhalb der Linie).
@@ -1999,6 +1999,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (panPending.current) {
       // SVG-Transform lösen; setView setzt das echte viewBox (ein einziger Re-Raster).
       if (svgRef.current) svgRef.current.style.transform = "";
+      svgRef.current?.classList.remove("plan-zooming");
       setView(panPending.current);
       panPending.current = null;
     }
@@ -2625,6 +2626,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           y: base.y + (e.clientY - rect.top - offY) / scale,
         };
       }
+      // Bildschirmkonstante Overlays (Griffe) würden vom CSS-Transform der Geste
+      // mitskaliert → bis zum Festschreiben ausblenden (kein React-Render nötig).
+      svgRef.current?.classList.add("plan-zooming");
       enqueuePan(zoomedView(base, e.clientX, e.clientY, e.deltaY, anchor));
       if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current);
       wheelCommitTimer.current = setTimeout(() => {
