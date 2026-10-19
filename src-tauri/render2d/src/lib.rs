@@ -21,6 +21,10 @@ pub mod types;
 #[cfg(feature = "render")]
 pub mod gpu;
 
+// Zeichnet fertig tessellierte Webview-Chunks nativ (Stufe 2, s. chunks.rs).
+#[cfg(feature = "render")]
+pub mod chunks;
+
 // Browser-Bindings (wasm32 + WebGPU), nur mit Feature "web". Setzt "render" voraus
 // (dieselbe GPU-Schicht wie das native Fenster), fuegt aber KEINE winit-Abhaengigkeit
 // hinzu — die Canvas dient direkt als wgpu-Surface.

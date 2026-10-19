@@ -17,19 +17,18 @@ use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, RawDisplayHandle, RawWindowHandle,
 };
-use render2d::gpu::Renderer as Renderer2d;
-use render2d::types::ViewBox;
-use render2d::{demo_scene, initial_view_box};
+use render2d::chunks::{ChunkGeom, ChunkRenderer, View};
 use tauri::{AppHandle, Manager};
 
 struct Embedded {
-    view: Retained<NSView>,
+    ns_view: Retained<NSView>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    renderer: Renderer2d,
-    view_box: ViewBox,
+    renderer: ChunkRenderer,
+    view: View,
+    paper_scale: f64,
 }
 
 // NSView ist nicht Send; wir fassen es nur auf dem Hauptthread an
@@ -72,7 +71,8 @@ pub fn set_rect(app: &AppHandle, x: f64, y: f64, w: f64, h: f64) {
         let state = app2.state::<EmbedState>();
         let mut guard = state.0.lock().expect("embed lock");
         if let Some(e) = guard.as_mut() {
-            e.view.setFrame(frame);
+            e.ns_view.setHidden(false);
+            e.ns_view.setFrame(frame);
             e.config.width = ((w * scale) as u32).max(1);
             e.config.height = ((h * scale) as u32).max(1);
             e.surface.configure(&e.device, &e.config);
@@ -84,15 +84,18 @@ pub fn set_rect(app: &AppHandle, x: f64, y: f64, w: f64, h: f64) {
         // Unter alle vorhandenen Geschwister (= unter die Webview).
         parent.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, None);
         make_webview_transparent(&app2);
-        if std::env::var("DOSSIER_EMBED_TEST").is_ok() {
-            if let Some(w) = app2.get_webview_window("main") {
-                let _ = w.eval("document.head.insertAdjacentHTML('beforeend','<style>*{background:transparent!important}</style>')");
-            }
-        }
         let (surface, device, queue, config) = create_surface(&view, w * scale, h * scale);
-        let mut renderer = Renderer2d::new(&device, config.format);
-        renderer.upload_scene(&device, &demo_scene());
-        let mut e = Embedded { view, surface, device, queue, config, renderer, view_box: initial_view_box() };
+        let renderer = ChunkRenderer::new(&device, config.format);
+        let mut e = Embedded {
+            ns_view: view,
+            surface,
+            device,
+            queue,
+            config,
+            renderer,
+            view: View { x: 0.0, y: 0.0, w: 1.0, h: 1.0 },
+            paper_scale: 100.0,
+        };
         draw(&mut e);
         *guard = Some(e);
         drop(guard);
@@ -123,8 +126,8 @@ fn draw(e: &mut Embedded) {
             return;
         }
     };
-    let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-    e.renderer.render(&e.device, &e.queue, &view, e.view_box, (e.config.width, e.config.height));
+    let tv = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+    e.renderer.render(&e.device, &e.queue, &tv, e.view, (e.config.width, e.config.height), e.paper_scale);
     frame.present();
 }
 
@@ -159,7 +162,7 @@ fn create_surface(
     }))
     .expect("Device anfordern");
     let caps = surface.get_capabilities(&adapter);
-    let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
+    let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
     let config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
@@ -172,4 +175,42 @@ fn create_surface(
     };
     surface.configure(&device, &config);
     (surface, device, queue, config)
+}
+
+/// Roh-Bytes eines Puffers ablegen (Vertex-/Indexdaten eines Chunks).
+pub fn upload(app: &AppHandle, id: u32, bytes: &[u8]) {
+    if let Some(e) = app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        e.renderer.upload(&e.device, id, bytes);
+    }
+}
+
+/// Chunk-Layout setzen, nicht mehr benoetigte Puffer freigeben, neu zeichnen.
+pub fn set_layout(app: &AppHandle, layout: Vec<ChunkGeom>, delete: Vec<u32>) {
+    if let Some(e) = app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        e.renderer.delete(&delete);
+        e.renderer.set_layout(layout);
+        draw(e);
+    }
+}
+
+/// Ausschnitt (Pan/Zoom) setzen und zeichnen — der einzige Pro-Frame-Aufruf.
+pub fn frame(app: &AppHandle, view: View, paper_scale: f64, clear: Option<[f64; 3]>) {
+    if let Some(e) = app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        e.view = view;
+        e.paper_scale = paper_scale;
+        if let Some(c) = clear {
+            e.renderer.clear = c;
+        }
+        draw(e);
+    }
+}
+
+/// Flaeche ausblenden (Plan-Ansicht nicht sichtbar, z. B. 3D-Reiter).
+pub fn hide(app: &AppHandle) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(e) = app2.state::<EmbedState>().0.lock().unwrap().as_mut() {
+            e.ns_view.setHidden(true);
+        }
+    });
 }
