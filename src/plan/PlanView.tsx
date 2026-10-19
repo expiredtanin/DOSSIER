@@ -2722,11 +2722,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // Linien kompakt gehaltener Zeichnungen entstehen nur für die gewählten (wenige).
     const underIds = getUnderlayIds();
     if (!underIds || !selectedDrawingIds) return fromPrims;
+    // Pro Gruppe EIN Durchlauf über deren Zeichnungen (statt `find` je gewählter ID:
+    // bei tausenden gewählten Katasterobjekten sonst quadratisch).
     const extra: Array<Extract<Primitive, { kind: "line" | "polygon" }>> = [];
+    const groups = new Set<NonNullable<ReturnType<typeof underIds.get>>>();
     for (const id of selectedDrawingIds) {
       const g = underIds.get(id);
-      const d = g?.drawings.find((x) => x.id === id);
-      if (g && d) for (const pr of g.build([d])) if (pr.kind === "line") extra.push(pr);
+      if (g) groups.add(g);
+    }
+    for (const g of groups) {
+      const chosen = g.drawings.filter((d) => ids.has(d.id));
+      if (chosen.length) for (const pr of g.build(chosen)) if (pr.kind === "line") extra.push(pr);
     }
     return extra.length ? [...fromPrims, ...extra] : fromPrims;
   }, [plan, selectedDrawingIds]);
@@ -2742,6 +2748,33 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (!ids) return [];
     return primsOwnedBy("drawingId", selectedDrawingIds, (p): p is Extract<Primitive, { kind: "drawingText" }> => p.kind === "drawingText" && p.drawingId !== editTextId);
   }, [plan, selectedDrawingIds, editTextId]);
+
+  // Auswahl-Hervorhebung als EIN <path> je Art statt eines DOM-Elements je Objekt:
+  // bei tausenden gewählten Katasterobjekten war der DOM-Aufbau (nicht die Auswahl)
+  // der Engpass. Aussehen identisch (beide Klassen: fill none, Kontur).
+  const highlightDrawPath = useMemo(() => {
+    const parts: string[] = [];
+    for (const p of highlightDrawPrims) {
+      if (p.kind === "line") {
+        const a = toScreen(p.a), b = toScreen(p.b);
+        parts.push(`M${a.x} ${a.y}L${b.x} ${b.y}`);
+      } else if (p.pts.length > 1) {
+        const q = p.pts.map(toScreen);
+        parts.push(`M${q.map((s) => `${s.x} ${s.y}`).join("L")}Z`);
+      }
+    }
+    return parts.join("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightDrawPrims]);
+  const highlightTextPath = useMemo(() => {
+    const parts: string[] = [];
+    for (const p of highlightTextFrames) {
+      const q = textFrameCorners(p).map(toScreen);
+      parts.push(`M${q.map((s) => `${s.x} ${s.y}`).join("L")}Z`);
+    }
+    return parts.join("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightTextFrames]);
 
   // Hervorhebung der selektierten Decken: alle Polygone JEDER gewählten Decke
   // (Fläche + Umriss) mit Akzentkontur überzeichnen — analog zur Wand-Auswahl.
@@ -3291,44 +3324,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         ),
       )}
       {/* Hervorhebung der selektierten 2D-Zeichenelemente (Akzentkontur). */}
-      {highlightDrawPrims.map((p, i) =>
-        p.kind === "line" ? (
-          <line
-            key={`seld-${i}`}
-            className="plan-sel-draw"
-            x1={toScreen(p.a).x}
-            y1={toScreen(p.a).y}
-            x2={toScreen(p.b).x}
-            y2={toScreen(p.b).y}
-            pointerEvents="none"
-          />
-        ) : (
-          <polygon
-            key={`seld-${i}`}
-            className="plan-sel-draw"
-            points={p.pts
-              .map(toScreen)
-              .map((s) => `${s.x},${s.y}`)
-              .join(" ")}
-            pointerEvents="none"
-          />
-        ),
+      {highlightDrawPath && (
+        <path className="plan-sel-draw" d={highlightDrawPath} pointerEvents="none" />
       )}
       {/* Auswahl-Rahmen für Text-Objekte (geschätzte Box, kein echter Umriss
           wie bei Linie/Polygon — s. `text/textFrame.ts` `textFrameCorners`). Gestrichelt
           statt durchgezogen wie `.plan-sel-draw`, um sichtbar zu machen: das
           ist eine SCHÄTZUNG, keine exakt nachgezeichnete Geometrie. */}
-      {highlightTextFrames.map((p) => (
-        <polygon
-          key={`selt-${p.drawingId}`}
-          className="plan-sel-text-frame"
-          points={textFrameCorners(p)
-            .map(toScreen)
-            .map((s) => `${s.x},${s.y}`)
-            .join(" ")}
-          pointerEvents="none"
-        />
-      ))}
+      {highlightTextPath && (
+        <path className="plan-sel-text-frame" d={highlightTextPath} pointerEvents="none" />
+      )}
       </>
       )}
       {/* Gruppen-Auswahl: nur eine Bounding-Box mit vier Eckpunkten (kein

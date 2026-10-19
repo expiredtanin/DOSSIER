@@ -139,6 +139,25 @@ export function useGripEditing(opts: {
         ? [selectedDrawingId]
         : [];
 
+  // Bei grossen Auswahlen (z. B. Rahmen über Katasterdaten) gibt es KEINE Griffe:
+  // je Stützpunkt ein Eck- und ein Kanten-Griff ergaben zehntausende DOM-Elemente
+  // (Sekunden Wartezeit) und sind bei so vielen Punkten nicht bedienbar. Massgebend
+  // ist die GESAMTZAHL der Stützpunkte (wenige Objekte können riesige Umrisse
+  // haben), nicht die Objektzahl. Die Auswahl selbst (Hervorhebung, Verschieben,
+  // Eigenschaften) bleibt unberührt.
+  const MAX_GRIP_DRAWINGS = 50;
+  const MAX_GRIP_VERTICES = 600;
+  const gripDrawingIds = (() => {
+    if (effectiveDrawingIds.length > MAX_GRIP_DRAWINGS) return [];
+    let total = 0;
+    for (const id of effectiveDrawingIds) {
+      const d = project.drawings2d.find((x) => x.id === id);
+      if (d) total += drawingVertices(d, scaleDenominator).length;
+      if (total > MAX_GRIP_VERTICES) return [];
+    }
+    return effectiveDrawingIds;
+  })();
+
   const grips: Vec2[] = (() => {
     // Öffnung (Fenster/Tür): EIN Mittelpunkt-Griff auf der Wandachse. Ziehen
     // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
@@ -198,7 +217,7 @@ export function useGripEditing(opts: {
       const end = out.length - 1;
       for (let i = start; i <= end; i++) gripOwnerRange.push([start, end]);
     };
-    for (const id of effectiveDrawingIds) {
+    for (const id of gripDrawingIds) {
       const d = project.drawings2d.find((x) => x.id === id);
       if (d) pushGroup(drawingVertices(d, scaleDenominator), { drawingId: id });
     }
@@ -219,7 +238,7 @@ export function useGripEditing(opts: {
   // bekommt eine Linie zu seinem/seinen benachbarten Griff(en).
   const gripHandleLines: { a: Vec2; b: Vec2 }[] = (() => {
     const out: { a: Vec2; b: Vec2 }[] = [];
-    for (const id of effectiveDrawingIds) {
+    for (const id of gripDrawingIds) {
       const d = project.drawings2d.find((x) => x.id === id);
       const g = d?.geom;
       if (!g || g.shape !== "bezier") continue;
@@ -310,7 +329,7 @@ export function useGripEditing(opts: {
       return ringEdges(selectedRoom.boundary, {});
     }
     const out: EdgeGrip[] = [];
-    for (const id of effectiveDrawingIds) {
+    for (const id of gripDrawingIds) {
       const d = project.drawings2d.find((x) => x.id === id);
       if (!d) continue;
       const verts = drawingVertices(d, scaleDenominator);
