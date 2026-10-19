@@ -27,6 +27,7 @@ import { wallCorners } from "../model/geometry";
 import { columnFootprint } from "../geometry/column";
 import { stairOutline } from "../geometry/stair";
 import type { DraftShape } from "./types";
+import { drawingPreviewShapes } from "./drawingPreview";
 import { uniqueId } from "./types";
 import type { CommandSelection } from "../commands/types";
 
@@ -543,6 +544,11 @@ function itemPreview(project: Project, item: AnyItem, fn: (p: Vec2) => Vec2): Dr
     return stairPreviewShapes(item.stair, fn);
   }
   const g = mvGeom(item.drawing.geom, fn);
+  // Allgemein: dieselbe Primitiv-Erzeugung wie im Plan (alle Formen, inkl. Bögen
+  // in Polylinien, Text, Bemassung, Kreis …). Fallback unten nur, falls daraus
+  // nichts entsteht.
+  const generic = drawingPreviewShapes(project, { ...item.drawing, geom: g });
+  if (generic.length) return generic;
   switch (g.shape) {
     case "line":
       return [{ kind: "line", a: g.a, b: g.b }];
