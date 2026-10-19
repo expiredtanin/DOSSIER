@@ -79,6 +79,7 @@ import {
   isCompactUnderlayEligible,
 } from "./generatePlan/drawing2d";
 import { drawingBox } from "../geometry/drawingBounds";
+import { layersStyleSig } from "./generatePlan/layerSig";
 import { addDoorSymbol, addOpeningSymbol } from "./generatePlan/openings";
 import { addRoof } from "./generatePlan/roofs";
 import { addRoomArea } from "./generatePlan/rooms";
@@ -595,13 +596,19 @@ export function generatePlan(
 
   // 2D-Zeichengeometrie zuletzt (über der Poché).
   const compact = compactUnderlay && !mono && !forPrint;
-  const underNormal: Drawing2D[] = [];
-  const underGreyed: Drawing2D[] = [];
+  // Kompakte Unterlage PRO KATEGORIE gruppiert: das Ein-/Ausblenden einer Ebene
+  // entfernt dann nur deren Gruppe — die Chunks aller anderen Ebenen bleiben
+  // identisch und werden wiederverwendet (statt dass fast jeder Chunk eine der
+  // ausgeblendeten Zeichnungen enthielt und neu kompiliert werden musste).
+  const underGroups = new Map<string, { ds: Drawing2D[]; greyed: boolean }>();
   for (const d of drawings) {
     const greyed = categoryDisplay(d.categoryCode).greyed;
     if (compact && isCompactUnderlayEligible(d)) {
       addDrawing2DWithoutLines(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator);
-      (greyed ? underGreyed : underNormal).push(d);
+      const key = `${greyed ? 1 : 0}:${d.categoryCode}`;
+      const grp = underGroups.get(key);
+      if (grp) grp.ds.push(d);
+      else underGroups.set(key, { ds: [d], greyed });
     } else {
       addDrawing2D(primitives, project, d, greyed, lwByCode, colorByCode, catByCode, scaleDenominator, !mono);
     }
@@ -614,7 +621,7 @@ export function generatePlan(
     above: true,
     // Alles, wovon `build` abhängt (s. drawingPrimCache): ändert sich eine davon,
     // müssen die GPU-Chunks dieser Gruppe neu erzeugt werden.
-    ctx: [project.lineStyles, project.hatches, project.layers, scaleDenominator],
+    ctx: [project.lineStyles, project.hatches, layersStyleSig(project.layers), scaleDenominator],
     build: (list) => {
       const out: Primitive[] = [];
       for (const d of list) {
@@ -623,8 +630,7 @@ export function generatePlan(
       return out;
     },
   });
-  if (underNormal.length) underlay.push(mkGroup(underNormal, false));
-  if (underGreyed.length) underlay.push(mkGroup(underGreyed, true));
+  for (const grp of underGroups.values()) underlay.push(mkGroup(grp.ds, grp.greyed));
 
   // Extrudierte Körper (truck-Integration): das Quell-Profil wurde beim
   // Extrudieren aus `drawings2d` entfernt (s. `extrude.ts` appendExtrudedSolid)

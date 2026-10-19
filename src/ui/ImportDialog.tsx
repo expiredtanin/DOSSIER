@@ -151,9 +151,12 @@ export function ImportDialog({
   const [newName, setNewName] = useState<string>(() =>
     fileName.replace(/\.[^.]+$/, "") || "",
   );
-  const [categoryMode, setCategoryMode] = useState<CategoryMode>(
-    layers.length > 0 ? "byLayer" : "active",
-  );
+  // Standard folgt den DXF-Layern, SOBALD sie geparst sind: der Dialog öffnet sich
+  // schon während des Parsens (`layers` dann noch leer) — ein einmaliger useState-
+  // Startwert blieb deshalb dauerhaft auf "alles auf die aktive Kategorie". Erst
+  // eine ausdrückliche Wahl des Nutzers überschreibt den abgeleiteten Wert.
+  const [categoryModeChoice, setCategoryMode] = useState<CategoryMode | null>(null);
+  const categoryMode: CategoryMode = categoryModeChoice ?? (layers.length > 0 ? "byLayer" : "active");
   const [importMeshes, setImportMeshes] = useState<boolean>(true);
   const [placement, setPlacement] = useState<"origin" | "viewCenter">("origin");
   // Zwischen Klick auf „Importieren" und dem (synchronen, u. U. mehrere

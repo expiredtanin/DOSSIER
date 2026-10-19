@@ -100,6 +100,12 @@ export interface MenuActions {
   selectionAllLocked: boolean;
   /** Sperrt/entsperrt die gesamte aktuelle Auswahl in einem Zug. */
   toggleSelectionLock: () => void;
+  /** Anzeigenamen der Ebenen (Kategorien) der aktuellen Auswahl — leer ohne Auswahl. */
+  selectionLayerNames: string[];
+  /** Blendet die Ebene(n) der aktuellen Auswahl aus (ein Undo-Schritt). */
+  hideSelectionLayers: () => void;
+  /** Zeigt NUR die Ebene(n) der aktuellen Auswahl, alle übrigen werden ausgeblendet. */
+  isolateSelectionLayers: () => void;
   /**
    * Sind ALLE aktuell gewählten 2D-Zeichnungen bereits `noPrint`? Bestimmt
    * Label/Icon von „Nicht drucken"/„Drucken" — nur `Drawing2D` kennt das
@@ -318,6 +324,28 @@ function planMenuItems(
         ]
       : [];
 
+  // Ebene(n) der Auswahl ausblenden / nur diese zeigen. Beschriftung nennt bei
+  // EINER Ebene deren Namen ("Ebene ausblenden: 01421"), sonst die Anzahl.
+  const layerLabel = (key: "ctx.hideLayer" | "ctx.isolateLayer"): string =>
+    a.selectionLayerNames.length === 1
+      ? t(key, { name: a.selectionLayerNames[0] })
+      : t(`${key}.n` as "ctx.hideLayer.n", { n: a.selectionLayerNames.length });
+  const layerItems: ContextMenuItem[] =
+    a.selectionLayerNames.length >= 1
+      ? [
+          {
+            label: layerLabel("ctx.hideLayer"),
+            icon: <MenuIcon name="visibility_off" />,
+            onClick: a.hideSelectionLayers,
+          },
+          {
+            label: layerLabel("ctx.isolateLayer"),
+            icon: <MenuIcon name="filter_alt" />,
+            onClick: a.isolateSelectionLayers,
+          },
+        ]
+      : [];
+
   // Nicht drucken/Drucken — nur für die 2D-Auswahl (`Drawing2D.noPrint`).
   const noPrintItems: ContextMenuItem[] =
     a.drawingSelectionCount >= 1
@@ -402,6 +430,8 @@ function planMenuItems(
       ...(styleItems.length ? [{ divider: true } as ContextMenuItem] : []),
       ...lockItems,
       ...(lockItems.length ? [{ divider: true } as ContextMenuItem] : []),
+      ...layerItems,
+      ...(layerItems.length ? [{ divider: true } as ContextMenuItem] : []),
       ...noPrintItems,
       ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
       {
@@ -433,6 +463,8 @@ function planMenuItems(
     ...(styleItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...lockItems,
     ...(lockItems.length ? [{ divider: true } as ContextMenuItem] : []),
+    ...layerItems,
+    ...(layerItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...noPrintItems,
     ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...booleanItems,

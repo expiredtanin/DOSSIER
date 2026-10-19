@@ -122,3 +122,41 @@ describe("kompakte Linien-Unterlage", () => {
     expect(plan.bounds.minX).toBeGreaterThan(2_000_000);
   });
 });
+
+describe("Ebenen ein-/ausblenden (Kataster-Performance)", () => {
+  const vis = (codes: string[]) => new Set(codes);
+
+  it("Unterlage ist pro Kategorie gruppiert", () => {
+    const p = project(drawings);
+    const plan = generatePlan(p, "L1", vis(["60", "61"]), undefined, "mittel", false, false, true, 100, false, true);
+    const cats = plan.underlay!.map((g) => new Set(g.drawings.map((d) => d.categoryCode)));
+    expect(cats.every((s) => s.size === 1)).toBe(true);
+    expect(plan.underlay!.length).toBe(2);
+  });
+
+  it("Ausblenden einer Ebene: nur deren Gruppe verschwindet, die übrigen bleiben inhaltlich IDENTISCH (gleiche Zeichnungen, gleicher Kontext)", () => {
+    const p1 = project(drawings);
+    // Wie das Umschalten von `visible`: neue Ebenen-Liste, gleiche Stil-Werte.
+    const p2 = { ...p1, layers: p1.layers.map((l) => (l.code === "61" ? { ...l, visible: false } : l)) } as Project;
+    const a = generatePlan(p1, "L1", vis(["60", "61"]), undefined, "mittel", false, false, true, 100, false, true);
+    const b = generatePlan(p2, "L1", vis(["60"]), undefined, "mittel", false, false, true, 100, false, true);
+    const g60a = a.underlay!.find((g) => g.drawings[0].categoryCode === "60")!;
+    const g60b = b.underlay!.find((g) => g.drawings[0].categoryCode === "60")!;
+    expect(g60b.drawings).toEqual(g60a.drawings);
+    expect(g60b.drawings.every((d, i) => d === g60a.drawings[i])).toBe(true);
+    expect(g60b.ctx.every((x, i) => x === g60a.ctx[i])).toBe(true); // Chunks bleiben wiederverwendbar
+    expect(b.underlay!.some((g) => g.drawings[0].categoryCode === "61")).toBe(false);
+  });
+
+  it("Ebenen-Sichtbarkeit invalidiert den Primitiv-Cache NICHT; eine Farbänderung schon", () => {
+    const d = poly("A", "60", [[0, 0], [1, 0], [2, 1]], false);
+    const p1 = project([d]);
+    const hidden = { ...p1, layers: p1.layers.map((l) => ({ ...l, visible: false })) } as Project;
+    const first = generatePlan(p1, "L1", vis(["60"]));
+    const afterToggle = generatePlan(hidden, "L1", vis(["60"]));
+    const lineOf = (pl: ReturnType<typeof generatePlan>) => pl.primitives.find((q) => q.kind === "line")!;
+    expect(lineOf(afterToggle)).toBe(lineOf(first)); // dasselbe Objekt → GPU-Chunk bleibt gültig
+    const recolored = { ...p1, layers: p1.layers.map((l) => ({ ...l, color: "#123456" })) } as Project;
+    expect(lineOf(generatePlan(recolored, "L1", vis(["60"])))).not.toBe(lineOf(first));
+  });
+});

@@ -6,7 +6,7 @@
 // Extrahiert aus App.tsx (top-level, alles über Props — keine App-Closure).
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { t } from "../i18n";
 import type {
@@ -19,6 +19,8 @@ import type {
   Vec2,
   Wall,
 } from "../model/types";
+import { categoryNameForPick } from "../plan/pickLabels";
+import type { PickKind } from "../plan/PlanView";
 import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan, materializeUnderlay } from "../plan/generatePlan";
 import type { CategoryDisplayResolver, Primitive } from "../plan/generatePlan";
 import type { RichTextDoc } from "../text/richText";
@@ -854,6 +856,12 @@ function LevelPlanView({
     groupPath,
   ]);
 
+  // Kategorie-/Layer-Name für die Objekt-Liste (Cmd/Strg+Klick), s. plan/pickLabels.ts.
+  const describePick = useCallback(
+    (kind: PickKind, id: string) => categoryNameForPick(project, kind, id),
+    [project],
+  );
+
   // Live-Spiegelung in die nativen wgpu-Fenster (No-op ohne Tauri, debounced):
   // EXAKT der sichtbare Plan (gleiches Geschoss, gleicher Detailgrad) fürs
   // 2D-Fenster, die Projekt-Wände fürs 3D-Fenster.
@@ -879,6 +887,7 @@ function LevelPlanView({
       <PlanView
         ref={planViewRef}
         plan={plan}
+        describePick={describePick}
         resetKey={level.id}
         onCursor={onCursor}
         onScale={onScale}

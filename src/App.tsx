@@ -120,6 +120,12 @@ import type {
   ToolState,
 } from "./tools/types";
 import { ContextMenu } from "./ui/ContextMenu";
+import {
+  categoryNames,
+  isolateCategories,
+  selectionCategoryCodes,
+  setCategoriesVisible,
+} from "./state/selectionLayers";
 import { buildMenuItems, menuTitle } from "./menus/contextMenu";
 import { useContextMenuState } from "./menus/useContextMenuState";
 import { InlineEditor } from "./views/InlineEditor";
@@ -1371,6 +1377,31 @@ export default function App() {
   const toggleSelectionLock = () => {
     if (selectionLockIds.length === 0) return;
     setProject((p) => setLockedForMembers(p, selectionLockMembers, !selectionAllLocked));
+  };
+
+  // Ebene(n) der Auswahl ausblenden / isolieren (Kontextmenü). Nur bei geöffnetem
+  // Menü berechnet — bei Kataster-Importen (~10^5 Zeichnungen) nicht bei jedem Render.
+  const selectionLayerCodes = menu
+    ? selectionCategoryCodes(project, {
+        wallIds: selectedWallIds,
+        drawingIds: selectedDrawingIds,
+        ceilingIds: selectedCeilingIds,
+        roomIds: selectedRoomIds,
+        stairIds: selectedStairIds,
+        columnIds: selectedColumnIds,
+        roofIds: selectedRoofIds,
+        openingIds: selectedOpeningIds,
+      })
+    : [];
+  const hideSelectionLayers = () => {
+    if (selectionLayerCodes.length === 0) return;
+    const codes = new Set(selectionLayerCodes);
+    setProject((p) => ({ ...p, layers: setCategoriesVisible(p.layers, codes, false) }));
+  };
+  const isolateSelectionLayers = () => {
+    if (selectionLayerCodes.length === 0) return;
+    const codes = new Set(selectionLayerCodes);
+    setProject((p) => ({ ...p, layers: isolateCategories(p.layers, codes) }));
   };
 
   // „Nicht drucken"/„Drucken" (Kontextmenü) — nur `Drawing2D` kennt
@@ -3893,6 +3924,9 @@ export default function App() {
             lockableSelectionCount: selectionLockIds.length,
             selectionAllLocked,
             toggleSelectionLock,
+            selectionLayerNames: categoryNames(project.layers, selectionLayerCodes),
+            hideSelectionLayers,
+            isolateSelectionLayers,
             selectionAllNoPrint: !!selectionAllNoPrint,
             toggleSelectionNoPrint,
             bringToFront: () => reorderDrawings(selectedDrawingIds, "front"),

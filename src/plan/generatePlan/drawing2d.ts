@@ -13,6 +13,7 @@ import {
   resolveStrokeWeight,
   type Primitive,
 } from "./shared";
+import { layersStyleSig } from "./layerSig";
 import { ellipsePts, sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../../tools/curves";
 import { scaleGeom } from "../../tools/transform";
 import { bulgeArc, bulgeArcPoints } from "../../geometry/bulge";
@@ -185,7 +186,7 @@ export function addDrawing2D(
       hit &&
       hit.lineStyles === project.lineStyles &&
       hit.hatches === project.hatches &&
-      hit.layers === project.layers &&
+      hit.layersSig === layersStyleSig(project.layers) &&
       hit.greyed === greyed &&
       hit.scaleDenominator === scaleDenominator
     ) {
@@ -211,7 +212,7 @@ export function addDrawing2D(
     drawingPrimCache.set(d, {
       lineStyles: project.lineStyles,
       hatches: project.hatches,
-      layers: project.layers,
+      layersSig: layersStyleSig(project.layers),
       greyed,
       scaleDenominator,
       prims: out.slice(start),
@@ -260,7 +261,7 @@ export function addDrawing2DWithoutLines(
     hit &&
     hit.lineStyles === project.lineStyles &&
     hit.hatches === project.hatches &&
-    hit.layers === project.layers &&
+    hit.layersSig === layersStyleSig(project.layers) &&
     hit.greyed === greyed &&
     hit.scaleDenominator === scaleDenominator
   ) {
@@ -273,7 +274,7 @@ export function addDrawing2DWithoutLines(
   withoutLinesCache.set(d, {
     lineStyles: project.lineStyles,
     hatches: project.hatches,
-    layers: project.layers,
+    layersSig: layersStyleSig(project.layers),
     greyed,
     scaleDenominator,
     prims: kept,
@@ -285,7 +286,7 @@ const withoutLinesCache = new WeakMap<
   {
     lineStyles: Project["lineStyles"];
     hatches: Project["hatches"];
-    layers: Project["layers"];
+    layersSig: string;
     greyed: boolean;
     scaleDenominator: number;
     prims: Primitive[];
@@ -322,7 +323,7 @@ const drawingPrimCache = new WeakMap<
   {
     lineStyles: Project["lineStyles"];
     hatches: Project["hatches"];
-    layers: Project["layers"];
+    layersSig: string;
     greyed: boolean;
     scaleDenominator: number;
     prims: Primitive[];

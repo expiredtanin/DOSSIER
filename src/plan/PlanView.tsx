@@ -386,6 +386,8 @@ export interface PlanViewProps {
    * markiert das getroffene Polygon zusätzlich selbst (lokale Hervorhebung).
    */
   onSelect?: (selection: PlanSelection) => void;
+  /** Kategorie-/Layer-Name eines Objekts für die Cmd/Strg+Klick-Liste ("Fläche · 01421"). */
+  describePick?: (kind: PickKind, id: string) => string | undefined;
   /**
    * Alt+Klick (Schere/Segment löschen): meldet das nahe getroffene Drawing2D plus
    * den Modellpunkt des Klicks. Der Aufrufer (App) ermittelt daraus die nächst-
@@ -659,6 +661,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       onCursor,
       onScale,
       onSelect,
+      describePick,
       onMarquee,
       onSegmentCut,
       onContextMenu,
@@ -2297,7 +2300,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const key = `${kind}:${id}`;
       if (seen.has(key)) return;
       seen.add(key);
-      out.push({ kind, id, hitIndex, label: kind === "drawing" ? drawingLabel(id) : t(`pick.kind.${kind}`) });
+      const base = kind === "drawing" ? drawingLabel(id) : t(`pick.kind.${kind}`);
+      const cat = describePick?.(kind, id);
+      out.push({ kind, id, hitIndex, label: cat ? `${base} · ${cat}` : base });
     };
     // 1) Standard-Treffer zuerst.
     add("section", dp.sectionLineId, dp.hitIndex);
