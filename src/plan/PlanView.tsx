@@ -962,13 +962,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // breite in Geräte-px — unabhängig vom Zoom konstant bleibt: dieselbe Wirkung
   // wie `non-scaling-stroke` im SVG-Pfad, nur über den Massstab-Nenner erzielt.
   // Display-Modus (Haarlinien): Die Strichbreite bleibt NICHT konstant in Pixeln,
-  // sondern wächst mit dem Zoom — sanft (Exponent 0.6) relativ zur Ansicht 1:100:
+  // sondern wächst mit dem Zoom — sanft (Exponent 0.8) relativ zur Ansicht 1:100:
   // weit weg bleiben die Striche fein (mind. 1 px im Shader), nah dran werden sie
   // sichtbar kräftiger statt auf Haarlinien-Breite zu kleben.
   const paperScaleForGl = (v: ViewBox): number => {
-    if (!hairline) return paperScaleRef.current ?? scaleFromView(v, svgRef.current) ?? 100;
-    const live = scaleFromView(v, svgRef.current) ?? 100;
-    const grow = Math.min(8, Math.max(0.25, Math.pow(100 / live, 0.6)));
+    // Elementbox der GPU-Fläche (NIE transformiert): das SVG trägt während einer
+    // imperativen Zoom-Geste einen CSS-Transform, seine Box wäre verzerrt (Striche
+    // wurden dadurch beim Herauszoomen kurz riesig).
+    const box = canvasRef.current ?? svgRef.current;
+    if (!hairline) return paperScaleRef.current ?? scaleFromView(v, box) ?? 100;
+    const live = scaleFromView(v, box) ?? 100;
+    const grow = Math.min(12, Math.max(0.25, Math.pow(100 / live, 0.8)));
     return live * grow;
   };
 
@@ -988,7 +992,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // meet-Skala (CSS-px je viewBox-Einheit) · PX_PER_M (viewBox-Einheiten je Meter)
   // · dpr (Geräte-px je CSS-px). Steuert die adaptive Bogen-Tessellierung.
   const pxPerMeterForView = (v: ViewBox): number => {
-    const meet = meetScale(v, svgRef.current);
+    const meet = meetScale(v, canvasRef.current ?? svgRef.current);
     if (!meet || meet <= 0) return 0;
     return meet * PX_PER_M * (window.devicePixelRatio || 1);
   };
@@ -1305,7 +1309,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // "xMidYMid meet" passt die viewBox einheitlich (kleinerer Faktor) ein und
   // zentriert sie; daraus ergibt sich die effektive Skala + der Versatz.
   const measure = (vb: ViewBox) => {
-    const el = svgRef.current;
+    // Untransformierte Box (GPU-Fläche) bevorzugen: das SVG trägt während einer
+    // imperativen Zoom-Geste einen CSS-Transform.
+    const el = canvasRef.current ?? svgRef.current;
     const rect = el?.getBoundingClientRect();
     const pxW = rect?.width ?? vb.w;
     const pxH = rect?.height ?? vb.h;

@@ -93,7 +93,7 @@ export function printStrokeVb(mm: number, n: number): number {
  * preserveAspectRatio="xMidYMid meet" nimmt die kleinere der beiden Achsen.
  * Liefert null, solange das SVG noch nicht gemessen werden kann.
  */
-export function meetScale(vb: ViewBox, el: SVGSVGElement | null): number | null {
+export function meetScale(vb: ViewBox, el: Element | null): number | null {
   const rect = el?.getBoundingClientRect();
   if (!rect || rect.width <= 0 || rect.height <= 0) return null;
   return Math.min(rect.width / vb.w, rect.height / vb.h);
@@ -105,7 +105,7 @@ export function meetScale(vb: ViewBox, el: SVGSVGElement | null): number | null 
  * das 1000/N mm ⇒ N = 1000·dpi / (scale·PX_PER_M·25.4). Letterbox-korrekt, da
  * `scale` die tatsächliche meet-Skala ist.
  */
-export function scaleFromView(vb: ViewBox, el: SVGSVGElement | null): number | null {
+export function scaleFromView(vb: ViewBox, el: Element | null): number | null {
   const scale = meetScale(vb, el);
   if (scale == null) return null;
   return (1000 * dpi()) / (scale * PX_PER_M * 25.4);
