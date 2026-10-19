@@ -53,7 +53,8 @@ describe('compilePrimitivesToGpu: zusammenhängende Linien-Segmente', () => {
   it('verkettet NICHT bei unterschiedlichem Stil', () => {
     const single = lineIndexCount([seg(0, 0, 1, 0, 'a')]);
     const thick = { ...seg(1, 0, 2, 0, 'a'), weightMm: 0.5 } as Primitive;
-    expect(lineIndexCount([seg(0, 0, 1, 0, 'a'), thick])).toBe(2 * single);
+    // Dicke Striche bekommen mehr Kappen-Schritte als dünne → je einzeln zählen.
+    expect(lineIndexCount([seg(0, 0, 1, 0, 'a'), thick])).toBe(single + lineIndexCount([thick]));
   });
 });
 
@@ -180,5 +181,30 @@ describe('computeOrthoMatrix', () => {
     const a = computeOrthoMatrix({ x: 0, y: 0, w: 100, h: 100 }, 100, 100);
     const b = computeOrthoMatrix({ x: 50, y: 50, w: 200, h: 200 }, 100, 100);
     expect([...a].every((v, i) => v === b[i])).toBe(false);
+  });
+});
+
+describe('compilePrimitivesToGpu: kompaktes Linien-Vertex-Format (nativ)', () => {
+  it('liefert 3 Wörter je Vertex statt 6 Floats', () => {
+    const uploaded: ArrayBufferView[] = [];
+    const mk = (packed: boolean) =>
+      ({
+        ARRAY_BUFFER: 1,
+        ELEMENT_ARRAY_BUFFER: 2,
+        STATIC_DRAW: 3,
+        packedLineVertices: packed,
+        createBuffer: () => ({}),
+        bindBuffer: () => {},
+        bufferData: (_t: number, d: ArrayBufferView) => void uploaded.push(d),
+        deleteBuffer: () => {},
+      }) as any;
+    const p = [seg(0, 0, 1, 0, 'a')];
+    uploaded.length = 0;
+    compilePrimitivesToGpu(mk(false), p, 0);
+    const fullBytes = uploaded.find((u) => u.byteLength % 24 === 0 && u.byteLength > 0)!.byteLength;
+    uploaded.length = 0;
+    compilePrimitivesToGpu(mk(true), p, 0);
+    const packedBytes = uploaded.find((u) => u.byteLength % 12 === 0 && u.byteLength > 0)!.byteLength;
+    expect(packedBytes).toBe(fullBytes / 2);
   });
 });

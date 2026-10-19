@@ -5,6 +5,8 @@
 // `PlanGpuRenderer` (glPlanRender.ts), inkl. lokalem Chunk-Ursprung in doppelter
 // Genauigkeit.
 //
+// Linien-Vertices kommen KOMPAKT (12 Byte, s. LINE_PACKED_WGSL).
+//
 // Die Webview kompiliert weiterhin (Cache/Chunk-Logik bleibt in TypeScript) und
 // schickt nur noch die Puffer-BYTES je Chunk einmalig; pro Frame geht nur der
 // Ausschnitt (viewBox) hierher. Rust haelt die Puffer — kein JSON, kein
@@ -15,13 +17,52 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::shaders::{FILL_WGSL, LINE_WGSL};
+use crate::shaders::FILL_WGSL;
 
 const SAMPLE_COUNT: u32 = 4;
 /// Graustufe fuer gedimmte Linien (== GREY_RGB in glPlanCompile.ts).
 const GREY: f32 = 0.549;
 /// Viewbox-Einheiten je Meter (== PX_PER_M).
 const PX_PER_M: f64 = 90.0;
+
+/// Linien-Shader fuer das KOMPAKTE Vertex-Format der Webview (12 statt 24 Byte):
+/// `position` (2 x f32) + `packed` (4 x snorm8 = bisector.xy, side, miter).
+/// Rechnung identisch zu `shaders::LINE_WGSL`.
+const LINE_PACKED_WGSL: &str = r#"
+struct Globals {
+    view_proj    : mat4x4<f32>,
+    color        : vec4<f32>,
+    viewport_px  : vec2<f32>,
+    stroke_px    : f32,
+    stroke_scale : f32,
+};
+@group(0) @binding(0) var<uniform> globals : Globals;
+
+struct VsIn {
+    @location(0) position : vec2<f32>,
+    @location(1) packed   : vec4<f32>,  // (bisector.x, bisector.y, side, miter)
+};
+
+@vertex
+fn vs_main(in : VsIn) -> @builtin(position) vec4<f32> {
+    let clip_p = globals.view_proj * vec4<f32>(in.position, 0.0, 1.0);
+    let clip_n = globals.view_proj * vec4<f32>(in.position + in.packed.xy, 0.0, 1.0);
+    let dir_px = (clip_n.xy - clip_p.xy) * globals.viewport_px * 0.5;
+    let len = length(dir_px);
+    var unit_px = vec2<f32>(0.0, 0.0);
+    if (len > 1e-6) {
+        unit_px = dir_px / len;
+    }
+    let width_px = max(0.6, globals.stroke_px * globals.stroke_scale) * in.packed.w;
+    let offset_px = unit_px * (width_px * 0.5) * in.packed.z;
+    return vec4<f32>(clip_p.xy + offset_px / (globals.viewport_px * 0.5), clip_p.z, clip_p.w);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return globals.color;
+}
+"#;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -127,7 +168,7 @@ impl ChunkRenderer {
         });
         let line_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("chunks.line"),
-            source: wgpu::ShaderSource::Wgsl(LINE_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(LINE_PACKED_WGSL.into()),
         });
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("chunks.globals"),
@@ -195,9 +236,9 @@ impl ChunkRenderer {
         let line_pipeline = make(
             &line_module,
             wgpu::VertexBufferLayout {
-                array_stride: 24,
+                array_stride: 12,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32, 3 => Float32],
+                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Snorm8x4],
             },
             "chunks.line.pipeline",
         );

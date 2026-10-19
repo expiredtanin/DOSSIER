@@ -117,6 +117,12 @@ export interface ViewBox {
  * Renderer (nativeGl.ts) liefert eine Attrappe, die die Bytes an Rust schickt.
  */
 export interface BufferGl {
+  /**
+   * Linien-Vertices kompakt (12 statt 24 Byte): [x,y als float32, dann 4 Bytes
+   * snorm8 = nx, ny, side, miter]. Nur der native Renderer (chunks.rs) liest das;
+   * der WebGL-Pfad bleibt beim 6-Float-Layout.
+   */
+  readonly packedLineVertices?: boolean;
   readonly ARRAY_BUFFER: number;
   readonly ELEMENT_ARRAY_BUFFER: number;
   readonly STATIC_DRAW: number;

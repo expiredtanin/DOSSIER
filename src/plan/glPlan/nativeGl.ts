@@ -32,6 +32,7 @@ export class NativeGl implements BufferGl {
   readonly ARRAY_BUFFER = 0x8892;
   readonly ELEMENT_ARRAY_BUFFER = 0x8893;
   readonly STATIC_DRAW = 0x88e4;
+  readonly packedLineVertices = true;
 
   private nextId = 1;
   private bound: NativeBuffer | null = null;

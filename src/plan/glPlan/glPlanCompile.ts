@@ -277,8 +277,19 @@ export function compilePrimitivesToGpu(
   const fillIdx = new GrowBuffer((n) => new Uint32Array(n));
   const fillBatches: GpuGeometry['fill']['batches'] = [];
 
-  // Linien-Puffer (interleaved [x,y, nx,ny, side]).
+  // Linien-Puffer: interleaved [x,y, nx,ny, side, miter] (6 Float32) — oder, wenn
+  // der Aufrufer es verlangt (nativer Renderer), kompakt 3 Wörter je Vertex:
+  // [x, y (float32-Bits), nx|ny|side|miter als 4 × snorm8].
+  const packedLines = gl.packedLineVertices === true;
   const lineVerts = new GrowBuffer((n) => new Float32Array(n));
+  const lineVertsPacked = new GrowBuffer((n) => new Uint32Array(n));
+  const bitsF32 = new Float32Array(1);
+  const bitsU32 = new Uint32Array(bitsF32.buffer);
+  const f2u = (v: number): number => {
+    bitsF32[0] = v;
+    return bitsU32[0];
+  };
+  const snorm8 = (v: number): number => Math.round(Math.max(-1, Math.min(1, v)) * 127) & 0xff;
   const lineIdx = new GrowBuffer((n) => new Uint32Array(n));
 
   // LOKALER URSPRUNG dieser Geometrie: alle Vertices werden relativ zum ersten
@@ -384,10 +395,18 @@ export function compilePrimitivesToGpu(
     const leftNormal = (d: Vec2): Vec2 => ({ x: -d.y, y: d.x });
 
     const startIdxLen = lineIdx.length;
-    const vBase = lineVerts.length / 6;
+    const vBase = packedLines ? lineVertsPacked.length / 3 : lineVerts.length / 6;
     let vcount = 0;
     const pushVert = (p: Vec2, nx: number, ny: number, side: number): number => {
-      lineVerts.push6(p.x, p.y, nx, ny, side, 1);
+      if (packedLines) {
+        lineVertsPacked.push3(
+          f2u(p.x),
+          f2u(p.y),
+          (snorm8(nx) | (snorm8(ny) << 8) | (snorm8(side) << 16) | (127 << 24)) >>> 0,
+        );
+      } else {
+        lineVerts.push6(p.x, p.y, nx, ny, side, 1);
+      }
       vcount++;
       return vBase + vcount - 1;
     };
@@ -415,7 +434,10 @@ export function compilePrimitivesToGpu(
     // Randpunkten (voller Versatz in Richtung (cosθ,sinθ)).
     const addFanArc = (p: Vec2, aFrom: number, aTo: number) => {
       const delta = aTo - aFrom;
-      const steps = Math.max(1, Math.ceil(Math.abs(delta) / (Math.PI / 10)));
+      // Dünne Striche (≤ 0.35 mm, nur wenige Pixel breit): grobe Rundung genügt
+      // und spart ~3× Vertices je Kappe/Ecke (Speicher bei Kataster-Importen).
+      const stepAngle = strokeMm <= 0.35 ? Math.PI / 3 : Math.PI / 10;
+      const steps = Math.max(1, Math.ceil(Math.abs(delta) / stepAngle));
       const iCenter = pushVert(p, 1, 0, 0);
       let prev = pushVert(p, Math.cos(aFrom), Math.sin(aFrom), 1);
       for (let s = 1; s <= steps; s++) {
@@ -749,7 +771,7 @@ export function compilePrimitivesToGpu(
   }
 
   // Puffer hochladen.
-  const uploadArray = (data: GrowBuffer<Float32Array>): WebGLBuffer | null => {
+  const uploadArray = (data: GrowBuffer<Float32Array> | GrowBuffer<Uint32Array>): WebGLBuffer | null => {
     if (!data.length) return null;
     const buf = gl.createBuffer();
     if (!buf) return null;
@@ -773,7 +795,7 @@ export function compilePrimitivesToGpu(
       batches: fillBatches,
     },
     line: {
-      vertexBuffer: uploadArray(lineVerts),
+      vertexBuffer: uploadArray(packedLines ? lineVertsPacked : lineVerts),
       indexBuffer: uploadIndex(lineIdx),
       batches: lineBatches,
     },
