@@ -6,7 +6,7 @@
 // Prioritäts-Reihenfolge (Vorrang bei nahem Abstand): endpoint > intersection >
 // midpoint > onEdge > grid; ortho/Winkelraster ist eine Projektion (überlagert).
 
-import type { Project, Vec2, Wall } from "../model/types";
+import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
 import { add, leftNormal, lineIntersect, normalize, scale, sub } from "../model/geometry";
 import { wallReferenceOffset } from "../model/wall";
@@ -15,6 +15,7 @@ import { columnFootprint } from "../geometry/column";
 import { stairOutline } from "../geometry/stair";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
 import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "./curves";
+import { buildDrawingIndex, drawingsNear, isIndexable, pointSegDist, type DrawingIndex } from "../geometry/drawingIndex";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -94,8 +95,105 @@ function closedPolySegs(pts: Vec2[]): Seg[] {
   return segs;
 }
 
+/** Strecken EINER Zeichnung (Fangkandidaten), je nach Form. */
+function drawingSegs(d: Drawing2D, segs: Seg[]): void {
+  const g = d.geom;
+  if (g.shape === "line") segs.push([g.a, g.b]);
+  else if (g.shape === "xline") {
+    // Weit verlängert (wie beim Rendern) — Lot-/Nächster-Punkt-Snap soll
+    // entlang der ganzen (optisch unendlichen) Linie greifen, nicht nur
+    // zwischen den beiden gesetzten Punkten.
+    const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 1e-6) {
+      const ux = dx / len, uy = dy / len, ext = 1000;
+      segs.push([
+        { x: g.a.x - ux * ext, y: g.a.y - uy * ext },
+        { x: g.b.x + ux * ext, y: g.b.y + uy * ext },
+      ]);
+    }
+  }
+  else if (g.shape === "ray") {
+    // Wie xline, aber NUR über `b` hinaus verlängert (Anker `a` bleibt fest).
+    const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 1e-6) {
+      const ux = dx / len, uy = dy / len, ext = 1000;
+      segs.push([g.a, { x: g.b.x + ux * ext, y: g.b.y + uy * ext }]);
+    }
+  }
+  else if (g.shape === "polyline") {
+    for (let i = 0; i < g.pts.length - 1; i++) segs.push([g.pts[i], g.pts[i + 1]]);
+    if (g.closed && g.pts.length > 2) segs.push([g.pts[g.pts.length - 1], g.pts[0]]);
+  } else if (g.shape === "rect") {
+    const c1 = g.min, c3 = g.max;
+    const c2 = { x: g.max.x, y: g.min.y }, c4 = { x: g.min.x, y: g.max.y };
+    segs.push([c1, c2], [c2, c3], [c3, c4], [c4, c1]);
+  } else if (g.shape === "bezier") {
+    const pts = sampleBezierChain(g.pts);
+    for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
+  } else if (g.shape === "spline") {
+    const closed = g.closed && g.pts.length > 2;
+    const pts = g.mode === "control" ? sampleUniformBSpline(g.pts, closed) : sampleCatmullRom(g.pts, closed);
+    for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
+    if (closed) segs.push([pts[pts.length - 1], pts[0]]);
+  }
+}
+
+/** Kreise/Bögen/Ellipsen & Co.: bei grossen Projekten ohne die vielen Linien. */
+function nonLineDrawings(all: readonly Drawing2D[]): readonly Drawing2D[] {
+  return all.length > LARGE_DRAWINGS ? getSnapIndex(all).others : all;
+}
+
+/** Ab so vielen Zeichnungen: nur Strecken in Cursornähe (Raster-Index) statt aller. */
+const LARGE_DRAWINGS = 2000;
+
+interface SnapDrawingIndex {
+  /** Linien/Polylinien (Massenfall), räumlich indiziert. */
+  index: DrawingIndex | null;
+  /** Alle übrigen Formen (Kreis, Bogen, Rechteck, Spline, …) — wenige, immer geprüft. */
+  others: Drawing2D[];
+}
+const snapIndexCache = new WeakMap<readonly Drawing2D[], SnapDrawingIndex>();
+/** Index je `drawings2d`-Array-Identität (Projekt-Updates teilen unveränderte Arrays). */
+function getSnapIndex(drawings: readonly Drawing2D[]): SnapDrawingIndex {
+  let c = snapIndexCache.get(drawings);
+  if (!c) {
+    const indexable: Drawing2D[] = [];
+    const others: Drawing2D[] = [];
+    for (const d of drawings) (isIndexable(d) ? indexable : others).push(d);
+    c = { index: buildDrawingIndex(indexable), others };
+    snapIndexCache.set(drawings, c);
+  }
+  return c;
+}
+
+/**
+ * Zeichnungen des Geschosses, die für den Fang in Frage kommen: bei grossen
+ * Projekten (Kataster-Import, ~10^5 Zeichnungen) nur die in `r` Umkreis von `at`
+ * (+ alle Nicht-Linien-Formen), sonst alle.
+ */
+function snapDrawings(input: SnapInput, near?: { at: Vec2; r: number }): Drawing2D[] {
+  const all = input.project.drawings2d;
+  const ok = (d: Drawing2D) => d.levelId === input.levelId && input.visibleCodes.has(d.categoryCode);
+  const out: Drawing2D[] = [];
+  if (near && all.length > LARGE_DRAWINGS) {
+    const c = getSnapIndex(all);
+    if (c.index) {
+      for (const i of drawingsNear(c.index, near.at, near.r)) {
+        const d = c.index.drawings[i];
+        if (ok(d)) out.push(d);
+      }
+    }
+    for (const d of c.others) if (ok(d)) out.push(d);
+    return out;
+  }
+  for (const d of all) if (ok(d)) out.push(d);
+  return out;
+}
+
 /** Sammelt alle sichtbaren Strecken des Geschosses (Wandachsen + 2D-Segmente). */
-function collectSegments(input: SnapInput): Seg[] {
+function collectSegments(input: SnapInput, near?: { at: Vec2; r: number }): Seg[] {
   const segs: Seg[] = [];
   for (const w of input.project.walls) {
     if (w.floorId !== input.levelId) continue;
@@ -135,51 +233,7 @@ function collectSegments(input: SnapInput): Seg[] {
     if (col.profile.kind === "rect") segs.push(...closedPolySegs(columnFootprint(col)));
     // Runde Stützen: s. collectCircles (Zentrum/Quadranten statt Vieleck-Kanten).
   }
-  for (const d of input.project.drawings2d) {
-    if (d.levelId !== input.levelId) continue;
-    if (!input.visibleCodes.has(d.categoryCode)) continue;
-    const g = d.geom;
-    if (g.shape === "line") segs.push([g.a, g.b]);
-    else if (g.shape === "xline") {
-      // Weit verlängert (wie beim Rendern) — Lot-/Nächster-Punkt-Snap soll
-      // entlang der ganzen (optisch unendlichen) Linie greifen, nicht nur
-      // zwischen den beiden gesetzten Punkten.
-      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 1e-6) {
-        const ux = dx / len, uy = dy / len, ext = 1000;
-        segs.push([
-          { x: g.a.x - ux * ext, y: g.a.y - uy * ext },
-          { x: g.b.x + ux * ext, y: g.b.y + uy * ext },
-        ]);
-      }
-    }
-    else if (g.shape === "ray") {
-      // Wie xline, aber NUR über `b` hinaus verlängert (Anker `a` bleibt fest).
-      const dx = g.b.x - g.a.x, dy = g.b.y - g.a.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 1e-6) {
-        const ux = dx / len, uy = dy / len, ext = 1000;
-        segs.push([g.a, { x: g.b.x + ux * ext, y: g.b.y + uy * ext }]);
-      }
-    }
-    else if (g.shape === "polyline") {
-      for (let i = 0; i < g.pts.length - 1; i++) segs.push([g.pts[i], g.pts[i + 1]]);
-      if (g.closed && g.pts.length > 2) segs.push([g.pts[g.pts.length - 1], g.pts[0]]);
-    } else if (g.shape === "rect") {
-      const c1 = g.min, c3 = g.max;
-      const c2 = { x: g.max.x, y: g.min.y }, c4 = { x: g.min.x, y: g.max.y };
-      segs.push([c1, c2], [c2, c3], [c3, c4], [c4, c1]);
-    } else if (g.shape === "bezier") {
-      const pts = sampleBezierChain(g.pts);
-      for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
-    } else if (g.shape === "spline") {
-      const closed = g.closed && g.pts.length > 2;
-      const pts = g.mode === "control" ? sampleUniformBSpline(g.pts, closed) : sampleCatmullRom(g.pts, closed);
-      for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
-      if (closed) segs.push([pts[pts.length - 1], pts[0]]);
-    }
-  }
+  for (const d of snapDrawings(input, near)) drawingSegs(d, segs);
   // Bereits gesetzte Draft-Segmente (Polylinie/Wand im Bau).
   for (let i = 0; i < input.draftPoints.length - 1; i++) {
     segs.push([input.draftPoints[i], input.draftPoints[i + 1]]);
@@ -202,7 +256,7 @@ interface CircleGeom {
  */
 function collectCircles(input: SnapInput): CircleGeom[] {
   const out: CircleGeom[] = [];
-  for (const d of input.project.drawings2d) {
+  for (const d of nonLineDrawings(input.project.drawings2d)) {
     if (d.levelId !== input.levelId) continue;
     if (!input.visibleCodes.has(d.categoryCode)) continue;
     const g = d.geom;
@@ -333,7 +387,30 @@ export function computeSnap(input: SnapInput): SnapResult | null {
     settings.endpoint ||
     settings.perpendicular ||
     settings.parallel;
-  const segs = needSegs ? collectSegments(input) : [];
+  // Bei grossen Projekten (Kataster-Import: ~10^5 Zeichnungen, Mio. Strecken) NUR
+  // die Strecken in Cursornähe — vorher wurde bei JEDER Mausbewegung die ganze
+  // Liste gebaut und der Schnittpunkt-Fang prüfte ALLE Paare (O(N²): die Seite
+  // blockierte beim ersten Klick eines Zeichenwerkzeugs). Kleine Projekte bleiben
+  // exakt wie bisher.
+  const nearMode = input.project.drawings2d.length > LARGE_DRAWINGS;
+  const intRadius = tolM * 6;
+  let segs: Seg[] = [];
+  let intSegs: Seg[] = [];
+  if (needSegs) {
+    if (nearMode) {
+      const cand = collectSegments(input, { at: raw, r: intRadius });
+      const withDist = cand
+        .map((seg) => ({ seg, d: pointSegDist(raw, seg[0], seg[1]) }))
+        .filter((e) => e.d <= intRadius)
+        .sort((x, y) => x.d - y.d);
+      segs = withDist.filter((e) => e.d <= tolM).map((e) => e.seg);
+      // Schnittpunkte nur unter den nächsten Strecken (paarweise → quadratisch).
+      intSegs = withDist.slice(0, 64).map((e) => e.seg);
+    } else {
+      segs = collectSegments(input);
+      intSegs = segs;
+    }
+  }
 
   // Teilpunkt-Verweilerkennung: braucht dieselben Strecken wie oben. Ohne sie
   // (alle Objekt-Snap-Arten aus) bleiben "divide"/"parallel" ebenfalls inaktiv
@@ -407,10 +484,10 @@ export function computeSnap(input: SnapInput): SnapResult | null {
   }
   // intersection (paarweise Geraden-Schnitt der Strecken, nahe am Cursor).
   if (settings.intersection) {
-    for (let i = 0; i < segs.length; i++) {
-      for (let j = i + 1; j < segs.length; j++) {
-        const [a, b] = segs[i];
-        const [c, d] = segs[j];
+    for (let i = 0; i < intSegs.length; i++) {
+      for (let j = i + 1; j < intSegs.length; j++) {
+        const [a, b] = intSegs[i];
+        const [c, d] = intSegs[j];
         const x = lineIntersect(a, { x: b.x - a.x, y: b.y - a.y }, c, {
           x: d.x - c.x,
           y: d.y - c.y,
@@ -475,7 +552,7 @@ export function computeSnap(input: SnapInput): SnapResult | null {
     // Ellipse: nur der Mittelpunkt (keine Quadranten — bei gedrehter Ellipse
     // wären die "Achsenpunkte" ohnehin keine Kreis-Quadranten mehr).
     if (settings.center) {
-      for (const d of input.project.drawings2d) {
+      for (const d of nonLineDrawings(input.project.drawings2d)) {
         if (d.levelId !== input.levelId) continue;
         if (!input.visibleCodes.has(d.categoryCode)) continue;
         if (d.geom.shape === "ellipse") consider(d.geom.center, "center");

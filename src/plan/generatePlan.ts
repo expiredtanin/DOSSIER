@@ -78,7 +78,7 @@ import {
   drawingLinePrims,
   isCompactUnderlayEligible,
 } from "./generatePlan/drawing2d";
-import { drawingBox } from "./generatePlan/drawingBounds";
+import { drawingBox } from "../geometry/drawingBounds";
 import { addDoorSymbol, addOpeningSymbol } from "./generatePlan/openings";
 import { addRoof } from "./generatePlan/roofs";
 import { addRoomArea } from "./generatePlan/rooms";

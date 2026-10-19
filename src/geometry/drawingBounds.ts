@@ -2,7 +2,7 @@
 // Zeichnungen (Structural Sharing) — ihre Box muss nicht bei jedem Plan-Aufbau
 // neu über alle Punkte berechnet werden (bei einem Kataster-Import 3,7 Mio.).
 
-import type { Drawing2D, Vec2 } from "../../model/types";
+import type { Drawing2D, Vec2 } from "../model/types";
 
 export interface Box {
   minX: number;

@@ -707,3 +707,61 @@ describe("computeSnap — Spline (fit- vs. control-Modus)", () => {
     expect(r?.point.y).toBeCloseTo(0, 6);
   });
 });
+
+// ── Grosse Projekte (Kataster-Import): Fang nur in Cursornähe ────────────────
+// Regression: bei ~10^5 Zeichnungen baute computeSnap bei JEDER Mausbewegung die
+// Liste aller Strecken und prüfte beim Schnittpunkt-Fang alle Paare (O(N²)) —
+// die Seite blockierte beim ersten Klick eines Zeichenwerkzeugs.
+
+describe("computeSnap — grosse Projekte", () => {
+  const ALL = { ...DEFAULT_SNAP, endpoint: true, midpoint: true, onEdge: true, intersection: true, perpendicular: true };
+
+  /** Gemeinsame Geometrie nahe am Ursprung + (optional) viele weit entfernte Linien. */
+  const geoms = (far: number): Drawing2D["geom"][] => {
+    const near: Drawing2D["geom"][] = [
+      { shape: "line", a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+      { shape: "line", a: { x: 2, y: -2 }, b: { x: 2, y: 2 } },
+      { shape: "polyline", pts: [{ x: 6, y: 0 }, { x: 8, y: 1 }, { x: 8, y: 3 }], closed: false },
+      { shape: "circle", center: { x: -3, y: 0 }, r: 1 },
+    ];
+    for (let i = 0; i < far; i++) {
+      const x = 1000 + (i % 200) * 5, y = 1000 + Math.floor(i / 200) * 5;
+      near.push({ shape: "line", a: { x, y }, b: { x: x + 3, y: y + 2 } });
+    }
+    return near;
+  };
+
+  it("liefert in Cursornähe dasselbe wie das kleine Projekt (End-/Mittel-/Schnitt-/Randpunkt)", () => {
+    const small = drawProject(geoms(0));
+    const large = drawProject(geoms(3000)); // > Schwelle → Nähe-Modus
+    const probes: Vec2[] = [
+      { x: 0.02, y: 0.03 }, // Endpunkt
+      { x: 2.01, y: 0.02 }, // Schnittpunkt der beiden Linien
+      { x: 1.0, y: 0.015 }, // Rand der ersten Linie
+      { x: 8.01, y: 2.0 }, // Polylinie
+      { x: -2.0, y: 0.01 }, // Kreis (Quadrant)
+      { x: 3.0, y: 0.02 },
+    ];
+    for (const raw of probes) {
+      const a = snapAt(small, raw, ALL);
+      const b = snapAt(large, raw, ALL);
+      expect(b?.kind).toBe(a?.kind);
+      expect(b?.point.x ?? NaN).toBeCloseTo(a?.point.x ?? NaN, 9);
+      expect(b?.point.y ?? NaN).toBeCloseTo(a?.point.y ?? NaN, 9);
+    }
+  });
+
+  it("fängt auch zwischen den vielen entfernten Linien (Endpunkt) und bleibt schnell", () => {
+    const big = drawProject(geoms(60000)); // ~ Grössenordnung eines Kataster-Imports
+    const t = performance.now();
+    const r = snapAt(big, { x: 1000.01, y: 1000.01 }, ALL);
+    const first = performance.now() - t; // inkl. einmaligem Aufbau des Index
+    expect(r?.kind).toBe("endpoint");
+    expect(r!.point.x).toBeCloseTo(1000, 6);
+    const t2 = performance.now();
+    for (let i = 0; i < 20; i++) snapAt(big, { x: 1000.01 + i * 0.001, y: 1000.01 }, ALL);
+    const perCall = (performance.now() - t2) / 20;
+    expect(first).toBeLessThan(3000);
+    expect(perCall).toBeLessThan(50);
+  });
+});
