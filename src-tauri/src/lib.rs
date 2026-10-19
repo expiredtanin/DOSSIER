@@ -126,6 +126,37 @@ fn native2d_upload(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> R
     Ok(())
 }
 
+/// Puffer-Patch: alten Puffer (`x-from`) unter neuer ID (`x-to`) weiterfuehren und
+/// nur die Bereiche aus `x-ranges` ("offset:laenge,offset:laenge") ueberschreiben.
+/// Body = die Bytes dieser Bereiche hintereinander. `false` → Aufrufer sendet voll.
+#[tauri::command]
+fn native2d_patch(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<bool, String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let h = request.headers();
+        let get = |k: &str| h.get(k).and_then(|v| v.to_str().ok()).map(|v| v.to_string());
+        let from: u32 = get("x-from").and_then(|v| v.parse().ok()).ok_or("x-from fehlt")?;
+        let to: u32 = get("x-to").and_then(|v| v.parse().ok()).ok_or("x-to fehlt")?;
+        let ranges: Vec<(u64, u64)> = get("x-ranges")
+            .ok_or("x-ranges fehlt")?
+            .split(',')
+            .filter_map(|r| {
+                let (o, l) = r.split_once(':')?;
+                Some((o.parse().ok()?, l.parse().ok()?))
+            })
+            .collect();
+        let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+            return Err("Rohdaten erwartet".into());
+        };
+        return Ok(native_embed::patch(&app, from, to, &ranges, bytes));
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    {
+        let _ = (app, request);
+        Ok(false)
+    }
+}
+
 #[tauri::command]
 fn native2d_layout(app: tauri::AppHandle, layout: serde_json::Value, delete: Vec<u32>) -> Result<(), String> {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
@@ -216,6 +247,7 @@ pub fn run() {
         native2d_embed_available,
         native2d_embed_hide,
         native2d_upload,
+        native2d_patch,
         native2d_layout,
         native2d_frame,
         native2d_texts,
@@ -231,6 +263,7 @@ pub fn run() {
         native2d_embed_available,
         native2d_embed_hide,
         native2d_upload,
+        native2d_patch,
         native2d_layout,
         native2d_frame,
         native2d_texts,

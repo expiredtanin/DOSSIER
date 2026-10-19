@@ -232,3 +232,11 @@ pub fn set_texts(app: &AppHandle, upsert: Vec<TextIn>, remove: Vec<u32>) -> bool
         None => false,
     }
 }
+
+/// Geaenderte Bereiche eines Puffers einspielen und ihn unter neuer ID fuehren.
+pub fn patch(app: &AppHandle, from: u32, to: u32, ranges: &[(u64, u64)], bytes: &[u8]) -> bool {
+    match app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        Some(e) => e.renderer.patch(&e.queue, from, to, ranges, bytes),
+        None => false,
+    }
+}

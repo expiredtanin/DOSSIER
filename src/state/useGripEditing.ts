@@ -9,7 +9,7 @@ import { useRef, useState, type RefObject } from "react";
 import { add, dot, leftNormal, normalize, scale, sub } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { drawingVertices } from "./projectSlice";
-import type { SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
+import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
 import type { CommandLineHandle } from "../ui/CommandLine";
@@ -446,6 +446,11 @@ export function useGripEditing(opts: {
   // Letzter roher Cursor des laufenden Vertex-Drags (für die Lock-Auflösung beim
   // Tippen, wenn gerade kein Move-Event kommt). Plus der gezogene Griff-Index.
   const gripDragInfoRef = useRef<{ index: number; raw: Vec2 } | null>(null);
+  // AUSSTEHENDER Vertex-Zug eines Polylinien-Elements: Während des Ziehens wird das
+  // PROJEKT NICHT verändert (sonst rechnet jede Mausbewegung den ganzen Plan neu —
+  // bei Katasterdaten Sekunden); nur eine Vorschau (`gripPreviewShapes`) wird
+  // gezeichnet. Erst beim Setzen des Punkts (onGripEnd) geht EINE Mutation ins Projekt.
+  const pendingGripRef = useRef<{ drawingId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
   // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
   // Grab verankert) — Bezugspunkt für die Flucht-Kandidaten unten (die
   // Nachbarkanten müssen an ihrer URSPRÜNGLICHEN, nicht der schon verschobenen
@@ -817,14 +822,36 @@ export function useGripEditing(opts: {
       // Mehrfachauswahl: welchem Element dieser Griff gehört, kommt aus
       // `gripOwners` (nicht mehr aus den singulären selectedDrawingId/-WallId).
       const owner = gripOwners[index];
-      moveGripOf(
-        owner?.drawingId ?? selectedDrawingId,
-        owner?.wallId ?? selectedWallId,
-        owner?.localIndex ?? index,
-        pt,
-        scaleDenominator,
-      );
+      const dId = owner?.drawingId ?? selectedDrawingId;
+      const wId = owner?.wallId ?? selectedWallId;
+      const local = owner?.localIndex ?? index;
+      // Polylinien-Eckpunkt: nur merken + Vorschau, Projekt erst beim Setzen ändern.
+      if (dId && !wId) {
+        const d = project.drawings2d.find((x) => x.id === dId);
+        if (d && !d.locked && d.geom.shape === "polyline" && local < d.geom.pts.length) {
+          pendingGripRef.current = { drawingId: dId, localIndex: local, flat: index, pt };
+          return;
+        }
+      }
+      moveGripOf(dId, wId, local, pt, scaleDenominator);
     }
+  };
+
+  /** Vorschau-Form des ausstehenden Eckpunkt-Zugs (leer, wenn keiner läuft). */
+  const gripPreviewShapes = (): DraftShape[] => {
+    const pend = pendingGripRef.current;
+    if (!pend) return [];
+    const d = project.drawings2d.find((x) => x.id === pend.drawingId);
+    if (!d || d.geom.shape !== "polyline") return [];
+    const pts = d.geom.pts.map((q, i) => (i === pend.localIndex ? pend.pt : q));
+    return [{ kind: "poly", pts, closed: !!d.geom.closed }];
+  };
+
+  /** Ausstehenden Zug jetzt in das Projekt schreiben (EINE Mutation). */
+  const commitPendingGrip = () => {
+    const pend = pendingGripRef.current;
+    pendingGripRef.current = null;
+    if (pend) moveGripOf(pend.drawingId, null, pend.localIndex, pend.pt, scaleDenominator);
   };
   const applyEdge = (edge: EdgeGrip, delta: Vec2) => {
     if (selectedRoomId) moveRoomEdge(selectedRoomId, edge.aIndex, edge.bIndex, delta);
@@ -880,6 +907,7 @@ export function useGripEditing(opts: {
     edgeAppliedDeltaRef.current = null; // Kanten-Drag beendet → Anker zurücksetzen
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
     gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
+    pendingGripRef.current = null; // (commitPendingGrip hat sie vorher schon geschrieben)
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
     setGripEdit(null); // (c) Feld-Controller schließen
     edgeDragInfoRef.current = null; // Kanten-Drag-Info verwerfen
@@ -901,7 +929,7 @@ export function useGripEditing(opts: {
       if (ge && (ge.locks.length != null || ge.locks.angle != null)) {
         const pt = gripEditPoint(ge.anchor, ge.locks, raw);
         applyGrip(index, pt);
-        setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
+        setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
       }
       // Mehrfachauswahl: das Element, dem DIESER Griff gehört (nicht zwingend
@@ -944,7 +972,7 @@ export function useGripEditing(opts: {
         }
         const pt = closestAxisPoint(raw, candidates) ?? applyAngleConstraint(anchor, raw, 90);
         applyGrip(index, pt);
-        setDraft({ preview: [], vertices: [], snap: null, hud: hudFor(index, pt) });
+        setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
       }
       // Snap gegen das Projekt OHNE das gerade gezogene Element (sonst fängt der
@@ -964,7 +992,7 @@ export function useGripEditing(opts: {
       });
       const pt = snapResult?.point ?? raw;
       applyGrip(index, pt);
-      setDraft({ preview: [], vertices: [], snap: snapResult, hud: hudFor(index, pt) });
+      setDraft({ preview: gripPreviewShapes(), vertices: [], snap: snapResult, hud: hudFor(index, pt) });
     },
     onMoveBody: (
       delta: Vec2,
@@ -1079,13 +1107,16 @@ export function useGripEditing(opts: {
       });
     },
     onGripEnd: () => {
+      commitPendingGrip();
       endEditing();
     },
     // Bewaffneten Punkt-Griff verwerfen (Escape): exakt auf `origin`
     // zurücksetzen — ohne Snap/Ortho-Neuauswertung, ein reiner Revert — und
     // danach wie onGripEnd aufräumen.
     onGripCancel: (index: number, origin: Vec2) => {
-      applyGrip(index, origin);
+      // Ausstehender Zug: einfach verwerfen (das Projekt wurde nie verändert).
+      if (pendingGripRef.current) pendingGripRef.current = null;
+      else applyGrip(index, origin);
       endEditing();
     },
     onEdgeEnd: () => {
@@ -1100,8 +1131,12 @@ export function useGripEditing(opts: {
     },
   };
 
+  // Der gezogene Griff folgt der Vorschau (das Projekt bleibt bis zum Setzen unverändert).
+  const pendingNow = pendingGripRef.current;
+  const displayGrips = pendingNow ? grips.map((g, i) => (i === pendingNow.flat ? pendingNow.pt : g)) : grips;
+
   return {
-    grips,
+    grips: displayGrips,
     gripHandleLines,
     edgeGrips,
     gripHandlers,

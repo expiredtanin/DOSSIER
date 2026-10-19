@@ -402,9 +402,32 @@ impl ChunkRenderer {
         let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("chunks.buf"),
             contents: &bytes[..len],
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
         });
         self.buffers.insert(id, buf);
+    }
+
+    /// Aendert einen vorhandenen Puffer ab und legt ihn unter einer NEUEN ID ab:
+    /// nur die geaenderten Bereiche (`ranges` = (Offset, Laenge) in Bytes, `bytes` =
+    /// deren Inhalte hintereinander) werden geschrieben. Gibt `false` zurueck, wenn
+    /// der alte Puffer fehlt oder die Angaben nicht passen (Aufrufer sendet dann voll).
+    pub fn patch(&mut self, queue: &wgpu::Queue, from: u32, to: u32, ranges: &[(u64, u64)], bytes: &[u8]) -> bool {
+        let total: u64 = ranges.iter().map(|r| r.1).sum();
+        if total != bytes.len() as u64 {
+            return false;
+        }
+        let Some(buf) = self.buffers.get(&from) else { return false };
+        if ranges.iter().any(|(o, l)| o % 4 != 0 || l % 4 != 0 || o + l > buf.size()) {
+            return false;
+        }
+        let buf = self.buffers.remove(&from).unwrap();
+        let mut pos = 0usize;
+        for (off, len) in ranges {
+            queue.write_buffer(&buf, *off, &bytes[pos..pos + *len as usize]);
+            pos += *len as usize;
+        }
+        self.buffers.insert(to, buf);
+        true
     }
 
     pub fn delete(&mut self, ids: &[u32]) {
