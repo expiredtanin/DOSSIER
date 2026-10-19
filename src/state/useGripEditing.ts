@@ -9,6 +9,8 @@ import { useRef, useState, type RefObject } from "react";
 import { add, dot, leftNormal, normalize, scale, sub } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { drawingVertices } from "./projectSlice";
+import { mvGeom } from "../tools/transform";
+import { drawingPreviewShapes } from "../tools/drawingPreview";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
@@ -207,19 +209,34 @@ export function useGripEditing(opts: {
     // bei der Auswahl selbst — s. die vielen `!selectedDrawingId`-Wächter, die
     // dieses Modul vorher hatte).
     const out: Vec2[] = [];
-    const pushGroup = (pts: Vec2[], owner: { drawingId?: string; wallId?: string }) => {
+    const pushGroup = (
+      pts: Vec2[],
+      owner: { drawingId?: string; wallId?: string },
+      keep?: (localIndex: number) => boolean,
+    ) => {
       if (pts.length === 0) return;
       const start = out.length;
       pts.forEach((p, i) => {
+        if (keep && !keep(i)) return;
         out.push(p);
         gripOwners.push({ ...owner, localIndex: i });
       });
+      if (out.length === start) return;
       const end = out.length - 1;
       for (let i = start; i <= end; i++) gripOwnerRange.push([start, end]);
     };
     for (const id of gripDrawingIds) {
       const d = project.drawings2d.find((x) => x.id === id);
-      if (d) pushGroup(drawingVertices(d, scaleDenominator), { drawingId: id });
+      if (!d) continue;
+      // Polylinie (ArchiCAD-artig): Segment-Mitten-Griffe NUR an Bogen-Segmenten —
+      // ein gerades Segment soll beim Anfassen nicht versehentlich zum Bogen werden.
+      // Bögen entstehen gezielt über den Punkttyp (Kontextmenü: Bogen-/Splinepunkt).
+      const g = d.geom;
+      const keep =
+        g.shape === "polyline"
+          ? (i: number) => i < g.pts.length || Math.abs(g.bulge?.[i - g.pts.length] ?? 0) > 1e-9
+          : undefined;
+      pushGroup(drawingVertices(d, scaleDenominator), { drawingId: id }, keep);
     }
     if (effectiveDrawingIds.length === 0) {
       for (const id of selectedWallIds) {
@@ -451,6 +468,10 @@ export function useGripEditing(opts: {
   // bei Katasterdaten Sekunden); nur eine Vorschau (`gripPreviewShapes`) wird
   // gezeichnet. Erst beim Setzen des Punkts (onGripEnd) geht EINE Mutation ins Projekt.
   const pendingGripRef = useRef<{ drawingId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
+  // Dasselbe für das Verschieben eines ganzen 2D-Elements (Gesamt-Delta) und für
+  // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
+  const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
+  const pendingEdgeRef = useRef<{ edge: EdgeGrip; delta: Vec2 } | null>(null);
   // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
   // Grab verankert) — Bezugspunkt für die Flucht-Kandidaten unten (die
   // Nachbarkanten müssen an ihrer URSPRÜNGLICHEN, nicht der schon verschobenen
@@ -853,6 +874,56 @@ export function useGripEditing(opts: {
     pendingGripRef.current = null;
     if (pend) moveGripOf(pend.drawingId, null, pend.localIndex, pend.pt, scaleDenominator);
   };
+
+  /** Polylinien-Element (nicht gesperrt), dessen Änderung aufgeschoben werden darf. */
+  const deferrableDrawing = (id: string | null | undefined) => {
+    if (!id) return null;
+    const d = project.drawings2d.find((x) => x.id === id);
+    return d && !d.locked ? d : null;
+  };
+
+  /** Vorschau eines aufgeschobenen Körper-Verschiebens (Element um das Gesamt-Delta versetzt). */
+  const bodyPreviewShapes = (): DraftShape[] => {
+    const pend = pendingBodyRef.current;
+    if (!pend) return [];
+    const d = deferrableDrawing(pend.drawingId);
+    if (!d) return [];
+    const { x: tx, y: ty } = pend.total;
+    const moved = { ...d, geom: mvGeom(d.geom, (q: Vec2) => ({ x: q.x + tx, y: q.y + ty })) };
+    return drawingPreviewShapes(project, moved, scaleDenominator);
+  };
+
+  /** Vorschau eines aufgeschobenen Kanten-Zugs (beide Kanten-Ecken um das Delta versetzt). */
+  const edgePreviewShapes = (): DraftShape[] => {
+    const pend = pendingEdgeRef.current;
+    if (!pend) return [];
+    const d = deferrableDrawing(pend.edge.owner?.drawingId ?? selectedDrawingId);
+    if (!d || d.geom.shape !== "polyline") return [];
+    const { aIndex, bIndex } = pend.edge;
+    const pts = d.geom.pts.map((q, i) =>
+      i === aIndex || i === bIndex ? { x: q.x + pend.delta.x, y: q.y + pend.delta.y } : q,
+    );
+    return [{ kind: "poly", pts, closed: !!d.geom.closed }];
+  };
+
+  /** Aufgeschobenes Körper-Verschieben jetzt ins Projekt schreiben. */
+  const commitPendingBody = () => {
+    const pend = pendingBodyRef.current;
+    pendingBodyRef.current = null;
+    if (!pend || (pend.total.x === 0 && pend.total.y === 0)) return;
+    moveElementByOf(pend.drawingId, null, pend.total);
+    for (const c of moveCoincidentRef.current ?? []) {
+      moveGripOf(c.drawingId, c.wallId, c.index, { x: c.pos.x + pend.total.x, y: c.pos.y + pend.total.y }, scaleDenominator);
+    }
+  };
+
+  /** Aufgeschobenen Kanten-Zug jetzt ins Projekt schreiben (EIN additives Delta). */
+  const commitPendingEdge = () => {
+    const pend = pendingEdgeRef.current;
+    pendingEdgeRef.current = null;
+    if (!pend || (pend.delta.x === 0 && pend.delta.y === 0)) return;
+    applyEdge(pend.edge, pend.delta);
+  };
   const applyEdge = (edge: EdgeGrip, delta: Vec2) => {
     if (selectedRoomId) moveRoomEdge(selectedRoomId, edge.aIndex, edge.bIndex, delta);
     else if (selectedCeilingId) moveCeilingEdge(selectedCeilingId, edge.aIndex, edge.bIndex, delta);
@@ -865,6 +936,14 @@ export function useGripEditing(opts: {
   // die Differenz zum vorherigen Delta macht die ganze Verschiebung rückgängig).
   const applyEdgeToward = (edge: EdgeGrip, anchor: Vec2, pt: Vec2) => {
     const desired = sub(pt, anchor);
+    // Polylinien-Kante: nur Vorschau, das Projekt ändert sich erst beim Setzen.
+    if (!selectedRoomId && !selectedCeilingId && !edge.owner?.wallId) {
+      const d = deferrableDrawing(edge.owner?.drawingId ?? selectedDrawingId);
+      if (d && d.geom.shape === "polyline") {
+        pendingEdgeRef.current = { edge, delta: desired };
+        return;
+      }
+    }
     const prev = edgeAppliedDeltaRef.current;
     edgeAppliedDeltaRef.current = desired;
     if (prev === null) return; // erster Event verankert nur (kein Sprung beim Greifen)
@@ -908,6 +987,8 @@ export function useGripEditing(opts: {
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
     gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
     pendingGripRef.current = null; // (commitPendingGrip hat sie vorher schon geschrieben)
+    pendingBodyRef.current = null;
+    pendingEdgeRef.current = null;
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
     setGripEdit(null); // (c) Feld-Controller schließen
     edgeDragInfoRef.current = null; // Kanten-Drag-Info verwerfen
@@ -1027,6 +1108,24 @@ export function useGripEditing(opts: {
       // sonst das einzeln selektierte. Wand UND 2D schließen sich aus.
       const moveDrawingId = target ? target.drawingId ?? null : selectedDrawingId;
       const moveWallId = target ? target.wallId ?? null : selectedWallId;
+      // 2D-Element: nur Gesamt-Delta merken + Vorschau; Projekt erst beim Loslassen.
+      const bodyDrawing = moveDrawingId && !moveWallId ? deferrableDrawing(moveDrawingId) : null;
+      // Nur Formen mit sichtbarer Umriss-Vorschau aufschieben (Text/Kreis/Bemassung
+      // bleiben beim Live-Verschieben, sonst sähe man während des Ziehens nichts).
+      // Alle 2D-Formen haben eine Vorschau (s. tools/drawingPreview.ts).
+      const previewable = !!bodyDrawing;
+      if (moveDrawingId && previewable) {
+        if (moveCoincidentRef.current === null) {
+          moveCoincidentRef.current = findMoveCoincident2D(moveDrawingId, null);
+        }
+        const prev = pendingBodyRef.current;
+        const total = prev && prev.drawingId === moveDrawingId
+          ? { x: prev.total.x + delta.x, y: prev.total.y + delta.y }
+          : delta;
+        pendingBodyRef.current = { drawingId: moveDrawingId, total };
+        setDraft({ preview: bodyPreviewShapes(), vertices: [], snap: null });
+        return;
+      }
       moveElementByOf(moveDrawingId, moveWallId, delta);
       // Beim ersten Move-Event die Koinzidenz-Gruppe einmalig bestimmen (Snapshot
       // VOR der ersten Mutation der Siblings). Danach inkrementell mitführen.
@@ -1057,7 +1156,7 @@ export function useGripEditing(opts: {
       if (ee && (ee.locks.length != null || ee.locks.angle != null)) {
         const pt = edgeEditPoint(edge, anchor, ee.locks, raw);
         applyEdgeToward(edge, anchor, pt);
-        setDraft({ preview: [], vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
+        setDraft({ preview: edgePreviewShapes(), vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
         return;
       }
       if (edge.free) {
@@ -1077,7 +1176,7 @@ export function useGripEditing(opts: {
           pt = { x: anchor.x + dx, y: anchor.y + dy };
         }
         applyEdgeToward(edge, anchor, pt);
-        setDraft({ preview: [], vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
+        setDraft({ preview: edgePreviewShapes(), vertices: [], snap: null, hud: edgeHudFor(edge, anchor, pt) });
         return;
       }
       // Cursor zuerst durch die Snap-Engine schicken (Ctrl unterdrückt Snap
@@ -1100,7 +1199,7 @@ export function useGripEditing(opts: {
       const pt = add(anchor, scale(edge.normal, offset));
       applyEdgeToward(edge, anchor, pt);
       setDraft({
-        preview: [],
+        preview: edgePreviewShapes(),
         vertices: [],
         snap: isGeometrySnap ? snapResult : null,
         hud: edgeHudFor(edge, anchor, pt),
@@ -1108,6 +1207,7 @@ export function useGripEditing(opts: {
     },
     onGripEnd: () => {
       commitPendingGrip();
+      commitPendingBody();
       endEditing();
     },
     // Bewaffneten Punkt-Griff verwerfen (Escape): exakt auf `origin`
@@ -1120,13 +1220,16 @@ export function useGripEditing(opts: {
       endEditing();
     },
     onEdgeEnd: () => {
+      commitPendingEdge();
       endEditing();
     },
     // Bewaffneten Kanten-Griff verwerfen (Escape): Ziel = Anker selbst (Delta
     // 0) — applyEdgeToward macht dadurch die komplette bisherige Verschiebung
     // in einem Schritt rückgängig (negatives Delta zum zuletzt angewandten).
     onEdgeCancel: (edge: EdgeGrip, anchor: Vec2) => {
-      applyEdgeToward(edge, anchor, anchor);
+      // Aufgeschobener Zug: verwerfen genügt (Projekt nie verändert).
+      if (pendingEdgeRef.current) pendingEdgeRef.current = null;
+      else applyEdgeToward(edge, anchor, anchor);
       endEditing();
     },
   };
