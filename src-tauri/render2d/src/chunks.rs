@@ -205,6 +205,8 @@ pub struct ChunkRenderer {
     uniform: Option<(wgpu::Buffer, wgpu::BindGroup, u64)>,
     buffers: HashMap<u32, wgpu::Buffer>,
     layout: Vec<ChunkGeom>,
+    /// Auswahl-Hervorhebung: eine Geometrie zuoberst, unabhaengig vom Layout gesetzt.
+    highlight: Option<ChunkGeom>,
     msaa: Option<(wgpu::Texture, (u32, u32))>,
     format: wgpu::TextureFormat,
     samples: u32,
@@ -389,6 +391,7 @@ impl ChunkRenderer {
             uniform: None,
             buffers: HashMap::new(),
             layout: Vec::new(),
+            highlight: None,
             msaa: None,
             format,
             samples,
@@ -522,6 +525,10 @@ impl ChunkRenderer {
         (tmp.into_iter().map(|(_, i)| i).collect(), groups)
     }
 
+    pub fn set_highlight(&mut self, geom: Option<ChunkGeom>) {
+        self.highlight = geom;
+    }
+
     pub fn set_layout(&mut self, layout: Vec<ChunkGeom>) {
         self.layout = layout;
     }
@@ -550,7 +557,7 @@ impl ChunkRenderer {
         let stride = (std::mem::size_of::<Globals>() as u64).div_ceil(align) * align;
         let mut blocks: Vec<Globals> = Vec::new();
         let vp = [vw as f32, vh as f32];
-        for g in &self.layout {
+        for g in self.layout.iter().chain(self.highlight.iter()) {
             if g.fill_pos.is_none() || g.fill_idx.is_none() {
                 continue;
             }
@@ -560,7 +567,7 @@ impl ChunkRenderer {
                 blocks.push(Globals { view_proj: proj, color: c, viewport_px: vp, stroke_px: 0.0, stroke_scale: 1.0 });
             }
         }
-        for g in &self.layout {
+        for g in self.layout.iter().chain(self.highlight.iter()) {
             if g.line_vtx.is_none() || g.line_idx.is_none() {
                 continue;
             }
@@ -698,7 +705,7 @@ impl ChunkRenderer {
             });
             let mut block = 0u32;
             pass.set_pipeline(&self.fill_pipeline);
-            for g in &self.layout {
+            for g in self.layout.iter().chain(self.highlight.iter()) {
                 let (Some(p), Some(i)) = (g.fill_pos, g.fill_idx) else { continue };
                 let (Some(pb), Some(ib)) = (self.buffers.get(&p), self.buffers.get(&i)) else {
                     block += g.fill_batches.len() as u32;
@@ -713,7 +720,7 @@ impl ChunkRenderer {
                 }
             }
             pass.set_pipeline(&self.line_pipeline);
-            for g in &self.layout {
+            for g in self.layout.iter().chain(self.highlight.iter()) {
                 let (Some(p), Some(i)) = (g.line_vtx, g.line_idx) else { continue };
                 let (Some(pb), Some(ib)) = (self.buffers.get(&p), self.buffers.get(&i)) else {
                     block += g.line_batches.len() as u32;

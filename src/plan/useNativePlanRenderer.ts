@@ -193,6 +193,7 @@ export function useNativePlanRenderer(
         if (remove.length) void invoke('native2d_texts', { upsert: [], remove }).catch(() => {});
         lastPlan.current = null;
         highlightGeom.current = null;
+        lastSentGeoms.current = null;
         setGpuTexts(false);
         const { delete: del } = glRef.current.takeLayout([]);
         void invoke('native2d_layout', { layout: [], delete: del }).catch(() => {});
@@ -205,18 +206,16 @@ export function useNativePlanRenderer(
     };
   }, [enabled, canvasRef, syncRect]);
 
-  /** Layout = Plan-Chunks + (optional) Auswahl-Hervorhebung zuoberst. */
+  /** Zuletzt gesendete Geometrie-Liste: unverändert → kein erneuter Layout-Versand. */
+  const lastSentGeoms = useRef<readonly GpuGeometry[] | null>(null);
   const takeFullLayout = useCallback(() => {
     const gl = glRef.current!;
     const geoms = cacheRef.current?.geometries ?? [];
-    const hl = highlightGeom.current;
-    const res = gl.takeLayout(hl ? [...geoms, hl] : geoms);
-    if (hl && res.layout.length) {
-      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-      const last = res.layout[res.layout.length - 1];
-      last.line_batches = last.line_batches.map((b) => ({ ...b, stroke_mm: 2.5 * dpr, device_px: true }));
-    }
-    return res;
+    const prev = lastSentGeoms.current;
+    const same = !!prev && prev.length === geoms.length && prev.every((g, i) => g === geoms[i]);
+    lastSentGeoms.current = geoms.slice();
+    const res = gl.takeLayout(geoms);
+    return { ...res, unchanged: same && res.delete.length === 0 };
   }, []);
 
   /**
@@ -248,10 +247,18 @@ export function useNativePlanRenderer(
         }
         highlightGeom.current = compilePrimitivesToGpu(gl, lines, lastPxPerMeter.current);
       }
-      const { layout, delete: del } = takeFullLayout();
-      void invoke('native2d_layout', { layout, delete: del }).catch(() => {});
+      const del = gl.takeUploads();
+      const hl = highlightGeom.current;
+      let geom = null;
+      if (hl) {
+        const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+        const e = gl.layoutOf(hl);
+        e.line_batches = e.line_batches.map((b) => ({ ...b, stroke_mm: 2.5 * dpr, device_px: true }));
+        geom = e;
+      }
+      void invoke('native2d_highlight', { geom, delete: del }).catch(() => {});
     },
-    [takeFullLayout],
+    [],
   );
 
   const updateGeometry = useCallback((plan: Plan, pxPerMeter = 0) => {
@@ -272,12 +279,15 @@ export function useNativePlanRenderer(
       cache.dispose();
     }
     lastPxPerMeter.current = pxPerMeter;
-    const { layout, delete: del } = takeFullLayout();
+    const { layout, delete: del, unchanged } = takeFullLayout();
     lastPlan.current = plan;
     // Direkt (nicht über sendFrame): Reihenfolge nach den Puffer-Uploads ist wichtig.
-    void invoke('native2d_layout', { layout, delete: del }).catch((e) =>
-      console.debug('native2d_layout fehlgeschlagen', e),
-    );
+    // Unverändertes Layout (kein Chunk neu, nichts freigegeben) nicht erneut senden.
+    if (!unchanged) {
+      void invoke('native2d_layout', { layout, delete: del }).catch((e) =>
+        console.debug('native2d_layout fehlgeschlagen', e),
+      );
+    }
     pushTexts(plan);
   }, [pushTexts, takeFullLayout]);
 

@@ -158,6 +158,21 @@ fn native2d_patch(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Re
 }
 
 #[tauri::command]
+fn native2d_highlight(app: tauri::AppHandle, geom: Option<serde_json::Value>, delete: Vec<u32>) -> Result<(), String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let geom = match geom {
+            Some(v) => Some(serde_json::from_value(v).map_err(|e| e.to_string())?),
+            None => None,
+        };
+        native_embed::set_highlight(&app, geom, delete);
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    let _ = (app, geom, delete);
+    Ok(())
+}
+
+#[tauri::command]
 fn native2d_layout(app: tauri::AppHandle, layout: serde_json::Value, delete: Vec<u32>) -> Result<(), String> {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
     {
@@ -197,9 +212,15 @@ fn native2d_frame(app: tauri::AppHandle, view: serde_json::Value, paper_scale: f
     Ok(())
 }
 
+///
+/// macOS: die eingebettete 2D-Fläche (`native_embed`) bekommt ihre Daten über
+/// Chunk-Uploads, und es gibt dort kein natives 3D-Fenster — dort also `false`,
+/// sonst würde die Webview nach JEDER Plan-/Projektänderung den ganzen Plan bzw.
+/// das 3D-Modell als JSON aufbauen, nur damit Rust es verwirft (bei Kataster-
+/// Importen sekundenlanges Stocken).
 #[tauri::command]
 fn native_viewport_enabled() -> bool {
-    cfg!(any(feature = "native2d", feature = "native3d"))
+    cfg!(all(any(feature = "native2d", feature = "native3d"), not(target_os = "macos")))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -248,6 +269,7 @@ pub fn run() {
         native2d_embed_hide,
         native2d_upload,
         native2d_patch,
+        native2d_highlight,
         native2d_layout,
         native2d_frame,
         native2d_texts,
@@ -264,6 +286,7 @@ pub fn run() {
         native2d_embed_hide,
         native2d_upload,
         native2d_patch,
+        native2d_highlight,
         native2d_layout,
         native2d_frame,
         native2d_texts,

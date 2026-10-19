@@ -162,14 +162,25 @@ export class NativeGl implements BufferGl {
     for (const id of deleted) this.live.delete(id);
   }
 
-  /** Geometrien (in Zeichenreihenfolge) → Layout für Rust, plus freizugebende Puffer. */
-  takeLayout(geometries: readonly GpuGeometry[]): { layout: NativeChunkLayout[]; delete: number[] } {
-    const id = (b: WebGLBuffer | null): number | null => (b ? (b as unknown as NativeBuffer).id : null);
+  /** Ausstehende Uploads senden; liefert die freizugebenden Puffer-IDs. */
+  takeUploads(): number[] {
     const del = this.pendingDelete;
     this.pendingDelete = [];
-    // Erst die Uploads (in Reihenfolge VOR dem Layout-Aufruf des Aufrufers).
     this.flushUploads(del);
-    const layout = geometries.map((g) => ({
+    return del;
+  }
+
+  /** Geometrien (in Zeichenreihenfolge) → Layout für Rust, plus freizugebende Puffer. */
+  takeLayout(geometries: readonly GpuGeometry[]): { layout: NativeChunkLayout[]; delete: number[] } {
+    // Erst die Uploads (in Reihenfolge VOR dem Layout-Aufruf des Aufrufers).
+    const del = this.takeUploads();
+    return { layout: geometries.map((g) => this.layoutOf(g)), delete: del };
+  }
+
+  /** Layout-Eintrag einer einzelnen Geometrie. */
+  layoutOf(g: GpuGeometry): NativeChunkLayout {
+    const id = (b: WebGLBuffer | null): number | null => (b ? (b as unknown as NativeBuffer).id : null);
+    return {
       fill_pos: id(g.fill.positionBuffer),
       fill_idx: id(g.fill.indexBuffer),
       fill_batches: g.fill.batches.map((b) => ({ start: b.startIndex, count: b.indexCount, color: b.color })),
@@ -184,7 +195,6 @@ export class NativeGl implements BufferGl {
       })),
       origin: [g.origin?.x ?? 0, g.origin?.y ?? 0] as [number, number],
       greyed: !!g.greyed,
-    }));
-    return { layout, delete: del };
+    };
   }
 }

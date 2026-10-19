@@ -240,3 +240,12 @@ pub fn patch(app: &AppHandle, from: u32, to: u32, ranges: &[(u64, u64)], bytes: 
         None => false,
     }
 }
+
+/// Auswahl-Hervorhebung setzen (eigene Geometrie zuoberst) und neu zeichnen.
+pub fn set_highlight(app: &AppHandle, geom: Option<ChunkGeom>, delete: Vec<u32>) {
+    if let Some(e) = app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        e.renderer.delete(&delete);
+        e.renderer.set_highlight(geom);
+        draw(e);
+    }
+}
