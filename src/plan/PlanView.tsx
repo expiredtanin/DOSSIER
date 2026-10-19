@@ -2192,6 +2192,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // kleine Liste zeigt alle Objekte an der Stelle (direkt anklickbar). Der
   // normale Klick bleibt die bisherige Prioritätskette (`defaultPick`).
   const [pickList, setPickList] = useState<{ x: number; y: number; items: PickCandidate[]; idx: number } | null>(null);
+  // Beim Überfahren eines Listeneintrags wird dieses Objekt im Plan hervorgehoben
+  // (Vorschau, ohne zu wählen) — so erkennt man, welcher Eintrag welches Objekt ist.
+  const [hoverPick, setHoverPick] = useState<PickCandidate | null>(null);
+  useEffect(() => {
+    if (!pickList) setHoverPick(null);
+  }, [pickList]);
   const cycleRef = useRef<{
     x: number;
     y: number;
@@ -2790,6 +2796,25 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return primsOwnedBy("columnId", selectedColumnIds, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
   }, [plan, selectedColumnIds]);
 
+  // Primitive des per Listen-Hover vorgemerkten Objekts (Vorschau-Hervorhebung).
+  const hoverPrims = useMemo((): Primitive[] => {
+    if (!hoverPick) return [];
+    const field: Record<PickKind, OwnerField> = {
+      wall: "wallId", drawing: "drawingId", ceiling: "ceilingId", opening: "openingId",
+      stair: "stairId", room: "roomId", roof: "roofId", context: "contextObjectId",
+      section: "sectionLineId", solid: "extrudedSolidId", column: "columnId",
+    };
+    const out: Primitive[] = primsOwnedBy(field[hoverPick.kind], [hoverPick.id], (_p): _p is Primitive => true);
+    if (hoverPick.kind === "drawing") {
+      // Linien kompakt gehaltener Zeichnungen entstehen nur für dieses eine Objekt.
+      const g = getUnderlayIds()?.get(hoverPick.id);
+      const d = g?.drawings.find((x) => x.id === hoverPick.id);
+      if (g && d) for (const pr of g.build([d])) out.push(pr);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverPick, plan]);
+
   // Ist eine GRUPPE gewählt (statt einzelner Elemente), zeigt die Auswahl NUR
   // eine einfache Bounding-Box mit vier Eckpunkten statt jedes einzelnen
   // Mitglieds-Umrisses (Nutzer-Wunsch, Vectorworks-Vorbild: „einfach vier
@@ -3295,6 +3320,49 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           </>
         );
       })()}
+      {/* Vorschau beim Überfahren der Objekt-Liste (Cmd/Strg+Klick): das Objekt
+          wird im Plan hervorgehoben, ohne die Auswahl zu ändern. */}
+      {hoverPrims.length > 0 && (
+        <g className="plan-hover-pick" pointerEvents="none">
+          {hoverPrims.map((p, i) => {
+            const key = `hp-${i}`;
+            const pts = (list: Vec2[]) => list.map(toScreen).map((q) => `${q.x},${q.y}`).join(" ");
+            switch (p.kind) {
+              case "line":
+                return <line key={key} x1={toScreen(p.a).x} y1={toScreen(p.a).y} x2={toScreen(p.b).x} y2={toScreen(p.b).y} />;
+              case "arc":
+                return <line key={key} x1={toScreen(p.from).x} y1={toScreen(p.from).y} x2={toScreen(p.to).x} y2={toScreen(p.to).y} />;
+              case "polygon":
+                return <polygon key={key} className="plan-hover-fill" points={pts(p.pts)} />;
+              case "drawingCircle": {
+                const c = toScreen(p.center);
+                return <circle key={key} cx={c.x} cy={c.y} r={p.r * PX_PER_M} />;
+              }
+              case "drawingArc": {
+                const TAU = Math.PI * 2;
+                const sweep = (((p.a1 - p.a0) % TAU) + TAU) % TAU || TAU;
+                const arcPts: Vec2[] = [];
+                for (let k = 0; k <= 48; k++) {
+                  const a = p.a0 + (sweep * k) / 48;
+                  arcPts.push({ x: p.center.x + p.r * Math.cos(a), y: p.center.y + p.r * Math.sin(a) });
+                }
+                return <polyline key={key} points={pts(arcPts)} />;
+              }
+              case "drawingText":
+                return <polygon key={key} points={pts(textFrameCorners(p))} />;
+              case "drawingImage":
+                return (
+                  <polygon
+                    key={key}
+                    points={pts([p.min, { x: p.max.x, y: p.min.y }, p.max, { x: p.min.x, y: p.max.y }])}
+                  />
+                );
+              default:
+                return null;
+            }
+          })}
+        </g>
+      )}
       {/* Auswahl-Rechteck (Marquee). Gestrichelt; die crossing-Variante (rechts→
           links, berührend) hebt sich farblich/strichlich ab. Das Rechteck steht
           bereits in viewBox-Einheiten → direkt setzbar. */}
@@ -3592,6 +3660,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               role="option"
               aria-selected={i === pickList.idx}
               className={`pick-list-item${i === pickList.idx ? " is-current" : ""}`}
+              onMouseEnter={() => setHoverPick(c)}
+              onMouseLeave={() => setHoverPick(null)}
+              onFocus={() => setHoverPick(c)}
+              onBlur={() => setHoverPick(null)}
               onClick={() => {
                 const cur = cycleRef.current;
                 if (cur) cur.idx = i;
