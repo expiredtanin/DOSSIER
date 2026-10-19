@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { Primitive } from "../generatePlan";
 import {
   expandRegion,
+  indexedInRegion,
   primitiveBoundsVb,
   primitivesInRegion,
   regionContains,
@@ -189,5 +190,19 @@ describe("primitivesInRegion", () => {
       const zoomedMinHeight = 50 * PX_PER_M * 0.005;
       expect(primitivesInRegion([label], bigRegion, zoomedMinHeight)).toHaveLength(1);
     });
+  });
+});
+
+describe('indexedInRegion: Text-Budget', () => {
+  const txt = (h: number) => ({ kind: 'drawingText', heightM: h, at: { x: 0, y: 0 }, text: 'x', drawingId: 'd' }) as unknown as Primitive;
+  const region = { minX: -1e9, minY: -1e9, maxX: 1e9, maxY: 1e9 };
+  it('behält über dem Budget nur die grössten Texte', () => {
+    const items = [1, 2, 3, 4, 5].map((h, i) => ({ p: txt(h), i }));
+    const out = indexedInRegion(items, region, 0, 3);
+    expect(out.map((o) => o.i)).toEqual([2, 3, 4]);
+  });
+  it('lässt alles durch, wenn das Budget reicht', () => {
+    const items = [1, 2, 3].map((h, i) => ({ p: txt(h), i }));
+    expect(indexedInRegion(items, region, 0, 10)).toHaveLength(3);
   });
 });

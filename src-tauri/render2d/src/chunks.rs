@@ -53,7 +53,7 @@ fn vs_main(in : VsIn) -> @builtin(position) vec4<f32> {
     if (len > 1e-6) {
         unit_px = dir_px / len;
     }
-    let width_px = max(0.6, globals.stroke_px * globals.stroke_scale) * in.packed.w;
+    let width_px = max(1.0, globals.stroke_px * globals.stroke_scale) * in.packed.w;
     let offset_px = unit_px * (width_px * 0.5) * in.packed.z;
     return vec4<f32>(clip_p.xy + offset_px / (globals.viewport_px * 0.5), clip_p.z, clip_p.w);
 }

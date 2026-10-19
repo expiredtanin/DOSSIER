@@ -68,7 +68,7 @@ void main() {
   // Echte Papierbreite in Geräte-px = mm(strokePx) · (mm→px)(strokeScale); mind.
   // 0.6 px. Der Miter-Faktor verlängert den Versatz an Ecken, sodass benachbarte
   // Segmente bündig verschmelzen (gehrte Ecke statt Butt-Cap-Stufe).
-  float widthPx = max(0.6, strokePx * strokeScale) * miter;
+  float widthPx = max(1.0, strokePx * strokeScale) * miter;
   vec2 offsetPx = unitPx * (widthPx * 0.5) * side;
   clipP.xy += offsetPx / (viewportPx * 0.5);
 

@@ -164,17 +164,47 @@ export function primitivesInRegion(
   return indexedInRegion(primitives.map((p, i) => ({ p, i })), region, minTextHeightVb);
 }
 
+/**
+ * Höchstzahl gleichzeitig gezeichneter Text-Elemente (SVG-Overlay). Darüber werden
+ * die GRÖSSTEN behalten und die kleinsten ausgeblendet — wie bei Karten: beim
+ * Rauszoomen bleiben die wichtigen (grossen) Beschriftungen stehen, statt dass
+ * ab einer festen Schwelle ALLE Texte auf einmal verschwinden.
+ */
+export const MAX_TEXT_ELEMENTS = 3000;
+
+function textHeightVb(p: Primitive): number | null {
+  return p.kind === "drawingText" || p.kind === "drawingTextPath" ? p.heightM * PX_PER_M : null;
+}
+
 /** Wie {@link primitivesInRegion}, aber über eine schon vorgefilterte, indizierte Liste. */
 export function indexedInRegion(
   items: ReadonlyArray<{ p: Primitive; i: number }>,
   region: Bounds,
   minTextHeightVb = 0,
+  maxTexts = MAX_TEXT_ELEMENTS,
 ): Array<{ p: Primitive; i: number }> {
   const out: Array<{ p: Primitive; i: number }> = [];
+  let texts = 0;
   for (const item of items) {
     if (isTooSmallToRead(item.p, minTextHeightVb)) continue;
     const b = primitiveBoundsVb(item.p);
-    if (b === null || intersects(b, region)) out.push(item);
+    if (b === null || intersects(b, region)) {
+      out.push(item);
+      if (textHeightVb(item.p) !== null) texts++;
+    }
   }
-  return out;
+  if (texts <= maxTexts) return out;
+  // Zu viele Texte: nur die grössten maxTexts behalten (Schwelle = Höhe des
+  // maxTexts-grössten; Gleichstand darf die Grenze leicht überschreiten).
+  const heights: number[] = [];
+  for (const item of out) {
+    const h = textHeightVb(item.p);
+    if (h !== null) heights.push(h);
+  }
+  heights.sort((a, b) => b - a);
+  const threshold = heights[maxTexts - 1];
+  return out.filter((item) => {
+    const h = textHeightVb(item.p);
+    return h === null || h >= threshold;
+  });
 }

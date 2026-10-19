@@ -93,7 +93,7 @@ const cullMargin = (vb: ViewBox) => Math.max(vb.w, vb.h) * CULL_MARGIN_FACTOR;
 // `isTooSmallToRead` in cullPrimitives.ts) — unabhängig von der Position.
 // 0.5 % einer typischen Bildschirmhöhe (~800 px) sind ~4 px, die Schwelle,
 // ab der Text praktisch ohnehin nicht mehr lesbar ist.
-const MIN_RELATIVE_TEXT_HEIGHT = 0.005;
+const MIN_RELATIVE_TEXT_HEIGHT = 0.002;
 // Reingezoomt seit der letzten Neuberechnung (View < 75 % der Grösse, für die
 // die Lesbarkeits-Schwelle berechnet wurde) → neu rechnen, auch wenn `view`
 // noch in der gepufferten Region liegt — sonst bliebe die Schwelle (an der
@@ -136,7 +136,8 @@ function cullStateStale(s: CullState, view: ViewBox): boolean {
 // einem Gebäude deutlich zu eng war.
 const ZOOM_MAX = 20000; // bis 20 000× hinein (Sub-Millimeter-Details)
 const ZOOM_MIN = 0.005; // bis 200× heraus (Siedlungs-/Site-Kontext)
-const WHEEL_STEP = 0.0015; // Empfindlichkeit des Mausrads
+const WHEEL_STEP = 0.001; // Empfindlichkeit des Mausrads
+const WHEEL_MAX_DELTA = 100; // grosse Rad-/Trackpad-Ausschläge pro Ereignis begrenzen
 
 // Schwelle (Bildschirm-Pixel), ab der ein Links-Ziehen als Marquee gilt; darunter
 // bleibt es ein Klick (Einzelwahl). Verhindert versehentliche Mini-Rechtecke.
@@ -952,10 +953,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // von `meet` (siehe dessen Formel), sodass N·meet — und damit die GL-Strich-
   // breite in Geräte-px — unabhängig vom Zoom konstant bleibt: dieselbe Wirkung
   // wie `non-scaling-stroke` im SVG-Pfad, nur über den Massstab-Nenner erzielt.
-  const paperScaleForGl = (v: ViewBox): number =>
-    hairline
-      ? scaleFromView(v, svgRef.current) ?? 100
-      : paperScaleRef.current ?? scaleFromView(v, svgRef.current) ?? 100;
+  // Display-Modus (Haarlinien): Die Strichbreite bleibt NICHT konstant in Pixeln,
+  // sondern wächst mit dem Zoom — sanft (Exponent 0.6) relativ zur Ansicht 1:100:
+  // weit weg bleiben die Striche fein (mind. 1 px im Shader), nah dran werden sie
+  // sichtbar kräftiger statt auf Haarlinien-Breite zu kleben.
+  const paperScaleForGl = (v: ViewBox): number => {
+    if (!hairline) return paperScaleRef.current ?? scaleFromView(v, svgRef.current) ?? 100;
+    const live = scaleFromView(v, svgRef.current) ?? 100;
+    const grow = Math.min(8, Math.max(0.25, Math.pow(100 / live, 0.6)));
+    return live * grow;
+  };
 
   // Referenz-Nenner (1:N) NUR für die Text-Schriftgröße der Engine — spiegelt
   // EXAKT die SVG-Formel (case "text" unten, gleiche `print`-Bedingung): im
@@ -2566,7 +2573,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     // Punkt unter dem Cursor (bleibt nach dem Zoom ortsfest).
     const anchor = anchorOverride ?? clientToView(clientX, clientY, prev);
     // Hochrollen (deltaY < 0) → hinein → kleinere viewBox.
-    let factor = Math.exp(deltaY * WHEEL_STEP);
+    let factor = Math.exp(clamp(deltaY, -WHEEL_MAX_DELTA, WHEEL_MAX_DELTA) * WHEEL_STEP);
     // Zoom relativ zur Default-Breite begrenzen.
     const minW = defaultView.w / ZOOM_MAX;
     const maxW = defaultView.w / ZOOM_MIN;
@@ -2584,7 +2591,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Zoom-Geste im GPU-Pfad: wie der Pan imperativ (kein React-Render pro Rad-
   // Schritt). Der Ausschnitt wird erst nach einer kurzen Ruhepause festgeschrieben.
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const WHEEL_COMMIT_MS = 140;
+  const WHEEL_COMMIT_MS = 70;
 
   const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
     e.preventDefault();

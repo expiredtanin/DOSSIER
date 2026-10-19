@@ -54,7 +54,7 @@ fn fs_main() -> @location(0) vec4<f32> {
 /// `side` — auf die passende Seite versetzt, dann px -> Clip zurueckgerechnet. So
 /// bleibt die Strichbreite zoom-unabhaengig echte Papier-mm (keine Re-Tessellierung).
 ///
-///   width_px = max(0.6, stroke_px * stroke_scale)   (== mm * mmToDevicePx)
+///   width_px = max(1.0, stroke_px * stroke_scale)   (== mm * mmToDevicePx)
 /// Mindestens ~0.6 px, damit feine Gewichte beim Rauszoomen sichtbar bleiben.
 pub const LINE_WGSL: &str = r#"
 struct Globals {
@@ -88,7 +88,7 @@ fn vs_main(in : VsIn) -> @builtin(position) vec4<f32> {
 
     // Echte Papierbreite in Geraete-px = mm(stroke_px) * (mm->px)(stroke_scale),
     // entlang des Bisektors um den Miter-Faktor verlaengert (buendige Gehrung).
-    let width_px = max(0.6, globals.stroke_px * globals.stroke_scale) * in.miter;
+    let width_px = max(1.0, globals.stroke_px * globals.stroke_scale) * in.miter;
     let offset_px = unit_px * (width_px * 0.5) * in.side;
 
     var out = clip_p;
@@ -171,7 +171,7 @@ fn vs_main(
     // Echte Papierbreite (Geraete-px) -> zurueck in Bildschirm-Einheiten fuer die
     // Quad-Groesse; plus AA-Rand (~2 px). px_per_screen gegen 0 sichern.
     let pps = max(g.px_per_screen, 1e-6);
-    let width_px = max(0.6, wdash.x * g.stroke_scale);
+    let width_px = max(1.0, wdash.x * g.stroke_scale);
     let half_w_screen = 0.5 * width_px / pps;
     let aa_screen = 2.0 / pps;
     let ext = r_s + half_w_screen + aa_screen;
@@ -206,7 +206,7 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 
     // 1) Radiale Kante (Strichbreite quer zum Bogen), analytisch antialiased.
     let d_ring_px = abs(dist - r_s) * pps;
-    let half_w_px = 0.5 * max(0.6, width_mm * g.stroke_scale);
+    let half_w_px = 0.5 * max(1.0, width_mm * g.stroke_scale);
     let cov_radial = 1.0 - smoothstep(half_w_px - 0.6, half_w_px + 0.6, d_ring_px);
 
     // 2) Winkel-Clamp auf [min(0,sweep), max(0,sweep)] mit Butt-Cap an den Enden.
