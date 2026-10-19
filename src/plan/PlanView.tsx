@@ -1940,7 +1940,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const applySvgTransform = (v0: ViewBox, v: ViewBox) => {
     const svg = svgRef.current;
     if (!svg) return;
-    const rect = svg.getBoundingClientRect();
+    // Box der (untransformierten) GPU-Fläche: das SVG trägt selbst schon den
+    // Transform der laufenden Geste (Zoom skaliert seine gemessene Box).
+    const rect = (canvasRef.current ?? svg).getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     const m = Math.min(rect.width / v0.w, rect.height / v0.h); // meet-Skala bei V0
     const A = v0.w / v.w; // Zoomfaktor (uniform)
@@ -2555,10 +2557,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     setDragging(false);
   };
 
-  /** Rechnet aus einem Ausschnitt + Rad-Delta den neuen (geklemmten) Ausschnitt. */
-  const zoomedView = (prev: ViewBox, clientX: number, clientY: number, deltaY: number): ViewBox => {
+  /**
+   * Rechnet aus einem Ausschnitt + Rad-Delta den neuen (geklemmten) Ausschnitt.
+   * `anchorOverride`: Ankerpunkt in viewBox-Koordinaten (sonst aus clientX/Y über
+   * die gemessene SVG-Box — die während eines imperativen Zooms transformiert ist).
+   */
+  const zoomedView = (prev: ViewBox, clientX: number, clientY: number, deltaY: number, anchorOverride?: Vec2): ViewBox => {
     // Punkt unter dem Cursor (bleibt nach dem Zoom ortsfest).
-    const anchor = clientToView(clientX, clientY, prev);
+    const anchor = anchorOverride ?? clientToView(clientX, clientY, prev);
     // Hochrollen (deltaY < 0) → hinein → kleinere viewBox.
     let factor = Math.exp(deltaY * WHEEL_STEP);
     // Zoom relativ zur Default-Breite begrenzen.
@@ -2575,14 +2581,37 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     };
   };
 
+  // Zoom-Geste im GPU-Pfad: wie der Pan imperativ (kein React-Render pro Rad-
+  // Schritt). Der Ausschnitt wird erst nach einer kurzen Ruhepause festgeschrieben.
+  const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const WHEEL_COMMIT_MS = 140;
+
   const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
     e.preventDefault();
-    // Zoom läuft IMMER über setView (React) — auch im GL-Pfad. Grund: der Zoom
-    // ändert den Massstab, und bildschirmkonstante SVG-Elemente (Auswahlrahmen,
-    // Griffe, Snap-Marker) müssen dabei NEU (in korrekter Grösse) gerendert
-    // werden. Ein imperativer CSS-scale würde sie fälschlich mitskalieren. In
-    // Chromium ist setView pro Rad-Schritt problemlos flüssig; der GL-Effekt auf
-    // `view` zeichnet die Ebene nur per Matrix-Uniform neu (keine Re-Tessellierung).
+    if (useGpuRenderer) {
+      // Aktueller (logischer) Ausschnitt: ein laufender imperativer Zoom/Pan gewinnt.
+      const base = panPending.current ?? viewRef.current;
+      // Während der Geste trägt das SVG einen CSS-Transform → seine Box ist
+      // verzerrt; die (untransformierte) GPU-Fläche liefert die echte Elementbox.
+      const rect = (canvasRef.current ?? svgRef.current)?.getBoundingClientRect();
+      let anchor: Vec2 | undefined;
+      if (rect && rect.width > 0 && rect.height > 0) {
+        const scale = Math.min(rect.width / base.w, rect.height / base.h);
+        const offX = (rect.width - base.w * scale) / 2;
+        const offY = (rect.height - base.h * scale) / 2;
+        anchor = {
+          x: base.x + (e.clientX - rect.left - offX) / scale,
+          y: base.y + (e.clientY - rect.top - offY) / scale,
+        };
+      }
+      enqueuePan(zoomedView(base, e.clientX, e.clientY, e.deltaY, anchor));
+      if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current);
+      wheelCommitTimer.current = setTimeout(() => {
+        wheelCommitTimer.current = null;
+        commitPan();
+      }, WHEEL_COMMIT_MS);
+      return;
+    }
     setView((prev) => zoomedView(prev, e.clientX, e.clientY, e.deltaY));
   };
 
