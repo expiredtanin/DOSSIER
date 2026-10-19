@@ -30,7 +30,7 @@ default = []
 # eigene (deckende, weisse) Webview-Kindansicht mitbringt, die jeden direkt
 # ans Fenster gehaengten wgpu-Inhalt verdeckt haette, empirisch bestaetigt).
 # Bewusst OPT-IN, damit der normale Build unveraendert schlank bleibt.
-native2d = ["dep:render2d", "dep:winit", "dep:wgpu", "dep:pollster", "tauri/unstable"]
+native2d = ["dep:render2d", "dep:winit", "dep:wgpu", "dep:pollster", "tauri/unstable", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:raw-window-handle"]
 # M2-Spike: nativer wgpu-3D-Viewport im Tauri-Prozess (eigenes winit-Fenster).
 # Zieht render3d(+window) sowie winit/wgpu/pollster. Kann gemeinsam mit `native2d`
 # aktiviert werden (dann zwei native Fenster). Ebenfalls OPT-IN.
@@ -66,3 +66,10 @@ render3d = { path = "render3d", features = ["window"], optional = true }
 winit = { version = "0.30", optional = true }
 wgpu = { version = "29", optional = true }
 pollster = { version = "0.4", optional = true }
+
+# Stufe 2 (macOS, native2d): native Metal-Flaeche als Kind-View UNTER der
+# transparenten Webview im Hauptfenster (src/native_embed.rs).
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["NSView", "NSResponder", "NSWindow"] }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["NSGeometry", "NSString", "NSObject"] }
+raw-window-handle = { version = "0.6", optional = true }

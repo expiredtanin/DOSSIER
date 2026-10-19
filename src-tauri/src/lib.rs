@@ -14,6 +14,11 @@ mod native;
 #[cfg(all(feature = "native2d", target_os = "macos"))]
 mod native_tauri_window;
 
+// Stufe 2 (macOS): native Metal-Flaeche als Kind-View im Hauptfenster, unter der
+// transparenten Webview (s. Modul-Kommentar).
+#[cfg(all(feature = "native2d", target_os = "macos"))]
+mod native_embed;
+
 // Lock-Datei gegen gleichzeitiges Oeffnen derselben Projektdatei aus zwei
 // App-Instanzen (OS-Advisory-Lock via `fs4`, siehe lock.rs).
 mod lock;
@@ -78,6 +83,16 @@ fn push_native_walls(walls: serde_json::Value) {
 /// pusht nur dann — sonst würde sie bei JEDER Planänderung die gesamte Szene
 /// (bei Kataster-Importen Millionen Primitive) serialisieren und an einen
 /// nicht vorhandenen Befehl schicken.
+/// Webview meldet Position/Groesse des Plan-Bereichs (CSS-Pixel); die native
+/// Flaeche folgt. Ausserhalb macOS/native2d ein No-op.
+#[tauri::command]
+fn native2d_embed_rect(app: tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    native_embed::set_rect(&app, x, y, w, h);
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    let _ = (app, x, y, w, h);
+}
+
 #[tauri::command]
 fn native_viewport_enabled() -> bool {
     cfg!(any(feature = "native2d", feature = "native3d"))
@@ -109,6 +124,9 @@ pub fn run() {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
     let builder = builder.manage(native_tauri_window::NativePlanWindowState::default());
 
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    let builder = builder.manage(native_embed::EmbedState::default());
+
     let builder = builder.setup(|_app| {
         // Native GPU-Fenster auf einem eigenen Thread hochfahren, damit der
         // Tauri-Hauptthread frei bleibt. NICHT auf macOS (winit verlangt dort
@@ -120,12 +138,22 @@ pub fn run() {
         // Stufe 1 den Performance-Gewinn bestaetigt hat).
         #[cfg(all(feature = "native2d", target_os = "macos"))]
         native_tauri_window::open(&_app.handle().clone());
+        // SPIKE: DOSSIER_EMBED_TEST=1 → native Flaeche nach 4 s im Hauptfenster.
+        #[cfg(all(feature = "native2d", target_os = "macos"))]
+        if std::env::var("DOSSIER_EMBED_TEST").is_ok() {
+            let h = _app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(4));
+                native_embed::set_rect(&h, 300.0, 200.0, 500.0, 350.0);
+            });
+        }
         Ok(())
     });
 
     #[cfg(any(feature = "native2d", feature = "native3d"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         native_viewport_enabled,
+        native2d_embed_rect,
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
@@ -134,6 +162,7 @@ pub fn run() {
     #[cfg(not(any(feature = "native2d", feature = "native3d")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         native_viewport_enabled,
+        native2d_embed_rect,
         acquire_project_lock,
         release_project_lock
     ]);
