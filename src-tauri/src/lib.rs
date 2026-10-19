@@ -138,6 +138,22 @@ fn native2d_layout(app: tauri::AppHandle, layout: serde_json::Value, delete: Vec
     Ok(())
 }
 
+/// Vektor-Texte (Delta): `upsert` = Eintraege, `remove` = IDs. Liefert `false`, wenn
+/// keine Schrift gefunden wurde (dann zeichnet die Webview die Texte selbst).
+#[tauri::command]
+fn native2d_texts(app: tauri::AppHandle, upsert: serde_json::Value, remove: Vec<u32>) -> Result<bool, String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let upsert = serde_json::from_value(upsert).map_err(|e| e.to_string())?;
+        return Ok(native_embed::set_texts(&app, upsert, remove));
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    {
+        let _ = (app, upsert, remove);
+        Ok(false)
+    }
+}
+
 #[tauri::command]
 fn native2d_frame(app: tauri::AppHandle, view: serde_json::Value, paper_scale: f64, clear: Option<[f64; 3]>) -> Result<(), String> {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
@@ -202,6 +218,7 @@ pub fn run() {
         native2d_upload,
         native2d_layout,
         native2d_frame,
+        native2d_texts,
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
@@ -216,6 +233,7 @@ pub fn run() {
         native2d_upload,
         native2d_layout,
         native2d_frame,
+        native2d_texts,
         acquire_project_lock,
         release_project_lock
     ]);

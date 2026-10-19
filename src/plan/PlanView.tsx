@@ -27,6 +27,7 @@ import { textFrameCorners } from "../text/textFrame";
 import { RichTextEditor } from "../text/RichTextEditor";
 import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useNativeAvailable, useNativePlanRenderer } from "./useNativePlanRenderer";
+import { isGpuText } from "./nativeText";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 import {
@@ -810,6 +811,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const wasmHook = useWasmPlanRenderer(canvasRef, wantWasm);
   const nativeHook = useNativePlanRenderer(canvasRef, wantNative);
   const activeEngine = wantWasm ? wasmHook : wantNative ? nativeHook : glHook;
+  // Text im Inline-Editor nicht zusätzlich nativ zeichnen.
+  const setNativeExcludedText = nativeHook.setExcludedText;
+  useEffect(() => {
+    setNativeExcludedText(editTextId ?? null);
+  }, [editTextId, setNativeExcludedText]);
   const { render: renderGl, updateGeometry, ready: glReady } = activeEngine;
   // „GPU-Canvas montieren?" — beide GPU-Pfade brauchen das Canvas (an der ABSICHT
   // montiert, nicht am ready, sonst könnte die Engine mangels Canvas nie starten).
@@ -896,10 +902,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           ? p.kind !== "drawingText"
           : p.kind !== "text" && p.kind !== "drawingText"
         : p.kind === "line" && !!p.drawingId;
+      // Einfache Texte zeichnet die native Fläche selbst (Vektor-Glyphen, auch gedreht).
+      if (useGpuRenderer && wantNative && nativeHook.gpuTexts && isGpuText(p)) continue;
       if (!drawnElsewhere) out.push({ p, i });
     }
     return out;
-  }, [plan.primitives, useGpuRenderer, wantWasm]);
+  }, [plan.primitives, useGpuRenderer, wantWasm, wantNative, nativeHook.gpuTexts]);
   const needsCull = svgCandidates.length > CULL_THRESHOLD;
   const [cullState, setCullState] = useState<CullState | null>(() => {
     if (!needsCull) return null;

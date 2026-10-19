@@ -13,6 +13,7 @@ import type { Plan } from './generatePlan';
 import { GpuChunkCache, type ViewBox } from './glPlan';
 import { NativeGl, type NativeInvoke } from './glPlan/nativeGl';
 import { readCssColor } from './useGlPlanRenderer';
+import { NativeTextSync } from './nativeText';
 
 /** Läuft die App in einer Tauri-Webview? */
 const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -71,6 +72,43 @@ export function useNativePlanRenderer(
   const invokeRef = useRef<NativeInvoke | null>(null);
   const rectRef = useRef('');
   const [ready, setReady] = useState(false);
+  // Texte: Rust zeichnet einfache Texte als Vektor-Glyphen (nativeText.ts). Solange
+  // das nicht bestätigt ist (oder keine Schrift gefunden wurde), bleibt es beim SVG.
+  const [gpuTexts, setGpuTexts] = useState(false);
+  const textSync = useRef(new NativeTextSync());
+  const textsDisabled = useRef(false);
+  const lastPlan = useRef<Plan | null>(null);
+  const excludedText = useRef<string | null>(null);
+
+  const pushTexts = useCallback((plan: Plan | null) => {
+    const invoke = invokeRef.current;
+    if (!invoke || !plan || textsDisabled.current) return;
+    const { upsert, remove } = textSync.current.delta(plan.primitives, excludedText.current);
+    if (upsert.length === 0 && remove.length === 0) return;
+    void invoke('native2d_texts', { upsert, remove })
+      .then((ok) => {
+        if (ok === true) setGpuTexts(true);
+        else {
+          textsDisabled.current = true;
+          textSync.current.reset();
+          setGpuTexts(false);
+        }
+      })
+      .catch(() => {
+        textsDisabled.current = true;
+        setGpuTexts(false);
+      });
+  }, []);
+
+  /** Text, der gerade im Editor liegt: nicht nativ zeichnen (der Editor zeigt ihn). */
+  const setExcludedText = useCallback(
+    (id: string | null) => {
+      if (excludedText.current === id) return;
+      excludedText.current = id;
+      pushTexts(lastPlan.current);
+    },
+    [pushTexts],
+  );
 
   // Frame-Aufrufe zusammenfassen: höchstens einer in der Luft, der letzte gewinnt.
   const frameBusy = useRef(false);
@@ -147,6 +185,10 @@ export function useNativePlanRenderer(
       const invoke = invokeRef.current;
       // Layout leeren + Fläche ausblenden (Plan-Ansicht verschwindet).
       if (glRef.current && invoke) {
+        const { remove } = textSync.current.delta([]);
+        if (remove.length) void invoke('native2d_texts', { upsert: [], remove }).catch(() => {});
+        lastPlan.current = null;
+        setGpuTexts(false);
         const { delete: del } = glRef.current.takeLayout([]);
         void invoke('native2d_layout', { layout: [], delete: del }).catch(() => {});
         void invoke('native2d_embed_hide').catch(() => {});
@@ -176,11 +218,13 @@ export function useNativePlanRenderer(
       cache.dispose();
     }
     const { layout, delete: del } = gl.takeLayout(cache.geometries);
+    lastPlan.current = plan;
     // Direkt (nicht über sendFrame): Reihenfolge nach den Puffer-Uploads ist wichtig.
     void invoke('native2d_layout', { layout, delete: del }).catch((e) =>
       console.debug('native2d_layout fehlgeschlagen', e),
     );
-  }, []);
+    pushTexts(plan);
+  }, [pushTexts]);
 
   const render = useCallback(
     (viewBox: ViewBox, paperScaleN = 100) => {
@@ -199,5 +243,5 @@ export function useNativePlanRenderer(
     [sendFrame, syncRect],
   );
 
-  return { render, updateGeometry, ready };
+  return { render, updateGeometry, ready, gpuTexts, setExcludedText };
 }

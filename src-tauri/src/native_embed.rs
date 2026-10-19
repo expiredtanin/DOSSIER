@@ -17,7 +17,7 @@ use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, RawDisplayHandle, RawWindowHandle,
 };
-use render2d::chunks::{ChunkGeom, ChunkRenderer, View};
+use render2d::chunks::{ChunkGeom, ChunkRenderer, TextIn, View};
 use tauri::{AppHandle, Manager};
 
 struct Embedded {
@@ -213,4 +213,17 @@ pub fn hide(app: &AppHandle) {
             e.ns_view.setHidden(true);
         }
     });
+}
+
+/// Texte einfuegen/entfernen und neu zeichnen. `false` = keine Schrift verfuegbar
+/// (die Webview zeichnet die Texte dann weiter im SVG-Overlay).
+pub fn set_texts(app: &AppHandle, upsert: Vec<TextIn>, remove: Vec<u32>) -> bool {
+    match app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        Some(e) => {
+            let ok = e.renderer.set_texts(upsert, &remove);
+            draw(e);
+            ok
+        }
+        None => false,
+    }
 }

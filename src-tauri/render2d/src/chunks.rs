@@ -64,6 +64,88 @@ fn fs_main() -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Vektor-Text: Glyphen-Dreiecke (em-Einheiten) pro Instanz positioniert, skaliert
+/// und gedreht. `pos` ist relativ zur Ansichtsmitte (f64 → f32 auf der CPU).
+const TEXT_WGSL: &str = r#"
+struct Globals {
+    view_proj    : mat4x4<f32>,
+    color        : vec4<f32>,
+    viewport_px  : vec2<f32>,
+    stroke_px    : f32,
+    stroke_scale : f32,
+};
+@group(0) @binding(0) var<uniform> globals : Globals;
+
+struct VsIn {
+    @location(0) g     : vec2<f32>,  // Glyphenpunkt in em (Y nach oben)
+    @location(1) pos   : vec2<f32>,  // Textanker (Bildschirm-Raum, relativ zur Ansichtsmitte)
+    @location(2) scale : f32,        // em → Bildschirm-Einheiten (= Schrifthoehe)
+    @location(3) xoff  : f32,        // X-Versatz der Glyphe in em (Vorschub)
+    @location(4) cs    : vec2<f32>,  // (cos, sin) der Bildschirm-Drehung
+    @location(5) color : vec4<f32>,
+};
+struct VsOut {
+    @builtin(position) p : vec4<f32>,
+    @location(0) color : vec4<f32>,
+};
+
+@vertex
+fn vs_main(in : VsIn) -> VsOut {
+    let lx = (in.xoff + in.g.x) * in.scale;
+    let ly = -in.g.y * in.scale;
+    let x = lx * in.cs.x - ly * in.cs.y;
+    let y = lx * in.cs.y + ly * in.cs.x;
+    var o : VsOut;
+    o.p = globals.view_proj * vec4<f32>(in.pos + vec2<f32>(x, y), 0.0, 1.0);
+    o.color = in.color;
+    return o;
+}
+
+@fragment
+fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
+    return in.color;
+}
+"#;
+
+/// Text-Eingabe aus der Webview (Bildschirm-Raum, doppelte Genauigkeit).
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct TextIn {
+    pub id: u32,
+    pub x: f64,
+    pub y: f64,
+    /// Schrifthoehe (= em) in Bildschirm-Einheiten.
+    pub size: f64,
+    /// Drehung in Bildschirm-Raum (Radiant, im Uhrzeigersinn positiv).
+    pub angle: f64,
+    pub color: [f32; 4],
+    pub text: String,
+}
+
+struct TextItem {
+    x: f64,
+    y: f64,
+    size: f64,
+    cs: [f32; 2],
+    color: [f32; 4],
+    glyphs: Vec<(u16, f32)>,
+    width_em: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TextInst {
+    pos: [f32; 2],
+    scale: f32,
+    xoff: f32,
+    cs: [f32; 2],
+    color: [f32; 4],
+}
+
+/// Obergrenze gleichzeitig gezeichneter Texte; darueber bleiben die groessten.
+const MAX_VISIBLE_TEXTS: usize = 6000;
+/// Texte unter dieser Hoehe (Geraete-px) werden nicht gezeichnet.
+const MIN_TEXT_PX: f64 = 2.0;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Globals {
@@ -124,6 +206,13 @@ pub struct ChunkRenderer {
     msaa: Option<(wgpu::Texture, (u32, u32))>,
     format: wgpu::TextureFormat,
     pub clear: [f64; 3],
+    // --- Vektor-Text ---
+    text_pipeline: wgpu::RenderPipeline,
+    font: Option<crate::vtext::VectorFont>,
+    texts: HashMap<u32, TextItem>,
+    glyph_vbo: Option<wgpu::Buffer>,
+    glyph_ibo: Option<wgpu::Buffer>,
+    inst_buf: Option<(wgpu::Buffer, u64)>,
 }
 
 /// Aspekt-korrigierte Grenzen (left,right,bottom,top) wie `orthoBounds`.
@@ -242,7 +331,53 @@ impl ChunkRenderer {
             },
             "chunks.line.pipeline",
         );
+        let text_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("chunks.text"),
+            source: wgpu::ShaderSource::Wgsl(TEXT_WGSL.into()),
+        });
+        let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("chunks.text.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &text_module,
+                entry_point: Some("vs_main"),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: 8,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<TextInst>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32, 3 => Float32, 4 => Float32x2, 5 => Float32x4],
+                    },
+                ],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &text_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(target.clone())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            multiview_mask: None,
+            cache: None,
+        });
         Self {
+            text_pipeline,
+            font: None,
+            texts: HashMap::new(),
+            glyph_vbo: None,
+            glyph_ibo: None,
+            inst_buf: None,
             fill_pipeline,
             line_pipeline,
             bind_group_layout,
@@ -273,6 +408,89 @@ impl ChunkRenderer {
         for id in ids {
             self.buffers.remove(id);
         }
+    }
+
+    /// Texte einfuegen/ersetzen bzw. entfernen. `false`, wenn keine Schrift
+    /// verfuegbar ist (die Webview zeichnet die Texte dann selbst).
+    pub fn set_texts(&mut self, upsert: Vec<TextIn>, remove: &[u32]) -> bool {
+        if self.font.is_none() {
+            self.font = crate::vtext::VectorFont::system();
+        }
+        let Some(font) = self.font.as_ref() else { return false };
+        for id in remove {
+            self.texts.remove(id);
+        }
+        for t in upsert {
+            let (glyphs, width_em) = font.shape(&t.text);
+            self.texts.insert(
+                t.id,
+                TextItem {
+                    x: t.x,
+                    y: t.y,
+                    size: t.size,
+                    cs: [t.angle.cos() as f32, t.angle.sin() as f32],
+                    color: t.color,
+                    glyphs,
+                    width_em,
+                },
+            );
+        }
+        true
+    }
+
+    pub fn text_count(&self) -> usize {
+        self.texts.len()
+    }
+
+    /// Sichtbare Texte dieses Frames als nach Glyphe gruppierte Instanzen.
+    /// Rueckgabe: Instanzen (nach Glyph-ID sortiert) + Gruppen (gid, Instanzbereich).
+    fn build_text_instances(
+        &mut self,
+        bounds: (f64, f64, f64, f64),
+        px_per_unit: f64,
+    ) -> (Vec<TextInst>, Vec<(u16, std::ops::Range<u32>)>) {
+        let Some(font) = self.font.as_mut() else { return (Vec::new(), Vec::new()) };
+        let (left, right, bottom, top) = bounds;
+        let (cx, cy) = ((left + right) / 2.0, (top + bottom) / 2.0);
+        let mut vis: Vec<u32> = Vec::new();
+        for (id, t) in &self.texts {
+            if t.size * px_per_unit < MIN_TEXT_PX {
+                continue;
+            }
+            let reach = t.size * (t.width_em as f64 + 1.0);
+            if t.x + reach < left || t.x - reach > right || t.y + reach < top || t.y - reach > bottom {
+                continue;
+            }
+            vis.push(*id);
+        }
+        if vis.len() > MAX_VISIBLE_TEXTS {
+            // Nur die groessten behalten (wie bei Karten: wichtige Beschriftungen bleiben).
+            let mut sizes: Vec<f64> = vis.iter().map(|id| self.texts[id].size).collect();
+            let k = vis.len() - MAX_VISIBLE_TEXTS;
+            sizes.select_nth_unstable_by(k, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let threshold = sizes[k];
+            vis.retain(|id| self.texts[id].size >= threshold);
+        }
+        let mut tmp: Vec<(u16, TextInst)> = Vec::new();
+        for id in &vis {
+            let t = &self.texts[id];
+            let pos = [(t.x - cx) as f32, (t.y - cy) as f32];
+            for &(gid, xoff) in &t.glyphs {
+                if font.mesh(gid).is_none() {
+                    continue;
+                }
+                tmp.push((gid, TextInst { pos, scale: t.size as f32, xoff, cs: t.cs, color: t.color }));
+            }
+        }
+        tmp.sort_by_key(|(g, _)| *g);
+        let mut groups: Vec<(u16, std::ops::Range<u32>)> = Vec::new();
+        for (i, (g, _)) in tmp.iter().enumerate() {
+            match groups.last_mut() {
+                Some((lg, r)) if lg == g => r.end = i as u32 + 1,
+                _ => groups.push((*g, i as u32..i as u32 + 1)),
+            }
+        }
+        (tmp.into_iter().map(|(_, i)| i).collect(), groups)
     }
 
     pub fn set_layout(&mut self, layout: Vec<ChunkGeom>) {
@@ -327,6 +545,52 @@ impl ChunkRenderer {
                     stroke_px: b.stroke_mm,
                     stroke_scale: if b.screen_px { meet as f32 } else { mm_px as f32 },
                 });
+            }
+        }
+
+        // Vektor-Text dieses Frames (sichtbare Texte, nach Glyphe gruppiert).
+        let (text_insts, text_groups) = self.build_text_instances(bounds, meet);
+        let text_block = blocks.len() as u32;
+        if !text_groups.is_empty() {
+            let centre = [(bounds.0 + bounds.1) / 2.0, (bounds.3 + bounds.2) / 2.0];
+            blocks.push(Globals {
+                view_proj: projection(bounds, centre),
+                color: [0.0; 4],
+                viewport_px: vp,
+                stroke_px: 0.0,
+                stroke_scale: 1.0,
+            });
+            // Glyphen-Mesh-Puffer neu aufbauen, wenn neue Glyphen dazukamen.
+            if let Some(font) = self.font.as_mut() {
+                if font.dirty || self.glyph_vbo.is_none() {
+                    self.glyph_vbo = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("chunks.glyph.vbo"),
+                        contents: bytemuck::cast_slice(&font.verts),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }));
+                    self.glyph_ibo = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("chunks.glyph.ibo"),
+                        contents: bytemuck::cast_slice(&font.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    }));
+                    font.dirty = false;
+                }
+            }
+            let need = (text_insts.len() * std::mem::size_of::<TextInst>()) as u64;
+            if self.inst_buf.as_ref().map_or(true, |b| b.1 < need) {
+                let cap = need.next_power_of_two().max(64 * 1024);
+                self.inst_buf = Some((
+                    device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("chunks.text.inst"),
+                        size: cap,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                    cap,
+                ));
+            }
+            if let Some((buf, _)) = &self.inst_buf {
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&text_insts));
             }
         }
 
@@ -432,6 +696,25 @@ impl ChunkRenderer {
                     pass.set_bind_group(0, ubind, &[block * stride as u32]);
                     pass.draw_indexed(b.start..b.start + b.count, 0, 0..1);
                     block += 1;
+                }
+            }
+            // Text zuoberst.
+            if let (false, Some(vbo), Some(ibo), Some((inst, _)), Some(font)) = (
+                text_groups.is_empty(),
+                &self.glyph_vbo,
+                &self.glyph_ibo,
+                &self.inst_buf,
+                self.font.as_ref(),
+            ) {
+                pass.set_pipeline(&self.text_pipeline);
+                pass.set_bind_group(0, ubind, &[text_block * stride as u32]);
+                pass.set_vertex_buffer(0, vbo.slice(..));
+                pass.set_vertex_buffer(1, inst.slice(..));
+                pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
+                for (gid, range) in &text_groups {
+                    if let Some(m) = font.mesh_info(*gid) {
+                        pass.draw_indexed(m.first_index..m.first_index + m.index_count, 0, range.clone());
+                    }
                 }
             }
         }

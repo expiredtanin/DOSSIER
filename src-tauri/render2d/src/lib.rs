@@ -25,6 +25,10 @@ pub mod gpu;
 #[cfg(feature = "render")]
 pub mod chunks;
 
+// Vektor-Text (Glyphen-Umrisse → Dreiecke, instanziert, drehbar).
+#[cfg(feature = "render")]
+pub mod vtext;
+
 // Browser-Bindings (wasm32 + WebGPU), nur mit Feature "web". Setzt "render" voraus
 // (dieselbe GPU-Schicht wie das native Fenster), fuegt aber KEINE winit-Abhaengigkeit
 // hinzu — die Canvas dient direkt als wgpu-Surface.
