@@ -19,7 +19,6 @@ use wgpu::util::DeviceExt;
 
 use crate::shaders::FILL_WGSL;
 
-const SAMPLE_COUNT: u32 = 4;
 /// Graustufe fuer gedimmte Linien (== GREY_RGB in glPlanCompile.ts).
 const GREY: f32 = 0.549;
 /// Viewbox-Einheiten je Meter (== PX_PER_M).
@@ -205,6 +204,7 @@ pub struct ChunkRenderer {
     layout: Vec<ChunkGeom>,
     msaa: Option<(wgpu::Texture, (u32, u32))>,
     format: wgpu::TextureFormat,
+    samples: u32,
     pub clear: [f64; 3],
     // --- Vektor-Text ---
     text_pipeline: wgpu::RenderPipeline,
@@ -250,7 +250,9 @@ fn projection(b: (f64, f64, f64, f64), origin: [f64; 2]) -> [f32; 16] {
 }
 
 impl ChunkRenderer {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    /// `samples`: MSAA-Stufe (4 oder 8, je nach GPU-Unterstuetzung) — Kantenglaettung
+    /// fuer ALLE Geometrie (Flaechen, Linien, Text).
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, samples: u32) -> Self {
         let fill_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("chunks.fill"),
             source: wgpu::ShaderSource::Wgsl(FILL_WGSL.into()),
@@ -305,7 +307,7 @@ impl ChunkRenderer {
                 },
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState {
-                    count: SAMPLE_COUNT,
+                    count: samples,
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -367,7 +369,7 @@ impl ChunkRenderer {
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            multisample: wgpu::MultisampleState { count: samples, mask: !0, alpha_to_coverage_enabled: false },
             multiview_mask: None,
             cache: None,
         });
@@ -386,6 +388,7 @@ impl ChunkRenderer {
             layout: Vec::new(),
             msaa: None,
             format,
+            samples,
             clear: [0.941, 0.941, 0.941],
         }
     }
@@ -634,7 +637,7 @@ impl ChunkRenderer {
                 label: Some("chunks.msaa"),
                 size: wgpu::Extent3d { width: viewport.0, height: viewport.1, depth_or_array_layers: 1 },
                 mip_level_count: 1,
-                sample_count: SAMPLE_COUNT,
+                sample_count: self.samples,
                 dimension: wgpu::TextureDimension::D2,
                 format: self.format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,

@@ -1950,6 +1950,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // + echtes viewBox werden erst beim Loslassen abgeglichen → in WebKit KEIN
   // SVG-Re-Raster je Frame mehr.
   const panPending = useRef<ViewBox | null>(null);
+  // true, wenn das SVG-Overlay zu schwer fürs Neu-Rastern je Frame ist (s. applySvgTransform).
+  const overlayHeavyRef = useRef(false);
   const panStartView = useRef<ViewBox | null>(null); // viewBox bei Gestenbeginn (V0)
   const panRaf = useRef<number | null>(null);
 
@@ -1971,6 +1973,15 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const lbY = (rect.height - v0.h * m) / 2;
     const cx = m * A * (v0.x - v.x) + (1 - A) * lbX;
     const cy = m * A * (v0.y - v.y) + (1 - A) * lbY;
+    if (!overlayHeavyRef.current) {
+      // Leichtes Overlay: den echten viewBox setzen — der Vektor wird in jedem
+      // Frame SCHARF neu gerastert (ein CSS-Transform würde die Ebene als Bitmap
+      // strecken → verpixelt). Bildschirmkonstante Griffe skalieren dabei mit.
+      svg.style.transform = "";
+      svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+      return;
+    }
+    // Schweres Overlay (z. B. riesiger Auswahlpfad): GPU-komponierter CSS-Transform.
     svg.style.transformOrigin = "0 0";
     svg.style.transform = `translate(${cx}px, ${cy}px) scale(${A})`;
   };
@@ -1999,7 +2010,6 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     if (panPending.current) {
       // SVG-Transform lösen; setView setzt das echte viewBox (ein einziger Re-Raster).
       if (svgRef.current) svgRef.current.style.transform = "";
-      svgRef.current?.classList.remove("plan-zooming");
       setView(panPending.current);
       panPending.current = null;
     }
@@ -2626,9 +2636,6 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           y: base.y + (e.clientY - rect.top - offY) / scale,
         };
       }
-      // Bildschirmkonstante Overlays (Griffe) würden vom CSS-Transform der Geste
-      // mitskaliert → bis zum Festschreiben ausblenden (kein React-Render nötig).
-      svgRef.current?.classList.add("plan-zooming");
       enqueuePan(zoomedView(base, e.clientX, e.clientY, e.deltaY, anchor));
       if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current);
       wheelCommitTimer.current = setTimeout(() => {
@@ -2791,6 +2798,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return parts.join("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightDrawPrims]);
+  overlayHeavyRef.current = highlightDrawPath.length > 300_000;
   const highlightTextPath = useMemo(() => {
     const parts: string[] = [];
     for (const p of highlightTextFrames) {

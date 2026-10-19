@@ -84,8 +84,12 @@ pub fn set_rect(app: &AppHandle, x: f64, y: f64, w: f64, h: f64) {
         // Unter alle vorhandenen Geschwister (= unter die Webview).
         parent.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, None);
         make_webview_transparent(&app2);
-        let (surface, device, queue, config) = create_surface(&view, w * scale, h * scale);
-        let renderer = ChunkRenderer::new(&device, config.format);
+        let (surface, device, queue, config, adapter_flags) = create_surface(&view, w * scale, h * scale);
+        let samples = [8u32, 4]
+            .into_iter()
+            .find(|s| adapter_flags.sample_count_supported(*s))
+            .unwrap_or(4);
+        let renderer = ChunkRenderer::new(&device, config.format, samples);
         let mut e = Embedded {
             ns_view: view,
             surface,
@@ -135,7 +139,7 @@ fn create_surface(
     view: &NSView,
     pw: f64,
     ph: f64,
-) -> (wgpu::Surface<'static>, wgpu::Device, wgpu::Queue, wgpu::SurfaceConfiguration) {
+) -> (wgpu::Surface<'static>, wgpu::Device, wgpu::Queue, wgpu::SurfaceConfiguration, wgpu::TextureFormatFeatureFlags) {
     let instance = wgpu::Instance::default();
     let surface = unsafe {
         instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -174,7 +178,8 @@ fn create_surface(
         desired_maximum_frame_latency: 2,
     };
     surface.configure(&device, &config);
-    (surface, device, queue, config)
+    let flags = adapter.get_texture_format_features(format).flags;
+    (surface, device, queue, config, flags)
 }
 
 /// Roh-Bytes eines Puffers ablegen (Vertex-/Indexdaten eines Chunks).
