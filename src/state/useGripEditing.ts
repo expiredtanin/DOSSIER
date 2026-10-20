@@ -472,6 +472,7 @@ export function useGripEditing(opts: {
   // Dasselbe für das Verschieben eines ganzen 2D-Elements (Gesamt-Delta) und für
   // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
   const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
+  const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
   const pendingEdgeRef = useRef<{ edge: EdgeGrip; delta: Vec2 } | null>(null);
   // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
@@ -839,6 +840,13 @@ export function useGripEditing(opts: {
       if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
       return;
     }
+    // Raum/Decke: Eckpunkt-Zug nur als Vorschau, Projekt erst beim Setzen.
+    if (selectedRoomId || selectedCeilingId) {
+      pendingAreaGripRef.current = selectedRoomId
+        ? { kind: "room", id: selectedRoomId, index, flat: index, pt }
+        : { kind: "ceiling", id: selectedCeilingId!, index, flat: index, pt };
+      return;
+    }
     if (selectedRoomId) moveRoomGrip(selectedRoomId, index, pt);
     else if (selectedCeilingId) moveCeilingGrip(selectedCeilingId, index, pt);
     else {
@@ -870,6 +878,15 @@ export function useGripEditing(opts: {
 
   /** Vorschau-Form des ausstehenden Eckpunkt-Zugs (leer, wenn keiner läuft). */
   const gripPreviewShapes = (): DraftShape[] => {
+    const pa = pendingAreaGripRef.current;
+    if (pa) {
+      const ring =
+        pa.kind === "room"
+          ? (project.rooms ?? []).find((r) => r.id === pa.id)?.boundary
+          : (project.ceilings ?? []).find((c) => c.id === pa.id)?.outline;
+      if (!ring) return [];
+      return [{ kind: "poly", pts: ring.map((q, i) => (i === pa.index ? pa.pt : q)), closed: true }];
+    }
     const pw = pendingWallGripRef.current;
     if (pw) {
       const w = project.walls.find((x) => x.id === pw.wallId);
@@ -893,6 +910,12 @@ export function useGripEditing(opts: {
 
   /** Ausstehenden Zug jetzt in das Projekt schreiben (EINE Mutation). */
   const commitPendingGrip = () => {
+    const pa = pendingAreaGripRef.current;
+    pendingAreaGripRef.current = null;
+    if (pa) {
+      if (pa.kind === "room") moveRoomGrip(pa.id, pa.index, pa.pt);
+      else moveCeilingGrip(pa.id, pa.index, pa.pt);
+    }
     const pw = pendingWallGripRef.current;
     pendingWallGripRef.current = null;
     if (pw) moveGripOf(null, pw.wallId, pw.localIndex, pw.pt, scaleDenominator);
@@ -1014,6 +1037,7 @@ export function useGripEditing(opts: {
     gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
     pendingGripRef.current = null; // (commitPendingGrip hat sie vorher schon geschrieben)
     pendingWallGripRef.current = null;
+    pendingAreaGripRef.current = null;
     pendingBodyRef.current = null;
     pendingEdgeRef.current = null;
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
@@ -1242,9 +1266,10 @@ export function useGripEditing(opts: {
     // danach wie onGripEnd aufräumen.
     onGripCancel: (index: number, origin: Vec2) => {
       // Ausstehender Zug: einfach verwerfen (das Projekt wurde nie verändert).
-      if (pendingGripRef.current || pendingWallGripRef.current) {
+      if (pendingGripRef.current || pendingWallGripRef.current || pendingAreaGripRef.current) {
         pendingGripRef.current = null;
         pendingWallGripRef.current = null;
+        pendingAreaGripRef.current = null;
       } else applyGrip(index, origin);
       endEditing();
     },
@@ -1264,7 +1289,7 @@ export function useGripEditing(opts: {
   };
 
   // Der gezogene Griff folgt der Vorschau (das Projekt bleibt bis zum Setzen unverändert).
-  const pendingNow = pendingGripRef.current ?? pendingWallGripRef.current;
+  const pendingNow = pendingGripRef.current ?? pendingWallGripRef.current ?? pendingAreaGripRef.current;
   const displayGrips = pendingNow ? grips.map((g, i) => (i === pendingNow.flat ? pendingNow.pt : g)) : grips;
 
   return {
