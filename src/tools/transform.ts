@@ -514,6 +514,26 @@ function stairPreviewShapes(stair: Stair, fn: (p: Vec2) => Vec2): DraftShape[] {
 }
 
 /** Vorschau-Formen für ein Element unter der Punkt-Transformation `fn`. */
+/** Vorschau eines einzelnen Flächen-Elements (Decke/Raum/Treppe) unter einer Verschiebung. */
+export function areaMovePreview(
+  project: Project,
+  kind: "ceiling" | "room" | "stair",
+  id: string,
+  delta: Vec2,
+): DraftShape[] {
+  const fn = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
+  if (kind === "ceiling") {
+    const c = (project.ceilings ?? []).find((x) => x.id === id);
+    return c ? itemPreview(project, { kind: "ceiling", ceiling: c } as AnyItem, fn) : [];
+  }
+  if (kind === "room") {
+    const r = (project.rooms ?? []).find((x) => x.id === id);
+    return r ? itemPreview(project, { kind: "room", room: r } as AnyItem, fn) : [];
+  }
+  const st = (project.stairs ?? []).find((x) => x.id === id);
+  return st ? itemPreview(project, { kind: "stair", stair: st } as AnyItem, fn) : [];
+}
+
 function itemPreview(project: Project, item: AnyItem, fn: (p: Vec2) => Vec2): DraftShape[] {
   if (item.kind === "wall") {
     const w = item.wall;

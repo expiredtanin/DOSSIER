@@ -10,7 +10,7 @@ import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../mod
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { drawingVertices } from "./projectSlice";
-import { mvGeom } from "../tools/transform";
+import { areaMovePreview, mvGeom } from "../tools/transform";
 import { drawingPreviewShapes } from "../tools/drawingPreview";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";
@@ -473,6 +473,7 @@ export function useGripEditing(opts: {
   // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
   const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
+  const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
   const pendingEdgeRef = useRef<{ edge: EdgeGrip; delta: Vec2 } | null>(null);
   // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
@@ -957,6 +958,13 @@ export function useGripEditing(opts: {
 
   /** Aufgeschobenes Körper-Verschieben jetzt ins Projekt schreiben. */
   const commitPendingBody = () => {
+    const pa = pendingAreaMoveRef.current;
+    pendingAreaMoveRef.current = null;
+    if (pa && (pa.total.x !== 0 || pa.total.y !== 0)) {
+      if (pa.kind === "ceiling") moveCeilingBy(pa.id, pa.total);
+      else if (pa.kind === "stair") moveStairBy(pa.id, pa.total);
+      else moveRoomBy(pa.id, pa.total);
+    }
     const pend = pendingBodyRef.current;
     pendingBodyRef.current = null;
     if (!pend || (pend.total.x === 0 && pend.total.y === 0)) return;
@@ -1038,6 +1046,7 @@ export function useGripEditing(opts: {
     pendingGripRef.current = null; // (commitPendingGrip hat sie vorher schon geschrieben)
     pendingWallGripRef.current = null;
     pendingAreaGripRef.current = null;
+    pendingAreaMoveRef.current = null;
     pendingBodyRef.current = null;
     pendingEdgeRef.current = null;
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
@@ -1141,18 +1150,26 @@ export function useGripEditing(opts: {
         else delta = { x: 0, y: delta.y };
       }
       // Decke: ganzen Umriss verschieben (kein Multi-Koinzidenz-Handling nötig).
-      if (selectedCeilingId && !target) {
-        moveCeilingBy(selectedCeilingId, delta);
-        return;
-      }
-      // Treppe: ganzen Antritt (+ Zentrum) verschieben.
-      if (selectedStairId && !target) {
-        moveStairBy(selectedStairId, delta);
-        return;
-      }
-      // Raum: ganzen Umriss (+ Stempel-Anker) verschieben.
-      if (selectedRoomId && !target) {
-        moveRoomBy(selectedRoomId, delta);
+      // Decke/Treppe/Raum: nur Gesamt-Delta + Vorschau, Projekt erst beim Loslassen.
+      const areaTarget: { kind: "ceiling" | "room" | "stair"; id: string } | null = target
+        ? null
+        : selectedCeilingId
+          ? { kind: "ceiling", id: selectedCeilingId }
+          : selectedStairId
+            ? { kind: "stair", id: selectedStairId }
+            : selectedRoomId
+              ? { kind: "room", id: selectedRoomId }
+              : null;
+      if (areaTarget) {
+        const prev = pendingAreaMoveRef.current;
+        const same = prev && prev.kind === areaTarget.kind && prev.id === areaTarget.id;
+        const total = same ? { x: prev!.total.x + delta.x, y: prev!.total.y + delta.y } : delta;
+        pendingAreaMoveRef.current = { ...areaTarget, total };
+        setDraft({
+          preview: areaMovePreview(project, areaTarget.kind, areaTarget.id, total),
+          vertices: [],
+          snap: null,
+        });
         return;
       }
       // Gegriffenes Element: bei Mehrfachauswahl das unter dem Cursor (target),
