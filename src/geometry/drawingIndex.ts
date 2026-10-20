@@ -144,6 +144,11 @@ export function nearestInDrawings(index: DrawingIndex, m: Vec2, maxDist: number)
   for (const i of drawingsNear(index, m, maxDist)) {
     const d = index.drawings[i];
     forEachSegment(d, (a, b) => {
+      // Billiger Vorab-Test: liegt das Segment ganz auf einer Seite des Suchquadrats,
+      // kann es nicht näher sein (große Konturen haben tausende Segmente).
+      const r = bestDist;
+      if ((a.x > m.x + r && b.x > m.x + r) || (a.x < m.x - r && b.x < m.x - r)) return;
+      if ((a.y > m.y + r && b.y > m.y + r) || (a.y < m.y - r && b.y < m.y - r)) return;
       const dist = pointSegDist(m, a, b);
       if (dist < bestDist) {
         bestDist = dist;
@@ -161,6 +166,8 @@ export function drawingsWithinDistance(index: DrawingIndex, m: Vec2, maxDist: nu
     const d = index.drawings[i];
     let best: NearestHit | null = null;
     forEachSegment(d, (a, b) => {
+      if ((a.x > m.x + maxDist && b.x > m.x + maxDist) || (a.x < m.x - maxDist && b.x < m.x - maxDist)) return;
+      if ((a.y > m.y + maxDist && b.y > m.y + maxDist) || (a.y < m.y - maxDist && b.y < m.y - maxDist)) return;
       const dist = pointSegDist(m, a, b);
       if (dist < maxDist && (!best || dist < best.dist)) best = { drawing: d, a, b, dist };
     });
