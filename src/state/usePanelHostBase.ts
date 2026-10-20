@@ -470,6 +470,17 @@ export function usePanelHostBase(opts: {
         if (selection?.kind === "drawing2d")
           setElementFillColor(selection.id, color);
       },
+      onSetSelectionFillOpacity: (opacity) => {
+        if (selection?.kind === "drawing2d")
+          setProject((p) => ({
+            ...p,
+            drawings2d: p.drawings2d.map((d) => {
+              if (d.id !== selection.id) return d;
+              const { fillOpacity: _old, ...rest } = d;
+              return opacity >= 1 ? rest : { ...rest, fillOpacity: Math.max(0, opacity) };
+            }),
+          }));
+      },
       onSetSelectionOpacity: (opacity) => {
         // Deckkraft eines 2D-Elements. Bei BILDERN bleibt es die Deckkraft der
         // Bildgeometrie (bestehendes Verhalten, eigenes Feld); bei allen

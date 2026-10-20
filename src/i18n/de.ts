@@ -353,6 +353,8 @@ export const de = {
   "attr.color": "Farbe",
   "attr.weight": "Strichstärke (mm)",
   "attr.opacity": "Deckkraft",
+  "attr.fillTransparency": "Füllungs-Transparenz",
+  "attr.hatch.none": "Keine Schraffur",
   "attr.saturation": "Sättigung",
   "attr.brightness": "Helligkeit",
   "attr.contrast": "Kontrast",

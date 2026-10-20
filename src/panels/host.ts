@@ -220,6 +220,11 @@ export interface PanelHostValue {
    */
   onSetSelectionOpacity: (opacity: number) => void;
   /**
+   * Setzt die Transparenz NUR der Füllung/Schraffur (`Drawing2D.fillOpacity`,
+   * 0..1, 1 = deckend); der Umriss bleibt deckend. Wirkt nur auf 2D-Elemente.
+   */
+  onSetSelectionFillOpacity: (opacity: number) => void;
+  /**
    * Setzt eine oder mehrere Bildkorrektur-Werte (Sättigung/Helligkeit/
    * Kontrast/Graustufen) — wirkt NUR auf Kontext-Objekt-Bilder (`ContextImage`,
    * `sel.kind === "contextObject"` mit `isImage`), sonst No-op. Merged mit den

@@ -208,6 +208,16 @@ export function addDrawing2D(
           : { ...p, opacity: (p.opacity ?? 1) * clamped };
     }
   }
+  // Nur die FLÄCHE transparenter machen (Umriss/Linien bleiben deckend): die
+  // Füllungs-Primitive sind die Polygone.
+  const fo = d.fillOpacity;
+  if (fo !== undefined && fo < 1) {
+    const clampedFo = Math.max(0, fo);
+    for (let i = start; i < out.length; i++) {
+      const p = out[i];
+      if (p.kind === "polygon") out[i] = { ...p, opacity: (p.opacity ?? 1) * clampedFo };
+    }
+  }
   if (cacheable) {
     drawingPrimCache.set(d, {
       lineStyles: project.lineStyles,

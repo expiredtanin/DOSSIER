@@ -2069,6 +2069,12 @@ export interface Drawing2D {
    */
   opacity?: number;
   /**
+   * Transparenz NUR der Füllung/Schraffurfläche 0..1 (Default 1 = deckend) —
+   * zusätzlich zu `opacity` (das Strich UND Füllung trifft). Der Umriss bleibt
+   * dabei deckend (z. B. durchscheinende Fläche mit kräftiger Kontur).
+   */
+  fillOpacity?: number;
+  /**
    * Linienenden an OFFENEN Formen (Linie, offene Polylinie, Bogen, Spline,
    * Bezier) sowie an der Hinweislinie eines Textes. `start`/`end` beziehen
    * sich auf die Zeichenrichtung der Form; `sizeMm` ist die Grösse in

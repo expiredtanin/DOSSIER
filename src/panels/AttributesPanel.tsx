@@ -237,6 +237,9 @@ export function AttributesPanel() {
     if (next === "custom") host.onSetSelectionWeight(sel.weightMm);
     else host.onSetSelectionStrokeWeightSource(next);
   };
+  // Die Ressource „Ohne" (Muster none) zeigt wie „Keine Schraffur" nichts an.
+  const hatchPatternIsNone =
+    project.hatches.find((h) => h.id === sel.effectiveHatchId)?.pattern === "none";
   const onHatchSourceChange = (next: UiSource) => {
     if (next === "custom") {
       host.onSetSelectionFill(sel.effectiveHatchId ?? project.hatches[0]?.id ?? null);
@@ -659,14 +662,41 @@ export function AttributesPanel() {
               hatchUi,
               onHatchSourceChange,
               <Dropdown
-                value={sel.effectiveHatchId ?? ""}
+                value={hatchPatternIsNone ? "" : sel.effectiveHatchId ?? ""}
                 disabled={!fillEditable}
                 onChange={(v) => host.onSetSelectionFill(v || null)}
                 options={[
-                  { value: "", label: t("attr.none") },
-                  ...project.hatches.map((h) => ({ value: h.id, label: h.name })),
+                  { value: "", label: t("attr.hatch.none") },
+                  // Die Ressource „Ohne" (Muster none) wäre dasselbe wie „Keine Schraffur".
+                  ...project.hatches
+                    .filter((h) => h.pattern !== "none")
+                    .map((h) => ({ value: h.id, label: h.name })),
                 ]}
               />,
+            )}
+
+            {/* Transparenz NUR der Füllung/Schraffurfläche (Umriss bleibt deckend);
+                in Prozent: 0 % = deckend, 100 % = unsichtbar. */}
+            {isDrawing && (
+              <>
+                <span className="attr-key">{t("attr.fillTransparency")}</span>
+                <span className="attr-val">
+                  <input
+                    className="attr-num"
+                    style={{ width: 72 }}
+                    type="number"
+                    step={5}
+                    min={0}
+                    max={100}
+                    value={Math.round((1 - (drawing?.fillOpacity ?? 1)) * 100)}
+                    onChange={(e) => {
+                      const pct = Number(e.target.value);
+                      if (Number.isFinite(pct)) host.onSetSelectionFillOpacity(1 - Math.max(0, Math.min(100, pct)) / 100);
+                    }}
+                  />
+                  <span className="attr-unit"> %</span>
+                </span>
+              </>
             )}
 
         {/* Schraffur-Platzierung an DIESEM Objekt (direkt unter der Schraffur-Auswahl): Winkel ersetzt den der
@@ -674,7 +704,7 @@ export function AttributesPanel() {
             Musterraster (leer = Modellursprung, damit benachbarte Flächen
             dieselbe Phase teilen). Nur sinnvoll, wenn das Element überhaupt
             eine Schraffur zeigt. */}
-        {isDrawing && sel.effectiveHatchId && (
+        {isDrawing && sel.effectiveHatchId && !hatchPatternIsNone && (
           <>
             <span className="attr-key">{t("attr.hatch.angle")}</span>
             <span className="attr-val">

@@ -351,6 +351,8 @@ export const en: Record<TranslationKey, string> = {
   "attr.color": "Color",
   "attr.weight": "Line weight (mm)",
   "attr.opacity": "Opacity",
+  "attr.fillTransparency": "Fill transparency",
+  "attr.hatch.none": "No hatch",
   "attr.saturation": "Saturation",
   "attr.brightness": "Brightness",
   "attr.contrast": "Contrast",
