@@ -6,8 +6,9 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useRef, useState, type RefObject } from "react";
-import { add, dot, leftNormal, normalize, scale, sub } from "../model/geometry";
+import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
+import { wallTypeThickness } from "../model/types";
 import { drawingVertices } from "./projectSlice";
 import { mvGeom } from "../tools/transform";
 import { drawingPreviewShapes } from "../tools/drawingPreview";
@@ -470,6 +471,7 @@ export function useGripEditing(opts: {
   const pendingGripRef = useRef<{ drawingId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
   // Dasselbe für das Verschieben eines ganzen 2D-Elements (Gesamt-Delta) und für
   // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
+  const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
   const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
   const pendingEdgeRef = useRef<{ edge: EdgeGrip; delta: Vec2 } | null>(null);
   // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
@@ -854,12 +856,33 @@ export function useGripEditing(opts: {
           return;
         }
       }
+      // Wand-Endpunkt: ebenso nur Vorschau, Projekt erst beim Setzen.
+      if (wId && !dId && local <= 1) {
+        const w = project.walls.find((x) => x.id === wId);
+        if (w && !w.locked) {
+          pendingWallGripRef.current = { wallId: wId, localIndex: local, flat: index, pt };
+          return;
+        }
+      }
       moveGripOf(dId, wId, local, pt, scaleDenominator);
     }
   };
 
   /** Vorschau-Form des ausstehenden Eckpunkt-Zugs (leer, wenn keiner läuft). */
   const gripPreviewShapes = (): DraftShape[] => {
+    const pw = pendingWallGripRef.current;
+    if (pw) {
+      const w = project.walls.find((x) => x.id === pw.wallId);
+      if (!w) return [];
+      const wt = project.wallTypes.find((t) => t.id === w.wallTypeId);
+      const th = wt ? wallTypeThickness(wt) : 0.2;
+      const a = pw.localIndex === 0 ? pw.pt : w.start;
+      const b = pw.localIndex === 0 ? w.end : pw.pt;
+      return [
+        { kind: "poly", pts: wallCorners(a, b, th), closed: true },
+        { kind: "line", a, b },
+      ];
+    }
     const pend = pendingGripRef.current;
     if (!pend) return [];
     const d = project.drawings2d.find((x) => x.id === pend.drawingId);
@@ -870,6 +893,9 @@ export function useGripEditing(opts: {
 
   /** Ausstehenden Zug jetzt in das Projekt schreiben (EINE Mutation). */
   const commitPendingGrip = () => {
+    const pw = pendingWallGripRef.current;
+    pendingWallGripRef.current = null;
+    if (pw) moveGripOf(null, pw.wallId, pw.localIndex, pw.pt, scaleDenominator);
     const pend = pendingGripRef.current;
     pendingGripRef.current = null;
     if (pend) moveGripOf(pend.drawingId, null, pend.localIndex, pend.pt, scaleDenominator);
@@ -987,6 +1013,7 @@ export function useGripEditing(opts: {
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
     gripDragInfoRef.current = null; // (c) Vertex-Drag-Info verwerfen
     pendingGripRef.current = null; // (commitPendingGrip hat sie vorher schon geschrieben)
+    pendingWallGripRef.current = null;
     pendingBodyRef.current = null;
     pendingEdgeRef.current = null;
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
@@ -1215,8 +1242,10 @@ export function useGripEditing(opts: {
     // danach wie onGripEnd aufräumen.
     onGripCancel: (index: number, origin: Vec2) => {
       // Ausstehender Zug: einfach verwerfen (das Projekt wurde nie verändert).
-      if (pendingGripRef.current) pendingGripRef.current = null;
-      else applyGrip(index, origin);
+      if (pendingGripRef.current || pendingWallGripRef.current) {
+        pendingGripRef.current = null;
+        pendingWallGripRef.current = null;
+      } else applyGrip(index, origin);
       endEditing();
     },
     onEdgeEnd: () => {
@@ -1235,7 +1264,7 @@ export function useGripEditing(opts: {
   };
 
   // Der gezogene Griff folgt der Vorschau (das Projekt bleibt bis zum Setzen unverändert).
-  const pendingNow = pendingGripRef.current;
+  const pendingNow = pendingGripRef.current ?? pendingWallGripRef.current;
   const displayGrips = pendingNow ? grips.map((g, i) => (i === pendingNow.flat ? pendingNow.pt : g)) : grips;
 
   return {
