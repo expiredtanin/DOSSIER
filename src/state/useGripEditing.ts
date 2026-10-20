@@ -474,6 +474,7 @@ export function useGripEditing(opts: {
   const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
+  const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
   const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
   const pendingEdgeRef = useRef<{ edge: EdgeGrip; delta: Vec2 } | null>(null);
   // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
@@ -958,6 +959,14 @@ export function useGripEditing(opts: {
 
   /** Aufgeschobenes Körper-Verschieben jetzt ins Projekt schreiben. */
   const commitPendingBody = () => {
+    const pwm = pendingWallMoveRef.current;
+    pendingWallMoveRef.current = null;
+    if (pwm && (pwm.total.x !== 0 || pwm.total.y !== 0)) {
+      moveElementByOf(null, pwm.wallId, pwm.total);
+      for (const c of moveCoincidentRef.current ?? []) {
+        moveGripOf(c.drawingId, c.wallId, c.index, { x: c.pos.x + pwm.total.x, y: c.pos.y + pwm.total.y }, scaleDenominator);
+      }
+    }
     const pa = pendingAreaMoveRef.current;
     pendingAreaMoveRef.current = null;
     if (pa && (pa.total.x !== 0 || pa.total.y !== 0)) {
@@ -1047,6 +1056,7 @@ export function useGripEditing(opts: {
     pendingWallGripRef.current = null;
     pendingAreaGripRef.current = null;
     pendingAreaMoveRef.current = null;
+    pendingWallMoveRef.current = null;
     pendingBodyRef.current = null;
     pendingEdgeRef.current = null;
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
@@ -1177,6 +1187,22 @@ export function useGripEditing(opts: {
       const moveDrawingId = target ? target.drawingId ?? null : selectedDrawingId;
       const moveWallId = target ? target.wallId ?? null : selectedWallId;
       // 2D-Element: nur Gesamt-Delta merken + Vorschau; Projekt erst beim Loslassen.
+      // Wand: Gesamt-Delta + Vorschau; beim Loslassen folgen verbundene Eckpunkte.
+      if (moveWallId && !moveDrawingId) {
+        const w = project.walls.find((x) => x.id === moveWallId);
+        if (w && !w.locked) {
+          if (moveCoincidentRef.current === null) {
+            moveCoincidentRef.current = findMoveCoincident2D(null, moveWallId);
+          }
+          const prev = pendingWallMoveRef.current;
+          const total = prev && prev.wallId === moveWallId
+            ? { x: prev.total.x + delta.x, y: prev.total.y + delta.y }
+            : delta;
+          pendingWallMoveRef.current = { wallId: moveWallId, total };
+          setDraft({ preview: areaMovePreview(project, "wall", moveWallId, total), vertices: [], snap: null });
+          return;
+        }
+      }
       const bodyDrawing = moveDrawingId && !moveWallId ? deferrableDrawing(moveDrawingId) : null;
       // Nur Formen mit sichtbarer Umriss-Vorschau aufschieben (Text/Kreis/Bemassung
       // bleiben beim Live-Verschieben, sonst sähe man während des Ziehens nichts).

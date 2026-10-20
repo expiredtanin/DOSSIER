@@ -517,11 +517,15 @@ function stairPreviewShapes(stair: Stair, fn: (p: Vec2) => Vec2): DraftShape[] {
 /** Vorschau eines einzelnen Flächen-Elements (Decke/Raum/Treppe) unter einer Verschiebung. */
 export function areaMovePreview(
   project: Project,
-  kind: "ceiling" | "room" | "stair",
+  kind: "ceiling" | "room" | "stair" | "wall",
   id: string,
   delta: Vec2,
 ): DraftShape[] {
   const fn = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
+  if (kind === "wall") {
+    const w = project.walls.find((x) => x.id === id);
+    return w ? itemPreview(project, { kind: "wall", wall: w } as AnyItem, fn) : [];
+  }
   if (kind === "ceiling") {
     const c = (project.ceilings ?? []).find((x) => x.id === id);
     return c ? itemPreview(project, { kind: "ceiling", ceiling: c } as AnyItem, fn) : [];
