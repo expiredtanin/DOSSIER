@@ -470,67 +470,6 @@ export function AttributesPanel() {
           </>
         )}
 
-        {/* Schraffur-Platzierung an DIESEM Objekt: Winkel ersetzt den der
-            Ressource, Massstab multipliziert sie, der Anker verschiebt das
-            Musterraster (leer = Modellursprung, damit benachbarte Flächen
-            dieselbe Phase teilen). Nur sinnvoll, wenn das Element überhaupt
-            eine Schraffur zeigt. */}
-        {isDrawing && sel.effectiveHatchId && (
-          <>
-            <span className="attr-key">{t("attr.hatch.angle")}</span>
-            <span className="attr-val">
-              <input
-                className="attr-num"
-                style={{ width: 72 }}
-                type="number"
-                step={5}
-                value={drawing?.hatchAngleDeg ?? ""}
-                placeholder={t("attr.hatch.fromStyle")}
-                onChange={(e) => {
-                  const v = e.target.value === "" ? null : Number(e.target.value);
-                  if (v === null || Number.isFinite(v))
-                    host.onSetHatchPlacement(drawing!.id, { angleDeg: v });
-                }}
-              />
-            </span>
-            <span className="attr-key">{t("attr.hatch.scale")}</span>
-            <span className="attr-val">
-              <input
-                className="attr-num"
-                style={{ width: 72 }}
-                type="number"
-                step={0.1}
-                min={0.01}
-                value={drawing?.hatchScale ?? ""}
-                placeholder={t("attr.hatch.fromStyle")}
-                onChange={(e) => {
-                  const v = e.target.value === "" ? null : Number(e.target.value);
-                  if (v === null || (Number.isFinite(v) && v > 0))
-                    host.onSetHatchPlacement(drawing!.id, { scale: v });
-                }}
-              />
-            </span>
-            <span className="attr-key">{t("attr.hatch.origin")}</span>
-            <span className="attr-val">
-              <button
-                className="attr-btn"
-                title={t("attr.hatch.origin.hint")}
-                onClick={() =>
-                  host.onSetHatchPlacement(drawing!.id, {
-                    // Ankerpunkt = untere linke Ecke der Objekt-Bbox: das ist
-                    // die Ecke, an der man ein Plattenraster üblicherweise
-                    // ansetzen lässt. Erneuter Klick setzt zurück.
-                    origin: drawing?.hatchOrigin
-                      ? null
-                      : { x: sel.bbox.minX, y: sel.bbox.minY },
-                  })
-                }
-              >
-                {drawing?.hatchOrigin ? t("attr.hatch.origin.reset") : t("attr.hatch.origin.corner")}
-              </button>
-            </span>
-          </>
-        )}
 
         {/* ── Linienenden (Pfeilspitzen) ────────────────────────────────
             Nur bei OFFENEN 2D-Formen und beim Text mit Hinweislinie —
@@ -729,6 +668,68 @@ export function AttributesPanel() {
                 ]}
               />,
             )}
+
+        {/* Schraffur-Platzierung an DIESEM Objekt (direkt unter der Schraffur-Auswahl): Winkel ersetzt den der
+            Ressource, Massstab multipliziert sie, der Anker verschiebt das
+            Musterraster (leer = Modellursprung, damit benachbarte Flächen
+            dieselbe Phase teilen). Nur sinnvoll, wenn das Element überhaupt
+            eine Schraffur zeigt. */}
+        {isDrawing && sel.effectiveHatchId && (
+          <>
+            <span className="attr-key">{t("attr.hatch.angle")}</span>
+            <span className="attr-val">
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={5}
+                value={drawing?.hatchAngleDeg ?? ""}
+                placeholder={t("attr.hatch.fromStyle")}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? null : Number(e.target.value);
+                  if (v === null || Number.isFinite(v))
+                    host.onSetHatchPlacement(drawing!.id, { angleDeg: v });
+                }}
+              />
+            </span>
+            <span className="attr-key">{t("attr.hatch.scale")}</span>
+            <span className="attr-val">
+              <input
+                className="attr-num"
+                style={{ width: 72 }}
+                type="number"
+                step={0.1}
+                min={0.01}
+                value={drawing?.hatchScale ?? ""}
+                placeholder={t("attr.hatch.fromStyle")}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? null : Number(e.target.value);
+                  if (v === null || (Number.isFinite(v) && v > 0))
+                    host.onSetHatchPlacement(drawing!.id, { scale: v });
+                }}
+              />
+            </span>
+            <span className="attr-key">{t("attr.hatch.origin")}</span>
+            <span className="attr-val">
+              <button
+                className="attr-btn"
+                title={t("attr.hatch.origin.hint")}
+                onClick={() =>
+                  host.onSetHatchPlacement(drawing!.id, {
+                    // Ankerpunkt = untere linke Ecke der Objekt-Bbox: das ist
+                    // die Ecke, an der man ein Plattenraster üblicherweise
+                    // ansetzen lässt. Erneuter Klick setzt zurück.
+                    origin: drawing?.hatchOrigin
+                      ? null
+                      : { x: sel.bbox.minX, y: sel.bbox.minY },
+                  })
+                }
+              >
+                {drawing?.hatchOrigin ? t("attr.hatch.origin.reset") : t("attr.hatch.origin.corner")}
+              </button>
+            </span>
+          </>
+        )}
           </>
         )}
 
