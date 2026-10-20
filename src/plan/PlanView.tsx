@@ -1269,6 +1269,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Werte selbst, s. App.tsx).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Aktuelle Handler über die Ref lesen: `gripHandlers` ist bei jedem Render ein
+      // neues Objekt — mit [gripHandlers] als Abhängigkeit wurde der Listener ständig
+      // ab- und neu angehängt und verpasste Tasten in diesem Fenster (Esc wurde dann
+      // von der Auswahl-Aufhebung statt vom Griff-Abbruch verbraucht).
+      const gripHandlers = gripHandlersRef.current;
       const gd = gripDrag.current;
       const ed = edgeDrag.current;
       if ((!gd && !ed) || !gripHandlers) return;
@@ -1290,7 +1295,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [gripHandlers]);
+  }, []);
 
   /** Bildschirm-px-Distanz Cursor → Stempel-Griff; null = kein einzelner Raum. */
   const stampHandleAt = (clientX: number, clientY: number): string | null => {
