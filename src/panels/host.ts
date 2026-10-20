@@ -225,6 +225,12 @@ export interface PanelHostValue {
    */
   onSetSelectionFillOpacity: (opacity: number) => void;
   /**
+   * Füllart eines geschlossenen 2D-Elements: "none" = keine Füllung (weder Farbe
+   * noch Schraffur), "solid" = Vollfläche in der Füllfarbe (ohne Schraffur),
+   * "hatch" = Schraffur (Füllfarbe bleibt als Grund erhalten).
+   */
+  onSetSelectionFillMode: (mode: "none" | "solid" | "hatch") => void;
+  /**
    * Setzt eine oder mehrere Bildkorrektur-Werte (Sättigung/Helligkeit/
    * Kontrast/Graustufen) — wirkt NUR auf Kontext-Objekt-Bilder (`ContextImage`,
    * `sel.kind === "contextObject"` mit `isImage`), sonst No-op. Merged mit den

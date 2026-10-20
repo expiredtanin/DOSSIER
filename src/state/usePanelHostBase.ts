@@ -7,6 +7,7 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { applyFillMode } from "./fillMode";
 import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Layout, Project } from "../model/types";
 import { resolvePenColor } from "../model/penSets";
@@ -469,6 +470,13 @@ export function usePanelHostBase(opts: {
         // Vollton-Füllfarbe nur bei Drawing2D (geschlossene Formen).
         if (selection?.kind === "drawing2d")
           setElementFillColor(selection.id, color);
+      },
+      onSetSelectionFillMode: (mode) => {
+        if (selection?.kind !== "drawing2d") return;
+        setProject((p) => ({
+          ...p,
+          drawings2d: p.drawings2d.map((d) => (d.id === selection.id ? applyFillMode(d, p.hatches, mode) : d)),
+        }));
       },
       onSetSelectionFillOpacity: (opacity) => {
         if (selection?.kind === "drawing2d")

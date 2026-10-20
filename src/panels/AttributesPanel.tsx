@@ -612,6 +612,33 @@ export function AttributesPanel() {
           <>
             <div className="attr-section-label">{t("attr.fill")}</div>
 
+            {/* Füllart: Keine / Vollfläche / Schraffur — die drei klaren Zustände einer
+                Fläche, statt sie nur indirekt über Hintergrundfarbe + Schraffur-Liste
+                zu erraten. Erkennung wie der Renderer (`addDrawing2D`: background →
+                Ebenenfarbe bei Quelle „Ebene" → fillColor). */}
+            {isDrawing && sel.closed === true && (() => {
+              const hatchActive = !!sel.effectiveHatchId && !hatchPatternIsNone;
+              const hasFill = !!(sel.background || sel.fillColor || sel.backgroundSource === "layer");
+              const mode = hatchActive ? "hatch" : hasFill ? "solid" : "none";
+              return (
+                <>
+                  <span className="attr-key">{t("attr.fillMode")}</span>
+                  <span className="attr-val">
+                    <Dropdown
+                      value={mode}
+                      disabled={!fillEditable}
+                      onChange={(v) => host.onSetSelectionFillMode(v as "none" | "solid" | "hatch")}
+                      options={[
+                        { value: "none", label: t("attr.fillMode.none") },
+                        { value: "solid", label: t("attr.fillMode.solid") },
+                        { value: "hatch", label: t("attr.fillMode.hatch") },
+                      ]}
+                    />
+                  </span>
+                </>
+              );
+            })()}
+
             {/* Swatch — IMMER sichtbar (zeigt den effektiven Wert, welche
                 Ebene/Bauteil/Override auch immer gerade liefert), aber nur bei
                 „eigener Wert" editierbar (`disabled`). Trägt wie die Strich-
