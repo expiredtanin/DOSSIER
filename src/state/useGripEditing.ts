@@ -40,6 +40,15 @@ export function useGripEditing(opts: {
   selectedWallIds: string[];
   selectedDrawingIds: string[];
   levelId: string;
+  /**
+   * Ob Modell-Bauteile (Wand/Decke/Raum/Öffnung/Treppe) Griffe bekommen und per
+   * Körper-Zug verschoben werden dürfen. `false` im Schnitt/in der Ansicht: deren
+   * Blatt misst Länge×Höhe entlang der Schnittlinie, die Bauteile aber X/Y im
+   * Grundriss — Griffe lägen an völlig falschen Stellen und ein Zug würde das
+   * Schnitt-Delta als Grundriss-Verschiebung anwenden. 2D-Elemente der Ebene
+   * selbst bleiben voll editierbar (sie leben im Blatt-Raum).
+   */
+  modelEditable?: boolean;
   visibleCodes: Set<string>;
   /** Papier-Massstab (1:N) — die Bemassungs-Griffe hängen daran (Papier-mm). */
   scaleDenominator: number;
@@ -86,6 +95,7 @@ export function useGripEditing(opts: {
     selectedWallIds,
     selectedDrawingIds,
     levelId,
+    modelEditable = true,
     visibleCodes,
     scaleDenominator,
     snap,
@@ -165,7 +175,8 @@ export function useGripEditing(opts: {
     // Öffnung (Fenster/Tür): EIN Mittelpunkt-Griff auf der Wandachse. Ziehen
     // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
     // `position`). Nur bei genau einer selektierten Öffnung (Auswahl exklusiv).
-    if (selectedOpeningId) {
+    if (!modelEditable && effectiveDrawingIds.length === 0) return [];
+    if (selectedOpeningId && modelEditable) {
       const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
       const w = op && project.walls.find((x) => x.id === op.hostWallId);
       if (op && w) {
@@ -179,7 +190,7 @@ export function useGripEditing(opts: {
     }
     // Treppe: EIN Bewegpunkt (siehe stairMoveHandle); Ziehen verschiebt die
     // ganze Treppe (applyGrip → moveStairBy). Auswahl exklusiv.
-    if (selectedStairId) {
+    if (selectedStairId && modelEditable) {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
       if (!st) return [];
       gripOwners.push({ localIndex: 0 });
@@ -188,13 +199,14 @@ export function useGripEditing(opts: {
     }
     // Decke: die Umriss-Vertices als Griffe (nur bei genau einer gewählten Decke,
     // solange kein 2D-Element/Wand mitgewählt ist — kein Multi-Select für Decken).
-    if (selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+    if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const pts = [...selectedCeiling.outline];
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
       return pts;
     }
     // Raum: die Umriss-Vertices als Griffe (nur bei genau einem gewählten Raum).
     if (
+      modelEditable &&
       selectedRoom &&
       effectiveDrawingIds.length === 0 &&
       selectedWallIds.length === 0 &&
@@ -239,7 +251,7 @@ export function useGripEditing(opts: {
           : undefined;
       pushGroup(drawingVertices(d, scaleDenominator), { drawingId: id }, keep);
     }
-    if (effectiveDrawingIds.length === 0) {
+    if (modelEditable && effectiveDrawingIds.length === 0) {
       for (const id of selectedWallIds) {
         const w = project.walls.find((x) => x.id === id);
         if (w) pushGroup([w.start, w.end], { wallId: id });
@@ -334,11 +346,12 @@ export function useGripEditing(opts: {
       return out;
     };
     // Decke: geschlossener Ring aus dem Umriss (Auswahl exklusiv, wie bei grips).
-    if (selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+    if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       return ringEdges(selectedCeiling.outline, {});
     }
     // Raum: geschlossener Ring aus dem Umriss.
     if (
+      modelEditable &&
       selectedRoom &&
       effectiveDrawingIds.length === 0 &&
       selectedWallIds.length === 0 &&
@@ -360,7 +373,7 @@ export function useGripEditing(opts: {
       else if (g.shape === "spline" && !g.closed) out.push(...openEdges(verts, owner));
       else if (g.shape === "line") out.push(...openEdges(verts, owner));
     }
-    if (effectiveDrawingIds.length === 0) {
+    if (modelEditable && effectiveDrawingIds.length === 0) {
       for (const id of selectedWallIds) {
         const w = project.walls.find((x) => x.id === id);
         if (!w) continue;
@@ -1161,7 +1174,7 @@ export function useGripEditing(opts: {
       }
       // Decke: ganzen Umriss verschieben (kein Multi-Koinzidenz-Handling nötig).
       // Decke/Treppe/Raum: nur Gesamt-Delta + Vorschau, Projekt erst beim Loslassen.
-      const areaTarget: { kind: "ceiling" | "room" | "stair"; id: string } | null = target
+      const areaTarget: { kind: "ceiling" | "room" | "stair"; id: string } | null = target || !modelEditable
         ? null
         : selectedCeilingId
           ? { kind: "ceiling", id: selectedCeilingId }
@@ -1185,7 +1198,8 @@ export function useGripEditing(opts: {
       // Gegriffenes Element: bei Mehrfachauswahl das unter dem Cursor (target),
       // sonst das einzeln selektierte. Wand UND 2D schließen sich aus.
       const moveDrawingId = target ? target.drawingId ?? null : selectedDrawingId;
-      const moveWallId = target ? target.wallId ?? null : selectedWallId;
+      const moveWallId = modelEditable ? (target ? target.wallId ?? null : selectedWallId) : null;
+      if (!moveDrawingId && !moveWallId) return;
       // 2D-Element: nur Gesamt-Delta merken + Vorschau; Projekt erst beim Loslassen.
       // Wand: Gesamt-Delta + Vorschau; beim Loslassen folgen verbundene Eckpunkte.
       if (moveWallId && !moveDrawingId) {

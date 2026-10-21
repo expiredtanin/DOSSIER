@@ -16,6 +16,7 @@ import { stairOutline } from "../geometry/stair";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
 import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "./curves";
 import { buildDrawingIndex, drawingsNear, isIndexable, pointSegDist, type DrawingIndex } from "../geometry/drawingIndex";
+import { sheetSnapSegments } from "./sheetSnapGeometry";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -409,6 +410,23 @@ export function computeSnap(input: SnapInput): SnapResult | null {
     } else {
       segs = collectSegments(input);
       intSegs = segs;
+    }
+    // Abgeleitete Blatt-Geometrie (Schnitt/Ansicht, s. sheetSnapGeometry.ts):
+    // nur die Strecken in Cursornähe — eine Ansicht hat schnell Tausende Kanten,
+    // der paarweise Schnittpunkt-Fang bliebe sonst nicht flüssig.
+    const sheet = sheetSnapSegments(input.levelId);
+    if (sheet.length > 0) {
+      const near = sheet
+        .map((seg) => ({ seg, d: pointSegDist(raw, seg[0], seg[1]) }))
+        .filter((e) => e.d <= intRadius)
+        .sort((x, y) => x.d - y.d)
+        .slice(0, 64)
+        .map((e) => e.seg);
+      if (near.length > 0) {
+        const shared = intSegs === segs;
+        segs = segs.concat(near);
+        intSegs = shared ? segs : intSegs.concat(near);
+      }
     }
   }
 

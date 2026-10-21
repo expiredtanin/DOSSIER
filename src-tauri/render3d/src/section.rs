@@ -583,6 +583,9 @@ struct PrismBounds {
     u_min: f32,
     u_max: f32,
     depth_min: f32,
+    /// Groesste Tiefe des Fussabdrucks. `<= EPS` heisst: das Bauteil liegt
+    /// komplett VOR der Ebene (hinter dem Betrachter) und verdeckt nichts.
+    depth_max: f32,
     z0: f32,
     z1: f32,
     opening_voids: Vec<(f32, f32, f32, f32)>,
@@ -592,6 +595,7 @@ fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
     let mut u_min = f32::INFINITY;
     let mut u_max = f32::NEG_INFINITY;
     let mut depth_min = f32::INFINITY;
+    let mut depth_max = f32::NEG_INFINITY;
     for &p in &prism.footprint {
         let w = to_world(p, 0.0); // u/Tiefe sind hoehenunabhaengig (vertikale Ebene)
         let u = plane.project(w)[0];
@@ -599,6 +603,7 @@ fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
         u_min = u_min.min(u);
         u_max = u_max.max(u);
         depth_min = depth_min.min(d);
+        depth_max = depth_max.max(d);
     }
 
     let mut opening_voids = Vec::new();
@@ -633,6 +638,7 @@ fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
         u_min,
         u_max,
         depth_min,
+        depth_max,
         z0: prism.z0,
         z1: prism.z1,
         opening_voids,
@@ -804,6 +810,14 @@ fn blocked_intervals(
             if ex.kind == b.kind && ex.index == b.index {
                 continue;
             }
+        }
+        // Komplett VOR der Schnittebene (hinter dem Betrachter, weggeschnitten):
+        // verdeckt nichts. Vorher zaehlte z. B. die Fassade zwischen Betrachter
+        // und Schnittlinie als Verdecker und versteckte jede Ansichtskante
+        // dahinter (Rueckwand, Fenster, Innenwaende) — der Schnitt zeigte fast
+        // nur noch Poché.
+        if b.depth_max <= EPS {
+            continue;
         }
         let ru = height_in_range(u0, u1, b.u_min, b.u_max, HeightBias::Vertical);
         let rv = height_in_range(v0, v1, b.z0, b.z1, bias);
@@ -1136,6 +1150,40 @@ mod tests {
         assert!((d - 2.0).abs() < 1e-5, "Tiefe entlang normalisierter Normale");
         let uv = plane.project([1.0, 1.5, 7.0]);
         assert!((uv[1] - 1.5).abs() < 1e-6, "v = world.y");
+    }
+
+    /// Regression (Nutzer-Report 2026-10-20, "im Schnitt fehlen die Ansichten"):
+    /// eine Wand komplett VOR der Ebene (zwischen Betrachter und Schnittlinie,
+    /// also weggeschnitten) darf die Rueckwand dahinter NICHT verdecken.
+    #[test]
+    fn wand_vor_der_ebene_verdeckt_nichts_dahinter() {
+        let mk = |start: [f32; 2], end: [f32; 2]| WallInput {
+            start,
+            end,
+            thickness: 0.2,
+            height: 2.5,
+            base_elevation: 0.0,
+            color: [0.8, 0.8, 0.8],
+            openings: vec![],
+            layers: None,
+            holes: vec![],
+            material_index: None,
+            hatch: None,
+            cut: None,
+        };
+        // Vorderwand bei y=0, Rueckwand bei y=6, Schnitt bei y=2 Blick nach +y.
+        let walls = vec![mk([0.0, 0.0], [8.0, 0.0]), mk([0.0, 6.0], [8.0, 6.0])];
+        let plane = SectionPlane::looking_plus_y(2.0);
+        let out = cut_section(&plane, &walls, &[], &[]);
+        assert!(out.cut_polygons.is_empty());
+        assert!(
+            out.visible_edges.iter().any(|e| e.component.index == 1),
+            "Rueckwand muss sichtbare Kanten haben"
+        );
+        assert!(
+            out.visible_edges.iter().all(|e| e.component.index != 0),
+            "Vorderwand liegt hinter dem Betrachter"
+        );
     }
 
     // --- Fall (a): Schnitt mittig durch einen Wandschenkel --------------------

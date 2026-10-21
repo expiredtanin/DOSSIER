@@ -694,6 +694,8 @@ export const de = {
   "objinfo.sectionLine.endY": "Ende Y",
   "objinfo.sectionLine.depth": "Schnitt-Tiefe (m)",
   "objinfo.sectionLine.hiddenLines": "Verdeckte Kanten",
+  "objinfo.sectionLine.planUnderlay": "Grundriss darunter",
+  "objinfo.sectionLine.planUnderlay.none": "Keiner",
   "objinfo.sectionLine.depthHint": "leer = unbegrenzt",
   "objinfo.sectionLine.delete": "Schnittlinie löschen",
   "objinfo.extrudedSolid.section": "Extrusion",

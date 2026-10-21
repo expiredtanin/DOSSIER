@@ -952,6 +952,13 @@ export interface DrawingLevel {
    * legen sich sonst als blasses Liniengewirr über Poché und Ansichtskanten.
    */
   hiddenLines?: boolean;
+  /**
+   * Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
+   * Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
+   * linie waagrecht, Blickrichtung nach oben, s. `plan/planUnderlay.ts`).
+   * Fehlt ⇒ keine Unterlage.
+   */
+  planUnderlayId?: string;
 }
 
 /**

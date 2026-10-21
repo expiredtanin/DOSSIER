@@ -1213,3 +1213,47 @@ export async function computeSection(
   if (level.depth !== undefined) filterByDepth(output, project, plane, level.depth);
   return output;
 }
+
+/**
+ * Projekt-Felder, die den abgeleiteten Schnitt/die Ansicht NICHT beeinflussen.
+ * Vor allem `drawings2d`: jede Linie, die man IM Schnitt zeichnet, landet dort —
+ * ohne diesen Ausschluss rechnete jede solche Änderung den ganzen Schnitt neu.
+ */
+const SECTION_IRRELEVANT_KEYS = new Set<string>(["drawings2d", "layouts", "viewSnapshots", "masterLayouts"]);
+
+/**
+ * Ob zwei Projektstände denselben Schnitt/dieselbe Ansicht ergeben — Vergleich
+ * je Feld per Referenz (das Projekt wird immutabel aktualisiert, unveränderte
+ * Teile behalten ihre Identität), ohne {@link SECTION_IRRELEVANT_KEYS}. Bei
+ * Unsicherheit `false` (dann wird eben neu gerechnet).
+ */
+export function sameSectionInputs(a: Project, b: Project): boolean {
+  if (a === b) return true;
+  const ra = a as unknown as Record<string, unknown>;
+  const rb = b as unknown as Record<string, unknown>;
+  const keys = new Set([...Object.keys(ra), ...Object.keys(rb)]);
+  for (const k of keys) {
+    if (SECTION_IRRELEVANT_KEYS.has(k)) continue;
+    if (ra[k] !== rb[k]) return false;
+  }
+  return true;
+}
+
+/** Ob zwei Stände einer Schnitt-/Ansichtsebene dieselbe Projektion ergeben. */
+export function sameSectionLine(a: DrawingLevel, b: DrawingLevel): boolean {
+  if (a === b) return true;
+  const la = a.linePoints;
+  const lb = b.linePoints;
+  const sameLine =
+    la === lb ||
+    (!!la && !!lb &&
+      la[0].x === lb[0].x && la[0].y === lb[0].y && la[1].x === lb[1].x && la[1].y === lb[1].y);
+  return (
+    sameLine &&
+    a.id === b.id &&
+    a.kind === b.kind &&
+    (a.directionSign ?? 1) === (b.directionSign ?? 1) &&
+    a.depth === b.depth &&
+    !!a.shadows === !!b.shadows
+  );
+}

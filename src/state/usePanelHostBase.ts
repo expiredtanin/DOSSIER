@@ -960,10 +960,10 @@ export function usePanelHostBase(opts: {
       // ── Schnitt-/Ansichtslinie (nur bei selektierter Linie) ────────────────
       sectionLine,
       onSetSectionLinePatch: (patch) => {
-        if (selectedSectionLineId) patchLevel(selectedSectionLineId, patch);
+        if (sectionLine) patchLevel(sectionLine.id, patch);
       },
       onDeleteSectionLine: () => {
-        if (selectedSectionLineId) patchLevel(selectedSectionLineId, { linePoints: undefined });
+        if (sectionLine) patchLevel(sectionLine.id, { linePoints: undefined });
       },
       // 3D-Live-Schnitt an die gewählte Schnittlinie binden (Toggle im Objekt-Info).
       section3dCutActive: section3dCutId != null && section3dCutId === sectionLine?.id,

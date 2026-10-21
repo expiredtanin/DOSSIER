@@ -539,6 +539,25 @@ export function SectionLineSection({
         />
       </div>
 
+      {/* Grundriss-Unterlage: ein Geschoss ausgerichtet unter dem Schnitt/der Ansicht. */}
+      {line && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.sectionLine.planUnderlay")}</span>
+          <Dropdown
+            value={level.planUnderlayId ?? ""}
+            onChange={(v) => host.onSetSectionLinePatch({ planUnderlayId: v || undefined })}
+            options={[
+              { value: "", label: t("objinfo.sectionLine.planUnderlay.none") },
+              ...host.project.drawingLevels
+                .filter((l) => l.kind === "floor")
+                .map((l) => ({ value: l.id, label: l.name })),
+            ]}
+            title={t("objinfo.sectionLine.planUnderlay")}
+            width={150}
+          />
+        </div>
+      )}
+
       {/* Löschen: linePoints zurücksetzen (die Ebene bleibt bestehen). */}
       <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>
         {t("objinfo.sectionLine.delete")}

@@ -825,6 +825,8 @@ const SECTION_HIDDEN_INK = "#8a929c";
 const SECTION_CUT_OUTLINE_MM = 0.35;
 /** Strichstärke sichtbarer Ansichtskanten (mm Papier). */
 const SECTION_VISIBLE_MM = 0.18;
+/** Strichstärke der Bodenlinie unter dem Schnitt (mm Papier, wie in der Ansicht). */
+const SECTION_GROUND_MM = 0.5;
 /** Strichstärke verdeckter Ansichtskanten (mm Papier, dünner). */
 const SECTION_HIDDEN_MM = 0.13;
 /** Strichmuster verdeckter Kanten (mm Papier). */
@@ -954,6 +956,19 @@ export function generateSectionPlan(
       cls: "section-visible",
       weightMm: SECTION_VISIBLE_MM,
       color: SECTION_VISIBLE_INK,
+    });
+  }
+
+  // Bodenlinie wie in der Ansicht (toElevation.ts): kräftige Linie über die
+  // volle Breite an der untersten Kante — ohne sie "schwebte" der Schnitt.
+  if (isFinite(minX) && maxX > minX) {
+    primitives.push({
+      kind: "line",
+      a: { x: minX, y: minY },
+      b: { x: maxX, y: minY },
+      cls: "section-ground",
+      weightMm: SECTION_GROUND_MM,
+      color: SECTION_INK,
     });
   }
 

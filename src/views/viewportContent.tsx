@@ -6,7 +6,7 @@
 // Extrahiert aus App.tsx (top-level, alles über Props — keine App-Closure).
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { t } from "../i18n";
 import type {
@@ -22,11 +22,14 @@ import type {
 import { categoryNameForPick } from "../plan/pickLabels";
 import type { PickKind } from "../plan/PlanView";
 import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../plan/generatePlan";
-import type { CategoryDisplayResolver, Primitive } from "../plan/generatePlan";
+import type { CategoryDisplayResolver, Plan, Primitive } from "../plan/generatePlan";
 import type { RichTextDoc } from "../text/richText";
-import { computeSection } from "../plan/toSection";
+import { computeSection, sameSectionInputs, sameSectionLine } from "../plan/toSection";
 import type { SectionOutput } from "../plan/toSection";
 import { generateElevationPlan } from "../plan/toElevation";
+import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../plan/planUnderlay";
+import { sectionOpeningPrimitives } from "../plan/sectionOpenings";
+import { setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
 import { pushNativeScene, pushNativeWalls } from "../plan/nativeSync";
 import { selectionHighlightLines } from "../plan/toWalls3d";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
@@ -318,7 +321,6 @@ export function Content({
           level={level}
           visibleCodes={visibleCodes}
           categoryDisplay={categoryDisplay}
-          floorDisplay={floorDisplay}
           detail={detail}
           referenceLines={referenceLines}
           scaleDenominator={scaleDenominator}
@@ -606,7 +608,10 @@ function useCrossKindOverlay(
   const overlayLevels = useMemo(
     () =>
       project.drawingLevels.filter(
-        (l) => l.kind !== activeLevel.kind && floorDisplay(l.id).render,
+        (l) =>
+          l.kind !== activeLevel.kind &&
+          crossKindOverlayAllowed(activeLevel.kind, l.kind) &&
+          floorDisplay(l.id).render,
       ),
     [project.drawingLevels, activeLevel.kind, floorDisplay],
   );
@@ -936,6 +941,16 @@ function LevelPlanView({
 }
 
 /**
+ * Geschnittene Fenster/Türen in den Schnitt-Plan einsetzen: nach den Cut-
+ * Polygonen (liegen in deren Aussparung), vor den Ansichtskanten — die Reihen-
+ * folge spielt kaum eine Rolle, da sie sich nicht überdecken.
+ */
+function withSectionOpenings(plan: Plan, openings: Primitive[]): Plan {
+  if (openings.length === 0) return plan;
+  return { ...plan, primitives: [...plan.primitives, ...openings] };
+}
+
+/**
  * Schnitt-/Ansichts-Ebene: der render3d-Schnitt-Extraktor (WASM, plan/toSection)
  * durchschneidet das Modell entlang der Schnittlinie der Ebene und übersetzt das
  * Ergebnis (Cut-Polygone + sichtbare/verdeckte Kanten) über generateSectionPlan
@@ -950,7 +965,6 @@ function SectionPlanView({
   level,
   visibleCodes,
   categoryDisplay,
-  floorDisplay,
   detail,
   referenceLines,
   scaleDenominator,
@@ -1005,7 +1019,6 @@ function SectionPlanView({
   level: DrawingLevel;
   visibleCodes: Set<string>;
   categoryDisplay: CategoryDisplayResolver;
-  floorDisplay: CategoryDisplayResolver;
   detail: DetailLevel;
   referenceLines: boolean;
   /** Papier-Massstab (1:N) — nur für Bemassungs-Feinheiten in Papier-mm. */
@@ -1066,14 +1079,37 @@ function SectionPlanView({
     "loading",
   );
 
+  // Stabile Eingaben der Projektion: nur ein neues Objekt, wenn sich etwas
+  // Schnitt-Relevantes geändert hat (nicht bei jeder 2D-Linie im Schnitt, s.
+  // sameSectionInputs). Spart das Neurechnen UND verhindert, dass die Ansicht
+  // bei jeder Änderung kurz leer wird.
+  const inputsRef = useRef<{ project: Project; level: DrawingLevel } | null>(null);
+  const prevInputs = inputsRef.current;
+  const inputs =
+    prevInputs &&
+    sameSectionInputs(prevInputs.project, project) &&
+    sameSectionLine(prevInputs.level, level)
+      ? prevInputs
+      : { project, level };
+  useEffect(() => {
+    inputsRef.current = inputs;
+  });
+
+  // Ebenenwechsel: alten Schnitt verwerfen (gehört zu einer anderen Linie).
+  useEffect(() => {
+    setOutput(null);
+    setStatus("loading");
+  }, [level.id]);
+
   useEffect(() => {
     if (isElevation) return; // Ansicht: kein WASM-Schnitt (synchroner Generator).
     let disposed = false;
-    setStatus("loading");
-    setOutput(null);
+    // Bisheriges Ergebnis stehen lassen, bis das neue fertig ist — sonst
+    // flackert die Ansicht auf "wird berechnet …" und die PlanView (Zoom/
+    // Ausschnitt) wird bei jeder Änderung neu aufgebaut.
     void (async () => {
       try {
-        const out = await computeSection(project, level);
+        const out = await computeSection(inputs.project, inputs.level);
         if (disposed) return;
         if (!out) {
           setStatus("empty");
@@ -1089,52 +1125,111 @@ function SectionPlanView({
     return () => {
       disposed = true;
     };
-  }, [project, level, isElevation]);
+  }, [inputs, isElevation]);
 
   // Ansichts-Plan: gefüllte Fassadenansicht inkl. optionalem Schatten
   // (level.shadows). Liefert null, wenn die Ebene keine Ansichtslinie trägt.
   const elevationPlan = useMemo(
     () =>
       isElevation
-        ? generateElevationPlan(project, level, { mono, visibleCodes, categoryDisplay })
+        ? generateElevationPlan(inputs.project, inputs.level, { mono, visibleCodes, categoryDisplay })
         : null,
-    [isElevation, project, level, mono, visibleCodes, categoryDisplay],
+    [isElevation, inputs, mono, visibleCodes, categoryDisplay],
   );
 
   const sectionPlan = useMemo(
     () =>
       !isElevation && output
-        ? generateSectionPlan(output, mono, {
-            hiddenLines: level.hiddenLines,
-            visibleCodes,
-            categoryDisplay,
-          })
+        ? withSectionOpenings(
+            generateSectionPlan(output, mono, {
+              hiddenLines: level.hiddenLines,
+              visibleCodes,
+              categoryDisplay,
+            }),
+            sectionOpeningPrimitives(inputs.project, inputs.level, visibleCodes, categoryDisplay),
+          )
         : null,
-    [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay],
+    [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay, inputs],
   );
   const rawPlan = isElevation ? elevationPlan : sectionPlan;
-  // Fremd-Art-Referenz-Unterlage (Nutzer-Wunsch: "in der Ansicht auch mal
-  // einen Grundriss zeigen können") — dieselbe Überlagerung wie im Grundriss/
-  // 2D-Arbeitsblatt, nur umgekehrt: hier ist Schnitt/Ansicht die aktive Ebene,
-  // andere Geschosse/Zeichnungen/Schnitte/Ansichten erscheinen als Unterlage.
-  const overlayPrimitives = useCrossKindOverlay(
-    project,
-    level,
-    floorDisplay,
-    visibleCodes,
-    categoryDisplay,
-    detail,
-    referenceLines,
-    mono,
-    scaleDenominator,
+  // Grundriss-Unterlage (Nutzer-Wunsch: "in der Ansicht auch mal einen
+  // Grundriss zeigen können"): das in `level.planUnderlayId` gewählte Geschoss
+  // AUSGERICHTET unter dem Schnitt/der Ansicht (s. plan/planUnderlay.ts) —
+  // nicht mehr jede sichtbare Ebene lose übereinander (die lag in einem
+  // fremden Koordinatenraum und verdeckte den Schnitt).
+  const underlayFloor = project.drawingLevels.find(
+    (l) => l.id === level.planUnderlayId && l.kind === "floor",
   );
-  const withOverlay = useMemo(
+  const sectionMinY = rawPlan?.bounds.minY;
+  const overlayPrimitives = useMemo(() => {
+    if (!underlayFloor || sectionMinY === undefined) return [];
+    const floorPlan = generatePlan(
+      project,
+      underlayFloor.id,
+      visibleCodes,
+      categoryDisplay,
+      detail,
+      referenceLines,
+      mono,
+      false,
+      scaleDenominator,
+    );
+    return planUnderlayPrimitives(level, floorPlan.primitives, sectionMinY).map(stripSelectableIds);
+  }, [underlayFloor, sectionMinY, project, level, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator]);
+  // Eigene 2D-Elemente des Schnitts/der Ansicht (Bemassung, Höhenkoten,
+  // Beschriftung, Ergänzungslinien …): liegen in `drawings2d` mit
+  // `levelId === level.id` im Blatt-Raum (u, Höhe). Bisher zeichnete die Ansicht
+  // NUR die abgeleitete Projektion — was man im Schnitt zeichnete, wurde zwar
+  // gespeichert, blieb aber unsichtbar.
+  const sheetDrawings = useMemo(
     () =>
-      rawPlan && overlayPrimitives.length > 0
-        ? { ...rawPlan, primitives: [...rawPlan.primitives, ...overlayPrimitives] }
-        : rawPlan,
-    [rawPlan, overlayPrimitives],
+      generatePlan(
+        project,
+        level.id,
+        visibleCodes,
+        categoryDisplay,
+        detail,
+        referenceLines,
+        mono,
+        false,
+        scaleDenominator,
+      ),
+    [project, level.id, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator],
   );
+  const withOverlay = useMemo(() => {
+    if (!rawPlan) return rawPlan;
+    const extra = sheetDrawings.primitives;
+    if (overlayPrimitives.length === 0 && extra.length === 0) return rawPlan;
+    const b = { ...rawPlan.bounds };
+    const grow = (x: number, y: number) => {
+      if (x < b.minX) b.minX = x;
+      if (y < b.minY) b.minY = y;
+      if (x > b.maxX) b.maxX = x;
+      if (y > b.maxY) b.maxY = y;
+    };
+    for (const pr of overlayPrimitives) {
+      if (pr.kind === "polygon") for (const p of pr.pts) grow(p.x, p.y);
+      else if (pr.kind === "line") { grow(pr.a.x, pr.a.y); grow(pr.b.x, pr.b.y); }
+    }
+    if (extra.length > 0) {
+      const eb = sheetDrawings.bounds;
+      grow(eb.minX, eb.minY);
+      grow(eb.maxX, eb.maxY);
+    }
+    // Unterlage zuunterst, Blatt-Zeichnungen obenauf.
+    return { ...rawPlan, primitives: [...overlayPrimitives, ...rawPlan.primitives, ...extra], bounds: b };
+  }, [rawPlan, overlayPrimitives, sheetDrawings]);
+  // Fangkanten der abgeleiteten Geometrie (Schnitt-/Ansichtskanten + Unterlage)
+  // für `computeSnap` bereitstellen — die stehen nicht im Projekt. Die eigenen
+  // 2D-Elemente fängt computeSnap ohnehin über `drawings2d`.
+  useEffect(() => {
+    if (!rawPlan) return;
+    setSheetSnapSegments(
+      level.id,
+      snapSegmentsFromPrimitives([...overlayPrimitives, ...rawPlan.primitives]),
+    );
+    return () => setSheetSnapSegments(level.id, null);
+  }, [rawPlan, overlayPrimitives, level.id]);
   // Gruppen-Isolation ("Gruppe betreten") gilt auch für Schnitt-/Ansichts-
   // Pläne, s. state/groupActions.ts::applyGroupDimming.
   const plan = useMemo(
@@ -1165,7 +1260,7 @@ function SectionPlanView({
 
   return (
     <section className="pane">
-      <div className="pane-title">
+      <div className="pane-title pane-title--ruled">
         {t("content.sectionTitle", { name: level.name, kind: kindLabel })}
       </div>
       {groupPath.length > 0 && (

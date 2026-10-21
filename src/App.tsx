@@ -25,6 +25,7 @@ import type {
   Ceiling,
   ContextObject,
   Drawing2D,
+  DrawingLevel,
   Layout,
   Project,
   Roof,
@@ -274,6 +275,27 @@ const TOOL_COMMAND: Partial<Record<ToolId, string>> = {
 /** Befehlsname für ein gekoppeltes Werkzeug (oder null, wenn keiner). */
 function coupledCommandFor(id: ToolId): string | null {
   return TOOL_COMMAND[id] ?? null;
+}
+
+/**
+ * Auswahl für Transformationen/Befehle: im Schnitt/in der Ansicht nur die
+ * 2D-Elemente der Ebene. Bauteile (Wand/Decke/…) sind dort zwar anwählbar
+ * (Objekt-Info, Löschen), leben aber im Grundriss-Raum — ein im Schnitt-Blatt
+ * gemessenes Delta/Drehzentrum würde sie an eine falsche Stelle setzen.
+ */
+function sheetOnlySelection(level: DrawingLevel, sel: TransformSelection): TransformSelection {
+  if (level.kind !== "section" && level.kind !== "elevation") return sel;
+  return {
+    wallIds: [],
+    drawingId: sel.drawingId,
+    drawingIds: sel.drawingIds,
+    extrudedSolidId: null,
+    columnId: null,
+    ceilingIds: [],
+    roofIds: [],
+    stairIds: [],
+    roomIds: [],
+  };
 }
 
 export default function App() {
@@ -661,7 +683,7 @@ export default function App() {
   // Zeichnungen, extrudierte Körper, Stützen, Decken/Dächer/Treppen/Räume) —
   // sonst wirken die Kürzel m/s/d nur auf einen Teil dessen, was
   // `commitTransform` tatsächlich bewegt.
-  const transformSel: TransformSelection = {
+  const transformSel: TransformSelection = sheetOnlySelection(activeLevel, {
     wallIds: selectedWallIds,
     drawingId: selectedDrawingId,
     drawingIds: selectedDrawingIds,
@@ -671,7 +693,7 @@ export default function App() {
     roofIds: selectedRoofIds,
     stairIds: selectedStairIds,
     roomIds: selectedRoomIds,
-  };
+  });
   const snapForTransform = (raw: Vec2, pxPerMeter: number, mods: ToolMods, points: Vec2[]) =>
     computeSnap({
       raw,
@@ -855,7 +877,9 @@ export default function App() {
           lastPoint,
           // Vorab gesetzte Auswahl aus dem Store (Rhino: erst selektieren, dann
           // Befehl). Move/Copy/Offset operieren darauf.
-          selection: {
+          // Im Schnitt/in der Ansicht nur die 2D-Elemente der Ebene: Bauteile
+          // leben im Grundriss-Raum, ein Schnitt-Delta wäre dort falsch.
+          selection: sheetOnlySelection(c.activeLevel, {
             wallIds: c.selectedWallIds,
             drawingId: c.selectedDrawingId,
             drawingIds: c.selectedDrawingIds,
@@ -865,7 +889,7 @@ export default function App() {
             roofIds: c.selectedRoofIds,
             stairIds: c.selectedStairIds,
             roomIds: c.selectedRoomIds,
-          },
+          }),
         };
       },
       snap: (raw, draftPoints, mods) => {
@@ -1696,9 +1720,9 @@ export default function App() {
     selectedWallIds,
     selectedDrawingIds,
     levelId: activeLevel.id,
+    modelEditable: activeLevel.kind !== "section" && activeLevel.kind !== "elevation",
     visibleCodes,
     scaleDenominator,
-   
     snap,
     setDraft,
     snapFor,
@@ -2253,16 +2277,22 @@ export default function App() {
   // Gewählte Schnitt-/Ansichtslinie (DrawingLevel) — separat von `selection`, da
   // eine Schnittlinie KEIN Projekt-Bauteil ist. Speist die Schnittlinien-Sektion
   // des Object-Info-Panels.
+  // Ohne gewählte Linie, aber mit aktivem Schnitt/aktiver Ansicht: deren
+  // Einstellungen (Tiefe, verdeckte Kanten, Grundriss-Unterlage …) direkt im
+  // Leerzustand zeigen — man arbeitet ja gerade IN diesem Schnitt.
+  const sectionLineId =
+    selectedSectionLineId ??
+    (activeLevel.kind === "section" || activeLevel.kind === "elevation" ? activeLevel.id : null);
   const sectionLine = useMemo(
     () =>
-      selectedSectionLineId
+      sectionLineId
         ? project.drawingLevels.find(
             (z) =>
-              z.id === selectedSectionLineId &&
+              z.id === sectionLineId &&
               (z.kind === "section" || z.kind === "elevation"),
           ) ?? null
         : null,
-    [project.drawingLevels, selectedSectionLineId],
+    [project.drawingLevels, sectionLineId],
   );
 
   // Abgeleitete 3D-Schnittebene der gebundenen Schnittlinie (world point+normal
