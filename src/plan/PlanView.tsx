@@ -225,7 +225,7 @@ export interface PickCandidate {
 }
 
 /** Ids einer Auswahl OHNE Klickposition/Shift — Ergebnis von `defaultPick`. */
-type PickIds = Omit<PlanSelection, "model" | "shift">;
+type PickIds = Omit<PlanSelection, "model" | "shift" | "replaces">;
 
 const EMPTY_PICK: PickIds = {
   hitIndex: null,
@@ -320,6 +320,12 @@ export interface PlanSelection {
    * ersetzen. Bei Leerraum-Klick mit Shift bleibt die Auswahl erhalten.
    */
   shift: boolean;
+  /**
+   * Nur bei Shift + Durchschalten (Cmd/Strg+Shift-Klick wiederholt an derselben
+   * Stelle): das im vorigen Schritt dazugewählte Objekt wird zuerst wieder
+   * entfernt, damit nicht jede Zwischenstation in der Auswahl landet.
+   */
+  replaces?: { kind: PickKind; id: string };
 }
 
 /**
@@ -2313,6 +2319,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     items: PickCandidate[];
     idx: number;
     model: Vec2;
+    /** Zuletzt per Shift dazugewähltes Objekt (für Shift-Durchschalten). */
+    applied?: PickCandidate;
   } | null>(null);
   // Liste/Zyklus verwerfen, sobald sich Ausschnitt oder Plan ändern.
   useEffect(() => {
@@ -2461,12 +2469,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return [...first, ...ordered];
   };
 
-  const applyCandidate = (c: PickCandidate, model: Vec2, shift: boolean) => {
+  const applyCandidate = (
+    c: PickCandidate,
+    model: Vec2,
+    shift: boolean,
+    replaces?: { kind: PickKind; id: string },
+  ) => {
     if (!onSelect) return;
     setSelected(c.hitIndex);
     onSelect({
       ...EMPTY_PICK,
       model,
+      replaces,
       hitIndex: c.hitIndex,
       shift,
       wallId: c.kind === "wall" ? c.id : null,
@@ -2507,8 +2521,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       const v = clientToView(e.clientX, e.clientY, view);
       model = viewToModel(v.x, v.y);
     }
-    cycleRef.current = { x: e.clientX, y: e.clientY, prims: plan.primitives, items, idx, model };
-    applyCandidate(items[idx], model, e.shiftKey);
+    const replaces =
+      e.shiftKey && same && prev?.applied && prev.applied.id !== items[idx].id
+        ? { kind: prev.applied.kind, id: prev.applied.id }
+        : undefined;
+    cycleRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      prims: plan.primitives,
+      items,
+      idx,
+      model,
+      applied: e.shiftKey ? items[idx] : undefined,
+    };
+    applyCandidate(items[idx], model, e.shiftKey, replaces);
     const rect = svgRef.current?.getBoundingClientRect();
     setPickList({
       x: e.clientX - (rect?.left ?? 0) + 14,

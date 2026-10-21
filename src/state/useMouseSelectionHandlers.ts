@@ -267,84 +267,55 @@ export function useMouseSelectionHandlers(opts: {
     // Rest behalten (Wände und 2D-Zeichnungen unabhängig, gemischte Auswahl
     // erlaubt). Leerraum-Klick mit Shift lässt die Auswahl unverändert.
     if (sel.shift) {
-      if (sel.sectionLineId) {
-        const id = sel.sectionLineId;
-        setSelectedSectionLineIds(
-          selectedSectionLineIds.includes(id)
-            ? selectedSectionLineIds.filter((s) => s !== id)
-            : [...selectedSectionLineIds, id],
-        );
-        return;
-      }
-      if (sel.wallId) {
-        const id = sel.wallId;
-        setSelectedWallIds(
-          selectedWallIds.includes(id)
-            ? selectedWallIds.filter((w) => w !== id)
-            : [...selectedWallIds, id],
-        );
-      } else if (sel.drawingId) {
-        const id = sel.drawingId;
-        setSelectedDrawingIds(
-          selectedDrawingIds.includes(id)
-            ? selectedDrawingIds.filter((d) => d !== id)
-            : [...selectedDrawingIds, id],
-        );
-      } else if (sel.ceilingId) {
-        const id = sel.ceilingId;
-        setSelectedCeilingIds(
-          selectedCeilingIds.includes(id)
-            ? selectedCeilingIds.filter((c) => c !== id)
-            : [...selectedCeilingIds, id],
-        );
-      } else if (sel.openingId) {
-        const id = sel.openingId;
-        setSelectedOpeningIds(
-          selectedOpeningIds.includes(id)
-            ? selectedOpeningIds.filter((o) => o !== id)
-            : [...selectedOpeningIds, id],
-        );
-      } else if (sel.stairId) {
-        const id = sel.stairId;
-        setSelectedStairIds(
-          selectedStairIds.includes(id)
-            ? selectedStairIds.filter((s) => s !== id)
-            : [...selectedStairIds, id],
-        );
-      } else if (sel.roomId) {
-        const id = sel.roomId;
-        setSelectedRoomIds(
-          selectedRoomIds.includes(id)
-            ? selectedRoomIds.filter((r) => r !== id)
-            : [...selectedRoomIds, id],
-        );
-      } else if (sel.extrudedSolidId) {
-        const id = sel.extrudedSolidId;
-        setSelectedExtrudedSolidIds(
-          selectedExtrudedSolidIds.includes(id)
-            ? selectedExtrudedSolidIds.filter((x) => x !== id)
-            : [...selectedExtrudedSolidIds, id],
-        );
-      } else if (sel.columnId) {
-        const id = sel.columnId;
-        setSelectedColumnIds(
-          selectedColumnIds.includes(id)
-            ? selectedColumnIds.filter((x) => x !== id)
-            : [...selectedColumnIds, id],
-        );
-      } else if (sel.roofId) {
-        const id = sel.roofId;
-        setSelectedRoofIds(
-          selectedRoofIds.includes(id)
-            ? selectedRoofIds.filter((x) => x !== id)
-            : [...selectedRoofIds, id],
-        );
-      } else if (sel.contextObjectId) {
-        const id = sel.contextObjectId;
-        setSelectedContextObjectIds(
-          selectedContextObjectIds.includes(id)
-            ? selectedContextObjectIds.filter((x) => x !== id)
-            : [...selectedContextObjectIds, id],
+      // Je Art: Auswahl-Liste + Setter. `replaces` (Shift-Durchschalten) entfernt
+      // zuerst das vorige Zwischenergebnis, bevor das neue Objekt umgeschaltet wird.
+      const channels = {
+        section: [selectedSectionLineIds, setSelectedSectionLineIds],
+        wall: [selectedWallIds, setSelectedWallIds],
+        drawing: [selectedDrawingIds, setSelectedDrawingIds],
+        ceiling: [selectedCeilingIds, setSelectedCeilingIds],
+        opening: [selectedOpeningIds, setSelectedOpeningIds],
+        stair: [selectedStairIds, setSelectedStairIds],
+        room: [selectedRoomIds, setSelectedRoomIds],
+        solid: [selectedExtrudedSolidIds, setSelectedExtrudedSolidIds],
+        column: [selectedColumnIds, setSelectedColumnIds],
+        roof: [selectedRoofIds, setSelectedRoofIds],
+        context: [selectedContextObjectIds, setSelectedContextObjectIds],
+      } as const;
+      type Kind = keyof typeof channels;
+      const target: { kind: Kind; id: string } | null = sel.sectionLineId
+        ? { kind: "section", id: sel.sectionLineId }
+        : sel.wallId
+          ? { kind: "wall", id: sel.wallId }
+          : sel.drawingId
+            ? { kind: "drawing", id: sel.drawingId }
+            : sel.ceilingId
+              ? { kind: "ceiling", id: sel.ceilingId }
+              : sel.openingId
+                ? { kind: "opening", id: sel.openingId }
+                : sel.stairId
+                  ? { kind: "stair", id: sel.stairId }
+                  : sel.roomId
+                    ? { kind: "room", id: sel.roomId }
+                    : sel.extrudedSolidId
+                      ? { kind: "solid", id: sel.extrudedSolidId }
+                      : sel.columnId
+                        ? { kind: "column", id: sel.columnId }
+                        : sel.roofId
+                          ? { kind: "roof", id: sel.roofId }
+                          : sel.contextObjectId
+                            ? { kind: "context", id: sel.contextObjectId }
+                            : null;
+      const rep = sel.replaces;
+      const base = (kind: Kind): string[] => {
+        const list = channels[kind][0] as readonly string[];
+        return rep && rep.kind === kind ? list.filter((x) => x !== rep.id) : [...list];
+      };
+      if (rep && (!target || rep.kind !== target.kind)) channels[rep.kind][1](base(rep.kind));
+      if (target) {
+        const list = base(target.kind);
+        channels[target.kind][1](
+          list.includes(target.id) ? list.filter((x) => x !== target.id) : [...list, target.id],
         );
       }
       return;
