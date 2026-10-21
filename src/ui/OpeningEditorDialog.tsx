@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import type {
   DoorType,
+  FrameCornerJoin,
   Opening,
   OpeningKind,
   Project,
@@ -453,6 +454,12 @@ function RahmenPanel({
           min={0}
           onCommit={(n) => patchDt({ frameWidth: n })}
         />
+        <SelField<FrameCornerJoin>
+          label={t("oed.f.cornerJoin")}
+          value={dt.frameCornerJoin ?? "vertikal"}
+          options={cornerJoinOptions()}
+          onChange={(v) => patchDt({ frameCornerJoin: v })}
+        />
       </>
     );
   }
@@ -477,10 +484,25 @@ function RahmenPanel({
           min={0}
           onCommit={(n) => patchWt({ frameWidth: n })}
         />
+        <SelField<FrameCornerJoin>
+          label={t("oed.f.cornerJoin")}
+          value={wt.frameCornerJoin ?? "vertikal"}
+          options={cornerJoinOptions()}
+          onChange={(v) => patchWt({ frameCornerJoin: v })}
+        />
       </>
     );
   }
   return null;
+}
+
+/** Auswahl der Rahmen-Eckverbindung (s. `WindowType.frameCornerJoin`). */
+function cornerJoinOptions(): { value: FrameCornerJoin; label: string }[] {
+  return [
+    { value: "vertikal", label: t("oed.cornerJoin.vertikal") },
+    { value: "horizontal", label: t("oed.cornerJoin.horizontal") },
+    { value: "gehrung", label: t("oed.cornerJoin.gehrung") },
+  ];
 }
 
 /** Flügeleinteilung: Tabelle mit Flügel/Pfosten, Öffnungsart + Anschlag je Zeile. */

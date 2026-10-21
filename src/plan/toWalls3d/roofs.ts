@@ -57,35 +57,119 @@ function planeNormalUp(pts: RoofVec3[]): [number, number, number] {
 }
 
 /**
- * Eine Dachfläche als SOLIDER Slab (Oberseite + um `thickness` entlang der
- * Normalen nach unten versetzte Unterseite + umlaufende Seitenwände) — gibt dem
- * Dach eine echte Materialdicke statt einer papierdünnen Fläche. render3d
- * rendert doppelseitig, Winding ist unerheblich.
+ * Gehrte Versatz-Ecken für ALLE Dachflächen eines Daches: liefert je Fläche die
+ * um `d` (Meter, entlang der Flächennormalen nach innen) versetzten Ecken —
+ * aber an Kanten, die sich zwei Flächen teilen (First/Grat/Knick), NICHT
+ * stur entlang der EIGENEN Normalen, sondern auf der Gehrung: die Ecke liegt im
+ * Schnitt der versetzten Ebenen beider Flächen. Vorher durchdrangen sich die
+ * Slabs benachbarter Flächen am First, ihre Stirnflächen lagen deckungsgleich
+ * auf der Nachbar-Oberseite (Störtriangle am First-Apex im „Schattiert mit
+ * Kanten"-Modus). Freie Kanten (Traufe/Ortgang) behalten die senkrechte
+ * Stirnfläche. `shared[i][k]` = Kante k→k+1 von Fläche i ist geteilt.
  */
-function pushRoofSlab(
+export function mitredRoofOffsets(planes: RoofVec3[][]): {
+  at: (i: number, d: number) => RoofVec3[];
+  shared: boolean[][];
+} {
+  const r = (v: number) => Math.round(v * 1e5);
+  const pk = (p: RoofVec3) => `${r(p[0])},${r(p[1])},${r(p[2])}`;
+  const ek = (a: RoofVec3, b: RoofVec3) => {
+    const ka = pk(a);
+    const kb = pk(b);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+  const edgeOwners = new Map<string, number[]>();
+  planes.forEach((pts, i) => {
+    for (let k = 0; k < pts.length; k++) {
+      const key = ek(pts[k], pts[(k + 1) % pts.length]);
+      const list = edgeOwners.get(key);
+      if (list) list.push(i);
+      else edgeOwners.set(key, [i]);
+    }
+  });
+  const normals = planes.map((pts) => planeNormalUp(pts));
+  const neighbor = planes.map((pts, i) =>
+    pts.map((p, k) => {
+      const owners = edgeOwners.get(ek(p, pts[(k + 1) % pts.length])) ?? [];
+      const j = owners.find((o) => o !== i);
+      return j === undefined ? -1 : j;
+    }),
+  );
+  const shared = neighbor.map((row) => row.map((j) => j >= 0));
+  const dot = (a: RoofVec3, b: RoofVec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a: RoofVec3, b: RoofVec3): RoofVec3 => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  // Ebene (Normale m, Abstand c: m·x = c) der Kante k→k+1 von Fläche i beim Versatz d:
+  // geteilt → versetzte Nachbarebene (Gehrung), frei → senkrechte Stirnebene.
+  const edgePlane = (i: number, k: number, d: number): [RoofVec3, number] => {
+    const pts = planes[i];
+    const a = pts[k];
+    const b = pts[(k + 1) % pts.length];
+    const j = neighbor[i][k];
+    if (j >= 0) return [normals[j], dot(normals[j], planes[j][0]) - d];
+    const dir: RoofVec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const m = cross(dir, normals[i]);
+    return [m, dot(m, a)];
+  };
+  // Schnittpunkt dreier Ebenen (Cramer über Kreuzprodukte), null wenn entartet.
+  const solve = (rows: Array<[RoofVec3, number]>): RoofVec3 | null => {
+    const [[a, ca], [b, cb], [c, cc]] = rows;
+    const bc = cross(b, c);
+    const det = dot(a, bc);
+    if (Math.abs(det) < 1e-9) return null;
+    const cxa = cross(c, a);
+    const axb = cross(a, b);
+    return [
+      (ca * bc[0] + cb * cxa[0] + cc * axb[0]) / det,
+      (ca * bc[1] + cb * cxa[1] + cc * axb[1]) / det,
+      (ca * bc[2] + cb * cxa[2] + cc * axb[2]) / det,
+    ];
+  };
+  const at = (i: number, d: number): RoofVec3[] => {
+    const pts = planes[i];
+    const n = normals[i];
+    if (d <= EPS) return pts.map((p) => [p[0], p[1], p[2]]);
+    const own: [RoofVec3, number] = [n, dot(n, pts[0]) - d];
+    return pts.map((p, k) => {
+      const prev = (k + pts.length - 1) % pts.length;
+      const fallback: RoofVec3 = [p[0] - n[0] * d, p[1] - n[1] * d, p[2] - n[2] * d];
+      if (!shared[i][prev] && !shared[i][k]) return fallback;
+      const q = solve([own, edgePlane(i, prev, d), edgePlane(i, k, d)]);
+      // Ausreisser (fast parallele Ebenen) abfangen: nicht weiter als ein paar
+      // Dicken von der senkrechten Lösung entfernt.
+      if (!q || Math.hypot(q[0] - fallback[0], q[1] - fallback[1], q[2] - fallback[2]) > 4 * d + 0.5) {
+        return fallback;
+      }
+      return q;
+    });
+  };
+  return { at, shared };
+}
+
+/**
+ * Slab einer Dachfläche zwischen fertigen Ober-/Unterseiten-Ecken (gleiche
+ * Reihenfolge). Stirnflächen nur an FREIEN Kanten (`shared[k]` = false) — an
+ * geteilten Kanten stossen die Nachbarflächen auf Gehrung, eine Stirnfläche
+ * läge dort im Inneren des Dachs.
+ */
+function pushRoofSlabBetween(
   positions: number[],
   indices: number[],
-  pts: RoofVec3[],
-  thickness: number,
+  top: RoofVec3[],
+  bottom: RoofVec3[],
+  shared: boolean[],
 ): void {
-  if (pts.length < 3 || thickness <= EPS) {
-    pushFanTriangles(positions, indices, pts);
-    return;
-  }
-  const nrm = planeNormalUp(pts);
-  const bottom: RoofVec3[] = pts.map((p) => [
-    p[0] - nrm[0] * thickness,
-    p[1] - nrm[1] * thickness,
-    p[2] - nrm[2] * thickness,
-  ]);
-  pushFanTriangles(positions, indices, pts); // Oberseite
-  pushFanTriangles(positions, indices, bottom); // Unterseite
-  // Seitenwände: je Kante ein Quad (zwei Dreiecke) zwischen Ober- und Unterseite.
-  for (let i = 0; i < pts.length; i++) {
-    const j = (i + 1) % pts.length;
+  pushFanTriangles(positions, indices, top);
+  pushFanTriangles(positions, indices, bottom);
+  for (let i = 0; i < top.length; i++) {
+    if (shared[i]) continue;
+    const j = (i + 1) % top.length;
     const base = positions.length / 3;
-    positions.push(pts[i][0], pts[i][1], pts[i][2]);
-    positions.push(pts[j][0], pts[j][1], pts[j][2]);
+    positions.push(top[i][0], top[i][1], top[i][2]);
+    positions.push(top[j][0], top[j][1], top[j][2]);
     positions.push(bottom[j][0], bottom[j][1], bottom[j][2]);
     positions.push(bottom[i][0], bottom[i][1], bottom[i][2]);
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
@@ -115,6 +199,7 @@ export function emitRoofs(project: Project): RMesh[] {
     // vorige gestapelt. Leere componentId (einschichtige thickness-Fallback) ⇒
     // Default-Dachfarbe. Eine Roof.color-Übersteuerung gilt für alle Schichten.
     const layers = roofLayers(project, roof);
+    const mitre = mitredRoofOffsets(g.planes.map((pl) => pl.pts));
     layers.reduce((offsetAbove, layer) => {
       const t = Math.max(0, layer.thickness);
       if (t <= EPS) return offsetAbove;
@@ -130,17 +215,14 @@ export function emitRoofs(project: Project): RMesh[] {
           : undefined;
       const positions: number[] = [];
       const indices: number[] = [];
-      for (const plane of g.planes) {
-        // Oberseite dieser Schicht = Dachfläche um `offsetAbove` entlang der
-        // Normalen nach innen versetzt; Slab-Dicke = Schichtdicke.
-        const nrm = planeNormalUp(plane.pts);
-        const top: RoofVec3[] = plane.pts.map((p) => [
-          p[0] - nrm[0] * offsetAbove,
-          p[1] - nrm[1] * offsetAbove,
-          p[2] - nrm[2] * offsetAbove,
-        ]);
-        pushRoofSlab(positions, indices, top, t);
-      }
+      g.planes.forEach((plane, i) => {
+        // Oberseite dieser Schicht = Dachfläche um `offsetAbove` nach innen
+        // versetzt, Unterseite um `offsetAbove + t` — an First/Grat gehrt.
+        if (plane.pts.length < 3) return;
+        const top = mitre.at(i, offsetAbove);
+        const bottom = mitre.at(i, offsetAbove + t);
+        pushRoofSlabBetween(positions, indices, top, bottom, mitre.shared[i]);
+      });
       if (indices.length > 0) out.push({ positions, indices, kind: "extrusion", color, materialIndex });
       return offsetAbove + t;
     }, 0);

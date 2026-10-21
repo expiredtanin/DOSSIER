@@ -3,7 +3,7 @@
 // und der Rollladen-/Sonnenschutzkasten typisierter Tür-/Fensteröffnungen — das
 // 3D-Pendant zu `generatePlan/openings.ts`.
 
-import type { Opening, Project, SashDef, Wall } from "../../model/types";
+import type { FrameCornerJoin, Opening, Project, SashDef, Wall } from "../../model/types";
 import { getDoorType, getWindowType, glazingPanesOf, openingsOfWall } from "../../model/types";
 import { openingInterval, openingVerticalExtent } from "../../geometry/opening";
 import { wallVerticalExtent } from "../../model/wall";
@@ -127,6 +127,84 @@ function openingAxisBox(
   // "extrusion", NICHT "imported" — s. Moduldoc an emitOpeningGlass (Nord-
   // Achsen-Negation in append_context_mesh gilt nur für echte Import-Kinds).
   return { positions, indices: [...OPENING_BOX_TRIS], kind: "extrusion", color };
+}
+
+/**
+ * Prisma mit beliebigem konvexem VIERECK als Ansichts-Querschnitt (in der
+ * Öffnungsebene: u entlang der Wand, h = Welthöhe), extrudiert über
+ * `[nMin,nMax]` quer zur Wand — für Gehrungs-Stösse (Trapez-Profile). Eckenfolge
+ * wie {@link OPENING_BOX_TRIS}: q[0]=(from,UK), q[1]=(to,UK), q[2]=(from,OK),
+ * q[3]=(to,OK) im Sinne der Topologie.
+ */
+function openingPlaneQuad(
+  wall: Wall,
+  q: [[number, number], [number, number], [number, number], [number, number]],
+  nMin: number,
+  nMax: number,
+  color: RRgb,
+): RMesh | null {
+  if (Math.abs(nMax - nMin) <= EPS) return null;
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = uy; // dieselbe (rechte) Normale wie openingAxisBox
+  const ny = -ux;
+  const positions: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const [s, z] = q[i & 3];
+    const t = i & 4 ? nMax : nMin;
+    positions.push(wall.start.x + ux * s + nx * t, wall.start.y + uy * s + ny * t, z);
+  }
+  return { positions, indices: [...OPENING_BOX_TRIS], kind: "extrusion", color };
+}
+
+/**
+ * Rahmen-Ring (Pfosten links/rechts, Riegel oben, Riegel unten nur bei
+ * `bottom`) über das Feld `[from,to]×[zB,zT]` mit Profilbreite `w`, OHNE
+ * überlappende Profile: `join` entscheidet, welche Glieder an den Ecken
+ * durchlaufen ("vertikal"/"horizontal") oder ob auf Gehrung gestossen wird.
+ * Liefert die Glieder als (u,h)-Vierecke (Reihenfolge s. {@link openingPlaneQuad}).
+ */
+export function frameRingQuads(
+  from: number,
+  to: number,
+  zB: number,
+  zT: number,
+  w: number,
+  join: FrameCornerJoin,
+  bottom: boolean,
+): Array<[[number, number], [number, number], [number, number], [number, number]]> {
+  type Q = [[number, number], [number, number], [number, number], [number, number]];
+  const box = (u0: number, u1: number, h0: number, h1: number): Q => [[u0, h0], [u1, h0], [u0, h1], [u1, h1]];
+  const out: Q[] = [];
+  if (to - from <= 2 * w + EPS || zT - zB <= (bottom ? 2 : 1) * w + EPS) {
+    // Zu klein für einen Ring: ein Vollprofil.
+    out.push(box(from, to, zB, zT));
+    return out;
+  }
+  const bz = bottom ? zB + w : zB; // Unterkante des Innenfelds
+  if (join === "horizontal") {
+    out.push(box(from, to, zT - w, zT)); // Sturz-Riegel durchlaufend
+    if (bottom) out.push(box(from, to, zB, zB + w));
+    out.push(box(from, from + w, bz, zT - w));
+    out.push(box(to - w, to, bz, zT - w));
+  } else if (join === "gehrung") {
+    // Oben: Trapez, Innenkante um w eingerückt.
+    out.push([[from + w, zT - w], [to - w, zT - w], [from, zT], [to, zT]]);
+    if (bottom) out.push([[from, zB], [to, zB], [from + w, zB + w], [to - w, zB + w]]);
+    // Pfosten: aussen volle Höhe, innen bis an die Gehrung.
+    out.push([[from, zB], [from + w, bz], [from, zT], [from + w, zT - w]]);
+    out.push([[to - w, bz], [to, zB], [to - w, zT - w], [to, zT]]);
+  } else {
+    out.push(box(from, from + w, zB, zT)); // Pfosten durchlaufend (Default)
+    out.push(box(to - w, to, zB, zT));
+    out.push(box(from + w, to - w, zT - w, zT));
+    if (bottom) out.push(box(from + w, to - w, zB, zB + w));
+  }
+  return out;
 }
 
 /**
@@ -316,6 +394,8 @@ interface OpeningFrameParams {
   /** Kassetten-Raster horizontal/vertikal (nur bei {@link panelled} relevant). */
   panelCols: number;
   panelRows: number;
+  /** Eckverbindung von Blend- und Flügelrahmen (s. `WindowType.frameCornerJoin`). */
+  cornerJoin: FrameCornerJoin;
 }
 
 function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): OpeningFrameParams | null {
@@ -332,6 +412,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
       dt.insetFace ?? "aussen",
     );
     return {
+      cornerJoin: dt.frameCornerJoin ?? "vertikal",
       frameWidth: dt.frameWidth ?? DEFAULT_FRAME_WIDTH,
       acrossWallDepth,
       nMin,
@@ -384,6 +465,7 @@ function resolveOpeningFrame(project: Project, wall: Wall, op: Opening): Opening
   }
   const wingCount = Math.max(1, sashes.filter((s) => s.kind === "fluegel").length);
   return {
+    cornerJoin: wt.frameCornerJoin ?? "vertikal",
     frameWidth: wt.frameWidth ?? DEFAULT_FRAME_WIDTH,
     acrossWallDepth,
     nMin,
@@ -454,13 +536,12 @@ function frameMeshesForOpening(
   // Blendrahmen-Riegel (volles Rahmen-Quer-Band nMin..nMax, Rahmenfarbe).
   const push = (from: number, to: number, zBottom: number, zTop: number): void =>
     pushC(from, to, zBottom, zTop, params.nMin, params.nMax, FRAME_RGB);
-  // Pfosten (Laibungsseiten), über die volle Öffnungshöhe durchlaufend.
-  push(iv.from, iv.from + fw, vert.zBottom, vert.zTop);
-  push(iv.to - fw, iv.to, vert.zBottom, vert.zTop);
-  // Sturz (oberer Riegel).
-  push(iv.from + fw, iv.to - fw, vert.zTop - fw, vert.zTop);
-  // Schwelle: Fenster immer, Tür nur mit Bodenanschlag (threshold).
-  if (params.hasSill) push(iv.from + fw, iv.to - fw, vert.zBottom, vert.zBottom + fw);
+  // Blendrahmen-Ring: Pfosten (Laibungsseiten), Sturz und — Fenster immer, Tür
+  // nur mit Bodenanschlag (threshold) — Schwelle; Eckstoss je `cornerJoin`.
+  for (const q of frameRingQuads(iv.from, iv.to, vert.zBottom, vert.zTop, fw, params.cornerJoin, params.hasSill)) {
+    const mesh = openingPlaneQuad(wall, q, params.nMin, params.nMax, FRAME_RGB);
+    if (mesh) out.push(mesh);
+  }
   // Echtes Schwellenprofil (Tür, `threshold`): eine dünne, farblich abgesetzte
   // Leiste ÜBER DIE GANZE WANDDICKE am Fussboden (nicht nur die Rahmentiefe
   // wie der Blendrahmen-Riegel oben) — analog zur Fensterbank-Leiste
@@ -542,8 +623,6 @@ function frameMeshesForOpening(
     const glassFrontN = params.nMax - 0.02;
     const symBackN = glassFrontN;
     const symFrontN = glassFrontN + 0.003;
-    const pushSash = (from: number, to: number, zB: number, zT: number): void =>
-      pushC(from, to, zB, zT, sashBackN, sashFrontN, FRAME_RGB);
     const pushSymbol = (u0: number, h0: number, u1: number, h1: number): void => {
       const mesh = openingPlaneBox(wall, u0, h0, u1, h1, SYMBOL_HALF_WIDTH, symFrontN, symBackN, SYMBOL_RGB);
       if (mesh) out.push(mesh);
@@ -558,10 +637,12 @@ function frameMeshesForOpening(
       const bz = sashBottom;
       const tz = sashTop;
       if (ct - cf <= EPS || tz - bz <= EPS) continue;
-      pushSash(cf, cf + sfw, bz, tz); // linker Flügelholm
-      pushSash(ct - sfw, ct, bz, tz); // rechter Flügelholm
-      pushSash(cf, ct, tz - sfw, tz); // oberer Flügelriegel
-      pushSash(cf, ct, bz, bz + sfw); // unterer Flügelriegel
+      // Flügelrahmen-Ring (Holme + Riegel) ohne Überlappung an den Ecken —
+      // vorher liefen Holme UND Riegel über die volle Länge (doppelte Kanten).
+      for (const q of frameRingQuads(cf, ct, bz, tz, sfw, params.cornerJoin, true)) {
+        const mesh = openingPlaneQuad(wall, q, sashBackN, sashFrontN, FRAME_RGB);
+        if (mesh) out.push(mesh);
+      }
       // SIA-Öffnungssymbole (nur „fein") auf dem Glasfeld INNERHALB des Flügel-
       // rahmens — exakt wie in der 2D-Ansicht (s. toElevation): Dreh = V mit
       // Spitze am Bandseiten-Mittel des Glasfelds, Kipp = V mit Spitze oben Mitte.

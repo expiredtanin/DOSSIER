@@ -451,6 +451,9 @@ export interface BlockDef {
  * `kind: "door"`. Bündelt Bauart, Blattausführung und Standardmaße. Werte am
  * einzelnen Element (Breite/Höhe/Anschlag) übersteuern die Typ-Defaults.
  */
+/** Eckverbindung von Rahmenprofilen (s. `WindowType.frameCornerJoin`). */
+export type FrameCornerJoin = "vertikal" | "horizontal" | "gehrung";
+
 export interface DoorType {
   id: string;
   name: string;
@@ -488,6 +491,14 @@ export interface DoorType {
    * gilt ein schmaler Default (~0.06 m). Steuert 2D-Rahmenkontur + 3D-Rahmen.
    */
   frameWidth?: number;
+  /**
+   * Eckverbindung der Rahmen (Blend- und Flügelrahmen) in der Ansicht:
+   * "vertikal" (Pfosten laufen durch, Riegel dazwischen — Default),
+   * "horizontal" (Riegel laufen durch) oder "gehrung" (45°-Stoss). Wirkt im
+   * 3D; vorher überlappten die Flügelrahmen-Profile an den Ecken (doppelte
+   * Kanten bei „Schattiert mit Kanten").
+   */
+  frameCornerJoin?: FrameCornerJoin;
   /**
    * Schichteinzug: Abstand der Rahmen-Vorderkante von einer Wandfläche (Meter).
    * 0/fehlt ⇒ bündig. > 0 ⇒ der Rahmen sitzt um diesen Betrag in die Wand
@@ -592,6 +603,14 @@ export interface WindowType {
    * 2D-Rahmen-/Sprossenkontur und den 3D-Rahmen.
    */
   frameWidth?: number;
+  /**
+   * Eckverbindung der Rahmen (Blend- und Flügelrahmen) in der Ansicht:
+   * "vertikal" (Pfosten laufen durch, Riegel dazwischen — Default),
+   * "horizontal" (Riegel laufen durch) oder "gehrung" (45°-Stoss). Wirkt im
+   * 3D; vorher überlappten die Flügelrahmen-Profile an den Ecken (doppelte
+   * Kanten bei „Schattiert mit Kanten").
+   */
+  frameCornerJoin?: FrameCornerJoin;
   /**
    * Schichteinzug: Abstand der Rahmen-Vorderkante von einer Wandfläche (Meter).
    * 0/fehlt ⇒ bündig; > 0 ⇒ der Rahmen sitzt zurückgesetzt (klassisch hinter der

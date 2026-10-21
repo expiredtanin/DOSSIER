@@ -2365,11 +2365,12 @@ describe("emitRoofs (Dachflächen + Giebel als Meshes)", () => {
     expect(roofMeshes.length).toBe(1);
     const m = roofMeshes[0];
     expect(m.positions.every((v) => Number.isFinite(v))).toBe(true);
-    // Walm hat KEINE Giebel (gables: []). Jede Fläche ist jetzt ein SOLIDER Slab
-    // (Oberseite + Unterseite + Seitenwände): Quader-Fläche (4 Ecken) = 2+2+8 =
-    // 12 Dreiecke, Dreiecks-Fläche (3 Ecken) = 1+1+6 = 8 Dreiecke.
-    // 2 Quader × 12 + 2 Dreiecke × 8 = 40 Dreiecke = 120 Indizes.
-    expect(m.indices.length).toBe(120);
+    // Walm hat KEINE Giebel (gables: []). Jede Fläche ist ein SOLIDER Slab
+    // (Oberseite + Unterseite + Stirnflächen NUR an freien Kanten — First/Grate
+    // stossen auf Gehrung, s. mitredRoofOffsets): Quader-Fläche = 2+2+2 (nur
+    // Traufe) = 6 Dreiecke, Dreiecks-Fläche = 1+1+2 = 4 Dreiecke.
+    // 2 × 6 + 2 × 4 = 20 Dreiecke = 60 Indizes.
+    expect(m.indices.length).toBe(60);
     const vcount = m.positions.length / 3;
     expect(m.indices.every((idx) => idx >= 0 && idx < vcount)).toBe(true);
   });
