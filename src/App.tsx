@@ -1689,11 +1689,11 @@ export default function App() {
 
   // 2D-Griff-Editieren (Eckpunkt-/Kanten-Griffe + Feld-Controller) der aktuellen
   // Auswahl — siehe state/useGripEditing.ts.
-  // Schnitt-Blatt: geschnittene Wände/Decken lassen sich dort waagrecht entlang
-  // der Schnittlinie ziehen (s. useGripEditing `sheet`). Nur echte Schnitte —
-  // die Ansicht trägt keine Bauteil-IDs an ihren Flächen.
+  // Schnitt-/Ansichts-Blatt: geschnittene (bzw. in der Ansicht sichtbare)
+  // Wände/Decken lassen sich dort waagrecht entlang der Linie ziehen (s.
+  // useGripEditing `sheet`).
   const sectionSheet = useMemo(() => {
-    if (activeLevel.kind !== "section") return null;
+    if (activeLevel.kind !== "section" && activeLevel.kind !== "elevation") return null;
     const plane = sectionPlaneFromLevel(activeLevel);
     if (!plane) return null;
     const u = sectionUAxisModel(plane);

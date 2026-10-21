@@ -623,6 +623,8 @@ interface ProjectedOpening {
   symbol: Array<[[number, number], [number, number]]>;
   /** Tür (Blatt-Fläche statt Glas, ausser Glas-Blatt). */
   isDoor: boolean;
+  /** Quell-Öffnung (`project.openings[].id`) — Klick in der Ansicht wählt sie. */
+  openingId?: string;
 }
 
 /**
@@ -724,6 +726,7 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
       const v = openingVerticalExtent(project, wall, op);
       const pr = projectOpeningRect(frame, wall, iv.from, iv.to, v.zBottom, v.zTop, thickness);
       if (!pr) continue;
+      pr.openingId = op.id;
       const w = iv.to - iv.from;
       const h = v.zTop - v.zBottom;
       if (op.kind === "door") {
@@ -1472,6 +1475,7 @@ export function generateElevationPlan(
         stroke: EDGE_INK,
         strokeWidthMm: FRAME_MM,
         hatch: NO_HATCH,
+        openingId: op.openingId,
       },
     });
     // Sims (Bank + Tropfkante) — verdeckt die Fassade, Kontur.
@@ -1486,6 +1490,7 @@ export function generateElevationPlan(
           stroke: EDGE_INK,
           strokeWidthMm: EDGE_MM,
           hatch: NO_HATCH,
+          openingId: op.openingId,
         },
       });
     }
@@ -1501,6 +1506,7 @@ export function generateElevationPlan(
           stroke: EDGE_INK,
           strokeWidthMm: EDGE_MM,
           hatch: NO_HATCH,
+          openingId: op.openingId,
         },
       });
     }
@@ -1515,6 +1521,7 @@ export function generateElevationPlan(
           stroke: EDGE_INK,
           strokeWidthMm: EDGE_MM,
           hatch: NO_HATCH,
+          openingId: op.openingId,
         },
       });
     }
@@ -1530,6 +1537,7 @@ export function generateElevationPlan(
           stroke: EDGE_INK,
           strokeWidthMm: EDGE_MM,
           hatch: NO_HATCH,
+          openingId: op.openingId,
         },
       });
     }
