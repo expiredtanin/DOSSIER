@@ -11,7 +11,7 @@
 
 import type { Project, Roof, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
-import { cleanRing, isRectilinearNonRect, offsetRectilinear, rectilinearHipRoof } from "./roofSkeleton";
+import { cleanRing, convexPieces, isRectilinearNonRect, offsetRectilinear, rectilinearHipRoof } from "./roofSkeleton";
 
 /** 3D-Punkt [x, y, z=Höhe] in Modell-Metern. */
 export type Vec3 = [number, number, number];
@@ -341,6 +341,9 @@ export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
   if ((roof.shape === "walm" || roof.shape === "sattel") && isRectilinearNonRect(roof.outline)) {
     return rectilinearWalm(roof, eavesZ);
   }
+  if (roof.shape === "pult" && isRectilinearNonRect(roof.outline)) {
+    return rectilinearPult(roof, eavesZ);
+  }
   const bb = roofBBox(roof.outline);
   const oe = Math.max(0, roof.overhang); // Traufüberstand (senkrecht zum First)
   const og = Math.max(0, roof.overhangGable ?? roof.overhang); // Ortgang (entlang First)
@@ -405,6 +408,52 @@ function rectilinearWalm(roof: Roof, eavesZ: number): RoofGeometry {
     planes: sk.planes.map((pts) => ({ pts })),
     gables: sk.gables,
     ridgeHeight: sk.ridgeHeight,
+  };
+}
+
+/**
+ * Pultdach auf rechtwinkligem Grundriss: EINE Ebene über dem (um Traufe/Ortgang
+ * geweiteten) Umriss. Tief bei kleinstem y (First entlang x) bzw. x (First entlang y),
+ * Steigung wie beim Rechteck-Pult; Kanten quer zum First bekommen senkrechte Giebel.
+ */
+function rectilinearPult(roof: Roof, eavesZ: number): RoofGeometry {
+  let ring = cleanRing(roof.outline);
+  let area = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const p = ring[i];
+    const q = ring[(i + 1) % ring.length];
+    area += p.x * q.y - q.x * p.y;
+  }
+  if (area < 0) ring = [...ring].reverse();
+  const oe = Math.max(0, roof.overhang);
+  const og = Math.max(0, roof.overhangGable ?? roof.overhang);
+  const ax = roof.ridgeAxis === "x";
+  const eaves = offsetRectilinear(ring, (a, b) => {
+    const alongX = Math.abs(b.x - a.x) > Math.abs(b.y - a.y);
+    return alongX === ax ? oe : og;
+  });
+  const tan = Math.tan(Math.max(0, roof.pitchDeg) * DEG);
+  const s = (p: Vec2) => (ax ? p.y : p.x);
+  const smin = Math.min(...eaves.map(s));
+  const smax = Math.max(...eaves.map(s));
+  const z = (p: Vec2) => eavesZ + tan * (s(p) - smin);
+  const up = (p: Vec2): Vec3 => [p.x, p.y, z(p)];
+  const base = (p: Vec2): Vec3 => [p.x, p.y, eavesZ];
+  const gables: Vec3[][] = [];
+  eaves.forEach((a, i) => {
+    const b = eaves[(i + 1) % eaves.length];
+    const alongX = Math.abs(b.x - a.x) > Math.abs(b.y - a.y);
+    if (alongX === ax) return;
+    gables.push([base(a), base(b), up(b), up(a)]);
+  });
+  return {
+    eaves,
+    ridges: [], // höchste Kante(n): Rand bei smax
+    hips: [],
+    breaks: [],
+    planes: convexPieces(eaves).map((pc) => ({ pts: pc.map(up) })),
+    gables,
+    ridgeHeight: (smax - smin) * tan,
   };
 }
 

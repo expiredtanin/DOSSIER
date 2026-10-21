@@ -72,3 +72,14 @@ describe("Satteldach auf L: Ortgang-Überstand", () => {
     expect(Math.max(...ys)).toBeCloseTo(6.5, 6);
   });
 });
+
+describe("Pultdach auf L-Grundriss", () => {
+  const roof = { id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline: L, shape: "pult", pitchDeg: 45, overhang: 0, ridgeAxis: "x" } as unknown as Roof;
+  it("eine Ebene über dem Umriss: Fläche = Grundriss, Höhe steigt mit y bis 6 m", () => {
+    const g = roofGeometry(roof, 0);
+    expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(11 * 4 + 8 * 2, 6);
+    expect(g.ridgeHeight).toBeCloseTo(6, 6);
+    for (const pl of g.planes) for (const v of pl.pts) expect(v[2]).toBeCloseTo(v[1], 6);
+    expect(g.gables.length).toBe(3);
+  });
+});
