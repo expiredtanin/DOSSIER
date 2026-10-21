@@ -269,6 +269,7 @@ export function AttributesPanel() {
 
   const bboxW = sel.bbox.maxX - sel.bbox.minX;
   const bboxH = sel.bbox.maxY - sel.bbox.minY;
+  const isModelElement = !!(sel.wall || sel.ceiling || sel.roof || sel.stair || sel.room);
 
   return (
     <div className="attr-panel">
@@ -793,12 +794,16 @@ export function AttributesPanel() {
         {/* ── Masse (informativ, aus der bbox) — bei einer Layout-Annotation
             in Papier-mm statt Modell-Metern geführt (`formatM` passt nicht),
             daher hier weggelassen; Grösse steht bereits im Blatt-HUD. */}
-        {!isAnnotation && (
+        {/* Bauteile: die bbox ist der GRUNDRISS-Umriss (X/Y), keine Höhe — als
+            „Ausdehnung X/Y" beschriften (Nutzer-Report: Fenster zeigte „Höhe
+            0.34 m" = Wanddicke). Öffnungen tragen Breite/Höhe im eigenen
+            Abschnitt, dort entfällt die bbox ganz. */}
+        {!isAnnotation && !sel.opening && (
           <>
             <div className="attr-section-label">{t("attr.size")}</div>
-            <span className="attr-key">{t("attr.width")}</span>
+            <span className="attr-key">{t(isModelElement ? "attr.extentX" : "attr.width")}</span>
             <span className="attr-val attr-readonly">{formatM(bboxW)}</span>
-            <span className="attr-key">{t("attr.height")}</span>
+            <span className="attr-key">{t(isModelElement ? "attr.extentY" : "attr.height")}</span>
             <span className="attr-val attr-readonly">{formatM(bboxH)}</span>
           </>
         )}

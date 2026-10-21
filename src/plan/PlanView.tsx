@@ -573,6 +573,12 @@ export interface PlanViewProps {
   /** Griff-Zieh-Treiber: Live-Bewegung (gesnappt) + Abschluss. */
   gripHandlers?: GripHandlers;
   /**
+   * Schnitt-/Ansichts-Blatt: zusätzlich gewählte Öffnungen und Decken per
+   * Körper-Zug greifbar (die App überträgt das Blatt-Delta entlang der
+   * Schnittlinie, s. useGripEditing `sheet`). Im Grundriss aus.
+   */
+  sheetBodies?: boolean;
+  /**
    * Farbe des Auswahlrahmens (Marquee-Ziehauswahl). Einstellbar im
    * Einstellungs-Fenster (State in ViewSlice); Default = Akzent „Yuyake".
    */
@@ -598,6 +604,16 @@ export interface PlanViewProps {
 }
 
 /** Treiber für das Ziehen von Editier-Griffen (von App bereitgestellt). */
+/** Gegriffener Körper beim Parallel-Verschieben. */
+export interface BodyTarget {
+  wallId?: string;
+  drawingId?: string;
+  /** Nur im Schnitt/in der Ansicht (`sheetBodies`). */
+  openingId?: string;
+  /** Nur im Schnitt/in der Ansicht (`sheetBodies`). */
+  ceilingId?: string;
+}
+
 export interface GripHandlers {
   onGripMove(index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods): void;
   /**
@@ -609,7 +625,7 @@ export interface GripHandlers {
    */
   onMoveBody(
     delta: Vec2,
-    target?: { wallId?: string; drawingId?: string },
+    target?: BodyTarget,
     mods?: ToolMods,
   ): void;
   /**
@@ -672,6 +688,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       selectedWallIds,
       selectedCeilingIds,
       selectedOpeningIds,
+      sheetBodies = false,
       selectedStairIds,
       selectedRoomIds,
       selectedRoofIds,
@@ -1251,7 +1268,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const moveDrag = useRef<{
     pointerId: number;
     last: Vec2;
-    target: { wallId?: string; drawingId?: string };
+    target: BodyTarget;
   } | null>(null);
   // Transiente Stempel-Griff-Zieh-Daten: letzter Modellpunkt, gegen den das
   // inkrementelle Delta gebildet wird (verschiebt NUR den Raum-Stempel-Anker).
@@ -1748,7 +1765,19 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const grabbedBody = (
     clientX: number,
     clientY: number,
-  ): { wallId?: string; drawingId?: string } | null => {
+  ): BodyTarget | null => {
+    // Schnitt/Ansicht: gewählte Öffnung bzw. Decke unter dem Cursor (Vorrang vor
+    // der Wirtswand, die im Blatt dahinter liegt).
+    if (sheetBodies) {
+      const hi = hitTest(clientX, clientY);
+      const p = hi !== null ? plan.primitives[hi] : null;
+      if (p && "openingId" in p && p.openingId && selectedOpeningIds?.includes(p.openingId)) {
+        return { openingId: p.openingId };
+      }
+      if (p && p.kind === "polygon" && p.ceilingId && selectedCeilingIds?.includes(p.ceilingId)) {
+        return { ceilingId: p.ceilingId };
+      }
+    }
     const selWalls = new Set(selectedWallIds ?? []);
     if (selWalls.size) {
       const hi = hitTest(clientX, clientY);

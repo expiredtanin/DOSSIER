@@ -60,7 +60,7 @@ export function snapSegmentsFromPrimitives(prims: readonly Primitive[]): SnapSeg
 }
 
 /** Bauteil-Art, deren Schnittflächen im Blatt gezogen werden können. */
-export type SheetOwnerKind = "wall" | "ceiling";
+export type SheetOwnerKind = "wall" | "ceiling" | "opening";
 
 /**
  * Schnittflächen der Ebene `levelId` je Quell-Bauteil ablegen (aus den Plan-
@@ -79,7 +79,8 @@ export function setSheetOwnerOutlines(levelId: string, prims: readonly Primitive
   };
   for (const p of prims) {
     if (p.kind !== "polygon") continue;
-    if (p.wallId) add(`wall:${p.wallId}`, p.pts);
+    if (p.openingId) add(`opening:${p.openingId}`, p.pts);
+    else if (p.wallId) add(`wall:${p.wallId}`, p.pts);
     else if (p.ceilingId) add(`ceiling:${p.ceilingId}`, p.pts);
   }
   outlinesByLevel.set(levelId, map);

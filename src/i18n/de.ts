@@ -406,6 +406,8 @@ export const de = {
   "attr.size": "Maße",
   "attr.width": "Breite",
   "attr.height": "Höhe",
+  "attr.extentX": "Ausdehnung X",
+  "attr.extentY": "Ausdehnung Y",
 
   // Objekt-Info-Palette (ObjectInfoPanel)
   "objinfo.title": "Objekt-Info",

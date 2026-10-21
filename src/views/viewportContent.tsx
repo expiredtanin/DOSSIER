@@ -1331,6 +1331,7 @@ function SectionPlanView({
         selectedDrawingId={selectedDrawingId}
         selectedDrawingIds={selectedDrawingIds}
         gripHandlers={gripHandlers}
+        sheetBodies
       />
       {/* NACH PlanView gerendert (nicht als box-shadow auf .pane), damit der
           Isolations-Rahmen über der PlanView-SVG sichtbar bleibt. */}

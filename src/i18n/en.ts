@@ -404,6 +404,8 @@ export const en: Record<TranslationKey, string> = {
   "attr.size": "Size",
   "attr.width": "Width",
   "attr.height": "Height",
+  "attr.extentX": "Extent X",
+  "attr.extentY": "Extent Y",
 
   // Objekt-Info-Palette (ObjectInfoPanel)
   "objinfo.title": "Object Info",

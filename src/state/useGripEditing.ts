@@ -16,6 +16,7 @@ import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
 import { sheetOwnerOutlines } from "../tools/sheetSnapGeometry";
+import type { BodyTarget } from "../plan/PlanView";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { CommandEngine } from "../commands/engine";
 
@@ -497,6 +498,8 @@ export function useGripEditing(opts: {
   const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
+  /** Aufgeschobene Öffnungs-Verschiebung im Schnitt/in der Ansicht (neue `position`). */
+  const pendingOpeningMoveRef = useRef<{ id: string; position: number } | null>(null);
   /** Laufendes Blatt-Delta (u, Meter) eines Zugs im Schnitt (s. moveInSheet). */
   const sheetDuRef = useRef<{ id: string; du: number } | null>(null);
   const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
@@ -992,6 +995,9 @@ export function useGripEditing(opts: {
         moveGripOf(c.drawingId, c.wallId, c.index, { x: c.pos.x + pwm.total.x, y: c.pos.y + pwm.total.y }, scaleDenominator);
       }
     }
+    const pom = pendingOpeningMoveRef.current;
+    pendingOpeningMoveRef.current = null;
+    if (pom) updateOpening(pom.id, { position: pom.position });
     const pa = pendingAreaMoveRef.current;
     pendingAreaMoveRef.current = null;
     if (pa && (pa.total.x !== 0 || pa.total.y !== 0)) {
@@ -1082,6 +1088,7 @@ export function useGripEditing(opts: {
     pendingAreaGripRef.current = null;
     pendingAreaMoveRef.current = null;
     pendingWallMoveRef.current = null;
+    pendingOpeningMoveRef.current = null;
     sheetDuRef.current = null;
     pendingBodyRef.current = null;
     pendingEdgeRef.current = null;
@@ -1098,7 +1105,7 @@ export function useGripEditing(opts: {
   const moveInSheet = (
     sh: { levelId: string; uAxis: Vec2 },
     delta: Vec2,
-    target?: { wallId?: string; drawingId?: string },
+    target?: BodyTarget,
   ) => {
     if (target?.drawingId) {
       // 2D-Element der Ebene selbst: normales Körper-Verschieben im Blatt-Raum.
@@ -1111,8 +1118,12 @@ export function useGripEditing(opts: {
       setDraft({ preview: bodyPreviewShapes(), vertices: [], snap: null });
       return;
     }
+    if (target?.openingId) {
+      moveOpeningInSheet(sh, delta, target.openingId);
+      return;
+    }
     const wallId = target ? target.wallId ?? null : selectedWallId;
-    const ceilingId = !target && !wallId ? selectedCeilingId : null;
+    const ceilingId = target ? target.ceilingId ?? null : !wallId ? selectedCeilingId : null;
     const kind = wallId ? "wall" : ceilingId ? "ceiling" : null;
     const id = wallId ?? ceilingId;
     if (!kind || !id) return;
@@ -1128,6 +1139,33 @@ export function useGripEditing(opts: {
       pendingAreaMoveRef.current = { kind: "ceiling", id, total };
     }
     const preview: DraftShape[] = sheetOwnerOutlines(sh.levelId, kind, id).map((pts) => ({
+      kind: "poly",
+      pts: pts.map((q) => ({ x: q.x + du, y: q.y })),
+      closed: true,
+    }));
+    setDraft({ preview, vertices: [], snap: null });
+  };
+
+  // Öffnung im Blatt waagrecht ziehen: Blatt-Delta (u) → Verschiebung entlang
+  // der Wirtswand (Δposition = du · (u-Achse · Wandrichtung)); bei einer quer
+  // geschnittenen Wand (Achse ⟂ Schnittlinie) bewegt sie sich darum kaum —
+  // richtig so, sie läuft ja in die Tiefe. Projekt erst beim Loslassen.
+  const moveOpeningInSheet = (sh: { levelId: string; uAxis: Vec2 }, delta: Vec2, openingId: string) => {
+    const op = (project.openings ?? []).find((o) => o.id === openingId);
+    const w = op && project.walls.find((x) => x.id === op.hostWallId);
+    if (!op || !w || op.locked) return;
+    const axis = normalize(sub(w.end, w.start));
+    const factor = dot(sh.uAxis, axis);
+    if (Math.abs(factor) < 0.15) return;
+    const prevDu = sheetDuRef.current && sheetDuRef.current.id === openingId ? sheetDuRef.current.du : 0;
+    const len = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+    // Auf die Wand klemmen (Öffnung bleibt drin) — auch die Vorschau.
+    const rawPos = op.position + (prevDu + delta.x) * factor;
+    const pos = Math.max(0, Math.min(len - op.width, rawPos));
+    const du = (pos - op.position) / factor;
+    sheetDuRef.current = { id: openingId, du };
+    pendingOpeningMoveRef.current = { id: openingId, position: pos };
+    const preview: DraftShape[] = sheetOwnerOutlines(sh.levelId, "opening", openingId).map((pts) => ({
       kind: "poly",
       pts: pts.map((q) => ({ x: q.x + du, y: q.y })),
       closed: true,
@@ -1217,7 +1255,7 @@ export function useGripEditing(opts: {
     },
     onMoveBody: (
       delta: Vec2,
-      target?: { wallId?: string; drawingId?: string },
+      target?: BodyTarget,
       mods?: ToolMods,
     ) => {
       // Shift = Ortho: das Delta auf die dominante Achse (H/V) zwingen —
