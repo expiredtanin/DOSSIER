@@ -2321,6 +2321,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     model: Vec2;
     /** Zuletzt per Shift dazugewähltes Objekt (für Shift-Durchschalten). */
     applied?: PickCandidate;
+    /** Liste per Cmd+Shift geöffnet → Klick auf einen Eintrag ERWEITERT die Auswahl. */
+    additive?: boolean;
   } | null>(null);
   // Liste/Zyklus verwerfen, sobald sich Ausschnitt oder Plan ändern.
   useEffect(() => {
@@ -2533,6 +2535,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       idx,
       model,
       applied: e.shiftKey ? items[idx] : undefined,
+      additive: e.shiftKey,
     };
     applyCandidate(items[idx], model, e.shiftKey, replaces);
     const rect = svgRef.current?.getBoundingClientRect();
@@ -3868,8 +3871,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               onClick={(ev) => {
                 const cur = cycleRef.current;
                 if (cur) cur.idx = i;
-                // Shift: Eintrag zur bestehenden Auswahl dazu-/abwählen (Liste bleibt offen).
-                applyCandidate(c, cur?.model ?? { x: 0, y: 0 }, ev.shiftKey);
+                // Shift (oder Liste per Cmd+Shift geöffnet): Eintrag zur bestehenden Auswahl
+                // dazuwählen; der beim Öffnen schon dazugewählte Zwischenstand wird ersetzt.
+                const additive = ev.shiftKey || !!cur?.additive;
+                const prevApplied = cur?.applied;
+                if (additive && prevApplied?.id === c.id && prevApplied.kind === c.kind) {
+                  setPickList({ ...pickList, idx: i }); // schon dazugewählt: nicht wieder abschalten
+                  return;
+                }
+                const replaces =
+                  additive && prevApplied && prevApplied.id !== c.id
+                    ? { kind: prevApplied.kind, id: prevApplied.id }
+                    : undefined;
+                if (cur) cur.applied = additive ? c : undefined;
+                applyCandidate(c, cur?.model ?? { x: 0, y: 0 }, additive, replaces);
                 setPickList({ ...pickList, idx: i });
               }}
             >
