@@ -11,6 +11,7 @@
 
 import type { Project, Roof, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
+import { cleanRing, isRectilinearNonRect, offsetRectilinear, rectilinearHipRoof } from "./roofSkeleton";
 
 /** 3D-Punkt [x, y, z=Höhe] in Modell-Metern. */
 export type Vec3 = [number, number, number];
@@ -335,6 +336,11 @@ const swapLine = (l: [Vec2, Vec2]): [Vec2, Vec2] => [swap2(l[0]), swap2(l[1])];
  * transponiert.
  */
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
+  // Walmdach über einem rechtwinkligen, nicht-rechteckigen Grundriss (L/T/U …):
+  // echte Flächen mit Graten und Kehlen statt Bounding-Box (s. roofSkeleton.ts).
+  if (roof.shape === "walm" && isRectilinearNonRect(roof.outline)) {
+    return rectilinearWalm(roof, eavesZ);
+  }
   const bb = roofBBox(roof.outline);
   const oe = Math.max(0, roof.overhang); // Traufüberstand (senkrecht zum First)
   const og = Math.max(0, roof.overhangGable ?? roof.overhang); // Ortgang (entlang First)
@@ -360,6 +366,34 @@ export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
     planes: g.planes.map((pl) => ({ pts: pl.pts.map(swap3) })),
     gables: g.gables.map((poly) => poly.map(swap3)),
     ridgeHeight: g.ridgeHeight,
+  };
+}
+
+/**
+ * Walmdach auf rechtwinkligem Grundriss: Traufe = Umriss um den Traufüberstand
+ * nach aussen versetzt (ringsum gleich — beim Walm ist jede Kante Traufe),
+ * Flächen/Linien aus {@link rectilinearHipRoof}.
+ */
+function rectilinearWalm(roof: Roof, eavesZ: number): RoofGeometry {
+  let ring = cleanRing(roof.outline);
+  let area = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const p = ring[i];
+    const q = ring[(i + 1) % ring.length];
+    area += p.x * q.y - q.x * p.y;
+  }
+  if (area < 0) ring = [...ring].reverse();
+  const eaves = offsetRectilinear(ring, Math.max(0, roof.overhang));
+  const tan = Math.tan(Math.max(0, roof.pitchDeg) * DEG);
+  const sk = rectilinearHipRoof(eaves, tan, eavesZ);
+  return {
+    eaves,
+    ridges: sk.ridges,
+    hips: sk.hips,
+    breaks: [],
+    planes: sk.planes.map((pts) => ({ pts })),
+    gables: [],
+    ridgeHeight: sk.ridgeHeight,
   };
 }
 
