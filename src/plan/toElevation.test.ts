@@ -617,6 +617,37 @@ describe("Dächer in der Ansicht (roofWorldFacesAll)", () => {
   });
 });
 
+describe("Dächer auf L-Grundriss in der Ansicht", () => {
+  const L = [
+    { x: 0, y: 0 }, { x: 11, y: 0 }, { x: 11, y: 4 }, { x: 8, y: 4 }, { x: 8, y: 6 }, { x: 0, y: 6 },
+  ];
+  for (const shape of ["sattel", "pult", "mansarde", "walm"] as const) {
+    it(`${shape}: Dachpolygone mit endlichen Koordinaten`, () => {
+      const base = elevationProject({ overhang: false });
+      const p = {
+        ...base,
+        roofs: [
+          {
+            id: "R1", type: "roof", floorId: "eg", categoryCode: "35", outline: L, shape,
+            pitchDeg: 30, overhang: 0, ridgeAxis: "x", baseElevation: 3, thickness: 0.2,
+          },
+        ],
+      } as unknown as Project;
+      const level = p.drawingLevels.find((z) => z.kind === "elevation")!;
+      const plan = generateElevationPlan(p, level);
+      const roofPolys = plan!.primitives.filter(
+        (pr) => pr.kind === "polygon" && (pr as { roofId?: string }).roofId === "R1",
+      );
+      expect(roofPolys.length).toBeGreaterThanOrEqual(1);
+      for (const pr of roofPolys) {
+        for (const q of (pr as { pts: { x: number; y: number }[] }).pts) {
+          expect(Number.isFinite(q.x) && Number.isFinite(q.y)).toBe(true);
+        }
+      }
+    });
+  }
+});
+
 describe("toElevation — Tür-Teilverglasung (glazingRatio)", () => {
   const GLASS_FILL_COLOR = "#9fc2d9";
   const DOOR_LEAF_FILL_COLOR = "#ede6d9";
