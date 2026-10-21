@@ -197,6 +197,8 @@ export interface Model3dOptions {
    * Fehlt es, gilt "fein" (= volle Details).
    */
   detail?: DetailLevel;
+  /** Schnitt-Eingabe: Treppen immer als Tritt-Prismen (s. `emitStairs` `forSection`). */
+  forSection?: boolean;
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
@@ -207,7 +209,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     walls: projectToWalls3d(project, layered),
     // Decken + Treppen (Treppentritte als extrudierte Slabs) — so wird die Treppe
     // auch im WASM/wgpu-Renderer sichtbar (der three.js-Pfad rendert sie separat).
-    slabs: [...emitSlabs(project), ...emitStairs(project)],
+    slabs: [...emitSlabs(project), ...emitStairs(project, { forSection: opts.forSection })],
     // Kontext-Meshes (Terrain/Import) + Fenster-/Tür-Glasscheiben (eigenes Mesh
     // je Scheibe) + Rahmen-/Sprossen-Riegel typisierter Öffnungen (Zarge/
     // Blendrahmen/Kämpfer/Mittelpfosten, s. emitOpeningFrames) + glatte Beton-

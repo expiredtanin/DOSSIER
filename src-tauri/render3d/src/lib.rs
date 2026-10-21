@@ -792,6 +792,7 @@ mod tests {
     /// Quadratischer Decken-Umriss (CCW) mit Kantenlaenge `s`, Ecke im Ursprung.
     fn square_slab(s: f32, z_bottom: f32, z_top: f32) -> SlabInput {
         SlabInput {
+            monolith: None,
             outline: vec![[0.0, 0.0], [s, 0.0], [s, s], [0.0, s]],
             z_bottom,
             z_top,
@@ -850,6 +851,7 @@ mod tests {
         // Zentriertes Quadrat um den Ursprung: jede Mantel-Normale muss vom
         // Zentrum weg zeigen.
         let slab = SlabInput {
+            monolith: None,
             outline: vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]],
             z_bottom: 0.0,
             z_top: 0.3,
@@ -884,7 +886,7 @@ mod tests {
     fn entarteter_slab_erzeugt_nichts() {
         let mut mesh = Mesh::default();
         // <3 Ecken.
-        extrude_slab(&mut mesh, &SlabInput { outline: vec![[0.0, 0.0], [1.0, 0.0]], z_bottom: 0.0, z_top: 0.2, color: [0.8, 0.8, 0.8], hatch: None, cut: None });
+        extrude_slab(&mut mesh, &SlabInput { outline: vec![[0.0, 0.0], [1.0, 0.0]], z_bottom: 0.0, z_top: 0.2, color: [0.8, 0.8, 0.8], hatch: None, cut: None, monolith: None });
         assert_eq!(mesh.vertex_count(), 0);
         // Nullhoehe.
         extrude_slab(&mut mesh, &square_slab(4.0, 2.6, 2.6));

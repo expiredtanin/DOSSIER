@@ -137,7 +137,15 @@ function closedRiserOutline(
  * `ceilingId` trägt hier die Treppen-Id (nur TS-seitiges Tagging; render3d ignoriert
  * das Feld, und der Pick läuft separat über `pickGeometry`).
  */
-export function emitStairs(project: Project): RSlab[] {
+export function emitStairs(
+  project: Project,
+  /**
+   * `forSection`: auch gerade Betontreppen als Tritt-Prismen liefern (deren
+   * glatte Laufplatte ist im 3D ein Mesh, das der Schnitt-Extraktor nicht
+   * schneiden kann — ohne diese Näherung fehlte die Treppe im Schnitt ganz).
+   */
+  opts: { forSection?: boolean } = {},
+): RSlab[] {
   const out: RSlab[] = [];
   for (const stair of project.stairs ?? []) {
     const { zBottom, zTop } = stairVerticalExtent(project, stair);
@@ -148,10 +156,13 @@ export function emitStairs(project: Project): RSlab[] {
     const structure = st?.structure ?? "massiv";
     // Gerade Betontreppe: die GLATTE Laufplatte kommt als echtes Mesh
     // (emitStairMeshes) — hier keine Slab-Näherung emittieren (sonst doppelt).
-    if (structure === "beton" && stair.shape === "straight") continue;
+    if (structure === "beton" && stair.shape === "straight" && !opts.forSection) continue;
     const treadThickness = st?.treadThickness ?? 0.04;
     const riser = geo.riserHeight;
     const open = structure !== "massiv";
+    // Massiv/Beton = EIN Körper: die Tritt-Prismen verschmelzen im Schnitt
+    // (keine Nähte zwischen den Tritten, s. render3d `SlabInput::monolith`).
+    const monolith = structure === "massiv" || structure === "beton" ? stair.id : undefined;
     const nosing = open ? st?.nosing ?? 0 : 0;
     const neighborPts = geo.treads.map((t) => t.pts);
     for (let k = 0; k < geo.treads.length; k++) {
@@ -172,6 +183,7 @@ export function emitStairs(project: Project): RSlab[] {
           zTop: top,
           color: STAIR_RGB,
           ceilingId: stair.id,
+          monolith,
         });
       }
       if (open && st?.closedRisers) {
@@ -188,12 +200,16 @@ export function emitStairs(project: Project): RSlab[] {
       }
     }
     if (geo.landing && geo.landing.length >= 3) {
+      const landingTop = zBottom + totalRise * 0.5;
       out.push({
         outline: geo.landing.map((p) => [p.x, p.y] as RVec2),
-        zBottom,
-        zTop: zBottom + totalRise * 0.5,
+        // Betontreppe: Podest als Platte (wie die Laufplatte), kein Vollblock
+        // bis zum Boden; massiv bleibt Vollkörper.
+        zBottom: structure === "beton" ? Math.max(zBottom, landingTop - riser - CONCRETE_WAIST) : zBottom,
+        zTop: landingTop,
         color: STAIR_RGB,
         ceilingId: stair.id,
+        monolith,
       });
     }
   }

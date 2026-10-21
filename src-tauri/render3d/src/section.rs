@@ -340,6 +340,8 @@ struct Prism {
     /// `WallInput`/`SlabInput`-Eingabe (`cut`) uebernommen und an jedes erzeugte
     /// `CutPolygon` weitergereicht.
     cut: Option<CutBandMeta>,
+    /// Monolith-Gruppe (siehe `SlabInput::monolith`); Waende: immer `None`.
+    monolith: Option<String>,
 }
 
 /// Wandachse + Oeffnungen, wie sie fuer die Oeffnungs-Zuordnung bei Cut-
@@ -430,6 +432,7 @@ fn wall_prism(index: usize, wall: &WallInput) -> Option<Prism> {
             openings: wall.openings.clone(),
         }),
         cut: wall.cut.clone(),
+        monolith: None,
     })
 }
 
@@ -453,6 +456,7 @@ fn slab_prism(index: usize, slab: &SlabInput) -> Option<Prism> {
         hatch: slab.hatch,
         wall_axis: None,
         cut: slab.cut.clone(),
+        monolith: slab.monolith.clone(),
     })
 }
 
@@ -586,6 +590,8 @@ struct PrismBounds {
     /// Groesste Tiefe des Fussabdrucks. `<= EPS` heisst: das Bauteil liegt
     /// komplett VOR der Ebene (hinter dem Betrachter) und verdeckt nichts.
     depth_max: f32,
+    /// Monolith-Gruppe des Prismas (siehe `SlabInput::monolith`).
+    monolith: Option<String>,
     z0: f32,
     z1: f32,
     opening_voids: Vec<(f32, f32, f32, f32)>,
@@ -639,6 +645,7 @@ fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
         u_max,
         depth_min,
         depth_max,
+        monolith: prism.monolith.clone(),
         z0: prism.z0,
         z1: prism.z1,
         opening_voids,
@@ -803,8 +810,10 @@ fn blocked_intervals(
     bias: HeightBias,
     bounds: &[PrismBounds],
     exclude: Option<ComponentRef>,
+    owner: (ComponentRef, Option<&str>),
 ) -> Vec<(f32, f32)> {
     let mut ivs = Vec::new();
+    let (owner_ref, owner_group) = owner;
     for b in bounds {
         if let Some(ex) = exclude {
             if ex.kind == b.kind && ex.index == b.index {
@@ -821,7 +830,15 @@ fn blocked_intervals(
         }
         let ru = height_in_range(u0, u1, b.u_min, b.u_max, HeightBias::Vertical);
         let rv = height_in_range(v0, v1, b.z0, b.z1, bias);
-        let rd = linear_greater_than(d0, d1, b.depth_min + EPS);
+        // Gleiche Monolith-Gruppe (z. B. Tritte EINER Treppe), anderes Prisma:
+        // verdeckt auch bei GLEICHER Tiefe — die Naht zwischen zwei Tritten auf
+        // derselben Seitenflaeche ist keine sichtbare Kante (sonst "gestapelte
+        // Kistchen" statt Saegezahn im Schnitt).
+        let same_group = owner_group.is_some()
+            && b.monolith.as_deref() == owner_group
+            && !(b.kind == owner_ref.kind && b.index == owner_ref.index);
+        let threshold = if same_group { b.depth_min - EPS } else { b.depth_min + EPS };
+        let rd = linear_greater_than(d0, d1, threshold);
         let Some(solid) = intersect_ranges(intersect_ranges(ru, rv), rd) else {
             continue;
         };
@@ -959,7 +976,18 @@ fn compute_view_edges(
             let d1 = plane.depth(cb);
 
             let exclude = if self_exclude { Some(cref) } else { None };
-            let blocked = blocked_intervals(u0, u1, v0, v1, d0, d1, bias, &bounds, exclude);
+            let blocked = blocked_intervals(
+                u0,
+                u1,
+                v0,
+                v1,
+                d0,
+                d1,
+                bias,
+                &bounds,
+                exclude,
+                (cref, prism.monolith.as_deref()),
+            );
             for &(s, e) in &blocked {
                 hidden.push(SectionEdge {
                     component: cref,
@@ -1099,6 +1127,7 @@ mod tests {
             },
         ];
         let slabs = vec![SlabInput {
+            monolith: None,
             outline: vec![[-0.5, -0.5], [3.5, -0.5], [3.5, 3.5], [-0.5, 3.5]],
             z_bottom: -0.2,
             z_top: 0.0,

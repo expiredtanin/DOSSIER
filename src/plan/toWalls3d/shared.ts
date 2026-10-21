@@ -285,6 +285,12 @@ export interface RSlab {
   hatch?: RHatch;
   /** Schnitt-Verschneidungs-/Linienstil-Metadaten dieser Decken-Schicht (siehe {@link RCutMeta}). */
   cut?: RCutMeta;
+  /**
+   * Monolith-Gruppe (z. B. Treppen-ID einer massiven/Beton-Treppe): Prismen
+   * derselben Gruppe verdecken sich im Schnitt auch bei gleicher Tiefe —
+   * render3d `SlabInput::monolith`.
+   */
+  monolith?: string;
 }
 
 /** Art eines rohen Kontext-Meshes (bestimmt in render3d die Default-Einfärbung). */

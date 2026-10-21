@@ -1182,7 +1182,8 @@ export async function computeSection(
   // Cut-Polygone 1:1 zu `wallSegmentOwners` (Öffnungs-Segmentierung) liegen und
   // `splitWallLayers` die materialspezifischen Schnitt-Bänder korrekt aus dem
   // EINEN Wandrechteck erzeugt. Der 3D-Viewer bekommt weiter per-Schicht-Boxen.
-  const modelJson = JSON.stringify(projectToModel3d(project, { layeredWalls: false }));
+  const model = projectToModel3d(project, { layeredWalls: false, forSection: true });
+  const modelJson = JSON.stringify(model);
   const json = mod.cut_section_json(
     modelJson,
     plane.point[0],
@@ -1209,6 +1210,10 @@ export async function computeSection(
   // Dächer TS-seitig ergänzen (der Rust-Extraktor kennt nur Wände + Decken).
   appendRoofSections(output, project, plane);
   attachCutStyles(output, project, plane);
+  // Monolithische Bauteile aus mehreren Prismen (Treppen-Tritte): ihre Schnitt-
+  // Rechtecke zu EINEM Umriss vereinen — sonst je Tritt ein eigenes,
+  // überlappendes Schraffur-Rechteck mit Kontur ("gestapelte Kistchen").
+  output.cutPolygons = mergeMonolithCuts(output.cutPolygons, (i) => model.slabs[i]?.monolith);
   // Schnitt-Tiefe: Kanten weiter als `level.depth` hinter der Ebene ausblenden.
   if (level.depth !== undefined) filterByDepth(output, project, plane, level.depth);
   return output;
@@ -1256,4 +1261,113 @@ export function sameSectionLine(a: DrawingLevel, b: DrawingLevel): boolean {
     a.depth === b.depth &&
     !!a.shadows === !!b.shadows
   );
+}
+
+/**
+ * Vereint die Cut-Polygone je Monolith-Gruppe (nur Decken-/Slab-Prismen mit
+ * gesetzter Gruppe, s. `RSlab.monolith`) zu orthogonalen Umriss-Polygonen.
+ * Stil/Herkunft übernimmt das erste Band der Gruppe. Löcher im Umriss werden
+ * nicht dargestellt (bei Treppen nicht vorkommend).
+ */
+export function mergeMonolithCuts(
+  cuts: SectionCutPolygon[],
+  groupOfSlab: (index: number) => string | undefined,
+): SectionCutPolygon[] {
+  const groups = new Map<string, SectionCutPolygon[]>();
+  const out: SectionCutPolygon[] = [];
+  for (const cp of cuts) {
+    const g = cp.component.kind === "slab" ? groupOfSlab(cp.component.index) : undefined;
+    if (!g) {
+      out.push(cp);
+      continue;
+    }
+    const list = groups.get(g);
+    if (list) list.push(cp);
+    else groups.set(g, [cp]);
+  }
+  for (const list of groups.values()) {
+    if (list.length === 1) {
+      out.push(list[0]);
+      continue;
+    }
+    const rects = list.map((cp) => rectOfBand(cp)).filter((r): r is Rect => r !== null);
+    if (rects.length !== list.length) {
+      out.push(...list); // nicht-rechteckige Bänder: unverändert lassen
+      continue;
+    }
+    for (const ring of unionRectOutlines(rects)) {
+      out.push({ ...list[0], pts: ring });
+    }
+  }
+  return out;
+}
+
+/**
+ * Äussere Umrisse der Vereinigung achsparalleler Rechtecke (Raster über alle
+ * Kanten-Koordinaten, Randkanten verketten). Liefert je zusammenhängender
+ * Fläche den Aussenring (CCW); Innenringe (Löcher) entfallen.
+ */
+export function unionRectOutlines(rects: Rect[]): Array<Array<[number, number]>> {
+  const xs = [...new Set(rects.flatMap((r) => [r.uMin, r.uMax]))].sort((a, b) => a - b);
+  const ys = [...new Set(rects.flatMap((r) => [r.vMin, r.vMax]))].sort((a, b) => a - b);
+  const nx = xs.length - 1;
+  const ny = ys.length - 1;
+  if (nx < 1 || ny < 1) return [];
+  const filled = (i: number, j: number): boolean => {
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
+    const cx = (xs[i] + xs[i + 1]) / 2;
+    const cy = (ys[j] + ys[j + 1]) / 2;
+    return rects.some((r) => cx > r.uMin && cx < r.uMax && cy > r.vMin && cy < r.vMax);
+  };
+  const cell: boolean[][] = [];
+  for (let i = 0; i < nx; i++) {
+    cell.push([]);
+    for (let j = 0; j < ny; j++) cell[i].push(filled(i, j));
+  }
+  const at = (i: number, j: number) => i >= 0 && j >= 0 && i < nx && j < ny && cell[i][j];
+  // Gerichtete Randkanten (Fläche links → CCW), als Gitterpunkt-Paare.
+  const next = new Map<string, [number, number]>();
+  const key = (i: number, j: number) => `${i},${j}`;
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < ny; j++) {
+      if (!cell[i][j]) continue;
+      if (!at(i, j - 1)) next.set(key(i, j), [i + 1, j]); // unten, nach rechts
+      if (!at(i + 1, j)) next.set(key(i + 1, j), [i + 1, j + 1]); // rechts, nach oben
+      if (!at(i, j + 1)) next.set(key(i + 1, j + 1), [i, j + 1]); // oben, nach links
+      if (!at(i - 1, j)) next.set(key(i, j + 1), [i, j]); // links, nach unten
+    }
+  }
+  const rings: Array<Array<[number, number]>> = [];
+  const used = new Set<string>();
+  for (const start of next.keys()) {
+    if (used.has(start)) continue;
+    const ring: Array<[number, number]> = [];
+    let k = start;
+    while (!used.has(k)) {
+      used.add(k);
+      const [i, j] = k.split(",").map(Number);
+      ring.push([xs[i], ys[j]]);
+      const n = next.get(k);
+      if (!n) break;
+      k = key(n[0], n[1]);
+    }
+    // Kollineare Zwischenpunkte entfernen.
+    const simple = ring.filter((p, idx) => {
+      const a = ring[(idx + ring.length - 1) % ring.length];
+      const b = ring[(idx + 1) % ring.length];
+      return !((a[0] === p[0] && p[0] === b[0]) || (a[1] === p[1] && p[1] === b[1]));
+    });
+    if (simple.length >= 4 && signedArea(simple) > 0) rings.push(simple);
+  }
+  return rings;
+}
+
+function signedArea(ring: Array<[number, number]>): number {
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % ring.length];
+    a += x0 * y1 - x1 * y0;
+  }
+  return a / 2;
 }

@@ -266,6 +266,13 @@ pub struct SlabInput {
     /// `CutBandMeta`/`WallInput::cut`).
     #[serde(default)]
     pub cut: Option<CutBandMeta>,
+    /// Gruppe eines aus mehreren Prismen zusammengesetzten, MONOLITHISCHEN
+    /// Bauteils (z. B. die Tritt-Prismen EINER massiven/Beton-Treppe). Im
+    /// Schnitt/in der Ansicht verdecken sich Prismen derselben Gruppe auch bei
+    /// GLEICHER Tiefe gegenseitig — die inneren Nähte zwischen den Tritten
+    /// verschwinden, sichtbar bleibt der Umriss (Sägezahn). `None` = Einzelteil.
+    #[serde(default)]
+    pub monolith: Option<String>,
 }
 
 /// EINE Dachflächen-Schicht für den 3D-Live-Schnitt (`crate::roof_cut`).
