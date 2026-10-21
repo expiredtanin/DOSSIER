@@ -121,6 +121,8 @@ export interface SkeletonRoof {
   planes: Vec3[][];
   ridges: [Vec2, Vec2][];
   hips: [Vec2, Vec2][];
+  /** Senkrechte Giebelflächen (nur Satteldach, s. `ridgeAxis`). */
+  gables: Vec3[][];
   ridgeHeight: number;
 }
 
@@ -128,7 +130,13 @@ export interface SkeletonRoof {
  * Walmdach-Flächen über dem rechtwinkligen Traufring `eaves` (beliebige
  * Orientierung) bei Neigung `tan` und Traufhöhe `e`.
  */
-export function rectilinearHipRoof(eavesIn: Vec2[], tan: number, e: number): SkeletonRoof {
+export function rectilinearHipRoof(
+  eavesIn: Vec2[],
+  tan: number,
+  e: number,
+  /** Gesetzt → Satteldach: Kanten quer zu dieser Firstrichtung sind senkrechte Giebel (Ortgang). */
+  ridgeAxis?: "x" | "y",
+): SkeletonRoof {
   let eaves = cleanRing(eavesIn);
   if (signedArea(eaves) < 0) eaves = [...eaves].reverse();
   const n = eaves.length;
@@ -137,6 +145,14 @@ export function rectilinearHipRoof(eavesIn: Vec2[], tan: number, e: number): Ske
     const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     return { a, b, n: { x: -(b.y - a.y) / len, y: (b.x - a.x) / len } };
   });
+  // Giebelkante = quer zur Firstrichtung: keine Neigung, begrenzt nur die Nachbarkeile.
+  const isGable = edges.map((ed) =>
+    ridgeAxis === undefined
+      ? false
+      : ridgeAxis === "x"
+        ? Math.abs(ed.b.x - ed.a.x) < Math.abs(ed.b.y - ed.a.y)
+        : Math.abs(ed.b.y - ed.a.y) < Math.abs(ed.b.x - ed.a.x),
+  );
   const dist = (k: number, p: Vec2) => (p.x - edges[k].a.x) * edges[k].n.x + (p.y - edges[k].a.y) * edges[k].n.y;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of eaves) {
@@ -154,15 +170,23 @@ export function rectilinearHipRoof(eavesIn: Vec2[], tan: number, e: number): Ske
   const wedge = edges.map((ed, k) => {
     const prev = edges[(k + n - 1) % n];
     const next = edges[(k + 1) % n];
-    const bisA = { x: ed.n.x + prev.n.x, y: ed.n.y + prev.n.y };
-    const bisB = { x: ed.n.x + next.n.x, y: ed.n.y + next.n.y };
+    // An Giebelkanten steht die Keilgrenze senkrecht zur Traufe (= Verlängerung des Giebels).
+    const bisA = isGable[(k + n - 1) % n] ? ed.n : { x: ed.n.x + prev.n.x, y: ed.n.y + prev.n.y };
+    const bisB = isGable[(k + 1) % n] ? ed.n : { x: ed.n.x + next.n.x, y: ed.n.y + next.n.y };
     const side = (o: Vec2, dir: Vec2, ref: Vec2) => {
       const s = Math.sign(dir.x * (ref.y - o.y) - dir.y * (ref.x - o.x)) || 1;
       return (p: Vec2) => s * (dir.x * (p.y - o.y) - dir.y * (p.x - o.x));
     };
     let w = clipHalf(big, (p) => dist(k, p));
-    w = clipHalf(w, side(ed.a, bisA, ed.b));
-    w = clipHalf(w, side(ed.b, bisB, ed.a));
+    // Giebelgrenze minimal nach aussen schieben: deckungsgleich mit der Traufring-Kante
+    // würde der Polygon-Boolean an kollinearen Segmenten scheitern.
+    const len = Math.hypot(ed.b.x - ed.a.x, ed.b.y - ed.a.y) || 1;
+    const ux = ((ed.b.x - ed.a.x) / len) * 1e-4;
+    const uy = ((ed.b.y - ed.a.y) / len) * 1e-4;
+    const oa = isGable[(k + n - 1) % n] ? { x: ed.a.x - ux, y: ed.a.y - uy } : ed.a;
+    const ob = isGable[(k + 1) % n] ? { x: ed.b.x + ux, y: ed.b.y + uy } : ed.b;
+    w = clipHalf(w, side(oa, bisA, ed.b));
+    w = clipHalf(w, side(ob, bisB, ed.a));
     return w;
   });
   const eavesPoly = [toRing(eaves)];
@@ -181,12 +205,12 @@ export function rectilinearHipRoof(eavesIn: Vec2[], tan: number, e: number): Ske
   const onEaves = (p: Vec2, q: Vec2) => edges.some((_, k) => onSeg(k, p) && onSeg(k, q));
 
   edges.forEach((_, k) => {
-    if (wedge[k].length < 3) return;
+    if (isGable[k] || wedge[k].length < 3) return;
     let face: MultiPolygon = polygonClipping.intersection(eavesPoly, [toRing(wedge[k])]);
     // Bereiche, in denen eine andere Kante tiefer liegt, abziehen.
     const subtract: Ring[][] = [];
     for (let f = 0; f < n; f++) {
-      if (f === k || wedge[f].length < 3) continue;
+      if (f === k || isGable[f] || wedge[f].length < 3) continue;
       // dist_f(p) < dist_k(p)  ⇔  g(p) = dist_k(p) − dist_f(p) > 0
       const lower = clipHalf(wedge[f], (p) => dist(k, p) - dist(f, p));
       if (lower.length >= 3 && Math.abs(signedArea(lower)) > 1e-9) subtract.push([toRing(lower)]);
@@ -218,7 +242,29 @@ export function rectilinearHipRoof(eavesIn: Vec2[], tan: number, e: number): Ske
       }
     }
   });
-  return { planes, ridges, hips, ridgeHeight };
+  // Giebelflächen: Profil = alle Flächenecken auf der Giebelkante, nach Lage sortiert.
+  const gables: Vec3[][] = [];
+  edges.forEach((ed, k) => {
+    if (!isGable[k]) return;
+    const len2 = (ed.b.x - ed.a.x) ** 2 + (ed.b.y - ed.a.y) ** 2;
+    const top: { t: number; v: Vec3 }[] = [];
+    for (const pl of planes) {
+      for (const v of pl) {
+        const t = ((v[0] - ed.a.x) * (ed.b.x - ed.a.x) + (v[1] - ed.a.y) * (ed.b.y - ed.a.y)) / len2;
+        if (Math.abs(dist(k, { x: v[0], y: v[1] })) < 1e-5 && t > -1e-6 && t < 1 + 1e-6) top.push({ t, v });
+      }
+    }
+    top.sort((p, q) => p.t - q.t);
+    const prof = top.filter((p, i) => i === 0 || Math.abs(p.t - top[i - 1].t) > 1e-6);
+    if (prof.length < 2) return;
+    const poly: Vec3[] = [
+      [ed.a.x, ed.a.y, e],
+      [ed.b.x, ed.b.y, e],
+      ...prof.reverse().map((p) => p.v),
+    ];
+    gables.push(poly);
+  });
+  return { planes, ridges, hips, gables, ridgeHeight };
 }
 
 // ── Konvexe Zerlegung ───────────────────────────────────────────────────────

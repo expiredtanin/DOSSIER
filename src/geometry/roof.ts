@@ -338,7 +338,7 @@ const swapLine = (l: [Vec2, Vec2]): [Vec2, Vec2] => [swap2(l[0]), swap2(l[1])];
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
   // Walmdach über einem rechtwinkligen, nicht-rechteckigen Grundriss (L/T/U …):
   // echte Flächen mit Graten und Kehlen statt Bounding-Box (s. roofSkeleton.ts).
-  if (roof.shape === "walm" && isRectilinearNonRect(roof.outline)) {
+  if ((roof.shape === "walm" || roof.shape === "sattel") && isRectilinearNonRect(roof.outline)) {
     return rectilinearWalm(roof, eavesZ);
   }
   const bb = roofBBox(roof.outline);
@@ -385,14 +385,14 @@ function rectilinearWalm(roof: Roof, eavesZ: number): RoofGeometry {
   if (area < 0) ring = [...ring].reverse();
   const eaves = offsetRectilinear(ring, Math.max(0, roof.overhang));
   const tan = Math.tan(Math.max(0, roof.pitchDeg) * DEG);
-  const sk = rectilinearHipRoof(eaves, tan, eavesZ);
+  const sk = rectilinearHipRoof(eaves, tan, eavesZ, roof.shape === "sattel" ? roof.ridgeAxis : undefined);
   return {
     eaves,
     ridges: sk.ridges,
     hips: sk.hips,
     breaks: [],
     planes: sk.planes.map((pts) => ({ pts })),
-    gables: [],
+    gables: sk.gables,
     ridgeHeight: sk.ridgeHeight,
   };
 }

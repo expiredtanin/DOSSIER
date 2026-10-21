@@ -38,3 +38,25 @@ describe("roofGeometry", () => {
     expect(roofGeometry(rect, 0).planes.length).toBe(4);
   });
 });
+
+describe("Satteldach auf L-Grundriss", () => {
+  const r = rectilinearHipRoof(L, 1, 0, "x");
+  it("Flächen decken den Grundriss, Giebel statt Walm-Schrägen", () => {
+    const total = r.planes.reduce((s, p) => s + planArea(p), 0);
+    expect(total).toBeCloseTo(11 * 4 + 8 * 2, 6);
+    expect(r.gables.length).toBe(3);
+  });
+  it("Giebel am Ende x=0 reicht bis zum First (halbe Tiefe 3 m)", () => {
+    const g = r.gables.find((poly) => poly.every((v) => v[0] === 0))!;
+    expect(Math.max(...g.map((v) => v[2]))).toBeCloseTo(3, 6);
+  });
+});
+
+describe("Satteldach, First entlang y", () => {
+  it("gedrehter L-Grundriss liefert dieselbe Flächensumme und Giebel quer zu y", () => {
+    const Lt = L.map((p) => ({ x: p.y, y: p.x }));
+    const r = rectilinearHipRoof(Lt, 1, 0, "y");
+    expect(r.planes.reduce((s, p) => s + planArea(p), 0)).toBeCloseTo(11 * 4 + 8 * 2, 6);
+    expect(r.gables.length).toBe(3);
+  });
+});
