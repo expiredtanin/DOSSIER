@@ -72,13 +72,14 @@ export function isRectilinearNonRect(outline: Vec2[]): boolean {
 }
 
 /** Rechtwinkligen Ring (CCW) um `d` nach aussen versetzen (Traufüberstand). */
-export function offsetRectilinear(ring: Vec2[], d: number): Vec2[] {
-  if (d <= 0) return ring.map((p) => ({ ...p }));
+export function offsetRectilinear(ring: Vec2[], dist: number | ((a: Vec2, b: Vec2) => number)): Vec2[] {
+  if (typeof dist === "number" && dist <= 0) return ring.map((p) => ({ ...p }));
   const n = ring.length;
   // Aussen-Normale je Kante (CCW → rechte Normale).
   const off = ring.map((p, i) => {
     const q = ring[(i + 1) % n];
     const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    const d = typeof dist === "number" ? dist : dist(p, q);
     return { x: ((q.y - p.y) / len) * d, y: (-(q.x - p.x) / len) * d };
   });
   // Ecke i = Schnitt der versetzten Kanten (i−1) und i; bei rechten Winkeln

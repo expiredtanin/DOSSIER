@@ -383,7 +383,18 @@ function rectilinearWalm(roof: Roof, eavesZ: number): RoofGeometry {
     area += p.x * q.y - q.x * p.y;
   }
   if (area < 0) ring = [...ring].reverse();
-  const eaves = offsetRectilinear(ring, Math.max(0, roof.overhang));
+  const oe = Math.max(0, roof.overhang);
+  const og = Math.max(0, roof.overhangGable ?? roof.overhang);
+  // Satteldach: Kanten quer zum First sind Ortgang (eigener Überstand), sonst Traufe.
+  const eaves = offsetRectilinear(
+    ring,
+    roof.shape === "sattel"
+      ? (a, b) => {
+          const alongX = Math.abs(b.x - a.x) > Math.abs(b.y - a.y);
+          return alongX === (roof.ridgeAxis === "x") ? oe : og;
+        }
+      : oe,
+  );
   const tan = Math.tan(Math.max(0, roof.pitchDeg) * DEG);
   const sk = rectilinearHipRoof(eaves, tan, eavesZ, roof.shape === "sattel" ? roof.ridgeAxis : undefined);
   return {

@@ -60,3 +60,15 @@ describe("Satteldach, First entlang y", () => {
     expect(r.gables.length).toBe(3);
   });
 });
+
+describe("Satteldach auf L: Ortgang-Überstand", () => {
+  it("overhangGable verschiebt nur die Giebelkanten", () => {
+    const roof = { id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline: L, shape: "sattel", pitchDeg: 45, overhang: 0.5, overhangGable: 1, ridgeAxis: "x" } as unknown as Roof;
+    const xs = roofGeometry(roof, 0).eaves.map((p) => p.x);
+    const ys = roofGeometry(roof, 0).eaves.map((p) => p.y);
+    expect(Math.min(...xs)).toBeCloseTo(-1, 6);
+    expect(Math.max(...xs)).toBeCloseTo(12, 6);
+    expect(Math.min(...ys)).toBeCloseTo(-0.5, 6);
+    expect(Math.max(...ys)).toBeCloseTo(6.5, 6);
+  });
+});
