@@ -922,8 +922,9 @@ export function generateSectionPlan(
       strokeWidthMm: SECTION_CUT_OUTLINE_MM,
       hatch: mono ? monoHatch : hatch,
       wallId: kind === "wall" ? sourceId : undefined,
-      ceilingId: kind === "slab" ? sourceId : undefined,
+      ceilingId: kind === "slab" && !cp.stairId ? sourceId : undefined,
       roofId: kind === "roof" ? sourceId : undefined,
+      stairId: cp.stairId,
       greyed: cp.categoryCode !== undefined && catDisplay(cp.categoryCode).greyed,
     });
   }

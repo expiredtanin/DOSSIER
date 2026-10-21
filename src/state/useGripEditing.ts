@@ -1124,8 +1124,9 @@ export function useGripEditing(opts: {
     }
     const wallId = target ? target.wallId ?? null : selectedWallId;
     const ceilingId = target ? target.ceilingId ?? null : !wallId ? selectedCeilingId : null;
-    const kind = wallId ? "wall" : ceilingId ? "ceiling" : null;
-    const id = wallId ?? ceilingId;
+    const stairId = target ? target.stairId ?? null : !wallId && !ceilingId ? selectedStairId : null;
+    const kind = wallId ? "wall" : ceilingId ? "ceiling" : stairId ? "stair" : null;
+    const id = wallId ?? ceilingId ?? stairId;
     if (!kind || !id) return;
     if (kind === "wall" && project.walls.find((w) => w.id === id)?.locked) return;
     const prevDu = sheetDuRef.current && sheetDuRef.current.id === id ? sheetDuRef.current.du : 0;
@@ -1136,7 +1137,7 @@ export function useGripEditing(opts: {
       if (moveCoincidentRef.current === null) moveCoincidentRef.current = findMoveCoincident2D(null, id);
       pendingWallMoveRef.current = { wallId: id, total };
     } else {
-      pendingAreaMoveRef.current = { kind: "ceiling", id, total };
+      pendingAreaMoveRef.current = { kind, id, total };
     }
     const preview: DraftShape[] = sheetOwnerOutlines(sh.levelId, kind, id).map((pts) => ({
       kind: "poly",

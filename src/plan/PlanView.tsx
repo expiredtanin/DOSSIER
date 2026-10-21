@@ -612,6 +612,8 @@ export interface BodyTarget {
   openingId?: string;
   /** Nur im Schnitt/in der Ansicht (`sheetBodies`). */
   ceilingId?: string;
+  /** Nur im Schnitt/in der Ansicht (`sheetBodies`). */
+  stairId?: string;
 }
 
 export interface GripHandlers {
@@ -1776,6 +1778,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       }
       if (p && p.kind === "polygon" && p.ceilingId && selectedCeilingIds?.includes(p.ceilingId)) {
         return { ceilingId: p.ceilingId };
+      }
+      if (p && p.kind === "polygon" && p.stairId && selectedStairIds?.includes(p.stairId)) {
+        return { stairId: p.stairId };
       }
     }
     const selWalls = new Set(selectedWallIds ?? []);

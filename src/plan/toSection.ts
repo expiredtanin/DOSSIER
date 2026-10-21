@@ -95,6 +95,12 @@ export interface SectionCutPolygon {
    * Grundriss. Fehlt (unauflösbares Bauteil), bleibt das Band immer sichtbar.
    */
   categoryCode?: string;
+  /**
+   * Quell-Treppe (Tritt-/Podest-Prisma einer Treppe, s. `emitStairs` —
+   * `RSlab.ceilingId` trägt dort die Treppen-ID). Macht die geschnittene Treppe
+   * im Schnitt anwählbar.
+   */
+  stairId?: string;
 }
 
 /** Ein projiziertes Liniensegment in (u, v)-Metern. */
@@ -1213,6 +1219,16 @@ export async function computeSection(
   // Monolithische Bauteile aus mehreren Prismen (Treppen-Tritte): ihre Schnitt-
   // Rechtecke zu EINEM Umriss vereinen — sonst je Tritt ein eigenes,
   // überlappendes Schraffur-Rechteck mit Kontur ("gestapelte Kistchen").
+  // Treppen-Prismen: Herkunft + Kategorie nachtragen (attachCutStyles kennt
+  // nur Decken), damit die geschnittene Treppe anwählbar/filterbar ist.
+  const stairsById = new Map((project.stairs ?? []).map((st) => [st.id, st]));
+  for (const cp of output.cutPolygons) {
+    if (cp.component.kind !== "slab") continue;
+    const st = stairsById.get(model.slabs[cp.component.index]?.ceilingId ?? "");
+    if (!st) continue;
+    cp.stairId = st.id;
+    cp.categoryCode = st.categoryCode;
+  }
   output.cutPolygons = mergeMonolithCuts(output.cutPolygons, (i) => model.slabs[i]?.monolith);
   // Schnitt-Tiefe: Kanten weiter als `level.depth` hinter der Ebene ausblenden.
   if (level.depth !== undefined) filterByDepth(output, project, plane, level.depth);
