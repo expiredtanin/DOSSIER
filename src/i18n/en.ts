@@ -692,6 +692,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.sectionLine.hiddenLines": "Hidden lines",
   "objinfo.sectionLine.planUnderlay": "Plan below",
   "objinfo.sectionLine.planUnderlay.none": "None",
+  "objinfo.sectionLine.levelMarks": "Level marks",
   "objinfo.sectionLine.depthHint": "empty = unlimited",
   "objinfo.sectionLine.delete": "Delete section line",
   "objinfo.extrudedSolid.section": "Extrusion",

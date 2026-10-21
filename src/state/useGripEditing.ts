@@ -15,6 +15,7 @@ import { drawingPreviewShapes } from "../tools/drawingPreview";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
+import { sheetOwnerOutlines } from "../tools/sheetSnapGeometry";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { CommandEngine } from "../commands/engine";
 
@@ -49,6 +50,13 @@ export function useGripEditing(opts: {
    * selbst bleiben voll editierbar (sie leben im Blatt-Raum).
    */
   modelEditable?: boolean;
+  /**
+   * Schnitt-Blatt (nur bei `modelEditable === false`): geschnittene Wände/Decken
+   * lassen sich dort WAAGRECHT ziehen — das Blatt-Delta (u) wird entlang der
+   * Schnitt-u-Achse `uAxis` (Grundriss, Einheit) aufs Bauteil übertragen, die
+   * Vorschau zeigt die verschobenen Schnittflächen im Blatt.
+   */
+  sheet?: { levelId: string; uAxis: Vec2 } | null;
   visibleCodes: Set<string>;
   /** Papier-Massstab (1:N) — die Bemassungs-Griffe hängen daran (Papier-mm). */
   scaleDenominator: number;
@@ -96,6 +104,7 @@ export function useGripEditing(opts: {
     selectedDrawingIds,
     levelId,
     modelEditable = true,
+    sheet = null,
     visibleCodes,
     scaleDenominator,
     snap,
@@ -488,6 +497,8 @@ export function useGripEditing(opts: {
   const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
+  /** Laufendes Blatt-Delta (u, Meter) eines Zugs im Schnitt (s. moveInSheet). */
+  const sheetDuRef = useRef<{ id: string; du: number } | null>(null);
   const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
   const pendingEdgeRef = useRef<{ edge: EdgeGrip; delta: Vec2 } | null>(null);
   // Position des gezogenen Griffs VOR dem Drag (beim ersten Move-Event nach dem
@@ -974,6 +985,7 @@ export function useGripEditing(opts: {
   const commitPendingBody = () => {
     const pwm = pendingWallMoveRef.current;
     pendingWallMoveRef.current = null;
+    sheetDuRef.current = null;
     if (pwm && (pwm.total.x !== 0 || pwm.total.y !== 0)) {
       moveElementByOf(null, pwm.wallId, pwm.total);
       for (const c of moveCoincidentRef.current ?? []) {
@@ -1070,12 +1082,57 @@ export function useGripEditing(opts: {
     pendingAreaGripRef.current = null;
     pendingAreaMoveRef.current = null;
     pendingWallMoveRef.current = null;
+    sheetDuRef.current = null;
     pendingBodyRef.current = null;
     pendingEdgeRef.current = null;
     gripOriginRef.current = null; // Flucht-Bezugspunkt verwerfen
     setGripEdit(null); // (c) Feld-Controller schließen
     edgeDragInfoRef.current = null; // Kanten-Drag-Info verwerfen
     setEdgeEdit(null); // Kanten-Feld-Controller schließen
+  };
+
+  // Ziehen einer geschnittenen Wand/Decke im Schnitt-Blatt (s. Option `sheet`):
+  // nur die waagrechte Komponente zählt (Höhe ist kein Grundriss-Delta). Das
+  // Projekt ändert sich — wie im Grundriss — erst beim Loslassen
+  // (commitPendingBody: pendingWallMoveRef/pendingAreaMoveRef, Grundriss-Delta).
+  const moveInSheet = (
+    sh: { levelId: string; uAxis: Vec2 },
+    delta: Vec2,
+    target?: { wallId?: string; drawingId?: string },
+  ) => {
+    if (target?.drawingId) {
+      // 2D-Element der Ebene selbst: normales Körper-Verschieben im Blatt-Raum.
+      const prev = pendingBodyRef.current;
+      const total = prev && prev.drawingId === target.drawingId
+        ? { x: prev.total.x + delta.x, y: prev.total.y + delta.y }
+        : delta;
+      if (!deferrableDrawing(target.drawingId)) return;
+      pendingBodyRef.current = { drawingId: target.drawingId, total };
+      setDraft({ preview: bodyPreviewShapes(), vertices: [], snap: null });
+      return;
+    }
+    const wallId = target ? target.wallId ?? null : selectedWallId;
+    const ceilingId = !target && !wallId ? selectedCeilingId : null;
+    const kind = wallId ? "wall" : ceilingId ? "ceiling" : null;
+    const id = wallId ?? ceilingId;
+    if (!kind || !id) return;
+    if (kind === "wall" && project.walls.find((w) => w.id === id)?.locked) return;
+    const prevDu = sheetDuRef.current && sheetDuRef.current.id === id ? sheetDuRef.current.du : 0;
+    const du = prevDu + delta.x;
+    sheetDuRef.current = { id, du };
+    const total = scale(sh.uAxis, du);
+    if (kind === "wall") {
+      if (moveCoincidentRef.current === null) moveCoincidentRef.current = findMoveCoincident2D(null, id);
+      pendingWallMoveRef.current = { wallId: id, total };
+    } else {
+      pendingAreaMoveRef.current = { kind: "ceiling", id, total };
+    }
+    const preview: DraftShape[] = sheetOwnerOutlines(sh.levelId, kind, id).map((pts) => ({
+      kind: "poly",
+      pts: pts.map((q) => ({ x: q.x + du, y: q.y })),
+      closed: true,
+    }));
+    setDraft({ preview, vertices: [], snap: null });
   };
 
   const gripHandlers = {
@@ -1172,9 +1229,14 @@ export function useGripEditing(opts: {
         if (Math.abs(delta.x) >= Math.abs(delta.y)) delta = { x: delta.x, y: 0 };
         else delta = { x: 0, y: delta.y };
       }
+      // Schnitt-Blatt: geschnittene Wand/Decke waagrecht entlang der Schnittlinie.
+      if (!modelEditable) {
+        if (sheet) moveInSheet(sheet, delta, target);
+        return;
+      }
       // Decke: ganzen Umriss verschieben (kein Multi-Koinzidenz-Handling nötig).
       // Decke/Treppe/Raum: nur Gesamt-Delta + Vorschau, Projekt erst beim Loslassen.
-      const areaTarget: { kind: "ceiling" | "room" | "stair"; id: string } | null = target || !modelEditable
+      const areaTarget: { kind: "ceiling" | "room" | "stair"; id: string } | null = target
         ? null
         : selectedCeilingId
           ? { kind: "ceiling", id: selectedCeilingId }
@@ -1198,8 +1260,7 @@ export function useGripEditing(opts: {
       // Gegriffenes Element: bei Mehrfachauswahl das unter dem Cursor (target),
       // sonst das einzeln selektierte. Wand UND 2D schließen sich aus.
       const moveDrawingId = target ? target.drawingId ?? null : selectedDrawingId;
-      const moveWallId = modelEditable ? (target ? target.wallId ?? null : selectedWallId) : null;
-      if (!moveDrawingId && !moveWallId) return;
+      const moveWallId = target ? target.wallId ?? null : selectedWallId;
       // 2D-Element: nur Gesamt-Delta merken + Vorschau; Projekt erst beim Loslassen.
       // Wand: Gesamt-Delta + Vorschau; beim Loslassen folgen verbundene Eckpunkte.
       if (moveWallId && !moveDrawingId) {

@@ -11,6 +11,8 @@ import type { Primitive } from "../plan/generatePlan";
 export type SnapSeg = [Vec2, Vec2];
 
 const byLevel = new Map<string, SnapSeg[]>();
+/** Je Ebene: Umriss-Polygone je Bauteil (`wall:<id>` / `ceiling:<id>`) — Vorschau beim Ziehen im Schnitt. */
+const outlinesByLevel = new Map<string, Map<string, Vec2[][]>>();
 
 /** Strecken der Ebene `levelId` setzen (leeres Array/`null` = entfernen). */
 export function setSheetSnapSegments(levelId: string, segs: SnapSeg[] | null): void {
@@ -55,4 +57,35 @@ export function snapSegmentsFromPrimitives(prims: readonly Primitive[]): SnapSeg
     }
   }
   return out;
+}
+
+/** Bauteil-Art, deren Schnittflächen im Blatt gezogen werden können. */
+export type SheetOwnerKind = "wall" | "ceiling";
+
+/**
+ * Schnittflächen der Ebene `levelId` je Quell-Bauteil ablegen (aus den Plan-
+ * Primitiven: `wallId`/`ceilingId` an Polygonen). `null` = entfernen.
+ */
+export function setSheetOwnerOutlines(levelId: string, prims: readonly Primitive[] | null): void {
+  if (!prims) {
+    outlinesByLevel.delete(levelId);
+    return;
+  }
+  const map = new Map<string, Vec2[][]>();
+  const add = (key: string, pts: Vec2[]) => {
+    const list = map.get(key);
+    if (list) list.push(pts);
+    else map.set(key, [pts]);
+  };
+  for (const p of prims) {
+    if (p.kind !== "polygon") continue;
+    if (p.wallId) add(`wall:${p.wallId}`, p.pts);
+    else if (p.ceilingId) add(`ceiling:${p.ceilingId}`, p.pts);
+  }
+  outlinesByLevel.set(levelId, map);
+}
+
+/** Schnittflächen eines Bauteils im Blatt der Ebene `levelId` (leer, wenn nicht geschnitten). */
+export function sheetOwnerOutlines(levelId: string, kind: SheetOwnerKind, id: string): readonly Vec2[][] {
+  return outlinesByLevel.get(levelId)?.get(`${kind}:${id}`) ?? [];
 }

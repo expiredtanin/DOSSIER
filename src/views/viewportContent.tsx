@@ -29,7 +29,8 @@ import type { SectionOutput } from "../plan/toSection";
 import { generateElevationPlan } from "../plan/toElevation";
 import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../plan/planUnderlay";
 import { sectionOpeningPrimitives } from "../plan/sectionOpenings";
-import { setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
+import { levelMarkerPrimitives, levelMarksEnabled } from "../plan/levelMarkers";
+import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
 import { pushNativeScene, pushNativeWalls } from "../plan/nativeSync";
 import { selectionHighlightLines } from "../plan/toWalls3d";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
@@ -1196,9 +1197,15 @@ function SectionPlanView({
       ),
     [project, level.id, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator],
   );
+  // Automatische Höhenkoten links neben der Zeichnung (abschaltbar je Ebene).
+  const marks = useMemo(
+    () =>
+      rawPlan && levelMarksEnabled(level) ? levelMarkerPrimitives(project, rawPlan.bounds) : [],
+    [rawPlan, level, project],
+  );
   const withOverlay = useMemo(() => {
     if (!rawPlan) return rawPlan;
-    const extra = sheetDrawings.primitives;
+    const extra = [...marks, ...sheetDrawings.primitives];
     if (overlayPrimitives.length === 0 && extra.length === 0) return rawPlan;
     const b = { ...rawPlan.bounds };
     const grow = (x: number, y: number) => {
@@ -1211,14 +1218,15 @@ function SectionPlanView({
       if (pr.kind === "polygon") for (const p of pr.pts) grow(p.x, p.y);
       else if (pr.kind === "line") { grow(pr.a.x, pr.a.y); grow(pr.b.x, pr.b.y); }
     }
-    if (extra.length > 0) {
+    if (sheetDrawings.primitives.length > 0) {
       const eb = sheetDrawings.bounds;
       grow(eb.minX, eb.minY);
       grow(eb.maxX, eb.maxY);
     }
+    for (const pr of marks) if (pr.kind === "line") grow(pr.a.x, pr.a.y);
     // Unterlage zuunterst, Blatt-Zeichnungen obenauf.
     return { ...rawPlan, primitives: [...overlayPrimitives, ...rawPlan.primitives, ...extra], bounds: b };
-  }, [rawPlan, overlayPrimitives, sheetDrawings]);
+  }, [rawPlan, overlayPrimitives, sheetDrawings, marks]);
   // Fangkanten der abgeleiteten Geometrie (Schnitt-/Ansichtskanten + Unterlage)
   // für `computeSnap` bereitstellen — die stehen nicht im Projekt. Die eigenen
   // 2D-Elemente fängt computeSnap ohnehin über `drawings2d`.
@@ -1228,7 +1236,11 @@ function SectionPlanView({
       level.id,
       snapSegmentsFromPrimitives([...overlayPrimitives, ...rawPlan.primitives]),
     );
-    return () => setSheetSnapSegments(level.id, null);
+    setSheetOwnerOutlines(level.id, rawPlan.primitives);
+    return () => {
+      setSheetSnapSegments(level.id, null);
+      setSheetOwnerOutlines(level.id, null);
+    };
   }, [rawPlan, overlayPrimitives, level.id]);
   // Gruppen-Isolation ("Gruppe betreten") gilt auch für Schnitt-/Ansichts-
   // Pläne, s. state/groupActions.ts::applyGroupDimming.

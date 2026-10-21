@@ -157,6 +157,51 @@ const XLINE_DASH: number[] = [0.3, 0.1, 0.03, 0.1]; // Strich-Punkt (CAD-Mittell
 
 
 /**
+ * Höhenkote (SIA 400 B.5.4/Figur 18) als Primitive: OK = Spitze nach unten,
+ * UK = Spitze nach oben; fertig = Kontur (hohl), roh = voll gefüllt. `at` ist
+ * die Spitze. Geteilt vom 2D-Element `kote` und den automatischen Koten im
+ * Schnitt/in der Ansicht (`plan/levelMarkers.ts`).
+ */
+export function pushKote(
+  out: Primitive[],
+  at: Vec2,
+  value: number,
+  kind: "okFertig" | "ukFertig" | "okRoh" | "ukRoh",
+  color: string,
+  weightMm: number,
+  greyed: boolean,
+  drawingId?: string,
+): void {
+  const up = kind === "okFertig" || kind === "okRoh" ? 1 : -1;
+  const filled = kind === "okRoh" || kind === "ukRoh";
+  const pts: Vec2[] = [
+    at,
+    { x: at.x - KOTE_TRI_HALF_W_M, y: at.y + up * KOTE_TRI_SIZE_M },
+    { x: at.x + KOTE_TRI_HALF_W_M, y: at.y + up * KOTE_TRI_SIZE_M },
+  ];
+  out.push({
+    kind: "polygon",
+    pts,
+    fill: filled ? color : "none",
+    stroke: color,
+    strokeWidthMm: weightMm,
+    hatch: NO_HATCH,
+    greyed,
+    drawingId,
+  });
+  out.push({
+    kind: "drawingText",
+    at: { x: at.x + KOTE_TRI_HALF_W_M + KOTE_TEXT_GAP_M, y: at.y + up * KOTE_TRI_SIZE_M * 0.5 },
+    text: formatKoteLabel(value),
+    heightM: KOTE_TEXT_HEIGHT_M,
+    angle: 0,
+    color,
+    greyed,
+    drawingId,
+  });
+}
+
+/**
  * Erzeugt die Plan-Primitive EINES 2D-Elements. Hülle um
  * {@link addDrawing2DInner}: sie stempelt am Ende die Objekt-Transparenz
  * (`Drawing2D.opacity`) auf ALLE hier entstandenen Primitive — an einer
@@ -691,35 +736,7 @@ function addDrawing2DInner(
       break;
     }
     case "kote": {
-      // SIA 400 B.5.4/Figur 18: OK = Spitze nach unten, UK = Spitze nach oben;
-      // fertig = Kontur (hohl), roh = voll gefüllt. `at` ist die Spitze.
-      const up = g.kind === "okFertig" || g.kind === "okRoh" ? 1 : -1;
-      const filled = g.kind === "okRoh" || g.kind === "ukRoh";
-      const pts: Vec2[] = [
-        g.at,
-        { x: g.at.x - KOTE_TRI_HALF_W_M, y: g.at.y + up * KOTE_TRI_SIZE_M },
-        { x: g.at.x + KOTE_TRI_HALF_W_M, y: g.at.y + up * KOTE_TRI_SIZE_M },
-      ];
-      out.push({
-        kind: "polygon",
-        pts,
-        fill: filled ? color : "none",
-        stroke: color,
-        strokeWidthMm: weightMm,
-        hatch: NO_HATCH,
-        greyed,
-        drawingId: d.id,
-      });
-      out.push({
-        kind: "drawingText",
-        at: { x: g.at.x + KOTE_TRI_HALF_W_M + KOTE_TEXT_GAP_M, y: g.at.y + up * KOTE_TRI_SIZE_M * 0.5 },
-        text: formatKoteLabel(g.value),
-        heightM: KOTE_TEXT_HEIGHT_M,
-        angle: 0,
-        color,
-        greyed,
-        drawingId: d.id,
-      });
+      pushKote(out, g.at, g.value, g.kind, color, weightMm, greyed, d.id);
       break;
     }
     case "detailref": {

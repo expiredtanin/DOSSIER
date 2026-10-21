@@ -36,7 +36,7 @@ import { activePenSet, resolvePenColor, resolvePenWeight } from "./model/penSets
 import { PenColorField } from "./ui/PenColorField";
 import { generatePlan } from "./plan/generatePlan";
 import type { CategoryDisplayResolver } from "./plan/generatePlan";
-import { sectionPlaneFromLevel } from "./plan/toSection";
+import { sectionPlaneFromLevel, sectionUAxisModel } from "./plan/toSection";
 import { roofBaseElevation, roofGeometry } from "./geometry/roof";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
 import { ImportDialog } from "./ui/ImportDialog";
@@ -1689,6 +1689,18 @@ export default function App() {
 
   // 2D-Griff-Editieren (Eckpunkt-/Kanten-Griffe + Feld-Controller) der aktuellen
   // Auswahl — siehe state/useGripEditing.ts.
+  // Schnitt-Blatt: geschnittene Wände/Decken lassen sich dort waagrecht entlang
+  // der Schnittlinie ziehen (s. useGripEditing `sheet`). Nur echte Schnitte —
+  // die Ansicht trägt keine Bauteil-IDs an ihren Flächen.
+  const sectionSheet = useMemo(() => {
+    if (activeLevel.kind !== "section") return null;
+    const plane = sectionPlaneFromLevel(activeLevel);
+    if (!plane) return null;
+    const u = sectionUAxisModel(plane);
+    const len = Math.hypot(u.x, u.y) || 1;
+    return { levelId: activeLevel.id, uAxis: { x: u.x / len, y: u.y / len } };
+  }, [activeLevel]);
+
   const {
     grips,
     gripHandleLines,
@@ -1721,6 +1733,7 @@ export default function App() {
     selectedDrawingIds,
     levelId: activeLevel.id,
     modelEditable: activeLevel.kind !== "section" && activeLevel.kind !== "elevation",
+    sheet: sectionSheet,
     visibleCodes,
     scaleDenominator,
     snap,

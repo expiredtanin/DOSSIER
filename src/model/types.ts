@@ -959,6 +959,12 @@ export interface DrawingLevel {
    * Fehlt ⇒ keine Unterlage.
    */
   planUnderlayId?: string;
+  /**
+   * Automatische Höhenkoten (nur Schnitt/Ansicht): je Geschoss OK fertig Boden
+   * + oberste Kante, links neben der Zeichnung (`plan/levelMarkers.ts`).
+   * Fehlt ⇒ an; `false` ⇒ aus.
+   */
+  levelMarks?: boolean;
 }
 
 /**

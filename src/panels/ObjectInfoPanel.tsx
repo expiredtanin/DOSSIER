@@ -539,6 +539,17 @@ export function SectionLineSection({
         />
       </div>
 
+      {/* Automatische Höhenkoten (Geschosse + oberste Kante). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.sectionLine.levelMarks")}</span>
+        <input
+          type="checkbox"
+          checked={level.levelMarks !== false}
+          onChange={(e) => host.onSetSectionLinePatch({ levelMarks: e.target.checked ? undefined : false })}
+          title={t("objinfo.sectionLine.levelMarks")}
+        />
+      </div>
+
       {/* Grundriss-Unterlage: ein Geschoss ausgerichtet unter dem Schnitt/der Ansicht. */}
       {line && (
         <div className="objinfo-field">
