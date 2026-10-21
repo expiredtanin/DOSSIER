@@ -575,29 +575,33 @@ function frameMeshesForOpening(
   // Flügel-Mittelpfosten + Kämpfer-Zeilen (Sprossen) nur bei FEINEM Detailgrad —
   // bei „mittel" bleibt es beim reinen Rahmen (+ Oberlicht-Kämpfer oben).
   if (fine) {
-    // Flügel-Mittelpfosten (vertikal, wingCount−1) im Sash-Bereich.
-    if (params.wingCount > 1 && sashTo - sashFrom > EPS) {
-      const cell = (sashTo - sashFrom) / params.wingCount;
-      for (let i = 1; i < params.wingCount; i++) {
+    // Senkrechte Teiler (Flügel-Mittelpfosten + Sprossen-Spalten) laufen durch;
+    // die waagrechten Kämpfer-Zeilen werden dazwischen unterbrochen, damit sich
+    // die Profile an den Kreuzungen nicht überlappen. Gleiche Lage nur einmal.
+    const posts: number[] = [];
+    const addPosts = (count: number): void => {
+      if (count <= 1 || sashTo - sashFrom <= EPS) return;
+      const cell = (sashTo - sashFrom) / count;
+      for (let i = 1; i < count; i++) {
         const center = sashFrom + i * cell;
-        push(center - fw / 2, center + fw / 2, sashBottom, sashTop);
+        if (!posts.some((c) => Math.abs(c - center) < 1e-4)) posts.push(center);
       }
-    }
+    };
+    addPosts(params.wingCount);
+    addPosts(params.mullionCols);
+    posts.sort((x, y) => x - y);
+    for (const center of posts) push(center - fw / 2, center + fw / 2, sashBottom, sashTop);
     // Kämpfer-Zeilen (horizontal, mullionRows−1) im Sash-Bereich.
     if (params.mullionRows > 1 && sashTop - sashBottom > EPS) {
       const cell = (sashTop - sashBottom) / params.mullionRows;
       for (let i = 1; i < params.mullionRows; i++) {
         const center = sashBottom + i * cell;
-        push(sashFrom, sashTo, center - fw / 2, center + fw / 2);
-      }
-    }
-
-    // Sprossen-Spalten (vertikal, mullionCols−1) im Sash-Bereich.
-    if (params.mullionCols > 1 && sashTo - sashFrom > EPS) {
-      const cell = (sashTo - sashFrom) / params.mullionCols;
-      for (let i = 1; i < params.mullionCols; i++) {
-        const center = sashFrom + i * cell;
-        push(center - fw / 2, center + fw / 2, sashBottom, sashTop);
+        let from = sashFrom;
+        for (const post of [...posts, sashTo + fw / 2]) {
+          const to = Math.min(sashTo, post - fw / 2);
+          if (to - from > EPS) push(from, to, center - fw / 2, center + fw / 2);
+          from = post + fw / 2;
+        }
       }
     }
   }

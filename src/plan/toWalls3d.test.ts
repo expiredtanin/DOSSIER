@@ -687,9 +687,10 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     const withMullionsFrames = projectToModel3d(withMullions).meshes.filter(isFrame);
     // Mit den Mittelpfosten (wingCount-1) und Kämpfern (mullionRows-1):
     //   1 Flügelpfosten (wingCount−1)
-    //   1 Kämpfer (mullionRows−1)
-    // → zusammen 2 Riegel mehr als Basis (1×1 =1).
-    expect(withMullionsFrames.length).toBe(baselineFrames.length + 2);
+    //   1 Kämpfer (mullionRows−1), am Pfosten in zwei Hälften geteilt (keine
+    //   Überlappung an der Kreuzung)
+    // → zusammen 3 Riegel mehr als Basis (1×1 =1).
+    expect(withMullionsFrames.length).toBe(baselineFrames.length + 3);
   });
 
   it("wingCount=2 + mullionCols=2 -> je ein zusätzlicher Sprossen-Spalte", () => {
