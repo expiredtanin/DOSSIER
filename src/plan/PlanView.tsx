@@ -1415,7 +1415,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // Trefferfläche liegt um die Dreiecks-Mitte (etwas außerhalb der Linie).
   const edgeGripAt = (clientX: number, clientY: number): EdgeGrip | null => {
     if (!edgeGrips) return null;
-    const s = meetScale(view, svgRef.current) ?? 1;
+    const s = meetScale(view, canvasRef.current ?? svgRef.current) ?? 1;
     const midOutVb = (EDGE_GRIP_H_PX * 0.45) / s; // Mitte des Dreiecks
     for (const e of edgeGrips) {
       const m = toScreen(e.mid);
@@ -1428,7 +1428,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   };
   // Aktuelle Bildschirm-Pixel pro Meter (für die zoom-unabhängige Snap-Toleranz).
   const currentPxPerMeter = (): number =>
-    (meetScale(view, svgRef.current) ?? 1) * PX_PER_M;
+    (meetScale(view, canvasRef.current ?? svgRef.current) ?? 1) * PX_PER_M;
   // Modifikatoren eines Pointer-Events (Shift=Ortho, Ctrl/Cmd=Snap aus).
   const toolMods = (e: React.PointerEvent | React.MouseEvent) => ({
     shift: e.shiftKey,
@@ -2070,6 +2070,21 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     panPending.current = v;
     if (panRaf.current === null) panRaf.current = requestAnimationFrame(flushPan);
   };
+  useEffect(() => {
+    if (panPending.current === null) {
+      meetStore.set(null);
+      viewStore.set(null);
+    }
+  }, [view, meetStore, viewStore]);
+  /**
+   * Griff-Grösse in Bildschirm-px: bewusst nur SCHWACH zoomabhängig (Exponent 0.2,
+   * begrenzt) — kein hartes Konstant-Bleiben, damit man an den Griffen noch merkt,
+   * ob man nah oder weit weg ist, aber ohne dass sie beim Zoomen mitwachsen.
+   */
+  const gripK = (meet: number): number => {
+    const ref = meetScale(defaultView, canvasRef.current ?? svgRef.current) ?? meet;
+    return Math.min(1.4, Math.max(0.7, Math.pow(meet / ref, 0.2)));
+  };
   /** Anhängigen imperativen Pan in React-State übernehmen (+ Transform lösen). */
   const commitPan = () => {
     if (panRaf.current !== null) {
@@ -2080,8 +2095,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       // SVG-Transform lösen; setView setzt das echte viewBox (ein einziger Re-Raster).
       if (svgRef.current) svgRef.current.style.transform = "";
       setView(panPending.current);
-      meetStore.set(null);
-      viewStore.set(null);
+      // Live-Werte NICHT sofort löschen: bis der neue `view` gerendert ist, würden
+      // Griffe/Lineal sonst kurz mit dem ALTEN Ausschnitt gezeichnet (Flackern);
+      // der Effekt unten räumt sie nach dem Render ab.
       panPending.current = null;
     }
     panStartView.current = null;
@@ -3482,12 +3498,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       )}
       {/* Gruppen-Auswahl: nur eine Bounding-Box mit vier Eckpunkten (kein
           Umriss jedes einzelnen Mitglieds) — s. `groupBBox`. */}
-      {groupBBox && (<LiveMeet store={meetStore} base={meetScale(view, svgRef.current) ?? 1}>{(meet) => {
+      {groupBBox && (<LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>{(meet) => {
         const c1 = toScreen({ x: groupBBox.minX, y: groupBBox.minY });
         const c2 = toScreen({ x: groupBBox.maxX, y: groupBBox.minY });
         const c3 = toScreen({ x: groupBBox.maxX, y: groupBBox.maxY });
         const c4 = toScreen({ x: groupBBox.minX, y: groupBBox.maxY });
-        const size = 4 / meet;
+        const size = (4 * gripK(meet)) / meet;
         const corners = [c1, c2, c3, c4];
         return (
           <>
@@ -3590,11 +3606,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           Radius bewusst kleiner als der Treffer-Radius (GRIP_HIT_PX) — die
           Klickfläche bleibt grosszügig, nur die sichtbare Form schrumpft. */}
       {gripsActive && (
-        <LiveMeet store={meetStore} base={meetScale(view, svgRef.current) ?? 1}>
+        <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(meet) =>
             grips!.map((g, i) => {
               const s = toScreen(g);
-              const size = 4.5 / meet;
+              const size = (4.5 * gripK(meet)) / meet;
               return (
                 <circle
                   key={`grip-${i}`}
@@ -3613,7 +3629,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           Verschiebt NUR den Stempel (nicht die Kontur); Doppelklick öffnet den
           Editor. Bildschirmkonstante Größe. */}
       {roomStamp && (
-        <LiveMeet store={meetStore} base={meetScale(view, svgRef.current) ?? 1}>{(meet) => {
+        <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>{(meet) => {
           const s = toScreen(roomStamp.anchor);
           const size = 4 / meet;
           const pts = [
@@ -3636,14 +3652,14 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           der Spitze nach außen. Y wird gespiegelt (toScreen spiegelt Y), damit
           das Dreieck wirklich nach außen zeigt. Größe bildschirmkonstant. */}
       {edgeGripsActive && (
-        <LiveMeet store={meetStore} base={meetScale(view, svgRef.current) ?? 1}>
+        <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(s) =>
         edgeGrips!.map((eg, i) => {
           const m = toScreen(eg.mid);
           // Normale in den Bildschirmraum (Y spiegeln); auf Bildschirm-px-Größen.
           const sn = screenNormal(eg.normal);
-          const hVb = EDGE_GRIP_H_PX / s; // Dreieckshöhe (nach außen)
-          const halfVb = EDGE_GRIP_HALF_PX / s; // halbe Basisbreite
+          const hVb = (EDGE_GRIP_H_PX * gripK(s)) / s; // Dreieckshöhe (nach außen)
+          const halfVb = (EDGE_GRIP_HALF_PX * gripK(s)) / s; // halbe Basisbreite
           // Tangente = 90°-Drehung der (Bildschirm-)Normale, für die Basisbreite.
           const tx = -sn.y;
           const ty = sn.x;
@@ -3670,7 +3686,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           Snap-Marker + HUD. Immer obenauf, pointerEvents none. Glyph-/Schrift-
           Größen werden über die aktuelle meet-Skala bildschirmkonstant gehalten. */}
       {toolHandlers?.draft && (
-        <LiveMeet store={meetStore} base={meetScale(view, svgRef.current) ?? 1}>
+        <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(meet) => (
             <DraftOverlay
               draft={toolHandlers.draft!}
@@ -3685,7 +3701,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
       {/* Hover-Teilpunkte (s. hoverDivideSeg oben): kleine Punkte in Akzentfarbe
           an den `hoverDivideCount`-gleichen Teilpunkten des gehoverten Segments
           (2 = nur Mitte). Nur im Ruhezustand (kein Werkzeug aktiv). */}
-      {hoverDivideSeg && !toolActive && (<LiveMeet store={meetStore} base={meetScale(view, svgRef.current) ?? 1}>{(meet) => {
+      {hoverDivideSeg && !toolActive && (<LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>{(meet) => {
         const vbPerPx = 1 / meet;
         const r = 3.5 * vbPerPx;
         const n = Math.max(2, Math.round(hoverDivideCount));
