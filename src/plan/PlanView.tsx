@@ -3839,10 +3839,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               onMouseLeave={() => setHoverPick(null)}
               onFocus={() => setHoverPick(c)}
               onBlur={() => setHoverPick(null)}
-              onClick={() => {
+              onClick={(ev) => {
                 const cur = cycleRef.current;
                 if (cur) cur.idx = i;
-                applyCandidate(c, cur?.model ?? { x: 0, y: 0 }, false);
+                // Shift: Eintrag zur bestehenden Auswahl dazu-/abwählen (Liste bleibt offen).
+                applyCandidate(c, cur?.model ?? { x: 0, y: 0 }, ev.shiftKey);
                 setPickList({ ...pickList, idx: i });
               }}
             >
