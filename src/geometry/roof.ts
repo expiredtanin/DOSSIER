@@ -338,7 +338,7 @@ const swapLine = (l: [Vec2, Vec2]): [Vec2, Vec2] => [swap2(l[0]), swap2(l[1])];
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
   // Walmdach über einem rechtwinkligen, nicht-rechteckigen Grundriss (L/T/U …):
   // echte Flächen mit Graten und Kehlen statt Bounding-Box (s. roofSkeleton.ts).
-  if ((roof.shape === "walm" || roof.shape === "sattel") && isRectilinearNonRect(roof.outline)) {
+  if ((roof.shape === "walm" || roof.shape === "sattel" || (roof.shape === "mansarde" && roof.mansardType !== "zelt")) && isRectilinearNonRect(roof.outline)) {
     return rectilinearWalm(roof, eavesZ);
   }
   if (roof.shape === "pult" && isRectilinearNonRect(roof.outline)) {
@@ -399,12 +399,22 @@ function rectilinearWalm(roof: Roof, eavesZ: number): RoofGeometry {
       : oe,
   );
   const tan = Math.tan(Math.max(0, roof.pitchDeg) * DEG);
-  const sk = rectilinearHipRoof(eaves, tan, eavesZ, roof.shape === "sattel" ? roof.ridgeAxis : undefined);
+  const gabled = roof.shape === "sattel" || (roof.shape === "mansarde" && (roof.mansardType ?? "giebel") === "giebel");
+  const ridgeAxis = gabled ? roof.ridgeAxis : undefined;
+  let knee: { d: number; tanUp: number } | undefined;
+  if (roof.shape === "mansarde") {
+    // Knick bei `mansardKneeRatio` der maximalen Dachtiefe (Abstand First–Traufe).
+    const depth = rectilinearHipRoof(eaves, 1, 0, ridgeAxis).ridgeHeight;
+    const ratio = Math.min(0.49, Math.max(0.05, roof.mansardKneeRatio ?? 0.4));
+    const aUp = Math.max(0, roof.pitchUpperDeg ?? roof.pitchDeg / 2) * DEG;
+    knee = { d: depth * ratio, tanUp: Math.tan(aUp) };
+  }
+  const sk = rectilinearHipRoof(eaves, tan, eavesZ, ridgeAxis, knee);
   return {
     eaves,
     ridges: sk.ridges,
     hips: sk.hips,
-    breaks: [],
+    breaks: sk.breaks,
     planes: sk.planes.map((pts) => ({ pts })),
     gables: sk.gables,
     ridgeHeight: sk.ridgeHeight,

@@ -122,6 +122,8 @@ export interface SkeletonRoof {
   planes: Vec3[][];
   ridges: [Vec2, Vec2][];
   hips: [Vec2, Vec2][];
+  /** Knicklinien der Mansarde. */
+  breaks: [Vec2, Vec2][];
   /** Senkrechte Giebelflächen (nur Satteldach, s. `ridgeAxis`). */
   gables: Vec3[][];
   ridgeHeight: number;
@@ -137,6 +139,8 @@ export function rectilinearHipRoof(
   e: number,
   /** Gesetzt → Satteldach: Kanten quer zu dieser Firstrichtung sind senkrechte Giebel (Ortgang). */
   ridgeAxis?: "x" | "y",
+  /** Mansarde: ab Traufabstand `d` flacher (Steigung `tanUp`); Knicklinien landen in `breaks`. */
+  knee?: { d: number; tanUp: number },
 ): SkeletonRoof {
   let eaves = cleanRing(eavesIn);
   if (signedArea(eaves) < 0) eaves = [...eaves].reverse();
@@ -195,6 +199,7 @@ export function rectilinearHipRoof(
   const lineKeys = new Set<string>();
   const ridges: [Vec2, Vec2][] = [];
   const hips: [Vec2, Vec2][] = [];
+  const breaks: [Vec2, Vec2][] = [];
   let ridgeHeight = 0;
   // Liegt die Strecke p–q auf einer Traufkante (Gerade UND innerhalb der Strecke)?
   const onSeg = (k: number, p: Vec2) => {
@@ -220,9 +225,27 @@ export function rectilinearHipRoof(
     for (const poly of face) {
       const outer = cleanRing(poly[0].slice(0, -1).map(([x, y]) => ({ x: snap(x), y: snap(y) })));
       if (outer.length < 3 || Math.abs(signedArea(outer)) < 1e-6) continue;
-      const z = (p: Vec2) => e + tan * Math.max(0, dist(k, p));
+      const z = (p: Vec2) => {
+        const d = Math.max(0, dist(k, p));
+        return knee ? e + tan * Math.min(d, knee.d) + knee.tanUp * Math.max(0, d - knee.d) : e + tan * d;
+      };
       for (const piece of convexPieces(outer)) {
-        planes.push(piece.map((p) => [p.x, p.y, z(p)] as Vec3));
+        // Mansarde: Teilfläche an der Knicklinie (Traufabstand = knee.d) teilen.
+        const parts = knee
+          ? [clipHalf(piece, (p) => knee.d - dist(k, p)), clipHalf(piece, (p) => dist(k, p) - knee.d)]
+          : [piece];
+        for (const part of parts) {
+          if (part.length < 3 || Math.abs(signedArea(part)) < 1e-9) continue;
+          planes.push(part.map((p) => [p.x, p.y, z(p)] as Vec3));
+        }
+        if (knee) {
+          const low = clipHalf(piece, (p) => knee.d - dist(k, p));
+          for (let i = 0; i < low.length; i++) {
+            const p = low[i];
+            const q = low[(i + 1) % low.length];
+            if (Math.abs(dist(k, p) - knee.d) < 1e-6 && Math.abs(dist(k, q) - knee.d) < 1e-6) breaks.push([p, q]);
+          }
+        }
       }
       // Grat-/Kehl-/Firstlinien: Flächenränder, die nicht auf der Traufe liegen.
       for (let i = 0; i < outer.length; i++) {
@@ -265,7 +288,7 @@ export function rectilinearHipRoof(
     ];
     gables.push(poly);
   });
-  return { planes, ridges, hips, gables, ridgeHeight };
+  return { planes, ridges, hips, breaks, gables, ridgeHeight };
 }
 
 // ── Konvexe Zerlegung ───────────────────────────────────────────────────────

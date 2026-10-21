@@ -83,3 +83,13 @@ describe("Pultdach auf L-Grundriss", () => {
     expect(g.gables.length).toBe(3);
   });
 });
+
+describe("Mansarde auf L-Grundriss", () => {
+  const roof = { id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline: L, shape: "mansarde", mansardType: "giebel", pitchDeg: 45, pitchUpperDeg: 0, mansardKneeRatio: 0.4, overhang: 0, ridgeAxis: "x" } as unknown as Roof;
+  it("Flächen decken den Grundriss, oben flach auf Knickhöhe", () => {
+    const g = roofGeometry(roof, 0);
+    expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(11 * 4 + 8 * 2, 6);
+    expect(g.ridgeHeight).toBeCloseTo(1.2, 6); // Tiefe 3 · 0,4 · tan45
+    expect(g.breaks.length).toBeGreaterThan(0);
+  });
+});
