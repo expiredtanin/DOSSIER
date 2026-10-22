@@ -2093,6 +2093,7 @@ export default function App() {
   const onEdit3dBody = (
     target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     delta: Vec2,
+    locked = false,
   ) => {
     const key = grip3dTargetKey(target);
     if (!bodyDragRef.current || bodyDragRef.current.key !== key) {
@@ -2110,7 +2111,9 @@ export default function App() {
     const desiredPoint =
       ge && ge.kind === "move" && grip3dTargetKey(ge.target) === key && (ge.locks.length != null || ge.locks.angle != null)
         ? grip3dEditPoint(ge.anchor, ge.locks, rawPoint)
-        : (snapFor3dVertex(
+        : locked
+          ? rawPoint // Shift/Achs-Sperre hat Vorrang vor dem Einrasten
+          : (snapFor3dVertex(
             rawPoint,
             new Set(target.wallId ? [target.wallId] : []),
             new Set(target.drawingId ? [target.drawingId] : []),

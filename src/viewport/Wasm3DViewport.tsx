@@ -433,6 +433,8 @@ export function Wasm3DViewport({
   onEditBody?: (
     target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     delta: Vec2,
+    /** Shift-/Pfeiltasten-Achsen-Sperre aktiv → App rastet NICHT zusätzlich auf Punkte ein. */
+    locked?: boolean,
   ) => void;
   /** Kanten-Griff einer Decke gezogen: Kante (aIndex→bIndex) um `delta` (XY) verschieben. */
   onEditEdge?: (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => void;
@@ -1056,7 +1058,7 @@ export function Wasm3DViewport({
         y: constrainedModel.y - drag.lastModel.y,
       };
       if (delta.x !== 0 || delta.y !== 0) {
-        onEditBodyRef.current?.(drag.target, delta);
+        onEditBodyRef.current?.(drag.target, delta, !!moveAxisLock || shiftKey);
         // Koinzidente Sibling-Ecken (ANDERER gewählter Elemente) um dasselbe
         // Delta mitführen — ihre LIVE-Position wird inkrementell
         // fortgeschrieben und absolut neu gesetzt (kein Snap).
