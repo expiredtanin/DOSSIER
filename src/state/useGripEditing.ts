@@ -67,6 +67,8 @@ export function useGripEditing(opts: {
   engineRef: RefObject<CommandEngine | null>;
   commandLineRef: RefObject<CommandLineHandle | null>;
   updateOpening: (id: string, patch: Record<string, unknown>) => void;
+  /** Wand ändern (Höhen-Griff im Schnitt); `coalesceKey` fasst einen Zug zu EINEM Undo-Schritt. */
+  updateWall: (id: string, patch: Partial<import("../model/types").Wall>, coalesceKey?: string) => void;
   moveStairBy: (id: string, delta: Vec2) => void;
   moveRoomGrip: (id: string, index: number, pt: Vec2) => void;
   moveCeilingGrip: (id: string, index: number, pt: Vec2) => void;
@@ -114,6 +116,7 @@ export function useGripEditing(opts: {
     engineRef,
     commandLineRef,
     updateOpening,
+    updateWall,
     moveStairBy,
     moveRoomGrip,
     moveCeilingGrip,
@@ -181,11 +184,67 @@ export function useGripEditing(opts: {
     return effectiveDrawingIds;
   })();
 
+  // ── Höhen-Griffe im Schnitt/in der Ansicht ───────────────────────────────
+  // Gewählte Wand: Griff an der Oberkante (ändert `height`). Gewähltes Fenster: Griffe
+  // an Ober- und Unterkante (Höhe bzw. Brüstung, Oberkante bleibt stehen); Tür nur oben.
+  // Alles in Blatt-Koordinaten (u, Höhe über ±0.00). Projekt erst beim Loslassen.
+  type SheetHeightGrip = {
+    kind: "wallTop" | "openingTop" | "openingBottom";
+    id: string;
+    pt: Vec2;
+    u0: number;
+    u1: number;
+    base: number;
+    top: number;
+    bottom: number;
+  };
+  const sheetHeightGrips: SheetHeightGrip[] = (() => {
+    if (modelEditable || !sheet) return [];
+    const bbox = (kind: "wall" | "opening", id: string) => {
+      const polys = sheetOwnerOutlines(sheet.levelId, kind, id);
+      if (polys.length === 0) return null;
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (const poly of polys) for (const q of poly) {
+        u0 = Math.min(u0, q.x); u1 = Math.max(u1, q.x);
+        v0 = Math.min(v0, q.y); v1 = Math.max(v1, q.y);
+      }
+      return { u0, u1, v0, v1 };
+    };
+    const floorBase = (floorId: string) => project.drawingLevels.find((l) => l.id === floorId)?.baseElevation ?? 0;
+    if (selectedOpeningId) {
+      const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
+      const w = op && project.walls.find((x) => x.id === op.hostWallId);
+      const bb = op && bbox("opening", op.id);
+      if (!op || !w || !bb || op.locked) return [];
+      const base = floorBase(w.floorId);
+      const mid = (bb.u0 + bb.u1) / 2;
+      const out: SheetHeightGrip[] = [
+        { kind: "openingTop", id: op.id, pt: { x: mid, y: bb.v1 }, u0: bb.u0, u1: bb.u1, base, top: bb.v1, bottom: bb.v0 },
+      ];
+      if (op.kind === "window") {
+        out.push({ kind: "openingBottom", id: op.id, pt: { x: mid, y: bb.v0 }, u0: bb.u0, u1: bb.u1, base, top: bb.v1, bottom: bb.v0 });
+      }
+      return out;
+    }
+    if (selectedWallId && selectedWallIds.length <= 1) {
+      const w = project.walls.find((x) => x.id === selectedWallId);
+      const bb = w && bbox("wall", w.id);
+      if (!w || !bb || w.locked) return [];
+      return [
+        { kind: "wallTop", id: w.id, pt: { x: (bb.u0 + bb.u1) / 2, y: bb.v1 }, u0: bb.u0, u1: bb.u1, base: floorBase(w.floorId), top: bb.v1, bottom: bb.v0 },
+      ];
+    }
+    return [];
+  })();
+
   const grips: Vec2[] = (() => {
     // Öffnung (Fenster/Tür): EIN Mittelpunkt-Griff auf der Wandachse. Ziehen
     // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
     // `position`). Nur bei genau einer selektierten Öffnung (Auswahl exklusiv).
-    if (!modelEditable && effectiveDrawingIds.length === 0) return [];
+    if (!modelEditable && effectiveDrawingIds.length === 0) {
+      sheetHeightGrips.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, sheetHeightGrips.length - 1]); });
+      return sheetHeightGrips.map((g) => g.pt);
+    }
     if (selectedOpeningId && modelEditable) {
       const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
       const w = op && project.walls.find((x) => x.id === op.hostWallId);
@@ -500,6 +559,8 @@ export function useGripEditing(opts: {
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
   /** Aufgeschobene Öffnungs-Verschiebung im Schnitt/in der Ansicht (neue `position`). */
   const pendingOpeningMoveRef = useRef<{ id: string; position: number } | null>(null);
+  /** Aufgeschobene Höhen-Änderung im Schnitt (Wand `height` bzw. Öffnung `height`/`sillHeight`). */
+  const pendingSheetHeightRef = useRef<{ kind: "wall" | "opening"; id: string; patch: Record<string, number> } | null>(null);
   /** Laufendes Blatt-Delta (u, Meter) eines Zugs im Schnitt (s. moveInSheet). */
   const sheetDuRef = useRef<{ id: string; du: number } | null>(null);
   const pendingBodyRef = useRef<{ drawingId: string; total: Vec2 } | null>(null);
@@ -939,6 +1000,12 @@ export function useGripEditing(opts: {
 
   /** Ausstehenden Zug jetzt in das Projekt schreiben (EINE Mutation). */
   const commitPendingGrip = () => {
+    const ph = pendingSheetHeightRef.current;
+    pendingSheetHeightRef.current = null;
+    if (ph) {
+      if (ph.kind === "wall") updateWall(ph.id, ph.patch as Partial<import("../model/types").Wall>);
+      else updateOpening(ph.id, ph.patch);
+    }
     const pa = pendingAreaGripRef.current;
     pendingAreaGripRef.current = null;
     if (pa) {
@@ -1176,6 +1243,40 @@ export function useGripEditing(opts: {
 
   const gripHandlers = {
     onGripMove: (index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+      // Schnitt/Ansicht: Höhen-Griff (Wand-Oberkante, Fenster Ober-/Unterkante).
+      if (!modelEditable && sheet) {
+        const g = sheetHeightGrips[index];
+        if (!g) return;
+        const v = mods.ctrl ? raw.y : Math.round(raw.y * 100) / 100; // 1-cm-Raster, Strg = frei
+        let newTop = g.top;
+        let newBottom = g.bottom;
+        if (g.kind === "wallTop") {
+          newTop = Math.max(g.base + 0.3, v);
+          pendingSheetHeightRef.current = { kind: "wall", id: g.id, patch: { height: Math.round((newTop - g.base) * 1000) / 1000 } };
+        } else if (g.kind === "openingTop") {
+          newTop = Math.max(g.bottom + 0.2, v);
+          pendingSheetHeightRef.current = { kind: "opening", id: g.id, patch: { height: Math.round((newTop - g.bottom) * 1000) / 1000 } };
+        } else {
+          newBottom = Math.min(g.top - 0.2, Math.max(g.base, v));
+          pendingSheetHeightRef.current = {
+            kind: "opening",
+            id: g.id,
+            patch: { sillHeight: Math.round((newBottom - g.base) * 1000) / 1000, height: Math.round((g.top - newBottom) * 1000) / 1000 },
+          };
+        }
+        const bottom = g.kind === "wallTop" ? g.bottom : newBottom;
+        setDraft({
+          preview: [{
+            kind: "poly",
+            pts: [{ x: g.u0, y: bottom }, { x: g.u1, y: bottom }, { x: g.u1, y: newTop }, { x: g.u0, y: newTop }],
+            closed: true,
+          }],
+          vertices: [],
+          snap: null,
+          hud: { at: { x: (g.u0 + g.u1) / 2, y: g.kind === "openingBottom" ? newBottom : newTop }, text: `${(newTop - bottom).toFixed(2)} m` },
+        });
+        return;
+      }
       // Erster Move-Event nach dem Grab (gripDragInfoRef noch leer): die
       // AKTUELLE — hier noch unveränderte — Position als Flucht-Bezugspunkt
       // verankern (s. Kommentar an gripOriginRef).
@@ -1423,7 +1524,9 @@ export function useGripEditing(opts: {
     // danach wie onGripEnd aufräumen.
     onGripCancel: (index: number, origin: Vec2) => {
       // Ausstehender Zug: einfach verwerfen (das Projekt wurde nie verändert).
-      if (pendingGripRef.current || pendingWallGripRef.current || pendingAreaGripRef.current) {
+      if (pendingSheetHeightRef.current) {
+        pendingSheetHeightRef.current = null;
+      } else if (pendingGripRef.current || pendingWallGripRef.current || pendingAreaGripRef.current) {
         pendingGripRef.current = null;
         pendingWallGripRef.current = null;
         pendingAreaGripRef.current = null;

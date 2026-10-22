@@ -1742,6 +1742,7 @@ export default function App() {
     engineRef,
     commandLineRef,
     updateOpening,
+    updateWall,
     moveStairBy,
     moveRoomGrip,
     moveCeilingGrip,
