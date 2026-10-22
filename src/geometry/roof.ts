@@ -11,7 +11,7 @@
 
 import type { Project, Roof, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
-import { cleanRing, convexPieces, isRectilinearNonRect, offsetRectilinear, rectilinearHipRoof } from "./roofSkeleton";
+import { cleanRing, convexPieces, isRectilinearNonRect, isSkeletonRoofable, offsetRectilinear, rectilinearHipRoof } from "./roofSkeleton";
 
 /** 3D-Punkt [x, y, z=Höhe] in Modell-Metern. */
 export type Vec3 = [number, number, number];
@@ -344,6 +344,16 @@ export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
     (roof.shape === "walm" || roof.shape === "sattel" || roof.shape === "mansarde" || roof.shape === "zelt") &&
     isRectilinearNonRect(roof.outline)
   ) {
+    return rectilinearWalm(roof, eavesZ);
+  }
+  // Beliebiger einfacher Umriss (Fünfeck, Pfeil, schiefe Winkel, gedrehtes Rechteck):
+  // nur allseitig gleich geneigte Formen (Walm/Zelt/Mansard-Walm/-Zelt) — Giebel brauchen
+  // achsparallele Kanten und bleiben bei der Bounding-Box.
+  const allround =
+    roof.shape === "walm" ||
+    roof.shape === "zelt" ||
+    (roof.shape === "mansarde" && (roof.mansardType ?? "giebel") !== "giebel");
+  if (allround && isSkeletonRoofable(roof.outline)) {
     return rectilinearWalm(roof, eavesZ);
   }
   if (roof.shape === "pult" && isRectilinearNonRect(roof.outline)) {

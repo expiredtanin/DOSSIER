@@ -71,24 +71,71 @@ export function isRectilinearNonRect(outline: Vec2[]): boolean {
   });
 }
 
-/** Rechtwinkligen Ring (CCW) um `d` nach aussen versetzen (Traufüberstand). */
+/**
+ * Ring (CCW) um `dist` nach aussen versetzen (Traufüberstand) — Gehrung an jeder
+ * Ecke (Schnitt der beiden versetzten Kantengeraden), auch bei schiefen Winkeln.
+ * `dist` kann je Kante verschieden sein (Traufe/Ortgang).
+ */
 export function offsetRectilinear(ring: Vec2[], dist: number | ((a: Vec2, b: Vec2) => number)): Vec2[] {
   if (typeof dist === "number" && dist <= 0) return ring.map((p) => ({ ...p }));
   const n = ring.length;
-  // Aussen-Normale je Kante (CCW → rechte Normale).
-  const off = ring.map((p, i) => {
+  // Aussen-Normale (Einheit) + Versatz je Kante (CCW → rechte Normale).
+  const edges = ring.map((p, i) => {
     const q = ring[(i + 1) % n];
     const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
-    const d = typeof dist === "number" ? dist : dist(p, q);
-    return { x: ((q.y - p.y) / len) * d, y: (-(q.x - p.x) / len) * d };
+    return { nx: (q.y - p.y) / len, ny: -(q.x - p.x) / len, d: typeof dist === "number" ? dist : dist(p, q) };
   });
-  // Ecke i = Schnitt der versetzten Kanten (i−1) und i; bei rechten Winkeln
-  // einfach die Summe beider Versätze.
   return ring.map((p, i) => {
-    const a = off[(i + n - 1) % n];
-    const b = off[i];
-    return { x: p.x + a.x + b.x, y: p.y + a.y + b.y };
+    const a = edges[(i + n - 1) % n];
+    const b = edges[i];
+    const det = a.nx * b.ny - a.ny * b.nx;
+    // (fast) kollineare Nachbarkanten: einfach entlang der Normale versetzen.
+    if (Math.abs(det) < 1e-6) return { x: p.x + a.nx * a.d, y: p.y + a.ny * a.d };
+    let dx = (a.d * b.ny - b.d * a.ny) / det;
+    let dy = (a.nx * b.d - b.nx * a.d) / det;
+    // Sehr spitze Ecken: Gehrungsspitze begrenzen.
+    const lim = 4 * Math.max(a.d, b.d);
+    const len = Math.hypot(dx, dy);
+    if (len > lim && len > 0) {
+      dx *= lim / len;
+      dy *= lim / len;
+    }
+    return { x: p.x + dx, y: p.y + dy };
   });
+}
+
+/** Schneiden sich zwei Strecken echt (nicht nur an einem gemeinsamen Endpunkt)? */
+function segmentsCross(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
+  const o = (p: Vec2, q: Vec2, r: Vec2) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const d1 = o(a, b, c), d2 = o(a, b, d), d3 = o(c, d, a), d4 = o(c, d, b);
+  return d1 * d2 < -1e-12 && d3 * d4 < -1e-12;
+}
+
+/**
+ * Ob der Umriss ein einfaches (selbstüberschneidungsfreies) Polygon ist, das KEIN
+ * achsparalleles Rechteck ist — dafür liefert das Skelett ({@link rectilinearHipRoof})
+ * für gleichmässig geneigte Dächer (Walm/Zelt) die echten Flächen statt der Bounding-Box.
+ */
+export function isSkeletonRoofable(outline: Vec2[]): boolean {
+  const pts = cleanRing(outline);
+  const n = pts.length;
+  if (n < 3) return false;
+  if (n === 4) {
+    const axisRect =
+      pts.every((p, i) => {
+        const q = pts[(i + 1) % n];
+        return Math.abs(p.x - q.x) < 1e-9 || Math.abs(p.y - q.y) < 1e-9;
+      });
+    if (axisRect) return false; // Rechteck: Bounding-Box-Dach reicht
+  }
+  if (Math.abs(signedArea(pts)) < 1e-6) return false;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // benachbarte Kanten
+      if (segmentsCross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return false;
+    }
+  }
+  return true;
 }
 
 /** Konvexes Polygon gegen die Halbebene f(p) ≥ 0 schneiden (Sutherland–Hodgman). */
@@ -108,7 +155,10 @@ function clipHalf(poly: Vec2[], f: (p: Vec2) => number): Vec2[] {
   return out;
 }
 
-const toRing = (pts: Vec2[]): Ring => pts.map((p) => [p.x, p.y] as [number, number]);
+/** Polygon-Booleans brauchen exakt zusammenfallende Punkte: auf ein feines Raster runden. */
+let ROUND = 1e-9;
+const rnd = (v: number) => Math.round(v / ROUND) * ROUND;
+const toRing = (pts: Vec2[]): Ring => pts.map((p) => [rnd(p.x), rnd(p.y)] as [number, number]);
 
 interface EdgeInfo {
   a: Vec2;
@@ -133,7 +183,7 @@ export interface SkeletonRoof {
  * Walmdach-Flächen über dem rechtwinkligen Traufring `eaves` (beliebige
  * Orientierung) bei Neigung `tan` und Traufhöhe `e`.
  */
-export function rectilinearHipRoof(
+function buildHipRoof(
   eavesIn: Vec2[],
   tan: number,
   e: number,
@@ -217,6 +267,14 @@ export function rectilinearHipRoof(
     const subtract: Ring[][] = [];
     for (let f = 0; f < n; f++) {
       if (f === k || isGable[f] || wedge[f].length < 3) continue;
+      // Deckungsgleiche Ebenen (gleiche Gerade/Normale, z. B. zwei Traufkanten einer Flucht
+      // mit Versatz dazwischen): g ≡ 0 — nur EINE der beiden Flächen darf die andere
+      // abziehen, sonst fällt der überlappende Teil aus beiden heraus (Lücke im Dach).
+      const coplanar =
+        Math.abs(edges[k].n.x - edges[f].n.x) < 1e-9 &&
+        Math.abs(edges[k].n.y - edges[f].n.y) < 1e-9 &&
+        Math.abs(dist(f, edges[k].a)) < 1e-9;
+      if (coplanar && f > k) continue;
       // dist_f(p) < dist_k(p)  ⇔  g(p) = dist_k(p) − dist_f(p) > 0
       const lower = clipHalf(wedge[f], (p) => dist(k, p) - dist(f, p));
       if (lower.length >= 3 && Math.abs(signedArea(lower)) > 1e-9) subtract.push([toRing(lower)]);
@@ -289,6 +347,31 @@ export function rectilinearHipRoof(
     gables.push(poly);
   });
   return { planes, ridges, hips, breaks, gables, ridgeHeight };
+}
+
+/**
+ * Walm-/Satteldach-Flächen über dem Traufring (s. {@link buildHipRoof}). Die Polygon-
+ * Booleans scheitern bei schiefen Winkeln gelegentlich an Rundungsrauschen ("Unable to
+ * complete output ring") — dann mit gröberem Raster erneut versuchen.
+ */
+export function rectilinearHipRoof(
+  eavesIn: Vec2[],
+  tan: number,
+  e: number,
+  ridgeAxis?: "x" | "y",
+  knee?: { d: number; tanUp: number },
+): SkeletonRoof {
+  let lastError: unknown;
+  for (const step of [1e-9, 1e-7, 1e-6, 1e-5]) {
+    ROUND = step;
+    try {
+      return buildHipRoof(eavesIn, tan, e, ridgeAxis, knee);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  ROUND = 1e-9;
+  throw lastError;
 }
 
 // ── Konvexe Zerlegung ───────────────────────────────────────────────────────

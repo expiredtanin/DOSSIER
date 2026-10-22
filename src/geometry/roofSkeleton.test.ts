@@ -104,3 +104,42 @@ describe("Zelt-/Mansard-Zeltdach auf L-Grundriss", () => {
     });
   }
 });
+
+describe("Walmdach über beliebigen einfachen Umrissen", () => {
+  const mk = (outline: Vec2[], shape = "walm") =>
+    ({ id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline, shape, pitchDeg: 30, overhang: 0, ridgeAxis: "x" }) as unknown as Roof;
+  const shapes: Record<string, Vec2[]> = {
+    Fünfeck: [[0, 0], [8, 0], [10, 5], [4, 8], [-2, 5]].map(([x, y]) => ({ x, y })),
+    "Pfeil (Z-Kehle)": [[0, 0], [10, 0], [10, 3], [6, 3], [6, 8], [4, 8], [4, 3], [0, 3]].map(([x, y]) => ({ x, y })),
+    "konkaves Fünfeck": [[0, 0], [10, 0], [10, 6], [5, 2], [0, 6]].map(([x, y]) => ({ x, y })),
+    Trapez: [[0, 0], [10, 0], [8, 5], [2, 5]].map(([x, y]) => ({ x, y })),
+    Dreieck: [[0, 0], [8, 0], [3, 6]].map(([x, y]) => ({ x, y })),
+  };
+  for (const [name, outline] of Object.entries(shapes)) {
+    it(`${name}: Flächen decken den Umriss, alle Flächen mit Neigung 30°`, () => {
+      const g = roofGeometry(mk(outline), 0);
+      const expected = planArea(outline.map((p) => [p.x, p.y]));
+      expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(expected, 4);
+      const tan = Math.tan((30 * Math.PI) / 180);
+      for (const pl of g.planes) {
+        for (const v of pl.pts) expect(v[2]).toBeGreaterThanOrEqual(-1e-9);
+        // Steigung aus drei Punkten: |grad z| = tan(30°)
+        const [a, b, c] = pl.pts;
+        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+        const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        if (Math.abs(nz) > 1e-9) expect(Math.hypot(nx, ny) / Math.abs(nz)).toBeCloseTo(tan, 4);
+      }
+    });
+  }
+  it("Zelt auf Trapez ist allseitig geneigt (keine Bounding-Box)", () => {
+    const g = roofGeometry(mk(shapes.Trapez, "zelt"), 0);
+    expect(g.planes.length).toBeGreaterThanOrEqual(4);
+    expect(g.eaves.length).toBe(4);
+  });
+  it("Rechteck und Satteldach auf schiefem Umriss bleiben bei der Bounding-Box", () => {
+    expect(roofGeometry(mk(shapes.Fünfeck, "sattel"), 0).planes.length).toBe(2);
+    const rect = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }];
+    expect(roofGeometry(mk(rect), 0).planes.length).toBe(4);
+  });
+});
