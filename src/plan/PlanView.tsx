@@ -1002,7 +1002,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const box = canvasRef.current ?? svgRef.current;
     if (!hairline) return paperScaleRef.current ?? scaleFromView(v, box) ?? 100;
     const live = scaleFromView(v, box) ?? 100;
-    const grow = Math.min(3, Math.max(0.3, Math.pow(100 / live, 0.4)));
+    // Hineinzoomen (live < 100) mild wachsen, Herauszoomen (live > 100) deutlich dünner.
+    const grow = Math.min(3, Math.max(0.1, Math.pow(100 / live, live < 100 ? 0.4 : 0.75)));
     return live * grow;
   };
 
