@@ -137,6 +137,14 @@ function closedRiserOutline(
  * `ceilingId` trägt hier die Treppen-Id (nur TS-seitiges Tagging; render3d ignoriert
  * das Feld, und der Pick läuft separat über `pickGeometry`).
  */
+/** Max. Stufenhöhe (Meter) der Soffit-Treppung im Schnitt: darunter wirkt die Untersicht glatt. */
+const SOFFIT_SLICE_STEP = 0.015;
+
+/** Laufplattendicke (vertikal) der glatten Betontreppe — gemeinsam für Mesh und Schnitt. */
+function concreteWaist(riserHeight: number): number {
+  return Math.min(0.24, Math.max(0.14, riserHeight * 1.2));
+}
+
 export function emitStairs(
   project: Project,
   /**
@@ -165,6 +173,46 @@ export function emitStairs(
     const monolith = structure === "massiv" || structure === "beton" ? stair.id : undefined;
     const nosing = open ? st?.nosing ?? 0 : 0;
     const neighborPts = geo.treads.map((t) => t.pts);
+    // Gerade Betontreppe im Schnitt: schräge Soffit-Untersicht (wie das 3D-Mesh) als
+    // feine Scheiben — jede Tritt-Fläche längs des Laufs in dünne Prismen zerlegt, deren
+    // Unterkante der Soffit-Geraden folgt (Stufen < SOFFIT_SLICE_STEP statt Sägezahn).
+    if (structure === "beton" && stair.shape === "straight" && opts.forSection && stair.runLength > EPS) {
+      const u = normalize(stair.dir);
+      const w = leftNormal(u);
+      const waistV = concreteWaist(riser);
+      const runOf = (p: Vec2) => (p.x - stair.start.x) * u.x + (p.y - stair.start.y) * u.y;
+      const sideOf = (p: Vec2) => (p.x - stair.start.x) * w.x + (p.y - stair.start.y) * w.y;
+      const soffit = (runS: number) => {
+        const t = Math.min(Math.max(runS, 0), stair.runLength);
+        return Math.max(zBottom, zBottom + (t / stair.runLength) * totalRise - waistV);
+      };
+      const n = Math.max(1, Math.ceil(riser / SOFFIT_SLICE_STEP));
+      for (const tr of geo.treads) {
+        if (tr.pts.length < 4) continue;
+        const byRun = [...tr.pts].sort((a, b) => runOf(a) - runOf(b));
+        const a = [byRun[0], byRun[1]].sort((p, q) => sideOf(p) - sideOf(q));
+        const b = [byRun[2], byRun[3]].sort((p, q) => sideOf(p) - sideOf(q));
+        const top = zBottom + tr.topRise;
+        const lerp = (p: Vec2, q: Vec2, t: number): Vec2 => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+        for (let j = 0; j < n; j++) {
+          const t0 = j / n;
+          const t1 = (j + 1) / n;
+          // Die tiefere (Anfangs-)Seite der Scheibe bestimmt die Unterkante: keine Lücke zum Soffit.
+          const bottom = soffit(runOf(lerp(a[0], b[0], t0)));
+          if (top - bottom <= EPS) continue;
+          const quad = [lerp(a[0], b[0], t0), lerp(a[0], b[0], t1), lerp(a[1], b[1], t1), lerp(a[1], b[1], t0)];
+          out.push({
+            outline: quad.map((p) => [p.x, p.y] as RVec2),
+            zBottom: bottom,
+            zTop: top,
+            color: STAIR_RGB,
+            ceilingId: stair.id,
+            monolith,
+          });
+        }
+      }
+      continue;
+    }
     for (let k = 0; k < geo.treads.length; k++) {
       const tr = geo.treads[k];
       if (tr.pts.length < 3) continue;
@@ -242,7 +290,7 @@ export function emitStairMeshes(project: Project): RMesh[] {
     const w = leftNormal(u); // Querrichtung (Breite)
     const runTotal = stair.runLength;
     // Laufplattendicke (vertikal): an die Steigung gekoppelt, geklemmt.
-    const waistV = Math.min(0.24, Math.max(0.14, geo.riserHeight * 1.2));
+    const waistV = concreteWaist(geo.riserHeight);
     // Soffit-Höhe entlang des Laufs: eine Gerade PARALLEL zur Trittkantenlinie
     // (Steigung totalRise/runTotal), um `waistV` nach unten versetzt → KONSTANTE
     // Plattendicke über den ganzen Lauf (sonst würde die Platte nach oben dicker).

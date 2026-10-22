@@ -2738,3 +2738,28 @@ describe("draftWorldLines — Zeichnen-Vorschau für den WASM-3D-Viewport", () =
     expect(out.length).toBe(4 * 12);
   });
 });
+
+describe("emitStairs — gerade Betontreppe im Schnitt: glatte Soffit-Untersicht", () => {
+  const project = (): Project => ({
+    ...sampleProject,
+    stairTypes: [
+      { id: "st-beton", name: "Beton", structure: "beton", closedRisers: false, treadThickness: 0.04, defaultWidth: 1.0 },
+    ],
+    stairs: [
+      {
+        id: "STB", type: "stair", floorId: "eg", categoryCode: "40", shape: "straight", typeId: "st-beton",
+        start: { x: 3.7, y: 0.4 }, dir: { x: 0, y: 1 }, runLength: 3.2, width: 1.0, totalRise: 2.6, stepCount: 15, up: true,
+      },
+    ],
+  });
+  it("Unterkanten steigen in feinen Stufen (≤ 2 cm) statt im Tritt-Sägezahn", () => {
+    const { slabs } = projectToModel3d(project(), { forSection: true });
+    const own = slabs.filter((s) => s.ceilingId === "STB");
+    expect(own.length).toBeGreaterThan(15 * 5); // mehrere Scheiben je Tritt
+    const sorted = [...own].sort((a, b) => Math.min(...a.outline.map((p) => p[1])) - Math.min(...b.outline.map((p) => p[1])));
+    for (let i = 1; i < sorted.length; i++) {
+      expect(sorted[i].zBottom - sorted[i - 1].zBottom).toBeLessThan(0.02);
+      expect(sorted[i].zBottom).toBeGreaterThanOrEqual(sorted[i - 1].zBottom - 1e-9);
+    }
+  });
+});
