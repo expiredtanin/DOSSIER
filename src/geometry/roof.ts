@@ -128,6 +128,37 @@ function computeCanonical(
 
     case "sattel": {
       const rz = e + h;
+      const hh = Math.min(0.9, Math.max(0, roof.halfHipRatio ?? 0));
+      if (hh > 1e-6 && halfW > halfD * hh + 1e-6) {
+        // Krüppelwalm: oberer Giebelteil (Anteil `hh` der Firsthöhe) als kleine Walmflächen
+        // gleicher Neigung — Walmlauf = halbe Tiefe · hh, First entsprechend verkürzt.
+        const kz = e + h * (1 - hh);
+        const yk0 = y0 + halfD * (1 - hh);
+        const yk1 = y1 - halfD * (1 - hh);
+        const d = halfD * hh;
+        return {
+          eaves,
+          ridges: [[P(x0 + d, yc), P(x1 - d, yc)]],
+          hips: [
+            [P(x0, yk0), P(x0 + d, yc)],
+            [P(x0, yk1), P(x0 + d, yc)],
+            [P(x1, yk0), P(x1 - d, yc)],
+            [P(x1, yk1), P(x1 - d, yc)],
+          ],
+          breaks: [],
+          planes: [
+            { pts: [[x0, y0, e], [x1, y0, e], [x1, yk0, kz], [x1 - d, yc, rz], [x0 + d, yc, rz], [x0, yk0, kz]] },
+            { pts: [[x0, y1, e], [x1, y1, e], [x1, yk1, kz], [x1 - d, yc, rz], [x0 + d, yc, rz], [x0, yk1, kz]] },
+            { pts: [[x0, yk0, kz], [x0, yk1, kz], [x0 + d, yc, rz]] },
+            { pts: [[x1, yk0, kz], [x1, yk1, kz], [x1 - d, yc, rz]] },
+          ],
+          gables: [
+            [[x0, y0, e], [x0, y1, e], [x0, yk1, kz], [x0, yk0, kz]],
+            [[x1, y0, e], [x1, y1, e], [x1, yk1, kz], [x1, yk0, kz]],
+          ],
+          ridgeHeight: h,
+        };
+      }
       return {
         eaves,
         ridges: [[P(x0, yc), P(x1, yc)]],

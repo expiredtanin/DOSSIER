@@ -466,6 +466,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.roof.mansard.walm": "Hip mansard",
   "objinfo.roof.mansard.zelt": "Pavilion mansard",
   "objinfo.roof.mansardKnee": "Knee position (% span)",
+  "objinfo.roof.halfHip": "Half-hip (% ridge height)",
   "objinfo.roof.width": "Width (m)",
   "objinfo.roof.depth": "Depth (m)",
   "objinfo.roof.overhang": "Eaves overhang (m)",

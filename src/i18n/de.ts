@@ -468,6 +468,7 @@ export const de = {
   "objinfo.roof.mansard.walm": "Walm-Mansarde",
   "objinfo.roof.mansard.zelt": "Zelt-Mansarde",
   "objinfo.roof.mansardKnee": "Knicklage (% Spannweite)",
+  "objinfo.roof.halfHip": "Krüppelwalm (% Firsthöhe)",
   "objinfo.roof.width": "Breite (m)",
   "objinfo.roof.depth": "Tiefe (m)",
   "objinfo.roof.overhang": "Überstand Traufe (m)",

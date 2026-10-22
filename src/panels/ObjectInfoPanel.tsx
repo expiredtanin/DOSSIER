@@ -915,6 +915,11 @@ export function RoofSection({
           host.onSetRoofPatch({ mansardKneeRatio: Math.max(5, Math.min(49, v)) / 100 }),
         )}
 
+      {roof.shape === "sattel" &&
+        numField("objinfo.roof.halfHip", (roof.halfHipRatio ?? 0) * 100, 5, (v) =>
+          host.onSetRoofPatch({ halfHipRatio: Math.max(0, Math.min(90, v)) / 100 }),
+        )}
+
       {/* Grundriss-Masse (Breite/Tiefe): das Umriss-Rechteck neu bilden, die
           untere/linke Ecke (minX/minY) bleibt fix. */}
       {numField("objinfo.roof.width", roof.width, 0.1, (v) => {

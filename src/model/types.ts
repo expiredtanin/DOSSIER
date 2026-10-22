@@ -1326,6 +1326,11 @@ export interface Roof {
    * gemessen von der Traufe. Kleiner ⇒ steiler Sockel kürzer; fehlt ⇒ 0.4.
    */
   mansardKneeRatio?: number;
+  /**
+   * Nur Satteldach: Krüppelwalm. Anteil der Firsthöhe (0..0.9), der an BEIDEN Giebeln
+   * abgewalmt wird — 0/fehlt = voller Giebel, 0.3 = oberes Drittel als kleine Walmflächen.
+   */
+  halfHipRatio?: number;
   /** Dachüberstand an der TRAUFE (Meter, senkrecht zum First); 0 = bündig. */
   overhang: number;
   /**

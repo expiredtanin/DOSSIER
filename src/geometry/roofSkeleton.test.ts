@@ -143,3 +143,22 @@ describe("Walmdach über beliebigen einfachen Umrissen", () => {
     expect(roofGeometry(mk(rect), 0).planes.length).toBe(4);
   });
 });
+
+describe("Krüppelwalm (halfHipRatio) am Satteldach", () => {
+  const rect = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 6 }, { x: 0, y: 6 }];
+  const mk = (halfHipRatio?: number) =>
+    ({ id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline: rect, shape: "sattel", pitchDeg: 45, overhang: 0, ridgeAxis: "x", halfHipRatio }) as unknown as Roof;
+  it("ohne Krüppelwalm: 2 Flächen, mit 0.3: 4 Flächen, gleiche Firsthöhe, Grundfläche bleibt", () => {
+    expect(roofGeometry(mk(), 0).planes.length).toBe(2);
+    const g = roofGeometry(mk(0.3), 0);
+    expect(g.planes.length).toBe(4);
+    expect(g.ridgeHeight).toBeCloseTo(3, 6);
+    expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(60, 6);
+  });
+  it("First um die Walmlänge verkürzt (halbe Tiefe 3 · 0.3 = 0.9 m je Seite)", () => {
+    const g = roofGeometry(mk(0.3), 0);
+    const [a, b] = g.ridges[0];
+    expect(a.x).toBeCloseTo(0.9, 6);
+    expect(b.x).toBeCloseTo(9.1, 6);
+  });
+});

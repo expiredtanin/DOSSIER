@@ -96,6 +96,7 @@ export interface RoofInfo {
   mansardType?: "giebel" | "walm" | "zelt";
   /** Mansarde-Knicklage (0..0.5 der halben Spannweite) — nur Mansarde relevant. */
   mansardKneeRatio?: number;
+  halfHipRatio?: number;
   /** Dachüberstand an der Traufe (Meter). */
   overhang: number;
   /** Dachüberstand am Ortgang (Giebelseite, Meter); fehlt ⇒ = Traufüberstand. */
@@ -843,6 +844,7 @@ function roofSelection(project: Project, roof: Roof): Selection {
     roofTypeId: roof.roofTypeId,
     mansardType: roof.mansardType,
     mansardKneeRatio: roof.mansardKneeRatio,
+    halfHipRatio: roof.halfHipRatio,
     overhang: roof.overhang,
     overhangGable: roof.overhangGable,
     ridgeAxis: roof.ridgeAxis,
