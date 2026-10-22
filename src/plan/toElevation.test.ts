@@ -716,3 +716,25 @@ describe("toElevation — Tür-Teilverglasung (glazingRatio)", () => {
     expect(divisionLines.length).toBeGreaterThan(0);
   });
 });
+
+describe("Dach-Ansicht: keine Nähte zwischen deckungsgleichen Teilflächen", () => {
+  it("L-Walmdach: die Süd-Schräge (3 konvexe Teile, eine Ebene) zeigt keine Diagonale", () => {
+    const L = [
+      { x: 0, y: 0 }, { x: 11, y: 0 }, { x: 11, y: 4 }, { x: 8, y: 4 }, { x: 8, y: 6 }, { x: 0, y: 6 },
+    ];
+    const base = elevationProject({ overhang: false });
+    const p = {
+      ...base,
+      roofs: [
+        { id: "R1", type: "roof", floorId: "eg", categoryCode: "35", outline: L, shape: "walm", pitchDeg: 30, overhang: 0, ridgeAxis: "x", baseElevation: 3, thickness: 0.2 },
+      ],
+    } as unknown as Project;
+    const level = p.drawingLevels.find((z) => z.kind === "elevation")!;
+    const plan = generateElevationPlan(p, level)!;
+    const lines = plan.primitives.filter((pr) => pr.kind === "line" && (pr as { cls?: string }).cls === "elevation-outline") as unknown as Array<{ a: { x: number; y: number }; b: { x: number; y: number } }>;
+    const tan = Math.tan((30 * Math.PI) / 180);
+    // Naht: von der Südost-Traufecke (11, z=3) zum Knick (6, z=3+2·tan) = 5 m breit, 2·tan hoch.
+    const seams = lines.filter((l) => Math.abs(Math.abs(l.b.x - l.a.x) - 5) < 0.02 && Math.abs(Math.abs(l.b.y - l.a.y) - 2 * tan) < 0.02);
+    expect(seams.length).toBe(0);
+  });
+});

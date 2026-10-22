@@ -144,3 +144,18 @@ describe("appendRoofSections", () => {
     expect(out.cutPolygons.every((cp) => cp.hatch?.pattern === "diagonal")).toBe(true);
   });
 });
+
+describe("appendRoofSections — Nähte deckungsgleicher Teilflächen", () => {
+  it("L-Walmdach, Schnitt längs durch die Süd-Schräge: deckungsgleiche Teilflächen werden ein Band", () => {
+    const L: Roof["outline"] = [
+      { x: 0, y: 0 }, { x: 11, y: 0 }, { x: 11, y: 4 }, { x: 8, y: 4 }, { x: 8, y: 6 }, { x: 0, y: 6 },
+    ];
+    // Schnitt entlang x bei y=1: Blick +y (Norden), u = x. Süd-Schräge besteht aus zwei Teilflächen EINER Ebene.
+    const plane: SectionPlaneSpec = { point: [0, 0, 1], normal: [0, 0, 1] };
+    const out = emptyOutput();
+    appendRoofSections(out, project(roof({ outline: L, shape: "walm" })), plane);
+    // Walm-Ost, Süd-Schräge (zwei Teilflächen einer Ebene → EIN Band), Walm-West = 3 Bänder.
+    const roofPolys = out.cutPolygons.filter((c) => c.component.kind === "roof");
+    expect(roofPolys.length).toBe(3);
+  });
+});

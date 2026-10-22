@@ -463,6 +463,8 @@ export interface ProjectedFace {
   ceilingId?: string;
   roofId?: string;
   fill?: RRgb;
+  /** Welt-Normale (Einheit) — für die Erkennung deckungsgleicher Nachbarflächen. */
+  normal?: V3;
 }
 
 /**
@@ -497,6 +499,7 @@ export function projectFace(frame: ElevationFrame, face: WorldFace): ProjectedFa
     ceilingId: face.ceilingId,
     roofId: face.roofId,
     fill: face.fill,
+    normal: face.normal,
   };
 }
 
@@ -1355,6 +1358,32 @@ export function generateElevationPlan(
   // der Teilboxen (Pfeiler/Sturz/Geschossfugen) heben sich auf, übrig bleibt die
   // Silhouette samt Öffnungslöchern (VW-Linienzeichnungs-Look). Dach/schräge
   // Flächen tragen ihre eigene, ebenfalls geclippte Kanten-Kontur (unten).
+  const edgeKey = (a: [number, number], b: [number, number]): string => {
+    const r = (v: number) => Math.round(v * 1e4);
+    const ka = `${r(a[0])},${r(a[1])}`;
+    const kb = `${r(b[0])},${r(b[1])}`;
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+  const roofEdgeFaces = new Map<string, ProjectedFace[]>();
+  for (const f of faces) {
+    if (f.role !== "roof" || !f.roofId || !f.normal) continue;
+    for (let i = 0; i < f.pts.length; i++) {
+      const k = edgeKey(f.pts[i], f.pts[(i + 1) % f.pts.length]);
+      const list = roofEdgeFaces.get(k);
+      if (list) list.push(f);
+      else roofEdgeFaces.set(k, [f]);
+    }
+  }
+  const isCoplanarSeam = (f: ProjectedFace, a: [number, number], b: [number, number]): boolean => {
+    if (f.role !== "roof" || !f.roofId || !f.normal) return false;
+    return (roofEdgeFaces.get(edgeKey(a, b)) ?? []).some(
+      (o) =>
+        o !== f &&
+        o.roofId === f.roofId &&
+        o.normal !== undefined &&
+        f.normal![0] * o.normal[0] + f.normal![1] * o.normal[1] + f.normal![2] * o.normal[2] > 1 - 1e-9,
+    );
+  };
   const frontalGroups = new Map<number, { faces: ProjectedFace[]; depth: number }>();
   for (const f of faces) {
     const pts: Vec2[] = f.pts.map(([u, v]) => {
@@ -1373,6 +1402,9 @@ export function generateElevationPlan(
       for (let i = 0; i < f.pts.length; i++) {
         const a = f.pts[i];
         const b = f.pts[(i + 1) % f.pts.length];
+        // Naht zwischen zwei deckungsgleichen Teilflächen DESSELBEN Dachs (konvexe
+        // Zerlegung einer L-/T-förmigen Dachfläche): keine Kante — es ist EINE Fläche.
+        if (isCoplanarSeam(f, a, b)) continue;
         pushClippedLine(a, b, f.depthMin - EPS * 5, (sa, sb) => ({
           kind: "line",
           a: { x: sa[0], y: sa[1] },

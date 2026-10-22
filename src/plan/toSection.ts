@@ -1003,6 +1003,7 @@ export function appendRoofSections(
     const totalT = layers.reduce((s, l) => s + Math.max(0, l.thickness), 0);
     if (totalT <= 1e-9) return;
 
+    const segs: Array<{ key: string; tLo: number; tHi: number; zTop0: number; zTop1: number; cosTheta: number }> = [];
     for (const pl of geo.planes) {
       const pts = pl.pts;
       if (pts.length < 3) continue;
@@ -1064,6 +1065,32 @@ export function appendRoofSections(
       const zTop0 = zAt(p0.x, p0.y);
       const zTop1 = zAt(p1.x, p1.y);
 
+      const r6 = (v: number) => Math.round(v * 1e5);
+      segs.push({
+        key: `${r6(A / C)}|${r6(B / C)}|${r6(zAt(base.x, base.y))}`,
+        tLo,
+        tHi,
+        zTop0,
+        zTop1,
+        cosTheta,
+      });
+    }
+
+    // Deckungsgleiche, aneinanderstossende Teilflächen (konvexe Zerlegung einer L-/T-förmigen
+    // Dachfläche) zu EINEM Band vereinen — sonst steht an der Naht eine senkrechte Linie.
+    segs.sort((p, q) => (p.key < q.key ? -1 : p.key > q.key ? 1 : p.tLo - q.tLo));
+    const merged: typeof segs = [];
+    for (const sg of segs) {
+      const last = merged[merged.length - 1];
+      if (last && last.key === sg.key && Math.abs(sg.tLo - last.tHi) < 1e-6) {
+        last.tHi = sg.tHi;
+        last.zTop1 = sg.zTop1;
+      } else {
+        merged.push({ ...sg });
+      }
+    }
+
+    for (const { tLo, tHi, zTop0, zTop1, cosTheta } of merged) {
       // Schicht-Bänder von aussen (oben) nach innen, vertikale Dicke je Schicht.
       let prefixV = 0;
       for (const layer of layers) {
