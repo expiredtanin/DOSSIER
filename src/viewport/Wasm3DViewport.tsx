@@ -653,9 +653,20 @@ export function Wasm3DViewport({
   // über den nächsten `render()`-Aufruf hinweg sichtbar.
   useEffect(() => {
     if (!ready) return;
-    const lines = commandActive
-      ? draftWorldLines(draft, groundElevationRef.current)
-      : (highlightLines ?? new Float32Array(0));
+    let lines: Float32Array;
+    if (commandActive) {
+      lines = draftWorldLines(draft, groundElevationRef.current);
+    } else {
+      lines = highlightLines ?? new Float32Array(0);
+      // Griff-Drag mit Einrasten: Fang-Marker (Quadrat + Führungslinie) zusätzlich zur Auswahl.
+      if (draft?.snap) {
+        const marker = draftWorldLines({ preview: [], vertices: [], snap: draft.snap }, groundElevationRef.current);
+        const merged = new Float32Array(lines.length + marker.length);
+        merged.set(lines, 0);
+        merged.set(marker, lines.length);
+        lines = merged;
+      }
+    }
     setHighlightLines(lines);
     redrawRef.current();
   }, [ready, highlightLines, commandActive, draft, groundElevation, setHighlightLines]);

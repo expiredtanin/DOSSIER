@@ -2061,6 +2061,7 @@ export default function App() {
     // sich hier nur am gezogenen `index`, der Nachbar bleibt stabil).
     const neighbor = neighbor3dVertex(project, target, index);
     let pt = model;
+    let snapHit: SnapResult | null = null;
     const ge = grip3dEdit;
     if (
       ge &&
@@ -2079,13 +2080,14 @@ export default function App() {
         excludeDrawingIds ?? new Set(),
       );
       pt = snapResult?.point ?? model;
+      snapHit = snapResult;
     }
     applyVertexPoint(target, index, pt);
     if (neighbor) last3dDragRef.current = { target, index, kind: "vertex", anchor: neighbor, raw: model };
     setDraft({
       preview: [],
       vertices: [],
-      snap: null,
+      snap: snapHit,
       hud: neighbor ? hudFromAnchor(neighbor, pt) : undefined,
     });
     return pt;
@@ -2108,16 +2110,21 @@ export default function App() {
     st.rawTotal = { x: st.rawTotal.x + delta.x, y: st.rawTotal.y + delta.y };
     const rawPoint: Vec2 = { x: st.anchor.x + st.rawTotal.x, y: st.anchor.y + st.rawTotal.y };
     const ge = grip3dEdit;
-    const desiredPoint =
-      ge && ge.kind === "move" && grip3dTargetKey(ge.target) === key && (ge.locks.length != null || ge.locks.angle != null)
-        ? grip3dEditPoint(ge.anchor, ge.locks, rawPoint)
-        : locked
-          ? rawPoint // Shift/Achs-Sperre hat Vorrang vor dem Einrasten
-          : (snapFor3dVertex(
-            rawPoint,
-            new Set(target.wallId ? [target.wallId] : []),
-            new Set(target.drawingId ? [target.drawingId] : []),
-          )?.point ?? rawPoint); // Referenzpunkt des Körpers rastet auf andere Punkte ein
+    let bodySnap: SnapResult | null = null;
+    let desiredPoint: Vec2;
+    if (ge && ge.kind === "move" && grip3dTargetKey(ge.target) === key && (ge.locks.length != null || ge.locks.angle != null)) {
+      desiredPoint = grip3dEditPoint(ge.anchor, ge.locks, rawPoint);
+    } else if (locked) {
+      desiredPoint = rawPoint; // Shift/Achs-Sperre hat Vorrang vor dem Einrasten
+    } else {
+      // Referenzpunkt des Körpers rastet auf andere Punkte ein
+      bodySnap = snapFor3dVertex(
+        rawPoint,
+        new Set(target.wallId ? [target.wallId] : []),
+        new Set(target.drawingId ? [target.drawingId] : []),
+      );
+      desiredPoint = bodySnap?.point ?? rawPoint;
+    }
     const desiredTotal: Vec2 = { x: desiredPoint.x - st.anchor.x, y: desiredPoint.y - st.anchor.y };
     const appliedDelta: Vec2 = {
       x: desiredTotal.x - st.appliedTotal.x,
@@ -2129,7 +2136,7 @@ export default function App() {
     setDraft({
       preview: [],
       vertices: [],
-      snap: null,
+      snap: bodySnap,
       hud: { at: desiredPoint, dx: desiredTotal.x, dy: desiredTotal.y },
     });
   };
@@ -2223,7 +2230,8 @@ export default function App() {
     // Der Kanten-Startpunkt rastet auf andere Wand-/Zeichnungspunkte ein; die Kante
     // folgt um dasselbe Delta (inkrementell, damit der Store-Aufruf gleich bleibt).
     const rawPoint: Vec2 = { x: st.start.x + st.raw.x, y: st.start.y + st.raw.y };
-    const snapped = snapFor3dVertex(rawPoint, new Set(), new Set())?.point ?? rawPoint;
+    const edgeSnap = snapFor3dVertex(rawPoint, new Set(), new Set());
+    const snapped = edgeSnap?.point ?? rawPoint;
     const total: Vec2 = { x: snapped.x - st.start.x, y: snapped.y - st.start.y };
     const step: Vec2 = { x: total.x - st.applied.x, y: total.y - st.applied.y };
     if (step.x !== 0 || step.y !== 0) moveCeilingEdge(ceilingId, aIndex, bIndex, step);
@@ -2235,7 +2243,7 @@ export default function App() {
     if (a && b) {
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       const dist = Math.hypot(st.total.x, st.total.y);
-      setDraft({ preview: [], vertices: [], snap: null, hud: { at: mid, text: `Δ: ${dist.toFixed(3)}m` } });
+      setDraft({ preview: [], vertices: [], snap: edgeSnap, hud: { at: mid, text: `Δ: ${dist.toFixed(3)}m` } });
     }
   };
   const onEdit3dWallTop = (wallId: string, topZ: number) => {
