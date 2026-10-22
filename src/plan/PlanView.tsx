@@ -992,9 +992,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // breite in Geräte-px — unabhängig vom Zoom konstant bleibt: dieselbe Wirkung
   // wie `non-scaling-stroke` im SVG-Pfad, nur über den Massstab-Nenner erzielt.
   // Display-Modus (Haarlinien): Die Strichbreite bleibt NICHT konstant in Pixeln,
-  // sondern wächst mit dem Zoom — sanft (Exponent 0.8) relativ zur Ansicht 1:100:
+  // sondern wächst mit dem Zoom — sanft (Exponent 0.4) relativ zur Ansicht 1:100:
   // weit weg bleiben die Striche fein (mind. 1 px im Shader), nah dran werden sie
-  // sichtbar kräftiger statt auf Haarlinien-Breite zu kleben.
+  // sichtbar kräftiger statt auf Haarlinien-Breite zu kleben. Bewusst nur MILD (Exponent 0.4, höchstens ×3): bei 0.8/×12 wirkten alle Elemente beim Hineinzoomen klobig dick.
   const paperScaleForGl = (v: ViewBox): number => {
     // Elementbox der GPU-Fläche (NIE transformiert): das SVG trägt während einer
     // imperativen Zoom-Geste einen CSS-Transform, seine Box wäre verzerrt (Striche
@@ -1002,7 +1002,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const box = canvasRef.current ?? svgRef.current;
     if (!hairline) return paperScaleRef.current ?? scaleFromView(v, box) ?? 100;
     const live = scaleFromView(v, box) ?? 100;
-    const grow = Math.min(12, Math.max(0.25, Math.pow(100 / live, 0.8)));
+    const grow = Math.min(3, Math.max(0.3, Math.pow(100 / live, 0.4)));
     return live * grow;
   };
 
