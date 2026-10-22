@@ -2210,15 +2210,25 @@ export default function App() {
   // Läuft während eines Kanten-Griff-Drags (Decke): sammelt die seit Drag-
   // Beginn angewandte Verschiebung fürs Δ-HUD — analog `bodyDragRef`, aber
   // ohne Lock-Unterstützung (kein Feld-Controller für Kanten, s. PENDENZEN).
-  const edgeDragRef = useRef<{ key: string; total: Vec2 } | null>(null);
+  const edgeDragRef = useRef<{ key: string; start: Vec2; raw: Vec2; applied: Vec2; total?: Vec2 } | null>(null);
   const onEdit3dEdge = (ceilingId: string, aIndex: number, bIndex: number, delta: Vec2) => {
-    moveCeilingEdge(ceilingId, aIndex, bIndex, delta);
     const key = `${ceilingId}:${aIndex}:${bIndex}`;
     if (!edgeDragRef.current || edgeDragRef.current.key !== key) {
-      edgeDragRef.current = { key, total: { x: 0, y: 0 } };
+      const c0 = (project.ceilings ?? []).find((x) => x.id === ceilingId);
+      const a0 = c0?.outline[aIndex] ?? { x: 0, y: 0 };
+      edgeDragRef.current = { key, start: { x: a0.x, y: a0.y }, raw: { x: 0, y: 0 }, applied: { x: 0, y: 0 } };
     }
     const st = edgeDragRef.current;
-    st.total = { x: st.total.x + delta.x, y: st.total.y + delta.y };
+    st.raw = { x: st.raw.x + delta.x, y: st.raw.y + delta.y };
+    // Der Kanten-Startpunkt rastet auf andere Wand-/Zeichnungspunkte ein; die Kante
+    // folgt um dasselbe Delta (inkrementell, damit der Store-Aufruf gleich bleibt).
+    const rawPoint: Vec2 = { x: st.start.x + st.raw.x, y: st.start.y + st.raw.y };
+    const snapped = snapFor3dVertex(rawPoint, new Set(), new Set())?.point ?? rawPoint;
+    const total: Vec2 = { x: snapped.x - st.start.x, y: snapped.y - st.start.y };
+    const step: Vec2 = { x: total.x - st.applied.x, y: total.y - st.applied.y };
+    if (step.x !== 0 || step.y !== 0) moveCeilingEdge(ceilingId, aIndex, bIndex, step);
+    st.applied = total;
+    st.total = total;
     const c = (project.ceilings ?? []).find((x) => x.id === ceilingId);
     const a = c?.outline[aIndex];
     const b = c?.outline[bIndex];
