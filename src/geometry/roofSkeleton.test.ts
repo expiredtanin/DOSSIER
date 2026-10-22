@@ -93,3 +93,14 @@ describe("Mansarde auf L-Grundriss", () => {
     expect(g.breaks.length).toBeGreaterThan(0);
   });
 });
+
+describe("Zelt-/Mansard-Zeltdach auf L-Grundriss", () => {
+  for (const [shape, extra] of [["zelt", {}], ["mansarde", { mansardType: "zelt", pitchUpperDeg: 15 }]] as const) {
+    it(`${shape}: allseitig geneigt über dem echten Umriss, keine Giebel`, () => {
+      const roof = { id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline: L, shape, pitchDeg: 45, overhang: 0, ridgeAxis: "x", ...extra } as unknown as Roof;
+      const g = roofGeometry(roof, 0);
+      expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(11 * 4 + 8 * 2, 6);
+      expect(g.gables.length).toBe(0);
+    });
+  }
+});

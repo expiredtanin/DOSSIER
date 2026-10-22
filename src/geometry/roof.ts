@@ -338,7 +338,12 @@ const swapLine = (l: [Vec2, Vec2]): [Vec2, Vec2] => [swap2(l[0]), swap2(l[1])];
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
   // Walmdach über einem rechtwinkligen, nicht-rechteckigen Grundriss (L/T/U …):
   // echte Flächen mit Graten und Kehlen statt Bounding-Box (s. roofSkeleton.ts).
-  if ((roof.shape === "walm" || roof.shape === "sattel" || (roof.shape === "mansarde" && roof.mansardType !== "zelt")) && isRectilinearNonRect(roof.outline)) {
+  // Zeltdach/Mansard-Zelt auf L/T/U: eine einzelne Spitze gibt es dort nicht — sinnvolles
+  // Gegenstück ist das allseitig geneigte Skelett-Dach (wie Walm, ohne Giebel).
+  if (
+    (roof.shape === "walm" || roof.shape === "sattel" || roof.shape === "mansarde" || roof.shape === "zelt") &&
+    isRectilinearNonRect(roof.outline)
+  ) {
     return rectilinearWalm(roof, eavesZ);
   }
   if (roof.shape === "pult" && isRectilinearNonRect(roof.outline)) {
