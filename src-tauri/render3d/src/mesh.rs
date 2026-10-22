@@ -887,6 +887,26 @@ fn compute_free_wall_ends(walls: &[WallInput]) -> Vec<(bool, bool)> {
     out
 }
 
+/// Breite (Meter, Welt) der Schicht-Trennlinien auf Kappen/Oberseiten.
+const LAYER_LINE_WIDTH: f32 = 0.004;
+
+/// Duenner Streifen (Vollton-Tinte, Muster 1) von `a` nach `b`, quer um `perp`
+/// (Einheitsvektor, in der Kappen-Ebene) auf `LAYER_LINE_WIDTH` verbreitert — die
+/// Schicht-Trennlinie wie im 2D/Schnitt. Gleiches Vertex-Format wie die Kappen.
+fn push_line_strip(verts: &mut Vec<f32>, a: [f32; 3], b: [f32; 3], perp: [f32; 3]) {
+    let h = LAYER_LINE_WIDTH * 0.5;
+    let v = |p: [f32; 3], s: f32| -> [f32; 9] {
+        [
+            p[0] + perp[0] * h * s, p[1] + perp[1] * h * s, p[2] + perp[2] * h * s,
+            0.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+        ]
+    };
+    let (a0, a1, b0, b1) = (v(a, 1.0), v(a, -1.0), v(b, 1.0), v(b, -1.0));
+    for q in [a0, a1, b1, a0, b1, b0] {
+        verts.extend_from_slice(&q);
+    }
+}
+
 /// Haengt EINE Schraffur-Kappe (alle Schicht-Baender gestapelt) an einem
 /// Wand-Achsenende an `verts` an — Vertex-Format identisch zu
 /// `section_fill::build_cut_caps` (`CAP_FLOATS_PER_VERTEX`), damit dieselbe
@@ -925,6 +945,17 @@ fn push_wall_end_cap(
         verts.extend_from_slice(&c0);
         verts.extend_from_slice(&c2);
         verts.extend_from_slice(&c3);
+        // Schicht-Trennlinie (senkrecht) an der Aussenkante dieser Lage; die letzte Lage
+        // schliesst zusaetzlich mit der Gegenseite ab.
+        let perp = [n[0], 0.0, n[1]];
+        let line = |s_off: f32, verts: &mut Vec<f32>| {
+            let p = [point[0] + n[0] * s_off, point[1] + n[1] * s_off];
+            push_line_strip(verts, [p[0], y0, p[1]], [p[0], y1, p[1]], perp);
+        };
+        line(off_a, verts);
+        if (off_b + total * 0.5).abs() < 1e-5 {
+            line(off_b, verts);
+        }
         off_a = off_b;
     }
 }
@@ -964,6 +995,17 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
                 };
                 for idx in [0usize, 1, 2, 0, 2, 3] {
                     verts.extend_from_slice(&c(fp[idx]));
+                }
+                // Schicht-Trennlinien auf der Oberseite: beide Laengskanten (Lagen-Grenzen).
+                let n = left_normal(wall.start, wall.end);
+                let perp_n = [n[0], 0.0, n[1]];
+                for (a, b) in [(0usize, 1usize), (3, 2)] {
+                    push_line_strip(
+                        &mut verts,
+                        [fp[a][0], y, fp[a][1]],
+                        [fp[b][0], y, fp[b][1]],
+                        perp_n,
+                    );
                 }
             }
         }
