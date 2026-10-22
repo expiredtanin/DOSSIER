@@ -2110,7 +2110,11 @@ export default function App() {
     const desiredPoint =
       ge && ge.kind === "move" && grip3dTargetKey(ge.target) === key && (ge.locks.length != null || ge.locks.angle != null)
         ? grip3dEditPoint(ge.anchor, ge.locks, rawPoint)
-        : rawPoint;
+        : (snapFor3dVertex(
+            rawPoint,
+            new Set(target.wallId ? [target.wallId] : []),
+            new Set(target.drawingId ? [target.drawingId] : []),
+          )?.point ?? rawPoint); // Referenzpunkt des Körpers rastet auf andere Punkte ein
     const desiredTotal: Vec2 = { x: desiredPoint.x - st.anchor.x, y: desiredPoint.y - st.anchor.y };
     const appliedDelta: Vec2 = {
       x: desiredTotal.x - st.appliedTotal.x,
