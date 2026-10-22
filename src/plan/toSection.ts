@@ -1003,7 +1003,7 @@ export function appendRoofSections(
     const totalT = layers.reduce((s, l) => s + Math.max(0, l.thickness), 0);
     if (totalT <= 1e-9) return;
 
-    const segs: Array<{ key: string; tLo: number; tHi: number; zTop0: number; zTop1: number; cosTheta: number }> = [];
+    const segs: Array<{ tLo: number; tHi: number; zTop0: number; zTop1: number; cosTheta: number }> = [];
     for (const pl of geo.planes) {
       const pts = pl.pts;
       if (pts.length < 3) continue;
@@ -1065,9 +1065,7 @@ export function appendRoofSections(
       const zTop0 = zAt(p0.x, p0.y);
       const zTop1 = zAt(p1.x, p1.y);
 
-      const r6 = (v: number) => Math.round(v * 1e5);
       segs.push({
-        key: `${r6(A / C)}|${r6(B / C)}|${r6(zAt(base.x, base.y))}`,
         tLo,
         tHi,
         zTop0,
@@ -1076,15 +1074,26 @@ export function appendRoofSections(
       });
     }
 
-    // Deckungsgleiche, aneinanderstossende Teilflächen (konvexe Zerlegung einer L-/T-förmigen
-    // Dachfläche) zu EINEM Band vereinen — sonst steht an der Naht eine senkrechte Linie.
-    segs.sort((p, q) => (p.key < q.key ? -1 : p.key > q.key ? 1 : p.tLo - q.tLo));
+    // Aneinanderstossende/überlappende Bänder, deren Oberkante in einer Geraden weiterläuft und die gleiche
+    // Dicke haben (z. B. Teilflächen EINER Ebene aus der konvexen Zerlegung, oder zwei
+    // Flächen, die genau an der Schnittspur anstossen), zu EINEM Band vereinen — sonst
+    // steht an der Naht eine senkrechte Linie.
+    segs.sort((p, q) => p.tLo - q.tLo);
     const merged: typeof segs = [];
     for (const sg of segs) {
       const last = merged[merged.length - 1];
-      if (last && last.key === sg.key && Math.abs(sg.tLo - last.tHi) < 1e-6) {
-        last.tHi = sg.tHi;
-        last.zTop1 = sg.zTop1;
+      const slope = (x: typeof sg) => (x.zTop1 - x.zTop0) / Math.max(x.tHi - x.tLo, 1e-12);
+      const lineZ = (x: typeof sg, t: number) => x.zTop0 + slope(x) * (t - x.tLo);
+      if (
+        last &&
+        sg.tLo <= last.tHi + 1e-6 && // anstossend ODER überlappend
+        Math.abs(lineZ(last, sg.tLo) - sg.zTop0) < 1e-6 &&
+        Math.abs(slope(sg) - slope(last)) < 1e-6 &&
+        Math.abs(sg.cosTheta - last.cosTheta) < 1e-6
+      ) {
+        const hi = Math.max(last.tHi, sg.tHi);
+        last.zTop1 = lineZ(last, hi);
+        last.tHi = hi;
       } else {
         merged.push({ ...sg });
       }

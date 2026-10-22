@@ -158,4 +158,13 @@ describe("appendRoofSections — Nähte deckungsgleicher Teilflächen", () => {
     const roofPolys = out.cutPolygons.filter((c) => c.component.kind === "roof");
     expect(roofPolys.length).toBe(3);
   });
+  it("Schnitt genau auf der Höhenlinie (y=2): überlappende gleich hohe Bänder werden EIN Band", () => {
+    const L: Roof["outline"] = [
+      { x: 0, y: 0 }, { x: 11, y: 0 }, { x: 11, y: 4 }, { x: 8, y: 4 }, { x: 8, y: 6 }, { x: 0, y: 6 },
+    ];
+    const plane: SectionPlaneSpec = { point: [0, 0, 2], normal: [0, 0, 1] };
+    const out = emptyOutput();
+    appendRoofSections(out, project(roof({ outline: L, shape: "walm" })), plane);
+    expect(out.cutPolygons.filter((c) => c.component.kind === "roof").length).toBe(3);
+  });
 });
