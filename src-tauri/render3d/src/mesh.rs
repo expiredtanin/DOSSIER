@@ -944,10 +944,29 @@ fn push_wall_end_cap(
 /// Kappen (separates, noch offenes Thema).
 pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
     let free_ends = compute_free_wall_ends(walls);
+    let miters = compute_wall_miters(walls);
     let mut verts: Vec<f32> = Vec::new();
 
     for (wi, wall) in walls.iter().enumerate() {
         let Some(hatch) = wall.hatch else { continue };
+        // Wand-OBERSEITE (Draufsicht): die Bauteil-Schraffur statt der Material-Textur/-Farbe,
+        // wie die geschnittene Wand im Grundriss. (u,v) = Weltkoordinaten (x, z) — metrisch,
+        // ueber alle Waende hinweg phasengleich.
+        if wall.height > 1e-6 {
+            if let Some(fp) = wall_mitered_footprint(wall, miters[wi]) {
+                let y = wall.base_elevation + wall.height;
+                let c = |p: Point2| -> [f32; 9] {
+                    [
+                        p[0], y, p[1], p[0], p[1],
+                        hatch.pattern as f32, hatch.angle.to_radians(), hatch.scale.max(0.05),
+                        hatch.line_weight.max(0.0),
+                    ]
+                };
+                for idx in [0usize, 1, 2, 0, 2, 3] {
+                    verts.extend_from_slice(&c(fp[idx]));
+                }
+            }
+        }
         let (free_start, free_end) = free_ends[wi];
         if !free_start && !free_end {
             continue;

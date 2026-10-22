@@ -185,9 +185,9 @@ mod tests {
     fn isolierte_wand_mit_hatch_bekommt_kappen_an_beiden_freien_enden() {
         // Eine einzelne Wand hat KEINE Nachbarn -> beide Achsenenden sind frei ->
         // je Ende eine Schraffur-Kappe (1 Schicht x 2 Dreiecke x 3 Vertices = 6
-        // Vertices je Ende, 12 insgesamt).
+        // Vertices je Ende, 12) + die Schraffur-Kappe der Wand-OBERSEITE (6) = 18.
         let caps = build_free_wall_end_caps(&[wall_x_hatched(3.0, 0.2, 2.5)]);
-        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 12);
+        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 18);
         // Jeder Kappen-Vertex traegt die Schraffur-Parameter (Muster 3 = crosshatch).
         for v in caps.chunks_exact(CAP_FLOATS_PER_VERTEX) {
             assert_eq!(v[5], 3.0, "pattern");
@@ -196,11 +196,25 @@ mod tests {
     }
 
     #[test]
+    fn wand_oberseite_traegt_die_schraffur_in_weltkoordinaten() {
+        // Wand (0,0)->(3,0), d=0.2, h=2.5: Oberseiten-Quad auf y = 2.5, (u,v) = (x,z).
+        let caps = build_free_wall_end_caps(&[wall_x_hatched(3.0, 0.2, 2.5)]);
+        let tops: Vec<&[f32]> = caps
+            .chunks_exact(CAP_FLOATS_PER_VERTEX)
+            .filter(|v| (v[1] - 2.5).abs() < 1e-6 && (v[3] - v[0]).abs() < 1e-6 && (v[4] - v[2]).abs() < 1e-6)
+            .collect();
+        assert_eq!(tops.len(), 6, "ein Quad = 2 Dreiecke");
+        for v in tops {
+            assert!(v[2].abs() <= 0.1 + 1e-5, "innerhalb der Wanddicke");
+        }
+    }
+
+    #[test]
     fn verbundene_wandenden_bekommen_keine_kappe_dort() {
         // Zwei Waende treffen sich rechtwinklig bei (3,0) -> DIESES Ende ist bei
         // beiden Waenden NICHT frei (Gehrung/Anschluss), die beiden anderen
         // (freien) Enden bekommen weiterhin je eine Kappe -> 2 Kappen gesamt
-        // (nicht 4), macht 12 Vertices statt 24.
+        // (nicht 4), macht 12 Vertices statt 24 — plus je Wand eine Oberseiten-Kappe (2 x 6).
         let a = wall_x_hatched(3.0, 0.2, 2.5); // (0,0) frei .. (3,0) verbunden
         let b = WallInput {
             start: [3.0, 0.0],
@@ -208,7 +222,7 @@ mod tests {
             ..wall_x_hatched(4.0, 0.2, 2.5) // (3,0) verbunden .. (3,4) frei
         };
         let caps = build_free_wall_end_caps(&[a, b]);
-        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 12, "nur die 2 freien Enden -> 2 Kappen");
+        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 24, "2 freie Enden + 2 Oberseiten");
     }
 
     #[test]
@@ -220,8 +234,9 @@ mod tests {
         let b = WallInput { start: [3.0, 0.0], end: [3.0, 4.0], ..wall_x_hatched(4.0, 0.2, 2.5) };
         let c = WallInput { start: [3.0, 0.0], end: [6.0, 0.0], ..wall_x_hatched(3.0, 0.2, 2.5) };
         let caps = build_free_wall_end_caps(&[a, b, c]);
-        // Freie Enden: a.start(0,0), b.end(3,4), c.end(6,0) -> 3 Kappen (nicht 6).
-        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 18);
+        // Freie Enden: a.start(0,0), b.end(3,4), c.end(6,0) -> 3 Kappen (nicht 6) = 18,
+        // plus 3 Oberseiten-Kappen (je 6) = 36.
+        assert_eq!(caps.len() / CAP_FLOATS_PER_VERTEX, 36);
     }
 
     #[test]
