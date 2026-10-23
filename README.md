@@ -1,195 +1,353 @@
 # Dossier
 
-Open-Source-CAAD (Computer Aided Architecture Design). Modelliert ein Gebäude
-aus semantischen Bauteilen und zieht daraus saubere, normgerechte 2D-Pläne —
-ohne Revit. **Desktop-App** — auf macOS über **Tauri**, auf Linux über eine
-**Electron**-Shell (weil Tauris Linux-Webview WebKitGTK kein zuverlässiges
-WebGPU bietet, das die Rendering-Engines brauchen); dieselbe Codebasis läuft
-auch im Browser (eingeschränkt, ohne native Fenster/Dateisystem-Integration).
+**Open-Source-CAD für die Architektur.** Dossier modelliert ein Gebäude aus
+semantischen Bauteilen — Wände, Decken, Dächer, Treppen, Öffnungen, Räume — und
+leitet daraus saubere, normgerechte Pläne ab: Grundriss, Schnitt, Ansicht, 3D,
+Planlayout und PDF. Dazu kommt ein vollwertiges 2D-Zeichenprogramm mit
+Rhino-artiger Befehlszeile.
 
-Das ist die eigenständige Neuimplementierung des Rhino-Plugins
+Dossier ist eine Desktop-Anwendung (macOS über Tauri, Linux über Electron) und
+die eigenständige Neuimplementierung des Rhino-Plugins
 [DOSSIER](https://git.openbureau.ch/karim/dossier): dieselbe Denkweise
 (Geschosse, Kategorie-Ebenen, mehrschichtige Bauteile, Prioritäts-
-Verschneidung), aber mit eigenem Datenmodell + eigener Rendering-Engine
-(Rust/WASM/WebGPU, intern „Nordstern" genannt) statt Rhino-Aufsatz.
+Verschneidung), aber mit eigenem Datenmodell und eigenen Rendering-Engines in
+Rust/WebGPU (intern „Nordstern") statt eines Aufsatzes auf Rhino.
+
+Dossier ist Teil der **openbureau**-Suite.
+
+---
 
 ## Grundgedanke
 
-Es gibt **ein semantisches Modell** als einzige Wahrheit. Jede Ansicht — 3D,
-Grundriss, Schnitt, Ansicht, PDF — wird daraus **abgeleitet**. Darstellung
-(Detailgrad, Linienstärken, Schraffuren) wird erst beim Rendern angewandt, nie
-in die Geometrie eingebacken. Wer eine Wand verschiebt, verschiebt sie überall.
+Es gibt **ein semantisches Modell** als einzige Wahrheit. Jede Darstellung
+wird daraus **abgeleitet**, nie umgekehrt:
 
-Konkret heißt das auch: Der Grundriss entsteht nicht aus einem zerschnittenen
-3D-Mesh, sondern **analytisch aus den Bauteil-Parametern** (Wandachsen + Dicken →
-Linien, Öffnungen → Lücken + Symbol). PDF-Export ist derselbe Plan, nur mit
-echten mm-Stiftstärken statt Bildschirm-Hairlines. Schnitte und Ansichten laufen
-über eine eigene, analytische Rust-Pipeline (kein Hidden-Line-Removal nötig)
-und sind seit Juli live im 3D-Viewport verdrahtet, nicht nur ein Spike.
+```
+                    ┌──────────────────────────┐
+                    │  Projekt (semantisches   │
+                    │  Modell, intern Meter)   │
+                    └────────────┬─────────────┘
+       ┌──────────────┬──────────┼───────────┬───────────────┐
+       ▼              ▼          ▼           ▼               ▼
+  Grundriss       Schnitt     Ansicht       3D       Export (IFC, STEP,
+ (analytisch    (Rust-WASM,  (Projektion) (WebGPU)    DXF, PDF, SVG, …)
+  aus Para-      Prioritäts-
+  metern)        logik)
+```
 
-## Stand heute
+- **Darstellung wird erst beim Rendern angewandt** — Detailgrad, Stiftstärken,
+  Schraffuren und Farben sind nie in die Geometrie eingebacken. Wer eine Wand
+  verschiebt, verschiebt sie überall.
+- **Der Grundriss entsteht analytisch** aus den Bauteil-Parametern
+  (Wandachsen + Schichtdicken → Linien und Füllungen, Öffnungen → Lücken +
+  Symbol), nicht aus einem zerschnittenen 3D-Mesh.
+- **Schnitte laufen über eine eigene analytische Pipeline** in Rust, die
+  dieselbe Prioritäts-Verschneidung wie der Grundriss anwendet — kein
+  Hidden-Line-Removal, keine Abweichung zwischen 2D und 3D.
+- **PDF ist derselbe Plan** wie am Bildschirm, nur mit echten
+  mm-Stiftstärken statt Bildschirm-Haarlinien.
 
-_(Momentaufnahme Oktober 2026 — bei einem Projekt in diesem Tempo veraltet
-jede genaue Zahl schnell; als Grössenordnung gedacht, nicht als Versprechen.)_
+## Funktionsumfang
 
-Aus dem ursprünglichen Risiko-Spike ist binnen weniger Monate ein
-**funktionsreiches Desktop-BIM-Tool** geworden: eigenes semantisches
-Gebäudemodell, zwei eigene Rust/WASM-Rendering-Engines, IFC/DXF/PDF/STL/OBJ-
-Export, Swisstopo-Import, SIA-416-Flächen, Materialbibliothek, Layouts/
-Plansätze, native Tauri-Fenster. ~116.000 Zeilen TypeScript + ~20.000 Zeilen
-Rust (ohne Tests), über 1700 Vitest-Tests, alle grün.
+_Stand Oktober 2026, Version 0.1.0. Das Projekt entwickelt sich schnell; die
+Liste beschreibt den Ist-Zustand des Codes, nicht eine Zusage._
 
-**Funktioniert (Auszug, nicht abschliessend):**
-- Semantisches Modell mit **mehrschichtigen Wänden**, L-Eck-Gehrung **und**
-  Prioritäts-T-/X-Stössen (`joinPriority` am Component) — konsistent in
-  Grundriss, 3D-Viewport und 3D-Live-Schnitt.
-- **Parametrische Wände**, Decken, Treppen (gerade/L/Wendel), Dächer
-  (Flach/Pult/Sattel/Walm/Mansarde/Zelt), Stützen, SIA-416-Räume mit
-  automatischer Bilanz + CSV-Export.
-- **Türen & Fenster** gehostet in Wänden, mit Rahmen/Zarge/Kämpfer/Oberlicht,
-  Detailgrad grob/mittel/fein, echte Rechteck-Löcher im 3D-Wandkörper.
-- Rhino-artiges **Kommandosystem** mit getippten Koordinaten (`5,3` · `r5,3` ·
-  `5<45`) und Tab-Feld-Zyklus; Snapping, Grips, Trim/Split/Join, 2D-Booleans.
-- **Live 2D↔3D-Schnitt**: eine Schnittebene im 3D-Viewport folgt derselben
-  Prioritäts-Logik wie der 2D-Plan-Schnitt (Rust-Port, keine Diskrepanz).
-- **Vektor-Export:** PDF (Einzel- **und Mehrseiten-Layouts**), DXF, **IFC4**
-  (mit echten Fenster-/Tür-Löchern), STL/OBJ, CSV-Bauteilliste.
-- **Materialbibliothek**: 13 gebündelte PBR-Starter **plus** Live-Suche der
-  kompletten ambientCG-Bibliothek (1K/2K/4K, On-Demand-Download).
-- **Layouts/Plansätze** mit mehreren Viewports pro Blatt, Ausschnitte
-  (View-Snapshots), Kamera-Presets, Norden-Rotation.
-- **Import:** DXF/DWG, Swisstopo (swissBUILDINGS3D/-ALTI3D/SWISSIMAGE,
-  radiusgenau zugeschnitten), OSM-Kontextimport, `.lin`/`.pat`. Grosse DXF-
-  Dateien (Kataster-Import ganzer Städte) parsen in einem Web Worker, damit
-  die UI währenddessen nicht einfriert.
-- **Native Desktop-Integration** (Tauri): eigene randlose Fenster, native
-  Speichern/Öffnen-Dialoge, eigenes `.obp`-Dateiformat mit OS-Level-Lock gegen
-  Doppelöffnen, mehrere native Zusatzfenster (Resources, Settings, …).
-- **Resource Manager** (Component/Hatch/Line/Typ-Editoren), regelbasierte
-  Overrides, Panel-System (dockbar/floatend), i18n (de/en).
-- **3D-Griffsystem** auf 2D-Niveau: Feld-Controller (getippte Länge/Winkel
-  relativ zum Ausgangspunkt, Tab-Zyklus wie im 2D), Kollisionsgruppen-
-  Snapping (verbundene Ecken ziehen mit), Klick-Bewegen-Klick statt
-  Drag-Halten, Rotations-Gizmo.
-- **Stiftsätze** (ArchiCAD-Vorbild): Bauteile/Ebenen lassen sich auf einen
-  Stift statt eine feste Farbe legen — ein Satzwechsel färbt alle daran
-  gekoppelten Elemente sofort um, ohne jede Farbe einzeln anzufassen.
-- **Einstellungen**, in Tabs organisiert: frei belegbare Tastenkürzel (mit
-  Kollisions-Erkennung) zusätzlich zu den schon länger anpassbaren
-  Befehlszeilen-Kürzeln.
-- Erweiterte 2D-Zeichen-/Annotationswerkzeuge: Bogen/Bulge-Polylinien,
-  Rechteck mit Fasen, Bruchlinie (Revision Cloud), Massstabsbalken,
-  Detailverweis, Punktmarker, Ausblend-Maske, Ausrichten, Explodieren —
-  samt ICC-Farbmanagement (Mischer, Spektral-Picker) für die Farbwahl.
+### Bauteile
 
-**Bewusst noch offen** (Auszug):
-- **Echtes Mesh-Boolean für Öffnungen** — funktioniert heute über achsparallele
-  Rechteck-Löcher; ein generisches CSG-Boolean existiert bereits
-  (`trucksolid`/`csgrs`), ist aber nicht an die Wand-Pipeline angeschlossen.
-- **DWG/DXF-Domänenimport** (Entitäten → echte Wände/Öffnungen) — Lesen
-  funktioniert, das Mapping auf das Modell ist unbegonnen; DWG-Schreiben fehlt.
-- **`make2D`**-Kommando (3D-Ansicht → flacher 2D-Plan mit Füllungen).
-- Bekannte, noch nicht bereinigte Doppelspur `Door[]`/`Opening[]` im Modell.
+- **Wände** mit beliebig vielen Materialschichten, L-Eck-Gehrungen und
+  Prioritäts-T-/X-Stössen (`joinPriority` je Bauteil) — identisch im
+  Grundriss, in 3D und im Schnitt. Wandtypen, Referenzlinie, parametrische
+  Wand-Regelwerke.
+- **Öffnungen**: Fenster und Türen in Wänden gehostet, mit Blendrahmen,
+  Flügelrahmen, Glas, Sprossen, Kämpfer, Oberlicht, Rollladenkasten,
+  zweiflügeligen Türen, Kassettentüren; Detailgrad grob/mittel/fein; Fenster-
+  und Türtypen.
+- **Decken** mit Deckentypen und Aussparungen.
+- **Dächer**: Flach-, Pult-, Sattel-, Walm-, Mansard- und Zeltdach, Krüppelwalm,
+  Dachschichten über Dachtypen, getrennter Trauf-/Ortgang-Überstand. Sattel-,
+  Pult- und Mansarddach auch über L/T/U-Grundrissen; Walm-, Zelt- und
+  Mansard-Walmdach über beliebigen einfachen Umrissen (auch schiefwinklig und
+  konkav) mit echten Graten und Kehlen (Straight-Skeleton).
+- **Treppen** (gerade, L-förmig, Wendel) inkl. Podest und Geländer; gerade
+  Betontreppen mit schräger Untersicht im Schnitt.
+- **Stützen**, **Räume** nach SIA 416 mit Raumstempel, automatischer
+  Flächenbilanz und CSV-Export.
+- **Gruppen**, Symbole/Blöcke, Objektsperre.
 
-## Stack
+### Volumenkörper (B-Rep)
 
-| | |
+Über die Crate `trucksolid` ([truck](https://github.com/ricosjp/truck) +
+[csgrs](https://github.com/timschmidt/csgrs)) als WASM:
+
+- Extrusion von 2D-Profilen mit Löchern, Verjüngung, verrundeten Ecken
+  (echte Kreisbögen) und Fasen.
+- Grundkörper: Quader, Kugel, Zylinder, Kegel, Kegelstumpf, Torus;
+  Rotationskörper und Loft.
+- Boolesche Operationen (`solidbool`) als B-Rep mit Mesh-CSG-Rückfall bei
+  bündigen Flächen; Drehen, Skalieren und Spiegeln direkt am B-Rep.
+- Kennwerte im Objekt-Panel: Volumen, Oberfläche, Schwerpunkt, Dichtheit.
+- **Kollisionsprüfung** zwischen freien Körpern, importierten Meshes und den
+  übrigen Bauteilen, mit Markierungen im Plan.
+
+### 2D-Zeichnen und Annotation
+
+- Linie, Polylinie (Eck-, Bogen- und Splinepunkte), Rechteck mit Fasen, Kreis,
+  Bogen, Ellipse, Vieleck, Spline, Bézier, Konstruktionslinie, Strahl,
+  Mehrfachlinie.
+- Bearbeiten: Verschieben, Kopieren, Drehen, Spiegeln, Skalieren, Reihe,
+  Versatz, Trimmen, Dehnen, Unterbrechen, Verbinden, Verrunden, Fasen,
+  Explodieren, Ausrichten, Eigenschaften übertragen, 2D-Booleans.
+- Bemassung, Höhenkote, Text, Textrahmen mit Rich-Text, Pfadtext,
+  Hinweislinie, Detailverweis, Massstabsbalken, Revisionswolke, Punktmarker,
+  Ausblend-Maske, Schnitt- und Ansichtslinien, Bilder (auch PDF-Seiten als
+  Bild).
+- Füllungen als Vollfläche, Schraffur oder Verlauf, mit Transparenz;
+  Schraffur-Winkel, -Massstab und -Ursprung je Element.
+
+### Bedienung
+
+- **Befehlszeile** nach Rhino-Vorbild mit rund 55 Befehlen, deutschen und
+  englischen Aliassen (`w`/`wand`, `d`/`decke`, `dach`, `koerper`, …) und
+  getippten Koordinaten: absolut `5,3`, relativ `r5,3`, polar `5<45`;
+  Tab-Zyklus durch die Eingabefelder.
+- **Fang** auf Endpunkte, Mitten, Schnittpunkte, Kanten usw.; Griffe mit
+  Vorschau (das Projekt ändert sich erst beim Loslassen); Esc bricht ab.
+- **3D-Griffsystem** auf 2D-Niveau: getippte Länge und Winkel, Fang beim
+  Verschieben, Achssperre, Rotations-Gizmo, verbundene Ecken ziehen mit.
+- Übereinanderliegende Objekte per Cmd/Strg-Klick durchschalten oder aus
+  einer Liste wählen.
+- Dockbare und frei schwebende Panels, Ribbon-Leiste mit eigener
+  Werkzeugleiste, frei belegbare Tastenkürzel mit Kollisionserkennung,
+  Oberfläche auf Deutsch und Englisch, helles und dunkles Thema.
+
+### Ansichten und Pläne
+
+- **Grundriss** je Geschoss mit Zeichnungsebenen, Kategorie-Ebenen,
+  gedimmten Referenzebenen, Sichtbarkeits-Kombinationen und fünf
+  Darstellungsmodi.
+- **Schnitt** und **Ansicht** aus Schnitt-/Ansichtslinien: geschnittene
+  Bauteile mit Schraffur, automatische Höhenkoten, eigene 2D-Elemente pro
+  Blatt. Bauteile lassen sich direkt im Schnitt bearbeiten — Wände, Decken,
+  Öffnungen und Treppen waagrecht verschieben, Wandhöhe und Brüstung über
+  Höhengriffe anpassen.
+- **3D-Ansicht** mit Live-Schnittebene, schattiert/mit Kanten/texturiert; die
+  Wand-Oberseiten tragen in der Draufsicht dieselbe Schraffur wie im Plan.
+- **Layouts und Plansätze**: mehrere Viewports pro Blatt, Masterlayouts mit
+  Rahmen und Titelblock, gespeicherte Ausschnitte, Kamera-Presets,
+  Nordrotation, Ordner als Mehrseiten-PDF.
+
+### Darstellung und Ressourcen
+
+- **Resource Manager** für Bauteile (Components), Schraffuren, Linienstile,
+  Text-Stile und Bauteiltypen; Import von `.lin`- und `.pat`-Dateien.
+- **Stiftsätze** nach ArchiCAD-Vorbild: Bauteile und Ebenen verweisen auf einen
+  Stift statt auf eine feste Farbe; ein Wechsel des Stiftsatzes färbt alles
+  Gekoppelte um.
+- **Grafische Overrides**: Regeln, die Farbe, Strichstärke und Linienstil
+  abhängig von Ebene und Element überschreiben, ohne die Daten zu ändern.
+- **Farbmanagement**: RGB/CMYK-Mischer mit echtem ICC-Abgleich (Little CMS)
+  und Spektral-Picker.
+- **Materialbibliothek**: 13 gebündelte PBR-Materialien plus Live-Suche in der
+  gesamten [ambientCG](https://ambientcg.com)-Bibliothek (CC0, 1K/2K/4K, auf
+  Abruf geladen).
+
+### Import
+
+| Format / Quelle | Ergebnis |
 |---|---|
-| Shell | **Tauri** auf macOS (WKWebView+WebGPU) · **Electron/Chromium** auf Linux (WebKitGTK kann kein WebGPU) — beide randlos, eigene Titelleiste, gemeinsame React-App |
-| Frontend | React + TypeScript + Vite |
-| 3D | eigener Rust/WASM/WebGPU-Renderer „Nordstern" (`render3d`, Default), Three.js als leichtgewichtiger Zweitpfad |
-| 2D-Plan | eigener Rust/WASM/WebGPU-Renderer (`render2d`), plus ein TS/WebGL2-Renderer (`plan/glPlan`), plus SVG (`PlanView.tsx`, immer als Interaktions-/Fallback-Ebene aktiv) |
-| Geometrie | eigener 2D-Kernel (`src/geometry/kernel2d.ts`); ein Rust-Port (`src-tauri/kernel2d`) existiert nur als Paritätstest, läuft nicht produktiv |
-| CSG/Extrusion | `trucksolid`-Crate (`truck` + `csgrs`), fürs Extrude-Kommando |
-| Export | eigener IFC4-Writer, `jspdf`/`svg2pdf.js` (Vektor-PDF), eigener DXF-Writer, STL/OBJ |
-| Import | `dxf-parser`, `@mlightcad/libredwg-web` (DWG), eigene `.lin`/`.pat`-Parser |
-| Materialien | `jszip` (ambientCG-Zip-Entpacken), `three.js` `TextureLoader` |
+| DXF | 2D-Elemente; fehlende Layer werden zu Kategorien. Grosse Dateien (Kataster ganzer Städte) werden parallel in Web Workern geparst. |
+| DWG | über `@mlightcad/libredwg-web`, inkl. Polyface-Meshes |
+| STEP (ISO 10303, B-Rep) | tessellierte Körper im Kontext |
+| PDF, Bilder | als Bild-Element im Plan oder im Layout |
+| swisstopo | Ortssuche, swissBUILDINGS3D (2.0/3.0), swissALTI3D-Gelände, SWISSIMAGE-Orthofoto — radiusgenau zugeschnitten, LV95-georeferenziert |
+| OpenStreetMap | Gebäude, Strassen, Gewässer, Grünflächen, Bahn, Wald als Kontext |
+| Höhenlinien | Gelände als TIN (Delaunay) |
+| `.lin`, `.pat` | Linienstile und Schraffuren |
 
-Der ursprünglich geplante OCCT/`opencascade.js`-HLR-Pfad für Schnitte ist
-komplett entfernt (weder Dependency noch Code) — abgelöst durch die
-analytische Rust-Schnitt-Pipeline (siehe Grundgedanke oben).
+### Export
+
+| Format | Inhalt |
+|---|---|
+| PDF | Vektor-PDF einzelner Pläne und mehrseitiger Plansätze, echte Stiftstärken in mm |
+| SVG | dasselbe druckgenaue SVG, aus dem auch das PDF entsteht |
+| DXF | Linien, Bögen, Füllungen und Verläufe |
+| IFC4 | Geschossstruktur, Bauteile mit Schichten, Öffnungen als echte Löcher |
+| STEP | B-Rep-Körper je Wandschicht, Decke, Dach, Treppe und Extrusion (in mm) |
+| STL, OBJ | Dreiecksnetz des 3D-Modells, Öffnungen ausgeschnitten |
+| CSV | Bauteilliste und SIA-416-Raumbilanz |
+
+### Desktop-Integration
+
+- Eigenes Projektformat **`.obp`** (JSON) mit OS-Lock gegen doppeltes Öffnen,
+  Vorlagen, zuletzt geöffnete Projekte, Rückfrage bei ungespeicherten
+  Änderungen.
+- Randlose Fenster mit eigener Titelleiste, native macOS-Menüleiste, native
+  Zusatzfenster (Ressourcen, Einstellungen, Ebenen, Kontext-Import).
+- Selbst-Update über den Tauri-Updater (signierte Releases).
+- Auf macOS rendert der Grundriss in eine **native Metal-Fläche** unter der
+  Webview (`native2d`): Millionen von Linien aus einem Kataster-Import bleiben
+  flüssig zoom- und verschiebbar.
+
+### Bewusst noch offen
+
+- **DWG/DXF als Bauteile**: Lesen funktioniert, die Zuordnung von Entitäten zu
+  echten Wänden und Öffnungen fehlt; DWG-Schreiben fehlt.
+- **`make2D`**: aus einer 3D-Sicht eine flache 2D-Zeichnung mit Füllungen
+  erzeugen.
+- **Generische Mesh-Booleans für Wandöffnungen**: Öffnungen werden heute als
+  achsparallele Löcher aus dem Wandkörper geschnitten; das allgemeine
+  CSG aus `trucksolid` ist nicht an die Wand-Pipeline angeschlossen.
+- Dachfenster.
+- Die historische Doppelung `doors` / `openings` im Datenmodell ist noch nicht
+  bereinigt.
+
+## Plattformen
+
+| Plattform | Shell | Rendering |
+|---|---|---|
+| macOS | **Tauri** (WKWebView) | WebGPU für 3D; Grundriss nativ über Metal (`native2d`), Rückfall auf WebGL2 mit `?native=0` |
+| Linux | **Electron** (Chromium) | WebGPU — WebKitGTK, die Linux-Webview von Tauri, bietet kein verlässliches WebGPU |
+| Browser | Vite-Dev-Server | eingeschränkt: ohne native Fenster, Dialoge und Dateisperre; gedacht für Entwicklung und Tests |
+
+Fertige Installer gibt es noch nicht; Dossier wird derzeit aus dem Quellcode
+gebaut.
+
+## Technik
+
+| Bereich | Umsetzung |
+|---|---|
+| Oberfläche | React 18 + TypeScript + Vite; eigener Store auf `useSyncExternalStore` mit Slices und Undo/Redo |
+| Grundriss | Plan-Ableitung in TS (`plan/generatePlan`) → GPU-Chunks; Rendering nativ über `render2d` (macOS), WebGL2 (`plan/glPlan`) oder `render2d` als WASM; SVG-Ebene immer aktiv für Interaktion und Overlays |
+| 3D | eigener WebGPU-Renderer `render3d` („Nordstern", Rust/WASM); Three.js als leichtgewichtiger Zweitpfad |
+| Schnitt | analytische Schnitt-Pipeline in `render3d` (`section.rs`), Ansicht in TS (`plan/toElevation.ts`) |
+| 2D-Geometrie | eigener Kernel `geometry/kernel2d.ts` (Offset, Trim, Verrundung, Schnittpunkte, Bulges) |
+| Volumenkörper | `trucksolid` (truck 0.6, csgrs) als WASM: B-Rep, Booleans, STEP-I/O, Mesh-Kennwerte |
+| PDF/SVG | eigene Druck-SVG-Erzeugung, `jspdf` + `svg2pdf.js` |
+| IFC, DXF, STEP | eigene Writer bzw. truck-stepio |
+| Import | `dxf-parser` (in Workern), `@mlightcad/libredwg-web`, `pdfjs-dist`, eigene `.lin`/`.pat`-Parser |
+| Farbe | `lcms-wasm` (Little CMS) |
+
+### Rust-Crates (`src-tauri/`)
+
+Jede Crate ist eigenständig, headless testbar und per `wasm-pack` baubar.
+
+| Crate | Zweck | Im Einsatz |
+|---|---|---|
+| `render2d` | 2D-Plan-Renderer (wgpu, Vektor-Text, Chunk-Renderer für `native2d`) | ja |
+| `render3d` | 3D-Renderer „Nordstern" + analytischer Schnitt | ja |
+| `trucksolid` | B-Rep-Modellierung, Booleans, STEP, Kennwerte, Kollision | ja |
+| `kernel2d` | Rust-Port des 2D-Kernels, nur als Paritätstest gegen die TS-Version | nein |
+| `dwgimport` | DXF/DWG-Parser-Spike (`acadrust`) | nein |
+| `src/` | Tauri-Host: Fenster, Menüs, Dateisperre, Metal-Einbettung | ja |
+
+### Umfang
+
+Rund 119 000 Zeilen TypeScript und 23 000 Zeilen Rust; etwa 1 900
+Vitest-Fälle in rund 200 Testdateien sowie gut 180 Rust-Tests.
 
 ## Entwicklung
 
+### Voraussetzungen
+
+- Node.js mit npm
+- Rust mit dem Target `wasm32-unknown-unknown` (`rustup target add
+  wasm32-unknown-unknown`); `wasm-pack` kommt als npm-Abhängigkeit mit
+- für Tauri die [Tauri-Voraussetzungen](https://tauri.app/start/prerequisites/)
+  der jeweiligen Plattform
+
+### Erster Start
+
+Die kompilierten WASM-Pakete (`src/engine/pkg*/`) sind nicht im Repository.
+Nach dem Klonen einmal bauen:
+
 ```bash
+git clone https://git.openbureau.ch/karim/DOSSIER-STANDALONE.git
+cd DOSSIER-STANDALONE
 npm install
-npm run dev        # Vite, http://localhost:5187
-npm run tauri:dev  # Tauri-Fenster (macOS — nativer Zielrahmen dort)
-npm run electron   # Electron-Fenster (Linux — WebGPU über Chromium statt WebKitGTK)
-npx tsc -b         # Typecheck
-npm run build      # tsc -b && vite build
-npm test           # vitest run
-```
-
-WASM-Engines nach Rust-Änderungen neu bauen (nur `.rs` committen,
-`src/engine/pkg*/` ist gitignored):
-
-```bash
 npm run build:engine     # render2d
 npm run build:engine3d   # render3d
 npm run build:truck      # trucksolid
 ```
 
-render3d/Wasm3DViewport-Änderungen sind nicht per Puppeteer/Browser
-verifizierbar — im laufenden `tauri:dev`-Fenster selbst testen.
+Nach Änderungen an Rust-Code die betroffene Crate erneut bauen.
 
-## Aufbau
+### Befehle
+
+```bash
+npm run tauri:dev     # Tauri-Fenster (macOS: inkl. native2d; Opt-out: DOSSIER_NO_NATIVE2D=1)
+npm run tauri:build   # App-Bundle bauen
+npm run electron      # Electron-Fenster (Linux)
+npm run dev           # nur Vite, http://localhost:5187
+npm run build         # Typecheck + Produktions-Build
+npm test              # Vitest
+npx tsc -b            # nur Typecheck
+```
+
+Rust-Tests laufen je Crate mit `cargo test` im jeweiligen Verzeichnis unter
+`src-tauri/`.
+
+Änderungen am 3D-Viewport und an der nativen Plan-Fläche lassen sich nicht
+zuverlässig headless prüfen — im laufenden `tauri:dev`-Fenster testen.
+
+### Aufbau
 
 ```
 src/
-  model/       semantisches Modell (types, joins, parametricWalls, roomStamp, terrain)
-  geometry/    2D-Kernel (offset/trim/fillet/intersect, ceiling/opening/roomArea/stair/roof/column)
-  commands/    Rhino-artiges Befehlssystem (engine, parser, registry, cmds/)
-  tools/       interaktive Zeichenwerkzeuge + Snapping + Transformationen
-  plan/        Grundriss-Ableitung (generatePlan) + PlanView (SVG) + glPlan (WebGL2) + Rust-Bindings
-  viewport/    Viewport3D (Three.js) + Wasm3DViewport (Rust/wgpu „Nordstern", Default)
-  export/      IFC4-, PDF-, DXF-, STL/OBJ-, CSV-Export aus derselben Plan-/Modell-Struktur
-  materials/   ambientCG-Live-Suche + gebündelte Starter-Bibliothek + PBR-Runtime
-  panels/      dockbares Panel-System + die einzelnen Paletten
-  state/       eigener Store (useSyncExternalStore) + Slices (project/selection/view/layout/…)
-  native/      Tauri-only: native Fenster, macOS-Menüleiste, Fenster-Chrome
-  ui/          App.tsx-Shell, Top-Bar, Resource Manager, Kontextmenü, Kommandozeile
-  io/          Import/Export (DXF, DWG, .lin, .pat), Swisstopo/LV95, OSM-Kontext
-  editors/     reine Editier-Logik (Ausrichten, Explodieren, Eigenschaften
-               übertragen, Elemente-Zwischenablage, 2D-Booleans)
-  text/        Schriftmetriken + Textrahmen-Umbruch
+  model/       semantisches Modell (types), Wand-Anschlüsse, parametrische Wände,
+               Raumstempel, Stiftsätze, Farbe/ICC, Gelände
+  geometry/    2D-Kernel und Bauteil-Geometrie (Decke, Öffnung, Dach, Dach-Skelett,
+               Treppe, Stütze, Raumfläche)
+  commands/    Befehlssystem (Engine, Eingabe-Parser, Registry, cmds/ je Befehl)
+  tools/       interaktive Werkzeuge, Fang, Transformationen
+  editors/     reine Editier-Logik (Ausrichten, Explodieren, Booleans, Zwischenablage)
+  plan/        Plan-Ableitung (generatePlan), Schnitt/Ansicht, 3D-Modell (toWalls3d),
+               PlanView (SVG), glPlan (WebGL2), native2d-Anbindung
+  viewport/    3D-Viewports (WebGPU „Nordstern", Three.js), 3D-Griffe
+  views/       Zusammensetzen der Viewports (Grundriss, Schnitt, Ansicht, 3D)
+  engine/      Laden der WASM-Crates (render3d, trucksolid)
+  analysis/    Modellprüfungen (Kollision)
+  export/      PDF, SVG, DXF, IFC, STEP, STL/OBJ, CSV
+  io/          Import (DXF, DWG, STEP, PDF, Bilder, .lin/.pat), swisstopo, OSM, LV95,
+               Projektdatei
+  materials/   Materialbibliothek, ambientCG-Suche, PBR-Laufzeit
+  overrides/   Regel-Engine für grafische Overrides
+  state/       Store, Slices, Undo/Redo, Hooks der App-Shell
+  panels/      Panel-System und die einzelnen Paletten
+  ui/          App-Shell, Ribbon, Resource Manager, Dialoge, Befehlszeile
+  native/      Tauri-spezifisch: Menüleiste, Zusatzfenster, Fensterrahmen
+  text/        Schriftmetriken, Textrahmen, Rich-Text
   i18n/        Wörterbücher de/en
-src-tauri/     5 eigenständige Rust-Crates (render2d/render3d/kernel2d/trucksolid/
-               dwgimport, je headless UND per wasm-pack baubar) + der Tauri-Host selbst
+  update/      Selbst-Update
+src-tauri/     Tauri-Host + Rust-Crates (siehe oben)
+scripts/       Shell-Starter (Electron/Chromium), Benchmarks, Browser-Probes
+website/       Dokumentations-Website (Hugo)
 ```
 
-## Konventionen
+### Konventionen
 
-- **Bezeichner im Code sind englisch**, an Vectorworks-Terminologie angelehnt
-  (Design Layer, Component, Hatch, Wall Style). **UI-Texte sind deutsch**, immer
-  über `t('key')` — keine hartcodierten Strings im JSX.
-- Intern alles in **Metern**; Anzeige via `formatM`.
+- **Bezeichner englisch**, an Vectorworks-Begriffe angelehnt (Design Layer,
+  Component, Hatch, Wall Style); Kommentare deutsch.
+- **UI-Texte** stehen nie im Code, sondern immer über `t('key')` in
+  `src/i18n/`.
+- **Einheiten**: intern immer Meter; Anzeige über `formatM`. Der STEP-Export
+  schreibt Millimeter.
+- Neue Befehle sind additiv: Modul unter `src/commands/cmds/` anlegen und in
+  `registry.ts` eintragen.
 
-## Weiterlesen
+## Dokumentation
 
-Dieses README ist die einzige Doku **im Code selbst** — `STATUS.md`,
-`ARCHITECTURE.md`, `ROADMAP.md`, `HANDOVER.md`, `PENDENZEN.md`,
-`CONVENTIONS.md` und `docs/` sind bewusst per `.gitignore` ausgeschlossen
-(interne Arbeitsnotizen/Backlog, kein öffentlicher Anspruch auf Vollständigkeit
-oder Aktualität) und daher hier absichtlich **nicht** verlinkt.
-
-Eine ausführlichere, nutzer-/entwicklerorientierte Dokumentation entsteht
-separat unter [`website/`](website/) (Hugo, Hextra-Theme, Ziel-URL
-`dossier.openbureau.ch`) — Anleitung (Erste Schritte, Bauteile, Export/Import,
-Layouts, Troubleshooting) und Entwickler-Doku (Aufbau, Technik-Stack,
-Konventionen, aktueller Stand).
+Eine ausführliche Anleitung (Installation, erste Schritte, Bauteile,
+Befehlssystem, Layouts, Import/Export, Fehlerbehebung) und eine
+Entwickler-Dokumentation entstehen unter [`website/`](website/) (Hugo,
+Hextra-Theme, Ziel: `dossier.openbureau.ch`).
 
 ## Lizenz
 
 Copyright © 2026 Karim Gabriele Varano. Veröffentlicht unter der
 **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)** —
-siehe [LICENSE](LICENSE). Dossier ist Teil der **openbureau**-Suite.
+siehe [LICENSE](LICENSE).
 
-Die AGPL verlangt, dass auch bei Betrieb als Netzwerk-/Webdienst der (ggf.
+Die AGPL verlangt, dass auch beim Betrieb als Netzwerkdienst der (gegebenenfalls
 geänderte) Quellcode für die Nutzer verfügbar gemacht wird. Drittkomponenten
-behalten ihre jeweiligen Lizenzen (siehe „Über"-Dialog in der App).
-
----
-
-Die UI ist deutsch; Schweizer Spezifika (SIA-416-Flächen, Swisstopo-Geodaten)
-sind ein bewusster Differenzierer.
+behalten ihre eigenen Lizenzen (siehe „Über"-Dialog in der App); die
+gebündelten ambientCG-Materialien stehen unter CC0 1.0.
