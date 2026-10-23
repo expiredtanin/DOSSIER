@@ -63,3 +63,12 @@ describe("allCommandNames", () => {
     expect(names).toContain("detailref");
   });
 });
+
+describe("Körper-Befehle (truck)", () => {
+  it("Kürzel führen zu den B-Rep-Befehlen", () => {
+    expect(resolveCommand("kugel")?.name).toBe("solid");
+    expect(resolveCommand("koerper")?.name).toBe("solid");
+    expect(resolveCommand("bool")?.name).toBe("solidbool");
+    expect(resolveCommand("verschneiden")?.name).toBe("solidbool");
+  });
+});
