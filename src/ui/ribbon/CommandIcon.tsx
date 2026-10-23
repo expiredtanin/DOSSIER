@@ -186,6 +186,14 @@ export function CommandIcon({ name }: { name: string }) {
           <path d="M9.5 12.5 L12.5 9.5 L12.5 4.5" />
         </svg>
       );
+    case "solidbool":
+      // Verschneiden: zwei überlappende Körper.
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="3.5" width="7" height="7" />
+          <circle cx="10" cy="9.5" r="3.6" />
+        </svg>
+      );
     case "solid":
       // Körper: Kugel mit Äquator (B-Rep-Grundkörper).
       return (

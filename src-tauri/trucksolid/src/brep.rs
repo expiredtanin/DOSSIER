@@ -283,16 +283,38 @@ fn revolve(profile: &[f64], cx: f64, cy: f64, angle_deg: f64) -> Res<Solid> {
     if ring.iter().any(|&(r, _)| r < -1e-9) {
         return Err("Profil muss in der Halbebene r >= 0 liegen".into());
     }
+    let angle = angle_deg.to_radians().clamp(1e-3, 2.0 * PI);
+    let n = ring.len();
+    // Volle Drehung eines Profils mit Kante AUF der Achse (Kegel, Kugel, Zylinder …): die
+    // Achskante entfällt, `cone` dreht den offenen Rest und lässt keine entarteten Flächen
+    // zurück (sonst gilt der STEP-Körper in anderen CAD-Systemen als ungültig).
+    let on_axis = |i: usize| ring[i].0.abs() < 1e-9 && ring[(i + 1) % n].0.abs() < 1e-9;
+    if angle >= 2.0 * PI - 1e-6 {
+        let axis_edges: Vec<usize> = (0..n).filter(|&i| on_axis(i)).collect();
+        if axis_edges.len() == 1 {
+            let k = axis_edges[0];
+            // Pfad von ring[k+1] über … bis ring[k] (zyklisch), ohne die Achskante.
+            let path: Vec<(f64, f64)> = (0..n).map(|j| ring[(k + 1 + j) % n]).collect();
+            let verts: Vec<Vertex> = path
+                .iter()
+                .map(|&(r, z)| builder::vertex(Point3::new(r, 0.0, z)))
+                .collect();
+            let wire: Wire = (0..verts.len() - 1)
+                .map(|i| builder::line(&verts[i], &verts[i + 1]))
+                .collect();
+            let shell = builder::cone(&wire, Vector3::unit_z(), Rad(2.0 * PI));
+            let s = Solid::new(vec![shell]);
+            return Ok(builder::translated(&s, Vector3::new(cx, cy, 0.0)));
+        }
+    }
     let verts: Vec<Vertex> = ring
         .iter()
         .map(|&(r, z)| builder::vertex(Point3::new(r, 0.0, z)))
         .collect();
-    let n = verts.len();
     let wire: Wire = (0..n)
         .map(|i| builder::line(&verts[i], &verts[(i + 1) % n]))
         .collect();
     let face = builder::try_attach_plane(&[wire]).map_err(|e| format!("{e}"))?;
-    let angle = angle_deg.to_radians().clamp(1e-3, 2.0 * PI);
     let s = builder::rsweep(&face, Point3::origin(), Vector3::unit_z(), Rad(angle));
     Ok(builder::translated(&s, Vector3::new(cx, cy, 0.0)))
 }
@@ -469,10 +491,48 @@ pub fn mesh_of_solid(solid: &Solid, tol: f64) -> MeshOutput {
     mesh_of_polygon(&poly)
 }
 
-/// Spezifikation → Mesh.
+/// Spezifikation → Mesh. Scheitert eine B-Rep-Boolean (koinzidente Flächen), wird die
+/// Operation auf Mesh-Ebene (csgrs, `boolean.rs`) wiederholt — das Ergebnis ist dann ein
+/// reines Dreiecks-Mesh (ohne exakte B-Rep-Flächen; der STEP-Export dieses Körpers entfällt).
 pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
-    let solid = build_solid(spec)?;
-    Ok(mesh_of_solid(&solid, tol))
+    match spec {
+        SolidSpec::Boolean { op, a, b } => {
+            if let (Ok(sa), Ok(sb)) = (build_solid(a), build_solid(b)) {
+                if let Ok(s) = bool_op(&sa, &sb, *op) {
+                    return Ok(mesh_of_solid(&s, tol));
+                }
+            }
+            let (ma, mb) = (solid_mesh_core(a, tol)?, solid_mesh_core(b, tol)?);
+            let f64s = |v: &[f32]| v.iter().map(|x| *x as f64).collect::<Vec<f64>>();
+            let op_name = match op {
+                BoolKind::Union => "union",
+                BoolKind::Difference => "difference",
+                BoolKind::Intersection => "intersection",
+            };
+            let r = crate::boolean::boolean_mesh_core(
+                &f64s(&ma.positions),
+                &ma.indices,
+                &f64s(&mb.positions),
+                &mb.indices,
+                op_name,
+            )?;
+            Ok(MeshOutput { positions: r.positions, indices: r.indices })
+        }
+        SolidSpec::Translate { v, solid } if matches!(**solid, SolidSpec::Boolean { .. }) => {
+            // Boolean unter einer Verschiebung: Mesh-Ergebnis verschieben (Fallback-sicher).
+            let mut m = solid_mesh_core(solid, tol)?;
+            for p in m.positions.chunks_mut(3) {
+                p[0] += v[0] as f32;
+                p[1] += v[1] as f32;
+                p[2] += v[2] as f32;
+            }
+            Ok(m)
+        }
+        _ => {
+            let solid = build_solid(spec)?;
+            Ok(mesh_of_solid(&solid, tol))
+        }
+    }
 }
 
 // ── STEP ─────────────────────────────────────────────────────────────────────
@@ -688,11 +748,22 @@ mod tests {
     }
 
     #[test]
-    fn boolean_bei_koinzidenten_flaechen_meldet_fehler() {
+    fn boolean_bei_koinzidenten_flaechen_faellt_auf_mesh_csg_zurueck() {
         let wall = SolidSpec::Cuboid { min: [0.0, 0.0, 0.0], max: [5.0, 0.3, 2.6] };
         let win = SolidSpec::Cuboid { min: [1.0, 0.0, 0.9], max: [2.2, 0.3, 2.1] };
         let spec = SolidSpec::Boolean { op: BoolKind::Difference, a: Box::new(wall), b: Box::new(win) };
-        assert!(solid_mesh_core(&spec, 0.01).is_err());
+        // B-Rep allein scheitert …
+        assert!(build_solid(&spec).is_err());
+        // … die Mesh-Ebene liefert das richtige Volumen.
+        let m = solid_mesh_core(&spec, 0.01).unwrap();
+        let expect = 5.0 * 0.3 * 2.6 - 1.2 * 0.3 * 1.2;
+        assert!((volume(&m) - expect).abs() < 1e-3, "{}", volume(&m));
+        // Verschoben bleibt es korrekt und liegt wirklich dort.
+        let moved = SolidSpec::Translate { v: [10.0, 0.0, 1.0], solid: Box::new(spec) };
+        let mm = solid_mesh_core(&moved, 0.01).unwrap();
+        assert!((volume(&mm) - expect).abs() < 1e-3);
+        let min_x = mm.positions.chunks(3).map(|p| p[0]).fold(f32::INFINITY, f32::min);
+        assert!((min_x - 10.0).abs() < 1e-3, "{min_x}");
     }
 
     /// Wand 5 × 2,6 m, 0,3 m dick, mit Fenster 1,2 × 1,2 m als Loch im Wandprofil.
@@ -736,3 +807,32 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod dbg_step {
+    use super::*;
+    #[test]
+    fn write_step_files_for_external_check() {
+        let dir = std::env::var("STEP_OUT_DIR").unwrap_or_default();
+        if dir.is_empty() {
+            return;
+        }
+        let ring = |x0: f64, y0: f64, x1: f64, y1: f64| vec![x0, y0, x1, y0, x1, y1, x0, y1];
+        let cases: Vec<(&str, SolidSpec)> = vec![
+            ("cuboid", SolidSpec::Cuboid { min: [0.0; 3], max: [2.0, 1.0, 1.0] }),
+            ("extrude_hole", SolidSpec::Extrude { points: ring(0.0, 0.0, 4.0, 3.0), holes: vec![ring(1.0, 1.0, 2.0, 2.0)], height: 2.0, z0: 0.0, corner_radius: 0.0 }),
+            ("extrude_round", SolidSpec::Extrude { points: ring(0.0, 0.0, 4.0, 3.0), holes: vec![], height: 2.0, z0: 0.0, corner_radius: 0.5 }),
+            ("cylinder", SolidSpec::Cylinder { cx: 0.0, cy: 0.0, z0: 0.0, r: 1.0, height: 2.0 }),
+            ("cone", SolidSpec::Cone { cx: 0.0, cy: 0.0, z0: 0.0, r: 1.0, height: 3.0 }),
+            ("sphere", SolidSpec::Sphere { center: [0.0; 3], r: 1.0 }),
+            ("torus", SolidSpec::Torus { center: [0.0; 3], major: 2.0, minor: 0.5 }),
+            ("revolve", SolidSpec::Revolve { profile: vec![0.0, 0.0, 1.0, 0.0, 1.0, 2.0, 0.0, 2.0], cx: 0.0, cy: 0.0, angle_deg: 360.0 }),
+            ("loft", SolidSpec::Loft { sections: vec![LoftSection { z: 0.0, points: ring(0.0, 0.0, 2.0, 2.0) }, LoftSection { z: 3.0, points: ring(0.5, 0.5, 1.5, 1.5) }] }),
+            ("wall_window", SolidSpec::ExtrudePlane { points: vec![0.0, 0.0, 5.0, 0.0, 5.0, 2.6, 0.0, 2.6], holes: vec![vec![1.0, 0.9, 2.2, 0.9, 2.2, 2.1, 1.0, 2.1]], origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 0.0, 1.0], depth: -0.3 }),
+        ];
+        for (name, spec) in cases {
+            let step = export_step_core(&[spec], &StepHeader::default()).unwrap();
+            std::fs::write(format!("{dir}/{name}.stp"), step).unwrap();
+        }
+    }
+}
