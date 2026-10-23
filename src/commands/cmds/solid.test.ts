@@ -50,4 +50,11 @@ describe("solid-Befehl", () => {
     expect(solidFromInputs("torus", { x: 0, y: 0 }, null, [0.3, 0.5])).toBeNull();
     expect(solidFromInputs("torus", { x: 0, y: 0 }, null, [2, 0.5])?.height).toBeCloseTo(1, 9);
   });
+
+  it("Kegelstumpf: Revolve-Profil aus Radius, Oberradius, Hoehe", () => {
+    const b = solidFromInputs("frustum", { x: 1, y: 2 }, null, [2, 1, 3]);
+    expect(b?.height).toBe(3);
+    expect(b?.spec).toMatchObject({ kind: "revolve", cx: 1, cy: 2, profile: [0, 0, 2, 0, 1, 3, 0, 3] });
+    expect(solidFromInputs("frustum", { x: 0, y: 0 }, null, [2, 0, 3])).toBeNull();
+  });
 });

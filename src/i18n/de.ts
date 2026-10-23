@@ -1287,6 +1287,8 @@ export const de = {
   "cmd.solid.shape.sphere": "Kugel",
   "cmd.solid.shape.cylinder": "Zylinder",
   "cmd.solid.shape.cone": "Kegel",
+  "cmd.solid.shape.frustum": "Kegelstumpf",
+  "cmd.solid.topRadius": "Oberer Radius:",
   "cmd.solid.shape.torus": "Torus",
   "cmd.solid.shape.cuboid": "Quader",
   "cmd.roof.label": "Dach",

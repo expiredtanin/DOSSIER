@@ -25,24 +25,26 @@ import type {
   Vec2,
 } from "../types";
 
-export type SolidShape = "sphere" | "cylinder" | "cone" | "torus" | "cuboid";
+export type SolidShape = "sphere" | "cylinder" | "cone" | "frustum" | "torus" | "cuboid";
 
 const SHAPE_OPTIONS: CmdOption[] = [
   { id: "sphere", labelKey: "cmd.solid.shape.sphere" },
   { id: "cylinder", labelKey: "cmd.solid.shape.cylinder" },
   { id: "cone", labelKey: "cmd.solid.shape.cone" },
+  { id: "frustum", labelKey: "cmd.solid.shape.frustum" },
   { id: "torus", labelKey: "cmd.solid.shape.torus" },
   { id: "cuboid", labelKey: "cmd.solid.shape.cuboid" },
 ];
 const SHAPE_IDS = new Set(SHAPE_OPTIONS.map((o) => o.id));
 
-type Step = "center" | "radius" | "height" | "major" | "minor" | "corner2";
+type Step = "center" | "radius" | "topRadius" | "height" | "major" | "minor" | "corner2";
 
 /** Schrittfolge je Form (erste Eingabe ist immer ein Punkt: Mittelpunkt bzw. Ecke). */
 const STEPS: Record<SolidShape, Step[]> = {
   sphere: ["center", "radius"],
   cylinder: ["center", "radius", "height"],
   cone: ["center", "radius", "height"],
+  frustum: ["center", "radius", "topRadius", "height"],
   torus: ["center", "major", "minor"],
   cuboid: ["center", "corner2", "height"],
 };
@@ -50,6 +52,7 @@ const STEPS: Record<SolidShape, Step[]> = {
 const PROMPT: Record<Step, string> = {
   center: "cmd.solid.center",
   radius: "cmd.solid.radius",
+  topRadius: "cmd.solid.topRadius",
   height: "cmd.solid.height",
   major: "cmd.solid.major",
   minor: "cmd.solid.minor",
@@ -114,6 +117,16 @@ export function solidFromInputs(
         label: `${shape === "cone" ? "Kegel" : "Zylinder"} r=${fmt(r)} h=${fmt(h)}`,
       };
     }
+    case "frustum": {
+      const [r, rt, h] = nums;
+      if (!(r > 1e-6) || !(rt > 1e-6) || !(h > 1e-6)) return null;
+      return {
+        points: circlePts(p0, Math.max(r, rt)),
+        height: h,
+        spec: { kind: "revolve", cx: p0.x, cy: p0.y, profile: [0, 0, r, 0, rt, h, 0, h] },
+        label: `Kegelstumpf r=${fmt(r)}/${fmt(rt)} h=${fmt(h)}`,
+      };
+    }
     case "torus": {
       const [major, minor] = nums;
       if (!(minor > 1e-6) || !(major > minor)) return null;
@@ -153,11 +166,14 @@ function draftOf(s: SolidState): ToolDraft | null {
     hud = s.p1 ? `h = ${(s.nums[0] ?? 0).toFixed(2)} m` : `${Math.abs(b.x - s.p0.x).toFixed(2)} × ${Math.abs(b.y - s.p0.y).toFixed(2)} m`;
   } else {
     const r = step === "radius" || step === "major" ? dist : (s.nums[0] ?? dist);
+    if (s.shape === "frustum" && step !== "radius") {
+      preview.push({ kind: "poly", pts: circlePts(s.p0, Math.max(step === "topRadius" ? dist : (s.nums[1] ?? dist), 0.01)), closed: true });
+    }
     preview.push({ kind: "poly", pts: circlePts(s.p0, Math.max(r, 0.01)), closed: true });
     if (s.shape === "torus" && step === "minor") {
       preview.push({ kind: "poly", pts: circlePts(s.p0, (s.nums[0] ?? 0) + dist), closed: true });
     }
-    hud = `${step === "height" ? "h" : "r"} = ${dist.toFixed(2)} m`;
+    hud = `${step === "height" ? "h" : step === "topRadius" ? "r2" : "r"} = ${dist.toFixed(2)} m`;
   }
   return { preview, vertices: [s.p0], hud: { at: cur, text: hud } };
 }

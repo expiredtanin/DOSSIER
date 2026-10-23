@@ -1276,6 +1276,8 @@ export const en: Record<TranslationKey, string> = {
   "cmd.solid.shape.sphere": "Sphere",
   "cmd.solid.shape.cylinder": "Cylinder",
   "cmd.solid.shape.cone": "Cone",
+  "cmd.solid.shape.frustum": "Frustum",
+  "cmd.solid.topRadius": "Top radius:",
   "cmd.solid.shape.torus": "Torus",
   "cmd.solid.shape.cuboid": "Cuboid",
   "cmd.roof.label": "Roof",
