@@ -20,7 +20,8 @@ export function needsBrepPath(solid: ExtrudedSolid): boolean {
  * B-Rep-Spezifikation des Körpers, UK auf `baseZ`. `null`, wenn truck dafür (noch) keine
  * Beschreibung hat (Pyramide: Spitze als B-Rep entartet).
  */
-export function extrudedSolidSpec(solid: ExtrudedSolid, baseZ: number): SolidSpec | null {
+export function extrudedSolidSpec(solid: ExtrudedSolid, floorZ: number): SolidSpec | null {
+  const baseZ = floorZ + (solid.baseOffset ?? 0);
   if (solid.brep) {
     const p0 = solid.points[0];
     const dx = p0 ? p0.x - solid.brep.origin.x : 0;

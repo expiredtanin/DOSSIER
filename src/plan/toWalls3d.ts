@@ -68,6 +68,7 @@ import { emitWall } from "./toWalls3d/bands";
 import { emitSlabs } from "./toWalls3d/ceilings";
 import { emitStairMeshes, emitStairRailings, emitStairs } from "./toWalls3d/stairs";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
+import { applyVoids3d } from "./toWalls3d/voids3d";
 import { emitDrawingLineVerts, pickDrawingSegs } from "./toWalls3d/drawing2d";
 import { emitColumns } from "./toWalls3d/columns";
 import { emitRoofCutLayers, emitRoofs } from "./toWalls3d/roofs";
@@ -199,13 +200,18 @@ export interface Model3dOptions {
   detail?: DetailLevel;
   /** Schnitt-Eingabe: Treppen immer als Tritt-Prismen (s. `emitStairs` `forSection`). */
   forSection?: boolean;
+  /**
+   * 3D-Viewer: Abzugskörper per truck-Boolean von Wänden/Decken abziehen (s.
+   * `toWalls3d/voids3d.ts`). Schnitt/Ansicht/Export behandeln Abzugskörper selbst.
+   */
+  voids?: boolean;
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
 export function projectToModel3d(project: Project, opts: Model3dOptions = {}): RModel3d {
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
-  return {
+  const model: RModel3d = {
     walls: projectToWalls3d(project, layered),
     // Decken + Treppen (Treppentritte als extrudierte Slabs) — so wird die Treppe
     // auch im WASM/wgpu-Renderer sichtbar (der three.js-Pfad rendert sie separat).
@@ -231,6 +237,8 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     // weil `section.rs` beliebige Dreiecksnetze nicht schneiden kann.
     roofLayers: emitRoofCutLayers(project),
   };
+  if (opts.voids) applyVoids3d(model, project);
+  return model;
 }
 
 /**

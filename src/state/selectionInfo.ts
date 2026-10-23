@@ -323,6 +323,12 @@ export interface ExtrudedSolidInfo {
   brepLabel?: string;
   /** Grundfläche des Profils (m²). */
   area: number;
+  /** Abzugskörper (Aussparung/Durchbruch). */
+  subtract: boolean;
+  /** Abzugskörper möglich (senkrechtes Prisma ohne B-Rep/Verjüngung). */
+  canSubtract: boolean;
+  /** Abstand der UK über der Geschoss-UK (m). */
+  baseOffset: number;
   /** B-Rep-Beschreibung (Weltkoordinaten) für Kennwerte — `null`, wenn truck keine hat. */
   spec: SolidSpec | null;
   /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
@@ -1056,7 +1062,10 @@ function extrudedSolidSelection(project: Project, s: ExtrudedSolid): Selection {
     chamfer: s.chamfer ?? 0,
     ...(s.brep ? { brepLabel: s.brep.label ?? "B-Rep" } : {}),
     area: polygonArea(s.points),
-    spec: extrudedSolidSpec(s, floor?.baseElevation ?? 0),
+    spec: s.operation === "subtract" ? null : extrudedSolidSpec(s, floor?.baseElevation ?? 0),
+    subtract: s.operation === "subtract",
+    canSubtract: !s.brep && (s.taper ?? 0) < 1e-6,
+    baseOffset: s.baseOffset ?? 0,
     floorId: s.levelId,
     floorName: floor?.name ?? s.levelId,
   };

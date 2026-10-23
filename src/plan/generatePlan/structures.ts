@@ -30,6 +30,28 @@ const EXTRUSION_STROKE = "#d98c40";
  * keine Schnitt-Poché/Kategorie-Zuordnung hat.
  */
 export function addExtrudedSolidOutline(out: Primitive[], solid: ExtrudedSolid): void {
+  if (solid.operation === "subtract") {
+    // Abzugskörper (Aussparung): gestrichelter Umriss + Diagonalkreuz (Durchbruch-Symbol),
+    // darunter eine unsichtbare Fläche für die Auswahl.
+    out.push({
+      kind: "polygon",
+      pts: solid.points,
+      fill: "none",
+      stroke: "none",
+      strokeWidthMm: 0,
+      hatch: NO_HATCH,
+      extrudedSolidId: solid.id,
+    });
+    const n = solid.points.length;
+    const seg = (a: (typeof solid.points)[number], b: (typeof solid.points)[number], dash: number[] | null) =>
+      out.push({ kind: "line", a, b, cls: "void", weightMm: SYMBOL_HAIRLINE_MM, dash, color: EXTRUSION_STROKE });
+    for (let i = 0; i < n; i++) seg(solid.points[i], solid.points[(i + 1) % n], [2, 1]);
+    if (n === 4) {
+      seg(solid.points[0], solid.points[2], null);
+      seg(solid.points[1], solid.points[3], null);
+    }
+    return;
+  }
   out.push({
     kind: "polygon",
     pts: solid.points,

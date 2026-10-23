@@ -87,7 +87,7 @@ export function pushNativeWalls(project: Project): void {
   clearTimeout(wallsTimer);
   wallsTimer = setTimeout(async () => {
     if (!(await isNativeEnabled())) return;
-    void invokeNative("push_native_walls", { walls: projectToModel3d(project) });
+    void invokeNative("push_native_walls", { walls: projectToModel3d(project, { voids: true }) });
   }, DEBOUNCE_MS);
 }
 

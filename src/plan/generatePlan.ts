@@ -70,6 +70,7 @@ import {
   type Primitive,
 } from "./generatePlan/shared";
 import { addCeilingPoche } from "./generatePlan/ceilings";
+import { subtractVoidsInPlan } from "./voids";
 import { addContextContours } from "./generatePlan/context";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import {
@@ -662,6 +663,9 @@ export function generatePlan(
   // Schwarz-Weiss (mono): nachträglich alle Farben auf reine Tinte zwingen.
   // Element-/Kategorie-/Hatch-Farben werden ignoriert, Füllungen werden weiss,
   // Musterlinien/Striche schwarz — so entsteht ein reiner S/W-Plan.
+  // Abzugskörper (Aussparungen/Durchbrüche): von Wand-/Stützen-/Decken-Poché abziehen.
+  subtractVoidsInPlan(primitives, project, (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0));
+
   if (mono) toMono(primitives);
 
   // Georeferenzierte Luftbilder als Hintergrund-Ebenen (nur interaktive Ansicht,
@@ -925,6 +929,7 @@ export function generateSectionPlan(
       ceilingId: kind === "slab" && !cp.stairId ? sourceId : undefined,
       roofId: kind === "roof" ? sourceId : undefined,
       stairId: cp.stairId,
+      noStrokeEdges: cp.noStrokeEdges,
       greyed: cp.categoryCode !== undefined && catDisplay(cp.categoryCode).greyed,
     });
   }

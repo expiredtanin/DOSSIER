@@ -24,6 +24,7 @@ import { dot, leftNormal, normalize, sub } from "../model/geometry";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d } from "./toWalls3d";
+import { subtractVoidsInSection } from "./voids";
 import { loadEngine3d } from "../engine/engine3d";
 import {
   HATCH_INK,
@@ -50,6 +51,8 @@ export interface SectionCutPolygon {
   color: [number, number, number];
   /** Ring-Ecken (u, v). */
   pts: Array<[number, number]>;
+  /** Nicht gestrichene Kanten (Stege eingehängter Löcher, s. `plan/voids.ts`). */
+  noStrokeEdges?: number[];
   /**
    * Echte Poché-Füllfarbe des geschnittenen Bauteils (tragende Wandschicht
    * bzw. erste Deckenschicht), von `computeSection` aufgelöst. Fehlt, wenn das
@@ -1266,6 +1269,13 @@ export async function computeSection(
     cp.categoryCode = st.categoryCode;
   }
   output.cutPolygons = mergeMonolithCuts(output.cutPolygons, (i) => model.slabs[i]?.monolith);
+  // Abzugskörper (Aussparungen/Durchbrüche) aus den geschnittenen Bauteilen entfernen.
+  output.cutPolygons = subtractVoidsInSection(
+    output.cutPolygons,
+    project,
+    { x: plane.point[0], y: plane.point[2] },
+    sectionUAxisModel(plane),
+  );
   // Schnitt-Tiefe: Kanten weiter als `level.depth` hinter der Ebene ausblenden.
   if (level.depth !== undefined) filterByDepth(output, project, plane, level.depth);
   return output;

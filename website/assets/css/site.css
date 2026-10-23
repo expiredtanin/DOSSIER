@@ -1,0 +1,195 @@
+/* DOSSIER-Website. Bewusst schlicht: Papier, Tinte, Haarlinien wie auf einem
+   Plan. Farben aus dem App-Hell-Theme (src/styles.css), kein Akzent. */
+
+@font-face {
+  font-family: "archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/archivo.woff2") format("woff2");
+}
+
+:root {
+  --paper: #f5f2ec;
+  --ink: #1a1a18;
+  --dim: #5f5b55;
+  --hair: #cfc9c0;
+  --code: #ebe6de;
+  --sans: "archivo", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #141413;
+    --ink: #e6e3dd;
+    --dim: #9a968f;
+    --hair: #3a3935;
+    --code: #1f1f1d;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 0 16px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.55 var(--sans);
+}
+
+a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+code, pre, kbd { font-family: var(--mono); font-size: .875em; }
+
+/* ---- Kopf und Fuss -------------------------------------------------- */
+
+.top, .foot, .home, .docs { max-width: 64rem; margin-inline: auto; }
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .5rem 1.5rem;
+  padding: 1.25rem 0 1rem;
+  border-bottom: 1px solid var(--ink);
+}
+.mark {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -.01em;
+  text-decoration: none;
+}
+.top nav { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; font: .875rem var(--mono); }
+.top nav a { text-decoration: none; }
+.top nav a:hover, .top nav a[aria-current] { text-decoration: underline; }
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem 1.5rem;
+  margin-top: 4rem;
+  padding: 1rem 0 2rem;
+  border-top: 1px solid var(--ink);
+  font: .8rem var(--mono);
+  color: var(--dim);
+}
+
+/* ---- Startseite ----------------------------------------------------- */
+
+.home { padding-top: 2.5rem; }
+.home > * { max-width: 44rem; }
+
+/* Plankopf: Felder mit kleiner Beschriftung oben, Wert darunter. Die
+   Haarlinien entstehen aus einem 1px-Gap über dem Tintenhintergrund. */
+.titleblock {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  margin: 0 0 2.5rem;
+  background: var(--ink);
+  border: 1.5px solid var(--ink);
+}
+.titleblock > div { background: var(--paper); padding: .4rem .6rem .5rem; min-width: 0; }
+.titleblock .tb-wide { grid-column: span 2; }
+.titleblock dt {
+  font: .65rem var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--dim);
+}
+.titleblock dd { margin: .1rem 0 0; font-size: .95rem; }
+.titleblock .tb-name { font-weight: 800; font-size: 1.6rem; line-height: 1.1; letter-spacing: -.01em; }
+
+@media (max-width: 560px) {
+  .titleblock { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---- Fliesstext ----------------------------------------------------- */
+
+.prose { min-width: 0; }
+.prose > :first-child { margin-top: 0; }
+
+.prose h1 { font-size: 1.75rem; line-height: 1.2; font-weight: 800; letter-spacing: -.01em; margin: 0 0 1.5rem; }
+
+.prose h2 {
+  margin: 3rem 0 1rem;
+  padding-top: .5rem;
+  border-top: 1px solid var(--ink);
+  font: 600 .8rem var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.prose h3 { font-size: 1rem; margin: 2rem 0 .5rem; }
+
+.prose p, .prose ul, .prose ol, .prose pre, .prose table { margin: 0 0 1rem; }
+.prose ul, .prose ol { padding-left: 1.25rem; }
+.prose li { margin-bottom: .25rem; }
+
+.prose :not(pre) > code { background: var(--code); padding: .05em .3em; }
+
+.prose pre {
+  background: var(--code);
+  padding: .75rem 1rem;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+.prose pre code { font-size: .8rem; }
+
+.prose table { border-collapse: collapse; width: 100%; font-size: .9rem; display: block; overflow-x: auto; }
+.prose th, .prose td { text-align: left; vertical-align: top; padding: .35rem .75rem .35rem 0; border-bottom: 1px solid var(--hair); }
+.prose th { font: 600 .75rem var(--mono); text-transform: uppercase; letter-spacing: .06em; border-bottom-color: var(--ink); }
+
+.prose blockquote { margin: 0 0 1rem; padding-left: 1rem; border-left: 2px solid var(--ink); color: var(--dim); }
+
+.prose hr { border: 0; border-top: 1px dashed var(--hair); margin: 2rem 0; }
+
+/* Commit-Log */
+.log { list-style: none; padding: 0; font: .8rem/1.5 var(--mono); }
+.log li { display: grid; grid-template-columns: auto auto 1fr; gap: 0 .75rem; padding: .3rem 0; border-bottom: 1px solid var(--hair); margin: 0; }
+.log time { color: var(--dim); }
+.log a { text-decoration: none; }
+.log a:hover { text-decoration: underline; }
+.log code { font-size: 1em; background: none; padding: 0; }
+@media (max-width: 560px) {
+  .log li { grid-template-columns: auto 1fr; }
+  .log span { grid-column: 1 / -1; }
+}
+
+/* Inhaltsverzeichnisse in der Doku (ehemals Hextra-Cards) */
+.index { list-style: none; padding: 0 !important; border-top: 1px solid var(--hair); }
+.index li { margin: 0; padding: .45rem 0; border-bottom: 1px solid var(--hair); }
+.index a { font-weight: 600; }
+.index span { display: block; color: var(--dim); font-size: .9rem; }
+
+/* ---- Doku ----------------------------------------------------------- */
+
+.docs { padding-top: 2.5rem; display: grid; gap: 2rem; }
+
+@media (min-width: 860px) {
+  .docs { grid-template-columns: 13rem minmax(0, 44rem); gap: 3rem; }
+  .docnav { position: sticky; top: 1.5rem; align-self: start; }
+}
+
+.docnav { font-size: .9rem; }
+.docnav a { text-decoration: none; }
+.docnav a:hover, .docnav a[aria-current] { text-decoration: underline; }
+.docnav a[aria-current] { font-weight: 700; }
+.docnav p {
+  margin: 1.25rem 0 .35rem;
+  font: 600 .7rem var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.docnav ul { list-style: none; margin: 0; padding: 0; }
+.docnav li { margin: 0 0 .2rem; }
+
+@media (max-width: 859px) {
+  .docnav { border-bottom: 1px solid var(--hair); padding-bottom: 1rem; }
+  .docnav ul { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
+}

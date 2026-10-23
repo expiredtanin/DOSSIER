@@ -16,6 +16,7 @@ import { columnCommand } from "./cmds/column";
 import { roofCommand } from "./cmds/roof";
 import { solidCommand } from "./cmds/solid";
 import { solidBoolCommand } from "./cmds/solidbool";
+import { voidBoxCommand } from "./cmds/voidbox";
 import { ceilingOpeningCommand } from "./cmds/ceilingOpening";
 import { roomCommand } from "./cmds/room";
 import { rectCommand } from "./cmds/rect";
@@ -73,6 +74,7 @@ export const COMMANDS: Record<string, Command> = {
   roof: roofCommand,
   solid: solidCommand,
   solidbool: solidBoolCommand,
+  voidbox: voidBoxCommand,
   ceilingopening: ceilingOpeningCommand,
   room: roomCommand,
   line: lineCommand,
@@ -144,6 +146,9 @@ export const ALIASES: Record<string, string> = {
   stütze: "column",
   dach: "roof",
   koerper: "solid",
+  durchbruch: "voidbox",
+  nische: "voidbox",
+  void: "voidbox",
   koerperbool: "solidbool",
   verschneiden: "solidbool",
   bool: "solidbool",

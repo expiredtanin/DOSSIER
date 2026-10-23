@@ -1,0 +1,9 @@
+{{- $commits := partialCached "commits.html" .Page -}}
+{{- with $commits }}
+<ol class="log">
+  {{- range . }}
+  <li><time datetime="{{ .commit.author.date }}">{{ time.Format "2006-01-02" .commit.author.date }}</time> <a href="{{ .html_url }}"><code>{{ substr .sha 0 7 }}</code></a> <span>{{ index (split .commit.message "\n") 0 }}</span></li>
+  {{- end }}
+</ol>
+{{- end }}
+<p><a href="{{ site.Params.repo }}/commits/branch/master">Alle Commits</a></p>

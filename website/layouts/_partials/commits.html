@@ -1,0 +1,11 @@
+{{- /* Letzte Commits aus der Gitea-API, beim Bauen geholt. Ohne Netz: leere
+   Liste, die Startseite zeigt dann nur den Link aufs Repo. */ -}}
+{{- $commits := slice -}}
+{{- with try (resources.GetRemote site.Params.commitsApi) -}}
+  {{- with .Err -}}
+    {{- warnf "Commit-Log nicht geladen: %s" . -}}
+  {{- else -}}
+    {{- with .Value -}}{{- $commits = .Content | transform.Unmarshal -}}{{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- return $commits -}}

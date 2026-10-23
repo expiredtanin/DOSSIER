@@ -2204,6 +2204,15 @@ export interface ExtrudedSolid {
   points: Vec2[];
   /** Extrusionshöhe in Metern (> 0), nach +Z ab der Geschoss-UK. */
   height: number;
+  /** Abstand der Körper-UK über der Geschoss-UK (Meter, Default 0). */
+  baseOffset?: number;
+  /**
+   * Boolesche Rolle im Gebäude: "subtract" = Abzugskörper (Aussparung/Durchbruch/Nische).
+   * Er zieht sich von allen Wänden, Decken und Stützen ab, die er durchdringt — in 3D
+   * (truck-Boolean), im Grundriss und im Schnitt; selbst wird er nur als Umriss gezeigt.
+   * Fehlt = normaler Körper.
+   */
+  operation?: "subtract";
   /**
    * Gesetzt, wenn das Profil ein Kreis ist (aus einem `Drawing2D` mit
    * `shape:"circle"`) — `points` bleibt die Tessellierung, `toWalls3d.ts`

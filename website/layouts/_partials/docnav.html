@@ -1,0 +1,13 @@
+{{- $docs := site.GetPage "/docs" -}}
+{{- $cur := .RelPermalink -}}
+<nav class="docnav" aria-label="Dokumentation">
+  <a href="{{ $docs.RelPermalink }}"{{ if eq $cur $docs.RelPermalink }} aria-current="page"{{ end }}>Übersicht</a>
+  {{- range $docs.Sections.ByWeight }}
+  <p><a href="{{ .RelPermalink }}"{{ if eq $cur .RelPermalink }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></p>
+  <ul>
+    {{- range .RegularPages.ByWeight }}
+    <li><a href="{{ .RelPermalink }}"{{ if eq $cur .RelPermalink }} aria-current="page"{{ end }}>{{ .LinkTitle }}</a></li>
+    {{- end }}
+  </ul>
+  {{- end }}
+</nav>

@@ -1051,6 +1051,26 @@ export function usePanelHostBase(opts: {
           ),
         }));
       },
+      onSetExtrudedSolidSubtract: (subtract) => {
+        if (selection?.kind !== "extrudedSolid") return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
+            s.id === id ? { ...s, operation: subtract ? ("subtract" as const) : undefined } : s,
+          ),
+        }));
+      },
+      onSetExtrudedSolidBaseOffset: (offset) => {
+        if (selection?.kind !== "extrudedSolid" || !Number.isFinite(offset)) return;
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
+            s.id === id ? { ...s, baseOffset: Math.abs(offset) > 1e-9 ? offset : undefined } : s,
+          ),
+        }));
+      },
       // ── Stützen-Attribute (Tragwerk; nur bei selektierter Stütze) ──────────
       onSetColumnProfileKind: (kind) => {
         if (selection?.kind !== "column") return;

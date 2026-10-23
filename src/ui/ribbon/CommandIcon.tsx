@@ -186,6 +186,15 @@ export function CommandIcon({ name }: { name: string }) {
           <path d="M9.5 12.5 L12.5 9.5 L12.5 4.5" />
         </svg>
       );
+    case "voidbox":
+      // Durchbruch: Wand mit gestricheltem, durchkreuztem Ausschnitt.
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="5.5" width="11" height="5" />
+          <rect x="6" y="3.5" width="4" height="9" strokeDasharray="1.4 1.2" />
+          <path d="M6 3.5 L10 12.5 M10 3.5 L6 12.5" />
+        </svg>
+      );
     case "solidbool":
       // Verschneiden: zwei überlappende Körper.
       return (

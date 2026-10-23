@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ if .IsHome }}DOSSIER{{ else }}{{ .Title }} · DOSSIER{{ end }}</title>
+  <meta name="description" content="{{ with .Description }}{{ . }}{{ else }}{{ site.Params.description }}{{ end }}">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  {{ $css := resources.Get "css/site.css" | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
+</head>
+<body>
+  <header class="top">
+    <a class="mark" href="/">dossier<span>.</span></a>
+    <nav>
+      <a href="/docs/"{{ if hasPrefix .RelPermalink "/docs/" }} aria-current="page"{{ end }}>doku</a>
+      <a href="{{ site.Params.repo }}">quellcode</a>
+      <a href="{{ site.Params.repo }}/issues">issues</a>
+      <a href="{{ site.Params.forum }}">forum</a>
+    </nav>
+  </header>
+
+  {{ block "main" . }}{{ end }}
+
+  <footer class="foot">
+    <span>© 2026 Karim Gabriele Varano</span>
+    <span>AGPL-3.0-or-later</span>
+    <span>Teil von <a href="{{ site.Params.bureau }}">openbureau</a></span>
+    {{ with .File }}<a href="{{ site.Params.repo }}/src/branch/master/website/content/{{ .Path }}">Diese Seite im Repo</a>{{ end }}
+  </footer>
+</body>
+</html>

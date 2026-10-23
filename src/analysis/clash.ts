@@ -10,7 +10,7 @@ import type { Drawing2D, Project, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
 import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
-import { wallSpec } from "../export/exportStep";
+import { wallSpec } from "../plan/wallSpec";
 import { solidClash, solidProps } from "../engine/truckSolid";
 import type { SolidSpec } from "../engine/truckSolid";
 
@@ -56,6 +56,7 @@ export function clashItems(project: Project): ClashItem[] {
     });
   }
   for (const solid of project.extrudedSolids ?? []) {
+    if (solid.operation === "subtract") continue; // Abzugskörper sind gewollte Durchdringungen
     let baseZ = 0;
     try {
       baseZ = solid.levelId ? (getFloor(project, solid.levelId).baseElevation ?? 0) : 0;

@@ -1,0 +1,21 @@
+{{ define "main" }}
+{{ $commits := partialCached "commits.html" . }}
+<main class="home">
+  {{/* Plankopf statt Hero: nur Fakten. */}}
+  <dl class="titleblock">
+    <div class="tb-wide"><dt>Projekt</dt><dd class="tb-name">DOSSIER</dd></div>
+    <div class="tb-wide"><dt>Inhalt</dt><dd>Open-Source-CAD für Architektur</dd></div>
+    <div><dt>Version</dt><dd>{{ site.Params.version }}</dd></div>
+    <div><dt>Lizenz</dt><dd>AGPL-3.0</dd></div>
+    <div><dt>Plattform</dt><dd>macOS, Linux, Browser</dd></div>
+    <div><dt>Letzter Commit</dt><dd>
+      {{- with index $commits 0 }}<a href="{{ .html_url }}">{{ time.Format "02.01.2006" .commit.author.date }}</a>
+      {{- else }}{{ now.Format "02.01.2006" }}{{ end -}}
+    </dd></div>
+  </dl>
+
+  <div class="prose">
+    {{ .Content }}
+  </div>
+</main>
+{{ end }}

@@ -50,4 +50,27 @@ describe("STEP-Export Ende-zu-Ende (truck-WASM)", () => {
     expect(back.length).toBeGreaterThan(5);
     expect(back.every((m) => m.indices.length >= 12)).toBe(true);
   }, 60_000);
+
+  it("Abzugskörper: Wandschichten werden boolesch geschnitten (Volumen kleiner), STEP bleibt gültig", async () => {
+    const mod: any = await import("../engine/pkgTruck/trucksolid.js");
+    await mod.default({ module_or_path: readFileSync("src/engine/pkgTruck/trucksolid_bg.wasm") });
+    const w = sampleProject.walls[0];
+    const mx = (w.start.x + w.end.x) / 2;
+    const my = (w.start.y + w.end.y) / 2;
+    const p = {
+      ...sampleProject,
+      extrudedSolids: [{
+        id: "v", type: "extrudedSolid" as const, levelId: w.floorId, operation: "subtract" as const, height: 0.8, baseOffset: 0.5,
+        points: [{ x: mx - 0.3, y: my - 1 }, { x: mx + 0.3, y: my - 1 }, { x: mx + 0.3, y: my + 1 }, { x: mx - 0.3, y: my + 1 }],
+      }],
+    };
+    const specs = projectSolidSpecs(p);
+    const bools = specs.filter((s) => s.kind === "boolean");
+    expect(bools.length).toBeGreaterThan(0);
+    const vol = (spec: unknown) => JSON.parse(mod.solid_props(JSON.stringify({ spec }))).volume as number;
+    const b0 = bools[0] as { a: unknown };
+    expect(vol(bools[0])).toBeLessThan(vol(b0.a) - 1e-4);
+    const step: string = mod.export_step(JSON.stringify({ solids: bools, fileName: "void.stp" }));
+    expect(step.startsWith("ISO-10303-21;")).toBe(true);
+  }, 60_000);
 });

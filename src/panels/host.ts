@@ -536,6 +536,10 @@ export interface PanelHostValue {
   onSetExtrudedSolidCornerRadius: (radius: number) => void;
   /** Setzt die Fase der Aussenkontur (Meter, ≥ 0). */
   onSetExtrudedSolidChamfer: (chamfer: number) => void;
+  /** Abzugskörper ein/aus (zieht sich von Wänden/Decken/Stützen ab). */
+  onSetExtrudedSolidSubtract: (subtract: boolean) => void;
+  /** Abstand der Körper-UK über der Geschoss-UK (Meter). */
+  onSetExtrudedSolidBaseOffset: (offset: number) => void;
 
   // ── Stützen-Attribute (Tragwerk; nur die selektierte Stütze) ────────────
   /** Wechselt das Profil (Rechteck/Kreis); leitet ein sinnvolles Mass ab. */

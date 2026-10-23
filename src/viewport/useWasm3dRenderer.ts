@@ -202,7 +202,7 @@ export function useWasm3dRenderer(
     const r = rendererRef.current;
     if (!r || !project) return;
     try {
-      r.set_model(JSON.stringify(projectToModel3d(project, { detail })));
+      r.set_model(JSON.stringify(projectToModel3d(project, { detail, voids: true })));
     } catch (e) {
       console.warn("render3d set_model fehlgeschlagen:", e);
     }

@@ -36,7 +36,7 @@ const truckMeshCache = new Map<string, TruckCacheEntry>();
 
 function extrudedSolidSignature(solid: ExtrudedSolid): string {
   const brep = solid.brep ? `${JSON.stringify(solid.brep.spec)}@${solid.brep.origin.x},${solid.brep.origin.y}` : "";
-  return `${solid.height}|${solid.taper ?? 0}|${solid.cornerRadius ?? 0}|${solid.chamfer ?? 0}|${brep}|${solid.points.map((p) => `${p.x},${p.y}`).join(";")}`;
+  return `${solid.baseOffset ?? 0}|${solid.height}|${solid.taper ?? 0}|${solid.cornerRadius ?? 0}|${solid.chamfer ?? 0}|${brep}|${solid.points.map((p) => `${p.x},${p.y}`).join(";")}`;
 }
 
 export function emitExtrudedSolids(project: Project): RMesh[] {
@@ -51,6 +51,8 @@ export function emitExtrudedSolids(project: Project): RMesh[] {
   }
   for (const solid of project.extrudedSolids ?? []) {
     if (solid.points.length < 3 || solid.height <= 0) continue;
+    // Abzugskörper sind kein Material (sie wirken über `voids3d.ts`).
+    if (solid.operation === "subtract") continue;
     const signature = extrudedSolidSignature(solid);
     let entry = truckMeshCache.get(solid.id);
     if (!entry || entry.signature !== signature) {
@@ -67,11 +69,12 @@ export function emitExtrudedSolids(project: Project): RMesh[] {
       } catch {
         // Geschoss nicht (mehr) auflösbar: bei UK 0 extrudieren (Fallback).
       }
+      baseZ += solid.baseOffset ?? 0;
       // Kreis-Profil: echte runde truck-Extrusion (extrudeCircle) statt der
       // 48-Eck-Tessellierung in `points` — glattes Zylinder-Mesh.
       const taper = solid.taper ?? 0;
       // B-Rep-Pfad (Grundkörper, Eckenradius): die Spezifikation trägt die UK (baseZ) selbst.
-      const brepSpec = needsBrepPath(solid) ? extrudedSolidSpec(solid, baseZ) : null;
+      const brepSpec = needsBrepPath(solid) ? extrudedSolidSpec(solid, baseZ - (solid.baseOffset ?? 0)) : null;
       const extrusion = brepSpec
         ? buildSolidMesh(brepSpec, 0.005)
         : solid.circle

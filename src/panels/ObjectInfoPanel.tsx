@@ -712,6 +712,35 @@ export function ExtrudedSolidSection({
 
       <SolidPropsRows spec={solid.spec} />
 
+      {/* Abstand über Geschoss-UK (Brüstungs-/Durchbruchshöhe). */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.baseOffset")}</span>
+        <input
+          type="number"
+          className="objinfo-text"
+          step={0.05}
+          value={solid.baseOffset}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) host.onSetExtrudedSolidBaseOffset(v);
+          }}
+          title={t("objinfo.extrudedSolid.baseOffset")}
+        />
+      </div>
+
+      {/* Abzugskörper: zieht sich von Wänden/Decken/Stützen ab (Grundriss, Schnitt, 3D, STEP). */}
+      {solid.canSubtract && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.extrudedSolid.subtract")}</span>
+          <input
+            type="checkbox"
+            checked={solid.subtract}
+            onChange={(e) => host.onSetExtrudedSolidSubtract(e.target.checked)}
+            title={t("objinfo.extrudedSolid.subtractHint")}
+          />
+        </div>
+      )}
+
       {solid.brepLabel && (
         <div className="objinfo-field">
           <span className="objinfo-flabel">{t("objinfo.extrudedSolid.brep")}</span>
