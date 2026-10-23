@@ -534,6 +534,8 @@ export interface PanelHostValue {
   onSetExtrudedSolidTaper: (taper: number) => void;
   /** Setzt den Eckenradius der Aussenkontur (Meter, ≥ 0) — echte Kreisbögen. */
   onSetExtrudedSolidCornerRadius: (radius: number) => void;
+  /** Setzt die Fase der Aussenkontur (Meter, ≥ 0). */
+  onSetExtrudedSolidChamfer: (chamfer: number) => void;
 
   // ── Stützen-Attribute (Tragwerk; nur die selektierte Stütze) ────────────
   /** Wechselt das Profil (Rechteck/Kreis); leitet ein sinnvolles Mass ab. */

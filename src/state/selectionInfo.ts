@@ -315,6 +315,8 @@ export interface ExtrudedSolidInfo {
   taper: number;
   /** Eckenradius der Aussenkontur (m), editierbar (0 = scharf). */
   cornerRadius: number;
+  /** Fase an den Ecken der Aussenkontur (m), editierbar (0 = scharf). */
+  chamfer: number;
   /** B-Rep-Körper (Grundkörper): Ecken-/Verjüngungsfelder entfallen. */
   brepLabel?: string;
   /** Grundfläche des Profils (m²). */
@@ -1047,6 +1049,7 @@ function extrudedSolidSelection(project: Project, s: ExtrudedSolid): Selection {
     height: s.height,
     taper: s.taper ?? 0,
     cornerRadius: s.cornerRadius ?? 0,
+    chamfer: s.chamfer ?? 0,
     ...(s.brep ? { brepLabel: s.brep.label ?? "B-Rep" } : {}),
     area: polygonArea(s.points),
     floorId: s.levelId,

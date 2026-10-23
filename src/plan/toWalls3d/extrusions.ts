@@ -36,7 +36,7 @@ const truckMeshCache = new Map<string, TruckCacheEntry>();
 
 function extrudedSolidSignature(solid: ExtrudedSolid): string {
   const brep = solid.brep ? `${JSON.stringify(solid.brep.spec)}@${solid.brep.origin.x},${solid.brep.origin.y}` : "";
-  return `${solid.height}|${solid.taper ?? 0}|${solid.cornerRadius ?? 0}|${brep}|${solid.points.map((p) => `${p.x},${p.y}`).join(";")}`;
+  return `${solid.height}|${solid.taper ?? 0}|${solid.cornerRadius ?? 0}|${solid.chamfer ?? 0}|${brep}|${solid.points.map((p) => `${p.x},${p.y}`).join(";")}`;
 }
 
 export function emitExtrudedSolids(project: Project): RMesh[] {

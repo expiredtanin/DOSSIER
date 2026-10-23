@@ -1040,6 +1040,17 @@ export function usePanelHostBase(opts: {
           ),
         }));
       },
+      onSetExtrudedSolidChamfer: (chamfer) => {
+        if (selection?.kind !== "extrudedSolid") return;
+        const c = Math.max(0, chamfer);
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
+            s.id === id ? { ...s, chamfer: c > 0 ? c : undefined } : s,
+          ),
+        }));
+      },
       // ── Stützen-Attribute (Tragwerk; nur bei selektierter Stütze) ──────────
       onSetColumnProfileKind: (kind) => {
         if (selection?.kind !== "column") return;

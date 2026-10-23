@@ -706,6 +706,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.extrudedSolid.height": "Height",
   "objinfo.extrudedSolid.taper": "Taper",
   "objinfo.extrudedSolid.cornerRadius": "Corner radius",
+  "objinfo.extrudedSolid.chamfer": "Chamfer",
   "objinfo.extrudedSolid.brep": "B-rep solid",
   "objinfo.extrudedSolid.area": "Footprint area",
   "objinfo.extrudedSolid.floor": "Floor",

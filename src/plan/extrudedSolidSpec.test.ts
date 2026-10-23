@@ -17,6 +17,12 @@ describe("extrudedSolidSpec", () => {
     expect(extrudedSolidSpec(s, 0)).toMatchObject({ kind: "extrude", cornerRadius: 0.3 });
   });
 
+  it("Fase schaltet ebenfalls auf den B-Rep-Pfad und landet in der Spezifikation", () => {
+    const s = { ...base, chamfer: 0.2 };
+    expect(needsBrepPath(s)).toBe(true);
+    expect(extrudedSolidSpec(s, 0)).toMatchObject({ kind: "extrude", chamfer: 0.2 });
+  });
+
   it("Verjüngung → Loft, volle Verjüngung (Pyramide) → keine B-Rep-Beschreibung", () => {
     expect(extrudedSolidSpec({ ...base, taper: 0.5 }, 0)?.kind).toBe("loft");
     expect(extrudedSolidSpec({ ...base, taper: 1 }, 0)).toBeNull();

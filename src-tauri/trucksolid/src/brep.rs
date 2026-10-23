@@ -61,6 +61,11 @@ pub enum SolidSpec {
         /// Kreisbogen (exakte Zylinderfläche, auch im STEP) verrundet. 0 = scharf.
         #[serde(default, rename = "cornerRadius")]
         corner_radius: f64,
+        /// Fase (Meter) an den Ecken der Aussenkontur: gerade Abschrägung im Abstand `chamfer`
+        /// von der Ecke. 0 = scharf. Vor dem Eckenradius angewandt (beides zugleich: Radius
+        /// auf der gefasten Kontur).
+        #[serde(default)]
+        chamfer: f64,
     },
     /// Prisma in einer beliebigen Ebene: Ring/Löcher in (u,v)-Koordinaten, platziert über
     /// `origin` + `uAxis`/`vAxis` (3D-Richtungen), extrudiert um `depth` entlang u×v.
@@ -205,12 +210,37 @@ fn rounded_ring_wire(ring: &[(f64, f64)], radius: f64, z: f64) -> Wire {
     wire
 }
 
+/// Ecken der Kontur im Abstand `d` abschrägen (je Ecke auf die Hälfte der kürzeren Kante begrenzt).
+fn chamfer_ring(ring: &[(f64, f64)], d: f64) -> Vec<(f64, f64)> {
+    let n = ring.len();
+    let mut out = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let (p0, v, p1) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
+        let (a, b) = ((p0.0 - v.0, p0.1 - v.1), (p1.0 - v.0, p1.1 - v.1));
+        let (la, lb) = (a.0.hypot(a.1), b.0.hypot(b.1));
+        if la < 1e-9 || lb < 1e-9 {
+            out.push(v);
+            continue;
+        }
+        let cos_t = (a.0 * b.0 + a.1 * b.1) / (la * lb);
+        if cos_t < -1.0 + 1e-6 {
+            out.push(v); // gestreckt: keine Ecke
+            continue;
+        }
+        let t = d.min(la / 2.0).min(lb / 2.0);
+        out.push((v.0 + a.0 / la * t, v.1 + a.1 / la * t));
+        out.push((v.0 + b.0 / lb * t, v.1 + b.1 / lb * t));
+    }
+    out
+}
+
 fn extrude(
     points: &[f64],
     holes: &[Vec<f64>],
     height: f64,
     z0: f64,
     corner_radius: f64,
+    chamfer: f64,
 ) -> Res<Solid> {
     if height <= 0.0 {
         return Err("height muss > 0 sein".into());
@@ -218,6 +248,9 @@ fn extrude(
     let mut outer = pairs(points)?;
     if signed_area(&outer) < 0.0 {
         outer.reverse();
+    }
+    if chamfer > 1e-6 {
+        outer = chamfer_ring(&outer, chamfer);
     }
     let mut wires = vec![if corner_radius > 1e-6 {
         rounded_ring_wire(&outer, corner_radius, z0)
@@ -443,8 +476,8 @@ pub fn bool_op(a: &Solid, b: &Solid, op: BoolKind) -> Res<Solid> {
 /// Baut den Volumenkörper aus der Spezifikation.
 pub fn build_solid(spec: &SolidSpec) -> Res<Solid> {
     match spec {
-        SolidSpec::Extrude { points, holes, height, z0, corner_radius } => {
-            extrude(points, holes, *height, *z0, *corner_radius)
+        SolidSpec::Extrude { points, holes, height, z0, corner_radius, chamfer } => {
+            extrude(points, holes, *height, *z0, *corner_radius, *chamfer)
         }
         SolidSpec::ExtrudePlane { points, holes, origin, u_axis, v_axis, depth } => {
             extrude_plane(points, holes, *origin, *u_axis, *v_axis, *depth)
@@ -641,7 +674,7 @@ mod tests {
             holes: vec![ring(1.0, 1.0, 2.0, 2.0)],
             height: 2.0,
             z0: 0.0,
-            corner_radius: 0.0,
+            corner_radius: 0.0, chamfer: 0.0,
         };
         let m = solid_mesh_core(&spec, 0.01).unwrap();
         assert!((volume(&m) - (12.0 - 1.0) * 2.0).abs() < 1e-3, "{}", volume(&m));
@@ -656,10 +689,26 @@ mod tests {
             height: 2.0,
             z0: 0.0,
             corner_radius: r,
+            chamfer: 0.0,
         };
         let m = solid_mesh_core(&spec, 0.001).unwrap();
         let area = 12.0 - (4.0 - PI) * r * r;
         assert!((volume(&m) - area * 2.0).abs() / (area * 2.0) < 0.003, "{}", volume(&m));
+    }
+
+    #[test]
+    fn fase_schneidet_vier_dreiecke_ab() {
+        let spec = SolidSpec::Extrude {
+            points: ring(0.0, 0.0, 4.0, 3.0),
+            holes: vec![],
+            height: 2.0,
+            z0: 0.0,
+            corner_radius: 0.0,
+            chamfer: 0.5,
+        };
+        let m = solid_mesh_core(&spec, 0.01).unwrap();
+        let area = 12.0 - 4.0 * 0.5 * 0.5 * 0.5; // 4 Eckdreiecke à 0,125
+        assert!((volume(&m) - area * 2.0).abs() < 1e-3, "{}", volume(&m));
     }
 
     #[test]
@@ -670,7 +719,7 @@ mod tests {
             holes: vec![],
             height: 1.0,
             z0: 0.0,
-            corner_radius: 10.0,
+            corner_radius: 10.0, chamfer: 0.0,
         };
         let m = solid_mesh_core(&spec, 0.001).unwrap();
         let expect = PI * 0.25;
@@ -684,7 +733,7 @@ mod tests {
             holes: vec![],
             height: 2.0,
             z0: 0.0,
-            corner_radius: 0.5,
+            corner_radius: 0.5, chamfer: 0.0,
         };
         let step = export_step_core(&[spec], &StepHeader::default()).unwrap();
         let back = import_step_core(&step, 0.001).unwrap();
@@ -820,8 +869,8 @@ mod dbg_step {
         let ring = |x0: f64, y0: f64, x1: f64, y1: f64| vec![x0, y0, x1, y0, x1, y1, x0, y1];
         let cases: Vec<(&str, SolidSpec)> = vec![
             ("cuboid", SolidSpec::Cuboid { min: [0.0; 3], max: [2.0, 1.0, 1.0] }),
-            ("extrude_hole", SolidSpec::Extrude { points: ring(0.0, 0.0, 4.0, 3.0), holes: vec![ring(1.0, 1.0, 2.0, 2.0)], height: 2.0, z0: 0.0, corner_radius: 0.0 }),
-            ("extrude_round", SolidSpec::Extrude { points: ring(0.0, 0.0, 4.0, 3.0), holes: vec![], height: 2.0, z0: 0.0, corner_radius: 0.5 }),
+            ("extrude_hole", SolidSpec::Extrude { points: ring(0.0, 0.0, 4.0, 3.0), holes: vec![ring(1.0, 1.0, 2.0, 2.0)], height: 2.0, z0: 0.0, corner_radius: 0.0, chamfer: 0.0 }),
+            ("extrude_round", SolidSpec::Extrude { points: ring(0.0, 0.0, 4.0, 3.0), holes: vec![], height: 2.0, z0: 0.0, corner_radius: 0.5, chamfer: 0.0 }),
             ("cylinder", SolidSpec::Cylinder { cx: 0.0, cy: 0.0, z0: 0.0, r: 1.0, height: 2.0 }),
             ("cone", SolidSpec::Cone { cx: 0.0, cy: 0.0, z0: 0.0, r: 1.0, height: 3.0 }),
             ("sphere", SolidSpec::Sphere { center: [0.0; 3], r: 1.0 }),

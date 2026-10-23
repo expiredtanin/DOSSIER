@@ -710,6 +710,7 @@ export const de = {
   "objinfo.extrudedSolid.height": "Höhe",
   "objinfo.extrudedSolid.taper": "Verjüngung",
   "objinfo.extrudedSolid.cornerRadius": "Eckenradius",
+  "objinfo.extrudedSolid.chamfer": "Fase",
   "objinfo.extrudedSolid.brep": "B-Rep-Körper",
   "objinfo.extrudedSolid.area": "Grundfläche",
   "objinfo.extrudedSolid.floor": "Geschoss",

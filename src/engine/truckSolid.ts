@@ -91,6 +91,8 @@ export type SolidSpec =
       z0?: number;
       /** Eckenradius (m) der Aussenkontur — echte Kreisbögen, auch im STEP. */
       cornerRadius?: number;
+      /** Fase (m) an den Ecken der Aussenkontur (gerade Abschrägung). */
+      chamfer?: number;
     }
   | {
       kind: "extrudePlane";

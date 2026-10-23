@@ -12,7 +12,8 @@ import type { SolidSpec } from "../engine/truckSolid";
  */
 export function needsBrepPath(solid: ExtrudedSolid): boolean {
   if (solid.brep) return true;
-  return (solid.cornerRadius ?? 0) > 1e-9 && !solid.circle && (solid.taper ?? 0) < 1e-6;
+  const rounded = (solid.cornerRadius ?? 0) > 1e-9 || (solid.chamfer ?? 0) > 1e-9;
+  return rounded && !solid.circle && (solid.taper ?? 0) < 1e-6;
 }
 
 /**
@@ -56,6 +57,7 @@ export function extrudedSolidSpec(solid: ExtrudedSolid, baseZ: number): SolidSpe
       height: solid.height,
       z0: baseZ,
       ...((solid.cornerRadius ?? 0) > 0 ? { cornerRadius: solid.cornerRadius } : {}),
+      ...((solid.chamfer ?? 0) > 0 ? { chamfer: solid.chamfer } : {}),
     };
   }
   if (taper < 1 - 1e-6) {

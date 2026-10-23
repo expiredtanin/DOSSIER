@@ -2220,6 +2220,8 @@ export interface ExtrudedSolid {
    * verrundet (truck-B-Rep, auch im STEP-Export exakt). Fehlt/0 = scharfe Ecken.
    */
   cornerRadius?: number;
+  /** Fase (Meter) an den Ecken der Aussenkontur — gerade Abschrägung; fehlt/0 = scharf. */
+  chamfer?: number;
   /**
    * B-Rep-Körper statt Profil-Extrusion (Grundkörper Kugel/Zylinder/Kegel/Torus/Quader …
    * oder beliebige `trucksolid`-Spezifikation). `spec` ist eine `SolidSpec`

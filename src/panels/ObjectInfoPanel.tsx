@@ -694,6 +694,25 @@ export function ExtrudedSolidSection({
         </div>
       )}
 
+      {/* Fase (editierbar, ≥ 0): gerade Abschrägung der Ecken der Aussenkontur. */}
+      {!solid.brepLabel && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.extrudedSolid.chamfer")}</span>
+          <input
+            type="number"
+            className="objinfo-text"
+            step={0.05}
+            min={0}
+            value={solid.chamfer}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v) && v >= 0) host.onSetExtrudedSolidChamfer(v);
+            }}
+            title={t("objinfo.extrudedSolid.chamfer")}
+          />
+        </div>
+      )}
+
       {/* Verjüngung (editierbar, 0..1) — löst eine Re-Extrusion (truck-WASM) aus. */}
       {!solid.brepLabel && (
       <div className="objinfo-field">
