@@ -989,7 +989,7 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
                 let c = |p: Point2| -> [f32; 9] {
                     [
                         p[0], y, p[1], p[0], p[1],
-                        hatch.pattern as f32, hatch.angle.to_radians(), hatch.scale.max(0.05),
+                        hatch.pattern as f32, hatch.top_angle.unwrap_or(hatch.angle).to_radians(), hatch.scale.max(0.05),
                         hatch.line_weight.max(0.0),
                     ]
                 };

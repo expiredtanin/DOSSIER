@@ -47,6 +47,11 @@ pub struct Hatch {
     /// `thin` 0.13 mm). Default 0.13 (Alt-Verhalten/Haarlinie).
     #[serde(default = "default_hatch_line_weight", rename = "lineWeight")]
     pub line_weight: f32,
+    /// Musterdrehung (Grad, Modell-Winkel gegen den Uhrzeigersinn) fuer die Wand-OBERSEITE
+    /// (Draufsicht, Weltkoordinaten x/z): wie im 2D-Grundriss relativ zur Wandachse. Fehlt
+    /// es, gilt `angle`.
+    #[serde(default, rename = "topAngle")]
+    pub top_angle: Option<f32>,
 }
 
 fn default_hatch_scale() -> f32 {

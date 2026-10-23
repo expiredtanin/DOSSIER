@@ -304,6 +304,7 @@ mod tests {
                 angle: 90.0,
                 scale: 2.0,
                 line_weight: 0.5,
+                top_angle: None,
             }),
             cut: None,
         };
@@ -377,7 +378,7 @@ mod tests {
             layers: None,
             holes: vec![],
             material_index: None,
-            hatch: Some(Hatch { pattern: 2, angle: 0.0, scale: 1.0, line_weight: 0.13 }),
+            hatch: Some(Hatch { pattern: 2, angle: 0.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             cut: Some(CutBandMeta {
                 join_priority: Some(50),
                 component_id: Some("brick".into()),
@@ -393,7 +394,7 @@ mod tests {
             z_bottom: 2.0,
             z_top: 2.4,
             color: [0.8, 0.8, 0.8],
-            hatch: Some(Hatch { pattern: 1, angle: 0.0, scale: 1.0, line_weight: 0.13 }),
+            hatch: Some(Hatch { pattern: 1, angle: 0.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             cut: Some(CutBandMeta {
                 join_priority: Some(100),
                 component_id: Some("concrete".into()),
@@ -451,7 +452,7 @@ mod tests {
             layers: None,
             holes: vec![],
             material_index: None,
-            hatch: Some(Hatch { pattern: 2, angle: 0.0, scale: 1.0, line_weight: 0.13 }),
+            hatch: Some(Hatch { pattern: 2, angle: 0.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             cut: Some(CutBandMeta {
                 join_priority: Some(50),
                 component_id: Some("brick".into()),
@@ -467,7 +468,7 @@ mod tests {
             z_bottom: 1.0,
             z_top: 1.06,
             color: [0.8, 0.8, 0.8],
-            hatch: Some(Hatch { pattern: 3, angle: 0.0, scale: 1.0, line_weight: 0.13 }),
+            hatch: Some(Hatch { pattern: 3, angle: 0.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             cut: Some(CutBandMeta {
                 join_priority: Some(30),
                 component_id: Some("screed".into()),
@@ -482,7 +483,7 @@ mod tests {
             z_bottom: 0.96,
             z_top: 1.0,
             color: [0.8, 0.8, 0.8],
-            hatch: Some(Hatch { pattern: 4, angle: 0.0, scale: 1.0, line_weight: 0.13 }),
+            hatch: Some(Hatch { pattern: 4, angle: 0.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             cut: Some(CutBandMeta {
                 join_priority: Some(20),
                 component_id: Some("insulation".into()),

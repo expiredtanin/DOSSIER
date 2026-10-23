@@ -183,6 +183,18 @@ function resolveWallBands(project: Project, wall: Wall, layered = true): WallBan
 }
 
 /**
+ * Setzt `topAngle` (Draufsicht): wie der 2D-Grundriss — das Muster folgt der Wandachse
+ * (`relativeToWall`), `resolveHatch` zieht den Wandwinkel ab (SVG-Konvention, y nach unten);
+ * render3d rechnet in Modell-Winkeln (gegen den Uhrzeigersinn), daher das Vorzeichen.
+ */
+function withTopAngle(h: RHatch, dx: number, dy: number): RHatch {
+  if (h.baseAngle === undefined) return h;
+  const wallAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  const svgAngle = h.relativeToWall ? h.baseAngle - wallAngle : h.baseAngle;
+  return { ...h, topAngle: -svgAngle };
+}
+
+/**
  * Hängt eine Wand-Schicht-Box an: das Achsenstück [from..to] (Meter ab
  * Wand-Startpunkt) über den Höhenbereich [zBottom..zTop], quer um `normalOffset`
  * Meter entlang der Wand-Normalen versetzt (Schichtmitte relativ zur Achse) und
@@ -245,7 +257,7 @@ function pushSegment(
     color,
     layers: [],
     wallId,
-    ...(hatch ? { hatch } : {}),
+    ...(hatch ? { hatch: withTopAngle(hatch, dx, dy) } : {}),
     ...(materialIndex != null ? { materialIndex } : {}),
     ...(holes && holes.length > 0 ? { holes } : {}),
     ...(cut ? { cut } : {}),

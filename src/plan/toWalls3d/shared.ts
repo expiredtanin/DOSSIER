@@ -47,6 +47,17 @@ export interface RHatch {
    * Schraffur einstellbar ist (z. B. SIA `hatch-hair` 0.02 mm vs. `thin` 0.13 mm).
    */
   lineWeight?: number;
+  /**
+   * Nur TS-intern: Grundwinkel der Schraffur (SVG-Konvention, vor Wandbezug) und ob das Muster
+   * der Wandachse folgt (`relativeToWall`). `pushSegment` leitet daraus {@link topAngle} ab.
+   */
+  baseAngle?: number;
+  relativeToWall?: boolean;
+  /**
+   * Musterdrehung (Grad, Modell-Winkel gegen den Uhrzeigersinn) für die Wand-OBERSEITE in der
+   * Draufsicht — wie im 2D-Grundriss relativ zur Wandachse (render3d::Hatch.topAngle).
+   */
+  topAngle?: number;
 }
 
 /** Bildet ein 2D-{@link HatchPattern} auf die Muster-Id von {@link RHatch}/CAP_WGSL ab. */
@@ -89,7 +100,17 @@ export function resolveComponentHatch(
     // (`HatchRender.angle`, bereits relativeToWall-korrigiert) UND die Musterlinien-
     // Stärke (`lineWeight`, aus dem LineStyle) — nicht mehr den rohen Hatch-Winkel.
     const hr = resolveHatch(project, comp.hatchId, axisAngleDeg);
-    return { pattern: hatchPatternId(hr.pattern), angle: hr.angle, scale: hr.scale, lineWeight: hr.lineWeight };
+    // Wandbezug für die Draufsicht: Grundwinkel + ob das Muster der Wandachse folgt.
+    const abs = resolveHatch(project, comp.hatchId, undefined);
+    const relativeToWall = resolveHatch(project, comp.hatchId, 90).angle !== abs.angle;
+    return {
+      pattern: hatchPatternId(hr.pattern),
+      angle: hr.angle,
+      scale: hr.scale,
+      lineWeight: hr.lineWeight,
+      baseAngle: abs.angle,
+      relativeToWall,
+    };
   } catch {
     return undefined;
   }

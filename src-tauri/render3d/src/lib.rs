@@ -168,7 +168,7 @@ mod tests {
     /// `wall_x` mit gesetzter Bauteil-Schraffur (Voraussetzung fuer die Kappen).
     fn wall_x_hatched(len: f32, thickness: f32, height: f32) -> WallInput {
         WallInput {
-            hatch: Some(Hatch { pattern: 3, angle: 45.0, scale: 1.0, line_weight: 0.13 }),
+            hatch: Some(Hatch { pattern: 3, angle: 45.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             ..wall_x(len, thickness, height)
         }
     }

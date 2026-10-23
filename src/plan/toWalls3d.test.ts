@@ -2763,3 +2763,24 @@ describe("emitStairs — gerade Betontreppe im Schnitt: glatte Soffit-Untersicht
     }
   });
 });
+
+describe("Wand-Schraffur in der Draufsicht (topAngle)", () => {
+  it("relativeToWall-Muster folgt der Wandachse: Wand längs x → 0°, längs y → 90°", () => {
+    const p: Project = {
+      ...sampleProject,
+      hatches: sampleProject.hatches.map((h) =>
+        h.id === "sia-insulation" ? { ...h, angle: 0, relativeToWall: true } : h,
+      ),
+    };
+    const { walls } = projectToModel3d(p);
+    const ins = walls.filter((w) => w.hatch && w.hatch.pattern === 2 && w.hatch.relativeToWall && w.hatch.baseAngle === 0);
+    const along = (w: (typeof walls)[number], axis: 0 | 1) =>
+      Math.abs(w.end[axis] - w.start[axis]) > Math.abs(w.end[1 - axis] - w.start[1 - axis]);
+    const alongX = ins.filter((w) => along(w, 0));
+    const alongY = ins.filter((w) => along(w, 1));
+    expect(alongX.length).toBeGreaterThan(0);
+    expect(alongY.length).toBeGreaterThan(0);
+    for (const w of alongX) expect(Math.abs(((w.hatch!.topAngle ?? 99) + 360) % 180)).toBeLessThan(1e-6);
+    for (const w of alongY) expect(Math.abs((((w.hatch!.topAngle ?? 0) % 180) + 180) % 180 - 90)).toBeLessThan(1e-6);
+  });
+});
