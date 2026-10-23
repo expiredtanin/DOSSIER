@@ -52,6 +52,7 @@ import { UnsavedChangesDialog } from "./ui/UnsavedChangesDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./io/projectFile";
 import { stepTextToImportedMeshes } from "./io/stepImport";
+import { applyClashMarkers, runClashCheck } from "./analysis/clash";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./plan/PlanView";
 import type { DisplayResolver } from "./viewport/Viewport3D";
@@ -2383,6 +2384,23 @@ export default function App() {
       onExportStl,
       onExportStep,
       onImportStep: () => stepInputRef.current?.click(),
+      onClashCheck: () => {
+        const p0 = project;
+        runClashCheck(p0)
+          .then((clashes) => {
+            setProject((p) => applyClashMarkers(p, clashes, activeCategoryCode));
+            window.alert(
+              clashes.length === 0
+                ? t("clash.none")
+                : `${t("clash.found")}: ${clashes.length}\n` +
+                    clashes
+                      .slice(0, 20)
+                      .map((c, k) => `K${k + 1}: ${c.a.kind} ↔ ${c.b.kind}${c.volume !== null ? ` · ${c.volume.toFixed(3)} m³` : ""}`)
+                      .join("\n"),
+            );
+          })
+          .catch((err) => window.alert(`${t("clash.failed")}: ${err instanceof Error ? err.message : String(err)}`));
+      },
       onUndo: undo,
       onRedo: redo,
       onDeleteSelection: deleteSelection,

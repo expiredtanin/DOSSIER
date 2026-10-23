@@ -69,7 +69,7 @@ export function wallProfile(
   return { outer, holes: inner };
 }
 
-function wallSpec(w: RWall): SolidSpec | null {
+export function wallSpec(w: RWall): SolidSpec | null {
   const dx = w.end[0] - w.start[0];
   const dy = w.end[1] - w.start[1];
   const len = Math.hypot(dx, dy);

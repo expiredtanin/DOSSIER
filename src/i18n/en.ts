@@ -1703,6 +1703,10 @@ export const en: Record<TranslationKey, string> = {
   "step.import.failed": "STEP import failed",
   "step.import.done": "STEP imported: {n} solids",
   "menu.native.importStep": "Import STEP …",
+  "menu.native.clashCheck": "Clash detection …",
+  "clash.none": "No clashes found.",
+  "clash.found": "Clashes found",
+  "clash.failed": "Clash detection failed",
   "file.export": "Export",
   "file.openFailed": "Could not read the project file.",
 

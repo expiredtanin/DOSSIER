@@ -34,6 +34,7 @@ export interface NativeAppMenuHandlers {
   onExportStl: () => void;
   onExportStep: () => void;
   onImportStep: () => void;
+  onClashCheck: () => void;
 
   onUndo: () => void;
   onRedo: () => void;
@@ -245,6 +246,11 @@ export function useNativeAppMenu(
           await MenuItem.new({
             text: t("menu.native.rotate"),
             action: () => handlersRef.current.onRotate(),
+          }),
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await MenuItem.new({
+            text: t("menu.native.clashCheck"),
+            action: () => handlersRef.current.onClashCheck(),
           }),
         ],
       });
