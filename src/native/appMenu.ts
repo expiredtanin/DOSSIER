@@ -32,6 +32,8 @@ export interface NativeAppMenuHandlers {
   onExportIfc: () => void;
   onExportObj: () => void;
   onExportStl: () => void;
+  onExportStep: () => void;
+  onImportStep: () => void;
 
   onUndo: () => void;
   onRedo: () => void;
@@ -166,6 +168,10 @@ export function useNativeAppMenu(
             text: t("menu.native.import"),
             action: () => handlersRef.current.onImport(),
           }),
+          await MenuItem.new({
+            text: t("menu.native.importStep"),
+            action: () => handlersRef.current.onImportStep(),
+          }),
           await Submenu.new({
             text: t("menu.native.export"),
             items: [
@@ -192,6 +198,10 @@ export function useNativeAppMenu(
               await MenuItem.new({
                 text: "STL",
                 action: () => handlersRef.current.onExportStl(),
+              }),
+              await MenuItem.new({
+                text: "STEP",
+                action: () => handlersRef.current.onExportStep(),
               }),
             ],
           }),

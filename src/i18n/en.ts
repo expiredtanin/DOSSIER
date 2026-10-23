@@ -1670,6 +1670,12 @@ export const en: Record<TranslationKey, string> = {
   "file.exportIfc": "Export IFC",
   "file.exportObj": "Export OBJ (3D mesh)",
   "file.exportStl": "Export STL (3D mesh)",
+  "exportSave.fmt.step": "STEP (B-rep, truck)",
+  "step.export.failed": "STEP export failed",
+  "step.export.skipped": "{n} solids could not be exported",
+  "step.import.failed": "STEP import failed",
+  "step.import.done": "STEP imported: {n} solids",
+  "menu.native.importStep": "Import STEP …",
   "file.export": "Export",
   "file.openFailed": "Could not read the project file.",
 

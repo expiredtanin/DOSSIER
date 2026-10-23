@@ -12,7 +12,7 @@ import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
 
 /** Direkt-herunterladbare Exportformate (mit Datei-Endung). */
-export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl";
+export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl" | "step";
 
 /** Datei-Endung je Format. */
 export const EXPORT_FORMAT_EXT: Record<ExportSaveFormat, string> = {
@@ -20,6 +20,7 @@ export const EXPORT_FORMAT_EXT: Record<ExportSaveFormat, string> = {
   ifc: "ifc",
   obj: "obj",
   stl: "stl",
+  step: "stp",
 };
 
 export interface ExportSaveDialogProps {
@@ -87,6 +88,7 @@ export function ExportSaveDialog({
                 { value: "ifc", label: t("exportSave.fmt.ifc") },
                 { value: "obj", label: t("exportSave.fmt.obj") },
                 { value: "stl", label: t("exportSave.fmt.stl") },
+                { value: "step", label: t("exportSave.fmt.step") },
               ]}
             />
           </section>

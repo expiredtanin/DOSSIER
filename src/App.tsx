@@ -51,6 +51,7 @@ import { LockConflictDialog } from "./ui/LockConflictDialog";
 import { UnsavedChangesDialog } from "./ui/UnsavedChangesDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./io/projectFile";
+import { stepTextToImportedMeshes } from "./io/stepImport";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./plan/PlanView";
 import type { DisplayResolver } from "./viewport/Viewport3D";
@@ -539,6 +540,8 @@ export default function App() {
   // Der Klick auf „DXF importieren" triggert .click() dieses Inputs; onChange
   // liest die Datei als Text und reicht sie durch parseDxf → addContextObjects.
   const dxfInputRef = useRef<HTMLInputElement>(null);
+  // Verstecktes Datei-Input für den STEP-Import (Menü Datei, STEP importieren).
+  const stepInputRef = useRef<HTMLInputElement>(null);
 
   // Verstecktes Datei-Input für „Bild einfügen" (Werkzeug „image", s. tools.ts-
   // Kommentar) — akzeptiert auch PDF (jede Seite wird gerastert, s. pdfImport.ts);
@@ -1824,6 +1827,7 @@ export default function App() {
     onExportIfc,
     onExportObj,
     onExportStl,
+    onExportStep,
     onOpenProject,
     openProjectAtPath,
     onProjectFileChosen,
@@ -2377,6 +2381,8 @@ export default function App() {
       onExportIfc,
       onExportObj,
       onExportStl,
+      onExportStep,
+      onImportStep: () => stepInputRef.current?.click(),
       onUndo: undo,
       onRedo: redo,
       onDeleteSelection: deleteSelection,
@@ -3209,6 +3215,25 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {/* Verstecktes STEP-Datei-Input (Menü Datei, STEP importieren). */}
+      <input
+        ref={stepInputRef}
+        type="file"
+        accept=".stp,.step,.p21"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (!f) return;
+          void f
+            .text()
+            .then((text) => stepTextToImportedMeshes(text, f.name))
+            .then((objs) => addContextObjectsAndFit(objs))
+            .catch((err) =>
+              window.alert(`${t("step.import.failed")}: ${err instanceof Error ? err.message : String(err)}`),
+            );
+        }}
+      />
       {/* Verstecktes Bild/PDF-Datei-Input (Werkzeug „image"). */}
       <input
         ref={imageInputRef}
@@ -3257,6 +3282,7 @@ export default function App() {
         onExportIfc={onExportIfc}
         onExportObj={onExportObj}
         onExportStl={onExportStl}
+        onExportStep={onExportStep}
         viewType={viewType}
         fov={fov}
         onFov={setFov}

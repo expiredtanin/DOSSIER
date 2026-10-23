@@ -17,6 +17,7 @@ import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings"
 import type { ImportDecision } from "../ui/ImportDialog";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf } from "../export/exportIfc";
+import { exportProjectStep } from "../export/exportStep";
 import { exportObj, exportStl } from "../export/exportMesh";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
 import { saveTextFile } from "../io/saveFile";
@@ -442,6 +443,18 @@ export function useProjectFileActions(
       case "stl":
         downloadTextFile(exportStl(project), filename);
         break;
+      case "step":
+        // B-Rep via truck-WASM (asynchron): Körper, die truck nicht bauen kann, werden
+        // übersprungen — der Export bleibt trotzdem erhalten, Hinweis per Meldung.
+        void exportProjectStep(project, filename.replace(/\.[^.]+$/, ""))
+          .then((r) => {
+            downloadTextFile(r.text, filename);
+            if (r.skipped.length > 0) {
+              window.alert(t("step.export.skipped", { n: r.skipped.length }));
+            }
+          })
+          .catch((e) => window.alert(`${t("step.export.failed")}: ${e instanceof Error ? e.message : String(e)}`));
+        break;
     }
   };
   // Schnellexport aus dem Topbar-Menü öffnet den Format-/Dateiname-Dialog
@@ -450,6 +463,7 @@ export function useProjectFileActions(
   const onExportIfc = () => setExportSaveFormat("ifc");
   const onExportObj = () => setExportSaveFormat("obj");
   const onExportStl = () => setExportSaveFormat("stl");
+  const onExportStep = () => setExportSaveFormat("step");
   // Unter Tauri: nativer Öffnen-Dialog (echter Pfad → Lock möglich). Im
   // Browser: verstecktes <input type=file> wie bisher (kein echter Pfad, also
   // ohne Lock — File-API im Browser liefert keinen Dateisystempfad).
@@ -570,6 +584,7 @@ export function useProjectFileActions(
     onExportIfc,
     onExportObj,
     onExportStl,
+    onExportStep,
     onOpenProject,
     onProjectFileChosen,
     runImport,

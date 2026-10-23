@@ -122,6 +122,7 @@ export interface TopBarProps {
   onExportIfc: () => void;
   onExportObj: () => void;
   onExportStl: () => void;
+  onExportStep?: () => void;
 
   // Kamera-Settings (FOV), ZUSÄTZLICH zur bestehenden im „Ansichten"-Ribbon-
   // Tab (ViewRibbonTab) und im 3D-Ribbon-Tab (Ribbon3dTab) — hier direkt neben
