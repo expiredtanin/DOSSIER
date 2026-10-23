@@ -68,3 +68,58 @@ export async function booleanMesh(
   );
   return JSON.parse(json) as BooleanMeshResult;
 }
+
+// ── B-Rep-Körper (truck 0.6): Spezifikation → Mesh / STEP ────────────────────
+
+/** Ein Loft-Schnitt: Höhe + geschlossener Ring [x0,y0,x1,y1,…]. */
+export interface LoftSectionSpec {
+  z: number;
+  points: number[];
+}
+
+/**
+ * Beschreibung eines Volumenkörpers (1:1 `brep::SolidSpec` in `trucksolid`). Koordinaten
+ * in Modell-Metern, Z = Höhe. `Boolean` arbeitet auf B-Rep-Ebene und scheitert bei
+ * bündigen Flächen — Schneidkörper überstehen lassen, oder `ExtrudePlane` mit Loch nutzen.
+ */
+export type SolidSpec =
+  | { kind: "extrude"; points: number[]; holes?: number[][]; height: number; z0?: number }
+  | {
+      kind: "extrudePlane";
+      points: number[];
+      holes?: number[][];
+      origin: [number, number, number];
+      uAxis: [number, number, number];
+      vAxis: [number, number, number];
+      depth: number;
+    }
+  | { kind: "revolve"; profile: number[]; cx?: number; cy?: number; angleDeg?: number }
+  | { kind: "loft"; sections: LoftSectionSpec[] }
+  | { kind: "cuboid"; min: [number, number, number]; max: [number, number, number] }
+  | { kind: "sphere"; center: [number, number, number]; r: number }
+  | { kind: "cylinder"; cx: number; cy: number; z0: number; r: number; height: number }
+  | { kind: "cone"; cx: number; cy: number; z0: number; r: number; height: number }
+  | { kind: "torus"; center: [number, number, number]; major: number; minor: number }
+  | { kind: "boolean"; op: "union" | "difference" | "intersection"; a: SolidSpec; b: SolidSpec }
+  | { kind: "translate"; v: [number, number, number]; solid: SolidSpec };
+
+/** Tesselliert einen B-Rep-Körper (Sehnenabweichung `tol` Meter). */
+export async function buildSolidMesh(spec: SolidSpec, tol = 0.01): Promise<ExtrudedMesh> {
+  const m = await getModule();
+  return JSON.parse(m.build_solid_mesh(JSON.stringify({ spec, tol }))) as ExtrudedMesh;
+}
+
+/** Exportiert Körper als STEP-Text (ISO 10303-42 B-Rep). */
+export async function exportStepSolids(
+  solids: SolidSpec[],
+  fileName = "",
+): Promise<string> {
+  const m = await getModule();
+  return m.export_step(JSON.stringify({ solids, fileName, organizationSystem: "dossier" }));
+}
+
+/** Liest STEP-Text und liefert je Körper ein Dreiecks-Mesh (`relTol` relativ zur Diagonale). */
+export async function importStepMeshes(text: string, relTol = 0.001): Promise<ExtrudedMesh[]> {
+  const m = await getModule();
+  return JSON.parse(m.import_step(text, relTol)) as ExtrudedMesh[];
+}

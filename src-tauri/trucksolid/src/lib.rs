@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use truck_modeling::*;
 
 mod boolean;
+pub mod brep;
 pub use boolean::{boolean_mesh_core, BooleanMeshInput, BooleanMeshOutput};
 
 /// Flaches [x0,y0, x1,y1, …] Array + Höhe → Extrusion.
@@ -356,6 +357,52 @@ mod web {
         let mesh = extrude_circle_core(i.cx, i.cy, i.r, i.height, i.taper)
             .map_err(|e| JsError::new(&e.to_string()))?;
         serde_json::to_string(&mesh).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// B-Rep-Körper aus einer Spezifikation (s. `brep::SolidSpec`) → Mesh.
+    /// Input JSON: `{ "spec": {kind:"extrude",…}, "tol": 0.01 }`
+    #[wasm_bindgen]
+    pub fn build_solid_mesh(input_json: &str) -> std::result::Result<String, JsError> {
+        #[derive(serde::Deserialize)]
+        struct In {
+            spec: brep::SolidSpec,
+            #[serde(default = "default_tol")]
+            tol: f64,
+        }
+        fn default_tol() -> f64 {
+            0.01
+        }
+        let i: In = serde_json::from_str(input_json).map_err(|e| JsError::new(&e.to_string()))?;
+        let mesh = brep::solid_mesh_core(&i.spec, i.tol).map_err(|e| JsError::new(&e))?;
+        serde_json::to_string(&mesh).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Exportiert Körper als STEP-Text (ISO 10303-42).
+    /// Input JSON: `{ "solids": [spec, …], "fileName": "haus.stp", "organizationSystem": "dossier" }`
+    #[wasm_bindgen]
+    pub fn export_step(input_json: &str) -> std::result::Result<String, JsError> {
+        #[derive(serde::Deserialize)]
+        struct In {
+            solids: Vec<brep::SolidSpec>,
+            #[serde(default, rename = "fileName")]
+            file_name: String,
+            #[serde(default, rename = "organizationSystem")]
+            organization_system: String,
+        }
+        let i: In = serde_json::from_str(input_json).map_err(|e| JsError::new(&e.to_string()))?;
+        brep::export_step_core(
+            &i.solids,
+            &brep::StepHeader { file_name: i.file_name, organization_system: i.organization_system },
+        )
+        .map_err(|e| JsError::new(&e))
+    }
+
+    /// Liest STEP-Text und tesselliert alle Körper (`relTol` = Toleranz relativ zur
+    /// Bounding-Box-Diagonale, Default 0.001). Output JSON: `[{positions, indices}, …]`.
+    #[wasm_bindgen]
+    pub fn import_step(text: &str, rel_tol: f64) -> std::result::Result<String, JsError> {
+        let meshes = brep::import_step_core(text, rel_tol).map_err(|e| JsError::new(&e))?;
+        serde_json::to_string(&meshes).map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Boolesche Operation zwischen zwei Dreiecks-Meshes (Mesh-Ebenen-CSG via
