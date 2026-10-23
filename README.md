@@ -88,6 +88,9 @@ Liste beschreibt den Ist-Zustand des Codes, nicht eine Zusage._
 - Kennwerte im Objekt-Panel: Volumen, Oberfläche, Schwerpunkt, Dichtheit.
 - **Kollisionsprüfung** zwischen freien Körpern, importierten Meshes und den
   übrigen Bauteilen, mit Markierungen im Plan.
+- **Abzugskörper** (Befehl `durchbruch`, oder „Abzugskörper" im Objekt-Panel):
+  Durchbrüche, Nischen und Schlitze ziehen sich von Wänden, Decken und Stützen
+  ab — im Grundriss, im Schnitt, im 3D (B-Rep-Boolean) und im STEP-Export.
 
 ### 2D-Zeichnen und Annotation
 
@@ -194,9 +197,10 @@ Liste beschreibt den Ist-Zustand des Codes, nicht eine Zusage._
   echten Wänden und Öffnungen fehlt; DWG-Schreiben fehlt.
 - **`make2D`**: aus einer 3D-Sicht eine flache 2D-Zeichnung mit Füllungen
   erzeugen.
-- **Generische Mesh-Booleans für Wandöffnungen**: Öffnungen werden heute als
-  achsparallele Löcher aus dem Wandkörper geschnitten; das allgemeine
-  CSG aus `trucksolid` ist nicht an die Wand-Pipeline angeschlossen.
+- **Booleans im Gebäude, weitere Fälle**: Abzugskörper sind senkrechte
+  Prismen und wirken auf Wände, Decken und Stützen; Wand-an-Dach-Anschluss,
+  Abzugskörper beliebiger Form, Abzug von Dächern und Durchbrüche in der
+  Ansicht fehlen noch.
 - Dachfenster.
 - Die historische Doppelung `doors` / `openings` im Datenmodell ist noch nicht
   bereinigt.
