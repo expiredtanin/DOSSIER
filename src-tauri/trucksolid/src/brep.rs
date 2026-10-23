@@ -107,6 +107,10 @@ pub enum SolidSpec {
     },
     /// Verschiebung eines Körpers.
     Translate { v: [f64; 3], solid: Box<SolidSpec> },
+    /// Affine Abbildung (Drehung, gleichmässige Skalierung, Spiegelung): 3×4-Matrix
+    /// zeilenweise `[a b c tx, d e f ty, g h i tz]`. Bei negativer Determinante
+    /// (Spiegelung) wird die Orientierung der Hülle umgekehrt.
+    Transform { m: [f64; 12], solid: Box<SolidSpec> },
 }
 
 fn pairs(flat: &[f64]) -> Res<Vec<(f64, f64)>> {
@@ -490,6 +494,18 @@ pub fn build_solid(spec: &SolidSpec) -> Res<Solid> {
         SolidSpec::Cone { cx, cy, z0, r, height } => cone(*cx, *cy, *z0, *r, *height),
         SolidSpec::Torus { center, major, minor } => torus(*center, *major, *minor),
         SolidSpec::Boolean { op, a, b } => bool_op(&build_solid(a)?, &build_solid(b)?, *op),
+        SolidSpec::Transform { m, solid } => {
+            let mat = Matrix4::new(
+                m[0], m[4], m[8], 0.0, m[1], m[5], m[9], 0.0, m[2], m[6], m[10], 0.0, m[3], m[7], m[11], 1.0,
+            );
+            let det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8])
+                + m[2] * (m[4] * m[9] - m[5] * m[8]);
+            let mut out = builder::transformed(&build_solid(solid)?, mat);
+            if det < 0.0 {
+                out.not();
+            }
+            Ok(out)
+        }
         SolidSpec::Translate { v, solid } => {
             Ok(builder::translated(&build_solid(solid)?, Vector3::new(v[0], v[1], v[2])))
         }
@@ -883,5 +899,22 @@ mod dbg_step {
             let step = export_step_core(&[spec], &StepHeader::default()).unwrap();
             std::fs::write(format!("{dir}/{name}.stp"), step).unwrap();
         }
+    }
+
+    #[test]
+    fn transform_rotate_and_mirror_keep_volume() {
+        let base = SolidSpec::Cuboid { min: [0.0, 0.0, 0.0], max: [2.0, 1.0, 3.0] };
+        let vol = |sp: &SolidSpec| {
+            let m = solid_mesh_core(sp, 0.01).unwrap();
+            let p: Vec<[f64; 3]> = m.positions.chunks(3).map(|c| [c[0] as f64, c[1] as f64, c[2] as f64]).collect();
+            m.indices.chunks(3).map(|t| {
+                let (a, b, c) = (p[t[0] as usize], p[t[1] as usize], p[t[2] as usize]);
+                (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+            }).sum::<f64>()
+        };
+        let rot = SolidSpec::Transform { m: [0.0, -1.0, 0.0, 5.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], solid: Box::new(base.clone()) };
+        let mir = SolidSpec::Transform { m: [-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], solid: Box::new(base) };
+        assert!((vol(&rot) - 6.0).abs() < 1e-6, "rot {}", vol(&rot));
+        assert!((vol(&mir) - 6.0).abs() < 1e-6, "mir {}", vol(&mir));
     }
 }

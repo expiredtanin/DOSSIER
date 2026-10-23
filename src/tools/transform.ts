@@ -9,6 +9,7 @@
 // Bezeichner englisch, UI-Text via t() (CONVENTIONS.md). Reine Funktionen + Geometrie;
 // die App hält den State und wendet `commitTransform` immutabel an.
 
+import { transformSolid } from "../plan/extrudedSolidSpec";
 import type {
   Ceiling,
   Column,
@@ -711,15 +712,7 @@ export function commitTransform(
       // nutzt) müssen mitziehen — sonst weicht das 3D-Volumen sichtbar von
       // der Grundriss-Kontur ab (nur `center` mitzuführen genügt nicht).
       const f1 = op === "scale" ? scaleFactor(pts, 1) : 1;
-      extrudedSolids = extrudedSolids.map((s) =>
-        s.id === sel.extrudedSolidId
-          ? {
-              ...s,
-              points: s.points.map(fn),
-              circle: s.circle ? { ...s.circle, center: fn(s.circle.center), r: s.circle.r * f1 } : undefined,
-            }
-          : s,
-      );
+      extrudedSolids = extrudedSolids.map((s) => (s.id === sel.extrudedSolidId ? transformSolid(s, fn, f1) : s));
     }
     if (sel.columnId) {
       columns = columns.map((c) => (c.id === sel.columnId && !c.locked ? mvColumn(c, fn) : c));
@@ -775,12 +768,7 @@ export function commitTransform(
         case "extrudedSolid": {
           const s = item.solid;
           const f = op === "scale" ? scaleFactor(pts, t) : 1;
-          newSolids.push({
-            ...s,
-            id: uniqueId("extrude"),
-            points: s.points.map(fn),
-            circle: s.circle ? { ...s.circle, center: fn(s.circle.center), r: s.circle.r * f } : undefined,
-          });
+          newSolids.push({ ...transformSolid(s, fn, f), id: uniqueId("extrude") });
           break;
         }
       }

@@ -111,7 +111,8 @@ export type SolidSpec =
   | { kind: "cone"; cx: number; cy: number; z0: number; r: number; height: number }
   | { kind: "torus"; center: [number, number, number]; major: number; minor: number }
   | { kind: "boolean"; op: "union" | "difference" | "intersection"; a: SolidSpec; b: SolidSpec }
-  | { kind: "translate"; v: [number, number, number]; solid: SolidSpec };
+  | { kind: "translate"; v: [number, number, number]; solid: SolidSpec }
+  | { kind: "transform"; m: number[]; solid: SolidSpec };
 
 /** Tesselliert einen B-Rep-Körper (Sehnenabweichung `tol` Meter). */
 export async function buildSolidMesh(spec: SolidSpec, tol = 0.01): Promise<ExtrudedMesh> {

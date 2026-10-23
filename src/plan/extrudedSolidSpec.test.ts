@@ -1,3 +1,4 @@
+import { transformSolid } from "./extrudedSolidSpec";
 import { describe, expect, it } from "vitest";
 import type { ExtrudedSolid } from "../model/types";
 import { extrudedSolidSpec, needsBrepPath } from "./extrudedSolidSpec";
@@ -46,5 +47,23 @@ describe("extrudedSolidSpec", () => {
       v: [5, -1, 2.6],
       solid: { kind: "sphere", center: [1, 1, 1], r: 1 },
     });
+  });
+});
+
+describe("transformSolid", () => {
+  const body = {
+    id: "b", type: "extrudedSolid", points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 }], height: 3,
+    brep: { spec: { kind: "cuboid", min: [0, 0, 0], max: [2, 1, 3] }, origin: { x: 0, y: 0 } },
+  } as never;
+  it("Drehung um 90° wickelt die Spezifikation in transform", () => {
+    const r = transformSolid(body, (p) => ({ x: -p.y, y: p.x }));
+    const sp = r.brep!.spec as { kind: string; m: number[] };
+    expect(sp.kind).toBe("transform");
+    expect(sp.m.slice(0, 2)).toEqual([0, -1]);
+    expect(r.brep!.origin).toEqual(r.points[0]);
+  });
+  it("Skalierung skaliert auch die Hoehe", () => {
+    const r = transformSolid(body, (p) => ({ x: p.x * 2, y: p.y * 2 }), 2);
+    expect(r.height).toBe(6);
   });
 });
