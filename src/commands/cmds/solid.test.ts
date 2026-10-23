@@ -6,7 +6,7 @@ import { solidCommand, solidFromInputs } from "./solid";
 const ctx = { project: sampleProject, level: { id: "eg" } } as unknown as CommandContext;
 
 function run(shape: string, steps: Array<{ kind: "point"; point: { x: number; y: number } } | { kind: "number"; value: number }>) {
-  let state = solidCommand.init(ctx);
+  let state = solidCommand.init();
   [state] = solidCommand.onInput(state, { kind: "option", id: shape }, ctx);
   let commit: ((p: typeof sampleProject) => typeof sampleProject) | undefined;
   for (const st of steps) {
