@@ -14,7 +14,9 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
-import { useState } from "react";
+import { solidProps } from "../engine/truckSolid";
+import type { SolidProps, SolidSpec } from "../engine/truckSolid";
+import { useEffect, useState } from "react";
 // Anzeige-Fallbacks für die Öffnungs-Linien-Übersteuerung (LineStyleRow) —
 // dieselben Werte wie POCHE_STROKE/SYMBOL_HAIRLINE_MM in plan/generatePlan.ts
 // (reine UI-Default-Anzeige, kein Re-Export nötig).
@@ -637,6 +639,46 @@ export function DetailRefSection({
   );
 }
 
+/** Volumen/Oberfläche/Schwerpunkt aus truck (asynchron, aus dem tessellierten B-Rep). */
+function SolidPropsRows({ spec }: { spec: SolidSpec | null }) {
+  const [props, setProps] = useState<SolidProps | null>(null);
+  const key = JSON.stringify(spec);
+  useEffect(() => {
+    let alive = true;
+    setProps(null);
+    if (!spec) return;
+    solidProps(spec).then(
+      (p) => alive && setProps(p),
+      () => alive && setProps(null),
+    );
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  if (!props) return null;
+  const f = (v: number, d = 2) => v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  return (
+    <>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.volume")}</span>
+        <span className="objinfo-fval">{f(props.volume)} m³</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.surface")}</span>
+        <span className="objinfo-fval">{f(props.area)} m²</span>
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.extrudedSolid.centroid")}</span>
+        <span className="objinfo-fval">
+          {f(props.centroid[0])} / {f(props.centroid[1])} / {f(props.centroid[2])}
+        </span>
+      </div>
+      {!props.closed && <div className="objinfo-field objinfo-warn">{t("objinfo.extrudedSolid.notClosed")}</div>}
+    </>
+  );
+}
+
 // ── Extrusions-Attribut-Abschnitt (truck-Integration) ───────────────────────
 // Höhe editierbar (löst Re-Extrusion aus); Grundfläche + Geschoss read-only.
 export function ExtrudedSolidSection({
@@ -667,6 +709,8 @@ export function ExtrudedSolidSection({
           title={t("objinfo.extrudedSolid.height")}
         />
       </div>
+
+      <SolidPropsRows spec={solid.spec} />
 
       {solid.brepLabel && (
         <div className="objinfo-field">

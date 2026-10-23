@@ -673,6 +673,99 @@ pub struct StepMesh {
     pub indices: Vec<u32>,
 }
 
+fn polygon_of(m: &MeshOutput) -> PolygonMesh {
+    let positions: Vec<Point3> = m
+        .positions
+        .chunks(3)
+        .map(|c| Point3::new(c[0] as f64, c[1] as f64, c[2] as f64))
+        .collect();
+    let tris: Vec<[usize; 3]> = m
+        .indices
+        .chunks(3)
+        .map(|t| [t[0] as usize, t[1] as usize, t[2] as usize])
+        .collect();
+    let mut poly = PolygonMesh::new(
+        StandardAttributes { positions, ..Default::default() },
+        Faces::from_iter(&tris),
+    );
+    // Eckpunkte verschweissen (tessellierte Flächen teilen keine Indizes).
+    poly.put_together_same_attrs(1e-6).remove_degenerate_faces().remove_unused_attrs();
+    poly
+}
+
+/// Kennwerte eines Körpers (aus dem tessellierten Mesh, Sehnenabweichung `tol`).
+#[derive(Serialize, Debug)]
+pub struct SolidProps {
+    /// Volumen in m³ (≥ 0; bei umgekehrter Orientierung der Betrag).
+    pub volume: f64,
+    /// Oberfläche in m².
+    pub area: f64,
+    /// Schwerpunkt [x, y, z] in m.
+    pub centroid: [f64; 3],
+    /// Mesh ist geschlossen und orientiert (wasserdicht).
+    pub closed: bool,
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+}
+
+pub fn solid_props_core(spec: &SolidSpec, tol: f64) -> Res<SolidProps> {
+    use truck_meshalgo::analyzers::{CalcVolume, Topology};
+    let m = solid_mesh_core(spec, tol)?;
+    let poly = polygon_of(&m);
+    let cog = poly.center_of_gravity();
+    let vol = poly.volume();
+    let mut area = 0.0;
+    for t in poly.faces().triangle_iter() {
+        let (a, b, c) = (poly.positions()[t[0].pos], poly.positions()[t[1].pos], poly.positions()[t[2].pos]);
+        area += (b - a).cross(c - a).magnitude() / 2.0;
+    }
+    let bb = poly.bounding_box();
+    let (mn, mx) = (bb.min(), bb.max());
+    Ok(SolidProps {
+        volume: vol.abs(),
+        area,
+        centroid: if cog.w.abs() > 1e-12 {
+            [cog.x / cog.w, cog.y / cog.w, cog.z / cog.w]
+        } else {
+            [0.0; 3]
+        },
+        closed: matches!(poly.shell_condition(), ShellCondition::Closed),
+        min: [mn.x, mn.y, mn.z],
+        max: [mx.x, mx.y, mx.z],
+    })
+}
+
+/// Ergebnis einer Kollisionsprüfung zweier Körper.
+#[derive(Serialize, Debug)]
+pub struct ClashResult {
+    pub colliding: bool,
+    /// Durchdringungslinien (Segmente [x0,y0,z0,x1,y1,z1]), höchstens `max_lines`.
+    pub lines: Vec<[f64; 6]>,
+    /// Volumen der Durchdringung (m³), nur wenn beide Körper boolesch verschneidbar sind.
+    pub overlap_volume: Option<f64>,
+}
+
+pub fn clash_core(a: &SolidSpec, b: &SolidSpec, tol: f64, max_lines: usize) -> Res<ClashResult> {
+    use truck_meshalgo::analyzers::Collision;
+    let (pa, pb) = (polygon_of(&solid_mesh_core(a, tol)?), polygon_of(&solid_mesh_core(b, tol)?));
+    let segs = pa.extract_interference(&pb);
+    let overlap_volume = if segs.is_empty() {
+        None
+    } else {
+        let inter = SolidSpec::Boolean { op: BoolKind::Intersection, a: Box::new(a.clone()), b: Box::new(b.clone()) };
+        solid_props_core(&inter, tol).ok().map(|p| p.volume)
+    };
+    Ok(ClashResult {
+        colliding: !segs.is_empty(),
+        lines: segs
+            .iter()
+            .take(max_lines)
+            .map(|(p, q)| [p.x, p.y, p.z, q.x, q.y, q.z])
+            .collect(),
+        overlap_volume,
+    })
+}
+
 /// Längeneinheit einer STEP-Datei in Metern (`LENGTH_UNIT`: SI mit Präfix oder Zoll/Fuss).
 pub fn step_length_unit_in_m(text: &str) -> f64 {
     for line in text.lines().chain(text.split(';')) {
@@ -1042,5 +1135,23 @@ mod dbg_step {
         let xs: Vec<f32> = back[0].positions.chunks(3).map(|c| c[0]).collect();
         let max = xs.iter().cloned().fold(f32::MIN, f32::max);
         assert!((max - 2.0).abs() < 1e-3, "Import zurück in Meter, war {max}");
+    }
+
+    #[test]
+    fn props_and_clash() {
+        let b = SolidSpec::Cuboid { min: [0.0; 3], max: [2.0, 1.0, 3.0] };
+        let p = solid_props_core(&b, 0.01).unwrap();
+        assert!((p.volume - 6.0).abs() < 1e-9 && (p.area - 22.0).abs() < 1e-9, "{p:?}");
+        assert!((p.centroid[0] - 1.0).abs() < 1e-9 && (p.centroid[2] - 1.5).abs() < 1e-9);
+        assert!(p.closed);
+        let sph = SolidSpec::Sphere { center: [0.0; 3], r: 1.0 };
+        let v = solid_props_core(&sph, 0.002).unwrap().volume;
+        assert!((v - 4.0 / 3.0 * PI).abs() / v < 0.01, "Kugel {v}");
+        let b2 = SolidSpec::Cuboid { min: [1.0, 0.5, 1.0], max: [3.0, 2.0, 2.0] };
+        let c = clash_core(&b, &b2, 0.01, 100).unwrap();
+        assert!(c.colliding && !c.lines.is_empty());
+        assert!((c.overlap_volume.unwrap() - 0.5).abs() < 1e-6, "{:?}", c.overlap_volume);
+        let far = SolidSpec::Cuboid { min: [10.0; 3], max: [11.0; 3] };
+        assert!(!clash_core(&b, &far, 0.01, 100).unwrap().colliding);
     }
 }

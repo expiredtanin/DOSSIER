@@ -359,6 +359,48 @@ mod web {
         serde_json::to_string(&mesh).map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Volumen, Oberfläche, Schwerpunkt, Hülle und Dichtheit eines Körpers.
+    /// Input JSON: `{ "spec": {…}, "tol": 0.005 }`
+    #[wasm_bindgen]
+    pub fn solid_props(input_json: &str) -> std::result::Result<String, JsError> {
+        #[derive(serde::Deserialize)]
+        struct In {
+            spec: brep::SolidSpec,
+            #[serde(default = "tol")]
+            tol: f64,
+        }
+        fn tol() -> f64 {
+            0.005
+        }
+        let i: In = serde_json::from_str(input_json).map_err(|e| JsError::new(&e.to_string()))?;
+        let p = brep::solid_props_core(&i.spec, i.tol).map_err(|e| JsError::new(&e))?;
+        serde_json::to_string(&p).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Kollisionsprüfung zweier Körper (Durchdringungslinien + Überlappungsvolumen).
+    /// Input JSON: `{ "a": {…}, "b": {…}, "tol": 0.01, "maxLines": 200 }`
+    #[wasm_bindgen]
+    pub fn solid_clash(input_json: &str) -> std::result::Result<String, JsError> {
+        #[derive(serde::Deserialize)]
+        struct In {
+            a: brep::SolidSpec,
+            b: brep::SolidSpec,
+            #[serde(default = "tol")]
+            tol: f64,
+            #[serde(default = "max_lines", rename = "maxLines")]
+            max_lines: usize,
+        }
+        fn tol() -> f64 {
+            0.01
+        }
+        fn max_lines() -> usize {
+            200
+        }
+        let i: In = serde_json::from_str(input_json).map_err(|e| JsError::new(&e.to_string()))?;
+        let r = brep::clash_core(&i.a, &i.b, i.tol, i.max_lines).map_err(|e| JsError::new(&e))?;
+        serde_json::to_string(&r).map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// B-Rep-Körper aus einer Spezifikation (s. `brep::SolidSpec`) → Mesh.
     /// Input JSON: `{ "spec": {kind:"extrude",…}, "tol": 0.01 }`
     #[wasm_bindgen]

@@ -120,6 +120,41 @@ export async function buildSolidMesh(spec: SolidSpec, tol = 0.01): Promise<Extru
   return JSON.parse(m.build_solid_mesh(JSON.stringify({ spec, tol }))) as ExtrudedMesh;
 }
 
+/** Kennwerte eines Körpers (Meter / m² / m³). */
+export interface SolidProps {
+  volume: number;
+  area: number;
+  centroid: [number, number, number];
+  /** Wasserdicht (geschlossenes, orientiertes Mesh). */
+  closed: boolean;
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+export async function solidProps(spec: SolidSpec, tol = 0.005): Promise<SolidProps> {
+  const m = await getModule();
+  return JSON.parse(m.solid_props(JSON.stringify({ spec, tol }))) as SolidProps;
+}
+
+export interface ClashResult {
+  colliding: boolean;
+  /** Durchdringungslinien [x0,y0,z0,x1,y1,z1]. */
+  lines: Array<[number, number, number, number, number, number]>;
+  /** Volumen der Durchdringung (m³), falls berechenbar. */
+  overlapVolume: number | null;
+}
+
+/** Kollisionsprüfung zweier Körper (truck-meshalgo). */
+export async function solidClash(a: SolidSpec, b: SolidSpec, tol = 0.01): Promise<ClashResult> {
+  const m = await getModule();
+  const r = JSON.parse(m.solid_clash(JSON.stringify({ a, b, tol }))) as {
+    colliding: boolean;
+    lines: ClashResult["lines"];
+    overlap_volume: number | null;
+  };
+  return { colliding: r.colliding, lines: r.lines, overlapVolume: r.overlap_volume };
+}
+
 /** Exportiert Körper als STEP-Text (ISO 10303-42 B-Rep). */
 export async function exportStepSolids(
   solids: SolidSpec[],

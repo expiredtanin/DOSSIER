@@ -10,6 +10,8 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
+import type { SolidSpec } from "../engine/truckSolid";
 import {
   ceilingThickness,
   flattenCategories,
@@ -321,6 +323,8 @@ export interface ExtrudedSolidInfo {
   brepLabel?: string;
   /** Grundfläche des Profils (m²). */
   area: number;
+  /** B-Rep-Beschreibung (Weltkoordinaten) für Kennwerte — `null`, wenn truck keine hat. */
+  spec: SolidSpec | null;
   /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
   floorId: string;
   floorName: string;
@@ -1052,6 +1056,7 @@ function extrudedSolidSelection(project: Project, s: ExtrudedSolid): Selection {
     chamfer: s.chamfer ?? 0,
     ...(s.brep ? { brepLabel: s.brep.label ?? "B-Rep" } : {}),
     area: polygonArea(s.points),
+    spec: extrudedSolidSpec(s, floor?.baseElevation ?? 0),
     floorId: s.levelId,
     floorName: floor?.name ?? s.levelId,
   };
