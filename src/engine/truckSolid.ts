@@ -83,7 +83,15 @@ export interface LoftSectionSpec {
  * bündigen Flächen — Schneidkörper überstehen lassen, oder `ExtrudePlane` mit Loch nutzen.
  */
 export type SolidSpec =
-  | { kind: "extrude"; points: number[]; holes?: number[][]; height: number; z0?: number }
+  | {
+      kind: "extrude";
+      points: number[];
+      holes?: number[][];
+      height: number;
+      z0?: number;
+      /** Eckenradius (m) der Aussenkontur — echte Kreisbögen, auch im STEP. */
+      cornerRadius?: number;
+    }
   | {
       kind: "extrudePlane";
       points: number[];

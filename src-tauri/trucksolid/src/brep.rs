@@ -57,6 +57,10 @@ pub enum SolidSpec {
         height: f64,
         #[serde(default)]
         z0: f64,
+        /// Eckenradius (Meter) der Aussenkontur: jede Ecke wird durch einen echten
+        /// Kreisbogen (exakte Zylinderfläche, auch im STEP) verrundet. 0 = scharf.
+        #[serde(default, rename = "cornerRadius")]
+        corner_radius: f64,
     },
     /// Prisma in einer beliebigen Ebene: Ring/Löcher in (u,v)-Koordinaten, platziert über
     /// `origin` + `uAxis`/`vAxis` (3D-Richtungen), extrudiert um `depth` entlang u×v.
@@ -140,7 +144,74 @@ fn signed_area(ring: &[(f64, f64)]) -> f64 {
 }
 
 /// Prisma aus Ring + Löchern. Außenring wird CCW, Löcher CW ausgerichtet.
-fn extrude(points: &[f64], holes: &[Vec<f64>], height: f64, z0: f64) -> Res<Solid> {
+/// Aussenring mit verrundeten Ecken als Wire: Linien + Kreisbögen (`circle_arc`). Der
+/// Radius wird je Ecke auf die Hälfte der kürzeren Nachbarkante begrenzt; fast gestreckte
+/// Ecken bleiben scharf.
+fn rounded_ring_wire(ring: &[(f64, f64)], radius: f64, z: f64) -> Wire {
+    let n = ring.len();
+    let p = |i: usize| Point3::new(ring[i % n].0, ring[i % n].1, z);
+    // Je Ecke: (Tangentenpunkt Eingang, Bogenmitte, Tangentenpunkt Ausgang) oder None (scharf).
+    let mut corners: Vec<Option<(Point3, Point3, Point3)>> = Vec::with_capacity(n);
+    for i in 0..n {
+        let v = p(i);
+        let (p0, p1) = (p(i + n - 1), p(i + 1));
+        let (a, b) = (p0 - v, p1 - v);
+        let (la, lb) = (a.magnitude(), b.magnitude());
+        if la < 1e-9 || lb < 1e-9 {
+            corners.push(None);
+            continue;
+        }
+        let (d0, d1) = (a / la, b / lb);
+        let cos_t = d0.dot(d1).clamp(-1.0, 1.0);
+        let theta = cos_t.acos(); // Winkel zwischen den Kanten, 0..π
+        if theta > PI - 1e-3 || theta < 1e-3 {
+            corners.push(None); // gestreckt oder spitzenlos
+            continue;
+        }
+        let tan_half = (theta / 2.0).tan();
+        let t = (radius / tan_half).min(la / 2.0).min(lb / 2.0);
+        let r = t * tan_half;
+        let bis = (d0 + d1).normalize();
+        let center = v + bis * (r / (theta / 2.0).sin());
+        let mid = center - bis * r;
+        corners.push(Some((v + d0 * t, mid, v + d1 * t)));
+    }
+    let mut wire = Wire::new();
+    // Vertex-Kette: Ausgang der Ecke i → Eingang der Ecke i+1.
+    let mut starts: Vec<Vertex> = Vec::new(); // Eingangs-Vertex je Ecke
+    let mut ends: Vec<Vertex> = Vec::new(); // Ausgangs-Vertex je Ecke
+    for (i, c) in corners.iter().enumerate() {
+        match c {
+            Some((a, _, b)) => {
+                starts.push(builder::vertex(*a));
+                ends.push(builder::vertex(*b));
+            }
+            None => {
+                let v = builder::vertex(p(i));
+                starts.push(v.clone());
+                ends.push(v);
+            }
+        }
+    }
+    for i in 0..n {
+        if let Some((_, m, _)) = corners[i] {
+            wire.push_back(builder::circle_arc(&starts[i], &ends[i], m));
+        }
+        let next = (i + 1) % n;
+        if !Vertex::eq(&ends[i], &starts[next]) {
+            wire.push_back(builder::line(&ends[i], &starts[next]));
+        }
+    }
+    wire
+}
+
+fn extrude(
+    points: &[f64],
+    holes: &[Vec<f64>],
+    height: f64,
+    z0: f64,
+    corner_radius: f64,
+) -> Res<Solid> {
     if height <= 0.0 {
         return Err("height muss > 0 sein".into());
     }
@@ -148,7 +219,11 @@ fn extrude(points: &[f64], holes: &[Vec<f64>], height: f64, z0: f64) -> Res<Soli
     if signed_area(&outer) < 0.0 {
         outer.reverse();
     }
-    let mut wires = vec![ring_wire(&outer, z0)];
+    let mut wires = vec![if corner_radius > 1e-6 {
+        rounded_ring_wire(&outer, corner_radius, z0)
+    } else {
+        ring_wire(&outer, z0)
+    }];
     for h in holes {
         let mut hole = pairs(h)?;
         if signed_area(&hole) > 0.0 {
@@ -346,7 +421,9 @@ pub fn bool_op(a: &Solid, b: &Solid, op: BoolKind) -> Res<Solid> {
 /// Baut den Volumenkörper aus der Spezifikation.
 pub fn build_solid(spec: &SolidSpec) -> Res<Solid> {
     match spec {
-        SolidSpec::Extrude { points, holes, height, z0 } => extrude(points, holes, *height, *z0),
+        SolidSpec::Extrude { points, holes, height, z0, corner_radius } => {
+            extrude(points, holes, *height, *z0, *corner_radius)
+        }
         SolidSpec::ExtrudePlane { points, holes, origin, u_axis, v_axis, depth } => {
             extrude_plane(points, holes, *origin, *u_axis, *v_axis, *depth)
         }
@@ -504,9 +581,56 @@ mod tests {
             holes: vec![ring(1.0, 1.0, 2.0, 2.0)],
             height: 2.0,
             z0: 0.0,
+            corner_radius: 0.0,
         };
         let m = solid_mesh_core(&spec, 0.01).unwrap();
         assert!((volume(&m) - (12.0 - 1.0) * 2.0).abs() < 1e-3, "{}", volume(&m));
+    }
+
+    #[test]
+    fn verrundete_ecken_haben_das_flaechenmass_des_abgerundeten_rechtecks() {
+        let r = 0.5;
+        let spec = SolidSpec::Extrude {
+            points: ring(0.0, 0.0, 4.0, 3.0),
+            holes: vec![],
+            height: 2.0,
+            z0: 0.0,
+            corner_radius: r,
+        };
+        let m = solid_mesh_core(&spec, 0.001).unwrap();
+        let area = 12.0 - (4.0 - PI) * r * r;
+        assert!((volume(&m) - area * 2.0).abs() / (area * 2.0) < 0.003, "{}", volume(&m));
+    }
+
+    #[test]
+    fn eckenradius_wird_auf_die_halbe_kante_begrenzt() {
+        // Radius 10 an einem 1×1-Quadrat → Kreis mit Radius 0,5 (Stadium-Grenzfall), kein Fehler.
+        let spec = SolidSpec::Extrude {
+            points: ring(0.0, 0.0, 1.0, 1.0),
+            holes: vec![],
+            height: 1.0,
+            z0: 0.0,
+            corner_radius: 10.0,
+        };
+        let m = solid_mesh_core(&spec, 0.001).unwrap();
+        let expect = PI * 0.25;
+        assert!((volume(&m) - expect).abs() / expect < 0.01, "{}", volume(&m));
+    }
+
+    #[test]
+    fn verrundete_extrusion_laesst_sich_nach_step_exportieren_und_zuruecklesen() {
+        let spec = SolidSpec::Extrude {
+            points: ring(0.0, 0.0, 4.0, 3.0),
+            holes: vec![],
+            height: 2.0,
+            z0: 0.0,
+            corner_radius: 0.5,
+        };
+        let step = export_step_core(&[spec], &StepHeader::default()).unwrap();
+        let back = import_step_core(&step, 0.001).unwrap();
+        let m = MeshOutput { positions: back[0].positions.clone(), indices: back[0].indices.clone() };
+        let expect = (12.0 - (4.0 - PI) * 0.25) * 2.0;
+        assert!((volume(&m) - expect).abs() / expect < 0.01, "{}", volume(&m));
     }
 
     #[test]
