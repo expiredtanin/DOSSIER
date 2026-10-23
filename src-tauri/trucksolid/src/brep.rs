@@ -595,10 +595,57 @@ pub struct StepHeader {
     pub organization_system: String,
 }
 
+/// Ersetzt Schnittkurven (`IntersectionCurve`, Ergebnis von B-Rep-Booleans) durch STEP-taugliche
+/// Kurven: Ebene∩Ebene → exakte Gerade, sonst der Leitkurven-Spline bzw. ein Polygonzug als
+/// B-Spline Grad 1. truck-stepio schreibt Schnittkurven fehlerhaft (falscher Flächenverweis),
+/// ausserdem lesen andere CAD-Systeme sie nicht.
+pub fn heal_curves(solid: &Solid) -> Solid {
+    fn leader_curve(l: &Leader) -> Curve {
+        match l {
+            Leader::BSpline(b) => Curve::BSplineCurve(b.clone()),
+            Leader::Polyline(pl) => {
+                let n = pl.len();
+                let mut knots = vec![0.0];
+                knots.extend((0..n).map(|i| i as f64));
+                knots.push((n - 1) as f64);
+                let pts: Vec<Point3> = pl.iter().copied().collect();
+                Curve::BSplineCurve(BSplineCurve::new(KnotVec::from(knots), pts))
+            }
+        }
+    }
+    solid.mapped(
+        |p| *p,
+        |c| match c {
+            Curve::IntersectionCurve(ic) => {
+                if let (Surface::Plane(_), Surface::Plane(_)) = (ic.surface0(), ic.surface1()) {
+                    let t = ic.leader().range_tuple();
+                    let (a, b) = (ic.leader().subs(t.0), ic.leader().subs(t.1));
+                    let mut line = Line(a, b);
+                    // Parameter 0..1 wie jede Gerade; die Kante übernimmt die Endpunkte.
+                    let _ = &mut line;
+                    Curve::Line(line)
+                } else {
+                    leader_curve(ic.leader())
+                }
+            }
+            other => other.clone(),
+        },
+        |s| s.clone(),
+    )
+}
+
 /// Exportiert Körper als STEP-Datei (ISO 10303-42 B-Rep).
 pub fn export_step_core(specs: &[SolidSpec], header: &StepHeader) -> Res<String> {
     use truck_stepio::out::{CompleteStepDisplay, StepHeaderDescriptor, StepModels};
-    let solids: Vec<Solid> = specs.iter().map(build_solid).collect::<std::result::Result<_, String>>()?;
+    let solids: Vec<Solid> = specs
+        .iter()
+        // Modell in Metern; truck schreibt `SI_UNIT(.MILLI.,.METRE.)` fest in den Kopf → ×1000.
+        .map(|sp| {
+            build_solid(sp).map(|s| {
+                builder::scaled(&heal_curves(&s), Point3::origin(), Vector3::new(1000.0, 1000.0, 1000.0))
+            })
+        })
+        .collect::<std::result::Result<_, String>>()?;
     let compressed: Vec<_> = solids.iter().map(|s| s.compress()).collect();
     let mut models: StepModels<'_, Point3, Curve, Surface> = StepModels::default();
     for c in &compressed {
@@ -626,11 +673,43 @@ pub struct StepMesh {
     pub indices: Vec<u32>,
 }
 
+/// Längeneinheit einer STEP-Datei in Metern (`LENGTH_UNIT`: SI mit Präfix oder Zoll/Fuss).
+pub fn step_length_unit_in_m(text: &str) -> f64 {
+    for line in text.lines().chain(text.split(';')) {
+        if !line.contains("LENGTH_UNIT") {
+            continue;
+        }
+        let up = line.to_uppercase();
+        if up.contains("CONVERSION_BASED_UNIT") {
+            if up.contains("'INCH'") || up.contains("'IN'") {
+                return 0.0254;
+            }
+            if up.contains("'FOOT'") || up.contains("'FT'") {
+                return 0.3048;
+            }
+        }
+        if up.contains(".MILLI.") {
+            return 0.001;
+        }
+        if up.contains(".CENTI.") {
+            return 0.01;
+        }
+        if up.contains(".KILO.") {
+            return 1000.0;
+        }
+        if up.contains("SI_UNIT") {
+            return 1.0;
+        }
+    }
+    1.0
+}
+
 /// Liest eine STEP-Datei und tesselliert alle Shells (relative Toleranz `rel_tol` der
 /// Bounding-Box-Diagonale, z. B. 0.001).
 pub fn import_step_core(text: &str, rel_tol: f64) -> Res<Vec<StepMesh>> {
     let table = truck_stepio::r#in::Table::from_step(text)
         .ok_or_else(|| "STEP-Datei konnte nicht gelesen werden".to_string())?;
+    let unit = step_length_unit_in_m(text);
     let mut out = Vec::new();
     let mut idxs: Vec<&u64> = table.shell.keys().collect();
     idxs.sort();
@@ -646,8 +725,11 @@ pub fn import_step_core(text: &str, rel_tol: f64) -> Res<Vec<StepMesh>> {
         poly.put_together_same_attrs(TOLERANCE * 50.0)
             .remove_degenerate_faces()
             .remove_unused_attrs();
-        let m = mesh_of_polygon(&poly);
+        let mut m = mesh_of_polygon(&poly);
         if !m.indices.is_empty() {
+            if (unit - 1.0).abs() > 1e-12 {
+                m.positions.iter_mut().for_each(|x| *x = (*x as f64 * unit) as f32);
+            }
             out.push(StepMesh { positions: m.positions, indices: m.indices });
         }
     }
@@ -916,5 +998,49 @@ mod dbg_step {
         let mir = SolidSpec::Transform { m: [-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], solid: Box::new(base) };
         assert!((vol(&rot) - 6.0).abs() < 1e-6, "rot {}", vol(&rot));
         assert!((vol(&mir) - 6.0).abs() < 1e-6, "mir {}", vol(&mir));
+    }
+
+    #[test]
+    fn bool_result_step_dump() {
+        let dir = std::env::var("STEP_DUMP_DIR").unwrap_or_default();
+        if dir.is_empty() {
+            return;
+        }
+        let wall = SolidSpec::Cuboid { min: [0.0, 0.0, 0.0], max: [5.0, 0.3, 3.0] };
+        let win = SolidSpec::Cuboid { min: [1.0, -0.1, 1.0], max: [2.5, 0.4, 2.2] };
+        let round = SolidSpec::Cylinder { cx: 4.0, cy: -0.5, z0: 1.5, r: 0.5, height: 1.0 };
+        let _ = round;
+        let hole = SolidSpec::Revolve { profile: vec![0.0, 0.0, 0.5, 0.0, 0.5, 1.0, 0.0, 1.0], cx: 0.0, cy: 0.0, angle_deg: 360.0 };
+        let _ = hole;
+        let w1 = SolidSpec::Boolean { op: BoolKind::Difference, a: Box::new(wall.clone()), b: Box::new(win) };
+        let step = export_step_core(&[w1], &StepHeader::default()).unwrap();
+        std::fs::write(format!("{dir}/bool_window.stp"), step).unwrap();
+        // Rundes Fenster: stehender Zylinder quer durch die Wand (Achse Y).
+        let cyl = SolidSpec::Transform {
+            m: [1.0, 0.0, 0.0, 4.0, 0.0, 0.0, 1.0, -0.2, 0.0, -1.0, 0.0, 1.5],
+            solid: Box::new(SolidSpec::Cylinder { cx: 0.0, cy: 0.0, z0: 0.0, r: 0.5, height: 0.7 }),
+        };
+        let w2 = SolidSpec::Boolean { op: BoolKind::Difference, a: Box::new(wall), b: Box::new(cyl) };
+        let step = export_step_core(&[w2], &StepHeader::default()).unwrap();
+        std::fs::write(format!("{dir}/bool_round.stp"), step).unwrap();
+    }
+
+    #[test]
+    fn step_unit_detection() {
+        assert_eq!(step_length_unit_in_m("#12 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );"), 0.001);
+        assert_eq!(step_length_unit_in_m("#1 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );"), 1.0);
+        assert_eq!(step_length_unit_in_m("#1 = ( CONVERSION_BASED_UNIT('INCH',#2) LENGTH_UNIT() NAMED_UNIT(#3) );"), 0.0254);
+        assert_eq!(step_length_unit_in_m("nichts"), 1.0);
+    }
+
+    #[test]
+    fn export_is_in_millimetres() {
+        let spec = SolidSpec::Cuboid { min: [0.0; 3], max: [2.0, 1.0, 3.0] };
+        let step = export_step_core(&[spec], &StepHeader::default()).unwrap();
+        assert!(step.contains("2000"), "Koordinaten in mm erwartet");
+        let back = import_step_core(&step, 0.0005).unwrap();
+        let xs: Vec<f32> = back[0].positions.chunks(3).map(|c| c[0]).collect();
+        let max = xs.iter().cloned().fold(f32::MIN, f32::max);
+        assert!((max - 2.0).abs() < 1e-3, "Import zurück in Meter, war {max}");
     }
 }
