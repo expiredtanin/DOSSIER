@@ -127,7 +127,7 @@ export async function exportStepSolids(
 }
 
 /** Liest STEP-Text und liefert je Körper ein Dreiecks-Mesh (`relTol` relativ zur Diagonale). */
-export async function importStepMeshes(text: string, relTol = 0.001): Promise<ExtrudedMesh[]> {
+export async function importStepMeshes(text: string, relTol = 0.0005): Promise<ExtrudedMesh[]> {
   const m = await getModule();
   return JSON.parse(m.import_step(text, relTol)) as ExtrudedMesh[];
 }
