@@ -107,6 +107,9 @@ pub enum SolidSpec {
     },
     /// Verschiebung eines Körpers.
     Translate { v: [f64; 3], solid: Box<SolidSpec> },
+    /// Fertiges Dreiecks-Mesh (importierte Körper, Gelände-Prisma …): hat keine exakten
+    /// Flächen, nimmt aber an Kennwerten, Kollisionsprüfung und (Mesh-)Booleans teil.
+    Mesh { positions: Vec<f64>, indices: Vec<u32> },
     /// Affine Abbildung (Drehung, gleichmässige Skalierung, Spiegelung): 3×4-Matrix
     /// zeilenweise `[a b c tx, d e f ty, g h i tz]`. Bei negativer Determinante
     /// (Spiegelung) wird die Orientierung der Hülle umgekehrt.
@@ -494,6 +497,7 @@ pub fn build_solid(spec: &SolidSpec) -> Res<Solid> {
         SolidSpec::Cone { cx, cy, z0, r, height } => cone(*cx, *cy, *z0, *r, *height),
         SolidSpec::Torus { center, major, minor } => torus(*center, *major, *minor),
         SolidSpec::Boolean { op, a, b } => bool_op(&build_solid(a)?, &build_solid(b)?, *op),
+        SolidSpec::Mesh { .. } => Err("Mesh-Körper hat keine B-Rep-Beschreibung".into()),
         SolidSpec::Transform { m, solid } => {
             let mat = Matrix4::new(
                 m[0], m[4], m[8], 0.0, m[1], m[5], m[9], 0.0, m[2], m[6], m[10], 0.0, m[3], m[7], m[11], 1.0,
@@ -567,13 +571,32 @@ pub fn solid_mesh_core(spec: &SolidSpec, tol: f64) -> Res<MeshOutput> {
             )?;
             Ok(MeshOutput { positions: r.positions, indices: r.indices })
         }
-        SolidSpec::Translate { v, solid } if matches!(**solid, SolidSpec::Boolean { .. }) => {
-            // Boolean unter einer Verschiebung: Mesh-Ergebnis verschieben (Fallback-sicher).
+        SolidSpec::Mesh { positions, indices } => Ok(MeshOutput {
+            positions: positions.iter().map(|x| *x as f32).collect(),
+            indices: indices.clone(),
+        }),
+        SolidSpec::Translate { v, solid } if build_solid(spec).is_err() => {
+            // Unter einer Verschiebung liegt ein Mesh-Ergebnis (Boolean-Fallback, Mesh): Mesh verschieben.
             let mut m = solid_mesh_core(solid, tol)?;
             for p in m.positions.chunks_mut(3) {
                 p[0] += v[0] as f32;
                 p[1] += v[1] as f32;
                 p[2] += v[2] as f32;
+            }
+            Ok(m)
+        }
+        SolidSpec::Transform { m: mat, solid } if build_solid(spec).is_err() => {
+            let mut m = solid_mesh_core(solid, tol)?;
+            for p in m.positions.chunks_mut(3) {
+                let (x, y, z) = (p[0] as f64, p[1] as f64, p[2] as f64);
+                p[0] = (mat[0] * x + mat[1] * y + mat[2] * z + mat[3]) as f32;
+                p[1] = (mat[4] * x + mat[5] * y + mat[6] * z + mat[7]) as f32;
+                p[2] = (mat[8] * x + mat[9] * y + mat[10] * z + mat[11]) as f32;
+            }
+            let det = mat[0] * (mat[5] * mat[10] - mat[6] * mat[9]) - mat[1] * (mat[4] * mat[10] - mat[6] * mat[8])
+                + mat[2] * (mat[4] * mat[9] - mat[5] * mat[8]);
+            if det < 0.0 {
+                m.indices.chunks_mut(3).for_each(|t| t.swap(1, 2));
             }
             Ok(m)
         }
@@ -1153,5 +1176,21 @@ mod dbg_step {
         assert!((c.overlap_volume.unwrap() - 0.5).abs() < 1e-6, "{:?}", c.overlap_volume);
         let far = SolidSpec::Cuboid { min: [10.0; 3], max: [11.0; 3] };
         assert!(!clash_core(&b, &far, 0.01, 100).unwrap().colliding);
+    }
+
+    #[test]
+    fn mesh_spec_takes_part_in_props_and_boolean() {
+        let b = SolidSpec::Cuboid { min: [0.0; 3], max: [2.0, 2.0, 2.0] };
+        let m = solid_mesh_core(&b, 0.01).unwrap();
+        let mesh = SolidSpec::Mesh { positions: m.positions.iter().map(|x| *x as f64).collect(), indices: m.indices.clone() };
+        assert!((solid_props_core(&mesh, 0.01).unwrap().volume - 8.0).abs() < 1e-6);
+        // Mesh − Quader (B-Rep): Mesh-CSG-Fallback.
+        let cut = SolidSpec::Cuboid { min: [1.0, -1.0, -1.0], max: [3.0, 3.0, 3.0] };
+        let d = SolidSpec::Boolean { op: BoolKind::Difference, a: Box::new(mesh.clone()), b: Box::new(cut) };
+        assert!((solid_props_core(&d, 0.01).unwrap().volume - 4.0).abs() < 1e-6);
+        // Mesh unter transform (Spiegelung): Volumen bleibt positiv.
+        let mir = SolidSpec::Transform { m: [-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0], solid: Box::new(mesh) };
+        assert!((solid_props_core(&mir, 0.01).unwrap().volume - 8.0).abs() < 1e-6);
+        assert!(export_step_core(&[mir], &StepHeader::default()).is_err());
     }
 }

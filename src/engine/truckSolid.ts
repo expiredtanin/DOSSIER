@@ -112,7 +112,9 @@ export type SolidSpec =
   | { kind: "torus"; center: [number, number, number]; major: number; minor: number }
   | { kind: "boolean"; op: "union" | "difference" | "intersection"; a: SolidSpec; b: SolidSpec }
   | { kind: "translate"; v: [number, number, number]; solid: SolidSpec }
-  | { kind: "transform"; m: number[]; solid: SolidSpec };
+  | { kind: "transform"; m: number[]; solid: SolidSpec }
+  /** Fertiges Dreiecks-Mesh: nur Kennwerte, Kollision, Mesh-Booleans (kein STEP-Export). */
+  | { kind: "mesh"; positions: number[]; indices: number[] };
 
 /** Tesselliert einen B-Rep-Körper (Sehnenabweichung `tol` Meter). */
 export async function buildSolidMesh(spec: SolidSpec, tol = 0.01): Promise<ExtrudedMesh> {
