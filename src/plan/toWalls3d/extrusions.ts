@@ -4,7 +4,8 @@
 
 import type { ExtrudedSolid, Project } from "../../model/types";
 import { getFloor } from "../../model/types";
-import { extrudeCircle, extrudePolygon } from "../../engine/truckSolid";
+import { buildSolidMesh, extrudeCircle, extrudePolygon } from "../../engine/truckSolid";
+import { extrudedSolidSpec, needsBrepPath } from "../extrudedSolidSpec";
 import type { RMesh, RRgb } from "./shared";
 
 /** Warmes Orange für truck-Profil-Extrusionen (hebt sie klar von Wand/Decke/Kontext ab). */
@@ -34,7 +35,8 @@ interface TruckCacheEntry {
 const truckMeshCache = new Map<string, TruckCacheEntry>();
 
 function extrudedSolidSignature(solid: ExtrudedSolid): string {
-  return `${solid.height}|${solid.taper ?? 0}|${solid.points.map((p) => `${p.x},${p.y}`).join(";")}`;
+  const brep = solid.brep ? `${JSON.stringify(solid.brep.spec)}@${solid.brep.origin.x},${solid.brep.origin.y}` : "";
+  return `${solid.height}|${solid.taper ?? 0}|${solid.cornerRadius ?? 0}|${brep}|${solid.points.map((p) => `${p.x},${p.y}`).join(";")}`;
 }
 
 export function emitExtrudedSolids(project: Project): RMesh[] {
@@ -68,14 +70,18 @@ export function emitExtrudedSolids(project: Project): RMesh[] {
       // Kreis-Profil: echte runde truck-Extrusion (extrudeCircle) statt der
       // 48-Eck-Tessellierung in `points` — glattes Zylinder-Mesh.
       const taper = solid.taper ?? 0;
-      const extrusion = solid.circle
-        ? extrudeCircle(solid.circle.center.x, solid.circle.center.y, solid.circle.r, solid.height, taper)
-        : extrudePolygon(solid.points.flatMap((p) => [p.x, p.y]), solid.height, taper);
+      // B-Rep-Pfad (Grundkörper, Eckenradius): die Spezifikation trägt die UK (baseZ) selbst.
+      const brepSpec = needsBrepPath(solid) ? extrudedSolidSpec(solid, baseZ) : null;
+      const extrusion = brepSpec
+        ? buildSolidMesh(brepSpec, 0.005)
+        : solid.circle
+          ? extrudeCircle(solid.circle.center.x, solid.circle.center.y, solid.circle.r, solid.height, taper)
+          : extrudePolygon(solid.points.flatMap((p) => [p.x, p.y]), solid.height, taper);
       extrusion
         .then((mesh) => {
-          // truck extrudiert immer ab z=0 — auf die Geschoss-UK anheben.
+          // Prisma-Pfad: truck extrudiert ab z=0 — auf die Geschoss-UK anheben.
           const positions =
-            baseZ === 0
+            brepSpec || baseZ === 0
               ? mesh.positions
               : mesh.positions.map((v, i) => (i % 3 === 2 ? v + baseZ : v));
           const cur = truckMeshCache.get(solid.id);

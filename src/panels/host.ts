@@ -532,6 +532,8 @@ export interface PanelHostValue {
   onSetExtrudedSolidHeight: (height: number) => void;
   /** Setzt die Verjüngung (0..1) — löst eine Re-Extrusion aus. */
   onSetExtrudedSolidTaper: (taper: number) => void;
+  /** Setzt den Eckenradius der Aussenkontur (Meter, ≥ 0) — echte Kreisbögen. */
+  onSetExtrudedSolidCornerRadius: (radius: number) => void;
 
   // ── Stützen-Attribute (Tragwerk; nur die selektierte Stütze) ────────────
   /** Wechselt das Profil (Rechteck/Kreis); leitet ein sinnvolles Mass ab. */

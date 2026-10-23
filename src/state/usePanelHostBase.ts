@@ -1029,6 +1029,17 @@ export function usePanelHostBase(opts: {
           ),
         }));
       },
+      onSetExtrudedSolidCornerRadius: (radius) => {
+        if (selection?.kind !== "extrudedSolid") return;
+        const r = Math.max(0, radius);
+        const id = selection.id;
+        setProject((p) => ({
+          ...p,
+          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
+            s.id === id ? { ...s, cornerRadius: r > 0 ? r : undefined } : s,
+          ),
+        }));
+      },
       // ── Stützen-Attribute (Tragwerk; nur bei selektierter Stütze) ──────────
       onSetColumnProfileKind: (kind) => {
         if (selection?.kind !== "column") return;

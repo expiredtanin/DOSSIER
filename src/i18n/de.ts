@@ -709,6 +709,8 @@ export const de = {
   "objinfo.extrudedSolid.section": "Extrusion",
   "objinfo.extrudedSolid.height": "Höhe",
   "objinfo.extrudedSolid.taper": "Verjüngung",
+  "objinfo.extrudedSolid.cornerRadius": "Eckenradius",
+  "objinfo.extrudedSolid.brep": "B-Rep-Körper",
   "objinfo.extrudedSolid.area": "Grundfläche",
   "objinfo.extrudedSolid.floor": "Geschoss",
   "objinfo.rotate": "Drehen",

@@ -313,6 +313,10 @@ export interface ExtrudedSolidInfo {
   height: number;
   /** Verjüngung 0 (Prisma) … 1 (Spitze), editierbar. */
   taper: number;
+  /** Eckenradius der Aussenkontur (m), editierbar (0 = scharf). */
+  cornerRadius: number;
+  /** B-Rep-Körper (Grundkörper): Ecken-/Verjüngungsfelder entfallen. */
+  brepLabel?: string;
   /** Grundfläche des Profils (m²). */
   area: number;
   /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
@@ -1042,6 +1046,8 @@ function extrudedSolidSelection(project: Project, s: ExtrudedSolid): Selection {
   const info: ExtrudedSolidInfo = {
     height: s.height,
     taper: s.taper ?? 0,
+    cornerRadius: s.cornerRadius ?? 0,
+    ...(s.brep ? { brepLabel: s.brep.label ?? "B-Rep" } : {}),
     area: polygonArea(s.points),
     floorId: s.levelId,
     floorName: floor?.name ?? s.levelId,

@@ -2215,6 +2215,20 @@ export interface ExtrudedSolid {
    * Pyramide bei Polygon-Profil). Linear zum Profil-Schwerpunkt skaliert.
    */
   taper?: number;
+  /**
+   * Eckenradius (Meter) der Aussenkontur: jede Ecke wird durch einen echten Kreisbogen
+   * verrundet (truck-B-Rep, auch im STEP-Export exakt). Fehlt/0 = scharfe Ecken.
+   */
+  cornerRadius?: number;
+  /**
+   * B-Rep-Körper statt Profil-Extrusion (Grundkörper Kugel/Zylinder/Kegel/Torus/Quader …
+   * oder beliebige `trucksolid`-Spezifikation). `spec` ist eine `SolidSpec`
+   * (`engine/truckSolid.ts`) in LOKALEN Koordinaten (Z ab der Geschoss-UK); `origin` ist der
+   * Wert von `points[0]` bei der Erzeugung — die aktuelle Verschiebung ergibt sich aus
+   * `points[0] − origin`, sodass Verschieben/Kopieren das Profil mitnimmt. `points` bleibt die
+   * Grundriss-Fläche (Auswahl/2D-Umriss), `height` die Körperhöhe.
+   */
+  brep?: { spec: Record<string, unknown>; origin: Vec2; label?: string };
 }
 
 // ── Stütze (Column, Tragwerk) ──────────────────────────────────────────────

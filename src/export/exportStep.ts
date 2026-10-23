@@ -19,6 +19,7 @@ import { projectToModel3d } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { exportStepSolids } from "../engine/truckSolid";
+import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
 import type { SolidSpec } from "../engine/truckSolid";
 
 const EPS = 1e-6;
@@ -147,7 +148,6 @@ export function projectSolidSpecs(project: Project): SolidSpec[] {
   }
 
   for (const solid of project.extrudedSolids ?? []) {
-    if (solid.points.length < 3 || solid.height <= 0) continue;
     let baseZ = 0;
     if (solid.levelId) {
       try {
@@ -156,26 +156,8 @@ export function projectSolidSpecs(project: Project): SolidSpec[] {
         baseZ = 0;
       }
     }
-    const taper = Math.min(1, Math.max(0, solid.taper ?? 0));
-    const flat = solid.points.flatMap((p) => [p.x, p.y]);
-    if (taper < 1e-6) {
-      out.push({ kind: "extrude", points: flat, height: solid.height, z0: baseZ });
-    } else if (taper < 1 - 1e-6) {
-      // Verjüngung: oberer Ring linear zum Schwerpunkt skaliert (Loft Boden → Kopf).
-      const cx = solid.points.reduce((s, p) => s + p.x, 0) / solid.points.length;
-      const cy = solid.points.reduce((s, p) => s + p.y, 0) / solid.points.length;
-      const top = solid.points.flatMap((p) => [
-        cx + (p.x - cx) * (1 - taper),
-        cy + (p.y - cy) * (1 - taper),
-      ]);
-      out.push({
-        kind: "loft",
-        sections: [
-          { z: baseZ, points: flat },
-          { z: baseZ + solid.height, points: top },
-        ],
-      });
-    }
+    const spec = extrudedSolidSpec(solid, baseZ);
+    if (spec) out.push(spec);
   }
   return out;
 }
