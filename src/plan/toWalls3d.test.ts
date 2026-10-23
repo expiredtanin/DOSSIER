@@ -2765,7 +2765,7 @@ describe("emitStairs — gerade Betontreppe im Schnitt: glatte Soffit-Untersicht
 });
 
 describe("Wand-Schraffur in der Draufsicht (topAngle)", () => {
-  it("relativeToWall-Muster folgt der Wandachse: Wand längs x → 0°, längs y → 90°", () => {
+  it("relativeToWall-Muster folgt der Wandachse: Dämmungs-Linien stehen QUER zur Wand (wie im 2D): längs x → 90°, längs y → 0°", () => {
     const p: Project = {
       ...sampleProject,
       hatches: sampleProject.hatches.map((h) =>
@@ -2780,7 +2780,7 @@ describe("Wand-Schraffur in der Draufsicht (topAngle)", () => {
     const alongY = ins.filter((w) => along(w, 1));
     expect(alongX.length).toBeGreaterThan(0);
     expect(alongY.length).toBeGreaterThan(0);
-    for (const w of alongX) expect(Math.abs(((w.hatch!.topAngle ?? 99) + 360) % 180)).toBeLessThan(1e-6);
-    for (const w of alongY) expect(Math.abs((((w.hatch!.topAngle ?? 0) % 180) + 180) % 180 - 90)).toBeLessThan(1e-6);
+    for (const w of alongX) expect(Math.abs((((w.hatch!.topAngle ?? 0) % 180) + 180) % 180 - 90)).toBeLessThan(1e-6);
+    for (const w of alongY) expect((((w.hatch!.topAngle ?? 99) % 180) + 180) % 180).toBeLessThan(1e-6);
   });
 });

@@ -191,7 +191,11 @@ function withTopAngle(h: RHatch, dx: number, dy: number): RHatch {
   if (h.baseAngle === undefined) return h;
   const wallAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
   const svgAngle = h.relativeToWall ? h.baseAngle - wallAngle : h.baseAngle;
-  return { ...h, topAngle: -svgAngle };
+  // Parallel-/Kreuzschar (diagonal=2, crosshatch=3): die 2D-Kachel trägt bei Winkel 0 eine
+  // SENKRECHTE Musterlinie (glPlanHatch: Basisrichtung (0,−1)), der 3D-Shader bei Winkel 0
+  // eine HORIZONTALE → um 90° versetzen. Die Dämmungs-Welle (4) läuft in beiden entlang u.
+  const quarter = h.pattern === 2 || h.pattern === 3 ? 90 : 0;
+  return { ...h, topAngle: -svgAngle + quarter };
 }
 
 /**
