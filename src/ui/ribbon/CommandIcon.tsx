@@ -186,6 +186,14 @@ export function CommandIcon({ name }: { name: string }) {
           <path d="M9.5 12.5 L12.5 9.5 L12.5 4.5" />
         </svg>
       );
+    case "solid":
+      // Körper: Kugel mit Äquator (B-Rep-Grundkörper).
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5.5" />
+          <ellipse cx="8" cy="8" rx="5.5" ry="2" />
+        </svg>
+      );
     case "sectionline":
       // Schnittlinie: Achse mit Blickrichtungs-Winkeln (SIA-Schnittsymbol).
       return (
