@@ -23,7 +23,3 @@ src/
 src-tauri/     Rust-Crates (render2d/render3d/geometry/kernel2d/trucksolid/dwgimport),
                je headless UND per wasm-pack baubar, plus der Tauri-Host selbst
 ```
-
-Ausführlicher, aktueller Ist-Zustand inklusive bekannter Doppelspuren und
-offener Punkte in [ARCHITECTURE.md](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/raw/branch/master/ARCHITECTURE.md)
-und [STATUS.md](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/raw/branch/master/STATUS.md).

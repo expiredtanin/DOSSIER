@@ -12,5 +12,3 @@ weight: 6
   CCW-Wicklung zeigt `+n` nach innen. Schichten werden aussen (−T/2) → innen
   (+T/2) gestapelt.
 - **Zeichnungsnormen und Symbolik** durchgängig nach SIA (Schweiz), nicht DIN.
-
-Verbindlich und vollständig in [CONVENTIONS.md](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/raw/branch/master/CONVENTIONS.md).

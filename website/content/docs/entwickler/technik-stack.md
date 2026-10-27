@@ -16,5 +16,4 @@ weight: 3
 | Import | `dxf-parser`, `@mlightcad/libredwg-web` (DWG), eigene `.lin`/`.pat`-Parser |
 | Materialien | `jszip` (ambientCG-Zip-Entpacken), Three.js `TextureLoader` |
 
-Alle Rust-Crates laufen sowohl headless als auch per `wasm-pack` gebaut. Details
-zu allen Crates in [ARCHITECTURE.md](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/raw/branch/master/ARCHITECTURE.md).
+Alle Rust-Crates laufen sowohl headless als auch per `wasm-pack` gebaut.

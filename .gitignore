@@ -1,27 +1,47 @@
-# Dependencies
+# Abhängigkeiten
 node_modules/
 
-# Build output
+# Build-Ausgaben (npm run build*, vite build --outDir dist-test, build:cli)
 dist/
+dist-test/
+dist-cli/
 *.tsbuildinfo
-
-# Probe / screenshot artifacts (regenerated)
-scripts/*.png
+target/
+/src-tauri/gen/
 
 # Editor / OS
 .DS_Store
 *.log
+/.vscode/
+/.idea/
+
+# Geheimnisse / lokale Umgebung
+.env
+.env.*
+*.pem
+*.key
+
+# Lokale Agenten-Konfiguration und Test-Arbeitsverzeichnisse
+.claude/
+.tmp-e2e/
+
+# Probe-/Screenshot-Artefakte (werden neu erzeugt)
+scripts/*.png
 
 # Lokale Test-/Demo-Projektdateien (kein Quellcode)
 *.obp
 *.obp.lock
 
+# Urheberrechtlich geschützte Fremddokumente (nur lokal)
+/*.pdf
+*.sia-extract.txt
+
 # Generierte native-Viewport-Szenen (aus sampleProject via scripts/dump-native-scene.mjs)
 src-tauri/assets/native2d_scene.json
 src-tauri/assets/native3d_walls.json
 
-# Interne Doku (Handover/Pendenzen/Design-Notizen) — nur lokal, nicht im
-# öffentlichen Gitea-Code-Browser. README.md bleibt als Repo-Beschreibung.
+# Interne Planung (Handover/Pendenzen/Design-Notizen) — nur lokal.
+# README.md, CLAUDE.md und LICENSE bleiben im Repo.
 /ARCHITECTURE.md
 /CONVENTIONS.md
 /HANDOVER.md
@@ -35,6 +55,3 @@ src-tauri/assets/native3d_walls.json
 /docs/*.md
 /docs/design/*.md
 /docs/research/*.md
-/docs/welle-c-hlr-spike/*.md
-dist-test/
-dist-cli/

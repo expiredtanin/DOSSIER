@@ -1088,7 +1088,7 @@ mod tests {
     use super::*;
 
     /// L-foermige Wand (zwei Schenkel im rechten Winkel) + Bodenplatte, wie im
-    /// OCCT-HLR-Spike (`docs/welle-c-hlr-spike/FEASIBILITY.md`) beschrieben.
+    /// frueheren OCCT-HLR-Spike.
     ///
     /// Schenkel A: Achse (0,0)->(0,3) (Grundriss-Y-Richtung), Dicke 0.2, Hoehe
     /// 2.5. Schenkel B: Achse (0,3)->(3,3) (Grundriss-X-Richtung), rechter

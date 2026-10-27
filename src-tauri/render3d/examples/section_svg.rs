@@ -2,10 +2,10 @@
 //! baut die L-Wand + Bodenplatte-Testszene (Schenkel A bekommt ein FENSTER) plus
 //! eine kurze "Spaeh"-Wand hinter dem Fenster, schneidet/betrachtet sie mit einer
 //! Ebene, die sowohl Material schneidet ALS AUCH auf dahinterliegende Kanten
-//! blickt, und schreibt das Ergebnis als SVG nach
-//! `docs/welle-c-hlr-spike/section-engine-proof.svg`.
+//! blickt, und schreibt das Ergebnis als SVG (Standard: `section-engine-proof.svg`
+//! im aktuellen Verzeichnis, oder der erste Argumentpfad).
 //!
-//! Aufruf: `cargo run --example section_svg` (im Verzeichnis `src-tauri/render3d`).
+//! Aufruf: `cargo run --example section_svg [ausgabe.svg]` (im Verzeichnis `src-tauri/render3d`).
 
 use render3d::section::{cut_section, ComponentKind, SectionOutput, SectionPlane};
 use render3d::types::Opening;
@@ -197,10 +197,9 @@ fn main() {
 
     let svg = render_svg(&out);
 
-    let out_path = format!(
-        "{}/../../docs/welle-c-hlr-spike/section-engine-proof.svg",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let out_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "section-engine-proof.svg".to_string());
     std::fs::write(&out_path, svg).expect("SVG schreiben fehlgeschlagen");
     println!("geschrieben: {out_path}");
 }

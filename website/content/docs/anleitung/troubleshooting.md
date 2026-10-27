@@ -5,10 +5,7 @@ weight: 7
 ---
 
 DOSSIER ist aus einem Risiko-Spike gewachsen und wird aktiv weiterentwickelt.
-Diese Seite listet **bewusst offene Punkte** ehrlich auf — für die
-vollständige, laufend aktualisierte Bestandsaufnahme siehe
-[STATUS.md](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/raw/branch/master/STATUS.md)
-im Repository.
+Diese Seite listet **bewusst offene Punkte** ehrlich auf.
 
 ## Modellierung
 

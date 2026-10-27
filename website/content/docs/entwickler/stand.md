@@ -4,8 +4,7 @@ linkTitle: "Stand & Funktionen"
 weight: 2
 ---
 
-Auszug — vollständige Liste inklusive offener Punkte und bekannter technischer
-Schulden in [STATUS.md](https://git.openbureau.ch/karim/DOSSIER-STANDALONE/raw/branch/master/STATUS.md) §3.
+Auszug der offenen Punkte und bekannten technischen Schulden.
 
 - **Semantisches Modell** mit mehrschichtigen Wänden, L-Eck-Gehrung **und**
   Prioritäts-T-/X-Stössen (`joinPriority` am Component) — konsistent in

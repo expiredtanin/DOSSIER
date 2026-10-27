@@ -4,7 +4,7 @@
 // Tauri-Prozess laufen — NICHT in der WebKitGTK-Webview (dem Perf-Flaschenhals)
 // und NICHT in einem separaten Chromium-Workaround-Fenster.
 //
-// Architektur (Ansatz B, siehe docs/welle-c-hlr-spike/m2-approach.md):
+// Architektur (Ansatz B):
 //   - Der Tauri-Hauptthread haelt weiterhin die GTK-Hauptschleife + die Webview.
 //   - Dieses Modul oeffnet EIGENE native winit-Fenster mit eigener wgpu-Surface
 //     auf EINEM HINTERGRUND-Thread. winit spricht auf Linux direkt Wayland/X11

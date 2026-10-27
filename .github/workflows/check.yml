@@ -1,4 +1,4 @@
-# Tests bei jedem Push (lessons-bimcraft [57]). Braucht einen Gitea-Actions-Runner mit
+# Tests bei jedem Push (lessons-bimcraft [57]). Braucht einen Actions-Runner mit
 # Docker/Node; ohne Runner passiert nichts. Die WASM-Pakete (src/engine/pkg*) sind nicht im
 # Repo und werden hier gebaut, weil Tests wie truckBrep.wasm.test.ts sie lesen.
 name: check
