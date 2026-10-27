@@ -2937,6 +2937,8 @@ export interface Project {
   sunStudy?: SunStudy;
   /** Baurecht der Parzelle: Grenze, Grenzabstände, Baulinien, Gesamthöhe (`analysis/siteRules.ts`). */
   siteRules?: SiteRules;
+  /** Strichstärken im Grundriss mit dem Massstab skalieren, (100/n)^0.25 (`plan/lineWeightScale.ts`). */
+  scaleLineWeights?: boolean;
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
   layers: LayerCategory[];
   walls: Wall[];

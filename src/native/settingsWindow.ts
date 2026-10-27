@@ -5,7 +5,8 @@
 // Sync-/Command-Paar statt eines generischen Proxys über 27 Handler.
 //
 // Hauptfenster → Einstellungs-Fenster: „settings-sync-state" mit
-//   { marqueeColor, snapColor, referenceElevationMasl, offline, layout } bei jeder Änderung + auf „settings-window-ready".
+//   { marqueeColor, snapColor, referenceElevationMasl, scaleLineWeights, offline, layout } bei jeder Änderung
+//   + auf „settings-window-ready".
 // Einstellungs-Fenster → Hauptfenster: „settings-command" mit
 //   { name, args } — dieselbe {name,args}-RPC-Form wie resource-command.
 //
@@ -25,6 +26,7 @@ export interface SettingsSyncState {
   marqueeColor: string;
   snapColor: string;
   referenceElevationMasl: number | undefined;
+  scaleLineWeights: boolean;
   offline: boolean;
   layout: LayoutState;
 }
@@ -35,6 +37,7 @@ export interface SettingsCommandHandlers {
   onMarqueeColorChange: (hex: string) => void;
   onSnapColorChange: (hex: string) => void;
   onReferenceElevationChange: (n: number | undefined) => void;
+  onScaleLineWeightsChange: (on: boolean) => void;
   onOfflineChange: (offline: boolean) => void;
   onApplyLayout: (layout: LayoutState) => void;
 }

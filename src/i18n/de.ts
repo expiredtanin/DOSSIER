@@ -1867,6 +1867,8 @@ export const de = {
   "settings.referenceElevation": "Referenzhöhe EG (m ü. M.)",
   "settings.referenceElevation.hint":
     "Nur gespeichert — wird noch nicht verwendet. Folgt für Terrain-Draping/reale Höhen relativ zum Erdgeschoss.",
+  "settings.scaleLineWeights": "Strichstärken nach Massstab",
+  "settings.scaleLineWeights.hint": "Grundriss-Strichstärken werden mit (100/n)^¼ skaliert: 1:200 ≈ 84 %, 1:50 ≈ 119 %. Gilt am Bildschirm, in Layouts und im Export.",
   "settings.section.shortcuts": "Befehlszeilen-Kürzel (Tipp-Alias)",
   "settings.shortcuts.hint":
     "Eigene Kürzel für die Befehlszeile — ein eigenes Kürzel überschreibt (nur für dich) ein eingebautes mit demselben Buchstaben, falls es eins gibt.",

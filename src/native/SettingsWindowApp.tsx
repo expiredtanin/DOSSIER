@@ -93,6 +93,8 @@ export function SettingsWindowApp() {
       onSnapColorChange={handlers.onSnapColorChange}
       referenceElevationMasl={state.referenceElevationMasl}
       onReferenceElevationChange={handlers.onReferenceElevationChange}
+      scaleLineWeights={state.scaleLineWeights}
+      onScaleLineWeightsChange={handlers.onScaleLineWeightsChange}
       offline={state.offline}
       onOfflineChange={handlers.onOfflineChange}
       layout={state.layout}

@@ -73,6 +73,9 @@ export interface SettingsDialogProps {
    * dieses eine Feld + sein Setter (schmale Grenzfläche, s. `windowed`). */
   referenceElevationMasl: number | undefined;
   onReferenceElevationChange: (n: number | undefined) => void;
+  /** Projekt-Option: Strichstärken nach Massstab ([32]). */
+  scaleLineWeights: boolean;
+  onScaleLineWeightsChange: (on: boolean) => void;
   /** Offline-Modus: sperrt alle entfernten Abrufe (Materialbibliothek, swisstopo, OSM). */
   offline: boolean;
   onOfflineChange: (offline: boolean) => void;
@@ -117,6 +120,8 @@ export function SettingsDialog({
   onSnapColorChange,
   referenceElevationMasl,
   onReferenceElevationChange,
+  scaleLineWeights,
+  onScaleLineWeightsChange,
   offline,
   onOfflineChange,
   layout,
@@ -278,6 +283,7 @@ export function SettingsDialog({
               placeholder="0.0"
             />
             <div className="imp-note">{t("settings.referenceElevation.hint")}</div>
+            <LineWeightScaleField enabled={scaleLineWeights} onChange={onScaleLineWeightsChange} />
           </section>
         </>
         )}
@@ -714,5 +720,18 @@ function ShortcutRemapSection({
         </button>
       )}
     </div>
+  );
+}
+
+/** Projekt-Option „Strichstärken nach Massstab" ([32], `plan/lineWeightScale.ts`). */
+function LineWeightScaleField({ enabled, onChange }: { enabled: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <>
+      <label className="settings-check">
+        <input type="checkbox" checked={enabled} onChange={(e) => onChange(e.target.checked)} />
+        <span>{t("settings.scaleLineWeights")}</span>
+      </label>
+      <div className="imp-note">{t("settings.scaleLineWeights.hint")}</div>
+    </>
   );
 }

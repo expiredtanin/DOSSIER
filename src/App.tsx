@@ -2704,12 +2704,18 @@ export default function App() {
   // Einstellungen als eigenes natives Fenster (Tauri) statt Overlay-Dialog —
   // hält es (falls offen) synchron zu den betroffenen Feldern, wendet dessen
   // Befehle auf die echten Setter an (siehe native/settingsWindow.ts).
+  const setScaleLineWeights = (on: boolean) =>
+    setProject((p) => {
+      const { scaleLineWeights: _old, ...rest } = p;
+      return on ? { ...rest, scaleLineWeights: true } : rest;
+    });
   useSettingsWindowHost(
     {
       themeMode,
       marqueeColor,
       snapColor,
       referenceElevationMasl: project.referenceElevationMasl,
+      scaleLineWeights: project.scaleLineWeights === true,
       offline,
       layout,
     },
@@ -2719,6 +2725,7 @@ export default function App() {
       onSnapColorChange: setSnapColor,
       onReferenceElevationChange: (n) =>
         setProject((p) => ({ ...p, referenceElevationMasl: n })),
+      onScaleLineWeightsChange: setScaleLineWeights,
       onOfflineChange,
       onApplyLayout: (l) => setLayout(reconcileLayout(l)),
     },
@@ -3904,6 +3911,8 @@ export default function App() {
           onReferenceElevationChange={(n) =>
             setProject((p) => ({ ...p, referenceElevationMasl: n }))
           }
+          scaleLineWeights={project.scaleLineWeights === true}
+          onScaleLineWeightsChange={setScaleLineWeights}
           offline={offline}
           onOfflineChange={onOfflineChange}
           layout={layout}

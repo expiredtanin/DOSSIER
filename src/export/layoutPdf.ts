@@ -221,6 +221,9 @@ async function renderPage(
     if (!snap) continue;
     try {
       const codes = visibleCodesFromSnapshot(snap);
+      // Massstab zuerst: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken
+      // nach Massstab) — wie ViewportPlan in LayoutSheet.tsx, sonst wiche das PDF von der Vorschau ab.
+      const scaleN = resolveViewportScale(vp, snap);
       const plan = generatePlan(
         project,
         snap.activeLevelId,
@@ -229,8 +232,10 @@ async function renderPage(
         snap.detail,
         false,
         false,
+        true,
+        scaleN,
+        true,
       );
-      const scaleN = resolveViewportScale(vp, snap);
       const print = planToPrintSvg(plan, {
         scaleDenominator: scaleN,
         pageWidthMm: vp.widthMm,

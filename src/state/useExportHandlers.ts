@@ -64,7 +64,7 @@ export function useExportHandlers(opts: {
       referenceLines,
       planColorMode === "mono",
       true, // includeGlobal (Default, explizit weil forPrint danach folgt)
-      undefined, // scaleDenominator (Default — der ECHTE Export-Massstab wirkt separat in savePlanPdf)
+      decision.scaleDenominator, // Export-Massstab: Bemassung in Papier-mm, Strichstärken nach Massstab
       true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
     );
     await savePlanPdf(plan, {
@@ -91,7 +91,7 @@ export function useExportHandlers(opts: {
       referenceLines,
       planColorMode === "mono",
       true, // includeGlobal (Default)
-      undefined, // scaleDenominator (Default)
+      decision.scaleDenominator, // wie PDF
       true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
     );
     savePlanSvg(plan, {

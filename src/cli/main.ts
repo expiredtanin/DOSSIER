@@ -168,7 +168,8 @@ export async function run(argv: string[]): Promise<number> {
     case "plan": {
       const lvl = findLevel(project, ["floor"], args.flags.get("level"));
       if (!lvl) fail(`Geschoss nicht gefunden: ${args.flags.get("level") ?? "(erstes)"}`);
-      const plan = generatePlan(project, lvl.id, allCodes);
+      // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
+      const plan = generatePlan(project, lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
       out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
       return 0;
     }

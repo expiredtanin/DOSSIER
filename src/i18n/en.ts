@@ -1854,6 +1854,8 @@ export const en: Record<TranslationKey, string> = {
   "settings.referenceElevation": "Ground floor reference elevation (m a.s.l.)",
   "settings.referenceElevation.hint":
     "Stored only — not used yet. Terrain draping / real-world elevations relative to the ground floor will follow.",
+  "settings.scaleLineWeights": "Line weights by scale",
+  "settings.scaleLineWeights.hint": "Plan line weights are scaled by (100/n)^¼: 1:200 ≈ 84 %, 1:50 ≈ 119 %. Applies on screen, in layouts and exports.",
   "settings.section.shortcuts": "Command-line shortcuts (typed alias)",
   "settings.shortcuts.hint":
     "Your own command-line shortcuts — a custom shortcut overrides (for you only) a built-in one with the same letter, if there is one.",

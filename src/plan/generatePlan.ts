@@ -74,6 +74,7 @@ import { subtractVoidsInPlan } from "./voids";
 import { addContextContours } from "./generatePlan/context";
 import { addSunShadow } from "./generatePlan/sunShadow";
 import { addSiteRules, addSiteViolations } from "./generatePlan/siteRules";
+import { lineWeightFactor, scalePrimitiveWeights } from "./lineWeightScale";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import {
   addDrawing2D,
@@ -683,11 +684,22 @@ export function generatePlan(
           filters: o.filters,
         }));
 
+  // Strichstärken nach Massstab ([32], nur mit Projekt-Option): auf die fertigen Primitive und
+  // auf die Linien der kompakten Unterlage.
+  const lwf = lineWeightFactor(project, scaleDenominator);
+  const scaledUnderlay =
+    lwf === 1
+      ? underlay
+      : underlay.map((g) => ({
+          ...g,
+          ctx: [...g.ctx, lwf],
+          build: (ds: Drawing2D[]) => g.build(ds).map((p) => scalePrimitiveWeights(p, lwf)),
+        }));
   return {
-    primitives,
+    primitives: lwf === 1 ? primitives : primitives.map((p) => scalePrimitiveWeights(p, lwf)),
     bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs, primitives.slice(0, underlayCount)),
     backgroundImages,
-    ...(underlay.length ? { underlay } : {}),
+    ...(scaledUnderlay.length ? { underlay: scaledUnderlay } : {}),
   };
 }
 

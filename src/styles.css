@@ -8235,3 +8235,11 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Einstellungen: Ankreuzfeld mit Text (Projekt-Optionen). */
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
