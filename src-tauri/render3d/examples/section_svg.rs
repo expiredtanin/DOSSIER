@@ -19,6 +19,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         // siehe section.rs-Moduldoc "Oeffnungen"). Fenster von Y=1.0 bis 2.0,
         // Bruestung 0.8 m, Fensterhoehe 1.0 m (Sturz ab Y-Hoehe 1.8).
         WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [0.0, 3.0],
             thickness: 0.2,
@@ -38,6 +39,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
             cut: None,
         },
         WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 3.0],
             end: [3.0, 3.0],
             thickness: 0.2,
@@ -57,6 +59,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         // -- demonstriert den Durchblick: sichtbar im Fensterband (Hoehe
         // 0.8..1.8), verdeckt darueber/darunter.
         WallInput {
+            top_drop: [0.0, 0.0],
             start: [1.5, 1.2],
             end: [1.5, 1.8],
             thickness: 0.2,

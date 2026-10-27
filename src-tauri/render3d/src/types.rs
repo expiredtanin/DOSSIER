@@ -130,6 +130,12 @@ pub struct WallInput {
     /// Basis-Hoehe (Unterkante) in Metern. Default 0 (Geschossboden).
     #[serde(default, rename = "baseElevation")]
     pub base_elevation: f32,
+    /// Absenkung der Oberkante am Wand-Anfang / -Ende (Meter, `>= 0`): die Oberseite ist eine
+    /// SCHRÄGE Ebene von `base+height-drop[0]` (bei `start`) nach `base+height-drop[1]` (bei
+    /// `end`) — die Wand unter einer Dachfläche endet so exakt an deren Unterkante statt
+    /// gestuft. Nur für Wände ohne `openings`/`holes` wirksam; `[0,0]` (Default) = flach.
+    #[serde(default, rename = "topDrop")]
+    pub top_drop: [f32; 2],
     /// Albedo-Farbe der Wand (RGB 0..1). Default helles Grau wie die three.js-Sicht.
     /// Nur wirksam, wenn `layers` fehlt/leer ist (Vollkoerper-Fallback).
     #[serde(default = "default_wall_color")]

@@ -239,6 +239,12 @@ export interface RWall {
   thickness: number;
   height: number;
   baseElevation: number;
+  /**
+   * Absenkung der Oberkante (Meter ≥ 0) am Anfang / Ende der Box: die Oberseite ist eine
+   * schräge Ebene — Wand unter einer Dachfläche, bündig an deren Unterkante. Fehlt = flach.
+   * Nur für Boxen ohne Löcher/Öffnungen (render3d `WallInput::top_drop`).
+   */
+  topDrop?: [number, number];
   color: RRgb;
   /**
    * Immer leer: die Schichten werden TS-seitig in eigene Voll-Boxen zerlegt

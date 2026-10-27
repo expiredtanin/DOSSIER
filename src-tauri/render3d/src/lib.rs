@@ -68,6 +68,7 @@ mod tests {
     /// Bequemer Bau einer achsparallelen Wand entlang +X.
     fn wall_x(len: f32, thickness: f32, height: f32) -> WallInput {
         WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [len, 0.0],
             thickness,
@@ -154,6 +155,27 @@ mod tests {
     }
 
     #[test]
+    fn schraege_oberkante_senkt_die_wand_am_ende() {
+        // Wand 4 m lang, 3 m hoch, Oberkante am Ende um 1 m abgesenkt: Deckel-Vertices
+        // liegen bei Start auf 3.0, am Ende auf 2.0; Zählung bleibt ein Quader.
+        let mut w = wall_x(4.0, 0.2, 3.0);
+        w.top_drop = [0.0, 1.0];
+        let mesh = build_walls_mesh(&[w]);
+        assert_eq!(mesh.vertex_count(), VERTS_PER_BOX);
+        let mut top_at_start = f32::MIN;
+        let mut top_at_end = f32::MIN;
+        for v in mesh.verts.chunks(9) {
+            if v[0] < 0.01 { top_at_start = top_at_start.max(v[1]); }
+            if v[0] > 3.99 { top_at_end = top_at_end.max(v[1]); }
+        }
+        assert!((top_at_start - 3.0).abs() < 1e-5, "start {top_at_start}");
+        assert!((top_at_end - 2.0).abs() < 1e-5, "end {top_at_end}");
+        // Deckelnormale zeigt nach oben und leicht gegen die Neigung (nx > 0 zum Ende hin abfallend).
+        let top_n = mesh.verts.chunks(9).filter(|v| v[4] > 0.5).count();
+        assert!(top_n >= 4, "Deckel hat nach oben zeigende Normalen");
+    }
+
+    #[test]
     fn eine_wand_hat_quader_zaehlung() {
         // Eine Wand -> ein Quader: 24 Vertices, 36 Indizes (12 Dreiecke).
         let mesh = build_walls_mesh(&[wall_x(3.0, 0.2, 2.5)]);
@@ -168,6 +190,7 @@ mod tests {
     /// `wall_x` mit gesetzter Bauteil-Schraffur (Voraussetzung fuer die Kappen).
     fn wall_x_hatched(len: f32, thickness: f32, height: f32) -> WallInput {
         WallInput {
+            top_drop: [0.0, 0.0],
             hatch: Some(Hatch { pattern: 3, angle: 45.0, scale: 1.0, line_weight: 0.13, top_angle: None }),
             ..wall_x(len, thickness, height)
         }
@@ -225,6 +248,7 @@ mod tests {
         // (nicht 4), macht 12 Vertices statt 24 — plus je Wand eine Oberseiten-Kappe (2 x 6).
         let a = wall_x_hatched(3.0, 0.2, 2.5); // (0,0) frei .. (3,0) verbunden
         let b = WallInput {
+            top_drop: [0.0, 0.0],
             start: [3.0, 0.0],
             end: [3.0, 4.0],
             ..wall_x_hatched(4.0, 0.2, 2.5) // (3,0) verbunden .. (3,4) frei
@@ -252,6 +276,7 @@ mod tests {
         let mesh = build_walls_mesh(&[
             wall_x(3.0, 0.2, 2.5),
             WallInput {
+            top_drop: [0.0, 0.0],
                 start: [3.0, 0.0],
                 end: [3.0, 4.0],
                 thickness: 0.2,
@@ -334,6 +359,7 @@ mod tests {
     fn diagonale_wand_hat_gleiche_zaehlung() {
         // Auch nicht-achsparallele Waende extrudieren korrekt (nur andere Ecken).
         let w = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [2.0, 2.0],
             thickness: 0.3,
@@ -359,6 +385,7 @@ mod tests {
     fn degenerierte_wand_erzeugt_nichts() {
         // Start == Ende -> keine Richtung -> uebersprungen (kein Absturz).
         let w = WallInput {
+            top_drop: [0.0, 0.0],
             start: [1.0, 1.0],
             end: [1.0, 1.0],
             thickness: 0.2,
@@ -576,6 +603,7 @@ mod tests {
         // Eckbereich exakt auf der 45-Grad-Gehrungslinie |x| == |z| liegen —
         // weder darueber hinaus (Ueberstand) noch darunter (Spalt).
         let a = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,
@@ -590,6 +618,7 @@ mod tests {
             cut: None,
         };
         let b = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [0.0, 3.0],
             thickness: 0.4,
@@ -653,6 +682,7 @@ mod tests {
         // Moduldoc/`joins.ts` bewusst NICHT gehrt (mehrdeutig), alle drei bleiben
         // rechtwinklig. Regressions-Absicherung: keine Panik, stabile Zaehlung.
         let mk = |s: [f32; 2], e: [f32; 2]| WallInput {
+            top_drop: [0.0, 0.0],
             start: s,
             end: e,
             thickness: 0.2,
@@ -685,6 +715,7 @@ mod tests {
         // einzelnes Geschoss fuer sich (Vertex-Zaehlung + Eck-Vertices je
         // Geschoss weiterhin auf der 45-Grad-Linie relativ zu SEINER Basis).
         let mk = |s: [f32; 2], e: [f32; 2], base: f32| WallInput {
+            top_drop: [0.0, 0.0],
             start: s,
             end: e,
             thickness: 0.4,
@@ -777,6 +808,7 @@ mod tests {
             ])
         };
         let a = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.3,

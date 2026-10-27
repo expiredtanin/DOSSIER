@@ -228,6 +228,7 @@ function pushSegment(
   materialIndex?: number,
   holes?: RHole[],
   cut?: RCutMeta,
+  topDrop?: [number, number],
 ): void {
   if (to - from <= EPS) return;
   if (zTop - zBottom <= EPS) return;
@@ -258,6 +259,7 @@ function pushSegment(
     thickness,
     height: zTop - zBottom,
     baseElevation: zBottom,
+    ...(topDrop && (topDrop[0] > EPS || topDrop[1] > EPS) ? { topDrop } : {}),
     color,
     layers: [],
     wallId,
@@ -637,9 +639,10 @@ function clipPieceToRoofs(
   bb: number,
   zb: number,
   zt: number,
-  emit: (a: number, bb: number, zb: number, zt: number) => void,
+  emit: (a: number, bb: number, zb: number, ztStart: number, ztEnd: number) => void,
 ): void {
   if (zt - zb <= EPS || bb - a <= EPS) return;
+  const nrm = n;
   const wallBounds = wallFootprintBounds(wall, Math.abs(bandOffset) + 0.01);
   const roofs = (project.roofs ?? []).filter((r) => {
     if (r.floorId !== wall.floorId) return false;
@@ -649,7 +652,7 @@ function clipPieceToRoofs(
     return eavesZ + 50 >= zb; // grosszügige Schranke statt exakter First-Höhe
   });
   if (roofs.length === 0) {
-    emit(a, bb, zb, zt);
+    emit(a, bb, zb, zt, zt);
     return;
   }
   const roofData = roofs
@@ -662,40 +665,79 @@ function clipPieceToRoofs(
     })
     .filter((d): d is { geo: RoofGeometry; total: number } => d !== null);
   if (roofData.length === 0) {
-    emit(a, bb, zb, zt);
+    emit(a, bb, zb, zt, zt);
     return;
   }
 
+  // Oberkante entlang der Achse abtasten (Dach-Unterkante ist stückweise linear in `u`) …
   const span = bb - a;
-  const steps = Math.max(1, Math.ceil(span / ROOF_CLIP_STEP));
-  const stepLen = span / steps;
-  // Je Stufe die geklemmte Oberkante bestimmen …
-  const tops: number[] = [];
-  for (let i = 0; i < steps; i++) {
-    const mid = a + (i + 0.5) * stepLen;
-    const p = add(add(wall.start, scale(u, mid)), scale(n, bandOffset));
+  const count = Math.max(1, Math.ceil(span / ROOF_CLIP_STEP));
+  const topAt = (t: number): number => {
+    // Randpunkte minimal nach innen: auf der Dachkante selbst liefert die Unterkante `null`.
+    const tt = Math.min(bb - 1e-3, Math.max(a + 1e-3, t));
+    const p = add(add(wall.start, scale(u, tt)), scale(nrm, bandOffset));
     let clip = zt;
     for (const { geo, total } of roofData) {
       const under = roofUndersideAt(geo, total, p.x, p.y);
       if (under !== null && under < clip) clip = under;
     }
-    tops.push(Math.max(zb, clip));
+    return Math.max(zb, clip);
+  };
+  const ts: number[] = [];
+  const tops: number[] = [];
+  for (let i = 0; i <= count; i++) {
+    ts.push(a + (span * i) / count);
+    tops.push(topAt(ts[i]));
   }
-  // … und AUFEINANDERFOLGENDE Stufen gleicher Oberkante zu EINEM Body verschmelzen.
-  // Wo das Dach das Stück gar nicht klippt (Oberkante == zt über die ganze Länge,
-  // z. B. nahe dem First oder wenn kein Dach wirklich überdeckt), entsteht so wieder
-  // EIN durchgehender Body statt vieler identischer 0.15-m-Fragmente — nur der echt
-  // geneigte Bereich bleibt gestuft. Das entlastet auch den Live-Schnitt, der genau
-  // diese Wandkörper cuttet (weniger, saubere Schnitt-Kappen).
-  let runStart = 0;
-  for (let i = 1; i <= steps; i++) {
-    if (i < steps && Math.abs(tops[i] - tops[runStart]) <= EPS) continue;
-    const sa = a + runStart * stepLen;
-    const sb = a + i * stepLen;
-    const zte = tops[runStart];
-    if (zte - zb > EPS) emit(sa, sb, zb, zte);
-    runStart = i;
+  // … und zu geraden Stücken zusammenfassen (Toleranz 2 mm): jedes Stück ist ein Körper mit
+  // schräger Oberkante (`topDrop`), die Knicke (First, Grat) sind die Stückgrenzen.
+  const TOL = 0.002;
+  const runs: Array<{ i0: number; i1: number }> = [];
+  let i0 = 0;
+  while (i0 < count) {
+    let i1 = i0 + 1;
+    while (i1 < count) {
+      const k = i1 + 1;
+      const slope = (tops[k] - tops[i0]) / (ts[k] - ts[i0]);
+      let ok = true;
+      for (let m = i0 + 1; m <= k && ok; m++) ok = Math.abs(tops[i0] + slope * (ts[m] - ts[i0]) - tops[m]) <= TOL;
+      if (!ok) break;
+      i1 = k;
+    }
+    runs.push({ i0, i1 });
+    i0 = i1;
   }
+  // Knick exakt als Schnitt der Nachbargeraden setzen (statt auf dem Abtastpunkt).
+  const cuts: number[] = [a];
+  const line = (r: { i0: number; i1: number }) => {
+    const m = (tops[r.i1] - tops[r.i0]) / (ts[r.i1] - ts[r.i0]);
+    return { m, c: tops[r.i0] - m * ts[r.i0] };
+  };
+  for (let r = 0; r + 1 < runs.length; r++) {
+    const l1 = line(runs[r]);
+    const l2 = line(runs[r + 1]);
+    const lo = ts[runs[r].i1 - 1];
+    const hi = ts[Math.min(count, runs[r].i1 + 1)];
+    let x = ts[runs[r].i1];
+    if (Math.abs(l1.m - l2.m) > 1e-9) {
+      const cx = (l2.c - l1.c) / (l1.m - l2.m);
+      if (cx >= lo && cx <= hi) x = cx;
+    }
+    cuts.push(x);
+  }
+  cuts.push(bb);
+  const valueAt = (r: { i0: number; i1: number }, x: number): number => {
+    const l = line(r);
+    return Math.min(zt, Math.max(zb, l.m * x + l.c));
+  };
+  runs.forEach((r, k) => {
+    const sa = cuts[k];
+    const sb = cuts[k + 1];
+    if (sb - sa <= EPS) return;
+    const z0 = valueAt(r, sa);
+    const z1 = valueAt(r, sb);
+    if (Math.max(z0, z1) - zb > EPS) emit(sa, sb, zb, z0, z1);
+  });
 }
 
 /**
@@ -846,7 +888,8 @@ export function emitWall(out: RWall[], project: Project, wall: Wall, layered = t
       // (Schicht-Rücksprung an der Laibung) — die anderen Schichten bleiben bündig.
       const isInnermostBand = li === bands.length - 1;
       const recessDepth = b.thickness;
-      const emitPiece = (a: number, bb: number, zb: number, zt: number): void => {
+      const emitPiece = (a: number, bb: number, zb: number, ztStart: number, ztEnd: number): void => {
+        const zt = Math.max(ztStart, ztEnd);
         const segHoles = holes
           .filter((h) => h.zTop > zb + EPS && h.zBottom < zt - EPS)
           .map((h) => {
@@ -860,7 +903,19 @@ export function emitWall(out: RWall[], project: Project, wall: Wall, layered = t
                 }
               : { from: h.from - a, to: h.to - a, zBottom: h.zBottom, zTop: h.zTop };
           });
-        pushSegment(out, wall, a, bb, zb, zt, b.thickness, b.offset, b.color, wall.id, b.hatch, b.materialIndex, segHoles, bandCutMeta(b));
+        if (segHoles.length > 0 && Math.abs(ztStart - ztEnd) > EPS) {
+          // Schräge Oberkante und Löcher im selben Körper geht nicht (render3d): gestuft annähern.
+          const k = Math.max(1, Math.ceil((bb - a) / ROOF_CLIP_STEP));
+          for (let i = 0; i < k; i++) {
+            const sa = a + ((bb - a) * i) / k;
+            const sb = a + ((bb - a) * (i + 1)) / k;
+            const zm = ztStart + ((ztEnd - ztStart) * (i + 0.5)) / k;
+            emitPiece(sa, sb, zb, zm, zm);
+          }
+          return;
+        }
+        const drop: [number, number] = [zt - ztStart, zt - ztEnd];
+        pushSegment(out, wall, a, bb, zb, zt, b.thickness, b.offset, b.color, wall.id, b.hatch, b.materialIndex, segHoles, bandCutMeta(b), drop);
       };
 
       for (const [a, bb] of axisPieces) {

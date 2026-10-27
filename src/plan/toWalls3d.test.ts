@@ -1597,13 +1597,17 @@ describe("Per-Schicht-Decken-Dominanz Wand/Decke (3D-Entsprechung der Schnitt-Bo
     // korrekt (nicht durch die Decken-, sondern die Dach-Logik) leicht gekappt.
     const w6 = projectToWalls3d(sampleProject).filter((w) => w.wallId === "W6");
     expect(w6.length).toBeGreaterThan(0);
-    const offHeight = w6.filter((seg) => Math.abs(seg.height - 2.6) > 1e-6);
-    expect(offHeight.length).toBe(1);
-    expect(offHeight[0].thickness).toBeCloseTo(0.02, 6); // die dünne Putz-Gehrungsspitze
-    expect(offHeight[0].height).toBeLessThan(2.6);
-    expect(offHeight[0].height).toBeGreaterThan(2.5); // nur ein paar cm gekappt
+    const lowTop = (seg: (typeof w6)[number]) => seg.height - Math.max(...(seg.topDrop ?? [0, 0]));
+    const offHeight = w6.filter((seg) => Math.abs(lowTop(seg) - 2.6) > 1e-6);
+    // Die Gehrungsspitzen der dünnen Putz- und Mauerwerksschicht reichen minimal unter den
+    // Dachüberstand: Oberkante dort um wenige cm abgesenkt (schräg), sonst volle Höhe.
+    expect(offHeight.some((o) => Math.abs(o.thickness - 0.02) < 1e-6)).toBe(true);
+    for (const o of offHeight) {
+      expect(lowTop(o)).toBeLessThan(2.6);
+      expect(lowTop(o)).toBeGreaterThan(2.5);
+    }
     for (const seg of w6) {
-      if (seg === offHeight[0]) continue;
+      if (offHeight.includes(seg)) continue;
       expect(seg.height).toBeCloseTo(2.6, 6);
     }
   });
@@ -1661,9 +1665,13 @@ describe("Dach-Wand-Verschneidung (clipPieceToRoofs) — Wand-Top folgt der Dach
     const atEave = walls.filter((s) => s.start[1] < 1e-6 || s.end[1] > 4 - 1e-6);
     expect(atEave.length).toBeGreaterThan(0);
     for (const seg of atEave) {
-      expect(seg.height).toBeLessThan(3.0 - 0.05);
-      expect(seg.height).toBeGreaterThan(2.8); // nicht mehr als die Dachdicke gekappt
+      // Schräge Oberkante: am Traufende um die Dachdicke abgesenkt, nicht mehr.
+      const drop = seg.start[1] < 1e-6 ? (seg.topDrop?.[0] ?? 0) : (seg.topDrop?.[1] ?? 0);
+      expect(seg.height - drop).toBeLessThan(3.0 - 0.05);
+      expect(seg.height - drop).toBeGreaterThan(2.8); // nicht mehr als die Dachdicke gekappt
     }
+    // Ein Satteldach-Giebel besteht aus wenigen schrägen/flachen Stücken, keiner Treppe (vorher ~27).
+    expect(walls.filter((w) => w.thickness === walls[0].thickness).length).toBeLessThanOrEqual(6);
     // Am First (y=2): unverändert volle Höhe. Die ungeклippten Achsenstücke gleicher
     // Oberkante werden zu EINEM Body verschmolzen, daher hier das Segment suchen, das
     // y=2 ÜBERSPANNT (nicht mehr ein an y≈2 beginnendes 0.15-m-Stück).

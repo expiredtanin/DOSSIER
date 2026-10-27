@@ -289,6 +289,7 @@ mod tests {
     #[test]
     fn hatch_muster_id_landet_in_den_cap_vertices() {
         let wall = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.3,
@@ -335,6 +336,7 @@ mod tests {
     #[test]
     fn ohne_hatch_fallback_auf_diagonale() {
         let wall = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.3,
@@ -368,6 +370,7 @@ mod tests {
     fn build_cut_caps_wendet_dominanz_an_wand_verliert_ueberlappung() {
         // Wand entlang +X bei x in [0,3], Dicke 0.4, volle Hoehe [0,2.5]; Prio 50.
         let wall = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,
@@ -442,6 +445,7 @@ mod tests {
         // Backstein-Wand entlang +X, x in [0,3], Dicke 0.4 → u (=y) in [-0.2,0.2],
         // volle Hoehe [0,2.5]; Prio 50, Muster 2 (diagonal).
         let wall = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,
@@ -524,6 +528,7 @@ mod tests {
     fn build_cut_cap_lines_kantenzahl_und_stil() {
         let color = [0.2, 0.4, 0.9];
         let wall = WallInput {
+            top_drop: [0.0, 0.0],
             start: [0.0, 0.0],
             end: [3.0, 0.0],
             thickness: 0.4,

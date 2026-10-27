@@ -158,8 +158,9 @@ fn extrude_wall_with_miters(mesh: &mut Mesh, wall: &WallInput, miters: WallMiter
                     &wall.holes,
                 );
             } else {
+                let drop = if segments.len() == 1 { wall.top_drop } else { [0.0, 0.0] };
                 extrude_layer_segment(
-                    mesh, wall, n, length, a0, a1, y0, y1, off_a, off_b, start_cut, end_cut,
+                    mesh, wall, n, length, a0, a1, y0, y1, drop, off_a, off_b, start_cut, end_cut,
                     layer.color,
                 );
             }
@@ -238,6 +239,7 @@ fn extrude_layer_segment(
     a1: f32,
     y0: f32,
     y1: f32,
+    top_drop: [f32; 2],
     off_a: f32,
     off_b: f32,
     start_cut: Option<MiterLine>,
@@ -276,14 +278,22 @@ fn extrude_layer_segment(
     let b1 = w(g1, y0);
     let b2 = w(g2, y0);
     let b3 = w(g3, y0);
-    let t0 = w(g0, y1);
-    let t1 = w(g1, y1);
-    let t2 = w(g2, y1);
-    let t3 = w(g3, y1);
+    // Schräge Oberkante: Absenkung linear über die ganze Wandachse (`a0`/`a1` sind
+    // Positionen auf ihr). Planar, weil g0/g3 und g1/g2 jeweils dieselbe Höhe haben.
+    let drop_at = |a: f32| -> f32 {
+        let t = if length > 1e-9 { (a / length).clamp(0.0, 1.0) } else { 0.0 };
+        top_drop[0] + (top_drop[1] - top_drop[0]) * t
+    };
+    let (ya, yb) = (y1 - drop_at(a0), y1 - drop_at(a1));
+    let t0 = w(g0, ya);
+    let t1 = w(g1, yb);
+    let t2 = w(g2, yb);
+    let t3 = w(g3, ya);
 
     // Sechs Seiten als Quads (Ecken CCW von aussen gesehen -> Normale zeigt raus).
     // Deckel oben (+Y): t0,t1,t2,t3 von oben CCW.
-    push_quad(mesh, t0, t1, t2, t3, [0.0, 1.0, 0.0], color);
+    let top_normal = if ya == yb { [0.0, 1.0, 0.0] } else { quad_normal(t0, t1, t3) };
+    push_quad(mesh, t0, t1, t2, t3, top_normal, color);
     // Boden unten (-Y): b0,b3,b2,b1 (von unten gesehen CCW).
     push_quad(mesh, b0, b3, b2, b1, [0.0, -1.0, 0.0], color);
 
@@ -985,8 +995,17 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
         // ueber alle Waende hinweg phasengleich.
         if wall.height > 1e-6 {
             if let Some(fp) = wall_mitered_footprint(wall, miters[wi]) {
-                let y = wall.base_elevation + wall.height;
+                let y_top = wall.base_elevation + wall.height;
+                // Schräge Oberkante: Höhe je Punkt aus der Lage entlang der Achse.
+                let dx = wall.end[0] - wall.start[0];
+                let dz = wall.end[1] - wall.start[1];
+                let len2 = (dx * dx + dz * dz).max(1e-12);
+                let y_at = |p: Point2| -> f32 {
+                    let t = (((p[0] - wall.start[0]) * dx + (p[1] - wall.start[1]) * dz) / len2).clamp(0.0, 1.0);
+                    y_top - (wall.top_drop[0] + (wall.top_drop[1] - wall.top_drop[0]) * t)
+                };
                 let c = |p: Point2| -> [f32; 9] {
+                    let y = y_at(p);
                     [
                         p[0], y, p[1], p[0], p[1],
                         hatch.pattern as f32, hatch.top_angle.unwrap_or(hatch.angle).to_radians(), hatch.scale.max(0.05),
@@ -1002,8 +1021,8 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
                 for (a, b) in [(0usize, 1usize), (3, 2)] {
                     push_line_strip(
                         &mut verts,
-                        [fp[a][0], y, fp[a][1]],
-                        [fp[b][0], y, fp[b][1]],
+                        [fp[a][0], y_at(fp[a]), fp[a][1]],
+                        [fp[b][0], y_at(fp[b]), fp[b][1]],
                         perp_n,
                     );
                 }
@@ -1036,13 +1055,13 @@ pub fn build_free_wall_end_caps(walls: &[WallInput]) -> Vec<f32> {
 
         if free_start {
             push_wall_end_cap(
-                &mut verts, wall.start, n, layers, total, y0, y1, pattern, angle_rad, scale,
+                &mut verts, wall.start, n, layers, total, y0, y1 - wall.top_drop[0], pattern, angle_rad, scale,
                 line_weight,
             );
         }
         if free_end {
             push_wall_end_cap(
-                &mut verts, wall.end, n, layers, total, y0, y1, pattern, angle_rad, scale,
+                &mut verts, wall.end, n, layers, total, y0, y1 - wall.top_drop[1], pattern, angle_rad, scale,
                 line_weight,
             );
         }
