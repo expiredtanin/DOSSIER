@@ -3,6 +3,7 @@
 //! Kaputte Eingaben ergeben ein leeres Ergebnis statt eines Panics (ein Panic legt das ganze
 //! WASM-Modul lahm, [14]).
 
+mod kernel2d;
 mod polygon;
 
 use wasm_bindgen::prelude::wasm_bindgen;

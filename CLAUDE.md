@@ -11,7 +11,7 @@ npm run check            # tsc, vitest, cargo test aller 6 Crates  (--fast: ohne
 npm run build:cli        # nur nötig, wenn src/cli oder src/core geändert wurden
 ```
 
-WASM-Pakete (`src/engine/pkg*`) sind nicht im Repo: vor vitest mit `npm run build:core|truck|engine3d|engine|kernel2d|dwgimport`
+WASM-Pakete (`src/engine/pkg*`) sind nicht im Repo: vor vitest mit `npm run build:core|truck|engine3d|engine|dwgimport`
 bauen. Test zuerst, dann Code. Ein Schritt endet mit grünen Tests und gelöschtem Altcode (keine Doppelspur).
 
 ## Rust-Kern (Umstellung läuft, Entscheid 27.10.)
@@ -39,7 +39,7 @@ die Grenze als flache `Float64Array`s. truck (`trucksolid`) bleibt eigenes WASM-
 | Ort | Inhalt |
 |---|---|
 | `src/model` | Typen (`types.ts`), Wand/Decke/Dach-Logik, Verbindungen, Ansichts-Typen (`viewTypes.ts`) |
-| `src/geometry` | reine Geometrie: Dach-Skelett (`roofSkeleton.ts`), kernel2d, Treppen, Räume |
+| `src/geometry` | reine Geometrie: Dach-Skelett (`roofSkeleton.ts`), kernel2d-Fassade, Treppen, Räume |
 | `src/plan` | Ableitung: `generatePlan`, `toSection`, `toElevation`, `toWalls3d`, `toRenderScene`, `voids.ts` |
 | `src/views/plan` | React-Plan-Ansicht, Renderer-Hooks (native Metal / WASM-WebGPU) |
 | `src/viewport` | 3D-Viewport (`Wasm3DViewport`), Raycast, Griffe |
@@ -50,8 +50,8 @@ die Grenze als flache `Float64Array`s. truck (`trucksolid`) bleibt eigenes WASM-
 | `src/net` | einziges Tor ins Netz (`netFetch`, Offline-Modus, Host-Liste) |
 | `src-tauri/render2d, render3d` | die zwei Anzeige-Engines (Rust → WASM/Metal) |
 | `src-tauri/trucksolid` | B-Rep (truck 0.6): Körper, Booleans, STEP, Kennwerte, Kollision |
-| `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans (i_overlay), wächst etappenweise |
-| `src-tauri/kernel2d, dwgimport` | 2D-Geometrie-Referenz, DWG-Import |
+| `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans (i_overlay), 2D-Kern (`kernel2d`), wächst etappenweise |
+| `src-tauri/kernel2d, dwgimport` | 2D-Geometrie (Offset/Trim/Fillet/Split/Join, in `core` eingebunden; `geometry/kernel2d.ts` ist Fassade), DWG-Import |
 
 ## Konventionen
 
