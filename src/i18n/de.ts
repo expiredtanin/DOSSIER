@@ -1750,6 +1750,7 @@ export const de = {
   "step.import.failed": "STEP-Import fehlgeschlagen",
   "step.import.done": "STEP importiert: {n} Körper",
   "menu.native.importStep": "STEP importieren …",
+  "project.open.failed": "Projekt konnte nicht geöffnet werden.",
   "menu.native.clashCheck": "Kollisionsprüfung …",
   "clash.none": "Keine Kollisionen gefunden.",
   "clash.found": "Kollisionen gefunden",

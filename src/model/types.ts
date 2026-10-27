@@ -2822,6 +2822,8 @@ export interface Group {
 }
 
 export interface Project {
+  /** Dateiformat-Version (s. `io/projectFormat.ts`); wird beim Speichern gesetzt. */
+  formatVersion?: number;
   id: string;
   name: string;
   /** Linienstil-Bibliothek (Line Manager). */

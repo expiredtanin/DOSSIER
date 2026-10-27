@@ -1711,6 +1711,7 @@ export const en: Record<TranslationKey, string> = {
   "step.import.failed": "STEP import failed",
   "step.import.done": "STEP imported: {n} solids",
   "menu.native.importStep": "Import STEP …",
+  "project.open.failed": "Project could not be opened.",
   "menu.native.clashCheck": "Clash detection …",
   "clash.none": "No clashes found.",
   "clash.found": "Clashes found",

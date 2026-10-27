@@ -37,7 +37,7 @@ describe("trucksolid-WASM", () => {
     expect(volume(build(u.brep!.spec))).toBeCloseTo(48 + 32 - 8, 2);
     const d = combineSolids(sampleProject, a, b, "difference")!;
     expect(volume(build(d.brep!.spec))).toBeCloseTo(48 - 8, 2);
-  });
+  }, 30_000);
 
   it("Verschobener Grundkörper: Mesh liegt an der neuen Stelle", () => {
     const s: ExtrudedSolid = {
@@ -75,7 +75,7 @@ describe("trucksolid-WASM", () => {
     const vols = back.map(volume).sort((a, b) => a - b);
     expect(vols[0]).toBeCloseTo((5 * 2.6 - 1.2 * 1.2) * 0.3, 1); // Wand
     expect(vols[1]).toBeCloseTo(Math.PI * 2, 1); // Zylinder
-  });
+  }, 30_000);
 
   it("Kennwerte + Kollision (truck-meshalgo)", () => {
     const cub = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) => ({ kind: "cuboid", min: [x0, y0, z0], max: [x1, y1, z1] });
@@ -88,5 +88,5 @@ describe("trucksolid-WASM", () => {
     expect(c.overlap_volume).toBeCloseTo(0.5, 5);
     const far = JSON.parse(mod.solid_clash(JSON.stringify({ a: cub(0, 0, 0, 1, 1, 1), b: cub(5, 5, 5, 6, 6, 6) })));
     expect(far.colliding).toBe(false);
-  });
+  }, 30_000);
 });

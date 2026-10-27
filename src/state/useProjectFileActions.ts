@@ -6,6 +6,7 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { parseProjectFile, serializeProject } from "../io/projectFormat";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { t } from "../i18n";
@@ -121,6 +122,21 @@ export type ImportDialogState = {
    *  `onProgress`) — rein informativ, s. `ImportDialog.tsx`. */
   progress?: string;
 } | null;
+
+
+/**
+ * Liest Projekt-Text über den gemeinsamen Format-Parser (Version, Migration, Toleranz) und
+ * meldet Fehler sichtbar statt nur in der Konsole. `null` = nicht ladbar.
+ */
+function readProjectOrReport(content: string): Project | null {
+  const r = parseProjectFile(content);
+  if (!r.ok) {
+    window.alert(`${t("project.open.failed")}\n\n${r.error}`);
+    return null;
+  }
+  for (const w of r.warnings) console.info(`Projekt geladen mit Hinweis: ${w}`);
+  return r.project;
+}
 
 export function useProjectFileActions(
   project: Project,
@@ -269,7 +285,7 @@ export function useProjectFileActions(
   // nativem Dialog) — `guardDiscard`-Aufrufer verlassen sich darauf, um NICHT
   // zu verwerfen, wenn der Nutzer den Speichern-Dialog abbricht.
   const onSaveProject = (): Promise<boolean> => {
-    const json = JSON.stringify(project, null, 2);
+    const json = serializeProject(project);
     return saveProjectFile(json, project.name, (path) =>
       addRecentProject(path, project.name || "modell"),
     ).then((saved) => {
@@ -294,15 +310,12 @@ export function useProjectFileActions(
   // Ersetzt ebenfalls das bisherige Projekt → über `guardDiscard`.
   const applyTemplateContent = (content: string): boolean => {
     try {
-      const parsed = JSON.parse(content) as Partial<Project>;
-      if (!Array.isArray(parsed.walls) || !Array.isArray(parsed.layers)) {
-        console.warn("Vorlagen-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
-        return false;
-      }
+      const parsed = readProjectOrReport(content);
+      if (!parsed) return false;
       guardDiscard(() => {
         releaseCurrentProjectLock();
-        setProject(parsed as Project);
-        lastSavedProjectRef.current = parsed as Project;
+        setProject(parsed);
+        lastSavedProjectRef.current = parsed;
       });
       return true;
     } catch (err) {
@@ -358,18 +371,18 @@ export function useProjectFileActions(
   // + ob WIR den Schreib-Lock für die neue Datei halten.
   const applyOpenedProjectFile = (path: string, content: string, lockOwned: boolean) => {
     try {
-      const parsed = JSON.parse(content) as Partial<Project>;
-      if (!Array.isArray(parsed.walls) || !Array.isArray(parsed.layers)) {
-        console.warn("Projekt-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
+      const parsed = readProjectOrReport(content);
+      if (!parsed) {
+        if (lockOwned) void releaseProjectLock(path);
         return;
       }
       guardDiscard(() => {
         releaseCurrentProjectLock();
-        setProject(parsed as Project);
-        lastSavedProjectRef.current = parsed as Project;
+        setProject(parsed);
+        lastSavedProjectRef.current = parsed;
         openedProjectPathRef.current = path;
         projectLockOwnedRef.current = lockOwned;
-        addRecentProject(path, (parsed as Project).name || "modell");
+        addRecentProject(path, parsed.name || "modell");
       });
     } catch (err) {
       console.error("Projekt-Import fehlgeschlagen:", err);
@@ -479,17 +492,14 @@ export function useProjectFileActions(
     const r = new FileReader();
     r.onload = () => {
       try {
-        const parsed = JSON.parse(String(r.result ?? "")) as Partial<Project>;
-        if (!Array.isArray(parsed.walls) || !Array.isArray(parsed.layers)) {
-          console.warn("Projekt-Datei hat kein gültiges Projekt-Format (walls/layers fehlen).");
-          return;
-        }
+        const parsed = readProjectOrReport(String(r.result ?? ""));
+        if (!parsed) return;
         // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
         // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
         guardDiscard(() => {
           releaseCurrentProjectLock();
-          setProject(parsed as Project);
-          lastSavedProjectRef.current = parsed as Project;
+          setProject(parsed);
+          lastSavedProjectRef.current = parsed;
         });
       } catch (err) {
         console.error("Projekt-Import fehlgeschlagen:", err);
