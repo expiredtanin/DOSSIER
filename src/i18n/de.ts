@@ -1756,6 +1756,7 @@ export const de = {
   "recover.restore": "Wiederherstellen",
   "recover.discard": "Verwerfen",
   "recover.later": "Später",
+  "project.change.rejected": "Änderung abgelehnt:",
   "project.open.failed": "Projekt konnte nicht geöffnet werden.",
   "menu.native.clashCheck": "Kollisionsprüfung …",
   "clash.none": "Keine Kollisionen gefunden.",

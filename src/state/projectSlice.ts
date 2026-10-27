@@ -8,6 +8,8 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
+import { applyOps, diffToOps, validateOps } from "../core/ops";
+import type { CoreOp } from "../core/ops";
 import { withVertexType, type PolylineVertexType } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import {
@@ -69,6 +71,8 @@ export interface ProjectSlice {
    * Implementierung unten.
    */
   setProject: (next: Project | ((p: Project) => Project), coalesceKey?: string) => void;
+  /** Die zuletzt angewendeten Ops (JSON-serialisierbar), jüngste zuletzt. */
+  recentOps: () => CoreOp[][];
 
   // ── Zeichnungsebenen (Levels/Geschosse) ──────────────────────────────────
   toggleLevelVisible: (id: string) => void;
@@ -444,6 +448,9 @@ export function createProjectSlice(
   let lastCoalesceKey: string | undefined;
   let lastCoalesceAt = 0;
   const COALESCE_WINDOW_MS = 400;
+  // Protokoll der angewendeten Ops (jüngste zuletzt) — Rohstoff für Undo-Verlauf [84], Makros [85].
+  const opLog: CoreOp[][] = [];
+  const OP_LOG_LIMIT = 200;
 
   const history = createHistorySlice(
     api as unknown as StoreApi<HistorySlice & { project: Project }>,
@@ -467,13 +474,27 @@ export function createProjectSlice(
     coalesceKey?: string,
   ) =>
     set((s) => {
-      const nextProject =
+      const wanted =
         typeof next === "function" ? (next as (p: Project) => Project)(s.project) : next;
       // No-Op-Schutz: echte Immutable-Updates liefern bei tatsächlicher
       // Änderung immer eine NEUE Referenz — bleibt sie gleich, gab es keine
       // Änderung, also kein History-Eintrag (und `set` selbst benachrichtigt
       // dann ebenfalls nicht, da der Patch leer ist).
-      if (nextProject === s.project) return {};
+      if (wanted === s.project) return {};
+      // Das Projekt ändert sich NUR über Ops (core/ops.ts): die gewünschte Änderung wird in
+      // eine Op-Folge übersetzt, validiert und angewendet. Verstösse (NaN, doppelte ids)
+      // werden zurückgerollt und gemeldet.
+      const ops = diffToOps(s.project, wanted);
+      if (ops.length === 0) return {};
+      const nextProject = applyOps(s.project, ops);
+      const problems = validateOps(nextProject, ops, s.project);
+      if (problems.length > 0) {
+        console.warn("Projektänderung verworfen:", problems);
+        queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
+        return {};
+      }
+      opLog.push(ops);
+      if (opLog.length > OP_LOG_LIMIT) opLog.shift();
       const now = Date.now();
       const coalesced =
         coalesceKey !== undefined &&
@@ -495,6 +516,7 @@ export function createProjectSlice(
     project: sampleProject,
 
     setProject,
+    recentOps: () => opLog.slice(),
 
     // ── Zeichnungsebenen ───────────────────────────────────────────────────
     toggleLevelVisible: (id) =>

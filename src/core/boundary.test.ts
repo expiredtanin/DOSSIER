@@ -14,7 +14,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative, sep } from "node:path";
 
 const SRC = join(process.cwd(), "src");
-const CORE_DIRS = new Set(["model", "geometry", "plan", "io", "export", "analysis", "materials", "text", "engine"]);
+const CORE_DIRS = new Set(["core", "model", "geometry", "plan", "io", "export", "analysis", "materials", "text", "engine"]);
 const SHELL_DIRS = new Set(["ui", "panels", "views", "menus", "editors", "viewport", "native", "tools", "state", "commands"]);
 const FACADE_DIRS = new Set(["plan", "geometry"]);
 const FORBIDDEN_PACKAGES = /^(react|react-dom|zustand|@tauri-apps\/.*)$/;

@@ -1717,6 +1717,7 @@ export const en: Record<TranslationKey, string> = {
   "recover.restore": "Restore",
   "recover.discard": "Discard",
   "recover.later": "Later",
+  "project.change.rejected": "Change rejected:",
   "project.open.failed": "Project could not be opened.",
   "menu.native.clashCheck": "Clash detection …",
   "clash.none": "No clashes found.",
