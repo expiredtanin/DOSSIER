@@ -12,7 +12,7 @@
 import type { Drawing2D, Project, Vec2 } from "../../model/types";
 import { flattenCategories, getFloor } from "../../model/types";
 import { DRAWING_LINE_FALLBACK_RGB, hexToRgb, type RRgb } from "./shared";
-import { DRAWING_PICK_TOLERANCE, type PickDrawingSeg } from "../../viewport/raycast3d";
+import { DRAWING_PICK_TOLERANCE, type PickDrawingSeg } from "../pickTypes";
 
 /** Höhen-Offset über der Geschossebene gegen Z-Fighting (wie addDrawing2DLines in Viewport3D.tsx). */
 const DRAWING_LINE_ELEVATION_EPS = 0.01;

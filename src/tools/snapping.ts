@@ -14,7 +14,7 @@ import { centroid as roomCentroid } from "../geometry/roomArea";
 import { columnFootprint } from "../geometry/column";
 import { stairOutline } from "../geometry/stair";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
-import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "./curves";
+import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../geometry/curves";
 import { buildDrawingIndex, drawingsNear, isIndexable, pointSegDist, type DrawingIndex } from "../geometry/drawingIndex";
 import { sheetSnapSegments } from "./sheetSnapGeometry";
 

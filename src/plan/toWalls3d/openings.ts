@@ -7,7 +7,7 @@ import type { FrameCornerJoin, Opening, Project, SashDef, Wall } from "../../mod
 import { getDoorType, getWindowType, glazingPanesOf, openingsOfWall } from "../../model/types";
 import { openingInterval, openingVerticalExtent } from "../../geometry/opening";
 import { wallVerticalExtent } from "../../model/wall";
-import type { DetailLevel } from "../../ui/TopBar";
+import type { DetailLevel } from "../../model/viewTypes";
 import { EPS, type RMesh, type RRgb } from "./shared";
 import { wallThicknessSafe } from "./bands";
 

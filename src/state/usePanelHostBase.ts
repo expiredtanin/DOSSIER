@@ -12,7 +12,7 @@ import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Layout, Project } from "../model/types";
 import { resolvePenColor } from "../model/penSets";
 import type { ToolId } from "../tools/types";
-import type { ViewType } from "../ui/TopBar";
+import type { ViewType } from "../model/viewTypes";
 import type { TransformSelection } from "../tools/transform";
 import type { PlanViewHandle } from "../plan/PlanView";
 import type { PanelHostValue } from "../panels/host";
@@ -51,7 +51,7 @@ import {
   moveLayoutToFolder,
   moveFolderToFolder,
   patchAnnotation as patchAnnotationInLayout,
-} from "../panels/layoutModel";
+} from "../model/layoutModel";
 import { saveFolderPdf } from "../export/layoutPdf";
 import type { useProjectActions } from "./useProjectActions";
 import type { useSelectionState } from "./useSelectionState";

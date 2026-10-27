@@ -24,7 +24,7 @@
 import type { HatchRender, Plan, Primitive } from "../plan/generatePlan";
 import type { Vec2 } from "../model/types";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints } from "../plan/glPlan/glPlanHatch";
-import { dashHasDot } from "../ui/lineSegments";
+import { dashHasDot } from "../geometry/lineSegments";
 import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
 import { docFromText } from "../text/richText";
 

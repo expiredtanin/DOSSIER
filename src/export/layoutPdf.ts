@@ -27,7 +27,7 @@ import {
   visibleCodesFromSnapshot,
   type FolderPdfPage,
   type ResolvedTitleBlock,
-} from "../panels/layoutModel";
+} from "../model/layoutModel";
 
 export { folderPdfPages, type FolderPdfPage };
 

@@ -81,7 +81,7 @@ import {
   addAnnotation as addAnnotationToLayout,
   removeAnnotation as removeAnnotationFromLayout,
   patchAnnotation as patchAnnotationInLayout,
-} from "./panels/layoutModel";
+} from "./model/layoutModel";
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab } from "./ui/TopBar";
 import { AppMenuBar } from "./ui/AppMenuBar";

@@ -37,7 +37,7 @@ import type {
 } from "../model/types";
 import { SIA_CATEGORIES, siaLabelFull } from "../geometry/roomArea";
 import { Dropdown } from "../ui/Dropdown";
-import type { DetailLevel } from "../ui/TopBar";
+import type { DetailLevel } from "../model/viewTypes";
 import { ColorHexField } from "../ui/ColorHexField";
 import { usePanelHost } from "./host";
 import type {

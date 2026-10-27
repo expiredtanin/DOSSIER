@@ -16,7 +16,7 @@ import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "../io/projectFile";
 import { t } from "../i18n";
 import { APP_VERSION } from "../ui/TopBar";
-import type { View3d, ViewType } from "../ui/TopBar";
+import type { View3d, ViewType } from "../model/viewTypes";
 
 /** Alle Aktionen, die die native Menüleiste auslösen kann. */
 export interface NativeAppMenuHandlers {

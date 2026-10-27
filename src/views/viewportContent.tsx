@@ -49,7 +49,7 @@ import type { Pick3dHit } from "../viewport/Wasm3DViewport";
 import { DrawingTabs } from "../DrawingTabs";
 import type { ViewSnapshotTabsHandlers } from "../DrawingTabs";
 import type { ToolDraft, ToolHandlers, ToolId } from "../tools/types";
-import type { DetailLevel, RenderMode, View3d, ViewType } from "../ui/TopBar";
+import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
 
 /**
  * Akzentfarbe der 3D-Auswahl-Hervorhebung (Umriss-Linien, WASM-Viewport, s.

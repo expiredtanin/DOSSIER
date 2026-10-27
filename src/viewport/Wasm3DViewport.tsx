@@ -47,7 +47,7 @@ import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/typ
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d, pickGeometry, draftWorldLines, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
-import type { DetailLevel, RenderMode, View3d } from "../ui/TopBar";
+import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
 import type { ToolDraft } from "../tools/types";
 import { hudSegments, type HudFieldsState } from "../tools/hudFormat";
 import type { EngineMods } from "../commands/engine";

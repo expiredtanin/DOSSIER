@@ -10,7 +10,8 @@ import { add, dot, leftNormal, normalize, scale, sub, wallCorners } from "../mod
 import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { drawingVertices } from "./projectSlice";
-import { areaMovePreview, mvGeom } from "../tools/transform";
+import { areaMovePreview } from "../tools/transform";
+import { mvGeom } from "../geometry/geomTransform";
 import { drawingPreviewShapes } from "../tools/drawingPreview";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";

@@ -42,16 +42,15 @@
 
 import type { Project, Vec2, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
-import type { ToolDraft } from "../tools/types";
 import { stairVerticalExtent } from "../model/wall";
 import { openingJambs, openingVerticalExtent } from "../geometry/opening";
-import type { DetailLevel } from "../ui/TopBar";
+import type { DetailLevel } from "../model/viewTypes";
 import { stairBBox, stairGeometry } from "../geometry/stair";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import type { Vec3 as RoofVec3 } from "../geometry/roof";
 import { computeJoins } from "../model/joins";
 import type { WallCuts } from "../model/joins";
-import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "../viewport/raycast3d";
+import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "./pickTypes";
 import {
   EPS,
   IMPORTED_RGB,
@@ -539,6 +538,16 @@ const SNAP_MARKER_HALF = 0.06;
 const SNAP_ANGLE_GUIDE_EXTEND_M = 6;
 
 /**
+ * Minimal-Form eines Werkzeug-Drafts (`ToolDraft` der Hülle erfüllt sie strukturell): nur das,
+ * was `draftWorldLines` liest. So hängt der Kern nicht an `tools/types`.
+ */
+export interface DraftLike {
+  preview: Array<{ kind: "line"; a: Vec2; b: Vec2 } | { kind: "poly"; pts: Vec2[]; closed?: boolean }>;
+  vertices: Vec2[];
+  snap?: { point: Vec2; kind?: string; refA?: Vec2 } | null;
+}
+
+/**
  * Wandelt den aktiven Werkzeug-Draft (`ToolDraft.preview`, Modell-Meter,
  * Grundriss-Ebene) in dasselbe flache Weltraum-LineList-Format wie
  * {@link selectionHighlightLines} (`[px,py,pz,r,g,b, ...]`, world-Meter, je 2
@@ -559,7 +568,7 @@ const SNAP_ANGLE_GUIDE_EXTEND_M = 6;
  * schon, wohin der erste Punkt fängt — deshalb NICHT mehr früh bei leerem
  * `preview` abgebrochen.
  */
-export function draftWorldLines(draft: ToolDraft | null, planeY: number): Float32Array {
+export function draftWorldLines(draft: DraftLike | null, planeY: number): Float32Array {
   if (!draft) return new Float32Array(0);
   const out: number[] = [];
   const pushSeg = (a: Vec2, bPt: Vec2, rgb: RRgb = DRAFT_LINE_RGB) => {

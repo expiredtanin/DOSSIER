@@ -9,7 +9,7 @@ import { docToLines, wrapDocToLines, type SvgLine } from "../../text/renderHtml"
 import type { Vec2 } from "../../model/types";
 import { quantizePen } from "../../export/sceneToPrintSvg";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../glPlan/glPlanHatch";
-import { dashHasDot } from "../../ui/lineSegments";
+import { dashHasDot } from "../../geometry/lineSegments";
 import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "./geometry";
 
 /** Basis-Kachelmaß (viewBox-Einheiten) einer Bild-Schraffur bei scaleX/scaleY = 1. */

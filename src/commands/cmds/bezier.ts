@@ -9,7 +9,7 @@
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import { sampleBezierChain } from "../../tools/curves";
+import { sampleBezierChain } from "../../geometry/curves";
 import type {
   Command,
   CommandContext,

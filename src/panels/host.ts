@@ -42,7 +42,7 @@ import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
 import type { Selection } from "../state/selectionInfo";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
-import type { DetailLevel } from "../ui/TopBar";
+import type { DetailLevel } from "../model/viewTypes";
 
 // ── Darstellungsmodus-Steuerung je Dock-Inhalt ────────────────────────────
 

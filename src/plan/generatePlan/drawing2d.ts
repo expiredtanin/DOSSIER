@@ -14,8 +14,8 @@ import {
   type Primitive,
 } from "./shared";
 import { layersStyleSig } from "./layerSig";
-import { ellipsePts, sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../../tools/curves";
-import { scaleGeom } from "../../tools/transform";
+import { ellipsePts, sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../../geometry/curves";
+import { scaleGeom } from "../../geometry/geomTransform";
 import { bulgeArc, bulgeArcPoints } from "../../geometry/bulge";
 import { END_MARK_DEFAULT_SIZE_MM, addEndMark, pullBack } from "./endMarks";
 import {

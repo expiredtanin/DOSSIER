@@ -14,7 +14,7 @@ import type {
   LayoutPaperFormat,
   MasterLayout,
 } from "../model/types";
-import { PAPER_FORMAT_GROUPS } from "../panels/layoutModel";
+import { PAPER_FORMAT_GROUPS } from "../model/layoutModel";
 
 /** Startwerte eines neuen Blatts/Masters (Grösse). */
 export interface LayoutSizeStart {

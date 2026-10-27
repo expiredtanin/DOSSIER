@@ -32,7 +32,7 @@ import {
   resolveTitleBlock,
   resolveViewportScale,
   visibleCodesFromSnapshot,
-} from "../panels/layoutModel";
+} from "../model/layoutModel";
 import {
   annotationBoundsMm,
   applyHandleDrag,

@@ -21,7 +21,7 @@ export type { RichTextDoc } from "../text/richText";
 // Ansichts-Enums für Ausschnitte/View-Snapshots (Ansichtstyp, Kamera-Preset,
 // Detailgrad). Rein type-only importiert — zur Laufzeit erased, kein Zyklus
 // (TopBar importiert seinerseits nur `Project` als Typ). Wie SiaCategory oben.
-import type { DetailLevel, View3d, ViewType } from "../ui/TopBar";
+import type { DetailLevel, View3d, ViewType } from "./viewTypes";
 
 // ── Ressourcen-Bibliotheken (Vectorworks-/DOSSIER-Stil) ────────────────────
 // Verwaltete, per id verwiesene Stil-Ressourcen. Verweis-Kette:

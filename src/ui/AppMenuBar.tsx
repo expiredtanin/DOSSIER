@@ -9,7 +9,7 @@
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem } from "./Dropdown";
 import { t } from "../i18n";
-import type { View3d, ViewType } from "./TopBar";
+import type { View3d, ViewType } from "../model/viewTypes";
 
 export interface AppMenuBarProps {
   /** Datei: Neu/Neu aus Vorlage/Öffnen/Speichern/Importieren. */

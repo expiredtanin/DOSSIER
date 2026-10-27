@@ -8,7 +8,7 @@
 // neue Zeichnungen / Status-Leiste) — view-seitiger Zustand wie activeLevelId.
 
 import { sampleProject } from "../model/sampleProject";
-import type { DetailLevel, RenderMode, View3d, ViewType } from "../ui/TopBar";
+import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
 import type { DisplayMode } from "../panels/types";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 import type { StoreApi } from "./store";

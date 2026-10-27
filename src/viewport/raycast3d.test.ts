@@ -5,15 +5,17 @@ import {
   raySlabPrism,
   rayDrawingSeg,
   pickNearest,
-  DRAWING_PICK_TOLERANCE,
   type RayCamera,
+} from "./raycast3d";
+import {
+  DRAWING_PICK_TOLERANCE,
   type PickWall,
   type PickSlab,
   type PickOpening,
   type PickStair,
   type PickContextMesh,
   type PickDrawingSeg,
-} from "./raycast3d";
+} from "../plan/pickTypes";
 
 // Kamera bei (0,1,10), Blick entlang -Z auf (0,1,0). Zentraler Strahl (ndc 0,0)
 // zeigt in -Z. World-Konvention: Modell (x,y) → world (x, elevation, y).

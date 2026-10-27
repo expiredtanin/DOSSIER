@@ -9,7 +9,7 @@ import type {
   MasterLayout,
   Project,
   ViewSnapshot,
-} from "../model/types";
+} from "./types";
 import {
   addAnnotation,
   addViewport,

@@ -45,7 +45,7 @@ import type {
   Wall,
   WallReferenceLine,
 } from "../model/types";
-import type { DetailLevel } from "../ui/TopBar";
+import type { DetailLevel } from "../model/viewTypes";
 import { localToLv95 } from "../io/lv95";
 import {
   resolveForeground,

@@ -27,7 +27,7 @@ import {
   PAPER_FORMAT_GROUPS,
   type FolderNode,
   type MasterFolderNode,
-} from "./layoutModel";
+} from "../model/layoutModel";
 import {
   NewLayoutDialog,
   NewMasterLayoutDialog,

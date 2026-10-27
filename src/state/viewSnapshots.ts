@@ -14,7 +14,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { OverrideRule, ViewSnapshot, Vec2 } from "../model/types";
-import type { DetailLevel, View3d, ViewType } from "../ui/TopBar";
+import type { DetailLevel, View3d, ViewType } from "../model/viewTypes";
 
 /**
  * Der wiederherstellbare KERNZUSTAND eines Ausschnitts — alle Felder, die ein

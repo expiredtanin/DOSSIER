@@ -15,7 +15,7 @@ import {
   type LineSegment,
   type LineSegmentType,
   type LinePresetKey,
-} from "../lineSegments";
+} from "../../geometry/lineSegments";
 import { MotifEditor } from "../MotifEditor";
 import { t } from "../../i18n";
 import {
