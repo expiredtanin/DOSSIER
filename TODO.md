@@ -80,8 +80,13 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
       über `Math` der JS-Engine (musl-libm wich ab, auch in der Topologie). Leistung (Node, Min. über
       Wiederholungen): Beispiel-EG 1,5 → 0,8 ms, 100k Linien + 3000 Schraffurflächen 3,9 → 1,8 s, nur
       Schraffur ~2×, nur Linien 104 → 81 ms (davon Kodieren in TS 7–29 ms). Mac-Test bestanden.
-  - ○ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
+  - ◐ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
     2D-Zeichnung, Kontext, Schnittlinien) direkt in den Plan-Puffer; JS-Objekte nur noch für Export/Overlay.
+    Vorgehen (28.10.): je Domäne ein Rust-Modul mit flacher Primitivliste, TS nur als dünne Übersetzung
+    (Farbe, Graustufen, Pick-ID) — kein Format-v2, bis [K3d] den Puffer direkt liefert.
+    ✅ Treppen: `plan_stairs.rs` (`plan_stair_flat`), `generatePlan/stairs.ts` nur noch Übersetzung; bitgleich zur
+    alten TS-Fassung (49 Fälle: gerade/L/Wendel, Pfeilstil, Schnitthöhen). Nicht in der Tauri-App angesehen.
+    Offen: Decken, Räume, Dächer, Stützen, 2D-Zeichnung, Kontext, Schnittlinien, Wände, Öffnungen.
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
   - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
