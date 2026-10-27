@@ -159,6 +159,12 @@ export function roofUndersideAt(
   x: number,
   y: number,
 ): number | null {
+  const z = core().roof_underside_at(roofPlanesFlat(geo), totalLayerThickness, x, y);
+  return Number.isNaN(z) ? null : z;
+}
+
+/** Dachflächen als flacher Puffer `[n, (m, (x, y, z)…)…]` (Kodierung `roof.rs`), je Geometrie gemerkt. */
+export function roofPlanesFlat(geo: RoofGeometry): Float64Array {
   let flat = planesFlat.get(geo);
   if (!flat) {
     const vals = [geo.planes.length];
@@ -169,6 +175,5 @@ export function roofUndersideAt(
     flat = Float64Array.from(vals);
     planesFlat.set(geo, flat);
   }
-  const z = core().roof_underside_at(flat, totalLayerThickness, x, y);
-  return Number.isNaN(z) ? null : z;
+  return flat;
 }

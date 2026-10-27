@@ -15,6 +15,8 @@ pub mod auto_dimensions;
 pub mod kennzahlen;
 pub mod bulge;
 pub mod stair;
+pub mod joins;
+pub mod wall_bands;
 
 #[cfg(feature = "web")]
 mod web;

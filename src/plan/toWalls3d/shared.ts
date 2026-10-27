@@ -262,7 +262,7 @@ export interface RWall {
   /**
    * Echte rechteckige Löcher (Fenster/Türen) in DIESEM Wandkörper (siehe
    * {@link RHole}). Nur im 3D-Viewer-Pfad (`projectToModel3d` mit
-   * `layeredWalls:true`) gesetzt: dort emittiert `emitWall` EINEN RWall pro
+   * `layeredWalls:true`) gesetzt: dort emittiert `emitWalls` EINEN RWall pro
    * Schicht-Band über die volle Achse mit ALLEN Öffnungen als `holes` — statt der
    * Pfeiler/Brüstung/Sturz-Segment-Boxen. So bildet EIN Körper auch versetzt
    * übereinanderliegende Fenster ab (das kann die Segment-Zerlegung nicht). Der

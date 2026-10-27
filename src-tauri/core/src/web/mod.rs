@@ -12,6 +12,8 @@ mod auto_dimensions;
 mod kennzahlen;
 mod bulge;
 mod stair;
+mod joins;
+mod wall_bands;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

@@ -63,7 +63,7 @@ import {
   type RVec2,
   type RWall,
 } from "./toWalls3d/shared";
-import { emitWall } from "./toWalls3d/bands";
+import { emitWalls } from "./toWalls3d/bands";
 import { emitSlabs } from "./toWalls3d/ceilings";
 import { emitStairMeshes, emitStairRailings, emitStairs } from "./toWalls3d/stairs";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
@@ -147,7 +147,7 @@ export function projectToWalls3d(project: Project, layered = true): RWall[] {
   // Dominanz macht toSection.ts). Anders als im 2D wird hier NICHT nach
   // Sichtbarkeit gefiltert — 3D zeigt alle Wände, alle nehmen an den Joins teil.
   const joins = layered ? computeJoinsByFloor(project) : undefined;
-  for (const w of project.walls) emitWall(out, project, w, layered, joins?.get(w.id));
+  emitWalls(out, project, project.walls, layered, joins);
   return out;
 }
 
@@ -364,7 +364,7 @@ export function pickGeometry(
  *    entlang der Wandlänge, Normale (Dicke) senkrecht dazu in der XZ-Ebene,
  *    Y = Höhe. Aus den 8 Ecken werden die 12 Kanten des Quaders emittiert.
  *    Wände MIT Öffnungen bestehen aus mehreren Teilquadern (Pfeiler/Brüstung/
- *    Sturz, s. emitWall) — alle tragen dieselbe `wallId` und werden hier ALLE
+ *    Sturz, s. emitWalls) — alle tragen dieselbe `wallId` und werden hier ALLE
  *    umrandet, sodass Öffnungsränder mit hervorgehoben werden.
  *  • Decke: der Umriss oben (zTop) und unten (zBottom) je als geschlossener
  *    Kantenzug, plus eine vertikale Kante an jeder Umriss-Ecke.
