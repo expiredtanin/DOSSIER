@@ -181,7 +181,7 @@ function withTopAngle(h: RHatch, dx: number, dy: number): RHatch {
  * Dicke einer Wand für die grobe Grundriss-Hülle (Decken-Vorfilter im Kern):
  * Summe der WallType-Schichtdicken, sonst der Fallback-Grundton-Dicke aus
  * {@link resolveWallBands} (0.2 m), falls kein WallType auflösbar ist. Auch von
- * `../openings.ts::resolveOpeningFrame` genutzt (Rahmen-Tiefe auf die Wanddicke
+ * `openings.ts::emitOpeningMeshes` genutzt (Rahmen-Tiefe auf die Wanddicke
  * klemmen).
  */
 export function wallThicknessSafe(project: Project, wall: Wall): number {

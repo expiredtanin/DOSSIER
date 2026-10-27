@@ -73,7 +73,7 @@ import {
 } from "../model/wall";
 import { pickGeometry } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
-import { isWatertight, wallCutMesh } from "../plan/wallMeshCut";
+import { isWatertight, wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
 import { evaluateRoom } from "../geometry/roomArea";
 import { columnFootprint } from "../geometry/column";
 import { emitRoofs } from "../plan/toWalls3d/roofs";
@@ -607,7 +607,11 @@ export function exportIfcSpf(projectIn: Project): string {
   // aussen bleiben. Watertightness (isWatertight) misst das anschliessend am
   // fertigen IFC-Mesh → treibt das Closed-Flag des Face-Sets.
   const bandsByWallId = new Map<string, RWall[]>();
-  for (const band of pickGeometry(project).walls) {
+  const allBands = pickGeometry(project).walls;
+  // Loch-Ausschnitte aller Bänder in EINEM Kern-Aufruf.
+  const cutOf = new Map<RWall, CutMesh>();
+  wallCutMeshes(allBands).forEach((m, i) => cutOf.set(allBands[i], m));
+  for (const band of allBands) {
     const list = bandsByWallId.get(band.wallId);
     if (list) list.push(band);
     else bandsByWallId.set(band.wallId, [band]);
@@ -620,7 +624,8 @@ export function exportIfcSpf(projectIn: Project): string {
     const positions: number[] = [];
     const indices: number[] = [];
     for (const band of bands) {
-      const cut = wallCutMesh(band);
+      const cut = cutOf.get(band);
+      if (!cut) continue;
       const base = positions.length / 3;
       for (let i = 0; i < cut.positions.length; i += 3) {
         positions.push(

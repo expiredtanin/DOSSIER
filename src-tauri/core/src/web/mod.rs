@@ -21,6 +21,8 @@ mod stairs3d;
 mod ceilings3d;
 mod columns3d;
 mod drawing2d_3d;
+mod openings3d;
+mod wall_mesh_cut;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

@@ -26,6 +26,8 @@ pub mod mesh3d;
 pub mod ceilings3d;
 pub mod columns3d;
 pub mod drawing2d_3d;
+pub mod openings3d;
+pub mod wall_mesh_cut;
 
 #[cfg(feature = "web")]
 mod web;
