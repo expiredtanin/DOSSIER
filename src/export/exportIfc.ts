@@ -335,6 +335,17 @@ export function exportIfcSpf(projectIn: Project): string {
     `$,${S("Model")},3,${R(0.00001)},#${identityAxis},$`,
   );
 
+  // Georeferenz: Die Geometrie liegt bereits in LV95-Weltkoordinaten (s. oben), die Abbildung
+  // lokal→Welt ist daher die Identität; das Koordinatensystem wird trotzdem deklariert, damit
+  // Importer die Datei als EPSG:2056 erkennen (IFC4 IfcProjectedCRS + IfcMapConversion).
+  if (project.geoAnchor) {
+    const crs = w.add(
+      "IFCPROJECTEDCRS",
+      `${S("EPSG:2056")},${S("CH1903+ / LV95")},${S("CH1903+")},$,${S("Swiss Oblique Mercator")},$,#${lenUnit}`,
+    );
+    w.add("IFCMAPCONVERSION", `#${context},#${crs},${R(0)},${R(0)},${R(0)},${R(1)},${R(0)},${R(1)}`);
+  }
+
   // Räumliche Hierarchie: Project → Site → Building → Storeys.
   const siteAxis = w.add("IFCAXIS2PLACEMENT3D", `#${originPoint},$,$`);
   const sitePlacement = w.add("IFCLOCALPLACEMENT", `$,#${siteAxis}`);

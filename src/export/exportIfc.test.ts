@@ -325,6 +325,10 @@ describe("exportIfcSpf — IFC4-Export", () => {
     expect(spf).toContain("2600000.");
     expect(spf).toContain("1200000.");
     expect(spf).toContain("2600005.");
+    // Koordinatensystem deklariert (IFC4): EPSG:2056 + Identitäts-Abbildung.
+    expect(spf).toContain("IFCPROJECTEDCRS('EPSG:2056'");
+    expect(spf).toContain("IFCMAPCONVERSION(");
+    expect(withoutAnchor).not.toContain("IFCMAPCONVERSION");
     // Struktur bleibt valide (keine dangling refs / Duplikate).
     const { defined, referenced, duplicates } = collectIds(spf);
     expect(duplicates).toEqual([]);
