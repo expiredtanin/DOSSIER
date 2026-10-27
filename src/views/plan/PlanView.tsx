@@ -5,6 +5,7 @@
 // Polygon wird ein eigenes <pattern> in <defs> definiert, damit Maßstab/Winkel/
 // Farbe variieren können.
 
+import type { PickKind } from "../../plan/pickLabels";
 import {
   forwardRef,
   useEffect,
@@ -14,22 +15,22 @@ import {
   useState,
 } from "react";
 import type { ComponentProps, CSSProperties } from "react";
-import type { HatchRender, Plan, PlanImage, Primitive } from "./generatePlan";
-import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "./generatePlan";
-import type { Drawing2D, EdgeGrip, Vec2 } from "../model/types";
-import { t } from "../i18n";
-import type { ToolHandlers, ToolId, ToolMods } from "../tools/types";
-import type { HudFieldsState } from "../tools/hudFormat";
-import type { RichTextDoc } from "../text/richText";
-import { docFromText } from "../text/richText";
-import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../text/fontMetrics";
-import { textFrameCorners } from "../text/textFrame";
-import { RichTextEditor } from "../text/RichTextEditor";
+import type { HatchRender, Plan, PlanImage, Primitive } from "../../plan/generatePlan";
+import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "../../plan/generatePlan";
+import type { Drawing2D, EdgeGrip, Vec2 } from "../../model/types";
+import { t } from "../../i18n";
+import type { ToolHandlers, ToolId, ToolMods } from "../../tools/types";
+import type { HudFieldsState } from "../../tools/hudFormat";
+import type { RichTextDoc } from "../../text/richText";
+import { docFromText } from "../../text/richText";
+import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../../text/fontMetrics";
+import { textFrameCorners } from "../../text/textFrame";
+import { RichTextEditor } from "../../editors/RichTextEditor";
 import { useNativeAvailable, useNativePlanRenderer } from "./useNativePlanRenderer";
-import { isGpuText } from "./nativeText";
+import { isGpuText } from "../../plan/nativeText";
 import { LiveMeet, LiveValue, createMeetStore, createValueStore } from "./planView/liveMeet";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
-import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
+import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../../theme/accents";
 import {
   type ViewBox,
   PX_PER_M,
@@ -49,7 +50,7 @@ import {
   marqueeHitCeilings,
   marqueeHitRooms,
   marqueeHitStairs,
-} from "./planView/geometry";
+} from "../../plan/planView/geometry";
 import {
   polyUsesPattern,
   HatchPattern,
@@ -61,25 +62,25 @@ import {
 import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
-import { expandRegion, indexedInRegion, regionContains, type Bounds } from "./planView/cullPrimitives";
-import { buildSegmentIndex, nearestSegment, pointSegDist, segmentsNear } from "./planView/segmentIndex";
-import { buildOwnerIndex, ownedBy, type OwnerField, type OwnerIndex } from "./planView/ownerIndex";
+import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../plan/planView/cullPrimitives";
+import { buildSegmentIndex, nearestSegment, pointSegDist, segmentsNear } from "../../plan/planView/segmentIndex";
+import { buildOwnerIndex, ownedBy, type OwnerField, type OwnerIndex } from "../../plan/planView/ownerIndex";
 import {
   buildDrawingIndex,
   drawingsWithinDistance,
   marqueeHitUnderlay,
   nearestInDrawings,
   type DrawingIndex,
-} from "./planView/underlayAccess";
-import { endBusyAfterPaint } from "../state/busyStore";
-import { createCursorStore, useCursorValue, type CursorStore } from "../state/cursorStore";
+} from "../../plan/planView/underlayAccess";
+import { endBusyAfterPaint } from "../../state/busyStore";
+import { createCursorStore, useCursorValue, type CursorStore } from "../../state/cursorStore";
 
 /**
  * Feld-Status der Befehlszeile fürs Cursor-HUD (Tab-Feld-Zyklus §2.7) — Typ
  * lebt in `tools/hudFormat.ts` (dort auch von der 3D-Ansicht genutzt);
  * hier nur re-exportiert (bestehende Importe aus `./PlanView` bleiben gültig).
  */
-export type { HudFieldsState } from "../tools/hudFormat";
+export type { HudFieldsState } from "../../tools/hudFormat";
 
 // Viewport-Culling (s. `cullPrimitives.ts`): erst ab dieser Primitiv-Anzahl
 // aktiv — normale Projekte liegen weit darunter und bleiben unverändert.
@@ -203,10 +204,6 @@ export interface PlanViewHandle {
   confirmEdgeEdit: () => void;
 }
 
-/** Art eines auswählbaren Objekts an einer Klickstelle (Reihenfolge = Standard-Priorität). */
-export type PickKind =
-  | "section" | "opening" | "wall" | "column" | "drawing" | "solid"
-  | "ceiling" | "stair" | "room" | "roof" | "context";
 
 const PICK_ORDER: readonly PickKind[] = [
   "section", "opening", "wall", "column", "drawing", "solid",

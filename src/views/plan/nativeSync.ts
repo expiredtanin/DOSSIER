@@ -9,11 +9,11 @@
 // Tauri an `window.__TAURI_INTERNALS__`; Fehler beim Invoke werden still
 // geschluckt (console.debug), damit die App nie daran scheitert.
 
-import type { Plan } from "./generatePlan";
-import { materializeGreyed, materializeUnderlay } from "./generatePlan";
-import type { Project } from "../model/types";
-import { planToRenderScene } from "./toRenderScene";
-import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "./toWalls3d";
+import type { Plan } from "../../plan/generatePlan";
+import { materializeGreyed, materializeUnderlay } from "../../plan/generatePlan";
+import type { Project } from "../../model/types";
+import { planToRenderScene } from "../../plan/toRenderScene";
+import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "../../plan/toWalls3d";
 
 /** Sammel-Fenster: Modelländerungen werden gebündelt gepusht (nicht je Frame). */
 const DEBOUNCE_MS = 200;

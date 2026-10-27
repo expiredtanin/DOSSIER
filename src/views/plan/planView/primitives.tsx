@@ -3,14 +3,14 @@
 // Renderer. Bekommt `toScreen`/Massstab-Parameter gereicht, kein eigener
 // Zugriff auf PlanView-internen State.
 
-import type { HatchRender, Primitive } from "../generatePlan";
-import { NO_HATCH } from "../generatePlan/shared";
-import { docToLines, wrapDocToLines, type SvgLine } from "../../text/renderHtml";
-import type { Vec2 } from "../../model/types";
-import { quantizePen } from "../../export/sceneToPrintSvg";
-import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../glPlan/glPlanHatch";
-import { dashHasDot } from "../../geometry/lineSegments";
-import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "./geometry";
+import type { HatchRender, Primitive } from "../../../plan/generatePlan";
+import { NO_HATCH } from "../../../plan/generatePlan/shared";
+import { docToLines, wrapDocToLines, type SvgLine } from "../../../text/renderHtml";
+import type { Vec2 } from "../../../model/types";
+import { quantizePen } from "../../../export/sceneToPrintSvg";
+import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../plan/glPlan/glPlanHatch";
+import { dashHasDot } from "../../../geometry/lineSegments";
+import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "../../../plan/planView/geometry";
 
 /** Basis-Kachelmaß (viewBox-Einheiten) einer Bild-Schraffur bei scaleX/scaleY = 1. */
 const IMG_TILE_VB = 40;

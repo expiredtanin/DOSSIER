@@ -41,7 +41,7 @@ import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
 import { flattenCategories } from "../model/types";
 import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
-import type { PlanViewHandle } from "../plan/PlanView";
+import type { PlanViewHandle } from "../views/plan/PlanView";
 
 /** Umriss (bbox) aller Drawing2D-Geometrien in Modell-Metern (null = leer). */
 function drawingsBBox(

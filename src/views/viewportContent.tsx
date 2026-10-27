@@ -20,7 +20,7 @@ import type {
   Wall,
 } from "../model/types";
 import { categoryNameForPick } from "../plan/pickLabels";
-import type { PickKind } from "../plan/PlanView";
+import type { PickKind } from "../plan/pickLabels";
 import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../plan/generatePlan";
 import type { CategoryDisplayResolver, Plan, Primitive } from "../plan/generatePlan";
 import type { RichTextDoc } from "../text/richText";
@@ -31,10 +31,10 @@ import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../plan/planUnd
 import { sectionOpeningPrimitives } from "../plan/sectionOpenings";
 import { levelMarkerPrimitives, levelMarksEnabled } from "../plan/levelMarkers";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
-import { pushNativeScene, pushNativeWalls } from "../plan/nativeSync";
+import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { selectionHighlightLines } from "../plan/toWalls3d";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
-import { PlanView } from "../plan/PlanView";
+import { PlanView } from "./plan/PlanView";
 import type {
   GripHandlers,
   GroupableHit,
@@ -42,7 +42,7 @@ import type {
   MarqueeSelection,
   PlanSelection,
   PlanViewHandle,
-} from "../plan/PlanView";
+} from "./plan/PlanView";
 import { Viewport3D } from "../viewport/Viewport3D";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import type { Pick3dHit } from "../viewport/Wasm3DViewport";

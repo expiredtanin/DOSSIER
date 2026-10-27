@@ -57,7 +57,7 @@ import {
   type RectMm,
   type SheetTransform,
 } from "./layoutSheetMath";
-import { RichTextEditor } from "../text/RichTextEditor";
+import { RichTextEditor } from "../editors/RichTextEditor";
 import { docFromText } from "../text/richText";
 import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
 import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../text/fontMetrics";

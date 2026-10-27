@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import { polyUsesPattern } from "./primitives";
-import type { HatchRender } from "../generatePlan/shared";
+import type { HatchRender } from "../../../plan/generatePlan/shared";
 
 function hatch(over: Partial<HatchRender> = {}): HatchRender {
   return {

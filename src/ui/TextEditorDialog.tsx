@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { t } from "../i18n";
-import { RichTextEditor } from "../text/RichTextEditor";
+import { RichTextEditor } from "../editors/RichTextEditor";
 import type { RichTextDoc } from "../text/richText";
 
 export interface TextEditorDialogProps {

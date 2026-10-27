@@ -14,7 +14,7 @@ import { resolvePenColor } from "../model/penSets";
 import type { ToolId } from "../tools/types";
 import type { ViewType } from "../model/viewTypes";
 import type { TransformSelection } from "../tools/transform";
-import type { PlanViewHandle } from "../plan/PlanView";
+import type { PlanViewHandle } from "../views/plan/PlanView";
 import type { PanelHostValue } from "../panels/host";
 import type { Selection } from "./selectionInfo";
 import type { EngineView } from "../commands/engine";

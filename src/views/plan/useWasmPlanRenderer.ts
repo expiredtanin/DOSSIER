@@ -13,8 +13,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Plan } from "./generatePlan";
-import { planToRenderScene } from "./toRenderScene";
+import type { Plan } from "../../plan/generatePlan";
+import { planToRenderScene } from "../../plan/toRenderScene";
 
 interface ViewBox {
   x: number;
@@ -43,7 +43,7 @@ let enginePromise: Promise<any> | null = null;
 function loadEngine(): Promise<any> {
   if (!enginePromise) {
     enginePromise = (async () => {
-      const mod: any = await import("../engine/pkg/render2d.js");
+      const mod: any = await import("../../engine/pkg/render2d.js");
       await mod.default(); // lädt render2d_bg.wasm
       return mod;
     })();

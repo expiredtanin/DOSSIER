@@ -2,9 +2,9 @@
 // Winkel-Führungslinie, Snap-Marker. Reine Darstellung, bekommt `toScreen` +
 // Massstab-Parameter als Props gereicht.
 
-import type { Vec2 } from "../../model/types";
-import type { SnapResult, ToolDraft } from "../../tools/types";
-import { hudSegments, type HudFieldsState } from "../../tools/hudFormat";
+import type { Vec2 } from "../../../model/types";
+import type { SnapResult, ToolDraft } from "../../../tools/types";
+import { hudSegments, type HudFieldsState } from "../../../tools/hudFormat";
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /

@@ -22,7 +22,7 @@ import type {
   WallType,
   WindowType,
 } from "../model/types";
-import type { PlanViewHandle } from "../plan/PlanView";
+import type { PlanViewHandle } from "../views/plan/PlanView";
 import type { NotifyKind } from "./notifySlice";
 
 /**

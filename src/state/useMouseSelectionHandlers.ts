@@ -8,7 +8,7 @@
 import type { Project, Vec2 } from "../model/types";
 import type { CategoryDisplayResolver } from "../plan/generatePlan";
 import type { DisplayResolver } from "../viewport/Viewport3D";
-import type { PlanSelection, MarqueeSelection } from "../plan/PlanView";
+import type { PlanSelection, MarqueeSelection } from "../views/plan/PlanView";
 import type { Pick3dHit } from "../viewport/Wasm3DViewport";
 import type { RichTextDoc } from "../text/richText";
 import { plainText } from "../text/richText";

@@ -17,7 +17,7 @@ import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
 import { sheetOwnerOutlines } from "../tools/sheetSnapGeometry";
-import type { BodyTarget } from "../plan/PlanView";
+import type { BodyTarget } from "../views/plan/PlanView";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { CommandEngine } from "../commands/engine";
 

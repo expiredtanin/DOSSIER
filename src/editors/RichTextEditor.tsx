@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
-import { docToHtml } from "./renderHtml";
+import { docToHtml } from "../text/renderHtml";
 import { Dropdown } from "../ui/Dropdown";
 import {
   applyMark,
@@ -21,14 +21,14 @@ import {
   normalizeDoc,
   serialize,
   toggleMark,
-} from "./richText";
+} from "../text/richText";
 import type {
   BoolMark,
   Marks,
   RichTextDoc,
   TextRange,
   TextStylePreset,
-} from "./richText";
+} from "../text/richText";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 

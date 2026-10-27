@@ -6,7 +6,7 @@
 // (`ZOOM_MIN`/`ZOOM_MAX` in PlanView.tsx) auf ≤ ~Bildschirmbreite/64px
 // begrenzt, unabhängig davon, wie weit heraus- oder hereingezoomt ist.
 
-import { PX_PER_M } from "./geometry";
+import { PX_PER_M } from "../../../plan/planView/geometry";
 import { rulerStep } from "./PlanRulers";
 
 export function PlanGrid({

@@ -5,7 +5,10 @@
 
 import type { Project } from "../model/types";
 import { flattenCategories } from "../model/types";
-import type { PickKind } from "./PlanView";
+/** Art eines auswählbaren Objekts an einer Klickstelle (Reihenfolge = Standard-Priorität). */
+export type PickKind =
+  | "section" | "opening" | "wall" | "column" | "drawing" | "solid"
+  | "ceiling" | "stair" | "room" | "roof" | "context";
 
 type WithCategory = { id: string; categoryCode?: string };
 

@@ -55,7 +55,7 @@ import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./io/projectFile";
 import { stepTextToImportedMeshes } from "./io/stepImport";
 import { applyClashMarkers, runClashCheck } from "./analysis/clash";
 import { checkForUpdate } from "./update/checkForUpdate";
-import type { PlanViewHandle } from "./plan/PlanView";
+import type { PlanViewHandle } from "./views/plan/PlanView";
 import type { DisplayResolver } from "./viewport/Viewport3D";
 import {
   neighbor3dVertex,
