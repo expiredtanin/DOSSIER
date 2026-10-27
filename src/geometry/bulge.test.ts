@@ -10,6 +10,7 @@ import {
   arcThroughPoints,
   bulgeArc,
   bulgeArcPoints,
+  bulgePolylinePoints,
   bulgeFromSagittaPoint,
   bulgeThroughPoint,
 } from "./bulge";
@@ -267,5 +268,37 @@ describe("arcFromStartEndDirection — Start/Ende/Tangentenrichtung (commands/cm
 
   it("liefert null bei entarteter Tangentenrichtung (dir≈a)", () => {
     expect(arcFromStartEndDirection({ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 0 })).toBeNull();
+  });
+});
+
+describe("bulgePolylinePoints (ganze Polylinie auf einmal)", () => {
+  const sq: Vec2[] = [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }];
+
+  it("entspricht der Verkettung von bulgeArcPoints je Kante", () => {
+    const bulge = [1, 0, -0.5, 0];
+    const expected: Vec2[] = [sq[0]];
+    for (let i = 0; i < 3; i++) expected.push(...bulgeArcPoints(sq[i], sq[i + 1], bulge[i]).slice(1));
+    const got = bulgePolylinePoints(sq, bulge, false);
+    expect(got.length).toBe(expected.length);
+    got.forEach((p, i) => {
+      expect(p.x).toBeCloseTo(expected[i].x, 12);
+      expect(p.y).toBeCloseTo(expected[i].y, 12);
+    });
+  });
+
+  it("geschlossen: Schlusskante enthalten, Startpunkt nicht wiederholt", () => {
+    const got = bulgePolylinePoints(sq, [0, 0, 0, 1], true);
+    expect(got[0]).toEqual(sq[0]);
+    expect(got[got.length - 1]).not.toEqual(sq[0]);
+    // Schlusskante (0,2)→(0,0) läuft nach −y, links davon ist +x: Halbkreis nach x > 0
+    expect(got.some((p) => p.x > 0.5 && p.y > 0.5 && p.y < 1.5)).toBe(true);
+  });
+
+  it("Unsinn (leer, NaN) ohne Fehler", () => {
+    expect(bulgePolylinePoints([], undefined, true)).toEqual([]);
+    expect(bulgePolylinePoints([{ x: NaN, y: 0 }, { x: 1, y: 0 }], [1], false)).toEqual([]);
+    expect(bulgeArc({ x: NaN, y: 0 }, { x: 1, y: 0 }, 1)).toBeNull();
+    expect(bulgeThroughPoint({ x: 0, y: 0 }, { x: NaN, y: 1 }, { x: 2, y: 0 })).toBe(0);
+    expect(bulgeArcPoints({ x: 0, y: 0 }, { x: 1, y: 0 }, NaN)).toHaveLength(2);
   });
 });

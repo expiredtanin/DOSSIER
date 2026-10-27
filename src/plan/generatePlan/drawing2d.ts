@@ -16,7 +16,7 @@ import {
 import { layersStyleSig } from "./layerSig";
 import { ellipsePts, sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../../geometry/curves";
 import { scaleGeom } from "../../geometry/geomTransform";
-import { bulgeArc, bulgeArcPoints } from "../../geometry/bulge";
+import { bulgeArc, bulgePolylinePoints } from "../../geometry/bulge";
 import { END_MARK_DEFAULT_SIZE_MM, addEndMark, pullBack } from "./endMarks";
 import {
   DEFAULT_SCALE_DENOMINATOR,
@@ -570,18 +570,10 @@ function addDrawing2DInner(
       // dadurch bleibt der Bogen bei jedem Zoom rund und kommt im DXF als
       // ARC statt als Kette von LINEs an (dasselbe Primitiv, das die
       // Kreis-/Bogen-Werkzeuge schon nutzen, inkl. Auswahl + GL-Pfad).
-      const ring: Vec2[] = [g.pts[0]];
-      for (let i = 0; i < g.pts.length - 1; i++) {
-        const sub = bulgeArcPoints(g.pts[i], g.pts[i + 1], g.bulge?.[i]);
-        for (let k = 1; k < sub.length; k++) ring.push(sub[k]);
-      }
-      if (g.closed && g.pts.length > 2) {
-        const sub = bulgeArcPoints(g.pts[g.pts.length - 1], g.pts[0], g.bulge?.[g.pts.length - 1]);
-        for (let k = 1; k < sub.length; k++) ring.push(sub[k]);
-        // Letzter Punkt dupliziert ring[0] (Schliess-Segment endet dort) — für
-        // die Füllfläche nicht nötig, das SVG-`<polygon>` schliesst implizit.
-        fillPoly(ring.slice(0, -1));
-      }
+      // Geschlossen ohne wiederholten Startpunkt — das SVG-`<polygon>` schliesst implizit.
+      const closedRing = g.closed && g.pts.length > 2;
+      const ring = bulgePolylinePoints(g.pts, g.bulge, closedRing);
+      if (closedRing) fillPoly(ring);
       /** Ein Segment a→b: gerade als Linie, gekrümmt als echter Bogen. */
       const emitSegment = (a: Vec2, b: Vec2, bulge: number | undefined) => {
         const arc = bulge !== undefined ? bulgeArc(a, b, bulge) : null;

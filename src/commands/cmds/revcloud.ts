@@ -9,7 +9,7 @@
 // Aufrufe hinweg (wie `lastSides` bei `polygon.ts`).
 
 import type { Drawing2D } from "../../model/types";
-import { bulgeArcPoints } from "../../core";
+import { bulgePolylinePoints } from "../../core";
 import { revisionCloudPts } from "../../core";
 import { segmentHud, uniqueId } from "../../tools/types";
 import type {
@@ -53,11 +53,7 @@ function revcloudDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   const expanded = revisionCloudPts(all, false, lastArcSize);
   const pts: Vec2[] = [];
   if (expanded) {
-    pts.push(expanded.pts[0]);
-    for (let i = 0; i < expanded.pts.length - 1; i++) {
-      const sub = bulgeArcPoints(expanded.pts[i], expanded.pts[i + 1], expanded.bulge[i]);
-      for (let k = 1; k < sub.length; k++) pts.push(sub[k]);
-    }
+    pts.push(...bulgePolylinePoints(expanded.pts, expanded.bulge, false));
   }
   const preview: DraftShape[] = [{ kind: "poly", pts, closed: false }];
   const draft: ToolDraft = { preview, vertices: points };

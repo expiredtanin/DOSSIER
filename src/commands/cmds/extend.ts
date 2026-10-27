@@ -23,7 +23,7 @@
 // Bezeichner englisch, Kommentare/UI deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { bulgeArcPoints, hasRealBulge } from "../../core";
+import { bulgePolylinePoints, hasRealBulge } from "../../core";
 import { extendBulgeSegment, extendSegment, pointSegmentDistance, polylineEdges } from "../../core";
 import type {
   Command,
@@ -56,13 +56,8 @@ function geomToOpenCurve(g: Drawing2DGeom): Curve | null {
  */
 function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
   if (!hasRealBulge(curve.bulge)) return polylineEdges(curve.pts, curve.closed);
-  const n = curve.pts.length;
-  const edgeCount = curve.closed ? n : n - 1;
-  const chain: Vec2[] = [curve.pts[0]];
-  for (let i = 0; i < edgeCount; i++) {
-    const seg = bulgeArcPoints(curve.pts[i], curve.pts[(i + 1) % n], curve.bulge?.[i]);
-    chain.push(...seg.slice(1));
-  }
+  const chain = bulgePolylinePoints(curve.pts, curve.bulge, curve.closed);
+  if (curve.closed) chain.push(curve.pts[0]); // Schlusskante mit-tesselliert, Kette endet am Start
   return polylineEdges(chain, false);
 }
 

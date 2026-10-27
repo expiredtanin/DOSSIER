@@ -14,7 +14,7 @@
 // Vorzeichen, wenn negativ getippt.
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { bulgeArcPoints, hasRealBulge } from "../../core";
+import { bulgePolylinePoints, hasRealBulge } from "../../core";
 import { uniqueId } from "../../tools/types";
 import { leftNormal, normalize, sub } from "../../model/geometry";
 import { offsetPolyline, offsetPolylineWithBulge, offsetSegment, pointSegmentDistance, polylineEdges } from "../../core";
@@ -86,20 +86,15 @@ function singleSelectedCurve(project: Project, sel: CommandSelection): Drawing2D
 
 /**
  * Kanten für Klick-Trefftests/Vorschau: bei Bogen-Segmenten (bulge) wird die
- * Kurve zu Geradenstücken tesselliert (`bulgeArcPoints`), damit Klick-/Seiten-
+ * Kurve zu Geradenstücken tesselliert (`bulgePolylinePoints`), damit Klick-/Seiten-
  * Tests entlang der TATSÄCHLICHEN (runden) Kontur funktionieren statt entlang
  * der geraden Sehne. Die eigentliche Offset-Geometrie bleibt exakt (bulge-
  * erhaltend, s. `offsetPolylineWithBulge`) — nur diese Hilfsfunktion approximiert.
  */
 function curveHitEdges(curve: Curve): [Vec2, Vec2][] {
   if (!hasRealBulge(curve.bulge)) return polylineEdges(curve.pts, curve.closed);
-  const n = curve.pts.length;
-  const edgeCount = curve.closed ? n : n - 1;
-  const chain: Vec2[] = [curve.pts[0]];
-  for (let i = 0; i < edgeCount; i++) {
-    const seg = bulgeArcPoints(curve.pts[i], curve.pts[(i + 1) % n], curve.bulge?.[i]);
-    chain.push(...seg.slice(1));
-  }
+  const chain = bulgePolylinePoints(curve.pts, curve.bulge, curve.closed);
+  if (curve.closed) chain.push(curve.pts[0]); // Schlusskante mit-tesselliert, Kette endet am Start
   return polylineEdges(chain, false); // Schlusskante (falls closed) ist bereits mit-tesselliert
 }
 

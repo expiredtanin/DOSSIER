@@ -1397,7 +1397,7 @@ fn eye_polygon(center: Vec2, r: f64) -> Vec<Vec2> {
 /// Treppen-Parameter (enthaelt alle geometrisch relevanten
 /// Felder des TS-Typs `Stair`; Modell-Semantik-Felder wie id/floorId werden
 /// ignoriert).
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct StairParams {
     pub shape: String,
@@ -1418,6 +1418,25 @@ pub struct StairParams {
     pub step_count: i64,
     #[serde(default)]
     pub up: Option<bool>,
+    /// Bezugskante der gespeicherten Achse: "links" | "mitte" | "rechts" (fehlend = Mitte).
+    #[serde(default)]
+    pub referenz: Option<String>,
+}
+
+/// Achse auf die visuelle Treppen-MITTE versetzen (Referenz links/rechts): `start` und `center`
+/// wandern um ±halbe Breite quer zur Laufrichtung. "mitte"/fehlend: unverändert.
+/// `links` = Achse ist die linke Kante, die Mitte liegt eine halbe Breite rechts (−n).
+fn stair_at_mid(stair: &StairParams, u: Vec2, half_w: f64) -> StairParams {
+    let mut s = stair.clone();
+    let mid_off = match stair.referenz.as_deref() {
+        Some("links") => -half_w,
+        Some("rechts") => half_w,
+        _ => return s,
+    };
+    let c = scale(stair_left_n(u), mid_off);
+    s.start = add(stair.start, c);
+    s.center = stair.center.map(|ce| add(ce, c));
+    s
 }
 
 /// Gerade Treppe (Port von `straightGeometry`).
@@ -1590,6 +1609,8 @@ pub fn stair_geometry(stair: &StairParams, total_rise: f64) -> StairGeometry {
     let half_w = (0.05_f64).max(stair.width / 2.0);
     let u = stair_norm(stair.dir);
     let n = stair_left_n(u);
+    let s = stair_at_mid(stair, u, half_w);
+    let stair = &s;
 
     if stair.shape == "spiral" {
         return spiral_geometry(stair, total_rise, steps, riser_height, half_w);
@@ -1598,6 +1619,91 @@ pub fn stair_geometry(stair: &StairParams, total_rise: f64) -> StairGeometry {
         return l_geometry(stair, total_rise, steps, riser_height, half_w, u, n);
     }
     straight_geometry(stair, total_rise, steps, riser_height, half_w, u, n)
+}
+
+/// Aussenlinie einer Wendeltreppe: radiale Schliesslinien + Innen-/Aussenbogen.
+#[derive(Clone, Debug)]
+pub struct SpiralOutline {
+    /// Radiale Abschlusslinien (Innenpunkt → Aussenpunkt) bei a0 und a1.
+    pub lines: [(Vec2, Vec2); 2],
+    /// Kreisbögen (Mittelpunkt, r, a0, a1): Innen- und Aussenkreis.
+    pub arcs: [(Vec2, f64, f64, f64); 2],
+}
+
+/// Plan-Aussenlinie: genau eines von `polygon` (gerade/L) bzw. `spiral` (Wendel) ist gesetzt.
+#[derive(Clone, Debug)]
+pub struct StairOutline {
+    pub polygon: Option<Vec<Vec2>>,
+    pub spiral: Option<SpiralOutline>,
+}
+
+/// Linien-Schnittpunkt wie TS `lineIntersect2d` (det < 1e-9 → None).
+fn stair_line_intersect(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2) -> Option<Vec2> {
+    let det = d1.x * (-d2.y) - d1.y * (-d2.x);
+    if det.abs() < 1e-9 {
+        return None;
+    }
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    let t = (dx * (-d2.y) - dy * (-d2.x)) / det;
+    Some(Vec2 { x: p1.x + d1.x * t, y: p1.y + d1.y * t })
+}
+
+/// Aussenlinie einer Treppe im Grundriss (Port von `stairOutline`; Referenz wie in `stair_geometry`).
+pub fn stair_outline(stair: &StairParams) -> StairOutline {
+    let half_w = (0.05_f64).max(stair.width / 2.0);
+    let u = stair_norm(stair.dir);
+    let st = stair_at_mid(stair, u, half_w);
+    let s = &st;
+    let n = stair_left_n(u);
+    if s.shape == "spiral" {
+        let center = s.center.unwrap_or(s.start);
+        let radius = (half_w + 0.1).max(s.radius.unwrap_or(s.width));
+        let sweep = s.sweep.unwrap_or(270.0) * DEG;
+        let sv = sub(s.start, center);
+        let a0 = sv.y.atan2(sv.x);
+        let a1 = a0 + sweep;
+        let r_in = (radius - half_w).max(0.02);
+        let r_out = radius + half_w;
+        let at = |r: f64, a: f64| Vec2 { x: center.x + r * a.cos(), y: center.y + r * a.sin() };
+        return StairOutline {
+            polygon: None,
+            spiral: Some(SpiralOutline {
+                lines: [(at(r_in, a0), at(r_out, a0)), (at(r_in, a1), at(r_out, a1))],
+                arcs: [(center, r_in, a0, a1), (center, r_out, a0, a1)],
+            }),
+        };
+    }
+    if s.shape == "L" {
+        let l1 = s.run_length.max(1e-4);
+        let turn = s.turn.unwrap_or(1);
+        let u2 = if turn > 0 { n } else { scale(n, -1.0) };
+        let n2 = stair_left_n(u2);
+        let l2 = s.run2_length.unwrap_or(s.run_length).max(1e-4);
+        let corner = add(s.start, scale(u, l1 + half_w));
+        let run2_start = add(corner, scale(u2, half_w));
+        let p0l = add(s.start, scale(n, half_w));
+        let p0r = add(s.start, scale(n, -half_w));
+        let end_run2 = add(run2_start, scale(u2, l2));
+        let p3l = add(end_run2, scale(n2, half_w));
+        let p3r = add(end_run2, scale(n2, -half_w));
+        let corner_l = stair_line_intersect(p0l, u, p3l, scale(u2, -1.0))
+            .unwrap_or_else(|| add(corner, scale(n, half_w)));
+        let corner_r = stair_line_intersect(p0r, u, p3r, scale(u2, -1.0))
+            .unwrap_or_else(|| add(corner, scale(n, -half_w)));
+        return StairOutline { polygon: Some(vec![p0l, p0r, corner_r, p3r, p3l, corner_l]), spiral: None };
+    }
+    let l = s.run_length.max(1e-4);
+    let end = add(s.start, scale(u, l));
+    StairOutline {
+        polygon: Some(vec![
+            add(s.start, scale(n, half_w)),
+            add(s.start, scale(n, -half_w)),
+            add(end, scale(n, -half_w)),
+            add(end, scale(n, half_w)),
+        ]),
+        spiral: None,
+    }
 }
 
 /// Punkt-in-Polygon (Ray-Casting) — gleiches Muster wie `pointInOutline` /
@@ -2652,5 +2758,164 @@ mod tests {
         assert_eq!(split_polyline_at_param(&pts, false, 9, 0.5), vec![pts.clone()]);
         assert!(split_closed_by_chord(&pts, 0, 0.5, 7, 0.5).is_none());
         assert!(remove_segment(&[], true, 3).pts.is_empty());
+    }
+
+    // --- Treppen ---------------------------------------------------------------------------
+
+    fn stair(shape: &str) -> StairParams {
+        StairParams {
+            shape: shape.to_string(),
+            start: Vec2 { x: 0.0, y: 0.0 },
+            dir: Vec2 { x: 1.0, y: 0.0 },
+            run_length: 3.0,
+            run2_length: None,
+            turn: None,
+            center: None,
+            radius: None,
+            sweep: None,
+            width: 1.2,
+            step_count: 16,
+            up: None,
+            referenz: None,
+        }
+    }
+
+    fn near(a: Vec2, x: f64, y: f64) -> bool {
+        (a.x - x).abs() < 1e-9 && (a.y - y).abs() < 1e-9
+    }
+
+    #[test]
+    fn stair_gerade_tritte_lauflinie_pfeil() {
+        let g = stair_geometry(&stair("straight"), 2.8);
+        assert_eq!(g.treads.len(), 16);
+        assert!((g.riser_height - 0.175).abs() < 1e-12);
+        assert!((g.tread_depth - 3.0 / 16.0).abs() < 1e-12);
+        assert!(g.landing.is_none());
+        let t0 = &g.treads[0];
+        assert!(near(t0.pts[0], 0.0, 0.6) && near(t0.pts[2], 3.0 / 16.0, -0.6));
+        assert!((g.treads[15].top_rise - 2.8).abs() < 1e-12);
+        assert_eq!(g.run_line.len(), 2);
+        // Pfeilspitze am oberen Ende (up Default = true)
+        assert!(near(g.arrow.head.1, g.run_line[1].x, g.run_line[1].y));
+        let mut down = stair("straight");
+        down.up = Some(false);
+        let gd = stair_geometry(&down, 2.8);
+        assert!(near(gd.arrow.head.1, gd.run_line[0].x, gd.run_line[0].y));
+    }
+
+    #[test]
+    fn stair_l_podest_und_zweiter_lauf() {
+        let mut p = stair("L");
+        p.run2_length = Some(2.0);
+        let g = stair_geometry(&p, 2.8);
+        assert_eq!(g.treads.len(), 15); // 16 Stufen − 1 Podest
+        let land = g.landing.as_ref().unwrap();
+        assert_eq!(land.len(), 4);
+        assert_eq!(g.run_line.len(), 3);
+        // Podest-Mitte = start + u·(run1 + halfW)
+        assert!(near(g.run_line[1], 3.6, 0.0));
+        // zweiter Lauf geht nach +y (turn Default = links)
+        assert!(g.run_line[2].y > 1.0);
+        assert_eq!(g.treads[g.treads.len() - 1].index, 15);
+        p.turn = Some(-1);
+        assert!(stair_geometry(&p, 2.8).run_line[2].y < -1.0);
+    }
+
+    #[test]
+    fn stair_wendel_keile_und_auge() {
+        let mut p = stair("spiral");
+        p.center = Some(Vec2 { x: 0.0, y: 0.0 });
+        p.start = Vec2 { x: 1.0, y: 0.0 };
+        p.radius = Some(1.0);
+        p.step_count = 12;
+        let g = stair_geometry(&p, 2.4);
+        assert_eq!(g.treads.len(), 12);
+        assert_eq!(g.landing.as_ref().unwrap().len(), 12);
+        assert_eq!(g.run_line.len(), 13);
+        assert!((g.tread_depth - (1.0 * 270.0 * DEG) / 12.0).abs() < 1e-12);
+        // Innenradius = radius − halfW = 0.4
+        assert!(near(g.treads[0].pts[0], 0.4, 0.0));
+    }
+
+    #[test]
+    fn stair_referenz_versetzt_achse_auf_die_mitte() {
+        let mut p = stair("straight");
+        p.referenz = Some("links".into());
+        let g = stair_geometry(&p, 2.8);
+        // Achse = linke Kante → Mitte eine halbe Breite rechts (−y bei Lauf +x)
+        assert!(near(g.treads[0].pts[0], 0.0, 0.0) && near(g.treads[0].pts[3], 0.0, -1.2));
+        p.referenz = Some("rechts".into());
+        let g = stair_geometry(&p, 2.8);
+        assert!(near(g.treads[0].pts[0], 0.0, 1.2));
+        // Wendel: auch das Zentrum wandert mit
+        let mut sp = stair("spiral");
+        sp.referenz = Some("rechts".into());
+        sp.center = Some(Vec2 { x: 5.0, y: 5.0 });
+        let o = stair_outline(&sp);
+        assert!((o.spiral.unwrap().arcs[0].0.y - 5.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stair_outline_formen() {
+        let o = stair_outline(&stair("straight"));
+        let poly = o.polygon.unwrap();
+        assert_eq!(poly.len(), 4);
+        assert!(near(poly[0], 0.0, 0.6) && near(poly[2], 3.0, -0.6));
+        assert!(o.spiral.is_none());
+        let mut l = stair("L");
+        l.run2_length = Some(2.0);
+        let poly = stair_outline(&l).polygon.unwrap();
+        assert_eq!(poly.len(), 6);
+        let sp = stair_outline(&stair("spiral")).spiral.unwrap();
+        assert!((sp.arcs[0].1 - 0.5).abs() < 1e-9 || sp.arcs[0].1 > 0.0);
+        assert!((sp.arcs[1].1 - sp.arcs[0].1 - 1.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn stair_unsinn_ohne_panic() {
+        let mut p = stair("straight");
+        p.dir = Vec2 { x: 0.0, y: 0.0 };
+        let _ = stair_geometry(&p, 2.8);
+        p.width = f64::NAN;
+        p.run_length = f64::NAN;
+        let g = stair_geometry(&p, f64::NAN);
+        assert_eq!(g.treads.len(), 16);
+        p.step_count = -5;
+        assert_eq!(stair_geometry(&p, 2.8).treads.len(), 2);
+        for shape in ["L", "spiral"] {
+            let mut q = stair(shape);
+            q.width = f64::NAN;
+            q.step_count = 0;
+            let _ = stair_geometry(&q, 1.0);
+            let _ = stair_outline(&q);
+        }
+    }
+
+    #[test]
+    fn stair_cut_bbox_und_treffer() {
+        let g = stair_geometry(&stair("straight"), 2.8);
+        let c = stair_cut(&g, 1.0);
+        assert_eq!(c.below_indices.len(), 5); // 0.175·5 = 0.875 ≤ 1 < 1.05
+        assert_eq!(c.above_indices.len(), 11);
+        assert_eq!(c.break_line.as_ref().unwrap().len(), 2);
+        assert!(stair_cut(&g, 99.0).break_line.is_none());
+        let b = stair_bbox(&g);
+        assert!((b.max_x - 3.0).abs() < 1e-9 && (b.min_y + 0.6).abs() < 1e-9);
+        assert!(point_hits_stair(Vec2 { x: 1.0, y: 0.0 }, &g));
+        assert!(!point_hits_stair(Vec2 { x: 1.0, y: 5.0 }, &g));
+        let leer = StairGeometry {
+            treads: vec![], landing: None, riser_height: 0.0, tread_depth: 0.0,
+            run_line: vec![], arrow: StairArrow { shaft: (Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 0.0, y: 0.0 }), head: (Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 0.0, y: 0.0 }) },
+            total_rise: 0.0,
+        };
+        assert_eq!(stair_bbox(&leer).max_x, 0.0);
+    }
+
+    #[test]
+    fn default_step_count_regeln() {
+        assert_eq!(default_step_count(2.8, 10.0), 16);
+        assert_eq!(default_step_count(2.8, 3.0), 13); // Lauflänge deckelt: floor(3/0.24)+1
+        assert_eq!(default_step_count(0.1, 0.0), 2);
+        assert_eq!(default_step_count(f64::NAN, 3.0), 2);
     }
 }

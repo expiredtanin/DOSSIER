@@ -8,6 +8,7 @@ export {
   arcThroughPoints,
   bulgeArc,
   bulgeArcPoints,
+  bulgePolylinePoints,
   bulgeBetweenAngles,
   bulgeFromSagittaPoint,
   bulgePointAt,
