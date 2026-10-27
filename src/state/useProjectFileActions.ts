@@ -6,7 +6,11 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { parseProjectFile, serializeProject } from "../io/projectFormat";
+import { useStore } from "./appStore";
+import type { NotifyKind } from "./notifySlice";
+import { parseProjectFile, parseProjectObject, serializeProject } from "../io/projectFormat";
+import { AUTOSAVE_INTERVAL_MS, clearAutosave, hasContent, readAutosave, writeAutosave } from "./autosave";
+import type { AutosaveRecovery } from "./autosave";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { t } from "../i18n";
@@ -128,10 +132,10 @@ export type ImportDialogState = {
  * Liest Projekt-Text über den gemeinsamen Format-Parser (Version, Migration, Toleranz) und
  * meldet Fehler sichtbar statt nur in der Konsole. `null` = nicht ladbar.
  */
-function readProjectOrReport(content: string): Project | null {
+function readProjectOrReport(content: string, notify: (msg: string, kind?: NotifyKind) => void): Project | null {
   const r = parseProjectFile(content);
   if (!r.ok) {
-    window.alert(`${t("project.open.failed")}\n\n${r.error}`);
+    notify(`${t("project.open.failed")} ${r.error}`, "error");
     return null;
   }
   for (const w of r.warnings) console.info(`Projekt geladen mit Hinweis: ${w}`);
@@ -155,6 +159,8 @@ export function useProjectFileActions(
   // über den nativen Dialog (openProjectFileNative), der einen echten Pfad für
   // den Lock liefert (File-API im Browser hat keinen echten Dateipfad).
   const projectFileInputRef = useRef<HTMLInputElement>(null);
+  // Meldungen als Toast (window.alert ist im Tauri-WKWebView wirkungslos).
+  const notify = useStore((s) => s.notify);
   // Verstecktes Datei-Input für „Neu aus Vorlage" (Datei wählen) — derselbe
   // Browser-Fallback wie `projectFileInputRef`, nur mit `.obpt`-Filter.
   const projectTemplateFileInputRef = useRef<HTMLInputElement>(null);
@@ -187,9 +193,49 @@ export function useProjectFileActions(
    * kommentarlose Überschreiben (Bug: Cmd+N löschte bisher stillschweigend).
    */
   const guardDiscard = (action: () => void) => {
-    if (project !== lastSavedProjectRef.current) setPendingDiscard(() => action);
-    else action();
+    if (project !== lastSavedProjectRef.current) {
+      // Bewusst verworfen (oder vorher gespeichert) → Wiederherstellungskopie ist hinfällig.
+      const path = openedProjectPathRef.current;
+      setPendingDiscard(() => () => {
+        void clearAutosave(path);
+        action();
+      });
+    } else action();
   };
+
+  // ── Autosave + Wiederherstellen (s. state/autosave.ts) ─────────────────────
+  const projectRef = useRef(project);
+  projectRef.current = project;
+  const lastAutosavedRef = useRef<Project | null>(null);
+  const [recovery, setRecovery] = useState<AutosaveRecovery | null>(null);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const p = projectRef.current;
+      if (p === lastSavedProjectRef.current || p === lastAutosavedRef.current || !hasContent(p)) return;
+      lastAutosavedRef.current = p;
+      void writeAutosave(openedProjectPathRef.current, p);
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, []);
+  const offerRecovery = (path: string | null) => {
+    void readAutosave(path).then((r) => {
+      if (r) setRecovery({ path, project: r.project, savedAt: r.savedAt });
+    });
+  };
+  // Start: Kopie eines nie gespeicherten Projekts aus der letzten Sitzung?
+  useEffect(() => offerRecovery(null), []);
+  const onRecoverRestore = () => {
+    if (!recovery) return;
+    const parsed = parseProjectObject(recovery.project);
+    if (parsed.ok) setProject(parsed.project); // bleibt „ungespeichert" bis zum Speichern
+    else notify(`${t("project.open.failed")} ${parsed.error}`, "error");
+    setRecovery(null);
+  };
+  const onRecoverDiscard = () => {
+    if (recovery) void clearAutosave(recovery.path);
+    setRecovery(null);
+  };
+  const onRecoverLater = () => setRecovery(null);
 
   // Best-effort Lock-Freigabe beim Fenster-Schliessen (sauberes Timing; der
   // OS-Lock fällt bei Prozessende/Absturz ohnehin automatisch weg). No-op ohne Tauri.
@@ -289,7 +335,11 @@ export function useProjectFileActions(
     return saveProjectFile(json, project.name, (path) =>
       addRecentProject(path, project.name || "modell"),
     ).then((saved) => {
-      if (saved) lastSavedProjectRef.current = project;
+      if (saved) {
+        lastSavedProjectRef.current = project;
+        void clearAutosave(openedProjectPathRef.current);
+        void clearAutosave(null);
+      }
       return saved;
     });
   };
@@ -310,7 +360,7 @@ export function useProjectFileActions(
   // Ersetzt ebenfalls das bisherige Projekt → über `guardDiscard`.
   const applyTemplateContent = (content: string): boolean => {
     try {
-      const parsed = readProjectOrReport(content);
+      const parsed = readProjectOrReport(content, notify);
       if (!parsed) return false;
       guardDiscard(() => {
         releaseCurrentProjectLock();
@@ -371,7 +421,7 @@ export function useProjectFileActions(
   // + ob WIR den Schreib-Lock für die neue Datei halten.
   const applyOpenedProjectFile = (path: string, content: string, lockOwned: boolean) => {
     try {
-      const parsed = readProjectOrReport(content);
+      const parsed = readProjectOrReport(content, notify);
       if (!parsed) {
         if (lockOwned) void releaseProjectLock(path);
         return;
@@ -383,6 +433,7 @@ export function useProjectFileActions(
         openedProjectPathRef.current = path;
         projectLockOwnedRef.current = lockOwned;
         addRecentProject(path, parsed.name || "modell");
+        offerRecovery(path);
       });
     } catch (err) {
       console.error("Projekt-Import fehlgeschlagen:", err);
@@ -463,10 +514,10 @@ export function useProjectFileActions(
           .then((r) => {
             downloadTextFile(r.text, filename);
             if (r.skipped.length > 0) {
-              window.alert(t("step.export.skipped", { n: r.skipped.length }));
+              notify(t("step.export.skipped", { n: r.skipped.length }), "warning");
             }
           })
-          .catch((e) => window.alert(`${t("step.export.failed")}: ${e instanceof Error ? e.message : String(e)}`));
+          .catch((e) => notify(`${t("step.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
     }
   };
@@ -492,7 +543,7 @@ export function useProjectFileActions(
     const r = new FileReader();
     r.onload = () => {
       try {
-        const parsed = readProjectOrReport(String(r.result ?? ""));
+        const parsed = readProjectOrReport(String(r.result ?? ""), notify);
         if (!parsed) return;
         // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
         // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
@@ -575,6 +626,10 @@ export function useProjectFileActions(
     projectLockOwnedRef,
     lockConflict,
     setLockConflict,
+    recovery,
+    onRecoverRestore,
+    onRecoverDiscard,
+    onRecoverLater,
     pendingDiscard,
     setPendingDiscard,
     openImportForFile,

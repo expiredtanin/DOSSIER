@@ -49,6 +49,7 @@ import { ExportSaveDialog } from "./ui/ExportSaveDialog";
 import { PromptDialog } from "./ui/PromptDialog";
 import { LockConflictDialog } from "./ui/LockConflictDialog";
 import { UnsavedChangesDialog } from "./ui/UnsavedChangesDialog";
+import { RecoverAutosaveDialog } from "./ui/RecoverAutosaveDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./io/projectFile";
 import { stepTextToImportedMeshes } from "./io/stepImport";
@@ -1809,6 +1810,10 @@ export default function App() {
   // und die Ausführung eines bestätigten DXF/DWG-Imports — gebündelt in
   // useProjectFileActions(), siehe dort.
   const {
+    recovery,
+    onRecoverRestore,
+    onRecoverDiscard,
+    onRecoverLater,
     projectFileInputRef,
     projectTemplateFileInputRef,
     lockConflict,
@@ -2389,17 +2394,19 @@ export default function App() {
         runClashCheck(p0)
           .then((clashes) => {
             setProject((p) => applyClashMarkers(p, clashes, activeCategoryCode));
-            window.alert(
+            // window.alert ist im Tauri-WKWebView wirkungslos → Toast.
+            notify(
               clashes.length === 0
                 ? t("clash.none")
-                : `${t("clash.found")}: ${clashes.length}\n` +
+                : `${t("clash.found")}: ${clashes.length} — ` +
                     clashes
-                      .slice(0, 20)
-                      .map((c, k) => `K${k + 1}: ${c.a.kind} ↔ ${c.b.kind}${c.volume !== null ? ` · ${c.volume.toFixed(3)} m³` : ""}`)
-                      .join("\n"),
+                      .slice(0, 5)
+                      .map((c, k) => `K${k + 1} ${c.a.kind}↔${c.b.kind}${c.volume !== null ? ` ${c.volume.toFixed(3)} m³` : ""}`)
+                      .join(", "),
+              clashes.length === 0 ? "info" : "warning",
             );
           })
-          .catch((err) => window.alert(`${t("clash.failed")}: ${err instanceof Error ? err.message : String(err)}`));
+          .catch((err) => notify(`${t("clash.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"));
       },
       onUndo: undo,
       onRedo: redo,
@@ -3194,6 +3201,7 @@ export default function App() {
   }
   if (bootPhase === "start") {
     return (
+      <>
       <StartScreen
         onNewProject={() => {
           onNewProject();
@@ -3210,6 +3218,19 @@ export default function App() {
           setBootPhase("editor");
         }}
       />
+      {recovery && (
+        <RecoverAutosaveDialog
+          path={recovery.path}
+          savedAt={recovery.savedAt}
+          onRestore={() => {
+            onRecoverRestore();
+            setBootPhase("editor");
+          }}
+          onDiscard={onRecoverDiscard}
+          onLater={onRecoverLater}
+        />
+      )}
+      </>
     );
   }
 
@@ -3248,7 +3269,7 @@ export default function App() {
             .then((text) => stepTextToImportedMeshes(text, f.name))
             .then((objs) => addContextObjectsAndFit(objs))
             .catch((err) =>
-              window.alert(`${t("step.import.failed")}: ${err instanceof Error ? err.message : String(err)}`),
+              notify(`${t("step.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
             );
         }}
       />
@@ -3908,6 +3929,15 @@ export default function App() {
         />
       )}
 
+      {recovery && (
+        <RecoverAutosaveDialog
+          path={recovery.path}
+          savedAt={recovery.savedAt}
+          onRestore={onRecoverRestore}
+          onDiscard={onRecoverDiscard}
+          onLater={onRecoverLater}
+        />
+      )}
       {lockConflict && (
         <LockConflictDialog
           info={lockConflict.info}

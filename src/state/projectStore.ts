@@ -134,6 +134,23 @@ export async function loadProject(name: string): Promise<Project | null> {
   }
 }
 
+/** Wie {@link loadProject}, mit Speicherzeitpunkt (ms seit Epoche). */
+export async function loadProjectRecord(name: string): Promise<{ project: Project; savedAt: number } | null> {
+  if (!name || !isAvailable()) return null;
+  try {
+    const db = await openDb();
+    const record = await new Promise<ProjectRecord | undefined>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const request = tx.objectStore(STORE_NAME).get(name);
+      request.onsuccess = () => resolve(request.result as ProjectRecord | undefined);
+      request.onerror = () => reject(request.error ?? new Error("Lesen fehlgeschlagen"));
+    });
+    return record ? { project: record.project, savedAt: record.savedAt } : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Listet alle gespeicherten Projekte (Name + Speicherzeitpunkt), alphabetisch
  * nach Name sortiert. Ohne IndexedDB oder bei Fehler: leere Liste.

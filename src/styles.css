@@ -8048,3 +8048,8 @@ body {
 [data-native-hole] body {
   background: transparent !important;
 }
+
+/* Wiederherstellen-Dialog: muss auch über dem Startbildschirm (z-index 2000) liegen. */
+.imp-overlay.recover-overlay {
+  z-index: 2100;
+}
