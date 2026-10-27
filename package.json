@@ -42,14 +42,12 @@
     "polygon-clipping": "^0.15.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "svg2pdf.js": "^2.7.0",
-    "three": "^0.169.0"
+    "svg2pdf.js": "^2.7.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
-    "@types/three": "^0.169.0",
     "@vitejs/plugin-react": "^4.3.2",
     "electron": "^43.0.0",
     "playwright": "^1.61.1",

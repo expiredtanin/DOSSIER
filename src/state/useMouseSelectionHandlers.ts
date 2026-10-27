@@ -10,7 +10,6 @@ import type { CategoryDisplayResolver } from "../plan/generatePlan";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import type { PlanSelection, MarqueeSelection } from "../plan/PlanView";
 import type { Pick3dHit } from "../viewport/Wasm3DViewport";
-import type { ViewportContextInfo } from "../viewport/Viewport3D";
 import type { RichTextDoc } from "../text/richText";
 import { plainText } from "../text/richText";
 import { hitTestWall } from "../viewport/planHitTest";
@@ -467,66 +466,6 @@ export function useMouseSelectionHandlers(opts: {
     if (wallId && !selectedWallIds.includes(wallId)) setSelectedWallIds([wallId]);
     setMenu({ kind: "plan", x: info.clientX, y: info.clientY, wallId, model: info.model });
   };
-  // Links-Klick im 3D: per Raycast getroffene Wand wählen (Einzelauswahl).
-  const onViewportSelectWall = (wallId: string | null) => {
-    setSelectedWallIds(wallId ? [wallId] : []);
-    if (wallId) {
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedSectionLineIds([]);
-    }
-  };
-  // Links-Klick im 3D: per Raycast getroffene Treppe wählen (Einzelauswahl).
-  const onViewportSelectStair = (stairId: string | null) => {
-    setSelectedStairIds(stairId ? [stairId] : []);
-    if (stairId) {
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedSectionLineIds([]);
-    }
-  };
-  // Links-Klick im 3D: per Raycast getroffene Decke wählen (Einzelauswahl).
-  const onViewportSelectCeiling = (ceilingId: string | null) => {
-    setSelectedCeilingIds(ceilingId ? [ceilingId] : []);
-    if (ceilingId) {
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedStairIds([]);
-      setSelectedOpeningIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedSectionLineIds([]);
-    }
-  };
-  // Links-Klick im 3D: per Raycast getroffene Öffnung wählen (Einzelauswahl).
-  const onViewportSelectOpening = (openingId: string | null) => {
-    setSelectedOpeningIds(openingId ? [openingId] : []);
-    if (openingId) {
-      setSelectedWallIds([]);
-      setSelectedDrawingId(null);
-      setSelectedCeilingIds([]);
-      setSelectedStairIds([]);
-      setSelectedRoomIds([]);
-      setSelectedExtrudedSolidIds([]);
-      setSelectedColumnIds([]);
-      setSelectedRoofIds([]);
-      setSelectedSectionLineIds([]);
-    }
-  };
   // Links-KLICK im Nordstern-3D-Viewport (WASM, TS-Raycast): getroffenes Bauteil
   // wählen, sodass das Attribute-/Objekt-Info-Panel es zeigt (erster Schritt zur
   // 3D-Editierbarkeit). `additive` (Shift/Ctrl) = zur Auswahl DERSELBEN Art
@@ -644,19 +583,6 @@ export function useMouseSelectionHandlers(opts: {
     setSelectedRoofIds([]);
     setSelectedSectionLineIds([]);
   };
-  // Rechts-Klick im 3D: Wand-Kontextmenü an der Cursorposition.
-  const onViewportContextMenu = (info: ViewportContextInfo) => {
-    if (info.wallId && !selectedWallIds.includes(info.wallId)) {
-      setSelectedWallIds([info.wallId]);
-    }
-    setMenu({
-      kind: "viewport",
-      x: info.clientX,
-      y: info.clientY,
-      wallId: info.wallId,
-    });
-  };
-
   return {
     onOpenStampEditor,
     onEditDrawingText,
@@ -665,11 +591,6 @@ export function useMouseSelectionHandlers(opts: {
     onPlanSelect,
     onPlanMarquee,
     onPlanContextMenu,
-    onViewportSelectWall,
-    onViewportSelectStair,
-    onViewportSelectCeiling,
-    onViewportSelectOpening,
     onViewport3dPick,
-    onViewportContextMenu,
   };
 }

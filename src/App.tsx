@@ -3003,12 +3003,7 @@ export default function App() {
     onPlanSelect,
     onPlanMarquee,
     onPlanContextMenu,
-    onViewportSelectWall,
-    onViewportSelectStair,
-    onViewportSelectCeiling,
-    onViewportSelectOpening,
     onViewport3dPick,
-    onViewportContextMenu,
   } = useMouseSelectionHandlers({
     project,
     setProject,
@@ -3573,11 +3568,6 @@ export default function App() {
           onPlanMarquee={onPlanMarquee}
           onSegmentCut={onSegmentCut}
           onPlanContextMenu={onPlanContextMenu}
-          onViewportSelectWall={onViewportSelectWall}
-          onViewportSelectCeiling={onViewportSelectCeiling}
-          onViewportSelectOpening={onViewportSelectOpening}
-          onViewportSelectStair={onViewportSelectStair}
-          onViewportContextMenu={onViewportContextMenu}
           onViewport3dPick={onViewport3dPick}
           // Zeichnen-Modus des 3D-Viewports gilt AUCH während einer
           // interaktiven Transformation (m/s/d) — sonst würde ein Klick im 3D

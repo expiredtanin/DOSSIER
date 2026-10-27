@@ -1,14 +1,10 @@
 // PBR-Materialkugel-Vorschau (CAD/DCC-üblich) für den Ressourcen-Manager.
-// EIN geteilter offscreen three.js-Renderer erzeugt nacheinander pro Material
-// eine Kugel und cached das Ergebnis als PNG-DataURL — bewusst NICHT ein
-// WebGL-Context je Kachel (Browser begrenzt gleichzeitige Kontexte). Aufträge
-// laufen seriell über eine Warteschlange, damit Renderer/Szene/Material sich
-// nie zwei Materialien gleichzeitig "gehören".
+// Pro Material wird nacheinander eine Kugel auf einem 2D-Canvas gezeichnet und als
+// PNG-DataURL gecached. Aufträge laufen seriell über eine Warteschlange.
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import * as THREE from "three";
-import type { MaterialAsset, MaterialMapKind } from "./library";
+import type { MaterialAsset } from "./library";
 
 /** Kantenlänge der gerenderten Vorschau in Pixeln (CSS skaliert die Kachel). */
 const PREVIEW_SIZE = 128;
@@ -42,136 +38,85 @@ function signatureOf(asset: MaterialAsset): string {
   ].join("|");
 }
 
-// ── Geteilte Render-Infrastruktur (eine Instanz für die gesamte App-Laufzeit) ─
+// ── Rendering per 2D-Canvas (kein WebGL/three.js) ──────────────────────────
+// Die Farbkarte wird auf die Kugel gelegt (Kugel-Abbildung: Pixel → Fläche eines Kugelstücks,
+// flächentreu genug für eine Kachel), dazu Licht von links oben als Verlauf. Die Rauheits-/
+// Normalkarten gehen nicht ein — die Kachel soll Farbe und Körnung lesbar machen.
 
-let renderer: THREE.WebGLRenderer | null = null;
-let scene: THREE.Scene | null = null;
-let camera: THREE.PerspectiveCamera | null = null;
-let sphereMesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial> | null =
-  null;
+const imageCache = new Map<string, Promise<HTMLImageElement>>();
 
-function ensureRenderer(): void {
-  if (renderer) return;
-
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: true,
-    preserveDrawingBuffer: true, // nötig für toDataURL() nach dem Render.
-  });
-  renderer.setSize(PREVIEW_SIZE, PREVIEW_SIZE);
-  renderer.setPixelRatio(1);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(0x000000, 0); // transparent — die Kachel liefert den Hintergrund.
-
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(32, 1, 0.1, 10);
-  camera.position.set(0, 0.12, 3.1);
-  camera.lookAt(0, 0, 0);
-
-  // Neutrale Studio-Beleuchtung: Himmelslicht (füllt Schatten weich auf) plus
-  // ein Key-Light für Glanzlichter/Rauheits-Lesbarkeit, ein dezentes Fülllicht
-  // gegen zu harte Kernschatten.
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x2c2c28, 1.15));
-  const key = new THREE.DirectionalLight(0xffffff, 2.2);
-  key.position.set(2.2, 2.6, 2.4);
-  scene.add(key);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.45);
-  fill.position.set(-2.2, 0.5, 1.3);
-  scene.add(fill);
-
-  const geometry = new THREE.SphereGeometry(1, 48, 48);
-  const material = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 });
-  sphereMesh = new THREE.Mesh(geometry, material);
-  scene.add(sphereMesh);
+function loadImage(url: string): Promise<HTMLImageElement> {
+  let p = imageCache.get(url);
+  if (!p) {
+    p = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`Textur nicht ladbar: ${url}`));
+      img.src = url;
+    });
+    imageCache.set(url, p);
+  }
+  return p;
 }
-
-// ── Textur-Ladecache (geteilte Quell-Texturen je URL) ──────────────────────
-
-const textureLoader = new THREE.TextureLoader();
-const textureCache = new Map<string, THREE.Texture>();
-
-function loadTexture(url: string, srgb: boolean): Promise<THREE.Texture> {
-  const key = `${srgb ? "s" : "l"}|${url}`;
-  const cached = textureCache.get(key);
-  if (cached) return Promise.resolve(cached);
-  return new Promise((resolve, reject) => {
-    textureLoader.load(
-      url,
-      (tex) => {
-        tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-        textureCache.set(key, tex);
-        resolve(tex);
-      },
-      undefined,
-      () => reject(new Error(`Textur nicht ladbar: ${url}`)),
-    );
-  });
-}
-
-const MAP_SLOTS: { kind: MaterialMapKind; srgb: boolean }[] = [
-  { kind: "color", srgb: true },
-  { kind: "normal", srgb: false },
-  { kind: "roughness", srgb: false },
-  { kind: "metalness", srgb: false },
-  { kind: "ao", srgb: false },
-  { kind: "displacement", srgb: false },
-];
 
 /** Rendert die Vorschau-Kugel eines Assets und liefert eine PNG-DataURL. */
 async function renderPreview(asset: MaterialAsset): Promise<string> {
-  ensureRenderer();
-  const mat = sphereMesh!.material;
+  const S = PREVIEW_SIZE;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D-Canvas nicht verfügbar");
 
-  // Karten der zuvor gerenderten Kugel lösen (kein Überstand ins nächste Material).
-  mat.map = null;
-  mat.normalMap = null;
-  mat.roughnessMap = null;
-  mat.metalnessMap = null;
-  mat.aoMap = null;
-  mat.displacementMap = null;
-  mat.displacementScale = 0;
-
-  const loaded = await Promise.allSettled(
-    MAP_SLOTS.map(async ({ kind, srgb }) => {
-      const url = asset.maps[kind];
-      if (!url) return null;
-      const tex = await loadTexture(url, srgb);
-      return { kind, tex };
-    }),
-  );
-  for (const res of loaded) {
-    if (res.status !== "fulfilled" || !res.value) continue;
-    const { kind, tex } = res.value;
-    switch (kind) {
-      case "color":
-        mat.map = tex;
-        break;
-      case "normal":
-        mat.normalMap = tex;
-        break;
-      case "roughness":
-        mat.roughnessMap = tex;
-        break;
-      case "metalness":
-        mat.metalnessMap = tex;
-        break;
-      case "ao":
-        mat.aoMap = tex;
-        break;
-      case "displacement":
-        mat.displacementMap = tex;
-        // Dezent — die eigentliche Tiefe liest sich über die Normal-Map.
-        mat.displacementScale = 0.04;
-        break;
+  // Albedo-Textur auf eine Kachel-Fläche (2×2 Wiederholungen, damit die Körnung sichtbar bleibt).
+  const tex = document.createElement("canvas");
+  tex.width = tex.height = S;
+  const tctx = tex.getContext("2d")!;
+  tctx.fillStyle = "#cccccc";
+  tctx.fillRect(0, 0, S, S);
+  const url = asset.maps.color;
+  if (url) {
+    try {
+      const img = await loadImage(url);
+      tctx.drawImage(img, 0, 0, S / 2, S / 2);
+      tctx.drawImage(img, S / 2, 0, S / 2, S / 2);
+      tctx.drawImage(img, 0, S / 2, S / 2, S / 2);
+      tctx.drawImage(img, S / 2, S / 2, S / 2, S / 2);
+    } catch {
+      /* graue Kugel */
     }
   }
-  // Weiß als Albedo-Basis (Farb-Karte bleibt unverfälscht), sonst neutrales Grau.
-  mat.color.set(asset.maps.color ? 0xffffff : 0xcccccc);
-  mat.metalness = asset.maps.metalness ? 1 : 0;
-  mat.needsUpdate = true;
-
-  renderer!.render(scene!, camera!);
-  return renderer!.domElement.toDataURL("image/png");
+  const src = tctx.getImageData(0, 0, S, S).data;
+  const out = ctx.createImageData(S, S);
+  const r = S / 2 - 1;
+  const L = [-0.45, 0.55, 0.7]; // Licht von links oben vorn
+  const ll = Math.hypot(L[0], L[1], L[2]);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const nx = (x + 0.5 - S / 2) / r;
+      const ny = -(y + 0.5 - S / 2) / r;
+      const d2 = nx * nx + ny * ny;
+      if (d2 > 1) continue;
+      const nz = Math.sqrt(1 - d2);
+      // Kugel-Abbildung: Längen-/Breitenkoordinate → Textur-Pixel.
+      const u = Math.atan2(nx, nz) / Math.PI + 0.5;
+      const v = Math.asin(ny) / Math.PI + 0.5;
+      const sx = Math.min(S - 1, Math.max(0, Math.floor(u * S)));
+      const sy = Math.min(S - 1, Math.max(0, Math.floor((1 - v) * S)));
+      const si = (sy * S + sx) * 4;
+      const lambert = Math.max(0, (nx * L[0] + ny * L[1] + nz * L[2]) / ll);
+      const shade = 0.28 + 0.85 * lambert;
+      const spec = asset.maps.metalness ? 0 : Math.pow(lambert, 24) * 0.25;
+      const oi = (y * S + x) * 4;
+      out.data[oi] = Math.min(255, src[si] * shade + spec * 255);
+      out.data[oi + 1] = Math.min(255, src[si + 1] * shade + spec * 255);
+      out.data[oi + 2] = Math.min(255, src[si + 2] * shade + spec * 255);
+      // Kantenglättung: weicher Rand über das letzte Pixel.
+      out.data[oi + 3] = Math.min(255, Math.max(0, (1 - Math.sqrt(d2)) * r * 255));
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  return canvas.toDataURL("image/png");
 }
 
 // ── Serielle Warteschlange (ein Render-Auftrag zur Zeit, geteilter Kontext) ─

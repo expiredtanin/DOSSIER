@@ -44,7 +44,7 @@ import type {
   PlanViewHandle,
 } from "../plan/PlanView";
 import { Viewport3D } from "../viewport/Viewport3D";
-import type { DisplayResolver, ViewportContextInfo } from "../viewport/Viewport3D";
+import type { DisplayResolver } from "../viewport/Viewport3D";
 import type { Pick3dHit } from "../viewport/Wasm3DViewport";
 import { DrawingTabs } from "../DrawingTabs";
 import type { ViewSnapshotTabsHandlers } from "../DrawingTabs";
@@ -75,7 +75,6 @@ export function Content({
   hoverDivideCount,
   renderMode,
   view3d,
-  fov,
   grid3dVisible,
   onToggleGrid3d,
   section3d,
@@ -85,7 +84,6 @@ export function Content({
   onSelectLevel,
   floorDisplay,
   categoryDisplay,
-  displayKey,
   planViewRef,
   onCursor,
   onScale,
@@ -115,11 +113,6 @@ export function Content({
   onPlanMarquee,
   onSegmentCut,
   onPlanContextMenu,
-  onViewportSelectWall,
-  onViewportSelectCeiling,
-  onViewportSelectOpening,
-  onViewportSelectStair,
-  onViewportContextMenu,
   onViewport3dPick,
   commandActive,
   draft,
@@ -223,11 +216,6 @@ export function Content({
     clientY: number;
     model: Vec2;
   }) => void;
-  onViewportSelectWall: (wallId: string | null) => void;
-  onViewportSelectCeiling: (ceilingId: string | null) => void;
-  onViewportSelectOpening: (openingId: string | null) => void;
-  onViewportSelectStair: (stairId: string | null) => void;
-  onViewportContextMenu: (info: ViewportContextInfo) => void;
   /** Links-KLICK-Auswahl im WASM-3D-Viewport (TS-Raycast, Wand/Decke). */
   onViewport3dPick: (hit: Pick3dHit, additive: boolean) => void;
   /** Läuft ein zeichnender Befehl? Macht den 3D-Viewport zur Erstellungs-Fläche. */
@@ -458,24 +446,14 @@ export function Content({
           </div>
           <Viewport3D
             project={project}
-            visibleCodes={visibleCodes}
-            floorDisplay={floorDisplay}
-            categoryDisplay={categoryDisplay}
-            displayKey={displayKey}
             renderMode={renderMode}
             detail={detail}
             view3d={view3d}
-            fov={fov}
-            gridElevation={level.baseElevation ?? 0}
+            groundElevation={level.baseElevation ?? 0}
             gridVisible={grid3dVisible}
             onToggleGrid={onToggleGrid3d}
             section3d={section3d}
             onClearSection3d={onClearSection3d}
-            onSelectWall={onViewportSelectWall}
-            onSelectCeiling={onViewportSelectCeiling}
-            onSelectOpening={onViewportSelectOpening}
-            onSelectStair={onViewportSelectStair}
-            onContextMenu={onViewportContextMenu}
             onPick3d={onViewport3dPick}
             highlightLines={highlightLines}
             commandActive={commandActive}
