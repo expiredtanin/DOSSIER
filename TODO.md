@@ -91,7 +91,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Fugen-Linienstil) bleibt in TS, bis das Modell in Rust liegt [K4]; Zuordnung über den Schichtindex. Bitgleich zur
     alten Fassung (60 Zufallspläne × 3 Detailgrade, Öffnungen, Beispielprojekt, Decken mit/ohne Loch); `subtractIntervals`/
     `segmentInsideWallBand` aus TS gelöscht. Nicht in der Tauri-App angesehen.
-    Offen: Öffnungssymbole, Räume, Dächer, Stützen, 2D-Zeichnung, Kontext, Schnittlinien.
+    ✅ Öffnungssymbole (Tür/Fenster): `opening_geom.rs` (Pfosten, Lücke, Türblätter, Fenster-Symbol mit Flügel-/Stulpmarken)
+    und `plan_openings.rs` (Symbol, Rahmenband, Sturzlinien, Sims, Rollladenkasten); Linien-Overrides lösen in TS auf,
+    Farben kommen als Slot zurück. `geometry/opening.ts`: `doorSymbol`/`doorLeaves` gelöscht, `windowSymbol` ist Fassade
+    (Schnitt nutzt sie weiter). Bitgleich zur alten Fassung (80 Zufallsfälle × 3 Detailgrade, alle 13 Linienklassen;
+    600 Zufalls-Fenstersymbole). Tote halbe Ports in `kernel2d` (door/window_symbol, jambs …) entfernt.
+    Offen: Räume, Dächer, Stützen, 2D-Zeichnung, Kontext, Schnittlinien.
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
   - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben

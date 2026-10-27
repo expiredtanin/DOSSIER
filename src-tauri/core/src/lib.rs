@@ -35,6 +35,8 @@ pub mod plan_buf;
 pub mod gpu_compile;
 pub mod plan_stairs;
 pub mod plan_walls;
+pub mod opening_geom;
+pub mod plan_openings;
 
 #[cfg(feature = "web")]
 mod web;

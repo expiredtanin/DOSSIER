@@ -1,9 +1,12 @@
 // Öffnungs-Domäne des Grundriss-Generators: Tür-/Fenstersymbole je Detailgrad
 // (Blatt/Schwenkbogen/Anschlag bzw. Rahmen/Sprossen/Glas), das optionale
-// Rahmenband (Zarge/Blockrahmen) samt Schichteinzug aus der Typ-Bibliothek,
-// sowie das Legacy-Türsymbol (`Door`, vor der Öffnungs-Typ-Bibliothek).
+// Rahmenband (Zarge/Blockrahmen) samt Schichteinzug aus der Typ-Bibliothek.
+//
+// Die Geometrie entsteht im Rust-Kern (`src-tauri/core/src/plan_openings.rs`, [K3a]); hier bleibt
+// die Auflösung aus dem Modell (Typ-Bibliothek, Linien-Overrides) und die Übersetzung in
+// `Primitive`-Objekte mit Farbe, Strichstärke und `openingId`. Fällt mit [K3d] weg.
 
-import type { Opening, Project, Vec2, Wall } from "../../model/types";
+import type { Opening, Project, Wall } from "../../model/types";
 import {
   getDoorType,
   getWindowType,
@@ -11,16 +14,8 @@ import {
   sashesOfWindowType,
   wallTypeThickness,
 } from "../../model/types";
-import {
-  doorLeaves,
-  doorSymbol,
-  openingGapQuad,
-  openingJambs,
-  wallAxisFrame,
-  windowSymbol,
-} from "../../geometry/opening";
 import { wallReferenceOffset } from "../../model/wall";
-import { add, along, dot, scale, sub } from "../../model/geometry";
+import { core } from "../../engine/coreWasm";
 import {
   NO_HATCH,
   OVERHEAD_DASH,
@@ -29,6 +24,17 @@ import {
   type DetailLevel,
   type Primitive,
 } from "./shared";
+
+/** Linienklassen in der Reihenfolge der Kern-Kodierung (`plan_openings.rs`). */
+const LINE_CLS = [
+  "door-leaf", "door-frame", "door-lintel", "opening-frame", "window-glass", "window-mullion",
+  "window-sash", "window-stulp", "window-sill", "window-frame", "window-shading",
+] as const;
+/** Strichmuster (Kern-Kodierung): 1 Sturz, 2 Überkopf, 3 gepunktet. */
+const DASHES: (number[] | undefined)[] = [undefined, [0.18, 0.09], OVERHEAD_DASH, [0.04, 0.08]];
+const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
+const LINTEL_CODE = { keine: 0, aussen: 1, innen: 2, beide: 3 } as const;
+const SILL_CODE = { aussen: 1, innen: 2, beide: 3 } as const;
 
 /**
  * Aufgelöste Rahmen-Parameter (Typ-Bibliothek) einer Tür-/Fenster-Öffnung —
@@ -74,133 +80,8 @@ function resolveOpeningFrameSpec(project: Project, o: Opening): OpeningFrameSpec
 }
 
 /**
- * Rahmenband + Oberlicht-Andeutung einer Tür-/Fenstertyp-Öffnung im
- * Grundriss-Schnitt. Nur aufgerufen, wenn `resolveOpeningFrameSpec` einen Typ
- * liefert — sonst bleibt die Darstellung exakt wie zuvor (kein neues Primitiv).
- *
- *  • Zarge             — schmales Umlauf-Rahmenband, ringsum um `frameWidth`
- *    von der vollen Öffnung (Pfosten × Wanddicke) nach innen eingezogen.
- *  • Blockrahmen (Tür) — kräftiges Rechteckprofil, sitzt PROUD an der
- *    gewählten Fläche (kein Einzug an den Pfosten, nur eine Tiefenscheibe von
- *    `frameWidth` ab der Nah-Fläche), kräftigere Linie.
- *  • Schichteinzug     — verschiebt die Nah-Fläche des Rahmens um
- *    `insetFromFace` von der gewählten Wandfläche nach innen; die Gegenfläche
- *    bleibt unverändert (der Rahmen reicht weiterhin bis dorthin).
- *  • Oberlicht         — Überkopf-Andeutung (gestrichelte Linie quer über die
- *    Öffnung), nur wenn `transomHeight > 0`.
- */
-function addOpeningFrameBand(
-  out: Primitive[],
-  project: Project,
-  wall: Wall,
-  o: Opening,
-  spec: OpeningFrameSpec,
-  greyed: boolean,
-): void {
-  const jambs = openingJambs(wall, o);
-  if (!jambs) return;
-  const { n } = wallAxisFrame(wall);
-  const total = wallTypeThickness(getWallType(project, wall));
-  const refOff = wallReferenceOffset(wall, total);
-  // "aussen" = die Fläche der ERSTEN Wandtyp-Schicht (kleinster Achs-Offset,
-  // s. addWallPoche/`off` startet bei `refOff-total/2`) — mit `n = leftNormal(u)`
-  // ist das die NEGATIVE Seite. Bug bis 2026-07-12: hier stand `+total/2` für
-  // "aussen" (positive Seite, tatsächlich "innen") — Türrahmenbänder mit
-  // insetFace:"aussen" landeten dadurch an der falschen Wandfläche.
-  const outerFace = refOff - total / 2; // "aussen"-Fläche (−n, erste Schicht)
-  const innerFace = refOff + total / 2; // "innen"-Fläche (+n, letzte Schicht)
-
-  // Schichteinzug: die GEWÄHLTE Fläche rückt um `insetFromFace` nach innen; die
-  // gegenüberliegende Fläche bleibt unverändert (der Rahmen reicht weiterhin
-  // bis dorthin) — vgl. DoorType.insetFromFace/WindowType.insetFromFace.
-  const clampedInset = Math.max(0, Math.min(spec.insetFromFace, total));
-  const nearIsAussen = spec.insetFace !== "innen";
-  // "Nach innen" heisst: von der gewählten Fläche RICHTUNG WANDMITTE (refOff) —
-  // von aussen (negative Seite) aus AUFWÄRTS (+clampedInset), von innen
-  // (positive Seite) aus ABWÄRTS (−clampedInset).
-  const faceNear = nearIsAussen ? outerFace + clampedInset : innerFace - clampedInset;
-  const faceFar = nearIsAussen ? innerFace : outerFace;
-  const lo = Math.min(faceNear, faceFar);
-  const hi = Math.max(faceNear, faceFar);
-
-  const { jambStart, jambEnd } = jambs;
-  const color = o.color ?? POCHE_STROKE;
-
-  // Rahmen-Rechteck NUR bei Türen zeichnen. Beim Fenster stellt bereits
-  // `windowSymbol` den Rahmen dar (voller Öffnungsumriss + Glaslinien); ein
-  // zusätzliches Band ergäbe ein doppeltes, verschachteltes Rechteck — genau
-  // das wirkte im 2D „nicht korrekt". Die Tür hat dort nur Blatt+Bogen, daher
-  // ist ihr Rahmenband die einzige Rahmenkontur und bleibt.
-  if (o.kind === "door") {
-    const frameWidth = Math.max(0, spec.frameWidth);
-    const isBlock = spec.frameKind === "blockrahmen";
-    let bandLo: number;
-    let bandHi: number;
-    let jStart: Vec2;
-    let jEnd: Vec2;
-    let weightMm: number;
-    if (isBlock) {
-      // Blockrahmen: volle Öffnungsbreite (kein Pfosten-Einzug), nur eine
-      // Tiefenscheibe von frameWidth ab der Nah-Fläche — sitzt proud VOR/auf der
-      // Laibung, statt schmal darin zu verschwinden (Zargen-Optik). "aussen"
-      // liegt bei `lo` (s. Kommentar zu outerFace/innerFace oben), die Scheibe
-      // beginnt dort und wächst RICHTUNG WANDMITTE (Richtung `hi`).
-      const depth = Math.min(frameWidth, hi - lo);
-      bandLo = nearIsAussen ? lo : hi - depth;
-      bandHi = nearIsAussen ? lo + depth : hi;
-      jStart = jambStart;
-      jEnd = jambEnd;
-      weightMm = SYMBOL_HAIRLINE_MM * 2.2;
-    } else {
-      // Zarge: ringsum um frameWidth von der vollen Öffnung eingezogenes,
-      // schmales Rahmenband (Laibungs-Anschlaglinie).
-      const jambSpan = Math.hypot(jambEnd.x - jambStart.x, jambEnd.y - jambStart.y);
-      const jambInset = Math.min(frameWidth, jambSpan / 2);
-      jStart = along(jambStart, jambEnd, jambInset);
-      jEnd = along(jambEnd, jambStart, jambInset);
-      const depthInset = Math.min(frameWidth, (hi - lo) / 2);
-      bandLo = lo + depthInset;
-      bandHi = hi - depthInset;
-      weightMm = SYMBOL_HAIRLINE_MM;
-    }
-
-    // Geschlossenes Rechteck aus 4 Kanten (Primitive "line", nicht "polygon" —
-    // so bleibt das Band per `cls` selektierbar/testbar wie die übrigen Symbole).
-    const p1 = add(jStart, scale(n, bandLo));
-    const p2 = add(jEnd, scale(n, bandLo));
-    const p3 = add(jEnd, scale(n, bandHi));
-    const p4 = add(jStart, scale(n, bandHi));
-    const edges: [Vec2, Vec2][] = [
-      [p1, p2],
-      [p2, p3],
-      [p3, p4],
-      [p4, p1],
-    ];
-    for (const [a, b] of edges) {
-      out.push({
-        kind: "line",
-        a,
-        b,
-        cls: "opening-frame",
-        weightMm,
-        color,
-        greyed,
-        openingId: o.id,
-      });
-    }
-  }
-
-  // Die frühere Oberlicht-Andeutung (gestrichelte Linie quer über die ganze
-  // Öffnung bei transomHeight>0) ist entfernt (Nutzer-Report: erscheint immer
-  // auf der Wandachse, unabhängig davon, ob die Schnittebene den Kämpfer
-  // überhaupt trifft — im horizontalen Grundriss-Schnitt architektonisch nicht
-  // aussagekräftig, ein Kämpfer ist ein Höhen-, kein Grundriss-Merkmal).
-}
-
-/**
- * Öffnungs-Symbol (Fenster/Tür) je Detailgrad. Anders als das Legacy-`addDoorSymbol`
- * arbeitet diese Funktion über die reinen Geometrie-Helfer (opening.ts) und taggt
- * ihre Primitive mit `openingId`, sodass die Öffnung im Plan selektierbar ist.
+ * Öffnungs-Symbol (Fenster/Tür) je Detailgrad. Arbeitet über den Kern (`plan_openings.rs`) und
+ * taggt ihre Primitive mit `openingId`, sodass die Öffnung im Plan selektierbar ist.
  *
  * Tür:
  *  • grob   — gerade Türblatt-Linie (die Lücke kommt aus der ausgesparten Poché).
@@ -208,8 +89,8 @@ function addOpeningFrameBand(
  *  • fein   — + Anschlag-Striche an beiden Pfosten.
  * Fenster:
  *  • grob   — eine einzelne Glaslinie über die Lücke.
- *  • mittel — Rahmen-Rechteck (Umriss) + eine Glaslinie.
- *  • fein   — Rahmen + zwei Glaslinien (Doppelverglasung angedeutet).
+ *  • mittel — Rahmen-Rechteck (Umriss) + Pfosten/Stulp.
+ *  • fein   — + Flügelrahmen, Fensterbank, Anschlagkerben.
  */
 export function addOpeningSymbol(
   out: Primitive[],
@@ -220,374 +101,118 @@ export function addOpeningSymbol(
   detail: DetailLevel,
   lwMm: number,
 ): void {
-  if (o.kind === "door") {
-    const sym = doorSymbol(wall, o);
-    if (!sym) return;
-    // Unsichtbares Pick-Polygon über der Öffnungslücke (Laibung × Wanddicke) —
-    // damit die Tür wie ein Fenster per Punkt-in-Polygon über die ganze
-    // Öffnungsfläche selektierbar ist (Türsymbol besteht sonst nur aus dünnem
-    // Blatt + Bogen, die man exakt treffen müsste). fill/stroke "none" ⇒ zeichnet
-    // nichts; `pickOpening` (PlanView) testet nur die `pts`.
-    const gap = openingGapQuad(project, wall, o);
-    if (gap) {
+  const total = wallTypeThickness(getWallType(project, wall));
+  const refOff = wallReferenceOffset(wall, total);
+  const door = o.kind === "door";
+  const wt = door ? undefined : getWindowType(project, o);
+  const frameSpec = door ? resolveOpeningFrameSpec(project, o) : undefined;
+  const sashes = wt ? sashesOfWindowType(wt) : [];
+  const strokeColor = o.color ?? POCHE_STROKE;
+  // Linien-Kategorien einzeln übersteuerbar: Rahmen-Schnitt, Rahmen-Aufsicht, Fenster
+  // (Flügelrahmen/Sprossen), Sims. `undefined` ⇒ Strichfarbe/Haarlinie.
+  const frameColor = o.frameLine?.color ?? strokeColor;
+  const frameWeight = o.frameLine?.weight ?? lwMm;
+  const frameViewWeight = o.frameViewLine?.weight ?? frameWeight;
+  const colors = [
+    "",
+    strokeColor,
+    frameColor,
+    o.frameViewLine?.color ?? frameColor,
+    o.sashLine?.color ?? strokeColor,
+    o.sillLineStyle?.color ?? strokeColor,
+  ];
+  const b: number[] = [
+    wall.start.x, wall.start.y, wall.end.x, wall.end.y, total, refOff,
+    o.position, o.width, door ? 1 : 0, DETAIL_CODE[detail],
+    // Tür
+    (o.swing ?? "left") !== "left" ? 1 : 0,
+    (o.openingDir ?? "in") !== "in" ? 1 : 0,
+    (o.hinge ?? "start") !== "start" ? 1 : 0,
+    o.swingAngle ?? Number.NaN,
+    (o.doorType ?? "normal") === "wandoeffnung" ? 1 : 0,
+    door ? Math.max(1, Math.round(getDoorType(project, o)?.leafCount ?? 1)) : 1,
+    LINTEL_CODE[o.lintelLines ?? "beide"],
+    // Rahmenband
+    frameSpec ? 1 : 0,
+    frameSpec?.frameWidth ?? 0,
+    frameSpec?.frameKind === "blockrahmen" ? 1 : 0,
+    frameSpec?.insetFromFace ?? 0,
+    frameSpec?.insetFace === "innen" ? 1 : 0,
+    // Fenster
+    wt ? 1 : 0,
+    wt ? wt.frameWidth ?? 0.06 : 0,
+    wt?.frameDepth ?? Number.NaN,
+    wt?.insetFromFace ?? Number.NaN,
+    wt?.insetFace === "innen" ? 1 : 0,
+    o.wingCount ?? Number.NaN,
+    detail === "fein" ? 2 : 1,
+    wt?.sillLine ? SILL_CODE[wt.sillLine.faces] : 0,
+    wt?.sillLine?.view === "unter" ? 1 : 0,
+    wt?.shading?.create ? 1 : 0,
+    wt?.shading?.box.width ?? 0,
+    wt?.shading?.box.height ?? 0,
+    // Strichstärken
+    SYMBOL_HAIRLINE_MM,
+    o.frameLine?.weight ?? SYMBOL_HAIRLINE_MM,
+    frameViewWeight,
+    o.sashLine?.weight ?? SYMBOL_HAIRLINE_MM,
+    o.sillLineStyle?.weight ?? SYMBOL_HAIRLINE_MM,
+    sashes.length,
+  ];
+  for (const s of sashes) {
+    b.push(s.kind === "pfosten" ? 1 : 0, s.autoWidth === false ? 0 : 1, s.width ?? Number.NaN, s.postWidth ?? Number.NaN,
+      s.opening && s.opening !== "fest" ? 1 : 0);
+  }
+  const f = core().plan_opening_flat(Float64Array.from(b));
+  if (f.length === 0) return;
+  const openingId = o.id;
+  const n = f[0];
+  let i = 1;
+  for (let k = 0; k < n; k++) {
+    if (f[i] === 1) {
+      const count = f[i + 4];
+      const pts = new Array<{ x: number; y: number }>(count);
+      for (let j = 0; j < count; j++) pts[j] = { x: f[i + 5 + 2 * j], y: f[i + 6 + 2 * j] };
+      const frame = f[i + 1] === 1;
       out.push({
         kind: "polygon",
-        pts: gap,
+        pts,
         fill: "none",
-        stroke: "none",
-        strokeWidthMm: 0,
+        stroke: frame ? colors[f[i + 3]] : "none",
+        strokeWidthMm: f[i + 2],
         hatch: NO_HATCH,
         greyed,
-        openingId: o.id,
+        openingId,
       });
-    }
-    // Tür-Typ „wandoeffnung": reiner Wanddurchbruch — KEIN Türblatt, KEIN
-    // Schwenkbogen. Nur die Öffnung/Laibung bleibt (die Wandlücke kommt aus der
-    // ausgesparten Poché; Sturz-/Anschlaglinien werden weiter unten gezeichnet).
-    // Entspricht `oeff_tuer_typ == "wandoeffnung"` im Rhino-Plugin.
-    const isWandoeffnung = (o.doorType ?? "normal") === "wandoeffnung";
-    if (!isWandoeffnung) {
-      // Türblätter (1 oder 2 Flügel, je DoorType.leafCount). Zweiflüglig ⇒ zwei
-      // halbbreite Blätter an gegenüberliegenden Pfosten (symmetrische Doppeltür).
-      const leafCount = Math.max(1, Math.round(getDoorType(project, o)?.leafCount ?? 1));
-      for (const leaf of doorLeaves(wall, o, leafCount)) {
-        out.push({
-          kind: "line",
-          a: leaf.hinge,
-          b: leaf.openEnd,
-          cls: "door-leaf",
-          weightMm: SYMBOL_HAIRLINE_MM,
-          greyed,
-          openingId: o.id,
-        });
-        // mittel + fein: Schwenkbogen von geschlossen → offen je Blatt.
-        if (detail !== "grob") {
-          out.push({
-            kind: "arc",
-            center: leaf.hinge,
-            from: leaf.closedEnd,
-            to: leaf.openEnd,
-            r: leaf.radius,
-            cls: "door-swing",
-            weightMm: SYMBOL_HAIRLINE_MM,
-            greyed,
-            openingId: o.id,
-          });
-        }
-      }
-    }
-    // fein: Anschlag-Striche an beiden Pfosten (quer zur Wand).
-    if (detail === "fein") {
-      const reveal = 0.06;
-      for (const jamb of [sym.jambStart, sym.jambEnd]) {
-        out.push({
-          kind: "line",
-          a: add(jamb, scale(sym.normal, reveal)),
-          b: add(jamb, scale(sym.normal, -reveal)),
-          cls: "door-frame",
-          weightMm: SYMBOL_HAIRLINE_MM,
-          greyed,
-          openingId: o.id,
-        });
-      }
-    }
-    // Rahmenband (Zarge/Blockrahmen) + Oberlicht-Andeutung — nur wenn die
-    // Öffnung einen Türtyp referenziert (siehe `resolveOpeningFrameSpec`).
-    const doorFrameSpec = resolveOpeningFrameSpec(project, o);
-    if (doorFrameSpec) addOpeningFrameBand(out, project, wall, o, doorFrameSpec, greyed);
-    // Sturzlinien (SIA, gestrichelt) — Überkopf-Projektion des Sturzes quer über
-    // die Öffnung an der Wand-Innen-/Aussenkante. Entspricht `_make_tuer_sturz_curves`
-    // im Rhino-Plugin. Default „beide" wenn nicht explizit gesetzt.
-    const lintelMode = o.lintelLines ?? "beide";
-    if (lintelMode !== "keine") {
-      const jambs = openingJambs(wall, o);
-      if (jambs) {
-        const { n } = wallAxisFrame(wall);
-        const total = wallTypeThickness(getWallType(project, wall));
-        const refOff = wallReferenceOffset(wall, total);
-        const halfD = total / 2;
-        // "aussen" = negative Seite (erste Wandtyp-Schicht), s. Kommentar in
-        // addOpeningFrameBand — Bug bis 2026-07-12: stand hier vertauscht.
-        const outerOff = refOff - halfD;
-        const innerOff = refOff + halfD;
-        // Strichmuster: gestrichelt (Überkopf-Projektion, SIA-Konvention).
-        const dash: number[] = [0.18, 0.09];
-        const strokeColor = o.color ?? POCHE_STROKE;
-        /** Linie quer über die Öffnung am gegebenen Perp-Offset. */
-        const lintelLine = (perpOff: number) => ({
-          a: add(jambs.jambStart, scale(n, perpOff)),
-          b: add(jambs.jambEnd,   scale(n, perpOff)),
-        });
-        if (lintelMode === "aussen" || lintelMode === "beide") {
-          const seg = lintelLine(outerOff);
-          out.push({
-            kind: "line" as const,
-            a: seg.a,
-            b: seg.b,
-            cls: "door-lintel",
-            weightMm: SYMBOL_HAIRLINE_MM,
-            dash,
-            color: strokeColor,
-            greyed,
-            openingId: o.id,
-          });
-        }
-        if (lintelMode === "innen" || lintelMode === "beide") {
-          const seg = lintelLine(innerOff);
-          out.push({
-            kind: "line" as const,
-            a: seg.a,
-            b: seg.b,
-            cls: "door-lintel",
-            weightMm: SYMBOL_HAIRLINE_MM,
-            dash,
-            color: strokeColor,
-            greyed,
-            openingId: o.id,
-          });
-        }
-      }
-    }
-    return;
-  }
-
-  // Fenster: Rahmen (mittel/fein) + Glaslinie(n) je Detailgrad + Fenstertyp.
-  const wt = getWindowType(project, o);
-  // Flügeltabelle NUR übergeben, wenn ein Fenstertyp auflösbar ist — fehlt er
-  // (kein `typeId`/unbekannt), bleibt `windowSymbol` beim reinen
-  // `o.wingCount`-Alt-Verhalten (siehe dortiger Kommentar, Regressionssicherheit).
-  const spec = wt
-    ? {
-        sashes: sashesOfWindowType(wt),
-        frameWidth: wt.frameWidth ?? 0.06,
-        frameDepth: wt.frameDepth,
-        insetFromFace: wt.insetFromFace,
-        insetFace: wt.insetFace,
-      }
-    : undefined;
-  // Glaslinienzahl NUR für den Alt-Pfad (kein `spec`) relevant — der typisierte
-  // Pfad entscheidet die Anzahl selbst nach SIA-Detailgrad (s. windowSymbol).
-  const glassCount = detail === "fein" ? 2 : 1;
-  const sym = windowSymbol(project, wall, o, glassCount, spec, detail);
-  if (!sym) return;
-  // Unsichtbares Pick-Polygon über der Öffnungslücke — macht das Fenster über
-  // die ganze Fläche selektierbar, auch bei „grob" (nur eine Glaslinie, sonst
-  // schwer zu treffen). Siehe Tür-Zweig oben.
-  const wgap = openingGapQuad(project, wall, o);
-  if (wgap) {
-    out.push({
-      kind: "polygon",
-      pts: wgap,
-      fill: "none",
-      stroke: "none",
-      strokeWidthMm: 0,
-      hatch: NO_HATCH,
-      greyed,
-      openingId: o.id,
-    });
-  }
-  // ── SIA-Fensterdarstellung, nach Detailgrad gestaffelt ────────────────────
-  // grob (1:100): weisse Öffnung + EINE dünne Glaslinie, sonst nichts.
-  // mittel (1:50): Blendrahmen-Rechteck + Pfosten-Trennlinien + Stulp-Mittel-
-  //   quadrat je Flügel-Junction + Glaslinie(n).
-  // fein (1:20): zusätzlich Flügelrahmen, Stulp als ZWEI Rechtecke, Fensterbank
-  //   (aussen) und Anschlag-/Laibungskerben — deutlich reicher als mittel.
-  const strokeColor = o.color ?? POCHE_STROKE;
-  const { n: wn } = wallAxisFrame(wall);
-
-  if (detail === "grob") {
-    // SIA 1:100 — nur eine dünne Glaslinie mittig über die weisse Öffnung.
-    // Zählt zur "Fenster"-Kategorie (sashLine) — dieselbe Glaslinie, die bei
-    // mittel/fein früher sichtbar war (jetzt dort entfernt, s. Fenster-Session).
-    const g = sym.glassLines[Math.floor(sym.glassLines.length / 2)] ?? sym.glassLines[0];
-    if (g) {
+      i += 5 + 2 * count;
+    } else if (f[i] === 2) {
+      const slot = f[i + 3];
+      const dash = DASHES[f[i + 4]];
       out.push({
         kind: "line",
-        a: g[0],
-        b: g[1],
-        cls: "window-glass",
-        weightMm: o.sashLine?.weight ?? SYMBOL_HAIRLINE_MM,
-        color: o.sashLine?.color ?? strokeColor,
+        a: { x: f[i + 5], y: f[i + 6] },
+        b: { x: f[i + 7], y: f[i + 8] },
+        cls: LINE_CLS[f[i + 1]],
+        weightMm: f[i + 2],
+        ...(dash ? { dash } : {}),
+        ...(slot ? { color: colors[slot] } : {}),
         greyed,
-        openingId: o.id,
+        openingId,
       });
-    }
-  } else {
-    // Linien-Kategorien einzeln übersteuerbar (Nutzer-Wunsch): Rahmen-Schnitt
-    // (Laibungs-/Stulp-Blöcke, geschnittenes Profil), Rahmen-Aufsicht (die
-    // durchlaufende Kontur DAZWISCHEN, projiziert statt geschnitten), Fenster
-    // (Flügelrahmen/Sprossen), Sims (Auf-/Untersicht-Andeutung, s. u.).
-    // `undefined` ⇒ bisheriges Verhalten (strokeColor/SYMBOL_HAIRLINE_MM);
-    // `frameViewLine` fällt zusätzlich auf `frameLine` zurück (eine Farbe für
-    // Schnitt+Aufsicht, bis der Nutzer sie explizit trennt).
-    const frameColor = o.frameLine?.color ?? strokeColor;
-    const frameWeight = o.frameLine?.weight ?? lwMm;
-    const frameHairline = o.frameLine?.weight ?? SYMBOL_HAIRLINE_MM;
-    const frameViewColor = o.frameViewLine?.color ?? frameColor;
-    const frameViewWeight = o.frameViewLine?.weight ?? frameWeight;
-    const sashColor = o.sashLine?.color ?? strokeColor;
-    const sashWeight = o.sashLine?.weight ?? SYMBOL_HAIRLINE_MM;
-
-    // Blendrahmen-Rechteck in Aufsicht (mittel + fein) — die durchlaufende
-    // Kontur zwischen den geschnittenen Laibungs-/Stulp-Blöcken.
-    out.push({
-      kind: "polygon",
-      pts: sym.frame,
-      fill: "none",
-      stroke: frameViewColor,
-      strokeWidthMm: frameViewWeight,
-      hatch: NO_HATCH,
-      greyed,
-      openingId: o.id,
-    });
-    // Pfosten-/Flügel-Trennlinien (Alt-Pfad ohne Typ — zählt als "Fenster").
-    for (const [a, b] of sym.mullionLines) {
-      out.push({ kind: "line", a, b, cls: "window-mullion", weightMm: sashWeight, color: sashColor, greyed, openingId: o.id });
-    }
-    // fein: Flügelrahmen (Flügelkontur) je öffenbarem Flügel — Schachtelung
-    // Blendrahmen → Flügelrahmen → Glas (Feindetail, hebt fein klar von mittel ab).
-    if (detail === "fein") {
-      for (const pts of sym.sashFrames) {
-        for (let i = 0; i < pts.length; i++) {
-          out.push({ kind: "line", a: pts[i], b: pts[(i + 1) % pts.length], cls: "window-sash", weightMm: sashWeight, color: sashColor, greyed, openingId: o.id });
-        }
-      }
-    }
-    // Laibungs-Blöcke an den Öffnungsenden (Blendrahmen-Querschnitt) — Teil des
-    // Blendrahmens, zählt zu "Rahmen".
-    for (const mark of sym.jambMarks) {
-      for (let i = 0; i < mark.length; i++) {
-        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: frameHairline, color: frameColor, greyed, openingId: o.id });
-      }
-    }
-    // Stulp-Mittelquadrat je Flügel-Junction (SIA-Signatur): mittel = EIN Quadrat,
-    // fein = ZWEI anliegende Rechtecke (die beiden Stulp-Stäbe der Flügel) —
-    // bereits tiefenkorrekt (inset-/insetFace-bewusst) in windowSymbol berechnet.
-    // Sitzt zwischen den Flügeln, zählt zu "Fenster" (separat vom Blendrahmen
-    // steuerbar — Nutzer-Feedback).
-    for (const mark of sym.meetingMarks) {
-      for (let i = 0; i < mark.length; i++) {
-        out.push({ kind: "line", a: mark[i], b: mark[(i + 1) % mark.length], cls: "window-stulp", weightMm: sashWeight, color: sashColor, greyed, openingId: o.id });
-      }
-    }
-    // Glaslinien (Anzahl je Detailgrad/Verglasung, s. glassCount).
-    for (const [a, b] of sym.glassLines) {
-      out.push({ kind: "line", a, b, cls: "window-glass", weightMm: SYMBOL_HAIRLINE_MM, greyed, openingId: o.id });
-    }
-    // Oberlicht-Andeutung (transom, gestrichelt) — mittel/fein.
-    const windowFrameSpec = resolveOpeningFrameSpec(project, o);
-    if (windowFrameSpec) addOpeningFrameBand(out, project, wall, o, windowFrameSpec, greyed);
-    // fein: Fensterbank (aussen) + Anschlag-/Laibungskerben.
-    if (detail === "fein") {
-      const jb = openingJambs(wall, o);
-      if (jb) {
-        const { jambStart, jambEnd } = jb;
-        // Tatsächliche Rahmen-Aussenkante (NICHT pauschal die volle Wandfläche —
-        // ein eingezogener Rahmen, s. {@link WindowType.insetFromFace}, hat seine
-        // Aussenkante weiter innen). "Aussen" ist der ALGEBRAISCH KLEINERE der
-        // beiden Tiefen-Werte in sym.frame (s. windowSymbol: frontRel für
-        // insetFace:"aussen" ist negativ) — welcher der beiden Eckpunkt-Paare das
-        // ist, hängt von insetFace ab, daher robust über Math.min bestimmt statt
-        // fest über sym.frame[0].
-        const outerN = Math.min(
-          dot(sub(sym.frame[0], jambStart), wn),
-          dot(sub(sym.frame[2], jambStart), wn),
-        );
-        // Fensterbank: schmales Rechteck vor der Aussenfläche, seitlich ~3 cm
-        // überstehend, ~4 cm auskragend (SIA-Sims-Andeutung im Grundriss).
-        // Auskragung geht IMMER weiter nach aussen (algebraisch kleiner, s. o.).
-        const ov = 0.03;
-        const proj = 0.04;
-        const s0 = along(jambStart, jambEnd, -ov);
-        const s1 = along(jambEnd, jambStart, -ov);
-        const b0 = add(s0, scale(wn, outerN));
-        const b1 = add(s1, scale(wn, outerN));
-        const b2 = add(s1, scale(wn, outerN - proj));
-        const b3 = add(s0, scale(wn, outerN - proj));
-        for (const [a, b] of [[b0, b1], [b1, b2], [b2, b3], [b3, b0]] as [Vec2, Vec2][]) {
-          out.push({ kind: "line", a, b, cls: "window-sill", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
-        }
-        // Anschlag-Kerben an beiden Pfosten (kurz quer zur Wand).
-        const reveal = 0.06;
-        for (const jamb of [jambStart, jambEnd]) {
-          out.push({ kind: "line", a: add(jamb, scale(wn, reveal)), b: add(jamb, scale(wn, -reveal)), cls: "window-frame", weightMm: SYMBOL_HAIRLINE_MM, color: strokeColor, greyed, openingId: o.id });
-        }
-      }
-    }
-  }
-  // Auf-/Untersicht-Andeutung ({@link WindowType.sillLine}): eine Referenzlinie
-  // an der Rahmen-Aussen-/Innenkante (NICHT der Wandachse — ersetzt die frühere,
-  // falsch positionierte Brüstungslinie), nur wenn der Typ es explizit wählt.
-  // "auf" (Aufsicht von oben, dünn gepunktet) vs. "unter" (Untersicht von unten,
-  // gestrichelt wie die übrigen Überkopf-Projektionen).
-  if (detail !== "grob" && wt?.sillLine) {
-    const { faces, view } = wt.sillLine;
-    const dash = view === "unter" ? OVERHEAD_DASH : [0.04, 0.08];
-    const sillColor = o.sillLineStyle?.color ?? strokeColor;
-    const sillWeight = o.sillLineStyle?.weight ?? SYMBOL_HAIRLINE_MM;
-    // Welches der beiden sym.frame-Eckpunkt-Paare physisch "aussen" ist, hängt
-    // von insetFace ab (s. windowSymbol) — robust über den Tiefen-Vergleich
-    // entlang wn bestimmt statt fest über den Index.
-    const pair01IsOuter = dot(sym.frame[0], wn) <= dot(sym.frame[3], wn);
-    const outerPair: [Vec2, Vec2] = pair01IsOuter ? [sym.frame[0], sym.frame[1]] : [sym.frame[3], sym.frame[2]];
-    const innerPair: [Vec2, Vec2] = pair01IsOuter ? [sym.frame[3], sym.frame[2]] : [sym.frame[0], sym.frame[1]];
-    if (faces === "aussen" || faces === "beide") {
-      out.push({ kind: "line", a: outerPair[0], b: outerPair[1], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
-    }
-    if (faces === "innen" || faces === "beide") {
-      out.push({ kind: "line", a: innerPair[0], b: innerPair[1], cls: "window-sill", weightMm: sillWeight, dash, color: sillColor, greyed, openingId: o.id });
-    }
-  }
-  // Rollladen-/Sonnenschutzkasten (P0-Minimalfassung, reine 2D-Kontur): ein
-  // gestricheltes Rechteck ÜBER der Öffnung, ausserhalb der Wand-Aussenfläche —
-  // Breite = `shading.box.width` (0/fehlt ⇒ Öffnungsbreite), die zweite
-  // Rechteckseite = `shading.box.height`. Die 3D-Tiefe (`box.depth`) bleibt für
-  // eine spätere 3D-Box reserviert (Fokus hier bewusst 2D, s. Aufgabenstellung).
-  // Gestrichelt wie die übrigen Überkopf-Projektionen (Sturz/Oberlicht) — der
-  // Kasten liegt oberhalb der Schnittebene und wird nur angedeutet.
-  if (wt?.shading?.create) {
-    const jambs = openingJambs(wall, o);
-    if (jambs) {
-      const { u, n: nrm } = wallAxisFrame(wall);
-      const total = wallTypeThickness(getWallType(project, wall));
-      const refOff = wallReferenceOffset(wall, total);
-      // "aussen" = negative Seite (erste Wandtyp-Schicht), s. Kommentar in
-      // addOpeningFrameBand — Bug bis 2026-07-12: stand hier vertauscht (der
-      // Rollladenkasten landete an der Innenfläche statt aussen am Sturz).
-      const outerFace = refOff - total / 2;
-      const axisWidth = Math.hypot(
-        jambs.jambEnd.x - jambs.jambStart.x,
-        jambs.jambEnd.y - jambs.jambStart.y,
-      );
-      const boxWidth = wt.shading.box.width > 0 ? wt.shading.box.width : axisWidth;
-      const boxHeight = Math.max(0, wt.shading.box.height);
-      const center = add(jambs.jambStart, scale(u, axisWidth / 2));
-      const half = boxWidth / 2;
-      const c1 = add(center, scale(u, -half));
-      const c2 = add(center, scale(u, half));
-      const p1 = add(c1, scale(nrm, outerFace));
-      const p2 = add(c2, scale(nrm, outerFace));
-      const p3 = add(c2, scale(nrm, outerFace + boxHeight));
-      const p4 = add(c1, scale(nrm, outerFace + boxHeight));
-      const edges: [Vec2, Vec2][] = [
-        [p1, p2],
-        [p2, p3],
-        [p3, p4],
-        [p4, p1],
-      ];
-      for (const [a, b] of edges) {
-        out.push({
-          kind: "line",
-          a,
-          b,
-          cls: "window-shading",
-          weightMm: SYMBOL_HAIRLINE_MM,
-          dash: OVERHEAD_DASH,
-          color: o.color ?? POCHE_STROKE,
-          greyed,
-          openingId: o.id,
-        });
-      }
+      i += 9;
+    } else {
+      out.push({
+        kind: "arc",
+        center: { x: f[i + 2], y: f[i + 3] },
+        from: { x: f[i + 4], y: f[i + 5] },
+        to: { x: f[i + 6], y: f[i + 7] },
+        r: f[i + 8],
+        cls: "door-swing",
+        weightMm: f[i + 1],
+        greyed,
+        openingId,
+      });
+      i += 9;
     }
   }
 }
