@@ -19,3 +19,4 @@ export { sunPosition, shadowPolygons, shadowOfPrism, projectLatLon } from "../an
 export type { SunPosition } from "../analysis/sun";
 export { checkSiteRules, allowedArea, multiPolygonArea, buildingFootprint, modelTop } from "../analysis/siteRules";
 export type { SiteCheck } from "../analysis/siteRules";
+export { encodeRenderScene } from "../plan/renderSceneBin";

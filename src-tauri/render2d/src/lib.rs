@@ -14,6 +14,7 @@
 
 pub mod demo;
 pub mod ortho;
+pub mod scene_bin;
 pub mod shaders;
 pub mod tessellate;
 pub mod types;

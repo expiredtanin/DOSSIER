@@ -6,17 +6,17 @@
 //
 // Ablauf im Frontend (siehe src/plan/useWasmPlanRenderer.ts):
 //   const r = await WebPlanRenderer.new(canvas, undefined);
-//   r.set_scene(JSON.stringify(planToRenderScene(plan)));
+//   r.set_scene_bin(encodeRenderScene(planToRenderScene(plan)));
 //   r.set_view_box(x, y, w, h); r.resize(px_w, px_h); r.render();
 //
-// Szenenformat = dieselbe serde-Struct wie der native Push (render2d::types::Scene),
-// als JSON-String hereingereicht. Pan/Zoom aendern nur die ViewBox (kein Re-Tess).
+// Szenenformat = Binaerpuffer (`scene_bin.rs`), dekodiert zu render2d::types::Scene. Pan/Zoom aendern nur die ViewBox (kein Re-Tess).
 
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::gpu::Renderer;
-use crate::types::{Scene, ViewBox};
+use crate::scene_bin::decode_scene;
+use crate::types::ViewBox;
 
 /// Eingebettete Plan-Schrift (Inter). cosmic-text findet auf wasm KEINE
 /// Systemfonts — ohne eingebettete Bytes bliebe der Grundriss textlos. Die
@@ -76,7 +76,7 @@ impl WebPlanRenderer {
         // NUR die auflösungsbezogenen Felder (Textur-/Viewport-Grössen) auf die
         // Adapter-Werte an, `max_buffer_size` bleibt unberührt klein. Für diese
         // App irrelevant (nur `Backends::BROWSER_WEBGPU`, kein WebGL2-Fallback),
-        // aber real limitierend für grosse `set_scene`-Tessellierungen (Nutzer-
+        // aber real limitierend für grosse `set_scene_bin`-Tessellierungen (Nutzer-
         // Report 2026-10-09, Kataster-Import). Stattdessen direkt die ECHTEN
         // Adapter-Limits anfordern (s. render3d/src/web.rs, gleicher Fix).
         let (device, queue) = adapter
@@ -133,12 +133,11 @@ impl WebPlanRenderer {
         })
     }
 
-    /// Setzt die zu zeichnende Szene aus einem JSON-String (Format =
-    /// render2d::types::Scene, identisch zum nativen Push). Re-tesselliert + laedt
-    /// die GPU-Puffer; ruft NICHT selbst `render` — das macht der Aufrufer.
-    pub fn set_scene(&mut self, json: &str) -> Result<(), JsValue> {
-        let scene: Scene = serde_json::from_str(json)
-            .map_err(|e| JsValue::from_str(&format!("Szene parsen: {e}")))?;
+    /// Setzt die zu zeichnende Szene aus dem Binaerformat von `scene_bin.rs` (TS-Seite:
+    /// `src/plan/renderSceneBin.ts`). Fremde Version/kaputte Daten → Fehler, die alte
+    /// Szene bleibt. Re-tesselliert + laedt die GPU-Puffer; ruft NICHT selbst `render`.
+    pub fn set_scene_bin(&mut self, bytes: &[u8]) -> Result<(), JsValue> {
+        let scene = decode_scene(bytes).map_err(|e| JsValue::from_str(&format!("Szene lesen: {e}")))?;
         self.renderer.upload_scene(&self.device, &scene);
         Ok(())
     }

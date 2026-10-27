@@ -42,27 +42,31 @@ fn release_project_lock(path: String, state: State<lock::LockState>) {
 // die aktuelle 2D-Szene bzw. die 3D-Waende hierher. Auf macOS (nur native2d)
 // geht das direkt an `native_tauri_window` (Tauri-Fenster als Surface); sonst
 // (Linux, oder native3d auf jeder Plattform) ueber `native.rs`s
-// EventLoopProxy in die winit-Loop. Die Payload kommt als rohes JSON
-// (`serde_json::Value`) an und wird erst dort in die render2d-/render3d-Typen
-// deserialisiert — so existieren beide Commands unter EINEM cfg, egal welche
-// Feature-Kombination gebaut wird.
+// EventLoopProxy in die winit-Loop. Die 2D-Szene kommt als roher Binaerpuffer
+// (`render2d::scene_bin`, Body des Requests), die 3D-Waende als JSON-Wert —
+// beide Commands existieren unter EINEM cfg, egal welche Feature-Kombination
+// gebaut wird.
 #[cfg(any(feature = "native2d", feature = "native3d"))]
 #[tauri::command]
-fn push_native_scene(app: tauri::AppHandle, scene: serde_json::Value) {
+fn push_native_scene(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
     {
         // macOS: die 2D-Ansicht laeuft ueber `native_embed` (Chunk-Upload), nicht
-        // ueber eine JSON-Szene.
-        let _ = (&app, &scene);
+        // ueber eine Szene.
+        let _ = (&app, &request);
     }
     #[cfg(all(feature = "native2d", not(target_os = "macos")))]
     {
         let _ = &app;
-        native::push_scene(scene);
+        if let tauri::ipc::InvokeBody::Raw(bytes) = request.body() {
+            native::push_scene(bytes);
+        } else {
+            eprintln!("push_native_scene: Rohdaten erwartet");
+        }
     }
     #[cfg(not(feature = "native2d"))]
     {
-        let _ = (app, scene);
+        let _ = (app, request);
     }
 }
 

@@ -58,12 +58,12 @@ enum UserEvent {
 /// Solange die Loop noch nicht steht, verpuffen Pushes bewusst still.
 static PROXY: OnceLock<EventLoopProxy<UserEvent>> = OnceLock::new();
 
-/// Webview-Push der 2D-Szene (JSON = `render2d::types::Scene`). Parse-Fehler
+/// Webview-Push der 2D-Szene (Binaerformat `render2d::scene_bin`). Formatfehler
 /// werden geloggt, ein fehlender Proxy still ignoriert (Loop startet noch).
 #[cfg(feature = "native2d")]
-pub fn push_scene(value: serde_json::Value) {
+pub fn push_scene(bytes: &[u8]) {
     let Some(proxy) = PROXY.get() else { return };
-    match serde_json::from_value::<Scene>(value) {
+    match render2d::scene_bin::decode_scene(bytes) {
         Ok(scene) => {
             let _ = proxy.send_event(UserEvent::Scene2d(scene));
         }

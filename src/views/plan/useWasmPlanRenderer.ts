@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Plan } from "../../core";
-import { planToRenderScene } from "../../core";
+import { encodeRenderScene, planToRenderScene } from "../../core";
 
 interface ViewBox {
   x: number;
@@ -25,7 +25,7 @@ interface ViewBox {
 
 /** Minimal-Typ des WASM-Exports (das echte .d.ts entsteht erst mit `build:engine`). */
 interface WebPlanRendererLike {
-  set_scene(json: string): void;
+  set_scene_bin(bytes: Uint8Array): void;
   set_view_box(x: number, y: number, w: number, h: number): void;
   set_paper_scale(n: number): void;
   set_text_scale(n: number): void;
@@ -115,9 +115,9 @@ export function useWasmPlanRenderer(
     const r = rendererRef.current;
     if (!r || !plan) return;
     try {
-      r.set_scene(JSON.stringify(planToRenderScene(plan)));
+      r.set_scene_bin(encodeRenderScene(planToRenderScene(plan)));
     } catch (e) {
-      console.warn("render2d set_scene fehlgeschlagen:", e);
+      console.warn("render2d set_scene_bin fehlgeschlagen:", e);
     }
   }, []);
 
