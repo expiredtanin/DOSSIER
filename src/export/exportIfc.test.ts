@@ -12,7 +12,7 @@
 // Fixture-Muster gespiegelt von exportSchedule.test.ts.
 
 import { describe, it, expect } from "vitest";
-import { exportIfcSpf, ifcGuid } from "./exportIfc";
+import { exportIfcSpf, ifcGuid, ifcString } from "./exportIfc";
 import type {
   Ceiling,
   ExtrudedSolid,
@@ -369,5 +369,22 @@ describe("exportIfcSpf — IFC4-Export", () => {
     const { defined, referenced, duplicates } = collectIds(spf);
     expect(duplicates).toEqual([]);
     expect([...referenced].filter((id) => !defined.has(id))).toEqual([]);
+  });
+});
+
+describe("STEP-Zeichenketten (ISO 10303-21)", () => {
+  it("Umlaute als \\X2\\…\\X0\\, ASCII unverändert, Apostroph verdoppelt", () => {
+    expect(ifcString("Gebäude")).toBe("'Geb\\X2\\00E4\\X0\\ude'");
+    expect(ifcString("Grösse Ü")).toBe("'Gr\\X2\\00F6\\X0\\sse \\X2\\00DC\\X0\\'");
+    expect(ifcString("it's a\\b")).toBe("'it''s a\\\\b'");
+  });
+  it("aufeinanderfolgende Zeichen in einem Block, Zeichen ausserhalb BMP als \\X4\\", () => {
+    expect(ifcString("äö")).toBe("'\\X2\\00E400F6\\X0\\'");
+    expect(ifcString("a😀")).toBe("'a\\X4\\0001F600\\X0\\'");
+  });
+  it("Steuerzeichen werden kodiert, die Datei bleibt reines ASCII", () => {
+    expect(ifcString("a\nb")).toBe("'a\\X2\\000A\\X0\\b'");
+    const spf = exportIfcSpf({ ...fixtureProject(), name: "Wohnüberbauung «Süd»" });
+    expect(/^[\x20-\x7e\n\r]*$/.test(spf)).toBe(true);
   });
 });

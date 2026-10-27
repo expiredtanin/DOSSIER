@@ -125,11 +125,37 @@ export function ifcGuid(id: string): string {
 
 // ── STEP-Formatierung ───────────────────────────────────────────────────────
 
-/** STEP-String-Literal ('…', Apostroph verdoppelt, Backslash verdoppelt). */
-function S(s: string): string {
-  const escaped = s.replace(/\\/g, "\\\\").replace(/'/g, "''");
-  return `'${escaped}'`;
+/**
+ * STEP-String-Literal (ISO 10303-21): druckbares ASCII bleibt, Backslash und Apostroph werden
+ * verdoppelt, alles andere (Umlaute, Steuerzeichen) als \X2\HHHH…\X0\ (BMP) bzw.
+ * \X4\HHHHHHHH…\X0\ (ausserhalb der BMP). Die Datei bleibt so reines ASCII.
+ */
+export function ifcString(s: string): string {
+  let out = "";
+  let run: number[] = [];
+  const flush = () => {
+    if (run.length === 0) return;
+    const wide = run.some((c) => c > 0xffff);
+    const hex = run.map((c) => c.toString(16).toUpperCase().padStart(wide ? 8 : 4, "0")).join("");
+    out += `${wide ? "\\X4\\" : "\\X2\\"}${hex}\\X0\\`;
+    run = [];
+  };
+  for (const ch of s) {
+    const c = ch.codePointAt(0)!;
+    if (c >= 0x20 && c <= 0x7e) {
+      flush();
+      out += ch === "\\" ? "\\\\" : ch === "'" ? "''" : ch;
+    } else {
+      // \X2\ und \X4\ nicht mischen: Wechsel der Breite beginnt einen neuen Block.
+      if (run.length > 0 && (run[0] > 0xffff) !== (c > 0xffff)) flush();
+      run.push(c);
+    }
+  }
+  flush();
+  return `'${out}'`;
 }
+
+const S = ifcString;
 
 /** STEP-REAL-Literal — immer mit Dezimalpunkt, ohne unnötige Nachkommastellen. */
 function R(x: number): string {
