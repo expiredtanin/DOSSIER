@@ -10,10 +10,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Plan } from './generatePlan';
-import { GpuChunkCache, compilePrimitivesToGpu, type GpuGeometry, type ViewBox } from './glPlan';
+import { GpuChunkCache } from './glPlan/glPlanChunks';
+import { compilePrimitivesToGpu } from './glPlan/glPlanCompile';
+import type { GpuGeometry, ViewBox } from './glPlan/glPlanTypes';
 import type { Primitive } from './generatePlan';
 import { NativeGl, type NativeInvoke } from './glPlan/nativeGl';
-import { readCssColor } from './useGlPlanRenderer';
+import { readCssColor } from './cssColor';
 import { NativeTextSync } from './nativeText';
 
 /** Läuft die App in einer Tauri-Webview? */

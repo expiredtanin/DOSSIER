@@ -25,7 +25,6 @@ import { docFromText } from "../text/richText";
 import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../text/fontMetrics";
 import { textFrameCorners } from "../text/textFrame";
 import { RichTextEditor } from "../text/RichTextEditor";
-import { useGlPlanRenderer } from "./useGlPlanRenderer";
 import { useNativeAvailable, useNativePlanRenderer } from "./useNativePlanRenderer";
 import { isGpuText } from "./nativeText";
 import { LiveMeet, LiveValue, createMeetStore, createValueStore } from "./planView/liveMeet";
@@ -804,39 +803,23 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const svgRef = useRef<SVGSVGElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Engine-Auswahl. STANDARD-Pfad: WebGL2 (useGlPlanRenderer); der SVG-Renderer
-  // bleibt automatischer Fallback (nur falls WebGL2/Shader nicht verfügbar), `?gl=0`
-  // erzwingt reines SVG. INTEGRATIONS-SPIKE: Mit `?engine=wasm` UND vorhandenem
-  // WebGPU (navigator.gpu) übernimmt statt WebGL2 der native render2d-Renderer als
-  // WASM/WebGPU-Viewport (useWasmPlanRenderer) — dieselbe Szene, dieselbe ViewBox,
-  // dasselbe SVG-Overlay (Text/Griffe/Auswahl) darüber. Fehlt WebGPU trotz Flag:
-  // stiller Fallback auf WebGL2 (+ Warnung).
-  const engineParam =
-    typeof window === "undefined"
-      ? null
-      : new URLSearchParams(window.location.search).get("engine");
+  // Engine-Auswahl. Zwei GPU-Pfade, kein WebGL2 mehr:
+  //  • NATIVE Metal-Fläche hinter der Webview (macOS-Tauri mit Feature native2d, s.
+  //    useNativePlanRenderer.ts): STANDARD, wo verfügbar; `?native=0` schaltet sie ab.
+  //  • render2d als WASM/WebGPU (useWasmPlanRenderer): überall sonst (Linux/Electron).
+  // Der SVG-Renderer bleibt die Interaktions-Ebene (Text/Griffe/Auswahl) und der Rückfall,
+  // wenn kein GPU-Pfad läuft (`?gl=0` erzwingt ihn). Solange die Verfügbarkeit des nativen
+  // Pfads noch erfragt wird (null), startet KEINE Engine.
   const hasWebGpu = typeof navigator !== "undefined" && "gpu" in navigator;
-  const wantWasm = engineParam === "wasm" && hasWebGpu;
-  useEffect(() => {
-    if (engineParam === "wasm" && !hasWebGpu) {
-      console.warn("engine=wasm angefragt, aber navigator.gpu fehlt → WebGL2-Fallback");
-    }
-  }, [engineParam, hasWebGpu]);
-  // NATIVE Metal-Fläche hinter der Webview (macOS-Tauri mit Feature native2d,
-  // s. useNativePlanRenderer.ts): STANDARD, wo verfügbar; `?native=0` schaltet auf
-  // WebGL2 zurück. Solange die Verfügbarkeit noch erfragt wird (null), startet
-  // KEINE Engine — sonst würde kurz ein WebGL-Kontext aufgebaut und wieder verworfen.
   const nativeAvail = useNativeAvailable();
   const glParam = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("gl");
   const nativeOptOut = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("native") === "0";
-  const wantNative = nativeAvail === true && !wantWasm && !nativeOptOut && glParam !== "0";
-  // WebGL2 nur, wenn weder der WASM- noch der native Pfad aktiv ist (und `?gl!=0`).
-  const wantGl = !wantWasm && !wantNative && nativeAvail !== null && glParam !== "0";
+  const wantNative = nativeAvail === true && !nativeOptOut && glParam !== "0";
+  const wantWasm = !wantNative && nativeAvail !== null && hasWebGpu && glParam !== "0";
   // Alle Hooks unbedingt aufrufen (Hook-Regeln); je nach Flag ist genau einer aktiv.
-  const glHook = useGlPlanRenderer(canvasRef, wantGl);
   const wasmHook = useWasmPlanRenderer(canvasRef, wantWasm);
   const nativeHook = useNativePlanRenderer(canvasRef, wantNative);
-  const activeEngine = wantWasm ? wasmHook : wantNative ? nativeHook : glHook;
+  const activeEngine = wantWasm ? wasmHook : nativeHook;
   // Text im Inline-Editor nicht zusätzlich nativ zeichnen.
   const setNativeExcludedText = nativeHook.setExcludedText;
   useEffect(() => {
@@ -845,7 +828,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const { render: renderGl, updateGeometry, ready: glReady } = activeEngine;
   // „GPU-Canvas montieren?" — beide GPU-Pfade brauchen das Canvas (an der ABSICHT
   // montiert, nicht am ready, sonst könnte die Engine mangels Canvas nie starten).
-  const wantGpu = wantGl || wantWasm || wantNative;
+  const wantGpu = wantWasm || wantNative;
   // Georeferenzierte Hintergrund-Rasterbilder (Luftbild) vorhanden? Der GPU-
   // Canvas löscht das Blatt UNDURCHSICHTIG (clearColor …,1) und würde ein
   // dahinterliegendes Bild verdecken. Daher bei aktivem Luftbild bewusst den

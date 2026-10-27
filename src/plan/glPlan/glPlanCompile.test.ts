@@ -5,7 +5,6 @@
 
 import { describe, it, expect } from 'vitest';
 import { compilePrimitivesToGpu, triangulate } from './glPlanCompile';
-import { computeOrthoMatrix } from './glPlanRender';
 import type { Vec2 } from '../../model/types';
 import type { Primitive } from '../generatePlan';
 
@@ -154,35 +153,6 @@ describe('triangulate', () => {
   });
 });
 
-describe('computeOrthoMatrix', () => {
-  it('liefert eine 4×4-Matrix', () => {
-    const m = computeOrthoMatrix({ x: 0, y: 0, w: 100, h: 100 }, 100, 100);
-    expect(m).toBeInstanceOf(Float32Array);
-    expect(m.length).toBe(16);
-  });
-
-  it('bildet die viewBox-Ecken bei passendem Aspekt auf Clip [-1,1] ab', () => {
-    // Quadratischer viewBox + quadratisches Canvas → keine Aspekt-Dehnung.
-    const m = computeOrthoMatrix({ x: 0, y: 0, w: 100, h: 100 }, 100, 100);
-    // Bildschirm-Punkt (0,0) = obere-linke Ecke → Clip (-1, +1).
-    const clip = (x: number, y: number) => ({
-      x: m[0] * x + m[4] * y + m[12],
-      y: m[1] * x + m[5] * y + m[13],
-    });
-    const tl = clip(0, 0);
-    expect(tl.x).toBeCloseTo(-1, 5);
-    expect(tl.y).toBeCloseTo(1, 5);
-    const br = clip(100, 100);
-    expect(br.x).toBeCloseTo(1, 5);
-    expect(br.y).toBeCloseTo(-1, 5);
-  });
-
-  it('verschiedene viewBoxes → verschiedene Matrizen', () => {
-    const a = computeOrthoMatrix({ x: 0, y: 0, w: 100, h: 100 }, 100, 100);
-    const b = computeOrthoMatrix({ x: 50, y: 50, w: 200, h: 200 }, 100, 100);
-    expect([...a].every((v, i) => v === b[i])).toBe(false);
-  });
-});
 
 describe('compilePrimitivesToGpu: kompaktes Linien-Vertex-Format (nativ)', () => {
   it('liefert 3 Wörter je Vertex statt 6 Floats', () => {
