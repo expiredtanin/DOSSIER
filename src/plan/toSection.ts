@@ -25,6 +25,7 @@ import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d } from "./toWalls3d";
 import { subtractVoidsInSection } from "./voids";
+import { appendBodySections, appendTerrainProfiles } from "./sectionExtras";
 import { loadEngine3d } from "../engine/engine3d";
 import {
   HATCH_INK,
@@ -40,7 +41,7 @@ import type { HatchRender } from "./generatePlan";
 
 /** Bauteil-Referenz eines Cut-Polygons/einer Kante (Art + Eingabe-Index). */
 export interface SectionComponentRef {
-  kind: "wall" | "slab" | "roof";
+  kind: "wall" | "slab" | "roof" | "body";
   index: number;
 }
 
@@ -118,6 +119,17 @@ export interface SectionOutput {
   cutPolygons: SectionCutPolygon[];
   visibleEdges: SectionEdge[];
   hiddenEdges: SectionEdge[];
+  /** Linien im Schnitt, die kein Bauteil-Umriss sind (Geländelinie). */
+  profiles?: SectionProfile[];
+}
+
+/** Geländelinie im Schnitt (Linienzug in (u, v)). */
+export interface SectionProfile {
+  kind: "terrain";
+  /** Id des Gelände-Netzes (`TerrainMesh.id`). */
+  id: string;
+  categoryCode?: string;
+  pts: Array<[number, number]>;
 }
 
 /** Minimal-Typ des WASM-Exports (das echte `.d.ts` entsteht erst beim wasm-Build). */
@@ -1211,6 +1223,15 @@ export function filterByDepth(
   output.hiddenEdges = output.hiddenEdges.filter(keep);
 }
 
+/** Körper-Schnittflächen: Herkunft + Kategorie nachtragen (Auswahl/Filter im Schnitt). */
+function attachBodyOwners(output: SectionOutput, project: Project): void {
+  const solids = project.extrudedSolids ?? [];
+  for (const cp of output.cutPolygons) {
+    if (cp.component.kind !== "body") continue;
+    cp.sourceId = solids[cp.component.index]?.id;
+  }
+}
+
 export async function computeSection(
   project: Project,
   level: DrawingLevel,
@@ -1276,6 +1297,10 @@ export async function computeSection(
     { x: plane.point[0], y: plane.point[2] },
     sectionUAxisModel(plane),
   );
+  // Freie Körper (B-Rep) und Gelände: über den allgemeinen Ebenenschnitt (meshSection.ts).
+  await appendBodySections(output, project, plane, sectionUAxisModel(plane));
+  attachBodyOwners(output, project);
+  appendTerrainProfiles(output, project, plane, sectionUAxisModel(plane));
   // Schnitt-Tiefe: Kanten weiter als `level.depth` hinter der Ebene ausblenden.
   if (level.depth !== undefined) filterByDepth(output, project, plane, level.depth);
   return output;

@@ -929,9 +929,31 @@ export function generateSectionPlan(
       ceilingId: kind === "slab" && !cp.stairId ? sourceId : undefined,
       roofId: kind === "roof" ? sourceId : undefined,
       stairId: cp.stairId,
+      extrudedSolidId: kind === "body" ? sourceId : undefined,
       noStrokeEdges: cp.noStrokeEdges,
       greyed: cp.categoryCode !== undefined && catDisplay(cp.categoryCode).greyed,
     });
+  }
+
+  // Geländelinie(n): kräftige Linie, über Kategorie filterbar.
+  for (const pr of output.profiles ?? []) {
+    if (pr.categoryCode !== undefined) {
+      if (opts.visibleCodes && !opts.visibleCodes.has(pr.categoryCode)) continue;
+      if (!catDisplay(pr.categoryCode).render) continue;
+    }
+    for (let i = 0; i + 1 < pr.pts.length; i++) {
+      const [a, b] = [pr.pts[i], pr.pts[i + 1]];
+      acc(a[0], a[1]);
+      acc(b[0], b[1]);
+      primitives.push({
+        kind: "line",
+        a: { x: a[0], y: a[1] },
+        b: { x: b[0], y: b[1] },
+        cls: "section-terrain",
+        weightMm: SECTION_GROUND_MM,
+        color: SECTION_INK,
+      });
+    }
   }
 
   // Verdeckte Kanten zuerst (liegen unter den sichtbaren), gestrichelt —
