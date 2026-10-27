@@ -6,6 +6,10 @@
 mod kernel2d;
 mod polygon;
 mod roof;
+mod sun;
+mod site_rules;
+mod auto_dimensions;
+mod kennzahlen;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

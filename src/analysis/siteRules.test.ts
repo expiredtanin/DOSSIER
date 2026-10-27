@@ -38,6 +38,11 @@ describe("zulässige Grundfläche", () => {
   it("Uhrzeigersinn der Parzelle spielt keine Rolle", () => {
     expect(multiPolygonArea(allowedArea({ ...base, parcel: parcel.slice().reverse() }))).toBeCloseTo(22 * 12, 6);
   });
+  it("einspringende Ecke: Abstand als Kreisbogen um die Ecke", () => {
+    // L-Parzelle, 2 m rundum: scharfe Innen-L 156 m² plus (8..10)² ausserhalb des Kreises um (10, 10).
+    const l = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 10, y: 10 }, { x: 10, y: 20 }, { x: 0, y: 20 }];
+    expect(multiPolygonArea(allowedArea({ parcel: l, defaultSetback: 2 }))).toBeCloseTo(160 - Math.PI, 3);
+  });
   it("ungültige Parzelle → keine Fläche, kein Absturz", () => {
     expect(allowedArea({ parcel: rect(0, 0, 1, 1).slice(0, 2), defaultSetback: 1 })).toEqual([]);
     expect(multiPolygonArea(allowedArea({ parcel, defaultSetback: Number.NaN }))).toBeCloseTo(600, 6);
