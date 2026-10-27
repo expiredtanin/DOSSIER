@@ -925,15 +925,6 @@ export interface SequenceRule {
  */
 export type DrawingLevelKind = "floor" | "section" | "elevation" | "drawing";
 
-/**
- * Eine Zeichnungsebene (DrawingLevel) — eine oberste Schnittebene des
- * Dokuments. Ein Geschoss trägt die Bauteile (über `floorId`); ein
- * Schnitt/Ansicht ist eine abgeleitete Projektion (vorerst Platzhalter); eine
- * reine Zeichnung ist eine freie 2D-Ebene ohne Geschossbezug.
- *
- * Geschoss nutzt floorHeight/cutHeight/baseElevation; Schnitt/Ansicht nutzen
- * linePoints/directionSign; "drawing" nutzt keines dieser Felder.
- */
 /** Eine Zeile des Raumprogramms (Soll): wird gegen die gezeichneten Räume geprüft (`analysis/kennzahlen.ts`). */
 export interface RoomProgramRow {
   /** Raumname wie im Modell (Vergleich ohne Gross-/Kleinschreibung, Präfix „Wohnen" trifft „Wohnen 2"). */
@@ -944,6 +935,22 @@ export interface RoomProgramRow {
   area: number;
   /** Soll-Anzahl (Default 1). */
   count?: number;
+}
+
+/**
+ * Eine Zeichnungsebene (DrawingLevel) — eine oberste Schnittebene des
+ * Dokuments. Ein Geschoss trägt die Bauteile (über `floorId`); ein
+ * Schnitt/Ansicht ist eine abgeleitete Projektion (vorerst Platzhalter); eine
+ * reine Zeichnung ist eine freie 2D-Ebene ohne Geschossbezug.
+ *
+ * Geschoss nutzt floorHeight/cutHeight/baseElevation; Schnitt/Ansicht nutzen
+ * linePoints/directionSign; "drawing" nutzt keines dieser Felder.
+ */
+/** Schattenstudie (`analysis/sun.ts`): der Schatten liegt auf dem Geschoss nächst ±0.00. */
+export interface SunStudy {
+  /** Zeitpunkt als ISO-8601-Text in UTC, z. B. "2026-12-21T11:00:00Z". */
+  when: string;
+  show: boolean;
 }
 
 export interface DrawingLevel {
@@ -2907,6 +2914,8 @@ export interface Project {
   roomProgram?: RoomProgramRow[];
   /** Parzellenfläche (m²) für Ausnützungs- und Überbauungsziffer. */
   parcelArea?: number;
+  /** Schattenstudie: Zeitpunkt (ISO 8601, UTC) und ob der Boden-Schatten im Grundriss erscheint. */
+  sunStudy?: SunStudy;
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
   layers: LayerCategory[];
   walls: Wall[];

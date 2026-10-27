@@ -72,3 +72,13 @@ describe("checkRoomProgram", () => {
     expect(r.extra.map((e) => e.name)).toEqual(["Keller"]);
   });
 });
+
+describe("checkRoomProgram mit unfertiger Zeile", () => {
+  it("leerer Name zieht keine Räume an sich", () => {
+    const n = (sampleProject.rooms ?? []).length;
+    const c = checkRoomProgram({ ...sampleProject, roomProgram: [{ name: "  ", area: 10 }] });
+    expect(c.rows[0].status).toBe("fehlt");
+    expect(c.rows[0].count).toBe(0);
+    expect(c.extra.length).toBe(n);
+  });
+});

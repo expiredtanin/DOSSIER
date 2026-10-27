@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { sunPosition, shadowOfPrism, shadowPolygons } from "./sun";
+import { sunPosition, shadowOfPrism, shadowPolygons, withoutHoles } from "./sun";
+import { polygonArea } from "../geometry/roomArea";
+import type { Vec2 } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
 
 describe("sunPosition", () => {
@@ -34,5 +36,33 @@ describe("Schatten", () => {
     expect(shadowOfPrism(sq, 0, 4, { azimuth: 0, elevation: -3 })).toEqual([]);
     expect(shadowPolygons(sampleProject, { azimuth: 200, elevation: 30 }).length).toBeGreaterThan(0);
     expect(shadowPolygons(sampleProject, { azimuth: 200, elevation: -3 })).toEqual([]);
+  });
+});
+
+describe("Schatten mit Hof", () => {
+  // Quadratischer Ring (aussen 20 m, Hof 10 m) als Polygon mit Loch.
+  const ring = (x0: number, y0: number, s: number): Vec2[] => [
+    { x: x0, y: y0 }, { x: x0 + s, y: y0 }, { x: x0 + s, y: y0 + s }, { x: x0, y: y0 + s },
+  ];
+  const courtyard = [ring(0, 0, 20), ring(5, 5, 10).reverse()];
+  it("lochfreie Teile haben dieselbe Fläche wie Aussenring minus Hof", () => {
+    const parts = withoutHoles(courtyard);
+    expect(parts.length).toBeGreaterThan(1);
+    const sum = parts.reduce((s, p) => s + Math.abs(polygonArea(p)), 0);
+    expect(sum).toBeCloseTo(400 - 100, 6);
+    // Kein Teil enthält den Hofmittelpunkt.
+    for (const p of parts) {
+      const xs = p.map((q) => q.x);
+      const ys = p.map((q) => q.y);
+      const inside = Math.min(...xs) < 10 && Math.max(...xs) > 10 && Math.min(...ys) < 10 && Math.max(...ys) > 10;
+      expect(inside && Math.abs(polygonArea(p)) > 150).toBe(false);
+    }
+  });
+  it("ohne Loch bleibt das Polygon unverändert", () => {
+    expect(withoutHoles([ring(0, 0, 3)])).toEqual([ring(0, 0, 3)]);
+  });
+  it("Projekt-Schatten: erster Ring je Polygon ist der Aussenring", () => {
+    const polys = shadowPolygons(sampleProject, { azimuth: 200, elevation: 30 });
+    for (const p of polys) expect(p[0].length).toBeGreaterThanOrEqual(3);
   });
 });

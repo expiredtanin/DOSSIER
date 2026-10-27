@@ -1,6 +1,7 @@
 // Inhalts-Panel „Flächenbilanz" (SIA 416) — listet alle Räume gruppiert nach
 // ihrer SIA-416-Blatt-Kategorie mit Zwischen-/Gesamtsummen und bietet einen
-// CSV-Export. Fläche/Bilanz werden LIVE aus den Raum-Umrissen abgeleitet
+// CSV-Export, darüber die Kennzahlenleiste mit Parzelle und Raumprogramm
+// (KennzahlenSection). Fläche/Bilanz werden LIVE aus den Raum-Umrissen abgeleitet
 // (geometry/roomArea: evaluateRoom/balance/roomsToCsv) — nie gespeichert.
 //
 // Daten kommen über usePanelHost (project.rooms). Bezeichner englisch, UI-Text
@@ -11,6 +12,7 @@ import { usePanelHost } from "./host";
 import { balance, evaluateRoom, roomsToCsv, siaLabelFull } from "../core";
 import type { Room } from "../model/types";
 import { roomDisplayName } from "../model/roomStamp";
+import { KennzahlenSection } from "./KennzahlenSection";
 
 /** Löst je Raum die anrechenbare (Netto-)Fläche + Kategorie auf. */
 function roomAreas(rooms: Room[]): { category: Room["siaCategory"]; area: number }[] {
@@ -52,6 +54,7 @@ export function RoomBalancePanel() {
   if (rooms.length === 0) {
     return (
       <div className="balance-panel">
+        <KennzahlenSection />
         <div className="balance-empty">{t("balance.empty")}</div>
       </div>
     );
@@ -80,6 +83,9 @@ export function RoomBalancePanel() {
           {t("balance.export")}
         </button>
       </div>
+
+      {/* Kennzahlenleiste, Parzelle und Raumprogramm. */}
+      <KennzahlenSection />
 
       {/* Raumliste (je Raum: Name · Geschoss · SIA · Fläche). */}
       <div className="balance-section-label">{t("balance.rooms")}</div>

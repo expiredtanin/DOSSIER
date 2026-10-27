@@ -89,8 +89,11 @@ export function shadowOfPrism(footprint: Vec2[], zBottom: number, zTop: number, 
   return hull(pts);
 }
 
-/** Vereinigter Schatten aller Wände, Körper und Dächer als Polygone (Aussenring + Löcher je Eintrag). */
-export function shadowPolygons(project: Project, sun: SunPosition): Vec2[][] {
+/** Ein Schatten-Polygon: `[0]` Aussenring, weitere Ringe sind Löcher (Höfe). Ringe offen (ohne Wiederholung des Startpunkts). */
+export type ShadowPolygon = Vec2[][];
+
+/** Vereinigter Schatten aller Wände, Körper und Dächer (leer bei Nacht). */
+export function shadowPolygons(project: Project, sun: SunPosition): ShadowPolygon[] {
   if (shadowShift(sun) === null) return [];
   const parts: Vec2[][] = [];
   for (const w of project.walls) {
@@ -138,8 +141,42 @@ export function shadowPolygons(project: Project, sun: SunPosition): Vec2[][] {
     .map((p) => [[...p.map((q): Pair => [q.x, q.y]), [p[0].x, p[0].y] as Pair]]);
   if (polys.length === 0) return [];
   const union = polygonClipping.union(polys[0], ...polys.slice(1));
-  // Pro Teilpolygon nur der Aussenring (Löcher eines Schattens sind Hofflächen: bewusst mitgeben).
+  return union.map((poly) => poly.map((ring) => ring.slice(0, -1).map(([x, y]) => ({ x, y }))));
+}
+
+/**
+ * Zerlegt ein Polygon mit Löchern in lochfreie Teile gleicher Gesamtfläche (für Ausgaben, die
+ * nur einfache Polygone füllen, z. B. das Plan-Primitiv). Jedes Loch wird von einer senkrechten
+ * Schnittlinie durch seinen Mittelpunkt geteilt; in den Streifen dazwischen berührt jeder
+ * Lochrest den Streifenrand und ist damit kein Loch mehr.
+ */
+export function withoutHoles(poly: ShadowPolygon): Vec2[][] {
+  const outer = poly[0];
+  if (!outer || outer.length < 3) return [];
+  if (poly.length === 1) return [outer];
+  const toPc = (ring: Vec2[]): Pair[] => [...ring.map((q): Pair => [q.x, q.y]), [ring[0].x, ring[0].y]];
+  const pc: PcPolygon = poly.filter((r) => r.length >= 3).map(toPc);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of outer) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const cuts = poly
+    .slice(1)
+    .filter((r) => r.length >= 3)
+    .map((r) => {
+      const xs = r.map((p) => p.x);
+      return (Math.min(...xs) + Math.max(...xs)) / 2;
+    })
+    .sort((a, b) => a - b);
+  const xs = [minX - 1, ...cuts, maxX + 1];
   const out: Vec2[][] = [];
-  for (const poly of union) for (const ring of poly) out.push(ring.slice(0, -1).map(([x, y]) => ({ x, y })));
+  for (let i = 0; i + 1 < xs.length; i++) {
+    if (xs[i + 1] - xs[i] < 1e-9) continue;
+    const slab: PcPolygon = [[[xs[i], minY - 1], [xs[i + 1], minY - 1], [xs[i + 1], maxY + 1], [xs[i], maxY + 1], [xs[i], minY - 1]]];
+    for (const piece of polygonClipping.intersection(pc, slab)) {
+      if (piece[0].length >= 4) out.push(piece[0].slice(0, -1).map(([x, y]) => ({ x, y })));
+    }
+  }
   return out;
 }

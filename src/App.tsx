@@ -35,6 +35,7 @@ import type {
 import { activePenSet, resolvePenColor, resolvePenWeight } from "./model/penSets";
 import { PenColorField } from "./ui/PenColorField";
 import { generatePlan, computeKennzahlen, checkRoomProgram } from "./core";
+import { programStatusLabel } from "./panels/KennzahlenSection";
 import type { CategoryDisplayResolver } from "./core";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./core";
 import { roofBaseElevation, roofGeometry } from "./core";
@@ -2420,7 +2421,7 @@ export default function App() {
         if (prog.rows.length > 0) {
           const bad = prog.rows.filter((r) => r.status !== "ok");
           lines.push(t("kennzahlen.program", { ok: prog.rows.length - bad.length, n: prog.rows.length }));
-          for (const r of bad.slice(0, 4)) lines.push(t("kennzahlen.programIssue", { name: r.name, status: r.status }));
+          for (const r of bad.slice(0, 4)) lines.push(t("kennzahlen.programIssue", { name: r.name, status: programStatusLabel(r.status) }));
         }
         notify(lines.join(" — "), "info");
       },

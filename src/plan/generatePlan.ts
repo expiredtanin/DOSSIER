@@ -72,6 +72,7 @@ import {
 import { addCeilingPoche } from "./generatePlan/ceilings";
 import { subtractVoidsInPlan } from "./voids";
 import { addContextContours } from "./generatePlan/context";
+import { addSunShadow } from "./generatePlan/sunShadow";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import {
   addDrawing2D,
@@ -349,6 +350,8 @@ export function generatePlan(
   compactUnderlay = false,
 ): Plan {
   const primitives: Primitive[] = [];
+  // Schattenstudie zuunterst (projektglobal, nur im Geschoss nächst ±0.00).
+  if (includeGlobal) addSunShadow(primitives, project, floorId);
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
   const floor = project.drawingLevels.find((z) => z.id === floorId);
   // Code → Kategorie-Strichstärke (mm), damit die Wand-Umrisslinie aus dem

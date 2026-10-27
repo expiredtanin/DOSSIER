@@ -8053,3 +8053,134 @@ body {
 .imp-overlay.recover-overlay {
   z-index: 2100;
 }
+
+/* Kennzahlenleiste, Parzelle und Raumprogramm (Flächenbilanz-Panel, KennzahlenSection). */
+.kz-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.kz-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  gap: 4px;
+}
+.kz-tile {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.kz-tile-label {
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.kz-tile-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.kz-parcel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kz-parcel > span:first-child {
+  flex: 1 1 auto;
+  color: var(--ink-2);
+}
+.kz-input {
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+}
+.kz-num {
+  width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.kz-program {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kz-program-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px 40px 64px 18px;
+  gap: 4px;
+  align-items: center;
+}
+.kz-program-row .kz-num {
+  width: 100%;
+}
+.kz-program-head {
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.kz-status {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kz-status.ok {
+  color: var(--ok, #2f8f4e);
+}
+.kz-status.bad {
+  color: var(--danger, #c0392b);
+}
+.kz-add {
+  align-self: flex-start;
+  padding: 3px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.kz-add:hover {
+  color: var(--ink);
+  border-color: var(--accent-border);
+}
+.kz-extra {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+/* Schattenstudie (Lage-Panel, SunStudySection). */
+.sun-study {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sun-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.site-panel .sun-preset {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+}
+.sun-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.sun-time {
+  font-variant-numeric: tabular-nums;
+  width: 3em;
+  text-align: right;
+}
+.sun-readout {
+  color: var(--ink-2);
+  font-size: 11px;
+}

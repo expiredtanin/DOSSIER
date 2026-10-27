@@ -105,7 +105,8 @@ export function checkRoomProgram(project: Project): ProgramCheck {
   const used = new Set<string>();
   const rows: ProgramRowResult[] = (project.roomProgram ?? []).map((row) => {
     const n = norm(row.name);
-    const hits = rooms.filter((r) => !used.has(r.id) && norm(r.name).startsWith(n) && (!row.siaCategory || r.cat === row.siaCategory));
+    // Leerer Name (Zeile im Editor noch unfertig) trifft nichts — „" wäre Präfix jedes Raums.
+    const hits = rooms.filter((r) => n !== "" && !used.has(r.id) && norm(r.name).startsWith(n) && (!row.siaCategory || r.cat === row.siaCategory));
     hits.forEach((h) => used.add(h.id));
     const targetCount = Math.max(1, row.count ?? 1);
     const area = hits.reduce((s, h) => s + h.area, 0);

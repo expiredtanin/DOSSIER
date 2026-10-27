@@ -69,7 +69,7 @@ const KNOWN_KEYS = new Set<string>([
   "walls", "ceilings", "roofs", "openings", "stairs", "rooms", "drawings2d", "context",
   "extrudedSolids", "columns", "groups", "parametricWalls", "overrideRules", "viewSnapshots",
   "viewSnapshotFolders", "layouts", "masterLayouts", "layoutFolders", "referenceElevationMasl",
-  "geoAnchor", "roomProgram", "parcelArea",
+  "geoAnchor", "roomProgram", "parcelArea", "sunStudy",
 ]);
 
 export type ParseProjectResult =
