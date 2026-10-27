@@ -1500,6 +1500,7 @@ export const de = {
   "cmd.align.distX": "waagrecht verteilen",
   "cmd.align.distY": "senkrecht verteilen",
   "cmd.explode.label": "Auflösen",
+  "cmd.autodim.label": "Aussenbemassung",
   "cmd.scale.label": "Skalieren",
   "cmd.scale.base": "Basispunkt:",
   "cmd.scale.factor": "Faktor oder Referenzlänge (Punkt):",

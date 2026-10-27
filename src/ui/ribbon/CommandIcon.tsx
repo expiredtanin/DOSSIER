@@ -45,6 +45,19 @@ export function CommandIcon({ name }: { name: string }) {
           <rect x="10.9" y="1.5" width="3.6" height="3.6" strokeDasharray="1.6 1.2" />
         </svg>
       );
+    case "autodim":
+      // Grundriss-Rechteck mit zwei Massketten (unten und rechts).
+      return (
+        <svg {...common}>
+          <rect x="3" y="3" width="7.5" height="6.5" />
+          <line x1="3" y1="12.5" x2="10.5" y2="12.5" />
+          <line x1="2.3" y1="13.2" x2="3.7" y2="11.8" />
+          <line x1="9.8" y1="13.2" x2="11.2" y2="11.8" />
+          <line x1="13.5" y1="3" x2="13.5" y2="9.5" />
+          <line x1="12.8" y1="3.7" x2="14.2" y2="2.3" />
+          <line x1="12.8" y1="10.2" x2="14.2" y2="8.8" />
+        </svg>
+      );
     case "measure":
       // Lineal/Massband: Strecke mit Endmarken + kleiner Skala.
       return (

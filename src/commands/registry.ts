@@ -42,6 +42,7 @@ import { mirrorCommand } from "./cmds/mirror";
 import { rotateCommand } from "./cmds/rotate";
 import { scaleCommand } from "./cmds/scale";
 import { explodeCommand } from "./cmds/explode";
+import { autodimCommand } from "./cmds/autodim";
 import { alignCommand } from "./cmds/align";
 import { joinCommand } from "./cmds/join";
 import { copyCommand } from "./cmds/copy";
@@ -104,6 +105,7 @@ export const COMMANDS: Record<string, Command> = {
   rotate: rotateCommand,
   scale: scaleCommand,
   explode: explodeCommand,
+  autodim: autodimCommand,
   align: alignCommand,
   join: joinCommand,
   copy: copyCommand,
@@ -215,6 +217,8 @@ export const ALIASES: Record<string, string> = {
   skalieren: "scale",
   x: "explode",
   aufloesen: "explode",
+  ab: "autodim",
+  aussenbemassung: "autodim",
   al: "align",
   ausrichten: "align",
   j: "join",

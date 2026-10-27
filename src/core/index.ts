@@ -92,6 +92,8 @@ export {
   openingGapQuad,
   openingVerticalExtent,
 } from "../geometry/opening";
+export { autoExteriorDimensions } from "../geometry/autoDimensions";
+export type { AutoDimension } from "../geometry/autoDimensions";
 
 export {
   nearestPolylineTarget,

@@ -1488,6 +1488,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.align.distX": "Distribute horizontally",
   "cmd.align.distY": "Distribute vertically",
   "cmd.explode.label": "Explode",
+  "cmd.autodim.label": "Exterior dimensions",
   "cmd.scale.label": "Scale",
   "cmd.scale.base": "Base point:",
   "cmd.scale.factor": "Factor or reference length (point):",

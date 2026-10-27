@@ -1126,6 +1126,17 @@ function computeBounds(
       g.pts.forEach(acc);
     } else if (g.shape === "dimension") {
       g.pts.forEach(acc);
+      // Masslinie liegt um `offset` versetzt (linke Normale je Segment), die Masszahl noch etwas
+      // weiter aussen — beides mit einrahmen, sonst schneiden Druck/Einpassen die Kette ab.
+      const reach = g.offset * 1.4;
+      for (let i = 0; i + 1 < g.pts.length; i++) {
+        const a = g.pts[i], b = g.pts[i + 1];
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        if (len < 1e-9) continue;
+        const nx = (-(b.y - a.y) / len) * reach, ny = ((b.x - a.x) / len) * reach;
+        acc({ x: a.x + nx, y: a.y + ny });
+        acc({ x: b.x + nx, y: b.y + ny });
+      }
     } else if (g.shape === "kote") acc(g.at);
     else if (g.shape === "detailref") acc(g.at);
     else if (g.shape === "scalebar") {
