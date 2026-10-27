@@ -10,6 +10,8 @@ mod sun;
 mod site_rules;
 mod auto_dimensions;
 mod kennzahlen;
+mod bulge;
+mod stair;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

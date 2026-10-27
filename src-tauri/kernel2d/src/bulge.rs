@@ -4,8 +4,8 @@
 // `bulge[i]` krümmt die Kante pts[i]→pts[i+1] (geschlossen zusätzlich
 // pts[n-1]→pts[0]); ein fehlender Eintrag oder 0 bedeutet Gerade.
 //
-// Die Bogen-Grundformeln (`bulge_arc`, `bulge_between_angles`) entsprechen
-// `src/geometry/bulge.ts` (dort weiter für Darstellung/Griffe genutzt).
+// Die Bogen-Grundformeln (`bulge_arc`, Tessellation, Drei-Punkt-/Radius-/Tangenten-Bogen) sind
+// die einzige Fassung; `src/geometry/bulge.ts` ist nur noch die Fassade darüber.
 
 use crate::{
     add, circle_circle_intersect, dist, line_circle_intersect, line_intersect, offset_segment,
@@ -103,6 +103,160 @@ pub fn bulge_between_angles(center: Vec2, r: f64, a_from: f64, a_to: f64, sweep_
     let q = point_on_circle(center, r, a_to);
     let m = point_on_circle(center, r, mid);
     bulge_from_sagitta_point(p, q, m)
+}
+
+/// Kreisbogen als Mittelpunkt/Radius/Winkelpaar (immer CCW von `a0` nach `a1`, wie `{shape:"arc"}`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArcParams {
+    pub center: Vec2,
+    pub r: f64,
+    pub a0: f64,
+    pub a1: f64,
+}
+
+/// Bogen als CCW-geordnetes Winkelpaar (bei negativem Schwenk a0/a1 vertauscht).
+fn ccw_arc(arc: BulgeArc) -> ArcParams {
+    if arc.sweep < 0.0 {
+        ArcParams { center: arc.center, r: arc.r, a0: arc.a1, a1: arc.a0 }
+    } else {
+        ArcParams { center: arc.center, r: arc.r, a0: arc.a0, a1: arc.a1 }
+    }
+}
+
+/// Tessellierte Bogenpunkte von `a` nach `b` inkl. beider Endpunkte (~1 Segment je 12°, gerade
+/// Segmentzahl, damit der Apex bei t=0.5 ein echter Punkt in der Mitte ist). Gerade → `[a, b]`.
+pub fn bulge_arc_points(a: Vec2, b: Vec2, bulge: f64) -> Vec<Vec2> {
+    let Some(arc) = bulge_arc(a, b, bulge) else { return vec![a, b] };
+    if !(arc.sweep.is_finite() && arc.r.is_finite()) {
+        return vec![a, b];
+    }
+    let mut n = ((arc.sweep.abs() / (PI / 15.0)).ceil() as usize).max(2);
+    if n % 2 != 0 {
+        n += 1;
+    }
+    (0..=n)
+        .map(|i| {
+            let t = arc.a0 + arc.sweep * (i as f64 / n as f64);
+            Vec2::new(arc.center.x + arc.r * t.cos(), arc.center.y + arc.r * t.sin())
+        })
+        .collect()
+}
+
+/// Tessellation einer ganzen Polylinie mit bulge je Kante (fehlend/0 = Gerade). Die Kantenpunkte
+/// werden verkettet, der Stossunterschied (doppelter Endpunkt) entfällt. Geschlossen: die
+/// Schlusskante a[n-1]→a[0] ist enthalten, der Startpunkt wird nicht wiederholt.
+pub fn bulge_polyline_points(pts: &[Vec2], bulge: &[f64], closed: bool) -> Vec<Vec2> {
+    let n = pts.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let edges = if closed { n } else { n - 1 };
+    let mut out = vec![pts[0]];
+    for i in 0..edges {
+        let seg = bulge_arc_points(pts[i], pts[(i + 1) % n], bulge_at(bulge, i));
+        let skip_last = closed && i == edges - 1;
+        let end = if skip_last { seg.len() - 1 } else { seg.len() };
+        out.extend_from_slice(&seg[1..end]);
+    }
+    out
+}
+
+/// Punkt auf dem Bogen bei t∈[0,1] (0=a, 1=b, 0.5=Apex) — der nächste Tessellationspunkt.
+pub fn bulge_point_at(a: Vec2, b: Vec2, bulge: f64, t: f64) -> Vec2 {
+    let pts = bulge_arc_points(a, b, bulge);
+    if pts.len() <= 2 {
+        return Vec2::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+    }
+    let last = (pts.len() - 1) as f64;
+    // wie JS `Math.round` (aufrunden bei .5), NaN → Index 0
+    let idx = (t * last + 0.5).floor();
+    let idx = if idx.is_nan() { 0.0 } else { idx.clamp(0.0, last) };
+    pts[idx as usize]
+}
+
+/// bulge des Drei-Punkt-Bogens a→through→b; (nahezu) kollinear → 0.
+pub fn bulge_through_point(a: Vec2, through: Vec2, b: Vec2) -> f64 {
+    let d = 2.0 * (a.x * (through.y - b.y) + through.x * (b.y - a.y) + b.x * (a.y - through.y));
+    if d.abs() < BULGE_EPS {
+        return 0.0;
+    }
+    let a2 = a.x * a.x + a.y * a.y;
+    let t2 = through.x * through.x + through.y * through.y;
+    let b2 = b.x * b.x + b.y * b.y;
+    let center = Vec2::new(
+        (a2 * (through.y - b.y) + t2 * (b.y - a.y) + b2 * (a.y - through.y)) / d,
+        (a2 * (b.x - through.x) + t2 * (a.x - b.x) + b2 * (through.x - a.x)) / d,
+    );
+    let r = (a.x - center.x).hypot(a.y - center.y);
+    if r < BULGE_EPS {
+        return 0.0;
+    }
+    let ang = |p: Vec2| (p.y - center.y).atan2(p.x - center.x);
+    let a_from = ang(a);
+    let ccw_to_through = norm_angle(ang(through) - a_from);
+    let ccw_to_b = norm_angle(ang(b) - a_from);
+    let sign = if ccw_to_through <= ccw_to_b { 1.0 } else { -1.0 };
+    bulge_between_angles(center, r, a_from, ang(b), sign)
+}
+
+/// Kreisbogen durch drei Punkte (CCW-geordnet); None bei kollinearen Punkten.
+pub fn arc_through_points(a: Vec2, through: Vec2, b: Vec2) -> Option<ArcParams> {
+    let bulge = bulge_through_point(a, through, b);
+    if bulge.abs() < BULGE_EPS {
+        return None;
+    }
+    bulge_arc(a, b, bulge).map(ccw_arc)
+}
+
+/// Kleinerer Bogen von `a` nach `b` mit Radius `r`; `near` wählt die Seite der Sehne.
+/// None, wenn `r` kleiner als die halbe Sehne oder die Sehne entartet ist.
+pub fn arc_from_start_end_radius(a: Vec2, b: Vec2, r: f64, near: Vec2) -> Option<ArcParams> {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let chord = dx.hypot(dy);
+    if chord < BULGE_EPS {
+        return None;
+    }
+    let h = chord / 2.0;
+    if r < h - BULGE_EPS {
+        return None;
+    }
+    let rr = r.max(h);
+    let s = rr - (rr * rr - h * h).max(0.0).sqrt();
+    let ux = dx / chord;
+    let uy = dy / chord;
+    let (nx, ny) = (-uy, ux);
+    let mx = (a.x + b.x) / 2.0;
+    let my = (a.y + b.y) / 2.0;
+    let side = if (near.x - mx) * nx + (near.y - my) * ny >= 0.0 { 1.0 } else { -1.0 };
+    bulge_arc(a, b, side * s / h).map(ccw_arc)
+}
+
+/// Bogen von `a` nach `b`, bei `a` tangential zur Richtung `dir` (Punkt auf dem Tangentenstrahl).
+/// None bei entarteter Tangente oder wenn sie entlang der Sehne zeigt.
+pub fn arc_from_start_end_direction(a: Vec2, b: Vec2, dir: Vec2) -> Option<ArcParams> {
+    let (tx, ty) = (dir.x - a.x, dir.y - a.y);
+    let t_len = tx.hypot(ty);
+    if t_len < BULGE_EPS {
+        return None;
+    }
+    let (ux, uy) = (tx / t_len, ty / t_len);
+    let tangent_normal = Vec2::new(-uy, ux);
+    let mid = Vec2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+    let chord_normal = Vec2::new(-(b.y - a.y), b.x - a.x);
+    let center = line_intersect(a, tangent_normal, mid, chord_normal)?;
+    let r = (a.x - center.x).hypot(a.y - center.y);
+    if r < BULGE_EPS {
+        return None;
+    }
+    let a0 = (a.y - center.y).atan2(a.x - center.x);
+    let a1 = (b.y - center.y).atan2(b.x - center.x);
+    let ccw_matches = -a0.sin() * ux + a0.cos() * uy >= 0.0;
+    Some(if ccw_matches {
+        ArcParams { center, r, a0, a1 }
+    } else {
+        ArcParams { center, r, a0: a1, a1: a0 }
+    })
 }
 
 /// bulge-Eintrag `i` (fehlend → 0, also Gerade).
@@ -775,5 +929,109 @@ mod tests {
         ]);
         assert_eq!(out[0].pts, vec![v(0.0, 0.0), v(1.0, 0.0), v(2.0, 0.0), v(3.0, 0.0)]);
         assert_eq!(out[0].bulge, vec![0.0, -0.25, -0.5]);
+    }
+
+    // --- Tessellation und Konstruktionen ---------------------------------------------------
+
+    #[test]
+    fn arc_points_halbkreis_apex_in_der_mitte() {
+        let pts = bulge_arc_points(v(0.0, 0.0), v(2.0, 0.0), 1.0);
+        assert_eq!(pts.len() % 2, 1); // gerade Segmentzahl
+        assert!(close(pts[0], 0.0, 0.0) && close(*pts.last().unwrap(), 2.0, 0.0));
+        assert!(close(pts[pts.len() / 2], 1.0, 1.0));
+        for p in &pts {
+            assert!(((p.x - 1.0).hypot(p.y) - 1.0).abs() < P);
+        }
+        // 180° / 12° = 15 -> 16 Segmente
+        assert_eq!(pts.len(), 17);
+    }
+
+    #[test]
+    fn arc_points_gerade_und_unsinn() {
+        let a = v(0.0, 0.0);
+        let b = v(4.0, 2.0);
+        assert_eq!(bulge_arc_points(a, b, 0.0), vec![a, b]);
+        assert_eq!(bulge_arc_points(a, a, 1.0), vec![a, a]);
+        assert_eq!(bulge_arc_points(a, b, f64::NAN), vec![a, b]);
+        let inf = bulge_arc_points(a, b, f64::INFINITY);
+        assert!(inf.len() >= 2);
+        let nan = bulge_arc_points(v(f64::NAN, 0.0), b, 1.0);
+        assert!(nan.len() >= 2);
+    }
+
+    #[test]
+    fn polyline_points_offen_und_geschlossen() {
+        let pts = [v(0.0, 0.0), v(2.0, 0.0), v(2.0, 2.0)];
+        let open = bulge_polyline_points(&pts, &[0.0, 0.0], false);
+        assert_eq!(open, pts.to_vec());
+        let closed = bulge_polyline_points(&pts, &[1.0], true);
+        // Kante 0 ist ein Halbkreis (17 Punkte, a..b), Kanten 1 und 2 gerade; Start nicht doppelt
+        assert_eq!(closed.len(), 17 + 1 + 0);
+        assert_eq!(closed[0], pts[0]);
+        assert_ne!(closed[closed.len() - 1], pts[0]);
+        assert!(bulge_polyline_points(&[], &[], true).is_empty());
+        assert_eq!(bulge_polyline_points(&[v(1.0, 1.0)], &[], false), vec![v(1.0, 1.0)]);
+        assert_eq!(bulge_polyline_points(&[v(1.0, 1.0)], &[], true).len(), 1);
+    }
+
+    #[test]
+    fn point_at_endpunkte_und_apex() {
+        let a = v(0.0, 0.0);
+        let b = v(2.0, 0.0);
+        assert!(close(bulge_point_at(a, b, 1.0, 0.0), 0.0, 0.0));
+        assert!(close(bulge_point_at(a, b, 1.0, 0.5), 1.0, 1.0));
+        assert!(close(bulge_point_at(a, b, 1.0, 1.0), 2.0, 0.0));
+        assert!(close(bulge_point_at(a, b, 0.0, 0.25), 0.5, 0.0)); // Gerade: linear
+        let _ = bulge_point_at(a, b, 1.0, f64::NAN); // kein Panic
+    }
+
+    #[test]
+    fn through_point_roundtrip() {
+        // Halbkreis über (0,0)–(1,1)–(2,0): Apex links der Sehne a→b? Sehne +x, Apex oben = links → +1
+        let b = bulge_through_point(v(0.0, 0.0), v(1.0, 1.0), v(2.0, 0.0));
+        assert!((b - 1.0).abs() < P);
+        let b = bulge_through_point(v(0.0, 0.0), v(1.0, -1.0), v(2.0, 0.0));
+        assert!((b + 1.0).abs() < P);
+        assert_eq!(bulge_through_point(v(0.0, 0.0), v(1.0, 0.0), v(2.0, 0.0)), 0.0);
+        assert_eq!(bulge_through_point(v(0.0, 0.0), v(0.0, 0.0), v(0.0, 0.0)), 0.0);
+        let _ = bulge_through_point(v(f64::NAN, 0.0), v(1.0, 0.0), v(2.0, 1.0));
+    }
+
+    #[test]
+    fn arc_through_points_ccw_geordnet() {
+        let arc = arc_through_points(v(2.0, 0.0), v(1.0, 1.0), v(0.0, 0.0)).unwrap();
+        assert!(close(arc.center, 1.0, 0.0) && (arc.r - 1.0).abs() < P);
+        // Lauf a→b ist CCW (über oben nach links): a0 = 0, a1 = π
+        assert!(arc.a0.abs() < P && (arc.a1 - PI).abs() < P);
+        let cw = arc_through_points(v(0.0, 0.0), v(1.0, 1.0), v(2.0, 0.0)).unwrap();
+        // CW von a nach b -> vertauscht: a0 = 0 (=b), a1 = π (=a)
+        assert!(cw.a0.abs() < P && (cw.a1 - PI).abs() < P);
+        assert!(arc_through_points(v(0.0, 0.0), v(1.0, 0.0), v(2.0, 0.0)).is_none());
+    }
+
+    #[test]
+    fn arc_start_end_radius_kleinerer_bogen() {
+        let a = v(0.0, 0.0);
+        let b = v(2.0, 0.0);
+        let up = arc_from_start_end_radius(a, b, 1.0, v(1.0, 5.0)).unwrap();
+        assert!(close(up.center, 1.0, 0.0) && (up.r - 1.0).abs() < P);
+        let flat = arc_from_start_end_radius(a, b, 10.0, v(1.0, -3.0)).unwrap();
+        assert!((flat.r - 10.0).abs() < P);
+        assert!(flat.center.y > 0.0); // Bogen wölbt nach unten -> Zentrum oben
+        assert!(arc_from_start_end_radius(a, b, 0.5, v(1.0, 1.0)).is_none());
+        assert!(arc_from_start_end_radius(a, a, 1.0, v(1.0, 1.0)).is_none());
+        let _ = arc_from_start_end_radius(a, b, f64::NAN, v(1.0, 1.0));
+    }
+
+    #[test]
+    fn arc_start_end_direction_tangente() {
+        // Start (0,0), Tangente +y, Ende (1,1): Viertelkreis um (1,0)? Mittelpunkt auf der Normalen (x-Achse)
+        let arc = arc_from_start_end_direction(v(0.0, 0.0), v(1.0, 1.0), v(0.0, 1.0)).unwrap();
+        assert!(close(arc.center, 1.0, 0.0) && (arc.r - 1.0).abs() < P);
+        // Tangente +y bei (0,0) um Zentrum (1,0): Lauf ist CW -> a0/a1 vertauscht
+        assert!((arc.a0 - PI / 2.0).abs() < P && (arc.a1 - PI).abs() < P);
+        assert!(arc_from_start_end_direction(v(0.0, 0.0), v(2.0, 0.0), v(1.0, 0.0)).is_none());
+        assert!(arc_from_start_end_direction(v(0.0, 0.0), v(2.0, 0.0), v(0.0, 0.0)).is_none());
+        let _ = arc_from_start_end_direction(v(f64::NAN, 0.0), v(2.0, 0.0), v(1.0, 1.0));
     }
 }

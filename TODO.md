@@ -26,11 +26,13 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
 - ◐ **[K1] 2D-Geometrie.** (27.10.) Polygon-Booleans aus Rust (i_overlay) ersetzen `polygon-clipping`
   (entfernt). `kernel2d` produktiv aus Rust (`kernel2d.ts` nur Fassade, Paritätstest weg; gemessen nicht
   langsamer). Schatten, Baurecht (exakter Puffer statt Kapsel), Aussenbemassung, Kennzahlen in Rust; die
-  SIA-416-Zuordnung (`roomArea.ts::balance`) und `checkRoomProgram` bleiben vorerst TS. Offen: `bulge.ts`
-  (Bogenformeln doppelt), Triangulierung, Straight Skeleton [B2]. · M
+  SIA-416-Zuordnung (`roomArea.ts::balance`) und `checkRoomProgram` bleiben vorerst TS. `bulge.ts` ist Fassade über den
+  Rust-Kern (`bulge_polyline_points` für ganze Polylinien; `hasRealBulge`/`pointOnCircle` bleiben TS,
+  Einzeiler). Offen: Triangulierung, Straight Skeleton [B2]. · M
 - ◐ **[K2] Geometrie-Ableitungen.** (27.10.) Dachgeometrie in Rust (`roof.rs`, `roof_skeleton.rs`;
-  `roofSkeleton.ts` gelöscht, ~2× schneller, Ergebnis bitgleich). Offen: Wand-Joins/-Bänder (`toWalls3d`),
-  Treppen, Räume. · L
+  `roofSkeleton.ts` gelöscht, ~2× schneller, Ergebnis bitgleich). Treppen in Rust (`stair_geometry`,
+  `stair_outline`, `stair_cut`; `stair.ts` Fassade, 27.10.). Offen: Wand-Joins/-Bänder (`toWalls3d`),
+  Räume. · L
 - ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
 - ○ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

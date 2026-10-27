@@ -19,7 +19,7 @@
 //     Tangenten-Referenz und bleibt gerade.
 
 import type { Drawing2D } from "../../model/types";
-import { bulgeArcPoints, bulgeThroughPoint } from "../../core";
+import { bulgePolylinePoints, bulgeThroughPoint } from "../../core";
 import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,
@@ -190,11 +190,7 @@ function polyDraft(
           : 0;
   const allBulges = cursor ? [...bulges, previewBulge] : bulges;
   // Bogen-Segmente für die Vorschau ausrollen.
-  const pts: Vec2[] = all.length ? [all[0]] : [];
-  for (let i = 0; i < all.length - 1; i++) {
-    const sub = bulgeArcPoints(all[i], all[i + 1], allBulges[i] ?? 0);
-    for (let k = 1; k < sub.length; k++) pts.push(sub[k]);
-  }
+  const pts = bulgePolylinePoints(all, allBulges, false);
   // Ring nur ab 3 Punkten zeigen; darunter bleibt die Vorschau offen.
   const showClosed = closed && all.length >= 3;
   const preview: DraftShape[] = [{ kind: "poly", pts, closed: showClosed }];

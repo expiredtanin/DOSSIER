@@ -32,7 +32,7 @@
 import type { Drawing2D } from "../../model/types";
 import { deltaHud, segmentHud, uniqueId } from "../../tools/types";
 import { filletCorner } from "../../core";
-import { bulgeArcPoints, bulgeThroughPoint } from "../../core";
+import { bulgePolylinePoints, bulgeThroughPoint } from "../../core";
 import type {
   Command,
   CommandContext,
@@ -257,12 +257,7 @@ function roundedRectPts(corners: Vec2[], r: number): { pts: Vec2[]; bulge: numbe
 
 /** Tessellierte Punkte einer gerundeten geschlossenen Kontur — für die Live-Vorschau. */
 function tessellateRounded(pts: Vec2[], bulge: number[]): Vec2[] {
-  const out: Vec2[] = [];
-  const n = pts.length;
-  for (let i = 0; i < n; i++) {
-    out.push(...bulgeArcPoints(pts[i], pts[(i + 1) % n], bulge[i]).slice(0, -1));
-  }
-  return out;
+  return bulgePolylinePoints(pts, bulge, true);
 }
 
 // ── Vorschau ─────────────────────────────────────────────────────────────────
