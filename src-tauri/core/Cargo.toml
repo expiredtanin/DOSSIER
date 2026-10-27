@@ -19,6 +19,7 @@ web = ["dep:wasm-bindgen", "dep:console_error_panic_hook"]
 
 [dependencies]
 i_overlay = { version = "9.1", default-features = false }
+kernel2d = { path = "../kernel2d" }
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 

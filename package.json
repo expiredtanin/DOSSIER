@@ -22,7 +22,6 @@
     "electron": "scripts/electron-shell.sh",
     "build:engine": "wasm-pack build src-tauri/render2d --release --target web --out-dir ../../src/engine/pkg --out-name render2d --no-default-features --features web",
     "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web",
-    "build:kernel2d": "wasm-pack build src-tauri/kernel2d --release --target web --out-dir ../../src/engine/pkgKernel2d --out-name kernel2d --no-default-features --features web",
     "build:dwgimport": "wasm-pack build src-tauri/dwgimport --release --target web --out-dir ../../src/engine/pkgDwgImport --out-name dwgimport --no-default-features --features web",
     "build:core": "wasm-pack build src-tauri/core --release --target web --out-dir ../../src/engine/pkgCore --out-name core --no-default-features --features web",
     "build:truck": "wasm-pack build src-tauri/trucksolid --release --target web --out-dir ../../src/engine/pkgTruck --out-name trucksolid --no-default-features --features web"
