@@ -4,6 +4,10 @@
 //! WASM-Modul lahm, [14]).
 
 mod polygon;
+mod sun;
+mod site_rules;
+mod auto_dimensions;
+mod kennzahlen;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

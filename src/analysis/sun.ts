@@ -5,9 +5,11 @@
 //  • `shadowOfPrism`/`shadowPolygons`: Boden-Schatten (z = 0) von Wänden, freien Körpern und
 //    Dächern als Vereinigung konvexer Hüllen (Prisma ∪ verschobenes Prisma). Modell: x = Ost,
 //    y = Nord, Höhen über dem Geländenullpunkt (Meter).
+// Gerechnet wird im Rust-Kern (`src-tauri/core/src/sun.rs`); hier wird nur aus dem Projekt
+// gesammelt und die Datenform übersetzt.
 
-import * as polygonClipping from "../geometry/polygonBool";
-import type { Pair, Polygon as PcPolygon } from "../geometry/polygonBool";
+import { core } from "../engine/coreWasm";
+import { FlatReader, FlatWriter, pointsOf } from "../geometry/coreFlat";
 import type { Project, Vec2 } from "../model/types";
 import { wallVerticalExtent } from "../model/wall";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
@@ -21,25 +23,9 @@ export interface SunPosition {
   elevation: number;
 }
 
-const RAD = Math.PI / 180;
-
 export function sunPosition(latDeg: number, lonDeg: number, when: Date): SunPosition {
-  const jd = when.getTime() / 86400000 + 2440587.5;
-  const n = jd - 2451545.0;
-  const L = (280.46 + 0.9856474 * n) % 360;
-  const g = ((357.528 + 0.9856003 * n) % 360) * RAD;
-  const lambda = (L + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * RAD;
-  const eps = (23.439 - 0.0000004 * n) * RAD;
-  const ra = Math.atan2(Math.cos(eps) * Math.sin(lambda), Math.cos(lambda));
-  const dec = Math.asin(Math.sin(eps) * Math.sin(lambda));
-  // Greenwich-Sternzeit → Stundenwinkel.
-  const gmst = (280.46061837 + 360.98564736629 * n) % 360;
-  const ha = (((gmst + lonDeg) * RAD - ra) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
-  const lat = latDeg * RAD;
-  const sinEl = Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(ha);
-  const el = Math.asin(sinEl);
-  const az = Math.atan2(-Math.sin(ha) * Math.cos(dec), Math.sin(dec) * Math.cos(lat) - Math.cos(dec) * Math.sin(lat) * Math.cos(ha));
-  return { azimuth: (((az / RAD) % 360) + 360) % 360, elevation: el / RAD };
+  const r = core().sun_position(latDeg, lonDeg, when.getTime());
+  return { azimuth: r[0], elevation: r[1] };
 }
 
 /** Breite/Länge des Projekts aus `geoAnchor` (LV95), sonst Zürich als Platzhalter. */
@@ -52,50 +38,23 @@ export function projectLatLon(project: Project): { lat: number; lon: number } {
   return { lat: 47.3769, lon: 8.5417 };
 }
 
-function hull(points: Vec2[]): Vec2[] {
-  const p = points.slice().sort((a, b) => a.x - b.x || a.y - b.y);
-  if (p.length < 3) return p;
-  const cross = (o: Vec2, a: Vec2, b: Vec2) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower: Vec2[] = [];
-  for (const q of p) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
-    lower.push(q);
-  }
-  const upper: Vec2[] = [];
-  for (const q of p.slice().reverse()) {
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
-    upper.push(q);
-  }
-  return lower.slice(0, -1).concat(upper.slice(0, -1));
-}
-
-/** Verschiebung des Schattens je Meter Höhe (Richtung von der Sonne weg). */
-function shadowShift(sun: SunPosition): Vec2 | null {
-  if (sun.elevation <= 0.5) return null;
-  const k = 1 / Math.tan(sun.elevation * RAD);
-  const az = sun.azimuth * RAD;
-  return { x: -Math.sin(az) * k, y: -Math.cos(az) * k };
-}
-
 /** Boden-Schatten eines Prismas `footprint` von `zBottom` bis `zTop` (leer bei Nacht). */
 export function shadowOfPrism(footprint: Vec2[], zBottom: number, zTop: number, sun: SunPosition): Vec2[] {
-  const k = shadowShift(sun);
-  if (!k || zTop <= zBottom || footprint.length < 3) return [];
-  const pts: Vec2[] = [];
-  for (const p of footprint) {
-    pts.push({ x: p.x + k.x * zBottom, y: p.y + k.y * zBottom });
-    pts.push({ x: p.x + k.x * zTop, y: p.y + k.y * zTop });
-  }
-  return hull(pts);
+  return pointsOf(core().sun_shadow_of_prism(new FlatWriter().pts(footprint).done(), zBottom, zTop, sun.azimuth, sun.elevation));
 }
 
 /** Ein Schatten-Polygon: `[0]` Aussenring, weitere Ringe sind Löcher (Höfe). Ringe offen (ohne Wiederholung des Startpunkts). */
 export type ShadowPolygon = Vec2[][];
 
-/** Vereinigter Schatten aller Wände, Körper und Dächer (leer bei Nacht). */
+/**
+ * Vereinigter Schatten aller Wände, Körper und Dächer (leer bei Nacht). Hier werden nur die
+ * Körper gesammelt — Wände und freie Körper als Prismen, Dächer als Punktwolke (Traufe auf
+ * Traufhöhe, Traufe/First/Grate auf Firsthöhe); Schatten und Vereinigung rechnet der Rust-Kern.
+ */
 export function shadowPolygons(project: Project, sun: SunPosition): ShadowPolygon[] {
-  if (shadowShift(sun) === null) return [];
-  const parts: Vec2[][] = [];
+  const prisms = new FlatWriter();
+  const prismCount = prisms.slot();
+  let nPrisms = 0;
   for (const w of project.walls) {
     const { zBottom, zTop } = wallVerticalExtent(project, w);
     const dx = w.end.x - w.start.x;
@@ -105,13 +64,13 @@ export function shadowPolygons(project: Project, sun: SunPosition): ShadowPolygo
     const t = wallTypeThickness(getWallType(project, w)) / 2;
     const nx = (-dy / len) * t;
     const ny = (dx / len) * t;
-    const fp = [
+    prisms.num(zBottom, zTop).ring([
       { x: w.start.x + nx, y: w.start.y + ny },
       { x: w.end.x + nx, y: w.end.y + ny },
       { x: w.end.x - nx, y: w.end.y - ny },
       { x: w.start.x - nx, y: w.start.y - ny },
-    ];
-    parts.push(shadowOfPrism(fp, zBottom, zTop, sun));
+    ]);
+    nPrisms++;
   }
   for (const s of project.extrudedSolids ?? []) {
     if (s.operation === "subtract") continue;
@@ -122,61 +81,38 @@ export function shadowPolygons(project: Project, sun: SunPosition): ShadowPolygo
       /* Geschoss fehlt → 0 */
     }
     const z0 = base + (s.baseOffset ?? 0);
-    parts.push(shadowOfPrism(s.points, z0, z0 + s.height, sun));
+    prisms.num(z0, z0 + s.height).ring(s.points);
+    nPrisms++;
   }
+  const clouds = new FlatWriter();
+  const cloudCount = clouds.slot();
+  let nClouds = 0;
   for (const r of project.roofs ?? []) {
     const eavesZ = roofBaseElevation(project, r);
     const geo = roofGeometry(r, eavesZ);
-    const k = shadowShift(sun)!;
-    const pts: Vec2[] = geo.eaves.map((p) => ({ x: p.x + k.x * eavesZ, y: p.y + k.y * eavesZ }));
     const top = eavesZ + geo.ridgeHeight;
-    for (const [a, b] of geo.ridges) for (const p of [a, b]) pts.push({ x: p.x + k.x * top, y: p.y + k.y * top });
-    for (const [, b] of geo.hips) pts.push({ x: b.x + k.x * top, y: b.y + k.y * top });
-    // Traufkante auf Traufhöhe + Firstpunkte → Hülle (Dach ist konvex genug für die Studie).
-    for (const p of geo.eaves) pts.push({ x: p.x + k.x * top, y: p.y + k.y * top });
-    parts.push(hull(pts));
+    const pts: number[] = [];
+    for (const p of geo.eaves) pts.push(p.x, p.y, eavesZ, p.x, p.y, top);
+    for (const [a, b] of geo.ridges) pts.push(a.x, a.y, top, b.x, b.y, top);
+    for (const [, b] of geo.hips) pts.push(b.x, b.y, top);
+    clouds.num(pts.length / 3, ...pts);
+    nClouds++;
   }
-  const polys: PcPolygon[] = parts
-    .filter((p) => p.length >= 3)
-    .map((p) => [[...p.map((q): Pair => [q.x, q.y]), [p[0].x, p[0].y] as Pair]]);
-  if (polys.length === 0) return [];
-  const union = polygonClipping.union(polys[0], ...polys.slice(1));
-  return union.map((poly) => poly.map((ring) => ring.slice(0, -1).map(([x, y]) => ({ x, y }))));
+  const out = core().sun_shadow_union(
+    prisms.set(prismCount, nPrisms).done(),
+    clouds.set(cloudCount, nClouds).done(),
+    sun.azimuth,
+    sun.elevation,
+  );
+  return new FlatReader(out).polygons();
 }
 
 /**
  * Zerlegt ein Polygon mit Löchern in lochfreie Teile gleicher Gesamtfläche (für Ausgaben, die
- * nur einfache Polygone füllen, z. B. das Plan-Primitiv). Jedes Loch wird von einer senkrechten
- * Schnittlinie durch seinen Mittelpunkt geteilt; in den Streifen dazwischen berührt jeder
- * Lochrest den Streifenrand und ist damit kein Loch mehr.
+ * nur einfache Polygone füllen, z. B. das Plan-Primitiv); Rechnung im Rust-Kern (`sun.rs`).
  */
 export function withoutHoles(poly: ShadowPolygon): Vec2[][] {
-  const outer = poly[0];
-  if (!outer || outer.length < 3) return [];
-  if (poly.length === 1) return [outer];
-  const toPc = (ring: Vec2[]): Pair[] => [...ring.map((q): Pair => [q.x, q.y]), [ring[0].x, ring[0].y]];
-  const pc: PcPolygon = poly.filter((r) => r.length >= 3).map(toPc);
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const p of outer) {
-    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
-  }
-  const cuts = poly
-    .slice(1)
-    .filter((r) => r.length >= 3)
-    .map((r) => {
-      const xs = r.map((p) => p.x);
-      return (Math.min(...xs) + Math.max(...xs)) / 2;
-    })
-    .sort((a, b) => a - b);
-  const xs = [minX - 1, ...cuts, maxX + 1];
-  const out: Vec2[][] = [];
-  for (let i = 0; i + 1 < xs.length; i++) {
-    if (xs[i + 1] - xs[i] < 1e-9) continue;
-    const slab: PcPolygon = [[[xs[i], minY - 1], [xs[i + 1], minY - 1], [xs[i + 1], maxY + 1], [xs[i], maxY + 1], [xs[i], minY - 1]]];
-    for (const piece of polygonClipping.intersection(pc, slab)) {
-      if (piece[0].length >= 4) out.push(piece[0].slice(0, -1).map(([x, y]) => ({ x, y })));
-    }
-  }
-  return out;
+  if (!poly[0] || poly[0].length < 3) return [];
+  if (poly.length === 1) return [poly[0]];
+  return new FlatReader(core().sun_without_holes(new FlatWriter().polygons([poly]).done())).polygons().map((p) => p[0]);
 }

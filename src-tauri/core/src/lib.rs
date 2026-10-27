@@ -6,6 +6,11 @@
 
 pub mod flat;
 pub mod polygon_bool;
+pub mod flat_read;
+pub mod sun;
+pub mod site_rules;
+pub mod auto_dimensions;
+pub mod kennzahlen;
 
 #[cfg(feature = "web")]
 mod web;
