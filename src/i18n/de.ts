@@ -1763,6 +1763,7 @@ export const de = {
   "window.controls": "Fenster",
   "window.close": "Schliessen",
   "window.minimize": "Minimieren",
+  "startup.previousCrashed": "Dossier wurde beim letzten Mal nicht sauber beendet. Ungesicherte Arbeit wird beim Öffnen zur Wiederherstellung angeboten.",
   "project.open.failed": "Projekt konnte nicht geöffnet werden.",
   "menu.native.clashCheck": "Kollisionsprüfung …",
   "clash.none": "Keine Kollisionen gefunden.",

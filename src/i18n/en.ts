@@ -1724,6 +1724,7 @@ export const en: Record<TranslationKey, string> = {
   "window.controls": "Window",
   "window.close": "Close",
   "window.minimize": "Minimize",
+  "startup.previousCrashed": "Dossier did not shut down cleanly last time. Unsaved work is offered for recovery when you open it.",
   "project.open.failed": "Project could not be opened.",
   "menu.native.clashCheck": "Clash detection …",
   "clash.none": "No clashes found.",

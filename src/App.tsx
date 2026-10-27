@@ -106,6 +106,7 @@ import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
 import { StatusBar } from "./ui/StatusBar";
 import { isOffline, setOffline } from "./net/net";
+import { markSessionClean, markSessionStart } from "./state/startupGuard";
 import { getTool } from "./tools/tools";
 import { computeSnap } from "./tools/snapping";
 import {
@@ -2663,6 +2664,17 @@ export default function App() {
   // aktiv. Sonst sind Cursor/Zoom bedeutungslos (PlanView ist nicht montiert →
   // das Handle ist null, Aktionen sind No-Ops).
   const planActive = activeLevel.kind === "floor" && viewType === "grundriss";
+  // Start-Protokoll: war der letzte Lauf unsauber beendet, kurz darauf hinweisen (Autosave sichert
+  // die Daten); beim Schliessen die Sitzung als sauber markieren.
+  useEffect(() => {
+    const r = markSessionStart();
+    if (r.previousCrashed) notify(t("startup.previousCrashed"), "warning");
+    const clean = () => markSessionClean();
+    window.addEventListener("pagehide", clean);
+    return () => window.removeEventListener("pagehide", clean);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Offline-Modus (Einstellungen → Allgemein): sperrt alle entfernten Abrufe (src/net/net.ts).
   const [offline, setOfflineState] = useState<boolean>(() => isOffline());
   const onOfflineChange = (v: boolean) => {
