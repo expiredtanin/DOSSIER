@@ -12,6 +12,9 @@ mod auto_dimensions;
 mod kennzahlen;
 mod bulge;
 mod stair;
+mod room_area;
+mod room_boundary;
+mod polygon_holes;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

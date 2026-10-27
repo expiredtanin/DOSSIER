@@ -2,7 +2,30 @@
 // insbesondere die Einhängung der Kategorie AGF (Aussengeschossfläche).
 
 import { describe, expect, it } from "vitest";
-import { balance, roomsToCsv, SIA_CATEGORIES, siaLabel } from "./roomArea";
+import { core } from "../engine/coreWasm";
+import { balance, centroid, evaluateRoom, polygonArea, roomsToCsv, SIA_CATEGORIES, siaLabel } from "./roomArea";
+
+describe("Kern-Anbindung", () => {
+  it("Kategorie-Namen und -Reihenfolge stimmen mit dem Rust-Kern überein", () => {
+    expect(core().room_sia_categories()).toEqual([...SIA_CATEGORIES]);
+  });
+
+  it("evaluateRoom: Brutto/Netto/Umfang/Schwerpunkt, Abzug geklemmt", () => {
+    const r = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }];
+    const e = evaluateRoom(r, "NNF", { deduction: 2 });
+    expect(e).toMatchObject({ grossArea: 12, netArea: 10, perimeter: 14, category: "NNF", label: "Nebennutzfläche" });
+    expect(e.centroid).toEqual({ x: 2, y: 1.5 });
+    expect(evaluateRoom(r, "HNF", { deduction: 99 }).netArea).toBe(0);
+    expect(evaluateRoom(r, "HNF", { deduction: -1 }).netArea).toBe(12);
+    expect(polygonArea([...r].reverse())).toBe(12);
+    expect(centroid([])).toEqual({ x: 0, y: 0 });
+  });
+
+  it("Unsinn ergibt NaN statt Fehler", () => {
+    expect(polygonArea([{ x: Number.NaN, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }])).toBeNaN();
+    expect(balance([{ category: "HNF", area: Number.NaN }]).total).toBe(0);
+  });
+});
 
 describe("SIA_CATEGORIES", () => {
   it("enthält AGF als Blatt-Kategorie", () => {
