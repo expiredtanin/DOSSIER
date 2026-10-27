@@ -239,10 +239,10 @@ export function wallLayersReversedInU(owner: Wall, uWorld: Vec2): boolean {
 // `projectToWalls3d` zerlegt EINE Wand mit Öffnungen in mehrere Teilquader
 // (Pfeiler/Brüstung/Sturz) — die Emission ist also nicht 1:1 Wand→Element.
 // Um einen `index` wieder auf seine Quellwand zurückzuführen, wird hier exakt
-// dieselbe Segmentierungs-/Skip-Logik wie `emitWall`/`pushSegment`
-// (toWalls3d.ts) repliziert — NICHT die Geometrie, nur welches Quellelement
+// dieselbe Segmentierungs-/Skip-Logik wie `emitWalls` (Schnitt-Pfad in
+// `src-tauri/core/src/wall_bands.rs`) repliziert — NICHT die Geometrie, nur welches Quellelement
 // pro emittiertem Segment "besitzt". Bleibt diese Zählung nicht exakt parallel
-// zu `emitWall`, verschieben sich die Indizes und die Hatch-Auflösung wird
+// zu `emitWalls`, verschieben sich die Indizes und die Hatch-Auflösung wird
 // falsch (harmlos: der Aufrufer fällt dann pro Cut-Polygon auf die generische
 // Schnitt-Schraffur zurück, siehe `resolveWallSectionStyle`/`generatePlan.ts`).
 const OWNER_EPS = 1e-4;

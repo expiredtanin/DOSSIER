@@ -13,6 +13,8 @@ pub mod sun;
 pub mod site_rules;
 pub mod auto_dimensions;
 pub mod kennzahlen;
+pub mod joins;
+pub mod wall_bands;
 
 #[cfg(feature = "web")]
 mod web;

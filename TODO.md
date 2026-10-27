@@ -29,8 +29,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   SIA-416-Zuordnung (`roomArea.ts::balance`) und `checkRoomProgram` bleiben vorerst TS. Offen: `bulge.ts`
   (Bogenformeln doppelt), Triangulierung, Straight Skeleton [B2]. · M
 - ◐ **[K2] Geometrie-Ableitungen.** (27.10.) Dachgeometrie in Rust (`roof.rs`, `roof_skeleton.rs`;
-  `roofSkeleton.ts` gelöscht, ~2× schneller, Ergebnis bitgleich). Offen: Wand-Joins/-Bänder (`toWalls3d`),
-  Treppen, Räume. · L
+  `roofSkeleton.ts` gelöscht, ~2× schneller, Ergebnis bitgleich). Offen: Treppen, Räume. · L
+  - ✅ (27.10.) Wand-Joins und -Bänder in Rust (`joins.rs`, `wall_bands.rs`): Gehrung/T-Stoss/Kreuzung,
+    Pro-Schicht-Cuts, Nah-Putz-Aussparungen, Decken-Dominanz, Öffnungs-Löcher, `topDrop` unter Dächern.
+    `model/joins.ts` und `toWalls3d/bands.ts` sammeln nur noch aus dem `Project` und übergeben flach
+    (Decken/Dächer einmal je Geschoss). Ergebnis bitgleich (Vergleich über 27 Projekte inkl.
+    Zufallsgrundrisse), `computeJoins` ~10×, `projectToWalls3d` (1296 Wände) ~4× schneller.
 - ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
 - ○ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

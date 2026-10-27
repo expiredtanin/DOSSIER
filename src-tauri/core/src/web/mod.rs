@@ -10,6 +10,8 @@ mod sun;
 mod site_rules;
 mod auto_dimensions;
 mod kennzahlen;
+mod joins;
+mod wall_bands;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
