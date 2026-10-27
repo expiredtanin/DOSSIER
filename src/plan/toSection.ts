@@ -267,14 +267,6 @@ export function wallSegmentOwners(project: Project): Wall[] {
       const v = openingVerticalExtent(project, wall, op);
       cutouts.push({ from: iv.from, to: iv.to, oBottom: v.zBottom, oTop: v.zTop });
     }
-    for (const d of project.doors ?? []) {
-      if (d.hostWallId !== wall.id) continue;
-      const from = Math.max(0, Math.min(d.position, axisLen));
-      const to = Math.max(from, Math.min(d.position + d.width, axisLen));
-      if (to - from < OWNER_EPS) continue;
-      const oTop = Math.min(zTop, zBottom + d.height);
-      cutouts.push({ from, to, oBottom: zBottom, oTop });
-    }
     cutouts.sort((a, b) => a.from - b.from);
 
     if (cutouts.length === 0) {

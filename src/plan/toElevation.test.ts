@@ -295,7 +295,6 @@ function elevationProject(opts: { overhang: boolean }): Project {
     ],
     layers: [{ code: "20", name: "Wände", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls: [w("NEAR", 0), w("FAR", 3)],
-    doors: [],
     openings: [],
     ceilings: opts.overhang
       ? [

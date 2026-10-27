@@ -18,7 +18,7 @@ function collection(project: Project, kind: PickKind): readonly WithCategory[] {
     case "wall": return p.walls ?? [];
     case "drawing": return p.drawings2d ?? [];
     case "ceiling": return p.ceilings ?? [];
-    case "opening": return [...(p.openings ?? []), ...(p.doors ?? [])];
+    case "opening": return p.openings ?? [];
     case "stair": return p.stairs ?? [];
     case "room": return p.rooms ?? [];
     case "roof": return p.roofs ?? [];

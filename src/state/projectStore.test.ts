@@ -23,7 +23,6 @@ function makeProject(overrides?: Partial<Project>): Project {
     drawingLevels: [],
     layers: [],
     walls: [],
-    doors: [],
     ...overrides,
   } as Project;
 }

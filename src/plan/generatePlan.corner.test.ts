@@ -52,7 +52,6 @@ function cornerProject(): Project {
       wall("W1", { x: 0, y: 0 }, { x: 5, y: 0 }),
       wall("W2", { x: 5, y: 0 }, { x: 5, y: 4 }),
     ],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

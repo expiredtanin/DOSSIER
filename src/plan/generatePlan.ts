@@ -81,7 +81,7 @@ import {
 } from "./generatePlan/drawing2d";
 import { drawingBox } from "../geometry/drawingBounds";
 import { layersStyleSig } from "./generatePlan/layerSig";
-import { addDoorSymbol, addOpeningSymbol } from "./generatePlan/openings";
+import { addOpeningSymbol } from "./generatePlan/openings";
 import { addRoof } from "./generatePlan/roofs";
 import { addRoomArea } from "./generatePlan/rooms";
 import { addSectionLines } from "./generatePlan/sections";
@@ -511,11 +511,9 @@ export function generatePlan(
       wallCategory,
       lwByCode.get(wall.categoryCode) ?? WALL_FALLBACK_MM,
     );
-    // Türen (Legacy) + Öffnungen (Fenster/Türen) am Wandhost: BEIDE sparen die
-    // Wand-Poché aus. Aus beiden wird eine gemeinsame Lücken-Intervall-Liste.
-    const doors = project.doors.filter((d) => d.hostWallId === wall.id);
+    // Öffnungen (Fenster/Türen) am Wandhost sparen die Wand-Poché aus (Lücken-Intervall-Liste).
     const openings = openingsOfWall(project, wall.id);
-    const gaps = wallGaps(wall, doors, openings);
+    const gaps = wallGaps(wall, openings);
     const cuts = joins.get(wall.id) ?? { startCut: null, endCut: null };
     // Schnitt vs. Ansicht nach Schnitthöhe (BIM-Standard): erreicht die Wand die
     // Grundriss-Schnittebene nicht (z. B. eine Brüstung/ein Podestrand), wird sie
@@ -534,15 +532,6 @@ export function generatePlan(
     // Referenzlinie: dünne gestrichelte Wand-Achslinie (von der Oberleiste
     // umschaltbar). Wird über der Poché gezeichnet, damit sie sichtbar bleibt.
     if (showReferenceLines) addReferenceLine(primitives, wall, wallGreyed);
-    // Tür-Symbol (Legacy-Door) nur, wenn die Kategorie sichtbar ist und der Modus
-    // sie zeigt.
-    for (const door of doors) {
-      const d = categoryDisplay(door.categoryCode);
-      if (visibleCodes.has(door.categoryCode) && d.render) {
-        const doorLwMm = lwByCode.get(door.categoryCode) ?? LAYER_LINE_MM;
-        addDoorSymbol(primitives, wall, door, d.greyed, detail, doorLwMm);
-      }
-    }
     // Öffnungs-Symbole (Fenster/Tür) je Detailgrad + Auswahl-taggbar.
     for (const o of openings) {
       const d = categoryDisplay(o.categoryCode);

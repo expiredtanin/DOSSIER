@@ -44,7 +44,6 @@ function project(groups: Group[]): Project {
     drawingLevels: [],
     layers: [],
     walls: [],
-    doors: [],
     drawings2d: [],
     groups,
   };

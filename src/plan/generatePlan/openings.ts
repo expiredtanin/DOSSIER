@@ -20,7 +20,7 @@ import {
   windowSymbol,
 } from "../../geometry/opening";
 import { wallReferenceOffset } from "../../model/wall";
-import { add, along, dot, leftNormal, normalize, scale, sub } from "../../model/geometry";
+import { add, along, dot, scale, sub } from "../../model/geometry";
 import {
   NO_HATCH,
   OVERHEAD_DASH,
@@ -29,75 +29,6 @@ import {
   type DetailLevel,
   type Primitive,
 } from "./shared";
-
-/**
- * Tür-Symbol je Detailgrad:
- *  • grob   — nur die gerade Türblatt-Linie (die Öffnungs-Lücke kommt aus der
- *             ausgesparten Poché).
- *  • mittel — + Schwenkbogen (geschlossen → offen).
- *  • fein   — + Rahmen/Anschlag-Striche an beiden Pfosten (kurze Striche quer
- *             zur Wand, die den Türrahmen/-anschlag andeuten).
- */
-export function addDoorSymbol(
-  out: Primitive[],
-  wall: Wall,
-  door: Project["doors"][number],
-  greyed: boolean,
-  detail: DetailLevel,
-  _doorLwMm: number,
-): void {
-  const u = normalize(sub(wall.end, wall.start));
-  const n = leftNormal(u); // linke Seite der Wandachse
-  const swingDir = door.swing === "left" ? n : scale(n, -1);
-
-  const jambStart = along(wall.start, wall.end, door.position);
-  const jambEnd = along(wall.start, wall.end, door.position + door.width);
-  const hinge = door.hinge === "start" ? jambStart : jambEnd;
-  const closedDir = door.hinge === "start" ? u : scale(u, -1);
-
-  const openEnd = add(hinge, scale(swingDir, door.width));
-  const closedEnd = add(hinge, scale(closedDir, door.width));
-
-  // Türblatt in geöffneter Stellung (alle Stufen).
-  out.push({
-    kind: "line",
-    a: hinge,
-    b: openEnd,
-    cls: "door-leaf",
-    weightMm: SYMBOL_HAIRLINE_MM,
-    greyed,
-  });
-
-  // mittel + fein: Schwenkbogen von geschlossen → offen.
-  if (detail !== "grob") {
-    out.push({
-      kind: "arc",
-      center: hinge,
-      from: closedEnd,
-      to: openEnd,
-      r: door.width,
-      cls: "door-swing",
-      weightMm: SYMBOL_HAIRLINE_MM,
-      greyed,
-    });
-  }
-
-  // fein: Rahmen/Anschlag-Striche an beiden Pfosten (kurz quer zur Wand,
-  // symmetrisch um die Achse über eine halbe Wanddicke-Andeutung).
-  if (detail === "fein") {
-    const reveal = 0.06; // 6 cm Anschlag-Andeutung je Seite
-    for (const jamb of [jambStart, jambEnd]) {
-      out.push({
-        kind: "line",
-        a: add(jamb, scale(n, reveal)),
-        b: add(jamb, scale(n, -reveal)),
-        cls: "door-frame",
-        weightMm: SYMBOL_HAIRLINE_MM,
-        greyed,
-      });
-    }
-  }
-}
 
 /**
  * Aufgelöste Rahmen-Parameter (Typ-Bibliothek) einer Tür-/Fenster-Öffnung —

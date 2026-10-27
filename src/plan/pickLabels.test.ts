@@ -11,7 +11,7 @@ const project = {
     },
   ],
   walls: [{ id: "w1", categoryCode: "20" }],
-  doors: [{ id: "t1", categoryCode: "20" }],
+  openings: [{ id: "t1", categoryCode: "20" }],
   drawings2d: [{ id: "d1", categoryCode: "100" }, { id: "d2", categoryCode: "99" }],
 } as unknown as Project;
 

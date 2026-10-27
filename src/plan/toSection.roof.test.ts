@@ -43,7 +43,6 @@ function project(r: Roof, extra: Partial<Project> = {}): Project {
     drawingLevels: [],
     layers: [],
     walls: [],
-    doors: [],
     roofs: [r],
     ...extra,
   } as unknown as Project;

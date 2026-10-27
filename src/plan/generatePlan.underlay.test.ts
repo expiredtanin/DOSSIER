@@ -36,7 +36,6 @@ function project(drawings: Drawing2D[], levels = [level("L1")]): Project {
     wallTypes: [],
     drawingLevels: levels,
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

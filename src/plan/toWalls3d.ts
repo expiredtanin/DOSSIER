@@ -71,7 +71,7 @@ import { applyVoids3d } from "./toWalls3d/voids3d";
 import { emitDrawingLineVerts, pickDrawingSegs } from "./toWalls3d/drawing2d";
 import { emitColumns } from "./toWalls3d/columns";
 import { emitRoofCutLayers, emitRoofs } from "./toWalls3d/roofs";
-import { emitLegacyDoorLeaves, emitOpeningFrames, emitOpeningGlass, emitOpeningShading } from "./toWalls3d/openings";
+import { emitOpeningFrames, emitOpeningGlass, emitOpeningShading } from "./toWalls3d/openings";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
@@ -224,7 +224,6 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     meshes: [
       ...emitMeshes(project),
       ...emitOpeningGlass(project),
-      ...emitLegacyDoorLeaves(project),
       ...emitOpeningFrames(project, detail),
       ...emitOpeningShading(project, detail),
       ...emitStairMeshes(project),

@@ -25,7 +25,6 @@ function project(blockDefs: BlockDef[] = []): Project {
     ],
     layers: [{ code: "20", name: "Zeichnung", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

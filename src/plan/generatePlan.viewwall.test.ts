@@ -37,7 +37,6 @@ function project(): Project {
       wall("HI", { x: 0, y: 0 }, { x: 4, y: 0 }, 2.6), // erreicht Schnitt → Poché
       wall("LOW", { x: 0, y: 2 }, { x: 4, y: 2 }, 0.3), // Brüstung → nur Ansicht
     ],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],
@@ -143,7 +142,6 @@ function nonSolidWallProject(): Project {
     ],
     layers: [{ code: "20", name: "Wände", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls: [wall],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],
@@ -191,7 +189,6 @@ function ceilingProject(): Project {
     ],
     layers: [{ code: "30", name: "Decken", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [
       {

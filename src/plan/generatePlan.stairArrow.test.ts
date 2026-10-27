@@ -50,7 +50,6 @@ function project(stair: Stair): Project {
     drawingLevels: [floor],
     layers: [{ code: "40", name: "Treppen", color: "#333", lw: 0.18, visible: true, locked: false }],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [stair],

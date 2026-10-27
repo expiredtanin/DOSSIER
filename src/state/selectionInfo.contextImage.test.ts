@@ -22,7 +22,6 @@ function projectWith(context: Project["context"]): Project {
     ],
     layers: [],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

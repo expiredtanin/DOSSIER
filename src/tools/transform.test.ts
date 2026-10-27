@@ -23,7 +23,6 @@ function project(drawings: Drawing2D[]): Project {
     drawingLevels: [],
     layers: [],
     walls: [],
-    doors: [],
     drawings2d: drawings,
   };
 }

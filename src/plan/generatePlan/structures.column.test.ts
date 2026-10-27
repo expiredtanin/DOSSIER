@@ -43,7 +43,6 @@ function project(overrides: Partial<Project> = {}): Project {
     drawingLevels: [],
     layers: [category],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

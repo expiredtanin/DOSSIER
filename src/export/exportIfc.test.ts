@@ -135,7 +135,6 @@ function fixtureProject(): Project {
     ],
     layers: [{ code: "20", name: "Wände", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls,
-    doors: [],
     openings,
     ceilings,
     stairs,

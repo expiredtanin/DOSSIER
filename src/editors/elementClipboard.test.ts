@@ -76,7 +76,6 @@ function project(): Project {
     ],
     layers: [{ code: "20", name: "Wand", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls: [wall("w1")],
-    doors: [],
     openings: [opening("o1", "w1")],
     ceilings: [ceiling("c1")],
     stairs: [],

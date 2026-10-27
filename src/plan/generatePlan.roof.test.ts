@@ -33,7 +33,6 @@ function baseProject(roofs?: Roof[]): Project {
     ],
     layers: [{ code: "35", name: "Dächer", color: "#8a4b32", lw: 0.25, visible: true, locked: false }],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

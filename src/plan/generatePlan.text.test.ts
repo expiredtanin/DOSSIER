@@ -43,7 +43,6 @@ function projectWithText(drawing: Drawing2D): Project {
       { code: "70", name: "Text", color: "#0a0a0a", lw: 0.3, visible: true, locked: false },
     ],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

@@ -37,7 +37,6 @@ function projectWithCeiling(openings?: Ceiling["openings"]): Project {
     ],
     layers: [{ code: "30", name: "Decken", color: "#0a0a0a", lw: 0.3, visible: true, locked: false }],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [ceiling],
     stairs: [],

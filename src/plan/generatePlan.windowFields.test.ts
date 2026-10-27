@@ -54,7 +54,6 @@ function project(opening: Opening, windowTypes?: WindowType[]): Project {
       { code: "21", name: "Öffnungen", color: "#0a0a0a", lw: 0.3, visible: true, locked: false },
     ],
     walls: [wall],
-    doors: [],
     openings: [opening],
     ceilings: [],
     stairs: [],

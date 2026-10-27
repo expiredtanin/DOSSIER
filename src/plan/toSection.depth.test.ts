@@ -28,7 +28,6 @@ const project = {
   ceilings: [],
   roofs: [],
   openings: [],
-  doors: [],
   components: [],
   wallTypes: [],
   drawingLevels: [{ id: "eg", name: "EG", kind: "floor", visible: true, locked: false }],

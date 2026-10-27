@@ -437,22 +437,25 @@ export const sampleProject: Project = {
     // West (links)
     { id: "W8", type: "wall", floorId: "og", categoryCode: "20", start: { x: 0, y: 3 }, end: { x: 0, y: 0 }, wallTypeId: "aw", height: 2.6 },
   ],
-  doors: [
-    {
-      id: "D1",
-      type: "door",
-      hostWallId: "W1",
-      categoryCode: "21",
-      position: 0.8, // Startkante 0.8 m ab Wand-Start → Tür x 0.8–1.7, links von W9 (x=2.4)
-      width: 0.9,
-      height: 2.1,
-      swing: "left", // schlägt nach innen (in den Raum) auf
-      hinge: "start",
-    },
-  ],
   // Öffnungen (Fenster/Türen) — ein Beispiel-Fenster in der EG-Südwand (W1,
   // frei von der Tür) und in der EG-Nordwand (W3). Kategorie „21" (Türen/Fenster).
   openings: [
+    // Zimmertür in der EG-Südwand (W1), links von W9 (x = 2.4): Anschlag 0.8 m ab Wandstart
+    // (x 0.8–1.7), schlägt nach innen auf. (Früher ein Legacy-`Door`.)
+    {
+      id: "D1",
+      type: "opening",
+      hostWallId: "W1",
+      categoryCode: "21",
+      kind: "door",
+      typeId: "door-standard",
+      position: 0.8,
+      width: 0.9,
+      height: 2.1,
+      sillHeight: 0,
+      swing: "left",
+      hinge: "start",
+    },
     {
       id: "O1",
       type: "opening",
@@ -583,7 +586,6 @@ export const emptyProject: Project = {
   id: "empty",
   name: "Leeres Projekt",
   walls: [],
-  doors: [],
   openings: [],
   ceilings: [],
   roofs: [],

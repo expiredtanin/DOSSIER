@@ -35,7 +35,7 @@ const project = (drawings: Drawing2D[]) =>
     components: [], wallTypes: [],
     drawingLevels: [{ id: "L", name: "L", kind: "drawing", visible: true, locked: false }],
     layers: [{ code: "60", name: "Z", color: "#000", lw: 0.25, visible: true, locked: false }],
-    walls: [], doors: [], openings: [], ceilings: [], stairs: [], rooms: [], drawings2d: drawings, context: [],
+    walls: [], openings: [], ceilings: [], stairs: [], rooms: [], drawings2d: drawings, context: [],
   }) as unknown as Project;
 
 describe("underlayAccess == Primitiv-Varianten", () => {

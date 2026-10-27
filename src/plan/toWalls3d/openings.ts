@@ -6,7 +6,6 @@
 import type { FrameCornerJoin, Opening, Project, SashDef, Wall } from "../../model/types";
 import { getDoorType, getWindowType, glazingPanesOf, openingsOfWall } from "../../model/types";
 import { openingInterval, openingVerticalExtent } from "../../geometry/opening";
-import { wallVerticalExtent } from "../../model/wall";
 import type { DetailLevel } from "../../model/viewTypes";
 import { EPS, type RMesh, type RRgb } from "./shared";
 import { wallThicknessSafe } from "./bands";
@@ -1031,49 +1030,6 @@ export function emitOpeningGlass(project: Project): RMesh[] {
           out.push(...glassPanesForOpening(wall, iv, vert, params));
         }
       }
-    }
-  }
-  return out;
-}
-
-/**
- * Emittiert je LEGACY-Tür (`project.doors` — das alte flache Türfeld VOR dem
- * Öffnungs-Typsystem, z. B. `Door.hostWallId/position/width/height` ohne
- * `typeId`) EIN Blatt-Panel als rohen Quader. `emitWall` (`../bands.ts`)
- * schneidet für diese Türen zwar bereits ein Loch in die Wand, aber
- * `emitOpeningGlass`/`emitOpeningFrames` durchlaufen NUR `project.openings`
- * (das neue Typsystem) — ohne diese Funktion blieb eine Legacy-Tür ein
- * blankes Loch, durch das man hindurchsieht (Nutzer-Report: "Türen fehlen im
- * 3D komplett"). Analog zum Alt-Verhalten typloser Fenster
- * ({@link emitOpeningGlass}: EINE Vollscheibe ohne Rahmen) — hier EIN
- * Vollblatt ohne Rahmen/Zarge (das Rahmen-System gehört exklusiv zu
- * `project.openings`, s. {@link resolveOpeningFrame}). `positions` in
- * MODELL-Metern.
- */
-export function emitLegacyDoorLeaves(project: Project): RMesh[] {
-  const out: RMesh[] = [];
-  for (const wall of project.walls) {
-    const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
-    if (axisLen < 1e-9) continue;
-    const { zBottom } = wallVerticalExtent(project, wall);
-    for (const d of project.doors ?? []) {
-      if (d.hostWallId !== wall.id) continue;
-      const from = Math.max(0, Math.min(d.position, axisLen));
-      const to = Math.max(from, Math.min(d.position + d.width, axisLen));
-      if (to - from <= EPS) continue;
-      const zTop = zBottom + d.height;
-      if (zTop - zBottom <= EPS) continue;
-      const mesh = openingAxisBox(
-        wall,
-        from,
-        to,
-        zBottom,
-        zTop,
-        -DOOR_LEAF_THICK / 2,
-        DOOR_LEAF_THICK / 2,
-        DOOR_LEAF_RGB,
-      );
-      if (mesh) out.push(mesh);
     }
   }
   return out;

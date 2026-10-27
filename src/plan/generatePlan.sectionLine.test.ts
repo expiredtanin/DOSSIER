@@ -28,7 +28,6 @@ function baseProject(levels: DrawingLevel[]): Project {
     drawingLevels: levels,
     layers: [{ code: "20", name: "Wände", color: "#333", lw: 0.18, visible: true, locked: false }],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

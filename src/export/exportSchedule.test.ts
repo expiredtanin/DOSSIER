@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { exportScheduleCsv, scheduleRows } from "./exportSchedule";
-import type { Project, Wall, Ceiling, Door, Opening, Stair, ExtrudedSolid } from "../model/types";
+import type { Project, Wall, Ceiling, Opening, Stair, ExtrudedSolid } from "../model/types";
 
 /**
  * Minimalprojekt: 2 Wände (1 Wandtyp T=0.4) + 1 Decke (Deckentyp T=0.2) +
@@ -52,20 +52,20 @@ function fixtureProject(): Project {
       ceilingTypeId: "dt",
     },
   ];
-  const doors: Door[] = [
+  const openings: Opening[] = [
     {
       id: "T1",
-      type: "door",
+      type: "opening",
       hostWallId: "W1",
       categoryCode: "21",
+      kind: "door",
       position: 1,
       width: 0.9,
       height: 2.1, // Fläche 1.89
+      sillHeight: 0,
       swing: "left",
       hinge: "start",
     },
-  ];
-  const openings: Opening[] = [
     {
       id: "F1",
       type: "opening",
@@ -120,7 +120,6 @@ function fixtureProject(): Project {
     ],
     layers: [{ code: "20", name: "Wände", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls,
-    doors,
     openings,
     ceilings,
     stairs,
@@ -190,7 +189,6 @@ describe("exportScheduleCsv — Bauteilliste", () => {
     const proj = fixtureProject();
     proj.walls = [];
     proj.ceilings = [];
-    proj.doors = [];
     proj.openings = [];
     proj.stairs = [];
     proj.extrudedSolids = [];

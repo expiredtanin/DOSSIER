@@ -22,7 +22,6 @@ function baseProject(overrides: Partial<Project> = {}): Project {
     drawingLevels: [],
     layers: [],
     walls: [],
-    doors: [],
     drawings2d: [],
     ...overrides,
   };

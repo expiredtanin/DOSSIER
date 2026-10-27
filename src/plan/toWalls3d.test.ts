@@ -155,7 +155,6 @@ describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:t
   // erscheinen. W1: start (0,0)->(5,0), floor "eg" (baseElevation 0).
   const twoOffsetWindows: Project = {
     ...sampleProject,
-    doors: [],
     openings: [
       {
         id: "WA",
@@ -228,7 +227,6 @@ describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:t
     const p: Project = {
       ...sampleProject,
       walls: [w1],
-      doors: [],
       ceilings: [],
       context: [],
       windowTypes: [
@@ -292,7 +290,7 @@ describe("Öffnungen als echte Löcher in EINEM Körper (3D-Pfad, layeredWalls:t
   it("Tür = Loch bis zur Wand-UK (zBottom == baseElevation)", () => {
     // Eine Tür (D1 auf W1) muss im 3D-Pfad als Loch bis zum Boden erscheinen:
     // zBottom des Lochs == Wand-UK (0), NICHT ab einer Brüstung.
-    const p: Project = { ...sampleProject, openings: [] };
+    const p: Project = { ...sampleProject, openings: (sampleProject.openings ?? []).filter((o) => o.id === "D1") };
     const w1 = projectToWalls3d(p, true).filter((w) => w.wallId === "W1");
     // W1 ist Durchgangswand für W9 (T-Stoss) -> innerste Putzschicht span-cutout-
     // gebrochen. Zusätzlich spaltet die Decke C1 (Beton 100) den Backstein (50) im
@@ -380,7 +378,6 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
     const p: Project = {
       ...sampleProject,
       openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
-      doors: sampleProject.doors,
       context: [],
     };
     const { meshes } = projectToModel3d(p);
@@ -417,26 +414,6 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
     };
     const [a, b] = glassMeshes.map(yRange).sort((r1, r2) => r1.min - r2.min);
     expect(a.max).toBeLessThanOrEqual(b.min + 1e-9);
-  });
-
-  it("Legacy-Tür (project.doors, ohne Öffnungs-Typsystem) bekommt ein Blatt-Panel statt eines blanken Lochs", () => {
-    // D1 ist eine LEGACY-Tür (project.doors, kein typeId/Öffnungs-Typsystem) —
-    // vor der Behebung durchliefen emitOpeningGlass/emitOpeningFrames nur
-    // project.openings, D1 blieb im 3D ein reines Loch in der Wand (Nutzer-
-    // Report: "Türen fehlen im 3D komplett"). DOOR_LEAF_RGB = [0.93,0.9,0.85].
-    const { meshes } = projectToModel3d(sampleProject);
-    const leafMeshes = meshes.filter(
-      (m) => m.color[0] === 0.93 && m.color[1] === 0.9 && m.color[2] === 0.85,
-    );
-    expect(leafMeshes.length).toBe(1);
-    const leaf = leafMeshes[0];
-    expect(leaf.positions.length).toBe(24); // Quader: 8 Ecken
-    expect(leaf.indices.length).toBe(36); // 12 Dreiecke
-    // D1: height 2.1, sitzt am Wand-UK (0) -> Blatt UK 0 .. OK 2.1.
-    const zs: number[] = [];
-    for (let i = 2; i < leaf.positions.length; i += 3) zs.push(leaf.positions[i]);
-    expect(Math.min(...zs)).toBeCloseTo(0, 6);
-    expect(Math.max(...zs)).toBeCloseTo(2.1, 6);
   });
 
   it("Türen bekommen keine Scheibe; je Fenster genau 2 (window-standard = zweifach verglast)", () => {
@@ -484,7 +461,6 @@ describe("Fenster-Glasscheiben (emitOpeningGlass)", () => {
             sillHeight: 0.9,
           },
         ],
-        doors: [],
         context: [],
       };
       const { meshes } = projectToModel3d(p);
@@ -519,7 +495,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     const p: Project = {
       ...sampleProject,
       openings: (sampleProject.openings ?? []).filter((o) => o.id === "O1"),
-      doors: [],
       context: [],
     };
     const { meshes } = projectToModel3d(p);
@@ -540,7 +515,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
     const p: Project = {
       ...sampleProject,
       openings: [{ ...o1, wingCount: 2 }],
-      doors: [],
       context: [],
     };
     const frameCount = (detail: "grob" | "mittel" | "fein"): number =>
@@ -586,7 +560,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     };
     const { meshes } = projectToModel3d(p);
@@ -645,7 +618,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     };
     const withMullions: Project = {
@@ -680,7 +652,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     };
     const baselineFrames = projectToModel3d(baseline).meshes.filter(isFrame);
@@ -727,7 +698,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     };
     const withMullions: Project = {
@@ -762,7 +732,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     };
     const baselineFrames = projectToModel3d(baseline).meshes.filter(isFrame);
@@ -807,7 +776,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     });
     const fixedCount = projectToModel3d(win("fest")).meshes.filter(isFrame).length;
@@ -847,7 +815,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0,
         },
       ],
-      doors: [],
       context: [],
     });
     // Vollglas (ratio 1 / fehlt): Glas über (fast) die ganze Blatthöhe.
@@ -921,8 +888,8 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
         sillHeight: 0.9,
       },
     ];
-    const pFlush: Project = { ...flushWindow(sampleProject), openings: openingWithType("win-flush-test"), doors: [], context: [] };
-    const pInset: Project = { ...insetWindow(sampleProject), openings: openingWithType("win-inset-test"), doors: [], context: [] };
+    const pFlush: Project = { ...flushWindow(sampleProject), openings: openingWithType("win-flush-test"), context: [] };
+    const pInset: Project = { ...insetWindow(sampleProject), openings: openingWithType("win-inset-test"), context: [] };
 
     const minY = (meshes: { positions: number[]; color: [number, number, number] }[]): number => {
       let m = Infinity;
@@ -977,7 +944,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     };
     const trueAussenY = -0.345 / 2;
@@ -1021,7 +987,6 @@ describe("Rahmen-/Sprossen-Riegel typisierter Öffnungen (emitOpeningFrames)", (
           sillHeight: 0.9,
         },
       ],
-      doors: [],
       context: [],
     };
     const { meshes } = projectToModel3d(p);
@@ -1061,7 +1026,6 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
         sillHeight: 0.9,
       },
     ],
-    doors: [],
     context: [],
   });
 
@@ -1212,7 +1176,6 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
           sillHeight: 0,
         },
       ],
-      doors: [],
       context: [],
     });
     const baseDoor = {
@@ -1273,7 +1236,6 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
           sillHeight: 0,
         },
       ],
-      doors: [],
       context: [],
     });
     const baseDoor = {
@@ -1344,7 +1306,6 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
           sillHeight: 0,
         },
       ],
-      doors: [],
       context: [],
     });
     const frames = (frameKind: "zarge" | "blockrahmen"): number =>
@@ -1393,7 +1354,6 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
           sillHeight: 0,
         },
       ],
-      doors: [],
       context: [],
     });
     // Ohne threshold: der Blendrahmen-Riegel (FRAME_RGB) fehlt bereits (hasSill
@@ -1689,7 +1649,6 @@ describe("Dach-Wand-Verschneidung (clipPieceToRoofs) — Wand-Top folgt der Dach
       ...sampleProject,
       walls: [gableWall],
       roofs: [gableRoof],
-      doors: [],
       openings: [],
       ceilings: [],
     };
@@ -1720,7 +1679,6 @@ describe("Dach-Wand-Verschneidung (clipPieceToRoofs) — Wand-Top folgt der Dach
       ...sampleProject,
       walls: [gableWall],
       roofs: [],
-      doors: [],
       openings: [],
       ceilings: [],
     };
@@ -1736,7 +1694,6 @@ describe("Dach-Wand-Verschneidung (clipPieceToRoofs) — Wand-Top folgt der Dach
       ...sampleProject,
       walls: [gableWall],
       roofs: [{ ...gableRoof, floorId: "og" }],
-      doors: [],
       openings: [],
       ceilings: [],
     };
@@ -2492,7 +2449,6 @@ describe("emitOpeningShading (Rollladen-/Sonnenschutzkasten als 3D-Box)", () => 
         sillHeight: 0.9,
       },
     ],
-    doors: [],
     context: [],
   });
 

@@ -734,8 +734,7 @@ export function emitWall(out: RWall[], project: Project, wall: Wall, layered = t
   };
 
   // Aussparungen der Wand als vereinheitlichte Cutouts sammeln:
-  //   • Öffnungen (project.openings, Fenster mit Brüstung/Sturz),
-  //   • Legacy-Türen (project.doors, sitzen am Boden, nur Sturz).
+  //   • Öffnungen (project.openings: Fenster und Türen, mit Brüstung/Sturz).
   // Jeweils [from..to] auf die Achse geklemmt + vertikale Öffnungs-Ausdehnung.
   const cutouts: Array<{
     from: number;
@@ -753,15 +752,6 @@ export function emitWall(out: RWall[], project: Project, wall: Wall, layered = t
     const recessInnerLayer =
       op.kind === "window" && getWindowType(project, op)?.innerLayerRecess === true;
     cutouts.push({ from: iv.from, to: iv.to, oBottom: v.zBottom, oTop: v.zTop, recessInnerLayer });
-  }
-  for (const d of project.doors ?? []) {
-    if (d.hostWallId !== wall.id) continue;
-    const from = Math.max(0, Math.min(d.position, axisLen));
-    const to = Math.max(from, Math.min(d.position + d.width, axisLen));
-    if (to - from < EPS) continue;
-    // Tür sitzt am Boden (UK der Wand), reicht bis zur lichten Türhöhe.
-    const oTop = Math.min(zTop, zBottom + d.height);
-    cutouts.push({ from, to, oBottom: zBottom, oTop, recessInnerLayer: false });
   }
   cutouts.sort((a, b) => a.from - b.from);
 

@@ -1698,25 +1698,6 @@ export interface RoomStamp {
   roundingStep?: number;
 }
 
-/** Eine Tür, gehostet in einer Wand. Ihr Geschoss ergibt sich aus der Wand. */
-export interface Door {
-  id: string;
-  type: "door";
-  hostWallId: string;
-  /** Grafik-Kategorie (Ebene), z. B. "21" für Türen/Fenster. */
-  categoryCode: string;
-  /** Abstand des Türanschlags (erster Pfosten) vom Wand-Startpunkt, in Metern. */
-  position: number;
-  /** Türbreite (lichte Öffnung) in Metern. */
-  width: number;
-  /** Türhöhe in Metern. */
-  height: number;
-  /** Auf welche Seite der Wandachse die Tür aufschlägt. */
-  swing: SwingSide;
-  /** An welchem Pfosten das Scharnier sitzt. */
-  hinge: "start" | "end";
-}
-
 // ── Freie 2D-Zeichengeometrie (Drawing2D) ──────────────────────────────────
 // Ein semantisches 2D-Element (wie Wall/Door), das beim Rendern abgeleitet wird
 // (keine vorab erzeugten Plan-Primitive). Siehe docs/design/drawing-tools.md §7.
@@ -2919,7 +2900,6 @@ export interface Project {
   ceilings?: Ceiling[];
   /** Dächer über (rechteckigen) Grundriss-Umrissen. Optional (Alt-Projekte). */
   roofs?: Roof[];
-  doors: Door[];
   /**
    * Öffnungen (Fenster/Türen), gehostet in Wänden. Optional, damit bestehende
    * Projekte/Tests ohne `openings` gültig bleiben (Default: leer behandeln).

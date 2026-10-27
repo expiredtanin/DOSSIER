@@ -42,7 +42,6 @@ import {
   sashesOfWindowType,
   wallTypeThickness,
 } from "../model/types";
-import { wallVerticalExtent } from "../model/wall";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { projectToModel3d } from "./toWalls3d";
@@ -721,8 +720,6 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
     } catch {
       thickness = 0.2;
     }
-    const { zBottom, zTop } = wallVerticalExtent(project, wall);
-    const axisLen = Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
     for (const op of openingsOfWall(project, wall.id)) {
       const iv = openingInterval(wall, op);
       if (!iv) continue;
@@ -896,18 +893,6 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
         pr.divisions.push([quadAt(pr.pts, 0, fTr), quadAt(pr.pts, 1, fTr)]);
       }
       out.push(pr);
-    }
-    for (const d of project.doors ?? []) {
-      if (d.hostWallId !== wall.id) continue;
-      const from = Math.max(0, Math.min(d.position, axisLen));
-      const to = Math.max(from, Math.min(d.position + d.width, axisLen));
-      const oTop = Math.min(zTop, zBottom + d.height);
-      const pr = projectOpeningRect(frame, wall, from, to, zBottom, oTop, thickness);
-      if (pr) {
-        pr.isDoor = true;
-        pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, 0.97)); // Legacy-Tür: kein Typ, kein Glasblatt
-        out.push(pr);
-      }
     }
   }
   return out;

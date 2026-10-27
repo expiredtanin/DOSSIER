@@ -14,7 +14,6 @@ import type {
   Project,
   Wall,
   Ceiling,
-  Door,
   Opening,
   Stair,
   ExtrudedSolid,
@@ -154,24 +153,9 @@ function floorIdOfHostWall(project: Project, hostWallId: string): string | undef
   return project.walls.find((w) => w.id === hostWallId)?.floorId;
 }
 
-/** Wertet eine Tür für die Bauteilliste aus. */
-function evalDoor(project: Project, door: Door): ScheduleRow {
-  return {
-    kind: "Tür",
-    id: door.id,
-    typeName: "Tür",
-    floor: floorOfHostWall(project, door.hostWallId),
-    floorId: floorIdOfHostWall(project, door.hostWallId),
-    length: door.width,
-    heightM: door.height,
-    thickness: null,
-    area: door.width * door.height,
-  };
-}
-
 /** Wertet eine Öffnung (Fenster oder Tür-Öffnung) für die Bauteilliste aus. */
 function evalOpening(project: Project, opening: Opening): ScheduleRow {
-  const kind = opening.kind === "window" ? "Fenster" : "Öffnung";
+  const kind = opening.kind === "window" ? "Fenster" : "Tür";
   return {
     kind,
     id: opening.id,
@@ -266,7 +250,6 @@ export function scheduleRows(project: Project): ScheduleRow[] {
   const rows: ScheduleRow[] = [];
   for (const w of project.walls ?? []) rows.push(evalWall(project, w));
   for (const c of project.ceilings ?? []) rows.push(evalCeiling(project, c));
-  for (const d of project.doors ?? []) rows.push(evalDoor(project, d));
   for (const o of project.openings ?? []) rows.push(evalOpening(project, o));
   for (const s of project.stairs ?? []) rows.push(evalStair(project, s));
   for (const e of project.extrudedSolids ?? []) rows.push(evalExtrudedSolid(project, e));

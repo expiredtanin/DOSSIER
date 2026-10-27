@@ -15,7 +15,7 @@
 import type { Project } from "../model/types";
 
 /** Aktuelle Version des Dateiformats. Bei jeder Formatänderung erhöhen + Migration anhängen. */
-export const PROJECT_FORMAT_VERSION = 1;
+export const PROJECT_FORMAT_VERSION = 2;
 
 /**
  * Migrationen: `MIGRATIONS[i]` hebt eine Datei von Version `i` auf `i + 1`. Arbeitet auf dem
@@ -24,19 +24,49 @@ export const PROJECT_FORMAT_VERSION = 1;
 const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown>> = [
   // 0 → 1: Einführung von `formatVersion`; Inhalt unverändert.
   (raw) => raw,
+  // 1 → 2: Legacy-Türen (`doors`) werden zu Öffnungen (`openings`, kind "door"). Es gibt nur noch
+  // EINEN Datensatz-Typ für Türen und Fenster.
+  (raw) => {
+    const doors = Array.isArray(raw.doors) ? (raw.doors as Array<Record<string, unknown>>) : [];
+    const { doors: _drop, ...rest } = raw;
+    if (doors.length === 0) return rest;
+    const openings = Array.isArray(rest.openings) ? [...(rest.openings as Array<Record<string, unknown>>)] : [];
+    const taken = new Set(openings.map((o) => String(o.id)));
+    const doorTypes = Array.isArray(rest.doorTypes) ? (rest.doorTypes as Array<{ id?: string }>) : [];
+    for (const d of doors) {
+      let id = String(d.id);
+      while (taken.has(id)) id = `${id}-t`;
+      taken.add(id);
+      openings.push({
+        id,
+        type: "opening",
+        hostWallId: d.hostWallId,
+        categoryCode: d.categoryCode,
+        kind: "door",
+        position: d.position,
+        width: d.width,
+        height: d.height,
+        sillHeight: 0,
+        swing: d.swing,
+        hinge: d.hinge,
+        ...(doorTypes[0]?.id ? { typeId: doorTypes[0].id } : {}),
+      });
+    }
+    return { ...rest, openings };
+  },
 ];
 
 /** Pflichtlisten: fehlen sie, ist es kein Dossier-Projekt. */
 const REQUIRED_ARRAYS = ["walls", "layers", "drawingLevels"] as const;
 /** Listen, die bei Fehlen leer ergänzt werden. */
-const DEFAULT_ARRAYS = ["lineStyles", "hatches", "components", "wallTypes", "doors", "drawings2d"] as const;
+const DEFAULT_ARRAYS = ["lineStyles", "hatches", "components", "wallTypes", "drawings2d"] as const;
 
 /** Bekannte Felder von `Project` (für die Meldung unbekannter Felder). */
 const KNOWN_KEYS = new Set<string>([
   "formatVersion", "id", "name", "lineStyles", "textStyles", "hatches", "components", "wallTypes",
   "ceilingTypes", "roofTypes", "blockDefs", "doorTypes", "windowTypes", "stairTypes", "pens",
   "penSets", "activePenSetId", "customPalettes", "builtinPaletteBanks", "drawingLevels", "layers",
-  "walls", "ceilings", "roofs", "doors", "openings", "stairs", "rooms", "drawings2d", "context",
+  "walls", "ceilings", "roofs", "openings", "stairs", "rooms", "drawings2d", "context",
   "extrudedSolids", "columns", "groups", "parametricWalls", "overrideRules", "viewSnapshots",
   "viewSnapshotFolders", "layouts", "masterLayouts", "layoutFolders", "referenceElevationMasl",
   "geoAnchor",

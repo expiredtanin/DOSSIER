@@ -28,7 +28,7 @@ const project = (d: Drawing2D): Project =>
       { id: "eg", name: "EG", kind: "floor", visible: true, locked: false, floorHeight: 2.6, cutHeight: 1.0, baseElevation: 0 },
     ],
     layers: [{ code: "60", name: "Zeichnung", color: "#0a0a0a", lw: 0.25, visible: true, locked: false }],
-    walls: [], doors: [], openings: [], ceilings: [], stairs: [], rooms: [],
+    walls: [], openings: [], ceilings: [], stairs: [], rooms: [],
     drawings2d: [d],
     context: [],
   }) as unknown as Project;

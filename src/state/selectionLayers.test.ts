@@ -10,7 +10,7 @@ const project = {
   layers,
   walls: [{ id: "w1", categoryCode: "20" }],
   drawings2d: [{ id: "d1", categoryCode: "100" }, { id: "d2", categoryCode: "101" }, { id: "d3", categoryCode: "100" }],
-  doors: [{ id: "t1", categoryCode: "20" }],
+  openings: [{ id: "t1", categoryCode: "20" }],
 } as unknown as Project;
 
 describe("Ebenen der Auswahl", () => {

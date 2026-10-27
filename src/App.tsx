@@ -1243,7 +1243,6 @@ export default function App() {
       rooms: (p.rooms ?? []).filter((r) => !rmids.has(r.id)),
       extrudedSolids: (p.extrudedSolids ?? []).filter((s) => !exids.has(s.id)),
       columns: (p.columns ?? []).filter((c) => !colids.has(c.id)),
-      doors: p.doors.filter((dr) => !wids.has(dr.hostWallId)),
       // Öffnungen: eigene Auswahl löschen UND alle, deren Host-Wand entfällt.
       openings: (p.openings ?? []).filter(
         (o) => !oids.has(o.id) && !wids.has(o.hostWallId),

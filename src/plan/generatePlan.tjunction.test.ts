@@ -57,7 +57,6 @@ function tJunctionProject(): Project {
       wall("WA2", { x: 5, y: 0 }, { x: 10, y: 0 }),
       wall("WB", { x: 5, y: 0 }, { x: 5, y: 3 }),
     ],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

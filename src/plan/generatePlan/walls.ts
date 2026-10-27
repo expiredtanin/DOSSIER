@@ -45,17 +45,15 @@ export interface WallGap {
 }
 
 /**
- * Vereint Legacy-Türen (`Door`) und Öffnungen (`Opening`) einer Wand zu einer
+ * Wandet die Öffnungen (`Opening`: Fenster und Türen) einer Wand zu einer
  * sortierten Lücken-Intervall-Liste entlang der Wandachse. Entartete Intervalle
  * (Breite ≤ 0 oder außerhalb der Achse) werden verworfen.
  */
 export function wallGaps(
   wall: Wall,
-  doors: Project["doors"],
   openings: Opening[],
 ): WallGap[] {
   const gaps: WallGap[] = [];
-  for (const d of doors) gaps.push({ from: d.position, to: d.position + d.width });
   for (const o of openings) {
     const iv = openingInterval(wall, o);
     if (iv) gaps.push(iv);

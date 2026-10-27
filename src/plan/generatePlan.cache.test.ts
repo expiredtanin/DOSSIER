@@ -34,7 +34,6 @@ function project(drawings: Drawing2D[]): Project {
     ],
     layers: SHARED.layers,
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

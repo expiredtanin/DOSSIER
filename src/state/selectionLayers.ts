@@ -30,7 +30,7 @@ export function selectionCategoryCodes(project: Project, sel: SelectionMembers):
     [sel.stairIds, p.stairs ?? []],
     [sel.columnIds, p.columns ?? []],
     [sel.roofIds, p.roofs ?? []],
-    [sel.openingIds, [...(p.openings ?? []), ...(p.doors ?? [])]],
+    [sel.openingIds, p.openings ?? []],
   ];
   const out = new Set<string>();
   for (const [ids, objects] of sources) {

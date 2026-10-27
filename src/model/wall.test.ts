@@ -41,7 +41,6 @@ function makeProject(overrides?: Partial<Project>): Project {
     ],
     layers: [{ code: "30", name: "Decken", color: "#0a0a0a", lw: 0.5, visible: true, locked: false }],
     walls: [],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

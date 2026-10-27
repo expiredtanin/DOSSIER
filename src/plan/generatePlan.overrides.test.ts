@@ -36,7 +36,6 @@ function project(overrideRules?: OverrideRule[]): Project {
       { code: "60", name: "Zeichnung", color: "#0a0a0a", lw: 0.25, visible: true, locked: false },
     ],
     walls: [wall],
-    doors: [],
     openings: [],
     ceilings: [],
     stairs: [],

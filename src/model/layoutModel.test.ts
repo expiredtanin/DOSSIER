@@ -69,7 +69,6 @@ function project(patch?: Partial<Project>): Project {
     drawingLevels: [],
     layers: [],
     walls: [],
-    doors: [],
     drawings2d: [],
     ...patch,
   };

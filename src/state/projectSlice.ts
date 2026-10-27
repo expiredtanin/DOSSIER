@@ -670,7 +670,6 @@ export function createProjectSlice(
           ceilings: (p.ceilings ?? []).filter((c) => c.floorId !== id),
           stairs: (p.stairs ?? []).filter((s) => s.floorId !== id),
           rooms: (p.rooms ?? []).filter((r) => r.floorId !== id),
-          doors: p.doors.filter((d) => !removedWallIds.has(d.hostWallId)),
           openings: (p.openings ?? []).filter(
             (o) => !removedWallIds.has(o.hostWallId),
           ),
@@ -739,11 +738,10 @@ export function createProjectSlice(
         if (!src) return p;
         const codes = new Set(flattenCategories([src]).map((c) => c.code));
         const usedByWall = p.walls.some((w) => codes.has(w.categoryCode));
-        const usedByDoor = p.doors.some((d) => codes.has(d.categoryCode));
         const usedByOpening = (p.openings ?? []).some((o) =>
           codes.has(o.categoryCode),
         );
-        if (usedByWall || usedByDoor || usedByOpening) {
+        if (usedByWall || usedByOpening) {
           get().notify(t("alert.layerInUse", { code: src.code, name: src.name }), "warning");
           return p;
         }
