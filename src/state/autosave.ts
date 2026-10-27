@@ -47,3 +47,24 @@ export function hasContent(p: Project): boolean {
     (p.context?.length ?? 0) > 0
   );
 }
+
+/**
+ * Merkt sich, welcher Stand zuletzt gesichert wurde, und entscheidet je Intervall, ob geschrieben
+ * wird. Nach dem Löschen der Kopie (Speichern, Verwerfen) MUSS `cleared()` laufen: sonst bliebe
+ * ein Stand, der während des Speicherns entstand und schon einmal gesichert war, ungeschützt
+ * (gespeichert wurde der ältere Stand, die Kopie ist weg, und „schon gesichert" verhinderte das
+ * erneute Schreiben).
+ */
+export function createAutosaveTracker() {
+  let lastWritten: Project | null = null;
+  return {
+    shouldWrite(current: Project, lastSaved: Project | null): boolean {
+      if (current === lastSaved || current === lastWritten || !hasContent(current)) return false;
+      lastWritten = current;
+      return true;
+    },
+    cleared(): void {
+      lastWritten = null;
+    },
+  };
+}

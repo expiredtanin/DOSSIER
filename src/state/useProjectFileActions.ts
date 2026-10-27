@@ -9,7 +9,7 @@
 import { useStore } from "./appStore";
 import type { NotifyKind } from "./notifySlice";
 import { parseProjectFile, parseProjectObject, serializeProject } from "../io/projectFormat";
-import { AUTOSAVE_INTERVAL_MS, clearAutosave, hasContent, readAutosave, writeAutosave } from "./autosave";
+import { AUTOSAVE_INTERVAL_MS, clearAutosave, createAutosaveTracker, readAutosave, writeAutosave } from "./autosave";
 import type { AutosaveRecovery } from "./autosave";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -198,6 +198,7 @@ export function useProjectFileActions(
       const path = openedProjectPathRef.current;
       setPendingDiscard(() => () => {
         void clearAutosave(path);
+        autosaveTracker.cleared();
         action();
       });
     } else action();
@@ -206,13 +207,12 @@ export function useProjectFileActions(
   // ── Autosave + Wiederherstellen (s. state/autosave.ts) ─────────────────────
   const projectRef = useRef(project);
   projectRef.current = project;
-  const lastAutosavedRef = useRef<Project | null>(null);
+  const autosaveTracker = useRef(createAutosaveTracker()).current;
   const [recovery, setRecovery] = useState<AutosaveRecovery | null>(null);
   useEffect(() => {
     const id = window.setInterval(() => {
       const p = projectRef.current;
-      if (p === lastSavedProjectRef.current || p === lastAutosavedRef.current || !hasContent(p)) return;
-      lastAutosavedRef.current = p;
+      if (!autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) return;
       void writeAutosave(openedProjectPathRef.current, p);
     }, AUTOSAVE_INTERVAL_MS);
     return () => window.clearInterval(id);
@@ -233,6 +233,7 @@ export function useProjectFileActions(
   };
   const onRecoverDiscard = () => {
     if (recovery) void clearAutosave(recovery.path);
+    autosaveTracker.cleared();
     setRecovery(null);
   };
   const onRecoverLater = () => setRecovery(null);
@@ -339,6 +340,7 @@ export function useProjectFileActions(
         lastSavedProjectRef.current = project;
         void clearAutosave(openedProjectPathRef.current);
         void clearAutosave(null);
+        autosaveTracker.cleared();
       }
       return saved;
     });
