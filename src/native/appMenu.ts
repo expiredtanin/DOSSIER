@@ -35,6 +35,7 @@ export interface NativeAppMenuHandlers {
   onExportStep: () => void;
   onImportStep: () => void;
   onClashCheck: () => void;
+  onKennzahlen: () => void;
 
   onUndo: () => void;
   onRedo: () => void;
@@ -251,6 +252,10 @@ export function useNativeAppMenu(
           await MenuItem.new({
             text: t("menu.native.clashCheck"),
             action: () => handlersRef.current.onClashCheck(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.kennzahlen"),
+            action: () => handlersRef.current.onKennzahlen(),
           }),
         ],
       });

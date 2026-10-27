@@ -8,7 +8,7 @@
 //   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--out eg.svg]
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
-//   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule|kennzahlen [--level EG] [--out datei]
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
@@ -25,6 +25,8 @@ import {
   exportObj,
   exportProjectStep,
   exportScheduleCsv,
+  computeKennzahlen,
+  checkRoomProgram,
   exportStl,
   generateElevationPlan,
   diffToOps,
@@ -111,7 +113,7 @@ export async function run(argv: string[]): Promise<number> {
   const [file, command, ...rest] = args.positional;
   if (!file || !command) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|ifc|step|obj|stl|schedule> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|ifc|step|obj|stl|schedule|kennzahlen> [Optionen]\n",
     );
     return 2;
   }
@@ -199,6 +201,12 @@ export async function run(argv: string[]): Promise<number> {
     case "stl":
       out(args, exportStl(project), `${project.name || "projekt"}.stl`);
       return 0;
+    case "kennzahlen": {
+      const k = computeKennzahlen(project);
+      const prog = checkRoomProgram(project);
+      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
+      return 0;
+    }
     case "schedule":
       out(args, exportScheduleCsv(project), `${project.name || "projekt"}-liste.csv`);
       return 0;

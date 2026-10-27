@@ -12,3 +12,5 @@ export { setWasmBytesProvider } from "../engine/wasmSource";
 export { applyOps, diffToOps, validateProject, validateOps } from "./ops";
 export type { CoreOp } from "./ops";
 export type { Project, DrawingLevel } from "../model/types";
+export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/kennzahlen";
+export type { Kennzahlen, ProgramCheck } from "../analysis/kennzahlen";

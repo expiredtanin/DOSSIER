@@ -34,7 +34,7 @@ import type {
 } from "./model/types";
 import { activePenSet, resolvePenColor, resolvePenWeight } from "./model/penSets";
 import { PenColorField } from "./ui/PenColorField";
-import { generatePlan } from "./core";
+import { generatePlan, computeKennzahlen, checkRoomProgram } from "./core";
 import type { CategoryDisplayResolver } from "./core";
 import { sectionPlaneFromLevel, sectionUAxisModel } from "./core";
 import { roofBaseElevation, roofGeometry } from "./core";
@@ -2408,6 +2408,21 @@ export default function App() {
             );
           })
           .catch((err) => notify(`${t("clash.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"));
+      },
+      onKennzahlen: () => {
+        const k = computeKennzahlen(project);
+        const prog = checkRoomProgram(project);
+        const f = (n: number, d = 1) => n.toFixed(d);
+        const lines = [
+          t("kennzahlen.summary", { gf: f(k.gf), agf: f(k.agf), gv: f(k.gv) }),
+          k.az !== null && k.uez !== null ? t("kennzahlen.ziffern", { az: f(k.az, 2), uez: f(k.uez, 2) }) : t("kennzahlen.noParcel"),
+        ];
+        if (prog.rows.length > 0) {
+          const bad = prog.rows.filter((r) => r.status !== "ok");
+          lines.push(t("kennzahlen.program", { ok: prog.rows.length - bad.length, n: prog.rows.length }));
+          for (const r of bad.slice(0, 4)) lines.push(t("kennzahlen.programIssue", { name: r.name, status: r.status }));
+        }
+        notify(lines.join(" — "), "info");
       },
       onUndo: undo,
       onRedo: redo,

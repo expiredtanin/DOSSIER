@@ -934,6 +934,18 @@ export type DrawingLevelKind = "floor" | "section" | "elevation" | "drawing";
  * Geschoss nutzt floorHeight/cutHeight/baseElevation; Schnitt/Ansicht nutzen
  * linePoints/directionSign; "drawing" nutzt keines dieser Felder.
  */
+/** Eine Zeile des Raumprogramms (Soll): wird gegen die gezeichneten Räume geprüft (`analysis/kennzahlen.ts`). */
+export interface RoomProgramRow {
+  /** Raumname wie im Modell (Vergleich ohne Gross-/Kleinschreibung, Präfix „Wohnen" trifft „Wohnen 2"). */
+  name: string;
+  /** SIA-416-Kategorie des Soll-Raums (optional, schärft die Zuordnung). */
+  siaCategory?: SiaCategory;
+  /** Soll-Fläche je Raum in m². */
+  area: number;
+  /** Soll-Anzahl (Default 1). */
+  count?: number;
+}
+
 export interface DrawingLevel {
   id: string;
   name: string;
@@ -2889,6 +2901,10 @@ export interface Project {
   builtinPaletteBanks?: BuiltinPaletteBanks;
   /** Oberste Schnitte: Geschosse + Schnitte/Ansichten. */
   drawingLevels: DrawingLevel[];
+  /** Raumprogramm (Soll) für die Prüfung gegen das Modell. */
+  roomProgram?: RoomProgramRow[];
+  /** Parzellenfläche (m²) für Ausnützungs- und Überbauungsziffer. */
+  parcelArea?: number;
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
   layers: LayerCategory[];
   walls: Wall[];
