@@ -6,6 +6,8 @@
 
 pub mod flat;
 pub mod polygon_bool;
+pub mod roof;
+pub mod roof_skeleton;
 
 #[cfg(feature = "web")]
 mod web;

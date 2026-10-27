@@ -81,7 +81,7 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 | Ort | Inhalt |
 |---|---|
 | `src/model` | Typen (`types.ts`), Wand/Decke/Dach-Logik, Verbindungen, Ansichts-Typen (`viewTypes.ts`) |
-| `src/geometry` | reine Geometrie: Dach-Skelett, kernel2d, Treppen, Räume, Polygon-Booleans (`polygonBool.ts`), Aussenbemassung |
+| `src/geometry` | reine Geometrie: kernel2d, Treppen, Räume, Polygon-Booleans (`polygonBool.ts`), Aussenbemassung; `roof.ts` = Hülle um die Rust-Dachgeometrie |
 | `src/analysis` | Kennzahlen/Raumprogramm, Sonnenstand/Schatten, Baurecht, Kollision |
 | `src/plan` | Ableitung: `generatePlan`, `toSection`, `toElevation`, `toWalls3d`, `toRenderScene`, `voids.ts` |
 | `src/views/plan` | React-Plan-Ansicht, Renderer-Hooks (native Metal / WASM-WebGPU) |
@@ -93,7 +93,7 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 | `src/native` | Tauri-Adapter (Dateien, Fenster, Menü, Farbprofile) |
 | `src/net` | einziges Tor ins Netz (`netFetch`, Offline-Modus, Host-Liste) |
 | `src/engine` | WASM-Lader (`coreWasm.ts`, `engine3d.ts`, `truckSolid.ts`, `wasmSource.ts`) |
-| `src-tauri/core` | Rust-Kern (`dossier-core`), wächst etappenweise |
+| `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans, Dachgeometrie (`roof.rs`, `roof_skeleton.rs`), wächst etappenweise |
 | `src-tauri/render2d, render3d` | die zwei Anzeige-Engines (Rust → WASM/Metal) |
 | `src-tauri/trucksolid` | B-Rep (truck 0.6): Körper, Booleans, STEP, Kennwerte, Kollision |
 | `src-tauri/kernel2d, dwgimport` | 2D-Geometrie (wird in den Kern eingehängt), DWG-Import |

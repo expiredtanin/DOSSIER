@@ -20,7 +20,8 @@ function validate(name: string, ifc: string): { status: number | null; out: stri
   return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
 }
 
-describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", () => {
+// Startet je Fall einen Python-Prozess (~3 s, unter Last mehr): eigenes Zeitlimit statt 5 s.
+describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60_000 }, () => {
   it("Demo-Haus: gültig, alle Körper erzeugbar", () => {
     const r = validate("demo-haus", exportIfcSpf(sampleProject));
     expect(r.out).toContain("0 Befunde");
