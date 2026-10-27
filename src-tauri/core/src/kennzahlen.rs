@@ -4,13 +4,12 @@
 //!    über `taper` und Kreise.
 //!  • [`area_sums`]: Raumflächen je Geschoss und SIA-416-Kategorie (Blattkategorien), das
 //!    Gebäudevolumen (Abzugskörper abgezogen, nie negativ) und die Parzellenfläche. Die
-//!    Zusammenfassung zu NF/NGF/GF (SIA-416-Bilanz) bleibt in TS (`geometry/roomArea.ts::balance`),
-//!    weil sie dort von Raumstempel, Bilanz-Panel, Raumliste und IFC mitbenutzt wird.
+//!    Zusammenfassung zu NF/NGF/GF (SIA-416-Bilanz) liefert `room_area::balance`.
 
 use crate::flat_read::signed_area;
 
-/// Anzahl der SIA-416-Blattkategorien (Reihenfolge legt TS fest).
-pub const CATEGORIES: usize = 6;
+/// Anzahl der SIA-416-Blattkategorien (Reihenfolge: `room_area::CATEGORIES`).
+pub const CATEGORIES: usize = crate::room_area::CATEGORIES.len();
 
 fn finite(v: f64) -> f64 {
     if v.is_finite() {

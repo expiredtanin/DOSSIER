@@ -14,6 +14,9 @@ mod bulge;
 mod stair;
 mod joins;
 mod wall_bands;
+mod room_area;
+mod room_boundary;
+mod polygon_holes;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

@@ -17,6 +17,9 @@ pub mod bulge;
 pub mod stair;
 pub mod joins;
 pub mod wall_bands;
+pub mod room_area;
+pub mod room_boundary;
+pub mod polygon_holes;
 
 #[cfg(feature = "web")]
 mod web;

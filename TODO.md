@@ -26,12 +26,15 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
 - ◐ **[K1] 2D-Geometrie.** (27.10.) Polygon-Booleans aus Rust (i_overlay) ersetzen `polygon-clipping`
   (entfernt). `kernel2d` produktiv aus Rust (`kernel2d.ts` nur Fassade, Paritätstest weg; gemessen nicht
   langsamer). Schatten, Baurecht (exakter Puffer statt Kapsel), Aussenbemassung, Kennzahlen in Rust; die
-  SIA-416-Zuordnung (`roomArea.ts::balance`) und `checkRoomProgram` bleiben vorerst TS. `bulge.ts` ist Fassade über den
+  `checkRoomProgram` bleibt vorerst TS (SIA-416-Zuordnung: seit [K2] `room_area.rs`). `bulge.ts` ist Fassade über den
   Rust-Kern (`bulge_polyline_points` für ganze Polylinien; `hasRealBulge`/`pointOnCircle` bleiben TS,
   Einzeiler). Offen: Triangulierung, Straight Skeleton [B2]. · M
 - ◐ **[K2] Geometrie-Ableitungen.** (27.10.) Dachgeometrie in Rust (`roof.rs`, `roof_skeleton.rs`;
   `roofSkeleton.ts` gelöscht, ~2× schneller, Ergebnis bitgleich). Treppen in Rust (`stair_geometry`,
-  `stair_outline`, `stair_cut`; `stair.ts` Fassade, 27.10.). Offen: Räume. · L
+  `stair_outline`, `stair_cut`; `stair.ts` Fassade, 27.10.). Räume (27.10.): `room_area.rs` (Flächen,
+  SIA-416-Zuordnung/`balance` nur hier), `room_boundary.rs` (Erkennung über `kernel2d`), `polygon_holes.rs`;
+  TS `roomArea/roomBoundary/polygonHoles` sind Fassaden (Beschriftungen und CSV bleiben TS; Einzelflächen
+  im WASM 2,5–8× langsamer, je Raum < 4 µs). Offen: Öffnungen/Decken/Stützen in `toWalls3d`. · L
   - ✅ (27.10.) Wand-Joins und -Bänder in Rust (`joins.rs`, `wall_bands.rs`): Gehrung/T-Stoss/Kreuzung,
     Pro-Schicht-Cuts, Nah-Putz-Aussparungen, Decken-Dominanz, Öffnungs-Löcher, `topDrop` unter Dächern.
     `model/joins.ts` und `toWalls3d/bands.ts` sammeln nur noch aus dem `Project` und übergeben flach

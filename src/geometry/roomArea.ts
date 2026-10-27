@@ -1,89 +1,34 @@
 // Räume (Flächen) — Flächenberechnung und SIA-416-Klassifikation.
 //
-// Reiner Rechenkern für die Raum-Flächenbuchhaltung nach SIA 416 (Schweizer
-// Norm „Flächen und Volumen von Gebäuden"). Keine UI, kein Datei-IO — nur
-// Polygon-Geometrie, Kategorie-Hierarchie und Aggregation für die Bilanz.
+// Fassade über den Rust-Kern (`src-tauri/core/src/room_area.rs`, Bindungen `web/room_area.rs`):
+// Polygon-Fläche, Schwerpunkt, Bewertung (`evaluateRoom`) und die Bilanz (`balance`) rechnet Rust.
+// Die Zuordnung Blatt-Kategorie → NF/NGF/GF steht NUR dort (`rollup`); hier bleiben die Namen als
+// Typ (`SiaCategory`; Reihenfolge = Index im Kern, von `roomArea.test.ts` gegen den Kern geprüft).
+//
+// Bewusst TS (rechnet nichts): deutsche Beschriftungen (`siaLabel`, `siaLabelFull`), Zeilenreihenfolge
+// der Bilanz-Tabelle und der CSV-Aufbau (`roomsToCsv`: Quoting, Zeilen, Zahlenformat) — reine
+// Text-/Tabellen-Logik, die UI-Sprache gehört in die Hülle.
 //
 // Bezeichner englisch, Kommentare/Labels deutsch (CONVENTIONS.md). Einheit: METER.
 
 import type { Vec2 } from "../model/types";
+import { core } from "../engine/coreWasm";
+import { FlatWriter } from "./coreFlat";
 
 // ── Polygon-Kennzahlen ───────────────────────────────────────────────────────
 
-/**
- * Vorzeichenbehaftete Polygonfläche (Gauss'sche Trapezformel / Shoelace).
- * >0 = gegen den Uhrzeigersinn (CCW), <0 = im Uhrzeigersinn (CW). Der letzte
- * Punkt darf NICHT dupliziert sein (die Schlusskante n-1 → 0 wird ergänzt).
- */
-export function signedArea(pts: Vec2[]): number {
-  const n = pts.length;
-  if (n < 3) return 0;
-  let s = 0;
-  for (let i = 0; i < n; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % n];
-    s += a.x * b.y - b.x * a.y;
-  }
-  return s / 2;
-}
-
-/** Absolute (immer positive) Polygonfläche in m². */
+/** Absolute (immer positive) Polygonfläche in m²; Ring offen (Schlusskante wird ergänzt). */
 export function polygonArea(pts: Vec2[]): number {
-  return Math.abs(signedArea(pts));
-}
-
-/** Umfang eines geschlossenen Polygons (Summe aller Kantenlängen). */
-export function perimeter(pts: Vec2[]): number {
-  const n = pts.length;
-  if (n < 2) return 0;
-  let p = 0;
-  for (let i = 0; i < n; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % n];
-    p += Math.hypot(b.x - a.x, b.y - a.y);
-  }
-  return p;
+  return core().room_polygon_area(new FlatWriter().pts(pts).done());
 }
 
 /**
  * Flächenschwerpunkt (Centroid) eines geschlossenen Polygons — Ankerpunkt für
- * das Raum-Label. Nutzt die momenten-gewichtete Formel; degeneriert (Fläche ≈ 0)
- * auf den Durchschnitt der Vertices.
+ * das Raum-Label. Degeneriert (Fläche ≈ 0) auf den Durchschnitt der Vertices.
  */
 export function centroid(pts: Vec2[]): Vec2 {
-  const n = pts.length;
-  if (n === 0) return { x: 0, y: 0 };
-  if (n < 3) {
-    let sx = 0;
-    let sy = 0;
-    for (const p of pts) {
-      sx += p.x;
-      sy += p.y;
-    }
-    return { x: sx / n, y: sy / n };
-  }
-  let a = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < n; i++) {
-    const p = pts[i];
-    const q = pts[(i + 1) % n];
-    const cr = p.x * q.y - q.x * p.y;
-    a += cr;
-    cx += (p.x + q.x) * cr;
-    cy += (p.y + q.y) * cr;
-  }
-  a /= 2;
-  if (Math.abs(a) < 1e-12) {
-    let sx = 0;
-    let sy = 0;
-    for (const p of pts) {
-      sx += p.x;
-      sy += p.y;
-    }
-    return { x: sx / n, y: sy / n };
-  }
-  return { x: cx / (6 * a), y: cy / (6 * a) };
+  const c = core().room_centroid(new FlatWriter().pts(pts).done());
+  return { x: c[0], y: c[1] };
 }
 
 // ── SIA-416-Kategorie-Hierarchie ─────────────────────────────────────────────
@@ -146,21 +91,6 @@ export function siaLabelFull(key: SiaKey): string {
   return `${key} — ${SIA_LABELS[key]}`;
 }
 
-/**
- * Zuordnung Blatt-Kategorie → übergeordnete Aggregate. Eine HNF trägt zu
- * NF, NGF und GF bei; eine KGF nur zu GF; VF/FF zu NGF und GF; NNF wie HNF.
- * AGF (Aussengeschossfläche) trägt nur zu GF bei — sie liegt ausserhalb der
- * Gebäudehülle und zählt NICHT zu NF/NGF. Wird für den Bilanz-Roll-up genutzt.
- */
-const CATEGORY_ROLLUP: Record<SiaCategory, SiaAggregate[]> = {
-  HNF: ["NF", "NGF", "GF"],
-  NNF: ["NF", "NGF", "GF"],
-  VF: ["NGF", "GF"],
-  FF: ["NGF", "GF"],
-  KGF: ["GF"],
-  AGF: ["GF"],
-};
-
 // ── Raum-Flächenergebnis ─────────────────────────────────────────────────────
 
 /**
@@ -201,14 +131,12 @@ export function evaluateRoom(
   category: SiaCategory,
   options: RoomAreaOptions = {},
 ): RoomAreaResult {
-  const gross = polygonArea(polygon);
-  const deduction = Math.max(0, options.deduction ?? 0);
-  const net = Math.max(0, gross - deduction);
+  const r = core().room_evaluate(new FlatWriter().pts(polygon).done(), options.deduction ?? 0);
   return {
-    grossArea: gross,
-    netArea: net,
-    perimeter: perimeter(polygon),
-    centroid: centroid(polygon),
+    grossArea: r[0],
+    netArea: r[1],
+    perimeter: r[2],
+    centroid: { x: r[3], y: r[4] },
     category,
     label: SIA_LABELS[category],
   };
@@ -247,45 +175,41 @@ export interface Balance {
 export function balance(
   rooms: { category: SiaCategory; area: number }[],
 ): Balance {
-  const leaf: Record<SiaCategory, number> = { HNF: 0, NNF: 0, VF: 0, FF: 0, KGF: 0, AGF: 0 };
-  const leafCount: Record<SiaCategory, number> = { HNF: 0, NNF: 0, VF: 0, FF: 0, KGF: 0, AGF: 0 };
-  const agg: Record<SiaAggregate, number> = { NF: 0, NGF: 0, GF: 0 };
-  const aggCount: Record<SiaAggregate, number> = { NF: 0, NGF: 0, GF: 0 };
-
-  for (const r of rooms) {
-    const area = Number.isFinite(r.area) ? r.area : 0;
-    leaf[r.category] += area;
-    leafCount[r.category] += 1;
-    for (const a of CATEGORY_ROLLUP[r.category]) {
-      agg[a] += area;
-      aggCount[a] += 1;
-    }
-  }
+  // Kern: [6 Blatt-Flächen, 6 Blatt-Zahlen, 3 Summen-Flächen (NF, NGF, GF), 3 Summen-Zahlen].
+  const r = core().room_balance(
+    Float64Array.from(rooms, (x) => SIA_CATEGORIES.indexOf(x.category)),
+    Float64Array.from(rooms, (x) => x.area),
+  );
+  const leafArea = (k: SiaCategory): number => r[SIA_CATEGORIES.indexOf(k)];
+  const leafCount = (k: SiaCategory): number => r[6 + SIA_CATEGORIES.indexOf(k)];
+  const AGG: SiaAggregate[] = ["NF", "NGF", "GF"];
+  const aggArea = (k: SiaAggregate): number => r[12 + AGG.indexOf(k)];
+  const aggCount = (k: SiaAggregate): number => r[15 + AGG.indexOf(k)];
 
   const byKey: Record<SiaKey, number> = {
-    HNF: leaf.HNF,
-    NNF: leaf.NNF,
-    VF: leaf.VF,
-    FF: leaf.FF,
-    KGF: leaf.KGF,
-    AGF: leaf.AGF,
-    NF: agg.NF,
-    NGF: agg.NGF,
-    GF: agg.GF,
+    HNF: leafArea("HNF"),
+    NNF: leafArea("NNF"),
+    VF: leafArea("VF"),
+    FF: leafArea("FF"),
+    KGF: leafArea("KGF"),
+    AGF: leafArea("AGF"),
+    NF: aggArea("NF"),
+    NGF: aggArea("NGF"),
+    GF: aggArea("GF"),
   };
 
   const mkLeaf = (k: SiaCategory): BalanceRow => ({
     key: k,
     label: SIA_LABELS[k],
-    area: leaf[k],
-    count: leafCount[k],
+    area: leafArea(k),
+    count: leafCount(k),
     aggregate: false,
   });
   const mkAgg = (k: SiaAggregate): BalanceRow => ({
     key: k,
     label: SIA_LABELS[k],
-    area: agg[k],
-    count: aggCount[k],
+    area: aggArea(k),
+    count: aggCount(k),
     aggregate: true,
   });
 
@@ -301,7 +225,7 @@ export function balance(
     mkAgg("GF"),
   ];
 
-  return { rows, byKey, total: agg.GF };
+  return { rows, byKey, total: byKey.GF };
 }
 
 // ── CSV-Serialisierung ───────────────────────────────────────────────────────
