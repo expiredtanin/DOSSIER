@@ -2748,6 +2748,8 @@ export interface Layout {
   name: string;
   paper: LayoutPaperFormat;
   orientation: LayoutOrientation;
+  /** Eigene Plannummer im Titelblock; fehlt = laufende Nummer (`resolveTitleBlock`). */
+  planNumber?: string;
   /** Referenz auf ein {@link MasterLayout}; ohne → kein Master (blanko Blatt). */
   masterId?: string;
   /**

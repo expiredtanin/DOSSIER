@@ -141,7 +141,7 @@ export function TitleBlockSvg({
   orientation,
 }: {
   sheet: { w: number; h: number };
-  tb: { projectName: string; sheetName: string; scale: string; date: string; author: string };
+  tb: { projectName: string; sheetName: string; scale: string; date: string; author: string; planNumber: string };
   paper: LayoutPaperFormat;
   orientation: LayoutOrientation;
 }) {
@@ -157,7 +157,10 @@ export function TitleBlockSvg({
       <line x1={x} y1={y + 8} x2={x + boxW} y2={y + 8} stroke="#111111" strokeWidth={0.2} />
       <line x1={x} y1={y + boxH - 7} x2={x + boxW} y2={y + boxH - 7} stroke="#111111" strokeWidth={0.2} />
       <text x={x + 3} y={y + 5.6} fontSize={3.4} fontFamily="Helvetica, Arial, sans-serif" fontWeight="bold" fill="#111111">
-        {clip(tb.projectName, 34)}
+        {clip(tb.projectName, 28)}
+      </text>
+      <text x={x + boxW - 3} y={y + 5.6} fontSize={3.4} fontFamily="Helvetica, Arial, sans-serif" fontWeight="bold" fill="#111111" textAnchor="end">
+        {tb.planNumber}
       </text>
       <text x={x + 3} y={y + 13} fontSize={3} fontFamily="Helvetica, Arial, sans-serif" fill="#111111">
         {clip(tb.sheetName, 36)}

@@ -270,6 +270,15 @@ describe("resolveTitleBlock — Master-Vererbung + Defaults", () => {
     expect(tb.scale).toBe("1:50");
     expect(tb.date).toBe("2026-07-07");
     expect(tb.author).toBe("");
+    expect(tb.planNumber).toBe("01"); // nicht in project.layouts → erste Nummer
+  });
+
+  it("Plannummer: laufend nach Reihenfolge, eigene Nummer übersteuert", () => {
+    const a = createLayout("a", "A", "a4", "portrait");
+    const b = createLayout("b", "B", "a4", "portrait");
+    const pp = { ...p, layouts: [a, b] };
+    expect(resolveTitleBlock(pp, b, undefined, "2026-07-07").planNumber).toBe("02");
+    expect(resolveTitleBlock(pp, { ...b, planNumber: "A-101" }, undefined, "2026-07-07").planNumber).toBe("A-101");
   });
 
   it("Master-Werte übersteuern die Defaults", () => {

@@ -57,7 +57,8 @@ function drawTitleBlock(
   doc.setTextColor(17, 17, 17);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text(clip(tb.projectName, 34), x + 3, y + 5.6);
+  doc.text(clip(tb.projectName, 28), x + 3, y + 5.6);
+  doc.text(tb.planNumber, x + boxW - 3, y + 5.6, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);

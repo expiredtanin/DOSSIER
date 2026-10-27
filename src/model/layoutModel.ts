@@ -641,6 +641,8 @@ export interface ResolvedTitleBlock {
   scale: string;
   date: string;
   author: string;
+  /** Plannummer: `Layout.planNumber`, sonst laufende Nummer des Blatts im Projekt ("01", "02" …). */
+  planNumber: string;
 }
 
 /**
@@ -671,7 +673,14 @@ export function resolveTitleBlock(
     scale: nonEmpty(tb.scale) ?? (scaleN ? `1:${scaleN}` : "—"),
     date: nonEmpty(tb.date) ?? today,
     author: nonEmpty(tb.author) ?? "",
+    planNumber: nonEmpty(layout.planNumber) ?? autoPlanNumber(project, layout),
   };
+}
+
+/** Laufende Plannummer: Position des Layouts in `project.layouts` (1-basiert, zweistellig). */
+function autoPlanNumber(project: Project, layout: Layout): string {
+  const i = (project.layouts ?? []).findIndex((l) => l.id === layout.id);
+  return String((i < 0 ? 0 : i) + 1).padStart(2, "0");
 }
 
 /**
