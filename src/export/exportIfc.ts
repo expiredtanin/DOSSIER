@@ -30,6 +30,8 @@
 //     Tür/Fenster bleiben als eigenes Objekt IfcDoor/IfcWindow mit eigener Box-
 //     Geometrie erhalten (füllt das ausgeschnittene Loch, "sieht aus wie 3D").
 //   • Extrusion → IfcBuildingElementProxy aus points+height.
+//   • Dach      → IfcRoof (Schicht-Meshes wie im 3D), Dachtyp → IfcRoofType mit Schichten.
+//   • Stütze    → IfcColumn (Profil-Extrusion), Bauteil → IfcMaterial.
 //   • Raum      → IfcSpace (im Geschoss aggregiert) mit Qto_SpaceBaseQuantities und SIA-416-Kategorie.
 //   • Treppe    → IfcStair, GEOMETRISCH bewusst vereinfacht auf einen
 //     extrudierten Bounding-Footprint (Lauf-Rechteck bei "straight"; Achsen-
@@ -55,6 +57,7 @@ import type {
   Wall,
 } from "../model/types";
 import {
+  columnLabel,
   getCeilingType,
   getWallType,
   openingLabel,
@@ -63,6 +66,7 @@ import {
 import { projectToWorldCoords } from "../model/geoRebase";
 import {
   ceilingVerticalExtent,
+  columnVerticalExtent,
   stairVerticalExtent,
   wallReferenceOffset,
   wallVerticalExtent,
@@ -71,6 +75,8 @@ import { pickGeometry } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
 import { isWatertight, wallCutMesh } from "../plan/wallMeshCut";
 import { evaluateRoom } from "../geometry/roomArea";
+import { columnFootprint } from "../geometry/column";
+import { emitRoofs } from "../plan/toWalls3d/roofs";
 
 // ── IFC-GUID (Base64-Kompression, 22 Zeichen) ───────────────────────────────
 // Standard-Kompressionsalgorithmus (IfcOpenShell guid.compress): das erste
@@ -559,7 +565,7 @@ export function exportIfcSpf(projectIn: Project): string {
   }
   const elementTypes = new Map<string, ElementTypeRef>();
   const typeFor = (
-    ifcType: "IFCWALLTYPE" | "IFCSLABTYPE",
+    ifcType: "IFCWALLTYPE" | "IFCSLABTYPE" | "IFCROOFTYPE",
     predefined: string,
     t: { id: string; name: string; layers: { componentId: string; thickness: number }[] },
   ): ElementTypeRef => {
@@ -815,6 +821,73 @@ export function exportIfcSpf(projectIn: Project): string {
     w.add(
       "IFCRELAGGREGATES",
       `${S(ifcGuid(`spaces:${structureId}`))},#${ownerHistory},$,$,#${structureId},${LIST(spaceIds.map((id) => `#${id}`))}`,
+    );
+  }
+
+  // ── Dächer → IfcRoof ───────────────────────────────────────────────────
+  // Dieselben geschlossenen Schicht-Meshes wie das 3D (`emitRoofs`: Dachflächen je Schicht,
+  // an First/Grat gehrt), zu EINEM Face-Set je Dach vereint. Modell-Koordinaten sind bereits
+  // Z-oben (kein Achsentausch wie bei den Wänden); die Wicklung wird so gewählt, dass das Volumen
+  // positiv ist — nur dann ist das Face-Set als geschlossen markiert.
+  const ROOF_PREDEFINED: Record<string, string> = {
+    flach: "FLAT_ROOF",
+    pult: "SHED_ROOF",
+    sattel: "GABLE_ROOF",
+    walm: "HIP_ROOF",
+    mansarde: "MANSARD_ROOF",
+    zelt: "HIPPED_GABLE_ROOF",
+  };
+  for (const roof of project.roofs ?? []) {
+    const structure = resolveStructure(roof.floorId);
+    const positions: number[] = [];
+    const indices: number[] = [];
+    for (const mesh of emitRoofs({ ...project, roofs: [roof] })) {
+      const base = positions.length / 3;
+      for (let i = 0; i < mesh.positions.length; i += 3) {
+        positions.push(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2] - structure.baseElevation);
+      }
+      for (const ix of mesh.indices) indices.push(base + ix);
+    }
+    if (indices.length === 0) continue;
+    let closed = isWatertight({ positions, indices });
+    if (!closed) {
+      const flipped: number[] = [];
+      for (let i = 0; i < indices.length; i += 3) flipped.push(indices[i], indices[i + 2], indices[i + 1]);
+      if (isWatertight({ positions, indices: flipped })) {
+        indices.splice(0, indices.length, ...flipped);
+        closed = true;
+      }
+    }
+    const { placementId, shapeId } = emitTriangulatedProduct(positions, indices, structure.placementId, closed);
+    const predefined = ROOF_PREDEFINED[roof.shape] ?? "NOTDEFINED";
+    const roofType = roof.roofTypeId ? (project.roofTypes ?? []).find((t) => t.id === roof.roofTypeId) : undefined;
+    const entityId = emitBuildingElement("IFCROOF", ifcGuid(roof.id), roofType?.name ?? "Dach", placementId, shapeId, ENUM(predefined));
+    if (roofType) typeFor("IFCROOFTYPE", predefined, roofType).occurrences.push(entityId);
+    addToContainment(structure.entityId, entityId);
+  }
+
+  // ── Stützen → IfcColumn (Profil-Extrusion, Material = Bauteil) ──────────
+  const materialAssoc = new Map<number, number[]>();
+  for (const col of project.columns ?? []) {
+    const footprint = columnFootprint(col);
+    if (footprint.length < 3) continue;
+    const { zBottom, zTop } = columnVerticalExtent(project, col);
+    if (!(zTop > zBottom)) continue;
+    const structure = resolveStructure(col.floorId);
+    const { placementId, shapeId } = emitBoxProduct(footprint, zBottom - structure.baseElevation, zTop - zBottom, structure.placementId);
+    const entityId = emitBuildingElement("IFCCOLUMN", ifcGuid(col.id), columnLabel(col), placementId, shapeId, ENUM("COLUMN"));
+    addToContainment(structure.entityId, entityId);
+    if (col.componentId) {
+      const mat = materialOf(col.componentId);
+      const list = materialAssoc.get(mat);
+      if (list) list.push(entityId);
+      else materialAssoc.set(mat, [entityId]);
+    }
+  }
+  for (const [mat, ids] of materialAssoc) {
+    w.add(
+      "IFCRELASSOCIATESMATERIAL",
+      `${S(ifcGuid(`material:${mat}`))},#${ownerHistory},$,$,${LIST(ids.map((id) => `#${id}`))},#${mat}`,
     );
   }
 

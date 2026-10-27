@@ -449,3 +449,37 @@ describe("Materialschichten über Bauteiltypen", () => {
     expect(lines(spf, "IFCMATERIAL")).toHaveLength(1);
   });
 });
+
+describe("Dächer und Stützen", () => {
+  const withRoofAndColumn = (): Project => ({
+    ...fixtureProject(),
+    roofTypes: [{ id: "rt", name: "Ziegeldach", layers: [{ componentId: "c", thickness: 0.05 }, { componentId: "c", thickness: 0.2 }] }],
+    roofs: [
+      {
+        id: "D1", type: "roof", floorId: "og", categoryCode: "35",
+        outline: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }],
+        shape: "sattel", pitchDeg: 35, overhang: 0.3, ridgeAxis: "x", thickness: 0.25, roofTypeId: "rt",
+      },
+    ],
+    columns: [
+      {
+        id: "S1", type: "column", floorId: "eg", categoryCode: "50",
+        position: { x: 2, y: 2 }, profile: { kind: "rect", width: 0.3, depth: 0.3 }, rotation: 0, height: 2.6, componentId: "c",
+      },
+    ],
+  });
+  it("Dach → IfcRoof (Satteldach) mit geschlossenem Mesh und IfcRoofType", () => {
+    const spf = exportIfcSpf(withRoofAndColumn());
+    const roof = spf.split("\n").find((l) => l.includes("=IFCROOF("))!;
+    expect(roof).toContain(".GABLE_ROOF.");
+    expect(spf.split("\n").filter((l) => l.includes("=IFCTRIANGULATEDFACESET(") && l.includes(".T."))).not.toHaveLength(0);
+    expect(spf).toMatch(/=IFCROOFTYPE\(.*'Ziegeldach'.*\.GABLE_ROOF\.\);/);
+  });
+  it("Stütze → IfcColumn mit Material", () => {
+    const spf = exportIfcSpf(withRoofAndColumn());
+    const col = spf.split("\n").find((l) => l.includes("=IFCCOLUMN("))!;
+    expect(col).toContain(".COLUMN.");
+    const colId = col.slice(0, col.indexOf("="));
+    expect(spf.split("\n").some((l) => l.includes("=IFCRELASSOCIATESMATERIAL(") && l.includes(`(${colId})`))).toBe(true);
+  });
+});

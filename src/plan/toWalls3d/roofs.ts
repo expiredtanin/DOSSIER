@@ -28,11 +28,14 @@ const ROOF_RGB: RRgb = [0.72, 0.45, 0.36];
  * Polygone (Dreieck/Quader bei den meisten Formen, ein Fünfeck-Giebel bei
  * Mansarde) — ein Fächer trianguliert diese korrekt, ohne Ear-Clipping.
  */
-function pushFanTriangles(positions: number[], indices: number[], pts: RoofVec3[]): void {
+function pushFanTriangles(positions: number[], indices: number[], pts: RoofVec3[], flip = false): void {
   if (pts.length < 3) return;
   const base = positions.length / 3;
   for (const p of pts) positions.push(p[0], p[1], p[2]);
-  for (let i = 1; i < pts.length - 1; i++) indices.push(base, base + i, base + i + 1);
+  for (let i = 1; i < pts.length - 1; i++) {
+    if (flip) indices.push(base, base + i + 1, base + i);
+    else indices.push(base, base + i, base + i + 1);
+  }
 }
 
 /**
@@ -162,17 +165,29 @@ function pushRoofSlabBetween(
   bottom: RoofVec3[],
   shared: boolean[],
 ): void {
-  pushFanTriangles(positions, indices, top);
-  pushFanTriangles(positions, indices, bottom);
+  // Wicklung nach aussen (geschlossener Körper, s. roofWinding.test.ts): Umlaufsinn der
+  // Oberseite von oben gesehen (Newell, Höhen-Komponente). Gegen den Uhrzeigersinn ⇒ Oberseite
+  // wie gegeben, Unterseite umgekehrt, Stirnfläche je Kante i→j als top[i], bottom[i], bottom[j],
+  // top[j] (Normale zeigt rechts der Kante = aussen); im Uhrzeigersinn alles gespiegelt.
+  let nz = 0;
+  for (let i = 0; i < top.length; i++) {
+    const a = top[i];
+    const b = top[(i + 1) % top.length];
+    nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  const ccw = nz > 0;
+  pushFanTriangles(positions, indices, top, !ccw);
+  pushFanTriangles(positions, indices, bottom, ccw);
   for (let i = 0; i < top.length; i++) {
     if (shared[i]) continue;
     const j = (i + 1) % top.length;
     const base = positions.length / 3;
     positions.push(top[i][0], top[i][1], top[i][2]);
-    positions.push(top[j][0], top[j][1], top[j][2]);
-    positions.push(bottom[j][0], bottom[j][1], bottom[j][2]);
     positions.push(bottom[i][0], bottom[i][1], bottom[i][2]);
-    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    positions.push(bottom[j][0], bottom[j][1], bottom[j][2]);
+    positions.push(top[j][0], top[j][1], top[j][2]);
+    if (ccw) indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    else indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
   }
 }
 

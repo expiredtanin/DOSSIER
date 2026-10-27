@@ -32,4 +32,13 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", () => {
     expect(r.out).toContain("0 Befunde");
     expect(r.status).toBe(0);
   });
+  it("mit Stütze (Rechteck und rund)", () => {
+    const col = (id: string, profile: { kind: "rect"; width: number; depth: number } | { kind: "round"; radius: number }) => ({
+      id, type: "column" as const, floorId: "eg", categoryCode: "50", position: { x: 1, y: 1 }, profile, rotation: 0.3, height: 2.5,
+    });
+    const p = { ...sampleProject, columns: [col("S1", { kind: "rect", width: 0.3, depth: 0.2 }), col("S2", { kind: "round", radius: 0.15 })] };
+    const r = validate("stuetzen", exportIfcSpf(p));
+    expect(r.out).toContain("0 Befunde");
+    expect(r.status).toBe(0);
+  });
 });
