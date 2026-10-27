@@ -17,6 +17,10 @@ mod wall_bands;
 mod room_area;
 mod room_boundary;
 mod polygon_holes;
+mod stairs3d;
+mod ceilings3d;
+mod columns3d;
+mod drawing2d_3d;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

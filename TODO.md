@@ -34,12 +34,22 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   `stair_outline`, `stair_cut`; `stair.ts` Fassade, 27.10.). Räume (27.10.): `room_area.rs` (Flächen,
   SIA-416-Zuordnung/`balance` nur hier), `room_boundary.rs` (Erkennung über `kernel2d`), `polygon_holes.rs`;
   TS `roomArea/roomBoundary/polygonHoles` sind Fassaden (Beschriftungen und CSV bleiben TS; Einzelflächen
-  im WASM 2,5–8× langsamer, je Raum < 4 µs). Offen: Öffnungen/Decken/Stützen in `toWalls3d`. · L
+  im WASM 2,5–8× langsamer, je Raum < 4 µs). Offen: Öffnungen in `toWalls3d` (`openings.ts`, `wallMeshCut.ts`). · L
   - ✅ (27.10.) Wand-Joins und -Bänder in Rust (`joins.rs`, `wall_bands.rs`): Gehrung/T-Stoss/Kreuzung,
     Pro-Schicht-Cuts, Nah-Putz-Aussparungen, Decken-Dominanz, Öffnungs-Löcher, `topDrop` unter Dächern.
     `model/joins.ts` und `toWalls3d/bands.ts` sammeln nur noch aus dem `Project` und übergeben flach
     (Decken/Dächer einmal je Geschoss). Ergebnis bitgleich (Vergleich über 27 Projekte inkl.
     Zufallsgrundrisse), `computeJoins` ~10×, `projectToWalls3d` (1296 Wände) ~4× schneller.
+  - ✅ (27.10.) 3D-Ableitungen Decken, Stützen, Treppen, 2D-Zeichnungen in Rust (`ceilings3d.rs`, `columns3d.rs`,
+    `stairs3d.rs` [Slabs, Betonlaufplatte, Handlauf/Pfosten], `drawing2d_3d.rs` [Boden-Spuren und Pick-Strecken in
+    Chargen], gemeinsam `mesh3d.rs`, `jsmath.rs` = V8-`Math.hypot`). `toWalls3d/{ceilings,columns,stairs,drawing2d}.ts`
+    sammeln nur noch aus dem `Project` (Farbe/Material bleiben TS); Treppengeometrie direkt aus `kernel2d`. Ergebnis
+    bitgleich (Vergleich über 460 Projekte inkl. Zufallstreppen/-decken/-stützen/-zeichnungen). Messung: Treppen 1,3–4×,
+    Decken ~1,7×, 2D-Zeichnungen (400 000) 1,2–1,5× schneller; Stützen bei 2000 Stück ~2× langsamer (5 → 11 ms, das
+    Prisma ist trivial, der Aufbau der JS-Arrays dominiert). **Bleibt TS:** `extrusions.ts` und `voids3d.ts` — jede
+    Netzrechnung dort läuft über truck (`extrudePolygon`/`extrudeCircle`/`buildSolidMesh`, eigenes WASM-Modul mit
+    Panic-Isolation); übrig ist nur Cache/Async-Orchestrierung und eine z-Verschiebung. Offen: `openings.ts`,
+    `wallMeshCut.ts` (anderer Agent).
 - ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
 - ○ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

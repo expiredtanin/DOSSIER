@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../../model/types";
 import { sampleProject } from "../../model/sampleProject";
-import { emitDrawingLineVerts } from "./drawing2d";
+import { emitDrawingLineVerts, pickDrawingSegs } from "./drawing2d";
 
 // `emitDrawingLineVerts` liefert die 2D-Boden-Spuren als LineList-Vertices für
 // render3ds `set_drawing_lines` (binärer Float32Array-Kanal) — interleaved
@@ -174,5 +174,38 @@ describe("emitDrawingLineVerts — WORLD-Abbildung und Puffergrösse", () => {
     expect(v[5]).toBeCloseTo(0, 5); // b
     // Zweiter Vertex trägt dieselbe Farbe.
     expect(v[FLOATS_PER_VERTEX + 3]).toBeCloseTo(1, 5);
+  });
+});
+
+describe("Chargen an den Rust-Kern (Kataster-Grössenordnung)", () => {
+  const line = (i: number) => ({
+    id: `D${i}`,
+    type: "drawing2d",
+    levelId: "eg",
+    categoryCode: "2d-line",
+    geom: { shape: "line", a: { x: i, y: 0 }, b: { x: i, y: 1 } },
+  });
+
+  it("viele Zeichnungen über mehrere Chargen: nichts geht verloren, Reihenfolge bleibt", () => {
+    const n = 60000; // 60000 × 11 Zahlen > eine Charge
+    const p = projectWith(Array.from({ length: n }, (_, i) => line(i)) as unknown as Project["drawings2d"]);
+    const v = emitDrawingLineVerts(p);
+    expect(v.length).toBe(n * 2 * FLOATS_PER_VERTEX);
+    expect(v[0]).toBe(0);
+    expect(v[FLOATS_PER_VERTEX * 2 * 33333]).toBe(33333);
+    expect(v[v.length - FLOATS_PER_VERTEX]).toBe(n - 1);
+    const picks = pickDrawingSegs(p);
+    expect(picks.length).toBe(n);
+    expect(picks[n - 1].drawingId).toBe(`D${n - 1}`);
+    expect(picks[40000].start).toEqual([40000, 0]);
+  });
+
+  it("eine einzelne Polylinie grösser als eine Charge", () => {
+    const pts = Array.from({ length: 200000 }, (_, i) => ({ x: i, y: i % 2 }));
+    const p = projectWith([
+      { id: "P", type: "drawing2d", levelId: "eg", categoryCode: "2d-line", geom: { shape: "polyline", pts, closed: true } },
+    ] as unknown as Project["drawings2d"]);
+    expect(emitDrawingLineVerts(p).length).toBe(200000 * 2 * FLOATS_PER_VERTEX);
+    expect(pickDrawingSegs(p).length).toBe(200000);
   });
 });
