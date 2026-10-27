@@ -32,4 +32,10 @@ describe("Schattenstudie im Grundriss", () => {
   it("ungültiges Datum → kein Schatten, kein Absturz", () => {
     expect(shadows(withStudy("kein Datum"), "eg")).toEqual([]);
   });
+  it("Planbegrenzung schliesst den ganzen Schatten ein (Druck/Einpassen)", () => {
+    const plan = generatePlan(withStudy("2026-12-21T11:00:00Z"), "eg", ALL);
+    const ys = shadows(withStudy("2026-12-21T11:00:00Z"), "eg").flatMap((q) => (q.kind === "polygon" ? q.pts.map((p) => p.y) : []));
+    expect(plan.bounds.maxY).toBeGreaterThanOrEqual(Math.max(...ys) - 1e-9);
+    expect(plan.bounds.maxY).toBeGreaterThan(generatePlan(sampleProject, "eg", ALL).bounds.maxY);
+  });
 });

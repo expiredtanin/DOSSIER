@@ -352,6 +352,7 @@ export function generatePlan(
   const primitives: Primitive[] = [];
   // Schattenstudie zuunterst (projektglobal, nur im Geschoss nächst ±0.00).
   if (includeGlobal) addSunShadow(primitives, project, floorId);
+  const shadowCount = primitives.length;
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
   const floor = project.drawingLevels.find((z) => z.id === floorId);
   // Code → Kategorie-Strichstärke (mm), damit die Wand-Umrisslinie aus dem
@@ -678,7 +679,7 @@ export function generatePlan(
 
   return {
     primitives,
-    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs),
+    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs, primitives.slice(0, shadowCount)),
     backgroundImages,
     ...(underlay.length ? { underlay } : {}),
   };
@@ -1059,6 +1060,8 @@ function computeBounds(
   stairs: Stair[] = [],
   rooms: Room[] = [],
   roofs: Roof[] = [],
+  /** Zusätzlich einzurahmende Flächen (Schattenstudie), damit Druck/Einpassen den ganzen Schatten zeigen. */
+  extra: Primitive[] = [],
 ) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const acc = (p: Vec2) => {
@@ -1071,6 +1074,7 @@ function computeBounds(
   }
   for (const c of ceilings) for (const p of c.outline) acc(p);
   for (const r of rooms) for (const p of r.boundary) acc(p);
+  for (const e of extra) if (e.kind === "polygon") e.pts.forEach(acc);
   // Traufe (inkl. Überstand) statt reinem Umriss, damit ein weit auskragendes
   // Dach das „Einpassen" korrekt mit einrahmt.
   for (const roof of roofs) for (const p of roofGeometry(roof, 0).eaves) acc(p);
