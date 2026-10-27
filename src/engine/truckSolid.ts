@@ -10,6 +10,37 @@ async function getModule(): Promise<any> {
   return modulePromise;
 }
 
+/** Ob ein Fehler ein WASM-Panic ist (Rust `panic!`/`unwrap` → Trap „unreachable"). */
+function isWasmTrap(e: unknown): boolean {
+  const msg = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+  return /RuntimeError|unreachable|memory access out of bounds|recursive use of an object/i.test(msg);
+}
+
+/**
+ * Ruft eine WASM-Funktion abgesichert auf (lessons-bimcraft [14]): nach einem Panic ist die
+ * Modul-Instanz unbrauchbar (Rust-Zustand verwaist) — sie wird verworfen, neu instanziiert und
+ * der Aufruf EINMAL wiederholt. Scheitert auch das, kommt eine klare Fehlermeldung statt des
+ * rohen Traps; der Aufrufer fällt auf Prisma/Platzhalter zurück (so tun es voids3d/extrusions).
+ * Normale Rust-Fehler (`JsError`, z. B. „Boolean fehlgeschlagen") laufen unverändert durch.
+ */
+export async function guarded<T>(call: (m: any) => T): Promise<T> {
+  try {
+    return call(await getModule());
+  } catch (e) {
+    if (!isWasmTrap(e)) throw e;
+    modulePromise = null; // Instanz verwerfen
+    try {
+      return call(await getModule());
+    } catch (e2) {
+      if (isWasmTrap(e2)) {
+        modulePromise = null;
+        throw new Error("Geometrie-Kern (truck) ist abgestürzt und wurde neu gestartet — Vorgang übersprungen.");
+      }
+      throw e2;
+    }
+  }
+}
+
 export interface ExtrudedMesh {
   positions: number[];
   indices: number[];
@@ -22,8 +53,7 @@ export async function extrudePolygon(
   height: number,
   taper = 0,
 ): Promise<ExtrudedMesh> {
-  const m = await getModule();
-  const json = m.extrude_polygon(JSON.stringify({ points, height, taper }));
+  const json = await guarded((m) => m.extrude_polygon(JSON.stringify({ points, height, taper })));
   return JSON.parse(json) as ExtrudedMesh;
 }
 
@@ -34,8 +64,7 @@ export async function extrudeCircle(
   height: number,
   taper = 0,
 ): Promise<ExtrudedMesh> {
-  const m = await getModule();
-  const json = m.extrude_circle(JSON.stringify({ cx, cy, r, height, taper }));
+  const json = await guarded((m) => m.extrude_circle(JSON.stringify({ cx, cy, r, height, taper })));
   return JSON.parse(json) as ExtrudedMesh;
 }
 
@@ -56,15 +85,16 @@ export async function booleanMesh(
   b: ExtrudedMesh,
   op: BooleanOp,
 ): Promise<BooleanMeshResult> {
-  const m = await getModule();
-  const json = m.boolean_mesh(
-    JSON.stringify({
-      a_positions: a.positions,
-      a_indices: a.indices,
-      b_positions: b.positions,
-      b_indices: b.indices,
-      op,
-    }),
+  const json = await guarded((m) =>
+    m.boolean_mesh(
+      JSON.stringify({
+        a_positions: a.positions,
+        a_indices: a.indices,
+        b_positions: b.positions,
+        b_indices: b.indices,
+        op,
+      }),
+    ),
   );
   return JSON.parse(json) as BooleanMeshResult;
 }
@@ -118,8 +148,7 @@ export type SolidSpec =
 
 /** Tesselliert einen B-Rep-Körper (Sehnenabweichung `tol` Meter). */
 export async function buildSolidMesh(spec: SolidSpec, tol = 0.01): Promise<ExtrudedMesh> {
-  const m = await getModule();
-  return JSON.parse(m.build_solid_mesh(JSON.stringify({ spec, tol }))) as ExtrudedMesh;
+  return JSON.parse(await guarded((m) => m.build_solid_mesh(JSON.stringify({ spec, tol })))) as ExtrudedMesh;
 }
 
 /** Kennwerte eines Körpers (Meter / m² / m³). */
@@ -134,8 +163,7 @@ export interface SolidProps {
 }
 
 export async function solidProps(spec: SolidSpec, tol = 0.005): Promise<SolidProps> {
-  const m = await getModule();
-  return JSON.parse(m.solid_props(JSON.stringify({ spec, tol }))) as SolidProps;
+  return JSON.parse(await guarded((m) => m.solid_props(JSON.stringify({ spec, tol })))) as SolidProps;
 }
 
 export interface ClashResult {
@@ -148,8 +176,7 @@ export interface ClashResult {
 
 /** Kollisionsprüfung zweier Körper (truck-meshalgo). */
 export async function solidClash(a: SolidSpec, b: SolidSpec, tol = 0.01): Promise<ClashResult> {
-  const m = await getModule();
-  const r = JSON.parse(m.solid_clash(JSON.stringify({ a, b, tol }))) as {
+  const r = JSON.parse(await guarded((m) => m.solid_clash(JSON.stringify({ a, b, tol })))) as {
     colliding: boolean;
     lines: ClashResult["lines"];
     overlap_volume: number | null;
@@ -162,12 +189,10 @@ export async function exportStepSolids(
   solids: SolidSpec[],
   fileName = "",
 ): Promise<string> {
-  const m = await getModule();
-  return m.export_step(JSON.stringify({ solids, fileName, organizationSystem: "dossier" }));
+  return guarded((m) => m.export_step(JSON.stringify({ solids, fileName, organizationSystem: "dossier" })));
 }
 
 /** Liest STEP-Text und liefert je Körper ein Dreiecks-Mesh (`relTol` relativ zur Diagonale). */
 export async function importStepMeshes(text: string, relTol = 0.0005): Promise<ExtrudedMesh[]> {
-  const m = await getModule();
-  return JSON.parse(m.import_step(text, relTol)) as ExtrudedMesh[];
+  return JSON.parse(await guarded((m) => m.import_step(text, relTol))) as ExtrudedMesh[];
 }
