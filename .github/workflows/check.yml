@@ -14,5 +14,7 @@ jobs:
         with: { targets: wasm32-unknown-unknown }
       - run: cargo install wasm-pack --locked
       - run: npm ci
+      # IFC-Prüfung in exportIfc.validate.test.ts ([B1]); ohne ifcopenshell würde sie übersprungen.
+      - run: pip install ifcopenshell pytest
       - run: npm run build:truck && npm run build:engine3d && npm run build:engine && npm run build:kernel2d && npm run build:dwgimport
       - run: npm run check

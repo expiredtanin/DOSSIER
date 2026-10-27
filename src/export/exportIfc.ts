@@ -337,9 +337,12 @@ export function exportIfcSpf(projectIn: Project): string {
     "IFCAPPLICATION",
     `#${org},${S("1.0")},${S("dossier")},${S("dossier")}`,
   );
+  // ChangeAction ADDED verlangt ein LastModifiedDate (IFC4-Regel IfcOwnerHistory.CorrectChangeAction):
+  // beim frischen Export ist es der Erstellungszeitpunkt.
+  const now = Math.floor(Date.now() / 1000);
   const ownerHistory = w.add(
     "IFCOWNERHISTORY",
-    `#${personOrg},#${app},$,${ENUM("ADDED")},$,$,$,${Math.floor(Date.now() / 1000)}`,
+    `#${personOrg},#${app},$,${ENUM("ADDED")},${now},$,$,${now}`,
   );
 
   // Einheiten (Meter, Radiant, m², m³).
