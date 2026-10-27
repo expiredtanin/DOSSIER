@@ -21,9 +21,13 @@ const call = async (...a: string[]) => run([file, ...a]);
 describe("dossier-cli", () => {
   it("importiert ausschliesslich ../core", () => {
     const src = readFileSync(join(process.cwd(), "src", "cli", "main.ts"), "utf8");
-    const rel = [...src.matchAll(/from\s+"(\.[^"]+)"/g)].map((m) => m[1]);
-    expect(rel.every((r) => r === "../core")).toBe(true);
-    expect(readdirSync(join(process.cwd(), "src", "cli")).filter((f) => statSync(join(process.cwd(), "src", "cli", f)).isFile() && f.endsWith(".ts") && !f.endsWith(".test.ts"))).toEqual(["main.ts"]);
+    for (const f of ["main.ts", "mcp.ts"]) {
+      const text = readFileSync(join(process.cwd(), "src", "cli", f), "utf8");
+      const rel = [...text.matchAll(/from\s+"(\.[^"]+)"/g)].map((m) => m[1]);
+      expect(rel.every((r) => r === "../core" || r === "./mcp"), f).toBe(true);
+    }
+    expect(src.length).toBeGreaterThan(0);
+    expect(readdirSync(join(process.cwd(), "src", "cli")).filter((f) => statSync(join(process.cwd(), "src", "cli", f)).isFile() && f.endsWith(".ts") && !f.endsWith(".test.ts")).sort()).toEqual(["main.ts", "mcp.ts"]);
   });
 
   it("info, validate, migrate", async () => {
@@ -67,4 +71,39 @@ describe("dossier-cli", () => {
     expect(await call("gibtsnicht")).toBe(2);
     expect(await run([])).toBe(2);
   });
+});
+
+import { handleMessage } from "./mcp";
+
+describe("MCP-Server", () => {
+  it("initialize, tools/list, project_info, apply_ops mit Validierung", async () => {
+    const init = (await handleMessage(file, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} })) as { result: { serverInfo: { name: string } } };
+    expect(init.result.serverInfo.name).toBe("dossier");
+    const list = (await handleMessage(file, { jsonrpc: "2.0", id: 2, method: "tools/list" })) as { result: { tools: Array<{ name: string }> } };
+    expect(list.result.tools.map((t) => t.name)).toEqual(["project_info", "query", "render_svg", "apply_ops", "validate"]);
+    expect(await handleMessage(file, { jsonrpc: "2.0", method: "notifications/initialized" })).toBeNull();
+
+    const call = async (name: string, args: Record<string, unknown>) =>
+      ((await handleMessage(file, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: args } })) as {
+        result: { content: Array<{ text: string }>; isError: boolean };
+      }).result;
+
+    const info = await call("project_info", {});
+    expect(JSON.parse(info.content[0].text).counts.walls).toBe(sampleProject.walls.length);
+
+    const w = sampleProject.walls[0];
+    // gültige Änderung → Datei geändert
+    const ok = await call("apply_ops", { ops: [{ kind: "replace", collection: "walls", entity: { ...w, height: 9 } }] });
+    expect(ok.isError).toBe(false);
+    const q = await call("query", { collection: "walls", id: w.id });
+    expect(JSON.parse(q.content[0].text)[0].height).toBe(9);
+    // ungültig (NaN → JSON-null ist nicht NaN; Doppel-id wird geprüft) → abgelehnt, Datei unverändert
+    const bad = await call("apply_ops", { ops: [{ kind: "add", collection: "walls", items: [{ ...w }] }] });
+    expect(bad.isError).toBe(true);
+    const q2 = await call("query", { collection: "walls", limit: 1000 });
+    expect(JSON.parse(q2.content[0].text).length).toBe(sampleProject.walls.length);
+    expect((await call("validate", {})).isError).toBe(false);
+    expect((await call("render_svg", { kind: "floor" })).content[0].text).toContain("<svg");
+    expect((await handleMessage(file, { jsonrpc: "2.0", id: 9, method: "gibts/nicht" })) as { error: { code: number } }).toMatchObject({ error: { code: -32601 } });
+  }, 30_000);
 });

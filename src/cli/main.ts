@@ -10,6 +10,7 @@
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule [--level EG] [--out datei]
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
+//   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
@@ -39,6 +40,7 @@ import {
   validateProject,
 } from "../core";
 import type { Project } from "../core";
+import { serveStdio } from "./mcp";
 
 type Args = { positional: string[]; flags: Map<string, string> };
 
@@ -206,6 +208,9 @@ export async function run(argv: string[]): Promise<number> {
       out(args, r.text, `${project.name || "projekt"}.stp`);
       return 0;
     }
+    case "mcp":
+      await serveStdio(file);
+      return 0;
     case "model3d":
       out(args, JSON.stringify(projectToModel3d(project)), `${project.name || "projekt"}.model3d.json`);
       return 0;
