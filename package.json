@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check": "node scripts/check.mjs",
     "tauri": "tauri",
     "tauri:dev": "node scripts/tauri-native.mjs dev",
     "tauri:build": "node scripts/tauri-native.mjs build",

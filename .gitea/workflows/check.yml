@@ -1,0 +1,18 @@
+# Tests bei jedem Push (lessons-bimcraft [57]). Braucht einen Gitea-Actions-Runner mit
+# Docker/Node; ohne Runner passiert nichts. Die WASM-Pakete (src/engine/pkg*) sind nicht im
+# Repo und werden hier gebaut, weil Tests wie truckBrep.wasm.test.ts sie lesen.
+name: check
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+      - run: cargo install wasm-pack --locked
+      - run: npm ci
+      - run: npm run build:truck && npm run build:engine3d && npm run build:engine && npm run build:kernel2d && npm run build:dwgimport
+      - run: npm run check
