@@ -28,6 +28,11 @@ pub mod columns3d;
 pub mod drawing2d_3d;
 pub mod openings3d;
 pub mod wall_mesh_cut;
+pub mod jsnum;
+pub mod hatch;
+pub mod hatch_flat;
+pub mod plan_buf;
+pub mod gpu_compile;
 
 #[cfg(feature = "web")]
 mod web;

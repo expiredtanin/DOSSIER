@@ -61,14 +61,25 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `number[]`, je Mesh < 3 µs), IFC-Export gesamt unverändert.
 - ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
   Reihenfolge (Entscheid 27.10.: Risiko klein halten, Verbraucher zuerst):
-  - ◐ **[K3b] Verbraucher auf Binärpuffer.** Plan-Puffer-Format (TS schreibt vorerst, Rust liest);
+  - ✅ **[K3b] Verbraucher auf Binärpuffer.** (Mac-Test des Grundrisses steht aus) Plan-Puffer-Format (TS schreibt vorerst, Rust liest);
     GPU-Kompilierung (`glPlanCompile`/`glPlanHatch`) in Rust, Vertex-Puffer bitgleich zur TS-Ausgabe;
     render2d bekommt die Szene binär statt JSON — **fertig**: `scene_bin.rs`/`renderSceneBin.ts`
     (Format v1: Kopf mit Magie+Version, f64-Punktepool, f32-Farben, String-Tabelle; Fixture
     `render2d/tests/fixtures/scene_v1.bin` in beiden Tests), `set_scene_bin` ersetzt `set_scene(json)`,
     `push_native_scene` (Nicht-macOS) ebenfalls binär (Linux-Container konnte `src-tauri` nicht bauen: gdk fehlt).
     Gross (200k Linien, 20k Füllungen, 1000 Texte): Kodieren 311 → 15 ms, Rust-Lesen 70 → 14 ms, 33,9 → 14,3 MB.
-    Danach Mac-Test (Bildfehler-Risiko liegt hier).
+    - ✅ (27.10.) Teil 1: Plan-Puffer-Format v1 (`plan_buf.rs` ↔ `src/plan/planBuf.ts`, Magie+Version,
+      Farb-/Schraffur-Tabellen, ein Eintrag je Primitiv, Text/Bild als Platzhalter, keine Pick-IDs) und
+      GPU-Kompilierung in Rust (`gpu_compile.rs`, `hatch.rs`, `jsnum.rs`). `glPlanCompile.ts`/`glPlanHatch.ts`
+      sind Fassaden (Signaturen gleich, auch `buildHatchRuns`/`applyDashRuns`/`zigzagPoints`/`motifPoints`/
+      `triangulate` für toRenderScene/Druck-SVG/DXF/Mesh). Ein Kern-Aufruf je Chunk. Bitgleich (Vertex-/
+      Index-Puffer, Batches, Ursprung, Bounds; gepackt + ungepackt): Beispielprojekt (alle Ebenen ×
+      Detailgrade × Modi × LOD, Chunks), 30 Zufallsprojekte (+ Unterlage), 460 Zufalls-Primitivlisten (alle
+      Schraffurtypen, Random/Motiv/Dämmung, Strichmuster, Zickzack, noStrokeEdges, greyed/opacity,
+      Landeskoordinaten), Schraffur-Fassade einzeln — 8 GB Puffer verglichen. Trigonometrie läuft im Web-Build
+      über `Math` der JS-Engine (musl-libm wich ab, auch in der Topologie). Leistung (Node, Min. über
+      Wiederholungen): Beispiel-EG 1,5 → 0,8 ms, 100k Linien + 3000 Schraffurflächen 3,9 → 1,8 s, nur
+      Schraffur ~2×, nur Linien 104 → 81 ms (davon Kodieren in TS 7–29 ms). **Offen:** Mac-Test (Metal) des Grundrisses.
   - ○ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
     2D-Zeichnung, Kontext, Schnittlinien) direkt in den Plan-Puffer; JS-Objekte nur noch für Export/Overlay.
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
