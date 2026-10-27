@@ -67,7 +67,7 @@ const FORM = { straight: 0, L: 1, spiral: 2 } as const;
 const REFERENZ = { mitte: 0, links: 1, rechts: 2 } as const;
 
 /** Treppen-Parameter als 16 Zahlen (Aufbau: `src-tauri/core/src/stair.rs`); fehlend = NaN. */
-function encodeStair(s: Stair): Float64Array {
+export function encodeStair(s: Stair): Float64Array {
   const n = (v: number | undefined) => (v === undefined ? Number.NaN : v);
   return Float64Array.of(
     FORM[s.shape] ?? 0,

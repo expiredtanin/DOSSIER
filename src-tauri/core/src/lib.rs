@@ -20,6 +20,12 @@ pub mod wall_bands;
 pub mod room_area;
 pub mod room_boundary;
 pub mod polygon_holes;
+pub mod jsmath;
+pub mod stairs3d;
+pub mod mesh3d;
+pub mod ceilings3d;
+pub mod columns3d;
+pub mod drawing2d_3d;
 
 #[cfg(feature = "web")]
 mod web;

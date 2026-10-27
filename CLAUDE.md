@@ -94,7 +94,7 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 | `src/native` | Tauri-Adapter (Dateien, Fenster, Menü, Farbprofile) |
 | `src/net` | einziges Tor ins Netz (`netFetch`, Offline-Modus, Host-Liste) |
 | `src/engine` | WASM-Lader (`coreWasm.ts`, `engine3d.ts`, `truckSolid.ts`, `wasmSource.ts`) |
-| `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans, 2D-Kern (`kernel2d`), Bögen, Dächer, Treppen, Wand-Joins/-Bänder, Schatten, Baurecht, Bemassung, Kennzahlen — wächst etappenweise |
+| `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans, 2D-Kern (`kernel2d`), Bögen, Dächer, Treppen, Wand-Joins/-Bänder, 3D-Ableitung Decken/Stützen/Treppen/2D-Spuren, Schatten, Baurecht, Bemassung, Kennzahlen — wächst etappenweise |
 | `src-tauri/render2d, render3d` | die zwei Anzeige-Engines (Rust → WASM/Metal) |
 | `src-tauri/trucksolid` | B-Rep (truck 0.6): Körper, Booleans, STEP, Kennwerte, Kollision |
 | `src-tauri/kernel2d, dwgimport` | 2D-Geometrie (Offset/Trim/Fillet/Split/Join, in `core` eingebunden), DWG-Import |
