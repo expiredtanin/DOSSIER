@@ -22,6 +22,8 @@
 import type { Vec2 } from "../model/types";
 
 const EPS = 1e-9;
+/** Höchstzahl Beulen je Segment (praktische Wolken haben < 100). */
+const MAX_BUMPS_PER_SEGMENT = 2000;
 
 /**
  * `bulge`-Wert EINER Beule — `tan(Δ/4)` für einen Öffnungswinkel Δ ≈ 100°
@@ -41,8 +43,9 @@ const lerp = (a: Vec2, b: Vec2, t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t,
  */
 function expandSegment(a: Vec2, b: Vec2, targetArcLen: number): { pts: Vec2[]; bulge: number[] } {
   const len = dist(a, b);
-  if (len < EPS) return { pts: [], bulge: [] };
-  const n = Math.max(1, Math.round(len / Math.max(targetArcLen, EPS)));
+  if (!Number.isFinite(len) || len < EPS) return { pts: [], bulge: [] };
+  // Obergrenze gegen Unsinn-Eingaben (winzige Bogenlänge, riesige Strecke): sonst Speicher-Explosion.
+  const n = Math.min(MAX_BUMPS_PER_SEGMENT, Math.max(1, Math.round(len / Math.max(targetArcLen, EPS))));
   const pts: Vec2[] = [];
   const bulge: number[] = [];
   for (let i = 1; i <= n; i++) {
@@ -63,7 +66,7 @@ export function revisionCloudPts(
   closed: boolean,
   targetArcLen: number,
 ): { pts: Vec2[]; bulge: number[] } | null {
-  if (points.length < 2) return null;
+  if (points.length < 2 || !Number.isFinite(targetArcLen) || targetArcLen <= 0) return null;
   const segCount = closed ? points.length : points.length - 1;
   const outPts: Vec2[] = [points[0]];
   const outBulge: number[] = [];
