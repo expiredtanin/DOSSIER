@@ -4,6 +4,7 @@
 //! WASM-Modul lahm, [14]).
 
 mod polygon;
+mod roof;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

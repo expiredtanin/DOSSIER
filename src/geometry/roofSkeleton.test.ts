@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Roof, Vec2 } from "../model/types";
 import { roofGeometry } from "./roof";
-import { convexPieces, isRectilinearNonRect, rectilinearHipRoof } from "./roofSkeleton";
+
+// Das Skelett rechnet der Rust-Kern (`src-tauri/core/src/roof_skeleton.rs`, dort auch die Tests
+// der Hilfsfunktionen: Säubern, Versatz, konvexe Zerlegung, Umriss-Erkennung). Hier wird es über
+// `roofGeometry` geprüft: Walm/Sattel mit 45° ohne Überstand auf Traufhöhe 0 entspricht dem
+// früheren direkten Aufruf `rectilinearHipRoof(L, 1, 0[, "x"])`.
 
 const L: Vec2[] = [{ x: 0, y: 0 }, { x: 11, y: 0 }, { x: 11, y: 4 }, { x: 8, y: 4 }, { x: 8, y: 6 }, { x: 0, y: 6 }];
 
@@ -14,14 +18,32 @@ const planArea = (pts: number[][]) => {
   return Math.abs(a) / 2;
 };
 
-describe("rectilinearHipRoof (L-Grundriss)", () => {
-  const r = rectilinearHipRoof(L, 1, 0);
+const skeleton = (outline: Vec2[], shape: "walm" | "sattel", ridgeAxis: "x" | "y" = "x") => {
+  const g = roofGeometry({ id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline, shape, pitchDeg: 45, overhang: 0, ridgeAxis } as unknown as Roof, 0);
+  return { ...g, planes: g.planes.map((p) => p.pts) };
+};
+
+/** Konvex (CCW oder CW, kollineare Punkte erlaubt). */
+const isConvex = (pts: number[][]) => {
+  let sign = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [a, b, c] = [pts[i], pts[(i + 1) % pts.length], pts[(i + 2) % pts.length]];
+    const cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+    if (Math.abs(cr) < 1e-12) continue;
+    if (sign !== 0 && Math.sign(cr) !== sign) return false;
+    sign = Math.sign(cr);
+  }
+  return true;
+};
+
+describe("Skelett-Walmdach (L-Grundriss)", () => {
+  const r = skeleton(L, "walm");
   it("Flächen decken den Grundriss exakt (44 + 18 = 62 m² … L = 11·4 + 8·2)", () => {
     const total = r.planes.reduce((s, p) => s + planArea(p), 0);
     expect(total).toBeCloseTo(11 * 4 + 8 * 2, 6);
   });
   it("alle Flächen konvex, Höhe = Abstand zur Traufe, Firsthöhe 3 m (halbe Breite 6 → Flügel 4 m: 2 m … )", () => {
-    for (const p of r.planes) expect(convexPieces(p.map(([x, y]) => ({ x, y }))).length).toBe(1);
+    for (const p of r.planes) expect(isConvex(p)).toBe(true);
     expect(r.ridgeHeight).toBeCloseTo(3, 6);
   });
   it("Kehle: einspringende Ecke (8,4) steigt zum Kehlpunkt (6,2)", () => {
@@ -32,7 +54,6 @@ describe("rectilinearHipRoof (L-Grundriss)", () => {
 describe("roofGeometry", () => {
   const base = { id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline: L, shape: "walm", pitchDeg: 45, overhang: 0, ridgeAxis: "x" } as unknown as Roof;
   it("Walm auf L nutzt das Skelett, Rechteck bleibt Bounding-Box", () => {
-    expect(isRectilinearNonRect(L)).toBe(true);
     // Sechs Dachebenen (Süd, Ost, Nord und West des Hauptbaus, Kehl- und Flügelfläche); wie viele
     // konvexe Stücke je Ebene entstehen, hängt vom Polygon-Kern ab und wird nicht geprüft.
     const g = roofGeometry(base, 0);
@@ -52,7 +73,7 @@ describe("roofGeometry", () => {
 });
 
 describe("Satteldach auf L-Grundriss", () => {
-  const r = rectilinearHipRoof(L, 1, 0, "x");
+  const r = skeleton(L, "sattel");
   it("Flächen decken den Grundriss, Giebel statt Walm-Schrägen", () => {
     const total = r.planes.reduce((s, p) => s + planArea(p), 0);
     expect(total).toBeCloseTo(11 * 4 + 8 * 2, 6);
@@ -67,7 +88,7 @@ describe("Satteldach auf L-Grundriss", () => {
 describe("Satteldach, First entlang y", () => {
   it("gedrehter L-Grundriss liefert dieselbe Flächensumme und Giebel quer zu y", () => {
     const Lt = L.map((p) => ({ x: p.y, y: p.x }));
-    const r = rectilinearHipRoof(Lt, 1, 0, "y");
+    const r = skeleton(Lt, "sattel", "y");
     expect(r.planes.reduce((s, p) => s + planArea(p), 0)).toBeCloseTo(11 * 4 + 8 * 2, 6);
     expect(r.gables.length).toBe(3);
   });
