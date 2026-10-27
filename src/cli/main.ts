@@ -8,7 +8,7 @@
 //   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--out eg.svg]
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
-//   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule|kennzahlen [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
@@ -26,6 +26,9 @@ import {
   exportProjectStep,
   exportScheduleCsv,
   computeKennzahlen,
+  sunPosition,
+  shadowPolygons,
+  projectLatLon,
   checkRoomProgram,
   exportStl,
   generateElevationPlan,
@@ -113,7 +116,7 @@ export async function run(argv: string[]): Promise<number> {
   const [file, command, ...rest] = args.positional;
   if (!file || !command) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|ifc|step|obj|stl|schedule|kennzahlen> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|ifc|step|obj|stl|schedule|kennzahlen|sun> [Optionen]\n",
     );
     return 2;
   }
@@ -205,6 +208,15 @@ export async function run(argv: string[]): Promise<number> {
       const k = computeKennzahlen(project);
       const prog = checkRoomProgram(project);
       out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
+      return 0;
+    }
+    case "sun": {
+      // Sonnenstand + Schatten-Polygone (Boden, Meter) für Datum/Uhrzeit (UTC), z. B. --when 2026-06-21T10:00Z
+      const when = new Date(String(args.flags.get("when") ?? "2026-06-21T10:00:00Z"));
+      if (Number.isNaN(when.getTime())) throw new Error("--when: ungültiges Datum");
+      const { lat, lon } = projectLatLon(project);
+      const sun = sunPosition(lat, lon, when);
+      out(args, JSON.stringify({ when: when.toISOString(), lat, lon, sun, shadows: shadowPolygons(project, sun) }, null, 2), `${project.name || "projekt"}-sonne.json`);
       return 0;
     }
     case "schedule":

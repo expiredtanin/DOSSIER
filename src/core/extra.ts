@@ -14,3 +14,5 @@ export type { CoreOp } from "./ops";
 export type { Project, DrawingLevel } from "../model/types";
 export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/kennzahlen";
 export type { Kennzahlen, ProgramCheck } from "../analysis/kennzahlen";
+export { sunPosition, shadowPolygons, shadowOfPrism, projectLatLon } from "../analysis/sun";
+export type { SunPosition } from "../analysis/sun";
