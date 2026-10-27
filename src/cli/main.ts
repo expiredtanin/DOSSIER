@@ -30,6 +30,7 @@ import {
   shadowPolygons,
   projectLatLon,
   checkRoomProgram,
+  checkSiteRules,
   exportStl,
   generateElevationPlan,
   diffToOps,
@@ -207,7 +208,8 @@ export async function run(argv: string[]): Promise<number> {
     case "kennzahlen": {
       const k = computeKennzahlen(project);
       const prog = checkRoomProgram(project);
-      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
+      const baurecht = checkSiteRules(project);
+      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
       return 0;
     }
     case "sun": {

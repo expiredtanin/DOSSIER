@@ -73,6 +73,7 @@ import { addCeilingPoche } from "./generatePlan/ceilings";
 import { subtractVoidsInPlan } from "./voids";
 import { addContextContours } from "./generatePlan/context";
 import { addSunShadow } from "./generatePlan/sunShadow";
+import { addSiteRules, addSiteViolations } from "./generatePlan/siteRules";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import {
   addDrawing2D,
@@ -352,7 +353,9 @@ export function generatePlan(
   const primitives: Primitive[] = [];
   // Schattenstudie zuunterst (projektglobal, nur im Geschoss nächst ±0.00).
   if (includeGlobal) addSunShadow(primitives, project, floorId);
-  const shadowCount = primitives.length;
+  // Baurecht (Parzelle, zulässige Fläche, Verstösse), ebenfalls zuunterst.
+  if (includeGlobal) addSiteRules(primitives, project, floorId);
+  const underlayCount = primitives.length;
   // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
   const floor = project.drawingLevels.find((z) => z.id === floorId);
   // Code → Kategorie-Strichstärke (mm), damit die Wand-Umrisslinie aus dem
@@ -659,6 +662,9 @@ export function generatePlan(
   // Abzugskörper (Aussparungen/Durchbrüche): von Wand-/Stützen-/Decken-Poché abziehen.
   subtractVoidsInPlan(primitives, project, (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0));
 
+  // Baurechts-Verstösse über allem (Signal, soll nicht unter der Wand-Poché verschwinden).
+  if (includeGlobal) addSiteViolations(primitives, project, floorId);
+
   if (mono) toMono(primitives);
 
   // Georeferenzierte Luftbilder als Hintergrund-Ebenen (nur interaktive Ansicht,
@@ -679,7 +685,7 @@ export function generatePlan(
 
   return {
     primitives,
-    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs, primitives.slice(0, shadowCount)),
+    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs, primitives.slice(0, underlayCount)),
     backgroundImages,
     ...(underlay.length ? { underlay } : {}),
   };
@@ -1060,7 +1066,7 @@ function computeBounds(
   stairs: Stair[] = [],
   rooms: Room[] = [],
   roofs: Roof[] = [],
-  /** Zusätzlich einzurahmende Flächen (Schattenstudie), damit Druck/Einpassen den ganzen Schatten zeigen. */
+  /** Zusätzlich einzurahmende Primitive (Schatten, Parzelle), damit Druck/Einpassen sie ganz zeigen. */
   extra: Primitive[] = [],
 ) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1074,7 +1080,10 @@ function computeBounds(
   }
   for (const c of ceilings) for (const p of c.outline) acc(p);
   for (const r of rooms) for (const p of r.boundary) acc(p);
-  for (const e of extra) if (e.kind === "polygon") e.pts.forEach(acc);
+  for (const e of extra) {
+    if (e.kind === "polygon") e.pts.forEach(acc);
+    else if (e.kind === "line") { acc(e.a); acc(e.b); }
+  }
   // Traufe (inkl. Überstand) statt reinem Umriss, damit ein weit auskragendes
   // Dach das „Einpassen" korrekt mit einrahmt.
   for (const roof of roofs) for (const p of roofGeometry(roof, 0).eaves) acc(p);

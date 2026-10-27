@@ -8184,3 +8184,54 @@ body {
   color: var(--ink-2);
   font-size: 11px;
 }
+
+/* Baurecht (Lage-Panel, SiteRulesSection). */
+.site-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.site-rules-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+.site-rules-head .sun-row {
+  font-weight: normal;
+}
+.site-rules-result {
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.site-rules-result.ok {
+  border-color: var(--ok, #2f8f4e);
+}
+.site-rules-result.bad {
+  border-color: var(--danger);
+  color: var(--danger-light, var(--danger));
+}
+.site-rules-edges summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+.site-rules-edges .kz-parcel {
+  margin: 2px 0 2px 10px;
+}
+.site-rules-lines {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.site-rules-lines > span {
+  flex: 1 1 auto;
+  color: var(--ink-2);
+}
+.site-panel .site-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -16,3 +16,5 @@ export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/ke
 export type { Kennzahlen, ProgramCheck } from "../analysis/kennzahlen";
 export { sunPosition, shadowPolygons, shadowOfPrism, projectLatLon } from "../analysis/sun";
 export type { SunPosition } from "../analysis/sun";
+export { checkSiteRules, allowedArea, multiPolygonArea, buildingFootprint, modelTop } from "../analysis/siteRules";
+export type { SiteCheck } from "../analysis/siteRules";

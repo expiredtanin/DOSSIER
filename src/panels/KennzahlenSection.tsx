@@ -1,7 +1,7 @@
 // Kennzahlenleiste [62] und Raumprogramm-Editor [61] im Flächenbilanz-Panel.
 //
 //  • Leiste: GF, aGF, GV, AZ, ÜZ (live aus `computeKennzahlen`), darunter je Geschoss GF/aGF.
-//  • Parzellenfläche: Eingabefeld → `Project.parcelArea` (leer/0 = nicht gesetzt).
+//  • Parzellenfläche: Eingabefeld → `Project.parcelArea` (leer/0 = aus der Parzellengrenze, sonst nicht gesetzt).
 //  • Raumprogramm: Soll-Zeilen (Name, Fläche je Raum, Anzahl) bearbeiten; der Status je Zeile
 //    kommt aus `checkRoomProgram`.
 // Änderungen laufen über `setProject` mit coalesceKey, damit Tippen einen Undo-Schritt ergibt.
@@ -10,7 +10,7 @@ import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
-import { checkRoomProgram, computeKennzahlen } from "../core";
+import { checkRoomProgram, computeKennzahlen, polygonArea } from "../core";
 import type { Project, RoomProgramRow } from "../model/types";
 
 type ProgramStatus = ReturnType<typeof checkRoomProgram>["rows"][number]["status"];
@@ -92,7 +92,8 @@ export function KennzahlenSection() {
           step={1}
           className="kz-input kz-num"
           value={project.parcelArea !== undefined ? String(project.parcelArea) : ""}
-          placeholder="–"
+          placeholder={project.siteRules?.parcel && project.siteRules.parcel.length >= 3 ? fmt(polygonArea(project.siteRules.parcel)) : "–"}
+          title={t("kennzahlen.parcelArea.hint")}
           onChange={(e) => setParcel(e.target.value)}
         />
         <span>m²</span>

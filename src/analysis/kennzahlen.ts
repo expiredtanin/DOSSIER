@@ -3,7 +3,7 @@
 //  • Flächen je Geschoss aus den Räumen (SIA 416: GF, NGF/aGF), Summe über das Gebäude.
 //  • Gebäudevolumen (GV) aus den freien Körpern (Massenmodell); Abzugskörper zählen nicht mit,
 //    ihr Volumen wird abgezogen.
-//  • Ausnützungs-/Überbauungsziffer nur mit `project.parcelArea`.
+//  • Ausnützungs-/Überbauungsziffer nur mit `project.parcelArea` oder der Parzellengrenze (`siteRules`).
 //  • Raumprogramm (`project.roomProgram`, Soll) gegen die gezeichneten Räume.
 // Alles rein und ohne Wasm — exakt für Prismen/Kegelstümpfe/Kreise, Näherung sonst (Fasen/Rundungen).
 
@@ -64,7 +64,9 @@ export function computeKennzahlen(project: Project): Kennzahlen {
     gv += s.operation === "subtract" ? -v : v;
   }
   const footprint = levels.find((l) => l.gf > 0)?.gf ?? 0;
-  const parcel = project.parcelArea && project.parcelArea > 0 ? project.parcelArea : null;
+  // Parzellenfläche: eingegebene Zahl, sonst aus der Parzellengrenze des Baurechts.
+  const fromRules = project.siteRules?.parcel && project.siteRules.parcel.length >= 3 ? finite(polygonArea(project.siteRules.parcel)) : 0;
+  const parcel = project.parcelArea && project.parcelArea > 0 ? project.parcelArea : fromRules > 0 ? fromRules : null;
   return {
     levels,
     gf,

@@ -7,6 +7,7 @@
 //     Dialog) + „Gelände erzeugen" (aus dem gewählten Kontur-Satz).
 //   • Liste der Kontext-Objekte: Name + Typ-Badge + „Entfernen".
 //   • Schattenstudie (SunStudySection): Schalter, Datum, Zeitregler.
+//   • Baurecht (SiteRulesSection): Parzelle, Grenzabstände, Baulinien, Gesamthöhe.
 //   • DWG-Hinweis am Fuß.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
@@ -23,6 +24,7 @@ import { useStore } from "../state/appStore";
 import { isTauriRuntime } from "../native/projectFile";
 import { openContextImportWindowNative } from "../native/contextImportWindow";
 import { SunStudySection } from "./SunStudySection";
+import { SiteRulesSection } from "./SiteRulesSection";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -158,6 +160,8 @@ export function SitePanel() {
 
       <div className="site-sep" />
       <SunStudySection />
+      <div className="site-sep" />
+      <SiteRulesSection />
       <div className="site-sep" />
 
       {/* Kontext-Objekte nach Ebene (`layer`) gruppiert: importierte Gebäude

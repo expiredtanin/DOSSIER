@@ -946,6 +946,25 @@ export interface RoomProgramRow {
  * Geschoss nutzt floorHeight/cutHeight/baseElevation; Schnitt/Ansicht nutzen
  * linePoints/directionSign; "drawing" nutzt keines dieser Felder.
  */
+/**
+ * Baurecht einer Parzelle ([63]). Die zulässige Grundfläche ist die Parzelle ohne die Streifen
+ * „näher als der Grenzabstand an Kante i", begrenzt durch die Baulinien.
+ */
+export interface SiteRules {
+  /** Parzellengrenze als geschlossener Ring (Modell-Meter, Umlaufsinn beliebig). */
+  parcel: Vec2[];
+  /** Grenzabstand (m) je Kante i = parcel[i] → parcel[i+1]; fehlende Einträge → `defaultSetback`. */
+  setbacks?: number[];
+  /** Grenzabstand (m) für alle Kanten ohne eigenen Wert. */
+  defaultSetback: number;
+  /** Baulinien: das Gebäude bleibt auf der Seite der Linie, auf der der Parzellen-Schwerpunkt liegt. */
+  buildingLines?: { a: Vec2; b: Vec2 }[];
+  /** Zulässige Gesamthöhe über ±0.00 (m). */
+  maxHeight?: number;
+  /** Parzelle, zulässige Fläche und Verstösse im Grundriss zeigen (Default: ja). */
+  show?: boolean;
+}
+
 /** Schattenstudie (`analysis/sun.ts`): der Schatten liegt auf dem Geschoss nächst ±0.00. */
 export interface SunStudy {
   /** Zeitpunkt als ISO-8601-Text in UTC, z. B. "2026-12-21T11:00:00Z". */
@@ -2916,6 +2935,8 @@ export interface Project {
   parcelArea?: number;
   /** Schattenstudie: Zeitpunkt (ISO 8601, UTC) und ob der Boden-Schatten im Grundriss erscheint. */
   sunStudy?: SunStudy;
+  /** Baurecht der Parzelle: Grenze, Grenzabstände, Baulinien, Gesamthöhe (`analysis/siteRules.ts`). */
+  siteRules?: SiteRules;
   /** Grafik-Kategorie-Baum (geschossübergreifend). */
   layers: LayerCategory[];
   walls: Wall[];
