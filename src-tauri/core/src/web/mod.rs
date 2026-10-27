@@ -23,6 +23,9 @@ mod columns3d;
 mod drawing2d_3d;
 mod openings3d;
 mod wall_mesh_cut;
+mod plan_buf;
+mod gpu_compile;
+mod hatch;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

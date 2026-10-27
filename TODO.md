@@ -62,6 +62,19 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   - ◐ **[K3b] Verbraucher auf Binärpuffer.** Plan-Puffer-Format (TS schreibt vorerst, Rust liest);
     GPU-Kompilierung (`glPlanCompile`/`glPlanHatch`) in Rust, Vertex-Puffer bitgleich zur TS-Ausgabe;
     render2d bekommt die Szene binär statt JSON. Danach Mac-Test (Bildfehler-Risiko liegt hier).
+    - ✅ (27.10.) Teil 1: Plan-Puffer-Format v1 (`plan_buf.rs` ↔ `src/plan/planBuf.ts`, Magie+Version,
+      Farb-/Schraffur-Tabellen, ein Eintrag je Primitiv, Text/Bild als Platzhalter, keine Pick-IDs) und
+      GPU-Kompilierung in Rust (`gpu_compile.rs`, `hatch.rs`, `jsnum.rs`). `glPlanCompile.ts`/`glPlanHatch.ts`
+      sind Fassaden (Signaturen gleich, auch `buildHatchRuns`/`applyDashRuns`/`zigzagPoints`/`motifPoints`/
+      `triangulate` für toRenderScene/Druck-SVG/DXF/Mesh). Ein Kern-Aufruf je Chunk. Bitgleich (Vertex-/
+      Index-Puffer, Batches, Ursprung, Bounds; gepackt + ungepackt): Beispielprojekt (alle Ebenen ×
+      Detailgrade × Modi × LOD, Chunks), 30 Zufallsprojekte (+ Unterlage), 460 Zufalls-Primitivlisten (alle
+      Schraffurtypen, Random/Motiv/Dämmung, Strichmuster, Zickzack, noStrokeEdges, greyed/opacity,
+      Landeskoordinaten), Schraffur-Fassade einzeln — 8 GB Puffer verglichen. Trigonometrie läuft im Web-Build
+      über `Math` der JS-Engine (musl-libm wich ab, auch in der Topologie). Leistung (Node, Min. über
+      Wiederholungen): Beispiel-EG 1,5 → 0,8 ms, 100k Linien + 3000 Schraffurflächen 3,9 → 1,8 s, nur
+      Schraffur ~2×, nur Linien 104 → 81 ms (davon Kodieren in TS 7–29 ms). **Offen:** Mac-Test (Metal),
+      Teil 2 (render2d binär, paralleler Agent).
   - ○ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
     2D-Zeichnung, Kontext, Schnittlinien) direkt in den Plan-Puffer; JS-Objekte nur noch für Export/Overlay.
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.

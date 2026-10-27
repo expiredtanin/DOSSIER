@@ -38,6 +38,8 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
   sie flach an Rust.
 - **truck** (`src-tauri/trucksolid`, 3D-B-Rep) bleibt eigenes WASM-Modul (Panic-Isolation, `guarded()`).
   2D-Flächen-Booleans laufen über den Kern (i_overlay), 3D-Körper über truck — nicht vermischen.
+- **Bitgleich zu TS:** JS-Zahlsemantik über `jsnum.rs` (`Math.min/max/round`, ToInt32; `sin/cos/atan2/acos`
+  im Web-Build über `Math` der JS-Engine) und `jsmath.rs` (`Math.hypot`); Rechenreihenfolge wie in TS.
 - **Genauigkeit:** i_overlay rechnet auf einem Ganzzahlraster (≈ Ausdehnung/2³⁰); Tests mit 1e-6 m statt 1e-9.
 
 ## Architektur (harte Grenze, vom Test `src/core/boundary.test.ts` geprüft)

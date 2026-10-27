@@ -1,8 +1,8 @@
 /**
  * Puffer-Attrappe für den NATIVEN Plan-Renderer (macOS, src-tauri/src/native_embed.rs).
  *
- * Kompilierung (`compilePrimitivesToGpu`) und Chunk-Cache (`GpuChunkCache`) laufen
- * unverändert in TypeScript und sprechen nur diese vier Puffer-Funktionen an
+ * Kompilierung (`compilePrimitivesToGpu`, Rechenteil im Rust-Kern) und Chunk-Cache
+ * (`GpuChunkCache`) sprechen nur diese vier Puffer-Funktionen an
  * (`BufferGl`). Statt eines GL-Kontexts liegen die Bytes danach in Rust: jeder
  * Puffer geht EINMAL als Rohdaten über die Tauri-Schnittstelle (kein JSON); pro
  * Frame wandert danach nur noch der Ausschnitt.
