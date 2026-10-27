@@ -10,15 +10,15 @@
 // die NIEDRIGSTE Ebene aller Kanten, deren Keil den Punkt enthält:
 //   z(p) = e + tan(Neigung) · min{ dist(p, Gerade f) | p ∈ Keil(f) }.
 // Die Fläche von e = (Traufpolygon ∩ Keil(e)) minus alle Bereiche, in denen eine
-// andere Kante tiefer liegt. Polygon-Booleans über `polygon-clipping`
+// andere Kante tiefer liegt. Polygon-Booleans über den Rust-Kern (`polygonBool`)
 // (Martinez, wie `editors/booleanOps.ts`). Danach in KONVEXE Teilflächen zerlegt
 // (Ohr-Schnitt + Hertel–Mehlhorn), weil Renderer/Schnitt konvexe Flächen
 // erwarten (Fächer-Triangulierung, Cyrus–Beck).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import polygonClipping from "polygon-clipping";
-import type { MultiPolygon, Ring } from "polygon-clipping";
+import * as polygonClipping from "./polygonBool";
+import type { MultiPolygon, Ring } from "./polygonBool";
 import type { Vec2 } from "../model/types";
 import type { Vec3 } from "./roof";
 

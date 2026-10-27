@@ -9,6 +9,7 @@ export { exportObj, exportStl } from "../export/exportMesh";
 export { exportProjectStep } from "../export/exportStep";
 export { planToSvgString } from "../export/planToSvgString";
 export { setWasmBytesProvider } from "../engine/wasmSource";
+export { initCore, coreReady } from "../engine/coreWasm";
 export { applyOps, diffToOps, validateProject, validateOps } from "./ops";
 export type { CoreOp } from "./ops";
 export type { Project, DrawingLevel } from "../model/types";

@@ -43,6 +43,7 @@ import {
   planToSvgString,
   serializeProject,
   setWasmBytesProvider,
+  initCore,
   validateProject,
 } from "../core";
 import type { Project } from "../core";
@@ -74,6 +75,7 @@ function wasmDir(): string {
 }
 
 const WASM_FILES: Record<string, string> = {
+  core: "pkgCore/core_bg.wasm",
   render3d: "pkg3d/render3d_bg.wasm",
   trucksolid: "pkgTruck/trucksolid_bg.wasm",
 };
@@ -126,6 +128,7 @@ export async function run(argv: string[]): Promise<number> {
     if (!rel) throw new Error(`unbekanntes WASM-Modul ${name}`);
     return readFileSync(join(wasmDir(), rel));
   });
+  await initCore();
   const project = loadProject(file);
   const scale = Number(args.flags.get("scale") ?? 100);
   const allCodes = new Set(project.layers.map((l) => l.code));

@@ -7,8 +7,8 @@
 //  • Gebäude-Grundfläche: Wände aller Geschosse und freie Körper (ohne Abzugskörper). Vorsprünge
 //    (Dachüberstand, Balkone) und ihre Sonderregeln zählen nicht.
 
-import polygonClipping from "polygon-clipping";
-import type { MultiPolygon, Pair, Polygon as PcPolygon } from "polygon-clipping";
+import * as polygonClipping from "../geometry/polygonBool";
+import type { MultiPolygon, Pair, Polygon as PcPolygon } from "../geometry/polygonBool";
 import type { Project, SiteRules, Vec2 } from "../model/types";
 import { getFloor, getWallType, wallTypeThickness } from "../model/types";
 import { wallVerticalExtent } from "../model/wall";

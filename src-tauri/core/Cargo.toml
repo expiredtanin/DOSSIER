@@ -1,0 +1,27 @@
+# Eigener leerer Workspace-Block wie render2d/kernel2d: entkoppelt das Crate vom cad-tauri-Workspace.
+[workspace]
+
+[package]
+name = "dossier-core"
+version = "0.1.0"
+edition = "2021"
+description = "Rust-Kern von Dossier (Umstellung des TS-Kerns, Etappen 0-4): Geometrie, Ableitung, spaeter Modell und Ops. Headless per `cargo test`, per wasm-pack (Feature \"web\") als src/engine/pkgCore."
+license = "AGPL-3.0-or-later"
+
+[lib]
+name = "dossier_core"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Browser-/Node-Bindings (wasm-bindgen); nur fuer wasm32-unknown-unknown.
+web = ["dep:wasm-bindgen", "dep:console_error_panic_hook"]
+
+[dependencies]
+i_overlay = { version = "9.1", default-features = false }
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[profile.release]
+opt-level = 3
+lto = true

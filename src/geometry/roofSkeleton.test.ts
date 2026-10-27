@@ -33,7 +33,19 @@ describe("roofGeometry", () => {
   const base = { id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline: L, shape: "walm", pitchDeg: 45, overhang: 0, ridgeAxis: "x" } as unknown as Roof;
   it("Walm auf L nutzt das Skelett, Rechteck bleibt Bounding-Box", () => {
     expect(isRectilinearNonRect(L)).toBe(true);
-    expect(roofGeometry(base, 0).planes.length).toBe(8);
+    // Sechs Dachebenen (Süd, Ost, Nord und West des Hauptbaus, Kehl- und Flügelfläche); wie viele
+    // konvexe Stücke je Ebene entstehen, hängt vom Polygon-Kern ab und wird nicht geprüft.
+    const g = roofGeometry(base, 0);
+    const planeKey = (pts: number[][]) => {
+      const [a, b, c] = pts;
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      const l = Math.hypot(n[0], n[1], n[2]) * Math.sign(n[2] || 1);
+      const k = n.map((x) => x / l);
+      return [...k, k[0] * a[0] + k[1] * a[1] + k[2] * a[2]].map((x) => x.toFixed(4)).join(",");
+    };
+    expect(new Set(g.planes.map((p) => planeKey(p.pts))).size).toBe(6);
+    expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(11 * 4 + 8 * 2, 6);
     const rect = { ...base, outline: L.slice(0, 1).concat([{ x: 11, y: 0 }, { x: 11, y: 6 }, { x: 0, y: 6 }]) };
     expect(roofGeometry(rect, 0).planes.length).toBe(4);
   });

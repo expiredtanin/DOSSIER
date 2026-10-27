@@ -93,6 +93,7 @@ export {
   openingVerticalExtent,
 } from "../geometry/opening";
 export { autoExteriorDimensions } from "../geometry/autoDimensions";
+export * as polygonBool from "../geometry/polygonBool";
 export type { AutoDimension } from "../geometry/autoDimensions";
 
 export {

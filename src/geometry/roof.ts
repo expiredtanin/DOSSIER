@@ -368,7 +368,7 @@ const swapLine = (l: [Vec2, Vec2]): [Vec2, Vec2] => [swap2(l[0]), swap2(l[1])];
  */
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
   // Memo je Dach-Objekt: Dächer sind immutabel (structural sharing), die Berechnung (Skelett über
-  // polygon-clipping) kostet ~50 ms je Dach und wird je Ableitung (3D, Schnitt, Pick, Highlight …)
+  // Polygon-Booleans) kostet ~50 ms je Dach und wird je Ableitung (3D, Schnitt, Pick, Highlight …)
   // mehrfach gebraucht — vorher rechnete jeder Aufruf neu (projectToModel3d: ~550 ms bei 10 Dächern).
   const hit = roofGeometryCache.get(roof);
   if (hit && hit.eavesZ === eavesZ) return hit.geo;

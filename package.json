@@ -24,6 +24,7 @@
     "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web",
     "build:kernel2d": "wasm-pack build src-tauri/kernel2d --release --target web --out-dir ../../src/engine/pkgKernel2d --out-name kernel2d --no-default-features --features web",
     "build:dwgimport": "wasm-pack build src-tauri/dwgimport --release --target web --out-dir ../../src/engine/pkgDwgImport --out-name dwgimport --no-default-features --features web",
+    "build:core": "wasm-pack build src-tauri/core --release --target web --out-dir ../../src/engine/pkgCore --out-name core --no-default-features --features web",
     "build:truck": "wasm-pack build src-tauri/trucksolid --release --target web --out-dir ../../src/engine/pkgTruck --out-name trucksolid --no-default-features --features web"
   },
   "dependencies": {
@@ -41,7 +42,6 @@
     "jszip": "^3.10.1",
     "lcms-wasm": "^1.0.5",
     "pdfjs-dist": "^6.2.108",
-    "polygon-clipping": "^0.15.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "svg2pdf.js": "^2.7.0"

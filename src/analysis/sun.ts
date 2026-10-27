@@ -6,8 +6,8 @@
 //    Dächern als Vereinigung konvexer Hüllen (Prisma ∪ verschobenes Prisma). Modell: x = Ost,
 //    y = Nord, Höhen über dem Geländenullpunkt (Meter).
 
-import polygonClipping from "polygon-clipping";
-import type { Pair, Polygon as PcPolygon } from "polygon-clipping";
+import * as polygonClipping from "../geometry/polygonBool";
+import type { Pair, Polygon as PcPolygon } from "../geometry/polygonBool";
 import type { Project, Vec2 } from "../model/types";
 import { wallVerticalExtent } from "../model/wall";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";

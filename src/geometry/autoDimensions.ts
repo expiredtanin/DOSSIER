@@ -8,8 +8,8 @@
 // schiefe Wände fehlen in den Ketten. Ergebnis sind gewöhnliche Bemassungen (Drawing2D), danach
 // frei bearbeitbar.
 
-import polygonClipping from "polygon-clipping";
-import type { Pair, Polygon as PcPolygon } from "polygon-clipping";
+import * as polygonClipping from "./polygonBool";
+import type { Pair, Polygon as PcPolygon } from "./polygonBool";
 import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
 import { openingJambs } from "./opening";

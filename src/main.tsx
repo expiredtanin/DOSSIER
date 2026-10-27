@@ -7,6 +7,7 @@ import { DrawingLevelsWindowApp } from "./native/DrawingLevelsWindowApp";
 import { LayerSettingsWindowApp } from "./native/LayerSettingsWindowApp";
 import { ContextImportWindowApp } from "./native/ContextImportWindowApp";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { initCore } from "./core";
 import { getLanguage, setLanguage } from "./i18n";
 import type { Language } from "./i18n";
 import { applyThemeMode, getStoredThemeMode } from "./theme/themeMode";
@@ -79,10 +80,24 @@ function RootByWindowKind() {
   return <App />;
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <RootByWindowKind />
-    </ErrorBoundary>
-  </StrictMode>,
-);
+// Rust-Kern (src-tauri/core) einmal laden, BEVOR irgendein Fenster rendert: die Kern-Funktionen
+// rufen ihn danach synchron auf (engine/coreWasm.ts). Scheitert das Laden, gibt es keinen
+// sinnvollen Betrieb — die Meldung erscheint statt der App.
+const root = createRoot(document.getElementById("root")!);
+initCore()
+  .then(() =>
+    root.render(
+      <StrictMode>
+        <ErrorBoundary>
+          <RootByWindowKind />
+        </ErrorBoundary>
+      </StrictMode>,
+    ),
+  )
+  .catch((err: unknown) => {
+    root.render(
+      <div style={{ padding: 24, fontFamily: "system-ui", color: "#8a1a1a" }}>
+        Dossier-Kern konnte nicht geladen werden: {err instanceof Error ? err.message : String(err)}
+      </div>,
+    );
+  });

@@ -7,12 +7,21 @@ Rust-Engines `render2d` und `render3d` (WebGPU/Metal) — kein three.js, kein We
 ## Vor jedem Abschluss
 
 ```
-npm run check            # tsc, vitest, cargo test aller 5 Crates  (--fast: ohne Rust)
+npm run check            # tsc, vitest, cargo test aller 6 Crates  (--fast: ohne Rust)
 npm run build:cli        # nur nötig, wenn src/cli oder src/core geändert wurden
 ```
 
-WASM-Pakete (`src/engine/pkg*`) sind nicht im Repo: vor vitest mit `npm run build:truck|engine3d|engine|kernel2d|dwgimport`
+WASM-Pakete (`src/engine/pkg*`) sind nicht im Repo: vor vitest mit `npm run build:core|truck|engine3d|engine|kernel2d|dwgimport`
 bauen. Test zuerst, dann Code. Ein Schritt endet mit grünen Tests und gelöschtem Altcode (keine Doppelspur).
+
+## Rust-Kern (Umstellung läuft, Entscheid 27.10.)
+
+Der Kern wandert vollständig nach Rust (`src-tauri/core`, Crate `dossier-core`): Etappe 0 Lader ·
+1 2D-Geometrie · 2 Geometrie-Ableitungen · 3 Plan/Schnitt/Ansicht · 4 Modell und Ops; die UI bleibt TSX.
+**Neuer Kern-Code entsteht in Rust**, nicht in TS. Wer eine TS-Kernfunktion portiert, löscht die TS-Fassung
+im selben Schritt (keine Doppelspur). Geladen wird der Kern einmal (`engine/coreWasm.ts`: App `initCore()`
+vor dem Rendern, CLI mit Byte-Provider, Vitest per Setup-Datei), danach synchron über `core()`. Daten über
+die Grenze als flache `Float64Array`s. truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation).
 
 ## Architektur (harte Grenze, vom Test `src/core/boundary.test.ts` geprüft)
 
@@ -41,6 +50,7 @@ bauen. Test zuerst, dann Code. Ein Schritt endet mit grünen Tests und gelöscht
 | `src/net` | einziges Tor ins Netz (`netFetch`, Offline-Modus, Host-Liste) |
 | `src-tauri/render2d, render3d` | die zwei Anzeige-Engines (Rust → WASM/Metal) |
 | `src-tauri/trucksolid` | B-Rep (truck 0.6): Körper, Booleans, STEP, Kennwerte, Kollision |
+| `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans (i_overlay), wächst etappenweise |
 | `src-tauri/kernel2d, dwgimport` | 2D-Geometrie-Referenz, DWG-Import |
 
 ## Konventionen

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Pair } from "polygon-clipping";
+import type { Pair } from "../geometry/polygonBool";
 import { generatePlan } from "./generatePlan";
 import { sampleProject } from "../model/sampleProject";
 import type { ExtrudedSolid, Project } from "../model/types";
@@ -23,7 +23,8 @@ describe("Abzugskoerper — Polygon-Kern", () => {
   it("Durchbruch quer: zwei Restteile", () => {
     const r = subtractRings(sq(0, 0, 4, 0.3), [sq(1, -1, 2, 1)])!;
     expect(r).toHaveLength(2);
-    expect(r.reduce((s, x) => s + area(x.pts), 0)).toBeCloseTo(0.9, 9);
+    // Polygon-Kern rechnet auf einem Ganzzahlraster (≈ Ausdehnung / 2³⁰): Mikrometer-genau.
+    expect(r.reduce((s, x) => s + area(x.pts), 0)).toBeCloseTo(0.9, 6);
   });
   it("ohne Ueberschneidung: null (Original bleibt)", () => {
     expect(subtractRings(sq(0, 0, 1, 1), [sq(5, 5, 6, 6)])).toBeNull();

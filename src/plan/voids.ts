@@ -15,8 +15,8 @@
 // Polygone mit Loch (Körper ganz im Bauteil) werden über einen Steg an den Aussenring
 // gehängt (Schlüsselloch); die beiden Stegkanten sind nicht gestrichen (`noStrokeEdges`).
 
-import polygonClipping from "polygon-clipping";
-import type { Pair, Polygon as PcPolygon, MultiPolygon } from "polygon-clipping";
+import * as polygonClipping from "../geometry/polygonBool";
+import type { Pair, Polygon as PcPolygon, MultiPolygon } from "../geometry/polygonBool";
 import type { ExtrudedSolid, Project, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
 import { ceilingVerticalExtent, columnVerticalExtent } from "../model/wall";
@@ -75,7 +75,7 @@ function signedArea(r: Pair[]): number {
   return a / 2;
 }
 
-/** Ring ohne doppelten Schlusspunkt (polygon-clipping liefert geschlossene Ringe). */
+/** Ring ohne doppelten Schlusspunkt (der Polygon-Kern liefert geschlossene Ringe). */
 function openRing(r: Pair[]): Pair[] {
   if (r.length > 1) {
     const a = r[0];

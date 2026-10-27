@@ -1,11 +1,11 @@
 // 2D-Boolean-Operationen (Union / Subtract / Intersect) für GESCHLOSSENE
 // 2D-Zeichenelemente (Drawing2D). Ergänzt Split/Join (`splitJoin.ts`). Wandelt
-// Drawing2D ↔ polygon-clipping-Format (Martinez-Algorithmus, robust) und liefert
+// Drawing2D ↔ Ring-/Polygon-Format der Polygon-Booleans des Rust-Kerns (`polygonBool`, i_overlay) und liefert
 // neue Drawing2D-Listen. Stil-, Kategorie- und Level-Attribute werden geerbt
 // (vom ersten bzw. Basis-Element).
 //
 // Loch-Handling: Das Drawing2D-Modell kennt KEINE Innenringe (Löcher). Liefert
-// polygon-clipping ein Polygon mit Innenringen, wird der Außenring als gefüllte
+// der Polygon-Kern ein Polygon mit Innenringen, wird der Außenring als gefüllte
 // Form emittiert und JEDER Innenring als SEPARATE, ungefüllte geschlossene
 // Polylinie (Loch-Umriss). So geht keine Geometrie verloren und nichts crasht;
 // der Lochrand bleibt sichtbar, ohne dass eine gefüllte Insel entsteht.
@@ -16,8 +16,10 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import polygonClipping from "polygon-clipping";
-import type { MultiPolygon, Polygon, Ring } from "polygon-clipping";
+import { polygonBool as polygonClipping } from "../core";
+type MultiPolygon = polygonClipping.MultiPolygon;
+type Polygon = polygonClipping.Polygon;
+type Ring = polygonClipping.Ring;
 import type { Drawing2D, Drawing2DGeom, Vec2 } from "../model/types";
 import { toPolyForm } from "./splitJoin";
 import type { PolyForm } from "./splitJoin";
@@ -30,9 +32,9 @@ export function isClosedArea(geom: Drawing2DGeom): boolean {
 }
 
 /**
- * Wandelt ein geschlossenes Drawing2D in ein polygon-clipping-`Polygon`
+ * Wandelt ein geschlossenes Drawing2D in ein Kern-`Polygon`
  * (Ring-Liste). Reuse: `toPolyForm` aus splitJoin liefert die Stützpunkte. Der
- * Ring wird als `[x,y]`-Paare gebildet; polygon-clipping schließt selbst
+ * Ring wird als `[x,y]`-Paare gebildet; der Kern schließt selbst
  * (erster==letzter ist nicht erforderlich, aber unschädlich). Liefert `null`,
  * wenn die Form nicht geschlossen ist oder zu wenige Punkte hat.
  */
@@ -45,12 +47,12 @@ export function drawingToPolygon(geom: Drawing2DGeom): Polygon | null {
   return [ring];
 }
 
-/** PolyForm → polygon-clipping-Ring (`[x,y]`-Paare). */
+/** PolyForm → Kern-Ring (`[x,y]`-Paare). */
 function formToRing(form: PolyForm): Ring {
   return form.pts.map((p): [number, number] => [p.x, p.y]);
 }
 
-/** Ein polygon-clipping-Ring → Vec2-Punktliste (für fromPolyForm/Drawing2D). */
+/** Ein Kern-Ring → Vec2-Punktliste (für fromPolyForm/Drawing2D). */
 function ringToPts(ring: Ring): Vec2[] {
   // polygon-clipping liefert geschlossene Ringe (letzter == erster Punkt). Den
   // doppelten Schlusspunkt entfernen, damit unsere Polyline-Form sauber ist.
@@ -109,7 +111,7 @@ function ringDrawing(src: Drawing2D, pts: Vec2[], filled: boolean): Drawing2D {
 }
 
 /**
- * Wandelt eine polygon-clipping-`MultiPolygon` in Drawing2D[] zurück. Je Polygon
+ * Wandelt eine Kern-`MultiPolygon` in Drawing2D[] zurück. Je Polygon
  * wird der Außenring (filled) emittiert; jeder Innenring (Loch) als separater
  * ungefüllter geschlossener Umriss. Quelle liefert Stil/Kategorie/Level.
  */
@@ -129,7 +131,7 @@ function multiPolygonToDrawings(
   return out;
 }
 
-/** Geschlossene Quellen → polygon-clipping-Polygone (mit Drawing-Zuordnung). */
+/** Geschlossene Quellen → Kern-Polygone (mit Drawing-Zuordnung). */
 function collectPolygons(
   srcs: Drawing2D[],
 ): { poly: Polygon; src: Drawing2D }[] {
