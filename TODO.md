@@ -58,6 +58,16 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `projectToModel3d` (1500 Wände) 193 → 126 ms; `isWatertight` allein ~4× langsamer (Übergabe der
     `number[]`, je Mesh < 3 µs), IFC-Export gesamt unverändert.
 - ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
+  Reihenfolge (Entscheid 27.10.: Risiko klein halten, Verbraucher zuerst):
+  - ◐ **[K3b] Verbraucher auf Binärpuffer.** Plan-Puffer-Format (TS schreibt vorerst, Rust liest);
+    GPU-Kompilierung (`glPlanCompile`/`glPlanHatch`) in Rust, Vertex-Puffer bitgleich zur TS-Ausgabe;
+    render2d bekommt die Szene binär statt JSON. Danach Mac-Test (Bildfehler-Risiko liegt hier).
+  - ○ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
+    2D-Zeichnung, Kontext, Schnittlinien) direkt in den Plan-Puffer; JS-Objekte nur noch für Export/Overlay.
+  - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
+  - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
+  Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
+  (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
 - ○ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.
 
