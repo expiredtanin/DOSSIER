@@ -4,9 +4,9 @@ members = ["."]
 # Tauri-Toolchain UND per wasm-pack (Feature "web") zu WASM baubar bleiben. Sie
 # liegen zwar im src-tauri-Baum, gehoeren aber NICHT zum cad-tauri-Workspace —
 # hier ausschliessen, damit `cad-tauri` sie dennoch per Pfad als Abhaengigkeit
-# nutzen kann. kernel2d: analog — eigenstaendiger 2D-Geometrie-Kern (Port von
-# kernel2d.ts), per wasm-pack (Feature "web") zu WASM gebaut, ausserhalb des
-# cad-tauri-Workspace.
+# nutzen kann. kernel2d: analog — eigenstaendiger 2D-Geometrie-Kern, als
+# Pfad-Abhaengigkeit von dossier-core (src-tauri/core) eingebunden, ausserhalb
+# des cad-tauri-Workspace.
 exclude = ["render2d", "render3d", "kernel2d", "dwgimport", "trucksolid"]
 
 [package]

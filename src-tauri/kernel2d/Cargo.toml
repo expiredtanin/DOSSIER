@@ -1,40 +1,16 @@
 # Eigener leerer Workspace-Block: entkoppelt kernel2d vollstaendig vom
-# cad-tauri-Workspace (src-tauri/Cargo.toml), damit `cargo test`/`wasm-pack`
-# aus diesem Verzeichnis heraus nicht faelschlich dessen Workspace erben.
-# Muster: render2d/render3d. (Parent-`exclude` allein greift beim Bauen aus
-# dem Unterverzeichnis nicht zuverlaessig.)
+# cad-tauri-Workspace (src-tauri/Cargo.toml), damit `cargo test` aus diesem
+# Verzeichnis heraus nicht faelschlich dessen Workspace erbt. Muster: render2d/render3d.
 [workspace]
 
 [package]
 name = "kernel2d"
 version = "0.1.0"
 edition = "2021"
-description = "2D-Geometrie-Kern (Port von src/geometry/kernel2d.ts) — handgeschriebene f64-Mathematik, headless per `cargo test` UND per wasm-pack (Feature \"web\") zu WASM baubar. Hinter identischer TS-Fassade; TS-Legacy bleibt Differential-Referenz."
+description = "2D-Geometrie-Kern von Dossier — handgeschriebene f64-Mathematik, headless per `cargo test`. Produktiv als Pfad-Abhaengigkeit von dossier-core (src-tauri/core, WASM-Paket pkgCore)."
 
-# cdylib: von wasm-pack (Feature "web") fuer das .wasm-Modul. rlib: als
-# Pfad-Abhaengigkeit und fuer den Test-/Example-Build (parity). Muster:
-# render2d/render3d/geometry.
 [lib]
-crate-type = ["cdylib", "rlib"]
-
-[features]
-# Standard: reiner f64-Rechenkern, headless per `cargo test` pruefbar.
-default = []
-# Browser-Bindings: dieselbe Geometrie hinter wasm-bindgen-Batch-Fassaden,
-# aus TS via wasm-pack aufgerufen. Nur fuer wasm32-unknown-unknown sinnvoll.
-web = ["dep:wasm-bindgen", "dep:serde_json", "dep:console_error_panic_hook"]
-# ADDITIV, NICHT im web-Default: exakte Orientierungs-Praedikate (robust::orient2d)
-# nur intern fuer Korrektheits-Golden-Cases (detectRooms/point-in-polygon). Der
-# Zufalls-Diff-Test gegen TS-naiv laeuft OHNE dieses Feature (siehe PORT_PLAN §3).
-robust-predicates = ["dep:robust"]
+crate-type = ["rlib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
-console_error_panic_hook = { version = "0.1", optional = true }
-robust = { version = "1", optional = true }
-
-# Nur fuers Paritaets-Beispiel (examples/parity.rs) — JSON von stdin lesen.
-[dev-dependencies]
-serde_json = "1"

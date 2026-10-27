@@ -1,15 +1,13 @@
-// kernel2d — Rust/WASM-Port von `src/geometry/kernel2d.ts` (+ reine Geometrie aus
-// room/ceiling/roomArea/stair). Handgeschriebene f64-Mathematik, KEINE externen
-// Geometrie-Crates: Akzeptanzkriterium ist Differential-Paritaet gegen die naive
-// TS-Routine (siehe PORT_PLAN.md). Fremd-Crates mit anderem Algorithmus braechen
-// die Paritaet per Konstruktion.
+// kernel2d — 2D-Geometrie-Kern von Dossier (Offset/Trim/Extend/Fillet/Fase/Split/
+// Join/Bruch, auch mit Bogen-Segmenten), dazu reine Geometrie aus room/ceiling/
+// roomArea/stair/opening. Handgeschriebene f64-Mathematik, KEINE externen
+// Geometrie-Crates. Ursprünglich als bitnaher Port von `src/geometry/kernel2d.ts`
+// entstanden; seit der Umstellung auf den Rust-Kern ist DIESE Fassung die
+// produktive: `dossier-core` bindet das Crate als Pfad-Abhängigkeit ein
+// (`src-tauri/core/src/web/kernel2d.rs`), `kernel2d.ts` ist nur noch die Fassade.
+// Die Bogen-Varianten liegen in `bulge.rs`.
 //
-// Aufbau (waechst ueber die Phasen des PORT_PLAN):
-//   - Phase 1 (hier): Vec2 + Vektor-Helfer (Port von src/model/geometry.ts) +
-//     leere Batch-WASM-Fassade. `cargo test` + `build:kernel2d` gruen.
-//   - Phase 2+: Schnitt/Offset/Trim/Fillet/Fläche/Kreis/detectRooms/… .
-//
-// KRITISCHE PARITAETS-REGELN (PORT_PLAN §6), gelten fuer den ganzen Port:
+// Numerische Regeln (aus der Paritaet mit der frueheren TS-Fassung, gelten weiter):
 //   - `len` = Math.hypot → `f64::hypot` (NICHT (x²+y²).sqrt()).
 //   - `normalize` Null-Guard: `len || 1` → `if l==0.0 {1.0} else {l}` (Ergebnis
 //     {0,0}, kein NaN).
@@ -19,6 +17,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+
+mod bulge;
+pub use bulge::*;
 
 /// EPS aus kernel2d.ts (Primitive/Schnitt/Trim). ACHTUNG: `lineIntersect`
 /// benutzt bewusst ein ANDERES, hartkodiertes 1e-9 — nicht dieses EPS.
@@ -415,6 +416,85 @@ pub fn fillet_corner(corner: Vec2, p1: Vec2, p2: Vec2, r: f64) -> Option<Fillet>
     })
 }
 
+/// Ergebnis einer Eck-Fasung: Punkte auf den beiden Schenkeln.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Chamfer {
+    /// Punkt auf corner→p1 im Abstand `distance` vom Eck.
+    pub a: Vec2,
+    /// Punkt auf corner→p2 im Abstand `distance` vom Eck.
+    pub b: Vec2,
+}
+
+/// Gleichabstands-Fase der Ecke bei `corner` (Schenkel corner→p1, corner→p2).
+/// None bei (nahezu) kollinearen Schenkeln oder `distance` länger als ein Schenkel.
+pub fn chamfer_corner(corner: Vec2, p1: Vec2, p2: Vec2, distance: f64) -> Option<Chamfer> {
+    let u1 = normalize(sub(p1, corner));
+    let u2 = normalize(sub(p2, corner));
+    let cos_theta = dot(u1, u2).min(1.0).max(-1.0);
+    let theta = cos_theta.acos();
+    if theta < 1e-4 || std::f64::consts::PI - theta < 1e-4 {
+        return None; // kollinear
+    }
+    if distance > len(sub(p1, corner)) + EPS || distance > len(sub(p2, corner)) + EPS {
+        return None;
+    }
+    Some(Chamfer { a: add(corner, scale(u1, distance)), b: add(corner, scale(u2, distance)) })
+}
+
+// --- Tangente-Tangente-Radius --------------------------------------------------
+
+/// Tangentialobjekt: Gerade durch a/b (unendlich gedacht) oder Kreis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TangentTarget {
+    Line { a: Vec2, b: Vec2 },
+    Circle { center: Vec2, r: f64 },
+}
+
+/// Ort aller Mittelpunkte von Kreisen mit Radius `r`, die `t` berühren
+/// (Gerade: beide Seiten; Kreis: äussere und — falls nicht entartet — innere Berührung).
+fn tangent_loci(t: TangentTarget, r: f64) -> Vec<TangentTarget> {
+    match t {
+        TangentTarget::Line { a, b } => {
+            let (a1, b1) = offset_segment(a, b, r);
+            let (a2, b2) = offset_segment(a, b, -r);
+            vec![TangentTarget::Line { a: a1, b: b1 }, TangentTarget::Line { a: a2, b: b2 }]
+        }
+        TangentTarget::Circle { center, r: tr } => {
+            let mut out = vec![TangentTarget::Circle { center, r: tr + r }];
+            let inner = (tr - r).abs();
+            if inner > EPS {
+                out.push(TangentTarget::Circle { center, r: inner });
+            }
+            out
+        }
+    }
+}
+
+fn intersect_loci(l1: TangentTarget, l2: TangentTarget) -> Vec<Vec2> {
+    use TangentTarget::*;
+    match (l1, l2) {
+        (Line { a: a1, b: b1 }, Line { a: a2, b: b2 }) => {
+            line_intersect(a1, sub(b1, a1), a2, sub(b2, a2)).into_iter().collect()
+        }
+        (Line { a, b }, Circle { center, r }) | (Circle { center, r }, Line { a, b }) => {
+            line_circle_intersect(a, b, center, r)
+        }
+        (Circle { center: c1, r: r1 }, Circle { center: c2, r: r2 }) => circle_circle_intersect(c1, r1, c2, r2),
+    }
+}
+
+/// Alle Mittelpunkt-Kandidaten eines Kreises mit Radius `r`, der `t1` UND `t2`
+/// berührt (TTR). Unsortiert/undedupliziert; der Aufrufer wählt per Referenzpunkt.
+pub fn tangent_circle_centers(t1: TangentTarget, t2: TangentTarget, r: f64) -> Vec<Vec2> {
+    let mut out = Vec::new();
+    for l1 in tangent_loci(t1, r) {
+        for l2 in tangent_loci(t2, r) {
+            out.extend(intersect_loci(l1, l2));
+        }
+    }
+    out
+}
+
 // --- Trim / Split / Join -----------------------------------------------------
 // Reine Geometrie auf Polylinien (`Vec2[]` + `closed`). Struktur- und
 // reihenfolgeabhaengig — Sortier-Reihenfolge, Dedup-Schwellen (1e-6) und die
@@ -688,7 +768,7 @@ pub fn split_polyline_at_param(
     t: f64,
 ) -> Vec<Vec<Vec2>> {
     let n = pts.len();
-    if n < 2 {
+    if n < 2 || edge_index >= n {
         return vec![pts.to_vec()];
     }
     let a = pts[edge_index];
@@ -748,7 +828,7 @@ pub fn split_closed_by_chord(
     tj: f64,
 ) -> Option<(Vec<Vec2>, Vec<Vec2>)> {
     let n = pts.len();
-    if n < 3 || i == j {
+    if n < 3 || i == j || i >= n || j >= n {
         return None;
     }
     let (ia, ta, ib, tb) = if i > j {
@@ -774,7 +854,7 @@ pub fn split_closed_by_chord(
 /// Entfernt das Segment `edge_index` (offen: laengeres Stueck; geschlossen: auftrennen).
 pub fn remove_segment(pts: &[Vec2], closed: bool, edge_index: usize) -> Polyline {
     let n = pts.len();
-    if closed {
+    if closed && n > 0 {
         let mut out: Vec<Vec2> = Vec::new();
         for k in 1..=n {
             out.push(pts[(edge_index + k) % n]);
@@ -797,6 +877,47 @@ pub fn remove_segment(pts: &[Vec2], closed: bool, edge_index: usize) -> Polyline
     } else {
         Polyline { pts: right, closed: false }
     }
+}
+
+/// Nächste Position (Kantenindex, geklemmter Parameter) auf einer Punktfolge zu
+/// `pt`; None bei < 2 Punkten. Grundlage für BREAK.
+pub fn nearest_on_polyline(pts: &[Vec2], closed: bool, pt: Vec2) -> Option<(usize, f64)> {
+    let n = pts.len();
+    if n < 2 {
+        return None;
+    }
+    let edge_count = if closed { n } else { n - 1 };
+    let mut best: Option<(usize, f64)> = None;
+    let mut best_d = f64::INFINITY;
+    for i in 0..edge_count {
+        let a = pts[i];
+        let b = pts[(i + 1) % n];
+        let t = project_param(pt, a, b).min(1.0).max(0.0);
+        let d = dist(pt, lerp(a, b, t));
+        if d < best_d {
+            best_d = d;
+            best = Some((i, t));
+        }
+    }
+    best
+}
+
+/// Entfernt den Abschnitt ZWISCHEN zwei Positionen (Kantenindex, t) einer OFFENEN
+/// Kurve (BREAK, Zwei-Punkt-Variante; Reihenfolge egal). Bis zu zwei Reststücke.
+/// Positionen ausserhalb der Kurve → leer.
+pub fn break_curve(pts: &[Vec2], hit1: (usize, f64), hit2: (usize, f64)) -> Vec<Vec<Vec2>> {
+    let pos = |h: (usize, f64)| h.0 as f64 + h.1;
+    let (lo, hi) = if pos(hit1) <= pos(hit2) { (hit1, hit2) } else { (hit2, hit1) };
+    if lo.0 + 1 >= pts.len() || hi.0 + 1 >= pts.len() {
+        return Vec::new();
+    }
+    let p1 = lerp(pts[lo.0], pts[lo.0 + 1], lo.1);
+    let p2 = lerp(pts[hi.0], pts[hi.0 + 1], hi.1);
+    let mut left = pts[..lo.0 + 1].to_vec();
+    left.push(p1);
+    let mut right = vec![p2];
+    right.extend_from_slice(&pts[hi.0 + 1..]);
+    [dedupe_consecutive(&left), dedupe_consecutive(&right)].into_iter().filter(|s| s.len() >= 2).collect()
 }
 
 /// Kanten einer (offenen ODER implizit geschlossenen) Punktliste.
@@ -1151,454 +1272,6 @@ pub fn point_in_outline(p: Vec2, outline: &[Vec2]) -> bool {
     inside
 }
 
-// --- Batch-WASM-Fassade (Feature "web") --------------------------------------
-// Phase 1: nur ein Versions-/Ping-Export, um die WASM-Grenze + das Tooling
-// (wasm-pack → pkgKernel2d → Vite/vitest) end-to-end gruen zu bekommen. Die
-// echten Batch-Fassaden (offset_polylines_json, intersect_batch_json, …) kommen
-// ab Phase 2, Muster: geometry::compute_joins_json (JSON rein/raus, O(n)-Grenze).
-
-/// Ping-Export: beweist die WASM-Grenze. Nimmt ein JSON-`Vec2`, spiegelt es
-/// normalisiert zurueck — genug, um Init + JSON-Marshalling im vitest-Harness
-/// zu verifizieren, bevor die echten Operationen landen.
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn kernel2d_normalize_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let v: Vec2 = serde_json::from_str(input_json)
-        .map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))?;
-    let out = normalize(v);
-    serde_json::to_string(&out).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))
-}
-
-// Grobkoernige Grenze: je Operation EINE Batch-Funktion (N Queries rein, N
-// Ergebnisse raus), Muster geometry::compute_joins_json. Serde-Helfer buendeln
-// das immergleiche JsValue-Fehlermapping. Die Query-Structs definieren zugleich
-// das JSON-Format, das der vitest-Differential-Harness sendet.
-
-#[cfg(feature = "web")]
-fn to_js<T: serde::Serialize>(v: &T) -> Result<String, wasm_bindgen::JsValue> {
-    serde_json::to_string(v).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))
-}
-
-#[cfg(feature = "web")]
-fn from_js<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, wasm_bindgen::JsValue> {
-    serde_json::from_str(s).map_err(|e| wasm_bindgen::JsValue::from_str(&e.to_string()))
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct ProjQuery {
-    p: Vec2,
-    a: Vec2,
-    b: Vec2,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct SegQuery {
-    a1: Vec2,
-    a2: Vec2,
-    b1: Vec2,
-    b2: Vec2,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct PolyHitsQuery {
-    a1: Vec2,
-    a2: Vec2,
-    pts: Vec<Vec2>,
-    closed: bool,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct LineCircleQuery {
-    a: Vec2,
-    b: Vec2,
-    center: Vec2,
-    r: f64,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct CircleCircleQuery {
-    c1: Vec2,
-    r1: f64,
-    c2: Vec2,
-    r2: f64,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct OffsetSegQuery {
-    a: Vec2,
-    b: Vec2,
-    d: f64,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct OffsetPolyQuery {
-    pts: Vec<Vec2>,
-    d: f64,
-    closed: bool,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct FilletQuery {
-    corner: Vec2,
-    p1: Vec2,
-    p2: Vec2,
-    r: f64,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct SplitCuttersQuery {
-    a1: Vec2,
-    a2: Vec2,
-    cutters: Vec<Polyline>,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct TrimSegQuery {
-    a1: Vec2,
-    a2: Vec2,
-    cutters: Vec<Polyline>,
-    pick: Vec2,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct TrimPolyQuery {
-    pts: Vec<Vec2>,
-    closed: bool,
-    cutters: Vec<Polyline>,
-    pick: Vec2,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct ExtendQuery {
-    a1: Vec2,
-    a2: Vec2,
-    end: String,
-    cutters: Vec<Polyline>,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct SplitAtParamQuery {
-    pts: Vec<Vec2>,
-    closed: bool,
-    #[serde(rename = "edgeIndex")]
-    edge_index: usize,
-    t: f64,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct ChordQuery {
-    pts: Vec<Vec2>,
-    i: usize,
-    ti: f64,
-    j: usize,
-    tj: f64,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct RemoveSegQuery {
-    pts: Vec<Vec2>,
-    closed: bool,
-    #[serde(rename = "edgeIndex")]
-    edge_index: usize,
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct SplitIntersectQuery {
-    #[serde(rename = "targetPts")]
-    target_pts: Vec<Vec2>,
-    closed: bool,
-    others: Vec<Vec<Vec2>>,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn project_param_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<ProjQuery> = from_js(input_json)?;
-    let out: Vec<f64> = qs.iter().map(|q| project_param(q.p, q.a, q.b)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn closest_point_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<ProjQuery> = from_js(input_json)?;
-    let out: Vec<Vec2> = qs
-        .iter()
-        .map(|q| closest_point_on_segment(q.p, q.a, q.b))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn point_segment_distance_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<ProjQuery> = from_js(input_json)?;
-    let out: Vec<f64> = qs
-        .iter()
-        .map(|q| point_segment_distance(q.p, q.a, q.b))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn segment_intersect_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<SegQuery> = from_js(input_json)?;
-    let out: Vec<Option<Hit>> = qs
-        .iter()
-        .map(|q| segment_intersect(q.a1, q.a2, q.b1, q.b2, EPS))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn line_segment_intersect_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<SegQuery> = from_js(input_json)?;
-    let out: Vec<Option<Hit>> = qs
-        .iter()
-        .map(|q| line_segment_intersect(q.a1, q.a2, q.b1, q.b2, EPS))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn segment_polyline_hits_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<PolyHitsQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Hit>> = qs
-        .iter()
-        .map(|q| segment_polyline_hits(q.a1, q.a2, &q.pts, q.closed))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn line_circle_intersect_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<LineCircleQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Vec2>> = qs
-        .iter()
-        .map(|q| line_circle_intersect(q.a, q.b, q.center, q.r))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn segment_circle_intersect_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<LineCircleQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Vec2>> = qs
-        .iter()
-        .map(|q| segment_circle_intersect(q.a, q.b, q.center, q.r))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn circle_circle_intersect_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<CircleCircleQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Vec2>> = qs
-        .iter()
-        .map(|q| circle_circle_intersect(q.c1, q.r1, q.c2, q.r2))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn signed_area_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<f64> = polys.iter().map(|p| signed_area(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn is_ccw_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<bool> = polys.iter().map(|p| is_ccw(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn offset_segment_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<OffsetSegQuery> = from_js(input_json)?;
-    let out: Vec<(Vec2, Vec2)> = qs.iter().map(|q| offset_segment(q.a, q.b, q.d)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn offset_polyline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<OffsetPolyQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Vec2>> = qs
-        .iter()
-        .map(|q| offset_polyline(&q.pts, q.d, q.closed))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn fillet_corner_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<FilletQuery> = from_js(input_json)?;
-    let out: Vec<Option<Fillet>> = qs
-        .iter()
-        .map(|q| fillet_corner(q.corner, q.p1, q.p2, q.r))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn split_segment_by_cutters_batch_json(
-    input_json: &str,
-) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<SplitCuttersQuery> = from_js(input_json)?;
-    let out: Vec<Vec<(Vec2, Vec2)>> = qs
-        .iter()
-        .map(|q| split_segment_by_cutters(q.a1, q.a2, &q.cutters))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn trim_segment_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<TrimSegQuery> = from_js(input_json)?;
-    let out: Vec<Vec<(Vec2, Vec2)>> = qs
-        .iter()
-        .map(|q| trim_segment(q.a1, q.a2, &q.cutters, q.pick))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn trim_polyline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<TrimPolyQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Polyline>> = qs
-        .iter()
-        .map(|q| trim_polyline(&q.pts, q.closed, &q.cutters, q.pick))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn extend_segment_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<ExtendQuery> = from_js(input_json)?;
-    let out: Vec<Option<(Vec2, Vec2)>> = qs
-        .iter()
-        .map(|q| extend_segment(q.a1, q.a2, &q.end, &q.cutters))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn split_polyline_at_param_batch_json(
-    input_json: &str,
-) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<SplitAtParamQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Vec<Vec2>>> = qs
-        .iter()
-        .map(|q| split_polyline_at_param(&q.pts, q.closed, q.edge_index, q.t))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn split_closed_by_chord_batch_json(
-    input_json: &str,
-) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<ChordQuery> = from_js(input_json)?;
-    let out: Vec<Option<(Vec<Vec2>, Vec<Vec2>)>> = qs
-        .iter()
-        .map(|q| split_closed_by_chord(&q.pts, q.i, q.ti, q.j, q.tj))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn remove_segment_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<RemoveSegQuery> = from_js(input_json)?;
-    let out: Vec<Polyline> = qs
-        .iter()
-        .map(|q| remove_segment(&q.pts, q.closed, q.edge_index))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn split_at_intersections_batch_json(
-    input_json: &str,
-) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<SplitIntersectQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Vec<Vec2>>> = qs
-        .iter()
-        .map(|q| split_at_intersections(&q.target_pts, q.closed, &q.others))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn join_chains_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let groups: Vec<Vec<Polyline>> = from_js(input_json)?;
-    let out: Vec<Vec<Polyline>> = groups.iter().map(|g| join_chains(g)).collect();
-    to_js(&out)
-}
-
-// --- Treppen-Geometrie (stair.ts, Slice 2) -----------------------------------
-
-/// Formkonstanten fuer Treppen (identisch zur TS-Referenz).
 pub const IDEAL_RISER: f64 = 0.17;
 pub const IDEAL_TREAD: f64 = 0.29;
 pub const MIN_STEPS: i64 = 2;
@@ -1721,30 +1394,30 @@ fn eye_polygon(center: Vec2, r: f64) -> Vec<Vec2> {
     }).collect()
 }
 
-/// Parameter-Struct fuer die Batch-Fassade (enthaelt alle geometrisch relevanten
+/// Treppen-Parameter (enthaelt alle geometrisch relevanten
 /// Felder des TS-Typs `Stair`; Modell-Semantik-Felder wie id/floorId werden
 /// ignoriert).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StairParams {
-    shape: String,
-    start: Vec2,
-    dir: Vec2,
-    run_length: f64,
+pub struct StairParams {
+    pub shape: String,
+    pub start: Vec2,
+    pub dir: Vec2,
+    pub run_length: f64,
     #[serde(default)]
-    run2_length: Option<f64>,
+    pub run2_length: Option<f64>,
     #[serde(default)]
-    turn: Option<i32>,
+    pub turn: Option<i32>,
     #[serde(default)]
-    center: Option<Vec2>,
+    pub center: Option<Vec2>,
     #[serde(default)]
-    radius: Option<f64>,
+    pub radius: Option<f64>,
     #[serde(default)]
-    sweep: Option<f64>,
-    width: f64,
-    step_count: i64,
+    pub sweep: Option<f64>,
+    pub width: f64,
+    pub step_count: i64,
     #[serde(default)]
-    up: Option<bool>,
+    pub up: Option<bool>,
 }
 
 /// Gerade Treppe (Port von `straightGeometry`).
@@ -1911,7 +1584,7 @@ fn spiral_geometry(
 }
 
 /// Vollstaendige Treppengeometrie (Port von `stairGeometry`).
-fn stair_geometry(stair: &StairParams, total_rise: f64) -> StairGeometry {
+pub fn stair_geometry(stair: &StairParams, total_rise: f64) -> StairGeometry {
     let steps = (stair.step_count as i64).max(MIN_STEPS);
     let riser_height = total_rise / steps as f64;
     let half_w = (0.05_f64).max(stair.width / 2.0);
@@ -2292,7 +1965,7 @@ fn average_thickness(walls: &[WallSegment]) -> f64 {
     s / walls.len() as f64
 }
 
-// ── Oeffentliche Structs fuer die Batch-Fassade ───────────────────────────────
+// ── Oeffentliche Structs (Raumerkennung) ───────────────────────────────
 
 /// Wandsegment (Port von `WallSegment`): Mittellinie a→b mit Dicke.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -2687,454 +2360,6 @@ pub fn window_symbol(
     Some(WindowSymbol { frame: frame_quad, glass_lines, mullion_lines })
 }
 
-// --- Batch-Fassaden: roomArea / ceiling (Slice 1) ----------------------------
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn polygon_area_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<f64> = polys.iter().map(|p| polygon_area(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn perimeter_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<f64> = polys.iter().map(|p| perimeter(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn centroid_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<Vec2> = polys.iter().map(|p| centroid(p)).collect();
-    to_js(&out)
-}
-
-/// Query-Struct fuer normalize_outline: optional (None bei ungueltigem Umriss).
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn normalize_outline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<Option<Vec<Vec2>>> = polys.iter().map(|p| normalize_outline(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn is_valid_outline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<bool> = polys.iter().map(|p| is_valid_outline(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn ceiling_area_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<f64> = polys.iter().map(|p| ceiling_area(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn outline_bbox_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<BBox> = polys.iter().map(|p| outline_bbox(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn outline_centroid_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let polys: Vec<Vec<Vec2>> = from_js(input_json)?;
-    let out: Vec<Vec2> = polys.iter().map(|p| outline_centroid(p)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct PointInOutlineQuery {
-    p: Vec2,
-    outline: Vec<Vec2>,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn point_in_outline_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<PointInOutlineQuery> = from_js(input_json)?;
-    let out: Vec<bool> = qs.iter().map(|q| point_in_outline(q.p, &q.outline)).collect();
-    to_js(&out)
-}
-
-// --- Batch-Fassaden: stair (Slice 2) -----------------------------------------
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct DefaultStepCountQuery {
-    #[serde(rename = "totalRise")]
-    total_rise: f64,
-    #[serde(rename = "runLength")]
-    run_length: f64,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn default_step_count_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<DefaultStepCountQuery> = from_js(input_json)?;
-    let out: Vec<i64> = qs.iter().map(|q| default_step_count(q.total_rise, q.run_length)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct StairGeoQuery {
-    stair: StairParams,
-    #[serde(rename = "totalRise")]
-    total_rise: f64,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn stair_geometry_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<StairGeoQuery> = from_js(input_json)?;
-    let out: Vec<StairGeometry> = qs.iter().map(|q| stair_geometry(&q.stair, q.total_rise)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct StairCutQuery {
-    geo: StairGeometry,
-    #[serde(rename = "cutRise")]
-    cut_rise: f64,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn stair_cut_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<StairCutQuery> = from_js(input_json)?;
-    let out: Vec<StairCut> = qs.iter().map(|q| stair_cut(&q.geo, q.cut_rise)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn stair_bbox_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let geos: Vec<StairGeometry> = from_js(input_json)?;
-    let out: Vec<StairBBox> = geos.iter().map(|g| stair_bbox(g)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct PointHitsStairQuery {
-    p: Vec2,
-    geo: StairGeometry,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn point_hits_stair_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<PointHitsStairQuery> = from_js(input_json)?;
-    let out: Vec<bool> = qs.iter().map(|q| point_hits_stair(q.p, &q.geo)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct PointInPolygonQuery {
-    p: Vec2,
-    poly: Vec<Vec2>,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn point_in_polygon_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<PointInPolygonQuery> = from_js(input_json)?;
-    let out: Vec<bool> = qs.iter().map(|q| point_in_polygon(q.p, &q.poly)).collect();
-    to_js(&out)
-}
-
-// --- Batch-Fassaden: roomBoundary (Slice 3) -----------------------------------
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct DetectRoomsQuery {
-    walls: Vec<WallSegment>,
-    #[serde(rename = "gapTol", default = "default_gap_tol")]
-    gap_tol: f64,
-    #[serde(rename = "minArea", default = "default_min_area")]
-    min_area: f64,
-    #[serde(rename = "offsetToInner", default = "default_true")]
-    offset_to_inner: bool,
-}
-
-#[cfg(feature = "web")]
-fn default_gap_tol() -> f64 { 0.05 }
-#[cfg(feature = "web")]
-fn default_min_area() -> f64 { 0.05 }
-#[cfg(feature = "web")]
-fn default_true() -> bool { true }
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn detect_rooms_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<DetectRoomsQuery> = from_js(input_json)?;
-    let out: Vec<Vec<Vec<Vec2>>> = qs.iter().map(|q| detect_rooms(&q.walls, q.gap_tol, q.min_area, q.offset_to_inner)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct RoomFromPointQuery {
-    point: Vec2,
-    walls: Vec<WallSegment>,
-    #[serde(rename = "gapTol", default = "default_gap_tol")]
-    gap_tol: f64,
-    #[serde(rename = "offsetToInner", default = "default_true")]
-    offset_to_inner: bool,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn room_from_point_inside_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<RoomFromPointQuery> = from_js(input_json)?;
-    let out: Vec<Option<Vec<Vec2>>> = qs.iter().map(|q| room_from_point_inside(q.point, &q.walls, q.gap_tol, q.offset_to_inner)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct RoomFromFacesQuery {
-    point: Vec2,
-    #[serde(rename = "wallFaces")]
-    wall_faces: Vec<WallFace>,
-    #[serde(rename = "gapTol", default = "default_gap_tol")]
-    gap_tol: f64,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn room_from_point_inside_faces_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<RoomFromFacesQuery> = from_js(input_json)?;
-    let out: Vec<Option<Vec<Vec2>>> = qs.iter().map(|q| room_from_point_inside_faces(q.point, &q.wall_faces, q.gap_tol)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-struct RbPointInPolygonQuery {
-    p: Vec2,
-    poly: Vec<Vec2>,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn rb_point_in_polygon_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<RbPointInPolygonQuery> = from_js(input_json)?;
-    let out: Vec<bool> = qs.iter().map(|q| rb_point_in_polygon(q.p, &q.poly)).collect();
-    to_js(&out)
-}
-
-// --- Batch-Fassaden: opening (Slice 4) ---------------------------------------
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WallAxisLengthQuery {
-    start: Vec2,
-    end: Vec2,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn wall_axis_length_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<WallAxisLengthQuery> = from_js(input_json)?;
-    let out: Vec<f64> = qs.iter().map(|q| wall_axis_length(q.start, q.end)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OpeningQuery {
-    start: Vec2,
-    end: Vec2,
-    position: f64,
-    width: f64,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn opening_interval_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<OpeningQuery> = from_js(input_json)?;
-    let out: Vec<Option<Interval>> = qs
-        .iter()
-        .map(|q| opening_interval(q.start, q.end, q.position, q.width))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn wall_axis_frame_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<WallAxisLengthQuery> = from_js(input_json)?;
-    let out: Vec<AxisFrame> = qs.iter().map(|q| wall_axis_frame(q.start, q.end)).collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn opening_jambs_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<OpeningQuery> = from_js(input_json)?;
-    let out: Vec<Option<Jambs>> = qs
-        .iter()
-        .map(|q| opening_jambs(q.start, q.end, q.position, q.width))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OpeningGapQuadQuery {
-    start: Vec2,
-    end: Vec2,
-    position: f64,
-    width: f64,
-    thickness: f64,
-    ref_offset: f64,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn opening_gap_quad_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<OpeningGapQuadQuery> = from_js(input_json)?;
-    let out: Vec<Option<Vec<Vec2>>> = qs
-        .iter()
-        .map(|q| opening_gap_quad(q.start, q.end, q.position, q.width, q.thickness, q.ref_offset))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn opening_center_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<OpeningQuery> = from_js(input_json)?;
-    let out: Vec<Option<Vec2>> = qs
-        .iter()
-        .map(|q| opening_center(q.start, q.end, q.position, q.width))
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DoorSymbolQuery {
-    start: Vec2,
-    end: Vec2,
-    position: f64,
-    width: f64,
-    #[serde(default)]
-    swing: Option<String>,
-    #[serde(default)]
-    opening_dir: Option<String>,
-    #[serde(default)]
-    hinge: Option<String>,
-    #[serde(default)]
-    swing_angle: Option<f64>,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn door_symbol_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<DoorSymbolQuery> = from_js(input_json)?;
-    let out: Vec<Option<DoorSymbol>> = qs
-        .iter()
-        .map(|q| {
-            door_symbol(
-                q.start,
-                q.end,
-                q.position,
-                q.width,
-                q.swing.as_deref(),
-                q.opening_dir.as_deref(),
-                q.hinge.as_deref(),
-                q.swing_angle,
-            )
-        })
-        .collect();
-    to_js(&out)
-}
-
-#[cfg(feature = "web")]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WindowSymbolQuery {
-    start: Vec2,
-    end: Vec2,
-    position: f64,
-    width: f64,
-    thickness: f64,
-    ref_offset: f64,
-    glass_count: f64,
-    #[serde(default)]
-    wing_count: Option<f64>,
-}
-
-#[cfg(feature = "web")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn window_symbol_batch_json(input_json: &str) -> Result<String, wasm_bindgen::JsValue> {
-    console_error_panic_hook::set_once();
-    let qs: Vec<WindowSymbolQuery> = from_js(input_json)?;
-    let out: Vec<Option<WindowSymbol>> = qs
-        .iter()
-        .map(|q| {
-            window_symbol(
-                q.start,
-                q.end,
-                q.position,
-                q.width,
-                q.thickness,
-                q.ref_offset,
-                q.glass_count,
-                q.wing_count,
-            )
-        })
-        .collect();
-    to_js(&out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3379,5 +2604,53 @@ mod tests {
         assert!(!out.closed);
         assert_eq!(out.pts.len(), 3, "rechtes (laengeres) Stueck pts[2..5]");
         assert!((out.pts[0].x - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn chamfer_rechter_winkel_und_kollinear() {
+        let c = chamfer_corner(Vec2::new(0.0, 0.0), Vec2::new(2.0, 0.0), Vec2::new(0.0, 2.0), 0.5).unwrap();
+        assert_eq!(c, Chamfer { a: Vec2::new(0.5, 0.0), b: Vec2::new(0.0, 0.5) });
+        assert!(chamfer_corner(Vec2::new(0.0, 0.0), Vec2::new(2.0, 0.0), Vec2::new(-2.0, 0.0), 0.5).is_none());
+        assert!(chamfer_corner(Vec2::new(0.0, 0.0), Vec2::new(2.0, 0.0), Vec2::new(0.0, 0.3), 0.5).is_none());
+    }
+
+    #[test]
+    fn ttr_zwei_achsen_und_gerade_kreis() {
+        let x = TangentTarget::Line { a: Vec2::new(-10.0, 0.0), b: Vec2::new(10.0, 0.0) };
+        let y = TangentTarget::Line { a: Vec2::new(0.0, -10.0), b: Vec2::new(0.0, 10.0) };
+        let c = tangent_circle_centers(x, y, 2.0);
+        assert_eq!(c.len(), 4);
+        for (qx, qy) in [(2.0, 2.0), (2.0, -2.0), (-2.0, 2.0), (-2.0, -2.0)] {
+            assert!(c.iter().any(|p| (p.x - qx).abs() < 1e-9 && (p.y - qy).abs() < 1e-9));
+        }
+        let k = TangentTarget::Circle { center: Vec2::new(0.0, 6.0), r: 3.0 };
+        let c = tangent_circle_centers(x, k, 2.0);
+        assert!(c.iter().any(|p| (p.x - 3.0).abs() < 1e-9 && (p.y - 2.0).abs() < 1e-9));
+        // Parallele Geraden im Abstand 2r: keine (statt unendlich vieler) Kandidaten.
+        let l2 = TangentTarget::Line { a: Vec2::new(0.0, 4.0), b: Vec2::new(10.0, 4.0) };
+        assert!(tangent_circle_centers(x, l2, 2.0).is_empty());
+    }
+
+    #[test]
+    fn nearest_und_break() {
+        let pts: Vec<Vec2> = vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 4.0)];
+        let h1 = nearest_on_polyline(&pts, false, Vec2::new(1.0, 0.5)).unwrap();
+        assert_eq!(h1.0, 0);
+        assert!((h1.1 - 0.25).abs() < 1e-12);
+        let h2 = nearest_on_polyline(&pts, false, Vec2::new(4.5, 2.0)).unwrap();
+        assert_eq!(h2.0, 1);
+        assert!(nearest_on_polyline(&pts[..1], false, Vec2::new(0.0, 0.0)).is_none());
+        // Reihenfolge der Klicks egal.
+        let out = break_curve(&pts, h2, h1);
+        assert_eq!(out, vec![vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0)], vec![Vec2::new(4.0, 2.0), Vec2::new(4.0, 4.0)]]);
+        assert!(break_curve(&pts, (5, 0.5), (0, 0.5)).is_empty());
+    }
+
+    #[test]
+    fn kaputte_indizes_ohne_panic() {
+        let pts: Vec<Vec2> = (0..4).map(|i| Vec2::new(i as f64, (i % 2) as f64)).collect();
+        assert_eq!(split_polyline_at_param(&pts, false, 9, 0.5), vec![pts.clone()]);
+        assert!(split_closed_by_chord(&pts, 0, 0.5, 7, 0.5).is_none());
+        assert!(remove_segment(&[], true, 3).pts.is_empty());
     }
 }
