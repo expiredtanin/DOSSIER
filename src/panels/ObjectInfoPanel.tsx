@@ -35,7 +35,7 @@ import type {
   VerticalAnchor,
   WallReferenceLine,
 } from "../model/types";
-import { SIA_CATEGORIES, siaLabelFull } from "../geometry/roomArea";
+import { SIA_CATEGORIES, siaLabelFull } from "../core";
 import { Dropdown } from "../ui/Dropdown";
 import type { DetailLevel } from "../model/viewTypes";
 import { ColorHexField } from "../ui/ColorHexField";

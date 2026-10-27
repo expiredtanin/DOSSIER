@@ -22,7 +22,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "./projectFile";
 import { findCategory } from "../state/projectSlice";
 import type { HatchStyle, LayerCategory, Project } from "../model/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";

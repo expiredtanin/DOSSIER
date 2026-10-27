@@ -5,7 +5,7 @@
 // tatsächlich laufende Version in der Fussleiste (s. update/version.ts).
 import { useEffect, useState } from "react";
 import { getLanguage, t } from "../i18n";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "../native/projectFile";
 import { APP_VERSION } from "./TopBar";
 import { getRunningVersion } from "../update/version";
 import {

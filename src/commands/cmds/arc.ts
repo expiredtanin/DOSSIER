@@ -33,11 +33,7 @@
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import {
-  arcFromStartEndDirection,
-  arcFromStartEndRadius,
-  arcThroughPoints,
-} from "../../geometry/bulge";
+import { arcFromStartEndDirection, arcFromStartEndRadius, arcThroughPoints } from "../../core";
 import type {
   Command,
   CommandContext,

@@ -37,13 +37,8 @@
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import { arcThroughPoints } from "../../geometry/bulge";
-import {
-  pointSegmentDistance,
-  polylineEdges,
-  tangentCircleCenters,
-  type TangentTarget,
-} from "../../geometry/kernel2d";
+import { arcThroughPoints } from "../../core";
+import { pointSegmentDistance, polylineEdges, tangentCircleCenters, type TangentTarget } from "../../core";
 import type {
   CmdOption,
   Command,

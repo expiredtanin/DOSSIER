@@ -5,7 +5,7 @@
 // Polygon wird ein eigenes <pattern> in <defs> definiert, damit Maßstab/Winkel/
 // Farbe variieren können.
 
-import type { PickKind } from "../../plan/pickLabels";
+import type { PickKind } from "../../core";
 import {
   forwardRef,
   useEffect,
@@ -15,8 +15,8 @@ import {
   useState,
 } from "react";
 import type { ComponentProps, CSSProperties } from "react";
-import type { HatchRender, Plan, PlanImage, Primitive } from "../../plan/generatePlan";
-import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "../../plan/generatePlan";
+import type { HatchRender, Plan, PlanImage, Primitive } from "../../core";
+import { materializeGreyed, materializeUnderlay, type UnderlayGroup } from "../../core";
 import type { Drawing2D, EdgeGrip, Vec2 } from "../../model/types";
 import { t } from "../../i18n";
 import type { ToolHandlers, ToolId, ToolMods } from "../../tools/types";
@@ -27,30 +27,11 @@ import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../../text/fo
 import { textFrameCorners } from "../../text/textFrame";
 import { RichTextEditor } from "../../editors/RichTextEditor";
 import { useNativeAvailable, useNativePlanRenderer } from "./useNativePlanRenderer";
-import { isGpuText } from "../../plan/nativeText";
+import { isGpuText } from "../../core";
 import { LiveMeet, LiveValue, createMeetStore, createValueStore } from "./planView/liveMeet";
 import { useWasmPlanRenderer } from "./useWasmPlanRenderer";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../../theme/accents";
-import {
-  type ViewBox,
-  PX_PER_M,
-  PAD,
-  toScreen,
-  clamp,
-  meetScale,
-  scaleFromView,
-  viewForScale,
-  viewForCamera,
-  fitBoxFor,
-  pointInPolygon,
-  pointSegDistPx,
-  marqueeHit,
-  marqueeHitDrawings,
-  type ModelRect,
-  marqueeHitCeilings,
-  marqueeHitRooms,
-  marqueeHitStairs,
-} from "../../plan/planView/geometry";
+import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, clamp, meetScale, scaleFromView, viewForScale, viewForCamera, fitBoxFor, pointInPolygon, pointSegDistPx, marqueeHit, marqueeHitDrawings, type ModelRect, marqueeHitCeilings, marqueeHitRooms, marqueeHitStairs } from "../../core";
 import {
   polyUsesPattern,
   HatchPattern,
@@ -62,16 +43,10 @@ import {
 import { DraftOverlay } from "./planView/overlays";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
-import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../plan/planView/cullPrimitives";
-import { buildSegmentIndex, nearestSegment, pointSegDist, segmentsNear } from "../../plan/planView/segmentIndex";
-import { buildOwnerIndex, ownedBy, type OwnerField, type OwnerIndex } from "../../plan/planView/ownerIndex";
-import {
-  buildDrawingIndex,
-  drawingsWithinDistance,
-  marqueeHitUnderlay,
-  nearestInDrawings,
-  type DrawingIndex,
-} from "../../plan/planView/underlayAccess";
+import { expandRegion, indexedInRegion, regionContains, type Bounds } from "../../core";
+import { buildSegmentIndex, nearestSegment, pointSegDist__plan_planView_segmentIndex as pointSegDist, segmentsNear } from "../../core";
+import { buildOwnerIndex, ownedBy, type OwnerField, type OwnerIndex } from "../../core";
+import { buildDrawingIndex, drawingsWithinDistance, marqueeHitUnderlay, nearestInDrawings, type DrawingIndex } from "../../core";
 import { endBusyAfterPaint } from "../../state/busyStore";
 import { createCursorStore, useCursorValue, type CursorStore } from "../../state/cursorStore";
 

@@ -23,7 +23,7 @@ import type {
   LayoutViewport,
   Project,
 } from "../model/types";
-import { generatePlan } from "../plan/generatePlan";
+import { generatePlan } from "../core";
 import { planToPrintSvg } from "../export/planToPrintSvg";
 import {
   effectiveSheetSizeMm,

@@ -13,7 +13,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "./projectFile";
 import type { LayoutState } from "../panels/types";
 import type { RendererMode } from "../ui/StatusBar";
 import type { ThemeMode } from "../theme/themeMode";

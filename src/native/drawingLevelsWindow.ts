@@ -18,7 +18,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "./projectFile";
 import type { DrawingLevel } from "../model/types";
 import type { DisplayMode } from "../panels/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";

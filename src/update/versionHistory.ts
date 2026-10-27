@@ -5,7 +5,7 @@
 // Release „latest" wie `latest.json`, s. checkForUpdate.ts) und bieten pro
 // Eintrag nur den DMG-Download im System-Browser an — Installation bleibt
 // der gewohnte manuelle Schritt (DMG oeffnen, App in Applications ersetzen).
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "../native/projectFile";
 
 export interface VersionEntry {
   version: string;

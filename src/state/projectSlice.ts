@@ -8,7 +8,7 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
-import { withVertexType, type PolylineVertexType } from "../geometry/polylineVertexType";
+import { withVertexType, type PolylineVertexType } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import {
   flattenCategories,
@@ -38,8 +38,8 @@ import { lineIntersect } from "../model/geometry";
 import { commitTransform } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
-import { centroid as roomCentroid } from "../geometry/roomArea";
-import { bulgeArc, bulgeBetweenAngles, bulgeFromSagittaPoint, bulgePointAt, pointOnCircle } from "../geometry/bulge";
+import { centroid as roomCentroid } from "../core";
+import { bulgeArc, bulgeBetweenAngles, bulgeFromSagittaPoint, bulgePointAt, pointOnCircle } from "../core";
 import {
   DEFAULT_SCALE_DENOMINATOR,
   DIM_DEFAULTS_MM,

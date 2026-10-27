@@ -6,7 +6,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Project, Vec2 } from "../model/types";
-import type { CategoryDisplayResolver } from "../plan/generatePlan";
+import type { CategoryDisplayResolver } from "../core";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import type { PlanSelection, MarqueeSelection } from "../views/plan/PlanView";
 import type { Pick3dHit } from "../viewport/Wasm3DViewport";

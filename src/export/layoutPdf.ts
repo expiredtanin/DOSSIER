@@ -15,7 +15,6 @@ import "svg2pdf.js";
 import type { Layout, LayoutAnnotation, MasterLayout, Project } from "../model/types";
 import { generatePlan } from "../plan/generatePlan";
 import { planToPrintSvg } from "./planToPrintSvg";
-import { saveBinaryFile } from "../io/saveFile";
 import { wrapDocToLines, type SvgLine } from "../text/renderHtml";
 import { docFromText } from "../text/richText";
 import {
@@ -304,19 +303,9 @@ export async function buildFolderPdf(
   return doc;
 }
 
-/**
- * Baut das Ordner-PDF und speichert es (nativer Tauri-Dialog bzw.
- * Browser-Download). Liefert `false`, wenn nichts zu exportieren war oder der
- * Speichern-Dialog abgebrochen wurde.
- */
-export async function saveFolderPdf(
-  project: Project,
-  folderId: string,
-  fileName: string,
-): Promise<boolean> {
+/** Baut das Ordner-PDF als Bytes (`null`, wenn nichts zu exportieren war). Speichern macht die Hülle. */
+export async function folderPdfBytes(project: Project, folderId: string): Promise<Uint8Array | null> {
   const doc = await buildFolderPdf(project, folderId);
-  if (!doc) return false;
-  const bytes = doc.output("arraybuffer");
-  const name = fileName.replace(/\.pdf$/i, "");
-  return saveBinaryFile(new Uint8Array(bytes), `${name}.pdf`, "application/pdf");
+  if (!doc) return null;
+  return new Uint8Array(doc.output("arraybuffer"));
 }

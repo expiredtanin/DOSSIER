@@ -19,20 +19,20 @@ import type {
   Vec2,
   Wall,
 } from "../model/types";
-import { categoryNameForPick } from "../plan/pickLabels";
-import type { PickKind } from "../plan/pickLabels";
-import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../plan/generatePlan";
-import type { CategoryDisplayResolver, Plan, Primitive } from "../plan/generatePlan";
+import { categoryNameForPick } from "../core";
+import type { PickKind } from "../core";
+import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../core";
+import type { CategoryDisplayResolver, Plan, Primitive } from "../core";
 import type { RichTextDoc } from "../text/richText";
-import { computeSection, sameSectionInputs, sameSectionLine } from "../plan/toSection";
-import type { SectionOutput } from "../plan/toSection";
-import { generateElevationPlan } from "../plan/toElevation";
-import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../plan/planUnderlay";
-import { sectionOpeningPrimitives } from "../plan/sectionOpenings";
-import { levelMarkerPrimitives, levelMarksEnabled } from "../plan/levelMarkers";
+import { computeSection, sameSectionInputs, sameSectionLine } from "../core";
+import type { SectionOutput } from "../core";
+import { generateElevationPlan } from "../core";
+import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../core";
+import { sectionOpeningPrimitives } from "../core";
+import { levelMarkerPrimitives, levelMarksEnabled } from "../core";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
 import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
-import { selectionHighlightLines } from "../plan/toWalls3d";
+import { selectionHighlightLines } from "../core";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { PlanView } from "./plan/PlanView";
 import type {

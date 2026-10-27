@@ -8,7 +8,7 @@
 //   1) „Erste Ecke der Aussparung:"  → Punkt
 //   2) „Gegenecke:"                  → Live-Rechteck-Vorschau; Klick committet.
 
-import { pointInOutline } from "../../geometry/ceiling";
+import { pointInOutline } from "../../core";
 import type {
   Command,
   CommandContext,

@@ -11,7 +11,7 @@ import type { Ceiling, Drawing2D, EdgeGrip, Project, Room, Stair, Vec2 } from ".
 import { wallTypeThickness } from "../model/types";
 import { drawingVertices } from "./projectSlice";
 import { areaMovePreview } from "../tools/transform";
-import { mvGeom } from "../geometry/geomTransform";
+import { mvGeom } from "../core";
 import { drawingPreviewShapes } from "../tools/drawingPreview";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { applyAngleConstraint, computeSnap } from "../tools/snapping";

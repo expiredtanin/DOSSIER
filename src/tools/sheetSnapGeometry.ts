@@ -6,7 +6,7 @@
 // `computeSnap` liest sie für die aktive Ebene mit.
 
 import type { Vec2 } from "../model/types";
-import type { Primitive } from "../plan/generatePlan";
+import type { Primitive } from "../core";
 
 export type SnapSeg = [Vec2, Vec2];
 

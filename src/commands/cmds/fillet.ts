@@ -15,8 +15,8 @@
 // einer polyline (kein reines Rechteck mehr).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { bulgeFromSagittaPoint, hasRealBulge } from "../../geometry/bulge";
-import { filletCorner, type Fillet } from "../../geometry/kernel2d";
+import { bulgeFromSagittaPoint, hasRealBulge } from "../../core";
+import { filletCorner, type Fillet } from "../../core";
 import type {
   Command,
   CommandContext,

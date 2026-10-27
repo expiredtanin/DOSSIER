@@ -9,7 +9,7 @@
 // Bezeichner englisch, UI-Text via t() (CONVENTIONS.md). Reine Funktionen + Geometrie;
 // die App hält den State und wendet `commitTransform` immutabel an.
 
-import { transformSolid } from "../plan/extrudedSolidSpec";
+import { transformSolid } from "../core";
 import type {
   Ceiling,
   Column,
@@ -25,11 +25,11 @@ import type {
 } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { wallCorners } from "../model/geometry";
-import { columnFootprint } from "../geometry/column";
-import { stairOutline } from "../geometry/stair";
+import { columnFootprint } from "../core";
+import { stairOutline } from "../core";
 import type { DraftShape } from "./types";
 import { drawingPreviewShapes } from "./drawingPreview";
-import { mvGeom, reversesOrientation, scaleFactor, scaleGeom } from "../geometry/geomTransform";
+import { mvGeom, reversesOrientation, scaleFactor, scaleGeom } from "../core";
 import { uniqueId } from "./types";
 import type { CommandSelection } from "../commands/types";
 

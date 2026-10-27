@@ -15,7 +15,7 @@
 
 import type { Column, ColumnProfile } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import { columnFootprint } from "../../geometry/column";
+import { columnFootprint } from "../../core";
 import type {
   Command,
   CommandContext,

@@ -17,7 +17,7 @@
 
 import type { Drawing2D } from "../../model/types";
 import { segmentHud, uniqueId } from "../../tools/types";
-import { sampleCatmullRom, sampleUniformBSpline } from "../../geometry/curves";
+import { sampleCatmullRom, sampleUniformBSpline } from "../../core";
 import type {
   Command,
   CommandContext,

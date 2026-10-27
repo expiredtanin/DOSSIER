@@ -4,7 +4,7 @@
 import type { Ceiling, Drawing2D, Project, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { wallCorners } from "../model/geometry";
-import { normalizeOutline, ceilingArea } from "../geometry/ceiling";
+import { normalizeOutline, ceilingArea } from "../core";
 import type { DraftShape, Tool, ToolContext, ToolDraft, ToolId } from "./types";
 import { uniqueId } from "./types";
 

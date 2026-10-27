@@ -10,7 +10,7 @@
 import type { ExtrudedSolid, Vec2 } from "../../model/types";
 import { getFloor } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import { extrudedSolidSpec } from "../../plan/extrudedSolidSpec";
+import { extrudedSolidSpec } from "../../core";
 import type { Command, CommandResult, CommandState, CmdOption, Project, ToolDraft } from "../types";
 
 export type SolidBoolOp = "union" | "difference" | "intersection";

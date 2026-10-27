@@ -11,7 +11,7 @@
 // Leere/rein-block-Auswahl → No-Op (kein Commit).
 
 import type { BlockDef, Drawing2D } from "../../model/types";
-import { mvGeom } from "../../geometry/geomTransform";
+import { mvGeom } from "../../core";
 import { uniqueId } from "../../tools/types";
 import type {
   Command,

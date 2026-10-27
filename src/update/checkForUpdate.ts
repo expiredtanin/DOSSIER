@@ -5,7 +5,7 @@
 // weder die Plugins noch etwas zu aktualisieren.
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import { t } from "../i18n";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "../native/projectFile";
 
 /** localStorage-Key fuer die Update-Pause (s. `getUpdateSnoozeUntil`). */
 const SNOOZE_KEY = "dossier.updateSnoozeUntil";

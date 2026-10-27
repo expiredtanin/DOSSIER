@@ -13,7 +13,7 @@
 // Bezeichner englisch, UI-Text über i18n (CONVENTIONS.md).
 
 import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "./projectFile";
 import { t } from "../i18n";
 import { APP_VERSION } from "../ui/TopBar";
 import type { View3d, ViewType } from "../model/viewTypes";

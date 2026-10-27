@@ -20,7 +20,7 @@
 // Bezeichner englisch, sichtbarer Text via t() (CONVENTIONS.md).
 
 import type { Stair, StairShape, Vec2 as MVec2 } from "../../model/types";
-import { stairGeometry, defaultStepCount, IDEAL_TREAD, MIN_STEPS } from "../../geometry/stair";
+import { stairGeometry, defaultStepCount, IDEAL_TREAD, MIN_STEPS } from "../../core";
 import { uniqueId } from "../../tools/types";
 import type {
   Command,

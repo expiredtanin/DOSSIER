@@ -15,7 +15,7 @@
 
 import type { Drawing2D, ExtrudedSolid } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import { polylineEdges, pointSegmentDistance } from "../../geometry/kernel2d";
+import { polylineEdges, pointSegmentDistance } from "../../core";
 import type {
   Command,
   CommandContext,

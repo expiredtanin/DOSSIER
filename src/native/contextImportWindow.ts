@@ -16,7 +16,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useRef } from "react";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "./projectFile";
 import type { GeoAnchor } from "../ui/ContextImportDialog";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 

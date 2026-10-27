@@ -9,8 +9,8 @@
 // Aufrufe hinweg (wie `lastSides` bei `polygon.ts`).
 
 import type { Drawing2D } from "../../model/types";
-import { bulgeArcPoints } from "../../geometry/bulge";
-import { revisionCloudPts } from "../../geometry/revisionCloud";
+import { bulgeArcPoints } from "../../core";
+import { revisionCloudPts } from "../../core";
 import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   CmdOption,

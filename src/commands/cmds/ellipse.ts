@@ -21,7 +21,7 @@
 
 import type { Drawing2D } from "../../model/types";
 import { segmentHud, uniqueId } from "../../tools/types";
-import { ellipsePts } from "../../geometry/curves";
+import { ellipsePts } from "../../core";
 import type {
   CmdOption,
   Command,

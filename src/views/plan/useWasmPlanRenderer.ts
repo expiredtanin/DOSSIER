@@ -13,8 +13,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Plan } from "../../plan/generatePlan";
-import { planToRenderScene } from "../../plan/toRenderScene";
+import type { Plan } from "../../core";
+import { planToRenderScene } from "../../core";
 
 interface ViewBox {
   x: number;

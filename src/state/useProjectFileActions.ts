@@ -25,7 +25,7 @@ import { exportIfcSpf } from "../export/exportIfc";
 import { exportProjectStep } from "../export/exportStep";
 import { exportObj, exportStl } from "../export/exportMesh";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
-import { saveTextFile } from "../io/saveFile";
+import { saveTextFile } from "../native/saveFile";
 import {
   saveProjectFile,
   openProjectFileNative,
@@ -35,8 +35,8 @@ import {
   releaseProjectLock,
   registerLockAutoRelease,
   isTauriRuntime,
-} from "../io/projectFile";
-import type { LockInfo } from "../io/projectFile";
+} from "../native/projectFile";
+import type { LockInfo } from "../native/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
 import { flattenCategories } from "../model/types";

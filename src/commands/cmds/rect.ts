@@ -31,8 +31,8 @@
 
 import type { Drawing2D } from "../../model/types";
 import { deltaHud, segmentHud, uniqueId } from "../../tools/types";
-import { filletCorner } from "../../geometry/kernel2d";
-import { bulgeArcPoints, bulgeThroughPoint } from "../../geometry/bulge";
+import { filletCorner } from "../../core";
+import { bulgeArcPoints, bulgeThroughPoint } from "../../core";
 import type {
   Command,
   CommandContext,

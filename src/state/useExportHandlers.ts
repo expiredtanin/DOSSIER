@@ -5,8 +5,8 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { generatePlan } from "../plan/generatePlan";
-import type { CategoryDisplayResolver } from "../plan/generatePlan";
+import { generatePlan } from "../core";
+import type { CategoryDisplayResolver } from "../core";
 import type { DetailLevel } from "../model/viewTypes";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import { savePlanPdf } from "../export/exportPdf";

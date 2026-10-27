@@ -9,8 +9,8 @@
 // ist von Natur aus gerade, also ein exaktes (nicht approximiertes) Ergebnis.
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { hasRealBulge } from "../../geometry/bulge";
-import { chamferCorner, type Chamfer } from "../../geometry/kernel2d";
+import { hasRealBulge } from "../../core";
+import { chamferCorner, type Chamfer } from "../../core";
 import type {
   Command,
   CommandContext,

@@ -7,15 +7,7 @@ import type { LineStyle, Project } from "../../model/types";
 import { PEN_WEIGHTS } from "../../model/types";
 import { parseLin } from "../../io/linParser";
 import { LineSwatch } from "../hatchPreview";
-import {
-  segmentsToDash,
-  dashToSegments,
-  presetOfDash,
-  LINE_PRESETS,
-  type LineSegment,
-  type LineSegmentType,
-  type LinePresetKey,
-} from "../../geometry/lineSegments";
+import { segmentsToDash, dashToSegments, presetOfDash, LINE_PRESETS, type LineSegment, type LineSegmentType, type LinePresetKey } from "../../core";
 import { MotifEditor } from "../MotifEditor";
 import { t } from "../../i18n";
 import {

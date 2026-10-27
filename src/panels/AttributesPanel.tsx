@@ -33,7 +33,7 @@ import { Dropdown } from "../ui/Dropdown";
 import { PenColorField } from "../ui/PenColorField";
 import { activePenSet, resolvePenWeight } from "../model/penSets";
 import { DIM_DEFAULTS_MM } from "../model/dimension";
-import { END_MARK_DEFAULT_SIZE_MM } from "../plan/generatePlan/endMarks";
+import { END_MARK_DEFAULT_SIZE_MM } from "../core";
 import type { EndMark } from "../model/types";
 
 /** Auswahl der Linienenden (Reihenfolge = Anzeige im Dropdown). */

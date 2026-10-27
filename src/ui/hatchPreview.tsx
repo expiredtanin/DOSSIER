@@ -10,7 +10,7 @@
 
 import { useId } from "react";
 import type { HatchStyle, LineStyle } from "../model/types";
-import { dashHasDot } from "../geometry/lineSegments";
+import { dashHasDot } from "../core";
 
 // ── Kleiner deterministischer PRNG (mulberry32) ────────────────────────────
 // Für „random"-Striche: stabil pro Seed, damit die Vorschau bei gleichem

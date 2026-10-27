@@ -10,7 +10,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
+import { extrudedSolidSpec } from "../core";
 import type { SolidSpec } from "../engine/truckSolid";
 import {
   ceilingThickness,
@@ -47,25 +47,20 @@ import type {
 } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { localToLv95 } from "../io/lv95";
-import {
-  resolveForeground,
-  resolveBackground,
-  resolveHatchId,
-  resolveStrokeWeight,
-} from "../plan/generatePlan/shared";
+import { resolveForeground, resolveBackground, resolveHatchId, resolveStrokeWeight } from "../core";
 import { columnVerticalExtent } from "../model/wall";
-import { columnFootprint } from "../geometry/column";
-import { evaluateRoom, polygonArea } from "../geometry/roomArea";
+import { columnFootprint } from "../core";
+import { evaluateRoom, polygonArea } from "../core";
 import {
   ceilingVerticalExtent,
   nextFloorAbove,
   stairVerticalExtent,
   wallVerticalExtent,
 } from "../model/wall";
-import { ceilingArea, outlineBBox } from "../geometry/ceiling";
-import { roofBBox, roofBaseElevation, roofGeometry } from "../geometry/roof";
-import { openingGapQuad, openingVerticalExtent } from "../geometry/opening";
-import { stairGeometry, stairBBox } from "../geometry/stair";
+import { ceilingArea, outlineBBox } from "../core";
+import { roofBBox, roofBaseElevation, roofGeometry } from "../core";
+import { openingGapQuad, openingVerticalExtent } from "../core";
+import { stairGeometry, stairBBox } from "../core";
 
 /** Eintrag für die WallType-Auswahl (Preset-Dropdown) im Object-Info-Panel. */
 export interface WallTypeChoice {

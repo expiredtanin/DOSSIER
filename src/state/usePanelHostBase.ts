@@ -20,7 +20,7 @@ import type { Selection } from "./selectionInfo";
 import type { EngineView } from "../commands/engine";
 import type { ScheduleKind } from "../export/exportSchedule";
 import type { TabId as ResourceTabId } from "../ui/ResourceManager";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "../native/projectFile";
 import { openDrawingLevelsWindowNative } from "../native/drawingLevelsWindow";
 import { t } from "../i18n";
 import {
@@ -52,7 +52,8 @@ import {
   moveFolderToFolder,
   patchAnnotation as patchAnnotationInLayout,
 } from "../model/layoutModel";
-import { saveFolderPdf } from "../export/layoutPdf";
+import { folderPdfBytes } from "../export/layoutPdf";
+import { saveBinaryFile } from "../native/saveFile";
 import type { useProjectActions } from "./useProjectActions";
 import type { useSelectionState } from "./useSelectionState";
 import type { useDrawingToolState } from "./useDrawingToolState";
@@ -1567,7 +1568,9 @@ export function usePanelHostBase(opts: {
       onExportFolderPdf: (folderId) => {
         const folder = (project.layoutFolders ?? []).find((f) => f.id === folderId);
         const name = folder?.name?.trim() || "layouts";
-        void saveFolderPdf(project, folderId, name);
+        void folderPdfBytes(project, folderId).then((bytes) => {
+          if (bytes) return saveBinaryFile(bytes, `${name}.pdf`, "application/pdf");
+        });
       },
       onMoveLayoutToFolder: (layoutId, folderId) => {
         setProject((p) => ({

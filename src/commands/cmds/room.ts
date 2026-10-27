@@ -19,8 +19,8 @@
 
 import type { Room } from "../../model/types";
 import { wallTypeThickness } from "../../model/types";
-import { roomFromPointInside, type WallSegment } from "../../geometry/roomBoundary";
-import { polygonArea, centroid } from "../../geometry/roomArea";
+import { roomFromPointInside, type WallSegment } from "../../core";
+import { polygonArea, centroid } from "../../core";
 import { docFromText } from "../../text/richText";
 import { uniqueId } from "../../tools/types";
 import type {

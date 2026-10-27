@@ -5,7 +5,7 @@
 
 import { useEffect } from "react";
 import { t } from "../i18n";
-import type { LockInfo } from "../io/projectFile";
+import type { LockInfo } from "../native/projectFile";
 
 export interface LockConflictDialogProps {
   /** Info aus der Lock-Sidecar-Datei (pid/hostname/timestamp) — kann fehlen. */

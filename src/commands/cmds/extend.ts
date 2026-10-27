@@ -23,13 +23,8 @@
 // Bezeichner englisch, Kommentare/UI deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { bulgeArcPoints, hasRealBulge } from "../../geometry/bulge";
-import {
-  extendBulgeSegment,
-  extendSegment,
-  pointSegmentDistance,
-  polylineEdges,
-} from "../../geometry/kernel2d";
+import { bulgeArcPoints, hasRealBulge } from "../../core";
+import { extendBulgeSegment, extendSegment, pointSegmentDistance, polylineEdges } from "../../core";
 import type {
   Command,
   CommandResult,

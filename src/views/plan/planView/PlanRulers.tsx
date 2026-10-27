@@ -1,7 +1,7 @@
 // Lineale oben + links (Vectorworks-Stil) am Rand der Plan-Ansicht.
 
 import type { Vec2 } from "../../../model/types";
-import { PX_PER_M } from "../../../plan/planView/geometry";
+import { PX_PER_M } from "../../../core";
 
 /**
  * Schrittweite (Meter) fürs Lineal: 1/2/5·10^n, sodass Major-Ticks ≥ ~64 px

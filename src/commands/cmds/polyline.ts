@@ -19,7 +19,7 @@
 //     Tangenten-Referenz und bleibt gerade.
 
 import type { Drawing2D } from "../../model/types";
-import { bulgeArcPoints, bulgeThroughPoint } from "../../geometry/bulge";
+import { bulgeArcPoints, bulgeThroughPoint } from "../../core";
 import { segmentHud, uniqueId } from "../../tools/types";
 import type {
   Command,

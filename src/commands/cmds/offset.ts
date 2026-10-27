@@ -14,16 +14,10 @@
 // Vorzeichen, wenn negativ getippt.
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
-import { bulgeArcPoints, hasRealBulge } from "../../geometry/bulge";
+import { bulgeArcPoints, hasRealBulge } from "../../core";
 import { uniqueId } from "../../tools/types";
 import { leftNormal, normalize, sub } from "../../model/geometry";
-import {
-  offsetPolyline,
-  offsetPolylineWithBulge,
-  offsetSegment,
-  pointSegmentDistance,
-  polylineEdges,
-} from "../../geometry/kernel2d";
+import { offsetPolyline, offsetPolylineWithBulge, offsetSegment, pointSegmentDistance, polylineEdges } from "../../core";
 import type {
   CmdInput,
   Command,

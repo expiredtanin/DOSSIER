@@ -16,7 +16,7 @@
 // unverändert stehen. Ebenso alles, was kein 2D-Element ist.
 
 import type { Drawing2D, Drawing2DGeom, Project, Vec2 } from "../model/types";
-import { bulgeArc } from "../geometry/bulge";
+import { bulgeArc } from "../core";
 import { uniqueId } from "../tools/types";
 
 /** Teilgeometrien EINES Elements, oder `null`, wenn es nicht zerlegbar ist. */

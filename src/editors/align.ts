@@ -8,7 +8,7 @@
 
 import type { Drawing2D, Project, Vec2 } from "../model/types";
 import { geomBBox } from "../state/selectionInfo";
-import { mvGeom } from "../geometry/geomTransform";
+import { mvGeom } from "../core";
 
 /** Ausrichtungskante bzw. -achse. */
 export type AlignMode = "left" | "right" | "centerX" | "top" | "bottom" | "centerY";

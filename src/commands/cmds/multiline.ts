@@ -18,7 +18,7 @@
 import type { Drawing2D } from "../../model/types";
 import { segmentHud, uniqueId } from "../../tools/types";
 import { leftNormal, normalize, sub } from "../../model/geometry";
-import { offsetSegment } from "../../geometry/kernel2d";
+import { offsetSegment } from "../../core";
 import type {
   CmdOption,
   Command,

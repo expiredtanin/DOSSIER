@@ -19,7 +19,7 @@ import type { ContextObject } from "../model/types";
 import { ContextImportDialog } from "../ui/ContextImportDialog";
 import { Dropdown } from "../ui/Dropdown";
 import { useStore } from "../state/appStore";
-import { isTauriRuntime } from "../io/projectFile";
+import { isTauriRuntime } from "../native/projectFile";
 import { openContextImportWindowNative } from "../native/contextImportWindow";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */

@@ -8,12 +8,7 @@
 
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
-import {
-  balance,
-  evaluateRoom,
-  roomsToCsv,
-  siaLabelFull,
-} from "../geometry/roomArea";
+import { balance, evaluateRoom, roomsToCsv, siaLabelFull } from "../core";
 import type { Room } from "../model/types";
 import { roomDisplayName } from "../model/roomStamp";
 

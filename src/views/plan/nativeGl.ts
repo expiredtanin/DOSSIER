@@ -8,7 +8,7 @@
  * Frame wandert danach nur noch der Ausschnitt.
  */
 
-import type { BufferGl, GpuGeometry } from '../../plan/glPlan/glPlanTypes';
+import type { BufferGl, GpuGeometry } from "../../core";
 
 export type NativeInvoke = (cmd: string, args?: unknown, options?: unknown) => Promise<unknown>;
 

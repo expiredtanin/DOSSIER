@@ -15,7 +15,7 @@
  */
 
 import type { Project } from "../model/types";
-import { wallMaterialColorMaps } from "../plan/toWalls3d";
+import { wallMaterialColorMaps } from "../core";
 
 /** Kantenlänge einer Textur-Ebene in Texeln (muss zu render3d `TEXTURE_SIZE`). */
 const TEX_SIZE = 256;

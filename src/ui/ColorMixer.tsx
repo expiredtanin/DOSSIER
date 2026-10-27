@@ -29,7 +29,7 @@ import {
   rgbToHsv,
 } from "../model/color";
 import type { Cmyk, Hsl, Hsv, Rgb } from "../model/color";
-import { initIccColorManagement, iccColorManagementAvailable, rgbToCmykIcc, cmykToRgbIcc } from "../model/colorIcc";
+import { initIccColorManagement, iccColorManagementAvailable, rgbToCmykIcc, cmykToRgbIcc } from "../native/colorIcc";
 import { SpectrumPicker } from "./SpectrumPicker";
 import { Segmented } from "./resourceManager/fields";
 import { t } from "../i18n";

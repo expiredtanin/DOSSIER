@@ -9,14 +9,14 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Plan } from '../../plan/generatePlan';
-import { GpuChunkCache } from '../../plan/glPlan/glPlanChunks';
-import { compilePrimitivesToGpu } from '../../plan/glPlan/glPlanCompile';
-import type { GpuGeometry, ViewBox } from '../../plan/glPlan/glPlanTypes';
-import type { Primitive } from '../../plan/generatePlan';
+import type { Plan } from "../../core";
+import { GpuChunkCache } from "../../core";
+import { compilePrimitivesToGpu } from "../../core";
+import type { GpuGeometry, ViewBox__plan_glPlan_glPlanTypes as ViewBox } from "../../core";
+import type { Primitive } from "../../core";
 import { NativeGl, type NativeInvoke } from './nativeGl';
 import { readCssColor } from './cssColor';
-import { NativeTextSync } from '../../plan/nativeText';
+import { NativeTextSync } from "../../core";
 
 /** Läuft die App in einer Tauri-Webview? */
 const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

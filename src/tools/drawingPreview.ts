@@ -6,8 +6,8 @@
 // Polylinie/Rechteck/Bild, alles andere war beim Verschieben unsichtbar).
 
 import type { Drawing2D, Project, Vec2 } from "../model/types";
-import type { Primitive } from "../plan/generatePlan";
-import { addDrawing2D } from "../plan/generatePlan/drawing2d";
+import type { Primitive } from "../core";
+import { addDrawing2D } from "../core";
 import { textFrameCorners } from "../text/textFrame";
 import type { DraftShape } from "./types";
 

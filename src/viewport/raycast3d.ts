@@ -17,9 +17,8 @@
 // Ortho-Zweig, keine perspektivische Näherung mehr.
 
 
-import { DRAWING_PICK_TOLERANCE } from "../plan/pickTypes";
-import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh } from "../plan/pickTypes";
-export type { Vec3 } from "../plan/pickTypes";
+import { DRAWING_PICK_TOLERANCE } from "../core";
+import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh } from "../core";
 
 /** Kamera-Parameter für den Pick-Strahl (Teilmenge von Camera3d). */
 export interface RayCamera {

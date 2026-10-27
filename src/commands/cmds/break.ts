@@ -20,8 +20,8 @@
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import { breakCurve, nearestOnPolyline } from "../../geometry/kernel2d";
-import { hasRealBulge } from "../../geometry/bulge";
+import { breakCurve, nearestOnPolyline } from "../../core";
+import { hasRealBulge } from "../../core";
 import { chainToGeom, geomToCurve, isTrimmable, pickCurveAt } from "./trim";
 import type {
   Command,

@@ -6,16 +6,8 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom, Vec2 } from "../model/types";
-import {
-  joinChainsWithBulge,
-  removeSegment,
-  removeSegmentWithBulge,
-  splitAtIntersections,
-  splitClosedByChord,
-  splitPolylineAtParam,
-  vecEqual,
-} from "../geometry/kernel2d";
-import { bulgeArcPoints, hasRealBulge } from "../geometry/bulge";
+import { joinChainsWithBulge, removeSegment, removeSegmentWithBulge, splitAtIntersections, splitClosedByChord, splitPolylineAtParam, vecEqual } from "../core";
+import { bulgeArcPoints, hasRealBulge } from "../core";
 
 /** Eine Polylinien-Darstellung eines Drawing2D (für die Kernel-Funktionen). */
 export interface PolyForm {

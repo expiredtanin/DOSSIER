@@ -10,12 +10,12 @@ import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
 import { add, leftNormal, lineIntersect, normalize, scale, sub } from "../model/geometry";
 import { wallReferenceOffset } from "../model/wall";
-import { centroid as roomCentroid } from "../geometry/roomArea";
-import { columnFootprint } from "../geometry/column";
-import { stairOutline } from "../geometry/stair";
+import { centroid as roomCentroid } from "../core";
+import { columnFootprint } from "../core";
+import { stairOutline } from "../core";
 import type { SnapKind, SnapResult, SnapSettings } from "./types";
-import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../geometry/curves";
-import { buildDrawingIndex, drawingsNear, isIndexable, pointSegDist, type DrawingIndex } from "../geometry/drawingIndex";
+import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../core";
+import { buildDrawingIndex, drawingsNear, isIndexable, pointSegDist__geometry_drawingIndex as pointSegDist, type DrawingIndex } from "../core";
 import { sheetSnapSegments } from "./sheetSnapGeometry";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);

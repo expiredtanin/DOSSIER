@@ -16,7 +16,7 @@
 //   • categoryCode← "30" (Ebene „Decken"; Fallback ctx.defaultCategoryCode)
 
 import type { Ceiling } from "../../model/types";
-import { normalizeOutline, ceilingArea } from "../../geometry/ceiling";
+import { normalizeOutline, ceilingArea } from "../../core";
 import { uniqueId } from "../../tools/types";
 import type {
   Command,

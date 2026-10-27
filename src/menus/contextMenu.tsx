@@ -8,8 +8,8 @@
 // Kommentare deutsch (CONVENTIONS.md).
 
 import { t } from "../i18n";
-import { canSetVertexType, vertexTypeOf, type PolylineVertexType } from "../geometry/polylineVertexType";
-import { nearestPolylineTarget, toleranceFor } from "../geometry/polylinePoint";
+import { canSetVertexType, vertexTypeOf, type PolylineVertexType } from "../core";
+import { nearestPolylineTarget, toleranceFor } from "../core";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { findCategory } from "../state/projectSlice";

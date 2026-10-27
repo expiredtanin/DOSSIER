@@ -6,9 +6,9 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Group, Project } from "../model/types";
-import type { Plan, UnderlayGroup } from "../plan/generatePlan";
+import type { Plan, UnderlayGroup } from "../core";
 import { uniqueId } from "../tools/types";
-import type { Primitive } from "../plan/generatePlan/shared";
+import type { Primitive } from "../core";
 
 /** Mitglieds-IDs je Elementart — dieselbe Form wie `Group`, ohne `id`/`name`/`groupIds`. */
 export interface GroupMembership {

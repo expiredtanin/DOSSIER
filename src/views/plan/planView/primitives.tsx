@@ -3,14 +3,14 @@
 // Renderer. Bekommt `toScreen`/Massstab-Parameter gereicht, kein eigener
 // Zugriff auf PlanView-internen State.
 
-import type { HatchRender, Primitive } from "../../../plan/generatePlan";
-import { NO_HATCH } from "../../../plan/generatePlan/shared";
+import type { HatchRender, Primitive } from "../../../core";
+import { NO_HATCH } from "../../../core";
 import { docToLines, wrapDocToLines, type SvgLine } from "../../../text/renderHtml";
 import type { Vec2 } from "../../../model/types";
 import { quantizePen } from "../../../export/sceneToPrintSvg";
-import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../plan/glPlan/glPlanHatch";
-import { dashHasDot } from "../../../geometry/lineSegments";
-import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "../../../plan/planView/geometry";
+import { buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../core";
+import { dashHasDot } from "../../../core";
+import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "../../../core";
 
 /** Basis-Kachelmaß (viewBox-Einheiten) einer Bild-Schraffur bei scaleX/scaleY = 1. */
 const IMG_TILE_VB = 40;

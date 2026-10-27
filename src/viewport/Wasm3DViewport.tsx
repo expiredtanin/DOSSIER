@@ -45,8 +45,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
-import { roofBaseElevation, roofGeometry } from "../geometry/roof";
-import { projectToModel3d, pickGeometry, draftWorldLines, TRUCK_MESH_READY_EVENT } from "../plan/toWalls3d";
+import { roofBaseElevation, roofGeometry } from "../core";
+import { projectToModel3d, pickGeometry, draftWorldLines, TRUCK_MESH_READY_EVENT } from "../core";
 import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
 import type { ToolDraft } from "../tools/types";
 import { hudSegments, type HudFieldsState } from "../tools/hudFormat";
@@ -63,7 +63,7 @@ import { t } from "../i18n";
 import { useWasm3dRenderer } from "./useWasm3dRenderer";
 import type { Camera3d } from "./useWasm3dRenderer";
 import { cameraRay, pickNearest, rayPlaneY, rayPlane, worldToScreen } from "./raycast3d";
-import type { Vec3 } from "./raycast3d";
+import type { Vec3 } from "../core";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */

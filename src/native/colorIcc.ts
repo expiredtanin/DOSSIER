@@ -21,7 +21,7 @@
 
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { LcmsInstance } from "lcms-wasm";
-import type { Cmyk, Rgb } from "./color";
+import type { Cmyk, Rgb } from "../model/color";
 
 const MACOS_GENERIC_CMYK_PROFILE = "/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc";
 
