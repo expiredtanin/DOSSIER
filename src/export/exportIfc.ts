@@ -30,6 +30,7 @@
 //     Tür/Fenster bleiben als eigenes Objekt IfcDoor/IfcWindow mit eigener Box-
 //     Geometrie erhalten (füllt das ausgeschnittene Loch, "sieht aus wie 3D").
 //   • Extrusion → IfcBuildingElementProxy aus points+height.
+//   • Raum      → IfcSpace (im Geschoss aggregiert) mit Qto_SpaceBaseQuantities und SIA-416-Kategorie.
 //   • Treppe    → IfcStair, GEOMETRISCH bewusst vereinfacht auf einen
 //     extrudierten Bounding-Footprint (Lauf-Rechteck bei "straight"; Achsen-
 //     ausgerichtete Bounding-Box der Kontrollpunkte bei "L"/"spiral") — die
@@ -69,6 +70,7 @@ import {
 import { pickGeometry } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
 import { isWatertight, wallCutMesh } from "../plan/wallMeshCut";
+import { evaluateRoom } from "../geometry/roomArea";
 
 // ── IFC-GUID (Base64-Kompression, 22 Zeichen) ───────────────────────────────
 // Standard-Kompressionsalgorithmus (IfcOpenShell guid.compress): das erste
@@ -710,6 +712,55 @@ export function exportIfcSpf(projectIn: Project): string {
       null,
     );
     addToContainment(structure.entityId, entityId);
+  }
+
+  // ── Räume → IfcSpace ───────────────────────────────────────────────────
+  // Je Raum ein IfcSpace (Name = Raumnummer, LongName = Raumname), als Extrusion der lichten
+  // Innenkontur über die lichte Geschosshöhe. Räume sind räumliche Elemente: sie werden im
+  // Geschoss AGGREGIERT (IfcRelAggregates), nicht enthalten. Dazu Basismengen
+  // (Qto_SpaceBaseQuantities) und die SIA-416-Kategorie als Eigenschaft.
+  const spacesByStructure = new Map<number, number[]>();
+  for (const room of project.rooms ?? []) {
+    if (room.boundary.length < 3) continue;
+    const structure = resolveStructure(room.floorId);
+    const floor = floors.find((f) => f.id === room.floorId);
+    const height = floor?.floorHeight && floor.floorHeight > 0 ? floor.floorHeight : 2.5;
+    const { placementId, shapeId } = emitBoxProduct(room.boundary, 0, height, structure.placementId);
+    const spaceId = w.add(
+      "IFCSPACE",
+      `${S(ifcGuid(room.id))},#${ownerHistory},${S(room.stamp?.number || room.id)},$,$,#${placementId},#${shapeId},${S(room.name)},${ENUM("ELEMENT")},${ENUM("INTERNAL")},$`,
+    );
+    const list = spacesByStructure.get(structure.entityId);
+    if (list) list.push(spaceId);
+    else spacesByStructure.set(structure.entityId, [spaceId]);
+
+    const area = evaluateRoom(room.boundary, room.siaCategory);
+    const qNet = w.add("IFCQUANTITYAREA", `${S("NetFloorArea")},$,$,${R(area.netArea)},$`);
+    const qGross = w.add("IFCQUANTITYAREA", `${S("GrossFloorArea")},$,$,${R(area.grossArea)},$`);
+    const qHeight = w.add("IFCQUANTITYLENGTH", `${S("Height")},$,$,${R(height)},$`);
+    const qto = w.add(
+      "IFCELEMENTQUANTITY",
+      `${S(ifcGuid(`${room.id}:qto`))},#${ownerHistory},${S("Qto_SpaceBaseQuantities")},$,$,${LIST([`#${qNet}`, `#${qGross}`, `#${qHeight}`])}`,
+    );
+    w.add(
+      "IFCRELDEFINESBYPROPERTIES",
+      `${S(ifcGuid(`${room.id}:rel-qto`))},#${ownerHistory},$,$,${LIST([`#${spaceId}`])},#${qto}`,
+    );
+    const sia = w.add("IFCPROPERTYSINGLEVALUE", `${S("SIA416")},$,IFCLABEL(${S(room.siaCategory)}),$`);
+    const pset = w.add(
+      "IFCPROPERTYSET",
+      `${S(ifcGuid(`${room.id}:pset`))},#${ownerHistory},${S("CH_Raum")},$,${LIST([`#${sia}`])}`,
+    );
+    w.add(
+      "IFCRELDEFINESBYPROPERTIES",
+      `${S(ifcGuid(`${room.id}:rel-pset`))},#${ownerHistory},$,$,${LIST([`#${spaceId}`])},#${pset}`,
+    );
+  }
+  for (const [structureId, spaceIds] of spacesByStructure) {
+    w.add(
+      "IFCRELAGGREGATES",
+      `${S(ifcGuid(`spaces:${structureId}`))},#${ownerHistory},$,$,#${structureId},${LIST(spaceIds.map((id) => `#${id}`))}`,
+    );
   }
 
   // ── Räumliche Eingliederung (gebündelt je Trägerstruktur) ──────────────

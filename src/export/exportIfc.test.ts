@@ -388,3 +388,37 @@ describe("STEP-Zeichenketten (ISO 10303-21)", () => {
     expect(/^[\x20-\x7e\n\r]*$/.test(spf)).toBe(true);
   });
 });
+
+describe("Räume als IfcSpace", () => {
+  const withRooms = (): Project => ({
+    ...fixtureProject(),
+    rooms: [
+      {
+        id: "R1", type: "room", floorId: "eg", categoryCode: "45", siaCategory: "HNF", name: "Küche",
+        boundary: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }], color: "#cccccc",
+      },
+      {
+        id: "R2", type: "room", floorId: "verwaist", categoryCode: "45", siaCategory: "VF", name: "Gang",
+        boundary: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }], color: "#cccccc",
+      },
+    ],
+  });
+  it("je Raum ein IfcSpace mit Langname, im Geschoss aggregiert (nicht enthalten)", () => {
+    const spf = exportIfcSpf(withRooms());
+    const spaces = spf.split("\n").filter((l) => /=IFCSPACE\(/.test(l));
+    expect(spaces).toHaveLength(2);
+    expect(spaces[0]).toContain("'K\\X2\\00FC\\X0\\che'");
+    expect(spaces[0]).toContain(".INTERNAL.");
+    const spaceIds = spaces.map((l) => l.slice(0, l.indexOf("=")));
+    const agg = spf.split("\n").filter((l) => /=IFCRELAGGREGATES\(/.test(l) && spaceIds.some((id) => l.includes(id)));
+    expect(agg.length).toBeGreaterThan(0);
+    const contained = spf.split("\n").filter((l) => /=IFCRELCONTAINEDINSPATIALSTRUCTURE\(/.test(l) && spaceIds.some((id) => new RegExp(`${id}[,)]`).test(l)));
+    expect(contained).toEqual([]);
+  });
+  it("Netto-Geschossfläche und SIA-416-Kategorie", () => {
+    const spf = exportIfcSpf(withRooms());
+    expect(spf).toMatch(/IFCQUANTITYAREA\('NetFloorArea',\$,\$,12\.0,\$\)/);
+    expect(spf).toContain("'Qto_SpaceBaseQuantities'");
+    expect(spf).toMatch(/IFCPROPERTYSINGLEVALUE\('SIA416',\$,IFCLABEL\('HNF'\),\$\)/);
+  });
+});
