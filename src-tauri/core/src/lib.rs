@@ -34,6 +34,7 @@ pub mod hatch_flat;
 pub mod plan_buf;
 pub mod gpu_compile;
 pub mod plan_stairs;
+pub mod plan_walls;
 
 #[cfg(feature = "web")]
 mod web;

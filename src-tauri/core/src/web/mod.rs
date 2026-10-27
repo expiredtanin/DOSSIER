@@ -26,6 +26,7 @@ mod wall_mesh_cut;
 mod plan_buf;
 mod gpu_compile;
 mod plan_stairs;
+mod plan_walls;
 mod hatch;
 
 use wasm_bindgen::prelude::wasm_bindgen;

@@ -86,7 +86,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (Farbe, Graustufen, Pick-ID) — kein Format-v2, bis [K3d] den Puffer direkt liefert.
     ✅ Treppen: `plan_stairs.rs` (`plan_stair_flat`), `generatePlan/stairs.ts` nur noch Übersetzung; bitgleich zur
     alten TS-Fassung (49 Fälle: gerade/L/Wendel, Pfeilstil, Schnitthöhen). Nicht in der Tauri-App angesehen.
-    Offen: Decken, Räume, Dächer, Stützen, 2D-Zeichnung, Kontext, Schnittlinien, Wände, Öffnungen.
+    ✅ Wand-Poché und Decken-Umriss: `plan_walls.rs` (Segmente zwischen Öffnungen, Gehrungsbänder, Schichtfugen,
+    L-Anschlüsse, Durchgangswand-Aussparungen, Verdeckung durch Wand-Footprints). Stil (Bauteil, Schraffur, Farbe,
+    Fugen-Linienstil) bleibt in TS, bis das Modell in Rust liegt [K4]; Zuordnung über den Schichtindex. Bitgleich zur
+    alten Fassung (60 Zufallspläne × 3 Detailgrade, Öffnungen, Beispielprojekt, Decken mit/ohne Loch); `subtractIntervals`/
+    `segmentInsideWallBand` aus TS gelöscht. Nicht in der Tauri-App angesehen.
+    Offen: Öffnungssymbole, Räume, Dächer, Stützen, 2D-Zeichnung, Kontext, Schnittlinien.
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
   - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
