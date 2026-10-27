@@ -40,6 +40,14 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `model/joins.ts` und `toWalls3d/bands.ts` sammeln nur noch aus dem `Project` und übergeben flach
     (Decken/Dächer einmal je Geschoss). Ergebnis bitgleich (Vergleich über 27 Projekte inkl.
     Zufallsgrundrisse), `computeJoins` ~10×, `projectToWalls3d` (1296 Wände) ~4× schneller.
+  - ✅ (27.10.) Öffnungen in 3D und Wand-Loch-Mesh in Rust (`openings3d.rs`, `wall_mesh_cut.rs`): Glas/
+    Mehrfachverglasung, Türblatt/Kassette, Blend-/Flügelrahmen je Eckstoss, Sprossen, SIA-Symbole, Bänke,
+    Zarge, Schwelle, Rollladenkasten; Loch-Mesh für STL/OBJ/IFC, `isWatertight`. `toWalls3d/openings.ts`
+    sammelt nur noch (alle Wände in einem Aufruf, `emitOpeningMeshes`), `wallMeshCut.ts` ist Fassade
+    (`wallCutMeshes` für viele Bänder). Bitgleich (Beispiel + 40 Zufallsprojekte × 4 Detailgrade, 152k
+    Quader; 6586 Bänder; IFC-Datei identisch). Öffnungen ~4–7×, Loch-Mesh ~1,6× schneller,
+    `projectToModel3d` (1500 Wände) 193 → 126 ms; `isWatertight` allein ~4× langsamer (Übergabe der
+    `number[]`, je Mesh < 3 µs), IFC-Export gesamt unverändert.
 - ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
 - ○ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.

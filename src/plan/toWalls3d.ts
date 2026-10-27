@@ -71,7 +71,7 @@ import { applyVoids3d } from "./toWalls3d/voids3d";
 import { emitDrawingLineVerts, pickDrawingSegs } from "./toWalls3d/drawing2d";
 import { emitColumns } from "./toWalls3d/columns";
 import { emitRoofCutLayers, emitRoofs } from "./toWalls3d/roofs";
-import { emitOpeningFrames, emitOpeningGlass, emitOpeningShading } from "./toWalls3d/openings";
+import { emitOpeningMeshes } from "./toWalls3d/openings";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
@@ -217,15 +217,13 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     slabs: [...emitSlabs(project), ...emitStairs(project, { forSection: opts.forSection })],
     // Kontext-Meshes (Terrain/Import) + Fenster-/Tür-Glasscheiben (eigenes Mesh
     // je Scheibe) + Rahmen-/Sprossen-Riegel typisierter Öffnungen (Zarge/
-    // Blendrahmen/Kämpfer/Mittelpfosten, s. emitOpeningFrames) + glatte Beton-
+    // Blendrahmen/Kämpfer/Mittelpfosten, s. emitOpeningMeshes) + glatte Beton-
     // Laufplatten (gerade Betontreppen als Mesh) + Dachflächen/-giebel
     // (s. emitRoofs) — pickGeometry/Highlight nutzen `meshes` bewusst NICHT (man
     // wählt Wand/Öffnung/Treppe; Treppen-Pick läuft über die pickGeometry-Boxen).
     meshes: [
       ...emitMeshes(project),
-      ...emitOpeningGlass(project),
-      ...emitOpeningFrames(project, detail),
-      ...emitOpeningShading(project, detail),
+      ...emitOpeningMeshes(project, detail),
       ...emitStairMeshes(project),
       ...emitStairRailings(project),
       ...emitRoofs(project),

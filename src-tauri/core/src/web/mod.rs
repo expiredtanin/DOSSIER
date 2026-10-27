@@ -17,6 +17,8 @@ mod wall_bands;
 mod room_area;
 mod room_boundary;
 mod polygon_holes;
+mod openings3d;
+mod wall_mesh_cut;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

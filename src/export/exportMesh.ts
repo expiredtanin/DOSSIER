@@ -8,7 +8,7 @@
 //     die auch der 3D-Viewer zeichnet (EIN RWall je Materiallage/Achsen-
 //     Teilstück, bereits mit End-Cuts/Gehrungen/Decken-Dominanz aufgelöst).
 //     Bänder mit Öffnungs-`holes` werden über den gemeinsamen Loch-Ausschnitt-
-//     Generator (`plan/wallMeshCut.ts`, TS-Port von render3ds Gitter-Zerlegung
+//     Generator (`plan/wallMeshCut.ts` → Rust-Kern, Gitter-Zerlegung wie render3ds
 //     `extrude_layer_segment_with_holes`) ÖFFNUNGSGENAU trianguliert — die
 //     Fenster/Türen sind sichtbar ausgestanzt inkl. Laibungsflächen, genau wie
 //     im 3D-Viewer. Lochlose Bänder bleiben die klassische geteilte 8-Ecken-Box.
@@ -39,7 +39,7 @@ import type { Project, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
 import { pickGeometry } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
-import { wallCutMesh } from "../plan/wallMeshCut";
+import { wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
 import { triangulate } from "../plan/glPlan/glPlanCompile";
 
 /**
@@ -67,7 +67,7 @@ function sanitizeName(id: string): string {
 
 /**
  * Die 6 Quader-Seiten als Eckpunkt-Quadrupel (Index-Bits: bit0=Achse −/+,
- * bit1=Höhe −/+, bit2=Dicke −/+ — dieselbe Konvention wie `emitOpeningGlass`/
+ * bit1=Höhe −/+, bit2=Dicke −/+ — dieselbe Konvention wie `emitOpeningMeshes`/
  * `selectionHighlightLines` in toWalls3d.ts), in nach AUSSEN gewundener
  * Reihenfolge (für ein rechtshändiges Dreibein Achse×Höhe=Dicke-Normale, wie
  * es die Wandbox-Konstruktion unten aufspannt). Jedes Quadrupel wird zu 2
@@ -85,14 +85,13 @@ const BOX_QUADS: Array<[number, number, number, number]> = [
 /**
  * Hängt EIN Wand-Schicht-Band (`RWall`, siehe toWalls3d.ts) an eine Mesh-Gruppe
  * an: hat das Band echte Öffnungs-`holes`, wird das öffnungsgenaue Loch-Ausschnitt-
- * Mesh (siehe {@link wallCutMesh}) verwendet — die Fenster/Türen sind sichtbar
- * ausgestanzt inkl. Laibungen, exakt wie im 3D-Viewer. Ohne Löcher bleibt es die
- * klassische, geteilte 8-Ecken-Box ({@link pushWallBox}) — bitgleich zum
- * bisherigen Verhalten (Joins/Gehrungen stecken schon in `start`/`end`).
+ * Mesh `cut` (vorab für alle Bänder über {@link wallCutMeshes}) verwendet — die
+ * Fenster/Türen sind sichtbar ausgestanzt inkl. Laibungen, exakt wie im 3D-Viewer.
+ * Ohne Löcher bleibt es die klassische, geteilte 8-Ecken-Box ({@link pushWallBox})
+ * (Joins/Gehrungen stecken schon in `start`/`end`).
  */
-function pushWall(group: MeshGroup, w: RWall): void {
-  if (w.holes && w.holes.length > 0) {
-    const cut = wallCutMesh(w);
+function pushWall(group: MeshGroup, w: RWall, cut: CutMesh | undefined): void {
+  if (cut) {
     const base = group.positions.length / 3;
     for (const p of cut.positions) group.positions.push(p);
     for (const idx of cut.indices) group.indices.push(base + idx);
@@ -221,6 +220,10 @@ function buildGroups(project: Project): MeshGroup[] {
   // Wände: alle Schicht-Bänder DERSELBEN Wand-Id in EINE Gruppe (mehrere
   // Materiallagen ergeben mehrere Boxen im selben Bauteil-Vorkommen).
   const wallGroups = new Map<string, MeshGroup>();
+  // Loch-Ausschnitte aller gelochten Bänder in EINEM Kern-Aufruf.
+  const holed = walls.filter((w) => w.holes && w.holes.length > 0);
+  const cuts = new Map<RWall, CutMesh>();
+  wallCutMeshes(holed).forEach((m, i) => cuts.set(holed[i], m));
   for (const w of walls) {
     let g = wallGroups.get(w.wallId);
     if (!g) {
@@ -228,7 +231,7 @@ function buildGroups(project: Project): MeshGroup[] {
       wallGroups.set(w.wallId, g);
       groups.push(g);
     }
-    pushWall(g, w);
+    pushWall(g, w, cuts.get(w));
   }
 
   // Decken: ein Prisma je Decke.

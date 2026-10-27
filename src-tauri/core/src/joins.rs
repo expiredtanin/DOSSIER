@@ -189,7 +189,7 @@ pub fn normalize(a: Vec2) -> Vec2 {
 }
 
 /// `Math.round` (halbe Werte nach +∞).
-fn js_round(x: f64) -> f64 {
+pub fn js_round(x: f64) -> f64 {
     if !x.is_finite() {
         return x;
     }

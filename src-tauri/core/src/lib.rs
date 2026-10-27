@@ -20,6 +20,8 @@ pub mod wall_bands;
 pub mod room_area;
 pub mod room_boundary;
 pub mod polygon_holes;
+pub mod openings3d;
+pub mod wall_mesh_cut;
 
 #[cfg(feature = "web")]
 mod web;
