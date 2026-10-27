@@ -201,6 +201,9 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[G7] Robuste Booleans bei bündigen Flächen** — wächst mit jeder Phase. · L (laufend)
 - ✅ **[G8] Abzugskörper (senkrechte Prismen)** — Grundriss, Schnitt, 3D, STEP. Offen: Ansicht,
   Schraffur-Deckel im 3D-Live-Schnitt.
+- ○ **[G10] render2d-Punkte f32** (neu 27.10., Fund aus [K3b]): `render2d::types::Scene` speichert Punkte
+  als f32 — bei LV95-Weltkoordinaten (~2.6e6 m) nur ~0.25 m Auflösung. Prüfen, ob der WASM-Pfad im Browser
+  Weltkoordinaten bekommt; sonst Ursprungsverschiebung wie im GPU-Pfad (`origin`) oder f64 in `Scene`. · S
 - ○ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
   paarweise Gehrung der Unterseite nicht exakt (Restlücke < 0.01 m²); solche Dächer gehen als nicht
   geschlossenes Face-Set ins IFC. · S–M
