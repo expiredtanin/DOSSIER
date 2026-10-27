@@ -13,7 +13,7 @@ describe("CLAUDE.md", () => {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
     for (const m of text.matchAll(/`((?:src|scripts|src-tauri)\/[A-Za-z0-9_./-]+?)`/g)) {
       const p = m[1].replace(/\/$/, "");
-      if (/[*…]/.test(p) || p.includes(" ")) continue;
+      if (/[*…]/.test(p) || p.includes(" ") || /\/target\//.test(p)) continue; // Build-Ausgaben ausnehmen
       expect(existsSync(join(process.cwd(), p)), `Pfad fehlt: ${p}`).toBe(true);
     }
     for (const m of text.matchAll(/npm run ([a-z0-9:]+)/g)) {
