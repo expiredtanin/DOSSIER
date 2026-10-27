@@ -367,6 +367,19 @@ const swapLine = (l: [Vec2, Vec2]): [Vec2, Vec2] => [swap2(l[0]), swap2(l[1])];
  * transponiert.
  */
 export function roofGeometry(roof: Roof, eavesZ: number): RoofGeometry {
+  // Memo je Dach-Objekt: Dächer sind immutabel (structural sharing), die Berechnung (Skelett über
+  // polygon-clipping) kostet ~50 ms je Dach und wird je Ableitung (3D, Schnitt, Pick, Highlight …)
+  // mehrfach gebraucht — vorher rechnete jeder Aufruf neu (projectToModel3d: ~550 ms bei 10 Dächern).
+  const hit = roofGeometryCache.get(roof);
+  if (hit && hit.eavesZ === eavesZ) return hit.geo;
+  const geo = roofGeometryUncached(roof, eavesZ);
+  roofGeometryCache.set(roof, { eavesZ, geo });
+  return geo;
+}
+
+const roofGeometryCache = new WeakMap<Roof, { eavesZ: number; geo: RoofGeometry }>();
+
+function roofGeometryUncached(roof: Roof, eavesZ: number): RoofGeometry {
   // Walmdach über einem rechtwinkligen, nicht-rechteckigen Grundriss (L/T/U …):
   // echte Flächen mit Graten und Kehlen statt Bounding-Box (s. roofSkeleton.ts).
   // Zeltdach/Mansard-Zelt auf L/T/U: eine einzelne Spitze gibt es dort nicht — sinnvolles
