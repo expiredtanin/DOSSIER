@@ -37,3 +37,4 @@ src-tauri/assets/native3d_walls.json
 /docs/research/*.md
 /docs/welle-c-hlr-spike/*.md
 dist-test/
+dist-cli/

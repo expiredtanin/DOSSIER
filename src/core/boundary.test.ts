@@ -99,7 +99,7 @@ describe("Kern/Hülle-Grenze", () => {
     const f = join(SRC, "core", "index.ts");
     for (const i of importsOf(f)) {
       const tt = i.target?.split("/")[0];
-      expect(tt === undefined || FACADE_DIRS.has(tt)).toBe(true);
+      expect(tt === undefined || FACADE_DIRS.has(tt) || i.target === "core/extra").toBe(true);
     }
   });
 });

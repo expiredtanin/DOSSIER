@@ -307,3 +307,5 @@ export {
   selectionHighlightLines,
   wallMaterialColorMaps,
 } from "../plan/toWalls3d";
+
+export * from "./extra";

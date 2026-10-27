@@ -53,7 +53,7 @@ def alias(n, mod):
 
 lines = ['// Fassade des Kerns für die Hülle (Phase A der Kern/UI-Trennung, docs/core-ui-split.md).',
          '// Dünne Durchreichung, Namen 1:1; die Hülle importiert Plan-/Geometrie-Funktionen nur noch von hier.',
-         '// Erzeugt mit scripts/core-facade.py — neue Einträge von Hand ergänzen.', '']
+         '// Erzeugt mit scripts/core-facade.py; Handgepflegtes steht in ./extra.', '']
 bymod = collections.defaultdict(list)
 for n, mods in uses.items():
     for mod, is_t in mods.items(): bymod[mod].append((n, is_t))
@@ -66,6 +66,8 @@ for mod in sorted(bymod):
         items.append(('type ' if is_t else '') + core)
     lines.append('export {\n  ' + ',\n  '.join(items) + f',\n}} from "{rel}";')
     lines.append('')
+lines.append('export * from "./extra";')
+lines.append('')
 os.makedirs('src/core', exist_ok=True)
 if '--dry' not in sys.argv:
     open('src/core/index.ts', 'w').write('\n'.join(lines))

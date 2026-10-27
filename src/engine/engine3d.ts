@@ -8,6 +8,8 @@
 // Bewusst schwach typisiert (`any`): das echte `.d.ts` entsteht erst beim
 // wasm-Build; die Aufrufer legen ihre eigene Minimal-Schnittstelle darüber.
 
+import { wasmInitArg } from "./wasmSource";
+
 let enginePromise: Promise<any> | null = null;
 
 /** Lädt das WASM-Modul einmalig und gibt das initialisierte Modul zurück. */
@@ -15,7 +17,7 @@ export function loadEngine3d(): Promise<any> {
   if (!enginePromise) {
     enginePromise = (async () => {
       const mod: any = await import("./pkg3d/render3d.js");
-      await mod.default(); // lädt render3d_bg.wasm
+      await mod.default(await wasmInitArg("render3d")); // lädt render3d_bg.wasm
       return mod;
     })();
   }

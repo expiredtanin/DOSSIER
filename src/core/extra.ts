@@ -1,0 +1,14 @@
+// Von Hand gepflegter Teil der Fassade: Kern-Einstiege, die nicht (nur) die Hülle braucht — Datei-
+// Format, Exporte, WASM-Quelle. Genutzt von `dossier-cli` (src/cli), das NUR `src/core` importiert.
+
+export { parseProjectFile, serializeProject, PROJECT_FORMAT_VERSION } from "../io/projectFormat";
+export { exportIfcSpf } from "../export/exportIfc";
+export { buildPlanDxf } from "../export/exportDxf";
+export { exportScheduleCsv } from "../export/exportSchedule";
+export { exportObj, exportStl } from "../export/exportMesh";
+export { exportProjectStep } from "../export/exportStep";
+export { planToSvgString } from "../export/planToSvgString";
+export { setWasmBytesProvider } from "../engine/wasmSource";
+export { applyOps, diffToOps, validateProject, validateOps } from "./ops";
+export type { CoreOp } from "./ops";
+export type { Project, DrawingLevel } from "../model/types";

@@ -1,9 +1,11 @@
+import { wasmInitArg } from "./wasmSource";
+
 let modulePromise: Promise<any> | null = null;
 
 async function getModule(): Promise<any> {
   if (!modulePromise) {
     modulePromise = import("./pkgTruck/trucksolid.js").then(async (m: any) => {
-      await m.default();
+      await m.default(await wasmInitArg("trucksolid"));
       return m;
     });
   }
