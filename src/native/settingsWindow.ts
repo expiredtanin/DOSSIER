@@ -5,8 +5,7 @@
 // Sync-/Command-Paar statt eines generischen Proxys über 27 Handler.
 //
 // Hauptfenster → Einstellungs-Fenster: „settings-sync-state" mit
-//   { marqueeColor, snapColor, referenceElevationMasl, rendererMode,
-//     webGpuAvailable, layout } bei jeder Änderung + auf „settings-window-ready".
+//   { marqueeColor, snapColor, referenceElevationMasl, offline, layout } bei jeder Änderung + auf „settings-window-ready".
 // Einstellungs-Fenster → Hauptfenster: „settings-command" mit
 //   { name, args } — dieselbe {name,args}-RPC-Form wie resource-command.
 //
@@ -15,7 +14,6 @@
 import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "./projectFile";
 import type { LayoutState } from "../panels/types";
-import type { RendererMode } from "../ui/StatusBar";
 import type { ThemeMode } from "../theme/themeMode";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 
@@ -27,8 +25,7 @@ export interface SettingsSyncState {
   marqueeColor: string;
   snapColor: string;
   referenceElevationMasl: number | undefined;
-  rendererMode: RendererMode;
-  webGpuAvailable: boolean;
+  offline: boolean;
   layout: LayoutState;
 }
 
@@ -38,7 +35,7 @@ export interface SettingsCommandHandlers {
   onMarqueeColorChange: (hex: string) => void;
   onSnapColorChange: (hex: string) => void;
   onReferenceElevationChange: (n: number | undefined) => void;
-  onRendererModeChange: (mode: RendererMode) => void;
+  onOfflineChange: (offline: boolean) => void;
   onApplyLayout: (layout: LayoutState) => void;
 }
 

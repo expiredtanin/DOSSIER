@@ -15,6 +15,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { netFetch } from "../net/net";
 import JSZip from "jszip";
 import type { ComponentMaterial } from "../model/types";
 
@@ -132,7 +133,7 @@ export async function searchMaterials(
   if (!query || !query.trim()) params.set("sort", "Popular");
 
   const url = proxyUrl(`/api/v2/full_json?${params.toString()}`);
-  const res = await fetch(url, { signal });
+  const res = await netFetch(url, { signal });
   if (!res.ok) {
     throw new Error(`ambientCG-API HTTP ${res.status}`);
   }
@@ -230,7 +231,7 @@ export async function fetchMaterialMaps(
 ): Promise<FetchedMaterial> {
   const file = `${id}_${resolution}-JPG.zip`;
   const url = proxyUrl(`/get?file=${encodeURIComponent(file)}`);
-  const res = await fetch(url, { signal });
+  const res = await netFetch(url, { signal });
   if (!res.ok) {
     throw new Error(`ambientCG-Download HTTP ${res.status}`);
   }

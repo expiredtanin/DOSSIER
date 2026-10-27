@@ -15,7 +15,6 @@ import { ACCENT_SWATCHES } from "../theme/accents";
 import { ColorHexField } from "./ColorHexField";
 import { LayoutMenu } from "./LayoutMenu";
 import { APP_VERSION } from "./TopBar";
-import type { RendererMode } from "./StatusBar";
 import type { LayoutState } from "../panels/types";
 import type { ThemeMode } from "../theme/themeMode";
 import { checkForUpdate, getUpdateSnoozeUntil, setUpdateSnooze } from "../update/checkForUpdate";
@@ -74,15 +73,9 @@ export interface SettingsDialogProps {
    * dieses eine Feld + sein Setter (schmale Grenzfläche, s. `windowed`). */
   referenceElevationMasl: number | undefined;
   onReferenceElevationChange: (n: number | undefined) => void;
-  /** Aktuell gewählter Plan-Renderer (aus dem `?engine`-URL-Param abgeleitet). */
-  rendererMode: RendererMode;
-  /** Ist `navigator.gpu` vorhanden? Steuert, ob „Nordstern" wählbar ist. */
-  webGpuAvailable: boolean;
-  /**
-   * Renderer wechseln (setzt/entfernt den `engine`-URL-Param und lädt neu — kein
-   * Live-Remount der Renderer-Hooks).
-   */
-  onRendererModeChange: (mode: RendererMode) => void;
+  /** Offline-Modus: sperrt alle entfernten Abrufe (Materialbibliothek, swisstopo, OSM). */
+  offline: boolean;
+  onOfflineChange: (offline: boolean) => void;
   /** Arbeitsumgebung (Fenster-/Dock-Layouts) — LayoutMenu wird HIER gerendert
    * (nicht mehr als vorgefertigtes ReactNode hereingereicht: JSX ist über eine
    * Fenstergrenze nicht serialisierbar, s. `windowed`). */
@@ -124,9 +117,8 @@ export function SettingsDialog({
   onSnapColorChange,
   referenceElevationMasl,
   onReferenceElevationChange,
-  rendererMode,
-  webGpuAvailable,
-  onRendererModeChange,
+  offline,
+  onOfflineChange,
   layout,
   onApplyLayout,
   onAliasOverridesChange,
@@ -227,30 +219,12 @@ export function SettingsDialog({
           </section>
 
           <section className="imp-section">
-            <div className="imp-section-title">{t("status.renderer")}</div>
-            <span className="sb-renderer-toggle" role="group" aria-label={t("status.renderer")}>
-              <button
-                type="button"
-                className={`sb-renderer-btn${rendererMode === "webgl2" ? " active" : ""}`}
-                aria-pressed={rendererMode === "webgl2"}
-                onClick={() => onRendererModeChange("webgl2")}
-              >
-                {t("status.rendererWebgl")}
-              </button>
-              <button
-                type="button"
-                className={`sb-renderer-btn${rendererMode === "wasm" ? " active" : ""}`}
-                aria-pressed={rendererMode === "wasm"}
-                disabled={!webGpuAvailable}
-                title={webGpuAvailable ? undefined : t("status.rendererWasmUnavailable")}
-                onClick={() => onRendererModeChange("wasm")}
-              >
-                {t("status.rendererWasm")}
-              </button>
-            </span>
-            {!webGpuAvailable && (
-              <div className="imp-note">{t("status.rendererWasmUnavailable")}</div>
-            )}
+            <div className="imp-section-title">{t("settings.section.network")}</div>
+            <label className="settings-check">
+              <input type="checkbox" checked={offline} onChange={(e) => onOfflineChange(e.target.checked)} />
+              {t("settings.offline")}
+            </label>
+            <div className="imp-note">{t("settings.offline.hint")}</div>
           </section>
 
           <section className="imp-section">

@@ -93,9 +93,8 @@ export function SettingsWindowApp() {
       onSnapColorChange={handlers.onSnapColorChange}
       referenceElevationMasl={state.referenceElevationMasl}
       onReferenceElevationChange={handlers.onReferenceElevationChange}
-      rendererMode={state.rendererMode}
-      webGpuAvailable={state.webGpuAvailable}
-      onRendererModeChange={handlers.onRendererModeChange}
+      offline={state.offline}
+      onOfflineChange={handlers.onOfflineChange}
       layout={state.layout}
       onApplyLayout={handlers.onApplyLayout}
       onClose={onClose}

@@ -9,6 +9,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheiten: Meter.
 
+import { netFetch } from "../net/net";
 import { bboxAround, makeOrigin } from "./lv95";
 import type { GeoOrigin, LV95 } from "./lv95";
 import { viaProxy } from "./geoContext";
@@ -132,7 +133,7 @@ export async function decodeImageToRgba(dataUrl: string): Promise<DecodedImage |
     return null;
   }
   try {
-    const res = await fetch(dataUrl);
+    const res = await netFetch(dataUrl);
     const blob = await res.blob();
     const bmp = await createImageBitmap(blob);
     const canvas = new OffscreenCanvas(bmp.width, bmp.height);
@@ -168,7 +169,7 @@ export async function fetchSwissImage(
   const max = { x: bboxLv95[2] - origin.e, y: bboxLv95[3] - origin.n };
 
   try {
-    const res = await fetch(viaProxy(buildSwissImageUrl(bboxLv95, px, px)));
+    const res = await netFetch(viaProxy(buildSwissImageUrl(bboxLv95, px, px)));
     if (!res.ok) return { origin, dataUrl: null, min, max };
     // WMS liefert bei Fehlern manchmal eine XML-Fehlermeldung statt eines Bildes.
     const mime = res.headers.get("content-type") ?? "";

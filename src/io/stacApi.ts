@@ -6,6 +6,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheiten: Meter.
 
+import { netFetch } from "../net/net";
 import JSZip from "jszip";
 import { viaProxy } from "./geoContext";
 
@@ -34,7 +35,7 @@ export async function stacQuery(
   const url =
     `${STAC_BASE}/collections/${collectionId}/items` +
     `?bbox=${bbox.west},${bbox.south},${bbox.east},${bbox.north}&limit=${limit}`;
-  const res = await fetch(viaProxy(url));
+  const res = await netFetch(viaProxy(url));
   if (!res.ok) throw new Error(`STAC-Abfrage fehlgeschlagen (${res.status})`);
   const data = (await res.json()) as {
     features?: {
@@ -115,7 +116,7 @@ function pickZipEntry(
  *  Netzwerkfehler oder Grössenüberschreitung; wirft nie. */
 async function fetchAssetWithinLimit(asset: StacAsset): Promise<Response | null> {
   if (asset.size != null && asset.size > MAX_ASSET_BYTES) return null;
-  const res = await fetch(viaProxy(asset.href));
+  const res = await netFetch(viaProxy(asset.href));
   if (!res.ok) return null;
   // STAC-Metadaten (`file:size`) fehlen manchmal (leeres `file:size`-Feld,
   // z. B. bei swissBUILDINGS3D v3) — dann greift die Prüfung oben NICHT, und

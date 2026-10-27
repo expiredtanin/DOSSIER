@@ -10,6 +10,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheiten: Meter.
 
+import { netFetch } from "../net/net";
 import { lv95BboxToWgs84, makeOrigin, wgs84ToLocal } from "./lv95";
 import type { GeoOrigin, LV95 } from "./lv95";
 import { bboxAround } from "./lv95";
@@ -145,7 +146,7 @@ export async function fetchOsm(
   const bbox = lv95BboxToWgs84(bboxAround(center, radius));
   const query = buildQuery(bbox, sel);
 
-  const res = await fetch(viaProxy(OVERPASS), {
+  const res = await netFetch(viaProxy(OVERPASS), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: "data=" + encodeURIComponent(query),

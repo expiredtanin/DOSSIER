@@ -1,0 +1,31 @@
+{
+ "ui/ExportSaveDialog.tsx": [
+  "placeholder=\"modell\""
+ ],
+ "ui/LayoutSheet.tsx": [
+  "chevron_left",
+  "restart_alt"
+ ],
+ "ui/PenColorField.tsx": [
+  "placeholder=\"#rrggbb\""
+ ],
+ "ui/TopBar.tsx": [
+  "React · Vite — MIT"
+ ],
+ "ui/UnsavedChangesDialog.tsx": [
+  "Promise"
+ ],
+ "ui/WindowControls.tsx": [
+  "Promise"
+ ],
+ "viewport/Wasm3DViewport.tsx": [
+  "content_cut"
+ ],
+ "views/plan/PlanView.tsx": [
+  "createValueStore"
+ ],
+ "views/plan/planView/PlanRulers.tsx": [
+  "t.vbX",
+  "t.vbY"
+ ]
+}

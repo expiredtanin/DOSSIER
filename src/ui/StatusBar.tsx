@@ -13,9 +13,6 @@ import { useEffect, useRef, useState } from "react";
 import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
 
-/** Plan-Renderer-Wahl, gespiegelt aus dem `?engine`-URL-Param (siehe PlanView). */
-export type RendererMode = "webgl2" | "wasm";
-
 export interface StatusBarProps {
   /** Kontextueller Werkzeug-Hinweis links (z. B. „Auswahl"). */
   hint: string;

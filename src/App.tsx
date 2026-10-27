@@ -104,7 +104,8 @@ import {
 import { TextEditorDialog } from "./ui/TextEditorDialog";
 import { RoomStampEditor } from "./panels/RoomStampEditor";
 import { defaultRoomStamp } from "./model/roomStamp";
-import { StatusBar, type RendererMode } from "./ui/StatusBar";
+import { StatusBar } from "./ui/StatusBar";
+import { isOffline, setOffline } from "./net/net";
 import { getTool } from "./tools/tools";
 import { computeSnap } from "./tools/snapping";
 import {
@@ -2662,30 +2663,11 @@ export default function App() {
   // aktiv. Sonst sind Cursor/Zoom bedeutungslos (PlanView ist nicht montiert →
   // das Handle ist null, Aktionen sind No-Ops).
   const planActive = activeLevel.kind === "floor" && viewType === "grundriss";
-  // Plan-Renderer-Umschalter (Statusleiste): reines Ableiten/Setzen des `engine`-
-  // URL-Params (siehe PlanView.tsx `wantWasm`); die Renderer-Auswahl selbst bleibt
-  // dort. Ein Wechsel lädt die Seite neu — kein Live-Remount der Renderer-Hooks.
-  // Persistiert in localStorage, damit die Wahl einen Neustart ohne URL-Param
-  // übersteht (z.B. die Electron-App startet immer auf der Basis-URL).
-  const RENDERER_STORAGE_KEY = "cad.rendererMode";
-  const webGpuAvailable = typeof navigator !== "undefined" && "gpu" in navigator;
-  const rendererMode: RendererMode = (() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("engine");
-    if (fromUrl === "wasm") return "wasm";
-    if (fromUrl === "webgl2") return "webgl2";
-    const fromStorage = window.localStorage.getItem(RENDERER_STORAGE_KEY);
-    if (fromStorage === "webgl2") return "webgl2";
-    if (fromStorage === "wasm") return "wasm";
-    // Keine explizite Wahl (weder URL noch localStorage) — Nordstern (WASM)
-    // ist Standard, sofern WebGPU verfügbar ist; sonst WebGL2 als Fallback.
-    return webGpuAvailable ? "wasm" : "webgl2";
-  })();
-  const setRendererMode = (mode: RendererMode) => {
-    window.localStorage.setItem(RENDERER_STORAGE_KEY, mode);
-    const url = new URL(window.location.href);
-    if (mode === "wasm") url.searchParams.set("engine", "wasm");
-    else url.searchParams.delete("engine");
-    window.location.assign(url.toString());
+  // Offline-Modus (Einstellungen → Allgemein): sperrt alle entfernten Abrufe (src/net/net.ts).
+  const [offline, setOfflineState] = useState<boolean>(() => isOffline());
+  const onOfflineChange = (v: boolean) => {
+    setOffline(v);
+    setOfflineState(v);
   };
 
   // Hell/Dunkel (Einstellungen → Darstellung). Standard Hell (styles.css);
@@ -2701,8 +2683,7 @@ export default function App() {
       marqueeColor,
       snapColor,
       referenceElevationMasl: project.referenceElevationMasl,
-      rendererMode,
-      webGpuAvailable,
+      offline,
       layout,
     },
     {
@@ -2711,7 +2692,7 @@ export default function App() {
       onSnapColorChange: setSnapColor,
       onReferenceElevationChange: (n) =>
         setProject((p) => ({ ...p, referenceElevationMasl: n })),
-      onRendererModeChange: setRendererMode,
+      onOfflineChange,
       onApplyLayout: (l) => setLayout(reconcileLayout(l)),
     },
   );
@@ -3896,9 +3877,8 @@ export default function App() {
           onReferenceElevationChange={(n) =>
             setProject((p) => ({ ...p, referenceElevationMasl: n }))
           }
-          rendererMode={rendererMode}
-          webGpuAvailable={webGpuAvailable}
-          onRendererModeChange={setRendererMode}
+          offline={offline}
+          onOfflineChange={onOfflineChange}
           layout={layout}
           onApplyLayout={(l) => setLayout(reconcileLayout(l))}
           onAliasOverridesChange={setAliasOverrides}

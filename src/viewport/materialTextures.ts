@@ -14,6 +14,7 @@
  * dass eine explizite Zuordnungstabelle zwischen JS und Rust wandern muss.
  */
 
+import { netFetch } from "../net/net";
 import type { Project } from "../model/types";
 import { wallMaterialColorMaps } from "../core";
 
@@ -76,7 +77,7 @@ export async function decodeMaterialTextures(
 async function loadImage(url: string): Promise<CanvasImageSource> {
   if (typeof createImageBitmap === "function" && typeof fetch === "function") {
     try {
-      const res = await fetch(url);
+      const res = await netFetch(url);
       const blob = await res.blob();
       return await createImageBitmap(blob);
     } catch {

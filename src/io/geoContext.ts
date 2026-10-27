@@ -7,6 +7,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { allowHost } from "../net/net";
 import Delaunator from "delaunator";
 import type { ContextObject, Contour, ImportedMesh } from "../model/types";
 import { GEO_CATEGORY_DEFS } from "../model/contextCategories";
@@ -285,5 +286,6 @@ export function geoProxyBase(): string {
  */
 export function viaProxy(url: string): string {
   const base = geoProxyBase();
+  if (base) allowHost(base);
   return base ? `${base}?u=${encodeURIComponent(url)}` : url;
 }

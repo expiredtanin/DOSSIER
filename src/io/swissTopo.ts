@@ -17,6 +17,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheiten: Meter.
 
+import { netFetch } from "../net/net";
 import { bboxAround, makeOrigin, wgs84ToLv95 } from "./lv95";
 import type { GeoOrigin, LV95 } from "./lv95";
 import type { GeoFeature } from "./geoContext";
@@ -50,7 +51,7 @@ export async function geocode(
     `?searchText=${encodeURIComponent(q)}` +
     `&type=locations&sr=2056&limit=${limit}`;
 
-  const res = await fetch(viaProxy(url));
+  const res = await netFetch(viaProxy(url));
   if (!res.ok) throw new Error(`Geocode fehlgeschlagen (${res.status})`);
   const data = (await res.json()) as {
     results?: {
@@ -120,7 +121,7 @@ export async function fetchBuildings(
     `&layers=all:ch.swisstopo.vec25-gebaeude` +
     `&returnGeometry=true&sr=2056&limit=200`;
 
-  const res = await fetch(viaProxy(url));
+  const res = await netFetch(viaProxy(url));
   if (!res.ok) throw new Error(`Gebäude-Abruf fehlgeschlagen (${res.status})`);
   const data = (await res.json()) as {
     results?: { geometry?: EsriPolygon }[];
