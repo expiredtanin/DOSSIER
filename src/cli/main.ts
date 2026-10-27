@@ -9,6 +9,7 @@
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
@@ -205,6 +206,9 @@ export async function run(argv: string[]): Promise<number> {
       out(args, r.text, `${project.name || "projekt"}.stp`);
       return 0;
     }
+    case "model3d":
+      out(args, JSON.stringify(projectToModel3d(project)), `${project.name || "projekt"}.model3d.json`);
+      return 0;
     case "bench": {
       const runs = Number(args.flags.get("runs") ?? 10);
       const floor = findLevel(project, ["floor"], undefined);

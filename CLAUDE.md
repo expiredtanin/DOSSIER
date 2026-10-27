@@ -53,5 +53,7 @@ Co-Authored-By-Zeile. Interne Planung (gitignored): `docs/*.md`, `PENDENZEN.md`.
 ## Ergebnis ansehen
 
 Plan/Schnitt/Ansicht headless: `node dist-cli/dossier-cli.mjs projekt.obp plan --out eg.svg` und
-Chromium-Screenshot. 3D braucht WebGPU (headless nicht verfügbar) — dort dem Nutzer die Prüfung nennen.
+Chromium-Screenshot. **3D headless:** `dossier-cli … model3d --out m.json`, dann
+`src-tauri/target/release/render_png m.json out.png --view iso --style shaded-edges` (nativ über Metal;
+vorher `npm run build:render-png`) und das PNG ansehen — kein Nutzer-Test nötig.
 Headless-Browser-Tests laufen gegen `dist-test` auf Port 5188 (`vite build --outDir dist-test`).

@@ -33,6 +33,9 @@ default = []
 # puffer, View-Projektions-Uniform und ein Directional-Light im Fragment-Shader.
 render = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
 
+# Headless-PNG-Renderer (`bin/render_png.rs`): GPU-Schicht + JSON-Modell, ohne Fenster.
+png = ["render", "dep:serde_json"]
+
 # Fenster-Spike (winit) inkl. lauffaehigem Binary mit Orbit-Kamera. Braucht
 # Wayland/X11 + eine Display-Session zur visuellen Verifikation.
 window = ["render", "dep:winit", "dep:env_logger"]
@@ -92,6 +95,11 @@ naga = { version = "29", features = ["wgsl-in"] }
 
 # Der Fenster-Spike ist nur mit Feature "window" verfuegbar; ohne das Feature
 # wird das Binary aus dem Build ausgeschlossen (required-features).
+[[bin]]
+name = "render_png"
+path = "src/bin/render_png.rs"
+required-features = ["png"]
+
 [[bin]]
 name = "spike3d"
 path = "src/bin/spike3d.rs"
