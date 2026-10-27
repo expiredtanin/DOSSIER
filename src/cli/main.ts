@@ -9,6 +9,7 @@
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
@@ -24,8 +25,12 @@ import {
   exportScheduleCsv,
   exportStl,
   generateElevationPlan,
+  diffToOps,
+  applyOps,
   generatePlan,
   generateSectionPlan,
+  planToRenderScene,
+  projectToModel3d,
   parseProjectFile,
   planToSvgString,
   serializeProject,
@@ -198,6 +203,34 @@ export async function run(argv: string[]): Promise<number> {
       const r = await exportProjectStep(project, project.name || "projekt");
       if (r.skipped.length) process.stderr.write(`${r.skipped.length} Körper übersprungen/ungeschnitten.\n`);
       out(args, r.text, `${project.name || "projekt"}.stp`);
+      return 0;
+    }
+    case "bench": {
+      const runs = Number(args.flags.get("runs") ?? 10);
+      const floor = findLevel(project, ["floor"], undefined);
+      const sec = findLevel(project, ["section"], undefined);
+      const elev = findLevel(project, ["elevation"], undefined);
+      const rows: Array<[string, number]> = [];
+      const time = async (name: string, f: () => unknown | Promise<unknown>, n = runs) => {
+        await f(); // Aufwärmen (füllt Caches wie roofGeometry)
+        const t0 = performance.now();
+        for (let i = 0; i < n; i++) await f();
+        rows.push([name, (performance.now() - t0) / n]);
+      };
+      if (floor) {
+        await time("generatePlan", () => generatePlan(project, floor.id, allCodes));
+        const plan = generatePlan(project, floor.id, allCodes);
+        await time("planToRenderScene", () => planToRenderScene(plan));
+        await time("planToSvgString", () => planToSvgString(plan, { scaleDenominator: scale }));
+      }
+      await time("projectToModel3d", () => projectToModel3d(project));
+      if (sec) await time("computeSection", () => computeSection(project, sec), Math.max(3, runs / 2));
+      if (elev) await time("generateElevationPlan", () => generateElevationPlan(project, elev), Math.max(3, runs / 2));
+      if (project.walls.length) {
+        const moved = { ...project, walls: [{ ...project.walls[0], height: (project.walls[0].height ?? 2.6) + 0.1 }, ...project.walls.slice(1)] };
+        await time("Op: diff+apply (1 Wand)", () => applyOps(project, diffToOps(project, moved)), runs * 20);
+      }
+      for (const [n, ms] of rows) process.stdout.write(`${n.padEnd(28)} ${ms.toFixed(2).padStart(9)} ms\n`);
       return 0;
     }
     default:

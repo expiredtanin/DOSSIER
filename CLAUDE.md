@@ -1,0 +1,57 @@
+# Dossier — Arbeitsregeln für Agenten
+
+CAAD-Desktop-App (Tauri/macOS, Electron/Linux). Ein semantisches Modell (`Project`) ist die einzige
+Wahrheit; Grundriss, Schnitt, Ansicht und 3D werden daraus abgeleitet. Anzeige nur über die zwei
+Rust-Engines `render2d` und `render3d` (WebGPU/Metal) — kein three.js, kein WebGL, kein Browser-Betrieb.
+
+## Vor jedem Abschluss
+
+```
+npm run check            # tsc, vitest, cargo test aller 5 Crates  (--fast: ohne Rust)
+npm run build:cli        # nur nötig, wenn src/cli oder src/core geändert wurden
+```
+
+WASM-Pakete (`src/engine/pkg*`) sind nicht im Repo: vor vitest mit `npm run build:truck|engine3d|engine|kernel2d|dwgimport`
+bauen. Test zuerst, dann Code. Ein Schritt endet mit grünen Tests und gelöschtem Altcode (keine Doppelspur).
+
+## Architektur (harte Grenze, vom Test `src/core/boundary.test.ts` geprüft)
+
+- **Kern**: `model/ geometry/ plan/ io/ export/ analysis/ materials/ text/ engine/ net/ core/` — importiert nie
+  `ui panels views menus editors viewport native tools state commands App`, nie React/Zustand/Tauri.
+- **Hülle** (UI/Interaktion/Darstellung) holt Funktionen aus `plan/` und `geometry/` nur über die Fassade
+  `src/core` (`index.ts` erzeugt von `scripts/core-facade.py`, Handgepflegtes in `core/extra.ts`).
+- **Das Projekt ändert sich nur über Ops** (`core/ops.ts`): `setProject(fn)` übersetzt die Änderung in
+  `CoreOp`s, validiert und wendet sie an. Ops sind JSON; NaN/doppelte ids werden zurückgerollt.
+- `dossier-cli` (`src/cli/main.ts`) importiert nur `../core`; `npm run build:cli` → `dist-cli/`.
+- Verschieben von Modulen: `scripts/move-modules.py alt=neu …` (schreibt alle Importe um).
+
+## Modulkarte
+
+| Ort | Inhalt |
+|---|---|
+| `src/model` | Typen (`types.ts`), Wand/Decke/Dach-Logik, Verbindungen, Ansichts-Typen (`viewTypes.ts`) |
+| `src/geometry` | reine Geometrie: Dach-Skelett (`roofSkeleton.ts`), kernel2d, Treppen, Räume |
+| `src/plan` | Ableitung: `generatePlan`, `toSection`, `toElevation`, `toWalls3d`, `toRenderScene`, `voids.ts` |
+| `src/views/plan` | React-Plan-Ansicht, Renderer-Hooks (native Metal / WASM-WebGPU) |
+| `src/viewport` | 3D-Viewport (`Wasm3DViewport`), Raycast, Griffe |
+| `src/state` | Zustands-Store (`projectSlice.ts`), Autosave, Export-/Datei-Aktionen |
+| `src/commands` | Befehle (Zustandsautomaten) + `registry.ts`; `tools/` Zeichenwerkzeuge |
+| `src/io`, `src/export` | Import/Export (DXF, IFC, STEP, OBJ, Swisstopo …), Projektformat (`projectFormat.ts`) |
+| `src/native` | Tauri-Adapter (Dateien, Fenster, Menü, Farbprofile) |
+| `src/net` | einziges Tor ins Netz (`netFetch`, Offline-Modus, Host-Liste) |
+| `src-tauri/render2d, render3d` | die zwei Anzeige-Engines (Rust → WASM/Metal) |
+| `src-tauri/trucksolid` | B-Rep (truck 0.6): Körper, Booleans, STEP, Kennwerte, Kollision |
+| `src-tauri/kernel2d, dwgimport` | 2D-Geometrie-Referenz, DWG-Import |
+
+## Konventionen
+
+Bezeichner englisch, Kommentare und UI-Text deutsch, UI-Text nur über `t()` (de + en; Test
+`src/i18n/untranslated.test.ts`). Intern Meter. Kein `window.alert/confirm/prompt` (im Tauri-WKWebView
+stumm) → `notify()` oder Overlay-Dialog. Entfernte Abrufe nur über `netFetch`. Commits deutsch, ohne
+Co-Authored-By-Zeile. Interne Planung (gitignored): `docs/*.md`, `PENDENZEN.md`.
+
+## Ergebnis ansehen
+
+Plan/Schnitt/Ansicht headless: `node dist-cli/dossier-cli.mjs projekt.obp plan --out eg.svg` und
+Chromium-Screenshot. 3D braucht WebGPU (headless nicht verfügbar) — dort dem Nutzer die Prüfung nennen.
+Headless-Browser-Tests laufen gegen `dist-test` auf Port 5188 (`vite build --outDir dist-test`).
