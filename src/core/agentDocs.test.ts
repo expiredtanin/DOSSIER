@@ -16,7 +16,7 @@ describe("CLAUDE.md", () => {
       if (/[*…]/.test(p) || p.includes(" ") || /\/target\//.test(p)) continue; // Build-Ausgaben ausnehmen
       expect(existsSync(join(process.cwd(), p)), `Pfad fehlt: ${p}`).toBe(true);
     }
-    for (const m of text.matchAll(/npm run ([a-z0-9:]+)/g)) {
+    for (const m of text.matchAll(/npm run ([a-z0-9:-]+)/g)) {
       expect(pkg.scripts[m[1]], `npm-Skript fehlt: ${m[1]}`).toBeTruthy();
     }
   });
