@@ -422,3 +422,30 @@ describe("Räume als IfcSpace", () => {
     expect(spf).toMatch(/IFCPROPERTYSINGLEVALUE\('SIA416',\$,IFCLABEL\('HNF'\),\$\)/);
   });
 });
+
+describe("Materialschichten über Bauteiltypen", () => {
+  const lines = (spf: string, type: string) => spf.split("\n").filter((l) => l.includes(`=${type}(`));
+  const idOf = (line: string) => line.slice(0, line.indexOf("="));
+  it("Wandtyp → IfcWallType mit IfcMaterialLayerSet, Wände über IfcRelDefinesByType", () => {
+    const p = fixtureProject();
+    p.components.push({ id: "d", name: "Dämmung", color: "#eee", hatchId: "none", joinPriority: 5 });
+    p.wallTypes[0].layers = [{ componentId: "d", thickness: 0.16 }, { componentId: "c", thickness: 0.24 }];
+    const spf = exportIfcSpf(p);
+    const types = lines(spf, "IFCWALLTYPE");
+    expect(types).toHaveLength(1);
+    expect(types[0]).toContain("'Aussenwand'");
+    const layers = lines(spf, "IFCMATERIALLAYER");
+    expect(layers.map((l) => l.match(/,(0\.\d+),/)?.[1]).slice(0, 2)).toEqual(["0.16", "0.24"]);
+    expect(lines(spf, "IFCMATERIAL").map((l) => l.match(/\('([^']*)'/)?.[1])).toEqual(["D\\X2\\00E4\\X0\\mmung", "C"]);
+    const walls = lines(spf, "IFCWALL").map(idOf);
+    const rel = lines(spf, "IFCRELDEFINESBYTYPE").find((l) => l.endsWith(`${idOf(types[0])});`))!;
+    for (const w of walls) expect(rel).toMatch(new RegExp(`${w}[,)]`));
+    const assoc = lines(spf, "IFCRELASSOCIATESMATERIAL");
+    expect(assoc.some((l) => l.includes(`(${idOf(types[0])})`))).toBe(true);
+  });
+  it("Deckentyp → IfcSlabType; gleiches Material nur einmal", () => {
+    const spf = exportIfcSpf(fixtureProject());
+    expect(lines(spf, "IFCSLABTYPE")).toHaveLength(1);
+    expect(lines(spf, "IFCMATERIAL")).toHaveLength(1);
+  });
+});

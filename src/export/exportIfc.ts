@@ -36,10 +36,10 @@
 //     ausgerichtete Bounding-Box der Kontrollpunkte bei "L"/"spiral") — die
 //     echte Stufengeometrie ist ausgelassen (siehe stairFootprint()).
 //
-//   Material-Layer (IfcMaterialLayerSet/-Usage) sind NICHT enthalten — die
-//   korrekte Direction/Offset-Semantik von IfcMaterialLayerSetUsage ließ sich
-//   ohne Gegenprüfung an einem echten Viewer nicht mit ausreichender Sicherheit
-//   umsetzen; Geometrie/Hierarchie hatten Vorrang (siehe Bericht/PENDENZEN).
+//   Material-Schichten: je Wand-/Deckentyp ein IfcWallType/IfcSlabType mit
+//   IfcMaterialLayerSet, die Exemplare erben ihn über IfcRelDefinesByType. KEIN
+//   IfcMaterialLayerSetUsage am Exemplar: Richtung/Versatz der Usage beziehen sich
+//   auf eine Achs-Darstellung, die das Wand-Mesh nicht hat.
 //
 //   GUIDs: deterministisch aus der Element-ID über einen 128-Bit-Hash (zwei
 //   FNV-1a-64-Läufe) + Standard-IFC-GUID-Kompression (Base64-Variante,
@@ -538,6 +538,53 @@ export function exportIfcSpf(projectIn: Project): string {
       `${S(guid)},#${ownerHistory},${S(name)},$,$,#${placementId},#${shapeId},$,${predefinedType ?? "$"}`,
     );
 
+  // ── Bauteiltypen mit Materialschichten ─────────────────────────────────
+  // Je Wand-/Deckentyp ein IfcWallType/IfcSlabType mit IfcMaterialLayerSet (Schichten in der
+  // Reihenfolge des Typs, Material = Bauteil). Die Wände/Decken erben ihn über
+  // IfcRelDefinesByType. Bewusst KEIN IfcMaterialLayerSetUsage am Exemplar: die Wand-Geometrie ist
+  // ein Mesh ohne Achs-Darstellung, eine Usage (Richtung/Versatz zur Bezugslinie) hätte keinen
+  // Bezug (s. Dateikopf).
+  const materialIdByComponent = new Map<string, number>();
+  const materialOf = (componentId: string): number => {
+    const hit = materialIdByComponent.get(componentId);
+    if (hit !== undefined) return hit;
+    const name = project.components.find((c) => c.id === componentId)?.name ?? componentId;
+    const id = w.add("IFCMATERIAL", `${S(name)},$,$`);
+    materialIdByComponent.set(componentId, id);
+    return id;
+  };
+  interface ElementTypeRef {
+    typeId: number;
+    occurrences: number[];
+  }
+  const elementTypes = new Map<string, ElementTypeRef>();
+  const typeFor = (
+    ifcType: "IFCWALLTYPE" | "IFCSLABTYPE",
+    predefined: string,
+    t: { id: string; name: string; layers: { componentId: string; thickness: number }[] },
+  ): ElementTypeRef => {
+    const key = `${ifcType}:${t.id}`;
+    const hit = elementTypes.get(key);
+    if (hit) return hit;
+    const layerIds = t.layers.map((l) =>
+      w.add("IFCMATERIALLAYER", `#${materialOf(l.componentId)},${R(Math.max(0, Number.isFinite(l.thickness) ? l.thickness : 0))},$,$,$,$,$`),
+    );
+    const typeId = w.add(
+      ifcType,
+      `${S(ifcGuid(key))},#${ownerHistory},${S(t.name)},$,$,$,$,$,$,${ENUM(predefined)}`,
+    );
+    if (layerIds.length > 0) {
+      const setId = w.add("IFCMATERIALLAYERSET", `${LIST(layerIds.map((id) => `#${id}`))},${S(t.name)},$`);
+      w.add(
+        "IFCRELASSOCIATESMATERIAL",
+        `${S(ifcGuid(`${key}:material`))},#${ownerHistory},$,$,${LIST([`#${typeId}`])},#${setId}`,
+      );
+    }
+    const ref = { typeId, occurrences: [] };
+    elementTypes.set(key, ref);
+    return ref;
+  };
+
   // ── Wände (öffnungsgenaues Dreiecks-Mesh statt Profil-Extrusion) ────────
   // Die Wand-Schicht-Bänder kommen aus DEMSELBEN geflachten Modell wie STL/OBJ
   // (`pickGeometry`, Joins/Gehrungen + Öffnungs-`holes` bereits aufgelöst). Alle
@@ -585,12 +632,16 @@ export function exportIfcSpf(projectIn: Project): string {
     const closed = isWatertight({ positions, indices });
     const { placementId, shapeId } = emitTriangulatedProduct(positions, indices, structure.placementId, closed);
     let name = wall.id;
+    let wallType: ElementTypeRef | null = null;
     try {
-      name = getWallType(project, wall).name;
+      const wt = getWallType(project, wall);
+      name = wt.name;
+      wallType = typeFor("IFCWALLTYPE", "STANDARD", wt);
     } catch {
-      /* verwaister Wandtyp — Roh-ID als Name */
+      /* verwaister Wandtyp — Roh-ID als Name, kein Typ */
     }
     const entityId = emitBuildingElement("IFCWALL", ifcGuid(wall.id), name, placementId, shapeId, null);
+    wallType?.occurrences.push(entityId);
     wallEntityIdByWallId.set(wall.id, entityId);
     addToContainment(structure.entityId, entityId);
   }
@@ -607,10 +658,13 @@ export function exportIfcSpf(projectIn: Project): string {
       structure.placementId,
     );
     let name: string = ceiling.id;
+    let slabType: ElementTypeRef | null = null;
     try {
-      name = getCeilingType(project, ceiling).name;
+      const ct = getCeilingType(project, ceiling);
+      name = ct.name;
+      slabType = typeFor("IFCSLABTYPE", "FLOOR", ct);
     } catch {
-      /* verwaister Deckentyp — Roh-ID als Name */
+      /* verwaister Deckentyp — Roh-ID als Name, kein Typ */
     }
     const entityId = emitBuildingElement(
       "IFCSLAB",
@@ -620,6 +674,7 @@ export function exportIfcSpf(projectIn: Project): string {
       shapeId,
       ENUM("FLOOR"),
     );
+    slabType?.occurrences.push(entityId);
     addToContainment(structure.entityId, entityId);
   }
 
@@ -760,6 +815,15 @@ export function exportIfcSpf(projectIn: Project): string {
     w.add(
       "IFCRELAGGREGATES",
       `${S(ifcGuid(`spaces:${structureId}`))},#${ownerHistory},$,$,#${structureId},${LIST(spaceIds.map((id) => `#${id}`))}`,
+    );
+  }
+
+  // ── Typ-Zuordnung (je Bauteiltyp eine IfcRelDefinesByType) ─────────────
+  for (const [key, ref] of elementTypes) {
+    if (ref.occurrences.length === 0) continue;
+    w.add(
+      "IFCRELDEFINESBYTYPE",
+      `${S(ifcGuid(`${key}:occurrences`))},#${ownerHistory},$,$,${LIST(ref.occurrences.map((id) => `#${id}`))},#${ref.typeId}`,
     );
   }
 
