@@ -12,7 +12,7 @@
 import type { Plan } from "../../core";
 import { materializeGreyed, materializeUnderlay } from "../../core";
 import type { Project } from "../../model/types";
-import { planToRenderScene } from "../../core";
+import { encodeRenderScene, planToRenderScene } from "../../core";
 import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "../../core";
 
 /** Sammel-Fenster: Modelländerungen werden gebündelt gepusht (nicht je Frame). */
@@ -48,7 +48,7 @@ function isNativeEnabled(): Promise<boolean> {
 }
 
 /** Geguardeter Invoke (Muster wie src/compute): nie werfen, Fehler nur debuggen. */
-async function invokeNative(cmd: string, args: Record<string, unknown>): Promise<void> {
+async function invokeNative(cmd: string, args: Record<string, unknown> | Uint8Array): Promise<void> {
   try {
     // @ts-ignore optionales Paket
     const mod = await import(/* @vite-ignore */ "@tauri-apps/api/core").catch(() => null);
@@ -72,7 +72,8 @@ export function pushNativeScene(plan: Plan): void {
   sceneTimer = setTimeout(async () => {
     if (!(await isNativeEnabled())) return;
     // planToRenderScene liest `greyed` am Primitiv → gedimmte Referenz-Ebenen materialisieren.
-    void invokeNative("push_native_scene", { scene: planToRenderScene(materializeGreyed(materializeUnderlay(plan), true)) });
+    // Binärpuffer als Request-Body (Rust: `render2d::scene_bin`), kein JSON.
+    void invokeNative("push_native_scene", encodeRenderScene(planToRenderScene(materializeGreyed(materializeUnderlay(plan), true))));
   }, DEBOUNCE_MS);
 }
 
