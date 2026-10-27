@@ -30,7 +30,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   Rust-Kern (`bulge_polyline_points` für ganze Polylinien; `hasRealBulge`/`pointOnCircle` bleiben TS,
   Einzeiler). Offen: Triangulierung, Straight Skeleton [B2]. · M
 - ✅ **Mac-Test 27.10.** (Maintainer): App startet mit dem Rust-Kern, Darstellung sieht gut aus — Stand `5b72069`
-  (K0–K2, render2d binär; GPU-Kompilierung [K3b] noch nicht enthalten).
+  (K0–K2, render2d binär); zweiter Test mit GPU-Kompilierung [K3b] (`7a8af4f`) ebenfalls bestanden.
 - ✅ **[K2] Geometrie-Ableitungen.** (27.10.) Dachgeometrie in Rust (`roof.rs`, `roof_skeleton.rs`;
   `roofSkeleton.ts` gelöscht, ~2× schneller, Ergebnis bitgleich). Treppen in Rust (`stair_geometry`,
   `stair_outline`, `stair_cut`; `stair.ts` Fassade, 27.10.). Räume (27.10.): `room_area.rs` (Flächen,
@@ -61,7 +61,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `number[]`, je Mesh < 3 µs), IFC-Export gesamt unverändert.
 - ○ **[K3] Plan, Schnitt, Ansicht in Rust**, Primitive direkt an render2d (ohne TS-Umweg). · L
   Reihenfolge (Entscheid 27.10.: Risiko klein halten, Verbraucher zuerst):
-  - ✅ **[K3b] Verbraucher auf Binärpuffer.** (Mac-Test des Grundrisses steht aus) Plan-Puffer-Format (TS schreibt vorerst, Rust liest);
+  - ✅ **[K3b] Verbraucher auf Binärpuffer.** (Mac-Test 27.10. bestanden: Grundriss läuft, sieht gut aus) Plan-Puffer-Format (TS schreibt vorerst, Rust liest);
     GPU-Kompilierung (`glPlanCompile`/`glPlanHatch`) in Rust, Vertex-Puffer bitgleich zur TS-Ausgabe;
     render2d bekommt die Szene binär statt JSON — **fertig**: `scene_bin.rs`/`renderSceneBin.ts`
     (Format v1: Kopf mit Magie+Version, f64-Punktepool, f32-Farben, String-Tabelle; Fixture
@@ -79,7 +79,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
       Landeskoordinaten), Schraffur-Fassade einzeln — 8 GB Puffer verglichen. Trigonometrie läuft im Web-Build
       über `Math` der JS-Engine (musl-libm wich ab, auch in der Topologie). Leistung (Node, Min. über
       Wiederholungen): Beispiel-EG 1,5 → 0,8 ms, 100k Linien + 3000 Schraffurflächen 3,9 → 1,8 s, nur
-      Schraffur ~2×, nur Linien 104 → 81 ms (davon Kodieren in TS 7–29 ms). **Offen:** Mac-Test (Metal) des Grundrisses.
+      Schraffur ~2×, nur Linien 104 → 81 ms (davon Kodieren in TS 7–29 ms). Mac-Test bestanden.
   - ○ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
     2D-Zeichnung, Kontext, Schnittlinien) direkt in den Plan-Puffer; JS-Objekte nur noch für Export/Overlay.
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
