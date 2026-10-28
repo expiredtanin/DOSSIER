@@ -1,8 +1,9 @@
 // Tests für den DXF-Import der Kurven-Entities ARC / CIRCLE / ELLIPSE:
 // belegt Tessellierung, Winkeleinheit (Radiant), Schließung und Z-Höhe.
 
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import { parseDxf } from "./dxfParser";
+import { loadFileioForTests } from "../engine/fileioWasm.testing";
 import { contoursToDrawings, textsToDrawings } from "./dxfToDrawings";
 import type { Contour, ContourSet, Vec2 } from "../model/types";
 
@@ -39,6 +40,8 @@ function ellipse(
     "40", `${ratio}`, "41", `${start}`, "42", `${end}`,
   ];
 }
+
+beforeAll(loadFileioForTests);
 
 const dist = (p: Vec2, cx: number, cy: number) => Math.hypot(p.x - cx, p.y - cy);
 

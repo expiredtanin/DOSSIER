@@ -28,6 +28,11 @@ export function fileio(): FileioModule {
   return mod;
 }
 
+/** Das geladene Format-Modul oder `null` (vorher `loadFileio()`/`initFileioSync()`). */
+export function fileioLoaded(): FileioModule | null {
+  return mod;
+}
+
 /** Synchron laden aus vorliegenden Bytes (Node: Tests, Werkzeuge). */
 export async function initFileioSync(bytes: BufferSource): Promise<FileioModule> {
   if (mod) return mod;

@@ -1,6 +1,6 @@
 // Bündelt scripts/benchDxfParallel.ts + benchDxfParallelWorker.ts mit esbuild
 // für Node und führt den Hauptteil aus (echte Parallelität über worker_threads).
-// Lauf: `node scripts/bench-dxf-parallel.mjs <pfad.dxf>`.
+// Lauf: `node scripts/bench-dxf-parallel.mjs <pfad.dxf|pfad.dwg>` (vorher `npm run build:fileio`).
 import esbuild from "esbuild";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -14,7 +14,7 @@ await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node18",
+  target: "node20",
   outfile: workerOut,
   logLevel: "warning",
 });
@@ -24,7 +24,7 @@ await esbuild.build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node18",
+  target: "node20",
   outfile: mainOut,
   logLevel: "warning",
 });

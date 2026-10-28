@@ -244,9 +244,9 @@ export function useProjectFileActions(
     registerLockAutoRelease(() => openedProjectPathRef.current);
   }, []);
 
-  // Eine Datei (Button ODER Drop) öffnet den modalen Import-Dialog. DXF wird als
-  // Text geparst, DWG als ArrayBuffer über LibreDWG-WASM (lazy, asynchron); beide
-  // münden in dasselbe {meshes, contours}-Format und denselben Dialog-Fluss.
+  // Eine Datei (Button ODER Drop) öffnet den modalen Import-Dialog. DXF (ASCII/Binär)
+  // und DWG werden als Bytes im Web-Worker über das Rust-Format-Modul gelesen (lazy,
+  // asynchron); beide münden in dasselbe {meshes, contours}-Format und denselben Dialog.
   // Parse-Fehler werden ruhig abgefangen: DWG fällt auf den ODA-Hinweis zurück.
   const openImportForFile = (file: File) => {
     const isDwg = /\.dwg$/i.test(file.name);
@@ -271,7 +271,7 @@ export function useProjectFileActions(
           });
           return;
         }
-        // Dynamisch importieren, damit LibreDWG-WASM nicht im Initial-Bundle ist.
+        // Dynamisch importieren (das Format-Modul wird ohnehin erst im Worker geladen).
         import("../io/dwgParser")
           .then(({ parseDwg }) => parseDwg(buf))
           .then((parsed) => {
@@ -304,7 +304,9 @@ export function useProjectFileActions(
     setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true });
     const r = new FileReader();
     r.onload = () => {
-      parseDxfAsync(String(r.result ?? ""), (progress) => {
+      // Bytes statt Text: Binär-DXF und Code-Seiten (vor R2007) liest erst Rust richtig.
+      const buf = r.result instanceof ArrayBuffer ? r.result : new ArrayBuffer(0);
+      parseDxfAsync(buf, (progress) => {
         setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true, progress });
       })
         .then((parsed) => {
@@ -316,7 +318,7 @@ export function useProjectFileActions(
           setImportState({ fileName: file.name, isDwg: false, parsed, loading: false });
         });
     };
-    r.readAsText(file);
+    r.readAsArrayBuffer(file);
   };
 
   // Projekt als Datei speichern/laden (Datei-Burger-Menü, TopBar/AppMenu).
@@ -406,7 +408,7 @@ export function useProjectFileActions(
   const onProjectTemplateFileChosen = (file: File) => {
     const r = new FileReader();
     r.onload = () => applyTemplateContent(String(r.result ?? ""));
-    r.readAsText(file);
+    r.readAsArrayBuffer(file);
   };
 
   // Gibt den Lock der zuletzt geöffneten Projektdatei frei (falls wir ihn
@@ -558,7 +560,7 @@ export function useProjectFileActions(
         console.error("Projekt-Import fehlgeschlagen:", err);
       }
     };
-    r.readAsText(file);
+    r.readAsArrayBuffer(file);
   };
 
   const importParentName = (decision: ImportDecision): string =>

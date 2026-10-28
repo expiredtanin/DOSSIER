@@ -2,7 +2,7 @@
 // zurücklesen und inhaltlich vergleichen.
 //   - DXF: kleiner Gruppen-Code-Leser (Paare Code/Wert, nur ENTITIES und LAYER-Tabelle). Bewusst
 //     nicht der Import (`io/dxfParser`), damit Export-Tests nicht an dessen Umbau hängen.
-//   - DWG: libredwg (`@mlightcad/libredwg-web`, dieselbe Bibliothek wie der DWG-Import) direkt in Node.
+//   - DWG: libredwg (`@mlightcad/libredwg-web`, reine Test-Abhängigkeit als unabhängiger Gegenleser — die App liest DWG über acadrust) direkt in Node.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

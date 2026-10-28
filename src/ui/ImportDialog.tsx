@@ -95,7 +95,7 @@ function formatDiagnostics(d: ImportDiagnostics): string {
 export interface ImportDialogProps {
   fileName: string;
   /**
-   * true, wenn eine DWG-Datei NICHT gelesen werden konnte (LibreDWG-WASM schlug
+   * true, wenn eine DWG-Datei NICHT gelesen werden konnte (das Format-Modul schlug
    * fehl) → ODA-Hinweis als Fallback. Bei erfolgreichem DWG-Parsing ist das false
    * und `parsed` enthält das Ergebnis (gleicher Fluss wie DXF).
    */

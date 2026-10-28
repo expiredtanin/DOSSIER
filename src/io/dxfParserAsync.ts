@@ -1,60 +1,36 @@
-// Asynchroner Wrapper um `parseDxf` über Web Worker (`dxfParser.worker.ts`)
-// — hält den Haupt-Thread/die UI reaktionsfähig, auch bei sehr grossen DXF-
-// Dateien (Kataster-Import einer ganzen Stadt, Nutzer-Report 2026-10-08:
-// 400 MB liessen die App vorher für die GESAMTE Parse-Dauer einfrieren).
+// Asynchroner DXF-/DWG-Import über Web-Worker (`dxfParser.worker.ts`) — hält die UI reaktionsfähig,
+// auch bei sehr grossen Dateien (Nutzer-Report 08.10.: 400-MB-Kataster-DXF fror die App ein).
 //
-// Seit Nutzer-Report 2026-10-09 ("dauert ewig trotz Worker") zusätzlich
-// ECHT PARALLEL über mehrere Kerne: `dxf-parser` selbst ist ein einziger
-// monolithischer synchroner Pass ohne Streaming-/Teilbereichs-API (ein
-// Worker alleine nutzt also nur einen Kern). `dxfEntityChunker.ts` teilt die
-// ENTITIES-Sektion VOR dem Parsen in sichere, für sich gültige Stücke auf;
-// jedes Stück läuft in seinem eigenen Worker durch das UNVERÄNDERTE
-// `parseDxf` — danach werden die Teilergebnisse zusammengeführt. Schlägt
-// die Aufteilung nicht an (zu klein, kein Multi-Core, kaputtes/exotisches
-// Format) oder schlägt ein Chunk-Worker fehl, fällt diese Funktion exakt auf
-// den bisherigen Einzel-Worker-Weg zurück — Korrektheit (amtliche
-// Vermessungsdaten!) geht vor Geschwindigkeit: im schlimmsten Fall nur
-// langsam, nie falsch.
+// Grosse ASCII-DXF werden zusätzlich PARALLEL gelesen (Nutzer-Report 09.10.): ein Split-Worker
+// sucht sichere Schnittstellen in der ENTITIES-Sektion (Rust `split.rs`), jedes Stück
+// (Präambel + Entities + Abschluss) läuft in einem eigenen Worker, danach werden die Teilergebnisse
+// zusammengeführt. Schlägt Aufteilung oder ein Stück fehl, wird die ganze Datei einmal am Stück
+// gelesen — Korrektheit (amtliche Vermessungsdaten!) vor Geschwindigkeit. Binär-DXF und DWG werden
+// nicht geteilt.
 //
-// Bewusst EIN Worker pro Chunk (nicht dauerhaft gepoolt) — DXF-Importe sind
-// seltene, einmalige Aktionen, kein Hochfrequenz-Pfad; der Start-Overhead
-// frischer Worker ist gegenüber der Parse-Dauer einer grossen Datei
-// vernachlässigbar.
-//
-// `new Worker(new URL(...), { type: "module" })` ist Vites eingebautes Worker-
-// Muster (funktioniert in Dev UND Build identisch, kein vite.config-Eintrag
-// nötig) — kein Browser-Global, daher ohne dediziertes Unit-Test (Vitest läuft
-// im "node"-Environment ohne `Worker`-Global, s. `vitest.config.ts`); dieselbe
-// Bestes-Bemühen-Haltung wie bei anderem browser-API-gebundenem Code in diesem
-// Projekt (z. B. `saveFile.ts`).
+// Ohne `Worker` (Node: CLI, Tests) wird direkt im aufrufenden Thread gelesen.
 
 import type { ContourSet, ImportedMesh, ImportedText } from "../model/types";
-import type { DxfImportResult } from "./dxfParser";
+import { loadFileio } from "../engine/fileioWasm";
+import { decodeImport, parseDxf } from "./dxfParser";
+import type { DxfImportResult, ImportDiagnostics } from "./dxfParser";
 import type { DxfWorkerRequest, DxfWorkerResponse } from "./dxfParser.worker";
-import { DXF_CHUNK_CLOSER, buildDxfChunks } from "./dxfEntityChunker";
-import type { DxfSplitOffsets } from "./dxfEntityChunker";
 
 /**
- * Höchstens so viele Worker gleichzeitig — bewusst NICHT `hardwareConcurrency`
- * direkt (Benchmark gegen die reale 439-MB-Kataster-Datei,
- * `scripts/bench-dxf-parallel.mjs`, auf einer Maschine mit 11 logischen
- * Kernen, davon 5 Performance-/6 Effizienzkerne): 4–5 parallele Worker
- * ergaben ~2,0–2,1× Speedup, 8 Worker nur ~1,4× — die zusätzlichen Worker
- * landen auf den deutlich langsameren Effizienzkernen und bremsen den
- * Durchschnitt, statt zu helfen. `navigator.hardwareConcurrency` kennt diese
- * Asymmetrie nicht (liefert nur die Gesamtzahl), daher ein fester, auf
- * gängigen Consumer-CPUs (Apple Silicon ebenso wie aktuelle Intel/AMD-
- * Hybridarchitekturen) breit funktionierender konservativer Deckel statt
- * eines Kernzahl-Vielfachen.
+ * Höchstens so viele Worker gleichzeitig (Benchmark 439-MB-Kataster-DXF, 5 Performance- +
+ * 6 Effizienzkerne: 4–5 Worker ≈ 2×, 8 Worker nur ≈ 1,4× — die zusätzlichen landen auf den
+ * langsamen Kernen). Fester, konservativer Deckel statt eines Kernzahl-Vielfachen.
  */
 const MAX_WORKERS = 4;
+/** Ab dieser Grösse lohnt sich das Aufteilen (gleiche Schwelle wie `split.rs`). */
+const MIN_SIZE_FOR_SPLIT = 4_000_000;
+/** Abschluss jedes Stücks (wie `split.rs::CHUNK_CLOSER`). */
+const CHUNK_CLOSER = new TextEncoder().encode("0\nENDSEC\n0\nEOF\n");
 
 /** Spawnt einen frischen Worker für GENAU eine Anfrage; terminiert ihn danach. */
-function runWorker(req: DxfWorkerRequest): Promise<DxfWorkerResponse> {
+function runWorker(req: DxfWorkerRequest, transfer: Transferable[] = []): Promise<DxfWorkerResponse> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./dxfParser.worker.ts", import.meta.url), {
-      type: "module",
-    });
+    const worker = new Worker(new URL("./dxfParser.worker.ts", import.meta.url), { type: "module" });
     worker.onmessage = (e: MessageEvent<DxfWorkerResponse>) => {
       worker.terminate();
       resolve(e.data);
@@ -63,92 +39,97 @@ function runWorker(req: DxfWorkerRequest): Promise<DxfWorkerResponse> {
       worker.terminate();
       reject(new Error(e.message || "DXF-Import (Worker) fehlgeschlagen"));
     };
-    worker.postMessage(req);
+    worker.postMessage(req, transfer);
   });
 }
 
-async function runParseWorker(req: DxfWorkerRequest): Promise<DxfImportResult> {
-  const res = await runWorker(req);
-  if (res.type === "result") return res.result;
+async function runParseWorker(data: ArrayBuffer, idPrefix: string, transfer: boolean): Promise<DxfImportResult> {
+  const res = await runWorker({ type: "parse", data }, transfer ? [data] : []);
+  if (res.type === "result") return decodeImport(res.geom, res.strings, idPrefix);
   throw new Error(res.type === "error" ? res.message : "Unerwartete Worker-Antwort");
 }
 
-/** Berechnet die Chunk-Grenzen in einem Worker (s. Kopfkommentar — der Scan
- *  allein braucht bei grossen Dateien Sekunden und darf die UI nicht blockieren). */
-async function runSplitWorker(text: string, chunkCount: number): Promise<DxfSplitOffsets | null> {
-  const res = await runWorker({ type: "split", text, chunkCount });
-  if (res.type === "splitOffsets") return res.offsets;
-  return null;
-}
-
-/** Führt die Teilergebnisse mehrerer Chunk-Worker zusammen. */
+/** Führt die Teilergebnisse mehrerer Stücke zusammen. */
 function mergeResults(results: DxfImportResult[]): DxfImportResult {
   const meshes: ImportedMesh[] = [];
   const contours: ContourSet[] = [];
   const texts: ImportedText[] = [];
   const layerColors: Record<string, string> = {};
+  const diagnostics: ImportDiagnostics = { entityCounts: {}, total: 0 };
   for (const r of results) {
     for (const m of r.meshes) meshes.push(m);
     for (const c of r.contours) contours.push(c);
     for (const t of r.texts ?? []) texts.push(t);
-    // Jeder Chunk trägt dieselbe Präambel (inkl. LAYER-Tabelle) — Vereinigung reicht.
+    // Jedes Stück trägt dieselbe Präambel (inkl. LAYER-Tabelle) — Vereinigung reicht.
     Object.assign(layerColors, r.layerColors);
+    for (const [k, n] of Object.entries(r.diagnostics?.entityCounts ?? {})) {
+      diagnostics.entityCounts[k] = (diagnostics.entityCounts[k] ?? 0) + n;
+    }
+    diagnostics.total += r.diagnostics?.total ?? 0;
   }
-  return { meshes, contours, texts, layerColors };
+  return { meshes, contours, texts, layerColors, diagnostics, insUnits: results[0]?.insUnits };
+}
+
+function toArrayBuffer(data: string | ArrayBuffer): ArrayBuffer {
+  if (typeof data !== "string") return data;
+  const bytes = new TextEncoder().encode(data);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+/** Stücke als eigene Puffer: Präambel + Entities-Ausschnitt + Abschluss. */
+function buildChunks(bytes: Uint8Array, offsets: number[]): ArrayBuffer[] {
+  const preamble = bytes.subarray(0, offsets[0]);
+  const out: ArrayBuffer[] = [];
+  for (let i = 0; i + 1 < offsets.length; i++) {
+    const body = bytes.subarray(offsets[i], offsets[i + 1]);
+    const chunk = new Uint8Array(preamble.length + body.length + CHUNK_CLOSER.length);
+    chunk.set(preamble, 0);
+    chunk.set(body, preamble.length);
+    chunk.set(CHUNK_CLOSER, preamble.length + body.length);
+    out.push(chunk.buffer);
+  }
+  return out;
 }
 
 /**
- * `onProgress` ist rein informativ (UI-Status, s. `ImportDialog.tsx`) — sie
- * bekommt grobe Phasennamen, keine Prozentzahl (dxf-parser hat keine
- * Fortschritts-API, s. o.; echte Prozente würden eine zweite, künstliche
- * Fortschrittsmessung erfordern, die den Code nur verkompliziert, ohne die
- * eigentliche Dauer zu verkürzen).
+ * Liest eine DXF- oder DWG-Datei (Text oder Bytes) im Hintergrund. `onProgress` bekommt grobe
+ * Phasennamen (`"structure"`, `"parse-single"`, `"parse-parallel:<N>"`, s. `ImportDialog.tsx`).
  */
 export async function parseDxfAsync(
-  text: string,
+  data: string | ArrayBuffer,
   onProgress?: (phase: string) => void,
 ): Promise<DxfImportResult> {
+  if (typeof Worker === "undefined") {
+    await loadFileio();
+    return parseDxf(data);
+  }
+  const buf = toArrayBuffer(data);
   const chunkCount = Math.min(
     typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 4 : 4,
     MAX_WORKERS,
   );
 
-  // Phase 1: Chunk-Grenzen finden — in einem Worker (s. `runSplitWorker`),
-  // NIE im Haupt-Thread (das wäre derselbe UI-Freeze-Fehler nur verschoben).
-  let offsets: DxfSplitOffsets | null = null;
-  if (chunkCount > 1) {
+  let offsets: number[] = [];
+  if (chunkCount > 1 && buf.byteLength >= MIN_SIZE_FOR_SPLIT) {
     onProgress?.("structure");
     try {
-      offsets = await runSplitWorker(text, chunkCount);
+      // Kopie an den Split-Worker (das Original bleibt für die Stücke/den Rückfall hier).
+      const res = await runWorker({ type: "split", data: buf, chunkCount });
+      if (res.type === "splitOffsets") offsets = res.offsets;
     } catch {
-      offsets = null; // Split-Worker fehlgeschlagen → Einzel-Worker-Fallback.
+      offsets = [];
     }
   }
-  // Phase 2: billiges Slicing (reine String-Views, unbedenklich hier).
-  const split = offsets ? buildDxfChunks(text, offsets) : null;
-  if (!split) {
-    onProgress?.("parse-single");
-    return runParseWorker({ type: "parse", text });
+  if (offsets.length >= 3) {
+    const chunks = buildChunks(new Uint8Array(buf), offsets);
+    try {
+      onProgress?.(`parse-parallel:${chunks.length}`);
+      const results = await Promise.all(chunks.map((c, i) => runParseWorker(c, `c${i}-`, true)));
+      return mergeResults(results);
+    } catch {
+      // Ein Stück ist fehlgeschlagen → einmal am Stück lesen (garantiert korrekt).
+    }
   }
-
-  try {
-    onProgress?.(`parse-parallel:${split.chunks.length}`);
-    const results = await Promise.all(
-      split.chunks.map((chunk, i) =>
-        runParseWorker({
-          type: "parse",
-          text: split.preamble + chunk + DXF_CHUNK_CLOSER,
-          idPrefix: `c${i}-`,
-        }),
-      ),
-    );
-    return mergeResults(results);
-  } catch {
-    // Irgendein Chunk ist fehlgeschlagen (z. B. weil der Splitter bei einer
-    // exotischen/kaputten Datei doch einen unsicheren Punkt gewählt hat) —
-    // einmalig der bisherige, garantiert korrekte Einzel-Worker-Weg mit dem
-    // kompletten Originaltext.
-    onProgress?.("parse-single");
-    return runParseWorker({ type: "parse", text });
-  }
+  onProgress?.("parse-single");
+  return runParseWorker(buf, "", false);
 }

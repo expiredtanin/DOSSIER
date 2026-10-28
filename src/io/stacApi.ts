@@ -88,8 +88,8 @@ function estimateUncompressedSize(entry: JSZip.JSZipObject): number | null {
 /** Wählt den passenden ZIP-Eintrag: eine der `innerExt`-Endungen, optional
  *  bevorzugt nach `preferNameIncludes` (Teilstring, klein geschrieben) —
  *  swissBUILDINGS3D-v3-Kacheln bündeln z. B. „…_separated_….dwg" UND
- *  „…_solid_….dwg" im selben Zip; nur `separated` lässt sich mit LibreDWG
- *  lesen (`solid` liefert 0 Entities, vermutlich ACIS-Volumenkörper statt
+ *  „…_solid_….dwg" im selben Zip; wir lesen `separated` (`solid` lieferte mit
+ *  dem früheren LibreDWG 0 Entities, vermutlich ACIS-Volumenkörper statt
  *  Polyface-Mesh). Ohne Treffer auf den Präferenz-Teilstring fällt es auf den
  *  ersten `innerExt`-Treffer zurück (unverändertes Verhalten). */
 function pickZipEntry(
@@ -170,7 +170,7 @@ export async function downloadAssetText(
 }
 
 /** Wie {@link downloadAssetText}, aber liefert den rohen Binärinhalt (für
- *  DWG-Assets, die als `ArrayBuffer` an `parseDwg`/LibreDWG-WASM gehen —
+ *  DWG-Assets, die als `ArrayBuffer` an `parseDwg` (Rust-Format-Modul) gehen —
  *  ein binäres Format als Text zu lesen würde die Daten korrumpieren).
  *  `preferNameIncludes` wählt bei mehreren Zip-Treffern gezielt einen aus
  *  (s. {@link pickZipEntry}). */
