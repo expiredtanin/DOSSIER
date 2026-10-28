@@ -21,31 +21,14 @@ import { projectToWorldCoords } from "../model/geoRebase";
 
 const allCodes = (p: Project) => new Set(flattenCategories(p.layers).map((l) => l.code));
 
-/** Was die flache Zeichnung an Entitäten trägt (Zählung je Typ, aus dem Puffer). */
+/** Was die flache Zeichnung an Entitäten im Modellbereich trägt (Zählung je Typ, im Sammler mitgeführt). */
 function flatCounts(plan: Plan, project: Project): Record<string, number> {
-  const [flat] = collectPlanDrawing(plan, project).args();
-  const names: Record<number, [string, (i: number) => number]> = {
-    1: ["", () => 4],
-    2: ["LINE", () => 6],
-    3: ["LWPOLYLINE", (i) => 4 + 2 * flat[i + 3]],
-    4: ["ARC", () => 7],
-    5: ["CIRCLE", () => 5],
-    6: ["TEXT", () => 7],
-    // HATCH: tag, layer, mode, rgb, n_dash, dash…, n_fam, (angle, spacing)…, n, pts…
-    7: ["HATCH", (i) => {
-      const nd = flat[i + 4];
-      const nf = flat[i + 5 + nd];
-      return 5 + nd + 1 + 2 * nf + 1 + 2 * flat[i + 5 + nd + 1 + 2 * nf];
-    }],
-  };
-  const out: Record<string, number> = {};
-  for (let i = 1; i < flat.length; ) {
-    const [name, len] = names[flat[i]];
-    if (name) out[name] = (out[name] ?? 0) + 1;
-    i += len(i);
-  }
-  return out;
+  return collectPlanDrawing(plan, project).stats().model;
 }
+
+/** Polygone, die der Export schreibt: unsichtbare Pick-Bänder (weder Füllung noch Umriss noch Schraffur) entfallen. */
+const visiblePolys = (polys: Extract<Plan["primitives"][number], { kind: "polygon" }>[]) =>
+  polys.filter((p) => !p.openingId && !(p.stroke === "none" && p.fill === "none" && p.hatch.pattern === "none" && p.hatch.kind !== "gradient"));
 
 describe("DXF-Export (R2018 über acadrust)", () => {
   const plan = generatePlan(sampleProject, "eg", allCodes(sampleProject));
@@ -66,7 +49,11 @@ describe("DXF-Export (R2018 über acadrust)", () => {
 
   it("jede übergebene Entität kommt an (Typ, Anzahl, Reihenfolge der Ebenen)", () => {
     const dxf = readDxf(buildPlanDxf(plan, sampleProject));
-    expect(countByType(dxf.entities)).toEqual(flatCounts(plan, sampleProject));
+    // ATTRIB/SEQEND hängen an den INSERTs (Türen/Fenster) und zählen nicht als eigene Entitäten des Plans.
+    const { ATTRIB, SEQEND, ...entities } = countByType(dxf.entities);
+    expect(ATTRIB ?? 0).toBeGreaterThanOrEqual(entities.INSERT ?? 0); // jede Tür/jedes Fenster trägt Attribute
+    expect(SEQEND ?? 0).toBe(entities.INSERT ?? 0);
+    expect(entities).toEqual(flatCounts(plan, sampleProject));
     expect(dxf.entities.every((e) => dxf.layers.has(e.layer))).toBe(true);
   });
 
@@ -104,7 +91,7 @@ describe("Georeferenz (LV95)", () => {
   };
   const world = projectToWorldCoords(anchored);
   const plan = generatePlan(world, "eg", allCodes(world));
-  const polys = plan.primitives.filter((p): p is Extract<Plan["primitives"][number], { kind: "polygon" }> => p.kind === "polygon");
+  const polys = visiblePolys(plan.primitives.filter((p): p is Extract<Plan["primitives"][number], { kind: "polygon" }> => p.kind === "polygon"));
 
   it("DXF: Polylinien-Koordinaten bitgleich zum Plan (f64, keine Rundung)", () => {
     const ents = readDxf(buildPlanDxf(plan, world)).entities.filter((e) => e.type === "LWPOLYLINE");

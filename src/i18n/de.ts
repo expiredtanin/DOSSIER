@@ -1736,6 +1736,15 @@ export const de = {
   "exportDxf.failed": "Export fehlgeschlagen",
   "exportDxf.unitsNote":
     "Modell-Space in Metern (1:1). Layer entsprechen den Ebenen des Projekts; beim Plot beliebig skalierbar.",
+  "exportDxf.scale": "Massstab (Bemassung, Strichmuster, Beschriftung)",
+  "exportDxf.dimUnit": "Masszahlen in",
+  "exportDxf.dimUnit.m": "Meter (3.25)",
+  "exportDxf.dimUnit.cm": "Zentimeter (325)",
+  "exportDxf.layout": "Papierbereich",
+  "exportDxf.layout.no": "Nur Modellbereich",
+  "exportDxf.layout.yes": "Zusätzlich Layout mit Ansichtsfenster im Massstab",
+  "exportDxf.objectsNote":
+    "Bemassungen als DIMENSION (mit Bemassungsstil), Türen, Fenster und Möbelblöcke als BLOCK/INSERT mit Attributen, Strichmuster als Linientypen, Texte mit Textstil.",
 
   // ── Datei-Menü (Burger, ganz rechts der Oberleiste) ──────────────────────
   "file.menu": "Datei",

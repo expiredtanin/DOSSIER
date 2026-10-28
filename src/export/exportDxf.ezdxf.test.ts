@@ -66,7 +66,11 @@ describe.skipIf(!hasEzdxf)("DXF-Export gegen ezdxf", { timeout: 60_000 }, () => 
     expect(r.status).toBe(0);
     expect(r.result!.version).toBe("AC1032");
     expect(r.result!.insunits).toBe(6);
-    const polys = plan.primitives.filter((p): p is Extract<Plan["primitives"][number], { kind: "polygon" }> => p.kind === "polygon");
+    // Ohne unsichtbare Pick-Bänder und ohne Öffnungs-Polygone (Fensterrahmen liegen im Block, nicht im Modellbereich).
+    const polys = plan.primitives.filter(
+      (p): p is Extract<Plan["primitives"][number], { kind: "polygon" }> =>
+        p.kind === "polygon" && !p.openingId && !(p.stroke === "none" && p.fill === "none" && p.hatch.pattern === "none"),
+    );
     const ezPolys = r.result!.entities.filter((e) => e.type === "LWPOLYLINE");
     expect(ezPolys.length).toBe(polys.length);
     for (let i = 0; i < polys.length; i++) {

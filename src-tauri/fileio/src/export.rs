@@ -34,6 +34,20 @@
 //   GRADIENT = 8, layer, rgb1 (0xRRGGBB), rgb2 (0xRRGGBB), angle (rad, Richtung rgb1 → rgb2, DXF-Konvention),
 //              kind (0 = linear, 1 = radial: rgb1 in der Mitte, rgb2 am Rand), n, x0, y0, … (äusserer Rand)
 //
+// Seit [C2] (28.10., „Fachplaner-Export“) zusätzlich — alles rückwärtskompatibel (Version bleibt 1):
+//   LTYPE    = 9,  name_idx, n, e0 … e(n−1)   Linientyp (Meter; > 0 Strich, < 0 Lücke, 0 Punkt); Index = Reihenfolge
+//   LAYERLT  = 10, layer, ltype                Standard-Linientyp einer Ebene
+//   PEN      = 11, ltype (−1 = nach Ebene)     gilt für alle folgenden Entitäten bis zum nächsten PEN
+//   STYLE    = 12, name_idx, font_idx, bold, italic, width_factor   Textstil (TrueType-Schriftname); Index = Reihenfolge
+//   TEXT2    = 13, layer, text_idx, x, y, height, rotation, halign (0 links, 1 Mitte, 2 rechts), style (−1 = Standard)
+//   DIMSTYLE = 14, name_idx, textstyle (−1), scale, txt, tick, exo, exe, gap, dec, lfac, post_idx (−1)   (Papier-Meter, s. export_dim.rs)
+//   DIM      = 15, layer, dimstyle, x1, y1, x2, y2, dx, dy (Punkt auf der Masslinie), has_text, tx, ty
+//   BLOCK    = 16, name_idx, desc_idx (−1), n_att, (tag_idx, prompt_idx, default_idx, x, y, height) × n_att
+//              — alle Entitätsdatensätze bis BLOCK_END gehören in die Blockdefinition (Koordinaten blocklokal)
+//   BLOCK_END= 17
+//   INSERT   = 18, layer, name_idx, x, y, rotation, sx, sy, n_att, (tag_idx, value_idx) × n_att
+//   LAYOUT   = 19, name_idx, paper_w, paper_h (mm), vp_cx, vp_cy, vp_w, vp_h (mm), view_cx, view_cy (Modell-m), scale_denominator
+//
 // `layer` ist der Index des LAYER-Datensatzes (Reihenfolge des Auftretens, ab 0), er muss vorher
 // stehen. Schraffuren sind echte HATCH-Entitäten ([C2], 28.10.): Vollfüllung (`SOLID`) oder ein
 // Linienmuster, das hier aus Winkel und Linienabstand der Dossier-Schraffur gebaut wird (je Linienschar
@@ -51,10 +65,17 @@ use acadrust::entities::{
     BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, HatchGradientPattern, HatchPattern, HatchPatternLine,
     HatchPatternType, PolylineEdge,
 };
+use acadrust::entities::{
+    AttributeDefinition, AttributeEntity, Insert, TextHorizontalAlignment, Viewport,
+};
+use acadrust::tables::{BlockRecord, LineType, LineTypeElement, TextStyle};
+use acadrust::types::Handle;
 use acadrust::{
     Arc, CadDocument, Circle, Color, DwgWriter, DxfVersion, DxfWriter, EntityType, Layer, Line,
     LineWeight, LwPolyline, Text, Vector2, Vector3,
 };
+
+use crate::export_dim::{build_aligned, into_entity, make_dimstyle, DimStyleDef};
 
 /// Version der flachen Kodierung (erstes Element des Puffers).
 pub const FLAT_VERSION: f64 = 1.0;
@@ -67,6 +88,17 @@ pub const REC_CIRCLE: f64 = 5.0;
 pub const REC_TEXT: f64 = 6.0;
 pub const REC_HATCH: f64 = 7.0;
 pub const REC_GRADIENT: f64 = 8.0;
+pub const REC_LTYPE: f64 = 9.0;
+pub const REC_LAYER_LTYPE: f64 = 10.0;
+pub const REC_PEN: f64 = 11.0;
+pub const REC_STYLE: f64 = 12.0;
+pub const REC_TEXT2: f64 = 13.0;
+pub const REC_DIMSTYLE: f64 = 14.0;
+pub const REC_DIM: f64 = 15.0;
+pub const REC_BLOCK: f64 = 16.0;
+pub const REC_BLOCK_END: f64 = 17.0;
+pub const REC_INSERT: f64 = 18.0;
+pub const REC_LAYOUT: f64 = 19.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -155,12 +187,18 @@ fn all_finite(v: &[f64]) -> bool {
     v.iter().all(|x| x.is_finite())
 }
 
+/// Genormte CAD-Strichstärken (1/100 mm). Andere Werte kennt AutoCAD nicht; es rundet beim Lesen
+/// uneinheitlich, darum rasten wir selbst auf die nächste Stufe ein.
+const STD_LINE_WEIGHTS: [i16; 24] =
+    [0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211];
+
 fn line_weight(v: f64) -> LineWeight {
     if !v.is_finite() || v < 0.0 {
         return LineWeight::Default;
     }
-    // Gültige DXF-Stufen enden bei 211 (2.11 mm).
-    LineWeight::Value(v.round().min(211.0) as i16)
+    let w = v.round().min(211.0) as i16;
+    let nearest = STD_LINE_WEIGHTS.iter().copied().min_by_key(|s| (s - w).abs()).unwrap_or(25);
+    LineWeight::Value(nearest)
 }
 
 fn layer_color(rgb: f64) -> Color {
@@ -228,6 +266,76 @@ fn make_gradient_hatch(pts: &[f64], rgb1: u32, rgb2: u32, angle: f64, radial: bo
     hatch
 }
 
+/// Obergrenzen gegen Unsinn im Puffer.
+const MAX_LTYPE_ELEMENTS: usize = 16;
+const MAX_BLOCK_ATTS: usize = 32;
+
+/// Blockname bereinigen: wie Ebenennamen, ein führendes `*` (= Anonymblock) wird zu `_`.
+fn sanitize_block_name(name: &str) -> String {
+    let n = sanitize_layer_name(name);
+    if let Some(rest) = n.strip_prefix('*') {
+        format!("_{rest}")
+    } else {
+        n
+    }
+}
+
+/// Neuer Blockeintrag (BLOCK-Tabelle) mit eigenen Handles; Entitäten werden über `owner_handle` zugeordnet.
+fn new_block_record(doc: &mut CadDocument, name: &str, anonymous: bool) -> Result<Handle, String> {
+    let mut rec = BlockRecord::new(name);
+    rec.handle = doc.allocate_handle();
+    rec.block_entity_handle = doc.allocate_handle();
+    rec.block_end_handle = doc.allocate_handle();
+    rec.flags.anonymous = anonymous;
+    let h = rec.handle;
+    doc.block_records.add(rec).map_err(|e| format!("Block {name}: {e}"))?;
+    Ok(h)
+}
+
+/// Eine Blockdefinition: Handle des Blockeintrags und ihre Attributdefinitionen (Tag, ATTDEF-Handle, Höhe).
+struct BlockDef {
+    atts: Vec<(String, Handle, f64)>,
+}
+
+/// Papierbereich: ein Layout in mm mit einem Ansichtsfenster auf den Modellbereich. `v` = Papierbreite,
+/// Papierhöhe, Mittelpunkt (x, y) und Grösse (b, h) des Fensters auf dem Papier (mm), Mittelpunkt des
+/// Bildausschnitts im Modell (m), Massstabsnenner. Massstab: 1 m Modell = 1000/Nenner mm Papier.
+fn add_layout_with_viewport(doc: &mut CadDocument, name: &str, v: &[f64]) -> Result<(), String> {
+    let (pw, ph, cx, cy, vw, vh) = (v[0], v[1], v[2], v[3], v[4], v[5]);
+    let layout_handle = doc.add_layout(name).map_err(|e| format!("Layout {name}: {e}"))?;
+    // Papiergrösse und Grenzen im Layout-Objekt; Blattviewport (ID 1) deckt das Papier.
+    let mut overall = Handle::NULL;
+    if let Some(acadrust::objects::ObjectType::Layout(l)) = doc.objects.get_mut(&layout_handle) {
+        l.paper_width = pw;
+        l.paper_height = ph;
+        l.min_limits = (0.0, 0.0);
+        l.max_limits = (pw, ph);
+        l.min_extents = (0.0, 0.0, 0.0);
+        l.max_extents = (pw, ph, 0.0);
+        overall = l.viewport;
+    }
+    if let Some(EntityType::Viewport(vp)) = doc.get_entity_mut(overall) {
+        vp.center = Vector3::new(pw / 2.0, ph / 2.0, 0.0);
+        vp.width = pw;
+        vp.height = ph;
+        vp.view_center = Vector3::new(pw / 2.0, ph / 2.0, 0.0);
+        vp.view_height = ph;
+    }
+    let mut vp = Viewport::new();
+    vp.id = 2;
+    vp.status = acadrust::entities::ViewportStatusFlags::default_on();
+    vp.center = Vector3::new(cx, cy, 0.0);
+    vp.width = vw;
+    vp.height = vh;
+    vp.view_center = Vector3::new(v[6], v[7], 0.0);
+    vp.view_target = Vector3::new(v[6], v[7], 0.0);
+    vp.set_scale(1000.0 / v[8]);
+    vp.common.layer = "0".to_string();
+    doc.add_entity_to_layout(EntityType::Viewport(Box::new(vp)), name)
+        .map_err(|e| format!("Ansichtsfenster {name}: {e}"))?;
+    Ok(())
+}
+
 /// Baut aus der flachen Zeichnung ein acadrust-Dokument (Einheit Meter, metrisch).
 pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String> {
     let strs: Vec<&str> = if strings.is_empty() { Vec::new() } else { strings.split('\0').collect() };
@@ -245,6 +353,25 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
     doc.header.measurement = 1; // metrisch
     // Ebenen-Index (Datensatzreihenfolge) → bereinigter Name.
     let mut layers: Vec<String> = Vec::new();
+    // Linientypen, Textstile, Bemassungsstile: Index (Datensatzreihenfolge) → Name bzw. Definition.
+    let mut ltypes: Vec<String> = Vec::new();
+    let mut styles: Vec<String> = Vec::new();
+    let mut dimstyles: Vec<DimStyleDef> = Vec::new();
+    let mut blocks: std::collections::HashMap<String, BlockDef> = std::collections::HashMap::new();
+    let mut cur_ltype = String::new();
+    let mut cur_block: Option<Handle> = None;
+    let mut dim_counter = 0usize;
+
+    // Optionaler Index: −1 = nicht gesetzt.
+    let opt_idx = |v: f64, what: &str| -> Result<Option<usize>, String> {
+        if v == -1.0 {
+            Ok(None)
+        } else if v.is_finite() && v >= 0.0 && v.fract() == 0.0 && v <= u32::MAX as f64 {
+            Ok(Some(v as usize))
+        } else {
+            Err(format!("ungültiger Index {v} ({what})"))
+        }
+    };
 
     while !r.done() {
         let tag = r.f()?;
@@ -262,8 +389,174 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             layers.push(name);
             continue;
         }
+        if tag == REC_LTYPE {
+            let name = sanitize_layer_name(str_at(r.idx()?)?);
+            let n = r.idx()?;
+            if n > MAX_LTYPE_ELEMENTS {
+                return Err(format!("zu viele Linientyp-Elemente ({n}) bei {}", r.pos - 1));
+            }
+            let el = r.take(n)?;
+            let valid = n >= 2 && all_finite(el) && el.iter().map(|e| e.abs()).sum::<f64>() > 1e-9;
+            // Ungültiges Muster: Index bleibt belegt, der Linientyp ist dann durchgezogen.
+            if !valid || ["continuous", "bylayer", "byblock"].contains(&name.to_lowercase().as_str()) {
+                ltypes.push("Continuous".to_string());
+            } else {
+                if !doc.line_types.contains(&name) {
+                    let mut lt = LineType::new(name.clone());
+                    lt.description = format!("Dossier {name}");
+                    for &e in el {
+                        lt.add_element(if e > 0.0 {
+                            LineTypeElement::dash(e)
+                        } else if e < 0.0 {
+                            LineTypeElement::space(-e)
+                        } else {
+                            LineTypeElement::dot()
+                        });
+                    }
+                    lt.pattern_length = el.iter().map(|e| e.abs()).sum();
+                    doc.line_types.add(lt).map_err(|e| format!("Linientyp {name}: {e}"))?;
+                }
+                ltypes.push(name);
+            }
+            continue;
+        }
+        if tag == REC_LAYER_LTYPE {
+            let li = r.idx()?;
+            let ti = r.idx()?;
+            let lname = layers.get(li).ok_or_else(|| format!("Ebene {li} nicht definiert"))?.clone();
+            let lt = ltypes.get(ti).ok_or_else(|| format!("Linientyp {ti} nicht definiert"))?.clone();
+            if lname != "0" && lt != "Continuous" {
+                if let Some(layer) = doc.layers.get_mut(&lname) {
+                    layer.line_type = lt;
+                }
+            }
+            continue;
+        }
+        if tag == REC_PEN {
+            cur_ltype = match opt_idx(r.f()?, "Linientyp")? {
+                None => String::new(),
+                Some(i) => ltypes.get(i).ok_or_else(|| format!("Linientyp {i} nicht definiert"))?.clone(),
+            };
+            if cur_ltype == "Continuous" {
+                cur_ltype.clear();
+            }
+            continue;
+        }
+        if tag == REC_STYLE {
+            let name = sanitize_layer_name(str_at(r.idx()?)?);
+            let font = str_at(r.idx()?)?.trim().to_string();
+            let bold = r.f()? != 0.0;
+            let italic = r.f()? != 0.0;
+            let width = r.f()?;
+            if !doc.text_styles.contains(&name) {
+                let mut st = TextStyle::with_truetype(name.clone(), if font.is_empty() { "Arial" } else { &font });
+                st.font_file = String::new(); // Auflösung über den TrueType-Namen (XDATA), nicht über eine Datei
+                st.handle = doc.allocate_handle(); // DIMSTYLE verweist (Code 340) über dieses Handle auf den Stil
+                st.true_type_font_flags = 34 | if bold { 0x0200_0000 } else { 0 } | if italic { 0x0100_0000 } else { 0 };
+                if width.is_finite() && width > 0.0 {
+                    st.width_factor = width;
+                }
+                doc.text_styles.add(st).map_err(|e| format!("Textstil {name}: {e}"))?;
+            }
+            styles.push(name);
+            continue;
+        }
+        if tag == REC_DIMSTYLE {
+            let name = sanitize_layer_name(str_at(r.idx()?)?);
+            let ts = opt_idx(r.f()?, "Textstil")?;
+            let v = r.take(8)?;
+            let post = match opt_idx(r.f()?, "Format")? {
+                Some(i) => str_at(i)?.to_string(),
+                None => String::new(),
+            };
+            let def = DimStyleDef {
+                name: name.clone(),
+                text_style: match ts {
+                    Some(i) => styles.get(i).ok_or_else(|| format!("Textstil {i} nicht definiert"))?.clone(),
+                    None => "Standard".to_string(),
+                },
+                scale: v[0],
+                txt: v[1],
+                tick: v[2],
+                exo: v[3],
+                exe: v[4],
+                gap: v[5],
+                dec: if v[6].is_finite() { v[6] as i16 } else { -1 },
+                lfac: v[7],
+                post,
+            };
+            if def.is_valid() && !doc.dim_styles.contains(&name) {
+                let mut ds = make_dimstyle(&def);
+                if let Some(ts) = doc.text_styles.get(&def.text_style) {
+                    ds.dimtxsty_handle = ts.handle;
+                }
+                doc.dim_styles.add(ds).map_err(|e| format!("Bemassungsstil {name}: {e}"))?;
+            }
+            dimstyles.push(def);
+            continue;
+        }
+        if tag == REC_BLOCK {
+            if cur_block.is_some() {
+                return Err(format!("Block in Block bei {}", r.pos - 1));
+            }
+            let name = sanitize_block_name(str_at(r.idx()?)?);
+            let desc = match opt_idx(r.f()?, "Beschreibung")? {
+                Some(i) => str_at(i)?.to_string(),
+                None => String::new(),
+            };
+            let n_att = r.idx()?;
+            if n_att > MAX_BLOCK_ATTS {
+                return Err(format!("zu viele Attribute ({n_att}) bei {}", r.pos - 1));
+            }
+            let h = new_block_record(&mut doc, &name, false)?;
+            if let Some(br) = doc.block_records.get_mut(&name) {
+                br.description = desc;
+            }
+            let mut atts = Vec::new();
+            for _ in 0..n_att {
+                let tag_s = str_at(r.idx()?)?.to_uppercase().replace(' ', "_");
+                let prompt = str_at(r.idx()?)?.to_string();
+                let default = str_at(r.idx()?)?.to_string();
+                let v = r.take(3)?;
+                if !all_finite(v) || v[2] <= 0.0 || tag_s.is_empty() {
+                    continue;
+                }
+                let mut ad = AttributeDefinition::new(tag_s.clone(), prompt, default);
+                ad.insertion_point = Vector3::new(v[0], v[1], 0.0);
+                ad.height = v[2];
+                ad.flags.invisible = true; // Daten, keine Beschriftung: erscheint nur im Attribut-Editor/in Tabellen
+                ad.common.layer = "0".to_string();
+                ad.common.owner_handle = h;
+                let ah = doc.add_entity(EntityType::AttributeDefinition(ad)).map_err(|e| format!("ATTDEF: {e}"))?;
+                atts.push((tag_s, ah, v[2]));
+            }
+            if !atts.is_empty() {
+                if let Some(br) = doc.block_records.get_mut(&name) {
+                    br.flags.has_attributes = true;
+                }
+            }
+            blocks.insert(name, BlockDef { atts });
+            cur_block = Some(h);
+            continue;
+        }
+        if tag == REC_BLOCK_END {
+            if cur_block.take().is_none() {
+                return Err(format!("BLOCK_END ohne BLOCK bei {}", r.pos - 1));
+            }
+            continue;
+        }
+        if tag == REC_LAYOUT {
+            let name = sanitize_layer_name(str_at(r.idx()?)?);
+            let v = r.take(9)?;
+            // Papier ≥ 10 mm, Ansichtsfenster ≥ 1 mm, Massstab > 0; sonst bleibt der Papierbereich weg.
+            if all_finite(v) && v[0] >= 10.0 && v[1] >= 10.0 && v[4] >= 1.0 && v[5] >= 1.0 && v[8] > 0.0 && cur_block.is_none() {
+                add_layout_with_viewport(&mut doc, &name, v)?;
+            }
+            continue;
+        }
         let li = r.idx()?;
         let layer = layers.get(li).ok_or_else(|| format!("Ebene {li} nicht definiert"))?.clone();
+        // Entitäten, die selbst Blöcke/mehrere Entitäten erzeugen (DIM), legen ihre Nebenentitäten selbst an.
         let entity = if tag == REC_LINE {
             let v = r.take(4)?;
             all_finite(v).then(|| EntityType::Line(Line::from_coords(v[0], v[1], 0.0, v[2], v[3], 0.0)))
@@ -288,6 +581,27 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             let v = r.take(4)?;
             (all_finite(v) && v[2] > 0.0).then(|| {
                 EntityType::Text(Text::with_value(value, Vector3::new(v[0], v[1], 0.0)).with_height(v[2]).with_rotation(v[3]))
+            })
+        } else if tag == REC_TEXT2 {
+            let value = sanitize_text(str_at(r.idx()?)?);
+            let v = r.take(4)?;
+            let halign = r.f()?;
+            let style = opt_idx(r.f()?, "Textstil")?;
+            let style_name = match style {
+                Some(i) => styles.get(i).ok_or_else(|| format!("Textstil {i} nicht definiert"))?.clone(),
+                None => "Standard".to_string(),
+            };
+            (all_finite(v) && v[2] > 0.0 && !value.trim().is_empty()).then(|| {
+                let at = Vector3::new(v[0], v[1], 0.0);
+                let mut t = Text::with_value(value, at).with_height(v[2]).with_rotation(v[3]);
+                t.style = style_name;
+                // TEXT 72/73: bei Mitte/rechts steht die Lage unter Gruppe 11 (Ausrichtungspunkt).
+                if halign == 1.0 || halign == 2.0 {
+                    t.horizontal_alignment =
+                        if halign == 1.0 { TextHorizontalAlignment::Center } else { TextHorizontalAlignment::Right };
+                    t.alignment_point = Some(at);
+                }
+                EntityType::Text(t)
             })
         } else if tag == REC_HATCH {
             let mode = r.f()?;
@@ -332,11 +646,72 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             (n >= 3 && all_finite(pts) && angle.is_finite() && in_range(rgb1) && in_range(rgb2)).then(|| {
                 EntityType::Hatch(Box::new(make_gradient_hatch(pts, rgb1 as u32, rgb2 as u32, angle, kind == 1.0)))
             })
+        } else if tag == REC_DIM {
+            let di = r.idx()?;
+            let v = r.take(6)?;
+            let has_text = r.f()? != 0.0;
+            let t = r.take(2)?;
+            let def = dimstyles.get(di).ok_or_else(|| format!("Bemassungsstil {di} nicht definiert"))?;
+            let text_at = has_text.then(|| [t[0], t[1]]);
+            let block_name = format!("*D{}", dim_counter + 1);
+            match build_aligned(def, &block_name, &layer, [v[0], v[1]], [v[2], v[3]], [v[4], v[5]], text_at) {
+                Some(built) if doc.dim_styles.contains(&def.name) => {
+                    dim_counter += 1;
+                    let bh = new_block_record(&mut doc, &block_name, true)?;
+                    for mut be in built.block_entities {
+                        be.common_mut().owner_handle = bh;
+                        doc.add_entity(be).map_err(|e| format!("Bemassungsblock: {e}"))?;
+                    }
+                    Some(into_entity(built.entity))
+                }
+                _ => None,
+            }
+        } else if tag == REC_INSERT {
+            let name = sanitize_block_name(str_at(r.idx()?)?);
+            let v = r.take(5)?;
+            let n_att = r.idx()?;
+            if n_att > MAX_BLOCK_ATTS {
+                return Err(format!("zu viele Attribute ({n_att}) bei {}", r.pos - 1));
+            }
+            let mut values: Vec<(String, String)> = Vec::new();
+            for _ in 0..n_att {
+                let tag_s = str_at(r.idx()?)?.to_uppercase().replace(' ', "_");
+                let val = sanitize_text(str_at(r.idx()?)?);
+                values.push((tag_s, val));
+            }
+            let def = blocks.get(&name).ok_or_else(|| format!("Block {name} nicht definiert"))?;
+            (all_finite(v) && v[3].abs() > 1e-12 && v[4].abs() > 1e-12).then(|| {
+                let at = Vector3::new(v[0], v[1], 0.0);
+                let mut ins = Insert::new(name.clone(), at).with_rotation(v[2]).with_scale(v[3], v[4], 1.0);
+                for (tag_s, ah, height) in &def.atts {
+                    if let Some((_, val)) = values.iter().find(|(t, _)| t == tag_s) {
+                        let mut a = AttributeEntity::new(tag_s.clone(), val.clone());
+                        a.insertion_point = at;
+                        a.alignment_point = at;
+                        a.height = *height * v[3].abs();
+                        a.rotation = v[2];
+                        a.attdef_handle = *ah;
+                        a.flags.invisible = true;
+                        a.common.layer = layer.clone();
+                        ins.attributes.push(a);
+                    }
+                }
+                EntityType::Insert(ins)
+            })
         } else {
             return Err(format!("unbekannter Datensatz {tag} bei {}", r.pos - 1));
         };
         if let Some(mut e) = entity {
             e.common_mut().layer = layer;
+            // Linientyp nur auf Linien-artigen Entitäten (Schraffur/Text/Block tragen ihn nicht).
+            if !cur_ltype.is_empty()
+                && matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Arc(_) | EntityType::Circle(_))
+            {
+                e.common_mut().linetype = cur_ltype.clone();
+            }
+            if let Some(owner) = cur_block {
+                e.common_mut().owner_handle = owner;
+            }
             doc.add_entity(e).map_err(|e| format!("Entität: {e}"))?;
         }
     }
@@ -783,5 +1158,217 @@ mod tests {
         check(&read_dxf(bin));
         let (flat, strings) = hatch_sample();
         check_hatches(&read_dxf(export_dxf_binary(&flat, &strings).unwrap()));
+    }
+
+    // ── [C2] Fachplaner-Export: Linientypen, Textstile, Bemassung, Blöcke, Attribute ─────────────
+
+    /// Zeichnung mit allen neuen Datensatzarten (LV95).
+    fn cad_sample() -> (Vec<f64>, String) {
+        let strings = [
+            "21_Wände",         // 0 Ebene
+            "0",                // 1 Ebene 0
+            "DOSSIER_STRICH_0.3_0.1", // 2 Linientyp
+            "DOSSIER",          // 3 Textstil
+            "Helvetica Neue",   // 4 Schrift
+            "DOSSIER_1-100",    // 5 Bemassungsstil
+            "T_Tür_0.9x2.1",    // 6 Block
+            "Tür 0.90 x 2.10",  // 7 Beschreibung
+            "TYP",              // 8 Tag
+            "Typ",              // 9 Prompt
+            "Tür",              // 10 Vorgabe
+            "BREITE",           // 11 Tag
+            "0.90",             // 12 Wert
+            "Fensterbank Küche",// 13 Text
+        ]
+        .join("\0");
+        let (e, n) = (E, N);
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, 0x8a_5a_44 as f64, 50.0,
+            REC_LAYER, 1.0, -1.0, 25.0,
+            REC_LTYPE, 2.0, 4.0, 0.03, -0.01, 0.03, -0.01,
+            REC_LAYER_LTYPE, 0.0, 0.0,
+            REC_STYLE, 3.0, 4.0, 1.0, 0.0, 1.0,
+            REC_DIMSTYLE, 5.0, 0.0, 100.0, 0.004, 0.003, 0.001, 0.001, 0.0024, 2.0, 1.0, -1.0,
+            // Block mit zwei Linien und einem Attribut-Paar (nur TYP definiert, BREITE unbekannt → ignoriert)
+            REC_BLOCK, 6.0, 7.0, 1.0, 8.0, 9.0, 10.0, 0.0, 0.0, 0.1,
+            REC_LINE, 1.0, 0.0, 0.0, 0.9, 0.0,
+            REC_ARC, 1.0, 0.0, 0.0, 0.9, 0.0, std::f64::consts::FRAC_PI_2,
+            REC_BLOCK_END,
+            REC_PEN, 0.0,
+            REC_LINE, 0.0, e, n, e + 4.0, n,
+            REC_PEN, -1.0,
+            REC_TEXT2, 0.0, 13.0, e + 2.0, n + 1.0, 0.2, 0.0, 1.0, 0.0,
+            REC_DIM, 0.0, 0.0, e, n, e + 4.0, n, e, n - 1.0, 0.0, 0.0, 0.0,
+            REC_INSERT, 0.0, 6.0, e + 1.0, n, 1.0, 1.0, 1.0, 1.0, 8.0, 12.0,
+            REC_INSERT, 0.0, 6.0, e + 3.0, n, 0.0, 0.5, 0.5, 0.0,
+        ];
+        (flat, strings)
+    }
+
+    fn check_cad(doc: &CadDocument) {
+        // Linientyp
+        let lt = doc.line_types.get("DOSSIER_STRICH_0.3_0.1").expect("Linientyp");
+        assert_eq!(lt.elements.len(), 4);
+        assert!((lt.elements[0].length - 0.03).abs() < 1e-12 && (lt.elements[1].length + 0.01).abs() < 1e-12);
+        let line = doc.model_space_entities().find_map(|x| if let EntityType::Line(l) = x { Some(l) } else { None }).expect("Linie");
+        assert_eq!(line.common.linetype, "DOSSIER_STRICH_0.3_0.1");
+        assert_eq!(doc.layers.get("21_Wände").unwrap().line_type, "DOSSIER_STRICH_0.3_0.1");
+        // Textstil
+        let st = doc.text_styles.get("DOSSIER").expect("Textstil");
+        assert_eq!(st.true_type_font, "Helvetica Neue");
+        // Text mit Mittelausrichtung
+        let txt = doc.model_space_entities().find_map(|x| if let EntityType::Text(t) = x { Some(t) } else { None }).unwrap();
+        assert_eq!(txt.value, "Fensterbank Küche");
+        assert_eq!(txt.horizontal_alignment, TextHorizontalAlignment::Center);
+        assert_eq!(txt.alignment_point.map(|p| (p.x, p.y)), Some((E + 2.0, N + 1.0)));
+        // Bemassungsstil
+        let ds = doc.dim_styles.get("DOSSIER_1-100").expect("Bemassungsstil");
+        assert!((ds.dimscale - 100.0).abs() < 1e-12 && (ds.dimtxt - 0.004).abs() < 1e-12);
+        assert!((ds.dimtsz - 0.0015).abs() < 1e-12 && ds.dimtad == 1);
+        // Bemassung: echte DIMENSION mit Anonymblock
+        let dim = doc
+            .model_space_entities()
+            .find_map(|x| if let EntityType::Dimension(d) = x { Some(d) } else { None })
+            .expect("DIMENSION");
+        assert!((dim.base().actual_measurement - 4.0).abs() < 1e-9, "{}", dim.base().actual_measurement);
+        assert_eq!(dim.base().style_name, "DOSSIER_1-100");
+        let block = dim.base().block_name.clone();
+        assert!(block.starts_with("*D"), "{block}");
+        let in_block: Vec<&EntityType> = doc.entities_in_block(&block).collect();
+        assert_eq!(in_block.iter().filter(|e| matches!(e, EntityType::Line(_))).count(), 5);
+        assert!(in_block.iter().any(|e| matches!(e, EntityType::Text(t) if t.value == "4.00")));
+        // Block + INSERT + Attribut
+        let br = doc.block_records.get("T_Tür_0.9x2.1").expect("Block");
+        assert_eq!(br.description, "Tür 0.90 x 2.10");
+        let content: Vec<&EntityType> = doc.entities_in_block("T_Tür_0.9x2.1").collect();
+        assert_eq!(content.iter().filter(|e| matches!(e, EntityType::Line(_))).count(), 1);
+        assert_eq!(content.iter().filter(|e| matches!(e, EntityType::Arc(_))).count(), 1);
+        assert_eq!(content.iter().filter(|e| matches!(e, EntityType::AttributeDefinition(_))).count(), 1);
+        let inserts: Vec<&Insert> =
+            doc.model_space_entities().filter_map(|x| if let EntityType::Insert(i) = x { Some(i) } else { None }).collect();
+        assert_eq!(inserts.len(), 2);
+        assert_eq!(inserts[0].block_name, "T_Tür_0.9x2.1");
+        assert_eq!((inserts[0].insert_point.x, inserts[0].insert_point.y), (E + 1.0, N));
+        assert_eq!(inserts[0].attributes.len(), 1);
+        assert_eq!(inserts[0].attributes[0].tag, "TYP");
+        assert_eq!(inserts[0].attributes[0].value, "0.90"); // Wert 12 steht unter Tag 8 (TYP)
+        assert!((inserts[1].x_scale() - 0.5).abs() < 1e-12);
+        assert!(inserts[1].attributes.is_empty());
+        // Die INSERTs und die Bemassung liegen im Modellbereich, Blockinhalt nicht.
+        let model = doc.model_space_entities().count();
+        assert!(doc.entities().count() > model);
+    }
+
+    #[test]
+    fn fachplaner_export_rundreise_dxf_binaer_und_dwg() {
+        let (flat, strings) = cad_sample();
+        check_cad(&read_dxf(export_dxf(&flat, &strings).unwrap()));
+        check_cad(&read_dxf(export_dxf_binary(&flat, &strings).unwrap()));
+        check_cad(&read_dwg(export_dwg(&flat, &strings).unwrap()));
+    }
+
+    #[test]
+    fn dxf_text_traegt_dimension_block_style_und_ltype() {
+        let (flat, strings) = cad_sample();
+        let text = String::from_utf8(export_dxf(&flat, &strings).unwrap()).unwrap();
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let has = |code: &str, val: &str| lines.windows(2).any(|w| w[0] == code && w[1] == val);
+        assert!(has("0", "DIMENSION") && has("100", "AcDbAlignedDimension"));
+        assert!(has("2", "*D1"));
+        assert!(has("0", "ATTDEF") && has("0", "ATTRIB"));
+        assert!(has("2", "DOSSIER_STRICH_0.3_0.1") && has("2", "Helvetica Neue") == false);
+        assert!(has("1000", "Helvetica Neue"));
+        assert!(has("72", "1")); // TEXT zentriert
+    }
+
+    #[test]
+    fn kaputte_cad_datensaetze_sind_fehler_oder_werden_verworfen() {
+        let head = [FLAT_VERSION, REC_LAYER, 0.0, -1.0, 25.0];
+        let mk = |rest: &[f64]| {
+            let mut v = head.to_vec();
+            v.extend_from_slice(rest);
+            v
+        };
+        // Unbekannte Indizes → Fehler
+        assert!(export_dxf(&mk(&[REC_DIM, 0.0, 5.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]), "P").is_err());
+        assert!(export_dxf(&mk(&[REC_INSERT, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0]), "P").is_err()); // Block fehlt
+        assert!(export_dxf(&mk(&[REC_PEN, 3.0]), "P").is_err());
+        assert!(export_dxf(&mk(&[REC_BLOCK_END]), "P").is_err());
+        assert!(export_dxf(&mk(&[REC_BLOCK, 0.0, -1.0, 0.0, REC_BLOCK, 0.0, -1.0, 0.0]), "P").is_err()); // Block im Block
+        assert!(export_dxf(&mk(&[REC_LTYPE, 0.0, 99.0]), "P").is_err());
+        assert!(export_dxf(&mk(&[REC_TEXT2, 0.0, 0.0, 0.0]), "P").is_err()); // abgeschnitten
+        // Entartetes: DIM mit Länge 0 / NaN, INSERT mit Skalierung 0, leerer Text → übersprungen
+        let ds = [REC_DIMSTYLE, 0.0, -1.0, 100.0, 0.004, 0.003, 0.001, 0.001, 0.0024, 2.0, 1.0, -1.0];
+        let mut v = mk(&ds);
+        v.extend_from_slice(&[REC_DIM, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 2.0, 0.0, 0.0, 0.0]);
+        v.extend_from_slice(&[REC_DIM, 0.0, 0.0, f64::NAN, 1.0, 2.0, 1.0, 0.0, 2.0, 0.0, 0.0, 0.0]);
+        v.extend_from_slice(&[REC_BLOCK, 0.0, -1.0, 0.0, REC_BLOCK_END, REC_INSERT, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        v.extend_from_slice(&[REC_TEXT2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.0, 0.0, -1.0]);
+        let doc = read_dxf(export_dxf(&v, "  ").unwrap());
+        assert_eq!(doc.entities().filter(|e| !matches!(e, EntityType::Insert(_))).count(), 0);
+        // Ungültiger Bemassungsstil (Massstab 0): DIM entfällt, Stil wird nicht geschrieben.
+        let mut bad = mk(&[REC_DIMSTYLE, 0.0, -1.0, 0.0, 0.004, 0.003, 0.001, 0.001, 0.0024, 2.0, 1.0, -1.0]);
+        bad.extend_from_slice(&[REC_DIM, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+        let doc = read_dxf(export_dxf(&bad, "S").unwrap());
+        assert_eq!(doc.entities().count(), 0);
+    }
+
+    #[test]
+    fn strichstaerken_rasten_auf_cad_stufen() {
+        assert_eq!(line_weight(18.0), LineWeight::Value(18));
+        assert_eq!(line_weight(17.0), LineWeight::Value(18));
+        assert_eq!(line_weight(22.0), LineWeight::Value(20));
+        assert_eq!(line_weight(1000.0), LineWeight::Value(211));
+        assert_eq!(line_weight(-3.0), LineWeight::Default);
+    }
+
+    /// Papierbereich: Layout mit Blattviewport und einem Ansichtsfenster im Planmassstab.
+    fn layout_flat() -> (Vec<f64>, String) {
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, -1.0, 25.0,
+            REC_LINE, 0.0, E, N, E + 10.0, N,
+            // A3 quer, Fenster 400 x 277 mm um (210, 148), Ausschnitt um (E+5, N+3), 1:50
+            REC_LAYOUT, 1.0, 420.0, 297.0, 210.0, 148.5, 400.0, 277.0, E + 5.0, N + 3.0, 50.0,
+        ];
+        (flat, "P\0Plan 1:50".to_string())
+    }
+
+    fn check_layout(doc: &CadDocument) {
+        let layout = doc
+            .objects
+            .values()
+            .find_map(|o| if let acadrust::objects::ObjectType::Layout(l) = o { (l.name == "Plan_1_50").then_some(l) } else { None })
+            .or_else(|| doc.objects.values().find_map(|o| if let acadrust::objects::ObjectType::Layout(l) = o { (l.name.starts_with("Plan")).then_some(l) } else { None }))
+            .expect("Layout");
+        assert!((layout.paper_width - 420.0).abs() < 1e-9 && (layout.paper_height - 297.0).abs() < 1e-9);
+        let vps: Vec<&acadrust::entities::Viewport> = doc
+            .entities()
+            .filter_map(|e| if let EntityType::Viewport(v) = e { Some(v.as_ref()) } else { None })
+            .filter(|v| v.id == 2)
+            .collect();
+        assert_eq!(vps.len(), 1);
+        let vp = vps[0];
+        assert!((vp.width - 400.0).abs() < 1e-9 && (vp.height - 277.0).abs() < 1e-9);
+        assert!((vp.view_center.x - (E + 5.0)).abs() < 1e-6 && (vp.view_center.y - (N + 3.0)).abs() < 1e-6);
+        // 1:50 → 1 m = 20 mm Papier; Ausschnitt 277 mm / 20 = 13.85 m hoch.
+        assert!((vp.view_height - 13.85).abs() < 1e-9, "{}", vp.view_height);
+    }
+
+    #[test]
+    fn papierbereich_mit_ansichtsfenster_dxf_und_dwg() {
+        let (flat, strings) = layout_flat();
+        check_layout(&read_dxf(export_dxf(&flat, &strings).unwrap()));
+        check_layout(&read_dwg(export_dwg(&flat, &strings).unwrap()));
+    }
+
+    #[test]
+    fn entartetes_layout_wird_uebersprungen() {
+        let (mut flat, strings) = layout_flat();
+        let n = flat.len();
+        flat[n - 1] = 0.0; // Massstab 0
+        let doc = read_dxf(export_dxf(&flat, &strings).unwrap());
+        assert!(doc.entities().all(|e| !matches!(e, EntityType::Viewport(_))));
     }
 }

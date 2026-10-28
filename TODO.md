@@ -690,6 +690,29 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
     Anonymblock nur als Text; Toleranzen/Alternativeinheiten/Textrahmen fehlen; Layout-Ansichtsfenster
     (Modellansicht im Papierbereich) werden nicht abgebildet; bei Aufteilung grosser DXF (≥ 4 MB, parallel) fehlt
     der Layout-Bericht; Ordinate-Bemassung; Tauri/macOS nicht getestet.
+  - ✅ **Export für Fachplaner** (28.10.): statt loser Linien schreibt der Export dort, wo das Modell die Information
+    trägt, CAD-Objekte (`export/exportDxf.ts` sammelt, `fileio/src/export.rs` + `export_dim.rs` bauen; neue
+    Datensätze der flachen Zeichnung, Version bleibt 1). **Bemassung:** `Drawing2D {shape:"dimension"}` → je Segment
+    eine echte ausgerichtete DIMENSION mit Anonymblock `*D…` (Hilfslinien, Masslinie, 45°-Architekturstriche, Masszahl
+    über der Linie, nie kopfüber) und DIMSTYLE `DOSSIER_1-<N>` (DIMSCALE = Massstab, DIMTXT/DIMTSZ/DIMEXO/DIMEXE in
+    Papier-mm, DIMTAD 1, Textstil); von Hand verschobene Masszahlen bleiben. **Türen/Fenster** (Primitive mit
+    `openingId`, Rahmen aus der Wand) → BLOCK `Tuer_90x210`/`Fenster_…` in Wandrichtung + INSERT mit ATTRIB (ID, TYP,
+    TYPENAME, BREITE_M, HOEHE_M, BRUESTUNG_M); gleiche lokale Geometrie teilt sich einen Block. **Möbel/Symbole/
+    Nordpfeil** (`shape:"block"`) → BLOCK je Definition (Name = Blockname) + INSERT mit Drehung/Skalierung.
+    **Linientypen:** Strichmuster → LTYPE (Name des Projekt-Linienstils bzw. `DOSSIER_STRICH_…`, Papier-mm × Massstab),
+    je Entität gesetzt. **Textstile:** STYLE `DOSSIER` mit Schriftname aus den Projekt-Textstilen (sonst Arial), Fett/
+    Kursiv als eigene Stile; Raumstempel (Name/Nutzung/Fläche) neu als TEXT, zentriert/links/rechts (72), Zeilen wie im
+    Plan; mehrzeilige/umbrochene Texte je Zeile. Strichstärken der Ebenen rasten auf CAD-Stufen; unsichtbare Pick-Bänder
+    (Dach, Schnittlinie) entfallen; Schnittsymbole auf Ebene `SECTIONS`. **Papierbereich:** optional ein Layout
+    (A4–A0 oder Sonderformat) mit Ansichtsfenster im Planmassstab (`--layout`). Dialog: Massstab, Einheit der Masszahl
+    (m/cm), Papierbereich; CLI `dxf|dwg --scale N --dim-unit cm --layout`. Geprüft: `cargo test` (acadrust-Rundreise DXF/
+    Binär/DWG je Datensatzart), ezdxf-Auditor 0 Fehler (`exportDxf.cad.test.ts`, `scripts/validate-dxf.py` liest jetzt
+    Blöcke, Stile, Linientypen, DIMSTYLE, Layouts), libredwg (DWG), eigener DXF-Import (Masszahlen, Geometrie).
+    **Offen:** in AutoCAD/BricsCAD selbst nicht geöffnet (DIMTSZ-Strichlänge, Textlage und `*D`-Block dort ungeprüft);
+    Wand/Decke/Treppe bleiben Linien/Polylinien (Plan liefert keine Bauteil-Instanzen); keine Strichstärke je Entität
+    (nur je Ebene); Schnittsymbole nicht als Block (Plan trägt keine Kennung); Ebenennamen `Code_Name` (kein SIA-2014-
+    Schema im Projekt); Masszahl-Einheit nur über Option (keine Projekteinstellung vorhanden); Ansichtsfenster ohne
+    eingefrorene Ebenen/Plotstil; Tauri/macOS nicht getestet.
 - ○ **[C3] MCP an die laufende App** (`--connect 127.0.0.1:7979`, Werkzeuge `screenshot`, `ui_click`,
   `render` → PNG, `execute` = jeder Befehl mit JSON): genau die fehlende Hälfte von [9]; setzt [6] voraus. · M
 - ◐ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless
