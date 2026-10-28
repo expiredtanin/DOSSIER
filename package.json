@@ -22,12 +22,11 @@
     "electron": "scripts/electron-shell.sh",
     "build:engine": "wasm-pack build src-tauri/render2d --release --target web --out-dir ../../src/engine/pkg --out-name render2d --no-default-features --features web",
     "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web",
-    "build:dwgimport": "wasm-pack build src-tauri/dwgimport --release --target web --out-dir ../../src/engine/pkgDwgImport --out-name dwgimport --no-default-features --features web",
+    "build:fileio": "wasm-pack build src-tauri/fileio --release --target web --out-dir ../../src/engine/pkgFileIo --out-name fileio --no-default-features --features web",
     "build:core": "wasm-pack build src-tauri/core --release --target web --out-dir ../../src/engine/pkgCore --out-name core --no-default-features --features web",
     "build:truck": "wasm-pack build src-tauri/trucksolid --release --target web --out-dir ../../src/engine/pkgTruck --out-name trucksolid --no-default-features --features web"
   },
   "dependencies": {
-    "@mlightcad/libredwg-web": "^0.7.7",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
@@ -35,7 +34,6 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "dxf-parser": "^1.1.2",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "lcms-wasm": "^1.0.5",
@@ -45,11 +43,13 @@
     "svg2pdf.js": "^2.7.0"
   },
   "devDependencies": {
+    "@mlightcad/libredwg-web": "^0.7.17",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.2",
     "electron": "^43.0.0",
+    "gltf-validator": "^2.0.0-dev.3.10",
     "playwright": "^1.61.1",
     "puppeteer": "^25.2.1",
     "typescript": "^5.6.2",

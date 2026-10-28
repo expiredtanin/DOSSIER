@@ -107,6 +107,36 @@ export function roofMeshes(project: Project, onlyRoofId?: string): RMesh[] {
   return documentFor(project).query<RMesh[]>("roofMeshes", [], onlyRoofId ?? "");
 }
 
+/** Einbauteile der Öffnungen als Quader-Meshes (Kern); für Exporter, die je Bauteil ein Mini-Projekt übergeben. */
+export function emitOpeningMeshes(project: Project, detail: DetailLevel = "fein"): RMesh[] {
+  return documentFor(project).query<RMesh[]>("openingMeshes", [DETAIL_CODE[detail] ?? 2]);
+}
+
+/** Stützen-Meshes (Kern). */
+export function emitColumns(project: Project): RMesh[] {
+  return documentFor(project).query<RMesh[]>("columnMeshes");
+}
+
+/** Dach-Meshes aller Dächer des Projekts (Kern). */
+export function emitRoofs(project: Project): RMesh[] {
+  return roofMeshes(project);
+}
+
+/** Treppen-Tritte/Podeste als Prismen (Kern); `forSection`: auch gerade Betontreppen. */
+export function emitStairs(project: Project, opts: { forSection?: boolean } = {}): RSlab[] {
+  return documentFor(project).query<RSlab[]>("stairSlabs", [opts.forSection ? 1 : 0]);
+}
+
+/** Glatte Ortbeton-Laufplatten (Kern). */
+export function emitStairMeshes(project: Project): RMesh[] {
+  return documentFor(project).query<RMesh[]>("stairMeshes");
+}
+
+/** Treppen-Handläufe (Kern). */
+export function emitStairRailings(project: Project): RMesh[] {
+  return documentFor(project).query<RMesh[]>("stairRailings");
+}
+
 /**
  * Optionen für {@link projectToModel3d}. `layeredWalls` steuert, ob eine
  * mehrschichtige Wand als eigene Box je Materiallage (Default, 3D-Viewer) oder

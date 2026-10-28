@@ -13,7 +13,7 @@ import type { Project, Stair, Vec2 } from "../model/types";
 import { getStairType } from "../model/types";
 import { stairVerticalExtent } from "../model/wall";
 import { stairGeometry } from "../geometry/stair";
-import { emitStairMeshes, emitStairRailings, emitStairs } from "../plan/toWalls3d/stairs";
+import { emitStairMeshes, emitStairRailings, emitStairs } from "../plan/toWalls3d";
 import type { RSlab } from "../plan/toWalls3d";
 import { orientOutward } from "./meshOrient";
 import { flightQuantities, meshVolume, railingQuantities, ringArea, slabQuantities, type Qty } from "./ifcQuantities";

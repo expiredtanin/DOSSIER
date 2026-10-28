@@ -109,7 +109,7 @@ import { isWatertight, wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
 import { evaluateRoom } from "../geometry/roomArea";
 import { columnFootprint } from "../geometry/column";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
-import { emitRoofs } from "../plan/toWalls3d/roofs";
+import { emitRoofs } from "../plan/toWalls3d";
 import { fileio } from "../engine/fileioWasm";
 import { lv95ToWgs84 } from "../io/lv95";
 import { fillParams, type FillParams } from "./ifcOpenings";
