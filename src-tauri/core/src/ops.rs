@@ -374,6 +374,12 @@ pub struct History {
     group_depth: u32,
     /// In einer offenen Gruppe: der erste Schritt steht schon (weitere verschmelzen damit).
     group_started: bool,
+    /// Schlüssel und Zeit der offenen Gruppe (`begin_group_keyed`): aufeinanderfolgende Gruppen
+    /// mit gleichem Schlüssel im Zeitfenster verschmelzen wie einzelne Änderungen.
+    group_key: Option<String>,
+    group_at: f64,
+    /// Die offene Gruppe hat etwas aufgezeichnet.
+    group_recorded: bool,
     bytes: usize,
     pub max_steps: usize,
     pub max_bytes: usize,
@@ -388,6 +394,9 @@ impl Default for History {
             last_at: 0.0,
             group_depth: 0,
             group_started: false,
+            group_key: None,
+            group_at: 0.0,
+            group_recorded: false,
             bytes: 0,
             max_steps: 100,
             max_bytes: 256 << 20,
@@ -417,17 +426,37 @@ impl History {
     }
 
     pub fn begin_group(&mut self) {
+        self.begin_group_keyed(None, 0.0);
+    }
+
+    /// Wie [`History::begin_group`]; mit `key` verschmilzt die Gruppe mit dem vorigen Schritt, wenn
+    /// dieser von einer Gruppe (oder Änderung) mit gleichem Schlüssel innerhalb des Zeitfensters
+    /// stammt — z. B. ein Griff-Zug, der je Mausschritt mehrere Elemente mitführt.
+    pub fn begin_group_keyed(&mut self, key: Option<&str>, now: f64) {
         if self.group_depth == 0 {
-            self.group_started = false;
+            let coalesced = key.is_some() && key == self.last_key.as_deref() && now - self.last_at < COALESCE_WINDOW_MS;
+            self.group_started = coalesced && !self.undo.is_empty();
+            self.group_key = key.map(str::to_owned);
+            self.group_at = now;
+            self.group_recorded = false;
         }
         self.group_depth += 1;
     }
 
     pub fn end_group(&mut self) {
-        self.group_depth = self.group_depth.saturating_sub(1);
         if self.group_depth == 0 {
-            // Die nächste Änderung beginnt einen eigenen Schritt, auch mit gleichem Schlüssel.
-            self.last_key = None;
+            return;
+        }
+        self.group_depth -= 1;
+        if self.group_depth == 0 {
+            if self.group_recorded || self.group_key.is_none() {
+                // Ohne Schlüssel beginnt die nächste Änderung einen eigenen Schritt (auch mit gleichem
+                // Schlüssel); mit Schlüssel kann die nächste gleichnamige Gruppe anschliessen.
+                self.last_key = self.group_key.take();
+                self.last_at = self.group_at;
+            } else {
+                self.group_key = None;
+            }
         }
     }
 
@@ -439,6 +468,9 @@ impl History {
         let coalesced = key.is_some() && key == self.last_key.as_deref() && now - self.last_at < COALESCE_WINDOW_MS;
         self.last_key = key.map(str::to_owned);
         self.last_at = now;
+        if self.group_depth > 0 {
+            self.group_recorded = true;
+        }
         let merge = if self.group_depth > 0 { std::mem::replace(&mut self.group_started, true) } else { coalesced };
         match self.undo.back_mut().filter(|_| merge) {
             Some(top) => {
