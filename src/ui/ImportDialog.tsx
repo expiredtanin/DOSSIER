@@ -106,6 +106,10 @@ export interface ImportDialogProps {
    *  `onProgress`) — `"structure"`, `"parse-single"` oder
    *  `"parse-parallel:<N>"`; `undefined` = noch keine Phase bekannt/DWG. */
   progress?: string;
+  /** Meldung des Format-Moduls, wenn die Datei nicht gelesen werden konnte (leer, beschädigt …). */
+  error?: string;
+  /** Wählt ein Papierbereich-Layout (Name) oder den Modellraum (`null`) zum Import; liest neu. */
+  onSelectLayout?: (layout: string | null) => void;
   /** Geparstes Ergebnis (null während Laden / bei DWG-Parse-Fehler). */
   parsed: DxfImportResult | null;
   project: Project;
@@ -119,6 +123,8 @@ export function ImportDialog({
   isDwg,
   loading = false,
   progress,
+  error,
+  onSelectLayout,
   parsed,
   project,
   activeCategoryCode,
@@ -245,6 +251,7 @@ export function ImportDialog({
             // DWG konnte nicht gelesen werden → ODA-Fallback-Hinweis.
             <section className="imp-section">
               <div className="imp-section-title">{t("import.dwg.heading")}</div>
+              {error && <div className="imp-warn">{error}</div>}
               <div className="imp-dwg-hint">{t("import.dwg.hint")}</div>
             </section>
           ) : (
@@ -266,9 +273,10 @@ export function ImportDialog({
                       : t("import.summary.noLayers")}
                   </li>
                 </ul>
+                {parsed?.recovered && <div className="imp-warn">{t("import.summary.recovered")}</div>}
                 {!hasDrawings && !hasMeshes && (
                   <div className="imp-warn">
-                    {t("import.summary.empty")}
+                    {error ?? t("import.summary.empty")}
                     {/* Diagnose-Histogramm (vom DWG-Parser): macht sichtbar,
                         WORAN es liegt — 0 Entities (Encoding/Version) vs.
                         Abdeckungslücke (z. B. „500 ARC, 200 INSERT"). Entity-Typ-
@@ -282,6 +290,34 @@ export function ImportDialog({
                   </div>
                 )}
               </section>
+
+              {/* Papierbereich: Layouts der Datei (Bericht) und, wenn möglich, eines statt des Modellraums lesen. */}
+              {parsed?.layouts && parsed.layouts.length > 0 && (
+                <section className="imp-section">
+                  <div className="imp-section-title">{t("import.layouts.heading")}</div>
+                  {onSelectLayout ? (
+                    <Dropdown
+                      value={parsed.layout ?? ""}
+                      onChange={(v) => onSelectLayout(v === "" ? null : v)}
+                      title={t("import.layouts.heading")}
+                      options={[
+                        { value: "", label: t("import.layouts.model") },
+                        ...parsed.layouts.map((l) => ({
+                          value: l.name,
+                          label: `${l.name} · ${t("import.layouts.entities", { n: l.entities })}`,
+                        })),
+                      ]}
+                    />
+                  ) : (
+                    <ul className="imp-summary">
+                      {parsed.layouts.map((l) => (
+                        <li key={l.name}>{`${l.name} · ${t("import.layouts.entities", { n: l.entities })}`}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="imp-dwg-hint">{t("import.layouts.note")}</div>
+                </section>
+              )}
 
               {/* Ziel-Zeichnungsebene. */}
               {hasDrawings && (

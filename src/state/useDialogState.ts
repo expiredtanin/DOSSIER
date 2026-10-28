@@ -42,6 +42,8 @@ export function useDialogState() {
     loading?: boolean;
     // Grober Phasenname während `loading` (nur DXF), s. ImportDialog.tsx.
     progress?: string;
+    // Fehlermeldung des Format-Moduls (Datei leer/beschädigt/kein DXF).
+    error?: string;
   } | null>(null);
   // Modaler PDF-Export-Dialog (Grundriss → Vektor-PDF). true = offen.
   const [exportOpen, setExportOpen] = useState(false);

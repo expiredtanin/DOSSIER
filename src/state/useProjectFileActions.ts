@@ -126,7 +126,12 @@ export type ImportDialogState = {
   /** Grober Phasenname während `loading` (DXF via `parseDxfAsync`'s
    *  `onProgress`) — rein informativ, s. `ImportDialog.tsx`. */
   progress?: string;
+  /** Fehlermeldung des Format-Moduls (Datei leer, beschädigt, kein DXF/DWG …); `null`/fehlend = kein Fehler. */
+  error?: string;
 } | null;
+
+/** Meldung eines abgefangenen Fehlers (Rust-Fehler kommen als String, Worker-Fehler als Error). */
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 
 /**
@@ -249,8 +254,32 @@ export function useProjectFileActions(
   // und DWG werden als Bytes im Web-Worker über das Rust-Format-Modul gelesen (lazy,
   // asynchron); beide münden in dasselbe {meshes, contours}-Format und denselben Dialog.
   // Parse-Fehler werden ruhig abgefangen: DWG fällt auf den ODA-Hinweis zurück.
+  // Rohdaten der zuletzt geöffneten Import-Datei: der Dialog kann damit ein Papierbereich-Layout
+  // statt des Modellraums nachladen (`loadImportLayout`), ohne die Datei erneut zu wählen.
+  const importSourceRef = useRef<{ fileName: string; buf: ArrayBuffer } | null>(null);
+
+  /** Liest `layout` (Papierbereich) oder, bei `null`, den Modellraum der geöffneten Import-Datei neu. */
+  const loadImportLayout = (layout: string | null) => {
+    const src = importSourceRef.current;
+    if (!src) return;
+    setImportState({ fileName: src.fileName, isDwg: false, parsed: null, loading: true });
+    parseDxfAsync(src.buf, undefined, layout ?? undefined)
+      .then((parsed) => setImportState({ fileName: src.fileName, isDwg: false, parsed, loading: false }))
+      .catch((err) => {
+        console.error("Layout-Import fehlgeschlagen:", err);
+        setImportState({
+          fileName: src.fileName,
+          isDwg: false,
+          parsed: { meshes: [], contours: [] },
+          loading: false,
+          error: errorText(err),
+        });
+      });
+  };
+
   const openImportForFile = (file: File) => {
     const isDwg = /\.dwg$/i.test(file.name);
+    importSourceRef.current = null;
     if (isDwg) {
       // Async-Zustand: Dialog öffnet sofort und zeigt „DWG wird gelesen …",
       // während WASM lädt/parst. Danach echte Zusammenfassung ODER ODA-Hinweis.
@@ -272,6 +301,7 @@ export function useProjectFileActions(
           });
           return;
         }
+        importSourceRef.current = { fileName: file.name, buf };
         // Dynamisch importieren (das Format-Modul wird ohnehin erst im Worker geladen).
         import("../io/dwgParser")
           .then(({ parseDwg }) => parseDwg(buf))
@@ -291,6 +321,7 @@ export function useProjectFileActions(
               isDwg: true,
               parsed: null,
               loading: false,
+              error: errorText(err),
             });
           });
       };
@@ -307,6 +338,7 @@ export function useProjectFileActions(
     r.onload = () => {
       // Bytes statt Text: Binär-DXF und Code-Seiten (vor R2007) liest erst Rust richtig.
       const buf = r.result instanceof ArrayBuffer ? r.result : new ArrayBuffer(0);
+      importSourceRef.current = { fileName: file.name, buf };
       parseDxfAsync(buf, (progress) => {
         setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true, progress });
       })
@@ -316,7 +348,7 @@ export function useProjectFileActions(
         .catch((err) => {
           console.error("DXF-Import fehlgeschlagen:", err);
           const parsed: DxfImportResult = { meshes: [], contours: [] };
-          setImportState({ fileName: file.name, isDwg: false, parsed, loading: false });
+          setImportState({ fileName: file.name, isDwg: false, parsed, loading: false, error: errorText(err) });
         });
     };
     r.readAsArrayBuffer(file);
@@ -641,6 +673,7 @@ export function useProjectFileActions(
     pendingDiscard,
     setPendingDiscard,
     openImportForFile,
+    loadImportLayout,
     onSaveProject,
     onNewProject,
     onNewProjectFromSample,
