@@ -13,7 +13,6 @@ use crate::js_fmt::{js_number, to_fixed};
 use crate::jsnum::{max, min, round};
 use crate::model::*;
 use crate::plan_walls::{ceiling_outline_lines, wall_footprint, WallFootprint};
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 /// Footprint-Farbe der Extrusionen (wie das 3D-Orange).
@@ -96,9 +95,10 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// Ergebnis der Abfrage `planDomains`: Primitive je Domäne (TS setzt sie an ihre Stelle in der
-/// Zeichenreihenfolge) und das Ausmass der Decken, Räume und Dach-Traufen.
-#[derive(Serialize, Default)]
+/// Ergebnis der Plan-Erzeugung: Primitive je Domäne (TS setzt sie an ihre Stelle in der
+/// Zeichenreihenfolge) und das Ausmass der Decken, Räume und Dach-Traufen. Über die Grenze geht es
+/// als Plan-Puffer v2 ([`plan_domains_buf`]).
+#[derive(Default)]
 pub struct DomainPrims {
     pub ceilings: Vec<Primitive>,
     /// Wände (Poché, Referenzlinie) mit ihren Öffnungs-Symbolen, je Wand nacheinander.
@@ -517,6 +517,21 @@ pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
     Ok(out)
 }
 
+/// Reihenfolge der Gruppen im Plan-Puffer der Abfrage `planDomains`.
+pub const GROUPS: [&str; 9] = ["ceilings", "roofs", "rooms", "walls", "stairs", "columns", "solids", "context", "sections"];
+
+/// Abfrage `planDomains` als Plan-Puffer v2 (s. `plan_buf.rs`): eine Gruppe je Domäne in der
+/// Reihenfolge [`GROUPS`], Ausmass im Kopf, Inhalts-Hashes für den GPU-Chunk-Cache.
+pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
+    let d = plan_domains(p, a)?;
+    let mut w = crate::plan_buf::Writer::new(true);
+    for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections] {
+        w.group(g);
+    }
+    w.bounds = d.bounds;
+    Ok(w.finish())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -543,6 +558,22 @@ mod tests {
         assert_eq!(rooms[1]["extraLines"][0]["text"], "17.01 m²");
         assert_eq!(rooms[1]["extraLines"][1]["text"], "HNF · Hauptnutzfläche");
         assert!(r.bounds.is_some());
+    }
+
+    #[test]
+    fn puffer_gruppen_wie_domaenen() {
+        let p = sample();
+        let a = args("eg", 1.0, &["20", "21", "30", "40", "60"]);
+        let d = plan_domains(&p, &a).unwrap();
+        let buf = plan_domains_buf(&p, &a).unwrap();
+        let (prims, groups, bounds) = crate::plan_buf::decode(&buf).unwrap();
+        assert_eq!(groups.len(), GROUPS.len());
+        let lists = [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections];
+        for ((a, b), l) in groups.iter().zip(lists) {
+            assert_eq!(serde_json::to_string(&prims[*a..*b]).unwrap(), serde_json::to_string(l).unwrap());
+        }
+        assert!(!d.walls.is_empty() && !d.rooms.is_empty());
+        assert_eq!(bounds, d.bounds);
     }
 
     #[test]
@@ -604,5 +635,39 @@ mod tests {
     fn stuetzen_label() {
         let col = Column { profile: ColumnProfile::Round { radius: 0.125 }, ..Default::default() };
         assert_eq!(column_label(&col), "Stütze Ø25");
+    }
+
+    /// Messung (von Hand): `PLAN_BIG=projekt.obp cargo test --release --lib messung_plan_puffer -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn messung_plan_puffer() {
+        let Ok(path) = std::env::var("PLAN_BIG") else { return };
+        let mut doc = crate::document::Document::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let p = doc.project().unwrap().clone();
+        let codes: Vec<String> = p.flat_categories().iter().map(|c| c.code.clone()).collect();
+        let t = serde_json::json!({ "floor": "eg", "show": codes, "grey": [], "global": true }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let time = |name: &str, f: &mut dyn FnMut()| {
+            f();
+            let t0 = std::time::Instant::now();
+            for _ in 0..5 {
+                f();
+            }
+            println!("{name}: {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0 / 5.0);
+        };
+        time("plan_domains", &mut || {
+            plan_domains(&p, &a).unwrap();
+        });
+        let d = plan_domains(&p, &a).unwrap();
+        time("Puffer schreiben", &mut || {
+            let mut w = crate::plan_buf::Writer::new(true);
+            for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections] {
+                w.group(g);
+            }
+            w.finish();
+        });
+        time("JSON (früher)", &mut || {
+            serde_json::to_string(&(&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections)).unwrap();
+        });
     }
 }

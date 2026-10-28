@@ -92,6 +92,15 @@ export class ProjectDocument {
     return out;
   }
 
+  /**
+   * Abfrage mit binärer Antwort (`queries.rs::run_bin`, z. B. `planDomains` als Plan-Puffer v2,
+   * s. `plan/planBuf.ts`). Fehler kommen als Fehlerpuffer (`decodePlanBuf` wirft die Meldung).
+   */
+  queryBin(name: QueryName, args: number[] = [], text = ""): Uint8Array {
+    if (!this.handle) throw new Error(`Kern-Abfrage „${name}": Dokument nicht offen`);
+    return core().doc_query_bin(this.handle, name, Float64Array.from(args), text);
+  }
+
   /** Datei-Text des Projekts (Formatversion vorn, Einrückung 2). */
   serialize(): string {
     return this.handle ? core().doc_serialize(this.handle) : "";

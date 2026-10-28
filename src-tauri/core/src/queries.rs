@@ -34,8 +34,15 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("scheduleRows", _) => json(&export_schedule::schedule_rows(p)),
         ("scheduleCsv", 1) => Ok(export_schedule::export_schedule_csv(p, text, args[0] != 0.0)),
         ("pickGeometry", _) => json(&model3d::pick_geometry(p)?),
-        ("planDomains", 1) => json(&crate::plan::domains::plan_domains(p, &crate::plan::domains::PlanArgs::parse(args[0], text)?)?),
         ("model3dParts", 3) => json(&model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?),
+        _ => Err(format!("Unbekannte Abfrage: {name}")),
+    }
+}
+
+/// Abfragen mit binärer Antwort (Plan-Puffer v2, s. `plan_buf.rs`).
+pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
+    match (name, args.len()) {
+        ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse(args[0], text)?),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
 }

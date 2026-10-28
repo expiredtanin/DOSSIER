@@ -36,6 +36,7 @@ import {
   getWallType,
 } from "../model/types";
 import { documentFor } from "../core/document";
+import { decodePlanBuf, type DecodedPlanBuf } from "./planBuf";
 import { effectiveOverrides, hasOverrides } from "../overrides/engine";
 import type { SectionOutput } from "./toSection";
 import {
@@ -193,6 +194,26 @@ export interface Plan {
    * {@link materializeUnderlay}.
    */
   underlay?: UnderlayGroup[];
+  /**
+   * Abschnitte, die unverändert aus einem Plan-Puffer des Kerns stammen ([K3d]): der GPU-Pfad
+   * kompiliert sie direkt aus dem Puffer und erkennt Unverändertes am Inhalts-Hash
+   * (`glPlanChunks.ts`). Wer Primitive ersetzt oder verschiebt, muss nichts nachführen — der
+   * Verbraucher prüft die Objekt-Identität und fällt sonst auf die Objekte zurück.
+   */
+  bufRuns?: PlanBufRun[];
+}
+
+/** `primitives[at + k]` ist (solange nicht ersetzt) `buf.prims[from + k]`, `k < to − from`. */
+export interface PlanBufRun {
+  at: number;
+  buf: DecodedPlanBuf;
+  from: number;
+  to: number;
+}
+
+/** Kern-Abschnitte um `shift` verschieben (beim Zusammensetzen mehrerer Pläne). */
+function shiftRuns(runs: readonly PlanBufRun[] | undefined, shift: number, into: PlanBufRun[]): void {
+  for (const r of runs ?? []) into.push({ ...r, at: r.at + shift });
 }
 
 /**
@@ -244,11 +265,14 @@ export function materializeUnderlay(plan: Plan): Plan {
     ...shifted,
     ...aboveGreyed.map(([a, b]): [number, number] => [a + aboveShift, b + aboveShift]),
   ];
+  const bufRuns: PlanBufRun[] = [];
+  shiftRuns(plan.bufRuns, below.length, bufRuns);
   return {
     ...plan,
     primitives,
     underlay: undefined,
     greyedRanges: ranges.length ? ranges : undefined,
+    bufRuns: bufRuns.length ? bufRuns : undefined,
   };
 }
 
@@ -385,20 +409,23 @@ export function generatePlan(
   // Kern auf dem Dokument ([K3d], `plan/{domains,walls,stairs}.rs`): Filter, Override-Regeln,
   // Verschneidung, Stil und Raumstempel-Daten. Decken, Dächer und Räume liegen unter der Wand-Poché; Stützen folgen
   // nach den Treppen, Extrusionen nach den 2D-Zeichnungen.
+  // Der Kern liefert alles in EINEM Plan-Puffer (Gruppen in dieser Reihenfolge); die Abschnitte
+  // merkt sich der Plan (`bufRuns`), damit die GPU sie direkt aus dem Puffer kompiliert.
   const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal);
-  for (const pr of dom.ceilings) primitives.push(pr);
-  for (const pr of dom.roofs) primitives.push(pr);
-  for (const pr of dom.rooms) primitives.push(pr);
-
-  // Wände (Poché, Referenzlinie) mit ihren Öffnungs-Symbolen, je Wand nacheinander.
-  for (const pr of dom.walls) primitives.push(pr);
-
-  // Treppen: Tritte + Lauflinie + Auf-/Abpfeil mit dem Grundriss-Schnitt (unter der Schnitthöhe
-  // durchgezogen, darüber gestrichelt + SIA-Bruchlinie), über der Wand-Poché.
-  for (const pr of dom.stairs) primitives.push(pr);
-
-  // Stützen (Tragwerk): Querschnitt-Poché, über der Wand-Poché.
-  for (const pr of dom.columns) primitives.push(pr);
+  const runs: PlanBufRun[] = [];
+  const pushGroups = (first: number, last: number): void => {
+    if (!dom.buf) return;
+    const from = dom.buf.groups[first][0];
+    const to = dom.buf.groups[last][1];
+    const at = primitives.length;
+    const src = dom.buf.prims;
+    for (let i = from; i < to; i++) primitives.push(src[i]);
+    if (to > from) runs.push({ at, buf: dom.buf, from, to });
+  };
+  // Decken, Dächer, Räume; Wände (Poché, Referenzlinie) mit ihren Öffnungs-Symbolen, je Wand
+  // nacheinander; Treppen (Tritte + Lauflinie + Auf-/Abpfeil mit dem Grundriss-Schnitt, über der
+  // Wand-Poché); Stützen (Querschnitt-Poché).
+  pushGroups(G_CEILINGS, G_COLUMNS);
 
   // 2D-Zeichengeometrie zuletzt (über der Poché).
   const compact = compactUnderlay && !mono && !forPrint;
@@ -439,22 +466,21 @@ export function generatePlan(
   for (const grp of underGroups.values()) underlay.push(mkGroup(grp.ds, grp.greyed));
 
   // Extrudierte Körper: Footprint-Umriss (Quell-Profil wurde beim Extrudieren entfernt).
-  for (const pr of dom.solids) primitives.push(pr);
-
   // Kontext-Konturen (Höhenlinien) als dezente Linien zeichnen — UNTER der
   // Wand-Poché wäre ideal, aber da sie eine eigene gedämpfte Farbe tragen, ist
   // die Reihenfolge unkritisch; wir hängen sie als Referenz an. Projektglobal
   // (nicht je Geschoss) → nur beim aktiven Aufruf einer Mehrfach-Überlagerung.
-  for (const pr of dom.context) primitives.push(pr);
   // Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie — ebenfalls projektglobal,
   // Sichtbarkeit über die Kategorie "90" (Referenzen).
-  for (const pr of dom.sections) primitives.push(pr);
+  pushGroups(G_SOLIDS, G_SECTIONS);
 
   // Schwarz-Weiss (mono): nachträglich alle Farben auf reine Tinte zwingen.
   // Element-/Kategorie-/Hatch-Farben werden ignoriert, Füllungen werden weiss,
   // Musterlinien/Striche schwarz — so entsteht ein reiner S/W-Plan.
   // Abzugskörper (Aussparungen/Durchbrüche): von Wand-/Stützen-/Decken-Poché abziehen.
-  subtractVoidsInPlan(primitives, project, (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0));
+  // Ersetzte Primitive erkennt der GPU-Pfad selbst (Identität); verschiebt das Zerlegen die
+  // Indizes, werden die Kern-Abschnitte neu ausgerichtet.
+  if (subtractVoidsInPlan(primitives, project, (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0))) realignRuns(primitives, runs);
 
   // Baurechts-Verstösse über allem (Signal, soll nicht unter der Wand-Poché verschwinden).
   if (includeGlobal) addSiteViolations(primitives, project, floorId);
@@ -488,12 +514,38 @@ export function generatePlan(
           ctx: [...g.ctx, lwf],
           build: (ds: Drawing2D[]) => g.build(ds).map((p) => scalePrimitiveWeights(p, lwf)),
         }));
+  // Mono färbt die Objekte um, der Massstab ersetzt sie: dann gilt der Puffer nicht mehr.
+  const keepRuns = !mono && lwf === 1 && runs.length > 0;
   return {
     primitives: lwf === 1 ? primitives : primitives.map((p) => scalePrimitiveWeights(p, lwf)),
-    bounds: computeBounds(project, drawings, dom.bounds, primitives.slice(0, underlayCount)),
+    bounds: computeBounds(project, drawings, dom.buf?.bounds, primitives.slice(0, underlayCount)),
     backgroundImages,
     ...(scaledUnderlay.length ? { underlay: scaledUnderlay } : {}),
+    ...(keepRuns ? { bufRuns: runs } : {}),
   };
+}
+
+/**
+ * Kern-Abschnitte nach einem Umbau der Liste (Abzugskörper zerlegen Polygone) neu ausrichten:
+ * jede noch vorhandene Folge unveränderter Puffer-Objekte wird ein eigener Abschnitt.
+ */
+function realignRuns(primitives: readonly Primitive[], runs: PlanBufRun[]): void {
+  if (runs.length === 0) return;
+  const where = new Map<Primitive, [PlanBufRun, number]>();
+  for (const r of runs) for (let i = r.from; i < r.to; i++) where.set(r.buf.prims[i], [r, i]);
+  const out: PlanBufRun[] = [];
+  let cur: PlanBufRun | null = null;
+  for (let i = 0; i < primitives.length; i++) {
+    const w = where.get(primitives[i]);
+    if (w && cur && w[0].buf === cur.buf && w[1] === cur.to && i === cur.at + (cur.to - cur.from)) {
+      cur.to++;
+      continue;
+    }
+    cur = w ? { at: i, buf: w[0].buf, from: w[1], to: w[1] + 1 } : null;
+    if (cur) out.push(cur);
+  }
+  runs.length = 0;
+  for (const r of out) runs.push(r);
 }
 
 /**
@@ -544,6 +596,7 @@ export function generateVisibleLevelsPlan(
   const primitives: Primitive[] = [];
   const greyedRanges: Array<[number, number]> = [];
   const underlay: UnderlayGroup[] = [];
+  const bufRuns: PlanBufRun[] = [];
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   const extend = (b: Plan["bounds"]) => {
     bounds.minX = Math.min(bounds.minX, b.minX);
@@ -579,6 +632,7 @@ export function generateVisibleLevelsPlan(
     // `dwgParser.ts`. Reine `for`-Schleife ist unbegrenzt sicher.
     const from = primitives.length;
     for (const pr of p.primitives) primitives.push(pr);
+    shiftRuns(p.bufRuns, from, bufRuns);
     if (d.greyed && primitives.length > from) greyedRanges.push([from, primitives.length]);
     // Leere Ebenen melden als Platzhalter (0,0)–(1,1) — NICHT mitzählen: sonst zog
     // jede leere Nachbar-Ebene den Ausschnitt bis zum Ursprung (bei Landes-
@@ -599,6 +653,7 @@ export function generateVisibleLevelsPlan(
     false,
     compactUnderlay,
   );
+  shiftRuns(activePlan.bufRuns, primitives.length, bufRuns);
   for (const pr of activePlan.primitives) primitives.push(pr);
   for (const g of activePlan.underlay ?? []) underlay.push(g);
   // Aktive Ebene leer UND keine Nachbar-Ebene mit Inhalt → Platzhalter-Ausmass.
@@ -610,6 +665,7 @@ export function generateVisibleLevelsPlan(
     backgroundImages: activePlan.backgroundImages,
     ...(greyedRanges.length ? { greyedRanges } : {}),
     ...(underlay.length ? { underlay } : {}),
+    ...(bufRuns.length ? { bufRuns } : {}),
   };
 }
 
@@ -863,21 +919,20 @@ function categoryMap(layers: LayerCategory[]): Map<string, LayerCategory> {
   return map;
 }
 
-/** Primitive der Kern-Domänen (`planDomains` in `queries.rs`). */
+/** Primitive der Kern-Domänen (`planDomains` in `queries.rs`) als gelesener Plan-Puffer v2. */
 interface DomainPrims {
-  ceilings: Primitive[];
-  walls: Primitive[];
-  stairs: Primitive[];
-  context: Primitive[];
-  sections: Primitive[];
-  roofs: Primitive[];
-  rooms: Primitive[];
-  columns: Primitive[];
-  solids: Primitive[];
-  bounds?: [number, number, number, number];
+  /** Fehlt, wenn das Geschoss nichts für den Kern enthält. */
+  buf?: DecodedPlanBuf;
 }
 
-const NO_DOMAINS: DomainPrims = { ceilings: [], walls: [], stairs: [], context: [], sections: [], roofs: [], rooms: [], columns: [], solids: [] };
+/** Gruppen des Puffers (`plan/domains.rs::GROUPS`). */
+const G_CEILINGS = 0;
+const G_COLUMNS = 5;
+const G_SOLIDS = 6;
+const G_SECTIONS = 8;
+const N_GROUPS = 9;
+
+const NO_DOMAINS: DomainPrims = {};
 const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
 
 /**
@@ -932,11 +987,15 @@ function planDomains(
     show.push(c);
     if (d.greyed) grey.push(c);
   }
-  return documentFor(project).query<DomainPrims>(
-    "planDomains",
-    [DETAIL_CODE[detail] ?? 1],
-    JSON.stringify({ floor: floorId, show, grey, referenceLines, global }),
+  const buf = decodePlanBuf(
+    documentFor(project).queryBin(
+      "planDomains",
+      [DETAIL_CODE[detail] ?? 1],
+      JSON.stringify({ floor: floorId, show, grey, referenceLines, global }),
+    ),
   );
+  if (buf.groups.length !== N_GROUPS) throw new Error("planDomains: unerwartete Gruppen im Plan-Puffer");
+  return { buf };
 }
 
 function computeBounds(
