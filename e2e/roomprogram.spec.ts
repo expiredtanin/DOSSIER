@@ -40,9 +40,16 @@ test("Raumprogramm importieren, vergleichen, Räume generieren", async ({ page }
   await page.getByRole("button", { name: "Räume generieren" }).click();
   await openTab(page, "Zeichnungsebenen");
   await expect(page.getByText("Raumprogramm", { exact: true }).first()).toBeVisible();
+  // Blatt aktivieren: die Statusleiste zeigt es. Undo muss danach auf eine vorhandene Ebene zurückfallen.
+  const statusFloor = page.locator("footer.statusbar");
+  await page.getByText("Raumprogramm", { exact: true }).first().click();
+  await expect(statusFloor).toContainText("Raumprogramm");
   // Ein Undo-Schritt macht das Blatt wieder rückgängig.
   const withSheet = await page.getByText("Raumprogramm", { exact: true }).count();
   await page.keyboard.press("Control+z");
   await expect.poll(() => page.getByText("Raumprogramm", { exact: true }).count()).toBeLessThan(withSheet);
+  // Die aktive Ebene fiel mit dem Blatt weg: Rückfall aufs Geschoss, keine rohe Id in der Statusleiste.
+  await expect(statusFloor).toContainText("Erdgeschoss");
+  await expect(statusFloor).not.toContainText(/raumprogramm|drawing-/i);
   if (shots) await page.screenshot({ path: `${shots}/generiert.png` });
 });
