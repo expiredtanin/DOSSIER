@@ -30,12 +30,18 @@
 //   WALL_MESH   = 2, structure, id, name, TYPEREF, PSETS, MESH
 //   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, z_rel, depth
 //   OPENING     = 4, wall_id, structure, opening_id, is_door (0/1), fill_name, PTS (Öffnungskörper), z_rel,
-//                 depth, width, kind_text (Text oder −1 = keine: Tür OperationType, Fenster PartitioningType,
-//                 IFC-Enum-Name), FILL_FRAME, n_parts, (role, PTS, z_rel, depth) × n_parts, PSETS
-//     FILL_FRAME = ox, oy, ux, uy (Welt-XY): Placement der Füllung (X = u, Y = linke Normale von u). Die
-//             Teile-PTS bleiben Welt-XY, z_rel zählt ab Öffnungs-Unterkante. n_parts = 0: kein Körper.
-//     role: 0 Rahmen/Zarge, 1 Türblatt, 2 Glas. Alle Teile eines Bauteils sind getrennte Körper in EINER
-//           Darstellung, je mit eigenem IfcStyledItem (Farbe/Transparenz je Rolle).
+//                 depth, width, FILL, PSETS
+//     FILL (Parameter aus dem Modell; Körper, Placement und OperationType/PartitioningType rechnet
+//          `ifc_openings.rs`, Version 2 seit 28.10.; OPT = has (0/1), value):
+//          wall_sx, wall_sy, wall_ex, wall_ey, from, to, z_bottom, z_top, n_lo, n_hi,
+//          frame_depth OPT, inset OPT, inset_outside (0/1), frame_width OPT,
+//          wing_count, panes (1–3), n_sashes, (post, post_width OPT, fixed, width OPT) × n_sashes,
+//          door_kind (0 Dreh, 1 Schiebe, 2 Wandöffnung), leaf_count, swing_sign (±1), dir_sign (±1),
+//          hinge_at_start (0/1), transom_height, glazed (0/1), glazing_ratio OPT
+//     Die Füllung bekommt ein eigenes Placement (Ursprung = Öffnungsmitte auf der Achse, X = u, Y = linke
+//     Normale von u; Tür: Y = Aufschlagrichtung); ohne Teile (Wandöffnung) kein Körper. Alle Teile
+//     (0 Rahmen/Zarge, 1 Türblatt, 2 Glas) sind getrennte Körper in EINER Darstellung, je mit eigenem
+//     IfcStyledItem (Farbe/Transparenz je Rolle).
 //   STAIR       = 5, structure, id, predefined (Text), PTS, z_rel, depth
 //   EXTRUSION   = 6, structure, id, PTS, z_rel, depth
 //   SPACE       = 7, structure, id, name, long_name, external (0/1), height, PTS, net_area, gross_area,
@@ -56,8 +62,10 @@
 
 use std::collections::HashMap;
 
+use crate::ifc_openings::{fill_geometry, DoorKind, FillParams, FillPart, Sash, MAX_SASHES};
+
 /// Version der flachen Kodierung (erstes Element des Puffers).
-pub const FLAT_VERSION: f64 = 1.0;
+pub const FLAT_VERSION: f64 = 2.0;
 
 pub const REC_WALL_SOLIDS: f64 = 1.0;
 pub const REC_WALL_MESH: f64 = 2.0;
@@ -378,23 +386,78 @@ impl<'a> Reader<'a> {
         let s = self.take(n.checked_mul(2).ok_or("Überlauf")?)?;
         Ok(s.chunks_exact(2).map(|c| (c[0], c[1])).collect())
     }
-    /// Teile einer Füllung: n, (Rolle 0 Rahmen / 1 Blatt / 2 Glas, PTS, z_rel, depth) × n.
-    fn parts(&mut self) -> Result<Vec<Part>, String> {
+    /// Optionaler Wert: has (0/1), value.
+    fn opt_f(&mut self) -> Result<Option<f64>, String> {
+        let has = self.flag()?;
+        let v = self.f()?;
+        Ok(has.then_some(v))
+    }
+    /// FILL-Parameter einer Tür/eines Fensters (s. Kopf; Geometrie in `ifc_openings.rs`).
+    fn fill_params(&mut self, is_door: bool) -> Result<FillParams, String> {
+        let (sx, sy, ex, ey) = (self.f()?, self.f()?, self.f()?, self.f()?);
+        let (from, to, z_bottom, z_top) = (self.f()?, self.f()?, self.f()?, self.f()?);
+        let (n_lo, n_hi) = (self.f()?, self.f()?);
+        let (frame_depth, inset) = (self.opt_f()?, self.opt_f()?);
+        let inset_outside = self.flag()?;
+        let frame_width = self.opt_f()?;
+        let wing_count = self.f()?;
+        let panes = self.idx()?;
+        if !(1..=3).contains(&panes) {
+            return Err(format!("Scheibenzahl {panes} bei {}", self.pos - 1));
+        }
         let n = self.idx()?;
-        if n > MAX_PARTS {
-            return Err(format!("zu viele Teile ({n}) bei {}", self.pos - 1));
+        if n > MAX_SASHES {
+            return Err(format!("zu viele Flügel ({n}) bei {}", self.pos - 1));
         }
-        let mut out = Vec::with_capacity(n);
+        let mut sashes = Vec::with_capacity(n);
         for _ in 0..n {
-            let role = self.idx()?;
-            if role > 2 {
-                return Err(format!("unbekannte Teilrolle {role} bei {}", self.pos - 1));
-            }
-            let pts = self.pts()?;
-            let (z_rel, depth) = (self.f()?, self.f()?);
-            out.push(Part { role, pts, z_rel, depth });
+            let post = self.flag()?;
+            let post_width = self.opt_f()?;
+            let fixed = self.flag()?;
+            let width = self.opt_f()?;
+            sashes.push(Sash { post, post_width, fixed, width });
         }
-        Ok(out)
+        let door_kind = match self.idx()? {
+            0 => DoorKind::Swing,
+            1 => DoorKind::Sliding,
+            2 => DoorKind::WallOpening,
+            k => return Err(format!("unbekannte Türart {k} bei {}", self.pos - 1)),
+        };
+        let leaf_count = self.f()?;
+        let (swing_sign, dir_sign) = (self.f()?, self.f()?);
+        if swing_sign.abs() != 1.0 || dir_sign.abs() != 1.0 {
+            return Err(format!("Aufschlag nicht ±1 bei {}", self.pos - 1));
+        }
+        let hinge_at_start = self.flag()?;
+        let transom_height = self.f()?;
+        let glazed = self.flag()?;
+        let glazing_ratio = self.opt_f()?;
+        Ok(FillParams {
+            wall_start: (sx, sy),
+            wall_end: (ex, ey),
+            from,
+            to,
+            z_bottom,
+            z_top,
+            n_lo,
+            n_hi,
+            is_door,
+            frame_depth,
+            inset,
+            inset_outside,
+            frame_width,
+            wing_count,
+            panes,
+            sashes,
+            door_kind,
+            leaf_count,
+            swing_sign,
+            dir_sign,
+            hinge_at_start,
+            transom_height,
+            glazed,
+            glazing_ratio,
+        })
     }
     fn mesh(&mut self) -> Result<Mesh, String> {
         let nv = self.idx()?;
@@ -458,29 +521,8 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Obergrenze der Körper je Tür/Fenster (Rahmenteile, Scheiben, Pfosten).
-const MAX_PARTS: usize = 256;
-
-/// Ein Körper einer Tür/eines Fensters (Welt-XY-Profil, Unterkante ab Öffnungs-UK).
-struct Part {
-    /// 0 Rahmen/Zarge, 1 Türblatt, 2 Glas.
-    role: usize,
-    pts: Vec<(f64, f64)>,
-    z_rel: f64,
-    depth: f64,
-}
-
-/// IfcDoorTypeOperationEnum / IfcWindowTypePartitioningEnum (IFC4): nur gültige Namen kommen durch.
-const DOOR_OPERATIONS: &[&str] = &[
-    "SINGLE_SWING_LEFT", "SINGLE_SWING_RIGHT", "DOUBLE_DOOR_SINGLE_SWING", "DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_LEFT",
-    "DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_RIGHT", "DOUBLE_SWING_LEFT", "DOUBLE_SWING_RIGHT", "DOUBLE_DOOR_DOUBLE_SWING",
-    "SWING_FIXED_LEFT", "SWING_FIXED_RIGHT", "SLIDING_TO_LEFT", "SLIDING_TO_RIGHT", "DOUBLE_DOOR_SLIDING",
-    "FOLDING_TO_LEFT", "FOLDING_TO_RIGHT", "DOUBLE_DOOR_FOLDING", "REVOLVING", "ROLLINGUP", "NOTDEFINED",
-];
-const WINDOW_PARTITIONINGS: &[&str] = &[
-    "SINGLE_PANEL", "DOUBLE_PANEL_VERTICAL", "DOUBLE_PANEL_HORIZONTAL", "TRIPLE_PANEL_VERTICAL", "TRIPLE_PANEL_BOTTOM",
-    "TRIPLE_PANEL_TOP", "TRIPLE_PANEL_LEFT", "TRIPLE_PANEL_RIGHT", "TRIPLE_PANEL_HORIZONTAL", "NOTDEFINED",
-];
+/// Ein Körper einer Tür/eines Fensters (Welt-XY-Profil, Unterkante ab Öffnungs-UK; `ifc_openings.rs`).
+type Part = FillPart;
 
 /// Farbe und Durchsichtigkeit je Teilrolle (wie `PART_RGB` im 3D: Rahmen hellgrau, Blatt warm, Glas bläulich).
 const PART_STYLES: [(&str, [f64; 3], f64); 3] = [
@@ -1222,20 +1264,17 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let void_z = r.f()?;
                 let depth = r.f()?;
                 let width = r.f()?;
-                let kind = r.opt_string()?;
-                let (fox, foy, fux, fuy) = (r.f()?, r.f()?, r.f()?, r.f()?);
-                if ((fux * fux + fuy * fuy) - 1.0).abs() > 1e-6 {
+                let fill = fill_geometry(&r.fill_params(is_door)?);
+                let (kind, parts) = (fill.kind, fill.parts);
+                let ((fox, foy), (fux, fuy)) = (fill.origin, fill.u);
+                if ((fux * fux + fuy * fuy) - 1.0).abs() > 1e-6 || !(fox.is_finite() && foy.is_finite()) {
                     return Err(format!("Füllungsrichtung nicht normiert bei {}", r.pos - 1));
                 }
-                let fill_frame = Frame { ox: fox, oy: foy, ux: fux, uy: fuy };
-                let parts = r.parts()?;
-                let psets = r.psets()?;
-                let allowed = if is_door { DOOR_OPERATIONS } else { WINDOW_PARTITIONINGS };
-                if let Some(k) = &kind {
-                    if !allowed.contains(&k.as_str()) {
-                        return Err(format!("unbekannte Ausführung {k:?} bei {}", r.pos - 1));
-                    }
+                if parts.iter().any(|p| !(p.z_rel.is_finite() && p.depth.is_finite() && p.pts.iter().all(|q| q.0.is_finite() && q.1.is_finite()))) {
+                    return Err(format!("Füllung mit NaN/∞ bei {}", r.pos - 1));
                 }
+                let fill_frame = Frame { ox: fox, oy: foy, ux: fux, uy: fuy };
+                let psets = r.psets()?;
                 let Some(&(host_entity, host_placement, host_frame)) = w.walls.get(&wall_id) else {
                     continue; // Wirtswand nicht geschrieben (degeneriert)
                 };
@@ -1262,7 +1301,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let fill_placement = w.emit_placement_frame(&fill_frame.relative_to(&host_frame), opening_placement);
                 let fill_shape = if parts.is_empty() { "$".to_string() } else { format!("#{}", w.emit_parts_shape(&parts, &fill_frame)) };
                 let g = w.gid(&format!("fill/{opening_id}"));
-                let operation = kind.as_deref().map(enum_).unwrap_or_else(|| "$".to_string());
+                let operation = kind.map(enum_).unwrap_or_else(|| "$".to_string());
                 let fill_entity = w.add(
                     if is_door { "IFCDOOR" } else { "IFCWINDOW" },
                     format!(
@@ -1616,22 +1655,9 @@ mod tests {
         fn no_type(&mut self) {
             self.f.push(0.0);
         }
-        /// OPENING-Datensatz im neuen Format (Gegenstück zu `FlatIfc.opening`).
+        /// OPENING-Datensatz (Gegenstück zu `FlatIfc.opening`), Füllung als Parameter.
         #[allow(clippy::too_many_arguments)]
-        fn opening(
-            &mut self,
-            wall: &str,
-            id: &str,
-            is_door: bool,
-            name: &str,
-            void_pts: &[(f64, f64)],
-            void_z: f64,
-            depth: f64,
-            width: f64,
-            kind: Option<&str>,
-            frame: [f64; 4],
-            parts: &[(f64, &[(f64, f64)], f64, f64)],
-        ) {
+        fn opening(&mut self, wall: &str, id: &str, is_door: bool, name: &str, void_pts: &[(f64, f64)], void_z: f64, depth: f64, width: f64, fill: &FillParams) {
             self.n(&[REC_OPENING]);
             self.str(wall);
             self.n(&[-1.0]);
@@ -1640,18 +1666,33 @@ mod tests {
             self.str(name);
             self.pts(void_pts);
             self.n(&[void_z, depth, width]);
-            match kind {
-                Some(k) => self.str(k),
-                None => self.f.push(-1.0),
-            }
-            self.n(&frame);
-            self.f.push(parts.len() as f64);
-            for (role, pts, z, d) in parts {
-                self.f.push(*role);
-                self.pts(pts);
-                self.n(&[*z, *d]);
-            }
+            self.fill(fill);
             self.no_psets();
+        }
+        fn opt(&mut self, v: Option<f64>) {
+            self.n(&[if v.is_some() { 1.0 } else { 0.0 }, v.unwrap_or(0.0)]);
+        }
+        fn fill(&mut self, p: &FillParams) {
+            self.n(&[p.wall_start.0, p.wall_start.1, p.wall_end.0, p.wall_end.1, p.from, p.to, p.z_bottom, p.z_top, p.n_lo, p.n_hi]);
+            self.opt(p.frame_depth);
+            self.opt(p.inset);
+            self.n(&[if p.inset_outside { 1.0 } else { 0.0 }]);
+            self.opt(p.frame_width);
+            self.n(&[p.wing_count, p.panes as f64, p.sashes.len() as f64]);
+            for s in &p.sashes {
+                self.n(&[if s.post { 1.0 } else { 0.0 }]);
+                self.opt(s.post_width);
+                self.n(&[if s.fixed { 1.0 } else { 0.0 }]);
+                self.opt(s.width);
+            }
+            let k = match p.door_kind {
+                DoorKind::Swing => 0.0,
+                DoorKind::Sliding => 1.0,
+                DoorKind::WallOpening => 2.0,
+            };
+            self.n(&[k, p.leaf_count, p.swing_sign, p.dir_sign, if p.hinge_at_start { 1.0 } else { 0.0 }, p.transom_height]);
+            self.n(&[if p.glazed { 1.0 } else { 0.0 }]);
+            self.opt(p.glazing_ratio);
         }
         fn wall_type(&mut self) {
             self.n(&[1.0, 0.0]);
@@ -1689,6 +1730,29 @@ mod tests {
     const SQUARE: [(f64, f64); 4] = [(0.0, 0.0), (5.0, 0.0), (5.0, 0.4), (0.0, 0.4)];
 
     /// Ein Projekt mit je einem Bauteil jeder Art; zwei Wände gleichen Typs (Pset/Typ müssen sich teilen).
+    /// Füllungs-Parameter: Wand (sx, sy) → (ex, ey), Achs-Intervall, Höhen, Dicke ±0.2.
+    fn fill(is_door: bool, wall: [f64; 4], from: f64, to: f64, z0: f64, z1: f64) -> FillParams {
+        FillParams {
+            wall_start: (wall[0], wall[1]),
+            wall_end: (wall[2], wall[3]),
+            from,
+            to,
+            z_bottom: z0,
+            z_top: z1,
+            n_lo: -0.2,
+            n_hi: 0.2,
+            is_door,
+            inset_outside: true,
+            wing_count: 1.0,
+            panes: 2,
+            leaf_count: 1.0,
+            swing_sign: 1.0,
+            dir_sign: 1.0,
+            hinge_at_start: true,
+            ..Default::default()
+        }
+    }
+
     fn full_house(with_geo: bool) -> B {
         let mut b = B::new();
         b.str("t");
@@ -1716,15 +1780,11 @@ mod tests {
             b.n(&[0.0, 2.6]);
         }
         // Öffnung in W1: Tür mit Zarge, Blatt und Glas.
+        // Scharnier am Ende, Aufschlag nach +Y: LEFT; Oberlicht gibt Glas.
         b.opening(
             "W1", "T1", true, "Haustür",
             &[(1.0, -0.02), (1.9, -0.02), (1.9, 0.42), (1.0, 0.42)], 0.0, 2.1, 0.9,
-            Some("SINGLE_SWING_LEFT"), [1.45, 0.0, 0.0, 1.0],
-            &[
-                (0.0, &[(1.0, 0.0), (1.06, 0.0), (1.06, 0.07), (1.0, 0.07)], 0.0, 2.1),
-                (1.0, &[(1.06, 0.015), (1.84, 0.015), (1.84, 0.055), (1.06, 0.055)], 0.0, 2.04),
-                (2.0, &[(1.2, 0.02), (1.6, 0.02), (1.6, 0.05), (1.2, 0.05)], 0.5, 1.0),
-            ],
+            &FillParams { hinge_at_start: false, transom_height: 0.4, ..fill(true, [0.0, 0.0, 5.0, 0.0], 1.0, 1.9, 0.0, 2.1) },
         );
         // Decke, Treppe, Extrusion.
         b.n(&[REC_CEILING, 0.0]);
@@ -1923,8 +1983,7 @@ mod tests {
         b.opening(
             "W", "O", false, "Fenster",
             &[(10.3, 21.0), (10.3, 22.0), (9.7, 22.0), (9.7, 21.0)], 0.9, 1.2, 1.0,
-            Some("SINGLE_PANEL"), [10.0, 21.5, 0.0, 1.0],
-            &[(0.0, &[(10.2, 21.0), (10.2, 22.0), (9.8, 22.0), (9.8, 21.0)], 0.0, 1.2)],
+            &fill(false, [10.0, 20.0, 10.0, 25.0], 1.0, 2.0, 0.9, 2.1),
         );
         let ifc = build(&b).unwrap();
         check_structure(&ifc);
@@ -1946,14 +2005,15 @@ mod tests {
         check_structure(&ifc);
         let door = first_line(&ifc, "IFCDOOR");
         assert!(door.contains(".DOOR.,.SINGLE_SWING_LEFT.,$);"), "{door}");
-        // Drei Körper (Zarge, Blatt, Glas) in EINER Darstellung, je ein IfcStyledItem, drei Stile.
-        assert_eq!(count(&ifc, "IFCSTYLEDITEM"), 3);
+        // Sechs Körper (Zarge 3, Kämpfer, Oberlicht-Glas, Blatt) in EINER Darstellung, je ein
+        // IfcStyledItem, drei Stile (Rahmen, Blatt, Glas).
+        assert_eq!(count(&ifc, "IFCSTYLEDITEM"), 6);
         assert_eq!(count(&ifc, "IFCSURFACESTYLE"), 3);
         assert_eq!(count(&ifc, "IFCSURFACESTYLERENDERING"), 3);
         assert!(ifc.contains("IFCSURFACESTYLE('Glas',.BOTH.,"));
         assert!(ifc.contains("IFCSURFACESTYLERENDERING(#"));
-        let shapes = ifc.lines().filter(|l| l.contains("IFCSHAPEREPRESENTATION") && l.contains("'SweptSolid'") && l.matches('#').count() == 5).count();
-        assert!(shapes >= 1, "Darstellung mit 3 Körpern fehlt");
+        let shapes = ifc.lines().filter(|l| l.contains("IFCSHAPEREPRESENTATION") && l.contains("'SweptSolid'") && l.matches('#').count() == 8).count();
+        assert!(shapes >= 1, "Darstellung mit 6 Körpern fehlt");
         // Füllungs-Placement mit Richtung (0,1,0) relativ zur Öffnung; Ursprung lokal.
         assert!(ifc.contains("IFCCARTESIANPOINT((1.45,0.0,0.0))"));
     }
@@ -1961,26 +2021,34 @@ mod tests {
     #[test]
     fn fenster_ohne_teile_hat_keine_darstellung_und_enum_ist_geprueft() {
         let mut b = full_house(false);
-        b.opening("W1", "F1", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, Some("DOUBLE_PANEL_VERTICAL"), [2.0, 0.0, 1.0, 0.0], &[]);
-        b.opening("W1", "T2", true, "Wandöffnung", &SQUARE, 0.0, 2.1, 1.0, None, [3.0, 0.0, 1.0, 0.0], &[]);
+        let w1 = [0.0, 0.0, 5.0, 0.0];
+        b.opening("W1", "F1", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, &FillParams { wing_count: 2.0, ..fill(false, w1, 2.0, 3.2, 0.9, 2.1) });
+        b.opening("W1", "T2", true, "Wandöffnung", &SQUARE, 0.0, 2.1, 1.0, &FillParams { door_kind: DoorKind::WallOpening, ..fill(true, w1, 3.0, 4.0, 0.0, 2.1) });
         let ifc = build(&b).unwrap();
         check_structure(&ifc);
         let win = first_line(&ifc, "IFCWINDOW");
         assert!(win.contains(".WINDOW.,.DOUBLE_PANEL_VERTICAL.,$);"), "{win}");
-        assert!(win.contains(",$,$,1.2,1.2,.WINDOW."), "ohne Teile keine Darstellung: {win}");
-        // Ungültige Ausführung (Fenster-Wert an der Tür und umgekehrt) ist ein Fehler, nie Panic.
+        let hole = ifc.lines().filter(|l| l.contains("IFCDOOR(")).find(|l| l.contains(",$,$,2.1,1.0,.DOOR.,$,$);"));
+        assert!(hole.is_some(), "Wandöffnung ohne Darstellung und Ausführung");
+        // Kaputte Parameter: Fehler, nie Panic.
+        let bad_params = [
+            FillParams { panes: 0, ..fill(false, w1, 1.0, 2.0, 0.9, 2.1) },
+            FillParams { swing_sign: 0.0, ..fill(true, w1, 1.0, 2.0, 0.0, 2.1) },
+            FillParams { wing_count: f64::NAN, ..fill(false, w1, 1.0, 2.0, 0.9, 2.1) },
+            FillParams { sashes: vec![Sash::default(); MAX_SASHES + 1], ..fill(false, w1, 1.0, 2.0, 0.9, 2.1) },
+            // Wand ohne Länge: keine Richtung.
+            fill(false, [1.0, 1.0, 1.0, 1.0], 0.0, 1.0, 0.0, 1.0),
+        ];
+        for p in bad_params {
+            let mut bad = full_house(false);
+            bad.opening("W1", "F9", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, &p);
+            assert!(build(&bad).is_err(), "{p:?}");
+        }
+        // Unbekannte Türart.
         let mut bad = full_house(false);
-        bad.opening("W1", "T3", true, "Tür", &SQUARE, 0.0, 2.1, 1.0, Some("SINGLE_PANEL"), [1.0, 0.0, 1.0, 0.0], &[]);
-        assert!(build(&bad).is_err());
-        let mut bad = full_house(false);
-        bad.opening("W1", "F3", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, Some("SINGLE_SWING_LEFT"), [1.0, 0.0, 1.0, 0.0], &[]);
-        assert!(build(&bad).is_err());
-        // Unbekannte Teilrolle, schiefe Richtung: Fehler.
-        let mut bad = full_house(false);
-        bad.opening("W1", "F4", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, None, [1.0, 0.0, 1.0, 0.0], &[(3.0, &SQUARE, 0.0, 1.0)]);
-        assert!(build(&bad).is_err());
-        let mut bad = full_house(false);
-        bad.opening("W1", "F5", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, None, [1.0, 0.0, 3.0, 0.0], &[]);
+        bad.opening("W1", "T9", true, "Tür", &SQUARE, 0.0, 2.1, 1.0, &fill(true, w1, 1.0, 2.0, 0.0, 2.1));
+        let at = bad.f.len() - 1 /* psets */ - 3 /* glazed, ratio-opt */ - 6;
+        bad.f[at] = 7.0;
         assert!(build(&bad).is_err());
     }
 
@@ -2041,7 +2109,7 @@ mod tests {
         b.n(&[1.0]);
         b.str("iso");
         b.n(&[0.0, f64::NAN, 0.0]);
-        b.opening("gibt-es-nicht", "O1", false, "Fenster", &SQUARE, 0.0, 1.0, 1.0, None, [0.0, 0.0, 1.0, 0.0], &[]);
+        b.opening("gibt-es-nicht", "O1", false, "Fenster", &SQUARE, 0.0, 1.0, 1.0, &fill(false, [0.0, 0.0, 5.0, 0.0], 0.0, 1.0, 0.0, 1.0));
         let ifc = build(&b).unwrap();
         check_structure(&ifc);
         assert_eq!(count(&ifc, "IFCOPENINGELEMENT"), 0);

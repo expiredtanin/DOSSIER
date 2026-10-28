@@ -418,6 +418,12 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     in `ifcOpenings.test.ts`. Offen: LEFT/RIGHT der Tür nach IFC-Konvention (Blick von der Aufschlagseite)
     gelesen, nicht in Revit/ArchiCAD gegengeprüft; ohne Sprossen, Fensterbank, Rollladenkasten, Schwelle,
     Flügelrahmen.
+  - ✅ Tür/Fenster-Geometrie nach Rust (Regel „Kern in Rust“, 28.10.): `fileio/src/ifc_openings.rs` rechnet
+    Rahmen/Zarge, Blatt, Glas, Füllungs-Placement und OperationType/PartitioningType; `export/ifcOpenings.ts`
+    sammelt nur die Parameter (Typ-/Öffnungswerte, fehlende als „keine“), flache Kodierung FILL (Version 2).
+    TS-Rechnung gelöscht, ihre Fälle als Rust-Tests. Golden-Vergleich: 419 verschiedene IFC-Ausgaben (Tests in
+    `export/*ifc*`, `io/ifcImport`, `io/ifcElements` und 780 Tür-/Fenster-Varianten: Glas-/Schiebe-/Wandöffnung,
+    Oberlicht, Flügeltabellen, Einzug innen, Klemmungen) vorher/nachher zeichengleich bis auf Zeitstempel.
   - ○ Offen: Bogenwände als echte Kurve. · M
   - ✅ Eigener IFC-Import ([B3]) zieht Öffnungen ab (28.10.): Rundreise vergleicht alle Wände mit dem
     ausgeschnittenen Volumen (`ifcImport.test.ts`).
