@@ -38,6 +38,8 @@ export interface NativeAppMenuHandlers {
   onImportIfc: () => void;
   /** Punktwolke importieren ([27]); optional für ältere Aufrufer. */
   onImportPointCloud?: () => void;
+  /** 3D-Modell importieren (OBJ/STL/glTF/GLB/PLY). */
+  onImportMesh?: () => void;
   onClashCheck: () => void;
   onKennzahlen: () => void;
 
@@ -185,6 +187,10 @@ export function useNativeAppMenu(
           await MenuItem.new({
             text: t("menu.native.importPointCloud"),
             action: () => handlersRef.current.onImportPointCloud?.(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.importMesh"),
+            action: () => handlersRef.current.onImportMesh?.(),
           }),
           await Submenu.new({
             text: t("menu.native.export"),
