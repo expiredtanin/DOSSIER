@@ -9,7 +9,11 @@
 //                                                  json = render2d-Szene (planToRenderScene)
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
-//   dossier-cli <projekt.obp> dxf [--binary]|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun [--level EG] [--out datei]
+//                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
+//   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
+//                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
+//                                                  gegen das Ergebnis, {last} = zuletzt geschriebene Datei
 //   dossier-cli <projekt.obp> import-ifc <datei.ifc> [--out neu.obp] [--group product|class] [--elements]
 //                                                  IFC als Kontext-Meshes ([B3]), mit --elements als echte
 //                                                  Bauteile ([B4]); Bericht als JSON auf stdout
@@ -48,6 +52,14 @@ import {
   checkRoomProgram,
   checkSiteRules,
   exportStl,
+  exportGlb,
+  exportGltf,
+  parseDxf,
+  contoursToDrawings,
+  textsToDrawings,
+  planImportCategories,
+  distinctImportLayers,
+  emptyProject,
   generateElevationPlan,
   diffToOps,
   applyOps,
@@ -66,23 +78,26 @@ import {
 import type { Project } from "../core";
 import { serveStdio } from "./mcp";
 
-type Args = { positional: string[]; flags: Map<string, string> };
+type Args = { positional: string[]; flags: Map<string, string>; cmds: string[] };
 
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
   const flags = new Map<string, string>();
+  const cmds: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith("--")) {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith("--")) flags.set(a.slice(2), "true");
       else {
-        flags.set(a.slice(2), next);
+        // `--cmd` darf mehrfach vorkommen (Reihenfolge bleibt), bei allen anderen Flags gilt das letzte.
+        if (a === "--cmd") cmds.push(next);
+        else flags.set(a.slice(2), next);
         i++;
       }
     } else positional.push(a);
   }
-  return { positional, flags };
+  return { positional, flags, cmds };
 }
 
 function wasmDir(): string {
@@ -124,8 +139,12 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
   return levels.find((l) => l.id.toLowerCase() === n || l.name.toLowerCase() === n);
 }
 
+/** Zuletzt geschriebene Datei (für `{last}` in `--cmd`). */
+let lastOutput = "";
+
 function out(args: Args, text: string | Uint8Array, defaultName: string): void {
   const target = args.flags.get("out") ?? defaultName;
+  lastOutput = target;
   if (target === "-") process.stdout.write(text);
   else {
     writeFileSync(target, text);
@@ -136,10 +155,13 @@ function out(args: Args, text: string | Uint8Array, defaultName: string): void {
 
 export async function run(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
+  const convertMode = args.positional[0] === "convert";
   const [file, command, ...rest] = args.positional;
-  if (!file || !command) {
+  if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun|model3d> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun|model3d> [Optionen]\n" +
+        "        dossier-cli convert <eingabe.dxf|dwg|ifc|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
+        "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n",
     );
     return 2;
   }
@@ -149,7 +171,142 @@ export async function run(argv: string[]): Promise<number> {
     return readFileSync(join(wasmDir(), rel));
   });
   await initCore();
+  if (convertMode) return convert(command, rest[0], args);
   const project = loadProject(file);
+  let code = 0;
+  if (command) code = await execute(project, file, command, rest, args);
+  return code === 0 ? runCmds(project, file, args) : code;
+}
+
+/** Endung (klein, ohne Punkt) eines Dateinamens. */
+const extOf = (path: string): string => (path.includes(".") ? (path.split(".").pop() ?? "").toLowerCase() : "");
+
+/** Zerlegt eine `--cmd`-Zeile in Wörter (Anführungszeichen "…" und '…' fassen zusammen). */
+function splitCommand(line: string): string[] {
+  return [...line.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+}
+
+/** Führt alle `--cmd` der Reihe nach gegen das Projekt aus; `{last}` = zuletzt geschriebene Datei. Bricht beim ersten Fehler ab. */
+async function runCmds(project: Project, file: string, args: Args): Promise<number> {
+  for (const line of args.cmds) {
+    const words = splitCommand(line.replaceAll("{last}", lastOutput));
+    const sub = parseArgs(words);
+    const [command, ...rest] = sub.positional;
+    if (!command) fail("--cmd: leerer Befehl");
+    const code = await execute(project, file, command, rest, sub);
+    if (code !== 0) return code;
+  }
+  return 0;
+}
+
+/** Alle Kategorien inkl. verschachtelter (flach). */
+function flattenAllCategories(ls: Project["layers"]): Project["layers"] {
+  return ls.flatMap((l) => [l, ...(l.children ? flattenAllCategories(l.children) : [])]);
+}
+
+/** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
+async function importAny(path: string, args: Args): Promise<Project> {
+  const ext = extOf(path);
+  if (ext === "obp" || ext === "json" || path === ":beispiel") return loadProject(path);
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(readFileSync(path));
+  } catch (e) {
+    return fail(`Datei nicht lesbar: ${path} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const base: Project = { ...emptyProject, name: fileName.replace(/\.[^.]+$/, "") };
+  if (ext === "ifc") return (await ifcInto(base, bytes, fileName, args)).next;
+  if (ext === "dxf" || ext === "dwg") {
+    await loadFileio();
+    const parsed = parseDxf(bytes);
+    const level = base.drawingLevels.find((l) => l.kind === "floor");
+    if (!level) return fail("kein Geschoss für den Import");
+    // Wie die App („DXF-Layer als Kategorien"): fehlende Layer als Unterkategorien einer neuen Elternkategorie.
+    const plan = planImportCategories(
+      distinctImportLayers(parsed.contours, parsed.texts ?? []),
+      flattenAllCategories(base.layers),
+      `Import ${fileName}`,
+      parsed.layerColors,
+    );
+    const layers = plan.parent ? [...base.layers, plan.parent] : base.layers;
+    const fallback = base.layers[0].code;
+    const toCode = (layer: string): string => plan.codeByLayer.get(layer) ?? fallback;
+    const drawings = [
+      ...contoursToDrawings(parsed.contours, level.id, "byLayer", fallback, toCode),
+      ...textsToDrawings(parsed.texts ?? [], level.id, "byLayer", fallback, toCode),
+    ];
+    return applyOps(base, diffToOps(base, { ...base, layers, drawings2d: drawings, context: [...parsed.meshes] }));
+  }
+  return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc)`);
+}
+
+/** `convert <eingabe> <ausgabe>`: Eingabe nach Endung lesen, Ausgabe nach Endung schreiben, dann `--cmd` ausführen. */
+async function convert(input: string | undefined, output: string | undefined, args: Args): Promise<number> {
+  if (!input || !output) {
+    process.stderr.write("Aufruf: dossier-cli convert <eingabe> <ausgabe> [--cmd \"befehl\"]…\n");
+    return 2;
+  }
+  const project = await importAny(input, args);
+  const ext = extOf(output);
+  const sub: Args = { positional: [], flags: new Map(args.flags), cmds: [] };
+  sub.flags.set("out", output);
+  let code: number;
+  switch (ext) {
+    case "obp":
+      out(sub, serializeProject(project), output);
+      code = 0;
+      break;
+    case "dxf":
+    case "dwg":
+    case "ifc":
+    case "obj":
+    case "stl":
+    case "glb":
+    case "gltf":
+      code = await execute(project, input, ext, [], sub);
+      break;
+    case "step":
+    case "stp":
+      code = await execute(project, input, "step", [], sub);
+      break;
+    default:
+      return fail(`Ausgabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, obj, stl, glb, gltf, step)`);
+  }
+  return code === 0 ? runCmds(project, input, args) : code;
+}
+
+/** IFC in ein Projekt übernehmen (Kontext-Meshes, mit `--elements` als Bauteile); `report` = Bericht für `import-ifc`. */
+async function ifcInto(project: Project, bytes: Uint8Array, fileName: string, args: Args): Promise<{ next: Project; report: unknown }> {
+  const group = args.flags.get("group");
+  const grouping = group === "product" || group === "class" ? group : "auto";
+  if (args.flags.has("elements")) {
+    const { products, report, elements } = await readIfcElements(bytes);
+    const r = ifcElementsToProject(project, products, elements, { fileName, geoOrigin: projectGeoOrigin(project), group: grouping });
+    return {
+      next: applyOps(project, diffToOps(project, r.project)),
+      report: { ...report, products: undefined, elements: r.summary, kept: elements.kept },
+    };
+  }
+  const { products, report } = await readIfc(bytes);
+  const meshes = ifcToImportedMeshes(products, fileName, { geoOrigin: projectGeoOrigin(project), group: grouping });
+  const byClass: Record<string, number> = {};
+  for (const p of products) byClass[p.ifcClass] = (byClass[p.ifcClass] ?? 0) + 1;
+  const triangles = products.reduce((s, p) => s + p.indices.length / 3, 0);
+  const next = applyOps(
+    project,
+    diffToOps(project, {
+      ...project,
+      context: [...(project.context ?? []), ...meshes],
+      // Wie in der App (siteSlice): fehlende Kontext-Kategorie als Ebene ergänzen.
+      layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
+    }),
+  );
+  return { next, report: { ...report, byClass, triangles, contextObjects: meshes.length } };
+}
+
+/** Führt EINEN Befehl gegen ein geladenes Projekt aus (Rückgabe = Exit-Code). */
+async function execute(project: Project, file: string, command: string, rest: string[], args: Args): Promise<number> {
   const scale = Number(args.flags.get("scale") ?? 100);
   // Alle Ebenen-Codes inkl. verschachtelter (z. B. „10 Situation" unter „05 Kontext").
   const allCodes = new Set<string>();
@@ -252,6 +409,14 @@ export async function run(argv: string[]): Promise<number> {
       await loadFileio();
       out(args, exportStl(project), `${project.name || "projekt"}.stl`);
       return 0;
+    case "glb":
+      await loadFileio();
+      out(args, exportGlb(project, { byLevel: !args.flags.has("flat") }), `${project.name || "projekt"}.glb`);
+      return 0;
+    case "gltf":
+      await loadFileio();
+      out(args, exportGltf(project, { byLevel: !args.flags.has("flat") }), `${project.name || "projekt"}.gltf`);
+      return 0;
     case "kennzahlen": {
       const k = computeKennzahlen(project);
       const prog = checkRoomProgram(project);
@@ -286,39 +451,10 @@ export async function run(argv: string[]): Promise<number> {
       } catch (e) {
         fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
       }
-      const group = args.flags.get("group");
-      const fileName = src.split(/[\\/]/).pop() ?? src;
-      if (args.flags.has("elements")) {
-        const { products, report, elements } = await readIfcElements(bytes);
-        const r = ifcElementsToProject(project, products, elements, {
-          fileName,
-          geoOrigin: projectGeoOrigin(project),
-          group: group === "product" || group === "class" ? group : "auto",
-        });
-        process.stdout.write(JSON.stringify({ ...report, products: undefined, elements: r.summary, kept: elements.kept }, null, 2) + "\n");
-        const target = args.flags.get("out");
-        if (target) out(args, serializeProject(applyOps(project, diffToOps(project, r.project))), target);
-        return 0;
-      }
-      const { products, report } = await readIfc(bytes);
-      const meshes = ifcToImportedMeshes(products, fileName, {
-        geoOrigin: projectGeoOrigin(project),
-        group: group === "product" || group === "class" ? group : "auto",
-      });
-      const byClass: Record<string, number> = {};
-      for (const p of products) byClass[p.ifcClass] = (byClass[p.ifcClass] ?? 0) + 1;
-      const triangles = products.reduce((s, p) => s + p.indices.length / 3, 0);
-      process.stdout.write(JSON.stringify({ ...report, byClass, triangles, contextObjects: meshes.length }, null, 2) + "\n");
+      const r = await ifcInto(project, bytes, src.split(/[\\/]/).pop() ?? src, args);
+      process.stdout.write(JSON.stringify(r.report, null, 2) + "\n");
       const target = args.flags.get("out");
-      if (target) {
-        const next = applyOps(project, diffToOps(project, {
-          ...project,
-          context: [...(project.context ?? []), ...meshes],
-          // Wie in der App (siteSlice): fehlende Kontext-Kategorie als Ebene ergänzen.
-          layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
-        }));
-        out(args, serializeProject(next), target);
-      }
+      if (target) out(args, serializeProject(r.next), target);
       return 0;
     }
     case "mcp":

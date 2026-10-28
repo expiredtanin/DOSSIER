@@ -523,8 +523,15 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
     der Layout-Bericht; Ordinate-Bemassung; Tauri/macOS nicht getestet.
 - ○ **[C3] MCP an die laufende App** (`--connect 127.0.0.1:7979`, Werkzeuge `screenshot`, `ui_click`,
   `render` → PNG, `execute` = jeder Befehl mit JSON): genau die fehlende Hälfte von [9]; setzt [6] voraus. · M
-- ○ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless
+- ◐ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless
   verketten — für Tests, Agenten und Stapelverarbeitung. Erweitert [4]. · S–M
+  28.10. **`convert <eingabe> <ausgabe>`** (Format nach Endung: dxf/dwg/ifc/obp lesen, obp/dxf/dwg/ifc/obj/stl/
+  glb/gltf/step schreiben; IFC mit `--elements` als Bauteile) und **`--cmd` mehrfach** (auch ohne `convert`:
+  `dossier-cli p.obp --cmd "plan --out a.svg" --cmd "dxf --out {last}.dxf"`; `{last}` = zuletzt geschriebene
+  Datei; Abbruch beim ersten Fehler) in `src/cli/main.ts`, Tests `src/cli/convert.test.ts`. **Offen:**
+  `run --script` (Skriptdatei), `--cmd` ohne gemeinsames Projekt (jeder Befehl sieht das Ausgangsprojekt, keine
+  Änderungen werden durchgereicht); DXF/DWG-Import in `convert` legt alles auf das erste Geschoss und nimmt
+  die Layer als Kategorien (keine Dialog-Optionen wie Platzierung); `convert` nach pdf/svg fehlt.
 - ○ **[C5] Copy-on-Write-Elementspeicher** für billiges Undo: Vorlage für das Modell in Rust ([K4], [8]). · —
 - ○ **[C6] `cargo xtask ci`**: prüft Formatierung, Clippy, Tests, **Crate-Schichtung**, **Asset-Herkunft** und
   den WASM-Build in einem Befehl — Ausbau von [22] (fmt/clippy fehlen) und [51]. · S
@@ -536,6 +543,18 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   geht, was fehlt): passt zu [60]. · S
 - ○ **[C10] Kleinigkeiten:** Log-Rotation über `RUST_LOG`, isoliertes Profil per Umgebungsvariable,
   „reduzierte Bewegung" aus den Systemeinstellungen. · je S
+- ◐ **[C11] glTF 2.0 / GLB-Export + Mesh-Export in Rust** (28.10.): `src-tauri/fileio/src/mesh_export.rs` schreibt
+  OBJ, STL (Ausgabe zeichengleich zur früheren TS-Fassung, Golden am Beispielprojekt) und **glTF/GLB** (eigener
+  Code, keine Abhängigkeit): ein Knoten je Bauteil (`Wand_<id>`, `extras` = Typ + id), Geschoss als Eltern-Knoten,
+  PBR-Materialien mit der Farbe der Komponente (linear umgerechnet), Verglasung transparent (`BLEND`), Meter,
+  **Y-up rechtshändig: Modell (x, y, z-hoch) → (x, z, −y)**, Norden = −Z. TS (`src/export/exportMesh.ts`) sammelt nur
+  flach. Export-Dialog „glTF 2.0 (GLB)“, Tauri-Menü, CLI `glb`/`gltf`. Prüfung: Khronos-Validator
+  (`gltf-validator`, devDependency, Apache-2.0) ohne Fehler, Rundreise Knoten-/Dreieckszahl gegen OBJ,
+  8 Rust-Tests. **Offen:** Dächer, Treppen, Stützen, Kontext-Meshes/Gelände fehlen auch in OBJ/STL (nur Wände,
+  Decken, Extrusionen, im glTF zusätzlich Öffnungsteile); Fenster-Verglasung und Rahmen sind je ein Sammelknoten
+  ohne Öffnungs-id; keine Normalen (Flat-Shading), keine Texturen, keine Instanzen; OBJ/STL bleiben beim
+  älteren gespiegelten Achsen-Bezug (x, Höhe, +y); nicht in Blender/Twinmotion/Enscape geöffnet, nur Validator;
+  nicht in der Tauri-App getestet. · S
 
 ## Bewusst nicht übernommen
 
