@@ -199,8 +199,33 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     **Messung** (Linux-Container): Kern nativ (release), 5000 Wände: commit 51 µs, Undo 37 µs, Redo 36 µs je Schritt. Über WASM im
     Store-Weg (vitest, 3000 Wände, 500 Schritte): 2,6 ms/Schritt, davon `diffToOps`+`applyOps` in TS ≈ 2,0 ms, Kern-Commit ≈ 0,4 ms;
     Undo 0,08 ms, Redo 0,07 ms; Verlauf ≈ 780 KiB für 500 Schritte.
-    Offen: Befehle/Store-Aktionen erzeugen Ops direkt (dann entfällt `diffToOps`, der grösste Kostenanteil); `applyOps` bleibt als
-    Patch-Anwendung der Leseansicht; Ebenen-/Gruppen-Logik (`groupActions.ts`) nach Rust; Undo-Verlauf als Liste in der UI [84].
+    **Zweite Etappe (28.10.): Aktionen erzeugen Ops direkt.** Op-Bauhelfer `core/opsBuild.ts` (`patchItem`, `patchItems`,
+    `addItems`, `removeItems`, `setField`, `fieldOps` = Differenz nur über ein kleines Feld, `opsMutation` = Projekt → Projekt-
+    Funktion mit mitgeführten Ops); Store `applyChange(ops | (p) => ops, coalesceKey?)`, `setProject` nimmt die Ops einer
+    `opsMutation` ohne `diffToOps`. Umgestellt: alle Griffe (Wand/2D/Decke/Dach/Treppe/Raum, Kanten, Stempel), Objekt-Info der
+    Store-Aktionen (update*, Farbe/Füllung/Vorder-/Hintergrund, Resize, Dicken, Polylinien-Punkte), Panel-Eigenschaften der
+    2D-Elemente, Auswahl verschieben/kopieren/drehen/spiegeln/skalieren (`transformOps`), Löschen der Auswahl, Ebenen/
+    Sichtbarkeit/Kategorien, Text-Tippen, Zeichenbefehle (Wand, Decke, Raum, Treppe, Öffnung, Dach, Stütze, Extrusion, alle
+    2D-Zeichenbefehle, Bemassung, move/copy/mirror/rotate/scale/array; Gruppen-Zuordnung beim Zeichnen in einer Gruppe über
+    `activeGroupOps`). Gruppen: Löschen (+ Schnittlinien) und aufgeschobene Griff-Commits = ein Schritt; `groupChanges(fn, key)`
+    mit Schlüssel (Kern `begin_group_keyed`): ein Griff-Zug, der je Mausschritt mitgeführte Ecken bewegt, ist EIN Undo-Schritt
+    (vorher mehrere je Mausschritt). Kern: Positions-Index für `replace`-Serien (`PosCache`), `commit` übernimmt die Ops (eine
+    Kopie weniger); TS-`applyOps` kopiert jede Liste je Aufruf einmal, Index ab der zweiten Suche. Gleichheit: beim Umbau 2400
+    Zufallsschritte gegen die alte setProject-Fassung und 400 Transformationen gegen das alte `commitTransform` (gleiches Projekt
+    bis auf erzeugte ids und fehlend/leere Listen); bleibende Tests `applyChange.test.ts`, `opsBuild.test.ts`, `ops.apply.test.ts`.
+    **Messung** (vitest/WASM, Linux-Container unter Last, 3000 Wände, `applyChange.perf.test.ts`): Griff ziehen 3,3 → 0,2–0,3 ms
+    je Mausschritt, Auswahl (300 Wände) verschieben 30 → 5,5–7,5 ms, Eigenschaft tippen 2,3–3,8 → 0,03 ms; Undo/Redo 0,45 → 0,07 ms.
+    Kern nativ: 300 `replace` auf 5000 Wände 11,2 → 1,5 ms. Rest beim Verschieben: JSON der 300 Wände (TS→Kern) und Kopien im Kern.
+    **Noch über `setProject(fn)` + `diffToOps`** (Kosten nur proportional zu den geänderten Listen; keine Mausschritt-Pfade mehr):
+    Ressourcen/Stifte/Paletten/Text-Stile in `projectSlice.ts` (kleine Listen; `setActivePenSet`/`patchPenSet*` mit
+    `rebakePenColors` fassen ganze Listen an), `usePanelHostBase.ts` (Stützen, Extrusionen, Layouts/Masterlayouts, Ausschnitte,
+    Kontext-Objekte), `useProjectActions.ts` (Wand-/Decken-/Dachtypen, Override-Regeln …), `App.tsx` (Stil übertragen, Sperren,
+    Kategorien ein/aus/isolieren, IFC-/Datei-Import, Kollisions-Marken, Layout-Handler, Georeferenz), Einfügen/Gruppieren/
+    Ungruppieren (`useKeyboardShortcuts.ts`), Raumprogramm/Baurecht/Sonnenstand-Panels, `siteSlice.ts`, Ressourcen-Fenster,
+    Werkzeug-Commits (`tools/`), Editier-Befehle trim/extend/fillet/chamfer/break/join/explode/align/autodim/defblock/georef/
+    sectionline/solid/solidbool/voidbox/terrain/ceilingOpening, Befehls-Commits innerhalb einer Gruppe ohne `opsMutation`.
+    Offen: diese Liste abbauen, danach `diffToOps` nur noch für Laden/Fremdstände; Ebenen-/Gruppen-Logik (`groupActions.ts`) nach
+    Rust; 3D-Griffe mit mitgeführten Ecken (`onEdit3dVertex`) ebenfalls als Gruppe; Undo-Verlauf als Liste in der UI [84].
   - ○ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
@@ -290,7 +315,9 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
 ### Befehle, Undo, Validierung
 
 - ◐ **[6] Jede Aktion ist ein Befehl mit JSON-Parametern.** Registratur vorhanden, aber interaktiv;
-  Panels/Griffe ändern das Projekt direkt. · L
+  Panels/Griffe ändern das Projekt direkt. 28.10.: die häufigsten Aktionen (Griffe, Objekt-Info, Auswahl-Transformationen,
+  Löschen, Zeichenbefehle) liefern ihre Änderung als JSON-Ops (`core/opsBuild.ts`, Store `applyChange`) — Grundlage für
+  Makros/MCP; Rest-Liste unter [K4] S3. · L
 - ◐ **[7] Zentrale Validierung nach jedem Befehl.** 28.10.: jede Projektänderung wird im Kern geprüft (`ops.rs`, NaN/neue doppelte
   ids → Rücknahme mit Meldung); weitere Regeln (Bezüge, Geometrie) offen. · M
 - ◐ **[8] Undo über Befehle.** 28.10.: Verlauf im Rust-Kern als inverse Ops (coalesceKey, Gruppen, Speichergrenze), keine
@@ -298,7 +325,9 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   leerem `viewSnapshots` automatisch einen Ausschnitt an (Projektänderung → neuer Verlaufsschritt). Jetzt nur Anzeige-Tab
   ohne Projektänderung; Neu/Öffnen/Vorlage/Wiederherstellen leeren den Verlauf; Browser-Öffnen liest Text statt
   ArrayBuffer. Tests: `history.roundtrip.test.ts`, e2e „Mehrmals ganz zurück und wieder vor“.
-  Snapshots mehr ([K4] S3). Offen: Befehle erzeugen Ops direkt statt `diffToOps`. · M
+  Snapshots mehr ([K4] S3). 28.10.: Griffe, Objekt-Info, Auswahl-Transformationen, Löschen und Zeichenbefehle erzeugen Ops
+  direkt (`applyChange`/`opsMutation`); Gruppen mit Schlüssel: ein Griff-Zug mit mitgeführten Ecken = ein Schritt. Offen:
+  Rest-Liste unter [K4] S3. · M
 - ◐ **[9] MCP-Brücke.** Headless `dossier-cli … mcp`; Brücke zum offenen Fenster fehlt. · M
 
 ### Daten
