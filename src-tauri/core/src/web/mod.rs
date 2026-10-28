@@ -28,6 +28,7 @@ mod gpu_compile;
 mod plan_stairs;
 mod plan_walls;
 mod plan_openings;
+mod plan_misc;
 mod hatch;
 
 use wasm_bindgen::prelude::wasm_bindgen;

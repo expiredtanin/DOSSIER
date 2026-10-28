@@ -9,18 +9,18 @@
 // Die Grösse kommt in PAPIER-MILLIMETERN herein und wird mit dem Massstab des
 // Plans in Modellmass umgerechnet (gleiche Linie wie die Bemassung, s.
 // `model/dimension.ts`): eine 3-mm-Pfeilspitze soll auf dem Papier 3 mm sein,
-// egal ob der Plan 1:50 oder 1:200 steht.
+// egal ob der Plan 1:50 oder 1:200 steht. Die Geometrie berechnet der Rust-Kern (`plan_misc.rs`, [K3a]).
 
 import type { EndMark, Vec2 } from "../../model/types";
-import { mmToModel } from "../../model/dimension";
+import { core } from "../../engine/coreWasm";
 import type { Primitive } from "./shared";
 import { NO_HATCH } from "./shared";
 
 /** Default-Grösse der Linienenden in Papier-Millimetern. */
 export const END_MARK_DEFAULT_SIZE_MM = 3;
 
-/** Öffnungsverhältnis der Pfeilspitze (halbe Breite ÷ Länge) — schlanke Spitze. */
-const ARROW_ASPECT = 0.32;
+/** Kodierung der Linienenden im Kern (`plan_misc.rs`). */
+const MARK_CODE: Record<Exclude<EndMark, "none">, number> = { arrow: 1, arrowOpen: 2, dot: 3, tick: 4, square: 5 };
 
 export interface EndMarkStyle {
   weightMm: number;
@@ -49,82 +49,35 @@ export function addEndMark(
   style: EndMarkStyle,
 ): number {
   if (!mark || mark === "none") return 0;
-  const len = Math.hypot(dir.x, dir.y);
-  if (len < 1e-9) return 0;
-  const size = mmToModel(sizeMm, scaleDenominator);
-  const ux = dir.x / len;
-  const uy = dir.y / len;
-  const nx = -uy;
-  const ny = ux;
+  const f = core().end_mark_flat(at.x, at.y, dir.x, dir.y, MARK_CODE[mark], sizeMm, scaleDenominator);
+  if (f.length === 0) return 0;
   const { weightMm, color, greyed, drawingId } = style;
-
-  /** Fusspunkt der Spitze (size zurück entlang der Linie). */
-  const base: Vec2 = { x: at.x - ux * size, y: at.y - uy * size };
-  const half = size * ARROW_ASPECT;
-  const wingA: Vec2 = { x: base.x + nx * half, y: base.y + ny * half };
-  const wingB: Vec2 = { x: base.x - nx * half, y: base.y - ny * half };
-  const line = (a: Vec2, b: Vec2) =>
-    out.push({ kind: "line", a, b, cls: "draw2d", weightMm, dash: null, color, greyed, drawingId });
-
-  switch (mark) {
-    case "arrow":
+  let i = 2;
+  for (let k = 0; k < f[1]; k++) {
+    if (f[i] === 1) {
+      const count = f[i + 1];
+      const pts = Array.from({ length: count }, (_, j) => ({ x: f[i + 2 + 2 * j], y: f[i + 3 + 2 * j] }));
+      out.push({ kind: "polygon", pts, fill: color, stroke: color, strokeWidthMm: weightMm, hatch: NO_HATCH, greyed, drawingId });
+      i += 2 + 2 * count;
+    } else if (f[i] === 2) {
       out.push({
-        kind: "polygon",
-        pts: [at, wingA, wingB],
-        fill: color,
-        stroke: color,
-        strokeWidthMm: weightMm,
-        hatch: NO_HATCH,
-        greyed,
-        drawingId,
-      });
-      // Die gefüllte Spitze überdeckt die Linie — dort darf sie enden.
-      return size;
-    case "arrowOpen":
-      line(wingA, at);
-      line(wingB, at);
-      // Offene Spitze: die Linie läuft bis zum Punkt durch (sie ist Teil des Bildes).
-      return 0;
-    case "dot":
-      out.push({
-        kind: "drawingCircle",
-        center: at,
-        r: size * 0.25,
-        fill: color,
-        stroke: color,
+        kind: "line",
+        a: { x: f[i + 1], y: f[i + 2] },
+        b: { x: f[i + 3], y: f[i + 4] },
+        cls: "draw2d",
         weightMm,
+        dash: null,
+        color,
         greyed,
         drawingId,
       });
-      return 0;
-    case "tick": {
-      // 45°-Schrägstrich, mittig auf dem Endpunkt (SIA-Massstrich-Anmutung).
-      const tx = (ux + nx) / Math.SQRT2;
-      const ty = (uy + ny) / Math.SQRT2;
-      const h = size / 2;
-      line({ x: at.x - tx * h, y: at.y - ty * h }, { x: at.x + tx * h, y: at.y + ty * h });
-      return 0;
-    }
-    case "square": {
-      const h = size * 0.3;
-      out.push({
-        kind: "polygon",
-        pts: [
-          { x: at.x + (ux + nx) * h, y: at.y + (uy + ny) * h },
-          { x: at.x + (ux - nx) * h, y: at.y + (uy - ny) * h },
-          { x: at.x + (-ux - nx) * h, y: at.y + (-uy - ny) * h },
-          { x: at.x + (-ux + nx) * h, y: at.y + (-uy + ny) * h },
-        ],
-        fill: color,
-        stroke: color,
-        strokeWidthMm: weightMm,
-        hatch: NO_HATCH,
-        greyed,
-        drawingId,
-      });
-      return 0;
+      i += 5;
+    } else {
+      out.push({ kind: "drawingCircle", center: { x: f[i + 1], y: f[i + 2] }, r: f[i + 3], fill: color, stroke: color, weightMm, greyed, drawingId });
+      i += 4;
     }
   }
+  return f[0];
 }
 
 /** Punkt `p` um `d` in Richtung `dir` (normiert) zurückgezogen — für die Linienverkürzung. */

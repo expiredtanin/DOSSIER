@@ -96,7 +96,10 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Farben kommen als Slot zurück. `geometry/opening.ts`: `doorSymbol`/`doorLeaves` gelöscht, `windowSymbol` ist Fassade
     (Schnitt nutzt sie weiter). Bitgleich zur alten Fassung (80 Zufallsfälle × 3 Detailgrade, alle 13 Linienklassen;
     600 Zufalls-Fenstersymbole). Tote halbe Ports in `kernel2d` (door/window_symbol, jambs …) entfernt.
-    Offen: Räume, Dächer, Stützen, 2D-Zeichnung, Kontext, Schnittlinien.
+    ✅ Kontext-Mesh (Fussabdruck, Rahmen), Schnittführungs-Symbol, Linienenden: `plan_misc.rs`; bitgleich (200 Zufalls-Meshes,
+    200 Schnittebenen-Sätze, 400 Linienenden). Räume, Dächer, Stützen, Extrusions-Umriss, Baurecht, Schatten sind nur
+    noch Stil-Glue um schon in Rust berechnete Geometrie (kein Rechenanteil) — bleiben bis [K4] in TS.
+    Offen: 2D-Zeichnung (`drawing2d.ts`, 950 Zeilen: Kurven, Bemassung, Kote, Detailverweis, Block, Text …).
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
   - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben

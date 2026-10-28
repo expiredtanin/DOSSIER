@@ -1,20 +1,17 @@
 // Kontext-Domäne des Grundriss-Generators: zeichnet `project.context`
 // (Höhenlinien, importierte Gebäude/Terrain-Meshes) als dezente Referenz-
 // Konturen — für Meshes der Grundriss-Fussabdruck nahe der Objekt-Unterkante,
-// nicht das volle Drahtgitter.
+// nicht das volle Drahtgitter. Fussabdruck (Sockelkanten, entdoppelt) und Rahmen berechnet der
+// Rust-Kern (`src-tauri/core/src/plan_misc.rs`, [K3a]).
 
 import type { Project } from "../../model/types";
+import { core } from "../../engine/coreWasm";
 import { NO_HATCH, SHOW_ALL, type CategoryDisplayResolver, type Primitive } from "./shared";
 
 /** Dezente Plan-Farbe der Kontext-Konturen (gedämpftes Grau). */
 const CONTEXT_LINE_COLOR = "#9aa3ad";
 /** Strichstärke der Kontext-Konturen (mm Papier, dünn). */
 const CONTEXT_LINE_MM = 0.1;
-
-/** Höhen-Toleranz (Meter): Dreieckskanten, deren beide Endpunkte höchstens so
- *  weit über der Objekt-Unterkante (minZ) liegen, gelten als „Sockelkante" und
- *  bilden den Grundriss-Fussabdruck eines importierten Gebäudes. */
-const FOOTPRINT_Z_TOL = 0.6;
 
 /**
  * Zeichnet die Kontext-Schicht `project.context` in den Grundriss:
@@ -77,68 +74,41 @@ export function addContextContours(
 
 /**
  * Zeichnet den Grundriss-Fussabdruck eines Meshes: Dreieckskanten nahe der
- * Unterkante (minZ + {@link FOOTPRINT_Z_TOL}), auf XY projiziert, über
- * quantisierte Endpunkt-Schlüssel entdoppelt. `positions` = flaches [x,y,z…]-
- * Array (Modell-Meter, z = Höhe), `indices` = Dreiecks-Indizes.
+ * Unterkante (minZ + 0.6 m), auf XY projiziert, über 1-cm-quantisierte Endpunkte
+ * entdoppelt. `positions` = flaches [x,y,z…]-Array (Modell-Meter, z = Höhe),
+ * `indices` = Dreiecks-Indizes.
  */
 function addMeshFootprint(out: Primitive[], positions: number[], indices: number[]): void {
-  const vcount = Math.floor(positions.length / 3);
-  if (vcount < 3 || indices.length < 3) return;
-  let minZ = Infinity;
-  for (let i = 2; i < positions.length; i += 3) if (positions[i] < minZ) minZ = positions[i];
-  if (!Number.isFinite(minZ)) return;
-  const zLimit = minZ + FOOTPRINT_Z_TOL;
-  const q = (v: number) => Math.round(v * 100); // 1-cm-Quantisierung (Entdopplung)
-  const seen = new Set<string>();
-  const edge = (ia: number, ib: number) => {
-    if (ia >= vcount || ib >= vcount) return;
-    const za = positions[ia * 3 + 2];
-    const zb = positions[ib * 3 + 2];
-    if (za > zLimit || zb > zLimit) return; // nur Sockelkanten
-    const ax = positions[ia * 3], ay = positions[ia * 3 + 1];
-    const bx = positions[ib * 3], by = positions[ib * 3 + 1];
-    // Kanten-Schlüssel richtungsunabhängig (kleinerer Endpunkt zuerst).
-    const ka = `${q(ax)},${q(ay)}`;
-    const kb = `${q(bx)},${q(by)}`;
-    if (ka === kb) return;
-    const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-    if (seen.has(key)) return;
-    seen.add(key);
+  const f = core().context_footprint_flat(Float64Array.from(positions), Float64Array.from(indices));
+  for (let i = 0; i < f[0]; i++) {
     out.push({
       kind: "line",
-      a: { x: ax, y: ay },
-      b: { x: bx, y: by },
+      a: { x: f[1 + 4 * i], y: f[2 + 4 * i] },
+      b: { x: f[3 + 4 * i], y: f[4 + 4 * i] },
       cls: "context-line",
       weightMm: CONTEXT_LINE_MM,
       color: CONTEXT_LINE_COLOR,
     });
-  };
-  for (let i = 0; i + 2 < indices.length; i += 3) {
-    const a = indices[i], b = indices[i + 1], c = indices[i + 2];
-    edge(a, b);
-    edge(b, c);
-    edge(c, a);
   }
+}
+
+/** Grundriss-Rahmen eines Meshes (nur x/y) als vier Eckpunkte, oder `null` ohne Punkte. */
+function meshBboxCorners(positions: number[]): { x: number; y: number }[] | null {
+  const b = core().context_bbox_flat(Float64Array.from(positions));
+  if (b.length === 0) return null;
+  return [
+    { x: b[0], y: b[1] },
+    { x: b[2], y: b[1] },
+    { x: b[2], y: b[3] },
+    { x: b[0], y: b[3] },
+  ];
 }
 
 /** Zeichnet nur den achsenparallelen 2D-Umriss (Bounding-Box) eines Meshes —
  *  für Terrain, dessen volles TIN-Gitter im Plan zu dicht wäre. */
 function addMeshBboxOutline(out: Primitive[], positions: number[]): void {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (let i = 0; i + 2 < positions.length; i += 3) {
-    const x = positions[i], y = positions[i + 1];
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  }
-  if (!Number.isFinite(minX)) return;
-  const corners = [
-    { x: minX, y: minY },
-    { x: maxX, y: minY },
-    { x: maxX, y: maxY },
-    { x: minX, y: maxY },
-  ];
+  const corners = meshBboxCorners(positions);
+  if (!corners) return;
   for (let i = 0; i < 4; i++) {
     out.push({
       kind: "line",
@@ -157,28 +127,14 @@ function addMeshBboxOutline(out: Primitive[], positions: number[]): void {
  * trägt die `ContextObject.id` (analog `sectionLineId`, s. dort). Macht das
  * Objekt IRGENDWO innerhalb seiner Grundfläche anklickbar (nicht nur exakt auf
  * der dünnen Umriss-/Fussabdrucklinie) — wie bei Wänden, deren Poché-Fläche
- * ebenfalls als Ganzes klickbar ist (Nutzer-Wunsch: „eigene Elemente wie Wände").
- * `positions` = flaches [x,y,z…]-Array (Modell-Meter); die Bbox nutzt NUR x/y,
- * unabhängig von der Höhe.
+ * ebenfalls als Ganzes klickbar ist.
  */
 function addContextPickRegion(out: Primitive[], positions: number[], id: string): void {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (let i = 0; i + 2 < positions.length; i += 3) {
-    const x = positions[i], y = positions[i + 1];
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  }
-  if (!Number.isFinite(minX)) return;
+  const pts = meshBboxCorners(positions);
+  if (!pts) return;
   out.push({
     kind: "polygon",
-    pts: [
-      { x: minX, y: minY },
-      { x: maxX, y: minY },
-      { x: maxX, y: maxY },
-      { x: minX, y: maxY },
-    ],
+    pts,
     fill: "none",
     stroke: "none",
     strokeWidthMm: 0,

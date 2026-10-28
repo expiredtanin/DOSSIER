@@ -2,9 +2,9 @@
 // Strichpunkt-Schnittlinie mit Endmarken + Label) — NICHT zu verwechseln mit
 // `generateSectionPlan()` (der Schnitt-ALS-Plan-Übersetzung, bleibt Orchestrator
 // in `../generatePlan.ts`): diese Domäne zeichnet nur das Führungssymbol EINER
-// Schnitt-/Ansichtsebene IM Grundriss.
+// Schnitt-/Ansichtsebene IM Grundriss. Die Geometrie berechnet der Rust-Kern (`plan_misc.rs`, [K3a]).
 
-import { leftNormal, normalize, sub } from "../../model/geometry";
+import { core } from "../../engine/coreWasm";
 import type { Project } from "../../model/types";
 import { NO_HATCH, SHOW_ALL, type CategoryDisplayResolver, type Primitive } from "./shared";
 
@@ -26,10 +26,6 @@ const SECTION_LINE_MM = 0.18;
 const SECTION_LINE_MARK_MM = 0.5;
 /** Strichpunkt-Muster der Schnittlinie (lange Striche + Punkt, mm Papier). */
 const SECTION_LINE_DASH: number[] = [6, 1.5, 0.4, 1.5];
-/** Länge der Endmarken (Querstrich/Pfeil) in Modell-Metern. */
-const SECTION_MARK_LEN = 0.6;
-/** Halbe Breite des unsichtbaren Pick-Bands über der Linie (Modell-Meter). */
-const SECTION_PICK_HALF = 0.3;
 /** Schrifthöhe des Schnitt-Labels (Modell-Meter). */
 const SECTION_LABEL_H = 0.5;
 
@@ -72,100 +68,48 @@ export function addSectionLines(
     const line = level.linePoints;
     if (!line) continue;
     const [p0, p1] = line;
-    const axis = sub(p1, p0);
-    const len = Math.hypot(axis.x, axis.y);
-    if (len < 1e-6) continue;
-    const u = normalize(axis);
-    const n = leftNormal(u); // (-uy, ux)
-    const sign = level.directionSign ?? 1;
-    const bn = { x: n.x * sign, y: n.y * sign }; // Blicknormale
-
-    // Hauptlinie (Strichpunkt-Haarlinie).
-    out.push({
-      kind: "line",
-      a: p0,
-      b: p1,
-      cls: "section-line",
-      weightMm: SECTION_LINE_MM,
-      dash: SECTION_LINE_DASH,
-      color: SECTION_LINE_INK,
-      greyed,
-    });
-
-    // Endmarken (Querstrich + Richtungspfeil + Label) an beiden Enden.
-    const half = SECTION_MARK_LEN / 2;
-    for (const end of [p0, p1]) {
-      // Querstrich senkrecht zur Linie, mittig am Endpunkt.
-      const t0 = { x: end.x - n.x * half, y: end.y - n.y * half };
-      const t1 = { x: end.x + n.x * half, y: end.y + n.y * half };
-      out.push({
-        kind: "line",
-        a: t0,
-        b: t1,
-        cls: "section-line",
-        weightMm: SECTION_LINE_MARK_MM,
-        color: SECTION_LINE_INK,
-        greyed,
-      });
-      // Richtungspfeil: vom Querstrich-Ende auf der Blickseite entlang bn.
-      const base = { x: end.x + bn.x * half, y: end.y + bn.y * half };
-      const tip = { x: base.x + bn.x * SECTION_MARK_LEN, y: base.y + bn.y * SECTION_MARK_LEN };
-      const wingBack = {
-        x: tip.x - bn.x * SECTION_MARK_LEN * 0.4,
-        y: tip.y - bn.y * SECTION_MARK_LEN * 0.4,
-      };
-      const w = SECTION_MARK_LEN * 0.25;
-      out.push({ kind: "line", a: base, b: tip, cls: "section-line", weightMm: SECTION_LINE_MARK_MM, color: SECTION_LINE_INK, greyed });
-      out.push({
-        kind: "line",
-        a: tip,
-        b: { x: wingBack.x + u.x * w, y: wingBack.y + u.y * w },
-        cls: "section-line",
-        weightMm: SECTION_LINE_MARK_MM,
-        color: SECTION_LINE_INK,
-        greyed,
-      });
-      out.push({
-        kind: "line",
-        a: tip,
-        b: { x: wingBack.x - u.x * w, y: wingBack.y - u.y * w },
-        cls: "section-line",
-        weightMm: SECTION_LINE_MARK_MM,
-        color: SECTION_LINE_INK,
-        greyed,
-      });
-      // Label (Kurz-Tag) etwas hinter dem Pfeil, horizontal.
-      const labelAt = {
-        x: tip.x + bn.x * SECTION_MARK_LEN * 0.4 - SECTION_LABEL_H * 0.3,
-        y: tip.y + bn.y * SECTION_MARK_LEN * 0.4 + SECTION_LABEL_H * 0.5,
-      };
-      out.push({
-        kind: "drawingText",
-        at: labelAt,
-        text: sectionLabelTag(level.name),
-        heightM: SECTION_LABEL_H,
-        angle: 0,
-        color: SECTION_LINE_INK,
-        greyed,
-      });
+    const f = core().section_line_flat(p0.x, p0.y, p1.x, p1.y, level.directionSign ?? 1);
+    if (f.length === 0) continue;
+    let i = 1;
+    for (let k = 0; k < f[0]; k++) {
+      if (f[i] === 2) {
+        const main = f[i + 1] === 0;
+        out.push({
+          kind: "line",
+          a: { x: f[i + 2], y: f[i + 3] },
+          b: { x: f[i + 4], y: f[i + 5] },
+          cls: "section-line",
+          weightMm: main ? SECTION_LINE_MM : SECTION_LINE_MARK_MM,
+          ...(main ? { dash: SECTION_LINE_DASH } : {}),
+          color: SECTION_LINE_INK,
+          greyed,
+        });
+        i += 6;
+      } else if (f[i] === 5) {
+        out.push({
+          kind: "drawingText",
+          at: { x: f[i + 1], y: f[i + 2] },
+          text: sectionLabelTag(level.name),
+          heightM: SECTION_LABEL_H,
+          angle: 0,
+          color: SECTION_LINE_INK,
+          greyed,
+        });
+        i += 3;
+      } else {
+        // Unsichtbares Pick-Band (Rechteck entlang der Linie) — klickbar per Punkt-in-Polygon in
+        // PlanView, trägt die DrawingLevel-Id.
+        out.push({
+          kind: "polygon",
+          pts: [0, 1, 2, 3].map((j) => ({ x: f[i + 1 + 2 * j], y: f[i + 2 + 2 * j] })),
+          fill: "none",
+          stroke: "none",
+          strokeWidthMm: 0,
+          hatch: NO_HATCH,
+          sectionLineId: level.id,
+        });
+        i += 9;
+      }
     }
-
-    // Unsichtbares Pick-Band (Rechteck entlang der Linie) — klickbar per
-    // Punkt-in-Polygon in PlanView, trägt die DrawingLevel-Id.
-    const off = { x: n.x * SECTION_PICK_HALF, y: n.y * SECTION_PICK_HALF };
-    out.push({
-      kind: "polygon",
-      pts: [
-        { x: p0.x + off.x, y: p0.y + off.y },
-        { x: p1.x + off.x, y: p1.y + off.y },
-        { x: p1.x - off.x, y: p1.y - off.y },
-        { x: p0.x - off.x, y: p0.y - off.y },
-      ],
-      fill: "none",
-      stroke: "none",
-      strokeWidthMm: 0,
-      hatch: NO_HATCH,
-      sectionLineId: level.id,
-    });
   }
 }
