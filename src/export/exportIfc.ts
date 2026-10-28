@@ -31,8 +31,12 @@
 //         werden trotzdem als Beziehung angelegt; die Öffnung liegt im Loch und zieht nichts ab.
 //   • Decke     → IfcSlab (outline-Polygon, PredefinedType FLOOR).
 //   • Öffnung   → IfcOpeningElement (Quader über die ganze Wanddicke, etwas vorstehend) in der
-//     Wand (IfcRelVoidsElement), darin IfcDoor/IfcWindow (IfcRelFillsElement) mit eigener
-//     Box-Geometrie; kein Blatt-/Rahmendetail (bewusste Vereinfachung).
+//     Wand (IfcRelVoidsElement), darin IfcDoor/IfcWindow (IfcRelFillsElement) aus getrennten Körpern
+//     ([B5], 28.10., `ifcOpenings.ts`): Rahmen/Zarge + Türblatt bzw. Glas je Flügel, mit Farbe/
+//     Transparenz je Rolle; OperationType (Tür: Blattzahl, Scharnierseite, Schiebe) und
+//     PartitioningType (Fenster: Flügelzahl). Masse aus dem Modell (Rahmenbreite/-tiefe, Einzug,
+//     Verglasung, Glasanteil, Oberlicht), sonst die Konstanten des 3D. Ohne Sprossen, Fensterbank,
+//     Schwelle; reine Wandöffnung ohne Körper.
 //   • Extrusion → IfcBuildingElementProxy aus points+height.
 //   • Dach      → IfcRoof (Schicht-Meshes wie im 3D), Dachtyp → IfcRoofType mit Schichten.
 //   • Stütze    → IfcColumn (Profil-Extrusion), Bauteil → IfcMaterial.
@@ -83,6 +87,7 @@ import { columnFootprint } from "../geometry/column";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { emitRoofs } from "../plan/toWalls3d/roofs";
 import { fileio } from "../engine/fileioWasm";
+import { fillGeometry, type FillGeometry } from "./ifcOpenings";
 
 /** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export.rs::ifc_guid`). */
 export function ifcGuid(name: string): string {
@@ -240,15 +245,19 @@ class FlatIfc {
     voidRect: Vec2[];
     voidZRel: number;
     depth: number;
-    fillRect: Vec2[];
     width: number;
+    fill: FillGeometry;
     psets: PsetIn[];
   }): void {
     this.nums.push(REC_OPENING, this.str(o.wallId), o.structure, this.str(o.openingId), o.isDoor ? 1 : 0, this.str(o.fillName));
     this.pts(o.voidRect);
-    this.nums.push(o.voidZRel, o.depth);
-    this.pts(o.fillRect);
-    this.nums.push(o.width);
+    this.nums.push(o.voidZRel, o.depth, o.width, o.fill.kind === null ? -1 : this.str(o.fill.kind));
+    this.nums.push(o.fill.origin.x, o.fill.origin.y, o.fill.u.x, o.fill.u.y, o.fill.parts.length);
+    for (const p of o.fill.parts) {
+      this.nums.push(p.role);
+      this.pts(p.pts);
+      this.nums.push(p.zRel, p.depth);
+    }
     this.psets(o.psets);
   }
 
@@ -670,8 +679,8 @@ export function exportIfcSpf(projectIn: Project): string {
   // ── Öffnungen: IfcOpeningElement in der Wand, IfcDoor/IfcWindow darin ───
   // Der Öffnungskörper ist ein Quader über das Achs-Intervall und die Höhe, wie sie das 3D
   // stanzt (`openingInterval`/`openingVerticalExtent`), quer über alle Bänder der Wand plus
-  // OPENING_OVERSHOOT. Die Füllung (Tür/Fenster) sitzt im Öffnungs-Placement, über die
-  // Banddicke, ohne Blatt-/Rahmendetail.
+  // OPENING_OVERSHOOT. Die Füllung (Tür/Fenster) hat ein eigenes Placement
+  // (Öffnungsmitte, Achse bzw. Aufschlagrichtung) und liegt in der Rahmentiefe (`ifcOpenings.ts`).
   for (const wall of project.walls ?? []) {
     const host = hostExtent.get(wall.id);
     if (!host) continue; // Wirtswand übersprungen (degeneriert)
@@ -705,8 +714,8 @@ export function exportIfcSpf(projectIn: Project): string {
         voidRect: axisRect(wall, c.from, c.to, host.nLo - OPENING_OVERSHOOT, host.nHi + OPENING_OVERSHOOT),
         voidZRel: c.zBottom - baseOf(structure),
         depth,
-        fillRect: axisRect(wall, c.from, c.to, host.nLo, host.nHi),
         width: c.to - c.from,
+        fill: fillGeometry(project, wall, opening, c, host),
         psets: [{ name: psetName, props }],
       });
     }

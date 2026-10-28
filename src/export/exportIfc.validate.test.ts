@@ -94,6 +94,53 @@ function wallAxes(name: string, ifc: string): Record<string, WallAxis> {
   return JSON.parse(r.stdout);
 }
 
+// Türen/Fenster nach ifcopenshell: Körper je Darstellungselement (Volumen, Welt-Bounding-Box), Stil je
+// Element und Ausführung.
+const FILL_INFO = `
+import json, sys
+import ifcopenshell, ifcopenshell.geom, ifcopenshell.util.shape as us
+m = ifcopenshell.open(sys.argv[1])
+s = ifcopenshell.geom.settings()
+s.set("use-world-coords", True)
+out = []
+for e in m.by_type("IfcDoor") + m.by_type("IfcWindow"):
+    sh = ifcopenshell.geom.create_shape(s, e)
+    v = sh.geometry.verts
+    xs, ys, zs = v[0::3], v[1::3], v[2::3]
+    items = []
+    rep = [r for r in e.Representation.Representations if r.RepresentationIdentifier == "Body"][0]
+    for it in rep.Items:
+        solid = ifcopenshell.geom.create_shape(s, it)
+        styles = [st.Name for si in it.StyledByItem for ps in si.Styles for st in [ps]]
+        items.append({"volume": us.get_volume(solid), "styles": styles,
+            "z": [min(solid.verts[2::3]), max(solid.verts[2::3])]})
+    out.append({"type": e.is_a(), "name": e.Name, "volume": us.get_volume(sh.geometry),
+        "bbox": [min(xs), max(xs), min(ys), max(ys), min(zs), max(zs)], "items": items,
+        "op": getattr(e, "OperationType", None) or getattr(e, "PartitioningType", None),
+        "predefined": e.PredefinedType, "h": e.OverallHeight, "w": e.OverallWidth,
+        "filled": len(e.FillsVoids)})
+print(json.dumps(out))
+`;
+
+interface FillInfo {
+  type: string;
+  name: string;
+  volume: number;
+  bbox: number[];
+  items: { volume: number; styles: string[]; z: number[] }[];
+  op: string | null;
+  predefined: string;
+  h: number;
+  w: number;
+  filled: number;
+}
+
+function fillInfo(name: string, ifc: string): FillInfo[] {
+  const r = spawnSync("python3", ["-c", FILL_INFO, writeIfc(name, ifc)], { encoding: "utf8", timeout: 120_000 });
+  expect(r.status, r.stderr).toBe(0);
+  return JSON.parse(r.stdout);
+}
+
 /** Eine freistehende Wand 5 × 0.4 × 2.6 m mit einem Fenster 1.2 × 1.2 m (Brüstung 0.9 m). */
 function singleWall(recess: boolean): Project {
   return {
@@ -236,5 +283,64 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60
       });
     }
     expect(withAxis).toBeGreaterThan(0);
+  });
+
+  it("[B5] Fenster: Rahmen + Glas als getrennte Körper, Volumen und Lage = Modell", () => {
+    const ifc = exportIfcSpf(singleWall(false)); // Fenster 1.2 × 1.2 bei x 1…2.2, Brüstung 0.9, Wand 0.4 dick, dreifach
+    expect(validate("fenster-koerper", ifc).out).toContain("0 Befunde");
+    const [f] = fillInfo("fenster-koerper", ifc);
+    expect(f.type).toBe("IfcWindow");
+    expect(f.filled).toBe(1);
+    expect(f.op).toBe("SINGLE_PANEL");
+    expect(f.items.map((i) => i.styles[0]).sort()).toEqual(["Glas", "Rahmen", "Rahmen", "Rahmen", "Rahmen"]);
+    const fw = 0.06;
+    const frame = (1.2 * 1.2 - (1.2 - 2 * fw) ** 2) * 0.07;
+    const glass = (1.2 - 2 * fw) ** 2 * 0.036; // dreifach: 36 mm
+    expect(f.volume).toBeCloseTo(frame + glass, 6);
+    const glassItem = f.items.find((i) => i.styles[0] === "Glas")!;
+    expect(glassItem.volume).toBeCloseTo(glass, 6);
+    // Welt-Lage: x 1…2.2, Wandaussenseite y −0.2 + Rahmentiefe, z = Brüstung … Brüstung + 1.2 (Geschoss-UK 0).
+    expect(f.bbox[0]).toBeCloseTo(1, 6);
+    expect(f.bbox[1]).toBeCloseTo(2.2, 6);
+    expect(f.bbox[2]).toBeCloseTo(-0.2, 6);
+    expect(f.bbox[3]).toBeCloseTo(-0.2 + 0.07, 6);
+    expect(f.bbox[4]).toBeCloseTo(0.9, 6);
+    expect(f.bbox[5]).toBeCloseTo(2.1, 6);
+    expect(f.h).toBeCloseTo(1.2, 9);
+    expect(f.w).toBeCloseTo(1.2, 9);
+  });
+  it("[B5] Tür (Wand schräg gestellt): Zarge, zwei Glasblätter, OperationType; Körper liegen in der Öffnung", () => {
+    const base = singleWall(false);
+    const dtype = { id: "dt", name: "Glastür", kind: "dreh", leafCount: 2, leafStyle: "glas", glazingRatio: 0.5, frameThickness: 0.06, defaultWidth: 1.6, defaultHeight: 2.1 };
+    const p: Project = {
+      ...base,
+      walls: [{ ...base.walls[0], start: { x: 3, y: 1 }, end: { x: 3, y: 6 } }], // entlang +Y, linke Normale = −X
+      doorTypes: [dtype],
+      windowTypes: [],
+      openings: [{ id: "T1", type: "opening", hostWallId: "W1", categoryCode: "21", kind: "door", position: 1, width: 1.6, height: 2.1, sillHeight: 0, typeId: "dt", hinge: "end", swing: "left" }],
+    } as unknown as Project;
+    const ifc = exportIfcSpf(p);
+    expect(validate("tuer-koerper", ifc).out).toContain("0 Befunde");
+    const [d] = fillInfo("tuer-koerper", ifc);
+    expect(d.type).toBe("IfcDoor");
+    expect(d.filled).toBe(1);
+    // Wand entlang +Y: n = (−1, 0); swing links/innen → Aufschlag −X; Scharnier am Ende, zweiflügelig → DOUBLE_DOOR_SINGLE_SWING.
+    expect(d.op).toBe("DOUBLE_DOOR_SINGLE_SWING");
+    // Rahmen: 3 Teile; Blätter: 2 × (4 Rahmenteile) mit Stil „Türblatt"; Glas: 2.
+    const roles = d.items.map((i) => i.styles[0]);
+    expect(roles.filter((r) => r === "Rahmen").length).toBe(3);
+    expect(roles.filter((r) => r === "Türblatt").length).toBe(8);
+    expect(roles.filter((r) => r === "Glas").length).toBe(2);
+    // Lage: Achse y 2…3.6 (Öffnung ab 1 m), quer zur Wand (x) innerhalb der Wanddicke 2.8…3.2, Boden z = 0.
+    expect(d.bbox[2]).toBeCloseTo(2, 6);
+    expect(d.bbox[3]).toBeCloseTo(3.6, 6);
+    expect(d.bbox[0]).toBeGreaterThanOrEqual(2.8 - 1e-6);
+    expect(d.bbox[1]).toBeLessThanOrEqual(3.2 + 1e-6);
+    expect(d.bbox[4]).toBeCloseTo(0, 6);
+    expect(d.bbox[5]).toBeCloseTo(2.1, 6);
+    // Glasanteil je Blatt = 50 % der Blattfläche (Blatt 0.74 × 2.04 je Flügel).
+    const leafArea = 0.74 * (2.1 - 0.06);
+    const glassVol = d.items.filter((i) => i.styles[0] === "Glas").reduce((a, i) => a + i.volume, 0);
+    expect(glassVol).toBeCloseTo(2 * leafArea * 0.5 * 0.024, 6);
   });
 });

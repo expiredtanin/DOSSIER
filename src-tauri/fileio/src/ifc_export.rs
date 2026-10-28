@@ -378,6 +378,24 @@ impl<'a> Reader<'a> {
         let s = self.take(n.checked_mul(2).ok_or("Überlauf")?)?;
         Ok(s.chunks_exact(2).map(|c| (c[0], c[1])).collect())
     }
+    /// Teile einer Füllung: n, (Rolle 0 Rahmen / 1 Blatt / 2 Glas, PTS, z_rel, depth) × n.
+    fn parts(&mut self) -> Result<Vec<Part>, String> {
+        let n = self.idx()?;
+        if n > MAX_PARTS {
+            return Err(format!("zu viele Teile ({n}) bei {}", self.pos - 1));
+        }
+        let mut out = Vec::with_capacity(n);
+        for _ in 0..n {
+            let role = self.idx()?;
+            if role > 2 {
+                return Err(format!("unbekannte Teilrolle {role} bei {}", self.pos - 1));
+            }
+            let pts = self.pts()?;
+            let (z_rel, depth) = (self.f()?, self.f()?);
+            out.push(Part { role, pts, z_rel, depth });
+        }
+        Ok(out)
+    }
     fn mesh(&mut self) -> Result<Mesh, String> {
         let nv = self.idx()?;
         let positions = self.take(nv.checked_mul(3).ok_or("Überlauf")?)?.to_vec();
@@ -440,6 +458,37 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Obergrenze der Körper je Tür/Fenster (Rahmenteile, Scheiben, Pfosten).
+const MAX_PARTS: usize = 256;
+
+/// Ein Körper einer Tür/eines Fensters (Welt-XY-Profil, Unterkante ab Öffnungs-UK).
+struct Part {
+    /// 0 Rahmen/Zarge, 1 Türblatt, 2 Glas.
+    role: usize,
+    pts: Vec<(f64, f64)>,
+    z_rel: f64,
+    depth: f64,
+}
+
+/// IfcDoorTypeOperationEnum / IfcWindowTypePartitioningEnum (IFC4): nur gültige Namen kommen durch.
+const DOOR_OPERATIONS: &[&str] = &[
+    "SINGLE_SWING_LEFT", "SINGLE_SWING_RIGHT", "DOUBLE_DOOR_SINGLE_SWING", "DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_LEFT",
+    "DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_RIGHT", "DOUBLE_SWING_LEFT", "DOUBLE_SWING_RIGHT", "DOUBLE_DOOR_DOUBLE_SWING",
+    "SWING_FIXED_LEFT", "SWING_FIXED_RIGHT", "SLIDING_TO_LEFT", "SLIDING_TO_RIGHT", "DOUBLE_DOOR_SLIDING",
+    "FOLDING_TO_LEFT", "FOLDING_TO_RIGHT", "DOUBLE_DOOR_FOLDING", "REVOLVING", "ROLLINGUP", "NOTDEFINED",
+];
+const WINDOW_PARTITIONINGS: &[&str] = &[
+    "SINGLE_PANEL", "DOUBLE_PANEL_VERTICAL", "DOUBLE_PANEL_HORIZONTAL", "TRIPLE_PANEL_VERTICAL", "TRIPLE_PANEL_BOTTOM",
+    "TRIPLE_PANEL_TOP", "TRIPLE_PANEL_LEFT", "TRIPLE_PANEL_RIGHT", "TRIPLE_PANEL_HORIZONTAL", "NOTDEFINED",
+];
+
+/// Farbe und Durchsichtigkeit je Teilrolle (wie `PART_RGB` im 3D: Rahmen hellgrau, Blatt warm, Glas bläulich).
+const PART_STYLES: [(&str, [f64; 3], f64); 3] = [
+    ("Rahmen", [0.85, 0.85, 0.83], 0.0),
+    ("Türblatt", [0.93, 0.90, 0.85], 0.0),
+    ("Glas", [0.62, 0.76, 0.85], 0.6),
+];
+
 /// Lokales Wand-/Füllungssystem in Welt-XY: Ursprung und Richtung der X-Achse (Y = linke Normale).
 #[derive(Clone, Copy)]
 struct Frame {
@@ -465,6 +514,12 @@ impl Frame {
 
     fn local_pts(&self, pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
         pts.iter().map(|&(x, y)| self.local(x, y)).collect()
+    }
+
+    /// Dieses System (in Welt-XY) im System `parent` ausgedrückt: Ursprung abbilden, Richtung nur drehen.
+    fn relative_to(&self, parent: &Frame) -> Frame {
+        let (ox, oy) = parent.local(self.ox, self.oy);
+        Frame { ox, oy, ux: self.ux * parent.ux + self.uy * parent.uy, uy: -self.ux * parent.uy + self.uy * parent.ux }
     }
 }
 
@@ -570,6 +625,8 @@ struct Builder {
     type_index: HashMap<String, usize>,
     /// Wand-id → (Entität, Placement, Wandsystem) für die Öffnungen.
     walls: HashMap<String, (usize, usize, Frame)>,
+    /// Oberflächenstil je Teilrolle (Rahmen, Blatt, Glas), beim ersten Gebrauch angelegt (0 = noch nicht).
+    styles: [usize; 3],
     /// Untergeordneter Kontext „Axis“ (GRAPH_VIEW), beim ersten Gebrauch angelegt (0 = noch nicht).
     axis_context: usize,
 
@@ -676,6 +733,36 @@ impl Builder {
         // IFC4: Axis und RefDirection stehen nur zusammen (Axis = +Z).
         let axis = self.add("IFCAXIS2PLACEMENT3D", format!("#{origin},#{},#{dir}", self.extrude_dir));
         self.add("IFCLOCALPLACEMENT", format!("#{relative_to},#{axis}"))
+    }
+
+    /// Oberflächenstil der Teilrolle (einmal je Datei): IfcSurfaceStyle mit IfcSurfaceStyleRendering.
+    fn part_style(&mut self, role: usize) -> usize {
+        if self.styles[role] == 0 {
+            let (name, rgb, transparency) = PART_STYLES[role];
+            let colour = self.add("IFCCOLOURRGB", format!("$,{},{},{}", fmt_real(rgb[0]), fmt_real(rgb[1]), fmt_real(rgb[2])));
+            let rendering = self.add(
+                "IFCSURFACESTYLERENDERING",
+                format!("#{colour},{},$,$,$,$,$,$,{}", fmt_real(transparency), enum_("NOTDEFINED")),
+            );
+            self.styles[role] = self.add(
+                "IFCSURFACESTYLE",
+                format!("{},{},{}", ifc_string(name), enum_("BOTH"), refs(&[rendering])),
+            );
+        }
+        self.styles[role]
+    }
+
+    /// Körper einer Tür/eines Fensters: je Teil eine Extrusion mit eigenem Stil, alle in EINER
+    /// SweptSolid-Darstellung (getrennte Körper im selben Bauteil). Profile kommen im Füllungssystem.
+    fn emit_parts_shape(&mut self, parts: &[Part], frame: &Frame) -> usize {
+        let mut solids = Vec::with_capacity(parts.len());
+        for p in parts {
+            let solid = self.emit_extrusion(&frame.local_pts(&p.pts), p.z_rel, p.depth);
+            let style = self.part_style(p.role);
+            self.add("IFCSTYLEDITEM", format!("#{solid},{},$", refs(&[style])));
+            solids.push(solid);
+        }
+        self.emit_swept_shape(&solids)
     }
 
     /// Untergeordneter Darstellungskontext „Axis“ (GRAPH_VIEW), einmal je Datei.
@@ -901,6 +988,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         type_index: HashMap::new(),
         walls: HashMap::new(),
         axis_context: 0,
+        styles: [0; 3],
         spaces: Vec::new(),
         column_materials: Vec::new(),
     };
@@ -1133,18 +1221,26 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let void_pts = r.pts()?;
                 let void_z = r.f()?;
                 let depth = r.f()?;
-                let fill_pts = r.pts()?;
                 let width = r.f()?;
+                let kind = r.opt_string()?;
+                let (fox, foy, fux, fuy) = (r.f()?, r.f()?, r.f()?, r.f()?);
+                if ((fux * fux + fuy * fuy) - 1.0).abs() > 1e-6 {
+                    return Err(format!("Füllungsrichtung nicht normiert bei {}", r.pos - 1));
+                }
+                let fill_frame = Frame { ox: fox, oy: foy, ux: fux, uy: fuy };
+                let parts = r.parts()?;
                 let psets = r.psets()?;
+                let allowed = if is_door { DOOR_OPERATIONS } else { WINDOW_PARTITIONINGS };
+                if let Some(k) = &kind {
+                    if !allowed.contains(&k.as_str()) {
+                        return Err(format!("unbekannte Ausführung {k:?} bei {}", r.pos - 1));
+                    }
+                }
                 let Some(&(host_entity, host_placement, host_frame)) = w.walls.get(&wall_id) else {
                     continue; // Wirtswand nicht geschrieben (degeneriert)
                 };
                 // Die Geometrie kommt in Welt-XY; Wände mit eigenem Placement rechnen wir ins Wandsystem.
-                let (void_pts, fill_pts) = if host_frame.is_world() {
-                    (void_pts, fill_pts)
-                } else {
-                    (host_frame.local_pts(&void_pts), host_frame.local_pts(&fill_pts))
-                };
+                let void_pts = if host_frame.is_world() { void_pts } else { host_frame.local_pts(&void_pts) };
                 let (opening_placement, opening_shape) = w.emit_box_product(&void_pts, void_z, depth, host_placement);
                 let g = w.gid(&format!("opening/{opening_id}"));
                 let opening_entity = w.add(
@@ -1161,12 +1257,16 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     "IFCRELVOIDSELEMENT",
                     format!("{g},#{},$,$,#{host_entity},#{opening_entity}", w.owner_history),
                 );
-                let (fill_placement, fill_shape) = w.emit_box_product(&fill_pts, 0.0, depth, opening_placement);
+                // Füllung: eigenes Placement (Ursprung/Richtung aus dem Modell, relativ zur Öffnung = zur Wand),
+                // Körper in diesem System; ohne Teile (reine Wandöffnung) keine Darstellung.
+                let fill_placement = w.emit_placement_frame(&fill_frame.relative_to(&host_frame), opening_placement);
+                let fill_shape = if parts.is_empty() { "$".to_string() } else { format!("#{}", w.emit_parts_shape(&parts, &fill_frame)) };
                 let g = w.gid(&format!("fill/{opening_id}"));
+                let operation = kind.as_deref().map(enum_).unwrap_or_else(|| "$".to_string());
                 let fill_entity = w.add(
                     if is_door { "IFCDOOR" } else { "IFCWINDOW" },
                     format!(
-                        "{g},#{},{},$,$,#{fill_placement},#{fill_shape},$,{},{},{},$,$",
+                        "{g},#{},{},$,$,#{fill_placement},{fill_shape},$,{},{},{},{operation},$",
                         w.owner_history,
                         ifc_string(&fill_name),
                         fmt_real(depth),
@@ -1516,6 +1616,43 @@ mod tests {
         fn no_type(&mut self) {
             self.f.push(0.0);
         }
+        /// OPENING-Datensatz im neuen Format (Gegenstück zu `FlatIfc.opening`).
+        #[allow(clippy::too_many_arguments)]
+        fn opening(
+            &mut self,
+            wall: &str,
+            id: &str,
+            is_door: bool,
+            name: &str,
+            void_pts: &[(f64, f64)],
+            void_z: f64,
+            depth: f64,
+            width: f64,
+            kind: Option<&str>,
+            frame: [f64; 4],
+            parts: &[(f64, &[(f64, f64)], f64, f64)],
+        ) {
+            self.n(&[REC_OPENING]);
+            self.str(wall);
+            self.n(&[-1.0]);
+            self.str(id);
+            self.n(&[if is_door { 1.0 } else { 0.0 }]);
+            self.str(name);
+            self.pts(void_pts);
+            self.n(&[void_z, depth, width]);
+            match kind {
+                Some(k) => self.str(k),
+                None => self.f.push(-1.0),
+            }
+            self.n(&frame);
+            self.f.push(parts.len() as f64);
+            for (role, pts, z, d) in parts {
+                self.f.push(*role);
+                self.pts(pts);
+                self.n(&[*z, *d]);
+            }
+            self.no_psets();
+        }
         fn wall_type(&mut self) {
             self.n(&[1.0, 0.0]);
             self.str("T1");
@@ -1578,18 +1715,17 @@ mod tests {
             b.pts(&SQUARE);
             b.n(&[0.0, 2.6]);
         }
-        // Öffnung in W1: Tür.
-        b.n(&[REC_OPENING]);
-        b.str("W1");
-        b.n(&[0.0]);
-        b.str("T1");
-        b.n(&[1.0]);
-        b.str("Haustür");
-        b.pts(&[(1.0, -0.02), (1.9, -0.02), (1.9, 0.42), (1.0, 0.42)]);
-        b.n(&[0.0, 2.1]);
-        b.pts(&[(1.0, 0.0), (1.9, 0.0), (1.9, 0.4), (1.0, 0.4)]);
-        b.n(&[0.9]);
-        b.ref_pset("Pset_DoorCommon", "Tür 90");
+        // Öffnung in W1: Tür mit Zarge, Blatt und Glas.
+        b.opening(
+            "W1", "T1", true, "Haustür",
+            &[(1.0, -0.02), (1.9, -0.02), (1.9, 0.42), (1.0, 0.42)], 0.0, 2.1, 0.9,
+            Some("SINGLE_SWING_LEFT"), [1.45, 0.0, 0.0, 1.0],
+            &[
+                (0.0, &[(1.0, 0.0), (1.06, 0.0), (1.06, 0.07), (1.0, 0.07)], 0.0, 2.1),
+                (1.0, &[(1.06, 0.015), (1.84, 0.015), (1.84, 0.055), (1.06, 0.055)], 0.0, 2.04),
+                (2.0, &[(1.2, 0.02), (1.6, 0.02), (1.6, 0.05), (1.2, 0.05)], 0.5, 1.0),
+            ],
+        );
         // Decke, Treppe, Extrusion.
         b.n(&[REC_CEILING, 0.0]);
         b.str("D1");
@@ -1729,7 +1865,7 @@ mod tests {
         assert_eq!(count(&ifc, "IFCMATERIALLAYERSET"), 2); // Wandtyp + Dachtyp
         assert_eq!(count(&ifc, "IFCMATERIAL"), 2); // Beton (geteilt mit Dachtyp und Stütze) + Dämmung
         assert_eq!(count(&ifc, "IFCRELDEFINESBYTYPE"), 2);
-        assert_eq!(count(&ifc, "IFCPROPERTYSET"), 6); // Wall, Door, Space, Roof, Column + CH_Raum
+        assert_eq!(count(&ifc, "IFCPROPERTYSET"), 5); // Wall, Space, Roof, Column + CH_Raum (Tür ohne Pset)
         // Eingliederung: Geschoss (Wände, Decke, Treppe, Tür, Dach, Stütze) und Gebäude (Extrusion).
         assert_eq!(count(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE"), 2);
         // Project→Site, Site→Building, Building→Storeys, Geschoss→Räume.
@@ -1784,17 +1920,12 @@ mod tests {
         b.n(&[1.0]);
         b.pts(&[(10.2, 20.0), (10.2, 25.0), (9.8, 25.0), (9.8, 20.0)]);
         b.n(&[0.0, 2.6]);
-        b.n(&[REC_OPENING]);
-        b.str("W");
-        b.n(&[-1.0]);
-        b.str("O");
-        b.n(&[0.0]);
-        b.str("Fenster");
-        b.pts(&[(10.3, 21.0), (10.3, 22.0), (9.7, 22.0), (9.7, 21.0)]);
-        b.n(&[0.9, 1.2]);
-        b.pts(&[(10.2, 21.0), (10.2, 22.0), (9.8, 22.0), (9.8, 21.0)]);
-        b.n(&[1.0]);
-        b.no_psets();
+        b.opening(
+            "W", "O", false, "Fenster",
+            &[(10.3, 21.0), (10.3, 22.0), (9.7, 22.0), (9.7, 21.0)], 0.9, 1.2, 1.0,
+            Some("SINGLE_PANEL"), [10.0, 21.5, 0.0, 1.0],
+            &[(0.0, &[(10.2, 21.0), (10.2, 22.0), (9.8, 22.0), (9.8, 21.0)], 0.0, 1.2)],
+        );
         let ifc = build(&b).unwrap();
         check_structure(&ifc);
         // Wandprofil lokal: x = Länge entlang u, y = linke Normale (10.2 → −0.2, 9.8 → 0.2).
@@ -1807,6 +1938,50 @@ mod tests {
         // Ohne Typ keine Usage, trotzdem Axis.
         assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 0);
         assert!(ifc.contains("'Axis','Curve2D'"));
+    }
+
+    #[test]
+    fn tuer_hat_getrennte_koerper_mit_stilen_und_operation() {
+        let ifc = build(&full_house(false)).unwrap();
+        check_structure(&ifc);
+        let door = first_line(&ifc, "IFCDOOR");
+        assert!(door.contains(".DOOR.,.SINGLE_SWING_LEFT.,$);"), "{door}");
+        // Drei Körper (Zarge, Blatt, Glas) in EINER Darstellung, je ein IfcStyledItem, drei Stile.
+        assert_eq!(count(&ifc, "IFCSTYLEDITEM"), 3);
+        assert_eq!(count(&ifc, "IFCSURFACESTYLE"), 3);
+        assert_eq!(count(&ifc, "IFCSURFACESTYLERENDERING"), 3);
+        assert!(ifc.contains("IFCSURFACESTYLE('Glas',.BOTH.,"));
+        assert!(ifc.contains("IFCSURFACESTYLERENDERING(#"));
+        let shapes = ifc.lines().filter(|l| l.contains("IFCSHAPEREPRESENTATION") && l.contains("'SweptSolid'") && l.matches('#').count() == 5).count();
+        assert!(shapes >= 1, "Darstellung mit 3 Körpern fehlt");
+        // Füllungs-Placement mit Richtung (0,1,0) relativ zur Öffnung; Ursprung lokal.
+        assert!(ifc.contains("IFCCARTESIANPOINT((1.45,0.0,0.0))"));
+    }
+
+    #[test]
+    fn fenster_ohne_teile_hat_keine_darstellung_und_enum_ist_geprueft() {
+        let mut b = full_house(false);
+        b.opening("W1", "F1", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, Some("DOUBLE_PANEL_VERTICAL"), [2.0, 0.0, 1.0, 0.0], &[]);
+        b.opening("W1", "T2", true, "Wandöffnung", &SQUARE, 0.0, 2.1, 1.0, None, [3.0, 0.0, 1.0, 0.0], &[]);
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        let win = first_line(&ifc, "IFCWINDOW");
+        assert!(win.contains(".WINDOW.,.DOUBLE_PANEL_VERTICAL.,$);"), "{win}");
+        assert!(win.contains(",$,$,1.2,1.2,.WINDOW."), "ohne Teile keine Darstellung: {win}");
+        // Ungültige Ausführung (Fenster-Wert an der Tür und umgekehrt) ist ein Fehler, nie Panic.
+        let mut bad = full_house(false);
+        bad.opening("W1", "T3", true, "Tür", &SQUARE, 0.0, 2.1, 1.0, Some("SINGLE_PANEL"), [1.0, 0.0, 1.0, 0.0], &[]);
+        assert!(build(&bad).is_err());
+        let mut bad = full_house(false);
+        bad.opening("W1", "F3", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, Some("SINGLE_SWING_LEFT"), [1.0, 0.0, 1.0, 0.0], &[]);
+        assert!(build(&bad).is_err());
+        // Unbekannte Teilrolle, schiefe Richtung: Fehler.
+        let mut bad = full_house(false);
+        bad.opening("W1", "F4", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, None, [1.0, 0.0, 1.0, 0.0], &[(3.0, &SQUARE, 0.0, 1.0)]);
+        assert!(build(&bad).is_err());
+        let mut bad = full_house(false);
+        bad.opening("W1", "F5", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, None, [1.0, 0.0, 3.0, 0.0], &[]);
+        assert!(build(&bad).is_err());
     }
 
     #[test]
@@ -1866,17 +2041,7 @@ mod tests {
         b.n(&[1.0]);
         b.str("iso");
         b.n(&[0.0, f64::NAN, 0.0]);
-        b.n(&[REC_OPENING]);
-        b.str("gibt-es-nicht");
-        b.n(&[-1.0]);
-        b.str("O1");
-        b.n(&[0.0]);
-        b.str("Fenster");
-        b.pts(&SQUARE);
-        b.n(&[0.0, 1.0]);
-        b.pts(&SQUARE);
-        b.n(&[1.0]);
-        b.no_psets();
+        b.opening("gibt-es-nicht", "O1", false, "Fenster", &SQUARE, 0.0, 1.0, 1.0, None, [0.0, 0.0, 1.0, 0.0], &[]);
         let ifc = build(&b).unwrap();
         check_structure(&ifc);
         assert_eq!(count(&ifc, "IFCOPENINGELEMENT"), 0);

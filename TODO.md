@@ -360,7 +360,18 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     füllen. Mesh-Wände (schräge Oberkante, Laibung) bleiben ohne Achse/Usage. ifcopenshell liest
     Achse = Wandachse (auch schräg/rückwärts gezeichnet) und die Bänder in Schichtreihenfolge ab Offset.
     Offen: nicht in Revit/ArchiCAD geöffnet.
-  - ○ Offen: Tür/Fenster mit Rahmen/Blatt statt Box; Bogenwände als echte Kurve. · M
+  - ✅ Tür/Fenster mit echter Geometrie statt Box. (28.10.) `export/ifcOpenings.ts`: Fenster = Blendrahmen
+    (4 Teile) + Mittelpfosten + eine Glasscheibe je Flügel (Flügeltabelle/`wingCount`), Tür = Zarge (3 Teile)
+    + Blatt/Blätter (Glastür: Rahmen um eine Glasfläche = `glazingRatio`, Oberlicht mit Kämpfer); getrennte
+    Körper in einer Darstellung, je mit IfcStyledItem (Rahmen/Blatt/Glas mit Transparenz). Masse aus dem
+    Modell (Rahmenbreite/-tiefe, Schichteinzug, Verglasung), sonst die Konstanten des 3D (6 cm, 7 cm, Blatt
+    4 cm; Glaspaket 6/24/36 mm). Eigenes Füllungs-Placement (Tür: Y = Aufschlagrichtung). OperationType
+    (Blattzahl, Scharnierseite, Schiebe) und PartitioningType (1–3 Flügel). Reine Wandöffnung: kein Körper.
+    Geprüft: ifcopenshell (0 Befunde; Volumen Rahmen + Glas, Welt-Lage, Stile je Körper), Modell-Rechnung
+    in `ifcOpenings.test.ts`. Offen: LEFT/RIGHT der Tür nach IFC-Konvention (Blick von der Aufschlagseite)
+    gelesen, nicht in Revit/ArchiCAD gegengeprüft; ohne Sprossen, Fensterbank, Rollladenkasten, Schwelle,
+    Flügelrahmen.
+  - ○ Offen: Bogenwände als echte Kurve. · M
   - ✅ Eigener IFC-Import ([B3]) zieht Öffnungen ab (28.10.): Rundreise vergleicht alle Wände mit dem
     ausgeschnittenen Volumen (`ifcImport.test.ts`).
   - ✅ Export nach Rust. (28.10.) `src-tauri/fileio/src/ifc_export.rs` schreibt die STEP-Datei
