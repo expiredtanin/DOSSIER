@@ -353,8 +353,14 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   - ✅ Georeferenz [69].
   - ○ Offen: IsExternal/LoadBearing/ThermalTransmittance für Wand/Decke/Tür/Fenster brauchen
     Modellfelder (z. B. am Wandtyp tragend/aussen, λ je Bauteil → U-Wert). · S–M
-  - ○ Offen: IfcMaterialLayerSetUsage + Achs-Darstellung („Axis") an Extrusions-Wänden;
-    Tür/Fenster mit Rahmen/Blatt statt Box; Bogenwände als echte Kurve. · M
+  - ✅ IfcMaterialLayerSetUsage + Achs-Darstellung an Extrusions-Wänden. (28.10.) Wand-Placement am
+    Wandanfang, X = Achse, Y = linke Normale (Rust rechnet die Welt-Profile und die Öffnungen ins
+    Wandsystem); „Axis“-Darstellung (IfcPolyline, Unterkontext GRAPH_VIEW) + Usage (AXIS2, POSITIVE,
+    Offset = Abstand der Aussenschicht von der Achse), nur wenn die Typ-Schichten den Bandquerschnitt
+    füllen. Mesh-Wände (schräge Oberkante, Laibung) bleiben ohne Achse/Usage. ifcopenshell liest
+    Achse = Wandachse (auch schräg/rückwärts gezeichnet) und die Bänder in Schichtreihenfolge ab Offset.
+    Offen: nicht in Revit/ArchiCAD geöffnet.
+  - ○ Offen: Tür/Fenster mit Rahmen/Blatt statt Box; Bogenwände als echte Kurve. · M
   - ✅ Eigener IFC-Import ([B3]) zieht Öffnungen ab (28.10.): Rundreise vergleicht alle Wände mit dem
     ausgeschnittenen Volumen (`ifcImport.test.ts`).
   - ✅ Export nach Rust. (28.10.) `src-tauri/fileio/src/ifc_export.rs` schreibt die STEP-Datei

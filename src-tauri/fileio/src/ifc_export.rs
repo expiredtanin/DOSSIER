@@ -20,11 +20,22 @@
 //              2 = IfcPositiveRatioMeasure (value = Zahl)
 //   structure= Geschoss-Index oder −1 (Gebäude)
 //
-//   WALL_SOLIDS = 1, structure, id, name, TYPEREF, PSETS, n_solids, (PTS, z_rel, depth) × n_solids
+//   WALL_SOLIDS = 1, structure, id, name, TYPEREF, PSETS, FRAME, n_solids, (PTS, z_rel, depth) × n_solids
+//     FRAME = has_frame (0/1); wenn 1: ox, oy, ux, uy (Wandanfang und Achsrichtung in Welt-XY, ux²+uy² = 1),
+//             axis_len, usage (0/1), offset. Mit Rahmen sitzt das Placement am Wandanfang, X = Achse, Y = linke
+//             Normale ([B5]: so ordnen Revit/ArchiCAD die Schichten der Achse zu); die PTS bleiben Welt-XY und
+//             werden hier ins Wandsystem gerechnet. Dazu eine „Axis“-Darstellung (IfcPolyline 0 … axis_len)
+//             und, bei usage = 1 und vorhandenem Typ, IfcMaterialLayerSetUsage (AXIS2, POSITIVE, `offset` =
+//             Abstand der ersten Schicht von der Achse entlang +Y). Ohne Rahmen: Placement ohne Drehung wie bisher.
 //   WALL_MESH   = 2, structure, id, name, TYPEREF, PSETS, MESH
 //   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, z_rel, depth
 //   OPENING     = 4, wall_id, structure, opening_id, is_door (0/1), fill_name, PTS (Öffnungskörper), z_rel,
-//                 depth, PTS (Füllung), width, PSETS
+//                 depth, width, kind_text (Text oder −1 = keine: Tür OperationType, Fenster PartitioningType,
+//                 IFC-Enum-Name), FILL_FRAME, n_parts, (role, PTS, z_rel, depth) × n_parts, PSETS
+//     FILL_FRAME = ox, oy, ux, uy (Welt-XY): Placement der Füllung (X = u, Y = linke Normale von u). Die
+//             Teile-PTS bleiben Welt-XY, z_rel zählt ab Öffnungs-Unterkante. n_parts = 0: kein Körper.
+//     role: 0 Rahmen/Zarge, 1 Türblatt, 2 Glas. Alle Teile eines Bauteils sind getrennte Körper in EINER
+//           Darstellung, je mit eigenem IfcStyledItem (Farbe/Transparenz je Rolle).
 //   STAIR       = 5, structure, id, predefined (Text), PTS, z_rel, depth
 //   EXTRUSION   = 6, structure, id, PTS, z_rel, depth
 //   SPACE       = 7, structure, id, name, long_name, external (0/1), height, PTS, net_area, gross_area,
@@ -429,6 +440,34 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Lokales Wand-/Füllungssystem in Welt-XY: Ursprung und Richtung der X-Achse (Y = linke Normale).
+#[derive(Clone, Copy)]
+struct Frame {
+    ox: f64,
+    oy: f64,
+    ux: f64,
+    uy: f64,
+}
+
+impl Frame {
+    /// Identität (Welt-Koordinaten).
+    const WORLD: Frame = Frame { ox: 0.0, oy: 0.0, ux: 1.0, uy: 0.0 };
+
+    fn is_world(&self) -> bool {
+        self.ox == 0.0 && self.oy == 0.0 && self.ux == 1.0 && self.uy == 0.0
+    }
+
+    /// Welt-XY → lokal (X = u, Y = linke Normale (−uy, ux)).
+    fn local(&self, x: f64, y: f64) -> (f64, f64) {
+        let (dx, dy) = (x - self.ox, y - self.oy);
+        (dx * self.ux + dy * self.uy, -dx * self.uy + dy * self.ux)
+    }
+
+    fn local_pts(&self, pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
+        pts.iter().map(|&(x, y)| self.local(x, y)).collect()
+    }
+}
+
 struct Mesh {
     positions: Vec<f64>,
     indices: Vec<usize>,
@@ -506,6 +545,8 @@ struct PsetAcc {
 struct TypeAcc {
     key: String,
     type_id: usize,
+    /// IfcMaterialLayerSet des Typs (0 = keiner) für die LayerSetUsage der Exemplare.
+    layer_set: usize,
     occurrences: Vec<usize>,
 }
 
@@ -527,8 +568,11 @@ struct Builder {
     materials: HashMap<String, usize>,
     types: Vec<TypeAcc>,
     type_index: HashMap<String, usize>,
-    /// Wand-id → (Entität, Placement) für die Öffnungen.
-    walls: HashMap<String, (usize, usize)>,
+    /// Wand-id → (Entität, Placement, Wandsystem) für die Öffnungen.
+    walls: HashMap<String, (usize, usize, Frame)>,
+    /// Untergeordneter Kontext „Axis“ (GRAPH_VIEW), beim ersten Gebrauch angelegt (0 = noch nicht).
+    axis_context: usize,
+
     spaces: Vec<(i64, Vec<usize>)>,
     column_materials: Vec<(String, String, Vec<usize>)>,
 }
@@ -625,6 +669,43 @@ impl Builder {
         self.add("IFCLOCALPLACEMENT", format!("#{relative_to},#{axis}"))
     }
 
+    /// Placement am Punkt (`frame.ox`, `frame.oy`, 0) mit gedrehter X-Achse relativ zu `relative_to`.
+    fn emit_placement_frame(&mut self, frame: &Frame, relative_to: usize) -> usize {
+        let origin = self.add("IFCCARTESIANPOINT", list(&[fmt_real(frame.ox), fmt_real(frame.oy), fmt_real(0.0)]));
+        let dir = self.add("IFCDIRECTION", list(&[fmt_real(frame.ux), fmt_real(frame.uy), fmt_real(0.0)]));
+        // IFC4: Axis und RefDirection stehen nur zusammen (Axis = +Z).
+        let axis = self.add("IFCAXIS2PLACEMENT3D", format!("#{origin},#{},#{dir}", self.extrude_dir));
+        self.add("IFCLOCALPLACEMENT", format!("#{relative_to},#{axis}"))
+    }
+
+    /// Untergeordneter Darstellungskontext „Axis“ (GRAPH_VIEW), einmal je Datei.
+    fn axis_context(&mut self) -> usize {
+        if self.axis_context == 0 {
+            self.axis_context = self.add(
+                "IFCGEOMETRICREPRESENTATIONSUBCONTEXT",
+                format!("{},{},*,*,*,*,#{},$,{},$", ifc_string("Axis"), ifc_string("Model"), self.context, enum_("GRAPH_VIEW")),
+            );
+        }
+        self.axis_context
+    }
+
+    /// Wand-Darstellung: „Axis“ (IfcPolyline 0 … `len` in lokal X) und „Body“ (SweptSolid aus `solids`).
+    fn emit_wall_shape(&mut self, solids: &[usize], len: f64) -> usize {
+        let p0 = self.add("IFCCARTESIANPOINT", list(&[fmt_real(0.0), fmt_real(0.0)]));
+        let p1 = self.add("IFCCARTESIANPOINT", list(&[fmt_real(len), fmt_real(0.0)]));
+        let curve = self.add("IFCPOLYLINE", refs(&[p0, p1]));
+        let axis_ctx = self.axis_context();
+        let axis = self.add(
+            "IFCSHAPEREPRESENTATION",
+            format!("#{axis_ctx},{},{},{}", ifc_string("Axis"), ifc_string("Curve2D"), refs(&[curve])),
+        );
+        let body = self.add(
+            "IFCSHAPEREPRESENTATION",
+            format!("#{},{},{},{}", self.context, ifc_string("Body"), ifc_string("SweptSolid"), refs(solids)),
+        );
+        self.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[axis, body])))
+    }
+
     /// SweptSolid-Körper aus Extrusionen.
     fn emit_swept_shape(&mut self, solids: &[usize]) -> usize {
         let rep = self.add(
@@ -708,6 +789,7 @@ impl Builder {
             t.kind.ifc(),
             format!("{guid},#{},{},$,$,$,$,$,$,{}", self.owner_history, ifc_string(&t.name), enum_(&t.predefined)),
         );
+        let mut layer_set = 0;
         if !layer_ids.is_empty() {
             let set = self.add("IFCMATERIALLAYERSET", format!("{},{},$", refs(&layer_ids), ifc_string(&t.name)));
             let rel_guid = self.gid(&format!("{key}/material"));
@@ -715,10 +797,18 @@ impl Builder {
                 "IFCRELASSOCIATESMATERIAL",
                 format!("{rel_guid},#{},$,$,{},#{set}", self.owner_history, refs(&[type_id])),
             );
+            layer_set = set;
         }
         self.type_index.insert(key.clone(), self.types.len());
-        self.types.push(TypeAcc { key, type_id, occurrences: Vec::new() });
+        self.types.push(TypeAcc { key, type_id, layer_set, occurrences: Vec::new() });
         self.types.len() - 1
+    }
+
+    /// IfcMaterialLayerSet eines schon angelegten Typs (`finish_typed` legt ihn an).
+    fn layer_set_of(&self, t: &TypeRef) -> Option<usize> {
+        let key = format!("type/{}/{}", t.kind.ifc(), t.id);
+        let set = self.types[*self.type_index.get(&key)?].layer_set;
+        (set != 0).then_some(set)
     }
 
     /// Gemeinsamer Abschluss der Bauteile mit Typ und Psets: Typ (falls vorhanden) anlegen, Entität
@@ -810,6 +900,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         types: Vec::new(),
         type_index: HashMap::new(),
         walls: HashMap::new(),
+        axis_context: 0,
         spaces: Vec::new(),
         column_materials: Vec::new(),
     };
@@ -966,18 +1057,49 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let name = r.string()?;
                 let ty = r.type_ref()?;
                 let psets = r.psets()?;
+                let has_frame = r.flag()?;
+                let (frame, axis_len, usage, offset) = if has_frame {
+                    let (ox, oy, ux, uy) = (r.f()?, r.f()?, r.f()?, r.f()?);
+                    if ((ux * ux + uy * uy) - 1.0).abs() > 1e-6 {
+                        return Err(format!("Achsrichtung nicht normiert bei {}", r.pos - 1));
+                    }
+                    let (len, usage, offset) = (r.f()?, r.flag()?, r.f()?);
+                    (Frame { ox, oy, ux, uy }, len, usage, offset)
+                } else {
+                    (Frame::WORLD, 0.0, false, 0.0)
+                };
                 let n = r.idx()?;
                 let mut solids = Vec::new();
                 for _ in 0..n {
-                    let pts = r.pts()?;
+                    let pts = frame.local_pts(&r.pts()?);
                     let z_rel = r.f()?;
                     let depth = r.f()?;
                     solids.push(w.emit_extrusion(&pts, z_rel, depth));
                 }
-                let placement = w.emit_placement(0.0, w.placement_of(structure));
-                let shape = w.emit_swept_shape(&solids);
+                let parent = w.placement_of(structure);
+                let (placement, shape) = if has_frame {
+                    (w.emit_placement_frame(&frame, parent), w.emit_wall_shape(&solids, axis_len))
+                } else {
+                    (w.emit_placement(0.0, parent), w.emit_swept_shape(&solids))
+                };
                 let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
-                w.walls.insert(id, (entity, placement));
+                if has_frame && usage {
+                    // Schichten des Typs der Wandachse zuordnen: erste Schicht (aussen) liegt bei `offset`
+                    // von der Achse, die übrigen folgen in +Y (linke Normale).
+                    let set = ty.as_ref().and_then(|t| w.layer_set_of(t));
+                    if let Some(set) = set {
+                        let u = w.add(
+                            "IFCMATERIALLAYERSETUSAGE",
+                            format!("#{set},{},{},{},$", enum_("AXIS2"), enum_("POSITIVE"), fmt_real(offset)),
+                        );
+                        let g = w.gid(&format!("wall/{id}/material"));
+                        w.add(
+                            "IFCRELASSOCIATESMATERIAL",
+                            format!("{g},#{},$,$,{},#{u}", w.owner_history, refs(&[entity])),
+                        );
+                    }
+                }
+                w.walls.insert(id, (entity, placement, frame));
             }
             c if c == REC_WALL_MESH => {
                 let structure = r.structure(n_storeys)?;
@@ -988,7 +1110,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let mesh = r.mesh()?;
                 let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
                 let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
-                w.walls.insert(id, (entity, placement));
+                w.walls.insert(id, (entity, placement, Frame::WORLD));
             }
             c if c == REC_CEILING => {
                 let structure = r.structure(n_storeys)?;
@@ -1014,8 +1136,14 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let fill_pts = r.pts()?;
                 let width = r.f()?;
                 let psets = r.psets()?;
-                let Some(&(host_entity, host_placement)) = w.walls.get(&wall_id) else {
+                let Some(&(host_entity, host_placement, host_frame)) = w.walls.get(&wall_id) else {
                     continue; // Wirtswand nicht geschrieben (degeneriert)
+                };
+                // Die Geometrie kommt in Welt-XY; Wände mit eigenem Placement rechnen wir ins Wandsystem.
+                let (void_pts, fill_pts) = if host_frame.is_world() {
+                    (void_pts, fill_pts)
+                } else {
+                    (host_frame.local_pts(&void_pts), host_frame.local_pts(&fill_pts))
                 };
                 let (opening_placement, opening_shape) = w.emit_box_product(&void_pts, void_z, depth, host_placement);
                 let g = w.gid(&format!("opening/{opening_id}"));
@@ -1440,6 +1568,12 @@ mod tests {
             b.str("Aussenwand");
             b.wall_type();
             b.ref_pset("Pset_WallCommon", "Aussenwand");
+            // W1 mit Wandsystem (Achse, LayerSetUsage), W2 ohne (altes Verhalten).
+            if wid == "W1" {
+                b.n(&[1.0, 0.0, 0.0, 1.0, 0.0, 5.0, 1.0, -0.2]);
+            } else {
+                b.n(&[0.0]);
+            }
             b.n(&[1.0]);
             b.pts(&SQUARE);
             b.n(&[0.0, 2.6]);
@@ -1600,6 +1734,91 @@ mod tests {
         assert_eq!(count(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE"), 2);
         // Project→Site, Site→Building, Building→Storeys, Geschoss→Räume.
         assert_eq!(count(&ifc, "IFCRELAGGREGATES"), 4);
+    }
+
+    /// Zeile der ersten Entität eines Typs.
+    fn first_line<'a>(ifc: &'a str, ty: &str) -> &'a str {
+        let head = format!("{ty}(");
+        ifc.lines().find(|l| l.split_once('=').is_some_and(|(_, b)| b.starts_with(&head))).unwrap_or_else(|| panic!("{ty} fehlt"))
+    }
+
+    /// Kopf (META) eines Mini-Projekts ohne Geschoss.
+    fn mini() -> B {
+        let mut b = B::new();
+        b.str("t");
+        b.str("H");
+        b.n(&[1_700_000_000.0]);
+        b.str("2026-10-28T12:00:00");
+        b.n(&[0.0, f64::NAN, 0.0]);
+        b
+    }
+
+    #[test]
+    fn wand_mit_achse_und_layer_set_usage() {
+        let ifc = build(&full_house(false)).unwrap();
+        check_structure(&ifc);
+        // Nur W1 hat Wandsystem: eine Usage, eine Axis-Darstellung, ein Axis-Kontext.
+        assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 1);
+        assert_eq!(count(&ifc, "IFCGEOMETRICREPRESENTATIONSUBCONTEXT"), 1);
+        let usage = first_line(&ifc, "IFCMATERIALLAYERSETUSAGE");
+        assert!(usage.contains(".AXIS2.,.POSITIVE.,-0.2,$"), "{usage}");
+        // Die Usage verweist auf das LayerSet des Typs (dasselbe wie die Typ-Zuordnung).
+        let set_no: usize = usage.split("(#").nth(1).unwrap().split(',').next().unwrap().parse().unwrap();
+        assert!(ifc.contains(&format!("#{set_no}=IFCMATERIALLAYERSET(")));
+        // Axis: IfcPolyline von (0,0) nach (5,0) in Kurve2D.
+        assert!(ifc.contains("'Axis','Curve2D'"));
+        assert!(ifc.contains("IFCCARTESIANPOINT((5.0,0.0))"));
+        assert!(ifc.contains("IFCDIRECTION((1.0,0.0,0.0))"));
+    }
+
+    #[test]
+    fn gedrehte_wand_rechnet_profil_und_oeffnung_ins_wandsystem() {
+        // Wand von (10,20) nach (10,25): u = (0,1), linke Normale = (−1,0).
+        let mut b = mini();
+        b.n(&[REC_WALL_SOLIDS, -1.0]);
+        b.str("W");
+        b.str("Wand");
+        b.no_type();
+        b.no_psets();
+        b.n(&[1.0, 10.0, 20.0, 0.0, 1.0, 5.0, 0.0, 0.0]);
+        b.n(&[1.0]);
+        b.pts(&[(10.2, 20.0), (10.2, 25.0), (9.8, 25.0), (9.8, 20.0)]);
+        b.n(&[0.0, 2.6]);
+        b.n(&[REC_OPENING]);
+        b.str("W");
+        b.n(&[-1.0]);
+        b.str("O");
+        b.n(&[0.0]);
+        b.str("Fenster");
+        b.pts(&[(10.3, 21.0), (10.3, 22.0), (9.7, 22.0), (9.7, 21.0)]);
+        b.n(&[0.9, 1.2]);
+        b.pts(&[(10.2, 21.0), (10.2, 22.0), (9.8, 22.0), (9.8, 21.0)]);
+        b.n(&[1.0]);
+        b.no_psets();
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        // Wandprofil lokal: x = Länge entlang u, y = linke Normale (10.2 → −0.2, 9.8 → 0.2).
+        assert!(ifc.contains("IFCCARTESIANPOINT((0.0,-0.2))"));
+        assert!(ifc.contains("IFCCARTESIANPOINT((5.0,0.2))"));
+        // Öffnung lokal bei x = 1…2, quer −0.3…0.3.
+        assert!(ifc.contains("IFCCARTESIANPOINT((1.0,-0.3))"));
+        assert!(ifc.contains("IFCCARTESIANPOINT((2.0,0.3))"));
+        assert!(ifc.contains("IFCDIRECTION((0.0,1.0,0.0))"));
+        // Ohne Typ keine Usage, trotzdem Axis.
+        assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 0);
+        assert!(ifc.contains("'Axis','Curve2D'"));
+    }
+
+    #[test]
+    fn schiefe_achsrichtung_ist_fehler() {
+        let mut b = mini();
+        b.n(&[REC_WALL_SOLIDS, -1.0]);
+        b.str("W");
+        b.str("Wand");
+        b.no_type();
+        b.no_psets();
+        b.n(&[1.0, 0.0, 0.0, 2.0, 0.0, 5.0, 0.0, 0.0, 0.0]);
+        assert!(build(&b).is_err());
     }
 
     #[test]

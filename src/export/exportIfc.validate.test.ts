@@ -39,7 +39,7 @@ for w in m.by_type("IfcWall"):
     sh = ifcopenshell.geom.create_shape(s, w)
     out[w.GlobalId] = {"volume": us.get_volume(sh.geometry), "openings": len(w.HasOpenings),
         "fills": sum(len(r.RelatedOpeningElement.HasFillings) for r in w.HasOpenings),
-        "rep": w.Representation.Representations[0].RepresentationType}
+        "rep": [r for r in w.Representation.Representations if r.RepresentationIdentifier == "Body"][0].RepresentationType}
 print(json.dumps(out))
 `;
 
@@ -48,6 +48,48 @@ type WallVolume = { volume: number; openings: number; fills: number; rep: string
 /** Je IfcWall (Schlüssel GlobalId): Volumen, Anzahl Öffnungen/Füllungen, Darstellungsart. */
 function wallVolumes(name: string, ifc: string): Record<string, WallVolume> {
   const r = spawnSync("python3", ["-c", WALL_VOLUMES, writeIfc(name, ifc)], { encoding: "utf8", timeout: 120_000 });
+  expect(r.status, r.stderr).toBe(0);
+  return JSON.parse(r.stdout);
+}
+
+// Achse und IfcMaterialLayerSetUsage je IfcWall: Placement, Achs-Polylinie (lokal), Usage und je
+// Körper (Extrusion) der Bereich quer zur Achse (lokal Y) — alles unabhängig vom Exporter gelesen.
+const WALL_AXES = `
+import json, sys
+import ifcopenshell, ifcopenshell.util.placement as up
+m = ifcopenshell.open(sys.argv[1])
+out = {}
+for w in m.by_type("IfcWall"):
+    reps = {r.RepresentationIdentifier: r for r in w.Representation.Representations}
+    mat = up.get_local_placement(w.ObjectPlacement)
+    item = {"identifiers": sorted(reps), "usage": None, "axis": None, "items": []}
+    if "Axis" in reps:
+        pts = [p.Coordinates for p in reps["Axis"].Items[0].Points]
+        a = mat @ [pts[0][0], pts[0][1], 0, 1]
+        b = mat @ [pts[1][0], pts[1][1], 0, 1]
+        item["axis"] = [[a[0], a[1]], [b[0], b[1]], reps["Axis"].RepresentationType, [list(p) for p in pts]]
+    for e in reps["Body"].Items:
+        if e.is_a("IfcExtrudedAreaSolid"):
+            ys = [p.Coordinates[1] for p in e.SweptArea.OuterCurve.Points]
+            item["items"].append([min(ys), max(ys)])
+    for rel in w.HasAssociations:
+        if rel.is_a("IfcRelAssociatesMaterial") and rel.RelatingMaterial.is_a("IfcMaterialLayerSetUsage"):
+            u = rel.RelatingMaterial
+            item["usage"] = {"dir": u.LayerSetDirection, "sense": u.DirectionSense, "offset": u.OffsetFromReferenceLine,
+                "layers": [l.LayerThickness for l in u.ForLayerSet.MaterialLayers]}
+    out[w.GlobalId] = item
+print(json.dumps(out))
+`;
+
+interface WallAxis {
+  identifiers: string[];
+  usage: { dir: string; sense: string; offset: number; layers: number[] } | null;
+  axis: [number[], number[], string, number[][]] | null;
+  items: number[][];
+}
+
+function wallAxes(name: string, ifc: string): Record<string, WallAxis> {
+  const r = spawnSync("python3", ["-c", WALL_AXES, writeIfc(name, ifc)], { encoding: "utf8", timeout: 120_000 });
   expect(r.status, r.stderr).toBe(0);
   return JSON.parse(r.stdout);
 }
@@ -133,5 +175,66 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60
       expect(w.volume, wall.id).toBeCloseTo(meshVolume.get(wall.id)!, 4);
     }
     expect(swept).toBeGreaterThan(0);
+  });
+
+  it("[B5] Wandachse + LayerSetUsage: Achse = Wandachse, Schichten ab Aussenfläche in Normalenrichtung", () => {
+    // Zwei Schichten (0.1 aussen, 0.3 innen), Wand schräg gestellt und rückwärts gezeichnet.
+    const [c0, c1] = sampleProject.components;
+    const base = singleWall(false);
+    const rotated: Project = {
+      ...base,
+      walls: [{ ...base.walls[0], start: { x: 12, y: 7 }, end: { x: 9, y: 3 } }],
+      wallTypes: [...base.wallTypes.filter((t) => t.id !== "solo"), { id: "solo", name: "Zweischicht", layers: [{ componentId: c0.id, thickness: 0.1 }, { componentId: c1.id, thickness: 0.3 }] }],
+      openings: [],
+    };
+    const ifc = exportIfcSpf(rotated);
+    expect(validate("achse", ifc).out).toContain("0 Befunde");
+    const [w] = Object.values(wallAxes("achse", ifc));
+    expect(w.identifiers).toEqual(["Axis", "Body"]);
+    expect(w.axis![2]).toBe("Curve2D");
+    expect(w.axis![0][0]).toBeCloseTo(12, 6);
+    expect(w.axis![0][1]).toBeCloseTo(7, 6);
+    expect(w.axis![1][0]).toBeCloseTo(9, 6);
+    expect(w.axis![1][1]).toBeCloseTo(3, 6);
+    expect(w.axis![3][1]).toEqual([5, 0]); // Länge √(9+16) = 5 entlang lokal X
+    expect(w.usage).toMatchObject({ dir: "AXIS2", sense: "POSITIVE", layers: [0.1, 0.3] });
+    // Referenzlinie in der Mitte (Standard) → Offset −total/2; Körper je Schicht in Reihenfolge.
+    const off = w.usage!.offset;
+    let y = off;
+    expect(w.items.length).toBe(2);
+    w.items.forEach(([lo, hi], i) => {
+      expect(lo).toBeCloseTo(y, 6);
+      y += w.usage!.layers[i];
+      expect(hi).toBeCloseTo(y, 6);
+    });
+  });
+  it("[B5] Demo-Haus: jede Extrusions-Wand hat Achse und Usage, Körper-Bänder = Schichten in Reihenfolge", () => {
+    const project = sampleProject;
+    const axes = wallAxes("demo-achsen", exportIfcSpf(project));
+    let withAxis = 0;
+    for (const wall of project.walls) {
+      const w = axes[ifcGuid(`${project.id}/wall/${wall.id}`)];
+      expect(w, wall.id).toBeDefined();
+      if (!w.axis) {
+        expect(w.usage, wall.id).toBeNull(); // Mesh-Wand
+        continue;
+      }
+      withAxis++;
+      expect(w.axis[0][0], wall.id).toBeCloseTo(wall.start.x, 6);
+      expect(w.axis[0][1], wall.id).toBeCloseTo(wall.start.y, 6);
+      expect(w.axis[1][0], wall.id).toBeCloseTo(wall.end.x, 6);
+      expect(w.axis[1][1], wall.id).toBeCloseTo(wall.end.y, 6);
+      if (!w.usage) continue; // Schichtsumme passt nicht zum Querschnitt
+      // Mehrere Bänder je Schicht möglich (Joins): die verschiedenen Querbereiche ergeben die Schichten.
+      const spans = [...new Map(w.items.map(([lo, hi]) => [`${lo.toFixed(6)}/${hi.toFixed(6)}`, [lo, hi]])).values()].sort((a, b) => a[0] - b[0]);
+      expect(spans.length, wall.id).toBe(w.usage.layers.length);
+      let y = w.usage.offset;
+      spans.forEach(([lo, hi], i) => {
+        expect(lo, `${wall.id} Schicht ${i}`).toBeCloseTo(y, 6);
+        y += w.usage!.layers[i];
+        expect(hi, `${wall.id} Schicht ${i}`).toBeCloseTo(y, 6);
+      });
+    }
+    expect(withAxis).toBeGreaterThan(0);
   });
 });

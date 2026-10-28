@@ -90,7 +90,7 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
       expect(p, wall.id).toBeDefined();
       const wallLine = [...lines.values()].find((l) => l.includes(`=IFCWALL('${p.globalId}'`))!;
       const shape = lines.get(/,(#\d+),\$,\$\);$/.exec(wallLine)![1])!;
-      const rep = lines.get(/\(\(?(#\d+)\)\);$/.exec(shape)![1])!;
+      const rep = lines.get(/(#\d+)\)\);$/.exec(shape)![1])!; // letzte Darstellung = Body (davor ggf. Axis)
       const isSwept = rep.includes("'SweptSolid'");
       if (isSwept) swept++;
       const expected = cut.get(wall.id)!;

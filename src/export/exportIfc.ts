@@ -43,8 +43,12 @@
 //     echte Stufengeometrie ist ausgelassen (siehe stairFootprint()).
 //
 //   Material-Schichten: je Wand-/Deckentyp ein IfcWallType/IfcSlabType mit
-//   IfcMaterialLayerSet, die Exemplare erben ihn über IfcRelDefinesByType. (Noch) KEIN
-//   IfcMaterialLayerSetUsage am Exemplar: die Wand hat keine Achs-Darstellung.
+//   IfcMaterialLayerSet, die Exemplare erben ihn über IfcRelDefinesByType. Extrusions-Wände
+//   ([B5], 28.10.) tragen zusätzlich eine „Axis"-Darstellung (IfcPolyline entlang der Wandachse)
+//   und eine IfcMaterialLayerSetUsage (AXIS2, POSITIVE, Offset = Abstand der Aussenschicht von der
+//   Achse), damit Revit/ArchiCAD die Schichten der Achse zuordnen: das Wand-Placement sitzt am
+//   Wandanfang, X = Achse, Y = linke Normale (Rust rechnet die Welt-Profile ins Wandsystem). Mesh-
+//   Wände (schräge Oberkante, Laibungs-Rücksprung) haben weder Achse noch Usage.
 //
 //   Eigenschaften ([B5]): Pset_WallCommon/SlabCommon/RoofCommon/ColumnCommon/DoorCommon/
 //   WindowCommon/SpaceCommon nur mit Werten, die das Modell hergibt (Reference = Typname,
@@ -187,10 +191,24 @@ class FlatIfc {
     for (const s of m.storeys) this.nums.push(this.str(s.id), this.str(s.name), s.base);
   }
 
-  wallSolids(structure: number, id: string, name: string, ty: TypeRefIn | null, psets: PsetIn[], solids: { pts: Vec2[]; zRel: number; depth: number }[]): void {
+  /**
+   * Extrusions-Wand. `frame`: Wandanfang, Achsrichtung (Einheitsvektor), Länge und — wenn die Schichten
+   * des Typs genau den Wandquerschnitt füllen — der Abstand `offset` der ersten Schicht von der
+   * Wandachse entlang der linken Normalen (→ IfcMaterialLayerSetUsage).
+   */
+  wallSolids(
+    structure: number,
+    id: string,
+    name: string,
+    ty: TypeRefIn | null,
+    psets: PsetIn[],
+    frame: { origin: Vec2; u: Vec2; length: number; offset: number | null },
+    solids: { pts: Vec2[]; zRel: number; depth: number }[],
+  ): void {
     this.nums.push(REC_WALL_SOLIDS, structure, this.str(id), this.str(name));
     this.typeRef(ty);
     this.psets(psets);
+    this.nums.push(1, frame.origin.x, frame.origin.y, frame.u.x, frame.u.y, frame.length, frame.offset === null ? 0 : 1, frame.offset ?? 0);
     this.nums.push(solids.length);
     for (const s of solids) {
       this.pts(s.pts);
@@ -583,8 +601,22 @@ export function exportIfcSpf(projectIn: Project): string {
       return { pts: rect, zRel: b.baseElevation - baseOf(structure), depth: b.height };
     });
     const id = wallIdentity(wall);
-    flat.wallSolids(structure, wall.id, id.name, id.ty, id.psets, solids);
-    hostExtent.set(wall.id, crossExtent(wall, bands));
+    // Wandsystem: Placement am Wandanfang, X = Achse, Y = linke Normale; die Schichten des Typs
+    // stehen ab der Aussenfläche (negative Normale) nebeneinander — IfcMaterialLayerSetUsage nur,
+    // wenn ihre Summe dem Querschnitt der Bänder entspricht (sonst wäre der Offset gelogen).
+    const extent = crossExtent(wall, bands);
+    const layerSum = id.ty?.layers.reduce((a, l) => a + l.thickness, 0) ?? 0;
+    const usage = id.ty !== null && layerSum > 0 && Math.abs(extent.nHi - extent.nLo - layerSum) < 1e-3;
+    flat.wallSolids(
+      structure,
+      wall.id,
+      id.name,
+      id.ty,
+      id.psets,
+      { origin: wall.start, u: normalize(sub(wall.end, wall.start)), length: Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y), offset: usage ? extent.nLo : null },
+      solids,
+    );
+    hostExtent.set(wall.id, extent);
   }
   // Mesh-Weg: Loch-Ausschnitte aller betroffenen Bänder in EINEM Kern-Aufruf.
   const meshBands = meshWalls.flatMap((m) => m.bands);
