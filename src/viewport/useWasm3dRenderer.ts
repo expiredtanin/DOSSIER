@@ -23,6 +23,8 @@ import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
 import { decodeImageToRgba } from "../io/swissImage";
+import { planPointCloudSync } from "./pointCloudSync";
+import type { PointCloudSyncItem, UploadedPointCloud } from "./pointCloudSync";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
 export interface Camera3d {
@@ -108,6 +110,25 @@ interface WebModelRendererLike {
   ): void;
   /** Drapiertes Luftbild löschen (Gelände wieder einfarbig/shaded). Optional. */
   clear_aerial?(): void;
+  /** Punktwolke setzen ([27], `web::set_point_cloud`): `xyz` relativ zum Ursprung, `ox/oy/oz` =
+   *  Modell-Meter des Ursprungs (f64, Rust addiert in f64). Leere Attribut-Arrays = fehlt.
+   *  Liefert die gezeichnete Punktzahl (0 = verworfen). Optional — ältere WASM-Builds. */
+  set_point_cloud?(
+    id: number,
+    xyz: Float32Array,
+    rgb: Uint8Array,
+    intensity: Uint16Array,
+    classification: Uint8Array,
+    ox: number,
+    oy: number,
+    oz: number,
+    colorMode: string,
+    pointSize: number,
+    visible: boolean,
+  ): number;
+  /** Nur Darstellung ändern; `false` = Wolke unbekannt. */
+  set_point_cloud_style?(id: number, colorMode: string, pointSize: number, visible: boolean): boolean;
+  remove_point_cloud?(id: number): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -157,6 +178,8 @@ export function useWasm3dRenderer(
   enabled: boolean,
 ) {
   const rendererRef = useRef<WebModelRendererLike | null>(null);
+  // Was an Punktwolken im Renderer liegt ([27], s. pointCloudSync.ts).
+  const pointCloudsRef = useRef<Map<number, UploadedPointCloud>>(new Map());
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -173,6 +196,8 @@ export function useWasm3dRenderer(
         const renderer = await getRenderer(canvas);
         if (disposed) return;
         rendererRef.current = renderer;
+        // Neuer (oder wiederverwendeter) Renderer: Punktwolken neu abgleichen.
+        pointCloudsRef.current = new Map();
         setReady(true);
         setFailed(false);
       } catch (e) {
@@ -279,6 +304,60 @@ export function useWasm3dRenderer(
         console.warn("render3d set_aerial_texture fehlgeschlagen:", e);
       }
     })();
+  }, []);
+
+  /**
+   * Punktwolken abgleichen ([27]): neue/geänderte Daten hochladen, Darstellung umstellen,
+   * entfernte löschen. Gibt `true` zurück, wenn sich etwas geändert hat (→ neu zeichnen).
+   */
+  const syncPointClouds = useCallback((items: readonly PointCloudSyncItem[]): boolean => {
+    const r = rendererRef.current;
+    if (!r || typeof r.set_point_cloud !== "function") return false;
+    const uploaded = pointCloudsRef.current;
+    const ops = planPointCloudSync(uploaded, items);
+    const empty8 = new Uint8Array(0);
+    const upload = (it: PointCloudSyncItem) => {
+      const d = it.data;
+      r.set_point_cloud!(
+        it.id,
+        d.xyz,
+        d.rgb ?? empty8,
+        d.intensity ?? new Uint16Array(0),
+        d.classification ?? empty8,
+        it.offset[0],
+        it.offset[1],
+        it.offset[2],
+        it.colorMode,
+        it.pointSize,
+        it.visible,
+      );
+    };
+    for (const op of ops) {
+      try {
+        if (op.kind === "remove") {
+          r.remove_point_cloud?.(op.id);
+          uploaded.delete(op.id);
+          continue;
+        }
+        const it = op.item;
+        if (op.kind === "style") {
+          const ok = r.set_point_cloud_style?.(it.id, it.colorMode, it.pointSize, it.visible) === true;
+          if (!ok) upload(it);
+        } else {
+          upload(it);
+        }
+        uploaded.set(it.id, {
+          data: it.data,
+          offset: [...it.offset],
+          colorMode: it.colorMode,
+          pointSize: it.pointSize,
+          visible: it.visible,
+        });
+      } catch (e) {
+        console.warn("render3d Punktwolke fehlgeschlagen:", e);
+      }
+    }
+    return ops.length > 0;
   }, []);
 
   /**
@@ -438,6 +517,7 @@ export function useWasm3dRenderer(
     setGroundGrid,
     setSectionPlane,
     setHighlightLines,
+    syncPointClouds,
     ready,
     failed,
   };

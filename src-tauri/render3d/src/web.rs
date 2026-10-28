@@ -584,6 +584,58 @@ impl WebModelRenderer {
         self.renderer.clear_aerial();
     }
 
+    /// Setzt/ersetzt die Punktwolke `id` ([27], `points.rs`/`gpu_points.rs`). `xyz` = f32 je Punkt
+    /// RELATIV zum Ursprung, `ox/oy/oz` = Modell-Meter dieses Ursprungs (f64; x = Ost, y = Nord,
+    /// z = Hoehe) — die Summe bildet Rust in f64. `rgb`/`intensity`/`classification` leer = fehlt
+    /// (falsche Laenge = ignoriert). `color_mode` ∈ rgb|intensity|class|height, `point_size` in
+    /// Bildschirm-Pixeln. Gibt die Anzahl gezeichneter Punkte zurueck; 0 = Eingabe unbrauchbar
+    /// (die Wolke `id` ist dann entfernt) — nie ein Panic.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_point_cloud(
+        &mut self,
+        id: u32,
+        xyz: &[f32],
+        rgb: &[u8],
+        intensity: &[u16],
+        classification: &[u8],
+        ox: f64,
+        oy: f64,
+        oz: f64,
+        color_mode: &str,
+        point_size: f32,
+        visible: bool,
+    ) -> u32 {
+        let cpu = crate::points::PointCloudCpu::from_raw(xyz, rgb, intensity, classification, [ox, oy, oz]);
+        let style = crate::gpu_points::PointStyle {
+            mode: crate::points::PointColorMode::from_str_or_rgb(color_mode),
+            size_px: point_size,
+            visible,
+        };
+        self.renderer.set_point_cloud(&self.device, id, cpu, style);
+        self.renderer.point_cloud_len(id) as u32
+    }
+
+    /// Nur Darstellung der Punktwolke `id` aendern (ohne Neu-Hochladen der Positionen).
+    /// `false`, wenn die Wolke unbekannt ist (dann `set_point_cloud` aufrufen).
+    pub fn set_point_cloud_style(&mut self, id: u32, color_mode: &str, point_size: f32, visible: bool) -> bool {
+        let style = crate::gpu_points::PointStyle {
+            mode: crate::points::PointColorMode::from_str_or_rgb(color_mode),
+            size_px: point_size,
+            visible,
+        };
+        self.renderer.set_point_cloud_style(&self.queue, id, style)
+    }
+
+    /// Entfernt die Punktwolke `id` (unbekannt = nichts).
+    pub fn remove_point_cloud(&mut self, id: u32) {
+        self.renderer.remove_point_cloud(id);
+    }
+
+    /// Entfernt alle Punktwolken.
+    pub fn clear_point_clouds(&mut self) {
+        self.renderer.clear_point_clouds();
+    }
+
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));

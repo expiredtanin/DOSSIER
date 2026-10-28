@@ -25,6 +25,7 @@ import { isTauriRuntime } from "../native/projectFile";
 import { openContextImportWindowNative } from "../native/contextImportWindow";
 import { SunStudySection } from "./SunStudySection";
 import { SiteRulesSection } from "./SiteRulesSection";
+import { PointCloudSection } from "./PointCloudSection";
 
 /** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
 function typeBadgeKey(obj: ContextObject): TranslationKey {
@@ -162,6 +163,8 @@ export function SitePanel() {
       <SunStudySection />
       <div className="site-sep" />
       <SiteRulesSection />
+      <div className="site-sep" />
+      <PointCloudSection />
       <div className="site-sep" />
 
       {/* Kontext-Objekte nach Ebene (`layer`) gruppiert: importierte Gebäude

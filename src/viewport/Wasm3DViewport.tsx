@@ -65,6 +65,9 @@ import type { Camera3d } from "./useWasm3dRenderer";
 import { cameraRay, pickNearest, rayPlaneY, rayPlane, worldToScreen } from "./raycast3d";
 import type { Vec3 } from "../core";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
+import { pointCloudSyncItems } from "./pointCloudSync";
+import { usePointClouds } from "../state/pointCloudStore";
+import { projectGeoOrigin } from "../core";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
@@ -536,9 +539,14 @@ export function Wasm3DViewport({
     setGroundGrid,
     setSectionPlane,
     setHighlightLines,
+    syncPointClouds,
     ready,
     failed,
   } = useWasm3dRenderer(canvasRef, true);
+  // Punktwolken ([27]) aus dem UI-Store (nicht im Projekt). Die Lage folgt dem Standort-Bezug.
+  const pointClouds = usePointClouds();
+  const geoOrigin = projectGeoOrigin(project);
+  const geoKey = geoOrigin ? `${geoOrigin.e},${geoOrigin.n},${project.geoAnchor?.height ?? ""}` : "";
   // Live-Schnitt: die aktive Ebene kommt jetzt aus `section3d` (App-State, an
   // eine Schnittlinie gebunden — `sectionPlaneFromLevel`) statt aus einem
   // lokalen Hardcode-Toggle. `null` = kein Schnitt.
@@ -561,6 +569,15 @@ export function Wasm3DViewport({
     updateModel(project, detail);
     redrawRef.current();
   }, [ready, project, detail, updateModel]);
+
+  // Punktwolken abgleichen (neu/umgestellt/entfernt) und neu zeichnen, wenn sich etwas tat.
+  useEffect(() => {
+    if (!ready) return;
+    const p = projectRef.current;
+    if (syncPointClouds(pointCloudSyncItems(pointClouds, projectGeoOrigin(p), p.geoAnchor?.height))) {
+      redrawRef.current();
+    }
+  }, [ready, pointClouds, geoKey, syncPointClouds]);
 
   // truck-Extrusionen (s. toWalls3d.ts emitExtrudedSolids): die WASM-Extrusion
   // läuft asynchron und ist beim ersten `updateModel` oben typischerweise noch
