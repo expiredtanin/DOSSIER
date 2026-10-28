@@ -353,6 +353,7 @@ export default function App() {
   // Endlosschleife). Actions leben ebenfalls im Zustand und sind referenzstabil.
   const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
+  const applyChange = useStore((s) => s.applyChange);
   const groupChanges = useStore((s) => s.groupChanges);
   const notify = useStore((s) => s.notify);
   const undo = useStore((s) => s.undo);
@@ -1496,7 +1497,7 @@ export default function App() {
   };
   useGroupShortcut(
     project,
-    setProject,
+    applyChange,
     {
       wallIds: selectedWallIds,
       drawingIds: selectedDrawingIds,
@@ -1873,7 +1874,7 @@ export default function App() {
     setElementClipboard,
     activeLevelId,
     project,
-    setProject,
+    applyChange,
     {
       wallIds: setSelectedWallIds,
       drawingIds: setSelectedDrawingIds,

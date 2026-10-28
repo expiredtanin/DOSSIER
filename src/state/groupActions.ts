@@ -11,7 +11,7 @@ import { uniqueId } from "../tools/types";
 import type { Primitive } from "../core";
 import { applyOps } from "../core";
 import type { CoreOp } from "../core";
-import { itemsOf, patchItem } from "../core";
+import { addItems, itemsOf, patchItem, removeItems } from "../core";
 import type { EntityCollection } from "../core";
 
 /** Mitglieds-IDs je Elementart — dieselbe Form wie `Group`, ohne `id`/`name`/`groupIds`. */
@@ -353,10 +353,9 @@ export function activeGroupOps(before: Project, ops: readonly CoreOp[], groupPat
  * ihre Mitglieder platt zu vermischen). Leere Auswahl → `null` (nichts zu tun).
  */
 export function groupSelection(
-  project: Project,
   sel: GroupMembership,
   selectedGroupIds: string[],
-): { project: Project; groupId: string } | null {
+): { ops: CoreOp[]; groupId: string } | null {
   const totalCount =
     KEYS.reduce((n, k) => n + sel[k].length, 0) + selectedGroupIds.length;
   if (totalCount < 2) return null; // Gruppieren braucht ≥ 2 Elemente (Vectorworks-Konvention)
@@ -373,7 +372,7 @@ export function groupSelection(
     openingIds: sel.openingIds,
     groupIds: [...selectedGroupIds],
   };
-  return { project: { ...project, groups: [...(project.groups ?? []), g] }, groupId: id };
+  return { ops: addItems("groups", [g]), groupId: id };
 }
 
 /**
@@ -386,11 +385,11 @@ export function groupSelection(
 export function ungroup(
   project: Project,
   groupId: string,
-): { project: Project; members: GroupMembership; subGroupIds: string[] } | null {
+): { ops: CoreOp[]; members: GroupMembership; subGroupIds: string[] } | null {
   const g = (project.groups ?? []).find((x) => x.id === groupId);
   if (!g) return null;
   return {
-    project: { ...project, groups: (project.groups ?? []).filter((x) => x.id !== groupId) },
+    ops: removeItems(project, "groups", [groupId]),
     members: {
       wallIds: g.wallIds,
       drawingIds: g.drawingIds,

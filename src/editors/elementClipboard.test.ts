@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { collectElementClipboard, pasteElementClipboard, isClipboardEmpty } from "./elementClipboard";
+import { applyOps } from "../core/ops";
 import type { ElementSelectionIds } from "./elementClipboard";
 import type { Project, Wall, Opening, Ceiling } from "../model/types";
 
@@ -121,7 +122,8 @@ describe("pasteElementClipboard", () => {
   it("fügt Wand + Öffnung mit NEUEN, verknüpften IDs auf dem aktiven Geschoss ein", () => {
     const p = project();
     const clip = collectElementClipboard(p, { ...emptySel(), wallIds: ["w1"] })!;
-    const { project: next, pastedIds } = pasteElementClipboard(p, clip, "og");
+    const { ops, pastedIds } = pasteElementClipboard(clip, "og");
+    const next = applyOps(p, ops);
     expect(next.walls.length).toBe(2);
     expect(next.openings!.length).toBe(2);
     const newWall = next.walls.find((w) => w.id === pastedIds.wallIds[0])!;
@@ -137,7 +139,7 @@ describe("pasteElementClipboard", () => {
   it("Originale bleiben unverändert (immutabel)", () => {
     const p = project();
     const clip = collectElementClipboard(p, { ...emptySel(), wallIds: ["w1"] })!;
-    pasteElementClipboard(p, clip, "og");
+    pasteElementClipboard(clip, "og");
     expect(p.walls.length).toBe(1);
     expect(p.walls[0].id).toBe("w1");
   });
