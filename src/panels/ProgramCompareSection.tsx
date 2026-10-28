@@ -11,7 +11,7 @@ import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
-import { addProgramSheet, areaReportToCsv, buildAreaReportPdf, buildProgramReport, buildProgramSheet, compareRoomProgram, defaultSheetLabels, DEFAULT_PROGRAM_TOLERANCE } from "../core";
+import { addProgramSheetOps, areaReportToCsv, buildAreaReportPdf, buildProgramReport, buildProgramSheet, compareRoomProgram, defaultSheetLabels, DEFAULT_PROGRAM_TOLERANCE, setFieldIfChanged } from "../core";
 import type { CompareRow, CompareSum, Light } from "../core";
 import type { Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
@@ -41,7 +41,7 @@ function SumRow({ s, label, total }: { s: CompareSum; label: string; total?: boo
 export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: CompareRow["status"]) => string }) {
   const host = usePanelHost();
   const project = host.project;
-  const setProject = useStore((s) => s.setProject);
+  const applyChange = useStore((s) => s.applyChange);
   const notify = useStore((s) => s.notify);
   const c = compareRoomProgram(project);
   if (c.rows.length === 0) return null;
@@ -51,10 +51,11 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
 
   const setTolerance = (text: string) => {
     const v = Number(text.trim().replace(",", "."));
-    setProject((p: Project) => {
-      const { roomProgramTolerance: _old, ...rest } = p;
-      return text.trim() !== "" && Number.isFinite(v) && v >= 0 && v <= 100 ? { ...rest, roomProgramTolerance: v / 100 } : rest;
-    }, "roomProgramTolerance");
+    applyChange(
+      (p: Project) =>
+        setFieldIfChanged(p, "roomProgramTolerance", text.trim() !== "" && Number.isFinite(v) && v >= 0 && v <= 100 ? v / 100 : undefined),
+      "roomProgramTolerance",
+    );
   };
 
   const exportPdf = () => {
@@ -71,8 +72,8 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
       notify(t("program.generate.none"), "warning");
       return;
     }
-    // Ein setProject = ein Undo-Schritt: Ebene und alle Zeichnungen zusammen.
-    setProject((p: Project) => addProgramSheet(p, sheet));
+    // Ein applyChange = ein Undo-Schritt: Ebene und alle Zeichnungen zusammen.
+    applyChange(addProgramSheetOps(sheet));
     host.onSelectLevel(sheet.level.id);
     notify(t("program.generate.done", { n: sheet.layout.items.length, name: sheet.level.name }));
   };

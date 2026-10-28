@@ -3711,6 +3711,7 @@ export default function App() {
           onEdit3dRoofPitch={onEdit3dRoofPitch}
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
+          onEdit3dGroup={groupChanges}
           onGrip3dEditTab={cycleGrip3dEditField}
           onGrip3dEditCancel={cancelGrip3dEdit}
         />

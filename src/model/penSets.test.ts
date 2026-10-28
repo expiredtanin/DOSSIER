@@ -3,13 +3,17 @@ import {
   activePenSet,
   resolvePenColor,
   resolvePenWeight,
-  rebakePenColors,
+  rebakePenOps,
   generateStandardPenPalette,
-  seedStandardPenSet,
+  seedStandardPenSetOps,
   PEN_FALLBACK_COLOR,
   PEN_FALLBACK_WEIGHT,
 } from "./penSets";
 import type { Ceiling, Component, Drawing2D, LayerCategory, PenStyle, Project, Room, Wall } from "./types";
+import { applyOps } from "../core/ops";
+
+const rebakePenColors = (p: Project): Project => applyOps(p, rebakePenOps(p));
+const seedStandardPenSet = (p: Project): Project => applyOps(p, seedStandardPenSetOps(p));
 
 function baseProject(overrides: Partial<Project> = {}): Project {
   return {

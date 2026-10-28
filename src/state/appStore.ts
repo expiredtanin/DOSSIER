@@ -48,13 +48,13 @@ const store = createStore<RootState>((api) => ({
   ...createSelectionSlice(api as unknown as StoreApi<SelectionSlice>),
   ...createViewSlice(api as unknown as StoreApi<ViewSlice>),
   ...createLayoutSlice(api as unknown as StoreApi<LayoutSlice>),
-  // Site-/Kontext-Slice liest `project` und schreibt über `setProject`
+  // Site-/Kontext-Slice liest `project` und schreibt über `applyChange`
   // (beide aus der Projekt-Slice) — daher die kombinierte Sicht im Cast.
   ...createSiteSlice(
     api as unknown as StoreApi<
       SiteSlice & {
         project: ProjectSlice["project"];
-        setProject: ProjectSlice["setProject"];
+        applyChange: ProjectSlice["applyChange"];
       }
     >,
   ),

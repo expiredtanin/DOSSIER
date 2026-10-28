@@ -15,6 +15,9 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { ColorPen, Component, LayerCategory, PenSet, PenStyle, Project } from "./types";
+import { applyOps } from "../core/ops";
+import type { CoreOp } from "../core/ops";
+import { addItems, fieldOps, patchItems, setFieldIfChanged } from "../core/opsBuild";
 
 /** Farbe eines Stifts, der im aktiven Stiftsatz (noch) keinen Eintrag hat. */
 export const PEN_FALLBACK_COLOR = "#9aa0a6";
@@ -122,15 +125,15 @@ export function generateStandardPenPalette(): { pens: ColorPen[]; styles: Record
  * eigene Stifte/Sätze existieren. Der neue Satz wird aktiv, wenn noch KEIN
  * Stiftsatz aktiv war (dieselbe Konvention wie `addPenSet`).
  */
-export function seedStandardPenSet(project: Project): Project {
+export function seedStandardPenSetOps(project: Project): CoreOp[] {
   const { pens, styles } = generateStandardPenPalette();
   const penSet: PenSet = { id: `penset-${Date.now()}`, name: "Standard (CAD-Palette)", pens: styles };
-  return rebakePenColors({
-    ...project,
-    pens,
-    penSets: [...(project.penSets ?? []), penSet],
-    activePenSetId: project.activePenSetId ?? penSet.id,
-  });
+  const stateOps = [
+    ...fieldOps(project, "pens", pens),
+    ...addItems("penSets", [penSet]),
+    ...setFieldIfChanged(project, "activePenSetId", project.activePenSetId ?? penSet.id),
+  ];
+  return [...stateOps, ...rebakePenOps(applyOps(project, stateOps))];
 }
 
 /** Der aktuell aktive Stiftsatz, oder `undefined` (kein Stiftsatz angelegt/aktiviert). */
@@ -236,18 +239,19 @@ function bakeElementColorAndWeight<
  * verschachtelt in `Project.layouts`) und `Tür`/`ExtrudedSolid`/Kontext-
  * Objekte — kein `colorPenId`-Feld dort (Scope-Entscheid, s. PENDENZEN.md).
  */
-export function rebakePenColors(project: Project): Project {
-  return {
-    ...project,
-    components: project.components.map((c) => bakeComponent(project, c)),
-    layers: project.layers.map((cat) => bakeCategory(project, cat)),
-    walls: project.walls.map((w) => bakeElementColorAndWeight(project, w, "strokeWeight")),
-    drawings2d: project.drawings2d.map((d) => bakeElementColorAndWeight(project, d, "weightMm")),
-    ceilings: project.ceilings?.map((c) => bakeElementColorAndWeight(project, c, "strokeWeight")),
-    columns: project.columns?.map((c) => bakeElementColorAndWeight(project, c, "strokeWeight")),
-    roofs: project.roofs?.map((r) => bakeElementColor(project, r)),
-    openings: project.openings?.map((o) => bakeElementColor(project, o)),
-    stairs: project.stairs?.map((s) => bakeElementColor(project, s)),
-    rooms: project.rooms?.map((r) => bakeElementColor(project, r)),
-  };
+export function rebakePenOps(project: Project): CoreOp[] {
+  const all = () => true;
+  const layers = project.layers.map((cat) => bakeCategory(project, cat));
+  return [
+    ...patchItems(project, "components", all, (c) => bakeComponent(project, c)),
+    ...(layers.every((c, i) => c === project.layers[i]) ? [] : fieldOps(project, "layers", layers)),
+    ...patchItems(project, "walls", all, (w) => bakeElementColorAndWeight(project, w, "strokeWeight")),
+    ...patchItems(project, "drawings2d", all, (d) => bakeElementColorAndWeight(project, d, "weightMm")),
+    ...patchItems(project, "ceilings", all, (c) => bakeElementColorAndWeight(project, c, "strokeWeight")),
+    ...patchItems(project, "columns", all, (c) => bakeElementColorAndWeight(project, c, "strokeWeight")),
+    ...patchItems(project, "roofs", all, (r) => bakeElementColor(project, r)),
+    ...patchItems(project, "openings", all, (o) => bakeElementColor(project, o)),
+    ...patchItems(project, "stairs", all, (s) => bakeElementColor(project, s)),
+    ...patchItems(project, "rooms", all, (r) => bakeElementColor(project, r)),
+  ];
 }

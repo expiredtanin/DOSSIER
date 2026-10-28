@@ -4,14 +4,15 @@
 //
 // Entwurfsentscheidung: `context` ist Teil von `project` (ein einziger
 // Wahrheits-Baum, konsistent mit projectSlice). Diese Slice MUTIERT daher
-// `project.context` IMMUTABEL über die vorhandene `setProject`-Aktion
-// (Cross-Slice), genau wie projectSlice ein neues Project-Objekt liefert. So
-// bleiben Persistenz/Undo später einheitlich am Project hängen.
+// `project.context` über die vorhandene `applyChange`-Aktion (Ops, Cross-Slice),
+// genau wie projectSlice. So bleiben Persistenz/Undo einheitlich am Project hängen.
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { generateTerrainFromContours } from "../model/terrain";
 import type { ContextObject, Project } from "../model/types";
+import { addItems, fieldOps, removeItems } from "../core/opsBuild";
+import type { CoreOp } from "../core/ops";
 import { ensureContextCategories } from "../model/contextCategories";
 import type { StoreApi } from "./store";
 
@@ -38,12 +39,12 @@ export interface SiteSlice {
 
 /**
  * Cross-Slice-Abhängigkeit: diese Slice liest `project` und schreibt es über
- * `setProject` (beide aus projectSlice). Der Store komponiert SiteSlice mit
+ * `applyChange` (beide aus projectSlice). Der Store komponiert SiteSlice mit
  * dieser Sicht, sodass `get()`/Actions typsicher auf das Projekt zugreifen.
  */
 type SiteSliceDeps = {
   project: Project;
-  setProject: (next: Project | ((p: Project) => Project)) => void;
+  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void;
 };
 
 export function createSiteSlice(
@@ -51,13 +52,6 @@ export function createSiteSlice(
 ): SiteSlice {
   const { get } = api;
 
-  // Immutabler Kontext-Updater: ersetzt `project.context` über die vorhandene
-  // setProject-Aktion (konsistent mit projectSlice-Stil).
-  const setContext = (
-    update: (ctx: ContextObject[]) => ContextObject[],
-  ): void => {
-    get().setProject((p) => ({ ...p, context: update(p.context ?? []) }));
-  };
 
   // Wie `setContext`, aber fürs HINZUFÜGEN: ergänzt zusätzlich jede fehlende
   // Grafik-Kategorie der neu ankommenden Objekte in `project.layers` (s.
@@ -69,11 +63,10 @@ export function createSiteSlice(
     const codes = added
       .map((o) => o.categoryCode)
       .filter((c): c is string => !!c);
-    get().setProject((p) => ({
-      ...p,
-      context: [...(p.context ?? []), ...added],
-      layers: ensureContextCategories(p.layers, codes),
-    }));
+    get().applyChange((p) => [
+      ...addItems("context", added),
+      ...fieldOps(p, "layers", ensureContextCategories(p.layers, codes)),
+    ]);
   };
 
   return {
@@ -81,13 +74,11 @@ export function createSiteSlice(
 
     addContextObjects: (objs) => addToContext(objs),
 
-    removeContextObject: (id) =>
-      setContext((ctx) => ctx.filter((o) => o.id !== id)),
+    removeContextObject: (id) => get().applyChange((p) => removeItems(p, "context", [id])),
 
     removeContextObjects: (ids) => {
       if (ids.length === 0) return;
-      const drop = new Set(ids);
-      setContext((ctx) => ctx.filter((o) => !drop.has(o.id)));
+      get().applyChange((p) => removeItems(p, "context", ids));
     },
 
     generateTerrain: (contourSetId) => {
@@ -102,6 +93,6 @@ export function createSiteSlice(
       return terrain.id;
     },
 
-    clearContext: () => setContext(() => []),
+    clearContext: () => get().applyChange((p) => fieldOps(p, "context", [])),
   };
 }

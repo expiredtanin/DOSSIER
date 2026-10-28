@@ -5,7 +5,7 @@
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
-import { checkSiteRules } from "../core";
+import { checkSiteRules, setField } from "../core";
 import type { Project, SiteRules } from "../model/types";
 import { lineFromDrawing, parcelFromDrawing } from "./siteRulesInput";
 
@@ -20,7 +20,7 @@ function parseLen(text: string): number | undefined | null {
 
 export function SiteRulesSection() {
   const host = usePanelHost();
-  const setProject = useStore((s) => s.setProject);
+  const applyChange = useStore((s) => s.applyChange);
   const rules = host.project.siteRules;
   const sel = host.selection;
   const selDrawing = sel?.kind === "drawing2d" ? host.project.drawings2d.find((d) => d.id === sel.id) : undefined;
@@ -28,19 +28,18 @@ export function SiteRulesSection() {
   const selLine = lineFromDrawing(selDrawing);
 
   const write = (fn: (r: SiteRules) => SiteRules | undefined, key?: string) =>
-    setProject((p: Project) => {
-      const { siteRules: old, ...rest } = p;
-      if (!old) return p;
-      const next = fn(old);
-      return next ? { ...rest, siteRules: next } : rest;
+    applyChange((p: Project) => {
+      const old = p.siteRules;
+      if (!old) return [];
+      return [setField("siteRules", fn(old))];
     }, key);
 
   const takeParcel = () => {
     if (!selParcel) return;
-    setProject((p: Project) => {
+    applyChange((p: Project) => {
       // Neue Grenze: Grenzabstände je Kante passen nicht mehr → zurücksetzen.
       const { setbacks: _old, ...prev } = p.siteRules ?? { parcel: [], defaultSetback: 4 };
-      return { ...p, siteRules: { ...prev, parcel: selParcel } };
+      return [setField("siteRules", { ...prev, parcel: selParcel })];
     });
   };
 

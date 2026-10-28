@@ -4,7 +4,7 @@
 //  • Parzellenfläche: Eingabefeld → `Project.parcelArea` (leer/0 = aus der Parzellengrenze, sonst nicht gesetzt).
 //  • Raumprogramm: Soll-Zeilen (Name, Fläche je Raum, Anzahl) bearbeiten; der Status je Zeile
 //    kommt aus `checkRoomProgram`.
-// Änderungen laufen über `setProject` mit coalesceKey, damit Tippen einen Undo-Schritt ergibt.
+// Änderungen laufen über `applyChange` (Ops) mit coalesceKey, damit Tippen einen Undo-Schritt ergibt.
 
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
@@ -12,6 +12,7 @@ import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
 import { checkRoomProgram, computeKennzahlen, polygonArea } from "../core";
 import type { Project, RoomProgramRow } from "../model/types";
+import { setField, setFieldIfChanged } from "../core";
 import { RoomProgramImportButton } from "../ui/RoomProgramImportDialog";
 import { ProgramCompareSection } from "./ProgramCompareSection";
 
@@ -41,7 +42,7 @@ const fmt = (n: number, d = 1) => n.toLocaleString("de-CH", { minimumFractionDig
 
 export function KennzahlenSection() {
   const host = usePanelHost();
-  const setProject = useStore((s) => s.setProject);
+  const applyChange = useStore((s) => s.applyChange);
   const notify = useStore((s) => s.notify);
   const project = host.project;
   const k = computeKennzahlen(project);
@@ -50,22 +51,18 @@ export function KennzahlenSection() {
 
   const setParcel = (text: string) => {
     const v = parseNum(text);
-    setProject((p: Project) => {
-      const { parcelArea: _old, ...rest } = p;
-      return v !== null && v > 0 ? { ...rest, parcelArea: v } : rest;
-    }, "parcelArea");
+    applyChange((p: Project) => setFieldIfChanged(p, "parcelArea", v !== null && v > 0 ? v : undefined), "parcelArea");
   };
   const patchRow = (i: number, patch: Partial<RoomProgramRow>, field: string) =>
-    setProject(
-      (p: Project) => ({ ...p, roomProgram: (p.roomProgram ?? []).map((r, j) => (j === i ? { ...r, ...patch } : r)) }),
+    applyChange(
+      (p: Project) => [setField("roomProgram", (p.roomProgram ?? []).map((r, j) => (j === i ? { ...r, ...patch } : r)))],
       `roomProgram:${i}:${field}`,
     );
-  const addRow = () => setProject((p: Project) => ({ ...p, roomProgram: [...(p.roomProgram ?? []), { name: "", area: 20, count: 1 }] }));
+  const addRow = () => applyChange((p: Project) => [setField("roomProgram", [...(p.roomProgram ?? []), { name: "", area: 20, count: 1 }])]);
   const removeRow = (i: number) =>
-    setProject((p: Project) => {
+    applyChange((p: Project) => {
       const next = (p.roomProgram ?? []).filter((_, j) => j !== i);
-      const { roomProgram: _old, ...rest } = p;
-      return next.length > 0 ? { ...rest, roomProgram: next } : rest;
+      return setFieldIfChanged(p, "roomProgram", next.length > 0 ? next : undefined);
     });
 
   const tiles: { label: string; value: string; title: TranslationKey }[] = [
@@ -182,7 +179,7 @@ export function KennzahlenSection() {
         <button type="button" className="kz-add" onClick={addRow}>
           {t("program.add")}
         </button>
-        <RoomProgramImportButton project={project} onApply={(fn) => setProject(fn)} notify={notify} />
+        <RoomProgramImportButton project={project} onApply={(build) => applyChange(build)} notify={notify} />
       </div>
       {rows.length > 0 && <ProgramCompareSection statusLabel={programStatusLabel} />}
     </div>

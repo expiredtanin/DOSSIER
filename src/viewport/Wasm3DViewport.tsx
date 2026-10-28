@@ -327,6 +327,7 @@ export function Wasm3DViewport({
   onEditRoofPitch,
   onEditWallTop,
   onEditEnd,
+  onEditGroup,
   section3d = null,
   onClearSection3d,
   commandActive = false,
@@ -406,6 +407,12 @@ export function Wasm3DViewport({
   onEditWallTop?: (wallId: string, topZ: number) => void;
   /** Ende eines Griff-Drags. */
   onEditEnd?: () => void;
+  /**
+   * Fasst die Änderungen EINES Maus-Schritts (Element + mitgeführte Ecken anderer Elemente) zu einem
+   * Undo-Schritt zusammen; gleicher `key` über die Schritte eines Zugs = ein Schritt für den ganzen
+   * Zug ([K4] S3, Store `groupChanges`). Fehlt es, läuft `fn` direkt.
+   */
+  onEditGroup?: (fn: () => void, key: string) => void;
   /** Aktive 3D-Schnittebene (world point+normal) aus der gebundenen Schnittlinie
    *  (App-State, `sectionPlaneFromLevel`), oder `null` = kein Live-Schnitt.
    *  Ersetzt den früheren lokalen Hardcode-Toggle. */
@@ -469,6 +476,14 @@ export function Wasm3DViewport({
   onEditWallTopRef.current = onEditWallTop;
   const onEditEndRef = useRef(onEditEnd);
   onEditEndRef.current = onEditEnd;
+  const onEditGroupRef = useRef(onEditGroup);
+  onEditGroupRef.current = onEditGroup;
+  /** Ein Maus-Schritt als Gruppe (ein Undo-Schritt je Zug), s. `onEditGroup`. */
+  const editGroup = (key: string, fn: () => void) => {
+    const g = onEditGroupRef.current;
+    if (g) g(fn, key);
+    else fn();
+  };
   const onGrip3dEditTabRef = useRef(onGrip3dEditTab);
   onGrip3dEditTabRef.current = onGrip3dEditTab;
   const onGrip3dEditCancelRef = useRef(onGrip3dEditCancel);
@@ -1075,20 +1090,25 @@ export function Wasm3DViewport({
           : axisLock === "y"
             ? { x: anchor.x, y: model.y }
             : applyAngleConstraint(anchor, model, 45);
-      const applied = constrained
-        ? (onEditVertexRef.current?.(drag.target, drag.index, constrained) ?? constrained)
-        : (onEditVertexRef.current?.(
-            drag.target,
-            drag.index,
-            model,
-            drag.excludeWallIds,
-            drag.excludeDrawingIds,
-          ) ?? model);
-      // Koinzidente Endpunkte ANDERER gewählter Elemente mitführen — exakt
-      // auf denselben (ggf. gesnappten) Punkt, ohne erneut zu snappen.
-      for (const c of drag.coincident) {
-        onEditVertexRef.current?.(c.target, c.index, applied);
-      }
+      // Element und mitgeführte Ecken = EIN Undo-Schritt für den ganzen Zug (Gruppe mit Schlüssel).
+      let applied: Vec2 = model;
+      const t0 = drag.target;
+      editGroup(`grip3d:${t0.wallId ?? t0.drawingId ?? t0.ceilingId ?? t0.roofId ?? ""}:${drag.index}`, () => {
+        applied = constrained
+          ? (onEditVertexRef.current?.(drag.target, drag.index, constrained) ?? constrained)
+          : (onEditVertexRef.current?.(
+              drag.target,
+              drag.index,
+              model,
+              drag.excludeWallIds,
+              drag.excludeDrawingIds,
+            ) ?? model);
+        // Koinzidente Endpunkte ANDERER gewählter Elemente mitführen — exakt
+        // auf denselben (ggf. gesnappten) Punkt, ohne erneut zu snappen.
+        for (const c of drag.coincident) {
+          onEditVertexRef.current?.(c.target, c.index, applied);
+        }
+      });
       return;
     }
     if (drag.kind === "edge") {
@@ -1124,14 +1144,17 @@ export function Wasm3DViewport({
         y: constrainedModel.y - drag.lastModel.y,
       };
       if (delta.x !== 0 || delta.y !== 0) {
-        onEditBodyRef.current?.(drag.target, delta, !!moveAxisLock || shiftKey);
-        // Koinzidente Sibling-Ecken (ANDERER gewählter Elemente) um dasselbe
-        // Delta mitführen — ihre LIVE-Position wird inkrementell
-        // fortgeschrieben und absolut neu gesetzt (kein Snap).
-        for (const c of drag.moveCoincident) {
-          c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
-          onEditVertexRef.current?.(c.target, c.index, c.pos);
-        }
+        const t1 = drag.target;
+        editGroup(`grip3dMove:${t1.wallId ?? t1.drawingId ?? t1.ceilingId ?? t1.roofId ?? ""}`, () => {
+          onEditBodyRef.current?.(drag.target, delta, !!moveAxisLock || shiftKey);
+          // Koinzidente Sibling-Ecken (ANDERER gewählter Elemente) um dasselbe
+          // Delta mitführen — ihre LIVE-Position wird inkrementell
+          // fortgeschrieben und absolut neu gesetzt (kein Snap).
+          for (const c of drag.moveCoincident) {
+            c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
+            onEditVertexRef.current?.(c.target, c.index, c.pos);
+          }
+        });
       }
     }
     drag.lastModel = constrainedModel;

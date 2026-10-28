@@ -5,8 +5,8 @@
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
-import { projectLatLon, sunPosition } from "../core";
-import type { Project, SunStudy } from "../model/types";
+import { projectLatLon, setField, sunPosition } from "../core";
+import type { SunStudy } from "../model/types";
 import { defaultStudyIso, formatMinutes, isoToLocal, localToIso } from "./sunStudyTime";
 
 /** Merkdaten: Tagundnachtgleiche, Sommer- und Wintersonnenwende (Tag/Monat). */
@@ -18,11 +18,11 @@ const PRESETS: { key: "sun.equinox" | "sun.summer" | "sun.winter"; md: string }[
 
 export function SunStudySection() {
   const host = usePanelHost();
-  const setProject = useStore((s) => s.setProject);
+  const applyChange = useStore((s) => s.applyChange);
   const study: SunStudy = host.project.sunStudy ?? { when: defaultStudyIso(), show: false };
   const local = isoToLocal(study.when) ?? isoToLocal(defaultStudyIso())!;
 
-  const write = (next: SunStudy, key?: string) => setProject((p: Project) => ({ ...p, sunStudy: next }), key);
+  const write = (next: SunStudy, key?: string) => applyChange([setField("sunStudy", next)], key);
   const setLocal = (date: string, minutes: number, key?: string) => {
     const iso = localToIso({ date, minutes });
     if (iso) write({ ...study, when: iso }, key);
