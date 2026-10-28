@@ -27,15 +27,26 @@
 //   ARC      = 4, layer, cx, cy, r, start (rad), end (rad)      (gegen den Uhrzeigersinn, DXF-Konvention)
 //   CIRCLE   = 5, layer, cx, cy, r
 //   TEXT     = 6, layer, text_idx, x, y, height, rotation (rad)
+//   HATCH    = 7, layer, mode (0 = Vollfüllung, 1 = Linienmuster), rgb (0xRRGGBB, −1 = nach Ebene),
+//              n_dash, d0 … d(n_dash−1) (Strichmuster in m: an, aus, an, aus …; 0 = durchgezogen),
+//              n_fam, (angle (rad), spacing (m)) × n_fam, n, x0, y0, … x(n−1), y(n−1)   (äusserer Rand)
 //
 // `layer` ist der Index des LAYER-Datensatzes (Reihenfolge des Auftretens, ab 0), er muss vorher
-// stehen. Schraffuren übergibt TS als geklippte LINE-Datensätze auf einer eigenen Ebene (Dossier-Muster,
-// Strichelung und Zufallsstriche haben kein DXF-Musteräquivalent; so wie bisher).
+// stehen. Schraffuren sind echte HATCH-Entitäten ([C2], 28.10.): Vollfüllung (`SOLID`) oder ein
+// Linienmuster, das hier aus Winkel und Linienabstand der Dossier-Schraffur gebaut wird (je Linienschar
+// eine Musterzeile, Basispunkt Ursprung — wie die Phase der bisherigen Schraffurlinien; Versatz =
+// Abstand senkrecht zur Linie, schon gedreht, wie DXF es speichert). Der Rand ist eine geschlossene
+// Polylinien-Kante. Zufallsstriche (`random`) haben kein Musteräquivalent: TS gibt sie weiter als
+// LINE-Datensätze aus.
 //
 // Fehlerverhalten: ein kaputter Puffer (falsche Version, unbekannter Datensatz, abgeschnitten, Index
 // ausserhalb) ergibt einen Fehler, nie einen Panic. Einzelne Entitäten mit NaN/∞ werden übersprungen
 // (der alte Writer schrieb dafür „0.0“ — eine Linie zum Nullpunkt ist schlechter als keine).
 
+use acadrust::entities::{
+    BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, HatchPattern, HatchPatternLine, HatchPatternType,
+    PolylineEdge,
+};
 use acadrust::{
     Arc, CadDocument, Circle, Color, DwgWriter, DxfVersion, DxfWriter, EntityType, Layer, Line,
     LineWeight, LwPolyline, Text, Vector2, Vector3,
@@ -50,6 +61,7 @@ pub const REC_POLYLINE: f64 = 3.0;
 pub const REC_ARC: f64 = 4.0;
 pub const REC_CIRCLE: f64 = 5.0;
 pub const REC_TEXT: f64 = 6.0;
+pub const REC_HATCH: f64 = 7.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -154,6 +166,41 @@ fn layer_color(rgb: f64) -> Color {
     Color::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
+/// Obergrenzen gegen Unsinn im Puffer (Musterzeilen und Striche je Schraffur).
+const MAX_HATCH_FAMILIES: usize = 8;
+const MAX_HATCH_DASHES: usize = 16;
+
+/// HATCH aus Rand und Muster. `families` = (Winkel in rad, Linienabstand in m); `dashes` = Strichmuster
+/// in m (an, aus, …), leer = durchgezogen. Leere Schar-Liste = Vollfüllung.
+fn make_hatch(pts: &[f64], solid: bool, families: &[(f64, f64)], dashes: &[f64]) -> Hatch {
+    let mut hatch = if solid {
+        Hatch::solid()
+    } else {
+        let mut pattern = HatchPattern::new("DOSSIER");
+        pattern.description = "Dossier-Schraffur".to_string();
+        for &(angle, spacing) in families {
+            pattern.add_line(HatchPatternLine {
+                angle,
+                base_point: Vector2::new(0.0, 0.0),
+                // Versatz zur nächsten Linie: Abstand senkrecht zur Richtung, im Weltsystem.
+                offset: Vector2::new(-spacing * angle.sin(), spacing * angle.cos()),
+                // DXF: positiv = Strich, negativ = Lücke.
+                dash_lengths: dashes.iter().enumerate().map(|(i, d)| if i % 2 == 0 { *d } else { -*d }).collect(),
+            });
+        }
+        let mut h = Hatch::with_pattern(pattern);
+        h.pattern_type = HatchPatternType::Custom;
+        h
+    };
+    let mut path = BoundaryPath::with_flags(BoundaryPathFlags::from_bits(1 | 2)); // äusserer Rand, Polylinie
+    path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+        pts.chunks_exact(2).map(|p| Vector2::new(p[0], p[1])).collect(),
+        true,
+    )));
+    hatch.add_path(path);
+    hatch
+}
+
 /// Baut aus der flachen Zeichnung ein acadrust-Dokument (Einheit Meter, metrisch).
 pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String> {
     let strs: Vec<&str> = if strings.is_empty() { Vec::new() } else { strings.split('\0').collect() };
@@ -214,6 +261,38 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             let v = r.take(4)?;
             (all_finite(v) && v[2] > 0.0).then(|| {
                 EntityType::Text(Text::with_value(value, Vector3::new(v[0], v[1], 0.0)).with_height(v[2]).with_rotation(v[3]))
+            })
+        } else if tag == REC_HATCH {
+            let mode = r.f()?;
+            let rgb = r.f()?;
+            let n_dash = r.idx()?;
+            if n_dash > MAX_HATCH_DASHES {
+                return Err(format!("zu viele Striche ({n_dash}) bei {}", r.pos - 1));
+            }
+            let dashes = r.take(n_dash)?;
+            let n_fam = r.idx()?;
+            if n_fam > MAX_HATCH_FAMILIES {
+                return Err(format!("zu viele Linienscharen ({n_fam}) bei {}", r.pos - 1));
+            }
+            let fam = r.take(n_fam.checked_mul(2).ok_or("Überlauf")?)?;
+            let n = r.idx()?;
+            let pts = r.take(n.checked_mul(2).ok_or("Überlauf")?)?;
+            let solid = mode == 0.0;
+            let families: Vec<(f64, f64)> = fam.chunks_exact(2).map(|f| (f[0], f[1])).collect();
+            // Muster nur mit endlichen, positiven Abständen und Strichen (sonst rechnet CAD ins Leere).
+            let valid = n >= 3
+                && all_finite(pts)
+                && (solid
+                    || (!families.is_empty()
+                        && families.iter().all(|(a, s)| a.is_finite() && s.is_finite() && *s > 1e-6)
+                        && dashes.iter().all(|d| d.is_finite() && *d >= 0.0)
+                        && (dashes.is_empty() || dashes.iter().sum::<f64>() > 1e-9)));
+            valid.then(|| {
+                let mut h = make_hatch(pts, solid, &families, dashes);
+                if rgb.is_finite() && (0.0..=16_777_215.0).contains(&rgb) {
+                    h.common.color = layer_color(rgb);
+                }
+                EntityType::Hatch(Box::new(h))
             })
         } else {
             return Err(format!("unbekannter Datensatz {tag} bei {}", r.pos - 1));
@@ -444,5 +523,125 @@ mod tests {
         ];
         let doc = read_dxf(export_dxf(&flat, "P").unwrap());
         assert_eq!(doc.entities().count(), 1);
+    }
+
+    /// HATCH-Rundreise: Vollfüllung und Linienmuster (zwei Scharen, gestrichelt) mit Rand, Farbe, Ebene.
+    fn hatch_sample() -> (Vec<f64>, String) {
+        let (e, n) = (E, N);
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, -1.0, 13.0,
+            // Vollfüllung, Farbe 0x336699
+            REC_HATCH, 0.0, 0.0, 0x33_66_99 as f64, 0.0, 0.0, 4.0, e, n, e + 4.0, n, e + 4.0, n + 3.0, e, n + 3.0,
+            // Kreuzschraffur 45° / 135° (Abstand 0.1 m), durchgezogen, Farbe nach Ebene
+            REC_HATCH, 0.0, 1.0, -1.0, 0.0, 2.0, std::f64::consts::FRAC_PI_4, 0.1, 3.0 * std::f64::consts::FRAC_PI_4, 0.1,
+            4.0, e, n, e + 4.0, n, e + 4.0, n + 3.0, e, n + 3.0,
+            // Gestrichelt: 0.05 an, 0.02 aus
+            REC_HATCH, 0.0, 1.0, 0x11_11_11 as f64, 2.0, 0.05, 0.02, 1.0, 0.0, 0.25,
+            3.0, e, n, e + 2.0, n, e + 1.0, n + 1.0,
+        ];
+        (flat, "HATCH".to_string())
+    }
+
+    fn check_hatches(doc: &CadDocument) {
+        let hs: Vec<&Hatch> = doc.entities().filter_map(|x| if let EntityType::Hatch(h) = x { Some(h.as_ref()) } else { None }).collect();
+        assert_eq!(hs.len(), 3);
+        // Vollfüllung
+        assert!(hs[0].is_solid);
+        assert_eq!(hs[0].common.color.rgb(), Some((0x33, 0x66, 0x99)));
+        assert_eq!(hs[0].common.layer, "HATCH");
+        // Kreuzschraffur
+        assert!(!hs[1].is_solid);
+        assert_eq!(hs[1].pattern.lines.len(), 2);
+        let l0 = &hs[1].pattern.lines[0];
+        assert!((l0.angle - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+        // Versatz: Abstand 0.1 senkrecht zur 45°-Richtung.
+        assert!((l0.offset.x + 0.1 * std::f64::consts::FRAC_PI_4.sin()).abs() < 1e-9);
+        assert!((l0.offset.y - 0.1 * std::f64::consts::FRAC_PI_4.cos()).abs() < 1e-9);
+        assert!(l0.dash_lengths.is_empty());
+        assert!(matches!(hs[1].common.color, Color::ByLayer));
+        // Gestrichelt: positiv = Strich, negativ = Lücke
+        let l = &hs[2].pattern.lines[0];
+        assert_eq!(l.dash_lengths, vec![0.05, -0.02]);
+        assert!((l.offset.y - 0.25).abs() < 1e-9 && l.offset.x.abs() < 1e-9);
+        // Rand: eine Polylinienkante, Koordinaten bitgleich
+        for h in &hs {
+            assert_eq!(h.paths.len(), 1);
+            assert!(!h.paths[0].edges.is_empty());
+        }
+        let edge = |h: &Hatch| match &h.paths[0].edges[0] {
+            BoundaryEdge::Polyline(p) => p.vertices.iter().map(|v| (v.x, v.y)).collect::<Vec<_>>(),
+            // Beim Lesen aus DXF/DWG darf der Rand auch als Linienkanten kommen.
+            BoundaryEdge::Line(_) => h
+                .paths[0]
+                .edges
+                .iter()
+                .filter_map(|e| if let BoundaryEdge::Line(l) = e { Some((l.start.x, l.start.y)) } else { None })
+                .collect(),
+            _ => panic!("unerwartete Randkante"),
+        };
+        let first = edge(hs[0]);
+        assert_eq!(first.len(), 4);
+        assert_eq!(first[0], (E, N));
+        assert_eq!(first[2], (E + 4.0, N + 3.0));
+    }
+
+    #[test]
+    fn hatch_roundtrip_dxf_und_dwg() {
+        let (flat, strings) = hatch_sample();
+        check_hatches(&read_dxf(export_dxf(&flat, &strings).unwrap()));
+        check_hatches(&read_dwg(export_dwg(&flat, &strings).unwrap()));
+    }
+
+    #[test]
+    fn hatch_dxf_text_hat_hatch_und_musterzeilen() {
+        let (flat, strings) = hatch_sample();
+        let text = String::from_utf8(export_dxf(&flat, &strings).unwrap()).unwrap();
+        // Entität = Gruppencode 0 mit Wert HATCH (der Ebenenname HATCH steht unter Code 2/8).
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let entities = lines.windows(2).filter(|w| w[0] == "0" && w[1] == "HATCH").count();
+        assert_eq!(entities, 3);
+        assert!(text.contains("DOSSIER"));
+    }
+
+    #[test]
+    fn kaputte_hatches_werden_verworfen_oder_sind_fehler() {
+        let head = [FLAT_VERSION, REC_LAYER, 0.0, -1.0, 13.0];
+        let sq = [4.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
+        let mk = |pre: &[f64]| {
+            let mut v = head.to_vec();
+            v.push(REC_HATCH);
+            v.extend_from_slice(pre);
+            v.extend_from_slice(&sq);
+            v
+        };
+        // Muster ohne Scharen, Abstand 0, NaN-Winkel, negativer/leerer Strich: übersprungen.
+        for pre in [
+            &[0.0, 1.0, -1.0, 0.0, 0.0][..],
+            &[0.0, 1.0, -1.0, 0.0, 1.0, 0.5, 0.0],
+            &[0.0, 1.0, -1.0, 0.0, 1.0, f64::NAN, 0.1],
+            &[0.0, 1.0, -1.0, 1.0, -0.1, 1.0, 0.5, 0.1],
+            &[0.0, 1.0, -1.0, 2.0, 0.0, 0.0, 1.0, 0.5, 0.1],
+        ] {
+            let doc = read_dxf(export_dxf(&mk(pre), "P").unwrap());
+            assert_eq!(doc.entities().count(), 0, "{pre:?}");
+        }
+        // Rand mit NaN oder < 3 Punkten: übersprungen.
+        let mut bad = head.to_vec();
+        bad.extend_from_slice(&[REC_HATCH, 0.0, 0.0, -1.0, 0.0, 0.0, 3.0, 0.0, 0.0, 1.0, f64::NAN, 1.0, 1.0]);
+        assert_eq!(read_dxf(export_dxf(&bad, "P").unwrap()).entities().count(), 0);
+        let mut two = head.to_vec();
+        two.extend_from_slice(&[REC_HATCH, 0.0, 0.0, -1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(read_dxf(export_dxf(&two, "P").unwrap()).entities().count(), 0);
+        // Zu viele Scharen/Striche, abgeschnitten: Fehler statt Panic.
+        assert!(export_dxf(&mk(&[0.0, 1.0, -1.0, 0.0, 99.0]), "P").is_err());
+        assert!(export_dxf(&mk(&[0.0, 1.0, -1.0, 99.0]), "P").is_err());
+        assert!(export_dxf(&[FLAT_VERSION, REC_LAYER, 0.0, -1.0, 13.0, REC_HATCH, 0.0, 0.0, -1.0, 0.0, 0.0, 5.0, 1.0], "P").is_err());
+        // Farbe ausserhalb → ByLayer statt Absturz.
+        let mut col = head.to_vec();
+        col.extend_from_slice(&[REC_HATCH, 0.0, 0.0, 1e12, 0.0, 0.0]);
+        col.extend_from_slice(&sq);
+        let doc = read_dxf(export_dxf(&col, "P").unwrap());
+        assert!(matches!(doc.entities().next().unwrap().as_entity().common().color, Color::ByLayer));
     }
 }

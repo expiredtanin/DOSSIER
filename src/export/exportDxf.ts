@@ -25,7 +25,7 @@ import { fileio, loadFileio } from "../engine/fileioWasm";
 export interface ExportDxfOptions {
   /** Titel/Geschossname (nur als Kommentar-freundlicher Dateiname genutzt). */
   title?: string;
-  /** Schraffurlinien mit ausgeben (true) oder nur Umrisse/Flächen (false). */
+  /** Schraffuren (echte HATCH-Entitäten: Vollfüllung, Linienmuster) mit ausgeben (true) oder nur Umrisse (false). */
   includeHatches?: boolean;
   /** Dateiname des Downloads (mit/ohne Endung). */
   fileName?: string;
@@ -53,6 +53,7 @@ const REC_POLYLINE = 3;
 const REC_ARC = 4;
 const REC_CIRCLE = 5;
 const REC_TEXT = 6;
+const REC_HATCH = 7;
 
 /**
  * Sammelt Ebenen und Entitäten als flachen Zahlenpuffer + Zeichenkettenliste. Ebenen sind
@@ -105,6 +106,26 @@ export class FlatDrawing {
   /** Einzeiliger Text (Höhe in Metern, Drehung in Radiant). */
   addText(layer: string, at: Vec2, height: number, rotation: number, value: string): void {
     this.nums.push(REC_TEXT, this.layer(layer), this.str(value), at.x, at.y, height, rotation);
+  }
+
+  /**
+   * Schraffur als echte HATCH-Entität (äusserer Rand `pts`, geschlossen). `solid` = Vollfüllung;
+   * sonst Linienmuster aus `families` (Winkel in Radiant, Linienabstand in Metern; je Schar eine
+   * Musterzeile) mit optionalem Strichmuster `dashes` (Meter: an, aus, …; leer = durchgezogen).
+   * `rgb` null = Farbe der Ebene.
+   */
+  addHatch(
+    layer: string,
+    pts: Vec2[],
+    opts: { solid: boolean; rgb: number | null; families?: { angle: number; spacing: number }[]; dashes?: number[] },
+  ): void {
+    if (pts.length < 3) return;
+    const families = opts.solid ? [] : (opts.families ?? []);
+    const dashes = opts.solid ? [] : (opts.dashes ?? []);
+    this.nums.push(REC_HATCH, this.layer(layer), opts.solid ? 0 : 1, opts.rgb ?? -1, dashes.length, ...dashes, families.length);
+    for (const f of families) this.nums.push(f.angle, f.spacing);
+    this.nums.push(pts.length);
+    for (const p of pts) this.nums.push(p.x, p.y);
   }
 
   /** Argumente für die Rust-Bindungen. */
@@ -266,37 +287,38 @@ function emitPrimitive(
     case "polygon": {
       const pts = p.pts;
       if (pts.length < 2) break;
-      // Kreis-Approximationen (viele Segmente) bleiben als geschlossene Polylinie —
-      // masshaltig und robust. Geschlossene Ringe bekommen das Ring-Flag.
-      dxf.addPolyline(layer, pts, true);
-      // Schraffur als geklippte Linien (optional). Vollfüllung/„none" tragen keine
-      // sichtbaren Musterlinien → wir geben nur echte Muster (nicht solid/none) aus.
-      // Bild-/Verlauf-Schraffur (kind==="image"/"gradient"): DXF trägt weder
-      // Rasterbilder noch (hier) echte Farbverläufe → FALLBACK ohne
-      // Musterlinien (nur die Umriss-Polylinie oben). Random-Vektor:
-      // deterministische Streu-Striche (Modell-Meter, identischer Seed wie Bildschirm/PDF).
-      if (
-        includeHatches &&
-        p.hatch.kind !== "image" &&
-        p.hatch.kind !== "gradient" &&
-        p.hatch.pattern !== "none" &&
-        p.hatch.pattern !== "solid"
-      ) {
-        const cycle = dashCycleMeters(p.hatch.dash);
-        const segs: Seg[] =
-          p.hatch.lines === "random"
-            ? buildRandomHatchRuns(pts, p.hatch)
-                .filter((r) => r.length >= 2)
-                .map((r) => ({ a: r[0], b: r[r.length - 1] }))
-            : hatchSegments(pts, p.hatch);
-        for (const seg of segs) {
-          if (cycle) {
-            for (const d of dashSeg(seg, cycle)) dxf.addLine(LAYER_HATCH, d.a, d.b);
-          } else {
-            dxf.addLine(LAYER_HATCH, seg.a, seg.b);
+      // Schraffur ([C2], 28.10.) als echte HATCH-Entität UNTER dem Umriss (Zeichenreihenfolge der
+      // Datei): Vollfüllung bzw. Linienmuster (diagonal/Kreuz/Dämmung/frei, auch gestrichelt) mit dem
+      // Polygon als Rand und der aufgelösten Vordergrundfarbe. Bild-/Verlauf-Schraffur (kind==="image"/
+      // "gradient") trägt DXF nicht → FALLBACK ohne Muster (nur der Umriss). Random-Vektor
+      // (deterministische Streu-Striche, Modell-Meter, identischer Seed wie Bildschirm/PDF) hat kein
+      // Musteräquivalent → bleibt als einzelne Linien auf dem HATCH-Layer.
+      if (includeHatches && p.hatch.kind !== "image" && p.hatch.kind !== "gradient" && pts.length >= 3) {
+        const h = p.hatch;
+        if (h.pattern === "solid") {
+          dxf.addHatch(LAYER_HATCH, pts, { solid: true, rgb: rgbOrNull(h.color) });
+        } else if (h.pattern !== "none" && h.lines === "random") {
+          const cycle = dashCycleMeters(h.dash);
+          const segs: Seg[] = buildRandomHatchRuns(pts, h)
+            .filter((r) => r.length >= 2)
+            .map((r) => ({ a: r[0], b: r[r.length - 1] }));
+          for (const seg of segs) {
+            if (cycle) {
+              for (const d of dashSeg(seg, cycle)) dxf.addLine(LAYER_HATCH, d.a, d.b);
+            } else {
+              dxf.addLine(LAYER_HATCH, seg.a, seg.b);
+            }
+          }
+        } else if (h.pattern !== "none") {
+          const families = hatchFamilies(h);
+          if (families.length > 0) {
+            dxf.addHatch(LAYER_HATCH, pts, { solid: false, rgb: rgbOrNull(h.color), families, dashes: dashCycleMeters(h.dash) ?? [] });
           }
         }
       }
+      // Kreis-Approximationen (viele Segmente) bleiben als geschlossene Polylinie —
+      // masshaltig und robust. Geschlossene Ringe bekommen das Ring-Flag.
+      dxf.addPolyline(layer, pts, true);
       break;
     }
   }
@@ -331,10 +353,10 @@ function angleRad(c: Vec2, p: Vec2): number {
   return a < 0 ? a + 2 * Math.PI : a;
 }
 
-// ── Schraffur als geklippte Vektorlinien (Meter) ────────────────────────────
-// Wie planToPrintSvg, aber in WELT-Metern statt Papier-mm. Die Kachelgrösse der
-// Bildschirm-PlanView (8 bzw. 10 Einheiten × scale, 1 Einheit = 1/90 m) wird
-// direkt in einen Meter-Linienabstand übersetzt.
+// ── Schraffur-Muster in Metern ───────────────────────────────────────────────
+// Die Kachelgrösse der Bildschirm-PlanView (8 bzw. 10 Einheiten × scale, 1 Einheit = 1/90 m) wird
+// direkt in einen Meter-Linienabstand übersetzt (`hatchFamilies`); die Zufallsstriche und das
+// Strichmuster laufen weiter über geklippte Segmente (`dashSeg`).
 
 interface Seg {
   a: Vec2;
@@ -379,63 +401,21 @@ function dashSeg(seg: Seg, cycle: number[]): Seg[] {
   return out;
 }
 
-function hatchSegments(
-  poly: Vec2[],
-  hatch: Extract<Primitive, { kind: "polygon" }>["hatch"],
-): Seg[] {
+/**
+ * Linienscharen einer Vektor-Schraffur als (Winkel in Radiant, Abstand in Metern): wie Bildschirm
+ * und PDF eine Schar (diagonal, frei), Kreuzschraffur zusätzlich um 90° gedreht, Dämmung zusätzlich
+ * bei −45°. Kachelgrösse wie `hatchSegments` früher: (8 bzw. 10) × scale / 90 m, mindestens 2 cm.
+ */
+function hatchFamilies(hatch: Extract<Primitive, { kind: "polygon" }>["hatch"]): { angle: number; spacing: number }[] {
   const unitM = 1 / 90;
   const tileM = (hatch.pattern === "insulation" ? 10 : 8) * hatch.scale * unitM;
   const spacing = Math.max(0.02, tileM); // Mindestabstand in Metern
+  if (!Number.isFinite(spacing)) return [];
   const angle = (hatch.angle * Math.PI) / 180;
-  const segs: Seg[] = [];
-  fillParallel(poly, angle, spacing, segs);
-  if (hatch.pattern === "crosshatch") fillParallel(poly, angle + Math.PI / 2, spacing, segs);
-  if (hatch.pattern === "insulation") fillParallel(poly, angle - Math.PI / 4, spacing, segs);
-  return segs;
-}
-
-/**
- * Füllt ein Polygon mit parallelen Linien (Winkel/Abstand) und klippt jede Linie
- * per Scanline auf das Polygon. Robust für konvexe wie einfache konkave Polygone.
- */
-function fillParallel(poly: Vec2[], angle: number, spacing: number, out: Seg[]): void {
-  if (poly.length < 3 || spacing <= 0) return;
-  const dir = { x: Math.cos(angle), y: Math.sin(angle) };
-  const nrm = { x: -dir.y, y: dir.x };
-  let tMin = Infinity;
-  let tMax = -Infinity;
-  for (const p of poly) {
-    const t = p.x * nrm.x + p.y * nrm.y;
-    if (t < tMin) tMin = t;
-    if (t > tMax) tMax = t;
-  }
-  const start = Math.ceil(tMin / spacing) * spacing;
-  for (let t = start; t <= tMax; t += spacing) {
-    const xs: number[] = [];
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[j];
-      const b = poly[i];
-      const ta = a.x * nrm.x + a.y * nrm.y;
-      const tb = b.x * nrm.x + b.y * nrm.y;
-      if (ta === tb) continue;
-      const f = (t - ta) / (tb - ta);
-      if (f < 0 || f > 1) continue;
-      const px = a.x + (b.x - a.x) * f;
-      const py = a.y + (b.y - a.y) * f;
-      xs.push(px * dir.x + py * dir.y);
-    }
-    if (xs.length < 2) continue;
-    xs.sort((u, v) => u - v);
-    for (let k = 0; k + 1 < xs.length; k += 2) {
-      const u0 = xs[k];
-      const u1 = xs[k + 1];
-      if (u1 - u0 < 1e-6) continue;
-      out.push({
-        a: { x: nrm.x * t + dir.x * u0, y: nrm.y * t + dir.y * u0 },
-        b: { x: nrm.x * t + dir.x * u1, y: nrm.y * t + dir.y * u1 },
-      });
-    }
-  }
+  const out = [{ angle, spacing }];
+  if (hatch.pattern === "crosshatch") out.push({ angle: angle + Math.PI / 2, spacing });
+  if (hatch.pattern === "insulation") out.push({ angle: angle - Math.PI / 4, spacing });
+  return out;
 }
 
 // ── Farb-/Strich-Umrechnung ─────────────────────────────────────────────────
@@ -446,6 +426,12 @@ export function rgbFromHex(hex: string): number {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return 0x111111;
   return parseInt(m[1], 16);
+}
+
+/** "#rrggbb" → 0xRRGGBB, bei unlesbarer Farbe (z. B. "none") null = Farbe der Ebene. */
+function rgbOrNull(hex: string): number | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  return m ? parseInt(m[1], 16) : null;
 }
 
 /** Millimeter → DXF-LWEIGHT (1/100 mm), gerundet auf gültige Stufen ≥ 0. */

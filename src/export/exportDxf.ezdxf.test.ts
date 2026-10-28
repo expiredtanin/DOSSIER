@@ -25,6 +25,10 @@ interface EzEntity {
   pts?: number[][];
   closed?: boolean;
   text?: string;
+  solid?: boolean;
+  paths?: number;
+  pattern_lines?: number;
+  rgb?: number[] | null;
 }
 interface EzResult {
   version: string;
@@ -91,5 +95,31 @@ describe.skipIf(!hasEzdxf)("DXF-Export gegen ezdxf", { timeout: 60_000 }, () => 
     expect(r.result!.entities).toEqual([
       expect.objectContaining({ type: "TEXT", layer: `${cat0.code}_Gelände_Süd`, text: "Grünfläche ≥ 30 %" }),
     ]);
+  });
+
+  it("HATCH: Vollfüllung, Kreuzschraffur und gestrichelt — ezdxf liest Rand, Farbe, Musterzeilen ohne Auditor-Fehler", () => {
+    const sq = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }];
+    const poly = (hatch: object) => ({
+      kind: "polygon", pts: sq, fill: "#eee", stroke: "#111", strokeWidthMm: 0.25,
+      hatch: { pattern: "crosshatch", scale: 1, angle: 45, color: "#336699", lineWeight: 0.13, dash: null, ...hatch },
+    });
+    const plan = {
+      primitives: [poly({ pattern: "solid" }), poly({}), poly({ pattern: "diagonal", dash: [2, 1] })],
+      bounds: { minX: 0, minY: 0, maxX: 4, maxY: 3 },
+    } as unknown as Plan;
+    const r = ezdxfRead("hatch", buildPlanDxf(plan, sampleProject));
+    expect(r.result, r.err).not.toBeNull();
+    expect(r.result!.errors).toEqual([]);
+    expect(r.status).toBe(0);
+    const hs = r.result!.entities.filter((e) => e.type === "HATCH");
+    expect(hs.length).toBe(3);
+    expect(hs.map((h) => h.solid)).toEqual([true, false, false]);
+    expect(hs.map((h) => h.pattern_lines)).toEqual([0, 2, 1]);
+    for (const h of hs) {
+      expect(h.layer).toBe("HATCH");
+      expect(h.paths).toBe(1);
+      expect(h.rgb).toEqual([0x33, 0x66, 0x99]);
+      expect(h.pts).toEqual(sq.map((p) => [p.x, p.y]));
+    }
   });
 });

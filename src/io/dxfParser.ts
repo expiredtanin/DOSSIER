@@ -5,9 +5,10 @@
 // semantisch. Rust liest DXF (ASCII und Binär, R12–2018+) und DWG (R13–2018) und liefert einen
 // flachen Puffer + String-Tabelle; hier wird daraus `DxfImportResult` (Konturen, Texte, Meshes,
 // Ebenenfarben, Diagnose, $INSUNITS). Abgebildet werden LINE, LWPOLYLINE/POLYLINE (inkl. Bulges),
-// ARC/CIRCLE (mit wahrer Kurve), ELLIPSE, SPLINE, HATCH (gefüllte Ränder), TEXT/MTEXT, 3DFACE,
+// ARC/CIRCLE (mit wahrer Kurve), ELLIPSE, SPLINE, HATCH und SOLID/TRACE (gefüllte Flächen), TEXT/MTEXT,
+// ATTRIB/ATTDEF, DIMENSION (über den Anonymblock), LEADER/MULTILEADER (Linien + Text), 3DFACE,
 // Polyface-/Polygon-Mesh, MESH; INSERT wird rekursiv aufgelöst (Basispunkt, Skalierung, Drehung,
-// Raster; Ebene „0" erbt die Ebene der Referenz).
+// Raster; Ebene „0" erbt die Ebene der Referenz). `$INSUNITS` rechnet Rust auf Meter um.
 //
 // `parseDxf` ist synchron und verlangt das geladene Modul (`loadFileio()`); die App ruft es im
 // Web-Worker (`dxfParserAsync.ts`), Tests laden es per `loadFileioForTests()`.
@@ -38,8 +39,14 @@ export interface DxfImportResult {
   diagnostics?: ImportDiagnostics;
   /** Farbe je DXF-Layer (Hex) aus der LAYER-Tabelle — für neu angelegte Kategorien. */
   layerColors?: Record<string, string>;
-  /** `$INSUNITS` der Datei (0 = ohne Einheit, 4 = mm, 5 = cm, 6 = m …); Koordinaten bleiben 1:1. */
+  /** `$INSUNITS` der Datei (0 = ohne Einheit, 4 = mm, 5 = cm, 6 = m …), roh wie gelesen. */
   insUnits?: number;
+  /**
+   * Meter je Zeicheneinheit nach `$INSUNITS` (mm 0.001, cm 0.01, m 1, Zoll 0.0254 …). Rust hat
+   * Koordinaten, Radien und Texthöhen damit schon in Meter umgerechnet; hier nur zur Anzeige
+   * („Datei in mm, umgerechnet“). 0/unbekannt = 1, die Koordinaten bleiben dann 1:1.
+   */
+  unitScale?: number;
 }
 
 let importSeq = 0;
@@ -78,9 +85,10 @@ export function decodeImport(geom: Float64Array, strings: readonly string[], idP
   let i = 0;
   const num = () => geom[i++];
   const str = () => strings[geom[i++]] ?? "";
-  if (num() !== 1) throw new Error("Unbekanntes Importformat (Version).");
+  if (num() !== 2) throw new Error("Unbekanntes Importformat (Version).");
   const fmt = num() === 1 ? "DWG" : "DXF";
   const insUnits = num();
+  const unitScale = num();
   const total = num();
 
   const layerColors: Record<string, string> = {};
@@ -155,5 +163,5 @@ export function decodeImport(geom: Float64Array, strings: readonly string[], idP
       contours,
     });
   }
-  return { meshes, contours: contourSets, texts, layerColors, diagnostics: { entityCounts, total }, insUnits };
+  return { meshes, contours: contourSets, texts, layerColors, diagnostics: { entityCounts, total }, insUnits, unitScale };
 }
