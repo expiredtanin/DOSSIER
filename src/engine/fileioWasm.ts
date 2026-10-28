@@ -22,6 +22,12 @@ export function loadFileio(): Promise<FileioModule> {
   return loading;
 }
 
+/** Synchroner Zugriff, nachdem `loadFileio()`/`initFileioSync()` gelaufen ist (Muster `core()`). */
+export function fileio(): FileioModule {
+  if (!mod) throw new Error("Format-Modul (pkgFileIo) nicht geladen: zuerst `await loadFileio()`.");
+  return mod;
+}
+
 /** Synchron laden aus vorliegenden Bytes (Node: Tests, Werkzeuge). */
 export async function initFileioSync(bytes: BufferSource): Promise<FileioModule> {
   if (mod) return mod;

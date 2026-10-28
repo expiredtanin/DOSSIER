@@ -1,4 +1,4 @@
-// DXF-Export des Grundrisses. Nutzt DIESELBE Quelle wie der PDF-Export — den
+// DXF-/DWG-Export des Grundrisses. Nutzt DIESELBE Quelle wie der PDF-Export — den
 // Vektor-Plan (generatePlan → Primitive) — schreibt aber MODELL-SPACE-Geometrie
 // in ECHTEN Metern (kein Papier-mm, keine Y-Spiegelung). So können nachgelagerte
 // CAD-Nutzer beim Plot beliebig skalieren; die Datei ist masshaltig 1:1 in Metern.
@@ -6,22 +6,33 @@
 // Layer entstehen aus den Kategorie-Ebenen des Projekts (Code + Name, Farbe,
 // Linienstärke). Jede Entity liegt auf dem Layer ihrer Kategorie; Primitive ohne
 // direkten Kategorie-Bezug (Tür-Symbole, Kontext, Schraffuren) landen auf
-// sprechenden Sammel-Layern. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
+// sprechenden Sammel-Layern.
+//
+// Seit [C1]/[C2] (28.10.) schreibt Rust (acadrust, `src-tauri/fileio/src/export.rs`) die Datei:
+// dieses Modul sammelt nur Ebenen und Entitäten aus dem `Plan` in eine flache Zeichnung
+// (`FlatDrawing`, Kodierung s. export.rs) und übergibt sie. DXF = R2018 ASCII (UTF-8),
+// DWG = R2018 — Begründung im Kopf von export.rs. Der frühere TS-Text-Writer
+// (`dxfWriter.ts`) ist gelöscht. Das Format-Modul wird nachgeladen: vor `buildPlanDxf`/
+// `buildPlanDwg` einmal `await loadFileio()` (savePlanDxf und die CLI tun das).
 
 import type { Plan, Primitive } from "../plan/generatePlan";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
-import { DxfWriter } from "./dxfWriter";
 import { buildRandomHatchRuns, zigzagPoints, motifPoints } from "../plan/glPlan/glPlanHatch";
+import { plainText } from "../text/richText";
+import { fileio, loadFileio } from "../engine/fileioWasm";
 
 export interface ExportDxfOptions {
   /** Titel/Geschossname (nur als Kommentar-freundlicher Dateiname genutzt). */
   title?: string;
   /** Schraffurlinien mit ausgeben (true) oder nur Umrisse/Flächen (false). */
   includeHatches?: boolean;
-  /** Dateiname des Downloads (mit/ohne .dxf). */
+  /** Dateiname des Downloads (mit/ohne Endung). */
   fileName?: string;
 }
+
+/** Ausgabeformat des Modell-Space-Exports. */
+export type CadExportFormat = "dxf" | "dwg";
 
 /** Sammel-Layer-Namen für Primitive ohne eigene Kategorie. */
 const LAYER_HATCH = "HATCH";
@@ -33,39 +44,103 @@ const LAYER_DEFAULT = "PLAN";
  *  mehr nachzuschlagen; eigener Layer statt Absturz in LAYER_DEFAULT. */
 const LAYER_EXTRUSION = "EXTRUSION";
 
+// ── Flache Zeichnung (Gegenstück zu src-tauri/fileio/src/export.rs) ─────────
+
+const FLAT_VERSION = 1;
+const REC_LAYER = 1;
+const REC_LINE = 2;
+const REC_POLYLINE = 3;
+const REC_ARC = 4;
+const REC_CIRCLE = 5;
+const REC_TEXT = 6;
+
 /**
- * Baut aus einem Plan + Projekt einen vollständigen DXF-String (Meter-Modell-Space).
- * Reihenfolge der Primitive bleibt erhalten. Rückgabe ist reiner ASCII-Text.
+ * Sammelt Ebenen und Entitäten als flachen Zahlenpuffer + Zeichenkettenliste. Ebenen sind
+ * idempotent über den Namen; eine unbekannte Ebene wird mit Standardwerten (ACI 7, 0.25 mm)
+ * angelegt — wie beim früheren Writer. Namen bereinigt Rust (`sanitize_layer_name`).
  */
-export function buildPlanDxf(
+export class FlatDrawing {
+  private nums: number[] = [FLAT_VERSION];
+  private strings: string[] = [];
+  private layers = new Map<string, number>();
+
+  private str(s: string): number {
+    this.strings.push(s.replace(/\0/g, ""));
+    return this.strings.length - 1;
+  }
+
+  /** Legt eine Ebene an (`rgb` 0xRRGGBB oder null = ACI 7, `lineWeight` in 1/100 mm). */
+  addLayer(name: string, rgb: number | null, lineWeight: number): number {
+    const known = this.layers.get(name);
+    if (known !== undefined) return known;
+    const idx = this.layers.size;
+    this.layers.set(name, idx);
+    this.nums.push(REC_LAYER, this.str(name), rgb ?? -1, lineWeight);
+    return idx;
+  }
+
+  private layer(name: string): number {
+    return this.layers.get(name) ?? this.addLayer(name, null, 25);
+  }
+
+  addLine(layer: string, a: Vec2, b: Vec2): void {
+    this.nums.push(REC_LINE, this.layer(layer), a.x, a.y, b.x, b.y);
+  }
+
+  addPolyline(layer: string, pts: Vec2[], closed: boolean): void {
+    if (pts.length < 2) return;
+    this.nums.push(REC_POLYLINE, this.layer(layer), closed ? 1 : 0, pts.length);
+    for (const p of pts) this.nums.push(p.x, p.y);
+  }
+
+  /** Bogen gegen den Uhrzeigersinn von `start` nach `end` (Radiant). */
+  addArc(layer: string, center: Vec2, r: number, start: number, end: number): void {
+    this.nums.push(REC_ARC, this.layer(layer), center.x, center.y, r, start, end);
+  }
+
+  addCircle(layer: string, center: Vec2, r: number): void {
+    this.nums.push(REC_CIRCLE, this.layer(layer), center.x, center.y, r);
+  }
+
+  /** Einzeiliger Text (Höhe in Metern, Drehung in Radiant). */
+  addText(layer: string, at: Vec2, height: number, rotation: number, value: string): void {
+    this.nums.push(REC_TEXT, this.layer(layer), this.str(value), at.x, at.y, height, rotation);
+  }
+
+  /** Argumente für die Rust-Bindungen. */
+  args(): [Float64Array, string] {
+    return [Float64Array.from(this.nums), this.strings.join("\0")];
+  }
+}
+
+/**
+ * Baut aus einem Plan + Projekt die flache Zeichnung (Meter-Modell-Space).
+ * Reihenfolge der Primitive bleibt erhalten.
+ */
+export function collectPlanDrawing(
   plan: Plan,
   project: Project,
   opts: ExportDxfOptions = {},
-): string {
+): FlatDrawing {
   const includeHatches = opts.includeHatches ?? true;
-  const dxf = new DxfWriter();
+  const dxf = new FlatDrawing();
 
   // 1) Layer aus den Kategorie-Ebenen anlegen (Code+Name als Layer-Name, Farbe,
-  //    Linienstärke). So trägt die DXF echte, benannte Layer statt eines Flachs.
+  //    Linienstärke). So trägt die Datei echte, benannte Layer statt eines Flachs.
   const cats = flattenCategories(project.layers);
   const layerNameByCode = new Map<string, string>();
   for (const c of cats) {
     const name = layerName(c);
     layerNameByCode.set(c.code, name);
-    dxf.addLayer({
-      name,
-      color: aciFromHex(c.color),
-      trueColor: rgbFromHex(c.color),
-      lineWeight: mmToLwe(c.lw),
-    });
+    dxf.addLayer(name, rgbFromHex(c.color), mmToLwe(c.lw));
   }
   // Sammel-Layer für kategorielose Primitive.
-  dxf.addLayer({ name: LAYER_SYMBOLS, color: 7, trueColor: 0x111111, lineWeight: 18 });
-  dxf.addLayer({ name: LAYER_HATCH, color: 8, trueColor: 0x888888, lineWeight: 13 });
-  dxf.addLayer({ name: LAYER_CONTEXT, color: 9, trueColor: 0x9aa3ad, lineWeight: 10 });
-  dxf.addLayer({ name: LAYER_DEFAULT, color: 7, trueColor: 0x111111, lineWeight: 18 });
+  dxf.addLayer(LAYER_SYMBOLS, 0x111111, 18);
+  dxf.addLayer(LAYER_HATCH, 0x888888, 13);
+  dxf.addLayer(LAYER_CONTEXT, 0x9aa3ad, 10);
+  dxf.addLayer(LAYER_DEFAULT, 0x111111, 18);
   // Warmes Orange, identisch zum 3D-/Grundriss-Footprint der Extrusionen (EXTRUSION_STROKE/EXTRUSION_RGB).
-  dxf.addLayer({ name: LAYER_EXTRUSION, color: aciFromHex("#d98c40"), trueColor: rgbFromHex("#d98c40"), lineWeight: 13 });
+  dxf.addLayer(LAYER_EXTRUSION, rgbFromHex("#d98c40"), 13);
 
   // 2) Rückverweise Primitiv → Kategorie: Wände/2D-Elemente tragen nur ihre ID im
   //    Plan; die Kategorie liegt am Projekt-Objekt. Damit landet jede Wand-/Drawing-
@@ -76,41 +151,76 @@ export function buildPlanDxf(
   for (const d of project.drawings2d) codeByDrawing.set(d.id, d.categoryCode);
   const codeByColumn = new Map<string, string>();
   for (const c of project.columns ?? []) codeByColumn.set(c.id, c.categoryCode);
+  const drawingLayer = (id: string | undefined, fallback: string): string =>
+    id ? (layerNameByCode.get(codeByDrawing.get(id) ?? "") ?? LAYER_DEFAULT) : fallback;
 
   const layerFor = (p: Primitive): string => {
     if (p.kind === "polygon") {
       if (p.wallId) return layerNameByCode.get(codeByWall.get(p.wallId) ?? "") ?? LAYER_DEFAULT;
-      if (p.drawingId) return layerNameByCode.get(codeByDrawing.get(p.drawingId) ?? "") ?? LAYER_DEFAULT;
+      if (p.drawingId) return drawingLayer(p.drawingId, LAYER_DEFAULT);
       if (p.columnId) return layerNameByCode.get(codeByColumn.get(p.columnId) ?? "") ?? LAYER_DEFAULT;
       if (p.extrudedSolidId) return LAYER_EXTRUSION;
       return LAYER_DEFAULT;
     }
     if (p.kind === "line") {
       if (p.cls === "context-line") return LAYER_CONTEXT;
-      if (p.drawingId) return layerNameByCode.get(codeByDrawing.get(p.drawingId) ?? "") ?? LAYER_DEFAULT;
       // Tür-Blatt/-Rahmen und Wand-Achsen: Symbol-Sammellayer.
-      return LAYER_SYMBOLS;
+      return drawingLayer(p.drawingId, LAYER_SYMBOLS);
     }
+    // Texte von 2D-Elementen: Ebene ihrer Kategorie.
+    if (p.kind === "drawingText") return drawingLayer(p.drawingId, LAYER_SYMBOLS);
     // Bögen: Tür-Schwenkbogen → Symbole.
     return LAYER_SYMBOLS;
   };
 
-  // 3) Jedes Primitiv in DXF-Entities übersetzen.
+  // 3) Jedes Primitiv in Entities übersetzen.
   for (const p of plan.primitives) {
     emitPrimitive(dxf, p, layerFor(p), includeHatches);
   }
-
-  return dxf.build();
+  return dxf;
 }
 
-/** Layer-Name aus einer Kategorie: "Code_Name" (bereinigt der Writer selbst). */
+/**
+ * Baut aus einem Plan + Projekt einen vollständigen DXF-String (R2018 ASCII, Meter-Modell-Space).
+ * Verlangt das geladene Format-Modul (`await loadFileio()`).
+ */
+export function buildPlanDxf(
+  plan: Plan,
+  project: Project,
+  opts: ExportDxfOptions = {},
+): string {
+  return new TextDecoder().decode(writeCad("dxf", collectPlanDrawing(plan, project, opts)));
+}
+
+/** Wie {@link buildPlanDxf}, aber als DWG (R2018, Bytes). */
+export function buildPlanDwg(
+  plan: Plan,
+  project: Project,
+  opts: ExportDxfOptions = {},
+): Uint8Array {
+  return writeCad("dwg", collectPlanDrawing(plan, project, opts));
+}
+
+/** Übergibt die flache Zeichnung an Rust; ein leeres Ergebnis wird zum Fehler mit Grund. */
+function writeCad(format: CadExportFormat, drawing: FlatDrawing): Uint8Array {
+  const m = fileio();
+  const [flat, strings] = drawing.args();
+  const bytes = format === "dxf" ? m.export_dxf_flat(flat, strings) : m.export_dwg_flat(flat, strings);
+  if (bytes.length === 0) {
+    const why = m.export_check_flat(flat, strings);
+    throw new Error(`${format.toUpperCase()}-Export fehlgeschlagen${why ? `: ${why}` : ""}`);
+  }
+  return bytes;
+}
+
+/** Layer-Name aus einer Kategorie: "Code_Name" (bereinigt Rust selbst). */
 function layerName(c: LayerCategory): string {
   return `${c.code}_${c.name}`;
 }
 
-/** Schreibt ein Plan-Primitiv als passende DXF-Entity(en). */
+/** Schreibt ein Plan-Primitiv als passende Entity(en). */
 function emitPrimitive(
-  dxf: DxfWriter,
+  dxf: FlatDrawing,
   p: Primitive,
   layer: string,
   includeHatches: boolean,
@@ -119,12 +229,12 @@ function emitPrimitive(
     case "line":
       if (p.zigzag) {
         // Zickzack-Linie → offene Polylinie (amplitude/wavelength Papier-mm →
-        // Modell-Meter über dieselbe Kopplung wie das Strichmuster oben).
+        // Modell-Meter über dieselbe Kopplung wie das Strichmuster unten).
         const amp = p.zigzag.amplitude * DASH_MM_TO_M;
         const wav = p.zigzag.wavelength * DASH_MM_TO_M;
         dxf.addPolyline(layer, zigzagPoints(p.a, p.b, amp, wav), false);
       } else if (p.motif) {
-        // Custom-Motiv → offene Polylinie (Papier-mm → Modell-Meter, wie oben).
+        // Custom-Motiv → offene Polylinie (Papier-mm → Modell-Meter, wie unten).
         dxf.addPolyline(layer, motifPoints(p.a, p.b, p.motif, DASH_MM_TO_M), false);
       } else {
         dxf.addLine(layer, p.a, p.b);
@@ -135,17 +245,23 @@ function emitPrimitive(
       emitArc(dxf, p, layer);
       break;
 
-    // Gezeichnete Kreise/Bögen (2D-Elemente) waren bisher gar nicht im DXF —
-    // der Writer kann beides längst, es fehlte nur der Zweig. `drawingArc`
-    // läuft per Konvention immer CCW von a0 nach a1 (s. planView/primitives),
-    // genau wie DXF-Bögen; daher direkte Grad-Umrechnung ohne Tausch.
+    // Gezeichnete Kreise/Bögen (2D-Elemente). `drawingArc` läuft per Konvention
+    // immer CCW von a0 nach a1 (s. planView/primitives), genau wie DXF-Bögen.
     case "drawingCircle":
       dxf.addCircle(layer, p.center, p.r);
       break;
 
     case "drawingArc":
-      dxf.addArc(layer, p.center, p.r, (p.a0 * 180) / Math.PI, (p.a1 * 180) / Math.PI);
+      dxf.addArc(layer, p.center, p.r, p.a0, p.a1);
       break;
+
+    // 2D-Text (neu mit [C2]; der alte Writer liess Texte weg): einzeiliger TEXT,
+    // Ankerpunkt = Einfügepunkt, Absätze eines Rich-Text-Felds mit Leerzeichen verbunden.
+    case "drawingText": {
+      const value = p.doc ? plainText(p.doc) : p.text;
+      if (value.trim() && p.heightM > 0) dxf.addText(layer, p.at, p.heightM, p.angle, value);
+      break;
+    }
 
     case "polygon": {
       const pts = p.pts;
@@ -157,9 +273,8 @@ function emitPrimitive(
       // sichtbaren Musterlinien → wir geben nur echte Muster (nicht solid/none) aus.
       // Bild-/Verlauf-Schraffur (kind==="image"/"gradient"): DXF trägt weder
       // Rasterbilder noch (hier) echte Farbverläufe → FALLBACK ohne
-      // Musterlinien (nur die Umriss-Polylinie oben). Als Folge-Arbeit
-      // dokumentiert. Random-Vektor: deterministische Streu-Striche
-      // (Modell-Meter, identischer Seed wie Bildschirm/PDF).
+      // Musterlinien (nur die Umriss-Polylinie oben). Random-Vektor:
+      // deterministische Streu-Striche (Modell-Meter, identischer Seed wie Bildschirm/PDF).
       if (
         includeHatches &&
         p.hatch.kind !== "image" &&
@@ -188,18 +303,18 @@ function emitPrimitive(
 }
 
 /**
- * Bogen-Primitiv → DXF-ARC. DXF-Bögen laufen gegen den Uhrzeigersinn von
- * startAngle nach endAngle. Der Plan-Bogen ist über from/to definiert; die
+ * Bogen-Primitiv → ARC. DXF-Bögen laufen gegen den Uhrzeigersinn von
+ * Start- nach Endwinkel. Der Plan-Bogen ist über from/to definiert; die
  * Drehrichtung folgt dem Kreuzprodukt (positiv = CCW). Bei CW werden Start/Ende
  * getauscht, damit der kurze Bogen in der richtigen Richtung entsteht.
  */
 function emitArc(
-  dxf: DxfWriter,
+  dxf: FlatDrawing,
   p: Extract<Primitive, { kind: "arc" }>,
   layer: string,
 ): void {
-  const a1 = angleDeg(p.center, p.from);
-  const a2 = angleDeg(p.center, p.to);
+  const a1 = angleRad(p.center, p.from);
+  const a2 = angleRad(p.center, p.to);
   const v1 = { x: p.from.x - p.center.x, y: p.from.y - p.center.y };
   const v2 = { x: p.to.x - p.center.x, y: p.to.y - p.center.y };
   const cross = v1.x * v2.y - v1.y * v2.x;
@@ -210,10 +325,10 @@ function emitArc(
   }
 }
 
-/** Winkel (Grad, 0..360) von `c` nach `p`, gegen den Uhrzeigersinn. */
-function angleDeg(c: Vec2, p: Vec2): number {
-  const d = (Math.atan2(p.y - c.y, p.x - c.x) * 180) / Math.PI;
-  return d < 0 ? d + 360 : d;
+/** Winkel (Radiant, 0..2π) von `c` nach `p`, gegen den Uhrzeigersinn. */
+function angleRad(c: Vec2, p: Vec2): number {
+  const a = Math.atan2(p.y - c.y, p.x - c.x);
+  return a < 0 ? a + 2 * Math.PI : a;
 }
 
 // ── Schraffur als geklippte Vektorlinien (Meter) ────────────────────────────
@@ -323,7 +438,8 @@ function fillParallel(poly: Vec2[], angle: number, spacing: number, out: Seg[]):
   }
 }
 
-// ── Farb-Umrechnung ─────────────────────────────────────────────────────────
+// ── Farb-/Strich-Umrechnung ─────────────────────────────────────────────────
+// (Die nächste ACI zur True-Color bestimmt acadrust mit der vollen 255er-Palette.)
 
 /** "#rrggbb" → 0xRRGGBB (24-Bit True-Color). Fallback dunkelgrau. */
 export function rgbFromHex(hex: string): number {
@@ -332,72 +448,26 @@ export function rgbFromHex(hex: string): number {
   return parseInt(m[1], 16);
 }
 
-/**
- * Mappt eine Hex-Farbe auf den nächsten AutoCAD-Color-Index (ACI 1..255). Nutzt
- * die feste ACI-Standardpalette (die ersten 9 Indizes sind die Grundfarben) und
- * wählt per euklidischem RGB-Abstand den nächstliegenden. Robust genug, damit
- * Viewer ohne True-Color-Support trotzdem sinnvolle Farben zeigen.
- */
-export function aciFromHex(hex: string): number {
-  const rgb = rgbFromHex(hex);
-  const r = (rgb >> 16) & 0xff;
-  const g = (rgb >> 8) & 0xff;
-  const b = rgb & 0xff;
-  let best = 7;
-  let bestDist = Infinity;
-  for (const [idx, cr, cg, cb] of ACI_PALETTE) {
-    const d = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2;
-    if (d < bestDist) {
-      bestDist = d;
-      best = idx;
-    }
-  }
-  return best;
-}
-
 /** Millimeter → DXF-LWEIGHT (1/100 mm), gerundet auf gültige Stufen ≥ 0. */
 export function mmToLwe(mm: number): number {
   return Math.max(0, Math.round(mm * 100));
 }
 
-/**
- * Verkürzte ACI-Standardpalette [index, r, g, b]. Deckt die geläufigen Töne ab;
- * für die Layer-Farben (meist gedämpfte Grau-/Bautöne) genügt das Nächste-Farbe-
- * Matching. Index 7 (weiss/schwarz) und die Grautöne 250..255 sind enthalten.
- */
-const ACI_PALETTE: ReadonlyArray<readonly [number, number, number, number]> = [
-  [1, 255, 0, 0],
-  [2, 255, 255, 0],
-  [3, 0, 255, 0],
-  [4, 0, 255, 255],
-  [5, 0, 0, 255],
-  [6, 255, 0, 255],
-  [7, 255, 255, 255],
-  [8, 128, 128, 128],
-  [9, 192, 192, 192],
-  [30, 255, 128, 0],
-  [40, 255, 191, 127],
-  [250, 51, 51, 51],
-  [251, 91, 91, 91],
-  [252, 132, 132, 132],
-  [253, 173, 173, 173],
-  [254, 214, 214, 214],
-  [255, 255, 255, 255],
-];
-
-/** Baut das DXF und löst den Download aus (Browser). */
-export function savePlanDxf(
+/** Baut die Datei und löst den Download aus (Browser). Lädt das Format-Modul bei Bedarf. */
+export async function savePlanDxf(
   plan: Plan,
   project: Project,
-  opts: ExportDxfOptions = {},
-): void {
-  const text = buildPlanDxf(plan, project, opts);
-  const name = (opts.fileName ?? "grundriss").replace(/\.dxf$/i, "");
-  const blob = new Blob([text], { type: "application/dxf" });
+  opts: ExportDxfOptions & { format?: CadExportFormat } = {},
+): Promise<void> {
+  await loadFileio();
+  const format = opts.format ?? "dxf";
+  const data = writeCad(format, collectPlanDrawing(plan, project, opts));
+  const name = (opts.fileName ?? "grundriss").replace(/\.(dxf|dwg)$/i, "");
+  const blob = new Blob([data as BlobPart], { type: format === "dxf" ? "application/dxf" : "image/vnd.dwg" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${name}.dxf`;
+  a.download = `${name}.${format}`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

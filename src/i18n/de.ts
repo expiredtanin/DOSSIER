@@ -1697,10 +1697,14 @@ export const de = {
   "export.cancel": "Abbrechen",
 
   // ── DXF-Export ───────────────────────────────────────────────────────────
-  "exportDxf.title": "DXF exportieren",
+  "exportDxf.title": "DXF/DWG exportieren",
   "exportDxf.hatches": "Schraffuren",
   "exportDxf.hatches.yes": "Mitexportieren",
   "exportDxf.hatches.no": "Nur Umrisse",
+  "exportDxf.format": "Format",
+  "exportDxf.format.dxf": "DXF (AutoCAD 2018, Text)",
+  "exportDxf.format.dwg": "DWG (AutoCAD 2018)",
+  "exportDxf.failed": "Export fehlgeschlagen",
   "exportDxf.unitsNote":
     "Modell-Space in Metern (1:1). Layer entsprechen den Ebenen des Projekts; beim Plot beliebig skalierbar.",
 
@@ -1713,7 +1717,7 @@ export const de = {
   "file.open": "Projekt öffnen",
   "file.import": "DXF/DWG importieren…",
   "file.exportPdf": "Als PDF exportieren…",
-  "file.exportDxf": "Als DXF exportieren…",
+  "file.exportDxf": "Als DXF/DWG exportieren…",
   "file.exportSchedule": "Bauteilliste (CSV)…",
   "file.exportIfc": "IFC exportieren",
   "file.exportObj": "OBJ exportieren (3D-Mesh)",

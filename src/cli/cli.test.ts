@@ -55,6 +55,14 @@ describe("dossier-cli", () => {
     }
   });
 
+  it("DWG über das Format-WASM (acadrust, R2018)", async () => {
+    const out = join(dir, "eg.dwg");
+    expect(await call("dwg", "--level", "eg", "--out", out)).toBe(0);
+    const bytes = readFileSync(out);
+    expect(bytes.subarray(0, 6).toString("latin1")).toBe("AC1032");
+    expect(bytes.length).toBeGreaterThan(10_000);
+  }, 60_000);
+
   it("Schnitt und STEP über das WASM", async () => {
     const section = sampleProject.drawingLevels.find((l) => l.kind === "section");
     if (section) {
