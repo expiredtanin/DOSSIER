@@ -106,11 +106,27 @@ function diffList(collection: string, va: Entity[], vb: Entity[], ops: CoreOp[])
   }
 }
 
-/** Wendet eine Op-Folge rein an (kein Zugriff auf Store/UI). */
+/**
+ * Wendet eine Op-Folge rein an (kein Zugriff auf Store/UI). Unberührte Listen und Elemente behalten
+ * ihre Identität. Innerhalb eines Aufrufs wird jede Liste höchstens einmal kopiert und für
+ * `replace`-Serien (Auswahl verschieben: hunderte Elemente) über einen id-Index angesprochen —
+ * Ergebnis gleich der einfachen Fassung (Test `ops.apply.test.ts`).
+ */
 export function applyOps(project: Project, ops: readonly CoreOp[]): Project {
-  let cur = project as unknown as Record<string, unknown>;
-  for (const op of ops) cur = applyOne(cur, op);
-  return cur as unknown as Project;
+  if (ops.length === 0) return project;
+  const st: ApplyState = { cur: { ...(project as unknown as Record<string, unknown>) }, owned: new Set(), index: new Map() };
+  for (const op of ops) applyOne(st, op);
+  return st.cur as unknown as Project;
+}
+
+/** Zustand eines `applyOps`-Aufrufs: `cur` ist eine eigene Kopie der obersten Ebene; Listen in
+ *  `owned` wurden in diesem Aufruf neu angelegt (dürfen verändert werden), `index` = id → Position
+ *  (erstes Vorkommen) solcher Listen. */
+interface ApplyState {
+  cur: Record<string, unknown>;
+  owned: Set<string>;
+  /** `null` = einmal linear gesucht, der Index wird bei der nächsten Suche gebaut. */
+  index: Map<string, Map<string, number> | null>;
 }
 
 function listOf(cur: Record<string, unknown>, collection: string): Entity[] {
@@ -118,43 +134,81 @@ function listOf(cur: Record<string, unknown>, collection: string): Entity[] {
   return Array.isArray(v) ? (v as Entity[]) : [];
 }
 
-function applyOne(cur: Record<string, unknown>, op: CoreOp): Record<string, unknown> {
+/** Setzt `collection` auf eine neue (eigene) Liste; ein vorhandener Index verfällt. */
+function putList(st: ApplyState, collection: string, list: Entity[]): void {
+  st.cur[collection] = list;
+  st.owned.add(collection);
+  st.index.delete(collection);
+}
+
+function applyOne(st: ApplyState, op: CoreOp): void {
+  const cur = st.cur;
   switch (op.kind) {
     case "setField": {
+      // Der Wert gehört dem Aufrufer: nie verändern.
+      st.owned.delete(op.key);
+      st.index.delete(op.key);
       if (op.value !== undefined && op.at !== undefined && !(op.key in cur)) {
         // Neues Feld an Position `at` (wie `shift_insert` im Kern).
         const entries = Object.entries(cur);
         entries.splice(Math.max(0, Math.min(entries.length, op.at)), 0, [op.key, op.value]);
-        return Object.fromEntries(entries);
+        st.cur = Object.fromEntries(entries);
+        return;
       }
-      const next = { ...cur };
-      if (op.value === undefined) delete next[op.key];
-      else next[op.key] = op.value;
-      return next;
+      if (op.value === undefined) delete cur[op.key];
+      else cur[op.key] = op.value;
+      return;
     }
     case "add": {
       const list = listOf(cur, op.collection);
       const at = op.at === undefined ? list.length : Math.max(0, Math.min(list.length, op.at));
-      return { ...cur, [op.collection]: [...list.slice(0, at), ...op.items, ...list.slice(at)] };
+      putList(st, op.collection, [...list.slice(0, at), ...op.items, ...list.slice(at)]);
+      return;
     }
     case "replace": {
-      const list = listOf(cur, op.collection);
-      const idx = list.findIndex((e) => e.id === op.entity.id);
-      if (idx < 0) return { ...cur, [op.collection]: [...list, op.entity] };
-      const out = list.slice();
-      out[idx] = op.entity;
-      return { ...cur, [op.collection]: out };
+      const c = op.collection;
+      let list: Entity[];
+      if (st.owned.has(c)) list = cur[c] as Entity[];
+      else {
+        list = listOf(cur, c).slice();
+        putList(st, c, list);
+      }
+      // Erste Suche in dieser Liste linear (ein Drag-Schritt), ab der zweiten über den Index.
+      let idx = st.index.get(c);
+      let at: number | undefined;
+      if (idx === undefined) {
+        st.index.set(c, null);
+        const i = list.findIndex((e) => e?.id === op.entity.id);
+        at = i < 0 ? undefined : i;
+      } else {
+        if (idx === null) {
+          idx = new Map();
+          for (let i = 0; i < list.length; i++) {
+            const id = list[i]?.id;
+            if (!idx.has(id)) idx.set(id, i);
+          }
+          st.index.set(c, idx);
+        }
+        at = idx.get(op.entity.id);
+      }
+      if (at === undefined) {
+        idx?.set(op.entity.id, list.length);
+        list.push(op.entity);
+      } else list[at] = op.entity;
+      return;
     }
     case "remove": {
       const drop = new Set(op.ids);
-      return { ...cur, [op.collection]: listOf(cur, op.collection).filter((e) => !drop.has(e.id)) };
+      putList(st, op.collection, listOf(cur, op.collection).filter((e) => !drop.has(e.id)));
+      return;
     }
     case "reorder": {
       const list = listOf(cur, op.collection);
       const byId = new Map(list.map((e) => [e.id, e]));
       const ordered = op.ids.map((id) => byId.get(id)).filter((e): e is Entity => e !== undefined);
       const inOps = new Set(op.ids);
-      return { ...cur, [op.collection]: [...ordered, ...list.filter((e) => !inOps.has(e.id))] };
+      putList(st, op.collection, [...ordered, ...list.filter((e) => !inOps.has(e.id))]);
+      return;
     }
   }
 }
