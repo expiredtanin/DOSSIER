@@ -1691,6 +1691,7 @@ export const en: Record<TranslationKey, string> = {
   "exportDxf.hatches.no": "Outlines only",
   "exportDxf.format": "Format",
   "exportDxf.format.dxf": "DXF (AutoCAD 2018, text)",
+  "exportDxf.format.dxfbin": "DXF binary (AutoCAD 2018, compact)",
   "exportDxf.format.dwg": "DWG (AutoCAD 2018)",
   "exportDxf.failed": "Export failed",
   "exportDxf.unitsNote":

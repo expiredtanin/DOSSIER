@@ -32,7 +32,12 @@ export interface ExportDxfOptions {
 }
 
 /** Ausgabeformat des Modell-Space-Exports. */
-export type CadExportFormat = "dxf" | "dwg";
+export type CadExportFormat = "dxf" | "dxfbin" | "dwg";
+
+/** Dateiendung zum Ausgabeformat (Binär-DXF trägt ebenfalls `.dxf`). */
+export function cadExtension(format: CadExportFormat): "dxf" | "dwg" {
+  return format === "dwg" ? "dwg" : "dxf";
+}
 
 /** Sammel-Layer-Namen für Primitive ohne eigene Kategorie. */
 const LAYER_HATCH = "HATCH";
@@ -54,6 +59,7 @@ const REC_ARC = 4;
 const REC_CIRCLE = 5;
 const REC_TEXT = 6;
 const REC_HATCH = 7;
+const REC_GRADIENT = 8;
 
 /**
  * Sammelt Ebenen und Entitäten als flachen Zahlenpuffer + Zeichenkettenliste. Ebenen sind
@@ -125,6 +131,17 @@ export class FlatDrawing {
     this.nums.push(REC_HATCH, this.layer(layer), opts.solid ? 0 : 1, opts.rgb ?? -1, dashes.length, ...dashes, families.length);
     for (const f of families) this.nums.push(f.angle, f.spacing);
     this.nums.push(pts.length);
+    for (const p of pts) this.nums.push(p.x, p.y);
+  }
+
+  /**
+   * Zweifarben-Verlauf als echte Gradient-HATCH-Entität (Rand `pts`, geschlossen). `rgb1`/`rgb2` =
+   * 0xRRGGBB; `angle` (Radiant) = Richtung von `rgb1` nach `rgb2` (nur linear); `radial`: `rgb1` in der
+   * Mitte, `rgb2` am Rand.
+   */
+  addGradient(layer: string, pts: Vec2[], g: { rgb1: number; rgb2: number; angle: number; radial: boolean }): void {
+    if (pts.length < 3) return;
+    this.nums.push(REC_GRADIENT, this.layer(layer), g.rgb1, g.rgb2, g.angle, g.radial ? 1 : 0, pts.length);
     for (const p of pts) this.nums.push(p.x, p.y);
   }
 
@@ -213,6 +230,15 @@ export function buildPlanDxf(
   return new TextDecoder().decode(writeCad("dxf", collectPlanDrawing(plan, project, opts)));
 }
 
+/** Wie {@link buildPlanDxf}, aber als Binär-DXF (R2018, Bytes; deutlich kleiner und schneller zu lesen). */
+export function buildPlanDxfBinary(
+  plan: Plan,
+  project: Project,
+  opts: ExportDxfOptions = {},
+): Uint8Array {
+  return writeCad("dxfbin", collectPlanDrawing(plan, project, opts));
+}
+
 /** Wie {@link buildPlanDxf}, aber als DWG (R2018, Bytes). */
 export function buildPlanDwg(
   plan: Plan,
@@ -226,10 +252,15 @@ export function buildPlanDwg(
 function writeCad(format: CadExportFormat, drawing: FlatDrawing): Uint8Array {
   const m = fileio();
   const [flat, strings] = drawing.args();
-  const bytes = format === "dxf" ? m.export_dxf_flat(flat, strings) : m.export_dwg_flat(flat, strings);
+  const bytes =
+    format === "dxf"
+      ? m.export_dxf_flat(flat, strings)
+      : format === "dxfbin"
+        ? m.export_dxf_binary_flat(flat, strings)
+        : m.export_dwg_flat(flat, strings);
   if (bytes.length === 0) {
     const why = m.export_check_flat(flat, strings);
-    throw new Error(`${format.toUpperCase()}-Export fehlgeschlagen${why ? `: ${why}` : ""}`);
+    throw new Error(`${cadExtension(format).toUpperCase()}-Export fehlgeschlagen${why ? `: ${why}` : ""}`);
   }
   return bytes;
 }
@@ -289,11 +320,20 @@ function emitPrimitive(
       if (pts.length < 2) break;
       // Schraffur ([C2], 28.10.) als echte HATCH-Entität UNTER dem Umriss (Zeichenreihenfolge der
       // Datei): Vollfüllung bzw. Linienmuster (diagonal/Kreuz/Dämmung/frei, auch gestrichelt) mit dem
-      // Polygon als Rand und der aufgelösten Vordergrundfarbe. Bild-/Verlauf-Schraffur (kind==="image"/
-      // "gradient") trägt DXF nicht → FALLBACK ohne Muster (nur der Umriss). Random-Vektor
+      // Polygon als Rand und der aufgelösten Vordergrundfarbe. Verlauf-Schraffur (kind==="gradient")
+      // als echte Gradient-HATCH (zwei Farben, linear/radial); ohne lesbare Farben oder Bild-
+      // Schraffur (kind==="image") trägt DXF das nicht → FALLBACK ohne Muster (nur der Umriss). Random-Vektor
       // (deterministische Streu-Striche, Modell-Meter, identischer Seed wie Bildschirm/PDF) hat kein
       // Musteräquivalent → bleibt als einzelne Linien auf dem HATCH-Layer.
-      if (includeHatches && p.hatch.kind !== "image" && p.hatch.kind !== "gradient" && pts.length >= 3) {
+      if (includeHatches && p.hatch.kind === "gradient" && pts.length >= 3) {
+        const g = p.hatch.gradient;
+        const rgb1 = g ? rgbOrNull(g.color1) : null;
+        const rgb2 = g ? rgbOrNull(g.color2) : null;
+        if (g && rgb1 !== null && rgb2 !== null && Number.isFinite(g.angle)) {
+          // Richtung wie der SVG-Verlauf der Ansicht: Vektor (cos, sin) in Plan-Koordinaten = DXF-Winkel.
+          dxf.addGradient(LAYER_HATCH, pts, { rgb1, rgb2, angle: (g.angle * Math.PI) / 180, radial: g.type === "radial" });
+        }
+      } else if (includeHatches && p.hatch.kind !== "image" && pts.length >= 3) {
         const h = p.hatch;
         if (h.pattern === "solid") {
           dxf.addHatch(LAYER_HATCH, pts, { solid: true, rgb: rgbOrNull(h.color) });
@@ -430,8 +470,10 @@ export function rgbFromHex(hex: string): number {
 
 /** "#rrggbb" → 0xRRGGBB, bei unlesbarer Farbe (z. B. "none") null = Farbe der Ebene. */
 function rgbOrNull(hex: string): number | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  return m ? parseInt(m[1], 16) : null;
+  const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex.trim());
+  if (!m) return null;
+  const h = m[1].length === 3 ? m[1].replace(/./g, (c) => c + c) : m[1];
+  return parseInt(h, 16);
 }
 
 /** Millimeter → DXF-LWEIGHT (1/100 mm), gerundet auf gültige Stufen ≥ 0. */
@@ -448,12 +490,13 @@ export async function savePlanDxf(
   await loadFileio();
   const format = opts.format ?? "dxf";
   const data = writeCad(format, collectPlanDrawing(plan, project, opts));
+  const ext = cadExtension(format);
   const name = (opts.fileName ?? "grundriss").replace(/\.(dxf|dwg)$/i, "");
-  const blob = new Blob([data as BlobPart], { type: format === "dxf" ? "application/dxf" : "image/vnd.dwg" });
+  const blob = new Blob([data as BlobPart], { type: ext === "dxf" ? "application/dxf" : "image/vnd.dwg" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${name}.${format}`;
+  a.download = `${name}.${ext}`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

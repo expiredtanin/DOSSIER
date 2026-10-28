@@ -13,7 +13,7 @@ import type { CadExportFormat } from "../export/exportDxf";
 
 /** Entscheidung, die der Dialog beim Bestätigen liefert. */
 export interface ExportDxfDecision {
-  /** Dateiformat: DXF (R2018 ASCII) oder DWG (R2018). */
+  /** Dateiformat: DXF (R2018 ASCII), Binär-DXF (R2018) oder DWG (R2018). */
   format: CadExportFormat;
   includeHatches: boolean;
   /** „nur Auswahl" statt des ganzen Plans (nur relevant, wenn `selectionCount > 0`). */
@@ -78,10 +78,11 @@ export function ExportDxfDialog({
             <div className="imp-section-title">{t("exportDxf.format")}</div>
             <Dropdown
               value={format}
-              onChange={(v) => setFormat(v === "dwg" ? "dwg" : "dxf")}
+              onChange={(v) => setFormat(v === "dwg" ? "dwg" : v === "dxfbin" ? "dxfbin" : "dxf")}
               title={t("exportDxf.format")}
               options={[
                 { value: "dxf", label: t("exportDxf.format.dxf") },
+                { value: "dxfbin", label: t("exportDxf.format.dxfbin") },
                 { value: "dwg", label: t("exportDxf.format.dwg") },
               ]}
             />

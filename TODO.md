@@ -353,8 +353,25 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   - ✅ Georeferenz [69].
   - ○ Offen: IsExternal/LoadBearing/ThermalTransmittance für Wand/Decke/Tür/Fenster brauchen
     Modellfelder (z. B. am Wandtyp tragend/aussen, λ je Bauteil → U-Wert). · S–M
-  - ○ Offen: IfcMaterialLayerSetUsage + Achs-Darstellung („Axis") an Extrusions-Wänden;
-    Tür/Fenster mit Rahmen/Blatt statt Box; Bogenwände als echte Kurve. · M
+  - ✅ IfcMaterialLayerSetUsage + Achs-Darstellung an Extrusions-Wänden. (28.10.) Wand-Placement am
+    Wandanfang, X = Achse, Y = linke Normale (Rust rechnet die Welt-Profile und die Öffnungen ins
+    Wandsystem); „Axis“-Darstellung (IfcPolyline, Unterkontext GRAPH_VIEW) + Usage (AXIS2, POSITIVE,
+    Offset = Abstand der Aussenschicht von der Achse), nur wenn die Typ-Schichten den Bandquerschnitt
+    füllen. Mesh-Wände (schräge Oberkante, Laibung) bleiben ohne Achse/Usage. ifcopenshell liest
+    Achse = Wandachse (auch schräg/rückwärts gezeichnet) und die Bänder in Schichtreihenfolge ab Offset.
+    Offen: nicht in Revit/ArchiCAD geöffnet.
+  - ✅ Tür/Fenster mit echter Geometrie statt Box. (28.10.) `export/ifcOpenings.ts`: Fenster = Blendrahmen
+    (4 Teile) + Mittelpfosten + eine Glasscheibe je Flügel (Flügeltabelle/`wingCount`), Tür = Zarge (3 Teile)
+    + Blatt/Blätter (Glastür: Rahmen um eine Glasfläche = `glazingRatio`, Oberlicht mit Kämpfer); getrennte
+    Körper in einer Darstellung, je mit IfcStyledItem (Rahmen/Blatt/Glas mit Transparenz). Masse aus dem
+    Modell (Rahmenbreite/-tiefe, Schichteinzug, Verglasung), sonst die Konstanten des 3D (6 cm, 7 cm, Blatt
+    4 cm; Glaspaket 6/24/36 mm). Eigenes Füllungs-Placement (Tür: Y = Aufschlagrichtung). OperationType
+    (Blattzahl, Scharnierseite, Schiebe) und PartitioningType (1–3 Flügel). Reine Wandöffnung: kein Körper.
+    Geprüft: ifcopenshell (0 Befunde; Volumen Rahmen + Glas, Welt-Lage, Stile je Körper), Modell-Rechnung
+    in `ifcOpenings.test.ts`. Offen: LEFT/RIGHT der Tür nach IFC-Konvention (Blick von der Aufschlagseite)
+    gelesen, nicht in Revit/ArchiCAD gegengeprüft; ohne Sprossen, Fensterbank, Rollladenkasten, Schwelle,
+    Flügelrahmen.
+  - ○ Offen: Bogenwände als echte Kurve. · M
   - ✅ Eigener IFC-Import ([B3]) zieht Öffnungen ab (28.10.): Rundreise vergleicht alle Wände mit dem
     ausgeschnittenen Volumen (`ifcImport.test.ts`).
   - ✅ Export nach Rust. (28.10.) `src-tauri/fileio/src/ifc_export.rs` schreibt die STEP-Datei
@@ -411,16 +428,22 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   Reihenfolge, Ebenen, Strichstärken, True-Color, Koordinaten ≤ 5e-7 m (Rundung des alten Writers auf 6 Stellen;
   neu volle f64). Neu: 2D-Texte als TEXT (fehlten bisher), CLI exportiert georeferenziert wie die App.
   Gegencheck ezdxf (`scripts/validate-dxf.py`, Test übersprungen ohne `pip install ezdxf`): 0 Auditor-Fehler.
-  Offen: Binär-DXF-Export.
+  - ✅ **Binär-DXF-Export** (28.10.): `export_dxf_binary` (acadrust `DxfWriter::new_binary`, R2018 UTF-8),
+    Dialog-Format „DXF binär“, CLI `dxf --binary`. Rundreise acadrust + ezdxf (gleiche Entitäten/Ebenen wie
+    ASCII, 0 Auditor-Fehler, kleiner als der Text). Offen: in AutoCAD/BricsCAD selbst nicht geöffnet.
+  - ✅ **Verlauf als echte Gradient-HATCH** (28.10.): `kind === "gradient"` → neuer Datensatz `REC_GRADIENT`
+    (`export.rs`): Name LINEAR/SPHERICAL, Farbstützen 0/1, Winkel = SVG-Richtung der Ansicht. ezdxf liest
+    Name, Rotation und beide Farben. Offen: Aussehen/Richtung in AutoCAD selbst ungeprüft (Winkel 0 =
+    Farbe 1 links angenommen); mehr als zwei Farbstützen kennt das Modell nicht.
   - ✅ **Export: echte HATCH-Entitäten** (28.10.): Schraffuren (`pattern` diagonal/Kreuz/Dämmung/frei, auch
     gestrichelt) und Vollfüllungen gehen als HATCH ins DXF/DWG statt als einzelne geklippte Linien: Rand =
     geschlossene Polylinienkante des Plan-Polygons, Musterzeilen aus Winkel und Linienabstand (Versatz schon
     gedreht, Strich-/Lückenfolge als `dash_lengths`), Vordergrundfarbe als True-Color, Ebene `HATCH`, vor dem
     Umriss gezeichnet (neuer flacher Datensatz `REC_HATCH`, `export.rs`). Zufallsstriche (`random`) haben
-    kein Musteräquivalent und bleiben Linien; Bild-/Verlauf-Schraffur wie bisher nur Umriss. Geprüft:
+    kein Musteräquivalent und bleiben Linien; Bild-Schraffur wie bisher nur Umriss (Verlauf: s. u.). Geprüft:
     acadrust-Rundreise DXF und DWG, ezdxf (Auditor 0 Fehler, Rand/Farbe/Musterzeilen), libredwg zählt gleiche
     Typen. Offen: Aussehen in AutoCAD/BricsCAD selbst nicht geprüft (Musterphase ab Ursprung bei
-    LV95-Koordinaten); Verlauf als echte Gradient-HATCH möglich (acadrust kann es), noch nicht umgesetzt.
+    LV95-Koordinaten); Verlauf siehe unten (jetzt Gradient-HATCH).
   - ✅ **DXF-Import in Rust** (28.10.): statt eigenem Tag-Reader acadrust (ASCII und Binär, R12–2018+,
     Code-Seiten) in `fileio/src/import.rs` → flacher f64-Puffer + String-Tabelle, dekodiert in
     `io/dxfParser.ts` (Rückgabetyp unverändert, neu `insUnits`). dxf-parser entfernt; Aufteilung grosser

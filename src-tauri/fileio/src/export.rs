@@ -31,12 +31,16 @@
 //              n_dash, d0 … d(n_dash−1) (Strichmuster in m: an, aus, an, aus …; 0 = durchgezogen),
 //              n_fam, (angle (rad), spacing (m)) × n_fam, n, x0, y0, … x(n−1), y(n−1)   (äusserer Rand)
 //
+//   GRADIENT = 8, layer, rgb1 (0xRRGGBB), rgb2 (0xRRGGBB), angle (rad, Richtung rgb1 → rgb2, DXF-Konvention),
+//              kind (0 = linear, 1 = radial: rgb1 in der Mitte, rgb2 am Rand), n, x0, y0, … (äusserer Rand)
+//
 // `layer` ist der Index des LAYER-Datensatzes (Reihenfolge des Auftretens, ab 0), er muss vorher
 // stehen. Schraffuren sind echte HATCH-Entitäten ([C2], 28.10.): Vollfüllung (`SOLID`) oder ein
 // Linienmuster, das hier aus Winkel und Linienabstand der Dossier-Schraffur gebaut wird (je Linienschar
 // eine Musterzeile, Basispunkt Ursprung — wie die Phase der bisherigen Schraffurlinien; Versatz =
 // Abstand senkrecht zur Linie, schon gedreht, wie DXF es speichert). Der Rand ist eine geschlossene
-// Polylinien-Kante. Zufallsstriche (`random`) haben kein Musteräquivalent: TS gibt sie weiter als
+// Polylinien-Kante. Farbverläufe (GRADIENT, [C2], 28.10.) sind echte Gradient-HATCHs (Gruppencodes
+// 450–470: Name LINEAR bzw. SPHERICAL, zwei Farbstützen 0 und 1, Winkel in Radiant). Zufallsstriche (`random`) haben kein Musteräquivalent: TS gibt sie weiter als
 // LINE-Datensätze aus.
 //
 // Fehlerverhalten: ein kaputter Puffer (falsche Version, unbekannter Datensatz, abgeschnitten, Index
@@ -44,8 +48,8 @@
 // (der alte Writer schrieb dafür „0.0“ — eine Linie zum Nullpunkt ist schlechter als keine).
 
 use acadrust::entities::{
-    BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, HatchPattern, HatchPatternLine, HatchPatternType,
-    PolylineEdge,
+    BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, HatchGradientPattern, HatchPattern, HatchPatternLine,
+    HatchPatternType, PolylineEdge,
 };
 use acadrust::{
     Arc, CadDocument, Circle, Color, DwgWriter, DxfVersion, DxfWriter, EntityType, Layer, Line,
@@ -62,6 +66,7 @@ pub const REC_ARC: f64 = 4.0;
 pub const REC_CIRCLE: f64 = 5.0;
 pub const REC_TEXT: f64 = 6.0;
 pub const REC_HATCH: f64 = 7.0;
+pub const REC_GRADIENT: f64 = 8.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -192,12 +197,34 @@ fn make_hatch(pts: &[f64], solid: bool, families: &[(f64, f64)], dashes: &[f64])
         h.pattern_type = HatchPatternType::Custom;
         h
     };
+    add_outer_boundary(&mut hatch, pts);
+    hatch
+}
+
+/// Äusserer Rand als geschlossene Polylinien-Kante.
+fn add_outer_boundary(hatch: &mut Hatch, pts: &[f64]) {
     let mut path = BoundaryPath::with_flags(BoundaryPathFlags::from_bits(1 | 2)); // äusserer Rand, Polylinie
     path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
         pts.chunks_exact(2).map(|p| Vector2::new(p[0], p[1])).collect(),
         true,
     )));
     hatch.add_path(path);
+}
+
+/// Zweifarben-Verlauf als Gradient-HATCH (wie AutoCAD: Muster „SOLID“ + Gradient-Gruppencodes).
+/// `radial` = Kugelverlauf (`SPHERICAL`), sonst `LINEAR` mit Drehwinkel `angle` (rad).
+fn make_gradient_hatch(pts: &[f64], rgb1: u32, rgb2: u32, angle: f64, radial: bool) -> Hatch {
+    let mut hatch = Hatch::solid();
+    let mut g = HatchGradientPattern::new();
+    g.enabled = true;
+    g.angle = if radial { 0.0 } else { angle };
+    g.shift = 0.0;
+    g.is_single_color = false;
+    g.name = if radial { "SPHERICAL" } else { "LINEAR" }.to_string();
+    g.add_color(0.0, layer_color(rgb1 as f64));
+    g.add_color(1.0, layer_color(rgb2 as f64));
+    hatch.gradient_color = g;
+    add_outer_boundary(&mut hatch, pts);
     hatch
 }
 
@@ -294,6 +321,17 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                 }
                 EntityType::Hatch(Box::new(h))
             })
+        } else if tag == REC_GRADIENT {
+            let rgb1 = r.f()?;
+            let rgb2 = r.f()?;
+            let angle = r.f()?;
+            let kind = r.f()?;
+            let n = r.idx()?;
+            let pts = r.take(n.checked_mul(2).ok_or("Überlauf")?)?;
+            let in_range = |c: f64| c.is_finite() && (0.0..=16_777_215.0).contains(&c);
+            (n >= 3 && all_finite(pts) && angle.is_finite() && in_range(rgb1) && in_range(rgb2)).then(|| {
+                EntityType::Hatch(Box::new(make_gradient_hatch(pts, rgb1 as u32, rgb2 as u32, angle, kind == 1.0)))
+            })
         } else {
             return Err(format!("unbekannter Datensatz {tag} bei {}", r.pos - 1));
         };
@@ -312,6 +350,16 @@ pub fn export_dxf(flat: &[f64], strings: &str) -> Result<Vec<u8>, String> {
         .with_version(DXF_VERSION)
         .write_to_vec()
         .map_err(|e| format!("DXF schreiben: {e}"))
+}
+
+/// Flache Zeichnung → Binär-DXF-Bytes (R2018, UTF-8). acadrust hebt R2000/R2004 bei Binär-DXF selbst auf
+/// R2010 an (BricsCAD lehnt die alten Köpfe ab); R2018 ist davon unberührt.
+pub fn export_dxf_binary(flat: &[f64], strings: &str) -> Result<Vec<u8>, String> {
+    let doc = build_document(flat, strings)?;
+    DxfWriter::new_binary(&doc)
+        .with_version(DXF_VERSION)
+        .write_to_vec()
+        .map_err(|e| format!("Binär-DXF schreiben: {e}"))
 }
 
 /// Flache Zeichnung → DWG-Bytes (R2018).
@@ -339,6 +387,12 @@ mod web {
     #[wasm_bindgen]
     pub fn export_dxf_flat(flat: &[f64], strings: &str) -> Vec<u8> {
         super::export_dxf(flat, strings).unwrap_or_default()
+    }
+
+    /// Flache Zeichnung → Binär-DXF-Bytes (R2018); leer bei kaputtem Puffer.
+    #[wasm_bindgen]
+    pub fn export_dxf_binary_flat(flat: &[f64], strings: &str) -> Vec<u8> {
+        super::export_dxf_binary(flat, strings).unwrap_or_default()
     }
 
     /// Flache Zeichnung → DWG-Bytes (R2018); leer bei kaputtem Puffer.
@@ -643,5 +697,91 @@ mod tests {
         col.extend_from_slice(&sq);
         let doc = read_dxf(export_dxf(&col, "P").unwrap());
         assert!(matches!(doc.entities().next().unwrap().as_entity().common().color, Color::ByLayer));
+    }
+
+    /// Verlauf-HATCH: linear (45°) und radial, Farben, Name, Rand — DXF, Binär-DXF und DWG.
+    fn gradient_sample() -> (Vec<f64>, String) {
+        let (e, n) = (E, N);
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, -1.0, 13.0,
+            REC_GRADIENT, 0.0, 0xff_ff_ff as f64, 0x00_33_99 as f64, std::f64::consts::FRAC_PI_4, 0.0,
+            4.0, e, n, e + 4.0, n, e + 4.0, n + 3.0, e, n + 3.0,
+            REC_GRADIENT, 0.0, 0xff_00_00 as f64, 0x00_00_ff as f64, 0.0, 1.0,
+            3.0, e, n, e + 2.0, n, e + 1.0, n + 1.0,
+        ];
+        (flat, "HATCH".to_string())
+    }
+
+    fn check_gradients(doc: &CadDocument) {
+        let hs: Vec<&Hatch> = doc.entities().filter_map(|x| if let EntityType::Hatch(h) = x { Some(h.as_ref()) } else { None }).collect();
+        assert_eq!(hs.len(), 2);
+        for h in &hs {
+            assert!(h.gradient_color.enabled);
+            assert_eq!(h.gradient_color.colors.len(), 2);
+            assert_eq!(h.common.layer, "HATCH");
+            assert_eq!(h.paths.len(), 1);
+        }
+        let g = &hs[0].gradient_color;
+        assert_eq!(g.name, "LINEAR");
+        assert!((g.angle - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+        assert_eq!(g.colors[0].color.rgb(), Some((0xff, 0xff, 0xff)));
+        assert_eq!(g.colors[1].color.rgb(), Some((0x00, 0x33, 0x99)));
+        assert_eq!(hs[1].gradient_color.name, "SPHERICAL");
+        assert_eq!(hs[1].gradient_color.colors[0].color.rgb(), Some((0xff, 0, 0)));
+    }
+
+    #[test]
+    fn gradient_roundtrip_dxf_binary_und_dwg() {
+        let (flat, strings) = gradient_sample();
+        check_gradients(&read_dxf(export_dxf(&flat, &strings).unwrap()));
+        let bin = export_dxf_binary(&flat, &strings).unwrap();
+        assert!(bin.starts_with(b"AutoCAD Binary DXF"));
+        check_gradients(&read_dxf(bin));
+        check_gradients(&read_dwg(export_dwg(&flat, &strings).unwrap()));
+    }
+
+    #[test]
+    fn gradient_dxf_text_hat_gruppencodes_450_bis_470() {
+        let (flat, strings) = gradient_sample();
+        let text = String::from_utf8(export_dxf(&flat, &strings).unwrap()).unwrap();
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let has = |code: &str, val: &str| lines.windows(2).any(|w| w[0] == code && w[1] == val);
+        assert!(has("450", "1") && has("470", "LINEAR") && has("470", "SPHERICAL") && has("453", "2"));
+    }
+
+    #[test]
+    fn kaputte_gradienten_werden_verworfen() {
+        let head = [FLAT_VERSION, REC_LAYER, 0.0, -1.0, 13.0];
+        let sq = [4.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
+        for pre in [
+            [f64::NAN, 0.0, 0.0, 0.0],
+            [0.0, 1e12, 0.0, 0.0],
+            [0.0, 0.0, f64::INFINITY, 0.0],
+        ] {
+            let mut v = head.to_vec();
+            v.push(REC_GRADIENT);
+            v.push(0.0);
+            v.extend_from_slice(&pre);
+            v.extend_from_slice(&sq);
+            assert_eq!(read_dxf(export_dxf(&v, "P").unwrap()).entities().count(), 0, "{pre:?}");
+        }
+        // Weniger als 3 Randpunkte und abgeschnittener Puffer.
+        let mut two = head.to_vec();
+        two.extend_from_slice(&[REC_GRADIENT, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(read_dxf(export_dxf(&two, "P").unwrap()).entities().count(), 0);
+        let mut cut = head.to_vec();
+        cut.extend_from_slice(&[REC_GRADIENT, 0.0, 0.0, 0.0, 0.0]);
+        assert!(export_dxf(&cut, "P").is_err());
+        assert!(export_dxf_binary(&cut, "P").is_err());
+    }
+
+    #[test]
+    fn binary_dxf_mit_allen_datensatzarten() {
+        let (flat, strings) = sample();
+        let bin = export_dxf_binary(&flat, &strings).unwrap();
+        check(&read_dxf(bin));
+        let (flat, strings) = hatch_sample();
+        check_hatches(&read_dxf(export_dxf_binary(&flat, &strings).unwrap()));
     }
 }
