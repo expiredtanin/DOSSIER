@@ -29,6 +29,8 @@ import {
 import type { CategoryMode } from "../io/dxfToDrawings";
 import { Dropdown } from "./Dropdown";
 import { PDF_SCALES, PT_TO_MM } from "../io/pdfVector";
+import type { PdfVectorPage } from "../io/pdfVector";
+import { PdfCalibrate } from "./PdfCalibrate";
 
 /** Vektor-PDF ([76]): Seite und Massstab, nach denen `parsed` aus dem PDF abgeleitet wurde. */
 export interface PdfImportOptions {
@@ -42,6 +44,8 @@ export interface PdfImportOptions {
   heightPt: number;
   /** Bilder auf der Seite (werden nicht übernommen). */
   images: number;
+  /** Die gelesene Seite — Vorschau und Fangpunkte der Zwei-Punkt-Kalibrierung. */
+  preview: PdfVectorPage;
 }
 
 /** Strukturierte Import-Entscheidung, die der Dialog beim Bestätigen liefert. */
@@ -197,6 +201,8 @@ export function ImportDialog({
   const [applying, setApplying] = useState(false);
   // Freier PDF-Massstab (Texteingabe „1:75" oder „75"), angewandt bei Enter/Verlassen.
   const [customScaleText, setCustomScaleText] = useState("");
+  // Zwei-Punkt-Kalibrierung ([76]) aufgeklappt?
+  const [calibrating, setCalibrating] = useState(false);
   const applyCustomScale = () => {
     const n = Number(customScaleText.trim().replace(/^1\s*:\s*/, ""));
     if (pdf && onPdfChange && Number.isFinite(n) && n > 0) onPdfChange(pdf.page, n);
@@ -226,11 +232,11 @@ export function ImportDialog({
         className="imp-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={t("import.title")}
+        aria-label={pdf ? t("import.pdf.title") : t("import.title")}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="imp-head">
-          <span className="imp-head-title">{t("import.title")}</span>
+          <span className="imp-head-title">{pdf ? t("import.pdf.title") : t("import.title")}</span>
           <button
             className="imp-close"
             onClick={onClose}
@@ -359,6 +365,18 @@ export function ImportDialog({
                       }}
                     />
                   </div>
+                  <button className="imp-btn imp-cal-toggle" onClick={() => setCalibrating((o) => !o)} aria-expanded={calibrating}>
+                    {calibrating ? t("import.pdf.cal.close") : t("import.pdf.cal.open")}
+                  </button>
+                  {calibrating && (
+                    <PdfCalibrate
+                      page={pdf.preview}
+                      onApply={(n) => {
+                        setCalibrating(false);
+                        onPdfChange(pdf.page, n);
+                      }}
+                    />
+                  )}
                   <div className="imp-note">
                     {t("import.pdf.size", {
                       w: Math.round(pdf.widthPt * PT_TO_MM),
@@ -559,6 +577,7 @@ export function buildDrawings(
   project: Project,
   activeCategoryCode: string,
   codeByLayer?: ReadonlyMap<string, string>,
+  lineStyleByLayer?: ReadonlyMap<string, string>,
 ) {
   // Layer-Name → Kategorie-Code: bevorzugt eine Kategorie mit demselben Namen
   // (case-insensitiv), sonst der aktive Code. Identifier bleiben so stabil.
@@ -582,6 +601,7 @@ export function buildDrawings(
     activeCategoryCode,
     layerToCode,
     fillColors ? (layer) => fillColors[layer] : undefined,
+    lineStyleByLayer ? (layer) => lineStyleByLayer.get(layer) : undefined,
   );
   const fromTexts = textsToDrawings(
     decision.parsed.texts ?? [],

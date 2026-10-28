@@ -2,8 +2,11 @@
 //
 // Fachplaner schicken Pläne oft als aus ArchiCAD/Revit/AutoCAD geplottete Vektor-PDFs. Dieses Modul
 // interpretiert den Content-Stream einer Seite (eigener kleiner Interpreter über `pdf_object.rs`):
-//   • Pfade: m l c v y h re, Malen mit S s f F f* B B* b b* n (Clip W/W* wird ignoriert),
-//     Bézier-Kurven adaptiv tesselliert (Toleranz [`FLAT_TOL`] in pt).
+//   • Pfade: m l c v y h re, Malen mit S s f F f* B B* b b* n, Bézier-Kurven adaptiv tesselliert
+//     (Toleranz [`FLAT_TOL`] in pt). Reine Bézier-Teilpfade, die auf einem Kreis liegen, werden
+//     zusätzlich als Kreis/Bogen gemeldet (`PdfPath::curve`, s. `pdf_geom.rs`).
+//   • Clip: W/W* (Rechteck exakt, Polygon für Linien exakt, für Flächen bei konvexem Clip exakt, sonst
+//     an der Hüllbox), Form-/Seiten-BBox als Rechteck-Clip; Texte ausserhalb entfallen.
 //   • Grafikzustand: q/Q, cm (CTM), w, d, gs (ExtGState /LW /D), Farben G g RG rg K k CS cs SC sc
 //     SCN scn (DeviceGray/RGB/CMYK, ICCBased nach /N, CalGray/CalRGB, Separation/DeviceN als
 //     Tönung von Schwarz, Indexed mit Tabelle, Pattern → letzte Farbe).
@@ -25,6 +28,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::pdf_geom::{fit_curve, Clip, Cubic};
+pub use crate::pdf_geom::PdfCurve;
 use crate::pdf_object::{is_ws, parse_from, Dict, Doc, Lexer, Obj, Stream, Tok};
 
 /// Sehnenfehler der Bézier-Tessellierung (pt, ≈ 0.02 mm Papier).
@@ -77,8 +82,10 @@ pub struct PdfPath {
     pub even_odd: bool,
     /// Linienbreite in pt (0 = Haarlinie).
     pub line_width: f64,
-    /// Strichmuster in pt (leer = durchgezogen).
+    /// Strichmuster in pt (leer = durchgezogen; Länge immer gerade, Phase entfällt).
     pub dash: Vec<f64>,
+    /// Erkannter Kreis/Bogen (Bézier-Folge), `pts` bleibt als Vieleck erhalten.
+    pub curve: Option<PdfCurve>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,6 +157,8 @@ pub fn read_pdf_page(bytes: Vec<u8>, page_index: usize) -> Result<PdfPage, Strin
 
     let content = page_content(&doc, &pg.dict);
     let mut it = Interp::new(&doc, mul(&t, &r));
+    // Seite (CropBox) begrenzt die Zeichnung wie in einem PDF-Betrachter.
+    it.gs.clips.push(Rc::new(Clip::from_rect([0.0, 0.0, out.width, out.height])));
     let res = pg.resources.clone().unwrap_or_default();
     it.run(&content, &Rc::new(res), 0);
     it.flush_text();
@@ -668,6 +677,40 @@ fn load_font(doc: &Doc, fo: &Obj, res_name: &str) -> Font {
     f
 }
 
+/// Strichmuster aus dem Operanden-Array: ungerade Länge wiederholt sich gespiegelt → verdoppelt
+/// (Phase entfällt); nur Nullen = durchgezogen.
+fn dash_from(arr: &[Obj]) -> Vec<f64> {
+    let d: Vec<f64> = arr.iter().filter_map(Obj::as_f64).map(f64::abs).take(16).collect();
+    let d = if d.len() % 2 == 1 { [d.clone(), d].concat() } else { d };
+    if d.iter().all(|v| *v == 0.0) {
+        Vec::new()
+    } else {
+        d
+    }
+}
+
+/// Einen Pfad an einem Clip beschneiden: ausserhalb → weg, innen → unverändert, sonst Fläche
+/// (gefüllte, geschlossene Pfade) und Umriss getrennt beschnitten (Kreis/Bogen entfällt dann).
+fn clip_path(clip: &Clip, p: PdfPath, out: &mut Vec<PdfPath>) {
+    if clip.misses(&p.pts) {
+        return;
+    }
+    if clip.contains_all(&p.pts) {
+        out.push(p);
+        return;
+    }
+    if p.fill.is_some() && p.closed {
+        if let Some(pts) = clip.clip_polygon(&p.pts) {
+            out.push(PdfPath { pts, closed: true, stroke: None, curve: None, ..p.clone() });
+        }
+    }
+    if p.stroke.is_some() {
+        for pts in clip.clip_polyline(&p.pts, p.closed) {
+            out.push(PdfPath { pts, closed: false, fill: None, curve: None, ..p.clone() });
+        }
+    }
+}
+
 // ── Interpreter ───────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -684,6 +727,8 @@ struct GState {
     fill_alpha: f64,
     font: Option<Rc<Font>>,
     font_size: f64,
+    /// Aktive Clip-Bereiche (alle müssen erfüllt sein), Seitenkoordinaten.
+    clips: Vec<Rc<Clip>>,
     char_sp: f64,
     word_sp: f64,
     hscale: f64,
@@ -695,12 +740,20 @@ struct GState {
 struct Sub {
     pts: Vec<[f64; 2]>,
     closed: bool,
+    /// Kubische Segmente (Seitenkoordinaten) und Zahl der geraden Segmente — für die Kreiserkennung.
+    cubics: Vec<Cubic>,
+    lines: usize,
 }
+
+/// Höchstzahl gleichzeitiger Clip-Bereiche.
+const MAX_CLIPS: usize = 16;
 
 /// Offener Text, an den die nächste Zeichenkette angehängt werden kann (gleiche Zeile).
 struct PendingText {
     item: PdfText,
     end: [f64; 2],
+    /// Einfügepunkt liegt ausserhalb des Clips → nicht übernehmen.
+    clipped: bool,
 }
 
 struct Interp<'d> {
@@ -708,6 +761,8 @@ struct Interp<'d> {
     gs: GState,
     stack: Vec<GState>,
     subs: Vec<Sub>,
+    /// `W`/`W*` gesehen (Wert = gerade-ungerade): wirkt nach dem nächsten Malen/`n`.
+    pending_clip: Option<bool>,
     cur: Option<[f64; 2]>,
     start: Option<[f64; 2]>,
     tm: M,
@@ -739,6 +794,7 @@ impl<'d> Interp<'d> {
                 fill_alpha: 1.0,
                 font: None,
                 font_size: 0.0,
+                clips: Vec::new(),
                 char_sp: 0.0,
                 word_sp: 0.0,
                 hscale: 1.0,
@@ -748,6 +804,7 @@ impl<'d> Interp<'d> {
             },
             stack: Vec::new(),
             subs: Vec::new(),
+            pending_clip: None,
             cur: None,
             start: None,
             tm: IDENT,
@@ -840,21 +897,34 @@ impl<'d> Interp<'d> {
                 self.subs.pop();
             }
         }
-        self.subs.push(Sub { pts: vec![p], closed: false });
+        self.subs.push(Sub { pts: vec![p], closed: false, cubics: Vec::new(), lines: 0 });
         self.cur = Some(p);
         self.start = Some(p);
         self.points += 1;
     }
 
-    fn line_to(&mut self, p: [f64; 2]) {
+    /// Offenen Teilpfad sicherstellen (nach `h` beginnt ein neuer am Startpunkt).
+    fn ensure_sub(&mut self, fallback: [f64; 2]) {
         let need_new = match self.subs.last() {
             None => true,
             Some(s) => s.closed,
         };
         if need_new {
-            let st = self.start.or(self.cur).unwrap_or(p);
-            self.subs.push(Sub { pts: vec![st], closed: false });
+            let st = self.start.or(self.cur).unwrap_or(fallback);
+            self.subs.push(Sub { pts: vec![st], closed: false, cubics: Vec::new(), lines: 0 });
         }
+    }
+
+    fn line_to(&mut self, p: [f64; 2]) {
+        self.ensure_sub(p);
+        if let Some(s) = self.subs.last_mut() {
+            s.lines += 1;
+        }
+        self.push_pt(p);
+    }
+
+    /// Punkt an den offenen Teilpfad hängen (Zähler und Budget).
+    fn push_pt(&mut self, p: [f64; 2]) {
         if let Some(s) = self.subs.last_mut() {
             s.pts.push(p);
         }
@@ -874,11 +944,15 @@ impl<'d> Interp<'d> {
         let dd = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| ((a[0] - 2.0 * b[0] + c[0]).powi(2) + (a[1] - 2.0 * b[1] + c[1]).powi(2)).sqrt();
         let m = dd(p0, p1, p2).max(dd(p1, p2, p3));
         let n = if m.is_finite() { ((0.75 * m / FLAT_TOL).sqrt().ceil() as usize).clamp(1, MAX_BEZIER_SEG) } else { 1 };
+        self.ensure_sub(p3);
+        if let Some(s) = self.subs.last_mut() {
+            s.cubics.push([p0, p1, p2, p3]);
+        }
         for k in 1..=n {
             let t = k as f64 / n as f64;
             let u = 1.0 - t;
             let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
-            self.line_to([
+            self.push_pt([
                 a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
                 a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
             ]);
@@ -898,9 +972,22 @@ impl<'d> Interp<'d> {
         let subs = std::mem::take(&mut self.subs);
         self.cur = None;
         self.start = None;
-        if !stroke && !fill {
-            return;
+        // Ein W/W* vor dem Malen wirkt erst NACH dem Malen dieses Pfades.
+        let new_clip = self.pending_clip.take().and_then(|eo| {
+            let polys = subs.iter().map(|s| s.pts.clone()).collect();
+            Clip::from_polys(polys, eo)
+        });
+        if stroke || fill {
+            self.emit(subs, stroke, fill, even_odd);
         }
+        if let Some(c) = new_clip {
+            if self.gs.clips.len() < MAX_CLIPS {
+                self.gs.clips.push(Rc::new(c));
+            }
+        }
+    }
+
+    fn emit(&mut self, subs: Vec<Sub>, stroke: bool, fill: bool, even_odd: bool) {
         let lw = self.gs.lw * scale_of(&self.gs.ctm);
         let sc = scale_of(&self.gs.ctm);
         let dash: Vec<f64> = self.gs.dash.iter().map(|d| d * sc).collect();
@@ -934,7 +1021,13 @@ impl<'d> Interp<'d> {
             if pts.len() == 2 {
                 closed = false;
             }
-            self.paths.push(PdfPath {
+            // Reine Bézier-Folge auf einem Kreis → Kreis/Bogen (nur gestrichen, sonst nützt der Fang nichts).
+            let curve = if stroke_c.is_some() && s.lines == 0 && !s.cubics.is_empty() {
+                fit_curve(&s.cubics, s.closed || fill_c.is_some())
+            } else {
+                None
+            };
+            self.push_path(PdfPath {
                 pts,
                 closed,
                 stroke: stroke_c,
@@ -942,8 +1035,25 @@ impl<'d> Interp<'d> {
                 even_odd,
                 line_width: if lw.is_finite() { lw } else { 0.0 },
                 dash: dash.clone(),
+                curve,
             });
         }
+    }
+
+    /// Pfad nach Anwendung aller aktiven Clips anhängen.
+    fn push_path(&mut self, path: PdfPath) {
+        let mut pieces = vec![path];
+        for clip in self.gs.clips.iter() {
+            let mut next = Vec::with_capacity(pieces.len());
+            for p in pieces {
+                clip_path(clip, p, &mut next);
+            }
+            pieces = next;
+            if pieces.is_empty() {
+                return;
+            }
+        }
+        self.paths.extend(pieces);
     }
 
     fn set_color(&mut self, stroke: bool, ops: &[Obj]) {
@@ -1046,15 +1156,17 @@ impl<'d> Interp<'d> {
             }
         }
         self.flush_text();
+        let clipped = !self.gs.clips.iter().all(|c| c.inside(origin));
         self.pending = Some(PendingText {
             item: PdfText { text, font: font.name.clone(), x: origin[0], y: origin[1], size: height, angle, color },
             end,
+            clipped,
         });
     }
 
     fn flush_text(&mut self) {
         if let Some(p) = self.pending.take() {
-            if self.texts.len() < MAX_TEXTS {
+            if self.texts.len() < MAX_TEXTS && !p.clipped {
                 let mut it = p.item;
                 it.text = it.text.trim().to_string();
                 if !it.text.is_empty() {
@@ -1098,6 +1210,18 @@ impl<'d> Interp<'d> {
         let saved_stack = self.stack.len();
         let saved_subs = std::mem::take(&mut self.subs);
         self.gs.ctm = mul(&m, &self.gs.ctm);
+        // /BBox der Form beschneidet ihren Inhalt (Rechteck bzw. Parallelogramm nach der CTM).
+        if let Some(bb) = s.dict.get("BBox").and_then(|b| rect(self.doc, b)) {
+            let poly: Vec<[f64; 2]> = [[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]], [bb[0], bb[3]]]
+                .iter()
+                .map(|q| apply(&self.gs.ctm, q[0], q[1]))
+                .collect();
+            if let Some(c) = Clip::from_polys(vec![poly], false) {
+                if self.gs.clips.len() < MAX_CLIPS {
+                    self.gs.clips.push(Rc::new(c));
+                }
+            }
+        }
         if let Some(n) = refnum {
             self.forms.push(n);
         }
@@ -1166,7 +1290,7 @@ impl<'d> Interp<'d> {
                 self.paint(true, true, true);
             }
             b"n" => self.paint(false, false, false),
-            b"W" | b"W*" => {}
+            b"W" | b"W*" => self.pending_clip = Some(op == b"W*"),
             // Grafikzustand
             b"q" => {
                 if self.stack.len() < MAX_GSTACK {
@@ -1187,8 +1311,7 @@ impl<'d> Interp<'d> {
             b"w" if !n.is_empty() => self.gs.lw = f(0).abs(),
             b"d" => {
                 if let Some(Obj::Array(arr)) = a.first() {
-                    let d: Vec<f64> = arr.iter().filter_map(Obj::as_f64).map(f64::abs).take(16).collect();
-                    self.gs.dash = if d.iter().all(|v| *v == 0.0) { Vec::new() } else { d };
+                    self.gs.dash = dash_from(arr);
                 }
             }
             b"gs" => {
@@ -1206,8 +1329,7 @@ impl<'d> Interp<'d> {
                             }
                             if let Obj::Array(da) = self.doc.dget(egs, "D") {
                                 if let Some(Obj::Array(arr)) = da.first() {
-                                    let d: Vec<f64> = arr.iter().filter_map(Obj::as_f64).map(f64::abs).take(16).collect();
-                                    self.gs.dash = if d.iter().all(|v| *v == 0.0) { Vec::new() } else { d };
+                                    self.gs.dash = dash_from(arr);
                                 }
                             }
                         }
@@ -1335,9 +1457,9 @@ impl<'d> Interp<'d> {
 /// Flacher Puffer + String-Tabelle für die WASM-Grenze (TS: `src/io/pdfVector.ts`).
 ///
 /// ```text
-/// [1 (Version), pageCount, pageIndex, width, height, media×4, crop×4, rotate, truncated, images,
-///  nPaths, je Pfad: flags (1 geschlossen, 2 Strich, 4 Füllung, 8 gerade-ungerade),
-///                   strichRGB (-1 = keine), füllRGB (-1 = keine), linienbreite, nDash, dash…, nPts, x,y…,
+/// [2 (Version), pageCount, pageIndex, width, height, media×4, crop×4, rotate, truncated, images,
+///  nPaths, je Pfad: flags (1 geschlossen, 2 Strich, 4 Füllung, 8 gerade-ungerade, 16 Kreis/Bogen, 32 voller Kreis),
+///                   strichRGB (-1 = keine), füllRGB (-1 = keine), linienbreite, nDash, dash…, nPts, x,y…, [bei Flag 16: cx, cy, r, a0, a1],
 ///  nTexts, je Text: textIdx, fontIdx, x, y, grösse, winkel, farbe]
 /// ```
 pub fn encode(p: &PdfPage) -> (Vec<f64>, Vec<String>) {
@@ -1352,13 +1474,18 @@ pub fn encode(p: &PdfPage) -> (Vec<f64>, Vec<String>) {
         idx.insert(v.to_string(), strings.len() - 1);
         (strings.len() - 1) as f64
     };
-    g.extend_from_slice(&[1.0, p.page_count as f64, p.page_index as f64, p.width, p.height]);
+    g.extend_from_slice(&[2.0, p.page_count as f64, p.page_index as f64, p.width, p.height]);
     g.extend_from_slice(&p.media_box);
     g.extend_from_slice(&p.crop_box);
     g.extend_from_slice(&[p.rotate as f64, if p.truncated { 1.0 } else { 0.0 }, p.images as f64]);
     g.push(p.paths.len() as f64);
     for path in &p.paths {
-        let flags = u8::from(path.closed) | u8::from(path.stroke.is_some()) << 1 | u8::from(path.fill.is_some()) << 2 | u8::from(path.even_odd) << 3;
+        let flags = u8::from(path.closed)
+            | u8::from(path.stroke.is_some()) << 1
+            | u8::from(path.fill.is_some()) << 2
+            | u8::from(path.even_odd) << 3
+            | u8::from(path.curve.is_some()) << 4
+            | u8::from(path.curve.is_some_and(|c| c.circle)) << 5;
         g.push(flags as f64);
         g.push(path.stroke.map(|c| c as f64).unwrap_or(-1.0));
         g.push(path.fill.map(|c| c as f64).unwrap_or(-1.0));
@@ -1369,6 +1496,9 @@ pub fn encode(p: &PdfPage) -> (Vec<f64>, Vec<String>) {
         for q in &path.pts {
             g.push(q[0]);
             g.push(q[1]);
+        }
+        if let Some(c) = path.curve {
+            g.extend_from_slice(&[c.cx, c.cy, c.r, c.a0, c.a1]);
         }
     }
     g.push(p.texts.len() as f64);

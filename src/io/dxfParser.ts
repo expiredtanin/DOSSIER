@@ -47,6 +47,8 @@ export interface DxfImportResult {
   layerLineWeights?: Record<string, number>;
   /** Füllfarbe je Layer (PDF-Import [76]): gefüllte Konturen dieses Layers bekommen sie statt des Grau. */
   layerFillColors?: Record<string, string>;
+  /** Strichmuster je Layer in Papier-mm, an/aus/an/aus (PDF-Import [76], Operator `d`) — wird zum Linienstil. */
+  layerDashes?: Record<string, number[]>;
   /** `$INSUNITS` der Datei (0 = ohne Einheit, 4 = mm, 5 = cm, 6 = m …), roh wie gelesen. */
   insUnits?: number;
   /**

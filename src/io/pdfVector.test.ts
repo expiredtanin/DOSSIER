@@ -67,12 +67,12 @@ describe("Vektor-PDF-Import", () => {
     const k = pdfMetersPerPt(100);
     expect(k).toBeCloseTo(0.0352778, 6);
     const layers = distinctImportLayers(res.contours, res.texts ?? []).sort();
-    expect(layers).toEqual(["PDF 0.18 #ff0000 (- -)", "PDF 0.50 #000000", "PDF Fläche #808080", "PDF Text #000000"]);
+    expect(layers).toEqual(["PDF 0.18 #ff0000 (Strich 1.05/0.7)", "PDF 0.50 #000000", "PDF Fläche #808080", "PDF Text #000000"]);
     expect(res.layerLineWeights?.["PDF 0.50 #000000"]).toBe(0.5);
     expect(pdfLineWeightMm(0.5)).toBe(0.18);
 
     const plan = planImportCategories(layers, [], "Import plan.pdf", res.layerColors, res.layerLineWeights);
-    const cat = plan.parent?.children?.find((c) => c.name === "PDF 0.18 #ff0000 (- -)");
+    const cat = plan.parent?.children?.find((c) => c.name === "PDF 0.18 #ff0000 (Strich 1.05/0.7)");
     expect(cat).toMatchObject({ color: "#ff0000", lw: 0.18 });
     const code = (l: string) => plan.codeByLayer.get(l) ?? "00";
     const drawings = contoursToDrawings(res.contours, "eg", "byLayer", "00", code, (l) => res.layerFillColors?.[l]);
@@ -84,6 +84,12 @@ describe("Vektor-PDF-Import", () => {
       expect(line.a.x).toBeCloseTo(72 * k, 9);
       expect(line.b.x - line.a.x).toBeCloseTo(3.527778, 5); // 100 pt = 35.28 mm Papier = 3.53 m bei 1:100
     }
+    // Strichmuster → Linienstil: nur die gestrichelte Ebene bekommt eine lineStyleId.
+    const styled = contoursToDrawings(res.contours, "eg", "byLayer", "00", code, undefined, (l) =>
+      res.layerDashes?.[l] ? "pdf-dash" : undefined,
+    );
+    expect(styled.filter((d) => d.lineStyleId === "pdf-dash")).toHaveLength(1);
+    expect(res.layerDashes?.["PDF 0.18 #ff0000 (Strich 1.05/0.7)"]).toEqual([1.05, 0.7]);
     const fill = drawings.find((d) => d.fillColor);
     expect(fill?.fillColor).toBe("#808080");
     const texts = textsToDrawings(res.texts ?? [], "eg", "byLayer", "00", code);
@@ -113,5 +119,45 @@ describe("Vektor-PDF-Import", () => {
     expect(isPdfFile("plan.PDF")).toBe(true);
     expect(isPdfFile("x.bin", good)).toBe(true);
     expect(isPdfFile("x.dxf")).toBe(false);
+  });
+
+  it("Kreis und Bogen aus Bézier-Folgen kommen als echte Kurven (Fang an Mitte/Quadrant)", () => {
+    const k = 0.5522847498 * 40;
+    const [cx, cy, r] = [200, 300, 40];
+    const circle =
+      `${cx + r} ${cy} m ${cx + r} ${cy + k} ${cx + k} ${cy + r} ${cx} ${cy + r} c ` +
+      `${cx - k} ${cy + r} ${cx - r} ${cy + k} ${cx - r} ${cy} c ` +
+      `${cx - r} ${cy - k} ${cx - k} ${cy - r} ${cx} ${cy - r} c ` +
+      `${cx + k} ${cy - r} ${cx + r} ${cy - k} ${cx + r} ${cy} c h S `;
+    const arc = `100 100 m 100 ${100 + k} ${60 + k} 140 60 140 c S`; // Viertelbogen um (60,100), r 40
+    const page = readPdfVectorPage(makePdf(circle + arc));
+    expect(page.paths).toHaveLength(2);
+    expect(page.paths[0].curve).toMatchObject({ kind: "circle" });
+    expect(page.paths[0].curve?.cx).toBeCloseTo(cx, 3);
+    expect(page.paths[0].curve?.r).toBeCloseTo(r, 3);
+    expect(page.paths[1].curve).toMatchObject({ kind: "arc" });
+    expect(page.paths[1].curve?.a1).toBeCloseTo(Math.PI / 2, 3);
+
+    const res = pdfPageToImport(page, 100);
+    const m = pdfMetersPerPt(100);
+    const contours = res.contours[0].contours;
+    expect(contours[0].curve).toMatchObject({ kind: "circle" });
+    expect(contours[0].curve?.cx).toBeCloseTo(cx * m, 9);
+    expect(contours[0].curve?.r).toBeCloseTo(r * m, 9);
+    const drawings = contoursToDrawings(res.contours, "eg", "active", "00", () => "00");
+    expect(drawings[0].geom).toMatchObject({ shape: "circle" });
+    expect(drawings[1].geom).toMatchObject({ shape: "arc" });
+  });
+
+  it("Strichmuster: Muster in Papier-mm je Ebene, Clip-Rechteck beschneidet", () => {
+    const page = readPdfVectorPage(
+      makePdf("50 50 100 100 re W n 1 0 0 RG [8 4] 0 d 0 100 m 300 100 l S"),
+    );
+    expect(page.paths).toHaveLength(1);
+    expect(page.paths[0].pts).toEqual([{ x: 50, y: 100 }, { x: 150, y: 100 }]);
+    const res = pdfPageToImport(page, 50);
+    const layer = Object.keys(res.layerDashes ?? {})[0];
+    expect(layer).toMatch(/Strich 2\.8\/1\.4/);
+    expect(res.layerDashes?.[layer]).toEqual([2.8, 1.4]);
   });
 });

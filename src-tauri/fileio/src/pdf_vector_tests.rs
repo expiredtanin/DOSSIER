@@ -392,7 +392,7 @@ fn garbage_never_panics() {
 fn encode_layout() {
     let p = read_pdf_page(page_pdf("1 0 0 RG 2 w 10 20 m 110 20 l S BT /F1 10 Tf 5 6 Td (Hi) Tj ET", "<< >>", "", false).finish(), 0).unwrap();
     let (g, s) = encode(&p);
-    assert_eq!(g[0], 1.0);
+    assert_eq!(g[0], 2.0);
     assert_eq!(&g[1..5], &[1.0, 0.0, 595.0, 842.0]);
     // media×4, crop×4, rotate, truncated, images
     let mut i = 5 + 8 + 3;
@@ -415,4 +415,180 @@ fn constant_alpha_from_extgstate() {
     // Unsichtbare Fläche fehlt, halbe Deckkraft wird mit Weiss gemischt.
     assert_eq!(p.paths.len(), 1);
     assert_eq!(p.paths[0].fill, Some(0x808080));
+}
+
+// ── [76] Kreise/Bögen, Strichmuster, Clips ───────────────────────────────────
+
+fn circle_content(cx: f64, cy: f64, r: f64, op: &str) -> String {
+    let k = 0.5522847498 * r;
+    format!(
+        "{} {} m {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c h {op}",
+        cx + r, cy,
+        cx + r, cy + k, cx + k, cy + r, cx, cy + r,
+        cx - k, cy + r, cx - r, cy + k, cx - r, cy,
+        cx - r, cy - k, cx - k, cy - r, cx, cy - r,
+        cx + k, cy - r, cx + r, cy - k, cx + r, cy,
+    )
+}
+
+fn read(content: &str) -> PdfPage {
+    read_pdf_page(page_pdf(content, "<< >>", "", false).finish(), 0).unwrap()
+}
+
+#[test]
+fn circle_from_four_beziers_becomes_curve() {
+    let p = read(&circle_content(200.0, 300.0, 40.0, "S"));
+    assert_eq!(p.paths.len(), 1);
+    let c = p.paths[0].curve.expect("Kreis erkannt");
+    assert!(c.circle);
+    assert!((c.cx - 200.0).abs() < 1e-3 && (c.cy - 300.0).abs() < 1e-3 && (c.r - 40.0).abs() < 1e-2, "{c:?}");
+    assert!(p.paths[0].pts.len() > 16, "Vieleck bleibt zusätzlich erhalten");
+}
+
+#[test]
+fn circle_with_fill_keeps_curve_and_tiny_circle_works() {
+    let p = read(&format!("0 1 0 rg {}", circle_content(100.0, 100.0, 40.0, "B")));
+    assert!(p.paths[0].curve.is_some());
+    assert_eq!(p.paths[0].fill, Some(0x00ff00));
+    let p = read(&circle_content(100.0, 100.0, 0.5, "S"));
+    assert!(p.paths[0].curve.is_some_and(|c| c.circle));
+}
+
+#[test]
+fn quarter_arc_becomes_arc() {
+    // Viertelbogen um (200,200) r 100 von (300,200) nach (200,300).
+    let k = 55.228475;
+    let content = format!("300 200 m 300 {y} {x} 300 200 300 c S", y = 200.0 + k, x = 200.0 + k);
+    let p = read(&content);
+    let c = p.paths[0].curve.expect("Bogen");
+    assert!(!c.circle);
+    assert!((c.cx - 200.0).abs() < 1e-2 && (c.cy - 200.0).abs() < 1e-2 && (c.r - 100.0).abs() < 1e-2, "{c:?}");
+    assert!(c.a0.abs() < 1e-3 && (c.a1 - std::f64::consts::FRAC_PI_2).abs() < 1e-3, "{c:?}");
+    // Türschwung mit CTM-Verschiebung und Skalierung ×2 bleibt ein Bogen.
+    let p = read(&format!("2 0 0 2 10 20 cm 150 100 m 150 {y} {x} 150 100 150 c S", y = 100.0 + k / 2.0, x = 100.0 + k / 2.0));
+    let c = p.paths[0].curve.expect("Bogen mit CTM");
+    assert!((c.cx - 210.0).abs() < 1e-2 && (c.cy - 220.0).abs() < 1e-2 && (c.r - 100.0).abs() < 1e-2, "{c:?}");
+}
+
+#[test]
+fn ellipse_rounded_rect_and_wave_are_not_curves() {
+    // Ellipse 2:1 (Kubik-Näherung)
+    let k = 0.5522847498;
+    let (rx, ry) = (100.0, 50.0);
+    let (cx, cy) = (200.0, 200.0);
+    let e = format!(
+        "{} {} m {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c h S",
+        cx + rx, cy,
+        cx + rx, cy + k * ry, cx + k * rx, cy + ry, cx, cy + ry,
+        cx - k * rx, cy + ry, cx - rx, cy + k * ry, cx - rx, cy,
+        cx - rx, cy - k * ry, cx - k * rx, cy - ry, cx, cy - ry,
+        cx + k * rx, cy - ry, cx + rx, cy - k * ry, cx + rx, cy,
+    );
+    assert!(read(&e).paths[0].curve.is_none(), "Ellipse");
+    // Rechteck mit gerundeter Ecke: Linien + Kubik → kein Kreis
+    let r = read("0 0 m 100 0 l 100 90 l 90 100 100 100 100 100 c 0 100 l h S");
+    assert!(r.paths[0].curve.is_none());
+    assert!(read("0 0 m 10 20 20 -20 30 0 c S").paths[0].curve.is_none(), "S-Kurve");
+    assert!(read("0 0 m 100 0 l S").paths[0].curve.is_none());
+}
+
+#[test]
+fn dash_patterns_are_normalised() {
+    // ungerade Länge: wiederholt sich gespiegelt → verdoppelt; mit CTM ×2 skaliert
+    let p = read("[3] 0 d 0 0 m 10 0 l S 2 0 0 2 0 0 cm [4 1 2] 1 d 0 5 m 10 5 l S [0 0] 0 d 0 9 m 9 9 l S");
+    assert_eq!(p.paths[0].dash, vec![3.0, 3.0]);
+    assert_eq!(p.paths[1].dash, vec![8.0, 2.0, 4.0, 8.0, 2.0, 4.0]);
+    assert!(p.paths[2].dash.is_empty(), "[0 0] = durchgezogen");
+}
+
+#[test]
+fn rect_clip_cuts_lines_and_fills() {
+    let p = read("50 50 100 100 re W n 0 0 m 200 200 l S 0 1 0 rg 100 100 100 100 re f 300 300 m 400 400 l S");
+    assert_eq!(p.paths.len(), 2, "{:?}", p.paths);
+    assert!(near(p.paths[0].pts[0], [50.0, 50.0]) && near(p.paths[0].pts[1], [150.0, 150.0]), "{:?}", p.paths[0].pts);
+    let f = &p.paths[1];
+    assert_eq!(f.fill, Some(0x00ff00));
+    let (minx, maxx) = f.pts.iter().fold((f64::MAX, f64::MIN), |a, q| (a.0.min(q[0]), a.1.max(q[0])));
+    assert!((minx - 100.0).abs() < 1e-9 && (maxx - 150.0).abs() < 1e-9, "{:?}", f.pts);
+}
+
+#[test]
+fn clip_is_restored_by_q_and_nested_clips_intersect() {
+    let p = read("q 0 0 100 100 re W n 50 0 100 100 re W n 0 50 m 200 50 l S Q 0 70 m 200 70 l S");
+    assert_eq!(p.paths.len(), 2);
+    // Schnitt beider Rechtecke: x ∈ [50, 100]
+    assert!(near(p.paths[0].pts[0], [50.0, 50.0]) && near(p.paths[0].pts[1], [100.0, 50.0]), "{:?}", p.paths[0].pts);
+    // nach Q wieder ungeclippt (nur die Seite begrenzt)
+    assert!(near(p.paths[1].pts[1], [200.0, 70.0]));
+}
+
+#[test]
+fn clip_painting_operator_still_paints_unclipped() {
+    // „W f": die Fläche selbst wird noch ungeclippt gemalt, erst danach wirkt der Clip.
+    let p = read("0 0 10 10 re W f 0 5 m 100 5 l S");
+    assert_eq!(p.paths.len(), 2);
+    assert!(near(p.paths[1].pts[1], [10.0, 5.0]));
+}
+
+#[test]
+fn polygon_clip_triangle_and_evenodd() {
+    // Dreieck als Clip: Linie y = 20 schneidet es bei x ∈ [0, 60] (Dreieck (0,0)-(80,0)-(0,80))
+    let p = read("0 0 m 80 0 l 0 80 l h W n 0 20 m 100 20 l S");
+    assert_eq!(p.paths.len(), 1);
+    assert!(near(p.paths[0].pts[0], [0.0, 20.0]) && near(p.paths[0].pts[1], [60.0, 20.0]), "{:?}", p.paths[0].pts);
+    // L-förmiger (konkaver) Clip: Linie durch die Kerbe → nur Teil im L
+    let p = read("0 0 m 100 0 l 100 50 l 50 50 l 50 100 l 0 100 l h W n 0 70 m 120 70 l S");
+    assert_eq!(p.paths.len(), 1, "{:?}", p.paths);
+    assert!(near(p.paths[0].pts[1], [50.0, 70.0]), "{:?}", p.paths[0].pts);
+}
+
+#[test]
+fn form_bbox_clips_content_and_cropbox_clips_page() {
+    let res = "<< /XObject << /Fm1 6 0 R >> >>";
+    let mut b = page_pdf("/Fm1 Do 0 -10 m 0 30 l S", res, "", false);
+    b.stream(6, "/Type /XObject /Subtype /Form /BBox [0 0 50 50] /Matrix [1 0 0 1 100 100]", b"-20 25 m 80 25 l S", false);
+    let p = read_pdf_page(b.finish(), 0).unwrap();
+    assert_eq!(p.paths.len(), 2, "{:?}", p.paths);
+    // Form-BBox (0..50) + Matrix (100,100): Linie y = 125 nur von x = 100 bis 150.
+    assert!(near(p.paths[0].pts[0], [100.0, 125.0]) && near(p.paths[0].pts[1], [150.0, 125.0]), "{:?}", p.paths[0].pts);
+    // Seite: Linie ragt unter den Rand (y < 0) → auf die Seite beschnitten.
+    assert!(near(p.paths[1].pts[0], [0.0, 0.0]) && near(p.paths[1].pts[1], [0.0, 30.0]), "{:?}", p.paths[1].pts);
+}
+
+#[test]
+fn clipped_text_is_dropped_and_fill_stroke_split() {
+    let res = "<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>";
+    let content = "0 0 100 100 re W n BT /F1 10 Tf 10 10 Td (innen) Tj 1 0 0 1 300 300 Tm (aussen) Tj ET 0 0 1 rg 1 0 0 RG 90 90 50 50 re B";
+    let p = read_pdf_page(page_pdf(content, res, "", false).finish(), 0).unwrap();
+    assert_eq!(p.texts.len(), 1);
+    assert_eq!(p.texts[0].text, "innen");
+    // Teilweise sichtbare gefüllte+gestrichene Fläche: Fläche (beschnitten) + Umriss-Stücke
+    let fills: Vec<_> = p.paths.iter().filter(|q| q.fill.is_some()).collect();
+    let strokes: Vec<_> = p.paths.iter().filter(|q| q.stroke.is_some()).collect();
+    assert_eq!(fills.len(), 1);
+    assert!(fills[0].stroke.is_none() && fills[0].pts.iter().all(|q| q[0] <= 100.0 + 1e-9 && q[1] <= 100.0 + 1e-9));
+    assert!(!strokes.is_empty());
+    assert!(strokes.iter().all(|q| q.fill.is_none() && !q.closed));
+}
+
+#[test]
+fn clipped_circle_loses_curve_unclipped_keeps_it() {
+    let p = read(&format!("0 0 100 100 re W n {} {}", circle_content(50.0, 50.0, 20.0, "S"), circle_content(100.0, 50.0, 20.0, "S")));
+    assert_eq!(p.paths.len(), 2);
+    assert!(p.paths[0].curve.is_some());
+    assert!(p.paths[1].curve.is_none(), "angeschnittener Kreis ist kein Kreis mehr");
+}
+
+#[test]
+fn encode_carries_curve() {
+    let p = read(&circle_content(200.0, 300.0, 40.0, "S"));
+    let (g, _) = encode(&p);
+    let i = 5 + 8 + 3 + 1;
+    let flags = g[i] as u32;
+    assert_eq!(flags & 16, 16, "Kurven-Flag");
+    assert_eq!(flags & 32, 32, "Kreis-Flag");
+    let nd = g[i + 4] as usize;
+    let np = g[i + 5 + nd] as usize;
+    let c = i + 6 + nd + 2 * np;
+    assert!((g[c] - 200.0).abs() < 1e-2 && (g[c + 1] - 300.0).abs() < 1e-2 && (g[c + 2] - 40.0).abs() < 1e-2);
 }

@@ -36,6 +36,7 @@ pub mod pointcloud_e57;
 pub mod pointcloud_text;
 pub mod pdf_object;
 pub mod pdf_vector;
+pub mod pdf_geom;
 #[cfg(feature = "web")]
 mod web_pdf;
 
