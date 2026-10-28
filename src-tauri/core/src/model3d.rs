@@ -244,6 +244,11 @@ pub struct RWall {
 /// Textur-Karten-URLs der Bauteile in der Reihenfolge des ersten Auftretens: Wandtypen, dann
 /// Decken, dann Dächer (`wallMaterialColorMaps`).
 pub fn wall_material_color_maps(p: &Project) -> Vec<String> {
+    material_color_maps(p, None)
+}
+
+/// Wie [`wall_material_color_maps`]; `only_roof` beschränkt die Dächer auf eines (IFC-Export).
+pub fn material_color_maps(p: &Project, only_roof: Option<&str>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut list = Vec::new();
     let mut consider = |id: &str| {
@@ -267,7 +272,7 @@ pub fn wall_material_color_maps(p: &Project) -> Vec<String> {
             }
         }
     }
-    for r in p.roofs.as_deref().unwrap_or(&[]) {
+    for r in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| only_roof.is_none_or(|id| r.id == id)) {
         for l in p.roof_layers(r) {
             if !l.component_id.is_empty() {
                 consider(&l.component_id);
@@ -990,10 +995,10 @@ fn roof_color(p: &Project, override_color: Option<Rgb>, component_id: &str) -> R
 }
 
 /// Dächer als geschlossene, geschichtete Dreiecks-Meshes (`emitRoofs`).
-pub fn emit_roofs(p: &Project) -> Result<Vec<RMesh>, String> {
-    let maps = wall_material_color_maps(p);
+pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, String> {
+    let maps = material_color_maps(p, only_roof);
     let mut out = Vec::new();
-    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| only_roof.is_none_or(|id| r.id == id)) {
         let eaves_z = p.roof_base_elevation(roof);
         let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
         let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
@@ -1051,9 +1056,111 @@ pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
     Ok(out)
 }
 
+// ── Kontext und Bündel ──────────────────────────────────────────────────────
+
+const TERRAIN_RGB: Rgb = [169.0 / 255.0, 176.0 / 255.0, 162.0 / 255.0];
+const IMPORTED_RGB: Rgb = [159.0 / 255.0, 166.0 / 255.0, 174.0 / 255.0];
+
+fn indices_u32(v: &[f64]) -> Vec<u32> {
+    v.iter().map(|&i| i as u32).collect()
+}
+
+/// Rohe Kontext-Meshes: Gelände-TIN und importierte Volumen (`emitMeshes`).
+pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
+    let mut out = Vec::new();
+    for obj in p.context.as_deref().unwrap_or(&[]) {
+        match obj {
+            ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => out.push(RMesh {
+                positions: m.positions.clone(),
+                indices: indices_u32(&m.indices),
+                kind: "terrain",
+                color: TERRAIN_RGB,
+                vertex_colors: m.vertex_colors.clone().filter(|v| !v.is_empty()),
+                material_index: None,
+            }),
+            ContextObject::ImportedMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => out.push(RMesh {
+                positions: m.positions.clone(),
+                indices: indices_u32(&m.indices),
+                kind: "imported",
+                color: IMPORTED_RGB,
+                vertex_colors: None,
+                material_index: None,
+            }),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Das 3D-Modell in Teilen: TS fügt die truck-Körper (asynchron) zwischen Kontext und Stützen ein.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Parts {
+    pub walls: Vec<RWall>,
+    pub slabs: Vec<RSlab>,
+    pub context_meshes: Vec<RMesh>,
+    pub column_meshes: Vec<RMesh>,
+    pub opening_meshes: Vec<RMesh>,
+    pub stair_meshes: Vec<RMesh>,
+    pub stair_railings: Vec<RMesh>,
+    pub roof_meshes: Vec<RMesh>,
+    pub roof_layers: Vec<RRoofLayer>,
+}
+
+/// `detail`: 0 grob, 1 mittel, 2 fein.
+pub fn parts(p: &Project, layered: bool, detail: f64, for_section: bool) -> Result<Parts, String> {
+    let mut slabs = emit_slabs(p);
+    slabs.extend(emit_stairs(p, for_section));
+    Ok(Parts {
+        walls: emit_walls(p, layered)?,
+        slabs,
+        context_meshes: emit_context_meshes(p),
+        column_meshes: emit_columns(p),
+        opening_meshes: emit_opening_meshes(p, detail),
+        stair_meshes: emit_stair_meshes(p),
+        stair_railings: emit_stair_railings(p),
+        roof_meshes: emit_roofs(p, None)?,
+        roof_layers: emit_roof_cut_layers(p)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Walmdach 12×7 m: zwei Trapeze + zwei Walm-Dreiecke, First (3,3)-(8,3).
+    fn walm_planes() -> Vec<Vec<V3>> {
+        vec![
+            vec![[-0.5, -0.5, 5.2], [11.5, -0.5, 5.2], [8.0, 3.0, 7.061], [3.0, 3.0, 7.061]],
+            vec![[-0.5, 6.5, 5.2], [11.5, 6.5, 5.2], [8.0, 3.0, 7.061], [3.0, 3.0, 7.061]],
+            vec![[-0.5, -0.5, 5.2], [-0.5, 6.5, 5.2], [3.0, 3.0, 7.061]],
+            vec![[11.5, -0.5, 5.2], [11.5, 6.5, 5.2], [8.0, 3.0, 7.061]],
+        ]
+    }
+
+    fn near(a: V3, b: V3) -> bool {
+        hypot(&[a[0] - b[0], a[1] - b[1], a[2] - b[2]]) < 1e-6
+    }
+
+    #[test]
+    fn gehrung_erkennt_first_und_grate_als_geteilt() {
+        let planes = walm_planes();
+        let m = Mitre::new(&planes);
+        assert_eq!(m.shared[0], vec![false, true, true, true]); // Traufe, Grat, First, Grat
+        assert_eq!(m.shared[2], vec![false, true, true]);
+    }
+
+    #[test]
+    fn unterseiten_treffen_sich_am_first_apex() {
+        let planes = walm_planes();
+        let m = Mitre::new(&planes);
+        let d = 0.27;
+        let (a, b, c) = (m.at(0, d)[3], m.at(1, d)[3], m.at(2, d)[2]);
+        assert!(near(a, b) && near(a, c));
+        assert!(a[2] < 7.061);
+        assert_eq!(m.at(0, 0.0), planes[0]);
+        assert!(m.at(0, 0.2)[0][2] < 5.2);
+    }
 
     #[test]
     fn beispielprojekt_hat_decken_und_gueltige_farben() {

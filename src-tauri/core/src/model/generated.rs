@@ -4,8 +4,9 @@
 use super::manual::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LineStyleKind {
+    #[default]
     #[serde(rename = "dash")]
     Dash,
     #[serde(rename = "zigzag")]
@@ -14,21 +15,24 @@ pub enum LineStyleKind {
     Custom,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LineStyleZigzag {
     pub amplitude: f64,
     pub wavelength: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LineStyleMotif {
     pub points: Vec<Vec2>,
     pub length: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LineStyle {
     pub id: String,
@@ -45,7 +49,8 @@ pub struct LineStyle {
     pub motif: Option<LineStyleMotif>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Marks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,7 +73,8 @@ pub struct Marks {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct TextStylePreset {
     pub id: String,
@@ -76,8 +82,9 @@ pub struct TextStylePreset {
     pub marks: Marks,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum HatchStyleKind {
+    #[default]
     #[serde(rename = "vector")]
     Vector,
     #[serde(rename = "image")]
@@ -86,15 +93,17 @@ pub enum HatchStyleKind {
     Gradient,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum HatchStyleLines {
+    #[default]
     #[serde(rename = "parallel")]
     Parallel,
     #[serde(rename = "random")]
     Random,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct HatchStyleImage {
     pub src: String,
@@ -105,15 +114,17 @@ pub struct HatchStyleImage {
     pub rotation: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum HatchStyleGradientType {
+    #[default]
     #[serde(rename = "linear")]
     Linear,
     #[serde(rename = "radial")]
     Radial,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct HatchStyleGradient {
     pub color1: String,
@@ -122,8 +133,9 @@ pub struct HatchStyleGradient {
     pub r#type: HatchStyleGradientType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum HatchPattern {
+    #[default]
     #[serde(rename = "none")]
     None,
     #[serde(rename = "solid")]
@@ -138,14 +150,16 @@ pub enum HatchPattern {
     Custom,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct HatchStyleMotif {
     pub points: Vec<Vec2>,
     pub length: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct HatchStyle {
     pub id: String,
@@ -178,7 +192,8 @@ pub struct HatchStyle {
     pub motif: Option<HatchStyleMotif>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ComponentMaterial {
     #[serde(rename = "libraryId", default, skip_serializing_if = "Option::is_none")]
@@ -199,7 +214,8 @@ pub struct ComponentMaterial {
     pub size_m: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Component {
     pub id: String,
@@ -229,7 +245,8 @@ pub struct Component {
     pub join_priority: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Layer {
     #[serde(rename = "componentId")]
@@ -239,7 +256,8 @@ pub struct Layer {
     pub joint_line_style_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct WallType {
     pub id: String,
@@ -247,7 +265,8 @@ pub struct WallType {
     pub layers: Vec<Layer>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct CeilingType {
     pub id: String,
@@ -255,7 +274,8 @@ pub struct CeilingType {
     pub layers: Vec<Layer>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct RoofType {
     pub id: String,
@@ -263,7 +283,8 @@ pub struct RoofType {
     pub layers: Vec<Layer>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct BlockDef {
     pub id: String,
@@ -271,8 +292,9 @@ pub struct BlockDef {
     pub geom2d: Vec<Drawing2DGeom>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DoorTypeKind {
+    #[default]
     #[serde(rename = "dreh")]
     Dreh,
     #[serde(rename = "schiebe")]
@@ -281,8 +303,9 @@ pub enum DoorTypeKind {
     Wandoeffnung,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DoorTypeLeafStyle {
+    #[default]
     #[serde(rename = "glatt")]
     Glatt,
     #[serde(rename = "kassette")]
@@ -291,16 +314,18 @@ pub enum DoorTypeLeafStyle {
     Glas,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DoorTypeFrameKind {
+    #[default]
     #[serde(rename = "zarge")]
     Zarge,
     #[serde(rename = "blockrahmen")]
     Blockrahmen,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum FrameCornerJoin {
+    #[default]
     #[serde(rename = "vertikal")]
     Vertikal,
     #[serde(rename = "horizontal")]
@@ -309,15 +334,17 @@ pub enum FrameCornerJoin {
     Gehrung,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DoorTypeInsetFace {
+    #[default]
     #[serde(rename = "aussen")]
     Aussen,
     #[serde(rename = "innen")]
     Innen,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct DoorType {
     pub id: String,
@@ -357,8 +384,9 @@ pub struct DoorType {
     pub threshold: Option<bool>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OpeningKind {
+    #[default]
     #[serde(rename = "dreh")]
     Dreh,
     #[serde(rename = "kipp")]
@@ -371,23 +399,26 @@ pub enum OpeningKind {
     Schiebe,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SashDefKind {
+    #[default]
     #[serde(rename = "fluegel")]
     Fluegel,
     #[serde(rename = "pfosten")]
     Pfosten,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SashDefHingeSide {
+    #[default]
     #[serde(rename = "left")]
     Left,
     #[serde(rename = "right")]
     Right,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct SashDef {
     pub kind: SashDefKind,
@@ -403,8 +434,9 @@ pub struct SashDef {
     pub hinge_side: Option<SashDefHingeSide>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WindowShadingKind {
+    #[default]
     #[serde(rename = "rollladen")]
     Rollladen,
     #[serde(rename = "raffstore")]
@@ -413,7 +445,8 @@ pub enum WindowShadingKind {
     Markise,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct WindowShadingBox {
     pub width: f64,
@@ -421,7 +454,8 @@ pub struct WindowShadingBox {
     pub depth: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct WindowShading {
     pub create: bool,
@@ -429,8 +463,9 @@ pub struct WindowShading {
     pub r#box: WindowShadingBox,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WindowTypeGlazing {
+    #[default]
     #[serde(rename = "einfach")]
     Einfach,
     #[serde(rename = "zweifach")]
@@ -439,16 +474,18 @@ pub enum WindowTypeGlazing {
     Dreifach,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WindowTypeInsetFace {
+    #[default]
     #[serde(rename = "aussen")]
     Aussen,
     #[serde(rename = "innen")]
     Innen,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WindowTypeSillLineFaces {
+    #[default]
     #[serde(rename = "aussen")]
     Aussen,
     #[serde(rename = "innen")]
@@ -457,23 +494,26 @@ pub enum WindowTypeSillLineFaces {
     Beide,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WindowTypeSillLineView {
+    #[default]
     #[serde(rename = "auf")]
     Auf,
     #[serde(rename = "unter")]
     Unter,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct WindowTypeSillLine {
     pub faces: WindowTypeSillLineFaces,
     pub view: WindowTypeSillLineView,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WindowTypeSillBoard {
+    #[default]
     #[serde(rename = "keine")]
     Keine,
     #[serde(rename = "innen")]
@@ -484,7 +524,8 @@ pub enum WindowTypeSillBoard {
     Beide,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct WindowType {
     pub id: String,
@@ -531,8 +572,9 @@ pub struct WindowType {
     pub sill_board: Option<WindowTypeSillBoard>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StairTypeStructure {
+    #[default]
     #[serde(rename = "massiv")]
     Massiv,
     #[serde(rename = "beton")]
@@ -545,8 +587,9 @@ pub enum StairTypeStructure {
     Spindel,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StairTypeRailing {
+    #[default]
     #[serde(rename = "keine")]
     Keine,
     #[serde(rename = "links")]
@@ -557,7 +600,8 @@ pub enum StairTypeRailing {
     Beide,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct StairType {
     pub id: String,
@@ -575,21 +619,24 @@ pub struct StairType {
     pub default_width: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ColorPen {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct PenStyle {
     pub color: String,
     pub weight: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct PenSet {
     pub id: String,
@@ -597,7 +644,8 @@ pub struct PenSet {
     pub pens: std::collections::BTreeMap<String, PenStyle>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct CustomPalette {
     pub id: String,
@@ -607,7 +655,8 @@ pub struct CustomPalette {
     pub visible: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct BuiltinPaletteBanks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -620,8 +669,9 @@ pub struct BuiltinPaletteBanks {
     pub ral: Option<bool>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DrawingLevelKind {
+    #[default]
     #[serde(rename = "floor")]
     Floor,
     #[serde(rename = "section")]
@@ -632,7 +682,8 @@ pub enum DrawingLevelKind {
     Drawing,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct DrawingLevel {
     pub id: String,
@@ -662,8 +713,9 @@ pub struct DrawingLevel {
     pub level_marks: Option<bool>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SiaCategory {
+    #[default]
     #[serde(rename = "HNF")]
     HNF,
     #[serde(rename = "NNF")]
@@ -678,7 +730,8 @@ pub enum SiaCategory {
     AGF,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct RoomProgramRow {
     pub name: String,
@@ -689,21 +742,24 @@ pub struct RoomProgramRow {
     pub count: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct SunStudy {
     pub when: String,
     pub show: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct SiteRulesBuildingLines {
     pub a: Vec2,
     pub b: Vec2,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct SiteRules {
     pub parcel: Vec<Vec2>,
@@ -719,7 +775,8 @@ pub struct SiteRules {
     pub show: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LayerCategory {
     pub code: String,
@@ -736,16 +793,18 @@ pub struct LayerCategory {
     pub children: Option<Vec<LayerCategory>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum AttributeSource {
+    #[default]
     #[serde(rename = "layer")]
     Layer,
     #[serde(rename = "object")]
     Object,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WallReferenceLine {
+    #[default]
     #[serde(rename = "left")]
     Left,
     #[serde(rename = "center")]
@@ -754,8 +813,9 @@ pub enum WallReferenceLine {
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SliceTermination {
+    #[default]
     #[serde(rename = "both")]
     Both,
     #[serde(rename = "below")]
@@ -764,7 +824,8 @@ pub enum SliceTermination {
     Above,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Wall {
     pub id: String,
@@ -816,7 +877,8 @@ pub struct Wall {
     pub slice_termination: Option<SliceTermination>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Ceiling {
     pub id: String,
@@ -866,8 +928,9 @@ pub struct Ceiling {
     pub bottom: Option<VerticalAnchor>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RoofShape {
+    #[default]
     #[serde(rename = "flach")]
     Flach,
     #[serde(rename = "pult")]
@@ -882,8 +945,9 @@ pub enum RoofShape {
     Zelt,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RoofMansardType {
+    #[default]
     #[serde(rename = "giebel")]
     Giebel,
     #[serde(rename = "walm")]
@@ -892,15 +956,17 @@ pub enum RoofMansardType {
     Zelt,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RoofRidgeAxis {
+    #[default]
     #[serde(rename = "x")]
     X,
     #[serde(rename = "y")]
     Y,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Roof {
     pub id: String,
@@ -939,48 +1005,54 @@ pub struct Roof {
     pub color_pen_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ElementKind {
+    #[default]
     #[serde(rename = "window")]
     Window,
     #[serde(rename = "door")]
     Door,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OpeningDoorType {
+    #[default]
     #[serde(rename = "normal")]
     Normal,
     #[serde(rename = "wandoeffnung")]
     Wandoeffnung,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OpeningHinge {
+    #[default]
     #[serde(rename = "start")]
     Start,
     #[serde(rename = "end")]
     End,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SwingSide {
+    #[default]
     #[serde(rename = "left")]
     Left,
     #[serde(rename = "right")]
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OpeningOpeningDir {
+    #[default]
     #[serde(rename = "in")]
     In,
     #[serde(rename = "out")]
     Out,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OpeningLintelLines {
+    #[default]
     #[serde(rename = "keine")]
     Keine,
     #[serde(rename = "innen")]
@@ -991,8 +1063,9 @@ pub enum OpeningLintelLines {
     Beide,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum DetailLevel {
+    #[default]
     #[serde(rename = "grob")]
     Grob,
     #[serde(rename = "mittel")]
@@ -1001,7 +1074,8 @@ pub enum DetailLevel {
     Fein,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LineStyleOverride {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1010,7 +1084,8 @@ pub struct LineStyleOverride {
     pub weight: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Opening {
     pub id: String,
@@ -1061,8 +1136,9 @@ pub struct Opening {
     pub sill_line_style: Option<LineStyleOverride>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StairShape {
+    #[default]
     #[serde(rename = "straight")]
     Straight,
     #[serde(rename = "L")]
@@ -1071,8 +1147,9 @@ pub enum StairShape {
     Spiral,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StairReferenz {
+    #[default]
     #[serde(rename = "links")]
     Links,
     #[serde(rename = "mitte")]
@@ -1081,15 +1158,17 @@ pub enum StairReferenz {
     Rechts,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StairArrowStyle {
+    #[default]
     #[serde(rename = "line")]
     Line,
     #[serde(rename = "filled")]
     Filled,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Stair {
     pub id: String,
@@ -1136,15 +1215,17 @@ pub struct Stair {
     pub arrow_style: Option<StairArrowStyle>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct TextRun {
     pub text: String,
     pub marks: Marks,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Align {
+    #[default]
     #[serde(rename = "left")]
     Left,
     #[serde(rename = "center")]
@@ -1153,7 +1234,8 @@ pub enum Align {
     Right,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Paragraph {
     pub runs: Vec<TextRun>,
@@ -1163,14 +1245,16 @@ pub struct Paragraph {
     pub line_height: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct RichTextDoc {
     pub version: f64,
     pub paragraphs: Vec<Paragraph>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct RoomStamp {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1198,7 +1282,8 @@ pub struct RoomStamp {
     pub rounding_step: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Room {
     pub id: String,
@@ -1224,8 +1309,9 @@ pub struct Room {
     pub stamp: Option<RoomStamp>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EndMark {
+    #[default]
     #[serde(rename = "none")]
     None,
     #[serde(rename = "arrow")]
@@ -1240,7 +1326,8 @@ pub enum EndMark {
     Square,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Drawing2DEndMarks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1251,7 +1338,8 @@ pub struct Drawing2DEndMarks {
     pub size_mm: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Drawing2D {
     pub id: String,
@@ -1309,14 +1397,16 @@ pub struct Drawing2D {
     pub hatch_source: Option<AttributeSource>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ExtrudedSolidCircle {
     pub center: Vec2,
     pub r: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ExtrudedSolidBrep {
     pub spec: std::collections::BTreeMap<String, serde_json::Value>,
@@ -1325,7 +1415,8 @@ pub struct ExtrudedSolidBrep {
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ExtrudedSolid {
     pub id: String,
@@ -1350,7 +1441,8 @@ pub struct ExtrudedSolid {
     pub brep: Option<ExtrudedSolidBrep>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Column {
     pub id: String,
@@ -1397,7 +1489,8 @@ pub struct Column {
     pub hatch_source: Option<AttributeSource>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Group {
     pub id: String,
@@ -1423,7 +1516,8 @@ pub struct Group {
     pub group_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ParametricWall {
     pub id: String,
@@ -1435,16 +1529,18 @@ pub struct ParametricWall {
     pub default_wall_type_id: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OverrideConditionType {
+    #[default]
     #[serde(rename = "layer_name")]
     LayerName,
     #[serde(rename = "object_name")]
     ObjectName,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OverrideOperator {
+    #[default]
     #[serde(rename = "equals")]
     Equals,
     #[serde(rename = "contains")]
@@ -1455,7 +1551,8 @@ pub enum OverrideOperator {
     NotEquals,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct OverrideCondition {
     pub r#type: OverrideConditionType,
@@ -1463,7 +1560,8 @@ pub struct OverrideCondition {
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct OverrideActions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1474,7 +1572,8 @@ pub struct OverrideActions {
     pub linetype_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct OverrideRule {
     pub id: String,
@@ -1484,16 +1583,18 @@ pub struct OverrideRule {
     pub actions: OverrideActions,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ViewType {
+    #[default]
     #[serde(rename = "grundriss")]
     Grundriss,
     #[serde(rename = "perspektive")]
     Perspektive,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum View3d {
+    #[default]
     #[serde(rename = "front")]
     Front,
     #[serde(rename = "back")]
@@ -1516,7 +1617,8 @@ pub enum View3d {
     Perspective,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ViewSnapshot {
     pub id: String,
@@ -1547,7 +1649,8 @@ pub struct ViewSnapshot {
     pub camera_px_per_meter: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ViewSnapshotFolder {
     pub id: String,
@@ -1556,8 +1659,9 @@ pub struct ViewSnapshotFolder {
     pub parent_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LayoutPaperFormat {
+    #[default]
     #[serde(rename = "a0")]
     A0,
     #[serde(rename = "a1")]
@@ -1588,15 +1692,17 @@ pub enum LayoutPaperFormat {
     B6,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LayoutOrientation {
+    #[default]
     #[serde(rename = "portrait")]
     Portrait,
     #[serde(rename = "landscape")]
     Landscape,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LayoutViewport {
     pub id: String,
@@ -1614,7 +1720,8 @@ pub struct LayoutViewport {
     pub scale_denominator: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Layout {
     pub id: String,
@@ -1636,7 +1743,8 @@ pub struct Layout {
     pub annotations: Option<Vec<LayoutAnnotation>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LayoutTitleBlock {
     #[serde(rename = "projectName", default, skip_serializing_if = "Option::is_none")]
@@ -1651,7 +1759,8 @@ pub struct LayoutTitleBlock {
     pub author: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct MasterLayout {
     pub id: String,
@@ -1670,15 +1779,17 @@ pub struct MasterLayout {
     pub custom_height_mm: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LayoutFolderKind {
+    #[default]
     #[serde(rename = "layout")]
     Layout,
     #[serde(rename = "master")]
     Master,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct LayoutFolder {
     pub id: String,
@@ -1689,14 +1800,16 @@ pub struct LayoutFolder {
     pub kind: Option<LayoutFolderKind>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ProjectGeoAnchorLv95 {
     pub e: f64,
     pub n: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ProjectGeoAnchor {
     pub lv95: ProjectGeoAnchorLv95,
@@ -1707,7 +1820,8 @@ pub struct ProjectGeoAnchor {
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Project {
     #[serde(rename = "formatVersion", default, skip_serializing_if = "Option::is_none")]
@@ -1797,8 +1911,9 @@ pub struct Project {
     pub geo_anchor: Option<ProjectGeoAnchor>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum GridRuleDirections {
+    #[default]
     #[serde(rename = "x")]
     X,
     #[serde(rename = "y")]
@@ -1807,7 +1922,8 @@ pub enum GridRuleDirections {
     Both,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct GridRule {
     #[serde(rename = "gridId", default, skip_serializing_if = "Option::is_none")]
@@ -1825,15 +1941,17 @@ pub struct GridRule {
     pub height: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ModuleRuleDirection {
+    #[default]
     #[serde(rename = "x")]
     X,
     #[serde(rename = "y")]
     Y,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ModuleRule {
     #[serde(rename = "moduleSize")]
@@ -1849,15 +1967,17 @@ pub struct ModuleRule {
     pub height: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ConditionalThicknessRuleLogic {
+    #[default]
     #[serde(rename = "and")]
     And,
     #[serde(rename = "or")]
     Or,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ConditionalThicknessRule {
     pub condition: serde_json::Value,
@@ -1867,7 +1987,8 @@ pub struct ConditionalThicknessRule {
     pub logic: Option<ConditionalThicknessRuleLogic>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ReferenceLineRule {
     #[serde(rename = "referenceLine")]
@@ -1875,7 +1996,8 @@ pub struct ReferenceLineRule {
     pub target: serde_json::Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct SequenceRule {
     pub rules: Vec<ParametricRule>,
@@ -1883,7 +2005,8 @@ pub struct SequenceRule {
     pub stop_on_match: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ImportedMesh {
     pub id: String,
@@ -1896,15 +2019,17 @@ pub struct ImportedMesh {
     pub indices: Vec<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ContourCurveKind {
+    #[default]
     #[serde(rename = "circle")]
     Circle,
     #[serde(rename = "arc")]
     Arc,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ContourCurve {
     pub kind: ContourCurveKind,
@@ -1915,7 +2040,8 @@ pub struct ContourCurve {
     pub a1: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Contour {
     pub z: f64,
@@ -1929,7 +2055,8 @@ pub struct Contour {
     pub curve: Option<ContourCurve>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ContourSet {
     pub id: String,
@@ -1941,7 +2068,8 @@ pub struct ContourSet {
     pub contours: Vec<Contour>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct TerrainMesh {
     pub id: String,
@@ -1956,7 +2084,8 @@ pub struct TerrainMesh {
     pub vertex_colors: Option<Vec<f64>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ContextImageFilters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1969,7 +2098,8 @@ pub struct ContextImageFilters {
     pub grayscale: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct ContextImage {
     pub id: String,

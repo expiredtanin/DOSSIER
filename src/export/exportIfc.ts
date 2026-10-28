@@ -76,7 +76,7 @@ import type { RWall } from "../plan/toWalls3d";
 import { isWatertight, wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
 import { evaluateRoom } from "../geometry/roomArea";
 import { columnFootprint } from "../geometry/column";
-import { emitRoofs } from "../plan/toWalls3d/roofs";
+import { roofMeshes } from "../plan/toWalls3d";
 
 // ── IFC-GUID (Base64-Kompression, 22 Zeichen) ───────────────────────────────
 // Standard-Kompressionsalgorithmus (IfcOpenShell guid.compress): das erste
@@ -830,7 +830,7 @@ export function exportIfcSpf(projectIn: Project): string {
   }
 
   // ── Dächer → IfcRoof ───────────────────────────────────────────────────
-  // Dieselben geschlossenen Schicht-Meshes wie das 3D (`emitRoofs`: Dachflächen je Schicht,
+  // Dieselben geschlossenen Schicht-Meshes wie das 3D (`roofMeshes`: Dachflächen je Schicht,
   // an First/Grat gehrt), zu EINEM Face-Set je Dach vereint. Modell-Koordinaten sind bereits
   // Z-oben (kein Achsentausch wie bei den Wänden); die Wicklung wird so gewählt, dass das Volumen
   // positiv ist — nur dann ist das Face-Set als geschlossen markiert.
@@ -846,7 +846,7 @@ export function exportIfcSpf(projectIn: Project): string {
     const structure = resolveStructure(roof.floorId);
     const positions: number[] = [];
     const indices: number[] = [];
-    for (const mesh of emitRoofs({ ...project, roofs: [roof] })) {
+    for (const mesh of roofMeshes(project, roof.id)) {
       const base = positions.length / 3;
       for (let i = 0; i < mesh.positions.length; i += 3) {
         positions.push(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2] - structure.baseElevation);

@@ -491,16 +491,6 @@ pub fn railings(buf: &[f64]) -> Vec<Mesh> {
     out
 }
 
-pub fn encode_slabs(slabs: &[Slab]) -> Vec<f64> {
-    let mut out = vec![slabs.len() as f64];
-    for s in slabs {
-        out.extend([s.src as f64, if s.monolith { 1.0 } else { 0.0 }, s.z_bottom, s.z_top, s.pts.len() as f64]);
-        for p in &s.pts {
-            out.extend(*p);
-        }
-    }
-    out
-}
 
 #[cfg(test)]
 mod tests {

@@ -2,8 +2,7 @@
 
 use crate::flat_read::pairs;
 use crate::flat::{decode, encode};
-use crate::flat_read::Reader;
-use crate::sun::{self, Prism, SunPosition};
+use crate::sun::{self, SunPosition};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// `[azimut, höhe]` in Grad.
@@ -18,36 +17,6 @@ pub fn sun_position(lat: f64, lon: f64, unix_ms: f64) -> Vec<f64> {
 pub fn sun_shadow_of_prism(footprint: &[f64], z_bottom: f64, z_top: f64, azimuth: f64, elevation: f64) -> Vec<f64> {
     let r = sun::shadow_of_prism(&pairs(footprint), z_bottom, z_top, SunPosition { azimuth, elevation });
     r.into_iter().flatten().collect()
-}
-
-fn read_prisms(buf: &[f64]) -> Option<Vec<Prism>> {
-    let mut r = Reader::new(buf);
-    let n = r.count()?;
-    let mut out = Vec::with_capacity(n.min(1 << 16));
-    for _ in 0..n {
-        let (z_bottom, z_top) = (r.num()?, r.num()?);
-        out.push(Prism { footprint: r.ring()?, z_bottom, z_top });
-    }
-    Some(out)
-}
-
-fn read_clouds(buf: &[f64]) -> Option<Vec<Vec<[f64; 3]>>> {
-    let mut r = Reader::new(buf);
-    let n = r.count()?;
-    let mut out = Vec::with_capacity(n.min(1 << 16));
-    for _ in 0..n {
-        let k = r.count()?;
-        out.push(r.points3(k)?);
-    }
-    Some(out)
-}
-
-/// Prismen `[n, (zUnten, zOben, nPkt, x, y, …)…]` und Punktwolken `[n, (nPkt, x, y, z, …)…]`
-/// → vereinigter Schatten (Polygone, `flat`-Kodierung).
-#[wasm_bindgen]
-pub fn sun_shadow_union(prisms: &[f64], clouds: &[f64], azimuth: f64, elevation: f64) -> Vec<f64> {
-    let (Some(p), Some(c)) = (read_prisms(prisms), read_clouds(clouds)) else { return encode(&[]) };
-    encode(&sun::shadow_union(&p, &c, SunPosition { azimuth, elevation }))
 }
 
 /// Ein Polygon (`flat`, erstes Polygon zählt) → lochfreie Teile (`flat`, je ein Ring).

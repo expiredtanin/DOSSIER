@@ -271,3 +271,15 @@ pub enum ContextObject {
     #[serde(rename = "image")]
     Image(ContextImage),
 }
+
+impl Default for Drawing2DGeom {
+    fn default() -> Self {
+        Drawing2DGeom::Pointmarker { at: Vec2::default() }
+    }
+}
+
+impl Default for ColumnProfile {
+    fn default() -> Self {
+        ColumnProfile::Rect { width: 0.0, depth: 0.0 }
+    }
+}

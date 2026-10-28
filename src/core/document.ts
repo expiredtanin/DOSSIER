@@ -8,6 +8,25 @@ import type { Project } from "../model/types";
 import { core } from "../engine/coreWasm";
 import { diffToOps } from "./ops";
 
+/** Abfragen des Kerns (`queries.rs`). */
+export type QueryName =
+  | "kennzahlen"
+  | "siteCheck"
+  | "buildingFootprint"
+  | "modelTop"
+  | "shadows"
+  | "materialMaps"
+  | "slabs"
+  | "columnMeshes"
+  | "walls"
+  | "openingMeshes"
+  | "stairSlabs"
+  | "stairMeshes"
+  | "stairRailings"
+  | "roofMeshes"
+  | "roofCutLayers"
+  | "model3dParts";
+
 export class ProjectDocument {
   private handle = 0;
   private mirror: Project;
@@ -46,13 +65,20 @@ export class ProjectDocument {
   }
 
   /**
-   * Abfrage auf dem typisierten Projekt im Kern. Das Ergebnis ist JSON; ein Fehler (Projekt passt
-   * nicht zum Modell, unbekannte Abfrage) wirft.
+   * Abfrage auf dem typisierten Projekt im Kern (`queries.rs`); `args` Zahlen, `text` ein Text
+   * (z. B. eine id). Das Ergebnis ist JSON; Fehler im Kern (Projekt passt nicht zum Modell,
+   * Rechenfehler) werfen mit der Meldung des Kerns.
    */
-  query<T>(name: "kennzahlen" | "siteCheck" | "buildingFootprint" | "modelTop" | "shadows" | "slabs" | "columnMeshes" | "walls" | "openingMeshes" | "stairSlabs" | "stairMeshes" | "stairRailings" | "roofMeshes" | "roofCutLayers", args: number[] = []): T {
-    const text = this.handle ? core().doc_query_args(this.handle, name, Float64Array.from(args)) : "";
-    if (!text) throw new Error(`Kern-Abfrage „${name}": Projekt passt nicht zum Kern-Modell`);
-    return JSON.parse(text) as T;
+  query<T>(name: QueryName, args: number[] = [], text = ""): T {
+    return JSON.parse(this.queryJson(name, args, text)) as T;
+  }
+
+  /** Wie {@link query}, aber das JSON als Text (spart das Parsen, wenn es nur weitergereicht wird). */
+  queryJson(name: QueryName, args: number[] = [], text = ""): string {
+    if (!this.handle) throw new Error(`Kern-Abfrage „${name}": Dokument nicht offen`);
+    const out = core().doc_query_args(this.handle, name, Float64Array.from(args), text);
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return out;
   }
 
   /** Das Dokument als JSON-Text (Test, Export). */

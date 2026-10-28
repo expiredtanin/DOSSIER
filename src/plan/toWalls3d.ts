@@ -40,7 +40,7 @@
 // truck-Extrusionen, freie 2D-Geometrie) hat ihre eigene Datei unter
 // `toWalls3d/` — siehe dort für die konkrete Emissions-Logik je Bauteil.
 
-import type { Project, Vec2, Wall } from "../model/types";
+import type { Project, Vec2 } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
 import { stairVerticalExtent } from "../model/wall";
 import { openingJambs, openingVerticalExtent } from "../geometry/opening";
@@ -48,14 +48,10 @@ import type { DetailLevel } from "../model/viewTypes";
 import { stairBBox, stairGeometry } from "../geometry/stair";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import type { Vec3 as RoofVec3 } from "../geometry/roof";
-import { computeJoins } from "../model/joins";
-import type { WallCuts } from "../model/joins";
+import { documentFor } from "../core/document";
 import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "./pickTypes";
 import {
   EPS,
-  IMPORTED_RGB,
-  TERRAIN_RGB,
-  wallMaterialColorMaps,
   type RMesh,
   type RModel3d,
   type RRgb,
@@ -63,20 +59,14 @@ import {
   type RVec2,
   type RWall,
 } from "./toWalls3d/shared";
-import { emitWalls } from "./toWalls3d/bands";
-import { emitSlabs } from "./toWalls3d/ceilings";
-import { emitStairMeshes, emitStairRailings, emitStairs } from "./toWalls3d/stairs";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
 import { applyVoids3d } from "./toWalls3d/voids3d";
 import { emitDrawingLineVerts, pickDrawingSegs } from "./toWalls3d/drawing2d";
-import { emitColumns } from "./toWalls3d/columns";
-import { emitRoofCutLayers, emitRoofs } from "./toWalls3d/roofs";
-import { emitOpeningMeshes } from "./toWalls3d/openings";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
 // ausschliesslich von hier, unverändert zur Zeit vor dem Domänen-Split.
-export { wallMaterialColorMaps, TRUCK_MESH_READY_EVENT };
+export { TRUCK_MESH_READY_EVENT };
 // 2D-Boden-Spuren gehen NICHT über `RModel3d`, sondern als LineList über den
 // binären `set_drawing_lines`-Kanal (s. dortige Funktionsdoc) — der Viewport
 // holt sie direkt hier ab.
@@ -90,87 +80,34 @@ type RoofPickVec3 = [number, number, number];
 type RVec3 = [number, number, number];
 
 /**
- * Emittiert die rohen Kontext-Meshes eines Projekts: Gelände-TINs (`terrainMesh`)
- * und importierte Volumen (`importedMesh`) aus `project.context`, plus alle
- * übrigen Kontext-Mesh-Domänen (truck-Extrusionen, Stützen, 2D-Boden-Spuren).
- * `contourSet` bleibt außen vor — das sind nur 2D-Linien (Höhenlinien/
- * Footprints), keine Dreiecksmeshes. Die `positions`/`indices` der Geo-Meshes
- * werden 1:1 durchgereicht (Modell-Koordinaten, x,y,z=Höhe); render3d bildet
- * sie selbst nach world ab.
- */
-function emitMeshes(project: Project): RMesh[] {
-  const out: RMesh[] = [];
-  for (const obj of project.context ?? []) {
-    if (obj.type === "terrainMesh" || obj.type === "importedMesh") {
-      // Leere/entartete Meshes überspringen (render3d würde sie ohnehin verwerfen).
-      if (obj.positions.length < 9 || obj.indices.length < 3) continue;
-      out.push({
-        positions: obj.positions,
-        indices: obj.indices,
-        kind: obj.type === "terrainMesh" ? "terrain" : "imported",
-        color: obj.type === "terrainMesh" ? TERRAIN_RGB : IMPORTED_RGB,
-        // Luftbild-Drape: das Gelände-TIN kann Pro-Vertex-Farben tragen (beim
-        // Import aus dem Luftbild gesampelt) — dann zeigt render3d das Ortho
-        // statt der Flächen-Grundfarbe.
-        vertexColors:
-          obj.type === "terrainMesh" && obj.vertexColors?.length
-            ? obj.vertexColors
-            : undefined,
-      });
-    }
-  }
-  // 2D-Zeichnungen sind hier bewusst NICHT dabei: sie gehen als LineList über
-  // den binären `set_drawing_lines`-Kanal (s. `emitDrawingLineVerts`), weil ein
-  // Kataster-Import als Meshes im JSON-Modell weder serialisierbar noch
-  // speicherbar wäre (s. dortige Funktionsdoc).
-  //
-  // KEIN `out.push(...emitX(project))`: der Spread-Operator sprengt bei grossen
-  // Arrays die Argumentzahl-Grenze von `push` (RangeError "Maximum call stack
-  // size exceeded") — dieselbe, bereits dokumentierte Falle wie in
-  // `swissBuildings3d.ts::concatMeshes`/`dwgParser.ts`.
-  for (const m of emitExtrudedSolids(project)) out.push(m);
-  for (const m of emitColumns(project)) out.push(m);
-  return out;
-}
-
-/**
- * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände
- * mit Öffnungen in Teilquader.
+ * Nur die Wände (Rückwärts-Kompatibilität / bestehende Aufrufer). Zerlegt Wände mit Öffnungen in
+ * Teilquader bzw. (layered) in Schicht-Bänder. Rechnet der Kern auf dem Projekt-Dokument
+ * (`model3d.rs`: Verschneidung je Geschoss, Bänder, Öffnungen, Decken-/Dach-Dominanz).
  */
 export function projectToWalls3d(project: Project, layered = true): RWall[] {
-  const out: RWall[] = [];
-  // Verschneidungs-Schnittlinien PRO GESCHOSS berechnen (wie generatePlan.ts sie
-  // je Grundriss auf der gefilterten Wandmenge bildet) — nur für den layered-3D-
-  // Pfad. Nach Geschoss gruppieren, damit deckungsgleiche Wände verschiedener
-  // Geschosse (z. B. EG/OG an identischen XY-Knoten) NICHT fälschlich verschneiden.
-  // Der Schnitt-Pfad (layered=false) bekommt KEINE Cuts (unverändert, seine
-  // Dominanz macht toSection.ts). Anders als im 2D wird hier NICHT nach
-  // Sichtbarkeit gefiltert — 3D zeigt alle Wände, alle nehmen an den Joins teil.
-  const joins = layered ? computeJoinsByFloor(project) : undefined;
-  emitWalls(out, project, project.walls, layered, joins);
-  return out;
+  return documentFor(project).query<RWall[]>("walls", [layered ? 1 : 0]);
 }
 
 /**
- * Berechnet `computeJoins` getrennt je Geschoss (`wall.floorId`) und führt
- * die Ergebnis-Maps zu einer flachen `wallId → WallCuts` zusammen. So bilden nur
- * Wände desselben Geschosses gemeinsame Ecken/T-Stösse (identisch zur 2D-Semantik,
- * wo `generatePlan` je Grundriss aufruft).
+ * Textur-Karten-URLs der Bauteile in der Reihenfolge des ersten Auftretens (Wandtypen, Decken,
+ * Dächer): die Position + 1 ist die Textur-Ebene (`materialIndex`). Memoisiert je Projekt-Referenz.
  */
-function computeJoinsByFloor(project: Project): Map<string, WallCuts> {
-  const byFloor = new Map<string, Wall[]>();
-  for (const w of project.walls) {
-    const key = w.floorId ?? "";
-    const list = byFloor.get(key);
-    if (list) list.push(w);
-    else byFloor.set(key, [w]);
+const materialMapCache = new WeakMap<Project, string[]>();
+export function wallMaterialColorMaps(project: Project): string[] {
+  let maps = materialMapCache.get(project);
+  if (!maps) {
+    maps = documentFor(project).query<string[]>("materialMaps");
+    materialMapCache.set(project, maps);
   }
-  const merged = new Map<string, WallCuts>();
-  for (const walls of byFloor.values()) {
-    const cuts = computeJoins(project, walls);
-    for (const [id, wc] of cuts) merged.set(id, wc);
-  }
-  return merged;
+  return maps;
+}
+
+/**
+ * Dach-Meshes (geschlossene, geschichtete Körper je Dachschicht); `onlyRoofId` beschränkt auf ein
+ * Dach (IFC-Export). Rechnet der Kern.
+ */
+export function roofMeshes(project: Project, onlyRoofId?: string): RMesh[] {
+  return documentFor(project).query<RMesh[]>("roofMeshes", [], onlyRoofId ?? "");
 }
 
 /**
@@ -210,32 +147,45 @@ export interface Model3dOptions {
 export function projectToModel3d(project: Project, opts: Model3dOptions = {}): RModel3d {
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
+  const parts = documentFor(project).query<Model3dParts>(
+    "model3dParts",
+    [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0],
+  );
+  // Die truck-Körper (asynchron, mit Cache) kommen zwischen Kontext-Meshes und Stützen.
+  const meshes: RMesh[] = [...parts.contextMeshes];
+  for (const m of emitExtrudedSolids(project)) meshes.push(m);
+  for (const m of parts.columnMeshes) meshes.push(m);
+  for (const m of parts.openingMeshes) meshes.push(m);
+  for (const m of parts.stairMeshes) meshes.push(m);
+  for (const m of parts.stairRailings) meshes.push(m);
+  for (const m of parts.roofMeshes) meshes.push(m);
   const model: RModel3d = {
-    walls: projectToWalls3d(project, layered),
-    // Decken + Treppen (Treppentritte als extrudierte Slabs) — so wird die Treppe
-    // auch im WASM/wgpu-Renderer sichtbar (der three.js-Pfad rendert sie separat).
-    slabs: [...emitSlabs(project), ...emitStairs(project, { forSection: opts.forSection })],
-    // Kontext-Meshes (Terrain/Import) + Fenster-/Tür-Glasscheiben (eigenes Mesh
-    // je Scheibe) + Rahmen-/Sprossen-Riegel typisierter Öffnungen (Zarge/
-    // Blendrahmen/Kämpfer/Mittelpfosten, s. emitOpeningMeshes) + glatte Beton-
-    // Laufplatten (gerade Betontreppen als Mesh) + Dachflächen/-giebel
-    // (s. emitRoofs) — pickGeometry/Highlight nutzen `meshes` bewusst NICHT (man
-    // wählt Wand/Öffnung/Treppe; Treppen-Pick läuft über die pickGeometry-Boxen).
-    meshes: [
-      ...emitMeshes(project),
-      ...emitOpeningMeshes(project, detail),
-      ...emitStairMeshes(project),
-      ...emitStairRailings(project),
-      ...emitRoofs(project),
-    ],
-    // Dach-Schicht-Eingabe für den 3D-Live-Schnitt (render3d::roof_cut) — s.
-    // Kopfkommentar bei `RRoofLayer`/`emitRoofCutLayers`: getrennt von `meshes`,
-    // weil `section.rs` beliebige Dreiecksnetze nicht schneiden kann.
-    roofLayers: emitRoofCutLayers(project),
+    walls: parts.walls,
+    // Decken + Treppen (Treppentritte als extrudierte Slabs), Kontext-Meshes, Öffnungs-Einbauteile,
+    // Betonlaufplatten, Handläufe und Dachflächen: alles aus dem Kern; Dach-Schichten für den
+    // 3D-Live-Schnitt getrennt (`roofLayers`).
+    slabs: parts.slabs,
+    meshes,
+    roofLayers: parts.roofLayers,
   };
   if (opts.voids) applyVoids3d(model, project);
   return model;
 }
+
+/** Teile des 3D-Modells aus dem Kern (`model3d::Parts`). */
+interface Model3dParts {
+  walls: RWall[];
+  slabs: RSlab[];
+  contextMeshes: RMesh[];
+  columnMeshes: RMesh[];
+  openingMeshes: RMesh[];
+  stairMeshes: RMesh[];
+  stairRailings: RMesh[];
+  roofMeshes: RMesh[];
+  roofLayers: RModel3d["roofLayers"];
+}
+
+const DETAIL_CODE: Record<string, number> = { grob: 0, mittel: 1, fein: 2 };
 
 /**
  * Pick-Geometrie für den TS-seitigen 3D-Raycast (siehe viewport/raycast3d): die
@@ -340,7 +290,7 @@ export function pickGeometry(
   const drawings = pickDrawingSegs(project);
   return {
     walls: projectToWalls3d(project),
-    slabs: emitSlabs(project),
+    slabs: documentFor(project).query<RSlab[]>("slabs"),
     openings,
     stairs,
     roofs,

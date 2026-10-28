@@ -130,7 +130,12 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     `deny_unknown_fields`), `Document::project()` als gecachte typisierte Sicht, `documentFor(project)` (TS) hält ein gemeinsames
     Dokument per Differenz aktuell. Verbraucher bisher: Kennzahlen (`kennzahlen.rs::compute`), Baurecht-Prüfung/Footprint/Modellhöhe (`site_rules.rs`); Abfragen laufen
     über `doc_query`, Modell-Nachschlagen in `model/helpers.rs`. TS-Sammler gelöscht.
-    Nächste: Sonnenstand/Schatten, Raumprogramm, danach Plan/Schnitt/Ansicht, 3D, Export.
+    Sonnenstand/Schatten ebenso. **3D-Modell komplett** (28.10.): `model3d.rs` (Wände mit Verschneidung/Bändern/Öffnungen, Decken, Treppen,
+    Stützen, Dächer inkl. Schnitt-Schichten, Öffnungs-Einbauteile, Kontext) → `projectToModel3d` holt die Teile per `doc_query`
+    (`queries.rs`), nur die truck-Körper (async) fügt TS ein; TS-Sammler `toWalls3d/{bands,ceilings,columns,openings,stairs,roofs}.ts`
+    gelöscht, unbenutzte Bindungen/Kodierer entfernt. Hin-und-her-Vergleich mit der TS-Fassung lief über Zufallsprojekte, danach
+    prüft die bestehende Suite (2123 Tests) den neuen Weg. Das Modell ist tolerant (fehlende Felder = Standardwert).
+    Nächste: Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation), Export (IFC/DXF/SVG), Raumprogramm.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
   - ○ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung

@@ -62,44 +62,24 @@ pub fn doc_json(h: u32) -> String {
     with_doc(h, |d| d.to_json()).unwrap_or_default()
 }
 
-/// Abfrage auf dem typisierten Projekt; Ergebnis als JSON, leer bei Fehler (Dokument nicht offen,
-/// Modell passt nicht, unbekannte Abfrage). Abfragen: `kennzahlen`, `siteCheck` (`null` ohne
-/// Baurecht), `buildingFootprint`, `modelTop` (`null` ohne Bauteile).
+/// Abfrage auf dem typisierten Projekt; Ergebnis als JSON. Fehler (Dokument nicht offen, Modell
+/// passt nicht, unbekannte Abfrage, Rechenfehler) kommen als Text mit vorangestelltem `\u{1}`.
+/// Abfragen s. `crate::queries`.
 #[wasm_bindgen]
 pub fn doc_query(h: u32, name: &str) -> String {
-    doc_query_args(h, name, &[])
+    doc_query_args(h, name, &[], "")
 }
 
-/// Wie [`doc_query`] mit Zahlenargumenten. `shadows`: `[azimut, höhe]` → vereinigter Boden-Schatten.
+/// Wie [`doc_query`] mit Zahlen- und Textargument.
 #[wasm_bindgen]
-pub fn doc_query_args(h: u32, name: &str, args: &[f64]) -> String {
-    use crate::{kennzahlen, site_rules, sun};
-    let args = args.to_vec();
-    let name = name.to_owned();
-    with_doc(h, move |d| {
-        let p = d.project().ok()?;
-        let json = match name.as_str() {
-            "kennzahlen" => serde_json::to_string(&kennzahlen::compute(&p)),
-            "siteCheck" => serde_json::to_string(&site_rules::check_project(&p)),
-            "buildingFootprint" => serde_json::to_string(&site_rules::building_footprint(&p)),
-            "modelTop" => serde_json::to_string(&site_rules::model_top(&p)),
-            "walls" if args.len() == 1 => crate::model3d::emit_walls(&p, args[0] != 0.0).map_err(|_| ()).and_then(|w| serde_json::to_string(&w).map_err(|_| ())).map_err(|_| serde_json::Error::io(std::io::Error::other("walls"))),
-            "openingMeshes" if args.len() == 1 => serde_json::to_string(&crate::model3d::emit_opening_meshes(&p, args[0])),
-            "stairSlabs" if args.len() == 1 => serde_json::to_string(&crate::model3d::emit_stairs(&p, args[0] != 0.0)),
-            "stairMeshes" => serde_json::to_string(&crate::model3d::emit_stair_meshes(&p)),
-            "stairRailings" => serde_json::to_string(&crate::model3d::emit_stair_railings(&p)),
-            "roofMeshes" => crate::model3d::emit_roofs(&p).map_err(|e| serde_json::Error::io(std::io::Error::other(e))).and_then(|v| serde_json::to_string(&v)),
-            "roofCutLayers" => crate::model3d::emit_roof_cut_layers(&p).map_err(|e| serde_json::Error::io(std::io::Error::other(e))).and_then(|v| serde_json::to_string(&v)),
-            "slabs" => serde_json::to_string(&crate::model3d::emit_slabs(&p)),
-            "columnMeshes" => serde_json::to_string(&crate::model3d::emit_columns(&p)),
-            "shadows" if args.len() == 2 => {
-                let polys = sun::shadow_polygons_project(&p, sun::SunPosition { azimuth: args[0], elevation: args[1] });
-                serde_json::to_string(&site_rules::area_out(&polys))
-            }
-            _ => return None,
-        };
-        json.ok()
+pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
+    let result = with_doc(h, |d| {
+        let p = d.project().map_err(|e| format!("Projekt passt nicht zum Kern-Modell: {e}"))?;
+        crate::queries::run(&p, name, args, text)
     })
-    .flatten()
-    .unwrap_or_default()
+    .unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
+    match result {
+        Ok(json) => json,
+        Err(e) => format!("\u{1}{e}"),
+    }
 }

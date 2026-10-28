@@ -31,15 +31,3 @@ pub fn site_multi_polygon_area(polys: &[f64]) -> f64 {
 pub fn site_allowed_area(rules: &[f64]) -> Vec<f64> {
     encode(&read_rules(rules).map(|r| site_rules::allowed_area(&r)).unwrap_or_default())
 }
-
-/// `[gültig, Parzelle, zulässig, Verstoss, HöheÜberschritten, …flat(zulässig), …flat(Verstösse)]`;
-/// ungültig → `[0]`. `footprint` = Teile der Gebäude-Grundfläche (`flat`), `max_top` NaN = keine.
-#[wasm_bindgen]
-pub fn site_check(rules: &[f64], footprint: &[f64], max_height: f64, max_top: f64) -> Vec<f64> {
-    let (Some(r), Some(fp)) = (read_rules(rules), decode(footprint)) else { return vec![0.0] };
-    let Some(c) = site_rules::check_site_rules(&r, &fp, max_height, max_top) else { return vec![0.0] };
-    let mut out = vec![1.0, c.parcel_area, c.allowed_area, c.violation_area, if c.height_exceeded { 1.0 } else { 0.0 }];
-    out.extend(encode(&c.allowed));
-    out.extend(encode(&c.violations));
-    out
-}

@@ -155,7 +155,8 @@ def rust_enum(name, lits):
         while v in seen: v = f"{base}{n}"; n += 1
         seen.add(v)
         lines.append(f'    #[serde(rename = {json.dumps(l, ensure_ascii=False)})]\n    {v},')
-    return ("#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]\n"
+    lines[0] = "    #[default]\n" + lines[0]
+    return ("#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]\n"
             f"pub enum {name} {{\n" + "\n".join(lines) + "\n}\n")
 
 def rtype(t, ctx):
@@ -228,7 +229,8 @@ def emit_struct(name, fields):
             r = f"Option<{r}>"
         a = f"    #[serde({', '.join(attrs)})]\n" if attrs else ""
         lines.append(f"{a}    pub {rn}: {r},")
-    out_items.append("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\n"
+    out_items.append("#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]\n"
+                     + '#[serde(default)]\n'
                      + '#[cfg_attr(test, serde(deny_unknown_fields))]\n'
                      + f"pub struct {name} {{\n" + "\n".join(lines) + "\n}\n")
 
