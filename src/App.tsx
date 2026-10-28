@@ -1883,6 +1883,7 @@ export default function App() {
     setPendingDiscard,
     openImportForFile,
     loadImportLayout,
+    setImportPdfOptions,
     onSaveProject,
     onNewProject,
     onNewProjectFromSample,
@@ -3320,7 +3321,7 @@ export default function App() {
       <input
         ref={dxfInputRef}
         type="file"
-        accept=".dxf,.dwg,.ifc,text/plain"
+        accept=".dxf,.dwg,.ifc,.pdf,text/plain"
         style={{ display: "none" }}
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -3951,6 +3952,8 @@ export default function App() {
           error={importState.error}
           onSelectLayout={loadImportLayout}
           parsed={importState.parsed}
+          pdf={importState.pdf}
+          onPdfChange={setImportPdfOptions}
           project={project}
           activeCategoryCode={activeCategoryCode}
           onImport={runImport}

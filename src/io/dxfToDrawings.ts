@@ -37,6 +37,7 @@ export function contoursToDrawings(
   categoryMode: CategoryMode,
   fallbackCode: string,
   layerToCode: (layerName: string) => string,
+  fillColorOf?: (layerName: string) => string | undefined,
 ): Drawing2D[] {
   const out: Drawing2D[] = [];
   for (const set of sets) {
@@ -58,7 +59,7 @@ export function contoursToDrawings(
       // Aus einer HATCH stammende Kontur → geschlossene, gefüllte Form. Vollton-
       // Füllung als restylebarer Default (neutrales Grau); Umriss bleibt Kategorie.
       if (contour.filled && geom.shape === "polyline") {
-        drawing.fillColor = DXF_HATCH_FILL;
+        drawing.fillColor = fillColorOf?.(layerName) ?? DXF_HATCH_FILL;
       }
       out.push(drawing);
     }
@@ -136,6 +137,7 @@ export function planImportCategories(
   existing: readonly LayerCategory[],
   parentName: string,
   layerColors: Readonly<Record<string, string>> = {},
+  layerLineWeights: Readonly<Record<string, number>> = {},
 ): { parent: LayerCategory | null; codeByLayer: Map<string, string> } {
   const used = new Set<string>();
   const byName = new Map<string, string>();
@@ -170,7 +172,7 @@ export function planImportCategories(
       code,
       name,
       color: layerColors[name] ?? "#707078",
-      lw: 0.18,
+      lw: layerLineWeights[name] ?? 0.18,
       visible: true,
       locked: false,
     });

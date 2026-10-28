@@ -1,0 +1,117 @@
+// [76] Vektor-PDF → DXF-Import-Form → 2D-Zeichnung: Massstab, Ebenen nach Farbe/Strichstärke,
+// Flächenfarben, Texte; kaputte Dateien werfen, ohne das WASM-Modul lahmzulegen.
+
+import { beforeAll, describe, expect, it } from "vitest";
+import { loadFileioForTests } from "../engine/fileioWasm.testing";
+import {
+  isPdfFile,
+  pdfLineWeightMm,
+  pdfMetersPerPt,
+  pdfPageInfo,
+  pdfPageToImport,
+  readPdfVectorPage,
+} from "./pdfVector";
+import { contoursToDrawings, distinctImportLayers, planImportCategories, textsToDrawings } from "./dxfToDrawings";
+
+/** Minimales einseitiges PDF (A4 hoch) mit Inhalt `content`, Schrift F1 = Helvetica. */
+function makePdf(content: string, pageExtra = ""): Uint8Array {
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R ${pageExtra} >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offs: number[] = [];
+  objs.forEach((o, i) => {
+    offs.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offs) out += `${String(o).padStart(10, "0")} 00000 n \n`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(out);
+}
+
+const PLAN =
+  "0 0 0 RG 1.4173 w 72 72 m 172 72 l S\n" + // 0.5 mm schwarz, 100 pt lang
+  "1 0 0 RG 0.5 w [3 2] 0 d 72 100 m 172 100 l S [] 0 d\n" + // 0.18 mm rot gestrichelt
+  "0.5 g 0 0 0 RG 1.4173 w 200 200 50 50 re B\n" + // graue Fläche mit Umriss
+  "1 g 0 0 595 842 re f\n" + // weisser Seitenhintergrund (wird weggelassen)
+  "0 g BT /F1 10 Tf 72 300 Td (Wohnen) Tj ET";
+
+beforeAll(loadFileioForTests);
+
+describe("Vektor-PDF-Import", () => {
+  it("liest Pfade, Farben, Strichstärken und Text in pt", () => {
+    const page = readPdfVectorPage(makePdf(PLAN));
+    expect(page.pageCount).toBe(1);
+    expect([page.width, page.height]).toEqual([595, 842]);
+    expect(page.paths).toHaveLength(4);
+    expect(page.paths[0]).toMatchObject({ stroke: "#000000", fill: null, closed: false, dash: [] });
+    expect(page.paths[0].pts).toEqual([{ x: 72, y: 72 }, { x: 172, y: 72 }]);
+    expect(page.paths[1]).toMatchObject({ stroke: "#ff0000", lineWidth: 0.5, dash: [3, 2] });
+    expect(page.paths[2]).toMatchObject({ stroke: "#000000", fill: "#808080", closed: true });
+    expect(page.texts).toEqual([
+      { text: "Wohnen", font: "Helvetica", x: 72, y: 300, size: 10, angle: 0, color: "#000000" },
+    ]);
+    const info = pdfPageInfo(page);
+    expect(info).toMatchObject({ pages: 1, page: 1, paths: 4, texts: 1, bboxPt: [0, 0, 595, 842] });
+  });
+
+  it("Massstab 1:100 und Ebenen nach Strichstärke/Farbe → 2D-Zeichnung", () => {
+    const page = readPdfVectorPage(makePdf(PLAN));
+    const res = pdfPageToImport(page, 100);
+    const k = pdfMetersPerPt(100);
+    expect(k).toBeCloseTo(0.0352778, 6);
+    const layers = distinctImportLayers(res.contours, res.texts ?? []).sort();
+    expect(layers).toEqual(["PDF 0.18 #ff0000 (- -)", "PDF 0.50 #000000", "PDF Fläche #808080", "PDF Text #000000"]);
+    expect(res.layerLineWeights?.["PDF 0.50 #000000"]).toBe(0.5);
+    expect(pdfLineWeightMm(0.5)).toBe(0.18);
+
+    const plan = planImportCategories(layers, [], "Import plan.pdf", res.layerColors, res.layerLineWeights);
+    const cat = plan.parent?.children?.find((c) => c.name === "PDF 0.18 #ff0000 (- -)");
+    expect(cat).toMatchObject({ color: "#ff0000", lw: 0.18 });
+    const code = (l: string) => plan.codeByLayer.get(l) ?? "00";
+    const drawings = contoursToDrawings(res.contours, "eg", "byLayer", "00", code, (l) => res.layerFillColors?.[l]);
+    // Linie, gestrichelte Linie, Fläche + Umriss (Hintergrund weggelassen).
+    expect(drawings).toHaveLength(4);
+    const line = drawings[0].geom;
+    expect(line.shape).toBe("line");
+    if (line.shape === "line") {
+      expect(line.a.x).toBeCloseTo(72 * k, 9);
+      expect(line.b.x - line.a.x).toBeCloseTo(3.527778, 5); // 100 pt = 35.28 mm Papier = 3.53 m bei 1:100
+    }
+    const fill = drawings.find((d) => d.fillColor);
+    expect(fill?.fillColor).toBe("#808080");
+    const texts = textsToDrawings(res.texts ?? [], "eg", "byLayer", "00", code);
+    expect(texts[0].geom).toMatchObject({ shape: "text", text: "Wohnen" });
+    if (texts[0].geom.shape === "text") expect(texts[0].geom.height).toBeCloseTo(10 * k, 9);
+  });
+
+  it("Rotate 90 dreht die Seite (Breite/Höhe getauscht)", () => {
+    const page = readPdfVectorPage(makePdf("0 0 m 100 0 l S", "/Rotate 90"));
+    expect([page.width, page.height]).toEqual([842, 595]);
+    expect(page.paths[0].pts[1].x).toBeCloseTo(0, 9);
+    expect(page.paths[0].pts[1].y).toBeCloseTo(495, 9);
+  });
+
+  it("kaputte und fremde Dateien werfen eine Meldung, das Modul bleibt benutzbar", () => {
+    expect(() => readPdfVectorPage(new TextEncoder().encode("kein pdf"))).toThrow(/PDF/);
+    const good = makePdf(PLAN);
+    for (let cut = 0; cut < good.length; cut += 37) {
+      try {
+        readPdfVectorPage(good.subarray(0, cut));
+      } catch {
+        /* erwartet */
+      }
+    }
+    expect(() => readPdfVectorPage(good, 5)).toThrow(/Seite 6/);
+    expect(readPdfVectorPage(good).paths).toHaveLength(4);
+    expect(isPdfFile("plan.PDF")).toBe(true);
+    expect(isPdfFile("x.bin", good)).toBe(true);
+    expect(isPdfFile("x.dxf")).toBe(false);
+  });
+});
