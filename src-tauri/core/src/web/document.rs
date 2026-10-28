@@ -83,3 +83,10 @@ pub fn doc_query_args(h: u32, name: &str, args: &[f64], text: &str) -> String {
         Err(e) => format!("\u{1}{e}"),
     }
 }
+
+/// Boden-Spuren aller 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]` (Float32);
+/// leer bei Fehler oder ohne Zeichnungen.
+#[wasm_bindgen]
+pub fn doc_drawing_line_verts(h: u32) -> Vec<f32> {
+    with_doc(h, |d| d.project().ok().map(|p| crate::model3d::drawing_line_verts(&p))).flatten().unwrap_or_default()
+}

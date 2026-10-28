@@ -26,6 +26,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("stairRailings", _) => json(&model3d::emit_stair_railings(p)),
         ("roofMeshes", _) => json(&model3d::emit_roofs(p, if text.is_empty() { None } else { Some(text) })?),
         ("roofCutLayers", _) => json(&model3d::emit_roof_cut_layers(p)?),
+        ("pickGeometry", _) => json(&model3d::pick_geometry(p)?),
         ("model3dParts", 3) => json(&model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }

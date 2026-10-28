@@ -1124,6 +1124,233 @@ pub fn parts(p: &Project, layered: bool, detail: f64, for_section: bool) -> Resu
     })
 }
 
+// ── 2D-Zeichnungen im 3D (Boden-Spuren) ─────────────────────────────────────
+
+/// Doppelte je Charge an `drawing2d_3d` — begrenzt den Speicher bei Kataster-Importen.
+const CHUNK_DOUBLES: usize = 1 << 18;
+const DRAWING_LINE_ELEVATION_EPS: f64 = 0.01;
+const DRAWING_PICK_TOLERANCE: f64 = 0.12;
+
+/// Linienfarbe einer Zeichnung: color → Linienstil → Kategorie (`drawingColor3d`).
+fn drawing_color(
+    d: &Drawing2D,
+    by_category: &HashMap<&str, &str>,
+    by_line_style: &HashMap<&str, &str>,
+) -> Rgb {
+    let fb = style::DRAWING_LINE_FALLBACK_RGB;
+    if let Some(c) = d.color.as_deref().filter(|c| !c.is_empty()) {
+        return hex_to_rgb(c, fb);
+    }
+    if let Some(c) = d.line_style_id.as_deref().and_then(|id| by_line_style.get(id)) {
+        return hex_to_rgb(c, fb);
+    }
+    by_category.get(d.category_code.as_str()).map_or(fb, |c| hex_to_rgb(c, fb))
+}
+
+/// Packt die darstellbaren Zeichnungen (Linie, Polylinie, Rechteck) in Chargen für `drawing2d_3d`.
+fn for_each_drawing_chunk(p: &Project, with_color: bool, mut f: impl FnMut(&[f64], &[&Drawing2D])) {
+    if p.drawings2d.is_empty() {
+        return;
+    }
+    let cats = p.flat_categories();
+    let by_category: HashMap<&str, &str> = cats.iter().filter(|c| !c.color.is_empty()).map(|c| (c.code.as_str(), c.color.as_str())).collect();
+    let by_line_style: HashMap<&str, &str> = p.line_styles.iter().filter(|l| !l.color.is_empty()).map(|l| (l.id.as_str(), l.color.as_str())).collect();
+    let mut elevations: HashMap<&str, f64> = HashMap::new();
+    let mut buf: Vec<f64> = vec![0.0];
+    let mut ids: Vec<&Drawing2D> = Vec::new();
+    let flush = |buf: &mut Vec<f64>, ids: &mut Vec<&Drawing2D>, f: &mut dyn FnMut(&[f64], &[&Drawing2D])| {
+        if ids.is_empty() {
+            return;
+        }
+        buf[0] = ids.len() as f64;
+        f(buf, ids);
+        ids.clear();
+        buf.truncate(1);
+    };
+    for d in &p.drawings2d {
+        let (kind, pts): (f64, Vec<Vec2>) = match &d.geom {
+            Drawing2DGeom::Line { a, b } => (1.0, vec![*a, *b]),
+            Drawing2DGeom::Rect { min, max } => (3.0, vec![*min, *max]),
+            Drawing2DGeom::Polyline { pts, .. } => (2.0, pts.clone()),
+            _ => continue,
+        };
+        let need = 7 + 2 * pts.len();
+        if buf.len() + need > CHUNK_DOUBLES {
+            flush(&mut buf, &mut ids, &mut f);
+        }
+        let elev = *elevations.entry(d.level_id.as_str()).or_insert_with(|| p.floor(&d.level_id).map_or(0.0, |l| l.base_elevation.unwrap_or(0.0)) + DRAWING_LINE_ELEVATION_EPS);
+        let rgb = if with_color { drawing_color(d, &by_category, &by_line_style) } else { [0.0; 3] };
+        let closed = matches!(&d.geom, Drawing2DGeom::Polyline { closed: true, .. });
+        buf.extend([kind, elev, rgb[0], rgb[1], rgb[2], if closed { 1.0 } else { 0.0 }, pts.len() as f64]);
+        for q in &pts {
+            buf.extend([q.x, q.y]);
+        }
+        ids.push(d);
+    }
+    flush(&mut buf, &mut ids, &mut f);
+}
+
+/// Boden-Spuren aller Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]` (`emitDrawingLineVerts`).
+pub fn drawing_line_verts(p: &Project) -> Vec<f32> {
+    let mut out = Vec::new();
+    for_each_drawing_chunk(p, true, |buf, _| out.extend(crate::drawing2d_3d::line_verts(buf)));
+    out
+}
+
+/// Pick-Strecke einer Zeichnung (`PickDrawingSeg`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickDrawingSeg {
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+    pub base_elevation: f64,
+    pub drawing_id: String,
+}
+
+fn pick_drawing_segs(p: &Project) -> Vec<PickDrawingSeg> {
+    let mut out = Vec::new();
+    for_each_drawing_chunk(p, false, |buf, drawings| {
+        let f = crate::drawing2d_3d::pick_segs(buf, DRAWING_PICK_TOLERANCE);
+        for c in f.chunks_exact(6) {
+            out.push(PickDrawingSeg { start: [c[0], c[1]], end: [c[2], c[3]], base_elevation: c[4], drawing_id: drawings[c[5] as usize].id.clone() });
+        }
+    });
+    out
+}
+
+// ── Pick-Geometrie ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickBox {
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+    pub thickness: f64,
+    pub height: f64,
+    pub base_elevation: f64,
+    pub opening_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickStair {
+    pub outline: [[f64; 2]; 4],
+    pub z_bottom: f64,
+    pub z_top: f64,
+    pub stair_id: String,
+}
+
+type Tri = [V3; 3];
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickRoof {
+    pub tris: Vec<Tri>,
+    pub roof_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickContextMesh {
+    pub tris: Vec<Tri>,
+    pub context_object_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PickGeometry {
+    pub walls: Vec<RWall>,
+    pub slabs: Vec<RSlab>,
+    pub openings: Vec<PickBox>,
+    pub stairs: Vec<PickStair>,
+    pub roofs: Vec<PickRoof>,
+    #[serde(rename = "contextMeshes")]
+    pub context_meshes: Vec<PickContextMesh>,
+    pub drawings: Vec<PickDrawingSeg>,
+}
+
+/// Geometrie für den 3D-Raycast (`pickGeometry`).
+pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
+    // Dächer: Flächen + Giebel als Welt-Dreiecke (Fächer ab Punkt 0), Modell [x, y, h] → Welt [x, h, y].
+    let mut roofs = Vec::new();
+    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+        let to_world = |q: &V3| -> V3 { [q[0], q[2], q[1]] };
+        let mut tris: Vec<Tri> = Vec::new();
+        for poly in g.planes.iter().chain(g.gables.iter()) {
+            for i in 1..poly.len().saturating_sub(1) {
+                tris.push([to_world(&poly[0]), to_world(&poly[i]), to_world(&poly[i + 1])]);
+            }
+        }
+        if !tris.is_empty() {
+            roofs.push(PickRoof { tris, roof_id: roof.id.clone() });
+        }
+    }
+    let mut openings = Vec::new();
+    for o in p.openings.as_deref().unwrap_or(&[]) {
+        let Some(wall) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
+        let wr = wall_ref(p, wall);
+        let Some((jamb_start, jamb_end)) = opening_geom::opening_jambs(&wr, o.position, o.width) else { continue };
+        let thickness = p.wall_type(wall).map(|t| Project::type_thickness(&t.layers)).ok_or_else(|| format!("Unbekannter Wandtyp: {}", wall.wall_type_id))?;
+        let (zb, zt) = p.wall_vertical_extent(wall);
+        let o_bottom = zb + o.sill_height.max(0.0);
+        let o_top = zt.min(o_bottom + o.height);
+        if o_top - o_bottom <= 0.0 {
+            continue;
+        }
+        openings.push(PickBox {
+            start: [jamb_start.x, jamb_start.y],
+            end: [jamb_end.x, jamb_end.y],
+            thickness,
+            height: o_top - o_bottom,
+            base_elevation: o_bottom,
+            opening_id: o.id.clone(),
+        });
+    }
+    let mut stairs = Vec::new();
+    for st in p.stairs.as_deref().unwrap_or(&[]) {
+        let (z_bottom, z_top) = p.stair_vertical_extent(st);
+        let total_rise = z_top - z_bottom;
+        if total_rise <= 0.0 {
+            continue;
+        }
+        let geo = crate::stair::geometry(&st.encode(), total_rise);
+        let b = crate::stair::bbox(&geo);
+        let (min_x, min_y, max_x, max_y) = if b.len() >= 4 { (b[0], b[1], b[2], b[3]) } else { (0.0, 0.0, 0.0, 0.0) };
+        stairs.push(PickStair { outline: [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]], z_bottom, z_top, stair_id: st.id.clone() });
+    }
+    // Kontext-Meshes: rohe Welt-Dreiecke, Modell (x, y, z) → Welt (x, z, −y).
+    let mut context_meshes = Vec::new();
+    for obj in p.context.as_deref().unwrap_or(&[]) {
+        let (pos, idx, id) = match obj {
+            ContextObject::TerrainMesh(m) => (&m.positions, &m.indices, &m.id),
+            ContextObject::ImportedMesh(m) => (&m.positions, &m.indices, &m.id),
+            _ => continue,
+        };
+        let vcount = pos.len() / 3;
+        let at = |i: usize| -> V3 { [pos[i * 3], pos[i * 3 + 2], -pos[i * 3 + 1]] };
+        let mut tris: Vec<Tri> = Vec::new();
+        for t in idx.chunks_exact(3) {
+            let ok = |v: f64| v >= 0.0 && v.fract() == 0.0 && (v as usize) < vcount;
+            if !(ok(t[0]) && ok(t[1]) && ok(t[2])) {
+                continue;
+            }
+            tris.push([at(t[0] as usize), at(t[1] as usize), at(t[2] as usize)]);
+        }
+        if !tris.is_empty() {
+            context_meshes.push(PickContextMesh { tris, context_object_id: id.clone() });
+        }
+    }
+    Ok(PickGeometry {
+        walls: emit_walls(p, true)?,
+        slabs: emit_slabs(p),
+        openings,
+        stairs,
+        roofs,
+        context_meshes,
+        drawings: pick_drawing_segs(p),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

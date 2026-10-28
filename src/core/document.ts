@@ -25,6 +25,7 @@ export type QueryName =
   | "stairRailings"
   | "roofMeshes"
   | "roofCutLayers"
+  | "pickGeometry"
   | "model3dParts";
 
 export class ProjectDocument {
@@ -79,6 +80,11 @@ export class ProjectDocument {
     const out = core().doc_query_args(this.handle, name, Float64Array.from(args), text);
     if (out.startsWith("\u0001")) throw new Error(out.slice(1));
     return out;
+  }
+
+  /** Boden-Spuren der 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]`. */
+  drawingLineVerts(): Float32Array {
+    return this.handle ? core().doc_drawing_line_verts(this.handle) : new Float32Array(0);
   }
 
   /** Das Dokument als JSON-Text (Test, Export). */

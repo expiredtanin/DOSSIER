@@ -41,13 +41,8 @@
 // `toWalls3d/` — siehe dort für die konkrete Emissions-Logik je Bauteil.
 
 import type { Project, Vec2 } from "../model/types";
-import { getWallType, wallTypeThickness } from "../model/types";
-import { stairVerticalExtent } from "../model/wall";
-import { openingJambs, openingVerticalExtent } from "../geometry/opening";
 import type { DetailLevel } from "../model/viewTypes";
-import { stairBBox, stairGeometry } from "../geometry/stair";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
-import type { Vec3 as RoofVec3 } from "../geometry/roof";
 import { documentFor } from "../core/document";
 import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickDrawingSeg } from "./pickTypes";
 import {
@@ -61,20 +56,22 @@ import {
 } from "./toWalls3d/shared";
 import { emitExtrudedSolids, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
 import { applyVoids3d } from "./toWalls3d/voids3d";
-import { emitDrawingLineVerts, pickDrawingSegs } from "./toWalls3d/drawing2d";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
 // ausschliesslich von hier, unverändert zur Zeit vor dem Domänen-Split.
 export { TRUCK_MESH_READY_EVENT };
-// 2D-Boden-Spuren gehen NICHT über `RModel3d`, sondern als LineList über den
-// binären `set_drawing_lines`-Kanal (s. dortige Funktionsdoc) — der Viewport
-// holt sie direkt hier ab.
-export { emitDrawingLineVerts };
 export type { RVec2, RRgb, RWall, RSlab, RModel3d };
 
-/** World-Punkt [x, Höhe, y] für den Dach-Pick (Vec3-Konvention von raycast3d). */
-type RoofPickVec3 = [number, number, number];
+/**
+ * Boden-Spuren aller 2D-Zeichnungen (Linie, Polylinie, Rechteck) als LineList-Vertices
+ * `[px, py, pz, r, g, b]` in Welt-Metern für render3d (`set_drawing_lines`, Binärkanal — ein
+ * Kataster-DXF kann Millionen Segmente liefern, als JSON-Mesh sprengte das Speicher und
+ * String-Länge). Rechnet der Kern (`model3d.rs`, Chargen).
+ */
+export function emitDrawingLineVerts(project: Project): Float32Array {
+  return documentFor(project).drawingLineVerts();
+}
 
 /** Weltpunkt (x, elevation, y) — nur intern für Highlight-Kantengeometrie. */
 type RVec3 = [number, number, number];
@@ -209,94 +206,7 @@ export function pickGeometry(
   contextMeshes: PickContextMesh[];
   drawings: PickDrawingSeg[];
 } {
-  // Dächer: Dachflächen + Giebel als WORLD-Dreiecke (fan-trianguliert wie
-  // emitRoofs; model [x,y,z=Höhe] → world [x, z, y]) — präzise geneigte
-  // Flächen für den Ray-Dreieck-Pick (raycast3d.rayRoofTris).
-  const roofs: PickRoof[] = [];
-  for (const roof of project.roofs ?? []) {
-    const eavesZ = roofBaseElevation(project, roof);
-    const g = roofGeometry(roof, eavesZ);
-    const tris: [RoofPickVec3, RoofPickVec3, RoofPickVec3][] = [];
-    const toWorld = (p: RoofVec3): RoofPickVec3 => [p[0], p[2], p[1]];
-    for (const poly of [...g.planes.map((pl) => pl.pts), ...g.gables]) {
-      for (let i = 1; i + 1 < poly.length; i++) {
-        tris.push([toWorld(poly[0]), toWorld(poly[i]), toWorld(poly[i + 1])]);
-      }
-    }
-    if (tris.length > 0) roofs.push({ tris, roofId: roof.id });
-  }
-  const openings: PickOpening[] = [];
-  for (const o of project.openings ?? []) {
-    const wall = project.walls.find((w) => w.id === o.hostWallId);
-    if (!wall) continue;
-    const jambs = openingJambs(wall, o);
-    if (!jambs) continue;
-    const thickness = wallTypeThickness(getWallType(project, wall));
-    const { zBottom, zTop } = openingVerticalExtent(project, wall, o);
-    if (zTop - zBottom <= 0) continue;
-    openings.push({
-      start: [jambs.jambStart.x, jambs.jambStart.y],
-      end: [jambs.jambEnd.x, jambs.jambEnd.y],
-      thickness,
-      height: zTop - zBottom,
-      baseElevation: zBottom,
-      openingId: o.id,
-    });
-  }
-  const stairs: PickStair[] = [];
-  for (const st of project.stairs ?? []) {
-    const { zBottom, zTop } = stairVerticalExtent(project, st);
-    const totalRise = zTop - zBottom;
-    if (totalRise <= 0) continue;
-    const bbox = stairBBox(stairGeometry(st, totalRise));
-    stairs.push({
-      outline: [
-        [bbox.minX, bbox.minY],
-        [bbox.maxX, bbox.minY],
-        [bbox.maxX, bbox.maxY],
-        [bbox.minX, bbox.maxY],
-      ],
-      zBottom,
-      zTop,
-      stairId: st.id,
-    });
-  }
-  // Kontext-Meshes (importierte Gebäude/Terrain, s. ContextObject): rohe
-  // WORLD-Dreiecke, direkt aus dem Indexpuffer (kein Fan nötig — ImportedMesh/
-  // TerrainMesh liefern bereits ein echtes Dreiecksnetz). Kaputte Indizes
-  // robust überspringen statt abzustürzen (importierte Daten).
-  // Modell (x,y,z) → world (x, z, −y) — Nord-Achse NEGIERT, damit der Pick
-  // dieselbe (gespiegelte→korrigierte) Lage trifft wie die sichtbare Geometrie
-  // in `viewport3d/meshBuilders.ts::buildContextMesh` (dort ausführlich
-  // begründet: reines Achsen-Vertauschen ohne Vorzeichenwechsel ist für einen
-  // allgemeinen xyz-Punktsatz eine Spiegelung, anders als bei Wand/Dach, die
-  // über eine orientierungserhaltende Rotation/Fächer-Triangulation entstehen).
-  const contextMeshes: PickContextMesh[] = [];
-  for (const obj of project.context ?? []) {
-    if (obj.type === "contourSet" || obj.type === "image") continue;
-    const pos = obj.positions;
-    const vcount = pos.length / 3;
-    const tris: [RoofPickVec3, RoofPickVec3, RoofPickVec3][] = [];
-    for (let i = 0; i + 2 < obj.indices.length; i += 3) {
-      const ia = obj.indices[i];
-      const ib = obj.indices[i + 1];
-      const ic = obj.indices[i + 2];
-      if (ia >= vcount || ib >= vcount || ic >= vcount) continue;
-      const at = (idx: number): RoofPickVec3 => [pos[idx * 3], pos[idx * 3 + 2], -pos[idx * 3 + 1]];
-      tris.push([at(ia), at(ib), at(ic)]);
-    }
-    if (tris.length > 0) contextMeshes.push({ tris, contextObjectId: obj.id });
-  }
-  const drawings = pickDrawingSegs(project);
-  return {
-    walls: projectToWalls3d(project),
-    slabs: documentFor(project).query<RSlab[]>("slabs"),
-    openings,
-    stairs,
-    roofs,
-    contextMeshes,
-    drawings,
-  };
+  return documentFor(project).query("pickGeometry");
 }
 
 /**
