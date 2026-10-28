@@ -1,15 +1,17 @@
-# Eigener leerer Workspace-Block: entkoppelt dwgimport vollstaendig vom
+# Eigener leerer Workspace-Block: entkoppelt fileio vollstaendig vom
 # cad-tauri-Workspace (src-tauri/Cargo.toml). Muster: kernel2d/render2d.
 [workspace]
 
 [package]
-name = "dwgimport"
+name = "dossier-fileio"
 version = "0.1.0"
 edition = "2021"
-description = "DXF-Import-Probe: beweist, dass acadrust (MPL-2.0) aus einem Byte-Buffer parst und nach wasm32-unknown-unknown kompiliert."
+description = "Dateiformate von Dossier (DXF/DWG lesen und schreiben ueber acadrust, spaeter IFC): eigenes WASM-Paket pkgFileIo, erst beim Import/Export nachgeladen."
+license = "AGPL-3.0-or-later"
 
 # cdylib: fuer wasm-pack (Feature \"web\"). rlib: fuer cargo test + Pfad-Dep.
 [lib]
+name = "dossier_fileio"
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -17,10 +19,14 @@ crate-type = ["cdylib", "rlib"]
 default = []
 # Browser-Bindings: wasm-bindgen-Fassade; nur fuer wasm32-unknown-unknown.
 web = ["dep:wasm-bindgen", "dep:serde_json", "dep:console_error_panic_hook"]
+# Nativ (Tauri-Prozess, CLI): acadrust mit Multithreading.
+native = ["acadrust/parallel"]
 
 [dependencies]
-# DXF/DWG-Parser (MPL-2.0), von crates.io.
-acadrust = "0.4"
+# DXF/DWG lesen und schreiben (MPL-2.0, DWG-Code aus ACadSharp/MIT portiert, s. NOTICE).
+# Ohne Standard-Feature "parallel" (rayon): im WASM gibt es ohne SharedArrayBuffer/COOP-COEP keine
+# Threads; der Import laeuft stattdessen im Web-Worker. Nativ (Feature "native") mit rayon.
+acadrust = { version = "0.6.8", default-features = false }
 
 # getrandom wird transitiv via ahash→acadrust gezogen. Fuer wasm32 muss das
 # Feature "wasm_js" explizit aktiviert werden (sonst Compile-Fehler).

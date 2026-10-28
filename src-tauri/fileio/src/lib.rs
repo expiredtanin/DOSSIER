@@ -1,13 +1,14 @@
-// dwgimport — SPIKE: beweist, dass acadrust (MPL-2.0) aus einem Byte-Buffer
-// ein DXF parst und nach wasm32-unknown-unknown kompiliert.
+// dossier-fileio — Dateiformate von Dossier in Rust (DXF/DWG lesen und schreiben über acadrust,
+// später IFC). Eigenes WASM-Paket `src/engine/pkgFileIo`, das erst beim Import/Export nachgeladen wird
+// (`src/engine/fileioWasm.ts`) — der Kern (`src-tauri/core`) bleibt davon unberührt und klein.
 //
-// Aufbau:
-//   - `parse_dxf_summary`: headless, feature-frei testbar.
-//   - `#[cfg(feature="web")]` wasm-bindgen-Fassade darueber.
+// Aufbau (je Format ein Modul, parallel bearbeitbar; in `lib.rs` nur `mod`-Zeilen ergänzen):
+//   - `parse_dxf_summary` (unten): Übersicht eines DXF, Startpunkt/Probe.
+//   - Import (DXF/DWG → flache Elementliste für `io/dxfToDrawings.ts`), Export (Zeichnung → DXF/DWG).
+//   - `#[cfg(feature = "web")]` wasm-bindgen-Fassade; Bytes rein, Bytes/flache Puffer raus; Unsinn ergibt
+//     einen Fehler-String, nie einen Panic.
 //
-// API-Stuetzpunkt acadrust:
-//   `DxfReader::from_reader<R: Read + Seek + 'static>(reader: R)`
-//   → std::io::Cursor<&[u8]> implementiert Read + Seek → WASM-tauglich.
+// acadrust: `DxfReader::from_reader(Cursor<Vec<u8>>)` (Read + Seek + 'static) — ohne Dateisystem, WASM-tauglich.
 
 use std::collections::HashMap;
 use std::io::Cursor;

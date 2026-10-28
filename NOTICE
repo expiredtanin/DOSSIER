@@ -1,0 +1,10 @@
+Dossier — Hinweise zu übernommenem und eingebundenem Fremdcode ([51])
+
+acadrust (https://github.com/hakanaktt/acadrust), MPL-2.0
+  Abhängigkeit von src-tauri/fileio (DXF/DWG lesen und schreiben), unverändert eingebunden.
+  Der DWG-Code von acadrust ist aus ACadSharp portiert:
+    ACadSharp (https://github.com/DomCR/ACadSharp), Copyright (c) 2021 Albert Domenech, MIT License.
+  Grundlage der Binärformate laut acadrust: öffentliche DWG-Spezifikation der Open Design Alliance.
+
+i_overlay (https://github.com/iShape-Rust/iOverlay), MIT OR Apache-2.0
+  Abhängigkeit von src-tauri/core (Polygon-Booleans).

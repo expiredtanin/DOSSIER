@@ -76,6 +76,7 @@ function wasmDir(): string {
 
 const WASM_FILES: Record<string, string> = {
   core: "pkgCore/core_bg.wasm",
+  fileio: "pkgFileIo/fileio_bg.wasm",
   render3d: "pkg3d/render3d_bg.wasm",
   trucksolid: "pkgTruck/trucksolid_bg.wasm",
 };

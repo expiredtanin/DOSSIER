@@ -336,7 +336,8 @@ Quelle: github.com/storytold/cadcraft (README gelesen 28.10.; AutoCAD-Nachbau in
 erreichbar, kein öffentliches Repo gefunden) — nicht zu verwechseln mit IPedrax/BIMCraft ([B]). Vor jeder
 Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
 
-- ○ **[C1] DWG über `acadrust`** (Rust, Open Source): Lesen R13–2018, **Schreiben R2000**. Heute liest
+- ◐ **[C1] DWG über `acadrust`** (28.10.: Gerüst `src-tauri/fileio` mit acadrust 0.6.8, WASM `pkgFileIo`,
+  nachgeladen über `src/engine/fileioWasm.ts`; Herkunft geprüft → `NOTICE`) (Rust, Open Source): Lesen R13–2018, **Schreiben R2000**. Heute liest
   Dossier DWG über `dwgimport`/libredwg-web und kann kein DWG schreiben. Lizenz von acadrust prüfen. · M
 - ○ **[C2] DXF als eigenes Rust-Crate** (Tag-Reader/-Writer, R12–2018 ASCII und Binär lesen, R2000 schreiben):
   Vorbild für die Portierung von `io/dxfParser*.ts` und `export/exportDxf.ts` in den Rust-Kern ([K4]);
