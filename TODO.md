@@ -449,6 +449,8 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 
 - ✅ **[41] Massenmodelle.** `analysis/kennzahlen.ts`: GF/aGF je Geschoss, GV aus Körpern.
 - ✅ **[61] Raumprogramm gegen Modell.** `checkRoomProgram`, Editor im Flächenbilanz-Panel (27.10.).
+  Fehlerbehebung 28.10.: Schnitt-/Ansichtsmarker erscheinen nicht mehr auf freien Zeichnungsebenen (`plan_section_lines`);
+  nach Undo/Redo fällt die aktive Ebene auf die zuletzt aktive bzw. das erste Geschoss zurück (`appStore.ts`, ohne Undo-Schritt).
   **Import, Soll/Ist, Räume generieren (28.10.):**
   (1) Import aus .xlsx/.ods/.csv/.tsv: Leser in Rust (`fileio/src/sheet_import.rs`, nur `zip` + `quick-xml`, kein neues
   Crate; CSV UTF-8/UTF-16/Windows-1252, Trenner `;` `,` Tab; Zahlparser „1'250,5“, „12,5 m²“), Zuordnung in

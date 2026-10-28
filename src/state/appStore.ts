@@ -64,3 +64,32 @@ export const useStore = store.useStore;
 export const getState = store.getState;
 export const setState = store.setState;
 
+
+// Aktive Ebene nach Projektänderungen absichern: Undo/Redo (oder jede andere Änderung) kann die
+// aktive Ebene entfernen, z. B. Undo von „Räume generieren" oder eines DXF-Imports in eine neue
+// Ebene. Dann auf die zuletzt aktive, noch vorhandene Ebene zurückfallen, sonst aufs erste
+// Geschoss (bzw. die erste Ebene). `activeLevelId` ist UI-Zustand: kein Undo-Schritt. Geprüft wird
+// nur, wenn sich `project` geändert hat, damit eine vor dem Projekt gesetzte Id (Laden) bleibt.
+const recentLevelIds: string[] = [];
+const remember = (id: string) => {
+  if (recentLevelIds[recentLevelIds.length - 1] === id) return;
+  recentLevelIds.push(id);
+  if (recentLevelIds.length > 20) recentLevelIds.shift();
+};
+let lastProject = store.getState().project;
+store.subscribe(() => {
+  const s = store.getState();
+  const id = s.activeLevelId;
+  const levels = s.project.drawingLevels;
+  const exists = levels.some((l) => l.id === id);
+  if (exists) remember(id);
+  if (s.project === lastProject) return;
+  lastProject = s.project;
+  if (exists || levels.length === 0) return;
+  let fallback: string | undefined;
+  for (let i = recentLevelIds.length - 1; i >= 0 && !fallback; i--) {
+    if (levels.some((l) => l.id === recentLevelIds[i])) fallback = recentLevelIds[i];
+  }
+  fallback ??= (levels.find((l) => l.kind === "floor") ?? levels[0]).id;
+  store.setState({ activeLevelId: fallback });
+});
