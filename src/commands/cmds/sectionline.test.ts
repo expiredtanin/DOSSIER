@@ -3,9 +3,11 @@
 
 import { describe, it, expect } from "vitest";
 import { _test } from "./sectionline";
-import type { DrawingLevel, Project } from "../../model/types";
+import type { DrawingLevel, Project, Vec2 } from "../../model/types";
+import { applyOps } from "../../core/ops";
 
-const { commitLine, nextLevelName } = _test;
+const { lineOps, nextLevelName } = _test;
+const commitLine = (p: Project, a: Vec2, b: Vec2, kind: "section" | "elevation") => applyOps(p, lineOps(p, a, b, kind));
 
 function projectWith(levels: DrawingLevel[]): Project {
   return {

@@ -21,6 +21,8 @@
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
 import { bulgePolylinePoints, hasRealBulge } from "../../core";
 import { uniqueId } from "../../tools/types";
+import { addItems, opsMutation, removeItems } from "../../core";
+import type { CoreOp } from "../../core";
 import { pointSegmentDistance, polylineEdges, trimPolylineWithBulge, vecEqual } from "../../core";
 import type {
   Command,
@@ -165,13 +167,13 @@ function trimCurve(
   return trimPolylineWithBulge(curve.pts, curve.bulge, curve.closed, cutters, pick);
 }
 
-function applyTrim(
+function trimOps(
   p: Project,
   target: Drawing2D,
   pick: Vec2,
-): Project {
+): CoreOp[] {
   const curve = geomToCurve(target.geom);
-  if (!curve) return p;
+  if (!curve) return [];
   const cutters = cuttersFor(p, target.levelId, target.id).map((c) => ({
     pts: c.pts,
     closed: c.closed,
@@ -180,12 +182,12 @@ function applyTrim(
   const rest = trimCurve(curve, cutters, pick);
   // Echtes No-op: genau eine Kette, identisch (gleiche Punkte) zur Quelle →
   // nichts wurde weggeschnitten (kein Schnitt mit Cuttern).
-  if (rest.length === 1 && sameChain(rest[0], curve)) return p;
+  if (rest.length === 1 && sameChain(rest[0], curve)) return [];
   const replacements: Drawing2D[] = rest
     .filter((c) => c.pts.length >= 2)
     .map((c) => ({ ...target, id: uniqueId("dr2d"), geom: chainToGeom(c) }));
-  const others = p.drawings2d.filter((d) => d.id !== target.id);
-  return { ...p, drawings2d: [...others, ...replacements] };
+  // Ziel raus, Reste hinten dran (wie bisher: `[...others, ...replacements]`).
+  return [...removeItems(p, "drawings2d", [target.id]), ...addItems("drawings2d", replacements)];
 }
 
 /** Vorschau-Formen der NACH dem Trim verbleibenden Ketten (für den Draft — tesselliert, s. `DraftShape`). */
@@ -259,7 +261,7 @@ export const trimCommand: Command = {
     // Wiederholend: NICHT done — nach dem Commit bleibt „pick" aktiv.
     return [
       s,
-      { draft: null, commit: (p) => applyTrim(p, target, pick) },
+      { draft: null, commit: opsMutation((p) => trimOps(p, target, pick)) },
     ];
   },
 

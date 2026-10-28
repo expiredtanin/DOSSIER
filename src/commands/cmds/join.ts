@@ -8,6 +8,8 @@
 
 import { joinDrawings } from "../../editors/splitJoin";
 import type { Drawing2D } from "../../model/types";
+import { addItems, opsMutation, removeItems } from "../../core";
+import type { CoreOp } from "../../core";
 import type {
   Command,
   CommandContext,
@@ -23,14 +25,13 @@ function selectedDrawingIds(sel: CommandSelection): string[] {
   return sel.drawingId ? [sel.drawingId] : [];
 }
 
-/** Ersetzt die gewählten Quell-Drawings durch das Join-Ergebnis (immutabel). */
-function applyJoin(project: Project, ids: string[]): Project {
+/** Ops: die gewählten Quell-Drawings raus, das Join-Ergebnis hinten dran. */
+function joinOps(project: Project, ids: string[]): CoreOp[] {
   const idSet = new Set(ids);
   const srcs = project.drawings2d.filter((d) => idSet.has(d.id));
-  if (srcs.length < 2) return project; // <2 → nichts zu verbinden
+  if (srcs.length < 2) return []; // <2 → nichts zu verbinden
   const joined: Drawing2D[] = joinDrawings(srcs);
-  const rest = project.drawings2d.filter((d) => !idSet.has(d.id));
-  return { ...project, drawings2d: [...rest, ...joined] };
+  return [...removeItems(project, "drawings2d", idSet), ...addItems("drawings2d", joined)];
 }
 
 interface JoinState extends CommandState {
@@ -54,7 +55,7 @@ export const joinCommand: Command = {
   autoRun: (ctx: CommandContext): CommandResult => {
     const ids = selectedDrawingIds(ctx.selection);
     if (ids.length < 2) return { draft: null, done: true };
-    return { draft: null, done: true, commit: (p) => applyJoin(p, ids) };
+    return { draft: null, done: true, commit: opsMutation((p) => joinOps(p, ids)) };
   },
 
   onInput: (): [CommandState, CommandResult] => done(),

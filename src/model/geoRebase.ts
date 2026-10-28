@@ -14,6 +14,8 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { replaceItem, setField } from "../core/opsBuild";
+import type { CoreOp } from "../core/ops";
 import type {
   ContextObject,
   Contour,
@@ -151,6 +153,32 @@ export function translateProject(project: Project, dx: number, dy: number): Proj
       ? { ...project.geoAnchor, model: shift(project.geoAnchor.model, dx, dy) }
       : undefined,
   };
+}
+
+/** Projekt-Listen, die {@link translateProject} verschiebt (jedes Element hat eine `id`). */
+const TRANSLATED_LISTS = [
+  "walls", "ceilings", "roofs", "stairs", "rooms", "columns", "extrudedSolids", "drawings2d", "context", "drawingLevels",
+] as const;
+
+/**
+ * Ops für {@link translateProject}: je geändertem Element ein `replace` (Reihenfolge und Identität
+ * unveränderter Elemente bleiben), `geoAnchor` als Feld. Das Ergebnis von `applyOps` ist gleich
+ * `translateProject(project, dx, dy)`.
+ */
+export function translateOps(project: Project, dx: number, dy: number): CoreOp[] {
+  const next = translateProject(project, dx, dy);
+  if (next === project) return [];
+  const ops: CoreOp[] = [];
+  for (const key of TRANSLATED_LISTS) {
+    const before = project[key] as readonly { id: string }[] | undefined;
+    const after = next[key] as readonly { id: string }[] | undefined;
+    if (!before || !after) continue;
+    after.forEach((e, i) => {
+      if (e !== before[i]) ops.push(replaceItem(key, e as never));
+    });
+  }
+  if (next.geoAnchor !== project.geoAnchor) ops.push(setField("geoAnchor", next.geoAnchor));
+  return ops;
 }
 
 /**

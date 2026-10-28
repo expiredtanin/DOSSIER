@@ -31,6 +31,8 @@ import type {
   Wall,
 } from "../model/types";
 import { uniqueId } from "../tools/types";
+import { addItems } from "../core";
+import type { CoreOp } from "../core";
 
 /** Auswahl-IDs je Bauteil-Art, wie sie die 9 Auswahl-Kanäle des Stores liefern. */
 export interface ElementSelectionIds {
@@ -145,13 +147,12 @@ export interface PastedIds {
 /**
  * Fügt eine Zwischenablage ins Projekt ein: Klone mit neuen IDs auf dem
  * AKTIVEN Geschoss (`activeLevelId`), an denselben Modell-Koordinaten. Liefert
- * das neue Projekt + die neuen IDs (für die Nachauswahl).
+ * die Ops (Anhängen je Liste) + die neuen IDs (für die Nachauswahl).
  */
 export function pasteElementClipboard(
-  project: Project,
   clip: ElementClipboard,
   activeLevelId: string,
-): { project: Project; pastedIds: PastedIds } {
+): { ops: CoreOp[]; pastedIds: PastedIds } {
   const wallIdMap = new Map<string, string>();
   const newWalls: Wall[] = clip.walls.map((w) => {
     const id = uniqueId("W");
@@ -204,21 +205,21 @@ export function pasteElementClipboard(
     floorId: activeLevelId,
   }));
 
-  const next: Project = {
-    ...project,
-    walls: [...project.walls, ...newWalls],
-    drawings2d: [...project.drawings2d, ...newDrawings],
-    ceilings: [...(project.ceilings ?? []), ...newCeilings],
-    roofs: [...(project.roofs ?? []), ...newRoofs],
-    openings: [...(project.openings ?? []), ...newOpenings],
-    stairs: [...(project.stairs ?? []), ...newStairs],
-    rooms: [...(project.rooms ?? []), ...newRooms],
-    extrudedSolids: [...(project.extrudedSolids ?? []), ...newExtrudedSolids],
-    columns: [...(project.columns ?? []), ...newColumns],
-  };
+  // Wände vor Öffnungen (Wirtswand zuerst), sonst Reihenfolge der Projekt-Listen.
+  const ops: CoreOp[] = [
+    ...addItems("walls", newWalls),
+    ...addItems("drawings2d", newDrawings),
+    ...addItems("ceilings", newCeilings),
+    ...addItems("roofs", newRoofs),
+    ...addItems("openings", newOpenings),
+    ...addItems("stairs", newStairs),
+    ...addItems("rooms", newRooms),
+    ...addItems("extrudedSolids", newExtrudedSolids),
+    ...addItems("columns", newColumns),
+  ];
 
   return {
-    project: next,
+    ops,
     pastedIds: {
       wallIds: newWalls.map((w) => w.id),
       drawingIds: newDrawings.map((d) => d.id),

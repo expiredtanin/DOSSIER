@@ -8,7 +8,7 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
-import { diffToOps } from "../core/ops";
+import { applyOps, diffToOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
 import {
   addItems,
@@ -17,7 +17,9 @@ import {
   patchItem,
   patchItems,
   removeItems,
+  replaceItem,
   setField,
+  setFieldIfChanged,
 } from "../core";
 import { withVertexType, type PolylineVertexType } from "../core";
 import { sampleProject } from "../model/sampleProject";
@@ -40,8 +42,8 @@ import type {
 } from "../model/types";
 import {
   activePenSet,
-  rebakePenColors,
-  seedStandardPenSet as buildStandardPenSet,
+  rebakePenOps,
+  seedStandardPenSetOps,
   PEN_FALLBACK_COLOR,
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
@@ -764,18 +766,12 @@ export function createProjectSlice(
       ),
 
     // ── Ressourcen ─────────────────────────────────────────────────────────
-    patchComponent: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        components: p.components.map((c) =>
-          c.id === id ? { ...c, ...patch } : c,
-        ),
-      })),
+    patchComponent: (id, patch) => applyChange((p) => patchItem(p, "components", id, patch)),
 
     addComponent: () =>
-      setProject((p) => {
-        let hatches = p.hatches;
-        let hatchId = hatches[0]?.id;
+      applyChange((p) => {
+        const ops: CoreOp[] = [];
+        let hatchId = p.hatches[0]?.id;
         if (!hatchId) {
           const fallback: HatchStyle = {
             id: `hatch-${Date.now()}`,
@@ -785,7 +781,7 @@ export function createProjectSlice(
             angle: 0,
             color: "#2b3039",
           };
-          hatches = [fallback];
+          ops.push(...fieldOps(p, "hatches", [fallback]));
           hatchId = fallback.id;
         }
         const component: Component = {
@@ -795,30 +791,26 @@ export function createProjectSlice(
           hatchId,
           joinPriority: 50,
         };
-        return { ...p, hatches, components: [...p.components, component] };
+        return [...ops, ...addItems("components", [component])];
       }),
 
     deleteComponent: (id) =>
-      setProject((p) => {
+      applyChange((p) => {
         const used = p.wallTypes.some((wt) =>
           wt.layers.some((l) => l.componentId === id),
         );
         if (used) {
           const name = p.components.find((c) => c.id === id)?.name ?? id;
           get().notify(t("alert.componentInUse", { name }), "warning");
-          return p;
+          return [];
         }
-        return { ...p, components: p.components.filter((c) => c.id !== id) };
+        return removeItems(p, "components", [id]);
       }),
 
-    patchHatch: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        hatches: p.hatches.map((h) => (h.id === id ? { ...h, ...patch } : h)),
-      })),
+    patchHatch: (id, patch) => applyChange((p) => patchItem(p, "hatches", id, patch)),
 
     addHatch: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const hatch: HatchStyle = {
           id: `hatch-${Date.now()}`,
           name: t("default.hatchName"),
@@ -828,30 +820,24 @@ export function createProjectSlice(
           color: "#2b3039",
           lineStyleId: p.lineStyles[0]?.id,
         };
-        return { ...p, hatches: [...p.hatches, hatch] };
+        return addItems("hatches", [hatch]);
       }),
 
     deleteHatch: (id) =>
-      setProject((p) => {
+      applyChange((p) => {
         const used = p.components.some((c) => c.hatchId === id);
         if (used) {
           const name = p.hatches.find((h) => h.id === id)?.name ?? id;
           get().notify(t("alert.hatchInUse", { name }), "warning");
-          return p;
+          return [];
         }
-        return { ...p, hatches: p.hatches.filter((h) => h.id !== id) };
+        return removeItems(p, "hatches", [id]);
       }),
 
-    patchLineStyle: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        lineStyles: p.lineStyles.map((l) =>
-          l.id === id ? { ...l, ...patch } : l,
-        ),
-      })),
+    patchLineStyle: (id, patch) => applyChange((p) => patchItem(p, "lineStyles", id, patch)),
 
     addLineStyle: () =>
-      setProject((p) => {
+      applyChange(() => {
         const lineStyle: LineStyle = {
           id: `line-${Date.now()}`,
           name: t("default.lineStyleName"),
@@ -859,87 +845,70 @@ export function createProjectSlice(
           color: "#2b3039",
           dash: null,
         };
-        return { ...p, lineStyles: [...p.lineStyles, lineStyle] };
+        return addItems("lineStyles", [lineStyle]);
       }),
 
     deleteLineStyle: (id) =>
-      setProject((p) => {
+      applyChange((p) => {
         const used = p.hatches.some((h) => h.lineStyleId === id);
         if (used) {
           const name = p.lineStyles.find((l) => l.id === id)?.name ?? id;
           get().notify(t("alert.lineStyleInUse", { name }), "warning");
-          return p;
+          return [];
         }
-        return { ...p, lineStyles: p.lineStyles.filter((l) => l.id !== id) };
+        return removeItems(p, "lineStyles", [id]);
       }),
 
     importLineStyles: (styles) =>
-      setProject((p) => ({
-        ...p,
-        lineStyles: [
-          ...p.lineStyles,
-          ...styles.map((s, i) => ({ ...s, id: `ls-${Date.now()}-${i}` })),
-        ],
-      })),
+      applyChange(addItems("lineStyles", styles.map((s, i) => ({ ...s, id: `ls-${Date.now()}-${i}` })))),
 
     patchTextStyle: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        textStyles: (p.textStyles ?? DEFAULT_PRESETS).map((s) =>
-          s.id === id ? { ...s, ...patch, marks: { ...s.marks, ...patch.marks } } : s,
+      applyChange((p) =>
+        fieldOps(
+          p,
+          "textStyles",
+          (p.textStyles ?? DEFAULT_PRESETS).map((s) =>
+            s.id === id ? { ...s, ...patch, marks: { ...s.marks, ...patch.marks } } : s,
+          ),
         ),
-      })),
+      ),
 
     addTextStyle: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const style: TextStylePreset = {
           id: `ts-${Date.now()}`,
           label: t("default.textStyleName"),
           marks: { sizePt: 10 },
         };
-        return { ...p, textStyles: [...(p.textStyles ?? DEFAULT_PRESETS), style] };
+        return fieldOps(p, "textStyles", [...(p.textStyles ?? DEFAULT_PRESETS), style]);
       }),
 
     deleteTextStyle: (id) =>
-      setProject((p) => ({
-        ...p,
-        textStyles: (p.textStyles ?? DEFAULT_PRESETS).filter((s) => s.id !== id),
-      })),
+      applyChange((p) => fieldOps(p, "textStyles", (p.textStyles ?? DEFAULT_PRESETS).filter((s) => s.id !== id))),
 
     importHatches: (hatches) =>
-      setProject((p) => ({
-        ...p,
-        hatches: [
-          ...p.hatches,
-          ...hatches.map((h, i) => ({ ...h, id: `ht-${Date.now()}-${i}` })),
-        ],
-      })),
+      applyChange(addItems("hatches", hatches.map((h, i) => ({ ...h, id: `ht-${Date.now()}-${i}` })))),
 
     // ── Stiftsätze ─────────────────────────────────────────────────────────
     addPen: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const pen: ColorPen = { id: `pen-${Date.now()}`, name: t("default.penName") };
-        return {
-          ...p,
-          pens: [...(p.pens ?? []), pen],
+        return [
+          ...addItems("pens", [pen]),
           // Neuer Stift bekommt in JEDEM bestehenden Stiftsatz sofort einen
           // Eintrag (Fallback-Grauton+Stärke) — Stiftsätze bleiben dadurch
           // immer deckungsgleich zur `pens`-Liste, keine "fehlt in Satz X"-Lücken.
-          penSets: p.penSets?.map((s) => ({
+          ...patchItems(p, "penSets", () => true, (s) => ({
             ...s,
             pens: { ...s.pens, [pen.id]: { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT } },
           })),
-        };
+        ];
       }),
 
-    renamePen: (id, name) =>
-      setProject((p) => ({
-        ...p,
-        pens: p.pens?.map((pen) => (pen.id === id ? { ...pen, name } : pen)),
-      })),
+    renamePen: (id, name) => applyChange((p) => patchItem(p, "pens", id, { name })),
 
     deletePen: (id) =>
-      setProject((p) => {
+      applyChange((p) => {
         const clearPenRefs = <T extends { colorPenId?: string; foregroundPenId?: string; backgroundPenId?: string }>(x: T): T =>
           x.colorPenId === id || x.foregroundPenId === id || x.backgroundPenId === id
             ? {
@@ -953,20 +922,19 @@ export function createProjectSlice(
           ...(cat.colorPenId === id ? { ...cat, colorPenId: undefined } : cat),
           ...(cat.children ? { children: cat.children.map(clearCategoryPenRefs) } : {}),
         });
-        return {
-          ...p,
-          pens: p.pens?.filter((pen) => pen.id !== id),
-          penSets: p.penSets?.map((s) => {
+        return [
+          ...removeItems(p, "pens", [id]),
+          ...patchItems(p, "penSets", () => true, (s) => {
             const { [id]: _removed, ...rest } = s.pens;
             return { ...s, pens: rest };
           }),
-          components: p.components.map(clearPenRefs),
-          layers: p.layers.map(clearCategoryPenRefs),
-        };
+          ...patchItems(p, "components", () => true, clearPenRefs),
+          ...fieldOps(p, "layers", p.layers.map(clearCategoryPenRefs)),
+        ];
       }),
 
     addPenSet: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const current = activePenSet(p);
         const penSet: PenSet = {
           id: `penset-${Date.now()}`,
@@ -977,128 +945,90 @@ export function createProjectSlice(
                 (p.pens ?? []).map((pen) => [pen.id, { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }]),
               ),
         };
-        const penSets = [...(p.penSets ?? []), penSet];
         // Erster Stiftsatz überhaupt: automatisch aktivieren (sonst löst jeder
         // Stift-Verweis bis zur ersten manuellen Aktivierung auf den Fallback auf).
-        return {
-          ...p,
-          penSets,
-          activePenSetId: p.activePenSetId ?? penSet.id,
-        };
+        return [
+          ...addItems("penSets", [penSet]),
+          ...setFieldIfChanged(p, "activePenSetId", p.activePenSetId ?? penSet.id),
+        ];
       }),
 
-    renamePenSet: (id, name) =>
-      setProject((p) => ({
-        ...p,
-        penSets: p.penSets?.map((s) => (s.id === id ? { ...s, name } : s)),
-      })),
+    renamePenSet: (id, name) => applyChange((p) => patchItem(p, "penSets", id, { name })),
 
     deletePenSet: (id) =>
-      setProject((p) => {
+      applyChange((p) => {
         if (p.activePenSetId === id) {
           const name = p.penSets?.find((s) => s.id === id)?.name ?? id;
           get().notify(t("alert.penSetIsActive", { name }), "warning");
-          return p;
+          return [];
         }
-        return { ...p, penSets: p.penSets?.filter((s) => s.id !== id) };
+        return removeItems(p, "penSets", [id]);
       }),
 
     setActivePenSet: (id) =>
-      setProject((p) => rebakePenColors({ ...p, activePenSetId: id })),
+      applyChange((p) => {
+        const stateOps = [setField("activePenSetId", id)];
+        return [...stateOps, ...rebakePenOps(applyOps(p, stateOps))];
+      }),
 
     patchPenSetColor: (setId, penId, color) =>
-      setProject((p) => {
-        const next = {
-          ...p,
-          penSets: p.penSets?.map((s) =>
-            s.id === setId
-              ? {
-                  ...s,
-                  pens: {
-                    ...s.pens,
-                    [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), color },
-                  },
-                }
-              : s,
-          ),
-        };
-        return setId === p.activePenSetId ? rebakePenColors(next) : next;
+      applyChange((p) => {
+        const stateOps = patchItem(p, "penSets", setId, (s) => ({
+          ...s,
+          pens: {
+            ...s.pens,
+            [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), color },
+          },
+        }));
+        return setId === p.activePenSetId ? [...stateOps, ...rebakePenOps(applyOps(p, stateOps))] : stateOps;
       }),
 
     patchPenSetWeight: (setId, penId, weight) =>
-      setProject((p) => {
-        const next = {
-          ...p,
-          penSets: p.penSets?.map((s) =>
-            s.id === setId
-              ? {
-                  ...s,
-                  pens: {
-                    ...s.pens,
-                    [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), weight },
-                  },
-                }
-              : s,
-          ),
-        };
-        return setId === p.activePenSetId ? rebakePenColors(next) : next;
+      applyChange((p) => {
+        const stateOps = patchItem(p, "penSets", setId, (s) => ({
+          ...s,
+          pens: {
+            ...s.pens,
+            [penId]: { ...(s.pens[penId] ?? { color: PEN_FALLBACK_COLOR, weight: PEN_FALLBACK_WEIGHT }), weight },
+          },
+        }));
+        return setId === p.activePenSetId ? [...stateOps, ...rebakePenOps(applyOps(p, stateOps))] : stateOps;
       }),
 
-    seedStandardPenSet: () => setProject((p) => buildStandardPenSet(p)),
+    seedStandardPenSet: () => applyChange((p) => seedStandardPenSetOps(p)),
 
     addCustomPalette: () =>
-      setProject((p) => ({
-        ...p,
-        customPalettes: [
-          ...(p.customPalettes ?? []),
-          { id: `palette-${Date.now()}`, name: t("default.customPaletteName"), colors: [] },
-        ],
-      })),
+      applyChange(
+        addItems("customPalettes", [{ id: `palette-${Date.now()}`, name: t("default.customPaletteName"), colors: [] }]),
+      ),
 
-    renameCustomPalette: (id, name) =>
-      setProject((p) => ({
-        ...p,
-        customPalettes: p.customPalettes?.map((c) => (c.id === id ? { ...c, name } : c)),
-      })),
+    renameCustomPalette: (id, name) => applyChange((p) => patchItem(p, "customPalettes", id, { name })),
 
-    deleteCustomPalette: (id) =>
-      setProject((p) => ({
-        ...p,
-        customPalettes: p.customPalettes?.filter((c) => c.id !== id),
-      })),
+    deleteCustomPalette: (id) => applyChange((p) => removeItems(p, "customPalettes", [id])),
 
     addColorToCustomPalette: (paletteId, hex) =>
-      setProject((p) => {
-        const palettes = p.customPalettes ?? [];
-        const target = palettes.find((c) => c.id === paletteId);
+      applyChange((p) => {
+        const target = (p.customPalettes ?? []).find((c) => c.id === paletteId);
         if (!target) {
           const created = { id: `palette-${Date.now()}`, name: t("default.customPaletteName"), colors: [hex] };
-          return { ...p, customPalettes: [...palettes, created] };
+          return addItems("customPalettes", [created]);
         }
         const withoutDupe = target.colors.filter((c) => c.toLowerCase() !== hex.toLowerCase());
-        const updated = { ...target, colors: [hex, ...withoutDupe] };
-        return { ...p, customPalettes: palettes.map((c) => (c.id === target.id ? updated : c)) };
+        return [replaceItem("customPalettes", { ...target, colors: [hex, ...withoutDupe] })];
       }),
 
     removeColorFromCustomPalette: (paletteId, hex) =>
-      setProject((p) => ({
-        ...p,
-        customPalettes: p.customPalettes?.map((c) =>
-          c.id === paletteId ? { ...c, colors: c.colors.filter((h) => h.toLowerCase() !== hex.toLowerCase()) } : c,
-        ),
-      })),
+      applyChange((p) =>
+        patchItem(p, "customPalettes", paletteId, (c) => ({
+          ...c,
+          colors: c.colors.filter((h) => h.toLowerCase() !== hex.toLowerCase()),
+        })),
+      ),
 
-    setCustomPaletteVisible: (id, visible) =>
-      setProject((p) => ({
-        ...p,
-        customPalettes: p.customPalettes?.map((c) => (c.id === id ? { ...c, visible } : c)),
-      })),
+    setCustomPaletteVisible: (id, visible) => applyChange((p) => patchItem(p, "customPalettes", id, { visible })),
 
     setBuiltinPaletteVisible: (bank, visible) =>
-      setProject((p) => ({
-        ...p,
-        builtinPaletteBanks: { ...p.builtinPaletteBanks, [bank]: visible },
-      })),
+      applyChange((p) => [setField("builtinPaletteBanks", { ...p.builtinPaletteBanks, [bank]: visible })]),
 
     insertDrawingPoint: (drawingId, segIndex, pt) =>
       applyChange((p) =>

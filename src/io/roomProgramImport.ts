@@ -9,6 +9,9 @@
 
 import type { Project, RoomProgramRow, SiaCategory } from "../model/types";
 import { fileio, loadFileio } from "../engine/fileioWasm";
+import { applyOps } from "../core/ops";
+import type { CoreOp } from "../core/ops";
+import { setField } from "../core/opsBuild";
 
 export type SheetCell = string | number | null;
 
@@ -284,8 +287,13 @@ export function importedRows(lines: ImportLine[]): RoomProgramRow[] {
 
 export type ImportMode = "replace" | "append";
 
-/** Fügt Programmzeilen in das Projekt ein (für `setProject`): ersetzen oder anhängen. Keine Zeilen → unverändert. */
+/** Ops: Programmzeilen ins Projekt einfügen — ersetzen oder anhängen. Keine Zeilen → keine Ops. */
+export function roomProgramOps(project: Project, rows: RoomProgramRow[], mode: ImportMode): CoreOp[] {
+  if (rows.length === 0) return [];
+  return [setField("roomProgram", mode === "append" ? [...(project.roomProgram ?? []), ...rows] : rows)];
+}
+
+/** Wie {@link roomProgramOps}, als Projekt → Projekt (CLI, Tests). Keine Zeilen → unverändert. */
 export function applyRoomProgram(project: Project, rows: RoomProgramRow[], mode: ImportMode): Project {
-  if (rows.length === 0) return project;
-  return { ...project, roomProgram: mode === "append" ? [...(project.roomProgram ?? []), ...rows] : rows };
+  return applyOps(project, roomProgramOps(project, rows, mode));
 }

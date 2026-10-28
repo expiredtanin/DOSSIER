@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { sampleProject } from "../model/sampleProject";
-import { applyClashMarkers, candidatePairs, clashItems, CLASH_MARKER_PREFIX } from "./clash";
+import { candidatePairs, clashItems, clashMarkerOps, CLASH_MARKER_PREFIX } from "./clash";
+import { applyOps } from "../core/ops";
+import type { Project } from "../model/types";
+import type { Clash } from "./clash";
+
+const applyClashMarkers = (p: Project, clashes: Clash[], cat: string) => applyOps(p, clashMarkerOps(p, clashes, cat));
 import type { ClashItem } from "./clash";
 
 const it0 = (id: string, kind: ClashItem["kind"]): ClashItem => ({ id, kind, spec: { kind: "cuboid", min: [0, 0, 0], max: [1, 1, 1] } });

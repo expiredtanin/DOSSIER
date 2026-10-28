@@ -138,6 +138,7 @@ export function Content({
   onEdit3dRoofPitch,
   onEdit3dWallTop,
   onEdit3dEnd,
+  onEdit3dGroup,
   onGrip3dEditTab,
   onGrip3dEditCancel,
 }: {
@@ -258,6 +259,8 @@ export function Content({
   onEdit3dRoofPitch: (roofId: string, apexHeight: number) => void;
   onEdit3dWallTop: (wallId: string, topZ: number) => void;
   onEdit3dEnd: () => void;
+  /** Maus-Schritt eines 3D-Griff-Zugs als Gruppe mit Schlüssel (ein Undo-Schritt je Zug). */
+  onEdit3dGroup?: (fn: () => void, key: string) => void;
   /** Tab während eines laufenden 3D-Griff-Drags (Endpunkt/Verschieben): Feld-
    * Controller fürs Cursor-HUD öffnen/zykeln, s. App.tsx `cycleGrip3dEditField`. */
   onGrip3dEditTab?: () => void;
@@ -471,6 +474,7 @@ export function Content({
             onEditRoofPitch={onEdit3dRoofPitch}
             onEditWallTop={onEdit3dWallTop}
             onEditEnd={onEdit3dEnd}
+            onEditGroup={onEdit3dGroup}
             onGrip3dEditTab={onGrip3dEditTab}
             onGrip3dEditCancel={onGrip3dEditCancel}
           />

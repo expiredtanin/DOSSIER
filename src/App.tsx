@@ -61,7 +61,7 @@ import { MeshImportHost } from "./ui/MeshImportDialog";
 import { openMeshFileDialog, requestMeshImport, splitMeshFiles } from "./state/meshImportStore";
 import { formatMeshReport, isMeshFile } from "./io/meshImport";
 import { projectGeoOrigin } from "./model/geoRebase";
-import { applyClashMarkers, runClashCheck } from "./analysis/clash";
+import { clashMarkerOps, runClashCheck } from "./analysis/clash";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./views/plan/PlanView";
 import type { DisplayResolver } from "./viewport/Viewport3D";
@@ -157,9 +157,9 @@ import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
 import { activeGroupOps, addNewElementsToActiveGroup, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
-import { isOpsMutation, opsMutation, removeItems } from "./core";
+import { addItems, fieldOps, isOpsMutation, opsMutation, patchItem, patchItems, removeItems, replaceItem, replaceWithMany, setFieldIfChanged } from "./core";
 import type { GroupMembership, MemberKind } from "./state/groupActions";
-import { isLocked, setLockedForMembers } from "./state/objectLock";
+import { isLocked, lockMembersOps } from "./state/objectLock";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useProjectActions } from "./state/useProjectActions";
 import {
@@ -202,7 +202,7 @@ import {
   unionDrawings,
 } from "./editors/booleanOps";
 import type { BooleanResult } from "./editors/booleanOps";
-import { applyDrawingStyle, readDrawingStyle } from "./editors/matchProps";
+import { applyDrawingStyleOps, readDrawingStyle } from "./editors/matchProps";
 
 // Globaler Store (Slices: project/selection/view/layout).
 import { useStore } from "./state/appStore";
@@ -353,6 +353,7 @@ export default function App() {
   // Endlosschleife). Actions leben ebenfalls im Zustand und sind referenzstabil.
   const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
+  const applyChange = useStore((s) => s.applyChange);
   const groupChanges = useStore((s) => s.groupChanges);
   const notify = useStore((s) => s.notify);
   const undo = useStore((s) => s.undo);
@@ -1332,13 +1333,11 @@ export default function App() {
     if (ids.length === 0) return;
     const idSet = new Set(ids);
     const newIds: string[] = [];
-    setProject((p) => {
-      const out: typeof p.drawings2d = [];
+    applyChange((p) => {
+      newIds.length = 0;
+      const replacements = new Map<string, Drawing2D[]>();
       for (const d of p.drawings2d) {
-        if (!idSet.has(d.id)) {
-          out.push(d);
-          continue;
-        }
+        if (!idSet.has(d.id)) continue;
         const others: PolyForm[] = [];
         for (const o of p.drawings2d) {
           if (o.id === d.id || o.levelId !== d.levelId) continue;
@@ -1347,9 +1346,10 @@ export default function App() {
         }
         const pieces = splitDrawing(d, others);
         for (const piece of pieces) newIds.push(piece.id);
-        out.push(...pieces);
+        replacements.set(d.id, pieces);
       }
-      return { ...p, drawings2d: out };
+      // Jedes Quell-Drawing wird an derselben Stelle durch seine Teile ersetzt.
+      return replaceWithMany(p, "drawings2d", replacements);
     });
     setSelectedDrawingIds(newIds);
     setSelectedWallIds([]);
@@ -1388,13 +1388,7 @@ export default function App() {
     const result = op(srcs);
     if (result.replacedIds.length === 0) return; // <2 geschlossene → No-op
     const replaced = new Set(result.replacedIds);
-    setProject((p) => ({
-      ...p,
-      drawings2d: [
-        ...p.drawings2d.filter((d) => !replaced.has(d.id)),
-        ...result.created,
-      ],
-    }));
+    applyChange((p) => [...removeItems(p, "drawings2d", replaced), ...addItems("drawings2d", result.created)]);
     setSelectedDrawingIds(result.created.map((d) => d.id));
     setSelectedWallIds([]);
   };
@@ -1409,7 +1403,7 @@ export default function App() {
   };
   const pasteDrawingStyle = () => {
     if (!drawingStyleClipboard || selectedDrawingIds.length === 0) return;
-    setProject((p) => applyDrawingStyle(p, selectedDrawingIds, drawingStyleClipboard));
+    applyChange((p) => applyDrawingStyleOps(p, selectedDrawingIds, drawingStyleClipboard));
   };
 
   // Objekt sperren/entsperren (Kontextmenü) — wirkt auf die GANZE aktuelle
@@ -1435,7 +1429,7 @@ export default function App() {
     selectionLockIds.every(([kind, id]) => isLocked(project, kind, id));
   const toggleSelectionLock = () => {
     if (selectionLockIds.length === 0) return;
-    setProject((p) => setLockedForMembers(p, selectionLockMembers, !selectionAllLocked));
+    applyChange((p) => lockMembersOps(p, selectionLockMembers, !selectionAllLocked));
   };
 
   // Ebene(n) der Auswahl ausblenden / isolieren (Kontextmenü). Nur bei geöffnetem
@@ -1455,12 +1449,12 @@ export default function App() {
   const hideSelectionLayers = () => {
     if (selectionLayerCodes.length === 0) return;
     const codes = new Set(selectionLayerCodes);
-    setProject((p) => ({ ...p, layers: setCategoriesVisible(p.layers, codes, false) }));
+    applyChange((p) => fieldOps(p, "layers", setCategoriesVisible(p.layers, codes, false)));
   };
   const isolateSelectionLayers = () => {
     if (selectionLayerCodes.length === 0) return;
     const codes = new Set(selectionLayerCodes);
-    setProject((p) => ({ ...p, layers: isolateCategories(p.layers, codes) }));
+    applyChange((p) => fieldOps(p, "layers", isolateCategories(p.layers, codes)));
   };
 
   // „Nicht drucken"/„Drucken" (Kontextmenü) — nur `Drawing2D` kennt
@@ -1472,12 +1466,7 @@ export default function App() {
   const toggleSelectionNoPrint = () => {
     if (selectedDrawingIds.length === 0) return;
     const next = !selectionAllNoPrint;
-    setProject((p) => ({
-      ...p,
-      drawings2d: p.drawings2d.map((d) =>
-        selectedDrawingIds.includes(d.id) ? { ...d, noPrint: next } : d,
-      ),
-    }));
+    applyChange((p) => patchItems(p, "drawings2d", selectedDrawingIds, (d) => ({ ...d, noPrint: next })));
   };
 
   // Ctrl/Cmd+G / Ctrl/Cmd+Shift+G = Gruppieren/Auflösen (Vectorworks-artig,
@@ -1496,7 +1485,7 @@ export default function App() {
   };
   useGroupShortcut(
     project,
-    setProject,
+    applyChange,
     {
       wallIds: selectedWallIds,
       drawingIds: selectedDrawingIds,
@@ -1566,18 +1555,17 @@ export default function App() {
     const edgeIndex = nearestEdgeIndex(src.geom, model);
     if (edgeIndex === null) return;
     let removed = false;
-    setProject((p) => ({
-      ...p,
-      drawings2d: p.drawings2d.flatMap((d) => {
-        if (d.id !== drawingId) return [d];
-        const next = cutSegment(d, edgeIndex);
-        if (next === null) {
-          removed = true;
-          return [];
-        }
-        return [next];
-      }),
-    }));
+    applyChange((p) => {
+      removed = false;
+      const d = p.drawings2d.find((x) => x.id === drawingId);
+      if (!d) return [];
+      const next = cutSegment(d, edgeIndex);
+      if (next === null) {
+        removed = true;
+        return removeItems(p, "drawings2d", [drawingId]);
+      }
+      return [replaceItem("drawings2d", next)];
+    });
     if (removed) setSelectedDrawingIds([]);
   };
 
@@ -1720,7 +1708,7 @@ export default function App() {
     moveRoomStamp,
     setRoomStampDoc,
     setRoomStamp,
-  } = useProjectActions(setProject, notify, planViewRef);
+  } = useProjectActions(applyChange, notify, planViewRef);
 
   // IFC-Import: erst die Wahl Mesh/Bauteile (`IfcImportDialog`), dann [B3] Kontext-Meshes
   // (`io/ifcImport.ts`) oder [B4] echte Bauteile (`io/ifcElements.ts`, übernommen über setProject).
@@ -1873,7 +1861,7 @@ export default function App() {
     setElementClipboard,
     activeLevelId,
     project,
-    setProject,
+    applyChange,
     {
       wallIds: setSelectedWallIds,
       drawingIds: setSelectedDrawingIds,
@@ -2482,7 +2470,7 @@ export default function App() {
         const p0 = project;
         runClashCheck(p0)
           .then((clashes) => {
-            setProject((p) => applyClashMarkers(p, clashes, activeCategoryCode));
+            applyChange((p) => clashMarkerOps(p, clashes, activeCategoryCode));
             // window.alert ist im Tauri-WKWebView wirkungslos → Toast.
             notify(
               clashes.length === 0
@@ -2713,13 +2701,7 @@ export default function App() {
       ? (project.layouts ?? []).find((l) => l.id === activeLayoutId)
       : undefined;
   const patchOpenLayout = (id: string, fn: (l: Layout) => Layout, coalesceKey?: string) =>
-    setProject(
-      (p) => ({
-        ...p,
-        layouts: (p.layouts ?? []).map((l) => (l.id === id ? fn(l) : l)),
-      }),
-      coalesceKey,
-    );
+    applyChange((p) => patchItem(p, "layouts", id, fn), coalesceKey);
 
   // ── Effektive Darstellung für die Hauptansicht ────────────────────────────
   // 3D: Geschosse nach dem Modus des Zeichnungsebenen-Panels, Kategorien nach
@@ -2792,10 +2774,7 @@ export default function App() {
   // hält es (falls offen) synchron zu den betroffenen Feldern, wendet dessen
   // Befehle auf die echten Setter an (siehe native/settingsWindow.ts).
   const setScaleLineWeights = (on: boolean) =>
-    setProject((p) => {
-      const { scaleLineWeights: _old, ...rest } = p;
-      return on ? { ...rest, scaleLineWeights: true } : rest;
-    });
+    applyChange((p) => setFieldIfChanged(p, "scaleLineWeights", on ? true : undefined));
   useSettingsWindowHost(
     {
       themeMode,
@@ -2810,8 +2789,7 @@ export default function App() {
       onThemeModeChange: setThemeMode,
       onMarqueeColorChange: setMarqueeColor,
       onSnapColorChange: setSnapColor,
-      onReferenceElevationChange: (n) =>
-        setProject((p) => ({ ...p, referenceElevationMasl: n })),
+      onReferenceElevationChange: (n) => applyChange((p) => setFieldIfChanged(p, "referenceElevationMasl", n)),
       onScaleLineWeightsChange: setScaleLineWeights,
       onOfflineChange,
       onApplyLayout: (l) => setLayout(reconcileLayout(l)),
@@ -2840,7 +2818,7 @@ export default function App() {
   // Standort-Import als eigenes natives Fenster — s. native/contextImportWindow.ts.
   useContextImportWindowHost(project.geoAnchor, {
     onImport: (objs) => addContextObjectsAndFit(objs as ContextObject[]),
-    onSetGeoAnchor: (anchor) => setProject((p) => ({ ...p, geoAnchor: anchor })),
+    onSetGeoAnchor: (anchor) => applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor)),
   });
 
   // Zeichnungsebenen-Manager als eigenes natives Fenster (DOSSIER-Rhino-
@@ -3181,6 +3159,7 @@ export default function App() {
   const baseHost = usePanelHostBase({
     project,
     setProject,
+    applyChange,
     activeLevelId,
     setActiveLevelId,
     activeLevel,
@@ -3526,14 +3505,7 @@ export default function App() {
             onPlanColorMode={setPlanColorMode}
             shadowsAvailable={activeLevel.kind === "elevation"}
             shadows={activeLevel.shadows ?? false}
-            onShadows={(v) =>
-              setProject((p) => ({
-                ...p,
-                drawingLevels: p.drawingLevels.map((z) =>
-                  z.id === activeLevel.id ? { ...z, shadows: v } : z,
-                ),
-              }))
-            }
+            onShadows={(v) => applyChange((p) => patchItem(p, "drawingLevels", activeLevel.id, { shadows: v }))}
             combos={{
               // Ebenen-Kombinationen: Speichern = Snapshot des Layer-Baums →
               // localStorage; Laden = Map lesen → Sichtbarkeits-Flags anwenden.
@@ -3739,6 +3711,7 @@ export default function App() {
           onEdit3dRoofPitch={onEdit3dRoofPitch}
           onEdit3dWallTop={onEdit3dWallTop}
           onEdit3dEnd={onEdit3dEnd}
+          onEdit3dGroup={groupChanges}
           onGrip3dEditTab={cycleGrip3dEditField}
           onGrip3dEditCancel={cancelGrip3dEdit}
         />
@@ -4039,9 +4012,7 @@ export default function App() {
           snapColor={snapColor}
           onSnapColorChange={setSnapColor}
           referenceElevationMasl={project.referenceElevationMasl}
-          onReferenceElevationChange={(n) =>
-            setProject((p) => ({ ...p, referenceElevationMasl: n }))
-          }
+          onReferenceElevationChange={(n) => applyChange((p) => setFieldIfChanged(p, "referenceElevationMasl", n))}
           scaleLineWeights={project.scaleLineWeights === true}
           onScaleLineWeightsChange={setScaleLineWeights}
           offline={offline}

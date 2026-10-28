@@ -6,8 +6,9 @@
 // Beliebige Profile: Polylinie extrudieren und im Objekt-Panel „Abzugskörper" setzen.
 
 import type { ExtrudedSolid } from "../../model/types";
+import { addItems, opsMutation } from "../../core";
 import { uniqueId } from "../../tools/types";
-import type { Command, CommandResult, CommandState, Project, ToolDraft, Vec2 } from "../types";
+import type { Command, CommandResult, CommandState, ToolDraft, Vec2 } from "../types";
 
 type Step = "corner" | "corner2" | "height" | "offset";
 
@@ -83,7 +84,7 @@ function finish(s: VoidState, offset: number, levelId: string): [CommandState, C
     {
       draft: null,
       done: true,
-      commit: (p: Project) => (solid ? { ...p, extrudedSolids: [...(p.extrudedSolids ?? []), solid] } : p),
+      commit: opsMutation(() => (solid ? addItems("extrudedSolids", [solid]) : [])),
     },
   ];
 }

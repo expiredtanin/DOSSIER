@@ -11,6 +11,9 @@
 
 import type { Drawing2D, DrawingLevel, Project } from "../model/types";
 import { t } from "../i18n";
+import { applyOps } from "../core/ops";
+import type { CoreOp } from "../core/ops";
+import { addItems } from "../core/opsBuild";
 import { layoutRoomProgram } from "./roomProgram";
 import type { LayoutGroup, LayoutItem, RoomProgramLayout } from "./roomProgram";
 
@@ -123,8 +126,13 @@ export function buildProgramSheet(project: Project, labels: SheetLabels, stamp: 
   return { level, drawings, layout };
 }
 
-/** Fügt das Blatt dem Projekt hinzu (für `setProject`); ohne Räume unverändert. */
+/** Ops: fügt das Blatt (Ebene + Zeichnungen) hinzu; ohne Räume keine Ops. */
+export function addProgramSheetOps(sheet: ProgramSheet): CoreOp[] {
+  if (sheet.drawings.length === 0) return [];
+  return [...addItems("drawingLevels", [sheet.level]), ...addItems("drawings2d", sheet.drawings)];
+}
+
+/** Wie {@link addProgramSheetOps}, als Projekt → Projekt (CLI, Tests); ohne Räume unverändert. */
 export function addProgramSheet(project: Project, sheet: ProgramSheet): Project {
-  if (sheet.drawings.length === 0) return project;
-  return { ...project, drawingLevels: [...project.drawingLevels, sheet.level], drawings2d: [...project.drawings2d, ...sheet.drawings] };
+  return applyOps(project, addProgramSheetOps(sheet));
 }

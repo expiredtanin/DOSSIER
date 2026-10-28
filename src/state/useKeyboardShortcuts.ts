@@ -18,6 +18,7 @@ import type { CopyMode, TransformOp } from "../tools/transform";
 import type { CommandEngine } from "../commands/engine";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { Drawing2D, Project, Vec2 } from "../model/types";
+import type { CoreOp } from "../core";
 import { differenceDrawings, intersectionDrawings, unionDrawings } from "../editors/booleanOps";
 import type { BooleanResult } from "../editors/booleanOps";
 import { groupSelection, mergeMembership, ungroup, EMPTY_MEMBERSHIP } from "./groupActions";
@@ -548,7 +549,7 @@ export function useElementClipboardShortcut(
   setElementClipboard: (c: ElementClipboard | null) => void,
   activeLevelId: string,
   project: Project,
-  setProject: (next: Project | ((p: Project) => Project)) => void,
+  applyChange: (ops: readonly CoreOp[]) => void,
   setSelected: {
     wallIds: (ids: string[]) => void;
     drawingIds: (ids: string[]) => void;
@@ -587,8 +588,8 @@ export function useElementClipboardShortcut(
       e.preventDefault();
       const paste = (clip: ElementClipboard | null) => {
         if (!clip || isClipboardEmpty(clip)) return;
-        const { project: next, pastedIds } = pasteElementClipboard(project, clip, activeLevelId);
-        setProject(next);
+        const { ops, pastedIds } = pasteElementClipboard(clip, activeLevelId);
+        applyChange(ops);
         setSelected.wallIds(pastedIds.wallIds);
         setSelected.drawingIds(pastedIds.drawingIds);
         setSelected.ceilingIds(pastedIds.ceilingIds);
@@ -764,7 +765,7 @@ export function useTransformShortcuts(
  */
 export function useGroupShortcut(
   project: Project,
-  setProject: (updater: (p: Project) => Project) => void,
+  applyChange: (ops: readonly CoreOp[]) => void,
   currentSelection: GroupMembership,
   selectedGroupIds: string[],
   applySelection: (mem: GroupMembership, groupIds: string[]) => void,
@@ -781,24 +782,24 @@ export function useGroupShortcut(
         // Ungruppieren: für jede gewählte Gruppe eine Hülle auflösen; ihre
         // direkten Mitglieder (+ Untergruppen) werden die neue Auswahl.
         if (selectedGroupIds.length === 0) return;
-        let p = project;
+        const ops: CoreOp[] = [];
         let members: GroupMembership = { ...EMPTY_MEMBERSHIP };
         const newGroupIds: string[] = [];
         for (const gid of selectedGroupIds) {
-          const res = ungroup(p, gid);
+          const res = ungroup(project, gid);
           if (!res) continue;
-          p = res.project;
+          ops.push(...res.ops);
           members = mergeMembership(members, res.members);
           newGroupIds.push(...res.subGroupIds);
         }
-        setProject(() => p);
+        applyChange(ops);
         applySelection(members, newGroupIds);
         return;
       }
       // Gruppieren: aktuelle Auswahl (+ bereits gewählte Gruppen als Untergruppen).
-      const res = groupSelection(project, currentSelection, selectedGroupIds);
+      const res = groupSelection(currentSelection, selectedGroupIds);
       if (!res) return;
-      setProject(() => res.project);
+      applyChange(res.ops);
       applySelection(currentSelection, [res.groupId]);
     };
     window.addEventListener("keydown", onKey);

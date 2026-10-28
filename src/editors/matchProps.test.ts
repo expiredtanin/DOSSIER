@@ -1,9 +1,14 @@
 /** „Eigenschaften übertragen" für 2D-Elemente. */
 
 import { describe, expect, it } from "vitest";
-import { applyDrawingStyle, readDrawingStyle } from "./matchProps";
+import { applyDrawingStyleOps, readDrawingStyle } from "./matchProps";
+import type { DrawingStyle } from "./matchProps";
+import { applyOps } from "../core/ops";
+
 import { sampleProject } from "../model/sampleProject";
 import type { Drawing2D, Project } from "../model/types";
+
+const applyDrawingStyle = (p: Project, ids: string[], style: DrawingStyle) => applyOps(p, applyDrawingStyleOps(p, ids, style));
 
 function proj(...ds: Partial<Drawing2D>[]): Project {
   return {

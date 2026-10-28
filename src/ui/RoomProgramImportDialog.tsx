@@ -9,8 +9,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
-import { applyRoomProgram, cellText, importedRows, mapRows, PROGRAM_FIELDS, readSheetFile, suggestMapping } from "../core";
-import type { ImportMode, Mapping, ProgramField, SheetData, SkipReason } from "../core";
+import { roomProgramOps, cellText, importedRows, mapRows, PROGRAM_FIELDS, readSheetFile, suggestMapping } from "../core";
+import type { CoreOp, ImportMode, Mapping, ProgramField, SheetData, SkipReason } from "../core";
 import type { Project, RoomProgramRow } from "../model/types";
 
 const FIELD_KEY: Record<ProgramField, TranslationKey> = {
@@ -235,7 +235,7 @@ export function RoomProgramImportDialog({ fileName, sheets, existing, onImport, 
 export interface RoomProgramImportButtonProps {
   project: Project;
   /** Übernimmt die Zeilen ins Projekt (ein Undo-Schritt). */
-  onApply: (project: (p: Project) => Project) => void;
+  onApply: (build: (p: Project) => readonly CoreOp[]) => void;
   notify: (message: string, kind?: "info" | "warning" | "error") => void;
 }
 
@@ -278,7 +278,7 @@ export function RoomProgramImportButton({ project, onApply, notify }: RoomProgra
           existing={project.roomProgram?.length ?? 0}
           onClose={() => setData(null)}
           onImport={(rows, mode) => {
-            onApply((p) => applyRoomProgram(p, rows, mode));
+            onApply((p) => roomProgramOps(p, rows, mode));
             notify(t("program.import.done", { n: rows.length }));
             setData(null);
           }}

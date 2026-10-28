@@ -5,7 +5,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { explodeDrawings, explodeGeom } from "./explode";
+import { explodeGeom, explodeOps } from "./explode";
+import { applyOps } from "../core/ops";
+
+const explodeDrawings = (p: Project, ids: string[]) => applyOps(p, explodeOps(p, ids));
 import { sampleProject } from "../model/sampleProject";
 import { bulgeArc } from "../geometry/bulge";
 import type { Drawing2D, Drawing2DGeom, Project } from "../model/types";

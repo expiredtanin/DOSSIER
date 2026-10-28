@@ -16,7 +16,8 @@
 // unverändert stehen. Ebenso alles, was kein 2D-Element ist.
 
 import type { Drawing2D, Drawing2DGeom, Project, Vec2 } from "../model/types";
-import { bulgeArc } from "../core";
+import { bulgeArc, replaceWithMany } from "../core";
+import type { CoreOp } from "../core";
 import { uniqueId } from "../tools/types";
 
 /** Teilgeometrien EINES Elements, oder `null`, wenn es nicht zerlegbar ist. */
@@ -121,28 +122,15 @@ function mapPoints(geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom {
  * Die Reihenfolge im Array bleibt stabil — die Teile stehen an der Stelle des
  * Originals, damit sich die Zeichenreihenfolge (z-Anordnung) nicht ändert.
  */
-export function explodeDrawings(project: Project, ids: string[]): Project {
+export function explodeOps(project: Project, ids: readonly string[]): CoreOp[] {
   const wanted = new Set(ids);
-  let changed = false;
-  const next: Drawing2D[] = [];
+  const replacements = new Map<string, Drawing2D[]>();
   for (const d of project.drawings2d) {
-    if (!wanted.has(d.id)) {
-      next.push(d);
-      continue;
-    }
-    const parts = explodeGeom(d.geom, project);
-    if (!parts || parts.length === 0) {
-      next.push(d);
-      continue;
-    }
-    changed = true;
-    for (const geom of parts) {
-      // Stil-Eigenschaften der Quelle übernehmen; nur Identität und Geometrie
-      // sind neu. `hatchId`/Füllung bleiben bewusst dran: löst man ein
-      // gefülltes Rechteck auf, tragen die Linien sie zwar wirkungslos mit,
-      // aber es geht nichts verloren, falls der Nutzer sie wieder schliesst.
-      next.push({ ...d, id: uniqueId("dr2d"), geom });
-    }
+    const parts = wanted.has(d.id) ? explodeGeom(d.geom, project) : null;
+    if (!parts || parts.length === 0) continue;
+    // Stil-Eigenschaften der Quelle übernehmen; nur Identität und Geometrie sind neu. `hatchId`/Füllung
+    // bleiben bewusst dran: es geht nichts verloren, falls der Nutzer die Linien wieder schliesst.
+    replacements.set(d.id, parts.map((geom): Drawing2D => ({ ...d, id: uniqueId("dr2d"), geom })));
   }
-  return changed ? { ...project, drawings2d: next } : project;
+  return replaceWithMany(project, "drawings2d", replacements);
 }

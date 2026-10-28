@@ -6,7 +6,8 @@
 // bewusst NICHT zerlegt wird (Kreis/Ellipse/Spline/Text/…): diese Elemente
 // bleiben unverändert stehen, statt zu verschwinden.
 
-import { explodeDrawings } from "../../editors/explode";
+import { explodeOps } from "../../editors/explode";
+import { opsMutation } from "../../core";
 import type { Command, CommandContext, CommandResult, CommandSelection, CommandState } from "../types";
 
 /** Gewählte 2D-Elemente (Mehrfachauswahl bevorzugt). */
@@ -31,7 +32,7 @@ export const explodeCommand: Command = {
   autoRun: (ctx: CommandContext): CommandResult => {
     const ids = selectedDrawingIds(ctx.selection);
     if (ids.length === 0) return { draft: null, done: true };
-    return { draft: null, done: true, commit: (p) => explodeDrawings(p, ids) };
+    return { draft: null, done: true, commit: opsMutation((p) => explodeOps(p, ids)) };
   },
 
   onInput: (): [CommandState, CommandResult] => done(),

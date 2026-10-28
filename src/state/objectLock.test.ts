@@ -3,8 +3,14 @@
 
 import { describe, it, expect } from "vitest";
 import { sampleProject } from "../model/sampleProject";
-import { isLocked, setLocked, setLockedForMembers } from "./objectLock";
+import { isLocked, lockMembersOps, lockOps } from "./objectLock";
+import type { MemberKind } from "./groupActions";
+import { applyOps } from "../core/ops";
 import type { Project, Wall, Drawing2D } from "../model/types";
+
+const setLocked = (p: Project, kind: MemberKind, id: string, locked: boolean) => applyOps(p, lockOps(p, kind, id, locked));
+const setLockedForMembers = (p: Project, m: Partial<Record<MemberKind, string[]>>, locked: boolean) =>
+  applyOps(p, lockMembersOps(p, m, locked));
 
 const wall: Wall = {
   id: "w1",

@@ -246,16 +246,30 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     **Messung** (vitest/WASM, Linux-Container unter Last, 3000 Wände, `applyChange.perf.test.ts`): Griff ziehen 3,3 → 0,2–0,3 ms
     je Mausschritt, Auswahl (300 Wände) verschieben 30 → 5,5–7,5 ms, Eigenschaft tippen 2,3–3,8 → 0,03 ms; Undo/Redo 0,45 → 0,07 ms.
     Kern nativ: 300 `replace` auf 5000 Wände 11,2 → 1,5 ms. Rest beim Verschieben: JSON der 300 Wände (TS→Kern) und Kopien im Kern.
-    **Noch über `setProject(fn)` + `diffToOps`** (Kosten nur proportional zu den geänderten Listen; keine Mausschritt-Pfade mehr):
-    Ressourcen/Stifte/Paletten/Text-Stile in `projectSlice.ts` (kleine Listen; `setActivePenSet`/`patchPenSet*` mit
-    `rebakePenColors` fassen ganze Listen an), `usePanelHostBase.ts` (Stützen, Extrusionen, Layouts/Masterlayouts, Ausschnitte,
-    Kontext-Objekte), `useProjectActions.ts` (Wand-/Decken-/Dachtypen, Override-Regeln …), `App.tsx` (Stil übertragen, Sperren,
-    Kategorien ein/aus/isolieren, IFC-/Datei-Import, Kollisions-Marken, Layout-Handler, Georeferenz), Einfügen/Gruppieren/
-    Ungruppieren (`useKeyboardShortcuts.ts`), Raumprogramm/Baurecht/Sonnenstand-Panels, `siteSlice.ts`, Ressourcen-Fenster,
-    Werkzeug-Commits (`tools/`), Editier-Befehle trim/extend/fillet/chamfer/break/join/explode/align/autodim/defblock/georef/
-    sectionline/solid/solidbool/voidbox/terrain/ceilingOpening, Befehls-Commits innerhalb einer Gruppe ohne `opsMutation`.
-    Offen: diese Liste abbauen, danach `diffToOps` nur noch für Laden/Fremdstände; Ebenen-/Gruppen-Logik (`groupActions.ts`) nach
-    Rust; 3D-Griffe mit mitgeführten Ecken (`onEdit3dVertex`) ebenfalls als Gruppe; Undo-Verlauf als Liste in der UI [84].
+    **Dritte Etappe (28.10.): Rest der Aktionen auf Ops.** Umgestellt: Editier-Befehle trim/extend/fillet/chamfer/break/join/explode/
+    align/autodim/defblock/georef/sectionline/solid/solidbool/voidbox/terrain/ceilingOpening und die Werkzeug-Commits in `tools/tools.ts`
+    (alle `CommandResult.commit`/`ToolResult.commit` sind jetzt `opsMutation`); Einfügen (`pasteElementClipboard`), Gruppieren/
+    Ungruppieren (`groupSelection`/`ungroup` liefern Ops); `usePanelHostBase.ts` (Stützen, Extrusionen, Kontext-Bild, Ausschnitte +
+    Ordner, Layouts/Masterlayouts/Ordner), `useProjectActions.ts` (Wand-/Decken-/Dach-/Tür-/Fenster-/Treppentypen, Override-Regeln,
+    Stil speichern), `App.tsx` (Split, 2D-Boolean, Segment schneiden, Stil übertragen, Sperren, Kategorien aus/isolieren,
+    Nicht-drucken, Kollisions-Marken, Layout-Blatt, Einstellungen/Georeferenz, Schatten), `projectSlice.ts` (Bauteile, Schraffuren,
+    Linien-/Text-Stile, Stifte/Stiftsätze mit `rebakePenOps`, Paletten), `siteSlice.ts`, Raumprogramm/Baurecht/Sonne-Panels
+    (`roomProgramOps`, `addProgramSheetOps`, `setField`); 3D-Griffe mit mitgeführten Ecken: `Wasm3DViewport` fasst Element und
+    mitgeführte Ecken je Maus-Schritt zur Gruppe mit Schlüssel (`onEditGroup` = `groupChanges`), ein Zug = ein Undo-Schritt.
+    Neuer Helfer `replaceWithMany` (Elemente durch mehrere an derselben Stelle ersetzen: explode, Split). Die Projekt → Projekt-Fassungen
+    der Befehle/Editoren sind gelöscht (`explodeDrawings`, `alignDrawings`, `applyDrawingStyle`, `setLocked*`, `rebakePenColors`,
+    `applyClashMarkers` …); wo CLI/Tests sie brauchen, sind es dünne Hüllen um die Ops (`applyRoomProgram`, `addProgramSheet`).
+    Gleichheit: beim Umbau je Befehl 300 Zufallsprojekte (trim … ceilingOpening, 8 Ausrichtungen), dazu Typ-CRUD, 46 Panel-Schritte und
+    37 Ressourcen-/Stiftsatz-Schritte (inkl. Undo-Tiefe und Meldungen) gegen die alte setProject-Fassung (Stand vor dem Umbau): gleiches
+    Projekt bis auf erzeugte ids. Bleibende Tests: `commands/cmds/editOps.test.ts`, `state/panelOps.test.ts`, `state/resourceOps.test.ts`,
+    `replaceWithMany` in `core/opsBuild.test.ts` und die umgestellten Bestandstests (align, explode, matchProps, objectLock, penSets, clash,
+    groupActions, elementClipboard). Nicht in der Tauri-App getestet (nur vitest/Linux + e2e im Browser).
+    **`setProject(fn)` + `diffToOps` bleibt nur noch für:** Datei-Öffnen/Neu/Vorlage/Wiederherstellen (`useProjectFileActions`),
+    Import (DXF-Layer/Linienstile in `runImport`, Bilder einfügen in `useImportHandling`, IFC-Bauteile in `App.tsx` `runIfcImport`),
+    das Ressourcen-Fenster (Fremd-Synchronisation) und das CLI (`cli/main.ts`: ganze Dateien, Projekt → Projekt-Hilfen); dazu der
+    Rückfall für Befehle ohne mitgeführte Ops in `App.tsx` (gibt es keine mehr; der Typ `commit: (p) => Project` erlaubt es noch).
+    Offen: Ebenen-/Gruppen-Logik (`groupActions.ts`) nach Rust; Undo-Verlauf als Liste in der UI [84]; `diffToOps` entfällt erst, wenn auch
+    Laden/Import/CLI Ops liefern.
   - ○ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
@@ -347,7 +361,7 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
 - ◐ **[6] Jede Aktion ist ein Befehl mit JSON-Parametern.** Registratur vorhanden, aber interaktiv;
   Panels/Griffe ändern das Projekt direkt. 28.10.: die häufigsten Aktionen (Griffe, Objekt-Info, Auswahl-Transformationen,
   Löschen, Zeichenbefehle) liefern ihre Änderung als JSON-Ops (`core/opsBuild.ts`, Store `applyChange`) — Grundlage für
-  Makros/MCP; Rest-Liste unter [K4] S3. · L
+  Makros/MCP; Rest (nur Laden/Import/CLI) unter [K4] S3. · L
 - ◐ **[7] Zentrale Validierung nach jedem Befehl.** 28.10.: jede Projektänderung wird im Kern geprüft (`ops.rs`, NaN/neue doppelte
   ids → Rücknahme mit Meldung); weitere Regeln (Bezüge, Geometrie) offen. · M
 - ◐ **[8] Undo über Befehle.** 28.10.: Verlauf im Rust-Kern als inverse Ops (coalesceKey, Gruppen, Speichergrenze), keine
@@ -357,7 +371,7 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
   ArrayBuffer. Tests: `history.roundtrip.test.ts`, e2e „Mehrmals ganz zurück und wieder vor“.
   Snapshots mehr ([K4] S3). 28.10.: Griffe, Objekt-Info, Auswahl-Transformationen, Löschen und Zeichenbefehle erzeugen Ops
   direkt (`applyChange`/`opsMutation`); Gruppen mit Schlüssel: ein Griff-Zug mit mitgeführten Ecken = ein Schritt. Offen:
-  Rest-Liste unter [K4] S3. · M
+  Rest (nur Laden/Import/CLI) unter [K4] S3. · M
 - ◐ **[9] MCP-Brücke.** Headless `dossier-cli … mcp`; Brücke zum offenen Fenster fehlt. · M
 
 ### Daten

@@ -12,6 +12,8 @@
 // sie mitnehmen wollte, verschöbe das Element ungewollt in eine andere Ebene.
 
 import type { Drawing2D, Project } from "../model/types";
+import { patchItems } from "../core";
+import type { CoreOp } from "../core";
 
 /** Die übertragbaren Stil-Felder eines 2D-Elements. */
 export type DrawingStyle = Pick<
@@ -84,19 +86,15 @@ export function readDrawingStyle(d: Drawing2D): DrawingStyle {
  * Ortsbezug (ein Ankerpunkt im Modell), kein Aussehen — am Ziel läge das
  * Muster sonst an einer sinnlosen Stelle.
  */
-export function applyDrawingStyle(project: Project, ids: string[], style: DrawingStyle): Project {
+export function applyDrawingStyleOps(project: Project, ids: string[], style: DrawingStyle): CoreOp[] {
   const wanted = new Set(ids);
-  if (wanted.size === 0) return project;
-  return {
-    ...project,
-    drawings2d: project.drawings2d.map((d) => {
-      if (!wanted.has(d.id)) return d;
-      const next: Record<string, unknown> = { ...d };
-      for (const k of STYLE_KEYS) {
-        if (style[k] === undefined) delete next[k];
-        else next[k] = style[k];
-      }
-      return next as unknown as Drawing2D;
-    }),
-  };
+  if (wanted.size === 0) return [];
+  return patchItems(project, "drawings2d", wanted, (d) => {
+    const next: Record<string, unknown> = { ...d };
+    for (const k of STYLE_KEYS) {
+      if (style[k] === undefined) delete next[k];
+      else next[k] = style[k];
+    }
+    return next as unknown as Drawing2D;
+  });
 }

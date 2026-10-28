@@ -4,7 +4,8 @@
 import type { Ceiling, Drawing2D, Project, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { wallCorners } from "../model/geometry";
-import { normalizeOutline, ceilingArea } from "../core";
+import { addItems, ceilingArea, normalizeOutline, opsMutation } from "../core";
+import type { CoreOp } from "../core";
 import type { DraftShape, Tool, ToolContext, ToolDraft, ToolId } from "./types";
 import { uniqueId } from "./types";
 
@@ -72,8 +73,8 @@ function wallDraft(points: Vec2[], cursor: Vec2 | null, ctx: ToolContext): ToolD
   return draft;
 }
 
-/** Hängt je Achssegment ein Wall des aktiven Typs ans Projekt (immutabel). */
-function appendWalls(project: Project, pts: Vec2[], ctx: ToolContext): Project {
+/** Ops: hängt je Achssegment ein Wall des aktiven Typs an. */
+function appendWalls(pts: Vec2[], ctx: ToolContext): CoreOp[] {
   const height =
     ctx.level.floorHeight && ctx.level.floorHeight > 0 ? ctx.level.floorHeight : 2.6;
   const newWalls: Wall[] = [];
@@ -92,8 +93,7 @@ function appendWalls(project: Project, pts: Vec2[], ctx: ToolContext): Project {
       height,
     });
   }
-  if (newWalls.length === 0) return project;
-  return { ...project, walls: [...project.walls, ...newWalls] };
+  return addItems("walls", newWalls);
 }
 
 const wallTool: Tool = {
@@ -123,7 +123,7 @@ const wallTool: Tool = {
     const pts = s.points;
     return [
       { phase: "idle" },
-      { draft: null, done: true, commit: (proj) => appendWalls(proj, pts, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendWalls(pts, ctx)) },
     ];
   },
   onCancel: () => [{ phase: "idle" }, { draft: null, done: true }],
@@ -169,9 +169,9 @@ function ceilDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendCeiling(project: Project, pts: Vec2[], ctx: ToolContext): Project {
+function appendCeiling(project: Project, pts: Vec2[], ctx: ToolContext): CoreOp[] {
   const outline = normalizeOutline(pts);
-  if (!outline || ceilingArea(outline) < 1e-4) return project;
+  if (!outline || ceilingArea(outline) < 1e-4) return [];
   const hasCat = project.layers.some((c) => c.code === "30");
   const c: Ceiling = {
     id: uniqueId("C"),
@@ -181,7 +181,7 @@ function appendCeiling(project: Project, pts: Vec2[], ctx: ToolContext): Project
     outline,
     wallTypeId: ctx.activeWallTypeId,
   };
-  return { ...project, ceilings: project.ceilings ? [...project.ceilings, c] : [c] };
+  return addItems("ceilings", [c]);
 }
 
 const ceilingTool: Tool = {
@@ -201,7 +201,7 @@ const ceilingTool: Tool = {
     // Klick auf den Startpunkt schließt den Umriss (ab 3 Punkten) und committet.
     if (s.points.length >= 3 && segLen(p.point, s.points[0]) < EPS) {
       const pts = s.points;
-      return [{ phase: "idle" }, { draft: null, done: true, commit: (proj) => appendCeiling(proj, pts, ctx) }];
+      return [{ phase: "idle" }, { draft: null, done: true, commit: opsMutation((proj) => appendCeiling(proj, pts, ctx)) }];
     }
     const points = [...s.points, p.point];
     return [{ phase: "drawing", points, cursor: p.point }, { draft: ceilDraft(points, p.point) }];
@@ -217,7 +217,7 @@ const ceilingTool: Tool = {
       return [{ phase: "idle" }, { draft: null, done: true }];
     }
     const pts = s.points;
-    return [{ phase: "idle" }, { draft: null, done: true, commit: (proj) => appendCeiling(proj, pts, ctx) }];
+    return [{ phase: "idle" }, { draft: null, done: true, commit: opsMutation((proj) => appendCeiling(proj, pts, ctx)) }];
   },
   onCancel: () => [{ phase: "idle" }, { draft: null, done: true }],
   onUndoPoint: (state) => {
@@ -318,7 +318,7 @@ function lineDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendLine(project: Project, a: Vec2, b: Vec2, ctx: ToolContext): Project {
+function appendLine(a: Vec2, b: Vec2, ctx: ToolContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -328,7 +328,7 @@ function appendLine(project: Project, a: Vec2, b: Vec2, ctx: ToolContext): Proje
     // Kein expliziter Linienstil → erbt Farbe/Strichstärke aus der aktiven Ebene
     // (Kategorie). Ein Linienstil-Picker kann das später überschreiben.
   };
-  return { ...project, drawings2d: [...project.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const lineTool: Tool = {
@@ -350,7 +350,7 @@ const lineTool: Tool = {
     const b = p.point;
     return [
       { phase: "idle" },
-      { draft: null, done: true, commit: (proj) => appendLine(proj, a, b, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendLine(a, b, ctx)) },
     ];
   },
   onMove: (state, p) => {
@@ -396,8 +396,8 @@ function polyDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendPolyline(project: Project, pts: Vec2[], closed: boolean, ctx: ToolContext): Project {
-  if (pts.length < 2) return project;
+function appendPolyline(pts: Vec2[], closed: boolean, ctx: ToolContext): CoreOp[] {
+  if (pts.length < 2) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -407,7 +407,7 @@ function appendPolyline(project: Project, pts: Vec2[], closed: boolean, ctx: Too
     // Kein expliziter Linienstil → erbt Farbe/Strichstärke aus der aktiven Ebene
     // (Kategorie). Ein Linienstil-Picker kann das später überschreiben.
   };
-  return { ...project, drawings2d: [...project.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 // Konstruktionslinie: Platzhalter-Werkzeug, gekoppelt an den `xline`-Befehl
@@ -451,7 +451,7 @@ const polylineTool: Tool = {
     // Klick auf den Startpunkt schließt die Polylinie (ab 3 Punkten).
     if (s.points.length >= 3 && segLen(p.point, s.points[0]) < EPS) {
       const pts = s.points;
-      return [{ phase: "idle" }, { draft: null, done: true, commit: (proj) => appendPolyline(proj, pts, true, ctx) }];
+      return [{ phase: "idle" }, { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, true, ctx)) }];
     }
     const points = [...s.points, p.point];
     return [{ phase: "drawing", points, cursor: p.point }, { draft: polyDraft(points, p.point) }];
@@ -467,7 +467,7 @@ const polylineTool: Tool = {
       return [{ phase: "idle" }, { draft: null, done: true }];
     }
     const pts = s.points;
-    return [{ phase: "idle" }, { draft: null, done: true, commit: (proj) => appendPolyline(proj, pts, false, ctx) }];
+    return [{ phase: "idle" }, { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, false, ctx)) }];
   },
   onCancel: () => [{ phase: "idle" }, { draft: null, done: true }],
   onUndoPoint: (state) => {
@@ -513,10 +513,10 @@ function rectDraft(p0: Vec2, cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendRect(project: Project, a: Vec2, b: Vec2, ctx: ToolContext): Project {
+function appendRect(a: Vec2, b: Vec2, ctx: ToolContext): CoreOp[] {
   const min = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) };
   const max = { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) };
-  if (Math.abs(max.x - min.x) < EPS || Math.abs(max.y - min.y) < EPS) return project;
+  if (Math.abs(max.x - min.x) < EPS || Math.abs(max.y - min.y) < EPS) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -526,7 +526,7 @@ function appendRect(project: Project, a: Vec2, b: Vec2, ctx: ToolContext): Proje
     // Kein expliziter Linienstil → erbt Farbe/Strichstärke aus der aktiven Ebene
     // (Kategorie). Ein Linienstil-Picker kann das später überschreiben.
   };
-  return { ...project, drawings2d: [...project.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const rectTool: Tool = {
@@ -542,7 +542,7 @@ const rectTool: Tool = {
     }
     const a = s.p0;
     const b = p.point;
-    return [{ phase: "idle" }, { draft: null, done: true, commit: (proj) => appendRect(proj, a, b, ctx) }];
+    return [{ phase: "idle" }, { draft: null, done: true, commit: opsMutation(() => appendRect(a, b, ctx)) }];
   },
   onMove: (state, p) => {
     const s = state as RectState;

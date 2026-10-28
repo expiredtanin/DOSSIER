@@ -11,6 +11,7 @@ import {
   patchItem,
   patchItems,
   removeItems,
+  replaceWithMany,
   setField,
   setFieldIfChanged,
 } from "./opsBuild";
@@ -83,6 +84,27 @@ describe("Op-Bauhelfer", () => {
     expect(findItem(sampleProject, "walls", first)).toBe(sampleProject.walls[0]);
   });
 
+  it("replaceWithMany = flatMap über die Liste (Teile an der Stelle des Originals), Zufall", () => {
+    for (let seed = 1; seed <= 300; seed++) {
+      const p = project(seed);
+      const r = rng(seed + 7);
+      const map = new Map<string, Wall[]>();
+      for (const w of p.walls) {
+        const k = r();
+        if (k < 0.25) map.set(w.id, []); // entfernen
+        else if (k < 0.5) map.set(w.id, [{ ...w, id: `${w.id}a` }, { ...w, id: `${w.id}b`, height: 9 }]); // teilen
+        else if (k < 0.6) map.set(w.id, [w]); // unverändert
+        else if (k < 0.7) map.set(w.id, [{ ...w, height: 1 }]); // ersetzen
+      }
+      const expected = { ...p, walls: p.walls.flatMap((w) => map.get(w.id) ?? [w]) };
+      const out = applyOps(p, replaceWithMany(p, "walls", map));
+      expect(out.walls).toEqual(expected.walls);
+      // Unveränderte Elemente behalten ihre Identität.
+      for (const w of p.walls) if (!map.has(w.id) || map.get(w.id)![0] === w) expect(out.walls.includes(w)).toBe(true);
+    }
+    expect(replaceWithMany(project(1), "walls", new Map())).toEqual([]);
+  });
+
   it("setField / setFieldIfChanged", () => {
     expect(setField("name", "X")).toEqual({ kind: "setField", key: "name", value: "X" });
     expect(setField("geoAnchor", undefined)).toEqual({ kind: "setField", key: "geoAnchor" });
@@ -111,5 +133,15 @@ describe("Op-Bauhelfer", () => {
     expect(isOpsMutation((p: Project) => p)).toBe(false);
     expect(m(sampleProject).walls[0].height).toBe(4.2);
     expect(m.toOps(sampleProject)).toHaveLength(1);
+  });
+});
+
+describe("patchItem ohne Änderung", () => {
+  it("gleicher Wert ergibt keine Op (kein leerer Undo-Schritt)", () => {
+    const p = sampleProject;
+    const w = p.walls[0];
+    expect(patchItem(p, "walls", w.id, { height: w.height })).toEqual([]);
+    expect(patchItems(p, "walls", [w.id], (e) => ({ ...e }))).toEqual([]);
+    expect(patchItem(p, "walls", w.id, { height: w.height + 1 })).toHaveLength(1);
   });
 });

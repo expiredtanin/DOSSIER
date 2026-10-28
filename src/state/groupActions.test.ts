@@ -56,24 +56,24 @@ function project(groups: Group[]): Project {
 describe("groupSelection", () => {
   it("erzeugt eine Gruppe aus ≥2 gewählten Elementen", () => {
     const p = project([]);
-    const res = groupSelection(p, { ...EMPTY_MEM, wallIds: ["w1", "w2"] }, []);
+    const res = groupSelection({ ...EMPTY_MEM, wallIds: ["w1", "w2"] }, []);
     expect(res).not.toBeNull();
-    expect(res!.project.groups).toHaveLength(1);
-    expect(res!.project.groups![0]).toMatchObject({ wallIds: ["w1", "w2"], groupIds: [] });
+    const out = applyOps(p, res!.ops);
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups![0]).toMatchObject({ wallIds: ["w1", "w2"], groupIds: [] });
   });
 
   it("weniger als 2 Elemente gruppiert nicht (Vectorworks-Konvention)", () => {
-    const p = project([]);
-    expect(groupSelection(p, { ...EMPTY_MEM, wallIds: ["w1"] }, [])).toBeNull();
-    expect(groupSelection(p, EMPTY_MEM, [])).toBeNull();
+    expect(groupSelection({ ...EMPTY_MEM, wallIds: ["w1"] }, [])).toBeNull();
+    expect(groupSelection(EMPTY_MEM, [])).toBeNull();
   });
 
   it("bereits gewählte Gruppen werden als Untergruppen verschachtelt, nicht vermischt", () => {
     const inner: Group = { id: "g1", wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] };
     const p = project([inner]);
-    const res = groupSelection(p, { ...EMPTY_MEM, wallIds: ["w2"] }, ["g1"]);
+    const res = groupSelection({ ...EMPTY_MEM, wallIds: ["w2"] }, ["g1"]);
     expect(res).not.toBeNull();
-    const outer = res!.project.groups!.find((g) => g.id === res!.groupId)!;
+    const outer = applyOps(p, res!.ops).groups!.find((g) => g.id === res!.groupId)!;
     expect(outer.wallIds).toEqual(["w2"]);
     expect(outer.groupIds).toEqual(["g1"]);
   });
@@ -297,7 +297,7 @@ describe("ungroup", () => {
     const p = project([inner, outer]);
     const res = ungroup(p, "g2");
     expect(res).not.toBeNull();
-    expect(res!.project.groups!.map((g) => g.id)).toEqual(["g1"]); // g2 weg, g1 bleibt
+    expect(applyOps(p, res!.ops).groups!.map((g) => g.id)).toEqual(["g1"]); // g2 weg, g1 bleibt
     expect(res!.members.wallIds).toEqual(["w2"]);
     expect(res!.subGroupIds).toEqual(["g1"]);
   });

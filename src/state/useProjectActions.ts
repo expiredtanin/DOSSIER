@@ -1,6 +1,6 @@
 // Bündelt Projekt-Mutationen als (referenzstabile) Store-Actions plus die
 // Ressourcen-Typ-CRUD (Wand-/Decken-/Dach-/Tür-/Fenster-/Treppentyp), die
-// direkt über `setProject` laufen (kein eigener Slice). Löschen ist je Typ
+// direkt über `applyChange` (Ops) laufen (kein eigener Slice). Löschen ist je Typ
 // geschützt, solange ein Element ihn per `typeId`/`wallTypeId`/… referenziert.
 // Nur aus App() herausgezogen, um die Funktion zu entlasten — reine
 // Zustands-/Aktions-Bündelung, keine Verhaltensänderung.
@@ -9,6 +9,8 @@
 
 import type { RefObject } from "react";
 import { useStore } from "./appStore";
+import { addItems, fieldOps, patchItem, removeItems } from "../core";
+import type { CoreOp } from "../core";
 import { t } from "../i18n";
 import type {
   CeilingType,
@@ -56,11 +58,11 @@ function contextObjectsBounds(objs: ContextObject[]): Vec2[] | null {
 }
 
 export function useProjectActions(
-  // `setProject`/`notify` kommen als Parameter herein statt erneut via
+  // `applyChange`/`notify` kommen als Parameter herein statt erneut via
   // useStore geholt zu werden: beide werden schon früher in App() gebraucht
   // (Command-Engine/Grips, vor dieser Sektion) und bleiben dort deklariert —
   // sonst gäbe es die Store-Action zweimal (Duplikat-Deklaration in App()).
-  setProject: (next: Project | ((p: Project) => Project)) => void,
+  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[])) => void,
   notify: (message: string, kind?: NotifyKind) => void,
   planViewRef: RefObject<PlanViewHandle | null>,
 ) {
@@ -122,99 +124,85 @@ export function useProjectActions(
   const deleteDrawingPoint = useStore((s) => s.deleteDrawingPoint);
   const setPolylineVertexType = useStore((s) => s.setPolylineVertexType);
   // Wandstile: immutable Patch eines Wandtyps (z. B. Schichtfugen-Stile). Kein
-  // eigener Store-Slice nötig — läuft direkt über setProject wie die übrigen
+  // eigener Store-Slice nötig — läuft direkt über applyChange wie die übrigen
   // Ressourcen-Mutationen.
   const patchWallType = (id: string, patch: Partial<WallType>) =>
-    setProject((p) => ({
-      ...p,
-      wallTypes: p.wallTypes.map((wt) => (wt.id === id ? { ...wt, ...patch } : wt)),
-    }));
+    applyChange((p) => patchItem(p, "wallTypes", id, patch));
   // Grafische Override-Regeln: ersetzt die ganze Regelliste (Reihenfolge =
   // Priorität, oben gewinnt). Läuft wie die übrigen Ressourcen-Mutationen
-  // direkt über setProject — persistiert damit automatisch im Projekt-JSON.
+  // direkt über applyChange — persistiert damit automatisch im Projekt-JSON.
   const setOverrideRules = (rules: OverrideRule[]) =>
-    setProject((p) => ({ ...p, overrideRules: rules }));
+    applyChange((p) => fieldOps(p, "overrideRules", rules));
   // Deckenstile: immutable Patch eines Deckentyps — analog `patchWallType`.
   const patchCeilingType = (id: string, patch: Partial<CeilingType>) =>
-    setProject((p) => ({
-      ...p,
-      ceilingTypes: (p.ceilingTypes ?? []).map((ct) =>
-        ct.id === id ? { ...ct, ...patch } : ct,
-      ),
-    }));
+    applyChange((p) => patchItem(p, "ceilingTypes", id, patch));
   // Neuen Wandtyp anlegen: eine Default-Schicht (erstes Bauteil, 200 mm).
   const addWallType = () =>
-    setProject((p) => {
+    applyChange((p) => {
       const componentId = p.components[0]?.id ?? "";
       const wallType: WallType = {
         id: `wt-${Date.now()}`,
         name: t("default.wallTypeName"),
         layers: [{ componentId, thickness: 0.2 }],
       };
-      return { ...p, wallTypes: [...p.wallTypes, wallType] };
+      return addItems("wallTypes", [wallType]);
     });
   // Wandtyp löschen — geschützt, solange ihn eine Wand verwendet.
   const deleteWallType = (id: string) =>
-    setProject((p) => {
+    applyChange((p) => {
       const used = p.walls.some((w) => w.wallTypeId === id);
       if (used) {
         const name = p.wallTypes.find((wt) => wt.id === id)?.name ?? id;
         notify(t("alert.wallTypeInUse", { name }), "warning");
-        return p;
+        return [];
       }
-      return { ...p, wallTypes: p.wallTypes.filter((wt) => wt.id !== id) };
+      return removeItems(p, "wallTypes", [id]);
     });
   // Neuen Deckentyp anlegen — analog `addWallType` (150 mm Default).
   const addCeilingType = () =>
-    setProject((p) => {
+    applyChange((p) => {
       const componentId = p.components[0]?.id ?? "";
       const ceilingType: CeilingType = {
         id: `ct-${Date.now()}`,
         name: t("default.ceilingTypeName"),
         layers: [{ componentId, thickness: 0.15 }],
       };
-      return { ...p, ceilingTypes: [...(p.ceilingTypes ?? []), ceilingType] };
+      return addItems("ceilingTypes", [ceilingType]);
     });
   // Deckentyp löschen — geschützt, solange ihn eine Decke verwendet.
   const deleteCeilingType = (id: string) =>
-    setProject((p) => {
+    applyChange((p) => {
       const used = (p.ceilings ?? []).some((c) => c.ceilingTypeId === id);
       if (used) {
         const name = (p.ceilingTypes ?? []).find((ct) => ct.id === id)?.name ?? id;
         notify(t("alert.ceilingTypeInUse", { name }), "warning");
-        return p;
+        return [];
       }
-      return {
-        ...p,
-        ceilingTypes: (p.ceilingTypes ?? []).filter((ct) => ct.id !== id),
-      };
+      return removeItems(p, "ceilingTypes", [id]);
     });
   // ── Dachtypen (Dachaufbauten) — analog Deckentyp ──────────────────────────
   const patchRoofType = (id: string, patch: Partial<RoofType>) =>
-    setProject((p) => ({
-      ...p,
-      roofTypes: (p.roofTypes ?? []).map((rt) => (rt.id === id ? { ...rt, ...patch } : rt)),
-    }));
+    applyChange((p) => patchItem(p, "roofTypes", id, patch));
   const addRoofType = () =>
-    setProject((p) => {
+    applyChange((p) => {
       const componentId = p.components[0]?.id ?? "";
       const roofType: RoofType = {
         id: `rt-${Date.now()}`,
         name: t("default.roofTypeName"),
         layers: [{ componentId, thickness: 0.2 }],
       };
-      return { ...p, roofTypes: [...(p.roofTypes ?? []), roofType] };
+      return addItems("roofTypes", [roofType]);
     });
   // Dachtyp löschen — geschützt, solange ihn ein Dach verwendet.
   const deleteRoofType = (id: string) =>
-    setProject((p) => {
+    applyChange((p) => {
       const used = (p.roofs ?? []).some((r) => r.roofTypeId === id);
       if (used) {
         const name = (p.roofTypes ?? []).find((rt) => rt.id === id)?.name ?? id;
         notify(t("alert.roofTypeInUse", { name }), "warning");
-        return p;
+        return [];
       }
-      return { ...p, roofTypes: (p.roofTypes ?? []).filter((rt) => rt.id !== id) };
+      return removeItems(p, "roofTypes", [id]);
     });
   // ── Bauteil-Typen: Tür / Fenster / Treppe (Bibliothek) ────────────────────
   // Anlegen/Patchen/Löschen analog Wand-/Deckentyp — direkt über setProject
@@ -222,7 +210,7 @@ export function useProjectActions(
   // per `typeId` referenziert. Defaults orientieren sich an den Element-Inline-
   // Werten (Tür 0.9×2.0, Fenster 1.2×1.4 Brüstung 0.9).
   const addDoorType = () =>
-    setProject((p) => {
+    applyChange(() => {
       const dt: DoorType = {
         id: `dt-${Date.now()}`,
         name: t("default.doorTypeName"),
@@ -233,27 +221,22 @@ export function useProjectActions(
         defaultWidth: 0.9,
         defaultHeight: 2.0,
       };
-      return { ...p, doorTypes: [...(p.doorTypes ?? []), dt] };
+      return addItems("doorTypes", [dt]);
     });
   const patchDoorType = (id: string, patch: Partial<DoorType>) =>
-    setProject((p) => ({
-      ...p,
-      doorTypes: (p.doorTypes ?? []).map((dt) =>
-        dt.id === id ? { ...dt, ...patch } : dt,
-      ),
-    }));
+    applyChange((p) => patchItem(p, "doorTypes", id, patch));
   const deleteDoorType = (id: string) =>
-    setProject((p) => {
+    applyChange((p) => {
       const used = (p.openings ?? []).some((o) => o.typeId === id);
       if (used) {
         const name = (p.doorTypes ?? []).find((dt) => dt.id === id)?.name ?? id;
         notify(t("alert.doorTypeInUse", { name }), "warning");
-        return p;
+        return [];
       }
-      return { ...p, doorTypes: (p.doorTypes ?? []).filter((dt) => dt.id !== id) };
+      return removeItems(p, "doorTypes", [id]);
     });
   const addWindowType = () =>
-    setProject((p) => {
+    applyChange(() => {
       const wt: WindowType = {
         id: `ft-${Date.now()}`,
         name: t("default.windowTypeName"),
@@ -265,35 +248,27 @@ export function useProjectActions(
         defaultWidth: 1.2,
         defaultHeight: 1.4,
       };
-      return { ...p, windowTypes: [...(p.windowTypes ?? []), wt] };
+      return addItems("windowTypes", [wt]);
     });
   const patchWindowType = (id: string, patch: Partial<WindowType>) =>
-    setProject((p) => ({
-      ...p,
-      windowTypes: (p.windowTypes ?? []).map((wt) =>
-        wt.id === id ? { ...wt, ...patch } : wt,
-      ),
-    }));
+    applyChange((p) => patchItem(p, "windowTypes", id, patch));
   const deleteWindowType = (id: string) =>
-    setProject((p) => {
+    applyChange((p) => {
       const used = (p.openings ?? []).some((o) => o.typeId === id);
       if (used) {
         const name = (p.windowTypes ?? []).find((wt) => wt.id === id)?.name ?? id;
         notify(t("alert.windowTypeInUse", { name }), "warning");
-        return p;
+        return [];
       }
-      return {
-        ...p,
-        windowTypes: (p.windowTypes ?? []).filter((wt) => wt.id !== id),
-      };
+      return removeItems(p, "windowTypes", [id]);
     });
   // „Als Stil speichern": aktuellen Fenster-/Tür-Typ der Öffnung als NEUEN
   // benannten Stil ablegen und der Öffnung zuweisen (VW „Fenster speichern…").
   // Ohne Bezugstyp wird aus den Default-Feldern ein frischer Stil erzeugt.
   const saveOpeningStyle = (openingId: string, name: string) =>
-    setProject((p) => {
+    applyChange((p) => {
       const o = (p.openings ?? []).find((x) => x.id === openingId);
-      if (!o) return p;
+      if (!o) return [];
       if (o.kind === "door") {
         const base = (p.doorTypes ?? []).find((d) => d.id === o.typeId);
         const nt: DoorType = base
@@ -308,13 +283,7 @@ export function useProjectActions(
               defaultWidth: 0.9,
               defaultHeight: 2.0,
             };
-        return {
-          ...p,
-          doorTypes: [...(p.doorTypes ?? []), nt],
-          openings: (p.openings ?? []).map((x) =>
-            x.id === openingId ? { ...x, typeId: nt.id } : x,
-          ),
-        };
+        return [...addItems("doorTypes", [nt]), ...patchItem(p, "openings", openingId, { typeId: nt.id })];
       }
       const base = (p.windowTypes ?? []).find((w) => w.id === o.typeId);
       const nt: WindowType = base
@@ -330,16 +299,10 @@ export function useProjectActions(
             defaultWidth: 1.2,
             defaultHeight: 1.4,
           };
-      return {
-        ...p,
-        windowTypes: [...(p.windowTypes ?? []), nt],
-        openings: (p.openings ?? []).map((x) =>
-          x.id === openingId ? { ...x, typeId: nt.id } : x,
-        ),
-      };
+      return [...addItems("windowTypes", [nt]), ...patchItem(p, "openings", openingId, { typeId: nt.id })];
     });
   const addStairType = () =>
-    setProject((p) => {
+    applyChange(() => {
       const st: StairType = {
         id: `st-${Date.now()}`,
         name: t("default.stairTypeName"),
@@ -350,24 +313,19 @@ export function useProjectActions(
         railing: "keine",
         defaultWidth: 1.0,
       };
-      return { ...p, stairTypes: [...(p.stairTypes ?? []), st] };
+      return addItems("stairTypes", [st]);
     });
   const patchStairType = (id: string, patch: Partial<StairType>) =>
-    setProject((p) => ({
-      ...p,
-      stairTypes: (p.stairTypes ?? []).map((st) =>
-        st.id === id ? { ...st, ...patch } : st,
-      ),
-    }));
+    applyChange((p) => patchItem(p, "stairTypes", id, patch));
   const deleteStairType = (id: string) =>
-    setProject((p) => {
+    applyChange((p) => {
       const used = (p.stairs ?? []).some((s) => s.typeId === id);
       if (used) {
         const name = (p.stairTypes ?? []).find((st) => st.id === id)?.name ?? id;
         notify(t("alert.stairTypeInUse", { name }), "warning");
-        return p;
+        return [];
       }
-      return { ...p, stairTypes: (p.stairTypes ?? []).filter((st) => st.id !== id) };
+      return removeItems(p, "stairTypes", [id]);
     });
   const importLineStyles = useStore((s) => s.importLineStyles);
   const importHatches = useStore((s) => s.importHatches);

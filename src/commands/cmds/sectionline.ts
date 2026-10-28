@@ -18,6 +18,8 @@
 import { t } from "../../i18n";
 import type { DrawingLevel, DrawingLevelKind } from "../../model/types";
 import { leftNormal, normalize, sub } from "../../model/geometry";
+import { addItems, opsMutation, patchItem } from "../../core";
+import type { CoreOp } from "../../core";
 import type {
   Command,
   CommandResult,
@@ -102,18 +104,12 @@ function nextLevelName(p: Project, kind: LineKind): string {
  * EINE Ebene der Art ohne Linie, wird sie belegt; sonst wird eine neue angelegt.
  * Entartete (zu kurze) Linien werden verworfen.
  */
-function commitLine(p: Project, a: Vec2, b: Vec2, kind: LineKind): Project {
-  if (Math.hypot(b.x - a.x, b.y - a.y) < 0.1) return p;
+function lineOps(p: Project, a: Vec2, b: Vec2, kind: LineKind): CoreOp[] {
+  if (Math.hypot(b.x - a.x, b.y - a.y) < 0.1) return [];
   const line: [Vec2, Vec2] = [a, b];
   const orphans = p.drawingLevels.filter((z) => z.kind === kind && !z.linePoints);
   if (orphans.length === 1) {
-    const targetId = orphans[0].id;
-    return {
-      ...p,
-      drawingLevels: p.drawingLevels.map((z) =>
-        z.id === targetId ? { ...z, linePoints: line, directionSign: z.directionSign ?? 1 } : z,
-      ),
-    };
+    return patchItem(p, "drawingLevels", orphans[0].id, (z) => ({ ...z, linePoints: line, directionSign: z.directionSign ?? 1 }));
   }
   const level: DrawingLevel = {
     id: `${kind}-${Date.now()}`,
@@ -124,7 +120,7 @@ function commitLine(p: Project, a: Vec2, b: Vec2, kind: LineKind): Project {
     linePoints: line,
     directionSign: 1,
   };
-  return { ...p, drawingLevels: [...p.drawingLevels, level] };
+  return addItems("drawingLevels", [level]);
 }
 
 interface LineIdle extends CommandState {
@@ -188,7 +184,7 @@ function makeCommand(name: string, startKind: LineKind): Command {
       const kind = s.kind;
       return [
         { phase: "start", kind, lastPoint: null } as LineIdle,
-        { draft: null, done: true, commit: (p) => commitLine(p, a, b, kind) },
+        { draft: null, done: true, commit: opsMutation((p) => lineOps(p, a, b, kind)) },
       ];
     },
 
@@ -210,4 +206,4 @@ export const sectionLineCommand: Command = makeCommand("sectionline", "section")
 export const viewLineCommand: Command = makeCommand("viewline", "elevation");
 
 // Für Tests: die reinen Datenpfad-Helfer.
-export const _test = { commitLine, nextLevelName, directionArrow };
+export const _test = { lineOps, nextLevelName, directionArrow };

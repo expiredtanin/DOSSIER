@@ -13,6 +13,8 @@
 
 import { generateTerrainFromContours } from "../../model/terrain";
 import type { ContextObject } from "../../model/types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 import type {
   Command,
   CommandResult,
@@ -20,21 +22,21 @@ import type {
   Project,
 } from "../types";
 
-/** Hängt ein aus dem ersten ContourSet abgeleitetes TIN an (immutabel). */
-function appendTerrain(p: Project): Project {
+/** Ops: hängt ein aus dem ersten ContourSet abgeleitetes TIN an `context` an. */
+function terrainOps(p: Project): CoreOp[] {
   const context: ContextObject[] = p.context ?? [];
   const set = context.find((o) => o.type === "contourSet");
-  if (!set || set.type !== "contourSet") return p;
+  if (!set || set.type !== "contourSet") return [];
   const terrain = generateTerrainFromContours(set.contours);
-  if (terrain.indices.length === 0) return p; // kein sinnvolles TIN
-  return { ...p, context: [...context, terrain] };
+  if (terrain.indices.length === 0) return []; // kein sinnvolles TIN
+  return addItems("context", [terrain]);
 }
 
 /** Ergebnis, das den Befehl sofort beendet und das TIN committet. */
 const COMMIT_DONE: CommandResult = {
   draft: null,
   done: true,
-  commit: appendTerrain,
+  commit: opsMutation(terrainOps),
 };
 
 const IDLE: CommandState = { phase: "idle", lastPoint: null };

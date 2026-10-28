@@ -9,6 +9,8 @@
 // ist von Natur aus gerade, also ein exaktes (nicht approximiertes) Ergebnis.
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { opsMutation, patchItem } from "../../core";
+import type { CoreOp } from "../../core";
 import { hasRealBulge } from "../../core";
 import { chamferCorner, type Chamfer } from "../../core";
 import type {
@@ -102,15 +104,12 @@ function chamferDraft(hit: CornerHit, d: number, at: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function commitChamfer(p: Project, hit: CornerHit, distance: number): Project {
+function chamferOps(p: Project, hit: CornerHit, distance: number): CoreOp[] {
   const c = chamferFor(hit, distance);
-  if (!c) return p; // Distanz zu gross für die Schenkellänge, oder Ecke (fast) gerade → No-op
+  if (!c) return []; // Distanz zu gross für die Schenkellänge, oder Ecke (fast) gerade → No-op
   const pts = applyChamferPoints(hit, c);
   const geom: Drawing2DGeom = { shape: "polyline", pts, closed: hit.curve.closed };
-  return {
-    ...p,
-    drawings2d: p.drawings2d.map((d) => (d.id === hit.drawing.id ? { ...d, geom } : d)),
-  };
+  return patchItem(p, "drawings2d", hit.drawing.id, { geom });
 }
 
 // ── Zustand ───────────────────────────────────────────────────────────────────
@@ -167,7 +166,7 @@ export const chamferCommand: Command = {
     else return [s, { draft: null }];
     return [
       { phase: "done", lastPoint: null } as ChamferDone,
-      { draft: null, done: true, commit: (p) => commitChamfer(p, s.hit, d) },
+      { draft: null, done: true, commit: opsMutation((p) => chamferOps(p, s.hit, d)) },
     ];
   },
 

@@ -8,7 +8,8 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { applyFillMode } from "./fillMode";
-import { opsMutation, patchItem } from "../core";
+import { addItems, fieldOps, opsMutation, patchItem, patchItems, removeItems, setFieldIfChanged } from "../core";
+import type { CoreOp } from "../core";
 import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Layout, Project } from "../model/types";
 import { resolvePenColor } from "../model/penSets";
@@ -107,6 +108,8 @@ function captureCameraState(
 export function usePanelHostBase(opts: {
   project: Project;
   setProject: (updater: (p: Project) => Project) => void;
+  /** Änderung direkt als Ops ([K4] S3), s. `ProjectSlice.applyChange`. */
+  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
   activeLevelId: string;
   setActiveLevelId: (id: string) => void;
   activeLevel: DrawingLevel;
@@ -226,6 +229,7 @@ export function usePanelHostBase(opts: {
   const {
     project,
     setProject,
+    applyChange,
     activeLevelId,
     setActiveLevelId,
     activeLevel,
@@ -508,26 +512,20 @@ export function usePanelHostBase(opts: {
             patchAnnotationInLayout(l, selection.id, { opacity }),
           );
         else if (selection?.kind === "contextObject")
-          setProject((p) => ({
-            ...p,
-            context: (p.context ?? []).map((o) =>
-              o.id === selection.id && o.type === "image" ? { ...o, opacity } : o,
-            ),
-          }));
+          applyChange((p) =>
+            patchItem(p, "context", selection.id, (o) => (o.type === "image" ? { ...o, opacity } : o)),
+          );
       },
       onSetSelectionImageFilters: (filters) => {
         // Nur Kontext-Objekt-Bilder tragen `filters` (s. `ContextImage`) —
         // gemergt mit den bestehenden Werten (Teil-Update, ein Slider ändert
         // nur SEINEN eigenen Wert).
         if (selection?.kind !== "contextObject") return;
-        setProject((p) => ({
-          ...p,
-          context: (p.context ?? []).map((o) =>
-            o.id === selection.id && o.type === "image"
-              ? { ...o, filters: { ...o.filters, ...filters } }
-              : o,
+        applyChange((p) =>
+          patchItem(p, "context", selection.id, (o) =>
+            o.type === "image" ? { ...o, filters: { ...o.filters, ...filters } } : o,
           ),
-        }));
+        );
       },
       onSetSelectionForeground: (color) => {
         // Vordergrund-Override: Wand, Decke oder Drawing2D.
@@ -708,12 +706,7 @@ export function usePanelHostBase(opts: {
           case "room": updateRoom(id, { categoryCode: code }); break;
           case "drawing2d": updateDrawing2D(id, { categoryCode: code }); break;
           case "column":
-            setProject((p) => ({
-              ...p,
-              columns: (p.columns ?? []).map((c) =>
-                c.id === id ? { ...c, categoryCode: code } : c,
-              ),
-            }));
+            applyChange((p) => patchItem(p, "columns", id, { categoryCode: code }));
             break;
           default: break; // extrudedSolid/door: keine Kategorie am Element
         }
@@ -729,20 +722,10 @@ export function usePanelHostBase(opts: {
           case "room": updateRoom(id, { floorId: levelId }); break;
           case "drawing2d": updateDrawing2D(id, { levelId }); break;
           case "extrudedSolid":
-            setProject((p) => ({
-              ...p,
-              extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
-                s.id === id ? { ...s, levelId } : s,
-              ),
-            }));
+            applyChange((p) => patchItem(p, "extrudedSolids", id, { levelId }));
             break;
           case "column":
-            setProject((p) => ({
-              ...p,
-              columns: (p.columns ?? []).map((c) =>
-                c.id === id ? { ...c, floorId: levelId } : c,
-              ),
-            }));
+            applyChange((p) => patchItem(p, "columns", id, { floorId: levelId }));
             break;
           default: break; // opening: Ebene kommt aus der Wirts-Wand
         }
@@ -1003,74 +986,42 @@ export function usePanelHostBase(opts: {
       onSetExtrudedSolidHeight: (height) => {
         if (selection?.kind !== "extrudedSolid" || !(height > 0)) return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
-            s.id === id ? { ...s, height } : s,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "extrudedSolids", id, { height }));
       },
       onSetExtrudedSolidTaper: (taper) => {
         if (selection?.kind !== "extrudedSolid") return;
         const clamped = Math.min(1, Math.max(0, taper));
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
-            s.id === id ? { ...s, taper: clamped } : s,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "extrudedSolids", id, { taper: clamped }));
       },
       onSetExtrudedSolidCornerRadius: (radius) => {
         if (selection?.kind !== "extrudedSolid") return;
         const r = Math.max(0, radius);
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
-            s.id === id ? { ...s, cornerRadius: r > 0 ? r : undefined } : s,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "extrudedSolids", id, { cornerRadius: r > 0 ? r : undefined }));
       },
       onSetExtrudedSolidChamfer: (chamfer) => {
         if (selection?.kind !== "extrudedSolid") return;
         const c = Math.max(0, chamfer);
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
-            s.id === id ? { ...s, chamfer: c > 0 ? c : undefined } : s,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "extrudedSolids", id, { chamfer: c > 0 ? c : undefined }));
       },
       onSetExtrudedSolidSubtract: (subtract) => {
         if (selection?.kind !== "extrudedSolid") return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
-            s.id === id ? { ...s, operation: subtract ? ("subtract" as const) : undefined } : s,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "extrudedSolids", id, { operation: subtract ? ("subtract" as const) : undefined }));
       },
       onSetExtrudedSolidBaseOffset: (offset) => {
         if (selection?.kind !== "extrudedSolid" || !Number.isFinite(offset)) return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          extrudedSolids: (p.extrudedSolids ?? []).map((s) =>
-            s.id === id ? { ...s, baseOffset: Math.abs(offset) > 1e-9 ? offset : undefined } : s,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "extrudedSolids", id, { baseOffset: Math.abs(offset) > 1e-9 ? offset : undefined }));
       },
       // ── Stützen-Attribute (Tragwerk; nur bei selektierter Stütze) ──────────
       onSetColumnProfileKind: (kind) => {
         if (selection?.kind !== "column") return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          columns: (p.columns ?? []).map((c) => {
-            if (c.id !== id) return c;
+        applyChange((p) =>
+          patchItem(p, "columns", id, (c) => {
             if (kind === c.profile.kind) return c;
             // Profil-Typ wechseln: sinnvolles Mass aus dem bisherigen ableiten.
             if (kind === "round") {
@@ -1078,65 +1029,50 @@ export function usePanelHostBase(opts: {
                 c.profile.kind === "rect"
                   ? Math.max(c.profile.width, c.profile.depth) / 2
                   : c.profile.radius;
-              return { ...c, profile: { kind: "round", radius: r } };
+              return { ...c, profile: { kind: "round" as const, radius: r } };
             }
             const side = c.profile.kind === "round" ? c.profile.radius * 2 : 0.3;
-            return { ...c, profile: { kind: "rect", width: side, depth: side } };
+            return { ...c, profile: { kind: "rect" as const, width: side, depth: side } };
           }),
-        }));
+        );
       },
       onSetColumnWidth: (width) => {
         if (selection?.kind !== "column" || !(width > 0)) return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          columns: (p.columns ?? []).map((c) =>
-            c.id === id && c.profile.kind === "rect"
-              ? { ...c, profile: { ...c.profile, width } }
-              : c,
+        applyChange((p) =>
+          patchItem(p, "columns", id, (c) =>
+            c.profile.kind === "rect" ? { ...c, profile: { ...c.profile, width } } : c,
           ),
-        }));
+        );
       },
       onSetColumnDepth: (depth) => {
         if (selection?.kind !== "column" || !(depth > 0)) return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          columns: (p.columns ?? []).map((c) =>
-            c.id === id && c.profile.kind === "rect"
-              ? { ...c, profile: { ...c.profile, depth } }
-              : c,
+        applyChange((p) =>
+          patchItem(p, "columns", id, (c) =>
+            c.profile.kind === "rect" ? { ...c, profile: { ...c.profile, depth } } : c,
           ),
-        }));
+        );
       },
       onSetColumnRadius: (radius) => {
         if (selection?.kind !== "column" || !(radius > 0)) return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          columns: (p.columns ?? []).map((c) =>
-            c.id === id && c.profile.kind === "round"
-              ? { ...c, profile: { ...c.profile, radius } }
-              : c,
+        applyChange((p) =>
+          patchItem(p, "columns", id, (c) =>
+            c.profile.kind === "round" ? { ...c, profile: { ...c.profile, radius } } : c,
           ),
-        }));
+        );
       },
       onSetColumnHeight: (height) => {
         if (selection?.kind !== "column" || !(height > 0)) return;
         const id = selection.id;
-        setProject((p) => ({
-          ...p,
-          columns: (p.columns ?? []).map((c) => (c.id === id ? { ...c, height } : c)),
-        }));
+        applyChange((p) => patchItem(p, "columns", id, { height }));
       },
       onSetColumnRotation: (deg) => {
         if (selection?.kind !== "column" || !Number.isFinite(deg)) return;
         const id = selection.id;
         const rotation = (deg * Math.PI) / 180;
-        setProject((p) => ({
-          ...p,
-          columns: (p.columns ?? []).map((c) => (c.id === id ? { ...c, rotation } : c)),
-        }));
+        applyChange((p) => patchItem(p, "columns", id, { rotation }));
       },
       // ── Site-/Kontext-Schicht ──────────────────────────────────────────────
       contextObjects: project.context ?? [],
@@ -1146,7 +1082,7 @@ export function usePanelHostBase(opts: {
       onRemoveContextObjects: removeContextObjects,
       onGenerateTerrain: generateTerrain,
       onSetGeoAnchor: (anchor) => {
-        setProject((p) => ({ ...p, geoAnchor: anchor }));
+        applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor));
       },
       onImportDxf: () => dxfInputRef.current?.click(),
       onStartGeoref: () => onRunCommand("georef"),
@@ -1234,10 +1170,7 @@ export function usePanelHostBase(opts: {
         // Neuer Ausschnitt landet im aktiven Ordner (falls das Panel einen
         // mitgibt), sonst auf der Wurzelebene — additiv (folderId optional).
         const full = folderId ? { ...snap, folderId } : snap;
-        setProject((p) => ({
-          ...p,
-          viewSnapshots: [...(p.viewSnapshots ?? []), full],
-        }));
+        applyChange(addItems("viewSnapshots", [full]));
         return full.id;
       },
 
@@ -1272,10 +1205,7 @@ export function usePanelHostBase(opts: {
           ...captureCameraState(planViewRef, viewType),
         };
         const snap = captureViewSnapshot(`vs-${Date.now()}`, name, st);
-        setProject((p) => ({
-          ...p,
-          viewSnapshots: [...(p.viewSnapshots ?? []), snap],
-        }));
+        applyChange(addItems("viewSnapshots", [snap]));
         setSelectedViewSnapshotId(snap.id);
         return snap.id;
       },
@@ -1298,13 +1228,9 @@ export function usePanelHostBase(opts: {
         setScaleDenominator(st.scaleDenominator);
         applyLayerVisibility(st.layerVisibility);
         applyDrawingVisibility(st.drawingVisibility);
-        setProject((p) => ({
-          ...p,
-          overrideRules: applyOverrideRuleEnabled(
-            p.overrideRules ?? [],
-            st.enabledOverrideRuleIds,
-          ),
-        }));
+        applyChange((p) =>
+          fieldOps(p, "overrideRules", applyOverrideRuleEnabled(p.overrideRules ?? [], st.enabledOverrideRuleIds)),
+        );
         requestAnimationFrame(() => {
           planViewRef.current?.applyScale(st.scaleDenominator);
           // Kamera NACH `applyScale` restaurieren (nicht statt): `applyScale`
@@ -1326,19 +1252,11 @@ export function usePanelHostBase(opts: {
       onRenameViewSnapshot: (id: string, name: string) => {
         const trimmed = name.trim();
         if (!trimmed) return;
-        setProject((p) => ({
-          ...p,
-          viewSnapshots: (p.viewSnapshots ?? []).map((s) =>
-            s.id === id ? { ...s, name: trimmed } : s,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "viewSnapshots", id, { name: trimmed }));
       },
 
       onDeleteViewSnapshot: (id: string) => {
-        setProject((p) => ({
-          ...p,
-          viewSnapshots: (p.viewSnapshots ?? []).filter((s) => s.id !== id),
-        }));
+        applyChange((p) => removeItems(p, "viewSnapshots", [id]));
         if (selectedViewSnapshotId === id) setSelectedViewSnapshotId(null);
       },
 
@@ -1352,51 +1270,31 @@ export function usePanelHostBase(opts: {
           t("viewsnap.folder.defaultName"),
           parentId,
         );
-        setProject((p) => ({
-          ...p,
-          viewSnapshotFolders: [...(p.viewSnapshotFolders ?? []), folder],
-        }));
+        applyChange(addItems("viewSnapshotFolders", [folder]));
         return id;
       },
       onRenameViewSnapshotFolder: (id, name) => {
         const trimmed = name.trim();
         if (!trimmed) return;
-        setProject((p) => ({
-          ...p,
-          viewSnapshotFolders: (p.viewSnapshotFolders ?? []).map((f) =>
-            f.id === id ? { ...f, name: trimmed } : f,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "viewSnapshotFolders", id, { name: trimmed }));
       },
       onDeleteViewSnapshotFolder: (id) => {
-        setProject((p) => {
+        applyChange((p) => {
           const { folders, snapshots } = deleteViewSnapshotFolder(
             id,
             p.viewSnapshotFolders ?? [],
             p.viewSnapshots ?? [],
           );
-          return { ...p, viewSnapshotFolders: folders, viewSnapshots: snapshots };
+          return [...fieldOps(p, "viewSnapshotFolders", folders), ...fieldOps(p, "viewSnapshots", snapshots)];
         });
       },
       onMoveViewSnapshotToFolder: (snapshotId, folderId) => {
-        setProject((p) => ({
-          ...p,
-          viewSnapshots: moveSnapshotToFolder(
-            p.viewSnapshots ?? [],
-            snapshotId,
-            folderId,
-          ),
-        }));
+        applyChange((p) => fieldOps(p, "viewSnapshots", moveSnapshotToFolder(p.viewSnapshots ?? [], snapshotId, folderId)));
       },
       onMoveViewSnapshotFolder: (folderId, parentId) => {
-        setProject((p) => ({
-          ...p,
-          viewSnapshotFolders: moveViewSnapshotFolder(
-            p.viewSnapshotFolders ?? [],
-            folderId,
-            parentId,
-          ),
-        }));
+        applyChange((p) =>
+          fieldOps(p, "viewSnapshotFolders", moveViewSnapshotFolder(p.viewSnapshotFolders ?? [], folderId, parentId)),
+        );
       },
 
       // Footer-Bar des Ausschnitte-Panels: die aktuell „angewählte" Id plus
@@ -1414,67 +1312,40 @@ export function usePanelHostBase(opts: {
       // Anlegen öffnet es direkt; Löschen schliesst es, falls es das offene trifft.
       onAddLayout: (name, paper, orientation) => {
         const lay = createLayout(`lay-${Date.now()}`, name, paper, orientation);
-        setProject((p) => ({ ...p, layouts: [...(p.layouts ?? []), lay] }));
+        applyChange(addItems("layouts", [lay]));
         setActiveLayoutId(lay.id);
       },
       onRenameLayout: (id, name) => {
-        setProject((p) => ({
-          ...p,
-          layouts: (p.layouts ?? []).map((l) =>
-            l.id === id ? { ...l, name } : l,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "layouts", id, { name }));
       },
       onDeleteLayout: (id) => {
-        setProject((p) => ({
-          ...p,
-          layouts: (p.layouts ?? []).filter((l) => l.id !== id),
-        }));
+        applyChange((p) => removeItems(p, "layouts", [id]));
         setActiveLayoutId((cur) => (cur === id ? null : cur));
       },
       onOpenLayout: (id) => setActiveLayoutId(id),
       onAddMasterLayout: (name) => {
         const m = createMasterLayout(`mas-${Date.now()}`, name, "a4", "portrait");
-        setProject((p) => ({
-          ...p,
-          masterLayouts: [...(p.masterLayouts ?? []), m],
-        }));
+        applyChange(addItems("masterLayouts", [m]));
       },
       onRenameMasterLayout: (id, name) => {
-        setProject((p) => ({
-          ...p,
-          masterLayouts: (p.masterLayouts ?? []).map((m) =>
-            m.id === id ? { ...m, name } : m,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "masterLayouts", id, { name }));
       },
       onDeleteMasterLayout: (id) => {
         // Master löschen UND Bindungen der Layouts lösen (masterId → undefined).
-        setProject((p) => ({
-          ...p,
-          masterLayouts: (p.masterLayouts ?? []).filter((m) => m.id !== id),
-          layouts: (p.layouts ?? []).map((l) =>
-            l.masterId === id ? { ...l, masterId: undefined } : l,
-          ),
-        }));
+        applyChange((p) => [
+          ...removeItems(p, "masterLayouts", [id]),
+          ...patchItems(p, "layouts", (l) => l.masterId === id, (l) => ({ ...l, masterId: undefined })),
+        ]);
       },
       onPatchMasterLayout: (id, patch) => {
-        setProject((p) => ({
-          ...p,
-          masterLayouts: (p.masterLayouts ?? []).map((m) =>
-            m.id === id ? { ...m, ...patch } : m,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "masterLayouts", id, patch));
       },
 
       // ── Layouts-Baum (Ordner) + Erstell-Dialoge (DOSSIER A3) ────────────
       onAddLayoutFolder: (parentId) => {
         const id = `folder-${Date.now()}`;
         const folder = createLayoutFolder(id, t("layouts.folder.defaultName"), parentId);
-        setProject((p) => ({
-          ...p,
-          layoutFolders: [...(p.layoutFolders ?? []), folder],
-        }));
+        applyChange(addItems("layoutFolders", [folder]));
         return id;
       },
       onAddMasterFolder: (parentId) => {
@@ -1485,38 +1356,30 @@ export function usePanelHostBase(opts: {
           parentId,
           "master",
         );
-        setProject((p) => ({
-          ...p,
-          layoutFolders: [...(p.layoutFolders ?? []), folder],
-        }));
+        applyChange(addItems("layoutFolders", [folder]));
         return id;
       },
       onDeleteMasterFolder: (id) => {
-        setProject((p) => {
+        applyChange((p) => {
           const { folders, masters } = deleteMasterFolder(
             id,
             p.layoutFolders ?? [],
             p.masterLayouts ?? [],
           );
-          return { ...p, layoutFolders: folders, masterLayouts: masters };
+          return [...fieldOps(p, "layoutFolders", folders), ...fieldOps(p, "masterLayouts", masters)];
         });
       },
       onRenameLayoutFolder: (id, name) => {
-        setProject((p) => ({
-          ...p,
-          layoutFolders: (p.layoutFolders ?? []).map((f) =>
-            f.id === id ? { ...f, name } : f,
-          ),
-        }));
+        applyChange((p) => patchItem(p, "layoutFolders", id, { name }));
       },
       onDeleteLayoutFolder: (id) => {
-        setProject((p) => {
+        applyChange((p) => {
           const { folders, layouts } = deleteLayoutFolder(
             id,
             p.layoutFolders ?? [],
             p.layouts ?? [],
           );
-          return { ...p, layoutFolders: folders, layouts };
+          return [...fieldOps(p, "layoutFolders", folders), ...fieldOps(p, "layouts", layouts)];
         });
       },
       onCreateLayout: (opts) => {
@@ -1538,7 +1401,7 @@ export function usePanelHostBase(opts: {
             ? { customWidthMm, customHeightMm }
             : {}),
         };
-        setProject((p) => ({ ...p, layouts: [...(p.layouts ?? []), full] }));
+        applyChange(addItems("layouts", [full]));
         return id;
       },
       onCreateMasterLayout: (opts) => {
@@ -1555,10 +1418,7 @@ export function usePanelHostBase(opts: {
           custom,
         );
         const full = opts.folderId ? { ...m, folderId: opts.folderId } : m;
-        setProject((p) => ({
-          ...p,
-          masterLayouts: [...(p.masterLayouts ?? []), full],
-        }));
+        applyChange(addItems("masterLayouts", [full]));
         return id;
       },
       onExportFolderPdf: (folderId) => {
@@ -1569,20 +1429,12 @@ export function usePanelHostBase(opts: {
         });
       },
       onMoveLayoutToFolder: (layoutId, folderId) => {
-        setProject((p) => ({
-          ...p,
-          layouts: moveLayoutToFolder(p.layouts ?? [], layoutId, folderId),
-        }));
+        applyChange((p) => fieldOps(p, "layouts", moveLayoutToFolder(p.layouts ?? [], layoutId, folderId)));
       },
       onMoveFolderToFolder: (folderId, parentId) => {
-        setProject((p) => ({
-          ...p,
-          layoutFolders: moveFolderToFolder(
-            p.layoutFolders ?? [],
-            folderId,
-            parentId,
-          ),
-        }));
+        applyChange((p) =>
+          fieldOps(p, "layoutFolders", moveFolderToFolder(p.layoutFolders ?? [], folderId, parentId)),
+        );
       },
     };
     return value;

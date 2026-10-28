@@ -13,6 +13,7 @@
 // Der Körper steht auf der Geschoss-UK (Z = 0 lokal).
 
 import type { ExtrudedSolid } from "../../model/types";
+import { addItems, opsMutation } from "../../core";
 import { uniqueId } from "../../tools/types";
 import type {
   Command,
@@ -20,7 +21,6 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
@@ -247,8 +247,8 @@ export const solidCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p: Project) => {
-          if (!built) return p;
+        commit: opsMutation(() => {
+          if (!built) return [];
           const solid: ExtrudedSolid = {
             id: uniqueId("body"),
             type: "extrudedSolid",
@@ -257,8 +257,8 @@ export const solidCommand: Command = {
             height: built.height,
             brep: { spec: built.spec, origin: built.points[0], label: built.label },
           };
-          return { ...p, extrudedSolids: [...(p.extrudedSolids ?? []), solid] };
-        },
+          return addItems("extrudedSolids", [solid]);
+        }),
       },
     ];
   },

@@ -10,7 +10,7 @@
 import type { ExtrudedSolid, Vec2 } from "../../model/types";
 import { getFloor } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import { extrudedSolidSpec } from "../../core";
+import { addItems, extrudedSolidSpec, opsMutation, removeItems } from "../../core";
 import type { Command, CommandResult, CommandState, CmdOption, Project, ToolDraft } from "../types";
 
 export type SolidBoolOp = "union" | "difference" | "intersection";
@@ -167,17 +167,15 @@ export const solidBoolCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p: Project) => {
+        commit: opsMutation((p) => {
           const a = (p.extrudedSolids ?? []).find((x) => x.id === firstId);
           const b = (p.extrudedSolids ?? []).find((x) => x.id === hit.id);
-          if (!a || !b) return p;
+          if (!a || !b) return [];
           const merged = combineSolids(p, a, b, op);
-          if (!merged) return p;
-          return {
-            ...p,
-            extrudedSolids: [...(p.extrudedSolids ?? []).filter((x) => x.id !== a.id && x.id !== b.id), merged],
-          };
-        },
+          if (!merged) return [];
+          // Beide Körper raus, das Ergebnis hinten dran.
+          return [...removeItems(p, "extrudedSolids", [a.id, b.id]), ...addItems("extrudedSolids", [merged])];
+        }),
       },
     ];
   },
