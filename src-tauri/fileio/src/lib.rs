@@ -40,6 +40,9 @@ pub mod pointcloud_text;
 pub mod pdf_object;
 pub mod pdf_vector;
 pub mod pdf_geom;
+pub mod sheet_import;
+#[cfg(feature = "web")]
+mod web_sheet;
 #[cfg(feature = "web")]
 mod web_pdf;
 

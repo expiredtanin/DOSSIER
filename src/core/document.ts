@@ -14,6 +14,8 @@ import type { CoreOp } from "./ops";
 export type QueryName =
   | "kennzahlen"
   | "areaTable"
+  | "programCompare"
+  | "programLayout"
   | "ivhb"
   | "siteCheck"
   | "buildingFootprint"

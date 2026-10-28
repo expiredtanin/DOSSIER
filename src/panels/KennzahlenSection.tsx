@@ -12,6 +12,8 @@ import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
 import { checkRoomProgram, computeKennzahlen, polygonArea } from "../core";
 import type { Project, RoomProgramRow } from "../model/types";
+import { RoomProgramImportButton } from "../ui/RoomProgramImportDialog";
+import { ProgramCompareSection } from "./ProgramCompareSection";
 
 type ProgramStatus = ReturnType<typeof checkRoomProgram>["rows"][number]["status"];
 
@@ -40,6 +42,7 @@ const fmt = (n: number, d = 1) => n.toLocaleString("de-CH", { minimumFractionDig
 export function KennzahlenSection() {
   const host = usePanelHost();
   const setProject = useStore((s) => s.setProject);
+  const notify = useStore((s) => s.notify);
   const project = host.project;
   const k = computeKennzahlen(project);
   const prog = checkRoomProgram(project);
@@ -118,6 +121,7 @@ export function KennzahlenSection() {
             <span>{t("program.name")}</span>
             <span>{t("program.area")}</span>
             <span>{t("program.count")}</span>
+            <span>{t("program.field.group")}</span>
             <span>{t("program.status")}</span>
             <span />
           </div>
@@ -154,6 +158,12 @@ export function KennzahlenSection() {
                     if (v !== null && v >= 1) patchRow(i, { count: Math.round(v) }, "count");
                   }}
                 />
+                <input
+                  type="text"
+                  className="kz-input"
+                  value={row.group ?? ""}
+                  onChange={(e) => patchRow(i, { group: e.target.value === "" ? undefined : e.target.value }, "group")}
+                />
                 <span
                   className={"kz-status" + (res?.status === "ok" ? " ok" : " bad")}
                   title={res ? t("program.actual", { count: res.count, area: fmt(res.area) }) : undefined}
@@ -168,14 +178,13 @@ export function KennzahlenSection() {
           })}
         </div>
       )}
-      <button type="button" className="kz-add" onClick={addRow}>
-        {t("program.add")}
-      </button>
-      {rows.length > 0 && prog.extra.length > 0 && (
-        <div className="kz-extra" title={prog.extra.map((r) => r.name).join(", ")}>
-          {t("program.extra", { n: prog.extra.length })}
-        </div>
-      )}
+      <div className="kz-program-actions">
+        <button type="button" className="kz-add" onClick={addRow}>
+          {t("program.add")}
+        </button>
+        <RoomProgramImportButton project={project} onApply={(fn) => setProject(fn)} notify={notify} />
+      </div>
+      {rows.length > 0 && <ProgramCompareSection statusLabel={programStatusLabel} />}
     </div>
   );
 }

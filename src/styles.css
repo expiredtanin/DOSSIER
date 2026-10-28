@@ -8554,3 +8554,136 @@ body {
   font-size: 10px;
   color: var(--ink-2);
 }
+
+/* Raumprogramm: Gruppenspalte, Aktionen, Soll/Ist-Vergleich, Import-Dialog ([61]). */
+.kz-program-row {
+  grid-template-columns: minmax(0, 1fr) 52px 36px 64px 56px 18px;
+}
+.kz-program-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pc-table {
+  font-size: 10px;
+}
+.pc-table td,
+.pc-table th {
+  white-space: nowrap;
+  padding: 2px 3px;
+}
+.pc-table td:first-child {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pc-table tr.pc-sub td {
+  font-weight: 600;
+  font-size: 10px;
+  color: var(--ink-2);
+  padding-top: 6px;
+}
+.pc-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-2);
+  vertical-align: middle;
+}
+.pc-dot.green {
+  background: var(--ok, #2f8f4e);
+}
+.pc-dot.yellow {
+  background: #e0a800;
+}
+.pc-dot.red {
+  background: var(--danger, #c0392b);
+}
+.pc-dot.grey {
+  background: var(--line, #999);
+}
+.rpi-dialog {
+  width: min(880px, 94vw);
+}
+.rpi-file {
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+.rpi-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rpi-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.rpi-select {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--ink);
+  max-width: 100%;
+}
+.rpi-colsel.mapped {
+  font-weight: 600;
+  outline: 1px solid var(--accent-border, #4a7bd0);
+}
+.rpi-scroll {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rpi-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.rpi-table th,
+.rpi-table td {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rpi-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
+.rpi-table td.mapped {
+  background: var(--field-bg);
+}
+.rpi-table tr.skip td {
+  color: var(--ink-2);
+  opacity: 0.65;
+}
+.rpi-table tr.head td {
+  font-weight: 600;
+}
+.rpi-rownr {
+  color: var(--ink-2);
+  text-align: right;
+  width: 28px;
+}
+.rpi-state {
+  font-size: 11px;
+}

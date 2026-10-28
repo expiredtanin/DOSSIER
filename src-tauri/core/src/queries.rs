@@ -2,7 +2,7 @@
 //! antwortet. TS ruft sie über `ProjectDocument.query(name, args, text)`.
 
 use crate::model::Project;
-use crate::{export_schedule, flaechen, kennzahlen, model3d, site_rules, sun};
+use crate::{export_schedule, flaechen, kennzahlen, model3d, room_program, site_rules, sun};
 
 fn json<T: serde::Serialize>(v: &T) -> Result<String, String> {
     serde_json::to_string(v).map_err(|e| e.to_string())
@@ -16,6 +16,11 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("ivhb", _) => {
             let opt: flaechen::IvhbOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("ivhb: {e}"))? };
             json(&flaechen::ivhb(p, &opt))
+        }
+        ("programCompare", _) => json(&room_program::compare(p)),
+        ("programLayout", _) => {
+            let opt: room_program::LayoutOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("programLayout: {e}"))? };
+            json(&room_program::layout(p, &opt))
         }
         ("siteCheck", _) => json(&site_rules::check_project(p)),
         ("buildingFootprint", _) => json(&site_rules::building_footprint(p)),

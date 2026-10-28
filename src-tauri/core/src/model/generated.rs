@@ -814,6 +814,10 @@ pub struct RoomProgramRow {
     pub area: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -2022,6 +2026,8 @@ pub struct Project {
     pub drawing_levels: Vec<DrawingLevel>,
     #[serde(rename = "roomProgram", default, skip_serializing_if = "Option::is_none")]
     pub room_program: Option<Vec<RoomProgramRow>>,
+    #[serde(rename = "roomProgramTolerance", default, skip_serializing_if = "Option::is_none")]
+    pub room_program_tolerance: Option<f64>,
     #[serde(rename = "parcelArea", default, skip_serializing_if = "Option::is_none")]
     pub parcel_area: Option<f64>,
     #[serde(rename = "sunStudy", default, skip_serializing_if = "Option::is_none")]
@@ -2429,6 +2435,12 @@ impl Project {
             "roomProgram" => {
                 self.room_program = match v {
                     Some(v) => <Option<Vec<RoomProgramRow>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "roomProgramTolerance" => {
+                self.room_program_tolerance = match v {
+                    Some(v) => <Option<f64>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }
