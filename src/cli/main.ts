@@ -11,7 +11,7 @@
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
-//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -63,6 +63,12 @@ import {
   exportProjectStep,
   exportScheduleCsv,
   computeKennzahlen,
+  computeAreaTable,
+  computeIvhb,
+  buildAreaReport,
+  areaReportToCsv,
+  areaReportToSvg,
+  buildAreaReportPdf,
   sunPosition,
   shadowPolygons,
   projectLatLon,
@@ -620,6 +626,34 @@ async function execute(project: Project, file: string, command: string, rest: st
       out(args, exportGltf(project, { byLevel: !args.flags.has("flat") }), `${project.name || "projekt"}.gltf`);
       return 0;
     case "kennzahlen": {
+      // --sia416 / --ivhb: Flächentabelle bzw. IVHB-Kennziffern [70]; --format json|csv|svg|pdf (Default json).
+      if (args.flags.has("sia416") || args.flags.has("ivhb")) {
+        const num = (k: string): number | undefined => {
+          const v = args.flags.get(k);
+          if (v === undefined) return undefined;
+          const n = Number(v.replace(",", "."));
+          if (!Number.isFinite(n)) throw new Error(`--${k}: keine Zahl`);
+          return n;
+        };
+        const basis = args.flags.get("agf-basis") ?? "ngf";
+        if (basis !== "gf" && basis !== "ngf" && basis !== "nf") throw new Error("--agf-basis: gf, ngf oder nf");
+        const ivhbOptions = { agsf: num("agsf"), greenArea: num("gruenflaeche"), agfBasis: basis, includeUnderground: args.flags.has("untergeschosse") } as const;
+        const wantAreas = args.flags.has("sia416");
+        const wantIvhb = args.flags.has("ivhb");
+        const format = args.flags.get("format") ?? "json";
+        const stem = `${project.name || "projekt"}-flaechen`;
+        if (format === "json") {
+          const json = { ...(wantAreas ? { flaechentabelle: computeAreaTable(project) } : {}), ...(wantIvhb ? { ivhb: computeIvhb(project, ivhbOptions) } : {}) };
+          out(args, JSON.stringify(json, null, 2), `${stem}.json`);
+          return 0;
+        }
+        const report = buildAreaReport(project, { areas: wantAreas, ivhb: wantIvhb, ivhbOptions });
+        if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
+        else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
+        else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+        else throw new Error("--format: json, csv, svg oder pdf");
+        return 0;
+      }
       const k = computeKennzahlen(project);
       const prog = checkRoomProgram(project);
       const baurecht = checkSiteRules(project);

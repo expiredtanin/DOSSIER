@@ -15,6 +15,7 @@ pub mod sun;
 pub mod site_rules;
 pub mod auto_dimensions;
 pub mod kennzahlen;
+pub mod flaechen;
 pub mod bulge;
 pub mod stair;
 pub mod joins;

@@ -8498,3 +8498,59 @@ body {
   flex: 0 0 9em;
   width: 9em;
 }
+
+/* Flächentabelle und IVHB-Kennziffern (Flächenbilanz-Panel, AreaTableSection). */
+.area-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.area-actions {
+  display: flex;
+  gap: 4px;
+}
+.area-heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 2px;
+}
+.area-scroll {
+  overflow-x: auto;
+}
+.area-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.area-table th,
+.area-table td {
+  padding: 2px 5px;
+  white-space: nowrap;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.area-table th {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.area-table .num {
+  text-align: right;
+}
+.area-table tr.total td {
+  font-weight: 700;
+  border-top: 1px solid var(--ink-2);
+}
+.area-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.area-notes {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 10px;
+  color: var(--ink-2);
+}

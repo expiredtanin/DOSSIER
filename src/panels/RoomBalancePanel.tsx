@@ -1,5 +1,5 @@
-// Inhalts-Panel „Flächenbilanz" (SIA 416) — listet alle Räume gruppiert nach
-// ihrer SIA-416-Blatt-Kategorie mit Zwischen-/Gesamtsummen und bietet einen
+// Inhalts-Panel „Flächenbilanz" — listet alle Räume gruppiert nach
+// ihrer Flächenart (SIA 416) mit Zwischen-/Gesamtsummen und bietet einen
 // CSV-Export, darüber die Kennzahlenleiste mit Parzelle und Raumprogramm
 // (KennzahlenSection). Fläche/Bilanz werden LIVE aus den Raum-Umrissen abgeleitet
 // (geometry/roomArea: evaluateRoom/balance/roomsToCsv) — nie gespeichert.
@@ -13,6 +13,8 @@ import { balance, evaluateRoom, roomsToCsv, siaLabelFull } from "../core";
 import type { Room } from "../model/types";
 import { roomDisplayName } from "../model/roomStamp";
 import { KennzahlenSection } from "./KennzahlenSection";
+import { AreaTableSection } from "./AreaTableSection";
+import { downloadCsv } from "./downloadFile";
 
 /** Löst je Raum die anrechenbare (Netto-)Fläche + Kategorie auf. */
 function roomAreas(rooms: Room[]): { category: Room["siaCategory"]; area: number }[] {
@@ -30,22 +32,6 @@ function floorNameOf(
   return levels.find((z) => z.id === floorId)?.name ?? floorId;
 }
 
-/** Stösst den Download einer CSV-Datei an (reiner Client, Blob-URL). */
-function downloadCsv(fileName: string, content: string): void {
-  // BOM voranstellen, damit Excel UTF-8 (Umlaute/„m²") korrekt liest.
-  const blob = new Blob(["﻿" + content], {
-    type: "text/csv;charset=utf-8;",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 export function RoomBalancePanel() {
   const host = usePanelHost();
   const rooms = host.project.rooms ?? [];
@@ -55,6 +41,7 @@ export function RoomBalancePanel() {
     return (
       <div className="balance-panel">
         <KennzahlenSection />
+        <AreaTableSection />
         <div className="balance-empty">{t("balance.empty")}</div>
       </div>
     );
@@ -86,6 +73,9 @@ export function RoomBalancePanel() {
 
       {/* Kennzahlenleiste, Parzelle und Raumprogramm. */}
       <KennzahlenSection />
+
+      {/* Flächentabelle und IVHB-Kennziffern. */}
+      <AreaTableSection />
 
       {/* Raumliste (je Raum: Name · Geschoss · SIA · Fläche). */}
       <div className="balance-section-label">{t("balance.rooms")}</div>
