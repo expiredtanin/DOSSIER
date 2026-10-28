@@ -31,6 +31,19 @@
 //! Reihenfolge: Wände, Decken, Dächer (je Quelle in Modellreihenfolge); nur sichtbare Flächen
 //! (Rückseiten-Culling, Tiefe > 0).
 //!
+//! ## Öffnungen
+//! `openings(frame, in)` mit `in = [n, Öffnung × n]`, Öffnung =
+//! ```text
+//! sx, sz, ex, ez, dicke, von, bis, zUnten, zOben,
+//! istTuer, glasBlatt, glasAnteil (NaN = 1),
+//! rahmenbreite, kaempferHoehe, sprossenZeilen (NaN = 1), sprossenSpalten (NaN = 1),
+//! bankAn, typArt (0 fest, 1 dreh, 2 kipp, 3 drehkipp, 4 schiebe),
+//! nFluegel, (pfosten, pfostenBreite (NaN), autoBreite (0/1), breite (NaN), art (-1 = typArt), bandLinks) × nFluegel
+//! ```
+//! → `[n, (ok, tiefe, istTuer, 8 Ecken, Listen) × n]`; `ok` 0 = nicht sichtbar (sonst nichts mehr).
+//! Listen in dieser Reihenfolge, je `[anzahl, Einträge]`: glas, tuerblatt (Vierecke à 8 Werte),
+//! teilungen (Linien à 4), fluegel (Vierecke), bank (Vierecke), symbol (Linien).
+//!
 //! ## Eck-Verlängerung
 //! `wall_extensions(in)` mit `in = [n, (geschoss, sx, sy, ex, ey, halbe dicke) × n]` →
 //! `[n, (verlStart, verlEnde) × n]`: Wandenden bis zur Aussenfläche der dicksten anstossenden Wand
@@ -706,6 +719,284 @@ pub fn wall_extensions(inp: &[f64]) -> Vec<f64> {
         };
         f.push(ext_at((me[1], me[2])));
         f.push(ext_at((me[3], me[4])));
+    }
+    f
+}
+
+// ── Öffnungen ──────────────────────────────────────────────────────────────
+
+type Quad = [P; 4];
+type Line = (P, P);
+
+#[derive(Default)]
+struct OpeningOut {
+    glass: Vec<Quad>,
+    door_leaf: Vec<Quad>,
+    divisions: Vec<Line>,
+    sash_rects: Vec<Quad>,
+    sill: Vec<Quad>,
+    symbol: Vec<Line>,
+}
+
+fn lerp(a: P, b: P, t: f64) -> P {
+    (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
+}
+
+fn quad_at(q: &Quad, fa: f64, fz: f64) -> P {
+    lerp(lerp(q[0], q[1], fa), lerp(q[3], q[2], fa), fz)
+}
+
+fn rect(q: &Quad, fa0: f64, fa1: f64, fz0: f64, fz1: f64) -> Quad {
+    [quad_at(q, fa0, fz0), quad_at(q, fa1, fz0), quad_at(q, fa1, fz1), quad_at(q, fa0, fz1)]
+}
+
+/// Projiziert die zum Betrachter zeigende Wand-Langseite der Öffnung; `None` ohne sichtbare Seite.
+fn project_opening_rect(f: &Frame, o: &[f64]) -> Option<(Quad, f64)> {
+    let (sx, sz) = (o[0], o[1]);
+    let ax = o[2] - o[0];
+    let az = o[3] - o[1];
+    let len = hypot2(ax, az);
+    let (from, to, z_bottom, z_top) = (o[5], o[6], o[7], o[8]);
+    if len < 1e-9 || to - from <= EPS || z_top - z_bottom <= EPS {
+        return None;
+    }
+    let a_hat: V3 = [ax / len, 0.0, az / len];
+    let n_hat: V3 = [az / len, 0.0, -ax / len];
+    let ht = o[4] / 2.0;
+    for side in [ht, -ht] {
+        let normal = if side > 0.0 { n_hat } else { neg(n_hat) };
+        let facing = f.n[0] * normal[0] + f.n[1] * normal[1] + f.n[2] * normal[2];
+        if facing >= -FACING_EPS {
+            continue;
+        }
+        let corner = |s_along: f64, y: f64| -> V3 {
+            [sx + a_hat[0] * s_along + n_hat[0] * side, y, sz + a_hat[2] * s_along + n_hat[2] * side]
+        };
+        let world = [corner(from, z_bottom), corner(to, z_bottom), corner(to, z_top), corner(from, z_top)];
+        let mut pts = [(0.0, 0.0); 4];
+        let mut depth_sum = 0.0;
+        for (k, w) in world.iter().enumerate() {
+            let (u, v, d) = project_point(f, *w);
+            pts[k] = (u, v);
+            depth_sum += d;
+        }
+        let depth = depth_sum / 4.0;
+        if depth <= EPS {
+            continue;
+        }
+        return Some((pts, depth));
+    }
+    None
+}
+
+fn layout_opening(o: &[f64], sashes: &[f64], pts: &Quad) -> OpeningOut {
+    let mut out = OpeningOut::default();
+    let (from, to, z_bottom, z_top) = (o[5], o[6], o[7], o[8]);
+    let w = to - from;
+    let h = z_top - z_bottom;
+    if o[9] != 0.0 {
+        // Tür: Blatt-Fläche, bei Glasblatt mit Teilverglasung (Kämpferhöhe von OBEN).
+        if o[10] != 0.0 {
+            let ratio = max(0.05, min(1.0, if o[11].is_nan() { 1.0 } else { o[11] }));
+            if ratio >= 1.0 - EPS {
+                out.glass.push(rect(pts, 0.04, 0.96, 0.0, 0.97));
+            } else {
+                let split_z = 0.97 * (1.0 - ratio);
+                out.glass.push(rect(pts, 0.04, 0.96, split_z, 0.97));
+                out.door_leaf.push(rect(pts, 0.04, 0.96, 0.0, split_z));
+                out.divisions.push((quad_at(pts, 0.04, split_z), quad_at(pts, 0.96, split_z)));
+            }
+        } else {
+            out.door_leaf.push(rect(pts, 0.04, 0.96, 0.0, 0.97));
+        }
+        return out;
+    }
+    let fw = o[12];
+    let fa = min(0.45, fw / max(w, 1e-6));
+    let fz = min(0.45, fw / max(h, 1e-6));
+    let transom = max(0.0, o[13]);
+    let f_tr = if transom > EPS && transom < h - fw { 1.0 - transom / h } else { 0.0 };
+    let field_top = if f_tr > 0.0 { f_tr - fz / 2.0 } else { 1.0 - fz };
+    let inner_w = max(1e-6, w * (1.0 - 2.0 * fa));
+    let n_sashes = sashes.len() / 6;
+    let sash = |k: usize| &sashes[6 * k..6 * k + 6];
+    let (mut fixed_sum, mut auto_count) = (0.0, 0usize);
+    for k in 0..n_sashes {
+        let sd = sash(k);
+        if sd[0] != 0.0 {
+            fixed_sum += max(0.0, if sd[1].is_nan() { 0.06 } else { sd[1] });
+        } else if sd[2] == 0.0 {
+            fixed_sum += max(0.0, if sd[3].is_nan() { 0.0 } else { sd[3] });
+        } else {
+            auto_count += 1;
+        }
+    }
+    let auto_w = if auto_count > 0 { max(0.02, (inner_w - fixed_sum) / auto_count as f64) } else { 0.0 };
+    let mut cursor = fa;
+    for k in 0..n_sashes {
+        let sd = sash(k);
+        let sw = if sd[0] != 0.0 {
+            max(0.0, if sd[1].is_nan() { 0.06 } else { sd[1] })
+        } else if sd[2] == 0.0 {
+            max(0.0, if sd[3].is_nan() { auto_w } else { sd[3] })
+        } else {
+            auto_w
+        };
+        let fa0 = cursor;
+        let fa1 = cursor + sw / w;
+        cursor = fa1;
+        if sd[0] != 0.0 {
+            let fm = (fa0 + fa1) / 2.0;
+            out.divisions.push((quad_at(pts, fm, fz), quad_at(pts, fm, field_top)));
+            continue;
+        }
+        out.sash_rects.push(rect(pts, fa0, fa1, fz, field_top));
+        let spw = min(0.06, max(0.03, fw));
+        let g_u = spw / max(w, 1e-6);
+        let g_v = spw / max(h, 1e-6);
+        let g_a = fa0 + g_u;
+        let g_b = fa1 - g_u;
+        let gz0 = fz + g_v;
+        let gz1 = field_top - g_v;
+        let rows = max(1.0, round(if o[14].is_nan() { 1.0 } else { o[14] })) as usize;
+        let cols = max(1.0, round(if o[15].is_nan() { 1.0 } else { o[15] })) as usize;
+        if g_b - g_a > 1e-6 && gz1 - gz0 > 1e-6 {
+            for r in 0..rows {
+                let rf = r as f64;
+                let rows_f = rows as f64;
+                let rz0 = gz0 + ((gz1 - gz0) * rf) / rows_f + if r > 0 { g_v / 2.0 } else { 0.0 };
+                let rz1 = gz0 + ((gz1 - gz0) * (rf + 1.0)) / rows_f - if r < rows - 1 { g_v / 2.0 } else { 0.0 };
+                if rz1 - rz0 <= 1e-6 {
+                    continue;
+                }
+                for c in 0..cols {
+                    let cf = c as f64;
+                    let cols_f = cols as f64;
+                    let ca0 = g_a + ((g_b - g_a) * cf) / cols_f + if c > 0 { g_u / 2.0 } else { 0.0 };
+                    let ca1 = g_a + ((g_b - g_a) * (cf + 1.0)) / cols_f - if c < cols - 1 { g_u / 2.0 } else { 0.0 };
+                    if ca1 - ca0 > 1e-6 {
+                        out.glass.push(rect(pts, ca0, ca1, rz0, rz1));
+                    }
+                }
+            }
+            for r in 1..rows {
+                let rz = gz0 + ((gz1 - gz0) * r as f64) / rows as f64;
+                out.divisions.push((quad_at(pts, g_a, rz), quad_at(pts, g_b, rz)));
+            }
+            for c in 1..cols {
+                let ca = g_a + ((g_b - g_a) * c as f64) / cols as f64;
+                out.divisions.push((quad_at(pts, ca, gz0), quad_at(pts, ca, gz1)));
+            }
+        }
+        if fa1 < 1.0 - fa - 1e-6 {
+            out.divisions.push((quad_at(pts, fa1, fz), quad_at(pts, fa1, field_top)));
+        }
+        let kind = if sd[4] >= 0.0 { sd[4] as i64 } else { o[17] as i64 };
+        let hinge_left = sd[5] != 0.0;
+        if kind == 1 || kind == 3 {
+            let apex = quad_at(pts, if hinge_left { g_a } else { g_b }, (gz0 + gz1) / 2.0);
+            let far_u = if hinge_left { g_b } else { g_a };
+            out.symbol.push((quad_at(pts, far_u, gz0), apex));
+            out.symbol.push((quad_at(pts, far_u, gz1), apex));
+        }
+        if kind == 2 || kind == 3 {
+            let apex = quad_at(pts, (g_a + g_b) / 2.0, gz1);
+            out.symbol.push((quad_at(pts, g_a, gz0), apex));
+            out.symbol.push((quad_at(pts, g_b, gz0), apex));
+        }
+        if kind == 4 {
+            let zc = (gz0 + gz1) / 2.0;
+            let to_right = hinge_left;
+            let tail = if to_right { g_a } else { g_b };
+            let head = if to_right { g_b } else { g_a };
+            let barb = (head - tail) * 0.22;
+            let head_pt = quad_at(pts, head, zc);
+            out.symbol.push((quad_at(pts, tail, zc), head_pt));
+            out.symbol.push((quad_at(pts, head - barb, gz0 + (gz1 - gz0) * 0.32), head_pt));
+            out.symbol.push((quad_at(pts, head - barb, gz0 + (gz1 - gz0) * 0.68), head_pt));
+        }
+    }
+    if o[16] != 0.0 {
+        let ov1 = 0.02 / max(w, 1e-6);
+        let ov2 = 0.05 / max(w, 1e-6);
+        let h1 = 0.035 / max(h, 1e-6);
+        let h2 = 0.025 / max(h, 1e-6);
+        out.sill.push(rect(pts, -ov1, 1.0 + ov1, -h1, 0.0));
+        out.sill.push(rect(pts, -ov2, 1.0 + ov2, -(h1 + h2), -h1));
+    }
+    if f_tr > 0.0 {
+        out.glass.push(rect(pts, fa, 1.0 - fa, f_tr + fz / 2.0, 1.0 - fz));
+        out.divisions.push((quad_at(pts, 0.0, f_tr), quad_at(pts, 1.0, f_tr)));
+    }
+    out
+}
+
+fn push_quads(f: &mut Vec<f64>, list: &[Quad]) {
+    f.push(list.len() as f64);
+    for q in list {
+        for p in q {
+            f.extend([p.0, p.1]);
+        }
+    }
+}
+
+fn push_lines(f: &mut Vec<f64>, list: &[Line]) {
+    f.push(list.len() as f64);
+    for (a, b) in list {
+        f.extend([a.0, a.1, b.0, b.1]);
+    }
+}
+
+pub fn openings(frame: &[f64], inp: &[f64]) -> Vec<f64> {
+    if frame.len() != 9 || frame.iter().any(|v| !v.is_finite()) {
+        return Vec::new();
+    }
+    let fr = Frame {
+        p: [frame[0], frame[1], frame[2]],
+        n: [frame[3], frame[4], frame[5]],
+        u: [frame[6], frame[7], frame[8]],
+    };
+    // Werte dürfen NaN tragen (= „fehlt"); sonst nur endliche.
+    let Some(n) = inp.first().copied().filter(|n| *n >= 0.0 && n.fract() == 0.0).map(|n| n as usize) else {
+        return Vec::new();
+    };
+    let mut f = vec![n as f64];
+    let mut i = 1;
+    for _ in 0..n {
+        if i + 19 > inp.len() {
+            return Vec::new();
+        }
+        let o = &inp[i..i + 19];
+        let ns = o[18];
+        if !(ns >= 0.0) || ns.fract() != 0.0 || i + 19 + 6 * ns as usize > inp.len() {
+            return Vec::new();
+        }
+        let ns = ns as usize;
+        let sashes = &inp[i + 19..i + 19 + 6 * ns];
+        i += 19 + 6 * ns;
+        let geo = &o[..9];
+        if geo.iter().any(|v| !v.is_finite()) {
+            return Vec::new();
+        }
+        match project_opening_rect(&fr, o) {
+            None => f.push(0.0),
+            Some((pts, depth)) => {
+                f.extend([1.0, depth, o[9]]);
+                for p in &pts {
+                    f.extend([p.0, p.1]);
+                }
+                let out = layout_opening(o, sashes, &pts);
+                push_quads(&mut f, &out.glass);
+                push_quads(&mut f, &out.door_leaf);
+                push_lines(&mut f, &out.divisions);
+                push_quads(&mut f, &out.sash_rects);
+                push_quads(&mut f, &out.sill);
+                push_lines(&mut f, &out.symbol);
+            }
+        }
+    }
+    if i != inp.len() {
+        return Vec::new();
     }
     f
 }

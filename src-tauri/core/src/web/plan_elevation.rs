@@ -37,3 +37,9 @@ pub fn elevation_faces_flat(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: 
 pub fn elevation_wall_extensions_flat(input: &[f64]) -> Vec<f64> {
     crate::plan_elevation::wall_extensions(input)
 }
+
+/// Projektion und Aufteilung (Glas, Flügel, Sprossen, Bank, Symbol) der Öffnungen; Unsinn → leer.
+#[wasm_bindgen]
+pub fn elevation_openings_flat(frame: &[f64], input: &[f64]) -> Vec<f64> {
+    crate::plan_elevation::openings(frame, input)
+}

@@ -32,7 +32,7 @@
 // aufrecht.
 
 import { core } from "../engine/coreWasm";
-import type { DrawingLevel, Project, Vec2, Wall } from "../model/types";
+import type { DrawingLevel, Project, Vec2 } from "../model/types";
 import {
   getComponent,
   getDoorType,
@@ -125,9 +125,6 @@ function rgbToHex(c: RRgb): string {
 
 /** Numerisches Rauschen (Meter) für Tiefen-/Flächenvergleiche. */
 const EPS = 1e-6;
-/** Grazing-Schwelle: Flächen fast parallel zur Blickrichtung gelten als nicht
- *  sichtbar (Kanten-an, keine Fläche) — vermeidet Z-Rauschen an Laibungen. */
-const FACING_EPS = 1e-4;
 
 // ── Ebenen-Frame ────────────────────────────────────────────────────────────
 
@@ -162,21 +159,6 @@ export function elevationFrame(plane: SectionPlaneSpec): ElevationFrame {
   const uLen = Math.hypot(ux, uz) || 1;
   const U: V3 = [ux / uLen, 0, uz / uLen];
   return { P: plane.point, N, U };
-}
-
-/** Projektion eines Weltpunkts in die Ansicht: u, v (Höhe) und Tiefe hinter der Ebene. */
-export function projectPoint(
-  frame: ElevationFrame,
-  w: V3,
-): { u: number; v: number; depth: number } {
-  const rx = w[0] - frame.P[0];
-  const ry = w[1] - frame.P[1];
-  const rz = w[2] - frame.P[2];
-  return {
-    u: rx * frame.U[0] + ry * frame.U[1] + rz * frame.U[2],
-    v: w[1], // absolute Höhe, wie die Schnitt-v-Konvention
-    depth: rx * frame.N[0] + ry * frame.N[1] + rz * frame.N[2],
-  };
 }
 
 // ── Flächen aus dem geflachten Modell ──────────────────────────────────────
@@ -392,90 +374,20 @@ interface ProjectedOpening {
   openingId?: string;
 }
 
-/**
- * Projiziert die Aussenfläche EINER Öffnung (Fenster/Tür) der Wirtswand: das
- * Rechteck [from..to] × [zBottom..zTop] auf der zum Betrachter zeigenden
- * Wand-Langseite (±T/2). Näherung: die Öffnung wird als planare Glasfläche BÜNDIG
- * in der Aussenwandebene dargestellt (keine Laibungstiefe) — genügt für die
- * Fassaden-Lesbarkeit. `null`, wenn keine Seite front-/hinter-Ebene liegt.
- */
-function projectOpeningRect(
-  frame: ElevationFrame,
-  wall: Wall,
-  from: number,
-  to: number,
-  zBottom: number,
-  zTop: number,
-  thickness: number,
-): ProjectedOpening | null {
-  const sx = wall.start.x;
-  const sz = wall.start.y;
-  const ax = wall.end.x - wall.start.x;
-  const az = wall.end.y - wall.start.y;
-  const len = Math.hypot(ax, az);
-  if (len < 1e-9 || to - from <= EPS || zTop - zBottom <= EPS) return null;
-  const aHat: V3 = [ax / len, 0, az / len];
-  const nHat: V3 = [az / len, 0, -ax / len];
-  const ht = thickness / 2;
-  // Kandidaten-Seiten (±T/2): die front-facing + hinter der Ebene liegende nehmen.
-  for (const side of [ht, -ht]) {
-    const normal: V3 = side > 0 ? nHat : [-nHat[0], -nHat[1], -nHat[2]];
-    const facing = frame.N[0] * normal[0] + frame.N[1] * normal[1] + frame.N[2] * normal[2];
-    if (facing >= -FACING_EPS) continue;
-    const corner = (sAlong: number, y: number): V3 => [
-      sx + aHat[0] * sAlong + nHat[0] * side,
-      y,
-      sz + aHat[2] * sAlong + nHat[2] * side,
-    ];
-    const world = [corner(from, zBottom), corner(to, zBottom), corner(to, zTop), corner(from, zTop)];
-    const pts: Array<[number, number]> = [];
-    let depthSum = 0;
-    for (const w of world) {
-      const p = projectPoint(frame, w);
-      pts.push([p.u, p.v]);
-      depthSum += p.depth;
-    }
-    const depth = depthSum / world.length;
-    if (depth <= EPS) continue;
-    // pts-Reihenfolge: [unten-von, unten-bis, oben-bis, oben-von] — Basis für
-    // die (fa, fz)-Interpolation der Flügel-/Glasfelder in collectOpenings.
-    return { pts, depth, glass: [], doorLeaf: [], divisions: [], sashRects: [], sill: [], symbol: [], isDoor: false };
-  }
-  return null;
-}
+/** Öffnungsart (`WindowSash.opening`/`WindowType.kind`) in der Kern-Kodierung. */
+const SASH_KIND: Record<string, number> = { dreh: 1, kipp: 2, drehkipp: 3, schiebe: 4 };
 
 /**
- * Alle Öffnungs-Flächen (Fenster/Türen inkl. Legacy-Türen) des Projekts, auf die
- * jeweilige Wand-Aussenseite projiziert. Thickness = WallType-Dicke (Fallback
- * 0.2 m). Rein aus dem Projekt (nicht aus dem geflachten Modell), damit Rahmen+Glas
- * unabhängig von der Segment-Aussparung der Wand-Box gezeichnet werden können.
+ * Alle Öffnungs-Flächen (Fenster/Türen inkl. Legacy-Türen) des Projekts, auf die jeweilige
+ * Wand-Aussenseite projiziert (Rahmen, Glasfelder je Flügel/Sprossenraster, Kämpfer, Sims,
+ * Öffnungssymbol nach SIA). Thickness = WallType-Dicke (Fallback 0.2 m). Rein aus dem Projekt
+ * (nicht aus dem geflachten Modell), damit Rahmen+Glas unabhängig von der Segment-Aussparung der
+ * Wand-Box gezeichnet werden können. Die Geometrie rechnet der Kern (`plan_elevation.rs`, [K3c]);
+ * hier die Auflösung aus dem Modell (Typ-Bibliothek) und die Übersetzung.
  */
 function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpening[] {
-  const out: ProjectedOpening[] = [];
-  const lerp = (
-    a: [number, number],
-    b: [number, number],
-    t: number,
-  ): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  // Punkt im Öffnungs-Quad: fa = Anteil entlang der Wandachse, fz = Höhenanteil.
-  const quadAt = (
-    q: Array<[number, number]>,
-    fa: number,
-    fz: number,
-  ): [number, number] => lerp(lerp(q[0], q[1], fa), lerp(q[3], q[2], fa), fz);
-  const rect = (
-    q: Array<[number, number]>,
-    fa0: number,
-    fa1: number,
-    fz0: number,
-    fz1: number,
-  ): Array<[number, number]> => [
-    quadAt(q, fa0, fz0),
-    quadAt(q, fa1, fz0),
-    quadAt(q, fa1, fz1),
-    quadAt(q, fa0, fz1),
-  ];
-
+  const b: number[] = [0];
+  const ids: string[] = [];
   for (const wall of project.walls) {
     let thickness = 0.2;
     try {
@@ -487,176 +399,57 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
       const iv = openingInterval(wall, op);
       if (!iv) continue;
       const v = openingVerticalExtent(project, wall, op);
-      const pr = projectOpeningRect(frame, wall, iv.from, iv.to, v.zBottom, v.zTop, thickness);
-      if (!pr) continue;
-      pr.openingId = op.id;
-      const w = iv.to - iv.from;
-      const h = v.zTop - v.zBottom;
-      if (op.kind === "door") {
-        // Türen im Projekt-`openings`-Array: Blatt-Fläche, bei Glasblatt mit
-        // Teilverglasung (`glazingRatio`, Kämpferhöhe von OBEN gemessen wie
-        // beim Fenster-Oberlicht) — Glasanteil oben (`glass`), blinder Rest
-        // unten (`doorLeaf`), Trennlinie dazwischen ab Kämpfer.
-        pr.isDoor = true;
-        const dt = getDoorType(project, op);
-        if (dt?.leafStyle === "glas") {
-          const ratio = Math.max(0.05, Math.min(1, dt.glazingRatio ?? 1));
-          if (ratio >= 1 - EPS) {
-            pr.glass.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
-          } else {
-            const splitZ = 0.97 * (1 - ratio);
-            pr.glass.push(rect(pr.pts, 0.04, 0.96, splitZ, 0.97));
-            pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, splitZ));
-            pr.divisions.push([quadAt(pr.pts, 0.04, splitZ), quadAt(pr.pts, 0.96, splitZ)]);
-          }
-        } else {
-          pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
-        }
-        out.push(pr);
-        continue;
+      const door = op.kind === "door";
+      const dt = door ? getDoorType(project, op) : undefined;
+      const wt = door ? undefined : getWindowType(project, op);
+      const sashes = door ? [] : wt ? sashesOfWindowType(wt) : [{ kind: "fluegel" as const }];
+      b.push(
+        wall.start.x, wall.start.y, wall.end.x, wall.end.y, thickness, iv.from, iv.to, v.zBottom, v.zTop,
+        door ? 1 : 0, dt?.leafStyle === "glas" ? 1 : 0, dt?.glazingRatio ?? Number.NaN,
+        wt?.frameWidth ?? 0.06, wt?.transomHeight ?? 0, wt?.mullionRows ?? Number.NaN, wt?.mullionCols ?? Number.NaN,
+        wt?.sillBoard !== "keine" && wt?.sillBoard !== "innen" ? 1 : 0,
+        SASH_KIND[wt?.kind ?? "fest"] ?? 0,
+        sashes.length,
+      );
+      for (const sd of sashes as Array<{ kind: string; postWidth?: number; autoWidth?: boolean; width?: number; opening?: string; hingeSide?: string }>) {
+        b.push(
+          sd.kind === "pfosten" ? 1 : 0, sd.postWidth ?? Number.NaN, sd.autoWidth === false ? 0 : 1, sd.width ?? Number.NaN,
+          sd.opening === undefined ? -1 : SASH_KIND[sd.opening] ?? 0, (sd.hingeSide ?? "left") === "left" ? 1 : 0,
+        );
       }
-      // Fenster: Blendrahmen → Flügelfelder → Glas (+ Kämpfer/Oberlicht) aus dem
-      // Fenstertyp; ohne Typ ein einzelnes Glasfeld im Default-Rahmen.
-      const wt = getWindowType(project, op);
-      const fw = wt?.frameWidth ?? 0.06;
-      const fa = Math.min(0.45, fw / Math.max(w, 1e-6));
-      const fz = Math.min(0.45, fw / Math.max(h, 1e-6));
-      const transom = Math.max(0, wt?.transomHeight ?? 0);
-      // Oberlicht-Trennung als Höhenanteil (0 = keins).
-      const fTr = transom > EPS && transom < h - fw ? 1 - transom / h : 0;
-      const fieldTop = fTr > 0 ? fTr - fz / 2 : 1 - fz;
-      // Flügel-Spannen über die innere Breite (autoWidth gleichmässig).
-      const sashes = wt ? sashesOfWindowType(wt) : [{ kind: "fluegel" as const }];
-      const innerW = Math.max(1e-6, w * (1 - 2 * fa));
-      let fixedSum = 0;
-      let autoCount = 0;
-      for (const sd of sashes) {
-        if (sd.kind === "pfosten") fixedSum += Math.max(0, sd.postWidth ?? 0.06);
-        else if (sd.autoWidth === false) fixedSum += Math.max(0, sd.width ?? 0);
-        else autoCount++;
-      }
-      const autoW = autoCount > 0 ? Math.max(0.02, (innerW - fixedSum) / autoCount) : 0;
-      let cursor = fa;
-      for (const sd of sashes) {
-        const sw =
-          sd.kind === "pfosten"
-            ? Math.max(0, sd.postWidth ?? 0.06)
-            : sd.autoWidth === false
-              ? Math.max(0, sd.width ?? autoW)
-              : autoW;
-        const fa0 = cursor;
-        const fa1 = cursor + sw / w;
-        cursor = fa1;
-        if (sd.kind === "pfosten") {
-          // Pfosten als Teilungslinie (Mitte).
-          const fm = (fa0 + fa1) / 2;
-          pr.divisions.push([quadAt(pr.pts, fm, fz), quadAt(pr.pts, fm, fieldTop)]);
-          continue;
-        }
-        // Flügelrahmen (Kontur) + Glas darin eingerückt (VW: Blendrahmen →
-        // Flügelprofil → Glas als drei ablesbare Konturen).
-        pr.sashRects.push(rect(pr.pts, fa0, fa1, fz, fieldTop));
-        const spw = Math.min(0.06, Math.max(0.03, fw)); // Flügelprofil (m)
-        const gU = spw / Math.max(w, 1e-6);
-        const gV = spw / Math.max(h, 1e-6);
-        const gA = fa0 + gU;
-        const gB = fa1 - gU;
-        const gz0 = fz + gV;
-        const gz1 = fieldTop - gV;
-        // Kämpfer-/Sprossen-Zeilen (mullionRows): das Glasfeld wird in `rows`
-        // horizontale Scheiben geteilt (analog zum 3D, s. toWalls3d), mit einer
-        // Trennlinie je Zeilengrenze über die Glasbreite. 1 = ungeteilt (bisher).
-        const rows = Math.max(1, Math.round(wt?.mullionRows ?? 1));
-        // Sprossen-Spalten (mullionCols): das Glasfeld wird in `cols` vertikale
-        // Scheiben geteilt (analog zum 3D, s. toWalls3d), mit einer
-        // Trennlinie je Spaltengrenze über die Glasscheibenhöhe.
-        const cols = Math.max(1, Math.round(wt?.mullionCols ?? 1));
-        if (gB - gA > 1e-6 && gz1 - gz0 > 1e-6) {
-          // Glasfelder: rows × cols Gitter aus Einzelscheiben.
-          for (let r = 0; r < rows; r++) {
-            const rz0 = gz0 + ((gz1 - gz0) * r) / rows + (r > 0 ? gV / 2 : 0);
-            const rz1 = gz0 + ((gz1 - gz0) * (r + 1)) / rows - (r < rows - 1 ? gV / 2 : 0);
-            if (rz1 - rz0 <= 1e-6) continue;
-            for (let c = 0; c < cols; c++) {
-              const ca0 = gA + ((gB - gA) * c) / cols + (c > 0 ? gU / 2 : 0);
-              const ca1 = gA + ((gB - gA) * (c + 1)) / cols - (c < cols - 1 ? gU / 2 : 0);
-              if (ca1 - ca0 > 1e-6) pr.glass.push(rect(pr.pts, ca0, ca1, rz0, rz1));
-            }
-          }
-          // Horizontale Trennlinien (Kämpfer)
-          for (let r = 1; r < rows; r++) {
-            const rz = gz0 + ((gz1 - gz0) * r) / rows;
-            pr.divisions.push([quadAt(pr.pts, gA, rz), quadAt(pr.pts, gB, rz)]);
-          }
-          // Vertikale Trennlinien (Sprossen-Spalten)
-          for (let c = 1; c < cols; c++) {
-            const ca = gA + ((gB - gA) * c) / cols;
-            pr.divisions.push([quadAt(pr.pts, ca, gz0), quadAt(pr.pts, ca, gz1)]);
-          }
-        }
-        // Trennlinie zum nächsten Feld (ausser am Rand).
-        if (fa1 < 1 - fa - 1e-6) {
-          pr.divisions.push([quadAt(pr.pts, fa1, fz), quadAt(pr.pts, fa1, fieldTop)]);
-        }
-        // Öffnungssymbol (SIA B.9.1.3): Linien starten/enden EXAKT auf den
-        // Glasfeld-Ecken (Nutzer-Report: Anker waren daneben). Dreh/Drehkipp:
-        // Spitze zeigt zur Bandseite (Anschlag), Basis zur Griffseite — SIA-
-        // Konvention. Kipp: Spitze oben Mitte (VW).
-        const kind = sd.opening ?? wt?.kind ?? "fest";
-        if (kind === "dreh" || kind === "drehkipp") {
-          const hingeLeft = (sd.hingeSide ?? "left") === "left";
-          const apex = quadAt(pr.pts, hingeLeft ? gA : gB, (gz0 + gz1) / 2);
-          const farU = hingeLeft ? gB : gA;
-          pr.symbol.push(
-            [quadAt(pr.pts, farU, gz0), apex],
-            [quadAt(pr.pts, farU, gz1), apex],
-          );
-        }
-        if (kind === "kipp" || kind === "drehkipp") {
-          const apex = quadAt(pr.pts, (gA + gB) / 2, gz1);
-          pr.symbol.push(
-            [quadAt(pr.pts, gA, gz0), apex],
-            [quadAt(pr.pts, gB, gz0), apex],
-          );
-        }
-        if (kind === "schiebe") {
-          // Schiebeflügel (SIA: „vertikales/horizontales Schiebefenster"):
-          // KEIN Dreieck (keine Bandseite), sondern ein Pfeil in Laufrichtung
-          // (horizontal) auf halber Glashöhe — die Griffseite (hingeSide)
-          // bestimmt die Pfeilrichtung.
-          const zc = (gz0 + gz1) / 2;
-          const toRight = (sd.hingeSide ?? "left") === "left"; // Griff links ⇒ schiebt nach rechts
-          const tail = toRight ? gA : gB;
-          const head = toRight ? gB : gA;
-          const barb = (head - tail) * 0.22; // Pfeilspitzen-Rücksprung (Glasbreite-Anteil)
-          const headPt = quadAt(pr.pts, head, zc);
-          pr.symbol.push(
-            [quadAt(pr.pts, tail, zc), headPt], // Schaft
-            [quadAt(pr.pts, head - barb, gz0 + (gz1 - gz0) * 0.32), headPt], // obere Spitze
-            [quadAt(pr.pts, head - barb, gz0 + (gz1 - gz0) * 0.68), headPt], // untere Spitze
-          );
-        }
-      }
-      // Fensterbank (Sims, VW): Bank + Tropfkante als zwei Bänder unter dem
-      // Rahmen, seitlich leicht überstehend. Default AN (sillBoard fehlt),
-      // aus bei "keine"/"innen".
-      const sb = wt?.sillBoard;
-      if (sb !== "keine" && sb !== "innen") {
-        const ov1 = 0.02 / Math.max(w, 1e-6);
-        const ov2 = 0.05 / Math.max(w, 1e-6);
-        const h1 = 0.035 / Math.max(h, 1e-6);
-        const h2 = 0.025 / Math.max(h, 1e-6);
-        pr.sill.push(rect(pr.pts, -ov1, 1 + ov1, -h1, 0));
-        pr.sill.push(rect(pr.pts, -ov2, 1 + ov2, -(h1 + h2), -h1));
-      }
-
-      // Oberlicht: eigenes Glasfeld + Kämpferlinie.
-      if (fTr > 0) {
-        pr.glass.push(rect(pr.pts, fa, 1 - fa, fTr + fz / 2, 1 - fz));
-        pr.divisions.push([quadAt(pr.pts, 0, fTr), quadAt(pr.pts, 1, fTr)]);
-      }
-      out.push(pr);
+      ids.push(op.id);
+      b[0]++;
     }
+  }
+  const f = core().elevation_openings_flat(encodeFrame(frame), Float64Array.from(b));
+  const out: ProjectedOpening[] = [];
+  if (f.length === 0) return out;
+  let i = 1;
+  const quads = (): Array<Array<[number, number]>> => {
+    const list: Array<Array<[number, number]>> = [];
+    for (let k = 0, n = f[i++]; k < n; k++, i += 8) {
+      list.push([[f[i], f[i + 1]], [f[i + 2], f[i + 3]], [f[i + 4], f[i + 5]], [f[i + 6], f[i + 7]]]);
+    }
+    return list;
+  };
+  const lines = (): Array<[[number, number], [number, number]]> => {
+    const list: Array<[[number, number], [number, number]]> = [];
+    for (let k = 0, n = f[i++]; k < n; k++, i += 4) list.push([[f[i], f[i + 1]], [f[i + 2], f[i + 3]]]);
+    return list;
+  };
+  for (let k = 0; k < f[0]; k++) {
+    if (f[i++] === 0) continue;
+    const depth = f[i];
+    const isDoor = f[i + 1] === 1;
+    const pts: Array<[number, number]> = [[f[i + 2], f[i + 3]], [f[i + 4], f[i + 5]], [f[i + 6], f[i + 7]], [f[i + 8], f[i + 9]]];
+    i += 10;
+    const glass = quads();
+    const doorLeaf = quads();
+    const divisions = lines();
+    const sashRects = quads();
+    const sill = quads();
+    const symbol = lines();
+    out.push({ pts, depth, glass, doorLeaf, divisions, sashRects, sill, symbol, isDoor, openingId: ids[k] });
   }
   return out;
 }
