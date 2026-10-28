@@ -60,12 +60,77 @@ def main(path: str) -> int:
             item["text"] = e.dxf.text
             item["at"] = [e.dxf.insert.x, e.dxf.insert.y]
             item["height"] = e.dxf.height
+            item["style"] = e.dxf.style
+            item["halign"] = e.dxf.halign
+            item["valign"] = e.dxf.valign
+            item["rotation"] = e.dxf.rotation
+            if e.dxf.hasattr("align_point"):
+                item["align_point"] = [e.dxf.align_point.x, e.dxf.align_point.y]
+        elif t == "INSERT":
+            item["name"] = e.dxf.name
+            item["at"] = [e.dxf.insert.x, e.dxf.insert.y]
+            item["rotation"] = e.dxf.rotation
+            item["scale"] = [e.dxf.xscale, e.dxf.yscale]
+            item["attribs"] = {a.dxf.tag: a.dxf.text for a in e.attribs}
+        elif t == "DIMENSION":
+            item["dimtype"] = e.dimtype
+            item["block"] = e.dxf.geometry
+            item["dimstyle"] = e.dxf.dimstyle
+            item["defpoint"] = [e.dxf.defpoint.x, e.dxf.defpoint.y]
+            item["p1"] = [e.dxf.defpoint2.x, e.dxf.defpoint2.y]
+            item["p2"] = [e.dxf.defpoint3.x, e.dxf.defpoint3.y]
+            item["measurement"] = e.dxf.actual_measurement
+        if e.dxf.hasattr("linetype"):
+            item["linetype"] = e.dxf.linetype
         entities.append(item)
     layers = {
         l.dxf.name: {"lineweight": l.dxf.lineweight, "rgb": l.rgb and list(l.rgb)} for l in doc.layers
     }
+    blocks = {}
+    for b in doc.blocks:
+        n = {}
+        for be in b:
+            n[be.dxftype()] = n.get(be.dxftype(), 0) + 1
+        blocks[b.name] = {"entities": n, "anonymous": b.name.startswith("*D")}
+    styles = {st.dxf.name: (st.dxf.font if st.dxf.hasattr("font") else None) for st in doc.styles}
+    ttf = {}
+    for st in doc.styles:
+        try:
+            ttf[st.dxf.name] = st.get_extended_font_data()[0]
+        except Exception:
+            pass
+    linetypes = {lt.dxf.name: list(lt.pattern_tags.tags and [t.value for t in lt.pattern_tags.tags if t.code == 49]) for lt in doc.linetypes}
+    dimstyles = {
+        d.dxf.name: {k: d.dxf.get(k) for k in ("dimscale", "dimtxt", "dimtsz", "dimexo", "dimexe", "dimgap", "dimtad", "dimdec", "dimlfac", "dimtxsty")}
+        for d in doc.dimstyles
+    }
+    layouts = {}
+    for lay in doc.layouts:
+        if lay.name == "Model":
+            continue
+        vps = [
+            {
+                "id": v.dxf.id,
+                "center": [v.dxf.center.x, v.dxf.center.y],
+                "size": [v.dxf.width, v.dxf.height],
+                "view_center": [v.dxf.view_center_point.x, v.dxf.view_center_point.y],
+                "view_height": v.dxf.view_height,
+            }
+            for v in lay.viewports()
+        ]
+        dl = lay.dxf_layout.dxf
+        layouts[lay.name] = {
+            "viewports": vps,
+            "paper": [dl.paper_width, dl.paper_height] if dl.hasattr("paper_width") else None,
+        }
     out = {
         "version": doc.dxfversion,
+        "blocks": blocks,
+        "styles": styles,
+        "fonts": ttf,
+        "linetypes": linetypes,
+        "dimstyles": dimstyles,
+        "layouts": layouts,
         "insunits": doc.header.get("$INSUNITS"),
         "errors": [str(err.message) for err in auditor.errors],
         "layers": layers,

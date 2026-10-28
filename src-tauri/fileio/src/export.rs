@@ -451,6 +451,7 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             if !doc.text_styles.contains(&name) {
                 let mut st = TextStyle::with_truetype(name.clone(), if font.is_empty() { "Arial" } else { &font });
                 st.font_file = String::new(); // Auflösung über den TrueType-Namen (XDATA), nicht über eine Datei
+                st.handle = doc.allocate_handle(); // DIMSTYLE verweist (Code 340) über dieses Handle auf den Stil
                 st.true_type_font_flags = 34 | if bold { 0x0200_0000 } else { 0 } | if italic { 0x0100_0000 } else { 0 };
                 if width.is_finite() && width > 0.0 {
                     st.width_factor = width;
@@ -485,7 +486,11 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                 post,
             };
             if def.is_valid() && !doc.dim_styles.contains(&name) {
-                doc.dim_styles.add(make_dimstyle(&def)).map_err(|e| format!("Bemassungsstil {name}: {e}"))?;
+                let mut ds = make_dimstyle(&def);
+                if let Some(ts) = doc.text_styles.get(&def.text_style) {
+                    ds.dimtxsty_handle = ts.handle;
+                }
+                doc.dim_styles.add(ds).map_err(|e| format!("Bemassungsstil {name}: {e}"))?;
             }
             dimstyles.push(def);
             continue;
