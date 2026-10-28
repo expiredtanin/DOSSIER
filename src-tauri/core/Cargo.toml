@@ -24,6 +24,8 @@ serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 kernel2d = { path = "../kernel2d" }
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
+# TS-Typen aus dem Rust-Modell ([K4] S4): `src/model/types.generated.ts`, s. `model/ts_export.rs`.
+ts-rs = { version = "12", default-features = false, features = ["serde-compat"] }
 
 [profile.release]
 opt-level = 3

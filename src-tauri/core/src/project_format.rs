@@ -192,6 +192,16 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// `KNOWN_KEYS` = Felder von `Project` im Rust-Modell ([K4] S4: das Modell ist die Quelle).
+    #[test]
+    fn bekannte_felder_aus_dem_modell() {
+        let mut model = crate::model::ts_export::object_keys::<crate::model::Project>();
+        let mut known: Vec<String> = KNOWN_KEYS.iter().map(|k| k.to_string()).collect();
+        model.sort();
+        known.sort();
+        assert_eq!(known, model, "KNOWN_KEYS an die Felder von model::Project angleichen");
+    }
+
     fn minimal() -> Value {
         json!({"id":"p","name":"N","walls":[],"layers":[],"drawingLevels":[]})
     }

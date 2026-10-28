@@ -12,6 +12,9 @@
 // Bezeichner englisch, Kommentare/Labels deutsch (CONVENTIONS.md). Einheit: METER.
 
 import type { Vec2 } from "../model/types";
+import type { SiaCategory } from "../model/types.generated";
+// SIA-416-Blatt-Kategorie eines Raums: Teil des Projektmodells, kommt aus dem Rust-Modell ([K4] S4).
+export type { SiaCategory };
 import { core } from "../engine/coreWasm";
 import { FlatWriter } from "./coreFlat";
 
@@ -49,9 +52,6 @@ export function centroid(pts: Vec2[]): Vec2 {
 // HNF, NNF, VF, FF, KGF und AGF. HNF+NNF = NF; NF+VF+FF = NGF; NGF+KGF+AGF = GF.
 // AGF zählt zur Geschossfläche, ist aber ausserhalb der Gebäudehülle (Aussen-
 // bereich) und fliesst daher NICHT in NGF (bzw. NF) ein.
-
-/** Blatt-Kategorien nach SIA 416, die einem Raum direkt zugewiesen werden. */
-export type SiaCategory = "HNF" | "NNF" | "VF" | "FF" | "KGF" | "AGF";
 
 /** Aggregat-(Zwischensummen-)Ebenen der SIA-416-Hierarchie. */
 export type SiaAggregate = "NF" | "NGF" | "GF";

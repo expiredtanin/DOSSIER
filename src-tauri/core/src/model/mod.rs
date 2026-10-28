@@ -1,10 +1,14 @@
-//! Typisiertes Projektmodell ([K4] S2): Rust-Gegenstück zu `src/model/types.ts`. `generated.rs`
-//! entstand aus den TS-Typen (`scripts/gen-rust-model.py`) und wird ab jetzt von Hand gepflegt;
-//! Typen mit Tag stehen in `manual.rs`.
+//! Typisiertes Projektmodell ([K4] S2/S4) — die QUELLE der Projekt-Datentypen. `generated.rs`
+//! (Strukturen/Enums; der Name stammt aus der einmaligen Übersetzung TS → Rust) und `manual.rs`
+//! (Typen mit Tag, `Vec2`, `Extra`) werden von Hand gepflegt; die TS-Typen
+//! (`src/model/types.generated.ts`) erzeugt `ts_export.rs` daraus (`npm run gen:types`).
+//! Neue Modellfelder nur hier eintragen (serde + ts-rs-Attribute, Regeln in `ts_export.rs`).
 
 pub mod generated;
 pub mod helpers;
 pub mod manual;
+#[cfg(test)]
+pub(crate) mod ts_export;
 
 pub use generated::*;
 pub use manual::*;
@@ -30,6 +34,20 @@ mod tests {
         let p: Project = serde_json::from_value(raw.clone()).unwrap_or_else(|e| panic!("{name}: {e}"));
         let back = serde_json::to_value(&p).unwrap();
         assert_eq!(norm(&back), norm(&raw), "{name}: Hin-und-zurück weicht ab");
+        // Ohne Extra-Felder gleich: das typisierte Modell deckt alles ab.
+        let typed = to_value_typed_only(&p).unwrap();
+        assert_eq!(norm(&typed), norm(&raw), "{name}: typisiertes Modell unvollständig");
+    }
+
+    #[test]
+    fn importiertes_netz_mit_farbe_und_ifc_id() {
+        let raw: Value = serde_json::from_str(
+            r##"{"type":"importedMesh","id":"m","name":"Wand","color":"#aabbcc","ifcGlobalId":"2O2Fr$t4X7Zf8NOew3FLOH",
+                 "positions":[0,0,0],"indices":[0,0,0]}"##,
+        )
+        .unwrap();
+        let o: ContextObject = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(norm(&serde_json::to_value(&o).unwrap()), norm(&raw));
     }
 
     #[test]

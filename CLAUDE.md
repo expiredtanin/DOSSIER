@@ -52,8 +52,12 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
   würde sie heute fast leeren).
 - **Das Projekt ändert sich nur über Ops** (`src/core/ops.ts`): `setProject(fn, coalesceKey?)` übersetzt
   die Änderung in `CoreOp`s, validiert und wendet sie an. NaN/doppelte ids werden zurückgerollt. Gleicher
-  `coalesceKey` (Regler, Tippen) = ein Undo-Schritt. Neue `Project`-Felder in `KNOWN_KEYS` von
-  `src/io/projectFormat.ts` eintragen.
+  `coalesceKey` (Regler, Tippen) = ein Undo-Schritt.
+- **Modell-Typen kommen aus Rust** ([K4] S4): Neue Modellfelder/-typen NUR im Rust-Modell
+  (`src-tauri/core/src/model/generated.rs`, `manual.rs`; serde- + ts-rs-Attribute, Regeln in `model/ts_export.rs`),
+  dann `npm run gen:types` → `src/model/types.generated.ts` (nie von Hand ändern; `types.ts` re-exportiert sie und
+  hält nur Hilfstypen/-funktionen). `cargo test` im Kern schlägt fehl, wenn die Datei veraltet ist. Neue
+  `Project`-Felder zusätzlich in `KNOWN_KEYS` (`src-tauri/core/src/project_format.rs`; ein Test gleicht mit dem Modell ab).
 - `dossier-cli` (`src/cli/main.ts`) importiert nur `../core`.
 - **macOS-Nebenfenster** (Einstellungen, Ressourcen …, `src/native/*WindowApp.tsx`) sind eigene Dokumente
   ohne gemeinsamen Store: Zustand über die Sync-Brücke (z. B. `src/native/settingsWindow.ts`), nicht über
