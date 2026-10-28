@@ -779,9 +779,10 @@ fn draw_circle_like(
     c.stroke_polyline(&pts, fill.is_some(), stroke_col, stroke_mm, false);
 }
 
-/// Flache Ausgabe (s. Modulkopf); leer bei unlesbarem Plan-Puffer.
-pub fn compile_flat(buf: &[f64], px_per_meter: f64, packed: bool) -> Vec<u32> {
-    let Some(plan) = plan_buf::decode(buf) else { return Vec::new() };
+/// Flache Ausgabe (s. Modulkopf) für die Primitive `[from, to)` eines Plan-Puffers (v2); leer bei
+/// unlesbarem Puffer oder ungültigem Bereich.
+pub fn compile_flat(bytes: &[u8], from: usize, to: usize, px_per_meter: f64, packed: bool) -> Vec<u32> {
+    let Some(plan) = plan_buf::View::parse(bytes).and_then(|v| v.gpu(from, to)) else { return Vec::new() };
     let o = compile(&plan, px_per_meter, packed);
     let mut meta: Vec<f64> = vec![
         o.origin.0,
@@ -843,7 +844,6 @@ mod tests {
             weight_mm: 0.18,
             a: v2(ax, 0.0),
             b: v2(bx, 0.0),
-            dash: vec![],
             chain,
             zigzag: None,
             motif: None,
@@ -926,8 +926,8 @@ mod tests {
     #[test]
     fn kreis_und_bogen() {
         let p = plan(vec![
-            Prim::Circle { style: st(), fill: 1, stroke: 0, weight_mm: 0.0, center: v2(1.0, 1.0), r: 1.0, dash: vec![] },
-            Prim::DrawingArc { style: st(), stroke: 0, weight_mm: 0.5, center: v2(0.0, 0.0), r: 1.0, a0: 0.0, a1: 0.0, dash: vec![] },
+            Prim::Circle { style: st(), fill: 1, stroke: 0, weight_mm: 0.0, center: v2(1.0, 1.0), r: 1.0 },
+            Prim::DrawingArc { style: st(), stroke: 0, weight_mm: 0.5, center: v2(0.0, 0.0), r: 1.0, a0: 0.0, a1: 0.0 },
             Prim::Placeholder,
         ]);
         let o = compile(&p, 0.0, false);
@@ -938,9 +938,26 @@ mod tests {
 
     #[test]
     fn kaputter_puffer_leer() {
-        assert!(compile_flat(&[1.0, 2.0, 3.0], 90.0, true).is_empty());
-        let enc = plan_buf::encode(&plan(vec![line(0.0, f64::NAN, false)]));
-        let out = compile_flat(&enc, 90.0, true);
-        assert!(!out.is_empty());
+        assert!(compile_flat(&[1, 2, 3], 0, 0, 90.0, true).is_empty());
+        let mut w = plan_buf::Writer::new(false);
+        w.push(&crate::plan::prim::Primitive::Line {
+            a: crate::model::Vec2 { x: 0.0, y: 0.0 },
+            b: crate::model::Vec2 { x: f64::NAN, y: 0.0 },
+            cls: "c".into(),
+            weight_mm: 0.18,
+            dash: None,
+            zigzag: None,
+            motif: None,
+            color: None,
+            drawing_id: None,
+            opening_id: None,
+            stair_id: None,
+            greyed: None,
+            opacity: None,
+        });
+        let enc = w.finish();
+        assert!(!compile_flat(&enc, 0, 1, 90.0, true).is_empty());
+        assert!(compile_flat(&enc, 0, 2, 90.0, true).is_empty(), "Bereich ausserhalb");
+        assert!(!compile_flat(&enc, 1, 1, 90.0, true).is_empty(), "leerer Bereich = leere Geometrie");
     }
 }

@@ -137,11 +137,12 @@ const WALL_LINE_CLS = new Set(["wall-outline", "layer-joint", "layer-joint-l"]);
 /**
  * Zieht die Abzugskörper von den Bauteil-Polygonen eines Grundrisses ab (in place).
  * Wände: wenn der Körper die Schnitthöhe `cutZ` durchdringt. Stützen: ebenso, über ihren
- * Höhenbereich. Decken: wenn der Körper die Platte durchdringt (Deckendurchbruch).
+ * Höhenbereich. Decken: wenn der Körper die Platte durchdringt (Deckendurchbruch). Liefert, ob
+ * Abzugskörper da waren (dann kann sich die Liste verändert haben).
  */
-export function subtractVoidsInPlan(prims: Primitive[], project: Project, cutZ: number): void {
+export function subtractVoidsInPlan(prims: Primitive[], project: Project, cutZ: number): boolean {
   const voids = voidPrisms(project);
-  if (voids.length === 0) return;
+  if (voids.length === 0) return false;
   const ceilings = new Map((project.ceilings ?? []).map((c) => [c.id, c]));
   const columns = new Map((project.columns ?? []).map((c) => [c.id, c]));
   const cuttersFor = (z0: number, z1: number): Pair[][] =>
@@ -198,6 +199,7 @@ export function subtractVoidsInPlan(prims: Primitive[], project: Project, cutZ: 
   }
   prims.length = 0;
   for (const p of out) prims.push(p);
+  return true;
 }
 
 // ── Schnitt ──────────────────────────────────────────────────────────────────

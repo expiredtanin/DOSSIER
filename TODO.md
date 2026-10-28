@@ -142,9 +142,37 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     aber die Antwort ist ~14 MB JSON (Wände 9,3 MB, Treppen 3,7 MB): Abfrage inkl. Serialisierung ~160–210 ms, `JSON.parse` ~145–225 ms.
     Die JSON-Form ist damit der Engpass → Plan-Puffer v2.
     Offen: `drawing2d.ts` (Verteiler), Schatten/Baurecht (dünner Stil-Glue um `analysis/`, Datum/Sonnenstand in TS), Abzugskörper
-    (`voids.ts`), Mono, Strichstärken-Massstab und `generateVisibleLevelsPlan` bleiben TS; die Override-Engine in TS bedient nur noch 2D-Zeichnungen. Plan-Puffer v2 (Primitive binär mit Pick-IDs und vollem
-    Umfang statt JSON, gemeinsame Tabellen für Schraffuren/Farben, damit nicht jedes Polygon seine `HatchRender` wiederholt) ist nicht
-    begonnen; erst sinnvoll, wenn die Verbraucher (SVG/PDF/DXF, Auswahl, Overlay) den Puffer lesen statt `Primitive[]`.
+    (`voids.ts`), Mono, Strichstärken-Massstab und `generateVisibleLevelsPlan` bleiben TS; die Override-Engine in TS bedient nur noch 2D-Zeichnungen. Plan-Puffer v2
+    s. nächster Punkt (28.10. erledigt).
+    ✅ (28.10.) **Plan-Puffer v2**: `planDomains` antwortet binär statt mit ~15 MB JSON (`doc_query_bin` → `queries.rs::run_bin` →
+    `plan/domains.rs::plan_domains_buf`). Format im Kopf von `plan_buf.rs` (Gegenstück `src/plan/planBuf.ts`): Bytes mit f64-Teil
+    + UTF-16-Texten; Kopf mit Magie "PLB2"/Version 2, Ausmass und Flags; gemeinsame Tabellen für Strings (Farben, Klassen, Ids,
+    Text-JSON) und Schraffuren (je Eintrag einmal als JSON für TS + numerischer Hatch-Datensatz für die GPU); Gruppen (die neun
+    Domänen); Offset-Tabelle (wahlfreier Zugriff); Inhalts-Hash je Primitiv; Einträge `[tag, flags, Pick-Art, Pick-Id, …]` mit
+    Punkt-/Listen-Pool; voller `Primitive`-Umfang (Polygon mit Löchern/noStrokeEdges, Linie mit Strichmuster null/Liste, Zickzack,
+    Motiv, Bogen, Kreis/Bogen der 2D-Zeichnung; Raumstempel, Texte, Textpfad, Bild als JSON „wie heute“). v1 und die TS-`parseColor`
+    sind gelöscht (Farben parst jetzt `plan_buf::parse_color`, bitgleich); `prim.rs` kennt auch `drawingTextPath/Image/Circle/Arc`.
+    TS liest den Puffer zu `Primitive[]` (gleiche Felder und Reihenfolge wie das alte JSON, Schraffur-Objekte geteilt);
+    die GPU-Kompilierung liest Bereiche direkt aus dem Kern-Puffer (`compilePlanBufRange`: Puffer einmal im Kern gehalten,
+    `plan_buf_hold`/`gpu_compile_held`, höchstens 8 Puffer/96 MB), gemischte Listen kodiert TS schlank (`lean`).
+    GPU-Chunk-Cache: `Plan.bufRuns` merkt sich die Kern-Abschnitte (auch über Abzugskörper, Geschoss-Überlagerung, kompakte
+    Unterlage hinweg; Mono/Strichstärken-Massstab lassen sie weg); dort zählt der Inhalts-Hash statt der Objekt-Identität, Chunk-
+    Grenzen auch an Bauteil-Ids. Neu erzeugter Plan mit gleichem Inhalt → 0 Chunks neu (vorher alle), eine Wand verschoben → 1 von 69.
+    Gleichheit (temporärer Paritätstest gegen den alten Kern, danach entfernt): planDomains-JSON nach Dekodierung Zeichen für Zeichen
+    gleich (ohne Sortieren) über Beispiel + 120 Zufallsprojekte (Zickzack/Motiv-Fugen, Random-Schraffur, Override-Regeln,
+    Zusatzwände/-öffnungen/-stützen/-treppen, kaputte Schraffuren/Deckentypen → gleiche Fehlermeldungen) × 2 Geschosse × 3 Detailgrade
+    mit zufälliger Sichtbarkeit/Graustufe/Referenzlinien/global (726 Abfragen) und das grosse Projekt; GPU-Vertex-/Index-/Batch-Puffer
+    byte-gleich zur v1-Kompilierung (2988 Puffer: Kern-Puffer direkt, ganzer Plan schlank kodiert, gepackt/ungepackt, LOD);
+    CLI-SVG Beispiel-EG/OG und grosses Projekt byte-gleich; `npm run e2e` grün.
+    Messung (Node, Linux-Container unter Last, Min/Median): `generatePlan` Beispiel-EG 0,63/0,76 → 0,32/0,51 ms; grosses Projekt
+    (Beispielhaus 20×20, `plan/bigSampleProject.testing.ts`: 3600 Wände, 56 824 Primitive) 386/442 → 171/210 ms. Davon Abfrage
+    122–130 ms (Rechnung ~130 ms nativ, Puffer schreiben 21 ms statt JSON 38 ms), Lesen in TS 39 ms (vorher `JSON.parse` 148 ms);
+    Puffer 9,2 MB statt 15,5 MB JSON. GPU-Kompilierung des ganzen grossen Plans unverändert ~0,5 s (Rechnung, nicht Übergabe).
+    Noch über `Primitive[]` (dekodiert): SVG/PDF/DXF-Export, Auswahl/Picken (`ownerIndex`, `segmentIndex`), Overlay/Texte
+    (`nativeText`, PlanView), Culling, Fang, `toRenderScene` → render2d (`scene_bin.rs`, Browser-Ansicht und `push_native_scene`,
+    unverändert). Offen: diese Verbraucher auf den Puffer umstellen (Picken über Pick-Art/Id je Eintrag; render2d-Szene direkt aus
+    dem Puffer), TS-Anteile (2D-Zeichnungen, Schatten/Baurecht) in den Puffer schreiben. Nicht in der Tauri-App angesehen (der
+    direkte GPU-Weg läuft nur im nativen macOS-Renderer; geprüft über die hochgeladenen Puffer in Vitest).
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
 - ◐ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
@@ -176,6 +204,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     kommen über `planDomains` aus dem Dokument ([K3d]); übrig in `generatePlan`: 2D-Zeichnungen, Schatten/Baurecht, Abzugskörper.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
+    Stand 28.10.: Plan-Puffer v2 steht ([K3d]) — `planDomains` liefert binär, GPU liest ihn direkt; Export/Auswahl/Overlay lesen
+    noch die dekodierten `Primitive[]`.
   - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche

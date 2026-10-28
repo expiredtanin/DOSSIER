@@ -177,3 +177,15 @@ pub fn doc_drawing_line_verts(h: u32) -> Vec<f32> {
 pub fn doc_serialize(h: u32) -> String {
     with_doc(h, |d| d.serialize()).unwrap_or_default()
 }
+
+/// Abfrage mit binärer Antwort (`crate::queries::run_bin`, z. B. `planDomains` als Plan-Puffer v2).
+/// Fehler kommen als Fehlerpuffer (`plan_buf::encode_error`).
+#[wasm_bindgen]
+pub fn doc_query_bin(h: u32, name: &str, args: &[f64], text: &str) -> Vec<u8> {
+    let result = with_doc(h, |d| {
+        let p = d.project().map_err(|e| format!("Projekt passt nicht zum Kern-Modell: {e}"))?;
+        crate::queries::run_bin(&p, name, args, text)
+    })
+    .unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
+    result.unwrap_or_else(|e| crate::plan_buf::encode_error(&e))
+}
