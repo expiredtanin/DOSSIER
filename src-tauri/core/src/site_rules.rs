@@ -260,7 +260,7 @@ use serde::Serialize;
 /// Mehrfach-Fläche mit `Vec2`-Punkten (JSON-Form wie `Area` in TS).
 pub type AreaOut = Vec<Vec<Vec<Vec2>>>;
 
-fn area_out(polys: &[Polygon]) -> AreaOut {
+pub fn area_out(polys: &[Polygon]) -> AreaOut {
     polys.iter().map(|p| p.iter().map(|r| r.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect()).collect()).collect()
 }
 

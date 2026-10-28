@@ -67,7 +67,14 @@ pub fn doc_json(h: u32) -> String {
 /// Baurecht), `buildingFootprint`, `modelTop` (`null` ohne Bauteile).
 #[wasm_bindgen]
 pub fn doc_query(h: u32, name: &str) -> String {
-    use crate::{kennzahlen, site_rules};
+    doc_query_args(h, name, &[])
+}
+
+/// Wie [`doc_query`] mit Zahlenargumenten. `shadows`: `[azimut, höhe]` → vereinigter Boden-Schatten.
+#[wasm_bindgen]
+pub fn doc_query_args(h: u32, name: &str, args: &[f64]) -> String {
+    use crate::{kennzahlen, site_rules, sun};
+    let args = args.to_vec();
     let name = name.to_owned();
     with_doc(h, move |d| {
         let p = d.project().ok()?;
@@ -76,6 +83,10 @@ pub fn doc_query(h: u32, name: &str) -> String {
             "siteCheck" => serde_json::to_string(&site_rules::check_project(&p)),
             "buildingFootprint" => serde_json::to_string(&site_rules::building_footprint(&p)),
             "modelTop" => serde_json::to_string(&site_rules::model_top(&p)),
+            "shadows" if args.len() == 2 => {
+                let polys = sun::shadow_polygons_project(&p, sun::SunPosition { azimuth: args[0], elevation: args[1] });
+                serde_json::to_string(&site_rules::area_out(&polys))
+            }
             _ => return None,
         };
         json.ok()

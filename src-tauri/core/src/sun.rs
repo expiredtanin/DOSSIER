@@ -280,3 +280,65 @@ mod tests {
         assert_eq!(without_holes(&vec![square(0.0, 0.0, 3.0)]), vec![square(0.0, 0.0, 3.0)]);
     }
 }
+
+// ── Schatten aus dem Projekt-Dokument ([K4] S2) ─────────────────────────────
+
+use crate::jsmath::hypot2;
+use crate::model::Project;
+
+/// Vereinigter Boden-Schatten aller Wände, freien Körper und Dächer des Projekts (leer bei Nacht).
+/// Wände und Körper als Prismen, Dächer als Punktwolke (Traufe auf Traufhöhe, Traufe/First/Grate
+/// auf Firsthöhe).
+pub fn shadow_polygons_project(p: &Project, sun: SunPosition) -> Vec<Polygon> {
+    let mut prisms: Vec<Prism> = Vec::new();
+    for w in &p.walls {
+        let (z_bottom, z_top) = p.wall_vertical_extent(w);
+        let dx = w.end.x - w.start.x;
+        let dy = w.end.y - w.start.y;
+        let len = hypot2(dx, dy);
+        if len < 1e-9 {
+            continue;
+        }
+        let t = p.wall_thickness(w, 0.2) / 2.0;
+        let nx = (-dy / len) * t;
+        let ny = (dx / len) * t;
+        prisms.push(Prism {
+            footprint: vec![
+                [w.start.x + nx, w.start.y + ny],
+                [w.end.x + nx, w.end.y + ny],
+                [w.end.x - nx, w.end.y - ny],
+                [w.start.x - nx, w.start.y - ny],
+            ],
+            z_bottom,
+            z_top,
+        });
+    }
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if s.operation.as_deref() == Some("subtract") {
+            continue;
+        }
+        let base = p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
+        let z0 = base + s.base_offset.unwrap_or(0.0);
+        prisms.push(Prism { footprint: s.points.iter().map(|v| [v.x, v.y]).collect(), z_bottom: z0, z_top: z0 + s.height });
+    }
+    let mut clouds: Vec<Vec<[f64; 3]>> = Vec::new();
+    for r in p.roofs.as_deref().unwrap_or(&[]) {
+        let eaves_z = p.roof_base_elevation(r);
+        let geo = crate::roof::roof_geometry(&r.params(), eaves_z);
+        let top = eaves_z + geo.ridge_height;
+        let mut pts: Vec<[f64; 3]> = Vec::new();
+        for e in &geo.eaves {
+            pts.push([e[0], e[1], eaves_z]);
+            pts.push([e[0], e[1], top]);
+        }
+        for l in &geo.ridges {
+            pts.push([l[0][0], l[0][1], top]);
+            pts.push([l[1][0], l[1][1], top]);
+        }
+        for l in &geo.hips {
+            pts.push([l[1][0], l[1][1], top]);
+        }
+        clouds.push(pts);
+    }
+    shadow_union(&prisms, &clouds, sun)
+}
