@@ -14,9 +14,9 @@
 //   GROUP     = name (Knoten-/Objektname), kind (Text, z. B. "wall"), id (Bauteil-id), level (Index oder −1),
 //               n_prims, (material (Index oder −1), n_verts, x, y, z, …, n_tris, i0, i1, i2, …) × n_prims
 //
-// Koordinaten: Welt, Meter, Y-up, wie `selectionHighlightLines` (Modell (x, y, z) → (x, z, y)). OBJ und STL
-// schreiben sie unverändert. glTF verlangt ein rechtshändiges Y-up-System: der Schreiber spiegelt Z
-// (v → (x, y, −z)) und vertauscht die Dreiecks-Wicklung; Gesamtabbildung vom Modell:
+// Koordinaten: Welt, Meter, Y-up, wie `selectionHighlightLines` (Modell (x, y, z) → (x, z, y); eine Spiegelung). Alle Formate
+// (OBJ, STL, glTF; OBJ/STL seit 28.10. — vorher ungespiegelt) verlangen ein rechtshändiges Y-up-System:
+// der Schreiber spiegelt Z (v → (x, y, −z)) und vertauscht die Dreiecks-Wicklung; Gesamtabbildung vom Modell:
 // (x, y, z-hoch) → (x, z, −y), Norden liegt bei −Z (glTF-„vorne“), Ost bei +X.
 //
 // glTF: ein Knoten je Bauteil (Name = Gruppenname, `extras` = Typ und id), je Material eine Primitive,
@@ -165,14 +165,21 @@ fn tri_count(g: &Group) -> usize {
     g.prims.iter().map(|p| p.indices.len() / 3).sum()
 }
 
+/// Szene-Welt (x, Höhe, y) → rechtshändige Datei (x, Höhe, −y) — Modell (x, y, z-hoch) → (x, z, −y). `0.0 - z`
+/// statt `-z`: aus +0 wird so kein „-0.0“ in der Datei.
+fn to_file(x: f64, y: f64, z: f64) -> [f64; 3] {
+    [x, y, 0.0 - z]
+}
+
 // ── OBJ ─────────────────────────────────────────────────────────────────────
 
 fn write_obj(s: &Scene) -> String {
     let mut out = String::new();
     out.push_str("# DOSSIER OBJ-Export - Dreiecks-Mesh des 3D-Gebaeudemodells\n");
-    out.push_str("# Achsen: rechtshaendig, Y-up (Y = Hoehe ueber OKFF), wie der 3D-Viewer.\n");
+    out.push_str("# Achsen: rechtshaendig, Y-up (Y = Hoehe ueber OKFF), Modell (x,y,z) -> (x,z,-y), Norden = -Z.\n");
     out.push_str("# Waende: Schicht-Baender mit oeffnungsgenau ausgeschnittenen Loechern (inkl. Laibungen).\n");
     out.push_str("# Decken/Extrusionen: Umriss-Prisma (Ear-Clipping-Triangulierung).\n");
+    out.push_str("# Daecher, Treppen, Stuetzen, Fenster/Tueren (je Oeffnung ein Objekt), Gelaende und Kontext-Meshes wie im 3D.\n");
     let mut offset = 0usize;
     for g in s.groups.iter().filter(|g| tri_count(g) > 0) {
         out.push_str("o ");
@@ -181,13 +188,15 @@ fn write_obj(s: &Scene) -> String {
         let mut local = 0usize;
         for p in &g.prims {
             for v in p.positions.chunks_exact(3) {
-                out.push_str(&format!("v {} {} {}\n", fmt_real(v[0]), fmt_real(v[1]), fmt_real(v[2])));
+                let f = to_file(v[0], v[1], v[2]);
+                out.push_str(&format!("v {} {} {}\n", fmt_real(f[0]), fmt_real(f[1]), fmt_real(f[2])));
             }
         }
         for p in &g.prims {
             for t in p.indices.chunks_exact(3) {
                 let (a, b, c) = (t[0] as usize, t[1] as usize, t[2] as usize);
-                out.push_str(&format!("f {} {} {}\n", a + 1 + offset + local, b + 1 + offset + local, c + 1 + offset + local));
+                // Z gespiegelt ⇒ Wicklung vertauschen (Normalen zeigen weiter nach aussen).
+                out.push_str(&format!("f {} {} {}\n", a + 1 + offset + local, c + 1 + offset + local, b + 1 + offset + local));
             }
             local += p.positions.len() / 3;
         }
@@ -204,10 +213,10 @@ fn write_stl(s: &Scene) -> String {
         for p in &g.prims {
             let v = |i: u32| {
                 let k = i as usize * 3;
-                [p.positions[k], p.positions[k + 1], p.positions[k + 2]]
+                to_file(p.positions[k], p.positions[k + 1], p.positions[k + 2])
             };
             for t in p.indices.chunks_exact(3) {
-                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                let (a, b, c) = (v(t[0]), v(t[2]), v(t[1]));
                 let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
                 let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
                 let mut n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
@@ -638,8 +647,8 @@ mod tests {
         let obj = export_obj(&n, &s).unwrap();
         assert!(obj.starts_with("# DOSSIER OBJ-Export"));
         assert!(obj.contains("o Wand_W1\nv 0.0 0.0 0.0\nv 1.0 0.0 0.0\n"));
-        // Zweite Gruppe: Indizes global (8 Vertices davor, 1-basiert).
-        assert!(obj.contains("o Decke_D\"1\nv 0.0 2.5 0.0\nv 1.0 2.5 0.0\nv 0.0 2.5 1.0\nf 9 10 11\n"), "{obj}");
+        // Zweite Gruppe: Indizes global (8 Vertices davor, 1-basiert). Rechtshändig: Z gespiegelt, Wicklung vertauscht.
+        assert!(obj.contains("o Decke_D\"1\nv 0.0 2.5 0.0\nv 1.0 2.5 0.0\nv 0.0 2.5 -1.0\nf 9 11 10\n"), "{obj}");
         assert_eq!(obj.matches("\nf ").count(), 13);
     }
 
@@ -651,8 +660,9 @@ mod tests {
         assert!(stl.ends_with("endloop\nendfacet\nendsolid dossier\n"));
         assert_eq!(stl.matches("facet normal").count(), 13);
         assert_eq!(stl.matches("vertex ").count(), 39);
-        // Dreieck (0,2.5,0)(1,2.5,0)(0,2.5,1): Normale (0, -1, 0).
-        assert!(stl.contains("facet normal 0.0 -1.0 0.0\nouter loop\nvertex 0.0 2.5 0.0\n"), "{stl}");
+        // Welt-Dreieck (0,2.5,0)(1,2.5,0)(0,2.5,1) ⇒ Datei (x, y, −z) mit vertauschter Wicklung: Normale (0, -1, 0)
+        // bleibt (Wicklung und Spiegelung heben sich in der Normale auf), Ecken (0,2.5,0)(0,2.5,-1)(1,2.5,0).
+        assert!(stl.contains("facet normal 0.0 -1.0 0.0\nouter loop\nvertex 0.0 2.5 0.0\nvertex 0.0 2.5 -1.0\nvertex 1.0 2.5 0.0\n"), "{stl}");
     }
 
     fn json_of_glb(glb: &[u8]) -> (String, usize) {
@@ -713,7 +723,7 @@ mod tests {
         let (json, bl) = json_of_glb(&glb);
         assert_eq!(bl, 0);
         assert!(json.trim_end().ends_with("\"scene\":0,\"scenes\":[{\"nodes\":[]}]}"));
-        assert_eq!(export_obj(&n, "").unwrap().lines().count(), 4);
+        assert_eq!(export_obj(&n, "").unwrap().lines().count(), 5);
         assert_eq!(export_stl(&n, "").unwrap(), "solid dossier\nendsolid dossier\n");
     }
 

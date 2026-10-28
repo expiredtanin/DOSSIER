@@ -581,11 +581,20 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   **Y-up rechtshändig: Modell (x, y, z-hoch) → (x, z, −y)**, Norden = −Z. TS (`src/export/exportMesh.ts`) sammelt nur
   flach. Export-Dialog „glTF 2.0 (GLB)“, Tauri-Menü, CLI `glb`/`gltf`. Prüfung: Khronos-Validator
   (`gltf-validator`, devDependency, Apache-2.0) ohne Fehler, Rundreise Knoten-/Dreieckszahl gegen OBJ,
-  8 Rust-Tests. **Offen:** Dächer, Treppen, Stützen, Kontext-Meshes/Gelände fehlen auch in OBJ/STL (nur Wände,
-  Decken, Extrusionen, im glTF zusätzlich Öffnungsteile); Fenster-Verglasung und Rahmen sind je ein Sammelknoten
-  ohne Öffnungs-id; keine Normalen (Flat-Shading), keine Texturen, keine Instanzen; OBJ/STL bleiben beim
-  älteren gespiegelten Achsen-Bezug (x, Höhe, +y); nicht in Blender/Twinmotion/Enscape geöffnet, nur Validator;
-  nicht in der Tauri-App getestet. · S
+  8 Rust-Tests. **Nachgeführt 28.10. (zweiter Schritt):** Dächer (`Dach_<id>`), Treppen (`Treppe_<id>`: Tritt-Prismen,
+  Ortbeton-Laufplatte, Handlauf), Stützen (`Stuetze_<id>`), Gelände (`Gelaende_<id>`) und importierte IFC/DXF-Meshes
+  (`Kontext_<id>`, mit `color`, falls gesetzt) in OBJ, STL und glTF; Verglasung/Rahmen je Öffnung ein Knoten
+  (`Fenster_<id>`/`Tuer_<id>`, `extras` = Öffnungs-id; die Sammelknoten `glazing`/`frame` gibt es nicht mehr, Öffnungsteile
+  jetzt auch in OBJ/STL). Quelle sind dieselben `emit*`-Ableitungen wie im 3D (`projectToModel3d`), je Bauteil mit einem
+  Ein-Bauteil-Projekt aufgerufen (die Ableitungen liefern keine ids; `src/plan` unverändert). Wicklung: `orientOutward`
+  (verschweisste Kanten, Komponenten, Volumenvorzeichen), da render3d doppelseitig zeichnet. **Achsen OBJ/STL geändert:**
+  rechtshändig wie glTF, Modell (x, y, z-hoch) → (x, z, −y), Norden = −Z (vorher gespiegelt (x, z, +y)); niemand ausser dem
+  eigenen Test hat die alte Abbildung erwartet. Optionen `openingParts`/`context` (Standard an). Prüfung: Validator 0 Fehler,
+  Volumen aller Teile > 0, Dreieckszahl je Art = Summe der Ableitungen, Rundreise OBJ = glTF. **Offen:** keine Normalen
+  (Flat-Shading), keine Texturen/Instanzen, Gelände ohne Vertex-Farben (Luftbild), Abzugskörper-Booleans (`voids`) und
+  truck-Extrusionen (nur Prisma-Näherung) nicht wie im 3D; Dreieckszahl nicht gegen die GPU-Puffer von render3d gemessen
+  (Wand-Löcher und Decken aus denselben Ableitungen, Dächer/Stützen/Treppen/Öffnungen identisch); nicht in
+  Blender/Twinmotion/Enscape geöffnet, nur Validator; nicht in der Tauri-App getestet. · S
 
 ## Bewusst nicht übernommen
 
