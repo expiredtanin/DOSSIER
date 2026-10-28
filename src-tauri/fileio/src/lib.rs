@@ -11,6 +11,7 @@
 // acadrust: `DxfReader::from_reader(Cursor<Vec<u8>>)` (Read + Seek + 'static) — ohne Dateisystem, WASM-tauglich.
 
 pub mod export;
+pub mod export_dim;
 pub mod common;
 pub mod import;
 pub mod split;
