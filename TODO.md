@@ -28,7 +28,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   langsamer). Schatten, Baurecht (exakter Puffer statt Kapsel), Aussenbemassung, Kennzahlen in Rust; die
   `checkRoomProgram` bleibt vorerst TS (SIA-416-Zuordnung: seit [K2] `room_area.rs`). `bulge.ts` ist Fassade über den
   Rust-Kern (`bulge_polyline_points` für ganze Polylinien; `hasRealBulge`/`pointOnCircle` bleiben TS,
-  Einzeiler). Offen: Triangulierung, Straight Skeleton [B2]. · M
+  Einzeiler). Delaunay-Triangulierung (`delaunay.rs`, Port von delaunator inkl. exaktem `orient2d`; bitgleich zu JS über Zufalls-/Raster-/kozirkulare/fast-kollineare Punkte; `delaunator` aus den Abhängigkeiten entfernt, 28.10.): Gelände-TIN und Kontext-Gebäude. Offen: Straight Skeleton [B2]. · M
 - ✅ **Mac-Test 27.10.** (Maintainer): App startet mit dem Rust-Kern, Darstellung sieht gut aus — Stand `5b72069`
   (K0–K2, render2d binär); zweiter Test mit GPU-Kompilierung [K3b] (`7a8af4f`) ebenfalls bestanden.
 - ✅ **[K2] Geometrie-Ableitungen.** (27.10.) Dachgeometrie in Rust (`roof.rs`, `roof_skeleton.rs`;
