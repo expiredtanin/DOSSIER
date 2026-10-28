@@ -11,7 +11,7 @@
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
-//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -73,6 +73,16 @@ import {
   shadowPolygons,
   projectLatLon,
   checkRoomProgram,
+  compareRoomProgram,
+  readSheetFile,
+  suggestMapping,
+  mapRows,
+  importedRows,
+  applyRoomProgram,
+  buildProgramReport,
+  buildProgramSheet,
+  addProgramSheet,
+  defaultSheetLabels,
   checkSiteRules,
   exportStl,
   exportGlb,
@@ -294,7 +304,7 @@ export async function run(argv: string[]): Promise<number> {
   if (file === "pdf-info") return runPdfInfo(args, command);
   if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|step|obj|stl|glb|gltf|schedule|kennzahlen|sun|model3d> [Optionen]\n" +
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|step|obj|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d> [Optionen]\n" +
         "        dossier-cli convert <eingabe.dxf|dwg|ifc|pdf|obj|stl|gltf|glb|ply|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
         "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
@@ -558,7 +568,8 @@ async function execute(project: Project, file: string, command: string, rest: st
       out(args, serializeProject(project), args.flags.get("out") ?? file);
       return 0;
     case "plan": {
-      const lvl = findLevel(project, ["floor"], args.flags.get("level"));
+      // Geschosse und freie 2D-Zeichnungsebenen (z. B. das Blatt „Raumprogramm").
+      const lvl = findLevel(project, ["floor", "drawing"], args.flags.get("level"));
       if (!lvl) fail(`Geschoss nicht gefunden: ${args.flags.get("level") ?? "(erstes)"}`);
       // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
       const plan = generatePlan(project, lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
@@ -658,6 +669,55 @@ async function execute(project: Project, file: string, command: string, rest: st
       const prog = checkRoomProgram(project);
       const baurecht = checkSiteRules(project);
       out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
+      return 0;
+    }
+    case "raumprogramm": {
+      // Raumprogramm: [--import tabelle.xlsx|ods|csv [--sheet Name|Nr] [--mode replace|append]] [--tolerance 5]
+      // [--generate] [--format json|csv|svg|pdf] [--out datei] [--save projekt.obp]
+      let next = project;
+      const src = args.flags.get("import");
+      if (src && src !== "true") {
+        let bytes: Uint8Array;
+        try {
+          bytes = new Uint8Array(readFileSync(src));
+        } catch (e) {
+          fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
+        }
+        const sheets = await readSheetFile(bytes, src.split(/[\\/]/).pop() ?? src);
+        const want = args.flags.get("sheet");
+        const sheet = (want !== undefined ? sheets.find((s, i) => s.name === want || String(i + 1) === want) : sheets.find((s) => s.rows.length > 0)) ?? sheets[0];
+        if (!sheet) fail("import: kein Tabellenblatt gefunden");
+        const rows = importedRows(mapRows(sheet.rows, suggestMapping(sheet.rows)));
+        next = applyRoomProgram(next, rows, args.flags.get("mode") === "append" ? "append" : "replace");
+        process.stderr.write(`${rows.length} Programmzeilen aus Blatt "${sheet.name}" übernommen.\n`);
+      }
+      const tol = args.flags.get("tolerance");
+      if (tol !== undefined) {
+        const v = Number(tol);
+        if (!Number.isFinite(v) || v < 0 || v > 100) fail("--tolerance: Prozent 0 bis 100");
+        next = { ...next, roomProgramTolerance: v / 100 };
+      }
+      if (args.flags.has("generate")) {
+        const sheet = buildProgramSheet(next, defaultSheetLabels());
+        next = addProgramSheet(next, sheet);
+        process.stderr.write(`${sheet.layout.items.length} Räume auf Blatt "${sheet.level.name}" (${sheet.level.id}) angelegt.\n`);
+      }
+      const save = args.flags.get("save");
+      if (save && save !== "true") {
+        const target = save;
+        writeFileSync(target, serializeProject(next));
+        process.stderr.write(`geschrieben: ${target}\n`);
+      }
+      const format = args.flags.get("format") ?? "json";
+      const stem = `${next.name || "projekt"}-raumprogramm`;
+      if (format === "json") out(args, JSON.stringify(compareRoomProgram(next), null, 2), `${stem}.json`);
+      else {
+        const report = buildProgramReport(next);
+        if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
+        else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
+        else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+        else throw new Error("--format: json, csv, svg oder pdf");
+      }
       return 0;
     }
     case "sun": {

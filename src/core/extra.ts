@@ -25,6 +25,8 @@ export type { Project, DrawingLevel } from "../model/types";
 export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/kennzahlen";
 export type { Kennzahlen, ProgramCheck } from "../analysis/kennzahlen";
 export { compareRoomProgram, layoutRoomProgram, DEFAULT_PROGRAM_TOLERANCE } from "../analysis/roomProgram";
+export { buildProgramSheet, addProgramSheet, groupColor, defaultSheetLabels } from "../analysis/roomProgramSheet";
+export type { ProgramSheet, SheetLabels } from "../analysis/roomProgramSheet";
 export type { RoomProgramCompare, RoomProgramLayout, CompareRow, CompareSum, Light, LayoutItem, LayoutGroup } from "../analysis/roomProgram";
 export { readSheetFile, suggestMapping, mapRows, importedRows, applyRoomProgram, cellNumber, cellText, detectHeaderRow, parseKind, PROGRAM_FIELDS } from "../io/roomProgramImport";
 export type { SheetData, SheetCell, Mapping, ColumnMap, ProgramField, ImportLine, ImportMode, SkipReason } from "../io/roomProgramImport";

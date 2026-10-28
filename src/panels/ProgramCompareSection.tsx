@@ -4,13 +4,14 @@
 //    Differenz absolut und in %, Ampel; darunter Summen je Gruppe, je Flächenart und gesamt.
 //  • Toleranz der Ampel (Standard ±5 %) liegt im Projekt (`roomProgramTolerance`).
 //  • Export CSV/PDF aus demselben Berichtsmodell (`export/programReport.ts`).
+//  • „Räume generieren": neues Blatt mit einem Rechteck je Soll-Raum (4:3), s. `analysis/roomProgramSheet.ts`.
 // Herleitung der Zahlen: `src-tauri/core/src/room_program.rs`.
 
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
-import { areaReportToCsv, buildAreaReportPdf, buildProgramReport, compareRoomProgram, DEFAULT_PROGRAM_TOLERANCE } from "../core";
+import { addProgramSheet, areaReportToCsv, buildAreaReportPdf, buildProgramReport, buildProgramSheet, compareRoomProgram, defaultSheetLabels, DEFAULT_PROGRAM_TOLERANCE } from "../core";
 import type { CompareRow, CompareSum, Light } from "../core";
 import type { Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
@@ -62,6 +63,18 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
     } catch {
       notify(t("program.compare.exportPdf.fail"));
     }
+  };
+
+  const generate = () => {
+    const sheet = buildProgramSheet(project, defaultSheetLabels());
+    if (sheet.drawings.length === 0) {
+      notify(t("program.generate.none"), "warning");
+      return;
+    }
+    // Ein setProject = ein Undo-Schritt: Ebene und alle Zeichnungen zusammen.
+    setProject((p: Project) => addProgramSheet(p, sheet));
+    host.onSelectLevel(sheet.level.id);
+    notify(t("program.generate.done", { n: sheet.layout.items.length, name: sheet.level.name }));
   };
 
   return (
@@ -146,6 +159,10 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
       </div>
       {c.extra.length > 0 && <div className="kz-extra">{t("program.compare.extra", { n: c.extra.length, area: fmt(c.extraArea) })}</div>}
       {hasKinds && <div className="kz-extra">{t("program.report.note.sia")}</div>}
+
+      <button type="button" className="kz-add" title={t("program.generate.hint")} onClick={generate}>
+        {t("program.generate")}
+      </button>
     </div>
   );
 }

@@ -390,6 +390,23 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 
 - ✅ **[41] Massenmodelle.** `analysis/kennzahlen.ts`: GF/aGF je Geschoss, GV aus Körpern.
 - ✅ **[61] Raumprogramm gegen Modell.** `checkRoomProgram`, Editor im Flächenbilanz-Panel (27.10.).
+  **Import, Soll/Ist, Räume generieren (28.10.):**
+  (1) Import aus .xlsx/.ods/.csv/.tsv: Leser in Rust (`fileio/src/sheet_import.rs`, nur `zip` + `quick-xml`, kein neues
+  Crate; CSV UTF-8/UTF-16/Windows-1252, Trenner `;` `,` Tab; Zahlparser „1'250,5“, „12,5 m²“), Zuordnung in
+  `io/roomProgramImport.ts` (Kopfzeile + Spalten nach Namen de/en/fr, Summen-/Leerzeilen, Zwischentitel → Gruppe),
+  Dialog `ui/RoomProgramImportDialog.tsx` (Knopf „Raumprogramm importieren …“, ersetzen/anhängen). Neue optionale
+  Felder `RoomProgramRow.group?`/`note?` (Flächenart = bestehendes `siaCategory`), `Project.roomProgramTolerance?`;
+  `generated.rs` von Hand ergänzt (nicht per `gen-rust-model.py`, das nur einmalig war), `KNOWN_KEYS` nachgeführt.
+  (2) Soll/Ist in Rust (`core/src/room_program.rs`, Abfrage `programCompare`): Zuordnung nach Namen (genau vor
+  Präfix, ohne Nummer/Gross-Klein), Differenz abs/%, Summen je Gruppe/Flächenart/total, Ampel (Standard ±5 %, im
+  Projekt einstellbar; `checkRoomProgram` ist jetzt Fassade, Standard-Toleranz damit 5 statt 10 %), Export CSV/PDF
+  (`export/programReport.ts`), CLI `raumprogramm [--import tabelle] [--generate] [--format json|csv|svg|pdf]`.
+  (3) „Räume generieren“: neues Blatt (Zeichnungsebene „Raumprogramm“, Art `drawing`), je Raum Rechteck + Name +
+  Fläche im Verhältnis 4:3 mit exakter Soll-Fläche, Shelf-Packing je Gruppe (Abfrage `programLayout`), ein Undo-Schritt.
+  Entscheid: 2D-Zeichnungen statt `Room`s — echte Räume zählen in Flächenbilanz/-tabelle/Kennzahlen/IFC und würden
+  das Ist verfälschen. Offen: Ist je Raum nur über den Namen (keine Zuordnung per Hand); Gruppen werden untereinander
+  gestapelt (nicht nebeneinander); beim Rückgängig bleibt die aktive Ebene auf dem entfernten Blatt (wie beim
+  DXF-Import); Ampel im PDF nur als Text; nur im Browser-Build/Linux geprüft, nicht in der Tauri-App.
 - ✅ **[62] Kennzahlenleiste.** Flächenbilanz-Panel: GF/aGF/GV/AZ/ÜZ, Parzellenfläche, je Geschoss (27.10.).
 - ✅ **[70] Flächentabellen (Flächenarten nach SIA 416) / IVHB.** (28.10.) Kern `core/src/flaechen.rs`
   (Abfragen `areaTable`, `ivhb`), Fassade `analysis/areaTable.ts`, Bericht `export/areaReport.ts`
@@ -398,7 +415,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Tabelle je Geschoss und total: HNF, NNF, NF, VF, FF, NGF, KF, GF, AGF, GV. GF = NGF + KF (Norm); KF aus
   Wandgrundrissen (abzüglich Räume) + KGF-Räumen hergeleitet. IVHB: GFZ, AZ (aGF-Basis wählbar), BMZ, ÜZ, GZ,
   Gesamt-/Fassadenhöhe; aGSF = Eingabe, sonst Parzellenfläche/-grenze.
-  Offen / Annahmen: (a) Die ältere Bilanz (`room_area::rollup`, Kennzahlenleiste [62], IFC-Qto) rechnet die AGF
+  Soll/Ist-Nachweis des Raumprogramms: s. [61]. Offen / Annahmen: (a) Die ältere Bilanz (`room_area::rollup`, Kennzahlenleiste [62], IFC-Qto) rechnet die AGF
   noch in die GF — nach SIA 416 gehört sie nicht dazu; angleichen, sobald IFC/Leiste mitgezogen werden.
   (b) Eingaben aGSF/Grünfläche/aGF-Basis/UG-Anrechnung liegen nur in der Ansicht; Vorschlag Modellfeld
   `Project.ivhb?: { agsf?, greenArea?, agfBasis?, includeUnderground? }` (+ `KNOWN_KEYS`), damit sie mit dem
