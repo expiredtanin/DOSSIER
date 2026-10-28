@@ -47,6 +47,12 @@ interface WebModelRendererLike {
    * "textured" faellt engine-seitig vorerst auf "shaded" zurueck). */
   set_render_style(style: string): void;
   set_view_preset(preset: string): void;
+  /** Formatfüllendes Ziel + Abstand für Modell UND sichtbare Punktwolken: `[tx, ty, tz, dist]`
+   *  (world, Y-oben; `web::view_fit`). Optional — ältere WASM-Builds. */
+  view_fit?(): Float32Array | number[];
+  /** Aktuelle Rust-Kamera: `[eye(3), target(3), up(3), perspektivisch 1/0, fovY rad, orthoHalbhöhe]`
+   *  (`web::camera_state`). Optional — ältere WASM-Builds. */
+  camera_state?(): Float32Array | number[];
   /** Boden-Referenzraster in der Welt-XZ-Ebene ein-/ausblenden (Rust-seitig,
    * `web::set_ground_grid`). `visible=false` zeichnet kein Raster; sonst ein
    * Quadrat der Kantenlaenge `extent_m` (zentriert um den Ursprung, XZ) auf
@@ -463,6 +469,71 @@ export function useWasm3dRenderer(
     }
   }, []);
 
+  /** Formatfüllendes Ziel + Abstand (Modell + sichtbare Punktwolken) aus Rust, oder null (alter Build). */
+  const viewFit = useCallback((): { target: [number, number, number]; dist: number } | null => {
+    const r = rendererRef.current;
+    if (!r || typeof r.view_fit !== "function") return null;
+    try {
+      const v = Array.from(r.view_fit());
+      if (v.length < 4 || !v.every(Number.isFinite)) return null;
+      return { target: [v[0], v[1], v[2]], dist: v[3] };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** Die Kamera, die Rust gerade zeichnet (Preset oder zuletzt gesetzt), oder null (alter Build). */
+  const readRustCamera = useCallback((): Camera3d | null => {
+    const r = rendererRef.current;
+    if (!r || typeof r.camera_state !== "function") return null;
+    try {
+      const v = Array.from(r.camera_state());
+      if (v.length < 12 || !v.every(Number.isFinite)) return null;
+      return {
+        eye: [v[0], v[1], v[2]],
+        target: [v[3], v[4], v[5]],
+        up: [v[6], v[7], v[8]],
+        perspective: v[9] > 0.5,
+        fovY: v[10],
+        orthoHalfHeight: v[11],
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * Schnappschuss des 3D-Bildes als PNG. `draw` zeichnet den Frame (muss synchron rendern): ein
+   * WebGPU-Canvas liefert seinen Inhalt nur im selben Task wie das Zeichnen, danach ist er leer.
+   * Das Bild wird sofort auf ein 2D-Canvas kopiert (höchstens `maxEdge` px lange Seite), dann
+   * kodiert. Null bei leerem/nicht lesbarem Bild (z. B. Software-WebGPU ohne Präsentation).
+   */
+  const snapshotPng = useCallback(
+    async (draw: () => void, maxEdge: number): Promise<Uint8Array | null> => {
+      const canvas = canvasRef.current;
+      if (!canvas || !rendererRef.current || canvas.width < 1 || canvas.height < 1) return null;
+      draw();
+      const k = Math.min(1, Math.max(16, maxEdge) / Math.max(canvas.width, canvas.height));
+      const w = Math.max(1, Math.round(canvas.width * k));
+      const h = Math.max(1, Math.round(canvas.height * k));
+      const out = document.createElement("canvas");
+      out.width = w;
+      out.height = h;
+      const ctx = out.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(canvas, 0, 0, w, h);
+      // Leer = alles transparent oder schwarz (Stichprobe über ein Raster).
+      const sample = ctx.getImageData(0, 0, w, h).data;
+      let seen = false;
+      const step = Math.max(1, Math.floor(sample.length / 4 / 400)) * 4;
+      for (let i = 0; i < sample.length && !seen; i += step) seen = sample[i + 3] > 0 && (sample[i] | sample[i + 1] | sample[i + 2]) !== 0;
+      if (!seen) return null;
+      const blob: Blob | null = await new Promise((res) => out.toBlob(res, "image/png"));
+      return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+    },
+    [canvasRef],
+  );
+
   /**
    * Einen Frame zeichnen (Canvas-Größe + DPR abgleichen). `cam` = null lässt
    * die zuletzt in Rust gesetzte Kamera unverändert — Fall für `render(null)`
@@ -514,6 +585,9 @@ export function useWasm3dRenderer(
     updateModel,
     setRenderStyle,
     applyViewPreset,
+    viewFit,
+    readRustCamera,
+    snapshotPng,
     setGroundGrid,
     setSectionPlane,
     setHighlightLines,

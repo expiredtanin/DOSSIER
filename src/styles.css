@@ -8429,3 +8429,36 @@ body {
   line-height: 1.5;
   color: var(--ink-2);
 }
+
+.bcf-vps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bcf-vp {
+  flex: 0 1 96px;
+  min-width: 64px;
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+.bcf-vp:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+}
+.bcf-vp .bcf-snapshot {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.bcf-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}

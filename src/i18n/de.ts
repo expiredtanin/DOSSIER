@@ -2138,6 +2138,7 @@ export const de = {
   "viewport3d.section.show": "Schnittebene ein",
   "viewport3d.section.hide": "Schnittebene aus",
   "viewport3d.section.bound": "3D-Schnitt aufheben (an Schnittlinie gebunden)",
+  "viewport3d.section.bcf": "3D-Schnitt aufheben (aus BCF-Viewpoint)",
   "viewport3d.grip.vertex": "Wandende ziehen",
   "viewport3d.grip.height": "Höhe ziehen",
   "viewport3d.grip.move": "Verschieben",
@@ -2326,6 +2327,20 @@ export const de = {
   "bcf.openFailed": "BCF-Datei nicht lesbar: {error}",
   "bcf.saved": "BCF gespeichert.",
   "bcf.saveFailed": "BCF nicht gespeichert: {error}",
+  "bcf.viewpoints": "Ansichten",
+  "bcf.viewpoint.go": "Ansicht {n} im 3D einstellen",
+  "bcf.viewpoint.snapshot": "Ansicht {n}",
+  "bcf.noViewport": "Keine 3D-Ansicht geöffnet: die Kamera des Viewpoints wurde nicht gesetzt.",
+  "bcf.cameraSet": "Kamera aus dem Viewpoint gesetzt.",
+  "bcf.cameraFailed": "Die Kamera des Viewpoints ist unbrauchbar und wurde nicht gesetzt.",
+  "bcf.sectionSet": "Schnittebene aus dem Viewpoint im 3D gesetzt.",
+  "bcf.sectionTilted": "Der Viewpoint enthält eine schräge Schnittebene: sie wird nur angezeigt, der 3D-Schnitt kann nur senkrechte Ebenen.",
+  "bcf.clipping": "Schnittebenen",
+  "bcf.clipping.item": "bei {x} / {y} / {z} m, Richtung {dx} / {dy} / {dz}",
+  "bcf.attachView": "Aktuelle 3D-Ansicht anhängen",
+  "bcf.addViewpoint": "Ansicht aufnehmen",
+  "bcf.addViewpoint.hint": "Hängt die aktuelle 3D-Kamera mit Bild und der Auswahl als Viewpoint an das Thema.",
+  "bcf.noSnapshot": "Kein Bild aufgenommen (3D-Bild nicht lesbar); die Kamera ist trotzdem gespeichert.",
 } as const;
 
 export type TranslationKey = keyof typeof de;

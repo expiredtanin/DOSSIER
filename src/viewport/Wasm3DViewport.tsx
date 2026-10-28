@@ -42,7 +42,7 @@
 // Die Orbit-/Pan-Mathematik folgt den OrbitControls-Konventionen (Winkel je
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { ceilingVerticalExtent, wallVerticalExtent } from "../model/wall";
 import { roofBaseElevation, roofGeometry } from "../core";
@@ -61,13 +61,22 @@ import {
 } from "./grip3dHud";
 import { t } from "../i18n";
 import { useWasm3dRenderer } from "./useWasm3dRenderer";
-import type { Camera3d } from "./useWasm3dRenderer";
 import { cameraRay, pickNearest, rayPlaneY, rayPlane, worldToScreen } from "./raycast3d";
 import type { Vec3 } from "../core";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
 import { pointCloudSyncItems } from "./pointCloudSync";
 import { usePointClouds } from "../state/pointCloudStore";
 import { projectGeoOrigin } from "../core";
+import {
+  FOV_Y,
+  PITCH_LIMIT,
+  lerpOrbit,
+  orbitCamera,
+  orbitFromCamera3d,
+  registerViewportCamera,
+  type OrbitState,
+  type V3 as CamV3,
+} from "./cameraBridge";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
@@ -212,57 +221,7 @@ function computeGrips(
   return out;
 }
 
-/** Vertikaler Öffnungswinkel (Radiant) — wie die three.js-PerspectiveCamera (50°),
- * auch für die FREIE Orbit-Kamera hier (die Presets selbst nutzen den Rust-
- * seitigen Default-FOV, s. `types::default_fov`, denselben Wert). */
-const FOV_Y = (50 * Math.PI) / 180;
-/** Pitch-Klemme gegen den Gimbal-Flip (identisch zu render3d::math::orbit_eye). */
-const PITCH_LIMIT = Math.PI / 2 - 0.01;
-
-/** Orbit-Zustand der Kamera: Kugelkoordinaten um ein Blickziel (world, Y-up). */
-interface OrbitState {
-  /** Azimut um die Y-Achse (Radiant). */
-  yaw: number;
-  /** Erhebung über die XZ-Ebene (Radiant, geklemmt). */
-  pitch: number;
-  /** Abstand vom Ziel (Meter). */
-  dist: number;
-  /** Blickziel (world). */
-  target: [number, number, number];
-  /** Soll die freie Kamera orthografisch bleiben? (true fuer alle Presets ausser
-   * `perspective`) — sonst kippt die erste Kamerabewegung fälschlich in
-   * Perspektive („locked iso"). */
-  ortho: boolean;
-  /** Orthografische Bild-Halbhoehe (Meter), UNABHAENGIG von `dist` gefuehrt: eine
-   * echte Ortho-Kamera skaliert ihr Bild ueber diese Groesse, nicht ueber den
-   * Augabstand. Wird beim Preset aus `dist*tan(FOV_Y/2)` geseedet (perspektiv-
-   * äquivalente Bildhoehe an der eingepassten Distanz → kein Sprung beim ersten
-   * Move) und beim Zoom in Ortho-Modus multiplikativ skaliert. */
-  orthoHalfHeight: number;
-}
-
-/** Fertige (freie, perspektivische) Kamera aus dem Orbit-Zustand (Konvention
- * wie render3d::math::orbit_eye). Für die manuelle Navigation NACH einem
- * Praeset-Sprung — die Presets selbst zeichnen über `set_view_preset`. */
-function orbitCamera(o: OrbitState): Camera3d {
-  const pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, o.pitch));
-  const r = o.dist * Math.cos(pitch);
-  return {
-    eye: [
-      o.target[0] + r * Math.cos(o.yaw),
-      o.target[1] + o.dist * Math.sin(pitch),
-      o.target[2] + r * Math.sin(o.yaw),
-    ],
-    target: [o.target[0], o.target[1], o.target[2]],
-    up: [0, 1, 0],
-    // Projektion aus dem Orbit-Zustand (war hartkodiert `true`/`dist*0.5` — genau
-    // DAS war der Locked-Iso-Bug: die erste Bewegung nach einem Ortho-Preset kippte
-    // sofort in Perspektive). Ortho behaelt seine eigene, dist-unabhaengige Halbhoehe.
-    perspective: !o.ortho,
-    fovY: FOV_Y,
-    orthoHalfHeight: o.orthoHalfHeight,
-  };
-}
+// FOV_Y, PITCH_LIMIT, OrbitState und orbitCamera leben in `./cameraBridge` (testbar, auch für BCF).
 
 /**
  * Formatfüllendes Ziel + Distanz: Bounding-Box des geflachten Modells (Wände +
@@ -536,6 +495,9 @@ export function Wasm3DViewport({
     updateModel,
     setRenderStyle,
     applyViewPreset,
+    viewFit,
+    readRustCamera,
+    snapshotPng,
     setGroundGrid,
     setSectionPlane,
     setHighlightLines,
@@ -557,6 +519,12 @@ export function Wasm3DViewport({
   // Redraw-Strategie des zuletzt aktiven Kamera-Modus (Praeset ODER freier
   // Orbit) — Resize/Modell-Update ruft diese auf, ohne den Modus zu kennen.
   const redrawRef = useRef<() => void>(() => {});
+  // Waren schon sichtbare Punktwolken eingepasst? (erste Wolke → Kamera einpassen)
+  const hadCloudsRef = useRef(false);
+  // Aktuelles Preset neu anwenden und den Orbit darauf einpassen (s. `applyPreset`).
+  const fitCameraRef = useRef<() => void>(() => {});
+  // Live-Schnitt von aussen (BCF-Schnittebene), hat Vorrang vor `section3d`; null = keiner.
+  const [extSection, setExtSection] = useState<{ point: CamV3; normal: CamV3 } | null>(null);
   // Frisches Projekt für den (stabilen) Init-Effekt unten.
   const projectRef = useRef(project);
   projectRef.current = project;
@@ -574,8 +542,15 @@ export function Wasm3DViewport({
   useEffect(() => {
     if (!ready) return;
     const p = projectRef.current;
-    if (syncPointClouds(pointCloudSyncItems(pointClouds, projectGeoOrigin(p), p.geoAnchor?.height))) {
-      redrawRef.current();
+    const items = pointCloudSyncItems(pointClouds, projectGeoOrigin(p), p.geoAnchor?.height);
+    if (syncPointClouds(items)) {
+      // Erste sichtbare Wolke: Kamera auf Modell + Wolke einpassen (sonst bleibt sie ausserhalb des
+      // Bildes, besonders bei lagerichtigen LV95-Wolken weit vom Modell).
+      const anyVisible = items.some((i) => i.visible && i.data.xyz.length > 0);
+      const first = anyVisible && !hadCloudsRef.current;
+      hadCloudsRef.current = anyVisible;
+      if (first) fitCameraRef.current();
+      else redrawRef.current();
     }
   }, [ready, pointClouds, geoKey, syncPointClouds]);
 
@@ -598,28 +573,89 @@ export function Wasm3DViewport({
   // ggf. orthografische Praeset-Kamera — „hinspringen, kein Lock", der
   // Orbit-Zustand wird nur als Startpunkt für spätere manuelle Navigation
   // nachgezogen (s. VIEW3D_ORBIT).
-  useEffect(() => {
-    if (!ready) return;
+  const applyPreset = useCallback(() => {
     applyViewPreset(view3d);
     const { yaw, pitch } = VIEW3D_ORBIT[view3d];
-    const { target, dist } = fitTargetDist(projectRef.current);
+    // Ziel + Abstand kommen aus Rust (Modell UND sichtbare Punktwolken, dieselbe Rechnung wie das
+    // Preset selbst); nur ältere WASM-Builds fallen auf die TS-Spiegelung zurück.
+    const fit = viewFit();
+    const { target, dist } = fit ?? fitTargetDist(projectRef.current);
     // Alle Presets ausser `perspective` sind orthografisch (front/top/side/iso, wie
     // die Rust-Seite `preset_camera`) → die freie Kamera bleibt danach ebenfalls
-    // ortho („locked iso"). orthoHalfHeight auf die perspektiv-aequivalente Bildhoehe
-    // an der eingepassten Distanz seeden, damit der erste manuelle Move/Zoom groessen-
-    // gleich an das von Rust gezeichnete Preset-Bild anschliesst (kein Sprung).
+    // ortho („locked iso"). Die Bildhöhe liest der Orbit aus der Rust-Preset-Kamera, damit der
+    // erste manuelle Move/Zoom grössengleich an das gezeichnete Bild anschliesst (kein Sprung);
+    // ältere Builds: perspektiv-äquivalente Höhe an der eingepassten Distanz.
     const ortho = view3d !== "perspective";
+    const rust = readRustCamera();
     orbitRef.current = {
       yaw,
       pitch,
       dist,
       target,
       ortho,
-      orthoHalfHeight: dist * Math.tan(FOV_Y / 2),
+      orthoHalfHeight: rust && !rust.perspective ? rust.orthoHalfHeight : dist * Math.tan(FOV_Y / 2),
     };
     redrawRef.current = () => render(null);
     redrawRef.current();
-  }, [ready, view3d, applyViewPreset, render]);
+  }, [view3d, applyViewPreset, viewFit, readRustCamera, render]);
+  fitCameraRef.current = applyPreset;
+
+  useEffect(() => {
+    if (!ready) return;
+    applyPreset();
+  }, [ready, applyPreset]);
+
+  // Kamera-Brücke ([BCF]): Lesen/Setzen der Orbit-Kamera, Schnappschuss und Schnitt von aussen
+  // (`cameraBridge.ts`). Der Orbit-Zustand ist die Wahrheit; nach einem Preset ist er aus der
+  // Rust-Preset-Kamera geseedet (s. `applyPreset`).
+  const animRef = useRef(0);
+  useEffect(() => {
+    if (!ready) return;
+    const canvas = canvasRef.current;
+    // Das Bild so zeichnen, wie es gerade angezeigt wird (Preset-Kamera oder Orbit).
+    const draw = () => redrawRef.current();
+    const off = registerViewportCamera({
+      read: () => {
+        const o = orbitRef.current;
+        const rect = canvas?.getBoundingClientRect();
+        if (!o || !rect || rect.width < 1 || rect.height < 1) return null;
+        return { camera: orbitCamera(o), aspect: rect.width / rect.height };
+      },
+      write: (cam, animate) => {
+        const to = orbitFromCamera3d(cam);
+        if (!to) return false;
+        cancelAnimationFrame(animRef.current);
+        const from = orbitRef.current;
+        // Ab jetzt zeichnet der Orbit (nicht mehr die Rust-Preset-Kamera).
+        redrawRef.current = () => {
+          if (orbitRef.current) render(orbitCamera(orbitRef.current));
+        };
+        if (!animate || !from) {
+          orbitRef.current = to;
+          redrawRef.current();
+          return true;
+        }
+        const t0 = performance.now();
+        const DURATION = 350;
+        const step = (now: number) => {
+          const k = Math.min(1, (now - t0) / DURATION);
+          const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // ease in-out
+          orbitRef.current = k >= 1 ? to : lerpOrbit(from, to, e);
+          redrawRef.current();
+          if (k < 1) animRef.current = requestAnimationFrame(step);
+        };
+        animRef.current = requestAnimationFrame(step);
+        return true;
+      },
+      snapshot: (maxEdge) => snapshotPng(draw, maxEdge),
+      section: (plane) => setExtSection(plane),
+      fit: () => fitCameraRef.current(),
+    });
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      off();
+    };
+  }, [ready, render, snapshotPng, canvasRef]);
 
   // Darstellungsart (volle RenderMode-Union) an den Renderer weiterreichen,
   // sobald sie wechselt oder der Renderer bereit wird — dann mit der aktuell
@@ -650,14 +686,16 @@ export function Wasm3DViewport({
   // Ebene oder Modelländerung (Caps folgen dem aktuellen Modell).
   useEffect(() => {
     if (!ready) return;
-    if (!section3d) {
+    // Eine von aussen gesetzte Ebene (BCF-Viewpoint) hat Vorrang vor der gebundenen Schnittlinie.
+    const plane = extSection ?? section3d;
+    if (!plane) {
       setSectionPlane(false, [0, 0, 0], [0, 0, 1]);
       redrawRef.current();
       return;
     }
-    setSectionPlane(true, section3d.point, section3d.normal);
+    setSectionPlane(true, plane.point, plane.normal);
     redrawRef.current();
-  }, [ready, section3d, project, setSectionPlane]);
+  }, [ready, section3d, extSection, project, setSectionPlane]);
 
   // Auswahl-Hervorhebung ODER Zeichnen-Vorschau (derselbe Kanal, s. Datei-
   // Kommentar oben): läuft gerade ein Befehl (`commandActive`), hat die
@@ -1668,12 +1706,16 @@ export function Wasm3DViewport({
       {/* Live-Schnitt-Knopf: nur sichtbar, wenn eine Schnittlinie den 3D-Schnitt
           treibt (`section3d` gebunden, Bindung im Objekt-Info gesetzt). Klick
           hebt die Bindung auf. Sitzt ueber dem Grid-Button (falls vorhanden). */}
-      {section3d && (
+      {(section3d || extSection) && (
         <button
           type="button"
           aria-label={t("viewport3d.section.label")}
-          onClick={() => onClearSection3d?.()}
-          title={t("viewport3d.section.bound")}
+          onClick={() => {
+            // Zuerst die von aussen gesetzte Ebene (BCF) aufheben, dann die gebundene Schnittlinie.
+            if (extSection) setExtSection(null);
+            else onClearSection3d?.();
+          }}
+          title={extSection ? t("viewport3d.section.bcf") : t("viewport3d.section.bound")}
           aria-pressed
           style={{
             position: "absolute",

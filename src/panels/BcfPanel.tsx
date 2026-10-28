@@ -4,9 +4,11 @@
 // IFC-GlobalId, dieselbe Ableitung wie im IFC-Export: `io/bcfMatch.ts`). Kommentar hinzufügen,
 // Status ändern, neues Thema aus der Auswahl, als .bcfzip speichern.
 //
-// Die Themen gehören nicht zum Projekt (eigene Datei, `bcfSession.ts`). Die Kamera eines Viewpoints
-// wird angezeigt, aber noch nicht gesetzt: `Wasm3DViewport` hält seine Orbit-Kamera intern und bietet
-// keine Setz-Funktion (s. TODO.md [BCF]).
+// Die Themen gehören nicht zum Projekt (eigene Datei, `bcfSession.ts`). Kamera und Schnittebene
+// eines Viewpoints setzt die Kamera-Brücke des 3D-Viewports (`viewport/cameraBridge.ts`, Umrechnung
+// samt LV95-Versatz in `bcfView.ts`); neue Themen und Kommentare nehmen die aktuelle Kamera plus
+// Schnappschuss als Viewpoint auf. Ohne offenen WASM-3D-Viewport (kein 3D, nativer macOS-Pfad)
+// bleibt es bei Anzeige und Auswahl.
 //
 // Bezeichner englisch, UI-Text deutsch/englisch über t().
 
@@ -21,13 +23,13 @@ import {
   addTopic,
   emptyBcf,
   newTopic,
-  newViewpoint,
   parseBcf,
   setTopicStatus,
   writeBcf,
   type BcfCamera,
   type BcfFile,
   type BcfTopic,
+  type BcfViewpoint,
   type BcfVersion,
 } from "../io/bcf";
 import {
@@ -39,6 +41,9 @@ import {
   type BcfSelection,
 } from "../io/bcfMatch";
 import { fileioLoaded, loadFileio } from "../engine/fileioWasm";
+import { projectGeoOrigin } from "../core";
+import { captureSnapshot, getCamera, setCamera, setSection, viewportAvailable } from "../viewport/cameraBridge";
+import { firstViewpointWithCamera, sectionFromBcfClipping, viewCameraFromBcf, viewpointForTopic } from "./bcfView";
 import { setBcfSession, useBcfSession } from "./bcfSession";
 
 const AUTHOR_KEY = "dossier.bcf.author";
@@ -109,6 +114,7 @@ export function BcfPanel() {
   const inputRef = useRef<HTMLInputElement>(null);
   const authorRef = useRef<HTMLInputElement>(null);
   const commentRef = useRef<HTMLTextAreaElement>(null);
+  const attachRef = useRef<HTMLInputElement>(null);
   const { file, selectedGuid } = session;
   const topic = file?.topics.find((x) => x.guid === selectedGuid) ?? null;
 
@@ -125,9 +131,29 @@ export function BcfPanel() {
     }
   };
 
-  const selectTopic = (tp: BcfTopic) => {
-    setBcfSession({ selectedGuid: tp.guid });
-    const guids = [...new Set(tp.viewpoints.flatMap(viewpointGuids))];
+  /** Kamera, Schnittebene und Bauteile eines Viewpoints im Modell zeigen. */
+  const showViewpoint = (vp: BcfViewpoint | null, topicGuids: string[]) => {
+    const origin = projectGeoOrigin(host.project);
+    if (vp?.camera || (vp && vp.clippingPlanes.length > 0)) {
+      if (!viewportAvailable()) {
+        notify(t("bcf.noViewport"), "warning");
+      } else {
+        if (vp.camera) {
+          const vc = viewCameraFromBcf(vp.camera, origin, getCamera()?.aspect ?? 1);
+          if (vc && setCamera(vc, { animate: true })) notify(t("bcf.cameraSet"), "info");
+          else notify(t("bcf.cameraFailed"), "warning");
+        }
+        // Schnitt: die erste senkrechte Ebene wird live gesetzt; ohne Ebenen fällt ein früherer Schnitt weg.
+        const planes = vp.clippingPlanes;
+        const live = planes.map((c) => sectionFromBcfClipping(c, origin)).find((x) => x !== null) ?? null;
+        setSection(live);
+        if (live) notify(t("bcf.sectionSet"), "info");
+        else if (planes.length > 0) notify(t("bcf.sectionTilted"), "warning");
+      }
+    } else if (vp && viewportAvailable()) {
+      setSection(null);
+    }
+    const guids = vp ? viewpointGuids(vp) : topicGuids;
     if (guids.length === 0) return;
     // GlobalIds brauchen das Format-Modul (Rust-Hash); nach dem Öffnen ist es geladen.
     void loadFileio().then(() => {
@@ -136,6 +162,26 @@ export function BcfPanel() {
       applySelection(selection);
       notify(t("bcf.components", { found, total: guids.length }), found > 0 ? "info" : "warning");
     });
+  };
+
+  const selectTopic = (tp: BcfTopic) => {
+    setBcfSession({ selectedGuid: tp.guid });
+    // Kamera/Schnitt vom ersten Viewpoint mit Kamera, sonst vom ersten überhaupt; die Auswahl
+    // gilt dem ganzen Thema (alle Viewpoints).
+    const topicGuids = [...new Set(tp.viewpoints.flatMap(viewpointGuids))];
+    const vp = firstViewpointWithCamera(tp) ?? tp.viewpoints[0] ?? null;
+    showViewpoint(vp, topicGuids);
+  };
+
+  /** Neuer Viewpoint aus Auswahl + aktueller Kamera + Schnappschuss. */
+  const captureViewpoint = async (): Promise<BcfViewpoint> => {
+    await loadFileio();
+    const sel = currentSelection();
+    const guids = bcfSelectionSize(sel) > 0 ? selectionToGuids(host.project, sel) : [];
+    const camera = getCamera();
+    const png = camera ? await captureSnapshot() : null;
+    if (camera && !png) notify(t("bcf.noSnapshot"), "info");
+    return viewpointForTopic({ guid: uuid(), ifcGuids: guids, camera, snapshotPng: png, origin: projectGeoOrigin(host.project) });
   };
 
   const save = async () => {
@@ -158,24 +204,40 @@ export function BcfPanel() {
       notify(t("bcf.needSelection"), "warning");
       return;
     }
-    await loadFileio();
-    const guids = selectionToGuids(host.project, sel);
+    const vp = await captureViewpoint();
     const topicGuid = uuid();
     const tp = newTopic({
       guid: topicGuid,
       title: t("bcf.defaultTitle"),
       author: author(),
       now: now(),
-      viewpoints: guids.length > 0 ? [newViewpoint(uuid(), guids)] : [],
+      viewpoints: vp.selection.length > 0 || vp.camera ? [vp] : [],
     });
     const base = file ?? emptyBcf(host.project.id, host.project.name ?? "");
     setBcfSession({ file: addTopic(base, tp), dirty: true, selectedGuid: topicGuid });
   };
 
-  const submitComment = () => {
+  /** Aktuelle 3D-Ansicht (Kamera + Bild + Auswahl) als weiteren Viewpoint ans gewählte Thema hängen. */
+  const addViewpointToTopic = async () => {
+    if (!file || !topic) return;
+    if (!viewportAvailable()) {
+      notify(t("bcf.noViewport"), "warning");
+      return;
+    }
+    const vp = await captureViewpoint();
+    update({ ...file, topics: file.topics.map((x) => (x.guid === topic.guid ? { ...x, viewpoints: [...x.viewpoints, vp], modifiedDate: now(), modifiedAuthor: author() } : x)) });
+  };
+
+  const submitComment = async () => {
     const el = commentRef.current;
     if (!file || !topic || !el || el.value.trim() === "") return;
-    update(addComment(file, topic.guid, { guid: uuid(), date: now(), author: author(), comment: el.value.trim(), viewpointGuid: "", modifiedDate: "", modifiedAuthor: "" }));
+    const text = el.value.trim();
+    // Optional die aktuelle 3D-Ansicht als Viewpoint des Kommentars.
+    let vp: BcfViewpoint | null = null;
+    if (attachRef.current?.checked && viewportAvailable()) vp = await captureViewpoint();
+    const withVp = vp && (vp.camera || vp.selection.length > 0) ? vp : null;
+    const next = addComment(file, topic.guid, { guid: uuid(), date: now(), author: author(), comment: text, viewpointGuid: withVp?.guid ?? "", modifiedDate: "", modifiedAuthor: "" });
+    update(withVp ? { ...next, topics: next.topics.map((x) => (x.guid === topic.guid ? { ...x, viewpoints: [...x.viewpoints, withVp] } : x)) } : next);
     el.value = "";
   };
 
@@ -184,7 +246,7 @@ export function BcfPanel() {
     update({ ...file, topics: file.topics.map((x) => (x.guid === topic.guid ? { ...x, title, modifiedDate: now(), modifiedAuthor: author() } : x)) });
   };
 
-  const snapshot = topic?.viewpoints.find((v) => v.snapshot)?.snapshot;
+  const clipping = topic?.viewpoints.flatMap((v) => v.clippingPlanes) ?? [];
   const camera = topic?.viewpoints.find((v) => v.camera)?.camera ?? null;
   const topicGuids = topic ? [...new Set(topic.viewpoints.flatMap(viewpointGuids))] : [];
   const project = host.project;
@@ -250,8 +312,25 @@ export function BcfPanel() {
             {topic.labels.length > 0 && <div className="bcf-kv"><span>{t("bcf.labels")}</span>{topic.labels.join(", ")}</div>}
           </div>
           {topic.description && <div className="bcf-desc">{topic.description}</div>}
-          {snapshot && <img className="bcf-snapshot" alt="" src={`data:image/png;base64,${snapshot}`} />}
+          {topic.viewpoints.length > 0 && (
+            <>
+              <div className="bcf-sub">{t("bcf.viewpoints")}</div>
+              <div className="bcf-vps">
+                {topic.viewpoints.map((vp, i) => (
+                  <button key={vp.guid} type="button" className="bcf-vp" title={t("bcf.viewpoint.go", { n: i + 1 })} onClick={() => showViewpoint(vp, [])}>
+                    {vp.snapshot ? <img className="bcf-snapshot" alt="" src={`data:image/png;base64,${vp.snapshot}`} /> : <span>{t("bcf.viewpoint.snapshot", { n: i + 1 })}</span>}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {camera && <div className="bcf-info"><b>{t("bcf.camera")}:</b> {cameraText(camera)}</div>}
+          {clipping.length > 0 && (
+            <div className="bcf-info">
+              <b>{t("bcf.clipping")}:</b>{" "}
+              {clipping.map((c) => t("bcf.clipping.item", { x: f1(c.location[0]), y: f1(c.location[1]), z: f1(c.location[2]), dx: f1(c.direction[0]), dy: f1(c.direction[1]), dz: f1(c.direction[2]) })).join("; ")}
+            </div>
+          )}
           <div className="bcf-bar">
             <div className="bcf-info bcf-grow">{topicGuids.length > 0 ? t("bcf.components", { found: foundCount, total: topicGuids.length }) : t("bcf.components.none")}</div>
             {topicGuids.length > 0 && <button type="button" className="bcf-btn" onClick={() => selectTopic(topic)}>{t("bcf.selectElements")}</button>}
@@ -264,7 +343,14 @@ export function BcfPanel() {
             </div>
           ))}
           <textarea ref={commentRef} className="bcf-input" rows={2} placeholder={t("bcf.commentPlaceholder")} />
-          <button type="button" className="bcf-btn" onClick={submitComment}>{t("bcf.addComment")}</button>
+          <label className="bcf-check">
+            <input ref={attachRef} type="checkbox" defaultChecked />
+            <span>{t("bcf.attachView")}</span>
+          </label>
+          <div className="bcf-bar">
+            <button type="button" className="bcf-btn" onClick={() => void submitComment()}>{t("bcf.addComment")}</button>
+            <button type="button" className="bcf-btn" title={t("bcf.addViewpoint.hint")} onClick={() => void addViewpointToTopic()}>{t("bcf.addViewpoint")}</button>
+          </div>
         </div>
       )}
     </div>
