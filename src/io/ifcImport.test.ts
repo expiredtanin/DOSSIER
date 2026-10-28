@@ -158,6 +158,9 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
 // UNION/INTERSECTION/DIFFERENCE, Rotation 90°/360°, Rohr (hohl, dünn), Sweep mit fester Referenz und
 // auf Ebene, Bogen-Leitkurve. Sollwerte von Hand; ifcopenshell bestätigt sie unten.
 const casesFile = new URL("./testdata/ifc-geometry-cases.ifc", import.meta.url);
+// Freiform-Fälle ([25], `testdata/ifc-freeform-cases.ifc`, von Hand erzeugt): IfcAdvancedBrep mit Zylinder,
+// Kugel, bilinearen und rationalen B-Spline-Flächen, B-Spline-Profil, Rohre mit StartParam/EndParam.
+const freeformFile = new URL("./testdata/ifc-freeform-cases.ifc", import.meta.url);
 
 describe("IFC-Import: Öffnungen, Boolesche Körper, Rotation, Sweeps", () => {
   it("alle Fälle gelesen, Volumen von Hand", async () => {
@@ -191,6 +194,24 @@ describe("IFC-Import: Öffnungen, Boolesche Körper, Rotation, Sweeps", () => {
       expect(products[i].ifcClass).toBe(cls);
       expect(relClose(vol(products[i]), w, rel), `${i} ${cls}: ${vol(products[i])} ≠ ${w} (${JSON.stringify(v[i])})`).toBe(true);
     });
+  });
+
+  it("Freiform-Fälle: alle gelesen, Volumen von Hand", async () => {
+    const { products, report } = await readIfc(new Uint8Array(readFileSync(freeformFile)));
+    expect(report.skippedItems).toEqual({});
+    const pi = Math.PI;
+    const want: Array<[string, number]> = [
+      ["IfcColumn", pi * 0.25 * 2],
+      ["IfcBuildingElementProxy", (2 / 3) * pi],
+      ["IfcColumn", pi * 0.25],
+      ["IfcBuildingElementProxy", 2 / 3],
+      ["IfcColumn", pi * 0.25],
+      ["IfcPipeSegment", pi * 0.01 * 3.5],
+      ["IfcPipeSegment", pi * 0.01 * pi],
+      ["IfcPipeSegment", pi * 0.01 * 2 * pi],
+    ];
+    expect(products.map((p) => p.ifcClass)).toEqual(want.map((w) => w[0]));
+    want.forEach(([, w], i) => expect(relClose(vol(products[i]), w, 0.02), `${i}: ${vol(products[i])} ≠ ${w}`).toBe(true));
   });
 
   describe("Laden im Web-Worker", () => {
@@ -310,6 +331,14 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Import gegen ifcopenshell", { timeout: 12
     // Rohre/Bögen werden verschieden fein zerlegt → 3 %.
     const problems = await compare(casesFile.pathname, () => 0.03);
     expect(problems).toEqual([]);
+  });
+
+  it("Freiform-Fälle: Advanced Brep (Zylinder, B-Spline-Flächen), B-Spline-Profil und -Leitkurve", async () => {
+    // ifcopenshell 0.9 liefert die nahtlose Halbkugel nicht (Volumen 0) und übergeht StartParam/EndParam
+    // der Rohre (IfcOpenShell zieht absichtlich die ganze Leitkurve); diese prüft der Rust-Test von Hand.
+    const handOnly = ["2dome", "6pipeparams", "7pipearc"];
+    const problems = await compare(freeformFile.pathname, () => 0.03);
+    expect(problems.filter((p) => !handOnly.some((h) => p.includes(h)))).toEqual([]);
   });
 
   // Freie Beispieldateien (z. B. github.com/buildingSMART/Sample-Test-Files, nicht im Repo, Lizenz

@@ -336,6 +336,22 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   `plan/toWalls3d.ts::emitMeshes` setzt für Kontext-Meshes fest `IMPORTED_RGB`; Vorschlag: dort
   `obj.color` (über `hexToRgb`/255) nehmen, falls gesetzt (der Plan zeichnet nur Umrisse in der
   Ebenenfarbe). · M
+  (28.10., 4. Schritt, Freiform) IfcAdvancedBrep(+WithVoids)/IfcFaceSurface: Seiten auf Ebene, Zylinder,
+  Kegel, Kugel, Torus, (rationaler) B-Spline-Fläche mit Kanten aus IfcEdgeLoop/IfcEdgeCurve (Linie,
+  Polylinie, Kreis, B-Spline …, Kanten je Brep einmal zerlegt → dicht), getrimmt über den Parameterraum
+  (`fileio/src/ifc_nurbs.rs`: Projektion, Naht/Pol schliessen, eingeschränkte Delaunay-Triangulierung mit
+  crate spade, Raster nach Krümmung/Verdrillung, Nachverfeinern; Verfahren wie truck-meshalgo, eigener
+  Code, kein truck im fileio); IfcBSplineCurveWithKnots(+Rational) als Kurve (Profile, Leitkurven,
+  IfcTrimmedCurve); IfcGridPlacement (IFC2x3/4 und 4.3-Form); StartParam/EndParam der Sweeps
+  (Parameter der Leitkurve, IFC4.3 IfcLengthMeasure = Länge; ausserhalb des Bereichs → ganze Kurve).
+  Lesen in `fileio/src/ifc_brep.rs`. Gegencheck ifcopenshell: buildingSMART basin-/cube-advanced-brep
+  gleich (≤ 0.3 %), jetzt 77 von 81 Dateien (Sample-Test-Files 35/35, IFC4.3 42/46); grid-placement:
+  Stützen liegen auf den Rasterschnitten (ifcopenshell 0.9 liefert sie gar nicht). Neue synthetische
+  Fälle `io/testdata/ifc-freeform-cases.ifc` (Formelvolumen, ifcopenshell wo es sie kann; es übergeht
+  StartParam/EndParam absichtlich und scheitert an der nahtlosen Halbkugel). Offen: IFC4.3-Trassierung
+  (IfcAlignment/IfcGradientCurve/IfcLinearPlacement/IfcSectionedSolidHorizontal, 3 Dateien), Flächen
+  aus Kurven-Extrusion/-Rotation, IfcRectangularTrimmedSurface/IfcCurveBoundedPlane, komplexe
+  STEP-Instanzen (IFC2x3-NURBS); nur Linux-Container, nicht in der Tauri-App angesehen.
 - ◐ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3]. Stand 28.10.:
   Wahl im Import-Dialog (`ui/IfcImportDialog.tsx`: Kontext-Meshes = Standard | Bauteile), CLI
   `import-ifc … --elements`. Erkennung in Rust (`fileio/src/ifc_semantic.rs`, `import_ifc_elements`),
@@ -357,6 +373,15 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   Profiländerung, Decken aus Dreiecksnetzen mit T-Stössen (zwei Teilflächen → Mesh), Tür-Anschlag/
   Öffnungsrichtung, Tür-/Fenstertyp aus IfcDoorType/IfcWindowType, Farbe der Bauteile; nur Linux-
   Container/vitest, nicht in der Tauri-App geprüft (Dialog nur per tsc).
+  (28.10., Tür-Ausführung) Tür: OperationType (IfcDoor, sonst IfcDoorType/IfcDoorStyle) → Scharnierseite
+  (LEFT = Scharnier auf +X der Tür-Platzierung, von der Aufschlagseite +Y gesehen, wie unser Export) und
+  Aufschlagseite (+Y gegen die Wandachse), Türtyp nach Dreh/Schiebe und Blattzahl; Fenster:
+  PartitioningType (IfcWindow, sonst IfcWindowType/IfcWindowStyle) → Fenstertyp mit gleicher Flügelzahl,
+  sonst `wingCount` an der Öffnung. Erkennung in Rust (`ifc_semantic.rs::operation`), TS ordnet zu.
+  Rundreise: alle 8 Kombinationen Scharnier/Aufschlag/Richtung landen räumlich gleich (Scharnierpunkt,
+  Aufschlagrichtung; `openingDir` kommt als „in“ mit gespiegeltem `swing` zurück), 2-flügliges Fenster →
+  Typ „Fenster 2-flügl.“. Offen: LEFT/RIGHT nur gegen den eigenen Export geprüft (nicht Revit/ArchiCAD);
+  Türen ohne Ausführung bleiben beim Standard (kein Raten aus der Platzierung).
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit
@@ -397,6 +422,12 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     in `ifcOpenings.test.ts`. Offen: LEFT/RIGHT der Tür nach IFC-Konvention (Blick von der Aufschlagseite)
     gelesen, nicht in Revit/ArchiCAD gegengeprüft; ohne Sprossen, Fensterbank, Rollladenkasten, Schwelle,
     Flügelrahmen.
+  - ✅ Tür/Fenster-Geometrie nach Rust (Regel „Kern in Rust“, 28.10.): `fileio/src/ifc_openings.rs` rechnet
+    Rahmen/Zarge, Blatt, Glas, Füllungs-Placement und OperationType/PartitioningType; `export/ifcOpenings.ts`
+    sammelt nur die Parameter (Typ-/Öffnungswerte, fehlende als „keine“), flache Kodierung FILL (Version 2).
+    TS-Rechnung gelöscht, ihre Fälle als Rust-Tests. Golden-Vergleich: 419 verschiedene IFC-Ausgaben (Tests in
+    `export/*ifc*`, `io/ifcImport`, `io/ifcElements` und 780 Tür-/Fenster-Varianten: Glas-/Schiebe-/Wandöffnung,
+    Oberlicht, Flügeltabellen, Einzug innen, Klemmungen) vorher/nachher zeichengleich bis auf Zeitstempel.
   - ○ Offen: Bogenwände als echte Kurve. · M
   - ✅ Eigener IFC-Import ([B3]) zieht Öffnungen ab (28.10.): Rundreise vergleicht alle Wände mit dem
     ausgeschnittenen Volumen (`ifcImport.test.ts`).

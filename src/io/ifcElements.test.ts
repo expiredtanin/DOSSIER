@@ -79,6 +79,42 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     expect(text).toContain('"walls":9');
   });
 
+  it("Tür-Anschlag/Aufschlag und Fensterteilung aus OperationType/PartitioningType (Rundreise)", async () => {
+    // Lage im Raum vergleichen (die Wand kann umgekehrt ankommen): Scharnierpunkt und Aufschlagrichtung.
+    const physical = (o: Opening, w: Wall) => {
+      const l = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+      const u = { x: (w.end.x - w.start.x) / l, y: (w.end.y - w.start.y) / l };
+      const along = (o.hinge ?? "start") === "start" ? o.position : o.position + o.width;
+      const s = ((o.swing ?? "left") === "left" ? 1 : -1) * ((o.openingDir ?? "in") === "in" ? 1 : -1);
+      return { hinge: { x: w.start.x + u.x * along, y: w.start.y + u.y * along }, swing: { x: -u.y * s, y: u.x * s } };
+    };
+    for (const hinge of ["start", "end"] as const)
+      for (const swing of ["left", "right"] as const)
+        for (const openingDir of ["in", "out"] as const) {
+          const src: Project = {
+            ...sampleProject,
+            openings: (sampleProject.openings ?? []).map((o) =>
+              o.id === "D1" ? { ...o, hinge, swing, openingDir } : o.id === "O2" ? { ...o, wingCount: 2 } : o,
+            ),
+          };
+          const { project: p } = await importInto(emptyProject, src);
+          const d1 = src.openings!.find((o) => o.id === "D1")!;
+          const w1 = src.walls.find((w) => w.id === d1.hostWallId)!;
+          const got = (p.openings ?? []).find((o) => o.kind === "door")!;
+          const gw = p.walls.find((w) => w.id === got.hostWallId)!;
+          const want = physical(d1, w1);
+          const have = physical(got, gw);
+          const tag = `${hinge}/${swing}/${openingDir}`;
+          expect(near(have.hinge, want.hinge), tag).toBe(true);
+          expect(near(have.swing, want.swing), tag).toBe(true);
+          expect(got.typeId, tag).toBe("door-standard");
+          // Fenster O2 mit zwei Flügeln: Typ mit zwei Flügeln (oder eigene Flügelzahl).
+          const o2 = (p.openings ?? []).find((o) => o.kind === "window" && Math.abs(o.width - 1.4) < 1e-6)!;
+          const wt = (p.windowTypes ?? []).find((t) => t.id === o2.typeId);
+          expect(o2.wingCount ?? wt?.wingCount, tag).toBe(2);
+        }
+  });
+
   it("in ein Projekt ohne Geschosse/Typen: legt Geschosse, Wand-/Deckentypen und Materialien an", async () => {
     const bare: Project = {
       ...emptyProject,

@@ -107,6 +107,15 @@ pub struct Opening {
     /// Brüstung über Wand-Unterkante.
     pub sill: f64,
     pub height: f64,
+    /// Ausführung: IfcDoorTypeOperationEnum (Tür) bzw. IfcWindowTypePartitioningEnum (Fenster) vom
+    /// Bauteil, sonst vom Typ (IfcDoorType/IfcWindowType, IFC2x3 IfcDoorStyle/IfcWindowStyle);
+    /// NOTDEFINED/USERDEFINED → `None`.
+    pub operation: Option<String>,
+    /// Tür: Aufschlag (+Y der Tür-Platzierung, IFC) links (+1) bzw. rechts (−1) der Wandachse; 0 = unbekannt.
+    pub swing: i8,
+    /// Tür: Scharnier am Wandanfang (+1) bzw. -ende (−1) nach LEFT/RIGHT der Ausführung (IFC: von der
+    /// Aufschlagseite gesehen; LEFT = Scharnier auf +X der Tür-Platzierung); 0 = unbekannt.
+    pub hinge: i8,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -488,6 +497,44 @@ struct Ctx<'r, 'a> {
 }
 
 impl Ctx<'_, '_> {
+    /// Ausführung, Aufschlagseite und Scharnier einer Tür/eines Fensters (s. [`Opening`]); `d` =
+    /// Richtung der (endgültigen) Wandachse.
+    fn operation(&mut self, id: u64, d: V2) -> (Option<String>, i8, i8) {
+        let f = self.r.f;
+        let Some(e) = f.get(id) else { return (None, 0, 0) };
+        let pick = |v: Option<&Value>| v.and_then(|v| v.as_enum()).filter(|x| *x != "NOTDEFINED" && *x != "USERDEFINED").map(str::to_string);
+        // IFC4: IfcDoor.OperationType / IfcWindow.PartitioningType (12. Attribut).
+        let own = if e.ty.starts_with("IFCDOOR") || e.ty.starts_with("IFCWINDOW") { pick(e.arg(11)) } else { None };
+        let op = own.or_else(|| {
+            let t = f.get(*self.type_of.get(&id)?)?;
+            match t.ty.as_str() {
+                "IFCDOORTYPE" | "IFCWINDOWTYPE" => pick(t.arg(10)),
+                "IFCDOORSTYLE" => pick(t.arg(8)),
+                "IFCWINDOWSTYLE" => pick(t.arg(9)),
+                _ => None,
+            }
+        });
+        // Seite nur mit bekannter Ausführung (ohne sie ist die Platzierung oft einfach die der Wand).
+        if !e.ty.starts_with("IFCDOOR") || op.is_none() {
+            return (op, 0, 0);
+        }
+        let Some(place) = e.arg(5).and_then(|v| v.as_ref_id()) else { return (op, 0, 0) };
+        let xf = self.r.object_placement(place, 0);
+        let x = xf.apply_dir([1.0, 0.0, 0.0]);
+        let y = xf.apply_dir([0.0, 1.0, 0.0]);
+        let (Some(x), Some(y)) = (unit2([x[0], x[1]]), unit2([y[0], y[1]])) else { return (op, 0, 0) };
+        let side = |v: f64| if v > 0.5 { 1 } else if v < -0.5 { -1 } else { 0 };
+        let swing = side(dot2(y, left(d)));
+        let hinge = match op.as_deref() {
+            Some(o) if !o.starts_with("DOUBLE_DOOR") && (o.ends_with("LEFT") || o.ends_with("RIGHT")) => {
+                let h = if o.ends_with("LEFT") { x } else { [-x[0], -x[1]] };
+                -side(dot2(h, d))
+            }
+            _ => 0,
+        };
+        (op, swing, hinge)
+    }
+
     fn info(&self, id: u64, color: Option<[f64; 4]>) -> Info {
         let f = self.r.f;
         let Some(e) = f.get(id) else { return Info::default() };
@@ -954,10 +1001,25 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
             let z0 = b[4].max(w.z0);
             let z1 = b[5].min(w.z1);
             let info = cx.info(filling.unwrap_or(*o), None);
+            let (operation, swing, hinge) = match filling {
+                Some(x) => cx.operation(*x, d),
+                None => (None, 0, 0),
+            };
             if let Some(x) = filling {
                 out.converted.insert(*x);
             }
-            out.openings.push(Opening { info, host, kind: *kind, position: u0, width: u1 - u0, sill: z0 - w.z0, height: z1 - z0 });
+            out.openings.push(Opening {
+                info,
+                host,
+                kind: *kind,
+                position: u0,
+                width: u1 - u0,
+                sill: z0 - w.z0,
+                height: z1 - z0,
+                operation,
+                swing,
+                hinge,
+            });
         }
         out.walls.push(Wall { info: w.info, start, end, z0: w.z0, z1: w.z1, thickness: w.thickness });
     }
@@ -967,7 +1029,7 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
 // ---------------------------------------------------------------------------
 // Flache Kodierung für JS: Texte/Verweise als JSON, Zahlen in einem Float64Array.
 //   wall:    sx, sy, ex, ey, z0, z1, thickness
-//   opening: position, width, sill, height
+//   opening: position, width, sill, height, swing (±1/0), hinge (±1/0)
 //   slab:    z0, z1, nRings, (nPts, x, y, …)*   (erster Ring = Umriss)
 //   column:  cx, cy, rotation, z0, z1, a, b      (rect: Breite, Tiefe; round: Radius, 0)
 //   space:   z0, z1, nPts, x, y, …
@@ -1018,7 +1080,13 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
             OpeningKind::Window => "window",
             OpeningKind::Hole => "hole",
         };
-        push("opening", &o.info, json!({ "host": o.host, "openingKind": kind }), vec![o.position, o.width, o.sill, o.height], &mut data);
+        push(
+            "opening",
+            &o.info,
+            json!({ "host": o.host, "openingKind": kind, "operation": o.operation }),
+            vec![o.position, o.width, o.sill, o.height, o.swing as f64, o.hinge as f64],
+            &mut data,
+        );
     }
     for sl in &s.slabs {
         let mut nums = vec![sl.z0, sl.z1, (1 + sl.holes.len()) as f64];
@@ -1221,6 +1289,33 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         let w = &s.walls[0];
         assert!(close2(w.start, [6.0, 0.0]) && close2(w.end, [0.0, 0.0]), "{w:?}");
         assert!(close(s.openings[0].position, 6.0 - 1.9));
+        // Ohne Ausführung und Platzierung: nichts abgeleitet.
+        assert_eq!((s.openings[0].operation.as_deref(), s.openings[0].swing, s.openings[0].hinge), (None, 0, 0));
+
+        // Tür-Ausführung ([B4]): OperationType am Bauteil, eigene Platzierung in der Öffnungsmitte mit
+        // X = −x (Y = Z × X = −y = Aufschlag nach rechts der Wandachse +x). LEFT = Scharnier auf +X der
+        // Tür = −x-Seite = Wandanfang. Fenster: PartitioningType am Typ (IfcRelDefinesByType).
+        let door = "#800=IFCDOOR('f800',$,'F800',$,$,#820,$,$,2100.,900.,.DOOR.,.SINGLE_SWING_LEFT.,$);\
+#821=IFCCARTESIANPOINT((1450.,0.,0.));#822=IFCDIRECTION((-1.,0.,0.));#823=IFCAXIS2PLACEMENT3D(#821,#11,#822);#820=IFCLOCALPLACEMENT(#1004,#823);";
+        let window = "#830=IFCWINDOWTYPE('wt',$,'Fenster 2',$,$,$,$,$,$,.WINDOW.,.DOUBLE_PANEL_VERTICAL.,$,$);\
+#831=IFCRELDEFINESBYTYPE('dt',$,$,$,(#810),#830);";
+        let src2 = src.replace("#800=IFCDOOR('f800',$,'F800',$,$,#1004,$,$,$,$,$,$,$);", door) + "";
+        let src2 = src2.replace("#906=IFCRELASSOCIATESMATERIAL", &format!("{window}#906=IFCRELASSOCIATESMATERIAL"));
+        let (_, s) = sem(&src2);
+        let d = &s.openings[0];
+        assert_eq!((d.operation.as_deref(), d.swing, d.hinge), (Some("SINGLE_SWING_LEFT"), -1, 1), "{d:?}");
+        assert_eq!(s.openings[1].operation.as_deref(), Some("DOUBLE_PANEL_VERTICAL"));
+        // Umgekehrte Wand: Scharnier am Ende, Aufschlag links der neuen Richtung.
+        let (_, s) = sem(&src2.replace(".POSITIVE.", ".NEGATIVE."));
+        assert_eq!((s.openings[0].swing, s.openings[0].hinge), (1, -1));
+        // RIGHT: Scharnier auf −X der Tür = +x-Seite = Wandende.
+        let (_, s) = sem(&src2.replace(".SINGLE_SWING_LEFT.", ".SINGLE_SWING_RIGHT."));
+        assert_eq!((s.openings[0].swing, s.openings[0].hinge), (-1, -1));
+        // Zweiflüglig: Seite ohne Scharnier-Angabe; NOTDEFINED zählt nicht.
+        let (_, s) = sem(&src2.replace(".SINGLE_SWING_LEFT.", ".DOUBLE_DOOR_SINGLE_SWING."));
+        assert_eq!((s.openings[0].operation.as_deref(), s.openings[0].swing, s.openings[0].hinge), (Some("DOUBLE_DOOR_SINGLE_SWING"), -1, 0));
+        let (_, s) = sem(&src2.replace(".SINGLE_SWING_LEFT.", ".NOTDEFINED."));
+        assert_eq!(s.openings[0].operation, None);
     }
 
     #[test]

@@ -32,7 +32,7 @@
 //   • Decke     → IfcSlab (outline-Polygon, PredefinedType FLOOR).
 //   • Öffnung   → IfcOpeningElement (Quader über die ganze Wanddicke, etwas vorstehend) in der
 //     Wand (IfcRelVoidsElement), darin IfcDoor/IfcWindow (IfcRelFillsElement) aus getrennten Körpern
-//     ([B5], 28.10., `ifcOpenings.ts`): Rahmen/Zarge + Türblatt bzw. Glas je Flügel, mit Farbe/
+//     ([B5], 28.10., Parameter `ifcOpenings.ts`, Rechnung `ifc_openings.rs`): Rahmen/Zarge + Türblatt bzw. Glas je Flügel, mit Farbe/
 //     Transparenz je Rolle; OperationType (Tür: Blattzahl, Scharnierseite, Schiebe) und
 //     PartitioningType (Fenster: Flügelzahl). Masse aus dem Modell (Rahmenbreite/-tiefe, Einzug,
 //     Verglasung, Glasanteil, Oberlicht), sonst die Konstanten des 3D. Ohne Sprossen, Fensterbank,
@@ -87,7 +87,7 @@ import { columnFootprint } from "../geometry/column";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { emitRoofs } from "../plan/toWalls3d/roofs";
 import { fileio } from "../engine/fileioWasm";
-import { fillGeometry, type FillGeometry } from "./ifcOpenings";
+import { fillParams, type FillParams } from "./ifcOpenings";
 
 /** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export.rs::ifc_guid`). */
 export function ifcGuid(name: string): string {
@@ -101,7 +101,7 @@ export function ifcString(s: string): string {
 
 // ── Flacher Puffer (Gegenstück zu src-tauri/fileio/src/ifc_export.rs, dort die Kodierung) ─────
 
-const FLAT_VERSION = 1;
+const FLAT_VERSION = 2;
 const REC_WALL_SOLIDS = 1;
 const REC_WALL_MESH = 2;
 const REC_CEILING = 3;
@@ -246,18 +246,29 @@ class FlatIfc {
     voidZRel: number;
     depth: number;
     width: number;
-    fill: FillGeometry;
+    fill: FillParams;
     psets: PsetIn[];
   }): void {
     this.nums.push(REC_OPENING, this.str(o.wallId), o.structure, this.str(o.openingId), o.isDoor ? 1 : 0, this.str(o.fillName));
     this.pts(o.voidRect);
-    this.nums.push(o.voidZRel, o.depth, o.width, o.fill.kind === null ? -1 : this.str(o.fill.kind));
-    this.nums.push(o.fill.origin.x, o.fill.origin.y, o.fill.u.x, o.fill.u.y, o.fill.parts.length);
-    for (const p of o.fill.parts) {
-      this.nums.push(p.role);
-      this.pts(p.pts);
-      this.nums.push(p.zRel, p.depth);
+    this.nums.push(o.voidZRel, o.depth, o.width);
+    // FILL (Kopf von `ifc_export.rs`): Parameter, die Rust zu Körpern und Ausführung rechnet.
+    const f = o.fill;
+    const opt = (v: number | null | undefined) => this.nums.push(v == null ? 0 : 1, v ?? 0);
+    this.nums.push(f.wallStart.x, f.wallStart.y, f.wallEnd.x, f.wallEnd.y, f.from, f.to, f.zBottom, f.zTop, f.nLo, f.nHi);
+    opt(f.frameDepth);
+    opt(f.inset);
+    this.nums.push(f.insetOutside ? 1 : 0);
+    opt(f.frameWidth);
+    this.nums.push(f.wingCount, f.panes, f.sashes.length);
+    for (const s of f.sashes) {
+      this.nums.push(s.post ? 1 : 0);
+      opt(s.postWidth);
+      this.nums.push(s.fixed ? 1 : 0);
+      opt(s.width);
     }
+    this.nums.push(f.doorKind, f.leafCount, f.swingSign, f.dirSign, f.hingeAtStart ? 1 : 0, f.transomHeight, f.glazed ? 1 : 0);
+    opt(f.glazingRatio);
     this.psets(o.psets);
   }
 
@@ -680,7 +691,7 @@ export function exportIfcSpf(projectIn: Project): string {
   // Der Öffnungskörper ist ein Quader über das Achs-Intervall und die Höhe, wie sie das 3D
   // stanzt (`openingInterval`/`openingVerticalExtent`), quer über alle Bänder der Wand plus
   // OPENING_OVERSHOOT. Die Füllung (Tür/Fenster) hat ein eigenes Placement
-  // (Öffnungsmitte, Achse bzw. Aufschlagrichtung) und liegt in der Rahmentiefe (`ifcOpenings.ts`).
+  // (Öffnungsmitte, Achse bzw. Aufschlagrichtung) und liegt in der Rahmentiefe (`ifc_openings.rs`).
   for (const wall of project.walls ?? []) {
     const host = hostExtent.get(wall.id);
     if (!host) continue; // Wirtswand übersprungen (degeneriert)
@@ -715,7 +726,7 @@ export function exportIfcSpf(projectIn: Project): string {
         voidZRel: c.zBottom - baseOf(structure),
         depth,
         width: c.to - c.from,
-        fill: fillGeometry(project, wall, opening, c, host),
+        fill: fillParams(project, wall, opening, c, host),
         psets: [{ name: psetName, props }],
       });
     }
