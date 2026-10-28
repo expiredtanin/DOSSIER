@@ -7,6 +7,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { createStore } from "./store";
+import { ProjectDocument } from "../core/document";
 import type { StoreApi } from "./store";
 import { createProjectSlice } from "./projectSlice";
 import type { ProjectSlice } from "./projectSlice";
@@ -63,3 +64,25 @@ const store = createStore<RootState>((api) => ({
 export const useStore = store.useStore;
 export const getState = store.getState;
 export const setState = store.setState;
+
+// Kern-Dokument ([K4] S1): spiegelt jede Änderung von `project` (Setzen, Laden, Undo/Redo) als Ops
+// in den Rust-Kern. Ohne geladenen Kern (Start, manche Tests) bleibt es aus und holt sich beim
+// nächsten Zugriff den vollen Stand.
+let coreDoc: ProjectDocument | null = null;
+
+/** Das Rust-Dokument zum aktuellen Projekt (synchron nachgezogen); `null`, solange der Kern fehlt. */
+export function projectDocument(): ProjectDocument | null {
+  try {
+    const p = store.getState().project;
+    if (!coreDoc) coreDoc = new ProjectDocument(p);
+    else coreDoc.sync(p);
+    return coreDoc;
+  } catch {
+    coreDoc = null;
+    return null;
+  }
+}
+
+store.subscribe(() => {
+  void projectDocument();
+});

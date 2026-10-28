@@ -38,6 +38,7 @@ pub mod plan_walls;
 pub mod opening_geom;
 pub mod plan_openings;
 pub mod delaunay;
+pub mod document;
 pub mod mesh_section;
 pub mod plan_elevation;
 pub mod plan_misc;
