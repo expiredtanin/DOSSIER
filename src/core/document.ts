@@ -82,6 +82,14 @@ export class ProjectDocument {
     return out;
   }
 
+  /** IFC4-Datei (STEP-Text) des Projekts; `nowMs` = Zeitpunkt des Exports. */
+  exportIfc(nowMs: number): string {
+    if (!this.handle) throw new Error("IFC-Export: Dokument nicht offen");
+    const out = core().doc_export_ifc(this.handle, nowMs);
+    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
+    return out;
+  }
+
   /** Boden-Spuren der 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]`. */
   drawingLineVerts(): Float32Array {
     return this.handle ? core().doc_drawing_line_verts(this.handle) : new Float32Array(0);

@@ -4,7 +4,9 @@
 //!
 //! Datenübergabe: flache `f64`-Puffer (s. [`flat`]), kein JSON — schnell und ohne Serde-Kosten.
 
+pub mod export_ifc;
 pub mod flat;
+pub mod geo_rebase;
 pub mod flat_write;
 pub mod polygon_bool;
 pub mod roof;
@@ -21,6 +23,7 @@ pub mod wall_bands;
 pub mod room_area;
 pub mod room_boundary;
 pub mod polygon_holes;
+pub mod js_fmt;
 pub mod jsmath;
 pub mod stairs3d;
 pub mod mesh3d;

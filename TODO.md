@@ -135,7 +135,10 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     (`queries.rs`), nur die truck-Körper (async) fügt TS ein; TS-Sammler `toWalls3d/{bands,ceilings,columns,openings,stairs,roofs}.ts`
     gelöscht, unbenutzte Bindungen/Kodierer entfernt. Hin-und-her-Vergleich mit der TS-Fassung lief über Zufallsprojekte, danach
     prüft die bestehende Suite (2123 Tests) den neuen Weg. Das Modell ist tolerant (fehlende Felder = Standardwert).
-    Nächste: Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation), Export (IFC/DXF/SVG), Raumprogramm.
+    Pick-Geometrie und 2D-Boden-Spuren im 3D ebenfalls im Kern. **IFC-Export** (`export_ifc.rs`, `js_fmt.rs` für JS-`toFixed`, `geo_rebase.rs`)
+    byte-genau zur TS-Fassung (Vergleich über Zufallsprojekte; das Salz der GUID-Ableitung beginnt mit U+0001 — so seit jeher, bleibt für
+    stabile GUIDs). Modell verlustfrei (`Extra`-Felder), typisierte Sicht wird nach Ops feldweise nachgeführt.
+    Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
   - ○ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
