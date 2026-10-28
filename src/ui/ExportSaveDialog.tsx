@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
+import type { IfcExportOptions } from "../export/ifcClassification";
 
 /** Direkt-herunterladbare Exportformate (mit Datei-Endung). */
 export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl" | "glb" | "step";
@@ -29,7 +30,8 @@ export interface ExportSaveDialogProps {
   initialFormat: ExportSaveFormat;
   /** Basis-Dateiname OHNE Endung (i. d. R. Projektname). */
   baseName: string;
-  onSave: (format: ExportSaveFormat, filename: string) => void;
+  /** `ifc`: Klassifikations-Optionen (nur bei Format IFC gesetzt). */
+  onSave: (format: ExportSaveFormat, filename: string, ifc?: IfcExportOptions) => void;
   onClose: () => void;
 }
 
@@ -59,7 +61,10 @@ export function ExportSaveDialog({
   const [name, setName] = useState(baseName);
 
   const filename = withExt(name, EXPORT_FORMAT_EXT[format]);
-  const onConfirm = () => onSave(format, filename);
+  // IFC-Klassifikation (Schweizer Praxis): beides aus, bis die Nutzerin es wählt.
+  const [ebkph, setEbkph] = useState(false);
+  const [layerCodes, setLayerCodes] = useState(false);
+  const onConfirm = () => onSave(format, filename, format === "ifc" ? { ebkph, layerCodes } : undefined);
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -94,6 +99,22 @@ export function ExportSaveDialog({
               ]}
             />
           </section>
+
+          {format === "ifc" && (
+            <section className="imp-section">
+              <label className="imp-check">
+                <input type="checkbox" checked={ebkph} onChange={(e) => setEbkph(e.target.checked)} />
+                <span>{t("exportSave.ifc.ebkph")}</span>
+              </label>
+              <div className="imp-note">{t("exportSave.ifc.ebkphHint")}</div>
+              <label className="imp-check">
+                <input type="checkbox" checked={layerCodes} onChange={(e) => setLayerCodes(e.target.checked)} />
+                <span>{t("exportSave.ifc.layers")}</span>
+              </label>
+              <div className="imp-note">{t("exportSave.ifc.layersHint")}</div>
+              <div className="imp-note">{t("exportSave.ifc.zonesNote")}</div>
+            </section>
+          )}
 
           <section className="imp-section">
             <div className="imp-section-title">{t("exportSave.filename")}</div>

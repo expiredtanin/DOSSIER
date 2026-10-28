@@ -31,6 +31,7 @@ import {
   ifcColorHex,
   ifcToImportedMeshes,
   readIfcFlat,
+  type IfcClassificationRef,
   type IfcFlat,
   type IfcImportReport,
   type IfcProduct,
@@ -54,6 +55,8 @@ interface IfcInfo {
   color: [number, number, number, number] | null;
   typeName: string | null;
   layers: IfcMatLayer[];
+  /** Klassifikationen des Bauteils bzw. seines Typs (eBKP-H, BKP …); fehlt in älteren Rohdaten. */
+  classifications?: IfcClassificationRef[];
 }
 
 export interface IfcStoreyData {
@@ -153,6 +156,7 @@ export function decodeIfcElements(flat: IfcFlat): IfcElementsData | null {
       color: e.color,
       typeName: e.typeName,
       layers: e.layers ?? [],
+      ...(e.classifications?.length ? { classifications: e.classifications } : {}),
     };
     const rings = (start: number, count: number): { rings: Vec2[][]; ok: boolean } => {
       const res: Vec2[][] = [];
@@ -249,6 +253,12 @@ export interface IfcElementsSummary {
   components: number;
   /** Bauteile als Kontext-Mesh. */
   meshes: number;
+  /**
+   * Übernommene Bauteile und Meshes mit Klassifikation (eBKP-H …). Das Modell hat an Wand/Decke/Stütze/
+   * Raum kein Klassifikationsfeld: nur die Namen der Kontext-Meshes tragen sie (`[eBKP-H C]`), sonst wird
+   * sie gezählt und gemeldet.
+   */
+  classified: number;
   /** Davon Kandidaten, die nicht sicher abbildbar waren. */
   kept: number;
 }
@@ -290,7 +300,7 @@ export function ifcElementsToProject(
   const stamp = Date.now().toString(36);
   const newId = (kind: string) => `ifc-${kind}-${stamp}-${counter++}`;
   const summary: IfcElementsSummary = {
-    walls: 0, openings: 0, ceilings: 0, columns: 0, rooms: 0, floors: 0, wallTypes: 0, ceilingTypes: 0, components: 0, meshes: 0,
+    walls: 0, openings: 0, ceilings: 0, columns: 0, rooms: 0, floors: 0, wallTypes: 0, ceilingTypes: 0, components: 0, meshes: 0, classified: 0,
     kept: Object.values(elements.kept).reduce((s, n) => s + n, 0),
   };
 
@@ -544,6 +554,10 @@ export function ifcElementsToProject(
   summary.columns = columns.length;
   summary.rooms = rooms.length;
   summary.meshes = meshes.length;
+  const withClass = (l: readonly IfcInfo[]) => l.filter((e) => e.classifications?.length).length;
+  summary.classified =
+    withClass(elements.walls) + withClass(elements.openings.filter((o) => o.kind !== "hole")) + withClass(elements.slabs) + withClass(elements.columns) + withClass(elements.spaces) +
+    products.filter((p) => p.classifications?.length).length;
 
   const next: Project = {
     ...project,
@@ -570,7 +584,7 @@ export function ifcElementsToProject(
 export function formatIfcElementsSummary(
   s: IfcElementsSummary,
   r: IfcImportReport,
-  tr: (key: "ifc.import.elements" | "ifc.import.kept", vars?: Record<string, string | number>) => string,
+  tr: (key: "ifc.import.elements" | "ifc.import.kept" | "ifc.import.classified", vars?: Record<string, string | number>) => string,
 ): string {
   const parts = [
     tr("ifc.import.elements", {
@@ -585,5 +599,6 @@ export function formatIfcElementsSummary(
     }),
   ];
   if (s.kept) parts.push(tr("ifc.import.kept", { n: s.kept }));
+  if (s.classified) parts.push(tr("ifc.import.classified", { n: s.classified }));
   return parts.join(" · ");
 }

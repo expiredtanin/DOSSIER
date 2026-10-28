@@ -24,7 +24,7 @@ import { isPdfFile, pdfPageToImport, readPdfVectorPage } from "../io/pdfVector";
 import { planDashLineStyles } from "../io/pdfLineStyles";
 import type { PdfVectorPage } from "../io/pdfVector";
 import { exportScheduleCsv } from "../export/exportSchedule";
-import { exportIfcSpf } from "../export/exportIfc";
+import { exportIfcSpf, type IfcExportOptions } from "../export/exportIfc";
 import { loadFileio } from "../engine/fileioWasm";
 import { exportProjectStep } from "../export/exportStep";
 import { exportGlb, exportObj, exportStl } from "../export/exportMesh";
@@ -587,7 +587,7 @@ export function useProjectFileActions(
   // Führt den gewählten Direkt-Export (CSV/IFC/OBJ/STL) mit dem im Dialog
   // gewählten Dateinamen aus. Erzeugung aus dem jeweiligen reinen Kern, Download
   // über den robusten Helfer.
-  const runExport = (format: ExportSaveFormat, filename: string) => {
+  const runExport = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions) => {
     switch (format) {
       case "csv":
         downloadTextFile("﻿" + exportScheduleCsv(project), filename, "text/csv;charset=utf-8;");
@@ -595,7 +595,7 @@ export function useProjectFileActions(
       case "ifc":
         // IFC schreibt Rust (Format-Modul pkgFileIo, wird beim ersten Export nachgeladen).
         void loadFileio()
-          .then(() => downloadTextFile(exportIfcSpf(project), filename))
+          .then(() => downloadTextFile(exportIfcSpf(project, ifcOptions), filename))
           .catch((e) => notify(`${t("ifc.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "obj":
