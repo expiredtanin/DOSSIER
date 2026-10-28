@@ -18,6 +18,8 @@ pub mod text;
 pub mod annotation;
 #[cfg(feature = "web")]
 mod web_import;
+#[cfg(feature = "web")]
+mod web_pointcloud;
 pub mod ifc_step;
 pub mod ifc_import;
 pub mod ifc_semantic;
@@ -27,6 +29,10 @@ pub mod mesh_export;
 pub mod csg;
 mod ifc_sweep;
 mod ifc_nurbs;
+pub mod pointcloud;
+pub mod pointcloud_las;
+pub mod pointcloud_e57;
+pub mod pointcloud_text;
 
 use std::collections::HashMap;
 use std::io::Cursor;

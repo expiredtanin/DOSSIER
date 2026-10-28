@@ -32,3 +32,5 @@ export { sampleProject } from "../model/sampleProject";
 export { parseDxf } from "../io/dxfParser";
 export { contoursToDrawings, textsToDrawings, planImportCategories, distinctImportLayers } from "../io/dxfToDrawings";
 export { emptyProject } from "../model/sampleProject";
+export { readPointCloud, readPointCloudFlat, isPointCloudFile, DEFAULT_MAX_POINTS } from "../io/pointCloud";
+export type { PointCloudData, PointCloudOptions, PointCloudReport } from "../io/pointCloud";

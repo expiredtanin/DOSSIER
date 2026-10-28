@@ -27,3 +27,9 @@ csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan 
 gltf-validator (https://github.com/KhronosGroup/glTF-Validator), Apache-2.0
   Nur Entwicklungsabhängigkeit (devDependency, Prüfung des glTF-Exports in vitest), nicht ausgeliefert.
   Der glTF-Schreiber (src-tauri/fileio/src/mesh_export.rs) ist eigener Code ohne Fremdbibliothek.
+
+laz (laz-rs, https://github.com/tmontaigu/laz-rs), Apache-2.0 — Rust-Port von LASzip (Martin Isenburg)
+  Abhängigkeit von src-tauri/fileio (LAZ-Dekompression der Punktwolken, [B9]), unverändert, ohne Feature "parallel".
+
+e57 (https://github.com/cry-inc/e57), MIT License, Copyright cry-inc
+  Abhängigkeit von src-tauri/fileio (E57-Punktwolken lesen, [B9]), unverändert.

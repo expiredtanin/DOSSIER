@@ -45,3 +45,5 @@ console_error_panic_hook = { version = "0.1", optional = true }
 earcutr = "0.5"
 # IFC-Import: eingeschränkte Delaunay-Triangulierung getrimmter Freiformflächen (MIT OR Apache-2.0).
 spade = "2.15"
+laz = { version = "0.13", default-features = false }
+e57 = { version = "0.11", default-features = false }
