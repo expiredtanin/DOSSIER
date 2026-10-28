@@ -33,8 +33,8 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     const { project: p, summary, report } = await importInto(emptyProject, sampleProject);
     expect(report.parseErrors).toBe(0);
     expect(summary).toMatchObject({ walls: 9, openings: 3, ceilings: 1, columns: 0, rooms: 1, floors: 0, wallTypes: 0, ceilingTypes: 0, components: 0, kept: 0 });
-    // Dach und Treppe bleiben Kontext-Mesh.
-    expect((p.context ?? []).map((c) => (c as { layer?: string }).layer).sort()).toEqual(["IfcRoof", "IfcStair"]);
+    // Dach und Treppenlauf (die IfcStair selbst hat keine Darstellung) bleiben Kontext-Mesh.
+    expect((p.context ?? []).map((c) => (c as { layer?: string }).layer).sort()).toEqual(["IfcRoof", "IfcStairFlight"]);
     expect(validateProject(p)).toEqual([]);
 
     const byOrig = new Map<string, Wall>();

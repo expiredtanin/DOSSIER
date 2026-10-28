@@ -43,13 +43,13 @@ describe("glTF-Export", () => {
     expect(report.issues.numErrors).toBe(0);
   });
 
-  it("Rundreise: ein Knoten je Bauteil, Dreiecke wie im OBJ (plus Öffnungsteile)", () => {
+  it("Rundreise: ein Knoten je Bauteil, Dreiecke und Objekte wie im OBJ", () => {
     const g = glbJson(exportGlb(sampleProject));
     const obj = exportObj(sampleProject);
     const objGroups = obj.split("\n").filter((l) => l.startsWith("o "));
     const objFaces = obj.split("\n").filter((l) => l.startsWith("f ")).length;
     const parts = g.nodes.filter((n) => n.mesh !== undefined);
-    const element = parts.filter((n) => ["wall", "slab", "extrusion"].includes(n.extras?.type ?? ""));
+    const element = parts;
     expect(element.length).toBe(objGroups.length);
     for (const n of element) expect(objGroups).toContain(`o ${n.name}`);
     const elementTris = element.reduce(
@@ -57,7 +57,7 @@ describe("glTF-Export", () => {
       0,
     );
     expect(elementTris).toBe(objFaces);
-    expect(triangles(g)).toBeGreaterThanOrEqual(objFaces);
+    expect(triangles(g)).toBe(objFaces);
   });
 
   it("Geschosse sind Eltern-Knoten der Bauteile; ohne byLevel liegen alle an der Wurzel", () => {
@@ -77,7 +77,7 @@ describe("glTF-Export", () => {
     const glass = g.materials.find((m) => m.name === "Glas");
     expect(glass?.alphaMode).toBe("BLEND");
     expect(glass!.pbrMetallicRoughness.baseColorFactor[3]).toBeLessThan(1);
-    expect(g.nodes.some((n) => n.extras?.type === "glazing")).toBe(true);
+    expect(g.nodes.some((n) => n.extras?.type === "window")).toBe(true);
     // Wandmaterial trägt den Namen der Komponente.
     const names = sampleProject.components.map((c) => c.name);
     expect(g.materials.some((m) => names.includes(m.name))).toBe(true);

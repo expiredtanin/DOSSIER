@@ -445,6 +445,26 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     ist jetzt ein Fehler statt „NaN“ in der Datei. Rundung wie `toFixed(6)` (Gleichstand auf).
     Offen: Laden von pkgFileIo ist beim ersten IFC-Export neu (bisher synchron ohne Wartezeit);
     Export im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · L
+  - ✅ Basismengen für Kostenplanung/Mengenermittlung. (28.10.) `Qto_WallBaseQuantities` (Length, Width, Height,
+    GrossSideArea, NetSideArea, GrossVolume, NetVolume), `Qto_SlabBaseQuantities` (Decke und Podest: Width, Perimeter,
+    Gross-/NetArea, Gross-/NetVolume), `Qto_RoofBaseQuantities` (GrossArea, NetArea, ProjectedArea),
+    `Qto_ColumnBaseQuantities`, `Qto_DoorBaseQuantities`/`Qto_WindowBaseQuantities` (Width, Height, Perimeter, Area),
+    `Qto_StairFlightBaseQuantities`, `Qto_RailingBaseQuantities`; als IfcElementQuantity je Bauteil (nie geteilt), GUID
+    dauerhaft. Werte aus der Geometrie der Datei (`export/ifcQuantities.ts`, reine Rechnung), Netto = abzüglich
+    Öffnungen (Wand: je Schicht-Band, Netz-Wände: Volumen des Netzes). Height nur bei konstanter Oberkante (IFC-Vorgabe).
+    Mit ifcopenshell nachgerechnet (`exportIfc.quantities.test.ts`, ± 1 %): Wand-Netto und -Brutto (Demo-Haus: exakt),
+    Decke/Podest/Stütze/Läufe = Volumen, Dach = nach oben zeigende Netz-Dreiecke (geneigt und projiziert),
+    Tür/Fenster = Öffnungskörper; `validate-ifc.py` 0 Befunde. Rechnung bewusst in TS (Modell bleibt bis [K4] TS), die
+    Entitäten schreibt Rust (Pset-Arten 3–5, `FLAT_VERSION` 3).
+  - ✅ Deckenaussparungen als echte Löcher (IfcArbitraryProfileDefWithVoids statt Volldecke), wie im 3D. (28.10.)
+  - ✅ Treppen mit Läufen. (28.10.) IfcStair ohne Darstellung, per IfcRelAggregates mit IfcStairFlight (Prismen der
+    Tritte oder glatte Ortbeton-Laufplatte als Netz; NumberOfRisers/Treads, RiserHeight, TreadLength), IfcSlab(LANDING)
+    (Podest bei „L“) und IfcRailing(HANDRAIL) (Handlauf + Pfosten, wo das 3D sie zeigt: gerade Läufe). Quelle: dieselben
+    `emitStairs`/`emitStairMeshes`/`emitStairRailings` wie das 3D, je Treppe mit Ein-Treppen-Projekt (`export/ifcStairs.ts`).
+    Der eigene IFC-Import sieht jetzt `IfcStairFlight` statt `IfcStair` als Bauteil (Tests angepasst). Offen: Lauflänge
+    ist eine Näherung (Weg zwischen den Tritt-Schwerpunkten + Auftritt, mit Steigung), Wendeltreppe ein Lauf inkl.
+    Mitte, Geländer von L-/Wendeltreppen fehlt wie im 3D, Geländer-Länge = Lauflänge × Seiten; Pfosten nicht
+    als IfcMember; nicht in Revit/ArchiCAD geöffnet.
   - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
     Solibri/BIMcollab und nicht in der Tauri-App.
 - ◐ **[BCF] BCF 2.1/3.0 (BIM Collaboration Format).** (28.10.) Koordinations-Themen mit Solibri, BIMcollab,
@@ -630,11 +650,20 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   **Y-up rechtshändig: Modell (x, y, z-hoch) → (x, z, −y)**, Norden = −Z. TS (`src/export/exportMesh.ts`) sammelt nur
   flach. Export-Dialog „glTF 2.0 (GLB)“, Tauri-Menü, CLI `glb`/`gltf`. Prüfung: Khronos-Validator
   (`gltf-validator`, devDependency, Apache-2.0) ohne Fehler, Rundreise Knoten-/Dreieckszahl gegen OBJ,
-  8 Rust-Tests. **Offen:** Dächer, Treppen, Stützen, Kontext-Meshes/Gelände fehlen auch in OBJ/STL (nur Wände,
-  Decken, Extrusionen, im glTF zusätzlich Öffnungsteile); Fenster-Verglasung und Rahmen sind je ein Sammelknoten
-  ohne Öffnungs-id; keine Normalen (Flat-Shading), keine Texturen, keine Instanzen; OBJ/STL bleiben beim
-  älteren gespiegelten Achsen-Bezug (x, Höhe, +y); nicht in Blender/Twinmotion/Enscape geöffnet, nur Validator;
-  nicht in der Tauri-App getestet. · S
+  8 Rust-Tests. **Nachgeführt 28.10. (zweiter Schritt):** Dächer (`Dach_<id>`), Treppen (`Treppe_<id>`: Tritt-Prismen,
+  Ortbeton-Laufplatte, Handlauf), Stützen (`Stuetze_<id>`), Gelände (`Gelaende_<id>`) und importierte IFC/DXF-Meshes
+  (`Kontext_<id>`, mit `color`, falls gesetzt) in OBJ, STL und glTF; Verglasung/Rahmen je Öffnung ein Knoten
+  (`Fenster_<id>`/`Tuer_<id>`, `extras` = Öffnungs-id; die Sammelknoten `glazing`/`frame` gibt es nicht mehr, Öffnungsteile
+  jetzt auch in OBJ/STL). Quelle sind dieselben `emit*`-Ableitungen wie im 3D (`projectToModel3d`), je Bauteil mit einem
+  Ein-Bauteil-Projekt aufgerufen (die Ableitungen liefern keine ids; `src/plan` unverändert). Wicklung: `orientOutward`
+  (verschweisste Kanten, Komponenten, Volumenvorzeichen), da render3d doppelseitig zeichnet. **Achsen OBJ/STL geändert:**
+  rechtshändig wie glTF, Modell (x, y, z-hoch) → (x, z, −y), Norden = −Z (vorher gespiegelt (x, z, +y)); niemand ausser dem
+  eigenen Test hat die alte Abbildung erwartet. Optionen `openingParts`/`context` (Standard an). Prüfung: Validator 0 Fehler,
+  Volumen aller Teile > 0, Dreieckszahl je Art = Summe der Ableitungen, Rundreise OBJ = glTF. **Offen:** keine Normalen
+  (Flat-Shading), keine Texturen/Instanzen, Gelände ohne Vertex-Farben (Luftbild), Abzugskörper-Booleans (`voids`) und
+  truck-Extrusionen (nur Prisma-Näherung) nicht wie im 3D; Dreieckszahl nicht gegen die GPU-Puffer von render3d gemessen
+  (Wand-Löcher und Decken aus denselben Ableitungen, Dächer/Stützen/Treppen/Öffnungen identisch); nicht in
+  Blender/Twinmotion/Enscape geöffnet, nur Validator; nicht in der Tauri-App getestet. · S
 
 ## Bewusst nicht übernommen
 

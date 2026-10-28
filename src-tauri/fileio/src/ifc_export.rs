@@ -17,7 +17,10 @@
 //              n_layers, (component_id, component_name, thickness) × n_layers
 //   PSETS    = n, (name, n_props, (prop_name, kind, value) × n_props) × n
 //              kind 0 = IfcIdentifier (value = Zeichenketten-Index), 1 = IfcBoolean (0/1),
-//              2 = IfcPositiveRatioMeasure (value = Zahl)
+//              2 = IfcPositiveRatioMeasure (value = Zahl),
+//              3 = IfcQuantityLength, 4 = IfcQuantityArea, 5 = IfcQuantityVolume (value = Zahl, ≥ 0).
+//              Heisst der Satz `Qto_…`, entsteht je Bauteil ein eigener IfcElementQuantity (Basismengen,
+//              nie geteilt); sonst ein IfcPropertySet (gleicher Inhalt = ein Pset für alle Bauteile).
 //   structure= Geschoss-Index oder −1 (Gebäude)
 //
 //   WALL_SOLIDS = 1, structure, id, name, TYPEREF, PSETS, FRAME, n_solids, (PTS, z_rel, depth) × n_solids
@@ -28,7 +31,8 @@
 //             und, bei usage = 1 und vorhandenem Typ, IfcMaterialLayerSetUsage (AXIS2, POSITIVE, `offset` =
 //             Abstand der ersten Schicht von der Achse entlang +Y). Ohne Rahmen: Placement ohne Drehung wie bisher.
 //   WALL_MESH   = 2, structure, id, name, TYPEREF, PSETS, MESH
-//   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, z_rel, depth
+//   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, n_inner, PTS × n_inner, z_rel, depth
+//                 (innere Ringe = Deckenaussparungen, IfcArbitraryProfileDefWithVoids)
 //   OPENING     = 4, wall_id, structure, opening_id, is_door (0/1), fill_name, PTS (Öffnungskörper), z_rel,
 //                 depth, width, FILL, PSETS
 //     FILL (Parameter aus dem Modell; Körper, Placement und OperationType/PartitioningType rechnet
@@ -42,7 +46,14 @@
 //     Normale von u; Tür: Y = Aufschlagrichtung); ohne Teile (Wandöffnung) kein Körper. Alle Teile
 //     (0 Rahmen/Zarge, 1 Türblatt, 2 Glas) sind getrennte Körper in EINER Darstellung, je mit eigenem
 //     IfcStyledItem (Farbe/Transparenz je Rolle).
-//   STAIR       = 5, structure, id, predefined (Text), PTS, z_rel, depth
+//   STAIR       = 5, structure, id, predefined (Text), PTS, z_rel, depth (Ersatzkörper, nur ohne Läufe/Podest),
+//                 PSETS, n_flights, FLIGHT × n_flights, has_landing, [LANDING], has_rail, [RAIL]
+//     FLIGHT  = name, n_risers, n_treads, riser_height, tread_length, predefined (Text, IfcStairFlightTypeEnum),
+//               PSETS, shape (0 = Extrusionen, 1 = Dreiecks-Mesh), 0: n, (PTS, z_rel, depth) × n | 1: MESH
+//     LANDING = name, PTS, z_rel, depth, PSETS                  (IfcSlab, PredefinedType LANDING)
+//     RAIL    = name, predefined (Text, IfcRailingTypeEnum), PSETS, MESH
+//     Mit mindestens einem Lauf/Podest/Geländer ist die IfcStair selbst ohne Darstellung und fasst Läufe,
+//     Podest und Geländer per IfcRelAggregates zusammen (nur die Treppe liegt im Geschoss).
 //   EXTRUSION   = 6, structure, id, PTS, z_rel, depth
 //   SPACE       = 7, structure, id, name, long_name, external (0/1), height, PTS, net_area, gross_area,
 //                 sia_category, PSETS
@@ -64,8 +75,8 @@ use std::collections::HashMap;
 
 use crate::ifc_openings::{fill_geometry, DoorKind, FillParams, FillPart, Sash, MAX_SASHES};
 
-/// Version der flachen Kodierung (erstes Element des Puffers).
-pub const FLAT_VERSION: f64 = 2.0;
+/// Version der flachen Kodierung (erstes Element des Puffers). 3 seit 28.10.: Basismengen (Pset-Arten 3–5), Deckenaussparungen, Treppen mit Läufen.
+pub const FLAT_VERSION: f64 = 3.0;
 
 pub const REC_WALL_SOLIDS: f64 = 1.0;
 pub const REC_WALL_MESH: f64 = 2.0;
@@ -475,6 +486,46 @@ impl<'a> Reader<'a> {
         let closed = self.flag()?;
         Ok(Mesh { positions, indices, closed })
     }
+    /// Treppenlauf (s. Kopf, STAIR).
+    fn stair_flight(&mut self) -> Result<StairFlight, String> {
+        let name = self.string()?;
+        let risers = self.idx()?;
+        let treads = self.idx()?;
+        let riser_height = self.f()?;
+        let tread_length = self.f()?;
+        let predefined = self.string()?;
+        let psets = self.psets()?;
+        let shape = match self.idx()? {
+            0 => {
+                let n = self.idx()?;
+                let mut solids = Vec::new();
+                for _ in 0..n {
+                    let pts = self.pts()?;
+                    solids.push((pts, self.f()?, self.f()?));
+                }
+                FlightShape::Solids(solids)
+            }
+            1 => FlightShape::Mesh(self.mesh()?),
+            k => return Err(format!("unbekannte Lauf-Form {k}")),
+        };
+        Ok(StairFlight { name, risers, treads, riser_height, tread_length, predefined, psets, shape })
+    }
+    /// Podest (s. Kopf, STAIR).
+    fn stair_landing(&mut self) -> Result<StairLanding, String> {
+        let name = self.string()?;
+        let pts = self.pts()?;
+        let (z_rel, depth) = (self.f()?, self.f()?);
+        let psets = self.psets()?;
+        Ok(StairLanding { name, pts, z_rel, depth, psets })
+    }
+    /// Geländer (s. Kopf, STAIR).
+    fn stair_rail(&mut self) -> Result<StairRail, String> {
+        let name = self.string()?;
+        let predefined = self.string()?;
+        let psets = self.psets()?;
+        let mesh = self.mesh()?;
+        Ok(StairRail { name, predefined, psets, mesh })
+    }
     fn type_ref(&mut self) -> Result<Option<TypeRef>, String> {
         if !self.flag()? {
             return Ok(None);
@@ -511,6 +562,9 @@ impl<'a> Reader<'a> {
                     0 => PropVal::Ident(self.string()?),
                     1 => PropVal::Bool(self.flag()?),
                     2 => PropVal::Ratio(self.f()?),
+                    3 => PropVal::Length(self.f()?),
+                    4 => PropVal::Area(self.f()?),
+                    5 => PropVal::Volume(self.f()?),
                     k => return Err(format!("unbekannte Eigenschaftsart {k}")),
                 };
                 props.push((pname, value));
@@ -571,6 +625,38 @@ struct Mesh {
     closed: bool,
 }
 
+enum FlightShape {
+    /// Prismen (Profil in Welt-XY, Unterkante relativ zum Geschoss, Tiefe).
+    Solids(Vec<(Vec<(f64, f64)>, f64, f64)>),
+    Mesh(Mesh),
+}
+
+struct StairFlight {
+    name: String,
+    risers: usize,
+    treads: usize,
+    riser_height: f64,
+    tread_length: f64,
+    predefined: String,
+    psets: Vec<Pset>,
+    shape: FlightShape,
+}
+
+struct StairLanding {
+    name: String,
+    pts: Vec<(f64, f64)>,
+    z_rel: f64,
+    depth: f64,
+    psets: Vec<Pset>,
+}
+
+struct StairRail {
+    name: String,
+    predefined: String,
+    psets: Vec<Pset>,
+    mesh: Mesh,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum TypeKind {
     Wall,
@@ -606,6 +692,10 @@ enum PropVal {
     Ident(String),
     Bool(bool),
     Ratio(f64),
+    /// Basismengen (`Qto_…`): Länge, Fläche, Volumen.
+    Length(f64),
+    Area(f64),
+    Volume(f64),
 }
 
 impl PropVal {
@@ -615,6 +705,17 @@ impl PropVal {
             PropVal::Ident(s) => format!("IFCIDENTIFIER({})", ifc_string(s)),
             PropVal::Bool(b) => format!("IFCBOOLEAN({})", if *b { ".T." } else { ".F." }),
             PropVal::Ratio(r) => format!("IFCPOSITIVERATIOMEASURE({})", fmt_real(*r)),
+            PropVal::Length(_) | PropVal::Area(_) | PropVal::Volume(_) => String::new(),
+        }
+    }
+
+    /// Mengen-Entität und Wert (nur Basismengen), sonst `None`.
+    fn quantity(&self) -> Option<(&'static str, f64)> {
+        match self {
+            PropVal::Length(v) => Some(("IFCQUANTITYLENGTH", *v)),
+            PropVal::Area(v) => Some(("IFCQUANTITYAREA", *v)),
+            PropVal::Volume(v) => Some(("IFCQUANTITYVOLUME", *v)),
+            _ => None,
         }
     }
 }
@@ -637,6 +738,15 @@ struct PsetAcc {
     key: String,
     props: Vec<(String, String)>,
     related: Vec<usize>,
+}
+
+/// Basismengen eines Bauteils (`Qto_…`), am Ende als IfcElementQuantity geschrieben.
+struct QtoAcc {
+    /// Schlüssel des Bauteils (wie für seine GlobalId) — Grundlage der dauerhaften GUIDs.
+    owner_key: String,
+    name: String,
+    quantities: Vec<(&'static str, String, f64)>,
+    element: usize,
 }
 
 struct TypeAcc {
@@ -662,6 +772,7 @@ struct Builder {
     containment: Vec<(i64, Vec<usize>)>,
     psets: Vec<PsetAcc>,
     pset_index: HashMap<String, usize>,
+    qtos: Vec<QtoAcc>,
     materials: HashMap<String, usize>,
     types: Vec<TypeAcc>,
     type_index: HashMap<String, usize>,
@@ -722,9 +833,23 @@ impl Builder {
     }
 
     /// Eigenschaftssatz vormerken: gleicher Inhalt ⇒ EIN Pset für alle Bauteile (GUID aus dem Inhalt).
-    fn add_pset(&mut self, pset: &Pset, element: usize) {
+    ///
+    /// Basismengen (`Qto_…`) sind dagegen je Bauteil eigen: `owner_key` (Schlüssel des Bauteils, wie für
+    /// seine GlobalId) bestimmt die GUIDs von Menge und Beziehung.
+    fn add_pset(&mut self, pset: &Pset, element: usize, owner_key: &str) {
         if pset.props.is_empty() {
             return; // IfcPropertySet verlangt mindestens eine Eigenschaft
+        }
+        if pset.name.starts_with("Qto_") {
+            let quantities: Vec<(&'static str, String, f64)> = pset
+                .props
+                .iter()
+                .filter_map(|(n, v)| v.quantity().map(|(ty, x)| (ty, n.clone(), x)))
+                .collect();
+            if !quantities.is_empty() {
+                self.qtos.push(QtoAcc { owner_key: owner_key.to_string(), name: pset.name.clone(), quantities, element });
+            }
+            return;
         }
         let props: Vec<(String, String)> = pset.props.iter().map(|(n, v)| (n.clone(), v.expr())).collect();
         // Schlüssel wie in der TS-Fassung: `<Name>/<JSON der [Name, Wert]-Paare>`.
@@ -741,15 +866,30 @@ impl Builder {
         }
     }
 
-    /// Profil (geschlossenes Polygon) als IfcExtrudedAreaSolid, Unterkante `z_rel` in `+Z`.
-    fn emit_extrusion(&mut self, footprint: &[(f64, f64)], z_rel: f64, depth: f64) -> usize {
-        let mut pt_ids = Vec::with_capacity(footprint.len() + 1);
-        for p in footprint.iter().chain(footprint.first()) {
+    /// Geschlossener Linienzug (erster Punkt am Ende wiederholt) als IfcPolyline.
+    fn emit_closed_polyline(&mut self, ring: &[(f64, f64)]) -> usize {
+        let mut pt_ids = Vec::with_capacity(ring.len() + 1);
+        for p in ring.iter().chain(ring.first()) {
             let id = self.add("IFCCARTESIANPOINT", list(&[fmt_real(p.0), fmt_real(p.1)]));
             pt_ids.push(id);
         }
-        let polyline = self.add("IFCPOLYLINE", refs(&pt_ids));
-        let profile = self.add("IFCARBITRARYCLOSEDPROFILEDEF", format!("{},$,#{polyline}", enum_("AREA")));
+        self.add("IFCPOLYLINE", refs(&pt_ids))
+    }
+
+    /// Profil (geschlossenes Polygon) als IfcExtrudedAreaSolid, Unterkante `z_rel` in `+Z`.
+    fn emit_extrusion(&mut self, footprint: &[(f64, f64)], z_rel: f64, depth: f64) -> usize {
+        self.emit_extrusion_voids(footprint, &[], z_rel, depth)
+    }
+
+    /// Wie {@link emit_extrusion}, mit inneren Ringen (Aussparungen) als IfcArbitraryProfileDefWithVoids.
+    fn emit_extrusion_voids(&mut self, footprint: &[(f64, f64)], inner: &[Vec<(f64, f64)>], z_rel: f64, depth: f64) -> usize {
+        let polyline = self.emit_closed_polyline(footprint);
+        let profile = if inner.is_empty() {
+            self.add("IFCARBITRARYCLOSEDPROFILEDEF", format!("{},$,#{polyline}", enum_("AREA")))
+        } else {
+            let holes: Vec<usize> = inner.iter().map(|ring| self.emit_closed_polyline(ring)).collect();
+            self.add("IFCARBITRARYPROFILEDEFWITHVOIDS", format!("{},$,#{polyline},{}", enum_("AREA"), refs(&holes)))
+        };
         let mut position = self.identity_axis;
         if z_rel != 0.0 {
             let pt = self.add("IFCCARTESIANPOINT", list(&[fmt_real(0.0), fmt_real(0.0), fmt_real(z_rel)]));
@@ -846,7 +986,12 @@ impl Builder {
 
     /// Profil+Extrusion+Shape+Placement für einen geschlossenen Footprint; liefert (Placement, Shape).
     fn emit_box_product(&mut self, footprint: &[(f64, f64)], z_bottom_rel: f64, depth: f64, relative_to: usize) -> (usize, usize) {
-        let solid = self.emit_extrusion(footprint, 0.0, depth);
+        self.emit_box_product_voids(footprint, &[], z_bottom_rel, depth, relative_to)
+    }
+
+    /// Wie {@link emit_box_product}, mit Aussparungen im Profil.
+    fn emit_box_product_voids(&mut self, footprint: &[(f64, f64)], inner: &[Vec<(f64, f64)>], z_bottom_rel: f64, depth: f64, relative_to: usize) -> (usize, usize) {
+        let solid = self.emit_extrusion_voids(footprint, inner, 0.0, depth);
         let shape = self.emit_swept_shape(&[solid]);
         let placement = self.emit_placement(z_bottom_rel, relative_to);
         (placement, shape)
@@ -968,7 +1113,7 @@ impl Builder {
         }
         self.add_to_containment(structure, entity);
         for p in psets {
-            self.add_pset(p, entity);
+            self.add_pset(p, entity, &guid_key);
         }
         entity
     }
@@ -1025,6 +1170,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         containment: Vec::new(),
         psets: Vec::new(),
         pset_index: HashMap::new(),
+        qtos: Vec::new(),
         materials: HashMap::new(),
         types: Vec::new(),
         type_index: HashMap::new(),
@@ -1249,9 +1395,14 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let ty = r.type_ref()?;
                 let psets = r.psets()?;
                 let pts = r.pts()?;
+                let n_inner = r.idx()?;
+                let mut inner = Vec::new();
+                for _ in 0..n_inner {
+                    inner.push(r.pts()?);
+                }
                 let z_rel = r.f()?;
                 let depth = r.f()?;
-                let (placement, shape) = w.emit_box_product(&pts, z_rel, depth, w.placement_of(structure));
+                let (placement, shape) = w.emit_box_product_voids(&pts, &inner, z_rel, depth, w.placement_of(structure));
                 w.finish_typed("IFCSLAB", format!("slab/{id}"), &name, &ty, &psets, structure, placement, shape, Some(enum_("FLOOR")), true);
             }
             c if c == REC_OPENING => {
@@ -1320,7 +1471,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 );
                 w.add_to_containment(structure, fill_entity);
                 for p in &psets {
-                    w.add_pset(p, fill_entity);
+                    w.add_pset(p, fill_entity, &format!("fill/{opening_id}"));
                 }
             }
             c if c == REC_STAIR => {
@@ -1330,10 +1481,85 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let pts = r.pts()?;
                 let z_rel = r.f()?;
                 let depth = r.f()?;
-                let (placement, shape) = w.emit_box_product(&pts, z_rel, depth, w.placement_of(structure));
-                let g = w.gid(&format!("stair/{id}"));
-                let entity = w.emit_building_element("IFCSTAIR", g, "Treppe", placement, shape, Some(enum_(&predefined)));
+                let psets = r.psets()?;
+                let mut flights = Vec::new();
+                for _ in 0..r.idx()? {
+                    flights.push(r.stair_flight()?);
+                }
+                let landing = if r.flag()? { Some(r.stair_landing()?) } else { None };
+                let rail = if r.flag()? { Some(r.stair_rail()?) } else { None };
+                let key = format!("stair/{id}");
+                let parent = w.placement_of(structure);
+                let g = w.gid(&key);
+                let entity = if flights.is_empty() && landing.is_none() && rail.is_none() {
+                    // Ohne Teile: ein Ersatzkörper (Fussabdruck) wie bisher.
+                    let (placement, shape) = w.emit_box_product(&pts, z_rel, depth, parent);
+                    w.emit_building_element("IFCSTAIR", g, "Treppe", placement, shape, Some(enum_(&predefined)))
+                } else {
+                    // Treppe ohne eigene Darstellung; Läufe, Podest und Geländer hängen per IfcRelAggregates daran.
+                    let stair_placement = w.emit_placement(0.0, parent);
+                    let stair = w.add(
+                        "IFCSTAIR",
+                        format!("{g},#{},{},$,$,#{stair_placement},$,$,{}", w.owner_history, ifc_string("Treppe"), enum_(&predefined)),
+                    );
+                    let mut parts = Vec::new();
+                    for (k, f) in flights.iter().enumerate() {
+                        let (placement, shape) = match &f.shape {
+                            FlightShape::Solids(solids) => {
+                                let ids: Vec<usize> = solids.iter().map(|(pts, z, d)| w.emit_extrusion(pts, *z, *d)).collect();
+                                let shape = w.emit_swept_shape(&ids);
+                                (w.emit_placement(0.0, stair_placement), shape)
+                            }
+                            FlightShape::Mesh(mesh) => w.emit_triangulated_product(mesh, stair_placement),
+                        };
+                        let fkey = format!("{key}/flight/{k}");
+                        let guid = w.gid(&fkey);
+                        let flight = w.add(
+                            "IFCSTAIRFLIGHT",
+                            format!(
+                                "{guid},#{},{},$,$,#{placement},#{shape},$,{},{},{},{},{}",
+                                w.owner_history,
+                                ifc_string(&f.name),
+                                f.risers,
+                                f.treads,
+                                fmt_real(f.riser_height),
+                                fmt_real(f.tread_length),
+                                enum_(&f.predefined)
+                            ),
+                        );
+                        for p in &f.psets {
+                            w.add_pset(p, flight, &fkey);
+                        }
+                        parts.push(flight);
+                    }
+                    if let Some(l) = &landing {
+                        let (placement, shape) = w.emit_box_product(&l.pts, l.z_rel, l.depth, stair_placement);
+                        let lkey = format!("{key}/landing");
+                        let guid = w.gid(&lkey);
+                        let slab = w.emit_building_element("IFCSLAB", guid, &l.name, placement, shape, Some(enum_("LANDING")));
+                        for p in &l.psets {
+                            w.add_pset(p, slab, &lkey);
+                        }
+                        parts.push(slab);
+                    }
+                    if let Some(rl) = &rail {
+                        let (placement, shape) = w.emit_triangulated_product(&rl.mesh, stair_placement);
+                        let rkey = format!("{key}/railing");
+                        let guid = w.gid(&rkey);
+                        let railing = w.emit_building_element("IFCRAILING", guid, &rl.name, placement, shape, Some(enum_(&rl.predefined)));
+                        for p in &rl.psets {
+                            w.add_pset(p, railing, &rkey);
+                        }
+                        parts.push(railing);
+                    }
+                    let g = w.gid(&format!("aggregates/{key}"));
+                    w.add("IFCRELAGGREGATES", format!("{g},#{},$,$,#{stair},{}", w.owner_history, refs(&parts)));
+                    stair
+                };
                 w.add_to_containment(structure, entity);
+                for p in &psets {
+                    w.add_pset(p, entity, &key);
+                }
             }
             c if c == REC_EXTRUSION => {
                 let structure = r.structure(n_storeys)?;
@@ -1409,7 +1635,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     format!("{g},#{},$,$,{},#{pset}", w.owner_history, refs(&[space])),
                 );
                 for p in &psets {
-                    w.add_pset(p, space);
+                    w.add_pset(p, space, &format!("space/{id}"));
                 }
             }
             c if c == REC_END_SPACES => {
@@ -1448,7 +1674,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let entity = w.emit_building_element("IFCCOLUMN", g, &label, placement, shape, Some(enum_("COLUMN")));
                 w.add_to_containment(structure, entity);
                 for p in &psets {
-                    w.add_pset(p, entity);
+                    w.add_pset(p, entity, &format!("column/{id}"));
                 }
                 if let Some(cid) = component {
                     if let Some((_, _, v)) = w.column_materials.iter_mut().find(|(c, _, _)| *c == cid) {
@@ -1504,6 +1730,20 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
             "IFCRELDEFINESBYPROPERTIES",
             format!("{g},#{},$,$,{},#{pset_id}", w.owner_history, refs(&ps.related)),
         );
+    }
+
+    // ── Basismengen (je Bauteil ein IfcElementQuantity) ──
+    let qtos = std::mem::take(&mut w.qtos);
+    for q in &qtos {
+        let mut ids = Vec::with_capacity(q.quantities.len());
+        for (ty, name, value) in &q.quantities {
+            // IFC verlangt Mengen ≥ 0.
+            ids.push(w.add(ty, format!("{},$,$,{},$", ifc_string(name), fmt_real(value.max(0.0)))));
+        }
+        let g = w.gid(&format!("{}/{}", q.owner_key, q.name));
+        let set = w.add("IFCELEMENTQUANTITY", format!("{g},#{},{},$,$,{}", w.owner_history, ifc_string(&q.name), refs(&ids)));
+        let g = w.gid(&format!("{}/{}/rel", q.owner_key, q.name));
+        w.add("IFCRELDEFINESBYPROPERTIES", format!("{g},#{},$,$,{},#{set}", w.owner_history, refs(&[q.element])));
     }
 
     // ── Räumliche Eingliederung (gebündelt je Trägerstruktur) ──
@@ -1717,6 +1957,16 @@ mod tests {
         fn no_psets(&mut self) {
             self.f.push(0.0);
         }
+        /// Ein Satz mit Mengen (`kind` 3 Länge, 4 Fläche, 5 Volumen).
+        fn qto(&mut self, set: &str, q: &[(&str, f64, f64)]) {
+            self.f.push(1.0);
+            self.str(set);
+            self.f.push(q.len() as f64);
+            for (n, kind, v) in q {
+                self.str(n);
+                self.n(&[*kind, *v]);
+            }
+        }
         fn mesh_tetra(&mut self) {
             self.n(&[4.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
             self.n(&[4.0, 0.0, 2.0, 1.0, 0.0, 1.0, 3.0, 1.0, 2.0, 3.0, 2.0, 0.0, 3.0]);
@@ -1793,12 +2043,14 @@ mod tests {
         b.no_type();
         b.no_psets();
         b.pts(&SQUARE);
-        b.n(&[2.6, 0.2]);
+        b.n(&[0.0, 2.6, 0.2]);
         b.n(&[REC_STAIR, 0.0]);
         b.str("S1");
         b.str("STRAIGHT_RUN_STAIR");
         b.pts(&SQUARE);
         b.n(&[0.0, 2.6]);
+        b.no_psets();
+        b.n(&[0.0, 0.0, 0.0]);
         b.n(&[REC_EXTRUSION, -1.0]);
         b.str("X1");
         b.pts(&SQUARE);
@@ -2082,6 +2334,170 @@ mod tests {
             }
         }
         assert!(seen.len() > 20);
+    }
+
+    #[test]
+    fn basismengen_je_bauteil_eigen_mit_dauerhafter_guid() {
+        let mut b = mini();
+        for id in ["W1", "W2"] {
+            b.n(&[REC_WALL_SOLIDS, -1.0]);
+            b.str(id);
+            b.str("Wand");
+            b.no_type();
+            b.qto("Qto_WallBaseQuantities", &[("Length", 3.0, 5.0), ("GrossSideArea", 4.0, 13.0), ("NetVolume", 5.0, 3.25), ("Width", 3.0, -1e-9)]);
+            b.n(&[0.0, 1.0]);
+            b.pts(&SQUARE);
+            b.n(&[0.0, 2.6]);
+        }
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        // Gleicher Inhalt, trotzdem je Wand ein eigener Satz (Mengen gehören dem Bauteil).
+        assert_eq!(count(&ifc, "IFCELEMENTQUANTITY"), 2);
+        assert_eq!(count(&ifc, "IFCPROPERTYSET"), 0);
+        assert_eq!(count(&ifc, "IFCQUANTITYLENGTH"), 4);
+        assert_eq!(count(&ifc, "IFCQUANTITYAREA"), 2);
+        assert_eq!(count(&ifc, "IFCQUANTITYVOLUME"), 2);
+        assert!(ifc.contains("IFCQUANTITYLENGTH('Length',$,$,5.0,$)"));
+        assert!(ifc.contains("IFCQUANTITYAREA('GrossSideArea',$,$,13.0,$)"));
+        assert!(ifc.contains("IFCQUANTITYVOLUME('NetVolume',$,$,3.25,$)"));
+        // Negative (Rundungs-)Werte werden auf 0 geklemmt (IFC verlangt ≥ 0).
+        assert!(ifc.contains("IFCQUANTITYLENGTH('Width',$,$,0.0,$)"));
+        assert_eq!(count(&ifc, "IFCRELDEFINESBYPROPERTIES"), 2);
+        let set = first_line(&ifc, "IFCELEMENTQUANTITY");
+        assert!(set.contains("'Qto_WallBaseQuantities',$,$,("), "{set}");
+        // Deterministisch, GUIDs verschieden je Wand.
+        assert_eq!(ifc, build(&b).unwrap());
+        let guids: Vec<&str> = ifc.lines().filter(|l| l.contains("=IFCELEMENTQUANTITY(")).map(|l| &l[l.find('(').unwrap() + 2..][..22]).collect();
+        assert_eq!(guids.len(), 2);
+        assert_ne!(guids[0], guids[1]);
+        // Eine andere Reihenfolge der Bauteile ändert die GUIDs nicht.
+        assert!(ifc.contains(&ifc_guid("t/wall/W1/Qto_WallBaseQuantities")));
+        assert!(ifc.contains(&ifc_guid("t/wall/W2/Qto_WallBaseQuantities")));
+    }
+
+    #[test]
+    fn decke_mit_aussparung_hat_profil_mit_loechern() {
+        let mut b = mini();
+        b.n(&[REC_CEILING, -1.0]);
+        b.str("D1");
+        b.str("Decke");
+        b.no_type();
+        b.qto("Qto_SlabBaseQuantities", &[("GrossArea", 4.0, 2.0), ("NetArea", 4.0, 1.5)]);
+        b.pts(&SQUARE);
+        b.n(&[2.0]);
+        b.pts(&[(1.0, 0.1), (2.0, 0.1), (2.0, 0.3), (1.0, 0.3)]);
+        b.pts(&[(3.0, 0.1), (4.0, 0.1), (4.0, 0.3)]);
+        b.n(&[2.6, 0.2]);
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        assert_eq!(count(&ifc, "IFCARBITRARYPROFILEDEFWITHVOIDS"), 1);
+        assert_eq!(count(&ifc, "IFCARBITRARYCLOSEDPROFILEDEF"), 0);
+        let prof = first_line(&ifc, "IFCARBITRARYPROFILEDEFWITHVOIDS");
+        assert!(prof.contains(".AREA.,$,#"), "{prof}");
+        // Aussen- und zwei Innenkurven, jede geschlossen (Punkt 1 wiederholt).
+        assert_eq!(count(&ifc, "IFCPOLYLINE"), 3);
+        assert_eq!(count(&ifc, "IFCEXTRUDEDAREASOLID"), 1);
+        // Ohne Aussparung bleibt es das einfache Profil.
+        let plain = build(&full_house(false)).unwrap();
+        assert_eq!(count(&plain, "IFCARBITRARYPROFILEDEFWITHVOIDS"), 0);
+    }
+
+    /// Treppe mit zwei Läufen (Prismen), Podest und Geländer (Mesh).
+    fn stair_with_parts(b: &mut B) {
+        b.n(&[REC_STAIR, -1.0]);
+        b.str("S1");
+        b.str("QUARTER_TURN_STAIR");
+        b.pts(&SQUARE);
+        b.n(&[0.0, 2.6]);
+        b.no_psets();
+        b.n(&[2.0]);
+        for (k, name) in ["Lauf 1", "Lauf 2"].iter().enumerate() {
+            b.str(name);
+            b.n(&[7.0, 7.0, 0.1857, 0.28]);
+            b.str("STRAIGHT");
+            b.qto("Qto_StairFlightBaseQuantities", &[("Length", 3.0, 2.0), ("GrossVolume", 5.0, 1.0)]);
+            b.n(&[0.0, 2.0]);
+            b.pts(&SQUARE);
+            b.n(&[0.0, 0.2 * (k + 1) as f64]);
+            b.pts(&SQUARE);
+            b.n(&[0.5, 0.4]);
+        }
+        b.n(&[1.0]);
+        b.str("Podest");
+        b.pts(&SQUARE);
+        b.n(&[0.0, 1.3]);
+        b.no_psets();
+        b.n(&[1.0]);
+        b.str("Handlauf");
+        b.str("HANDRAIL");
+        b.no_psets();
+        b.mesh_tetra();
+    }
+
+    #[test]
+    fn treppe_mit_laeufen_podest_und_gelaender() {
+        let b = full_house(false);
+        let mut m = mini();
+        stair_with_parts(&mut m);
+        let ifc = build(&m).unwrap();
+        check_structure(&ifc);
+        assert_eq!(count(&ifc, "IFCSTAIR"), 1);
+        assert_eq!(count(&ifc, "IFCSTAIRFLIGHT"), 2);
+        assert_eq!(count(&ifc, "IFCRAILING"), 1);
+        assert_eq!(count(&ifc, "IFCSLAB"), 1);
+        assert!(ifc.contains(".LANDING.);"), "Podest als IfcSlab(LANDING)");
+        let stair = first_line(&ifc, "IFCSTAIR");
+        assert!(stair.contains(",$,$,.QUARTER_TURN_STAIR.);") && !stair.contains("#,#"), "{stair}");
+        let flight = first_line(&ifc, "IFCSTAIRFLIGHT");
+        assert!(flight.contains(",7,7,0.1857,0.28,.STRAIGHT.);"), "{flight}");
+        // Beide Läufe: Menge je Lauf; Treppe, Läufe, Podest, Geländer in EINER Aggregation, nur die Treppe im Geschoss/Gebäude.
+        assert_eq!(count(&ifc, "IFCELEMENTQUANTITY"), 2);
+        let agg = ifc.lines().find(|l| l.contains("IFCRELAGGREGATES(") && l.matches('#').count() == 7).expect("Aggregation der Treppe");
+        assert!(agg.contains(",#"), "{agg}");
+        let contained = first_line(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE");
+        assert_eq!(contained.matches('#').count(), 4, "nur die Treppe (Nummer, Owner, Treppe, Gebäude): {contained}");
+        // Läufe als Prismen, Geländer als Dreiecks-Netz.
+        assert_eq!(count(&ifc, "IFCEXTRUDEDAREASOLID"), 5); // 2 Läufe × 2 Prismen + Podest
+        assert_eq!(count(&ifc, "IFCTRIANGULATEDFACESET"), 1);
+        // Ohne Teile: Ersatzkörper (Fussabdruck) wie vorher.
+        let fallback = build(&b).unwrap();
+        assert_eq!(count(&fallback, "IFCSTAIRFLIGHT"), 0);
+        assert_eq!(count(&fallback, "IFCSTAIR"), 1);
+        // Lauf mit Mesh-Form.
+        let mut g = mini();
+        g.n(&[REC_STAIR, -1.0]);
+        g.str("S2");
+        g.str("STRAIGHT_RUN_STAIR");
+        g.pts(&SQUARE);
+        g.n(&[0.0, 2.6]);
+        g.no_psets();
+        g.n(&[1.0]);
+        g.str("Lauf");
+        g.n(&[15.0, 14.0, 0.17, 0.29]);
+        g.str("STRAIGHT");
+        g.no_psets();
+        g.n(&[1.0]);
+        g.mesh_tetra();
+        g.n(&[0.0, 0.0]);
+        let mesh = build(&g).unwrap();
+        check_structure(&mesh);
+        assert_eq!(count(&mesh, "IFCSTAIRFLIGHT"), 1);
+        assert_eq!(count(&mesh, "IFCTRIANGULATEDFACESET"), 1);
+        // Kaputte Lauf-Form: Fehler, nie Panic.
+        let mut bad = mini();
+        bad.n(&[REC_STAIR, -1.0]);
+        bad.str("S3");
+        bad.str("STRAIGHT_RUN_STAIR");
+        bad.pts(&SQUARE);
+        bad.n(&[0.0, 2.6]);
+        bad.no_psets();
+        bad.n(&[1.0]);
+        bad.str("Lauf");
+        bad.n(&[1.0, 1.0, 0.17, 0.29]);
+        bad.str("STRAIGHT");
+        bad.no_psets();
+        bad.n(&[9.0]);
+        assert!(build(&bad).is_err());
     }
 
     #[test]

@@ -40,7 +40,7 @@ const bytesOf = (s: string) => new TextEncoder().encode(s);
 /** Bauteile je IFC-Klasse aus dem Export-Text (Zeilen `#n=IFCWALL(`). */
 function exportedCounts(ifc: string): Map<string, number> {
   const m = new Map<string, number>();
-  for (const cls of ["IFCWALL", "IFCSLAB", "IFCROOF", "IFCDOOR", "IFCWINDOW", "IFCSTAIR", "IFCCOLUMN", "IFCBUILDINGELEMENTPROXY"]) {
+  for (const cls of ["IFCWALL", "IFCSLAB", "IFCROOF", "IFCDOOR", "IFCWINDOW", "IFCSTAIRFLIGHT", "IFCRAILING", "IFCCOLUMN", "IFCBUILDINGELEMENTPROXY"]) {
     const n = (ifc.match(new RegExp(`^#\\d+=${cls}\\(`, "gm")) ?? []).length;
     if (n) m.set(cls, n);
   }

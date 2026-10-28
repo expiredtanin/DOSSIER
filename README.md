@@ -176,7 +176,7 @@ Liste beschreibt den Ist-Zustand des Codes, nicht eine Zusage._
 | DXF | Linien, Bögen, Füllungen und Verläufe |
 | IFC4 | Geschossstruktur, Bauteile mit Schichten, Öffnungen als echte Löcher |
 | STEP | B-Rep-Körper je Wandschicht, Decke, Dach, Treppe und Extrusion (in mm) |
-| STL, OBJ | Dreiecksnetz des 3D-Modells, Öffnungen ausgeschnitten |
+| STL, OBJ, glTF/GLB | Dreiecksnetz des 3D-Modells (Wände mit Öffnungen, Decken, Dächer, Treppen, Stützen, Fenster/Türen, Gelände und Kontext), rechtshändig Y-up |
 | CSV | Bauteilliste und SIA-416-Raumbilanz |
 
 ### Desktop-Integration
