@@ -40,6 +40,11 @@ zip (https://github.com/zip-rs/zip2), MIT, mit flate2 (MIT OR Apache-2.0) und zo
 quick-xml (https://github.com/tafia/quick-xml), MIT
   Abhängigkeit von src-tauri/fileio (BCF: markup.bcf und Viewpoints lesen), unverändert.
 
+flate2 (https://github.com/rust-lang/flate2-rs), MIT OR Apache-2.0, mit miniz_oxide (MIT OR Zlib OR Apache-2.0)
+  Direkte Abhängigkeit von src-tauri/fileio (Vektor-PDF [76]: FlateDecode-Streams), unverändert.
+  PDF-Leser und Content-Stream-Interpreter (pdf_object.rs, pdf_vector.rs) sind eigener Code nach der
+  PDF-Referenz (ISO 32000-1); WinAnsi-Tabelle und LZW-Testbeispiel stammen aus der Spezifikation.
+
 BCF-Spezifikation (https://github.com/buildingSMART/BCF-XML, Schemas), buildingSMART, CC BY-ND 4.0
   Nur das Dateiformat als Vorlage; eigener Code in src-tauri/fileio/src/bcf.rs. Die Test-Beispiele
   stehen nicht im Repo (Test buildingsmart_beispiele liest sie über BCF_TESTCASES aus einem lokalen Klon).

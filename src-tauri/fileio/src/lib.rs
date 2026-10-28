@@ -34,6 +34,10 @@ pub mod pointcloud;
 pub mod pointcloud_las;
 pub mod pointcloud_e57;
 pub mod pointcloud_text;
+pub mod pdf_object;
+pub mod pdf_vector;
+#[cfg(feature = "web")]
+mod web_pdf;
 
 use std::collections::HashMap;
 use std::io::Cursor;

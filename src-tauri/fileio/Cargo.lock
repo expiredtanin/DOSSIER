@@ -146,6 +146,7 @@ dependencies = [
  "console_error_panic_hook",
  "e57",
  "earcutr",
+ "flate2",
  "getrandom",
  "laz",
  "quick-xml",
