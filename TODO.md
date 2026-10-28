@@ -369,6 +369,15 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   Profiländerung, Decken aus Dreiecksnetzen mit T-Stössen (zwei Teilflächen → Mesh), Tür-Anschlag/
   Öffnungsrichtung, Tür-/Fenstertyp aus IfcDoorType/IfcWindowType, Farbe der Bauteile; nur Linux-
   Container/vitest, nicht in der Tauri-App geprüft (Dialog nur per tsc).
+  (28.10., Tür-Ausführung) Tür: OperationType (IfcDoor, sonst IfcDoorType/IfcDoorStyle) → Scharnierseite
+  (LEFT = Scharnier auf +X der Tür-Platzierung, von der Aufschlagseite +Y gesehen, wie unser Export) und
+  Aufschlagseite (+Y gegen die Wandachse), Türtyp nach Dreh/Schiebe und Blattzahl; Fenster:
+  PartitioningType (IfcWindow, sonst IfcWindowType/IfcWindowStyle) → Fenstertyp mit gleicher Flügelzahl,
+  sonst `wingCount` an der Öffnung. Erkennung in Rust (`ifc_semantic.rs::operation`), TS ordnet zu.
+  Rundreise: alle 8 Kombinationen Scharnier/Aufschlag/Richtung landen räumlich gleich (Scharnierpunkt,
+  Aufschlagrichtung; `openingDir` kommt als „in“ mit gespiegeltem `swing` zurück), 2-flügliges Fenster →
+  Typ „Fenster 2-flügl.“. Offen: LEFT/RIGHT nur gegen den eigenen Export geprüft (nicht Revit/ArchiCAD);
+  Türen ohne Ausführung bleiben beim Standard (kein Raten aus der Platzierung).
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit

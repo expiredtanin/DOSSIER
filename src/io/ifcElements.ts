@@ -77,6 +77,12 @@ export interface IfcOpeningData extends IfcInfo {
   width: number;
   sill: number;
   height: number;
+  /** Ausführung: IfcDoorTypeOperationEnum bzw. IfcWindowTypePartitioningEnum (Bauteil, sonst Typ). */
+  operation: string | null;
+  /** Tür: Aufschlag links (+1) / rechts (−1) der Wandachse, 0 = unbekannt (Rust `ifc_semantic`). */
+  swing: number;
+  /** Tür: Scharnier am Wandanfang (+1) / -ende (−1), 0 = unbekannt. */
+  hinge: number;
 }
 export interface IfcSlabData extends IfcInfo {
   outline: Vec2[];
@@ -117,6 +123,7 @@ interface RawElement extends IfcInfo {
   n: number;
   host?: number;
   openingKind?: "door" | "window" | "hole";
+  operation?: string | null;
   profile?: "rect" | "round";
   longName?: string | null;
   sia?: string | null;
@@ -170,8 +177,19 @@ export function decodeIfcElements(flat: IfcFlat): IfcElementsData | null {
         break;
       case "opening": {
         const host = wallIndex.get(e.host ?? -1);
-        if (host !== undefined && v.length === 4) {
-          out.openings.push({ ...info, host, kind: e.openingKind ?? "hole", position: v[0], width: v[1], sill: v[2], height: v[3] });
+        if (host !== undefined && v.length === 6) {
+          out.openings.push({
+            ...info,
+            host,
+            kind: e.openingKind ?? "hole",
+            position: v[0],
+            width: v[1],
+            sill: v[2],
+            height: v[3],
+            operation: e.operation ?? null,
+            swing: Math.sign(v[4]),
+            hinge: Math.sign(v[5]),
+          });
         }
         break;
       }
@@ -422,7 +440,26 @@ export function ifcElementsToProject(
     const host = walls[o.host];
     if (!host) continue;
     const kind = o.kind === "window" ? "window" : "door";
-    const typeId = o.kind === "door" ? project.doorTypes?.[0]?.id : o.kind === "window" ? project.windowTypes?.[0]?.id : undefined;
+    const op = o.operation ?? "";
+    // Tür: Typ nach Art (Dreh/Schiebe) und Blattzahl aus der Ausführung, sonst der erste Typ.
+    const sliding = op.includes("SLIDING");
+    const leaves = op.startsWith("DOUBLE_DOOR") ? 2 : 1;
+    const doorType =
+      (op ? project.doorTypes?.find((t) => t.kind === (sliding ? "schiebe" : "dreh") && t.leafCount === leaves) : undefined) ??
+      project.doorTypes?.[0];
+    // Fenster: Flügelzahl aus der Teilung (nur senkrechte Standardfälle); Typ mit dieser Flügelzahl, sonst
+    // der erste Typ mit eigener Flügelzahl an der Öffnung.
+    const wings = ({ SINGLE_PANEL: 1, DOUBLE_PANEL_VERTICAL: 2, TRIPLE_PANEL_VERTICAL: 3 } as Record<string, number>)[op];
+    const windowType = (wings ? project.windowTypes?.find((t) => t.wingCount === wings) : undefined) ?? project.windowTypes?.[0];
+    const typeId = o.kind === "door" ? doorType?.id : o.kind === "window" ? windowType?.id : undefined;
+    const doorExtra =
+      o.kind === "door"
+        ? {
+            ...(o.hinge !== 0 ? { hinge: o.hinge > 0 ? ("start" as const) : ("end" as const) } : {}),
+            ...(o.swing !== 0 ? { swing: o.swing > 0 ? ("left" as const) : ("right" as const) } : {}),
+          }
+        : {};
+    const windowExtra = o.kind === "window" && wings && (windowType?.wingCount ?? 1) !== wings ? { wingCount: wings } : {};
     openings.push({
       id: newId("opening"),
       type: "opening",
@@ -435,6 +472,8 @@ export function ifcElementsToProject(
       sillHeight: round(o.sill, 1e-6),
       ...(o.kind === "hole" ? { doorType: "wandoeffnung" as const } : {}),
       ...(typeId ? { typeId } : {}),
+      ...doorExtra,
+      ...windowExtra,
     });
   }
 
