@@ -7,8 +7,11 @@
 //! JSON kennt weder `undefined` noch NaN: fehlende Felder fehlen, nicht endliche Zahlen prüft TS
 //! vor dem Senden (`validateOps`).
 
+use crate::model::Project;
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
+use std::rc::Rc;
 
 /// Eine Änderung am Projekt (Spiegel von `CoreOp` in `core/ops.ts`).
 #[derive(Clone, Debug, PartialEq)]
@@ -90,12 +93,14 @@ fn has_dup(v: Option<&Value>) -> bool {
 #[derive(Clone, Debug, Default)]
 pub struct Document {
     root: Map<String, Value>,
+    /// Typisierte Sicht (Cache); jede Änderung verwirft sie.
+    typed: Option<Rc<Project>>,
 }
 
 impl Document {
     pub fn from_json(text: &str) -> Result<Document, String> {
         match serde_json::from_str::<Value>(text) {
-            Ok(Value::Object(root)) => Ok(Document { root }),
+            Ok(Value::Object(root)) => Ok(Document { root, typed: None }),
             Ok(_) => Err("Projekt ist kein JSON-Objekt".into()),
             Err(e) => Err(e.to_string()),
         }
@@ -103,6 +108,23 @@ impl Document {
 
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self.root).unwrap_or_default()
+    }
+
+    /// Typisierte Sicht des Projekts (gecacht bis zur nächsten Änderung). Fehler = Feld, das dem
+    /// Modell widerspricht (Meldung von serde).
+    pub fn project(&mut self) -> Result<Rc<Project>, String> {
+        if let Some(p) = &self.typed {
+            return Ok(p.clone());
+        }
+        // Die Map wird nur ausgeliehen: `Value::Object` braucht Besitz, daher temporär herausnehmen.
+        let value = Value::Object(std::mem::take(&mut self.root));
+        let parsed = Project::deserialize(&value).map_err(|e| e.to_string());
+        if let Value::Object(m) = value {
+            self.root = m;
+        }
+        let p = Rc::new(parsed?);
+        self.typed = Some(p.clone());
+        Ok(p)
     }
 
     pub fn field(&self, key: &str) -> Option<&Value> {
@@ -167,6 +189,7 @@ impl Document {
 
     /// Wendet `ops` atomar an. Verstösse (neue doppelte ids) → `Err(Meldungen)`, Dokument unverändert.
     pub fn apply(&mut self, ops: &[Op]) -> Result<(), Vec<String>> {
+        self.typed = None;
         // Zustand der berührten Felder sichern (Rücknahme) und Alt-Doppelungen merken.
         let mut saved: Vec<(String, Option<Value>)> = Vec::new();
         let mut had_dup: HashSet<String> = HashSet::new();
@@ -257,6 +280,17 @@ mod tests {
     fn alt_doppelungen_bleiben_aenderbar() {
         let mut d = Document::from_json(r#"{"walls":[{"id":"a"},{"id":"a"}]}"#).unwrap();
         d.apply(&ops(json!([{"kind":"add","collection":"walls","items":[{"id":"z"}]}]))).unwrap();
+    }
+
+    #[test]
+    fn typisierte_sicht_folgt_den_ops() {
+        let text = include_str!("../tests/fixtures/sample_project.json");
+        let mut d = Document::from_json(text).unwrap();
+        let n = d.project().unwrap().walls.len();
+        assert!(n > 0);
+        let id = d.project().unwrap().walls[0].id.clone();
+        d.apply(&ops(json!([{"kind":"remove","collection":"walls","ids":[id]}]))).unwrap();
+        assert_eq!(d.project().unwrap().walls.len(), n - 1);
     }
 
     #[test]

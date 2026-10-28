@@ -133,3 +133,122 @@ mod tests {
         assert_eq!(area_sums(0, &[], &[], f64::NAN, &[]), AreaSums { by_level: vec![], gv: 0.0, parcel: None });
     }
 }
+
+// ── Kennzahlen aus dem Projekt-Dokument ([K4] S2) ───────────────────────────
+
+use crate::model::{DrawingLevelKind, Project, SiaCategory};
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LevelKennzahlen {
+    pub level_id: String,
+    pub name: String,
+    /// Geschossfläche (SIA 416 GF) aus den Räumen.
+    pub gf: f64,
+    /// Anrechenbare Fläche ≈ Nettogeschossfläche NGF.
+    pub agf: f64,
+    pub rooms: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Kennzahlen {
+    pub levels: Vec<LevelKennzahlen>,
+    pub gf: f64,
+    pub agf: f64,
+    pub gv: f64,
+    pub footprint: f64,
+    pub az: Option<f64>,
+    pub uez: Option<f64>,
+}
+
+fn category_index(c: SiaCategory) -> usize {
+    match c {
+        SiaCategory::HNF => 0,
+        SiaCategory::NNF => 1,
+        SiaCategory::VF => 2,
+        SiaCategory::FF => 3,
+        SiaCategory::KGF => 4,
+        SiaCategory::AGF => 5,
+    }
+}
+
+/// Flächen je Geschoss (SIA 416), Gebäudevolumen, Ausnützungs- und Überbauungsziffer.
+pub fn compute(p: &Project) -> Kennzahlen {
+    let mut floors: Vec<&crate::model::DrawingLevel> = p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor).collect();
+    floors.sort_by(|a, b| a.base_elevation.unwrap_or(0.0).partial_cmp(&b.base_elevation.unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
+    let mut level_index: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (i, l) in floors.iter().enumerate() {
+        level_index.entry(l.id.as_str()).or_insert(i);
+    }
+    let all_rooms = p.rooms.as_deref().unwrap_or(&[]);
+    let rooms: Vec<&crate::model::Room> = all_rooms.iter().filter(|r| level_index.contains_key(r.floor_id.as_str())).collect();
+    let rooms_in: Vec<RoomIn> = rooms
+        .iter()
+        .map(|r| RoomIn {
+            level: level_index[r.floor_id.as_str()],
+            category: category_index(r.sia_category),
+            boundary: r.boundary.iter().map(|v| [v.x, v.y]).collect(),
+        })
+        .collect();
+    let solids: Vec<SolidIn> = p
+        .extruded_solids
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|s| SolidIn {
+            subtract: s.operation.as_deref() == Some("subtract"),
+            points: if s.circle.is_some() { vec![] } else { s.points.iter().map(|v| [v.x, v.y]).collect() },
+            circle_r: s.circle.as_ref().map_or(f64::NAN, |c| c.r),
+            height: s.height,
+            taper: s.taper.unwrap_or(0.0),
+        })
+        .collect();
+    let parcel_ring: Vec<[f64; 2]> = p.site_rules.as_ref().map(|r| r.parcel.iter().map(|v| [v.x, v.y]).collect()).unwrap_or_default();
+    let sums = area_sums(floors.len(), &rooms_in, &solids, p.parcel_area.unwrap_or(f64::NAN), &parcel_ring);
+    let levels: Vec<LevelKennzahlen> = floors
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let entries: Vec<(usize, f64)> = (0..CATEGORIES).map(|k| (k, sums.by_level[i][k])).collect();
+            let b = crate::room_area::balance(&entries);
+            LevelKennzahlen {
+                level_id: l.id.clone(),
+                name: l.name.clone(),
+                gf: b.agg_area[2],
+                agf: b.agg_area[1],
+                rooms: rooms.iter().filter(|r| r.floor_id == l.id).count(),
+            }
+        })
+        .collect();
+    let gf: f64 = levels.iter().map(|l| l.gf).sum();
+    let agf: f64 = levels.iter().map(|l| l.agf).sum();
+    let footprint = levels.iter().find(|l| l.gf > 0.0).map_or(0.0, |l| l.gf);
+    Kennzahlen {
+        levels,
+        gf,
+        agf,
+        gv: sums.gv,
+        footprint,
+        az: sums.parcel.filter(|x| *x != 0.0).map(|x| agf / x),
+        uez: sums.parcel.filter(|x| *x != 0.0).map(|x| footprint / x),
+    }
+}
+
+#[cfg(test)]
+mod doc_tests {
+    use super::*;
+
+    #[test]
+    fn kennzahlen_des_beispielprojekts() {
+        let p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        let k = compute(&p);
+        assert!(!k.levels.is_empty());
+        let sum: f64 = k.levels.iter().map(|l| l.gf).sum();
+        assert!((k.gf - sum).abs() < 1e-9);
+        assert!(k.az.is_none() && k.uez.is_none());
+        let with_parcel = Project { parcel_area: Some(1000.0), ..p };
+        let k2 = compute(&with_parcel);
+        assert!((k2.az.unwrap() - k2.agf / 1000.0).abs() < 1e-12);
+    }
+}

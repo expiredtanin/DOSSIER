@@ -19,6 +19,7 @@ web = ["dep:wasm-bindgen", "dep:console_error_panic_hook"]
 
 [dependencies]
 i_overlay = { version = "9.1", default-features = false }
+serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 kernel2d = { path = "../kernel2d" }
 wasm-bindgen = { version = "0.2", optional = true }

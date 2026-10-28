@@ -31,6 +31,7 @@ dependencies = [
  "console_error_panic_hook",
  "i_overlay",
  "kernel2d",
+ "serde",
  "serde_json",
  "wasm-bindgen",
 ]

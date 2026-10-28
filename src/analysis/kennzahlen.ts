@@ -6,14 +6,14 @@
 //  • Ausnützungs-/Überbauungsziffer nur mit `project.parcelArea` oder der Parzellengrenze (`siteRules`).
 //  • Raumprogramm (`project.roomProgram`, Soll) gegen die gezeichneten Räume.
 // Exakt für Prismen/Kegelstümpfe/Kreise, Näherung sonst (Fasen/Rundungen). Raumflächen je
-// Geschoss und Kategorie, Volumen und Parzellenfläche rechnet der Rust-Kern
-// (`src-tauri/core/src/kennzahlen.rs`); die Zusammenfassung nach SIA 416 (NF/NGF/GF) bleibt bei
-// `geometry/roomArea.ts::balance`, die auch Raumstempel, Bilanz, Raumliste und IFC nutzen.
+// Geschoss und Kategorie, Volumen, Parzellenfläche und die SIA-416-Zusammenfassung rechnet der
+// Rust-Kern auf dem Projekt-Dokument (`src-tauri/core/src/kennzahlen.rs`).
 
 import type { ExtrudedSolid, Project } from "../model/types";
-import { SIA_CATEGORIES, balance, polygonArea } from "../geometry/roomArea";
+import { polygonArea } from "../geometry/roomArea";
 import { core } from "../engine/coreWasm";
 import { FlatWriter } from "../geometry/coreFlat";
+import { documentFor } from "../core/document";
 
 export interface LevelKennzahlen {
   levelId: string;
@@ -46,56 +46,12 @@ export function solidVolume(s: ExtrudedSolid): number {
 
 const finite = (n: number): number => (Number.isFinite(n) ? n : 0);
 
-/** Körper flach (`web/kennzahlen.rs`). */
-function encodeSolids(solids: ExtrudedSolid[]): Float64Array {
-  const w = new FlatWriter().num(solids.length);
-  for (const s of solids) {
-    w.num(s.operation === "subtract" ? 1 : 0, s.circle ? s.circle.r : Number.NaN, s.height, s.taper ?? 0).ring(s.circle ? [] : s.points);
-  }
-  return w.done();
-}
-
+/**
+ * Flächen je Geschoss (SIA 416), Gebäudevolumen, Ausnützungs- und Überbauungsziffer. Rechnet der
+ * Kern auf dem Projekt-Dokument (`kennzahlen.rs`, [K4] S2).
+ */
 export function computeKennzahlen(project: Project): Kennzahlen {
-  const floors = project.drawingLevels
-    .filter((l) => l.kind === "floor")
-    .slice()
-    .sort((a, b) => (a.baseElevation ?? 0) - (b.baseElevation ?? 0));
-  const levelIndex = new Map<string, number>();
-  floors.forEach((l, i) => levelIndex.has(l.id) || levelIndex.set(l.id, i));
-  const rooms = (project.rooms ?? []).filter((r) => levelIndex.has(r.floorId));
-  const rw = new FlatWriter().num(rooms.length);
-  for (const r of rooms) {
-    const k = SIA_CATEGORIES.indexOf(r.siaCategory);
-    // Unbekannte Kategorie → Index ausserhalb, zählt im Kern nicht.
-    rw.num(levelIndex.get(r.floorId)!, k < 0 ? SIA_CATEGORIES.length : k).ring(r.boundary);
-  }
-  const parcelRing = project.siteRules?.parcel ?? [];
-  const sums = core().kz_area_sums(
-    floors.length,
-    rw.done(),
-    encodeSolids(project.extrudedSolids ?? []),
-    project.parcelArea ?? Number.NaN,
-    new FlatWriter().pts(Array.isArray(parcelRing) ? parcelRing : []).done(),
-  );
-  const gv = sums[0];
-  const parcel = Number.isNaN(sums[1]) ? null : sums[1];
-  const levels: LevelKennzahlen[] = floors.map((l, i) => {
-    // Kategorie-Summen als Einträge der SIA-416-Bilanz → GF und NGF.
-    const b = balance(SIA_CATEGORIES.map((category, k) => ({ category, area: sums[2 + i * SIA_CATEGORIES.length + k] })));
-    return { levelId: l.id, name: l.name, gf: b.byKey.GF, agf: b.byKey.NGF, rooms: rooms.filter((r) => r.floorId === l.id).length };
-  });
-  const gf = levels.reduce((s, l) => s + l.gf, 0);
-  const agf = levels.reduce((s, l) => s + l.agf, 0);
-  const footprint = levels.find((l) => l.gf > 0)?.gf ?? 0;
-  return {
-    levels,
-    gf,
-    agf,
-    gv,
-    footprint,
-    az: parcel ? agf / parcel : null,
-    uez: parcel ? footprint / parcel : null,
-  };
+  return documentFor(project).kennzahlen();
 }
 
 export type ProgramStatus = "ok" | "zu klein" | "zu gross" | "fehlt" | "zu wenige" | "zu viele";

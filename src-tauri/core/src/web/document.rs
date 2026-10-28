@@ -61,3 +61,11 @@ pub fn doc_apply(h: u32, ops_json: &str) -> String {
 pub fn doc_json(h: u32) -> String {
     with_doc(h, |d| d.to_json()).unwrap_or_default()
 }
+
+/// Kennzahlen des Projekts als JSON (leer bei Fehler: Dokument nicht offen oder Modell passt nicht).
+#[wasm_bindgen]
+pub fn doc_kennzahlen(h: u32) -> String {
+    with_doc(h, |d| d.project().ok().map(|p| serde_json::to_string(&crate::kennzahlen::compute(&p)).unwrap_or_default()))
+        .flatten()
+        .unwrap_or_default()
+}

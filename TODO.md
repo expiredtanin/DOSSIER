@@ -125,9 +125,13 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   - ✅ **S1 Dokument im Kern** (28.10.): `document.rs` hält das Projekt als JSON-Baum, `core/document.ts` spiegelt jede
     Änderung von `store.project` (setProject, Laden, Undo/Redo) als Ops (`diffToOps` → `doc_apply`); Selbstheilung durch Neuöffnen.
     Test: 300 Zufallsänderungen, Kern-JSON == TS-Projekt. (Spiegel, TS ist noch Quelle der Änderungen.)
-  - ○ **S2 Ableitungen lesen das Dokument**: typisierte Sicht (serde) je Domäne; Plan/Schnitt/Ansicht, 3D, Kennzahlen, Export
-    rechnen mit `doc`-Handle statt mit flach gesammelten Arrays; TS-Sammler/-Adapter werden gelöscht ([K3d] hängt hier dran:
-    Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
+  - ◐ **S2 Ableitungen lesen das Dokument** (28.10.): typisiertes Rust-Modell `model/` (`generated.rs` aus den TS-Typen per
+    `scripts/gen-rust-model.py`, `manual.rs` für getaggte Unions; Hin-und-zurück-Test gegen das Beispielprojekt mit
+    `deny_unknown_fields`), `Document::project()` als gecachte typisierte Sicht, `documentFor(project)` (TS) hält ein gemeinsames
+    Dokument per Differenz aktuell. Erster Verbraucher: Kennzahlen (`kennzahlen.rs::compute`, TS-Sammler gelöscht).
+    Nächste: Baurecht/Footprint, Sonnenstand, Raumprogramm, danach Plan/Schnitt/Ansicht, 3D, Export.
+    Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
+    ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
   - ○ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
   - ○ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/

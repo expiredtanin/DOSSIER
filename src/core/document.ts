@@ -7,6 +7,7 @@
 import type { Project } from "../model/types";
 import { core } from "../engine/coreWasm";
 import { diffToOps } from "./ops";
+import type { Kennzahlen } from "../analysis/kennzahlen";
 
 export class ProjectDocument {
   private handle = 0;
@@ -45,6 +46,13 @@ export class ProjectDocument {
     }
   }
 
+  /** Kennzahlen aus dem Kern (`kennzahlen.rs`). */
+  kennzahlen(): Kennzahlen {
+    const text = this.handle ? core().doc_kennzahlen(this.handle) : "";
+    if (!text) throw new Error("Kennzahlen: Projekt passt nicht zum Kern-Modell");
+    return JSON.parse(text) as Kennzahlen;
+  }
+
   /** Das Dokument als JSON-Text (Test, Export). */
   json(): string {
     return this.handle ? core().doc_json(this.handle) : "";
@@ -54,4 +62,17 @@ export class ProjectDocument {
     if (this.handle) core().doc_close(this.handle);
     this.handle = 0;
   }
+}
+
+let shared: ProjectDocument | null = null;
+
+/**
+ * Das gemeinsame Kern-Dokument, auf den Stand von `project` gebracht. Der Abgleich läuft über die
+ * Differenz zum zuletzt gesehenen Projekt (Referenzvergleich, unveränderte Teile kosten nichts);
+ * wechselt ein Aufrufer zwischen sehr verschiedenen Projekten, ist es nur langsamer, nie falsch.
+ */
+export function documentFor(project: Project): ProjectDocument {
+  if (!shared) shared = new ProjectDocument(project);
+  else shared.sync(project);
+  return shared;
 }
