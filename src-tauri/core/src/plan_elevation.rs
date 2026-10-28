@@ -19,7 +19,24 @@
 //!
 //! ## XOR-Umriss
 //! `xor_outline(polys)` mit `[n, (k, u, v …) × n]` → `[e, (ax, ay, bx, by) × e]`.
+//!
+//! ## Flächen
+//! `faces(frame, walls, slabs, roofs)`; `frame = [Px,Py,Pz, Nx,Ny,Nz, Ux,Uy,Uz]` (Welt, Y oben).
+//! ```text
+//! walls  [n, (sx, sz, ex, ez, dicke, hoehe, basis) × n]
+//! slabs  [n, (zUnten, zOben, k, x, z …) × n]
+//! roofs  [n, (nFl, nGiebel, (k, x, y, z …) × nFl, (k, x, y, z …) × nGiebel) × n]   Modell [x, y, Höhe]
+//! → [m, (rolle 0 Wand|1 Decke|2 Dach, quelle, tiefe, tiefeMin, tiefeMax, nx, ny, nz, k, u, v …) × m]
+//! ```
+//! Reihenfolge: Wände, Decken, Dächer (je Quelle in Modellreihenfolge); nur sichtbare Flächen
+//! (Rückseiten-Culling, Tiefe > 0).
+//!
+//! ## Eck-Verlängerung
+//! `wall_extensions(in)` mit `in = [n, (geschoss, sx, sy, ex, ey, halbe dicke) × n]` →
+//! `[n, (verlStart, verlEnde) × n]`: Wandenden bis zur Aussenfläche der dicksten anstossenden Wand
+//! desselben Geschosses (`wallCornerExtensions`).
 
+use crate::jsmath::{hypot, hypot2};
 use crate::jsnum::{max, min, round};
 use std::collections::HashMap;
 
@@ -374,6 +391,325 @@ pub fn xor_outline(polys: &[f64]) -> Vec<f64> {
     f
 }
 
+// ── Flächen ────────────────────────────────────────────────────────────────
+
+const FACING_EPS: f64 = 1e-4;
+type V3 = [f64; 3];
+
+struct Frame {
+    p: V3,
+    n: V3,
+    u: V3,
+}
+
+struct Projected {
+    role: u8,
+    src: usize,
+    depth: f64,
+    depth_min: f64,
+    depth_max: f64,
+    normal: V3,
+    pts: Vec<P>,
+}
+
+fn normalize3(a: V3) -> V3 {
+    let l = hypot(&a);
+    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
+    [a[0] / l, a[1] / l, a[2] / l]
+}
+
+fn neg(a: V3) -> V3 {
+    [-a[0], -a[1], -a[2]]
+}
+
+fn project_point(f: &Frame, w: V3) -> (f64, f64, f64) {
+    let rx = w[0] - f.p[0];
+    let ry = w[1] - f.p[1];
+    let rz = w[2] - f.p[2];
+    (
+        rx * f.u[0] + ry * f.u[1] + rz * f.u[2],
+        w[1],
+        rx * f.n[0] + ry * f.n[1] + rz * f.n[2],
+    )
+}
+
+fn project_face(f: &Frame, poly: &[V3], normal: V3, role: u8, src: usize) -> Option<Projected> {
+    let facing = f.n[0] * normal[0] + f.n[1] * normal[1] + f.n[2] * normal[2];
+    if facing >= -FACING_EPS {
+        return None;
+    }
+    let mut pts = Vec::with_capacity(poly.len());
+    let (mut sum, mut dmin, mut dmax) = (0.0, f64::INFINITY, f64::NEG_INFINITY);
+    for &w in poly {
+        let (u, v, d) = project_point(f, w);
+        pts.push((u, v));
+        sum += d;
+        dmin = min(dmin, d);
+        dmax = max(dmax, d);
+    }
+    let depth = sum / poly.len() as f64;
+    if depth <= EPS {
+        return None;
+    }
+    Some(Projected { role, src, depth, depth_min: dmin, depth_max: dmax, normal, pts })
+}
+
+fn wall_faces(f: &Frame, w: &[f64], src: usize, out: &mut Vec<Projected>) {
+    let (sx, sz, ex, ez) = (w[0], w[1], w[2], w[3]);
+    let ax = ex - sx;
+    let az = ez - sz;
+    let len = hypot2(ax, az);
+    if len < 1e-9 || w[5] <= EPS {
+        return;
+    }
+    let a_hat: V3 = [ax / len, 0.0, az / len];
+    let n_hat: V3 = [az / len, 0.0, -ax / len];
+    let ht = w[4] / 2.0;
+    let zb = w[6];
+    let zt = w[6] + w[5];
+    let corner = |s_along: f64, t_off: f64, y: f64| -> V3 {
+        [sx + a_hat[0] * s_along + n_hat[0] * t_off, y, sz + a_hat[2] * s_along + n_hat[2] * t_off]
+    };
+    let faces: [(V3, [V3; 4]); 6] = [
+        (n_hat, [corner(0.0, ht, zb), corner(len, ht, zb), corner(len, ht, zt), corner(0.0, ht, zt)]),
+        (neg(n_hat), [corner(0.0, -ht, zb), corner(0.0, -ht, zt), corner(len, -ht, zt), corner(len, -ht, zb)]),
+        (neg(a_hat), [corner(0.0, -ht, zb), corner(0.0, ht, zb), corner(0.0, ht, zt), corner(0.0, -ht, zt)]),
+        (a_hat, [corner(len, -ht, zb), corner(len, -ht, zt), corner(len, ht, zt), corner(len, ht, zb)]),
+        ([0.0, 1.0, 0.0], [corner(0.0, -ht, zt), corner(0.0, ht, zt), corner(len, ht, zt), corner(len, -ht, zt)]),
+        ([0.0, -1.0, 0.0], [corner(0.0, -ht, zb), corner(len, -ht, zb), corner(len, ht, zb), corner(0.0, ht, zb)]),
+    ];
+    for (normal, poly) in faces {
+        if let Some(p) = project_face(f, &poly, normal, 0, src) {
+            out.push(p);
+        }
+    }
+}
+
+fn slab_faces(f: &Frame, z_bottom: f64, z_top: f64, outline: &[P], src: usize, out: &mut Vec<Projected>) {
+    let n = outline.len();
+    if n < 3 || z_top - z_bottom <= EPS {
+        return;
+    }
+    let (mut cx, mut cz) = (0.0, 0.0);
+    for p in outline {
+        cx += p.0;
+        cz += p.1;
+    }
+    cx /= n as f64;
+    cz /= n as f64;
+    let bottom: Vec<V3> = outline.iter().map(|p| [p.0, z_bottom, p.1]).collect();
+    let top: Vec<V3> = outline.iter().map(|p| [p.0, z_top, p.1]).collect();
+    let mut push = |poly: &[V3], normal: V3| {
+        if let Some(p) = project_face(f, poly, normal, 1, src) {
+            out.push(p);
+        }
+    };
+    push(&top, [0.0, 1.0, 0.0]);
+    let rev: Vec<V3> = bottom.iter().rev().copied().collect();
+    push(&rev, [0.0, -1.0, 0.0]);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let ex = outline[j].0 - outline[i].0;
+        let ez = outline[j].1 - outline[i].1;
+        let mut m = normalize3([ez, 0.0, -ex]);
+        let mid_x = (outline[i].0 + outline[j].0) / 2.0;
+        let mid_z = (outline[i].1 + outline[j].1) / 2.0;
+        if m[0] * (mid_x - cx) + m[2] * (mid_z - cz) < 0.0 {
+            m = neg(m);
+        }
+        push(&[bottom[i], bottom[j], top[j], top[i]], m);
+    }
+}
+
+fn newell(poly: &[V3]) -> V3 {
+    let (mut nx, mut ny, mut nz) = (0.0, 0.0, 0.0);
+    for i in 0..poly.len() {
+        let a = poly[i];
+        let b = poly[(i + 1) % poly.len()];
+        nx += (a[1] - b[1]) * (a[2] + b[2]);
+        ny += (a[2] - b[2]) * (a[0] + b[0]);
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    normalize3([nx, ny, nz])
+}
+
+/// Liest `k, (x, y, z) × k` ab `i`; Modell [x, y, Höhe] → Welt [x, Höhe, y].
+fn read_world_poly(f: &[f64], i: &mut usize) -> Option<Vec<V3>> {
+    let k = *f.get(*i)?;
+    if k < 0.0 || k.fract() != 0.0 {
+        return None;
+    }
+    let k = k as usize;
+    *i += 1;
+    if *i + 3 * k > f.len() {
+        return None;
+    }
+    let poly = (0..k).map(|j| [f[*i + 3 * j], f[*i + 3 * j + 2], f[*i + 3 * j + 1]]).collect();
+    *i += 3 * k;
+    Some(poly)
+}
+
+fn roof_faces(f: &Frame, planes: &[Vec<V3>], gables: &[Vec<V3>], src: usize, out: &mut Vec<Projected>) {
+    let (mut cx, mut cy, mut cz, mut cn) = (0.0, 0.0, 0.0, 0usize);
+    for pl in planes {
+        for p in pl {
+            // Welt [x, Höhe, y] → Modell-Reihenfolge der TS-Summen: p[0], p[2], p[1].
+            cx += p[0];
+            cy += p[1];
+            cz += p[2];
+            cn += 1;
+        }
+    }
+    if cn == 0 {
+        return;
+    }
+    let cnf = cn as f64;
+    cx /= cnf;
+    cy /= cnf;
+    cz /= cnf;
+    for poly in planes {
+        let mut n = newell(poly);
+        if n[1] < 0.0 {
+            n = neg(n);
+        }
+        if let Some(p) = project_face(f, poly, n, 2, src) {
+            out.push(p);
+        }
+    }
+    for poly in gables {
+        if poly.len() < 3 {
+            continue;
+        }
+        let mut n = newell(poly);
+        let to_c = [cx - poly[0][0], cy - poly[0][1], cz - poly[0][2]];
+        if n[0] * to_c[0] + n[1] * to_c[1] + n[2] * to_c[2] > 0.0 {
+            n = neg(n);
+        }
+        if let Some(p) = project_face(f, poly, n, 2, src) {
+            out.push(p);
+        }
+    }
+}
+
+fn counted(f: &[f64]) -> Option<usize> {
+    let n = *f.first()?;
+    (n >= 0.0 && n.fract() == 0.0 && f.iter().all(|v| v.is_finite())).then_some(n as usize)
+}
+
+pub fn faces(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Vec<f64> {
+    if frame.len() != 9 || frame.iter().any(|v| !v.is_finite()) {
+        return Vec::new();
+    }
+    let fr = Frame {
+        p: [frame[0], frame[1], frame[2]],
+        n: [frame[3], frame[4], frame[5]],
+        u: [frame[6], frame[7], frame[8]],
+    };
+    let (Some(nw), Some(ns), Some(nr)) = (counted(walls), counted(slabs), counted(roofs)) else {
+        return Vec::new();
+    };
+    if walls.len() != 1 + 7 * nw {
+        return Vec::new();
+    }
+    let mut out: Vec<Projected> = Vec::new();
+    for k in 0..nw {
+        wall_faces(&fr, &walls[1 + 7 * k..8 + 7 * k], k, &mut out);
+    }
+    let mut i = 1;
+    for k in 0..ns {
+        let Some(&kk) = slabs.get(i + 2) else { return Vec::new() };
+        if kk < 0.0 || kk.fract() != 0.0 || i + 3 + 2 * kk as usize > slabs.len() {
+            return Vec::new();
+        }
+        let kk = kk as usize;
+        let outline: Vec<P> = (0..kk).map(|j| (slabs[i + 3 + 2 * j], slabs[i + 4 + 2 * j])).collect();
+        slab_faces(&fr, slabs[i], slabs[i + 1], &outline, k, &mut out);
+        i += 3 + 2 * kk;
+    }
+    if i != slabs.len() {
+        return Vec::new();
+    }
+    let mut i = 1;
+    for k in 0..nr {
+        let (Some(&nf), Some(&ng)) = (roofs.get(i), roofs.get(i + 1)) else { return Vec::new() };
+        if nf < 0.0 || ng < 0.0 || nf.fract() != 0.0 || ng.fract() != 0.0 {
+            return Vec::new();
+        }
+        i += 2;
+        let mut planes = Vec::new();
+        for _ in 0..nf as usize {
+            let Some(p) = read_world_poly(roofs, &mut i) else { return Vec::new() };
+            planes.push(p);
+        }
+        let mut gables = Vec::new();
+        for _ in 0..ng as usize {
+            let Some(p) = read_world_poly(roofs, &mut i) else { return Vec::new() };
+            gables.push(p);
+        }
+        roof_faces(&fr, &planes, &gables, k, &mut out);
+    }
+    if i != roofs.len() {
+        return Vec::new();
+    }
+    let mut f = vec![out.len() as f64];
+    for p in &out {
+        f.extend([
+            p.role as f64, p.src as f64, p.depth, p.depth_min, p.depth_max,
+            p.normal[0], p.normal[1], p.normal[2], p.pts.len() as f64,
+        ]);
+        for q in &p.pts {
+            f.extend([q.0, q.1]);
+        }
+    }
+    f
+}
+
+// ── Eck-Verlängerung ───────────────────────────────────────────────────────
+
+fn body_contains(w: &[f64], half: f64, p: P) -> bool {
+    let dx = w[3] - w[1];
+    let dy = w[4] - w[2];
+    let len = hypot2(dx, dy);
+    if len < 1e-9 {
+        return false;
+    }
+    let ux = dx / len;
+    let uy = dy / len;
+    let rx = p.0 - w[1];
+    let ry = p.1 - w[2];
+    let along = rx * ux + ry * uy;
+    let perp = (-uy * rx + ux * ry).abs();
+    along >= -1e-6 && along <= len + 1e-6 && perp <= half + 1e-6
+}
+
+pub fn wall_extensions(inp: &[f64]) -> Vec<f64> {
+    let Some(n) = counted(inp) else { return Vec::new() };
+    if inp.len() != 1 + 6 * n {
+        return Vec::new();
+    }
+    let w = |k: usize| &inp[1 + 6 * k..7 + 6 * k];
+    let mut f = vec![n as f64];
+    for k in 0..n {
+        let me = w(k);
+        let ext_at = |p: P| -> f64 {
+            let mut max_other = 0.0;
+            for o in 0..n {
+                let other = w(o);
+                if o == k || other[0] != me[0] {
+                    continue;
+                }
+                if body_contains(other, other[5], p) {
+                    max_other = max(max_other, other[5]);
+                }
+            }
+            max_other
+        };
+        f.push(ext_at((me[1], me[2])));
+        f.push(ext_at((me[3], me[4])));
+    }
+    f
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +735,31 @@ mod tests {
         // Oben/unten je 2 Teilstücke (an der Naht nicht verschmolzen) + 2 senkrechte Aussenkanten;
         // die Innenkante bei u=1 hebt sich auf.
         assert_eq!(f[0], 6.0);
+    }
+
+    #[test]
+    fn wand_sichtbar_nur_aus_der_sueden() {
+        // Betrachter bei z = -2, Blick +z; Wand 4 m lang bei z = 0, 3 m hoch.
+        let frame = [-1.0, 0.0, -2.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
+        let walls = [1.0, 0.0, 0.0, 4.0, 0.0, 0.2, 3.0, 0.0];
+        let f = faces(&frame, &walls, &[0.0], &[0.0]);
+        assert_eq!(f[0], 1.0);
+        assert_eq!((f[1], f[2]), (0.0, 0.0)); // Rolle Wand, Quelle 0
+        assert!((f[3] - 1.9).abs() < 1e-9); // Südseite bei z = -0.1
+        // hinter dem Betrachter: nichts
+        let walls = [1.0, 0.0, -5.0, 4.0, -5.0, 0.2, 3.0, 0.0];
+        assert_eq!(faces(&frame, &walls, &[0.0], &[0.0]), vec![0.0]);
+    }
+
+    #[test]
+    fn t_stoss_verlaengert_das_ende() {
+        // Wand 0 endet an der Seite von Wand 1 (Dicke 0.4): Verlängerung = halbe Dicke 0.2.
+        let f = wall_extensions(&[
+            2.0, //
+            0.0, 0.0, 0.0, 3.0, 0.0, 0.1, // Wand 0 endet bei (3, 0)
+            0.0, 3.0, -2.0, 3.0, 2.0, 0.2, // Wand 1 läuft durch (3, 0)
+        ]);
+        assert_eq!(f, vec![2.0, 0.0, 0.2, 0.0, 0.0]);
     }
 
     #[test]

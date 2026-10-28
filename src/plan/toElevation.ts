@@ -76,7 +76,7 @@ const FRAME_MM = 0.18;
  * zeichnungs-Look) bleibt alles weiss — nur Kontur trägt Information. Im
  * FARBIG-Modus tragen die Flächen echte Bauteilfarbe: Wand/Dach die dominante
  * Schicht (s. {@link WorldFace.fill}, gesetzt in {@link wallWorldFaces}/
- * {@link roofWorldFacesAll}), Fenster/Türen feste, an `toWalls3d.ts`
+ * {@link collectRoofFaces}), Fenster/Türen feste, an `toWalls3d.ts`
  * (FRAME_RGB/GLASS_RGB/SILL_RGB/DOOR_LEAF_RGB) angelehnte Töne, damit Ansicht
  * und 3D konsistent wirken.
  */
@@ -179,270 +179,10 @@ export function projectPoint(
   };
 }
 
-// ── Welt-Flächen aus dem geflachten Modell ─────────────────────────────────
+// ── Flächen aus dem geflachten Modell ──────────────────────────────────────
 
 /** Rolle einer Fläche (steuert Füllung/Stil in der Ansicht). */
 export type FaceRole = "wall" | "slab" | "roof";
-
-/** Eine orientierte Welt-Fläche (konvexes Polygon + Aussennormale). */
-export interface WorldFace {
-  poly: V3[];
-  normal: V3;
-  role: FaceRole;
-  /** Ursprungs-Wand (nur role "wall") — für Auswahl/Painter-Identität. */
-  wallId?: string;
-  /** Ursprungs-Decke (nur role "slab"). */
-  ceilingId?: string;
-  /** Ursprungs-Dach (nur role "roof"). */
-  roofId?: string;
-  /**
-   * Bauteil-Farbe (dominante Wandschicht bzw. äusserste Dach-/Eindeckungs-
-   * schicht) für den Farbig-Modus (s. {@link ElevationOptions.mono}). Fehlt
-   * ⇒ Fallback auf die neutrale Rollen-Füllung.
-   */
-  fill?: RRgb;
-}
-
-function normalize3(a: V3): V3 {
-  const l = Math.hypot(a[0], a[1], a[2]) || 1;
-  return [a[0] / l, a[1] / l, a[2] / l];
-}
-
-/**
- * Die sechs Quader-Flächen EINER Wand-Box (RWall) in Weltkoordinaten mit
- * Aussennormalen: zwei Langseiten (Fassaden-Aussenflächen, Normale horizontal
- * quer zur Wand), zwei Stirnkappen (Normale entlang der Achse), Deckel/Boden.
- */
-export function wallWorldFaces(w: RWall): WorldFace[] {
-  const sx = w.start[0];
-  const sz = w.start[1];
-  const ex = w.end[0];
-  const ez = w.end[1];
-  const ax = ex - sx;
-  const az = ez - sz;
-  const len = Math.hypot(ax, az);
-  if (len < 1e-9 || w.height <= EPS) return [];
-  const aHat: V3 = [ax / len, 0, az / len];
-  const nHat: V3 = [az / len, 0, -ax / len]; // horizontale Quer-Normale
-  const ht = w.thickness / 2;
-  const zb = w.baseElevation;
-  const zt = w.baseElevation + w.height;
-  // Ecke bei (Achsen-Meter sAlong, Quer-Versatz tOff, Höhe y).
-  const corner = (sAlong: number, tOff: number, y: number): V3 => [
-    sx + aHat[0] * sAlong + nHat[0] * tOff,
-    y,
-    sz + aHat[2] * sAlong + nHat[2] * tOff,
-  ];
-  const faces: WorldFace[] = [];
-  // +Quer (Aussenfläche A)
-  faces.push({
-    role: "wall",
-    normal: nHat,
-    poly: [corner(0, ht, zb), corner(len, ht, zb), corner(len, ht, zt), corner(0, ht, zt)],
-  });
-  // −Quer (Aussenfläche B)
-  faces.push({
-    role: "wall",
-    normal: [-nHat[0], -nHat[1], -nHat[2]],
-    poly: [corner(0, -ht, zb), corner(0, -ht, zt), corner(len, -ht, zt), corner(len, -ht, zb)],
-  });
-  // Stirn Start (−Achse)
-  faces.push({
-    role: "wall",
-    normal: [-aHat[0], -aHat[1], -aHat[2]],
-    poly: [corner(0, -ht, zb), corner(0, ht, zb), corner(0, ht, zt), corner(0, -ht, zt)],
-  });
-  // Stirn Ende (+Achse)
-  faces.push({
-    role: "wall",
-    normal: aHat,
-    poly: [corner(len, -ht, zb), corner(len, -ht, zt), corner(len, ht, zt), corner(len, ht, zb)],
-  });
-  // Deckel (+Höhe)
-  faces.push({
-    role: "wall",
-    normal: [0, 1, 0],
-    poly: [corner(0, -ht, zt), corner(0, ht, zt), corner(len, ht, zt), corner(len, -ht, zt)],
-  });
-  // Boden (−Höhe)
-  faces.push({
-    role: "wall",
-    normal: [0, -1, 0],
-    poly: [corner(0, -ht, zb), corner(len, -ht, zb), corner(len, ht, zb), corner(0, ht, zb)],
-  });
-  for (const f of faces) {
-    f.wallId = w.wallId;
-    f.fill = w.color;
-  }
-  return faces;
-}
-
-/**
- * Enthält der Wandkörper von `w` (Achse ± `half`) den Punkt `p`? Perpendikular-
- * abstand ≤ half UND Projektion innerhalb der Achsenlänge (mit half-Toleranz an
- * den Enden). Basis der T-/L-/X-Stoss-Erkennung für die Eckverlängerung.
- */
-function wallBodyContains(w: Wall, half: number, p: Vec2): boolean {
-  const dx = w.end.x - w.start.x;
-  const dy = w.end.y - w.start.y;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-9) return false;
-  const ux = dx / len;
-  const uy = dy / len;
-  const rx = p.x - w.start.x;
-  const ry = p.y - w.start.y;
-  const along = rx * ux + ry * uy;
-  const perp = Math.abs(-uy * rx + ux * ry);
-  return along >= -1e-6 && along <= len + 1e-6 && perp <= half + 1e-6;
-}
-
-/**
- * Achsen-Verlängerung je Wandende (Meter, ≥0) für die ANSICHT: axis-zu-axis
- * gebaute Wandboxen (s. {@link wallWorldFaces}) decken einen Eckknoten nicht
- * voll ab — an jeder Ecke bleibt ein dreieckiger Spalt der Grösse der halben
- * Dicke der anschliessenden Wand (sichtbar als Kerbe in der Silhouette bzw. als
- * Lücke im Schlagschatten). Jedes Wandende wird darum bis zur AUSSENFLÄCHE der
- * dicksten anstossenden anderen Wand verlängert — die Boxen überlappen dann im
- * Eckbereich vollständig.
- *
- * Erfasst L-Ecken (Endpunkt teilt sich mit anderem Endpunkt), T-Stösse (Ende
- * trifft die SEITE/Achse einer durchlaufenden Wand) UND versetzte Stösse — über
- * {@link wallBodyContains} statt exakter Endpunkt-Gleichheit. Bewusst eine
- * EIGENE, tolerante Näherung statt der Gehrungs-Logik aus `model/joins.ts` (die
- * bedient 2D-Grundriss/3D-Viewer und bleibt unangetastet): die Ansicht ist ein
- * Painter-Silhouetten-Verfahren, dem eine leichte Eck-Überlappung nichts
- * ausmacht — anders als Grundriss-Poché/Schnitt-Dominanz, die exakte Gehrung
- * brauchen.
- */
-function wallCornerExtensions(project: Project, walls: Wall[]): Map<string, { start: number; end: number }> {
-  const thicknessOf = (w: Wall): number => {
-    try {
-      return wallTypeThickness(getWallType(project, w));
-    } catch {
-      return 0.2;
-    }
-  };
-  const halves = new Map<string, number>();
-  for (const w of walls) halves.set(w.id, thicknessOf(w) / 2);
-  const extAt = (w: Wall, p: Vec2): number => {
-    let maxOther = 0;
-    for (const other of walls) {
-      if (other.id === w.id) continue;
-      const ho = halves.get(other.id) ?? 0.1;
-      if (wallBodyContains(other, ho, p)) maxOther = Math.max(maxOther, ho);
-    }
-    return maxOther;
-  };
-  const out = new Map<string, { start: number; end: number }>();
-  for (const w of walls) out.set(w.id, { start: extAt(w, w.start), end: extAt(w, w.end) });
-  return out;
-}
-
-/**
- * Verlängert die (offset-freien, s. {@link resolveWallBands} `layered:false`)
- * Wand-Boxen des Ansichts-Modells an gemeinsamen Eck-Knoten (s.
- * {@link wallCornerExtensions}), damit Fassaden-Ecken in der Ansicht ohne
- * dreieckige Kerbe/Schattenlücke erscheinen. Wirkt PRO GESCHOSS (`floorId`),
- * damit sich nur Wände desselben Grundrisses zu Ecken verbinden. Mutiert die
- * `start`/`end`-Koordinaten der jeweils äussersten Teilstücke (Pfeiler vor der
- * ersten bzw. nach der letzten Öffnung) in-place.
- *
- * WICHTIG — nur Wände verlängern, die etwa PARALLEL zur Ansichtsebene laufen
- * (Fassaden-Silhouette): eine facaden-SENKRECHTE Wand (Innenwand quer zur
- * Blickrichtung) würde sonst entlang ihrer Achse in die Tiefe — u. U. VOR die
- * Fassade auf den Betrachter zu — geschoben und erschiene als störender
- * Balken. `uModel` ist die Ansichts-u-Achse in Grundriss-Koordinaten (Modell
- * x,y = Welt x,z), gegen die die Wandachse projiziert wird.
- */
-function extendWallCornersForElevation(project: Project, rwalls: RWall[], uModel: Vec2): void {
-  const byFloor = new Map<string, Wall[]>();
-  for (const w of project.walls) {
-    const key = w.floorId ?? "";
-    const list = byFloor.get(key);
-    if (list) list.push(w);
-    else byFloor.set(key, [w]);
-  }
-  const byWallId = new Map<string, RWall[]>();
-  for (const rw of rwalls) {
-    const list = byWallId.get(rw.wallId);
-    if (list) list.push(rw);
-    else byWallId.set(rw.wallId, [rw]);
-  }
-  const closeTo = (a: RVec2, b: Vec2): boolean => Math.abs(a[0] - b.x) < 1e-6 && Math.abs(a[1] - b.y) < 1e-6;
-  for (const floorWalls of byFloor.values()) {
-    const ext = wallCornerExtensions(project, floorWalls);
-    for (const w of floorWalls) {
-      const e = ext.get(w.id);
-      if (!e || (e.start <= EPS && e.end <= EPS)) continue;
-      const pieces = byWallId.get(w.id);
-      if (!pieces) continue;
-      const dx = w.end.x - w.start.x;
-      const dz = w.end.y - w.start.y;
-      const len = Math.hypot(dx, dz);
-      if (len < 1e-9) continue;
-      const ux = dx / len;
-      const uz = dz / len;
-      // Parallelität zur Ansichtsebene: |Achse · u| ≈ 1 (parallel) … 0 (senkrecht).
-      // Facaden-senkrechte Wände NICHT verlängern (sonst Tiefen-Protrusion).
-      if (Math.abs(ux * uModel.x + uz * uModel.y) < 0.35) continue;
-      if (e.start > EPS) {
-        const first = pieces.find((p) => closeTo(p.start, w.start));
-        if (first) first.start = [first.start[0] - ux * e.start, first.start[1] - uz * e.start];
-      }
-      if (e.end > EPS) {
-        const last = pieces.find((p) => closeTo(p.end, w.end));
-        if (last) last.end = [last.end[0] + ux * e.end, last.end[1] + uz * e.end];
-      }
-    }
-  }
-}
-
-/**
- * Die Flächen EINER Deckenplatte (RSlab): Deckel + Boden (Umriss bei zTop/zBottom)
- * und je Umrisskante eine Seitenfläche (Stirn). Die Seitennormalen werden über
- * den Grundriss-Schwerpunkt nach AUSSEN orientiert (unabhängig von der Umriss-
- * Windung). Der Umriss (Modell x,y) wird als Welt (x, y=Höhe, z=y) gehoben.
- */
-export function slabWorldFaces(s: RSlab): WorldFace[] {
-  const n = s.outline.length;
-  if (n < 3 || s.zTop - s.zBottom <= EPS) return [];
-  // Grundriss-Schwerpunkt (für die Aussen-Orientierung der Seitenflächen).
-  let cx = 0;
-  let cz = 0;
-  for (const p of s.outline) {
-    cx += p[0];
-    cz += p[1];
-  }
-  cx /= n;
-  cz /= n;
-  const bottom: V3[] = s.outline.map((p) => [p[0], s.zBottom, p[1]]);
-  const top: V3[] = s.outline.map((p) => [p[0], s.zTop, p[1]]);
-  const faces: WorldFace[] = [];
-  faces.push({ role: "slab", normal: [0, 1, 0], poly: top.slice() });
-  faces.push({ role: "slab", normal: [0, -1, 0], poly: bottom.slice().reverse() });
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const ex = s.outline[j][0] - s.outline[i][0];
-    const ez = s.outline[j][1] - s.outline[i][1];
-    // Kandidat-Normale horizontal quer zur Kante; nach aussen orientieren.
-    let m: V3 = normalize3([ez, 0, -ex]);
-    const midX = (s.outline[i][0] + s.outline[j][0]) / 2;
-    const midZ = (s.outline[i][1] + s.outline[j][1]) / 2;
-    if (m[0] * (midX - cx) + m[2] * (midZ - cz) < 0) m = [-m[0], -m[1], -m[2]];
-    faces.push({
-      role: "slab",
-      normal: m,
-      poly: [bottom[i], bottom[j], top[j], top[i]],
-    });
-  }
-  for (const f of faces) {
-    f.ceilingId = s.ceilingId;
-    f.fill = s.color;
-  }
-  return faces;
-}
-
-// ── Projektion + Sichtbarkeit ──────────────────────────────────────────────
 
 /** Eine in die Ansicht projizierte, sichtbare Fläche. */
 export interface ProjectedFace {
@@ -462,137 +202,164 @@ export interface ProjectedFace {
   normal?: V3;
 }
 
-/**
- * Projiziert eine Welt-Fläche und entscheidet die Sichtbarkeit:
- *   • Rückseiten-Culling: Normale muss GEGEN die Blickrichtung zeigen (N·Nf < 0).
- *   • Vor/Hinter: die mittlere Tiefe muss hinter der Ebene liegen (depth > 0).
- * Sonst `null` (Fläche erscheint nicht).
- */
-export function projectFace(frame: ElevationFrame, face: WorldFace): ProjectedFace | null {
-  const facing = frame.N[0] * face.normal[0] + frame.N[1] * face.normal[1] + frame.N[2] * face.normal[2];
-  if (facing >= -FACING_EPS) return null; // Rückseite oder streifend → unsichtbar
-  const pts: Array<[number, number]> = [];
-  let depthSum = 0;
-  let depthMin = Infinity;
-  let depthMax = -Infinity;
-  for (const w of face.poly) {
-    const p = projectPoint(frame, w);
-    pts.push([p.u, p.v]);
-    depthSum += p.depth;
-    depthMin = Math.min(depthMin, p.depth);
-    depthMax = Math.max(depthMax, p.depth);
-  }
-  const depth = depthSum / face.poly.length;
-  if (depth <= EPS) return null; // vor der Ebene → ignorieren
-  return {
-    pts,
-    depth,
-    depthMin,
-    depthMax,
-    role: face.role,
-    wallId: face.wallId,
-    ceilingId: face.ceilingId,
-    roofId: face.roofId,
-    fill: face.fill,
-    normal: face.normal,
-  };
+const ROLES: FaceRole[] = ["wall", "slab", "roof"];
+
+/** Ansichts-Frame flach für den Kern (`[P, N, U]`). */
+function encodeFrame(frame: ElevationFrame): Float64Array {
+  return Float64Array.from([...frame.P, ...frame.N, ...frame.U]);
 }
 
 /**
- * Sammelt alle sichtbaren, projizierten Flächen des Modells (Wände + Decken),
- * bereits rückseiten-gecullt und vor der Ebene verworfen. Reihenfolge = Emissions-
- * reihenfolge des Modells (NICHT tiefensortiert) — die Painter-Sortierung macht
- * der Aufrufer.
+ * Projiziert Wand-Quader (sechs Flächen je Wand-Box, Aussennormalen), Decken-Prismen (Deckel,
+ * Boden, Stirnflächen) und Dachflächen/Giebel in die Ansicht und behält die sichtbaren
+ * (Rückseiten-Culling: Normale gegen die Blickrichtung, mittlere Tiefe hinter der Ebene).
+ * Rechnet der Kern (`plan_elevation.rs`, [K3c]); hier nur Ein-/Ausgabe samt Herkunft (IDs, Farbe).
+ * Reihenfolge = Emissionsreihenfolge des Modells (NICHT tiefensortiert) — die Painter-Sortierung
+ * macht der Aufrufer.
  */
-export function collectElevationFaces(model: RModel3d, frame: ElevationFrame): ProjectedFace[] {
-  const out: ProjectedFace[] = [];
-  for (const w of model.walls) {
-    for (const f of wallWorldFaces(w)) {
-      const pf = projectFace(frame, f);
-      if (pf) out.push(pf);
+function projectFaces(
+  frame: ElevationFrame,
+  walls: RWall[],
+  slabs: RSlab[],
+  roofs: Array<{ id: string; fill: RRgb; planes: V3[][]; gables: V3[][] }>,
+): ProjectedFace[] {
+  const w: number[] = [walls.length];
+  for (const x of walls) w.push(x.start[0], x.start[1], x.end[0], x.end[1], x.thickness, x.height, x.baseElevation);
+  const sl: number[] = [slabs.length];
+  for (const x of slabs) {
+    sl.push(x.zBottom, x.zTop, x.outline.length);
+    for (const p of x.outline) sl.push(p[0], p[1]);
+  }
+  const r: number[] = [roofs.length];
+  for (const roof of roofs) {
+    r.push(roof.planes.length, roof.gables.length);
+    for (const poly of [...roof.planes, ...roof.gables]) {
+      r.push(poly.length);
+      for (const p of poly) r.push(p[0], p[1], p[2]);
     }
   }
-  for (const s of model.slabs) {
-    for (const f of slabWorldFaces(s)) {
-      const pf = projectFace(frame, f);
-      if (pf) out.push(pf);
+  const f = core().elevation_faces_flat(encodeFrame(frame), Float64Array.from(w), Float64Array.from(sl), Float64Array.from(r));
+  const out: ProjectedFace[] = [];
+  for (let k = 0, i = 1; k < (f[0] ?? 0); k++) {
+    const role = ROLES[f[i]];
+    const src = f[i + 1];
+    const count = f[i + 8];
+    const pts = new Array<[number, number]>(count);
+    for (let j = 0; j < count; j++) pts[j] = [f[i + 9 + 2 * j], f[i + 10 + 2 * j]];
+    const face: ProjectedFace = {
+      pts,
+      depth: f[i + 2],
+      depthMin: f[i + 3],
+      depthMax: f[i + 4],
+      role,
+      normal: [f[i + 5], f[i + 6], f[i + 7]],
+    };
+    if (role === "wall") {
+      face.wallId = walls[src].wallId;
+      face.fill = walls[src].color;
+    } else if (role === "slab") {
+      face.ceilingId = slabs[src].ceilingId;
+      face.fill = slabs[src].color;
+    } else {
+      face.roofId = roofs[src].id;
+      face.fill = roofs[src].fill;
     }
+    out.push(face);
+    i += 9 + 2 * count;
   }
   return out;
 }
 
-// ── Dächer ──────────────────────────────────────────────────────────────────
+/**
+ * Sammelt alle sichtbaren, projizierten Flächen des Modells (Wände + Decken), bereits
+ * rückseiten-gecullt und vor der Ebene verworfen.
+ */
+export function collectElevationFaces(model: RModel3d, frame: ElevationFrame): ProjectedFace[] {
+  return projectFaces(frame, model.walls, model.slabs, []);
+}
 
 /**
- * Die Welt-Flächen ALLER Dächer des Projekts: Dachflächen (Aufsicht-Polygone der
- * roofGeometry, Normale aufwärts orientiert) + Giebel (vertikale Endflächen,
- * Normale vom Dach-Schwerpunkt weg nach aussen). Modell [x,y,z=Höhe] → Welt
- * (x, y=Höhe, z=y), dieselbe Konvention wie emitRoofs/pickGeometry. Die
- * Materialdicke bleibt für die Ansicht unberücksichtigt (Silhouette genügt —
- * die Untersicht ist rückseiten-gecullt ohnehin unsichtbar).
+ * Dachflächen (Aufsicht-Polygone der roofGeometry) und Giebel ALLER Dächer, projiziert. Modell
+ * [x, y, Höhe]; die Eindeckungsfarbe (äusserste Schicht bzw. `roof.color`) entspricht `emitRoofs`
+ * des 3D-Viewers. Die Materialdicke bleibt unberücksichtigt (Silhouette genügt).
  */
-export function roofWorldFacesAll(project: Project): WorldFace[] {
-  const out: WorldFace[] = [];
-  for (const roof of project.roofs ?? []) {
-    const eavesZ = roofBaseElevation(project, roof);
-    const g = roofGeometry(roof, eavesZ);
-    // Äusserste Schicht (Eindeckung) bzw. `roof.color`-Übersteuerung — dieselbe
-    // Farbwahl wie {@link emitRoofs} (3D-Viewer), damit Ansicht/3D konsistent
-    // wirken. Ohne auflösbare Schicht der neutrale Dach-Fallback.
+function collectRoofFaces(project: Project, frame: ElevationFrame): ProjectedFace[] {
+  const roofs = (project.roofs ?? []).map((roof) => {
+    const g = roofGeometry(roof, roofBaseElevation(project, roof));
     const outer = roofLayers(project, roof)[0];
     const fill: RRgb = roof.color
       ? hexToRgb(roof.color, ROOF_RGB_FALLBACK)
       : outer?.componentId
         ? hexToRgb(getComponent(project, outer.componentId).color, ROOF_RGB_FALLBACK)
         : ROOF_RGB_FALLBACK;
-    // Dach-Schwerpunkt (Welt) für die Aussen-Orientierung der Giebel.
-    let cx = 0;
-    let cy = 0;
-    let cz = 0;
-    let cn = 0;
-    for (const pl of g.planes) {
-      for (const p of pl.pts) {
-        cx += p[0];
-        cy += p[2];
-        cz += p[1];
-        cn++;
-      }
-    }
-    if (cn === 0) continue;
-    cx /= cn;
-    cy /= cn;
-    cz /= cn;
-    const newell = (poly: V3[]): V3 => {
-      let nx = 0;
-      let ny = 0;
-      let nz = 0;
-      for (let i = 0; i < poly.length; i++) {
-        const a = poly[i];
-        const b = poly[(i + 1) % poly.length];
-        nx += (a[1] - b[1]) * (a[2] + b[2]);
-        ny += (a[2] - b[2]) * (a[0] + b[0]);
-        nz += (a[0] - b[0]) * (a[1] + b[1]);
-      }
-      return normalize3([nx, ny, nz]);
+    return {
+      id: roof.id,
+      fill,
+      planes: g.planes.map((pl) => pl.pts.map((p) => [p[0], p[1], p[2]] as V3)),
+      gables: g.gables.map((gb) => gb.map((p) => [p[0], p[1], p[2]] as V3)),
     };
-    for (const pl of g.planes) {
-      const poly: V3[] = pl.pts.map((p) => [p[0], p[2], p[1]]);
-      let n = newell(poly);
-      // Dachflächen zeigen aufwärts (Welt-Y).
-      if (n[1] < 0) n = [-n[0], -n[1], -n[2]];
-      out.push({ role: "roof", normal: n, poly, roofId: roof.id, fill });
+  });
+  return projectFaces(frame, [], [], roofs);
+}
+
+/**
+ * Verlängert die (offset-freien) Wand-Boxen des Ansichts-Modells an gemeinsamen Eck-Knoten, damit
+ * Fassaden-Ecken in der Ansicht ohne dreieckige Kerbe/Schattenlücke erscheinen: jedes Wandende
+ * reicht bis zur AUSSENFLÄCHE der dicksten anstossenden anderen Wand desselben Geschosses (L-Ecken,
+ * T-Stösse, versetzte Stösse). Bewusst eine EIGENE, tolerante Näherung statt der Gehrungs-Logik aus
+ * `model/joins.ts`; die Mengen rechnet der Kern (`plan_elevation.rs`).
+ *
+ * Nur Wände etwa PARALLEL zur Ansichtsebene werden verlängert (Fassaden-Silhouette): eine
+ * fassaden-SENKRECHTE Wand würde sonst entlang ihrer Achse in die Tiefe geschoben. `uModel` ist die
+ * Ansichts-u-Achse in Grundriss-Koordinaten. Mutiert `start`/`end` der jeweils äussersten
+ * Teilstücke (Pfeiler vor der ersten bzw. nach der letzten Öffnung) in-place.
+ */
+function extendWallCornersForElevation(project: Project, rwalls: RWall[], uModel: Vec2): void {
+  const floors = new Map<string, number>();
+  const b: number[] = [project.walls.length];
+  for (const w of project.walls) {
+    const key = w.floorId ?? "";
+    if (!floors.has(key)) floors.set(key, floors.size);
+    let thickness = 0.2;
+    try {
+      thickness = wallTypeThickness(getWallType(project, w));
+    } catch {
+      thickness = 0.2;
     }
-    for (const gable of g.gables) {
-      const poly: V3[] = gable.map((p) => [p[0], p[2], p[1]]);
-      if (poly.length < 3) continue;
-      let n = newell(poly);
-      // Giebel zeigen vom Dach-Schwerpunkt weg nach aussen.
-      const toC: V3 = [cx - poly[0][0], cy - poly[0][1], cz - poly[0][2]];
-      if (n[0] * toC[0] + n[1] * toC[1] + n[2] * toC[2] > 0) n = [-n[0], -n[1], -n[2]];
-      out.push({ role: "roof", normal: n, poly, roofId: roof.id, fill });
-    }
+    b.push(floors.get(key)!, w.start.x, w.start.y, w.end.x, w.end.y, thickness / 2);
   }
-  return out;
+  const ext = core().elevation_wall_extensions_flat(Float64Array.from(b));
+  if (ext.length === 0) return;
+  const byWallId = new Map<string, RWall[]>();
+  for (const rw of rwalls) {
+    const list = byWallId.get(rw.wallId);
+    if (list) list.push(rw);
+    else byWallId.set(rw.wallId, [rw]);
+  }
+  const closeTo = (a: RVec2, v: Vec2): boolean => Math.abs(a[0] - v.x) < 1e-6 && Math.abs(a[1] - v.y) < 1e-6;
+  project.walls.forEach((w, k) => {
+    const eStart = ext[1 + 2 * k];
+    const eEnd = ext[2 + 2 * k];
+    if (eStart <= EPS && eEnd <= EPS) return;
+    const pieces = byWallId.get(w.id);
+    if (!pieces) return;
+    const dx = w.end.x - w.start.x;
+    const dz = w.end.y - w.start.y;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-9) return;
+    const ux = dx / len;
+    const uz = dz / len;
+    // Parallelität zur Ansichtsebene: |Achse · u| ≈ 1 (parallel) … 0 (senkrecht).
+    if (Math.abs(ux * uModel.x + uz * uModel.y) < 0.35) return;
+    if (eStart > EPS) {
+      const first = pieces.find((p) => closeTo(p.start, w.start));
+      if (first) first.start = [first.start[0] - ux * eStart, first.start[1] - uz * eStart];
+    }
+    if (eEnd > EPS) {
+      const last = pieces.find((p) => closeTo(p.end, w.end));
+      if (last) last.end = [last.end[0] + ux * eEnd, last.end[1] + uz * eEnd];
+    }
+  });
 }
 
 // ── Fenster/Türen ───────────────────────────────────────────────────────────
@@ -1022,12 +789,7 @@ export function generateElevationPlan(
   const model = projectToModel3d(project, { layeredWalls: false });
   // Ansichts-u-Achse in Grundriss-Koordinaten (Welt x,z = Modell x,y).
   extendWallCornersForElevation(project, model.walls, { x: frame.U[0], y: frame.U[2] });
-  let faces = collectElevationFaces(model, frame);
-  // Dächer analytisch (roofGeometry) — nicht Teil von RModel3d walls/slabs.
-  for (const rf of roofWorldFacesAll(project)) {
-    const pf = projectFace(frame, rf);
-    if (pf) faces.push(pf);
-  }
+  let faces = [...collectElevationFaces(model, frame), ...collectRoofFaces(project, frame)];
   // Grafik-Kategorie einer projizierten Fläche (Quell-Wand/-Decke/-Dach) — für
   // Ebenen-Panel-Sichtbarkeit UND -Dimmen (s. u.).
   const categoryCodeOfFace = (f: ProjectedFace): string | undefined => {

@@ -16,9 +16,6 @@ import {
   collectElevationFaces,
   elevationFrame,
   generateElevationPlan,
-  projectFace,
-  projectPoint,
-  wallWorldFaces,
 } from "./toElevation";
 
 // Betrachter im Süden (world z = −2), Blick nach +Z (in die Szene). Damit liegt
@@ -41,44 +38,29 @@ function wall(over: Partial<RWall> = {}): RWall {
 }
 
 describe("toElevation — Projektion + Culling", () => {
-  it("projiziert einen Weltpunkt auf (u, v, depth)", () => {
-    const frame = elevationFrame(PLANE_SOUTH);
-    // Punkt auf der Süd-Fassade (z ≈ −0.1), x = 4, Höhe 3.
-    const p = projectPoint(frame, [4, 3, -0.1]);
-    expect(p.v).toBeCloseTo(3, 6); // v = absolute Höhe
-    expect(p.depth).toBeCloseTo(1.9, 6); // −0.1 − (−2) = 1.9 hinter der Ebene
-    // u = dot(rel, U); U (entspiegelt, Blick +z ⇒ rechts = +x) = [1, 0, 0],
-    // P.x = −1 → u = 4 − (−1) = 5.
-    expect(p.u).toBeCloseTo(5, 6);
-  });
-
   it("Süd-Langseite einer Wand: erwartetes (u, v)-Rechteck + Tiefe, Rückseite gecullt", () => {
     const frame = elevationFrame(PLANE_SOUTH);
-    const faces = wallWorldFaces(wall());
-    const projected = faces.map((f) => projectFace(frame, f));
+    const model: RModel3d = { walls: [wall()], slabs: [], meshes: [], roofLayers: [] };
+    const visible = collectElevationFaces(model, frame);
     // Genau EINE sichtbare Fläche (die Süd-Langseite); alle anderen sind
     // Rückseiten oder streifend (Deckel/Boden/Stirnkappen).
-    const visible = projected.filter((p) => p !== null);
     expect(visible.length).toBe(1);
-    const face = visible[0]!;
+    const face = visible[0];
     expect(face.wallId).toBe("W");
     const us = face.pts.map((p) => p[0]);
     const vs = face.pts.map((p) => p[1]);
-    expect(Math.min(...us)).toBeCloseTo(1, 6); // x=0 → u=1 (P.x=−1)
+    // U (entspiegelt, Blick +z ⇒ rechts = +x) = [1, 0, 0], P.x = −1.
+    expect(Math.min(...us)).toBeCloseTo(1, 6); // x=0 → u=1
     expect(Math.max(...us)).toBeCloseTo(5, 6); // x=4 → u=5
     expect(Math.min(...vs)).toBeCloseTo(0, 6);
     expect(Math.max(...vs)).toBeCloseTo(3, 6);
-    expect(face.depth).toBeCloseTo(1.9, 6);
+    expect(face.depth).toBeCloseTo(1.9, 6); // z ≈ −0.1 − (−2)
   });
 
-  it("Rückseiten-Culling: eine Fläche mit Normale VON der Ebene weg erscheint nicht", () => {
+  it("Rückseiten-Culling: eine Wand hinter dem Betrachter erscheint nicht", () => {
     const frame = elevationFrame(PLANE_SOUTH);
-    const faces = wallWorldFaces(wall());
-    // Die +Quer-Fläche (Nord-Langseite, Normale [0,0,−1]·N = −1 … eigentlich die
-    // Süd-Seite ist sichtbar) — hier prüfen wir explizit die Rückseite:
-    const north = faces.find((f) => f.normal[2] > 0.5); // Normale zeigt +Z (= mit N)
-    expect(north).toBeDefined();
-    expect(projectFace(frame, north!)).toBeNull();
+    const model: RModel3d = { walls: [wall({ start: [0, -5], end: [4, -5] })], slabs: [], meshes: [], roofLayers: [] };
+    expect(collectElevationFaces(model, frame)).toEqual([]);
   });
 });
 
