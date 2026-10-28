@@ -61,7 +61,7 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
 
 ## Parallel arbeitende Agents
 
-In der Cloud höchstens **2 Agents gleichzeitig** (Vorgabe Maintainer); neue erst starten, wenn einer
+In der Cloud höchstens **3 Agents gleichzeitig** (Vorgabe Maintainer); neue erst starten, wenn einer
 fertig ist. Modell je Aufgabe: Sonnet für mechanische, klar umrissene Portierungen; Opus für knifflige
 Geometrie mit vielen Sonderfällen oder Architektur-Entscheide. Jeder Agent in eigenem Git-Worktree und eigenem Branch, nur die Dateien seiner Aufgabe. In gemeinsamen
 Dateien (`lib.rs`, `web/mod.rs`, `Cargo.toml`, `src/core/index.ts`, `src/core/extra.ts`, `i18n/de.ts`,
@@ -99,7 +99,8 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 | `src-tauri/core` | Rust-Kern (`dossier-core`): Polygon-Booleans, 2D-Kern (`kernel2d`), Bögen, Dächer, Treppen, Wand-Joins/-Bänder, 3D-Ableitung Decken/Stützen/Treppen/2D-Spuren, Schatten, Baurecht, Bemassung, Kennzahlen — wächst etappenweise |
 | `src-tauri/render2d, render3d` | die zwei Anzeige-Engines (Rust → WASM/Metal) |
 | `src-tauri/trucksolid` | B-Rep (truck 0.6): Körper, Booleans, STEP, Kennwerte, Kollision |
-| `src-tauri/kernel2d, dwgimport` | 2D-Geometrie (Offset/Trim/Fillet/Split/Join, in `core` eingebunden), DWG-Import |
+| `src-tauri/kernel2d` | 2D-Geometrie (Offset/Trim/Fillet/Split/Join, in `core` eingebunden) |
+| `src-tauri/fileio` | Dateiformate in Rust (DXF/DWG über acadrust, später IFC); eigenes WASM `pkgFileIo`, nachgeladen über `src/engine/fileioWasm.ts` |
 
 ## Konventionen
 

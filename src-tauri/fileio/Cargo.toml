@@ -1,0 +1,60 @@
+# Eigener leerer Workspace-Block: entkoppelt fileio vollstaendig vom
+# cad-tauri-Workspace (src-tauri/Cargo.toml). Muster: kernel2d/render2d.
+[workspace]
+
+[package]
+name = "dossier-fileio"
+version = "0.1.0"
+edition = "2021"
+description = "Dateiformate von Dossier (DXF/DWG lesen und schreiben ueber acadrust, spaeter IFC): eigenes WASM-Paket pkgFileIo, erst beim Import/Export nachgeladen."
+license = "AGPL-3.0-or-later"
+
+# cdylib: fuer wasm-pack (Feature \"web\"). rlib: fuer cargo test + Pfad-Dep.
+[lib]
+name = "dossier_fileio"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Standard: headless, kein WASM-Overhead — per `cargo test` pruefbar.
+default = []
+# Browser-Bindings: wasm-bindgen-Fassade; nur fuer wasm32-unknown-unknown.
+web = ["dep:wasm-bindgen", "dep:serde_json", "dep:console_error_panic_hook"]
+# Nativ (Tauri-Prozess, CLI): acadrust mit Multithreading.
+native = ["acadrust/parallel"]
+
+[dependencies]
+# DXF/DWG lesen und schreiben (MPL-2.0, DWG-Code aus ACadSharp/MIT portiert, s. NOTICE).
+# Ohne Standard-Feature "parallel" (rayon): im WASM gibt es ohne SharedArrayBuffer/COOP-COEP keine
+# Threads; der Import laeuft stattdessen im Web-Worker. Nativ (Feature "native") mit rayon.
+acadrust = { version = "0.6.8", default-features = false }
+
+# getrandom wird transitiv via ahash→acadrust gezogen. Fuer wasm32 muss das
+# Feature "wasm_js" explizit aktiviert werden (sonst Compile-Fehler).
+# Direkte Dep mit Feature-Aktivierung unifiziert das Flag fuer alle Abhaengigen.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+# Serialisierung: immer vorhanden (fuer den headless parse_dxf_summary-Kern).
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+
+# WASM-Bindings — nur im Feature "web" aktiv.
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# IFC-Import ([B3]): Dreieckszerlegung von Profilen und Flächen mit Löchern (ISC, Port von mapbox/earcut).
+earcutr = "0.5"
+# IFC-Import: eingeschränkte Delaunay-Triangulierung getrimmter Freiformflächen (MIT OR Apache-2.0).
+spade = "2.15"
+laz = { version = "0.13", default-features = false }
+e57 = { version = "0.11", default-features = false }
+
+# BCF ([BCF]): .bcfzip (ZIP) lesen/schreiben und markup.bcf/viewpoint.bcfv (XML) lesen.
+# zip: MIT, nur Deflate in reinem Rust (flate2/miniz_oxide, zopfli: Apache-2.0); quick-xml: MIT.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.39"
+
+# Vektor-PDF ([76]): FlateDecode-Streams (MIT OR Apache-2.0, reines Rust über miniz_oxide; schon über zip im Baum).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+[dev-dependencies]
+serde_json = "1"

@@ -23,6 +23,8 @@ import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
 import { decodeImageToRgba } from "../io/swissImage";
+import { planPointCloudSync } from "./pointCloudSync";
+import type { PointCloudSyncItem, UploadedPointCloud } from "./pointCloudSync";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
 export interface Camera3d {
@@ -45,6 +47,12 @@ interface WebModelRendererLike {
    * "textured" faellt engine-seitig vorerst auf "shaded" zurueck). */
   set_render_style(style: string): void;
   set_view_preset(preset: string): void;
+  /** Formatfüllendes Ziel + Abstand für Modell UND sichtbare Punktwolken: `[tx, ty, tz, dist]`
+   *  (world, Y-oben; `web::view_fit`). Optional — ältere WASM-Builds. */
+  view_fit?(): Float32Array | number[];
+  /** Aktuelle Rust-Kamera: `[eye(3), target(3), up(3), perspektivisch 1/0, fovY rad, orthoHalbhöhe]`
+   *  (`web::camera_state`). Optional — ältere WASM-Builds. */
+  camera_state?(): Float32Array | number[];
   /** Boden-Referenzraster in der Welt-XZ-Ebene ein-/ausblenden (Rust-seitig,
    * `web::set_ground_grid`). `visible=false` zeichnet kein Raster; sonst ein
    * Quadrat der Kantenlaenge `extent_m` (zentriert um den Ursprung, XZ) auf
@@ -108,6 +116,25 @@ interface WebModelRendererLike {
   ): void;
   /** Drapiertes Luftbild löschen (Gelände wieder einfarbig/shaded). Optional. */
   clear_aerial?(): void;
+  /** Punktwolke setzen ([27], `web::set_point_cloud`): `xyz` relativ zum Ursprung, `ox/oy/oz` =
+   *  Modell-Meter des Ursprungs (f64, Rust addiert in f64). Leere Attribut-Arrays = fehlt.
+   *  Liefert die gezeichnete Punktzahl (0 = verworfen). Optional — ältere WASM-Builds. */
+  set_point_cloud?(
+    id: number,
+    xyz: Float32Array,
+    rgb: Uint8Array,
+    intensity: Uint16Array,
+    classification: Uint8Array,
+    ox: number,
+    oy: number,
+    oz: number,
+    colorMode: string,
+    pointSize: number,
+    visible: boolean,
+  ): number;
+  /** Nur Darstellung ändern; `false` = Wolke unbekannt. */
+  set_point_cloud_style?(id: number, colorMode: string, pointSize: number, visible: boolean): boolean;
+  remove_point_cloud?(id: number): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -157,6 +184,8 @@ export function useWasm3dRenderer(
   enabled: boolean,
 ) {
   const rendererRef = useRef<WebModelRendererLike | null>(null);
+  // Was an Punktwolken im Renderer liegt ([27], s. pointCloudSync.ts).
+  const pointCloudsRef = useRef<Map<number, UploadedPointCloud>>(new Map());
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -173,6 +202,8 @@ export function useWasm3dRenderer(
         const renderer = await getRenderer(canvas);
         if (disposed) return;
         rendererRef.current = renderer;
+        // Neuer (oder wiederverwendeter) Renderer: Punktwolken neu abgleichen.
+        pointCloudsRef.current = new Map();
         setReady(true);
         setFailed(false);
       } catch (e) {
@@ -282,6 +313,60 @@ export function useWasm3dRenderer(
   }, []);
 
   /**
+   * Punktwolken abgleichen ([27]): neue/geänderte Daten hochladen, Darstellung umstellen,
+   * entfernte löschen. Gibt `true` zurück, wenn sich etwas geändert hat (→ neu zeichnen).
+   */
+  const syncPointClouds = useCallback((items: readonly PointCloudSyncItem[]): boolean => {
+    const r = rendererRef.current;
+    if (!r || typeof r.set_point_cloud !== "function") return false;
+    const uploaded = pointCloudsRef.current;
+    const ops = planPointCloudSync(uploaded, items);
+    const empty8 = new Uint8Array(0);
+    const upload = (it: PointCloudSyncItem) => {
+      const d = it.data;
+      r.set_point_cloud!(
+        it.id,
+        d.xyz,
+        d.rgb ?? empty8,
+        d.intensity ?? new Uint16Array(0),
+        d.classification ?? empty8,
+        it.offset[0],
+        it.offset[1],
+        it.offset[2],
+        it.colorMode,
+        it.pointSize,
+        it.visible,
+      );
+    };
+    for (const op of ops) {
+      try {
+        if (op.kind === "remove") {
+          r.remove_point_cloud?.(op.id);
+          uploaded.delete(op.id);
+          continue;
+        }
+        const it = op.item;
+        if (op.kind === "style") {
+          const ok = r.set_point_cloud_style?.(it.id, it.colorMode, it.pointSize, it.visible) === true;
+          if (!ok) upload(it);
+        } else {
+          upload(it);
+        }
+        uploaded.set(it.id, {
+          data: it.data,
+          offset: [...it.offset],
+          colorMode: it.colorMode,
+          pointSize: it.pointSize,
+          visible: it.visible,
+        });
+      } catch (e) {
+        console.warn("render3d Punktwolke fehlgeschlagen:", e);
+      }
+    }
+    return ops.length > 0;
+  }, []);
+
+  /**
    * Darstellungsart umschalten — reicht die volle `RenderMode`-Union der
    * Oberleiste ("shaded"/"white"/"textured"/"wireframe"/"hidden") an Rust
    * durch (`web::set_render_style`); die Engine entscheidet je Stil, wie
@@ -384,6 +469,71 @@ export function useWasm3dRenderer(
     }
   }, []);
 
+  /** Formatfüllendes Ziel + Abstand (Modell + sichtbare Punktwolken) aus Rust, oder null (alter Build). */
+  const viewFit = useCallback((): { target: [number, number, number]; dist: number } | null => {
+    const r = rendererRef.current;
+    if (!r || typeof r.view_fit !== "function") return null;
+    try {
+      const v = Array.from(r.view_fit());
+      if (v.length < 4 || !v.every(Number.isFinite)) return null;
+      return { target: [v[0], v[1], v[2]], dist: v[3] };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** Die Kamera, die Rust gerade zeichnet (Preset oder zuletzt gesetzt), oder null (alter Build). */
+  const readRustCamera = useCallback((): Camera3d | null => {
+    const r = rendererRef.current;
+    if (!r || typeof r.camera_state !== "function") return null;
+    try {
+      const v = Array.from(r.camera_state());
+      if (v.length < 12 || !v.every(Number.isFinite)) return null;
+      return {
+        eye: [v[0], v[1], v[2]],
+        target: [v[3], v[4], v[5]],
+        up: [v[6], v[7], v[8]],
+        perspective: v[9] > 0.5,
+        fovY: v[10],
+        orthoHalfHeight: v[11],
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * Schnappschuss des 3D-Bildes als PNG. `draw` zeichnet den Frame (muss synchron rendern): ein
+   * WebGPU-Canvas liefert seinen Inhalt nur im selben Task wie das Zeichnen, danach ist er leer.
+   * Das Bild wird sofort auf ein 2D-Canvas kopiert (höchstens `maxEdge` px lange Seite), dann
+   * kodiert. Null bei leerem/nicht lesbarem Bild (z. B. Software-WebGPU ohne Präsentation).
+   */
+  const snapshotPng = useCallback(
+    async (draw: () => void, maxEdge: number): Promise<Uint8Array | null> => {
+      const canvas = canvasRef.current;
+      if (!canvas || !rendererRef.current || canvas.width < 1 || canvas.height < 1) return null;
+      draw();
+      const k = Math.min(1, Math.max(16, maxEdge) / Math.max(canvas.width, canvas.height));
+      const w = Math.max(1, Math.round(canvas.width * k));
+      const h = Math.max(1, Math.round(canvas.height * k));
+      const out = document.createElement("canvas");
+      out.width = w;
+      out.height = h;
+      const ctx = out.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(canvas, 0, 0, w, h);
+      // Leer = alles transparent oder schwarz (Stichprobe über ein Raster).
+      const sample = ctx.getImageData(0, 0, w, h).data;
+      let seen = false;
+      const step = Math.max(1, Math.floor(sample.length / 4 / 400)) * 4;
+      for (let i = 0; i < sample.length && !seen; i += step) seen = sample[i + 3] > 0 && (sample[i] | sample[i + 1] | sample[i + 2]) !== 0;
+      if (!seen) return null;
+      const blob: Blob | null = await new Promise((res) => out.toBlob(res, "image/png"));
+      return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+    },
+    [canvasRef],
+  );
+
   /**
    * Einen Frame zeichnen (Canvas-Größe + DPR abgleichen). `cam` = null lässt
    * die zuletzt in Rust gesetzte Kamera unverändert — Fall für `render(null)`
@@ -435,9 +585,13 @@ export function useWasm3dRenderer(
     updateModel,
     setRenderStyle,
     applyViewPreset,
+    viewFit,
+    readRustCamera,
+    snapshotPng,
     setGroundGrid,
     setSectionPlane,
     setHighlightLines,
+    syncPointClouds,
     ready,
     failed,
   };

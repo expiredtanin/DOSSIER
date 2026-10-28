@@ -76,6 +76,7 @@ export interface TopBarProps {
   onExportIfc: () => void;
   onExportObj: () => void;
   onExportStl: () => void;
+  onExportGlb?: () => void;
   onExportStep?: () => void;
 
   // Kamera-Settings (FOV), ZUSÄTZLICH zur bestehenden im „Ansichten"-Ribbon-
@@ -1029,7 +1030,6 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
           <li>wgpu (render3d) — MIT / Apache-2.0</li>
           <li>truck · csgrs — Apache-2.0</li>
           <li>OpenCascade.js — LGPL-2.1</li>
-          <li>LibreDWG — GPL-3.0</li>
           <li>acadrust — MPL-2.0</li>
         </ul>
         <div className="about-actions">

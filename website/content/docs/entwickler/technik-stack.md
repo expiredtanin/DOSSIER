@@ -13,7 +13,7 @@ weight: 3
 | Geometrie | eigener 2D-Kernel (`src/geometry/kernel2d.ts`); ein Rust-Port existiert als Paritätstest |
 | CSG/Extrusion | `trucksolid`-Crate (`truck` + `csgrs`) für das Extrude-Kommando |
 | Export | eigener IFC4-Writer, `jspdf`/`svg2pdf.js` (Vektor-PDF), eigener DXF-Writer, STL/OBJ |
-| Import | `dxf-parser`, `@mlightcad/libredwg-web` (DWG), eigene `.lin`/`.pat`-Parser |
+| Import | `acadrust` (DXF/DWG, Rust-Crate `src-tauri/fileio`), eigene `.lin`/`.pat`-Parser |
 | Materialien | `jszip` (ambientCG-Zip-Entpacken), Three.js `TextureLoader` |
 
 Alle Rust-Crates laufen sowohl headless als auch per `wasm-pack` gebaut.

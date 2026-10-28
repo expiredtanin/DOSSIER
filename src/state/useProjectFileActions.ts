@@ -19,13 +19,17 @@ import { parseDxfAsync } from "../io/dxfParserAsync";
 import { beginBusy } from "./busyStore";
 import { buildDrawings } from "../ui/ImportDialog";
 import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings";
-import type { ImportDecision } from "../ui/ImportDialog";
+import type { ImportDecision, PdfImportOptions } from "../ui/ImportDialog";
+import { isPdfFile, pdfPageToImport, readPdfVectorPage } from "../io/pdfVector";
+import { planDashLineStyles } from "../io/pdfLineStyles";
+import type { PdfVectorPage } from "../io/pdfVector";
 import { exportScheduleCsv } from "../export/exportSchedule";
-import { exportIfcSpf } from "../export/exportIfc";
+import { exportIfcSpf, type IfcExportOptions } from "../export/exportIfc";
+import { loadFileio } from "../engine/fileioWasm";
 import { exportProjectStep } from "../export/exportStep";
-import { exportObj, exportStl } from "../export/exportMesh";
+import { exportGlb, exportObj, exportStl } from "../export/exportMesh";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
-import { saveTextFile } from "../native/saveFile";
+import { saveBinaryFile, saveTextFile } from "../native/saveFile";
 import {
   saveProjectFile,
   openProjectFileNative,
@@ -125,7 +129,14 @@ export type ImportDialogState = {
   /** Grober Phasenname während `loading` (DXF via `parseDxfAsync`'s
    *  `onProgress`) — rein informativ, s. `ImportDialog.tsx`. */
   progress?: string;
+  /** Fehlermeldung des Format-Moduls (Datei leer, beschädigt, kein DXF/DWG …); `null`/fehlend = kein Fehler. */
+  error?: string;
+  /** Vektor-PDF ([76]): Seite und Massstab, aus denen `parsed` abgeleitet ist. */
+  pdf?: PdfImportOptions;
 } | null;
+
+/** Meldung eines abgefangenen Fehlers (Rust-Fehler kommen als String, Worker-Fehler als Error). */
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 
 /**
@@ -244,12 +255,88 @@ export function useProjectFileActions(
     registerLockAutoRelease(() => openedProjectPathRef.current);
   }, []);
 
-  // Eine Datei (Button ODER Drop) öffnet den modalen Import-Dialog. DXF wird als
-  // Text geparst, DWG als ArrayBuffer über LibreDWG-WASM (lazy, asynchron); beide
-  // münden in dasselbe {meshes, contours}-Format und denselben Dialog-Fluss.
+  // Eine Datei (Button ODER Drop) öffnet den modalen Import-Dialog. DXF (ASCII/Binär)
+  // und DWG werden als Bytes im Web-Worker über das Rust-Format-Modul gelesen (lazy,
+  // asynchron); beide münden in dasselbe {meshes, contours}-Format und denselben Dialog.
   // Parse-Fehler werden ruhig abgefangen: DWG fällt auf den ODA-Hinweis zurück.
+  // Rohdaten der zuletzt geöffneten Import-Datei: der Dialog kann damit ein Papierbereich-Layout
+  // statt des Modellraums nachladen (`loadImportLayout`), ohne die Datei erneut zu wählen.
+  const importSourceRef = useRef<{ fileName: string; buf: ArrayBuffer } | null>(null);
+
+  /** Liest `layout` (Papierbereich) oder, bei `null`, den Modellraum der geöffneten Import-Datei neu. */
+  const loadImportLayout = (layout: string | null) => {
+    const src = importSourceRef.current;
+    if (!src) return;
+    setImportState({ fileName: src.fileName, isDwg: false, parsed: null, loading: true });
+    parseDxfAsync(src.buf, undefined, layout ?? undefined)
+      .then((parsed) => setImportState({ fileName: src.fileName, isDwg: false, parsed, loading: false }))
+      .catch((err) => {
+        console.error("Layout-Import fehlgeschlagen:", err);
+        setImportState({
+          fileName: src.fileName,
+          isDwg: false,
+          parsed: { meshes: [], contours: [] },
+          loading: false,
+          error: errorText(err),
+        });
+      });
+  };
+
+  // Vektor-PDF ([76]): Bytes und zuletzt gelesene Seite — Massstabswechsel rechnet nur um, ein
+  // Seitenwechsel liest die Seite neu (Rust, synchron; das Format-Modul ist dann schon geladen).
+  const pdfSourceRef = useRef<{ fileName: string; bytes: Uint8Array; page: PdfVectorPage } | null>(null);
+
+  const pdfImportState = (fileName: string, page: PdfVectorPage, scale: number): ImportDialogState => ({
+    fileName,
+    isDwg: false,
+    parsed: pdfPageToImport(page, scale),
+    loading: false,
+    pdf: {
+      pageCount: page.pageCount,
+      page: page.pageIndex,
+      scale,
+      widthPt: page.width,
+      heightPt: page.height,
+      images: page.images,
+      preview: page,
+    },
+  });
+
+  const openPdfImport = (file: File) => {
+    pdfSourceRef.current = null;
+    setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true, progress: "pdf" });
+    void Promise.all([file.arrayBuffer(), loadFileio()])
+      .then(([buf]) => {
+        const bytes = new Uint8Array(buf);
+        const page = readPdfVectorPage(bytes, 0);
+        pdfSourceRef.current = { fileName: file.name, bytes, page };
+        setImportState(pdfImportState(file.name, page, 100));
+      })
+      .catch((err) => {
+        console.error("PDF-Import fehlgeschlagen:", err);
+        setImportState({ fileName: file.name, isDwg: false, parsed: { meshes: [], contours: [] }, loading: false, error: errorText(err) });
+      });
+  };
+
+  /** Import-Dialog: andere PDF-Seite oder anderer Massstab. */
+  const setImportPdfOptions = (pageIndex: number, scale: number) => {
+    const src = pdfSourceRef.current;
+    if (!src || !(scale > 0)) return;
+    try {
+      if (pageIndex !== src.page.pageIndex) src.page = readPdfVectorPage(src.bytes, pageIndex);
+      setImportState(pdfImportState(src.fileName, src.page, scale));
+    } catch (err) {
+      setImportState({ fileName: src.fileName, isDwg: false, parsed: { meshes: [], contours: [] }, loading: false, error: errorText(err) });
+    }
+  };
+
   const openImportForFile = (file: File) => {
+    if (isPdfFile(file.name)) {
+      openPdfImport(file);
+      return;
+    }
     const isDwg = /\.dwg$/i.test(file.name);
+    importSourceRef.current = null;
     if (isDwg) {
       // Async-Zustand: Dialog öffnet sofort und zeigt „DWG wird gelesen …",
       // während WASM lädt/parst. Danach echte Zusammenfassung ODER ODA-Hinweis.
@@ -271,7 +358,8 @@ export function useProjectFileActions(
           });
           return;
         }
-        // Dynamisch importieren, damit LibreDWG-WASM nicht im Initial-Bundle ist.
+        importSourceRef.current = { fileName: file.name, buf };
+        // Dynamisch importieren (das Format-Modul wird ohnehin erst im Worker geladen).
         import("../io/dwgParser")
           .then(({ parseDwg }) => parseDwg(buf))
           .then((parsed) => {
@@ -290,6 +378,7 @@ export function useProjectFileActions(
               isDwg: true,
               parsed: null,
               loading: false,
+              error: errorText(err),
             });
           });
       };
@@ -304,7 +393,10 @@ export function useProjectFileActions(
     setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true });
     const r = new FileReader();
     r.onload = () => {
-      parseDxfAsync(String(r.result ?? ""), (progress) => {
+      // Bytes statt Text: Binär-DXF und Code-Seiten (vor R2007) liest erst Rust richtig.
+      const buf = r.result instanceof ArrayBuffer ? r.result : new ArrayBuffer(0);
+      importSourceRef.current = { fileName: file.name, buf };
+      parseDxfAsync(buf, (progress) => {
         setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true, progress });
       })
         .then((parsed) => {
@@ -313,10 +405,10 @@ export function useProjectFileActions(
         .catch((err) => {
           console.error("DXF-Import fehlgeschlagen:", err);
           const parsed: DxfImportResult = { meshes: [], contours: [] };
-          setImportState({ fileName: file.name, isDwg: false, parsed, loading: false });
+          setImportState({ fileName: file.name, isDwg: false, parsed, loading: false, error: errorText(err) });
         });
     };
-    r.readAsText(file);
+    r.readAsArrayBuffer(file);
   };
 
   // Projekt als Datei speichern/laden (Datei-Burger-Menü, TopBar/AppMenu).
@@ -406,7 +498,7 @@ export function useProjectFileActions(
   const onProjectTemplateFileChosen = (file: File) => {
     const r = new FileReader();
     r.onload = () => applyTemplateContent(String(r.result ?? ""));
-    r.readAsText(file);
+    r.readAsArrayBuffer(file);
   };
 
   // Gibt den Lock der zuletzt geöffneten Projektdatei frei (falls wir ihn
@@ -495,19 +587,27 @@ export function useProjectFileActions(
   // Führt den gewählten Direkt-Export (CSV/IFC/OBJ/STL) mit dem im Dialog
   // gewählten Dateinamen aus. Erzeugung aus dem jeweiligen reinen Kern, Download
   // über den robusten Helfer.
-  const runExport = (format: ExportSaveFormat, filename: string) => {
+  const runExport = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions) => {
     switch (format) {
       case "csv":
         downloadTextFile("﻿" + exportScheduleCsv(project), filename, "text/csv;charset=utf-8;");
         break;
       case "ifc":
-        downloadTextFile(exportIfcSpf(project), filename);
+        // IFC schreibt Rust (Format-Modul pkgFileIo, wird beim ersten Export nachgeladen).
+        void loadFileio()
+          .then(() => downloadTextFile(exportIfcSpf(project, ifcOptions), filename))
+          .catch((e) => notify(`${t("ifc.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "obj":
-        downloadTextFile(exportObj(project), filename);
-        break;
       case "stl":
-        downloadTextFile(exportStl(project), filename);
+      case "glb":
+        // OBJ/STL/glTF schreibt Rust (Format-Modul pkgFileIo, wird beim ersten Export nachgeladen).
+        void loadFileio()
+          .then(() => {
+            if (format === "glb") void saveBinaryFile(exportGlb(project), filename, "model/gltf-binary");
+            else downloadTextFile(format === "obj" ? exportObj(project) : exportStl(project), filename);
+          })
+          .catch((e) => notify(`${t("mesh.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "step":
         // B-Rep via truck-WASM (asynchron): Körper, die truck nicht bauen kann, werden
@@ -529,6 +629,7 @@ export function useProjectFileActions(
   const onExportIfc = () => setExportSaveFormat("ifc");
   const onExportObj = () => setExportSaveFormat("obj");
   const onExportStl = () => setExportSaveFormat("stl");
+  const onExportGlb = () => setExportSaveFormat("glb");
   const onExportStep = () => setExportSaveFormat("step");
   // Unter Tauri: nativer Öffnen-Dialog (echter Pfad → Lock möglich). Im
   // Browser: verstecktes <input type=file> wie bisher (kein echter Pfad, also
@@ -558,7 +659,7 @@ export function useProjectFileActions(
         console.error("Projekt-Import fehlgeschlagen:", err);
       }
     };
-    r.readAsText(file);
+    r.readAsArrayBuffer(file);
   };
 
   const importParentName = (decision: ImportDecision): string =>
@@ -586,6 +687,7 @@ export function useProjectFileActions(
         flattenCategories(project.layers),
         t("import.layers.parentName", { name: importParentName(decision) }),
         decision.parsed.layerColors,
+        decision.parsed.layerLineWeights,
       );
       codeByLayer = plan.codeByLayer;
       if (plan.parent) {
@@ -593,12 +695,22 @@ export function useProjectFileActions(
         setProject((p) => ({ ...p, layers: [...p.layers, parent] }));
       }
     }
+    // PDF-Strichmuster ([76]): passenden Linienstil nehmen oder Strichmuster-Stil anlegen (vor den Zeichnungen).
+    const dashPlan = planDashLineStyles(decision.parsed.layerDashes, project.lineStyles);
+    if (dashPlan.created.length) {
+      const created = dashPlan.created;
+      setProject((p) => ({
+        ...p,
+        lineStyles: [...p.lineStyles, ...created.filter((c) => !p.lineStyles.some((l) => l.id === c.id))],
+      }));
+    }
     let drawings = buildDrawings(
       decision,
       levelId,
       project,
       activeCategoryCode,
       codeByLayer,
+      dashPlan.styleByLayer,
     );
     // Platzierung „viewCenter": den Gesamt-Umriss so verschieben, dass seine
     // Mitte auf die Mitte des aktuellen Ausschnitts fällt (sonst bleibt alles an
@@ -635,6 +747,8 @@ export function useProjectFileActions(
     pendingDiscard,
     setPendingDiscard,
     openImportForFile,
+    setImportPdfOptions,
+    loadImportLayout,
     onSaveProject,
     onNewProject,
     onNewProjectFromSample,
@@ -651,6 +765,7 @@ export function useProjectFileActions(
     onExportIfc,
     onExportObj,
     onExportStl,
+    onExportGlb,
     onExportStep,
     onOpenProject,
     onProjectFileChosen,

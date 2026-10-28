@@ -8,21 +8,20 @@
 //     `.dwg.zip`/`.gdb.zip` (kein `.dxf` mehr), in Städten teils >150 MB/Tile
 //     (nicht 1-km-strukturiert) → wir fallen bei leeren/zu grossen v3-Treffern
 //     automatisch auf v2 zurück. Das Zip bündelt ZWEI DWG-Varianten
-//     („…_separated_….dwg" + „…_solid_….dwg"); NUR „separated" ist mit
-//     LibreDWG lesbar (`downloadAssetBinary(..., "separated")` wählt sie
-//     gezielt aus) — „solid" liefert 0 Entities (vermutlich ACIS-Volumenkörper
-//     statt Polyface-Mesh, an echten Kacheln verifiziert). Die Geometrie
-//     selbst ist ein ganz normales AutoCAD-Polyface-Mesh (DWG-Typ 29), NUR
-//     über die Low-Level-API lesbar (s. `dwgParser.ts::
-//     extractPfaceMeshesByLayer`) und NACH DXF-LAYER GRUPPIERT geliefert:
-//     „Roof"/„Wall"/„Floor" je Gebäudefläche.
+//     („…_separated_….dwg" + „…_solid_….dwg"); wir lesen „separated"
+//     (`downloadAssetBinary(..., "separated")` wählt sie gezielt aus) — „solid"
+//     enthält vermutlich ACIS-Volumenkörper statt Polyface-Mesh (mit dem
+//     früheren LibreDWG an echten Kacheln: 0 Entities). Die Geometrie selbst ist
+//     ein normales AutoCAD-Polyface-Mesh in per INSERT platzierten Blöcken; der
+//     Import (Rust/acadrust, `dwgParser.ts`) liefert die Meshes NACH DXF-LAYER
+//     GRUPPIERT: „Roof"/„Wall"/„Floor" je Gebäudefläche.
 // Referenz-Implementierung (Rhino-Vorgänger-Plugin, 1:1 als Blaupause genutzt):
 // git.kgva.ch/karim/DOSSIER, Datei rhino/swisstopo.py.
 //
 // Assets liegen als DXF/DWG/OBJ/IFC vor (teils `.zip`) — wir wählen bevorzugt
 // DXF: `parseDxf` (dxfParser.ts) liest 3DFACE/MESH/Polyface-Entities bereits
 // verlustfrei zu `ImportedMesh` (positions/indices, echtes Z); fehlt DXF (v3),
-// liest `parseDwg` (dwgParser.ts, LibreDWG-WASM, lazy geladen) dieselbe
+// liest `parseDwg` (dwgParser.ts, Rust-Format-Modul, lazy geladen) dieselbe
 // Geometrie aus dem DWG. „Roof"-Layer-Meshes bekommen die Dächer-Kategorie
 // ({@link IMPORTED_ROOF_CATEGORY}), alle übrigen (Wand/Boden/ungruppiert) die
 // normale Gebäude-Kategorie — VOR dem Zuschnitt zusammengeführt, damit
@@ -35,7 +34,7 @@
 import { bboxAround, lv95BboxToWgs84, makeOrigin } from "./lv95";
 import type { GeoOrigin, LV95 } from "./lv95";
 import { stacQuery, pickAsset, downloadAssetText, downloadAssetBinary } from "./stacApi";
-import { parseDxf } from "./dxfParser";
+import { parseDxfAsync } from "./dxfParserAsync";
 import type { ImportedMesh } from "../model/types";
 import { GEO_CATEGORY_DEFS, IMPORTED_ROOF_CATEGORY } from "../model/contextCategories";
 
@@ -417,17 +416,15 @@ export async function fetchBuildings3d(
             skipped++;
             continue;
           }
-          rawMeshes = parseDxf(text).meshes;
+          rawMeshes = (await parseDxfAsync(text)).meshes;
         }
       } catch (err) {
         // `parseDwg`/`parseDxf` werfen bei fatalen Parse-Fehlern BEWUSST (s.
         // deren Moduldoc) — richtig für einen einzelnen Nutzer-Import, aber
         // hier iterieren wir über MEHRERE STAC-Kacheln: eine einzelne kaputte/
-        // von LibreDWG-WASM nicht unterstützte Kachel darf nicht den gesamten
-        // Mehr-Kachel-Import abbrechen. An einer echten v3-Kachel reproduziert:
-        // „RuntimeError: function signature mismatch" tief in LibreDWG-WASM
-        // (`dwg_dynapi_header_value`) — vermutlich eine Format-Eigenheit, die
-        // dieser WASM-Build nicht abdeckt, kein Fehler in unserem Code.
+        // nicht lesbare Kachel darf nicht den gesamten Mehr-Kachel-Import
+        // abbrechen (mit dem früheren LibreDWG-WASM an einer echten v3-Kachel
+        // reproduziert: „RuntimeError: function signature mismatch").
         console.warn(`[swissBuildings3d] Kachel ${item.id} übersprungen (Parse-Fehler):`, err);
         skipped++;
         continue;

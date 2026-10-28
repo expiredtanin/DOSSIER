@@ -1,8 +1,9 @@
 // Tests für den DXF-Import der Kurven-Entities ARC / CIRCLE / ELLIPSE:
 // belegt Tessellierung, Winkeleinheit (Radiant), Schließung und Z-Höhe.
 
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import { parseDxf } from "./dxfParser";
+import { loadFileioForTests } from "../engine/fileioWasm.testing";
 import { contoursToDrawings, textsToDrawings } from "./dxfToDrawings";
 import type { Contour, ContourSet, Vec2 } from "../model/types";
 
@@ -39,6 +40,8 @@ function ellipse(
     "40", `${ratio}`, "41", `${start}`, "42", `${end}`,
   ];
 }
+
+beforeAll(loadFileioForTests);
 
 const dist = (p: Vec2, cx: number, cy: number) => Math.hypot(p.x - cx, p.y - cy);
 
@@ -435,11 +438,26 @@ describe("parseDxf — TEXT/MTEXT", () => {
     expect(t0.text).toBe("Hallo");
   });
 
-  it("MTEXT → Formatcodes gesäubert (\\P → Leerzeichen)", () => {
+  it("MTEXT → Formatcodes gesäubert, \\P = neue Zeile (je Zeile ein Text, oben links verankert)", () => {
     const res = parseDxf(dxf(mtextEnt(1, 2, 0.3, "Welt\\Pzeile2")));
-    expect(res.texts![0].text).toBe("Welt zeile2");
+    expect(res.texts!.map((t) => t.text)).toEqual(["Welt", "zeile2"]);
     expect(res.texts![0].at.x).toBeCloseTo(1, 9);
+    expect(res.texts![0].at.y).toBeCloseTo(2 - 0.3, 9);
+    expect(res.texts![1].at.y).toBeCloseTo(2 - 0.3 - 0.3 * (5 / 3), 9);
     expect(res.texts![0].height).toBeCloseTo(0.3, 9);
+  });
+
+  it("MTEXT: Schriftcodes, Stapel, \\~ und Sonderzeichen", () => {
+    const res = parseDxf(dxf(mtextEnt(0, 0, 0.2, "{\\fArial|b1;Fett}\\~\\H2x;gross \\S1/2; 12%%d")));
+    expect(res.texts!.map((t) => t.text)).toEqual(["Fett gross 1/2 12°"]);
+  });
+
+  it("TEXT zentriert: Anker ist der Ausrichtpunkt, Text beginnt links davon", () => {
+    const g = ["0", "TEXT", "8", "0", "10", "0", "20", "0", "30", "0", "40", "1", "72", "1", "11", "10", "21", "5", "31", "0", "1", "Mitte"];
+    const t = parseDxf(dxf(g)).texts![0];
+    expect(t.at.x).toBeLessThan(10);
+    expect(t.at.x).toBeGreaterThan(10 - 6);
+    expect(t.at.y).toBeCloseTo(5, 9);
   });
 
   it("leerer Text wird übersprungen", () => {
@@ -597,5 +615,103 @@ describe("parseDxf — Polyface-Mesh (POLYLINE Flag 64, swissBUILDINGS3D-Format)
     const res = parseDxf(lines.join("\n"));
     expect(res.meshes).toHaveLength(1);
     expect(res.meshes[0].indices).toEqual([0, 1, 2]);
+  });
+});
+
+describe("parseDxf — $INSUNITS", () => {
+  /** DXF mit Kopf-Variable $INSUNITS, einer Linie (Koordinaten in Zeicheneinheiten) und einem Text. */
+  const withUnits = (units: number | null): string => {
+    const head = units === null ? [] : ["0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", `${units}`, "0", "ENDSEC"];
+    const body = dxf(
+      ["0", "LINE", "8", "0", "10", "1000", "20", "2000", "30", "0", "11", "3000", "21", "2000", "31", "0"],
+      ["0", "TEXT", "8", "0", "10", "100", "20", "200", "30", "0", "40", "50", "1", "Raum"],
+    );
+    return [...head, body].join("\n");
+  };
+
+  it("Millimeter → Meter (Koordinaten, Texthöhe), unitScale 0.001", () => {
+    const res = parseDxf(withUnits(4));
+    expect(res.insUnits).toBe(4);
+    expect(res.unitScale).toBe(0.001);
+    const c = res.contours[0].contours[0];
+    expect(c.pts[0].x).toBeCloseTo(1, 12);
+    expect(c.pts[1].x).toBeCloseTo(3, 12);
+    expect(c.pts[0].y).toBeCloseTo(2, 12);
+    const t = res.texts![0];
+    expect(t.at.x).toBeCloseTo(0.1, 12);
+    expect(t.height).toBeCloseTo(0.05, 12);
+  });
+
+  it("Zentimeter und Zoll", () => {
+    expect(parseDxf(withUnits(5)).contours[0].contours[0].pts[1].x).toBeCloseTo(30, 12);
+    expect(parseDxf(withUnits(1)).contours[0].contours[0].pts[0].x).toBeCloseTo(25.4, 12);
+  });
+
+  it("Meter, ohne Einheit (0), unbekannt und fehlend bleiben 1:1", () => {
+    for (const u of [6, 0, 77, null]) {
+      const res = parseDxf(withUnits(u));
+      expect(res.unitScale, `${u}`).toBe(1);
+      expect(res.contours[0].contours[0].pts[0].x, `${u}`).toBe(1000);
+    }
+  });
+});
+
+describe("parseDxf — SOLID/TRACE", () => {
+  it("SOLID (Eckenfolge 1,2,4,3) → gefüllte geschlossene Kontur → Drawing2D mit Füllung", () => {
+    const res = parseDxf(
+      dxf(["0", "SOLID", "8", "S", "10", "0", "20", "0", "30", "0", "11", "2", "21", "0", "31", "0", "12", "0", "22", "1", "32", "0", "13", "2", "23", "1", "33", "0"]),
+    );
+    const c = res.contours[0].contours[0];
+    expect(c.filled).toBe(true);
+    expect(c.closed).toBe(true);
+    expect(c.pts).toEqual([{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 }]);
+    const [d] = contoursToDrawings(res.contours, "L", "active", "01", () => "01");
+    expect(d.fillColor).toBeDefined();
+  });
+
+  it("Dreieck: dritte = vierte Ecke", () => {
+    const c = onlyContour(
+      dxf(["0", "TRACE", "8", "S", "10", "0", "20", "0", "30", "0", "11", "1", "21", "0", "31", "0", "12", "0", "22", "1", "32", "0", "13", "0", "23", "1", "33", "0"]),
+    );
+    expect(c.pts).toHaveLength(3);
+    expect(c.filled).toBe(true);
+  });
+});
+
+describe("parseDxf — Papierbereich-Layouts und beschädigte Dateien", () => {
+  const withLayout = (): string => {
+    // Modellraum mit einer Linie; Layout „Plan A3" mit Linie + Text (Papier in mm, 72 = 1)
+    return [
+      "0", "SECTION", "2", "ENTITIES",
+      "0", "LINE", "8", "0", "10", "0", "20", "0", "30", "0", "11", "1", "21", "0", "31", "0",
+      "0", "ENDSEC", "0", "EOF",
+    ].join("\n");
+  };
+
+  it("ohne Layouts: leere Liste, Modellraum, nicht wiederhergestellt", () => {
+    const res = parseDxf(withLayout());
+    expect(res.layouts).toEqual([]);
+    expect(res.layout).toBeUndefined();
+    expect(res.recovered).toBe(false);
+  });
+
+  it("unbekanntes Layout → Fehler mit Meldung", () => {
+    expect(() => parseDxf(withLayout(), "", "Gibt es nicht")).toThrow(/nicht gefunden/);
+  });
+
+  it("leere/fremde Datei → verständliche Fehlermeldung statt Absturz", () => {
+    expect(() => parseDxf(new Uint8Array(0))).toThrow(/leer/);
+    expect(() => parseDxf("Dies ist ein Brief.\nMit Gruessen")).toThrow(/Keine DXF/);
+  });
+
+  it("abgeschnittene Datei → teilweise gelesen (recovered) oder Fehlermeldung, nie ein Absturz", () => {
+    const full = dxf(circle(1, 1, 0, 1), circle(2, 2, 0, 1), circle(3, 3, 0, 1));
+    const cut = full.slice(0, full.indexOf("EOF") - 30);
+    try {
+      const res = parseDxf(cut);
+      expect(res.contours[0].contours.length).toBeGreaterThan(0);
+    } catch (e) {
+      expect(String(e)).toMatch(/\S/);
+    }
   });
 });

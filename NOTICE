@@ -1,0 +1,50 @@
+Dossier — Hinweise zu übernommenem und eingebundenem Fremdcode ([51])
+
+acadrust (https://github.com/hakanaktt/acadrust), MPL-2.0
+  Abhängigkeit von src-tauri/fileio (DXF/DWG lesen und schreiben), unverändert eingebunden.
+  Der DWG-Code von acadrust ist aus ACadSharp portiert:
+    ACadSharp (https://github.com/DomCR/ACadSharp), Copyright (c) 2021 Albert Domenech, MIT License.
+  Grundlage der Binärformate laut acadrust: öffentliche DWG-Spezifikation der Open Design Alliance.
+
+i_overlay (https://github.com/iShape-Rust/iOverlay), MIT OR Apache-2.0
+  Abhängigkeit von src-tauri/core (Polygon-Booleans).
+
+earcutr (https://github.com/frewsxcv/earcutr), ISC License — Rust-Port von mapbox/earcut (ISC)
+  Abhängigkeit von src-tauri/fileio (IFC-Import: Dreieckszerlegung von Profilen und Flächen), unverändert.
+
+spade (https://github.com/Stoeoef/spade), MIT OR Apache-2.0
+  Abhängigkeit von src-tauri/fileio (IFC-Import: eingeschränkte Delaunay-Triangulierung getrimmter
+  Freiformflächen), unverändert.
+
+truck (https://github.com/ricosjp/truck, truck-meshalgo src/tessellation/triangulation.rs), Apache-2.0
+  Nur das Verfahren (Rand in den Parameterraum projizieren, Rasterpunkte, eingeschränkte Delaunay-
+  Triangulierung, Auswahl innen) als Vorbild; eigener Code in src-tauri/fileio/src/ifc_nurbs.rs.
+
+csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan Wallace, MIT License
+  Verfahren (BSP-Bäume, Ebenen-Teilung, clipTo/invert, Vereinigung/Differenz/Schnitt) in Rust neu
+  geschrieben und angepasst: src-tauri/fileio/src/csg.rs (IFC-Import: Öffnungen, Boolesche Körper).
+
+gltf-validator (https://github.com/KhronosGroup/glTF-Validator), Apache-2.0
+  Nur Entwicklungsabhängigkeit (devDependency, Prüfung des glTF-Exports in vitest), nicht ausgeliefert.
+  Der glTF-Schreiber (src-tauri/fileio/src/mesh_export.rs) ist eigener Code ohne Fremdbibliothek.
+
+laz (laz-rs, https://github.com/tmontaigu/laz-rs), Apache-2.0 — Rust-Port von LASzip (Martin Isenburg)
+  Abhängigkeit von src-tauri/fileio (LAZ-Dekompression der Punktwolken, [B9]), unverändert, ohne Feature "parallel".
+
+e57 (https://github.com/cry-inc/e57), MIT License, Copyright cry-inc
+  Abhängigkeit von src-tauri/fileio (E57-Punktwolken lesen, [B9]), unverändert.
+
+zip (https://github.com/zip-rs/zip2), MIT, mit flate2 (MIT OR Apache-2.0) und zopfli (Apache-2.0)
+  Abhängigkeit von src-tauri/fileio (BCF: .bcfzip lesen und schreiben, nur Deflate), unverändert.
+
+quick-xml (https://github.com/tafia/quick-xml), MIT
+  Abhängigkeit von src-tauri/fileio (BCF: markup.bcf und Viewpoints lesen), unverändert.
+
+flate2 (https://github.com/rust-lang/flate2-rs), MIT OR Apache-2.0, mit miniz_oxide (MIT OR Zlib OR Apache-2.0)
+  Direkte Abhängigkeit von src-tauri/fileio (Vektor-PDF [76]: FlateDecode-Streams), unverändert.
+  PDF-Leser und Content-Stream-Interpreter (pdf_object.rs, pdf_vector.rs) sind eigener Code nach der
+  PDF-Referenz (ISO 32000-1); WinAnsi-Tabelle und LZW-Testbeispiel stammen aus der Spezifikation.
+
+BCF-Spezifikation (https://github.com/buildingSMART/BCF-XML, Schemas), buildingSMART, CC BY-ND 4.0
+  Nur das Dateiformat als Vorlage; eigener Code in src-tauri/fileio/src/bcf.rs. Die Test-Beispiele
+  stehen nicht im Repo (Test buildingsmart_beispiele liest sie über BCF_TESTCASES aus einem lokalen Klon).

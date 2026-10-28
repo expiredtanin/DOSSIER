@@ -1,11 +1,11 @@
 // dossier-cli (Phase C): importiert nur src/core, und die Befehle laufen headless gegen das
 // Beispielprojekt (inkl. der echten WASM-Pakete aus src/engine/pkg*).
-import { describe, expect, it, beforeAll } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { describe, expect, it, beforeAll, vi } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./main";
-import { serializeProject } from "../core";
+import { projectToModel3d, serializeProject } from "../core";
 import { sampleProject } from "../model/sampleProject";
 
 const dir = mkdtempSync(join(tmpdir(), "dossier-cli-"));
@@ -47,6 +47,22 @@ describe("dossier-cli", () => {
     expect(svg).toContain("</svg>");
   });
 
+  it("Plan als render2d-Szene (JSON)", async () => {
+    const out = join(dir, "eg.scene.json");
+    expect(await call("plan", "--format", "json", "--out", out)).toBe(0);
+    const scene = JSON.parse(readFileSync(out, "utf8"));
+    expect(scene.fills.length).toBeGreaterThan(0);
+    expect(scene.fills[0].pts[0]).toHaveLength(2);
+    expect(scene.fills[0].color).toHaveLength(4);
+    expect(Array.isArray(scene.texts)).toBe(true);
+  });
+
+  it("Beispielprojekt ohne Datei (:beispiel)", async () => {
+    const out = join(dir, "beispiel.model3d.json");
+    expect(await run([":beispiel", "model3d", "--out", out])).toBe(0);
+    expect(JSON.parse(readFileSync(out, "utf8")).walls.length).toBe(projectToModel3d(sampleProject).walls.length);
+  });
+
   it("IFC, OBJ, CSV, DXF", async () => {
     for (const [cmd, ext, needle] of [["ifc", "ifc", "ISO-10303-21"], ["obj", "obj", "v "], ["schedule", "csv", "Typ"], ["dxf", "dxf", "SECTION"]] as const) {
       const out = join(dir, `x.${ext}`);
@@ -54,6 +70,45 @@ describe("dossier-cli", () => {
       expect(readFileSync(out, "utf8")).toContain(needle);
     }
   });
+
+  it("IFC mit --schema: 4 (Standard) und 2x3 (Coordination View 2.0), anderes ist ein Fehler", async () => {
+    const out = join(dir, "schema.ifc");
+    expect(await call("ifc", "--out", out)).toBe(0);
+    expect(readFileSync(out, "utf8")).toContain("FILE_SCHEMA(('IFC4'));");
+    expect(await call("ifc", "--schema", "4", "--out", out)).toBe(0);
+    expect(readFileSync(out, "utf8")).toContain("FILE_SCHEMA(('IFC4'));");
+    for (const v of ["2x3", "IFC2X3", "ifc2x3"]) {
+      expect(await call("ifc", "--schema", v, "--out", out)).toBe(0);
+      const text = readFileSync(out, "utf8");
+      expect(text).toContain("FILE_SCHEMA(('IFC2X3'));");
+      expect(text).toContain("ViewDefinition [CoordinationView_V2.0]");
+      expect(text).not.toContain("IFCTRIANGULATEDFACESET");
+    }
+    // convert reicht die Option durch.
+    const conv = join(dir, "convert.ifc");
+    expect(await run(["convert", file, conv, "--schema", "2x3"])).toBe(0);
+    expect(readFileSync(conv, "utf8")).toContain("FILE_SCHEMA(('IFC2X3'));");
+    // Unbekanntes Schema: `fail` beendet den Prozess (hier abgefangen) und schreibt keine Datei.
+    const exit = vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await expect(call("ifc", "--schema", "2x4", "--out", join(dir, "nope.ifc"))).rejects.toThrow("exit 1");
+    } finally {
+      exit.mockRestore();
+      err.mockRestore();
+    }
+    expect(existsSync(join(dir, "nope.ifc"))).toBe(false);
+  });
+
+  it("DWG über das Format-WASM (acadrust, R2018)", async () => {
+    const out = join(dir, "eg.dwg");
+    expect(await call("dwg", "--level", "eg", "--out", out)).toBe(0);
+    const bytes = readFileSync(out);
+    expect(bytes.subarray(0, 6).toString("latin1")).toBe("AC1032");
+    expect(bytes.length).toBeGreaterThan(10_000);
+  }, 60_000);
 
   it("Schnitt und STEP über das WASM", async () => {
     const section = sampleProject.drawingLevels.find((l) => l.kind === "section");

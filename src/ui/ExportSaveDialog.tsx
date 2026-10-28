@@ -10,9 +10,10 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
+import type { IfcExportOptions, IfcSchema } from "../export/ifcClassification";
 
 /** Direkt-herunterladbare Exportformate (mit Datei-Endung). */
-export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl" | "step";
+export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl" | "glb" | "step";
 
 /** Datei-Endung je Format. */
 export const EXPORT_FORMAT_EXT: Record<ExportSaveFormat, string> = {
@@ -20,6 +21,7 @@ export const EXPORT_FORMAT_EXT: Record<ExportSaveFormat, string> = {
   ifc: "ifc",
   obj: "obj",
   stl: "stl",
+  glb: "glb",
   step: "stp",
 };
 
@@ -28,7 +30,8 @@ export interface ExportSaveDialogProps {
   initialFormat: ExportSaveFormat;
   /** Basis-Dateiname OHNE Endung (i. d. R. Projektname). */
   baseName: string;
-  onSave: (format: ExportSaveFormat, filename: string) => void;
+  /** `ifc`: Klassifikations-Optionen (nur bei Format IFC gesetzt). */
+  onSave: (format: ExportSaveFormat, filename: string, ifc?: IfcExportOptions) => void;
   onClose: () => void;
 }
 
@@ -58,7 +61,12 @@ export function ExportSaveDialog({
   const [name, setName] = useState(baseName);
 
   const filename = withExt(name, EXPORT_FORMAT_EXT[format]);
-  const onConfirm = () => onSave(format, filename);
+  // IFC-Klassifikation (Schweizer Praxis): beides aus, bis die Nutzerin es wählt.
+  const [ebkph, setEbkph] = useState(false);
+  const [layerCodes, setLayerCodes] = useState(false);
+  // IFC-Schema: IFC4 (Standard) oder IFC2x3 für ältere Fachplaner-Programme.
+  const [schema, setSchema] = useState<IfcSchema>("IFC4");
+  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes } : undefined);
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -88,10 +96,38 @@ export function ExportSaveDialog({
                 { value: "ifc", label: t("exportSave.fmt.ifc") },
                 { value: "obj", label: t("exportSave.fmt.obj") },
                 { value: "stl", label: t("exportSave.fmt.stl") },
+                { value: "glb", label: t("exportSave.fmt.glb") },
                 { value: "step", label: t("exportSave.fmt.step") },
               ]}
             />
           </section>
+
+          {format === "ifc" && (
+            <section className="imp-section">
+              <div className="imp-section-title">{t("exportSave.ifc.schema")}</div>
+              <Dropdown
+                value={schema}
+                onChange={(v) => setSchema(v as IfcSchema)}
+                title={t("exportSave.ifc.schema")}
+                options={[
+                  { value: "IFC4", label: t("exportSave.ifc.schema4") },
+                  { value: "IFC2X3", label: t("exportSave.ifc.schema2x3") },
+                ]}
+              />
+              <div className="imp-note">{t("exportSave.ifc.schemaHint")}</div>
+              <label className="imp-check">
+                <input type="checkbox" checked={ebkph} onChange={(e) => setEbkph(e.target.checked)} />
+                <span>{t("exportSave.ifc.ebkph")}</span>
+              </label>
+              <div className="imp-note">{t("exportSave.ifc.ebkphHint")}</div>
+              <label className="imp-check">
+                <input type="checkbox" checked={layerCodes} onChange={(e) => setLayerCodes(e.target.checked)} />
+                <span>{t("exportSave.ifc.layers")}</span>
+              </label>
+              <div className="imp-note">{t("exportSave.ifc.layersHint")}</div>
+              <div className="imp-note">{t("exportSave.ifc.zonesNote")}</div>
+            </section>
+          )}
 
           <section className="imp-section">
             <div className="imp-section-title">{t("exportSave.filename")}</div>

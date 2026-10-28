@@ -2380,6 +2380,10 @@ export interface ImportedMesh {
    * IMMER sichtbar (Rückwärtskompatibilität), s. `generatePlan/context.ts`.
    */
   categoryCode?: string;
+  /** Farbe aus der Quelldatei (`#rrggbb`, z. B. IFC-Oberflächenstil/Material); fehlt sie, gilt die Kontext-Grundfarbe. */
+  color?: string;
+  /** IFC-GlobalId des Quell-Bauteils (IFC-Import je Bauteil). */
+  ifcGlobalId?: string;
   positions: number[];
   indices: number[];
 }

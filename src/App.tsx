@@ -54,6 +54,13 @@ import { RecoverAutosaveDialog } from "./ui/RecoverAutosaveDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./native/projectFile";
 import { stepTextToImportedMeshes } from "./io/stepImport";
+import { formatIfcReport, ifcBytesToImportedMeshes } from "./io/ifcImport";
+import { formatIfcElementsSummary, ifcElementsToProject, readIfcElements } from "./io/ifcElements";
+import { IfcImportDialog, type IfcImportMode } from "./ui/IfcImportDialog";
+import { MeshImportHost } from "./ui/MeshImportDialog";
+import { openMeshFileDialog, requestMeshImport, splitMeshFiles } from "./state/meshImportStore";
+import { formatMeshReport, isMeshFile } from "./io/meshImport";
+import { projectGeoOrigin } from "./model/geoRebase";
 import { applyClashMarkers, runClashCheck } from "./analysis/clash";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./views/plan/PlanView";
@@ -86,6 +93,9 @@ import {
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab } from "./ui/TopBar";
 import { AppMenuBar } from "./ui/AppMenuBar";
+import { PointCloudImportHost } from "./ui/PointCloudImportDialog";
+import { openPointCloudFileDialog, requestPointCloudImport } from "./state/pointCloudStore";
+import { isPointCloudFile } from "./io/pointCloud";
 import { EditorField } from "./ui/EditorField";
 import { useNativeAppMenu } from "./native/appMenu";
 import { openResourceWindowNative, useResourceWindowHost } from "./native/resourceWindow";
@@ -547,6 +557,8 @@ export default function App() {
   const dxfInputRef = useRef<HTMLInputElement>(null);
   // Verstecktes Datei-Input für den STEP-Import (Menü Datei, STEP importieren).
   const stepInputRef = useRef<HTMLInputElement>(null);
+  // Verstecktes Datei-Input für den IFC-Import ([B3], Menü Datei, IFC importieren).
+  const ifcInputRef = useRef<HTMLInputElement>(null);
 
   // Verstecktes Datei-Input für „Bild einfügen" (Werkzeug „image", s. tools.ts-
   // Kommentar) — akzeptiert auch PDF (jede Seite wird gerastert, s. pdfImport.ts);
@@ -1694,6 +1706,57 @@ export default function App() {
     setRoomStamp,
   } = useProjectActions(setProject, notify, planViewRef);
 
+  // IFC-Import: erst die Wahl Mesh/Bauteile (`IfcImportDialog`), dann [B3] Kontext-Meshes
+  // (`io/ifcImport.ts`) oder [B4] echte Bauteile (`io/ifcElements.ts`, übernommen über setProject).
+  const [pendingIfc, setPendingIfc] = useState<File | null>(null);
+  const importIfcFile = (f: File) => setPendingIfc(f);
+  const runIfcImport = (f: File, mode: IfcImportMode) => {
+    if (mode === "elements") {
+      void f
+        .arrayBuffer()
+        .then((buf) => readIfcElements(new Uint8Array(buf)))
+        .then(({ products, report, elements }) => {
+          let summary: ReturnType<typeof ifcElementsToProject>["summary"] | null = null;
+          let bounds: { x: number; y: number }[] = [];
+          setProject((p) => {
+            const r = ifcElementsToProject(p, products, elements, { fileName: f.name, geoOrigin: projectGeoOrigin(p) });
+            summary = r.summary;
+            const added = new Set(p.walls.map((w) => w.id));
+            bounds = r.project.walls.filter((w) => !added.has(w.id)).flatMap((w) => [w.start, w.end]);
+            return r.project;
+          });
+          if (bounds.length) planViewRef.current?.fitBounds(bounds);
+          if (summary) {
+            const s: ReturnType<typeof ifcElementsToProject>["summary"] = summary;
+            const empty = s.walls + s.ceilings + s.columns + s.rooms + s.meshes === 0;
+            notify(formatIfcElementsSummary(s, report, t), empty || report.truncated ? "warning" : "info");
+          }
+        })
+        .catch((err) =>
+          notify(`${t("ifc.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
+        );
+      return;
+    }
+    void f
+      .arrayBuffer()
+      .then((buf) => ifcBytesToImportedMeshes(new Uint8Array(buf), f.name, { geoOrigin: projectGeoOrigin(project) }))
+      .then(({ meshes, report }) => {
+        if (meshes.length) addContextObjectsAndFit(meshes);
+        const warn = meshes.length === 0 || report.truncated || report.productsWithoutGeometry > 0;
+        notify(formatIfcReport(report, t), warn ? "warning" : "info");
+      })
+      .catch((err) =>
+        notify(`${t("ifc.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
+      );
+  };
+  /** Datei aus Import-Dialog oder Drag & Drop: IFC direkt, sonst DXF/DWG-Dialog. */
+  const openImportForAnyFile = (f: File) => {
+    if (isMeshFile(f.name)) return requestMeshImport(f);
+    if (isPointCloudFile(f.name)) return requestPointCloudImport(f);
+    if (/\.ifc$/i.test(f.name)) importIfcFile(f);
+    else openImportForFile(f);
+  };
+
   // 2D-Griff-Editieren (Eckpunkt-/Kanten-Griffe + Feld-Controller) der aktuellen
   // Auswahl — siehe state/useGripEditing.ts.
   // Schnitt-/Ansichts-Blatt: geschnittene (bzw. in der Ansicht sichtbare)
@@ -1823,6 +1886,8 @@ export default function App() {
     pendingDiscard,
     setPendingDiscard,
     openImportForFile,
+    loadImportLayout,
+    setImportPdfOptions,
     onSaveProject,
     onNewProject,
     onNewProjectFromSample,
@@ -1835,6 +1900,7 @@ export default function App() {
     onExportIfc,
     onExportObj,
     onExportStl,
+    onExportGlb,
     onExportStep,
     onOpenProject,
     openProjectAtPath,
@@ -2389,8 +2455,12 @@ export default function App() {
       onExportIfc,
       onExportObj,
       onExportStl,
+      onExportGlb,
       onExportStep,
       onImportStep: () => stepInputRef.current?.click(),
+      onImportIfc: () => ifcInputRef.current?.click(),
+      onImportPointCloud: () => openPointCloudFileDialog(),
+      onImportMesh: () => openMeshFileDialog(),
       onClashCheck: () => {
         const p0 = project;
         runClashCheck(p0)
@@ -3080,7 +3150,14 @@ export default function App() {
   // App-weites Drag & Drop einer DXF/DWG-Datei — siehe state/useImportHandling.ts.
   const { onAppDragEnter, onAppDragOver, onAppDragLeave, onAppDrop } = useFileDropImport(
     setDropActive,
-    openImportForFile,
+    openImportForAnyFile,
+    (files) => {
+      // Mehrere Dateien: Modell + Begleitdateien (.mtl/.bin) gemeinsam an den Mesh-Import.
+      const r = splitMeshFiles(files);
+      if (!r) return false;
+      requestMeshImport(r.file, r.sidecars);
+      return true;
+    },
   );
 
   // Host-Context für die Panels — siehe state/usePanelHostBase.ts.
@@ -3256,11 +3333,11 @@ export default function App() {
       <input
         ref={dxfInputRef}
         type="file"
-        accept=".dxf,.dwg,text/plain"
+        accept=".dxf,.dwg,.ifc,.pdf,text/plain"
         style={{ display: "none" }}
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) openImportForFile(f);
+          if (f) openImportForAnyFile(f);
           e.target.value = "";
         }}
       />
@@ -3281,6 +3358,29 @@ export default function App() {
             .catch((err) =>
               notify(`${t("step.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
             );
+        }}
+      />
+      {/* Punktwolken-Import ([27]): verstecktes Datei-Feld + Dialog (UI-Store, nicht im Projekt). */}
+      <PointCloudImportHost project={project} />
+      {/* 3D-Modell-Import (OBJ/STL/glTF/GLB/PLY): verstecktes Datei-Feld + Dialog. */}
+      <MeshImportHost
+        project={project}
+        notify={notify}
+        onImport={(meshes, report) => {
+          if (meshes.length) addContextObjectsAndFit(meshes);
+          notify(formatMeshReport(report, t), meshes.length === 0 || report.truncated ? "warning" : "info");
+        }}
+      />
+      {/* Verstecktes IFC-Datei-Input (Menü Datei, IFC importieren). */}
+      <input
+        ref={ifcInputRef}
+        type="file"
+        accept=".ifc"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) importIfcFile(f);
         }}
       />
       {/* Verstecktes Bild/PDF-Datei-Input (Werkzeug „image"). */}
@@ -3331,6 +3431,7 @@ export default function App() {
         onExportIfc={onExportIfc}
         onExportObj={onExportObj}
         onExportStl={onExportStl}
+        onExportGlb={onExportGlb}
         onExportStep={onExportStep}
         viewType={viewType}
         fov={fov}
@@ -3356,6 +3457,8 @@ export default function App() {
               onOpenProject={onOpenProject}
               onSaveProject={onSaveProject}
               onImport={() => dxfInputRef.current?.click()}
+              onImportPointCloud={() => openPointCloudFileDialog()}
+              onImportMesh={() => openMeshFileDialog()}
               onUndo={undo}
               onRedo={redo}
               canUndo={canUndo}
@@ -3371,6 +3474,7 @@ export default function App() {
               resourcesOpen={resourcesOpen}
               onToggleResources={() => toggleResources()}
               onOpenSettings={() => openSettings()}
+              onOpenBcf={() => setLayout((l) => revealPanel(l, "bcf"))}
             />
           )
         }
@@ -3867,7 +3971,11 @@ export default function App() {
           isDwg={importState.isDwg}
           loading={importState.loading ?? false}
           progress={importState.progress}
+          error={importState.error}
+          onSelectLayout={loadImportLayout}
           parsed={importState.parsed}
+          pdf={importState.pdf}
+          onPdfChange={setImportPdfOptions}
           project={project}
           activeCategoryCode={activeCategoryCode}
           onImport={runImport}
@@ -3893,6 +4001,7 @@ export default function App() {
       {exportDxfOpen && (
         <ExportDxfDialog
           planTitle={activeLevel.name}
+          initialScale={scaleDenominator}
           selectionCount={selectionLockIds.length}
           onExport={onExportDxf}
           onClose={() => setExportDxfOpen(false)}
@@ -3927,8 +4036,8 @@ export default function App() {
         <ExportSaveDialog
           initialFormat={exportSaveFormat}
           baseName={projectFileName()}
-          onSave={(fmt, filename) => {
-            runExport(fmt, filename);
+          onSave={(fmt, filename, ifcOptions) => {
+            runExport(fmt, filename, ifcOptions);
             setExportSaveFormat(null);
           }}
           onClose={() => setExportSaveFormat(null)}
@@ -3957,6 +4066,18 @@ export default function App() {
             // Risiko-Übernahme, im Dialog als Warnung gekennzeichnet.
             applyOpenedProjectFile(lockConflict.path, lockConflict.content, false);
             setLockConflict(null);
+          }}
+        />
+      )}
+
+      {pendingIfc && (
+        <IfcImportDialog
+          fileName={pendingIfc.name}
+          onCancel={() => setPendingIfc(null)}
+          onImport={(mode) => {
+            const f = pendingIfc;
+            setPendingIfc(null);
+            runIfcImport(f, mode);
           }}
         />
       )}

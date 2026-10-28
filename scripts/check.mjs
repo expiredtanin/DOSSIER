@@ -7,7 +7,7 @@
 import { spawnSync } from "node:child_process";
 
 const fast = process.argv.includes("--fast");
-const crates = ["core", "render2d", "render3d", "kernel2d", "trucksolid", "dwgimport"];
+const crates = ["core", "render2d", "render3d", "kernel2d", "trucksolid", "fileio"];
 const steps = [
   { name: "tsc", cmd: "npx", args: ["tsc", "--noEmit", "-p", "."] },
   { name: "vitest", cmd: "npx", args: ["vitest", "run"] },

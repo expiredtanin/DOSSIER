@@ -12,6 +12,7 @@
 // Fixture-Muster gespiegelt von exportSchedule.test.ts.
 
 import { describe, it, expect } from "vitest";
+import "../engine/fileioWasm.setup";
 import { exportIfcSpf, ifcGuid, ifcString } from "./exportIfc";
 import type {
   Ceiling,
@@ -145,6 +146,37 @@ function fixtureProject(): Project {
   } as Project;
 }
 
+/**
+ * Wie {@link fixtureProject}, aber beide Öffnungen sind Fenster mit Laibungs-Rücksprung an der
+ * innersten Schicht: das Loch der (einzigen) Schicht ist grösser als die Öffnung, die Wand lässt sich
+ * nicht als Extrusion minus Öffnung schreiben → Mesh-Pfad (IfcTriangulatedFaceSet).
+ */
+function meshFixture(): Project {
+  const p = fixtureProject();
+  (p as { windowTypes?: unknown[] }).windowTypes = [
+    { id: "wt", name: "Holz-Metall IV", kind: "drehkipp", wingCount: 1, glazing: "dreifach", frameThickness: 0.08, defaultSillHeight: 0.9, defaultWidth: 1.2, defaultHeight: 1.2, innerLayerRecess: true },
+  ];
+  p.openings = [
+    { ...p.openings![0], kind: "window", sillHeight: 0.9, height: 1.2, typeId: "wt" },
+    { ...p.openings![1], height: 1.2, typeId: "wt" },
+  ];
+  return p;
+}
+
+/** `#N` einer Entity-Zeile. */
+const idOf = (line: string) => line.slice(0, line.indexOf("="));
+
+/** Alle GlobalIds (erstes Attribut jeder IfcRoot-Entity: 22-Zeichen-String gefolgt von der OwnerHistory). */
+function globalIds(spf: string): string[] {
+  return [...spf.matchAll(/^#\d+=IFC\w+\('([0-9A-Za-z_$]{22})',#\d+,/gm)].map((m) => m[1]);
+}
+
+/** GlobalId der ersten Entity vom Typ `type`, deren Zeile `needle` enthält. */
+function guidOf(spf: string, type: string, needle = ""): string | undefined {
+  const line = spf.split("\n").find((l) => l.includes(`=${type}(`) && l.includes(needle));
+  return line ? /\('([^']{22})'/.exec(line)?.[1] : undefined;
+}
+
 /** Sammelt alle definierten Entity-IDs (`#N=`) und alle referenzierten `#N`. */
 function collectIds(spf: string): { defined: Set<number>; referenced: Set<number>; duplicates: number[] } {
   const defined = new Set<number>();
@@ -199,30 +231,59 @@ describe("exportIfcSpf — IFC4-Export", () => {
     expect(wallLines).toHaveLength(2);
   });
 
-  it("Tür/Fenster bleiben eigene Objekte (IfcDoor/IfcWindow); das Loch steckt im Wand-Mesh (kein IfcOpeningElement/Void/Fill)", () => {
+  it("Tür/Fenster: IfcOpeningElement in der Wand (RelVoids) und IfcDoor/IfcWindow darin (RelFills)", () => {
     const spf = exportIfcSpf(fixtureProject());
     const lines = spf.split("\n");
-    // Tür + Fenster als eigene Objekte erhalten.
     expect(lines.filter((l) => l.includes("=IFCDOOR("))).toHaveLength(1);
     expect(lines.filter((l) => l.includes("=IFCWINDOW("))).toHaveLength(1);
-    // Bewusste Abwägung: Wand ist jetzt ein Face-Set mit ausgeschnittenem Loch —
-    // die frühere IfcOpeningElement-Void/Fill-Semantik entfällt (siehe Dateikopf).
-    expect(lines.filter((l) => l.includes("=IFCOPENINGELEMENT("))).toHaveLength(0);
-    expect(lines.filter((l) => l.includes("=IFCRELVOIDSELEMENT("))).toHaveLength(0);
-    expect(lines.filter((l) => l.includes("=IFCRELFILLSELEMENT("))).toHaveLength(0);
+    const openings = lines.filter((l) => l.includes("=IFCOPENINGELEMENT("));
+    expect(openings).toHaveLength(2);
+    for (const o of openings) expect(o).toContain(".OPENING.");
+    const voids = lines.filter((l) => l.includes("=IFCRELVOIDSELEMENT("));
+    const fills = lines.filter((l) => l.includes("=IFCRELFILLSELEMENT("));
+    expect(voids).toHaveLength(2);
+    expect(fills).toHaveLength(2);
+    // RelVoids: Wand → Öffnung; RelFills: Öffnung → Tür/Fenster.
+    const wallIds = lines.filter((l) => l.includes("=IFCWALL(")).map(idOf);
+    const openingIds = openings.map(idOf);
+    const fillIds = lines.filter((l) => l.includes("=IFCDOOR(") || l.includes("=IFCWINDOW(")).map(idOf);
+    for (const v of voids) {
+      const m = /,(#\d+),(#\d+)\);$/.exec(v)!;
+      expect(wallIds).toContain(m[1]);
+      expect(openingIds).toContain(m[2]);
+    }
+    for (const f of fills) {
+      const m = /,(#\d+),(#\d+)\);$/.exec(f)!;
+      expect(openingIds).toContain(m[1]);
+      expect(fillIds).toContain(m[2]);
+    }
+    // Öffnungen hängen nur über RelVoids an der Wand, nicht im Geschoss.
+    const contained = lines.filter((l) => l.includes("=IFCRELCONTAINEDINSPATIALSTRUCTURE("));
+    for (const o of openingIds) for (const c of contained) expect(c).not.toMatch(new RegExp(`${o}[,)]`));
   });
 
-  it("bildet Wände als IfcTriangulatedFaceSet (IfcCartesianPointList3D + CoordIndex) statt Profil-Extrusion ab", () => {
+  it("einfache Wände: ungeschnittene Profil-Extrusion (SweptSolid) je Schicht-Band, kein Mesh", () => {
     const spf = exportIfcSpf(fixtureProject());
     const lines = spf.split("\n");
-    // Genau ein Face-Set + eine Punktliste je Wand (2 Wände).
-    expect(lines.filter((l) => l.includes("=IFCTRIANGULATEDFACESET("))).toHaveLength(2);
-    expect(lines.filter((l) => l.includes("=IFCCARTESIANPOINTLIST3D("))).toHaveLength(2);
-    // Wand-Shape ist als Tessellation deklariert (nicht mehr SweptSolid).
-    expect(spf).toContain("'Tessellation'");
-    // Face-Set-CoordIndex referenziert 1-basierte Punkt-Indizes (Tripel-Listen).
-    const fs = lines.find((l) => l.includes("=IFCTRIANGULATEDFACESET("));
-    expect(fs).toMatch(/\(\(\d+,\d+,\d+\)/);
+    expect(lines.filter((l) => l.includes("=IFCTRIANGULATEDFACESET("))).toHaveLength(0);
+    // Der Fenster-Wand-Körper ist voll: 5 m × 0.4 m Rechteck, 2.6 m hoch (das Loch macht die Öffnung).
+    expect(spf).toMatch(/=IFCEXTRUDEDAREASOLID\(#\d+,#\d+,#\d+,2\.6\);/);
+  });
+
+  it("Wand mit Laibungs-Rücksprung (innerste Schicht weiter offen): Mesh bleibt, Öffnung+Füllung trotzdem als Beziehung", () => {
+    const p = fixtureProject();
+    p.components.push({ id: "d", name: "Dämmung", color: "#eee", hatchId: "none", joinPriority: 5 });
+    p.wallTypes[0].layers = [{ componentId: "d", thickness: 0.16 }, { componentId: "c", thickness: 0.24 }];
+    (p as { windowTypes?: unknown[] }).windowTypes = [
+      { id: "wt", name: "Holz-Metall IV", kind: "drehkipp", wingCount: 1, glazing: "dreifach", frameThickness: 0.08, defaultSillHeight: 0.9, defaultWidth: 1.2, defaultHeight: 1.2, innerLayerRecess: true },
+    ];
+    p.openings![1] = { ...p.openings![1], typeId: "wt" };
+    const lines = exportIfcSpf(p).split("\n");
+    // W2 (Fenster mit Rücksprung) als Mesh, W1 (Tür) als Extrusion.
+    expect(lines.filter((l) => l.includes("=IFCTRIANGULATEDFACESET("))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes("=IFCOPENINGELEMENT("))).toHaveLength(2);
+    expect(lines.filter((l) => l.includes("=IFCRELVOIDSELEMENT("))).toHaveLength(2);
+    expect(lines.filter((l) => l.includes("=IFCRELFILLSELEMENT("))).toHaveLength(2);
   });
 
   it("bildet Decke, Treppe und Extrusion auf die erwarteten Entity-Typen ab", () => {
@@ -234,11 +295,13 @@ describe("exportIfcSpf — IFC4-Export", () => {
   });
 
   it("das Wand-Face-Set enthält das ausgeschnittene Fenster-Loch (Loch-Vertices + volle Dreieckszahl, keine dangling refs)", () => {
+    // Einschichtige Wände mit Rücksprung-Fenster: die einzige (= innerste) Schicht hat das geweitete
+    // Loch → Mesh-Pfad; Zerlegung wie bisher.
     // W2 hat das Fenster F1 (position 1, width 1.2, sill 0.9, height 1.5) → das
     // Loch liegt voll im Wand-Inneren; das Face-Set der Wand hat exakt die
     // Rust-Zerlegung: 8 Langseiten-Teilrechtecke ×2×2 + 8 (Deckel/Boden/Kappen)
     // + 8 (4 Laibungen) = 48 Dreiecke, 144 Punkte.
-    const spf = exportIfcSpf(fixtureProject());
+    const spf = exportIfcSpf(meshFixture());
     const lines = spf.split("\n");
     const faceSets = lines.filter((l) => l.includes("=IFCTRIANGULATEDFACESET("));
     // Das Loch-Face-Set hat 48 CoordIndex-Tripel.
@@ -258,7 +321,7 @@ describe("exportIfcSpf — IFC4-Export", () => {
     // Dreiecks-Wicklung um → Normalen zeigten nach INNEN → Viewer cullten die
     // Vorderseiten → Wand wirkte oben/unten offen. Nach dem Wicklungs-Ausgleich
     // muss das signierte Volumen jedes Wandkörpers POSITIV sein (aussen orientiert).
-    const spf = exportIfcSpf(fixtureProject());
+    const spf = exportIfcSpf(meshFixture());
     const lines = spf.split("\n");
     const byId = new Map<number, string>();
     for (const l of lines) {
@@ -302,9 +365,72 @@ describe("exportIfcSpf — IFC4-Export", () => {
   it("GUIDs sind 22 Zeichen lang, nutzen den gültigen IFC-Zeichensatz und sind deterministisch", () => {
     const guid = ifcGuid("W1");
     expect(guid).toHaveLength(22);
-    expect(guid).toMatch(/^[0-9A-Za-z_$]{22}$/);
+    // 128 Bit in 22 Zeichen: das erste Zeichen trägt nur 2 Bit (0–3).
+    expect(guid).toMatch(/^[0-3][0-9A-Za-z_$]{21}$/);
     expect(ifcGuid("W1")).toBe(guid); // stabil über Re-Export
     expect(ifcGuid("W2")).not.toBe(guid); // unterschiedliche IDs → unterschiedliche GUIDs
+  });
+
+  it("[B5] dauerhafte GUIDs: zweimal exportieren liefert dieselben GlobalIds", () => {
+    const a = globalIds(exportIfcSpf(fixtureProject()));
+    const b = globalIds(exportIfcSpf(fixtureProject()));
+    expect(a.length).toBeGreaterThan(20);
+    expect(b).toEqual(a);
+  });
+
+  it("[B5] GlobalIds sind in der Datei eindeutig — auch bei gleicher id verschiedener Bauteilarten", () => {
+    // Decke und Dach heissen beide „D1": Namensraum je Bauteilart trennt sie.
+    const p: Project = {
+      ...meshFixture(),
+      roofs: [
+        {
+          id: "D1", type: "roof", floorId: "og", categoryCode: "35",
+          outline: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }],
+          shape: "sattel", pitchDeg: 35, overhang: 0.3, ridgeAxis: "x", thickness: 0.25,
+        },
+      ],
+      rooms: [
+        { id: "R1", type: "room", floorId: "eg", categoryCode: "45", siaCategory: "HNF", name: "Küche", boundary: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }], color: "#ccc" },
+      ],
+      columns: [
+        { id: "S2", type: "column", floorId: "eg", categoryCode: "50", position: { x: 2, y: 2 }, profile: { kind: "round", radius: 0.1 }, rotation: 0, height: 2.6, componentId: "c" },
+      ],
+    };
+    const ids = globalIds(exportIfcSpf(p));
+    expect(ids.length).toBeGreaterThan(30);
+    expect(new Set(ids).size).toBe(ids.length);
+    // Ebenso im Demo-Haus mit Extrusions-Wänden.
+    const ids2 = globalIds(exportIfcSpf(fixtureProject()));
+    expect(new Set(ids2).size).toBe(ids2.length);
+  });
+
+  it("[B5] GUID eines Bauteils hängt nur an Projekt und Bauteil, nicht an anderen Bauteilen oder der Reihenfolge", () => {
+    const base = exportIfcSpf(fixtureProject());
+    const p = fixtureProject();
+    p.walls = [
+      { id: "W0", type: "wall", floorId: "og", categoryCode: "20", start: { x: 0, y: 4 }, end: { x: 0, y: 0 }, wallTypeId: "aw", height: 2.6 },
+      ...[...p.walls].reverse(),
+    ];
+    const more = exportIfcSpf(p);
+    for (const type of ["IFCWALL", "IFCSLAB", "IFCDOOR", "IFCOPENINGELEMENT", "IFCWALLTYPE"]) {
+      const g = guidOf(base, type);
+      expect(g, type).toBeDefined();
+      expect(globalIds(more), type).toContain(g);
+    }
+    // Geschoss und räumliche Eingliederung des EG bleiben gleich, obwohl das OG neu Bauteile hat.
+    expect(guidOf(more, "IFCBUILDINGSTOREY", "'EG'")).toBe(guidOf(base, "IFCBUILDINGSTOREY", "'EG'"));
+    const containEg = (spf: string) => {
+      const eg = idOf(spf.split("\n").find((l) => l.includes("=IFCBUILDINGSTOREY(") && l.includes("'EG'"))!);
+      return guidOf(spf, "IFCRELCONTAINEDINSPATIALSTRUCTURE", `,${eg});`);
+    };
+    expect(containEg(base)).toBeDefined();
+    expect(containEg(more)).toBe(containEg(base));
+  });
+
+  it("[B5] anderes Projekt ⇒ andere GUIDs (gleiche Bauteil-ids kollidieren nicht projektübergreifend)", () => {
+    const a = new Set(globalIds(exportIfcSpf(fixtureProject())));
+    const b = globalIds(exportIfcSpf({ ...fixtureProject(), id: "anderes" }));
+    expect(b.filter((g) => a.has(g))).toEqual([]);
   });
 
   it("georeferenziert: mit geoAnchor werden die ECHTEN LV95-Koordinaten geschrieben (lokal bearbeitet, weltweit lagerichtig)", () => {
@@ -425,7 +551,6 @@ describe("Räume als IfcSpace", () => {
 
 describe("Materialschichten über Bauteiltypen", () => {
   const lines = (spf: string, type: string) => spf.split("\n").filter((l) => l.includes(`=${type}(`));
-  const idOf = (line: string) => line.slice(0, line.indexOf("="));
   it("Wandtyp → IfcWallType mit IfcMaterialLayerSet, Wände über IfcRelDefinesByType", () => {
     const p = fixtureProject();
     p.components.push({ id: "d", name: "Dämmung", color: "#eee", hatchId: "none", joinPriority: 5 });
@@ -481,5 +606,98 @@ describe("Dächer und Stützen", () => {
     expect(col).toContain(".COLUMN.");
     const colId = col.slice(0, col.indexOf("="));
     expect(spf.split("\n").some((l) => l.includes("=IFCRELASSOCIATESMATERIAL(") && l.includes(`(${colId})`))).toBe(true);
+  });
+});
+
+describe("[B5] Pset_*Common mit den Werten aus dem Modell", () => {
+  const byId = (spf: string) => {
+    const m = new Map<string, string>();
+    for (const l of spf.split("\n")) {
+      const k = /^(#\d+)=/.exec(l);
+      if (k) m.set(k[1], l);
+    }
+    return m;
+  };
+  /** Eigenschaften (Name → Wert-Ausdruck) des Psets `pset` am Bauteil `elementLine`. */
+  const psetOf = (spf: string, elementLine: string, pset: string): Record<string, string> | null => {
+    const lines = byId(spf);
+    const el = idOf(elementLine);
+    for (const rel of spf.split("\n").filter((l) => l.includes("=IFCRELDEFINESBYPROPERTIES("))) {
+      const m = /,\(([^)]*)\),(#\d+)\);$/.exec(rel)!;
+      if (!m[1].split(",").includes(el)) continue;
+      const ps = lines.get(m[2])!;
+      if (!ps.includes(`'${pset}'`)) continue;
+      const props = /,\(([^)]*)\)\);$/.exec(ps)![1].split(",");
+      const out: Record<string, string> = {};
+      for (const pid of props) {
+        const pm = /IFCPROPERTYSINGLEVALUE\('([^']*)',\$,(.*),\$\);$/.exec(lines.get(pid)!)!;
+        out[pm[1]] = pm[2];
+      }
+      return out;
+    }
+    return null;
+  };
+  const project = (): Project => ({
+    ...fixtureProject(),
+    doorTypes: [
+      { id: "dt-glas", name: "Glastür", kind: "dreh", leafCount: 1, leafStyle: "glas", glazingRatio: 0.6, frameThickness: 0.06, defaultWidth: 0.9, defaultHeight: 2.1 },
+    ],
+    windowTypes: [{ id: "wt", name: "Holz-Metall IV", kind: "drehkipp", wingCount: 1, glazing: "dreifach", frameThickness: 0.08, defaultSillHeight: 0.9, defaultWidth: 1.2, defaultHeight: 1.5 }],
+    openings: [
+      { ...fixtureProject().openings![0], typeId: "dt-glas" },
+      { ...fixtureProject().openings![1], typeId: "wt" },
+    ],
+    roofTypes: [{ id: "rt", name: "Ziegeldach", layers: [{ componentId: "c", thickness: 0.25 }] }],
+    roofs: [
+      {
+        id: "DA", type: "roof", floorId: "og", categoryCode: "35",
+        outline: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 4 }, { x: 0, y: 4 }],
+        shape: "sattel", pitchDeg: 35, overhang: 0.3, ridgeAxis: "x", thickness: 0.25, roofTypeId: "rt",
+      },
+    ],
+    columns: [
+      { id: "S1", type: "column", floorId: "eg", categoryCode: "50", position: { x: 2, y: 2 }, profile: { kind: "rect", width: 0.3, depth: 0.2 }, rotation: 0, height: 2.6 },
+    ],
+    rooms: [
+      { id: "R1", type: "room", floorId: "eg", categoryCode: "45", siaCategory: "HNF", name: "Küche", boundary: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }], color: "#ccc", stamp: { number: "E.01" } as never },
+      { id: "R2", type: "room", floorId: "eg", categoryCode: "45", siaCategory: "AGF", name: "Terrasse", boundary: [{ x: 6, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 3 }, { x: 6, y: 3 }], color: "#ccc" },
+    ],
+  }) as Project;
+  const line = (spf: string, type: string, needle = "") => spf.split("\n").find((l) => l.includes(`=${type}(`) && l.includes(needle))!;
+
+  it("Wand/Decke: Reference = Typname, keine erfundenen Werte (IsExternal/LoadBearing/U-Wert fehlen im Modell)", () => {
+    const spf = exportIfcSpf(project());
+    expect(psetOf(spf, line(spf, "IFCWALL"), "Pset_WallCommon")).toEqual({ Reference: "IFCIDENTIFIER('Aussenwand')" });
+    expect(psetOf(spf, line(spf, "IFCSLAB"), "Pset_SlabCommon")).toEqual({ Reference: "IFCIDENTIFIER('Betondecke')" });
+    expect(spf).not.toContain("'ThermalTransmittance'");
+    expect(spf).not.toContain("'LoadBearing'");
+  });
+  it("Dach: Reference = Dachtyp, IsExternal (ein Dach ist Gebäudehülle)", () => {
+    const spf = exportIfcSpf(project());
+    expect(psetOf(spf, line(spf, "IFCROOF"), "Pset_RoofCommon")).toEqual({ Reference: "IFCIDENTIFIER('Ziegeldach')", IsExternal: "IFCBOOLEAN(.T.)" });
+  });
+  it("Stütze: Reference = Profilbezeichnung", () => {
+    const spf = exportIfcSpf(project());
+    expect(psetOf(spf, line(spf, "IFCCOLUMN"), "Pset_ColumnCommon")).toEqual({ Reference: "IFCIDENTIFIER('St\\X2\\00FC\\X0\\tze 30\\X2\\00D7\\X0\\20')" });
+  });
+  it("Tür/Fenster: Reference = Bauteiltyp, Glasanteil der Glastür", () => {
+    const spf = exportIfcSpf(project());
+    expect(psetOf(spf, line(spf, "IFCDOOR"), "Pset_DoorCommon")).toEqual({
+      Reference: "IFCIDENTIFIER('Glast\\X2\\00FC\\X0\\r')",
+      GlazingAreaFraction: "IFCPOSITIVERATIOMEASURE(0.6)",
+    });
+    expect(psetOf(spf, line(spf, "IFCWINDOW"), "Pset_WindowCommon")).toEqual({ Reference: "IFCIDENTIFIER('Holz-Metall IV')" });
+    // Ohne Typ kein leeres Pset.
+    const plain = exportIfcSpf(fixtureProject());
+    expect(psetOf(plain, line(plain, "IFCDOOR"), "Pset_DoorCommon")).toBeNull();
+  });
+  it("Raum: Reference = Raumnummer, IsExternal aus SIA 416 (AGF = Aussengeschossfläche)", () => {
+    const spf = exportIfcSpf(project());
+    const kueche = line(spf, "IFCSPACE", "'K\\X2\\00FC\\X0\\che'");
+    const terrasse = line(spf, "IFCSPACE", "'Terrasse'");
+    expect(psetOf(spf, kueche, "Pset_SpaceCommon")).toEqual({ Reference: "IFCIDENTIFIER('E.01')", IsExternal: "IFCBOOLEAN(.F.)" });
+    expect(psetOf(spf, terrasse, "Pset_SpaceCommon")).toEqual({ IsExternal: "IFCBOOLEAN(.T.)" });
+    expect(terrasse).toContain(".EXTERNAL.");
+    expect(kueche).toContain(".INTERNAL.");
   });
 });

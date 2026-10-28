@@ -32,8 +32,14 @@ export interface NativeAppMenuHandlers {
   onExportIfc: () => void;
   onExportObj: () => void;
   onExportStl: () => void;
+  onExportGlb: () => void;
   onExportStep: () => void;
   onImportStep: () => void;
+  onImportIfc: () => void;
+  /** Punktwolke importieren ([27]); optional für ältere Aufrufer. */
+  onImportPointCloud?: () => void;
+  /** 3D-Modell importieren (OBJ/STL/glTF/GLB/PLY). */
+  onImportMesh?: () => void;
   onClashCheck: () => void;
   onKennzahlen: () => void;
 
@@ -174,6 +180,18 @@ export function useNativeAppMenu(
             text: t("menu.native.importStep"),
             action: () => handlersRef.current.onImportStep(),
           }),
+          await MenuItem.new({
+            text: t("menu.native.importIfc"),
+            action: () => handlersRef.current.onImportIfc(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.importPointCloud"),
+            action: () => handlersRef.current.onImportPointCloud?.(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.importMesh"),
+            action: () => handlersRef.current.onImportMesh?.(),
+          }),
           await Submenu.new({
             text: t("menu.native.export"),
             items: [
@@ -200,6 +218,10 @@ export function useNativeAppMenu(
               await MenuItem.new({
                 text: "STL",
                 action: () => handlersRef.current.onExportStl(),
+              }),
+              await MenuItem.new({
+                text: "glTF (GLB)",
+                action: () => handlersRef.current.onExportGlb(),
               }),
               await MenuItem.new({
                 text: "STEP",

@@ -5,8 +5,12 @@
 //   • leeres Projekt ⇒ gültige leere Datei (kein Crash).
 
 import { describe, it, expect } from "vitest";
+import "../engine/fileioWasm.setup";
 import { exportObj, exportStl } from "./exportMesh";
 import type { Project, Wall, Ceiling, ExtrudedSolid, Opening } from "../model/types";
+
+/** Nur die Wand (ohne Rahmen/Glas der Öffnung): die Tests zählen die Dreiecke des ausgeschnittenen Wandkörpers. */
+const WALL_ONLY = { openingParts: false };
 
 /** Gemeinsame Ressourcen-Basis (Komponente/Wandtyp/Deckentyp/Geschoss/Ebene). */
 function baseProject(): Project {
@@ -261,14 +265,14 @@ describe("exportStl — ASCII-STL-Export", () => {
     // (= Rust-Zerlegung `extrude_layer_segment_with_holes`): 8 solide Langseiten-
     // Teilrechtecke (3×3-Gitter minus Loch) × 2 Seiten × 2 Dreiecke = 32,
     // + Deckel/Boden/2 Stirnkappen = 8, + 4 Laibungen × 2 = 8 → 48 Dreiecke.
-    const stl = exportStl(projectWithOpening("window"));
+    const stl = exportStl(projectWithOpening("window"), WALL_ONLY);
     const facetCount = stl.split("\n").filter((l) => l.startsWith("facet normal")).length;
     expect(facetCount).toBe(48);
 
     // Die volle Box hätte NUR Ecken bei y∈{0,2.6}, x∈{0,5}. Der Ausschnitt
     // führt echte Vertices an den Loch-Rändern ein — Beweis, dass das Loch
     // wirklich in der Fläche steckt (nicht bloss eine übergelegte Scheibe).
-    const verts = parseObjVertices(exportObj(projectWithOpening("window")));
+    const verts = parseObjVertices(exportObj(projectWithOpening("window"), WALL_ONLY));
     const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
     expect(verts.some((v) => near(v[1], 0.9))).toBe(true); // Brüstungs-OK
     expect(verts.some((v) => near(v[1], 2.4))).toBe(true); // Sturz-UK
@@ -282,10 +286,10 @@ describe("exportStl — ASCII-STL-Export", () => {
     // Tür [x 2..3] × [y 0..2.1]: Boden bekommt die Lücke [2,3] (statt einer
     // unteren Laibung) → 5 Langseiten-Teilrechtecke × 2 × 2 = 20, Deckel(1)=2,
     // Boden(2 Streifen)=4, 2 Stirnkappen=4, 3 Laibungen (links/rechts/oben)=6 → 36.
-    const stl = exportStl(projectWithOpening("door"));
+    const stl = exportStl(projectWithOpening("door"), WALL_ONLY);
     const facetCount = stl.split("\n").filter((l) => l.startsWith("facet normal")).length;
     expect(facetCount).toBe(36);
-    const verts = parseObjVertices(exportObj(projectWithOpening("door")));
+    const verts = parseObjVertices(exportObj(projectWithOpening("door"), WALL_ONLY));
     const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
     // Sturz-UK bei y=2.1 vorhanden, aber KEIN Brüstungsvertex (Tür sitzt am Boden).
     expect(verts.some((v) => near(v[1], 2.1))).toBe(true);

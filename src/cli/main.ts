@@ -5,13 +5,32 @@
 //   dossier-cli <projekt.obp> info
 //   dossier-cli <projekt.obp> validate
 //   dossier-cli <projekt.obp> migrate [--out neu.obp]
-//   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--out eg.svg]
+//   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--format svg|json] [--out eg.svg]
+//                                                  json = render2d-Szene (planToRenderScene)
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
-//   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
+//                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun [--level EG] [--out datei]
+//                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
+//   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
+//                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
+//                                                  gegen das Ergebnis, {last} = zuletzt geschriebene Datei
+//   dossier-cli <projekt.obp> import-ifc <datei.ifc> [--out neu.obp] [--group product|class] [--elements]
+//                                                  IFC als Kontext-Meshes ([B3]), mit --elements als echte
+//                                                  Bauteile ([B4]); Bericht als JSON auf stdout
+//   dossier-cli <projekt.obp> import-mesh <datei.obj|stl|gltf|glb|ply> [--out neu.obp] [--unit mm|cm|m|inch|foot] [--up z|y|auto]
+//                                                  [--placement center|original]   3D-Modell als Kontext-Meshes; Bericht als JSON
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
+//   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
+//                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
+//   dossier-cli pdf-info <datei.pdf> [--page 1]    Vektor-PDF lesen ([76]): Seiten, Pfade, Texte, BBox (pt) als JSON
+//   dossier-cli convert plan.pdf plan.obp [--scale 100] [--page 1] [--no-text]
+//                                                  Vektor-PDF als 2D-Zeichnung (Ebenen nach Farbe/Strichstärke)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
+//
+// Statt einer Datei nimmt `:beispiel` das eingebaute Demo-Haus (sampleProject).
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
@@ -20,6 +39,24 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildPlanDxf,
+  buildPlanDwg,
+  buildPlanDxfBinary,
+  loadFileio,
+  readPointCloudFlat,
+  readPdfVectorPage,
+  pdfPageToImport,
+  pdfPageInfo,
+  readIfc,
+  readIfcElements,
+  ifcElementsToProject,
+  ifcToImportedMeshes,
+  readMesh,
+  meshObjectsToImportedMeshes,
+  isMeshFile,
+  MESH_UNITS,
+  projectGeoOrigin,
+  ensureContextCategories,
+  projectToWorldCoords,
   computeSection,
   exportIfcSpf,
   exportObj,
@@ -32,6 +69,14 @@ import {
   checkRoomProgram,
   checkSiteRules,
   exportStl,
+  exportGlb,
+  exportGltf,
+  parseDxf,
+  contoursToDrawings,
+  textsToDrawings,
+  planImportCategories,
+  distinctImportLayers,
+  emptyProject,
   generateElevationPlan,
   diffToOps,
   applyOps,
@@ -42,30 +87,46 @@ import {
   parseProjectFile,
   planToSvgString,
   serializeProject,
+  parseBcf,
+  bcfInfo,
   setWasmBytesProvider,
   initCore,
   validateProject,
+  sampleProject,
 } from "../core";
 import type { Project } from "../core";
 import { serveStdio } from "./mcp";
 
-type Args = { positional: string[]; flags: Map<string, string> };
+type Args = { positional: string[]; flags: Map<string, string>; cmds: string[] };
+
+/** `--schema 4|ifc4|2x3|ifc2x3` → IFC-Schema des Exports (ohne Angabe IFC4). */
+function ifcSchemaFlag(args: Args): "IFC4" | "IFC2X3" {
+  const v = args.flags.get("schema");
+  if (v === undefined) return "IFC4";
+  const k = v.toLowerCase().replace(/^ifc/, "");
+  if (k === "4") return "IFC4";
+  if (k === "2x3") return "IFC2X3";
+  return fail(`--schema: "${v}" unbekannt (4 oder 2x3)`);
+}
 
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
   const flags = new Map<string, string>();
+  const cmds: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith("--")) {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith("--")) flags.set(a.slice(2), "true");
       else {
-        flags.set(a.slice(2), next);
+        // `--cmd` darf mehrfach vorkommen (Reihenfolge bleibt), bei allen anderen Flags gilt das letzte.
+        if (a === "--cmd") cmds.push(next);
+        else flags.set(a.slice(2), next);
         i++;
       }
     } else positional.push(a);
   }
-  return { positional, flags };
+  return { positional, flags, cmds };
 }
 
 function wasmDir(): string {
@@ -76,6 +137,7 @@ function wasmDir(): string {
 
 const WASM_FILES: Record<string, string> = {
   core: "pkgCore/core_bg.wasm",
+  fileio: "pkgFileIo/fileio_bg.wasm",
   render3d: "pkg3d/render3d_bg.wasm",
   trucksolid: "pkgTruck/trucksolid_bg.wasm",
 };
@@ -86,6 +148,7 @@ function fail(msg: string): never {
 }
 
 function loadProject(path: string): Project {
+  if (path === ":beispiel") return sampleProject;
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -105,21 +168,132 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
   return levels.find((l) => l.id.toLowerCase() === n || l.name.toLowerCase() === n);
 }
 
-function out(args: Args, text: string, defaultName: string): void {
+/** Zuletzt geschriebene Datei (für `{last}` in `--cmd`). */
+let lastOutput = "";
+
+function out(args: Args, text: string | Uint8Array, defaultName: string): void {
   const target = args.flags.get("out") ?? defaultName;
+  lastOutput = target;
   if (target === "-") process.stdout.write(text);
   else {
     writeFileSync(target, text);
-    process.stderr.write(`geschrieben: ${target} (${text.length} Zeichen)\n`);
+    const size = typeof text === "string" ? `${text.length} Zeichen` : `${text.length} Bytes`;
+    process.stderr.write(`geschrieben: ${target} (${size})\n`);
   }
+}
+
+/** `dossier-cli bcf-info <datei.bcfzip>`: Themen einer BCF-Datei (2.1/3.0) als JSON, ohne Snapshot-Bytes. */
+async function runBcfInfo(path: string | undefined): Promise<number> {
+  if (!path) {
+    process.stderr.write("Aufruf: dossier-cli bcf-info <datei.bcfzip>\n");
+    return 2;
+  }
+  setWasmBytesProvider(async (name) => {
+    const rel = WASM_FILES[name];
+    if (!rel) throw new Error(`unbekanntes WASM-Modul ${name}`);
+    return readFileSync(join(wasmDir(), rel));
+  });
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(readFileSync(path));
+  } catch (e) {
+    fail(`Datei nicht lesbar: ${path} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  try {
+    process.stdout.write(JSON.stringify(bcfInfo(await parseBcf(bytes)), null, 2) + "\n");
+  } catch (e) {
+    fail(`BCF: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return 0;
+}
+
+/** `--page n` (1-basiert) → Seitenindex (0-basiert). */
+function pageArg(args: Args): number {
+  const v = Number(args.flags.get("page") ?? 1);
+  if (!Number.isInteger(v) || v < 1) fail("--page: ganze Zahl ab 1");
+  return v - 1;
+}
+
+/** `pdf-info <datei.pdf> [--page 1]`: Seitenzahl, Pfade/Texte/Bilder, Umriss (pt) und Ebenen als JSON. */
+async function runPdfInfo(args: Args, path: string | undefined): Promise<number> {
+  if (!path) {
+    process.stderr.write("Aufruf: dossier-cli pdf-info <datei.pdf> [--page 1]\n");
+    return 2;
+  }
+  setWasmBytesProvider(async (name) => {
+    const rel = WASM_FILES[name];
+    if (!rel) throw new Error(`unbekanntes WASM-Modul ${name}`);
+    return readFileSync(join(wasmDir(), rel));
+  });
+  await loadFileio();
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(readFileSync(path));
+  } catch (e) {
+    fail(`Datei nicht lesbar: ${path} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  const t0 = performance.now();
+  let page;
+  try {
+    page = readPdfVectorPage(bytes, pageArg(args));
+  } catch (e) {
+    fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const ms = Math.round(performance.now() - t0);
+  process.stdout.write(JSON.stringify({ file: path, bytes: bytes.byteLength, ms, ...pdfPageInfo(page) }, null, 2) + "\n");
+  return 0;
+}
+
+/** `pointcloud-info <datei> [--voxel m] [--max n]`: liest und dünnt aus, gibt den Bericht als JSON aus. */
+async function pointCloudInfo(args: Args, src: string | undefined): Promise<number> {
+  if (!src) fail("pointcloud-info: Datei fehlt (Aufruf: pointcloud-info <datei> [--voxel 0.05] [--max 2000000])");
+  setWasmBytesProvider(async (name) => {
+    const rel = WASM_FILES[name];
+    if (!rel) throw new Error(`unbekanntes WASM-Modul ${name}`);
+    return readFileSync(join(wasmDir(), rel));
+  });
+  await loadFileio();
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(src);
+  } catch (e) {
+    fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  const num = (k: string, d: number): number => {
+    const v = Number(args.flags.get(k) ?? d);
+    if (!Number.isFinite(v) || v < 0) fail(`--${k}: keine gültige Zahl`);
+    return v;
+  };
+  const t0 = performance.now();
+  let cloud;
+  try {
+    cloud = readPointCloudFlat(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), src, {
+      voxel: num("voxel", 0),
+      maxPoints: num("max", 2_000_000),
+    });
+  } catch (e) {
+    fail(`${src}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const ms = Math.round(performance.now() - t0);
+  process.stdout.write(JSON.stringify({ file: src, bytes: bytes.byteLength, ms, ...cloud.report }, null, 2) + "\n");
+  return 0;
 }
 
 export async function run(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
+  const convertMode = args.positional[0] === "convert";
   const [file, command, ...rest] = args.positional;
-  if (!file || !command) {
+  if (file === "bcf-info") return runBcfInfo(command);
+  if (file === "pointcloud-info") return pointCloudInfo(args, command);
+  if (file === "pdf-info") return runPdfInfo(args, command);
+  if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|ifc|step|obj|stl|schedule|kennzahlen|sun> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|step|obj|stl|glb|gltf|schedule|kennzahlen|sun|model3d> [Optionen]\n" +
+        "        dossier-cli convert <eingabe.dxf|dwg|ifc|pdf|obj|stl|gltf|glb|ply|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
+        "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
+        "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
+        "        dossier-cli bcf-info <datei.bcfzip>\n" +
+        "        dossier-cli pdf-info <datei.pdf> [--page 1]\n",
     );
     return 2;
   }
@@ -129,9 +303,218 @@ export async function run(argv: string[]): Promise<number> {
     return readFileSync(join(wasmDir(), rel));
   });
   await initCore();
+  if (convertMode) return convert(command, rest[0], args);
   const project = loadProject(file);
+  let code = 0;
+  if (command) code = await execute(project, file, command, rest, args);
+  return code === 0 ? runCmds(project, file, args) : code;
+}
+
+/** Endung (klein, ohne Punkt) eines Dateinamens. */
+const extOf = (path: string): string => (path.includes(".") ? (path.split(".").pop() ?? "").toLowerCase() : "");
+
+/** Zerlegt eine `--cmd`-Zeile in Wörter (Anführungszeichen "…" und '…' fassen zusammen). */
+function splitCommand(line: string): string[] {
+  return [...line.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+}
+
+/** Führt alle `--cmd` der Reihe nach gegen das Projekt aus; `{last}` = zuletzt geschriebene Datei. Bricht beim ersten Fehler ab. */
+async function runCmds(project: Project, file: string, args: Args): Promise<number> {
+  for (const line of args.cmds) {
+    const words = splitCommand(line.replaceAll("{last}", lastOutput));
+    const sub = parseArgs(words);
+    const [command, ...rest] = sub.positional;
+    if (!command) fail("--cmd: leerer Befehl");
+    const code = await execute(project, file, command, rest, sub);
+    if (code !== 0) return code;
+  }
+  return 0;
+}
+
+/** Alle Kategorien inkl. verschachtelter (flach). */
+function flattenAllCategories(ls: Project["layers"]): Project["layers"] {
+  return ls.flatMap((l) => [l, ...(l.children ? flattenAllCategories(l.children) : [])]);
+}
+
+/** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
+async function importAny(path: string, args: Args): Promise<Project> {
+  const ext = extOf(path);
+  if (ext === "obp" || ext === "json" || path === ":beispiel") return loadProject(path);
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(readFileSync(path));
+  } catch (e) {
+    return fail(`Datei nicht lesbar: ${path} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const base: Project = { ...emptyProject, name: fileName.replace(/\.[^.]+$/, "") };
+  if (ext === "ifc") return (await ifcInto(base, bytes, fileName, args)).next;
+  if (isMeshFile(fileName)) return (await meshInto(base, bytes, path, args)).next;
+  if (ext === "dxf" || ext === "dwg" || ext === "pdf") {
+    await loadFileio();
+    let parsed;
+    if (ext === "pdf") {
+      // Vektor-PDF ([76]): Massstab 1:--scale (Standard 100), Seite --page (Standard 1).
+      const scale = Number(args.flags.get("scale") ?? 100);
+      if (!Number.isFinite(scale) || scale <= 0) return fail("--scale: Massstabszahl > 0, z. B. 100 für 1:100");
+      try {
+        parsed = pdfPageToImport(readPdfVectorPage(bytes, pageArg(args)), scale, { texts: !args.flags.has("no-text") });
+      } catch (e) {
+        return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    } else parsed = parseDxf(bytes);
+    const level = base.drawingLevels.find((l) => l.kind === "floor");
+    if (!level) return fail("kein Geschoss für den Import");
+    // Wie die App („DXF-Layer als Kategorien"): fehlende Layer als Unterkategorien einer neuen Elternkategorie.
+    const plan = planImportCategories(
+      distinctImportLayers(parsed.contours, parsed.texts ?? []),
+      flattenAllCategories(base.layers),
+      `Import ${fileName}`,
+      parsed.layerColors,
+      parsed.layerLineWeights,
+    );
+    const layers = plan.parent ? [...base.layers, plan.parent] : base.layers;
+    const fallback = base.layers[0].code;
+    const toCode = (layer: string): string => plan.codeByLayer.get(layer) ?? fallback;
+    const drawings = [
+      ...contoursToDrawings(parsed.contours, level.id, "byLayer", fallback, toCode, (l) => parsed.layerFillColors?.[l]),
+      ...textsToDrawings(parsed.texts ?? [], level.id, "byLayer", fallback, toCode),
+    ];
+    return applyOps(base, diffToOps(base, { ...base, layers, drawings2d: drawings, context: [...parsed.meshes] }));
+  }
+  return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, pdf, obj, stl, gltf, glb, ply)`);
+}
+
+/** `convert <eingabe> <ausgabe>`: Eingabe nach Endung lesen, Ausgabe nach Endung schreiben, dann `--cmd` ausführen. */
+async function convert(input: string | undefined, output: string | undefined, args: Args): Promise<number> {
+  if (!input || !output) {
+    process.stderr.write("Aufruf: dossier-cli convert <eingabe> <ausgabe> [--cmd \"befehl\"]…\n");
+    return 2;
+  }
+  const project = await importAny(input, args);
+  const ext = extOf(output);
+  const sub: Args = { positional: [], flags: new Map(args.flags), cmds: [] };
+  sub.flags.set("out", output);
+  let code: number;
+  switch (ext) {
+    case "obp":
+      out(sub, serializeProject(project), output);
+      code = 0;
+      break;
+    case "dxf":
+    case "dwg":
+    case "ifc":
+    case "obj":
+    case "stl":
+    case "glb":
+    case "gltf":
+      code = await execute(project, input, ext, [], sub);
+      break;
+    case "step":
+    case "stp":
+      code = await execute(project, input, "step", [], sub);
+      break;
+    default:
+      return fail(`Ausgabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, obj, stl, glb, gltf, step)`);
+  }
+  return code === 0 ? runCmds(project, input, args) : code;
+}
+
+/** IFC in ein Projekt übernehmen (Kontext-Meshes, mit `--elements` als Bauteile); `report` = Bericht für `import-ifc`. */
+async function ifcInto(project: Project, bytes: Uint8Array, fileName: string, args: Args): Promise<{ next: Project; report: unknown }> {
+  const group = args.flags.get("group");
+  const grouping = group === "product" || group === "class" ? group : "auto";
+  if (args.flags.has("elements")) {
+    const { products, report, elements } = await readIfcElements(bytes);
+    const r = ifcElementsToProject(project, products, elements, { fileName, geoOrigin: projectGeoOrigin(project), group: grouping });
+    return {
+      next: applyOps(project, diffToOps(project, r.project)),
+      report: { ...report, products: undefined, elements: r.summary, kept: elements.kept },
+    };
+  }
+  const { products, report } = await readIfc(bytes);
+  const meshes = ifcToImportedMeshes(products, fileName, { geoOrigin: projectGeoOrigin(project), group: grouping });
+  const byClass: Record<string, number> = {};
+  for (const p of products) byClass[p.ifcClass] = (byClass[p.ifcClass] ?? 0) + 1;
+  const triangles = products.reduce((s, p) => s + p.indices.length / 3, 0);
+  const next = applyOps(
+    project,
+    diffToOps(project, {
+      ...project,
+      context: [...(project.context ?? []), ...meshes],
+      // Wie in der App (siteSlice): fehlende Kontext-Kategorie als Ebene ergänzen.
+      layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
+    }),
+  );
+  return { next, report: { ...report, byClass, triangles, contextObjects: meshes.length } };
+}
+
+/** Begleitdateien eines Mesh-Modells aus demselben Verzeichnis: `.mtl` (OBJ `mtllib`), externe `.bin` (glTF). */
+function meshSidecars(path: string, bytes: Uint8Array): { name: string; bytes: Uint8Array }[] {
+  const names: string[] = [];
+  const ext = extOf(path);
+  if (ext === "obj") {
+    for (const m of new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 1 << 20))).matchAll(/^mtllib[ \t]+(.+)$/gm)) {
+      names.push(...m[1].trim().split(/\s+/));
+    }
+  } else if (ext === "gltf") {
+    try {
+      const j = JSON.parse(new TextDecoder().decode(bytes)) as { buffers?: { uri?: string }[] };
+      for (const b of j.buffers ?? []) if (b.uri && !b.uri.startsWith("data:")) names.push(decodeURIComponent(b.uri));
+    } catch {
+      /* kaputtes JSON meldet der Leser */
+    }
+  }
+  const out: { name: string; bytes: Uint8Array }[] = [];
+  for (const n of names) {
+    try {
+      out.push({ name: n, bytes: new Uint8Array(readFileSync(join(dirname(path), n))) });
+    } catch {
+      /* fehlende Datei meldet der Leser (MTL: Hinweis, glTF: Fehler) */
+    }
+  }
+  return out;
+}
+
+/** 3D-Modell (OBJ/STL/glTF/GLB/PLY) als Kontext-Meshes in ein Projekt übernehmen; `report` = Bericht für `import-mesh`. */
+async function meshInto(project: Project, bytes: Uint8Array, path: string, args: Args): Promise<{ next: Project; report: unknown }> {
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const unit = args.flags.get("unit") ?? "m";
+  if (!(MESH_UNITS as readonly string[]).includes(unit)) return fail(`--unit: ${MESH_UNITS.join("|")}`);
+  const up = args.flags.get("up") ?? "auto";
+  if (up !== "auto" && up !== "z" && up !== "y") return fail("--up: z|y|auto");
+  const placement = args.flags.get("placement") ?? "original";
+  if (placement !== "center" && placement !== "original") return fail("--placement: center|original");
+  let read;
+  try {
+    read = await readMesh(bytes, fileName, { unit: unit as (typeof MESH_UNITS)[number], up, files: meshSidecars(path, bytes) });
+  } catch (e) {
+    return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const meshes = meshObjectsToImportedMeshes(read.objects, fileName, { placement, geoOrigin: projectGeoOrigin(project) });
+  const next = applyOps(
+    project,
+    diffToOps(project, {
+      ...project,
+      context: [...(project.context ?? []), ...meshes],
+      layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
+    }),
+  );
+  return { next, report: { ...read.report, contextObjects: meshes.length } };
+}
+
+/** Führt EINEN Befehl gegen ein geladenes Projekt aus (Rückgabe = Exit-Code). */
+async function execute(project: Project, file: string, command: string, rest: string[], args: Args): Promise<number> {
   const scale = Number(args.flags.get("scale") ?? 100);
-  const allCodes = new Set(project.layers.map((l) => l.code));
+  // Alle Ebenen-Codes inkl. verschachtelter (z. B. „10 Situation" unter „05 Kontext").
+  const allCodes = new Set<string>();
+  const collectCodes = (ls: Project["layers"]): void => {
+    for (const l of ls) {
+      allCodes.add(l.code);
+      if (l.children) collectCodes(l.children);
+    }
+  };
+  collectCodes(project.layers);
 
   switch (command) {
     case "info": {
@@ -173,9 +556,14 @@ export async function run(argv: string[]): Promise<number> {
       if (!lvl) fail(`Geschoss nicht gefunden: ${args.flags.get("level") ?? "(erstes)"}`);
       // Massstab geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken nach Massstab).
       const plan = generatePlan(project, lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
+      if (args.flags.get("format") === "json") {
+        out(args, JSON.stringify(planToRenderScene(plan, scale)), `${lvl.name}.scene.json`);
+        return 0;
+      }
       out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
       return 0;
     }
+      return 0;
     case "section":
     case "elevation": {
       const name = rest[0];
@@ -194,20 +582,42 @@ export async function run(argv: string[]): Promise<number> {
       out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
       return 0;
     }
-    case "dxf": {
+    case "dxf":
+    case "dwg": {
       const lvl = findLevel(project, ["floor"], args.flags.get("level"));
       if (!lvl) fail("Geschoss nicht gefunden");
-      out(args, buildPlanDxf(generatePlan(project, lvl.id, allCodes), project), `${lvl.name}.dxf`);
+      // Wie in der App: georeferenziert (LV95), wenn das Projekt einen Standort-Bezug hat.
+      const world = projectToWorldCoords(project);
+      const plan = generatePlan(world, lvl.id, allCodes);
+      await loadFileio();
+      // --scale N (Massstabsnenner, Default 100): Bemassungsstil, Linientypen, Raumstempel, Ansichtsfenster.
+      // --dim-unit cm: Masszahlen in Zentimetern; --layout: zusätzlich Papierbereich mit Ansichtsfenster.
+      const cad = { scaleDenominator: scale, dimUnit: args.flags.get("dim-unit") === "cm" ? ("cm" as const) : ("m" as const), paperLayout: args.flags.has("layout") };
+      if (command === "dxf" && args.flags.has("binary")) out(args, buildPlanDxfBinary(plan, world, cad), `${lvl.name}.dxf`);
+      else if (command === "dxf") out(args, buildPlanDxf(plan, world, cad), `${lvl.name}.dxf`);
+      else out(args, buildPlanDwg(plan, world, cad), `${lvl.name}.dwg`);
       return 0;
     }
     case "ifc":
-      out(args, exportIfcSpf(project), `${project.name || "projekt"}.ifc`);
+      await loadFileio();
+      // --ebkph: eBKP-H-Hauptgruppen je Bauteilart; --ebenen: Ebene (categoryCode) des Modells als Klassifikation.
+      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), schema: ifcSchemaFlag(args) }), `${project.name || "projekt"}.ifc`);
       return 0;
     case "obj":
+      await loadFileio();
       out(args, exportObj(project), `${project.name || "projekt"}.obj`);
       return 0;
     case "stl":
+      await loadFileio();
       out(args, exportStl(project), `${project.name || "projekt"}.stl`);
+      return 0;
+    case "glb":
+      await loadFileio();
+      out(args, exportGlb(project, { byLevel: !args.flags.has("flat") }), `${project.name || "projekt"}.glb`);
+      return 0;
+    case "gltf":
+      await loadFileio();
+      out(args, exportGltf(project, { byLevel: !args.flags.has("flat") }), `${project.name || "projekt"}.gltf`);
       return 0;
     case "kennzahlen": {
       const k = computeKennzahlen(project);
@@ -232,6 +642,36 @@ export async function run(argv: string[]): Promise<number> {
       const r = await exportProjectStep(project, project.name || "projekt");
       if (r.skipped.length) process.stderr.write(`${r.skipped.length} Körper übersprungen/ungeschnitten.\n`);
       out(args, r.text, `${project.name || "projekt"}.stp`);
+      return 0;
+    }
+    case "import-ifc": {
+      const src = rest[0];
+      if (!src) fail("import-ifc: IFC-Datei fehlt");
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(readFileSync(src));
+      } catch (e) {
+        fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
+      }
+      const r = await ifcInto(project, bytes, src.split(/[\\/]/).pop() ?? src, args);
+      process.stdout.write(JSON.stringify(r.report, null, 2) + "\n");
+      const target = args.flags.get("out");
+      if (target) out(args, serializeProject(r.next), target);
+      return 0;
+    }
+    case "import-mesh": {
+      const src = rest[0];
+      if (!src) fail("import-mesh: Modelldatei fehlt");
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(readFileSync(src));
+      } catch (e) {
+        fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
+      }
+      const r = await meshInto(project, bytes, src, args);
+      process.stdout.write(JSON.stringify(r.report, null, 2) + "\n");
+      const target = args.flags.get("out");
+      if (target) out(args, serializeProject(r.next), target);
       return 0;
     }
     case "mcp":
@@ -277,7 +717,8 @@ export async function run(argv: string[]): Promise<number> {
 // Direktaufruf (nicht beim Import in Tests).
 if (process.argv[1] && /dossier-cli\.mjs$/.test(process.argv[1])) {
   run(process.argv.slice(2)).then(
-    (code) => process.exit(code),
+    // Erst beenden, wenn stdout geleert ist: sonst schneidet `--out -` grosse Ausgaben in einer Pipe ab.
+    (code) => process.stdout.write("", () => process.exit(code)),
     (e) => {
       process.stderr.write(`dossier-cli: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
       process.exit(1);

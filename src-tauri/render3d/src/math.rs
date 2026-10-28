@@ -286,3 +286,89 @@ pub fn preset_camera(preset: CameraPreset, target: [f32; 3], dist: f32) -> Camer
     }
     cam
 }
+
+/// Achsparallele Bounding-Box (min, max) in world-Metern.
+pub type Bounds3 = ([f32; 3], [f32; 3]);
+
+/// Vereinigung zweier Bounding-Boxen (Modell + sichtbare Punktwolken). `None` = leer;
+/// nicht endliche Boxen (NaN/Inf) zählen als leer — nie ein Panic, nie eine NaN-Kamera.
+pub fn merge_bounds(a: Option<Bounds3>, b: Option<Bounds3>) -> Option<Bounds3> {
+    let finite = |x: &Option<Bounds3>| match x {
+        Some((lo, hi)) => lo.iter().chain(hi.iter()).all(|v| v.is_finite()),
+        None => false,
+    };
+    match (finite(&a), finite(&b)) {
+        (true, true) => {
+            let ((alo, ahi), (blo, bhi)) = (a.unwrap(), b.unwrap());
+            let mut lo = alo;
+            let mut hi = ahi;
+            for i in 0..3 {
+                lo[i] = lo[i].min(blo[i]);
+                hi[i] = hi[i].max(bhi[i]);
+            }
+            Some((lo, hi))
+        }
+        (true, false) => a,
+        (false, true) => b,
+        (false, false) => None,
+    }
+}
+
+/// Formatfüllendes Ziel + Abstand für eine Bounding-Box (Bounding-Kugel im vertikalen Sichtfeld
+/// plus 20 % Rand, mindestens 4 m). Ohne Box der neutrale Standpunkt wie im three.js-Start.
+pub fn fit_target_dist(bounds: Option<Bounds3>, fov_y: f32) -> ([f32; 3], f32) {
+    match bounds {
+        Some((min, max)) => {
+            let center = [
+                (min[0] + max[0]) * 0.5,
+                (min[1] + max[1]) * 0.5,
+                (min[2] + max[2]) * 0.5,
+            ];
+            let (dx, dy, dz) = (max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+            let radius = (dx * dx + dy * dy + dz * dz).sqrt() * 0.5;
+            let radius = if radius > 0.0 { radius } else { 1.0 };
+            let dist = ((radius / (fov_y * 0.5).tan()) * 1.2).max(4.0);
+            (center, dist)
+        }
+        None => ([2.5, 1.0, 2.0], 14.0),
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    #[test]
+    fn merge_vereinigt_modell_und_punktwolke() {
+        let m = ([0.0, 0.0, 0.0], [10.0, 3.0, 8.0]);
+        let p = ([-5.0, 1.0, 2.0], [4.0, 20.0, 30.0]);
+        assert_eq!(merge_bounds(Some(m), Some(p)), Some(([-5.0, 0.0, 0.0], [10.0, 20.0, 30.0])));
+    }
+
+    #[test]
+    fn merge_mit_leer_oder_unsinn_liefert_die_andere() {
+        let m = ([0.0; 3], [1.0; 3]);
+        assert_eq!(merge_bounds(Some(m), None), Some(m));
+        assert_eq!(merge_bounds(None, Some(m)), Some(m));
+        let nan = ([f32::NAN; 3], [1.0; 3]);
+        assert_eq!(merge_bounds(Some(m), Some(nan)), Some(m));
+        assert_eq!(merge_bounds(Some(nan), None), None);
+        assert_eq!(merge_bounds(None, None), None);
+    }
+
+    #[test]
+    fn fit_rahmt_die_vereinigte_box_ein() {
+        let fov = 50.0_f32.to_radians();
+        let modell = ([0.0, 0.0, 0.0], [10.0, 3.0, 8.0]);
+        let wolke = ([200.0, 0.0, 0.0], [260.0, 20.0, 50.0]);
+        let (_, d_modell) = fit_target_dist(Some(modell), fov);
+        let (t, d_beide) = fit_target_dist(merge_bounds(Some(modell), Some(wolke)), fov);
+        assert!(d_beide > d_modell * 5.0, "Wolke muss den Abstand vergrössern");
+        assert!((t[0] - 130.0).abs() < 1e-4, "Ziel liegt in der Mitte beider Boxen");
+    }
+
+    #[test]
+    fn fit_ohne_box_ist_der_neutrale_standpunkt() {
+        assert_eq!(fit_target_dist(None, 0.8), ([2.5, 1.0, 2.0], 14.0));
+    }
+}

@@ -28,6 +28,25 @@ import {
 } from "../io/dxfToDrawings";
 import type { CategoryMode } from "../io/dxfToDrawings";
 import { Dropdown } from "./Dropdown";
+import { PDF_SCALES, PT_TO_MM } from "../io/pdfVector";
+import type { PdfVectorPage } from "../io/pdfVector";
+import { PdfCalibrate } from "./PdfCalibrate";
+
+/** Vektor-PDF ([76]): Seite und Massstab, nach denen `parsed` aus dem PDF abgeleitet wurde. */
+export interface PdfImportOptions {
+  pageCount: number;
+  /** 0-basiert. */
+  page: number;
+  /** Massstabszahl (100 = 1:100). */
+  scale: number;
+  /** Angezeigte Seitengrösse in pt. */
+  widthPt: number;
+  heightPt: number;
+  /** Bilder auf der Seite (werden nicht übernommen). */
+  images: number;
+  /** Die gelesene Seite — Vorschau und Fangpunkte der Zwei-Punkt-Kalibrierung. */
+  preview: PdfVectorPage;
+}
 
 /** Strukturierte Import-Entscheidung, die der Dialog beim Bestätigen liefert. */
 export interface ImportDecision {
@@ -56,6 +75,7 @@ export interface ImportDecision {
  */
 function dxfProgressText(progress: string | undefined): string | null {
   if (!progress) return null;
+  if (progress === "pdf") return t("import.pdf.loading");
   if (progress === "structure") return t("import.loading.phase.structure");
   if (progress === "parse-single") return t("import.loading.phase.parseSingle");
   const m = /^parse-parallel:(\d+)$/.exec(progress);
@@ -95,7 +115,7 @@ function formatDiagnostics(d: ImportDiagnostics): string {
 export interface ImportDialogProps {
   fileName: string;
   /**
-   * true, wenn eine DWG-Datei NICHT gelesen werden konnte (LibreDWG-WASM schlug
+   * true, wenn eine DWG-Datei NICHT gelesen werden konnte (das Format-Modul schlug
    * fehl) → ODA-Hinweis als Fallback. Bei erfolgreichem DWG-Parsing ist das false
    * und `parsed` enthält das Ergebnis (gleicher Fluss wie DXF).
    */
@@ -106,8 +126,15 @@ export interface ImportDialogProps {
    *  `onProgress`) — `"structure"`, `"parse-single"` oder
    *  `"parse-parallel:<N>"`; `undefined` = noch keine Phase bekannt/DWG. */
   progress?: string;
+  /** Meldung des Format-Moduls, wenn die Datei nicht gelesen werden konnte (leer, beschädigt …). */
+  error?: string;
+  /** Wählt ein Papierbereich-Layout (Name) oder den Modellraum (`null`) zum Import; liest neu. */
+  onSelectLayout?: (layout: string | null) => void;
   /** Geparstes Ergebnis (null während Laden / bei DWG-Parse-Fehler). */
   parsed: DxfImportResult | null;
+  /** Vektor-PDF ([76]): Seite/Massstab; `onPdfChange` liest neu bzw. rechnet um. */
+  pdf?: PdfImportOptions;
+  onPdfChange?: (page: number, scale: number) => void;
   project: Project;
   activeCategoryCode: string;
   onImport: (decision: ImportDecision) => void;
@@ -119,7 +146,11 @@ export function ImportDialog({
   isDwg,
   loading = false,
   progress,
+  error,
+  onSelectLayout,
   parsed,
+  pdf,
+  onPdfChange,
   project,
   activeCategoryCode,
   onImport,
@@ -168,6 +199,14 @@ export function ImportDialog({
   // Teil zu malen — sonst würde React den State-Update-Commit gar nicht mehr
   // vor dem Block zum Zug kommen lassen.
   const [applying, setApplying] = useState(false);
+  // Freier PDF-Massstab (Texteingabe „1:75" oder „75"), angewandt bei Enter/Verlassen.
+  const [customScaleText, setCustomScaleText] = useState("");
+  // Zwei-Punkt-Kalibrierung ([76]) aufgeklappt?
+  const [calibrating, setCalibrating] = useState(false);
+  const applyCustomScale = () => {
+    const n = Number(customScaleText.trim().replace(/^1\s*:\s*/, ""));
+    if (pdf && onPdfChange && Number.isFinite(n) && n > 0) onPdfChange(pdf.page, n);
+  };
 
   const canImport =
     !isDwg && !loading && !applying && (hasDrawings || (hasMeshes && importMeshes));
@@ -193,11 +232,11 @@ export function ImportDialog({
         className="imp-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={t("import.title")}
+        aria-label={pdf ? t("import.pdf.title") : t("import.title")}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="imp-head">
-          <span className="imp-head-title">{t("import.title")}</span>
+          <span className="imp-head-title">{pdf ? t("import.pdf.title") : t("import.title")}</span>
           <button
             className="imp-close"
             onClick={onClose}
@@ -245,6 +284,7 @@ export function ImportDialog({
             // DWG konnte nicht gelesen werden → ODA-Fallback-Hinweis.
             <section className="imp-section">
               <div className="imp-section-title">{t("import.dwg.heading")}</div>
+              {error && <div className="imp-warn">{error}</div>}
               <div className="imp-dwg-hint">{t("import.dwg.hint")}</div>
             </section>
           ) : (
@@ -266,9 +306,10 @@ export function ImportDialog({
                       : t("import.summary.noLayers")}
                   </li>
                 </ul>
+                {parsed?.recovered && <div className="imp-warn">{t("import.summary.recovered")}</div>}
                 {!hasDrawings && !hasMeshes && (
                   <div className="imp-warn">
-                    {t("import.summary.empty")}
+                    {error ?? t("import.summary.empty")}
                     {/* Diagnose-Histogramm (vom DWG-Parser): macht sichtbar,
                         WORAN es liegt — 0 Entities (Encoding/Version) vs.
                         Abdeckungslücke (z. B. „500 ARC, 200 INSERT"). Entity-Typ-
@@ -282,6 +323,100 @@ export function ImportDialog({
                   </div>
                 )}
               </section>
+
+              {/* Vektor-PDF ([76]): Seite und Massstab (pt → m: 25.4/72 mm Papier × Massstab). */}
+              {pdf && onPdfChange && (
+                <section className="imp-section">
+                  <div className="imp-section-title">{t("import.pdf.heading")}</div>
+                  {pdf.pageCount > 1 && (
+                    <Dropdown
+                      value={String(pdf.page)}
+                      onChange={(v) => onPdfChange(Number(v), pdf.scale)}
+                      title={t("import.pdf.page")}
+                      options={Array.from({ length: pdf.pageCount }, (_, i) => ({
+                        value: String(i),
+                        label: t("import.pdf.pageOf", { n: i + 1, total: pdf.pageCount }),
+                      }))}
+                    />
+                  )}
+                  <Dropdown
+                    value={String(pdf.scale)}
+                    onChange={(v) => onPdfChange(pdf.page, Number(v))}
+                    title={t("import.pdf.scale")}
+                    triggerClassName="tb-dd-mono"
+                    options={[
+                      ...((PDF_SCALES as readonly number[]).includes(pdf.scale)
+                        ? []
+                        : [{ value: String(pdf.scale), label: `1:${pdf.scale}` }]),
+                      ...PDF_SCALES.map((n) => ({ value: String(n), label: `1:${n}` })),
+                    ]}
+                  />
+                  <div className="imp-scale-custom">
+                    <input
+                      className="imp-input"
+                      type="text"
+                      placeholder={t("import.pdf.scaleFree")}
+                      aria-label={t("import.pdf.scaleFree")}
+                      value={customScaleText}
+                      onChange={(e) => setCustomScaleText(e.target.value)}
+                      onBlur={applyCustomScale}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyCustomScale();
+                      }}
+                    />
+                  </div>
+                  <button className="imp-btn imp-cal-toggle" onClick={() => setCalibrating((o) => !o)} aria-expanded={calibrating}>
+                    {calibrating ? t("import.pdf.cal.close") : t("import.pdf.cal.open")}
+                  </button>
+                  {calibrating && (
+                    <PdfCalibrate
+                      page={pdf.preview}
+                      onApply={(n) => {
+                        setCalibrating(false);
+                        onPdfChange(pdf.page, n);
+                      }}
+                    />
+                  )}
+                  <div className="imp-note">
+                    {t("import.pdf.size", {
+                      w: Math.round(pdf.widthPt * PT_TO_MM),
+                      h: Math.round(pdf.heightPt * PT_TO_MM),
+                      mw: ((pdf.widthPt * PT_TO_MM * pdf.scale) / 1000).toFixed(2),
+                      mh: ((pdf.heightPt * PT_TO_MM * pdf.scale) / 1000).toFixed(2),
+                    })}
+                  </div>
+                  {pdf.images > 0 && <div className="imp-note">{t("import.pdf.images", { n: pdf.images })}</div>}
+                  <div className="imp-dwg-hint">{t("import.pdf.note")}</div>
+                </section>
+              )}
+
+              {/* Papierbereich: Layouts der Datei (Bericht) und, wenn möglich, eines statt des Modellraums lesen. */}
+              {parsed?.layouts && parsed.layouts.length > 0 && (
+                <section className="imp-section">
+                  <div className="imp-section-title">{t("import.layouts.heading")}</div>
+                  {onSelectLayout ? (
+                    <Dropdown
+                      value={parsed.layout ?? ""}
+                      onChange={(v) => onSelectLayout(v === "" ? null : v)}
+                      title={t("import.layouts.heading")}
+                      options={[
+                        { value: "", label: t("import.layouts.model") },
+                        ...parsed.layouts.map((l) => ({
+                          value: l.name,
+                          label: `${l.name} · ${t("import.layouts.entities", { n: l.entities })}`,
+                        })),
+                      ]}
+                    />
+                  ) : (
+                    <ul className="imp-summary">
+                      {parsed.layouts.map((l) => (
+                        <li key={l.name}>{`${l.name} · ${t("import.layouts.entities", { n: l.entities })}`}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="imp-dwg-hint">{t("import.layouts.note")}</div>
+                </section>
+              )}
 
               {/* Ziel-Zeichnungsebene. */}
               {hasDrawings && (
@@ -442,6 +577,7 @@ export function buildDrawings(
   project: Project,
   activeCategoryCode: string,
   codeByLayer?: ReadonlyMap<string, string>,
+  lineStyleByLayer?: ReadonlyMap<string, string>,
 ) {
   // Layer-Name → Kategorie-Code: bevorzugt eine Kategorie mit demselben Namen
   // (case-insensitiv), sonst der aktive Code. Identifier bleiben so stabil.
@@ -457,12 +593,15 @@ export function buildDrawings(
   // vor dem Import) noch nicht kennt.
   const layerToCode = (layerName: string): string =>
     codeByLayer?.get(layerName) ?? byName.get(layerName.toLowerCase()) ?? activeCategoryCode;
+  const fillColors = decision.parsed.layerFillColors;
   const fromContours = contoursToDrawings(
     decision.parsed.contours,
     levelId,
     decision.categoryMode,
     activeCategoryCode,
     layerToCode,
+    fillColors ? (layer) => fillColors[layer] : undefined,
+    lineStyleByLayer ? (layer) => lineStyleByLayer.get(layer) : undefined,
   );
   const fromTexts = textsToDrawings(
     decision.parsed.texts ?? [],

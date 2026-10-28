@@ -436,27 +436,38 @@ impl WebModelRenderer {
                 )))
             }
         };
-        let (target, dist) = match self.bounds {
-            Some((min, max)) => {
-                let center = [
-                    (min[0] + max[0]) * 0.5,
-                    (min[1] + max[1]) * 0.5,
-                    (min[2] + max[2]) * 0.5,
-                ];
-                let (dx, dy, dz) = (max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-                let radius = (dx * dx + dy * dy + dz * dz).sqrt() * 0.5;
-                let radius = if radius > 0.0 { radius } else { 1.0 };
-                // Abstand so, dass die Bounding-Kugel ins vertikale Sichtfeld
-                // passt (+ Rand) — identische Formel wie `fitTargetDist`.
-                let fov_y = crate::types::default_fov();
-                let dist = ((radius / (fov_y * 0.5).tan()) * 1.2).max(4.0);
-                (center, dist)
-            }
-            // Leeres Modell: neutraler Standpunkt (entspricht dem three.js-Start).
-            None => ([2.5_f32, 1.0, 2.0], 14.0_f32),
-        };
+        // Modell UND sichtbare Punktwolken einpassen ([27]).
+        let (target, dist) = self.fit_target_dist();
         self.camera = preset_camera(preset, target, dist);
         Ok(())
+    }
+
+    /// Bounding-Box aus Modell und sichtbaren Punktwolken → Ziel + Abstand (`math::fit_target_dist`).
+    fn fit_target_dist(&self) -> ([f32; 3], f32) {
+        let merged = crate::math::merge_bounds(self.bounds, self.renderer.point_cloud_bounds());
+        crate::math::fit_target_dist(merged, crate::types::default_fov())
+    }
+
+    /// Formatfüllendes Ziel + Abstand für Modell + sichtbare Punktwolken (dieselbe Rechnung wie
+    /// `set_view_preset`). Liefert `[tx, ty, tz, dist]` (world, Y-up), damit die TS-Seite ihren
+    /// Orbit-Zustand daraus setzt statt die Rechnung zu spiegeln.
+    pub fn view_fit(&self) -> Vec<f32> {
+        let (t, d) = self.fit_target_dist();
+        vec![t[0], t[1], t[2], d]
+    }
+
+    /// Aktuelle Kamera als `[eye(3), target(3), up(3), perspektivisch (1/0), fovY (rad), orthoHalbhöhe]`
+    /// — 12 Werte, world Y-up. Für Lesezugriffe (BCF-Viewpoint, Orbit-Abgleich nach einem Preset).
+    pub fn camera_state(&self) -> Vec<f32> {
+        let c = &self.camera;
+        vec![
+            c.eye[0], c.eye[1], c.eye[2],
+            c.target[0], c.target[1], c.target[2],
+            c.up[0], c.up[1], c.up[2],
+            if matches!(c.projection, Projection::Perspective) { 1.0 } else { 0.0 },
+            c.fov_y,
+            c.ortho_half_height,
+        ]
     }
 
     /// Darstellungsart der Oberleiste setzen. Gueltige Werte:
@@ -582,6 +593,58 @@ impl WebModelRenderer {
     /// Loescht das drapierte Luftbild (Gelaende erscheint wieder einfarbig/shaded).
     pub fn clear_aerial(&mut self) {
         self.renderer.clear_aerial();
+    }
+
+    /// Setzt/ersetzt die Punktwolke `id` ([27], `points.rs`/`gpu_points.rs`). `xyz` = f32 je Punkt
+    /// RELATIV zum Ursprung, `ox/oy/oz` = Modell-Meter dieses Ursprungs (f64; x = Ost, y = Nord,
+    /// z = Hoehe) — die Summe bildet Rust in f64. `rgb`/`intensity`/`classification` leer = fehlt
+    /// (falsche Laenge = ignoriert). `color_mode` ∈ rgb|intensity|class|height, `point_size` in
+    /// Bildschirm-Pixeln. Gibt die Anzahl gezeichneter Punkte zurueck; 0 = Eingabe unbrauchbar
+    /// (die Wolke `id` ist dann entfernt) — nie ein Panic.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_point_cloud(
+        &mut self,
+        id: u32,
+        xyz: &[f32],
+        rgb: &[u8],
+        intensity: &[u16],
+        classification: &[u8],
+        ox: f64,
+        oy: f64,
+        oz: f64,
+        color_mode: &str,
+        point_size: f32,
+        visible: bool,
+    ) -> u32 {
+        let cpu = crate::points::PointCloudCpu::from_raw(xyz, rgb, intensity, classification, [ox, oy, oz]);
+        let style = crate::gpu_points::PointStyle {
+            mode: crate::points::PointColorMode::from_str_or_rgb(color_mode),
+            size_px: point_size,
+            visible,
+        };
+        self.renderer.set_point_cloud(&self.device, id, cpu, style);
+        self.renderer.point_cloud_len(id) as u32
+    }
+
+    /// Nur Darstellung der Punktwolke `id` aendern (ohne Neu-Hochladen der Positionen).
+    /// `false`, wenn die Wolke unbekannt ist (dann `set_point_cloud` aufrufen).
+    pub fn set_point_cloud_style(&mut self, id: u32, color_mode: &str, point_size: f32, visible: bool) -> bool {
+        let style = crate::gpu_points::PointStyle {
+            mode: crate::points::PointColorMode::from_str_or_rgb(color_mode),
+            size_px: point_size,
+            visible,
+        };
+        self.renderer.set_point_cloud_style(&self.queue, id, style)
+    }
+
+    /// Entfernt die Punktwolke `id` (unbekannt = nichts).
+    pub fn remove_point_cloud(&mut self, id: u32) {
+        self.renderer.remove_point_cloud(id);
+    }
+
+    /// Entfernt alle Punktwolken.
+    pub fn clear_point_clouds(&mut self) {
+        self.renderer.clear_point_clouds();
     }
 
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
