@@ -1712,6 +1712,7 @@ export const en: Record<TranslationKey, string> = {
   "file.exportStl": "Export STL (3D mesh)",
   "exportSave.fmt.step": "STEP (B-rep, truck)",
   "step.export.failed": "STEP export failed",
+  "ifc.export.failed": "IFC export failed",
   "step.export.skipped": "{n} solids could not be exported",
   "step.import.failed": "STEP import failed",
   "step.import.done": "STEP imported: {n} solids",

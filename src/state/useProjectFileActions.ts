@@ -22,6 +22,7 @@ import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings"
 import type { ImportDecision } from "../ui/ImportDialog";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf } from "../export/exportIfc";
+import { loadFileio } from "../engine/fileioWasm";
 import { exportProjectStep } from "../export/exportStep";
 import { exportObj, exportStl } from "../export/exportMesh";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
@@ -503,7 +504,10 @@ export function useProjectFileActions(
         downloadTextFile("﻿" + exportScheduleCsv(project), filename, "text/csv;charset=utf-8;");
         break;
       case "ifc":
-        downloadTextFile(exportIfcSpf(project), filename);
+        // IFC schreibt Rust (Format-Modul pkgFileIo, wird beim ersten Export nachgeladen).
+        void loadFileio()
+          .then(() => downloadTextFile(exportIfcSpf(project), filename))
+          .catch((e) => notify(`${t("ifc.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "obj":
         downloadTextFile(exportObj(project), filename);

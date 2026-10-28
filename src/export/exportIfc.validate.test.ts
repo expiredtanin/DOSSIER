@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import "../engine/fileioWasm.setup";
 import { exportIfcSpf, ifcGuid } from "./exportIfc";
 import { pickGeometry } from "../plan/toWalls3d";
 import { wallCutMeshes } from "../plan/wallMeshCut";

@@ -343,8 +343,20 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     Tür/Fenster mit Rahmen/Blatt statt Box; Bogenwände als echte Kurve. · M
   - ○ Offen: eigener IFC-Import ([B3]) zieht Öffnungen noch nicht ab → Rundreise des eigenen
     Exports zeigt Extrusions-Wände ohne Löcher, bis [B4] (Test `ifcImport.test.ts` angepasst). · M
-  - ○ Folgepunkt: Export nach Rust (`src-tauri/fileio`, wie der Import) portieren; TS-Fassung
-    `exportIfc.ts` dann löschen. · L
+  - ✅ Export nach Rust. (28.10.) `src-tauri/fileio/src/ifc_export.rs` schreibt die STEP-Datei
+    (Entitäten, GUID-Hash, Typen/Materialschichten, Psets, Beziehungen, Räume, Georeferenz,
+    `\X2\`/`\X4\`); `exportIfc.ts` sammelt nur noch (Bänder, Öffnungen, Dach-Meshes, Raumflächen)
+    und gibt einen flachen Puffer + Zeichenketten an `export_ifc_flat` (Muster `export.rs`/DXF). Die
+    TS-STEP-Erzeugung ist gelöscht; `ifcGuid`/`ifcString` sind dünne Fassaden. `exportIfcSpf` bleibt
+    synchron, verlangt aber das geladene Format-Modul (wie `buildPlanDxf`): Dialog und CLI `ifc`
+    laden per `loadFileio()`, Tests per `fileioWasm.setup`. Golden-Vergleich gegen die TS-Fassung
+    (45 Exporte aus `exportIfc.test`, `exportIfc.validate.test`, `ifcImport.test`, inkl. Demo-Haus,
+    Georeferenz, Dach, Stützen, Räume, Umlaute): Entitäten, Reihenfolge, Nummern, GUIDs und Zahlen
+    zeichengleich (bis auf Zeitstempel). Abweichungen nur in Grenzfällen: unpaarige UTF-16-Surrogate
+    in Namen werden U+FFFD (TS: `\X2\D800\X0\`), `\0` in Namen entfällt, NaN/∞ in einer Koordinate
+    ist jetzt ein Fehler statt „NaN“ in der Datei. Rundung wie `toFixed(6)` (Gleichstand auf).
+    Offen: Laden von pkgFileIo ist beim ersten IFC-Export neu (bisher synchron ohne Wartezeit);
+    Export im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · L
   - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
     Solibri/BIMcollab und nicht in der Tauri-App.
 - ○ **[B6] Wand unter Dach als Prismen zwischen Ebenen** (für [G2]). `walls.rs:413–472, 592–654`. · M

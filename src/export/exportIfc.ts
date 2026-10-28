@@ -1,7 +1,10 @@
 // IFC4-Export (STEP Physical File / ISO-10303-21) des semantischen Modells.
-// Reiner Rechen-/Serialisierungskern: keine UI, kein Datei-IO, kein WASM, keine
-// neue Dependency — IFC wird direkt als Text geschrieben (analog exportDxf.ts/
-// exportSchedule.ts). Der Download (Blob+Anchor) passiert im App-Layer.
+//
+// Seit [B5] (28.10.) schreibt Rust die Datei (`src-tauri/fileio/src/ifc_export.rs`, Format-Modul
+// pkgFileIo): TS sammelt hier aus Projekt und Plan die Bauteile samt fertig gerechneter Geometrie
+// (Wand-Bänder, Öffnungen, Dach-Meshes, Raumflächen) als flachen Puffer, Rust vergibt die Nummern und
+// baut Entitäten, GUIDs, Typen mit Materialschichten, Psets und Beziehungen. Verlangt das geladene
+// Format-Modul (`await loadFileio()`, wie `buildPlanDxf`). Der Download passiert im App-Layer.
 //
 // Abbildung:
 //   Project → IfcProject → IfcSite → IfcBuilding → je "floor"-Geschoss ein
@@ -52,17 +55,11 @@
 //   128-Bit-Hash + Standard-IFC-GUID-Kompression (Zeichensatz 0-9,A-Z,a-z,_,$) — zweimal
 //   exportieren gibt dieselben GlobalIds, BIM-Koordination (Solibri, BIMcollab) erkennt die
 //   Bauteile wieder. Abgeleitete Entitäten (Rels, Typen, Psets) hängen an Element-/Geschoss-/
-//   Typ-ids, nie an STEP-Nummern.
+//   Typ-ids, nie an STEP-Nummern. Der Hash lebt in Rust (`ifc_guid`).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheit: METER.
 
-import type {
-  Opening,
-  Project,
-  Stair,
-  Vec2,
-  Wall,
-} from "../model/types";
+import type { Opening, Project, Stair, Vec2, Wall } from "../model/types";
 import {
   columnLabel,
   getCeilingType,
@@ -73,11 +70,7 @@ import {
   openingsOfWall,
 } from "../model/types";
 import { projectToWorldCoords } from "../model/geoRebase";
-import {
-  ceilingVerticalExtent,
-  columnVerticalExtent,
-  stairVerticalExtent,
-} from "../model/wall";
+import { ceilingVerticalExtent, columnVerticalExtent, stairVerticalExtent } from "../model/wall";
 import { pickGeometry } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
 import { isWatertight, wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
@@ -85,154 +78,227 @@ import { evaluateRoom } from "../geometry/roomArea";
 import { columnFootprint } from "../geometry/column";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { emitRoofs } from "../plan/toWalls3d/roofs";
+import { fileio } from "../engine/fileioWasm";
 
-// ── IFC-GUID (Base64-Kompression, 22 Zeichen) ───────────────────────────────
-// Standard-Kompressionsalgorithmus (IfcOpenShell guid.compress): das erste
-// Byte des 128-Bit-Werts wird auf 2 Zeichen abgebildet, die restlichen 15
-// Byte in 5 Dreiergruppen zu je 4 Zeichen — macht 2 + 5×4 = 22 Zeichen.
-
-const IFC_GUID_CHARS =
-  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
-
-/** Kodiert `v` big-endian in `len` IFC-GUID-Zeichen (Basis 64). */
-function ifcGuidB64(v: number, len: number): string {
-  let out = "";
-  for (let i = len - 1; i >= 0; i--) {
-    out += IFC_GUID_CHARS[Math.floor(v / 64 ** i) % 64];
-  }
-  return out;
-}
-
-/** Komprimiert einen 128-Bit-Wert (32 Hex-Zeichen) zur 22-stelligen IFC-GUID. */
-function compressGuidHex(hex32: string): string {
-  const bytes: number[] = [];
-  for (let i = 0; i < 32; i += 2) bytes.push(parseInt(hex32.slice(i, i + 2), 16));
-  let out = ifcGuidB64(bytes[0], 2);
-  for (let i = 1; i < 16; i += 3) {
-    const v = (bytes[i] << 16) + (bytes[i + 1] << 8) + bytes[i + 2];
-    out += ifcGuidB64(v, 4);
-  }
-  return out;
-}
-
-const MASK64 = 0xffffffffffffffffn;
-
-/** Mischt die Bits eines 64-Bit-Werts (MurmurHash3-fmix64): jedes Eingabebit wirkt auf alle Ausgabebits. */
-function fmix64(k: bigint): bigint {
-  k ^= k >> 33n;
-  k = (k * 0xff51afd7ed558ccdn) & MASK64;
-  k ^= k >> 33n;
-  k = (k * 0xc4ceb9fe1a85ec53n) & MASK64;
-  k ^= k >> 33n;
-  return k;
-}
-
-/** FNV-1a-64 über Bytes (vorwärts oder rückwärts) — reines Streuungswerkzeug, keine Kryptografie. */
-function fnv1a64(bytes: Uint8Array, seed: bigint, reverse: boolean): bigint {
-  const prime = 0x100000001b3n;
-  let hash = seed & MASK64;
-  for (let i = 0; i < bytes.length; i++) {
-    hash ^= BigInt(bytes[reverse ? bytes.length - 1 - i : i]);
-    hash = (hash * prime) & MASK64;
-  }
-  return hash;
-}
-
-const utf8 = new TextEncoder();
-
-/**
- * Deterministischer 128-Bit-Wert (32 Hex-Zeichen) aus einem Namen: zwei unabhängige 64-Bit-Läufe
- * (FNV-1a vorwärts/rückwärts mit verschiedenen Startwerten, je fmix64-nachgemischt), gekennzeichnet
- * als RFC-9562-UUID Version 8 (namensbasiert, eigener Hash) mit Variante 10.
- */
-function nameToHex32(name: string): string {
-  const bytes = utf8.encode(name);
-  const h1 = fmix64(fnv1a64(bytes, 0xcbf29ce484222325n, false));
-  const h2 = fmix64(fnv1a64(bytes, 0x9e3779b97f4a7c15n, true) ^ BigInt(bytes.length));
-  const hex = (h1.toString(16).padStart(16, "0") + h2.toString(16).padStart(16, "0")).split("");
-  hex[12] = "8"; // Version 8
-  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16); // Variante 10xx
-  return hex.join("");
-}
-
-/**
- * Deterministische 22-stellige IFC-GUID aus einem Namen. Im Export lautet der Name immer
- * `<Projekt-id>/<Art>/<id>[/<Zusatz>]` (s. `exportIfcSpf`), damit gleiche ids verschiedener
- * Bauteilarten oder Projekte nicht kollidieren.
- */
+/** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export.rs::ifc_guid`). */
 export function ifcGuid(name: string): string {
-  return compressGuidHex(nameToHex32(name));
+  return fileio().ifc_guid(name);
 }
 
-// ── STEP-Formatierung ───────────────────────────────────────────────────────
-
-/**
- * STEP-String-Literal (ISO 10303-21): druckbares ASCII bleibt, Backslash und Apostroph werden
- * verdoppelt, alles andere (Umlaute, Steuerzeichen) als \X2\HHHH…\X0\ (BMP) bzw.
- * \X4\HHHHHHHH…\X0\ (ausserhalb der BMP). Die Datei bleibt so reines ASCII.
- */
+/** STEP-String-Literal mit Apostrophen, Nicht-ASCII als `\X2\`/`\X4\` (Rust, `ifc_export.rs::ifc_string`). */
 export function ifcString(s: string): string {
-  let out = "";
-  let run: number[] = [];
-  const flush = () => {
-    if (run.length === 0) return;
-    const wide = run.some((c) => c > 0xffff);
-    const hex = run.map((c) => c.toString(16).toUpperCase().padStart(wide ? 8 : 4, "0")).join("");
-    out += `${wide ? "\\X4\\" : "\\X2\\"}${hex}\\X0\\`;
-    run = [];
-  };
-  for (const ch of s) {
-    const c = ch.codePointAt(0)!;
-    if (c >= 0x20 && c <= 0x7e) {
-      flush();
-      out += ch === "\\" ? "\\\\" : ch === "'" ? "''" : ch;
-    } else {
-      // \X2\ und \X4\ nicht mischen: Wechsel der Breite beginnt einen neuen Block.
-      if (run.length > 0 && (run[0] > 0xffff) !== (c > 0xffff)) flush();
-      run.push(c);
+  return fileio().ifc_string(s);
+}
+
+// ── Flacher Puffer (Gegenstück zu src-tauri/fileio/src/ifc_export.rs, dort die Kodierung) ─────
+
+const FLAT_VERSION = 1;
+const REC_WALL_SOLIDS = 1;
+const REC_WALL_MESH = 2;
+const REC_CEILING = 3;
+const REC_OPENING = 4;
+const REC_STAIR = 5;
+const REC_EXTRUSION = 6;
+const REC_SPACE = 7;
+const REC_END_SPACES = 8;
+const REC_ROOF = 9;
+const REC_COLUMN = 10;
+const REC_END_COLUMNS = 11;
+
+/** Typart in der flachen Kodierung (0 Wand, 1 Decke, 2 Dach). */
+type TypeKind = 0 | 1 | 2;
+
+interface TypeRefIn {
+  kind: TypeKind;
+  id: string;
+  name: string;
+  predefined: string;
+  layers: { componentId: string; componentName: string; thickness: number }[];
+}
+
+/** Pset-Eigenschaft: Kennung, Art (IfcIdentifier, IfcBoolean, IfcPositiveRatioMeasure) und Wert. */
+type PropIn = { name: string; ident: string } | { name: string; bool: boolean } | { name: string; ratio: number };
+interface PsetIn {
+  name: string;
+  props: PropIn[];
+}
+
+/** Sammelt die Bauteile als Zahlenpuffer + Zeichenkettenliste. */
+class FlatIfc {
+  private nums: number[] = [FLAT_VERSION];
+  private strings: string[] = [];
+
+  private str(s: string): number {
+    this.strings.push(s.replace(/\0/g, ""));
+    return this.strings.length - 1;
+  }
+  private optStr(s: string | null): number {
+    return s === null ? -1 : this.str(s);
+  }
+  private pts(pts: readonly Vec2[]): void {
+    this.nums.push(pts.length);
+    for (const p of pts) this.nums.push(p.x, p.y);
+  }
+  private mesh(positions: readonly number[], indices: readonly number[], closed: boolean): void {
+    this.nums.push(positions.length / 3);
+    for (let i = 0; i < positions.length; i++) this.nums.push(positions[i]);
+    this.nums.push(indices.length / 3);
+    for (let i = 0; i < indices.length; i++) this.nums.push(indices[i]);
+    this.nums.push(closed ? 1 : 0);
+  }
+  private typeRef(t: TypeRefIn | null): void {
+    if (!t) {
+      this.nums.push(0);
+      return;
+    }
+    this.nums.push(1, t.kind, this.str(t.id), this.str(t.name), this.str(t.predefined), t.layers.length);
+    for (const l of t.layers) this.nums.push(this.str(l.componentId), this.str(l.componentName), l.thickness);
+  }
+  private psets(list: readonly PsetIn[]): void {
+    this.nums.push(list.length);
+    for (const ps of list) {
+      this.nums.push(this.str(ps.name), ps.props.length);
+      for (const p of ps.props) {
+        if ("ident" in p) this.nums.push(this.str(p.name), 0, this.str(p.ident));
+        else if ("bool" in p) this.nums.push(this.str(p.name), 1, p.bool ? 1 : 0);
+        else this.nums.push(this.str(p.name), 2, p.ratio);
+      }
     }
   }
-  flush();
-  return `'${out}'`;
-}
 
-const S = ifcString;
-
-/** STEP-REAL-Literal — immer mit Dezimalpunkt, ohne unnötige Nachkommastellen. */
-function R(x: number): string {
-  const v = Object.is(x, -0) ? 0 : x;
-  let s = v.toFixed(6);
-  s = s.replace(/0+$/, "");
-  if (s.endsWith(".")) s += "0";
-  if (!s.includes(".")) s += ".0";
-  return s;
-}
-
-/** STEP-Enumerationswert `.WERT.`. */
-function ENUM(v: string): string {
-  return `.${v}.`;
-}
-
-/** STEP-Liste `(a,b,c)`. */
-function LIST(items: string[]): string {
-  return `(${items.join(",")})`;
-}
-
-// ── STEP-Writer ──────────────────────────────────────────────────────────────
-
-class StepWriter {
-  private lines: string[] = [];
-  private nextId = 1;
-
-  /** Schreibt eine neue Entity-Zeile und liefert ihre `#id`. */
-  add(type: string, params: string): number {
-    const id = this.nextId++;
-    this.lines.push(`#${id}=${type}(${params});`);
-    return id;
+  meta(m: {
+    projectId: string;
+    projectName: string;
+    now: number;
+    iso: string;
+    hasGeo: boolean;
+    refElevation: number | null;
+    storeys: { id: string; name: string; base: number }[];
+  }): void {
+    this.nums.push(
+      this.str(m.projectId),
+      this.str(m.projectName),
+      m.now,
+      this.str(m.iso),
+      m.hasGeo ? 1 : 0,
+      m.refElevation ?? Number.NaN,
+      m.storeys.length,
+    );
+    for (const s of m.storeys) this.nums.push(this.str(s.id), this.str(s.name), s.base);
   }
 
-  get entityLines(): readonly string[] {
-    return this.lines;
+  wallSolids(structure: number, id: string, name: string, ty: TypeRefIn | null, psets: PsetIn[], solids: { pts: Vec2[]; zRel: number; depth: number }[]): void {
+    this.nums.push(REC_WALL_SOLIDS, structure, this.str(id), this.str(name));
+    this.typeRef(ty);
+    this.psets(psets);
+    this.nums.push(solids.length);
+    for (const s of solids) {
+      this.pts(s.pts);
+      this.nums.push(s.zRel, s.depth);
+    }
+  }
+
+  wallMesh(structure: number, id: string, name: string, ty: TypeRefIn | null, psets: PsetIn[], positions: number[], indices: number[], closed: boolean): void {
+    this.nums.push(REC_WALL_MESH, structure, this.str(id), this.str(name));
+    this.typeRef(ty);
+    this.psets(psets);
+    this.mesh(positions, indices, closed);
+  }
+
+  ceiling(structure: number, id: string, name: string, ty: TypeRefIn | null, psets: PsetIn[], outline: Vec2[], zRel: number, depth: number): void {
+    this.nums.push(REC_CEILING, structure, this.str(id), this.str(name));
+    this.typeRef(ty);
+    this.psets(psets);
+    this.pts(outline);
+    this.nums.push(zRel, depth);
+  }
+
+  opening(o: {
+    wallId: string;
+    structure: number;
+    openingId: string;
+    isDoor: boolean;
+    fillName: string;
+    voidRect: Vec2[];
+    voidZRel: number;
+    depth: number;
+    fillRect: Vec2[];
+    width: number;
+    psets: PsetIn[];
+  }): void {
+    this.nums.push(REC_OPENING, this.str(o.wallId), o.structure, this.str(o.openingId), o.isDoor ? 1 : 0, this.str(o.fillName));
+    this.pts(o.voidRect);
+    this.nums.push(o.voidZRel, o.depth);
+    this.pts(o.fillRect);
+    this.nums.push(o.width);
+    this.psets(o.psets);
+  }
+
+  stair(structure: number, id: string, predefined: string, footprint: Vec2[], zRel: number, depth: number): void {
+    this.nums.push(REC_STAIR, structure, this.str(id), this.str(predefined));
+    this.pts(footprint);
+    this.nums.push(zRel, depth);
+  }
+
+  extrusion(structure: number, id: string, pts: Vec2[], zRel: number, depth: number): void {
+    this.nums.push(REC_EXTRUSION, structure, this.str(id));
+    this.pts(pts);
+    this.nums.push(zRel, depth);
+  }
+
+  space(s: {
+    structure: number;
+    id: string;
+    name: string;
+    longName: string;
+    external: boolean;
+    height: number;
+    boundary: Vec2[];
+    netArea: number;
+    grossArea: number;
+    siaCategory: string;
+    psets: PsetIn[];
+  }): void {
+    this.nums.push(REC_SPACE, s.structure, this.str(s.id), this.str(s.name), this.str(s.longName), s.external ? 1 : 0, s.height);
+    this.pts(s.boundary);
+    this.nums.push(s.netArea, s.grossArea, this.str(s.siaCategory));
+    this.psets(s.psets);
+  }
+
+  endSpaces(): void {
+    this.nums.push(REC_END_SPACES);
+  }
+
+  roof(structure: number, id: string, name: string, predefined: string, ty: TypeRefIn | null, psets: PsetIn[], positions: number[], indices: number[], closed: boolean): void {
+    this.nums.push(REC_ROOF, structure, this.str(id), this.str(name), this.str(predefined));
+    this.typeRef(ty);
+    this.psets(psets);
+    this.mesh(positions, indices, closed);
+  }
+
+  column(c: {
+    structure: number;
+    id: string;
+    label: string;
+    footprint: Vec2[];
+    zRel: number;
+    depth: number;
+    component: { id: string; name: string } | null;
+    psets: PsetIn[];
+  }): void {
+    this.nums.push(REC_COLUMN, c.structure, this.str(c.id), this.str(c.label));
+    this.pts(c.footprint);
+    this.nums.push(c.zRel, c.depth, this.optStr(c.component?.id ?? null), this.optStr(c.component?.name ?? null));
+    this.psets(c.psets);
+  }
+
+  endColumns(): void {
+    this.nums.push(REC_END_COLUMNS);
+  }
+
+  /** Argumente für die Rust-Bindung: `[Zahlenpuffer, Zeichenketten durch \0 getrennt]`. */
+  args(): [Float64Array, string] {
+    return [new Float64Array(this.nums), this.strings.join("\0")];
   }
 }
 
@@ -367,33 +433,24 @@ function stairFootprint(stair: Stair): Vec2[] {
 
 // ── IFC4-Export ──────────────────────────────────────────────────────────────
 
-interface Structure {
-  entityId: number;
-  placementId: number;
-  baseElevation: number;
-  /** Stabiler Schlüssel für abgeleitete GUIDs (`storey/<floorId>` oder `building`). */
-  key: string;
-}
-
-/** Was die Öffnungen von ihrer Wirtswand brauchen. */
-interface WallRef {
-  entityId: number;
-  placementId: number;
-  /** Ausdehnung aller Bänder quer zur Wandachse (entlang der linken Normalen ab `wall.start`). */
-  nLo: number;
-  nHi: number;
-}
-
 /** Wie weit der Öffnungskörper beidseits über die Wandflächen vorsteht (keine koplanaren Booleans). */
 const OPENING_OVERSHOOT = 0.02;
 
-/** IFC-Wert-Ausdruck einer Pset-Eigenschaft, z. B. `IFCIDENTIFIER('…')`. */
-type PropValue = string;
+const ROOF_PREDEFINED: Record<string, string> = {
+  flach: "FLAT_ROOF",
+  pult: "SHED_ROOF",
+  sattel: "GABLE_ROOF",
+  walm: "HIP_ROOF",
+  mansarde: "MANSARD_ROOF",
+  zelt: "HIPPED_GABLE_ROOF",
+};
+
+const identifier = (name: string, v: string): PropIn => ({ name, ident: v });
 
 /**
  * Baut aus einem Projekt einen vollständigen IFC4-SPF-String (STEP Physical
- * File). Reiner Rechenkern — kein Datei-IO. Leeres Projekt ⇒ valider Minimal-
- * IFC (Project/Site/Building, kein Crash).
+ * File). Kein Datei-IO. Leeres Projekt ⇒ valider Minimal-IFC (Project/Site/Building, kein Crash).
+ * Verlangt das geladene Format-Modul (`await loadFileio()`).
  */
 export function exportIfcSpf(projectIn: Project): string {
   // Georeferenziert exportieren: ist ein Standort-Bezug gesetzt (geoAnchor),
@@ -402,297 +459,46 @@ export function exportIfcSpf(projectIn: Project): string {
   // Modell lokal nahe (0,0) bearbeitet wurde (s. projectToWorldCoords / der
   // „Neuer Bezugspunkt"-Workflow). Ohne Bezug bleibt alles lokal (Identität).
   const project = projectToWorldCoords(projectIn);
-  const w = new StepWriter();
-
-  /** Dauerhafte GlobalId (als STEP-String) aus `<Art>/<id>[/<Zusatz>]`, im Namensraum des Projekts. */
-  const gid = (key: string): string => S(ifcGuid(`${project.id}/${key}`));
-
-  // Geteilte Grundgeometrie: Ursprung, Z-Extrusionsrichtung, Identitäts-
-  // Placement (Position aller ExtrudedAreaSolid — Profile tragen direkt
-  // Welt-X/Y, siehe Dateikopf).
-  const originPoint = w.add("IFCCARTESIANPOINT", LIST([R(0), R(0), R(0)]));
-  const extrudeDir = w.add("IFCDIRECTION", LIST([R(0), R(0), R(1)]));
-  const identityAxis = w.add("IFCAXIS2PLACEMENT3D", `#${originPoint},$,$`);
-
-  // Owner-History (minimal, aber vorhanden — manche Importer verlangen sie).
-  const org = w.add("IFCORGANIZATION", `$,${S("dossier")},$,$,$`);
-  const person = w.add(
-    "IFCPERSON",
-    `${S("dossier")},$,$,$,$,$,$,$`,
-  );
-  const personOrg = w.add("IFCPERSONANDORGANIZATION", `#${person},#${org},$`);
-  const app = w.add(
-    "IFCAPPLICATION",
-    `#${org},${S("1.0")},${S("dossier")},${S("dossier")}`,
-  );
-  // ChangeAction ADDED verlangt ein LastModifiedDate (IFC4-Regel IfcOwnerHistory.CorrectChangeAction):
-  // beim frischen Export ist es der Erstellungszeitpunkt.
-  const now = Math.floor(Date.now() / 1000);
-  const ownerHistory = w.add(
-    "IFCOWNERHISTORY",
-    `#${personOrg},#${app},$,${ENUM("ADDED")},${now},$,$,${now}`,
-  );
-
-  // Einheiten (Meter, Radiant, m², m³).
-  const lenUnit = w.add("IFCSIUNIT", `*,${ENUM("LENGTHUNIT")},$,${ENUM("METRE")}`);
-  const areaUnit = w.add("IFCSIUNIT", `*,${ENUM("AREAUNIT")},$,${ENUM("SQUARE_METRE")}`);
-  const volUnit = w.add("IFCSIUNIT", `*,${ENUM("VOLUMEUNIT")},$,${ENUM("CUBIC_METRE")}`);
-  const angleUnit = w.add(
-    "IFCSIUNIT",
-    `*,${ENUM("PLANEANGLEUNIT")},$,${ENUM("RADIAN")}`,
-  );
-  const unitAssignment = w.add(
-    "IFCUNITASSIGNMENT",
-    LIST([`#${lenUnit}`, `#${areaUnit}`, `#${volUnit}`, `#${angleUnit}`]),
-  );
-
-  // Geometrischer Kontext (3D, Precision 1e-5).
-  const context = w.add(
-    "IFCGEOMETRICREPRESENTATIONCONTEXT",
-    `$,${S("Model")},3,${R(0.00001)},#${identityAxis},$`,
-  );
-
-  // Georeferenz: Die Geometrie liegt bereits in LV95-Weltkoordinaten (s. oben), die Abbildung
-  // lokal→Welt ist daher die Identität; das Koordinatensystem wird trotzdem deklariert, damit
-  // Importer die Datei als EPSG:2056 erkennen (IFC4 IfcProjectedCRS + IfcMapConversion).
-  if (project.geoAnchor) {
-    const crs = w.add(
-      "IFCPROJECTEDCRS",
-      `${S("EPSG:2056")},${S("CH1903+ / LV95")},${S("CH1903+")},$,${S("Swiss Oblique Mercator")},$,#${lenUnit}`,
-    );
-    w.add("IFCMAPCONVERSION", `#${context},#${crs},${R(0)},${R(0)},${R(0)},${R(1)},${R(0)},${R(1)}`);
-  }
-
-  // Räumliche Hierarchie: Project → Site → Building → Storeys.
-  const siteAxis = w.add("IFCAXIS2PLACEMENT3D", `#${originPoint},$,$`);
-  const sitePlacement = w.add("IFCLOCALPLACEMENT", `$,#${siteAxis}`);
-  const buildingAxis = w.add("IFCAXIS2PLACEMENT3D", `#${originPoint},$,$`);
-  const buildingPlacement = w.add(
-    "IFCLOCALPLACEMENT",
-    `#${sitePlacement},#${buildingAxis}`,
-  );
-
-  const projectId = w.add(
-    "IFCPROJECT",
-    `${gid("project")},#${ownerHistory},${S(project.name || "Projekt")},$,$,$,$,${LIST([`#${context}`])},#${unitAssignment}`,
-  );
-  // RefElevation (m ü. M.): reale Datumshöhe des Standorts aus dem
-  // Georeferenzierungs-Bezug (wie ArchiCADs Vermessungspunkt). Rein informativ —
-  // die Geometrie wird NICHT verschoben (das Terrain trägt bereits reale Höhen).
-  const refElevation = project.geoAnchor?.height;
-  const siteRefElev = typeof refElevation === "number" ? R(refElevation) : "$";
-  const siteId = w.add(
-    "IFCSITE",
-    `${gid("site")},#${ownerHistory},${S("Standort")},$,$,#${sitePlacement},$,$,${ENUM("ELEMENT")},$,$,${siteRefElev},$,$`,
-  );
-  const buildingId = w.add(
-    "IFCBUILDING",
-    `${gid("building")},#${ownerHistory},${S(project.name || "Gebäude")},$,$,#${buildingPlacement},$,$,${ENUM("ELEMENT")},$,$,$`,
-  );
-  w.add(
-    "IFCRELAGGREGATES",
-    `${gid("aggregates/site")},#${ownerHistory},$,$,#${projectId},${LIST([`#${siteId}`])}`,
-  );
-  w.add(
-    "IFCRELAGGREGATES",
-    `${gid("aggregates/building")},#${ownerHistory},$,$,#${siteId},${LIST([`#${buildingId}`])}`,
-  );
+  const flat = new FlatIfc();
 
   // Je "floor"-Geschoss ein IfcBuildingStorey (Elevation = baseElevation).
   const floors = project.drawingLevels.filter((l) => l.kind === "floor");
-  const storeyByFloorId = new Map<string, Structure>();
-  const storeyEntityIds: number[] = [];
-  for (const floor of floors) {
-    const base = floor.baseElevation ?? 0;
-    const pt = w.add("IFCCARTESIANPOINT", LIST([R(0), R(0), R(base)]));
-    const axis = w.add("IFCAXIS2PLACEMENT3D", `#${pt},$,$`);
-    const placementId = w.add("IFCLOCALPLACEMENT", `#${buildingPlacement},#${axis}`);
-    const entityId = w.add(
-      "IFCBUILDINGSTOREY",
-      `${gid(`storey/${floor.id}`)},#${ownerHistory},${S(floor.name)},$,$,#${placementId},$,$,${ENUM("ELEMENT")},${R(base)}`,
-    );
-    storeyByFloorId.set(floor.id, { entityId, placementId, baseElevation: base, key: `storey/${floor.id}` });
-    storeyEntityIds.push(entityId);
-  }
-  if (storeyEntityIds.length > 0) {
-    w.add(
-      "IFCRELAGGREGATES",
-      `${gid("aggregates/storeys")},#${ownerHistory},$,$,#${buildingId},${LIST(storeyEntityIds.map((id) => `#${id}`))}`,
-    );
-  }
+  const storeyIndexByFloorId = new Map<string, number>();
+  const storeyBase: number[] = [];
+  floors.forEach((floor, i) => {
+    storeyIndexByFloorId.set(floor.id, i);
+    storeyBase.push(floor.baseElevation ?? 0);
+  });
+  /** Geschoss → Index der Trägerstruktur, oder −1 = Gebäude (verwaiste floorId). */
+  const structureOf = (floorId: string): number => storeyIndexByFloorId.get(floorId) ?? -1;
+  const baseOf = (structure: number): number => (structure < 0 ? 0 : storeyBase[structure]);
 
-  /** Geschoss → Trägerstruktur (Storey), oder defensiv das Gebäude (verwaiste floorId). */
-  const buildingStructure: Structure = { entityId: buildingId, placementId: buildingPlacement, baseElevation: 0, key: "building" };
-  const resolveStructure = (floorId: string): Structure => storeyByFloorId.get(floorId) ?? buildingStructure;
+  // RefElevation (m ü. M.): reale Datumshöhe des Standorts aus dem Georeferenzierungs-Bezug (wie
+  // ArchiCADs Vermessungspunkt). Rein informativ — die Geometrie wird NICHT verschoben.
+  const refElevation = project.geoAnchor?.height;
+  flat.meta({
+    projectId: project.id,
+    projectName: project.name ?? "",
+    now: Math.floor(Date.now() / 1000),
+    iso: new Date().toISOString().replace(/\.\d+Z$/, ""),
+    hasGeo: !!project.geoAnchor,
+    refElevation: typeof refElevation === "number" ? refElevation : null,
+    storeys: floors.map((f, i) => ({ id: f.id, name: f.name, base: storeyBase[i] })),
+  });
 
-  // Räumliche Eingliederung sammelt sich je Trägerstruktur (Storey/Building)
-  // und wird am Ende in EINE IfcRelContainedInSpatialStructure je Struktur
-  // gebündelt (Öffnungen NICHT — die hängen nur über RelVoidsElement an ihrer
-  // Wand, wie in IFC üblich).
-  const containment = new Map<Structure, number[]>();
-  const addToContainment = (structure: Structure, elementId: number): void => {
-    const arr = containment.get(structure);
-    if (arr) arr.push(elementId);
-    else containment.set(structure, [elementId]);
-  };
-
-  // Eigenschaftssätze: gleicher Inhalt ⇒ EIN IfcPropertySet + EINE IfcRelDefinesByProperties für
-  // alle Bauteile (z. B. alle Wände eines Typs). GUID aus dem Inhalt — stabil, solange er gleich bleibt.
-  const psets = new Map<string, { name: string; props: [string, PropValue][]; related: number[] }>();
-  const addPset = (name: string, props: [string, PropValue][], elementId: number): void => {
-    if (props.length === 0) return; // IfcPropertySet verlangt mindestens eine Eigenschaft
-    const key = `${name}/${JSON.stringify(props)}`;
-    const hit = psets.get(key);
-    if (hit) hit.related.push(elementId);
-    else psets.set(key, { name, props, related: [elementId] });
-  };
-  const identifier = (v: string): PropValue => `IFCIDENTIFIER(${S(v)})`;
-  const bool = (v: boolean): PropValue => `IFCBOOLEAN(${v ? ".T." : ".F."})`;
-
-  /** Profil (geschlossenes Polygon in Welt-XY) als IfcExtrudedAreaSolid, Unterkante `zRel` in `+Z`. */
-  const emitExtrusion = (footprint: Vec2[], zRel: number, depth: number): number => {
-    const closed = [...footprint, footprint[0]];
-    const ptIds = closed.map((p) => w.add("IFCCARTESIANPOINT", LIST([R(p.x), R(p.y)])));
-    const polylineId = w.add("IFCPOLYLINE", LIST(ptIds.map((id) => `#${id}`)));
-    const profileId = w.add(
-      "IFCARBITRARYCLOSEDPROFILEDEF",
-      `${ENUM("AREA")},$,#${polylineId}`,
-    );
-    let position = identityAxis;
-    if (zRel !== 0) {
-      const pt = w.add("IFCCARTESIANPOINT", LIST([R(0), R(0), R(zRel)]));
-      position = w.add("IFCAXIS2PLACEMENT3D", `#${pt},$,$`);
-    }
-    return w.add(
-      "IFCEXTRUDEDAREASOLID",
-      `#${profileId},#${position},#${extrudeDir},${R(Math.max(depth, 0.001))}`,
-    );
-  };
-
-  /** Placement im Abstand `zRel` über `placementRelTo`. */
-  const emitPlacement = (zRel: number, placementRelTo: number): number => {
-    const elemOrigin = w.add("IFCCARTESIANPOINT", LIST([R(0), R(0), R(zRel)]));
-    const elemAxis = w.add("IFCAXIS2PLACEMENT3D", `#${elemOrigin},$,$`);
-    return w.add("IFCLOCALPLACEMENT", `#${placementRelTo},#${elemAxis}`);
-  };
-
-  /** SweptSolid-Körper aus Extrusionen. */
-  const emitSweptShape = (solids: number[]): number => {
-    const shapeRepId = w.add(
-      "IFCSHAPEREPRESENTATION",
-      `#${context},${S("Body")},${S("SweptSolid")},${LIST(solids.map((id) => `#${id}`))}`,
-    );
-    return w.add("IFCPRODUCTDEFINITIONSHAPE", `$,$,${LIST([`#${shapeRepId}`])}`);
-  };
-
-  /** Baut Profil+Extrusion+Shape+Placement für einen geschlossenen Footprint. */
-  const emitBoxProduct = (
-    footprint: Vec2[],
-    zBottomRel: number,
-    depth: number,
-    placementRelTo: number,
-  ): { placementId: number; shapeId: number } => {
-    const shapeId = emitSweptShape([emitExtrusion(footprint, 0, depth)]);
-    return { placementId: emitPlacement(zBottomRel, placementRelTo), shapeId };
-  };
-
-  /**
-   * Baut aus einem Dreiecks-Mesh (`positions` flach x,y,z in IFC-Koordinaten —
-   * bereits Z-up und relativ zur `placementRelTo`-Herkunft, `indices` je 3 =
-   * 1-basiert-1 CoordIndex-Tripel) ein IfcTriangulatedFaceSet + Shape + Placement.
-   * IFC4-Tessellierung: IfcCartesianPointList3D (CoordList) + IfcTriangulatedFace
-   * Set (CoordIndex, 1-basiert). Das Element-Placement sitzt im Ursprung der
-   * Trägerstruktur (die Punkte tragen die Geometrie bereits absolut in deren Frame).
-   */
-  const emitTriangulatedProduct = (
-    positions: number[],
-    indices: number[],
-    placementRelTo: number,
-    closed: boolean,
-  ): { placementId: number; shapeId: number } => {
-    const coords: string[] = [];
-    for (let i = 0; i < positions.length; i += 3) {
-      coords.push(`(${R(positions[i])},${R(positions[i + 1])},${R(positions[i + 2])})`);
-    }
-    const pointListId = w.add("IFCCARTESIANPOINTLIST3D", `(${coords.join(",")})`);
-    const tris: string[] = [];
-    for (let i = 0; i < indices.length; i += 3) {
-      tris.push(`(${indices[i] + 1},${indices[i + 1] + 1},${indices[i + 2] + 1})`);
-    }
-    // Closed=.T. NUR wenn das Mesh nachweislich ein dichtes, aussen orientiertes
-    // Volumen ist (siehe isWatertight): Wände sind extrudierte Querschnitts-
-    // Polygone (Fenster = Durchgangsloch, Tür = umlaufende П-Kerbe) → geschlossene
-    // Körper → `.T.` (Viewer rendern sie als Solid statt als offene Fläche). Der
-    // Guard fängt echte Defekte ab (invertierte Wicklung → Volumen < 0 → `$`).
-    // Normals=$ (Viewer leitet sie aus der — jetzt aussen orientierten — Wicklung ab).
-    const closedFlag = closed ? ".T." : "$";
-    const faceSetId = w.add("IFCTRIANGULATEDFACESET", `#${pointListId},$,${closedFlag},(${tris.join(",")}),$`);
-    const shapeRepId = w.add(
-      "IFCSHAPEREPRESENTATION",
-      `#${context},${S("Body")},${S("Tessellation")},${LIST([`#${faceSetId}`])}`,
-    );
-    const shapeId = w.add("IFCPRODUCTDEFINITIONSHAPE", `$,$,${LIST([`#${shapeRepId}`])}`);
-    return { placementId: emitPlacement(0, placementRelTo), shapeId };
-  };
-
-  /** Baut ein IfcBuildingElement-Subtyp mit dem üblichen 9-Attribut-Flatten. */
-  const emitBuildingElement = (
-    type: string,
-    guid: string,
-    name: string,
-    placementId: number,
-    shapeId: number,
-    predefinedType: string | null,
-  ): number =>
-    w.add(
-      type,
-      `${guid},#${ownerHistory},${S(name)},$,$,#${placementId},#${shapeId},$,${predefinedType ?? "$"}`,
-    );
-
-  // ── Bauteiltypen mit Materialschichten ─────────────────────────────────
-  // Je Wand-/Deckentyp ein IfcWallType/IfcSlabType mit IfcMaterialLayerSet (Schichten in der
-  // Reihenfolge des Typs, Material = Bauteil). Die Wände/Decken erben ihn über
-  // IfcRelDefinesByType. Bewusst KEIN IfcMaterialLayerSetUsage am Exemplar (s. Dateikopf).
-  const materialIdByComponent = new Map<string, number>();
-  const materialOf = (componentId: string): number => {
-    const hit = materialIdByComponent.get(componentId);
-    if (hit !== undefined) return hit;
-    const name = project.components.find((c) => c.id === componentId)?.name ?? componentId;
-    const id = w.add("IFCMATERIAL", `${S(name)},$,$`);
-    materialIdByComponent.set(componentId, id);
-    return id;
-  };
-  interface ElementTypeRef {
-    typeId: number;
-    occurrences: number[];
-  }
-  const elementTypes = new Map<string, ElementTypeRef>();
-  const typeFor = (
-    ifcType: "IFCWALLTYPE" | "IFCSLABTYPE" | "IFCROOFTYPE",
+  const componentName = (componentId: string): string =>
+    project.components.find((c) => c.id === componentId)?.name ?? componentId;
+  const typeRef = (
+    kind: TypeKind,
     predefined: string,
     t: { id: string; name: string; layers: { componentId: string; thickness: number }[] },
-  ): ElementTypeRef => {
-    const key = `type/${ifcType}/${t.id}`;
-    const hit = elementTypes.get(key);
-    if (hit) return hit;
-    const layerIds = t.layers.map((l) =>
-      w.add("IFCMATERIALLAYER", `#${materialOf(l.componentId)},${R(Math.max(0, Number.isFinite(l.thickness) ? l.thickness : 0))},$,$,$,$,$`),
-    );
-    const typeId = w.add(
-      ifcType,
-      `${gid(key)},#${ownerHistory},${S(t.name)},$,$,$,$,$,$,${ENUM(predefined)}`,
-    );
-    if (layerIds.length > 0) {
-      const setId = w.add("IFCMATERIALLAYERSET", `${LIST(layerIds.map((id) => `#${id}`))},${S(t.name)},$`);
-      w.add(
-        "IFCRELASSOCIATESMATERIAL",
-        `${gid(`${key}/material`)},#${ownerHistory},$,$,${LIST([`#${typeId}`])},#${setId}`,
-      );
-    }
-    const ref = { typeId, occurrences: [] };
-    elementTypes.set(key, ref);
-    return ref;
-  };
+  ): TypeRefIn => ({
+    kind,
+    id: t.id,
+    name: t.name,
+    predefined,
+    layers: t.layers.map((l) => ({ componentId: l.componentId, componentName: componentName(l.componentId), thickness: l.thickness })),
+  });
 
   // ── Wände ──────────────────────────────────────────────────────────────
   // Die Wand-Schicht-Bänder kommen aus DEMSELBEN geflachten Modell wie STL/OBJ
@@ -712,8 +518,7 @@ export function exportIfcSpf(projectIn: Project): string {
   // umgedreht (i0,i2,i1). Watertightness (isWatertight) misst das anschliessend am
   // fertigen IFC-Mesh → treibt das Closed-Flag des Face-Sets.
   const bandsByWallId = new Map<string, RWall[]>();
-  const allBands = pickGeometry(project).walls;
-  for (const band of allBands) {
+  for (const band of pickGeometry(project).walls) {
     const list = bandsByWallId.get(band.wallId);
     if (list) list.push(band);
     else bandsByWallId.set(band.wallId, [band]);
@@ -728,28 +533,22 @@ export function exportIfcSpf(projectIn: Project): string {
     }
     return out;
   };
-  const meshWalls: { wall: Wall; bands: RWall[] }[] = [];
-  const wallRefById = new Map<string, WallRef>();
-  const cutoutsByWallId = new Map<string, WallCutout[]>();
-  const emitWallEntity = (wall: Wall, structure: Structure, placementId: number, shapeId: number, bands: RWall[]): void => {
-    let name = wall.id;
-    let wallType: ElementTypeRef | null = null;
-    let reference: string | null = null;
+  /** Name, Typ und Pset einer Wand (verwaister Wandtyp: Roh-ID als Name, kein Typ). */
+  const wallIdentity = (wall: Wall): { name: string; ty: TypeRefIn | null; psets: PsetIn[] } => {
     try {
       const wt = getWallType(project, wall);
-      name = wt.name;
-      reference = wt.name;
-      wallType = typeFor("IFCWALLTYPE", "STANDARD", wt);
+      return {
+        name: wt.name,
+        ty: typeRef(0, "STANDARD", wt),
+        psets: [{ name: "Pset_WallCommon", props: [identifier("Reference", wt.name)] }],
+      };
     } catch {
-      /* verwaister Wandtyp — Roh-ID als Name, kein Typ */
+      return { name: wall.id, ty: null, psets: [] };
     }
-    const entityId = emitBuildingElement("IFCWALL", gid(`wall/${wall.id}`), name, placementId, shapeId, null);
-    wallType?.occurrences.push(entityId);
-    addToContainment(structure, entityId);
-    if (reference !== null) addPset("Pset_WallCommon", [["Reference", identifier(reference)]], entityId);
-    // Querausdehnung aller Bänder (für den Öffnungskörper).
-    const u = normalize(sub(wall.end, wall.start));
-    const n = leftNormal(u);
+  };
+  /** Ausdehnung aller Bänder quer zur Wandachse (entlang der linken Normalen ab `wall.start`). */
+  const crossExtent = (wall: Wall, bands: readonly RWall[]): { nLo: number; nHi: number } => {
+    const n = leftNormal(normalize(sub(wall.end, wall.start)));
     let nLo = Infinity;
     let nHi = -Infinity;
     for (const b of bands) {
@@ -757,8 +556,12 @@ export function exportIfcSpf(projectIn: Project): string {
       nLo = Math.min(nLo, off - b.thickness / 2);
       nHi = Math.max(nHi, off + b.thickness / 2);
     }
-    wallRefById.set(wall.id, { entityId, placementId, nLo, nHi });
+    return { nLo, nHi };
   };
+
+  const meshWalls: { wall: Wall; bands: RWall[] }[] = [];
+  const hostExtent = new Map<string, { nLo: number; nHi: number }>();
+  const cutoutsByWallId = new Map<string, WallCutout[]>();
   for (const wall of project.walls ?? []) {
     const bands = (bandsByWallId.get(wall.id) ?? []).filter(
       (b) => Math.hypot(b.end[0] - b.start[0], b.end[1] - b.start[1]) > 1e-9 && b.height > 1e-9 && b.thickness > 1e-9,
@@ -770,23 +573,25 @@ export function exportIfcSpf(projectIn: Project): string {
       meshWalls.push({ wall, bands: bandsByWallId.get(wall.id)! });
       continue;
     }
-    const structure = resolveStructure(wall.floorId);
+    const structure = structureOf(wall.floorId);
     const solids = bands.map((b) => {
       const s: Vec2 = { x: b.start[0], y: b.start[1] };
       const e: Vec2 = { x: b.end[0], y: b.end[1] };
       const n = leftNormal(normalize(sub(e, s)));
       const h = b.thickness / 2;
       const rect = [addScaled(s, n, -h), addScaled(e, n, -h), addScaled(e, n, h), addScaled(s, n, h)];
-      return emitExtrusion(rect, b.baseElevation - structure.baseElevation, b.height);
+      return { pts: rect, zRel: b.baseElevation - baseOf(structure), depth: b.height };
     });
-    emitWallEntity(wall, structure, emitPlacement(0, structure.placementId), emitSweptShape(solids), bands);
+    const id = wallIdentity(wall);
+    flat.wallSolids(structure, wall.id, id.name, id.ty, id.psets, solids);
+    hostExtent.set(wall.id, crossExtent(wall, bands));
   }
   // Mesh-Weg: Loch-Ausschnitte aller betroffenen Bänder in EINEM Kern-Aufruf.
   const meshBands = meshWalls.flatMap((m) => m.bands);
   const cutOf = new Map<RWall, CutMesh>();
   wallCutMeshes(meshBands).forEach((m, i) => cutOf.set(meshBands[i], m));
   for (const { wall, bands } of meshWalls) {
-    const structure = resolveStructure(wall.floorId);
+    const structure = structureOf(wall.floorId);
     const positions: number[] = [];
     const indices: number[] = [];
     for (const band of bands) {
@@ -794,11 +599,7 @@ export function exportIfcSpf(projectIn: Project): string {
       if (!cut) continue;
       const base = positions.length / 3;
       for (let i = 0; i < cut.positions.length; i += 3) {
-        positions.push(
-          cut.positions[i],
-          cut.positions[i + 2],
-          cut.positions[i + 1] - structure.baseElevation,
-        );
+        positions.push(cut.positions[i], cut.positions[i + 2], cut.positions[i + 1] - baseOf(structure));
       }
       // Wicklung umkehren (Reflexions-Ausgleich, s. o.): (a,b,c) → (a,c,b).
       for (let i = 0; i < cut.indices.length; i += 3) {
@@ -806,44 +607,32 @@ export function exportIfcSpf(projectIn: Project): string {
       }
     }
     if (indices.length === 0) continue;
+    // Closed=.T. NUR wenn das Mesh nachweislich ein dichtes, aussen orientiertes Volumen ist
+    // (Wände sind extrudierte Querschnitts-Polygone → geschlossene Körper); der Guard fängt echte
+    // Defekte ab (invertierte Wicklung → Volumen < 0 → `$`).
     const closed = isWatertight({ positions, indices });
-    const { placementId, shapeId } = emitTriangulatedProduct(positions, indices, structure.placementId, closed);
-    emitWallEntity(wall, structure, placementId, shapeId, bands);
+    const id = wallIdentity(wall);
+    flat.wallMesh(structure, wall.id, id.name, id.ty, id.psets, positions, indices, closed);
+    hostExtent.set(wall.id, crossExtent(wall, bandsByWallId.get(wall.id)!));
   }
 
   // ── Decken ─────────────────────────────────────────────────────────────
   for (const ceiling of project.ceilings ?? []) {
     if (ceiling.outline.length < 3) continue;
     const { zBottom, zTop } = ceilingVerticalExtent(project, ceiling);
-    const structure = resolveStructure(ceiling.floorId);
-    const { placementId, shapeId } = emitBoxProduct(
-      ceiling.outline,
-      zBottom - structure.baseElevation,
-      zTop - zBottom,
-      structure.placementId,
-    );
+    const structure = structureOf(ceiling.floorId);
     let name: string = ceiling.id;
-    let slabType: ElementTypeRef | null = null;
-    let reference: string | null = null;
+    let ty: TypeRefIn | null = null;
+    const psets: PsetIn[] = [];
     try {
       const ct = getCeilingType(project, ceiling);
       name = ct.name;
-      reference = ct.name;
-      slabType = typeFor("IFCSLABTYPE", "FLOOR", ct);
+      ty = typeRef(1, "FLOOR", ct);
+      psets.push({ name: "Pset_SlabCommon", props: [identifier("Reference", ct.name)] });
     } catch {
       /* verwaister Deckentyp — Roh-ID als Name, kein Typ */
     }
-    const entityId = emitBuildingElement(
-      "IFCSLAB",
-      gid(`slab/${ceiling.id}`),
-      name,
-      placementId,
-      shapeId,
-      ENUM("FLOOR"),
-    );
-    slabType?.occurrences.push(entityId);
-    addToContainment(structure, entityId);
-    if (reference !== null) addPset("Pset_SlabCommon", [["Reference", identifier(reference)]], entityId);
+    flat.ceiling(structure, ceiling.id, name, ty, psets, ceiling.outline, zBottom - baseOf(structure), zTop - zBottom);
   }
 
   // ── Öffnungen: IfcOpeningElement in der Wand, IfcDoor/IfcWindow darin ───
@@ -852,61 +641,42 @@ export function exportIfcSpf(projectIn: Project): string {
   // OPENING_OVERSHOOT. Die Füllung (Tür/Fenster) sitzt im Öffnungs-Placement, über die
   // Banddicke, ohne Blatt-/Rahmendetail.
   for (const wall of project.walls ?? []) {
-    const host = wallRefById.get(wall.id);
+    const host = hostExtent.get(wall.id);
     if (!host) continue; // Wirtswand übersprungen (degeneriert)
-    const structure = resolveStructure(wall.floorId);
+    const structure = structureOf(wall.floorId);
     for (const c of cutoutsByWallId.get(wall.id) ?? []) {
       const { opening } = c;
       const depth = c.zTop - c.zBottom;
       if (!(depth > 1e-6)) continue;
-      const voidRect = axisRect(wall, c.from, c.to, host.nLo - OPENING_OVERSHOOT, host.nHi + OPENING_OVERSHOOT);
-      const { placementId: openingPlacement, shapeId: openingShape } = emitBoxProduct(
-        voidRect,
-        c.zBottom - structure.baseElevation,
-        depth,
-        host.placementId,
-      );
-      const openingEntityId = w.add(
-        "IFCOPENINGELEMENT",
-        `${gid(`opening/${opening.id}`)},#${ownerHistory},${S(opening.kind === "door" ? "Türöffnung" : "Fensteröffnung")},$,$,#${openingPlacement},#${openingShape},$,${ENUM("OPENING")}`,
-      );
-      w.add(
-        "IFCRELVOIDSELEMENT",
-        `${gid(`voids/${opening.id}`)},#${ownerHistory},$,$,#${host.entityId},#${openingEntityId}`,
-      );
-
-      const { placementId: fillPlacement, shapeId: fillShape } = emitBoxProduct(
-        axisRect(wall, c.from, c.to, host.nLo, host.nHi),
-        0,
-        depth,
-        openingPlacement,
-      );
-      const fillName = openingLabel(opening);
       const isDoor = opening.kind === "door";
-      const fillEntityId = w.add(
-        isDoor ? "IFCDOOR" : "IFCWINDOW",
-        `${gid(`fill/${opening.id}`)},#${ownerHistory},${S(fillName)},$,$,#${fillPlacement},#${fillShape},$,${R(depth)},${R(c.to - c.from)},${ENUM(isDoor ? "DOOR" : "WINDOW")},$,$`,
-      );
-      w.add(
-        "IFCRELFILLSELEMENT",
-        `${gid(`fills/${opening.id}`)},#${ownerHistory},$,$,#${openingEntityId},#${fillEntityId}`,
-      );
-      addToContainment(structure, fillEntityId);
-
-      const props: [string, PropValue][] = [];
+      const props: PropIn[] = [];
+      let psetName: string;
       if (isDoor) {
+        psetName = "Pset_DoorCommon";
         const dt = getDoorType(project, opening);
-        if (dt) props.push(["Reference", identifier(dt.name)]);
+        if (dt) props.push(identifier("Reference", dt.name));
         const ratio = dt?.glazingRatio;
         if (dt?.leafStyle === "glas" && typeof ratio === "number" && ratio > 0 && ratio <= 1) {
-          props.push(["GlazingAreaFraction", `IFCPOSITIVERATIOMEASURE(${R(ratio)})`]);
+          props.push({ name: "GlazingAreaFraction", ratio });
         }
-        addPset("Pset_DoorCommon", props, fillEntityId);
       } else {
+        psetName = "Pset_WindowCommon";
         const wt = getWindowType(project, opening);
-        if (wt) props.push(["Reference", identifier(wt.name)]);
-        addPset("Pset_WindowCommon", props, fillEntityId);
+        if (wt) props.push(identifier("Reference", wt.name));
       }
+      flat.opening({
+        wallId: wall.id,
+        structure,
+        openingId: opening.id,
+        isDoor,
+        fillName: openingLabel(opening),
+        voidRect: axisRect(wall, c.from, c.to, host.nLo - OPENING_OVERSHOOT, host.nHi + OPENING_OVERSHOOT),
+        voidZRel: c.zBottom - baseOf(structure),
+        depth,
+        fillRect: axisRect(wall, c.from, c.to, host.nLo, host.nHi),
+        width: c.to - c.from,
+        psets: [{ name: psetName, props }],
+      });
     }
   }
 
@@ -915,28 +685,9 @@ export function exportIfcSpf(projectIn: Project): string {
     const footprint = stairFootprint(stair);
     if (footprint.length < 3) continue;
     const { zBottom, zTop } = stairVerticalExtent(project, stair);
-    const structure = resolveStructure(stair.floorId);
-    const { placementId, shapeId } = emitBoxProduct(
-      footprint,
-      zBottom - structure.baseElevation,
-      zTop - zBottom,
-      structure.placementId,
-    );
-    const predefinedType =
-      stair.shape === "straight"
-        ? ENUM("STRAIGHT_RUN_STAIR")
-        : stair.shape === "spiral"
-          ? ENUM("SPIRAL_STAIR")
-          : ENUM("QUARTER_TURN_STAIR");
-    const entityId = emitBuildingElement(
-      "IFCSTAIR",
-      gid(`stair/${stair.id}`),
-      "Treppe",
-      placementId,
-      shapeId,
-      predefinedType,
-    );
-    addToContainment(structure, entityId);
+    const structure = structureOf(stair.floorId);
+    const predefined = stair.shape === "straight" ? "STRAIGHT_RUN_STAIR" : stair.shape === "spiral" ? "SPIRAL_STAIR" : "QUARTER_TURN_STAIR";
+    flat.stair(structure, stair.id, predefined, footprint, zBottom - baseOf(structure), zTop - zBottom);
   }
 
   // ── Extrudierte Körper (truck-Integration) → IfcBuildingElementProxy ───
@@ -944,22 +695,8 @@ export function exportIfcSpf(projectIn: Project): string {
     if (solid.points.length < 3) continue;
     const floor = floors.find((f) => f.id === solid.levelId);
     const base = floor?.baseElevation ?? 0;
-    const structure = resolveStructure(solid.levelId);
-    const { placementId, shapeId } = emitBoxProduct(
-      solid.points,
-      base - structure.baseElevation,
-      solid.height,
-      structure.placementId,
-    );
-    const entityId = emitBuildingElement(
-      "IFCBUILDINGELEMENTPROXY",
-      gid(`extrusion/${solid.id}`),
-      "Extrusion",
-      placementId,
-      shapeId,
-      null,
-    );
-    addToContainment(structure, entityId);
+    const structure = structureOf(solid.levelId);
+    flat.extrusion(structure, solid.id, solid.points, base - baseOf(structure), solid.height);
   }
 
   // ── Räume → IfcSpace ───────────────────────────────────────────────────
@@ -968,76 +705,45 @@ export function exportIfcSpf(projectIn: Project): string {
   // Geschoss AGGREGIERT (IfcRelAggregates), nicht enthalten. Dazu Basismengen
   // (Qto_SpaceBaseQuantities), die SIA-416-Kategorie als Eigenschaft und Pset_SpaceCommon
   // (AGF = Aussengeschossfläche ⇒ aussen, alles andere innen).
-  const spacesByStructure = new Map<Structure, number[]>();
   for (const room of project.rooms ?? []) {
     if (room.boundary.length < 3) continue;
-    const structure = resolveStructure(room.floorId);
+    const structure = structureOf(room.floorId);
     const floor = floors.find((f) => f.id === room.floorId);
     const height = floor?.floorHeight && floor.floorHeight > 0 ? floor.floorHeight : 2.5;
-    const { placementId, shapeId } = emitBoxProduct(room.boundary, 0, height, structure.placementId);
     const external = room.siaCategory === "AGF";
-    const spaceId = w.add(
-      "IFCSPACE",
-      `${gid(`space/${room.id}`)},#${ownerHistory},${S(room.stamp?.number || room.id)},$,$,#${placementId},#${shapeId},${S(room.name)},${ENUM("ELEMENT")},${ENUM(external ? "EXTERNAL" : "INTERNAL")},$`,
-    );
-    const list = spacesByStructure.get(structure);
-    if (list) list.push(spaceId);
-    else spacesByStructure.set(structure, [spaceId]);
-
     const area = evaluateRoom(room.boundary, room.siaCategory);
-    const qNet = w.add("IFCQUANTITYAREA", `${S("NetFloorArea")},$,$,${R(area.netArea)},$`);
-    const qGross = w.add("IFCQUANTITYAREA", `${S("GrossFloorArea")},$,$,${R(area.grossArea)},$`);
-    const qHeight = w.add("IFCQUANTITYLENGTH", `${S("Height")},$,$,${R(height)},$`);
-    const qto = w.add(
-      "IFCELEMENTQUANTITY",
-      `${gid(`space/${room.id}/qto`)},#${ownerHistory},${S("Qto_SpaceBaseQuantities")},$,$,${LIST([`#${qNet}`, `#${qGross}`, `#${qHeight}`])}`,
-    );
-    w.add(
-      "IFCRELDEFINESBYPROPERTIES",
-      `${gid(`space/${room.id}/qto-rel`)},#${ownerHistory},$,$,${LIST([`#${spaceId}`])},#${qto}`,
-    );
-    const sia = w.add("IFCPROPERTYSINGLEVALUE", `${S("SIA416")},$,IFCLABEL(${S(room.siaCategory)}),$`);
-    const pset = w.add(
-      "IFCPROPERTYSET",
-      `${gid(`space/${room.id}/pset`)},#${ownerHistory},${S("CH_Raum")},$,${LIST([`#${sia}`])}`,
-    );
-    w.add(
-      "IFCRELDEFINESBYPROPERTIES",
-      `${gid(`space/${room.id}/pset-rel`)},#${ownerHistory},$,$,${LIST([`#${spaceId}`])},#${pset}`,
-    );
-    const common: [string, PropValue][] = [];
-    if (room.stamp?.number) common.push(["Reference", identifier(room.stamp.number)]);
-    common.push(["IsExternal", bool(external)]);
-    addPset("Pset_SpaceCommon", common, spaceId);
+    const common: PropIn[] = [];
+    if (room.stamp?.number) common.push(identifier("Reference", room.stamp.number));
+    common.push({ name: "IsExternal", bool: external });
+    flat.space({
+      structure,
+      id: room.id,
+      name: room.stamp?.number || room.id,
+      longName: room.name,
+      external,
+      height,
+      boundary: room.boundary,
+      netArea: area.netArea,
+      grossArea: area.grossArea,
+      siaCategory: room.siaCategory,
+      psets: [{ name: "Pset_SpaceCommon", props: common }],
+    });
   }
-  for (const [structure, spaceIds] of spacesByStructure) {
-    w.add(
-      "IFCRELAGGREGATES",
-      `${gid(`aggregates/spaces/${structure.key}`)},#${ownerHistory},$,$,#${structure.entityId},${LIST(spaceIds.map((id) => `#${id}`))}`,
-    );
-  }
+  flat.endSpaces();
 
   // ── Dächer → IfcRoof ───────────────────────────────────────────────────
   // Dieselben geschlossenen Schicht-Meshes wie das 3D (`emitRoofs`: Dachflächen je Schicht,
   // an First/Grat gehrt), zu EINEM Face-Set je Dach vereint. Modell-Koordinaten sind bereits
   // Z-oben (kein Achsentausch wie bei den Wänden); die Wicklung wird so gewählt, dass das Volumen
   // positiv ist — nur dann ist das Face-Set als geschlossen markiert.
-  const ROOF_PREDEFINED: Record<string, string> = {
-    flach: "FLAT_ROOF",
-    pult: "SHED_ROOF",
-    sattel: "GABLE_ROOF",
-    walm: "HIP_ROOF",
-    mansarde: "MANSARD_ROOF",
-    zelt: "HIPPED_GABLE_ROOF",
-  };
   for (const roof of project.roofs ?? []) {
-    const structure = resolveStructure(roof.floorId);
+    const structure = structureOf(roof.floorId);
     const positions: number[] = [];
     const indices: number[] = [];
     for (const mesh of emitRoofs({ ...project, roofs: [roof] })) {
       const base = positions.length / 3;
       for (let i = 0; i < mesh.positions.length; i += 3) {
-        positions.push(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2] - structure.baseElevation);
+        positions.push(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2] - baseOf(structure));
       }
       for (const ix of mesh.indices) indices.push(base + ix);
     }
@@ -1051,89 +757,52 @@ export function exportIfcSpf(projectIn: Project): string {
         closed = true;
       }
     }
-    const { placementId, shapeId } = emitTriangulatedProduct(positions, indices, structure.placementId, closed);
     const predefined = ROOF_PREDEFINED[roof.shape] ?? "NOTDEFINED";
     const roofType = roof.roofTypeId ? (project.roofTypes ?? []).find((t) => t.id === roof.roofTypeId) : undefined;
-    const entityId = emitBuildingElement("IFCROOF", gid(`roof/${roof.id}`), roofType?.name ?? "Dach", placementId, shapeId, ENUM(predefined));
-    if (roofType) typeFor("IFCROOFTYPE", predefined, roofType).occurrences.push(entityId);
-    addToContainment(structure, entityId);
     // Ein Dach ist Gebäudehülle: IsExternal folgt aus der Bauteilart, nicht aus einer Annahme.
-    const props: [string, PropValue][] = [];
-    if (roofType) props.push(["Reference", identifier(roofType.name)]);
-    props.push(["IsExternal", bool(true)]);
-    addPset("Pset_RoofCommon", props, entityId);
+    const props: PropIn[] = [];
+    if (roofType) props.push(identifier("Reference", roofType.name));
+    props.push({ name: "IsExternal", bool: true });
+    flat.roof(
+      structure,
+      roof.id,
+      roofType?.name ?? "Dach",
+      predefined,
+      roofType ? typeRef(2, predefined, roofType) : null,
+      [{ name: "Pset_RoofCommon", props }],
+      positions,
+      indices,
+      closed,
+    );
   }
 
   // ── Stützen → IfcColumn (Profil-Extrusion, Material = Bauteil) ──────────
-  const materialAssoc = new Map<string, number[]>();
   for (const col of project.columns ?? []) {
     const footprint = columnFootprint(col);
     if (footprint.length < 3) continue;
     const { zBottom, zTop } = columnVerticalExtent(project, col);
     if (!(zTop > zBottom)) continue;
-    const structure = resolveStructure(col.floorId);
-    const { placementId, shapeId } = emitBoxProduct(footprint, zBottom - structure.baseElevation, zTop - zBottom, structure.placementId);
+    const structure = structureOf(col.floorId);
     const label = columnLabel(col);
-    const entityId = emitBuildingElement("IFCCOLUMN", gid(`column/${col.id}`), label, placementId, shapeId, ENUM("COLUMN"));
-    addToContainment(structure, entityId);
-    addPset("Pset_ColumnCommon", [["Reference", identifier(label)]], entityId);
-    if (col.componentId) {
-      const list = materialAssoc.get(col.componentId);
-      if (list) list.push(entityId);
-      else materialAssoc.set(col.componentId, [entityId]);
-    }
+    flat.column({
+      structure,
+      id: col.id,
+      label,
+      footprint,
+      zRel: zBottom - baseOf(structure),
+      depth: zTop - zBottom,
+      component: col.componentId ? { id: col.componentId, name: componentName(col.componentId) } : null,
+      psets: [{ name: "Pset_ColumnCommon", props: [identifier("Reference", label)] }],
+    });
   }
-  for (const [componentId, ids] of materialAssoc) {
-    w.add(
-      "IFCRELASSOCIATESMATERIAL",
-      `${gid(`material/${componentId}/columns`)},#${ownerHistory},$,$,${LIST(ids.map((id) => `#${id}`))},#${materialOf(componentId)}`,
-    );
+  flat.endColumns();
+
+  const m = fileio();
+  const [buf, strings] = flat.args();
+  const text = m.export_ifc_flat(buf, strings);
+  if (text.length === 0) {
+    const why = m.export_ifc_check_flat(buf, strings);
+    throw new Error(`IFC-Export fehlgeschlagen${why ? `: ${why}` : ""}`);
   }
-
-  // ── Typ-Zuordnung (je Bauteiltyp eine IfcRelDefinesByType) ─────────────
-  for (const [key, ref] of elementTypes) {
-    if (ref.occurrences.length === 0) continue;
-    w.add(
-      "IFCRELDEFINESBYTYPE",
-      `${gid(`${key}/occurrences`)},#${ownerHistory},$,$,${LIST(ref.occurrences.map((id) => `#${id}`))},#${ref.typeId}`,
-    );
-  }
-
-  // ── Eigenschaftssätze (Pset_*Common) ───────────────────────────────────
-  for (const [key, ps] of psets) {
-    const propIds = ps.props.map(([name, value]) => w.add("IFCPROPERTYSINGLEVALUE", `${S(name)},$,${value},$`));
-    const psetId = w.add(
-      "IFCPROPERTYSET",
-      `${gid(`pset/${key}`)},#${ownerHistory},${S(ps.name)},$,${LIST(propIds.map((id) => `#${id}`))}`,
-    );
-    w.add(
-      "IFCRELDEFINESBYPROPERTIES",
-      `${gid(`pset/${key}/rel`)},#${ownerHistory},$,$,${LIST(ps.related.map((id) => `#${id}`))},#${psetId}`,
-    );
-  }
-
-  // ── Räumliche Eingliederung (gebündelt je Trägerstruktur) ──────────────
-  for (const [structure, elementIds] of containment) {
-    w.add(
-      "IFCRELCONTAINEDINSPATIALSTRUCTURE",
-      `${gid(`contains/${structure.key}`)},#${ownerHistory},$,$,${LIST(elementIds.map((id) => `#${id}`))},#${structure.entityId}`,
-    );
-  }
-
-  // ── Kopf + Zusammenbau ───────────────────────────────────────────────────
-  const iso = new Date().toISOString().replace(/\.\d+Z$/, "");
-  const fileName = `${project.name || "modell"}.ifc`;
-  const header = [
-    "ISO-10303-21;",
-    "HEADER;",
-    `FILE_DESCRIPTION(${LIST([S("")])},${S("2;1")});`,
-    `FILE_NAME(${S(fileName)},${S(iso)},${LIST([S("dossier")])},${LIST([S("dossier")])},${S("dossier")},${S("dossier")},${S("")});`,
-    "FILE_SCHEMA(('IFC4'));",
-    "ENDSEC;",
-    "",
-    "DATA;",
-  ];
-  const footer = ["ENDSEC;", "END-ISO-10303-21;"];
-
-  return [...header, ...w.entityLines, ...footer].join("\n") + "\n";
+  return text;
 }

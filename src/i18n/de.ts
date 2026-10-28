@@ -1751,6 +1751,7 @@ export const de = {
   "exportSave.fmt.stl": "STL (3D-Mesh)",
   "exportSave.fmt.step": "STEP (B-Rep, truck)",
   "step.export.failed": "STEP-Export fehlgeschlagen",
+  "ifc.export.failed": "IFC-Export fehlgeschlagen",
   "step.export.skipped": "{n} Körper konnten nicht exportiert werden",
   "step.import.failed": "STEP-Import fehlgeschlagen",
   "step.import.done": "STEP importiert: {n} Körper",
