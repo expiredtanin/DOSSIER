@@ -1,5 +1,5 @@
 /**
- * `addColumnPoche` — By-Layer/By-Object-Override für Stützen (Nutzer-Wunsch:
+ * Stützen-Poché im Grundriss (Kern: `plan/domains.rs`) — By-Layer/By-Object-Override für Stützen (Nutzer-Wunsch:
  * "generell sollten alle BIM Teile ... die weiteren Attribute haben" — Stütze
  * hat bereits eine Poché UND nutzt dieselben Resolver wie Wand/Decke, daher
  * hier zuerst fertig verdrahtet). Regressionsschutz: die neuen
@@ -8,9 +8,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { addColumnPoche } from "./structures";
-import type { Column, Component, LayerCategory, Project } from "../../model/types";
-import type { Primitive } from "./shared";
+import { generatePlan } from "./generatePlan";
+import type { Column, Component, LayerCategory, Project } from "../model/types";
+import type { Primitive } from "./generatePlan/shared";
 
 const comp: Component = {
   id: "beton",
@@ -69,62 +69,47 @@ function column(overrides: Partial<Column> = {}): Column {
   };
 }
 
+/** Grundriss des Geschosses „eg" mit genau dieser Stütze. */
+function planColumn(p: Project, col: Column): Primitive[] {
+  return generatePlan({ ...p, columns: [col] }, "eg", new Set(["50"])).primitives;
+}
+
 function polygonOf(out: Primitive[]): Extract<Primitive, { kind: "polygon" }> {
   const p = out.find((x) => x.kind === "polygon");
   if (!p || p.kind !== "polygon") throw new Error("kein Poché-Polygon gefunden");
   return p;
 }
 
-describe("addColumnPoche — Attribut-Override greift", () => {
+describe("Stützen-Poché — Attribut-Override greift", () => {
   it("ohne Override: Bauteil-Schraffur/-Farbe bestimmen die Poché (Default 'Nach Bauteil')", () => {
-    const out: Primitive[] = [];
-    addColumnPoche(out, project(), column(), false, 0.35, category);
+    const out = planColumn(project(), column());
     const poly = polygonOf(out);
     expect(poly.hatch.pattern).toBe("solid");
   });
 
   it("mit explizitem background-Override: die Poché-Füllung wird die Override-Farbe", () => {
-    const out: Primitive[] = [];
-    addColumnPoche(out, project(), column({ background: "#ff00ff" }), false, 0.35, category);
+    const out = planColumn(project(), column({ background: "#ff00ff" }));
     expect(polygonOf(out).fill).toBe("#ff00ff");
   });
 
   it("mit hatchSource:'layer': die Kategorie-Schraffur wird verwendet, nicht die Bauteil-Schraffur", () => {
-    const out: Primitive[] = [];
     const catWithHatch: LayerCategory = { ...category, hatch: "sia-other" };
-    addColumnPoche(
-      out,
-      project({ layers: [catWithHatch] }),
-      column({ hatchSource: "layer" }),
-      false,
-      0.35,
-      catWithHatch,
-    );
+    const out = planColumn(project({ layers: [catWithHatch] }), column({ hatchSource: "layer" }));
     expect(polygonOf(out).hatch.pattern).toBe("none");
   });
 
   it("mit explizitem hatchId-Override: gewinnt gegenüber Bauteil UND Kategorie", () => {
-    const out: Primitive[] = [];
-    addColumnPoche(
-      out,
-      project(),
-      column({ hatchId: "sia-other" }),
-      false,
-      0.35,
-      category,
-    );
+    const out = planColumn(project(), column({ hatchId: "sia-other" }));
     expect(polygonOf(out).hatch.pattern).toBe("none");
   });
 
   it("ohne gesetzten Vordergrund: Schraffurfarbe bleibt die neutrale Tinte (Default unverändert)", () => {
-    const out: Primitive[] = [];
-    addColumnPoche(out, project(), column(), false, 0.35, category);
+    const out = planColumn(project(), column());
     expect(polygonOf(out).hatch.color).toBe("#0f0f0f");
   });
 
   it("mit explizitem foreground-Override: die Schraffurfarbe wird die Override-Farbe (vorher wirkungslos)", () => {
-    const out: Primitive[] = [];
-    addColumnPoche(out, project(), column({ foreground: "#00ff88" }), false, 0.35, category);
+    const out = planColumn(project(), column({ foreground: "#00ff88" }));
     expect(polygonOf(out).hatch.color).toBe("#00ff88");
   });
 });

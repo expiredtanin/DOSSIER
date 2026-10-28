@@ -114,12 +114,37 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
     `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`,
     `drawing2d.ts`. Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um.
-  - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
+  - ◐ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
     typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang
     (Text, Schraffur-Optionen, Zickzack/Motiv); die Verbraucher von `Primitive[]` (SVG/PDF/DXF, Auswahl, Overlay) lesen dann den Puffer.
     Stand 28.10.: Rust-Grundlage `core/src/plan/{prim,style}.rs` (Primitive-Typ mit TS-gleicher JSON-Form, Auflösung By-Layer/By-Object,
     `resolve_hatch`). Offen: Overrides-Engine, Raum-Stempel/richText, Domänen (Decken, Dächer, Räume, Wände+Öffnungen, Treppen, Stützen,
     Körper, Kontext, Schnittlinien), Orchestrator (drawings2d bleibt vorerst TS), Plan-Puffer v2 (GPU-Chunk-Cache braucht Inhalts-Hash statt Objekt-Identität).
+    ✅ (28.10.) Plan-Erzeugung auf dem Dokument, Abfrage `planDomains` (`plan/{domains,walls,stairs,overrides}.rs`): Override-Regeln
+    (`overrides.rs`, wie `overrides/engine.ts` inkl. JS-`trim`), Decken (Brücken-Trick, Wand-Footprints, Umriss-Verdeckung), Dächer
+    (Ansichts-Schraffur der Eindeckung), Räume mit Raumstempel-Daten (`roomStampToDoc`/`roomStampExtraLines`/`formatStampArea`/
+    `docFromText` portiert; `js_fmt::js_number` = JS-`String(Zahl)`; Text-Layout bleibt TS), Wände mit Verschneidung, Poché-Stil,
+    Fugen-Linienstil (Zickzack/Motiv), Referenzlinie und Öffnungs-Symbolen, Treppen, Stützen, Extrusions-Umrisse und das Ausmass
+    dieser Domänen; mit `global` auch Kontext-Konturen (Höhenlinien, Mesh-Fussabdruck, Gelände-Rahmen, Pick-Bänder — die Meshes
+    gehen nicht mehr über die WASM-Grenze) und Schnittführungs-Symbole. `generatePlan` ruft die Abfrage einmal je Geschoss und setzt die Primitive an ihre Stelle der Zeichenreihenfolge;
+    Sichtbarkeit/Darstellungsmodus gehen als Code-Mengen mit (`show`/`grey`). Gelöscht: `generatePlan/{ceilings,roofs,rooms,structures,
+    walls,openings,stairs,context,sections}.ts`, `model/joins.ts` (+ Test, fehlende Fälle in `joins.rs` nachgezogen), Bindungen `compute_joins_flat`,
+    `join_priority_resolution`, `plan_wall_poche_flat`, `plan_opening_flat`, `plan_ceiling_outline_flat`, `plan_stair_flat`, `context_footprint_flat`, `context_bbox_flat`,
+    `section_line_flat`, TS-Helfer
+    `stairsOfFloor`/`stairLabel`/`columnsOfFloor`/`roomsOfFloor`. Gleichheit: Primitive-JSON (Schlüssel sortiert) bitgleich zur alten
+    TS-Fassung über Beispielprojekt + 80 Zufallsprojekte (mit Kontext-Meshes/Höhenlinien, variierten Schnittlinien, Override-Regeln,
+    Fenster-/Türtypen, Fugen-Linienstilen) × 2 Geschosse × 3 Detailgrade × 2 Sichtbarkeits-/Graustufen-/Mono-/
+    Referenzlinien-Varianten (972 Pläne inkl. Fehlermeldungen kaputter Decken/Schraffuren), CLI-SVG Beispiel-EG/OG und grosses Projekt
+    byte-gleich (temporärer Paritätstest, danach entfernt). Nicht in der Tauri-App angesehen.
+    Messung (`generatePlan`, Node, Linux-Container unter Last, Min/Median über Wiederholungen, alter Stand mit gleich gebautem Kern):
+    Beispiel-EG 0,3–0,35 → 0,65–0,7 ms (feste Kosten der Abfrage und der JSON-Übergabe); grosses Projekt (Beispielhaus 20×20: 3600
+    Wände, 400 Decken/Räume/Treppen, 1600 Stützen) EG 320–340 → 355–370 ms, also ~10 % langsamer. Die Rechnung selbst ist schneller,
+    aber die Antwort ist ~14 MB JSON (Wände 9,3 MB, Treppen 3,7 MB): Abfrage inkl. Serialisierung ~160–210 ms, `JSON.parse` ~145–225 ms.
+    Die JSON-Form ist damit der Engpass → Plan-Puffer v2.
+    Offen: `drawing2d.ts` (Verteiler), Schatten/Baurecht (dünner Stil-Glue um `analysis/`, Datum/Sonnenstand in TS), Abzugskörper
+    (`voids.ts`), Mono, Strichstärken-Massstab und `generateVisibleLevelsPlan` bleiben TS; die Override-Engine in TS bedient nur noch 2D-Zeichnungen. Plan-Puffer v2 (Primitive binär mit Pick-IDs und vollem
+    Umfang statt JSON, gemeinsame Tabellen für Schraffuren/Farben, damit nicht jedes Polygon seine `HatchRender` wiederholt) ist nicht
+    begonnen; erst sinnvoll, wenn die Verbraucher (SVG/PDF/DXF, Auswahl, Overlay) den Puffer lesen statt `Primitive[]`.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
 - ◐ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
@@ -147,6 +172,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Abfragen `objFile`/`stlFile` sind gelöscht. Die Exporte holen ihre 3D-Teile über `export/model3dParts.ts` aus dem
     Dokument (`queries.rs`). Offen: `fileio`-Schreiber direkt aus dem Dokument füttern statt über den TS-Sammler.
     Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
+    Grundriss (28.10.): Decken, Dächer, Räume, Wände+Öffnungen, Treppen, Stützen, Extrusionen, Kontext und Schnittlinien
+    kommen über `planDomains` aus dem Dokument ([K3d]); übrig in `generatePlan`: 2D-Zeichnungen, Schatten/Baurecht, Abzugskörper.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
   - ○ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung

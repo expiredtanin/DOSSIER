@@ -399,8 +399,8 @@ export function useSelectAllAndDeleteShortcut(opts: {
           .filter((r) => r.floorId === activeLevelId)
           .map((r) => r.id);
         // Schnittführungs-Symbole sind projektweit (kein floorId-Bezug — sie
-        // werden auf JEDEM Grundriss gezeichnet, s. generatePlan/sections.ts::
-        // addSectionLines), anders als die übrigen, geschossgefilterten Kanäle.
+        // werden auf JEDEM Grundriss gezeichnet, s. plan/context.rs im Kern,
+        // plan_section_lines), anders als die übrigen, geschossgefilterten Kanäle.
         const sectionLineIds = project.drawingLevels
           .filter((l) => (l.kind === "section" || l.kind === "elevation") && l.linePoints)
           .map((l) => l.id);

@@ -18,7 +18,7 @@ import { solidProps } from "../engine/truckSolid";
 import type { SolidProps, SolidSpec } from "../engine/truckSolid";
 import { useEffect, useState } from "react";
 // Anzeige-Fallbacks für die Öffnungs-Linien-Übersteuerung (LineStyleRow) —
-// dieselben Werte wie POCHE_STROKE/SYMBOL_HAIRLINE_MM in plan/generatePlan.ts
+// dieselben Werte wie POCHE_STROKE/SYMBOL_HAIRLINE_MM im Grundriss (Kern: plan/style.rs)
 // (reine UI-Default-Anzeige, kein Re-Export nötig).
 const OPENING_LINE_DEFAULT_COLOR = "#1a1a1a";
 const OPENING_LINE_DEFAULT_WEIGHT = 0.02;

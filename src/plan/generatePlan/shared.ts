@@ -1,6 +1,7 @@
 // Gemeinsame Grundlage des Grundriss-Generators: das `Primitive`-Vokabular
 // (das EINZIGE Austauschformat zwischen `generatePlan()`/`generateSectionPlan()`
-// und allen Bauteil-Domänen unter `generatePlan/`), die By-Layer/By-Object-
+// und den Domänen — unter `generatePlan/` in TS, die meisten im Rust-Kern mit
+// derselben JSON-Form, `src-tauri/core/src/plan/prim.rs`), die By-Layer/By-Object-
 // Attribut-Auflösung (`resolve*`) sowie die Papier-mm-/Tinten-Konstanten, die
 // über mehrere Domänen hinweg identisch gelten müssen (SIA-Poché, Haarlinien).
 //
@@ -53,33 +54,8 @@ export const MONO_INK = "#111111";
  *  gleiche Stärke wie die Schraffur-Tinte. Pro Fuge im Wandstil überschreibbar
  *  (z. B. 0.13, wenn zwei massive Materialien aufeinandertreffen). */
 export const LAYER_LINE_MM = 0.02;
-/** Haarlinie für Tür-/Fenstersymbole (Flügel, Bogen, Rahmen, Glas) in mm. */
-export const SYMBOL_HAIRLINE_MM = 0.02;
-/** Strichmuster (mm Papier) für ÜBERKOPF-Ansichtslinien: Bauteile über der
- *  Grundriss-Schnittebene (Decken-/Slab-Überstände, Unterzüge) werden nach
- *  BIM-Konvention gestrichelt gezeichnet (Aufsicht auf ein Bauteil über einem). */
-export const OVERHEAD_DASH: number[] = [0.4, 0.25];
-/** Strichstärken der Dach-Grundrisslinien (mm Papier): Traufe = mittlere
- *  Haarlinie, First etwas kräftiger als die Traufe, Grat dazwischen, Knick dünn
- *  + gestrichelt (vgl. addRoof). */
-export const ROOF_EAVES_MM = 0.13;
-export const ROOF_RIDGE_MM = 0.25;
-export const ROOF_HIP_MM = 0.18;
-export const ROOF_BREAK_MM = 0.09;
-/** Strichmuster (mm Papier) der Dach-Knicklinie (Mansarde). */
-export const ROOF_BREAK_DASH: number[] = [0.12, 0.08];
-/** Stärke der Wand-Umrisslinie je Detailgrad, als Faktor auf die Ebenen-lw. */
-export const OUTLINE_DETAIL_FACTOR: Record<DetailLevel, number> = {
-  grob: 1.6, // dickere Sammellinie
-  mittel: 1.0, // wie die Kategorie-Strichstärke
-  fein: 0.6, // feiner
-};
-/** Stärke der Schichtfugen je Detailgrad (mittel/fein; grob hat keine Fugen). */
-export const LAYER_DETAIL_FACTOR: Record<DetailLevel, number> = {
-  grob: 1.0,
-  mittel: 1.0,
-  fein: 0.7,
-};
+// Strichstärken und -muster der Bauteil-Domänen (Symbole, Überkopf, Dach, Detailgrad-Faktoren) stehen
+// seit [K3d] im Kern (`src-tauri/core/src/plan/style.rs`).
 /** Default-Umrandungs-Strichstärke (mm), falls die Kategorie keine lw trägt
    (Grundeinstellung für „normale Elemente"). */
 export const WALL_FALLBACK_MM = 0.18;
@@ -611,11 +587,6 @@ export function resolveStrokeWeight(
 // einheitlich Tinte auf hellem Papier, unabhängig von Material-/Bauteilfarbe.
 export const HATCH_PAPER = "#f0f0f0";
 export const HATCH_INK = "#0f0f0f";
-/** Neutrale Poché-Füllfarbe für ein Muster: "solid" → Tinte, sonst Papier. */
-export function pocheFill(pattern: HatchPattern): string {
-  return pattern === "solid" ? HATCH_INK : HATCH_PAPER;
-}
-
 /** Schraffur-Platzhalter „ohne" (für reine Umriss-/Sammelflächen). */
 export const NO_HATCH: HatchRender = {
   pattern: "none",

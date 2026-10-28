@@ -7,13 +7,14 @@
 //
 // Diese Datei ist nur noch der ORCHESTRATOR: `generatePlan()`/
 // `generateSectionPlan()` sowie die `resolve*SectionStyle`-Helfer (für den
-// Schnitt-Pfad, `toSection.ts`). Das gemeinsame `Primitive`-Vokabular, die
-// By-Layer/By-Object-Attribut-Auflösung (`resolveHatch`/`resolveForeground`/…)
-// und die Papier-mm-/Tinten-Konstanten leben in `generatePlan/shared.ts`; jede
-// Bauteil-Domäne (Wände, Decken, Öffnungen, Treppen, Dächer, Kontext,
-// Schnittführung, Räume, sonstige Tragwerks-/Fremdkörper, freie 2D-Geometrie)
-// hat ihre eigene Datei unter `generatePlan/` — siehe dort für die konkrete
-// Zeichenlogik je Bauteil.
+// Schnitt-Pfad, `toSection.ts`). Die Bauteil-Domänen (Decken, Dächer, Räume,
+// Wände mit Öffnungen, Treppen, Stützen, Extrusionen, Kontext, Schnittführung)
+// rechnet der Rust-Kern auf dem Projekt-Dokument (`src-tauri/core/src/plan/`,
+// Abfrage `planDomains`, [K3d]) und liefert fertige `Primitive`. In TS bleiben
+// die freie 2D-Geometrie (`generatePlan/drawing2d.ts`), Schattenstudie und
+// Baurecht, die Abzugskörper (`voids.ts`), Mono und der Strichstärken-Massstab.
+// Das `Primitive`-Vokabular und die Attribut-Auflösung für die übrigen TS-Pfade
+// leben in `generatePlan/shared.ts`.
 
 import type {
   Ceiling,
@@ -24,54 +25,34 @@ import type {
   LayerCategory,
   OverrideActions,
   Project,
-  Roof,
-  Room,
-  Stair,
   Vec2,
   Wall,
 } from "../model/types";
 import {
-  columnLabel,
-  columnsOfFloor,
   flattenCategories,
   getCeilingType,
   getComponent,
   getLayerCategory,
   getWallType,
-  openingLabel,
-  openingsOfWall,
-  roomsOfFloor,
-  stairLabel,
-  stairsOfFloor,
-  wallTypeThickness,
 } from "../model/types";
-import { roofGeometry } from "../geometry/roof";
+import { documentFor } from "../core/document";
 import { effectiveOverrides, hasOverrides } from "../overrides/engine";
-import { stairVerticalExtent, wallVerticalExtent } from "../model/wall";
-import { stairGeometry } from "../geometry/stair";
-import { wallCorners } from "../model/geometry";
-import { computeJoins } from "../model/joins";
 import type { SectionOutput } from "./toSection";
 import {
   HATCH_INK,
   HATCH_PAPER,
-  LAYER_LINE_MM,
   MONO_INK,
   SHOW_ALL,
-  WALL_FALLBACK_MM,
   resolveBackground,
   resolveForeground,
   resolveHatch,
   resolveHatchId,
-  resolveStrokeWeight,
   type CategoryDisplayResolver,
   type DetailLevel,
   type HatchRender,
   type Primitive,
 } from "./generatePlan/shared";
-import { addCeilingPoche } from "./generatePlan/ceilings";
 import { subtractVoidsInPlan } from "./voids";
-import { addContextContours } from "./generatePlan/context";
 import { addSunShadow } from "./generatePlan/sunShadow";
 import { addSiteRules, addSiteViolations } from "./generatePlan/siteRules";
 import { lineWeightFactor, scalePrimitiveWeights } from "./lineWeightScale";
@@ -84,13 +65,6 @@ import {
 } from "./generatePlan/drawing2d";
 import { drawingBox } from "../geometry/drawingBounds";
 import { layersStyleSig } from "./generatePlan/layerSig";
-import { addOpeningSymbol } from "./generatePlan/openings";
-import { addRoof } from "./generatePlan/roofs";
-import { addRoomArea } from "./generatePlan/rooms";
-import { addSectionLines } from "./generatePlan/sections";
-import { addStairSymbol } from "./generatePlan/stairs";
-import { addColumnPoche, addExtrudedSolidOutline } from "./generatePlan/structures";
-import { addReferenceLine, addWallPoche, buildWallFootprints, wallGaps } from "./generatePlan/walls";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (Export-Pipeline,
 // PlanView, toSection.ts, toWalls3d.ts, toRenderScene.ts, …) importieren
@@ -382,33 +356,6 @@ export function generatePlan(
       layerCode: categoryCode,
       objectName,
     });
-  const wallTypeNameById = new Map(project.wallTypes.map((t) => [t.id, t.name]));
-  const ceilingTypeNameById = new Map(
-    (project.ceilingTypes ?? []).map((t) => [t.id, t.name]),
-  );
-
-  // Sichtbarkeit wie bisher; der Darstellungsmodus verfeinert sie zusätzlich:
-  // render=false blendet die Wand aus, greyed=true dimmt sie.
-  const walls = project.walls
-    .filter(
-      (w) =>
-        w.floorId === floorId &&
-        visibleCodes.has(w.categoryCode) &&
-        categoryDisplay(w.categoryCode).render,
-    )
-    .map((w) => {
-      // Regel-Override gewinnt über den Per-Instanz-Wert (oberste Schicht):
-      // Farbe → Umriss-/Fugenfarbe (Wall.color), Strichstärke → strokeWeight
-      // (der topmost-Wert der bestehenden resolveStrokeWeight-Kette).
-      const ov = overrideFor(w.categoryCode, wallTypeNameById.get(w.wallTypeId));
-      if (!hasOverrides(ov)) return w;
-      return {
-        ...w,
-        color: ov.color ?? w.color,
-        strokeWeight: ov.lineweight ?? w.strokeWeight,
-      };
-    });
-
   // Freie 2D-Zeichengeometrie dieses Geschosses (wie Wände nach sichtbaren
   // Kategorien + Darstellungsmodus gefiltert). Wird über der Wand-Poché
   // gezeichnet (am Ende angehängt).
@@ -434,169 +381,24 @@ export function generatePlan(
       };
     });
 
-  // Decken dieses Geschosses (wie Wände nach sichtbaren Kategorien +
-  // Darstellungsmodus gefiltert). Eine Decke liegt (als Slab) über der
-  // Schnittebene → im Grundriss als gefüllter/schraffierter Umriss dargestellt,
-  // UNTER der Wand-Poché (damit die Wände darüber lesbar bleiben).
-  const ceilings = (project.ceilings ?? [])
-    .filter(
-      (c) =>
-        c.floorId === floorId &&
-        visibleCodes.has(c.categoryCode) &&
-        categoryDisplay(c.categoryCode).render,
-    )
-    .map((c) => {
-      // Decken: nur der Farb-Override wirkt (der Umriss ist eine feste
-      // Überkopf-Haarlinie, siehe addCeilingPoche — keine Strichstärke).
-      const typeName =
-        (c.ceilingTypeId ? ceilingTypeNameById.get(c.ceilingTypeId) : undefined) ??
-        wallTypeNameById.get(c.wallTypeId);
-      const ov = overrideFor(c.categoryCode, typeName);
-      return ov.color !== undefined ? { ...c, color: ov.color } : c;
-    });
-  // Wand-Footprints für das Verdecken der (darunterliegenden) Decken-Umrisse:
-  // die Decke liegt als Slab über der Schnittebene, ihre Umrisslinie soll dort,
-  // wo eine Wand darüber steht, NICHT durch die Wand-Poché schlagen. Nur nötig,
-  // wenn es überhaupt Decken gibt.
-  const wallFootprints = ceilings.length ? buildWallFootprints(project, walls) : [];
-  for (const ceiling of ceilings) {
-    const greyed = categoryDisplay(ceiling.categoryCode).greyed;
-    const category = catByCode.get(ceiling.categoryCode);
-    // Strichstärke wie bei der Wand (Attribut-Override > Kategorie > Fallback);
-    // der Umriss bleibt trotzdem eine gestrichelte Überkopf-Ansichtslinie
-    // (Dash-Muster unverändert, s. addCeilingPoche) — nur die Dicke ist editierbar.
-    const ceilingLwMm = resolveStrokeWeight(
-      ceiling.strokeWeight,
-      ceiling.strokeWeightSource,
-      category,
-      lwByCode.get(ceiling.categoryCode) ?? LAYER_LINE_MM,
-    );
-    addCeilingPoche(primitives, project, ceiling, greyed, detail, category, wallFootprints, ceilingLwMm);
-  }
+  // Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen und Extrusions-Umrisse rechnet der
+  // Kern auf dem Dokument ([K3d], `plan/{domains,walls,stairs}.rs`): Filter, Override-Regeln,
+  // Verschneidung, Stil und Raumstempel-Daten. Decken, Dächer und Räume liegen unter der Wand-Poché; Stützen folgen
+  // nach den Treppen, Extrusionen nach den 2D-Zeichnungen.
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal);
+  for (const pr of dom.ceilings) primitives.push(pr);
+  for (const pr of dom.roofs) primitives.push(pr);
+  for (const pr of dom.rooms) primitives.push(pr);
 
-  // Dächer dieses Geschosses (Dachaufsicht): reine Grundriss-Linien (Traufe/
-  // First/Grat/Knick), kein Poché. Über der Wand-Poché gezeichnet.
-  const roofs = (project.roofs ?? []).filter(
-    (r) =>
-      r.floorId === floorId &&
-      visibleCodes.has(r.categoryCode) &&
-      categoryDisplay(r.categoryCode).render,
-  );
-  for (const roof of roofs) {
-    const greyed = categoryDisplay(roof.categoryCode).greyed;
-    const category = catByCode.get(roof.categoryCode);
-    addRoof(primitives, project, roof, greyed, category);
-  }
+  // Wände (Poché, Referenzlinie) mit ihren Öffnungs-Symbolen, je Wand nacheinander.
+  for (const pr of dom.walls) primitives.push(pr);
 
-  // Räume (SIA-416-Flächen) dieses Geschosses: transluzente Farbfüllung + Stempel
-  // (Name + Fläche + SIA-Tag). UNTER der Wand-Poché gezeichnet, damit die Wände
-  // lesbar bleiben. Der Stempel (Text) entfällt beim Detailgrad „grob".
-  const rooms = roomsOfFloor(project, floorId)
-    .filter(
-      (r) =>
-        visibleCodes.has(r.categoryCode) && categoryDisplay(r.categoryCode).render,
-    )
-    .map((r) => {
-      // Räume: `object_name` matcht den Raum-Namen; der Farb-Override färbt
-      // Fläche + Stempel (Room.color) um.
-      const ov = overrideFor(r.categoryCode, r.name);
-      return ov.color !== undefined ? { ...r, color: ov.color } : r;
-    });
-  for (const room of rooms) {
-    const greyed = categoryDisplay(room.categoryCode).greyed;
-    addRoomArea(primitives, room, greyed, detail);
-  }
+  // Treppen: Tritte + Lauflinie + Auf-/Abpfeil mit dem Grundriss-Schnitt (unter der Schnitthöhe
+  // durchgezogen, darüber gestrichelt + SIA-Bruchlinie), über der Wand-Poché.
+  for (const pr of dom.stairs) primitives.push(pr);
 
-  // Gehrungs-Schnittlinien einmal pro Plan berechnen (auf der gefilterten Menge).
-  const joins = computeJoins(project, walls);
-
-  for (const wall of walls) {
-    const wallGreyed = categoryDisplay(wall.categoryCode).greyed;
-    const wallCategory = catByCode.get(wall.categoryCode);
-    const wallLwMm = resolveStrokeWeight(
-      wall.strokeWeight,
-      wall.strokeWeightSource,
-      wallCategory,
-      lwByCode.get(wall.categoryCode) ?? WALL_FALLBACK_MM,
-    );
-    // Öffnungen (Fenster/Türen) am Wandhost sparen die Wand-Poché aus (Lücken-Intervall-Liste).
-    const openings = openingsOfWall(project, wall.id);
-    const gaps = wallGaps(wall, openings);
-    const cuts = joins.get(wall.id) ?? { startCut: null, endCut: null };
-    // Schnitt vs. Ansicht nach Schnitthöhe (BIM-Standard): erreicht die Wand die
-    // Grundriss-Schnittebene nicht (z. B. eine Brüstung/ein Podestrand), wird sie
-    // nur als Ansichts-Umriss gezeichnet — keine Schnitt-Poché. Normale Wände
-    // (Schnittebene liegt in ihrer vertikalen Ausdehnung) sind unberührt. Über
-    // `wallVerticalExtent` aufgelöst (nicht nur `wall.height`), damit ein
-    // `bottom`/`top`-Override (VerticalAnchor) korrekt einfliesst — sonst würde
-    // z. B. eine hochgesetzte Wand (angehobenes UK, Höhe allein sieht „hoch genug"
-    // aus) fälschlich als Schnitt-Poché statt als Ansichts-Umriss gezeichnet.
-    const { zBottom: wallZBottom, zTop: wallZTop } = wallVerticalExtent(project, wall);
-    const cutPlaneZ = (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0);
-    const wallViewOnly = wallZTop < cutPlaneZ || wallZBottom > cutPlaneZ;
-    addWallPoche(
-      primitives, project, wall, gaps, cuts, wallGreyed, detail, wallLwMm, wallCategory, wallViewOnly,
-    );
-    // Referenzlinie: dünne gestrichelte Wand-Achslinie (von der Oberleiste
-    // umschaltbar). Wird über der Poché gezeichnet, damit sie sichtbar bleibt.
-    if (showReferenceLines) addReferenceLine(primitives, wall, wallGreyed);
-    // Öffnungs-Symbole (Fenster/Tür) je Detailgrad + Auswahl-taggbar.
-    for (const o of openings) {
-      const d = categoryDisplay(o.categoryCode);
-      if (visibleCodes.has(o.categoryCode) && d.render) {
-        // Override-Regeln: `object_name` matcht das Öffnungs-Label
-        // („Tür 90×210" / „Fenster 120×140").
-        const ov = overrideFor(o.categoryCode, openingLabel(o));
-        const oLwMm =
-          ov.lineweight ?? lwByCode.get(o.categoryCode) ?? LAYER_LINE_MM;
-        const effO = ov.color !== undefined ? { ...o, color: ov.color } : o;
-        // Per-Element-Detailstufe (`Opening.detailLevel`) übersteuert die
-        // ansichtsweite `detail`, sonst gilt Letztere unverändert.
-        const effDetail = o.detailLevel ?? detail;
-        addOpeningSymbol(primitives, project, wall, effO, d.greyed, effDetail, oLwMm);
-      }
-    }
-  }
-
-  // Treppen dieses Geschosses: Tritte + Lauflinie + Auf-/Abpfeil, mit dem
-  // Grundriss-Schnitt (Tritte unter der Schnitthöhe durchgezogen, darüber
-  // gestrichelt/verdeckt + SIA-Bruchlinie). Über der Wand-Poché gezeichnet.
-  const cutHeight = floor?.cutHeight ?? 1.0;
-  const stairs = stairsOfFloor(project, floorId).filter(
-    (s) =>
-      visibleCodes.has(s.categoryCode) && categoryDisplay(s.categoryCode).render,
-  );
-  for (const stair of stairs) {
-    const greyed = categoryDisplay(stair.categoryCode).greyed;
-    // Override-Regeln: `object_name` matcht das Treppen-Label („Gerade 16 STG").
-    const ov = overrideFor(stair.categoryCode, stairLabel(stair));
-    const lwMm =
-      ov.lineweight ?? lwByCode.get(stair.categoryCode) ?? WALL_FALLBACK_MM;
-    const effStair = ov.color !== undefined ? { ...stair, color: ov.color } : stair;
-    addStairSymbol(primitives, project, effStair, greyed, lwMm, cutHeight);
-  }
-
-  // Stützen (Tragwerk) dieses Geschosses: Querschnitt-Poché (Rechteck/Kreis),
-  // um `rotation` gedreht, auf Kategorie „50". Über der Wand-Poché gezeichnet.
-  const columns = columnsOfFloor(project, floorId).filter(
-    (col) =>
-      visibleCodes.has(col.categoryCode) && categoryDisplay(col.categoryCode).render,
-  );
-  for (const column of columns) {
-    const greyed = categoryDisplay(column.categoryCode).greyed;
-    const category = catByCode.get(column.categoryCode);
-    const ov = overrideFor(column.categoryCode, columnLabel(column));
-    const lwMm =
-      ov.lineweight ??
-      resolveStrokeWeight(
-        column.strokeWeight,
-        column.strokeWeightSource,
-        category,
-        lwByCode.get(column.categoryCode) ?? WALL_FALLBACK_MM,
-      );
-    const effCol = ov.color !== undefined ? { ...column, color: ov.color } : column;
-    addColumnPoche(primitives, project, effCol, greyed, lwMm, category);
-  }
+  // Stützen (Tragwerk): Querschnitt-Poché, über der Wand-Poché.
+  for (const pr of dom.columns) primitives.push(pr);
 
   // 2D-Zeichengeometrie zuletzt (über der Poché).
   const compact = compactUnderlay && !mono && !forPrint;
@@ -636,26 +438,17 @@ export function generatePlan(
   });
   for (const grp of underGroups.values()) underlay.push(mkGroup(grp.ds, grp.greyed));
 
-  // Extrudierte Körper (truck-Integration): das Quell-Profil wurde beim
-  // Extrudieren aus `drawings2d` entfernt (s. `extrude.ts` appendExtrudedSolid)
-  // — im Grundriss erscheint stattdessen der Footprint-Umriss des Körpers
-  // selbst (Haarlinie, kein Poché/Schraffur; Farbe wie das 3D-Orange).
-  for (const solid of project.extrudedSolids ?? []) {
-    if (solid.levelId === floorId) addExtrudedSolidOutline(primitives, solid);
-  }
+  // Extrudierte Körper: Footprint-Umriss (Quell-Profil wurde beim Extrudieren entfernt).
+  for (const pr of dom.solids) primitives.push(pr);
 
   // Kontext-Konturen (Höhenlinien) als dezente Linien zeichnen — UNTER der
   // Wand-Poché wäre ideal, aber da sie eine eigene gedämpfte Farbe tragen, ist
   // die Reihenfolge unkritisch; wir hängen sie als Referenz an. Projektglobal
   // (nicht je Geschoss) → nur beim aktiven Aufruf einer Mehrfach-Überlagerung.
-  if (includeGlobal) {
-    addContextContours(primitives, project, visibleCodes, categoryDisplay);
-
-    // Schnittführungs-Symbole (klassische Schnittlinien) aller Schnitt-/
-    // Ansichtsebenen mit gesetzter Linie — ebenfalls projektglobal. Sichtbarkeit
-    // läuft über die Kategorie "90" (Referenzen), wie jedes andere Bauteil.
-    addSectionLines(primitives, project, visibleCodes, categoryDisplay);
-  }
+  for (const pr of dom.context) primitives.push(pr);
+  // Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie — ebenfalls projektglobal,
+  // Sichtbarkeit über die Kategorie "90" (Referenzen).
+  for (const pr of dom.sections) primitives.push(pr);
 
   // Schwarz-Weiss (mono): nachträglich alle Farben auf reine Tinte zwingen.
   // Element-/Kategorie-/Hatch-Farben werden ignoriert, Füllungen werden weiss,
@@ -697,7 +490,7 @@ export function generatePlan(
         }));
   return {
     primitives: lwf === 1 ? primitives : primitives.map((p) => scalePrimitiveWeights(p, lwf)),
-    bounds: computeBounds(project, walls, drawings, ceilings, stairs, rooms, roofs, primitives.slice(0, underlayCount)),
+    bounds: computeBounds(project, drawings, dom.bounds, primitives.slice(0, underlayCount)),
     backgroundImages,
     ...(scaledUnderlay.length ? { underlay: scaledUnderlay } : {}),
   };
@@ -1070,14 +863,87 @@ function categoryMap(layers: LayerCategory[]): Map<string, LayerCategory> {
   return map;
 }
 
+/** Primitive der Kern-Domänen (`planDomains` in `queries.rs`). */
+interface DomainPrims {
+  ceilings: Primitive[];
+  walls: Primitive[];
+  stairs: Primitive[];
+  context: Primitive[];
+  sections: Primitive[];
+  roofs: Primitive[];
+  rooms: Primitive[];
+  columns: Primitive[];
+  solids: Primitive[];
+  bounds?: [number, number, number, number];
+}
+
+const NO_DOMAINS: DomainPrims = { ceilings: [], walls: [], stairs: [], context: [], sections: [], roofs: [], rooms: [], columns: [], solids: [] };
+const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
+
+/**
+ * Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen, Extrusions-Umrisse eines Geschosses
+ * und (mit `global`) Kontext-Konturen und Schnittführungs-Symbole aus dem Kern. Sichtbarkeit und Darstellungsmodus (UI-Zustand) gehen als Code-Mengen mit: `show` =
+ * sichtbar und gezeichnet, `grey` = gedimmt.
+ */
+function planDomains(
+  project: Project,
+  floorId: string,
+  visibleCodes: Set<string>,
+  categoryDisplay: CategoryDisplayResolver,
+  detail: DetailLevel,
+  referenceLines: boolean,
+  global: boolean,
+): DomainPrims {
+  const codes = new Set<string>();
+  let any = false;
+  const take = (list: ReadonlyArray<{ floorId: string; categoryCode: string }> | undefined) => {
+    for (const e of list ?? []) {
+      if (e.floorId !== floorId) continue;
+      codes.add(e.categoryCode);
+      any = true;
+    }
+  };
+  take(project.ceilings);
+  take(project.roofs);
+  take(project.rooms);
+  take(project.columns);
+  take(project.walls);
+  take(project.stairs);
+  if (global) {
+    // Kontext-Objekte ohne Kategorie sind immer sichtbar; Schnittlinien hängen an "90".
+    for (const o of project.context ?? []) {
+      if (o.type === "image") continue;
+      any = true;
+      if (o.categoryCode !== undefined) codes.add(o.categoryCode);
+    }
+    if (project.drawingLevels.some((l) => (l.kind === "section" || l.kind === "elevation") && l.linePoints)) {
+      any = true;
+      codes.add("90");
+    }
+  }
+  if (!any && !(project.extrudedSolids ?? []).some((x) => x.levelId === floorId)) return NO_DOMAINS;
+  for (const o of project.openings ?? []) codes.add(o.categoryCode);
+  const show: string[] = [];
+  const grey: string[] = [];
+  for (const c of codes) {
+    if (!visibleCodes.has(c)) continue;
+    const d = categoryDisplay(c);
+    if (!d.render) continue;
+    show.push(c);
+    if (d.greyed) grey.push(c);
+  }
+  return documentFor(project).query<DomainPrims>(
+    "planDomains",
+    [DETAIL_CODE[detail] ?? 1],
+    JSON.stringify({ floor: floorId, show, grey, referenceLines, global }),
+  );
+}
+
 function computeBounds(
   project: Project,
-  walls: Wall[],
   drawings: Drawing2D[] = [],
-  ceilings: Ceiling[] = [],
-  stairs: Stair[] = [],
-  rooms: Room[] = [],
-  roofs: Roof[] = [],
+  /** Ausmass der Kern-Domänen (Wand-Ecken, Decken, Räume, Dach-Traufen, Treppen), s. `planDomains`. */
+  domainBox: [number, number, number, number] | undefined = undefined,
   /** Zusätzlich einzurahmende Primitive (Schatten, Parzelle), damit Druck/Einpassen sie ganz zeigen. */
   extra: Primitive[] = [],
 ) {
@@ -1086,24 +952,13 @@ function computeBounds(
     minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
     maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
   };
-  for (const w of walls) {
-    const t = wallTypeThickness(getWallType(project, w));
-    for (const c of wallCorners(w.start, w.end, t)) acc(c);
+  if (domainBox) {
+    acc({ x: domainBox[0], y: domainBox[1] });
+    acc({ x: domainBox[2], y: domainBox[3] });
   }
-  for (const c of ceilings) for (const p of c.outline) acc(p);
-  for (const r of rooms) for (const p of r.boundary) acc(p);
   for (const e of extra) {
     if (e.kind === "polygon") e.pts.forEach(acc);
     else if (e.kind === "line") { acc(e.a); acc(e.b); }
-  }
-  // Traufe (inkl. Überstand) statt reinem Umriss, damit ein weit auskragendes
-  // Dach das „Einpassen" korrekt mit einrahmt.
-  for (const roof of roofs) for (const p of roofGeometry(roof, 0).eaves) acc(p);
-  for (const s of stairs) {
-    const { zBottom, zTop } = stairVerticalExtent(project, s);
-    const geo = stairGeometry(s, zTop - zBottom);
-    for (const tr of geo.treads) for (const p of tr.pts) acc(p);
-    if (geo.landing) for (const p of geo.landing) acc(p);
   }
   for (const d of drawings) {
     const g = d.geom;

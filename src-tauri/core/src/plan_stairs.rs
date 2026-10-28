@@ -1,7 +1,7 @@
 //! Treppen-Symbol im Grundriss ([K3a]): Tritte, Lauflinie, Pfeil, Podest, SIA-Bruchlinie und
 //! Aussenlinie als flache Primitivliste. Port von `src/plan/generatePlan/stairs.ts`; die Geometrie
 //! kommt aus `kernel2d` (`stair_geometry`, `stair_cut`, `stair_outline`), Farbe, Pick-ID und
-//! Graustufen setzt der Aufrufer.
+//! Graustufen setzt der Aufrufer (`plan/stairs.rs`, [K3d]).
 //!
 //! Eingabe: Treppen-Parameter (16 Zahlen, s. `stair.rs`), Gesamt-Steighöhe, Schnitthöhe über der
 //! Treppen-UK, Strichstärke `lw_mm` (Papier-mm), `filled_arrow` (0/1).

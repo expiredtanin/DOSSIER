@@ -1,8 +1,8 @@
-//! Wand-Poché und Decken-Umriss im Grundriss ([K3a]): die Geometrie von `generatePlan/walls.ts`
+//! Wand-Poché und Decken-Umriss im Grundriss ([K3a]): die Geometrie der früheren `generatePlan/walls.ts`
 //! und `ceilings.ts` (Segmente zwischen Öffnungen, Gehrungsbänder, Schichtfugen, Durchgangswand-
 //! Aussparungen, Verdeckung von Decken-Umrissen durch Wand-Footprints). Stil (Bauteil, Schraffur,
-//! Farbe, Strichstärke, Linienstil der Fuge) löst TS aus dem Modell auf und ordnet ihn über den
-//! Schichtindex zu — das Modell bleibt bis [K4] in TS.
+//! Farbe, Strichstärke, Linienstil der Fuge) löst `plan/walls.rs` auf dem Dokument auf und ordnet
+//! ihn über den Schichtindex zu ([K3d]).
 //!
 //! Rechenreihenfolge und Zahlsemantik wie in TS (`Math.hypot` über `jsmath`, `Math.min/max` über
 //! `jsnum`), damit die Ausgabe bitgleich bleibt.
@@ -22,8 +22,8 @@
 //! ```
 //!
 //! ## Decken-Umriss
-//! Eingabe `[nRing, x, y …, nBruecken, kante…, nFootprints, (ax, ay, ux, uy, mx, my, len, half,
-//! refOff)×n]`; Ausgabe `[n, ax, ay, bx, by …]` (freie Teilstücke der Umrisskanten).
+//! [`ceiling_outline_lines`]: freie Teilstücke der Umrisskanten gegen die Wand-Footprints; Aufrufer
+//! ist die Decken-Domäne auf dem Dokument (`plan/domains.rs`, [K3d]).
 
 use crate::flat_read::Reader;
 use crate::jsmath::hypot2;
@@ -164,44 +164,50 @@ fn segment_inside(pa: V, pb: V, fp: &Footprint) -> Option<(f64, f64)> {
 
 // ── Decken-Umriss ───────────────────────────────────────────────────────────
 
-pub fn ceiling_outline(buf: &[f64]) -> Vec<f64> {
-    (|| {
-        let mut r = Reader::new(buf);
-        let ring: Vec<V> = r.ring()?.into_iter().map(|p| v(p[0], p[1])).collect();
-        let n_bridge = r.count()?;
-        let mut bridge = Vec::with_capacity(n_bridge);
-        for _ in 0..n_bridge {
-            bridge.push(r.num()?);
+/// Wand-Footprint (OBB) für das Verdecken von Decken-Umrissen (`buildWallFootprints` in TS).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WallFootprint {
+    pub a: [f64; 2],
+    pub u: [f64; 2],
+    pub m: [f64; 2],
+    pub len: f64,
+    pub half: f64,
+    pub ref_off: f64,
+}
+
+/// Footprint einer Wand aus Achse, Dicke und Referenz-Querversatz.
+pub fn wall_footprint(start: [f64; 2], end: [f64; 2], thickness: f64, ref_off: f64) -> WallFootprint {
+    let (s, e) = (v(start[0], start[1]), v(end[0], end[1]));
+    let u = normalize(sub(e, s));
+    let m = left_normal(u);
+    WallFootprint { a: start, u: [u.x, u.y], m: [m.x, m.y], len: hypot2(e.x - s.x, e.y - s.y), half: thickness / 2.0, ref_off }
+}
+
+/// Freie Teilstücke der Umrisskanten eines Decken-Rings (ohne Brückenkanten), die nicht unter einem
+/// Wand-Footprint liegen.
+pub fn ceiling_outline_lines(ring: &[[f64; 2]], bridge: &[usize], fps: &[WallFootprint]) -> Vec<[[f64; 2]; 2]> {
+    let fps: Vec<Footprint> = fps
+        .iter()
+        .map(|f| Footprint { a: v(f.a[0], f.a[1]), u: v(f.u[0], f.u[1]), m: v(f.m[0], f.m[1]), len: f.len, half: f.half, ref_off: f.ref_off })
+        .collect();
+    let ring: Vec<V> = ring.iter().map(|p| v(p[0], p[1])).collect();
+    let n = ring.len();
+    let mut out = Vec::new();
+    for i in 0..n {
+        if bridge.contains(&i) {
+            continue;
         }
-        let n_fp = r.count()?;
-        let mut fps = Vec::with_capacity(n_fp);
-        for _ in 0..n_fp {
-            let a = [r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?];
-            fps.push(Footprint { a: v(a[0], a[1]), u: v(a[2], a[3]), m: v(a[4], a[5]), len: a[6], half: a[7], ref_off: a[8] });
+        let a = ring[i];
+        let b = ring[(i + 1) % n];
+        let holes: Vec<(f64, f64)> = fps.iter().filter_map(|fp| segment_inside(a, b, fp)).collect();
+        let d = sub(b, a);
+        for (t0, t1) in subtract_intervals(0.0, 1.0, &holes) {
+            let p = add(a, scale(d, t0));
+            let q = add(a, scale(d, t1));
+            out.push([[p.x, p.y], [q.x, q.y]]);
         }
-        let n = ring.len();
-        let mut lines: Vec<f64> = Vec::new();
-        let mut count = 0usize;
-        for i in 0..n {
-            if bridge.contains(&(i as f64)) {
-                continue;
-            }
-            let a = ring[i];
-            let b = ring[(i + 1) % n];
-            let holes: Vec<(f64, f64)> = fps.iter().filter_map(|fp| segment_inside(a, b, fp)).collect();
-            let d = sub(b, a);
-            for (t0, t1) in subtract_intervals(0.0, 1.0, &holes) {
-                let p = add(a, scale(d, t0));
-                let q = add(a, scale(d, t1));
-                lines.extend([p.x, p.y, q.x, q.y]);
-                count += 1;
-            }
-        }
-        let mut out = vec![count as f64];
-        out.extend(lines);
-        Some(out)
-    })()
-    .unwrap_or_default()
+    }
+    out
 }
 
 // ── Wand-Poché ──────────────────────────────────────────────────────────────
@@ -513,15 +519,17 @@ mod tests {
         let mut b = wall(4.0, false, &[]);
         b[0] = f64::NAN;
         assert!(wall_poche(&b).is_empty());
-        assert!(ceiling_outline(&[3.0, 0.0]).is_empty());
     }
 
     #[test]
     fn decken_umriss_wird_von_wand_verdeckt() {
         // Quadrat 4×4, Wand entlang der unteren Kante (Mitte y=0, Dicke 0.4)
-        let mut b = vec![4.0, 0.0, 0.0, 4.0, 0.0, 4.0, 4.0, 0.0, 4.0, 0.0, 1.0];
-        b.extend([0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 4.0, 0.2, 0.0]);
-        let o = ceiling_outline(&b);
-        assert_eq!(o[0], 3.0); // untere Kante entfällt, drei freie Kanten
+        let ring = [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
+        let fp = wall_footprint([0.0, 0.0], [4.0, 0.0], 0.4, 0.0);
+        assert_eq!(fp, WallFootprint { a: [0.0, 0.0], u: [1.0, 0.0], m: [0.0, 1.0], len: 4.0, half: 0.2, ref_off: 0.0 });
+        let o = ceiling_outline_lines(&ring, &[], &[fp]);
+        assert_eq!(o.len(), 3); // untere Kante entfällt, drei freie Kanten
+        // Brückenkanten werden nie gestrichen.
+        assert_eq!(ceiling_outline_lines(&ring, &[1], &[fp]).len(), 2);
     }
 }
