@@ -116,13 +116,10 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
   GPU/Software-Treiber). · M
 - ○ **[R2] Grafik-Fallback** = [46].
 - ✗ **[R3] Eigener CPU-Rasterizer.** Kein Mehrwert gegenüber [R1] + Three.js-Fallback.
-- ◐ **[egui] Probe: native Oberfläche in egui.** (28.10.) Crate `src-tauri/dossier-egui` (eframe/egui 0.35 +
-  egui_dock 0.20 — die letzte Reihe auf wgpu 29 wie render2d/render3d, ein gemeinsames Device): Werkzeugleiste,
-  Geschosse, Grundriss (render2d) | 3D (render3d) als Offscreen-Texturen, Eigenschaften (nur Anzeige),
-  Flächenbilanz, Werkzeug „Wand zeichnen" (nur Skizze). Daten über `dossier-cli … bundle` (Ansichtspaket) bzw.
-  `plan --format json`, weil das Modell noch TS ist ([K4]). Nicht in `npm run check`/CI. Nur im Linux-Container
-  (Xvfb + llvmpipe) gebaut und angesehen; **auf dem Mac nicht getestet.** Offen: Entscheid egui vs. TSX
-  (Einschätzung im README des Crates), Bearbeiten erst mit [K4]. · M
+- ✗ **[egui] Probe: native Oberfläche in egui.** (28.10.) Crate `dossier-egui` (eframe/egui 0.35, egui_dock,
+  render2d/render3d als Offscreen-Texturen) gebaut und angesehen — verworfen: wirkt wie ein Werkzeug, nicht wie
+  eine Mac-App; Gleichstand hätte Monate gekostet. **Die Oberfläche bleibt React/TSX.** Code gelöscht, im
+  Verlauf unter `33bad5d`. Geblieben: CLI `plan --format json`, `:beispiel` statt Datei.
 
 ---
 

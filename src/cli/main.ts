@@ -14,9 +14,6 @@
 //                                                  IFC als Kontext-Meshes ([B3]), mit --elements als echte
 //                                                  Bauteile ([B4]); Bericht als JSON auf stdout
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
-//   dossier-cli <projekt.obp> bundle [--scale 100] [--out projekt.bundle.json]
-//                                                  Ansichtspaket für die egui-Oberfläche (src-tauri/dossier-egui):
-//                                                  je Geschoss render2d-Szene, 3D-Modell, Bauteile; dazu Kennzahlen
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
@@ -64,7 +61,6 @@ import {
   setWasmBytesProvider,
   initCore,
   validateProject,
-  polygonArea,
   sampleProject,
 } from "../core";
 import type { Project } from "../core";
@@ -138,143 +134,12 @@ function out(args: Args, text: string | Uint8Array, defaultName: string): void {
   }
 }
 
-// ── Ansichtspaket für die egui-Oberfläche (`bundle`) ─────────────────────────
-// Das Modell ist noch TS ([K4]); die egui-App (src-tauri/dossier-egui) liest deshalb ein
-// JSON, das alles Abgeleitete enthält: je Geschoss die render2d-Szene, das 3D-Modell nur
-// dieses Geschosses (damit die App Geschosse im 3D ein-/ausblenden kann) und eine
-// vereinfachte Bauteil-Liste (Form zum Anklicken + Eigenschaften als Schlüssel/Wert).
-
-type BPt = [number, number];
-type BShape =
-  | { type: "segment"; a: BPt; b: BPt; width: number }
-  | { type: "polygon"; pts: BPt[] }
-  | { type: "circle"; c: BPt; r: number };
-type BElement = { id: string; kind: string; label: string; shape: BShape; props: Array<[string, string | number]> };
-
-const r3 = (n: number): number => Math.round(n * 1000) / 1000;
-const pt = (v: { x: number; y: number }): BPt => [v.x, v.y];
-
-/** Projekt auf ein Geschoss eingeschränkt: Arrays mit `floorId` gefiltert, Öffnungen über ihre Wand. */
-function projectForFloor(project: Project, floorId: string | null): Project {
-  const p: Record<string, unknown> = { ...project };
-  for (const [k, v] of Object.entries(project)) {
-    if (!Array.isArray(v) || k === "drawingLevels") continue;
-    if (v.some((e) => e && typeof e === "object" && "floorId" in e)) {
-      p[k] = v.filter((e) => e && typeof e === "object" && (e as { floorId?: string }).floorId === floorId);
-    }
-  }
-  const walls = new Set((p.walls as Project["walls"]).map((w) => w.id));
-  p.openings = (project.openings ?? []).filter((o) => walls.has(o.hostWallId));
-  if (floorId !== null) p.context = [];
-  return p as unknown as Project;
-}
-
-function floorElements(project: Project, floorId: string): BElement[] {
-  const els: BElement[] = [];
-  const wallTypes = new Map(project.wallTypes.map((t) => [t.id, t]));
-  const thickness = (typeId: string) => (wallTypes.get(typeId)?.layers ?? []).reduce((s, l) => s + l.thickness, 0);
-  const wallsById = new Map(project.walls.map((w) => [w.id, w]));
-  for (const w of project.walls) {
-    if (w.floorId !== floorId) continue;
-    const t = thickness(w.wallTypeId);
-    const len = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
-    els.push({
-      id: w.id,
-      kind: "wall",
-      label: wallTypes.get(w.wallTypeId)?.name ?? w.id,
-      shape: { type: "segment", a: pt(w.start), b: pt(w.end), width: t || 0.1 },
-      props: [["type", wallTypes.get(w.wallTypeId)?.name ?? "—"], ["thickness", r3(t)], ["length", r3(len)], ["height", r3(w.height)], ["category", w.categoryCode]],
-    });
-  }
-  for (const o of project.openings ?? []) {
-    const w = wallsById.get(o.hostWallId);
-    if (!w || w.floorId !== floorId) continue;
-    const len = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) || 1;
-    const ux = (w.end.x - w.start.x) / len;
-    const uy = (w.end.y - w.start.y) / len;
-    // `position` = erster Pfosten entlang der Wandachse (Meter ab Wandanfang).
-    const at = (s: number): BPt => [w.start.x + ux * s, w.start.y + uy * s];
-    els.push({
-      id: o.id,
-      kind: o.kind,
-      label: o.kind,
-      shape: { type: "segment", a: at(o.position), b: at(o.position + o.width), width: (thickness(w.wallTypeId) || 0.1) + 0.04 },
-      props: [["width", r3(o.width)], ["height", r3(o.height)], ["sill", r3(o.sillHeight)], ["wall", w.id]],
-    });
-  }
-  for (const r of project.rooms ?? []) {
-    if (r.floorId !== floorId) continue;
-    els.push({
-      id: r.id,
-      kind: "room",
-      label: r.name,
-      shape: { type: "polygon", pts: r.boundary.map(pt) },
-      props: [["name", r.name], ["sia", r.siaCategory], ["area", r3(polygonArea(r.boundary))], ["category", r.categoryCode]],
-    });
-  }
-  for (const c of project.columns ?? []) {
-    if (c.floorId !== floorId) continue;
-    const r = c.profile.kind === "round" ? c.profile.radius : Math.hypot(c.profile.width, c.profile.depth) / 2;
-    const profile = c.profile.kind === "round" ? `Ø ${r3(c.profile.radius * 2)}` : `${r3(c.profile.width)} × ${r3(c.profile.depth)}`;
-    els.push({ id: c.id, kind: "column", label: c.id, shape: { type: "circle", c: pt(c.position), r }, props: [["profile", profile], ["height", r3(c.height)]] });
-  }
-  for (const s of project.stairs ?? []) {
-    if (s.floorId !== floorId) continue;
-    const dl = Math.hypot(s.dir.x, s.dir.y) || 1;
-    const end: BPt = [s.start.x + (s.dir.x / dl) * s.runLength, s.start.y + (s.dir.y / dl) * s.runLength];
-    els.push({
-      id: s.id,
-      kind: "stair",
-      label: s.id,
-      shape: { type: "segment", a: pt(s.start), b: end, width: s.width },
-      props: [["shape", s.shape], ["width", r3(s.width)], ["steps", s.stepCount], ["runLength", r3(s.runLength)]],
-    });
-  }
-  for (const c of project.ceilings ?? []) {
-    if (c.floorId !== floorId) continue;
-    els.push({ id: c.id, kind: "ceiling", label: c.id, shape: { type: "polygon", pts: c.outline.map(pt) }, props: [["area", r3(polygonArea(c.outline))], ["thickness", r3(c.thickness ?? 0)]] });
-  }
-  for (const r of project.roofs ?? []) {
-    if (r.floorId !== floorId) continue;
-    els.push({ id: r.id, kind: "roof", label: r.shape, shape: { type: "polygon", pts: r.outline.map(pt) }, props: [["shape", r.shape], ["pitch", r3(r.pitchDeg)], ["thickness", r3(r.thickness)]] });
-  }
-  return els;
-}
-
-function buildBundle(project: Project, allCodes: Set<string>, scale: number) {
-  const floors = project.drawingLevels.filter((l) => l.kind === "floor");
-  const levels = floors.map((lvl) => {
-    const plan = generatePlan(project, lvl.id, allCodes, undefined, "mittel", false, false, true, scale);
-    return {
-      id: lvl.id,
-      name: lvl.name,
-      elevation: lvl.baseElevation ?? 0,
-      height: lvl.floorHeight ?? 0,
-      visible: lvl.visible,
-      scene: planToRenderScene(plan, scale),
-      model3d: projectToModel3d(projectForFloor(project, lvl.id)),
-      elements: floorElements(project, lvl.id),
-    };
-  });
-  const context = (project.context ?? []).length ? projectToModel3d(projectForFloor(project, null)) : null;
-  return {
-    format: "dossier-bundle",
-    version: 1,
-    name: project.name,
-    scale,
-    levels,
-    context3d: context,
-    kennzahlen: computeKennzahlen(project),
-    raumprogramm: checkRoomProgram(project),
-  };
-}
-
 export async function run(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const [file, command, ...rest] = args.positional;
   if (!file || !command) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun|model3d|bundle> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun|model3d> [Optionen]\n",
     );
     return 2;
   }
@@ -343,8 +208,6 @@ export async function run(argv: string[]): Promise<number> {
       out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
       return 0;
     }
-    case "bundle":
-      out(args, JSON.stringify(buildBundle(project, allCodes, scale)), `${project.name || "projekt"}.bundle.json`);
       return 0;
     case "section":
     case "elevation": {
@@ -499,7 +362,8 @@ export async function run(argv: string[]): Promise<number> {
 // Direktaufruf (nicht beim Import in Tests).
 if (process.argv[1] && /dossier-cli\.mjs$/.test(process.argv[1])) {
   run(process.argv.slice(2)).then(
-    (code) => process.exit(code),
+    // Erst beenden, wenn stdout geleert ist: sonst schneidet `--out -` grosse Ausgaben in einer Pipe ab.
+    (code) => process.stdout.write("", () => process.exit(code)),
     (e) => {
       process.stderr.write(`dossier-cli: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
       process.exit(1);

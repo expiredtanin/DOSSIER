@@ -57,35 +57,10 @@ describe("dossier-cli", () => {
     expect(Array.isArray(scene.texts)).toBe(true);
   });
 
-  it("Ansichtspaket (bundle) für die egui-Oberfläche", async () => {
-    const out = join(dir, "demo.bundle.json");
-    expect(await call("bundle", "--out", out)).toBe(0);
-    const b = JSON.parse(readFileSync(out, "utf8"));
-    expect(b.format).toBe("dossier-bundle");
-    expect(b.version).toBe(1);
-    expect(b.name).toBe(sampleProject.name);
-    const floors = sampleProject.drawingLevels.filter((l) => l.kind === "floor");
-    expect(b.levels.map((l: { id: string }) => l.id)).toEqual(floors.map((l) => l.id));
-    const eg = b.levels[0];
-    expect(eg.scene.fills.length).toBeGreaterThan(0);
-    // 3D je Geschoss: zusammen ergeben die Geschosse das ganze Modell (Wand-Schichtbänder)
-    expect(eg.model3d.walls.length).toBeGreaterThan(0);
-    const sum = b.levels.reduce((s: number, l: { model3d: { walls: unknown[] } }) => s + l.model3d.walls.length, 0);
-    expect(sum).toBe(projectToModel3d(sampleProject).walls.length);
-    const wall = eg.elements.find((e: { kind: string }) => e.kind === "wall");
-    expect(wall.shape.type).toBe("segment");
-    expect(wall.shape.width).toBeGreaterThan(0);
-    expect(wall.props.some(([k]: [string, unknown]) => k === "height")).toBe(true);
-    const room = eg.elements.find((e: { kind: string }) => e.kind === "room");
-    expect(room.shape.type).toBe("polygon");
-    expect(b.kennzahlen.levels.length).toBe(floors.length);
-    expect(b.raumprogramm).toBeDefined();
-  });
-
   it("Beispielprojekt ohne Datei (:beispiel)", async () => {
-    const out = join(dir, "beispiel.bundle.json");
-    expect(await run([":beispiel", "bundle", "--out", out])).toBe(0);
-    expect(JSON.parse(readFileSync(out, "utf8")).name).toBe(sampleProject.name);
+    const out = join(dir, "beispiel.model3d.json");
+    expect(await run([":beispiel", "model3d", "--out", out])).toBe(0);
+    expect(JSON.parse(readFileSync(out, "utf8")).walls.length).toBe(projectToModel3d(sampleProject).walls.length);
   });
 
   it("IFC, OBJ, CSV, DXF", async () => {
