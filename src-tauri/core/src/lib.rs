@@ -38,6 +38,7 @@ pub mod jsnum;
 pub mod hatch;
 pub mod hatch_flat;
 pub mod plan_buf;
+pub mod project_format;
 pub mod queries;
 pub mod gpu_compile;
 pub mod plan_stairs;

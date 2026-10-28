@@ -104,3 +104,9 @@ pub fn doc_export_ifc(h: u32, now_ms: f64) -> String {
         Err(e) => format!("\u{1}{e}"),
     }
 }
+
+/// Das Projekt als Datei-Text (Formatversion vorn, Einrückung 2); leer, wenn das Dokument nicht offen ist.
+#[wasm_bindgen]
+pub fn doc_serialize(h: u32) -> String {
+    with_doc(h, |d| d.serialize()).unwrap_or_default()
+}

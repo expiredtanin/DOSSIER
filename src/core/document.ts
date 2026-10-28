@@ -94,6 +94,11 @@ export class ProjectDocument {
     return out;
   }
 
+  /** Datei-Text des Projekts (Formatversion vorn, Einrückung 2). */
+  serialize(): string {
+    return this.handle ? core().doc_serialize(this.handle) : "";
+  }
+
   /** Boden-Spuren der 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]`. */
   drawingLineVerts(): Float32Array {
     return this.handle ? core().doc_drawing_line_verts(this.handle) : new Float32Array(0);

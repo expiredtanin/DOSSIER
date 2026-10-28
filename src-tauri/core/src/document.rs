@@ -107,6 +107,11 @@ impl Document {
         }
     }
 
+    /// Datei-Text des Projekts (`serializeProject`): Formatversion vorn, Einrückung 2.
+    pub fn serialize(&self) -> String {
+        crate::project_format::serialize_project(&self.root)
+    }
+
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self.root).unwrap_or_default()
     }
