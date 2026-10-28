@@ -3,7 +3,8 @@
 import { describe, it, expect } from "vitest";
 import "../engine/fileioWasm.setup";
 import validator from "gltf-validator";
-import { exportGlb, exportGltf, exportObj, exportStl, orientOutward } from "./exportMesh";
+import { exportGlb, exportGltf, exportObj, exportStl } from "./exportMesh";
+import { orientOutward } from "./meshOrient";
 import { sampleProject } from "../model/sampleProject";
 import type { Column, ImportedMesh, Project, TerrainMesh } from "../model/types";
 import { emitOpeningMeshes } from "../plan/toWalls3d/openings";

@@ -445,6 +445,26 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     ist jetzt ein Fehler statt „NaN“ in der Datei. Rundung wie `toFixed(6)` (Gleichstand auf).
     Offen: Laden von pkgFileIo ist beim ersten IFC-Export neu (bisher synchron ohne Wartezeit);
     Export im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · L
+  - ✅ Basismengen für Kostenplanung/Mengenermittlung. (28.10.) `Qto_WallBaseQuantities` (Length, Width, Height,
+    GrossSideArea, NetSideArea, GrossVolume, NetVolume), `Qto_SlabBaseQuantities` (Decke und Podest: Width, Perimeter,
+    Gross-/NetArea, Gross-/NetVolume), `Qto_RoofBaseQuantities` (GrossArea, NetArea, ProjectedArea),
+    `Qto_ColumnBaseQuantities`, `Qto_DoorBaseQuantities`/`Qto_WindowBaseQuantities` (Width, Height, Perimeter, Area),
+    `Qto_StairFlightBaseQuantities`, `Qto_RailingBaseQuantities`; als IfcElementQuantity je Bauteil (nie geteilt), GUID
+    dauerhaft. Werte aus der Geometrie der Datei (`export/ifcQuantities.ts`, reine Rechnung), Netto = abzüglich
+    Öffnungen (Wand: je Schicht-Band, Netz-Wände: Volumen des Netzes). Height nur bei konstanter Oberkante (IFC-Vorgabe).
+    Mit ifcopenshell nachgerechnet (`exportIfc.quantities.test.ts`, ± 1 %): Wand-Netto und -Brutto (Demo-Haus: exakt),
+    Decke/Podest/Stütze/Läufe = Volumen, Dach = nach oben zeigende Netz-Dreiecke (geneigt und projiziert),
+    Tür/Fenster = Öffnungskörper; `validate-ifc.py` 0 Befunde. Rechnung bewusst in TS (Modell bleibt bis [K4] TS), die
+    Entitäten schreibt Rust (Pset-Arten 3–5, `FLAT_VERSION` 3).
+  - ✅ Deckenaussparungen als echte Löcher (IfcArbitraryProfileDefWithVoids statt Volldecke), wie im 3D. (28.10.)
+  - ✅ Treppen mit Läufen. (28.10.) IfcStair ohne Darstellung, per IfcRelAggregates mit IfcStairFlight (Prismen der
+    Tritte oder glatte Ortbeton-Laufplatte als Netz; NumberOfRisers/Treads, RiserHeight, TreadLength), IfcSlab(LANDING)
+    (Podest bei „L“) und IfcRailing(HANDRAIL) (Handlauf + Pfosten, wo das 3D sie zeigt: gerade Läufe). Quelle: dieselben
+    `emitStairs`/`emitStairMeshes`/`emitStairRailings` wie das 3D, je Treppe mit Ein-Treppen-Projekt (`export/ifcStairs.ts`).
+    Der eigene IFC-Import sieht jetzt `IfcStairFlight` statt `IfcStair` als Bauteil (Tests angepasst). Offen: Lauflänge
+    ist eine Näherung (Weg zwischen den Tritt-Schwerpunkten + Auftritt, mit Steigung), Wendeltreppe ein Lauf inkl.
+    Mitte, Geländer von L-/Wendeltreppen fehlt wie im 3D, Geländer-Länge = Lauflänge × Seiten; Pfosten nicht
+    als IfcMember; nicht in Revit/ArchiCAD geöffnet.
   - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
     Solibri/BIMcollab und nicht in der Tauri-App.
 - ○ **[B6] Wand unter Dach als Prismen zwischen Ebenen** (für [G2]). `walls.rs:413–472, 592–654`. · M

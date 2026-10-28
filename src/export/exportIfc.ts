@@ -41,10 +41,11 @@
 //   • Dach      → IfcRoof (Schicht-Meshes wie im 3D), Dachtyp → IfcRoofType mit Schichten.
 //   • Stütze    → IfcColumn (Profil-Extrusion), Bauteil → IfcMaterial.
 //   • Raum      → IfcSpace (im Geschoss aggregiert) mit Qto_SpaceBaseQuantities und SIA-416-Kategorie.
-//   • Treppe    → IfcStair, GEOMETRISCH bewusst vereinfacht auf einen
-//     extrudierten Bounding-Footprint (Lauf-Rechteck bei "straight"; Achsen-
-//     ausgerichtete Bounding-Box der Kontrollpunkte bei "L"/"spiral") — die
-//     echte Stufengeometrie ist ausgelassen (siehe stairFootprint()).
+//   • Treppe    → IfcStair ohne eigene Darstellung, zusammengefasst (IfcRelAggregates) aus Läufen
+//     (IfcStairFlight: Prismen der Tritte bzw. glatte Ortbeton-Laufplatte als Netz, Steigungs-/Auftrittsmasse),
+//     Podest (IfcSlab LANDING, nur "L") und Handlauf/Pfosten (IfcRailing HANDRAIL, wo das 3D sie zeigt) —
+//     dieselben Ableitungen wie das 3D (`ifcStairs.ts`). Ohne Teile bleibt der Fussabdruck-Quader
+//     (`stairFootprint()`).
 //
 //   Material-Schichten: je Wand-/Deckentyp ein IfcWallType/IfcSlabType mit
 //   IfcMaterialLayerSet, die Exemplare erben ihn über IfcRelDefinesByType. Extrusions-Wände
@@ -53,6 +54,12 @@
 //   Achse), damit Revit/ArchiCAD die Schichten der Achse zuordnen: das Wand-Placement sitzt am
 //   Wandanfang, X = Achse, Y = linke Normale (Rust rechnet die Welt-Profile ins Wandsystem). Mesh-
 //   Wände (schräge Oberkante, Laibungs-Rücksprung) haben weder Achse noch Usage.
+//
+//   Basismengen ([B5], 28.10.): Qto_WallBaseQuantities (Length, Width, Height, GrossSideArea, NetSideArea,
+//   GrossVolume, NetVolume), Qto_SlabBaseQuantities, Qto_RoofBaseQuantities, Qto_ColumnBaseQuantities,
+//   Qto_DoorBaseQuantities/Qto_WindowBaseQuantities (Width, Height, Perimeter, Area), Qto_StairFlightBaseQuantities
+//   und Qto_RailingBaseQuantities — aus der Geometrie (`ifcQuantities.ts`), Netto = abzüglich Öffnungen;
+//   Rust schreibt je Bauteil einen IfcElementQuantity. Deckenaussparungen sind echte Löcher im Profil.
 //
 //   Eigenschaften ([B5]): Pset_WallCommon/SlabCommon/RoofCommon/ColumnCommon/DoorCommon/
 //   WindowCommon/SpaceCommon nur mit Werten, die das Modell hergibt (Reference = Typname,
@@ -68,6 +75,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md). Einheit: METER.
 
 import type { Opening, Project, Stair, Vec2, Wall } from "../model/types";
+import type { StairParts } from "./ifcStairs";
 import {
   columnLabel,
   getCeilingType,
@@ -88,6 +96,18 @@ import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { emitRoofs } from "../plan/toWalls3d/roofs";
 import { fileio } from "../engine/fileioWasm";
 import { fillParams, type FillParams } from "./ifcOpenings";
+import { stairParts } from "./ifcStairs";
+import {
+  columnQuantities,
+  holeVolume,
+  meshVolume,
+  openingQuantities,
+  roofQuantities,
+  slabQuantities,
+  wallQuantities,
+  type Qty,
+} from "./ifcQuantities";
+import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 
 /** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export.rs::ifc_guid`). */
 export function ifcGuid(name: string): string {
@@ -101,7 +121,7 @@ export function ifcString(s: string): string {
 
 // ── Flacher Puffer (Gegenstück zu src-tauri/fileio/src/ifc_export.rs, dort die Kodierung) ─────
 
-const FLAT_VERSION = 2;
+const FLAT_VERSION = 3;
 const REC_WALL_SOLIDS = 1;
 const REC_WALL_MESH = 2;
 const REC_CEILING = 3;
@@ -125,8 +145,17 @@ interface TypeRefIn {
   layers: { componentId: string; componentName: string; thickness: number }[];
 }
 
-/** Pset-Eigenschaft: Kennung, Art (IfcIdentifier, IfcBoolean, IfcPositiveRatioMeasure) und Wert. */
-type PropIn = { name: string; ident: string } | { name: string; bool: boolean } | { name: string; ratio: number };
+/**
+ * Pset-Eigenschaft: Kennung, Art (IfcIdentifier, IfcBoolean, IfcPositiveRatioMeasure) und Wert; in einem Satz
+ * `Qto_…` Mengen (Länge, Fläche, Volumen) — Rust schreibt daraus je Bauteil einen IfcElementQuantity.
+ */
+type PropIn =
+  | { name: string; ident: string }
+  | { name: string; bool: boolean }
+  | { name: string; ratio: number }
+  | { name: string; length: number }
+  | { name: string; area: number }
+  | { name: string; volume: number };
 interface PsetIn {
   name: string;
   props: PropIn[];
@@ -170,7 +199,10 @@ class FlatIfc {
       for (const p of ps.props) {
         if ("ident" in p) this.nums.push(this.str(p.name), 0, this.str(p.ident));
         else if ("bool" in p) this.nums.push(this.str(p.name), 1, p.bool ? 1 : 0);
-        else this.nums.push(this.str(p.name), 2, p.ratio);
+        else if ("ratio" in p) this.nums.push(this.str(p.name), 2, p.ratio);
+        else if ("length" in p) this.nums.push(this.str(p.name), 3, p.length);
+        else if ("area" in p) this.nums.push(this.str(p.name), 4, p.area);
+        else this.nums.push(this.str(p.name), 5, p.volume);
       }
     }
   }
@@ -228,11 +260,13 @@ class FlatIfc {
     this.mesh(positions, indices, closed);
   }
 
-  ceiling(structure: number, id: string, name: string, ty: TypeRefIn | null, psets: PsetIn[], outline: Vec2[], zRel: number, depth: number): void {
+  ceiling(structure: number, id: string, name: string, ty: TypeRefIn | null, psets: PsetIn[], outline: Vec2[], inner: readonly (readonly Vec2[])[], zRel: number, depth: number): void {
     this.nums.push(REC_CEILING, structure, this.str(id), this.str(name));
     this.typeRef(ty);
     this.psets(psets);
     this.pts(outline);
+    this.nums.push(inner.length);
+    for (const ring of inner) this.pts(ring);
     this.nums.push(zRel, depth);
   }
 
@@ -272,10 +306,44 @@ class FlatIfc {
     this.psets(o.psets);
   }
 
-  stair(structure: number, id: string, predefined: string, footprint: Vec2[], zRel: number, depth: number): void {
+  stair(structure: number, id: string, predefined: string, footprint: Vec2[], zRel: number, depth: number, parts: StairParts): void {
     this.nums.push(REC_STAIR, structure, this.str(id), this.str(predefined));
     this.pts(footprint);
     this.nums.push(zRel, depth);
+    this.psets([]);
+    this.nums.push(parts.flights.length);
+    for (const f of parts.flights) {
+      this.nums.push(this.str(f.name), f.risers, f.treads, f.riserHeight, f.treadLength, this.str(f.predefined));
+      this.psets(qto("Qto_StairFlightBaseQuantities", f.quantities));
+      if (f.mesh) {
+        this.nums.push(1);
+        this.mesh(f.mesh.positions, f.mesh.indices, false);
+      } else {
+        const solids = f.solids ?? [];
+        this.nums.push(0, solids.length);
+        for (const s of solids) {
+          this.pts(s.pts);
+          this.nums.push(s.zRel, s.depth);
+        }
+      }
+    }
+    if (parts.landing) {
+      const l = parts.landing;
+      this.nums.push(1, this.str(l.name));
+      this.pts(l.pts);
+      this.nums.push(l.zRel, l.depth);
+      this.psets(qto("Qto_SlabBaseQuantities", l.quantities));
+    } else {
+      this.nums.push(0);
+    }
+    if (parts.rail) {
+      const r = parts.rail;
+      this.nums.push(1, this.str(r.name), this.str(r.predefined));
+      this.psets(qto("Qto_RailingBaseQuantities", r.quantities));
+      this.mesh(r.mesh.positions, r.mesh.indices, false);
+    } else {
+      this.nums.push(0);
+    }
   }
 
   extrusion(structure: number, id: string, pts: Vec2[], zRel: number, depth: number): void {
@@ -485,6 +553,17 @@ const ROOF_PREDEFINED: Record<string, string> = {
 
 const identifier = (name: string, v: string): PropIn => ({ name, ident: v });
 
+/** Basismengen als Pset `Qto_…` (nur wenn Mengen vorliegen). */
+function qto(name: string, quantities: readonly Qty[]): PsetIn[] {
+  if (quantities.length === 0) return [];
+  return [
+    {
+      name,
+      props: quantities.map((x): PropIn => (x.kind === "length" ? { name: x.name, length: x.value } : x.kind === "area" ? { name: x.name, area: x.value } : { name: x.name, volume: x.value })),
+    },
+  ];
+}
+
 /**
  * Baut aus einem Projekt einen vollständigen IFC4-SPF-String (STEP Physical
  * File). Kein Datei-IO. Leeres Projekt ⇒ valider Minimal-IFC (Project/Site/Building, kein Crash).
@@ -571,17 +650,18 @@ export function exportIfcSpf(projectIn: Project): string {
     }
     return out;
   };
-  /** Name, Typ und Pset einer Wand (verwaister Wandtyp: Roh-ID als Name, kein Typ). */
-  const wallIdentity = (wall: Wall): { name: string; ty: TypeRefIn | null; psets: PsetIn[] } => {
+  /** Name, Typ und Pset einer Wand (verwaister Wandtyp: Roh-ID als Name, kein Typ); `quantities` = Basismengen. */
+  const wallIdentity = (wall: Wall, quantities: readonly Qty[]): { name: string; ty: TypeRefIn | null; psets: PsetIn[] } => {
+    const qtoSets = qto("Qto_WallBaseQuantities", quantities);
     try {
       const wt = getWallType(project, wall);
       return {
         name: wt.name,
         ty: typeRef(0, "STANDARD", wt),
-        psets: [{ name: "Pset_WallCommon", props: [identifier("Reference", wt.name)] }],
+        psets: [{ name: "Pset_WallCommon", props: [identifier("Reference", wt.name)] }, ...qtoSets],
       };
     } catch {
-      return { name: wall.id, ty: null, psets: [] };
+      return { name: wall.id, ty: null, psets: qtoSets };
     }
   };
   /** Ausdehnung aller Bänder quer zur Wandachse (entlang der linken Normalen ab `wall.start`). */
@@ -620,7 +700,7 @@ export function exportIfcSpf(projectIn: Project): string {
       const rect = [addScaled(s, n, -h), addScaled(e, n, -h), addScaled(e, n, h), addScaled(s, n, h)];
       return { pts: rect, zRel: b.baseElevation - baseOf(structure), depth: b.height };
     });
-    const id = wallIdentity(wall);
+    const id = wallIdentity(wall, wallQuantities(wall, bands, cutouts));
     // Wandsystem: Placement am Wandanfang, X = Achse, Y = linke Normale; die Schichten des Typs
     // stehen ab der Aussenfläche (negative Normale) nebeneinander — IfcMaterialLayerSetUsage nur,
     // wenn ihre Summe dem Querschnitt der Bänder entspricht (sonst wäre der Offset gelogen).
@@ -663,7 +743,15 @@ export function exportIfcSpf(projectIn: Project): string {
     // (Wände sind extrudierte Querschnitts-Polygone → geschlossene Körper); der Guard fängt echte
     // Defekte ab (invertierte Wicklung → Volumen < 0 → `$`).
     const closed = isWatertight({ positions, indices });
-    const id = wallIdentity(wall);
+    // Netto: Volumen des Netzes (Öffnungen samt Laibungen schon ausgestanzt); ohne dichtes Netz Quader minus Löcher.
+    const meshBandsOfWall = bandsByWallId.get(wall.id)!;
+    const net = closed ? meshVolume(positions, indices) : undefined;
+    const quantities = wallQuantities(wall, meshBandsOfWall, cutoutsByWallId.get(wall.id) ?? [], net);
+    if (net === undefined) {
+      const gross = quantities.find((x) => x.name === "GrossVolume")!.value;
+      quantities.find((x) => x.name === "NetVolume")!.value = Math.max(0, gross - holeVolume(meshBandsOfWall));
+    }
+    const id = wallIdentity(wall, quantities);
     flat.wallMesh(structure, wall.id, id.name, id.ty, id.psets, positions, indices, closed);
     hostExtent.set(wall.id, crossExtent(wall, bandsByWallId.get(wall.id)!));
   }
@@ -684,7 +772,10 @@ export function exportIfcSpf(projectIn: Project): string {
     } catch {
       /* verwaister Deckentyp — Roh-ID als Name, kein Typ */
     }
-    flat.ceiling(structure, ceiling.id, name, ty, psets, ceiling.outline, zBottom - baseOf(structure), zTop - zBottom);
+    // Aussparungen (wie im 3D) als innere Ringe des Profils; Mengen: Netto zieht sie ab.
+    const inner = (ceiling.openings ?? []).filter((ring) => ring.length >= 3);
+    psets.push(...qto("Qto_SlabBaseQuantities", slabQuantities(ceiling.outline, inner, zTop - zBottom)));
+    flat.ceiling(structure, ceiling.id, name, ty, psets, ceiling.outline, inner, zBottom - baseOf(structure), zTop - zBottom);
   }
 
   // ── Öffnungen: IfcOpeningElement in der Wand, IfcDoor/IfcWindow darin ───
@@ -727,19 +818,19 @@ export function exportIfcSpf(projectIn: Project): string {
         depth,
         width: c.to - c.from,
         fill: fillParams(project, wall, opening, c, host),
-        psets: [{ name: psetName, props }],
+        psets: [{ name: psetName, props }, ...qto(isDoor ? "Qto_DoorBaseQuantities" : "Qto_WindowBaseQuantities", openingQuantities(c.to - c.from, depth))],
       });
     }
   }
 
-  // ── Treppen (vereinfachter Bounding-Footprint, siehe Dateikopf) ────────
+  // ── Treppen: Läufe, Podest, Geländer wie im 3D (`ifcStairs.ts`); ohne Teile der Fussabdruck-Quader ──
   for (const stair of project.stairs ?? []) {
     const footprint = stairFootprint(stair);
     if (footprint.length < 3) continue;
     const { zBottom, zTop } = stairVerticalExtent(project, stair);
     const structure = structureOf(stair.floorId);
     const predefined = stair.shape === "straight" ? "STRAIGHT_RUN_STAIR" : stair.shape === "spiral" ? "SPIRAL_STAIR" : "QUARTER_TURN_STAIR";
-    flat.stair(structure, stair.id, predefined, footprint, zBottom - baseOf(structure), zTop - zBottom);
+    flat.stair(structure, stair.id, predefined, footprint, zBottom - baseOf(structure), zTop - zBottom, stairParts(project, stair, baseOf(structure)));
   }
 
   // ── Extrudierte Körper (truck-Integration) → IfcBuildingElementProxy ───
@@ -815,13 +906,15 @@ export function exportIfcSpf(projectIn: Project): string {
     const props: PropIn[] = [];
     if (roofType) props.push(identifier("Reference", roofType.name));
     props.push({ name: "IsExternal", bool: true });
+    // Mengen aus den geneigten Dachflächen (Aussenseite), wie sie auch das Netz erzeugen.
+    const planes = roofGeometry(roof, roofBaseElevation(project, roof)).planes.map((pl) => pl.pts);
     flat.roof(
       structure,
       roof.id,
       roofType?.name ?? "Dach",
       predefined,
       roofType ? typeRef(2, predefined, roofType) : null,
-      [{ name: "Pset_RoofCommon", props }],
+      [{ name: "Pset_RoofCommon", props }, ...qto("Qto_RoofBaseQuantities", roofQuantities(planes))],
       positions,
       indices,
       closed,
@@ -844,7 +937,7 @@ export function exportIfcSpf(projectIn: Project): string {
       zRel: zBottom - baseOf(structure),
       depth: zTop - zBottom,
       component: col.componentId ? { id: col.componentId, name: componentName(col.componentId) } : null,
-      psets: [{ name: "Pset_ColumnCommon", props: [identifier("Reference", label)] }],
+      psets: [{ name: "Pset_ColumnCommon", props: [identifier("Reference", label)] }, ...qto("Qto_ColumnBaseQuantities", columnQuantities(footprint, zTop - zBottom))],
     });
   }
   flat.endColumns();
