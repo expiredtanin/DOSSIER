@@ -18,6 +18,8 @@ pub mod split;
 mod web_import;
 pub mod ifc_step;
 pub mod ifc_import;
+pub mod csg;
+mod ifc_sweep;
 
 use std::collections::HashMap;
 use std::io::Cursor;

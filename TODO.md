@@ -291,7 +291,7 @@ Alle ○: [27] Punktwolken · [28] Phasen · [29] Bauteillisten (◐, Export vor
 Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
 [84] Undo-Verlauf · [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
-(◐, nur DXF-Parser) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
+(◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
 
 ## Übernahme aus BIMCraft [B]
@@ -313,10 +313,24 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   importieren …", Import-Dialog und Drag & Drop (`.ifc`), CLI `import-ifc`. Extrusion (Arbitrary/
   Rechteck/Kreis/I/L/U/T, Löcher, Bögen), FacetedBrep, Tri-/PolygonalFaceSet, MappedItem, mm/Fuss,
   IFC2x3/4/4.3. Rundreise und alle buildingSMART-Simple-Scene-Dateien gegen ifcopenshell gleich (Volumen je
-  Bauteil). Offen: Öffnungen abziehen und Boolesche Körper (nur 1. Operand) → [B4]; IfcAdvancedBrep,
-  Revolved/SweptDisk; Farbe/GlobalId gelesen, aber `ImportedMesh` hat kein Feld dafür (GlobalId steht im
-  Namen); Laden im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · M
-- ○ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3].
+  Bauteil). (28.10., 2. Schritt) Öffnungen (IfcRelVoidsElement, auch am Ganzen, z. B. IfcRoof →
+  Platten) und IfcBooleanResult/ClippingResult (alle drei Operationen, Halbräume IfcHalfSpaceSolid/
+  Boxed/PolygonalBounded als Ebenen-Schnitt) über BSP-CSG `fileio/src/csg.rs` (Verfahren csg.js, neu
+  geschrieben, iterativ, Budget; scheitert er → Öffnung gezählt, Wirt ganz); IfcRevolvedAreaSolid,
+  IfcSweptDiskSolid(+Polygonal), IfcFixedReferenceSweptAreaSolid, IfcSurfaceCurveSweptAreaSolid auf
+  Ebene (`ifc_sweep.rs`, Gehrung an Knicken), 3D-Leitkurven inkl. räumlicher Bögen; Ausrundungen bei
+  RoundedRectangle/I/L/U/T. Laden im Web-Worker (`io/ifcImport.worker.ts`, Rückfall im Thread).
+  Gegencheck ifcopenshell (Öffnungen jetzt abgezogen): Rundreise (alle Wände ausgeschnitten),
+  synthetische Fälle `io/testdata/ifc-geometry-cases.ifc`, alle 35 buildingSMART-Sample-Test-Files
+  und 39 von 46 IFC4.3-sample-models gleich (≤ 3 %; nur lokal, nicht eingecheckt). Offen:
+  IfcAdvancedBrep (NURBS), IFC4.3-Ausrichtung (IfcGradientCurve, IfcLinearPlacement,
+  IfcSectionedSolidHorizontal), IfcGridPlacement, B-Spline-Kurven, StartParam/EndParam der Sweeps,
+  Profil-Kantenradien/Neigungen; Farbe/GlobalId gelesen, aber `ImportedMesh` hat kein Feld dafür
+  (GlobalId steht im Namen); CSG bei sehr grossen Netzen (> 200 000 Dreiecke) übersprungen; nur
+  Linux-Container/vitest, nicht in der Tauri-App geprüft (Worker nur mit Attrappe getestet). · M
+- ○ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3]. Stand 28.10.:
+  Geometrie-Grundlage steht (Öffnungen/Booleans/Sweeps als Mesh, [B3]); offen: Wand/Decke/Stütze aus
+  Extrusion + Achse erkennen, Öffnungen als `Opening` statt abgezogen, Material/Typ übernehmen.
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit
@@ -341,8 +355,8 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     Modellfelder (z. B. am Wandtyp tragend/aussen, λ je Bauteil → U-Wert). · S–M
   - ○ Offen: IfcMaterialLayerSetUsage + Achs-Darstellung („Axis") an Extrusions-Wänden;
     Tür/Fenster mit Rahmen/Blatt statt Box; Bogenwände als echte Kurve. · M
-  - ○ Offen: eigener IFC-Import ([B3]) zieht Öffnungen noch nicht ab → Rundreise des eigenen
-    Exports zeigt Extrusions-Wände ohne Löcher, bis [B4] (Test `ifcImport.test.ts` angepasst). · M
+  - ✅ Eigener IFC-Import ([B3]) zieht Öffnungen ab (28.10.): Rundreise vergleicht alle Wände mit dem
+    ausgeschnittenen Volumen (`ifcImport.test.ts`).
   - ○ Folgepunkt: Export nach Rust (`src-tauri/fileio`, wie der Import) portieren; TS-Fassung
     `exportIfc.ts` dann löschen. · L
   - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
