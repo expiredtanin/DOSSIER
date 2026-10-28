@@ -31,8 +31,8 @@ beforeEach(() => {
       ...sampleProject,
       drawingLevels: [floor("A"), floor("B"), floor("C"), floor("D")],
     },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

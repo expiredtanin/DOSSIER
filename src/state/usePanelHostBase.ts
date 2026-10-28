@@ -1255,6 +1255,11 @@ export function usePanelHostBase(opts: {
       // aktuellen Stand an — Name automatisch die aktive Zeichnungskombination
       // (falls deren Sichtbarkeits-Map exakt passt) oder sonst das aktive Blatt
       // (Nutzer-Wunsch). Wählt den neuen Ausschnitt sofort an (Tab wird aktiv).
+      viewSnapshotAutoName: (): string => {
+        const combo = matchingComboName(listDrawingCombos(), loadDrawingCombo, snapshotDrawingVisibility());
+        return combo ?? project.drawingLevels.find((l) => l.id === activeLevelId)?.name ?? activeLevelId;
+      },
+
       onCaptureViewSnapshotAuto: (): string => {
         const drawingVisibility = snapshotDrawingVisibility();
         const combo = matchingComboName(listDrawingCombos(), loadDrawingCombo, drawingVisibility);

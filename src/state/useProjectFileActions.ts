@@ -6,7 +6,7 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { useStore } from "./appStore";
+import { getState, useStore } from "./appStore";
 import type { NotifyKind } from "./notifySlice";
 import { parseProjectFile, parseProjectObject, serializeProject } from "../io/projectFormat";
 import { AUTOSAVE_INTERVAL_MS, clearAutosave, createAutosaveTracker, readAutosave, writeAutosave } from "./autosave";
@@ -172,6 +172,13 @@ export function useProjectFileActions(
   const projectFileInputRef = useRef<HTMLInputElement>(null);
   // Meldungen als Toast (window.alert ist im Tauri-WKWebView wirkungslos).
   const notify = useStore((s) => s.notify);
+  // Ein anderes Projekt übernehmen (Neu, Vorlage, Öffnen, Wiederherstellen): ersetzt das Projekt und
+  // leert den Undo-Verlauf — sonst führte Rückgängig über das Laden hinaus ins vorherige Projekt, und
+  // jede Änderung dort verwarf den Redo-Stapel.
+  const replaceProject = (next: Project) => {
+    setProject(next);
+    getState().clearHistory();
+  };
   // Verstecktes Datei-Input für „Neu aus Vorlage" (Datei wählen) — derselbe
   // Browser-Fallback wie `projectFileInputRef`, nur mit `.obpt`-Filter.
   const projectTemplateFileInputRef = useRef<HTMLInputElement>(null);
@@ -238,7 +245,7 @@ export function useProjectFileActions(
   const onRecoverRestore = () => {
     if (!recovery) return;
     const parsed = parseProjectObject(recovery.project);
-    if (parsed.ok) setProject(parsed.project); // bleibt „ungespeichert" bis zum Speichern
+    if (parsed.ok) replaceProject(parsed.project); // bleibt „ungespeichert" bis zum Speichern
     else notify(`${t("project.open.failed")} ${parsed.error}`, "error");
     setRecovery(null);
   };
@@ -443,7 +450,7 @@ export function useProjectFileActions(
   // `guardDiscard`: bei ungespeicherten Änderungen erst der Dialog, s. o.
   const onNewProject = () => guardDiscard(() => {
     releaseCurrentProjectLock();
-    setProject(emptyProject);
+    replaceProject(emptyProject);
     lastSavedProjectRef.current = emptyProject;
   });
 
@@ -458,7 +465,7 @@ export function useProjectFileActions(
       if (!parsed) return false;
       guardDiscard(() => {
         releaseCurrentProjectLock();
-        setProject(parsed);
+        replaceProject(parsed);
         lastSavedProjectRef.current = parsed;
       });
       return true;
@@ -474,7 +481,7 @@ export function useProjectFileActions(
   const onNewProjectFromSample = () => guardDiscard(() => {
     releaseCurrentProjectLock();
     const next = structuredClone(sampleProject);
-    setProject(next);
+    replaceProject(next);
     lastSavedProjectRef.current = next;
   });
   // „Neu aus Vorlage: Datei wählen…" — native `.obpt`-Dialog unter Tauri, sonst
@@ -498,7 +505,7 @@ export function useProjectFileActions(
   const onProjectTemplateFileChosen = (file: File) => {
     const r = new FileReader();
     r.onload = () => applyTemplateContent(String(r.result ?? ""));
-    r.readAsArrayBuffer(file);
+    r.readAsText(file);
   };
 
   // Gibt den Lock der zuletzt geöffneten Projektdatei frei (falls wir ihn
@@ -522,7 +529,7 @@ export function useProjectFileActions(
       }
       guardDiscard(() => {
         releaseCurrentProjectLock();
-        setProject(parsed);
+        replaceProject(parsed);
         lastSavedProjectRef.current = parsed;
         openedProjectPathRef.current = path;
         projectLockOwnedRef.current = lockOwned;
@@ -652,14 +659,14 @@ export function useProjectFileActions(
         // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
         guardDiscard(() => {
           releaseCurrentProjectLock();
-          setProject(parsed);
+          replaceProject(parsed);
           lastSavedProjectRef.current = parsed;
         });
       } catch (err) {
         console.error("Projekt-Import fehlgeschlagen:", err);
       }
     };
-    r.readAsArrayBuffer(file);
+    r.readAsText(file);
   };
 
   const importParentName = (decision: ImportDecision): string =>

@@ -7,6 +7,12 @@
 // an — das Projekt ändert sich ausschliesslich durch Ops. Ops sind JSON-serialisierbar
 // (Undo-Verlauf [84], Makros [85], MCP [9], später ein Rust-Kern).
 //
+// [K4] S3: Prüfung (`validateOps`/`validateProject`), Anwendung mit Verlauf und Undo/Redo liegen im
+// Rust-Kern (`src-tauri/core/src/ops.rs`, `document.rs`). Hier bleiben `diffToOps` (Adapter für die
+// Befehle, die noch Projekt → Projekt liefern) und `applyOps` als Nachführung der TS-Leseansicht:
+// TS wendet genau die Ops an, die der Kern angenommen oder für Undo/Redo geliefert hat —
+// unveränderte Elemente behalten so ihre Objekt-Identität (Caches in Plan/3D).
+//
 // Granularität (bewusst grob, aber stabil):
 //  • Listen aus Elementen mit `id` (walls, ceilings, drawings2d, …): `add` / `replace` / `remove`
 //    / `reorder` je Element — unveränderte Elemente behalten ihre Objekt-Identität
@@ -14,6 +20,7 @@
 //  • Alles andere (Skalare, Objekte, Listen ohne ids): `setField` mit dem ganzen Wert.
 
 import type { Project } from "../model/types";
+import { core } from "../engine/coreWasm";
 
 type Entity = { id: string } & Record<string, unknown>;
 
@@ -26,8 +33,9 @@ export type CoreOp =
   | { kind: "remove"; collection: string; ids: string[] }
   /** Setzt die Reihenfolge der Liste (`ids` ist eine Permutation der vorhandenen ids). */
   | { kind: "reorder"; collection: string; ids: string[] }
-  /** Setzt ein Projekt-Feld auf `value` (`undefined`/fehlend ⇒ Feld entfernen). */
-  | { kind: "setField"; key: string; value?: unknown };
+  /** Setzt ein Projekt-Feld auf `value` (`undefined`/fehlend ⇒ Feld entfernen). `at`: Position, falls
+   *  das Feld neu eingefügt wird (vom Kern-Undo gesetzt, damit die Feld-Reihenfolge exakt zurückkommt). */
+  | { kind: "setField"; key: string; value?: unknown; at?: number };
 
 const isEntityList = (v: unknown): v is Entity[] =>
   Array.isArray(v) && v.length > 0 && v.every((x) => x !== null && typeof x === "object" && typeof (x as Entity).id === "string");
@@ -113,6 +121,12 @@ function listOf(cur: Record<string, unknown>, collection: string): Entity[] {
 function applyOne(cur: Record<string, unknown>, op: CoreOp): Record<string, unknown> {
   switch (op.kind) {
     case "setField": {
+      if (op.value !== undefined && op.at !== undefined && !(op.key in cur)) {
+        // Neues Feld an Position `at` (wie `shift_insert` im Kern).
+        const entries = Object.entries(cur);
+        entries.splice(Math.max(0, Math.min(entries.length, op.at)), 0, [op.key, op.value]);
+        return Object.fromEntries(entries);
+      }
       const next = { ...cur };
       if (op.value === undefined) delete next[op.key];
       else next[op.key] = op.value;
@@ -145,7 +159,28 @@ function applyOne(cur: Record<string, unknown>, op: CoreOp): Record<string, unkn
   }
 }
 
-// ── Validierung ([7]) ────────────────────────────────────────────────────────
+// ── Übergabe an den Kern ─────────────────────────────────────────────────────
+
+/** Nicht endliche Zahlen als Marken-Text (JSON kennt sie nicht; der Kern prüft sie, s. `ops.rs`). */
+function markNonFinite(_key: string, v: unknown): unknown {
+  return typeof v === "number" && !Number.isFinite(v) ? `\u0001${String(v)}` : v;
+}
+
+/** Ops als JSON für den Kern (NaN/±Infinity als Marken). */
+export function opsToJson(ops: readonly CoreOp[]): string {
+  return JSON.stringify(ops, markNonFinite);
+}
+
+// ── Validierung ([7]) — im Kern (`ops.rs`) ───────────────────────────────────
+
+function problemsOf(json: string): string[] {
+  try {
+    const v = JSON.parse(json) as unknown;
+    return Array.isArray(v) ? (v as string[]) : [];
+  } catch {
+    return ["Prüfung im Kern fehlgeschlagen."];
+  }
+}
 
 /**
  * Prüft ein Projekt auf Verstösse, die nie gewollt sind: nicht endliche Zahlen in Geometrie
@@ -153,76 +188,22 @@ function applyOne(cur: Record<string, unknown>, op: CoreOp): Record<string, unkn
  * konservativ — gesperrt wird nur, was sicher kaputt ist.
  */
 export function validateProject(p: Project): string[] {
-  const problems: string[] = [];
-  const rec = p as unknown as Record<string, unknown>;
-  for (const key of Object.keys(rec)) {
-    const v = rec[key];
-    if (!isIdList(v) || v.length === 0) continue;
-    if (!uniqueIds(v)) problems.push(`Doppelte ids in „${key}".`);
-    // Nicht endliche Zahlen in den Elementen (flache Suche bis Tiefe 3, ohne grosse Zahlenfelder).
-    for (const e of v) {
-      const bad = findNonFinite(e, 0);
-      if (bad) {
-        problems.push(`„${key}" ${e.id}: ${bad} ist nicht endlich.`);
-        break;
-      }
-    }
-  }
-  return problems;
+  return problemsOf(core().project_validate(JSON.stringify(p, markNonFinite)));
 }
 
 /**
- * Wie {@link validateProject}, aber nur für das, was `ops` anfassen (billig genug für jeden
- * Maus-Schritt eines Drags): nicht endliche Zahlen in neuen/ersetzten Elementen, doppelte ids
- * in den betroffenen Listen, nicht endliche `setField`-Zahlen.
+ * Prüft angewendete Ops (nur was sie anfassen, billig genug für jeden Drag-Schritt): nicht
+ * endliche Zahlen in neuen/ersetzten Elementen und `setField`-Zahlen, NEUE doppelte ids in den
+ * betroffenen Listen. Im Store läuft die Prüfung direkt im Kern-Dokument (`ProjectDocument.commit`).
  */
 export function validateOps(after: Project, ops: readonly CoreOp[], before?: Project): string[] {
-  const beforeRec = before as unknown as Record<string, unknown> | undefined;
-  /** Alt-Dateien mit doppelten ids sollen weiter änderbar bleiben: nur NEUE Doppelungen melden. */
-  const hadDup = (key: string) => {
-    const l = beforeRec?.[key];
-    return isIdList(l) && !uniqueIds(l);
+  const keys = new Set(ops.map((op) => (op.kind === "setField" ? op.key : op.collection)));
+  const pick = (p: Project | undefined): string => {
+    if (!p) return "";
+    const rec = p as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of keys) if (k in rec) out[k] = rec[k];
+    return JSON.stringify(out);
   };
-  const problems: string[] = [];
-  const rec = after as unknown as Record<string, unknown>;
-  const dupChecked = new Set<string>();
-  for (const op of ops) {
-    if (op.kind === "add" || op.kind === "replace") {
-      const ents = op.kind === "add" ? op.items : [op.entity];
-      for (const e of ents) {
-        const bad = findNonFinite(e, 0);
-        if (bad) problems.push(`„${op.collection}" ${e.id}: ${bad} ist nicht endlich.`);
-      }
-      if (op.kind === "add" && !dupChecked.has(op.collection)) {
-        dupChecked.add(op.collection);
-        const list = rec[op.collection];
-        if (isIdList(list) && !uniqueIds(list) && !hadDup(op.collection)) problems.push(`Doppelte ids in „${op.collection}".`);
-      }
-    } else if (op.kind === "setField") {
-      if (typeof op.value === "number" && !Number.isFinite(op.value)) {
-        problems.push(`Feld „${op.key}": ${String(op.value)} ist nicht endlich.`);
-      } else if (isEntityList(op.value) && !uniqueIds(op.value) && !hadDup(op.key)) {
-        problems.push(`Doppelte ids in „${op.key}".`);
-      }
-    }
-  }
-  return problems;
-}
-
-function findNonFinite(v: unknown, depth: number): string | null {
-  if (typeof v === "number") return Number.isFinite(v) ? null : String(v);
-  if (depth > 3 || v === null || typeof v !== "object") return null;
-  if (Array.isArray(v)) {
-    if (v.length > 5000) return null; // Mesh-Arrays: nicht durchlaufen
-    for (const x of v) {
-      const r = findNonFinite(x, depth + 1);
-      if (r) return r;
-    }
-    return null;
-  }
-  for (const x of Object.values(v as Record<string, unknown>)) {
-    const r = findNonFinite(x, depth + 1);
-    if (r) return r;
-  }
-  return null;
+  return problemsOf(core().ops_validate(opsToJson(ops), pick(after), pick(before)));
 }

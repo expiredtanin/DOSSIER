@@ -628,6 +628,8 @@ export interface PanelHostValue {
    * Ausschnitt sofort an.
    */
   onCaptureViewSnapshotAuto: () => string;
+  /** Name, den ein automatisch angelegter Ausschnitt jetzt bekäme (aktive Kombination bzw. Blatt). */
+  viewSnapshotAutoName: () => string;
   /** Stellt alle Felder eines Ausschnitts wieder her (Geschoss/Sichtbarkeit/Overrides/Ansicht). */
   onApplyViewSnapshot: (id: string) => void;
   /** Benennt einen Ausschnitt um. */

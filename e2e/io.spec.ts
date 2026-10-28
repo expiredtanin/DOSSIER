@@ -28,15 +28,7 @@ async function chooseFile(page: Page, menuItem: string | RegExp, file: string | 
   await (await chooser).setFiles(file);
 }
 
-// BEKANNTER FEHLER (28.10.): `onProjectFileChosen` (src/state/useProjectFileActions.ts) liest die Datei mit
-// `readAsArrayBuffer` und macht `String(r.result)` daraus („[object ArrayBuffer]") — im Browser-Pfad
-// meldet die App „Die Datei ist kein gültiges JSON". Unter Tauri (nativer Dialog) tritt es nicht auf.
-// Fix: `r.readAsText(file)`. Bis dahin ist die Erwartung umgekehrt (`test.fail`); sobald der Fehler
-// behoben ist, schlägt diese Markierung an und wird entfernt.
-const OPEN_BUG = "Projekt öffnen im Browser: readAsArrayBuffer + String(result) → „kein gültiges JSON“";
-
 test("Beispielprojekt aus Datei öffnen (.obp-Fixture der CLI)", async ({ page }) => {
-  test.fail(true, OPEN_BUG);
   await startNewProject(page);
   await chooseFile(page, "Projekt öffnen", BEISPIEL_OBP);
   await discardIfAsked(page);
@@ -56,7 +48,6 @@ test("Speichern: .obp-Download mit gültigem Projekt-JSON", async ({ page }) => 
 });
 
 test("Speichern und Laden: .obp-Rundreise", async ({ page }) => {
-  test.fail(true, OPEN_BUG);
   await startNewProject(page);
   await openSample(page);
 

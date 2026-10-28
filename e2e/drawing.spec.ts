@@ -77,3 +77,29 @@ test("Rückgängig/Wiederholen per Tastatur und Menü", async ({ page }) => {
   await page.getByRole("option", { name: "Wiederholen" }).click();
   await expect(elementRows(page)).toHaveCount(1);
 });
+
+// Maintainer-Fund 28.10.: mehrmals ganz zurück bis zum leeren Projekt und wieder vor — irgendwann war
+// der Redo-Stapel weg (Neu/Öffnen lagen im Undo-Verlauf, das leere Startprojekt war erreichbar).
+test("Mehrmals ganz zurück und wieder vor: Redo bleibt vollständig", async ({ page }) => {
+  await startNewProject(page);
+  await openTab(page, "Elemente");
+  await pickWallTool(page);
+  await commandInput(page).focus();
+  await typeCommand(page, "0,0");
+  await typeCommand(page, "5,0");
+  await typeCommand(page, "5,4");
+  await typeCommand(page, "0,4");
+  await finishCommand(page);
+  await expect(elementRows(page)).toHaveCount(3);
+  await blurFocus(page);
+
+  for (let round = 0; round < 3; round++) {
+    // Mehr Rückgängig als Schritte: über den Anfang hinaus darf nichts passieren.
+    for (let k = 0; k < 6; k++) await page.keyboard.press("ControlOrMeta+z");
+    await expect(elementRows(page)).toHaveCount(0);
+    for (let k = 0; k < 6; k++) await page.keyboard.press("ControlOrMeta+Shift+z");
+    await expect(elementRows(page)).toHaveCount(3);
+  }
+  // „Neues Projekt" ist nicht rückgängig zu machen (Verlauf beginnt neu).
+  await expect(page.locator(".project-name")).toHaveText("Leeres Projekt");
+});

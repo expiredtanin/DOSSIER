@@ -32,8 +32,8 @@ beforeEach(() => {
       ...sampleProject,
       drawings2d: [circleDrawing, arcDrawing],
     },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

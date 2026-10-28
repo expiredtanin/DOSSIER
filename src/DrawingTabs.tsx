@@ -7,9 +7,11 @@
 // „+" sichert den aktuellen Stand als neuen Tab; der Name wird automatisch
 // bestimmt (aktive Zeichnungskombination, falls ihre Sichtbarkeits-Map exakt
 // passt, sonst das aktive Blatt) — kein Tipp-Dialog, wie ein Browser-Tab.
-// „×" löscht einen Tab; mindestens einer bleibt immer erhalten (fehlt der
-// letzte, wird beim nächsten Mount automatisch einer aus dem aktuellen Stand
-// nachgezogen).
+// „×" löscht einen Tab; mindestens einer bleibt immer erhalten. Hat das Projekt
+// noch keinen Ausschnitt, zeigt die Leiste einen Tab für den aktuellen Stand, ohne
+// ihn ins Projekt zu schreiben (das früher automatische Anlegen war eine
+// Projektänderung: nach jedem Rückgängig bis zum Anfang landete sie neu im Verlauf
+// und verwarf den Redo-Stapel). Erst „+" legt einen echten Ausschnitt an.
 //
 // Ersetzt die frühere Ein-Tab-je-Geschoss-Leiste: ein Ausschnitt kann JEDE
 // Zeichnungsebenen-Art referenzieren (Geschoss, Schnitt, Ansicht, Zeichnung),
@@ -18,7 +20,6 @@
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import { useEffect } from "react";
 import type { Project } from "./model/types";
 import { t } from "./i18n";
 
@@ -35,6 +36,8 @@ export interface ViewSnapshotTabsHandlers {
   onCaptureAuto: () => string;
   /** Löscht einen Ausschnitt. */
   onDelete: (id: string) => void;
+  /** Name für den Tab des aktuellen Stands, solange das Projekt keinen Ausschnitt hat. */
+  autoName: () => string;
 }
 
 export function DrawingTabs({
@@ -47,15 +50,26 @@ export function DrawingTabs({
   const snapshots = project.viewSnapshots ?? [];
   const { selectedId, onApply, onCaptureAuto, onDelete } = handlers;
 
-  // Es muss immer mindestens ein Tab existieren (Nutzer-Vorgabe): ein frisches
-  // oder altes Projekt ohne einen einzigen Ausschnitt bekommt beim ersten
-  // Mount automatisch einen aus dem aktuellen Stand.
-  useEffect(() => {
-    if (snapshots.length === 0) onCaptureAuto();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshots.length]);
-
-  if (snapshots.length === 0) return null;
+  // Es muss immer mindestens ein Tab sichtbar sein (Nutzer-Vorgabe): ohne gespeicherten
+  // Ausschnitt einer für den aktuellen Stand (nur Anzeige, keine Projektänderung).
+  if (snapshots.length === 0) {
+    return (
+      <div className="drawing-tabs" role="tablist" aria-label={t("tabs.drawings")}>
+        <button type="button" role="tab" aria-selected className="drawing-tab active" title={handlers.autoName()}>
+          <span className="drawing-tab-label">{handlers.autoName()}</span>
+        </button>
+        <button
+          type="button"
+          className="drawing-tab-add"
+          aria-label={t("tabs.add")}
+          title={t("tabs.add")}
+          onClick={() => onCaptureAuto()}
+        >
+          +
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="drawing-tabs" role="tablist" aria-label={t("tabs.drawings")}>

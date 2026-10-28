@@ -40,8 +40,8 @@ const baseProject = {
 beforeEach(() => {
   setState({
     project: JSON.parse(JSON.stringify(baseProject)),
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });
@@ -62,15 +62,14 @@ describe("moveRoofGrip — Eckpunkt-Resize", () => {
   });
 
   it("hochfrequente Drags koaleszieren zu EINEM Undo-Schritt", () => {
-    // Saubere Koaleszenz-Grenze: eine diskrete (keyless) Aktion setzt
-    // lastCoalesceKey zurück, damit der erste Drag garantiert pusht (der
-    // Coalesce-Zustand ist ein Modul-Closure und überlebt sonst zwischen Tests).
+    // Saubere Koaleszenz-Grenze: eine diskrete (keyless) Aktion setzt den
+    // Koaleszenz-Schlüssel im Kern zurück, danach Verlauf leeren.
     getState().updateRoof("RF1", { overhang: 0.1 });
-    setState({ undoStack: [], canUndo: false });
+    getState().clearHistory();
     getState().moveRoofGrip("RF1", 2, { x: 5, y: 3 });
     getState().moveRoofGrip("RF1", 2, { x: 5.5, y: 3.5 });
     getState().moveRoofGrip("RF1", 2, { x: 7, y: 5 });
-    expect(getState().undoStack.length).toBe(1);
+    expect(getState().undoDepth).toBe(1);
     getState().undo();
     // Nach einem Undo wieder der Ausgangsumriss.
     expect(getState().project.roofs![0].outline).toEqual(baseProject.roofs![0].outline);

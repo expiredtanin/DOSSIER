@@ -3656,6 +3656,7 @@ export default function App() {
             selectedId: baseHost.selectedViewSnapshotId,
             onApply: baseHost.onApplyViewSnapshot,
             onCaptureAuto: baseHost.onCaptureViewSnapshotAuto,
+            autoName: baseHost.viewSnapshotAutoName,
             onDelete: baseHost.onDeleteViewSnapshot,
           }}
           onSelectLevel={setActiveLevelId}

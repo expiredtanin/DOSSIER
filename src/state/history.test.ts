@@ -23,11 +23,12 @@ import { HISTORY_LIMIT } from "./historySlice";
 beforeEach(() => {
   setState({
     project: sampleProject,
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });
+  getState().clearHistory();
 });
 
 describe("Undo/Redo", () => {
@@ -59,7 +60,7 @@ describe("Undo/Redo", () => {
   });
 
   it("undo bei leerem Stack ist ein No-Op (kein Crash)", () => {
-    expect(getState().undoStack.length).toBe(0);
+    expect(getState().undoDepth).toBe(0);
     const before = getState().project;
 
     expect(() => getState().undo()).not.toThrow();
@@ -69,7 +70,7 @@ describe("Undo/Redo", () => {
   });
 
   it("redo bei leerem Stack ist ein No-Op (kein Crash)", () => {
-    expect(getState().redoStack.length).toBe(0);
+    expect(getState().redoDepth).toBe(0);
     const before = getState().project;
 
     expect(() => getState().redo()).not.toThrow();
@@ -81,27 +82,27 @@ describe("Undo/Redo", () => {
   it("eine neue Aktion nach undo() verwirft den Redo-Stack", () => {
     getState().toggleLevelVisible("eg");
     getState().undo();
-    expect(getState().redoStack.length).toBe(1);
+    expect(getState().redoDepth).toBe(1);
 
     getState().toggleLevelVisible("og");
 
-    expect(getState().redoStack.length).toBe(0);
+    expect(getState().redoDepth).toBe(0);
     expect(getState().canRedo).toBe(false);
     // Die neue Aktion selbst bleibt natürlich undo-fähig.
     expect(getState().canUndo).toBe(true);
   });
 
   it("die allererste Änderung bleibt exakt EIN Undo-Schritt (kein Start-Eintrag)", () => {
-    expect(getState().undoStack.length).toBe(0);
+    expect(getState().undoDepth).toBe(0);
     getState().toggleLevelVisible("eg");
-    expect(getState().undoStack.length).toBe(1);
+    expect(getState().undoDepth).toBe(1);
   });
 
   it("history-Stack verwirft die ältesten Einträge über HISTORY_LIMIT hinaus", () => {
     for (let i = 0; i < HISTORY_LIMIT + 10; i++) {
       getState().toggleLevelVisible("eg");
     }
-    expect(getState().undoStack.length).toBe(HISTORY_LIMIT);
+    expect(getState().undoDepth).toBe(HISTORY_LIMIT);
   });
 
   it("ein Grip-Drag (viele setProject-Aufrufe in Serie) koalesziert zu EINEM Undo-Schritt", () => {
@@ -118,19 +119,19 @@ describe("Undo/Redo", () => {
     const w1After = getState().project.walls.find((w) => w.id === "W1");
     expect(w1After?.start).toEqual({ x: 2, y: 0 });
     // Trotz 20 Aufrufen: genau EIN Undo-Schritt.
-    expect(getState().undoStack.length).toBe(1);
+    expect(getState().undoDepth).toBe(1);
 
     getState().undo();
 
     const w1Restored = getState().project.walls.find((w) => w.id === "W1");
     expect(w1Restored?.start).toEqual({ x: 0, y: 0 });
-    expect(getState().undoStack.length).toBe(0);
+    expect(getState().undoDepth).toBe(0);
   });
 
   it("zwei Drags auf UNTERSCHIEDLICHE Griffe erzeugen ZWEI Undo-Schritte", () => {
     getState().moveGripOf(null, "W1", 0, { x: 1, y: 0 });
     getState().moveGripOf(null, "W1", 1, { x: 6, y: 0 });
 
-    expect(getState().undoStack.length).toBe(2);
+    expect(getState().undoDepth).toBe(2);
   });
 });

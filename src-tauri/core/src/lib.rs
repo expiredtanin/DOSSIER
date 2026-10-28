@@ -46,6 +46,7 @@ pub mod opening_geom;
 pub mod plan_openings;
 pub mod delaunay;
 pub mod document;
+pub mod ops;
 pub mod mesh_section;
 pub mod model;
 pub mod model3d;

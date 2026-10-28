@@ -21,8 +21,8 @@ beforeEach(() => {
   vi.spyOn(Date, "now").mockImplementation(() => clock++);
   setState({
     project: { ...sampleProject, components: sampleProject.components.slice(0, 1), pens: [], penSets: [], activePenSetId: undefined },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

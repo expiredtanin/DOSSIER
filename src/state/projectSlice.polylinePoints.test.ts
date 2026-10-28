@@ -24,8 +24,8 @@ function setPolyline(geom: Extract<Drawing2D["geom"], { shape: "polyline" }>) {
   };
   setState({
     project: { ...sampleProject, drawings2d: [d] },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

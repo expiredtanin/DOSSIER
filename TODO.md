@@ -176,8 +176,31 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     kommen über `planDomains` aus dem Dokument ([K3d]); übrig in `generatePlan`: 2D-Zeichnungen, Schatten/Baurecht, Abzugskörper.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
-  - ○ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
+  - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
+    **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche
+    Ablehnungen und Meldungen; NaN/±Infinity reisen als Marken `"\u0001NaN"`, weil JSON sie nicht kennt), `document.rs`
+    `commit`/`undo`/`redo`: atomar anwenden, prüfen, bei Verstoss über die inversen Ops zurückrollen; Verlauf als **inverse Ops**
+    statt Schnappschüssen (feine Inverse je Op, Feld-Sicherung nur bei Alt-Doppelungen/fehlendem Feld; Feld-Position wird mit
+    zurückgegeben, Undo ist JSON-exakt). coalesceKey + Zeitfenster (400 ms) und Gruppen (`doc_group_begin/end`, Store
+    `groupChanges`) = ein Schritt; Drag-Serien werden verdichtet (wachsen nicht je Mausbewegung); Grenzen 100 Schritte /
+    256 MiB (älteste fallen weg). Store: `setProject` → `diffToOps` → `ProjectDocument.commit` (Kern) → TS führt die
+    Leseansicht mit denselben Ops nach (`applyOps`); `undo`/`redo` holen die Ops aus dem Kern (`doc_undo`/`doc_redo`).
+    TS-Snapshot-Undo und TS-`validateOps`/`validateProject`-Rechnung gelöscht (Fassaden über `ops_validate`/`project_validate`).
+    Das Store-Dokument ist zugleich das Abfrage-Dokument (`documentFor` → kein zweiter Spiegel). Store-Felder
+    `undoStack/redoStack` → `undoDepth/redoDepth`, `clearHistory()`.
+    **Entscheid Richtung (28.10.):** halb umgedreht. Der Kern ist Autorität für Prüfung und Verlauf; das TS-Projekt ist eine
+    Leseansicht, die nur mit Ops nachgeführt wird, die der Kern angenommen (`commit`) oder geliefert (Undo/Redo) hat — so kann
+    sie nicht auseinanderlaufen (Test: 1000 Zufallsänderungen, Undo bis Anfang/Redo bis Ende, Kern-JSON == TS-Projekt).
+    `diffToOps` bleibt vorerst als Adapter, weil ~50 Store-Aktionen, Griffe, Panels und `src/commands` noch Projekt → Projekt
+    liefern; die volle Umkehr (ganzes Projekt als JSON zurück) ist verworfen: sie kostet je Schritt Parse-Zeit und zerstört die
+    Objekt-Identität unveränderter Elemente, auf der die Plan-/3D-Caches beruhen. Patches (Ops) erhalten sie. Änderungen vorbei an
+    den Ops (direktes `setState` in Tests) zieht der Spiegel per Differenz nach und leert den Verlauf.
+    **Messung** (Linux-Container): Kern nativ (release), 5000 Wände: commit 51 µs, Undo 37 µs, Redo 36 µs je Schritt. Über WASM im
+    Store-Weg (vitest, 3000 Wände, 500 Schritte): 2,6 ms/Schritt, davon `diffToOps`+`applyOps` in TS ≈ 2,0 ms, Kern-Commit ≈ 0,4 ms;
+    Undo 0,08 ms, Redo 0,07 ms; Verlauf ≈ 780 KiB für 500 Schritte.
+    Offen: Befehle/Store-Aktionen erzeugen Ops direkt (dann entfällt `diffToOps`, der grösste Kostenanteil); `applyOps` bleibt als
+    Patch-Anwendung der Leseansicht; Ebenen-/Gruppen-Logik (`groupActions.ts`) nach Rust; Undo-Verlauf als Liste in der UI [84].
   - ○ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
@@ -268,8 +291,14 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
 
 - ◐ **[6] Jede Aktion ist ein Befehl mit JSON-Parametern.** Registratur vorhanden, aber interaktiv;
   Panels/Griffe ändern das Projekt direkt. · L
-- ○ **[7] Zentrale Validierung nach jedem Befehl.** · M
-- ◐ **[8] Undo über Befehle.** Undo existiert (Snapshots, coalesceKey), nicht befehlsbasiert. · M
+- ◐ **[7] Zentrale Validierung nach jedem Befehl.** 28.10.: jede Projektänderung wird im Kern geprüft (`ops.rs`, NaN/neue doppelte
+  ids → Rücknahme mit Meldung); weitere Regeln (Bezüge, Geometrie) offen. · M
+- ◐ **[8] Undo über Befehle.** 28.10.: Verlauf im Rust-Kern als inverse Ops (coalesceKey, Gruppen, Speichergrenze), keine
+  28.10. (Mac-Test Maintainer): nach mehrmaligem Ganz-zurück/Vor war Redo weg. Ursache: die Ausschnitt-Leiste legte bei
+  leerem `viewSnapshots` automatisch einen Ausschnitt an (Projektänderung → neuer Verlaufsschritt). Jetzt nur Anzeige-Tab
+  ohne Projektänderung; Neu/Öffnen/Vorlage/Wiederherstellen leeren den Verlauf; Browser-Öffnen liest Text statt
+  ArrayBuffer. Tests: `history.roundtrip.test.ts`, e2e „Mehrmals ganz zurück und wieder vor“.
+  Snapshots mehr ([K4] S3). Offen: Befehle erzeugen Ops direkt statt `diffToOps`. · M
 - ◐ **[9] MCP-Brücke.** Headless `dossier-cli … mcp`; Brücke zum offenen Fenster fehlt. · M
 
 ### Daten

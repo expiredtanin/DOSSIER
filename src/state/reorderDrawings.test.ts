@@ -27,8 +27,8 @@ beforeEach(() => {
       ...sampleProject,
       drawings2d: [rect("A"), rect("B"), rect("C"), rect("D")],
     },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });
