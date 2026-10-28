@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync, readdirSync, statSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./main";
-import { serializeProject } from "../core";
+import { projectToModel3d, serializeProject } from "../core";
 import { sampleProject } from "../model/sampleProject";
 
 const dir = mkdtempSync(join(tmpdir(), "dossier-cli-"));
@@ -45,6 +45,47 @@ describe("dossier-cli", () => {
     expect(svg).toMatch(/^<\?xml/);
     expect(svg).toContain("<polygon");
     expect(svg).toContain("</svg>");
+  });
+
+  it("Plan als render2d-Szene (JSON)", async () => {
+    const out = join(dir, "eg.scene.json");
+    expect(await call("plan", "--format", "json", "--out", out)).toBe(0);
+    const scene = JSON.parse(readFileSync(out, "utf8"));
+    expect(scene.fills.length).toBeGreaterThan(0);
+    expect(scene.fills[0].pts[0]).toHaveLength(2);
+    expect(scene.fills[0].color).toHaveLength(4);
+    expect(Array.isArray(scene.texts)).toBe(true);
+  });
+
+  it("Ansichtspaket (bundle) für die egui-Oberfläche", async () => {
+    const out = join(dir, "demo.bundle.json");
+    expect(await call("bundle", "--out", out)).toBe(0);
+    const b = JSON.parse(readFileSync(out, "utf8"));
+    expect(b.format).toBe("dossier-bundle");
+    expect(b.version).toBe(1);
+    expect(b.name).toBe(sampleProject.name);
+    const floors = sampleProject.drawingLevels.filter((l) => l.kind === "floor");
+    expect(b.levels.map((l: { id: string }) => l.id)).toEqual(floors.map((l) => l.id));
+    const eg = b.levels[0];
+    expect(eg.scene.fills.length).toBeGreaterThan(0);
+    // 3D je Geschoss: zusammen ergeben die Geschosse das ganze Modell (Wand-Schichtbänder)
+    expect(eg.model3d.walls.length).toBeGreaterThan(0);
+    const sum = b.levels.reduce((s: number, l: { model3d: { walls: unknown[] } }) => s + l.model3d.walls.length, 0);
+    expect(sum).toBe(projectToModel3d(sampleProject).walls.length);
+    const wall = eg.elements.find((e: { kind: string }) => e.kind === "wall");
+    expect(wall.shape.type).toBe("segment");
+    expect(wall.shape.width).toBeGreaterThan(0);
+    expect(wall.props.some(([k]: [string, unknown]) => k === "height")).toBe(true);
+    const room = eg.elements.find((e: { kind: string }) => e.kind === "room");
+    expect(room.shape.type).toBe("polygon");
+    expect(b.kennzahlen.levels.length).toBe(floors.length);
+    expect(b.raumprogramm).toBeDefined();
+  });
+
+  it("Beispielprojekt ohne Datei (:beispiel)", async () => {
+    const out = join(dir, "beispiel.bundle.json");
+    expect(await run([":beispiel", "bundle", "--out", out])).toBe(0);
+    expect(JSON.parse(readFileSync(out, "utf8")).name).toBe(sampleProject.name);
   });
 
   it("IFC, OBJ, CSV, DXF", async () => {
