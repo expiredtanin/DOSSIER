@@ -57,6 +57,9 @@ import { stepTextToImportedMeshes } from "./io/stepImport";
 import { formatIfcReport, ifcBytesToImportedMeshes } from "./io/ifcImport";
 import { formatIfcElementsSummary, ifcElementsToProject, readIfcElements } from "./io/ifcElements";
 import { IfcImportDialog, type IfcImportMode } from "./ui/IfcImportDialog";
+import { MeshImportHost } from "./ui/MeshImportDialog";
+import { openMeshFileDialog, requestMeshImport, splitMeshFiles } from "./state/meshImportStore";
+import { formatMeshReport, isMeshFile } from "./io/meshImport";
 import { projectGeoOrigin } from "./model/geoRebase";
 import { applyClashMarkers, runClashCheck } from "./analysis/clash";
 import { checkForUpdate } from "./update/checkForUpdate";
@@ -1748,6 +1751,7 @@ export default function App() {
   };
   /** Datei aus Import-Dialog oder Drag & Drop: IFC direkt, sonst DXF/DWG-Dialog. */
   const openImportForAnyFile = (f: File) => {
+    if (isMeshFile(f.name)) return requestMeshImport(f);
     if (isPointCloudFile(f.name)) return requestPointCloudImport(f);
     if (/\.ifc$/i.test(f.name)) importIfcFile(f);
     else openImportForFile(f);
@@ -2456,6 +2460,7 @@ export default function App() {
       onImportStep: () => stepInputRef.current?.click(),
       onImportIfc: () => ifcInputRef.current?.click(),
       onImportPointCloud: () => openPointCloudFileDialog(),
+      onImportMesh: () => openMeshFileDialog(),
       onClashCheck: () => {
         const p0 = project;
         runClashCheck(p0)
@@ -3146,6 +3151,13 @@ export default function App() {
   const { onAppDragEnter, onAppDragOver, onAppDragLeave, onAppDrop } = useFileDropImport(
     setDropActive,
     openImportForAnyFile,
+    (files) => {
+      // Mehrere Dateien: Modell + Begleitdateien (.mtl/.bin) gemeinsam an den Mesh-Import.
+      const r = splitMeshFiles(files);
+      if (!r) return false;
+      requestMeshImport(r.file, r.sidecars);
+      return true;
+    },
   );
 
   // Host-Context für die Panels — siehe state/usePanelHostBase.ts.
@@ -3350,6 +3362,15 @@ export default function App() {
       />
       {/* Punktwolken-Import ([27]): verstecktes Datei-Feld + Dialog (UI-Store, nicht im Projekt). */}
       <PointCloudImportHost project={project} />
+      {/* 3D-Modell-Import (OBJ/STL/glTF/GLB/PLY): verstecktes Datei-Feld + Dialog. */}
+      <MeshImportHost
+        project={project}
+        notify={notify}
+        onImport={(meshes, report) => {
+          if (meshes.length) addContextObjectsAndFit(meshes);
+          notify(formatMeshReport(report, t), meshes.length === 0 || report.truncated ? "warning" : "info");
+        }}
+      />
       {/* Verstecktes IFC-Datei-Input (Menü Datei, IFC importieren). */}
       <input
         ref={ifcInputRef}
@@ -3437,6 +3458,7 @@ export default function App() {
               onSaveProject={onSaveProject}
               onImport={() => dxfInputRef.current?.click()}
               onImportPointCloud={() => openPointCloudFileDialog()}
+              onImportMesh={() => openMeshFileDialog()}
               onUndo={undo}
               onRedo={redo}
               canUndo={canUndo}

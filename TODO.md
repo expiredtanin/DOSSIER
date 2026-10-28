@@ -733,6 +733,34 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   truck-Extrusionen (nur Prisma-Näherung) nicht wie im 3D; Dreieckszahl nicht gegen die GPU-Puffer von render3d gemessen
   (Wand-Löcher und Decken aus denselben Ableitungen, Dächer/Stützen/Treppen/Öffnungen identisch); nicht in
   Blender/Twinmotion/Enscape geöffnet, nur Validator; nicht in der Tauri-App getestet. · S
+- ◐ **[C12] Allgemeiner Mesh-Import als Kontext-Meshes** (Gegenstück zu [C11], 28.10.): Nachbargebäude, Möbel und
+  Umgebungsmodelle aus SketchUp/Blender/Rhino. Eigener Code in `src-tauri/fileio/src/mesh_import.rs` (OBJ + MTL, STL,
+  PLY mit Flächen) und `mesh_import_gltf.rs` (glTF 2.0/GLB mit kleinem JSON-Leser, keine neue Abhängigkeit; earcutr
+  für N-Ecke), Bindung `import_mesh` in `pkgFileIo`. OBJ: `o`/`g`/`usemtl` → je Objekt+Material ein Mesh (Gruppe = Ebene),
+  Polygone trianguliert (Drehsinn bleibt), negative Indizes, MTL `Kd`/`d`/`Tr` (`.mtl` nur, wenn mitgegeben). STL: ASCII
+  (mehrere `solid`) und binär, Eckpunkte verschweisst, Farbvarianten VisCAM/SolidView und Magics (`COLOR=`). glTF:
+  .gltf (Data-URI, externe `.bin` nur wenn mitgegeben) und .glb, Knoten-Hierarchie (Matrix oder TRS, Spiegelung dreht
+  die Wicklung), TRIANGLES/STRIP/FAN, Indizes u8/u16/u32, normalisierte Ganzzahl-Positionen, `baseColorFactor` → sRGB
+  als `color`; Draco/Meshopt → Fehlermeldung. PLY ohne Flächen → Fehler `[punktwolke]`, die App öffnet dann den
+  Punktwolken-Import. Achse: glTF Y-up = Umkehr der Export-Abbildung (Datei (X,Y,Z) → Modell (X,−Z,Y)); OBJ/STL/PLY
+  Z oben / Y oben / automatisch (Kopfkommentar „Dossier/Blender/Rhinoceros“, dann kleinste Ausdehnung, sonst OBJ Y,
+  STL/PLY Z; `up_certain` meldet, ob belastbar). Einheit mm/cm/m/inch/foot (glTF immer m). Budget 6 Mio. Dreiecke,
+  24 Mio. Eckpunkte; NaN/Index ausserhalb/entartet werden verworfen und gezählt, nie Panic. TS: `io/meshImport.ts`
+  (+ `meshImport.worker.ts`, Rückfall im Thread), Abbildung wie [B3] (`color`, `layer` = Gruppe; > 2000 Objekte je
+  Gruppe+Farbe zusammengelegt), Dialog `ui/MeshImportDialog.tsx` (Einheit, Achse mit Erkennungsanzeige, Platzierung
+  „Projekt-Nullpunkt“ = Grundriss-Mitte auf 0 und Unterkante auf z = 0 / „Original-Koordinaten“ mit LV95-Rückschub wie IFC),
+  Menü „3D-Modell importieren …“ (mehrere Dateien: Modell + `.mtl`/`.bin`), Drag & Drop (auch mehrere Dateien),
+  CLI `import-mesh <datei> [--unit] [--up] [--placement] [--out]` und `convert` mit obj/stl/gltf/glb/ply als Eingabe
+  (Begleitdateien aus dem Verzeichnis). Einfügen nur über `setProject`/Ops (`addContextObjectsAndFit`).
+  Prüfung: 27 Rust-Tests (Rundreise glb/gltf/obj/stl mit den eigenen Schreibern: Dreieckszahl, Volumen, Lage, Farbe;
+  Quads/konkave N-Ecke, negative Indizes, MTL, Node-Matrizen/TRS, Strip/Fan, externe `.bin`, Budget, jede Kürzung gültiger
+  Dateien und Müll ohne Panic), 13 vitest (Fassade, Platzierung, Worker-Protokoll) + 4 CLI-Tests. `src/io/swissBuildings3d.ts`
+  hat keinen eigenen OBJ-Parser (nur DXF/DWG werden gelesen, `.obj` steht nur in der Asset-Prioritätsliste) — dort nichts
+  umzustellen. **Offen:** keine Texturen/UVs/Normalen/Vertex-Farben (glTF `COLOR_0`, OBJ `v x y z r g b`), keine
+  Instanzen-Erweiterungen (`EXT_mesh_gpu_instancing`), Sparse-Accessors ignoriert, Draco/Meshopt nicht gelesen,
+  `KHR_materials_pbrSpecularGlossiness` ignoriert; STL-Magics-Bit-Belegung nach Beschreibung, nicht an echten Dateien geprüft;
+  Achsen-Erkennung ist eine Heuristik; Dialog und Drag & Drop nicht in der Tauri-App und nicht im Browser angeklickt;
+  keine Dateien aus echtem SketchUp/Blender/Rhino gelesen (nur Rundreise und synthetische Fälle). · M
 
 ## Bewusst nicht übernommen
 

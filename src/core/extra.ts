@@ -37,3 +37,5 @@ export { readPointCloud, readPointCloudFlat, isPointCloudFile, DEFAULT_MAX_POINT
 export type { PointCloudData, PointCloudOptions, PointCloudReport } from "../io/pointCloud";
 export { readPdfVectorPage, pdfPageToImport, pdfPageInfo, pdfMetersPerPt, isPdfFile, PDF_SCALES } from "../io/pdfVector";
 export type { PdfVectorPage, PdfVectorPath, PdfVectorText } from "../io/pdfVector";
+export { readMesh, meshObjectsToImportedMeshes, formatMeshReport, isMeshFile, MESH_UNITS, MESH_UNIT_SCALE } from "../io/meshImport";
+export type { MeshObject, MeshImportReport, MeshUnit, MeshUp, MeshPlacement } from "../io/meshImport";

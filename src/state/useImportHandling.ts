@@ -122,6 +122,8 @@ export function useImageImportHandling(opts: {
 export function useFileDropImport(
   setDropActive: (active: boolean) => void,
   openImportForFile: (file: File) => void,
+  /** Mehrere abgelegte Dateien (z. B. .gltf + .bin): `true`, wenn der Aufrufer sie übernommen hat. */
+  openMany?: (files: File[]) => boolean,
 ): {
   onAppDragEnter: (e: DragEvent) => void;
   onAppDragOver: (e: DragEvent) => void;
@@ -152,7 +154,9 @@ export function useFileDropImport(
     e.preventDefault();
     dragDepthRef.current = 0;
     setDropActive(false);
-    const f = e.dataTransfer.files?.[0];
+    const all = Array.from(e.dataTransfer.files ?? []);
+    if (all.length > 1 && openMany?.(all)) return;
+    const f = all[0];
     if (f) openImportForFile(f);
   };
   return { onAppDragEnter, onAppDragOver, onAppDragLeave, onAppDrop };
