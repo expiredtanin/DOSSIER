@@ -339,9 +339,24 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
 - ◐ **[C1] DWG über `acadrust`** (28.10.: Gerüst `src-tauri/fileio` mit acadrust 0.6.8, WASM `pkgFileIo`,
   nachgeladen über `src/engine/fileioWasm.ts`; Herkunft geprüft → `NOTICE`) (Rust, Open Source): Lesen R13–2018, **Schreiben R2000**. Heute liest
   Dossier DWG über `dwgimport`/libredwg-web und kann kein DWG schreiben. Lizenz von acadrust prüfen. · M
+  - ✅ **DWG-Import** (28.10.): `fileio/src/import.rs` liest DWG R13–2018 über acadrust, gleiche Abbildung
+    wie DXF ([C2]); `io/dwgParser.ts` ist dünne Fassade (Web-Worker), libredwg-web samt Vite-Aliasen und
+    `libredwg-web.d.ts` entfernt. 7–8× schneller (200 000 Linien: 6–8 s → 0,8 s); neu auch Texte,
+    Schraffuren, Ebenenfarben, geschlossene LWPOLYLINE, MINSERT, Bulges. Offen: echte swissBUILDINGS3D-
+    v3-Kachel nur synthetisch nachgebaut geprüft (`io/testdata/tile*`), nicht in Tauri/macOS getestet.
 - ○ **[C2] DXF als eigenes Rust-Crate** (Tag-Reader/-Writer, R12–2018 ASCII und Binär lesen, R2000 schreiben):
   Vorbild für die Portierung von `io/dxfParser*.ts` und `export/exportDxf.ts` in den Rust-Kern ([K4]);
   Binär-DXF fehlt Dossier heute. · M
+  - ✅ **DXF-Import in Rust** (28.10.): statt eigenem Tag-Reader acadrust (ASCII und Binär, R12–2018+,
+    Code-Seiten) in `fileio/src/import.rs` → flacher f64-Puffer + String-Tabelle, dekodiert in
+    `io/dxfParser.ts` (Rückgabetyp unverändert, neu `insUnits`). dxf-parser entfernt; Aufteilung grosser
+    Dateien für parallele Worker von `io/dxfEntityChunker.ts` nach `fileio/src/split.rs` (Bytes statt
+    Text, ab 4 MB). Abweichungen zum alten Parser (alle gewollt): Bulges tesselliert, Kreise/Bögen/
+    Schraffuren in Blöcken behalten Kurve/Füllung, Ebene „0" in Blöcken erbt die INSERT-Ebene (sonst
+    eigene), Meshes je Ebene und auch aus Blöcken, MESH/Polygon-Mesh trianguliert, nur Modellraum (kein
+    Papierbereich), periodische Splines. Offen: Texte/ATTRIB in Blöcken nur als TEXT/MTEXT, SOLID/
+    DIMENSION/LEADER nicht abgebildet, `$INSUNITS` nur gemeldet (Koordinaten bleiben 1:1), DXF am Stück
+    ≈ 1,2–1,6× langsamer als dxf-parser (acadrust-Tokenizer; dank Aufteilung ab 4 MB insgesamt schneller).
 - ○ **[C3] MCP an die laufende App** (`--connect 127.0.0.1:7979`, Werkzeuge `screenshot`, `ui_click`,
   `render` → PNG, `execute` = jeder Befehl mit JSON): genau die fehlende Hälfte von [9]; setzt [6] voraus. · M
 - ○ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless

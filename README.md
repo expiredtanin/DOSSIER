@@ -158,8 +158,8 @@ Liste beschreibt den Ist-Zustand des Codes, nicht eine Zusage._
 
 | Format / Quelle | Ergebnis |
 |---|---|
-| DXF | 2D-Elemente; fehlende Layer werden zu Kategorien. Grosse Dateien (Kataster ganzer Städte) werden parallel in Web Workern geparst. |
-| DWG | über `@mlightcad/libredwg-web`, inkl. Polyface-Meshes |
+| DXF | ASCII und Binär (R12–2018+) über `acadrust` (Rust/WASM): 2D-Elemente, Texte, Schraffuren, Blöcke, 3D-Meshes; fehlende Layer werden zu Kategorien. Grosse Dateien (Kataster ganzer Städte) werden parallel in Web Workern gelesen. |
+| DWG | R13–2018 über `acadrust` (Rust/WASM), gleicher Umfang wie DXF, inkl. Polyface-Meshes |
 | STEP (ISO 10303, B-Rep) | tessellierte Körper im Kontext |
 | PDF, Bilder | als Bild-Element im Plan oder im Layout |
 | swisstopo | Ortssuche, swissBUILDINGS3D (2.0/3.0), swissALTI3D-Gelände, SWISSIMAGE-Orthofoto — radiusgenau zugeschnitten, LV95-georeferenziert |
@@ -228,7 +228,7 @@ gebaut.
 | Volumenkörper | `trucksolid` (truck 0.6, csgrs) als WASM: B-Rep, Booleans, STEP-I/O, Mesh-Kennwerte |
 | PDF/SVG | eigene Druck-SVG-Erzeugung, `jspdf` + `svg2pdf.js` |
 | IFC, DXF, STEP | eigene Writer bzw. truck-stepio |
-| Import | `dxf-parser` (in Workern), `@mlightcad/libredwg-web`, `pdfjs-dist`, eigene `.lin`/`.pat`-Parser |
+| Import | `acadrust` (DXF/DWG, Rust-Crate `src-tauri/fileio`, in Workern), `pdfjs-dist`, eigene `.lin`/`.pat`-Parser |
 | Farbe | `lcms-wasm` (Little CMS) |
 
 ### Rust-Crates (`src-tauri/`)

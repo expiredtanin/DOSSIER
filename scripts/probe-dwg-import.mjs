@@ -1,6 +1,6 @@
 // Browser-Laufzeittest: echter DWG-Import über den App-Import-Pfad.
 // Lädt eine echte DWG über das versteckte File-Input (uploadFile), wartet bis
-// LibreDWG-WASM geparst hat, und screenshotet den Import-Dialog mit der ECHTEN
+// das Rust-Format-Modul (Web-Worker) gelesen hat, und screenshotet den Import-Dialog mit der ECHTEN
 // Zusammenfassung (Konturen/Layer) statt des ODA-Hinweises.
 
 import puppeteer from "puppeteer";

@@ -75,8 +75,8 @@ type Sources = {
 };
 
 const DEFAULT_SOURCES: Sources = {
-  // v3 als Default (2026-08-31): liest DWG „separated" über die LibreDWG-
-  // Low-Level-API (s. swissBuildings3d.ts-Moduldoc) und liefert Dach getrennt
+  // v3 als Default (2026-08-31): liest DWG „separated" (Rust-Format-Modul,
+  // s. swissBuildings3d.ts-Moduldoc) und liefert Dach getrennt
   // von Wand/Boden (eigene, ausblendbare Ebene „Dächer") — pro Kachel robust
   // (einzelne kaputte/zu grosse Kacheln werden übersprungen, kein Absturz des
   // gesamten Imports); fällt bei leeren v3-Treffern automatisch auf v2 zurück.
@@ -261,8 +261,8 @@ export function ContextImportDialog({
       // Stadt) können `meshes`/`features` hunderttausende Einträge haben — der
       // Spread-Operator sprengt dann die Argumentzahl-Grenze von `push`
       // (RangeError "Maximum call stack size exceeded"), dieselbe, bereits
-      // dokumentierte Falle wie in `swissBuildings3d.ts::concatMeshes`/
-      // `dwgParser.ts` (dort an einer echten 2000-Gebäude-Kachel verifiziert).
+      // dokumentierte Falle wie in `swissBuildings3d.ts::concatMeshes` (an einer
+      // echten 2000-Gebäude-Kachel verifiziert).
       // Reine `for`-Schleifen sind unbegrenzt sicher.
       if (buildingsResult) {
         if ("meshes" in buildingsResult) {
