@@ -336,10 +336,12 @@ Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
     geprüft: Bild im Browser (Chromium präsentiert hier keine WebGPU-Frames, auch nicht headful unter
     Xvfb), Tauri-App/macOS-Metal, echte LAS/E57-Dateien, 2–5 Mio. Punkte (Zeit/Speicher), Achsrichtung
     gegen ein echtes swissALTI3D-Gelände desselben Bezugs.
+  - **Einpassen (28.10.):** `set_view_preset` und der Orbit-Seed (`view_fit`) beziehen sichtbare Punktwolken in
+    die Bounding-Box ein (`math::merge_bounds`/`fit_target_dist`, Rust-Test); die erste sichtbare Wolke passt
+    die Kamera automatisch ein. Nicht im Browser mit Bild geprüft (leerer WebGPU-Frame im Container).
   - Offen: **beim Neuladen sind die Wolken weg** (kein Autosave) → Stufe 2 mit Modellfeld
     `Project.pointClouds` + Asset im IndexedDB/neben der Datei (Vorschlag unter [B9]); Speicher doppelt
-    (JS-Store + Rust-CPU-Kopie für Farbwechsel + GPU); Kamera-Einpassen (`set_view_preset`) kennt die
-    Wolke nicht; Grundriss/Schnitt (Punkte in Scheibe), Fang an Punkten, Clip-Box; sRGB-Ziel in
+    (JS-Store + Rust-CPU-Kopie für Farbwechsel + GPU); Grundriss/Schnitt (Punkte in Scheibe), Fang an Punkten, Clip-Box; sRGB-Ziel in
     `render_png` hellt Punktfarben (wie alle Vertexfarben) auf.
 
 ## Übernahme aus BIMCraft [B]
@@ -525,10 +527,26 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   alle 71 buildingSMART-Beispieldateien (Test Cases v2.1/v3.0, lokal; CC BY-ND, deshalb nicht im Repo,
   Test `buildingsmart_beispiele` über `BCF_TESTCASES`), vitest Fassade und GlobalId-Zuordnung gegen den
   IFC-Export des Demo-Hauses. Nicht geprüft: Austausch mit echter Solibri/BIMcollab-Software, Tauri-App.
-  Offen: Kamera des Viewpoints setzen und für neue Themen aus dem 3D-Viewport lesen (`Wasm3DViewport` hält
-  die Orbit-Kamera intern, ohne Setter/Getter; Achsen Z-oben wie IFC, Viewport vermutlich Y-oben);
-  Snapshot aus dem Viewport; `extensions.xml` (3.0), Farbgruppen/Linien, BimSnippet, Dokument-Referenzen
-  und verwandte Themen gehen beim Speichern verloren; Panel in den Standard-Dock aufnehmen. · M
+  **Kamera (28.10.):** `viewport/cameraBridge.ts` (`getCamera`/`setCamera({animate})`/`captureSnapshot`/`setSection`/
+  `fitView`; der Viewport meldet sich an, ohne Viewport null/false) in MODELL-Koordinaten (z oben); Achsen
+  Modell (x, y, Höhe) → world (x, Höhe, y) (Tausch, belegt gegen `projectToModel3d`; Gelände/Punktwolken
+  negieren y, s. [27]). `panels/bcfView.ts`: BCF-Weltkoordinaten = Modell + LV95-Versatz `projectGeoOrigin`
+  (genau wie `exportIfcSpf`/`projectToWorldCoords`, Höhe unverändert). Klick auf Thema/Viewpoint-Vorschau
+  setzt Kamera (perspektivisch + orthogonal, Fahrt 350 ms) und eine senkrechte Schnittebene (live,
+  Knopf zum Aufheben), Auswahl wie zuvor; „Thema aus Auswahl", „Ansicht aufnehmen" und Kommentar
+  (Häkchen „Aktuelle 3D-Ansicht anhängen") legen einen Viewpoint mit Kamera + PNG-Schnappschuss an.
+  Annahmen: FieldOfView vertikal, ViewToWorldScale = sichtbare Breite, ClippingPlane.Direction zeigt auf
+  die weggeschnittene Seite (wie `set_section_plane`). render3d additiv: `camera_state`, `view_fit`
+  (`math::fit_target_dist`/`merge_bounds`). Geprüft: vitest Achsabbildung + Rundreisen (inkl. echter
+  .bcfzip 2.1/3.0), Chromium-Build (`scripts/probe-bcf-camera.mjs`): Kamera setzen/lesen/aufnehmen
+  per Debug-Handle `window.__dossierCamera`. NICHT geprüft: Schnappschuss mit echtem Bild (im Container
+  ist der WebGPU-Frame leer → `captureSnapshot` liefert null, Viewpoint trägt dann nur die Kamera),
+  nativer macOS-Pfad (Metal-Fenster `native.rs` hat eigene Orbit-Kamera, NICHT angebunden: dort nur Anzeige
+  und Auswahl), Austausch mit echter Solibri/BIMcollab-Software (Achsen-/FOV-Annahmen oben).
+  Offen: Kamera im nativen Metal-Fenster; Schnittebene beim Anlegen eines Themas aus dem Live-Schnitt
+  übernehmen; Roll der Kamera (Orbit kennt keinen); schräge Schnittebenen nur angezeigt;
+  `extensions.xml` (3.0), Farbgruppen/Linien, BimSnippet, Dokument-Referenzen und verwandte Themen gehen
+  beim Speichern verloren; Panel in den Standard-Dock aufnehmen. · M
 - ○ **[B6] Wand unter Dach als Prismen zwischen Ebenen** (für [G2]). `walls.rs:413–472, 592–654`. · M
 - ○ **[B7] Dach-Verschneidung und Gauben in 2.5D** (für [G5]). · M · nach [B2]/[B6].
 - ○ **[B8] Bogenwände, schneller Weg** (für [T2]). · S/M–L
