@@ -16,6 +16,8 @@ pub mod import;
 pub mod split;
 #[cfg(feature = "web")]
 mod web_import;
+pub mod ifc_step;
+pub mod ifc_import;
 
 use std::collections::HashMap;
 use std::io::Cursor;

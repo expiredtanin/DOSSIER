@@ -8,3 +8,6 @@ acadrust (https://github.com/hakanaktt/acadrust), MPL-2.0
 
 i_overlay (https://github.com/iShape-Rust/iOverlay), MIT OR Apache-2.0
   Abhängigkeit von src-tauri/core (Polygon-Booleans).
+
+earcutr (https://github.com/frewsxcv/earcutr), ISC License — Rust-Port von mapbox/earcut (ISC)
+  Abhängigkeit von src-tauri/fileio (IFC-Import: Dreieckszerlegung von Profilen und Flächen), unverändert.

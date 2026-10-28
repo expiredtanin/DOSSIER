@@ -34,6 +34,7 @@ export interface NativeAppMenuHandlers {
   onExportStl: () => void;
   onExportStep: () => void;
   onImportStep: () => void;
+  onImportIfc: () => void;
   onClashCheck: () => void;
   onKennzahlen: () => void;
 
@@ -173,6 +174,10 @@ export function useNativeAppMenu(
           await MenuItem.new({
             text: t("menu.native.importStep"),
             action: () => handlersRef.current.onImportStep(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.importIfc"),
+            action: () => handlersRef.current.onImportIfc(),
           }),
           await Submenu.new({
             text: t("menu.native.export"),
