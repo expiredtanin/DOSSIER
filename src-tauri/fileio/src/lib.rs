@@ -14,6 +14,8 @@ pub mod export;
 pub mod common;
 pub mod import;
 pub mod split;
+pub mod text;
+pub mod annotation;
 #[cfg(feature = "web")]
 mod web_import;
 pub mod ifc_step;

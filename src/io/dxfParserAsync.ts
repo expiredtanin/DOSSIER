@@ -43,8 +43,13 @@ function runWorker(req: DxfWorkerRequest, transfer: Transferable[] = []): Promis
   });
 }
 
-async function runParseWorker(data: ArrayBuffer, idPrefix: string, transfer: boolean): Promise<DxfImportResult> {
-  const res = await runWorker({ type: "parse", data }, transfer ? [data] : []);
+async function runParseWorker(
+  data: ArrayBuffer,
+  idPrefix: string,
+  transfer: boolean,
+  layout?: string,
+): Promise<DxfImportResult> {
+  const res = await runWorker({ type: "parse", data, layout }, transfer ? [data] : []);
   if (res.type === "result") return decodeImport(res.geom, res.strings, idPrefix);
   throw new Error(res.type === "error" ? res.message : "Unerwartete Worker-Antwort");
 }
@@ -67,7 +72,16 @@ function mergeResults(results: DxfImportResult[]): DxfImportResult {
     }
     diagnostics.total += r.diagnostics?.total ?? 0;
   }
-  return { meshes, contours, texts, layerColors, diagnostics, insUnits: results[0]?.insUnits, unitScale: results[0]?.unitScale };
+  return {
+    meshes,
+    contours,
+    texts,
+    layerColors,
+    diagnostics,
+    insUnits: results[0]?.insUnits,
+    unitScale: results[0]?.unitScale,
+    layouts: results[0]?.layouts,
+  };
 }
 
 function toArrayBuffer(data: string | ArrayBuffer): ArrayBuffer {
@@ -94,14 +108,16 @@ function buildChunks(bytes: Uint8Array, offsets: number[]): ArrayBuffer[] {
 /**
  * Liest eine DXF- oder DWG-Datei (Text oder Bytes) im Hintergrund. `onProgress` bekommt grobe
  * Phasennamen (`"structure"`, `"parse-single"`, `"parse-parallel:<N>"`, s. `ImportDialog.tsx`).
+ * Mit `layout` kommt das Papierbereich-Layout dieses Namens statt des Modellraums.
  */
 export async function parseDxfAsync(
   data: string | ArrayBuffer,
   onProgress?: (phase: string) => void,
+  layout?: string,
 ): Promise<DxfImportResult> {
   if (typeof Worker === "undefined") {
     await loadFileio();
-    return parseDxf(data);
+    return parseDxf(data, "", layout);
   }
   const buf = toArrayBuffer(data);
   const chunkCount = Math.min(
@@ -110,7 +126,8 @@ export async function parseDxfAsync(
   );
 
   let offsets: number[] = [];
-  if (chunkCount > 1 && buf.byteLength >= MIN_SIZE_FOR_SPLIT) {
+  // Ein Layout (Papierbereich) ist klein und wird immer am Stück gelesen.
+  if (layout === undefined && chunkCount > 1 && buf.byteLength >= MIN_SIZE_FOR_SPLIT) {
     onProgress?.("structure");
     try {
       // Kopie an den Split-Worker (das Original bleibt für die Stücke/den Rückfall hier).
@@ -131,5 +148,5 @@ export async function parseDxfAsync(
     }
   }
   onProgress?.("parse-single");
-  return runParseWorker(buf, "", false);
+  return runParseWorker(buf, "", false, layout);
 }

@@ -1878,6 +1878,7 @@ export default function App() {
     pendingDiscard,
     setPendingDiscard,
     openImportForFile,
+    loadImportLayout,
     onSaveProject,
     onNewProject,
     onNewProjectFromSample,
@@ -3935,6 +3936,8 @@ export default function App() {
           isDwg={importState.isDwg}
           loading={importState.loading ?? false}
           progress={importState.progress}
+          error={importState.error}
+          onSelectLayout={loadImportLayout}
           parsed={importState.parsed}
           project={project}
           activeCategoryCode={activeCategoryCode}

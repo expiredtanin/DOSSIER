@@ -482,10 +482,41 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
     LEADER und MULTILEADER als Linienzug (zur Anschlussstelle geordnet, mit Landestrecke) plus MULTILEADER-Text,
     ATTRIB an INSERTs und ATTDEF in Blöcken als Text (ATTDEF nur ohne passendes ATTRIB, unsichtbare entfallen).
     Geprüft: Rust-Tests über Modell, ASCII-DXF und DWG-Rundreise; vitest `dxfParser.test.ts`; Swisstopo-
-    Kacheln (INSUNITS 6) unverändert. Offen: Pfeilspitzen/Spline-Führungslinien, Bemassung ohne Anonymblock
+    Kacheln (INSUNITS 6) unverändert. Offen (→ unten erledigt): Pfeilspitzen/Spline-Führungslinien, Bemassung ohne Anonymblock
     (nur Text), Block-/Tabellen-Inhalt von MULTILEADER, ATTRIB-Textausrichtung nur über den zweiten
     Ausrichtungspunkt; keine echte Bemassungs-/Mehrdateien-Probe aus AutoCAD (nur synthetisch erzeugt); ein
     Import-Dialog-Hinweis „Datei in mm, umgerechnet“ fehlt (`unitScale` steht bereit).
+  - ✅ **Import vervollständigt: Beschriftung, Pfeile, Layouts, Robustheit** (28.10.): neue Module
+    `fileio/src/text.rs` (MTEXT-Codes, Ausrichtung) und `annotation.rs` (Pfeile, Bemassung).
+    **Texte:** MTEXT-Formatcodes sauber (`\P`/`\N` = neue Zeile, `\~`, `{\f…;}`, `\H`, `\S`-Stapel, `\U+XXXX`,
+    `\L\O\K`, `%%c/d/p/nnn`); mehrzeiliger MTEXT = je Zeile ein Text (Zeilenabstand 5/3·Höhe), Anhängepunkt
+    (9 Lagen) und Drehung; TEXT 72/73 mit Ausrichtpunkt (links/mitte/rechts × Grundlinie/unten/mitte/oben,
+    „Mitte", „ausgerichtet" mit Höhe nach Länge, „eingepasst"), Breitenfaktor; ATTRIB/ATTDEF mit derselben
+    Ausrichtung (auch mehrzeilig). Weil `ImportedText` keine Ausrichtung kennt, wird auf den Grundlinien-Anfang
+    umgerechnet — mit **geschätzter Textbreite** (mittlere Proportionalschrift, ±10 %).
+    **Pfeile:** LEADER (Stil `DIMLDRBLK`/`DIMBLK`, Grösse `DIMASZ·DIMSCALE`), MULTILEADER (Pfeil je Linie, Grösse
+    aus Kontext/Linie) und Bemassungen ohne Anonymblock: Pfeilart aus dem Blocknamen (gefülltes/offenes
+    Dreieck, offen 30°/90°, Punkt, Kreis, Quadrat, Schrägstrich/Architektur-Tick), `DIMTSZ` → Strich.
+    Spline-Führungslinien (LEADER-Spline, MULTILEADER-Spline) tesselliert (Catmull-Rom durch die Stützpunkte);
+    MULTILEADER-Block-Inhalt mit Skalierung, Drehung, „Block-Umfang"-Anschluss und Attributtexten.
+    **Bemassung ohne Anonymblock** aus Definitionspunkten + Stil: linear, ausgerichtet, Radius, Durchmesser,
+    Winkel (3 Punkte und 2 Linien): Hilfslinien (`DIMEXO/DIMEXE`), Masslinie (um mittigen Text unterbrochen),
+    Pfeile (aussen, wenn es eng wird), Text nach `DIMDEC/DIMZIN/DIMDSEP/DIMPOST/DIMLFAC/DIMRND/DIMTAD`.
+    **Layouts:** der Bericht (`layouts`, im Dialog „Papierbereich") listet Layouts mit Inhalt; ein Layout lässt
+    sich statt des Modellraums lesen (`import_layout`, WASM `import_drawing_layout`, `parseDxf(…, layout)`,
+    Auswahl im Import-Dialog; Papier in mm/Zoll → Meter). **Robustheit:** Vorprüfung (leer, > 1,5 GB, kein
+    DXF/DWG) mit deutscher Meldung; Fehlermeldungen erscheinen im Dialog statt „keine Geometrie";
+    abgeschnittene/beschädigte Dateien werden tolerant gelesen und als „teilweise gelesen" gemeldet
+    (`recovered`); Fuzz-Test in `cargo test` (`import_robust_tests.rs`: 1200 gekürzte/verfälschte ASCII-/Binär-DXF
+    und DWG je Lauf, `FUZZ_ITERS=4000` einmalig mit 32 000 Dateien: 0 Panics). Puffer-Version 3.
+    Prüfung: 126 Rust-Tests, vitest `io/`, Probedateien mit ezdxf (`fileio/testdata/make_fixtures.py`: Bemassungen
+    mit/ohne Block, Pfeilarten, Leader/MLeader, Texte, Layouts). **Offen:** keine echte AutoCAD-Datei (nur ezdxf/
+    acadrust-Synthese — Pfeilgrössen von MULTILEADER, `_OPEN`-Winkel und Textbreiten ungeprüft); Texte werden
+    nicht an der Spaltenbreite umbrochen, Schriftart/Schrägstellung/Spiegelung fehlen; LWPOLYLINE-Breiten
+    (dicke Architektur-Ticks erscheinen als dünner Strich); Koordinaten-, Bogenlängen-, Knick-Bemassung ohne
+    Anonymblock nur als Text; Toleranzen/Alternativeinheiten/Textrahmen fehlen; Layout-Ansichtsfenster
+    (Modellansicht im Papierbereich) werden nicht abgebildet; bei Aufteilung grosser DXF (≥ 4 MB, parallel) fehlt
+    der Layout-Bericht; Ordinate-Bemassung; Tauri/macOS nicht getestet.
 - ○ **[C3] MCP an die laufende App** (`--connect 127.0.0.1:7979`, Werkzeuge `screenshot`, `ui_click`,
   `render` → PNG, `execute` = jeder Befehl mit JSON): genau die fehlende Hälfte von [9]; setzt [6] voraus. · M
 - ○ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless

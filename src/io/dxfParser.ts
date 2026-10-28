@@ -5,10 +5,14 @@
 // semantisch. Rust liest DXF (ASCII und Binär, R12–2018+) und DWG (R13–2018) und liefert einen
 // flachen Puffer + String-Tabelle; hier wird daraus `DxfImportResult` (Konturen, Texte, Meshes,
 // Ebenenfarben, Diagnose, $INSUNITS). Abgebildet werden LINE, LWPOLYLINE/POLYLINE (inkl. Bulges),
-// ARC/CIRCLE (mit wahrer Kurve), ELLIPSE, SPLINE, HATCH und SOLID/TRACE (gefüllte Flächen), TEXT/MTEXT,
-// ATTRIB/ATTDEF, DIMENSION (über den Anonymblock), LEADER/MULTILEADER (Linien + Text), 3DFACE,
-// Polyface-/Polygon-Mesh, MESH; INSERT wird rekursiv aufgelöst (Basispunkt, Skalierung, Drehung,
-// Raster; Ebene „0" erbt die Ebene der Referenz). `$INSUNITS` rechnet Rust auf Meter um.
+// ARC/CIRCLE (mit wahrer Kurve), ELLIPSE, SPLINE, HATCH und SOLID/TRACE (gefüllte Flächen), TEXT/MTEXT
+// (Formatcodes aufgelöst, Ausrichtung/Drehung auf den Grundlinien-Anfang umgerechnet, mehrzeiliger
+// MTEXT je Zeile ein Text), ATTRIB/ATTDEF, DIMENSION (Anonymblock, sonst aus Definitionspunkten und
+// Stil mit Pfeilspitzen aufgebaut), LEADER/MULTILEADER (Linien mit Pfeilspitzen, Spline-Pfade,
+// Text oder Block-Inhalt), 3DFACE, Polyface-/Polygon-Mesh, MESH; INSERT wird rekursiv aufgelöst
+// (Basispunkt, Skalierung, Drehung, Raster; Ebene „0" erbt die Ebene der Referenz). `$INSUNITS`
+// rechnet Rust auf Meter um. Papierbereich: `layouts` listet die Layouts der Datei, `parseDxf(…, layout)`
+// liest eines statt des Modellraums.
 //
 // `parseDxf` ist synchron und verlangt das geladene Modul (`loadFileio()`); die App ruft es im
 // Web-Worker (`dxfParserAsync.ts`), Tests laden es per `loadFileioForTests()`.
@@ -47,6 +51,12 @@ export interface DxfImportResult {
    * („Datei in mm, umgerechnet“). 0/unbekannt = 1, die Koordinaten bleiben dann 1:1.
    */
   unitScale?: number;
+  /** Papierbereich-Layouts der Datei (ohne „Model"), in Reiter-Reihenfolge; `entities` = Zeichnungs-Entities. */
+  layouts?: { name: string; entities: number }[];
+  /** Name des gelesenen Layouts; fehlt beim Modellraum. */
+  layout?: string;
+  /** Die Datei war beschädigt/abgeschnitten und wurde nur teilweise gelesen. */
+  recovered?: boolean;
 }
 
 let importSeq = 0;
@@ -63,16 +73,23 @@ function toBytes(input: string | ArrayBuffer | Uint8Array): Uint8Array {
  * Geometrie. Wirft bei unlesbaren Dateien (Meldung aus Rust) oder wenn das Modul nicht geladen ist.
  * `idPrefix` macht ids eindeutig, wenn mehrere Realms (Worker) parallel parsen.
  */
-export function parseDxf(input: string | ArrayBuffer | Uint8Array, idPrefix = ""): DxfImportResult {
-  const { geom, strings } = importDrawingFlat(input);
+export function parseDxf(input: string | ArrayBuffer | Uint8Array, idPrefix = "", layout?: string): DxfImportResult {
+  const { geom, strings } = importDrawingFlat(input, layout);
   return decodeImport(geom, strings, idPrefix);
 }
 
-/** Rust-Aufruf: flacher Puffer + String-Tabelle (für die Übergabe aus dem Worker). */
-export function importDrawingFlat(input: string | ArrayBuffer | Uint8Array): { geom: Float64Array; strings: string[] } {
+/**
+ * Rust-Aufruf: flacher Puffer + String-Tabelle (für die Übergabe aus dem Worker). Mit `layout` wird
+ * das Papierbereich-Layout dieses Namens gelesen (unbekannt → Fehler mit den vorhandenen Namen).
+ */
+export function importDrawingFlat(
+  input: string | ArrayBuffer | Uint8Array,
+  layout?: string,
+): { geom: Float64Array; strings: string[] } {
   const m = fileioLoaded();
   if (!m) throw new Error("Format-Modul nicht geladen: loadFileio() muss vor dem Import laufen.");
-  const res = m.import_drawing(toBytes(input));
+  const bytes = toBytes(input);
+  const res = layout === undefined ? m.import_drawing(bytes) : m.import_drawing_layout(bytes, layout);
   try {
     return { geom: res.geom(), strings: res.strings() };
   } finally {
@@ -85,7 +102,7 @@ export function decodeImport(geom: Float64Array, strings: readonly string[], idP
   let i = 0;
   const num = () => geom[i++];
   const str = () => strings[geom[i++]] ?? "";
-  if (num() !== 2) throw new Error("Unbekanntes Importformat (Version).");
+  if (num() !== 3) throw new Error("Unbekanntes Importformat (Version).");
   const fmt = num() === 1 ? "DWG" : "DXF";
   const insUnits = num();
   const unitScale = num();
@@ -153,6 +170,15 @@ export function decodeImport(geom: Float64Array, strings: readonly string[], idP
     });
   }
 
+  const layouts: { name: string; entities: number }[] = [];
+  for (let n = num(), k = 0; k < n; k++) {
+    const name = str();
+    layouts.push({ name, entities: num() });
+  }
+  const recovered = num() === 1;
+  const layoutIdx = num();
+  const layout = layoutIdx >= 0 ? (strings[layoutIdx] ?? undefined) : undefined;
+
   const contourSets: ContourSet[] = [];
   if (contours.length > 0) {
     contourSets.push({
@@ -163,5 +189,16 @@ export function decodeImport(geom: Float64Array, strings: readonly string[], idP
       contours,
     });
   }
-  return { meshes, contours: contourSets, texts, layerColors, diagnostics: { entityCounts, total }, insUnits, unitScale };
+  return {
+    meshes,
+    contours: contourSets,
+    texts,
+    layerColors,
+    diagnostics: { entityCounts, total },
+    insUnits,
+    unitScale,
+    layouts,
+    layout,
+    recovered,
+  };
 }

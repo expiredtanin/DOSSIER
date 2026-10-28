@@ -3,7 +3,7 @@
 // einer ganzen Stadt, mehrere hundert MB) flüssig bleibt. Ein Worker je Aufruf, danach beendet
 // (s. `dxfParserAsync.ts`).
 //
-//   → { type: "parse", data: ArrayBuffer }
+//   → { type: "parse", data: ArrayBuffer, layout?: string }   (layout = Papierbereich-Layout statt Modellraum)
 //   ← { type: "result", geom: Float64Array, strings: string[] } | { type: "error", message }
 //
 //   → { type: "split", data: ArrayBuffer, chunkCount: number }
@@ -18,7 +18,7 @@ import { loadFileio } from "../engine/fileioWasm";
 import { importDrawingFlat } from "./dxfParser";
 
 export type DxfWorkerRequest =
-  | { type: "parse"; data: ArrayBuffer }
+  | { type: "parse"; data: ArrayBuffer; layout?: string }
   | { type: "split"; data: ArrayBuffer; chunkCount: number };
 export type DxfWorkerResponse =
   | { type: "result"; geom: Float64Array; strings: string[] }
@@ -32,7 +32,7 @@ self.onmessage = async (e: MessageEvent<DxfWorkerRequest>) => {
   try {
     const m = await loadFileio();
     if (e.data?.type === "parse") {
-      const { geom, strings } = importDrawingFlat(e.data.data);
+      const { geom, strings } = importDrawingFlat(e.data.data, e.data.layout);
       post({ type: "result", geom, strings }, [geom.buffer]);
     } else if (e.data?.type === "split") {
       const offsets = Array.from(m.dxf_split_offsets(new Uint8Array(e.data.data), e.data.chunkCount));

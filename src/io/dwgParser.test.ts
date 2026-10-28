@@ -63,6 +63,10 @@ describe("parseDwg (acadrust)", () => {
     const broken = fixture("tile-r2018.dwg").slice(0, 200);
     await expect(parseDwg(asBuffer(broken))).rejects.toThrow();
   });
+
+  it("Layout-Auswahl wirkt auch bei DWG (unbekanntes Layout → Fehler mit Namen)", async () => {
+    await expect(parseDwg(asBuffer(fixture("tile-r2018.dwg")), "gibt es nicht")).rejects.toThrow(/nicht gefunden/);
+  });
 });
 
 describe("parseDxf — Binär-DXF und Code-Seite", () => {
@@ -72,5 +76,25 @@ describe("parseDxf — Binär-DXF und Code-Seite", () => {
 
   it("ASCII-Quelle in cp1252 ($DWGCODEPAGE fehlt) — Umlaute bleiben erhalten", () => {
     checkTile(parseDxf(fixture("tile.dxf")));
+  });
+});
+
+describe("parseDxf — Papierbereich-Layouts (Datei mit ezdxf erzeugt)", () => {
+  it("listet Layouts mit Inhalt im Bericht; Modellraum bleibt Vorgabe", () => {
+    const res = parseDxf(fixture("layouts.dxf"));
+    expect(res.layouts).toEqual([{ name: "A3 Grundriss", entities: 2 }]);
+    expect(res.layout).toBeUndefined();
+    expect(res.recovered).toBe(false);
+    expect(res.contours[0].contours).toHaveLength(1);
+    expect(res.texts ?? []).toHaveLength(0);
+  });
+
+  it("liest ein Layout statt des Modellraums (Papier in mm → Meter)", () => {
+    const res = parseDxf(fixture("layouts.dxf"), "", "A3 Grundriss");
+    expect(res.layout).toBe("A3 Grundriss");
+    const c = res.contours[0].contours[0];
+    expect(c.pts[1].x).toBeCloseTo(0.42, 9);
+    expect(res.texts!.map((t) => t.text)).toEqual(["Plankopf"]);
+    expect(res.texts![0].height).toBeCloseTo(0.005, 9);
   });
 });

@@ -178,18 +178,14 @@ fn texte_und_mtext_gesaeubert() {
         ],
     ))
     .unwrap();
-    assert_eq!(d.texts.len(), 3);
+    // MTEXT mit \P: je Zeile ein Text, untereinander (Anhängepunkt oben links).
+    assert_eq!(d.texts.len(), 4);
     assert!(close(d.texts[0].angle, PI / 2.0) && d.texts[0].text == "Hallo");
-    assert_eq!(d.texts[1].text, "Welt zeile2");
+    assert_eq!(d.texts[1].text, "Welt");
+    assert_eq!(d.texts[2].text, "zeile2");
+    assert!(close(d.texts[1].y, 2.0 - 0.3) && close(d.texts[2].y, 2.0 - 0.3 - 0.3 * 5.0 / 3.0));
     // Fehlende Höhe: acadrust setzt den Vorgabewert der Entity (> 0).
-    assert!(d.texts[2].height > 0.0);
-}
-
-#[test]
-fn mtext_formatcodes() {
-    assert_eq!(sanitize_mtext("{\\fArial|b1;Fett}\\~und\\pmehr"), "Fett und mehr");
-    assert_eq!(sanitize_mtext("  a\\\\b  "), "a\\b");
-    assert_eq!(sanitize_mtext("\\H2.5x;gross"), "gross");
+    assert!(d.texts[3].height > 0.0);
 }
 
 #[test]
@@ -316,7 +312,7 @@ fn kodierung_aufbau() {
     ))
     .unwrap();
     let (g, s) = encode(&d);
-    assert_eq!(g[0], 2.0);
+    assert_eq!(g[0], 3.0);
     assert_eq!(g[1], 0.0);
     assert_eq!(g[3], 1.0); // Einheitenfaktor (ohne $INSUNITS: 1)
     // Schichtfarben/Zählungen überspringen bis zur Kontur.
@@ -529,11 +525,36 @@ fn bemassung_ueber_anonymblock() {
 }
 
 #[test]
-fn bemassung_ohne_block_zeigt_massstext() {
+fn bemassung_ohne_block_wird_aus_punkten_aufgebaut() {
+    // Lineare Bemassung ohne Anonymblock: Hilfslinien, Masslinie, zwei Pfeile, Text.
     let mut doc = CadDocument::new();
+    let mut style = acadrust::tables::DimStyle::new("Standard");
+    style.dimdec = 2;
+    style.dimzin = 0;
+    doc.dim_styles.add_or_replace(style);
     let mut dim = DimensionLinear::new(v(0.0, 0.0), v(3.5, 0.0));
-    dim.base.text_middle_point = v(1.75, 0.5);
+    dim.definition_point = v(0.0, 1.0);
     doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(dim)))).unwrap();
+    let d = map_document(SourceKind::Dxf, &doc);
+    let lines: Vec<_> = d.contours.iter().filter(|c| !c.filled).collect();
+    let arrows: Vec<_> = d.contours.iter().filter(|c| c.filled).collect();
+    assert_eq!(lines.len(), 3, "{:?}", d.contours);
+    assert_eq!(arrows.len(), 2);
+    assert!(lines.iter().any(|c| close(c.pts[0][1], 1.0) && close(c.pts[1][1], 1.0) && close(c.pts[1][0], 3.5)));
+    assert!(arrows.iter().any(|c| close(c.pts[0][0], 0.0) && close(c.pts[0][1], 1.0)));
+    assert_eq!(d.texts.len(), 1);
+    assert_eq!(d.texts[0].text, "3.50"); // DIMDEC 2
+    assert!(d.texts[0].x < 1.75 && d.texts[0].x > 1.0, "zentriert um die Mitte: {}", d.texts[0].x);
+}
+
+#[test]
+fn bemassung_ohne_block_ohne_aufbau_zeigt_massstext() {
+    // Koordinatenbemassung hat keinen Aufbau: nur der Messwert als Text (wie bisher).
+    let mut doc = CadDocument::new();
+    let mut dim = acadrust::entities::DimensionOrdinate::x_ordinate(v(1.0, 2.0), v(1.0, 3.0));
+    dim.base.actual_measurement = 3.5;
+    dim.base.text_middle_point = v(1.75, 0.5);
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Ordinate(dim)))).unwrap();
     let d = map_document(SourceKind::Dxf, &doc);
     assert!(d.contours.is_empty());
     assert_eq!(d.texts.len(), 1);
@@ -551,20 +572,40 @@ fn bemassung_in_millimetern_wird_umgerechnet() {
 }
 
 #[test]
-fn leader_linienzug() {
+fn leader_linienzug_mit_pfeilspitze() {
     let mut doc = CadDocument::new();
     doc.layers.add(acadrust::Layer::new("F")).unwrap();
     let l = Leader::new().with_vertex(v(0.0, 0.0)).with_vertex(v(1.0, 1.0)).with_vertex(v(2.0, 1.0)).with_layer("F");
     doc.add_entity(EntityType::Leader(l)).unwrap();
     let d = map_document(SourceKind::Dxf, &doc);
-    let c = only_contour(&d);
-    assert_eq!(c.layer, "F");
-    assert!(!c.closed);
-    assert_eq!(c.pts, vec![[0.0, 0.0], [1.0, 1.0], [2.0, 1.0]]);
+    let line: Vec<_> = d.contours.iter().filter(|c| !c.filled).collect();
+    assert_eq!(line.len(), 1);
+    assert_eq!(line[0].layer, "F");
+    assert!(!line[0].closed);
+    assert_eq!(line[0].pts, vec![[0.0, 0.0], [1.0, 1.0], [2.0, 1.0]]);
+    // gefülltes Dreieck mit der Spitze am ersten Punkt, Körper entlang der ersten Strecke
+    let arrow: Vec<_> = d.contours.iter().filter(|c| c.filled).collect();
+    assert_eq!(arrow.len(), 1);
+    assert!(arrow[0].closed && arrow[0].pts.len() == 3);
+    assert_eq!(arrow[0].pts[0], [0.0, 0.0]);
+    assert!(arrow[0].pts[1][0] > 0.0 && arrow[0].pts[1][1] > 0.0);
 }
 
 #[test]
-fn multileader_linie_und_text() {
+fn leader_ohne_pfeil_und_spline_pfad() {
+    let mut doc = CadDocument::new();
+    let mut l = Leader::new().with_vertex(v(0.0, 0.0)).with_vertex(v(1.0, 1.0)).with_vertex(v(2.0, 0.0));
+    l.arrow_enabled = false;
+    l.path_type = acadrust::entities::LeaderPathType::Spline;
+    doc.add_entity(EntityType::Leader(l)).unwrap();
+    let d = map_document(SourceKind::Dxf, &doc);
+    let c = only_contour(&d);
+    assert_eq!(c.pts.len(), 1 + 2 * 8, "Spline tesselliert");
+    assert!(c.pts.iter().any(|p| close(p[0], 1.0) && close(p[1], 1.0)), "geht durch die Stützpunkte");
+}
+
+#[test]
+fn multileader_linie_pfeil_und_text() {
     let mut doc = CadDocument::new();
     let ml = MultiLeaderBuilder::new()
         .text("Beton C25/30", v(3.0, 2.0))
@@ -573,14 +614,17 @@ fn multileader_linie_und_text() {
         .build();
     doc.add_entity(EntityType::MultiLeader(Box::new(ml))).unwrap();
     let d = map_document(SourceKind::Dxf, &doc);
-    assert!(!d.contours.is_empty(), "keine Führungslinie");
-    let c = &d.contours[0];
+    let c = d.contours.iter().find(|c| !c.filled).expect("keine Führungslinie");
     assert!(!c.closed && c.pts.len() >= 2);
     assert!(c.pts.iter().any(|p| close(p[0], 0.0) && close(p[1], 0.0)));
+    assert!(d.contours.iter().any(|c| c.filled && c.pts.len() == 3), "Pfeilspitze");
     assert_eq!(d.texts.len(), 1);
     assert_eq!(d.texts[0].text, "Beton C25/30");
     assert!(close(d.texts[0].height, 0.2));
-    assert!(close(d.texts[0].x, 3.0) && close(d.texts[0].y, 2.0));
+    // Anhängepunkt oben (mittig, wie der Standard des Builders): erste Grundlinie eine Texthöhe
+    // unter dem Ankerpunkt, Text um x = 3 zentriert.
+    assert!(close(d.texts[0].y, 2.0 - 0.2), "{:?}", d.texts[0]);
+    assert!(d.texts[0].x < 3.0 && d.texts[0].x > 2.0, "{:?}", d.texts[0]);
 }
 
 /// Block mit ATTDEFs (Raumnummer, Fläche, unsichtbar) und einem INSERT mit nur einem ATTRIB.
@@ -631,4 +675,247 @@ fn attrib_in_zentimeterzeichnung() {
     let d = map_document(SourceKind::Dxf, &doc);
     let a = d.texts.iter().find(|t| t.text == "101").unwrap();
     assert!(close(a.x, 0.105) && close(a.height, 0.002));
+}
+
+// ── ezdxf-Dateien (src-tauri/fileio/testdata, erzeugt mit testdata/make_fixtures.py) ──
+
+const DIM_BLOCK: &[u8] = include_bytes!("../testdata/dim_block.dxf");
+const DIM_NOBLOCK: &[u8] = include_bytes!("../testdata/dim_noblock.dxf");
+const LEADERS: &[u8] = include_bytes!("../testdata/leaders.dxf");
+const TEXTS: &[u8] = include_bytes!("../testdata/texts.dxf");
+const LAYOUTS: &[u8] = include_bytes!("../testdata/layouts.dxf");
+const ARROW_TICK: &[u8] = include_bytes!("../testdata/dim_arrow_tick.dxf");
+
+fn texts_of(d: &ImportData) -> Vec<&str> {
+    d.texts.iter().map(|t| t.text.as_str()).collect()
+}
+
+/// Spitze eines gefüllten Dreiecks (die Ecke mit der grössten Summe der Abstände zu den anderen).
+fn arrow_tips(d: &ImportData) -> Vec<(i64, i64)> {
+    let mut v: Vec<(i64, i64)> = d
+        .contours
+        .iter()
+        .filter(|c| c.filled && c.pts.len() == 3)
+        .map(|c| {
+            let dist = |i: usize, j: usize| (c.pts[i][0] - c.pts[j][0]).hypot(c.pts[i][1] - c.pts[j][1]);
+            let spread = |i: usize| dist(i, (i + 1) % 3) + dist(i, (i + 2) % 3);
+            let tip = (0..3).max_by(|&i, &j| spread(i).total_cmp(&spread(j))).unwrap();
+            ((c.pts[tip][0] * 100.0).round() as i64, (c.pts[tip][1] * 100.0).round() as i64)
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn ezdxf_bemassung_ohne_block_gleiche_texte_wie_mit_block() {
+    // Dieselben sechs Bemassungen einmal mit Anonymblöcken (ezdxf `render()`), einmal ohne.
+    let with = import_bytes(DIM_BLOCK).unwrap();
+    let without = import_bytes(DIM_NOBLOCK).unwrap();
+    let (mut a, mut b) = (texts_of(&with), texts_of(&without));
+    a.sort();
+    b.sort();
+    assert_eq!(a, b);
+    assert_eq!(b, vec!["5", "5", "60°", "71,57°", "R2,24", "Ø4,47"]);
+    // Ohne Block gibt es trotzdem Pfeile (gefüllte Dreiecke): 2 + 2 (linear/ausgerichtet) + 1 (Radius)
+    // + 2 (Durchmesser) + 2 + 2 (Winkel)
+    assert_eq!(without.contours.iter().filter(|c| c.filled && c.pts.len() == 3).count(), 11);
+    // Masslinie der ersten Bemassung auf y = 3 zwischen x = 0 und 5
+    assert!(without.contours.iter().any(|c| !c.filled
+        && c.pts.len() == 2
+        && c.pts.iter().all(|p| close(p[1], 3.0))
+        && close(c.pts[0][0], 0.0)
+        && close(c.pts[1][0], 5.0)));
+    // Lineare/ausgerichtete Pfeilspitzen liegen mit und ohne Block auf denselben Punkten.
+    let (tw, tn) = (arrow_tips(&with), arrow_tips(&without));
+    for p in [(0, 300), (500, 300), (910, 120), (1310, 420)] {
+        assert!(tw.contains(&p), "Block: {p:?} fehlt in {tw:?}");
+        assert!(tn.contains(&p), "ohne Block: {p:?} fehlt in {tn:?}");
+    }
+}
+
+#[test]
+fn ezdxf_schraegstrich_pfeil_im_block_bleibt_erhalten() {
+    // Schrägstrich-Pfeile (_ARCHTICK) kommen als INSERT in den Anonymblock: zwei 45°-Striche an den Enden.
+    let d = import_bytes(ARROW_TICK).unwrap();
+    let ticks = d
+        .contours
+        .iter()
+        .filter(|c| {
+            let (dx, dy) = (c.pts[1][0] - c.pts[0][0], c.pts[1][1] - c.pts[0][1]);
+            c.pts.len() == 2 && dx.abs() > 0.0 && (dx.abs() - dy.abs()).abs() < 1e-9
+        })
+        .count();
+    assert_eq!(ticks, 2, "{:?}", d.contours);
+}
+
+#[test]
+fn ezdxf_texte_ausrichtung_formatcodes_und_prozentcodes() {
+    let d = import_bytes(TEXTS).unwrap();
+    let t = |i: usize| &d.texts[i];
+    // acht TEXT mit „Wand 12%%d" (Grad-Zeichen), Höhe 0,3 — aufsteigend y = 0 … 7 (Anker)
+    for i in 0..8 {
+        assert_eq!(t(i).text, "Wand 12°");
+    }
+    let w = crate::text::text_width("Wand 12°", 0.3, 1.0);
+    assert!(close(t(0).x, 0.0) && close(t(0).y, 0.0)); // links
+    assert!(close(t(1).x, -w / 2.0) && close(t(1).y, 1.0)); // zentriert
+    assert!(close(t(2).x, -w) && close(t(2).y, 2.0)); // rechts
+    assert!(close(t(3).x, -w / 2.0) && close(t(3).y, 3.0 - 0.15)); // Mitte/Mitte
+    assert!(close(t(4).x, 0.0) && close(t(4).y, 4.0 - 0.3)); // oben links
+    assert!(close(t(5).x, -w) && close(t(5).y, 5.0 + crate::text::DESCENT * 0.3)); // unten rechts
+    // ausgerichtet (6): Höhe wächst, Textlänge füllt die 6 m; eingepasst (7): Höhe bleibt
+    assert!(close(crate::text::text_width("Wand 12°", t(6).height, 1.0), 6.0));
+    assert!(close(t(7).height, 0.3));
+    // gedreht
+    assert!(close(t(8).angle, 30f64.to_radians()) && t(8).text == "Rotiert");
+    // MTEXT: Mitte/Mitte-Anhängepunkt (20, 5), Drehung 15°, Formatcodes entfernt, drei Zeilen
+    let m: Vec<&str> = d.texts[9..].iter().map(|t| t.text.as_str()).collect();
+    assert_eq!(m, vec!["Fett", "Zeile gross", "1/2  u"]);
+    assert!(d.texts[9..].iter().all(|t| close(t.angle, 15f64.to_radians())));
+    // Blockmitte (in Textrichtung gemessen) liegt auf dem Anhängepunkt: erste Zeile eine halbe
+    // Blockhöhe über, letzte eine halbe darunter.
+    let pitch = 0.25 * crate::text::LINE_PITCH;
+    let (s, c) = 15f64.to_radians().sin_cos();
+    let local_y = |tx: &Text| -s * (tx.x - 20.0) + c * (tx.y - 5.0);
+    let block_h = 0.25 + 2.0 * pitch;
+    assert!(close(local_y(&d.texts[9]), block_h / 2.0 - 0.25));
+    assert!(close(local_y(&d.texts[11]), block_h / 2.0 - 0.25 - 2.0 * pitch));
+}
+
+#[test]
+fn ezdxf_leader_pfeile_spline_und_blockinhalt() {
+    let d = import_bytes(LEADERS).unwrap();
+    // LEADER 1 (gerade): Pfeilspitze am ersten Punkt (0,0)
+    assert!(d.contours.iter().any(|c| c.filled && c.pts.len() == 3 && c.pts[0] == [0.0, 0.0]));
+    assert!(d.contours.iter().any(|c| !c.filled && c.pts == vec![[0.0, 0.0], [2.0, 2.0], [4.0, 2.0]]));
+    // LEADER 2 (Spline durch 4 Punkte): tesselliert, geht durch die Stützpunkte
+    let spl = d.contours.iter().find(|c| c.pts.len() == 25 && close(c.pts[0][1], 5.0)).expect("Spline-Führungslinie");
+    for q in [[2.0, 7.0], [4.0, 6.0], [6.0, 7.0]] {
+        assert!(spl.pts.iter().any(|p| close(p[0], q[0]) && close(p[1], q[1])), "{q:?}");
+    }
+    // MULTILEADER 1: Pfeil DOT (gefüllter Kreis, 16 Ecken, Mitte (10,0))
+    let dot = d.contours.iter().find(|c| c.filled && c.pts.len() == 16).expect("Punkt-Pfeil");
+    let cx = dot.pts.iter().map(|p| p[0]).sum::<f64>() / 16.0;
+    assert!(close(cx, 10.0), "{cx}");
+    // MULTILEADER 3: Block „TAG" (Kreis r 0,5) um (24, 2) zentriert, Attribut „42" statt „000"
+    assert!(d.contours.iter().any(|c| c.curve.is_some_and(|k| k.circle && close(k.cx, 24.0) && close(k.cy, 2.0))));
+    assert!(texts_of(&d).contains(&"42") && !texts_of(&d).contains(&"000"));
+    // MULTILEADER-Text mit zwei Zeilen
+    assert!(texts_of(&d).contains(&"Pos 1") && texts_of(&d).contains(&"Zeile 2"));
+}
+
+#[test]
+fn ezdxf_layouts_im_bericht_und_einzeln_lesbar() {
+    let d = import_bytes(LAYOUTS).unwrap();
+    // Modellraum: nur die Linie; Layouts mit Inhalt aufgelistet (das leere „Layout1" nicht)
+    assert_eq!(d.layout, None);
+    assert_eq!(d.contours.len(), 1);
+    assert_eq!(
+        d.layouts.iter().map(|l| (l.name.as_str(), l.entities)).collect::<Vec<_>>(),
+        vec![("A3 Grundriss", 2)]
+    );
+    // Layout lesen: Papier in Millimetern → Meter, Text „Plankopf"
+    let l = import_layout(LAYOUTS.to_vec(), "a3 grundriss").unwrap();
+    assert_eq!(l.layout.as_deref(), Some("A3 Grundriss"));
+    assert_eq!(l.contours.len(), 1);
+    assert!(close(l.contours[0].pts[1][0], 0.42));
+    assert_eq!(texts_of(&l), vec!["Plankopf"]);
+    assert!(close(l.texts[0].height, 0.005));
+    // unbekannt → Fehler mit den vorhandenen Namen
+    let e = import_layout(LAYOUTS.to_vec(), "gibt es nicht").unwrap_err();
+    assert!(e.contains("A3 Grundriss") && e.contains("nicht gefunden"), "{e}");
+}
+
+#[test]
+fn kodierung_enthaelt_layouts_und_wiederhergestellt_flag() {
+    let mut d = import_bytes(LAYOUTS).unwrap();
+    d.recovered = true;
+    let (g, s) = encode(&d);
+    // Anhang am Ende: nLayouts, (Name, Anzahl)…, recovered, Layout-Name (−1 = Modellraum)
+    let n = g.len();
+    assert_eq!(g[n - 1], -1.0);
+    assert_eq!(g[n - 2], 1.0);
+    assert_eq!(g[n - 3], 2.0); // „A3 Grundriss": zwei Entities
+    assert_eq!(s[g[n - 4] as usize], "A3 Grundriss");
+    assert_eq!(g[n - 5], 1.0); // ein Layout mit Inhalt
+}
+
+#[test]
+fn mtext_attachment_drehung_und_zeilenabstand() {
+    // MTEXT rechts unten (Anhängepunkt 9), 2 Zeilen, Höhe 0,5: Grundlinie der letzten Zeile über der Unterkante
+    let d = import_bytes(&dxf(&[], &[&["0", "MTEXT", "8", "0", "10", "10", "20", "10", "30", "0", "40", "0.5", "71", "9", "1", "ab\\Pcd"]])).unwrap();
+    assert_eq!(texts_of(&d), vec!["ab", "cd"]);
+    assert!(close(d.texts[1].y, 10.0 + crate::text::DESCENT * 0.5));
+    assert!(close(d.texts[0].y, d.texts[1].y + 0.5 * crate::text::LINE_PITCH));
+    let w = crate::text::text_width("cd", 0.5, 1.0);
+    assert!(close(d.texts[1].x, 10.0 - w));
+}
+
+#[test]
+fn text_ausrichtung_mit_ausrichtpunkt_aus_datei() {
+    // TEXT zentriert (72 = 1): Anker = 11/21 (Ausrichtpunkt), nicht der Einfügepunkt
+    let d = import_bytes(&dxf(&[], &[&["0", "TEXT", "8", "0", "10", "0", "20", "0", "30", "0", "40", "1", "72", "1", "11", "10", "21", "5", "31", "0", "1", "Mitte"]])).unwrap();
+    let w = crate::text::text_width("Mitte", 1.0, 1.0);
+    assert!(close(d.texts[0].x, 10.0 - w / 2.0) && close(d.texts[0].y, 5.0));
+    // Breitenfaktor 2 verdoppelt die Breite für die Zentrierung
+    let d = import_bytes(&dxf(&[], &[&["0", "TEXT", "8", "0", "10", "0", "20", "0", "30", "0", "40", "1", "41", "2", "72", "1", "11", "10", "21", "5", "31", "0", "1", "Mitte"]])).unwrap();
+    assert!(close(d.texts[0].x, 10.0 - w));
+}
+
+#[test]
+fn bemassungen_ohne_block_ueber_modell_dxf_und_dwg() {
+    use acadrust::entities::{DimensionAligned, DimensionAngular3Pt, DimensionDiameter, DimensionRadius};
+    let mut doc = CadDocument::new();
+    let mut style = acadrust::tables::DimStyle::new("Standard");
+    style.dimdec = 1;
+    style.dimzin = 0;
+    style.dimdsep = 46;
+    doc.dim_styles.add_or_replace(style);
+    let mut lin = DimensionLinear::new(v(0.0, 0.0), v(4.0, 0.0));
+    lin.definition_point = v(0.0, 2.0);
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(lin)))).unwrap();
+    let mut al = DimensionAligned::new(v(10.0, 0.0), v(13.0, 4.0));
+    al.set_offset(1.0);
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(al)))).unwrap();
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Radius(DimensionRadius::new(v(20.0, 0.0), v(22.0, 0.0)))))).unwrap();
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Diameter(DimensionDiameter::new(v(30.0, 3.0), v(30.0, -3.0)))))).unwrap();
+    let mut ang = DimensionAngular3Pt::new(v(40.0, 0.0), v(44.0, 0.0), v(40.0, 4.0));
+    ang.definition_point = v(42.0, 2.0);
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Angular3Pt(ang)))).unwrap();
+    for d in all_paths(&doc) {
+        let mut labels = texts_of(&d);
+        labels.sort();
+        assert_eq!(labels, vec!["4.0", "5.0", "90°", "R2.0", "Ø6.0"], "{:?}", d.texts);
+        assert!(d.contours.iter().filter(|c| c.filled).count() >= 9, "Pfeile fehlen");
+    }
+}
+
+#[test]
+fn bemassungstext_mit_benutzertext_und_unterdrueckung() {
+    let mut doc = CadDocument::new();
+    let mut a = DimensionLinear::new(v(0.0, 0.0), v(4.0, 0.0));
+    a.definition_point = v(0.0, 1.0);
+    a.base.user_text = Some("ca. <> m".into());
+    let mut b = DimensionLinear::new(v(10.0, 0.0), v(14.0, 0.0));
+    b.definition_point = v(10.0, 1.0);
+    b.base.user_text = Some(" ".into()); // Text unterdrückt
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(a)))).unwrap();
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(b)))).unwrap();
+    let d = map_document(SourceKind::Dxf, &doc);
+    assert_eq!(d.texts.len(), 1);
+    assert!(d.texts[0].text.starts_with("ca. ") && d.texts[0].text.ends_with(" m"), "{:?}", d.texts);
+}
+
+#[test]
+fn bemassung_in_millimetern_ohne_block_rechnet_um() {
+    let mut doc = CadDocument::new();
+    doc.header.insertion_units = 4;
+    let mut lin = DimensionLinear::new(v(0.0, 0.0), v(4000.0, 0.0));
+    lin.definition_point = v(0.0, 800.0);
+    doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(lin)))).unwrap();
+    let d = map_document(SourceKind::Dxf, &doc);
+    // Masslinie bei y = 0,8 m von x = 0 bis 4 m; Text zeigt den Wert in Zeichnungseinheiten (4000)
+    assert!(d.contours.iter().any(|c| !c.filled && c.pts.len() == 2 && close(c.pts[0][1], 0.8) && close(c.pts[1][0], 4.0)));
+    assert!(d.texts[0].text.starts_with("4000"), "{:?}", d.texts);
 }

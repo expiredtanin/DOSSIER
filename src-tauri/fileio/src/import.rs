@@ -16,6 +16,12 @@
 //     und ATTDEF (in Blöcken ohne passendes ATTRIB) als Text.
 //   • `$INSUNITS` wird angewendet: alle Koordinaten, Radien und Texthöhen kommen in Metern an
 //     (`unit_scale`); 0/unbekannt = Faktor 1 (1:1 wie bisher).
+//   • Beschriftung ([`crate::text`], [`crate::annotation`]): MTEXT-Formatcodes, Ausrichtung/Drehung
+//     von TEXT/MTEXT/ATTRIB (auf Grundlinien-Anfang umgerechnet, mehrzeilige MTEXT je Zeile ein Text),
+//     Pfeilspitzen an DIMENSION/LEADER/MULTILEADER, Bemassungen ohne Anonymblock aus Definitions-
+//     punkten und Stil, Spline-Führungslinien, MULTILEADER mit Block-Inhalt.
+//   • Papierbereich: `layouts` listet die Layouts; [`import_layout`] liest eines statt des
+//     Modellraums (Viewport-Inhalt, also die Modellansicht im Layout, fehlt).
 //
 // Übergabe an JS als flacher f64-Puffer + String-Tabelle (`encode`), Aufbau dort beschrieben.
 // Kaputte Dateien ergeben `Err(String)`; die Geometrie-Abbildung selbst ist panikfrei (alle
@@ -27,15 +33,22 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use acadrust::entities::{
-    AttributeDefinition, AttributeEntity, BoundaryEdge, BoundaryPath, Dimension, Ellipse, Hatch,
+    AttachmentPoint, AttributeDefinition, AttributeEntity, BoundaryEdge, BoundaryPath, Dimension, Ellipse, Hatch,
     HorizontalAlignment, Insert, Leader, LwPolyline, Mesh, MultiLeader, PolyfaceMesh, Solid, Spline,
-    VerticalAlignment,
+    Text as AText, TextHorizontalAlignment, TextVerticalAlignment, VerticalAlignment,
 };
+use acadrust::entities::multileader::{
+    BlockContentConnectionType, LeaderContentType, MultiLeaderPathType, TextAttachmentPointType,
+};
+use acadrust::objects::ObjectType;
+use acadrust::Handle;
 use acadrust::entities::polygon_mesh::PolygonMesh;
 use acadrust::io::dxf::DxfReaderConfiguration;
 use acadrust::{CadDocument, DwgReadOptions, DwgReader, DxfReader, EntityType, Vector3};
 
+use crate::annotation::{self as ann, ArrowKind, DimStyleVals, Shape};
 use crate::common::{detect_kind, layer_color_rgb, SourceKind};
+use crate::text::{self as txt, HAlign, Hz, VAlign};
 
 /// Winkelauflösung der Tessellierung (~5.6° pro Segment), wie bisher in TS.
 const CURVE_STEP: f64 = PI / 32.0;
@@ -102,6 +115,20 @@ pub struct ImportData {
     /// Entity-Typ → Anzahl (inkl. aufgelöster Block-Inhalte), in Reihenfolge des ersten Auftretens.
     pub entity_counts: Vec<(String, u32)>,
     pub total: u32,
+    /// Papierbereich-Layouts der Datei mit Inhalt (ohne „Model"), in Reiter-Reihenfolge.
+    pub layouts: Vec<LayoutInfo>,
+    /// Name des gelesenen Layouts; `None` = Modellraum.
+    pub layout: Option<String>,
+    /// Die Datei war beschädigt/abgeschnitten und wurde tolerant (teilweise) gelesen.
+    pub recovered: bool,
+}
+
+/// Ein Papierbereich-Layout (Plankopf, Ansichtsfenster auf das Modell).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutInfo {
+    pub name: String,
+    /// Zeichnungs-Entities im Layout (ohne Ansichtsfenster).
+    pub entities: u32,
 }
 
 // ── Einlesen ──────────────────────────────────────────────────────────────────
@@ -125,16 +152,56 @@ pub fn read_document(bytes: &[u8]) -> Result<(SourceKind, CadDocument), String> 
 
 /// Wie [`read_document`], übernimmt den Puffer (keine Kopie).
 pub fn read_document_owned(bytes: Vec<u8>) -> Result<(SourceKind, CadDocument), String> {
+    read_document_flagged(bytes).map(|(kind, doc, _)| (kind, doc))
+}
+
+/// Grösste lesbare Datei: im WASM (32 Bit) sind es 4 GB Adressraum, Puffer + Dokument brauchen ein
+/// Vielfaches der Dateigrösse — darüber lieber eine klare Meldung als ein Speicherabbruch.
+pub const MAX_INPUT_BYTES: usize = 1_500_000_000;
+
+/// Offensichtlich keine DXF/DWG-Datei: leer, zu gross, oder Text ohne DXF-Struktur. Fängt den
+/// häufigen Fall (falsche Datei gewählt, leerer Download) mit verständlicher Meldung ab, bevor
+/// acadrust darauf losgelassen wird.
+fn precheck(bytes: &[u8], kind: SourceKind) -> Result<(), String> {
+    if bytes.is_empty() {
+        return Err("Die Datei ist leer.".to_string());
+    }
+    if bytes.len() > MAX_INPUT_BYTES {
+        return Err(format!(
+            "Die Datei ist zu gross ({} MB, höchstens {} MB): bitte in AutoCAD in kleinere Teile aufteilen (WBLOCK) oder bereinigen (PURGE).",
+            bytes.len() / 1_000_000,
+            MAX_INPUT_BYTES / 1_000_000
+        ));
+    }
+    if kind == SourceKind::Dxf && !bytes.starts_with(b"AutoCAD Binary DXF") {
+        // ASCII-DXF: „SECTION" steht in den ersten Zeilen (Kommentare 999 davor sind möglich).
+        let head = &bytes[..bytes.len().min(1 << 20)];
+        let has = head.windows(7).any(|w| w.eq_ignore_ascii_case(b"SECTION"));
+        if !has {
+            return Err("Keine DXF- oder DWG-Datei erkannt (Kennung fehlt). Wurde die richtige Datei gewählt?".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Wie [`read_document_owned`], dazu ein Flag: `true`, wenn nur der tolerante Zweitversuch gelang
+/// (beschädigte oder abgeschnittene Datei, Inhalt unvollständig).
+pub fn read_document_flagged(bytes: Vec<u8>) -> Result<(SourceKind, CadDocument, bool), String> {
     let kind = detect_kind(&bytes);
+    precheck(&bytes, kind)?;
     let shared = SharedBytes(Arc::new(bytes));
     match read_with(kind, shared.clone(), false) {
-        Ok(doc) => Ok((kind, doc)),
+        Ok(doc) => Ok((kind, doc, false)),
         Err(err) => match read_with(kind, shared, true) {
-            Ok(doc) if doc.entities().next().is_some() => Ok((kind, doc)),
+            Ok(doc) if doc.entities().next().is_some() => Ok((kind, doc, true)),
             _ => Err(err),
         },
     }
 }
+
+/// Anzahl der in acadrust abgefangenen Panics (nur nativ: im WASM bricht ein Panic die Instanz ab).
+/// Diagnose für den Fuzz-Test, der beschädigte Dateien einspielt.
+pub static READ_PANICS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn read_with(kind: SourceKind, bytes: SharedBytes, failsafe: bool) -> Result<CadDocument, String> {
     // acadrust darf keinen Panic bis hierher durchreichen (nativ abgefangen; im WASM bricht ein
@@ -154,7 +221,10 @@ fn read_with(kind: SourceKind, bytes: SharedBytes, failsafe: bool) -> Result<Cad
                 .map_err(|e| format!("DWG nicht lesbar: {e}"))
         }
     });
-    res.unwrap_or_else(|_| Err("Datei nicht lesbar (interner Fehler beim Lesen)".to_string()))
+    res.unwrap_or_else(|_| {
+        READ_PANICS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err("Datei nicht lesbar: beschädigter Inhalt (interner Fehler beim Lesen)".to_string())
+    })
 }
 
 /// Datei lesen und abbilden.
@@ -164,8 +234,19 @@ pub fn import_bytes(bytes: &[u8]) -> Result<ImportData, String> {
 
 /// Wie [`import_bytes`], übernimmt den Puffer.
 pub fn import_owned(bytes: Vec<u8>) -> Result<ImportData, String> {
-    let (kind, doc) = read_document_owned(bytes)?;
-    Ok(map_document(kind, &doc))
+    let (kind, doc, recovered) = read_document_flagged(bytes)?;
+    let mut data = map_document(kind, &doc);
+    data.recovered = recovered;
+    Ok(data)
+}
+
+/// Wie [`import_owned`], liest aber das Papierbereich-Layout `name` statt des Modellraums
+/// (Gross-/Kleinschreibung egal). Unbekannter Name → Fehler mit den vorhandenen Layouts.
+pub fn import_layout(bytes: Vec<u8>, name: &str) -> Result<ImportData, String> {
+    let (kind, doc, recovered) = read_document_flagged(bytes)?;
+    let mut data = map_document_space(kind, &doc, &Space::Layout(name))?;
+    data.recovered = recovered;
+    Ok(data)
 }
 
 // ── Abbildung ─────────────────────────────────────────────────────────────────
@@ -280,10 +361,72 @@ struct Mapper<'a> {
     /// ATTRIB-Tags (grossgeschrieben) des gerade aufgelösten INSERT: dazu gehörige ATTDEFs im Block
     /// zeigen nicht ihren Vorgabewert (AutoCAD zeichnet statt dessen das ATTRIB der Referenz).
     insert_tags: Vec<std::collections::HashSet<String>>,
+    /// Attributwerte eines MULTILEADER-Blocks (Tag in Grossbuchstaben → Text), für ATTDEFs im Block.
+    ml_attrs: Vec<HashMap<String, String>>,
+    /// Bemassungsstile, einmal gelesen.
+    dim_styles: HashMap<String, DimStyleVals>,
+}
+
+/// Welcher Raum der Datei abgebildet wird.
+#[derive(Debug, Clone, Copy)]
+pub enum Space<'a> {
+    Model,
+    Layout(&'a str),
+}
+
+/// Ein Layout der Datei: Name, Blockname des Papierbereichs, Papiereinheit (0 Zoll, 1 mm, 2 Pixel).
+struct LayoutRef {
+    name: String,
+    block: String,
+    paper_units: i16,
+    tab: i16,
+}
+
+/// Papierbereich-Layouts (ohne das Modell-Layout), nach Reiter-Reihenfolge.
+fn layout_refs(doc: &CadDocument) -> Vec<LayoutRef> {
+    let mut out: Vec<LayoutRef> = doc
+        .objects
+        .values()
+        .filter_map(|o| match o {
+            ObjectType::Layout(l) if !l.name.eq_ignore_ascii_case("Model") => {
+                let block = doc
+                    .block_records
+                    .iter()
+                    .find(|b| b.handle == l.block_record || (!b.layout.is_null() && b.layout == l.handle))?;
+                Some(LayoutRef { name: l.name.clone(), block: block.name.clone(), paper_units: l.plot_paper_units, tab: l.tab_order })
+            }
+            _ => None,
+        })
+        .collect();
+    out.sort_by(|a, b| a.tab.cmp(&b.tab).then_with(|| a.name.cmp(&b.name)));
+    out
 }
 
 /// Ganzes Dokument abbilden: Modellraum (ohne Papierbereich), INSERTs aufgelöst.
 pub fn map_document(kind: SourceKind, doc: &CadDocument) -> ImportData {
+    // Der Modellraum gibt es immer; nur ein Layout kann fehlen.
+    map_document_space(kind, doc, &Space::Model).unwrap_or_else(|_| empty_data(kind))
+}
+
+fn empty_data(kind: SourceKind) -> ImportData {
+    ImportData {
+        kind,
+        ins_units: 0,
+        unit_scale: 1.0,
+        layer_colors: Vec::new(),
+        contours: Vec::new(),
+        texts: Vec::new(),
+        meshes: Vec::new(),
+        entity_counts: Vec::new(),
+        total: 0,
+        layouts: Vec::new(),
+        layout: None,
+        recovered: false,
+    }
+}
+
+/// Wie [`map_document`] für einen wählbaren Raum.
+pub fn map_document_space(kind: SourceKind, doc: &CadDocument, space: &Space) -> Result<ImportData, String> {
     let mut m = Mapper {
         doc,
         contours: Vec::new(),
@@ -294,16 +437,43 @@ pub fn map_document(kind: SourceKind, doc: &CadDocument) -> ImportData {
         count_index: HashMap::new(),
         total: 0,
         insert_tags: Vec::new(),
+        ml_attrs: Vec::new(),
+        dim_styles: HashMap::new(),
     };
-    let scale = unit_scale(doc.header.insertion_units);
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let model_scale = {
+        let s = unit_scale(doc.header.insertion_units);
+        if s.is_finite() && s > 0.0 {
+            s
+        } else {
+            1.0
+        }
+    };
+    let layouts = layout_refs(doc);
+    let (scale, layout_name, entities): (f64, Option<String>, Vec<&EntityType>) = match space {
+        Space::Model => {
+            let model: Vec<&EntityType> = if doc.block_records.get("*Model_Space").is_some() {
+                doc.model_space_entities().collect()
+            } else {
+                doc.entities().collect()
+            };
+            (model_scale, None, model)
+        }
+        Space::Layout(name) => {
+            let Some(l) = layouts.iter().find(|l| l.name.eq_ignore_ascii_case(name.trim())) else {
+                let have: Vec<&str> = layouts.iter().map(|l| l.name.as_str()).collect();
+                return Err(format!("Layout „{name}“ nicht gefunden (vorhanden: {}).", have.join(", ")));
+            };
+            // Papierbereich: Einheit des Papiers (mm/Zoll), nicht die des Modells.
+            let scale = match l.paper_units {
+                0 => 0.0254,
+                1 => 0.001,
+                _ => model_scale,
+            };
+            (scale, Some(l.name.clone()), doc.entities_in_block(&l.block).collect())
+        }
+    };
     let root = Xf { m00: scale, m11: scale, zs: scale, ..IDENTITY };
-    let model: Vec<&EntityType> = if doc.block_records.get("*Model_Space").is_some() {
-        doc.model_space_entities().collect()
-    } else {
-        doc.entities().collect()
-    };
-    for e in model {
+    for e in entities {
         m.entity(e, &root, None, 0);
     }
     let layer_colors = doc
@@ -312,7 +482,17 @@ pub fn map_document(kind: SourceKind, doc: &CadDocument) -> ImportData {
         .filter_map(|l| layer_color_rgb(&l.color).map(|c| (l.name.clone(), c)))
         .collect();
     let meshes = m.meshes.into_iter().filter(|b| !b.indices.is_empty()).collect();
-    ImportData {
+    // Nur Layouts mit Inhalt melden: jede Datei trägt ein leeres „Layout1" mit, das niemanden
+    // interessiert (importieren lässt es sich trotzdem über seinen Namen).
+    let layout_infos = layouts
+        .iter()
+        .map(|l| LayoutInfo {
+            name: l.name.clone(),
+            entities: doc.entities_in_block(&l.block).filter(|e| !matches!(e, EntityType::Viewport(_))).count() as u32,
+        })
+        .filter(|l| l.entities > 0)
+        .collect();
+    Ok(ImportData {
         kind,
         ins_units: doc.header.insertion_units,
         unit_scale: scale,
@@ -322,7 +502,10 @@ pub fn map_document(kind: SourceKind, doc: &CadDocument) -> ImportData {
         meshes,
         entity_counts: m.counts,
         total: m.total,
-    }
+        layouts: layout_infos,
+        layout: layout_name,
+        recovered: false,
+    })
 }
 
 fn finite2(p: &Vector3) -> bool {
@@ -440,14 +623,12 @@ impl<'a> Mapper<'a> {
             EntityType::Ellipse(el) => self.ellipse(el, layer, xf),
             EntityType::Spline(s) => self.spline(s, layer, xf),
             EntityType::Hatch(h) => self.hatch(h, layer, xf),
-            EntityType::Text(t) => {
-                let h = if t.height > 0.0 && t.height.is_finite() { t.height } else { DEFAULT_TEXT_HEIGHT };
-                self.text(&t.value, t.insertion_point, h, t.rotation, layer, xf);
-            }
+            EntityType::Text(t) => self.text_entity(t, layer, xf),
             EntityType::MText(t) => {
                 let h = if t.height > 0.0 && t.height.is_finite() { t.height } else { DEFAULT_TEXT_HEIGHT };
-                let clean = sanitize_mtext(&t.value);
-                self.text(&clean, t.insertion_point, h, t.rotation, layer, xf);
+                let rot = if t.rotation.is_finite() { t.rotation } else { 0.0 };
+                let attach = mtext_attach(t.attachment_point);
+                self.mtext_block(&t.value, t.insertion_point, h, rot, attach, t.line_spacing_factor, layer, xf);
             }
             EntityType::Face3D(f) => {
                 let mut cs = vec![f.first_corner, f.second_corner, f.third_corner];
@@ -472,7 +653,7 @@ impl<'a> Mapper<'a> {
             EntityType::Solid(sol) => self.solid(sol, layer, xf),
             EntityType::Dimension(dim) => self.dimension(dim, layer, xf, depth),
             EntityType::Leader(l) => self.leader(l, layer, xf),
-            EntityType::MultiLeader(ml) => self.multileader(ml, layer, xf),
+            EntityType::MultiLeader(ml) => self.multileader(ml, layer, xf, depth),
             EntityType::AttributeEntity(a) => self.attrib(a, layer, xf),
             EntityType::AttributeDefinition(a) => self.attdef(a, layer, xf, depth),
             _ => {}
@@ -699,8 +880,143 @@ impl<'a> Mapper<'a> {
         }
     }
 
-    /// DIMENSION: die Zeichnung steht im Anonymblock (`*D…`, Gruppencode 2) in Weltkoordinaten; er
-    /// wird wie ein INSERT ohne Verschiebung aufgelöst. Ohne Block (oder leer) bleibt der Massstext.
+    /// Einzeiliger Text: Ausrichtung (72/73 mit Ausrichtpunkt), Breitenfaktor, `%%`-Codes.
+    fn text_entity(&mut self, t: &AText, layer: &str, xf: &Xf) {
+        let value = txt::decode_percent_codes(&t.value);
+        if value.is_empty() || !finite2(&t.insertion_point) {
+            return;
+        }
+        let h = if t.height > 0.0 && t.height.is_finite() { t.height } else { DEFAULT_TEXT_HEIGHT };
+        let hz = match t.horizontal_alignment {
+            TextHorizontalAlignment::Left => Hz::Left,
+            TextHorizontalAlignment::Center => Hz::Center,
+            TextHorizontalAlignment::Right => Hz::Right,
+            TextHorizontalAlignment::Aligned => Hz::Aligned,
+            TextHorizontalAlignment::Middle => Hz::Middle,
+            TextHorizontalAlignment::Fit => Hz::Fit,
+        };
+        let vt = match t.vertical_alignment {
+            TextVerticalAlignment::Baseline => VAlign::Baseline,
+            TextVerticalAlignment::Bottom => VAlign::Bottom,
+            TextVerticalAlignment::Middle => VAlign::Middle,
+            TextVerticalAlignment::Top => VAlign::Top,
+        };
+        let align = t.alignment_point.filter(finite2).map(|a| [a.x, a.y]);
+        let rot = if t.rotation.is_finite() { t.rotation } else { 0.0 };
+        let ins = t.insertion_point;
+        let (pos, height, angle) = txt::place_single(&value, [ins.x, ins.y], align, hz, vt, h, t.width_factor, rot);
+        self.text(&value, Vector3::new(pos[0], pos[1], ins.z), height, angle, layer, xf);
+    }
+
+    /// MTEXT: Formatcodes aufgelöst, Anhängepunkt und Drehung angewendet; je Zeile ein Text (die
+    /// Zeilen stehen mit Standard-Zeilenabstand untereinander, ohne Umbruch an der Spaltenbreite).
+    #[allow(clippy::too_many_arguments)]
+    fn mtext_block(
+        &mut self,
+        raw: &str,
+        at: Vector3,
+        height: f64,
+        rot: f64,
+        attach: (HAlign, VAlign),
+        spacing: f64,
+        layer: &str,
+        xf: &Xf,
+    ) {
+        if !finite2(&at) {
+            return;
+        }
+        let lines = txt::mtext_lines(raw);
+        if lines.is_empty() {
+            return;
+        }
+        let placed = txt::layout_block([at.x, at.y], attach.0, attach.1, &lines, height, 1.0, rot, spacing);
+        for (pos, line) in placed {
+            if !line.is_empty() {
+                self.text(&line, Vector3::new(pos[0], pos[1], at.z), height, rot, layer, xf);
+            }
+        }
+    }
+
+    /// Geometrie aus [`crate::annotation`] (Weltkoordinaten) unter der Abbildung `xf` ausgeben.
+    fn emit_shapes(&mut self, shapes: Vec<Shape>, z: f64, layer: &str, xf: &Xf) {
+        for s in shapes {
+            match s {
+                Shape::Poly { pts, closed, filled } => {
+                    if filled {
+                        self.push_filled(layer, z, pts, xf);
+                    } else {
+                        self.push_contour(layer, z, pts, closed, xf);
+                    }
+                }
+                Shape::Text { at, height, angle, text } => {
+                    self.text(&text, Vector3::new(at[0], at[1], z), height, angle, layer, xf);
+                }
+            }
+        }
+    }
+
+    /// Bemassungsstil `name` (sonst „Standard") als Zahlen für [`crate::annotation`].
+    fn dim_style_vals(&mut self, name: &str) -> DimStyleVals {
+        let key = name.to_ascii_uppercase();
+        if let Some(v) = self.dim_styles.get(&key) {
+            return v.clone();
+        }
+        let doc = self.doc;
+        let arrow = |n: &str, h: Handle| -> ArrowKind {
+            if !n.is_empty() {
+                ann::arrow_kind(n)
+            } else {
+                ann::arrow_kind(block_name_of(doc, h).unwrap_or(""))
+            }
+        };
+        let v = match doc.dim_styles.get(name).or_else(|| doc.dim_styles.get("Standard")) {
+            None => DimStyleVals::default(),
+            Some(d) => {
+                let (a1, a2) = if d.dimsah {
+                    (arrow(&d.dimblk1_name, d.dimblk1), arrow(&d.dimblk2_name, d.dimblk2))
+                } else {
+                    let a = arrow(&d.dimblk_name, d.dimblk);
+                    (a, a)
+                };
+                let leader_arrow = match block_name_of(doc, d.dimldrblk) {
+                    Some(n) => ann::arrow_kind(n),
+                    None => a1,
+                };
+                DimStyleVals {
+                    asz: d.dimasz,
+                    tsz: d.dimtsz,
+                    txt: d.dimtxt,
+                    gap: d.dimgap,
+                    exo: d.dimexo,
+                    exe: d.dimexe,
+                    scale: d.dimscale,
+                    dec: d.dimdec,
+                    adec: d.dimadec,
+                    zin: d.dimzin,
+                    dsep: d.dimdsep,
+                    post: d.dimpost.clone(),
+                    lfac: d.dimlfac,
+                    rnd: d.dimrnd,
+                    tad: d.dimtad,
+                    cen: d.dimcen,
+                    arrow1: a1,
+                    arrow2: a2,
+                    leader_arrow,
+                    se1: d.dimse1,
+                    se2: d.dimse2,
+                    sd1: d.dimsd1,
+                    sd2: d.dimsd2,
+                }
+            }
+        };
+        self.dim_styles.insert(key, v.clone());
+        v
+    }
+
+    /// DIMENSION: Steht die Zeichnung im Anonymblock (`*D…`, Gruppencode 2), wird er wie ein INSERT
+    /// ohne Verschiebung aufgelöst (Pfeile, Linien und Text stehen dort fertig in Weltkoordinaten).
+    /// Fehlt der Block (Dateien aus Skripten, LibreCAD, DWG ohne Block), baut [`Self::synth_dimension`]
+    /// die Bemassung aus Definitionspunkten und Stil; Arten ohne Aufbau behalten den Massstext.
     fn dimension(&mut self, d: &Dimension, layer: &str, xf: &Xf, depth: usize) {
         if depth >= MAX_INSERT_DEPTH {
             return;
@@ -718,6 +1034,10 @@ impl<'a> Mapper<'a> {
             }
             return;
         }
+        if let Some((shapes, z)) = self.synth_dimension(d) {
+            self.emit_shapes(shapes, z, layer, xf);
+            return;
+        }
         // Rückfall: nur der Text (Benutzertext, sonst gemessener Wert); `<>` = Messwert.
         let measure = format_measure(base.actual_measurement);
         let value = match &base.user_text {
@@ -727,17 +1047,100 @@ impl<'a> Mapper<'a> {
         self.text(&value, base.text_middle_point, DEFAULT_TEXT_HEIGHT, base.text_rotation, layer, xf);
     }
 
-    /// LEADER: Führungslinie als offener Linienzug (Pfeilspitze und Spline-Form entfallen).
+    /// Bemassung aus Definitionspunkten und Stil (lineare, ausgerichtete, Radius-, Durchmesser-,
+    /// Winkelbemassung). `None` für Koordinaten-, Bogenlängen- und Radius-mit-Knick-Bemassungen
+    /// sowie bei unbrauchbaren Punkten.
+    fn synth_dimension(&mut self, d: &Dimension) -> Option<(Vec<Shape>, f64)> {
+        let base = d.base();
+        let st = self.dim_style_vals(&base.style_name);
+        let xy = |p: Vector3| [p.x, p.y];
+        // Textmitte der Datei; (0, 0) heisst „nicht gesetzt" (Skript-Dateien ohne Rendering).
+        let tm = base.text_middle_point;
+        let text_mid = (finite2(&tm) && (tm.x != 0.0 || tm.y != 0.0)).then(|| xy(tm));
+        let user = base.user_text.as_deref();
+        let shapes = match d {
+            Dimension::Linear(l) => {
+                let lin = ann::LinearDim {
+                    p1: xy(l.first_point),
+                    p2: xy(l.second_point),
+                    def: xy(l.definition_point),
+                    angle: l.rotation,
+                    text_mid,
+                    user_text: user,
+                    text_rotation: base.text_rotation,
+                };
+                (ann::linear_dimension(&lin, &st), l.first_point.z)
+            }
+            Dimension::Aligned(a) => {
+                let (p1, p2) = (xy(a.first_point), xy(a.second_point));
+                let lin = ann::LinearDim {
+                    p1,
+                    p2,
+                    def: xy(a.definition_point),
+                    angle: (p2[1] - p1[1]).atan2(p2[0] - p1[0]),
+                    text_mid,
+                    user_text: user,
+                    text_rotation: base.text_rotation,
+                };
+                (ann::linear_dimension(&lin, &st), a.first_point.z)
+            }
+            // acadrust: `angle_vertex` = Mittelpunkt, `definition_point` = Punkt auf dem Kreis.
+            Dimension::Radius(r) => {
+                (ann::radial_dimension(xy(r.angle_vertex), xy(r.definition_point), false, text_mid, user, &st), r.definition_point.z)
+            }
+            Dimension::Diameter(dm) => {
+                let c = dm.center();
+                (ann::radial_dimension(xy(c), xy(dm.definition_point), true, text_mid, user, &st), dm.definition_point.z)
+            }
+            Dimension::Angular3Pt(a) => (
+                ann::angular_3pt(xy(a.angle_vertex), xy(a.first_point), xy(a.second_point), xy(a.definition_point), text_mid, user, &st),
+                a.angle_vertex.z,
+            ),
+            Dimension::Angular2Ln(a) => (
+                ann::angular_2line(
+                    (xy(a.first_point), xy(a.second_point)),
+                    (xy(a.angle_vertex), xy(a.definition_point)),
+                    xy(a.dimension_arc),
+                    text_mid,
+                    user,
+                    &st,
+                ),
+                a.first_point.z,
+            ),
+            _ => return None,
+        };
+        if shapes.0.is_empty() {
+            return None;
+        }
+        Some((shapes.0, fz(shapes.1)))
+    }
+
+    /// LEADER: Führungslinie als Linienzug (Spline-Pfad tesselliert) mit Pfeilspitze am ersten
+    /// Punkt (Pfeilart `DIMLDRBLK` des Stils, Grösse `DIMASZ·DIMSCALE`).
     fn leader(&mut self, l: &Leader, layer: &str, xf: &Xf) {
-        let pts: Vec<[f64; 2]> = l.vertices.iter().filter(|v| finite2(v)).map(|v| [v.x, v.y]).collect();
+        let mut pts: Vec<[f64; 2]> = l.vertices.iter().filter(|v| finite2(v)).map(|v| [v.x, v.y]).collect();
         let z = l.vertices.iter().find(|v| v.z.is_finite()).map(|v| v.z).unwrap_or(0.0);
+        if l.path_type == acadrust::entities::LeaderPathType::Spline {
+            pts = ann::spline_through(&pts);
+        }
+        if l.arrow_enabled && pts.len() >= 2 {
+            let st = self.dim_style_vals(&l.dimension_style);
+            let size = if l.arrow_size > 0.0 && l.arrow_size.is_finite() { l.arrow_size } else { st.arrow_size() };
+            let dir = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]];
+            let shapes = ann::arrow(st.leader_arrow, pts[0], dir, size);
+            self.emit_shapes(shapes, z, layer, xf);
+        }
         self.push_contour(layer, z, pts, false, xf);
     }
 
     /// MULTILEADER: je Führungslinie ein Linienzug (zur Anschlussstelle hin geordnet, mit
-    /// Landestrecke), dazu der Text der Annotation.
-    fn multileader(&mut self, ml: &MultiLeader, layer: &str, xf: &Xf) {
+    /// Landestrecke; Spline-Pfad tesselliert) samt Pfeilspitze, dazu der Inhalt: Text (mit
+    /// Anhängepunkt und Drehung) oder Block (mit Skalierung, Drehung und Attributtexten).
+    fn multileader(&mut self, ml: &MultiLeader, layer: &str, xf: &Xf, depth: usize) {
         let ctx = &ml.context;
+        let invisible = ml.path_type == MultiLeaderPathType::Invisible;
+        let scale = if ctx.scale_factor.is_finite() && ctx.scale_factor > 0.0 { ctx.scale_factor } else { 1.0 };
+        let positive = |v: f64| v.is_finite() && v > 0.0;
         for root in &ctx.leader_roots {
             let cp = root.connection_point;
             let landing = if ml.enable_landing && root.landing_distance.is_finite() && root.landing_distance != 0.0 {
@@ -761,60 +1164,240 @@ impl<'a> Mapper<'a> {
                     if d2(&pts[pts.len() - 1]) > 1e-18 {
                         pts.push([cp.x, cp.y]);
                     }
+                }
+                let spline = line.path_type == MultiLeaderPathType::Spline
+                    || (line.path_type == MultiLeaderPathType::StraightLineSegments && ml.path_type == MultiLeaderPathType::Spline);
+                if spline {
+                    pts = ann::spline_through(&pts);
+                }
+                if finite2(&cp) {
                     if let Some(l) = landing {
                         pts.push(l);
                     }
                 }
                 let z = line.points.iter().find(|p| p.z.is_finite()).map(|p| p.z).unwrap_or(0.0);
+                if invisible {
+                    continue;
+                }
+                // Pfeilspitze am freien Ende (erster Punkt).
+                if pts.len() >= 2 {
+                    let kind = match line.arrowhead_handle.or(ml.arrowhead_handle) {
+                        Some(h) => match block_name_of(self.doc, h) {
+                            Some(n) => ann::arrow_kind(n),
+                            None => ArrowKind::ClosedFilled,
+                        },
+                        None => ArrowKind::ClosedFilled,
+                    };
+                    let size = [ctx.arrowhead_size, line.arrowhead_size * scale, ml.arrowhead_size * scale]
+                        .into_iter()
+                        .find(|v| positive(*v))
+                        .unwrap_or_else(|| DimStyleVals::default().asz);
+                    let dir = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]];
+                    let shapes = ann::arrow(kind, pts[0], dir, size);
+                    self.emit_shapes(shapes, z, layer, xf);
+                }
                 self.push_contour(layer, z, pts, false, xf);
             }
         }
-        if ctx.has_text_contents && !ctx.text_string.trim().is_empty() {
+        if ctx.has_text_contents && ml.content_type != LeaderContentType::Block && !ctx.text_string.trim().is_empty() {
             let h = [ctx.text_height, ml.text_height]
                 .into_iter()
                 .find(|h| *h > 0.0 && h.is_finite())
                 .unwrap_or(DEFAULT_TEXT_HEIGHT);
-            let clean = sanitize_mtext(&ctx.text_string);
-            self.text(&clean, ctx.text_location, h, ctx.text_rotation, layer, xf);
+            let rot = if ctx.text_rotation.is_finite() && ctx.text_rotation != 0.0 {
+                ctx.text_rotation
+            } else {
+                let d = ctx.text_direction;
+                if finite2(&d) && d.x.hypot(d.y) > 1e-12 { d.y.atan2(d.x) } else { 0.0 }
+            };
+            let ha = match ctx.text_attachment_point {
+                TextAttachmentPointType::Left => HAlign::Left,
+                TextAttachmentPointType::Center => HAlign::Center,
+                TextAttachmentPointType::Right => HAlign::Right,
+            };
+            self.mtext_block(&ctx.text_string, ctx.text_location, h, rot, (ha, VAlign::Top), ctx.line_spacing_factor, layer, xf);
+        }
+        if ctx.has_block_contents || ml.content_type == LeaderContentType::Block {
+            self.multileader_block(ml, layer, xf, depth);
         }
     }
 
-    /// ATTRIB (Wert eines Block-Attributs, steht in Weltkoordinaten): als Text; unsichtbare entfallen.
-    /// Bei ausgerichtetem Text (nicht links/Grundlinie) gilt der zweite Ausrichtungspunkt.
+    /// Block-Inhalt eines MULTILEADER: an `block_content_location`, mit Block-Skalierung und -Drehung.
+    /// Anschluss „Block-Umfang" = Mittelpunkt des Umfangs liegt auf dem Punkt (statt des Basispunkts).
+    fn multileader_block(&mut self, ml: &MultiLeader, layer: &str, xf: &Xf, depth: usize) {
+        if depth >= MAX_INSERT_DEPTH {
+            return;
+        }
+        let ctx = &ml.context;
+        let doc = self.doc;
+        let Some(h) = ctx.block_content_handle.or(ml.block_content_handle) else { return };
+        let Some(block) = doc.block_records.iter().find(|b| b.handle == h) else { return };
+        if block.entity_handles.is_empty() {
+            return;
+        }
+        let loc = ctx.block_content_location;
+        if !finite2(&loc) {
+            return;
+        }
+        let num = |v: f64, d: f64| if v.is_finite() && v != 0.0 { v } else { d };
+        let sc = ctx.block_content_scale;
+        let scale = [num(sc.x, 1.0), num(sc.y, 1.0), num(sc.z, 1.0)];
+        let rot = if ctx.block_rotation.is_finite() { ctx.block_rotation } else { 0.0 };
+        // Attributtexte: ATTDEF-Tag → Text der Referenz.
+        let mut values: HashMap<String, String> = HashMap::new();
+        for a in &ml.block_attributes {
+            let Some(def) = a.attribute_definition_handle.and_then(|h| doc.get_entity(h)) else { continue };
+            if let EntityType::AttributeDefinition(ad) = def {
+                values.insert(ad.tag.to_ascii_uppercase(), a.text.clone());
+            }
+        }
+        let (c0, t0) = (self.contours.len(), self.texts.len());
+        self.ml_attrs.push(values);
+        self.place_block(block, loc, scale, rot, (1, 1, 0.0, 0.0), std::collections::HashSet::new(), layer, xf, depth);
+        self.ml_attrs.pop();
+        let connection = if ctx.block_connection_type == BlockContentConnectionType::BlockExtents {
+            ml.block_connection_type
+        } else {
+            ctx.block_connection_type
+        };
+        if connection == BlockContentConnectionType::BlockExtents {
+            // Umfang der neuen Geometrie in Ausgabekoordinaten → Mittelpunkt auf den Zielpunkt schieben.
+            let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+            for c in &self.contours[c0..] {
+                for p in &c.pts {
+                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+                }
+            }
+            for t in &self.texts[t0..] {
+                lo = [lo[0].min(t.x), lo[1].min(t.y)];
+                hi = [hi[0].max(t.x), hi[1].max(t.y)];
+            }
+            if lo[0] <= hi[0] {
+                let target = xf.xy(loc.x, loc.y);
+                let (dx, dy) = (target[0] - (lo[0] + hi[0]) / 2.0, target[1] - (lo[1] + hi[1]) / 2.0);
+                for c in &mut self.contours[c0..] {
+                    for p in &mut c.pts {
+                        p[0] += dx;
+                        p[1] += dy;
+                    }
+                    if let Some(cv) = c.curve.as_mut() {
+                        cv.cx += dx;
+                        cv.cy += dy;
+                    }
+                }
+                for t in &mut self.texts[t0..] {
+                    t.x += dx;
+                    t.y += dy;
+                }
+            }
+        }
+    }
+
+    /// ATTRIB (Wert eines Block-Attributs, steht in Weltkoordinaten): als Text mit Ausrichtung,
+    /// Breitenfaktor und Drehung; mehrzeilige (MTEXT-)Attribute je Zeile; unsichtbare entfallen.
     fn attrib(&mut self, a: &AttributeEntity, layer: &str, xf: &Xf) {
         if a.flags.invisible || a.value.is_empty() {
             return;
         }
-        let at = text_anchor(a.horizontal_alignment, a.vertical_alignment, a.insertion_point, a.alignment_point);
         let h = if a.height > 0.0 && a.height.is_finite() { a.height } else { DEFAULT_TEXT_HEIGHT };
-        let value = match &a.embedded_mtext {
-            Some(m) if a.is_multiline => sanitize_mtext(&m.value),
-            _ => a.value.clone(),
+        if let Some(m) = a.embedded_mtext.as_deref().filter(|_| a.is_multiline) {
+            let mh = if m.height > 0.0 && m.height.is_finite() { m.height } else { h };
+            let rot = if m.rotation.is_finite() { m.rotation } else { 0.0 };
+            self.mtext_block(&m.value, m.insertion_point, mh, rot, mtext_attach(m.attachment_point), m.line_spacing_factor, layer, xf);
+            return;
+        }
+        self.aligned_text(
+            &a.value,
+            a.insertion_point,
+            a.alignment_point,
+            a.horizontal_alignment,
+            a.vertical_alignment,
+            h,
+            a.width_factor,
+            a.rotation,
+            layer,
+            xf,
+        );
+    }
+
+    /// Einzeiliger Text eines ATTRIB/ATTDEF mit Ausrichtung.
+    #[allow(clippy::too_many_arguments)]
+    fn aligned_text(
+        &mut self,
+        raw: &str,
+        ins: Vector3,
+        align: Vector3,
+        ha: HorizontalAlignment,
+        va: VerticalAlignment,
+        height: f64,
+        wf: f64,
+        rot: f64,
+        layer: &str,
+        xf: &Xf,
+    ) {
+        let value = txt::decode_percent_codes(raw);
+        if value.is_empty() || !finite2(&ins) {
+            return;
+        }
+        let hz = match ha {
+            HorizontalAlignment::Left => Hz::Left,
+            HorizontalAlignment::Center => Hz::Center,
+            HorizontalAlignment::Right => Hz::Right,
+            HorizontalAlignment::Aligned => Hz::Aligned,
+            HorizontalAlignment::Middle => Hz::Middle,
+            HorizontalAlignment::Fit => Hz::Fit,
         };
-        self.text(&value, at, h, a.rotation, layer, xf);
+        let vt = match va {
+            VerticalAlignment::Baseline => VAlign::Baseline,
+            VerticalAlignment::Bottom => VAlign::Bottom,
+            VerticalAlignment::Middle => VAlign::Middle,
+            VerticalAlignment::Top => VAlign::Top,
+        };
+        let align = finite2(&align).then(|| [align.x, align.y]);
+        let rot = if rot.is_finite() { rot } else { 0.0 };
+        let (pos, height, angle) = txt::place_single(&value, [ins.x, ins.y], align, hz, vt, height, wf, rot);
+        self.text(&value, Vector3::new(pos[0], pos[1], ins.z), height, angle, layer, xf);
     }
 
     /// ATTDEF: in einem Block zeigt AutoCAD den Vorgabewert nur, wenn die Referenz kein passendes
     /// ATTRIB trägt (oder das Attribut konstant ist); ausserhalb eines Blocks gilt Wert bzw. Tag.
+    /// Bei MULTILEADER-Blöcken ersetzt der Text des Attributs den Vorgabewert.
     fn attdef(&mut self, a: &AttributeDefinition, layer: &str, xf: &Xf, depth: usize) {
         if a.flags.invisible {
             return;
         }
-        let covered = depth > 0
+        let tag = a.tag.to_ascii_uppercase();
+        let ml_value = if depth > 0 { self.ml_attrs.last().and_then(|m| m.get(&tag)).cloned() } else { None };
+        let covered = ml_value.is_none()
+            && depth > 0
             && !a.flags.constant
-            && self.insert_tags.last().is_some_and(|tags| tags.contains(&a.tag.to_ascii_uppercase()));
+            && self.insert_tags.last().is_some_and(|tags| tags.contains(&tag));
         if covered {
             return;
         }
-        let value = if a.default_value.is_empty() { a.tag.as_str() } else { a.default_value.as_str() };
+        let value = match &ml_value {
+            Some(v) => v.as_str(),
+            None if a.default_value.is_empty() => a.tag.as_str(),
+            None => a.default_value.as_str(),
+        };
         if value.is_empty() {
             return;
         }
-        let at = text_anchor(a.horizontal_alignment, a.vertical_alignment, a.insertion_point, a.alignment_point);
         let h = if a.height > 0.0 && a.height.is_finite() { a.height } else { DEFAULT_TEXT_HEIGHT };
-        self.text(value, at, h, a.rotation, layer, xf);
+        self.aligned_text(
+            value,
+            a.insertion_point,
+            a.alignment_point,
+            a.horizontal_alignment,
+            a.vertical_alignment,
+            h,
+            a.width_factor,
+            a.rotation,
+            layer,
+            xf,
+        );
     }
-
 
     /// INSERT: Block-Inhalt je Rasterzelle mit `Welt = P + R(θ)·(S·(p − Basis) + Versatz)`.
     fn insert(&mut self, ins: &Insert, layer: &str, xf: &Xf, depth: usize) {
@@ -829,24 +1412,51 @@ impl<'a> Mapper<'a> {
             return;
         }
         let num = |v: f64, d: f64| if v.is_finite() { v } else { d };
-        let sx = num(ins.x_scale(), 1.0);
-        let sy = num(ins.y_scale(), 1.0);
-        let sz = num(ins.z_scale(), 1.0);
+        let scale = [num(ins.x_scale(), 1.0), num(ins.y_scale(), 1.0), num(ins.z_scale(), 1.0)];
         let rot = num(ins.rotation, 0.0);
-        let (sin, cos) = rot.sin_cos();
         let ip = ins.insert_point;
         if !finite2(&ip) {
             return;
         }
-        let bp = block.base_point;
-        let (bx, by, bz) = (num(bp.x, 0.0), num(bp.y, 0.0), num(bp.z, 0.0));
         let nc = usize::from(ins.column_count.max(1));
         let nr = usize::from(ins.row_count.max(1));
         let (nc, nr) = if nc * nr > MAX_ARRAY_CELLS { (1, 1) } else { (nc, nr) };
-        let dc = num(ins.column_spacing, 0.0);
-        let dr = num(ins.row_spacing, 0.0);
+        let grid = (nc, nr, num(ins.column_spacing, 0.0), num(ins.row_spacing, 0.0));
+        let tags = ins.attributes.iter().map(|a| a.tag.to_ascii_uppercase()).collect();
+        self.place_block(block, ip, scale, rot, grid, tags, layer, xf, depth);
+        // ATTRIBs der Referenz stehen schon in Weltkoordinaten (nicht unter der Block-Abbildung).
+        for a in &ins.attributes {
+            self.count("ATTRIB");
+            let own = a.common.layer.as_str();
+            let attr_layer = if own == "0" || own.is_empty() { layer } else { own };
+            self.attrib(a, attr_layer, xf);
+        }
+    }
+
+    /// Block-Inhalt platziert: Einfügepunkt `ip`, Skalierung, Drehung, Raster
+    /// `(Spalten, Zeilen, Spaltenabstand, Zeilenabstand)`; `tags` = ATTRIB-Tags der Referenz.
+    #[allow(clippy::too_many_arguments)]
+    fn place_block(
+        &mut self,
+        block: &acadrust::tables::BlockRecord,
+        ip: Vector3,
+        scale: [f64; 3],
+        rot: f64,
+        grid: (usize, usize, f64, f64),
+        tags: std::collections::HashSet<String>,
+        layer: &str,
+        xf: &Xf,
+        depth: usize,
+    ) {
+        let doc = self.doc;
+        let num = |v: f64, d: f64| if v.is_finite() { v } else { d };
+        let [sx, sy, sz] = scale;
+        let (sin, cos) = rot.sin_cos();
+        let bp = block.base_point;
+        let (bx, by, bz) = (num(bp.x, 0.0), num(bp.y, 0.0), num(bp.z, 0.0));
+        let (nc, nr, dc, dr) = grid;
         let entities: Vec<&EntityType> = block.entity_handles.iter().filter_map(|h| doc.get_entity(*h)).collect();
-        self.insert_tags.push(ins.attributes.iter().map(|a| a.tag.to_ascii_uppercase()).collect());
+        self.insert_tags.push(tags);
         for row in 0..nr {
             for col in 0..nc {
                 let offx = col as f64 * dc;
@@ -875,24 +1485,29 @@ impl<'a> Mapper<'a> {
             }
         }
         self.insert_tags.pop();
-        // ATTRIBs der Referenz stehen schon in Weltkoordinaten (nicht unter der Block-Abbildung).
-        for a in &ins.attributes {
-            self.count("ATTRIB");
-            let own = a.common.layer.as_str();
-            let attr_layer = if own == "0" || own.is_empty() { layer } else { own };
-            self.attrib(a, attr_layer, xf);
-        }
     }
 }
 
-/// Ankerpunkt eines ATTRIB/ATTDEF: bei ausgerichtetem Text (nicht links/Grundlinie) der zweite
-/// Ausrichtungspunkt, sonst der Einfügepunkt.
-fn text_anchor(h: HorizontalAlignment, v: VerticalAlignment, ins: Vector3, align: Vector3) -> Vector3 {
-    let aligned = h != HorizontalAlignment::Left || v != VerticalAlignment::Baseline;
-    if aligned && finite2(&align) && (align.x != 0.0 || align.y != 0.0) {
-        align
-    } else {
-        ins
+/// Blockname eines Block-Eintrags über sein Handle (z. B. Pfeilblock `_DOT` aus `DIMBLK`).
+fn block_name_of(doc: &CadDocument, h: Handle) -> Option<&str> {
+    if h.is_null() {
+        return None;
+    }
+    doc.block_records.iter().find(|b| b.handle == h).map(|b| b.name.as_str())
+}
+
+/// MTEXT-Anhängepunkt → (horizontal, vertikal).
+fn mtext_attach(a: AttachmentPoint) -> (HAlign, VAlign) {
+    match a {
+        AttachmentPoint::TopLeft => (HAlign::Left, VAlign::Top),
+        AttachmentPoint::TopCenter => (HAlign::Center, VAlign::Top),
+        AttachmentPoint::TopRight => (HAlign::Right, VAlign::Top),
+        AttachmentPoint::MiddleLeft => (HAlign::Left, VAlign::Middle),
+        AttachmentPoint::MiddleCenter => (HAlign::Center, VAlign::Middle),
+        AttachmentPoint::MiddleRight => (HAlign::Right, VAlign::Middle),
+        AttachmentPoint::BottomLeft => (HAlign::Left, VAlign::Bottom),
+        AttachmentPoint::BottomCenter => (HAlign::Center, VAlign::Bottom),
+        AttachmentPoint::BottomRight => (HAlign::Right, VAlign::Bottom),
     }
 }
 
@@ -1171,70 +1786,19 @@ fn edge_params(s: f64, e: f64, ccw: bool) -> Vec<f64> {
     (0..=segs).map(|i| s + dir * (sweep * i as f64) / segs as f64).collect()
 }
 
-/// MTEXT-Inhalt von Formatcodes säubern (wie bisher in TS): `\P`/`\p` und `\~` → Leerzeichen,
-/// `\X…;`-Sequenzen weg, alle `{}` weg, `\\`/`\{`/`\}` entschärft, Rand-Leerraum weg.
-pub fn sanitize_mtext(s: &str) -> String {
-    // 1. \P (beliebige Grossschreibung) → " ".
-    let mut a = String::with_capacity(s.len());
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        if c == '\\' && matches!(it.peek(), Some('P' | 'p')) {
-            it.next();
-            a.push(' ');
-        } else {
-            a.push(c);
-        }
-    }
-    // 2. \~ → " ".
-    let a = a.replace("\\~", " ");
-    // 3. \<Buchstabe>[^;\\]*; → "" (nur wenn das Semikolon vor dem nächsten \ kommt).
-    let chars: Vec<char> = a.chars().collect();
-    let mut b = String::with_capacity(a.len());
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic() {
-            let mut j = i + 2;
-            while j < chars.len() && chars[j] != ';' && chars[j] != '\\' {
-                j += 1;
-            }
-            if j < chars.len() && chars[j] == ';' {
-                i = j + 1;
-                continue;
-            }
-        }
-        b.push(chars[i]);
-        i += 1;
-    }
-    // 4. Alle geschweiften Klammern weg.
-    let c: String = b.chars().filter(|ch| *ch != '{' && *ch != '}').collect();
-    // 5. \{ \} \\ → Zeichen (nach 4. bleibt davon nur \\).
-    let chars: Vec<char> = c.chars().collect();
-    let mut d = String::with_capacity(c.len());
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && matches!(chars[i + 1], '{' | '}' | '\\') {
-            d.push(chars[i + 1]);
-            i += 2;
-            continue;
-        }
-        d.push(chars[i]);
-        i += 1;
-    }
-    d.trim_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}').to_string()
-}
-
 // ── Flache Kodierung ─────────────────────────────────────────────────────────
 
 /// Kodierung für JS: `(geom, strings)`. Strings (Ebenen, Texte, Entity-Typen) stehen einmal in
 /// der Tabelle, `geom` verweist per Index darauf. Aufbau von `geom`:
 ///
 /// ```text
-/// [1 (Version), kind (0 DXF, 1 DWG), insUnits, total,
+/// [3 (Version), kind (0 DXF, 1 DWG), insUnits, total,
 ///  nLayerColors, (layer, rgb)…,
 ///  nCounts, (type, count)…,
 ///  nContours, (layer, flags, z, [kind, cx, cy, r, a0, a1 wenn flags&4], nPts, x, y …)…,
 ///  nTexts, (layer, text, x, y, height, angle)…,
-///  nMeshes, (layer, nPos, nIdx, positions…, indices…)…]
+///  nMeshes, (layer, nPos, nIdx, positions…, indices…)…,
+///  nLayouts, (name, entities)…, recovered (0/1), layoutName (String-Index, −1 = Modellraum)]
 /// ```
 /// `flags`: 1 = geschlossen, 2 = gefüllt, 4 = Kurve (kind 0 Bogen, 1 Kreis).
 pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
@@ -1249,7 +1813,7 @@ pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
         (strings.len() - 1) as f64
     };
     let mut g: Vec<f64> = Vec::with_capacity(16 + data.contours.iter().map(|c| 4 + c.pts.len() * 2).sum::<usize>());
-    g.push(2.0);
+    g.push(3.0);
     g.push(match data.kind {
         SourceKind::Dxf => 0.0,
         SourceKind::Dwg => 1.0,
@@ -1296,9 +1860,23 @@ pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
         g.extend_from_slice(&m.positions);
         g.extend(m.indices.iter().map(|i| f64::from(*i)));
     }
+    g.push(data.layouts.len() as f64);
+    for l in &data.layouts {
+        g.push(s(&l.name));
+        g.push(f64::from(l.entities));
+    }
+    g.push(if data.recovered { 1.0 } else { 0.0 });
+    g.push(match &data.layout {
+        Some(name) => s(name),
+        None => -1.0,
+    });
     (g, strings)
 }
 
 #[cfg(test)]
 #[path = "import_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "import_robust_tests.rs"]
+mod robust_tests;

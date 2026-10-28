@@ -8,6 +8,6 @@ import type { DxfImportResult } from "./dxfParser";
 import { parseDxfAsync } from "./dxfParserAsync";
 
 /** Liest eine DWG-Datei. Wirft bei unlesbaren Dateien (der Aufrufer zeigt den ODA-Hinweis). */
-export function parseDwg(data: ArrayBuffer): Promise<DxfImportResult> {
-  return parseDxfAsync(data);
+export function parseDwg(data: ArrayBuffer, layout?: string): Promise<DxfImportResult> {
+  return parseDxfAsync(data, undefined, layout);
 }
