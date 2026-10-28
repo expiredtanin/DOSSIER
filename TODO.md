@@ -280,7 +280,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[65] Explosionsaxonometrie.** · S–M
 - ○ **[66] Präsentationspläne mit einem Klick.** · M
 - ○ **[67] Skizzenstil.** · M
-- ◐ **[25] IFC-Import** → [B3] ✅ (Mesh), [B4] ○. · L
+- ◐ **[25] IFC-Import** → [B3] ✅ (Mesh), [B4] ◐ (Bauteile). · L
 - ◐ **[26] Dächer über beliebige Grundrisse.** `geometry/roofSkeleton.ts` (Walm/Sattel/Mansarde/
   Krüppelwalm auf L/T/U, Kehlen, Giebel); Port nach Rust läuft [K2]. Offen: Innenhöfe, schiefwinklige
   Grundrisse → [B2]. · M
@@ -325,12 +325,34 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   und 39 von 46 IFC4.3-sample-models gleich (≤ 3 %; nur lokal, nicht eingecheckt). Offen:
   IfcAdvancedBrep (NURBS), IFC4.3-Ausrichtung (IfcGradientCurve, IfcLinearPlacement,
   IfcSectionedSolidHorizontal), IfcGridPlacement, B-Spline-Kurven, StartParam/EndParam der Sweeps,
-  Profil-Kantenradien/Neigungen; Farbe/GlobalId gelesen, aber `ImportedMesh` hat kein Feld dafür
-  (GlobalId steht im Namen); CSG bei sehr grossen Netzen (> 200 000 Dreiecke) übersprungen; nur
-  Linux-Container/vitest, nicht in der Tauri-App geprüft (Worker nur mit Attrappe getestet). · M
-- ○ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3]. Stand 28.10.:
-  Geometrie-Grundlage steht (Öffnungen/Booleans/Sweeps als Mesh, [B3]); offen: Wand/Decke/Stütze aus
-  Extrusion + Achse erkennen, Öffnungen als `Opening` statt abgezogen, Material/Typ übernehmen.
+  Profil-Kantenradien/Neigungen; CSG bei sehr grossen Netzen (> 200 000 Dreiecke) übersprungen; nur
+  Linux-Container/vitest, nicht in der Tauri-App geprüft (Worker nur mit Attrappe getestet).
+  (28.10., 3. Schritt) `ImportedMesh.color` (`#rrggbb` aus Stil/Material) und `ifcGlobalId` gefüllt,
+  Name ohne GlobalId; Rundreise Speichern/Laden getestet. Offen: Anzeige der Farbe in 3D —
+  `plan/toWalls3d.ts::emitMeshes` setzt für Kontext-Meshes fest `IMPORTED_RGB`; Vorschlag: dort
+  `obj.color` (über `hexToRgb`/255) nehmen, falls gesetzt (der Plan zeichnet nur Umrisse in der
+  Ebenenfarbe). · M
+- ◐ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3]. Stand 28.10.:
+  Wahl im Import-Dialog (`ui/IfcImportDialog.tsx`: Kontext-Meshes = Standard | Bauteile), CLI
+  `import-ifc … --elements`. Erkennung in Rust (`fileio/src/ifc_semantic.rs`, `import_ifc_elements`),
+  über die Körperform statt den Darstellungstyp: Wand = Rechteck im Grundriss (kleinstes umschliessendes
+  Rechteck, unten eben, oben ≥ 35 % eben, Volumen 70–100 %), Achse = Mitte, Enden auf die Achse
+  anstossender Wände gezogen (L/T), Schichten aus IfcMaterialLayerSet(Usage) von Bauteil oder Typ,
+  Seite der Aussenschicht aus Usage, sonst Schicht-Bändern, sonst „weg vom Geschoss-Schwerpunkt";
+  Öffnungen (quaderförmig, durch die ganze Wand) → Tür/Fenster/Wanddurchbruch (sonst bleibt die Wand
+  Mesh); IfcSlab als senkrechtes Prisma → Decke (Löcher + durchgehende Öffnungen als
+  Deckenöffnungen, nicht Teil eines Daches); IfcColumn Rechteck/Kreis → Stütze; IfcSpace (Prisma ohne
+  Loch) → Raum (LongName, SIA 416 aus `CH_Raum`); Geschosse nach Höhe wiederverwendet (±5 mm) oder
+  angelegt. TS (`io/ifcElements.ts`) ordnet nur zu: Wand-/Deckentyp nach Schichten (Material + Dicke)
+  wiederverwenden oder anlegen, Materialien nach Namen; Projekt über `setProject` (Ops). Rundreise
+  Demo-Haus (Export → Import als Bauteile in `emptyProject`): alle 9 Wände (Achse, Richtung, Typ, Höhe,
+  Geschoss), 3 Öffnungen (Lage, Grösse, Brüstung, Typ), Decke, Raum gleich, keine neuen Typen;
+  Dach/Treppe bleiben Mesh. buildingSMART Sample-Test-Files (35, lokal): alle lesbar, Ergebnis gültig;
+  erkannt v. a. Räume, Stützen, `wall-with-opening-and-window` (Wand + Fenster); die Simple-Scene-Wände
+  sind Giebelwände (bleiben Mesh). Offen: Dächer, Treppen, Träger, schräge/gekrümmte Wände, Wände mit
+  Profiländerung, Decken aus Dreiecksnetzen mit T-Stössen (zwei Teilflächen → Mesh), Tür-Anschlag/
+  Öffnungsrichtung, Tür-/Fenstertyp aus IfcDoorType/IfcWindowType, Farbe der Bauteile; nur Linux-
+  Container/vitest, nicht in der Tauri-App geprüft (Dialog nur per tsc).
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit

@@ -1,9 +1,10 @@
 // IFC-Import als Mesh ([B3]): dünne Fassade über `import_ifc` im Format-Modul (`src-tauri/fileio`,
 // `ifc_import.rs`). Jedes IFC-Bauteil mit Körper wird zu einem `ImportedMesh` der Kontext-Schicht
-// (wie der STEP-Import, `stepImport.ts`); echte Bauteile (Wand, Decke …) kommen mit [B4].
+// (wie der STEP-Import, `stepImport.ts`); echte Bauteile (Wand, Decke …) baut auf Wunsch
+// `ifcElements.ts` ([B4]) aus `import_ifc_elements`.
 //
-// Gruppierung: je Bauteil ein Mesh (anwählbar, Name/Geschoss/GlobalId bleiben erhalten, im
-// Kontext-Panel nach IFC-Klasse gruppiert über `layer`). Bei sehr vielen Bauteilen (> `MAX_SINGLE`)
+// Gruppierung: je Bauteil ein Mesh (anwählbar, Name/Geschoss bleiben erhalten, GlobalId in
+// `ifcGlobalId`, Farbe in `color`; im Kontext-Panel nach IFC-Klasse gruppiert über `layer`). Bei sehr vielen Bauteilen (> `MAX_SINGLE`)
 // werden Bauteile gleicher Klasse und gleichen Geschosses zusammengelegt, damit Projektdatei und
 // Kontext-Panel handhabbar bleiben.
 //
@@ -18,6 +19,7 @@
 import { loadFileio } from "../engine/fileioWasm";
 import { GENERIC_IMPORT_CATEGORY } from "../model/contextCategories";
 import type { ImportedMesh } from "../model/types";
+import { rgbToHex } from "../model/color";
 
 /** Ein gelesenes IFC-Bauteil. */
 export interface IfcProduct {
@@ -62,23 +64,27 @@ interface RawProduct {
   indexCount: number;
 }
 
-/** Rohergebnis aus Rust: Bericht (JSON) und alle Bauteile hintereinander in zwei flachen Puffern. */
+/** Rohergebnis aus Rust: Bericht (JSON) und alle Bauteile hintereinander in zwei flachen Puffern;
+ *  mit `elements` dazu die Zahlen der erkannten Bauteile ([B4], `ifcElements.ts`). */
 export interface IfcFlat {
   meta: string;
   positions: Float64Array;
   indices: Uint32Array;
+  elementData?: Float64Array;
 }
 
-/** Worker-Protokoll (`ifcImport.worker.ts`). */
-export type IfcWorkerRequest = { type: "parse"; data: ArrayBuffer };
+/** Worker-Protokoll (`ifcImport.worker.ts`); `elements` = echte Bauteile erkennen ([B4]). */
+export type IfcWorkerRequest = { type: "parse"; data: ArrayBuffer; elements?: boolean };
 export type IfcWorkerResponse = { type: "result"; flat: IfcFlat } | { type: "error"; message: string };
 
 /** Liest IFC-Bytes mit dem geladenen Format-Modul (Worker oder aufrufender Thread). */
-export async function importIfcFlat(bytes: Uint8Array): Promise<IfcFlat> {
+export async function importIfcFlat(bytes: Uint8Array, elements = false): Promise<IfcFlat> {
   const m = await loadFileio();
-  const r = m.import_ifc(bytes);
+  const r = elements ? m.import_ifc_elements(bytes) : m.import_ifc(bytes);
   try {
-    return { meta: r.meta, positions: r.positions(), indices: r.indices() };
+    const flat: IfcFlat = { meta: r.meta, positions: r.positions(), indices: r.indices() };
+    if (elements) flat.elementData = r.elementData();
+    return flat;
   } finally {
     r.free();
   }
@@ -88,15 +94,17 @@ export async function importIfcFlat(bytes: Uint8Array): Promise<IfcFlat> {
 export async function handleIfcWorkerRequest(req: IfcWorkerRequest): Promise<{ res: IfcWorkerResponse; transfer: Transferable[] }> {
   try {
     if (req?.type !== "parse" || !(req.data instanceof ArrayBuffer)) throw new Error("ungültige Anfrage");
-    const flat = await importIfcFlat(new Uint8Array(req.data));
-    return { res: { type: "result", flat }, transfer: [flat.positions.buffer, flat.indices.buffer] };
+    const flat = await importIfcFlat(new Uint8Array(req.data), req.elements === true);
+    const transfer: Transferable[] = [flat.positions.buffer, flat.indices.buffer];
+    if (flat.elementData) transfer.push(flat.elementData.buffer);
+    return { res: { type: "result", flat }, transfer };
   } catch (err) {
     return { res: { type: "error", message: err instanceof Error ? err.message : String(err) }, transfer: [] };
   }
 }
 
 /** Liest im Web-Worker; `null`, wenn kein Worker verfügbar ist oder er nicht startet. */
-function readInWorker(bytes: Uint8Array): Promise<IfcFlat | null> {
+function readInWorker(bytes: Uint8Array, elements: boolean): Promise<IfcFlat | null> {
   if (typeof Worker === "undefined") return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     let worker: Worker;
@@ -117,7 +125,8 @@ function readInWorker(bytes: Uint8Array): Promise<IfcFlat | null> {
     };
     // Kopie übertragen: der Aufrufer behält seine Bytes.
     const data = bytes.slice().buffer;
-    worker.postMessage({ type: "parse", data } satisfies IfcWorkerRequest, [data]);
+    const req: IfcWorkerRequest = elements ? { type: "parse", data, elements } : { type: "parse", data };
+    worker.postMessage(req, [data]);
   });
 }
 
@@ -145,8 +154,18 @@ export function decodeIfc(flat: IfcFlat): { products: IfcProduct[]; report: IfcI
 
 /** Liest IFC-Bytes (im Worker, sonst direkt). Wirft bei unlesbarer Datei (Meldung aus Rust). */
 export async function readIfc(bytes: Uint8Array): Promise<{ products: IfcProduct[]; report: IfcImportReport }> {
-  const flat = (await readInWorker(bytes)) ?? (await importIfcFlat(bytes));
-  return decodeIfc(flat);
+  return decodeIfc(await readIfcFlat(bytes));
+}
+
+/** Rohergebnis lesen (im Worker, sonst direkt); `elements` = echte Bauteile erkennen ([B4]). */
+export async function readIfcFlat(bytes: Uint8Array, elements = false): Promise<IfcFlat> {
+  return (await readInWorker(bytes, elements)) ?? (await importIfcFlat(bytes, elements));
+}
+
+/** RGBA 0..1 → `#rrggbb` (Alpha entfällt). */
+export function ifcColorHex(c: readonly number[] | null | undefined): string | undefined {
+  if (!c || c.length < 3 || !c.slice(0, 3).every((v) => Number.isFinite(v))) return undefined;
+  return rgbToHex({ r: c[0] * 255, g: c[1] * 255, b: c[2] * 255 });
 }
 
 /** Ab so vielen Bauteilen wird je Klasse + Geschoss zusammengelegt. */
@@ -157,12 +176,19 @@ export interface IfcToMeshesOptions {
   geoOrigin?: { e: number; n: number } | null;
   /** "product" = je Bauteil, "class" = je Klasse + Geschoss, "auto" (Standard) nach `MAX_SINGLE`. */
   group?: "product" | "class" | "auto";
+  /** Feste Verschiebung statt der aus den Bauteilen geschätzten ([B4]: gemeinsam mit den Bauteilen). */
+  shift?: [number, number];
 }
 
 let counter = 0;
 
-/** Verschiebung, falls die Datei in Landeskoordinaten liegt und das Projekt einen Bezug hat. */
-function geoShift(products: IfcProduct[], origin: { e: number; n: number } | null | undefined): [number, number] {
+/** Verschiebung, falls die Datei in Landeskoordinaten liegt und das Projekt einen Bezug hat;
+ *  `extra` = weitere Punkte (x,y flach, z. B. erkannte Bauteile [B4]). */
+export function geoShift(
+  products: IfcProduct[],
+  origin: { e: number; n: number } | null | undefined,
+  extra: readonly number[] = [],
+): [number, number] {
   if (!origin) return [0, 0];
   let sx = 0;
   let sy = 0;
@@ -174,6 +200,11 @@ function geoShift(products: IfcProduct[], origin: { e: number; n: number } | nul
       n++;
     }
   }
+  for (let i = 0; i + 1 < extra.length; i += 2) {
+    sx += extra[i];
+    sy += extra[i + 1];
+    n++;
+  }
   if (n === 0) return [0, 0];
   const cx = sx / n;
   const cy = sy / n;
@@ -184,7 +215,7 @@ function geoShift(products: IfcProduct[], origin: { e: number; n: number } | nul
 /** Bauteile → Kontext-Meshes (Kategorie „Situation" wie STEP; `layer` = IFC-Klasse). */
 export function ifcToImportedMeshes(products: IfcProduct[], fileName: string, opts: IfcToMeshesOptions = {}): ImportedMesh[] {
   const base = fileName.replace(/\.[^.]+$/, "") || "IFC";
-  const [dx, dy] = geoShift(products, opts.geoOrigin);
+  const [dx, dy] = opts.shift ?? geoShift(products, opts.geoOrigin);
   const stamp = Date.now().toString(36);
   const group = opts.group ?? "auto";
   const perProduct = group === "product" || (group === "auto" && products.length <= MAX_SINGLE);
@@ -203,14 +234,19 @@ export function ifcToImportedMeshes(products: IfcProduct[], fileName: string, op
   };
 
   if (perProduct) {
-    return products.map((p) => ({
-      id: `imported-ifc-${stamp}-${counter++}`,
-      type: "importedMesh" as const,
-      name: [p.storey, p.name || p.ifcClass].filter(Boolean).join(": ") + (p.globalId ? ` [${p.globalId}]` : ""),
-      layer: p.ifcClass,
-      categoryCode: GENERIC_IMPORT_CATEGORY.code,
-      ...toArrays([p]),
-    }));
+    return products.map((p) => {
+      const color = ifcColorHex(p.color);
+      return {
+        id: `imported-ifc-${stamp}-${counter++}`,
+        type: "importedMesh" as const,
+        name: [p.storey, p.name || p.ifcClass].filter(Boolean).join(": "),
+        layer: p.ifcClass,
+        categoryCode: GENERIC_IMPORT_CATEGORY.code,
+        ...(color ? { color } : {}),
+        ...(p.globalId ? { ifcGlobalId: p.globalId } : {}),
+        ...toArrays([p]),
+      };
+    });
   }
   const groups = new Map<string, IfcProduct[]>();
   for (const p of products) {
@@ -219,14 +255,20 @@ export function ifcToImportedMeshes(products: IfcProduct[], fileName: string, op
     if (g) g.push(p);
     else groups.set(key, [p]);
   }
-  return [...groups.values()].map((parts) => ({
-    id: `imported-ifc-${stamp}-${counter++}`,
-    type: "importedMesh" as const,
-    name: `${base}: ${[parts[0].storey, parts[0].ifcClass].filter(Boolean).join(" ")} (${parts.length})`,
-    layer: parts[0].ifcClass,
-    categoryCode: GENERIC_IMPORT_CATEGORY.code,
-    ...toArrays(parts),
-  }));
+  return [...groups.values()].map((parts) => {
+    // Gemeinsame Farbe nur, wenn alle Teile dieselbe haben.
+    const colors = new Set(parts.map((p) => ifcColorHex(p.color) ?? ""));
+    const color = colors.size === 1 ? [...colors][0] : "";
+    return {
+      id: `imported-ifc-${stamp}-${counter++}`,
+      type: "importedMesh" as const,
+      name: `${base}: ${[parts[0].storey, parts[0].ifcClass].filter(Boolean).join(" ")} (${parts.length})`,
+      layer: parts[0].ifcClass,
+      categoryCode: GENERIC_IMPORT_CATEGORY.code,
+      ...(color ? { color } : {}),
+      ...toArrays(parts),
+    };
+  });
 }
 
 /** Datei-Bytes → Kontext-Meshes + Bericht. */

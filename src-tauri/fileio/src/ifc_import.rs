@@ -1,7 +1,8 @@
 // IFC-Import als Mesh ([B3], erste Stufe von [25]): liest aus einer IFC-Datei (IFC2x3, IFC4, IFC4.3)
 // je Bauteil (IfcProduct mit Körper-Darstellung) GlobalId, Klasse, Name, Geschoss, Farbe und
 // Dreiecke in Metern (Weltkoordinaten der Datei, Z = Höhe). Daraus werden auf der TS-Seite
-// importierte Kontext-Meshes (`src/io/ifcImport.ts`); echte Bauteile kommen mit [B4].
+// importierte Kontext-Meshes (`src/io/ifcImport.ts`); echte Bauteile erkennt auf Wunsch
+// `ifc_semantic.rs` ([B4], `import_ifc_opts(…, true)`), sie fehlen dann unter den Meshes.
 //
 // Eigener Code (nichts aus BIMCraft `import.rs` übernommen; BIMCraft rechnet in mm, hier Meter).
 //
@@ -140,6 +141,14 @@ impl Xf {
     }
     fn is_finite(&self) -> bool {
         self.r.iter().flatten().chain(self.t.iter()).all(|v| v.is_finite())
+    }
+    /// Ursprung (Verschiebung) der Abbildung.
+    pub(crate) fn origin(&self) -> V3 {
+        self.t
+    }
+    /// Bildet eine Richtung ab (ohne Verschiebung).
+    pub(crate) fn apply_dir(&self, v: V3) -> V3 {
+        Xf { r: self.r, t: [0.0; 3] }.apply(v)
     }
 }
 
@@ -475,6 +484,8 @@ pub struct IfcImport {
     pub parse_errors: usize,
     /// Abbruch wegen Dreiecks-Obergrenze.
     pub truncated: bool,
+    /// Erkannte Bauteile ([B4]), nur mit [`import_ifc_opts`]`(…, true)`.
+    pub elements: Option<crate::ifc_semantic::Semantic>,
 }
 
 /// Bauteilklassen, die als Mesh keinen Sinn ergeben (Volumen-Hilfskörper, Beschriftung).
@@ -497,9 +508,9 @@ const NON_BODY_REPS: &[&str] = &[
 // Leser
 // ---------------------------------------------------------------------------
 
-struct Reader<'a> {
-    f: &'a StepFile,
-    len_scale: f64,
+pub(crate) struct Reader<'a> {
+    pub(crate) f: &'a StepFile,
+    pub(crate) len_scale: f64,
     angle_scale: f64,
     placements: HashMap<u64, Xf>,
     item_colors: HashMap<u64, [f64; 4]>,
@@ -593,7 +604,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Objekt-Platzierung in Weltkoordinaten (IfcLocalPlacement-Kette, zwischengespeichert).
-    fn object_placement(&mut self, id: u64, depth: usize) -> Xf {
+    pub(crate) fn object_placement(&mut self, id: u64, depth: usize) -> Xf {
         if let Some(x) = self.placements.get(&id) {
             return *x;
         }
@@ -1372,9 +1383,9 @@ impl<'a> Reader<'a> {
 
     // ---- Bauteile ---------------------------------------------------------------------------
 
-    /// Körper eines Bauteils in Weltkoordinaten (ohne Öffnungen) und erste Elementfarbe; `None` ohne
-    /// Körper-Darstellung. Hört nach etwa `max_tris` Dreiecken auf.
-    fn product_body(&mut self, id: u64, max_tris: usize) -> Option<(Mesh, Option<[f64; 4]>)> {
+    /// Platzierung und Körper-Elemente (ids der Darstellungselemente) eines Bauteils; `None` ohne
+    /// Körper-Darstellung.
+    fn body_items(&mut self, id: u64) -> Option<(Xf, Vec<u64>)> {
         let f = self.f;
         let e = f.get(id)?;
         // IfcProduct: Representation (Attribut 7) zeigt auf eine IfcProductDefinitionShape.
@@ -1396,19 +1407,45 @@ impl<'a> Reader<'a> {
             Some(p) => self.object_placement(p, 0),
             None => Xf::IDENTITY,
         };
+        Some((place, chosen.iter().flat_map(|rep| refs(rep.arg(3))).collect()))
+    }
+
+    /// Körper eines Bauteils in Weltkoordinaten (ohne Öffnungen) und erste Elementfarbe; `None` ohne
+    /// Körper-Darstellung. Hört nach etwa `max_tris` Dreiecken auf.
+    pub(crate) fn product_body(&mut self, id: u64, max_tris: usize) -> Option<(Mesh, Option<[f64; 4]>)> {
+        let (place, items) = self.body_items(id)?;
         let mut local = Mesh::default();
         let mut color = None;
-        'reps: for rep in chosen {
-            for it in refs(rep.arg(3)) {
-                self.item(it, &mut local, 0, &mut color);
-                if local.triangle_count() > max_tris {
-                    break 'reps;
-                }
+        for it in items {
+            self.item(it, &mut local, 0, &mut color);
+            if local.triangle_count() > max_tris {
+                break;
             }
         }
         let mut mesh = Mesh::default();
         mesh.append(&local, &place);
         Some((mesh, color))
+    }
+
+    /// Wie [`Self::product_body`], aber je Darstellungselement ein eigenes Netz (Weltkoordinaten) —
+    /// für den Bauteil-Import ([B4]), der z. B. die Schicht-Bänder einer Wand einzeln braucht.
+    pub(crate) fn product_item_meshes(&mut self, id: u64, max_tris: usize) -> Vec<Mesh> {
+        let Some((place, items)) = self.body_items(id) else { return Vec::new() };
+        let mut out = Vec::new();
+        let mut total = 0;
+        for it in items {
+            let mut local = Mesh::default();
+            let mut color = None;
+            self.item(it, &mut local, 0, &mut color);
+            total += local.triangle_count();
+            let mut mesh = Mesh::default();
+            mesh.append(&local, &place);
+            out.push(mesh);
+            if total > max_tris {
+                break;
+            }
+        }
+        out
     }
 
     // ---- Farben ----------------------------------------------------------------------------
@@ -1509,8 +1546,128 @@ fn units(f: &StepFile, ids: &[u64]) -> (f64, f64) {
     (len_scale, angle_scale)
 }
 
+/// Beziehungen der Datei, die Mesh- und Bauteil-Import ([B4]) brauchen.
+#[derive(Default)]
+pub(crate) struct Rels {
+    /// Bauteil → räumliche Struktur (IfcRelContainedInSpatialStructure).
+    pub container: HashMap<u64, u64>,
+    /// Teil → Ganzes (IfcRelAggregates).
+    pub parent: HashMap<u64, u64>,
+    /// Objekt (auch Typ) → Material (IfcRelAssociatesMaterial).
+    pub material_of: HashMap<u64, u64>,
+    /// Material → Farbe (IfcMaterialDefinitionRepresentation).
+    pub material_color: HashMap<u64, [f64; 4]>,
+    /// Wirt → Öffnungen (IfcRelVoidsElement).
+    pub voids: HashMap<u64, Vec<u64>>,
+}
+
+impl Rels {
+    /// Material (auch Schichten/Profile/Bestandteile/Listen) → Farbe des ersten Materials.
+    pub(crate) fn resolve_material_color(&self, f: &StepFile, mut m: u64) -> Option<[f64; 4]> {
+        for _ in 0..6 {
+            if let Some(c) = self.material_color.get(&m) {
+                return Some(*c);
+            }
+            let e = f.get(m)?;
+            let next = match e.ty.as_str() {
+                "IFCMATERIALLAYERSETUSAGE" | "IFCMATERIALPROFILESETUSAGE" | "IFCMATERIALPROFILESETUSAGETAPERING" => e.arg(0),
+                "IFCMATERIALLAYERSET" | "IFCMATERIALLIST" => e.arg(0).and_then(|v| v.as_list()).and_then(|l| l.first()),
+                "IFCMATERIALPROFILESET" | "IFCMATERIALCONSTITUENTSET" => e.arg(2).and_then(|v| v.as_list()).and_then(|l| l.first()),
+                "IFCMATERIALLAYER" => e.arg(0),
+                "IFCMATERIALPROFILE" | "IFCMATERIALCONSTITUENT" => e.arg(2),
+                _ => None,
+            };
+            m = next?.as_ref_id()?;
+        }
+        None
+    }
+
+    /// Geschoss (IfcBuildingStorey-id) eines Bauteils: Enthaltensein, sonst aufwärts über Aggregation.
+    pub(crate) fn storey_id(&self, f: &StepFile, mut id: u64) -> Option<u64> {
+        for _ in 0..32 {
+            let e = f.get(id)?;
+            if e.ty == "IFCBUILDINGSTOREY" {
+                return Some(id);
+            }
+            id = match self.container.get(&id) {
+                Some(s) => *s,
+                None => *self.parent.get(&id)?,
+            };
+        }
+        None
+    }
+
+    fn gather(f: &StepFile, ids: &[u64], r: &mut Reader) -> Rels {
+        let mut rels = Rels::default();
+        let refs = |v: Option<&Value>| -> Vec<u64> { v.and_then(|v| v.as_list()).unwrap_or(&[]).iter().filter_map(|x| x.as_ref_id()).collect() };
+        for &id in ids {
+            let e = &f.entities[&id];
+            match e.ty.as_str() {
+                "IFCRELCONTAINEDINSPATIALSTRUCTURE" => {
+                    if let Some(s) = e.arg(5).and_then(|v| v.as_ref_id()) {
+                        for el in refs(e.arg(4)) {
+                            rels.container.entry(el).or_insert(s);
+                        }
+                    }
+                }
+                "IFCRELAGGREGATES" => {
+                    if let Some(p) = e.arg(4).and_then(|v| v.as_ref_id()) {
+                        for c in refs(e.arg(5)) {
+                            rels.parent.entry(c).or_insert(p);
+                        }
+                    }
+                }
+                "IFCRELASSOCIATESMATERIAL" => {
+                    if let Some(m) = e.arg(5).and_then(|v| v.as_ref_id()) {
+                        for o in refs(e.arg(4)) {
+                            rels.material_of.entry(o).or_insert(m);
+                        }
+                    }
+                }
+                "IFCRELVOIDSELEMENT" => {
+                    if let (Some(h), Some(o)) = (e.arg(4).and_then(|v| v.as_ref_id()), e.arg(5).and_then(|v| v.as_ref_id())) {
+                        rels.voids.entry(h).or_default().push(o);
+                    }
+                }
+                "IFCSTYLEDITEM" => {
+                    if let Some(item) = e.arg(0).and_then(|v| v.as_ref_id()) {
+                        if let Some(c) = e.arg(1).and_then(|v| v.as_list()).and_then(|l| r.style_color(l, 0)) {
+                            r.item_colors.entry(item).or_insert(c);
+                        }
+                    }
+                }
+                "IFCMATERIALDEFINITIONREPRESENTATION" => {
+                    if let Some(m) = e.arg(3).and_then(|v| v.as_ref_id()) {
+                        'reps: for rep in refs(e.arg(2)) {
+                            for it in refs(f.get(rep).and_then(|x| x.arg(3))) {
+                                let Some(si) = f.get(it) else { continue };
+                                if si.ty != "IFCSTYLEDITEM" {
+                                    continue;
+                                }
+                                if let Some(c) = si.arg(1).and_then(|v| v.as_list()).and_then(|l| r.style_color(l, 0)) {
+                                    rels.material_color.entry(m).or_insert(c);
+                                    break 'reps;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        rels
+    }
+}
+
 /// Liest eine IFC-Datei als Meshes je Bauteil.
 pub fn import_ifc(bytes: &[u8]) -> Result<IfcImport, String> {
+    import_ifc_opts(bytes, false)
+}
+
+/// Wie [`import_ifc`]; mit `elements` werden zusätzlich echte Bauteile erkannt ([B4],
+/// `ifc_semantic.rs`): Wände, Decken, Stützen, Türen/Fenster in Wandöffnungen, Räume, Geschosse.
+/// Erkannte Bauteile (und ihre Türen/Fenster) fehlen dann in `products`.
+pub fn import_ifc_opts(bytes: &[u8], elements: bool) -> Result<IfcImport, String> {
     let f = ifc_step::parse(bytes)?;
     if !f.schema.is_empty() && !f.schema.starts_with("IFC") {
         return Err(format!("kein IFC-Schema: {}", f.schema));
@@ -1536,108 +1693,26 @@ pub fn import_ifc(bytes: &[u8]) -> Result<IfcImport, String> {
     let mut result = IfcImport { schema: f.schema.clone(), length_scale: len_scale, parse_errors: f.errors, ..Default::default() };
 
     // Beziehungen: Geschoss-Zugehörigkeit, Aggregation, Material, Farben.
-    let mut container: HashMap<u64, u64> = HashMap::new();
-    let mut parent: HashMap<u64, u64> = HashMap::new();
-    let mut material_of: HashMap<u64, u64> = HashMap::new();
-    let mut material_color: HashMap<u64, [f64; 4]> = HashMap::new();
-    let mut voids: HashMap<u64, Vec<u64>> = HashMap::new();
-    let refs = |v: Option<&Value>| -> Vec<u64> { v.and_then(|v| v.as_list()).unwrap_or(&[]).iter().filter_map(|x| x.as_ref_id()).collect() };
-    for &id in &ids {
-        let e = &f.entities[&id];
-        match e.ty.as_str() {
-            "IFCRELCONTAINEDINSPATIALSTRUCTURE" => {
-                if let Some(s) = e.arg(5).and_then(|v| v.as_ref_id()) {
-                    for el in refs(e.arg(4)) {
-                        container.entry(el).or_insert(s);
-                    }
-                }
-            }
-            "IFCRELAGGREGATES" => {
-                if let Some(p) = e.arg(4).and_then(|v| v.as_ref_id()) {
-                    for c in refs(e.arg(5)) {
-                        parent.entry(c).or_insert(p);
-                    }
-                }
-            }
-            "IFCRELASSOCIATESMATERIAL" => {
-                if let Some(m) = e.arg(5).and_then(|v| v.as_ref_id()) {
-                    for o in refs(e.arg(4)) {
-                        material_of.entry(o).or_insert(m);
-                    }
-                }
-            }
-            "IFCRELVOIDSELEMENT" => {
-                if let (Some(h), Some(o)) = (e.arg(4).and_then(|v| v.as_ref_id()), e.arg(5).and_then(|v| v.as_ref_id())) {
-                    voids.entry(h).or_default().push(o);
-                }
-            }
-            "IFCSTYLEDITEM" => {
-                if let Some(item) = e.arg(0).and_then(|v| v.as_ref_id()) {
-                    if let Some(c) = e.arg(1).and_then(|v| v.as_list()).and_then(|l| r.style_color(l, 0)) {
-                        r.item_colors.entry(item).or_insert(c);
-                    }
-                }
-            }
-            "IFCMATERIALDEFINITIONREPRESENTATION" => {
-                if let Some(m) = e.arg(3).and_then(|v| v.as_ref_id()) {
-                    'reps: for rep in refs(e.arg(2)) {
-                        for it in refs(f.get(rep).and_then(|x| x.arg(3))) {
-                            let Some(si) = f.get(it) else { continue };
-                            if si.ty != "IFCSTYLEDITEM" {
-                                continue;
-                            }
-                            if let Some(c) = si.arg(1).and_then(|v| v.as_list()).and_then(|l| r.style_color(l, 0)) {
-                                material_color.entry(m).or_insert(c);
-                                break 'reps;
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Material (auch Schichten/Profile/Bestandteile/Listen) → Farbe des ersten Materials.
-    let resolve_material_color = |mut m: u64| -> Option<[f64; 4]> {
-        for _ in 0..6 {
-            if let Some(c) = material_color.get(&m) {
-                return Some(*c);
-            }
-            let e = f.get(m)?;
-            let next = match e.ty.as_str() {
-                "IFCMATERIALLAYERSETUSAGE" | "IFCMATERIALPROFILESETUSAGE" | "IFCMATERIALPROFILESETUSAGETAPERING" => e.arg(0),
-                "IFCMATERIALLAYERSET" | "IFCMATERIALLIST" => e.arg(0).and_then(|v| v.as_list()).and_then(|l| l.first()),
-                "IFCMATERIALPROFILESET" | "IFCMATERIALCONSTITUENTSET" => e.arg(2).and_then(|v| v.as_list()).and_then(|l| l.first()),
-                "IFCMATERIALLAYER" => e.arg(0),
-                "IFCMATERIALPROFILE" | "IFCMATERIALCONSTITUENT" => e.arg(2),
-                _ => None,
-            };
-            m = next?.as_ref_id()?;
-        }
-        None
+    let rels = Rels::gather(&f, &ids, &mut r);
+    let voids = &rels.voids;
+    let parent = &rels.parent;
+    let material_of = &rels.material_of;
+    let resolve_material_color = |m: u64| rels.resolve_material_color(&f, m);
+    let storey_of = |id: u64| -> Option<String> {
+        let s = f.get(rels.storey_id(&f, id)?)?;
+        let name = s.arg(2).and_then(|v| v.as_str()).or_else(|| s.arg(7).and_then(|v| v.as_str()));
+        Some(name.unwrap_or("").to_string())
     };
 
-    let storey_of = |mut id: u64| -> Option<String> {
-        for _ in 0..32 {
-            let e = f.get(id)?;
-            if e.ty == "IFCBUILDINGSTOREY" {
-                let name = e.arg(2).and_then(|v| v.as_str()).or_else(|| e.arg(7).and_then(|v| v.as_str()));
-                return Some(name.unwrap_or("").to_string());
-            }
-            id = match container.get(&id) {
-                Some(s) => *s,
-                None => *parent.get(&id)?,
-            };
-        }
-        None
-    };
+    // Bauteil-Import ([B4]): erkannte Bauteile kommen nicht als Mesh.
+    let semantic = elements.then(|| crate::ifc_semantic::analyze(&mut r, &rels, &ids));
+    let converted: HashSet<u64> = semantic.as_ref().map(|s| s.converted.clone()).unwrap_or_default();
 
     let mut total_tris = 0usize;
     for &id in &ids {
         let e = &f.entities[&id];
         let has_shape = e.arg(6).and_then(|v| v.as_ref_id()).and_then(|i| f.get(i)).is_some_and(|s| s.ty == "IFCPRODUCTDEFINITIONSHAPE");
-        if !has_shape {
+        if !has_shape || converted.contains(&id) {
             continue;
         }
         if SKIP_CLASSES.contains(&e.ty.as_str()) {
@@ -1697,6 +1772,7 @@ pub fn import_ifc(bytes: &[u8]) -> Result<IfcImport, String> {
     }
     result.skipped_items = r.skipped;
     result.simplified_booleans = r.simplified;
+    result.elements = semantic;
     Ok(result)
 }
 
@@ -1725,7 +1801,7 @@ const CLASS_NAMES: &[&str] = &[
     "IfcWallElementedCase", "IfcWallStandardCase", "IfcWasteTerminal", "IfcWindow", "IfcWindowStandardCase",
 ];
 
-fn class_name(upper: &str) -> String {
+pub(crate) fn class_name(upper: &str) -> String {
     CLASS_NAMES.iter().find(|c| c.eq_ignore_ascii_case(upper)).map_or_else(|| upper.to_string(), |c| c.to_string())
 }
 
@@ -1808,12 +1884,14 @@ mod web {
     use wasm_bindgen::prelude::*;
 
     /// Ergebnis für JS: `meta` (JSON: Bauteile mit Längen der Puffer, Bericht), `positions()`
-    /// (alle Bauteile hintereinander, x,y,z in m), `indices()` (je Bauteil ab 0).
+    /// (alle Bauteile hintereinander, x,y,z in m), `indices()` (je Bauteil ab 0), `elementData()`
+    /// (Zahlen der erkannten Bauteile, [B4], s. `ifc_semantic::encode`; leer beim reinen Mesh-Import).
     #[wasm_bindgen]
     pub struct IfcImportResult {
         meta: String,
         positions: Vec<f64>,
         indices: Vec<u32>,
+        element_data: Vec<f64>,
     }
 
     #[wasm_bindgen]
@@ -1828,12 +1906,27 @@ mod web {
         pub fn indices(&self) -> Vec<u32> {
             self.indices.clone()
         }
+        #[wasm_bindgen(js_name = elementData)]
+        pub fn element_data(&self) -> Vec<f64> {
+            self.element_data.clone()
+        }
     }
 
     /// IFC-Bytes → Meshes je Bauteil. Unlesbare Datei → JS-Fehler mit Meldung (kein Panic).
     #[wasm_bindgen]
     pub fn import_ifc(bytes: &[u8]) -> Result<IfcImportResult, JsValue> {
-        let r = super::import_ifc(bytes).map_err(|e| JsValue::from_str(&e))?;
+        encode(super::import_ifc(bytes).map_err(|e| JsValue::from_str(&e))?)
+    }
+
+    /// Wie `import_ifc`, dazu echte Bauteile ([B4]): `meta.elements` (Wände, Öffnungen, Decken,
+    /// Stützen, Räume; Texte und Verweise) mit Zahlen in `elementData()`, `meta.storeys`; erkannte
+    /// Bauteile fehlen in den Meshes.
+    #[wasm_bindgen]
+    pub fn import_ifc_elements(bytes: &[u8]) -> Result<IfcImportResult, JsValue> {
+        encode(super::import_ifc_opts(bytes, true).map_err(|e| JsValue::from_str(&e))?)
+    }
+
+    fn encode(r: super::IfcImport) -> Result<IfcImportResult, JsValue> {
         let mut positions = Vec::new();
         let mut indices = Vec::new();
         let products: Vec<serde_json::Value> = r
@@ -1853,7 +1946,7 @@ mod web {
                 })
             })
             .collect();
-        let meta = serde_json::json!({
+        let mut meta = serde_json::json!({
             "schema": r.schema,
             "lengthScale": r.length_scale,
             "products": products,
@@ -1866,7 +1959,13 @@ mod web {
             "parseErrors": r.parse_errors,
             "truncated": r.truncated,
         });
-        Ok(IfcImportResult { meta: meta.to_string(), positions, indices })
+        let mut element_data = Vec::new();
+        if let Some(sem) = &r.elements {
+            let (v, data) = crate::ifc_semantic::encode(sem);
+            meta["elements"] = v;
+            element_data = data;
+        }
+        Ok(IfcImportResult { meta: meta.to_string(), positions, indices, element_data })
     }
 }
 
