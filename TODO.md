@@ -329,6 +329,34 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   - ○ `pen.rs` → [32] (✅ Grundriss); `styles.rs`/`graphics.rs` → [33]/[34]; `phasing.rs` → [28];
     `link.rs` → [43]; `docs/areas/*.md`, `docs/performance.md` → [21]/[20].
 
+## Lernen von CADCraft [C] (neu 28.10.)
+
+Quelle: github.com/storytold/cadcraft (README gelesen 28.10.; AutoCAD-Nachbau in Rust, MIT OR Apache-2.0,
+„early development", ~7000 Sterne). Gleiche Familie wie das BIMCraft auf getcadcraft.com (Seite hier nicht
+erreichbar, kein öffentliches Repo gefunden) — nicht zu verwechseln mit IPedrax/BIMCraft ([B]). Vor jeder
+Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
+
+- ○ **[C1] DWG über `acadrust`** (Rust, Open Source): Lesen R13–2018, **Schreiben R2000**. Heute liest
+  Dossier DWG über `dwgimport`/libredwg-web und kann kein DWG schreiben. Lizenz von acadrust prüfen. · M
+- ○ **[C2] DXF als eigenes Rust-Crate** (Tag-Reader/-Writer, R12–2018 ASCII und Binär lesen, R2000 schreiben):
+  Vorbild für die Portierung von `io/dxfParser*.ts` und `export/exportDxf.ts` in den Rust-Kern ([K4]);
+  Binär-DXF fehlt Dossier heute. · M
+- ○ **[C3] MCP an die laufende App** (`--connect 127.0.0.1:7979`, Werkzeuge `screenshot`, `ui_click`,
+  `render` → PNG, `execute` = jeder Befehl mit JSON): genau die fehlende Hälfte von [9]; setzt [6] voraus. · M
+- ○ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless
+  verketten — für Tests, Agenten und Stapelverarbeitung. Erweitert [4]. · S–M
+- ○ **[C5] Copy-on-Write-Elementspeicher** für billiges Undo: Vorlage für das Modell in Rust ([K4], [8]). · —
+- ○ **[C6] `cargo xtask ci`**: prüft Formatierung, Clippy, Tests, **Crate-Schichtung**, **Asset-Herkunft** und
+  den WASM-Build in einem Befehl — Ausbau von [22] (fmt/clippy fehlen) und [51]. · S
+- ○ **[C7] Text in Rust** (TEXT/MTEXT-Layout, OpenType-Shaping, Unicode-Bidi): Vorbild, wenn `text/` mit
+  [K4] nach Rust wandert. · M
+- ○ **[C8] Releases** (macOS universal signiert und notarisiert, Windows MSI, Linux AppImage/Flatpak/deb/rpm,
+  `SHA256SUMS.txt`): Muster für [30]. · M
+- ○ **[C9] Ehrliche Paritäts-Doku** (`docs/file-format-parity.md`, `docs/gaps.md`: was beim Speichern verloren
+  geht, was fehlt): passt zu [60]. · S
+- ○ **[C10] Kleinigkeiten:** Log-Rotation über `RUST_LOG`, isoliertes Profil per Umgebungsvariable,
+  „reduzierte Bewegung" aus den Systemeinstellungen. · je S
+
 ## Bewusst nicht übernommen
 
 egui, CPU-Renderer (s. [R3]), Revit-Bedienkonzept, Strich-Schrift, Haustechnik-Disziplinen. Zusätzlich:
