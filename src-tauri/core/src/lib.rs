@@ -37,6 +37,7 @@ pub mod wall_mesh_cut;
 pub mod jsnum;
 pub mod hatch;
 pub mod hatch_flat;
+pub mod plan;
 pub mod plan_buf;
 pub mod project_format;
 pub mod queries;
