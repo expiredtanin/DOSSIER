@@ -97,3 +97,13 @@ export function RoomBalanceTabIcon() {
     </svg>
   );
 }
+
+/** BCF-Themen — Sprechblase mit Haken (Koordinations-Thema). */
+export function BcfTabIcon() {
+  return (
+    <svg {...common}>
+      <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
+      <path d="M5.5 7l1.6 1.6L10.5 5.5" />
+    </svg>
+  );
+}

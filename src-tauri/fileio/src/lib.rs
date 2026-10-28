@@ -26,6 +26,7 @@ pub mod ifc_semantic;
 pub mod ifc_export;
 pub mod ifc_openings;
 pub mod mesh_export;
+pub mod bcf;
 pub mod csg;
 mod ifc_sweep;
 mod ifc_nurbs;

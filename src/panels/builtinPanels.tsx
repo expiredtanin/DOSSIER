@@ -25,6 +25,7 @@ import { RoomBalancePanel } from "./RoomBalancePanel";
 import { ElementTreePanel, ElementsTabIcon } from "./ElementTreePanel";
 import { ViewSnapshotsPanel, ViewSnapshotsTabIcon } from "./ViewSnapshotsPanel";
 import { LayoutsPanel, LayoutsTabIcon } from "./LayoutsPanel";
+import { BcfPanel } from "./BcfPanel";
 import {
   ToolsTabIcon,
   AttributesTabIcon,
@@ -33,6 +34,7 @@ import {
   LayersTabIcon,
   SiteTabIcon,
   RoomBalanceTabIcon,
+  BcfTabIcon,
 } from "./PanelIcons";
 
 /** IDs der eingebauten Dock-Panels (auch für defaultLayout/Filter nutzbar). */
@@ -47,6 +49,7 @@ export const BUILTIN_PANEL_IDS = {
   elements: "elements",
   viewSnapshots: "view-snapshots",
   layouts: "layouts",
+  bcf: "bcf",
 } as const;
 
 // Werkzeug-Palette (Symbol + Name je Werkzeug, ArchiCAD/Vectorworks-Stil).
@@ -143,4 +146,15 @@ registerPanel({
   icon: <LayoutsTabIcon />,
   hasDisplayMode: false,
   render: () => <LayoutsPanel />,
+});
+
+// BCF-Themen (buildingSMART BCF 2.1/3.0) — Koordinations-Themen aus Solibri/BIMcollab/Revit/ArchiCAD;
+// die Themen liegen in einer eigenen .bcfzip, nicht im Projekt. Nicht im Standard-Layout (kein
+// Layout-Versionssprung), erreichbar über „Fenster > Panels".
+registerPanel({
+  id: BUILTIN_PANEL_IDS.bcf,
+  title: "nav.bcf",
+  icon: <BcfTabIcon />,
+  hasDisplayMode: false,
+  render: () => <BcfPanel />,
 });

@@ -41,6 +41,8 @@ export interface AppMenuBarProps {
   resourcesOpen: boolean;
   onToggleResources: () => void;
   onOpenSettings: () => void;
+  /** BCF-Themen-Panel öffnen (`revealPanel`); ohne diese Funktion entfällt der Menüpunkt. */
+  onOpenBcf?: () => void;
 }
 
 /** Menüleiste (Bearbeiten/Ansicht/Fenster) — sitzt in der TopBar neben der Wortmarke. */
@@ -66,6 +68,7 @@ export function AppMenuBar({
   resourcesOpen,
   onToggleResources,
   onOpenSettings,
+  onOpenBcf,
 }: AppMenuBarProps) {
   const fileItems: DropdownItem[] = [
     { label: t("file.new"), onSelect: onNewProject },
@@ -132,6 +135,7 @@ export function AppMenuBar({
       active: resourcesOpen,
     },
     { divider: true },
+    ...(onOpenBcf ? [{ label: t("nav.bcf"), onSelect: onOpenBcf }] : []),
     { label: t("menu.window.settings"), onSelect: onOpenSettings },
   ];
 
