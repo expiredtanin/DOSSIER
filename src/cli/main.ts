@@ -9,7 +9,7 @@
 //                                                  json = render2d-Szene (planToRenderScene)
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
-//   dossier-cli <projekt.obp> dxf [--binary]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -517,9 +517,12 @@ async function execute(project: Project, file: string, command: string, rest: st
       const world = projectToWorldCoords(project);
       const plan = generatePlan(world, lvl.id, allCodes);
       await loadFileio();
-      if (command === "dxf" && args.flags.has("binary")) out(args, buildPlanDxfBinary(plan, world), `${lvl.name}.dxf`);
-      else if (command === "dxf") out(args, buildPlanDxf(plan, world), `${lvl.name}.dxf`);
-      else out(args, buildPlanDwg(plan, world), `${lvl.name}.dwg`);
+      // --scale N (Massstabsnenner, Default 100): Bemassungsstil, Linientypen, Raumstempel, Ansichtsfenster.
+      // --dim-unit cm: Masszahlen in Zentimetern; --layout: zusätzlich Papierbereich mit Ansichtsfenster.
+      const cad = { scaleDenominator: scale, dimUnit: args.flags.get("dim-unit") === "cm" ? ("cm" as const) : ("m" as const), paperLayout: args.flags.has("layout") };
+      if (command === "dxf" && args.flags.has("binary")) out(args, buildPlanDxfBinary(plan, world, cad), `${lvl.name}.dxf`);
+      else if (command === "dxf") out(args, buildPlanDxf(plan, world, cad), `${lvl.name}.dxf`);
+      else out(args, buildPlanDwg(plan, world, cad), `${lvl.name}.dwg`);
       return 0;
     }
     case "ifc":

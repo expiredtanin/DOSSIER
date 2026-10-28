@@ -3979,6 +3979,7 @@ export default function App() {
       {exportDxfOpen && (
         <ExportDxfDialog
           planTitle={activeLevel.name}
+          initialScale={scaleDenominator}
           selectionCount={selectionLockIds.length}
           onExport={onExportDxf}
           onClose={() => setExportDxfOpen(false)}

@@ -1724,6 +1724,15 @@ export const en: Record<TranslationKey, string> = {
   "exportDxf.failed": "Export failed",
   "exportDxf.unitsNote":
     "Model space in meters (1:1). Layers mirror the project's categories; scale freely on plot.",
+  "exportDxf.scale": "Scale (dimensions, dash patterns, labels)",
+  "exportDxf.dimUnit": "Dimension values in",
+  "exportDxf.dimUnit.m": "Meters (3.25)",
+  "exportDxf.dimUnit.cm": "Centimeters (325)",
+  "exportDxf.layout": "Paper space",
+  "exportDxf.layout.no": "Model space only",
+  "exportDxf.layout.yes": "Add a layout with a viewport at the scale",
+  "exportDxf.objectsNote":
+    "Dimensions as DIMENSION entities (with dimension style), doors, windows and furniture blocks as BLOCK/INSERT with attributes, dash patterns as linetypes, text with text styles.",
 
   // File menu (burger, far right of the top bar).
   "file.menu": "File",

@@ -125,7 +125,7 @@ export function useExportHandlers(opts: {
       referenceLines,
       planColorMode === "mono",
       true, // includeGlobal (Default)
-      undefined, // scaleDenominator (Default)
+      decision.scaleDenominator, // Export-Massstab (wie PDF): Strichstärken, Bemassung
       true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
     );
     try {
@@ -133,6 +133,9 @@ export function useExportHandlers(opts: {
         title: activeLevelName,
         includeHatches: decision.includeHatches,
         format: decision.format,
+        scaleDenominator: decision.scaleDenominator,
+        dimUnit: decision.dimUnit,
+        paperLayout: decision.paperLayout,
         fileName: `${project.name}-${activeLevelName}`,
       });
     } catch (err) {
