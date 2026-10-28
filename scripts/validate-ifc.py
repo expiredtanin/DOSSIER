@@ -3,7 +3,8 @@
 
 Aufruf: python3 scripts/validate-ifc.py datei.ifc [weitere.ifc …]
 Exit 0 = alles gültig; sonst werden die Befunde ausgegeben und Exit 1.
-Braucht `pip install ifcopenshell` (getestet mit 0.8/0.9).
+Braucht `pip install ifcopenshell` (getestet mit 0.8/0.9). Das Schema (IFC4, IFC2X3 …) liest ifcopenshell aus
+`FILE_SCHEMA` der Datei; IFC2x3-Exporte werden also gegen IFC2X3_TC1 geprüft.
 """
 
 import sys

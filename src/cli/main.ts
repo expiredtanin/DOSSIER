@@ -10,6 +10,7 @@
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
+//                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
@@ -97,6 +98,16 @@ import type { Project } from "../core";
 import { serveStdio } from "./mcp";
 
 type Args = { positional: string[]; flags: Map<string, string>; cmds: string[] };
+
+/** `--schema 4|ifc4|2x3|ifc2x3` → IFC-Schema des Exports (ohne Angabe IFC4). */
+function ifcSchemaFlag(args: Args): "IFC4" | "IFC2X3" {
+  const v = args.flags.get("schema");
+  if (v === undefined) return "IFC4";
+  const k = v.toLowerCase().replace(/^ifc/, "");
+  if (k === "4") return "IFC4";
+  if (k === "2x3") return "IFC2X3";
+  return fail(`--schema: "${v}" unbekannt (4 oder 2x3)`);
+}
 
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
@@ -590,7 +601,7 @@ async function execute(project: Project, file: string, command: string, rest: st
     case "ifc":
       await loadFileio();
       // --ebkph: eBKP-H-Hauptgruppen je Bauteilart; --ebenen: Ebene (categoryCode) des Modells als Klassifikation.
-      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen") }), `${project.name || "projekt"}.ifc`);
+      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), schema: ifcSchemaFlag(args) }), `${project.name || "projekt"}.ifc`);
       return 0;
     case "obj":
       await loadFileio();

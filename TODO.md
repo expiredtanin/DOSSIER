@@ -542,6 +542,29 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     ist eine Näherung (Weg zwischen den Tritt-Schwerpunkten + Auftritt, mit Steigung), Wendeltreppe ein Lauf inkl.
     Mitte, Geländer von L-/Wendeltreppen fehlt wie im 3D, Geländer-Länge = Lauflänge × Seiten; Pfosten nicht
     als IfcMember; nicht in Revit/ArchiCAD geöffnet.
+  - ✅ Schema-Option IFC4 (Standard) | IFC2x3 (Coordination View 2.0). (28.10.) Viele Fachplaner-Programme (ältere
+    Revit/ArchiCAD, Statik, Energie, Kalkulation) verlangen noch 2x3. Export-Dialog: Auswahl „IFC-Schema“ (nur bei
+    IFC), CLI `ifc --schema 4|2x3` (auch bei `convert`), `IfcExportOptions.schema`. Rust `ifc_export.rs`
+    (`Schema`, META mit Schema + WGS84-Breite/Länge, `FLAT_VERSION` 4): `FILE_SCHEMA(('IFC2X3'))`,
+    `FILE_DESCRIPTION('ViewDefinition [CoordinationView_V2.0]')`; Netze als IfcFacetedBrep (dichtes, aussen
+    orientiertes Netz; IfcClosedShell) bzw. IfcShellBasedSurfaceModel (IfcOpenShell) aus IfcFace/IfcPolyLoop statt
+    IfcTriangulatedFaceSet; IfcWallStandardCase nur für Extrusions-Wände mit IfcMaterialLayerSetUsage (2x3 WR1), sonst
+    IfcWall; IfcDoorStyle/IfcWindowStyle (Ausführung als Attribut, ein Style je Ausführung, Zuordnung über
+    IfcRelDefinesByType) statt OperationType/PartitioningType am Bauteil; kein IfcRoofType in 2x3 → Dachschichten
+    (IfcMaterialLayerSet) direkt am Dach; IfcStyledItem über IfcPresentationStyleAssignment; Georeferenz über
+    IfcSite.RefLatitude/RefLongitude/RefElevation (WGS84 aus dem LV95-Bezug, swisstopo-Näherung) und
+    ePSet_ProjectedCRS/ePSet_MapConversion am IfcProject (statt IfcProjectedCRS/IfcMapConversion). Attributlisten nach
+    IFC2X3_TC1: ohne PredefinedType bei Wand/Stütze/Öffnung, ShapeType bei Dach/Treppe, NumberOfRiser ohne
+    PredefinedType am Lauf, IfcZone ohne LongName (Langname als Beschreibung), IfcMaterial/-Layer/-LayerSet/-Usage,
+    IfcQuantity* ohne Formula, IfcClassification/-Reference ohne Description/Location/Tokens (Source/Edition Pflicht),
+    IfcPerson mit FamilyName. Quantities, Psets, Zonen, Klassifikation und alle GlobalIds wie IFC4. Geprüft: Rust-Tests
+    (`ifc_export.rs`, auch kaputte Puffer), `exportIfc.ifc2x3.test.ts`: ifcopenshell validiert gegen IFC2X3 (0 Befunde,
+    Demo-Haus mit/ohne Klassifikation und Georeferenz, Dach mit Typ, Stützen, Wand mit/ohne Mesh, Umlaute), Volumen
+    und Welt-Bounding-Box je Bauteil gleich der IFC4-Ausgabe (≤ 1e-6), eigener Import liest die 2x3-Datei als Meshes
+    und als Bauteile mit gleichem Ergebnis wie IFC4. Offen: nicht in Revit/ArchiCAD/Solibri geöffnet (die
+    buildingSMART-Konvention für ePSet_* am IfcProject nach bestem Wissen, ohne Gegenprüfung in einer Anwendung); Türen/
+    Fenster ohne IfcDoorLiningProperties/-PanelProperties; kein IfcFaceBasedSurfaceModel-Pfad für CV-2.0-Zertifizierung;
+    Netz-Wände/Dächer als Brep sind grösser als IfcTriangulatedFaceSet (ein Punkt je Ecke, drei Entitäten je Dreieck). · M
   - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
     Solibri/BIMcollab und nicht in der Tauri-App.
 - ◐ **[BCF] BCF 2.1/3.0 (BIM Collaboration Format).** (28.10.) Koordinations-Themen mit Solibri, BIMcollab,
