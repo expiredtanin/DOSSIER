@@ -6,13 +6,14 @@
 //! ein verdrängter Puffer liefert leere Ergebnisse, TS übergibt ihn dann neu.
 
 use std::cell::RefCell;
+use std::rc::Rc;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-const MAX_HELD: usize = 8;
+const MAX_HELD: usize = 64;
 const MAX_HELD_BYTES: usize = 96 << 20;
 
 thread_local! {
-    static HELD: RefCell<(u32, Vec<(u32, Vec<u8>)>)> = const { RefCell::new((0, Vec::new())) };
+    static HELD: RefCell<(u32, Vec<(u32, Rc<[u8]>)>)> = const { RefCell::new((0, Vec::new())) };
 }
 
 /// Plan-Puffer lesen und neu schreiben (Hin-und-zurück-Prüfung der TS-Kodierung); leer bei
@@ -32,7 +33,7 @@ pub fn plan_buf_hold(buf: &[u8]) -> u32 {
         let mut h = h.borrow_mut();
         h.0 = h.0.wrapping_add(1).max(1);
         let id = h.0;
-        h.1.push((id, buf.to_vec()));
+        h.1.push((id, Rc::from(buf)));
         let mut bytes: usize = h.1.iter().map(|e| e.1.len()).sum();
         while h.1.len() > MAX_HELD || (bytes > MAX_HELD_BYTES && h.1.len() > 1) {
             bytes -= h.1.remove(0).1.len();
@@ -50,4 +51,32 @@ pub fn plan_buf_release(id: u32) {
 /// Mit dem gehaltenen Puffer `id` rechnen; `None`, wenn er nicht (mehr) da ist.
 pub(crate) fn with_held<R>(id: u32, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
     HELD.with(|h| h.borrow().1.iter().find(|e| e.0 == id).map(|e| f(&e.1)))
+}
+
+/// Gehaltenen Puffer `id` teilen (bleibt am Leben, auch wenn er verdrängt wird); `None`, wenn er
+/// nicht (mehr) da ist.
+pub(crate) fn held_rc(id: u32) -> Option<Rc<[u8]>> {
+    HELD.with(|h| h.borrow().1.iter().find(|e| e.0 == id).map(|e| e.1.clone()))
+}
+
+/// Die Puffer der Abschnitte `[nr, von, bis, …]` (s. `plan_parts`) in Abschnitts-Reihenfolge;
+/// `None`, wenn einer fehlt oder die Liste kaputt ist.
+pub(crate) fn held_for_segs(segs: &[f64]) -> Option<Vec<(u32, Rc<[u8]>)>> {
+    if segs.len() % 3 != 0 {
+        return None;
+    }
+    let mut out: Vec<(u32, Rc<[u8]>)> = Vec::new();
+    for s in segs.chunks_exact(3) {
+        let nr = crate::plan_buf::whole(s[0])? as u32;
+        if !out.iter().any(|e| e.0 == nr) {
+            out.push((nr, held_rc(nr)?));
+        }
+    }
+    Some(out)
+}
+
+/// Ist der Puffer `id` noch gehalten?
+#[wasm_bindgen]
+pub fn plan_buf_is_held(id: u32) -> bool {
+    HELD.with(|h| h.borrow().1.iter().any(|e| e.0 == id))
 }

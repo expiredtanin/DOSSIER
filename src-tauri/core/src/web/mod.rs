@@ -32,6 +32,7 @@ mod voids;
 mod curves;
 mod hatch;
 mod skeleton;
+mod plan_scene;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

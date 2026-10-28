@@ -290,6 +290,7 @@ export {
 } from "../plan/toElevation";
 
 export {
+  planSceneBin,
   planToRenderScene,
 } from "../plan/toRenderScene";
 

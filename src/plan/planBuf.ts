@@ -178,6 +178,12 @@ export interface EncodeOptions {
    * (tag 0). Schneller; {@link decodePlanBuf} kann so einen Puffer nicht vollständig lesen.
    */
   lean?: boolean;
+  /**
+   * `false`: Texte/Bilder ohne JSON (String-Index −1), aber mit Typ und Pick-Ids — für Kern-
+   * Verbraucher, die Texte nicht lesen (Render-Szene, Auswahl). {@link decodePlanBuf} kann so
+   * einen Puffer nicht lesen. Standard `true`.
+   */
+  textJson?: boolean;
   /** Gruppen `[start, end)` in den Kopf schreiben. */
   groups?: ReadonlyArray<readonly [number, number]>;
   bounds?: readonly [number, number, number, number];
@@ -186,6 +192,7 @@ export interface EncodeOptions {
 /** Primitive → Plan-Puffer v2 (Format s. Dateikopf). */
 export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions = {}): Uint8Array {
   const lean = opts.lean === true;
+  const textJson = opts.textJson !== false;
   const strParts: string[] = [];
   const strTab = new F64Writer(64);
   const strIdx = new Map<string, number>();
@@ -385,7 +392,7 @@ export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions =
         }
         const tag = p.kind === "text" ? 6 : p.kind === "drawingText" ? 7 : p.kind === "drawingTextPath" ? 8 : 9;
         head(tag, 0, p);
-        w.push(str(JSON.stringify(p)));
+        w.push(textJson ? str(JSON.stringify(p)) : -1);
       }
     }
   }

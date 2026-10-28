@@ -1,30 +1,24 @@
-// Flacht einen {@link Plan} (die eine Wahrheit aus generatePlan) auf das
-// GPU-nahe Szenenformat des nativen render2d-Renderers ab: Füllpolygone,
-// Umrisse, Linien und Textzeilen. Text wird zeilenweise geflacht (Rich-Text-Doc
-// + Live-Zusatzzeilen) — die echten Glyphen rastert der Rust-Renderer über
-// einen GPU-Glyphen-Atlas (glyphon/cosmic-text), keine Vektor-Ersatzschrift.
+// Render-Szene eines {@link Plan} für render2d (Browser über WASM/WebGPU, natives Fenster über
+// `push_native_scene`) und für den Druck-/SVG-Export. Die Geometrie (Füllungen, Umrisse,
+// Polylinien, Bögen, Linien samt Maler-Reihenfolge `z`, Verkettung, Kantennaht, Schraffur-Läufe,
+// Zickzack/Motiv) rechnet der Kern direkt aus dem Plan-Puffer ([K3d], `src-tauri/core/src/
+// plan_scene.rs`, über die Abschnitte aus `planParts.ts`) — ohne Umweg über `Primitive[]`. Hier
+// bleibt das Text-Layout (Rich-Text-Zeilen + Live-Zusatzzeilen, die Glyphen rastert render2d)
+// und das Durchreichen eingebetteter Bilder.
 //
-// Das erzeugte Objekt matcht 1:1 die serde-Structs render2d::types::Scene
+// Das Szenen-Objekt matcht 1:1 die serde-Structs render2d::types::Scene
 // { fills:[{pts,color}], outlines:[{pts,color,widthMm,dash}],
 //   polylines:[{pts,color,widthMm,dash}], arcs:[{center,from,to,r,color,widthMm,dash}],
 //   lines:[{a,b,color,widthMm,dash}], texts:[{pos,content,sizeMm,color,align}] }
-// mit Point = [x,y] (Meter) und Rgba = [r,g,b,a] (0..1).
-//
-// Bögen werden NICHT hier tessellliert: der Rust-Renderer zeichnet sie
-// mathematisch exakt per SDF-Fragment-Shader (`shaders::ARC_WGSL`, eine
-// analytische Instanz je Bogen) — bei jeder Vergrößerung ein echter Kreis statt
-// eines Vielecks, ohne Neu-Tessellierung. Strichmuster
-// (`dash`, mm Papier) werden ebenfalls unverändert durchgereicht — das geometrische
-// Zerschneiden in Teilstücke (`applyDashRuns`-Algorithmus) passiert erst NACH der
-// Bogen-Tessellierung in Rust (`tessellate::split_dash`), damit die Phase über die
-// gesamte (ggf. verkettete oder adaptiv tessellierte) Strecke durchläuft.
+// mit Point = [x,y] (Meter) und Rgba = [r,g,b,a] (0..1). Bögen bleiben unvortesselliert
+// (render2d zeichnet sie per SDF-Shader), Strichmuster (Papier-mm) werden durchgereicht.
 
-import type { Plan, Primitive } from "./generatePlan";
-import { applyDashRuns, buildHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "./glPlan/glPlanHatch";
+import type { Plan } from "./generatePlan";
+import { inGreyedRange } from "./generatePlan";
 import { docToLines, wrapDocToLines } from "../text/renderHtml";
 import { docFromText } from "../text/richText";
-
-type LinePrim = Extract<Primitive, { kind: "line" }>;
+import { core } from "../engine/coreWasm";
+import { greyedFlat, planParts, withPlanParts } from "./planParts";
 
 export type RPoint = [number, number];
 export type RRgba = [number, number, number, number];
@@ -133,57 +127,15 @@ export interface RScene {
   bounds: RBounds;
 }
 
-const DEFAULT_LINE = "#1a1a1a";
-
 /**
- * Strichfarben/-deckkraft je CSS-Klasse — Spiegel der `.plan-svg .<cls>`-Regeln
- * in styles.css: Im SVG-Pfad ÜBERSTIMMT eine CSS-`stroke`-Property das inline
- * gesetzte `stroke`-Attribut (Präsentationsattribut), d. h. für diese Klassen
- * gilt IMMER die CSS-Farbe. Klassen ohne CSS-`stroke` (draw2d, stair-*,
- * context-line) behalten die Modell-Farbe; context-line trägt zusätzlich
- * `opacity: 0.7`, wall-axis `opacity: 0.85`.
- */
-const CLS_STROKE: Record<string, string> = {
-  "door-leaf": "#1a1a1a",
-  "door-swing": "#1a1a1a",
-  "door-frame": "#1a1a1a",
-  "window-glass": "#1a1a1a",
-  "wall-axis": "#4a453e", // var(--accent) des hellen Standard-Themes
-};
-const CLS_OPACITY: Record<string, number> = {
-  "wall-axis": 0.85,
-  "context-line": 0.7,
-};
-
-/**
- * Fester Grauton gedimmter (greyed) Primitive — ECHTE Umfärbung statt
- * Deckkraft (dünne Haarlinien auf dem hellen Zeichenblatt wären bei reiner
- * Transparenz kaum erkennbar gedimmt). Gleicher Ton wie GREYED_COLOR in
- * PlanView.tsx / GREY_RGB in glPlanCompile.ts (#8c8c8c ≈ 0.549).
+ * Fester Grauton gedimmter (greyed) Texte — gleicher Ton wie GREYED_COLOR in PlanView.tsx und
+ * `GREY_RGB` im Kern (#8c8c8c ≈ 0.549).
  */
 const GREY_RGB = 0.549;
 
-/** Farbe mit Klassen-Deckkraft multiplizieren, bei Greyed-Dimmung auf den festen Grauton umfärben. */
-function withOpacity(col: RRgba, cls: string | undefined, greyed: boolean | undefined): RRgba {
-  const o = cls ? CLS_OPACITY[cls] ?? 1 : 1;
-  const rgb: RRgba = greyed ? [GREY_RGB, GREY_RGB, GREY_RGB, col[3]] : col;
-  return o === 1 ? rgb : [rgb[0], rgb[1], rgb[2], rgb[3] * o];
-}
-
-/**
- * Wie `withOpacity`, aber für FLÄCHEN-Füllung: gedimmte Flächen bleiben WEISS
- * statt grau eingefärbt — nur der Umriss (weiterhin `withOpacity`) macht das
- * Element als gedimmt erkennbar (Nutzer-Wunsch: "im Hintergrund nicht als
- * graue Fläche gefüllt, sondern weiss mit nur den Linien sichtbar").
- */
-function withFillOpacity(col: RRgba, greyed: boolean | undefined): RRgba {
-  return greyed ? [1, 1, 1, col[3]] : col;
-}
-
-/** Strichfarbe einer line/arc-Primitive: CSS-Klassen-Farbe > Modell-Farbe > Tinte. */
-function strokeColorFor(cls: string | undefined, color: string | undefined): RRgba {
-  const css = cls ? CLS_STROKE[cls] : undefined;
-  return toRgba(css ?? color ?? DEFAULT_LINE, 1) ?? [0.1, 0.1, 0.1, 1];
+/** Textfarbe gedimmt: auf den festen Grauton umfärben (Deckkraft bleibt). */
+function greyedColor(col: RRgba, greyed: boolean | undefined): RRgba {
+  return greyed ? [GREY_RGB, GREY_RGB, GREY_RGB, col[3]] : col;
 }
 
 /** 1 Punkt (pt) in Papier-Millimetern. */
@@ -194,8 +146,7 @@ const PT_TO_MM = 25.4 / 72;
  * Modus: dort belegt 1 pt Schrift (1/72)·0.0254·100 Modell-Meter. Der native
  * Renderer rechnet im Anzeigemodus mit `paper_scale_n = 100`, damit ist
  * `sizeMm = pt · PT_TO_MM` exakt die Browser-Darstellung. Für Aufrufer MIT
- * Massstabskontext (z. B. PDF-Export) übersteuert `planToRenderScene`s
- * `paperScaleN`-Parameter diesen Default — siehe `mmToM` dort.
+ * Massstabskontext (z. B. PDF-Export) übersteuert `paperScaleN` diesen Default.
  */
 const STAMP_DEFAULT_N = 100;
 
@@ -208,7 +159,7 @@ const NAMED: Record<string, string> = {
   transparent: "none",
 };
 
-/** Hex/Named-Farbe → [r,g,b,a] in 0..1, oder null bei "none"/leer. */
+/** Hex/Named-Farbe → [r,g,b,a] in 0..1, oder null bei "none"/leer (Kern: `plan_scene::to_rgba`). */
 function toRgba(input: string | undefined, alpha = 1): RRgba | null {
   if (!input) return null;
   let h = input.trim().toLowerCase();
@@ -232,318 +183,23 @@ function toRgba(input: string | undefined, alpha = 1): RRgba | null {
   return [r, g, b, a];
 }
 
-/** Zwei Modell-Punkte (Meter) als gleich behandeln (Verkettungs-Toleranz). */
-function samePt(a: RPoint, b: RPoint): boolean {
-  return Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
-}
-
-/** Gleicher Linienstil (für das Verketten aufeinanderfolgender 2D-Zeichenlinien). */
-function sameLineStyle(a: LinePrim, b: LinePrim): boolean {
-  return (
-    a.cls === b.cls &&
-    a.weightMm === b.weightMm &&
-    (a.color ?? "") === (b.color ?? "") &&
-    JSON.stringify(a.dash ?? null) === JSON.stringify(b.dash ?? null)
-  );
-}
-
 /**
- * Zerlegt einen Polygon-Ring in zusammenhängende Läufe SICHTBARER Kanten (die
- * `noStroke`-Kanten werden ausgelassen). Jeder Lauf beginnt an einer sichtbaren
- * Kante, deren Vorgänger unterdrückt ist. Portiert aus PlanView.visibleEdgeRuns —
- * so bekommen die inneren Ecken eine Gehrung statt Stumpfkappen.
+ * Textzeilen und eingebettete Bilder eines Plans in Zeichenreihenfolge. Layout wie im SVG-Pfad
+ * (PlanView, case "text"): Rich-Text-Zeilen + Live-Zusatzzeilen, Block vertikal um den Anker
+ * zentriert, Zeilenvorschub 1.3·Basisgröße; Einzeltexte (`drawingText`) top-down ab `at` mit
+ * `heightM` als Basisgrösse. `paperScaleN` (1:N) rechnet Papier-mm in Modell-Meter um.
  */
-function visibleEdgeRuns(pts: RPoint[], noStroke: number[]): RPoint[][] {
-  const n = pts.length;
-  const skip = new Set(noStroke.map((i) => ((i % n) + n) % n));
-  if (skip.size >= n || n < 2) return [];
-  const visible = (i: number) => !skip.has(((i % n) + n) % n);
-  const runs: RPoint[][] = [];
-  for (let s = 0; s < n; s++) {
-    if (!visible(s) || visible(s - 1 + n)) continue; // kein Lauf-Anfang
-    const run: RPoint[] = [pts[s]];
-    let j = s;
-    while (visible(j) && j - s < n) {
-      run.push(pts[(j + 1) % n]);
-      j++;
-    }
-    runs.push(run);
-  }
-  return runs;
-}
-
-/**
- * Näht sichtbare Kantenläufe ÜBER Polygon-Grenzen hinweg zusammen: Läufe mit
- * koinzidenten Endpunkten (und GENAU zwei beteiligten Enden — T-Stösse bleiben
- * unangetastet) werden zu einer Kette verbunden, ggf. mit Richtungsumkehr.
- * Schliesst sich eine Kette, wird sie als geschlossener Ring markiert. So
- * bekommt eine Wandecke, deren zwei Schenkel aus VERSCHIEDENEN Wand-Polygonen
- * stammen, dieselbe Gehrung wie die inneren Ecken eines einzelnen Laufs
- * (statt zweier Stumpfkappen, die eine Kerbe bilden).
- */
-function stitchRuns(runs: RPoint[][]): { pts: RPoint[]; closed: boolean }[] {
-  const eps = 1e-5;
-  const key = (p: RPoint) => `${Math.round(p[0] / eps)},${Math.round(p[1] / eps)}`;
-  // Endpunkt-Belegung zählen: verkettet wird nur, wo genau ZWEI Enden liegen.
-  const endCount = new Map<string, number>();
-  for (const r of runs) {
-    for (const p of [r[0], r[r.length - 1]]) {
-      endCount.set(key(p), (endCount.get(key(p)) ?? 0) + 1);
-    }
-  }
-  const joinable = (p: RPoint) => endCount.get(key(p)) === 2;
-
-  const pool = runs.map((pts) => ({ pts, used: false }));
-  const out: { pts: RPoint[]; closed: boolean }[] = [];
-  for (const seed of pool) {
-    if (seed.used) continue;
-    seed.used = true;
-    let chain = seed.pts;
-    let extended = true;
-    while (extended && !(chain.length > 2 && samePt(chain[0], chain[chain.length - 1]))) {
-      extended = false;
-      const head = chain[0];
-      const tail = chain[chain.length - 1];
-      for (const cand of pool) {
-        if (cand.used) continue;
-        const cs = cand.pts[0];
-        const ce = cand.pts[cand.pts.length - 1];
-        if (joinable(tail) && samePt(tail, cs)) {
-          chain = chain.concat(cand.pts.slice(1));
-        } else if (joinable(tail) && samePt(tail, ce)) {
-          chain = chain.concat([...cand.pts].reverse().slice(1));
-        } else if (joinable(head) && samePt(head, ce)) {
-          chain = cand.pts.concat(chain.slice(1));
-        } else if (joinable(head) && samePt(head, cs)) {
-          chain = [...cand.pts].reverse().concat(chain.slice(1));
-        } else {
-          continue;
-        }
-        cand.used = true;
-        extended = true;
-        break;
-      }
-    }
-    const closed = chain.length > 3 && samePt(chain[0], chain[chain.length - 1]);
-    out.push({ pts: closed ? chain.slice(0, -1) : chain, closed });
-  }
-  return out;
-}
-
-/**
- * Wandelt einen Plan in eine native render2d-Szene um. Zusammenhängende Umriss-
- * und Zeichnungskanten werden zu OFFENEN Polylinien verkettet (gehrte Ecken);
- * nur genuin einzelne Segmente (Türblätter, Referenzlinien) bleiben `lines`.
- *
- * `paperScaleN` ist der Massstab-Nenner N (1:N), mit dem die vertikale
- * Zeilenposition mehrzeiliger Stempel-Texte in Modell-Meter umgerechnet wird
- * (Papier-mm sind massstabsunabhängig, ihre Weltgrösse aber nicht — analog zu
- * PlanViews `nRef`, s. `PlanView.tsx` case "text"). Default 100 für Aufrufer
- * ohne Massstabskontext (WASM-Viewport, `nativeSync.ts`).
- */
-export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N): RScene {
+export function planSceneTexts(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N): { texts: RText[]; images: RImage[] } {
   const mmToM = paperScaleN / 1000; // Papier-mm → Modell-Meter beim gewählten Massstab.
-  const fills: RFill[] = [];
-  const outlines: ROutline[] = [];
-  const polylines: RPolyline[] = [];
-  const arcs: RArc[] = [];
-  const lines: RLine[] = [];
   const texts: RText[] = [];
   const images: RImage[] = [];
-
-  // Sichtbare Umriss-Läufe werden erst GESAMMELT (nach Stil gruppiert) und am
-  // Ende über Polygon-Grenzen hinweg zusammengenäht — erst dadurch bekommen
-  // Wand-zu-Wand-Ecken (zwei Polygone!) eine Gehrung statt einer Kerbe.
-  const edgeRunGroups = new Map<string, { color: RRgba; widthMm: number; runs: RPoint[][]; z: number }>();
-  const collectEdgeRun = (run: RPoint[], color: RRgba, widthMm: number, z: number) => {
-    const k = `${color.join(",")}|${widthMm}`;
-    let g = edgeRunGroups.get(k);
-    if (!g) {
-      g = { color, widthMm, runs: [], z };
-      edgeRunGroups.set(k, g);
-    }
-    g.runs.push(run);
-    // Die Kette zeichnet, wenn ihr SPÄTESTER Beitrag im SVG zeichnen würde.
-    g.z = Math.max(g.z, z);
-  };
-
-  // Maler-Reihenfolge: läuft in EXAKT der Reihenfolge mit, in der der SVG-Pfad
-  // die Elemente zeichnet (Primitive in Array-Reihenfolge; je Polygon Füllung →
-  // Schraffur → Umriss). Jedes emittierte Szenen-Element bekommt das nächste z.
-  let zc = 0;
-
-  // Laufender, verketteter 2D-Zeichnungs-Zug (gleiche drawingId + Stil, End-an-Start).
-  let curPts: RPoint[] | null = null;
-  let curSrc: LinePrim | null = null;
-  const flushRun = () => {
-    if (curPts && curSrc && curPts.length >= 2) {
-      const col = withOpacity(strokeColorFor(curSrc.cls, curSrc.color), curSrc.cls, curSrc.greyed);
-      const closed = curPts.length > 2 && samePt(curPts[0], curPts[curPts.length - 1]);
-      const dash = curSrc.dash ?? null;
-      if (closed) {
-        outlines.push({ pts: curPts.slice(0, -1), color: col, widthMm: curSrc.weightMm, dash, z: zc++ });
-      } else {
-        polylines.push({ pts: curPts, color: col, widthMm: curSrc.weightMm, dash, z: zc++ });
-      }
-    }
-    curPts = null;
-    curSrc = null;
-  };
-
-  for (const p of plan.primitives) {
-    if (p.kind === "polygon") {
-      flushRun();
-      const pts: RPoint[] = p.pts.map((v) => [v.x, v.y]);
-      if (pts.length < 2) continue;
-
-      // Füllung
-      const fillCol = toRgba(p.fill, 1);
-      if (fillCol && pts.length >= 3) {
-        fills.push({ pts, color: withFillOpacity(fillCol, p.greyed), z: zc++ });
-      }
-
-      // Schraffur: die aufs Polygon geclippten Musterlinien wie im Browser
-      // (glPlanHatch — identische Geometrie), als Polylinien. "none"/"solid"
-      // brauchen keine Linien (solid deckt die Füllung farbig ab). Bild-/
-      // Verlauf-Schraffuren (kind==="image"/"gradient") kann die render2d-
-      // Szene nicht tragen (keine Textur/kein echter Verlauf) → FALLBACK: nur
-      // die neutrale Poché-Füllung (oben), keine Musterlinien. Der Random-
-      // Untermodus läuft transparent über `buildHatchRuns` (Streu-Striche).
-      if (
-        p.hatch &&
-        p.hatch.kind !== "image" &&
-        p.hatch.kind !== "gradient" &&
-        p.hatch.pattern !== "none" &&
-        p.hatch.pattern !== "solid"
-      ) {
-        const hatchCol = withOpacity(
-          toRgba(p.hatch.color, 1) ?? [0.1, 0.1, 0.1, 1],
-          undefined,
-          p.greyed,
-        );
-        // Strichbreite: ein GEWÖHNLICHER Papier-mm-Stift (0.02 mm), wie jede
-        // andere Linie — nicht mehr an die Musterkachel/Bildschirm-px
-        // gekoppelt (siehe RPolyline.widthScreen-Kommentar).
-        const hatchMm = p.hatch.lineWeight > 0 ? p.hatch.lineWeight : 0.13;
-        const runs = applyDashRuns(buildHatchRuns(p.pts, p.hatch), p.hatch.dash);
-        // Alle Musterläufe eines Polygons teilen EIN z (überlappen einander nicht).
-        const hatchZ = zc++;
-        for (const run of runs) {
-          if (run.length >= 2) {
-            polylines.push({
-              pts: run.map((v) => [v.x, v.y]),
-              color: hatchCol,
-              widthMm: hatchMm,
-              z: hatchZ,
-            });
-          }
-        }
-      }
-
-      // Umriss
-      const strokeColRaw = toRgba(p.stroke, 1);
-      if (strokeColRaw && p.strokeWidthMm > 0) {
-        const strokeCol = withOpacity(strokeColRaw, undefined, p.greyed);
-        const suppressed = p.noStrokeEdges ?? [];
-        if (suppressed.length === 0) {
-          // Ganzer Ring → geschlossener, gehrter Umriss.
-          outlines.push({ pts, color: strokeCol, widthMm: p.strokeWidthMm, z: zc++ });
-        } else {
-          // Nur die sichtbaren Kanten — sammeln, die Naht ans Ende verschoben.
-          const runZ = zc++;
-          for (const run of visibleEdgeRuns(pts, suppressed)) {
-            collectEdgeRun(run, strokeCol, p.strokeWidthMm, runZ);
-          }
-        }
-      }
-    } else if (p.kind === "line") {
-      if (p.zigzag) {
-        // Zickzack-Linie: als Polylinie tesselliert (render2d kennt keinen
-        // Zickzack-Primitiv). amplitude/wavelength sind Papier-mm → Modell-Meter
-        // über dieselbe Kopplung wie Strichmuster (DASH_MM_TO_M). Nicht verketten.
-        flushRun();
-        const amp = p.zigzag.amplitude * DASH_MM_TO_M;
-        const wav = p.zigzag.wavelength * DASH_MM_TO_M;
-        const zpts = zigzagPoints(p.a, p.b, amp, wav);
-        const col = withOpacity(strokeColorFor(p.cls, p.color), p.cls, p.greyed);
-        if (zpts.length >= 2) {
-          polylines.push({
-            pts: zpts.map((v) => [v.x, v.y]),
-            color: col,
-            widthMm: p.weightMm,
-            z: zc++,
-          });
-        }
-      } else if (p.motif) {
-        // Custom-Motiv: entlang der Linie gekachelt (Papier-mm → Modell-Meter via
-        // DASH_MM_TO_M) → Polylinie. Nicht verketten (wie Zickzack).
-        flushRun();
-        const mpts = motifPoints(p.a, p.b, p.motif, DASH_MM_TO_M);
-        const col = withOpacity(strokeColorFor(p.cls, p.color), p.cls, p.greyed);
-        if (mpts.length >= 2) {
-          polylines.push({
-            pts: mpts.map((v) => [v.x, v.y]),
-            color: col,
-            widthMm: p.weightMm,
-            z: zc++,
-          });
-        }
-      } else if (p.drawingId) {
-        // Aufeinanderfolgende 2D-Zeichenlinien gleicher drawingId/Stil verketten.
-        const a: RPoint = [p.a.x, p.a.y];
-        const b: RPoint = [p.b.x, p.b.y];
-        if (curPts && curSrc && sameLineStyle(curSrc, p) && samePt(curPts[curPts.length - 1], a)) {
-          curPts.push(b);
-        } else {
-          flushRun();
-          curPts = [a, b];
-          curSrc = p;
-        }
-      } else {
-        // Genuin einzelnes Segment (Türblatt, Referenzlinie, Symbol) → Stumpfkappen ok.
-        flushRun();
-        const col = withOpacity(strokeColorFor(p.cls, p.color), p.cls, p.greyed);
-        lines.push({ a: [p.a.x, p.a.y], b: [p.b.x, p.b.y], color: col, widthMm: p.weightMm, dash: p.dash ?? null, z: zc++ });
-      }
-    } else if (p.kind === "arc") {
-      flushRun();
-      // Farbe wie im SVG: CSS-Klassen-Regel (z. B. .door-swing → #1a1a1a).
-      const col = withOpacity(strokeColorFor(p.cls, undefined), p.cls, p.greyed);
-      // Bogen unvortessellliert an Rust übergeben (`RArc`) — die exakte runde
-      // Darstellung (analytischer SDF-Shader, `ARC_WGSL`) und ein evtl. Strich-
-      // muster übernimmt der native Renderer (`compile_scene`) drüben.
-      arcs.push({
-        center: [p.center.x, p.center.y],
-        from: [p.from.x, p.from.y],
-        to: [p.to.x, p.to.y],
-        r: p.r,
-        color: col,
-        widthMm: p.weightMm,
-        dash: p.dash ?? null,
-      });
-    } else if (p.kind === "drawingCircle" || p.kind === "drawingArc") {
-      // Der native Renderer hat kein Kreis-/Bogen-Primitiv → hier tessellieren
-      // (der SVG-Pfad zeichnet sie glatt). Kreis = voller Umlauf, Bogen = a0..a1.
-      flushRun();
-      const col = withOpacity(toRgba(p.stroke, 1) ?? [0.1, 0.1, 0.1, 1], undefined, p.greyed);
-      const TAU = Math.PI * 2;
-      const a0 = p.kind === "drawingArc" ? p.a0 : 0;
-      const sweep = p.kind === "drawingArc" ? (((p.a1 - p.a0) % TAU) + TAU) % TAU : TAU;
-      const N = Math.max(8, Math.ceil(sweep / (Math.PI / 32)));
-      const pts: RPoint[] = [];
-      for (let i = 0; i <= N; i++) {
-        const t = a0 + (sweep * i) / N;
-        pts.push([p.center.x + p.r * Math.cos(t), p.center.y + p.r * Math.sin(t)]);
-      }
-      polylines.push({ pts, color: col, widthMm: p.weightMm, dash: p.dash ?? null, z: zc++ });
-    } else if (p.kind === "text") {
-      // "text": zeilenweise flachen — die ECHTEN Glyphen rastert der Rust-
-      // Renderer über einen GPU-Glyphen-Atlas (glyphon, dieselbe Font-Familie
-      // wie im Browser). Layout identisch zum SVG-Pfad in PlanView (case
-      // "text"): Rich-Text-Zeilen + Live-Zusatzzeilen, Block vertikal um den
-      // Anker zentriert, Zeilenvorschub 1.3·Basisgröße.
-      flushRun();
-      const defCol = withOpacity(toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1], undefined, p.greyed);
+  const ranges = plan.greyedRanges;
+  const prims = plan.primitives;
+  for (let i = 0; i < prims.length; i++) {
+    const p = prims[i];
+    if (p.kind === "text") {
+      const greyed = p.greyed || inGreyedRange(ranges, i);
+      const defCol = greyedColor(toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1], greyed);
       // unitPerPt = PT_TO_MM → tspan.fontSize ist direkt die Papier-mm-Größe.
       const docLines = docToLines(p.doc, {
         x: 0,
@@ -560,14 +216,8 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
           // Runs einer Zeile werden zusammengelegt (ein Buffer je Zeile);
           // Größe/Farbe des größten bzw. ersten Runs gelten für die Zeile.
           content: line.tspans.map((t) => t.text).join(""),
-          sizeMm: line.tspans.length
-            ? Math.max(...line.tspans.map((t) => t.fontSize))
-            : baseMm,
-          color: withOpacity(
-            toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol,
-            undefined,
-            p.greyed,
-          ),
+          sizeMm: line.tspans.length ? Math.max(...line.tspans.map((t) => t.fontSize)) : baseMm,
+          color: greyedColor(toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol, greyed),
           align: line.align,
         });
       }
@@ -592,14 +242,11 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
         });
       }
     } else if (p.kind === "drawingText") {
-      // Modellverankerter Einzeltext (Text-Werkzeug/DXF-Import) — wie "text"
-      // oben zeilenweise geflacht, aber TOP-DOWN ab `at` (kein vertikal
-      // zentrierter Block) und `heightM` (Modell-Meter) als Basisgrösse statt
-      // `basePt` (Papier-Punkt) — der Text bleibt so, wie bisher, massstabsfrei
-      // an der Modellgeometrie verankert (kein Papier-Punkt-Bezug nötig).
-      flushRun();
+      // Modellverankerter Einzeltext (Text-Werkzeug/DXF-Import): top-down ab `at`, `heightM`
+      // (Modell-Meter) als Basisgrösse — massstabsfrei an der Modellgeometrie verankert.
+      const greyed = p.greyed || inGreyedRange(ranges, i);
       const doc = p.doc ?? docFromText(p.text, p.marks ?? {});
-      const defCol = withOpacity(toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1], undefined, p.greyed);
+      const defCol = greyedColor(toRgba(p.color, 1) ?? [0.1, 0.1, 0.1, 1], greyed);
       const unitPerPt = PT_TO_MM * mmToM; // pt (Run-Override) -> Papier-mm -> Modell-Meter.
       const basePt = unitPerPt > 0 ? p.heightM / unitPerPt : 0;
       const lineHeight = p.heightM * 1.25;
@@ -618,48 +265,132 @@ export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAUL
         if (k > 0) dy += line.lineHeight;
         const content = line.tspans.map((t) => t.text).join("");
         if (!content.trim()) return;
-        const sizeM = line.tspans.length
-          ? Math.max(...line.tspans.map((t) => t.fontSize))
-          : p.heightM;
+        const sizeM = line.tspans.length ? Math.max(...line.tspans.map((t) => t.fontSize)) : p.heightM;
         texts.push({
           pos: [p.at.x, p.at.y - dy],
           content,
           sizeMm: unitPerPt > 0 ? sizeM / mmToM : sizeM,
-          color: withOpacity(
-            toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol,
-            undefined,
-            p.greyed,
-          ),
+          color: greyedColor(toRgba(line.tspans[0]?.fill ?? p.color, 1) ?? defCol, greyed),
           align: line.align,
         });
       });
     } else if (p.kind === "drawingImage") {
-      // Eingebettetes Rasterbild — keine Rust-Textur (s. `RImage`); wird vom
-      // GPU-Backend ignoriert (`useGpuRenderer` schaltet bei Bildern im Plan
-      // ohnehin auf den SVG-Pfad um), `sceneToPrintSvg.ts` liest es für den PDF-Export.
-      flushRun();
-      images.push({
-        min: [p.min.x, p.min.y],
-        max: [p.max.x, p.max.y],
-        src: p.src,
-        opacity: p.opacity,
-      });
+      // Eingebettetes Rasterbild — keine Rust-Textur (s. `RImage`); `sceneToPrintSvg.ts` liest es.
+      images.push({ min: [p.min.x, p.min.y], max: [p.max.x, p.max.y], src: p.src, opacity: p.opacity });
     }
   }
-  flushRun();
+  return { texts, images };
+}
 
-  // Gesammelte Umriss-Läufe polygonübergreifend zusammennähen: geschlossene
-  // Ketten als Ring (Gehrung auch an der Naht), offene als Polylinie.
-  for (const g of edgeRunGroups.values()) {
-    for (const chain of stitchRuns(g.runs)) {
-      if (chain.pts.length < 2) continue;
-      if (chain.closed) {
-        outlines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm, z: g.z });
-      } else {
-        polylines.push({ pts: chain.pts, color: g.color, widthMm: g.widthMm, z: g.z });
-      }
+const ALIGN: Record<RTextAlign, number> = { left: 0, center: 1, right: 2 };
+const textEncoder = new TextEncoder();
+
+/** Leere render2d-Szene (nur Kopf), falls der Kern nichts liefern kann. */
+function emptySceneBin(): Uint8Array {
+  const b = new Uint8Array(48);
+  b.set([0x44, 0x52, 0x32, 0x53], 0); // "DR2S"
+  new DataView(b.buffer).setUint32(4, 1, true);
+  return b;
+}
+
+/**
+ * render2d-Szene (Binärformat v1, `render2d/src/scene_bin.rs`) für `set_scene_bin` bzw.
+ * `push_native_scene`. Geometrie aus dem Kern, Texte aus {@link planSceneTexts};
+ * `plan.greyedRanges` gelten wie materialisiertes `greyed`.
+ */
+export function planSceneBin(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N): Uint8Array {
+  const { texts } = planSceneTexts(plan, paperScaleN);
+  const nums = new Float64Array(texts.length * 9);
+  const strs = texts.map((t) => textEncoder.encode(t.content));
+  let nBytes = 0;
+  for (const s of strs) nBytes += s.length;
+  const bytes = new Uint8Array(nBytes);
+  let o = 0;
+  texts.forEach((t, i) => {
+    nums.set([t.pos[0], t.pos[1], t.sizeMm, t.color[0], t.color[1], t.color[2], t.color[3], ALIGN[t.align] ?? 0, strs[i].length], i * 9);
+    bytes.set(strs[i], o);
+    o += strs[i].length;
+  });
+  const greyed = greyedFlat(plan);
+  const out = withPlanParts(planParts(plan), (segs) => core().plan_scene_bin(segs, greyed, nums, bytes));
+  return out.length ? out : emptySceneBin();
+}
+
+type SceneGeometry = Pick<RScene, "fills" | "outlines" | "polylines" | "arcs" | "lines">;
+
+/** Verlustfreie Kern-Szene (Format s. `plan_scene.rs`) → Szenen-Objekte (Feldreihenfolge wie früher). */
+function decodeSceneF64(f: Float64Array): SceneGeometry {
+  const out: SceneGeometry = { fills: [], outlines: [], polylines: [], arcs: [], lines: [] };
+  if (f.length < 5) return out;
+  let k = 5;
+  const pts = (n: number): RPoint[] => {
+    const r: RPoint[] = new Array(n);
+    for (let i = 0; i < n; i++, k += 2) r[i] = [f[k], f[k + 1]];
+    return r;
+  };
+  const color = (): RRgba => {
+    const c: RRgba = [f[k], f[k + 1], f[k + 2], f[k + 3]];
+    k += 4;
+    return c;
+  };
+  /** −2 fehlt (undefined) · −1 null · n Werte. */
+  const dash = (): number[] | null | undefined => {
+    const n = f[k++];
+    if (n === -2) return undefined;
+    if (n === -1) return null;
+    const d = Array.from(f.subarray(k, k + n));
+    k += n;
+    return d;
+  };
+  for (let i = 0; i < f[0]; i++) {
+    const n = f[k];
+    const z = f[k + 1];
+    k += 2;
+    const c = color();
+    out.fills.push({ pts: pts(n), color: c, z });
+  }
+  for (let j = 0; j < 2; j++) {
+    const list = j === 0 ? out.outlines : out.polylines;
+    for (let i = 0; i < f[1 + j]; i++) {
+      const n = f[k];
+      const z = f[k + 1];
+      const widthMm = f[k + 2];
+      k += 3;
+      const d = dash();
+      const c = color();
+      const p = pts(n);
+      list.push(d === undefined ? { pts: p, color: c, widthMm, z } : { pts: p, color: c, widthMm, dash: d, z });
     }
   }
+  for (let i = 0; i < f[3]; i++) {
+    const r = f[k];
+    const widthMm = f[k + 1];
+    k += 2;
+    const d = dash() ?? null;
+    const c = color();
+    const [center, from, to] = pts(3);
+    out.arcs.push({ center, from, to, r, color: c, widthMm, dash: d });
+  }
+  for (let i = 0; i < f[4]; i++) {
+    const z = f[k];
+    const widthMm = f[k + 1];
+    k += 2;
+    const d = dash() ?? null;
+    const c = color();
+    const [a, b] = pts(2);
+    out.lines.push({ a, b, color: c, widthMm, dash: d, z });
+  }
+  return out;
+}
 
-  return { fills, outlines, polylines, arcs, lines, texts, images, bounds: { ...plan.bounds } };
+/**
+ * Plan → Render-Szene als Objekte (Druck-/SVG-Export, `dossier-cli plan --format json`).
+ * `paperScaleN` ist der Massstab-Nenner N (1:N) für die Zeilenlage der Texte (s.
+ * {@link planSceneTexts}).
+ */
+export function planToRenderScene(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N): RScene {
+  const greyed = greyedFlat(plan);
+  const geo = decodeSceneF64(withPlanParts(planParts(plan), (segs) => core().plan_scene_f64(segs, greyed)));
+  const { texts, images } = planSceneTexts(plan, paperScaleN);
+  return { ...geo, texts, images, bounds: { ...plan.bounds } };
 }

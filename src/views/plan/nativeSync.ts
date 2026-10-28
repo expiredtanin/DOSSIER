@@ -1,7 +1,7 @@
 // Live-Spiegelung in die nativen wgpu-Fenster (src-tauri/src/native.rs): schiebt
 // die AKTUELL sichtbare 2D-Szene bzw. die geflachten 3D-Wände debounced per
 // Tauri-Command an die native Event-Loop. Es wird EXAKT dieselbe Ableitung
-// benutzt wie für die Browser-Ansicht (planToRenderScene auf dem sichtbaren
+// benutzt wie für die Browser-Ansicht (planSceneBin aus dem Kern auf dem sichtbaren
 // Plan, projectToWalls3d aufs Projekt) — 1:1-Parität inkl. Türschwenk,
 // Fenster-Symbolen und Raumstempel-Text (echte Glyphen via GPU-Atlas in Rust).
 //
@@ -10,9 +10,9 @@
 // geschluckt (console.debug), damit die App nie daran scheitert.
 
 import type { Plan } from "../../core";
-import { materializeGreyed, materializeUnderlay } from "../../core";
+import { materializeUnderlay } from "../../core";
 import type { Project } from "../../model/types";
-import { encodeRenderScene, planToRenderScene } from "../../core";
+import { planSceneBin } from "../../core";
 import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "../../core";
 
 /** Sammel-Fenster: Modelländerungen werden gebündelt gepusht (nicht je Frame). */
@@ -71,9 +71,9 @@ export function pushNativeScene(plan: Plan): void {
   clearTimeout(sceneTimer);
   sceneTimer = setTimeout(async () => {
     if (!(await isNativeEnabled())) return;
-    // planToRenderScene liest `greyed` am Primitiv → gedimmte Referenz-Ebenen materialisieren.
-    // Binärpuffer als Request-Body (Rust: `render2d::scene_bin`), kein JSON.
-    void invokeNative("push_native_scene", encodeRenderScene(planToRenderScene(materializeGreyed(materializeUnderlay(plan), true))));
+    // Szene aus dem Kern (Plan-Puffer, gedimmte Referenz-Ebenen über `greyedRanges`), als
+    // Binärpuffer im Request-Body (Rust: `render2d::scene_bin`), kein JSON.
+    void invokeNative("push_native_scene", planSceneBin(materializeUnderlay(plan)));
   }, DEBOUNCE_MS);
 }
 
