@@ -24,6 +24,8 @@ export type { CoreOp } from "./ops";
 export type { Project, DrawingLevel } from "../model/types";
 export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/kennzahlen";
 export type { Kennzahlen, ProgramCheck } from "../analysis/kennzahlen";
+export { readSheetFile, suggestMapping, mapRows, importedRows, applyRoomProgram, cellNumber, cellText, detectHeaderRow, parseKind, PROGRAM_FIELDS } from "../io/roomProgramImport";
+export type { SheetData, SheetCell, Mapping, ColumnMap, ProgramField, ImportLine, ImportMode, SkipReason } from "../io/roomProgramImport";
 export { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 export type { AreaTable, AreaRow, Ivhb, IvhbOptions, AgfBasis } from "../analysis/areaTable";
 export { buildAreaReport, areaReportToCsv, parseAreaReportCsv, areaReportToSvg, buildAreaReportPdf } from "../export/areaReport";

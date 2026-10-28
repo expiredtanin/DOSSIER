@@ -8424,11 +8424,6 @@ body {
 }
 
 /* Punktwolken-Import ([27]): Bericht im Dialog kompakt wie die übrigen Hinweise. */
-.pc-report {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--ink-2);
-}
 
 .bcf-vps {
   display: flex;
@@ -8553,4 +8548,92 @@ body {
   padding-left: 16px;
   font-size: 10px;
   color: var(--ink-2);
+}
+
+/* Raumprogramm: Gruppenspalte, Aktionen, Soll/Ist-Vergleich, Import-Dialog ([61]). */
+.kz-program-row {
+  grid-template-columns: minmax(0, 1fr) 52px 36px 64px 56px 18px;
+}
+.kz-program-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rpi-dialog {
+  width: min(880px, 94vw);
+}
+.rpi-file {
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+.rpi-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rpi-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.rpi-select {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--ink);
+  max-width: 100%;
+}
+.rpi-colsel.mapped {
+  font-weight: 600;
+  outline: 1px solid var(--accent-border, #4a7bd0);
+}
+.rpi-scroll {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rpi-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.rpi-table th,
+.rpi-table td {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rpi-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
+.rpi-table td.mapped {
+  background: var(--field-bg);
+}
+.rpi-table tr.skip td {
+  color: var(--ink-2);
+  opacity: 0.65;
+}
+.rpi-table tr.head td {
+  font-weight: 600;
+}
+.rpi-rownr {
+  color: var(--ink-2);
+  text-align: right;
+  width: 28px;
+}
+.rpi-state {
+  font-size: 11px;
 }

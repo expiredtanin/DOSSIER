@@ -935,6 +935,10 @@ export interface RoomProgramRow {
   area: number;
   /** Soll-Anzahl (Default 1). */
   count?: number;
+  /** Gruppe/Bereich/Geschoss aus dem Programm (z. B. „Wohnen", „EG"): Zwischensummen und Farbe beim Generieren. */
+  group?: string;
+  /** Bemerkung aus dem Programm (reiner Text). */
+  note?: string;
 }
 
 /**
@@ -2935,6 +2939,8 @@ export interface Project {
   drawingLevels: DrawingLevel[];
   /** Raumprogramm (Soll) für die Prüfung gegen das Modell. */
   roomProgram?: RoomProgramRow[];
+  /** Toleranz der Soll/Ist-Ampel des Raumprogramms als Anteil der Soll-Fläche (Default 0.05 = ±5 %). */
+  roomProgramTolerance?: number;
   /** Parzellenfläche (m²) für Ausnützungs- und Überbauungsziffer. */
   parcelArea?: number;
   /** Schattenstudie: Zeitpunkt (ISO 8601, UTC) und ob der Boden-Schatten im Grundriss erscheint. */
