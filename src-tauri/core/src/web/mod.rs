@@ -25,7 +25,6 @@ mod plan_stairs;
 mod plan_walls;
 mod plan_openings;
 mod delaunay;
-mod export_ifc;
 mod document;
 mod mesh_section;
 mod plan_elevation;

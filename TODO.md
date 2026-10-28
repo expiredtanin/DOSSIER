@@ -141,6 +141,11 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Pick-Geometrie und 2D-Boden-Spuren im 3D ebenfalls im Kern. **IFC-Export** (`export_ifc.rs`, `js_fmt.rs` für JS-`toFixed`, `geo_rebase.rs`)
     byte-genau zur TS-Fassung (Vergleich über Zufallsprojekte; das Salz der GUID-Ableitung beginnt mit U+0001 — so seit jeher, bleibt für
     stabile GUIDs). Modell verlustfrei (`Extra`-Felder), typisierte Sicht wird nach Ops feldweise nachgeführt.
+    **Zusammenführung 28.10. (Cloud):** Der IFC- und OBJ/STL-Export liefen parallel auch in `src-tauri/fileio` weiter
+    ([B5]/[C11]: IFC2x3, Basismengen, Öffnungen, Zonen, Klassifikation, glTF …). Behalten ist die `fileio`-Fassung; die
+    Kern-Duplikate `export_ifc.rs`, `export_mesh.rs`, `geo_rebase.rs`, `web/export_ifc.rs`, `doc_export_ifc` und die
+    Abfragen `objFile`/`stlFile` sind gelöscht. Die Exporte holen ihre 3D-Teile über `export/model3dParts.ts` aus dem
+    Dokument (`queries.rs`). Offen: `fileio`-Schreiber direkt aus dem Dokument füttern statt über den TS-Sammler.
     Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).

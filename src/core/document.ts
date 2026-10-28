@@ -27,8 +27,6 @@ export type QueryName =
   | "roofCutLayers"
   | "scheduleRows"
   | "scheduleCsv"
-  | "objFile"
-  | "stlFile"
   | "pickGeometry"
   | "model3dParts";
 
@@ -82,14 +80,6 @@ export class ProjectDocument {
   queryJson(name: QueryName, args: number[] = [], text = ""): string {
     if (!this.handle) throw new Error(`Kern-Abfrage „${name}": Dokument nicht offen`);
     const out = core().doc_query_args(this.handle, name, Float64Array.from(args), text);
-    if (out.startsWith("\u0001")) throw new Error(out.slice(1));
-    return out;
-  }
-
-  /** IFC4-Datei (STEP-Text) des Projekts; `nowMs` = Zeitpunkt des Exports. */
-  exportIfc(nowMs: number): string {
-    if (!this.handle) throw new Error("IFC-Export: Dokument nicht offen");
-    const out = core().doc_export_ifc(this.handle, nowMs);
     if (out.startsWith("\u0001")) throw new Error(out.slice(1));
     return out;
   }

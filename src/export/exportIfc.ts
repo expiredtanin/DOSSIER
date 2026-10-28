@@ -109,7 +109,6 @@ import { isWatertight, wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
 import { evaluateRoom } from "../geometry/roomArea";
 import { columnFootprint } from "../geometry/column";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
-import { emitRoofs } from "../plan/toWalls3d";
 import { fileio } from "../engine/fileioWasm";
 import { lv95ToWgs84 } from "../io/lv95";
 import { fillParams, type FillParams } from "./ifcOpenings";
@@ -126,6 +125,7 @@ import {
 } from "./ifcQuantities";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { SIA_CATEGORIES, balance, siaLabel, type SiaCategory } from "../geometry/roomArea";
+import { emitRoofs } from "./model3dParts";
 import {
   EBKPH_SYSTEM,
   LAYER_SYSTEM,

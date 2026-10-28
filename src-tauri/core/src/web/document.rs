@@ -91,20 +91,6 @@ pub fn doc_drawing_line_verts(h: u32) -> Vec<f32> {
     with_doc(h, |d| d.project().ok().map(|p| crate::model3d::drawing_line_verts(&p))).flatten().unwrap_or_default()
 }
 
-/// IFC4-Datei des Projekts (`now_ms`: Zeitpunkt des Exports); Fehler mit vorangestelltem `\u{1}`.
-#[wasm_bindgen]
-pub fn doc_export_ifc(h: u32, now_ms: f64) -> String {
-    let result = with_doc(h, |d| {
-        let p = d.project().map_err(|e| format!("Projekt passt nicht zum Kern-Modell: {e}"))?;
-        crate::export_ifc::export_ifc_spf(p, now_ms)
-    })
-    .unwrap_or_else(|| Err("Dokument nicht offen".to_string()));
-    match result {
-        Ok(text) => text,
-        Err(e) => format!("\u{1}{e}"),
-    }
-}
-
 /// Das Projekt als Datei-Text (Formatversion vorn, Einrückung 2); leer, wenn das Dokument nicht offen ist.
 #[wasm_bindgen]
 pub fn doc_serialize(h: u32) -> String {
