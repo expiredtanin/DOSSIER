@@ -3,7 +3,7 @@
 // (`geometry/autoDimensions.ts`). Ein erneuter Aufruf ersetzt die zuvor automatisch erzeugten
 // Ketten DIESES Geschosses (feste IDs), von Hand gezeichnete Bemassungen bleiben.
 
-import { autoExteriorDimensions } from "../../core";
+import { addItems, autoExteriorDimensions, opsMutation, removeItems } from "../../core";
 import type { Command, CommandContext, CommandResult, CommandState } from "../types";
 
 const PREFIX = "autodim";
@@ -30,10 +30,11 @@ export const autodimCommand: Command = {
     return {
       draft: null,
       done: true,
-      commit: (p) => ({
-        ...p,
-        drawings2d: [...p.drawings2d.filter((d) => !d.id.startsWith(own)), ...dims.map((d) => d.drawing)],
-      }),
+      // Frühere Ketten dieses Geschosses raus, neue hinten dran.
+      commit: opsMutation((p) => [
+        ...removeItems(p, "drawings2d", (d) => d.id.startsWith(own)),
+        ...addItems("drawings2d", dims.map((d) => d.drawing)),
+      ]),
     };
   },
 

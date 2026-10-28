@@ -8,7 +8,8 @@
 //   1) „Erste Ecke der Aussparung:"  → Punkt
 //   2) „Gegenecke:"                  → Live-Rechteck-Vorschau; Klick committet.
 
-import { pointInOutline } from "../../core";
+import { opsMutation, patchItem, pointInOutline } from "../../core";
+import type { CoreOp } from "../../core";
 import type {
   Command,
   CommandContext,
@@ -63,10 +64,10 @@ function holeDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
  * Rechteck vollständig enthält (alle 4 Ecken im Umriss). Entartete Rechtecke
  * und Rechtecke ausserhalb jeder Decke werden verworfen (Projekt unverändert).
  */
-function appendCeilingOpening(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): Project {
+function ceilingOpeningOps(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
   const w = Math.abs(b.x - a.x);
   const d = Math.abs(b.y - a.y);
-  if (w < 0.05 || d < 0.05) return p;
+  if (w < 0.05 || d < 0.05) return [];
   const corners = rectCorners(a, b);
   const host = (p.ceilings ?? []).find(
     (c) =>
@@ -74,13 +75,8 @@ function appendCeilingOpening(p: Project, a: Vec2, b: Vec2, ctx: CommandContext)
       c.outline.length >= 3 &&
       corners.every((pt) => pointInOutline(pt, c.outline)),
   );
-  if (!host) return p;
-  return {
-    ...p,
-    ceilings: (p.ceilings ?? []).map((c) =>
-      c.id === host.id ? { ...c, openings: [...(c.openings ?? []), corners] } : c,
-    ),
-  };
+  if (!host) return [];
+  return patchItem(p, "ceilings", host.id, (c) => ({ ...c, openings: [...(c.openings ?? []), corners] }));
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -117,7 +113,7 @@ export const ceilingOpeningCommand: Command = {
     const b = input.point;
     return [
       { phase: "start", lastPoint: null } as HoleIdle,
-      { draft: null, done: true, commit: (p) => appendCeilingOpening(p, a, b, ctx) },
+      { draft: null, done: true, commit: opsMutation((p) => ceilingOpeningOps(p, a, b, ctx)) },
     ];
   },
 

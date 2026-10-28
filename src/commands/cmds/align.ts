@@ -5,7 +5,8 @@
 //
 // Die Modell-Logik liegt in `editors/align.ts`.
 
-import { alignDrawings, distributeDrawings } from "../../editors/align";
+import { alignOps, distributeOps } from "../../editors/align";
+import { opsMutation } from "../../core";
 import type { AlignMode, DistributeAxis } from "../../editors/align";
 import type {
   CmdOption,
@@ -62,13 +63,13 @@ export const alignCommand: Command = {
       const axis = input.id.slice(5) as DistributeAxis;
       return [
         { phase: "pick", lastPoint: null } as AlignState,
-        { draft: null, done: true, commit: (p) => distributeDrawings(p, ids, axis) },
+        { draft: null, done: true, commit: opsMutation((p) => distributeOps(p, ids, axis)) },
       ];
     }
     const mode = input.id as AlignMode;
     return [
       { phase: "pick", lastPoint: null } as AlignState,
-      { draft: null, done: true, commit: (p) => alignDrawings(p, ids, mode) },
+      { draft: null, done: true, commit: opsMutation((p) => alignOps(p, ids, mode)) },
     ];
   },
 

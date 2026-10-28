@@ -23,6 +23,8 @@
 // Bezeichner englisch, Kommentare/UI deutsch (CONVENTIONS.md).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { opsMutation, patchItem } from "../../core";
+import type { CoreOp } from "../../core";
 import { bulgePolylinePoints, hasRealBulge } from "../../core";
 import { extendBulgeSegment, extendSegment, pointSegmentDistance, polylineEdges } from "../../core";
 import type {
@@ -145,12 +147,12 @@ function extendCurve(curve: Curve, cutters: Curve[], pick: Vec2): Curve | null {
 }
 
 /** Wendet Extend auf das Projekt an: ersetzt die getroffene Kurve durch ihre verlängerte Form. */
-function applyExtend(p: Project, target: Drawing2D, pick: Vec2): Project {
+function extendOps(p: Project, target: Drawing2D, pick: Vec2): CoreOp[] {
   const curve = geomToOpenCurve(target.geom);
-  if (!curve) return p;
+  if (!curve) return [];
   const cutters = cuttersFor(p, target.levelId, target.id);
   const next = extendCurve(curve, cutters, pick);
-  if (!next) return p;
+  if (!next) return [];
   const geom: Drawing2DGeom =
     next.pts.length === 2 && target.geom.shape === "line" && !hasRealBulge(next.bulge)
       ? { shape: "line", a: next.pts[0], b: next.pts[1] }
@@ -160,10 +162,7 @@ function applyExtend(p: Project, target: Drawing2D, pick: Vec2): Project {
           closed: false,
           ...(hasRealBulge(next.bulge) ? { bulge: next.bulge } : {}),
         };
-  return {
-    ...p,
-    drawings2d: p.drawings2d.map((d) => (d.id === target.id ? { ...d, geom } : d)),
-  };
+  return patchItem(p, "drawings2d", target.id, { geom });
 }
 
 /** Vorschau-Form der verlängerten Kurve (für den Draft — Bogen tesselliert, s. `curveHitEdges`). */
@@ -215,7 +214,7 @@ export const extendCommand: Command = {
     const target = pickOpenCurveAt(ctx.project, ctx.level.id, input.point);
     if (!target) return [s, { draft: null }];
     const pick = input.point;
-    return [s, { draft: null, commit: (p) => applyExtend(p, target, pick) }];
+    return [s, { draft: null, commit: opsMutation((p) => extendOps(p, target, pick)) }];
   },
 
   onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {

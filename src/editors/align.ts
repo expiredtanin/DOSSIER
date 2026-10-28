@@ -8,7 +8,8 @@
 
 import type { Drawing2D, Project, Vec2 } from "../model/types";
 import { geomBBox } from "../state/selectionInfo";
-import { mvGeom } from "../core";
+import { mvGeom, patchItems } from "../core";
+import type { CoreOp } from "../core";
 
 /** Ausrichtungskante bzw. -achse. */
 export type AlignMode = "left" | "right" | "centerX" | "top" | "bottom" | "centerY";
@@ -31,18 +32,15 @@ function boxesOf(project: Project, ids: string[]): Boxed[] {
     .map((d) => ({ d, ...geomBBox(d.geom) }));
 }
 
-/** Verschiebt die genannten Elemente um je einen eigenen Vektor. */
-function moveBy(project: Project, deltas: Map<string, Vec2>): Project {
-  if (deltas.size === 0) return project;
-  return {
-    ...project,
-    drawings2d: project.drawings2d.map((d) => {
-      const delta = deltas.get(d.id);
-      if (!delta || (delta.x === 0 && delta.y === 0)) return d;
-      const fn = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
-      return { ...d, geom: mvGeom(d.geom, fn) };
-    }),
-  };
+/** Ops: verschiebt die genannten Elemente um je einen eigenen Vektor. */
+function moveBy(project: Project, deltas: Map<string, Vec2>): CoreOp[] {
+  if (deltas.size === 0) return [];
+  return patchItems(project, "drawings2d", (d) => deltas.has(d.id), (d) => {
+    const delta = deltas.get(d.id)!;
+    if (delta.x === 0 && delta.y === 0) return d;
+    const fn = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
+    return { ...d, geom: mvGeom(d.geom, fn) };
+  });
 }
 
 /**
@@ -53,9 +51,9 @@ function moveBy(project: Project, deltas: Map<string, Vec2>): Project {
  * Weniger als zwei Elemente ergeben keine Ausrichtung (nichts, woran man sich
  * ausrichten könnte) — das Projekt bleibt unverändert.
  */
-export function alignDrawings(project: Project, ids: string[], mode: AlignMode): Project {
+export function alignOps(project: Project, ids: string[], mode: AlignMode): CoreOp[] {
   const boxes = boxesOf(project, ids);
-  if (boxes.length < 2) return project;
+  if (boxes.length < 2) return [];
 
   const minX = Math.min(...boxes.map((b) => b.minX));
   const maxX = Math.max(...boxes.map((b) => b.maxX));
@@ -101,9 +99,9 @@ export function alignDrawings(project: Project, ids: string[], mode: AlignMode):
  * Unter drei Elementen gibt es nichts zu verteilen (die Äusseren bleiben ja
  * ohnehin stehen) — das Projekt bleibt unverändert.
  */
-export function distributeDrawings(project: Project, ids: string[], axis: DistributeAxis): Project {
+export function distributeOps(project: Project, ids: string[], axis: DistributeAxis): CoreOp[] {
   const boxes = boxesOf(project, ids);
-  if (boxes.length < 3) return project;
+  if (boxes.length < 3) return [];
 
   const center = (b: Boxed) => (axis === "x" ? (b.minX + b.maxX) / 2 : (b.minY + b.maxY) / 2);
   const sorted = [...boxes].sort((a, b) => center(a) - center(b));

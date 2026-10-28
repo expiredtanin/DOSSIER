@@ -1,9 +1,14 @@
 /** Ausrichten und Verteilen der 2D-Auswahl. */
 
 import { describe, expect, it } from "vitest";
-import { alignDrawings, distributeDrawings } from "./align";
+import { alignOps, distributeOps } from "./align";
+import type { AlignMode, DistributeAxis } from "./align";
+import { applyOps } from "../core/ops";
 import { sampleProject } from "../model/sampleProject";
 import type { Drawing2D, Project } from "../model/types";
+
+const alignDrawings = (p: Project, ids: string[], m: AlignMode) => applyOps(p, alignOps(p, ids, m));
+const distributeDrawings = (p: Project, ids: string[], a: DistributeAxis) => applyOps(p, distributeOps(p, ids, a));
 
 /** Rechtecke als Testobjekte: bbox ist direkt ablesbar. */
 function rects(boxes: [string, number, number, number, number][]): Project {

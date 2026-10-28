@@ -20,6 +20,8 @@
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
+import { addItems, opsMutation, removeItems } from "../../core";
+import type { CoreOp } from "../../core";
 import { breakCurve, nearestOnPolyline } from "../../core";
 import { hasRealBulge } from "../../core";
 import { chainToGeom, geomToCurve, isTrimmable, pickCurveAt } from "./trim";
@@ -41,20 +43,20 @@ function pickBreakable(project: Project, levelId: string, pt: Vec2): Drawing2D |
   return d;
 }
 
-function applyBreak(p: Project, target: Drawing2D, p1: Vec2, p2: Vec2): Project {
+function breakOps(p: Project, target: Drawing2D, p1: Vec2, p2: Vec2): CoreOp[] {
   const curve = geomToCurve(target.geom);
-  if (!curve) return p;
+  if (!curve) return [];
   const hit1 = nearestOnPolyline(curve.pts, false, p1);
   const hit2 = nearestOnPolyline(curve.pts, false, p2);
-  if (!hit1 || !hit2) return p;
+  if (!hit1 || !hit2) return [];
   const pieces = breakCurve(curve.pts, hit1, hit2);
   const replacements: Drawing2D[] = pieces.map((pts) => ({
     ...target,
     id: uniqueId("dr2d"),
     geom: chainToGeom({ pts, closed: false }),
   }));
-  const others = p.drawings2d.filter((d) => d.id !== target.id);
-  return { ...p, drawings2d: [...others, ...replacements] };
+  // Ziel raus, Stücke hinten dran.
+  return [...removeItems(p, "drawings2d", [target.id]), ...addItems("drawings2d", replacements)];
 }
 
 /** Vorschau der Reststücke (für den Draft). */
@@ -104,7 +106,7 @@ export const breakCommand: Command = {
     }
     // phase "p2"
     const { target, p1 } = s;
-    return [idle()[0], { draft: null, done: true, commit: (p) => applyBreak(p, target, p1, input.point) }];
+    return [idle()[0], { draft: null, done: true, commit: opsMutation((p) => breakOps(p, target, p1, input.point)) }];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => {

@@ -11,7 +11,8 @@
 // Leere/rein-block-Auswahl → No-Op (kein Commit).
 
 import type { BlockDef, Drawing2D } from "../../model/types";
-import { mvGeom } from "../../core";
+import { addItems, mvGeom, opsMutation, removeItems } from "../../core";
+import type { CoreOp } from "../../core";
 import { uniqueId } from "../../tools/types";
 import type {
   Command,
@@ -32,11 +33,11 @@ function nextBlockName(p: Project): string {
   return `Block ${(p.blockDefs?.length ?? 0) + 1}`;
 }
 
-function defineAndReplace(p: Project, ids: string[], at: Vec2, ctx: CommandContext): Project {
+function defineOps(p: Project, ids: string[], at: Vec2, ctx: CommandContext): CoreOp[] {
   const idSet = new Set(ids);
   // Block-Instanzen als Quelle ausschliessen (keine verschachtelten Blöcke).
   const srcs = p.drawings2d.filter((d) => idSet.has(d.id) && d.geom.shape !== "block");
-  if (srcs.length === 0) return p;
+  if (srcs.length === 0) return [];
   const toLocal = (pt: Vec2): Vec2 => ({ x: pt.x - at.x, y: pt.y - at.y });
   const def: BlockDef = {
     id: uniqueId("blk"),
@@ -50,13 +51,12 @@ function defineAndReplace(p: Project, ids: string[], at: Vec2, ctx: CommandConte
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "block", blockDefId: def.id, at, rotation: 0 },
   };
-  const srcIds = new Set(srcs.map((d) => d.id));
-  const rest = p.drawings2d.filter((d) => !srcIds.has(d.id));
-  return {
-    ...p,
-    blockDefs: [...(p.blockDefs ?? []), def],
-    drawings2d: [...rest, instance],
-  };
+  // Definition anhängen, Quellen raus, Instanz hinten dran.
+  return [
+    ...addItems("blockDefs", [def]),
+    ...removeItems(p, "drawings2d", srcs.map((d) => d.id)),
+    ...addItems("drawings2d", [instance]),
+  ];
 }
 
 interface DefblockState extends CommandState {
@@ -81,7 +81,7 @@ export const defblockCommand: Command = {
     const ids = selectedDrawingIds(ctx.selection);
     if (ids.length === 0) return idle();
     const at = input.point;
-    return [idle()[0], { draft: null, done: true, commit: (p) => defineAndReplace(p, ids, at, ctx) }];
+    return [idle()[0], { draft: null, done: true, commit: opsMutation((p) => defineOps(p, ids, at, ctx)) }];
   },
 
   onMove: (state): [CommandState, CommandResult] => [state, { draft: null }],

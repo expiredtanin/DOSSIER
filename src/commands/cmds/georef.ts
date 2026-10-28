@@ -11,7 +11,8 @@
 //
 // Ein-Klick-Befehl: der erste (einzige) Punkt committet sofort.
 
-import { translateProject } from "../../model/geoRebase";
+import { translateOps } from "../../model/geoRebase";
+import { opsMutation } from "../../core";
 import type {
   Command,
   CommandResult,
@@ -53,7 +54,7 @@ export const georefCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p: Project) => translateProject(p, -x, -y),
+        commit: opsMutation((p: Project) => translateOps(p, -x, -y)),
       },
     ];
   },

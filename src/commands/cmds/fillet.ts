@@ -15,6 +15,8 @@
 // einer polyline (kein reines Rechteck mehr).
 
 import type { Drawing2D, Drawing2DGeom } from "../../model/types";
+import { opsMutation, patchItem } from "../../core";
+import type { CoreOp } from "../../core";
 import { bulgeFromSagittaPoint, hasRealBulge } from "../../core";
 import { filletCorner, type Fillet } from "../../core";
 import type {
@@ -138,18 +140,15 @@ function filletDraft(hit: CornerHit, r: number, at: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function commitFillet(p: Project, hit: CornerHit, r: number): Project {
+function filletOps(p: Project, hit: CornerHit, r: number): CoreOp[] {
   const f = filletFor(hit, r);
-  if (!f) return p; // Radius zu gross für die Schenkellänge, oder Ecke (fast) gerade → No-op
+  if (!f) return []; // Radius zu gross für die Schenkellänge, oder Ecke (fast) gerade → No-op
   const pts = applyFilletPoints(hit, f);
   const edgeCount = hit.curve.closed ? pts.length : pts.length - 1;
   const bulge = new Array(edgeCount).fill(0);
   bulge[hit.index] = filletBulge(f); // Kante tangentA→tangentB (an Position hit.index)
   const geom: Drawing2DGeom = { shape: "polyline", pts, closed: hit.curve.closed, bulge };
-  return {
-    ...p,
-    drawings2d: p.drawings2d.map((d) => (d.id === hit.drawing.id ? { ...d, geom } : d)),
-  };
+  return patchItem(p, "drawings2d", hit.drawing.id, { geom });
 }
 
 // ── Zustand ───────────────────────────────────────────────────────────────────
@@ -200,7 +199,7 @@ export const filletCommand: Command = {
     else return [s, { draft: null }];
     return [
       { phase: "done", lastPoint: null } as FilletDone,
-      { draft: null, done: true, commit: (p) => commitFillet(p, s.hit, r) },
+      { draft: null, done: true, commit: opsMutation((p) => filletOps(p, s.hit, r)) },
     ];
   },
 
