@@ -105,6 +105,37 @@ export function removeItems<K extends EntityCollection>(
   return drop.length ? [{ kind: "remove", collection, ids: drop }] : [];
 }
 
+/**
+ * Ersetzt Elemente durch je eine Liste neuer Elemente AN DERSELBEN STELLE (Zeichenreihenfolge bleibt;
+ * leere Liste = Element entfernen). Ein Eintrag, der nur das Original selbst enthält (gleiche
+ * Referenz), ändert nichts. Ein `remove` für alle ersetzten, danach je ein `add` an der Endposition
+ * (aufsteigend), sodass `applyOps` die Liste so liefert, als wäre sie in einem Zug neu aufgebaut worden.
+ */
+export function replaceWithMany<K extends EntityCollection>(
+  p: Project,
+  collection: K,
+  replacements: ReadonlyMap<string, readonly EntityOf<K>[]>,
+): CoreOp[] {
+  const dropped: string[] = [];
+  const inserts: { at: number; items: readonly EntityOf<K>[] }[] = [];
+  let len = 0; // Länge der Liste nach dem Entfernen = Position im Ergebnis
+  for (const e of itemsOf(p, collection)) {
+    const id = (e as { id: string }).id;
+    const items = replacements.get(id);
+    if (items === undefined || (items.length === 1 && items[0] === e)) {
+      len++;
+      continue;
+    }
+    dropped.push(id);
+    if (items.length > 0) inserts.push({ at: len, items });
+    len += items.length;
+  }
+  if (dropped.length === 0) return [];
+  const ops: CoreOp[] = [{ kind: "remove", collection, ids: dropped }];
+  for (const ins of inserts) ops.push(...addItems(collection, ins.items, ins.at));
+  return ops;
+}
+
 /** Setzt ein Projekt-Feld (`undefined` ⇒ Feld entfernen). */
 export function setField<K extends keyof Project>(key: K, value: Project[K] | undefined): CoreOp {
   return value === undefined ? { kind: "setField", key } : { kind: "setField", key, value };

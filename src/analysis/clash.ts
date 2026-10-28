@@ -7,6 +7,8 @@
 // macht daraus rote Markierungen (Kreis + Text, nicht druckend) auf dem passenden Geschoss.
 
 import type { Drawing2D, Project, Vec2 } from "../model/types";
+import { addItems, removeItems } from "../core/opsBuild";
+import type { CoreOp } from "../core/ops";
 import { getFloor } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
 import { extrudedSolidSpec } from "../plan/extrudedSolidSpec";
@@ -152,8 +154,7 @@ export function floorAtElevation(project: Project, z: number): string | null {
 }
 
 /** Ersetzt alte Kollisions-Marker durch neue (Kreis + Beschriftung, rot, nicht druckend). */
-export function applyClashMarkers(project: Project, clashes: Clash[], categoryCode: string): Project {
-  const keep = project.drawings2d.filter((d) => !d.id.startsWith(CLASH_MARKER_PREFIX));
+export function clashMarkerOps(project: Project, clashes: Clash[], categoryCode: string): CoreOp[] {
   const markers: Drawing2D[] = [];
   clashes.forEach((c, k) => {
     const levelId = floorAtElevation(project, c.center[2]);
@@ -168,5 +169,9 @@ export function applyClashMarkers(project: Project, clashes: Clash[], categoryCo
       geom: { shape: "text", at: { x: at.x + 0.45, y: at.y + 0.1 }, text: `K${k + 1}${vol}`, height: 0.2, angle: 0 },
     });
   });
-  return { ...project, drawings2d: [...keep, ...markers] };
+  // Frühere Marken raus, neue hinten dran.
+  return [
+    ...removeItems(project, "drawings2d", (d) => d.id.startsWith(CLASH_MARKER_PREFIX)),
+    ...addItems("drawings2d", markers),
+  ];
 }

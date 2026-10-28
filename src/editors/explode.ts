@@ -16,7 +16,7 @@
 // unverändert stehen. Ebenso alles, was kein 2D-Element ist.
 
 import type { Drawing2D, Drawing2DGeom, Project, Vec2 } from "../model/types";
-import { bulgeArc, addItems } from "../core";
+import { bulgeArc, replaceWithMany } from "../core";
 import type { CoreOp } from "../core";
 import { uniqueId } from "../tools/types";
 
@@ -124,25 +124,13 @@ function mapPoints(geom: Drawing2DGeom, fn: (p: Vec2) => Vec2): Drawing2DGeom {
  */
 export function explodeOps(project: Project, ids: readonly string[]): CoreOp[] {
   const wanted = new Set(ids);
-  const dropped: string[] = [];
-  const inserts: { at: number; items: Drawing2D[] }[] = [];
-  let len = 0; // Länge der Liste nach dem Entfernen der zerlegten Originale = Position im Ergebnis
+  const replacements = new Map<string, Drawing2D[]>();
   for (const d of project.drawings2d) {
     const parts = wanted.has(d.id) ? explodeGeom(d.geom, project) : null;
-    if (!parts || parts.length === 0) {
-      len++;
-      continue;
-    }
-    dropped.push(d.id);
+    if (!parts || parts.length === 0) continue;
     // Stil-Eigenschaften der Quelle übernehmen; nur Identität und Geometrie sind neu. `hatchId`/Füllung
     // bleiben bewusst dran: es geht nichts verloren, falls der Nutzer die Linien wieder schliesst.
-    const items = parts.map((geom): Drawing2D => ({ ...d, id: uniqueId("dr2d"), geom }));
-    inserts.push({ at: len, items });
-    len += items.length;
+    replacements.set(d.id, parts.map((geom): Drawing2D => ({ ...d, id: uniqueId("dr2d"), geom })));
   }
-  if (dropped.length === 0) return [];
-  // Originale in einem Zug raus, die Teile (aufsteigend) an ihrer Endposition wieder rein.
-  const ops: CoreOp[] = [{ kind: "remove", collection: "drawings2d", ids: dropped }];
-  for (const ins of inserts) ops.push(...addItems("drawings2d", ins.items, ins.at));
-  return ops;
+  return replaceWithMany(project, "drawings2d", replacements);
 }

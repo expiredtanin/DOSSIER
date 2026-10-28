@@ -11,6 +11,8 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Project } from "../model/types";
+import { patchItem } from "../core";
+import type { CoreOp } from "../core";
 import type { MemberKind } from "./groupActions";
 
 /** Ist das Element (Art + ID) gesperrt? `false` für unbekannte/fehlende IDs. */
@@ -35,40 +37,25 @@ export function isLocked(project: Project, kind: MemberKind, id: string): boolea
   }
 }
 
-/** Setzt die Sperre eines Elements (immutabel); unbekannte IDs sind ein No-Op. */
-export function setLocked(project: Project, kind: MemberKind, id: string, locked: boolean): Project {
+/** Ops: setzt die Sperre eines Elements; unbekannte IDs sind ein No-Op (keine Ops). */
+export function lockOps(project: Project, kind: MemberKind, id: string, locked: boolean): CoreOp[] {
   switch (kind) {
     case "wallIds":
-      return { ...project, walls: project.walls.map((w) => (w.id === id ? { ...w, locked } : w)) };
+      return patchItem(project, "walls", id, { locked });
     case "drawingIds":
-      return {
-        ...project,
-        drawings2d: project.drawings2d.map((d) => (d.id === id ? { ...d, locked } : d)),
-      };
+      return patchItem(project, "drawings2d", id, { locked });
     case "ceilingIds":
-      return {
-        ...project,
-        ceilings: (project.ceilings ?? []).map((c) => (c.id === id ? { ...c, locked } : c)),
-      };
+      return patchItem(project, "ceilings", id, { locked });
     case "roomIds":
-      return { ...project, rooms: (project.rooms ?? []).map((r) => (r.id === id ? { ...r, locked } : r)) };
+      return patchItem(project, "rooms", id, { locked });
     case "stairIds":
-      return {
-        ...project,
-        stairs: (project.stairs ?? []).map((s) => (s.id === id ? { ...s, locked } : s)),
-      };
+      return patchItem(project, "stairs", id, { locked });
     case "columnIds":
-      return {
-        ...project,
-        columns: (project.columns ?? []).map((c) => (c.id === id ? { ...c, locked } : c)),
-      };
+      return patchItem(project, "columns", id, { locked });
     case "roofIds":
-      return { ...project, roofs: (project.roofs ?? []).map((r) => (r.id === id ? { ...r, locked } : r)) };
+      return patchItem(project, "roofs", id, { locked });
     case "openingIds":
-      return {
-        ...project,
-        openings: (project.openings ?? []).map((o) => (o.id === id ? { ...o, locked } : o)),
-      };
+      return patchItem(project, "openings", id, { locked });
   }
 }
 
@@ -77,16 +64,14 @@ export function setLocked(project: Project, kind: MemberKind, id: string, locked
  * Zug (ein Undo-Schritt für "Auswahl sperren/entsperren", nicht einer je
  * Element). Reihenfolge/Struktur wie `MemberKind` — jedes Feld optional.
  */
-export function setLockedForMembers(
+export function lockMembersOps(
   project: Project,
   members: Partial<Record<MemberKind, string[]>>,
   locked: boolean,
-): Project {
-  let next = project;
+): CoreOp[] {
+  const ops: CoreOp[] = [];
   for (const kind of Object.keys(members) as MemberKind[]) {
-    for (const id of members[kind] ?? []) {
-      next = setLocked(next, kind, id, locked);
-    }
+    for (const id of members[kind] ?? []) ops.push(...lockOps(project, kind, id, locked));
   }
-  return next;
+  return ops;
 }
