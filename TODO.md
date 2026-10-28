@@ -173,6 +173,38 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     unverändert). Offen: diese Verbraucher auf den Puffer umstellen (Picken über Pick-Art/Id je Eintrag; render2d-Szene direkt aus
     dem Puffer), TS-Anteile (2D-Zeichnungen, Schatten/Baurecht) in den Puffer schreiben. Nicht in der Tauri-App angesehen (der
     direkte GPU-Weg läuft nur im nativen macOS-Renderer; geprüft über die hochgeladenen Puffer in Vitest).
+    ✅ (28.10.) **Verbraucher lesen den Puffer** (Szene, Auswahl, Fang, SVG-Export). Grundlage `core/src/plan_parts.rs` ↔
+    `src/plan/planParts.ts`: ein Plan als Abschnitte gehaltener Plan-Puffer in Zeichenreihenfolge — Kern-Abschnitte aus `Plan.bufRuns`
+    (Objekt-Identität geprüft) ohne Umweg, der Rest (2D-Zeichnungen, Schatten, Baurecht, zerlegte Polygone, gedimmte Klone) einmal in
+    einen eigenen Puffer (ohne Schraffur-JSON; Texte nur mit JSON für den SVG-Export); `greyedRanges` gehen als Bereiche mit (kein
+    Klonen). Gehaltene Puffer sind geteilt (`Rc`), bis 64; verdrängt → TS legt neu ab und fragt nochmals.
+    - Render-Szene: `core/src/plan_scene.rs` (Farben wie `toRgba`, CSS-Klassen, Dimmen, `z`, Verkettung, Kantennaht mit Raster statt
+      O(n²)-Suche, Schraffur-Läufe, Zickzack/Motiv, Kreis-Tessellierung) schreibt die render2d-Szene v1 direkt (`planSceneBin` →
+      `set_scene_bin`, `push_native_scene`) bzw. eine verlustfreie f64-Szene (`planToRenderScene` für `sceneToPrintSvg`/PDF/SVG-Dialog,
+      CLI `--format json`). Text-Layout bleibt TS (`planSceneTexts`). `renderSceneBin.ts` gelöscht, Fixture-Test nach Rust.
+    - Auswahl: `core/src/plan_pick.rs` ↔ `src/plan/planView/planPick.ts` (Index je Plan, lazy): 2D-Zeichenlinien im Raster (wie
+      `segmentIndex`), Polygone unter dem Punkt (oberstes/unterstes, Pick-Feld-Filter), Symbol-Linien/-Bögen in Client-Pixeln, Kreis-/
+      Bogen-Ringe, Besitzer. PlanView fragt nur ab (hitTest, pickRoom/Roof/Stair/Opening/Column/…, pickDrawing, nearDrawingIds,
+      Hervorhebung); `segmentIndex.ts`, `ownerIndex.ts` und die Schleifen über alle Primitive je Mausbewegung gelöscht.
+    - Fang: `core/src/snap.rs` ↔ `src/geometry/snapSegments.ts`: Strecken eines Projekt-Geschosses einmal im Kern (Raster), je
+      Mausbewegung Lot/Endpunkt/Mitte/Schnitt/Kante/Verweilen; Schnittpunkte nur zwischen Geraden, die näher als die Toleranz am Cursor
+      vorbeigehen (vorher alle Paare). Die Sammlung der Strecken (Modell) bleibt in `tools/snapping.ts` (bis [K4]), gecacht je
+      Projekt/Geschoss/Sichtbarkeit samt Raum-Ankern, Kreisen, Ellipsen.
+    - SVG-Text-Export: `core/src/plan_svg.rs` (`planToSvgString` für CLI/MCP/Goldens), Texte aus dem Text-JSON des Puffers.
+    Gleichheit (temporäre Paritätstests gegen die alten TS-Fassungen, danach entfernt): Szene JSON + Binär bitgleich (Beispielprojekt
+    alle Ebenen × Detailgrade × mono, Überlagerung mit gedimmten Ebenen, Schnitt, Ansicht, 400 Zufallslisten aller Primitiv-Arten,
+    grosses Projekt); Auswahl 25 000 Abfragen gleich (Beispiel + Überlagerung, 150 Zufallspläne, grosses Projekt); Fang 2600 Abfragen
+    gleich (Beispiel, mit 2D-Zeichnung, Nahmodus > 2000 Zeichnungen, bigSample(3), Verweilen an/aus, alle Fang-Arten zufällig); SVG
+    328 Pläne byte-gleich, Goldens unverändert; CLI plan EG/OG (svg, json), section, elevation, dxf md5-gleich zur CLI des Hauptstands.
+    Messung (Node, Linux-Container, `--no-opt`-WASM): Szene grosses Projekt 3125 → 133 ms (Beispiel-EG 1,8 → 0,7 ms); Auswahl grosses
+    Projekt + 100k 2D-Linien alle Hover-Abfragen zusammen 90 ms → 30 µs je Mausbewegung (Aufbau ~100 ms lazy); Fang grosses Projekt
+    27,6 s → 0,8 ms je Mausbewegung, bigSample(5) 135 ms → 57 µs. Kodieren des eigenen Puffers in TS ~1 µs je Linie (bei 100k
+    gemischten Primitiven ~200 ms, einmal je Plan). Nicht in der Tauri-App angesehen; `push_native_scene` nur über die Bytes geprüft.
+    Bleibt über `Primitive[]`: Text-Overlay und SVG-Rückfall der PlanView (`nativeText`, `primitives.tsx`, Culling `cullPrimitives`),
+    Marquee (`marqueeHit*`, nur beim Loslassen), `drawingLabel`/Text-/Bild-Treffer (Bbox, je Plan vorsortiert), DXF-Sammler
+    (`exportDxf.ts`, 1000 Zeilen Stil/Layer-Logik) und `planToPrintSvg.ts` (Layout-PDF/LayoutSheet; nicht auf `sceneToPrintSvg`
+    umgestellt, weil die Ausgabe dann nicht mehr byte-gleich wäre). `generatePlan` dekodiert den Kern-Puffer weiter vollständig
+    (für diese Verbraucher); fällt, wenn sie den Puffer lesen bzw. das Modell nach Rust zieht [K4].
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
 - ◐ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
@@ -206,6 +238,8 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
     Stand 28.10.: Plan-Puffer v2 steht ([K3d]) — `planDomains` liefert binär, GPU liest ihn direkt; Export/Auswahl/Overlay lesen
     noch die dekodierten `Primitive[]`.
+    Nachtrag 28.10.: render2d-Szene, Auswahl, Fang und SVG-Text-Export lesen den Puffer im Kern ([K3d]); Overlay/Texte, DXF und
+    Layout-PDF noch über `Primitive[]`.
   - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche
