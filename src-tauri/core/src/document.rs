@@ -11,7 +11,6 @@ use crate::model::Project;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-use std::rc::Rc;
 
 /// Eine Änderung am Projekt (Spiegel von `CoreOp` in `core/ops.ts`).
 #[derive(Clone, Debug, PartialEq)]
@@ -93,14 +92,16 @@ fn has_dup(v: Option<&Value>) -> bool {
 #[derive(Clone, Debug, Default)]
 pub struct Document {
     root: Map<String, Value>,
-    /// Typisierte Sicht (Cache); jede Änderung verwirft sie.
-    typed: Option<Rc<Project>>,
+    /// Typisierte Sicht (Cache). Eine Op markiert nur ihr Feld als geändert; `project()` liest dann
+    /// genau diese Felder neu ein.
+    typed: Option<Project>,
+    dirty: HashSet<String>,
 }
 
 impl Document {
     pub fn from_json(text: &str) -> Result<Document, String> {
         match serde_json::from_str::<Value>(text) {
-            Ok(Value::Object(root)) => Ok(Document { root, typed: None }),
+            Ok(Value::Object(root)) => Ok(Document { root, typed: None, dirty: HashSet::new() }),
             Ok(_) => Err("Projekt ist kein JSON-Objekt".into()),
             Err(e) => Err(e.to_string()),
         }
@@ -110,21 +111,35 @@ impl Document {
         serde_json::to_string(&self.root).unwrap_or_default()
     }
 
-    /// Typisierte Sicht des Projekts (gecacht bis zur nächsten Änderung). Fehler = Feld, das dem
-    /// Modell widerspricht (Meldung von serde).
-    pub fn project(&mut self) -> Result<Rc<Project>, String> {
-        if let Some(p) = &self.typed {
-            return Ok(p.clone());
+    /// Typisierte Sicht des Projekts (gecacht; nach Ops werden nur die berührten Felder neu gelesen).
+    /// Fehler = Feld, das dem Modell widerspricht (Meldung von serde).
+    pub fn project(&mut self) -> Result<&Project, String> {
+        if self.typed.is_none() {
+            // Die Map wird nur ausgeliehen: `Value::Object` braucht Besitz, daher temporär herausnehmen.
+            let value = Value::Object(std::mem::take(&mut self.root));
+            let parsed = Project::deserialize(&value).map_err(|e| e.to_string());
+            if let Value::Object(m) = value {
+                self.root = m;
+            }
+            self.typed = Some(parsed?);
+            self.dirty.clear();
+        } else if !self.dirty.is_empty() {
+            let dirty: Vec<String> = self.dirty.drain().collect();
+            let mut failed = None;
+            if let Some(t) = self.typed.as_mut() {
+                for key in &dirty {
+                    if let Err(e) = t.set_field(key, self.root.get(key)) {
+                        failed = Some(e);
+                        break;
+                    }
+                }
+            }
+            if let Some(e) = failed {
+                self.typed = None;
+                return Err(e);
+            }
         }
-        // Die Map wird nur ausgeliehen: `Value::Object` braucht Besitz, daher temporär herausnehmen.
-        let value = Value::Object(std::mem::take(&mut self.root));
-        let parsed = Project::deserialize(&value).map_err(|e| e.to_string());
-        if let Value::Object(m) = value {
-            self.root = m;
-        }
-        let p = Rc::new(parsed?);
-        self.typed = Some(p.clone());
-        Ok(p)
+        Ok(self.typed.as_ref().expect("gerade gesetzt"))
     }
 
     pub fn field(&self, key: &str) -> Option<&Value> {
@@ -189,7 +204,9 @@ impl Document {
 
     /// Wendet `ops` atomar an. Verstösse (neue doppelte ids) → `Err(Meldungen)`, Dokument unverändert.
     pub fn apply(&mut self, ops: &[Op]) -> Result<(), Vec<String>> {
-        self.typed = None;
+        for op in ops {
+            self.dirty.insert(op.key().to_owned());
+        }
         // Zustand der berührten Felder sichern (Rücknahme) und Alt-Doppelungen merken.
         let mut saved: Vec<(String, Option<Value>)> = Vec::new();
         let mut had_dup: HashSet<String> = HashSet::new();
@@ -291,6 +308,11 @@ mod tests {
         let id = d.project().unwrap().walls[0].id.clone();
         d.apply(&ops(json!([{"kind":"remove","collection":"walls","ids":[id]}]))).unwrap();
         assert_eq!(d.project().unwrap().walls.len(), n - 1);
+        // Feld entfernen und wieder setzen
+        d.apply(&ops(json!([{"kind":"setField","key":"name"}]))).unwrap();
+        assert_eq!(d.project().unwrap().name, "");
+        d.apply(&ops(json!([{"kind":"setField","key":"name","value":"X"}]))).unwrap();
+        assert_eq!(d.project().unwrap().name, "X");
     }
 
     #[test]

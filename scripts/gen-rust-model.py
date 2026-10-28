@@ -205,6 +205,8 @@ def rtype(t, ctx):
         return "serde_json::Value", opt
     raise ValueError(t)
 
+project_fields = []
+
 def emit_struct(name, fields):
     if name in emitted: return
     emitted.add(name)
@@ -229,9 +231,11 @@ def emit_struct(name, fields):
             r = f"Option<{r}>"
         a = f"    #[serde({', '.join(attrs)})]\n" if attrs else ""
         lines.append(f"{a}    pub {rn}: {r},")
+        if name == "Project":
+            project_fields.append((fname, rn, r))
+    lines.append("    #[serde(flatten)]\n    pub extra: Extra,")
     out_items.append("#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]\n"
                      + '#[serde(default)]\n'
-                     + '#[cfg_attr(test, serde(deny_unknown_fields))]\n'
                      + f"pub struct {name} {{\n" + "\n".join(lines) + "\n}\n")
 
 def ensure(n):
@@ -259,6 +263,10 @@ print("// GENERIERT von scripts/gen-rust-model.py aus den TS-Typen (Stand 28.10.
       "// Rust-Gegenstück zu src/model/types.ts ([K4] S2). Union-Typen mit Tag stehen in model/manual.rs.\n"
       "#![allow(clippy::large_enum_variant)]\n"
       "use super::manual::*;\nuse serde::{Deserialize, Serialize};\n")
+impl_lines = []
+for jn, rn, rt in project_fields:
+    impl_lines.append(f"            {json.dumps(jn)} => {{\n                self.{rn} = match v {{\n                    Some(v) => <{rt}>::deserialize(v).map_err(|e| e.to_string())?,\n                    None => Default::default(),\n                }};\n            }}")
+out_items.append("impl Project {\n    /// Setzt EIN Feld aus dem JSON-Baum (`None` = Feld entfernt → Standardwert); so bleibt die\n    /// typisierte Sicht nach einer Op ohne Neu-Parsen des ganzen Projekts aktuell.\n    pub fn set_field(&mut self, key: &str, v: Option<&serde_json::Value>) -> Result<(), String> {\n        match key {\n" + "\n".join(impl_lines) + "\n            other => match v {\n                Some(v) => {\n                    self.extra.0.insert(other.to_owned(), v.clone());\n                }\n                None => {\n                    self.extra.0.remove(other);\n                }\n            },\n        }\n        Ok(())\n    }\n}\n")
 body = "\n".join(out_items)
 for a, b in RENAMES.items():
     body = body.replace(a, b)

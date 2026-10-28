@@ -4,6 +4,29 @@
 use super::generated::*;
 use serde::{Deserialize, Serialize};
 
+/// Felder, die das Modell (noch) nicht kennt: bleiben beim Hin-und-zurück erhalten, damit Rust
+/// nichts verliert, was neuere Programmstände oder Erweiterungen in die Datei geschrieben haben.
+/// In Tests meldet ein unbekanntes Feld sich als Panic — so fällt eine Lücke im Modell auf.
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+pub struct Extra(pub serde_json::Map<String, serde_json::Value>);
+
+impl<'de> Deserialize<'de> for Extra {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let m = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
+        #[cfg(test)]
+        if !m.is_empty() {
+            panic!("Modell kennt Felder nicht: {:?}", m.keys().collect::<Vec<_>>());
+        }
+        Ok(Extra(m))
+    }
+}
+
+impl Extra {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(test, serde(deny_unknown_fields))]
 pub struct Vec2 {

@@ -99,7 +99,7 @@ impl Project {
                 }
             }
         }
-        vec![Layer { component_id: String::new(), thickness: r.thickness.max(0.0), joint_line_style_id: None }]
+        vec![Layer { component_id: String::new(), thickness: r.thickness.max(0.0), ..Default::default() }]
     }
 
     fn resolve_anchor(&self, a: Option<&VerticalAnchor>) -> Option<f64> {
