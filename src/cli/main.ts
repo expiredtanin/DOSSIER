@@ -9,6 +9,7 @@
 //                                                  json = render2d-Szene (planToRenderScene)
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
+//   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //   dossier-cli <projekt.obp> dxf [--binary]|dwg|ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
@@ -585,7 +586,8 @@ async function execute(project: Project, file: string, command: string, rest: st
     }
     case "ifc":
       await loadFileio();
-      out(args, exportIfcSpf(project), `${project.name || "projekt"}.ifc`);
+      // --ebkph: eBKP-H-Hauptgruppen je Bauteilart; --ebenen: Ebene (categoryCode) des Modells als Klassifikation.
+      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen") }), `${project.name || "projekt"}.ifc`);
       return 0;
     case "obj":
       await loadFileio();

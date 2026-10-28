@@ -21,6 +21,14 @@ import { GENERIC_IMPORT_CATEGORY } from "../model/contextCategories";
 import type { ImportedMesh } from "../model/types";
 import { rgbToHex } from "../model/color";
 
+/** Klassifikation eines Bauteils (IfcClassificationReference), z. B. eBKP-H `C`. */
+export interface IfcClassificationRef {
+  /** Name des Systems (IfcClassification), z. B. `eBKP-H`; leer, wenn die Datei keines nennt. */
+  system: string;
+  code: string;
+  name: string | null;
+}
+
 /** Ein gelesenes IFC-Bauteil. */
 export interface IfcProduct {
   globalId: string;
@@ -30,6 +38,8 @@ export interface IfcProduct {
   storey: string | null;
   /** RGBA 0..1 aus IfcStyledItem/Material, falls vorhanden. */
   color: [number, number, number, number] | null;
+  /** Klassifikationen (eBKP-H, BKP …); fehlt bei Quellen ohne. */
+  classifications?: IfcClassificationRef[];
   /** x,y,z in Metern (Z = Höhe). */
   positions: Float64Array;
   indices: Uint32Array;
@@ -60,6 +70,7 @@ interface RawProduct {
   name: string | null;
   storey: string | null;
   color: [number, number, number, number] | null;
+  classifications?: IfcClassificationRef[];
   positionCount: number;
   indexCount: number;
 }
@@ -143,6 +154,7 @@ export function decodeIfc(flat: IfcFlat): { products: IfcProduct[]; report: IfcI
       name: p.name,
       storey: p.storey,
       color: p.color,
+      ...(p.classifications?.length ? { classifications: p.classifications } : {}),
       positions: flat.positions.subarray(po, po + p.positionCount),
       indices: flat.indices.subarray(io, io + p.indexCount),
     });
@@ -212,6 +224,17 @@ export function geoShift(
   return nearOrigin ? [-origin.e, -origin.n] : [0, 0];
 }
 
+/**
+ * Klassifikation als Namenszusatz des Kontext-Objekts (` [eBKP-H C]`): das Modell hat für Kontext-Meshes
+ * kein eigenes Klassifikationsfeld, der Name ist das einzige freie Feld (im Kontext-Panel sichtbar).
+ * Nur die erste Klassifikation; ohne leer.
+ */
+export function classificationSuffix(list: readonly IfcClassificationRef[] | undefined): string {
+  const c = list?.[0];
+  if (!c) return "";
+  return ` [${[c.system, c.code].filter(Boolean).join(" ")}]`;
+}
+
 /** Bauteile → Kontext-Meshes (Kategorie „Situation" wie STEP; `layer` = IFC-Klasse). */
 export function ifcToImportedMeshes(products: IfcProduct[], fileName: string, opts: IfcToMeshesOptions = {}): ImportedMesh[] {
   const base = fileName.replace(/\.[^.]+$/, "") || "IFC";
@@ -239,7 +262,7 @@ export function ifcToImportedMeshes(products: IfcProduct[], fileName: string, op
       return {
         id: `imported-ifc-${stamp}-${counter++}`,
         type: "importedMesh" as const,
-        name: [p.storey, p.name || p.ifcClass].filter(Boolean).join(": "),
+        name: [p.storey, p.name || p.ifcClass].filter(Boolean).join(": ") + classificationSuffix(p.classifications),
         layer: p.ifcClass,
         categoryCode: GENERIC_IMPORT_CATEGORY.code,
         ...(color ? { color } : {}),

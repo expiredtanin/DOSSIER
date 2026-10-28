@@ -4035,8 +4035,8 @@ export default function App() {
         <ExportSaveDialog
           initialFormat={exportSaveFormat}
           baseName={projectFileName()}
-          onSave={(fmt, filename) => {
-            runExport(fmt, filename);
+          onSave={(fmt, filename, ifcOptions) => {
+            runExport(fmt, filename, ifcOptions);
             setExportSaveFormat(null);
           }}
           onClose={() => setExportSaveFormat(null)}

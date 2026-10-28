@@ -23,12 +23,15 @@
 //   - Raum (IfcSpace): Prisma mit einem Umriss ohne Löcher; Name (LongName), SIA-416-Kategorie aus
 //     der Eigenschaft `SIA416` (Dossier-Export) falls vorhanden.
 //   - Geschosse (IfcBuildingStorey): Name, Höhe (Platzierung, sonst Elevation).
+//   - Klassifikation (IfcRelAssociatesClassification → IfcClassificationReference, Bauteil oder Typ) an jedem
+//     erkannten Bauteil (`Info::classifications`); IfcZone (IfcRelAssignsToGroup) liefert dem Raum die
+//     SIA-416-Kategorie, wenn er keine eigene `SIA416`-Eigenschaft trägt.
 //
 // Unsinn ergibt „nicht erkannt" (bleibt Mesh), nie Panic.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::ifc_import::{class_name, signed_volume, Mesh, Reader, Rels, V2};
+use crate::ifc_import::{class_name, signed_volume, Classification, Mesh, Reader, Rels, V2};
 use crate::ifc_step::Value;
 
 /// Höchstzahl Dreiecke je untersuchtem Körper.
@@ -72,6 +75,8 @@ pub struct Info {
     /// Name des Typs (IfcWallType …) oder des Schichtaufbaus.
     pub type_name: Option<String>,
     pub layers: Vec<MatLayer>,
+    /// Klassifikationen (eBKP-H, BKP ...) des Bauteils, sonst seines Typs.
+    pub classifications: Vec<Classification>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -557,7 +562,37 @@ impl Ctx<'_, '_> {
             color: color.or_else(|| mat.and_then(|m| self.rels.resolve_material_color(f, m))),
             type_name,
             layers,
+            classifications: {
+                let own = self.rels.classifications(f, id);
+                if own.is_empty() {
+                    self.type_of.get(&id).map(|t| self.rels.classifications(f, *t)).unwrap_or_default()
+                } else {
+                    own
+                }
+            },
         }
+    }
+
+    /// SIA-416-Kategorie eines Raums aus seinen Zonen (IfcZone über IfcRelAssignsToGroup): Eigenschaft
+    /// `SIA416` der Zone (Dossier-Export), sonst der Zonenname, wenn er eine Kategorie ist.
+    fn zone_sia(&self, id: u64) -> Option<String> {
+        let f = self.r.f;
+        for g in self.rels.groups_of.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
+            let Some(z) = f.get(*g) else { continue };
+            if z.ty != "IFCZONE" {
+                continue;
+            }
+            if let Some(v) = self.sia.get(g) {
+                return Some(v.clone());
+            }
+            let name = z.arg(2).and_then(|v| v.as_str()).unwrap_or("").trim().to_uppercase();
+            // SIA 416 schreibt KF; unser Modell heisst KGF.
+            let name = if name == "KF" { "KGF".to_string() } else { name };
+            if ["HNF", "NNF", "VF", "FF", "KGF", "AGF"].contains(&name.as_str()) {
+                return Some(name);
+            }
+        }
+        None
     }
 
     /// Material des Bauteils, sonst seines Typs.
@@ -774,7 +809,7 @@ impl Ctx<'_, '_> {
         }
         let f = self.r.f;
         let long_name = f.get(id).and_then(|e| e.arg(7)).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
-        Some(Space { info: self.info(id, color), long_name, sia: self.sia.get(&id).cloned(), boundary, z0: s.z0, z1: s.z1 })
+        Some(Space { info: self.info(id, color), long_name, sia: self.sia.get(&id).cloned().or_else(|| self.zone_sia(id)), boundary, z0: s.z0, z1: s.z1 })
     }
 }
 
@@ -1049,6 +1084,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
             "color": i.color,
             "typeName": i.type_name,
             "layers": i.layers.iter().map(|l| json!({ "material": l.material, "thickness": l.thickness, "color": l.color })).collect::<Vec<_>>(),
+            "classifications": crate::ifc_import::classifications_json(&i.classifications),
         })
     };
     let mut push = |kind: &str, i: &Info, extra: serde_json::Value, nums: Vec<f64>, data: &mut Vec<f64>| {
@@ -1395,6 +1431,87 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         assert_eq!((sp.long_name.as_deref(), sp.sia.as_deref(), sp.info.name.as_deref()), (Some("Küche"), Some("HNF"), Some("1.01")));
         assert!(close(area2(&sp.boundary), 6.0));
         assert!(r.skipped_products.is_empty(), "{:?}", r.skipped_products);
+    }
+
+    /// Raum (3 x 2, ohne eigene SIA-Eigenschaft) mit `extra` (Zone, Klassifikation ...) dahinter.
+    fn space_file(extra: &str) -> String {
+        let body = format!(
+            "#501=IFCCARTESIANPOINT((0.,0.));#502=IFCCARTESIANPOINT((3.,0.));#503=IFCCARTESIANPOINT((3.,2.));#504=IFCCARTESIANPOINT((0.,2.));\
+#505=IFCPOLYLINE((#501,#502,#503,#504,#501));#506=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,$,#505);#507=IFCEXTRUDEDAREASOLID(#506,#13,#11,2.5);\
+#508=IFCSHAPEREPRESENTATION($,'Body','SweptSolid',(#507));#509=IFCPRODUCTDEFINITIONSHAPE($,$,(#508));\
+#500=IFCSPACE('sp',$,'1.01',$,$,#22,#509,'Bad',.ELEMENT.,.INTERNAL.,$);\
+#520=IFCRELAGGREGATES('as',$,$,$,#23,(#500));\n{extra}"
+        );
+        file(METRE, &body)
+    }
+
+    #[test]
+    fn zone_name_and_zone_property_give_sia_category() {
+        // Zone heisst wie die Kategorie.
+        let (_, s) = sem(&space_file("#600=IFCZONE('z',$,'nnf',$,$,$);#601=IFCRELASSIGNSTOGROUP('ag',$,$,$,(#500),$,#600);"));
+        assert_eq!(s.spaces.len(), 1, "{:?}", s.kept);
+        assert_eq!(s.spaces[0].sia.as_deref(), Some("NNF"));
+        // SIA 416 schreibt KF, das Modell KGF.
+        let (_, s) = sem(&space_file("#600=IFCZONE('z',$,'KF',$,$,$);#601=IFCRELASSIGNSTOGROUP('ag',$,$,$,(#500),$,#600);"));
+        assert_eq!(s.spaces[0].sia.as_deref(), Some("KGF"));
+        // Eigenschaft der Zone (Dossier-Export) schlägt den Namen.
+        let zone = "#600=IFCZONE('z',$,'Zone 7',$,$,$);#601=IFCRELASSIGNSTOGROUP('ag',$,$,$,(#500),$,#600);\
+#602=IFCPROPERTYSINGLEVALUE('SIA416',$,IFCLABEL('VF'),$);#603=IFCPROPERTYSET('zp',$,'CH_Zone',$,(#602));\
+#604=IFCRELDEFINESBYPROPERTIES('zr',$,$,$,(#600),#603);";
+        let (_, s) = sem(&space_file(zone));
+        assert_eq!(s.spaces[0].sia.as_deref(), Some("VF"));
+        // Beliebiger Zonenname ohne Eigenschaft: keine Kategorie (kein Raten); eine IfcGroup zählt nicht.
+        let (_, s) = sem(&space_file("#600=IFCZONE('z',$,'Wohnung 3',$,$,$);#601=IFCRELASSIGNSTOGROUP('ag',$,$,$,(#500),$,#600);"));
+        assert_eq!(s.spaces[0].sia, None);
+        let (_, s) = sem(&space_file("#600=IFCGROUP('z',$,'HNF',$,$);#601=IFCRELASSIGNSTOGROUP('ag',$,$,$,(#500),$,#600);"));
+        assert_eq!(s.spaces[0].sia, None);
+        // Eigene Raum-Eigenschaft hat Vorrang vor der Zone.
+        let own = "#600=IFCZONE('z',$,'HNF',$,$,$);#601=IFCRELASSIGNSTOGROUP('ag',$,$,$,(#500),$,#600);\
+#610=IFCPROPERTYSINGLEVALUE('SIA416',$,IFCLABEL('FF'),$);#611=IFCPROPERTYSET('rp',$,'CH_Raum',$,(#610));\
+#612=IFCRELDEFINESBYPROPERTIES('rr',$,$,$,(#500),#611);";
+        let (_, s) = sem(&space_file(own));
+        assert_eq!(s.spaces[0].sia.as_deref(), Some("FF"));
+    }
+
+    #[test]
+    fn classification_references_of_element_type_and_mesh() {
+        // Stütze (Bauteil) mit eBKP-H, Raum mit Klassifikation über verschachtelte Referenz, BKP am Typ,
+        // dazu ein Dach (bleibt Mesh) mit Klassifikation.
+        let col = rect_product(40, "IFCCOLUMN", (1.0, 1.0, 0.0), (1.0, 0.0), (0.4, 0.4), 2.75, "");
+        let roof = rect_product(41, "IFCROOF", (1.0, 1.0, 3.0), (1.0, 0.0), (4.0, 3.0), 0.3, "");
+        let cls = "#700=IFCCLASSIFICATION('CRB','2020',$,'eBKP-H',$,$,$);\
+#701=IFCCLASSIFICATIONREFERENCE($,'C','Konstruktion Geb\\X2\\00E4\\X0\\ude',#700,$,$);\
+#702=IFCRELASSOCIATESCLASSIFICATION('c1',$,$,$,(#40),#701);\
+#703=IFCCLASSIFICATIONREFERENCE($,'C02',$,#701,$,$);\
+#704=IFCRELASSOCIATESCLASSIFICATION('c2',$,$,$,(#41),#703);\
+#705=IFCCLASSIFICATIONREFERENCE($,'  ',$,#700,$,$);\
+#706=IFCRELASSOCIATESCLASSIFICATION('c3',$,$,$,(#40),#705);\
+#707=IFCRELASSOCIATESCLASSIFICATION('c4',$,$,$,(#40),#700);";
+        let (r, s) = sem(&file(METRE, &format!("{col}{roof}{cls}")));
+        assert_eq!(s.columns.len(), 1, "{:?}", s.kept);
+        let c = &s.columns[0].info.classifications;
+        // Leerer Code und ein blosses IfcClassification (ohne Code) zählen nicht.
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!((c[0].system.as_str(), c[0].code.as_str(), c[0].name.as_deref()), ("eBKP-H", "C", Some("Konstruktion Gebäude")));
+        // Roof bleibt Mesh, die Klassifikation kommt trotzdem mit (verschachtelte Referenz: System von oben).
+        let p = r.products.iter().find(|p| p.class == "IfcRoof").expect("Dach als Mesh");
+        assert_eq!(p.classifications.len(), 1);
+        assert_eq!((p.classifications[0].system.as_str(), p.classifications[0].code.as_str(), p.classifications[0].name.as_deref()), ("eBKP-H", "C02", None));
+    }
+
+    #[test]
+    fn classification_from_type_and_ifc2x3_layout() {
+        // Klassifikation am Typ (IfcRelDefinesByType) erbt das Bauteil; Wandtyp ohne Bauteil-Eigenes.
+        let col = rect_product(40, "IFCCOLUMN", (1.0, 1.0, 0.0), (1.0, 0.0), (0.4, 0.4), 2.75, "");
+        let cls = "#710=IFCCOLUMNTYPE('ct',$,'S30',$,$,$,$,$,$,.COLUMN.);\
+#711=IFCRELDEFINESBYTYPE('dt',$,$,$,(#40),#710);\
+#712=IFCCLASSIFICATION('CRB',$,$,'BKP',$,$,$);\
+#713=IFCCLASSIFICATIONREFERENCE($,'214',$,#712,$,$);\
+#714=IFCRELASSOCIATESCLASSIFICATION('c5',$,$,$,(#710),#713);";
+        let (_, s) = sem(&file(METRE, &format!("{col}{cls}")));
+        let c = &s.columns[0].info.classifications;
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!((c[0].system.as_str(), c[0].code.as_str()), ("BKP", "214"));
     }
 
     impl Profile {

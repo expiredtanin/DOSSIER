@@ -457,6 +457,23 @@ pub(crate) fn arc_segments(span: f64, r: f64) -> usize {
 // Ergebnis
 // ---------------------------------------------------------------------------
 
+/// Eine Klassifikations-Zuordnung (IfcRelAssociatesClassification -> IfcClassificationReference), z. B.
+/// eBKP-H `C` "Konstruktion Gebäude".
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Classification {
+    /// Name des Systems (IfcClassification.Name, sonst Source), z. B. `eBKP-H`.
+    pub system: String,
+    /// Code (IfcClassificationReference.Identification bzw. IFC2x3 ItemReference).
+    pub code: String,
+    pub name: Option<String>,
+}
+
+/// Klassifikationen als JSON für die JS-Seite (`system`, `code`, `name`).
+#[cfg(feature = "web")]
+pub(crate) fn classifications_json(list: &[Classification]) -> Vec<serde_json::Value> {
+    list.iter().map(|c| serde_json::json!({ "system": c.system, "code": c.code, "name": c.name })).collect()
+}
+
 /// Ein importiertes Bauteil.
 #[derive(Clone, Debug, Default)]
 pub struct IfcProductMesh {
@@ -467,6 +484,8 @@ pub struct IfcProductMesh {
     pub storey: Option<String>,
     /// RGBA 0..1.
     pub color: Option<[f64; 4]>,
+    /// Klassifikationen des Bauteils (eBKP-H, BKP, Uniclass ...).
+    pub classifications: Vec<Classification>,
     pub mesh: Mesh,
 }
 
@@ -1670,6 +1689,10 @@ pub(crate) struct Rels {
     pub material_color: HashMap<u64, [f64; 4]>,
     /// Wirt → Öffnungen (IfcRelVoidsElement).
     pub voids: HashMap<u64, Vec<u64>>,
+    /// Objekt (auch Typ) → Klassifikationsverweise (IfcRelAssociatesClassification).
+    pub classification_of: HashMap<u64, Vec<u64>>,
+    /// Objekt → Gruppen/Zonen (IfcRelAssignsToGroup).
+    pub groups_of: HashMap<u64, Vec<u64>>,
 }
 
 impl Rels {
@@ -1691,6 +1714,45 @@ impl Rels {
             m = next?.as_ref_id()?;
         }
         None
+    }
+
+    /// Klassifikationen eines Objekts (IfcClassificationReference mit Code; ein reines IfcClassification ohne
+    /// Code zählt nicht), mit dem System aus `ReferencedSource` (über verschachtelte Verweise nach oben).
+    pub(crate) fn classifications(&self, f: &StepFile, id: u64) -> Vec<Classification> {
+        let mut out: Vec<Classification> = Vec::new();
+        for &c in self.classification_of.get(&id).map(Vec::as_slice).unwrap_or(&[]) {
+            let Some(e) = f.get(c) else { continue };
+            if e.ty != "IFCCLASSIFICATIONREFERENCE" {
+                continue;
+            }
+            let code = e.arg(1).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if code.is_empty() {
+                continue;
+            }
+            let name = e.arg(2).and_then(|v| v.as_str()).filter(|n| !n.is_empty()).map(str::to_string);
+            // System: ReferencedSource, ggf. über weitere Referenzen bis zur IfcClassification.
+            let mut system = String::new();
+            let mut cur = e.arg(3).and_then(|v| v.as_ref_id());
+            for _ in 0..8 {
+                let Some(se) = cur.and_then(|i| f.get(i)) else { break };
+                if se.ty == "IFCCLASSIFICATION" {
+                    system = se
+                        .arg(3)
+                        .and_then(|v| v.as_str())
+                        .filter(|n| !n.is_empty())
+                        .or_else(|| se.arg(0).and_then(|v| v.as_str()))
+                        .unwrap_or("")
+                        .to_string();
+                    break;
+                }
+                cur = se.arg(3).and_then(|v| v.as_ref_id());
+            }
+            let item = Classification { system, code, name };
+            if !out.contains(&item) {
+                out.push(item);
+            }
+        }
+        out
     }
 
     /// Geschoss (IfcBuildingStorey-id) eines Bauteils: Enthaltensein, sonst aufwärts über Aggregation.
@@ -1732,6 +1794,20 @@ impl Rels {
                     if let Some(m) = e.arg(5).and_then(|v| v.as_ref_id()) {
                         for o in refs(e.arg(4)) {
                             rels.material_of.entry(o).or_insert(m);
+                        }
+                    }
+                }
+                "IFCRELASSOCIATESCLASSIFICATION" => {
+                    if let Some(c) = e.arg(5).and_then(|v| v.as_ref_id()) {
+                        for o in refs(e.arg(4)) {
+                            rels.classification_of.entry(o).or_default().push(c);
+                        }
+                    }
+                }
+                "IFCRELASSIGNSTOGROUP" => {
+                    if let Some(g) = e.arg(6).and_then(|v| v.as_ref_id()) {
+                        for o in refs(e.arg(4)) {
+                            rels.groups_of.entry(o).or_default().push(g);
                         }
                     }
                 }
@@ -1877,6 +1953,7 @@ pub fn import_ifc_opts(bytes: &[u8], elements: bool) -> Result<IfcImport, String
             name: e.arg(2).and_then(|v| v.as_str()).map(str::to_string),
             storey: storey_of(id),
             color,
+            classifications: rels.classifications(&f, id),
             mesh,
         });
     }
@@ -2054,6 +2131,7 @@ mod web {
                     "name": p.name,
                     "storey": p.storey,
                     "color": p.color,
+                    "classifications": super::classifications_json(&p.classifications),
                     "positionCount": p.mesh.positions.len(),
                     "indexCount": p.mesh.indices.len(),
                 })

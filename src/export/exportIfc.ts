@@ -66,6 +66,18 @@
 //   IsExternal beim Dach und bei SIA-416-AGF-Räumen, Glasanteil der Glastür). Kein U-Wert,
 //   keine Tragfunktion: dafür hat das Modell keine Felder.
 //
+//   Schweizer Praxis ([B5], 28.10.):
+//   • Zonen: je vorkommender SIA-416-Kategorie (HNF, NNF, VF, FF, KGF, AGF) eine IfcZone mit
+//     IfcRelAssignsToGroup der IfcSpaces, Eigenschaft `CH_Zone.SIA416` und Summe der Nettoflächen
+//     (`CH_Qto_SIA416.NetFloorArea`). Immer dabei, sobald Räume da sind.
+//   • Geschoss-Kennwerte: je Geschoss mit Räumen `Qto_BuildingStoreyBaseQuantities` (GrossFloorArea = GF,
+//     NetFloorArea = NGF nach SIA 416) und `CH_Qto_SIA416` mit allen Blatt-/Summenflächen (HNF … GF).
+//   • Klassifikation (Option, `ifcClassification.ts`): eBKP-H-Hauptgruppen je Bauteilart und/oder die
+//     Ebene des Modells als System „Dossier-Ebenen" — IfcClassification + IfcClassificationReference +
+//     IfcRelAssociatesClassification.
+//   • Achsraster: nicht exportiert — das Modell führt keine Raster-Ressource (nur die Regel „grid" der
+//     parametrischen Wände mit festem Abstand).
+//
 //   GUIDs ([B5]/[10]): deterministisch aus `<Projekt-id>/<Art>/<id>[/<Zusatz>]` über einen
 //   128-Bit-Hash + Standard-IFC-GUID-Kompression (Zeichensatz 0-9,A-Z,a-z,_,$) — zweimal
 //   exportieren gibt dieselben GlobalIds, BIM-Koordination (Solibri, BIMcollab) erkennt die
@@ -108,6 +120,18 @@ import {
   type Qty,
 } from "./ifcQuantities";
 import { roofBaseElevation, roofGeometry } from "../geometry/roof";
+import { SIA_CATEGORIES, balance, siaLabel, type SiaCategory } from "../geometry/roomArea";
+import {
+  EBKPH_SYSTEM,
+  LAYER_SYSTEM,
+  ebkphGroup,
+  layerClassification,
+  type ClassificationSystem,
+  type ClassifiedKind,
+  type IfcExportOptions,
+} from "./ifcClassification";
+
+export type { IfcExportOptions } from "./ifcClassification";
 
 /** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export.rs::ifc_guid`). */
 export function ifcGuid(name: string): string {
@@ -133,6 +157,9 @@ const REC_END_SPACES = 8;
 const REC_ROOF = 9;
 const REC_COLUMN = 10;
 const REC_END_COLUMNS = 11;
+const REC_CLASSIFICATION = 12;
+const REC_ZONE = 13;
+const REC_ATTACH = 14;
 
 /** Typart in der flachen Kodierung (0 Wand, 1 Decke, 2 Dach). */
 type TypeKind = 0 | 1 | 2;
@@ -402,6 +429,26 @@ class FlatIfc {
     this.nums.push(REC_END_COLUMNS);
   }
 
+  /** Zone (IfcZone) mit den Räumen `spaceIds`; `key` ergibt die dauerhafte GUID. */
+  zone(key: string, name: string, longName: string, spaceIds: readonly string[], psets: PsetIn[]): void {
+    this.nums.push(REC_ZONE, this.str(key), this.str(name), this.str(longName), spaceIds.length);
+    for (const id of spaceIds) this.nums.push(this.str(id));
+    this.psets(psets);
+  }
+
+  /** Psets/Mengen an ein geschriebenes Bauteil (Schlüssel wie für seine GUID, z. B. `storey/<id>`). */
+  attach(key: string, psets: PsetIn[]): void {
+    this.nums.push(REC_ATTACH, this.str(key));
+    this.psets(psets);
+  }
+
+  /** Ein Klassifikationssystem mit Zuordnungen (Bauteil-Schlüssel → Code, Name der Referenz). */
+  classification(system: ClassificationSystem, refs: readonly { key: string; code: string; name: string }[]): void {
+    if (refs.length === 0) return;
+    this.nums.push(REC_CLASSIFICATION, this.str(system.name), this.str(system.source), this.str(system.edition), refs.length);
+    for (const r of refs) this.nums.push(this.str(r.key), this.str(r.code), this.str(r.name));
+  }
+
   /** Argumente für die Rust-Bindung: `[Zahlenpuffer, Zeichenketten durch \0 getrennt]`. */
   args(): [Float64Array, string] {
     return [new Float64Array(this.nums), this.strings.join("\0")];
@@ -569,7 +616,7 @@ function qto(name: string, quantities: readonly Qty[]): PsetIn[] {
  * File). Kein Datei-IO. Leeres Projekt ⇒ valider Minimal-IFC (Project/Site/Building, kein Crash).
  * Verlangt das geladene Format-Modul (`await loadFileio()`).
  */
-export function exportIfcSpf(projectIn: Project): string {
+export function exportIfcSpf(projectIn: Project, options: IfcExportOptions = {}): string {
   // Georeferenziert exportieren: ist ein Standort-Bezug gesetzt (geoAnchor),
   // wird die gesamte Geometrie auf die ECHTEN LV95-Weltkoordinaten verschoben,
   // damit die IFC-Datei in anderer Software lagerichtig sitzt — auch wenn das
@@ -602,6 +649,13 @@ export function exportIfcSpf(projectIn: Project): string {
     refElevation: typeof refElevation === "number" ? refElevation : null,
     storeys: floors.map((f, i) => ({ id: f.id, name: f.name, base: storeyBase[i] })),
   });
+
+  // Klassifikation: je Bauteil, das geschrieben wird, Schlüssel (wie für die GUID), Art und Ebene sammeln;
+  // Rust überspringt Schlüssel ohne geschriebenes Bauteil (degenerierte Wand, Öffnung ohne Körper …).
+  const classified: { key: string; kind: ClassifiedKind; categoryCode: string | undefined }[] = [];
+  const classify = (key: string, kind: ClassifiedKind, categoryCode: string | undefined): void => {
+    classified.push({ key, kind, categoryCode });
+  };
 
   const componentName = (componentId: string): string =>
     project.components.find((c) => c.id === componentId)?.name ?? componentId;
@@ -687,6 +741,7 @@ export function exportIfcSpf(projectIn: Project): string {
     if (bands.length === 0) continue; // degenerierte Wand / keine Geometrie
     const cutouts = cutoutsOf(wall);
     cutoutsByWallId.set(wall.id, cutouts);
+    classify(`wall/${wall.id}`, "wall", wall.categoryCode);
     if (!bandsMatchOpenings(wall, bands, cutouts)) {
       meshWalls.push({ wall, bands: bandsByWallId.get(wall.id)! });
       continue;
@@ -761,6 +816,7 @@ export function exportIfcSpf(projectIn: Project): string {
     if (ceiling.outline.length < 3) continue;
     const { zBottom, zTop } = ceilingVerticalExtent(project, ceiling);
     const structure = structureOf(ceiling.floorId);
+    classify(`slab/${ceiling.id}`, "slab", ceiling.categoryCode);
     let name: string = ceiling.id;
     let ty: TypeRefIn | null = null;
     const psets: PsetIn[] = [];
@@ -792,6 +848,7 @@ export function exportIfcSpf(projectIn: Project): string {
       const depth = c.zTop - c.zBottom;
       if (!(depth > 1e-6)) continue;
       const isDoor = opening.kind === "door";
+      classify(`fill/${opening.id}`, isDoor ? "door" : "window", opening.categoryCode);
       const props: PropIn[] = [];
       let psetName: string;
       if (isDoor) {
@@ -829,6 +886,7 @@ export function exportIfcSpf(projectIn: Project): string {
     if (footprint.length < 3) continue;
     const { zBottom, zTop } = stairVerticalExtent(project, stair);
     const structure = structureOf(stair.floorId);
+    classify(`stair/${stair.id}`, "stair", stair.categoryCode);
     const predefined = stair.shape === "straight" ? "STRAIGHT_RUN_STAIR" : stair.shape === "spiral" ? "SPIRAL_STAIR" : "QUARTER_TURN_STAIR";
     flat.stair(structure, stair.id, predefined, footprint, zBottom - baseOf(structure), zTop - zBottom, stairParts(project, stair, baseOf(structure)));
   }
@@ -848,6 +906,7 @@ export function exportIfcSpf(projectIn: Project): string {
   // Geschoss AGGREGIERT (IfcRelAggregates), nicht enthalten. Dazu Basismengen
   // (Qto_SpaceBaseQuantities), die SIA-416-Kategorie als Eigenschaft und Pset_SpaceCommon
   // (AGF = Aussengeschossfläche ⇒ aussen, alles andere innen).
+  const roomAreas: { id: string; floorId: string; category: SiaCategory; area: number }[] = [];
   for (const room of project.rooms ?? []) {
     if (room.boundary.length < 3) continue;
     const structure = structureOf(room.floorId);
@@ -855,6 +914,8 @@ export function exportIfcSpf(projectIn: Project): string {
     const height = floor?.floorHeight && floor.floorHeight > 0 ? floor.floorHeight : 2.5;
     const external = room.siaCategory === "AGF";
     const area = evaluateRoom(room.boundary, room.siaCategory);
+    roomAreas.push({ id: room.id, floorId: room.floorId, category: room.siaCategory, area: area.netArea });
+    classify(`space/${room.id}`, "space", room.categoryCode);
     const common: PropIn[] = [];
     if (room.stamp?.number) common.push(identifier("Reference", room.stamp.number));
     common.push({ name: "IsExternal", bool: external });
@@ -874,6 +935,41 @@ export function exportIfcSpf(projectIn: Project): string {
   }
   flat.endSpaces();
 
+  // SIA 416 ([70], [B5]): je vorkommender Kategorie eine IfcZone mit den Räumen. Kategorie als Eigenschaft
+  // (`CH_Zone.SIA416`, die der Import wieder liest), Summe der Nettoflächen als Menge.
+  for (const cat of SIA_CATEGORIES) {
+    const members = roomAreas.filter((r) => r.category === cat);
+    if (members.length === 0) continue;
+    const net = members.reduce((a, r) => a + r.area, 0);
+    flat.zone(
+      `sia416/${cat}`,
+      cat,
+      siaLabel(cat),
+      members.map((r) => r.id),
+      [
+        { name: "CH_Zone", props: [identifier("SIA416", cat)] },
+        { name: "CH_Qto_SIA416", props: [{ name: "NetFloorArea", area: Math.max(0, net) }] },
+      ],
+    );
+  }
+  // Geschoss-Kennwerte: GF/NGF als Basismenge des IfcBuildingStorey, alle SIA-416-Flächen als CH_Qto_SIA416.
+  for (const floor of floors) {
+    const rooms = roomAreas.filter((r) => r.floorId === floor.id);
+    if (rooms.length === 0) continue;
+    const bal = balance(rooms.map((r) => ({ category: r.category, area: r.area })));
+    const keys = ["HNF", "NNF", "NF", "VF", "FF", "NGF", "KGF", "AGF", "GF"] as const;
+    flat.attach(`storey/${floor.id}`, [
+      {
+        name: "Qto_BuildingStoreyBaseQuantities",
+        props: [
+          { name: "GrossFloorArea", area: Math.max(0, bal.byKey.GF) },
+          { name: "NetFloorArea", area: Math.max(0, bal.byKey.NGF) },
+        ],
+      },
+      { name: "CH_Qto_SIA416", props: keys.map((k): PropIn => ({ name: k, area: Math.max(0, bal.byKey[k]) })) },
+    ]);
+  }
+
   // ── Dächer → IfcRoof ───────────────────────────────────────────────────
   // Dieselben geschlossenen Schicht-Meshes wie das 3D (`emitRoofs`: Dachflächen je Schicht,
   // an First/Grat gehrt), zu EINEM Face-Set je Dach vereint. Modell-Koordinaten sind bereits
@@ -881,6 +977,7 @@ export function exportIfcSpf(projectIn: Project): string {
   // positiv ist — nur dann ist das Face-Set als geschlossen markiert.
   for (const roof of project.roofs ?? []) {
     const structure = structureOf(roof.floorId);
+    classify(`roof/${roof.id}`, "roof", roof.categoryCode);
     const positions: number[] = [];
     const indices: number[] = [];
     for (const mesh of emitRoofs({ ...project, roofs: [roof] })) {
@@ -928,6 +1025,7 @@ export function exportIfcSpf(projectIn: Project): string {
     const { zBottom, zTop } = columnVerticalExtent(project, col);
     if (!(zTop > zBottom)) continue;
     const structure = structureOf(col.floorId);
+    classify(`column/${col.id}`, "column", col.categoryCode);
     const label = columnLabel(col);
     flat.column({
       structure,
@@ -941,6 +1039,26 @@ export function exportIfcSpf(projectIn: Project): string {
     });
   }
   flat.endColumns();
+
+  // ── Klassifikation (Optionen), am Ende: alle Bauteile sind geschrieben ──────────────
+  if (options.ebkph) {
+    flat.classification(
+      EBKPH_SYSTEM,
+      classified.flatMap((c) => {
+        const g = ebkphGroup(c.kind);
+        return g ? [{ key: c.key, code: g.code, name: g.name }] : [];
+      }),
+    );
+  }
+  if (options.layerCodes) {
+    flat.classification(
+      LAYER_SYSTEM,
+      classified.flatMap((c) => {
+        const l = layerClassification(project, c.categoryCode);
+        return l ? [{ key: c.key, code: l.code, name: l.name }] : [];
+      }),
+    );
+  }
 
   const m = fileio();
   const [buf, strings] = flat.args();

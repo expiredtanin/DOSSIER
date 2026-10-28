@@ -61,6 +61,17 @@
 //   ROOF        = 9, structure, id, name, predefined (Text), TYPEREF, PSETS, MESH
 //   COLUMN      = 10, structure, id, label, PTS, z_rel, depth, component_id (−1 = keine), component_name, PSETS
 //   END_COLUMNS = 11  (Materialzuordnung der Stützen)
+//   CLASSIFICATION = 12, name, source, edition (Text, leer = keine), n_refs, (key, code, ref_name) × n_refs
+//                 ([B5], 28.10.) Ein Klassifikationssystem (IfcClassification) mit je Code einer
+//                 IfcClassificationReference und EINER IfcRelAssociatesClassification für alle Bauteile mit
+//                 diesem Code. `key` = Schlüssel des Bauteils wie für seine GlobalId (`wall/<id>`, `slab/<id>`,
+//                 `roof/<id>`, `column/<id>`, `stair/<id>`, `fill/<Öffnungs-id>` (Tür/Fenster), `space/<id>`,
+//                 `storey/<id>`); unbekannte Schlüssel werden übersprungen (kein Fehler). Gehört ans Ende
+//                 (nach allen Bauteilen); ein System ohne auflösbares Bauteil entsteht nicht.
+//   ZONE        = 13, key, name, long_name, n_spaces, (space_id) × n_spaces, PSETS
+//                 IfcZone mit IfcRelAssignsToGroup der Räume (`space/<id>`-Entitäten; unbekannte ids werden
+//                 übersprungen, ohne Raum keine Zone). GlobalId aus `zone/<key>`; Psets/Mengen wie bei Bauteilen.
+//   ATTACH      = 14, key, PSETS   (Psets/Mengen an ein schon geschriebenes Bauteil/Geschoss, Schlüssel wie oben)
 //
 // Danach folgen (am Pufferende) Typ-Zuordnungen, Eigenschaftssätze, räumliche Eingliederung und Fuss.
 //
@@ -89,6 +100,9 @@ pub const REC_END_SPACES: f64 = 8.0;
 pub const REC_ROOF: f64 = 9.0;
 pub const REC_COLUMN: f64 = 10.0;
 pub const REC_END_COLUMNS: f64 = 11.0;
+pub const REC_CLASSIFICATION: f64 = 12.0;
+pub const REC_ZONE: f64 = 13.0;
+pub const REC_ATTACH: f64 = 14.0;
 
 // ── IFC-GUID (Kompression nach IfcOpenShell `guid.compress`) ────────────────
 
@@ -785,6 +799,8 @@ struct Builder {
 
     spaces: Vec<(i64, Vec<usize>)>,
     column_materials: Vec<(String, String, Vec<usize>)>,
+    /// Bauteil-Schlüssel (wie für die GlobalId, z. B. `wall/<id>`) → Entität; Ziel von Klassifikation/Zone/Attach.
+    elements: HashMap<String, usize>,
 }
 
 impl Builder {
@@ -840,7 +856,7 @@ impl Builder {
         if pset.props.is_empty() {
             return; // IfcPropertySet verlangt mindestens eine Eigenschaft
         }
-        if pset.name.starts_with("Qto_") {
+        if pset.name.starts_with("Qto_") || pset.name.starts_with("CH_Qto_") {
             let quantities: Vec<(&'static str, String, f64)> = pset
                 .props
                 .iter()
@@ -1115,6 +1131,7 @@ impl Builder {
         for p in psets {
             self.add_pset(p, entity, &guid_key);
         }
+        self.elements.insert(guid_key, entity);
         entity
     }
 }
@@ -1126,6 +1143,9 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_WALL_MESH => "WALL_MESH",
         c if c == REC_CEILING => "CEILING",
         c if c == REC_OPENING => "OPENING",
+        c if c == REC_CLASSIFICATION => "CLASSIFICATION",
+        c if c == REC_ZONE => "ZONE",
+        c if c == REC_ATTACH => "ATTACH",
         _ => "?",
     }
 }
@@ -1179,6 +1199,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         styles: [0; 3],
         spaces: Vec::new(),
         column_materials: Vec::new(),
+        elements: HashMap::new(),
     };
     let pname = |dflt: &str| if project_name.is_empty() { dflt.to_string() } else { project_name.clone() };
 
@@ -1312,6 +1333,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 fmt_real(base)
             ),
         );
+        w.elements.insert(format!("storey/{id}"), entity);
         w.storeys.push(Storey { id, entity, placement });
         storey_entities.push(entity);
     }
@@ -1470,6 +1492,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     format!("{g},#{},$,$,#{opening_entity},#{fill_entity}", w.owner_history),
                 );
                 w.add_to_containment(structure, fill_entity);
+                w.elements.insert(format!("fill/{opening_id}"), fill_entity);
                 for p in &psets {
                     w.add_pset(p, fill_entity, &format!("fill/{opening_id}"));
                 }
@@ -1557,6 +1580,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     stair
                 };
                 w.add_to_containment(structure, entity);
+                w.elements.insert(key.clone(), entity);
                 for p in &psets {
                     w.add_pset(p, entity, &key);
                 }
@@ -1571,6 +1595,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let g = w.gid(&format!("extrusion/{id}"));
                 let entity = w.emit_building_element("IFCBUILDINGELEMENTPROXY", g, "Extrusion", placement, shape, None);
                 w.add_to_containment(structure, entity);
+                w.elements.insert(format!("extrusion/{id}"), entity);
             }
             c if c == REC_SPACE => {
                 let structure = r.structure(n_storeys)?;
@@ -1597,6 +1622,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                         enum_(if external { "EXTERNAL" } else { "INTERNAL" })
                     ),
                 );
+                w.elements.insert(format!("space/{id}"), space);
                 if let Some((_, v)) = w.spaces.iter_mut().find(|(s, _)| *s == structure) {
                     v.push(space);
                 } else {
@@ -1673,6 +1699,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let g = w.gid(&format!("column/{id}"));
                 let entity = w.emit_building_element("IFCCOLUMN", g, &label, placement, shape, Some(enum_("COLUMN")));
                 w.add_to_containment(structure, entity);
+                w.elements.insert(format!("column/{id}"), entity);
                 for p in &psets {
                     w.add_pset(p, entity, &format!("column/{id}"));
                 }
@@ -1694,6 +1721,88 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                         "IFCRELASSOCIATESMATERIAL",
                         format!("{g},#{},$,$,{},#{material}", w.owner_history, refs(&ids)),
                     );
+                }
+            }
+            c if c == REC_CLASSIFICATION => {
+                let name = r.string()?;
+                let source = r.string()?;
+                let edition = r.string()?;
+                let n = r.idx()?;
+                // Je Code in Reihenfolge des ersten Auftretens: (Name der Referenz, Bauteile).
+                let mut by_code: Vec<(String, String, Vec<usize>)> = Vec::new();
+                for _ in 0..n {
+                    let key = r.string()?;
+                    let code = r.string()?;
+                    let ref_name = r.string()?;
+                    if code.is_empty() {
+                        continue; // ohne Code keine Referenz
+                    }
+                    let Some(&entity) = w.elements.get(&key) else { continue };
+                    if let Some((_, _, v)) = by_code.iter_mut().find(|(c, _, _)| *c == code) {
+                        if !v.contains(&entity) {
+                            v.push(entity);
+                        }
+                    } else {
+                        by_code.push((code, ref_name, vec![entity]));
+                    }
+                }
+                if !by_code.is_empty() {
+                    let opt = |s: &str| if s.is_empty() { "$".to_string() } else { ifc_string(s) };
+                    let system = w.add("IFCCLASSIFICATION", format!("{},{},$,{},$,$,$", opt(&source), opt(&edition), ifc_string(&name)));
+                    for (code, ref_name, ids) in by_code {
+                        let reference = w.add(
+                            "IFCCLASSIFICATIONREFERENCE",
+                            format!("$,{},{},#{system},$,$", ifc_string(&code), opt(&ref_name)),
+                        );
+                        let g = w.gid(&format!("classification/{name}/{code}"));
+                        w.add(
+                            "IFCRELASSOCIATESCLASSIFICATION",
+                            format!("{g},#{},$,$,{},#{reference}", w.owner_history, refs(&ids)),
+                        );
+                    }
+                }
+            }
+            c if c == REC_ZONE => {
+                let key = r.string()?;
+                let name = r.string()?;
+                let long_name = r.string()?;
+                let n = r.idx()?;
+                let mut members = Vec::new();
+                for _ in 0..n {
+                    let id = r.string()?;
+                    if let Some(&e) = w.elements.get(&format!("space/{id}")) {
+                        if !members.contains(&e) {
+                            members.push(e);
+                        }
+                    }
+                }
+                let psets = r.psets()?;
+                if members.is_empty() {
+                    continue;
+                }
+                let zone_key = format!("zone/{key}");
+                let g = w.gid(&zone_key);
+                let zone = w.add(
+                    "IFCZONE",
+                    format!("{g},#{},{},$,$,{}", w.owner_history, ifc_string(&name), ifc_string(&long_name)),
+                );
+                let g = w.gid(&format!("{zone_key}/spaces"));
+                w.add(
+                    "IFCRELASSIGNSTOGROUP",
+                    format!("{g},#{},$,$,{},$,#{zone}", w.owner_history, refs(&members)),
+                );
+                w.elements.insert(zone_key.clone(), zone);
+                for p in &psets {
+                    w.add_pset(p, zone, &zone_key);
+                }
+            }
+            c if c == REC_ATTACH => {
+                let key = r.string()?;
+                let psets = r.psets()?;
+                if let Some(&entity) = w.elements.get(&key) {
+                    for p in &psets {
+                        w.add_pset(p, entity, &key);
+                    }
                 }
             }
             other => return Err(format!("unbekannter Datensatz {other} ({}) bei {}", rec_name(other), r.pos - 1)),
@@ -2185,6 +2294,117 @@ mod tests {
     }
 
     /// Zeile der ersten Entität eines Typs.
+    /// Pset-Kodierung mit Einträgen `(Name, Art, Wert)`; Art 0 = IfcIdentifier (Wert = Text), 4 = Fläche.
+    fn put_pset(b: &mut B, name: &str, props: &[(&str, f64, Result<&str, f64>)]) {
+        b.f.push(1.0);
+        b.str(name);
+        b.f.push(props.len() as f64);
+        for (n, kind, v) in props {
+            b.str(n);
+            b.f.push(*kind);
+            match v {
+                Ok(text) => b.str(text),
+                Err(x) => b.f.push(*x),
+            }
+        }
+    }
+
+    /// Klassifikation (eBKP-H), Zone (SIA 416) und Geschoss-Mengen: Entitäten, Zuordnung, dauerhafte GUIDs.
+    #[test]
+    fn klassifikation_zone_und_geschossmengen() {
+        let mut b = full_house(false);
+        b.n(&[REC_ZONE]);
+        b.str("sia416/HNF");
+        b.str("HNF");
+        b.str("Hauptnutzfläche");
+        b.n(&[2.0]);
+        b.str("R1");
+        b.str("R9"); // unbekannt: übersprungen
+        put_pset(&mut b, "CH_Zone", &[("SIA416", 0.0, Ok("HNF"))]);
+        // Zweiter Satz im selben PSETS-Block geht nicht (Zahl steht vorn) — Mengen separat über ATTACH.
+        b.n(&[REC_ATTACH]);
+        b.str("zone/sia416/HNF");
+        put_pset(&mut b, "CH_Qto_SIA416", &[("NetFloorArea", 4.0, Err(1.9))]);
+        b.n(&[REC_ATTACH]);
+        b.str("storey/eg");
+        put_pset(&mut b, "Qto_BuildingStoreyBaseQuantities", &[("GrossFloorArea", 4.0, Err(2.4)), ("NetFloorArea", 4.0, Err(1.9))]);
+        // Zone ohne auflösbaren Raum: nichts schreiben.
+        b.n(&[REC_ZONE]);
+        b.str("sia416/FF");
+        b.str("FF");
+        b.str("Funktionsfläche");
+        b.n(&[1.0]);
+        b.str("R9");
+        b.f.push(0.0);
+        b.n(&[REC_CLASSIFICATION]);
+        b.str("eBKP-H");
+        b.str("CRB");
+        b.str("SN 506 511:2020");
+        b.n(&[6.0]);
+        for (k, code, name) in [
+            ("wall/W1", "C", "Konstruktion Gebäude"),
+            ("wall/W2", "C", "Konstruktion Gebäude"),
+            ("fill/T1", "E", "Äussere Wandbekleidung Gebäude"),
+            ("roof/Ro1", "F", "Bedachung Gebäude"),
+            ("wall/Gibtsnicht", "C", "Konstruktion Gebäude"),
+            ("space/R1", "", ""),
+        ] {
+            b.str(k);
+            b.str(code);
+            b.str(name);
+        }
+        // System ohne auflösbares Bauteil: nicht schreiben.
+        b.n(&[REC_CLASSIFICATION]);
+        b.str("Leer");
+        b.str("");
+        b.str("");
+        b.n(&[1.0]);
+        b.str("wall/nope");
+        b.str("X");
+        b.str("X");
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        assert_eq!(count(&ifc, "IFCCLASSIFICATION"), 1);
+        // Codes C, E, F; der Eintrag ohne Code und der unbekannte Schlüssel fallen weg.
+        assert_eq!(count(&ifc, "IFCCLASSIFICATIONREFERENCE"), 3);
+        assert_eq!(count(&ifc, "IFCRELASSOCIATESCLASSIFICATION"), 3);
+        let sys = first_line(&ifc, "IFCCLASSIFICATION");
+        assert!(sys.contains("'CRB','SN 506 511:2020',$,'eBKP-H',$,$,$"), "{sys}");
+        // Erste Beziehung (Code C): beide Wände.
+        let rel_c = first_line(&ifc, "IFCRELASSOCIATESCLASSIFICATION");
+        assert!(rel_c.contains(",(#") && rel_c.matches(",#").count() + rel_c.matches("(#").count() >= 3, "{rel_c}");
+        assert_eq!(count(&ifc, "IFCZONE"), 1);
+        assert_eq!(count(&ifc, "IFCRELASSIGNSTOGROUP"), 1);
+        let zone = first_line(&ifc, "IFCZONE");
+        assert!(zone.contains(",'HNF',$,$,'Hauptnutzfl\\X2\\00E4\\X0\\che'"), "{zone}");
+        assert!(ifc.contains("'Qto_BuildingStoreyBaseQuantities'"));
+        assert!(ifc.contains("'CH_Qto_SIA416'"));
+        assert!(ifc.contains("'CH_Zone'"));
+        // Dauerhaft: gleiche Eingabe, gleiche Datei.
+        assert_eq!(ifc, build(&b).unwrap());
+    }
+
+    #[test]
+    fn klassifikation_leere_codes_wohlgeformt_und_ohne_zone_nichts() {
+        // Ohne die neuen Datensätze ändert sich nichts: keine Klassifikation, keine Zone.
+        let ifc = build(&full_house(false)).unwrap();
+        assert_eq!(count(&ifc, "IFCCLASSIFICATION"), 0);
+        assert_eq!(count(&ifc, "IFCZONE"), 0);
+        // Abgeschnittene neue Datensätze: Fehler statt Panic.
+        for cut in 1..6 {
+            let mut b = full_house(false);
+            b.n(&[REC_CLASSIFICATION]);
+            b.str("a");
+            b.str("b");
+            b.str("c");
+            b.n(&[3.0]);
+            let n = b.f.len();
+            b.f.truncate(n - cut.min(3));
+            let (f, s) = b.data();
+            let _ = build_ifc(f, &s); // darf Err sein, nie panicken
+        }
+    }
+
     fn first_line<'a>(ifc: &'a str, ty: &str) -> &'a str {
         let head = format!("{ty}(");
         ifc.lines().find(|l| l.split_once('=').is_some_and(|(_, b)| b.starts_with(&head))).unwrap_or_else(|| panic!("{ty} fehlt"))

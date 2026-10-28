@@ -249,7 +249,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ✅ **[41] Massenmodelle.** `analysis/kennzahlen.ts`: GF/aGF je Geschoss, GV aus Körpern.
 - ✅ **[61] Raumprogramm gegen Modell.** `checkRoomProgram`, Editor im Flächenbilanz-Panel (27.10.).
 - ✅ **[62] Kennzahlenleiste.** Flächenbilanz-Panel: GF/aGF/GV/AZ/ÜZ, Parzellenfläche, je Geschoss (27.10.).
-- ◐ **[70] Flächentabellen SIA 416 / IVHB.** SIA-416-Bilanz vorhanden (CSV); IVHB offen. · M
+- ◐ **[70] Flächentabellen SIA 416 / IVHB.** SIA-416-Bilanz vorhanden (CSV); IVHB offen. IFC (28.10., [B5]): SIA-416-Zonen und Geschoss-GF/NGF als Qto im IFC-Export. · M
 - ○ **[42] Varianten.** · L
 - ✅ **[63] Baulinien, Grenzabstände, zulässige Hülle.** (27.10.) Parzelle/Baulinien aus Auswahl,
   Grenzabstand pauschal und je Kante, Gesamthöhe; zulässige Fläche und Verstösse im Grundriss.
@@ -435,6 +435,13 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   Aufschlagrichtung; `openingDir` kommt als „in“ mit gespiegeltem `swing` zurück), 2-flügliges Fenster →
   Typ „Fenster 2-flügl.“. Offen: LEFT/RIGHT nur gegen den eigenen Export geprüft (nicht Revit/ArchiCAD);
   Türen ohne Ausführung bleiben beim Standard (kein Raten aus der Platzierung).
+  (28.10., Klassifikation/Zonen) IfcClassificationReference (Bauteil, sonst Typ; System aus ReferencedSource,
+  IFC4 und IFC2x3) wird gelesen (`Info.classifications`, `IfcProduct.classifications`): Kontext-Meshes
+  tragen sie im Namen (` [eBKP-H C]`), für Wand/Decke/Stütze/Raum gibt es kein Modellfeld (kein neues
+  angelegt) — Zählung in der Import-Meldung (`summary.classified`). IfcZone (IfcRelAssignsToGroup) →
+  SIA-416-Kategorie des Raums, wenn er keine eigene `CH_Raum`-Eigenschaft hat: `CH_Zone.SIA416`, sonst der
+  Zonenname (HNF, NNF, VF, FF, KGF/KF, AGF; kein Raten bei anderen Namen). Rundreise Export → Import
+  geprüft. Offen: Klassifikation als Feld am Bauteil, IfcGrid (Modell ohne Raster).
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit
@@ -498,6 +505,23 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     ist jetzt ein Fehler statt „NaN“ in der Datei. Rundung wie `toFixed(6)` (Gleichstand auf).
     Offen: Laden von pkgFileIo ist beim ersten IFC-Export neu (bisher synchron ohne Wartezeit);
     Export im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · L
+  - ✅ IFC für die Schweizer Praxis (28.10.): (1) Klassifikation als Option im Export-Dialog
+    (`ExportSaveDialog`, CLI `ifc --ebkph --ebenen`): IfcClassification + IfcClassificationReference +
+    IfcRelAssociatesClassification (Rust-Datensatz CLASSIFICATION, eine Beziehung je Code). Das Modell führt
+    KEINEN eBKP-H-/BKP-Code; `categoryCode` ist die Grafik-Ebene. Daher zwei Wege: „eBKP-H-Klassifikation
+    hinzufügen“ = Standardzuordnung auf Hauptgruppen (`export/ifcClassification.ts`; Quelle CRB, eBKP-H,
+    SN 506 511:2020; nur die Buchstaben C Konstruktion Gebäude, E Äussere Wandbekleidung Gebäude, F Bedachung
+    Gebäude): Wand/Decke/Stütze/Treppe = C, Dach = F, Fenster = E, Tür und Raum ohne (Aussen/Innen nicht
+    unterscheidbar, nicht geraten); keine Untergruppen. „Ebene des Modells als Klassifikation“ = System
+    „Dossier-Ebenen“ (Code = `categoryCode`, Name = Ebenenname). (2) Zonen: je vorkommender SIA-416-Kategorie
+    eine IfcZone + IfcRelAssignsToGroup der IfcSpaces (immer, wenn Räume da sind), `CH_Zone.SIA416`,
+    `CH_Qto_SIA416.NetFloorArea`; je Geschoss `Qto_BuildingStoreyBaseQuantities` (GF/NGF) + `CH_Qto_SIA416`
+    (HNF … GF). (3) Achsraster: nicht exportiert, das Modell hat keine Raster-Ressource (nur die Regel „grid“
+    der parametrischen Wände). Geprüft: ifcopenshell (`util.classification.get_references`, Zonen-Mitglieder,
+    Storey-Qtos; validate-ifc 0 Befunde), Rust- und vitest-Tests, GUIDs bleiben stabil. Offen: die eBKP-H-
+    Zuordnung ist ein Vorschlag (Tür, Untergruppen, Aussen-/Innenwand brauchen Modellfelder; Fenster → E und
+    Dach → F sind Entscheide auf Gruppenebene, vom Maintainer/Kostenplaner zu bestätigen); nicht in
+    Revit/ArchiCAD/Solibri geöffnet; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · S
   - ✅ Basismengen für Kostenplanung/Mengenermittlung. (28.10.) `Qto_WallBaseQuantities` (Length, Width, Height,
     GrossSideArea, NetSideArea, GrossVolume, NetVolume), `Qto_SlabBaseQuantities` (Decke und Podest: Width, Perimeter,
     Gross-/NetArea, Gross-/NetVolume), `Qto_RoofBaseQuantities` (GrossArea, NetArea, ProjectedArea),
