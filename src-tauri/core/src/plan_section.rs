@@ -9,6 +9,12 @@
 //! `[m, Eintrag × m]`, Eintrag = `[quelle, istRechteck, uMin, uMax, vMin, vMax]`. `istRechteck` 0 =
 //! Quellband unverändert übernehmen, sonst neues Rechteck mit Stil von `quelle`.
 //!
+//! ## Dach-Schnittspur
+//! `roof_segments(base_x, base_y, u_x, u_y, planes)` mit `planes = [n, (k, x, y, z …) × n]` (Modell
+//! [x, y, Höhe], konvexe Aufsicht-Polygone) → `[m, (tLo, tHi, zOben0, zOben1, cosNeigung) × m]`: die
+//! Spur der senkrechten Schnittebene (Gerade `base + t·u`) je Dachfläche, nach `tLo` sortiert und
+//! gleich geneigte, anstossende Teile verschmolzen (`appendRoofSections`).
+//!
 //! ## Umrisse
 //! `union_outlines(in)` mit `in = [n, (uMin, uMax, vMin, vMax) × n]` → `[r, (k, x, y × k) × r]`.
 
@@ -302,6 +308,123 @@ pub fn union_outlines(inp: &[f64]) -> Vec<f64> {
     f
 }
 
+/// Spur-Abschnitt auf einer Dachfläche.
+#[derive(Clone, Copy)]
+struct RoofSeg {
+    t_lo: f64,
+    t_hi: f64,
+    z_top0: f64,
+    z_top1: f64,
+    cos_theta: f64,
+}
+
+pub fn roof_segments(bx: f64, by: f64, ux: f64, uy: f64, planes: &[f64]) -> Vec<f64> {
+    if [bx, by, ux, uy].iter().any(|v| !v.is_finite()) || planes.iter().any(|v| !v.is_finite()) {
+        return Vec::new();
+    }
+    let Some(&n) = planes.first() else { return Vec::new() };
+    if n < 0.0 || n.fract() != 0.0 {
+        return Vec::new();
+    }
+    let mut segs: Vec<RoofSeg> = Vec::new();
+    let mut i = 1;
+    for _ in 0..n as usize {
+        let Some(&k) = planes.get(i) else { return Vec::new() };
+        if k < 0.0 || k.fract() != 0.0 || i + 1 + 3 * k as usize > planes.len() {
+            return Vec::new();
+        }
+        let k = k as usize;
+        let pts: Vec<[f64; 3]> = (0..k).map(|j| [planes[i + 1 + 3 * j], planes[i + 2 + 3 * j], planes[i + 3 + 3 * j]]).collect();
+        i += 1 + 3 * k;
+        if k < 3 {
+            continue;
+        }
+        let (mut a, mut b, mut c) = (0.0, 0.0, 0.0);
+        for q in 0..k {
+            let cc = pts[q];
+            let d = pts[(q + 1) % k];
+            a += (cc[1] - d[1]) * (cc[2] + d[2]);
+            b += (cc[2] - d[2]) * (cc[0] + d[0]);
+            c += (cc[0] - d[0]) * (cc[1] + d[1]);
+        }
+        if c.abs() < 1e-9 {
+            continue;
+        }
+        let n_len = crate::jsmath::hypot(&[a, b, c]);
+        let cos_theta = c.abs() / if n_len == 0.0 || n_len.is_nan() { 1.0 } else { n_len };
+        let z_at = |x: f64, y: f64| -> f64 { pts[0][2] - (a * (x - pts[0][0]) + b * (y - pts[0][1])) / c };
+        let (mut cx, mut cy) = (0.0, 0.0);
+        for p in &pts {
+            cx += p[0];
+            cy += p[1];
+        }
+        cx /= k as f64;
+        cy /= k as f64;
+        let (mut t_lo, mut t_hi) = (f64::NEG_INFINITY, f64::INFINITY);
+        let mut outside = false;
+        let mut q = 0;
+        while q < k && !outside {
+            let pa = pts[q];
+            let pb = pts[(q + 1) % k];
+            let mut ex = -(pb[1] - pa[1]);
+            let mut ey = pb[0] - pa[0];
+            if ex * (cx - pa[0]) + ey * (cy - pa[1]) < 0.0 {
+                ex = -ex;
+                ey = -ey;
+            }
+            let denom = ex * ux + ey * uy;
+            let dist = ex * (bx - pa[0]) + ey * (by - pa[1]);
+            q += 1;
+            if denom.abs() < 1e-12 {
+                if dist < -1e-9 {
+                    outside = true;
+                }
+                continue;
+            }
+            let t = -dist / denom;
+            if denom > 0.0 {
+                t_lo = max(t_lo, t);
+            } else {
+                t_hi = min(t_hi, t);
+            }
+        }
+        if outside || t_hi - t_lo <= 1e-6 {
+            continue;
+        }
+        let (x0, y0) = (bx + t_lo * ux, by + t_lo * uy);
+        let (x1, y1) = (bx + t_hi * ux, by + t_hi * uy);
+        segs.push(RoofSeg { t_lo, t_hi, z_top0: z_at(x0, y0), z_top1: z_at(x1, y1), cos_theta });
+    }
+    if i != planes.len() {
+        return Vec::new();
+    }
+    segs.sort_by(|p, q| (p.t_lo - q.t_lo).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));
+    let slope = |x: &RoofSeg| (x.z_top1 - x.z_top0) / max(x.t_hi - x.t_lo, 1e-12);
+    let line_z = |x: &RoofSeg, t: f64| x.z_top0 + slope(x) * (t - x.t_lo);
+    let mut merged: Vec<RoofSeg> = Vec::new();
+    for sg in segs {
+        if let Some(last) = merged.last_mut() {
+            if sg.t_lo <= last.t_hi + 1e-6
+                && (line_z(last, sg.t_lo) - sg.z_top0).abs() < 1e-6
+                && (slope(&sg) - slope(last)).abs() < 1e-6
+                && (sg.cos_theta - last.cos_theta).abs() < 1e-6
+            {
+                let hi = max(last.t_hi, sg.t_hi);
+                let z1 = line_z(last, hi);
+                last.z_top1 = z1;
+                last.t_hi = hi;
+                continue;
+            }
+        }
+        merged.push(sg);
+    }
+    let mut f = vec![merged.len() as f64];
+    for m in &merged {
+        f.extend([m.t_lo, m.t_hi, m.z_top0, m.z_top1, m.cos_theta]);
+    }
+    f
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,7 +480,18 @@ mod tests {
     }
 
     #[test]
+    fn pultdach_spur() {
+        // Fläche 0..4 × 0..3, Höhe steigt in x von 3 auf 4 (Neigung 1/4); Schnitt entlang x bei y = 1.
+        let planes = [1.0, 4.0, 0.0, 0.0, 3.0, 4.0, 0.0, 4.0, 4.0, 3.0, 4.0, 0.0, 3.0, 3.0];
+        let f = roof_segments(-1.0, 1.0, 1.0, 0.0, &planes);
+        assert_eq!(f[0], 1.0);
+        assert_eq!((f[1], f[2]), (1.0, 5.0));
+        assert!((f[3] - 3.0).abs() < 1e-12 && (f[4] - 4.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn unsinn_ist_leer() {
+        assert!(roof_segments(f64::NAN, 0.0, 1.0, 0.0, &[0.0]).is_empty());
         assert!(dominant_bands(&[f64::NAN]).is_empty());
         assert!(dominant_bands(&[2.0, 1.0]).is_empty());
         assert!(union_outlines(&[1.0, f64::NAN, 1.0, 0.0, 1.0]).is_empty());

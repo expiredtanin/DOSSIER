@@ -875,7 +875,6 @@ export function appendRoofSections(
   // plane.point[0]=x, plane.point[2]=y; u-Achse = (−nz, nx) (s. section.rs).
   const base: Vec2 = { x: plane.point[0], y: plane.point[2] };
   const uDir = sectionUAxisModel(plane);
-  const EPS_U = 1e-6;
 
   roofs.forEach((roof, index) => {
     const eavesZ = roofBaseElevation(project, roof);
@@ -884,100 +883,19 @@ export function appendRoofSections(
     const totalT = layers.reduce((s, l) => s + Math.max(0, l.thickness), 0);
     if (totalT <= 1e-9) return;
 
-    const segs: Array<{ tLo: number; tHi: number; zTop0: number; zTop1: number; cosTheta: number }> = [];
-    for (const pl of geo.planes) {
-      const pts = pl.pts;
-      if (pts.length < 3) continue;
-      // Ebenengleichung z = z0 − (A(x−x0)+B(y−y0))/C über die Newell-Normale.
-      let A = 0;
-      let B = 0;
-      let C = 0;
-      for (let i = 0; i < pts.length; i++) {
-        const c = pts[i];
-        const d = pts[(i + 1) % pts.length];
-        A += (c[1] - d[1]) * (c[2] + d[2]);
-        B += (c[2] - d[2]) * (c[0] + d[0]);
-        C += (c[0] - d[0]) * (c[1] + d[1]);
-      }
-      if (Math.abs(C) < 1e-9) continue; // (nahezu) vertikale Fläche — kein Flächenschnitt
-      const nLen = Math.hypot(A, B, C);
-      const cosTheta = Math.abs(C) / (nLen || 1);
-      const zAt = (x: number, y: number): number =>
-        pts[0][2] - (A * (x - pts[0][0]) + B * (y - pts[0][1])) / C;
-
-      // Cyrus–Beck: Gerade base + t·uDir gegen das konvexe Aufsichts-Polygon.
-      // Orientierungsunabhängig: Innenseite je Kante über den Polygon-Schwerpunkt.
-      let cx = 0;
-      let cy = 0;
-      for (const p of pts) {
-        cx += p[0];
-        cy += p[1];
-      }
-      cx /= pts.length;
-      cy /= pts.length;
-      let tLo = -Infinity;
-      let tHi = Infinity;
-      let outside = false;
-      for (let i = 0; i < pts.length && !outside; i++) {
-        const a = pts[i];
-        const b = pts[(i + 1) % pts.length];
-        // Kanten-Normale, zum Schwerpunkt orientiert (Innenseite).
-        let ex = -(b[1] - a[1]);
-        let ey = b[0] - a[0];
-        if (ex * (cx - a[0]) + ey * (cy - a[1]) < 0) {
-          ex = -ex;
-          ey = -ey;
-        }
-        const denom = ex * uDir.x + ey * uDir.y;
-        const dist = ex * (base.x - a[0]) + ey * (base.y - a[1]);
-        if (Math.abs(denom) < 1e-12) {
-          if (dist < -1e-9) outside = true; // parallel ausserhalb
-          continue;
-        }
-        const t = -dist / denom;
-        if (denom > 0) tLo = Math.max(tLo, t);
-        else tHi = Math.min(tHi, t);
-      }
-      if (outside || tHi - tLo <= EPS_U) continue;
-
-      const q = (t: number): Vec2 => ({ x: base.x + t * uDir.x, y: base.y + t * uDir.y });
-      const p0 = q(tLo);
-      const p1 = q(tHi);
-      const zTop0 = zAt(p0.x, p0.y);
-      const zTop1 = zAt(p1.x, p1.y);
-
-      segs.push({
-        tLo,
-        tHi,
-        zTop0,
-        zTop1,
-        cosTheta,
-      });
+    // Spur der Schnittebene auf den Dachflächen (Cyrus–Beck gegen die konvexen Aufsichten, lineare
+    // Oberkante), gleich geneigte anstossende Teile zu EINEM Band vereint — sonst stünde an der
+    // Naht eine senkrechte Linie. Rechnet der Kern (`plan_section.rs`).
+    const pl: number[] = [geo.planes.length];
+    for (const plane of geo.planes) {
+      pl.push(plane.pts.length);
+      for (const p of plane.pts) pl.push(p[0], p[1], p[2]);
     }
-
-    // Aneinanderstossende/überlappende Bänder, deren Oberkante in einer Geraden weiterläuft und die gleiche
-    // Dicke haben (z. B. Teilflächen EINER Ebene aus der konvexen Zerlegung, oder zwei
-    // Flächen, die genau an der Schnittspur anstossen), zu EINEM Band vereinen — sonst
-    // steht an der Naht eine senkrechte Linie.
-    segs.sort((p, q) => p.tLo - q.tLo);
-    const merged: typeof segs = [];
-    for (const sg of segs) {
-      const last = merged[merged.length - 1];
-      const slope = (x: typeof sg) => (x.zTop1 - x.zTop0) / Math.max(x.tHi - x.tLo, 1e-12);
-      const lineZ = (x: typeof sg, t: number) => x.zTop0 + slope(x) * (t - x.tLo);
-      if (
-        last &&
-        sg.tLo <= last.tHi + 1e-6 && // anstossend ODER überlappend
-        Math.abs(lineZ(last, sg.tLo) - sg.zTop0) < 1e-6 &&
-        Math.abs(slope(sg) - slope(last)) < 1e-6 &&
-        Math.abs(sg.cosTheta - last.cosTheta) < 1e-6
-      ) {
-        const hi = Math.max(last.tHi, sg.tHi);
-        last.zTop1 = lineZ(last, hi);
-        last.tHi = hi;
-      } else {
-        merged.push({ ...sg });
-      }
+    const sg = core().section_roof_segments_flat(base.x, base.y, uDir.x, uDir.y, Float64Array.from(pl));
+    const merged: Array<{ tLo: number; tHi: number; zTop0: number; zTop1: number; cosTheta: number }> = [];
+    for (let k = 0; k < (sg[0] ?? 0); k++) {
+      const o = 1 + 5 * k;
+      merged.push({ tLo: sg[o], tHi: sg[o + 1], zTop0: sg[o + 2], zTop1: sg[o + 3], cosTheta: sg[o + 4] });
     }
 
     for (const { tLo, tHi, zTop0, zTop1, cosTheta } of merged) {
