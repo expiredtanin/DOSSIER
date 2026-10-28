@@ -29,8 +29,13 @@
 
 import type { LayerCategory, Project } from "../model/types";
 
-/** Optionen der Klassifikation im IFC-Export. */
+/** IFC-Schema der Ausgabe: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0, TC1). */
+export type IfcSchema = "IFC4" | "IFC2X3";
+
+/** Optionen des IFC-Exports: Schema und Klassifikation. */
 export interface IfcExportOptions {
+  /** Schema der Datei; ohne Angabe IFC4. */
+  schema?: IfcSchema;
   /** eBKP-H-Hauptgruppen je Bauteilart (Standardzuordnung, s. Dateikopf). */
   ebkph?: boolean;
   /** `categoryCode` (Ebene) des Modells als System „Dossier-Ebenen". */

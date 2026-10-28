@@ -1,4 +1,4 @@
-// IFC4-Schreiber ([B5], Port von `src/export/exportIfc.ts`): erzeugt aus einer flachen Bauteilliste die
+// IFC4-/IFC2x3-Schreiber ([B5], Port von `src/export/exportIfc.ts`): erzeugt aus einer flachen Bauteilliste die
 // STEP-Datei (ISO 10303-21). TS sammelt aus Projekt und Plan (Wand-Bänder, Öffnungen, Dach-Meshes,
 // Raumflächen, Georeferenz — alles Geometrie, die im TS-Modell lebt) und gibt sie fertig gerechnet
 // weiter; Rust vergibt die Entitätsnummern und baut die Entitäten, GUIDs, Typen mit Materialschichten,
@@ -10,7 +10,8 @@
 //
 //   [FLAT_VERSION, META, Datensatz, Datensatz, …]
 //   META     = project_id, project_name, now (Sekunden, ganzzahlig), iso (Zeitstempel, Text), has_geo (0/1),
-//              ref_elevation (NaN = keine), n_storeys, (id, name, base) × n_storeys
+//              ref_elevation (NaN = keine), ref_lat, ref_lon (WGS84-Grad, NaN = keine; nur IFC2x3),
+//              schema (0 = IFC4, 1 = IFC2x3), n_storeys, (id, name, base) × n_storeys
 //   PTS      = n, x0, y0, …, x(n−1), y(n−1)                   (Profil, offen; Rust schliesst es)
 //   MESH     = n_verts, x, y, z, …, n_tris, i0, i1, i2, …, closed (0/1)      (Indizes 0-basiert)
 //   TYPEREF  = has (0/1); wenn 1: kind (0 Wand, 1 Decke, 2 Dach), type_id, type_name, predefined (Text),
@@ -73,6 +74,13 @@
 //                 übersprungen, ohne Raum keine Zone). GlobalId aus `zone/<key>`; Psets/Mengen wie bei Bauteilen.
 //   ATTACH      = 14, key, PSETS   (Psets/Mengen an ein schon geschriebenes Bauteil/Geschoss, Schlüssel wie oben)
 //
+// Schema IFC2x3 (Coordination View 2.0, TC1; [B5] 28.10.): gleiche Datensätze, GUIDs, Psets und Mengen, aber
+// die Entitäten des Schemas — Netze als IfcFacetedBrep (dicht) bzw. IfcShellBasedSurfaceModel (offen) statt
+// IfcTriangulatedFaceSet, IfcWallStandardCase für Wände mit IfcMaterialLayerSetUsage, IfcDoorStyle/
+// IfcWindowStyle statt OperationType am Bauteil, Dachschichten direkt am Dach (es gibt keinen IfcRoofType),
+// Georeferenz als IfcSite.RefLatitude/RefLongitude plus ePSet_ProjectedCRS/ePSet_MapConversion am IfcProject,
+// IfcPresentationStyleAssignment um die Oberflächenstile, Attributlisten nach IFC2X3_TC1.
+//
 // Danach folgen (am Pufferende) Typ-Zuordnungen, Eigenschaftssätze, räumliche Eingliederung und Fuss.
 //
 // Fehlerverhalten: ein kaputter Puffer (falsche Version, unbekannter Datensatz, abgeschnitten, Index
@@ -87,7 +95,15 @@ use std::collections::HashMap;
 use crate::ifc_openings::{fill_geometry, DoorKind, FillParams, FillPart, Sash, MAX_SASHES};
 
 /// Version der flachen Kodierung (erstes Element des Puffers). 3 seit 28.10.: Basismengen (Pset-Arten 3–5), Deckenaussparungen, Treppen mit Läufen.
-pub const FLAT_VERSION: f64 = 3.0;
+/// 4 seit 28.10.: Schema-Wahl und Breite/Länge im META.
+pub const FLAT_VERSION: f64 = 4.0;
+
+/// IFC-Schema der Ausgabe.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Schema {
+    Ifc4,
+    Ifc2x3,
+}
 
 pub const REC_WALL_SOLIDS: f64 = 1.0;
 pub const REC_WALL_MESH: f64 = 2.0;
@@ -774,6 +790,7 @@ struct TypeAcc {
 /// Entitäten-Schreiber mit allem Zustand, den die TS-Fassung in Closures hielt.
 struct Builder {
     lines: Vec<String>,
+    schema: Schema,
     project_id: String,
     owner_history: usize,
     context: usize,
@@ -801,9 +818,16 @@ struct Builder {
     column_materials: Vec<(String, String, Vec<usize>)>,
     /// Bauteil-Schlüssel (wie für die GlobalId, z. B. `wall/<id>`) → Entität; Ziel von Klassifikation/Zone/Attach.
     elements: HashMap<String, usize>,
+    /// IFC2x3: Türen/Fenster je (Tür?, Ausführung) → Bauteile; am Ende je ein IfcDoorStyle/IfcWindowStyle.
+    fill_styles: Vec<(bool, String, Vec<usize>)>,
 }
 
 impl Builder {
+    /// Ausgabe im Schema IFC2x3?
+    fn v2(&self) -> bool {
+        self.schema == Schema::Ifc2x3
+    }
+
     /// Schreibt eine neue Entity-Zeile und liefert ihre Nummer.
     fn add(&mut self, ty: &str, params: String) -> usize {
         let id = self.lines.len() + 1;
@@ -942,10 +966,12 @@ impl Builder {
                 "IFCSURFACESTYLERENDERING",
                 format!("#{colour},{},$,$,$,$,$,$,{}", fmt_real(transparency), enum_("NOTDEFINED")),
             );
-            self.styles[role] = self.add(
+            let style = self.add(
                 "IFCSURFACESTYLE",
                 format!("{},{},{}", ifc_string(name), enum_("BOTH"), refs(&[rendering])),
             );
+            // IFC2x3: IfcStyledItem.Styles verlangt IfcPresentationStyleAssignment (in IFC4 direkt der Stil).
+            self.styles[role] = if self.v2() { self.add("IFCPRESENTATIONSTYLEASSIGNMENT", refs(&[style])) } else { style };
         }
         self.styles[role]
     }
@@ -1013,9 +1039,20 @@ impl Builder {
         (placement, shape)
     }
 
-    /// Dreiecks-Mesh als IfcTriangulatedFaceSet + Shape + Placement (Punkte tragen die Geometrie absolut
-    /// im Rahmen der Trägerstruktur).
+    /// Dreiecks-Mesh als IfcTriangulatedFaceSet (IFC2x3: IfcFacetedBrep bzw. IfcShellBasedSurfaceModel) +
+    /// Shape + Placement (Punkte tragen die Geometrie absolut im Rahmen der Trägerstruktur).
     fn emit_triangulated_product(&mut self, mesh: &Mesh, relative_to: usize) -> (usize, usize) {
+        let (item, rep_type) = if self.v2() { self.emit_face_brep(mesh) } else { (self.emit_face_set(mesh), "Tessellation") };
+        let rep = self.add(
+            "IFCSHAPEREPRESENTATION",
+            format!("#{},{},{},{}", self.context, ifc_string("Body"), ifc_string(rep_type), refs(&[item])),
+        );
+        let shape = self.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[rep])));
+        let placement = self.emit_placement(0.0, relative_to);
+        (placement, shape)
+    }
+
+    fn emit_face_set(&mut self, mesh: &Mesh) -> usize {
         let coords: Vec<String> = mesh
             .positions
             .chunks_exact(3)
@@ -1029,26 +1066,54 @@ impl Builder {
             .collect();
         // Closed=.T. nur, wenn TS das Mesh als dichtes, aussen orientiertes Volumen geprüft hat.
         let closed = if mesh.closed { ".T." } else { "$" };
-        let face_set = self.add("IFCTRIANGULATEDFACESET", format!("#{point_list},$,{closed},({}),$", tris.join(",")));
-        let rep = self.add(
-            "IFCSHAPEREPRESENTATION",
-            format!("#{},{},{},{}", self.context, ifc_string("Body"), ifc_string("Tessellation"), refs(&[face_set])),
-        );
-        let shape = self.add("IFCPRODUCTDEFINITIONSHAPE", format!("$,$,{}", refs(&[rep])));
-        let placement = self.emit_placement(0.0, relative_to);
-        (placement, shape)
+        self.add("IFCTRIANGULATEDFACESET", format!("#{point_list},$,{closed},({}),$", tris.join(",")))
     }
 
-    /// IfcBuildingElement-Subtyp mit dem üblichen 9-Attribut-Flatten.
+    /// IFC2x3: ein IfcCartesianPoint je Ecke, je Dreieck IfcPolyLoop → IfcFaceOuterBound → IfcFace. Dichtes,
+    /// aussen orientiertes Netz = IfcFacetedBrep über IfcClosedShell, sonst IfcShellBasedSurfaceModel über
+    /// IfcOpenShell. Dreiecke mit doppelter Ecke (ohne Fläche) entfallen. Liefert (Körper, Darstellungsart).
+    fn emit_face_brep(&mut self, mesh: &Mesh) -> (usize, &'static str) {
+        let points: Vec<usize> = mesh
+            .positions
+            .chunks_exact(3)
+            .map(|c| self.add("IFCCARTESIANPOINT", list(&[fmt_real(c[0]), fmt_real(c[1]), fmt_real(c[2])])))
+            .collect();
+        let mut faces = Vec::with_capacity(mesh.indices.len() / 3);
+        for c in mesh.indices.chunks_exact(3) {
+            if c[0] == c[1] || c[1] == c[2] || c[0] == c[2] {
+                continue;
+            }
+            let poly_loop = self.add("IFCPOLYLOOP", refs(&[points[c[0]], points[c[1]], points[c[2]]]));
+            let bound = self.add("IFCFACEOUTERBOUND", format!("#{poly_loop},.T."));
+            faces.push(self.add("IFCFACE", refs(&[bound])));
+        }
+        if mesh.closed {
+            let shell = self.add("IFCCLOSEDSHELL", refs(&faces));
+            (self.add("IFCFACETEDBREP", format!("#{shell}")), "Brep")
+        } else {
+            let shell = self.add("IFCOPENSHELL", refs(&faces));
+            (self.add("IFCSHELLBASEDSURFACEMODEL", refs(&[shell])), "SurfaceModel")
+        }
+    }
+
+    /// Menge (IfcQuantityLength/Area/Volume): IFC4 hat zusätzlich `Formula`.
+    fn emit_quantity(&mut self, ty: &str, name: &str, value: f64) -> usize {
+        let formula = if self.v2() { "" } else { ",$" };
+        self.add(ty, format!("{},$,$,{}{formula}", ifc_string(name), fmt_real(value)))
+    }
+
+    /// IfcBuildingElement-Subtyp mit dem üblichen 9-Attribut-Flatten. Das letzte Attribut ist in IFC4 die
+    /// PredefinedType, in IFC2x3 je Klasse ShapeType/PredefinedType/CompositionType; IfcWall und IfcColumn
+    /// haben es dort nicht.
     fn emit_building_element(&mut self, ty: &str, guid: String, name: &str, placement: usize, shape: usize, predefined: Option<String>) -> usize {
+        let last = if self.v2() && matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCCOLUMN") {
+            String::new()
+        } else {
+            format!(",{}", predefined.as_deref().unwrap_or("$"))
+        };
         self.add(
             ty,
-            format!(
-                "{guid},#{},{},$,$,#{placement},#{shape},$,{}",
-                self.owner_history,
-                ifc_string(name),
-                predefined.as_deref().unwrap_or("$")
-            ),
+            format!("{guid},#{},{},$,$,#{placement},#{shape},${last}", self.owner_history, ifc_string(name)),
         )
     }
 
@@ -1057,7 +1122,7 @@ impl Builder {
         if let Some(&id) = self.materials.get(component_id) {
             return id;
         }
-        let id = self.add("IFCMATERIAL", format!("{},$,$", ifc_string(component_name)));
+        let id = self.add("IFCMATERIAL", if self.v2() { ifc_string(component_name) } else { format!("{},$,$", ifc_string(component_name)) });
         self.materials.insert(component_id.to_string(), id);
         id
     }
@@ -1072,21 +1137,34 @@ impl Builder {
         for l in &t.layers {
             let m = self.material_of(&l.component_id, &l.component_name);
             let thickness = if l.thickness.is_finite() { l.thickness.max(0.0) } else { 0.0 };
-            layer_ids.push(self.add("IFCMATERIALLAYER", format!("#{m},{},$,$,$,$,$", fmt_real(thickness))));
+            let layer = if self.v2() { format!("#{m},{},$", fmt_real(thickness)) } else { format!("#{m},{},$,$,$,$,$", fmt_real(thickness)) };
+            layer_ids.push(self.add("IFCMATERIALLAYER", layer));
         }
+        // IFC2x3 kennt keinen IfcRoofType: das Dach bekommt nur die Schichten (direkt am Bauteil, s. `build_ifc`).
+        let no_type = self.v2() && t.kind == TypeKind::Roof;
         let guid = self.gid(&key);
-        let type_id = self.add(
-            t.kind.ifc(),
-            format!("{guid},#{},{},$,$,$,$,$,$,{}", self.owner_history, ifc_string(&t.name), enum_(&t.predefined)),
-        );
+        let type_id = if no_type {
+            0
+        } else {
+            self.add(
+                t.kind.ifc(),
+                format!("{guid},#{},{},$,$,$,$,$,$,{}", self.owner_history, ifc_string(&t.name), enum_(&t.predefined)),
+            )
+        };
         let mut layer_set = 0;
         if !layer_ids.is_empty() {
-            let set = self.add("IFCMATERIALLAYERSET", format!("{},{},$", refs(&layer_ids), ifc_string(&t.name)));
-            let rel_guid = self.gid(&format!("{key}/material"));
-            self.add(
-                "IFCRELASSOCIATESMATERIAL",
-                format!("{rel_guid},#{},$,$,{},#{set}", self.owner_history, refs(&[type_id])),
-            );
+            let set = if self.v2() {
+                self.add("IFCMATERIALLAYERSET", format!("{},{}", refs(&layer_ids), ifc_string(&t.name)))
+            } else {
+                self.add("IFCMATERIALLAYERSET", format!("{},{},$", refs(&layer_ids), ifc_string(&t.name)))
+            };
+            if !no_type {
+                let rel_guid = self.gid(&format!("{key}/material"));
+                self.add(
+                    "IFCRELASSOCIATESMATERIAL",
+                    format!("{rel_guid},#{},$,$,{},#{set}", self.owner_history, refs(&[type_id])),
+                );
+            }
             layer_set = set;
         }
         self.type_index.insert(key.clone(), self.types.len());
@@ -1150,7 +1228,20 @@ fn rec_name(code: f64) -> &'static str {
     }
 }
 
-/// Baut aus dem flachen Puffer die STEP-Datei (IFC4). Fehler als Text.
+/// Winkel in Grad als IfcCompoundPlaneAngleMeasure `(Grad,Minuten,Sekunden,Millionstel)`; alle Glieder tragen das
+/// Vorzeichen des Winkels. `limit` = Betragsgrenze (90 Breite, 180 Länge), darüber wird geklemmt.
+fn compound_angle(deg: f64, limit: f64) -> String {
+    let neg = deg < 0.0;
+    // In Millionstel Bogensekunden runden (ganzzahlig), dann zerlegen — so gibt es keine Überträge von 60.
+    let total = (deg.abs().min(limit) * 3600.0 * 1_000_000.0).round() as i64;
+    let micro = total % 1_000_000;
+    let secs = total / 1_000_000;
+    let (d, m, s) = (secs / 3600, (secs / 60) % 60, secs % 60);
+    let sg = if neg { -1 } else { 1 };
+    format!("({},{},{},{})", sg * d, sg * m, sg * s, sg * micro)
+}
+
+/// Baut aus dem flachen Puffer die STEP-Datei (IFC4 oder IFC2x3, je nach META). Fehler als Text.
 pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     let mut r = Reader { buf: flat, pos: 0, strings: strings.split('\0').collect() };
     let version = r.raw()?;
@@ -1168,6 +1259,12 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     let iso = r.string()?;
     let has_geo = r.flag()?;
     let ref_elevation = r.raw()?;
+    let (ref_lat, ref_lon) = (r.raw()?, r.raw()?);
+    let schema = match r.idx()? {
+        0 => Schema::Ifc4,
+        1 => Schema::Ifc2x3,
+        k => return Err(format!("unbekanntes Schema {k} bei {}", r.pos - 1)),
+    };
     let n_storeys = r.idx()?;
     let mut storey_defs = Vec::new();
     for _ in 0..n_storeys {
@@ -1179,6 +1276,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
 
     let mut w = Builder {
         lines: Vec::new(),
+        schema,
         project_id,
         owner_history: 0,
         context: 0,
@@ -1200,7 +1298,9 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         spaces: Vec::new(),
         column_materials: Vec::new(),
         elements: HashMap::new(),
+        fill_styles: Vec::new(),
     };
+    let v2 = schema == Schema::Ifc2x3;
     let pname = |dflt: &str| if project_name.is_empty() { dflt.to_string() } else { project_name.clone() };
 
     // Geteilte Grundgeometrie: Ursprung, Z-Extrusionsrichtung, Identitäts-Placement.
@@ -1210,7 +1310,11 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
 
     // Owner-History (minimal, aber vorhanden — manche Importer verlangen sie).
     let org = w.add("IFCORGANIZATION", format!("$,{},$,$,$", ifc_string("dossier")));
-    let person = w.add("IFCPERSON", format!("{},$,$,$,$,$,$,$", ifc_string("dossier")));
+    // IFC2x3 verlangt FamilyName oder GivenName (WR1), IFC4 genügt die Kennung.
+    let person = w.add(
+        "IFCPERSON",
+        if v2 { format!("{0},{0},$,$,$,$,$,$", ifc_string("dossier")) } else { format!("{},$,$,$,$,$,$,$", ifc_string("dossier")) },
+    );
     let person_org = w.add("IFCPERSONANDORGANIZATION", format!("#{person},#{org},$"));
     let app = w.add(
         "IFCAPPLICATION",
@@ -1239,8 +1343,9 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     );
 
     // Georeferenz: Geometrie liegt schon in LV95-Weltkoordinaten (TS), die Abbildung ist die Identität;
-    // das Koordinatensystem wird trotzdem deklariert (IFC4 IfcProjectedCRS + IfcMapConversion).
-    if has_geo {
+    // das Koordinatensystem wird trotzdem deklariert (IFC4 IfcProjectedCRS + IfcMapConversion; IFC2x3 kennt
+    // beide nicht und bekommt ePSet_ProjectedCRS/ePSet_MapConversion am IfcProject, s. unten).
+    if has_geo && !v2 {
         let crs = w.add(
             "IFCPROJECTEDCRS",
             format!(
@@ -1284,11 +1389,17 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     );
     // RefElevation (m ü. M.): rein informativ, die Geometrie wird nicht verschoben.
     let site_ref_elev = if ref_elevation.is_finite() { fmt_real(ref_elevation) } else { "$".to_string() };
+    // IFC2x3: Breite/Länge des Bezugspunkts (WGS84) als IfcCompoundPlaneAngleMeasure; IFC4 trägt sie im CRS.
+    let (site_lat, site_lon) = if v2 && has_geo && ref_lat.is_finite() && ref_lon.is_finite() {
+        (compound_angle(ref_lat, 90.0), compound_angle(ref_lon, 180.0))
+    } else {
+        ("$".to_string(), "$".to_string())
+    };
     let g = w.gid("site");
     let site_entity = w.add(
         "IFCSITE",
         format!(
-            "{g},#{},{},$,$,#{site_placement},$,$,{},$,$,{site_ref_elev},$,$",
+            "{g},#{},{},$,$,#{site_placement},$,$,{},{site_lat},{site_lon},{site_ref_elev},$,$",
             w.owner_history,
             ifc_string("Standort"),
             enum_("ELEMENT")
@@ -1315,6 +1426,38 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         "IFCRELAGGREGATES",
         format!("{g},#{},$,$,#{site_entity},{}", w.owner_history, refs(&[w.building_entity])),
     );
+
+    // IFC2x3-Georeferenz (Konvention buildingSMART): Koordinatensystem und Abbildung als Eigenschaftssätze am
+    // IfcProject. Die Geometrie liegt schon in LV95, die Abbildung ist die Identität.
+    if v2 && has_geo {
+        let txt = |name: &str, ty: &str, v: &str| (name.to_string(), format!("{ty}({})", ifc_string(v)));
+        let num = |name: &str, ty: &str, v: f64| (name.to_string(), format!("{ty}({})", fmt_real(v)));
+        let crs = [
+            txt("Name", "IFCLABEL", "EPSG:2056"),
+            txt("Description", "IFCTEXT", "CH1903+ / LV95"),
+            txt("GeodeticDatum", "IFCIDENTIFIER", "CH1903+"),
+            txt("MapProjection", "IFCIDENTIFIER", "Swiss Oblique Mercator"),
+            txt("MapUnit", "IFCLABEL", "METRE"),
+        ];
+        let conversion = [
+            num("Eastings", "IFCLENGTHMEASURE", 0.0),
+            num("Northings", "IFCLENGTHMEASURE", 0.0),
+            num("OrthogonalHeight", "IFCLENGTHMEASURE", 0.0),
+            num("XAxisAbscissa", "IFCREAL", 1.0),
+            num("XAxisOrdinate", "IFCREAL", 0.0),
+            num("Scale", "IFCREAL", 1.0),
+        ];
+        for (set, props) in [("ePSet_ProjectedCRS", &crs[..]), ("ePSet_MapConversion", &conversion[..])] {
+            let ids: Vec<usize> = props
+                .iter()
+                .map(|(n, v)| w.add("IFCPROPERTYSINGLEVALUE", format!("{},$,{v},$", ifc_string(n))))
+                .collect();
+            let g = w.gid(&format!("project/{set}"));
+            let pset = w.add("IFCPROPERTYSET", format!("{g},#{},{},$,{}", w.owner_history, ifc_string(set), refs(&ids)));
+            let g = w.gid(&format!("project/{set}/rel"));
+            w.add("IFCRELDEFINESBYPROPERTIES", format!("{g},#{},$,$,{},#{pset}", w.owner_history, refs(&[project_entity])));
+        }
+    }
 
     // Je Geschoss ein IfcBuildingStorey (Elevation = base).
     let mut storey_entities = Vec::new();
@@ -1380,7 +1523,10 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 } else {
                     (w.emit_placement(0.0, parent), w.emit_swept_shape(&solids))
                 };
-                let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
+                // IFC2x3: IfcWallStandardCase verlangt genau eine IfcMaterialLayerSetUsage (WR1) — nur dann.
+                let standard = v2 && has_frame && usage && ty.as_ref().is_some_and(|t| !t.layers.is_empty());
+                let class = if standard { "IFCWALLSTANDARDCASE" } else { "IFCWALL" };
+                let entity = w.finish_typed(class, format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
                 if has_frame && usage {
                     // Schichten des Typs der Wandachse zuordnen: erste Schicht (aussen) liegt bei `offset`
                     // von der Achse, die übrigen folgen in +Y (linke Normale).
@@ -1388,7 +1534,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     if let Some(set) = set {
                         let u = w.add(
                             "IFCMATERIALLAYERSETUSAGE",
-                            format!("#{set},{},{},{},$", enum_("AXIS2"), enum_("POSITIVE"), fmt_real(offset)),
+                            format!("#{set},{},{},{}{}", enum_("AXIS2"), enum_("POSITIVE"), fmt_real(offset), if v2 { "" } else { ",$" }),
                         );
                         let g = w.gid(&format!("wall/{id}/material"));
                         w.add(
@@ -1458,10 +1604,10 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let opening_entity = w.add(
                     "IFCOPENINGELEMENT",
                     format!(
-                        "{g},#{},{},$,$,#{opening_placement},#{opening_shape},$,{}",
+                        "{g},#{},{},$,$,#{opening_placement},#{opening_shape},${}",
                         w.owner_history,
                         ifc_string(if is_door { "Türöffnung" } else { "Fensteröffnung" }),
-                        enum_("OPENING")
+                        if v2 { String::new() } else { format!(",{}", enum_("OPENING")) }
                     ),
                 );
                 let g = w.gid(&format!("voids/{opening_id}"));
@@ -1475,17 +1621,27 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let fill_shape = if parts.is_empty() { "$".to_string() } else { format!("#{}", w.emit_parts_shape(&parts, &fill_frame)) };
                 let g = w.gid(&format!("fill/{opening_id}"));
                 let operation = kind.map(enum_).unwrap_or_else(|| "$".to_string());
+                // IFC4: PredefinedType, OperationType/PartitioningType, UserDefined… am Bauteil; IFC2x3 hat nur
+                // Höhe und Breite — die Ausführung steht im IfcDoorStyle/IfcWindowStyle (`fill_styles`).
+                let tail = if v2 { String::new() } else { format!(",{},{operation},$", enum_(if is_door { "DOOR" } else { "WINDOW" })) };
                 let fill_entity = w.add(
                     if is_door { "IFCDOOR" } else { "IFCWINDOW" },
                     format!(
-                        "{g},#{},{},$,$,#{fill_placement},{fill_shape},$,{},{},{},{operation},$",
+                        "{g},#{},{},$,$,#{fill_placement},{fill_shape},$,{},{}{tail}",
                         w.owner_history,
                         ifc_string(&fill_name),
                         fmt_real(depth),
-                        fmt_real(width),
-                        enum_(if is_door { "DOOR" } else { "WINDOW" })
+                        fmt_real(width)
                     ),
                 );
+                if v2 {
+                    let op = kind.unwrap_or("NOTDEFINED").to_string();
+                    if let Some((_, _, v)) = w.fill_styles.iter_mut().find(|(d, o, _)| *d == is_door && *o == op) {
+                        v.push(fill_entity);
+                    } else {
+                        w.fill_styles.push((is_door, op, vec![fill_entity]));
+                    }
+                }
                 let g = w.gid(&format!("fills/{opening_id}"));
                 w.add(
                     "IFCRELFILLSELEMENT",
@@ -1537,17 +1693,18 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                         };
                         let fkey = format!("{key}/flight/{k}");
                         let guid = w.gid(&fkey);
+                        // IFC2x3: NumberOfRiser, keine PredefinedType.
+                        let flight_type = if v2 { String::new() } else { format!(",{}", enum_(&f.predefined)) };
                         let flight = w.add(
                             "IFCSTAIRFLIGHT",
                             format!(
-                                "{guid},#{},{},$,$,#{placement},#{shape},$,{},{},{},{},{}",
+                                "{guid},#{},{},$,$,#{placement},#{shape},$,{},{},{},{}{flight_type}",
                                 w.owner_history,
                                 ifc_string(&f.name),
                                 f.risers,
                                 f.treads,
                                 fmt_real(f.riser_height),
-                                fmt_real(f.tread_length),
-                                enum_(&f.predefined)
+                                fmt_real(f.tread_length)
                             ),
                         );
                         for p in &f.psets {
@@ -1628,9 +1785,9 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 } else {
                     w.spaces.push((structure, vec![space]));
                 }
-                let q_net = w.add("IFCQUANTITYAREA", format!("{},$,$,{},$", ifc_string("NetFloorArea"), fmt_real(net)));
-                let q_gross = w.add("IFCQUANTITYAREA", format!("{},$,$,{},$", ifc_string("GrossFloorArea"), fmt_real(gross)));
-                let q_height = w.add("IFCQUANTITYLENGTH", format!("{},$,$,{},$", ifc_string("Height"), fmt_real(height)));
+                let q_net = w.emit_quantity("IFCQUANTITYAREA", "NetFloorArea", net);
+                let q_gross = w.emit_quantity("IFCQUANTITYAREA", "GrossFloorArea", gross);
+                let q_height = w.emit_quantity("IFCQUANTITYLENGTH", "Height", height);
                 let g = w.gid(&format!("space/{id}/qto"));
                 let qto = w.add(
                     "IFCELEMENTQUANTITY",
@@ -1748,11 +1905,20 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 }
                 if !by_code.is_empty() {
                     let opt = |s: &str| if s.is_empty() { "$".to_string() } else { ifc_string(s) };
-                    let system = w.add("IFCCLASSIFICATION", format!("{},{},$,{},$,$,$", opt(&source), opt(&edition), ifc_string(&name)));
+                    // IFC2x3: Source und Edition sind Pflicht (leer = ''), keine Description/Location/Tokens.
+                    let system = if v2 {
+                        w.add("IFCCLASSIFICATION", format!("{},{},$,{}", ifc_string(&source), ifc_string(&edition), ifc_string(&name)))
+                    } else {
+                        w.add("IFCCLASSIFICATION", format!("{},{},$,{},$,$,$", opt(&source), opt(&edition), ifc_string(&name)))
+                    };
                     for (code, ref_name, ids) in by_code {
                         let reference = w.add(
                             "IFCCLASSIFICATIONREFERENCE",
-                            format!("$,{},{},#{system},$,$", ifc_string(&code), opt(&ref_name)),
+                            if v2 {
+                                format!("$,{},{},#{system}", ifc_string(&code), opt(&ref_name))
+                            } else {
+                                format!("$,{},{},#{system},$,$", ifc_string(&code), opt(&ref_name))
+                            },
                         );
                         let g = w.gid(&format!("classification/{name}/{code}"));
                         w.add(
@@ -1782,9 +1948,14 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 }
                 let zone_key = format!("zone/{key}");
                 let g = w.gid(&zone_key);
+                // IFC2x3: IfcZone hat kein LongName — der lange Name steht dort als Beschreibung.
                 let zone = w.add(
                     "IFCZONE",
-                    format!("{g},#{},{},$,$,{}", w.owner_history, ifc_string(&name), ifc_string(&long_name)),
+                    if v2 {
+                        format!("{g},#{},{},{},$", w.owner_history, ifc_string(&name), ifc_string(&long_name))
+                    } else {
+                        format!("{g},#{},{},$,$,{}", w.owner_history, ifc_string(&name), ifc_string(&long_name))
+                    },
                 );
                 let g = w.gid(&format!("{zone_key}/spaces"));
                 w.add(
@@ -1815,10 +1986,41 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         if t.occurrences.is_empty() {
             continue;
         }
+        if t.type_id == 0 {
+            // IFC2x3 ohne Typ (Dach): Schichten direkt am Bauteil.
+            if t.layer_set != 0 {
+                let g = w.gid(&format!("{}/occurrences/material", t.key));
+                w.add(
+                    "IFCRELASSOCIATESMATERIAL",
+                    format!("{g},#{},$,$,{},#{}", w.owner_history, refs(&t.occurrences), t.layer_set),
+                );
+            }
+            continue;
+        }
         let g = w.gid(&format!("{}/occurrences", t.key));
         w.add(
             "IFCRELDEFINESBYTYPE",
             format!("{g},#{},$,$,{},#{}", w.owner_history, refs(&t.occurrences), t.type_id),
+        );
+    }
+
+    // ── IFC2x3: Türen/Fenster mit IfcDoorStyle/IfcWindowStyle (Ausführung als Attribut des Styles) ──
+    let fill_styles = std::mem::take(&mut w.fill_styles);
+    for (is_door, op, occurrences) in &fill_styles {
+        let (class, label) = if *is_door { ("IFCDOORSTYLE", "Tür") } else { ("IFCWINDOWSTYLE", "Fenster") };
+        let key = format!("style/{}/{op}", if *is_door { "door" } else { "window" });
+        let g = w.gid(&key);
+        let name = if op == "NOTDEFINED" { label.to_string() } else { format!("{label} {op}") };
+        // Tür: OperationType, ConstructionType; Fenster: ConstructionType, OperationType (Reihenfolge je Schema).
+        let (first, second) = if *is_door { (enum_(op), enum_("NOTDEFINED")) } else { (enum_("NOTDEFINED"), enum_(op)) };
+        let style = w.add(
+            class,
+            format!("{g},#{},{},$,$,$,$,$,{first},{second},.F.,.F.", w.owner_history, ifc_string(&name)),
+        );
+        let g = w.gid(&format!("{key}/occurrences"));
+        w.add(
+            "IFCRELDEFINESBYTYPE",
+            format!("{g},#{},$,$,{},#{style}", w.owner_history, refs(occurrences)),
         );
     }
 
@@ -1847,7 +2049,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         let mut ids = Vec::with_capacity(q.quantities.len());
         for (ty, name, value) in &q.quantities {
             // IFC verlangt Mengen ≥ 0.
-            ids.push(w.add(ty, format!("{},$,$,{},$", ifc_string(name), fmt_real(value.max(0.0)))));
+            ids.push(w.emit_quantity(ty, name, value.max(0.0)));
         }
         let g = w.gid(&format!("{}/{}", q.owner_key, q.name));
         let set = w.add("IFCELEMENTQUANTITY", format!("{g},#{},{},$,$,{}", w.owner_history, ifc_string(&q.name), refs(&ids)));
@@ -1869,7 +2071,8 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     let file_name = format!("{}.ifc", pname("modell"));
     let mut out = String::with_capacity(w.lines.iter().map(|l| l.len() + 1).sum::<usize>() + 512);
     out.push_str("ISO-10303-21;\nHEADER;\n");
-    out.push_str(&format!("FILE_DESCRIPTION({},{});\n", list(&[ifc_string("")]), ifc_string("2;1")));
+    let description = if v2 { "ViewDefinition [CoordinationView_V2.0]" } else { "" };
+    out.push_str(&format!("FILE_DESCRIPTION({},{});\n", list(&[ifc_string(description)]), ifc_string("2;1")));
     out.push_str(&format!(
         "FILE_NAME({},{},{},{},{},{},{});\n",
         ifc_string(&file_name),
@@ -1880,7 +2083,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         ifc_string("dossier"),
         ifc_string("")
     ));
-    out.push_str("FILE_SCHEMA(('IFC4'));\nENDSEC;\n\nDATA;\n");
+    out.push_str(&format!("FILE_SCHEMA(('{}'));\nENDSEC;\n\nDATA;\n", if v2 { "IFC2X3" } else { "IFC4" }));
     for l in &w.lines {
         out.push_str(l);
         out.push('\n');
@@ -1979,10 +2182,20 @@ mod tests {
     struct B {
         f: Vec<f64>,
         s: Vec<String>,
+        /// 0 = IFC4, 1 = IFC2x3 (im META).
+        schema: f64,
     }
     impl B {
         fn new() -> Self {
-            B { f: vec![FLAT_VERSION], s: Vec::new() }
+            B { f: vec![FLAT_VERSION], s: Vec::new(), schema: 0.0 }
+        }
+        fn v2() -> Self {
+            B { schema: 1.0, ..B::new() }
+        }
+        /// META ab `has_geo`: Geo-Flag, Höhe, Breite/Länge (nur mit Geo), Schema, Anzahl Geschosse.
+        fn meta_tail(&mut self, geo: bool, elevation: f64, storeys: f64) {
+            let (lat, lon) = if geo { (47.376_9, 8.541_7) } else { (f64::NAN, f64::NAN) };
+            self.f.extend([if geo { 1.0 } else { 0.0 }, elevation, lat, lon, self.schema, storeys]);
         }
         fn s(&mut self, x: &str) -> f64 {
             self.s.push(x.to_string());
@@ -2113,12 +2326,15 @@ mod tests {
     }
 
     fn full_house(with_geo: bool) -> B {
-        let mut b = B::new();
+        full_house_in(B::new(), with_geo)
+    }
+
+    fn full_house_in(mut b: B, with_geo: bool) -> B {
         b.str("t");
         b.str("Haus Ä");
         b.n(&[1_700_000_000.0]);
         b.str("2026-10-28T12:00:00");
-        b.n(&[if with_geo { 1.0 } else { 0.0 }, if with_geo { 421.5 } else { f64::NAN }, 1.0]);
+        b.meta_tail(with_geo, if with_geo { 421.5 } else { f64::NAN }, 1.0);
         b.str("eg");
         b.str("Erdgeschoss");
         b.n(&[0.0]);
@@ -2412,12 +2628,15 @@ mod tests {
 
     /// Kopf (META) eines Mini-Projekts ohne Geschoss.
     fn mini() -> B {
-        let mut b = B::new();
+        mini_in(B::new())
+    }
+
+    fn mini_in(mut b: B) -> B {
         b.str("t");
         b.str("H");
         b.n(&[1_700_000_000.0]);
         b.str("2026-10-28T12:00:00");
-        b.n(&[0.0, f64::NAN, 0.0]);
+        b.meta_tail(false, f64::NAN, 0.0);
         b
     }
 
@@ -2720,6 +2939,178 @@ mod tests {
         assert!(build(&bad).is_err());
     }
 
+    fn full_house_2x3(with_geo: bool) -> String {
+        build(&full_house_in(B::v2(), with_geo)).unwrap()
+    }
+
+    /// GlobalId (erster Parameter) der ersten Entität eines Typs.
+    fn guid_of(ifc: &str, ty: &str) -> String {
+        let l = first_line(ifc, ty);
+        l[l.find('(').unwrap() + 2..][..22].to_string()
+    }
+
+    #[test]
+    fn ifc2x3_kopf_und_entitaeten() {
+        let ifc = full_house_2x3(true);
+        assert!(ifc.contains("FILE_DESCRIPTION(('ViewDefinition [CoordinationView_V2.0]'),'2;1');"));
+        assert!(ifc.contains("FILE_SCHEMA(('IFC2X3'));"));
+        assert!(ifc.is_ascii());
+        check_structure(&ifc);
+        // Nur Entitäten, die es in IFC2x3 gibt.
+        for gone in ["IFCTRIANGULATEDFACESET", "IFCCARTESIANPOINTLIST3D", "IFCROOFTYPE", "IFCMAPCONVERSION", "IFCPROJECTEDCRS"] {
+            assert_eq!(count(&ifc, gone), 0, "{gone}");
+        }
+        // W1 hat Achse + Usage (StandardCase), W2 nicht (IfcWall).
+        assert_eq!(count(&ifc, "IFCWALLSTANDARDCASE"), 1);
+        assert_eq!(count(&ifc, "IFCWALL"), 1);
+        assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 1);
+        assert!(first_line(&ifc, "IFCMATERIALLAYERSETUSAGE").ends_with(".AXIS2.,.POSITIVE.,-0.2);"));
+        // Wand ohne PredefinedType (8 Attribute), Stütze ebenso.
+        assert!(first_line(&ifc, "IFCWALL").ends_with(",$);") && first_line(&ifc, "IFCWALL").matches(',').count() == 7, "{}", first_line(&ifc, "IFCWALL"));
+        assert!(first_line(&ifc, "IFCCOLUMN").ends_with(",$);"), "{}", first_line(&ifc, "IFCCOLUMN"));
+        // Material-Schicht und -Satz in der kurzen 2x3-Form.
+        assert!(first_line(&ifc, "IFCMATERIAL").ends_with("');") && !first_line(&ifc, "IFCMATERIAL").contains(",$,$"));
+        assert!(first_line(&ifc, "IFCMATERIALLAYER").ends_with(",$);") && first_line(&ifc, "IFCMATERIALLAYER").matches(',').count() == 2);
+        // Tür: nur Höhe und Breite; Ausführung im IfcDoorStyle, verbunden über IfcRelDefinesByType.
+        let door = first_line(&ifc, "IFCDOOR");
+        assert!(door.ends_with(",$,2.1,0.9);"), "{door}");
+        let style = first_line(&ifc, "IFCDOORSTYLE");
+        assert!(style.contains(",$,$,$,$,$,.SINGLE_SWING_LEFT.,.NOTDEFINED.,.F.,.F.);"), "{style}");
+        assert_eq!(count(&ifc, "IFCWINDOWSTYLE"), 0);
+        assert_eq!(count(&ifc, "IFCRELDEFINESBYTYPE"), 2); // Wandtyp + Türstil
+        // Öffnung ohne PredefinedType; Raum, Treppe, Dach in der 2x3-Form.
+        assert!(first_line(&ifc, "IFCOPENINGELEMENT").ends_with(",$);") && !first_line(&ifc, "IFCOPENINGELEMENT").contains(".OPENING."));
+        assert!(first_line(&ifc, "IFCROOF").ends_with(".GABLE_ROOF.);"));
+        assert!(first_line(&ifc, "IFCSTAIR").ends_with(".STRAIGHT_RUN_STAIR.);"));
+        // Dach: Netz als Brep (dicht), Schichten direkt am Dach (kein Typ).
+        assert_eq!(count(&ifc, "IFCFACETEDBREP"), 1);
+        assert_eq!(count(&ifc, "IFCCLOSEDSHELL"), 1);
+        assert_eq!(count(&ifc, "IFCFACE"), 4);
+        assert_eq!(count(&ifc, "IFCPOLYLOOP"), 4);
+        assert!(ifc.contains("'Body','Brep'"));
+        assert_eq!(count(&ifc, "IFCRELASSOCIATESMATERIAL"), 4); // Wandtyp, Usage, Dachschichten, Stütze
+        // Stile der Teilrollen über IfcPresentationStyleAssignment.
+        assert_eq!(count(&ifc, "IFCPRESENTATIONSTYLEASSIGNMENT"), 3);
+        // Mengen ohne Formula.
+        assert!(first_line(&ifc, "IFCQUANTITYAREA").ends_with(",$,$,1.9);"), "{}", first_line(&ifc, "IFCQUANTITYAREA"));
+    }
+
+    #[test]
+    fn ifc2x3_georeferenz_ueber_site_und_epset() {
+        let ifc = full_house_2x3(true);
+        let site = first_line(&ifc, "IFCSITE");
+        assert!(site.contains(".ELEMENT.,(47,22,36,840000),(8,32,30,120000),421.5,$,$);"), "{site}");
+        assert!(ifc.contains("'ePSet_ProjectedCRS'") && ifc.contains("'ePSet_MapConversion'"));
+        assert!(ifc.contains("IFCPROPERTYSINGLEVALUE('Name',$,IFCLABEL('EPSG:2056'),$)"));
+        assert!(ifc.contains("IFCPROPERTYSINGLEVALUE('Scale',$,IFCREAL(1.0),$)"));
+        // Ohne Georeferenz keine Winkel und keine Sätze.
+        let plain = full_house_2x3(false);
+        assert!(first_line(&plain, "IFCSITE").contains(".ELEMENT.,$,$,$,$,$);"));
+        assert!(!plain.contains("ePSet_"));
+        // IFC4 behält CRS + Abbildung und schreibt keine Winkel.
+        let v4 = build(&full_house(true)).unwrap();
+        assert!(first_line(&v4, "IFCSITE").contains(".ELEMENT.,$,$,421.5,$,$);"));
+        assert!(!v4.contains("ePSet_"));
+    }
+
+    #[test]
+    fn winkel_in_grad_minuten_sekunden() {
+        assert_eq!(compound_angle(47.376_9, 90.0), "(47,22,36,840000)");
+        assert_eq!(compound_angle(-0.5, 90.0), "(0,-30,0,0)");
+        assert_eq!(compound_angle(-47.5, 90.0), "(-47,-30,0,0)");
+        assert_eq!(compound_angle(0.0, 90.0), "(0,0,0,0)");
+        // Kein Überlauf auf 60 Sekunden: 59.9999999° rundet sauber hoch.
+        assert_eq!(compound_angle(10.999_999_999_9, 90.0), "(11,0,0,0)");
+        assert_eq!(compound_angle(1000.0, 90.0), "(90,0,0,0)");
+    }
+
+    #[test]
+    fn ifc2x3_gleiche_guids_wie_ifc4() {
+        let (a, b) = (build(&full_house(true)).unwrap(), full_house_2x3(true));
+        for ty in ["IFCPROJECT", "IFCSITE", "IFCBUILDING", "IFCBUILDINGSTOREY", "IFCSLAB", "IFCSPACE", "IFCROOF", "IFCCOLUMN", "IFCSTAIR", "IFCDOOR", "IFCOPENINGELEMENT", "IFCWALLTYPE", "IFCELEMENTQUANTITY"] {
+            assert_eq!(guid_of(&a, ty), guid_of(&b, ty), "{ty}");
+        }
+        // Wand W1: StandardCase trägt die GlobalId des IfcWall.
+        assert_eq!(guid_of(&b, "IFCWALLSTANDARDCASE"), ifc_guid("t/wall/W1"));
+        assert_eq!(b, full_house_2x3(true));
+    }
+
+    #[test]
+    fn ifc2x3_offenes_netz_ist_shell_based_surface_model() {
+        let mut b = mini_in(B::v2());
+        b.n(&[REC_ROOF, -1.0]);
+        b.str("R");
+        b.str("Dach");
+        b.str("FLAT_ROOF");
+        b.no_type();
+        b.no_psets();
+        // Zwei Dreiecke (offen) plus ein entartetes (doppelte Ecke).
+        b.n(&[4.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
+        b.n(&[3.0, 0.0, 1.0, 2.0, 0.0, 2.0, 3.0, 0.0, 0.0, 1.0]);
+        b.f.push(0.0);
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        assert_eq!(count(&ifc, "IFCSHELLBASEDSURFACEMODEL"), 1);
+        assert_eq!(count(&ifc, "IFCOPENSHELL"), 1);
+        assert_eq!(count(&ifc, "IFCFACE"), 2);
+        assert_eq!(count(&ifc, "IFCCARTESIANPOINT"), 6); // Ursprung, 4 Ecken (je einmal), Placement
+        assert!(ifc.contains("'Body','SurfaceModel'"));
+        assert_eq!(count(&ifc, "IFCFACETEDBREP"), 0);
+    }
+
+    #[test]
+    fn ifc2x3_fenster_stil_klassifikation_zone_treppe() {
+        let mut b = full_house_in(B::v2(), false);
+        let w1 = [0.0, 0.0, 5.0, 0.0];
+        b.opening("W1", "F1", false, "Fenster", &SQUARE, 0.9, 1.2, 1.2, &FillParams { wing_count: 2.0, ..fill(false, w1, 2.0, 3.2, 0.9, 2.1) });
+        b.opening("W1", "T2", true, "Wandöffnung", &SQUARE, 0.0, 2.1, 1.0, &FillParams { door_kind: DoorKind::WallOpening, ..fill(true, w1, 3.0, 4.0, 0.0, 2.1) });
+        b.n(&[REC_ZONE]);
+        b.str("sia416/HNF");
+        b.str("HNF");
+        b.str("Hauptnutzfläche");
+        b.n(&[1.0]);
+        b.str("R1");
+        b.f.push(0.0);
+        b.n(&[REC_CLASSIFICATION]);
+        b.str("eBKP-H");
+        b.str("");
+        b.str("");
+        b.n(&[1.0]);
+        b.str("wall/W1");
+        b.str("C");
+        b.str("Konstruktion");
+        stair_with_parts(&mut b);
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        let win = first_line(&ifc, "IFCWINDOWSTYLE");
+        assert!(win.contains(",$,$,$,$,$,.NOTDEFINED.,.DOUBLE_PANEL_VERTICAL.,.F.,.F.);"), "{win}");
+        // Wandöffnung: Tür ohne Ausführung → Stil NOTDEFINED; Tür 1 hat eigenen Stil.
+        assert_eq!(count(&ifc, "IFCDOORSTYLE"), 2);
+        assert!(ifc.contains(",.NOTDEFINED.,.NOTDEFINED.,.F.,.F.);"));
+        let hole = ifc.lines().find(|l| l.contains("IFCDOOR(") && l.contains(",$,$,2.1,1.0);"));
+        assert!(hole.is_some());
+        // Klassifikation: Pflichtfelder als '', keine IFC4-Zusatzfelder.
+        assert!(first_line(&ifc, "IFCCLASSIFICATION").ends_with("('','',$,'eBKP-H');") || first_line(&ifc, "IFCCLASSIFICATION").contains("'','',$,'eBKP-H');"), "{}", first_line(&ifc, "IFCCLASSIFICATION"));
+        assert!(first_line(&ifc, "IFCCLASSIFICATIONREFERENCE").contains("$,'C','Konstruktion',#"), "{}", first_line(&ifc, "IFCCLASSIFICATIONREFERENCE"));
+        assert!(!first_line(&ifc, "IFCCLASSIFICATIONREFERENCE").ends_with(",$,$);"));
+        // Zone: Langname als Beschreibung.
+        assert!(first_line(&ifc, "IFCZONE").contains(",'HNF','Hauptnutzfl\\X2\\00E4\\X0\\che',$);"), "{}", first_line(&ifc, "IFCZONE"));
+        // Treppenlauf: NumberOfRiser… ohne PredefinedType.
+        assert!(first_line(&ifc, "IFCSTAIRFLIGHT").ends_with(",7,7,0.1857,0.28);"), "{}", first_line(&ifc, "IFCSTAIRFLIGHT"));
+        assert_eq!(count(&ifc, "IFCTRIANGULATEDFACESET"), 0);
+        assert_eq!(count(&ifc, "IFCFACETEDBREP"), 2); // Dach + Geländer (Mesh dicht? s. mesh_tetra: closed = 1)
+    }
+
+    #[test]
+    fn unbekanntes_schema_ist_fehler() {
+        let mut b = mini();
+        let n = b.f.len();
+        b.f[n - 2] = 2.0;
+        assert!(build(&b).is_err());
+        b.f[n - 2] = 0.5;
+        assert!(build(&b).is_err());
+    }
+
     #[test]
     fn leeres_projekt_ist_gueltig() {
         let mut b = B::new();
@@ -2727,7 +3118,7 @@ mod tests {
         b.str("");
         b.n(&[1.0]);
         b.str("iso");
-        b.n(&[0.0, f64::NAN, 0.0]);
+        b.meta_tail(false, f64::NAN, 0.0);
         let ifc = build(&b).unwrap();
         check_structure(&ifc);
         assert!(ifc.contains("IFCPROJECT('"));
@@ -2744,7 +3135,7 @@ mod tests {
         b.str("x");
         b.n(&[1.0]);
         b.str("iso");
-        b.n(&[0.0, f64::NAN, 0.0]);
+        b.meta_tail(false, f64::NAN, 0.0);
         b.opening("gibt-es-nicht", "O1", false, "Fenster", &SQUARE, 0.0, 1.0, 1.0, &fill(false, [0.0, 0.0, 5.0, 0.0], 0.0, 1.0, 0.0, 1.0));
         let ifc = build(&b).unwrap();
         check_structure(&ifc);
@@ -2772,10 +3163,23 @@ mod tests {
                 let _ = build_ifc(&g, &s);
             }
         }
+        // Dasselbe im Schema IFC2x3 (eigene Zweige für Netze, Stile, Zonen, Klassifikation).
+        let b = full_house_in(B::v2(), true);
+        let (f, s) = b.data();
+        for n in 0..f.len() {
+            let _ = build_ifc(&f[..n], &s);
+        }
+        for i in 0..f.len() {
+            for bad in [f64::NAN, f64::INFINITY, -1.0, 1e30, 0.5] {
+                let mut g = f.to_vec();
+                g[i] = bad;
+                let _ = build_ifc(&g, &s);
+            }
+        }
         // Unbekannter Datensatz, Geschoss-Index ausserhalb, Dreiecks-Index ausserhalb.
-        let mut g = vec![FLAT_VERSION, 0.0, 0.0, 1.0, 0.0, 0.0, f64::NAN, 0.0, 99.0];
+        let mut g = vec![FLAT_VERSION, 0.0, 0.0, 1.0, 0.0, 0.0, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0, 99.0];
         assert!(build_ifc(&g, "a").is_err());
-        g[8] = REC_STAIR;
+        g[11] = REC_STAIR;
         g.extend([3.0]);
         assert!(build_ifc(&g, "a").is_err());
         let mut m = B::new();
@@ -2783,7 +3187,7 @@ mod tests {
         m.str("x");
         m.n(&[1.0]);
         m.str("i");
-        m.n(&[0.0, f64::NAN, 0.0]);
+        m.meta_tail(false, f64::NAN, 0.0);
         m.n(&[REC_ROOF, -1.0]);
         m.str("R");
         m.str("R");

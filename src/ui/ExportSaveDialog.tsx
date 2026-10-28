@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
-import type { IfcExportOptions } from "../export/ifcClassification";
+import type { IfcExportOptions, IfcSchema } from "../export/ifcClassification";
 
 /** Direkt-herunterladbare Exportformate (mit Datei-Endung). */
 export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl" | "glb" | "step";
@@ -64,7 +64,9 @@ export function ExportSaveDialog({
   // IFC-Klassifikation (Schweizer Praxis): beides aus, bis die Nutzerin es wählt.
   const [ebkph, setEbkph] = useState(false);
   const [layerCodes, setLayerCodes] = useState(false);
-  const onConfirm = () => onSave(format, filename, format === "ifc" ? { ebkph, layerCodes } : undefined);
+  // IFC-Schema: IFC4 (Standard) oder IFC2x3 für ältere Fachplaner-Programme.
+  const [schema, setSchema] = useState<IfcSchema>("IFC4");
+  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes } : undefined);
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -102,6 +104,17 @@ export function ExportSaveDialog({
 
           {format === "ifc" && (
             <section className="imp-section">
+              <div className="imp-section-title">{t("exportSave.ifc.schema")}</div>
+              <Dropdown
+                value={schema}
+                onChange={(v) => setSchema(v as IfcSchema)}
+                title={t("exportSave.ifc.schema")}
+                options={[
+                  { value: "IFC4", label: t("exportSave.ifc.schema4") },
+                  { value: "IFC2X3", label: t("exportSave.ifc.schema2x3") },
+                ]}
+              />
+              <div className="imp-note">{t("exportSave.ifc.schemaHint")}</div>
               <label className="imp-check">
                 <input type="checkbox" checked={ebkph} onChange={(e) => setEbkph(e.target.checked)} />
                 <span>{t("exportSave.ifc.ebkph")}</span>

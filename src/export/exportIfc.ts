@@ -1,4 +1,8 @@
-// IFC4-Export (STEP Physical File / ISO-10303-21) des semantischen Modells.
+// IFC-Export (IFC4 oder IFC2x3, STEP Physical File / ISO-10303-21) des semantischen Modells.
+//
+// Schema ([B5], 28.10.): `options.schema` = "IFC4" (Standard) oder "IFC2X3" (Coordination View 2.0).
+// TS sammelt in beiden Fällen dasselbe; nur das META trägt die Wahl (und die WGS84-Breite/Länge des
+// Bezugspunkts für `IfcSite.RefLatitude/RefLongitude`), die Entitäten des Schemas schreibt Rust.
 //
 // Seit [B5] (28.10.) schreibt Rust die Datei (`src-tauri/fileio/src/ifc_export.rs`, Format-Modul
 // pkgFileIo): TS sammelt hier aus Projekt und Plan die Bauteile samt fertig gerechneter Geometrie
@@ -107,6 +111,7 @@ import { columnFootprint } from "../geometry/column";
 import { openingInterval, openingVerticalExtent } from "../geometry/opening";
 import { emitRoofs } from "../plan/toWalls3d/roofs";
 import { fileio } from "../engine/fileioWasm";
+import { lv95ToWgs84 } from "../io/lv95";
 import { fillParams, type FillParams } from "./ifcOpenings";
 import { stairParts } from "./ifcStairs";
 import {
@@ -129,9 +134,17 @@ import {
   type ClassificationSystem,
   type ClassifiedKind,
   type IfcExportOptions,
+  type IfcSchema,
 } from "./ifcClassification";
 
-export type { IfcExportOptions } from "./ifcClassification";
+export type { IfcExportOptions, IfcSchema } from "./ifcClassification";
+
+/** WGS84 des LV95-Bezugspunkts (swisstopo-Näherung); `null` ohne Bezug oder bei unbrauchbaren Zahlen. */
+function refLatLon(lv95: { e: number; n: number } | undefined): { lat: number; lon: number } | null {
+  if (!lv95 || !Number.isFinite(lv95.e) || !Number.isFinite(lv95.n)) return null;
+  const { lat, lon } = lv95ToWgs84(lv95.e, lv95.n);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+}
 
 /** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export.rs::ifc_guid`). */
 export function ifcGuid(name: string): string {
@@ -145,7 +158,7 @@ export function ifcString(s: string): string {
 
 // ── Flacher Puffer (Gegenstück zu src-tauri/fileio/src/ifc_export.rs, dort die Kodierung) ─────
 
-const FLAT_VERSION = 3;
+const FLAT_VERSION = 4;
 const REC_WALL_SOLIDS = 1;
 const REC_WALL_MESH = 2;
 const REC_CEILING = 3;
@@ -241,6 +254,9 @@ class FlatIfc {
     iso: string;
     hasGeo: boolean;
     refElevation: number | null;
+    /** WGS84-Grad des Bezugspunkts (nur IFC2x3-Site); `null` = keine. */
+    refLatLon: { lat: number; lon: number } | null;
+    schema: IfcSchema;
     storeys: { id: string; name: string; base: number }[];
   }): void {
     this.nums.push(
@@ -250,6 +266,9 @@ class FlatIfc {
       this.str(m.iso),
       m.hasGeo ? 1 : 0,
       m.refElevation ?? Number.NaN,
+      m.refLatLon?.lat ?? Number.NaN,
+      m.refLatLon?.lon ?? Number.NaN,
+      m.schema === "IFC2X3" ? 1 : 0,
       m.storeys.length,
     );
     for (const s of m.storeys) this.nums.push(this.str(s.id), this.str(s.name), s.base);
@@ -612,7 +631,7 @@ function qto(name: string, quantities: readonly Qty[]): PsetIn[] {
 }
 
 /**
- * Baut aus einem Projekt einen vollständigen IFC4-SPF-String (STEP Physical
+ * Baut aus einem Projekt einen vollständigen IFC-SPF-String (IFC4, oder IFC2x3 mit `options.schema`; STEP Physical
  * File). Kein Datei-IO. Leeres Projekt ⇒ valider Minimal-IFC (Project/Site/Building, kein Crash).
  * Verlangt das geladene Format-Modul (`await loadFileio()`).
  */
@@ -647,6 +666,8 @@ export function exportIfcSpf(projectIn: Project, options: IfcExportOptions = {})
     iso: new Date().toISOString().replace(/\.\d+Z$/, ""),
     hasGeo: !!project.geoAnchor,
     refElevation: typeof refElevation === "number" ? refElevation : null,
+    refLatLon: refLatLon(project.geoAnchor?.lv95),
+    schema: options.schema === "IFC2X3" ? "IFC2X3" : "IFC4",
     storeys: floors.map((f, i) => ({ id: f.id, name: f.name, base: storeyBase[i] })),
   });
 
