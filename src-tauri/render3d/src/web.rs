@@ -436,27 +436,38 @@ impl WebModelRenderer {
                 )))
             }
         };
-        let (target, dist) = match self.bounds {
-            Some((min, max)) => {
-                let center = [
-                    (min[0] + max[0]) * 0.5,
-                    (min[1] + max[1]) * 0.5,
-                    (min[2] + max[2]) * 0.5,
-                ];
-                let (dx, dy, dz) = (max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-                let radius = (dx * dx + dy * dy + dz * dz).sqrt() * 0.5;
-                let radius = if radius > 0.0 { radius } else { 1.0 };
-                // Abstand so, dass die Bounding-Kugel ins vertikale Sichtfeld
-                // passt (+ Rand) — identische Formel wie `fitTargetDist`.
-                let fov_y = crate::types::default_fov();
-                let dist = ((radius / (fov_y * 0.5).tan()) * 1.2).max(4.0);
-                (center, dist)
-            }
-            // Leeres Modell: neutraler Standpunkt (entspricht dem three.js-Start).
-            None => ([2.5_f32, 1.0, 2.0], 14.0_f32),
-        };
+        // Modell UND sichtbare Punktwolken einpassen ([27]).
+        let (target, dist) = self.fit_target_dist();
         self.camera = preset_camera(preset, target, dist);
         Ok(())
+    }
+
+    /// Bounding-Box aus Modell und sichtbaren Punktwolken → Ziel + Abstand (`math::fit_target_dist`).
+    fn fit_target_dist(&self) -> ([f32; 3], f32) {
+        let merged = crate::math::merge_bounds(self.bounds, self.renderer.point_cloud_bounds());
+        crate::math::fit_target_dist(merged, crate::types::default_fov())
+    }
+
+    /// Formatfüllendes Ziel + Abstand für Modell + sichtbare Punktwolken (dieselbe Rechnung wie
+    /// `set_view_preset`). Liefert `[tx, ty, tz, dist]` (world, Y-up), damit die TS-Seite ihren
+    /// Orbit-Zustand daraus setzt statt die Rechnung zu spiegeln.
+    pub fn view_fit(&self) -> Vec<f32> {
+        let (t, d) = self.fit_target_dist();
+        vec![t[0], t[1], t[2], d]
+    }
+
+    /// Aktuelle Kamera als `[eye(3), target(3), up(3), perspektivisch (1/0), fovY (rad), orthoHalbhöhe]`
+    /// — 12 Werte, world Y-up. Für Lesezugriffe (BCF-Viewpoint, Orbit-Abgleich nach einem Preset).
+    pub fn camera_state(&self) -> Vec<f32> {
+        let c = &self.camera;
+        vec![
+            c.eye[0], c.eye[1], c.eye[2],
+            c.target[0], c.target[1], c.target[2],
+            c.up[0], c.up[1], c.up[2],
+            if matches!(c.projection, Projection::Perspective) { 1.0 } else { 0.0 },
+            c.fov_y,
+            c.ortho_half_height,
+        ]
     }
 
     /// Darstellungsart der Oberleiste setzen. Gueltige Werte:
