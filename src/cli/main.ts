@@ -9,8 +9,9 @@
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> dxf [--binary]|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
-//   dossier-cli <projekt.obp> import-ifc <datei.ifc> [--out neu.obp] [--group product|class]
-//                                                  IFC als Kontext-Meshes ([B3]); Bericht als JSON auf stdout
+//   dossier-cli <projekt.obp> import-ifc <datei.ifc> [--out neu.obp] [--group product|class] [--elements]
+//                                                  IFC als Kontext-Meshes ([B3]), mit --elements als echte
+//                                                  Bauteile ([B4]); Bericht als JSON auf stdout
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
@@ -26,6 +27,8 @@ import {
   buildPlanDxfBinary,
   loadFileio,
   readIfc,
+  readIfcElements,
+  ifcElementsToProject,
   ifcToImportedMeshes,
   projectGeoOrigin,
   ensureContextCategories,
@@ -271,9 +274,22 @@ export async function run(argv: string[]): Promise<number> {
       } catch (e) {
         fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
       }
-      const { products, report } = await readIfc(bytes);
       const group = args.flags.get("group");
-      const meshes = ifcToImportedMeshes(products, src.split(/[\\/]/).pop() ?? src, {
+      const fileName = src.split(/[\\/]/).pop() ?? src;
+      if (args.flags.has("elements")) {
+        const { products, report, elements } = await readIfcElements(bytes);
+        const r = ifcElementsToProject(project, products, elements, {
+          fileName,
+          geoOrigin: projectGeoOrigin(project),
+          group: group === "product" || group === "class" ? group : "auto",
+        });
+        process.stdout.write(JSON.stringify({ ...report, products: undefined, elements: r.summary, kept: elements.kept }, null, 2) + "\n");
+        const target = args.flags.get("out");
+        if (target) out(args, serializeProject(applyOps(project, diffToOps(project, r.project))), target);
+        return 0;
+      }
+      const { products, report } = await readIfc(bytes);
+      const meshes = ifcToImportedMeshes(products, fileName, {
         geoOrigin: projectGeoOrigin(project),
         group: group === "product" || group === "class" ? group : "auto",
       });

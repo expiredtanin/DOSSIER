@@ -8,6 +8,7 @@ export { buildPlanDwg } from "../export/exportDxf";
 export { buildPlanDxfBinary } from "../export/exportDxf";
 export { loadFileio } from "../engine/fileioWasm";
 export { readIfc, ifcToImportedMeshes } from "../io/ifcImport";
+export { readIfcElements, ifcElementsToProject } from "../io/ifcElements";
 export { projectGeoOrigin } from "../model/geoRebase";
 export { ensureContextCategories } from "../model/contextCategories";
 export { projectToWorldCoords } from "../model/geoRebase";
