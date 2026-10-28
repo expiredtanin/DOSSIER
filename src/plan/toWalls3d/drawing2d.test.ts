@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../../model/types";
 import { sampleProject } from "../../model/sampleProject";
-import { emitDrawingLineVerts, pickDrawingSegs } from "./drawing2d";
+import { emitDrawingLineVerts, pickGeometry } from "../toWalls3d";
+
+const pickDrawingSegs = (p: Project) => pickGeometry(p).drawings;
 
 // `emitDrawingLineVerts` liefert die 2D-Boden-Spuren als LineList-Vertices für
 // render3ds `set_drawing_lines` (binärer Float32Array-Kanal) — interleaved

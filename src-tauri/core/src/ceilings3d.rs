@@ -76,21 +76,6 @@ pub fn ceilings(buf: &[f64]) -> Vec<CeilingSlabs> {
     out
 }
 
-pub fn encode(c: &[CeilingSlabs]) -> Vec<f64> {
-    let mut out = vec![c.len() as f64];
-    for d in c {
-        out.push(d.ceiling as f64);
-        out.push(d.ring.len() as f64);
-        for p in &d.ring {
-            out.extend(*p);
-        }
-        out.push(d.slabs.len() as f64);
-        for (l, zb, zt) in &d.slabs {
-            out.extend([*l as f64, *zb, *zt]);
-        }
-    }
-    out
-}
 
 #[cfg(test)]
 mod tests {

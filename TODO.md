@@ -28,7 +28,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   langsamer). Schatten, Baurecht (exakter Puffer statt Kapsel), Aussenbemassung, Kennzahlen in Rust; die
   `checkRoomProgram` bleibt vorerst TS (SIA-416-Zuordnung: seit [K2] `room_area.rs`). `bulge.ts` ist Fassade über den
   Rust-Kern (`bulge_polyline_points` für ganze Polylinien; `hasRealBulge`/`pointOnCircle` bleiben TS,
-  Einzeiler). Offen: Triangulierung, Straight Skeleton [B2]. · M
+  Einzeiler). Delaunay-Triangulierung (`delaunay.rs`, Port von delaunator inkl. exaktem `orient2d`; bitgleich zu JS über Zufalls-/Raster-/kozirkulare/fast-kollineare Punkte; `delaunator` aus den Abhängigkeiten entfernt, 28.10.): Gelände-TIN und Kontext-Gebäude. Offen: Straight Skeleton [B2]. · M
 - ✅ **Mac-Test 27.10.** (Maintainer): App startet mit dem Rust-Kern, Darstellung sieht gut aus — Stand `5b72069`
   (K0–K2, render2d binär); zweiter Test mit GPU-Kompilierung [K3b] (`7a8af4f`) ebenfalls bestanden.
 - ✅ **[K2] Geometrie-Ableitungen.** (27.10.) Dachgeometrie in Rust (`roof.rs`, `roof_skeleton.rs`;
@@ -80,13 +80,81 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
       über `Math` der JS-Engine (musl-libm wich ab, auch in der Topologie). Leistung (Node, Min. über
       Wiederholungen): Beispiel-EG 1,5 → 0,8 ms, 100k Linien + 3000 Schraffurflächen 3,9 → 1,8 s, nur
       Schraffur ~2×, nur Linien 104 → 81 ms (davon Kodieren in TS 7–29 ms). Mac-Test bestanden.
-  - ○ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
+  - ◐ **[K3a] Plan-Erzeugung in Rust** (Wand-Poché, Öffnungssymbole, Decken, Treppen, Dächer, Räume,
     2D-Zeichnung, Kontext, Schnittlinien) direkt in den Plan-Puffer; JS-Objekte nur noch für Export/Overlay.
-  - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
-  - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
+    Vorgehen (28.10.): je Domäne ein Rust-Modul mit flacher Primitivliste, TS nur als dünne Übersetzung
+    (Farbe, Graustufen, Pick-ID) — kein Format-v2, bis [K3d] den Puffer direkt liefert.
+    ✅ Treppen: `plan_stairs.rs` (`plan_stair_flat`), `generatePlan/stairs.ts` nur noch Übersetzung; bitgleich zur
+    alten TS-Fassung (49 Fälle: gerade/L/Wendel, Pfeilstil, Schnitthöhen). Nicht in der Tauri-App angesehen.
+    ✅ Wand-Poché und Decken-Umriss: `plan_walls.rs` (Segmente zwischen Öffnungen, Gehrungsbänder, Schichtfugen,
+    L-Anschlüsse, Durchgangswand-Aussparungen, Verdeckung durch Wand-Footprints). Stil (Bauteil, Schraffur, Farbe,
+    Fugen-Linienstil) bleibt in TS, bis das Modell in Rust liegt [K4]; Zuordnung über den Schichtindex. Bitgleich zur
+    alten Fassung (60 Zufallspläne × 3 Detailgrade, Öffnungen, Beispielprojekt, Decken mit/ohne Loch); `subtractIntervals`/
+    `segmentInsideWallBand` aus TS gelöscht. Nicht in der Tauri-App angesehen.
+    ✅ Öffnungssymbole (Tür/Fenster): `opening_geom.rs` (Pfosten, Lücke, Türblätter, Fenster-Symbol mit Flügel-/Stulpmarken)
+    und `plan_openings.rs` (Symbol, Rahmenband, Sturzlinien, Sims, Rollladenkasten); Linien-Overrides lösen in TS auf,
+    Farben kommen als Slot zurück. `geometry/opening.ts`: `doorSymbol`/`doorLeaves` gelöscht, `windowSymbol` ist Fassade
+    (Schnitt nutzt sie weiter). Bitgleich zur alten Fassung (80 Zufallsfälle × 3 Detailgrade, alle 13 Linienklassen;
+    600 Zufalls-Fenstersymbole). Tote halbe Ports in `kernel2d` (door/window_symbol, jambs …) entfernt.
+    ✅ Kontext-Mesh (Fussabdruck, Rahmen), Schnittführungs-Symbol, Linienenden: `plan_misc.rs`; bitgleich (200 Zufalls-Meshes,
+    200 Schnittebenen-Sätze, 400 Linienenden). Räume, Dächer, Stützen, Extrusions-Umriss, Baurecht, Schatten sind nur
+    noch Stil-Glue um schon in Rust berechnete Geometrie (kein Rechenanteil) — bleiben bis [K4] in TS.
+    ✅ Kurven (Ellipse, Bezier, Catmull-Rom, B-Spline): `curves.rs`, `geometry/curves.ts` ist Fassade; bitgleich (500 Zufallsfälle).
+    `jsnum::pow` (= `Math.pow` im Web-Build) für `x ** 3`.
+    Offen: `drawing2d.ts` (950 Zeilen) ist nach diesen Schritten Stil-Auflösung und Verteiler über Formen (Bemassung, Kote,
+    Detailverweis, Massstabsbalken, Block über `scaleGeom`); der Rechenanteil liegt in Rust. Der Verteiler zieht mit dem Modell
+    nach Rust [K4] — vorher würde ein Rust-`Drawing2D` doppelt gepflegt. Danach: [K3c] Schnitt/Ansicht, [K3d] Aufräumen.
+  - ◐ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
+    ✅ Schnitt-Bänder: Dominanz-Subtraktion, Verschmelzung, Rechteck-Vereinigung (`plan_section.rs`, 28.10.).
+    ✅ Ansicht: Verdeckungs-Clipping, Punkt-Verdeckung, Schlagschatten, XOR-Umriss (`plan_elevation.rs`, 28.10.).
+    ✅ Ansicht: Flächen (Wand-Quader, Decken-Prismen, Dach/Giebel) projizieren + Rückseiten-Culling, Eck-Verlängerung, Öffnungen (Rahmen, Glasfelder, Sprossen, Sims, SIA-Symbol) (`plan_elevation.rs`).
+    ✅ Netz-Ebenenschnitt (Körper/Gelände) + Ringe→Flächen (`mesh_section.rs`; behebt nebenbei: rückwärts geschlossene Ringe gingen verloren).
+    ✅ Dach-Schnittspur (Cyrus–Beck, lineare Oberkante, Verschmelzen) in `plan_section.rs`.
+    ✅ Abzugskörper-Geometrie (`voids.rs`: Polygon minus Schneider mit Schlüsselloch-Stegen, Strecke ausserhalb, Schnitt-Rechtecke); behebt: bei mehreren getrennten Aussparungen wurde nichts abgezogen.
+    Rest in TS (28.10.): Stil-Auflösung (Bauteil, Schraffur, Farbe, Linienstil, Pick-IDs, Painter-Reihenfolge) in `generatePlan*.ts`,
+    `toSection.ts` (Besitzer-Zuordnung, Schichtbänder), `toElevation.ts` (Orchestrierung), `sectionOpenings.ts`, `planUnderlay.ts`,
+    `drawing2d.ts`. Das ist kein Rechenanteil mehr, sondern liest das Modell; es zieht mit [K4] um.
+  - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer. Hängt an [K4]: Rust braucht das
+    typisierte Modell (Bauteil-Typen, Schraffuren, Linienstile, Kategorien) und einen Plan-Puffer v2 mit Pick-IDs + vollem `Primitive`-Umfang
+    (Text, Schraffur-Optionen, Zickzack/Motiv); die Verbraucher von `Primitive[]` (SVG/PDF/DXF, Auswahl, Overlay) lesen dann den Puffer.
+    Stand 28.10.: Rust-Grundlage `core/src/plan/{prim,style}.rs` (Primitive-Typ mit TS-gleicher JSON-Form, Auflösung By-Layer/By-Object,
+    `resolve_hatch`). Offen: Overrides-Engine, Raum-Stempel/richText, Domänen (Decken, Dächer, Räume, Wände+Öffnungen, Treppen, Stützen,
+    Körper, Kontext, Schnittlinien), Orchestrator (drawings2d bleibt vorerst TS), Plan-Puffer v2 (GPU-Chunk-Cache braucht Inhalts-Hash statt Objekt-Identität).
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
-- ○ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
+- ◐ **[K4] Modell und Ops in Rust** [2]; TS bekommt die Typen generiert (z. B. `ts-rs`). · XL
+  Ziel (Entscheid 28.10., Maintainer): nur die UI bleibt TS, alles andere Rust. Vorgehen in Stufen, jede verdrahtet und mit
+  Gleichheitstest gegen die TS-Fassung, die im selben Schritt verschwindet:
+  - ✅ **S1 Dokument im Kern** (28.10.): `document.rs` hält das Projekt als JSON-Baum, `core/document.ts` spiegelt jede
+    Änderung von `store.project` (setProject, Laden, Undo/Redo) als Ops (`diffToOps` → `doc_apply`); Selbstheilung durch Neuöffnen.
+    Test: 300 Zufallsänderungen, Kern-JSON == TS-Projekt. (Spiegel, TS ist noch Quelle der Änderungen.)
+  - ◐ **S2 Ableitungen lesen das Dokument** (28.10.): typisiertes Rust-Modell `model/` (`generated.rs` aus den TS-Typen per
+    `scripts/gen-rust-model.py`, `manual.rs` für getaggte Unions; Hin-und-zurück-Test gegen das Beispielprojekt mit
+    `deny_unknown_fields`), `Document::project()` als gecachte typisierte Sicht, `documentFor(project)` (TS) hält ein gemeinsames
+    Dokument per Differenz aktuell. Verbraucher bisher: Kennzahlen (`kennzahlen.rs::compute`), Baurecht-Prüfung/Footprint/Modellhöhe (`site_rules.rs`); Abfragen laufen
+    über `doc_query`, Modell-Nachschlagen in `model/helpers.rs`. TS-Sammler gelöscht.
+    Sonnenstand/Schatten ebenso. **3D-Modell komplett** (28.10.): `model3d.rs` (Wände mit Verschneidung/Bändern/Öffnungen, Decken, Treppen,
+    Stützen, Dächer inkl. Schnitt-Schichten, Öffnungs-Einbauteile, Kontext) → `projectToModel3d` holt die Teile per `doc_query`
+    (`queries.rs`), nur die truck-Körper (async) fügt TS ein; TS-Sammler `toWalls3d/{bands,ceilings,columns,openings,stairs,roofs}.ts`
+    gelöscht, unbenutzte Bindungen/Kodierer entfernt. Hin-und-her-Vergleich mit der TS-Fassung lief über Zufallsprojekte, danach
+    prüft die bestehende Suite (2123 Tests) den neuen Weg. Das Modell ist tolerant (fehlende Felder = Standardwert).
+    Pick-Geometrie und 2D-Boden-Spuren im 3D ebenfalls im Kern. **IFC-Export** (`export_ifc.rs`, `js_fmt.rs` für JS-`toFixed`, `geo_rebase.rs`)
+    byte-genau zur TS-Fassung (Vergleich über Zufallsprojekte; das Salz der GUID-Ableitung beginnt mit U+0001 — so seit jeher, bleibt für
+    stabile GUIDs). Modell verlustfrei (`Extra`-Felder), typisierte Sicht wird nach Ops feldweise nachgeführt.
+    **Zusammenführung 28.10. (Cloud):** Der IFC- und OBJ/STL-Export liefen parallel auch in `src-tauri/fileio` weiter
+    ([B5]/[C11]: IFC2x3, Basismengen, Öffnungen, Zonen, Klassifikation, glTF …). Behalten ist die `fileio`-Fassung; die
+    Kern-Duplikate `export_ifc.rs`, `export_mesh.rs`, `geo_rebase.rs`, `web/export_ifc.rs`, `doc_export_ifc` und die
+    Abfragen `objFile`/`stlFile` sind gelöscht. Die Exporte holen ihre 3D-Teile über `export/model3dParts.ts` aus dem
+    Dokument (`queries.rs`). Offen: `fileio`-Schreiber direkt aus dem Dokument füttern statt über den TS-Sammler.
+    Nächste: Export (Schedule/CSV, STL/OBJ, STEP), Plan/Schnitt/Ansicht-Sammler (generatePlan, toSection, toElevation) — hängt an Plan-Puffer v2.
+    Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
+    ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
+  - ○ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
+    (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
+  - ○ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
+    STEP-Ex- und -Import) im Kern.
+  Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
+  React-Store (TS-Spiegel bleibt bis S3), Befehls-Zustandsautomaten sind viel Code (`src/commands/cmds/*`).
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.
 
 ## Was die Analyse übersieht (Ergänzungen zum Vergleich)

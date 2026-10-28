@@ -1,0 +1,936 @@
+{
+ "id": "demo",
+ "name": "Demo-Haus",
+ "lineStyles": [
+  {
+   "id": "hatch-hair",
+   "name": "Volllinie 0.02",
+   "weight": 0.02,
+   "color": "#1a1a1a",
+   "dash": null
+  },
+  {
+   "id": "thin",
+   "name": "Volllinie 0.13",
+   "weight": 0.13,
+   "color": "#1a1a1a",
+   "dash": null
+  },
+  {
+   "id": "medium",
+   "name": "Volllinie 0.25",
+   "weight": 0.25,
+   "color": "#1a1a1a",
+   "dash": null
+  },
+  {
+   "id": "thick",
+   "name": "Volllinie 0.5",
+   "weight": 0.5,
+   "color": "#0a0a0a",
+   "dash": null
+  },
+  {
+   "id": "hatch-dash",
+   "name": "Dämmungsstrich",
+   "weight": 0.02,
+   "color": "#1a1a1a",
+   "dash": [
+    0.35,
+    0.3
+   ]
+  }
+ ],
+ "hatches": [
+  {
+   "id": "none",
+   "name": "Ohne",
+   "pattern": "none",
+   "scale": 1,
+   "angle": 0,
+   "color": "#1a1a1a"
+  },
+  {
+   "id": "insulation",
+   "name": "Wärmedämmung",
+   "pattern": "insulation",
+   "scale": 1,
+   "angle": 0,
+   "color": "#1a1a1a",
+   "lineStyleId": "thin"
+  },
+  {
+   "id": "diagonal",
+   "name": "Diagonal",
+   "pattern": "diagonal",
+   "scale": 1,
+   "angle": 45,
+   "color": "#1a1a1a",
+   "lineStyleId": "thin"
+  },
+  {
+   "id": "crosshatch",
+   "name": "Kreuzschraffur",
+   "pattern": "crosshatch",
+   "scale": 1,
+   "angle": 0,
+   "color": "#1a1a1a",
+   "lineStyleId": "thin"
+  },
+  {
+   "id": "solid-concrete",
+   "name": "Beton (voll)",
+   "pattern": "solid",
+   "scale": 1,
+   "angle": 0,
+   "color": "#9aa0a6",
+   "lineStyleId": "thin"
+  },
+  {
+   "id": "sia-concrete",
+   "name": "Beton (Kreuz)",
+   "pattern": "crosshatch",
+   "scale": 0.5,
+   "angle": 45,
+   "color": "#1a1a1a",
+   "lineStyleId": "hatch-hair"
+  },
+  {
+   "id": "sia-brick",
+   "name": "Backstein (Diagonal)",
+   "pattern": "diagonal",
+   "scale": 0.5,
+   "angle": 45,
+   "relativeToWall": true,
+   "color": "#1a1a1a",
+   "lineStyleId": "hatch-hair"
+  },
+  {
+   "id": "sia-insulation",
+   "name": "Dämmung (Strich)",
+   "pattern": "diagonal",
+   "scale": 0.45,
+   "angle": 0,
+   "relativeToWall": true,
+   "color": "#1a1a1a",
+   "lineStyleId": "hatch-hair"
+  }
+ ],
+ "components": [
+  {
+   "id": "render-ext",
+   "name": "Aussenputz",
+   "color": "#d8d2c7",
+   "hatchId": "none",
+   "joinPriority": 10,
+   "material": {
+    "libraryId": "Plaster001",
+    "color": "/assets/materials/Plaster001/color.jpg",
+    "normal": "/assets/materials/Plaster001/normal.jpg",
+    "roughness": "/assets/materials/Plaster001/roughness.jpg",
+    "displacement": "/assets/materials/Plaster001/displacement.jpg",
+    "sizeM": 1
+   }
+  },
+  {
+   "id": "insulation",
+   "name": "Wärmedämmung",
+   "color": "#ffffff",
+   "hatchId": "sia-insulation",
+   "joinPriority": 20
+  },
+  {
+   "id": "brick",
+   "name": "Backstein",
+   "color": "#8c5544",
+   "hatchId": "sia-brick",
+   "joinPriority": 50,
+   "material": {
+    "libraryId": "Bricks104",
+    "color": "/assets/materials/Bricks104/color.jpg",
+    "normal": "/assets/materials/Bricks104/normal.jpg",
+    "roughness": "/assets/materials/Bricks104/roughness.jpg",
+    "displacement": "/assets/materials/Bricks104/displacement.jpg",
+    "ao": "/assets/materials/Bricks104/ao.jpg",
+    "sizeM": 1
+   }
+  },
+  {
+   "id": "render-int",
+   "name": "Innenputz",
+   "color": "#efece6",
+   "hatchId": "none",
+   "joinPriority": 10,
+   "material": {
+    "libraryId": "Plaster001",
+    "color": "/assets/materials/Plaster001/color.jpg",
+    "normal": "/assets/materials/Plaster001/normal.jpg",
+    "roughness": "/assets/materials/Plaster001/roughness.jpg",
+    "displacement": "/assets/materials/Plaster001/displacement.jpg",
+    "sizeM": 1
+   }
+  },
+  {
+   "id": "roof-tiles",
+   "name": "Dachziegel",
+   "color": "#b8735c",
+   "hatchId": "sia-brick",
+   "joinPriority": 15,
+   "material": {
+    "libraryId": "RoofingTiles013A",
+    "color": "/assets/materials/RoofingTiles013A/color.jpg",
+    "normal": "/assets/materials/RoofingTiles013A/normal.jpg",
+    "roughness": "/assets/materials/RoofingTiles013A/roughness.jpg",
+    "displacement": "/assets/materials/RoofingTiles013A/displacement.jpg",
+    "ao": "/assets/materials/RoofingTiles013A/ao.jpg",
+    "sizeM": 1
+   }
+  },
+  {
+   "id": "concrete",
+   "name": "Beton",
+   "color": "#9aa0a6",
+   "hatchId": "sia-concrete",
+   "joinPriority": 100,
+   "material": {
+    "libraryId": "Concrete048",
+    "color": "/assets/materials/Concrete048/color.jpg",
+    "normal": "/assets/materials/Concrete048/normal.jpg",
+    "roughness": "/assets/materials/Concrete048/roughness.jpg",
+    "displacement": "/assets/materials/Concrete048/displacement.jpg",
+    "ao": "/assets/materials/Concrete048/ao.jpg",
+    "sizeM": 1
+   }
+  },
+  {
+   "id": "screed",
+   "name": "Zementestrich",
+   "color": "#c9c2b3",
+   "hatchId": "diagonal",
+   "joinPriority": 30
+  }
+ ],
+ "wallTypes": [
+  {
+   "id": "aw",
+   "name": "Aussenwand 34.5 cm",
+   "layers": [
+    {
+     "componentId": "render-ext",
+     "thickness": 0.02
+    },
+    {
+     "componentId": "insulation",
+     "thickness": 0.16,
+     "jointLineStyleId": "thin"
+    },
+    {
+     "componentId": "brick",
+     "thickness": 0.15
+    },
+    {
+     "componentId": "render-int",
+     "thickness": 0.015
+    }
+   ]
+  },
+  {
+   "id": "iw",
+   "name": "Innenwand Mauerwerk verputzt 15 cm",
+   "layers": [
+    {
+     "componentId": "render-int",
+     "thickness": 0.015
+    },
+    {
+     "componentId": "brick",
+     "thickness": 0.12
+    },
+    {
+     "componentId": "render-int",
+     "thickness": 0.015
+    }
+   ]
+  }
+ ],
+ "ceilingTypes": [
+  {
+   "id": "dg-massiv",
+   "name": "Geschossdecke mehrschichtig",
+   "layers": [
+    {
+     "componentId": "screed",
+     "thickness": 0.06
+    },
+    {
+     "componentId": "insulation",
+     "thickness": 0.04,
+     "jointLineStyleId": "thin"
+    },
+    {
+     "componentId": "concrete",
+     "thickness": 0.2
+    }
+   ]
+  }
+ ],
+ "roofTypes": [
+  {
+   "id": "roof-warm",
+   "name": "Steildach gedämmt",
+   "layers": [
+    {
+     "componentId": "roof-tiles",
+     "thickness": 0.04
+    },
+    {
+     "componentId": "insulation",
+     "thickness": 0.22,
+     "jointLineStyleId": "thin"
+    },
+    {
+     "componentId": "render-int",
+     "thickness": 0.0125
+    }
+   ]
+  }
+ ],
+ "doorTypes": [
+  {
+   "id": "door-standard",
+   "name": "Zimmertür 0.9 m",
+   "kind": "dreh",
+   "leafCount": 1,
+   "leafStyle": "glatt",
+   "frameThickness": 0.05,
+   "frameKind": "zarge",
+   "frameWidth": 0.06,
+   "defaultWidth": 0.9,
+   "defaultHeight": 2
+  },
+  {
+   "id": "door-entry",
+   "name": "Haustür Blockrahmen (Oberlicht)",
+   "kind": "dreh",
+   "leafCount": 1,
+   "leafStyle": "glas",
+   "glazingRatio": 0.35,
+   "frameThickness": 0.07,
+   "frameKind": "blockrahmen",
+   "frameWidth": 0.09,
+   "insetFromFace": 0.14,
+   "insetFace": "aussen",
+   "transomHeight": 0.45,
+   "threshold": true,
+   "defaultWidth": 1.1,
+   "defaultHeight": 2.1
+  }
+ ],
+ "windowTypes": [
+  {
+   "id": "window-standard",
+   "name": "Fenster 1.2 × 1.4 m",
+   "kind": "drehkipp",
+   "wingCount": 1,
+   "glazing": "zweifach",
+   "frameThickness": 0.06,
+   "frameWidth": 0.06,
+   "defaultSillHeight": 0.9,
+   "defaultWidth": 1.2,
+   "defaultHeight": 1.4
+  },
+  {
+   "id": "window-double",
+   "name": "Fenster 2-flügl. + Oberlicht",
+   "kind": "drehkipp",
+   "wingCount": 2,
+   "mullionRows": 1,
+   "glazing": "dreifach",
+   "frameThickness": 0.07,
+   "frameWidth": 0.07,
+   "insetFromFace": 0.12,
+   "insetFace": "aussen",
+   "transomHeight": 0.4,
+   "defaultSillHeight": 0.85,
+   "defaultWidth": 1.8,
+   "defaultHeight": 1.9
+  }
+ ],
+ "stairTypes": [
+  {
+   "id": "stair-standard",
+   "name": "Betontreppe 1.0 m",
+   "structure": "beton",
+   "closedRisers": true,
+   "treadThickness": 0.05,
+   "nosing": 0.03,
+   "railing": "keine",
+   "defaultWidth": 1
+  },
+  {
+   "id": "stair-massiv",
+   "name": "Massivtreppe (auf Sockel)",
+   "structure": "massiv",
+   "closedRisers": true,
+   "treadThickness": 0.04,
+   "nosing": 0.03,
+   "railing": "keine",
+   "defaultWidth": 1
+  },
+  {
+   "id": "stair-wange-holz",
+   "name": "Wangentreppe Holz (offen)",
+   "structure": "wange",
+   "closedRisers": false,
+   "treadThickness": 0.05,
+   "nosing": 0.03,
+   "railing": "keine",
+   "defaultWidth": 1
+  },
+  {
+   "id": "stair-aufgesattelt",
+   "name": "Aufgesattelt (Setzstufen)",
+   "structure": "aufgesattelt",
+   "closedRisers": true,
+   "treadThickness": 0.05,
+   "nosing": 0.025,
+   "railing": "keine",
+   "defaultWidth": 1
+  }
+ ],
+ "drawingLevels": [
+  {
+   "id": "eg",
+   "name": "Erdgeschoss",
+   "kind": "floor",
+   "visible": true,
+   "locked": false,
+   "floorHeight": 2.6,
+   "cutHeight": 1,
+   "baseElevation": 0
+  },
+  {
+   "id": "og",
+   "name": "Obergeschoss",
+   "kind": "floor",
+   "visible": true,
+   "locked": false,
+   "floorHeight": 2.6,
+   "cutHeight": 1,
+   "baseElevation": 2.6
+  },
+  {
+   "id": "schnitt-a",
+   "name": "Schnitt A",
+   "kind": "section",
+   "visible": true,
+   "locked": false,
+   "linePoints": [
+    {
+     "x": -1,
+     "y": 2
+    },
+    {
+     "x": 6,
+     "y": 2
+    }
+   ],
+   "directionSign": 1
+  },
+  {
+   "id": "ansicht-sued",
+   "name": "Ansicht Süd",
+   "kind": "elevation",
+   "visible": true,
+   "locked": false,
+   "linePoints": [
+    {
+     "x": -1,
+     "y": -2
+    },
+    {
+     "x": 6,
+     "y": -2
+    }
+   ],
+   "directionSign": 1,
+   "shadows": true
+  },
+  {
+   "id": "detail-1",
+   "name": "Detail 1",
+   "kind": "drawing",
+   "visible": true,
+   "locked": false
+  }
+ ],
+ "layers": [
+  {
+   "code": "00",
+   "name": "Raster",
+   "color": "#484850",
+   "lw": 0.13,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "01",
+   "name": "Vermessung",
+   "color": "#707078",
+   "lw": 0.18,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "05",
+   "name": "Kontext",
+   "color": "#707078",
+   "lw": 0.13,
+   "visible": true,
+   "locked": false,
+   "children": [
+    {
+     "code": "10",
+     "name": "Situation",
+     "color": "#909090",
+     "lw": 0.18,
+     "visible": true,
+     "locked": false
+    },
+    {
+     "code": "11",
+     "name": "Strasse",
+     "color": "#a89070",
+     "lw": 0.18,
+     "visible": true,
+     "locked": false
+    },
+    {
+     "code": "12",
+     "name": "Gebäude",
+     "color": "#888888",
+     "lw": 0.25,
+     "visible": true,
+     "locked": false
+    },
+    {
+     "code": "13",
+     "name": "Bäume",
+     "color": "#50a050",
+     "lw": 0.13,
+     "visible": true,
+     "locked": false
+    },
+    {
+     "code": "14",
+     "name": "Höhenlinien",
+     "color": "#909050",
+     "lw": 0.18,
+     "visible": true,
+     "locked": false
+    }
+   ]
+  },
+  {
+   "code": "20",
+   "name": "Wände",
+   "color": "#0a0a0a",
+   "lw": 0.35,
+   "visible": true,
+   "locked": false,
+   "children": [
+    {
+     "code": "21",
+     "name": "Türen/Fenster",
+     "color": "#5080c8",
+     "lw": 0.25,
+     "visible": true,
+     "locked": false
+    },
+    {
+     "code": "22",
+     "name": "Möbel",
+     "color": "#909090",
+     "lw": 0.13,
+     "visible": true,
+     "locked": false
+    },
+    {
+     "code": "25",
+     "name": "Stützen",
+     "color": "#c87050",
+     "lw": 0.5,
+     "visible": true,
+     "locked": false
+    }
+   ]
+  },
+  {
+   "code": "30",
+   "name": "Decken",
+   "color": "#605850",
+   "lw": 0.35,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "31",
+   "name": "Dächer",
+   "color": "#7a4a3a",
+   "lw": 0.35,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "40",
+   "name": "Treppen",
+   "color": "#4a6a58",
+   "lw": 0.35,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "35",
+   "name": "Träger",
+   "color": "#a87858",
+   "lw": 0.5,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "50",
+   "name": "Text",
+   "color": "#d0d0d0",
+   "lw": 0.13,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "60",
+   "name": "Räume",
+   "color": "#5a7a9a",
+   "lw": 0.13,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "90",
+   "name": "Referenzen",
+   "color": "#585860",
+   "lw": 0.13,
+   "visible": true,
+   "locked": false
+  },
+  {
+   "code": "99",
+   "name": "Konstruktion",
+   "color": "#404048",
+   "lw": 0.13,
+   "visible": true,
+   "locked": false
+  }
+ ],
+ "walls": [
+  {
+   "id": "W1",
+   "type": "wall",
+   "floorId": "eg",
+   "categoryCode": "20",
+   "start": {
+    "x": 0,
+    "y": 0
+   },
+   "end": {
+    "x": 5,
+    "y": 0
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  },
+  {
+   "id": "W2",
+   "type": "wall",
+   "floorId": "eg",
+   "categoryCode": "20",
+   "start": {
+    "x": 5,
+    "y": 0
+   },
+   "end": {
+    "x": 5,
+    "y": 4
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  },
+  {
+   "id": "W3",
+   "type": "wall",
+   "floorId": "eg",
+   "categoryCode": "20",
+   "start": {
+    "x": 5,
+    "y": 4
+   },
+   "end": {
+    "x": 0,
+    "y": 4
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  },
+  {
+   "id": "W4",
+   "type": "wall",
+   "floorId": "eg",
+   "categoryCode": "20",
+   "start": {
+    "x": 0,
+    "y": 4
+   },
+   "end": {
+    "x": 0,
+    "y": 0
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  },
+  {
+   "id": "W9",
+   "type": "wall",
+   "floorId": "eg",
+   "categoryCode": "20",
+   "start": {
+    "x": 2.4,
+    "y": 0
+   },
+   "end": {
+    "x": 2.4,
+    "y": 4
+   },
+   "wallTypeId": "iw",
+   "height": 2.6
+  },
+  {
+   "id": "W5",
+   "type": "wall",
+   "floorId": "og",
+   "categoryCode": "20",
+   "start": {
+    "x": 0,
+    "y": 0
+   },
+   "end": {
+    "x": 5,
+    "y": 0
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  },
+  {
+   "id": "W6",
+   "type": "wall",
+   "floorId": "og",
+   "categoryCode": "20",
+   "start": {
+    "x": 5,
+    "y": 0
+   },
+   "end": {
+    "x": 5,
+    "y": 3
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  },
+  {
+   "id": "W7",
+   "type": "wall",
+   "floorId": "og",
+   "categoryCode": "20",
+   "start": {
+    "x": 5,
+    "y": 3
+   },
+   "end": {
+    "x": 0,
+    "y": 3
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  },
+  {
+   "id": "W8",
+   "type": "wall",
+   "floorId": "og",
+   "categoryCode": "20",
+   "start": {
+    "x": 0,
+    "y": 3
+   },
+   "end": {
+    "x": 0,
+    "y": 0
+   },
+   "wallTypeId": "aw",
+   "height": 2.6
+  }
+ ],
+ "openings": [
+  {
+   "id": "D1",
+   "type": "opening",
+   "hostWallId": "W1",
+   "categoryCode": "21",
+   "kind": "door",
+   "typeId": "door-standard",
+   "position": 0.8,
+   "width": 0.9,
+   "height": 2.1,
+   "sillHeight": 0,
+   "swing": "left",
+   "hinge": "start"
+  },
+  {
+   "id": "O1",
+   "type": "opening",
+   "hostWallId": "W1",
+   "categoryCode": "21",
+   "kind": "window",
+   "typeId": "window-standard",
+   "position": 3,
+   "width": 1,
+   "height": 1.2,
+   "sillHeight": 0.9
+  },
+  {
+   "id": "O2",
+   "type": "opening",
+   "hostWallId": "W3",
+   "categoryCode": "21",
+   "kind": "window",
+   "typeId": "window-standard",
+   "position": 0.6,
+   "width": 1.4,
+   "height": 1.3,
+   "sillHeight": 0.9
+  }
+ ],
+ "ceilings": [
+  {
+   "id": "C1",
+   "type": "ceiling",
+   "floorId": "eg",
+   "categoryCode": "30",
+   "outline": [
+    {
+     "x": 0,
+     "y": 0
+    },
+    {
+     "x": 5,
+     "y": 0
+    },
+    {
+     "x": 5,
+     "y": 4
+    },
+    {
+     "x": 0,
+     "y": 4
+    }
+   ],
+   "wallTypeId": "aw",
+   "ceilingTypeId": "dg-massiv"
+  }
+ ],
+ "roofs": [
+  {
+   "id": "RF1",
+   "type": "roof",
+   "floorId": "og",
+   "categoryCode": "31",
+   "outline": [
+    {
+     "x": 0,
+     "y": 0
+    },
+    {
+     "x": 5,
+     "y": 0
+    },
+    {
+     "x": 5,
+     "y": 4
+    },
+    {
+     "x": 0,
+     "y": 4
+    }
+   ],
+   "shape": "sattel",
+   "pitchDeg": 30,
+   "overhang": 0.4,
+   "ridgeAxis": "x",
+   "thickness": 0.2
+  }
+ ],
+ "stairs": [
+  {
+   "id": "ST1",
+   "type": "stair",
+   "floorId": "eg",
+   "categoryCode": "40",
+   "shape": "straight",
+   "typeId": "stair-standard",
+   "start": {
+    "x": 3.7,
+    "y": 0.4
+   },
+   "dir": {
+    "x": 0,
+    "y": 1
+   },
+   "runLength": 3.2,
+   "width": 1,
+   "totalRise": 2.6,
+   "stepCount": 15,
+   "up": true
+  }
+ ],
+ "rooms": [
+  {
+   "id": "R1",
+   "type": "room",
+   "floorId": "eg",
+   "categoryCode": "60",
+   "siaCategory": "HNF",
+   "name": "Wohnen",
+   "boundary": [
+    {
+     "x": 0.1725,
+     "y": 0.1725
+    },
+    {
+     "x": 4.8275,
+     "y": 0.1725
+    },
+    {
+     "x": 4.8275,
+     "y": 3.8275
+    },
+    {
+     "x": 0.1725,
+     "y": 3.8275
+    }
+   ],
+   "color": "#6b7280",
+   "stampAnchor": {
+    "x": 2.5,
+    "y": 2
+   }
+  }
+ ],
+ "drawings2d": [],
+ "context": []
+}

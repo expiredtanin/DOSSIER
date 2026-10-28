@@ -7,7 +7,7 @@
 import type { Ceiling, LayerCategory, Project } from "../../model/types";
 import { getCeilingType, getComponent } from "../../model/types";
 import { mergeHoles } from "../../geometry/polygonHoles";
-import { add, scale, sub } from "../../model/geometry";
+import { core } from "../../engine/coreWasm";
 import {
   NO_HATCH,
   OVERHEAD_DASH,
@@ -21,7 +21,7 @@ import {
   type DetailLevel,
   type Primitive,
 } from "./shared";
-import { segmentInsideWallBand, subtractIntervals, type WallFootprint } from "./walls";
+import type { WallFootprint } from "./walls";
 
 /**
  * Decken-Poché im Grundriss: die Decke liegt als Slab ÜBER der Schnittebene und
@@ -116,32 +116,25 @@ export function addCeilingPoche(
   // der Umriss ganz; nur Überstände (Vordach/Balkon jenseits der Wand)
   // bleiben sichtbar. Brückenkanten (künstliche Verbindung Aussenring↔Loch)
   // werden NICHT gestrichen.
-  const n = ring.length;
-  const bridgeSet = new Set(bridgeEdges);
-  for (let i = 0; i < n; i++) {
-    if (bridgeSet.has(i)) continue;
-    const a = ring[i];
-    const b = ring[(i + 1) % n];
-    const holes: Array<[number, number]> = [];
-    for (const fp of wallFootprints) {
-      const iv = segmentInsideWallBand(a, b, fp);
-      if (iv) holes.push(iv);
-    }
-    const d = sub(b, a);
-    for (const [t0, t1] of subtractIntervals(0, 1, holes)) {
-      out.push({
-        kind: "line",
-        a: add(a, scale(d, t0)),
-        b: add(a, scale(d, t1)),
-        cls: "ceiling-outline",
-        // Überkopf-Ansichtslinie (Decke liegt als Slab über der Schnittebene) →
-        // gestrichelt statt durchgezogen (BIM-Konvention) — die DICKE folgt
-        // aber ceiling.strokeWeight/-Source wie bei der Wand (s. Aufrufer).
-        weightMm: lwMm * LAYER_DETAIL_FACTOR[detail],
-        dash: OVERHEAD_DASH,
-        color: stroke,
-        greyed,
-      });
-    }
+  // Die freien Teilstücke berechnet der Kern (`plan_walls.rs`, [K3a]).
+  const buf: number[] = [ring.length];
+  for (const p of ring) buf.push(p.x, p.y);
+  buf.push(bridgeEdges.length, ...bridgeEdges, wallFootprints.length);
+  for (const fp of wallFootprints) buf.push(fp.a.x, fp.a.y, fp.u.x, fp.u.y, fp.m.x, fp.m.y, fp.len, fp.half, fp.refOff);
+  const f = core().plan_ceiling_outline_flat(Float64Array.from(buf));
+  for (let i = 0; i < f[0]; i++) {
+    out.push({
+      kind: "line",
+      a: { x: f[1 + 4 * i], y: f[2 + 4 * i] },
+      b: { x: f[3 + 4 * i], y: f[4 + 4 * i] },
+      cls: "ceiling-outline",
+      // Überkopf-Ansichtslinie (Decke liegt als Slab über der Schnittebene) →
+      // gestrichelt statt durchgezogen (BIM-Konvention) — die DICKE folgt
+      // aber ceiling.strokeWeight/-Source wie bei der Wand (s. Aufrufer).
+      weightMm: lwMm * LAYER_DETAIL_FACTOR[detail],
+      dash: OVERHEAD_DASH,
+      color: stroke,
+      greyed,
+    });
   }
 }

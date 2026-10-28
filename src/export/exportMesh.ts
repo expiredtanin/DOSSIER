@@ -49,14 +49,11 @@ import { pickGeometry } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
 import { wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
 import { triangulate } from "../plan/glPlan/glPlanCompile";
-import { emitOpeningMeshes } from "../plan/toWalls3d/openings";
-import { emitRoofs } from "../plan/toWalls3d/roofs";
-import { emitColumns } from "../plan/toWalls3d/columns";
-import { emitStairMeshes, emitStairRailings, emitStairs } from "../plan/toWalls3d/stairs";
 import type { RMesh } from "../plan/toWalls3d/shared";
 import { IMPORTED_RGB, TERRAIN_RGB, hexToRgb } from "../plan/toWalls3d/shared";
 import { fileio } from "../engine/fileioWasm";
 import { orientOutward } from "./meshOrient";
+import { emitColumns, emitOpeningMeshes, emitRoofs, emitStairMeshes, emitStairRailings, emitStairs } from "./model3dParts";
 
 /**
  * Ein Teil-Mesh mit EINEM Material und LOKALEN (0-basierten) Vertex-/Dreiecks-Indizes. Der Rust-Schreiber

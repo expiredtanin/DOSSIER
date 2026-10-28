@@ -8,7 +8,7 @@
 //
 // Gelände ist NICHT semantisch — es ist Kontext-Geometrie (Project.context).
 
-import Delaunator from "delaunator";
+import { core } from "../engine/coreWasm";
 import type { Contour, TerrainMesh } from "./types";
 import { TERRAIN_CATEGORY } from "./contextCategories";
 
@@ -25,7 +25,7 @@ export const TERRAIN_LAYER = "Terrain";
  *     z = Kontur-Höhe. Es wird KEIN zusätzliches Resampling betrieben — die
  *     Kontur-Vertices selbst sind die Breaklines.
  *  2. Delaunay: 2D-Triangulation über die (x,y)-Projektion aller Vertices
- *     (Delaunator). Die Z-Höhe je Vertex bleibt erhalten → echtes Gelände-TIN.
+ *     (Rust-Kern, `delaunay.rs`). Die Z-Höhe je Vertex bleibt erhalten → echtes Gelände-TIN.
  *  3. Degenerate-Filter: Dreiecke mit (nahezu) null Fläche in der (x,y)-Ebene
  *     bzw. mit nicht-endlichen Koordinaten werden verworfen.
  *
@@ -59,21 +59,16 @@ export function generateTerrainFromContours(contours: Contour[]): TerrainMesh {
     return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, positions: [], indices: [] };
   }
 
-  // 2. Delaunay über die (x,y)-Projektion. Delaunator erwartet ein flaches
+  // 2. Delaunay über die (x,y)-Projektion. der Kern erwartet ein flaches
   //    [x0,y0, x1,y1, …]-Koordinatenarray.
   const coords2d = new Float64Array(xs.length * 2);
   for (let i = 0; i < xs.length; i++) {
     coords2d[i * 2] = xs[i];
     coords2d[i * 2 + 1] = ys[i];
   }
-  // Bei kollinearen Punkten liefert Delaunator eine leere Triangulation — das ist
-  // korrekt (kein Crash). Trotzdem schützen wir gegen einen möglichen Wurf.
-  let triangles: Uint32Array;
-  try {
-    triangles = new Delaunator(coords2d).triangles;
-  } catch {
-    return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, positions: [], indices: [] };
-  }
+  // Der Kern (`delaunay.rs`, Port von delaunator) liefert bei kollinearen Punkten eine leere
+  // Triangulation — das ist korrekt.
+  const triangles = core().delaunay_flat(coords2d);
 
   // 3. positions (x,y,z) aufbauen; Z aus zs je Vertex.
   const positions: number[] = new Array(xs.length * 3);

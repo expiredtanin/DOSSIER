@@ -1,15 +1,12 @@
 // Gemeinsame Grundlage der 3D-Ableitung: das Serde-Vokabular (`RWall`/`RSlab`/
 // `RMesh`/…, matcht 1:1 render3d::types) sowie die Farb-/Schraffur-/Material-
 // Auflösung, die über mehrere Bauteil-Domänen hinweg identisch gelten muss
-// (Hex→RGB, dominante Schicht, Schnitt-Schraffur, Material-Textur-Ebene).
+// (Hex→RGB). Die Ableitung selbst rechnet der Rust-Kern (`src-tauri/core/src/model3d.rs`).
 //
 // Jede Datei unter `toWalls3d/` importiert von hier, NIE von `../toWalls3d`
 // selbst — das hielte die Orchestrator-Datei (`toWalls3d.ts`) andernfalls in
 // einem Zirkelimport mit jeder einzelnen Domäne.
 
-import type { HatchPattern, Layer, Project } from "../../model/types";
-import { getCeilingType, getComponent, getWallType, roofLayers } from "../../model/types";
-import { resolveHatch } from "../generatePlan";
 import type { Vec3 as RoofVec3 } from "../../geometry/roof";
 
 export type RVec2 = [number, number];
@@ -58,144 +55,6 @@ export interface RHatch {
    * Draufsicht — wie im 2D-Grundriss relativ zur Wandachse (render3d::Hatch.topAngle).
    */
   topAngle?: number;
-}
-
-/** Bildet ein 2D-{@link HatchPattern} auf die Muster-Id von {@link RHatch}/CAP_WGSL ab. */
-function hatchPatternId(p: HatchPattern): number {
-  switch (p) {
-    case "solid":
-      return 1;
-    case "diagonal":
-      return 2;
-    case "crosshatch":
-      return 3;
-    case "insulation":
-      return 4;
-    case "none":
-    default:
-      return 0;
-  }
-}
-
-/**
- * Löst die Schnitt-Schraffur eines Bauteils (per `Component.hatchId`) zu einem
- * {@link RHatch} auf — dasselbe Muster/Winkel/Skalierung wie der 2D-Schnitt
- * (`generatePlan.ts::resolveHatch`, hier bewusst NICHT aufgerufen: nur die drei
- * render3d-relevanten Felder werden direkt aus dem `HatchStyle` gezogen, die
- * Farbe bleibt monochrom im Shader). `undefined`, wenn das Bauteil/die Schraffur
- * nicht auflösbar ist (der Cap-Shader fällt dann auf sein Diagonalmuster zurück).
- */
-export function resolveComponentHatch(
-  project: Project,
-  componentId: string,
-  axisAngleDeg?: number,
-): RHatch | undefined {
-  try {
-    const comp = getComponent(project, componentId);
-    if (!comp.hatchId) return undefined;
-    // GENAU der 2D-Schnitt-Pfad (`splitWallLayers`/`splitSlabLayers` →
-    // `resolveHatch`): `axisAngleDeg` = 90 für WAND-Bänder (die geschnittene Wand
-    // steht vertikal, `relativeToWall`-Muster drehen mit), `undefined` für DECKEN
-    // (kein Wandachsen-Bezug → absoluter Winkel). Wir übernehmen den ENDWINKEL
-    // (`HatchRender.angle`, bereits relativeToWall-korrigiert) UND die Musterlinien-
-    // Stärke (`lineWeight`, aus dem LineStyle) — nicht mehr den rohen Hatch-Winkel.
-    const hr = resolveHatch(project, comp.hatchId, axisAngleDeg);
-    // Wandbezug für die Draufsicht: Grundwinkel + ob das Muster der Wandachse folgt.
-    const abs = resolveHatch(project, comp.hatchId, undefined);
-    const relativeToWall = resolveHatch(project, comp.hatchId, 90).angle !== abs.angle;
-    return {
-      pattern: hatchPatternId(hr.pattern),
-      angle: hr.angle,
-      scale: hr.scale,
-      lineWeight: hr.lineWeight,
-      baseAngle: abs.angle,
-      relativeToWall,
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Schnitt-Schraffur der dicksten (dominanten) Schicht eines Schichtstapels.
- * `axisAngleDeg` wie {@link resolveComponentHatch} (90 für Wand, undefined für Decke).
- */
-export function dominantLayerHatch(
-  layers: Layer[],
-  project: Project,
-  axisAngleDeg?: number,
-): RHatch | undefined {
-  if (layers.length === 0) return undefined;
-  const dominant = layers.reduce((best, l) => (l.thickness > best.thickness ? l : best));
-  return resolveComponentHatch(project, dominant.componentId, axisAngleDeg);
-}
-
-/**
- * Geordnete Liste der EINDEUTIGEN Material-Farbkarten-URLs (`Component.material.
- * color`), die von Wand-/Decken-Bauteilen des Projekts benutzt werden — in
- * deterministischer First-Seen-Reihenfolge über `project.walls` (Wandtyp-Schichten)
- * dann `project.ceilings`. Die POSITION in dieser Liste (+1) ist der Textur-Array-
- * Index (`WallInput.materialIndex`, 1-basiert; Ebene 0 = Fallback-Schachbrett), den
- * sowohl {@link resolveComponentMaterialLayer} (Zuweisung je Band) als auch der
- * JS-Decoder (`viewport/materialTextures`) verwenden — so stimmen Band-Index und
- * hochgeladene Textur-Ebene ohne separaten Map-Transport überein. Memoisiert je
- * Projekt-REFERENZ (der Store ist immutabel — jede Änderung liefert ein neues
- * Objekt, also kein Stale-Risiko), damit die per-Band-Auflösung nicht quadratisch wird.
- */
-const materialMapCache = new WeakMap<Project, string[]>();
-export function wallMaterialColorMaps(project: Project): string[] {
-  const cached = materialMapCache.get(project);
-  if (cached) return cached;
-  const seen = new Set<string>();
-  const list: string[] = [];
-  const consider = (componentId: string): void => {
-    try {
-      const url = getComponent(project, componentId).material?.color;
-      if (url && !seen.has(url)) {
-        seen.add(url);
-        list.push(url);
-      }
-    } catch {
-      // Unauflösbares Bauteil überspringen.
-    }
-  };
-  for (const w of project.walls) {
-    try {
-      for (const l of getWallType(project, w).layers) consider(l.componentId);
-    } catch {
-      // Kein auflösbarer Wandtyp.
-    }
-  }
-  for (const c of project.ceilings ?? []) {
-    try {
-      for (const l of getCeilingType(project, c).layers) consider(l.componentId);
-    } catch {
-      // Kein auflösbarer Deckentyp.
-    }
-  }
-  for (const r of project.roofs ?? []) {
-    for (const l of roofLayers(project, r)) {
-      if (l.componentId) consider(l.componentId);
-    }
-  }
-  materialMapCache.set(project, list);
-  return list;
-}
-
-/**
- * Textur-Array-Ebene (1-basiert) der Material-Farbkarte eines Bauteils, oder
- * `undefined`, wenn das Bauteil kein Material mit Farbkarte trägt. Ebene 0 ist das
- * Fallback-Schachbrett — deshalb `indexOf + 1`. Siehe {@link wallMaterialColorMaps}.
- */
-export function resolveComponentMaterialLayer(project: Project, componentId: string): number | undefined {
-  try {
-    const url = getComponent(project, componentId).material?.color;
-    if (!url) return undefined;
-    const idx = wallMaterialColorMaps(project).indexOf(url);
-    return idx >= 0 ? idx + 1 : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -406,42 +265,4 @@ export function hexToRgb(hex: string, fallback: RRgb = WALL_RGB): RRgb {
   if (!m) return fallback;
   const v = parseInt(m[1], 16);
   return [((v >> 16) & 0xff) / 255, ((v >> 8) & 0xff) / 255, (v & 0xff) / 255];
-}
-
-/**
- * Repräsentative Bauteilfarbe eines Schichtaufbaus: die Farbe der DICKSTEN
- * Schicht (i. d. R. die tragende/dominante Schicht, z. B. Mauerwerk/Beton) —
- * einfache Näherung, solange Wände/Decken als EIN Vollkörper emittiert werden
- * (kein Schicht-Rendering in 3D). Fällt auf `fallback` zurück, wenn keine
- * Schicht vorhanden ist oder deren Component nicht auflösbar ist.
- */
-export function dominantLayerColor(layers: Layer[], project: Project, fallback: RRgb): RRgb {
-  if (layers.length === 0) return fallback;
-  const dominant = layers.reduce((best, l) => (l.thickness > best.thickness ? l : best));
-  try {
-    return hexToRgb(getComponent(project, dominant.componentId).color, fallback);
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * Löst den Schnitt-UMRISSLINIEN-Stil einer Schicht aus ihrem
- * `Layer.jointLineStyleId` (LineStyle) auf: Farbe (hex→RGB 0..1) + Strichstärke
- * (mm-Papier) — dieselbe Quelle wie die 2D-Schichtfuge (`generatePlan/walls.ts`).
- * Fehlt der Verweis/LineStyle, `undefined` (der 3D-Cut fällt dann auf seinen
- * Default-Schnittkanten-Stil zurück, siehe `section_fill::build_cut_cap_lines`).
- * Bewusst tolerant (`find` statt `getLineStyle`), wie im 2D — ein verwaister
- * Verweis darf den 3D-Push nicht werfen. Von {@link ../bands.resolveWallBands}
- * UND `../ceilings.emitSlabs` genutzt (Wand- wie Deckenschicht teilen dieselbe
- * Fugen-Auflösung).
- */
-export function resolveCutLineStyle(
-  project: Project,
-  jointLineStyleId: string | undefined,
-): { color?: RRgb; weight?: number } | undefined {
-  if (!jointLineStyleId) return undefined;
-  const ls = project.lineStyles.find((l) => l.id === jointLineStyleId);
-  if (!ls) return undefined;
-  return { color: hexToRgb(ls.color, DRAWING_LINE_FALLBACK_RGB), weight: ls.weight };
 }

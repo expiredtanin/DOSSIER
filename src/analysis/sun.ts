@@ -5,16 +5,13 @@
 //  • `shadowOfPrism`/`shadowPolygons`: Boden-Schatten (z = 0) von Wänden, freien Körpern und
 //    Dächern als Vereinigung konvexer Hüllen (Prisma ∪ verschobenes Prisma). Modell: x = Ost,
 //    y = Nord, Höhen über dem Geländenullpunkt (Meter).
-// Gerechnet wird im Rust-Kern (`src-tauri/core/src/sun.rs`); hier wird nur aus dem Projekt
-// gesammelt und die Datenform übersetzt.
+// Gerechnet wird im Rust-Kern (`src-tauri/core/src/sun.rs`), die Schatten auf dem Projekt-Dokument.
 
 import { core } from "../engine/coreWasm";
 import { FlatReader, FlatWriter, pointsOf } from "../geometry/coreFlat";
 import type { Project, Vec2 } from "../model/types";
-import { wallVerticalExtent } from "../model/wall";
-import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { lv95ToWgs84 } from "../io/lv95";
-import { getFloor, getWallType, wallTypeThickness } from "../model/types";
+import { documentFor } from "../core/document";
 
 export interface SunPosition {
   /** Grad von Nord im Uhrzeigersinn (Ost = 90, Süd = 180). */
@@ -47,64 +44,11 @@ export function shadowOfPrism(footprint: Vec2[], zBottom: number, zTop: number, 
 export type ShadowPolygon = Vec2[][];
 
 /**
- * Vereinigter Schatten aller Wände, Körper und Dächer (leer bei Nacht). Hier werden nur die
- * Körper gesammelt — Wände und freie Körper als Prismen, Dächer als Punktwolke (Traufe auf
- * Traufhöhe, Traufe/First/Grate auf Firsthöhe); Schatten und Vereinigung rechnet der Rust-Kern.
+ * Vereinigter Schatten aller Wände, Körper und Dächer (leer bei Nacht). Rechnet der Kern auf dem
+ * Projekt-Dokument (`sun.rs`): Wände und freie Körper als Prismen, Dächer als Punktwolke.
  */
 export function shadowPolygons(project: Project, sun: SunPosition): ShadowPolygon[] {
-  const prisms = new FlatWriter();
-  const prismCount = prisms.slot();
-  let nPrisms = 0;
-  for (const w of project.walls) {
-    const { zBottom, zTop } = wallVerticalExtent(project, w);
-    const dx = w.end.x - w.start.x;
-    const dy = w.end.y - w.start.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-9) continue;
-    const t = wallTypeThickness(getWallType(project, w)) / 2;
-    const nx = (-dy / len) * t;
-    const ny = (dx / len) * t;
-    prisms.num(zBottom, zTop).ring([
-      { x: w.start.x + nx, y: w.start.y + ny },
-      { x: w.end.x + nx, y: w.end.y + ny },
-      { x: w.end.x - nx, y: w.end.y - ny },
-      { x: w.start.x - nx, y: w.start.y - ny },
-    ]);
-    nPrisms++;
-  }
-  for (const s of project.extrudedSolids ?? []) {
-    if (s.operation === "subtract") continue;
-    let base = 0;
-    try {
-      base = getFloor(project, s.levelId).baseElevation ?? 0;
-    } catch {
-      /* Geschoss fehlt → 0 */
-    }
-    const z0 = base + (s.baseOffset ?? 0);
-    prisms.num(z0, z0 + s.height).ring(s.points);
-    nPrisms++;
-  }
-  const clouds = new FlatWriter();
-  const cloudCount = clouds.slot();
-  let nClouds = 0;
-  for (const r of project.roofs ?? []) {
-    const eavesZ = roofBaseElevation(project, r);
-    const geo = roofGeometry(r, eavesZ);
-    const top = eavesZ + geo.ridgeHeight;
-    const pts: number[] = [];
-    for (const p of geo.eaves) pts.push(p.x, p.y, eavesZ, p.x, p.y, top);
-    for (const [a, b] of geo.ridges) pts.push(a.x, a.y, top, b.x, b.y, top);
-    for (const [, b] of geo.hips) pts.push(b.x, b.y, top);
-    clouds.num(pts.length / 3, ...pts);
-    nClouds++;
-  }
-  const out = core().sun_shadow_union(
-    prisms.set(prismCount, nPrisms).done(),
-    clouds.set(cloudCount, nClouds).done(),
-    sun.azimuth,
-    sun.elevation,
-  );
-  return new FlatReader(out).polygons();
+  return documentFor(project).query<ShadowPolygon[]>("shadows", [sun.azimuth, sun.elevation]);
 }
 
 /**

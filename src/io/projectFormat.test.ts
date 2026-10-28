@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { sampleProject } from "../model/sampleProject";
+import { core } from "../engine/coreWasm";
 import { parseProjectFile, PROJECT_FORMAT_VERSION, serializeProject } from "./projectFormat";
 
 describe("Projektdatei-Format", () => {
+  it("Formatversion in TS und Kern stimmt überein", () => {
+    expect(core().project_format_version()).toBe(PROJECT_FORMAT_VERSION);
+  });
   it("Speichern setzt die Formatversion, Laden liefert dasselbe Projekt zurueck", () => {
     const text = serializeProject(sampleProject);
     expect(JSON.parse(text).formatVersion).toBe(PROJECT_FORMAT_VERSION);

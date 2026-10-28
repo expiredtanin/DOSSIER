@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { cutMeshWithPlane, ringArea, ringsToPolygons } from "./meshSection";
+import { cutMeshWithPlane, ringsToPolygons, type Pt2 } from "./meshSection";
+
+const ringArea = (r: Pt2[]): number => {
+  let a = 0;
+  for (let i = 0; i < r.length; i++) {
+    const p = r[i];
+    const q = r[(i + 1) % r.length];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return a / 2;
+};
 
 /** Quader als geschlossenes Netz (12 Dreiecke, aussen orientiert). `inward` kehrt um (Hohlraum). */
 function box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, inward = false) {

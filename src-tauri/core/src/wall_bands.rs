@@ -640,160 +640,6 @@ fn emit_band_piece(em: &mut Emitter, li: usize, off: f64, cutouts: &[OpeningIn],
     em.push(li, a, bb, zb, zt, off, holes, [zt - zt_start, zt - zt_end]);
 }
 
-// ── Flache Kodierung ─────────────────────────────────────────────────────────
-//
-// Geschosse: [nGeschosse, (nDecken, (zBottom, zTop, nPkt, (x, y)…, typOk, nSchichten,
-//   (dicke, prio|NaN)…)…, nDächer, (traufZ, schichtdicke, nPkt, (x, y)…, nFlächen,
-//   (m, (x, y, z)…)…)…)…]
-// Wände: [nWände, (geschoss, sx, sy, ex, ey, zBottom, zTop, layered, stacked, refKind, refValue,
-//   dickeHülle, terminierung (0 beide, 1 unten, 2 oben), nBänder, (dicke, prio|NaN)…,
-//   nÖffnungen, (from, to, zBottom, zTop, rücksprung)…, <Cuts wie joins::encode_cuts>)…]
-//   geschoss: Index in die Geschosse (ausserhalb = ohne Decken/Dächer).
-// Ausgabe: [nWände, (nKörper, (band, x1, y1, x2, y2, zBottom, zTop, schräg 0/1, drop0, drop1,
-//   nLöcher, (from, to, zBottom, zTop)…)…)…] — nWände < Eingabe, wenn der Puffer mittendrin
-//   kaputt ist; eine Wand mit ungültigen Werten (NaN …) hat keine Körper.
-
-use crate::flat_read::Reader;
-
-fn fin(v: &[f64]) -> bool {
-    v.iter().all(|x| x.is_finite())
-}
-
-/// Liest die Decken und Dächer eines Geschosses; einzelne ungültige fallen weg.
-fn decode_context(r: &mut Reader) -> Option<FloorContext> {
-    let nc = r.count()?;
-    let mut ceilings = Vec::with_capacity(nc.min(1 << 12));
-    for _ in 0..nc {
-        let (czb, czt) = (r.num()?, r.num()?);
-        let outline = r.ring()?;
-        let type_ok = r.num()? != 0.0;
-        let nl = r.count()?;
-        let mut layers = Vec::with_capacity(nl.min(1 << 10));
-        let mut ok = fin(&[czb, czt]) && outline.iter().all(|p| fin(p));
-        for _ in 0..nl {
-            let (t, p) = (r.num()?, r.num()?);
-            ok &= t.is_finite() && !p.is_infinite();
-            layers.push((t, (!p.is_nan()).then_some(p)));
-        }
-        if ok {
-            let outline = outline.into_iter().map(|p| Vec2::new(p[0], p[1])).collect();
-            ceilings.push(CeilingIn { z_bottom: czb, z_top: czt, outline, layers: type_ok.then_some(layers) });
-        }
-    }
-    let nr = r.count()?;
-    let mut roofs = Vec::with_capacity(nr.min(1 << 12));
-    for _ in 0..nr {
-        let (ez, total) = (r.num()?, r.num()?);
-        let eaves = r.ring()?;
-        let np = r.count()?;
-        let mut planes = Vec::with_capacity(np.min(1 << 12));
-        for _ in 0..np {
-            let m = r.count()?;
-            planes.push(r.points3(m)?);
-        }
-        if fin(&[ez, total]) && eaves.iter().all(|p| fin(p)) && planes.iter().flatten().all(|p| fin(p)) {
-            roofs.push(RoofIn { eaves_z: ez, total_thickness: total, eaves, planes });
-        }
-    }
-    Some(FloorContext::new(ceilings, roofs))
-}
-
-/// Liest eine Wand: `None` = Puffer kaputt (Abbruch), `Some((geschoss, None))` = Werte ungültig.
-fn decode_wall(r: &mut Reader) -> Option<(f64, Option<WallIn>)> {
-    let floor = r.num()?;
-    let (sx, sy, ex, ey, zb, zt) = (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
-    let (layered, stacked, kind, value, thick, term) = (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
-    let mut ok = fin(&[sx, sy, ex, ey, zb, zt, thick]);
-    let reference = match kind as i64 {
-        1 => Reference::Left,
-        2 => Reference::Right,
-        3 => {
-            ok &= value.is_finite();
-            Reference::Offset(value)
-        }
-        _ => Reference::Center,
-    };
-    let termination = match term as i64 {
-        1 => Termination::Below,
-        2 => Termination::Above,
-        _ => Termination::Both,
-    };
-    let nb = r.count()?;
-    let mut bands = Vec::with_capacity(nb.min(1 << 10));
-    for _ in 0..nb {
-        let (t, p) = (r.num()?, r.num()?);
-        ok &= t.is_finite() && !p.is_infinite();
-        bands.push(BandIn { thickness: t, priority: (!p.is_nan()).then_some(p) });
-    }
-    let no = r.count()?;
-    let mut openings = Vec::with_capacity(no.min(1 << 12));
-    for _ in 0..no {
-        let o = [r.num()?, r.num()?, r.num()?, r.num()?];
-        let recess = r.num()? != 0.0;
-        ok &= fin(&o);
-        openings.push(OpeningIn { from: o[0], to: o[1], z_bottom: o[2], z_top: o[3], recess_inner_layer: recess });
-    }
-    let cuts = crate::joins::decode_cuts(r)?;
-    let wall = WallIn {
-        start: Vec2::new(sx, sy),
-        end: Vec2::new(ex, ey),
-        z_bottom: zb,
-        z_top: zt,
-        layered: layered != 0.0,
-        stacked: stacked != 0.0,
-        reference,
-        thickness_safe: thick,
-        termination,
-        bands,
-        openings,
-        cuts,
-    };
-    Some((floor, ok.then_some(wall)))
-}
-
-fn encode_pieces(out: &mut Vec<f64>, pieces: &[Piece]) {
-    out.push(pieces.len() as f64);
-    for p in pieces {
-        out.extend([p.band as f64, p.start.x, p.start.y, p.end.x, p.end.y, p.z_bottom, p.z_top]);
-        match p.top_drop {
-            Some([d0, d1]) => out.extend([1.0, d0, d1]),
-            None => out.extend([0.0, 0.0, 0.0]),
-        }
-        out.push(p.holes.len() as f64);
-        for h in &p.holes {
-            out.extend(h);
-        }
-    }
-}
-
-/// Wände + Geschosse flach → Körper je Wand flach (s. Kodierung oben); nie ein Panic.
-pub fn wall_bands_flat(walls: &[f64], floors: &[f64]) -> Vec<f64> {
-    let mut fr = Reader::new(floors);
-    let mut contexts = Vec::new();
-    if let Some(n) = fr.count() {
-        for _ in 0..n {
-            match decode_context(&mut fr) {
-                Some(c) => contexts.push(c),
-                None => break,
-            }
-        }
-    }
-    let empty = FloorContext::default();
-    let mut out = vec![0.0];
-    let mut r = Reader::new(walls);
-    let Some(n) = r.count() else { return out };
-    let mut done = 0usize;
-    for _ in 0..n {
-        let Some((floor, wall)) = decode_wall(&mut r) else { break };
-        let ctx = if floor >= 0.0 && floor.fract() == 0.0 { contexts.get(floor as usize).unwrap_or(&empty) } else { &empty };
-        let pieces = wall.map(|w| wall_bands(&w, ctx)).unwrap_or_default();
-        encode_pieces(&mut out, &pieces);
-        done += 1;
-    }
-    out[0] = done as f64;
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -929,9 +775,6 @@ mod tests {
 
     #[test]
     fn unsinn_ohne_panic() {
-        assert_eq!(wall_bands_flat(&[], &[]), vec![0.0]);
-        assert_eq!(wall_bands_flat(&[f64::NAN; 40], &[f64::NAN]), vec![0.0]);
-        assert_eq!(wall_bands_flat(&[0.0; 3], &[1.0, 5.0]), vec![0.0]);
         // Nulllänge, umgekehrte Höhen, Öffnung ausserhalb, Bänder ohne Dicke, entartete Decke/Dach.
         let mut w = base((1.0, 1.0), (1.0, 1.0), vec![band(0.2, 50.0)]);
         assert!(bands_of(&w).is_empty());
@@ -947,23 +790,5 @@ mod tests {
         );
         let _ = wall_bands(&w, &ctx);
 
-        // Flach: zwei Wände (die zweite mit NaN-Koordinate → keine Körper), ein Geschoss.
-        let wall = |x: f64| {
-            let mut b = vec![0.0, x, 1.0, 2.0, 1.0, 0.0, 2.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.0, 1.0, 0.2, 50.0, 0.0];
-            crate::joins::encode_cuts(&mut b, &WallCuts::default());
-            b
-        };
-        let mut buf = vec![2.0];
-        buf.extend(wall(1.0));
-        buf.extend(wall(f64::NAN));
-        let floors = [1.0, 0.0, 0.0];
-        let out = wall_bands_flat(&buf, &floors);
-        assert_eq!(out[0], 2.0);
-        assert_eq!(out[1], 1.0); // ein Körper
-        assert_eq!(*out.last().unwrap(), 0.0); // zweite Wand: keine Körper
-        // Abgeschnittener Puffer: nur die vollständige erste Wand.
-        assert_eq!(wall_bands_flat(&buf[..buf.len() - 1], &floors)[0], 1.0);
-        // Kaputte Geschosse: Wände ohne Decken/Dächer.
-        assert_eq!(wall_bands_flat(&buf, &[3.0, 1.0])[0], 2.0);
     }
 }

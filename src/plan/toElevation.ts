@@ -31,7 +31,8 @@
 // v = absolute Höhe (Welt-Y). Die PlanView zeichnet Y nach oben → Ansicht steht
 // aufrecht.
 
-import type { DrawingLevel, Project, Vec2, Wall } from "../model/types";
+import { core } from "../engine/coreWasm";
+import type { DrawingLevel, Project, Vec2 } from "../model/types";
 import {
   getComponent,
   getDoorType,
@@ -75,7 +76,7 @@ const FRAME_MM = 0.18;
  * zeichnungs-Look) bleibt alles weiss — nur Kontur trägt Information. Im
  * FARBIG-Modus tragen die Flächen echte Bauteilfarbe: Wand/Dach die dominante
  * Schicht (s. {@link WorldFace.fill}, gesetzt in {@link wallWorldFaces}/
- * {@link roofWorldFacesAll}), Fenster/Türen feste, an `toWalls3d.ts`
+ * {@link collectRoofFaces}), Fenster/Türen feste, an `toWalls3d.ts`
  * (FRAME_RGB/GLASS_RGB/SILL_RGB/DOOR_LEAF_RGB) angelehnte Töne, damit Ansicht
  * und 3D konsistent wirken.
  */
@@ -122,16 +123,8 @@ function rgbToHex(c: RRgb): string {
   return `#${b(c[0])}${b(c[1])}${b(c[2])}`;
 }
 
-/** Sonnenrichtung als (u, v)-Schattenversatz je Tiefeneinheit: 45° von links
- *  oben ⇒ Schatten fällt nach rechts unten (+u, −v). */
-const SUN_U = 1;
-const SUN_V = -1;
-
 /** Numerisches Rauschen (Meter) für Tiefen-/Flächenvergleiche. */
 const EPS = 1e-6;
-/** Grazing-Schwelle: Flächen fast parallel zur Blickrichtung gelten als nicht
- *  sichtbar (Kanten-an, keine Fläche) — vermeidet Z-Rauschen an Laibungen. */
-const FACING_EPS = 1e-4;
 
 // ── Ebenen-Frame ────────────────────────────────────────────────────────────
 
@@ -168,285 +161,10 @@ export function elevationFrame(plane: SectionPlaneSpec): ElevationFrame {
   return { P: plane.point, N, U };
 }
 
-/** Projektion eines Weltpunkts in die Ansicht: u, v (Höhe) und Tiefe hinter der Ebene. */
-export function projectPoint(
-  frame: ElevationFrame,
-  w: V3,
-): { u: number; v: number; depth: number } {
-  const rx = w[0] - frame.P[0];
-  const ry = w[1] - frame.P[1];
-  const rz = w[2] - frame.P[2];
-  return {
-    u: rx * frame.U[0] + ry * frame.U[1] + rz * frame.U[2],
-    v: w[1], // absolute Höhe, wie die Schnitt-v-Konvention
-    depth: rx * frame.N[0] + ry * frame.N[1] + rz * frame.N[2],
-  };
-}
-
-// ── Welt-Flächen aus dem geflachten Modell ─────────────────────────────────
+// ── Flächen aus dem geflachten Modell ──────────────────────────────────────
 
 /** Rolle einer Fläche (steuert Füllung/Stil in der Ansicht). */
 export type FaceRole = "wall" | "slab" | "roof";
-
-/** Eine orientierte Welt-Fläche (konvexes Polygon + Aussennormale). */
-export interface WorldFace {
-  poly: V3[];
-  normal: V3;
-  role: FaceRole;
-  /** Ursprungs-Wand (nur role "wall") — für Auswahl/Painter-Identität. */
-  wallId?: string;
-  /** Ursprungs-Decke (nur role "slab"). */
-  ceilingId?: string;
-  /** Ursprungs-Dach (nur role "roof"). */
-  roofId?: string;
-  /**
-   * Bauteil-Farbe (dominante Wandschicht bzw. äusserste Dach-/Eindeckungs-
-   * schicht) für den Farbig-Modus (s. {@link ElevationOptions.mono}). Fehlt
-   * ⇒ Fallback auf die neutrale Rollen-Füllung.
-   */
-  fill?: RRgb;
-}
-
-function normalize3(a: V3): V3 {
-  const l = Math.hypot(a[0], a[1], a[2]) || 1;
-  return [a[0] / l, a[1] / l, a[2] / l];
-}
-
-/**
- * Die sechs Quader-Flächen EINER Wand-Box (RWall) in Weltkoordinaten mit
- * Aussennormalen: zwei Langseiten (Fassaden-Aussenflächen, Normale horizontal
- * quer zur Wand), zwei Stirnkappen (Normale entlang der Achse), Deckel/Boden.
- */
-export function wallWorldFaces(w: RWall): WorldFace[] {
-  const sx = w.start[0];
-  const sz = w.start[1];
-  const ex = w.end[0];
-  const ez = w.end[1];
-  const ax = ex - sx;
-  const az = ez - sz;
-  const len = Math.hypot(ax, az);
-  if (len < 1e-9 || w.height <= EPS) return [];
-  const aHat: V3 = [ax / len, 0, az / len];
-  const nHat: V3 = [az / len, 0, -ax / len]; // horizontale Quer-Normale
-  const ht = w.thickness / 2;
-  const zb = w.baseElevation;
-  const zt = w.baseElevation + w.height;
-  // Ecke bei (Achsen-Meter sAlong, Quer-Versatz tOff, Höhe y).
-  const corner = (sAlong: number, tOff: number, y: number): V3 => [
-    sx + aHat[0] * sAlong + nHat[0] * tOff,
-    y,
-    sz + aHat[2] * sAlong + nHat[2] * tOff,
-  ];
-  const faces: WorldFace[] = [];
-  // +Quer (Aussenfläche A)
-  faces.push({
-    role: "wall",
-    normal: nHat,
-    poly: [corner(0, ht, zb), corner(len, ht, zb), corner(len, ht, zt), corner(0, ht, zt)],
-  });
-  // −Quer (Aussenfläche B)
-  faces.push({
-    role: "wall",
-    normal: [-nHat[0], -nHat[1], -nHat[2]],
-    poly: [corner(0, -ht, zb), corner(0, -ht, zt), corner(len, -ht, zt), corner(len, -ht, zb)],
-  });
-  // Stirn Start (−Achse)
-  faces.push({
-    role: "wall",
-    normal: [-aHat[0], -aHat[1], -aHat[2]],
-    poly: [corner(0, -ht, zb), corner(0, ht, zb), corner(0, ht, zt), corner(0, -ht, zt)],
-  });
-  // Stirn Ende (+Achse)
-  faces.push({
-    role: "wall",
-    normal: aHat,
-    poly: [corner(len, -ht, zb), corner(len, -ht, zt), corner(len, ht, zt), corner(len, ht, zb)],
-  });
-  // Deckel (+Höhe)
-  faces.push({
-    role: "wall",
-    normal: [0, 1, 0],
-    poly: [corner(0, -ht, zt), corner(0, ht, zt), corner(len, ht, zt), corner(len, -ht, zt)],
-  });
-  // Boden (−Höhe)
-  faces.push({
-    role: "wall",
-    normal: [0, -1, 0],
-    poly: [corner(0, -ht, zb), corner(len, -ht, zb), corner(len, ht, zb), corner(0, ht, zb)],
-  });
-  for (const f of faces) {
-    f.wallId = w.wallId;
-    f.fill = w.color;
-  }
-  return faces;
-}
-
-/**
- * Enthält der Wandkörper von `w` (Achse ± `half`) den Punkt `p`? Perpendikular-
- * abstand ≤ half UND Projektion innerhalb der Achsenlänge (mit half-Toleranz an
- * den Enden). Basis der T-/L-/X-Stoss-Erkennung für die Eckverlängerung.
- */
-function wallBodyContains(w: Wall, half: number, p: Vec2): boolean {
-  const dx = w.end.x - w.start.x;
-  const dy = w.end.y - w.start.y;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-9) return false;
-  const ux = dx / len;
-  const uy = dy / len;
-  const rx = p.x - w.start.x;
-  const ry = p.y - w.start.y;
-  const along = rx * ux + ry * uy;
-  const perp = Math.abs(-uy * rx + ux * ry);
-  return along >= -1e-6 && along <= len + 1e-6 && perp <= half + 1e-6;
-}
-
-/**
- * Achsen-Verlängerung je Wandende (Meter, ≥0) für die ANSICHT: axis-zu-axis
- * gebaute Wandboxen (s. {@link wallWorldFaces}) decken einen Eckknoten nicht
- * voll ab — an jeder Ecke bleibt ein dreieckiger Spalt der Grösse der halben
- * Dicke der anschliessenden Wand (sichtbar als Kerbe in der Silhouette bzw. als
- * Lücke im Schlagschatten). Jedes Wandende wird darum bis zur AUSSENFLÄCHE der
- * dicksten anstossenden anderen Wand verlängert — die Boxen überlappen dann im
- * Eckbereich vollständig.
- *
- * Erfasst L-Ecken (Endpunkt teilt sich mit anderem Endpunkt), T-Stösse (Ende
- * trifft die SEITE/Achse einer durchlaufenden Wand) UND versetzte Stösse — über
- * {@link wallBodyContains} statt exakter Endpunkt-Gleichheit. Bewusst eine
- * EIGENE, tolerante Näherung statt der Gehrungs-Logik aus `model/joins.ts` (die
- * bedient 2D-Grundriss/3D-Viewer und bleibt unangetastet): die Ansicht ist ein
- * Painter-Silhouetten-Verfahren, dem eine leichte Eck-Überlappung nichts
- * ausmacht — anders als Grundriss-Poché/Schnitt-Dominanz, die exakte Gehrung
- * brauchen.
- */
-function wallCornerExtensions(project: Project, walls: Wall[]): Map<string, { start: number; end: number }> {
-  const thicknessOf = (w: Wall): number => {
-    try {
-      return wallTypeThickness(getWallType(project, w));
-    } catch {
-      return 0.2;
-    }
-  };
-  const halves = new Map<string, number>();
-  for (const w of walls) halves.set(w.id, thicknessOf(w) / 2);
-  const extAt = (w: Wall, p: Vec2): number => {
-    let maxOther = 0;
-    for (const other of walls) {
-      if (other.id === w.id) continue;
-      const ho = halves.get(other.id) ?? 0.1;
-      if (wallBodyContains(other, ho, p)) maxOther = Math.max(maxOther, ho);
-    }
-    return maxOther;
-  };
-  const out = new Map<string, { start: number; end: number }>();
-  for (const w of walls) out.set(w.id, { start: extAt(w, w.start), end: extAt(w, w.end) });
-  return out;
-}
-
-/**
- * Verlängert die (offset-freien, s. {@link resolveWallBands} `layered:false`)
- * Wand-Boxen des Ansichts-Modells an gemeinsamen Eck-Knoten (s.
- * {@link wallCornerExtensions}), damit Fassaden-Ecken in der Ansicht ohne
- * dreieckige Kerbe/Schattenlücke erscheinen. Wirkt PRO GESCHOSS (`floorId`),
- * damit sich nur Wände desselben Grundrisses zu Ecken verbinden. Mutiert die
- * `start`/`end`-Koordinaten der jeweils äussersten Teilstücke (Pfeiler vor der
- * ersten bzw. nach der letzten Öffnung) in-place.
- *
- * WICHTIG — nur Wände verlängern, die etwa PARALLEL zur Ansichtsebene laufen
- * (Fassaden-Silhouette): eine facaden-SENKRECHTE Wand (Innenwand quer zur
- * Blickrichtung) würde sonst entlang ihrer Achse in die Tiefe — u. U. VOR die
- * Fassade auf den Betrachter zu — geschoben und erschiene als störender
- * Balken. `uModel` ist die Ansichts-u-Achse in Grundriss-Koordinaten (Modell
- * x,y = Welt x,z), gegen die die Wandachse projiziert wird.
- */
-function extendWallCornersForElevation(project: Project, rwalls: RWall[], uModel: Vec2): void {
-  const byFloor = new Map<string, Wall[]>();
-  for (const w of project.walls) {
-    const key = w.floorId ?? "";
-    const list = byFloor.get(key);
-    if (list) list.push(w);
-    else byFloor.set(key, [w]);
-  }
-  const byWallId = new Map<string, RWall[]>();
-  for (const rw of rwalls) {
-    const list = byWallId.get(rw.wallId);
-    if (list) list.push(rw);
-    else byWallId.set(rw.wallId, [rw]);
-  }
-  const closeTo = (a: RVec2, b: Vec2): boolean => Math.abs(a[0] - b.x) < 1e-6 && Math.abs(a[1] - b.y) < 1e-6;
-  for (const floorWalls of byFloor.values()) {
-    const ext = wallCornerExtensions(project, floorWalls);
-    for (const w of floorWalls) {
-      const e = ext.get(w.id);
-      if (!e || (e.start <= EPS && e.end <= EPS)) continue;
-      const pieces = byWallId.get(w.id);
-      if (!pieces) continue;
-      const dx = w.end.x - w.start.x;
-      const dz = w.end.y - w.start.y;
-      const len = Math.hypot(dx, dz);
-      if (len < 1e-9) continue;
-      const ux = dx / len;
-      const uz = dz / len;
-      // Parallelität zur Ansichtsebene: |Achse · u| ≈ 1 (parallel) … 0 (senkrecht).
-      // Facaden-senkrechte Wände NICHT verlängern (sonst Tiefen-Protrusion).
-      if (Math.abs(ux * uModel.x + uz * uModel.y) < 0.35) continue;
-      if (e.start > EPS) {
-        const first = pieces.find((p) => closeTo(p.start, w.start));
-        if (first) first.start = [first.start[0] - ux * e.start, first.start[1] - uz * e.start];
-      }
-      if (e.end > EPS) {
-        const last = pieces.find((p) => closeTo(p.end, w.end));
-        if (last) last.end = [last.end[0] + ux * e.end, last.end[1] + uz * e.end];
-      }
-    }
-  }
-}
-
-/**
- * Die Flächen EINER Deckenplatte (RSlab): Deckel + Boden (Umriss bei zTop/zBottom)
- * und je Umrisskante eine Seitenfläche (Stirn). Die Seitennormalen werden über
- * den Grundriss-Schwerpunkt nach AUSSEN orientiert (unabhängig von der Umriss-
- * Windung). Der Umriss (Modell x,y) wird als Welt (x, y=Höhe, z=y) gehoben.
- */
-export function slabWorldFaces(s: RSlab): WorldFace[] {
-  const n = s.outline.length;
-  if (n < 3 || s.zTop - s.zBottom <= EPS) return [];
-  // Grundriss-Schwerpunkt (für die Aussen-Orientierung der Seitenflächen).
-  let cx = 0;
-  let cz = 0;
-  for (const p of s.outline) {
-    cx += p[0];
-    cz += p[1];
-  }
-  cx /= n;
-  cz /= n;
-  const bottom: V3[] = s.outline.map((p) => [p[0], s.zBottom, p[1]]);
-  const top: V3[] = s.outline.map((p) => [p[0], s.zTop, p[1]]);
-  const faces: WorldFace[] = [];
-  faces.push({ role: "slab", normal: [0, 1, 0], poly: top.slice() });
-  faces.push({ role: "slab", normal: [0, -1, 0], poly: bottom.slice().reverse() });
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const ex = s.outline[j][0] - s.outline[i][0];
-    const ez = s.outline[j][1] - s.outline[i][1];
-    // Kandidat-Normale horizontal quer zur Kante; nach aussen orientieren.
-    let m: V3 = normalize3([ez, 0, -ex]);
-    const midX = (s.outline[i][0] + s.outline[j][0]) / 2;
-    const midZ = (s.outline[i][1] + s.outline[j][1]) / 2;
-    if (m[0] * (midX - cx) + m[2] * (midZ - cz) < 0) m = [-m[0], -m[1], -m[2]];
-    faces.push({
-      role: "slab",
-      normal: m,
-      poly: [bottom[i], bottom[j], top[j], top[i]],
-    });
-  }
-  for (const f of faces) {
-    f.ceilingId = s.ceilingId;
-    f.fill = s.color;
-  }
-  return faces;
-}
-
-// ── Projektion + Sichtbarkeit ──────────────────────────────────────────────
 
 /** Eine in die Ansicht projizierte, sichtbare Fläche. */
 export interface ProjectedFace {
@@ -466,137 +184,164 @@ export interface ProjectedFace {
   normal?: V3;
 }
 
-/**
- * Projiziert eine Welt-Fläche und entscheidet die Sichtbarkeit:
- *   • Rückseiten-Culling: Normale muss GEGEN die Blickrichtung zeigen (N·Nf < 0).
- *   • Vor/Hinter: die mittlere Tiefe muss hinter der Ebene liegen (depth > 0).
- * Sonst `null` (Fläche erscheint nicht).
- */
-export function projectFace(frame: ElevationFrame, face: WorldFace): ProjectedFace | null {
-  const facing = frame.N[0] * face.normal[0] + frame.N[1] * face.normal[1] + frame.N[2] * face.normal[2];
-  if (facing >= -FACING_EPS) return null; // Rückseite oder streifend → unsichtbar
-  const pts: Array<[number, number]> = [];
-  let depthSum = 0;
-  let depthMin = Infinity;
-  let depthMax = -Infinity;
-  for (const w of face.poly) {
-    const p = projectPoint(frame, w);
-    pts.push([p.u, p.v]);
-    depthSum += p.depth;
-    depthMin = Math.min(depthMin, p.depth);
-    depthMax = Math.max(depthMax, p.depth);
-  }
-  const depth = depthSum / face.poly.length;
-  if (depth <= EPS) return null; // vor der Ebene → ignorieren
-  return {
-    pts,
-    depth,
-    depthMin,
-    depthMax,
-    role: face.role,
-    wallId: face.wallId,
-    ceilingId: face.ceilingId,
-    roofId: face.roofId,
-    fill: face.fill,
-    normal: face.normal,
-  };
+const ROLES: FaceRole[] = ["wall", "slab", "roof"];
+
+/** Ansichts-Frame flach für den Kern (`[P, N, U]`). */
+function encodeFrame(frame: ElevationFrame): Float64Array {
+  return Float64Array.from([...frame.P, ...frame.N, ...frame.U]);
 }
 
 /**
- * Sammelt alle sichtbaren, projizierten Flächen des Modells (Wände + Decken),
- * bereits rückseiten-gecullt und vor der Ebene verworfen. Reihenfolge = Emissions-
- * reihenfolge des Modells (NICHT tiefensortiert) — die Painter-Sortierung macht
- * der Aufrufer.
+ * Projiziert Wand-Quader (sechs Flächen je Wand-Box, Aussennormalen), Decken-Prismen (Deckel,
+ * Boden, Stirnflächen) und Dachflächen/Giebel in die Ansicht und behält die sichtbaren
+ * (Rückseiten-Culling: Normale gegen die Blickrichtung, mittlere Tiefe hinter der Ebene).
+ * Rechnet der Kern (`plan_elevation.rs`, [K3c]); hier nur Ein-/Ausgabe samt Herkunft (IDs, Farbe).
+ * Reihenfolge = Emissionsreihenfolge des Modells (NICHT tiefensortiert) — die Painter-Sortierung
+ * macht der Aufrufer.
  */
-export function collectElevationFaces(model: RModel3d, frame: ElevationFrame): ProjectedFace[] {
-  const out: ProjectedFace[] = [];
-  for (const w of model.walls) {
-    for (const f of wallWorldFaces(w)) {
-      const pf = projectFace(frame, f);
-      if (pf) out.push(pf);
+function projectFaces(
+  frame: ElevationFrame,
+  walls: RWall[],
+  slabs: RSlab[],
+  roofs: Array<{ id: string; fill: RRgb; planes: V3[][]; gables: V3[][] }>,
+): ProjectedFace[] {
+  const w: number[] = [walls.length];
+  for (const x of walls) w.push(x.start[0], x.start[1], x.end[0], x.end[1], x.thickness, x.height, x.baseElevation);
+  const sl: number[] = [slabs.length];
+  for (const x of slabs) {
+    sl.push(x.zBottom, x.zTop, x.outline.length);
+    for (const p of x.outline) sl.push(p[0], p[1]);
+  }
+  const r: number[] = [roofs.length];
+  for (const roof of roofs) {
+    r.push(roof.planes.length, roof.gables.length);
+    for (const poly of [...roof.planes, ...roof.gables]) {
+      r.push(poly.length);
+      for (const p of poly) r.push(p[0], p[1], p[2]);
     }
   }
-  for (const s of model.slabs) {
-    for (const f of slabWorldFaces(s)) {
-      const pf = projectFace(frame, f);
-      if (pf) out.push(pf);
+  const f = core().elevation_faces_flat(encodeFrame(frame), Float64Array.from(w), Float64Array.from(sl), Float64Array.from(r));
+  const out: ProjectedFace[] = [];
+  for (let k = 0, i = 1; k < (f[0] ?? 0); k++) {
+    const role = ROLES[f[i]];
+    const src = f[i + 1];
+    const count = f[i + 8];
+    const pts = new Array<[number, number]>(count);
+    for (let j = 0; j < count; j++) pts[j] = [f[i + 9 + 2 * j], f[i + 10 + 2 * j]];
+    const face: ProjectedFace = {
+      pts,
+      depth: f[i + 2],
+      depthMin: f[i + 3],
+      depthMax: f[i + 4],
+      role,
+      normal: [f[i + 5], f[i + 6], f[i + 7]],
+    };
+    if (role === "wall") {
+      face.wallId = walls[src].wallId;
+      face.fill = walls[src].color;
+    } else if (role === "slab") {
+      face.ceilingId = slabs[src].ceilingId;
+      face.fill = slabs[src].color;
+    } else {
+      face.roofId = roofs[src].id;
+      face.fill = roofs[src].fill;
     }
+    out.push(face);
+    i += 9 + 2 * count;
   }
   return out;
 }
 
-// ── Dächer ──────────────────────────────────────────────────────────────────
+/**
+ * Sammelt alle sichtbaren, projizierten Flächen des Modells (Wände + Decken), bereits
+ * rückseiten-gecullt und vor der Ebene verworfen.
+ */
+export function collectElevationFaces(model: RModel3d, frame: ElevationFrame): ProjectedFace[] {
+  return projectFaces(frame, model.walls, model.slabs, []);
+}
 
 /**
- * Die Welt-Flächen ALLER Dächer des Projekts: Dachflächen (Aufsicht-Polygone der
- * roofGeometry, Normale aufwärts orientiert) + Giebel (vertikale Endflächen,
- * Normale vom Dach-Schwerpunkt weg nach aussen). Modell [x,y,z=Höhe] → Welt
- * (x, y=Höhe, z=y), dieselbe Konvention wie emitRoofs/pickGeometry. Die
- * Materialdicke bleibt für die Ansicht unberücksichtigt (Silhouette genügt —
- * die Untersicht ist rückseiten-gecullt ohnehin unsichtbar).
+ * Dachflächen (Aufsicht-Polygone der roofGeometry) und Giebel ALLER Dächer, projiziert. Modell
+ * [x, y, Höhe]; die Eindeckungsfarbe (äusserste Schicht bzw. `roof.color`) entspricht `emitRoofs`
+ * des 3D-Viewers. Die Materialdicke bleibt unberücksichtigt (Silhouette genügt).
  */
-export function roofWorldFacesAll(project: Project): WorldFace[] {
-  const out: WorldFace[] = [];
-  for (const roof of project.roofs ?? []) {
-    const eavesZ = roofBaseElevation(project, roof);
-    const g = roofGeometry(roof, eavesZ);
-    // Äusserste Schicht (Eindeckung) bzw. `roof.color`-Übersteuerung — dieselbe
-    // Farbwahl wie {@link emitRoofs} (3D-Viewer), damit Ansicht/3D konsistent
-    // wirken. Ohne auflösbare Schicht der neutrale Dach-Fallback.
+function collectRoofFaces(project: Project, frame: ElevationFrame): ProjectedFace[] {
+  const roofs = (project.roofs ?? []).map((roof) => {
+    const g = roofGeometry(roof, roofBaseElevation(project, roof));
     const outer = roofLayers(project, roof)[0];
     const fill: RRgb = roof.color
       ? hexToRgb(roof.color, ROOF_RGB_FALLBACK)
       : outer?.componentId
         ? hexToRgb(getComponent(project, outer.componentId).color, ROOF_RGB_FALLBACK)
         : ROOF_RGB_FALLBACK;
-    // Dach-Schwerpunkt (Welt) für die Aussen-Orientierung der Giebel.
-    let cx = 0;
-    let cy = 0;
-    let cz = 0;
-    let cn = 0;
-    for (const pl of g.planes) {
-      for (const p of pl.pts) {
-        cx += p[0];
-        cy += p[2];
-        cz += p[1];
-        cn++;
-      }
-    }
-    if (cn === 0) continue;
-    cx /= cn;
-    cy /= cn;
-    cz /= cn;
-    const newell = (poly: V3[]): V3 => {
-      let nx = 0;
-      let ny = 0;
-      let nz = 0;
-      for (let i = 0; i < poly.length; i++) {
-        const a = poly[i];
-        const b = poly[(i + 1) % poly.length];
-        nx += (a[1] - b[1]) * (a[2] + b[2]);
-        ny += (a[2] - b[2]) * (a[0] + b[0]);
-        nz += (a[0] - b[0]) * (a[1] + b[1]);
-      }
-      return normalize3([nx, ny, nz]);
+    return {
+      id: roof.id,
+      fill,
+      planes: g.planes.map((pl) => pl.pts.map((p) => [p[0], p[1], p[2]] as V3)),
+      gables: g.gables.map((gb) => gb.map((p) => [p[0], p[1], p[2]] as V3)),
     };
-    for (const pl of g.planes) {
-      const poly: V3[] = pl.pts.map((p) => [p[0], p[2], p[1]]);
-      let n = newell(poly);
-      // Dachflächen zeigen aufwärts (Welt-Y).
-      if (n[1] < 0) n = [-n[0], -n[1], -n[2]];
-      out.push({ role: "roof", normal: n, poly, roofId: roof.id, fill });
+  });
+  return projectFaces(frame, [], [], roofs);
+}
+
+/**
+ * Verlängert die (offset-freien) Wand-Boxen des Ansichts-Modells an gemeinsamen Eck-Knoten, damit
+ * Fassaden-Ecken in der Ansicht ohne dreieckige Kerbe/Schattenlücke erscheinen: jedes Wandende
+ * reicht bis zur AUSSENFLÄCHE der dicksten anstossenden anderen Wand desselben Geschosses (L-Ecken,
+ * T-Stösse, versetzte Stösse). Bewusst eine EIGENE, tolerante Näherung statt der Gehrungs-Logik aus
+ * `model/joins.ts`; die Mengen rechnet der Kern (`plan_elevation.rs`).
+ *
+ * Nur Wände etwa PARALLEL zur Ansichtsebene werden verlängert (Fassaden-Silhouette): eine
+ * fassaden-SENKRECHTE Wand würde sonst entlang ihrer Achse in die Tiefe geschoben. `uModel` ist die
+ * Ansichts-u-Achse in Grundriss-Koordinaten. Mutiert `start`/`end` der jeweils äussersten
+ * Teilstücke (Pfeiler vor der ersten bzw. nach der letzten Öffnung) in-place.
+ */
+function extendWallCornersForElevation(project: Project, rwalls: RWall[], uModel: Vec2): void {
+  const floors = new Map<string, number>();
+  const b: number[] = [project.walls.length];
+  for (const w of project.walls) {
+    const key = w.floorId ?? "";
+    if (!floors.has(key)) floors.set(key, floors.size);
+    let thickness = 0.2;
+    try {
+      thickness = wallTypeThickness(getWallType(project, w));
+    } catch {
+      thickness = 0.2;
     }
-    for (const gable of g.gables) {
-      const poly: V3[] = gable.map((p) => [p[0], p[2], p[1]]);
-      if (poly.length < 3) continue;
-      let n = newell(poly);
-      // Giebel zeigen vom Dach-Schwerpunkt weg nach aussen.
-      const toC: V3 = [cx - poly[0][0], cy - poly[0][1], cz - poly[0][2]];
-      if (n[0] * toC[0] + n[1] * toC[1] + n[2] * toC[2] > 0) n = [-n[0], -n[1], -n[2]];
-      out.push({ role: "roof", normal: n, poly, roofId: roof.id, fill });
-    }
+    b.push(floors.get(key)!, w.start.x, w.start.y, w.end.x, w.end.y, thickness / 2);
   }
-  return out;
+  const ext = core().elevation_wall_extensions_flat(Float64Array.from(b));
+  if (ext.length === 0) return;
+  const byWallId = new Map<string, RWall[]>();
+  for (const rw of rwalls) {
+    const list = byWallId.get(rw.wallId);
+    if (list) list.push(rw);
+    else byWallId.set(rw.wallId, [rw]);
+  }
+  const closeTo = (a: RVec2, v: Vec2): boolean => Math.abs(a[0] - v.x) < 1e-6 && Math.abs(a[1] - v.y) < 1e-6;
+  project.walls.forEach((w, k) => {
+    const eStart = ext[1 + 2 * k];
+    const eEnd = ext[2 + 2 * k];
+    if (eStart <= EPS && eEnd <= EPS) return;
+    const pieces = byWallId.get(w.id);
+    if (!pieces) return;
+    const dx = w.end.x - w.start.x;
+    const dz = w.end.y - w.start.y;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-9) return;
+    const ux = dx / len;
+    const uz = dz / len;
+    // Parallelität zur Ansichtsebene: |Achse · u| ≈ 1 (parallel) … 0 (senkrecht).
+    if (Math.abs(ux * uModel.x + uz * uModel.y) < 0.35) return;
+    if (eStart > EPS) {
+      const first = pieces.find((p) => closeTo(p.start, w.start));
+      if (first) first.start = [first.start[0] - ux * eStart, first.start[1] - uz * eStart];
+    }
+    if (eEnd > EPS) {
+      const last = pieces.find((p) => closeTo(p.end, w.end));
+      if (last) last.end = [last.end[0] + ux * eEnd, last.end[1] + uz * eEnd];
+    }
+  });
 }
 
 // ── Fenster/Türen ───────────────────────────────────────────────────────────
@@ -629,90 +374,20 @@ interface ProjectedOpening {
   openingId?: string;
 }
 
-/**
- * Projiziert die Aussenfläche EINER Öffnung (Fenster/Tür) der Wirtswand: das
- * Rechteck [from..to] × [zBottom..zTop] auf der zum Betrachter zeigenden
- * Wand-Langseite (±T/2). Näherung: die Öffnung wird als planare Glasfläche BÜNDIG
- * in der Aussenwandebene dargestellt (keine Laibungstiefe) — genügt für die
- * Fassaden-Lesbarkeit. `null`, wenn keine Seite front-/hinter-Ebene liegt.
- */
-function projectOpeningRect(
-  frame: ElevationFrame,
-  wall: Wall,
-  from: number,
-  to: number,
-  zBottom: number,
-  zTop: number,
-  thickness: number,
-): ProjectedOpening | null {
-  const sx = wall.start.x;
-  const sz = wall.start.y;
-  const ax = wall.end.x - wall.start.x;
-  const az = wall.end.y - wall.start.y;
-  const len = Math.hypot(ax, az);
-  if (len < 1e-9 || to - from <= EPS || zTop - zBottom <= EPS) return null;
-  const aHat: V3 = [ax / len, 0, az / len];
-  const nHat: V3 = [az / len, 0, -ax / len];
-  const ht = thickness / 2;
-  // Kandidaten-Seiten (±T/2): die front-facing + hinter der Ebene liegende nehmen.
-  for (const side of [ht, -ht]) {
-    const normal: V3 = side > 0 ? nHat : [-nHat[0], -nHat[1], -nHat[2]];
-    const facing = frame.N[0] * normal[0] + frame.N[1] * normal[1] + frame.N[2] * normal[2];
-    if (facing >= -FACING_EPS) continue;
-    const corner = (sAlong: number, y: number): V3 => [
-      sx + aHat[0] * sAlong + nHat[0] * side,
-      y,
-      sz + aHat[2] * sAlong + nHat[2] * side,
-    ];
-    const world = [corner(from, zBottom), corner(to, zBottom), corner(to, zTop), corner(from, zTop)];
-    const pts: Array<[number, number]> = [];
-    let depthSum = 0;
-    for (const w of world) {
-      const p = projectPoint(frame, w);
-      pts.push([p.u, p.v]);
-      depthSum += p.depth;
-    }
-    const depth = depthSum / world.length;
-    if (depth <= EPS) continue;
-    // pts-Reihenfolge: [unten-von, unten-bis, oben-bis, oben-von] — Basis für
-    // die (fa, fz)-Interpolation der Flügel-/Glasfelder in collectOpenings.
-    return { pts, depth, glass: [], doorLeaf: [], divisions: [], sashRects: [], sill: [], symbol: [], isDoor: false };
-  }
-  return null;
-}
+/** Öffnungsart (`WindowSash.opening`/`WindowType.kind`) in der Kern-Kodierung. */
+const SASH_KIND: Record<string, number> = { dreh: 1, kipp: 2, drehkipp: 3, schiebe: 4 };
 
 /**
- * Alle Öffnungs-Flächen (Fenster/Türen inkl. Legacy-Türen) des Projekts, auf die
- * jeweilige Wand-Aussenseite projiziert. Thickness = WallType-Dicke (Fallback
- * 0.2 m). Rein aus dem Projekt (nicht aus dem geflachten Modell), damit Rahmen+Glas
- * unabhängig von der Segment-Aussparung der Wand-Box gezeichnet werden können.
+ * Alle Öffnungs-Flächen (Fenster/Türen inkl. Legacy-Türen) des Projekts, auf die jeweilige
+ * Wand-Aussenseite projiziert (Rahmen, Glasfelder je Flügel/Sprossenraster, Kämpfer, Sims,
+ * Öffnungssymbol nach SIA). Thickness = WallType-Dicke (Fallback 0.2 m). Rein aus dem Projekt
+ * (nicht aus dem geflachten Modell), damit Rahmen+Glas unabhängig von der Segment-Aussparung der
+ * Wand-Box gezeichnet werden können. Die Geometrie rechnet der Kern (`plan_elevation.rs`, [K3c]);
+ * hier die Auflösung aus dem Modell (Typ-Bibliothek) und die Übersetzung.
  */
 function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpening[] {
-  const out: ProjectedOpening[] = [];
-  const lerp = (
-    a: [number, number],
-    b: [number, number],
-    t: number,
-  ): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  // Punkt im Öffnungs-Quad: fa = Anteil entlang der Wandachse, fz = Höhenanteil.
-  const quadAt = (
-    q: Array<[number, number]>,
-    fa: number,
-    fz: number,
-  ): [number, number] => lerp(lerp(q[0], q[1], fa), lerp(q[3], q[2], fa), fz);
-  const rect = (
-    q: Array<[number, number]>,
-    fa0: number,
-    fa1: number,
-    fz0: number,
-    fz1: number,
-  ): Array<[number, number]> => [
-    quadAt(q, fa0, fz0),
-    quadAt(q, fa1, fz0),
-    quadAt(q, fa1, fz1),
-    quadAt(q, fa0, fz1),
-  ];
-
+  const b: number[] = [0];
+  const ids: string[] = [];
   for (const wall of project.walls) {
     let thickness = 0.2;
     try {
@@ -724,337 +399,85 @@ function collectOpenings(project: Project, frame: ElevationFrame): ProjectedOpen
       const iv = openingInterval(wall, op);
       if (!iv) continue;
       const v = openingVerticalExtent(project, wall, op);
-      const pr = projectOpeningRect(frame, wall, iv.from, iv.to, v.zBottom, v.zTop, thickness);
-      if (!pr) continue;
-      pr.openingId = op.id;
-      const w = iv.to - iv.from;
-      const h = v.zTop - v.zBottom;
-      if (op.kind === "door") {
-        // Türen im Projekt-`openings`-Array: Blatt-Fläche, bei Glasblatt mit
-        // Teilverglasung (`glazingRatio`, Kämpferhöhe von OBEN gemessen wie
-        // beim Fenster-Oberlicht) — Glasanteil oben (`glass`), blinder Rest
-        // unten (`doorLeaf`), Trennlinie dazwischen ab Kämpfer.
-        pr.isDoor = true;
-        const dt = getDoorType(project, op);
-        if (dt?.leafStyle === "glas") {
-          const ratio = Math.max(0.05, Math.min(1, dt.glazingRatio ?? 1));
-          if (ratio >= 1 - EPS) {
-            pr.glass.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
-          } else {
-            const splitZ = 0.97 * (1 - ratio);
-            pr.glass.push(rect(pr.pts, 0.04, 0.96, splitZ, 0.97));
-            pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, splitZ));
-            pr.divisions.push([quadAt(pr.pts, 0.04, splitZ), quadAt(pr.pts, 0.96, splitZ)]);
-          }
-        } else {
-          pr.doorLeaf.push(rect(pr.pts, 0.04, 0.96, 0, 0.97));
-        }
-        out.push(pr);
-        continue;
+      const door = op.kind === "door";
+      const dt = door ? getDoorType(project, op) : undefined;
+      const wt = door ? undefined : getWindowType(project, op);
+      const sashes = door ? [] : wt ? sashesOfWindowType(wt) : [{ kind: "fluegel" as const }];
+      b.push(
+        wall.start.x, wall.start.y, wall.end.x, wall.end.y, thickness, iv.from, iv.to, v.zBottom, v.zTop,
+        door ? 1 : 0, dt?.leafStyle === "glas" ? 1 : 0, dt?.glazingRatio ?? Number.NaN,
+        wt?.frameWidth ?? 0.06, wt?.transomHeight ?? 0, wt?.mullionRows ?? Number.NaN, wt?.mullionCols ?? Number.NaN,
+        wt?.sillBoard !== "keine" && wt?.sillBoard !== "innen" ? 1 : 0,
+        SASH_KIND[wt?.kind ?? "fest"] ?? 0,
+        sashes.length,
+      );
+      for (const sd of sashes as Array<{ kind: string; postWidth?: number; autoWidth?: boolean; width?: number; opening?: string; hingeSide?: string }>) {
+        b.push(
+          sd.kind === "pfosten" ? 1 : 0, sd.postWidth ?? Number.NaN, sd.autoWidth === false ? 0 : 1, sd.width ?? Number.NaN,
+          sd.opening === undefined ? -1 : SASH_KIND[sd.opening] ?? 0, (sd.hingeSide ?? "left") === "left" ? 1 : 0,
+        );
       }
-      // Fenster: Blendrahmen → Flügelfelder → Glas (+ Kämpfer/Oberlicht) aus dem
-      // Fenstertyp; ohne Typ ein einzelnes Glasfeld im Default-Rahmen.
-      const wt = getWindowType(project, op);
-      const fw = wt?.frameWidth ?? 0.06;
-      const fa = Math.min(0.45, fw / Math.max(w, 1e-6));
-      const fz = Math.min(0.45, fw / Math.max(h, 1e-6));
-      const transom = Math.max(0, wt?.transomHeight ?? 0);
-      // Oberlicht-Trennung als Höhenanteil (0 = keins).
-      const fTr = transom > EPS && transom < h - fw ? 1 - transom / h : 0;
-      const fieldTop = fTr > 0 ? fTr - fz / 2 : 1 - fz;
-      // Flügel-Spannen über die innere Breite (autoWidth gleichmässig).
-      const sashes = wt ? sashesOfWindowType(wt) : [{ kind: "fluegel" as const }];
-      const innerW = Math.max(1e-6, w * (1 - 2 * fa));
-      let fixedSum = 0;
-      let autoCount = 0;
-      for (const sd of sashes) {
-        if (sd.kind === "pfosten") fixedSum += Math.max(0, sd.postWidth ?? 0.06);
-        else if (sd.autoWidth === false) fixedSum += Math.max(0, sd.width ?? 0);
-        else autoCount++;
-      }
-      const autoW = autoCount > 0 ? Math.max(0.02, (innerW - fixedSum) / autoCount) : 0;
-      let cursor = fa;
-      for (const sd of sashes) {
-        const sw =
-          sd.kind === "pfosten"
-            ? Math.max(0, sd.postWidth ?? 0.06)
-            : sd.autoWidth === false
-              ? Math.max(0, sd.width ?? autoW)
-              : autoW;
-        const fa0 = cursor;
-        const fa1 = cursor + sw / w;
-        cursor = fa1;
-        if (sd.kind === "pfosten") {
-          // Pfosten als Teilungslinie (Mitte).
-          const fm = (fa0 + fa1) / 2;
-          pr.divisions.push([quadAt(pr.pts, fm, fz), quadAt(pr.pts, fm, fieldTop)]);
-          continue;
-        }
-        // Flügelrahmen (Kontur) + Glas darin eingerückt (VW: Blendrahmen →
-        // Flügelprofil → Glas als drei ablesbare Konturen).
-        pr.sashRects.push(rect(pr.pts, fa0, fa1, fz, fieldTop));
-        const spw = Math.min(0.06, Math.max(0.03, fw)); // Flügelprofil (m)
-        const gU = spw / Math.max(w, 1e-6);
-        const gV = spw / Math.max(h, 1e-6);
-        const gA = fa0 + gU;
-        const gB = fa1 - gU;
-        const gz0 = fz + gV;
-        const gz1 = fieldTop - gV;
-        // Kämpfer-/Sprossen-Zeilen (mullionRows): das Glasfeld wird in `rows`
-        // horizontale Scheiben geteilt (analog zum 3D, s. toWalls3d), mit einer
-        // Trennlinie je Zeilengrenze über die Glasbreite. 1 = ungeteilt (bisher).
-        const rows = Math.max(1, Math.round(wt?.mullionRows ?? 1));
-        // Sprossen-Spalten (mullionCols): das Glasfeld wird in `cols` vertikale
-        // Scheiben geteilt (analog zum 3D, s. toWalls3d), mit einer
-        // Trennlinie je Spaltengrenze über die Glasscheibenhöhe.
-        const cols = Math.max(1, Math.round(wt?.mullionCols ?? 1));
-        if (gB - gA > 1e-6 && gz1 - gz0 > 1e-6) {
-          // Glasfelder: rows × cols Gitter aus Einzelscheiben.
-          for (let r = 0; r < rows; r++) {
-            const rz0 = gz0 + ((gz1 - gz0) * r) / rows + (r > 0 ? gV / 2 : 0);
-            const rz1 = gz0 + ((gz1 - gz0) * (r + 1)) / rows - (r < rows - 1 ? gV / 2 : 0);
-            if (rz1 - rz0 <= 1e-6) continue;
-            for (let c = 0; c < cols; c++) {
-              const ca0 = gA + ((gB - gA) * c) / cols + (c > 0 ? gU / 2 : 0);
-              const ca1 = gA + ((gB - gA) * (c + 1)) / cols - (c < cols - 1 ? gU / 2 : 0);
-              if (ca1 - ca0 > 1e-6) pr.glass.push(rect(pr.pts, ca0, ca1, rz0, rz1));
-            }
-          }
-          // Horizontale Trennlinien (Kämpfer)
-          for (let r = 1; r < rows; r++) {
-            const rz = gz0 + ((gz1 - gz0) * r) / rows;
-            pr.divisions.push([quadAt(pr.pts, gA, rz), quadAt(pr.pts, gB, rz)]);
-          }
-          // Vertikale Trennlinien (Sprossen-Spalten)
-          for (let c = 1; c < cols; c++) {
-            const ca = gA + ((gB - gA) * c) / cols;
-            pr.divisions.push([quadAt(pr.pts, ca, gz0), quadAt(pr.pts, ca, gz1)]);
-          }
-        }
-        // Trennlinie zum nächsten Feld (ausser am Rand).
-        if (fa1 < 1 - fa - 1e-6) {
-          pr.divisions.push([quadAt(pr.pts, fa1, fz), quadAt(pr.pts, fa1, fieldTop)]);
-        }
-        // Öffnungssymbol (SIA B.9.1.3): Linien starten/enden EXAKT auf den
-        // Glasfeld-Ecken (Nutzer-Report: Anker waren daneben). Dreh/Drehkipp:
-        // Spitze zeigt zur Bandseite (Anschlag), Basis zur Griffseite — SIA-
-        // Konvention. Kipp: Spitze oben Mitte (VW).
-        const kind = sd.opening ?? wt?.kind ?? "fest";
-        if (kind === "dreh" || kind === "drehkipp") {
-          const hingeLeft = (sd.hingeSide ?? "left") === "left";
-          const apex = quadAt(pr.pts, hingeLeft ? gA : gB, (gz0 + gz1) / 2);
-          const farU = hingeLeft ? gB : gA;
-          pr.symbol.push(
-            [quadAt(pr.pts, farU, gz0), apex],
-            [quadAt(pr.pts, farU, gz1), apex],
-          );
-        }
-        if (kind === "kipp" || kind === "drehkipp") {
-          const apex = quadAt(pr.pts, (gA + gB) / 2, gz1);
-          pr.symbol.push(
-            [quadAt(pr.pts, gA, gz0), apex],
-            [quadAt(pr.pts, gB, gz0), apex],
-          );
-        }
-        if (kind === "schiebe") {
-          // Schiebeflügel (SIA: „vertikales/horizontales Schiebefenster"):
-          // KEIN Dreieck (keine Bandseite), sondern ein Pfeil in Laufrichtung
-          // (horizontal) auf halber Glashöhe — die Griffseite (hingeSide)
-          // bestimmt die Pfeilrichtung.
-          const zc = (gz0 + gz1) / 2;
-          const toRight = (sd.hingeSide ?? "left") === "left"; // Griff links ⇒ schiebt nach rechts
-          const tail = toRight ? gA : gB;
-          const head = toRight ? gB : gA;
-          const barb = (head - tail) * 0.22; // Pfeilspitzen-Rücksprung (Glasbreite-Anteil)
-          const headPt = quadAt(pr.pts, head, zc);
-          pr.symbol.push(
-            [quadAt(pr.pts, tail, zc), headPt], // Schaft
-            [quadAt(pr.pts, head - barb, gz0 + (gz1 - gz0) * 0.32), headPt], // obere Spitze
-            [quadAt(pr.pts, head - barb, gz0 + (gz1 - gz0) * 0.68), headPt], // untere Spitze
-          );
-        }
-      }
-      // Fensterbank (Sims, VW): Bank + Tropfkante als zwei Bänder unter dem
-      // Rahmen, seitlich leicht überstehend. Default AN (sillBoard fehlt),
-      // aus bei "keine"/"innen".
-      const sb = wt?.sillBoard;
-      if (sb !== "keine" && sb !== "innen") {
-        const ov1 = 0.02 / Math.max(w, 1e-6);
-        const ov2 = 0.05 / Math.max(w, 1e-6);
-        const h1 = 0.035 / Math.max(h, 1e-6);
-        const h2 = 0.025 / Math.max(h, 1e-6);
-        pr.sill.push(rect(pr.pts, -ov1, 1 + ov1, -h1, 0));
-        pr.sill.push(rect(pr.pts, -ov2, 1 + ov2, -(h1 + h2), -h1));
-      }
-
-      // Oberlicht: eigenes Glasfeld + Kämpferlinie.
-      if (fTr > 0) {
-        pr.glass.push(rect(pr.pts, fa, 1 - fa, fTr + fz / 2, 1 - fz));
-        pr.divisions.push([quadAt(pr.pts, 0, fTr), quadAt(pr.pts, 1, fTr)]);
-      }
-      out.push(pr);
+      ids.push(op.id);
+      b[0]++;
     }
+  }
+  const f = core().elevation_openings_flat(encodeFrame(frame), Float64Array.from(b));
+  const out: ProjectedOpening[] = [];
+  if (f.length === 0) return out;
+  let i = 1;
+  const quads = (): Array<Array<[number, number]>> => {
+    const list: Array<Array<[number, number]>> = [];
+    for (let k = 0, n = f[i++]; k < n; k++, i += 8) {
+      list.push([[f[i], f[i + 1]], [f[i + 2], f[i + 3]], [f[i + 4], f[i + 5]], [f[i + 6], f[i + 7]]]);
+    }
+    return list;
+  };
+  const lines = (): Array<[[number, number], [number, number]]> => {
+    const list: Array<[[number, number], [number, number]]> = [];
+    for (let k = 0, n = f[i++]; k < n; k++, i += 4) list.push([[f[i], f[i + 1]], [f[i + 2], f[i + 3]]]);
+    return list;
+  };
+  for (let k = 0; k < f[0]; k++) {
+    if (f[i++] === 0) continue;
+    const depth = f[i];
+    const isDoor = f[i + 1] === 1;
+    const pts: Array<[number, number]> = [[f[i + 2], f[i + 3]], [f[i + 4], f[i + 5]], [f[i + 6], f[i + 7]], [f[i + 8], f[i + 9]]];
+    i += 10;
+    const glass = quads();
+    const doorLeaf = quads();
+    const divisions = lines();
+    const sashRects = quads();
+    const sill = quads();
+    const symbol = lines();
+    out.push({ pts, depth, glass, doorLeaf, divisions, sashRects, sill, symbol, isDoor, openingId: ids[k] });
   }
   return out;
 }
 
 // ── Schlagschatten (45°, klassische Architektur-Konvention) ─────────────────
 
-/** Achsparalleles (u, v)-Rechteck. */
-interface UVRect {
-  uMin: number;
-  uMax: number;
-  vMin: number;
-  vMax: number;
-}
-
-function bboxOf(pts: Array<[number, number]>): UVRect {
-  let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
-  for (const [u, v] of pts) {
-    if (u < uMin) uMin = u;
-    if (u > uMax) uMax = u;
-    if (v < vMin) vMin = v;
-    if (v > vMax) vMax = v;
-  }
-  return { uMin, uMax, vMin, vMax };
-}
-
 /**
  * Ein opakes Verdeckungs-Polygon (projizierte Fläche) mit seiner FERNSTEN Tiefe
- * (`depthMax`): eine Linie/Fläche gilt nur dann als verdeckt, wenn sie hinter
- * dem gesamten Occluder liegt (`> depthMax`) — konservativ, damit gekippte
- * Flächen (Dach) keine sichtbaren Kanten fälschlich wegschneiden.
+ * (`depth` = `depthMax`): eine Linie/Fläche gilt nur dann als verdeckt, wenn sie hinter
+ * dem gesamten Occluder liegt — konservativ, damit gekippte Flächen (Dach) keine
+ * sichtbaren Kanten fälschlich wegschneiden. Das Clipping selbst rechnet der Kern
+ * (`plan_elevation.rs`, [K3c]): warum überhaupt clippen — die GL-Ansicht zeichnet ALLE
+ * Linien in einem EIGENEN Stift-Durchgang ÜBER allen Füllungen (s. `glPlan/glPlanCompile.ts`);
+ * eine reine Painter-Tiefensortierung der Flächen verdeckt Linien also NICHT.
  */
 interface Occluder {
   poly: Array<[number, number]>;
-  bbox: UVRect;
   depth: number;
 }
 
-/** Warum überhaupt clippen: die GL-Ansicht zeichnet ALLE Linien in einem
- *  EIGENEN Stift-Durchgang ÜBER allen Füllungen (s. `glPlan/glPlanCompile.ts`);
- *  eine reine Painter-Tiefensortierung der Flächen verdeckt Linien also NICHT.
- *  Verdeckte Linienstücke werden darum hier, beim Planaufbau, exakt entfernt. */
-const OCC_MARGIN = 2e-3;
-
-/**
- * Teilintervall `[t0,t1] ⊆ [0,1]` des Segments A→B, das INNERHALB des konvexen
- * Polygons liegt (Halbebenen-Schnitt auf dem Parameter t), oder `null`. Die
- * Polygon-Windung wird aus der Signfläche bestimmt, sodass die Innen-Seite jeder
- * Kante korrekt orientiert ist (kein Vorwissen über CW/CCW nötig).
- */
-function segmentInsidePolyInterval(
-  a: [number, number],
-  b: [number, number],
-  poly: Array<[number, number]>,
-): [number, number] | null {
-  const n = poly.length;
-  if (n < 3) return null;
-  let area = 0;
-  for (let i = 0; i < n; i++) {
-    const p = poly[i];
-    const q = poly[(i + 1) % n];
-    area += p[0] * q[1] - q[0] * p[1];
+/** Verdecker flach für den Kern (`[n, (tiefe, k, u, v …) × n]`). */
+function encodeOccluders(occ: Occluder[]): Float64Array {
+  const b: number[] = [occ.length];
+  for (const o of occ) {
+    b.push(o.depth, o.poly.length);
+    for (const [u, v] of o.poly) b.push(u, v);
   }
-  const sign = area >= 0 ? 1 : -1;
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  let t0 = 0;
-  let t1 = 1;
-  for (let i = 0; i < n; i++) {
-    const p = poly[i];
-    const q = poly[(i + 1) % n];
-    const ex = q[0] - p[0];
-    const ey = q[1] - p[1];
-    // Innen: sign·cross(edge, X−p) ≥ 0. f(t) = c0 + cd·t.
-    const c0 = sign * (ex * (a[1] - p[1]) - ey * (a[0] - p[0]));
-    const cd = sign * (ex * dy - ey * dx);
-    if (Math.abs(cd) < 1e-12) {
-      if (c0 < 0) return null; // Segment komplett ausserhalb dieser Kante
-    } else {
-      const tHit = -c0 / cd;
-      if (cd > 0) t0 = Math.max(t0, tHit);
-      else t1 = Math.min(t1, tHit);
-      if (t0 > t1) return null;
-    }
-  }
-  return t0 <= t1 ? [t0, t1] : null;
-}
-
-/**
- * Sichtbare Teilstücke eines Segments A→B (Tiefe `depth`): entfernt alle Anteile,
- * die innerhalb eines NÄHEREN opaken Occluders (`o.depth < depth − margin`)
- * liegen. Liefert die verbleibenden Segmente (leer, wenn ganz verdeckt). Exakt
- * (Polygon-Halbebenen), nicht die frühere Bounding-Box-Näherung.
- */
-function clipSegmentVisible(
-  a: [number, number],
-  b: [number, number],
-  depth: number,
-  occluders: Occluder[],
-): Array<[[number, number], [number, number]]> {
-  const cuts: Array<[number, number]> = [];
-  const segMin: [number, number] = [Math.min(a[0], b[0]), Math.min(a[1], b[1])];
-  const segMax: [number, number] = [Math.max(a[0], b[0]), Math.max(a[1], b[1])];
-  for (const o of occluders) {
-    if (o.depth >= depth - OCC_MARGIN) continue; // nicht echt näher
-    // Billiger Bounding-Box-Vorabtest.
-    if (o.bbox.uMax < segMin[0] || o.bbox.uMin > segMax[0]) continue;
-    if (o.bbox.vMax < segMin[1] || o.bbox.vMin > segMax[1]) continue;
-    const iv = segmentInsidePolyInterval(a, b, o.poly);
-    if (iv && iv[1] - iv[0] > 1e-6) cuts.push(iv);
-  }
-  if (cuts.length === 0) return [[a, b]];
-  cuts.sort((x, y) => x[0] - y[0]);
-  const at = (t: number): [number, number] => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  const out: Array<[[number, number], [number, number]]> = [];
-  let cursor = 0;
-  for (const [s, e] of cuts) {
-    if (s > cursor + 1e-6) out.push([at(cursor), at(Math.min(s, 1))]);
-    cursor = Math.max(cursor, e);
-    if (cursor >= 1) break;
-  }
-  if (cursor < 1 - 1e-6) out.push([at(cursor), at(1)]);
-  return out;
-}
-
-/**
- * Clippt ein Polygon an ein achsparalleles Rechteck (Sutherland–Hodgman, vier
- * Halbebenen). Liefert das (konvexe) Restpolygon oder [] bei leerem Schnitt.
- */
-function clipPolygonToRect(poly: Array<[number, number]>, r: UVRect): Array<[number, number]> {
-  type Pt = [number, number];
-  const clip = (
-    input: Pt[],
-    inside: (p: Pt) => boolean,
-    intersect: (a: Pt, b: Pt) => Pt,
-  ): Pt[] => {
-    const out: Pt[] = [];
-    for (let i = 0; i < input.length; i++) {
-      const a = input[i];
-      const b = input[(i + 1) % input.length];
-      const ain = inside(a);
-      const bin = inside(b);
-      if (ain) out.push(a);
-      if (ain !== bin) out.push(intersect(a, b));
-    }
-    return out;
-  };
-  let p: Pt[] = poly.slice();
-  const lerp = (a: Pt, b: Pt, t: number): Pt => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  // links (u >= uMin)
-  p = clip(p, (q) => q[0] >= r.uMin, (a, b) => lerp(a, b, (r.uMin - a[0]) / (b[0] - a[0])));
-  if (p.length < 3) return [];
-  // rechts (u <= uMax)
-  p = clip(p, (q) => q[0] <= r.uMax, (a, b) => lerp(a, b, (r.uMax - a[0]) / (b[0] - a[0])));
-  if (p.length < 3) return [];
-  // unten (v >= vMin)
-  p = clip(p, (q) => q[1] >= r.vMin, (a, b) => lerp(a, b, (r.vMin - a[1]) / (b[1] - a[1])));
-  if (p.length < 3) return [];
-  // oben (v <= vMax)
-  p = clip(p, (q) => q[1] <= r.vMax, (a, b) => lerp(a, b, (r.vMax - a[1]) / (b[1] - a[1])));
-  if (p.length < 3) return [];
-  return p;
+  return Float64Array.from(b);
 }
 
 /** Ein Schatten-Polygon mit der Tiefe der Empfängerfläche (für die Painter-Ordnung). */
@@ -1063,51 +486,35 @@ interface ShadowPoly {
   depth: number;
 }
 
+function encodeShadowFaces(faces: ProjectedFace[]): Float64Array {
+  const b: number[] = [faces.length];
+  for (const f of faces) {
+    b.push(f.depth, f.depthMin, f.pts.length);
+    for (const [u, v] of f.pts) b.push(u, v);
+  }
+  return Float64Array.from(b);
+}
+
 /**
  * Baut die Schlagschatten auskragender Decken/Balkone (Slabs) auf die dahinter
  * liegenden Fassaden (Wände). KLASSISCHE ARCHITEKTUR-KONVENTION: Sonne 45° von
  * links oben ⇒ die Unterkante des Überstands wirft einen Schatten, dessen
- * horizontaler Versatz UND vertikaler Abfall der Auskragungstiefe entspricht
- * (Δ = Tiefendifferenz Empfänger − Überstand). Der Schatten ist ein Parallelo-
- * gramm unter der Überstand-Unterkante (Höhe/Breite ∝ Δ), geclippt auf die
- * Empfänger-Fassade.
- *
- * NÄHERUNG (dokumentiert): Überstand-Silhouette = (u, v)-Bounding-Box der Slab-
- * Fläche; Empfänger = Bounding-Box der Wandfläche. Nur Slab→Wand-Paare mit
- * echtem Tiefen-Vorsprung (Slab näher) und u-Überlapp erzeugen Schatten. Deckt
- * die geforderten Fälle (Dachüberstand/Traufe, auskragende Decke/Balkon) ab;
- * schräge Auskragungen werden als achsparalleles Band angenähert.
+ * horizontaler Versatz UND vertikaler Abfall der Auskragungstiefe entspricht.
+ * Rechnet der Kern (`plan_elevation.rs`): Näherung Überstand-Silhouette = (u, v)-
+ * Bounding-Box der Slab-Fläche, Empfänger = Bounding-Box der Wandfläche; nur Paare mit
+ * echtem Tiefen-Vorsprung (höchstens 1,2 m) und u-Überlapp.
  */
-/** Maximale Schatten-Tiefendifferenz (Meter): tiefer liegende Empfänger (ferne
- *  Innen-/Rückwände) bekämen sonst raumhohe Schatten-Parallelogramme —
- *  gezeichnet wird der klassische Bauteil-Schlagschatten (Traufe, Balkon),
- *  nicht die globale Verschattung. */
-const MAX_SHADOW_DELTA = 1.2;
-
 export function buildShadows(walls: ProjectedFace[], slabs: ProjectedFace[]): ShadowPoly[] {
+  const f = core().elevation_shadows_flat(encodeShadowFaces(walls), encodeShadowFaces(slabs));
   const out: ShadowPoly[] = [];
-  for (const slab of slabs) {
-    const so = bboxOf(slab.pts);
-    for (const wall of walls) {
-      const wo = bboxOf(wall.pts);
-      // Werfer-Tiefe = NÄCHSTE Kante (depthMin): bei geneigten Dachflächen ist
-      // das die auskragende Traufe — der Bezug für die Schattentiefe.
-      const delta = wall.depth - slab.depthMin; // Wand hinter dem Überstand?
-      if (delta <= EPS || delta > MAX_SHADOW_DELTA) continue;
-      // u-Überlapp Überstand/Wand?
-      if (so.uMax <= wo.uMin + EPS || so.uMin >= wo.uMax - EPS) continue;
-      // Der Schatten hängt an der Slab-Unterkante (so.vMin) und fällt um Δ nach
-      // unten, versetzt um Δ nach rechts (Sonne von links oben).
-      const vTop = so.vMin;
-      const parallelogram: Array<[number, number]> = [
-        [so.uMin, vTop],
-        [so.uMax, vTop],
-        [so.uMax + delta * SUN_U, vTop + delta * SUN_V],
-        [so.uMin + delta * SUN_U, vTop + delta * SUN_V],
-      ];
-      const clipped = clipPolygonToRect(parallelogram, wo);
-      if (clipped.length >= 3) out.push({ pts: clipped, depth: wall.depth });
-    }
+  let i = 1;
+  for (let k = 0; k < (f[0] ?? 0); k++) {
+    const depth = f[i];
+    const count = f[i + 1];
+    i += 2;
+    const pts = new Array<[number, number]>(count);
+    for (let j = 0; j < count; j++, i += 2) pts[j] = [f[i], f[i + 1]];
+    out.push({ pts, depth });
   }
   return out;
 }
@@ -1116,62 +523,22 @@ export function buildShadows(walls: ProjectedFace[], slabs: ProjectedFace[]): Sh
 
 /**
  * Vereinigungs-UMRISS einer Gruppe achsparalleler (u,v)-Rechteckflächen über
- * Kanten-XOR: jede Kante wird als Intervall auf ihrer Trägerlinie gesammelt;
- * Bereiche mit GERADER Überdeckung (geteilte Innenkanten zweier Teilboxen)
- * heben sich auf, ungerade Bereiche bilden die Silhouette — inklusive der
- * Fensterlöcher (die Teilboxen um eine Öffnung lassen genau deren Rand übrig).
- * Nicht-achsparallele Kanten werden unverändert durchgereicht.
+ * Kanten-XOR: Bereiche mit GERADER Überdeckung (geteilte Innenkanten zweier
+ * Teilboxen) heben sich auf, ungerade Bereiche bilden die Silhouette — inklusive der
+ * Fensterlöcher. Nicht-achsparallele Kanten werden unverändert durchgereicht.
+ * Rechnet der Kern (`plan_elevation.rs`).
  */
 export function xorOutlineEdges(
   polys: Array<Array<[number, number]>>,
 ): Array<[[number, number], [number, number]]> {
-  const EPS_AX = 1e-6;
-  const keyOf = (x: number): number => Math.round(x * 1e5);
-  const horiz = new Map<number, Array<[number, number]>>();
-  const vert = new Map<number, Array<[number, number]>>();
-  const out: Array<[[number, number], [number, number]]> = [];
+  const b: number[] = [polys.length];
   for (const poly of polys) {
-    for (let i = 0; i < poly.length; i++) {
-      const a = poly[i];
-      const b = poly[(i + 1) % poly.length];
-      if (Math.abs(a[1] - b[1]) < EPS_AX) {
-        const k = keyOf(a[1]);
-        if (!horiz.has(k)) horiz.set(k, []);
-        horiz.get(k)!.push([Math.min(a[0], b[0]), Math.max(a[0], b[0])]);
-      } else if (Math.abs(a[0] - b[0]) < EPS_AX) {
-        const k = keyOf(a[0]);
-        if (!vert.has(k)) vert.set(k, []);
-        vert.get(k)!.push([Math.min(a[1], b[1]), Math.max(a[1], b[1])]);
-      } else {
-        out.push([a, b]);
-      }
-    }
+    b.push(poly.length);
+    for (const [u, v] of poly) b.push(u, v);
   }
-  const sweep = (
-    m: Map<number, Array<[number, number]>>,
-    emit: (coord: number, s: number, e: number) => void,
-  ): void => {
-    for (const [k, ivs] of m) {
-      const evs: Array<[number, number]> = [];
-      for (const [s, e] of ivs) {
-        if (e - s < 1e-9) continue;
-        evs.push([s, 1], [e, -1]);
-      }
-      evs.sort((p, q) => p[0] - q[0] || q[1] - p[1]);
-      let count = 0;
-      let start = 0;
-      const coord = k / 1e5;
-      for (const [x, d] of evs) {
-        const wasOdd = count % 2 === 1;
-        count += d;
-        const isOdd = count % 2 === 1;
-        if (!wasOdd && isOdd) start = x;
-        else if (wasOdd && !isOdd && x - start > 1e-9) emit(coord, start, x);
-      }
-    }
-  };
-  sweep(horiz, (v, s, e) => out.push([[s, v], [e, v]]));
-  sweep(vert, (u, s, e) => out.push([[u, s], [u, e]]));
+  const f = core().elevation_xor_outline_flat(Float64Array.from(b));
+  const out: Array<[[number, number], [number, number]]> = [];
+  for (let k = 0, i = 1; k < (f[0] ?? 0); k++, i += 4) out.push([[f[i], f[i + 1]], [f[i + 2], f[i + 3]]]);
   return out;
 }
 
@@ -1215,12 +582,7 @@ export function generateElevationPlan(
   const model = projectToModel3d(project, { layeredWalls: false });
   // Ansichts-u-Achse in Grundriss-Koordinaten (Welt x,z = Modell x,y).
   extendWallCornersForElevation(project, model.walls, { x: frame.U[0], y: frame.U[2] });
-  let faces = collectElevationFaces(model, frame);
-  // Dächer analytisch (roofGeometry) — nicht Teil von RModel3d walls/slabs.
-  for (const rf of roofWorldFacesAll(project)) {
-    const pf = projectFace(frame, rf);
-    if (pf) faces.push(pf);
-  }
+  let faces = [...collectElevationFaces(model, frame), ...collectRoofFaces(project, frame)];
   // Grafik-Kategorie einer projizierten Fläche (Quell-Wand/-Decke/-Dach) — für
   // Ebenen-Panel-Sichtbarkeit UND -Dimmen (s. u.).
   const categoryCodeOfFace = (f: ProjectedFace): string | undefined => {
@@ -1263,32 +625,21 @@ export function generateElevationPlan(
   // Fassade). Linien HINTER einem Occluder werden exakt herausgeschnitten —
   // nötig, weil die GL-Pipeline alle Linien in einem eigenen Durchgang über die
   // Füllungen legt.
-  const occluders: Occluder[] = faces.map((f) => ({
-    poly: f.pts,
-    bbox: bboxOf(f.pts),
-    depth: f.depthMax,
-  }));
-  for (const op of openings) {
-    occluders.push({ poly: op.pts, bbox: bboxOf(op.pts), depth: op.depth });
-  }
-  // Ist ein Punkt hinter einer näheren opaken Fläche verborgen? (Ganz-Öffnung-Cull.)
-  const pointInPoly = (pt: [number, number], poly: Array<[number, number]>): boolean => {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const [xi, yi] = poly[i];
-      const [xj, yj] = poly[j];
-      if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  const occluders: Occluder[] = faces.map((f) => ({ poly: f.pts, depth: f.depthMax }));
+  for (const op of openings) occluders.push({ poly: op.pts, depth: op.depth });
+  const occFlat = encodeOccluders(occluders);
+  // Ganz-Öffnung-Cull: liegt der Öffnungs-Mittelpunkt hinter einer näheren opaken Fläche?
+  const openingOccluded = (() => {
+    const b: number[] = [openings.length];
+    for (const op of openings) {
+      b.push(
+        (op.pts[0][0] + op.pts[1][0] + op.pts[2][0] + op.pts[3][0]) / 4,
+        (op.pts[0][1] + op.pts[1][1] + op.pts[2][1] + op.pts[3][1]) / 4,
+        op.depth,
+      );
     }
-    return inside;
-  };
-  const isPointOccluded = (pt: [number, number], depth: number): boolean => {
-    for (const o of occluders) {
-      if (o.depth >= depth - OCC_MARGIN) continue;
-      if (pt[0] < o.bbox.uMin || pt[0] > o.bbox.uMax || pt[1] < o.bbox.vMin || pt[1] > o.bbox.vMax) continue;
-      if (pointInPoly(pt, o.poly)) return true;
-    }
-    return false;
-  };
+    return core().elevation_occluded_points_flat(occFlat, Float64Array.from(b));
+  })();
 
   const primitives: Primitive[] = [];
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1322,19 +673,43 @@ export function generateElevationPlan(
   const items: Item[] = [];
   let seq = 0;
 
-  // Emittiert ein Linien-Segment, exakt gegen nähere Occluder geclippt (verdeckte
-  // Teilstücke entfallen). `depth` = Tiefe der Linie (leicht vor ihrer Trägerfläche).
+  // Linien-Segmente werden exakt gegen nähere Occluder geclippt (verdeckte Teilstücke
+  // entfallen). Die Anforderungen sammeln sich in Zeichenreihenfolge und gehen gebündelt
+  // an den Kern (`flushPending`); `depth` = Tiefe der Linie (leicht vor ihrer Trägerfläche).
+  type Pending =
+    | { a: [number, number]; b: [number, number]; depth: number; prim: (a: [number, number], b: [number, number]) => Primitive }
+    | { item: Omit<Item, "seq"> };
+  const pending: Pending[] = [];
   const pushClippedLine = (
     a: [number, number],
     b: [number, number],
     depth: number,
     prim: (a: [number, number], b: [number, number]) => Primitive,
   ): void => {
-    for (const [sa, sb] of clipSegmentVisible(a, b, depth, occluders)) {
-      acc(sa[0], sa[1]);
-      acc(sb[0], sb[1]);
-      items.push({ depth, seq: seq++, prim: prim(sa, sb) });
+    pending.push({ a, b, depth, prim });
+  };
+  const flushPending = (): void => {
+    const lines = pending.filter((p): p is Extract<Pending, { a: unknown }> => "a" in p);
+    const q: number[] = [lines.length];
+    for (const l of lines) q.push(l.a[0], l.a[1], l.b[0], l.b[1], l.depth);
+    const r = core().elevation_clip_segments_flat(occFlat, Float64Array.from(q));
+    let i = 1;
+    for (const p of pending) {
+      if ("item" in p) {
+        items.push({ ...p.item, seq: seq++ });
+        continue;
+      }
+      const c = r.length === 0 ? 1 : r[i++];
+      for (let k = 0; k < c; k++) {
+        const sa: [number, number] = r.length === 0 ? p.a : [r[i], r[i + 1]];
+        const sb: [number, number] = r.length === 0 ? p.b : [r[i + 2], r[i + 3]];
+        if (r.length !== 0) i += 4;
+        acc(sa[0], sa[1]);
+        acc(sb[0], sb[1]);
+        items.push({ depth: p.depth, seq: seq++, prim: p.prim(sa, sb) });
+      }
     }
+    pending.length = 0;
   };
 
   // Frontale Wand-/Deckenflächen (alle Ecken auf gleicher Tiefe) werden je
@@ -1400,9 +775,8 @@ export function generateElevationPlan(
         }));
       }
     }
-    items.push({
+    pending.push({ item: {
       depth: f.depth,
-      seq: seq++,
       // Painter-Gleichstand (bündige Flächen, z. B. Decken-Stirn in der
       // Fassadenebene): Decke vor Wand vor Dach zeichnen, damit die Wand die
       // Stirnstreifen überdeckt.
@@ -1421,7 +795,7 @@ export function generateElevationPlan(
         ...(f.ceilingId ? { ceilingId: f.ceilingId } : {}),
         ...(f.roofId ? { roofId: f.roofId } : {}),
       },
-    });
+    } });
   }
   for (const g of frontalGroups.values()) {
     // Der XOR-Silhouetten-Umriss der Gruppe, JEDE Kante exakt gegen nähere
@@ -1439,6 +813,8 @@ export function generateElevationPlan(
       }));
     }
   }
+
+  flushPending();
 
   // Schatten (leicht VOR der Empfängertiefe, damit sie direkt nach der Fassade,
   // aber unter den Öffnungen/Kanten näherer Flächen liegen).
@@ -1468,12 +844,8 @@ export function generateElevationPlan(
   // Ganz verdeckte Öffnungen (Mittelpunkt hinter einer näheren opaken Fläche)
   // werden gar nicht erst emittiert — sonst scheinen ihre Symbol-/Sprossen-Linien
   // (eigener Linien-Durchgang, s. Occluder-Kommentar oben) durch die Vorderwand.
-  for (const op of openings) {
-    const opCenter: [number, number] = [
-      (op.pts[0][0] + op.pts[1][0] + op.pts[2][0] + op.pts[3][0]) / 4,
-      (op.pts[0][1] + op.pts[1][1] + op.pts[2][1] + op.pts[3][1]) / 4,
-    ];
-    if (isPointOccluded(opCenter, op.depth)) continue;
+  for (const [openingIndex, op] of openings.entries()) {
+    if (openingOccluded[1 + openingIndex] === 1) continue;
     const toVec = (q: Array<[number, number]>): Vec2[] =>
       q.map(([u, v]) => {
         acc(u, v);

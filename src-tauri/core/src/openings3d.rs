@@ -1005,23 +1005,6 @@ pub fn opening_meshes_flat(buf: &[f64]) -> Vec<f64> {
     out
 }
 
-/// Flache Bindung von [`frame_ring_quads`]: `[n, (u, h) × 4 …]`; Eckstoss wie oben.
-pub fn frame_ring_quads_flat(from: f64, to: f64, z_b: f64, z_t: f64, w: f64, join: f64, bottom: bool) -> Vec<f64> {
-    let join = match join as i64 {
-        1 => CornerJoin::Horizontal,
-        2 => CornerJoin::Mitre,
-        _ => CornerJoin::Vertical,
-    };
-    let qs = frame_ring_quads(from, to, z_b, z_t, w, join, bottom);
-    let mut out = vec![qs.len() as f64];
-    for q in qs {
-        for [u, h] in q {
-            out.push(u);
-            out.push(h);
-        }
-    }
-    out
-}
 
 #[cfg(test)]
 mod tests {
@@ -1220,9 +1203,9 @@ mod tests {
         assert_eq!(out.len(), 1 + 25);
         assert_eq!(out[0], 1.0);
         assert_eq!(out[1], Part::Glass as i32 as f64);
-        let ring = frame_ring_quads_flat(0.0, 1.0, 0.0, 1.0, 0.1, 0.0, true);
-        assert_eq!(ring[0], 4.0);
-        assert_eq!(&ring[1..9], &[0.0, 0.0, 0.1, 0.0, 0.0, 1.0, 0.1, 1.0]);
+        let ring = frame_ring_quads(0.0, 1.0, 0.0, 1.0, 0.1, CornerJoin::Vertical, true);
+        assert_eq!(ring.len(), 4);
+        assert_eq!(ring[0], [[0.0, 0.0], [0.1, 0.0], [0.0, 1.0], [0.1, 1.0]]);
     }
 
     #[test]
@@ -1241,6 +1224,6 @@ mod tests {
         let mut big = vec![2.0, 1.0, 0.0, 0.0, 5.0, 0.0, 1.0, 1.0, 4.0, 0.0, 2.0, 1.0, 0.3, 1.0];
         big.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1e12, 2.0, f64::NAN, 1.0, 1e12, 1e12]);
         assert!(opening_meshes_flat(&big)[0] >= 0.0);
-        let _ = frame_ring_quads_flat(f64::NAN, f64::INFINITY, -1.0, 1.0, -3.0, 9.0, false);
+        let _ = frame_ring_quads(f64::NAN, f64::INFINITY, -1.0, 1.0, -3.0, CornerJoin::Mitre, false);
     }
 }

@@ -7,10 +7,7 @@ import { exportGlb, exportGltf, exportObj, exportStl } from "./exportMesh";
 import { orientOutward } from "./meshOrient";
 import { sampleProject } from "../model/sampleProject";
 import type { Column, ImportedMesh, Project, TerrainMesh } from "../model/types";
-import { emitOpeningMeshes } from "../plan/toWalls3d/openings";
-import { emitRoofs } from "../plan/toWalls3d/roofs";
-import { emitColumns } from "../plan/toWalls3d/columns";
-import { emitStairMeshes, emitStairRailings, emitStairs } from "../plan/toWalls3d/stairs";
+import { emitColumns, emitOpeningMeshes, emitRoofs, emitStairMeshes, emitStairRailings, emitStairs } from "./model3dParts";
 
 interface Gltf {
   nodes: { name: string; mesh?: number; children?: number[]; extras?: { type: string; id: string } }[];

@@ -15,8 +15,8 @@
 // Polygone mit Loch (Körper ganz im Bauteil) werden über einen Steg an den Aussenring
 // gehängt (Schlüsselloch); die beiden Stegkanten sind nicht gestrichen (`noStrokeEdges`).
 
-import * as polygonClipping from "../geometry/polygonBool";
-import type { Pair, Polygon as PcPolygon, MultiPolygon } from "../geometry/polygonBool";
+import type { Pair } from "../geometry/polygonBool";
+import { core } from "../engine/coreWasm";
 import type { ExtrudedSolid, Project, Vec2 } from "../model/types";
 import { getFloor } from "../model/types";
 import { ceilingVerticalExtent, columnVerticalExtent } from "../model/wall";
@@ -60,29 +60,18 @@ export function voidPrisms(project: Project): VoidPrism[] {
   return out;
 }
 
-// ── Polygon-Booleans ─────────────────────────────────────────────────────────
+// ── Polygon-Booleans (Rust-Kern, `voids.rs`) ─────────────────────────────────
 
 const ring = (pts: Vec2[]): Pair[] => pts.map((p) => [p.x, p.y] as Pair);
 
-/** Fläche (vorzeichenbehaftet) eines Rings. */
-function signedArea(r: Pair[]): number {
-  let a = 0;
-  for (let i = 0; i < r.length; i++) {
-    const p = r[i];
-    const q = r[(i + 1) % r.length];
-    a += p[0] * q[1] - q[0] * p[1];
+/** Ringliste flach für den Kern (`[n, (k, x, y …) × n]`). */
+function encodeRings(rings: Pair[][]): Float64Array {
+  const b: number[] = [rings.length];
+  for (const r of rings) {
+    b.push(r.length);
+    for (const p of r) b.push(p[0], p[1]);
   }
-  return a / 2;
-}
-
-/** Ring ohne doppelten Schlusspunkt (der Polygon-Kern liefert geschlossene Ringe). */
-function openRing(r: Pair[]): Pair[] {
-  if (r.length > 1) {
-    const a = r[0];
-    const b = r[r.length - 1];
-    if (Math.abs(a[0] - b[0]) < EPS && Math.abs(a[1] - b[1]) < EPS) return r.slice(0, -1);
-  }
-  return r;
+  return Float64Array.from(b);
 }
 
 /**
@@ -90,45 +79,14 @@ function openRing(r: Pair[]): Pair[] {
  * Indizes der Stegkanten (Kante i = pts[i] → pts[i+1]).
  */
 export function keyhole(poly: Pair[][]): { pts: Pair[]; bridges: number[] } {
-  let outer = openRing(poly[0]);
-  const bridges: number[] = [];
-  const holes = poly.slice(1).map(openRing).filter((h) => h.length >= 3);
-  // Löcher von rechts nach links einhängen (Stege kreuzen sich so nicht).
-  holes.sort((a, b) => Math.max(...b.map((p) => p[0])) - Math.max(...a.map((p) => p[0])));
-  for (const hole of holes) {
-    // Lochpunkt mit grösstem x, nächster Aussenring-Punkt dazu.
-    let hi = 0;
-    for (let i = 1; i < hole.length; i++) if (hole[i][0] > hole[hi][0]) hi = i;
-    const h = hole[hi];
-    let oi = 0;
-    let best = Infinity;
-    for (let i = 0; i < outer.length; i++) {
-      const d = Math.hypot(outer[i][0] - h[0], outer[i][1] - h[1]);
-      if (d < best) {
-        best = d;
-        oi = i;
-      }
-    }
-    const holeSeq = [...hole.slice(hi), ...hole.slice(0, hi), h];
-    const next: Pair[] = [...outer.slice(0, oi + 1), ...holeSeq, outer[oi], ...outer.slice(oi + 1)];
-    // Indizes der beiden Stegkanten (alte Stegindizes hinter oi verschieben sich).
-    const shift = holeSeq.length + 1;
-    for (let k = 0; k < bridges.length; k++) if (bridges[k] > oi) bridges[k] += shift;
-    bridges.push(oi, oi + holeSeq.length);
-    outer = next;
-  }
-  return { pts: outer, bridges };
-}
-
-/** Liegt Segment a→b auf Segment p→q (kollinear, innerhalb)? */
-function onSegment(a: Pair, b: Pair, p: Pair, q: Pair, tol = 1e-6): boolean {
-  const dx = q[0] - p[0];
-  const dy = q[1] - p[1];
-  const len = Math.hypot(dx, dy);
-  if (len < EPS) return false;
-  const dist = (r: Pair) => Math.abs((r[0] - p[0]) * dy - (r[1] - p[1]) * dx) / len;
-  const t = (r: Pair) => ((r[0] - p[0]) * dx + (r[1] - p[1]) * dy) / (len * len);
-  return dist(a) < tol && dist(b) < tol && t(a) > -tol && t(a) < 1 + tol && t(b) > -tol && t(b) < 1 + tol;
+  const f = core().voids_keyhole_flat(encodeRings(poly));
+  const n = f[0];
+  const pts = new Array<Pair>(n);
+  for (let i = 0; i < n; i++) pts[i] = [f[1 + 2 * i], f[2 + 2 * i]];
+  const nb = f[1 + 2 * n];
+  const bridges = new Array<number>(nb);
+  for (let i = 0; i < nb; i++) bridges[i] = f[2 + 2 * n + i];
+  return { pts, bridges };
 }
 
 /**
@@ -143,99 +101,33 @@ export function subtractRings(
   noStroke: number[] = [],
 ): Array<{ pts: Pair[]; noStrokeEdges: number[] }> | null {
   if (pts.length < 3 || cutters.length === 0) return null;
-  const subject: PcPolygon = [pts];
-  const clips: MultiPolygon = cutters.filter((c) => c.length >= 3).map((c) => [c] as PcPolygon);
-  if (clips.length === 0) return null;
-  // Schnell-Test: überlappen die Hüllen überhaupt?
-  let hit = false;
-  try {
-    hit = polygonClipping.intersection(subject, ...clips).length > 0;
-  } catch {
-    return null;
-  }
-  if (!hit) return null;
-  let diff: MultiPolygon;
-  try {
-    diff = polygonClipping.difference(subject, ...clips);
-  } catch {
-    return null;
-  }
-  const area0 = Math.abs(signedArea(pts));
+  const f = core().voids_subtract_rings_flat(
+    encodeRings([pts]).subarray(1),
+    encodeRings(cutters),
+    Float64Array.from([noStroke.length, ...noStroke]),
+  );
+  if (f.length === 0 || f[0] < 0) return null;
   const out: Array<{ pts: Pair[]; noStrokeEdges: number[] }> = [];
-  for (const poly of diff) {
-    const { pts: kp, bridges } = keyhole(poly);
-    if (kp.length < 3 || Math.abs(signedArea(openRing(poly[0]))) < area0 * 1e-9) continue;
-    // Orientierung des Originals beibehalten (Schraffur-/Strich-Logik ist orientierungsfrei,
-    // aber Tests und Nachbearbeitungen erwarten den Umlaufsinn).
-    const sameDir = Math.sign(signedArea(kp)) === Math.sign(signedArea(pts)) || signedArea(pts) === 0;
-    const ringPts = sameDir ? kp : [...kp].reverse();
-    const n = ringPts.length;
-    const bridgeSet = new Set(sameDir ? bridges : bridges.map((i) => (n - 2 - i + n) % n));
-    const ns: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const a = ringPts[i];
-      const b = ringPts[(i + 1) % n];
-      if (bridgeSet.has(i)) {
-        ns.push(i);
-        continue;
-      }
-      for (const e of noStroke) {
-        const p = pts[e];
-        const q = pts[(e + 1) % pts.length];
-        if (p && q && onSegment(a, b, p, q)) {
-          ns.push(i);
-          break;
-        }
-      }
-    }
-    out.push({ pts: ringPts, noStrokeEdges: ns });
+  let i = 1;
+  for (let k = 0; k < f[0]; k++) {
+    const n = f[i++];
+    const rp = new Array<Pair>(n);
+    for (let j = 0; j < n; j++, i += 2) rp[j] = [f[i], f[i + 1]];
+    const m = f[i++];
+    const ns = new Array<number>(m);
+    for (let j = 0; j < m; j++) ns[j] = f[i++];
+    out.push({ pts: rp, noStrokeEdges: ns });
   }
   return out;
 }
 
 // ── Grundriss ────────────────────────────────────────────────────────────────
 
-function pointInRing(x: number, y: number, r: Pair[]): boolean {
-  let inside = false;
-  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
-    const [xi, yi] = r[i];
-    const [xj, yj] = r[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
 /** Teile der Strecke a→b ausserhalb aller Ringe, als Parameter-Intervalle [t0, t1]. */
 export function segmentOutside(a: Vec2, b: Vec2, cutters: Pair[][]): Array<[number, number]> {
-  const ts = [0, 1];
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  for (const r of cutters) {
-    for (let i = 0; i < r.length; i++) {
-      const p = r[i];
-      const q = r[(i + 1) % r.length];
-      const ex = q[0] - p[0];
-      const ey = q[1] - p[1];
-      const den = dx * ey - dy * ex;
-      if (Math.abs(den) < 1e-14) continue;
-      const t = ((p[0] - a.x) * ey - (p[1] - a.y) * ex) / den;
-      const u = ((p[0] - a.x) * dy - (p[1] - a.y) * dx) / den;
-      if (t > 0 && t < 1 && u >= -1e-9 && u <= 1 + 1e-9) ts.push(t);
-    }
-  }
-  ts.sort((x, y) => x - y);
+  const f = core().voids_segment_outside_flat(Float64Array.from([a.x, a.y, b.x, b.y]), encodeRings(cutters));
   const out: Array<[number, number]> = [];
-  for (let i = 0; i + 1 < ts.length; i++) {
-    const [t0, t1] = [ts[i], ts[i + 1]];
-    if (t1 - t0 < 1e-9) continue;
-    const tm = (t0 + t1) / 2;
-    const mx = a.x + dx * tm;
-    const my = a.y + dy * tm;
-    if (cutters.some((r) => pointInRing(mx, my, r))) continue;
-    const last = out[out.length - 1];
-    if (last && Math.abs(last[1] - t0) < 1e-9) last[1] = t1;
-    else out.push([t0, t1]);
-  }
+  for (let k = 0; k < (f[0] ?? 0); k++) out.push([f[1 + 2 * k], f[2 + 2 * k]]);
   return out;
 }
 
@@ -315,27 +207,14 @@ export function subtractVoidsInPlan(prims: Primitive[], project: Project, cutZ: 
  * Richtung `uDir` (Einheitsvektor; u = Abstand entlang uDir ab `base`).
  */
 export function voidSectionRects(v: VoidPrism, base: Vec2, uDir: Vec2): Pair[][] {
-  const ts: number[] = [];
-  const n = v.pts.length;
-  // Normale der Schnittspur: Punkt-Seite über das Kreuzprodukt.
-  const side = (p: Vec2) => (p.x - base.x) * uDir.y - (p.y - base.y) * uDir.x;
-  for (let i = 0; i < n; i++) {
-    const a = v.pts[i];
-    const b = v.pts[(i + 1) % n];
-    const sa = side(a);
-    const sb = side(b);
-    // Halboffene Regel (eine Ecke auf der Spur zählt nur einmal).
-    if ((sa > 0) === (sb > 0)) continue;
-    const t = sa / (sa - sb);
-    const px = a.x + (b.x - a.x) * t;
-    const py = a.y + (b.y - a.y) * t;
-    ts.push((px - base.x) * uDir.x + (py - base.y) * uDir.y);
-  }
-  ts.sort((a, b) => a - b);
+  const f = core().voids_section_rects_flat(
+    Float64Array.from([v.pts.length, ...v.pts.flatMap((p) => [p.x, p.y])]),
+    Float64Array.from([base.x, base.y, uDir.x, uDir.y]),
+  );
   const rects: Pair[][] = [];
-  for (let i = 0; i + 1 < ts.length; i += 2) {
-    const [u0, u1] = [ts[i], ts[i + 1]];
-    if (u1 - u0 < 1e-6) continue;
+  for (let k = 0; k < (f[0] ?? 0); k++) {
+    const u0 = f[1 + 2 * k];
+    const u1 = f[2 + 2 * k];
     rects.push([
       [u0, v.z0],
       [u1, v.z0],

@@ -1,8 +1,8 @@
-// Dach-Meshes (`emitRoofs`) sind je Schicht geschlossene, nach aussen gewundene Körper — Voraussetzung
+// Dach-Meshes (`roofMeshes`) sind je Schicht geschlossene, nach aussen gewundene Körper — Voraussetzung
 // für Closed-Face-Sets im IFC und korrektes Rückseiten-Culling.
 
 import { describe, expect, it } from "vitest";
-import { emitRoofs } from "./roofs";
+import { roofMeshes } from "../toWalls3d";
 import { isWatertight } from "../wallMeshCut";
 import { sampleProject } from "../../model/sampleProject";
 import type { Project, Roof, RoofShape } from "../../model/types";
@@ -37,7 +37,7 @@ describe("Dach-Meshes geschlossen und nach aussen gewunden", () => {
     for (const axis of ["x", "y"] as const) {
       it(`${shape} (First ${axis})`, () => {
         const p: Project = { ...sampleProject, roofs: [roof(shape, axis)] };
-        const meshes = emitRoofs(p);
+        const meshes = roofMeshes(p);
         expect(meshes.length).toBeGreaterThan(0);
         for (const m of meshes) {
           const c = closure(m);

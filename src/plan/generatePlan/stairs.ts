@@ -2,46 +2,21 @@
 // Auf-/Abpfeil, Zwischenpodest und Aussenlinie — mit dem Grundriss-Schnitt
 // (Tritte unter der Schnitthöhe durchgezogen, darüber gestrichelt/verdeckt +
 // SIA-Bruchlinie).
+//
+// Die Primitive entstehen im Rust-Kern (`src-tauri/core/src/plan_stairs.rs`, [K3a]); hier nur die
+// Übersetzung der flachen Liste in `Primitive`-Objekte (Farbe, Graustufen, `stairId`).
+// Fällt mit [K3d] weg, wenn der Plan-Puffer direkt aus Rust kommt.
 
-import type { Project, Stair, Vec2 } from "../../model/types";
+import type { Project, Stair } from "../../model/types";
 import { stairVerticalExtent } from "../../model/wall";
-import { stairCut, stairGeometry, stairOutline } from "../../geometry/stair";
-import type { SpiralOutlineSegments } from "../../geometry/stair";
+import { encodeStair } from "../../geometry/stair";
+import { core } from "../../engine/coreWasm";
 import { NO_HATCH, POCHE_STROKE, type Primitive } from "./shared";
 
-/**
- * Zeichnet die Wendel-Aussenlinie: Innen-/Aussenbogen als Arc-Primitive plus zwei
- * radiale Schliesslinien. Wird von `addStairSymbol` aufgerufen wenn `shape === "spiral"`.
- */
-function _addSpiralOutline(
-  out: Primitive[],
-  seg: SpiralOutlineSegments,
-  stroke: string,
-  lwMm: number,
-  greyed: boolean,
-  stairId: string,
-): void {
-  // Radiale Schliesslinien (Startwinkel + Endwinkel).
-  for (const [a, b] of seg.lines) {
-    out.push({ kind: "line", a, b, cls: "stair-outline", weightMm: lwMm, color: stroke, greyed, stairId });
-  }
-  // Innen- und Aussenbogen.
-  for (const arc of seg.arcs) {
-    const from: Vec2 = { x: arc.cx + arc.r * Math.cos(arc.a0), y: arc.cy + arc.r * Math.sin(arc.a0) };
-    const to: Vec2   = { x: arc.cx + arc.r * Math.cos(arc.a1), y: arc.cy + arc.r * Math.sin(arc.a1) };
-    out.push({
-      kind: "arc",
-      center: { x: arc.cx, y: arc.cy },
-      from,
-      to,
-      r: arc.r,
-      cls: "stair-outline",
-      weightMm: lwMm,
-      greyed,
-      stairId,
-    });
-  }
-}
+/** Linienklassen in der Reihenfolge der Kern-Kodierung (`plan_stairs.rs`). */
+const LINE_CLS = ["stair-outline", "stair-tread", "stair-break", "stair-run", "stair-arrow"] as const;
+/** Strichmuster der verdeckten Tritte (Meter). */
+const TREAD_DASH = [0.12, 0.08];
 
 /**
  * Treppen-Symbol im Grundriss (DOSSIER/SIA):
@@ -62,124 +37,64 @@ export function addStairSymbol(
   cutHeight: number,
 ): void {
   const { zBottom, zTop } = stairVerticalExtent(project, stair);
-  const totalRise = zTop - zBottom;
-  const geo = stairGeometry(stair, totalRise);
-  const cut = stairCut(geo, cutHeight);
-  const below = new Set(cut.belowIndices);
+  const f = core().plan_stair_flat(
+    encodeStair(stair),
+    zTop - zBottom,
+    cutHeight,
+    lwMm,
+    stair.arrowStyle === "filled" ? 1 : 0,
+  );
+  if (f.length === 0) return;
   const stroke = stair.color ?? POCHE_STROKE;
   const stairId = stair.id;
-
-  // Umriss + Tritt-Trennlinien je Stufe. Der letzte Punkt jedes Tritt-Rechtecks
-  // liefert die vordere Kante (Auftritt); wir zeichnen jede Tritt-Kante.
-  for (const tr of geo.treads) {
-    const isBelow = below.has(tr.index);
-    // Tritt-Rechteck als reine Umrisslinie (keine Füllung), durchgezogen wenn
-    // unter der Schnittebene, sonst gestrichelt (verdeckt).
-    out.push({
-      kind: "polygon",
-      pts: tr.pts,
-      fill: "none",
-      stroke,
-      strokeWidthMm: lwMm * 0.7,
-      hatch: NO_HATCH,
-      greyed,
-      stairId,
-    });
-    // Zusätzliche Auftrittskante (vordere Kante der Stufe) etwas kräftiger.
-    const front: [Vec2, Vec2] = [tr.pts[1], tr.pts[2]];
-    out.push({
-      kind: "line",
-      a: front[0],
-      b: front[1],
-      cls: "stair-tread",
-      weightMm: lwMm * (isBelow ? 1.0 : 0.6),
-      dash: isBelow ? null : [0.12, 0.08],
-      color: stroke,
-      greyed,
-      stairId,
-    });
-  }
-
-  // Zwischenpodest (L/Wendel-Auge): Umriss-Polygon.
-  if (geo.landing && geo.landing.length >= 3) {
-    out.push({
-      kind: "polygon",
-      pts: geo.landing,
-      fill: "none",
-      stroke,
-      strokeWidthMm: lwMm * 0.7,
-      hatch: NO_HATCH,
-      greyed,
-      stairId,
-    });
-  }
-
-  // SIA-Bruchlinie (Doppelstrich diagonal über den Schnitt-Tritt).
-  if (cut.breakLine) {
-    for (const [a, b] of cut.breakLine) {
-      out.push({
-        kind: "line",
-        a,
-        b,
-        cls: "stair-break",
-        weightMm: lwMm,
-        color: stroke,
-        greyed,
-        stairId,
-      });
+  const n = f[0];
+  let i = 1;
+  for (let k = 0; k < n; k++) {
+    switch (f[i]) {
+      case 1: {
+        const count = f[i + 3];
+        const pts = new Array<{ x: number; y: number }>(count);
+        for (let j = 0; j < count; j++) pts[j] = { x: f[i + 4 + 2 * j], y: f[i + 5 + 2 * j] };
+        out.push({
+          kind: "polygon",
+          pts,
+          fill: f[i + 2] ? stroke : "none",
+          stroke,
+          strokeWidthMm: f[i + 1],
+          hatch: NO_HATCH,
+          greyed,
+          stairId,
+        });
+        i += 4 + 2 * count;
+        break;
+      }
+      case 2:
+        out.push({
+          kind: "line",
+          a: { x: f[i + 4], y: f[i + 5] },
+          b: { x: f[i + 6], y: f[i + 7] },
+          cls: LINE_CLS[f[i + 1]],
+          weightMm: f[i + 2],
+          ...(LINE_CLS[f[i + 1]] === "stair-tread" ? { dash: f[i + 3] ? TREAD_DASH : null } : {}),
+          color: stroke,
+          greyed,
+          stairId,
+        });
+        i += 8;
+        break;
+      default:
+        out.push({
+          kind: "arc",
+          center: { x: f[i + 2], y: f[i + 3] },
+          from: { x: f[i + 4], y: f[i + 5] },
+          to: { x: f[i + 6], y: f[i + 7] },
+          r: f[i + 8],
+          cls: "stair-outline",
+          weightMm: f[i + 1],
+          greyed,
+          stairId,
+        });
+        i += 9;
     }
-  }
-
-  // Lauflinie (Lauflinie) — kräftig, durchgezogen.
-  for (let i = 0; i < geo.runLine.length - 1; i++) {
-    out.push({
-      kind: "line",
-      a: geo.runLine[i],
-      b: geo.runLine[i + 1],
-      cls: "stair-run",
-      weightMm: lwMm,
-      color: stroke,
-      greyed,
-      stairId,
-    });
-  }
-  // Auf-/Abpfeil an der Spitze der Lauflinie. "filled" = gefülltes Dreieck
-  // (SIA-Vollpfeil), sonst der offene Winkelpfeil (zwei Linien, Default).
-  const [h1, tip, h2] = geo.arrow.head;
-  if (stair.arrowStyle === "filled") {
-    out.push({
-      kind: "polygon",
-      pts: [h1, tip, h2],
-      fill: stroke,
-      stroke,
-      strokeWidthMm: lwMm,
-      hatch: NO_HATCH,
-      greyed,
-      stairId,
-    });
-  } else {
-    out.push({ kind: "line", a: h1, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
-    out.push({ kind: "line", a: h2, b: tip, cls: "stair-arrow", weightMm: lwMm, color: stroke, greyed, stairId });
-  }
-
-  // Aussenlinie (Outline) der Treppe — schliessendes Umriss-Polygon (gerade/L)
-  // bzw. Innen-/Aussenbogen + radiale Schliesslinien (Wendel).
-  // Entspricht `_aussen_gerade` / `_aussen_l_polygon` / `_aussen_wendel` im
-  // Rhino-Plugin. Stets durchgezogen, volle Strichstärke.
-  const outline = stairOutline(stair, totalRise);
-  if (outline.polygon && outline.polygon.length >= 3) {
-    out.push({
-      kind: "polygon",
-      pts: outline.polygon,
-      fill: "none",
-      stroke,
-      strokeWidthMm: lwMm,
-      hatch: NO_HATCH,
-      greyed,
-      stairId,
-    });
-  }
-  if (outline.spiral) {
-    _addSpiralOutline(out, outline.spiral, stroke, lwMm, greyed, stairId);
   }
 }

@@ -2,24 +2,19 @@
 // die Wand-Footprints (für das Verdecken darunterliegender Decken-Umrisse, s.
 // {@link ../ceilings}) und die eigentliche Wand-Poché (Schichten + Umriss +
 // Öffnungsaussparungen + T-Stoss-/Gehrungs-Behandlung).
+//
+// Die Geometrie der Poché entsteht im Rust-Kern (`src-tauri/core/src/plan_walls.rs`, [K3a]); hier
+// bleibt die Stilauflösung aus dem Modell (Bauteil, Schraffur, Farbe, Fugen-Linienstil) und die
+// Übersetzung in `Primitive`-Objekte. Fällt mit [K3d] weg.
 
 import type { LayerCategory, Opening, Project, Vec2, Wall } from "../../model/types";
 import { getComponent, getWallType, wallTypeThickness } from "../../model/types";
 import { wallReferenceOffset } from "../../model/wall";
 import { openingInterval } from "../../geometry/opening";
-import {
-  add,
-  along,
-  clippedBand,
-  dot,
-  leftNormal,
-  lineIntersect,
-  normalize,
-  scale,
-  sub,
-} from "../../model/geometry";
+import { leftNormal, normalize, sub } from "../../model/geometry";
 import type { Line } from "../../model/geometry";
 import type { WallCuts } from "../../model/joins";
+import { core } from "../../engine/coreWasm";
 import {
   HATCH_INK,
   HATCH_PAPER,
@@ -33,6 +28,7 @@ import {
   resolveHatch,
   resolveHatchId,
   type DetailLevel,
+  type HatchRender,
   type Primitive,
 } from "./shared";
 
@@ -59,38 +55,6 @@ export function wallGaps(
     if (iv) gaps.push(iv);
   }
   return gaps.sort((a, b) => a.from - b.from);
-}
-
-/** Toleranz für die Achsen-Intervall-Arithmetik der Durchgangswand-Aussparungen. */
-export const CUTOUT_EPS = 1e-9;
-
-/**
- * Zieht die Loch-Intervalle `holes` vom Segment `[s,e]` ab und liefert die
- * verbleibenden (gezeichneten) Teil-Intervalle in Achsen-Metern. Löcher werden
- * auf `[s,e]` geklemmt, sortiert und vereinigt; leeres Ergebnis heisst „ganz
- * ausgespart". Ist `holes` leer, kommt exakt `[[s,e]]` zurück (unverändertes
- * Verhalten für Wände ohne Aussparung).
- */
-export function subtractIntervals(
-  s: number,
-  e: number,
-  holes: Array<[number, number]>,
-): Array<[number, number]> {
-  const clipped = holes
-    .map(([a, b]): [number, number] => [
-      Math.max(s, Math.min(a, b)),
-      Math.min(e, Math.max(a, b)),
-    ])
-    .filter(([a, b]) => b > a + CUTOUT_EPS)
-    .sort((p, q) => p[0] - q[0]);
-  const parts: Array<[number, number]> = [];
-  let cursor = s;
-  for (const [a, b] of clipped) {
-    if (a > cursor + CUTOUT_EPS) parts.push([cursor, a]);
-    if (b > cursor) cursor = b;
-  }
-  if (cursor < e - CUTOUT_EPS) parts.push([cursor, e]);
-  return parts;
 }
 
 /**
@@ -133,49 +97,37 @@ export function buildWallFootprints(project: Project, walls: Wall[]): WallFootpr
   return out;
 }
 
-/**
- * Parametrisches Intervall [t0,t1] ⊆ [0,1], über das die Strecke `pa→pb`
- * INNERHALB des Wand-Footprints liegt (also von der Wand verdeckt). `null`, wenn
- * die Strecke den Footprint nicht schneidet. OBB-Test über zwei Slabs: Projektion
- * auf die Achse `u` (Bereich [−half, len+half]) und auf die Normale `m` (Bereich
- * [refOff−half, refOff+half]); das Schnitt-Intervall beider Slabs ∩ [0,1] ist die
- * verdeckte Strecke.
- */
-export function segmentInsideWallBand(
-  pa: Vec2,
-  pb: Vec2,
-  fp: WallFootprint,
-): [number, number] | null {
-  const d = sub(pb, pa);
-  const rel = sub(pa, fp.a);
-  const clipSlab = (
-    f0: number,
-    fd: number,
-    lo: number,
-    hi: number,
-  ): [number, number] | null => {
-    if (Math.abs(fd) < 1e-12)
-      return f0 >= lo - CUTOUT_EPS && f0 <= hi + CUTOUT_EPS ? [0, 1] : null;
-    let ta = (lo - f0) / fd;
-    let tb = (hi - f0) / fd;
-    if (ta > tb) [ta, tb] = [tb, ta];
-    return [ta, tb];
-  };
-  const su = clipSlab(dot(rel, fp.u), dot(d, fp.u), -fp.half, fp.len + fp.half);
-  if (!su) return null;
-  const sm = clipSlab(
-    dot(rel, fp.m),
-    dot(d, fp.m),
-    fp.refOff - fp.half,
-    fp.refOff + fp.half,
-  );
-  if (!sm) return null;
-  const t0 = Math.max(0, su[0], sm[0]);
-  const t1 = Math.min(1, su[1], sm[1]);
-  return t1 > t0 + CUTOUT_EPS ? [t0, t1] : null;
-}
+const lineBuf = (l: Line | null | undefined): number[] =>
+  l ? [1, l.point.x, l.point.y, l.dir.x, l.dir.y] : [0, 0, 0, 0, 0];
 
-const length = (w: Wall): number => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+/** Eingabe der Kern-Funktion `plan_wall_poche_flat` (Aufbau: `plan_walls.rs`). */
+function encodeWallPoche(
+  wall: Wall,
+  layerThickness: number[],
+  total: number,
+  refOff: number,
+  gaps: WallGap[],
+  cuts: WallCuts,
+  grob: boolean,
+  viewOnly: boolean,
+): Float64Array {
+  const b: number[] = [wall.start.x, wall.start.y, wall.end.x, wall.end.y, total, refOff, grob ? 1 : 0, viewOnly ? 1 : 0];
+  b.push(layerThickness.length, ...layerThickness);
+  b.push(...lineBuf(cuts.startCut), ...lineBuf(cuts.endCut));
+  const lc = cuts.layerCuts;
+  b.push(lc ? 1 : 0);
+  if (lc) {
+    for (let i = 0; i < layerThickness.length; i++) {
+      b.push(...lineBuf(lc.start[i]), ...lineBuf(lc.end[i]), ...lineBuf(lc.startSide[i]), ...lineBuf(lc.endSide[i]));
+    }
+  }
+  const sc = cuts.spanCutouts ?? [];
+  b.push(sc.length);
+  for (const c of sc) b.push(c.from, c.to, c.offA, c.offB);
+  b.push(gaps.length);
+  for (const g of gaps) b.push(g.from, g.to);
+  return Float64Array.from(b);
+}
 
 /**
  * Wand als gefüllte Schnittfläche (Poché), um Öffnungen ausgespart.
@@ -188,6 +140,9 @@ const length = (w: Wall): number => Math.hypot(w.end.x - w.start.x, w.end.y - w.
  *    volle Wanddicke (Füllung = Farbe des „Backbone"-Bauteils mit höchster
  *    joinPriority) mit dicker Umrisslinie. Bewusst vereinfacht (≙ DOSSIER
  *    „Einfach").
+ *
+ * Segmente, Gehrungsbänder, Schichtfugen und Durchgangswand-Aussparungen berechnet der Kern;
+ * hier kommen nur Stil und Pick-ID (`wallId`) dazu.
  */
 export function addWallPoche(
   out: Primitive[],
@@ -206,311 +161,114 @@ export function addWallPoche(
 ): void {
   const wt = getWallType(project, wall);
   const total = wallTypeThickness(wt);
-  // Versatz der Schichtstapelung über die Dicke gemäß Referenzlinie (center=0,
-  // left=+T/2, right=−T/2). Alle Band-Offsets unten werden hierum verschoben,
-  // sodass die Achse bei „außen"/„innen" auf der jeweiligen Wandfläche liegt.
   const refOff = wallReferenceOffset(wall, total);
-  // Jede Schicht-/Umrissfläche trägt die Wand-ID, damit ein Links-Klick die
-  // GANZE Wand (alle Bänder) markiert und die PlanView die wallId nach oben
-  // melden kann.
   const wallId = wall.id;
-  // Achswinkel der Wand (Modell, Grad) — treibt wandbezogene Schraffuren
-  // ({@link resolveHatch}), damit z. B. eine Diagonale oder die Dämmungsstriche
-  // mit der Wandorientierung mitdrehen.
+  // Achswinkel der Wand (Modell, Grad) — treibt wandbezogene Schraffuren ({@link resolveHatch}).
   const wallAngleDeg =
     (Math.atan2(wall.end.y - wall.start.y, wall.end.x - wall.start.x) * 180) / Math.PI;
-  // Strich-/Umrandungsfarbe der Wand: optionale Übersteuerung (wall.color),
-  // sonst der Default-Poché-Strich. Betrifft NUR die Linienfarbe (Umriss +
-  // Schichtfugen), nicht die Schicht-Füllfarben/Schraffuren.
+  // Strich-/Umrandungsfarbe der Wand: optionale Übersteuerung (wall.color), sonst der
+  // Default-Poché-Strich. Betrifft NUR die Linienfarbe, nicht die Schicht-Füllfarben/Schraffuren.
   const stroke = wall.color ?? POCHE_STROKE;
-
-  // Öffnungs-Intervalle entlang der Wandachse, sortiert (bereits vereint).
-  const openings = gaps;
-
-  // Wand in Segmente zwischen den Öffnungen zerlegen.
-  let cursor = 0;
-  const segments: Array<[number, number]> = [];
-  for (const op of openings) {
-    if (op.from > cursor) segments.push([cursor, op.from]);
-    cursor = Math.max(cursor, op.to);
-  }
-  const axisLen = length(wall);
-  if (cursor < axisLen) segments.push([cursor, axisLen]);
-
   const outlineMm = wallLwMm * OUTLINE_DETAIL_FACTOR[detail];
   const layerLineMm = LAYER_LINE_MM * LAYER_DETAIL_FACTOR[detail];
-  // Vereinfachte Füllung (grob): immer schwarze Vollfüllung, keine Schraffur
 
-  // Durchgangswand-Aussparungen (Phase 1c): über diese Achsen-Intervalle × Quer-
-  // Offsetbereiche wird die Nah-Putz-Zone der Durchgangswand echt ausgeschnitten
-  // (der Abzweig-Kern sticht durch). `offA` ist stets die Nahfläche, `offB` die
-  // Rückgrat-Nahfläche (siehe SpanCutout in model/joins.ts). Leer ⇒ heutiges
-  // Verhalten (Wand ohne T-Durchstoss).
-  const spanCutouts = cuts.spanCutouts ?? [];
+  const f = core().plan_wall_poche_flat(
+    encodeWallPoche(wall, wt.layers.map((l) => l.thickness), total, refOff, gaps, cuts, detail === "grob", viewOnly),
+  );
+  if (f.length === 0) return;
 
-  // Kanten-Indizes der inneren Gehrungs-Stirnflächen (die Diagonalen am Knoten).
-  // clippedBand liefert [A.start, A.end, B.end, B.start] → Kante 1 (A.end→B.end)
-  // ist die endCut-Stirnfläche, Kante 3 (B.start→A.start) die startCut-Stirnfläche.
-  // Diese werden NICHT umrissen: sonst 45°-Naht zwischen gleichfarbigen Schichten
-  // + überschießende Gehrungs-Barbe am Eck-Apex. Freie Enden (kein Cut) bleiben
-  // rechtwinklig gestrichen. Die Längskanten (Schichtfugen) bleiben stets sichtbar.
-  const joinEdges = (startCut: Line | null, endCut: Line | null): number[] => {
-    const e: number[] = [];
-    if (endCut) e.push(1);
-    if (startCut) e.push(3);
-    return e;
-  };
-
-  for (const [s, e] of segments) {
-    const p1 = along(wall.start, wall.end, s);
-    const p2 = along(wall.start, wall.end, e);
-    // Nur die echten Wandenden bekommen die Gehrung. Türnahe Segmentenden
-    // bleiben rechtwinklig (kein Schnitt).
-    const startCut = s <= 1e-6 ? cuts.startCut : null;
-    const endCut = e >= axisLen - 1e-6 ? cuts.endCut : null;
-
-    if (viewOnly) {
-      // Ansichts-Wand (unter der Schnittebene): ein Umriss über die volle Dicke
-      // als Haarlinie, ohne Füllung/Schraffur. Segment-/Gehrungs-/Öffnungs-Logik
-      // bleibt dieselbe wie im Schnittfall (nur eben ohne Poché).
-      out.push({
-        kind: "polygon",
-        pts: clippedBand(p1, p2, refOff - total / 2, refOff + total / 2, startCut, endCut),
-        fill: "none",
-        stroke,
-        strokeWidthMm: layerLineMm,
-        hatch: NO_HATCH,
-        greyed,
-        noStrokeEdges: joinEdges(startCut, endCut),
-        wallId,
-      });
-      continue;
-    }
-
-    if (detail === "grob") {
-      // Eine Sammelfläche über die volle Dicke, ohne Schraffur, dicker Umriss.
-      // Bei grob: immer Vollschwarz-Füllung gemäß SIA 400 Anhang B.9, Figur 36
-      out.push({
-        kind: "polygon",
-        pts: clippedBand(p1, p2, refOff - total / 2, refOff + total / 2, startCut, endCut),
-        fill: HATCH_INK,
-        stroke,
-        strokeWidthMm: outlineMm,
-        hatch: NO_HATCH,
-        greyed,
-        noStrokeEdges: joinEdges(startCut, endCut),
-        wallId,
-      });
-      continue;
-    }
-
-    // mittel/fein: Schichten von außen (-T/2) nach innen (+T/2) stapeln. Jede
-    // Schicht löst Bauteil (Füllfarbe) + Schraffur (Muster/Maßstab/Winkel/Farbe)
-    // auf. Die Bänder tragen NUR Füllung + Schraffur (kein eigener Umriss); jede
-    // innere Schichtfuge wird als EIGENSTÄNDIGE, stilisierbare Linie gezeichnet.
-    const bandJoinEdges = joinEdges(startCut, endCut);
-    // Nur die Aussparungen, die dieses Segment [s,e] entlang der Achse berühren.
-    const segCutouts = spanCutouts.filter(
-      (c) =>
-        Math.min(c.from, c.to) < e - CUTOUT_EPS &&
-        Math.max(c.from, c.to) > s + CUTOUT_EPS,
-    );
-    // Punkt entlang der Wandachse bei Achsen-Meter `d` (p1/p2 an den Rändern).
-    const axisPt = (d: number): Vec2 =>
-      d === s ? p1 : d === e ? p2 : along(wall.start, wall.end, d);
-    // Materialbewusster T-Stoss (siehe resolveJoinPriority in model/joins.ts):
-    // liegt eine Pro-Schicht-Cut-Überschreibung vor, ersetzt sie PRO SCHICHT den
-    // einheitlichen startCut/endCut — nur an den echten Wandenden (dieselbe
-    // Maskierung wie oben für startCut/endCut, s <= 1e-6 / e >= axisLen-1e-6).
-    // Fehlt sie, bleibt alles wie zuvor (startCut/endCut für jede Schicht).
-    const layerCuts = cuts.layerCuts;
-    let off = refOff - total / 2;
-    for (let li = 0; li < wt.layers.length; li++) {
-      const layer = wt.layers[li];
-      const comp = getComponent(project, layer.componentId);
+  // Stil je Schicht erst beim ersten Band lösen (wie zuvor: nur wenn die Wand Segmente hat).
+  const layerStyle = new Map<number, { hatch: HatchRender; fill: string }>();
+  const styleOf = (li: number) => {
+    let st = layerStyle.get(li);
+    if (!st) {
+      const comp = getComponent(project, wt.layers[li].componentId);
       const layerHatchId =
         resolveHatchId(wall.hatchId, wall.hatchSource, category, comp.hatchId) ?? comp.hatchId;
-      const layerHatch = resolveHatch(
+      const hatch = resolveHatch(
         project,
         layerHatchId,
         wallAngleDeg,
         resolveForeground(comp, wall.foreground, category, wall.foregroundSource),
       );
-      // SIA-Poché: neutraler Hintergrund (Papier) statt Bauteil-Albedo, die
-      // Schichtschraffur (fest in HATCH_INK, siehe resolveHatch) liegt darüber;
-      // Vollmuster ("solid") = Tinten-Poché.
-      const layerSolid = layerHatch.pattern === "solid";
+      // SIA-Poché: neutraler Hintergrund (Papier) statt Bauteil-Albedo, die Schichtschraffur
+      // (fest in HATCH_INK, siehe resolveHatch) liegt darüber; Vollmuster ("solid") = Tinten-Poché.
       const bgOverride = resolveBackground(comp, wall.background, category, wall.backgroundSource);
-      const layerStartCut = s <= 1e-6 ? (layerCuts ? layerCuts.start[li] : startCut) : null;
-      const layerEndCut = e >= axisLen - 1e-6 ? (layerCuts ? layerCuts.end[li] : endCut) : null;
-      // Durchgangswand-Aussparung: liegt der Quer-Offsetbereich dieses Bandes
-      // [off, off+thickness] im Nah-Putz-Bereich einer Aussparung, wird das Band
-      // entlang der Achse in Teil-Bänder VOR/NACH dem Intervall zerlegt (das
-      // Durchstoss-Stück entfällt). Ohne Überlappung bleibt genau ein Band
-      // [s,e] (unverändertes Verhalten).
-      const bandLo = off;
-      const bandHi = off + layer.thickness;
-      const bandHoles: Array<[number, number]> = [];
-      for (const c of segCutouts) {
-        const cLo = Math.min(c.offA, c.offB);
-        const cHi = Math.max(c.offA, c.offB);
-        if (bandLo < cHi - CUTOUT_EPS && bandHi > cLo + CUTOUT_EPS)
-          bandHoles.push([c.from, c.to]);
-      }
-      for (const [a, b] of subtractIntervals(s, e, bandHoles)) {
-        const sc = a <= s + CUTOUT_EPS ? layerStartCut : null;
-        const ec = b >= e - CUTOUT_EPS ? layerEndCut : null;
+      st = { hatch, fill: bgOverride ?? (hatch.pattern === "solid" ? HATCH_INK : HATCH_PAPER) };
+      layerStyle.set(li, st);
+    }
+    return st;
+  };
+
+  const n = f[0];
+  let i = 1;
+  for (let k = 0; k < n; k++) {
+    if (f[i] === 1) {
+      const art = f[i + 1];
+      const li = f[i + 2];
+      const nNo = f[i + 3];
+      const noStrokeEdges = Array.from(f.subarray(i + 4, i + 4 + nNo));
+      const q = i + 4 + nNo;
+      const pts = [0, 1, 2, 3].map((j) => ({ x: f[q + 2 * j], y: f[q + 2 * j + 1] }));
+      i = q + 8;
+      if (art === 2) {
+        const st = styleOf(li);
         out.push({
           kind: "polygon",
-          pts: clippedBand(axisPt(a), axisPt(b), off, off + layer.thickness, sc, ec),
-          fill: bgOverride ?? (layerSolid ? HATCH_INK : HATCH_PAPER),
-          // Band ohne Umriss: keine Schichtfuge über die Bandkante, keine 45°-Naht
-          // am Knoten. Die Fugen kommen als separate `line`-Primitive (siehe unten).
+          pts,
+          fill: st.fill,
+          // Band ohne Umriss: keine Schichtfuge über die Bandkante, keine 45°-Naht am Knoten.
+          // Die Fugen kommen als separate `line`-Primitive.
           stroke: "none",
           strokeWidthMm: 0,
-          hatch: layerHatch,
+          hatch: st.hatch,
           greyed,
-          // Für die Ecktests/Konsistenz beibehalten (bei stroke:"none" wirkungslos).
-          noStrokeEdges: bandJoinEdges,
+          noStrokeEdges,
+          wallId,
+        });
+      } else {
+        out.push({
+          kind: "polygon",
+          pts,
+          // Grob: immer Vollschwarz-Füllung gemäss SIA 400 Anhang B.9, Figur 36.
+          fill: art === 1 ? HATCH_INK : "none",
+          stroke,
+          strokeWidthMm: art === 0 ? layerLineMm : outlineMm,
+          hatch: NO_HATCH,
+          greyed,
+          noStrokeEdges,
           wallId,
         });
       }
-      // L-Anschluss: eine getrimmte Schicht (z. B. Putz), die an eine
-      // verschmelzende Nachbarschicht (durchlaufender Kern) grenzt, bekommt
-      // zusätzlich eine seitliche Cut-Linie entlang der Durchgangsachse — sie
-      // begrenzt die Schichtbreite dort, wo der Kern sie unterbricht (L-Form).
-      const sideStart = s <= 1e-6 ? layerCuts?.startSide[li] : null;
-      const sideEnd = e >= axisLen - 1e-6 ? layerCuts?.endSide[li] : null;
-      if (sideStart || sideEnd) {
-        const uSeg = normalize(sub(p2, p1));
-        const nSeg = leftNormal(uSeg);
-        const sidePoint = (base: Vec2, layerOff: number, cut: Line): Vec2 => {
-          const pt = add(base, scale(nSeg, layerOff));
-          return lineIntersect(pt, uSeg, cut.point, cut.dir) ?? pt;
-        };
-        if (sideStart) {
-          out.push({
-            kind: "line",
-            a: sidePoint(p1, off, sideStart),
-            b: sidePoint(p1, off + layer.thickness, sideStart),
-            cls: "layer-joint-l",
-            weightMm: layerLineMm,
-            color: stroke,
-            greyed,
-          });
-        }
-        if (sideEnd) {
-          out.push({
-            kind: "line",
-            a: sidePoint(p2, off, sideEnd),
-            b: sidePoint(p2, off + layer.thickness, sideEnd),
-            cls: "layer-joint-l",
-            weightMm: layerLineMm,
-            color: stroke,
-            greyed,
-          });
-        }
-      }
-      off += layer.thickness;
-      // Innere Schichtfuge (zwischen dieser und der nächst-inneren Schicht) als
-      // eigene Linie am kumulierten Offset `off`, mit dem Cut der Bänder geclippt.
-      // Stil aus layer.jointLineStyleId (Gewicht/Farbe/Strich); Rückfall = Haar-
-      // linie (LAYER_LINE_MM) in Wandfarbe. Das Gewicht folgt demselben Detail-
-      // Faktor wie die frühere Schichtfuge (`layerLineMm`), damit die Detailgrade
-      // sich unverändert verhalten. Die innerste Schicht hat keine innere Fuge.
-      // Nutzt bewusst weiterhin den einheitlichen startCut/endCut (nicht die
-      // Pro-Schicht-Cuts): die Fuge markiert den Materialwechsel INNERHALB
-      // dieser Wand und bleibt daher an der bisherigen Nahfläche.
-      if (li < wt.layers.length - 1) {
-        const jls = layer.jointLineStyleId
-          ? project.lineStyles.find((l) => l.id === layer.jointLineStyleId)
-          : undefined;
-        // Durchgangswand-Aussparung: liegt die Fuge im (geschlossenen) Nah-Putz-
-        // Bereich einer Aussparung — inkl. der Rückgrat-Nahfläche (Merge-Kontakt)
-        // —, wird sie über das Durchstoss-Intervall unterbrochen. So bleibt an der
-        // Verschmelzungsfläche keine Trennlinie stehen.
-        const fugeHoles: Array<[number, number]> = [];
-        for (const c of segCutouts) {
-          const cLo = Math.min(c.offA, c.offB);
-          const cHi = Math.max(c.offA, c.offB);
-          if (off >= cLo - CUTOUT_EPS && off <= cHi + CUTOUT_EPS)
-            fugeHoles.push([c.from, c.to]);
-        }
-        for (const [a, b] of subtractIntervals(s, e, fugeHoles)) {
-          const sc = a <= s + CUTOUT_EPS ? startCut : null;
-          const ec = b >= e - CUTOUT_EPS ? endCut : null;
-          // clippedBand(pa, pb, off, off, …) liefert [edgeStart, edgeEnd, edgeEnd,
-          // edgeStart] → die zwei distinkten Endpunkte sind Index 0 (Start) und 1
-          // (Ende), beide am Cut abgeschnitten wie die Bandlängskante.
-          const jq = clippedBand(axisPt(a), axisPt(b), off, off, sc, ec);
-          out.push({
-            kind: "line",
-            a: jq[0],
-            b: jq[1],
-            cls: "layer-joint",
-            weightMm: jls ? jls.weight * LAYER_DETAIL_FACTOR[detail] : layerLineMm,
-            color: jls ? jls.color : stroke,
-            dash: jls ? jls.dash : null,
-            // Zickzack-Fuge (LineStyle kind==="zigzag") ebenfalls durchreichen.
-            zigzag: jls?.kind === "zigzag" ? jls.zigzag : undefined,
-            // Custom-Motiv-Fuge (LineStyle kind==="custom") ebenfalls durchreichen.
-            motif: jls?.kind === "custom" ? jls.motif : undefined,
-            greyed,
-          });
-        }
-      }
-    }
-    // Kräftige Wand-Umrisslinie über die volle Dicke (nur Kontur, keine Füllung),
-    // damit die Wand sich klar von den dünnen Schichtfugen abhebt. Die Gehrungs-
-    // Stirnkanten am Knoten entfallen → sauberer Eck-Apex ohne überschießende Barbe.
-    // Bei einer Durchgangswand-Aussparung wird zusätzlich die NAHFLÄCHEN-Kante
-    // (die Längskante auf der Durchstoss-Seite) über [from,to] strokelos gemacht
-    // und als separate Segmente vor/nach dem Durchstoss gezeichnet — sonst liefe
-    // die Umrisslinie über die Durchstoss-Breite.
-    const offLo = refOff - total / 2;
-    const offHi = refOff + total / 2;
-    const holesHi: Array<[number, number]> = [];
-    const holesLo: Array<[number, number]> = [];
-    for (const c of segCutouts) {
-      // `offA` ist stets die Nahfläche (Wandoberfläche); ordne die Aussparung der
-      // passenden Längskante (offHi bzw. offLo) zu.
-      if (Math.abs(c.offA - offHi) < 1e-6) holesHi.push([c.from, c.to]);
-      else if (Math.abs(c.offA - offLo) < 1e-6) holesLo.push([c.from, c.to]);
-    }
-    const outlineNoStroke = [...bandJoinEdges];
-    // clippedBand-Kantenreihenfolge [A.start(offLo), A.end(offLo), B.end(offHi),
-    // B.start(offHi)]: Kante 0 ist die offLo-Längskante, Kante 2 die offHi-Längskante.
-    if (holesHi.length) outlineNoStroke.push(2);
-    if (holesLo.length) outlineNoStroke.push(0);
-    out.push({
-      kind: "polygon",
-      pts: clippedBand(p1, p2, offLo, offHi, startCut, endCut),
-      fill: "none",
-      stroke,
-      strokeWidthMm: outlineMm,
-      hatch: NO_HATCH,
-      greyed,
-      noStrokeEdges: outlineNoStroke,
-      wallId,
-    });
-    const drawNearEdge = (edgeOff: number, holes: Array<[number, number]>): void => {
-      for (const [a, b] of subtractIntervals(s, e, holes)) {
-        const sc = a <= s + CUTOUT_EPS ? startCut : null;
-        const ec = b >= e - CUTOUT_EPS ? endCut : null;
-        const jq = clippedBand(axisPt(a), axisPt(b), edgeOff, edgeOff, sc, ec);
+    } else {
+      const art = f[i + 1];
+      const li = f[i + 2];
+      const a = { x: f[i + 3], y: f[i + 4] };
+      const b = { x: f[i + 5], y: f[i + 6] };
+      i += 7;
+      if (art === 0) {
+        out.push({ kind: "line", a, b, cls: "layer-joint-l", weightMm: layerLineMm, color: stroke, greyed });
+      } else if (art === 1) {
+        // Innere Schichtfuge: Stil aus layer.jointLineStyleId (Gewicht/Farbe/Strich), Rückfall =
+        // Haarlinie in Wandfarbe.
+        const id = wt.layers[li].jointLineStyleId;
+        const jls = id ? project.lineStyles.find((l) => l.id === id) : undefined;
         out.push({
           kind: "line",
-          a: jq[0],
-          b: jq[1],
-          cls: "wall-outline",
-          weightMm: outlineMm,
-          color: stroke,
+          a,
+          b,
+          cls: "layer-joint",
+          weightMm: jls ? jls.weight * LAYER_DETAIL_FACTOR[detail] : layerLineMm,
+          color: jls ? jls.color : stroke,
+          dash: jls ? jls.dash : null,
+          zigzag: jls?.kind === "zigzag" ? jls.zigzag : undefined,
+          motif: jls?.kind === "custom" ? jls.motif : undefined,
           greyed,
         });
+      } else {
+        out.push({ kind: "line", a, b, cls: "wall-outline", weightMm: outlineMm, color: stroke, greyed });
       }
-    };
-    if (holesHi.length) drawNearEdge(offHi, holesHi);
-    if (holesLo.length) drawNearEdge(offLo, holesLo);
+    }
   }
 }
 

@@ -8,7 +8,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { allowHost } from "../net/net";
-import Delaunator from "delaunator";
+import { core } from "../engine/coreWasm";
 import type { ContextObject, Contour, ImportedMesh } from "../model/types";
 import { GEO_CATEGORY_DEFS } from "../model/contextCategories";
 
@@ -228,12 +228,7 @@ function triangulateRing(ring: { x: number; y: number }[]): number[] {
     coords[i * 2] = ring[i].x;
     coords[i * 2 + 1] = ring[i].y;
   }
-  let tri: Uint32Array;
-  try {
-    tri = new Delaunator(coords).triangles;
-  } catch {
-    return fanTriangulate(n);
-  }
+  const tri = core().delaunay_flat(coords);
   const out: number[] = [];
   for (let t = 0; t < tri.length; t += 3) {
     const a = tri[t], b = tri[t + 1], c = tri[t + 2];
