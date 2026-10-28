@@ -3459,6 +3459,10 @@ export default function App() {
               onImport={() => dxfInputRef.current?.click()}
               onImportPointCloud={() => openPointCloudFileDialog()}
               onImportMesh={() => openMeshFileDialog()}
+              onExportDxf={() => setExportDxfOpen(true)}
+              onExportIfc={onExportIfc}
+              onExportObj={onExportObj}
+              onExportStl={onExportStl}
               onUndo={undo}
               onRedo={redo}
               canUndo={canUndo}
