@@ -1,9 +1,26 @@
 // Geometrie-Helfer für Ellipse/Bezier/Spline — reine Sample-/Tessellierungs-
 // Funktionen, gemeinsam genutzt von den Zeichen-Werkzeugen (Vorschau), dem
 // Grundriss-Generator (finales Rendering als Linien-/Polygon-Primitive) und
-// dem Snapping (Kandidaten-Strecken).
+// dem Snapping (Kandidaten-Strecken). Fassade über den Rust-Kern
+// (`src-tauri/core/src/curves.rs`, Bindungen `web/curves.rs`): die Formeln stehen nur dort.
 
 import type { Vec2 } from "../model/types";
+import { core } from "../engine/coreWasm";
+
+function toPoints(f: Float64Array): Vec2[] {
+  const out: Vec2[] = new Array(f.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = { x: f[2 * i], y: f[2 * i + 1] };
+  return out;
+}
+
+function toFlat(pts: Vec2[]): Float64Array {
+  const f = new Float64Array(pts.length * 2);
+  for (let i = 0; i < pts.length; i++) {
+    f[2 * i] = pts[i].x;
+    f[2 * i + 1] = pts[i].y;
+  }
+  return f;
+}
 
 /** Punkte einer (ggf. gedrehten) Ellipse, N gleichverteilte Parameterschritte. */
 export function ellipsePts(
@@ -13,29 +30,7 @@ export function ellipsePts(
   rotation: number,
   n = 64,
 ): Vec2[] {
-  const pts: Vec2[] = [];
-  const cosR = Math.cos(rotation);
-  const sinR = Math.sin(rotation);
-  for (let i = 0; i < n; i++) {
-    const t = (i / n) * Math.PI * 2;
-    const lx = rx * Math.cos(t);
-    const ly = ry * Math.sin(t);
-    pts.push({ x: center.x + lx * cosR - ly * sinR, y: center.y + lx * sinR + ly * cosR });
-  }
-  return pts;
-}
-
-/** Punkt auf einer kubischen Bezier-Kurve (De-Casteljau-Formel) bei Parameter `t` ∈ [0,1]. */
-function cubicPoint(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
-  const u = 1 - t;
-  const a = u * u * u;
-  const b = 3 * u * u * t;
-  const c = 3 * u * t * t;
-  const d = t * t * t;
-  return {
-    x: a * p0.x + b * p1.x + c * p2.x + d * p3.x,
-    y: a * p0.y + b * p1.y + c * p2.y + d * p3.y,
-  };
+  return toPoints(core().curves_ellipse_flat(center.x, center.y, rx, ry, rotation, n));
 }
 
 /**
@@ -46,21 +41,7 @@ function cubicPoint(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
  */
 export function sampleBezierChain(pts: Vec2[], segsPerCurve = 24): Vec2[] {
   if (pts.length < 4) return [...pts];
-  const out: Vec2[] = [pts[0]];
-  for (let i = 0; i + 3 < pts.length; i += 3) {
-    const p0 = pts[i], p1 = pts[i + 1], p2 = pts[i + 2], p3 = pts[i + 3];
-    for (let s = 1; s <= segsPerCurve; s++) out.push(cubicPoint(p0, p1, p2, p3, s / segsPerCurve));
-  }
-  return out;
-}
-
-/** Kontrollpunkt-Zugriff für Catmull-Rom mit Rand-Klemmung bzw. Ring-Umlauf. */
-function crPoint(pts: Vec2[], i: number, closed: boolean): Vec2 {
-  const n = pts.length;
-  if (closed) return pts[((i % n) + n) % n];
-  if (i < 0) return pts[0];
-  if (i >= n) return pts[n - 1];
-  return pts[i];
+  return toPoints(core().curves_bezier_chain_flat(toFlat(pts), segsPerCurve));
 }
 
 /**
@@ -73,48 +54,7 @@ function crPoint(pts: Vec2[], i: number, closed: boolean): Vec2 {
  */
 export function sampleCatmullRom(pts: Vec2[], closed: boolean, segsPerSpan = 16): Vec2[] {
   if (pts.length < 3) return [...pts];
-  const out: Vec2[] = [];
-  const spans = closed ? pts.length : pts.length - 1;
-  for (let i = 0; i < spans; i++) {
-    const p0 = crPoint(pts, i - 1, closed);
-    const p1 = crPoint(pts, i, closed);
-    const p2 = crPoint(pts, i + 1, closed);
-    const p3 = crPoint(pts, i + 2, closed);
-    for (let s = 0; s < segsPerSpan; s++) {
-      const t = s / segsPerSpan;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const x =
-        0.5 *
-        (2 * p1.x +
-          (-p0.x + p2.x) * t +
-          (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-          (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
-      const y =
-        0.5 *
-        (2 * p1.y +
-          (-p0.y + p2.y) * t +
-          (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-          (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
-      out.push({ x, y });
-    }
-  }
-  if (!closed) out.push(pts[pts.length - 1]);
-  return out;
-}
-
-/** Punkt auf einem uniformen kubischen B-Spline-Segment (Standard-Basis, 4 Kontrollpunkte). */
-function bsplineSegPoint(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const b0 = (1 - t) ** 3 / 6;
-  const b1 = (3 * t3 - 6 * t2 + 4) / 6;
-  const b2 = (-3 * t3 + 3 * t2 + 3 * t + 1) / 6;
-  const b3 = t3 / 6;
-  return {
-    x: p0.x * b0 + p1.x * b1 + p2.x * b2 + p3.x * b3,
-    y: p0.y * b0 + p1.y * b1 + p2.y * b2 + p3.y * b3,
-  };
+  return toPoints(core().curves_catmull_rom_flat(toFlat(pts), closed, segsPerSpan));
 }
 
 /**
@@ -122,35 +62,11 @@ function bsplineSegPoint(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec
  * `pts` — Gegenstück zu `sampleCatmullRom`: die Kurve verläuft NICHT durch
  * die inneren Punkte, sie wird nur von ihnen „gezogen" (Kontrollnetz statt
  * Durchgangspunkte, wie CV-Modus in AutoCAD/Rhino). Offen: GEKLEMMT — die
- * Kurve berührt exakt `pts[0]`/`pts[n-1]` (Rand-Kontrollpunkte werden intern
- * je 2× zusätzlich dupliziert, Multiplizität 3 an beiden Enden — der
- * Standard-Trick für kubische B-Splines, ohne eine generische
- * Knotenvektor-Auswertung/Cox-de-Boor-Rekursion zu brauchen). Geschlossen:
- * periodisch (Kontrollpunkte laufen zyklisch um), die Kurve berührt dann
- * KEINEN der Punkte. Mit weniger als 3 Punkten identisches
+ * Kurve berührt exakt `pts[0]`/`pts[n-1]`. Geschlossen: periodisch, die Kurve
+ * berührt dann KEINEN der Punkte. Mit weniger als 3 Punkten identisches
  * Fallback-Verhalten wie `sampleCatmullRom` (Rohpunkte, Gummiband-Vorschau).
  */
 export function sampleUniformBSpline(pts: Vec2[], closed: boolean, segsPerSpan = 16): Vec2[] {
   if (pts.length < 3) return [...pts];
-  const out: Vec2[] = [];
-  if (closed) {
-    const n = pts.length;
-    const at = (i: number) => pts[((i % n) + n) % n];
-    for (let i = 0; i < n; i++) {
-      for (let s = 0; s < segsPerSpan; s++) {
-        out.push(bsplineSegPoint(at(i - 1), at(i), at(i + 1), at(i + 2), s / segsPerSpan));
-      }
-    }
-    return out;
-  }
-  const last = pts[pts.length - 1];
-  const padded = [pts[0], pts[0], ...pts, last, last];
-  const spans = padded.length - 3;
-  for (let i = 0; i < spans; i++) {
-    for (let s = 0; s < segsPerSpan; s++) {
-      out.push(bsplineSegPoint(padded[i], padded[i + 1], padded[i + 2], padded[i + 3], s / segsPerSpan));
-    }
-  }
-  out.push(last);
-  return out;
+  return toPoints(core().curves_uniform_bspline_flat(toFlat(pts), closed, segsPerSpan));
 }

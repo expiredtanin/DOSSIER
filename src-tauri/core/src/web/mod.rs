@@ -29,6 +29,7 @@ mod plan_stairs;
 mod plan_walls;
 mod plan_openings;
 mod plan_misc;
+mod curves;
 mod hatch;
 
 use wasm_bindgen::prelude::wasm_bindgen;

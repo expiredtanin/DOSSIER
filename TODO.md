@@ -99,7 +99,11 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ✅ Kontext-Mesh (Fussabdruck, Rahmen), Schnittführungs-Symbol, Linienenden: `plan_misc.rs`; bitgleich (200 Zufalls-Meshes,
     200 Schnittebenen-Sätze, 400 Linienenden). Räume, Dächer, Stützen, Extrusions-Umriss, Baurecht, Schatten sind nur
     noch Stil-Glue um schon in Rust berechnete Geometrie (kein Rechenanteil) — bleiben bis [K4] in TS.
-    Offen: 2D-Zeichnung (`drawing2d.ts`, 950 Zeilen: Kurven, Bemassung, Kote, Detailverweis, Block, Text …).
+    ✅ Kurven (Ellipse, Bezier, Catmull-Rom, B-Spline): `curves.rs`, `geometry/curves.ts` ist Fassade; bitgleich (500 Zufallsfälle).
+    `jsnum::pow` (= `Math.pow` im Web-Build) für `x ** 3`.
+    Offen: `drawing2d.ts` (950 Zeilen) ist nach diesen Schritten Stil-Auflösung und Verteiler über Formen (Bemassung, Kote,
+    Detailverweis, Massstabsbalken, Block über `scaleGeom`); der Rechenanteil liegt in Rust. Der Verteiler zieht mit dem Modell
+    nach Rust [K4] — vorher würde ein Rust-`Drawing2D` doppelt gepflegt. Danach: [K3c] Schnitt/Ansicht, [K3d] Aufräumen.
   - ○ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
   - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
