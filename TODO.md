@@ -270,8 +270,22 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     Rückfall für Befehle ohne mitgeführte Ops in `App.tsx` (gibt es keine mehr; der Typ `commit: (p) => Project` erlaubt es noch).
     Offen: Ebenen-/Gruppen-Logik (`groupActions.ts`) nach Rust; Undo-Verlauf als Liste in der UI [84]; `diffToOps` entfällt erst, wenn auch
     Laden/Import/CLI Ops liefern.
-  - ○ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
+  - ◐ **S4 Typen aus Rust**: `types.ts` wird aus den Rust-Strukturen erzeugt (ts-rs); Datei-I/O (`projectFormat`, Migration, IFC/DXF/
     STEP-Ex- und -Import) im Kern.
+    **Typen (28.10.):** Das Rust-Modell (`core/src/model/generated.rs`, `manual.rs`) ist die Quelle; ts-rs 12 (MIT, nur
+    `serde-compat`) erzeugt über `model/ts_export.rs` (eigener Sammler + Formatierer, Test `ts_types_aktuell`) die Datei
+    `src/model/types.generated.ts` (`npm run gen:types`; `cargo test` im Kern schlägt fehl, wenn sie veraltet ist).
+    `types.ts` re-exportiert sie (`export type *`) und hält nur noch Hilfstypen ohne Projekt-Gegenstück (`EdgeGrip`,
+    `ImportedText`, `LayoutAnnotationPatch`, `BuiltinPaletteBank`) und die Helfer (`getWallType` … `PEN_WEIGHTS`);
+    `richText.ts`, `viewTypes.ts`, `roomArea.ts` re-exportieren ihre Modell-Typen ebenso. TS-Doku als `///` nach Rust
+    übernommen (→ JSDoc). Gleichwertigkeit zur alten TS-Fassung je Typ und Feld per gegenseitiger Zuweisbarkeit + gleiche
+    Schlüssel geprüft (einmaliger Abgleich); 18 Literal-Felder per `#[ts(type = …)]` (z. B. `type: "wall"`, `leafCount: 1 | 2`),
+    Hilfstypen ohne TS-Namen per `#[ts(inline)]`, getaggte Newtype-Varianten (`ParametricRule`, `ContextObject`) als
+    `GridRule | …` mit Tag-Feld in der Struktur. Dabei gefunden: `ImportedMesh.color/ifcGlobalId` fehlten in Rust (ergänzt).
+    Rundreise-Test `src/model/types.roundtrip.test.ts`: Beispielprojekt, Projekt mit allen Element-Arten und 60
+    Zufallsprojekte TS → JSON → Rust → JSON (Abfrage `modelJson`: typisiertes Modell OHNE `Extra`-Felder) gleich.
+    `KNOWN_KEYS` per Test aus `model::Project` abgeglichen. `scripts/gen-rust-model.py` gelöscht. Offen: Varianten-Doku
+    getaggter Enums (z. B. `Drawing2DGeom`-Varianten) lässt ts-rs weg (steht in Rust); Datei-I/O-Rest.
   Offene Entscheide/Risiken: Kosten der JSON-Übergabe bei grossen Projekten (Teil-Updates statt Neuaufbau), Struktur-Sharing im
   React-Store (TS-Spiegel bleibt bis S3), Befehls-Zustandsautomaten sind viel Code (`src/commands/cmds/*`).
 - **Fertig wenn** (je Etappe): TS-Fassung gelöscht, `npm run check` grün, App/CLI/IFC unverändert.
