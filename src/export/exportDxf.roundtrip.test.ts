@@ -31,6 +31,12 @@ function flatCounts(plan: Plan, project: Project): Record<string, number> {
     4: ["ARC", () => 7],
     5: ["CIRCLE", () => 5],
     6: ["TEXT", () => 7],
+    // HATCH: tag, layer, mode, rgb, n_dash, dash…, n_fam, (angle, spacing)…, n, pts…
+    7: ["HATCH", (i) => {
+      const nd = flat[i + 4];
+      const nf = flat[i + 5 + nd];
+      return 5 + nd + 1 + 2 * nf + 1 + 2 * flat[i + 5 + nd + 1 + 2 * nf];
+    }],
   };
   const out: Record<string, number> = {};
   for (let i = 1; i < flat.length; ) {
@@ -64,7 +70,26 @@ describe("DXF-Export (R2018 über acadrust)", () => {
     expect(dxf.entities.every((e) => dxf.layers.has(e.layer))).toBe(true);
   });
 
-  it("ohne Schraffuren: nur die HATCH-Linien fallen weg", () => {
+  it("Schraffuren sind echte HATCH-Entitäten mit Rand, Farbe und Muster", () => {
+    const hatches = readDxf(buildPlanDxf(plan, sampleProject)).entities.filter((e) => e.type === "HATCH");
+    expect(hatches.length).toBeGreaterThan(0);
+    for (const h of hatches) {
+      expect(h.layer).toBe("HATCH");
+      expect(Number(str(h, 91))).toBe(1); // ein Randpfad
+      expect(nums(h, 10).length).toBeGreaterThanOrEqual(3); // Polylinien-Rand
+    }
+    const solid = hatches.filter((h) => Number(str(h, 70)) === 1);
+    const pattern = hatches.filter((h) => Number(str(h, 70)) === 0);
+    for (const h of pattern) {
+      expect(Number(str(h, 78))).toBeGreaterThanOrEqual(1); // Musterzeilen
+      expect(nums(h, 53).length).toBeGreaterThanOrEqual(1);
+      const [ox, oy] = [nums(h, 45), nums(h, 46)];
+      for (let i = 0; i < ox.length; i++) expect(Math.hypot(ox[i], oy[i])).toBeGreaterThanOrEqual(0.02 - 1e-9); // Linienabstand ≥ 2 cm
+    }
+    expect(solid.length + pattern.length).toBe(hatches.length);
+  });
+
+  it("ohne Schraffuren: alle HATCH-Entitäten (und Zufallsstriche) fallen weg, der Rest bleibt", () => {
     const withH = readDxf(buildPlanDxf(plan, sampleProject)).entities;
     const without = readDxf(buildPlanDxf(plan, sampleProject, { includeHatches: false })).entities;
     expect(without.some((e) => e.layer === "HATCH")).toBe(false);

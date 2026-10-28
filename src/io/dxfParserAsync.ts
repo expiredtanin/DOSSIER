@@ -67,7 +67,7 @@ function mergeResults(results: DxfImportResult[]): DxfImportResult {
     }
     diagnostics.total += r.diagnostics?.total ?? 0;
   }
-  return { meshes, contours, texts, layerColors, diagnostics, insUnits: results[0]?.insUnits };
+  return { meshes, contours, texts, layerColors, diagnostics, insUnits: results[0]?.insUnits, unitScale: results[0]?.unitScale };
 }
 
 function toArrayBuffer(data: string | ArrayBuffer): ArrayBuffer {

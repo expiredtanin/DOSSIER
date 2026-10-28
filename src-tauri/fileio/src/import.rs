@@ -11,6 +11,11 @@
 //   • INSERT rekursiv aufgelöst (Basispunkt, Skalierung, Drehung, Raster), Ebene „0" erbt die
 //     Ebene der Referenz (CAD-Regel), Tiefe begrenzt.
 //   • Ebenenfarben, $INSUNITS, Entity-Histogramm (Diagnose).
+//   • SOLID/TRACE (gefüllte 3-/4-Ecke) als gefüllte geschlossene Konturen, DIMENSION über den
+//     Anonymblock (`*D…`) als Linien/Text, LEADER/MULTILEADER als Linien (+ Text), ATTRIB (an INSERTs)
+//     und ATTDEF (in Blöcken ohne passendes ATTRIB) als Text.
+//   • `$INSUNITS` wird angewendet: alle Koordinaten, Radien und Texthöhen kommen in Metern an
+//     (`unit_scale`); 0/unbekannt = Faktor 1 (1:1 wie bisher).
 //
 // Übergabe an JS als flacher f64-Puffer + String-Tabelle (`encode`), Aufbau dort beschrieben.
 // Kaputte Dateien ergeben `Err(String)`; die Geometrie-Abbildung selbst ist panikfrei (alle
@@ -22,8 +27,9 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use acadrust::entities::{
-    BoundaryEdge, BoundaryPath, Ellipse, Hatch, Insert, LwPolyline, Mesh, PolyfaceMesh,
-    Spline,
+    AttributeDefinition, AttributeEntity, BoundaryEdge, BoundaryPath, Dimension, Ellipse, Hatch,
+    HorizontalAlignment, Insert, Leader, LwPolyline, Mesh, MultiLeader, PolyfaceMesh, Solid, Spline,
+    VerticalAlignment,
 };
 use acadrust::entities::polygon_mesh::PolygonMesh;
 use acadrust::io::dxf::DxfReaderConfiguration;
@@ -83,8 +89,10 @@ pub struct MeshBucket {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportData {
     pub kind: SourceKind,
-    /// `$INSUNITS` (0 = ohne Einheit, 1 = Zoll, 4 = mm, 5 = cm, 6 = m …).
+    /// `$INSUNITS` (0 = ohne Einheit, 1 = Zoll, 4 = mm, 5 = cm, 6 = m …) — roh aus der Datei.
     pub ins_units: i16,
+    /// Faktor, mit dem alle Längen auf Meter umgerechnet wurden ([`unit_scale`]); 1 bei 0/unbekannt.
+    pub unit_scale: f64,
     /// Ebene → Farbe `0xRRGGBB` (nur Ebenen mit Farbe), in Tabellenreihenfolge.
     pub layer_colors: Vec<(String, u32)>,
     pub contours: Vec<Contour>,
@@ -162,6 +170,37 @@ pub fn import_owned(bytes: Vec<u8>) -> Result<ImportData, String> {
 
 // ── Abbildung ─────────────────────────────────────────────────────────────────
 
+/// Meter je Zeicheneinheit nach `$INSUNITS` (AutoCAD-Codes). 0 (ohne Einheit) und Unbekanntes
+/// ergeben 1.0: die Koordinaten bleiben dann wie in der Datei.
+pub fn unit_scale(ins_units: i16) -> f64 {
+    match ins_units {
+        1 | 22 => 0.0254,                // Zoll (22 = US-Survey-Zoll, Unterschied < 1e-5)
+        2 => 0.3048,                     // Fuss
+        3 => 1609.344,                   // Meile
+        4 => 0.001,                      // Millimeter
+        5 => 0.01,                       // Zentimeter
+        6 => 1.0,                        // Meter
+        7 => 1000.0,                     // Kilometer
+        8 => 2.54e-8,                    // Mikrozoll
+        9 => 2.54e-5,                    // Mil
+        10 => 0.9144,                    // Yard
+        11 => 1e-10,                     // Ångström
+        12 => 1e-9,                      // Nanometer
+        13 => 1e-6,                      // Mikrometer
+        14 => 0.1,                       // Dezimeter
+        15 => 10.0,                      // Dekameter
+        16 => 100.0,                     // Hektometer
+        17 => 1e9,                       // Gigameter
+        18 => 1.495_978_707e11,          // Astronomische Einheit
+        19 => 9.460_730_472_580_8e15,    // Lichtjahr
+        20 => 3.085_677_581_491_4e16,    // Parsec
+        21 => 1200.0 / 3937.0,           // US-Survey-Fuss
+        23 => 3600.0 / 3937.0,           // US-Survey-Yard
+        24 => 6_336_000.0 / 3937.0,      // US-Survey-Meile
+        _ => 1.0,
+    }
+}
+
 /// 2D-Affinabbildung + z: `[x', y'] = M·[x, y] + t`, `z' = z·zs + zo`.
 #[derive(Debug, Clone, Copy)]
 struct Xf {
@@ -238,6 +277,9 @@ struct Mapper<'a> {
     counts: Vec<(String, u32)>,
     count_index: HashMap<&'static str, usize>,
     total: u32,
+    /// ATTRIB-Tags (grossgeschrieben) des gerade aufgelösten INSERT: dazu gehörige ATTDEFs im Block
+    /// zeigen nicht ihren Vorgabewert (AutoCAD zeichnet statt dessen das ATTRIB der Referenz).
+    insert_tags: Vec<std::collections::HashSet<String>>,
 }
 
 /// Ganzes Dokument abbilden: Modellraum (ohne Papierbereich), INSERTs aufgelöst.
@@ -251,14 +293,18 @@ pub fn map_document(kind: SourceKind, doc: &CadDocument) -> ImportData {
         counts: Vec::new(),
         count_index: HashMap::new(),
         total: 0,
+        insert_tags: Vec::new(),
     };
+    let scale = unit_scale(doc.header.insertion_units);
+    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let root = Xf { m00: scale, m11: scale, zs: scale, ..IDENTITY };
     let model: Vec<&EntityType> = if doc.block_records.get("*Model_Space").is_some() {
         doc.model_space_entities().collect()
     } else {
         doc.entities().collect()
     };
     for e in model {
-        m.entity(e, &IDENTITY, None, 0);
+        m.entity(e, &root, None, 0);
     }
     let layer_colors = doc
         .layers
@@ -269,6 +315,7 @@ pub fn map_document(kind: SourceKind, doc: &CadDocument) -> ImportData {
     ImportData {
         kind,
         ins_units: doc.header.insertion_units,
+        unit_scale: scale,
         layer_colors,
         contours: m.contours,
         texts: m.texts,
@@ -422,6 +469,12 @@ impl<'a> Mapper<'a> {
             EntityType::PolygonMesh(p) => self.polygon_mesh(p, layer, xf),
             EntityType::Mesh(mesh) => self.mesh(mesh, layer, xf),
             EntityType::Insert(ins) => self.insert(ins, layer, xf, depth),
+            EntityType::Solid(sol) => self.solid(sol, layer, xf),
+            EntityType::Dimension(dim) => self.dimension(dim, layer, xf, depth),
+            EntityType::Leader(l) => self.leader(l, layer, xf),
+            EntityType::MultiLeader(ml) => self.multileader(ml, layer, xf),
+            EntityType::AttributeEntity(a) => self.attrib(a, layer, xf),
+            EntityType::AttributeDefinition(a) => self.attdef(a, layer, xf, depth),
             _ => {}
         }
     }
@@ -619,6 +672,150 @@ impl<'a> Mapper<'a> {
         }
     }
 
+    /// SOLID/TRACE: gefülltes 3-/4-Eck. DXF speichert die Ecken als 1, 2, 4, 3 (Schleife ohne
+    /// Überkreuzung: erste, zweite, vierte, dritte); fallen dritte und vierte Ecke zusammen, ist es
+    /// ein Dreieck.
+    fn solid(&mut self, s: &Solid, layer: &str, xf: &Xf) {
+        let mut cs = vec![s.first_corner, s.second_corner];
+        if s.fourth_corner != s.third_corner {
+            cs.push(s.fourth_corner);
+        }
+        cs.push(s.third_corner);
+        if !cs.iter().all(finite2) {
+            return;
+        }
+        let pts: Vec<[f64; 2]> = cs.iter().map(|c| [c.x, c.y]).collect();
+        self.push_filled(layer, fz(s.first_corner.z), pts, xf);
+    }
+
+    /// Gefüllte, geschlossene Kontur (SOLID/TRACE; wie ein HATCH-Rand).
+    fn push_filled(&mut self, layer: &str, z: f64, pts: Vec<[f64; 2]>, xf: &Xf) {
+        let before = self.contours.len();
+        self.push_contour(layer, z, pts, true, xf);
+        if self.contours.len() > before {
+            if let Some(c) = self.contours.last_mut() {
+                c.filled = true;
+            }
+        }
+    }
+
+    /// DIMENSION: die Zeichnung steht im Anonymblock (`*D…`, Gruppencode 2) in Weltkoordinaten; er
+    /// wird wie ein INSERT ohne Verschiebung aufgelöst. Ohne Block (oder leer) bleibt der Massstext.
+    fn dimension(&mut self, d: &Dimension, layer: &str, xf: &Xf, depth: usize) {
+        if depth >= MAX_INSERT_DEPTH {
+            return;
+        }
+        let base = d.base();
+        let doc = self.doc;
+        let entities: Vec<&EntityType> = doc
+            .block_records
+            .get(&base.block_name)
+            .map(|b| b.entity_handles.iter().filter_map(|h| doc.get_entity(*h)).collect())
+            .unwrap_or_default();
+        if !entities.is_empty() {
+            for e in entities {
+                self.entity(e, xf, Some(layer), depth + 1);
+            }
+            return;
+        }
+        // Rückfall: nur der Text (Benutzertext, sonst gemessener Wert); `<>` = Messwert.
+        let measure = format_measure(base.actual_measurement);
+        let value = match &base.user_text {
+            Some(t) if !t.is_empty() => t.replace("<>", &measure),
+            _ => measure,
+        };
+        self.text(&value, base.text_middle_point, DEFAULT_TEXT_HEIGHT, base.text_rotation, layer, xf);
+    }
+
+    /// LEADER: Führungslinie als offener Linienzug (Pfeilspitze und Spline-Form entfallen).
+    fn leader(&mut self, l: &Leader, layer: &str, xf: &Xf) {
+        let pts: Vec<[f64; 2]> = l.vertices.iter().filter(|v| finite2(v)).map(|v| [v.x, v.y]).collect();
+        let z = l.vertices.iter().find(|v| v.z.is_finite()).map(|v| v.z).unwrap_or(0.0);
+        self.push_contour(layer, z, pts, false, xf);
+    }
+
+    /// MULTILEADER: je Führungslinie ein Linienzug (zur Anschlussstelle hin geordnet, mit
+    /// Landestrecke), dazu der Text der Annotation.
+    fn multileader(&mut self, ml: &MultiLeader, layer: &str, xf: &Xf) {
+        let ctx = &ml.context;
+        for root in &ctx.leader_roots {
+            let cp = root.connection_point;
+            let landing = if ml.enable_landing && root.landing_distance.is_finite() && root.landing_distance != 0.0 {
+                let d = root.direction;
+                let len = (d.x * d.x + d.y * d.y).sqrt();
+                (len > 1e-12 && finite2(&cp))
+                    .then(|| [cp.x + d.x / len * root.landing_distance, cp.y + d.y / len * root.landing_distance])
+            } else {
+                None
+            };
+            for line in &root.lines {
+                let mut pts: Vec<[f64; 2]> = line.points.iter().filter(|p| finite2(p)).map(|p| [p.x, p.y]).collect();
+                if pts.is_empty() {
+                    continue;
+                }
+                if finite2(&cp) {
+                    let d2 = |p: &[f64; 2]| (p[0] - cp.x).powi(2) + (p[1] - cp.y).powi(2);
+                    if d2(&pts[0]) < d2(&pts[pts.len() - 1]) {
+                        pts.reverse(); // letzter Punkt = Anschlussstelle
+                    }
+                    if d2(&pts[pts.len() - 1]) > 1e-18 {
+                        pts.push([cp.x, cp.y]);
+                    }
+                    if let Some(l) = landing {
+                        pts.push(l);
+                    }
+                }
+                let z = line.points.iter().find(|p| p.z.is_finite()).map(|p| p.z).unwrap_or(0.0);
+                self.push_contour(layer, z, pts, false, xf);
+            }
+        }
+        if ctx.has_text_contents && !ctx.text_string.trim().is_empty() {
+            let h = [ctx.text_height, ml.text_height]
+                .into_iter()
+                .find(|h| *h > 0.0 && h.is_finite())
+                .unwrap_or(DEFAULT_TEXT_HEIGHT);
+            let clean = sanitize_mtext(&ctx.text_string);
+            self.text(&clean, ctx.text_location, h, ctx.text_rotation, layer, xf);
+        }
+    }
+
+    /// ATTRIB (Wert eines Block-Attributs, steht in Weltkoordinaten): als Text; unsichtbare entfallen.
+    /// Bei ausgerichtetem Text (nicht links/Grundlinie) gilt der zweite Ausrichtungspunkt.
+    fn attrib(&mut self, a: &AttributeEntity, layer: &str, xf: &Xf) {
+        if a.flags.invisible || a.value.is_empty() {
+            return;
+        }
+        let at = text_anchor(a.horizontal_alignment, a.vertical_alignment, a.insertion_point, a.alignment_point);
+        let h = if a.height > 0.0 && a.height.is_finite() { a.height } else { DEFAULT_TEXT_HEIGHT };
+        let value = match &a.embedded_mtext {
+            Some(m) if a.is_multiline => sanitize_mtext(&m.value),
+            _ => a.value.clone(),
+        };
+        self.text(&value, at, h, a.rotation, layer, xf);
+    }
+
+    /// ATTDEF: in einem Block zeigt AutoCAD den Vorgabewert nur, wenn die Referenz kein passendes
+    /// ATTRIB trägt (oder das Attribut konstant ist); ausserhalb eines Blocks gilt Wert bzw. Tag.
+    fn attdef(&mut self, a: &AttributeDefinition, layer: &str, xf: &Xf, depth: usize) {
+        if a.flags.invisible {
+            return;
+        }
+        let covered = depth > 0
+            && !a.flags.constant
+            && self.insert_tags.last().is_some_and(|tags| tags.contains(&a.tag.to_ascii_uppercase()));
+        if covered {
+            return;
+        }
+        let value = if a.default_value.is_empty() { a.tag.as_str() } else { a.default_value.as_str() };
+        if value.is_empty() {
+            return;
+        }
+        let at = text_anchor(a.horizontal_alignment, a.vertical_alignment, a.insertion_point, a.alignment_point);
+        let h = if a.height > 0.0 && a.height.is_finite() { a.height } else { DEFAULT_TEXT_HEIGHT };
+        self.text(value, at, h, a.rotation, layer, xf);
+    }
+
+
     /// INSERT: Block-Inhalt je Rasterzelle mit `Welt = P + R(θ)·(S·(p − Basis) + Versatz)`.
     fn insert(&mut self, ins: &Insert, layer: &str, xf: &Xf, depth: usize) {
         if depth >= MAX_INSERT_DEPTH {
@@ -649,6 +846,7 @@ impl<'a> Mapper<'a> {
         let dc = num(ins.column_spacing, 0.0);
         let dr = num(ins.row_spacing, 0.0);
         let entities: Vec<&EntityType> = block.entity_handles.iter().filter_map(|h| doc.get_entity(*h)).collect();
+        self.insert_tags.push(ins.attributes.iter().map(|a| a.tag.to_ascii_uppercase()).collect());
         for row in 0..nr {
             for col in 0..nc {
                 let offx = col as f64 * dc;
@@ -676,7 +874,35 @@ impl<'a> Mapper<'a> {
                 }
             }
         }
+        self.insert_tags.pop();
+        // ATTRIBs der Referenz stehen schon in Weltkoordinaten (nicht unter der Block-Abbildung).
+        for a in &ins.attributes {
+            self.count("ATTRIB");
+            let own = a.common.layer.as_str();
+            let attr_layer = if own == "0" || own.is_empty() { layer } else { own };
+            self.attrib(a, attr_layer, xf);
+        }
     }
+}
+
+/// Ankerpunkt eines ATTRIB/ATTDEF: bei ausgerichtetem Text (nicht links/Grundlinie) der zweite
+/// Ausrichtungspunkt, sonst der Einfügepunkt.
+fn text_anchor(h: HorizontalAlignment, v: VerticalAlignment, ins: Vector3, align: Vector3) -> Vector3 {
+    let aligned = h != HorizontalAlignment::Left || v != VerticalAlignment::Baseline;
+    if aligned && finite2(&align) && (align.x != 0.0 || align.y != 0.0) {
+        align
+    } else {
+        ins
+    }
+}
+
+/// Messwert als Text (höchstens 3 Nachkommastellen, ohne Nullen am Ende).
+fn format_measure(v: f64) -> String {
+    if !v.is_finite() {
+        return String::new();
+    }
+    let s = format!("{v:.3}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 fn push_vertex(b: &mut MeshBucket, xf: &Xf, v: &Vector3) -> u32 {
@@ -1023,12 +1249,13 @@ pub fn encode(data: &ImportData) -> (Vec<f64>, Vec<String>) {
         (strings.len() - 1) as f64
     };
     let mut g: Vec<f64> = Vec::with_capacity(16 + data.contours.iter().map(|c| 4 + c.pts.len() * 2).sum::<usize>());
-    g.push(1.0);
+    g.push(2.0);
     g.push(match data.kind {
         SourceKind::Dxf => 0.0,
         SourceKind::Dwg => 1.0,
     });
     g.push(f64::from(data.ins_units));
+    g.push(data.unit_scale);
     g.push(f64::from(data.total));
     g.push(data.layer_colors.len() as f64);
     for (name, rgb) in &data.layer_colors {

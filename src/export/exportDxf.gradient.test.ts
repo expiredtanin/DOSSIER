@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import "../engine/fileioWasm.setup";
 import { buildPlanDxf } from "./exportDxf";
-import { readDxf } from "./cadReadBack.testutil";
+import { nums, readDxf } from "./cadReadBack.testutil";
 import { sampleProject } from "../model/sampleProject";
 import type { Plan } from "../plan/generatePlan";
 import type { HatchRender } from "../plan/generatePlan/shared";
@@ -49,10 +49,13 @@ function polyWith(hatchOver: Partial<HatchRender> = {}): Plan["primitives"][numb
 }
 
 describe("buildPlanDxf — Verlauf-Schraffur", () => {
-  it("vektor+crosshatch: erzeugt Musterlinien (Gegenprobe)", () => {
+  it("vektor+crosshatch: erzeugt eine HATCH-Entität mit zwei Musterzeilen (Gegenprobe)", () => {
     const dxf = buildPlanDxf(planWith([polyWith()]), sampleProject);
-    expect(countEntities(dxf, "LINE")).toBeGreaterThan(0);
-    expect(countEntities(dxf, "LWPOLYLINE")).toBe(1); // nur der Umriss
+    expect(countEntities(dxf, "HATCH")).toBe(1);
+    expect(countEntities(dxf, "LINE")).toBe(0); // keine einzelnen Schraffurlinien mehr
+    expect(countEntities(dxf, "LWPOLYLINE")).toBe(1); // der Umriss
+    const h = readDxf(dxf).entities.find((e) => e.type === "HATCH")!;
+    expect(nums(h, 53).map((a) => Math.round(a))).toEqual([0, 90]);
   });
 
   it("gradient: KEINE Musterlinien, nur die Umriss-Polylinie", () => {
@@ -66,6 +69,7 @@ describe("buildPlanDxf — Verlauf-Schraffur", () => {
       sampleProject,
     );
     expect(countEntities(dxf, "LINE")).toBe(0);
+    expect(countEntities(dxf, "HATCH")).toBe(0);
     expect(countEntities(dxf, "LWPOLYLINE")).toBe(1); // Umriss bleibt erhalten
   });
 });

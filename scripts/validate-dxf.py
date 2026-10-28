@@ -31,6 +31,13 @@ def main(path: str) -> int:
             item["r"] = e.dxf.radius
             if t == "ARC":
                 item["angles"] = [e.dxf.start_angle, e.dxf.end_angle]
+        elif t == "HATCH":
+            item["solid"] = bool(e.dxf.solid_fill)
+            item["paths"] = len(e.paths)
+            item["pattern_lines"] = len(e.pattern.lines) if e.pattern else 0
+            item["rgb"] = list(e.rgb) if e.dxf.hasattr("true_color") else None
+            first = e.paths[0] if len(e.paths) else None
+            item["pts"] = [[v[0], v[1]] for v in first.vertices] if first is not None and hasattr(first, "vertices") else []
         elif t == "TEXT":
             item["text"] = e.dxf.text
             item["at"] = [e.dxf.insert.x, e.dxf.insert.y]

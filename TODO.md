@@ -364,7 +364,16 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   Reihenfolge, Ebenen, Strichstärken, True-Color, Koordinaten ≤ 5e-7 m (Rundung des alten Writers auf 6 Stellen;
   neu volle f64). Neu: 2D-Texte als TEXT (fehlten bisher), CLI exportiert georeferenziert wie die App.
   Gegencheck ezdxf (`scripts/validate-dxf.py`, Test übersprungen ohne `pip install ezdxf`): 0 Auditor-Fehler.
-  Offen: Binär-DXF-Export, echte HATCH-Entitäten statt Schraffurlinien.
+  Offen: Binär-DXF-Export.
+  - ✅ **Export: echte HATCH-Entitäten** (28.10.): Schraffuren (`pattern` diagonal/Kreuz/Dämmung/frei, auch
+    gestrichelt) und Vollfüllungen gehen als HATCH ins DXF/DWG statt als einzelne geklippte Linien: Rand =
+    geschlossene Polylinienkante des Plan-Polygons, Musterzeilen aus Winkel und Linienabstand (Versatz schon
+    gedreht, Strich-/Lückenfolge als `dash_lengths`), Vordergrundfarbe als True-Color, Ebene `HATCH`, vor dem
+    Umriss gezeichnet (neuer flacher Datensatz `REC_HATCH`, `export.rs`). Zufallsstriche (`random`) haben
+    kein Musteräquivalent und bleiben Linien; Bild-/Verlauf-Schraffur wie bisher nur Umriss. Geprüft:
+    acadrust-Rundreise DXF und DWG, ezdxf (Auditor 0 Fehler, Rand/Farbe/Musterzeilen), libredwg zählt gleiche
+    Typen. Offen: Aussehen in AutoCAD/BricsCAD selbst nicht geprüft (Musterphase ab Ursprung bei
+    LV95-Koordinaten); Verlauf als echte Gradient-HATCH möglich (acadrust kann es), noch nicht umgesetzt.
   - ✅ **DXF-Import in Rust** (28.10.): statt eigenem Tag-Reader acadrust (ASCII und Binär, R12–2018+,
     Code-Seiten) in `fileio/src/import.rs` → flacher f64-Puffer + String-Tabelle, dekodiert in
     `io/dxfParser.ts` (Rückgabetyp unverändert, neu `insUnits`). dxf-parser entfernt; Aufteilung grosser
@@ -372,9 +381,19 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
     Text, ab 4 MB). Abweichungen zum alten Parser (alle gewollt): Bulges tesselliert, Kreise/Bögen/
     Schraffuren in Blöcken behalten Kurve/Füllung, Ebene „0" in Blöcken erbt die INSERT-Ebene (sonst
     eigene), Meshes je Ebene und auch aus Blöcken, MESH/Polygon-Mesh trianguliert, nur Modellraum (kein
-    Papierbereich), periodische Splines. Offen: Texte/ATTRIB in Blöcken nur als TEXT/MTEXT, SOLID/
-    DIMENSION/LEADER nicht abgebildet, `$INSUNITS` nur gemeldet (Koordinaten bleiben 1:1), DXF am Stück
+    Papierbereich), periodische Splines. Offen: DXF am Stück
     ≈ 1,2–1,6× langsamer als dxf-parser (acadrust-Tokenizer; dank Aufteilung ab 4 MB insgesamt schneller).
+  - ✅ **Import verfeinert** (28.10.): `$INSUNITS` wird angewendet (mm, cm, m, Zoll, Fuss, … → Meter für
+    Koordinaten, Radien, Texthöhen, Meshes; 0/unbekannt/fehlend = 1:1 wie bisher; `insUnits` bleibt roh,
+    neu `unitScale`; Puffer-Version 2). Neu abgebildet: SOLID/TRACE als gefüllte Flächen (Eckenfolge 1-2-4-3,
+    Dreieck bei 3 = 4), DIMENSION über den Anonymblock `*D…` (Linien + Text; ohne Block nur der Messwert),
+    LEADER und MULTILEADER als Linienzug (zur Anschlussstelle geordnet, mit Landestrecke) plus MULTILEADER-Text,
+    ATTRIB an INSERTs und ATTDEF in Blöcken als Text (ATTDEF nur ohne passendes ATTRIB, unsichtbare entfallen).
+    Geprüft: Rust-Tests über Modell, ASCII-DXF und DWG-Rundreise; vitest `dxfParser.test.ts`; Swisstopo-
+    Kacheln (INSUNITS 6) unverändert. Offen: Pfeilspitzen/Spline-Führungslinien, Bemassung ohne Anonymblock
+    (nur Text), Block-/Tabellen-Inhalt von MULTILEADER, ATTRIB-Textausrichtung nur über den zweiten
+    Ausrichtungspunkt; keine echte Bemassungs-/Mehrdateien-Probe aus AutoCAD (nur synthetisch erzeugt); ein
+    Import-Dialog-Hinweis „Datei in mm, umgerechnet“ fehlt (`unitScale` steht bereit).
 - ○ **[C3] MCP an die laufende App** (`--connect 127.0.0.1:7979`, Werkzeuge `screenshot`, `ui_click`,
   `render` → PNG, `execute` = jeder Befehl mit JSON): genau die fehlende Hälfte von [9]; setzt [6] voraus. · M
 - ○ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless
