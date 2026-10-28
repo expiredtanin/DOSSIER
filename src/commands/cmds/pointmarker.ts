@@ -11,10 +11,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const PREVIEW_RADIUS = 0.08; // Modell-Meter, deckt sich mit POINTMARKER_RADIUS_M (drawing2d.ts)
 const PREVIEW_CROSS = 0.12;
@@ -39,7 +40,7 @@ function pointDraft(at: Vec2): ToolDraft {
   return { preview, vertices: [at] };
 }
 
-function appendPointMarker(p: Project, at: Vec2, ctx: CommandContext): Project {
+function appendPointMarker(at: Vec2, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -47,7 +48,7 @@ function appendPointMarker(p: Project, at: Vec2, ctx: CommandContext): Project {
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "pointmarker", at },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -68,7 +69,7 @@ export const pointmarkerCommand: Command = {
     if (input.kind !== "point") return [s, { draft: null }];
     return [
       { phase: "point", lastPoint: null } as PointMarkerIdle,
-      { draft: null, done: true, commit: (p) => appendPointMarker(p, input.point, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendPointMarker(input.point, ctx)) },
     ];
   },
 

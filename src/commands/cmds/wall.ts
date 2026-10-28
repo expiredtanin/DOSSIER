@@ -31,6 +31,8 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -109,7 +111,7 @@ function wallTypeForThickness(
   p: Project,
   base: WallType,
   thickness: number,
-): { project: Project; wallTypeId: string } {
+): { ops: CoreOp[]; wallTypeId: string } {
   const componentId = base.layers[0].componentId;
   const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
   const existing = p.wallTypes.find(
@@ -118,13 +120,13 @@ function wallTypeForThickness(
       t.layers[0].componentId === componentId &&
       near(t.layers[0].thickness, thickness),
   );
-  if (existing) return { project: p, wallTypeId: existing.id };
+  if (existing) return { ops: [], wallTypeId: existing.id };
   const nt: WallType = {
     id: uniqueId("WT"),
     name: `${base.name} ${(thickness * 100).toFixed(0)} cm`,
     layers: [{ componentId, thickness }],
   };
-  return { project: { ...p, wallTypes: [...p.wallTypes, nt] }, wallTypeId: nt.id };
+  return { ops: addItems("wallTypes", [nt]), wallTypeId: nt.id };
 }
 
 interface WallIdle extends CommandState {
@@ -179,12 +181,12 @@ function appendWalls(
   pts: Vec2[],
   ctx: CommandContext,
   thickOverride: number | null,
-): Project {
+): CoreOp[] {
   const height =
     ctx.level.floorHeight && ctx.level.floorHeight > 0 ? ctx.level.floorHeight : DEFAULT_HEIGHT;
   // Dicke-Übersteuerung (nur einschichtig): passenden Wandtyp finden/erzeugen,
   // damit Plan/3D — die die Dicke aus dem Wandtyp lesen — korrekt darstellen.
-  let project = p;
+  let typeOps: CoreOp[] = [];
   let wallTypeId = activeWallTypeId(ctx);
   const base = activeWallType(ctx);
   if (
@@ -194,8 +196,8 @@ function appendWalls(
     thickOverride >= MIN_THICKNESS &&
     Math.abs(thickOverride - wallTypeThickness(base)) > 1e-4
   ) {
-    const r = wallTypeForThickness(project, base, thickOverride);
-    project = r.project;
+    const r = wallTypeForThickness(p, base, thickOverride);
+    typeOps = r.ops;
     wallTypeId = r.wallTypeId;
   }
   const newWalls: Wall[] = [];
@@ -214,8 +216,8 @@ function appendWalls(
       height,
     });
   }
-  if (newWalls.length === 0) return p;
-  return { ...project, walls: [...project.walls, ...newWalls] };
+  if (newWalls.length === 0) return [];
+  return [...typeOps, ...addItems("walls", newWalls)];
 }
 
 const idle = (
@@ -299,7 +301,7 @@ export const wallCommand: Command = {
       const to = s.thickOverride;
       return [
         { phase: "start", lastPoint: null, thickOverride: to, single: s.single } as WallIdle,
-        { draft: null, done: true, commit: (p) => appendWalls(p, pts, ctx, to) },
+        { draft: null, done: true, commit: opsMutation((p) => appendWalls(p, pts, ctx, to)) },
       ];
     }
     return idle(s.thickOverride, s.single);

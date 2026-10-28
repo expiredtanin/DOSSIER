@@ -30,10 +30,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 /** Default-Ebene (Kategorie) für Treppen: „40" Treppen (Fallback: aktive). */
 const STAIR_CATEGORY = "40";
@@ -241,7 +242,7 @@ function runDraft(s: StairRun, ctx: CommandContext): ToolDraft {
 }
 
 /** Hängt eine Treppe ans Projekt (immutabel) und aktualisiert die Defaults. */
-function appendStair(p: Project, s: StairRun, ctx: CommandContext): Project {
+function appendStair(s: StairRun, ctx: CommandContext): CoreOp[] {
   const stair = buildStair(s, ctx);
   // Zuletzt genutzte Einstellungen für die nächste Treppe merken.
   stairDefaults.shape = s.shape;
@@ -252,8 +253,7 @@ function appendStair(p: Project, s: StairRun, ctx: CommandContext): Project {
   stairDefaults.auftritt = s.auftritt;
   stairDefaults.steps = s.steps;
   stairDefaults.rise = s.rise;
-  const stairs = p.stairs ? [...p.stairs, stair] : [stair];
-  return { ...p, stairs };
+  return addItems("stairs", [stair]);
 }
 
 const idle = (from?: StairCmdState): [CommandState, CommandResult] => [
@@ -348,7 +348,7 @@ export const stairCommand: Command = {
     const ns: StairRun = { ...s, cursor: pt };
     return [
       idle(s)[0],
-      { draft: null, done: true, commit: (p) => appendStair(p, ns, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendStair(ns, ctx)) },
     ];
   },
 
@@ -365,7 +365,7 @@ export const stairCommand: Command = {
       const ns = s;
       return [
         idle(s)[0],
-        { draft: null, done: true, commit: (p) => appendStair(p, ns, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendStair(ns, ctx)) },
       ];
     }
     return idle(s);

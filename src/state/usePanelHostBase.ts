@@ -8,6 +8,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { applyFillMode } from "./fillMode";
+import { opsMutation, patchItem } from "../core";
 import { useMemo, type RefObject } from "react";
 import type { DrawingLevel, Layout, Project } from "../model/types";
 import { resolvePenColor } from "../model/penSets";
@@ -474,21 +475,19 @@ export function usePanelHostBase(opts: {
       },
       onSetSelectionFillMode: (mode) => {
         if (selection?.kind !== "drawing2d") return;
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) => (d.id === selection.id ? applyFillMode(d, p.hatches, mode) : d)),
-        }));
+        const id = selection.id;
+        setProject(opsMutation((p) => patchItem(p, "drawings2d", id, (d) => applyFillMode(d, p.hatches, mode))));
       },
       onSetSelectionFillOpacity: (opacity) => {
         if (selection?.kind === "drawing2d")
-          setProject((p) => ({
-            ...p,
-            drawings2d: p.drawings2d.map((d) => {
-              if (d.id !== selection.id) return d;
-              const { fillOpacity: _old, ...rest } = d;
-              return opacity >= 1 ? rest : { ...rest, fillOpacity: Math.max(0, opacity) };
-            }),
-          }));
+          setProject(
+            opsMutation((p) =>
+              patchItem(p, "drawings2d", selection.id, (d) => {
+                const { fillOpacity: _old, ...rest } = d;
+                return opacity >= 1 ? rest : { ...rest, fillOpacity: Math.max(0, opacity) };
+              }),
+            ),
+          );
       },
       onSetSelectionOpacity: (opacity) => {
         // Deckkraft eines 2D-Elements. Bei BILDERN bleibt es die Deckkraft der
@@ -497,15 +496,13 @@ export function usePanelHostBase(opts: {
         // Füllungen wirkt (`Drawing2D.opacity`). Nur EIN Bedienfeld — welches
         // Feld gesetzt wird, entscheidet die Form.
         if (selection?.kind === "drawing2d")
-          setProject((p) => ({
-            ...p,
-            drawings2d: p.drawings2d.map((d) => {
-              if (d.id !== selection.id) return d;
-              return d.geom.shape === "image"
-                ? { ...d, geom: { ...d.geom, opacity } }
-                : { ...d, opacity };
-            }),
-          }));
+          setProject(
+            opsMutation((p) =>
+              patchItem(p, "drawings2d", selection.id, (d) =>
+                d.geom.shape === "image" ? { ...d, geom: { ...d.geom, opacity } } : { ...d, opacity },
+              ),
+            ),
+          );
         else if (selection?.kind === "layoutAnnotation" && activeLayout)
           patchOpenLayout(activeLayout.id, (l) =>
             patchAnnotationInLayout(l, selection.id, { opacity }),
@@ -571,44 +568,39 @@ export function usePanelHostBase(opts: {
       },
       onAddColorToCustomPalette: (paletteId, hex) => addColorToCustomPalette(paletteId, hex),
       onSetDashScale: (drawingId, scale) =>
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) => (d.id === drawingId ? { ...d, dashScale: scale } : d)),
-        })),
+        setProject(opsMutation((p) => patchItem(p, "drawings2d", drawingId, { dashScale: scale }))),
       onSetDetailRefLabel: (drawingId, label) =>
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) =>
-            d.id === drawingId && d.geom.shape === "detailref"
-              ? { ...d, geom: { ...d.geom, label } }
-              : d,
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) =>
+              d.geom.shape === "detailref" ? { ...d, geom: { ...d.geom, label } } : d,
+            ),
           ),
-        })),
+        ),
       onSetDetailRefSheetLayout: (drawingId, sheetLayoutId) =>
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) => {
-            if (d.id !== drawingId || d.geom.shape !== "detailref") return d;
-            const geom = { ...d.geom };
-            if (sheetLayoutId) geom.sheetLayoutId = sheetLayoutId;
-            else delete geom.sheetLayoutId;
-            return { ...d, geom };
-          }),
-        })),
-      onSetDetailRefSheetLabel: (drawingId, sheetLabel) =>
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) =>
-            d.id === drawingId && d.geom.shape === "detailref"
-              ? { ...d, geom: { ...d.geom, sheetLabel } }
-              : d,
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) => {
+              if (d.geom.shape !== "detailref") return d;
+              const geom = { ...d.geom };
+              if (sheetLayoutId) geom.sheetLayoutId = sheetLayoutId;
+              else delete geom.sheetLayoutId;
+              return { ...d, geom };
+            }),
           ),
-        })),
+        ),
+      onSetDetailRefSheetLabel: (drawingId, sheetLabel) =>
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) =>
+              d.geom.shape === "detailref" ? { ...d, geom: { ...d.geom, sheetLabel } } : d,
+            ),
+          ),
+        ),
       onSetHatchPlacement: (drawingId, patch) =>
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) => {
-            if (d.id !== drawingId) return d;
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) => {
             const next = { ...d };
             // `null` = zurück auf die Ressource (Feld entfernen).
             if ("angleDeg" in patch)
@@ -618,24 +610,23 @@ export function usePanelHostBase(opts: {
             if ("origin" in patch)
               patch.origin === null ? delete next.hatchOrigin : (next.hatchOrigin = patch.origin);
             return next;
-          }),
-        })),
+            }),
+          ),
+        ),
       onSetEndMarks: (drawingId, patch) =>
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) =>
-            d.id === drawingId ? { ...d, endMarks: { ...d.endMarks, ...patch } } : d,
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) => ({ ...d, endMarks: { ...d.endMarks, ...patch } })),
           ),
-        })),
+        ),
       onSetDimensionStyle: (drawingId, patch) =>
-        setProject((p) => ({
-          ...p,
-          drawings2d: p.drawings2d.map((d) =>
-            d.id === drawingId && d.geom.shape === "dimension"
-              ? { ...d, geom: { ...d.geom, ...patch } }
-              : d,
+        setProject(
+          opsMutation((p) =>
+            patchItem(p, "drawings2d", drawingId, (d) =>
+              d.geom.shape === "dimension" ? { ...d, geom: { ...d.geom, ...patch } } : d,
+            ),
           ),
-        })),
+        ),
       onSetSelectionBackgroundPen: (penId) => {
         if (!selection) return;
         const background = penId ? resolvePenColor(project, penId) : undefined;

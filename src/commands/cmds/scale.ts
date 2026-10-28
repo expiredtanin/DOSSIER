@@ -15,7 +15,7 @@
 // desselben Typs verändert — bewusste Grenze, s. PENDENZEN.md.
 
 import {
-  commitTransform,
+  transformMutation,
   hasTransformSelection,
   toTransformSel,
   transformPreview,
@@ -110,7 +110,7 @@ export const scaleCommand: Command = {
         {
           draft: null,
           done: true,
-          commit: (p) => commitTransform(p, toTransformSel(sel), "scale", pts, "move", 1),
+          commit: transformMutation(toTransformSel(sel), "scale", pts, "move", 1),
         },
       ];
     }
@@ -145,7 +145,7 @@ export const scaleCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) => commitTransform(p, toTransformSel(sel), "scale", [base, ref, pt], "move", 1),
+        commit: transformMutation(toTransformSel(sel), "scale", [base, ref, pt], "move", 1),
       },
     ];
   },

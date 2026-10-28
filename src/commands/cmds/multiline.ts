@@ -27,10 +27,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -76,8 +77,8 @@ function multilinePairs(a: Vec2, b: Vec2, spacing: number, sign: number, count: 
   return out;
 }
 
-function appendMultiline(p: Project, a: Vec2, b: Vec2, spacing: number, sign: number, count: number, ctx: CommandContext): Project {
-  if (segLen(a, b) < EPS) return p;
+function appendMultiline(a: Vec2, b: Vec2, spacing: number, sign: number, count: number, ctx: CommandContext): CoreOp[] {
+  if (segLen(a, b) < EPS) return [];
   const pairs = multilinePairs(a, b, spacing, sign, count);
   const copies: Drawing2D[] = pairs.map(([pa, pb]) => ({
     id: uniqueId("dr2d"),
@@ -86,7 +87,7 @@ function appendMultiline(p: Project, a: Vec2, b: Vec2, spacing: number, sign: nu
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "line", a: pa, b: pb },
   }));
-  return { ...p, drawings2d: [...p.drawings2d, ...copies] };
+  return addItems("drawings2d", copies);
 }
 
 const COUNT_OPTION: CmdOption = { id: "count", labelKey: "cmd.multiline.count" };
@@ -169,7 +170,7 @@ export const multilineCommand: Command = {
       const { a, b } = s;
       return [
         idle()[0],
-        { draft: null, done: true, commit: (p) => appendMultiline(p, a, b, lastSpacing, lastSign, lastCount, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendMultiline(a, b, lastSpacing, lastSign, lastCount, ctx)) },
       ];
     }
     if (input.kind === "point") {
@@ -177,7 +178,7 @@ export const multilineCommand: Command = {
       const { a, b } = s;
       return [
         idle()[0],
-        { draft: null, done: true, commit: (p) => appendMultiline(p, a, b, lastSpacing, lastSign, lastCount, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendMultiline(a, b, lastSpacing, lastSign, lastCount, ctx)) },
       ];
     }
     return [s, { draft: null }];

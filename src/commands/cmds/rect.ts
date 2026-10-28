@@ -41,11 +41,12 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 
@@ -310,8 +311,8 @@ function riseDraft(a: Vec2, b: Vec2, cursor: Vec2 | null): ToolDraft {
 // ── Commit ───────────────────────────────────────────────────────────────────
 
 /** Achsparalleles Rechteck als `shape:"rect"` (geschlossen behandelt). */
-function appendRect(p: Project, min: Vec2, max: Vec2, ctx: CommandContext): Project {
-  if (max.x - min.x < EPS || max.y - min.y < EPS) return p; // Null-Rechteck
+function appendRect(min: Vec2, max: Vec2, ctx: CommandContext): CoreOp[] {
+  if (max.x - min.x < EPS || max.y - min.y < EPS) return []; // Null-Rechteck
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -319,7 +320,7 @@ function appendRect(p: Project, min: Vec2, max: Vec2, ctx: CommandContext): Proj
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "rect", min, max },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 /**
@@ -327,11 +328,11 @@ function appendRect(p: Project, min: Vec2, max: Vec2, ctx: CommandContext): Proj
  * — `shape:"rect"` kann nur achsparallel, deshalb hier ein Ring aus vier Ecken.
  * Downstream (Füllung/Offset) behandelt einen geschlossenen Polygonzug als Ring.
  */
-function appendRotated(p: Project, pts: Vec2[], ctx: CommandContext): Project {
+function appendRotated(pts: Vec2[], ctx: CommandContext): CoreOp[] {
   // Fläche prüfen: entartete Rechtecke verwerfen.
   const w = segLen(pts[0], pts[1]);
   const h = segLen(pts[1], pts[2]);
-  if (w < EPS || h < EPS) return p;
+  if (w < EPS || h < EPS) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -339,7 +340,7 @@ function appendRotated(p: Project, pts: Vec2[], ctx: CommandContext): Project {
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "polyline", pts, closed: true },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 /**
@@ -350,9 +351,9 @@ function appendRotated(p: Project, pts: Vec2[], ctx: CommandContext): Project {
  * passt (`roundedRectPts` liefert dann `null`, z. B. bei einem entarteten
  * Rechteck).
  */
-function appendRectRounded(p: Project, corners: Vec2[], ctx: CommandContext): Project {
+function appendRectRounded(corners: Vec2[], ctx: CommandContext): CoreOp[] {
   const rr = roundedRectPts(corners, lastRadius);
-  if (!rr) return p;
+  if (!rr) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -360,7 +361,7 @@ function appendRectRounded(p: Project, corners: Vec2[], ctx: CommandContext): Pr
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "polyline", pts: rr.pts, closed: true, bulge: rr.bulge },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (method: RectMethod): [CommandState, CommandResult] => [
@@ -436,14 +437,14 @@ export const rectCommand: Command = {
         {
           draft: null,
           done: true,
-          commit: (p) => {
+          commit: opsMutation(() => {
             const g = method === "center" ? centerGeom(a, pt) : rectGeom(a, pt);
             if (lastRadius >= EPS) {
               const corners = [g.min, { x: g.max.x, y: g.min.y }, g.max, { x: g.min.x, y: g.max.y }];
-              return appendRectRounded(p, corners, ctx);
+              return appendRectRounded(corners, ctx);
             }
-            return appendRect(p, g.min, g.max, ctx);
-          },
+            return appendRect(g.min, g.max, ctx);
+          }),
         },
       ];
     }
@@ -456,10 +457,10 @@ export const rectCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) => {
+        commit: opsMutation(() => {
           const corners = rotatedCorners(a, b, pt);
-          return lastRadius >= EPS ? appendRectRounded(p, corners, ctx) : appendRotated(p, corners, ctx);
-        },
+          return lastRadius >= EPS ? appendRectRounded(corners, ctx) : appendRotated(corners, ctx);
+        }),
       },
     ];
   },

@@ -26,10 +26,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -115,9 +116,9 @@ function ceilingDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
 }
 
 /** Hängt eine Decke ans Projekt (immutabel). Entartete Umrisse werden verworfen. */
-function appendCeiling(p: Project, pts: Vec2[], ctx: CommandContext): Project {
+function appendCeiling(pts: Vec2[], ctx: CommandContext): CoreOp[] {
   const outline = normalizeOutline(pts);
-  if (!outline || ceilingArea(outline) < 1e-4) return p;
+  if (!outline || ceilingArea(outline) < 1e-4) return [];
   const ceiling: Ceiling = {
     id: uniqueId("C"),
     type: "ceiling",
@@ -126,8 +127,7 @@ function appendCeiling(p: Project, pts: Vec2[], ctx: CommandContext): Project {
     outline,
     wallTypeId: activeTypeId(ctx),
   };
-  const ceilings = p.ceilings ? [...p.ceilings, ceiling] : [ceiling];
-  return { ...p, ceilings };
+  return addItems("ceilings", [ceiling]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -175,7 +175,7 @@ export const ceilingCommand: Command = {
         const pts = s.points;
         return [
           { phase: "start", lastPoint: null } as CeilIdle,
-          { draft: null, done: true, commit: (p) => appendCeiling(p, pts, ctx) },
+          { draft: null, done: true, commit: opsMutation(() => appendCeiling(pts, ctx)) },
         ];
       }
       return [s, { draft: ceilingDraft(s.points, s.cursor) }];
@@ -197,7 +197,7 @@ export const ceilingCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null } as CeilIdle,
-        { draft: null, done: true, commit: (p) => appendCeiling(p, pts, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendCeiling(pts, ctx)) },
       ];
     }
     // Null-Strecke (Klick auf denselben Punkt) ignorieren.
@@ -224,7 +224,7 @@ export const ceilingCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null } as CeilIdle,
-        { draft: null, done: true, commit: (p) => appendCeiling(p, pts, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendCeiling(pts, ctx)) },
       ];
     }
     return idle();

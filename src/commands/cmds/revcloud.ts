@@ -19,10 +19,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const CLOSE_HIT = 0.15; // Modell-Meter: Klick nahe Startpunkt schliesst den Zug
@@ -62,9 +63,9 @@ function revcloudDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendRevcloud(p: Project, points: Vec2[], closed: boolean, ctx: CommandContext): Project {
+function appendRevcloud(points: Vec2[], closed: boolean, ctx: CommandContext): CoreOp[] {
   const expanded = revisionCloudPts(points, closed, lastArcSize);
-  if (!expanded) return p;
+  if (!expanded) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -72,7 +73,7 @@ function appendRevcloud(p: Project, points: Vec2[], closed: boolean, ctx: Comman
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "polyline", pts: expanded.pts, closed, bulge: expanded.bulge },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -105,7 +106,7 @@ export const revcloudCommand: Command = {
       }
       if (input.id === "close" && s.phase === "next" && s.points.length >= 3) {
         const pts = s.points;
-        return [idle()[0], { draft: null, done: true, commit: (p) => appendRevcloud(p, pts, true, ctx) }];
+        return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendRevcloud(pts, true, ctx)) }];
       }
       return [s, { draft: null }];
     }
@@ -123,7 +124,7 @@ export const revcloudCommand: Command = {
     // Klick nahe Startpunkt (≥3 Punkte) → schliessen (committet als Ring).
     if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
       const pts = s.points;
-      return [idle()[0], { draft: null, done: true, commit: (p) => appendRevcloud(p, pts, true, ctx) }];
+      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendRevcloud(pts, true, ctx)) }];
     }
     const points = [...s.points, pt];
     const ns: RevcloudDrawing = { phase: "next", points, cursor: pt, lastPoint: pt };
@@ -142,7 +143,7 @@ export const revcloudCommand: Command = {
     const s = state as RevcloudState;
     if (s.phase === "next" && s.points.length >= 2) {
       const pts = s.points;
-      return [idle()[0], { draft: null, done: true, commit: (p) => appendRevcloud(p, pts, false, ctx) }];
+      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendRevcloud(pts, false, ctx)) }];
     }
     return idle();
   },

@@ -29,6 +29,8 @@ import type {
   Project,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Kurvenwahl
@@ -183,11 +185,11 @@ function offsetDraftShapes(curve: Curve, d: number): DraftShape[] {
   return [{ kind: "poly", pts: tess, closed: curve.closed }];
 }
 
-function appendOffset(p: Project, src: Drawing2D, d: number): Project {
+function appendOffset(src: Drawing2D, d: number): CoreOp[] {
   const geom = offsetGeom(src, d);
-  if (!geom) return p;
+  if (!geom) return [];
   const copy: Drawing2D = { ...src, id: uniqueId("dr2d"), geom };
-  return { ...p, drawings2d: [...p.drawings2d, copy] };
+  return addItems("drawings2d", [copy]);
 }
 
 // ── Zustand ───────────────────────────────────────────────────────────────────
@@ -316,7 +318,7 @@ function offsetSideInput(
     const d = sign * mag;
     return [
       { phase: "done", lastPoint: null } as OffDone,
-      { draft: null, done: true, commit: (p) => appendOffset(p, src, d) },
+      { draft: null, done: true, commit: opsMutation(() => appendOffset(src, d)) },
     ];
   }
 
@@ -327,7 +329,7 @@ function offsetSideInput(
     const d = sign * lastDistance;
     return [
       { phase: "done", lastPoint: null } as OffDone,
-      { draft: null, done: true, commit: (p) => appendOffset(p, src, d) },
+      { draft: null, done: true, commit: opsMutation(() => appendOffset(src, d)) },
     ];
   }
 

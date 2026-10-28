@@ -42,11 +42,12 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 
@@ -202,8 +203,8 @@ function lineDraft(a: Vec2, b: Vec2): ToolDraft {
   return { preview: [{ kind: "line", a, b }], vertices: [a] };
 }
 
-function appendArc(p: Project, center: Vec2, r: number, a0: number, a1: number, ctx: CommandContext): Project {
-  if (r < EPS) return p;
+function appendArc(center: Vec2, r: number, a0: number, a1: number, ctx: CommandContext): CoreOp[] {
+  if (r < EPS) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -211,7 +212,7 @@ function appendArc(p: Project, center: Vec2, r: number, a0: number, a1: number, 
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "arc", center, r, a0, a1 },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (method: ArcMethod): [CommandState, CommandResult] => [
@@ -268,7 +269,7 @@ export const arcCommand: Command = {
       if (!arc) return [s, { draft: null }];
       return [
         idle("ser")[0],
-        { draft: null, done: true, commit: (p) => appendArc(p, arc.center, arc.r, arc.a0, arc.a1, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendArc(arc.center, arc.r, arc.a0, arc.a1, ctx)) },
       ];
     }
     if (input.kind !== "point") return [s, { draft: null }];
@@ -291,7 +292,7 @@ export const arcCommand: Command = {
       const { center, r, a0 } = s;
       return [
         idle("center")[0],
-        { draft: null, done: true, commit: (p) => appendArc(p, center, r, a0, a1, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendArc(center, r, a0, a1, ctx)) },
       ];
     }
 
@@ -311,7 +312,7 @@ export const arcCommand: Command = {
       if (!arc) return [s, { draft: lineDraft(s.a, pt) }]; // kollinear — Punkt ignorieren, weiter warten
       return [
         idle("three")[0],
-        { draft: null, done: true, commit: (p) => appendArc(p, arc.center, arc.r, arc.a0, arc.a1, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendArc(arc.center, arc.r, arc.a0, arc.a1, ctx)) },
       ];
     }
 
@@ -331,7 +332,7 @@ export const arcCommand: Command = {
       if (!arc) return [s, { draft: lineDraft(s.a, s.b) }]; // Radius zu klein — weiter warten
       return [
         idle("ser")[0],
-        { draft: null, done: true, commit: (p) => appendArc(p, arc.center, arc.r, arc.a0, arc.a1, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendArc(arc.center, arc.r, arc.a0, arc.a1, ctx)) },
       ];
     }
 
@@ -350,7 +351,7 @@ export const arcCommand: Command = {
     if (!sedArc) return [s, { draft: lineDraft(s.a, s.b) }]; // entartete Richtung — weiter warten
     return [
       idle("sed")[0],
-      { draft: null, done: true, commit: (p) => appendArc(p, sedArc.center, sedArc.r, sedArc.a0, sedArc.a1, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendArc(sedArc.center, sedArc.r, sedArc.a0, sedArc.a1, ctx)) },
     ];
   },
 

@@ -7,7 +7,7 @@
 //   P distribute — Original bleibt + N Kopien gleichmäßig zwischen Original und Ziel.
 //
 // Bezeichner englisch, UI-Text via t() (CONVENTIONS.md). Reine Funktionen + Geometrie;
-// die App hält den State und wendet `commitTransform` immutabel an.
+// die App hält den State und wendet die Ops aus `transformOps` an ([K4] S3).
 
 import { transformSolid } from "../core";
 import type {
@@ -32,6 +32,10 @@ import { drawingPreviewShapes } from "./drawingPreview";
 import { mvGeom, reversesOrientation, scaleFactor, scaleGeom } from "../core";
 import { uniqueId } from "./types";
 import type { CommandSelection } from "../commands/types";
+import { applyOps } from "../core";
+import type { CoreOp } from "../core";
+import { addItems, opsMutation, patchItems } from "../core";
+import type { ProjectMutation } from "../core";
 
 export type TransformOp = "move" | "rotate" | "mirror" | "scale";
 export type CopyMode = "move" | "copy" | "array" | "distribute"; // U / I / O / P
@@ -497,17 +501,20 @@ export function rotateGizmoShapes(center: Vec2, refPoint: Vec2, cursor: Vec2): D
 
 // ── Commit ───────────────────────────────────────────────────────────────────
 
-/** Wendet die Transformation immutabel auf das Projekt an (Original + Kopien). */
-export function commitTransform(
+/**
+ * Die Transformation als Ops ([K4] S3): `replace` je bewegtem Original (nur bei „move"), `add` der
+ * Kopien je Liste. Liest nur die gewählten Elemente — keine Projekt-Differenz über alle Wände.
+ */
+export function transformOps(
   project: Project,
   sel: TransformSelection,
   op: TransformOp,
   pts: Vec2[],
   mode: CopyMode,
   count: number,
-): Project {
+): CoreOp[] {
   const items = gatherItems(project, sel, op);
-  if (items.length === 0) return project;
+  if (items.length === 0) return [];
   const wallIds = new Set(sel.wallIds);
   // Bei einer Skalierung müssen auch Grössenfelder (Radius/Schrifthöhe/…)
   // mitziehen — dafür `scaleGeom` statt `mvGeom` (s. dort); analog für
@@ -517,18 +524,11 @@ export function commitTransform(
   const stairAt = (s: Stair, fn: (p: Vec2) => Vec2, t: number): Stair =>
     mvStair(s, fn, op === "scale" ? scaleFactor(pts, t) : 1);
 
-  let walls = project.walls;
-  let drawings2d = project.drawings2d;
-  let extrudedSolids = project.extrudedSolids ?? [];
-  let columns = project.columns ?? [];
-  let ceilings = project.ceilings ?? [];
-  let roofs = project.roofs ?? [];
-  let stairs = project.stairs ?? [];
-  let rooms = project.rooms ?? [];
   const ceilingIds = new Set(sel.ceilingIds ?? []);
   const roofIds = new Set(sel.roofIds ?? []);
   const stairIds = new Set(sel.stairIds ?? []);
   const roomIds = new Set(sel.roomIds ?? []);
+  const ops: CoreOp[] = [];
 
   // U (move): Original an die Endlage (t=1) transformieren. Objekt-Sperre
   // (`locked`) überall mitgeprüft — dieselbe Semantik wie `gatherItems`
@@ -537,13 +537,20 @@ export function commitTransform(
   // genau diese Art von Doppel-Pflege).
   if (movesOriginal(mode)) {
     const fn = transformFn(op, pts, 1);
-    walls = walls.map((w) =>
-      wallIds.has(w.id) && !w.locked ? { ...w, start: fn(w.start), end: fn(w.end) } : w,
+    ops.push(
+      ...patchItems(project, "walls", (w) => wallIds.has(w.id) && !w.locked, (w) => ({
+        ...w,
+        start: fn(w.start),
+        end: fn(w.end),
+      })),
     );
     const moveDrawIds = drawingIdSet(sel);
     if (moveDrawIds.size > 0) {
-      drawings2d = drawings2d.map((d) =>
-        moveDrawIds.has(d.id) && !d.locked ? { ...d, geom: geomAt(d.geom, fn, 1) } : d,
+      ops.push(
+        ...patchItems(project, "drawings2d", (d) => moveDrawIds.has(d.id) && !d.locked, (d) => ({
+          ...d,
+          geom: geomAt(d.geom, fn, 1),
+        })),
       );
     }
     if (sel.extrudedSolidId) {
@@ -552,19 +559,21 @@ export function commitTransform(
       // nutzt) müssen mitziehen — sonst weicht das 3D-Volumen sichtbar von
       // der Grundriss-Kontur ab (nur `center` mitzuführen genügt nicht).
       const f1 = op === "scale" ? scaleFactor(pts, 1) : 1;
-      extrudedSolids = extrudedSolids.map((s) => (s.id === sel.extrudedSolidId ? transformSolid(s, fn, f1) : s));
+      const solidId = sel.extrudedSolidId;
+      ops.push(...patchItems(project, "extrudedSolids", (s) => s.id === solidId, (s) => transformSolid(s, fn, f1)));
     }
     if (sel.columnId) {
-      columns = columns.map((c) => (c.id === sel.columnId && !c.locked ? mvColumn(c, fn) : c));
+      const columnId = sel.columnId;
+      ops.push(...patchItems(project, "columns", (c) => c.id === columnId && !c.locked, (c) => mvColumn(c, fn)));
     }
     if (ceilingIds.size > 0)
-      ceilings = ceilings.map((c) => (ceilingIds.has(c.id) && !c.locked ? mvCeiling(c, fn) : c));
-    if (roofIds.size > 0 && roofTransformAllowed(op)) {
-      roofs = roofs.map((r) => (roofIds.has(r.id) && !r.locked ? mvRoof(r, fn) : r));
-    }
+      ops.push(...patchItems(project, "ceilings", (c) => ceilingIds.has(c.id) && !c.locked, (c) => mvCeiling(c, fn)));
+    if (roofIds.size > 0 && roofTransformAllowed(op))
+      ops.push(...patchItems(project, "roofs", (r) => roofIds.has(r.id) && !r.locked, (r) => mvRoof(r, fn)));
     if (stairIds.size > 0)
-      stairs = stairs.map((s) => (stairIds.has(s.id) && !s.locked ? stairAt(s, fn, 1) : s));
-    if (roomIds.size > 0) rooms = rooms.map((r) => (roomIds.has(r.id) && !r.locked ? mvRoom(r, fn) : r));
+      ops.push(...patchItems(project, "stairs", (s) => stairIds.has(s.id) && !s.locked, (s) => stairAt(s, fn, 1)));
+    if (roomIds.size > 0)
+      ops.push(...patchItems(project, "rooms", (r) => roomIds.has(r.id) && !r.locked, (r) => mvRoom(r, fn)));
   }
 
   // Kopien anhängen (I/O/P bzw. mirror copy).
@@ -614,16 +623,41 @@ export function commitTransform(
       }
     }
   }
+  ops.push(
+    ...addItems("walls", newWalls),
+    ...addItems("drawings2d", newDrawings),
+    ...addItems("extrudedSolids", newSolids),
+    ...addItems("columns", newColumns),
+    ...addItems("ceilings", newCeilings),
+    ...addItems("roofs", newRoofs),
+    ...addItems("stairs", newStairs),
+    ...addItems("rooms", newRooms),
+  );
+  return ops;
+}
 
-  return {
-    ...project,
-    walls: newWalls.length ? [...walls, ...newWalls] : walls,
-    drawings2d: newDrawings.length ? [...drawings2d, ...newDrawings] : drawings2d,
-    extrudedSolids: newSolids.length ? [...extrudedSolids, ...newSolids] : extrudedSolids,
-    columns: newColumns.length ? [...columns, ...newColumns] : columns,
-    ceilings: newCeilings.length ? [...ceilings, ...newCeilings] : ceilings,
-    roofs: newRoofs.length ? [...roofs, ...newRoofs] : roofs,
-    stairs: newStairs.length ? [...stairs, ...newStairs] : stairs,
-    rooms: newRooms.length ? [...rooms, ...newRooms] : rooms,
-  };
+/** Wendet die Transformation immutabel auf das Projekt an (Original + Kopien), über {@link transformOps}. */
+export function commitTransform(
+  project: Project,
+  sel: TransformSelection,
+  op: TransformOp,
+  pts: Vec2[],
+  mode: CopyMode,
+  count: number,
+): Project {
+  return applyOps(project, transformOps(project, sel, op, pts, mode, count));
+}
+
+/**
+ * Wie {@link commitTransform}, als Projekt → Projekt-Funktion mit mitgeführten Ops (`opsMutation`) —
+ * für `CommandResult.commit`: `setProject` übergibt die Ops ohne Projekt-Differenz an den Kern.
+ */
+export function transformMutation(
+  sel: TransformSelection,
+  op: TransformOp,
+  pts: Vec2[],
+  mode: CopyMode,
+  count: number,
+): ProjectMutation {
+  return opsMutation((p) => transformOps(p, sel, op, pts, mode, count));
 }

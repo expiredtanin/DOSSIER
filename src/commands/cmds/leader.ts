@@ -22,11 +22,12 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const DEFAULT_TEXT_HEIGHT_M = 0.25;
 const MAX_BENDS = 4;
@@ -53,14 +54,12 @@ interface LeaderAnchor extends CommandState {
 }
 type LeaderState = LeaderTarget | LeaderBend | LeaderAnchor;
 
-function appendLeaderText(
-  p: Project,
-  id: string,
+function appendLeaderText(id: string,
   at: Vec2,
   target: Vec2,
   bends: Vec2[],
   ctx: CommandContext,
-): Project {
+): CoreOp[] {
   const d: Drawing2D = {
     id,
     type: "drawing2d",
@@ -76,7 +75,7 @@ function appendLeaderText(
       ...(bends.length > 0 ? { leaderBendPoints: bends } : {}),
     },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -143,7 +142,7 @@ export const leaderCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) => appendLeaderText(p, id, pt, target, bends, ctx),
+        commit: opsMutation(() => appendLeaderText(id, pt, target, bends, ctx)),
         focusDrawingId: id,
       },
     ];

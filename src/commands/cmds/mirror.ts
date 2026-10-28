@@ -7,12 +7,12 @@
 // wie Move/Copy). Ist sie leer, ist nichts zu spiegeln: kurzer No-op mit Hinweis
 // („Nichts gewählt") und Beenden.
 //
-// Der Commit nutzt den bestehenden, getesteten `commitTransform` (op:"mirror",
+// Der Commit nutzt den bestehenden, getesteten `transformMutation` (op:"mirror",
 // mode:"copy") — er spiegelt Wände UND alle 2D-Formen immutabel an der Achse und
 // hängt das Spiegelbild als KOPIE an (das Original bleibt stehen). Das ist das
 // klassische Mirror „Kopie spiegeln" (Rhino/Vectorworks-Default).
 
-import { commitTransform, hasTransformSelection, toTransformSel } from "../../tools/transform";
+import { transformMutation, hasTransformSelection, toTransformSel } from "../../tools/transform";
 import { transformPreview } from "../../tools/transform";
 import type {
   Command,
@@ -132,7 +132,7 @@ export const mirrorCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) => commitTransform(p, toTransformSel(sel), "mirror", [a, pt], "copy", 1),
+        commit: transformMutation(toTransformSel(sel), "mirror", [a, pt], "copy", 1),
       },
     ];
   },

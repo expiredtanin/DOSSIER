@@ -22,9 +22,10 @@ import type {
   CommandContext,
   CommandResult,
   CommandState,
-  Project,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 
@@ -51,14 +52,12 @@ function readDefs(ctx: CommandContext): { ids: string[]; names: string[] } {
   return { ids: defs.map((d) => d.id), names: defs.map((d) => d.name) };
 }
 
-function appendInstance(
-  p: Project,
-  blockDefId: string,
+function appendInstance(blockDefId: string,
   at: Vec2,
   rotation: number,
   scale: number,
   ctx: CommandContext,
-): Project {
+): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -66,7 +65,7 @@ function appendInstance(
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "block", blockDefId, at, rotation, scale },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 /** Drehwinkel + Skalierungsfaktor aus DEMSELBEN Punkt: Klick auf `at` = (0, 1). */
@@ -117,7 +116,7 @@ export const blockCommand: Command = {
     const { rotation, scale } = rotationAndScaleFrom(at, pt);
     return [
       idle()[0],
-      { draft: null, done: true, commit: (p) => appendInstance(p, blockDefId, at, rotation, scale, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendInstance(blockDefId, at, rotation, scale, ctx)) },
     ];
   },
 

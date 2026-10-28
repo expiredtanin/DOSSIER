@@ -5,6 +5,7 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { opsMutation, patchItem, removeItems } from "../core";
 import type { Project, Vec2 } from "../model/types";
 import type { CategoryDisplayResolver } from "../core";
 import type { DisplayResolver } from "../viewport/Viewport3D";
@@ -168,14 +169,11 @@ export function useMouseSelectionHandlers(opts: {
     const id = editTextId;
     if (!id) return;
     setProject(
-      (p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) =>
-          d.id === id && d.geom.shape === "text"
-            ? { ...d, geom: { ...d.geom, doc, text: plainText(doc) } }
-            : d,
+      opsMutation((p) =>
+        patchItem(p, "drawings2d", id, (d) =>
+          d.geom.shape === "text" ? { ...d, geom: { ...d.geom, doc, text: plainText(doc) } } : d,
         ),
-      }),
+      ),
       `commitTextEdit:${id}`,
     );
   };
@@ -186,15 +184,14 @@ export function useMouseSelectionHandlers(opts: {
   const closeTextEdit = () => {
     const id = editTextId;
     if (id) {
-      setProject((p) => {
-        const d = p.drawings2d.find((x) => x.id === id);
-        // `text` ist immer der Reintext-Spiegel von `doc` (s. commitTextEdit) —
-        // reicht daher allein als Leer-Test, egal ob `doc` je gesetzt wurde.
-        if (d && d.geom.shape === "text" && d.geom.text.trim() === "") {
-          return { ...p, drawings2d: p.drawings2d.filter((x) => x.id !== id) };
-        }
-        return p;
-      });
+      setProject(
+        opsMutation((p) => {
+          const d = p.drawings2d.find((x) => x.id === id);
+          // `text` ist immer der Reintext-Spiegel von `doc` (s. commitTextEdit) —
+          // reicht daher allein als Leer-Test, egal ob `doc` je gesetzt wurde.
+          return d && d.geom.shape === "text" && d.geom.text.trim() === "" ? removeItems(p, "drawings2d", [id]) : [];
+        }),
+      );
     }
     setEditTextId(null);
     setEditTextMinHeightM(null);

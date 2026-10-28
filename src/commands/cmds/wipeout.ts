@@ -29,10 +29,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const CLOSE_HIT = 0.15; // Modell-Meter: Klick nahe Startpunkt schliesst den Zug
@@ -59,7 +60,7 @@ function wipeoutDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendWipeout(p: Project, points: Vec2[], ctx: CommandContext): Project {
+function appendWipeout(points: Vec2[], ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -69,7 +70,7 @@ function appendWipeout(p: Project, points: Vec2[], ctx: CommandContext): Project
     background: MASK_COLOR,
     color: MASK_COLOR,
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -100,7 +101,7 @@ export const wipeoutCommand: Command = {
     // Klick nahe Startpunkt (≥3 Punkte) → schliessen (committet).
     if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
       const pts = s.points;
-      return [idle()[0], { draft: null, done: true, commit: (p) => appendWipeout(p, pts, ctx) }];
+      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendWipeout(pts, ctx)) }];
     }
     const points = [...s.points, pt];
     const ns: WipeoutDrawing = { phase: "next", points, cursor: pt, lastPoint: pt };
@@ -120,7 +121,7 @@ export const wipeoutCommand: Command = {
     const s = state as WipeoutState;
     if (s.phase === "next" && s.points.length >= 3) {
       const pts = s.points;
-      return [idle()[0], { draft: null, done: true, commit: (p) => appendWipeout(p, pts, ctx) }];
+      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendWipeout(pts, ctx)) }];
     }
     return idle();
   },

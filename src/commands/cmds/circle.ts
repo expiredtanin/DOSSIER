@@ -52,6 +52,8 @@ import type {
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 
@@ -265,8 +267,8 @@ function lineDraft(a: Vec2, b: Vec2): ToolDraft {
   return { preview: [{ kind: "line", a, b }], vertices: [a] };
 }
 
-function appendCircle(p: Project, center: Vec2, r: number, ctx: CommandContext): Project {
-  if (r < EPS) return p;
+function appendCircle(center: Vec2, r: number, ctx: CommandContext): CoreOp[] {
+  if (r < EPS) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -274,7 +276,7 @@ function appendCircle(p: Project, center: Vec2, r: number, ctx: CommandContext):
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "circle", center, r },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (method: CircleMethod): [CommandState, CommandResult] => [
@@ -335,7 +337,7 @@ export const circleCommand: Command = {
       if (input.kind === "number") r = input.value;
       else r = dist(s.center, input.point);
       const center = s.center;
-      return [idle("center")[0], { draft: null, done: true, commit: (p) => appendCircle(p, center, r, ctx) }];
+      return [idle("center")[0], { draft: null, done: true, commit: opsMutation(() => appendCircle(center, r, ctx)) }];
     }
 
     if (s.method === "ttr") {
@@ -346,7 +348,7 @@ export const circleCommand: Command = {
         const center = r > EPS ? nearestCandidate(tangentCircleCenters(s.t1, s.t2, r), s.near1, s.near2) : null;
         // Kein Kandidat (z. B. Radius geometrisch unpassend) — ignorieren, weiter warten.
         if (!center) return [s, { draft: null }];
-        return [idle("ttr")[0], { draft: null, done: true, commit: (p) => appendCircle(p, center, r, ctx) }];
+        return [idle("ttr")[0], { draft: null, done: true, commit: opsMutation(() => appendCircle(center, r, ctx)) }];
       }
       if (input.kind !== "point") return [s, { draft: null }];
       const pick = pickTangentTarget(ctx.project, ctx.level.id, input.point);
@@ -387,7 +389,7 @@ export const circleCommand: Command = {
       }
       const center = mid(s.a, pt);
       const r = dist(s.a, pt) / 2;
-      return [idle("twoPoint")[0], { draft: null, done: true, commit: (p) => appendCircle(p, center, r, ctx) }];
+      return [idle("twoPoint")[0], { draft: null, done: true, commit: opsMutation(() => appendCircle(center, r, ctx)) }];
     }
 
     // threePoint
@@ -405,7 +407,7 @@ export const circleCommand: Command = {
     if (!circ) return [s, { draft: lineDraft(s.a, pt) }]; // kollinear — ignorieren, weiter warten
     return [
       idle("threePoint")[0],
-      { draft: null, done: true, commit: (p) => appendCircle(p, circ.center, circ.r, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendCircle(circ.center, circ.r, ctx)) },
     ];
   },
 

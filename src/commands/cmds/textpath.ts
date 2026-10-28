@@ -15,10 +15,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -59,7 +60,7 @@ function pathDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendEmptyTextPath(p: Project, id: string, pts: Vec2[], ctx: CommandContext): Project {
+function appendEmptyTextPath(id: string, pts: Vec2[], ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id,
     type: "drawing2d",
@@ -67,7 +68,7 @@ function appendEmptyTextPath(p: Project, id: string, pts: Vec2[], ctx: CommandCo
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "text", at: pts[0], text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0, pathPts: pts },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -77,7 +78,7 @@ const idle = (): [CommandState, CommandResult] => [
 
 function commitPath(pts: Vec2[], ctx: CommandContext): CommandResult {
   const id = uniqueId("dr2d");
-  return { draft: null, done: true, commit: (p) => appendEmptyTextPath(p, id, pts, ctx), focusDrawingId: id };
+  return { draft: null, done: true, commit: opsMutation(() => appendEmptyTextPath(id, pts, ctx)), focusDrawingId: id };
 }
 
 export const textpathCommand: Command = {

@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  activeGroupOps,
   addNewElementsToActiveGroup,
   applyGroupDimming,
   applyGroupDimmingToPlan,
@@ -21,6 +22,9 @@ import {
 import type { Primitive } from "../plan/generatePlan/shared";
 import { materializeUnderlay, type Plan } from "../plan/generatePlan";
 import type { Drawing2D, Group, Project } from "../model/types";
+import { applyOps } from "../core/ops";
+import type { CoreOp } from "../core/ops";
+import { addItems, replaceItem } from "../core/opsBuild";
 
 const EMPTY_MEM = {
   wallIds: [] as string[],
@@ -258,6 +262,31 @@ describe("addNewElementsToActiveGroup", () => {
     const result = addNewElementsToActiveGroup(before, after, ["g2", "g1"]);
     expect(result.groups!.find((x) => x.id === "g1")!.drawingIds).toEqual(["d1"]);
     expect(result.groups!.find((x) => x.id === "g2")!.drawingIds).toEqual([]);
+  });
+});
+
+describe("activeGroupOps ([K4] S3: Ops statt Differenz)", () => {
+  const mk = (id: string): Group => ({ id, wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] });
+  const line = (id: string) =>
+    ({ id, type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } } }) as Project["drawings2d"][number];
+  const wall = (id: string) => ({ id, start: { x: 0, y: 0 }, end: { x: 1, y: 0 } }) as unknown as Project["walls"][number];
+
+  it("gleiches Ergebnis wie addNewElementsToActiveGroup, Zufall", () => {
+    let x = 11;
+    const r = () => ((x = (x * 1664525 + 1013904223) % 4294967296) / 4294967296);
+    for (let n = 0; n < 200; n++) {
+      const before: Project = { ...project([mk("g1"), mk("g2")]), drawings2d: [line("d0")], walls: [wall("w0")] };
+      const ops: CoreOp[] = [];
+      const k = Math.floor(r() * 4);
+      if (k >= 1) ops.push(...addItems("drawings2d", [line(`a${n}`), line(`b${n}`)], r() < 0.5 ? 0 : undefined));
+      if (k >= 2) ops.push(...addItems("walls", [wall(`w${n}x`)]));
+      if (k >= 3) ops.push(replaceItem("drawings2d", { ...line("d0"), color: "#f00" }));
+      const path = r() < 0.2 ? [] : r() < 0.5 ? ["g1"] : ["g2", "g1", "gx"];
+      const after = applyOps(before, ops);
+      const legacy = addNewElementsToActiveGroup(before, after, path);
+      const viaOps = applyOps(before, [...ops, ...activeGroupOps(before, ops, path)]);
+      expect(viaOps).toEqual(legacy);
+    }
   });
 });
 
