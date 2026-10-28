@@ -54,6 +54,8 @@ import { RecoverAutosaveDialog } from "./ui/RecoverAutosaveDialog";
 import { Toast } from "./ui/Toast";
 import { isTauriRuntime, PROJECT_TEMPLATE_EXT } from "./native/projectFile";
 import { stepTextToImportedMeshes } from "./io/stepImport";
+import { formatIfcReport, ifcBytesToImportedMeshes } from "./io/ifcImport";
+import { projectGeoOrigin } from "./model/geoRebase";
 import { applyClashMarkers, runClashCheck } from "./analysis/clash";
 import { checkForUpdate } from "./update/checkForUpdate";
 import type { PlanViewHandle } from "./views/plan/PlanView";
@@ -547,6 +549,8 @@ export default function App() {
   const dxfInputRef = useRef<HTMLInputElement>(null);
   // Verstecktes Datei-Input für den STEP-Import (Menü Datei, STEP importieren).
   const stepInputRef = useRef<HTMLInputElement>(null);
+  // Verstecktes Datei-Input für den IFC-Import ([B3], Menü Datei, IFC importieren).
+  const ifcInputRef = useRef<HTMLInputElement>(null);
 
   // Verstecktes Datei-Input für „Bild einfügen" (Werkzeug „image", s. tools.ts-
   // Kommentar) — akzeptiert auch PDF (jede Seite wird gerastert, s. pdfImport.ts);
@@ -1694,6 +1698,26 @@ export default function App() {
     setRoomStamp,
   } = useProjectActions(setProject, notify, planViewRef);
 
+  // IFC-Import ([B3]): Bauteile als Kontext-Meshes (Format-Modul, `io/ifcImport.ts`), Bericht als Toast.
+  const importIfcFile = (f: File) => {
+    void f
+      .arrayBuffer()
+      .then((buf) => ifcBytesToImportedMeshes(new Uint8Array(buf), f.name, { geoOrigin: projectGeoOrigin(project) }))
+      .then(({ meshes, report }) => {
+        if (meshes.length) addContextObjectsAndFit(meshes);
+        const warn = meshes.length === 0 || report.truncated || report.productsWithoutGeometry > 0;
+        notify(formatIfcReport(report, t), warn ? "warning" : "info");
+      })
+      .catch((err) =>
+        notify(`${t("ifc.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
+      );
+  };
+  /** Datei aus Import-Dialog oder Drag & Drop: IFC direkt, sonst DXF/DWG-Dialog. */
+  const openImportForAnyFile = (f: File) => {
+    if (/\.ifc$/i.test(f.name)) importIfcFile(f);
+    else openImportForFile(f);
+  };
+
   // 2D-Griff-Editieren (Eckpunkt-/Kanten-Griffe + Feld-Controller) der aktuellen
   // Auswahl — siehe state/useGripEditing.ts.
   // Schnitt-/Ansichts-Blatt: geschnittene (bzw. in der Ansicht sichtbare)
@@ -2391,6 +2415,7 @@ export default function App() {
       onExportStl,
       onExportStep,
       onImportStep: () => stepInputRef.current?.click(),
+      onImportIfc: () => ifcInputRef.current?.click(),
       onClashCheck: () => {
         const p0 = project;
         runClashCheck(p0)
@@ -3080,7 +3105,7 @@ export default function App() {
   // App-weites Drag & Drop einer DXF/DWG-Datei — siehe state/useImportHandling.ts.
   const { onAppDragEnter, onAppDragOver, onAppDragLeave, onAppDrop } = useFileDropImport(
     setDropActive,
-    openImportForFile,
+    openImportForAnyFile,
   );
 
   // Host-Context für die Panels — siehe state/usePanelHostBase.ts.
@@ -3256,11 +3281,11 @@ export default function App() {
       <input
         ref={dxfInputRef}
         type="file"
-        accept=".dxf,.dwg,text/plain"
+        accept=".dxf,.dwg,.ifc,text/plain"
         style={{ display: "none" }}
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) openImportForFile(f);
+          if (f) openImportForAnyFile(f);
           e.target.value = "";
         }}
       />
@@ -3281,6 +3306,18 @@ export default function App() {
             .catch((err) =>
               notify(`${t("step.import.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error"),
             );
+        }}
+      />
+      {/* Verstecktes IFC-Datei-Input (Menü Datei, IFC importieren). */}
+      <input
+        ref={ifcInputRef}
+        type="file"
+        accept=".ifc"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) importIfcFile(f);
         }}
       />
       {/* Verstecktes Bild/PDF-Datei-Input (Werkzeug „image"). */}

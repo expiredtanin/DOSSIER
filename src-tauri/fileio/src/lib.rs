@@ -11,6 +11,8 @@
 // acadrust: `DxfReader::from_reader(Cursor<Vec<u8>>)` (Read + Seek + 'static) — ohne Dateisystem, WASM-tauglich.
 
 pub mod export;
+pub mod ifc_step;
+pub mod ifc_import;
 
 use std::collections::HashMap;
 use std::io::Cursor;

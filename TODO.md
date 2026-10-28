@@ -280,7 +280,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[65] Explosionsaxonometrie.** · S–M
 - ○ **[66] Präsentationspläne mit einem Klick.** · M
 - ○ **[67] Skizzenstil.** · M
-- ○ **[25] IFC-Import** → [B3]/[B4]. · L
+- ◐ **[25] IFC-Import** → [B3] ✅ (Mesh), [B4] ○. · L
 - ◐ **[26] Dächer über beliebige Grundrisse.** `geometry/roofSkeleton.ts` (Walm/Sattel/Mansarde/
   Krüppelwalm auf L/T/U, Kehlen, Giebel); Port nach Rust läuft [K2]. Offen: Innenhöfe, schiefwinklige
   Grundrisse → [B2]. · M
@@ -307,7 +307,15 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
 - ○ **[B2] Straight Skeleton** (für [26]), jetzt nach `dossier-core` statt `kernel2d`. `skeleton.rs`
   (709 Z., 8 Tests inkl. Fuzz): Innenhöfe, schiefwinklige Grundrisse, Giebel auf beliebiger Kante,
   Neigung je Kante, Arbeitsbudget. · S (Kernel) + M (Einbau)
-- ○ **[B3] IFC-Import als Mesh** (erste Stufe von [25]). `step.rs` + Leseteil von `import.rs`. · M
+- ✅ **[B3] IFC-Import als Mesh** (erste Stufe von [25]). (28.10.) Eigener Code in `src-tauri/fileio`
+  (`ifc_step.rs` STEP-Leser inkl. `\X2\`/`\X4\`, `ifc_import.rs` Geometrie), Fassade `io/ifcImport.ts`:
+  je IfcProduct ein Kontext-Mesh (Ebene = IFC-Klasse; > 2000 Bauteile je Klasse+Geschoss), Menü „IFC
+  importieren …", Import-Dialog und Drag & Drop (`.ifc`), CLI `import-ifc`. Extrusion (Arbitrary/
+  Rechteck/Kreis/I/L/U/T, Löcher, Bögen), FacetedBrep, Tri-/PolygonalFaceSet, MappedItem, mm/Fuss,
+  IFC2x3/4/4.3. Rundreise und alle buildingSMART-Simple-Scene-Dateien gegen ifcopenshell gleich (Volumen je
+  Bauteil). Offen: Öffnungen abziehen und Boolesche Körper (nur 1. Operand) → [B4]; IfcAdvancedBrep,
+  Revolved/SweptDisk; Farbe/GlobalId gelesen, aber `ImportedMesh` hat kein Feld dafür (GlobalId steht im
+  Namen); Laden im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · M
 - ○ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3].
 - ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 27.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).

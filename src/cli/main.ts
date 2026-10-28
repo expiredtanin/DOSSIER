@@ -9,6 +9,8 @@
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
 //   dossier-cli <projekt.obp> dxf|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> import-ifc <datei.ifc> [--out neu.obp] [--group product|class]
+//                                                  IFC als Kontext-Meshes ([B3]); Bericht als JSON auf stdout
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
@@ -22,6 +24,10 @@ import {
   buildPlanDxf,
   buildPlanDwg,
   loadFileio,
+  readIfc,
+  ifcToImportedMeshes,
+  projectGeoOrigin,
+  ensureContextCategories,
   projectToWorldCoords,
   computeSection,
   exportIfcSpf,
@@ -124,7 +130,7 @@ export async function run(argv: string[]): Promise<number> {
   const [file, command, ...rest] = args.positional;
   if (!file || !command) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun> [Optionen]\n",
     );
     return 2;
   }
@@ -136,7 +142,15 @@ export async function run(argv: string[]): Promise<number> {
   await initCore();
   const project = loadProject(file);
   const scale = Number(args.flags.get("scale") ?? 100);
-  const allCodes = new Set(project.layers.map((l) => l.code));
+  // Alle Ebenen-Codes inkl. verschachtelter (z. B. „10 Situation" unter „05 Kontext").
+  const allCodes = new Set<string>();
+  const collectCodes = (ls: Project["layers"]): void => {
+    for (const l of ls) {
+      allCodes.add(l.code);
+      if (l.children) collectCodes(l.children);
+    }
+  };
+  collectCodes(project.layers);
 
   switch (command) {
     case "info": {
@@ -243,6 +257,37 @@ export async function run(argv: string[]): Promise<number> {
       const r = await exportProjectStep(project, project.name || "projekt");
       if (r.skipped.length) process.stderr.write(`${r.skipped.length} Körper übersprungen/ungeschnitten.\n`);
       out(args, r.text, `${project.name || "projekt"}.stp`);
+      return 0;
+    }
+    case "import-ifc": {
+      const src = rest[0];
+      if (!src) fail("import-ifc: IFC-Datei fehlt");
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(readFileSync(src));
+      } catch (e) {
+        fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
+      }
+      const { products, report } = await readIfc(bytes);
+      const group = args.flags.get("group");
+      const meshes = ifcToImportedMeshes(products, src.split(/[\\/]/).pop() ?? src, {
+        geoOrigin: projectGeoOrigin(project),
+        group: group === "product" || group === "class" ? group : "auto",
+      });
+      const byClass: Record<string, number> = {};
+      for (const p of products) byClass[p.ifcClass] = (byClass[p.ifcClass] ?? 0) + 1;
+      const triangles = products.reduce((s, p) => s + p.indices.length / 3, 0);
+      process.stdout.write(JSON.stringify({ ...report, byClass, triangles, contextObjects: meshes.length }, null, 2) + "\n");
+      const target = args.flags.get("out");
+      if (target) {
+        const next = applyOps(project, diffToOps(project, {
+          ...project,
+          context: [...(project.context ?? []), ...meshes],
+          // Wie in der App (siteSlice): fehlende Kontext-Kategorie als Ebene ergänzen.
+          layers: ensureContextCategories(project.layers, meshes.flatMap((m) => (m.categoryCode ? [m.categoryCode] : []))),
+        }));
+        out(args, serializeProject(next), target);
+      }
       return 0;
     }
     case "mcp":
