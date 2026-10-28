@@ -5,6 +5,7 @@ import { emitSlabs } from "./toWalls3d/ceilings";
 import { emitColumns } from "./toWalls3d/columns";
 import { projectToWalls3d } from "./toWalls3d";
 import { emitOpeningMeshes } from "./toWalls3d/openings";
+import { emitRoofs, emitRoofCutLayers } from "./toWalls3d/roofs";
 import { emitStairs, emitStairMeshes, emitStairRailings } from "./toWalls3d/stairs";
 
 const plain = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -95,6 +96,29 @@ describe("model3d stairs", () => {
       expect(doc.query("stairRailings")).toEqual(plain(emitStairRailings(project)));
     }
     expect(n).toBeGreaterThan(300);
+  });
+});
+
+describe("model3d roofs", () => {
+  it("random", () => {
+    let n = 0;
+    const L = [{ x: 0, y: 0 }, { x: 11, y: 0 }, { x: 11, y: 4 }, { x: 8, y: 4 }, { x: 8, y: 6 }, { x: 0, y: 6 }];
+    const R = [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 5 }, { x: 0, y: 5 }];
+    for (let t = 0; t < 200; t++) {
+      const lvl = sampleProject.drawingLevels.filter((l) => l.kind === "floor");
+      const roofTypes = sampleProject.roofTypes ?? [];
+      const roofs = Array.from({ length: 1 + Math.floor(rnd() * 2) }, (_, k) => ({ id: "R" + k, type: "roof", floorId: pick(lvl).id, categoryCode: "35", outline: pick([L, R]),
+        shape: pick(["sattel", "walm", "pult", "flach", "mansarde", "zelt"]), pitchDeg: 10 + Math.floor(rnd() * 40), overhang: rnd() * 0.5, ridgeAxis: pick(["x", "y"]), thickness: pick([0.1, 0.2]),
+        ...(roofTypes.length && rnd() < 0.7 ? { roofTypeId: pick(roofTypes).id } : {}), ...(rnd() < 0.3 ? { color: "#aa3322" } : {}), ...(rnd() < 0.3 ? { baseElevation: 3 } : {}) }));
+      const project: any = { ...sampleProject, roofs };
+      const doc = documentFor(project);
+      const a = doc.query<unknown[]>("roofMeshes");
+      const b = plain(emitRoofs(project));
+      expect(a).toEqual(b);
+      expect(plain(doc.query("roofCutLayers"))).toEqual(plain(emitRoofCutLayers(project)));
+      n += b.length;
+    }
+    expect(n).toBeGreaterThan(100);
   });
 });
 

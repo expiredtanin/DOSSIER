@@ -791,6 +791,266 @@ pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
     }
 }
 
+// ── Dächer ──────────────────────────────────────────────────────────────────
+
+use crate::jsmath::hypot;
+use crate::jsnum::round;
+
+type V3 = [f64; 3];
+const ROOF_RGB: Rgb = [0.72, 0.45, 0.36];
+const EPS: f64 = 1e-4;
+
+/// Eine Dachschicht für den Live-Schnitt (`RRoofLayer`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RRoofLayer {
+    pub polygon: Vec<V3>,
+    pub normal: V3,
+    pub thickness: f64,
+    pub color: Rgb,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cut: Option<RCutMeta>,
+}
+
+fn push_fan_triangles(positions: &mut Vec<f64>, indices: &mut Vec<u32>, pts: &[V3], flip: bool) {
+    if pts.len() < 3 {
+        return;
+    }
+    let base = (positions.len() / 3) as u32;
+    for p in pts {
+        positions.extend(*p);
+    }
+    for i in 1..pts.len() as u32 - 1 {
+        if flip {
+            indices.extend([base, base + i + 1, base + i]);
+        } else {
+            indices.extend([base, base + i, base + i + 1]);
+        }
+    }
+}
+
+/// Newell-Normale einer Dachfläche, nach oben orientiert (`planeNormalUp`).
+fn plane_normal_up(pts: &[V3]) -> V3 {
+    let (mut nx, mut ny, mut nz) = (0.0, 0.0, 0.0);
+    for i in 0..pts.len() {
+        let c = pts[i];
+        let d = pts[(i + 1) % pts.len()];
+        nx += (c[1] - d[1]) * (c[2] + d[2]);
+        ny += (c[2] - d[2]) * (c[0] + d[0]);
+        nz += (c[0] - d[0]) * (c[1] + d[1]);
+    }
+    let len = hypot(&[nx, ny, nz]);
+    let len = if len == 0.0 || len.is_nan() { 1.0 } else { len };
+    let u = [nx / len, ny / len, nz / len];
+    if u[2] < 0.0 {
+        [-u[0], -u[1], -u[2]]
+    } else {
+        u
+    }
+}
+
+fn dot3(a: V3, b: V3) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross3(a: V3, b: V3) -> V3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+/// Gehrte Versatz-Ecken aller Dachflächen (`mitredRoofOffsets`).
+struct Mitre<'a> {
+    planes: &'a [Vec<V3>],
+    normals: Vec<V3>,
+    neighbor: Vec<Vec<isize>>,
+    shared: Vec<Vec<bool>>,
+}
+
+impl<'a> Mitre<'a> {
+    fn new(planes: &'a [Vec<V3>]) -> Self {
+        let key = |p: &V3| (round(p[0] * 1e5) as i64, round(p[1] * 1e5) as i64, round(p[2] * 1e5) as i64);
+        let ek = |a: &V3, b: &V3| {
+            let (ka, kb) = (key(a), key(b));
+            if ka <= kb { (ka, kb) } else { (kb, ka) }
+        };
+        let mut owners: HashMap<_, Vec<usize>> = HashMap::new();
+        for (i, pts) in planes.iter().enumerate() {
+            for k in 0..pts.len() {
+                owners.entry(ek(&pts[k], &pts[(k + 1) % pts.len()])).or_default().push(i);
+            }
+        }
+        let normals: Vec<V3> = planes.iter().map(|p| plane_normal_up(p)).collect();
+        let neighbor: Vec<Vec<isize>> = planes
+            .iter()
+            .enumerate()
+            .map(|(i, pts)| {
+                (0..pts.len())
+                    .map(|k| {
+                        owners
+                            .get(&ek(&pts[k], &pts[(k + 1) % pts.len()]))
+                            .and_then(|o| o.iter().find(|&&x| x != i))
+                            .map_or(-1, |&j| j as isize)
+                    })
+                    .collect()
+            })
+            .collect();
+        let shared = neighbor.iter().map(|row| row.iter().map(|&j| j >= 0).collect()).collect();
+        Mitre { planes, normals, neighbor, shared }
+    }
+
+    fn edge_plane(&self, i: usize, k: usize, d: f64) -> (V3, f64) {
+        let pts = &self.planes[i];
+        let a = pts[k];
+        let b = pts[(k + 1) % pts.len()];
+        let j = self.neighbor[i][k];
+        if j >= 0 {
+            let j = j as usize;
+            return (self.normals[j], dot3(self.normals[j], self.planes[j][0]) - d);
+        }
+        let dir = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let m = cross3(dir, self.normals[i]);
+        (m, dot3(m, a))
+    }
+
+    fn solve(rows: [(V3, f64); 3]) -> Option<V3> {
+        let [(a, ca), (b, cb), (c, cc)] = rows;
+        let bc = cross3(b, c);
+        let det = dot3(a, bc);
+        if det.abs() < 1e-9 {
+            return None;
+        }
+        let cxa = cross3(c, a);
+        let axb = cross3(a, b);
+        Some([
+            (ca * bc[0] + cb * cxa[0] + cc * axb[0]) / det,
+            (ca * bc[1] + cb * cxa[1] + cc * axb[1]) / det,
+            (ca * bc[2] + cb * cxa[2] + cc * axb[2]) / det,
+        ])
+    }
+
+    fn at(&self, i: usize, d: f64) -> Vec<V3> {
+        let pts = &self.planes[i];
+        let n = self.normals[i];
+        if d <= EPS {
+            return pts.clone();
+        }
+        let own = (n, dot3(n, pts[0]) - d);
+        (0..pts.len())
+            .map(|k| {
+                let p = pts[k];
+                let prev = (k + pts.len() - 1) % pts.len();
+                let fallback = [p[0] - n[0] * d, p[1] - n[1] * d, p[2] - n[2] * d];
+                if !self.shared[i][prev] && !self.shared[i][k] {
+                    return fallback;
+                }
+                match Self::solve([own, self.edge_plane(i, prev, d), self.edge_plane(i, k, d)]) {
+                    Some(q) if hypot(&[q[0] - fallback[0], q[1] - fallback[1], q[2] - fallback[2]]) <= 4.0 * d + 0.5 => q,
+                    _ => fallback,
+                }
+            })
+            .collect()
+    }
+}
+
+fn push_roof_slab_between(positions: &mut Vec<f64>, indices: &mut Vec<u32>, top: &[V3], bottom: &[V3], shared: &[bool]) {
+    let mut nz = 0.0;
+    for i in 0..top.len() {
+        let a = top[i];
+        let b = top[(i + 1) % top.len()];
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    let ccw = nz > 0.0;
+    push_fan_triangles(positions, indices, top, !ccw);
+    push_fan_triangles(positions, indices, bottom, ccw);
+    for i in 0..top.len() {
+        if shared[i] {
+            continue;
+        }
+        let j = (i + 1) % top.len();
+        let base = (positions.len() / 3) as u32;
+        positions.extend(top[i]);
+        positions.extend(bottom[i]);
+        positions.extend(bottom[j]);
+        positions.extend(top[j]);
+        if ccw {
+            indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        } else {
+            indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
+    }
+}
+
+fn roof_color(p: &Project, override_color: Option<Rgb>, component_id: &str) -> Result<Rgb, String> {
+    if let Some(c) = override_color {
+        return Ok(c);
+    }
+    if component_id.is_empty() {
+        return Ok(ROOF_RGB);
+    }
+    p.component(component_id).map(|c| hex_to_rgb(&c.color, ROOF_RGB)).ok_or_else(|| format!("Unbekanntes Bauteil-Material: {component_id}"))
+}
+
+/// Dächer als geschlossene, geschichtete Dreiecks-Meshes (`emitRoofs`).
+pub fn emit_roofs(p: &Project) -> Result<Vec<RMesh>, String> {
+    let maps = wall_material_color_maps(p);
+    let mut out = Vec::new();
+    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        let eaves_z = p.roof_base_elevation(roof);
+        let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
+        let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
+        let mitre = Mitre::new(&g.planes);
+        let mut offset_above = 0.0;
+        for layer in p.roof_layers(roof) {
+            let t = layer.thickness.max(0.0);
+            if t <= EPS {
+                continue;
+            }
+            let color = roof_color(p, override_color, &layer.component_id)?;
+            let material_index = if override_color.is_none() && !layer.component_id.is_empty() { material_layer(p, &maps, &layer.component_id) } else { None };
+            let (mut positions, mut indices) = (Vec::new(), Vec::new());
+            for (i, plane) in g.planes.iter().enumerate() {
+                if plane.len() < 3 {
+                    continue;
+                }
+                let top = mitre.at(i, offset_above);
+                let bottom = mitre.at(i, offset_above + t);
+                push_roof_slab_between(&mut positions, &mut indices, &top, &bottom, &mitre.shared[i]);
+            }
+            if !indices.is_empty() {
+                out.push(RMesh { positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
+            }
+            offset_above += t;
+        }
+    }
+    Ok(out)
+}
+
+/// Dachschicht-Eingabe für den 3D-Live-Schnitt (`emitRoofCutLayers`).
+pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
+    let mut out = Vec::new();
+    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        let eaves_z = p.roof_base_elevation(roof);
+        let g = crate::roof::roof_geometry(&roof.params(), eaves_z);
+        let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
+        let mut offset_above = 0.0;
+        for layer in p.roof_layers(roof) {
+            let t = layer.thickness.max(0.0);
+            if t <= EPS {
+                continue;
+            }
+            let color = roof_color(p, override_color, &layer.component_id)?;
+            let line = resolve_cut_line_style(p, layer.joint_line_style_id.as_deref());
+            let cut = line.map(|(c, w)| RCutMeta { line_color: Some(c), line_weight: Some(w), ..Default::default() });
+            for plane in &g.planes {
+                let nrm = plane_normal_up(plane);
+                let polygon = plane.iter().map(|q| [q[0] - nrm[0] * offset_above, q[1] - nrm[1] * offset_above, q[2] - nrm[2] * offset_above]).collect();
+                out.push(RRoofLayer { polygon, normal: nrm, thickness: t, color, cut: cut.clone() });
+            }
+            offset_above += t;
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -88,6 +88,8 @@ pub fn doc_query_args(h: u32, name: &str, args: &[f64]) -> String {
             "stairSlabs" if args.len() == 1 => serde_json::to_string(&crate::model3d::emit_stairs(&p, args[0] != 0.0)),
             "stairMeshes" => serde_json::to_string(&crate::model3d::emit_stair_meshes(&p)),
             "stairRailings" => serde_json::to_string(&crate::model3d::emit_stair_railings(&p)),
+            "roofMeshes" => crate::model3d::emit_roofs(&p).map_err(|e| serde_json::Error::io(std::io::Error::other(e))).and_then(|v| serde_json::to_string(&v)),
+            "roofCutLayers" => crate::model3d::emit_roof_cut_layers(&p).map_err(|e| serde_json::Error::io(std::io::Error::other(e))).and_then(|v| serde_json::to_string(&v)),
             "slabs" => serde_json::to_string(&crate::model3d::emit_slabs(&p)),
             "columnMeshes" => serde_json::to_string(&crate::model3d::emit_columns(&p)),
             "shadows" if args.len() == 2 => {
