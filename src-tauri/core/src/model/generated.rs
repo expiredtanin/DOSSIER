@@ -13,6 +13,8 @@ pub enum LineStyleKind {
     Zigzag,
     #[serde(rename = "custom")]
     Custom,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -96,6 +98,8 @@ pub enum HatchStyleKind {
     Image,
     #[serde(rename = "gradient")]
     Gradient,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -105,6 +109,8 @@ pub enum HatchStyleLines {
     Parallel,
     #[serde(rename = "random")]
     Random,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -127,6 +133,8 @@ pub enum HatchStyleGradientType {
     Linear,
     #[serde(rename = "radial")]
     Radial,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -155,6 +163,8 @@ pub enum HatchPattern {
     Crosshatch,
     #[serde(rename = "custom")]
     Custom,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -317,6 +327,8 @@ pub enum DoorTypeKind {
     Schiebe,
     #[serde(rename = "wandoeffnung")]
     Wandoeffnung,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -328,6 +340,8 @@ pub enum DoorTypeLeafStyle {
     Kassette,
     #[serde(rename = "glas")]
     Glas,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -337,6 +351,8 @@ pub enum DoorTypeFrameKind {
     Zarge,
     #[serde(rename = "blockrahmen")]
     Blockrahmen,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -348,6 +364,8 @@ pub enum FrameCornerJoin {
     Horizontal,
     #[serde(rename = "gehrung")]
     Gehrung,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -357,6 +375,8 @@ pub enum DoorTypeInsetFace {
     Aussen,
     #[serde(rename = "innen")]
     Innen,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -414,6 +434,8 @@ pub enum OpeningKind {
     Fest,
     #[serde(rename = "schiebe")]
     Schiebe,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -423,6 +445,8 @@ pub enum SashDefKind {
     Fluegel,
     #[serde(rename = "pfosten")]
     Pfosten,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -432,6 +456,8 @@ pub enum SashDefHingeSide {
     Left,
     #[serde(rename = "right")]
     Right,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -461,6 +487,8 @@ pub enum WindowShadingKind {
     Raffstore,
     #[serde(rename = "markise")]
     Markise,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -492,6 +520,8 @@ pub enum WindowTypeGlazing {
     Zweifach,
     #[serde(rename = "dreifach")]
     Dreifach,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -501,6 +531,8 @@ pub enum WindowTypeInsetFace {
     Aussen,
     #[serde(rename = "innen")]
     Innen,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -512,6 +544,8 @@ pub enum WindowTypeSillLineFaces {
     Innen,
     #[serde(rename = "beide")]
     Beide,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -521,6 +555,8 @@ pub enum WindowTypeSillLineView {
     Auf,
     #[serde(rename = "unter")]
     Unter,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -543,6 +579,8 @@ pub enum WindowTypeSillBoard {
     Aussen,
     #[serde(rename = "beide")]
     Beide,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -607,6 +645,8 @@ pub enum StairTypeStructure {
     Aufgesattelt,
     #[serde(rename = "spindel")]
     Spindel,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -620,6 +660,8 @@ pub enum StairTypeRailing {
     Rechts,
     #[serde(rename = "beide")]
     Beide,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -708,6 +750,8 @@ pub enum DrawingLevelKind {
     Elevation,
     #[serde(rename = "drawing")]
     Drawing,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -757,6 +801,8 @@ pub enum SiaCategory {
     KGF,
     #[serde(rename = "AGF")]
     AGF,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -834,6 +880,8 @@ pub enum AttributeSource {
     Layer,
     #[serde(rename = "object")]
     Object,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -845,6 +893,8 @@ pub enum WallReferenceLine {
     Center,
     #[serde(rename = "right")]
     Right,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -856,6 +906,8 @@ pub enum SliceTermination {
     Below,
     #[serde(rename = "above")]
     Above,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -979,6 +1031,8 @@ pub enum RoofShape {
     Mansarde,
     #[serde(rename = "zelt")]
     Zelt,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -990,6 +1044,8 @@ pub enum RoofMansardType {
     Walm,
     #[serde(rename = "zelt")]
     Zelt,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -999,6 +1055,8 @@ pub enum RoofRidgeAxis {
     X,
     #[serde(rename = "y")]
     Y,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1049,6 +1107,8 @@ pub enum ElementKind {
     Window,
     #[serde(rename = "door")]
     Door,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1058,6 +1118,8 @@ pub enum OpeningDoorType {
     Normal,
     #[serde(rename = "wandoeffnung")]
     Wandoeffnung,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1067,6 +1129,8 @@ pub enum OpeningHinge {
     Start,
     #[serde(rename = "end")]
     End,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1076,6 +1140,8 @@ pub enum SwingSide {
     Left,
     #[serde(rename = "right")]
     Right,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1085,6 +1151,8 @@ pub enum OpeningOpeningDir {
     In,
     #[serde(rename = "out")]
     Out,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1098,6 +1166,8 @@ pub enum OpeningLintelLines {
     Aussen,
     #[serde(rename = "beide")]
     Beide,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1109,6 +1179,8 @@ pub enum DetailLevel {
     Mittel,
     #[serde(rename = "fein")]
     Fein,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1184,6 +1256,8 @@ pub enum StairShape {
     L,
     #[serde(rename = "spiral")]
     Spiral,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1195,6 +1269,8 @@ pub enum StairReferenz {
     Mitte,
     #[serde(rename = "rechts")]
     Rechts,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1204,6 +1280,8 @@ pub enum StairArrowStyle {
     Line,
     #[serde(rename = "filled")]
     Filled,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1273,6 +1351,8 @@ pub enum Align {
     Center,
     #[serde(rename = "right")]
     Right,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1369,6 +1449,8 @@ pub enum EndMark {
     Tick,
     #[serde(rename = "square")]
     Square,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1589,6 +1671,8 @@ pub enum OverrideConditionType {
     LayerName,
     #[serde(rename = "object_name")]
     ObjectName,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1602,6 +1686,8 @@ pub enum OverrideOperator {
     StartsWith,
     #[serde(rename = "not_equals")]
     NotEquals,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1646,6 +1732,8 @@ pub enum ViewType {
     Grundriss,
     #[serde(rename = "perspektive")]
     Perspektive,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1671,6 +1759,8 @@ pub enum View3d {
     IsoBackLeft,
     #[serde(rename = "perspective")]
     Perspective,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1748,6 +1838,8 @@ pub enum LayoutPaperFormat {
     B5,
     #[serde(rename = "b6")]
     B6,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1757,6 +1849,8 @@ pub enum LayoutOrientation {
     Portrait,
     #[serde(rename = "landscape")]
     Landscape,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1848,6 +1942,8 @@ pub enum LayoutFolderKind {
     Layout,
     #[serde(rename = "master")]
     Master,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -1986,6 +2082,8 @@ pub enum GridRuleDirections {
     Y,
     #[serde(rename = "both")]
     Both,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -2015,6 +2113,8 @@ pub enum ModuleRuleDirection {
     X,
     #[serde(rename = "y")]
     Y,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -2042,6 +2142,8 @@ pub enum ConditionalThicknessRuleLogic {
     And,
     #[serde(rename = "or")]
     Or,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -2098,6 +2200,8 @@ pub enum ContourCurveKind {
     Circle,
     #[serde(rename = "arc")]
     Arc,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

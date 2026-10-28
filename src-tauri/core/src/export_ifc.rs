@@ -564,7 +564,7 @@ pub fn export_ifc_spf(project_in: &Project, now_ms: f64) -> Result<String, Strin
         let predefined = match stair.shape {
             StairShape::Straight => en("STRAIGHT_RUN_STAIR"),
             StairShape::Spiral => en("SPIRAL_STAIR"),
-            StairShape::L => en("QUARTER_TURN_STAIR"),
+            _ => en("QUARTER_TURN_STAIR"),
         };
         let entity = emit_building_element!("IFCSTAIR", ifc_guid(&stair.id), "Treppe".to_string(), placement, shape, Some(predefined));
         add_to_containment(structure.entity_id, entity);
@@ -650,6 +650,7 @@ pub fn export_ifc_spf(project_in: &Project, now_ms: f64) -> Result<String, Strin
             RoofShape::Walm => "HIP_ROOF",
             RoofShape::Mansarde => "MANSARD_ROOF",
             RoofShape::Zelt => "HIPPED_GABLE_ROOF",
+            RoofShape::Unknown => "NOTDEFINED",
         };
         let roof_type = roof.roof_type_id.as_deref().and_then(|id| p.roof_types.as_deref()?.iter().find(|t| t.id == id));
         let name = roof_type.map_or("Dach".to_string(), |t| t.name.clone());

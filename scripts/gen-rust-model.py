@@ -156,6 +156,8 @@ def rust_enum(name, lits):
         seen.add(v)
         lines.append(f'    #[serde(rename = {json.dumps(l, ensure_ascii=False)})]\n    {v},')
     lines[0] = "    #[default]\n" + lines[0]
+    # Unbekannte Werte (ältere/neuere Dateien) lesen sich als `Unknown`, statt das ganze Projekt abzulehnen.
+    lines.append("    #[serde(other)]\n    Unknown,")
     return ("#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]\n"
             f"pub enum {name} {{\n" + "\n".join(lines) + "\n}\n")
 

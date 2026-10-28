@@ -170,6 +170,7 @@ fn category_index(c: SiaCategory) -> usize {
         SiaCategory::FF => 3,
         SiaCategory::KGF => 4,
         SiaCategory::AGF => 5,
+        SiaCategory::Unknown => CATEGORIES, // zählt nicht
     }
 }
 

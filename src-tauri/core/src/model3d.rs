@@ -593,6 +593,7 @@ fn opening_kind_code(k: Option<OpeningKind>) -> f64 {
         Some(OpeningKind::Drehkipp) => 3.0,
         Some(OpeningKind::Fest) => 4.0,
         Some(OpeningKind::Schiebe) => 5.0,
+        Some(OpeningKind::Unknown) => 6.0,
     }
 }
 

@@ -157,6 +157,7 @@ fn shape_name(s: RoofShape) -> &'static str {
         RoofShape::Walm => "walm",
         RoofShape::Mansarde => "mansarde",
         RoofShape::Zelt => "zelt",
+        RoofShape::Unknown => "",
     }
 }
 

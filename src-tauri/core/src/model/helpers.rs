@@ -159,7 +159,7 @@ impl Roof {
         RoofParams {
             outline: self.outline.iter().map(|v| [v.x, v.y]).collect(),
             shape: match self.shape {
-                RoofShape::Flach => Shape::Flach,
+                RoofShape::Flach | RoofShape::Unknown => Shape::Flach,
                 RoofShape::Pult => Shape::Pult,
                 RoofShape::Sattel => Shape::Sattel,
                 RoofShape::Walm => Shape::Walm,
@@ -188,7 +188,7 @@ impl Stair {
         let n = |v: Option<f64>| v.unwrap_or(f64::NAN);
         [
             match self.shape {
-                StairShape::Straight => 0.0,
+                StairShape::Straight | StairShape::Unknown => 0.0,
                 StairShape::L => 1.0,
                 StairShape::Spiral => 2.0,
             },
