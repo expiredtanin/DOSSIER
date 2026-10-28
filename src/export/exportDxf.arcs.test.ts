@@ -8,7 +8,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import "../engine/fileioWasm.setup";
 import { buildPlanDxf } from "./exportDxf";
+import { readDxf, num } from "./cadReadBack.testutil";
 import { sampleProject } from "../model/sampleProject";
 import type { Plan } from "../plan/generatePlan";
 
@@ -17,10 +19,9 @@ function planWith(primitives: Plan["primitives"]): Plan {
   return { primitives, bounds: { minX: 0, minY: 0, maxX: 10, maxY: 10 } } as Plan;
 }
 
-/** Zählt, wie oft ein DXF-Entity-Typ als eigene Gruppe (0/TYP) vorkommt. */
+/** Zählt die Entitäten eines Typs in der ENTITIES-Sektion (Rücklesen statt Textsuche). */
 function countEntities(dxf: string, type: string): number {
-  return dxf.split(/\r?\n/).filter((l, i, all) => l.trim() === "0" && all[i + 1]?.trim() === type)
-    .length;
+  return readDxf(dxf).entities.filter((e) => e.type === type).length;
 }
 
 const code = sampleProject.layers[0].code;
@@ -61,9 +62,12 @@ describe("buildPlanDxf — gezeichnete Kreise/Bögen", () => {
       sampleProject,
     );
     expect(countEntities(dxf, "ARC")).toBe(1);
-    // Start-/Endwinkel (DXF-Gruppencodes 50/51) in Grad.
-    expect(dxf).toMatch(/\n\s*50\r?\n\s*0(\.0+)?\r?\n/);
-    expect(dxf).toMatch(/\n\s*51\r?\n\s*90(\.0+)?\r?\n/);
+    // Start-/Endwinkel (DXF-Gruppencodes 50/51) in Grad — inhaltlich zurückgelesen statt per
+    // Textmuster: acadrust formatiert Zahlen anders als der frühere TS-Writer.
+    const arc = readDxf(dxf).entities.find((e) => e.type === "ARC")!;
+    expect(num(arc, 50)).toBeCloseTo(0, 12);
+    expect(num(arc, 51)).toBeCloseTo(90, 12);
+    expect([num(arc, 10), num(arc, 20), num(arc, 40)]).toEqual([0, 0, 2]);
   });
 
   it("ein Bogen bleibt EIN Entity — keine Kette von LINEs", () => {

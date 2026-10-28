@@ -7,7 +7,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import "../engine/fileioWasm.setup";
 import { buildPlanDxf } from "./exportDxf";
+import { readDxf } from "./cadReadBack.testutil";
 import { sampleProject } from "../model/sampleProject";
 import type { Plan } from "../plan/generatePlan";
 import type { HatchRender } from "../plan/generatePlan/shared";
@@ -17,7 +19,7 @@ function planWith(primitives: Plan["primitives"]): Plan {
 }
 
 function countEntities(dxf: string, type: string): number {
-  return dxf.split(/\r?\n/).filter((l, i, all) => l.trim() === "0" && all[i + 1]?.trim() === type).length;
+  return readDxf(dxf).entities.filter((e) => e.type === type).length;
 }
 
 const SQUARE = [

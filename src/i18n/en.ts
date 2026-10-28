@@ -1685,10 +1685,14 @@ export const en: Record<TranslationKey, string> = {
   "export.cancel": "Cancel",
 
   // DXF export.
-  "exportDxf.title": "Export DXF",
+  "exportDxf.title": "Export DXF/DWG",
   "exportDxf.hatches": "Hatches",
   "exportDxf.hatches.yes": "Include",
   "exportDxf.hatches.no": "Outlines only",
+  "exportDxf.format": "Format",
+  "exportDxf.format.dxf": "DXF (AutoCAD 2018, text)",
+  "exportDxf.format.dwg": "DWG (AutoCAD 2018)",
+  "exportDxf.failed": "Export failed",
   "exportDxf.unitsNote":
     "Model space in meters (1:1). Layers mirror the project's categories; scale freely on plot.",
 
@@ -1701,7 +1705,7 @@ export const en: Record<TranslationKey, string> = {
   "file.open": "Open project",
   "file.import": "Import DXF/DWG…",
   "file.exportPdf": "Export as PDF…",
-  "file.exportDxf": "Export as DXF…",
+  "file.exportDxf": "Export as DXF/DWG…",
   "file.exportSchedule": "Component schedule (CSV)…",
   "file.exportIfc": "Export IFC",
   "file.exportObj": "Export OBJ (3D mesh)",

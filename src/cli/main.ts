@@ -8,7 +8,7 @@
 //   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--out eg.svg]
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
-//   dossier-cli <projekt.obp> dxf|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
@@ -20,6 +20,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildPlanDxf,
+  buildPlanDwg,
+  loadFileio,
+  projectToWorldCoords,
   computeSection,
   exportIfcSpf,
   exportObj,
@@ -106,12 +109,13 @@ function findLevel(project: Project, kinds: string[], name: string | undefined) 
   return levels.find((l) => l.id.toLowerCase() === n || l.name.toLowerCase() === n);
 }
 
-function out(args: Args, text: string, defaultName: string): void {
+function out(args: Args, text: string | Uint8Array, defaultName: string): void {
   const target = args.flags.get("out") ?? defaultName;
   if (target === "-") process.stdout.write(text);
   else {
     writeFileSync(target, text);
-    process.stderr.write(`geschrieben: ${target} (${text.length} Zeichen)\n`);
+    const size = typeof text === "string" ? `${text.length} Zeichen` : `${text.length} Bytes`;
+    process.stderr.write(`geschrieben: ${target} (${size})\n`);
   }
 }
 
@@ -120,7 +124,7 @@ export async function run(argv: string[]): Promise<number> {
   const [file, command, ...rest] = args.positional;
   if (!file || !command) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|ifc|step|obj|stl|schedule|kennzahlen|sun> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun> [Optionen]\n",
     );
     return 2;
   }
@@ -195,10 +199,16 @@ export async function run(argv: string[]): Promise<number> {
       out(args, planToSvgString(plan, { scaleDenominator: scale }), `${lvl.name}.svg`);
       return 0;
     }
-    case "dxf": {
+    case "dxf":
+    case "dwg": {
       const lvl = findLevel(project, ["floor"], args.flags.get("level"));
       if (!lvl) fail("Geschoss nicht gefunden");
-      out(args, buildPlanDxf(generatePlan(project, lvl.id, allCodes), project), `${lvl.name}.dxf`);
+      // Wie in der App: georeferenziert (LV95), wenn das Projekt einen Standort-Bezug hat.
+      const world = projectToWorldCoords(project);
+      const plan = generatePlan(world, lvl.id, allCodes);
+      await loadFileio();
+      if (command === "dxf") out(args, buildPlanDxf(plan, world), `${lvl.name}.dxf`);
+      else out(args, buildPlanDwg(plan, world), `${lvl.name}.dwg`);
       return 0;
     }
     case "ifc":

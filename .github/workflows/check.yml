@@ -15,6 +15,6 @@ jobs:
       - run: cargo install wasm-pack --locked
       - run: npm ci
       # IFC-Prüfung in exportIfc.validate.test.ts ([B1]); ohne ifcopenshell würde sie übersprungen.
-      - run: pip install ifcopenshell pytest
+      - run: pip install ifcopenshell pytest ezdxf
       - run: npm run build:core && npm run build:truck && npm run build:engine3d && npm run build:engine && npm run build:fileio
       - run: npm run check

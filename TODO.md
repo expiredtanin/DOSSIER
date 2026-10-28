@@ -339,9 +339,22 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
 - ◐ **[C1] DWG über `acadrust`** (28.10.: Gerüst `src-tauri/fileio` mit acadrust 0.6.8, WASM `pkgFileIo`,
   nachgeladen über `src/engine/fileioWasm.ts`; Herkunft geprüft → `NOTICE`) (Rust, Open Source): Lesen R13–2018, **Schreiben R2000**. Heute liest
   Dossier DWG über `dwgimport`/libredwg-web und kann kein DWG schreiben. Lizenz von acadrust prüfen. · M
-- ○ **[C2] DXF als eigenes Rust-Crate** (Tag-Reader/-Writer, R12–2018 ASCII und Binär lesen, R2000 schreiben):
+  28.10. **DWG-Export** steht: `src-tauri/fileio/src/export.rs` baut aus einer flachen Zeichnung ein acadrust-
+  `CadDocument` und schreibt **DWG R2018** (R2000 möglich, verliert aber True-Color; Begründung im Dateikopf);
+  Dialog „DXF/DWG exportieren“ mit Formatwahl, CLI `dwg`. Rundreise acadrust (`cargo test`) und Gegenlesen mit
+  libredwg (`exportDxf.roundtrip.test.ts`): Ebenen, Entitäten, LV95 bitgleich, Umlaute. Offen: DWG-**Import**
+  über acadrust (paralleler Agent), Prüfung in AutoCAD/BricsCAD selbst, Tauri-App nicht getestet.
+- ◐ **[C2] DXF als eigenes Rust-Crate** (Tag-Reader/-Writer, R12–2018 ASCII und Binär lesen, R2000 schreiben):
   Vorbild für die Portierung von `io/dxfParser*.ts` und `export/exportDxf.ts` in den Rust-Kern ([K4]);
   Binär-DXF fehlt Dossier heute. · M
+  28.10. **DXF-Export in Rust:** statt eigenem Writer über acadrust (`fileio/src/export.rs`), **R2018 ASCII
+  (UTF-8)** statt des alten AC1015-Kopfs mit UTF-8-Inhalt. `buildPlanDxf` (gleiche Signatur) sammelt nur noch
+  aus dem `Plan`; `export/dxfWriter.ts` gelöscht, `savePlanDxf` async (lädt pkgFileIo nach). Gleichwertigkeit:
+  einmaliger Vergleich alt↔neu am Demo-Haus (EG/OG, lokal/LV95, mit/ohne Schraffur) — gleiche Entitäten,
+  Reihenfolge, Ebenen, Strichstärken, True-Color, Koordinaten ≤ 5e-7 m (Rundung des alten Writers auf 6 Stellen;
+  neu volle f64). Neu: 2D-Texte als TEXT (fehlten bisher), CLI exportiert georeferenziert wie die App.
+  Gegencheck ezdxf (`scripts/validate-dxf.py`, Test übersprungen ohne `pip install ezdxf`): 0 Auditor-Fehler.
+  Offen: DXF-Import nach Rust (paralleler Agent), Binär-DXF, echte HATCH-Entitäten statt Schraffurlinien.
 - ○ **[C3] MCP an die laufende App** (`--connect 127.0.0.1:7979`, Werkzeuge `screenshot`, `ui_click`,
   `render` → PNG, `execute` = jeder Befehl mit JSON): genau die fehlende Hälfte von [9]; setzt [6] voraus. · M
 - ○ **[C4] CLI-Skripte** (`run --script`, `--cmd` mehrfach mit `{last}`, `convert`): Befehle headless

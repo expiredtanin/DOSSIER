@@ -18,6 +18,8 @@ import { projectToWorldCoords } from "../model/geoRebase";
 import type { Project } from "../model/types";
 import { filterProjectToSelection } from "./exportScope";
 import type { GroupMembership } from "./groupActions";
+import { getState } from "./appStore";
+import { t } from "../i18n";
 
 export function useExportHandlers(opts: {
   project: Project;
@@ -35,7 +37,7 @@ export function useExportHandlers(opts: {
 }): {
   onExportPdf: (decision: ExportPdfDecision) => Promise<void>;
   onExportSvg: (decision: ExportPdfDecision) => void;
-  onExportDxf: (decision: ExportDxfDecision) => void;
+  onExportDxf: (decision: ExportDxfDecision) => Promise<void>;
 } {
   const {
     project,
@@ -103,10 +105,11 @@ export function useExportHandlers(opts: {
     setExportOpen(false);
   };
 
-  // DXF-Export: erzeugt den Plan mit EXAKT denselben Eingaben wie die Ansicht und
-  // schreibt ihn als Modell-Space-DXF in echten Metern (1:1). Layer aus den
-  // Kategorie-Ebenen; jede Entity auf ihrem Kategorie-Layer.
-  const onExportDxf = (decision: ExportDxfDecision) => {
+  // DXF-/DWG-Export: erzeugt den Plan mit EXAKT denselben Eingaben wie die Ansicht und
+  // schreibt ihn als Modell-Space-Datei in echten Metern (1:1). Layer aus den
+  // Kategorie-Ebenen; jede Entity auf ihrem Kategorie-Layer. Asynchron, weil das
+  // Format-Modul (acadrust, pkgFileIo) erst beim ersten Export nachgeladen wird.
+  const onExportDxf = async (decision: ExportDxfDecision) => {
     // Georeferenziert exportieren: bei gesetztem Standort-Bezug (geoAnchor)
     // schreibt der Modell-DXF die ECHTEN LV95-Koordinaten (weit vom Nullpunkt),
     // damit die Datei in anderer CAD-Software lagerichtig ankommt — auch wenn
@@ -125,11 +128,16 @@ export function useExportHandlers(opts: {
       undefined, // scaleDenominator (Default)
       true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
     );
-    savePlanDxf(plan, exportProject, {
-      title: activeLevelName,
-      includeHatches: decision.includeHatches,
-      fileName: `${project.name}-${activeLevelName}`,
-    });
+    try {
+      await savePlanDxf(plan, exportProject, {
+        title: activeLevelName,
+        includeHatches: decision.includeHatches,
+        format: decision.format,
+        fileName: `${project.name}-${activeLevelName}`,
+      });
+    } catch (err) {
+      getState().notify(`${t("exportDxf.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
     setExportDxfOpen(false);
   };
 

@@ -1,4 +1,4 @@
-// DXF-Export-Dialog (modal). Fragt „Schraffuren mitexportieren?" ab und weist auf
+// DXF-/DWG-Export-Dialog (modal). Fragt Format (DXF/DWG) und „Schraffuren mitexportieren?" ab und weist auf
 // die Meter-Einheit hin (DXF ist Modell-Space in echten Metern, 1:1). Muster wie
 // ExportPdfDialog: abgedunkeltes Overlay, Klick auf den Hintergrund + Esc schliessen.
 //
@@ -9,9 +9,12 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { Dropdown } from "./Dropdown";
+import type { CadExportFormat } from "../export/exportDxf";
 
 /** Entscheidung, die der Dialog beim Bestätigen liefert. */
 export interface ExportDxfDecision {
+  /** Dateiformat: DXF (R2018 ASCII) oder DWG (R2018). */
+  format: CadExportFormat;
   includeHatches: boolean;
   /** „nur Auswahl" statt des ganzen Plans (nur relevant, wenn `selectionCount > 0`). */
   selectionOnly: boolean;
@@ -40,11 +43,12 @@ export function ExportDxfDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const [format, setFormat] = useState<CadExportFormat>("dxf");
   const [includeHatches, setIncludeHatches] = useState(true);
   const [selectionOnly, setSelectionOnly] = useState(false);
 
   const onConfirm = () =>
-    onExport({ includeHatches, selectionOnly: selectionCount > 0 && selectionOnly });
+    onExport({ format, includeHatches, selectionOnly: selectionCount > 0 && selectionOnly });
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -69,6 +73,19 @@ export function ExportDxfDialog({
               {planTitle}
             </span>
           </div>
+
+          <section className="imp-section">
+            <div className="imp-section-title">{t("exportDxf.format")}</div>
+            <Dropdown
+              value={format}
+              onChange={(v) => setFormat(v === "dwg" ? "dwg" : "dxf")}
+              title={t("exportDxf.format")}
+              options={[
+                { value: "dxf", label: t("exportDxf.format.dxf") },
+                { value: "dwg", label: t("exportDxf.format.dwg") },
+              ]}
+            />
+          </section>
 
           <section className="imp-section">
             <div className="imp-section-title">{t("exportDxf.hatches")}</div>

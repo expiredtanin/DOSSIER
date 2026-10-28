@@ -4,6 +4,9 @@
 export { parseProjectFile, serializeProject, PROJECT_FORMAT_VERSION } from "../io/projectFormat";
 export { exportIfcSpf } from "../export/exportIfc";
 export { buildPlanDxf } from "../export/exportDxf";
+export { buildPlanDwg } from "../export/exportDxf";
+export { loadFileio } from "../engine/fileioWasm";
+export { projectToWorldCoords } from "../model/geoRebase";
 export { exportScheduleCsv } from "../export/exportSchedule";
 export { exportObj, exportStl } from "../export/exportMesh";
 export { exportProjectStep } from "../export/exportStep";
