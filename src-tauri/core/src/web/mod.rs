@@ -33,6 +33,7 @@ mod mesh_section;
 mod plan_elevation;
 mod plan_misc;
 mod plan_section;
+mod voids;
 mod curves;
 mod hatch;
 

@@ -29,6 +29,11 @@ describe("Abzugskoerper — Polygon-Kern", () => {
   it("ohne Ueberschneidung: null (Original bleibt)", () => {
     expect(subtractRings(sq(0, 0, 1, 1), [sq(5, 5, 6, 6)])).toBeNull();
   });
+  it("zwei getrennte Aussparungen wirken beide (drei Restteile)", () => {
+    // Früher: der Überschneidungstest schnitt mit ALLEN Schneidern zugleich → keine Subtraktion.
+    const r = subtractRings(sq(0, 0, 10, 2), [sq(1, -1, 2, 3), sq(6, -1, 7, 3)])!;
+    expect(r).toHaveLength(3);
+  });
   it("ungestrichene Originalkanten bleiben ungestrichen", () => {
     // Kante 1 (rechts, x=4) ungestrichen; der Schnitt links lässt sie unberührt.
     const r = subtractRings(sq(0, 0, 4, 2), [sq(-1, -1, 1, 3)], [1])!;

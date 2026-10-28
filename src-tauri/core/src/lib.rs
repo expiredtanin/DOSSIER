@@ -42,6 +42,7 @@ pub mod mesh_section;
 pub mod plan_elevation;
 pub mod plan_misc;
 pub mod plan_section;
+pub mod voids;
 pub mod curves;
 
 #[cfg(feature = "web")]
