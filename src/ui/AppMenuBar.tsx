@@ -19,6 +19,8 @@ export interface AppMenuBarProps {
   onOpenProject: () => void;
   onSaveProject: () => void;
   onImport: () => void;
+  /** Datei: Punktwolke importieren ([27]). */
+  onImportPointCloud?: () => void;
 
   /** Bearbeiten: Undo/Redo (Store) + Löschen der aktuellen Auswahl. */
   onUndo: () => void;
@@ -51,6 +53,7 @@ export function AppMenuBar({
   onOpenProject,
   onSaveProject,
   onImport,
+  onImportPointCloud,
   onUndo,
   onRedo,
   canUndo,
@@ -76,6 +79,7 @@ export function AppMenuBar({
     { label: t("file.save"), onSelect: onSaveProject },
     { divider: true },
     { label: t("file.import"), onSelect: onImport },
+    ...(onImportPointCloud ? [{ label: t("menu.native.importPointCloud"), onSelect: onImportPointCloud }] : []),
   ];
 
   const editItems: DropdownItem[] = [

@@ -90,6 +90,9 @@ import {
 import { HatchSwatch } from "./ui/hatchPreview";
 import { TopBar, ViewRibbonTab } from "./ui/TopBar";
 import { AppMenuBar } from "./ui/AppMenuBar";
+import { PointCloudImportHost } from "./ui/PointCloudImportDialog";
+import { openPointCloudFileDialog, requestPointCloudImport } from "./state/pointCloudStore";
+import { isPointCloudFile } from "./io/pointCloud";
 import { EditorField } from "./ui/EditorField";
 import { useNativeAppMenu } from "./native/appMenu";
 import { openResourceWindowNative, useResourceWindowHost } from "./native/resourceWindow";
@@ -1745,6 +1748,7 @@ export default function App() {
   };
   /** Datei aus Import-Dialog oder Drag & Drop: IFC direkt, sonst DXF/DWG-Dialog. */
   const openImportForAnyFile = (f: File) => {
+    if (isPointCloudFile(f.name)) return requestPointCloudImport(f);
     if (/\.ifc$/i.test(f.name)) importIfcFile(f);
     else openImportForFile(f);
   };
@@ -2450,6 +2454,7 @@ export default function App() {
       onExportStep,
       onImportStep: () => stepInputRef.current?.click(),
       onImportIfc: () => ifcInputRef.current?.click(),
+      onImportPointCloud: () => openPointCloudFileDialog(),
       onClashCheck: () => {
         const p0 = project;
         runClashCheck(p0)
@@ -3342,6 +3347,8 @@ export default function App() {
             );
         }}
       />
+      {/* Punktwolken-Import ([27]): verstecktes Datei-Feld + Dialog (UI-Store, nicht im Projekt). */}
+      <PointCloudImportHost project={project} />
       {/* Verstecktes IFC-Datei-Input (Menü Datei, IFC importieren). */}
       <input
         ref={ifcInputRef}
@@ -3428,6 +3435,7 @@ export default function App() {
               onOpenProject={onOpenProject}
               onSaveProject={onSaveProject}
               onImport={() => dxfInputRef.current?.click()}
+              onImportPointCloud={() => openPointCloudFileDialog()}
               onUndo={undo}
               onRedo={redo}
               canUndo={canUndo}

@@ -36,6 +36,8 @@ export interface NativeAppMenuHandlers {
   onExportStep: () => void;
   onImportStep: () => void;
   onImportIfc: () => void;
+  /** Punktwolke importieren ([27]); optional für ältere Aufrufer. */
+  onImportPointCloud?: () => void;
   onClashCheck: () => void;
   onKennzahlen: () => void;
 
@@ -179,6 +181,10 @@ export function useNativeAppMenu(
           await MenuItem.new({
             text: t("menu.native.importIfc"),
             action: () => handlersRef.current.onImportIfc(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.importPointCloud"),
+            action: () => handlersRef.current.onImportPointCloud?.(),
           }),
           await Submenu.new({
             text: t("menu.native.export"),

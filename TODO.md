@@ -291,12 +291,48 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 
 ## Priorität 4 — später
 
-Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige/Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden) · [43] Verknüpfte
+Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige ◐ s. u., Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden) · [43] Verknüpfte
 Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
 [84] Undo-Verlauf · [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
 (◐, DXF-Parser, IFC-Import) · [52] Icons (◐, `CommandIcon.tsx`) · [56] Startparameter · [89] Git-freundliches
 Format · [90] Versionsvergleich · [91] Assistent · [92] Speckle.
+
+- ◐ **[27] Punktwolken — Stufe 1: Anzeige im 3D.** (28.10.) render3d: eigene Punkt-Pipeline
+  (`render3d/src/points.rs` GPU-frei: Puffer-Aufbau, Farbabbildung, WGSL; `gpu_points.rs`: Pipeline im
+  selben Pass/Tiefen-/MSAA-Ziel wie das Modell). Ein Instanz-Quad je Punkt (6 Vertices aus
+  `vertex_index`, Position 12 B + RGBA8 4 B je Punkt), feste Grösse in Bildschirm-Pixeln (ab 3 px rund),
+  tiefengetestet gegen das Modell, vom Live-Schnitt gekappt. Puffer zu höchstens 4 Mio. Punkten (ein
+  Draw je Puffer). Farbmodi rgb / Intensität (1.–99. Perzentil) / ASPRS-Klasse / Höhe (fehlt das Attribut →
+  Höhe), auf der CPU berechnet; Moduswechsel schreibt nur den Farbpuffer. Eingabe `xyz` f32 relativ zum
+  Ursprung + Modellversatz f64, Summe in f64 (LV95-fest). Achsen wie Gelände/Import (`MeshKind::Terrain`):
+  Modell (x, y, z) → world (x, z, −y). Bindungen `web.rs` (`set_point_cloud`, `set_point_cloud_style`,
+  `remove_point_cloud`, `clear_point_clouds`; Unsinn → 0 Punkte, kein Panic); derselbe `Renderer` im
+  Browser (WebGPU) und nativ (`render_png --points wolke.txt [--point-size] [--point-color]`; das native Fenster `native.rs` hat
+  denselben Renderer, bekommt aber noch keine Wolken geschoben).
+  UI: Menü „Punktwolke importieren …" (Datei-Menü im Browser + natives App-Menü), Drag & Drop
+  `.las/.laz/.e57/.ply/.xyz/.pts`, Dialog mit Voxel/Budget und Bericht (Anzahl, Ausdehnung, tiefste Ecke,
+  EPSG, Attribute, Lage), Abschnitt „Punktwolken" im Gelände-Panel (Sichtbarkeit, Farbmodus, Punktgrösse,
+  Entfernen). Lage (`state/pointCloudPlacement.ts`): mit `geoAnchor` und LV95 (EPSG 2056 oder ohne EPSG mit
+  LV95-Koordinaten) lagerichtig, Höhe aus `geoAnchor.height` (sonst tiefster Punkt auf 0); sonst lokale
+  Koordinaten wie in der Datei bzw. Landeskoordinaten mittig auf den Nullpunkt — jeweils mit Hinweis.
+  Wolken leben im UI-Store `state/pointCloudStore.ts` (kein Projektfeld). Tests: 14 Rust (Puffer, Farben,
+  WGSL) + 2 GPU-Render in eine Textur (Tiefe gegen Wand, Sichtbarkeit, Farbwechsel, feste Pixelgrösse;
+  `cargo test --features render`, im Container Vulkan/lavapipe) + 12 vitest (Lage, Store, Abgleich).
+  Nebenbei behoben: `CAP_WGSL` rief `fwidth` in nicht-uniformem Kontrollfluss → Chrome/Tint verwarf die
+  Cap-Pipeline und damit JEDEN 3D-Frame (im Browser-Build gesehen); Ableitungen jetzt vor den Verzweigungen,
+  Regressionstest `shaders::uniformity_tests`.
+  - Geprüft: Linux-Container — cargo test (lavapipe), `render_png` mit Demo-Haus + synthetischer Wolke
+    (110 000 Punkte; Tiefe, Klassen-/RGB-Farben sichtbar richtig), Browser-Build in Chromium (WebGPU über
+    SwiftShader): Import-Dialog, Bericht, Panel, Moduswechsel ohne WebGPU-Validierungsfehler. NICHT
+    geprüft: Bild im Browser (Chromium präsentiert hier keine WebGPU-Frames, auch nicht headful unter
+    Xvfb), Tauri-App/macOS-Metal, echte LAS/E57-Dateien, 2–5 Mio. Punkte (Zeit/Speicher), Achsrichtung
+    gegen ein echtes swissALTI3D-Gelände desselben Bezugs.
+  - Offen: **beim Neuladen sind die Wolken weg** (kein Autosave) → Stufe 2 mit Modellfeld
+    `Project.pointClouds` + Asset im IndexedDB/neben der Datei (Vorschlag unter [B9]); Speicher doppelt
+    (JS-Store + Rust-CPU-Kopie für Farbwechsel + GPU); Kamera-Einpassen (`set_view_preset`) kennt die
+    Wolke nicht; Grundriss/Schnitt (Punkte in Scheibe), Fang an Punkten, Clip-Box; sRGB-Ziel in
+    `render_png` hellt Punktfarben (wie alle Vertexfarben) auf.
 
 ## Übernahme aus BIMCraft [B]
 

@@ -8243,3 +8243,10 @@ body {
   gap: 6px;
   margin-top: 10px;
 }
+
+/* Punktwolken-Import ([27]): Bericht im Dialog kompakt wie die übrigen Hinweise. */
+.pc-report {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
