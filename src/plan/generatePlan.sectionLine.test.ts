@@ -74,6 +74,28 @@ describe("generatePlan — Schnittführungs-Symbol", () => {
     expect(labels.length).toBe(2);
   });
 
+  it("zeichnet NICHTS auf einer freien Zeichnungsebene (kind drawing), aber weiter auf Geschossen", () => {
+    const p = baseProject([
+      floor,
+      { id: "blatt", name: "Raumprogramm", kind: "drawing", visible: true, locked: false },
+      {
+        id: "s-a",
+        name: "Schnitt A",
+        kind: "section",
+        visible: true,
+        locked: false,
+        linePoints: [{ x: 0, y: 2 }, { x: 6, y: 2 }],
+        directionSign: 1,
+      },
+    ]);
+    const onSheet = generatePlan(p, "blatt", visible).primitives;
+    expect(onSheet.some((pr) => pr.kind === "polygon" && pr.sectionLineId != null)).toBe(false);
+    expect(onSheet.some((pr) => pr.kind === "line" && pr.cls === "section-line")).toBe(false);
+    expect(onSheet.some((pr) => pr.kind === "drawingText" && pr.text === "A")).toBe(false);
+    const onFloor = generatePlan(p, "eg", visible).primitives;
+    expect(onFloor.some((pr) => pr.kind === "polygon" && pr.sectionLineId === "s-a")).toBe(true);
+  });
+
   it("zeichnet NICHTS für eine Schnittebene ohne linePoints", () => {
     const p = baseProject([
       floor,

@@ -121,6 +121,11 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     if !c.shown(SECTION_LINE_CATEGORY) {
         return;
     }
+    // Auf freien Zeichnungsebenen (Blätter wie „Raumprogramm", Detail) gehören die Symbole nicht hin:
+    // sie beziehen sich auf die Geschoss-Grundrisse.
+    if c.p.drawing_levels.iter().any(|l| l.id == c.a.floor && matches!(l.kind, DrawingLevelKind::Drawing)) {
+        return;
+    }
     let greyed = Some(c.greyed(SECTION_LINE_CATEGORY));
     for level in &c.p.drawing_levels {
         if !matches!(level.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) {
