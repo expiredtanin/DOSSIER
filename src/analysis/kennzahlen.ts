@@ -10,10 +10,11 @@
 // Rust-Kern auf dem Projekt-Dokument (`src-tauri/core/src/kennzahlen.rs`).
 
 import type { ExtrudedSolid, Project } from "../model/types";
-import { polygonArea } from "../geometry/roomArea";
 import { core } from "../engine/coreWasm";
 import { FlatWriter } from "../geometry/coreFlat";
 import { documentFor } from "../core/document";
+import { compareRoomProgram } from "./roomProgram";
+import type { ProgramStatus } from "./roomProgram";
 
 export interface LevelKennzahlen {
   levelId: string;
@@ -44,8 +45,6 @@ export function solidVolume(s: ExtrudedSolid): number {
   return core().kz_solid_volume(new FlatWriter().pts(s.circle ? [] : s.points).done(), s.circle ? s.circle.r : Number.NaN, s.height, s.taper ?? 0);
 }
 
-const finite = (n: number): number => (Number.isFinite(n) ? n : 0);
-
 /**
  * Flächen je Geschoss (SIA 416), Gebäudevolumen, Ausnützungs- und Überbauungsziffer. Rechnet der
  * Kern auf dem Projekt-Dokument (`kennzahlen.rs`, [K4] S2).
@@ -54,7 +53,7 @@ export function computeKennzahlen(project: Project): Kennzahlen {
   return documentFor(project).query<Kennzahlen>("kennzahlen");
 }
 
-export type ProgramStatus = "ok" | "zu klein" | "zu gross" | "fehlt" | "zu wenige" | "zu viele";
+export type { ProgramStatus } from "./roomProgram";
 
 export interface ProgramRowResult {
   name: string;
@@ -72,31 +71,11 @@ export interface ProgramCheck {
   extra: Array<{ id: string; name: string; area: number }>;
 }
 
-/** Toleranz der Flächenprüfung (relativ zur Soll-Fläche). */
-const AREA_TOL = 0.1;
-
-const norm = (s: string) => s.trim().toLowerCase();
-
-/** Prüft das Raumprogramm: Räume werden über den Namen (Präfix, ohne Gross-/Kleinschreibung) zugeordnet. */
+/** Prüft das Raumprogramm: Räume werden über den Namen zugeordnet. Rechnet der Kern (`room_program.rs`, Toleranz `Project.roomProgramTolerance`). */
 export function checkRoomProgram(project: Project): ProgramCheck {
-  const rooms = (project.rooms ?? []).map((r) => ({ id: r.id, name: r.name, cat: r.siaCategory, area: finite(polygonArea(r.boundary)) }));
-  const used = new Set<string>();
-  const rows: ProgramRowResult[] = (project.roomProgram ?? []).map((row) => {
-    const n = norm(row.name);
-    // Leerer Name (Zeile im Editor noch unfertig) trifft nichts — „" wäre Präfix jedes Raums.
-    const hits = rooms.filter((r) => n !== "" && !used.has(r.id) && norm(r.name).startsWith(n) && (!row.siaCategory || r.cat === row.siaCategory));
-    hits.forEach((h) => used.add(h.id));
-    const targetCount = Math.max(1, row.count ?? 1);
-    const area = hits.reduce((s, h) => s + h.area, 0);
-    const target = row.area * targetCount;
-    let status: ProgramStatus;
-    if (hits.length === 0) status = "fehlt";
-    else if (hits.length < targetCount) status = "zu wenige";
-    else if (hits.length > targetCount) status = "zu viele";
-    else if (area < target * (1 - AREA_TOL)) status = "zu klein";
-    else if (area > target * (1 + AREA_TOL)) status = "zu gross";
-    else status = "ok";
-    return { name: row.name, targetArea: row.area, targetCount, count: hits.length, area, status };
-  });
-  return { rows, extra: rooms.filter((r) => !used.has(r.id)).map((r) => ({ id: r.id, name: r.name, area: r.area })) };
+  const c = compareRoomProgram(project);
+  return {
+    rows: c.rows.map((r) => ({ name: r.name, targetArea: r.targetArea, targetCount: r.targetCount, count: r.count, area: r.ist, status: r.status })),
+    extra: c.extra,
+  };
 }

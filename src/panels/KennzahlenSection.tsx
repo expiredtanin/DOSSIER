@@ -13,6 +13,7 @@ import { useStore } from "../state/appStore";
 import { checkRoomProgram, computeKennzahlen, polygonArea } from "../core";
 import type { Project, RoomProgramRow } from "../model/types";
 import { RoomProgramImportButton } from "../ui/RoomProgramImportDialog";
+import { ProgramCompareSection } from "./ProgramCompareSection";
 
 type ProgramStatus = ReturnType<typeof checkRoomProgram>["rows"][number]["status"];
 
@@ -183,11 +184,7 @@ export function KennzahlenSection() {
         </button>
         <RoomProgramImportButton project={project} onApply={(fn) => setProject(fn)} notify={notify} />
       </div>
-      {rows.length > 0 && prog.extra.length > 0 && (
-        <div className="kz-extra" title={prog.extra.map((r) => r.name).join(", ")}>
-          {t("program.extra", { n: prog.extra.length })}
-        </div>
-      )}
+      {rows.length > 0 && <ProgramCompareSection statusLabel={programStatusLabel} />}
     </div>
   );
 }
