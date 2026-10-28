@@ -58,6 +58,8 @@ import {
   parseProjectFile,
   planToSvgString,
   serializeProject,
+  parseBcf,
+  bcfInfo,
   setWasmBytesProvider,
   initCore,
   validateProject,
@@ -134,12 +136,38 @@ function out(args: Args, text: string | Uint8Array, defaultName: string): void {
   }
 }
 
+/** `dossier-cli bcf-info <datei.bcfzip>`: Themen einer BCF-Datei (2.1/3.0) als JSON, ohne Snapshot-Bytes. */
+async function runBcfInfo(path: string | undefined): Promise<number> {
+  if (!path) {
+    process.stderr.write("Aufruf: dossier-cli bcf-info <datei.bcfzip>\n");
+    return 2;
+  }
+  setWasmBytesProvider(async (name) => {
+    const rel = WASM_FILES[name];
+    if (!rel) throw new Error(`unbekanntes WASM-Modul ${name}`);
+    return readFileSync(join(wasmDir(), rel));
+  });
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(readFileSync(path));
+  } catch (e) {
+    fail(`Datei nicht lesbar: ${path} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  try {
+    process.stdout.write(JSON.stringify(bcfInfo(await parseBcf(bytes)), null, 2) + "\n");
+  } catch (e) {
+    fail(`BCF: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return 0;
+}
+
 export async function run(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const [file, command, ...rest] = args.positional;
+  if (file === "bcf-info") return runBcfInfo(command);
   if (!file || !command) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun|model3d> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun|model3d> [Optionen]\n       dossier-cli bcf-info <datei.bcfzip>\n",
     );
     return 2;
   }

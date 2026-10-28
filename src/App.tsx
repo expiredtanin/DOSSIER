@@ -3440,6 +3440,7 @@ export default function App() {
               resourcesOpen={resourcesOpen}
               onToggleResources={() => toggleResources()}
               onOpenSettings={() => openSettings()}
+              onOpenBcf={() => setLayout((l) => revealPanel(l, "bcf"))}
             />
           )
         }

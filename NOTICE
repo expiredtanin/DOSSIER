@@ -23,3 +23,13 @@ truck (https://github.com/ricosjp/truck, truck-meshalgo src/tessellation/triangu
 csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan Wallace, MIT License
   Verfahren (BSP-Bäume, Ebenen-Teilung, clipTo/invert, Vereinigung/Differenz/Schnitt) in Rust neu
   geschrieben und angepasst: src-tauri/fileio/src/csg.rs (IFC-Import: Öffnungen, Boolesche Körper).
+
+zip (https://github.com/zip-rs/zip2), MIT, mit flate2 (MIT OR Apache-2.0) und zopfli (Apache-2.0)
+  Abhängigkeit von src-tauri/fileio (BCF: .bcfzip lesen und schreiben, nur Deflate), unverändert.
+
+quick-xml (https://github.com/tafia/quick-xml), MIT
+  Abhängigkeit von src-tauri/fileio (BCF: markup.bcf und Viewpoints lesen), unverändert.
+
+BCF-Spezifikation (https://github.com/buildingSMART/BCF-XML, Schemas), buildingSMART, CC BY-ND 4.0
+  Nur das Dateiformat als Vorlage; eigener Code in src-tauri/fileio/src/bcf.rs. Die Test-Beispiele
+  stehen nicht im Repo (Test buildingsmart_beispiele liest sie über BCF_TESTCASES aus einem lokalen Klon).

@@ -447,6 +447,24 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
     Export im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · L
   - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
     Solibri/BIMcollab und nicht in der Tauri-App.
+- ◐ **[BCF] BCF 2.1/3.0 (BIM Collaboration Format).** (28.10.) Koordinations-Themen mit Solibri, BIMcollab,
+  Revit, ArchiCAD austauschen. Rust `src-tauri/fileio/src/bcf.rs` (+ `bcf_read`/`bcf_write` im pkgFileIo,
+  JSON an der Grenze, Snapshots Base64): .bcfzip lesen/schreiben (Themen mit Typ/Status/Priorität/Zuständig/
+  Fällig/Labels, Kommentare, Viewpoints mit Perspektiv-/Orthokamera, Auswahl, Sichtbarkeits-Ausnahmen,
+  Schnittebenen, Snapshot; 2.1 und 3.0). Crates `zip` (MIT, nur Deflate) und `quick-xml` (MIT), in NOTICE.
+  TS `io/bcf.ts` (Fassade, reine Hilfen), `io/bcfMatch.ts` (GlobalId ↔ Dossier-id mit derselben Ableitung wie
+  der IFC-Export: `ifcGuid("<Projekt-id>/<Art>/<id>")`; importierte Meshes über `ifcGlobalId`), Dock-Panel
+  „BCF-Themen" (`panels/BcfPanel.tsx`, nicht im Standard-Layout, Menü Fenster > BCF-Themen bzw. macOS Fenster > Panels): Datei öffnen,
+  Themenliste, Klick wählt die Bauteile, Kommentar, Status, Thema aus Auswahl, Speichern. Themen liegen in
+  der eigenen Datei, kein Feld in `src/model`. CLI `dossier-cli bcf-info <datei.bcfzip>`.
+  Geprüft: Rust-Rundreise 2.1/3.0, Unsinn → Fehler (inkl. Zufallsbytes, Zip-Bomben-Grenze, XML-Tiefe),
+  alle 71 buildingSMART-Beispieldateien (Test Cases v2.1/v3.0, lokal; CC BY-ND, deshalb nicht im Repo,
+  Test `buildingsmart_beispiele` über `BCF_TESTCASES`), vitest Fassade und GlobalId-Zuordnung gegen den
+  IFC-Export des Demo-Hauses. Nicht geprüft: Austausch mit echter Solibri/BIMcollab-Software, Tauri-App.
+  Offen: Kamera des Viewpoints setzen und für neue Themen aus dem 3D-Viewport lesen (`Wasm3DViewport` hält
+  die Orbit-Kamera intern, ohne Setter/Getter; Achsen Z-oben wie IFC, Viewport vermutlich Y-oben);
+  Snapshot aus dem Viewport; `extensions.xml` (3.0), Farbgruppen/Linien, BimSnippet, Dokument-Referenzen
+  und verwandte Themen gehen beim Speichern verloren; Panel in den Standard-Dock aufnehmen. · M
 - ○ **[B6] Wand unter Dach als Prismen zwischen Ebenen** (für [G2]). `walls.rs:413–472, 592–654`. · M
 - ○ **[B7] Dach-Verschneidung und Gauben in 2.5D** (für [G5]). · M · nach [B2]/[B6].
 - ○ **[B8] Bogenwände, schneller Weg** (für [T2]). · S/M–L
