@@ -8,7 +8,7 @@
 // laufen. Die Slice tippt daher nur ihre eigenen Felder; `get()` liefert
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
-import { applyOps, diffToOps, validateOps } from "../core/ops";
+import { diffToOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
 import { withVertexType, type PolylineVertexType } from "../core";
 import { sampleProject } from "../model/sampleProject";
@@ -54,7 +54,7 @@ import { textFrameCorners } from "../text/textFrame";
 import { DEFAULT_PRESETS, type TextStylePreset } from "../text/richText";
 import { t } from "../i18n";
 import type { StoreApi } from "./store";
-import { createHistorySlice, pushHistoryPatch } from "./historySlice";
+import { createHistorySlice, historyPatch, storeDocument } from "./historySlice";
 import type { HistorySlice } from "./historySlice";
 import type { NotifyKind } from "./notifySlice";
 
@@ -422,7 +422,7 @@ export interface ProjectSlice {
  * `get()`/`set` typsicher auf `activeLevelId` zugreifen können. Die
  * History-Felder gehören ebenfalls dazu: `setProject` (unten) ist der EINZIGE
  * Durchlaufpunkt jeder Projekt-Mutation und pusht dort bei jeder ECHTEN
- * Änderung auf `undoStack`.
+ * Änderung einen Undo-Schritt im Kern-Dokument auf.
  */
 type ProjectSliceDeps = {
   activeLevelId: string;
@@ -436,32 +436,16 @@ export function createProjectSlice(
 ): ProjectSlice & HistorySlice {
   const { set, get } = api;
 
-  // Koaleszenz-Buchführung für Drag-Serien (Griff ziehen, Element verschieben,
-  // Kante ziehen, …): diese Aktionen rufen `setProject` bei JEDEM
-  // Maus-Move-Schritt auf (kein separates Draft/Preview + Commit-Muster wie
-  // bei den Zeichenwerkzeugen — dort läuft die Vorschau über lokalen
-  // `draft`-State in App.tsx, und `setProject` wird erst einmal beim Commit
-  // aufgerufen, siehe `applyToolResult`/`onToolCommit` in App.tsx). Ohne
-  // Koaleszenz würde EIN Drag zig Undo-Schritte erzeugen. Ephemer (wie ein
-  // Ref) — kein reaktiver State nötig, wird bei jedem `setProject`-Aufruf neu
-  // bewertet und bei `undo`/`redo` zurückgesetzt (siehe `onAfterJump` unten).
-  let lastCoalesceKey: string | undefined;
-  let lastCoalesceAt = 0;
-  const COALESCE_WINDOW_MS = 400;
+  // Koaleszenz von Drag-Serien (Griff ziehen, Element verschieben, Kante ziehen, …): diese
+  // Aktionen rufen `setProject` bei JEDEM Maus-Move-Schritt mit einem `coalesceKey` auf (kein
+  // Draft/Commit-Muster wie bei den Zeichenwerkzeugen, deren Vorschau über lokalen `draft`-State
+  // in App.tsx läuft). Gleicher Schlüssel innerhalb des Zeitfensters = EIN Undo-Schritt; die
+  // Buchführung (Schlüssel, Zeitfenster, Rücksetzen nach Undo/Redo) liegt im Kern (`ops.rs`).
   // Protokoll der angewendeten Ops (jüngste zuletzt) — Rohstoff für Undo-Verlauf [84], Makros [85].
   const opLog: CoreOp[][] = [];
   const OP_LOG_LIMIT = 200;
 
-  const history = createHistorySlice(
-    api as unknown as StoreApi<HistorySlice & { project: Project }>,
-    () => {
-      // Nach einem Sprung (undo/redo) muss die NÄCHSTE Aktion garantiert
-      // pushen, auch wenn sie zufällig denselben coalesceKey trägt wie die
-      // Serie vor dem Sprung — sonst würde sie mit der alten Serie
-      // verschmolzen und verschwände spurlos (kein Undo-Eintrag).
-      lastCoalesceKey = undefined;
-    },
-  );
+  const history = createHistorySlice(api as unknown as StoreApi<HistorySlice & { project: Project }>);
 
   // Bequemer immutabler Projekt-Updater (wie setProject in App). Zweiter,
   // optionaler Parameter `coalesceKey`: NUR von den paar bekannten
@@ -482,28 +466,21 @@ export function createProjectSlice(
       // dann ebenfalls nicht, da der Patch leer ist).
       if (wanted === s.project) return {};
       // Das Projekt ändert sich NUR über Ops (core/ops.ts): die gewünschte Änderung wird in
-      // eine Op-Folge übersetzt, validiert und angewendet. Verstösse (NaN, doppelte ids)
-      // werden zurückgerollt und gemeldet.
+      // eine Op-Folge übersetzt; der Kern prüft (NaN, doppelte ids), wendet an und zeichnet den
+      // Undo-Schritt auf. Verstösse werden zurückgerollt und gemeldet.
       const ops = diffToOps(s.project, wanted);
       if (ops.length === 0) return {};
-      const nextProject = applyOps(s.project, ops);
-      const problems = validateOps(nextProject, ops, s.project);
-      if (problems.length > 0) {
+      const doc = storeDocument(s.project);
+      const res = doc.commit(s.project, ops, coalesceKey, Date.now());
+      if ("problems" in res) {
+        const problems = res.problems;
         console.warn("Projektänderung verworfen:", problems);
         queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
         return {};
       }
       opLog.push(ops);
       if (opLog.length > OP_LOG_LIMIT) opLog.shift();
-      const now = Date.now();
-      const coalesced =
-        coalesceKey !== undefined &&
-        coalesceKey === lastCoalesceKey &&
-        now - lastCoalesceAt < COALESCE_WINDOW_MS;
-      lastCoalesceKey = coalesceKey;
-      lastCoalesceAt = now;
-      if (coalesced) return { project: nextProject };
-      return { project: nextProject, ...pushHistoryPatch(s.undoStack, s.project) };
+      return { project: res.project, ...historyPatch(doc) };
     });
 
   return {

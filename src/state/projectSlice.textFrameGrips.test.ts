@@ -60,8 +60,8 @@ beforeEach(() => {
       ...sampleProject,
       drawings2d: [plainText, textBox, rotatedTextBox],
     },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

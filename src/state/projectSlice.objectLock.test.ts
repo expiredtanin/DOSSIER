@@ -36,8 +36,8 @@ const lockedDrawing: Drawing2D = {
 beforeEach(() => {
   setState({
     project: { ...sampleProject, walls: [lockedWall], drawings2d: [lockedDrawing] },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

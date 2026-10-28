@@ -16,8 +16,8 @@ import { DEFAULT_PRESETS } from "../text/richText";
 beforeEach(() => {
   setState({
     project: { ...sampleProject, textStyles: undefined },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

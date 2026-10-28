@@ -57,8 +57,8 @@ function makeRoom(over: Partial<Room> = {}): Room {
 beforeEach(() => {
   setState({
     project: { ...sampleProject, drawings2d: [pentagon], rooms: [makeRoom()] },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

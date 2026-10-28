@@ -18,16 +18,18 @@ describe("setProject über CoreOps", () => {
     expect(ops.length).toBeGreaterThan(0);
     expect(JSON.parse(JSON.stringify(ops.at(-1)))).toEqual(ops.at(-1));
     st().undo();
-    expect(st().project).toBe(before);
+    // Undo kommt als inverse Ops aus dem Kern: inhaltlich gleich, unveränderte Elemente identisch.
+    expect(st().project).toEqual(before);
+    expect(st().project.walls[1]).toBe(before.walls[1]);
   });
 
   it("NaN-Änderung wird verworfen, Projekt bleibt, Undo-Stapel unverändert", () => {
     const before = st().project;
-    const depth = st().undoStack.length;
+    const depth = st().undoDepth;
     const w = before.walls[0];
     st().setProject({ ...before, walls: [{ ...w, height: NaN }, ...before.walls.slice(1)] });
     expect(st().project).toBe(before);
-    expect(st().undoStack.length).toBe(depth);
+    expect(st().undoDepth).toBe(depth);
   });
 
   it("doppelte ids beim Einfügen werden verworfen", () => {

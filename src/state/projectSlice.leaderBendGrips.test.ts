@@ -38,8 +38,8 @@ const leaderTwoBends: Drawing2D = {
 beforeEach(() => {
   setState({
     project: { ...sampleProject, drawings2d: [leaderNoBends, leaderTwoBends] },
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
   });

@@ -1,107 +1,95 @@
-// History-Slice: Undo/Redo für das Projekt-Modell. Reine Snapshot-Historie —
-// dank immutabler Updates in `projectSlice.ts` (jede echte Änderung liefert
-// eine NEUE `Project`-Referenz mit structural sharing) ist ein Stack aus
-// `Project`-Werten billig (kein Deep-Clone nötig, unveränderte Teilbäume
-// werden zwischen den Snapshots geteilt).
+// History-Slice: Undo/Redo für das Projekt-Modell ([8], [K4] S3). Der Verlauf liegt im Rust-Kern
+// (`src-tauri/core/src/ops.rs`, `document.rs`): je Schritt die Vorwärts- und die inversen Ops —
+// keine Projekt-Schnappschüsse mehr. Gleicher `coalesceKey` im Zeitfenster = ein Schritt (Drag,
+// Regler), Gruppen (`groupChanges`) fassen mehrere Änderungen zusammen; begrenzt auf
+// {@link HISTORY_LIMIT} Schritte und {@link HISTORY_MAX_BYTES}.
 //
-// Die eigentliche Buchführung (WANN wird gepusht, Koaleszenz von Drag-Serien)
-// lebt bewusst in `projectSlice.ts` bei `setProject` selbst — das ist die
-// EINZIGE Stelle, durch die jede Projekt-Mutation läuft. Dieses Modul liefert
-// nur den reaktiven Zustand (Stacks + Flags) und die `undo`/`redo`-Aktionen,
-// die DIREKT über `set()` schreiben (NICHT über `setProject`), damit sie
-// keinen neuen History-Eintrag erzeugen (sonst Endlosschleife/kaputte
-// Historie). Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
+// `setProject` (projectSlice.ts) ist die EINZIGE Stelle, durch die jede Projekt-Mutation läuft: es
+// übergibt die Ops dem Kern-Dokument des Stores ({@link storeDocument}). `undo`/`redo` holen die
+// Ops vom Kern und führen die TS-Leseansicht damit nach (direkt über `set()`, kein neuer Schritt).
+// Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import type { Project } from "../model/types";
+import { ProjectDocument, setPrimaryDocument } from "../core/document";
 import type { StoreApi } from "./store";
 
-/** Obergrenze der Undo-Tiefe — ältere Einträge fallen hinten raus (Speicher/Performance). */
+/** Obergrenze der Undo-Tiefe — ältere Schritte fallen hinten raus. */
 export const HISTORY_LIMIT = 100;
+/** Ungefähre Speichergrenze des Verlaufs (Bytes) — ältere Schritte fallen hinten raus. */
+export const HISTORY_MAX_BYTES = 256 * 1024 * 1024;
 
 /** Felder, die diese Slice in den RootState beisteuert. */
 export interface HistorySlice {
-  /** Ältere Projekt-Stände (oben = zuletzt verlassener Stand, für `undo`). */
-  undoStack: Project[];
-  /** Durch `undo` verlassene Stände (oben = zuletzt verlassener, für `redo`). */
-  redoStack: Project[];
-  /** Abgeleitet aus `undoStack.length > 0` — bequem für UI-Bindings (Buttons/Menüs). */
+  /** Anzahl Undo-Schritte im Kern. */
+  undoDepth: number;
+  /** Anzahl Redo-Schritte im Kern. */
+  redoDepth: number;
+  /** Abgeleitet aus `undoDepth > 0` — bequem für UI-Bindings (Buttons/Menüs). */
   canUndo: boolean;
-  /** Abgeleitet aus `redoStack.length > 0`. */
+  /** Abgeleitet aus `redoDepth > 0`. */
   canRedo: boolean;
-  /** Einen Schritt zurück. No-Op (kein Crash), wenn der Undo-Stack leer ist. */
+  /** Einen Schritt zurück. No-Op (kein Crash), wenn nichts rückgängig zu machen ist. */
   undo: () => void;
-  /** Einen Schritt vor. No-Op (kein Crash), wenn der Redo-Stack leer ist. */
+  /** Einen Schritt vor. No-Op (kein Crash), wenn nichts wiederherzustellen ist. */
   redo: () => void;
+  /** Verlauf leeren. */
+  clearHistory: () => void;
+  /** Alle Projekt-Änderungen in `fn` werden EIN Undo-Schritt. */
+  groupChanges: (fn: () => void) => void;
 }
 
-/**
- * Reines Patch-Berechnen für einen History-Push — von `setProject` (in
- * `projectSlice.ts`) bei jeder ECHTEN Projekt-Änderung aufgerufen (kein
- * Store-Zugriff nötig, daher hier als freie Funktion statt Store-Aktion: so
- * lässt sich der Push in EINEM gemeinsamen `set()`-Aufruf mit der eigentlichen
- * `project`-Änderung zusammenfassen, statt einen zweiten, verschachtelten
- * `set()`-Aufruf auszulösen).
- *
- * Eine neue Aktion verwirft immer die Redo-Historie (Standardverhalten jedes
- * Undo/Redo-Systems: sobald der Nutzer nach einem `undo()` etwas Neues tut,
- * ist der alte "vordere" Zweig weg).
- */
-export function pushHistoryPatch(
-  undoStack: Project[],
-  prevProject: Project,
-): Pick<HistorySlice, "undoStack" | "redoStack" | "canUndo" | "canRedo"> {
-  const next = [...undoStack, prevProject];
-  if (next.length > HISTORY_LIMIT) next.shift();
-  return { undoStack: next, redoStack: [], canUndo: true, canRedo: false };
-}
+let doc: ProjectDocument | null = null;
 
 /**
- * Baut `undo`/`redo` + initialen Zustand. `onAfterJump` wird nach jedem
- * Sprung aufgerufen (projectSlice.ts nutzt das, um die Koaleszenz-Buchführung
- * für Drag-Serien zurückzusetzen — sonst könnte eine neue Aktion direkt nach
- * einem `undo()` fälschlich mit der VORHERIGEN Serie verschmolzen und dadurch
- * NIE auf dem Undo-Stack landen).
+ * Das Kern-Dokument des Stores (mit Verlauf), beim ersten Gebrauch aus `project` geöffnet. Es ist
+ * zugleich das Dokument, über das die Abfragen auf dem aktuellen Projekt laufen (`documentFor`).
  */
-export function createHistorySlice(
-  api: StoreApi<HistorySlice & { project: Project }>,
-  onAfterJump?: () => void,
-): HistorySlice {
+export function storeDocument(project: Project): ProjectDocument {
+  if (!doc) {
+    doc = new ProjectDocument(project);
+    doc.setHistoryLimits(HISTORY_LIMIT, HISTORY_MAX_BYTES);
+    setPrimaryDocument(doc);
+  }
+  return doc;
+}
+
+/** Verlaufs-Felder für den Store aus dem Stand im Kern. */
+export function historyPatch(d: ProjectDocument): Pick<HistorySlice, "undoDepth" | "redoDepth" | "canUndo" | "canRedo"> {
+  const h = d.historyState();
+  return { undoDepth: h.undo, redoDepth: h.redo, canUndo: h.undo > 0, canRedo: h.redo > 0 };
+}
+
+/** Baut `undo`/`redo` + initialen Zustand. */
+export function createHistorySlice(api: StoreApi<HistorySlice & { project: Project }>): HistorySlice {
   const { set, get } = api;
 
+  const jump = (dir: "undo" | "redo") => {
+    const { project } = get();
+    const d = storeDocument(project);
+    const next = dir === "undo" ? d.undo(project) : d.redo(project);
+    set(next ? { project: next, ...historyPatch(d) } : historyPatch(d));
+  };
+
   return {
-    undoStack: [],
-    redoStack: [],
+    undoDepth: 0,
+    redoDepth: 0,
     canUndo: false,
     canRedo: false,
-
-    undo: () => {
-      const { undoStack, redoStack, project } = get();
-      if (undoStack.length === 0) return;
-      const prev = undoStack[undoStack.length - 1];
-      const rest = undoStack.slice(0, -1);
-      set({
-        project: prev,
-        undoStack: rest,
-        redoStack: [...redoStack, project],
-        canUndo: rest.length > 0,
-        canRedo: true,
-      });
-      onAfterJump?.();
+    undo: () => jump("undo"),
+    redo: () => jump("redo"),
+    clearHistory: () => {
+      const d = storeDocument(get().project);
+      d.clearHistory();
+      set(historyPatch(d));
     },
-
-    redo: () => {
-      const { undoStack, redoStack, project } = get();
-      if (redoStack.length === 0) return;
-      const next = redoStack[redoStack.length - 1];
-      const rest = redoStack.slice(0, -1);
-      set({
-        project: next,
-        undoStack: [...undoStack, project],
-        redoStack: rest,
-        canUndo: true,
-        canRedo: rest.length > 0,
-      });
-      onAfterJump?.();
+    groupChanges: (fn) => {
+      const d = storeDocument(get().project);
+      d.beginGroup();
+      try {
+        fn();
+      } finally {
+        d.endGroup();
+      }
     },
   };
 }
