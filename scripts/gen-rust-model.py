@@ -14,6 +14,7 @@ MANUAL = {"Vec2", "Drawing2DGeom", "VerticalAnchor", "ColumnProfile", "LayoutAnn
           "LayoutAnnotationPatch", "ContextObject", "BuiltinPaletteBank", "SiaKey", "SiaAggregate",
           "BoolMark", "TextRange"}
 TAGGED = {"GridRule", "ModuleRule", "ConditionalThicknessRule", "ReferenceLineRule", "SequenceRule", "ImportedMesh", "ContourSet", "TerrainMesh", "ContextImage"}
+RENAMES = {"OpeningKind2": "ElementKind"}
 ONLY = None  # alle Interfaces aus SRC, die erreichbar sind
 
 def strip_comments(s):
@@ -256,4 +257,7 @@ print("// GENERIERT von scripts/gen-rust-model.py aus den TS-Typen (Stand 28.10.
       "// Rust-Gegenstück zu src/model/types.ts ([K4] S2). Union-Typen mit Tag stehen in model/manual.rs.\n"
       "#![allow(clippy::large_enum_variant)]\n"
       "use super::manual::*;\nuse serde::{Deserialize, Serialize};\n")
-print("\n".join(out_items))
+body = "\n".join(out_items)
+for a, b in RENAMES.items():
+    body = body.replace(a, b)
+print(body)

@@ -5,6 +5,7 @@
 //! Datenübergabe: flache `f64`-Puffer (s. [`flat`]), kein JSON — schnell und ohne Serde-Kosten.
 
 pub mod flat;
+pub mod flat_write;
 pub mod polygon_bool;
 pub mod roof;
 pub mod roof_skeleton;
@@ -41,6 +42,8 @@ pub mod delaunay;
 pub mod document;
 pub mod mesh_section;
 pub mod model;
+pub mod model3d;
+pub mod style;
 pub mod plan_elevation;
 pub mod plan_misc;
 pub mod plan_section;

@@ -940,7 +940,7 @@ pub struct Roof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OpeningKind2 {
+pub enum ElementKind {
     #[serde(rename = "window")]
     Window,
     #[serde(rename = "door")]
@@ -1021,7 +1021,7 @@ pub struct Opening {
     pub category_code: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<bool>,
-    pub kind: OpeningKind2,
+    pub kind: ElementKind,
     pub position: f64,
     pub width: f64,
     pub height: f64,

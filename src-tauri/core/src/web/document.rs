@@ -83,6 +83,9 @@ pub fn doc_query_args(h: u32, name: &str, args: &[f64]) -> String {
             "siteCheck" => serde_json::to_string(&site_rules::check_project(&p)),
             "buildingFootprint" => serde_json::to_string(&site_rules::building_footprint(&p)),
             "modelTop" => serde_json::to_string(&site_rules::model_top(&p)),
+            "walls" if args.len() == 1 => crate::model3d::emit_walls(&p, args[0] != 0.0).map_err(|_| ()).and_then(|w| serde_json::to_string(&w).map_err(|_| ())).map_err(|_| serde_json::Error::io(std::io::Error::other("walls"))),
+            "slabs" => serde_json::to_string(&crate::model3d::emit_slabs(&p)),
+            "columnMeshes" => serde_json::to_string(&crate::model3d::emit_columns(&p)),
             "shadows" if args.len() == 2 => {
                 let polys = sun::shadow_polygons_project(&p, sun::SunPosition { azimuth: args[0], elevation: args[1] });
                 serde_json::to_string(&site_rules::area_out(&polys))
