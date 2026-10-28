@@ -4,6 +4,7 @@ import { documentFor } from "../core/document";
 import { emitSlabs } from "./toWalls3d/ceilings";
 import { emitColumns } from "./toWalls3d/columns";
 import { projectToWalls3d } from "./toWalls3d";
+import { emitOpeningMeshes } from "./toWalls3d/openings";
 
 const plain = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 let seed = 21;
@@ -39,8 +40,22 @@ describe("model3d walls", () => {
         ...(sampleProject.ceilingTypes?.length && rnd() < 0.5 ? { ceilingTypeId: pick(sampleProject.ceilingTypes).id } : {}) }));
       const roofs = rnd() < 0.5 ? [{ id: "R1", type: "roof", floorId: pick(lvl).id, categoryCode: "35", outline: [{ x: -1, y: -1 }, { x: 7, y: -1 }, { x: 7, y: 5 }, { x: -1, y: 5 }],
         shape: pick(["sattel", "walm", "pult", "flach"]), pitchDeg: 30, overhang: 0.3, ridgeAxis: pick(["x", "y"]), thickness: 0.2 }] : [];
-      const project: any = { ...sampleProject, walls, openings, ceilings, roofs };
+      const kinds = ["fest", "dreh", "kipp", "drehkipp", "schiebe"];
+      const wts = Array.from({ length: 2 }, (_, k) => ({ ...sampleProject.windowTypes![0], id: "wt" + k, kind: pick(kinds), wingCount: 1 + Math.floor(rnd() * 3),
+        frameWidth: rnd() < 0.5 ? pick([0.04, 0.06, 0.09]) : undefined, transomHeight: rnd() < 0.5 ? pick([0.2, 0.4]) : undefined,
+        mullionRows: rnd() < 0.5 ? pick([1, 2, 3]) : undefined, mullionCols: rnd() < 0.5 ? pick([1, 2]) : undefined,
+        sillBoard: pick(["keine", "innen", "aussen", "beide", undefined]), glazingPanes: pick([1, 2, 3, undefined]), glazing: pick(["einfach", "zweifach", "dreifach"]),
+        frameCornerJoin: pick(["vertikal", "horizontal", "gehrung", undefined]), insetFromFace: rnd() < 0.5 ? 0.1 : undefined, insetFace: pick(["aussen", "innen", undefined]),
+        innerLayerRecess: rnd() < 0.3 ? true : undefined, shading: rnd() < 0.4 ? { create: true, kind: "rollladen", box: { width: 1, height: 0.2, depth: 0.2 } } : undefined,
+        sashes: rnd() < 0.6 ? Array.from({ length: 1 + Math.floor(rnd() * 3) }, () => ({ kind: pick(["fluegel", "fluegel", "pfosten"]), autoWidth: pick([true, false, undefined]), width: rnd() < 0.5 ? 0.4 : undefined, postWidth: rnd() < 0.5 ? 0.08 : undefined, opening: pick([...kinds, undefined]), hingeSide: pick(["left", "right", undefined]) })) : undefined }));
+      const dts = Array.from({ length: 2 }, (_, k) => ({ ...sampleProject.doorTypes![0], id: "dt" + k, leafStyle: pick(["glatt", "glas", "kassette"]), glazingRatio: rnd() < 0.5 ? pick([0.3, 1]) : undefined,
+        frameKind: pick(["zarge", "blockrahmen", undefined]), threshold: pick([true, false, undefined]), leafCount: pick([1, 2]) , panelCols: rnd() < 0.5 ? 2 : undefined, panelRows: rnd() < 0.5 ? 3 : undefined }));
+      const openings2 = openings.map((o: any) => ({ ...o, ...(rnd() < 0.8 ? { typeId: o.kind === "door" ? pick(dts).id : pick(wts).id } : {}), ...(rnd() < 0.3 ? { wingCount: 2 } : {}) }));
+      const project: any = { ...sampleProject, walls, openings: openings2, ceilings, roofs, windowTypes: wts, doorTypes: dts };
       const doc = documentFor(project);
+      for (const [dc, dn] of [[0, "grob"], [1, "mittel"], [2, "fein"]] as const) {
+        expect(doc.query<unknown[]>("openingMeshes", [dc])).toEqual(plain(emitOpeningMeshes(project, dn)));
+      }
       for (const layered of [true, false]) {
         let want: unknown;
         try { want = plain(projectToWalls3d(project, layered)); } catch { want = undefined; }

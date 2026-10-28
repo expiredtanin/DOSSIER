@@ -535,6 +535,172 @@ pub fn emit_walls(p: &Project, layered: bool) -> Result<Vec<RWall>, String> {
     Ok(out)
 }
 
+// ── Öffnungs-Einbauteile (Glas, Rahmen, Sprossen, Bank, Kasten) ─────────────
+
+/// Farbe je Bauteil-Klasse (Index = `Part` in `openings3d.rs`).
+const PART_RGB: [Rgb; 6] = [
+    [0.62, 0.76, 0.85],
+    [0.85, 0.85, 0.83],
+    [0.88, 0.88, 0.9],
+    [0.8, 0.8, 0.78],
+    [0.25, 0.27, 0.3],
+    [0.93, 0.9, 0.85],
+];
+
+/// Dreiecke eines Öffnungs-Quaders (Ecken-Bits: bit0 = Achse, bit1 = Höhe, bit2 = quer).
+const OPENING_BOX_TRIS: [u32; 36] = [0, 1, 3, 0, 3, 2, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 3, 7, 1, 7, 5];
+
+fn opt(v: Option<f64>) -> f64 {
+    v.unwrap_or(f64::NAN)
+}
+
+fn flag(b: bool) -> f64 {
+    if b {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+fn join_code(j: Option<FrameCornerJoin>) -> f64 {
+    match j {
+        Some(FrameCornerJoin::Horizontal) => 1.0,
+        Some(FrameCornerJoin::Gehrung) => 2.0,
+        _ => 0.0,
+    }
+}
+
+fn opening_kind_code(k: Option<OpeningKind>) -> f64 {
+    match k {
+        None => 0.0,
+        Some(OpeningKind::Dreh) => 1.0,
+        Some(OpeningKind::Kipp) => 2.0,
+        Some(OpeningKind::Drehkipp) => 3.0,
+        Some(OpeningKind::Fest) => 4.0,
+        Some(OpeningKind::Schiebe) => 5.0,
+    }
+}
+
+fn write_common(w: &mut FlatWriter, frame_depth: Option<f64>, inset: Option<f64>, inner: bool, join: Option<FrameCornerJoin>, frame_width: Option<f64>, transom: Option<f64>) {
+    w.nums(&[opt(frame_depth), opt(inset), flag(inner), join_code(join), opt(frame_width), opt(transom)]);
+}
+
+fn glazing_panes_of(wt: &WindowType) -> f64 {
+    match wt.glazing_panes {
+        Some(p) if p != 0.0 => p,
+        _ => match wt.glazing {
+            WindowTypeGlazing::Dreifach => 3.0,
+            WindowTypeGlazing::Zweifach => 2.0,
+            _ => 1.0,
+        },
+    }
+}
+
+fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
+    if op.kind == ElementKind::Window {
+        let Some(wt) = p.window_type(op) else {
+            w.num(0.0);
+            return;
+        };
+        w.num(1.0);
+        write_common(w, wt.frame_depth, wt.inset_from_face, wt.inset_face == Some(WindowTypeInsetFace::Innen), wt.frame_corner_join, wt.frame_width, wt.transom_height);
+        let shading = wt.shading.as_ref().filter(|s| s.create).map(|s| &s.r#box);
+        w.nums(&[
+            glazing_panes_of(wt),
+            opt(wt.mullion_rows),
+            opt(wt.mullion_cols),
+            match wt.sill_board {
+                Some(WindowTypeSillBoard::Keine) => 1.0,
+                Some(WindowTypeSillBoard::Innen) => 2.0,
+                Some(WindowTypeSillBoard::Beide) => 3.0,
+                _ => 0.0,
+            },
+            flag(shading.is_some()),
+            shading.map_or(0.0, |b| b.width),
+            shading.map_or(0.0, |b| b.height),
+            shading.map_or(0.0, |b| b.depth),
+            op.wing_count.unwrap_or(wt.wing_count),
+            opening_kind_code(Some(wt.kind)),
+        ]);
+        let sashes = wt.sashes.as_deref().unwrap_or(&[]);
+        w.num(sashes.len() as f64);
+        for s in sashes {
+            w.nums(&[
+                if s.kind == SashDefKind::Fluegel { 0.0 } else { 1.0 },
+                flag(s.auto_width == Some(false)),
+                opt(s.width),
+                opt(s.post_width),
+                opening_kind_code(s.opening),
+                flag(s.hinge_side != Some(SashDefHingeSide::Right)),
+            ]);
+        }
+        return;
+    }
+    let Some(dt) = p.door_type(op) else {
+        w.num(0.0);
+        return;
+    };
+    w.num(1.0);
+    write_common(w, dt.frame_depth, dt.inset_from_face, dt.inset_face == Some(DoorTypeInsetFace::Innen), dt.frame_corner_join, dt.frame_width, dt.transom_height);
+    w.nums(&[
+        flag(dt.threshold == Some(true)),
+        dt.leaf_count,
+        match dt.leaf_style {
+            DoorTypeLeafStyle::Glas => 1.0,
+            DoorTypeLeafStyle::Kassette => 2.0,
+            _ => 0.0,
+        },
+        opt(dt.glazing_ratio),
+        flag(dt.frame_kind != Some(DoorTypeFrameKind::Blockrahmen)),
+        opt(dt.panel_cols),
+        opt(dt.panel_rows),
+    ]);
+}
+
+/// Öffnungs-Einbauteile als Quader-Meshes (`emitOpeningMeshes`); `detail`: 0 grob, 1 mittel, 2 fein.
+pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
+    let mut w = FlatWriter::new();
+    w.num(detail).num(p.walls.len() as f64);
+    for wall in &p.walls {
+        w.nums(&[wall.start.x, wall.start.y, wall.end.x, wall.end.y]);
+        let slot = w.slot();
+        let mut count = 0.0;
+        let wr = wall_ref(p, wall);
+        let (zb, zt) = p.wall_vertical_extent(wall);
+        let mut thickness: Option<f64> = None;
+        for op in p.openings_of_wall(&wall.id) {
+            let Some((from, to)) = opening_geom::opening_interval(&wr, op.position, op.width) else { continue };
+            let o_bottom = zb + op.sill_height.max(0.0);
+            let o_top = zt.min(o_bottom + op.height);
+            let t = *thickness.get_or_insert_with(|| p.wall_thickness(wall, 0.2));
+            w.nums(&[from, to, o_bottom, o_top, flag(op.kind != ElementKind::Window), t]);
+            write_opening(&mut w, p, op);
+            count += 1.0;
+        }
+        w.set(slot, count);
+    }
+    let buf = crate::openings3d::opening_meshes_flat(&w.done());
+    let n = buf.first().copied().unwrap_or(0.0).max(0.0) as usize;
+    let mut out = Vec::new();
+    let mut i = 1;
+    for _ in 0..n {
+        if i + 25 > buf.len() {
+            break;
+        }
+        let part = buf[i] as usize;
+        out.push(RMesh {
+            positions: buf[i + 1..i + 25].to_vec(),
+            indices: OPENING_BOX_TRIS.to_vec(),
+            kind: "extrusion",
+            color: PART_RGB.get(part).copied().unwrap_or(PART_RGB[1]),
+            vertex_colors: None,
+            material_index: None,
+        });
+        i += 25;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
