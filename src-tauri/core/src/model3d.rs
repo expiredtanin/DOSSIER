@@ -873,12 +873,18 @@ fn cross3(a: V3, b: V3) -> V3 {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 
-/// Gehrte Versatz-Ecken aller Dachflächen (`mitredRoofOffsets`).
+/// Gehrte Versatz-Ecken aller Dachflächen (`mitredRoofOffsets`). [G9]: an einem Punkt, an dem
+/// mehr als zwei Flächen zusammentreffen (Walm-/Zeltspitze, Kehlpunkt, konvexe Teilstücke einer
+/// Fläche), bekommen ALLE Flächen dieselbe versetzte Ecke — Ausgleich über alle beteiligten
+/// Ebenen (kleinste Quadrate) statt je Fläche paarweise mit zwei Nachbarn; sonst klaffen dort
+/// Lücken und der Dachkörper ist nicht geschlossen.
 struct Mitre<'a> {
     planes: &'a [Vec<V3>],
     normals: Vec<V3>,
     neighbor: Vec<Vec<isize>>,
     shared: Vec<Vec<bool>>,
+    /// Je Fläche und Ecke: alle (Fläche, Ecke) am selben Punkt (inkl. sich selbst).
+    incident: Vec<Vec<Vec<(usize, usize)>>>,
 }
 
 impl<'a> Mitre<'a> {
@@ -910,7 +916,14 @@ impl<'a> Mitre<'a> {
             })
             .collect();
         let shared = neighbor.iter().map(|row| row.iter().map(|&j| j >= 0).collect()).collect();
-        Mitre { planes, normals, neighbor, shared }
+        let mut at_point: HashMap<_, Vec<(usize, usize)>> = HashMap::new();
+        for (i, pts) in planes.iter().enumerate() {
+            for (k, p) in pts.iter().enumerate() {
+                at_point.entry(key(p)).or_default().push((i, k));
+            }
+        }
+        let incident = planes.iter().map(|pts| pts.iter().map(|p| at_point.get(&key(p)).cloned().unwrap_or_default()).collect()).collect();
+        Mitre { planes, normals, neighbor, shared, incident }
     }
 
     fn edge_plane(&self, i: usize, k: usize, d: f64) -> (V3, f64) {
@@ -958,12 +971,92 @@ impl<'a> Mitre<'a> {
                 if !self.shared[i][prev] && !self.shared[i][k] {
                     return fallback;
                 }
-                match Self::solve([own, self.edge_plane(i, prev, d), self.edge_plane(i, k, d)]) {
-                    Some(q) if hypot(&[q[0] - fallback[0], q[1] - fallback[1], q[2] - fallback[2]]) <= 4.0 * d + 0.5 => q,
+                let near = |q: V3| hypot(&[q[0] - fallback[0], q[1] - fallback[1], q[2] - fallback[2]]) <= 4.0 * d + 0.5;
+                // Zwei Flächen am Punkt: wie bisher paarweise (exakt, unverändert).
+                let pairwise = || match Self::solve([own, self.edge_plane(i, prev, d), self.edge_plane(i, k, d)]) {
+                    Some(q) if near(q) => q,
                     _ => fallback,
+                };
+                let inc = &self.incident[i][k];
+                if inc.len() <= 2 {
+                    return pairwise();
+                }
+                match self.common(inc, d) {
+                    Some(q) if near(q) => q,
+                    _ => pairwise(),
                 }
             })
             .collect()
+    }
+
+    /// Gemeinsame versetzte Ecke aller Flächen `inc` (Fläche, Ecke) an einem Punkt: kleinste
+    /// Quadrate über alle verschiedenen Ebenen (Flächen um `d` versetzt, Ränder ohne Nachbarn als
+    /// Seitenebene), schwach zum Mittel der Normalen-Versätze gezogen (macht unterbestimmte Fälle
+    /// eindeutig: eine Ebene → Normalenversatz, zwei → nächster Punkt der Schnittgeraden).
+    /// Treffen sich die Ebenen in einem Punkt, ist es dieser.
+    fn common(&self, inc: &[(usize, usize)], d: f64) -> Option<V3> {
+        let mut rows: Vec<(V3, f64)> = Vec::new();
+        let mut push = |(m, c): (V3, f64)| {
+            let l = hypot(&m);
+            if !(l > 1e-12) {
+                return;
+            }
+            let (m, c) = ([m[0] / l, m[1] / l, m[2] / l], c / l);
+            let same = |r: &(V3, f64)| {
+                (hypot(&[r.0[0] - m[0], r.0[1] - m[1], r.0[2] - m[2]]) < 1e-9 && (r.1 - c).abs() < 1e-9)
+                    || (hypot(&[r.0[0] + m[0], r.0[1] + m[1], r.0[2] + m[2]]) < 1e-9 && (r.1 + c).abs() < 1e-9)
+            };
+            if !rows.iter().any(same) {
+                rows.push((m, c));
+            }
+        };
+        let mut f = [0.0; 3];
+        for &(j, kk) in inc {
+            let pts = &self.planes[j];
+            let nj = self.normals[j];
+            push((nj, dot3(nj, pts[0]) - d));
+            let prev = (kk + pts.len() - 1) % pts.len();
+            for e in [prev, kk] {
+                if !self.shared[j][e] {
+                    push(self.edge_plane(j, e, d));
+                }
+            }
+            let p = pts[kk];
+            for a in 0..3 {
+                f[a] += (p[a] - nj[a] * d) / inc.len() as f64;
+            }
+        }
+        let normal_eq = |rows: &[(V3, f64)]| {
+            let mut m = [[0.0; 3]; 3];
+            let mut b = [0.0; 3];
+            for (n, c) in rows {
+                for r in 0..3 {
+                    for col in 0..3 {
+                        m[r][col] += n[r] * n[col];
+                    }
+                    b[r] += n[r] * c;
+                }
+            }
+            Self::solve([(m[0], b[0]), (m[1], b[1]), (m[2], b[2])])
+        };
+        if let Some(q) = normal_eq(&rows) {
+            return q.iter().all(|v| v.is_finite()).then_some(q);
+        }
+        // Unterbestimmt (Ebenen schneiden sich in einer Geraden, z. B. zwei Teilstücke am
+        // Mansardknick): der Punkt der Geraden, der dem Mittel der Normalen-Versätze am nächsten ist.
+        let (n1, _) = *rows.first()?;
+        let n2 = rows.iter().map(|r| cross3(n1, r.0)).max_by(|a, b| hypot(a).total_cmp(&hypot(b)))?;
+        let l = hypot(&n2);
+        if !(l > 1e-6) {
+            // Nur eine Richtung: Mittel auf die (gemittelte) Ebene legen.
+            let c = rows.iter().map(|r| r.1 * dot3(r.0, n1).signum()).sum::<f64>() / rows.len() as f64;
+            let t = c - dot3(n1, f);
+            return Some([f[0] + n1[0] * t, f[1] + n1[1] * t, f[2] + n1[2] * t]);
+        }
+        let dir = [n2[0] / l, n2[1] / l, n2[2] / l];
+        rows.push((dir, dot3(dir, f)));
+        let q = normal_eq(&rows)?;
+        q.iter().all(|v| v.is_finite()).then_some(q)
     }
 }
 
@@ -1406,5 +1499,62 @@ mod tests {
         let slabs = emit_slabs(&p);
         assert!(!slabs.is_empty());
         assert!(slabs.iter().all(|s| s.z_top > s.z_bottom && s.outline.len() >= 3));
+    }
+
+    /// Dachkörper einer Schicht (Versatz `d0` bis `d1` unter der Oberkante) wie in `emit_roofs`.
+    fn roof_slab_closed(planes: &[Vec<V3>], d0: f64, d1: f64) -> bool {
+        let mitre = Mitre::new(planes);
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        for (i, plane) in planes.iter().enumerate() {
+            if plane.len() >= 3 {
+                push_roof_slab_between(&mut positions, &mut indices, &mitre.at(i, d0), &mitre.at(i, d1), &mitre.shared[i]);
+            }
+        }
+        crate::wall_mesh_cut::is_watertight(&positions, &indices, 1e-6)
+    }
+
+    /// [G9] Gehrung an Punkten mit mehr als zwei Dachflächen (Zeltspitze auf Rechteck mit zwei
+    /// Neigungen, Kehlpunkte, konvexe Teilstücke einer Skelett-Fläche, Mansardknick): jede
+    /// Dachschicht ist ein geschlossener Körper. Vorher klafften dort Lücken (Zelt 7×5 m:
+    /// 1.1e-3 m², Walm auf L: 0.77 m²).
+    #[test]
+    fn g9_dachschichten_geschlossen() {
+        use crate::roof::{roof_geometry, MansardType, RoofParams, Shape};
+        use crate::roof_skeleton::Axis;
+        let l = vec![[0.0, 0.0], [11.0, 0.0], [11.0, 4.0], [8.0, 4.0], [8.0, 6.0], [0.0, 6.0]];
+        let u = vec![[0.0, 0.0], [12.0, 0.0], [12.0, 9.0], [8.0, 9.0], [8.0, 4.0], [4.0, 4.0], [4.0, 9.0], [0.0, 9.0]];
+        let rect = vec![[0.0, 0.0], [7.0, 0.0], [7.0, 5.0], [0.0, 5.0]];
+        let star = vec![[0.0, 0.0], [8.0, 0.0], [10.0, 5.0], [4.0, 3.0], [-2.0, 5.0]];
+        let skew = vec![[0.0, 0.0], [10.0, 0.0], [13.0, 5.0], [3.0, 5.0]];
+        let shapes = [
+            (Shape::Walm, MansardType::Giebel),
+            (Shape::Zelt, MansardType::Giebel),
+            (Shape::Sattel, MansardType::Giebel),
+            (Shape::Mansarde, MansardType::Giebel),
+            (Shape::Mansarde, MansardType::Walm),
+            (Shape::Mansarde, MansardType::Zelt),
+        ];
+        for outline in [&rect, &l, &u, &star, &skew] {
+            for (shape, mt) in shapes {
+                for axis in [Axis::X, Axis::Y] {
+                    let p = RoofParams {
+                        outline: outline.clone(),
+                        shape,
+                        pitch_deg: 35.0,
+                        pitch_upper_deg: None,
+                        mansard_type: mt,
+                        mansard_knee_ratio: None,
+                        half_hip_ratio: None,
+                        overhang: 0.5,
+                        overhang_gable: None,
+                        ridge_axis: axis,
+                    };
+                    let g = roof_geometry(&p, 6.0);
+                    for (d0, d1) in [(0.0, 0.3), (0.3, 0.42)] {
+                        assert!(roof_slab_closed(&g.planes, d0, d1), "{outline:?} {shape:?} {mt:?} {axis:?} {d0}–{d1}");
+                    }
+                }
+            }
+        }
     }
 }

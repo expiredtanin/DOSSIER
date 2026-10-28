@@ -294,9 +294,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   betroffen:** macOS-Metal-Pfad (GPU-Kompilierung mit `origin`-Verschiebung), lokal gezeichnete Projekte,
   Standort-Import (Modell-(0,0) = Suchzentrum). Lösung: Szene relativ zu einem Ursprung kodieren
   (`renderSceneBin.ts`/`scene_bin.rs` + Kamera-Versatz in f64 in render2d, wie `GpuGeometry.origin`). · S–M
-- ○ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
+- ✅ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
   paarweise Gehrung der Unterseite nicht exakt (Restlücke < 0.01 m²); solche Dächer gehen als nicht
   geschlossenes Face-Set ins IFC. · S–M
+  (28.10.) Nicht durch den Skeleton gelöst (auch dessen Flächen treffen sich an Spitzen mit zwei
+  Neigungen, Kehlpunkten und zwischen konvexen Teilstücken einer Fläche): `Mitre` in `model3d.rs` gibt
+  allen Flächen an einem Punkt mit > 2 Flächen dieselbe versetzte Ecke (kleinste Quadrate über alle
+  Ebenen, unterbestimmt → nächster Punkt der Schnittgeraden); Punkte mit 2 Flächen unverändert. Gemessen
+  vorher: Zelt 7×5 m 1.1e-3 m², Walm/Zelt auf L 0.77–1.2 m², Mansard-Walm auf L 0.93 m² Lücke; jetzt jede
+  Schicht geschlossen (Test `g9_dachschichten_geschlossen`: Rechteck/L/U/konkav/schief × alle
+  Skelett-Formen × First x/y × zwei Schichten). Nicht in der App/IFC-Prüfung angesehen.
 
 ## truck [T]
 
