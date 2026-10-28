@@ -108,6 +108,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     ✅ Schnitt-Bänder: Dominanz-Subtraktion, Verschmelzung, Rechteck-Vereinigung (`plan_section.rs`, 28.10.).
     ✅ Ansicht: Verdeckungs-Clipping, Punkt-Verdeckung, Schlagschatten, XOR-Umriss (`plan_elevation.rs`, 28.10.).
     ✅ Ansicht: Flächen (Wand-Quader, Decken-Prismen, Dach/Giebel) projizieren + Rückseiten-Culling, Eck-Verlängerung, Öffnungen (Rahmen, Glasfelder, Sprossen, Sims, SIA-Symbol) (`plan_elevation.rs`).
+    ✅ Netz-Ebenenschnitt (Körper/Gelände) + Ringe→Flächen (`mesh_section.rs`; behebt nebenbei: rückwärts geschlossene Ringe gingen verloren).
   - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.

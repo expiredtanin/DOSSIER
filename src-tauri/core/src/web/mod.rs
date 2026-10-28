@@ -28,6 +28,7 @@ mod gpu_compile;
 mod plan_stairs;
 mod plan_walls;
 mod plan_openings;
+mod mesh_section;
 mod plan_elevation;
 mod plan_misc;
 mod plan_section;

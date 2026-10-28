@@ -8,9 +8,10 @@
 // Geschlossene Netze (Körper) ergeben geschlossene Ringe → Polygone mit Löchern; offene Netze
 // (Gelände) ergeben offene Linienzüge (Geländelinie im Schnitt).
 //
-// Robustheit: Ecken exakt AUF der Ebene werden einheitlich der „hinteren" Seite zugeschlagen
-// (symbolische Störung, `d > 0` ⇒ vorn) — so schliessen sich die Segmente auch bei Netzen, deren
-// Ecken genau auf der Schnittlinie liegen (Achsen im Raster!).
+// Die Rechnung liegt im Rust-Kern (`src-tauri/core/src/mesh_section.rs`, [K3c]); hier nur die
+// Fassade mit unveränderter Signatur.
+
+import { core } from "../engine/coreWasm";
 
 export type Pt2 = [number, number];
 
@@ -34,151 +35,33 @@ export interface HorizontalPlane {
 }
 export type CutPlane = VerticalPlane | HorizontalPlane;
 
-const QUANT = 1e6;
-const key = (p: Pt2): string => `${Math.round(p[0] * QUANT)},${Math.round(p[1] * QUANT)}`;
+/** Liest `[n, (k, u, v …) × n]` ab `i` (Index wandert mit). */
+function readRings(f: Float64Array, at: { i: number }): Pt2[][] {
+  const out: Pt2[][] = [];
+  for (let k = 0, n = f[at.i++]; k < n; k++) {
+    const count = f[at.i++];
+    const ring = new Array<Pt2>(count);
+    for (let j = 0; j < count; j++, at.i += 2) ring[j] = [f[at.i], f[at.i + 1]];
+    out.push(ring);
+  }
+  return out;
+}
 
 /**
  * Schneidet das Netz mit `plane`. `positions` flach [x,y,z,…], `indices` je 3 ein Dreieck.
  * Entartete Segmente (Länge ~0) werden verworfen.
  */
 export function cutMeshWithPlane(positions: ArrayLike<number>, indices: ArrayLike<number>, plane: CutPlane): CutResult {
-  const nv = Math.floor(positions.length / 3);
-  // Signierter Abstand + 2D-Koordinate je Vertex.
-  const dist = new Float64Array(nv);
-  const c0 = new Float64Array(nv);
-  const c1 = new Float64Array(nv);
-  for (let i = 0; i < nv; i++) {
-    const x = positions[i * 3];
-    const y = positions[i * 3 + 1];
-    const z = positions[i * 3 + 2];
-    if (plane.kind === "vertical") {
-      // Normale der Ebene (im Grundriss): n = (dir.y, −dir.x); u = Position entlang dir.
-      dist[i] = (x - plane.point.x) * plane.dir.y - (y - plane.point.y) * plane.dir.x;
-      c0[i] = (x - plane.point.x) * plane.dir.x + (y - plane.point.y) * plane.dir.y;
-      c1[i] = z;
-    } else {
-      dist[i] = z - plane.z;
-      c0[i] = x;
-      c1[i] = y;
-    }
-  }
-
-  // Kanten-Schnittpunkte cachen (jede Kante gehört zu bis zu 2 Dreiecken → gleicher Punkt).
-  const edgePt = new Map<number, Pt2>();
-  const edgeKey = (a: number, b: number): number => (a < b ? a * nv + b : b * nv + a);
-  const crossing = (a: number, b: number): Pt2 => {
-    const k = edgeKey(a, b);
-    let p = edgePt.get(k);
-    if (!p) {
-      const t = dist[a] / (dist[a] - dist[b]);
-      p = [c0[a] + (c0[b] - c0[a]) * t, c1[a] + (c1[b] - c1[a]) * t];
-      edgePt.set(k, p);
-    }
-    return p;
-  };
-
-  const segs: Array<[Pt2, Pt2]> = [];
-  for (let t = 0; t + 2 < indices.length; t += 3) {
-    const a = indices[t];
-    const b = indices[t + 1];
-    const c = indices[t + 2];
-    const sa = dist[a] > 0;
-    const sb = dist[b] > 0;
-    const sc = dist[c] > 0;
-    if (sa === sb && sb === sc) continue;
-    // Genau eine Ecke steht allein auf ihrer Seite: die beiden Kanten dort bilden das Segment.
-    const odd = sa !== sb && sa !== sc ? a : sb !== sa && sb !== sc ? b : c;
-    const o1 = odd === a ? b : odd === b ? c : a;
-    const o2 = odd === a ? c : odd === b ? a : b;
-    const p = crossing(odd, o1);
-    const q = crossing(odd, o2);
-    if (Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9) continue;
-    // Einheitlicher Umlaufsinn je Seite der Einzelecke → Segmente benachbarter Dreiecke fügen
-    // sich bei gleichsinnig orientiertem Netz zu gleichsinnigen Ketten.
-    segs.push(dist[odd] > 0 ? [q, p] : [p, q]);
-  }
-  return chain(segs);
-}
-
-/** Verkettet Segmente zu Ringen und Linienzügen. */
-function chain(segs: Array<[Pt2, Pt2]>): CutResult {
-  // Start-/Endpunkt-Index.
-  const byStart = new Map<string, number[]>();
-  const byEnd = new Map<string, number[]>();
-  segs.forEach((s, i) => {
-    const ks = key(s[0]);
-    const ke = key(s[1]);
-    (byStart.get(ks) ?? byStart.set(ks, []).get(ks)!).push(i);
-    (byEnd.get(ke) ?? byEnd.set(ke, []).get(ke)!).push(i);
-  });
-  const used = new Array<boolean>(segs.length).fill(false);
-  const take = (m: Map<string, number[]>, k: string): number => {
-    const l = m.get(k);
-    if (!l) return -1;
-    while (l.length) {
-      const i = l.pop()!;
-      if (!used[i]) return i;
-    }
-    return -1;
-  };
-  const rings: Pt2[][] = [];
-  const lines: Pt2[][] = [];
-  for (let i = 0; i < segs.length; i++) {
-    if (used[i]) continue;
-    used[i] = true;
-    const pts: Pt2[] = [segs[i][0], segs[i][1]];
-    const startKey = key(pts[0]);
-    // vorwärts
-    for (;;) {
-      const k = key(pts[pts.length - 1]);
-      if (k === startKey && pts.length > 2) break;
-      const n = take(byStart, k);
-      if (n < 0) break;
-      used[n] = true;
-      pts.push(segs[n][1]);
-    }
-    if (key(pts[pts.length - 1]) === startKey && pts.length > 3) {
-      pts.pop();
-      rings.push(pts);
-      continue;
-    }
-    // rückwärts verlängern (offener Zug)
-    for (;;) {
-      const k = key(pts[0]);
-      const n = take(byEnd, k);
-      if (n < 0) break;
-      used[n] = true;
-      pts.unshift(segs[n][0]);
-      if (key(pts[0]) === key(pts[pts.length - 1])) {
-        pts.shift();
-        rings.push(pts);
-        pts.length = 0;
-        break;
-      }
-    }
-    if (pts.length >= 2) lines.push(pts);
-  }
+  const pl =
+    plane.kind === "vertical"
+      ? [0, plane.point.x, plane.point.y, plane.dir.x, plane.dir.y]
+      : [1, plane.z];
+  const f = core().mesh_section_cut_flat(Float64Array.from(positions), Float64Array.from(indices), Float64Array.from(pl));
+  if (f.length === 0) return { rings: [], lines: [] };
+  const at = { i: 0 };
+  const rings = readRings(f, at);
+  const lines = readRings(f, at);
   return { rings, lines };
-}
-
-export const ringArea = (r: Pt2[]): number => {
-  let a = 0;
-  for (let i = 0; i < r.length; i++) {
-    const p = r[i];
-    const q = r[(i + 1) % r.length];
-    a += p[0] * q[1] - q[0] * p[1];
-  }
-  return a / 2;
-};
-
-function pointInRing(p: Pt2, r: Pt2[]): boolean {
-  let inside = false;
-  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
-    const [xi, yi] = r[i];
-    const [xj, yj] = r[j];
-    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
 }
 
 /** Ring mit Löchern (Aussenring zuerst, dann Löcher). */
@@ -189,35 +72,25 @@ export type RingSet = Pt2[][];
  * Loch). Unabhängig vom Umlaufsinn. Aussenringe zuerst-gross; Löcher folgen ihrem Aussenring.
  */
 export function ringsToPolygons(rings: Pt2[][]): RingSet[] {
-  const items = rings
-    .filter((r) => r.length >= 3 && Math.abs(ringArea(r)) > 1e-12)
-    .map((r) => ({ r, area: Math.abs(ringArea(r)) }))
-    .sort((a, b) => b.area - a.area);
-  const depth: number[] = items.map(() => 0);
-  const parent: number[] = items.map(() => -1);
-  for (let i = 0; i < items.length; i++) {
-    for (let j = i - 1; j >= 0; j--) {
-      // Kandidat j (grösser) enthält i? Test mit einem Punkt von i (nicht auf dem Rand von j).
-      if (pointInRing(items[i].r[0], items[j].r)) {
-        parent[i] = j;
-        depth[i] = depth[j] + 1;
-        break;
-      }
-    }
+  const b: number[] = [rings.length];
+  for (const r of rings) {
+    b.push(r.length);
+    for (const p of r) b.push(p[0], p[1]);
   }
+  const f = core().mesh_section_polygons_flat(Float64Array.from(b));
+  if (f.length === 0) return [];
+  const at = { i: 1 };
   const out: RingSet[] = [];
-  const idx = new Map<number, number>();
-  items.forEach((it, i) => {
-    if (depth[i] % 2 === 0) {
-      idx.set(i, out.length);
-      out.push([it.r]);
+  for (let k = 0; k < f[0]; k++) {
+    const nr = f[at.i++];
+    const set: RingSet = [];
+    for (let r = 0; r < nr; r++) {
+      const count = f[at.i++];
+      const ring = new Array<Pt2>(count);
+      for (let j = 0; j < count; j++, at.i += 2) ring[j] = [f[at.i], f[at.i + 1]];
+      set.push(ring);
     }
-  });
-  items.forEach((it, i) => {
-    if (depth[i] % 2 === 1) {
-      const owner = idx.get(parent[i]);
-      if (owner !== undefined) out[owner].push(it.r);
-    }
-  });
+    out.push(set);
+  }
   return out;
 }
