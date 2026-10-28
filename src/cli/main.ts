@@ -226,6 +226,7 @@ export async function run(argv: string[]): Promise<number> {
       return 0;
     }
     case "ifc":
+      await loadFileio();
       out(args, exportIfcSpf(project), `${project.name || "projekt"}.ifc`);
       return 0;
     case "obj":

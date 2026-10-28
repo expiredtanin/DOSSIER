@@ -12,6 +12,7 @@
 // Fixture-Muster gespiegelt von exportSchedule.test.ts.
 
 import { describe, it, expect } from "vitest";
+import "../engine/fileioWasm.setup";
 import { exportIfcSpf, ifcGuid, ifcString } from "./exportIfc";
 import type {
   Ceiling,
