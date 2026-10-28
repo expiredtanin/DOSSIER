@@ -49,9 +49,62 @@ pub fn to_fixed(x: f64, d: usize) -> String {
     s
 }
 
+/// `String(x)` für Zahlen (ECMAScript `Number::toString`): kürzeste Ziffernfolge, Exponent erst ab
+/// 1e21 bzw. unter 1e-6, `-0` → `"0"`.
+pub fn js_number(x: f64) -> String {
+    if x.is_nan() {
+        return "NaN".into();
+    }
+    if x == 0.0 {
+        return "0".into();
+    }
+    if x.is_infinite() {
+        return if x > 0.0 { "Infinity".into() } else { "-Infinity".into() };
+    }
+    let sign = if x < 0.0 { "-" } else { "" };
+    // Rusts `{:e}` liefert die kürzeste Ziffernfolge, z. B. "1.2345e3".
+    let e = format!("{:e}", x.abs());
+    let (mant, exp) = e.split_once('e').expect("Exponent");
+    let digits: String = mant.chars().filter(|c| *c != '.').collect();
+    let k = digits.len() as i64;
+    let n = exp.parse::<i64>().expect("Exponent") + 1;
+    let body = if k <= n && n <= 21 {
+        format!("{digits}{}", "0".repeat((n - k) as usize))
+    } else if 0 < n && n <= 21 {
+        format!("{}.{}", &digits[..n as usize], &digits[n as usize..])
+    } else if -6 < n && n <= 0 {
+        format!("0.{}{digits}", "0".repeat((-n) as usize))
+    } else {
+        let es = if n > 0 { format!("+{}", n - 1) } else { format!("{}", n - 1) };
+        if k == 1 {
+            format!("{digits}e{es}")
+        } else {
+            format!("{}.{}e{es}", &digits[..1], &digits[1..])
+        }
+    };
+    format!("{sign}{body}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zahl_als_text_wie_js() {
+        assert_eq!(js_number(3.0), "3");
+        assert_eq!(js_number(-0.0), "0");
+        assert_eq!(js_number(0.1 + 0.2), "0.30000000000000004");
+        assert_eq!(js_number(1e21), "1e+21");
+        assert_eq!(js_number(1.5e21), "1.5e+21");
+        assert_eq!(js_number(1e20), "100000000000000000000");
+        assert_eq!(js_number(1e-7), "1e-7");
+        assert_eq!(js_number(1.25e-7), "1.25e-7");
+        assert_eq!(js_number(0.000001), "0.000001");
+        assert_eq!(js_number(-12.5), "-12.5");
+        assert_eq!(js_number(123456.789), "123456.789");
+        assert_eq!(js_number(f64::NAN), "NaN");
+        assert_eq!(js_number(f64::NEG_INFINITY), "-Infinity");
+    }
 
     #[test]
     fn rundet_halbwerte_auf_wie_js() {

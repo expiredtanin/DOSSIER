@@ -172,7 +172,7 @@ function wallDraft(points: Vec2[], cursor: Vec2 | null, thickness: number): Tool
  * Hängt je Achssegment ein `Wall` des aktiven Typs ans Projekt (immutabel). Höhe
  * aus dem aktiven Geschoss (floorHeight), Geschoss + Kategorie + Wandtyp aus dem
  * Context. Null-Strecken werden übersprungen. Gehrung an Ecken entsteht später
- * automatisch aus computeJoins (generatePlan).
+ * automatisch aus der Verschneidung im Kern (`joins.rs`).
  */
 function appendWalls(
   p: Project,

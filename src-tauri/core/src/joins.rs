@@ -1,7 +1,7 @@
 //! Wand-Verschneidung (Gehrung, T-Stoss, Kreuzung): berechnet je Wand die optionalen
 //! Schnittlinien an Start- und Endpunkt, materialbewusste Pro-Schicht-Cuts am T-Stoss und die
-//! Nah-Putz-Aussparungen der Durchgangswand. Portiert aus `src/model/joins.ts` (dort bleiben die
-//! Typen und das Sammeln aus dem `Project`).
+//! Nah-Putz-Aussparungen der Durchgangswand. Portiert aus `src/model/joins.ts`; gesammelt wird im
+//! Kern (`model3d.rs` für 3D, `plan/walls.rs` für den Grundriss).
 //!
 //! Behandelt: L-Ecken (zwei Wandenden im Knoten), T-Knoten (drei Enden, zwei kollinear),
 //! Mittelspannen-T-Stösse (freies Ende trifft auf die Seite einer anderen Wand) und
@@ -771,6 +771,38 @@ mod tests {
         let s = c[0].span_cutouts[0];
         assert!(close(s.off_a, total / 2.0) && close(s.off_b, total / 2.0 - 0.015));
         assert!(close(s.to - s.from, 0.15), "{s:?}");
+    }
+
+    // Aus `model/joins.test.ts` übernommen ([K3d]: der TS-Sammler ist weg).
+    #[test]
+    fn stern_knoten_bleibt_rechtwinklig() {
+        let w = vec![mono((0.0, 5.0), (5.0, 5.0), 0.3), mono((5.0, 5.0), (10.0, 5.0), 0.3), mono((5.0, 5.0), (5.0, 0.0), 0.3), mono((5.0, 5.0), (5.0, 10.0), 0.3)];
+        for c in compute_joins(&w).unwrap() {
+            assert!(c.start_cut.is_none() && c.end_cut.is_none());
+        }
+    }
+
+    #[test]
+    fn rangfolge_zweier_bauteile() {
+        use JoinResolution::*;
+        assert_eq!(resolve_join_priority(50.0, 50.0, true), Merge);
+        assert_eq!(resolve_join_priority(20.0, 20.0, false), Coexist);
+        assert_eq!(resolve_join_priority(10.0, 50.0, false), TrimA);
+        assert_eq!(resolve_join_priority(50.0, 10.0, false), TrimB);
+        assert_eq!(resolve_join_priority(100.0, 50.0, false), TrimB);
+        assert_eq!(resolve_join_priority(50.0, 100.0, false), TrimA);
+    }
+
+    #[test]
+    fn l_ecke_ohne_aussparung_und_abzweig_ohne_materialgleichheit() {
+        let c = compute_joins(&[mono((0.0, 0.0), (5.0, 0.0), 0.4), mono((5.0, 0.0), (5.0, 4.0), 0.4)]).unwrap();
+        assert!(c.iter().all(|k| k.span_cutouts.is_empty()));
+        // Durchgang Putz|Backstein|Putz, Abzweig nur Putz (kein Bauteil des Rückgrats): kein layerCuts.
+        let lay = || vec![layer(0.015, 0, 10.0), layer(0.12, 1, 50.0), layer(0.015, 0, 10.0)];
+        let w = vec![wall((0.0, 0.0), (5.0, 0.0), lay()), wall((5.0, 0.0), (10.0, 0.0), lay()), wall((5.0, 0.0), (5.0, 3.0), vec![layer(0.1, 0, 10.0)])];
+        let c = compute_joins(&w).unwrap();
+        assert!(c[2].layer_cuts.is_none());
+        assert!(c[2].start_cut.is_some());
     }
 
     #[test]

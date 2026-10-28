@@ -2377,7 +2377,7 @@ export interface ImportedMesh {
    * Grafik-Kategorie-Code (s. {@link LayerCategory}, `model/contextCategories.ts`)
    * — steuert Sichtbarkeit/Grau/Sperren wie bei jedem anderen Bauteil (Ebenen-
    * Panel). Fehlt er (ältere Importe vor dieser Erweiterung), bleibt das Objekt
-   * IMMER sichtbar (Rückwärtskompatibilität), s. `generatePlan/context.ts`.
+   * IMMER sichtbar (Rückwärtskompatibilität), s. `plan/context.rs` im Kern.
    */
   categoryCode?: string;
   /** Farbe aus der Quelldatei (`#rrggbb`, z. B. IFC-Oberflächenstil/Material); fehlt sie, gilt die Kontext-Grundfarbe. */
@@ -3193,21 +3193,6 @@ export const openingLabel = (o: Opening): string =>
     o.height * 100
   ).toFixed(0)}`;
 
-/** Alle Treppen eines Geschosses (leere Liste, wenn keine oder `stairs` fehlt). */
-export const stairsOfFloor = (project: Project, floorId: string): Stair[] =>
-  (project.stairs ?? []).filter((s) => s.floorId === floorId);
-
-/** Menschenlesbarer Standardname einer Treppe (Grundform + Stufenanzahl). */
-export const stairLabel = (s: Stair): string => {
-  const shape =
-    s.shape === "straight" ? "Gerade" : s.shape === "L" ? "L-Treppe" : "Wendel";
-  return `${shape} ${s.stepCount} STG`;
-};
-
-/** Alle Stützen eines Geschosses (leere Liste, wenn keine oder `columns` fehlt). */
-export const columnsOfFloor = (project: Project, floorId: string): Column[] =>
-  (project.columns ?? []).filter((c) => c.floorId === floorId);
-
 /** Menschenlesbarer Standardname einer Stütze (Profil + Masse in cm). */
 export const columnLabel = (c: Column): string => {
   if (c.profile.kind === "round") {
@@ -3215,10 +3200,6 @@ export const columnLabel = (c: Column): string => {
   }
   return `Stütze ${(c.profile.width * 100).toFixed(0)}×${(c.profile.depth * 100).toFixed(0)}`;
 };
-
-/** Alle Räume eines Geschosses (leere Liste, wenn keine oder `rooms` fehlt). */
-export const roomsOfFloor = (project: Project, floorId: string): Room[] =>
-  (project.rooms ?? []).filter((r) => r.floorId === floorId);
 
 /** Liefert ein Bauteil-Material (Component) per ID oder wirft. */
 export const getComponent = (project: Project, id: string): Component => {

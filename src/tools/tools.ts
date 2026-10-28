@@ -35,7 +35,7 @@ const selectTool: Tool = {
 
 // ── Wall ─────────────────────────────────────────────────────────────────────
 // Zeichnet eine Achs-Polylinie; jedes Segment wird ein eigenständiges Wall.
-// Die Gehrung an Ecken entsteht automatisch aus computeJoins (generatePlan).
+// Die Gehrung an Ecken entsteht automatisch aus der Verschneidung im Kern (`joins.rs`).
 
 interface WallDrawing {
   phase: "drawing";

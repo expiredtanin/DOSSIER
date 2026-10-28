@@ -1,5 +1,5 @@
 //! Öffnungs-Symbol (Tür/Fenster) im Grundriss ([K3a]): Port von `generatePlan/openings.ts`
-//! (`addOpeningSymbol`, `addOpeningFrameBand`). Geometrie aus `opening_geom.rs`. Stil löst TS aus dem
+//! (`addOpeningSymbol`, `addOpeningFrameBand`). Geometrie aus `opening_geom.rs`. Stil löst `plan/walls.rs` aus dem
 //! Modell: Strichstärken kommen als Zahlen herein, Farben als Platz (Slot) heraus (0 = keine,
 //! 1 Strichfarbe, 2 Rahmen, 3 Rahmen-Aufsicht, 4 Flügel/Sprossen, 5 Fensterbank-/Sims-Linie).
 //!

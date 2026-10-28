@@ -373,7 +373,7 @@ fn kv(v: Vec2) -> KVec {
     KVec::new(v.x, v.y)
 }
 
-fn wall_reference(w: &Wall) -> Reference {
+pub(crate) fn wall_reference(w: &Wall) -> Reference {
     match (w.reference_offset, w.reference_line) {
         (Some(v), _) => Reference::Offset(v),
         (None, Some(WallReferenceLine::Left)) => Reference::Left,
