@@ -7,6 +7,10 @@
 // werden Bauteile gleicher Klasse und gleichen Geschosses zusammengelegt, damit Projektdatei und
 // Kontext-Panel handhabbar bleiben.
 //
+// Lesen im Web-Worker (`ifcImport.worker.ts`), damit grosse Dateien die UI nicht blockieren: zurück
+// kommen nur der JSON-Bericht und zwei flache Puffer (übertragen, nicht kopiert). Ohne `Worker` (Node:
+// CLI, Tests) oder wenn der Worker nicht startet, wird im aufrufenden Thread gelesen.
+//
 // Koordinaten: Meter, Z = Höhe, unverändert aus der Datei — ausser die Datei liegt in
 // Landeskoordinaten und das Projekt hat einen Standort-Bezug: dann wird auf den Modell-Nullpunkt
 // zurückgeschoben (Gegenstück zu `projectToWorldCoords` beim Export).
@@ -40,6 +44,9 @@ export interface IfcImportReport {
   skippedProducts: Record<string, number>;
   productsWithoutGeometry: number;
   simplifiedBooleans: number;
+  /** Abgezogene Öffnungen (je Wirt und Öffnung). */
+  voidsApplied: number;
+  /** Öffnungen, die nicht abgezogen werden konnten. */
   voidsIgnored: number;
   parseErrors: number;
   truncated: boolean;
@@ -55,34 +62,91 @@ interface RawProduct {
   indexCount: number;
 }
 
-/** Liest IFC-Bytes. Wirft bei unlesbarer Datei (Meldung aus Rust). */
-export async function readIfc(bytes: Uint8Array): Promise<{ products: IfcProduct[]; report: IfcImportReport }> {
+/** Rohergebnis aus Rust: Bericht (JSON) und alle Bauteile hintereinander in zwei flachen Puffern. */
+export interface IfcFlat {
+  meta: string;
+  positions: Float64Array;
+  indices: Uint32Array;
+}
+
+/** Worker-Protokoll (`ifcImport.worker.ts`). */
+export type IfcWorkerRequest = { type: "parse"; data: ArrayBuffer };
+export type IfcWorkerResponse = { type: "result"; flat: IfcFlat } | { type: "error"; message: string };
+
+/** Liest IFC-Bytes mit dem geladenen Format-Modul (Worker oder aufrufender Thread). */
+export async function importIfcFlat(bytes: Uint8Array): Promise<IfcFlat> {
   const m = await loadFileio();
   const r = m.import_ifc(bytes);
   try {
-    const meta = JSON.parse(r.meta) as Omit<IfcImportReport, "products"> & { products: RawProduct[] };
-    const pos = r.positions();
-    const idx = r.indices();
-    let po = 0;
-    let io = 0;
-    const products: IfcProduct[] = [];
-    for (const p of meta.products) {
-      products.push({
-        globalId: p.globalId,
-        ifcClass: p.ifcClass,
-        name: p.name,
-        storey: p.storey,
-        color: p.color,
-        positions: pos.subarray(po, po + p.positionCount),
-        indices: idx.subarray(io, io + p.indexCount),
-      });
-      po += p.positionCount;
-      io += p.indexCount;
-    }
-    return { products, report: { ...meta, products: products.length } };
+    return { meta: r.meta, positions: r.positions(), indices: r.indices() };
   } finally {
     r.free();
   }
+}
+
+/** Beantwortet eine Worker-Anfrage; liefert Antwort und zu übertragende Puffer. */
+export async function handleIfcWorkerRequest(req: IfcWorkerRequest): Promise<{ res: IfcWorkerResponse; transfer: Transferable[] }> {
+  try {
+    if (req?.type !== "parse" || !(req.data instanceof ArrayBuffer)) throw new Error("ungültige Anfrage");
+    const flat = await importIfcFlat(new Uint8Array(req.data));
+    return { res: { type: "result", flat }, transfer: [flat.positions.buffer, flat.indices.buffer] };
+  } catch (err) {
+    return { res: { type: "error", message: err instanceof Error ? err.message : String(err) }, transfer: [] };
+  }
+}
+
+/** Liest im Web-Worker; `null`, wenn kein Worker verfügbar ist oder er nicht startet. */
+function readInWorker(bytes: Uint8Array): Promise<IfcFlat | null> {
+  if (typeof Worker === "undefined") return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./ifcImport.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      resolve(null);
+      return;
+    }
+    worker.onmessage = (e: MessageEvent<IfcWorkerResponse>) => {
+      worker.terminate();
+      if (e.data?.type === "result") resolve(e.data.flat);
+      else reject(new Error(e.data?.type === "error" ? e.data.message : "Unerwartete Worker-Antwort"));
+    };
+    worker.onerror = () => {
+      worker.terminate();
+      resolve(null);
+    };
+    // Kopie übertragen: der Aufrufer behält seine Bytes.
+    const data = bytes.slice().buffer;
+    worker.postMessage({ type: "parse", data } satisfies IfcWorkerRequest, [data]);
+  });
+}
+
+/** Rohergebnis → Bauteile (Ansichten in die flachen Puffer) + Bericht. */
+export function decodeIfc(flat: IfcFlat): { products: IfcProduct[]; report: IfcImportReport } {
+  const meta = JSON.parse(flat.meta) as Omit<IfcImportReport, "products"> & { products: RawProduct[] };
+  let po = 0;
+  let io = 0;
+  const products: IfcProduct[] = [];
+  for (const p of meta.products) {
+    products.push({
+      globalId: p.globalId,
+      ifcClass: p.ifcClass,
+      name: p.name,
+      storey: p.storey,
+      color: p.color,
+      positions: flat.positions.subarray(po, po + p.positionCount),
+      indices: flat.indices.subarray(io, io + p.indexCount),
+    });
+    po += p.positionCount;
+    io += p.indexCount;
+  }
+  return { products, report: { ...meta, products: products.length } };
+}
+
+/** Liest IFC-Bytes (im Worker, sonst direkt). Wirft bei unlesbarer Datei (Meldung aus Rust). */
+export async function readIfc(bytes: Uint8Array): Promise<{ products: IfcProduct[]; report: IfcImportReport }> {
+  const flat = (await readInWorker(bytes)) ?? (await importIfcFlat(bytes));
+  return decodeIfc(flat);
 }
 
 /** Ab so vielen Bauteilen wird je Klasse + Geschoss zusammengelegt. */

@@ -7,7 +7,7 @@
 // (hier Sehnenfehler ≤ 2 mm) → dort relativ 3 %.
 
 import "../engine/fileioWasm.setup";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,7 +18,7 @@ import { ceilingVerticalExtent } from "../model/wall";
 import { polygonArea } from "../geometry/roomArea";
 import { pickGeometry } from "../plan/toWalls3d";
 import { wallCutMeshes } from "../plan/wallMeshCut";
-import { formatIfcReport, ifcToImportedMeshes, readIfc, type IfcProduct } from "./ifcImport";
+import { formatIfcReport, handleIfcWorkerRequest, ifcToImportedMeshes, readIfc, type IfcProduct, type IfcWorkerRequest } from "./ifcImport";
 
 function volume(pos: ArrayLike<number>, idx: ArrayLike<number>): number {
   let v = 0;
@@ -73,16 +73,14 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
   });
 
   it("Volumen je Wand = Volumen der Wand-Netze, je Decke = Fläche × Dicke", async () => {
-    const { products } = await readIfc(bytesOf(ifc));
-    // Wände: dieselben Ausschnitt-Netze wie der Export (Bänder je Wand).
-    // [B5]: einfache Wände kommen als ungeschnittene Extrusion + IfcOpeningElement; der Import zieht
-    // Öffnungen noch nicht ab ([B3] offen) → dort das Volumen der vollen Bänder.
+    const { products, report } = await readIfc(bytesOf(ifc));
+    // Wände: dieselben Ausschnitt-Netze wie der Export (Bänder je Wand). [B5] schreibt einfache Wände als
+    // ungeschnittene Extrusion + IfcOpeningElement, der Import zieht die Öffnungen ab ([B3]) → bei allen
+    // Wänden das ausgeschnittene Volumen.
     const bands = pickGeometry(sampleProject).walls;
     const cut = new Map<string, number>();
-    const full = new Map<string, number>();
     const add = (m: Map<string, number>, id: string, v: number) => m.set(id, (m.get(id) ?? 0) + Math.abs(v));
     wallCutMeshes(bands).forEach((m, i) => add(cut, bands[i].wallId, volume(m.positions, m.indices)));
-    wallCutMeshes(bands.map((b) => ({ ...b, holes: [] }))).forEach((m, i) => add(full, bands[i].wallId, volume(m.positions, m.indices)));
     const lines = new Map(ifc.split("\n").map((l) => [l.slice(0, l.indexOf("=")), l] as const));
     const wallsGot = products.filter((p) => p.ifcClass === "IfcWall");
     expect(wallsGot.length).toBe(sampleProject.walls.length);
@@ -95,10 +93,13 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
       const rep = lines.get(/\(\(?(#\d+)\)\);$/.exec(shape)![1])!;
       const isSwept = rep.includes("'SweptSolid'");
       if (isSwept) swept++;
-      const expected = (isSwept ? full : cut).get(wall.id)!;
+      const expected = cut.get(wall.id)!;
       expect(relClose(vol(p), expected, 1e-6), `${wall.id}: ${vol(p)} ≠ ${expected}`).toBe(true);
     }
     expect(swept).toBeGreaterThan(0);
+    expect(report.voidsApplied).toBeGreaterThan(0);
+    expect(report.voidsIgnored).toBe(0);
+    expect(report.simplifiedBooleans).toBe(0);
 
     const slabsExpected = (sampleProject.ceilings ?? [])
       .filter((c) => c.outline.length >= 3)
@@ -149,6 +150,99 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
     expect(r.products.length).toBeGreaterThanOrEqual(0);
     // Modul lebt noch.
     expect((await readIfc(bytesOf(ifc))).products.length).toBeGreaterThan(0);
+  });
+});
+
+// Synthetische Fälle (`testdata/ifc-geometry-cases.ifc`, von Hand erzeugt, ein Bauteil je Fall): Wände
+// mit Öffnung (tiefer als die Wand bzw. bündig), Halbräume (.T./.F., polygonal begrenzt), Boolean
+// UNION/INTERSECTION/DIFFERENCE, Rotation 90°/360°, Rohr (hohl, dünn), Sweep mit fester Referenz und
+// auf Ebene, Bogen-Leitkurve. Sollwerte von Hand; ifcopenshell bestätigt sie unten.
+const casesFile = new URL("./testdata/ifc-geometry-cases.ifc", import.meta.url);
+
+describe("IFC-Import: Öffnungen, Boolesche Körper, Rotation, Sweeps", () => {
+  it("alle Fälle gelesen, Volumen von Hand", async () => {
+    const { products, report } = await readIfc(new Uint8Array(readFileSync(casesFile)));
+    expect(report.skippedItems).toEqual({});
+    expect(report.simplifiedBooleans).toBe(0);
+    expect(report.voidsApplied).toBe(2);
+    expect(report.voidsIgnored).toBe(0);
+    expect(report.skippedProducts.IfcOpeningElement).toBe(2);
+    const v = products.map((p) => [p.ifcClass, Math.round(vol(p) * 1e4) / 1e4] as const);
+    const pi = Math.PI;
+    const want: Array<[string, number, number]> = [
+      ["IfcWall", 3.6 - 0.3 * 2, 1e-6],
+      ["IfcWall", 3.6 - 0.3 * 2, 1e-6],
+      ["IfcWall", 8 * 0.3, 1e-6],
+      ["IfcWall", 12 * 0.3, 1e-6],
+      ["IfcWall", 15 * 0.3, 1e-6],
+      ["IfcBuildingElementProxy", 1.75, 1e-6],
+      ["IfcBuildingElementProxy", 0.25, 1e-6],
+      ["IfcBuildingElementProxy", 0.75, 1e-6],
+      ["IfcMember", (pi / 2) * 2.5, 0.01],
+      ["IfcMember", 2 * pi * 2.5, 0.01],
+      ["IfcReinforcingBar", pi * (0.01 - 0.0025) * 9, 0.03],
+      ["IfcReinforcingBar", pi * 0.006 ** 2 * 9, 0.03],
+      ["IfcRailing", 0.08 * 7.1, 1e-6],
+      ["IfcRailing", 0.08 * 7.1, 1e-6],
+      ["IfcRailing", pi * 0.01 * pi, 0.03],
+    ];
+    expect(products.length).toBe(want.length);
+    want.forEach(([cls, w, rel], i) => {
+      expect(products[i].ifcClass).toBe(cls);
+      expect(relClose(vol(products[i]), w, rel), `${i} ${cls}: ${vol(products[i])} ≠ ${w} (${JSON.stringify(v[i])})`).toBe(true);
+    });
+  });
+
+  describe("Laden im Web-Worker", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    /** Nachbau eines Workers im selben Thread: gleiche Nachrichten, gleiche Übertragung. */
+    class FakeWorker {
+      static started = 0;
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      constructor(url: URL) {
+        expect(String(url)).toContain("ifcImport.worker");
+        FakeWorker.started++;
+      }
+      postMessage(req: IfcWorkerRequest, transfer: Transferable[]) {
+        expect(transfer).toEqual([req.data]);
+        void handleIfcWorkerRequest(req).then(({ res, transfer: back }) => {
+          if (res.type === "result") expect(back).toEqual([res.flat.positions.buffer, res.flat.indices.buffer]);
+          this.onmessage?.({ data: res });
+        });
+      }
+      terminate() {}
+    }
+
+    it("liest über den Worker, Aufrufer behält seine Bytes; Fehler kommen als Ablehnung zurück", async () => {
+      vi.stubGlobal("Worker", FakeWorker);
+      const bytes = new Uint8Array(readFileSync(casesFile));
+      const before = FakeWorker.started;
+      const { products, report } = await readIfc(bytes);
+      expect(FakeWorker.started).toBe(before + 1);
+      expect(products.length).toBe(15);
+      expect(report.voidsApplied).toBe(2);
+      expect(bytes.byteLength).toBeGreaterThan(0);
+      await expect(readIfc(bytesOf("kein IFC"))).rejects.toThrow();
+      const bad = await handleIfcWorkerRequest({ type: "nonsense" } as unknown as IfcWorkerRequest);
+      expect(bad.res.type).toBe("error");
+    });
+
+    it("startet der Worker nicht, wird im aufrufenden Thread gelesen", async () => {
+      vi.stubGlobal(
+        "Worker",
+        class {
+          onerror: ((e: unknown) => void) | null = null;
+          postMessage() {
+            setTimeout(() => this.onerror?.(new Error("kein Worker")), 0);
+          }
+          terminate() {}
+        },
+      );
+      const { products } = await readIfc(new Uint8Array(readFileSync(casesFile)));
+      expect(products.length).toBe(15);
+    });
   });
 });
 
@@ -209,6 +303,12 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Import gegen ifcopenshell", { timeout: 12
     const file = join(dir, "stuetze.ifc");
     writeFileSync(file, exportIfcSpf({ ...sampleProject, columns: [col] }));
     const problems = await compare(file, (p) => (p.ifcClass === "IfcColumn" ? 0.03 : 1e-6));
+    expect(problems).toEqual([]);
+  });
+
+  it("synthetische Fälle: Öffnungen, Halbräume, Booleans, Rotation, Sweeps", async () => {
+    // Rohre/Bögen werden verschieden fein zerlegt → 3 %.
+    const problems = await compare(casesFile.pathname, () => 0.03);
     expect(problems).toEqual([]);
   });
 
