@@ -162,7 +162,7 @@ pub struct Kennzahlen {
     pub uez: Option<f64>,
 }
 
-fn category_index(c: SiaCategory) -> usize {
+pub(crate) fn category_index(c: SiaCategory) -> usize {
     match c {
         SiaCategory::HNF => 0,
         SiaCategory::NNF => 1,

@@ -352,7 +352,24 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ✅ **[41] Massenmodelle.** `analysis/kennzahlen.ts`: GF/aGF je Geschoss, GV aus Körpern.
 - ✅ **[61] Raumprogramm gegen Modell.** `checkRoomProgram`, Editor im Flächenbilanz-Panel (27.10.).
 - ✅ **[62] Kennzahlenleiste.** Flächenbilanz-Panel: GF/aGF/GV/AZ/ÜZ, Parzellenfläche, je Geschoss (27.10.).
-- ◐ **[70] Flächentabellen SIA 416 / IVHB.** SIA-416-Bilanz vorhanden (CSV); IVHB offen. IFC (28.10., [B5]): SIA-416-Zonen und Geschoss-GF/NGF als Qto im IFC-Export. · M
+- ✅ **[70] Flächentabellen (Flächenarten nach SIA 416) / IVHB.** (28.10.) Kern `core/src/flaechen.rs`
+  (Abfragen `areaTable`, `ivhb`), Fassade `analysis/areaTable.ts`, Bericht `export/areaReport.ts`
+  (CSV mit Rückleser, SVG, Vektor-PDF), Abschnitt im Flächenbilanz-Panel (`AreaTableSection.tsx`),
+  CLI `kennzahlen --sia416 --ivhb --format json|csv|svg|pdf [--agsf --gruenflaeche --agf-basis --untergeschosse]`.
+  Tabelle je Geschoss und total: HNF, NNF, NF, VF, FF, NGF, KF, GF, AGF, GV. GF = NGF + KF (Norm); KF aus
+  Wandgrundrissen (abzüglich Räume) + KGF-Räumen hergeleitet. IVHB: GFZ, AZ (aGF-Basis wählbar), BMZ, ÜZ, GZ,
+  Gesamt-/Fassadenhöhe; aGSF = Eingabe, sonst Parzellenfläche/-grenze.
+  Offen / Annahmen: (a) Die ältere Bilanz (`room_area::rollup`, Kennzahlenleiste [62], IFC-Qto) rechnet die AGF
+  noch in die GF — nach SIA 416 gehört sie nicht dazu; angleichen, sobald IFC/Leiste mitgezogen werden.
+  (b) Eingaben aGSF/Grünfläche/aGF-Basis/UG-Anrechnung liegen nur in der Ansicht; Vorschlag Modellfeld
+  `Project.ivhb?: { agsf?, greenArea?, agfBasis?, includeUnderground? }` (+ `KNOWN_KEYS`), damit sie mit dem
+  Projekt gespeichert werden. (c) Massgebendes Terrain = ±0.00 (kein Geländemodell → Baumasse, Höhen).
+  (d) Fassadenhöhe = höchste Wandoberkante (Schnittlinie Fassade/Dach nicht ausgewertet); ÜZ ohne
+  Vorsprünge/Dachüberstände; Stützen/Schächte nur als KGF-Raum in der KF; GV = GF × Geschosshöhe bzw. Körper.
+  (e) Eigene Raumtypen (Büro, Wohnen …): nur Zuordnung Typ → Flächenart in `flaechen::area_kind`, die Tabelle
+  bleibt. (f) Als Layout-Element (Tabelle im Blatt) offen: Layout-Annotationen kennen nur Linie/Rechteck/
+  Text/Bild; bis dahin eigener PDF-/SVG-Export. (g) IVHB-Wortlaut (Anhang 1, Ziff. 5/8) vor Behördenabgabe
+  gegen die kantonale Bauverordnung prüfen. IFC (28.10., [B5]): SIA-416-Zonen und Geschoss-GF/NGF als Qto im IFC-Export. · M
 - ○ **[42] Varianten.** · L
 - ✅ **[63] Baulinien, Grenzabstände, zulässige Hülle.** (27.10.) Parzelle/Baulinien aus Auswahl,
   Grenzabstand pauschal und je Kante, Gesamthöhe; zulässige Fläche und Verstösse im Grundriss.

@@ -11,6 +11,8 @@ import { diffToOps } from "./ops";
 /** Abfragen des Kerns (`queries.rs`). */
 export type QueryName =
   | "kennzahlen"
+  | "areaTable"
+  | "ivhb"
   | "siteCheck"
   | "buildingFootprint"
   | "modelTop"

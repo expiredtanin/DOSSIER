@@ -264,7 +264,7 @@ pub fn area_out(polys: &[Polygon]) -> AreaOut {
     polys.iter().map(|p| p.iter().map(|r| r.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect()).collect()).collect()
 }
 
-fn wall_corners(start: Vec2, end: Vec2, thickness: f64) -> Vec<[f64; 2]> {
+pub(crate) fn wall_corners(start: Vec2, end: Vec2, thickness: f64) -> Vec<[f64; 2]> {
     let h = thickness / 2.0;
     let (dx, dy) = (end.x - start.x, end.y - start.y);
     let l = hypot2(dx, dy);
