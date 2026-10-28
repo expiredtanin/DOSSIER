@@ -195,3 +195,20 @@ describe("Krüppelwalm (halfHipRatio) am Satteldach", () => {
     expect(b.x).toBeCloseTo(9.1, 6);
   });
 });
+
+describe("[B2] Straight Skeleton: Fälle, die das alte Keil-Verfahren falsch rechnete", () => {
+  const mk = (outline: Vec2[], shape: string, ridgeAxis = "x") =>
+    ({ id: "R", type: "roof", floorId: "eg", categoryCode: "31", outline, shape, pitchDeg: 45, overhang: 0, ridgeAxis }) as unknown as Roof;
+  it("Fünfeck mit Split-Ereignis: First 3.50 m statt 6.49 m", () => {
+    const outline = [[1.813878404284597, 2.674811495947053], [-4.6640880609681865, 6.5257083984972075], [-7.477739292833127, -0.45841940910353607], [-0.7089480591605644, -3.3078293252888984], [4.024603417619533, -7.732432853365041]].map(([x, y]) => ({ x, y }));
+    const g = roofGeometry(mk(outline, "walm"), 0);
+    expect(g.ridgeHeight).toBeCloseTo(3.500343883146626, 6);
+    expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(planArea(outline.map((p) => [p.x, p.y])), 6);
+  });
+  it("U mit Giebeln in der Bucht: Flächen decken den Grundriss einfach (nicht doppelt)", () => {
+    const u = [[0, 0], [17.2, 0], [17.2, 6.7], [10.6, 6.7], [10.6, 2.6], [6.6, 2.6], [6.6, 6.7], [0, 6.7]].map(([x, y]) => ({ x, y }));
+    const g = roofGeometry(mk(u, "sattel"), 0);
+    expect(g.planes.reduce((s, p) => s + planArea(p.pts), 0)).toBeCloseTo(98.84, 6);
+    expect(g.gables.length).toBe(4);
+  });
+});

@@ -48,3 +48,9 @@ flate2 (https://github.com/rust-lang/flate2-rs), MIT OR Apache-2.0, mit miniz_ox
 BCF-Spezifikation (https://github.com/buildingSMART/BCF-XML, Schemas), buildingSMART, CC BY-ND 4.0
   Nur das Dateiformat als Vorlage; eigener Code in src-tauri/fileio/src/bcf.rs. Die Test-Beispiele
   stehen nicht im Repo (Test buildingsmart_beispiele liest sie über BCF_TESTCASES aus einem lokalen Klon).
+
+BIMCraft (https://github.com/IPedrax/BIMCraft), MIT OR Apache-2.0, Copyright (c) 2026 IPedrax und die
+  BIMCraft-Mitwirkenden. Übernommen und geändert ([B2]): crates/core/src/skeleton.rs (gewichteter Straight
+  Skeleton mit Löchern) aus Commit f3bbb33f3b8b6cc6f80b3bd6611e33c330cb448f → src-tauri/core/src/skeleton.rs
+  (Meter statt Millimeter, Rust 2021, Arbeitsbudget, Fehler statt Panic, deutsche Kommentare); hier unter
+  der MIT-Lizenz genutzt.
