@@ -1755,6 +1755,8 @@ export const de = {
   "exportSave.fmt.ifc": "IFC (BIM)",
   "exportSave.fmt.obj": "OBJ (3D-Mesh)",
   "exportSave.fmt.stl": "STL (3D-Mesh)",
+  "exportSave.fmt.glb": "glTF 2.0 (GLB, 3D-Modell)",
+  "mesh.export.failed": "Mesh-Export fehlgeschlagen",
   "exportSave.fmt.step": "STEP (B-Rep, truck)",
   "step.export.failed": "STEP-Export fehlgeschlagen",
   "ifc.export.failed": "IFC-Export fehlgeschlagen",

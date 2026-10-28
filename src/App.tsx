@@ -1891,6 +1891,7 @@ export default function App() {
     onExportIfc,
     onExportObj,
     onExportStl,
+    onExportGlb,
     onExportStep,
     onOpenProject,
     openProjectAtPath,
@@ -2445,6 +2446,7 @@ export default function App() {
       onExportIfc,
       onExportObj,
       onExportStl,
+      onExportGlb,
       onExportStep,
       onImportStep: () => stepInputRef.current?.click(),
       onImportIfc: () => ifcInputRef.current?.click(),
@@ -3400,6 +3402,7 @@ export default function App() {
         onExportIfc={onExportIfc}
         onExportObj={onExportObj}
         onExportStl={onExportStl}
+        onExportGlb={onExportGlb}
         onExportStep={onExportStep}
         viewType={viewType}
         fov={fov}

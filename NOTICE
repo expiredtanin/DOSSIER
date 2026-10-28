@@ -23,3 +23,7 @@ truck (https://github.com/ricosjp/truck, truck-meshalgo src/tessellation/triangu
 csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan Wallace, MIT License
   Verfahren (BSP-Bäume, Ebenen-Teilung, clipTo/invert, Vereinigung/Differenz/Schnitt) in Rust neu
   geschrieben und angepasst: src-tauri/fileio/src/csg.rs (IFC-Import: Öffnungen, Boolesche Körper).
+
+gltf-validator (https://github.com/KhronosGroup/glTF-Validator), Apache-2.0
+  Nur Entwicklungsabhängigkeit (devDependency, Prüfung des glTF-Exports in vitest), nicht ausgeliefert.
+  Der glTF-Schreiber (src-tauri/fileio/src/mesh_export.rs) ist eigener Code ohne Fremdbibliothek.

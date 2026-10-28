@@ -13,7 +13,7 @@ export { projectGeoOrigin } from "../model/geoRebase";
 export { ensureContextCategories } from "../model/contextCategories";
 export { projectToWorldCoords } from "../model/geoRebase";
 export { exportScheduleCsv } from "../export/exportSchedule";
-export { exportObj, exportStl } from "../export/exportMesh";
+export { exportObj, exportStl, exportGlb, exportGltf } from "../export/exportMesh";
 export { exportProjectStep } from "../export/exportStep";
 export { planToSvgString } from "../export/planToSvgString";
 export { setWasmBytesProvider } from "../engine/wasmSource";
@@ -29,3 +29,6 @@ export { checkSiteRules, allowedArea, multiPolygonArea, buildingFootprint, model
 export type { SiteCheck } from "../analysis/siteRules";
 export { encodeRenderScene } from "../plan/renderSceneBin";
 export { sampleProject } from "../model/sampleProject";
+export { parseDxf } from "../io/dxfParser";
+export { contoursToDrawings, textsToDrawings, planImportCategories, distinctImportLayers } from "../io/dxfToDrawings";
+export { emptyProject } from "../model/sampleProject";

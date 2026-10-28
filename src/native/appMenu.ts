@@ -32,6 +32,7 @@ export interface NativeAppMenuHandlers {
   onExportIfc: () => void;
   onExportObj: () => void;
   onExportStl: () => void;
+  onExportGlb: () => void;
   onExportStep: () => void;
   onImportStep: () => void;
   onImportIfc: () => void;
@@ -205,6 +206,10 @@ export function useNativeAppMenu(
               await MenuItem.new({
                 text: "STL",
                 action: () => handlersRef.current.onExportStl(),
+              }),
+              await MenuItem.new({
+                text: "glTF (GLB)",
+                action: () => handlersRef.current.onExportGlb(),
               }),
               await MenuItem.new({
                 text: "STEP",

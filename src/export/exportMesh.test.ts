@@ -5,6 +5,7 @@
 //   • leeres Projekt ⇒ gültige leere Datei (kein Crash).
 
 import { describe, it, expect } from "vitest";
+import "../engine/fileioWasm.setup";
 import { exportObj, exportStl } from "./exportMesh";
 import type { Project, Wall, Ceiling, ExtrudedSolid, Opening } from "../model/types";
 
