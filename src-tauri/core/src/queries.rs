@@ -39,6 +39,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("scheduleRows", _) => json(&export_schedule::schedule_rows(p)),
         ("scheduleCsv", 1) => Ok(export_schedule::export_schedule_csv(p, text, args[0] != 0.0)),
         ("pickGeometry", _) => json(&model3d::pick_geometry(p)?),
+        ("modelJson", _) => crate::model::to_value_typed_only(p).map(|v| v.to_string()).map_err(|e| e.to_string()),
         ("model3dParts", 3) => json(&model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }

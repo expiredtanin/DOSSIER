@@ -35,7 +35,8 @@ export type QueryName =
   | "scheduleCsv"
   | "pickGeometry"
   | "model3dParts"
-  | "planDomains";
+  | "planDomains"
+  | "modelJson";
 
 export class ProjectDocument {
   private handle = 0;
