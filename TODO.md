@@ -218,6 +218,7 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
 - ○ **[60] Nur versprechen, was getestet ist.** · S · Regel, keine Arbeit.
 - ○ **[51] Herkunft übernommenen Codes.** · S · fällig mit [B2]/[B3]: Dateikopf (Repo, Commit, Datei,
   „geändert") + `NOTICE` im Repo.
+  (28.10.) [B2] erledigt (BIMCraft `skeleton.rs`: Dateikopf mit MIT-Text, `NOTICE`).
 
 Ausserdem für die Beta: englisches README, `CONTRIBUTING.md`, Spiegel, Beispielprojekt, Beta-Hinweise,
 Entscheid CLA vs. Verzicht auf Dual Licensing.
@@ -293,9 +294,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   betroffen:** macOS-Metal-Pfad (GPU-Kompilierung mit `origin`-Verschiebung), lokal gezeichnete Projekte,
   Standort-Import (Modell-(0,0) = Suchzentrum). Lösung: Szene relativ zu einem Ursprung kodieren
   (`renderSceneBin.ts`/`scene_bin.rs` + Kamera-Versatz in f64 in render2d, wie `GpuGeometry.origin`). · S–M
-- ○ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
+- ✅ **[G9] Dach-Gehrung an Walm-/Zeltspitzen** (neu 27.10.): an Punkten mit ≥ 3 Dachflächen trifft die
   paarweise Gehrung der Unterseite nicht exakt (Restlücke < 0.01 m²); solche Dächer gehen als nicht
   geschlossenes Face-Set ins IFC. · S–M
+  (28.10.) Nicht durch den Skeleton gelöst (auch dessen Flächen treffen sich an Spitzen mit zwei
+  Neigungen, Kehlpunkten und zwischen konvexen Teilstücken einer Fläche): `Mitre` in `model3d.rs` gibt
+  allen Flächen an einem Punkt mit > 2 Flächen dieselbe versetzte Ecke (kleinste Quadrate über alle
+  Ebenen, unterbestimmt → nächster Punkt der Schnittgeraden); Punkte mit 2 Flächen unverändert. Gemessen
+  vorher: Zelt 7×5 m 1.1e-3 m², Walm/Zelt auf L 0.77–1.2 m², Mansard-Walm auf L 0.93 m² Lücke; jetzt jede
+  Schicht geschlossen (Test `g9_dachschichten_geschlossen`: Rechteck/L/U/konkav/schief × alle
+  Skelett-Formen × First x/y × zwei Schichten). Nicht in der App/IFC-Prüfung angesehen.
 
 ## truck [T]
 
@@ -371,6 +379,13 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ◐ **[26] Dächer über beliebige Grundrisse.** `geometry/roofSkeleton.ts` (Walm/Sattel/Mansarde/
   Krüppelwalm auf L/T/U, Kehlen, Giebel); Port nach Rust läuft [K2]. Offen: Innenhöfe, schiefwinklige
   Grundrisse → [B2]. · M
+  (28.10.) Skelett-Dächer rechnen über den Straight Skeleton [B2]: konkave/schiefe Umrisse mit
+  Split-Ereignissen jetzt richtig, Giebelwände schliessen die Stufe an einspringenden Ecken. Offen, weil
+  das Modell es nicht ausdrücken kann (Kern kann es, `weighted_roof`): **Vorschlag Modellfelder** am
+  `Roof`: `holes?: Vec2[][]` (Innenhöfe, Ring im Uhrzeigersinn), `edgePitchDeg?: (number | null)[]` je
+  Umrisskante (null = Giebel; ersetzt dann die Giebel-Regel „quer zur Firstachse"). Satteldach auf
+  schiefem Umriss bleibt bei der Bounding-Box (Umstellung auf den Skeleton würde bestehende Dächer
+  ändern — Entscheid Maintainer).
 
 ## Priorität 4 — später
 
@@ -429,9 +444,22 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
 - ✅ **[B1] IFC-Prüfung in der CI** (= [18]). (27.10.) Eigenes Prüfskript (Schema, Express-Regeln,
   Geometrie je Bauteil), Test ruft es auf, CI installiert ifcopenshell. Erster Fund behoben
   (IfcOwnerHistory ohne LastModifiedDate).
-- ○ **[B2] Straight Skeleton** (für [26]), jetzt nach `dossier-core` statt `kernel2d`. `skeleton.rs`
+- ✅ **[B2] Straight Skeleton** (für [26]), jetzt nach `dossier-core` statt `kernel2d`. `skeleton.rs`
   (709 Z., 8 Tests inkl. Fuzz): Innenhöfe, schiefwinklige Grundrisse, Giebel auf beliebiger Kante,
   Neigung je Kante, Arbeitsbudget. · S (Kernel) + M (Einbau)
+  (28.10.) Übernommen aus BIMCraft `crates/core/src/skeleton.rs` @ f3bbb33 (MIT, Kopf + `NOTICE`), mm→m,
+  Rust 2021, Budget-Parameter, `SkeletonError` statt Panic/String, Eingabeprüfung: `core/src/skeleton.rs`
+  (Fuzz 2000 Sterne/Treppen mit Höfen und Giebeln), Bindung `straight_skeleton`, Fassade
+  `geometry/skeleton.ts`. `roof_skeleton.rs`: `hip_roof` rechnet über `weighted_roof` (Ringe mit Höfen,
+  Neigung je Kante, Giebel = Neigung 90°), Rückfall auf das alte Keil-Verfahren (`hip_roof_wedge`) bei
+  Budget/Degeneration. Parität (Test `paritaet_mit_keilverfahren_auf_l_t_u`, 800 Zufalls-L/T/U/Treppen ×
+  Walm/Sattel x/y/Mansarde; WASM-Vergleich alt/neu über 2000 Dächer): Rechteck/Pult bitgleich (Pfad
+  unverändert), Skelett-Dachflächen auf 2e-13 gleich; anders nur, wo das alte falsch war — Sattel/
+  Mansard-Giebel auf U mit Giebeln in der Bucht deckte doppelt (13/800), offene Stufe am Giebel einer
+  einspringenden Ecke (jetzt Giebelwand bis zur tieferen Fläche), Linien zwischen zwei Flächen derselben
+  Ebene (T-Stoss) entfallen; konkave Sterne: in ~37 % stieg das alte Dach über den Randabstand (Fünfeck:
+  First 6.49 statt 3.50 m). Ohne Snap auf 1e-6: gemeinsame Ecken jetzt exakt. CLI-Plan/Ansicht (L, U, U
+  Sattel, Fünfeck, T Mansarde, Zelt) angesehen (Linux). Offen: Modellfelder für Höfe/Neigung je Kante [26].
 - ✅ **[B3] IFC-Import als Mesh** (erste Stufe von [25]). (28.10.) Eigener Code in `src-tauri/fileio`
   (`ifc_step.rs` STEP-Leser inkl. `\X2\`/`\X4\`, `ifc_import.rs` Geometrie), Fassade `io/ifcImport.ts`:
   je IfcProduct ein Kontext-Mesh (Ebene = IFC-Klasse; > 2000 Bauteile je Klasse+Geschoss), Menü „IFC
