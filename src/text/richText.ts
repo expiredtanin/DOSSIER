@@ -17,49 +17,13 @@
 // zählt (wie „\n"). Das erlaubt Bereichs-Operationen (applyMark/toggleMark) über
 // Absatzgrenzen hinweg.
 
-/** Zeichen-Marks eines Runs. Alle optional; fehlend = „nicht gesetzt". */
-export interface Marks {
-  bold?: boolean;
-  italic?: boolean;
-  underline?: boolean;
-  strike?: boolean;
-  /** Hochgestellt. super und sub schliessen sich gegenseitig aus. */
-  super?: boolean;
-  /** Tiefgestellt. */
-  sub?: boolean;
-  /** Schriftfamilie (CSS font-family-Wert), z. B. "Helvetica". */
-  font?: string;
-  /** Schriftgrösse in typografischen Punkt (pt). */
-  sizePt?: number;
-  /** Farbe als "#rrggbb". */
-  color?: string;
-}
-
-/** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */
-export interface TextRun {
-  text: string;
-  marks: Marks;
-}
-
-/** Absatz-Ausrichtung. */
-export type Align = "left" | "center" | "right";
+// Die Datentypen (RichTextDoc, Paragraph, TextRun, Marks, Align, TextStylePreset) gehören zum
+// Projektmodell und kommen aus dem Rust-Modell ([K4] S4, `model/types.generated.ts`).
+import type { Align, Marks, Paragraph, RichTextDoc, TextRun, TextStylePreset } from "../model/types.generated";
+export type { Align, Marks, Paragraph, RichTextDoc, TextRun, TextStylePreset };
 
 /** Zeilenhöhe als Vielfaches der Basisgrösse, wenn nicht am Absatz gesetzt. */
 export const DEFAULT_LINE_HEIGHT = 1.3;
-
-/** Ein Absatz: eine Zeile aus Runs plus optionale Ausrichtung/Zeilenhöhe. */
-export interface Paragraph {
-  runs: TextRun[];
-  align?: Align;
-  /** Zeilenhöhe als Vielfaches der Basisgrösse (z. B. 1.3 = 130 %). */
-  lineHeight?: number;
-}
-
-/** Das gesamte Rich-Text-Dokument. */
-export interface RichTextDoc {
-  version: 1;
-  paragraphs: Paragraph[];
-}
 
 /** Namen der booleschen Marks (togglebar). */
 export type BoolMark = "bold" | "italic" | "underline" | "strike" | "super" | "sub";
@@ -372,16 +336,6 @@ export function serialize(doc: RichTextDoc): string {
 }
 
 // ── Style-Presets ──────────────────────────────────────────────────────────
-
-/** Ein benannter Stil (Marks-Vorlage), z. B. „Titel". */
-export interface TextStylePreset {
-  /** Stabiler Schlüssel (englisch), z. B. "title". */
-  id: string;
-  /** Anzeigename (bereits übersetzt oder Schlüssel für t()). */
-  label: string;
-  /** Marks, die der Stil auf die Auswahl (oder das ganze Dokument) legt. */
-  marks: Marks;
-}
 
 /**
  * Standard-Presets, an DOSSIERs Textstile angelehnt. Grössen in pt; die

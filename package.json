@@ -14,6 +14,7 @@
     "check": "node scripts/check.mjs",
     "e2e": "playwright test",
     "build:render-png": "cargo build --release --features png --bin render_png --manifest-path src-tauri/render3d/Cargo.toml",
+    "gen:types": "DOSSIER_GEN_TYPES=1 cargo test --quiet --lib --manifest-path src-tauri/core/Cargo.toml ts_types_aktuell",
     "build:cli": "esbuild src/cli/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist-cli/dossier-cli.mjs --log-level=warning",
     "tauri": "tauri",
     "tauri:dev": "node scripts/tauri-native.mjs dev",
