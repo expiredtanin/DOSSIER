@@ -55,3 +55,7 @@ src-tauri/assets/native3d_walls.json
 /docs/*.md
 /docs/design/*.md
 /docs/research/*.md
+
+# Playwright-Suite ([49])
+test-results/
+playwright-report/

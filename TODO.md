@@ -214,7 +214,7 @@ Frage: WebGPU weiterführen oder wie BIMCraft CPU + native GPU?
   `--fast` ohne Rust). `cargo fmt`/`clippy` fehlen noch (Riesen-Diff) → eigener Schritt.
 - ○ **[30] Release-Workflow.** · M · Hängt an [57].
 - ◐ **[57] Tests bei jedem Push.** `.github/workflows/check.yml` (baut alle WASM-Pakete, installiert
-  ifcopenshell, `npm run check`). Läuft auf GitHub, sobald Actions aktiv sind. · S–M
+  ifcopenshell, `npm run check`; (28.10.) zusätzlich Job `e2e` für [49]). Läuft auf GitHub, sobald Actions aktiv sind. · S–M
 - ○ **[60] Nur versprechen, was getestet ist.** · S · Regel, keine Arbeit.
 - ○ **[51] Herkunft übernommenen Codes.** · S · fällig mit [B2]/[B3]: Dateikopf (Repo, Commit, Datei,
   „geändert") + `NOTICE` im Repo.
@@ -257,7 +257,17 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
 - ✅ **[18] IFC gegen IfcOpenShell.** = [B1]. 27.10.: `scripts/validate-ifc.py` + `exportIfc.validate.test.ts`. · S–M
 - ◐ **[19] Beispielgebäude als Skript.** `sampleProject.ts` + Kontrollmodell. · S
 - ◐ **[20] Performance-Benchmark.** `dossier-cli … bench`; grosses Testgebäude/Frame-Zeiten offen. · M
-- ○ **[49] UI-Tests wie ein Mensch.** Playwright ad hoc (dist-test, Port 5188), nicht als Suite. · M
+- ◐ **[49] UI-Tests wie ein Mensch.** (28.10.) Suite in `e2e/` (`npm run e2e`, Playwright, baut `dist-test`,
+  `vite preview` Port 5199; nicht in `npm run check`, eigener CI-Job `e2e` in `check.yml`). 14 Tests, ~40 s:
+  Start, neues Projekt, Beispielprojekt (Vorlage), Wand per Klicks und per Befehlszeile, Rückgängig/Wiederholen
+  (Tastatur + Menü), Eigenschaft ändern (Wand-OK), Geschoss wechseln, 3D-Ansicht, Speichern, Export IFC/DXF,
+  DXF-Import. Geprüft wird über sichtbaren Zustand (Elemente-Baum, Panel-Werte), nicht über Pixel; Konsolenfehler
+  scheitern, ausser der Erlaubt-Liste in `e2e/app.ts` (wgpu-Panik headless). Offen: **Projekt öffnen im Browser ist
+  kaputt** (`onProjectFileChosen`: `readAsArrayBuffer` + `String(result)` → „kein gültiges JSON"; Fix `readAsText`) —
+  zwei Tests sind bis dahin als `test.fail` markiert; Debug-Hook für den Store fehlt (bräuchte
+  `window.__dossierStore` nur bei `?e2e`); Pixel/Rendering (render2d/render3d) headless nicht prüfbar;
+  Strichstärken/Text/Block/Raum/PDF-Export, Schnitt/Ansicht noch ohne UI-Test. Neu: Datei-Menü im Browser hat
+  Exportieren: DXF/IFC/OBJ/STL (vorher kein UI-Weg). · M
 - ✅ **[50] Test für fehlende Übersetzungen.** `i18n/untranslated.test.ts` mit Baseline. · S
 
 ### Arbeitsweise mit Claude Code
