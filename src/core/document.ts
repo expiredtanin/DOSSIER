@@ -7,7 +7,6 @@
 import type { Project } from "../model/types";
 import { core } from "../engine/coreWasm";
 import { diffToOps } from "./ops";
-import type { Kennzahlen } from "../analysis/kennzahlen";
 
 export class ProjectDocument {
   private handle = 0;
@@ -46,11 +45,14 @@ export class ProjectDocument {
     }
   }
 
-  /** Kennzahlen aus dem Kern (`kennzahlen.rs`). */
-  kennzahlen(): Kennzahlen {
-    const text = this.handle ? core().doc_kennzahlen(this.handle) : "";
-    if (!text) throw new Error("Kennzahlen: Projekt passt nicht zum Kern-Modell");
-    return JSON.parse(text) as Kennzahlen;
+  /**
+   * Abfrage auf dem typisierten Projekt im Kern. Das Ergebnis ist JSON; ein Fehler (Projekt passt
+   * nicht zum Modell, unbekannte Abfrage) wirft.
+   */
+  query<T>(name: "kennzahlen" | "siteCheck" | "buildingFootprint" | "modelTop"): T {
+    const text = this.handle ? core().doc_query(this.handle, name) : "";
+    if (!text) throw new Error(`Kern-Abfrage „${name}": Projekt passt nicht zum Kern-Modell`);
+    return JSON.parse(text) as T;
   }
 
   /** Das Dokument als JSON-Text (Test, Export). */

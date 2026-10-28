@@ -128,8 +128,9 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
   - ◐ **S2 Ableitungen lesen das Dokument** (28.10.): typisiertes Rust-Modell `model/` (`generated.rs` aus den TS-Typen per
     `scripts/gen-rust-model.py`, `manual.rs` für getaggte Unions; Hin-und-zurück-Test gegen das Beispielprojekt mit
     `deny_unknown_fields`), `Document::project()` als gecachte typisierte Sicht, `documentFor(project)` (TS) hält ein gemeinsames
-    Dokument per Differenz aktuell. Erster Verbraucher: Kennzahlen (`kennzahlen.rs::compute`, TS-Sammler gelöscht).
-    Nächste: Baurecht/Footprint, Sonnenstand, Raumprogramm, danach Plan/Schnitt/Ansicht, 3D, Export.
+    Dokument per Differenz aktuell. Verbraucher bisher: Kennzahlen (`kennzahlen.rs::compute`), Baurecht-Prüfung/Footprint/Modellhöhe (`site_rules.rs`); Abfragen laufen
+    über `doc_query`, Modell-Nachschlagen in `model/helpers.rs`. TS-Sammler gelöscht.
+    Nächste: Sonnenstand/Schatten, Raumprogramm, danach Plan/Schnitt/Ansicht, 3D, Export.
     Ziel: Plan/Schnitt/Ansicht, 3D, Export rechnen mit `doc`-Handle statt flach gesammelter Arrays; TS-Sammler/-Adapter werden gelöscht
     ([K3d] hängt hier dran: Plan-Puffer v2 mit Pick-IDs und vollem Primitive-Umfang).
   - ○ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung

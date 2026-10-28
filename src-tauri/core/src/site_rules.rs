@@ -250,3 +250,111 @@ mod tests {
         assert!(close(c.violation_area, 0.0) && c.violations.is_empty() && c.height_exceeded);
     }
 }
+
+// ── Baurecht aus dem Projekt-Dokument ([K4] S2) ─────────────────────────────
+
+use crate::jsmath::hypot2;
+use crate::model::{Project, Vec2};
+use serde::Serialize;
+
+/// Mehrfach-Fläche mit `Vec2`-Punkten (JSON-Form wie `Area` in TS).
+pub type AreaOut = Vec<Vec<Vec<Vec2>>>;
+
+fn area_out(polys: &[Polygon]) -> AreaOut {
+    polys.iter().map(|p| p.iter().map(|r| r.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect()).collect()).collect()
+}
+
+fn wall_corners(start: Vec2, end: Vec2, thickness: f64) -> Vec<[f64; 2]> {
+    let h = thickness / 2.0;
+    let (dx, dy) = (end.x - start.x, end.y - start.y);
+    let l = hypot2(dx, dy);
+    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
+    let (ux, uy) = (dx / l, dy / l);
+    let (nx, ny) = (-uy, ux);
+    vec![
+        [start.x + nx * h, start.y + ny * h],
+        [end.x + nx * h, end.y + ny * h],
+        [end.x + nx * -h, end.y + ny * -h],
+        [start.x + nx * -h, start.y + ny * -h],
+    ]
+}
+
+/// Teile der Gebäude-Grundfläche (Wände aller Geschosse, freie Körper ohne Abzugskörper).
+fn footprint_parts(p: &Project) -> Vec<Polygon> {
+    let mut parts: Vec<Polygon> = Vec::new();
+    for w in &p.walls {
+        if hypot2(w.end.x - w.start.x, w.end.y - w.start.y) < 1e-9 {
+            continue;
+        }
+        parts.push(vec![wall_corners(w.start, w.end, p.wall_thickness(w, 0.2))]);
+    }
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if s.operation.as_deref() == Some("subtract") || s.points.len() < 3 {
+            continue;
+        }
+        parts.push(vec![s.points.iter().map(|v| [v.x, v.y]).collect()]);
+    }
+    parts
+}
+
+/// Grundfläche des Gebäudes (vereinigt).
+pub fn building_footprint(p: &Project) -> AreaOut {
+    let parts = footprint_parts(p);
+    if parts.is_empty() {
+        return vec![];
+    }
+    area_out(&polygon_bool::union(&parts))
+}
+
+/// Höchster Punkt des Modells über ±0.00 (Wände, freie Körper, Dächer); `None` ohne Bauteile.
+pub fn model_top(p: &Project) -> Option<f64> {
+    let mut top = f64::NEG_INFINITY;
+    for w in &p.walls {
+        top = top.max(p.wall_vertical_extent(w).1);
+    }
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if s.operation.as_deref() == Some("subtract") {
+            continue;
+        }
+        let base = p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
+        top = top.max(base + s.base_offset.unwrap_or(0.0) + s.height);
+    }
+    for r in p.roofs.as_deref().unwrap_or(&[]) {
+        let eaves = p.roof_base_elevation(r);
+        top = top.max(eaves + crate::roof::roof_geometry(&r.params(), eaves).ridge_height);
+    }
+    top.is_finite().then_some(top)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteCheckOut {
+    pub parcel_area: f64,
+    pub allowed: AreaOut,
+    pub allowed_area: f64,
+    pub violations: AreaOut,
+    pub violation_area: f64,
+    pub max_top: Option<f64>,
+    pub height_exceeded: bool,
+}
+
+/// Prüft das Modell gegen `siteRules`; `None` ohne (gültiges) Baurecht.
+pub fn check_project(p: &Project) -> Option<SiteCheckOut> {
+    let r = p.site_rules.as_ref()?;
+    let max_top = model_top(p);
+    let rules = SiteRules {
+        parcel: r.parcel.iter().map(|v| [v.x, v.y]).collect(),
+        setbacks: (0..r.parcel.len()).map(|i| r.setbacks.as_ref().and_then(|s| s.get(i)).copied().unwrap_or(r.default_setback)).collect(),
+        lines: r.building_lines.as_deref().unwrap_or(&[]).iter().map(|l| BuildingLine { a: [l.a.x, l.a.y], b: [l.b.x, l.b.y] }).collect(),
+    };
+    let c = check_site_rules(&rules, &footprint_parts(p), r.max_height.unwrap_or(f64::NAN), max_top.unwrap_or(f64::NAN))?;
+    Some(SiteCheckOut {
+        parcel_area: c.parcel_area,
+        allowed: area_out(&c.allowed),
+        allowed_area: c.allowed_area,
+        violations: area_out(&c.violations),
+        violation_area: c.violation_area,
+        max_top,
+        height_exceeded: c.height_exceeded,
+    })
+}

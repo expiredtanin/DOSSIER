@@ -3,6 +3,7 @@
 //! Typen mit Tag stehen in `manual.rs`.
 
 pub mod generated;
+pub mod helpers;
 pub mod manual;
 
 pub use generated::*;

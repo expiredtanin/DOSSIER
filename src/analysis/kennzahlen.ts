@@ -51,7 +51,7 @@ const finite = (n: number): number => (Number.isFinite(n) ? n : 0);
  * Kern auf dem Projekt-Dokument (`kennzahlen.rs`, [K4] S2).
  */
 export function computeKennzahlen(project: Project): Kennzahlen {
-  return documentFor(project).kennzahlen();
+  return documentFor(project).query<Kennzahlen>("kennzahlen");
 }
 
 export type ProgramStatus = "ok" | "zu klein" | "zu gross" | "fehlt" | "zu wenige" | "zu viele";

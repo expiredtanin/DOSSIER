@@ -62,10 +62,24 @@ pub fn doc_json(h: u32) -> String {
     with_doc(h, |d| d.to_json()).unwrap_or_default()
 }
 
-/// Kennzahlen des Projekts als JSON (leer bei Fehler: Dokument nicht offen oder Modell passt nicht).
+/// Abfrage auf dem typisierten Projekt; Ergebnis als JSON, leer bei Fehler (Dokument nicht offen,
+/// Modell passt nicht, unbekannte Abfrage). Abfragen: `kennzahlen`, `siteCheck` (`null` ohne
+/// Baurecht), `buildingFootprint`, `modelTop` (`null` ohne Bauteile).
 #[wasm_bindgen]
-pub fn doc_kennzahlen(h: u32) -> String {
-    with_doc(h, |d| d.project().ok().map(|p| serde_json::to_string(&crate::kennzahlen::compute(&p)).unwrap_or_default()))
-        .flatten()
-        .unwrap_or_default()
+pub fn doc_query(h: u32, name: &str) -> String {
+    use crate::{kennzahlen, site_rules};
+    let name = name.to_owned();
+    with_doc(h, move |d| {
+        let p = d.project().ok()?;
+        let json = match name.as_str() {
+            "kennzahlen" => serde_json::to_string(&kennzahlen::compute(&p)),
+            "siteCheck" => serde_json::to_string(&site_rules::check_project(&p)),
+            "buildingFootprint" => serde_json::to_string(&site_rules::building_footprint(&p)),
+            "modelTop" => serde_json::to_string(&site_rules::model_top(&p)),
+            _ => return None,
+        };
+        json.ok()
+    })
+    .flatten()
+    .unwrap_or_default()
 }

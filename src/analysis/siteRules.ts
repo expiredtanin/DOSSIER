@@ -6,15 +6,12 @@
 //  • Baulinie: Halbebene auf der Seite des Parzellen-Schwerpunkts.
 //  • Gebäude-Grundfläche: Wände aller Geschosse und freie Körper (ohne Abzugskörper). Vorsprünge
 //    (Dachüberstand, Balkone) und ihre Sonderregeln zählen nicht.
-// Gerechnet wird im Rust-Kern (`src-tauri/core/src/site_rules.rs`); hier wird aus dem Projekt
-// gesammelt (Grundflächen-Teile, Modellhöhe) und die Datenform übersetzt.
+// Gerechnet wird im Rust-Kern (`src-tauri/core/src/site_rules.rs`), die Prüfung des Modells auf dem
+// Projekt-Dokument; die Flächen-Hilfen (`allowedArea`, `multiPolygonArea`) nehmen flache Daten.
 
 import type { Project, SiteRules, Vec2 } from "../model/types";
-import { getFloor, getWallType, wallTypeThickness } from "../model/types";
-import { wallVerticalExtent } from "../model/wall";
-import { wallCorners } from "../model/geometry";
-import { roofBaseElevation, roofGeometry } from "../geometry/roof";
 import { core } from "../engine/coreWasm";
+import { documentFor } from "../core/document";
 import { FlatReader, FlatWriter } from "../geometry/coreFlat";
 
 /** Polygone mit Ringen: `[polygon][ring]`, Ring 0 aussen, weitere Löcher; Ringe offen. */
@@ -41,46 +38,14 @@ export function allowedArea(r: SiteRules): Area {
   return new FlatReader(core().site_allowed_area(encodeRules(r))).polygons();
 }
 
-/** Teile der Gebäude-Grundfläche (Wände aller Geschosse, freie Körper ohne Abzugskörper). */
-function footprintParts(project: Project): Area {
-  const parts: Area = [];
-  for (const w of project.walls) {
-    if (Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) < 1e-9) continue;
-    parts.push([wallCorners(w.start, w.end, wallTypeThickness(getWallType(project, w)))]);
-  }
-  for (const s of project.extrudedSolids ?? []) {
-    if (s.operation === "subtract" || s.points.length < 3) continue;
-    parts.push([s.points]);
-  }
-  return parts;
-}
-
-/** Grundfläche des Gebäudes (Wände aller Geschosse, freie Körper ohne Abzugskörper). */
+/** Grundfläche des Gebäudes (Wände aller Geschosse, freie Körper ohne Abzugskörper). Rechnet der Kern. */
 export function buildingFootprint(project: Project): Area {
-  const parts = footprintParts(project);
-  if (parts.length === 0) return [];
-  return new FlatReader(core().poly_union(new FlatWriter().polygons(parts).done())).polygons();
+  return documentFor(project).query<Area>("buildingFootprint");
 }
 
 /** Höchster Punkt des Modells über ±0.00 (Wände, freie Körper, Dächer); `null` ohne Bauteile. */
 export function modelTop(project: Project): number | null {
-  let top = -Infinity;
-  for (const w of project.walls) top = Math.max(top, wallVerticalExtent(project, w).zTop);
-  for (const s of project.extrudedSolids ?? []) {
-    if (s.operation === "subtract") continue;
-    let base = 0;
-    try {
-      base = getFloor(project, s.levelId).baseElevation ?? 0;
-    } catch {
-      /* Geschoss fehlt → 0 */
-    }
-    top = Math.max(top, base + (s.baseOffset ?? 0) + s.height);
-  }
-  for (const r of project.roofs ?? []) {
-    const eavesZ = roofBaseElevation(project, r);
-    top = Math.max(top, eavesZ + roofGeometry(r, eavesZ).ridgeHeight);
-  }
-  return Number.isFinite(top) ? top : null;
+  return documentFor(project).query<number | null>("modelTop");
 }
 
 export interface SiteCheck {
@@ -96,22 +61,6 @@ export interface SiteCheck {
 
 /** Prüft das Modell gegen `project.siteRules`; `null` ohne (gültiges) Baurecht. Rechnung im Rust-Kern (`site_rules.rs`). */
 export function checkSiteRules(project: Project): SiteCheck | null {
-  const r = project.siteRules;
-  if (!r) return null;
-  const maxTop = modelTop(project);
-  const out = core().site_check(
-    encodeRules(r),
-    new FlatWriter().polygons(footprintParts(project)).done(),
-    r.maxHeight ?? Number.NaN,
-    maxTop ?? Number.NaN,
-  );
-  const rd = new FlatReader(out);
-  if (rd.num() !== 1) return null;
-  const parcelArea = rd.num();
-  const allowedA = rd.num();
-  const violationArea = rd.num();
-  const heightExceeded = rd.num() === 1;
-  const allowed = rd.polygons();
-  const violations = rd.polygons();
-  return { parcelArea, allowed, allowedArea: allowedA, violations, violationArea, maxTop, heightExceeded };
+  if (!project.siteRules) return null;
+  return documentFor(project).query<SiteCheck | null>("siteCheck");
 }
