@@ -1,91 +1,73 @@
 /**
- * Plan-Puffer ([K3b]): kompakte Binärkodierung der zeichnungsrelevanten Plan-Primitive als
- * flacher `Float64Array`. TS schreibt ihn vorerst aus `Plan.primitives`, der Rust-Kern liest ihn
- * (`src-tauri/core/src/plan_buf.rs`, dort dieselbe Formatbeschreibung) — heute für die GPU-
- * Kompilierung (`glPlan/glPlanCompile.ts`), ab [K3a] erzeugt Rust ihn direkt.
+ * Plan-Puffer v2 ([K3d]): binäre Übergabe der Plan-Primitive zwischen Rust-Kern und TS — Format
+ * und Bedeutung aller Felder stehen im Kopf von `src-tauri/core/src/plan_buf.rs` (hier gekürzt).
+ * Der Kern schreibt ihn direkt aus der Plan-Erzeugung (Abfrage `planDomains`); TS liest ihn zu
+ * `Primitive[]` ({@link decodePlanBuf}: Auswahl, Overlay, SVG/PDF/DXF) und schreibt ihn für
+ * GPU-Chunks aus gemischten Listen ({@link encodePlanBuf}, `glPlanCompile.ts`). Die GPU-Kompilierung
+ * liest Bereiche eines Kern-Puffers direkt (`compilePlanBufRange`), ohne Umweg über Objekte.
  *
  * ```text
- * Kopf        [MAGIC, VERSION, nColors, nHatches, nPrims]
- *             MAGIC = 0x504C4231 ("PLB1"), VERSION = 1 — Rust lehnt fremde Werte ab (leeres Ergebnis)
- * Farben      nColors × [r, g, b, a]           (0..1, hier aus dem Farbtext geparst)
- * Schraffuren nHatches × Hatch
- * Primitive   nPrims × Prim                    (genau ein Eintrag je Primitiv → Indizes bleiben gleich)
- *
- * Hatch  [pattern, kind, flags, scale, angle, colorIdx, lineWeight, originX, originY,
- *         seed, density, lengthMin, lengthMax, nDash, dash…, (Motiv: length, nPts, x,y…)]
- *        pattern 0 none · 1 solid · 2 diagonal (auch unbekannt) · 3 crosshatch · 4 insulation · 5 custom
- *        kind    0 vector · 1 image · 2 gradient   (Bild/Verlauf: GPU fällt auf die Füllung zurück)
- *        flags   1 random · 2 origin · 4 seed · 8 density · 16 lengthMin · 32 lengthMax · 64 Motiv
- *        (Felder ohne Flag stehen auf 0 und gelten als „nicht gesetzt")
- *
- * Prim   [tag, flags, …]   flags 1 greyed · 2 opacity gesetzt · 4 setzt den Linienzug der
- *                          vorigen Linie fort · 8 Zickzack · 16 Motiv
- *   0 Platzhalter      [0]                                   (Text, Bild … — zeichnet die GPU nicht)
- *   1 polygon          [1, flags, fillIdx, strokeIdx, strokeWidthMm, hatchIdx, opacity,
- *                       nPts, x,y…, nNoStroke, kante…]
- *   2 line             [2, flags, colorIdx, weightMm, opacity, ax, ay, bx, by, nDash, dash…,
- *                       (Zickzack: amplitude, wavelength), (Motiv: length, nPts, x,y…)]
- *   3 arc              [3, flags, colorIdx, weightMm, opacity, cx, cy, fromX, fromY, toX, toY, r,
- *                       nDash, dash…]
- *   4 drawingCircle    [4, flags, fillIdx, strokeIdx, weightMm, opacity, cx, cy, r, nDash, dash…]
- *   5 drawingArc       [5, flags, strokeIdx, weightMm, opacity, cx, cy, r, a0, a1, nDash, dash…]
+ * Bytes: f64-Teil, dann UTF-16-Einheiten aller Texte
+ * Kopf (16)  [MAGIC "PLB2", VERSION 2, flags (1 Hashes, 2 Ausmass), nStrings, nHatches, nHatchWords,
+ *             nGroups, nPrims, nRecWords, nPool, nUnits, 0, minX, minY, maxX, maxY]
+ * Strings    nStrings × [unitOff, unitLen]
+ * Schraffur  nHatches × [jsonStr, Hatch]      (Hatch wie encodeHatch, Farbe = String-Index)
+ * Gruppen    nGroups × [start, end)
+ * Offsets    nPrims × Wortindex des Eintrags
+ * Hashes     nPrims × Inhalts-Hash (nur Kern)
+ * Primitive  [tag, flags, pickKind, pickStr, …]   1 polygon · 2 line · 3 arc · 4 drawingCircle ·
+ *            5 drawingArc · 6 text · 7 drawingText · 8 drawingTextPath · 9 drawingImage (JSON) ·
+ *            0 Platzhalter (nur `lean`)
+ * Pool       Punkte, Strichmuster, Kantenlisten, Motive, weitere Ids
  * ```
- * Farb-/Schraffur-Index −1 = keine (Farbtext ungültig, "none", fehlende Schraffur). Längen in
- * Metern, Strichstärken/Strichmuster/Zickzack/Motiv in Papier-mm, Winkel von drawingArc in
- * Bogenmass, Schraffur-Winkel in Grad (SVG-Drehsinn). Ohne opacity-Flag steht 1 im Feld; fehlende
- * Zahlen (`undefined`) werden NaN, der Verbraucher nimmt dann wie bisher seinen Standard.
- * Flag 4 (Linienzug): gleiches Element (`drawingId`), gleiche Farbe/Stärke/greyed/opacity/
- * Strichmuster (Referenz) und Anfang = Ende der vorigen Linie — dann zeichnet die GPU die
- * Einzelsegmente als EINEN Zug (zwei echte Kappen statt 2N). Pick-IDs stehen NICHT im Puffer
- * (Picken bleibt vorerst TS).
+ * Flags: 1 greyed gesetzt · 2 greyed · 4 opacity · 8 Linienzug · 16 Zickzack · 32 Motiv ·
+ * 64 dash null · 128 dash Liste · 256 noStrokeEdges · 512 Farbe (line/arc) · 1024 weitere Ids.
  */
 
 import type { HatchRender, Primitive } from "./generatePlan";
 import type { Vec2 } from "../model/types";
 
-export const PLAN_BUF_MAGIC = 0x504c4231;
-export const PLAN_BUF_VERSION = 1;
+export const PLAN_BUF_MAGIC = 0x504c4232;
+export const PLAN_BUF_VERSION = 2;
+/** Fehlerpuffer einer Kern-Abfrage ("PLBe"): `[ERR_MAGIC, nUnits]` + Meldung (UTF-16). */
+export const PLAN_BUF_ERR_MAGIC = 0x504c4265;
+const HEAD = 16;
 
-/** RGBA-Farbe, Komponenten in [0,1]. */
-export type PlanRgba = [number, number, number, number];
+const F_GREYED_SET = 1;
+const F_GREYED = 2;
+const F_OPACITY = 4;
+const F_CHAIN = 8;
+const F_ZIGZAG = 16;
+const F_MOTIF = 32;
+const F_DASH_NULL = 64;
+const F_DASH_LIST = 128;
+const F_NSE = 256;
+const F_COLOR = 512;
+const F_IDS = 1024;
 
-const FLAG_GREYED = 1;
-const FLAG_OPACITY = 2;
-const FLAG_CHAIN = 4;
-const FLAG_ZIGZAG = 8;
-const FLAG_MOTIF = 16;
-
-/**
- * Farbe → RGBA[0..1]; ungültig/"none"/"transparent" → null.
- * Unterstützt "#rgb", "#rrggbb", "#rrggbbaa" und "rgb()/rgba()".
- */
-export function parseColor(hex: string | undefined): PlanRgba | null {
-  if (!hex) return null;
-  const s = hex.trim().toLowerCase();
-  if (s === "none" || s === "transparent") return null;
-
-  if (s.startsWith("rgb")) {
-    const m = s.match(/[\d.]+/g);
-    if (!m || m.length < 3) return null;
-    const a = m.length >= 4 ? parseFloat(m[3]) : 1;
-    return [+m[0] / 255, +m[1] / 255, +m[2] / 255, a > 1 ? a / 255 : a];
-  }
-
-  let h = s[0] === "#" ? s.slice(1) : s;
-  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-  if (h.length !== 6 && h.length !== 8) return null;
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  const a = h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1;
-  if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
-  return [r / 255, g / 255, b / 255, a];
-}
+/** Pick-Arten (Index + 1) = Feldname am Primitiv. */
+const PICK_KEYS = [
+  "wallId",
+  "drawingId",
+  "ceilingId",
+  "openingId",
+  "stairId",
+  "roomId",
+  "extrudedSolidId",
+  "contextObjectId",
+  "columnId",
+  "roofId",
+  "sectionLineId",
+] as const;
+type PickKey = (typeof PICK_KEYS)[number];
 
 /** Wachsender `Float64Array`-Schreiber. */
 class F64Writer {
-  buf = new Float64Array(1024);
+  buf: Float64Array;
   length = 0;
+  constructor(cap = 256) {
+    this.buf = new Float64Array(cap);
+  }
   private grow(need: number): void {
     let cap = this.buf.length * 2;
     while (cap < need) cap *= 2;
@@ -131,7 +113,7 @@ const PATTERN_CODE: Record<string, number> = {
   custom: 5,
 };
 
-/** Eine Schraffur im Hatch-Format (auch Eingabe der Einzel-Bindungen in `glPlanHatch.ts`). */
+/** Ein Hatch-Datensatz (auch Eingabe der Einzel-Bindungen in `glPlanHatch.ts`). */
 function writeHatch(w: F64Writer, h: HatchRender, colorIdx: number): void {
   let flags = 0;
   if (h.lines === "random") flags |= 1;
@@ -165,13 +147,10 @@ function writeHatch(w: F64Writer, h: HatchRender, colorIdx: number): void {
 
 /** Einzelne Schraffur kodieren (Farbe −1) — Eingabe der Schraffur-Bindungen des Kerns. */
 export function encodeHatch(h: HatchRender): Float64Array {
-  const w = new F64Writer();
+  const w = new F64Writer(32);
   writeHatch(w, h, -1);
   return w.buf.subarray(0, w.length);
 }
-
-/** Zwischenspeicher Farbtext → Farbindex-Eintrag (geparste Farbe oder null). */
-const colorCache = new Map<string, PlanRgba | null>();
 
 type LinePrim = Extract<Primitive, { kind: "line" }>;
 
@@ -193,164 +172,485 @@ function chainsPrev(prev: Primitive | undefined, p: LinePrim): boolean {
   );
 }
 
-/** Primitive → Plan-Puffer (Format s. Dateikopf). */
-export function encodePlanBuf(prims: readonly Primitive[]): Float64Array {
-  const colors: PlanRgba[] = [];
-  const colorIdx = new Map<string, number>();
-  let lastColor: string | undefined;
-  let lastColorIdx = -1;
-  const color = (s: string | undefined): number => {
-    if (!s) return -1;
-    if (s === lastColor) return lastColorIdx;
-    let i = colorIdx.get(s);
-    if (i !== undefined) {
-      lastColor = s;
-      lastColorIdx = i;
-      return i;
+export interface EncodeOptions {
+  /**
+   * Nur für die GPU: ohne Pick-Ids, Linienklassen und Schraffur-JSON, Texte/Bilder als Platzhalter
+   * (tag 0). Schneller; {@link decodePlanBuf} kann so einen Puffer nicht vollständig lesen.
+   */
+  lean?: boolean;
+  /** Gruppen `[start, end)` in den Kopf schreiben. */
+  groups?: ReadonlyArray<readonly [number, number]>;
+  bounds?: readonly [number, number, number, number];
+}
+
+/** Primitive → Plan-Puffer v2 (Format s. Dateikopf). */
+export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions = {}): Uint8Array {
+  const lean = opts.lean === true;
+  const strParts: string[] = [];
+  const strTab = new F64Writer(64);
+  const strIdx = new Map<string, number>();
+  let units = 0;
+  const str = (s: string | undefined): number => {
+    if (s === undefined) return -1;
+    let i = strIdx.get(s);
+    if (i === undefined) {
+      i = strTab.length >> 1;
+      strTab.push(units);
+      strTab.push(s.length);
+      units += s.length;
+      strParts.push(s);
+      strIdx.set(s, i);
     }
-    let c = colorCache.get(s);
-    if (c === undefined) {
-      c = parseColor(s);
-      if (colorCache.size > 4096) colorCache.clear();
-      colorCache.set(s, c);
-    }
-    i = c ? colors.push(c) - 1 : -1;
-    colorIdx.set(s, i);
     return i;
   };
-  const hatchW = new F64Writer();
+  const hatchW = new F64Writer(64);
   const hatchIdx = new Map<HatchRender, number>();
   const hatch = (h: HatchRender | undefined): number => {
     if (!h) return -1;
     let i = hatchIdx.get(h);
     if (i === undefined) {
       i = hatchIdx.size;
-      writeHatch(hatchW, h, color(h.color));
+      hatchW.push(lean ? -1 : str(JSON.stringify(h)));
+      writeHatch(hatchW, h, str(h.color));
       hatchIdx.set(h, i);
     }
     return i;
   };
-  const style = (greyed: boolean | undefined, opacity: number | undefined): number =>
-    (greyed ? FLAG_GREYED : 0) | (opacity !== undefined ? FLAG_OPACITY : 0);
+  const offsets = new Float64Array(prims.length);
+  const w = new F64Writer(Math.max(256, prims.length * 14));
+  const pool = new F64Writer(Math.max(256, prims.length * 4));
+  const poolList = (l: readonly number[]): void => {
+    w.push(pool.length);
+    w.push(l.length);
+    const o = pool.reserve(l.length);
+    for (let i = 0; i < l.length; i++) pool.buf[o + i] = l[i];
+  };
+  const poolPts = (p: readonly Vec2[]): void => {
+    w.push(pool.length);
+    w.push(p.length);
+    const o = pool.reserve(2 * p.length);
+    const b = pool.buf;
+    for (let i = 0; i < p.length; i++) {
+      b[o + 2 * i] = p[i].x;
+      b[o + 2 * i + 1] = p[i].y;
+    }
+  };
+  const styleFlags = (greyed: boolean | undefined, opacity: number | undefined): number =>
+    (greyed === undefined ? 0 : greyed ? F_GREYED_SET | F_GREYED : F_GREYED_SET) | (opacity !== undefined ? F_OPACITY : 0);
+  const dashFlags = (d: number[] | null | undefined): number => (d === null ? F_DASH_NULL : d ? F_DASH_LIST : 0);
   const op = (opacity: number | undefined): number => (opacity !== undefined ? opacity : 1);
+  /** Kopf [tag, flags, pickKind, pickStr]; liefert die weiteren Ids. */
+  const head = (tag: number, flags: number, p: Primitive): number[] | null => {
+    let pk = 0;
+    let ps = -1;
+    let more: number[] | null = null;
+    if (!lean) {
+      const r = p as Partial<Record<PickKey, string>>;
+      for (let k = 0; k < PICK_KEYS.length; k++) {
+        const id = r[PICK_KEYS[k]];
+        if (id === undefined) continue;
+        if (pk === 0) {
+          pk = k + 1;
+          ps = str(id);
+        } else (more ??= []).push(k + 1, str(id));
+      }
+    }
+    const o = w.reserve(4);
+    const b = w.buf;
+    b[o] = tag;
+    b[o + 1] = flags | (more ? F_IDS : 0);
+    b[o + 2] = pk;
+    b[o + 3] = ps;
+    return more;
+  };
+  const tail = (more: number[] | null): void => {
+    if (!more) return;
+    w.push(pool.length);
+    w.push(more.length / 2);
+    for (const v of more) pool.push(v);
+  };
 
-  const w = new F64Writer();
   for (let i = 0; i < prims.length; i++) {
     const p = prims[i];
+    offsets[i] = w.length;
     switch (p.kind) {
       case "polygon": {
-        const fill = color(p.fill);
-        const stroke = color(p.stroke);
+        const more = head(1, styleFlags(p.greyed, p.opacity) | (p.noStrokeEdges ? F_NSE : 0), p);
+        const fill = str(p.fill);
+        const stroke = str(p.stroke);
         const h = hatch(p.hatch);
-        const o = w.reserve(7);
+        const o = w.reserve(5);
         const b = w.buf;
-        b[o] = 1;
-        b[o + 1] = style(p.greyed, p.opacity);
-        b[o + 2] = fill;
-        b[o + 3] = stroke;
-        b[o + 4] = p.strokeWidthMm;
-        b[o + 5] = h;
-        b[o + 6] = op(p.opacity);
-        w.pts(p.pts);
-        w.list(p.noStrokeEdges);
+        b[o] = fill;
+        b[o + 1] = stroke;
+        b[o + 2] = p.strokeWidthMm;
+        b[o + 3] = h;
+        b[o + 4] = op(p.opacity);
+        poolPts(p.pts);
+        if (p.noStrokeEdges) poolList(p.noStrokeEdges);
+        tail(more);
         break;
       }
       case "line": {
-        let flags = style(p.greyed, p.opacity);
-        if (isPlainLine(p) && chainsPrev(prims[i - 1], p)) flags |= FLAG_CHAIN;
-        if (p.zigzag) flags |= FLAG_ZIGZAG;
-        if (p.motif) flags |= FLAG_MOTIF;
-        const c = color(p.color);
-        const o = w.reserve(9);
+        let flags = styleFlags(p.greyed, p.opacity) | dashFlags(p.dash);
+        if (isPlainLine(p) && chainsPrev(prims[i - 1], p)) flags |= F_CHAIN;
+        if (p.zigzag) flags |= F_ZIGZAG;
+        if (p.motif) flags |= F_MOTIF;
+        if (p.color !== undefined) flags |= F_COLOR;
+        const more = head(2, flags, p);
+        const cls = lean ? -1 : str(p.cls);
+        const c = str(p.color);
+        const o = w.reserve(8);
         const b = w.buf;
-        b[o] = 2;
-        b[o + 1] = flags;
-        b[o + 2] = c;
-        b[o + 3] = p.weightMm;
-        b[o + 4] = op(p.opacity);
-        b[o + 5] = p.a.x;
-        b[o + 6] = p.a.y;
-        b[o + 7] = p.b.x;
-        b[o + 8] = p.b.y;
-        w.list(p.dash);
+        b[o] = cls;
+        b[o + 1] = c;
+        b[o + 2] = p.weightMm;
+        b[o + 3] = op(p.opacity);
+        b[o + 4] = p.a.x;
+        b[o + 5] = p.a.y;
+        b[o + 6] = p.b.x;
+        b[o + 7] = p.b.y;
+        if (p.dash) poolList(p.dash);
         if (p.zigzag) {
           w.push(p.zigzag.amplitude);
           w.push(p.zigzag.wavelength);
         }
         if (p.motif) {
           w.push(p.motif.length);
-          w.pts(p.motif.points);
+          poolPts(p.motif.points);
         }
+        tail(more);
         break;
       }
       case "arc": {
-        const c = color((p as { color?: string }).color);
-        const o = w.reserve(12);
+        const color = (p as { color?: string }).color;
+        const more = head(3, styleFlags(p.greyed, p.opacity) | dashFlags(p.dash) | (color !== undefined ? F_COLOR : 0), p);
+        const cls = lean ? -1 : str(p.cls);
+        const c = str(color);
+        const o = w.reserve(11);
         const b = w.buf;
-        b[o] = 3;
-        b[o + 1] = style(p.greyed, p.opacity);
-        b[o + 2] = c;
-        b[o + 3] = p.weightMm;
-        b[o + 4] = op(p.opacity);
-        b[o + 5] = p.center.x;
-        b[o + 6] = p.center.y;
-        b[o + 7] = p.from.x;
-        b[o + 8] = p.from.y;
-        b[o + 9] = p.to.x;
-        b[o + 10] = p.to.y;
-        b[o + 11] = p.r;
-        w.list(p.dash);
+        b[o] = cls;
+        b[o + 1] = c;
+        b[o + 2] = p.weightMm;
+        b[o + 3] = op(p.opacity);
+        b[o + 4] = p.center.x;
+        b[o + 5] = p.center.y;
+        b[o + 6] = p.from.x;
+        b[o + 7] = p.from.y;
+        b[o + 8] = p.to.x;
+        b[o + 9] = p.to.y;
+        b[o + 10] = p.r;
+        if (p.dash) poolList(p.dash);
+        tail(more);
         break;
       }
       case "drawingCircle": {
-        const fill = color(p.fill);
-        const stroke = color(p.stroke);
-        const o = w.reserve(9);
+        const more = head(4, styleFlags(p.greyed, p.opacity) | dashFlags(p.dash), p);
+        const fill = str(p.fill);
+        const stroke = str(p.stroke);
+        const o = w.reserve(7);
         const b = w.buf;
-        b[o] = 4;
-        b[o + 1] = style(p.greyed, p.opacity);
-        b[o + 2] = fill;
-        b[o + 3] = stroke;
-        b[o + 4] = p.weightMm;
-        b[o + 5] = op(p.opacity);
-        b[o + 6] = p.center.x;
-        b[o + 7] = p.center.y;
-        b[o + 8] = p.r;
-        w.list(p.dash);
+        b[o] = fill;
+        b[o + 1] = stroke;
+        b[o + 2] = p.weightMm;
+        b[o + 3] = op(p.opacity);
+        b[o + 4] = p.center.x;
+        b[o + 5] = p.center.y;
+        b[o + 6] = p.r;
+        if (p.dash) poolList(p.dash);
+        tail(more);
         break;
       }
       case "drawingArc": {
-        const stroke = color(p.stroke);
-        const o = w.reserve(10);
+        const more = head(5, styleFlags(p.greyed, p.opacity) | dashFlags(p.dash), p);
+        const stroke = str(p.stroke);
+        const o = w.reserve(8);
         const b = w.buf;
-        b[o] = 5;
-        b[o + 1] = style(p.greyed, p.opacity);
-        b[o + 2] = stroke;
-        b[o + 3] = p.weightMm;
-        b[o + 4] = op(p.opacity);
-        b[o + 5] = p.center.x;
-        b[o + 6] = p.center.y;
-        b[o + 7] = p.r;
-        b[o + 8] = p.a0;
-        b[o + 9] = p.a1;
-        w.list(p.dash);
+        b[o] = stroke;
+        b[o + 1] = p.weightMm;
+        b[o + 2] = op(p.opacity);
+        b[o + 3] = p.center.x;
+        b[o + 4] = p.center.y;
+        b[o + 5] = p.r;
+        b[o + 6] = p.a0;
+        b[o + 7] = p.a1;
+        if (p.dash) poolList(p.dash);
+        tail(more);
         break;
       }
-      default:
-        // Text, Bild …: Platzhalter, damit Indizes/Bereiche gleich bleiben.
-        w.push(0);
+      default: {
+        if (lean) {
+          head(0, 0, p);
+          break;
+        }
+        const tag = p.kind === "text" ? 6 : p.kind === "drawingText" ? 7 : p.kind === "drawingTextPath" ? 8 : 9;
+        head(tag, 0, p);
+        w.push(str(JSON.stringify(p)));
+      }
     }
   }
 
-  const head = 5 + colors.length * 4;
-  const out = new Float64Array(head + hatchW.length + w.length);
-  out[0] = PLAN_BUF_MAGIC;
-  out[1] = PLAN_BUF_VERSION;
-  out[2] = colors.length;
-  out[3] = hatchIdx.size;
-  out[4] = prims.length;
-  for (let i = 0; i < colors.length; i++) out.set(colors[i], 5 + i * 4);
-  out.set(hatchW.buf.subarray(0, hatchW.length), head);
-  out.set(w.buf.subarray(0, w.length), head + hatchW.length);
-  return out;
+  const groups = opts.groups ?? [];
+  const nStrings = strTab.length >> 1;
+  const nF64 = HEAD + strTab.length + hatchW.length + 2 * groups.length + prims.length + w.length + pool.length;
+  const out = new ArrayBuffer(nF64 * 8 + units * 2);
+  const f = new Float64Array(out, 0, nF64);
+  const bounds = opts.bounds;
+  f.set([
+    PLAN_BUF_MAGIC,
+    PLAN_BUF_VERSION,
+    bounds ? 2 : 0,
+    nStrings,
+    hatchIdx.size,
+    hatchW.length,
+    groups.length,
+    prims.length,
+    w.length,
+    pool.length,
+    units,
+    0,
+    bounds ? bounds[0] : 0,
+    bounds ? bounds[1] : 0,
+    bounds ? bounds[2] : 0,
+    bounds ? bounds[3] : 0,
+  ]);
+  let k = HEAD;
+  f.set(strTab.buf.subarray(0, strTab.length), k);
+  k += strTab.length;
+  f.set(hatchW.buf.subarray(0, hatchW.length), k);
+  k += hatchW.length;
+  for (const [a, b] of groups) {
+    f[k++] = a;
+    f[k++] = b;
+  }
+  f.set(offsets, k);
+  k += prims.length;
+  f.set(w.buf.subarray(0, w.length), k);
+  k += w.length;
+  f.set(pool.buf.subarray(0, pool.length), k);
+  if (units > 0) {
+    const u = new Uint16Array(out, nF64 * 8, units);
+    let j = 0;
+    for (const s of strParts) for (let c = 0; c < s.length; c++) u[j++] = s.charCodeAt(c);
+  }
+  return new Uint8Array(out);
+}
+
+/** Gelesener Plan-Puffer (Kern-Ergebnis); `bytes` bleibt für die GPU-Kompilierung erhalten. */
+export interface DecodedPlanBuf {
+  bytes: Uint8Array;
+  prims: Primitive[];
+  groups: Array<[number, number]>;
+  bounds?: [number, number, number, number];
+  /** Inhalts-Hash je Primitiv (vom Kern; Schlüssel des GPU-Chunk-Caches) oder null. */
+  hashes: Float64Array | null;
+  /** Nummer des im Kern gehaltenen Puffers (0 = keiner), s. `compilePlanBufRange`. */
+  hold: number;
+}
+
+/** UTF-16-Einheiten → ein String (exakt, auch einzelne Surrogate). */
+function unitsToString(u: Uint16Array): string {
+  let s = "";
+  for (let i = 0; i < u.length; i += 8192) {
+    s += String.fromCharCode.apply(null, u.subarray(i, Math.min(u.length, i + 8192)) as unknown as number[]);
+  }
+  return s;
+}
+
+function bad(why: string): never {
+  throw new Error(`Plan-Puffer unlesbar: ${why}`);
+}
+
+/**
+ * Plan-Puffer → Primitive (in der JSON-Form, die der Kern früher lieferte: gleiche Felder, gleiche
+ * Reihenfolge). Wirft bei einem Fehlerpuffer des Kerns (mit dessen Meldung) oder kaputtem Puffer.
+ */
+export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
+  const bytes = input.byteOffset % 8 === 0 ? input : input.slice();
+  if (bytes.byteLength >= 16) {
+    const h = new Float64Array(bytes.buffer, bytes.byteOffset, 2);
+    if (h[0] === PLAN_BUF_ERR_MAGIC) {
+      const n = h[1];
+      throw new Error(unitsToString(new Uint16Array(bytes.buffer, bytes.byteOffset + 16, Math.min(n, (bytes.byteLength - 16) >> 1))));
+    }
+  }
+  if (bytes.byteLength < HEAD * 8) bad("zu kurz");
+  const hd = new Float64Array(bytes.buffer, bytes.byteOffset, HEAD);
+  if (hd[0] !== PLAN_BUF_MAGIC || hd[1] !== PLAN_BUF_VERSION) bad("fremde Version");
+  const [, , flags, nStrings, nHatches, nHatchWords, nGroups, nPrims, nRec, nPool, nUnits] = hd;
+  const hashes = (flags & 1) !== 0;
+  const strAt = HEAD;
+  const hatchAt = strAt + 2 * nStrings;
+  const groupAt = hatchAt + nHatchWords;
+  const offAt = groupAt + 2 * nGroups;
+  const hashAt = offAt + nPrims;
+  const recAt = hashAt + (hashes ? nPrims : 0);
+  const poolAt = recAt + nRec;
+  const nF64 = poolAt + nPool;
+  if (!Number.isInteger(nF64) || bytes.byteLength !== nF64 * 8 + nUnits * 2) bad("Länge");
+  const f = new Float64Array(bytes.buffer, bytes.byteOffset, nF64);
+  const all = unitsToString(new Uint16Array(bytes.buffer, bytes.byteOffset + nF64 * 8, nUnits));
+  const strs: Array<string | undefined> = new Array(nStrings);
+  const S = (i: number): string => {
+    let s = strs[i];
+    if (s === undefined) {
+      const o = f[strAt + 2 * i];
+      s = all.slice(o, o + f[strAt + 2 * i + 1]);
+      strs[i] = s;
+    }
+    return s;
+  };
+  // Schraffuren: einmal je Eintrag aus dem JSON (geteilt von allen Polygonen).
+  const hatchList: HatchRender[] = [];
+  let k = hatchAt;
+  for (let i = 0; i < nHatches; i++) {
+    // [jsonStr, pattern, kind, flags, scale, angle, color, lineWeight, ox, oy, seed, density,
+    //  lengthMin, lengthMax, nDash, dash…, (Motiv: length, nPts, x,y…)]
+    const js = f[k];
+    hatchList.push(js >= 0 ? (JSON.parse(S(js)) as HatchRender) : (undefined as unknown as HatchRender));
+    const hf = f[k + 3];
+    k += 15 + f[k + 14];
+    if (hf & 64) k += 2 + 2 * f[k + 1];
+    if (!(k <= groupAt)) bad("Schraffuren");
+  }
+  if (k !== groupAt) bad("Schraffuren");
+  const groups: Array<[number, number]> = [];
+  for (let g = 0; g < nGroups; g++) groups.push([f[groupAt + 2 * g], f[groupAt + 2 * g + 1]]);
+  const pts = (o: number, n: number): Vec2[] => {
+    const out: Vec2[] = new Array(n);
+    const b = poolAt + o;
+    for (let i = 0; i < n; i++) out[i] = { x: f[b + 2 * i], y: f[b + 2 * i + 1] };
+    return out;
+  };
+  const list = (o: number, n: number): number[] => {
+    const out: number[] = new Array(n);
+    const b = poolAt + o;
+    for (let i = 0; i < n; i++) out[i] = f[b + i];
+    return out;
+  };
+  /** Pick-Ids in Art-Reihenfolge (= Feldreihenfolge der Kern-JSON-Form). */
+  const setIds = (o: Record<string, unknown>, pk: number, ps: number, fl: number, tailAt: number): void => {
+    if (!(fl & F_IDS)) {
+      o[PICK_KEYS[pk - 1]] = S(ps);
+      return;
+    }
+    const found: Array<[number, string]> = [[pk, S(ps)]];
+    const po = poolAt + f[tailAt];
+    const n = f[tailAt + 1];
+    for (let j = 0; j < n; j++) found.push([f[po + 2 * j], S(f[po + 2 * j + 1])]);
+    found.sort((a, b) => a[0] - b[0]);
+    for (const [kk, id] of found) o[PICK_KEYS[kk - 1]] = id;
+  };
+  const prims: Primitive[] = new Array(nPrims);
+  for (let i = 0; i < nPrims; i++) {
+    let r = recAt + f[offAt + i];
+    const tag = f[r];
+    const fl = f[r + 1];
+    const pk = f[r + 2];
+    const ps = f[r + 3];
+    r += 4;
+    let o: Record<string, unknown>;
+    switch (tag) {
+      case 1: {
+        o = { kind: "polygon", pts: pts(f[r + 5], f[r + 6]), fill: S(f[r]), stroke: S(f[r + 1]), strokeWidthMm: f[r + 2] };
+        if (f[r + 3] >= 0) o.hatch = hatchList[f[r + 3]];
+        if (fl & F_GREYED_SET) o.greyed = (fl & F_GREYED) !== 0;
+        if (fl & F_OPACITY) o.opacity = f[r + 4];
+        let t = r + 7;
+        if (fl & F_NSE) {
+          o.noStrokeEdges = list(f[t], f[t + 1]);
+          t += 2;
+        }
+        if (pk > 0 || fl & F_IDS) setIds(o, pk, ps, fl, t);
+        break;
+      }
+      case 2: {
+        o = { kind: "line", a: { x: f[r + 4], y: f[r + 5] }, b: { x: f[r + 6], y: f[r + 7] }, cls: S(f[r]), weightMm: f[r + 2] };
+        let t = r + 8;
+        if (fl & F_DASH_NULL) o.dash = null;
+        else if (fl & F_DASH_LIST) {
+          o.dash = list(f[t], f[t + 1]);
+          t += 2;
+        }
+        if (fl & F_ZIGZAG) {
+          o.zigzag = { amplitude: f[t], wavelength: f[t + 1] };
+          t += 2;
+        }
+        if (fl & F_MOTIF) {
+          o.motif = { points: pts(f[t + 1], f[t + 2]), length: f[t] };
+          t += 3;
+        }
+        if (fl & F_COLOR) o.color = S(f[r + 1]);
+        if (pk > 0 || fl & F_IDS) setIds(o, pk, ps, fl, t);
+        if (fl & F_GREYED_SET) o.greyed = (fl & F_GREYED) !== 0;
+        if (fl & F_OPACITY) o.opacity = f[r + 3];
+        break;
+      }
+      case 3: {
+        o = {
+          kind: "arc",
+          center: { x: f[r + 4], y: f[r + 5] },
+          from: { x: f[r + 6], y: f[r + 7] },
+          to: { x: f[r + 8], y: f[r + 9] },
+          r: f[r + 10],
+          cls: S(f[r]),
+          weightMm: f[r + 2],
+        };
+        let t = r + 11;
+        if (fl & F_DASH_NULL) o.dash = null;
+        else if (fl & F_DASH_LIST) {
+          o.dash = list(f[t], f[t + 1]);
+          t += 2;
+        }
+        if (fl & F_COLOR) o.color = S(f[r + 1]);
+        if (pk > 0 || fl & F_IDS) setIds(o, pk, ps, fl, t);
+        if (fl & F_GREYED_SET) o.greyed = (fl & F_GREYED) !== 0;
+        if (fl & F_OPACITY) o.opacity = f[r + 3];
+        break;
+      }
+      case 4: {
+        o = { kind: "drawingCircle", center: { x: f[r + 4], y: f[r + 5] }, r: f[r + 6], fill: S(f[r]), stroke: S(f[r + 1]), weightMm: f[r + 2] };
+        let t = r + 7;
+        if (fl & F_DASH_NULL) o.dash = null;
+        else if (fl & F_DASH_LIST) {
+          o.dash = list(f[t], f[t + 1]);
+          t += 2;
+        }
+        if (pk > 0 || fl & F_IDS) setIds(o, pk, ps, fl, t);
+        if (fl & F_GREYED_SET) o.greyed = (fl & F_GREYED) !== 0;
+        if (fl & F_OPACITY) o.opacity = f[r + 3];
+        break;
+      }
+      case 5: {
+        o = { kind: "drawingArc", center: { x: f[r + 3], y: f[r + 4] }, r: f[r + 5], a0: f[r + 6], a1: f[r + 7], stroke: S(f[r]), weightMm: f[r + 1] };
+        let t = r + 8;
+        if (fl & F_DASH_NULL) o.dash = null;
+        else if (fl & F_DASH_LIST) {
+          o.dash = list(f[t], f[t + 1]);
+          t += 2;
+        }
+        if (pk > 0 || fl & F_IDS) setIds(o, pk, ps, fl, t);
+        if (fl & F_GREYED_SET) o.greyed = (fl & F_GREYED) !== 0;
+        if (fl & F_OPACITY) o.opacity = f[r + 2];
+        break;
+      }
+      case 6:
+      case 7:
+      case 8:
+      case 9:
+        o = JSON.parse(S(f[r])) as Record<string, unknown>;
+        break;
+      default:
+        bad(`Primitiv-Typ ${tag}`);
+    }
+    prims[i] = o as unknown as Primitive;
+  }
+  return {
+    bytes,
+    prims,
+    groups,
+    bounds: flags & 2 ? [hd[12], hd[13], hd[14], hd[15]] : undefined,
+    hashes: hashes ? new Float64Array(bytes.buffer, bytes.byteOffset + hashAt * 8, nPrims) : null,
+    hold: 0,
+  };
 }

@@ -1,9 +1,10 @@
 /**
  * Tessellierung: wandelt Plan-`Primitive` in GPU-fertige Puffer — Fassade über den Rust-Kern
- * ([K3b], `src-tauri/core/src/gpu_compile.rs`). TS kodiert die Primitive eines Chunks in den
- * Plan-Puffer (`../planBuf.ts`), Rust tesselliert (Ear-Clipping, Striche mit runden Kappen/Ecken,
- * Schraffur, Zickzack, Motive, Bögen, Kreise) und liefert Vertex-/Index-/Batch-Daten flach zurück;
- * hier werden sie nur noch hochgeladen.
+ * ([K3b], `src-tauri/core/src/gpu_compile.rs`). Rust tesselliert (Ear-Clipping, Striche mit runden
+ * Kappen/Ecken, Schraffur, Zickzack, Motive, Bögen, Kreise) und liefert Vertex-/Index-/Batch-Daten
+ * flach zurück; hier werden sie nur noch hochgeladen. Eingabe ist der Plan-Puffer v2
+ * (`../planBuf.ts`): Bereiche eines Kern-Puffers (`planDomains`) gehen direkt in die Kompilierung
+ * ({@link compilePlanBufRange}, [K3d]), gemischte Listen kodiert TS schlank ({@link compilePrimitivesToGpu}).
  *
  * Koordinaten: alles in BILDSCHIRM-Raum (wie `toScreen`): sx = mx·PX_PER_M, sy = -my·PX_PER_M,
  * relativ zum lokalen Ursprung (`origin`, erster abgelegter Punkt).
@@ -12,7 +13,7 @@
 import type { Primitive } from '../generatePlan';
 import type { Vec2 } from '../../model/types';
 import type { BufferGl, GpuGeometry, Rgba } from './glPlanTypes';
-import { encodePlanBuf } from '../planBuf';
+import { encodePlanBuf, type DecodedPlanBuf } from '../planBuf';
 import { core } from '../../engine/coreWasm';
 
 /**
@@ -41,7 +42,23 @@ export function compilePrimitivesToGpu(
   pxPerMeter = 0,
 ): GpuGeometry {
   const packed = gl.packedLineVertices === true;
-  const out = core().gpu_compile_flat(encodePlanBuf(primitives), pxPerMeter, packed);
+  const out = core().gpu_compile_flat(encodePlanBuf(primitives, { lean: true }), 0, primitives.length, pxPerMeter, packed);
+  return uploadCompiled(gl, out);
+}
+
+/**
+ * Wie {@link compilePrimitivesToGpu} für die Primitive `[from, to)` eines Kern-Puffers — ohne
+ * Umweg über Objekte: der Puffer wird einmal im Kern abgelegt (`plan_buf_hold`) und für alle
+ * Chunks wiederverwendet. Ist er dort verdrängt, wird er neu abgelegt.
+ */
+export function compilePlanBufRange(gl: BufferGl, src: DecodedPlanBuf, from: number, to: number, pxPerMeter = 0): GpuGeometry {
+  const packed = gl.packedLineVertices === true;
+  const c = core();
+  let out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed) : new Uint32Array(0);
+  if (out.length === 0) {
+    src.hold = c.plan_buf_hold(src.bytes);
+    out = src.hold ? c.gpu_compile_held(src.hold, from, to, pxPerMeter, packed) : c.gpu_compile_flat(src.bytes, from, to, pxPerMeter, packed);
+  }
   return uploadCompiled(gl, out);
 }
 

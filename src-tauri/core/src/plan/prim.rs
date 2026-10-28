@@ -3,10 +3,10 @@
 //! Zeichen für Zeichen die der TS-Objekte (camelCase, fehlende Felder fehlen).
 
 use crate::model::*;
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Aufgelöste Schraffur eines Polygons (`HatchRender`).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HatchRender {
     pub pattern: HatchPattern,
@@ -38,7 +38,7 @@ pub struct HatchRender {
 }
 
 /// Zeile unter dem Raum-Stempel.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StampLine {
     pub text: String,
     pub align: Align,
@@ -47,7 +47,12 @@ pub struct StampLine {
 /// `dash?: number[] | null`: fehlt (`None`), `null` (`Some(None)`) oder Muster.
 pub type Dash = Option<Option<Vec<f64>>>;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// Liest `dash` so, dass `null` (`Some(None)`) und fehlend (`None`, über `default`) verschieden bleiben.
+fn de_dash<'de, D: Deserializer<'de>>(d: D) -> Result<Dash, D::Error> {
+    Option::<Vec<f64>>::deserialize(d).map(Some)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Primitive {
     #[serde(rename = "polygon", rename_all = "camelCase")]
@@ -92,7 +97,7 @@ pub enum Primitive {
         b: Vec2,
         cls: String,
         weight_mm: f64,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_dash")]
         dash: Dash,
         #[serde(skip_serializing_if = "Option::is_none")]
         zigzag: Option<LineStyleZigzag>,
@@ -119,7 +124,7 @@ pub enum Primitive {
         r: f64,
         cls: String,
         weight_mm: f64,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_dash")]
         dash: Dash,
         #[serde(skip_serializing_if = "Option::is_none")]
         opening_id: Option<String>,
@@ -164,13 +169,82 @@ pub enum Primitive {
         #[serde(skip_serializing_if = "Option::is_none")]
         opacity: Option<f64>,
     },
+    /// Text entlang eines Pfads (2D-Zeichnung); erzeugt heute nur TS, s. Plan-Puffer v2.
+    #[serde(rename = "drawingTextPath", rename_all = "camelCase")]
+    DrawingTextPath {
+        path_pts: Vec<Vec2>,
+        text: String,
+        height_m: f64,
+        color: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drawing_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        greyed: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+    },
+    /// Eingebettetes Rasterbild (2D-Zeichnung).
+    #[serde(rename = "drawingImage", rename_all = "camelCase")]
+    DrawingImage {
+        min: Vec2,
+        max: Vec2,
+        src: String,
+        opacity: f64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drawing_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        greyed: Option<bool>,
+    },
+    /// Glatter Kreis (2D-Zeichnung).
+    #[serde(rename = "drawingCircle", rename_all = "camelCase")]
+    DrawingCircle {
+        center: Vec2,
+        r: f64,
+        fill: String,
+        stroke: String,
+        weight_mm: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_dash")]
+        dash: Dash,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drawing_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        greyed: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+    },
+    /// Glatter Bogen (2D-Zeichnung), Winkel im Bogenmass (CCW).
+    #[serde(rename = "drawingArc", rename_all = "camelCase")]
+    DrawingArc {
+        center: Vec2,
+        r: f64,
+        a0: f64,
+        a1: f64,
+        stroke: String,
+        weight_mm: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_dash")]
+        dash: Dash,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drawing_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        greyed: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+    },
 }
 
 impl Primitive {
     /// Setzt `greyed` (für Gruppen, deren Darstellungsmodus gedimmt ist).
     pub fn with_greyed(mut self, g: bool) -> Self {
         match &mut self {
-            Primitive::Polygon { greyed, .. } | Primitive::Line { greyed, .. } | Primitive::Arc { greyed, .. } | Primitive::Text { greyed, .. } | Primitive::DrawingText { greyed, .. } => *greyed = Some(g),
+            Primitive::Polygon { greyed, .. }
+            | Primitive::Line { greyed, .. }
+            | Primitive::Arc { greyed, .. }
+            | Primitive::Text { greyed, .. }
+            | Primitive::DrawingText { greyed, .. }
+            | Primitive::DrawingTextPath { greyed, .. }
+            | Primitive::DrawingImage { greyed, .. }
+            | Primitive::DrawingCircle { greyed, .. }
+            | Primitive::DrawingArc { greyed, .. } => *greyed = Some(g),
         }
         self
     }
