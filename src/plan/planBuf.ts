@@ -178,6 +178,14 @@ export interface EncodeOptions {
    * (tag 0). Schneller; {@link decodePlanBuf} kann so einen Puffer nicht vollständig lesen.
    */
   lean?: boolean;
+  /**
+   * `false`: Texte/Bilder ohne JSON (String-Index −1), aber mit Typ und Pick-Ids — für Kern-
+   * Verbraucher, die Texte nicht lesen (Render-Szene, Auswahl). {@link decodePlanBuf} kann so
+   * einen Puffer nicht lesen. Standard `true`.
+   */
+  textJson?: boolean;
+  /** `false`: Schraffuren ohne JSON (nur das Hatch-Format, wie `lean`). Standard `true`. */
+  hatchJson?: boolean;
   /** Gruppen `[start, end)` in den Kopf schreiben. */
   groups?: ReadonlyArray<readonly [number, number]>;
   bounds?: readonly [number, number, number, number];
@@ -186,6 +194,8 @@ export interface EncodeOptions {
 /** Primitive → Plan-Puffer v2 (Format s. Dateikopf). */
 export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions = {}): Uint8Array {
   const lean = opts.lean === true;
+  const textJson = opts.textJson !== false;
+  const hatchJson = !lean && opts.hatchJson !== false;
   const strParts: string[] = [];
   const strTab = new F64Writer(64);
   const strIdx = new Map<string, number>();
@@ -210,7 +220,7 @@ export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions =
     let i = hatchIdx.get(h);
     if (i === undefined) {
       i = hatchIdx.size;
-      hatchW.push(lean ? -1 : str(JSON.stringify(h)));
+      hatchW.push(hatchJson ? str(JSON.stringify(h)) : -1);
       writeHatch(hatchW, h, str(h.color));
       hatchIdx.set(h, i);
     }
@@ -385,7 +395,7 @@ export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions =
         }
         const tag = p.kind === "text" ? 6 : p.kind === "drawingText" ? 7 : p.kind === "drawingTextPath" ? 8 : 9;
         head(tag, 0, p);
-        w.push(str(JSON.stringify(p)));
+        w.push(textJson ? str(JSON.stringify(p)) : -1);
       }
     }
   }

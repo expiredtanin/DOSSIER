@@ -58,6 +58,11 @@ pub mod plan_section;
 pub mod voids;
 pub mod curves;
 pub mod skeleton;
+pub mod plan_parts;
+pub mod plan_scene;
+pub mod plan_pick;
+pub mod snap;
+pub mod plan_svg;
 
 #[cfg(feature = "web")]
 mod web;

@@ -8,7 +8,7 @@
 
 import type { Drawing2D, Project, Vec2, Wall } from "../model/types";
 import { getWallType, wallTypeThickness } from "../model/types";
-import { add, leftNormal, lineIntersect, normalize, scale, sub } from "../model/geometry";
+import { add, leftNormal, normalize, scale, sub } from "../model/geometry";
 import { wallReferenceOffset } from "../model/wall";
 import { centroid as roomCentroid } from "../core";
 import { columnFootprint } from "../core";
@@ -17,9 +17,9 @@ import type { SnapKind, SnapResult, SnapSettings } from "./types";
 import { sampleBezierChain, sampleCatmullRom, sampleUniformBSpline } from "../core";
 import { buildDrawingIndex, drawingsNear, isIndexable, pointSegDist__geometry_drawingIndex as pointSegDist, type DrawingIndex } from "../core";
 import { sheetSnapSegments } from "./sheetSnapGeometry";
+import { holdSnapSegments, releaseSnapSegments, snapOnSegments, type SegSnapCand } from "../core";
 
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
-const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 /** Bildschirm-px-Bonus je Snap-Art: höher = gewinnt knappe Vergleiche. */
 const PRIORITY: Record<SnapKind, number> = {
@@ -193,8 +193,89 @@ function snapDrawings(input: SnapInput, near?: { at: Vec2; r: number }): Drawing
   return out;
 }
 
-/** Sammelt alle sichtbaren Strecken des Geschosses (Wandachsen + 2D-Segmente). */
+/** Sammelt alle sichtbaren Strecken des Geschosses (Wandachsen + 2D-Segmente) samt Entwurf. */
 function collectSegments(input: SnapInput, near?: { at: Vec2; r: number }): Seg[] {
+  const segs = baseSegments(input, near);
+  for (const seg of draftSegments(input)) segs.push(seg);
+  return segs;
+}
+
+/** Bereits gesetzte Draft-Segmente (Polylinie/Wand im Bau). */
+function draftSegments(input: SnapInput): Seg[] {
+  const segs: Seg[] = [];
+  for (let i = 0; i < input.draftPoints.length - 1; i++) {
+    segs.push([input.draftPoints[i], input.draftPoints[i + 1]]);
+  }
+  return segs;
+}
+
+/**
+ * Was je Projekt/Geschoss/Sichtbarkeit gleich bleibt, einmal gesammelt (lief sonst bei jeder
+ * Mausbewegung über alle Wände, Räume, Treppen, Stützen): die Strecken ohne Entwurf (im Kern
+ * abgelegt, erst bei Bedarf), Raum-Stempel-Anker, Kreise/Bögen, Ellipsen-Mittelpunkte. Die
+ * letzten paar Einträge bleiben, ältere werden freigegeben.
+ */
+interface LevelSnap {
+  project: Project;
+  levelId: string;
+  codes: Set<string>;
+  /** Abgelegte Strecken im Kern (0 = noch nicht). */
+  hold: number;
+  anchors: Vec2[] | null;
+  circles: CircleGeom[] | null;
+  ellipses: Vec2[] | null;
+}
+const levelSnaps: LevelSnap[] = [];
+const MAX_LEVEL_SNAPS = 4;
+function levelSnap(input: SnapInput): LevelSnap {
+  let e = levelSnaps.find((h) => h.project === input.project && h.levelId === input.levelId && h.codes === input.visibleCodes);
+  if (!e) {
+    e = { project: input.project, levelId: input.levelId, codes: input.visibleCodes, hold: 0, anchors: null, circles: null, ellipses: null };
+    levelSnaps.push(e);
+    while (levelSnaps.length > MAX_LEVEL_SNAPS) releaseSnapSegments(levelSnaps.shift()!.hold);
+  }
+  return e;
+}
+function heldBaseSegments(input: SnapInput, fresh: boolean): number {
+  const e = levelSnap(input);
+  if (e.hold && !fresh) return e.hold;
+  releaseSnapSegments(e.hold);
+  e.hold = holdSnapSegments(baseSegments(input));
+  return e.hold;
+}
+/** Raum-Stempel-Anker (fixer Anker, sonst Flächenschwerpunkt) des Geschosses. */
+function roomAnchors(input: SnapInput): Vec2[] {
+  const e = levelSnap(input);
+  if (!e.anchors) {
+    e.anchors = [];
+    for (const room of input.project.rooms ?? []) {
+      if (room.floorId !== input.levelId) continue;
+      if (!input.visibleCodes.has(room.categoryCode)) continue;
+      if (room.boundary.length < 3) continue;
+      e.anchors.push(room.stampAnchor ?? roomCentroid(room.boundary));
+    }
+  }
+  return e.anchors;
+}
+function levelCircles(input: SnapInput): CircleGeom[] {
+  const e = levelSnap(input);
+  return (e.circles ??= collectCircles(input));
+}
+function ellipseCenters(input: SnapInput): Vec2[] {
+  const e = levelSnap(input);
+  if (!e.ellipses) {
+    e.ellipses = [];
+    for (const d of nonLineDrawings(input.project.drawings2d)) {
+      if (d.levelId !== input.levelId) continue;
+      if (!input.visibleCodes.has(d.categoryCode)) continue;
+      if (d.geom.shape === "ellipse") e.ellipses.push(d.geom.center);
+    }
+  }
+  return e.ellipses;
+}
+
+/** Sichtbare Strecken des Geschosses ohne Entwurf (Wandachsen, Schichtgrenzen, Umrisse, 2D). */
+function baseSegments(input: SnapInput, near?: { at: Vec2; r: number }): Seg[] {
   const segs: Seg[] = [];
   for (const w of input.project.walls) {
     if (w.floorId !== input.levelId) continue;
@@ -235,10 +316,6 @@ function collectSegments(input: SnapInput, near?: { at: Vec2; r: number }): Seg[
     // Runde Stützen: s. collectCircles (Zentrum/Quadranten statt Vieleck-Kanten).
   }
   for (const d of snapDrawings(input, near)) drawingSegs(d, segs);
-  // Bereits gesetzte Draft-Segmente (Polylinie/Wand im Bau).
-  for (let i = 0; i < input.draftPoints.length - 1; i++) {
-    segs.push([input.draftPoints[i], input.draftPoints[i + 1]]);
-  }
   return segs;
 }
 
@@ -284,16 +361,6 @@ function collectCircles(input: SnapInput): CircleGeom[] {
   return out;
 }
 
-/** Lotfußpunkt von p auf die Strecke a-b, auf das Segment geklemmt. */
-function perpFoot(p: Vec2, a: Vec2, b: Vec2): Vec2 {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 < 1e-12) return a;
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-  t = Math.max(0, Math.min(1, t));
-  return { x: a.x + dx * t, y: a.y + dy * t };
-}
-
 // ── Verweil-Erkennung fürs Teilpunkte-Snapping ("divide") ───────────────────
 // Modul-weiter Zustand (wie `lastCoalesceKey` in projectSlice.ts) statt in
 // SnapInput/computeSnap-Parametern: computeSnap wird von mehreren, völlig
@@ -322,28 +389,14 @@ let acquiredParallelSeg: Seg | null = null;
 const segKey = (seg: Seg): string =>
   `${seg[0].x},${seg[0].y}|${seg[1].x},${seg[1].y}`;
 
-/** Nächstgelegene Strecke zu `raw` innerhalb der Fangtoleranz (Meter), oder null. */
-function nearestSegment(raw: Vec2, segs: Seg[], tolM: number): Seg | null {
-  let best: Seg | null = null;
-  let bestD = tolM;
-  for (const seg of segs) {
-    const d = dist(perpFoot(raw, seg[0], seg[1]), raw);
-    if (d < bestD) {
-      bestD = d;
-      best = seg;
-    }
-  }
-  return best;
-}
-
 /**
  * Verankert/verwirft den Verweil-Zustand für den aktuellen Cursor und liefert
  * die "freigegebene" Strecke (Teilpunkte fangbar), sobald der Cursor lange
  * genug (`delayMs`) auf DERSELBEN Strecke geblieben ist — sonst `null`. Ein
  * Streckenwechsel (auch zu "keine Strecke") setzt die Verweildauer zurück.
+ * `seg` ist die nächste Strecke innerhalb der Fangtoleranz (aus dem Kern) oder null.
  */
-function updateDwell(raw: Vec2, segs: Seg[], delayMs: number, tolM: number): Seg | null {
-  const seg = nearestSegment(raw, segs, tolM);
+function updateDwell(seg: Seg | null, delayMs: number): Seg | null {
   const key = seg ? segKey(seg) : null;
   const now = Date.now();
   if (key !== dwellSegKey) {
@@ -393,10 +446,14 @@ export function computeSnap(input: SnapInput): SnapResult | null {
   // Liste gebaut und der Schnittpunkt-Fang prüfte ALLE Paare (O(N²): die Seite
   // blockierte beim ersten Klick eines Zeichenwerkzeugs). Kleine Projekte bleiben
   // exakt wie bisher.
+  // Strecken-Fang (Lot, Endpunkte, Mitte, Schnitt, Kante, nächste Strecke) rechnet der Kern
+  // (`geometry/snapSegments.ts`): bei normalen Projekten über die dort abgelegten Strecken des
+  // Geschosses (`held`) plus Entwurf, sonst über die hier vorausgewählten nahen Strecken.
   const nearMode = input.project.drawings2d.length > LARGE_DRAWINGS;
   const intRadius = tolM * 6;
+  let held = 0;
   let segs: Seg[] = [];
-  let intSegs: Seg[] = [];
+  let intSegs: Seg[] | null = null;
   if (needSegs) {
     if (nearMode) {
       const cand = collectSegments(input, { at: raw, r: intRadius });
@@ -408,8 +465,8 @@ export function computeSnap(input: SnapInput): SnapResult | null {
       // Schnittpunkte nur unter den nächsten Strecken (paarweise → quadratisch).
       intSegs = withDist.slice(0, 64).map((e) => e.seg);
     } else {
-      segs = collectSegments(input);
-      intSegs = segs;
+      held = heldBaseSegments(input, false);
+      segs = draftSegments(input);
     }
     // Abgeleitete Blatt-Geometrie (Schnitt/Ansicht, s. sheetSnapGeometry.ts):
     // nur die Strecken in Cursornähe — eine Ansicht hat schnell Tausende Kanten,
@@ -423,17 +480,40 @@ export function computeSnap(input: SnapInput): SnapResult | null {
         .slice(0, 64)
         .map((e) => e.seg);
       if (near.length > 0) {
-        const shared = intSegs === segs;
         segs = segs.concat(near);
-        intSegs = shared ? segs : intSegs.concat(near);
+        if (intSegs) intSegs = intSegs.concat(near);
       }
     }
   }
+  let segSnap: ReturnType<typeof snapOnSegments> = null;
+  if (needSegs) {
+    const q = {
+      raw,
+      tolM,
+      pxPerMeter,
+      perpendicular: settings.perpendicular,
+      endpoint: settings.endpoint,
+      midpoint: settings.midpoint,
+      intersection: settings.intersection,
+      onEdge: settings.onEdge,
+      lastPoint: settings.perpendicular ? input.lastPoint : null,
+    };
+    segSnap = snapOnSegments(held, segs, intSegs, q);
+    // Abgelegte Strecken verdrängt/freigegeben: neu ablegen und nochmals.
+    if (!segSnap && held) segSnap = snapOnSegments(heldBaseSegments(input, true), segs, intSegs, q);
+  }
+  // Kern-Kandidat übernehmen, wenn er besser ist (gleiche Regel wie `consider`).
+  const offer = (c: SegSnapCand | null | undefined) => {
+    if (c && c.score < bestScore) {
+      bestScore = c.score;
+      best = { point: c.point, kind: c.kind, distPx: c.distPx, refA: c.kind === "perpendicular" ? input.lastPoint ?? undefined : undefined };
+    }
+  };
 
   // Teilpunkt-Verweilerkennung: braucht dieselben Strecken wie oben. Ohne sie
   // (alle Objekt-Snap-Arten aus) bleiben "divide"/"parallel" ebenfalls inaktiv
   // — konsistent dazu, dass dann ohnehin keine Linien-bezogenen Snaps gelten.
-  const revealed = updateDwell(raw, segs, settings.hoverDivideDelayMs, tolM);
+  const revealed = updateDwell(segSnap?.nearest ?? null, settings.hoverDivideDelayMs);
   if (revealed) {
     const [a, b] = revealed;
     const n = Math.max(2, Math.round(settings.hoverDivideCount));
@@ -474,50 +554,18 @@ export function computeSnap(input: SnapInput): SnapResult | null {
 
   // perpendicular: Lotfusspunkt VOM LETZTEN PUNKT (nicht vom Cursor wie
   // "onEdge") auf nahe Strecken — die Strecke lastPoint→Fangpunkt steht im
-  // rechten Winkel zur Referenz-Strecke.
-  if (settings.perpendicular && input.lastPoint) {
-    for (const [a, b] of segs) {
-      consider(perpFoot(input.lastPoint, a, b), "perpendicular", input.lastPoint);
-    }
-  }
+  // rechten Winkel zur Referenz-Strecke; dann die Strecken-Endpunkte (Kern, Block A).
+  offer(segSnap?.a);
 
-  // endpoint (Strecken-Endpunkte + Draft-Knoten + Raum-Stempel-Anker).
+  // endpoint (Draft-Knoten + Raum-Stempel-Anker).
   if (settings.endpoint) {
-    for (const [a, b] of segs) {
-      consider(a, "endpoint");
-      consider(b, "endpoint");
-    }
     for (const p of input.draftPoints) consider(p, "endpoint");
     // Raum-Stempel-Anker (fixer Anker, sonst Flächenschwerpunkt) des Geschosses.
-    for (const room of input.project.rooms ?? []) {
-      if (room.floorId !== input.levelId) continue;
-      if (!input.visibleCodes.has(room.categoryCode)) continue;
-      if (room.boundary.length < 3) continue;
-      consider(room.stampAnchor ?? roomCentroid(room.boundary), "endpoint");
-    }
+    for (const p of roomAnchors(input)) consider(p, "endpoint");
   }
-  // midpoint.
-  if (settings.midpoint) {
-    for (const [a, b] of segs) consider(mid(a, b), "midpoint");
-  }
-  // intersection (paarweise Geraden-Schnitt der Strecken, nahe am Cursor).
-  if (settings.intersection) {
-    for (let i = 0; i < intSegs.length; i++) {
-      for (let j = i + 1; j < intSegs.length; j++) {
-        const [a, b] = intSegs[i];
-        const [c, d] = intSegs[j];
-        const x = lineIntersect(a, { x: b.x - a.x, y: b.y - a.y }, c, {
-          x: d.x - c.x,
-          y: d.y - c.y,
-        });
-        if (x) consider(x, "intersection");
-      }
-    }
-  }
-  // onEdge (Lotfußpunkt auf nahe Strecken; niedrige Priorität).
-  if (settings.onEdge) {
-    for (const [a, b] of segs) consider(perpFoot(raw, a, b), "onEdge");
-  }
+  // midpoint, intersection (paarweise Geraden-Schnitt der Strecken, nahe am Cursor), onEdge
+  // (Lotfußpunkt auf nahe Strecken; niedrige Priorität) — Kern, Block B.
+  offer(segSnap?.b);
 
   // Kreis-/Bogen-Snaps: Mittelpunkt + Quadranten (Ost/Nord/West/Süd); bei Bögen
   // nur die Quadranten IM Bogen-Bereich, plus die beiden Bogen-Endpunkte. Center/
@@ -535,7 +583,7 @@ export function computeSnap(input: SnapInput): SnapResult | null {
       const sweep = norm(c.arc.a1 - c.arc.a0) || TAU;
       return norm(ang - c.arc.a0) <= sweep + 1e-9;
     };
-    for (const c of collectCircles(input)) {
+    for (const c of levelCircles(input)) {
       if (settings.center) {
         consider(c.center, "center");
         // Volle CCW-Spanne (0 ⇒ Vollkreis); Quadrant nur, wenn im Bogen liegt.
@@ -570,11 +618,7 @@ export function computeSnap(input: SnapInput): SnapResult | null {
     // Ellipse: nur der Mittelpunkt (keine Quadranten — bei gedrehter Ellipse
     // wären die "Achsenpunkte" ohnehin keine Kreis-Quadranten mehr).
     if (settings.center) {
-      for (const d of nonLineDrawings(input.project.drawings2d)) {
-        if (d.levelId !== input.levelId) continue;
-        if (!input.visibleCodes.has(d.categoryCode)) continue;
-        if (d.geom.shape === "ellipse") consider(d.geom.center, "center");
-      }
+      for (const p of ellipseCenters(input)) consider(p, "center");
     }
   }
 

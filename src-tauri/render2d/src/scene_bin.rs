@@ -1,4 +1,4 @@
-// Binaerformat der Plan-Szene (Version 1): TS schreibt (`src/plan/renderSceneBin.ts`),
+// Binaerformat der Plan-Szene (Version 1): der Kern schreibt (`core/src/plan_scene.rs`),
 // Rust liest — ersetzt den JSON-Weg zwischen Webview und render2d. Alles little-endian.
 //
 // Aufbau (alle Abschnitte lueckenlos hintereinander, kein Fuellmaterial):
@@ -214,7 +214,7 @@ pub fn decode_scene(bytes: &[u8]) -> Result<Scene, String> {
 mod tests {
     use super::*;
 
-    /// Beispielszene; MUSS mit `sampleScene()` in `src/plan/renderSceneBin.test.ts`
+    /// Beispielszene; MUSS mit `sample()` in `core/src/plan_scene.rs`
     /// uebereinstimmen (gemeinsame Bytes: `tests/fixtures/scene_v1.bin`).
     fn sample() -> Scene {
         Scene {

@@ -46,6 +46,14 @@ export {
 } from "../geometry/drawingIndex";
 
 export {
+  type SegSnapCand,
+  type SegSnapResult,
+  holdSnapSegments,
+  releaseSnapSegments,
+  snapOnSegments,
+} from "../geometry/snapSegments";
+
+export {
   mvGeom,
   reversesOrientation,
   scaleFactor,
@@ -264,18 +272,10 @@ export {
 } from "../plan/planView/geometry";
 
 export {
+  type ClientMap,
   type OwnerField,
-  type OwnerIndex,
-  buildOwnerIndex,
-  ownedBy,
-} from "../plan/planView/ownerIndex";
-
-export {
-  buildSegmentIndex,
-  nearestSegment,
-  pointSegDist as pointSegDist__plan_planView_segmentIndex,
-  segmentsNear,
-} from "../plan/planView/segmentIndex";
+  PlanPickIndex,
+} from "../plan/planView/planPick";
 
 export {
   marqueeHitUnderlay,
@@ -290,6 +290,7 @@ export {
 } from "../plan/toElevation";
 
 export {
+  planSceneBin,
   planToRenderScene,
 } from "../plan/toRenderScene";
 

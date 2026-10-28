@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import type { Drawing2D, Project } from "../../model/types";
 import { generatePlan, materializeUnderlay } from "../generatePlan";
 import { marqueeHitDrawings } from "./geometry";
-import { buildSegmentIndex, nearestSegment } from "./segmentIndex";
+import { PlanPickIndex } from "./planPick";
 import { buildDrawingIndex, marqueeHitUnderlay, nearestInDrawings } from "./underlayAccess";
 
 let seed = 7;
@@ -53,12 +53,12 @@ describe("underlayAccess == Primitiv-Varianten", () => {
 
   it("nächstes Segment == Segment-Index der Primitive", () => {
     const idx = buildDrawingIndex(under)!;
-    const segIdx = buildSegmentIndex(normal.primitives)!;
+    const segIdx = new PlanPickIndex(normal);
     for (let k = 0; k < 400; k++) {
       const m = { x: rnd() * 540 - 20, y: rnd() * 540 - 20 };
       const a = nearestInDrawings(idx, m, 2);
-      const bi = nearestSegment(segIdx, normal.primitives, m, 2);
-      const b = bi === null ? null : (normal.primitives[bi] as any);
+      const bi = segIdx.nearestSegment(m, 2);
+      const b = bi === null ? null : (normal.primitives[bi.i] as any);
       expect(a?.drawing.id ?? null).toBe(b?.drawingId ?? null);
     }
   });

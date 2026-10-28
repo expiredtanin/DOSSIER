@@ -212,7 +212,7 @@ impl PlanBuf {
 // ── Farben (früher `parseColor` in TS) ───────────────────────────────────────────────────────────
 
 /// JS `parseInt(s, 16)` (Leerraum, Vorzeichen, `0x`, längster Ziffern-Präfix; NaN ohne Ziffer).
-fn js_parse_hex(units: &[u16]) -> f64 {
+pub(crate) fn js_parse_hex(units: &[u16]) -> f64 {
     let s = String::from_utf16_lossy(units);
     let t = s.trim_start_matches(crate::plan::overrides::js_space);
     let (neg, t) = match t.as_bytes().first() {
@@ -391,7 +391,7 @@ impl<'a> Reader<'a> {
 }
 
 /// Nicht-negative ganze Zahl als Index/Anzahl.
-fn whole(v: f64) -> Option<usize> {
+pub(crate) fn whole(v: f64) -> Option<usize> {
     if !(v >= 0.0) || v.fract() != 0.0 || v > (u32::MAX as f64) {
         return None;
     }
@@ -473,17 +473,17 @@ pub struct View<'a> {
 }
 
 /// Ein Primitiv-Eintrag, roh gelesen (Indizes noch nicht aufgelöst).
-struct Rec {
-    tag: u32,
-    flags: u32,
-    pick: (u32, i32),
+pub(crate) struct Rec {
+    pub(crate) tag: u32,
+    pub(crate) flags: u32,
+    pub(crate) pick: (u32, i32),
     /// Feste Felder nach dem Kopf (je Typ, s. Format).
-    f: Vec<f64>,
-    dash: Option<(usize, usize)>,
-    nse: Option<(usize, usize)>,
-    zigzag: Option<(f64, f64)>,
-    motif: Option<(f64, usize, usize)>,
-    ids: Option<(usize, usize)>,
+    pub(crate) f: Vec<f64>,
+    pub(crate) dash: Option<(usize, usize)>,
+    pub(crate) nse: Option<(usize, usize)>,
+    pub(crate) zigzag: Option<(f64, f64)>,
+    pub(crate) motif: Option<(f64, usize, usize)>,
+    pub(crate) ids: Option<(usize, usize)>,
 }
 
 fn fixed_len(tag: u32) -> Option<usize> {
@@ -561,6 +561,11 @@ impl<'a> View<'a> {
         self.n_prims == 0
     }
 
+    /// Anzahl Einträge der String-Tabelle.
+    pub(crate) fn n_strings(&self) -> usize {
+        self.n_strings
+    }
+
     pub fn bounds(&self) -> Option<[f64; 4]> {
         self.bounds
     }
@@ -609,7 +614,7 @@ impl<'a> View<'a> {
         Some(Some(self.string(whole(idx)?)?))
     }
 
-    fn pool(&self, off: usize, n: usize) -> Option<Vec<f64>> {
+    pub(crate) fn pool(&self, off: usize, n: usize) -> Option<Vec<f64>> {
         if off.checked_add(n)? > self.n_pool {
             return None;
         }
@@ -620,13 +625,13 @@ impl<'a> View<'a> {
         Some(out)
     }
 
-    fn pool_pts(&self, off: usize, n: usize) -> Option<Vec<V2>> {
+    pub(crate) fn pool_pts(&self, off: usize, n: usize) -> Option<Vec<V2>> {
         let l = self.pool(off, n.checked_mul(2)?)?;
         Some(l.chunks_exact(2).map(|c| V2 { x: c[0], y: c[1] }).collect())
     }
 
     /// Hatch-Einträge: (JSON-String-Index, Hatch, Farb-String-Index).
-    fn hatch_table(&self) -> Option<Vec<(i32, Hatch, i32)>> {
+    pub(crate) fn hatch_table(&self) -> Option<Vec<(i32, Hatch, i32)>> {
         let mut r = Reader { w: self.w, pos: self.hatches_at, end: self.hatches_end };
         let mut out = Vec::with_capacity(self.n_hatches);
         for _ in 0..self.n_hatches {
@@ -643,7 +648,24 @@ impl<'a> View<'a> {
         Some(out)
     }
 
-    fn rec(&self, i: usize) -> Option<Rec> {
+    /// Absoluter Wortindex des Eintrags `i` (Kopf `[tag, flags, pickKind, pickStr]`, danach die
+    /// festen Felder) — für Leser, die nur wenige Wörter brauchen ([`View::word`]).
+    pub(crate) fn rec_at(&self, i: usize) -> Option<usize> {
+        if i >= self.n_prims {
+            return None;
+        }
+        let off = whole(self.w.get(self.offsets_at + i)?)?;
+        let at = self.recs_at.checked_add(off)?;
+        (at < self.recs_end).then_some(at)
+    }
+
+    /// Wort `k` des `f64`-Teils (s. [`View::rec_at`]).
+    #[inline]
+    pub(crate) fn word(&self, k: usize) -> Option<f64> {
+        self.w.get(k)
+    }
+
+    pub(crate) fn rec(&self, i: usize) -> Option<Rec> {
         if i >= self.n_prims {
             return None;
         }

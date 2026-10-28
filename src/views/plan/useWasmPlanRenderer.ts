@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Plan } from "../../core";
-import { encodeRenderScene, planToRenderScene } from "../../core";
+import { planSceneBin } from "../../core";
 
 interface ViewBox {
   x: number;
@@ -115,7 +115,7 @@ export function useWasmPlanRenderer(
     const r = rendererRef.current;
     if (!r || !plan) return;
     try {
-      r.set_scene_bin(encodeRenderScene(planToRenderScene(plan)));
+      r.set_scene_bin(planSceneBin(plan));
     } catch (e) {
       console.warn("render2d set_scene_bin fehlgeschlagen:", e);
     }
