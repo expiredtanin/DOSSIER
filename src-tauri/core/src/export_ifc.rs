@@ -514,7 +514,7 @@ pub fn export_ifc_spf(project_in: &Project, now_ms: f64) -> Result<String, Strin
         let (placement, shape) = emit_box_product!(&ceiling.outline, z_bottom - structure.base_elevation, z_top - z_bottom, structure.placement_id);
         let mut name = ceiling.id.clone();
         let mut type_idx = None;
-        if let Some((tid, tname, layers)) = ceiling_type_of(p, ceiling) {
+        if let Some((tid, tname, layers)) = model3d::ceiling_type_ref(p, ceiling) {
             name = tname.to_string();
             type_idx = Some(type_for!("IFCSLABTYPE", "FLOOR", tid, tname, layers));
         }
@@ -718,16 +718,6 @@ pub fn export_ifc_spf(project_in: &Project, now_ms: f64) -> Result<String, Strin
     out.push("ENDSEC;".to_string());
     out.push("END-ISO-10303-21;".to_string());
     Ok(out.join("\n") + "\n")
-}
-
-/// Deckentyp (id, Name, Schichten): Deckentyp, sonst Wandtyp (`getCeilingType`).
-fn ceiling_type_of<'a>(p: &'a Project, c: &Ceiling) -> Option<(&'a str, &'a str, &'a [Layer])> {
-    if let Some(id) = c.ceiling_type_id.as_deref() {
-        if let Some(t) = p.ceiling_types.as_deref().and_then(|v| v.iter().find(|t| t.id == id)) {
-            return Some((&t.id, &t.name, &t.layers));
-        }
-    }
-    p.wall_types.iter().find(|t| t.id == c.wall_type_id).map(|t| (t.id.as_str(), t.name.as_str(), t.layers.as_slice()))
 }
 
 #[cfg(test)]

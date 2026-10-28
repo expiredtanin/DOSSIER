@@ -59,6 +59,16 @@ pub struct RMesh {
 
 // ── Decken ──────────────────────────────────────────────────────────────────
 
+/// Deckentyp (id, Name, Schichten): Deckentyp, sonst Wandtyp (`getCeilingType`).
+pub fn ceiling_type_ref<'a>(p: &'a Project, c: &Ceiling) -> Option<(&'a str, &'a str, &'a [Layer])> {
+    if let Some(id) = c.ceiling_type_id.as_deref() {
+        if let Some(t) = p.ceiling_types.as_deref().and_then(|v| v.iter().find(|t| t.id == id)) {
+            return Some((&t.id, &t.name, &t.layers));
+        }
+    }
+    p.wall_types.iter().find(|t| t.id == c.wall_type_id).map(|t| (t.id.as_str(), t.name.as_str(), t.layers.as_slice()))
+}
+
 fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Option<&'a [Layer]> {
     if let Some(id) = c.ceiling_type_id.as_deref() {
         if let Some(t) = p.ceiling_types.as_deref().and_then(|v| v.iter().find(|t| t.id == id)) {

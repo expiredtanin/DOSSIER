@@ -25,6 +25,8 @@ export type QueryName =
   | "stairRailings"
   | "roofMeshes"
   | "roofCutLayers"
+  | "scheduleRows"
+  | "scheduleCsv"
   | "pickGeometry"
   | "model3dParts";
 

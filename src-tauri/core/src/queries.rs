@@ -2,7 +2,7 @@
 //! antwortet. TS ruft sie über `ProjectDocument.query(name, args, text)`.
 
 use crate::model::Project;
-use crate::{kennzahlen, model3d, site_rules, sun};
+use crate::{export_schedule, kennzahlen, model3d, site_rules, sun};
 
 fn json<T: serde::Serialize>(v: &T) -> Result<String, String> {
     serde_json::to_string(v).map_err(|e| e.to_string())
@@ -26,6 +26,8 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("stairRailings", _) => json(&model3d::emit_stair_railings(p)),
         ("roofMeshes", _) => json(&model3d::emit_roofs(p, if text.is_empty() { None } else { Some(text) })?),
         ("roofCutLayers", _) => json(&model3d::emit_roof_cut_layers(p)?),
+        ("scheduleRows", _) => json(&export_schedule::schedule_rows(p)),
+        ("scheduleCsv", 1) => Ok(export_schedule::export_schedule_csv(p, text, args[0] != 0.0)),
         ("pickGeometry", _) => json(&model3d::pick_geometry(p)?),
         ("model3dParts", 3) => json(&model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
