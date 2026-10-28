@@ -26,6 +26,7 @@ mod plan_walls;
 mod plan_openings;
 mod delaunay;
 mod document;
+mod ops;
 mod mesh_section;
 mod plan_elevation;
 mod plan_misc;

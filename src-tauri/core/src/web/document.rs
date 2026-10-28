@@ -2,6 +2,7 @@
 //! Projekt nicht bei jedem Aufruf neu übergeben muss.
 
 use crate::document::{Document, Op};
+use crate::ops::{ops_from_json, ops_to_json};
 use serde_json::Value;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -39,21 +40,101 @@ pub fn doc_close(h: u32) {
     });
 }
 
-/// Wendet eine Op-Folge (JSON-Array) an. Leerer Text = ok, sonst JSON-Array der Meldungen.
-#[wasm_bindgen]
-pub fn doc_apply(h: u32, ops_json: &str) -> String {
-    let parsed: Result<Vec<Op>, String> = serde_json::from_str::<Value>(ops_json)
-        .map_err(|e| e.to_string())
-        .and_then(|v| v.as_array().ok_or("Ops sind kein Array".to_string()).and_then(|a| a.iter().map(Op::from_json).collect()));
-    let problems = match parsed {
-        Err(e) => vec![e],
-        Ok(ops) => match with_doc(h, |d| d.apply(&ops)) {
-            None => vec!["Dokument nicht offen".to_string()],
-            Some(Ok(())) => return String::new(),
-            Some(Err(p)) => p,
-        },
+fn parse_ops(ops_json: &str) -> Result<Vec<Op>, String> {
+    serde_json::from_str::<Value>(ops_json).map_err(|e| e.to_string()).and_then(|v| ops_from_json(&v))
+}
+
+/// Ob der Text Nicht-endlich-Marken enthalten kann (`"\u0001NaN"` …, s. `crate::ops`).
+fn may_have_marks(ops_json: &str) -> bool {
+    ops_json.contains("\\u0001")
+}
+
+fn problems_text(r: Option<Result<(), Vec<String>>>, parsed_err: Option<String>) -> String {
+    let problems = match (parsed_err, r) {
+        (Some(e), _) => vec![e],
+        (None, None) => vec!["Dokument nicht offen".to_string()],
+        (None, Some(Ok(()))) => return String::new(),
+        (None, Some(Err(p))) => p,
     };
     Value::from(problems).to_string()
+}
+
+/// Wendet eine Op-Folge (JSON-Array) an, ohne Verlauf (Abgleich). Leerer Text = ok, sonst
+/// JSON-Array der Meldungen (Dokument unverändert).
+#[wasm_bindgen]
+pub fn doc_apply(h: u32, ops_json: &str) -> String {
+    match parse_ops(ops_json) {
+        Err(e) => problems_text(None, Some(e)),
+        Ok(ops) => problems_text(with_doc(h, |d| d.apply_marked(&ops, may_have_marks(ops_json))), None),
+    }
+}
+
+/// Eine Benutzer-Änderung: Ops anwenden, prüfen (NaN, neue doppelte ids) und als Undo-Schritt
+/// aufzeichnen. `key` = coalesceKey (leer = keiner), `now_ms` = Zeit für das Koaleszenz-Fenster.
+/// Leerer Text = angenommen, sonst JSON-Array der Meldungen (Dokument und Verlauf unverändert).
+#[wasm_bindgen]
+pub fn doc_commit(h: u32, ops_json: &str, key: &str, now_ms: f64) -> String {
+    match parse_ops(ops_json) {
+        Err(e) => problems_text(None, Some(e)),
+        Ok(ops) => {
+            let key = (!key.is_empty()).then_some(key);
+            let now = if now_ms.is_finite() { now_ms } else { 0.0 };
+            problems_text(with_doc(h, |d| d.commit(&ops, key, now, may_have_marks(ops_json))), None)
+        }
+    }
+}
+
+/// Einen Schritt zurück: die angewendeten Ops als JSON-Array (für die TS-Leseansicht), leer = nichts.
+#[wasm_bindgen]
+pub fn doc_undo(h: u32) -> String {
+    with_doc(h, |d| d.undo().map(|ops| ops_to_json(&ops))).flatten().unwrap_or_default()
+}
+
+/// Einen Schritt vor: die angewendeten Ops als JSON-Array, leer = nichts.
+#[wasm_bindgen]
+pub fn doc_redo(h: u32) -> String {
+    with_doc(h, |d| d.redo().map(|ops| ops_to_json(&ops))).flatten().unwrap_or_default()
+}
+
+/// Verlaufsstand `[Undo-Tiefe, Redo-Tiefe, geschätzte Bytes]` (leer, wenn nicht offen).
+#[wasm_bindgen]
+pub fn doc_history_state(h: u32) -> Vec<f64> {
+    with_doc(h, |d| {
+        let hi = d.history();
+        vec![hi.undo_depth() as f64, hi.redo_depth() as f64, hi.bytes() as f64]
+    })
+    .unwrap_or_default()
+}
+
+/// Verlauf leeren (z. B. nach einer Änderung am Projekt vorbei an den Ops).
+#[wasm_bindgen]
+pub fn doc_history_clear(h: u32) {
+    with_doc(h, |d| d.history_mut().clear());
+}
+
+/// Grenzen des Verlaufs: höchstens `steps` Schritte und ungefähr `bytes` Speicher (≤ 0 = unverändert).
+#[wasm_bindgen]
+pub fn doc_history_limits(h: u32, steps: f64, bytes: f64) {
+    with_doc(h, |d| {
+        let hi = d.history_mut();
+        if steps.is_finite() && steps >= 1.0 {
+            hi.max_steps = steps as usize;
+        }
+        if bytes.is_finite() && bytes >= 1.0 {
+            hi.max_bytes = bytes as usize;
+        }
+    });
+}
+
+/// Gruppe öffnen: alle Änderungen bis `doc_group_end` werden ein Undo-Schritt (verschachtelbar).
+#[wasm_bindgen]
+pub fn doc_group_begin(h: u32) {
+    with_doc(h, |d| d.history_mut().begin_group());
+}
+
+#[wasm_bindgen]
+pub fn doc_group_end(h: u32) {
+    with_doc(h, |d| d.history_mut().end_group());
 }
 
 /// Das ganze Dokument als JSON (leer, wenn nicht offen).
