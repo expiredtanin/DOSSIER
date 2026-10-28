@@ -27,6 +27,8 @@ export type QueryName =
   | "roofCutLayers"
   | "scheduleRows"
   | "scheduleCsv"
+  | "objFile"
+  | "stlFile"
   | "pickGeometry"
   | "model3dParts";
 
