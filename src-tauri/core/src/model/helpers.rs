@@ -181,3 +181,36 @@ impl Roof {
         }
     }
 }
+
+impl Stair {
+    /// Treppen-Parameter als 16 Zahlen (Aufbau: `stair.rs`, `encodeStair` in TS); fehlend = NaN.
+    pub fn encode(&self) -> [f64; 16] {
+        let n = |v: Option<f64>| v.unwrap_or(f64::NAN);
+        [
+            match self.shape {
+                StairShape::Straight => 0.0,
+                StairShape::L => 1.0,
+                StairShape::Spiral => 2.0,
+            },
+            self.start.x,
+            self.start.y,
+            self.dir.x,
+            self.dir.y,
+            self.run_length,
+            n(self.run2_length),
+            n(self.turn),
+            n(self.center.map(|c| c.x)),
+            n(self.center.map(|c| c.y)),
+            n(self.radius),
+            n(self.sweep),
+            self.width,
+            self.step_count,
+            self.up.map_or(f64::NAN, |u| if u { 1.0 } else { 0.0 }),
+            match self.referenz {
+                Some(StairReferenz::Links) => 1.0,
+                Some(StairReferenz::Rechts) => 2.0,
+                _ => 0.0,
+            },
+        ]
+    }
+}

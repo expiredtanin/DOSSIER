@@ -5,6 +5,7 @@ import { emitSlabs } from "./toWalls3d/ceilings";
 import { emitColumns } from "./toWalls3d/columns";
 import { projectToWalls3d } from "./toWalls3d";
 import { emitOpeningMeshes } from "./toWalls3d/openings";
+import { emitStairs, emitStairMeshes, emitStairRailings } from "./toWalls3d/stairs";
 
 const plain = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 let seed = 21;
@@ -65,6 +66,35 @@ describe("model3d walls", () => {
       }
     }
     expect(n).toBeGreaterThan(500);
+  });
+});
+
+describe("model3d stairs", () => {
+  it("random", () => {
+    let n = 0;
+    for (let t = 0; t < 200; t++) {
+      const lvl = sampleProject.drawingLevels.filter((l) => l.kind === "floor");
+      const types = Array.from({ length: 3 }, (_, k) => ({ id: "st" + k, name: "t", structure: pick(["massiv", "beton", "wange", "aufgesattelt", "spindel"]), closedRisers: rnd() < 0.5,
+        treadThickness: pick([0.04, 0.06]), nosing: rnd() < 0.5 ? 0.03 : undefined, railing: pick(["keine", "links", "rechts", "beide", undefined]), defaultWidth: 1 }));
+      const stairs = Array.from({ length: 1 + Math.floor(rnd() * 3) }, (_, k) => {
+        const shape = pick(["straight", "L", "spiral"]);
+        return { id: "s" + k, type: "stair", floorId: pick(lvl).id, categoryCode: "25", shape, start: { x: rnd() * 5, y: rnd() * 5 }, dir: pick([{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }]),
+          runLength: 2 + rnd() * 3, ...(shape === "L" ? { run2Length: 1.5, turn: pick([1, -1]) } : {}), ...(shape === "spiral" ? { center: { x: 2, y: 2 }, radius: 1.2, sweep: 4 } : {}),
+          width: 1, stepCount: 8 + Math.floor(rnd() * 8), ...(rnd() < 0.5 ? { totalRise: 2.6 } : {}), ...(rnd() < 0.5 ? { up: pick([true, false]) } : {}),
+          ...(rnd() < 0.7 ? { typeId: pick(types).id } : {}), ...(rnd() < 0.3 ? { referenz: pick(["links", "rechts", "mitte"]) } : {}) };
+      });
+      const project: any = { ...sampleProject, stairs, stairTypes: types };
+      const doc = documentFor(project);
+      for (const fs of [false, true]) {
+        const a = doc.query<unknown[]>("stairSlabs", [fs ? 1 : 0]);
+        const b = plain(emitStairs(project, { forSection: fs }));
+        expect(a).toEqual(b);
+        n += b.length;
+      }
+      expect(doc.query("stairMeshes")).toEqual(plain(emitStairMeshes(project)));
+      expect(doc.query("stairRailings")).toEqual(plain(emitStairRailings(project)));
+    }
+    expect(n).toBeGreaterThan(300);
   });
 });
 

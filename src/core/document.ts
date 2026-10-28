@@ -49,7 +49,7 @@ export class ProjectDocument {
    * Abfrage auf dem typisierten Projekt im Kern. Das Ergebnis ist JSON; ein Fehler (Projekt passt
    * nicht zum Modell, unbekannte Abfrage) wirft.
    */
-  query<T>(name: "kennzahlen" | "siteCheck" | "buildingFootprint" | "modelTop" | "shadows" | "slabs" | "columnMeshes" | "walls" | "openingMeshes", args: number[] = []): T {
+  query<T>(name: "kennzahlen" | "siteCheck" | "buildingFootprint" | "modelTop" | "shadows" | "slabs" | "columnMeshes" | "walls" | "openingMeshes" | "stairSlabs" | "stairMeshes" | "stairRailings", args: number[] = []): T {
     const text = this.handle ? core().doc_query_args(this.handle, name, Float64Array.from(args)) : "";
     if (!text) throw new Error(`Kern-Abfrage „${name}": Projekt passt nicht zum Kern-Modell`);
     return JSON.parse(text) as T;

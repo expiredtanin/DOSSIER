@@ -701,6 +701,96 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
     out
 }
 
+// ── Treppen ─────────────────────────────────────────────────────────────────
+
+fn stair_rgb() -> Rgb {
+    hex_to_rgb("#9aa0a6", SLAB_RGB)
+}
+
+fn rail_rgb() -> Rgb {
+    hex_to_rgb("#74797f", SLAB_RGB)
+}
+
+/// Flache Eingabe der Treppen für `stairs3d` (23 Zahlen je Treppe); `wanted` wählt vor.
+fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&StairType>) -> bool) -> Option<(Vec<&'a Stair>, Vec<f64>)> {
+    let mut stairs: Vec<&Stair> = Vec::new();
+    let mut types: Vec<Option<&StairType>> = Vec::new();
+    for s in p.stairs.as_deref().unwrap_or(&[]) {
+        let st = p.stair_type(s);
+        if !wanted(s, st) {
+            continue;
+        }
+        stairs.push(s);
+        types.push(st);
+    }
+    if stairs.is_empty() {
+        return None;
+    }
+    let mut buf = vec![stairs.len() as f64];
+    for (s, st) in stairs.iter().zip(&types) {
+        let (z_bottom, z_top) = p.stair_vertical_extent(s);
+        buf.extend(s.encode());
+        buf.push(z_bottom);
+        buf.push(z_top);
+        buf.push(match st.map(|t| t.structure) {
+            None | Some(StairTypeStructure::Massiv) => 0.0,
+            Some(StairTypeStructure::Beton) => 1.0,
+            _ => 2.0,
+        });
+        buf.push(st.map_or(0.04, |t| t.tread_thickness));
+        buf.push(st.and_then(|t| t.nosing).unwrap_or(0.0));
+        buf.push(if st.is_some_and(|t| t.closed_risers) { 1.0 } else { 0.0 });
+        buf.push(match st.and_then(|t| t.railing) {
+            Some(StairTypeRailing::Links) => 1.0,
+            Some(StairTypeRailing::Rechts) => 2.0,
+            Some(StairTypeRailing::Beide) => 3.0,
+            _ => 0.0,
+        });
+    }
+    Some((stairs, buf))
+}
+
+/// Treppen als extrudierte Platten (`emitStairs`); `for_section`: auch gerade Betontreppen als Tritte.
+pub fn emit_stairs(p: &Project, for_section: bool) -> Vec<RSlab> {
+    let Some((stairs, buf)) = stair_input(p, |_, _| true) else { return vec![] };
+    crate::stairs3d::slabs(&buf, for_section)
+        .into_iter()
+        .map(|s| {
+            let stair = stairs[s.src];
+            RSlab {
+                outline: s.pts,
+                z_bottom: s.z_bottom,
+                z_top: s.z_top,
+                color: stair_rgb(),
+                ceiling_id: stair.id.clone(),
+                hatch: None,
+                cut: None,
+                monolith: s.monolith.then(|| stair.id.clone()),
+            }
+        })
+        .collect()
+}
+
+fn meshes_of(meshes: Vec<crate::mesh3d::Mesh>, color: Rgb) -> Vec<RMesh> {
+    meshes.into_iter().map(|m| RMesh { positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }).collect()
+}
+
+/// Glatte Ortbeton-Laufplatten gerader Treppen (`emitStairMeshes`).
+pub fn emit_stair_meshes(p: &Project) -> Vec<RMesh> {
+    match stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Beton) && s.shape == StairShape::Straight) {
+        Some((_, buf)) => meshes_of(crate::stairs3d::slab_meshes(&buf), stair_rgb()),
+        None => vec![],
+    }
+}
+
+/// Handlauf und Pfosten gerader Treppen (`emitStairRailings`).
+pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
+    match stair_input(p, |s, st| s.shape == StairShape::Straight && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
+        Some((_, buf)) => meshes_of(crate::stairs3d::railings(&buf), rail_rgb()),
+        None => vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
