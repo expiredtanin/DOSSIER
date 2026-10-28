@@ -20,10 +20,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 /** Default-Ebene (Kategorie) für Dächer („31 Dächer"). */
 const ROOF_CATEGORY = "31";
@@ -93,10 +94,10 @@ function roofDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
 }
 
 /** Hängt ein Dach ans Projekt (immutabel). Entartete Rechtecke werden verworfen. */
-function appendRoof(p: Project, a: Vec2, b: Vec2, shape: RoofShape, ctx: CommandContext): Project {
+function appendRoof(a: Vec2, b: Vec2, shape: RoofShape, ctx: CommandContext): CoreOp[] {
   const w = Math.abs(b.x - a.x);
   const d = Math.abs(b.y - a.y);
-  if (w < 0.1 || d < 0.1) return p;
+  if (w < 0.1 || d < 0.1) return [];
   const roof: Roof = {
     id: uniqueId("RF"),
     type: "roof",
@@ -111,8 +112,7 @@ function appendRoof(p: Project, a: Vec2, b: Vec2, shape: RoofShape, ctx: Command
     ridgeAxis: w >= d ? "x" : "y",
     thickness: 0.2,
   };
-  const roofs = p.roofs ? [...p.roofs, roof] : [roof];
-  return { ...p, roofs };
+  return addItems("roofs", [roof]);
 }
 
 const idle = (shape: RoofShape = "sattel"): [CommandState, CommandResult] => [
@@ -157,7 +157,7 @@ export const roofCommand: Command = {
     const shape = s.shape;
     return [
       { phase: "start", shape, lastPoint: null } as RoofIdle,
-      { draft: null, done: true, commit: (p) => appendRoof(p, a, b, shape, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendRoof(a, b, shape, ctx)) },
     ];
   },
 

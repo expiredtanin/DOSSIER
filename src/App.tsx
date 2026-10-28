@@ -156,7 +156,8 @@ import { useGripEditing } from "./state/useGripEditing";
 import { usePanelHostBase } from "./state/usePanelHostBase";
 import { useDockDragState } from "./state/useDockDragState";
 import { useMouseSelectionHandlers } from "./state/useMouseSelectionHandlers";
-import { addNewElementsToActiveGroup, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
+import { activeGroupOps, addNewElementsToActiveGroup, containingGroupId, EMPTY_MEMBERSHIP } from "./state/groupActions";
+import { isOpsMutation, opsMutation, removeItems } from "./core";
 import type { GroupMembership, MemberKind } from "./state/groupActions";
 import { isLocked, setLockedForMembers } from "./state/objectLock";
 import { useProjectFileActions } from "./state/useProjectFileActions";
@@ -352,6 +353,7 @@ export default function App() {
   // Endlosschleife). Actions leben ebenfalls im Zustand und sind referenzstabil.
   const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
+  const groupChanges = useStore((s) => s.groupChanges);
   const notify = useStore((s) => s.notify);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
@@ -937,10 +939,21 @@ export default function App() {
       // „wenn man etwas neu zeichnet ... zeichnet man in der Gruppe") — s.
       // state/groupActions.ts::addNewElementsToActiveGroup (Diff vor/nach
       // Commit über alle Elementarten, additiv zur eigentlichen Mutation).
-      commit: (mutate) =>
-        cmdLatest.current.setProject((p) =>
-          addNewElementsToActiveGroup(p, mutate(p), cmdLatest.current.groupPath),
-        ),
+      // [K4] S3: Befehle mit mitgeführten Ops (`opsMutation`) gehen ohne Projekt-Differenz an den
+      // Kern; die Gruppen-Zuordnung kommt dann als weitere Ops dazu (`activeGroupOps`).
+      commit: (mutate) => {
+        const groupPath = cmdLatest.current.groupPath;
+        if (isOpsMutation(mutate)) {
+          cmdLatest.current.setProject(
+            opsMutation((p) => {
+              const ops = mutate.toOps(p);
+              return [...ops, ...activeGroupOps(p, ops, groupPath)];
+            }),
+          );
+        } else {
+          cmdLatest.current.setProject((p) => addNewElementsToActiveGroup(p, mutate(p), groupPath));
+        }
+      },
       isFloor: () => cmdLatest.current.activeLevel.kind === "floor",
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
       // (kein Lookup nötig — der Commit hat es bereits angehängt, s. engine.ts
@@ -1223,6 +1236,21 @@ export default function App() {
   // Löscht die AKTUELLE Auswahl (alle Kanäle) — geteilte Logik zwischen dem
   // Entf-Tastatur-Handler und dem Menüpunkt „Bearbeiten > Löschen".
   const deleteSelection = () => {
+    // Ein Undo-Schritt für alles (Schnittlinien + Elemente), [K4] S3.
+    groupChanges(() => deleteSelectionChanges());
+    setSelectedDrawingIds([]);
+    setSelectedWallIds([]);
+    setSelectedCeilingIds([]);
+    setSelectedOpeningIds([]);
+    setSelectedStairIds([]);
+    setSelectedRoomIds([]);
+    setSelectedExtrudedSolidIds([]);
+    setSelectedColumnIds([]);
+    setSelectedRoofIds([]);
+    setSelectedContextObjectIds([]);
+    setSelectedSectionLineIds([]);
+  };
+  const deleteSelectionChanges = () => {
     // Schnittlinie(n): Entf löscht NUR ihre Linie (linePoints), die Ebene
     // bleibt — ADDITIV zu den übrigen Kanälen unten (nicht mehr exklusiv:
     // seit Cmd/Ctrl+A Schnittlinien zusammen mit Wänden/etc. mitselektiert,
@@ -1246,33 +1274,21 @@ export default function App() {
     const colids = new Set(notLocked("columnIds", selectedColumnIds));
     const rfids = new Set(notLocked("roofIds", selectedRoofIds));
     const ctxids = new Set(selectedContextObjectIds);
-    setProject((p) => ({
-      ...p,
-      drawings2d: p.drawings2d.filter((d) => !dids.has(d.id)),
-      walls: p.walls.filter((w) => !wids.has(w.id)),
-      ceilings: (p.ceilings ?? []).filter((c) => !cids.has(c.id)),
-      roofs: (p.roofs ?? []).filter((r) => !rfids.has(r.id)),
-      stairs: (p.stairs ?? []).filter((s) => !stids.has(s.id)),
-      rooms: (p.rooms ?? []).filter((r) => !rmids.has(r.id)),
-      extrudedSolids: (p.extrudedSolids ?? []).filter((s) => !exids.has(s.id)),
-      columns: (p.columns ?? []).filter((c) => !colids.has(c.id)),
-      // Öffnungen: eigene Auswahl löschen UND alle, deren Host-Wand entfällt.
-      openings: (p.openings ?? []).filter(
-        (o) => !oids.has(o.id) && !wids.has(o.hostWallId),
-      ),
-      context: (p.context ?? []).filter((o) => !ctxids.has(o.id)),
-    }));
-    setSelectedDrawingIds([]);
-    setSelectedWallIds([]);
-    setSelectedCeilingIds([]);
-    setSelectedOpeningIds([]);
-    setSelectedStairIds([]);
-    setSelectedRoomIds([]);
-    setSelectedExtrudedSolidIds([]);
-    setSelectedColumnIds([]);
-    setSelectedRoofIds([]);
-    setSelectedContextObjectIds([]);
-    setSelectedSectionLineIds([]);
+    setProject(
+      opsMutation((p) => [
+        ...removeItems(p, "drawings2d", dids),
+        ...removeItems(p, "walls", wids),
+        ...removeItems(p, "ceilings", cids),
+        ...removeItems(p, "roofs", rfids),
+        ...removeItems(p, "stairs", stids),
+        ...removeItems(p, "rooms", rmids),
+        ...removeItems(p, "extrudedSolids", exids),
+        ...removeItems(p, "columns", colids),
+        // Öffnungen: eigene Auswahl löschen UND alle, deren Host-Wand entfällt.
+        ...removeItems(p, "openings", (o) => oids.has(o.id) || wids.has(o.hostWallId)),
+        ...removeItems(p, "context", ctxids),
+      ]),
+    );
   };
 
   // Tastatur im Auswahl-Werkzeug: Ctrl/Cmd+A = alles wählen, Entf/Backspace =
@@ -1823,6 +1839,7 @@ export default function App() {
     moveRoomBy,
     moveCeilingBy,
     moveElementByOf,
+    groupChanges,
   });
 
   // Nummern-Shortcuts für Zeichenwerkzeuge (Vectorworks-Stil): 1 Text, 2 Linie,

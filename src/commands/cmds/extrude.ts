@@ -25,6 +25,8 @@ import type {
   Project,
   Vec2,
 } from "../types";
+import { addItems, opsMutation, removeItems } from "../../core";
+import type { CoreOp } from "../../core";
 
 const HIT_TOL = 0.25; // Modell-Meter: Pick-Toleranz für die Profil-Wahl
 
@@ -113,7 +115,7 @@ function appendExtrudedSolid(
   taper: number,
   sourceId: string,
   ctx: CommandContext,
-): Project {
+): CoreOp[] {
   const solid: ExtrudedSolid = {
     id: uniqueId("extrude"),
     type: "extrudedSolid",
@@ -123,11 +125,7 @@ function appendExtrudedSolid(
     circle: profile.circle,
     ...(taper > 0 ? { taper } : {}),
   };
-  return {
-    ...p,
-    drawings2d: p.drawings2d.filter((d) => d.id !== sourceId),
-    extrudedSolids: [...(p.extrudedSolids ?? []), solid],
-  };
+  return [...removeItems(p, "drawings2d", [sourceId]), ...addItems("extrudedSolids", [solid])];
 }
 
 // ── Zustand ───────────────────────────────────────────────────────────────────
@@ -177,7 +175,7 @@ const commitTaper = (
   ctx: CommandContext,
 ): [CommandState, CommandResult] => [
   { phase: "done", lastPoint: null } as ExDone,
-  { draft: null, done: true, commit: (p) => appendExtrudedSolid(p, profile, height, taper, sourceId, ctx) },
+  { draft: null, done: true, commit: opsMutation((p) => appendExtrudedSolid(p, profile, height, taper, sourceId, ctx)) },
 ];
 
 export const extrudeCommand: Command = {

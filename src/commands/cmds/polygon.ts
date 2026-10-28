@@ -35,11 +35,12 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const MIN_SIDES = 3;
@@ -148,8 +149,8 @@ function edgeDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   return { preview: [{ kind: "poly", pts, closed: true }], vertices: [a], hud: segmentHud(a, cursor) };
 }
 
-function appendPolygon(p: Project, center: Vec2, r: number, dir: Vec2 | null, ctx: CommandContext): Project {
-  if (r < EPS) return p;
+function appendPolygon(center: Vec2, r: number, dir: Vec2 | null, ctx: CommandContext): CoreOp[] {
+  if (r < EPS) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -157,11 +158,11 @@ function appendPolygon(p: Project, center: Vec2, r: number, dir: Vec2 | null, ct
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "polyline", pts: polygonPts(center, r, lastSides, lastMode, dir), closed: true },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
-function appendPolygonFromEdge(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): Project {
-  if (dist(a, b) < EPS) return p;
+function appendPolygonFromEdge(a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
+  if (dist(a, b) < EPS) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -169,7 +170,7 @@ function appendPolygonFromEdge(p: Project, a: Vec2, b: Vec2, ctx: CommandContext
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "polyline", pts: polygonFromEdge(a, b, lastSides), closed: true },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -247,7 +248,7 @@ export const polygonCommand: Command = {
       }
       const a = s.a;
       const b = input.point;
-      return [idle()[0], { draft: null, done: true, commit: (p) => appendPolygonFromEdge(p, a, b, ctx) }];
+      return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendPolygonFromEdge(a, b, ctx)) }];
     }
 
     // phase "radius"
@@ -266,7 +267,7 @@ export const polygonCommand: Command = {
     const center = s.center;
     return [
       idle()[0],
-      { draft: null, done: true, commit: (p) => appendPolygon(p, center, r, dir, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendPolygon(center, r, dir, ctx)) },
     ];
   },
 

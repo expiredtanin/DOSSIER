@@ -5,11 +5,11 @@
 //      → weitere Zielpunkte = weitere Kopien (Basispunkt bleibt), bis Esc/Enter.
 //
 // Die Auswahl kommt vorab über ctx.selection. Leere Auswahl → No-op + Hinweis.
-// Der Commit nutzt `commitTransform` (op:"move", mode:"copy") — eine Kopie der
+// Der Commit nutzt `transformMutation` (op:"move", mode:"copy") — eine Kopie der
 // Auswahl an die Endlage, Original unverändert; neue IDs via uniqueId (dort).
 
 import {
-  commitTransform,
+  transformMutation,
   hasTransformSelection,
   toTransformSel,
   transformPreview,
@@ -136,7 +136,7 @@ export const copyCommand: Command = {
       next,
       {
         draft: copyDraft(ctx.project, sel, base, pt),
-        commit: (p) => commitTransform(p, toTransformSel(sel), "move", [base, pt], "copy", 1),
+        commit: transformMutation(toTransformSel(sel), "move", [base, pt], "copy", 1),
       },
     ];
   },

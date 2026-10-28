@@ -24,6 +24,67 @@ pub struct Document {
     history: History,
 }
 
+/// id → Position je Liste für die Dauer einer Op-Folge. Nur `replace` sucht darüber; jede andere Op
+/// auf der Liste verwirft den Eintrag. Erst die zweite Suche in derselben Liste baut den Index —
+/// ein einzelner Drag-Schritt bleibt bei der linearen Suche, Serien (Auswahl verschieben: hunderte
+/// `replace`) kosten so O(Liste + Ops) statt O(Liste · Ops). Gleiche Semantik wie `position`
+/// (erstes Vorkommen). Schlüssel ist ein Hash der id (keine Text-Kopien); jeder Treffer wird an der
+/// Liste nachgeprüft, bei einer Kollision sucht `find` linear.
+#[derive(Default)]
+struct PosCache(HashMap<String, PosEntry>);
+
+enum PosEntry {
+    /// Einmal linear gesucht.
+    Once,
+    Built(HashMap<u64, usize>),
+}
+
+/// FNV-1a über die id.
+fn id_hash(id: &str) -> u64 {
+    id.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+}
+
+impl PosCache {
+    fn find(&mut self, collection: &str, list: &[Value], id: Option<&str>) -> Option<usize> {
+        let linear = |id: Option<&str>| list.iter().position(|e| id_of(e) == id);
+        let Some(id) = id else {
+            return linear(None);
+        };
+        match self.0.get(collection) {
+            Some(PosEntry::Built(m)) => match m.get(&id_hash(id)) {
+                Some(&i) if list.get(i).and_then(id_of) == Some(id) => Some(i),
+                Some(_) => linear(Some(id)),
+                None => None,
+            },
+            Some(PosEntry::Once) => {
+                let mut m: HashMap<u64, usize> = HashMap::with_capacity(list.len());
+                for (i, e) in list.iter().enumerate() {
+                    if let Some(x) = id_of(e) {
+                        m.entry(id_hash(x)).or_insert(i);
+                    }
+                }
+                self.0.insert(collection.to_owned(), PosEntry::Built(m));
+                self.find(collection, list, Some(id))
+            }
+            None => {
+                self.0.insert(collection.to_owned(), PosEntry::Once);
+                linear(Some(id))
+            }
+        }
+    }
+
+    /// Element `id` wurde an Position `at` angehängt (`replace` ohne Treffer).
+    fn pushed(&mut self, collection: &str, id: Option<&str>, at: usize) {
+        if let (Some(PosEntry::Built(m)), Some(id)) = (self.0.get_mut(collection), id) {
+            m.entry(id_hash(id)).or_insert(at);
+        }
+    }
+
+    fn forget(&mut self, collection: &str) {
+        self.0.remove(collection);
+    }
+}
+
 impl Document {
     pub fn from_json(text: &str) -> Result<Document, String> {
         match serde_json::from_str::<Value>(text) {
@@ -87,7 +148,10 @@ impl Document {
 
 
     /// Wendet eine Op ohne Aufzeichnung an (Semantik wie `applyOps` in TS).
-    fn apply_raw(&mut self, op: &Op) {
+    fn apply_raw(&mut self, op: &Op, pos: &mut PosCache) {
+        if !matches!(op, Op::Replace { .. }) {
+            pos.forget(op.key());
+        }
         match op {
             Op::SetField { key, value, at } => match value {
                 Some(v) => match at {
@@ -111,9 +175,12 @@ impl Document {
             Op::Replace { collection, entity } => {
                 let list = self.list_mut(collection);
                 let id = id_of(entity);
-                match list.iter().position(|e| id_of(e) == id) {
+                match pos.find(collection, list, id) {
                     Some(i) => list[i] = entity.clone(),
-                    None => list.push(entity.clone()),
+                    None => {
+                        list.push(entity.clone());
+                        pos.pushed(collection, id, list.len() - 1);
+                    }
                 }
             }
             Op::Remove { collection, ids } => {
@@ -137,13 +204,13 @@ impl Document {
         }
     }
 
-    /// Wendet eine Op an und liefert (inverse Ops in Anwendungsreihenfolge, normalisierte
-    /// Vorwärts-Op). Listen bekommen feine Inverse (`replace` ↔ altes Element, `add` ↔ `remove`,
+    /// Wendet eine Op an und liefert (inverse Ops in Anwendungsreihenfolge, ob die Vorwärts-Op als
+    /// `add` aufzuzeichnen ist — `replace` ohne Treffer). Listen bekommen feine Inverse (`replace` ↔ altes Element, `add` ↔ `remove`,
     /// `remove` ↔ `add` an den alten Positionen, `reorder` ↔ alte Reihenfolge), wo das exakt ist
     /// (`add`: ids neu und eindeutig; `reorder`: alle ids eindeutig); sonst (fehlendes Feld, kein
     /// Array, Alt-Doppelungen) wird das ganze Feld samt Position gesichert. Ohne Hash über die ganze
     /// Liste — ein Drag-Schritt kostet nur das Suchen des Elements.
-    fn apply_recorded(&mut self, op: &Op) -> (Vec<Op>, Op) {
+    fn apply_recorded(&mut self, op: &Op, pos: &mut PosCache) -> (Vec<Op>, bool) {
         let key = op.key();
         let old = self.root.get(key);
         let snapshot = || {
@@ -155,7 +222,7 @@ impl Document {
             Op::Reorder { .. } => old.and_then(Value::as_array).filter(|a| a.iter().all(|e| id_of(e).is_some()) && unique_ids(a)),
             _ => old.and_then(Value::as_array),
         };
-        let mut forward = op.clone();
+        let mut as_add = false;
         let inverse = match (op, clean) {
             (_, None) => vec![snapshot()],
             (Op::Add { collection, items, .. }, Some(list)) => {
@@ -168,16 +235,16 @@ impl Document {
                     vec![snapshot()]
                 }
             }
-            (Op::Replace { collection, entity }, Some(list)) => match list.iter().position(|e| id_of(e) == id_of(entity)) {
+            (Op::Replace { collection, entity }, Some(list)) => match pos.find(collection, list, id_of(entity)) {
                 Some(i) => {
                     // Direkt ersetzen (spart die zweite Suche in `apply_raw`).
                     let slot = &mut self.root.get_mut(key).and_then(Value::as_array_mut).expect("Liste geprüft")[i];
                     let prev = std::mem::replace(slot, entity.clone());
-                    return (vec![Op::Replace { collection: collection.clone(), entity: prev }], forward);
+                    return (vec![Op::Replace { collection: collection.clone(), entity: prev }], false);
                 }
                 None => {
                     // Aufgezeichnet als `add` (so trifft jedes aufgezeichnete `replace` ein vorhandenes Element).
-                    forward = Op::Add { collection: collection.clone(), items: vec![entity.clone()], at: None };
+                    as_add = true;
                     vec![Op::Remove { collection: collection.clone(), ids: vec![id_of(entity).unwrap_or("").to_owned()] }]
                 }
             },
@@ -202,14 +269,14 @@ impl Document {
             }
             (Op::SetField { .. }, Some(_)) => unreachable!("setField hat keine Liste"),
         };
-        self.apply_raw(op);
-        (inverse, forward)
+        self.apply_raw(op, pos);
+        (inverse, as_add)
     }
 
     /// Wendet `ops` atomar an und prüft sie (`ops::validate`). Verstösse → `Err(Meldungen)`,
-    /// Dokument unverändert. Ok → (Vorwärts-Ops normalisiert, inverse Ops). `sanitize`: die Ops
+    /// Dokument unverändert. Ok → (je Op: als `add` aufzuzeichnen, inverse Ops). `sanitize`: die Ops
     /// können Nicht-endlich-Marken enthalten (s. `ops.rs`).
-    fn apply_checked(&mut self, ops: &[Op], sanitize: bool) -> Result<(Vec<Op>, Vec<Op>), Vec<String>> {
+    fn apply_checked(&mut self, ops: &[Op], sanitize: bool) -> Result<(Vec<bool>, Vec<Op>), Vec<String>> {
         // Alt-Doppelungen der Listen merken, in die eingefügt oder die gesetzt wird.
         let mut had_dup: HashSet<String> = HashSet::new();
         for op in ops {
@@ -218,17 +285,19 @@ impl Document {
             }
         }
         let mut inverses: Vec<Vec<Op>> = Vec::with_capacity(ops.len());
-        let mut forward: Vec<Op> = Vec::with_capacity(ops.len());
+        let mut as_add: Vec<bool> = Vec::with_capacity(ops.len());
+        let mut pos = PosCache::default();
         for op in ops {
-            let (inv, fwd) = self.apply_recorded(op);
+            let (inv, add) = self.apply_recorded(op, &mut pos);
             inverses.push(inv);
-            forward.push(fwd);
+            as_add.push(add);
         }
         let problems = crate::ops::validate(&self.root, ops, &|k| had_dup.contains(k));
         if !problems.is_empty() {
+            let mut pos = PosCache::default();
             for inv in inverses.iter().rev() {
                 for op in inv {
-                    self.apply_raw(op);
+                    self.apply_raw(op, &mut pos);
                 }
             }
             return Err(problems);
@@ -241,12 +310,11 @@ impl Document {
                     crate::ops::sanitize_non_finite(v);
                 }
             }
-            crate::ops::sanitize_ops(&mut forward);
         }
         for op in ops {
             self.dirty.insert(op.key().to_owned());
         }
-        Ok((forward, inverses.into_iter().rev().flatten().collect()))
+        Ok((as_add, inverses.into_iter().rev().flatten().collect()))
     }
 
     /// Wendet `ops` atomar an, ohne Verlauf (Abgleich des Spiegels). Verstösse (NaN, neue
@@ -261,16 +329,32 @@ impl Document {
     }
 
     /// Eine Benutzer-Änderung: anwenden, prüfen und als Undo-Schritt aufzeichnen (`key` =
-    /// `coalesceKey`, `now` = Zeit in ms für das Koaleszenz-Fenster).
-    pub fn commit(&mut self, ops: &[Op], key: Option<&str>, now: f64, sanitize: bool) -> Result<(), Vec<String>> {
-        let (forward, inverse) = self.apply_checked(ops, sanitize)?;
+    /// `coalesceKey`, `now` = Zeit in ms für das Koaleszenz-Fenster). Die Ops gehen in den Verlauf
+    /// über (Redo) — das Dokument hält eigene Kopien, so wird jedes Element nur einmal kopiert.
+    pub fn commit(&mut self, ops: Vec<Op>, key: Option<&str>, now: f64, sanitize: bool) -> Result<(), Vec<String>> {
+        let (as_add, inverse) = self.apply_checked(&ops, sanitize)?;
+        // Normalisiert: `replace` ohne Treffer wird als `add` aufgezeichnet (so trifft jedes
+        // aufgezeichnete `replace` ein vorhandenes Element, s. `ops::compact`).
+        let mut forward: Vec<Op> = ops
+            .into_iter()
+            .zip(as_add)
+            .map(|(op, add)| match op {
+                Op::Replace { collection, entity } if add => Op::Add { collection, items: vec![entity], at: None },
+                op => op,
+            })
+            .collect();
+        if sanitize {
+            // Angenommene Nicht-endlich-Marken auch im Verlauf als null.
+            crate::ops::sanitize_ops(&mut forward);
+        }
         self.history.record(forward, inverse, key, now);
         Ok(())
     }
 
     fn apply_unchecked(&mut self, ops: &[Op]) {
+        let mut pos = PosCache::default();
         for op in ops {
-            self.apply_raw(op);
+            self.apply_raw(op, &mut pos);
             self.dirty.insert(op.key().to_owned());
         }
     }
@@ -443,7 +527,7 @@ mod tests {
             let ops = random_ops(&d, &mut r, n);
             let before = d.to_json();
             // Ohne Schlüssel: jede Änderung ein Schritt.
-            match d.commit(&ops, None, n as f64 * 1000.0, true) {
+            match d.commit(ops, None, n as f64 * 1000.0, true) {
                 Ok(()) => committed += 1,
                 Err(_) => {
                     rejected += 1;
@@ -461,23 +545,101 @@ mod tests {
     }
 
     #[test]
+    fn replace_serien_wie_einzeln() {
+        // Serien in einem Aufruf (Positions-Index) = dieselben Ops einzeln (lineare Suche), auch mit
+        // fehlenden ids, Alt-Doppelungen und Struktur-Ops dazwischen; Undo stellt exakt zurück.
+        let start = r#"{"walls":[{"id":"a"},{"id":"b"},{"id":"a","alt":1},{"id":"c"}],"rooms":[{"id":"r"}]}"#;
+        let mut r = Rng(3);
+        for round in 0..200 {
+            let mut list = Vec::new();
+            for k in 0..(2 + r.below(30)) {
+                let id = ["a", "b", "c", "d", "e"][r.below(5)];
+                let c = if r.next() < 0.8 { "walls" } else { "rooms" };
+                let p = r.next();
+                list.push(if p < 0.7 {
+                    json!({"kind":"replace","collection":c,"entity":{"id":id,"v":k}})
+                } else if p < 0.8 {
+                    json!({"kind":"remove","collection":c,"ids":[id]})
+                } else if p < 0.9 {
+                    json!({"kind":"add","collection":c,"items":[{"id":format!("n{round}-{k}")}],"at":r.below(4)})
+                } else {
+                    json!({"kind":"reorder","collection":c,"ids":[id]})
+                });
+            }
+            let o = ops(Value::Array(list));
+            let mut batch = Document::from_json(start).unwrap();
+            batch.commit(o.clone(), None, 0.0, false).unwrap();
+            let mut single = Document::from_json(start).unwrap();
+            for op in &o {
+                single.apply(std::slice::from_ref(op)).unwrap();
+            }
+            assert_eq!(batch.to_json(), single.to_json(), "Runde {round}");
+            batch.undo().unwrap();
+            assert_eq!(batch.to_json(), Document::from_json(start).unwrap().to_json());
+            batch.redo().unwrap();
+            assert_eq!(batch.to_json(), single.to_json());
+        }
+    }
+
+    #[test]
     fn coalesce_key_ein_schritt_und_verdichtet() {
         let mut d = doc();
         let start = d.to_json();
         for i in 0..500 {
             let o = ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","x":i}}]));
-            d.commit(&o, Some("drag"), i as f64, false).unwrap();
+            d.commit(o.clone(), Some("drag"), i as f64, false).unwrap();
         }
         assert_eq!(d.history().undo_depth(), 1);
         // Der Schritt wächst nicht mit jeder Mausbewegung.
         assert!(d.history().bytes() < 1000, "{}", d.history().bytes());
-        d.commit(&ops(json!([{"kind":"setField","key":"name","value":"Q"}])), Some("drag"), 499.0, false).unwrap();
+        d.commit(ops(json!([{"kind":"setField","key":"name","value":"Q"}])), Some("drag"), 499.0, false).unwrap();
         assert_eq!(d.history().undo_depth(), 1);
         d.undo().unwrap();
         assert_eq!(d.to_json(), start);
         // Nach Undo beginnt dieselbe Serie einen neuen Schritt.
         d.redo().unwrap();
-        d.commit(&ops(json!([{"kind":"setField","key":"name","value":"R"}])), Some("drag"), 500.0, false).unwrap();
+        d.commit(ops(json!([{"kind":"setField","key":"name","value":"R"}])), Some("drag"), 500.0, false).unwrap();
+        assert_eq!(d.history().undo_depth(), 2);
+    }
+
+    #[test]
+    fn gruppen_mit_schluessel_verschmelzen() {
+        let mut d = doc();
+        let start = d.to_json();
+        // Griff-Zug: je Mausschritt eine Gruppe (Element + mitgeführter Nachbar), gleicher Schlüssel.
+        for i in 0..20 {
+            d.history_mut().begin_group_keyed(Some("zug"), i as f64 * 20.0);
+            d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","x":i}}])), Some("grip:a"), i as f64 * 20.0, false).unwrap();
+            d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"b","x":i}}])), Some("grip:b"), i as f64 * 20.0, false).unwrap();
+            d.history_mut().end_group();
+        }
+        assert_eq!(d.history().undo_depth(), 1);
+        // Andere Gruppe bzw. Pause über das Zeitfenster: neuer Schritt.
+        d.history_mut().begin_group_keyed(Some("zug"), 5000.0);
+        d.commit(ops(json!([{"kind":"setField","key":"name","value":"Z"}])), None, 5000.0, false).unwrap();
+        d.history_mut().end_group();
+        assert_eq!(d.history().undo_depth(), 2);
+        // Leere Gruppe ändert nichts am Anschluss.
+        d.history_mut().begin_group_keyed(Some("anders"), 5010.0);
+        d.history_mut().end_group();
+        d.history_mut().begin_group_keyed(Some("zug"), 5020.0);
+        d.commit(ops(json!([{"kind":"setField","key":"name","value":"Y"}])), None, 5020.0, false).unwrap();
+        d.history_mut().end_group();
+        assert_eq!(d.history().undo_depth(), 2);
+        // Ohne Schlüssel: jede Gruppe ein Schritt.
+        for i in 0..3 {
+            d.history_mut().begin_group();
+            d.commit(ops(json!([{"kind":"setField","key":"name","value":format!("g{i}")}])), Some("k"), 6000.0, false).unwrap();
+            d.history_mut().end_group();
+        }
+        assert_eq!(d.history().undo_depth(), 5);
+        while d.undo().is_some() {}
+        assert_eq!(d.to_json(), start);
+        // Nach Undo verschmilzt eine gleichnamige Gruppe nicht mit dem Redo-Rest.
+        d.redo().unwrap();
+        d.history_mut().begin_group_keyed(Some("zug"), 6001.0);
+        d.commit(ops(json!([{"kind":"setField","key":"name","value":"W"}])), None, 6001.0, false).unwrap();
+        d.history_mut().end_group();
         assert_eq!(d.history().undo_depth(), 2);
     }
 
@@ -485,14 +647,14 @@ mod tests {
     fn nan_und_doppelte_ids_abgelehnt_ohne_schritt() {
         let mut d = doc();
         let before = d.to_json();
-        let e = d.commit(&ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","x":"\u{1}NaN"}}])), None, 0.0, true).unwrap_err();
+        let e = d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","x":"\u{1}NaN"}}])), None, 0.0, true).unwrap_err();
         assert_eq!(e, vec!["„walls\" a: NaN ist nicht endlich.".to_string()]);
-        let e = d.commit(&ops(json!([{"kind":"add","collection":"walls","items":[{"id":"b"}]}])), None, 0.0, false).unwrap_err();
+        let e = d.commit(ops(json!([{"kind":"add","collection":"walls","items":[{"id":"b"}]}])), None, 0.0, false).unwrap_err();
         assert_eq!(e, vec!["Doppelte ids in „walls\".".to_string()]);
         assert_eq!(d.to_json(), before);
         assert_eq!(d.history().undo_depth(), 0);
         // Tiefe Marken werden angenommen und als null gespeichert.
-        d.commit(&ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","p":{"q":{"r":{"s":{"t":"\u{1}NaN"}}}}}}])), None, 0.0, true).unwrap();
+        d.commit(ops(json!([{"kind":"replace","collection":"walls","entity":{"id":"a","p":{"q":{"r":{"s":{"t":"\u{1}NaN"}}}}}}])), None, 0.0, true).unwrap();
         assert_eq!(d.field("walls").unwrap()[0]["p"]["q"]["r"]["s"]["t"], Value::Null);
     }
 
@@ -500,8 +662,8 @@ mod tests {
     fn feld_reihenfolge_bleibt_beim_undo() {
         let mut d = doc();
         let start = d.to_json();
-        d.commit(&ops(json!([{"kind":"setField","key":"walls"}])), None, 0.0, false).unwrap();
-        d.commit(&ops(json!([{"kind":"setField","key":"walls","value":[]}])), None, 1.0, false).unwrap();
+        d.commit(ops(json!([{"kind":"setField","key":"walls"}])), None, 0.0, false).unwrap();
+        d.commit(ops(json!([{"kind":"setField","key":"walls","value":[]}])), None, 1.0, false).unwrap();
         d.undo().unwrap();
         d.undo().unwrap();
         assert_eq!(d.to_json(), start);
@@ -513,7 +675,7 @@ mod tests {
         d.history_mut().max_bytes = 20_000;
         let big: Vec<Value> = (0..10).map(|i| json!({"id": format!("e{i}"), "pad": "x".repeat(100)})).collect();
         for i in 0..20 {
-            d.commit(&ops(json!([{"kind":"setField","key":"blob","value":big.clone()}, {"kind":"setField","key":"i","value":i}])), None, i as f64 * 1000.0, false).unwrap();
+            d.commit(ops(json!([{"kind":"setField","key":"blob","value":big.clone()}, {"kind":"setField","key":"i","value":i}])), None, i as f64 * 1000.0, false).unwrap();
         }
         assert!(d.history().bytes() <= 20_000 && d.history().undo_depth() < 20 && d.history().undo_depth() >= 1);
     }
@@ -531,9 +693,20 @@ mod tests {
         let n = 5000;
         for i in 0..n {
             let o = ops(json!([{"kind":"replace","collection":"walls","entity":{"id": format!("w{}", (i * 7) % 5000), "height": i}}]));
-            d.commit(&o, None, i as f64 * 1000.0, false).unwrap();
+            d.commit(o.clone(), None, i as f64 * 1000.0, false).unwrap();
         }
         let commit = t.elapsed();
+        // Auswahl verschieben: 300 `replace` in einer Op-Folge.
+        let sel: Vec<Value> = (0..300).map(|k| json!({"kind":"replace","collection":"walls","entity":{"id": format!("w{}", k * 16), "height": 1}})).collect();
+        let sel = ops(Value::Array(sel));
+        let t = Instant::now();
+        for i in 0..20 {
+            d.commit(sel.clone(), None, (n + i) as f64 * 1000.0, false).unwrap();
+        }
+        eprintln!("Auswahl 300 Wände verschieben: commit {:.1} µs/Schritt", t.elapsed().as_secs_f64() * 1e6 / 20.0);
+        for _ in 0..20 {
+            d.undo().unwrap();
+        }
         let t = Instant::now();
         while d.undo().is_some() {}
         let undo = t.elapsed();

@@ -9,11 +9,11 @@
 // einen zweiten, divergierenden Pick-Pfad für die Objektwahl aufzumachen; die
 // Selektion läuft schon sauber über die Plan-Ansicht/Store).
 //
-// Der Commit nutzt den bestehenden, getesteten `commitTransform` (op:"move",
+// Der Commit nutzt den bestehenden, getesteten `transformMutation` (op:"move",
 // mode:"move") statt eine zweite Verschiebe-Logik zu duplizieren — er bewegt
 // Wände UND alle 2D-Formen immutabel an die Endlage.
 
-import { commitTransform, hasTransformSelection, toTransformSel } from "../../tools/transform";
+import { transformMutation, hasTransformSelection, toTransformSel } from "../../tools/transform";
 import { transformPreview } from "../../tools/transform";
 import type {
   Command,
@@ -145,7 +145,7 @@ export const moveCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) => commitTransform(p, toTransformSel(sel), "move", [base, pt], "move", 1),
+        commit: transformMutation(toTransformSel(sel), "move", [base, pt], "move", 1),
       },
     ];
   },

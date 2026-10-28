@@ -27,9 +27,10 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 /** Default-Schrifthöhe einer Textspalte in Modell-Metern (= Baseline-Versatz vom Rahmen-Top). */
 const DEFAULT_TEXT_HEIGHT_M = 0.25;
@@ -84,7 +85,7 @@ function frameDraft(a: Vec2, cursor: Vec2): { preview: DraftShape[]; vertices: V
   };
 }
 
-function appendEmptyTextbox(p: Project, id: string, at: Vec2, width: number, ctx: CommandContext): Project {
+function appendEmptyTextbox(id: string, at: Vec2, width: number, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id,
     type: "drawing2d",
@@ -92,7 +93,7 @@ function appendEmptyTextbox(p: Project, id: string, at: Vec2, width: number, ctx
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "text", at, text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0, width },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -123,7 +124,7 @@ export const textboxCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) => appendEmptyTextbox(p, id, at, width, ctx),
+        commit: opsMutation(() => appendEmptyTextbox(id, at, width, ctx)),
         focusDrawingId: id,
         focusMinHeightM: heightM,
       },

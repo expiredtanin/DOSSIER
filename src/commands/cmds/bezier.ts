@@ -17,10 +17,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 interface BezierStart extends CommandState {
   phase: "start";
@@ -58,8 +59,8 @@ function bezierDraft(pts: Vec2[], rubber: Vec2[]): ToolDraft {
   return { preview, vertices: pts.length > 0 ? [pts[0]] : [] };
 }
 
-function appendBezier(p: Project, pts: Vec2[], ctx: CommandContext): Project {
-  if (pts.length < 4) return p;
+function appendBezier(pts: Vec2[], ctx: CommandContext): CoreOp[] {
+  if (pts.length < 4) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -67,7 +68,7 @@ function appendBezier(p: Project, pts: Vec2[], ctx: CommandContext): Project {
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "bezier", pts },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -76,7 +77,7 @@ const idle = (): [CommandState, CommandResult] => [
 ];
 const finish = (pts: Vec2[], ctx: CommandContext): [CommandState, CommandResult] => [
   { phase: "start", lastPoint: null } as BezierStart,
-  { draft: null, done: true, commit: (p) => appendBezier(p, pts, ctx) },
+  { draft: null, done: true, commit: opsMutation(() => appendBezier(pts, ctx)) },
 ];
 
 export const bezierCommand: Command = {

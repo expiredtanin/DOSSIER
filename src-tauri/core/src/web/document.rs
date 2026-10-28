@@ -79,7 +79,7 @@ pub fn doc_commit(h: u32, ops_json: &str, key: &str, now_ms: f64) -> String {
         Ok(ops) => {
             let key = (!key.is_empty()).then_some(key);
             let now = if now_ms.is_finite() { now_ms } else { 0.0 };
-            problems_text(with_doc(h, |d| d.commit(&ops, key, now, may_have_marks(ops_json))), None)
+            problems_text(with_doc(h, |d| d.commit(ops, key, now, may_have_marks(ops_json))), None)
         }
     }
 }
@@ -130,6 +130,15 @@ pub fn doc_history_limits(h: u32, steps: f64, bytes: f64) {
 #[wasm_bindgen]
 pub fn doc_group_begin(h: u32) {
     with_doc(h, |d| d.history_mut().begin_group());
+}
+
+/// Wie `doc_group_begin`, mit Schlüssel und Zeit (ms): aufeinanderfolgende Gruppen mit gleichem
+/// Schlüssel im Zeitfenster werden ein Undo-Schritt (Griff-Zug mit mitgeführten Elementen).
+#[wasm_bindgen]
+pub fn doc_group_begin_keyed(h: u32, key: &str, now_ms: f64) {
+    let key = (!key.is_empty()).then_some(key);
+    let now = if now_ms.is_finite() { now_ms } else { 0.0 };
+    with_doc(h, |d| d.history_mut().begin_group_keyed(key, now));
 }
 
 #[wasm_bindgen]

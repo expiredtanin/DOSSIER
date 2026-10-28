@@ -92,6 +92,11 @@ export function useGripEditing(opts: {
   moveRoomBy: (id: string, delta: Vec2) => void;
   moveCeilingBy: (id: string, delta: Vec2) => void;
   moveElementByOf: (drawingId: string | null, wallId: string | null, delta: Vec2) => void;
+  /**
+   * Fasst mehrere Änderungen zu EINEM Undo-Schritt zusammen ([K4] S3, Store `groupChanges`); mit
+   * Schlüssel schliessen die Mausschritte desselben Zugs an denselben Schritt an.
+   */
+  groupChanges?: (fn: () => void, coalesceKey?: string) => void;
 }) {
   const {
     project,
@@ -129,6 +134,7 @@ export function useGripEditing(opts: {
     moveCeilingBy,
     moveElementByOf,
   } = opts;
+  const groupChanges = opts.groupChanges ?? ((fn: () => void) => fn());
 
   // Bewegpunkt (Move-Handle) einer Treppe: liegt auf der Treppe (Mitte des
   // ersten Laufs bei gerade/L, Zentrum bei Wendel) und verschiebt beim Ziehen
@@ -1000,7 +1006,8 @@ export function useGripEditing(opts: {
   };
 
   /** Ausstehenden Zug jetzt in das Projekt schreiben (EINE Mutation). */
-  const commitPendingGrip = () => {
+  const commitPendingGrip = () => groupChanges(commitPendingGripChanges);
+  const commitPendingGripChanges = () => {
     const ph = pendingSheetHeightRef.current;
     pendingSheetHeightRef.current = null;
     if (ph) {
@@ -1053,7 +1060,8 @@ export function useGripEditing(opts: {
   };
 
   /** Aufgeschobenes Körper-Verschieben jetzt ins Projekt schreiben. */
-  const commitPendingBody = () => {
+  const commitPendingBody = () => groupChanges(commitPendingBodyChanges);
+  const commitPendingBodyChanges = () => {
     const pwm = pendingWallMoveRef.current;
     pendingWallMoveRef.current = null;
     sheetDuRef.current = null;
@@ -1436,16 +1444,21 @@ export function useGripEditing(opts: {
         setDraft({ preview: bodyPreviewShapes(), vertices: [], snap: null });
         return;
       }
-      moveElementByOf(moveDrawingId, moveWallId, delta);
       // Beim ersten Move-Event die Koinzidenz-Gruppe einmalig bestimmen (Snapshot
       // VOR der ersten Mutation der Siblings). Danach inkrementell mitführen.
       if (moveCoincidentRef.current === null) {
         moveCoincidentRef.current = findMoveCoincident2D(moveDrawingId, moveWallId);
       }
-      for (const c of moveCoincidentRef.current) {
-        c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
-        moveGripOf(c.drawingId, c.wallId, c.index, c.pos, scaleDenominator);
-      }
+      const coincident = moveCoincidentRef.current;
+      // Element + mitgeführte Ecken: je Mausschritt eine Gruppe, die Schritte desselben Zugs
+      // schliessen an denselben Undo-Schritt an.
+      groupChanges(() => {
+        moveElementByOf(moveDrawingId, moveWallId, delta);
+        for (const c of coincident) {
+          c.pos = { x: c.pos.x + delta.x, y: c.pos.y + delta.y };
+          moveGripOf(c.drawingId, c.wallId, c.index, c.pos, scaleDenominator);
+        }
+      }, `bodyDrag:${moveDrawingId ?? ""}:${moveWallId ?? ""}`);
     },
     // Kanten-Griff ziehen. Zwei Verhalten (Zielpunkt jeweils ABSOLUT relativ
     // zum ORIGINALEN Anker `edge.mid`, angewandt über applyEdgeToward — s. dort):

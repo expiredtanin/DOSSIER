@@ -10,6 +10,15 @@
 
 import { diffToOps } from "../core/ops";
 import type { CoreOp } from "../core/ops";
+import {
+  addItems,
+  fieldOps,
+  isOpsMutation,
+  patchItem,
+  patchItems,
+  removeItems,
+  setField,
+} from "../core";
 import { withVertexType, type PolylineVertexType } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import {
@@ -37,7 +46,7 @@ import {
   PEN_FALLBACK_WEIGHT,
 } from "../model/penSets";
 import { lineIntersect } from "../model/geometry";
-import { commitTransform } from "../tools/transform";
+import { transformOps } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
 import { centroid as roomCentroid } from "../core";
@@ -71,6 +80,12 @@ export interface ProjectSlice {
    * Implementierung unten.
    */
   setProject: (next: Project | ((p: Project) => Project), coalesceKey?: string) => void;
+  /**
+   * Änderung direkt als Ops ([K4] S3): `ops` oder ein Op-Bauer auf dem aktuellen Projekt
+   * (`core/opsBuild.ts`). Geht ohne `diffToOps` an den Kern (Prüfung, Verlauf); sonst wie
+   * {@link setProject} (gleicher `coalesceKey` im Zeitfenster = ein Undo-Schritt).
+   */
+  applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
   /** Die zuletzt angewendeten Ops (JSON-serialisierbar), jüngste zuletzt. */
   recentOps: () => CoreOp[][];
 
@@ -447,17 +462,41 @@ export function createProjectSlice(
 
   const history = createHistorySlice(api as unknown as StoreApi<HistorySlice & { project: Project }>);
 
+  // Kern-Commit einer Op-Folge auf `s.project` (Prüfung, Verlauf, Leseansicht nachführen).
+  // Verstösse werden zurückgerollt und gemeldet.
+  const commitOps = (
+    s: { project: Project },
+    ops: readonly CoreOp[],
+    coalesceKey: string | undefined,
+  ): Partial<ProjectSlice & HistorySlice> => {
+    if (ops.length === 0) return {};
+    const doc = storeDocument(s.project);
+    const res = doc.commit(s.project, ops, coalesceKey, Date.now());
+    if ("problems" in res) {
+      const problems = res.problems;
+      console.warn("Projektänderung verworfen:", problems);
+      queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
+      return {};
+    }
+    opLog.push(ops.slice());
+    if (opLog.length > OP_LOG_LIMIT) opLog.shift();
+    return { project: res.project, ...historyPatch(doc) };
+  };
+
   // Bequemer immutabler Projekt-Updater (wie setProject in App). Zweiter,
   // optionaler Parameter `coalesceKey`: NUR von den paar bekannten
-  // Hochfrequenz-Aktionen (Grip-Drag & Co., s. u.) gesetzt — alle anderen ~50
-  // Aktionen in dieser Datei rufen `setProject(fn)` ohne Key auf und pushen
-  // damit IMMER diskret (kein Koaleszieren zwischen unterschiedlichen
-  // Aktionen möglich, auch nicht bei zufällig identischem Timing in Tests).
+  // Hochfrequenz-Aktionen (Grip-Drag & Co., s. u.) gesetzt — alle anderen
+  // Aktionen rufen ohne Key auf und pushen damit IMMER diskret (kein
+  // Koaleszieren zwischen unterschiedlichen Aktionen möglich, auch nicht bei
+  // zufällig identischem Timing in Tests).
+  // [K4] S3: Projekt → Projekt-Funktionen gehen über `diffToOps` (Adapter für die Aktionen, die noch
+  // nicht umgestellt sind); Funktionen aus `opsMutation` tragen ihre Ops mit und sparen die Differenz.
   const setProject = (
     next: Project | ((p: Project) => Project),
     coalesceKey?: string,
   ) =>
     set((s) => {
+      if (isOpsMutation(next)) return commitOps(s, next.toOps(s.project), coalesceKey);
       const wanted =
         typeof next === "function" ? (next as (p: Project) => Project)(s.project) : next;
       // No-Op-Schutz: echte Immutable-Updates liefern bei tatsächlicher
@@ -467,21 +506,15 @@ export function createProjectSlice(
       if (wanted === s.project) return {};
       // Das Projekt ändert sich NUR über Ops (core/ops.ts): die gewünschte Änderung wird in
       // eine Op-Folge übersetzt; der Kern prüft (NaN, doppelte ids), wendet an und zeichnet den
-      // Undo-Schritt auf. Verstösse werden zurückgerollt und gemeldet.
-      const ops = diffToOps(s.project, wanted);
-      if (ops.length === 0) return {};
-      const doc = storeDocument(s.project);
-      const res = doc.commit(s.project, ops, coalesceKey, Date.now());
-      if ("problems" in res) {
-        const problems = res.problems;
-        console.warn("Projektänderung verworfen:", problems);
-        queueMicrotask(() => get().notify(`${t("project.change.rejected")} ${problems[0]}`, "error"));
-        return {};
-      }
-      opLog.push(ops);
-      if (opLog.length > OP_LOG_LIMIT) opLog.shift();
-      return { project: res.project, ...historyPatch(doc) };
+      // Undo-Schritt auf.
+      return commitOps(s, diffToOps(s.project, wanted), coalesceKey);
     });
+
+  // Änderung direkt als Ops (ohne Differenz), s. `ProjectSlice.applyChange`.
+  const applyChange = (
+    ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]),
+    coalesceKey?: string,
+  ) => set((s) => commitOps(s, typeof ops === "function" ? ops(s.project) : ops, coalesceKey));
 
   return {
     ...history,
@@ -493,31 +526,28 @@ export function createProjectSlice(
     project: sampleProject,
 
     setProject,
+    applyChange,
     recentOps: () => opLog.slice(),
 
     // ── Zeichnungsebenen ───────────────────────────────────────────────────
     toggleLevelVisible: (id) =>
-      setProject((p) => ({
-        ...p,
-        drawingLevels: p.drawingLevels.map((z) =>
-          z.id === id ? { ...z, visible: !z.visible } : z,
-        ),
-      })),
+      applyChange((p) => patchItem(p, "drawingLevels", id, (z) => ({ ...z, visible: !z.visible }))),
 
     patchActiveFloor: (patch) => {
       const activeLevelId = get().activeLevelId;
-      setProject((p) => ({
-        ...p,
-        drawingLevels: recomputeFloorElevations(
-          p.drawingLevels.map((z) =>
-            z.id === activeLevelId ? { ...z, ...patch } : z,
+      applyChange((p) =>
+        fieldOps(
+          p,
+          "drawingLevels",
+          recomputeFloorElevations(
+            p.drawingLevels.map((z) => (z.id === activeLevelId ? { ...z, ...patch } : z)),
           ),
         ),
-      }));
+      );
     },
 
     addFloor: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const n = p.drawingLevels.filter((z) => z.kind === "floor").length + 1;
         const floor: DrawingLevel = {
           id: `floor-${Date.now()}`,
@@ -528,14 +558,11 @@ export function createProjectSlice(
           floorHeight: 2.6,
           cutHeight: 1.0,
         };
-        return {
-          ...p,
-          drawingLevels: recomputeFloorElevations([...p.drawingLevels, floor]),
-        };
+        return fieldOps(p, "drawingLevels", recomputeFloorElevations([...p.drawingLevels, floor]));
       }),
 
     addDrawing: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const n = p.drawingLevels.filter((z) => z.kind === "drawing").length + 1;
         const drawing: DrawingLevel = {
           id: `drawing-${Date.now()}`,
@@ -544,13 +571,13 @@ export function createProjectSlice(
           visible: true,
           locked: false,
         };
-        return { ...p, drawingLevels: [...p.drawingLevels, drawing] };
+        return addItems("drawingLevels", [drawing]);
       }),
 
     // Schnitt/Ansicht sind vorerst Platzhalter ohne Schnittlinie (linePoints
     // bleibt undefined, bis die Schnitt-UI existiert — siehe toSection.ts).
     addSection: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const n = p.drawingLevels.filter((z) => z.kind === "section").length + 1;
         const section: DrawingLevel = {
           id: `section-${Date.now()}`,
@@ -559,11 +586,11 @@ export function createProjectSlice(
           visible: true,
           locked: false,
         };
-        return { ...p, drawingLevels: [...p.drawingLevels, section] };
+        return addItems("drawingLevels", [section]);
       }),
 
     addElevation: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const n = p.drawingLevels.filter((z) => z.kind === "elevation").length + 1;
         const elevation: DrawingLevel = {
           id: `elevation-${Date.now()}`,
@@ -572,7 +599,7 @@ export function createProjectSlice(
           visible: true,
           locked: false,
         };
-        return { ...p, drawingLevels: [...p.drawingLevels, elevation] };
+        return addItems("drawingLevels", [elevation]);
       }),
 
     // Neue freie Zeichnungsebene mit explizitem Namen anlegen und ihre ID
@@ -580,7 +607,7 @@ export function createProjectSlice(
     // (Dialog); leere Eingabe fällt auf den Default-Namen zurück.
     addDrawingLevel: (name) => {
       const id = `drawing-${Date.now()}`;
-      setProject((p) => {
+      applyChange((p) => {
         const n = p.drawingLevels.filter((z) => z.kind === "drawing").length + 1;
         const drawing: DrawingLevel = {
           id,
@@ -589,30 +616,26 @@ export function createProjectSlice(
           visible: true,
           locked: false,
         };
-        return { ...p, drawingLevels: [...p.drawingLevels, drawing] };
+        return addItems("drawingLevels", [drawing]);
       });
       return id;
     },
 
-    importDrawings: (drawings) =>
-      setProject((p) =>
-        drawings.length
-          ? { ...p, drawings2d: [...p.drawings2d, ...drawings] }
-          : p,
-      ),
+    importDrawings: (drawings) => applyChange(addItems("drawings2d", drawings)),
 
     patchLevel: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        drawingLevels: recomputeFloorElevations(
-          p.drawingLevels.map((z) => (z.id === id ? { ...z, ...patch } : z)),
+      applyChange((p) =>
+        fieldOps(
+          p,
+          "drawingLevels",
+          recomputeFloorElevations(p.drawingLevels.map((z) => (z.id === id ? { ...z, ...patch } : z))),
         ),
-      })),
+      ),
 
     duplicateLevel: (id) =>
-      setProject((p) => {
+      applyChange((p) => {
         const i = p.drawingLevels.findIndex((z) => z.id === id);
-        if (i < 0) return p;
+        if (i < 0) return [];
         const src = p.drawingLevels[i];
         const clone: DrawingLevel = {
           ...src,
@@ -621,7 +644,7 @@ export function createProjectSlice(
         };
         const next = [...p.drawingLevels];
         next.splice(i + 1, 0, clone);
-        return { ...p, drawingLevels: recomputeFloorElevations(next) };
+        return fieldOps(p, "drawingLevels", recomputeFloorElevations(next));
       }),
 
     // Zeichnungsebene löschen (≥1 behalten). War es das aktive Geschoss, auf
@@ -634,35 +657,27 @@ export function createProjectSlice(
         const fallback = project.drawingLevels.find((z) => z.id !== id);
         if (fallback) set({ activeLevelId: fallback.id });
       }
-      setProject((p) => {
+      applyChange((p) => {
         const removedWallIds = new Set(
           p.walls.filter((w) => w.floorId === id).map((w) => w.id),
         );
-        return {
-          ...p,
-          drawingLevels: recomputeFloorElevations(
-            p.drawingLevels.filter((z) => z.id !== id),
-          ),
-          walls: p.walls.filter((w) => w.floorId !== id),
-          ceilings: (p.ceilings ?? []).filter((c) => c.floorId !== id),
-          stairs: (p.stairs ?? []).filter((s) => s.floorId !== id),
-          rooms: (p.rooms ?? []).filter((r) => r.floorId !== id),
-          openings: (p.openings ?? []).filter(
-            (o) => !removedWallIds.has(o.hostWallId),
-          ),
-        };
+        return [
+          ...fieldOps(p, "drawingLevels", recomputeFloorElevations(p.drawingLevels.filter((z) => z.id !== id))),
+          ...removeItems(p, "walls", removedWallIds),
+          ...removeItems(p, "ceilings", (c) => c.floorId === id),
+          ...removeItems(p, "stairs", (s) => s.floorId === id),
+          ...removeItems(p, "rooms", (r) => r.floorId === id),
+          ...removeItems(p, "openings", (o) => removedWallIds.has(o.hostWallId)),
+        ];
       });
     },
 
     // ── Ebenen (Kategorien) ────────────────────────────────────────────────
     toggleCategoryVisible: (code) =>
-      setProject((p) => ({
-        ...p,
-        layers: toggleCategoryByCode(p.layers, code),
-      })),
+      applyChange((p) => fieldOps(p, "layers", toggleCategoryByCode(p.layers, code))),
 
     addCategory: () =>
-      setProject((p) => {
+      applyChange((p) => {
         const code = nextFreeCode(p.layers);
         const category: LayerCategory = {
           code,
@@ -672,17 +687,14 @@ export function createProjectSlice(
           visible: true,
           locked: false,
         };
-        return { ...p, layers: [...p.layers, category] };
+        return [setField("layers", [...p.layers, category])];
       }),
 
     patchCategory: (code, patch) =>
-      setProject((p) => ({
-        ...p,
-        layers: patchCategoryByCode(p.layers, code, patch),
-      })),
+      applyChange((p) => fieldOps(p, "layers", patchCategoryByCode(p.layers, code, patch))),
 
     addSubCategory: (parentCode) =>
-      setProject((p) => {
+      applyChange((p) => {
         const code = nextFreeCode(p.layers);
         const child: LayerCategory = {
           code,
@@ -692,27 +704,27 @@ export function createProjectSlice(
           visible: true,
           locked: false,
         };
-        return { ...p, layers: addChildByCode(p.layers, parentCode, child) };
+        return fieldOps(p, "layers", addChildByCode(p.layers, parentCode, child));
       }),
 
     duplicateCategory: (code) =>
-      setProject((p) => {
+      applyChange((p) => {
         const src = findCategory(p.layers, code);
-        if (!src) return p;
+        if (!src) return [];
         const clone: LayerCategory = {
           ...src,
           code: nextFreeCode(p.layers),
           name: t("default.copySuffixLayer", { name: src.name }),
           children: undefined,
         };
-        return { ...p, layers: insertAfterCode(p.layers, code, clone) };
+        return fieldOps(p, "layers", insertAfterCode(p.layers, code, clone));
       }),
 
     deleteCategory: (code) =>
-      setProject((p) => {
-        if (flattenCategories(p.layers).length <= 1) return p; // letzte behalten
+      applyChange((p) => {
+        if (flattenCategories(p.layers).length <= 1) return []; // letzte behalten
         const src = findCategory(p.layers, code);
-        if (!src) return p;
+        if (!src) return [];
         const codes = new Set(flattenCategories([src]).map((c) => c.code));
         const usedByWall = p.walls.some((w) => codes.has(w.categoryCode));
         const usedByOpening = (p.openings ?? []).some((o) =>
@@ -720,18 +732,13 @@ export function createProjectSlice(
         );
         if (usedByWall || usedByOpening) {
           get().notify(t("alert.layerInUse", { code: src.code, name: src.name }), "warning");
-          return p;
+          return [];
         }
-        return { ...p, layers: removeByCode(p.layers, code) };
+        return fieldOps(p, "layers", removeByCode(p.layers, code));
       }),
 
     assignWallCategory: (wallId, code) =>
-      setProject((p) => ({
-        ...p,
-        walls: p.walls.map((w) =>
-          w.id === wallId ? { ...w, categoryCode: code } : w,
-        ),
-      })),
+      applyChange((p) => patchItem(p, "walls", wallId, { categoryCode: code })),
 
     // ── Sichtbarkeits-Kombinationen ────────────────────────────────────────
     snapshotLayerVisibility: () => {
@@ -743,10 +750,7 @@ export function createProjectSlice(
     },
 
     applyLayerVisibility: (codes) =>
-      setProject((p) => ({
-        ...p,
-        layers: applyVisibilityByCode(p.layers, codes),
-      })),
+      applyChange((p) => fieldOps(p, "layers", applyVisibilityByCode(p.layers, codes))),
 
     snapshotDrawingVisibility: () => {
       const out: Record<string, boolean> = {};
@@ -755,12 +759,9 @@ export function createProjectSlice(
     },
 
     applyDrawingVisibility: (ids) =>
-      setProject((p) => ({
-        ...p,
-        drawingLevels: p.drawingLevels.map((z) =>
-          z.id in ids ? { ...z, visible: ids[z.id] } : z,
-        ),
-      })),
+      applyChange((p) =>
+        patchItems(p, "drawingLevels", (z) => z.id in ids, (z) => ({ ...z, visible: ids[z.id] })),
+      ),
 
     // ── Ressourcen ─────────────────────────────────────────────────────────
     patchComponent: (id, patch) =>
@@ -1100,10 +1101,9 @@ export function createProjectSlice(
       })),
 
     insertDrawingPoint: (drawingId, segIndex, pt) =>
-      setProject((p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) => {
-          if (d.id !== drawingId || d.geom.shape !== "polyline") return d;
+      applyChange((p) =>
+        patchItem(p, "drawings2d", drawingId, (d) => {
+          if (d.geom.shape !== "polyline") return d;
           const g = d.geom;
           const n = g.pts.length;
           const last = segIndex === n - 1;
@@ -1128,44 +1128,36 @@ export function createProjectSlice(
             : undefined;
           return { ...d, geom: { ...g, pts, ...(nextBulge ? { bulge: nextBulge } : {}) } };
         }),
-      })),
+      ),
 
     setPolylineVertexType: (drawingId, index, type) =>
-      setProject((p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) => {
-          if (d.id !== drawingId || d.geom.shape !== "polyline" || d.locked) return d;
+      applyChange((p) =>
+        patchItem(p, "drawings2d", drawingId, (d) => {
+          if (d.geom.shape !== "polyline" || d.locked) return d;
           const g = d.geom;
           const bulge = withVertexType(g, index, type);
           const { bulge: _old, ...rest } = g;
           return { ...d, geom: bulge.some((b) => b !== 0) ? { ...rest, bulge } : rest };
         }),
-      })),
+      ),
 
     deleteDrawingPoint: (drawingId, index) =>
-      setProject((p) => {
+      applyChange((p) => {
         const d = p.drawings2d.find((x) => x.id === drawingId);
-        if (!d || d.geom.shape !== "polyline") return p;
+        if (!d || d.geom.shape !== "polyline") return [];
         const g = d.geom;
         const min = g.closed ? 4 : 3;
         if (g.pts.length < min) {
           get().notify(t("alert.polylineMinPoints"), "warning");
-          return p;
+          return [];
         }
-        if (index < 0 || index >= g.pts.length) return p;
+        if (index < 0 || index >= g.pts.length) return [];
         const pts = g.pts.filter((_, i) => i !== index);
         // Zwei Segmente werden zu einem: der Bulge des ENTFERNTEN Segments
         // fällt weg, das verbleibende behält seinen Wert (die exakte
         // Bogenform lässt sich nicht erhalten, wenn ihr Stützpunkt entfällt).
         const bulge = g.bulge ? g.bulge.filter((_, i) => i !== index) : undefined;
-        return {
-          ...p,
-          drawings2d: p.drawings2d.map((x) =>
-            x.id === drawingId
-              ? { ...x, geom: { ...g, pts, ...(bulge ? { bulge } : {}) } }
-              : x,
-          ),
-        };
+        return patchItem(p, "drawings2d", drawingId, (x) => ({ ...x, geom: { ...g, pts, ...(bulge ? { bulge } : {}) } }));
       }),
 
     // ── Editier-Griffe ─────────────────────────────────────────────────────
@@ -1173,129 +1165,91 @@ export function createProjectSlice(
     // (kein Draft/Commit-Muster wie bei den Zeichenwerkzeugen) — daher mit
     // coalesceKey, damit EIN Drag EINEN Undo-Schritt erzeugt statt vieler.
     moveGripOf: (drawingId, wallId, index, pt, scaleDenominator) =>
-      setProject(
+      applyChange(
         (p) => moveGrip(p, drawingId, wallId, index, pt, scaleDenominator),
         `moveGripOf:${drawingId ?? ""}:${wallId ?? ""}:${index}`,
       ),
 
     moveElementByOf: (drawingId, wallId, delta) =>
-      setProject(
+      applyChange(
         (p) => moveElementBy(p, drawingId, wallId, delta),
         `moveElementByOf:${drawingId ?? ""}:${wallId ?? ""}`,
       ),
 
     moveEdgeOf: (drawingId, wallId, aIndex, bIndex, delta) =>
-      setProject(
+      applyChange(
         (p) => moveEdge(p, drawingId, wallId, aIndex, bIndex, delta),
         `moveEdgeOf:${drawingId ?? ""}:${wallId ?? ""}:${aIndex}:${bIndex}`,
       ),
 
     // ── Selektions-Attribute ───────────────────────────────────────────────
     setElementColor: (kind, id, color) =>
-      setProject((p) => {
-        if (kind === "drawing2d") {
-          return {
-            ...p,
-            drawings2d: p.drawings2d.map((d) =>
-              d.id === id ? { ...d, color } : d,
-            ),
-          };
-        }
-        return {
-          ...p,
-          walls: p.walls.map((w) => (w.id === id ? { ...w, color } : w)),
-        };
-      }),
+      applyChange((p) =>
+        kind === "drawing2d" ? patchItem(p, "drawings2d", id, { color }) : patchItem(p, "walls", id, { color }),
+      ),
 
     // Strichstärke gibt es als direktes Feld NUR auf Drawing2D; bei unbekannter
     // ID bleibt das Projekt unverändert (No-op).
-    setElementWeight: (id, weightMm) =>
-      setProject((p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) =>
-          d.id === id ? { ...d, weightMm } : d,
-        ),
-      })),
+    setElementWeight: (id, weightMm) => applyChange((p) => patchItem(p, "drawings2d", id, { weightMm })),
 
     // Füllschraffur NUR für Drawing2D; `null` entfernt die Schraffur (Feld weg).
     setElementFill: (id, hatchId) =>
-      setProject((p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) => {
-          if (d.id !== id) return d;
+      applyChange((p) =>
+        patchItem(p, "drawings2d", id, (d) => {
           if (hatchId === null) {
             const { hatchId: _omit, ...rest } = d;
             return rest;
           }
           return { ...d, hatchId };
         }),
-      })),
+      ),
 
     // Vollton-Füllfarbe NUR für Drawing2D; `null` entfernt das Feld.
     setElementFillColor: (id, fillColor) =>
-      setProject((p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) => {
-          if (d.id !== id) return d;
+      applyChange((p) =>
+        patchItem(p, "drawings2d", id, (d) => {
           if (fillColor === null) {
             const { fillColor: _omit, ...rest } = d;
             return rest;
           }
           return { ...d, fillColor };
         }),
-      })),
+      ),
 
     // Vordergrund-/Hintergrund-Override (Wand/Decke/Drawing2D); `null` löscht
     // das Feld (→ „Nach System", erbt wieder vom Bauteil/System).
     setElementForeground: (kind, id, value) =>
-      setProject((p) => setOverrideField(p, kind, id, "foreground", value)),
+      applyChange((p) => setOverrideField(p, kind, id, "foreground", value)),
     setElementBackground: (kind, id, value) =>
-      setProject((p) => setOverrideField(p, kind, id, "background", value)),
+      applyChange((p) => setOverrideField(p, kind, id, "background", value)),
 
-    updateDrawing2D: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        drawings2d: p.drawings2d.map((d) => (d.id === id ? { ...d, ...patch } : d)),
-      })),
+    updateDrawing2D: (id, patch) => applyChange((p) => patchItem(p, "drawings2d", id, patch)),
 
     reorderDrawings: (ids, op) =>
-      setProject((p) => ({
-        ...p,
-        drawings2d: reorderDrawings2D(p.drawings2d, ids, op),
-      })),
+      applyChange((p) => fieldOps(p, "drawings2d", reorderDrawings2D(p.drawings2d, ids, op))),
 
     reorderDrawingLevels: (ids, op) =>
-      setProject((p) => ({
-        ...p,
-        drawingLevels: reorderDrawingLevelsArr(p.drawingLevels, ids, op),
-      })),
+      applyChange((p) => fieldOps(p, "drawingLevels", reorderDrawingLevelsArr(p.drawingLevels, ids, op))),
 
     // ── Größe (Resize um Anker) ────────────────────────────────────────────
     resizeElement: (kind, id, w, h, anchor) =>
-      setProject((p) => resizeElement(p, kind, id, w, h, anchor)),
+      applyChange((p) => resizeElement(p, kind, id, w, h, anchor)),
 
     // ── Transformation ─────────────────────────────────────────────────────
     commitTransformOn: (sel, op, points, copyMode, count) =>
-      setProject((p) => commitTransform(p, sel, op, points, copyMode, count)),
+      applyChange((p) => transformOps(p, sel, op, points, copyMode, count)),
 
     // ── Wand-Attribute ─────────────────────────────────────────────────────
-    updateWall: (id, patch, coalesceKey) =>
-      setProject(
-        (p) => ({
-          ...p,
-          walls: p.walls.map((w) => (w.id === id ? { ...w, ...patch } : w)),
-        }),
-        coalesceKey,
-      ),
+    updateWall: (id, patch, coalesceKey) => applyChange((p) => patchItem(p, "walls", id, patch), coalesceKey),
 
     setWallThickness: (wallId, thickness) =>
-      setProject((p) => setWallThickness(p, wallId, thickness)),
+      applyChange((p) => setWallThickness(p, wallId, thickness)),
 
     // ── Decken-Editieren ──────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf — auch hier läuft die
     // Mutation bei jedem Maus-Move-Schritt eines Drags.)
     moveCeilingGrip: (ceilingId, index, pt) =>
-      setProject(
+      applyChange(
         (p) => mapCeiling(p, ceilingId, (c) => ({
           ...c,
           outline: c.outline.map((v, i) => (i === index ? pt : v)),
@@ -1304,7 +1258,7 @@ export function createProjectSlice(
       ),
 
     moveCeilingBy: (ceilingId, delta) =>
-      setProject(
+      applyChange(
         (p) => mapCeiling(p, ceilingId, (c) => ({
           ...c,
           outline: c.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
@@ -1313,7 +1267,7 @@ export function createProjectSlice(
       ),
 
     moveCeilingEdge: (ceilingId, aIndex, bIndex, delta) =>
-      setProject(
+      applyChange(
         (p) => mapCeiling(p, ceilingId, (c) => ({
           ...c,
           outline: movePolygonEdge(c.outline, aIndex, bIndex, delta, true),
@@ -1322,37 +1276,25 @@ export function createProjectSlice(
       ),
 
     updateCeiling: (id, patch) =>
-      setProject((p) => mapCeiling(p, id, (c) => ({ ...c, ...patch }))),
+      applyChange((p) => mapCeiling(p, id, (c) => ({ ...c, ...patch }))),
 
     setCeilingThickness: (ceilingId, thickness) =>
-      setProject((p) => setCeilingThickness(p, ceilingId, thickness)),
+      applyChange((p) => setCeilingThickness(p, ceilingId, thickness)),
 
     // ── Öffnungs-Editieren ────────────────────────────────────────────────
-    updateOpening: (id, patch) =>
-      setProject((p) => ({
-        ...p,
-        openings: (p.openings ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)),
-      })),
+    updateOpening: (id, patch) => applyChange((p) => patchItem(p, "openings", id, patch)),
 
     // ── Dach-Editieren ─────────────────────────────────────────────────────
-    updateRoof: (id, patch, coalesceKey) =>
-      setProject(
-        (p) => ({
-          ...p,
-          roofs: (p.roofs ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
-        }),
-        coalesceKey,
-      ),
+    updateRoof: (id, patch, coalesceKey) => applyChange((p) => patchItem(p, "roofs", id, patch), coalesceKey),
 
     // Dach-Eckgriff (3D): der gezogene Umriss-Eckpunkt `index` wandert auf `pt`;
     // die GEGENÜBERLIEGENDE Ecke bleibt fix → der Umriss bleibt ein achsparalleles
     // Rechteck (die Dach-Geometrie rechnet ohnehin auf der Bounding-Box).
     moveRoofGrip: (roofId, index, pt) =>
-      setProject(
-        (p) => ({
-          ...p,
-          roofs: (p.roofs ?? []).map((r) => {
-            if (r.id !== roofId || r.outline.length < 4) return r;
+      applyChange(
+        (p) =>
+          patchItem(p, "roofs", roofId, (r) => {
+            if (r.outline.length < 4) return r;
             const opp = r.outline[(index + 2) % r.outline.length];
             const x0 = Math.min(pt.x, opp.x);
             const x1 = Math.max(pt.x, opp.x);
@@ -1368,28 +1310,24 @@ export function createProjectSlice(
               ],
             };
           }),
-        }),
         `moveRoofGrip:${roofId}`,
       ),
 
     // Dach als Ganzes verschieben (Verschiebe-Griff).
     moveRoofBy: (roofId, delta) =>
-      setProject(
-        (p) => ({
-          ...p,
-          roofs: (p.roofs ?? []).map((r) =>
-            r.id === roofId
-              ? { ...r, outline: r.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })) }
-              : r,
-          ),
-        }),
+      applyChange(
+        (p) =>
+          patchItem(p, "roofs", roofId, (r) => ({
+            ...r,
+            outline: r.outline.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })),
+          })),
         `moveRoofBy:${roofId}`,
       ),
 
     // ── Treppen-Editieren ──────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf.)
     moveStairBy: (stairId, delta) =>
-      setProject(
+      applyChange(
         (p) =>
           mapStair(p, stairId, (s) => ({
             ...s,
@@ -1402,12 +1340,12 @@ export function createProjectSlice(
       ),
 
     updateStair: (id, patch) =>
-      setProject((p) => mapStair(p, id, (s) => ({ ...s, ...patch }))),
+      applyChange((p) => mapStair(p, id, (s) => ({ ...s, ...patch }))),
 
     // ── Raum-Editieren ──────────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf.)
     moveRoomBy: (roomId, delta) =>
-      setProject(
+      applyChange(
         (p) =>
           mapRoom(p, roomId, (r) => ({
             ...r,
@@ -1425,7 +1363,7 @@ export function createProjectSlice(
       ),
 
     moveRoomGrip: (roomId, index, pt) =>
-      setProject(
+      applyChange(
         (p) =>
           mapRoom(p, roomId, (r) => ({
             ...r,
@@ -1435,7 +1373,7 @@ export function createProjectSlice(
       ),
 
     moveRoomEdge: (roomId, aIndex, bIndex, delta) =>
-      setProject(
+      applyChange(
         (p) =>
           mapRoom(p, roomId, (r) => ({
             ...r,
@@ -1445,10 +1383,10 @@ export function createProjectSlice(
       ),
 
     updateRoom: (id, patch) =>
-      setProject((p) => mapRoom(p, id, (r) => ({ ...r, ...patch }))),
+      applyChange((p) => mapRoom(p, id, (r) => ({ ...r, ...patch }))),
 
     moveRoomStamp: (roomId, delta) =>
-      setProject((p) =>
+      applyChange((p) =>
         mapRoom(p, roomId, (r) => {
           const base = r.stampAnchor ?? roomCentroid(r.boundary);
           return {
@@ -1459,13 +1397,13 @@ export function createProjectSlice(
       ),
 
     setRoomStampAnchor: (roomId, anchor) =>
-      setProject((p) => mapRoom(p, roomId, (r) => ({ ...r, stampAnchor: anchor }))),
+      applyChange((p) => mapRoom(p, roomId, (r) => ({ ...r, stampAnchor: anchor }))),
 
     setRoomStampDoc: (roomId, doc) =>
-      setProject((p) => mapRoom(p, roomId, (r) => ({ ...r, stampDoc: doc }))),
+      applyChange((p) => mapRoom(p, roomId, (r) => ({ ...r, stampDoc: doc }))),
 
     setRoomStamp: (roomId, stamp) =>
-      setProject((p) => mapRoom(p, roomId, (r) => ({ ...r, stamp }))),
+      applyChange((p) => mapRoom(p, roomId, (r) => ({ ...r, stamp }))),
   };
 }
 
@@ -1474,12 +1412,8 @@ function mapRoom(
   project: Project,
   roomId: string,
   fn: (r: import("../model/types").Room) => import("../model/types").Room,
-): Project {
-  const rooms = project.rooms ?? [];
-  return {
-    ...project,
-    rooms: rooms.map((r) => (r.id === roomId ? fn(r) : r)),
-  };
+): CoreOp[] {
+  return patchItem(project, "rooms", roomId, fn);
 }
 
 /** Immutabler Map über eine Treppe (per ID); No-op ohne Treffer. */
@@ -1487,12 +1421,8 @@ function mapStair(
   project: Project,
   stairId: string,
   fn: (s: import("../model/types").Stair) => import("../model/types").Stair,
-): Project {
-  const stairs = project.stairs ?? [];
-  return {
-    ...project,
-    stairs: stairs.map((s) => (s.id === stairId ? fn(s) : s)),
-  };
+): CoreOp[] {
+  return patchItem(project, "stairs", stairId, fn);
 }
 
 /** Immutabler Map über eine Decke (per ID); No-op ohne Treffer. */
@@ -1507,19 +1437,17 @@ function setOverrideField(
   id: string,
   field: "foreground" | "background",
   value: string | null,
-): Project {
+): CoreOp[] {
   const apply = <T extends { id: string }>(item: T): T => {
-    if (item.id !== id) return item;
     if (value === null) {
       const { [field]: _omit, ...rest } = item as Record<string, unknown>;
       return rest as unknown as T;
     }
     return { ...item, [field]: value };
   };
-  if (kind === "wall") return { ...project, walls: project.walls.map(apply) };
-  if (kind === "ceiling")
-    return { ...project, ceilings: (project.ceilings ?? []).map(apply) };
-  return { ...project, drawings2d: project.drawings2d.map(apply) };
+  if (kind === "wall") return patchItem(project, "walls", id, apply);
+  if (kind === "ceiling") return patchItem(project, "ceilings", id, apply);
+  return patchItem(project, "drawings2d", id, apply);
 }
 
 /**
@@ -1609,12 +1537,8 @@ function mapCeiling(
   project: Project,
   ceilingId: string,
   fn: (c: import("../model/types").Ceiling) => import("../model/types").Ceiling,
-): Project {
-  const ceilings = project.ceilings ?? [];
-  return {
-    ...project,
-    ceilings: ceilings.map((c) => (c.id === ceilingId ? fn(c) : c)),
-  };
+): CoreOp[] {
+  return patchItem(project, "ceilings", ceilingId, fn);
 }
 
 /**
@@ -1627,12 +1551,12 @@ function setWallThickness(
   project: Project,
   wallId: string,
   thickness: number,
-): Project {
-  if (!isFinite(thickness) || thickness <= 0) return project;
+): CoreOp[] {
+  if (!isFinite(thickness) || thickness <= 0) return [];
   const wall = project.walls.find((w) => w.id === wallId);
-  if (!wall) return project;
+  if (!wall) return [];
   const wt = project.wallTypes.find((t) => t.id === wall.wallTypeId);
-  if (!wt || wt.layers.length === 0) return project;
+  if (!wt || wt.layers.length === 0) return [];
 
   const single = wt.layers.length === 1;
   const usedByOthers = project.walls.some(
@@ -1641,14 +1565,7 @@ function setWallThickness(
 
   if (single && !usedByOthers) {
     // Direkt die Schichtdicke des (exklusiven, einschichtigen) Wandtyps setzen.
-    return {
-      ...project,
-      wallTypes: project.wallTypes.map((t) =>
-        t.id === wt.id
-          ? { ...t, layers: [{ ...t.layers[0], thickness }] }
-          : t,
-      ),
-    };
+    return patchItem(project, "wallTypes", wt.id, (t) => ({ ...t, layers: [{ ...t.layers[0], thickness }] }));
   }
 
   // Dedizierten einschichtigen Wandtyp erzeugen (erste Schicht klonen) und der
@@ -1659,13 +1576,7 @@ function setWallThickness(
     name: t("default.wallTypeSingle", { thickness: thickness.toFixed(2) }),
     layers: [{ ...wt.layers[0], thickness }],
   };
-  return {
-    ...project,
-    wallTypes: [...project.wallTypes, clone],
-    walls: project.walls.map((w) =>
-      w.id === wallId ? { ...w, wallTypeId: id } : w,
-    ),
-  };
+  return [...addItems("wallTypes", [clone]), ...patchItem(project, "walls", wallId, { wallTypeId: id })];
 }
 
 /**
@@ -1681,15 +1592,15 @@ function setCeilingThickness(
   project: Project,
   ceilingId: string,
   thickness: number,
-): Project {
-  if (!isFinite(thickness) || thickness <= 0) return project;
+): CoreOp[] {
+  if (!isFinite(thickness) || thickness <= 0) return [];
   const ceiling = (project.ceilings ?? []).find((c) => c.id === ceilingId);
-  if (!ceiling) return project;
+  if (!ceiling) return [];
   const activeId = ceiling.ceilingTypeId ?? ceiling.wallTypeId;
   const ct =
     (project.ceilingTypes ?? []).find((t) => t.id === ceiling.ceilingTypeId) ??
     project.wallTypes.find((t) => t.id === ceiling.wallTypeId);
-  if (!ct || ct.layers.length === 0) return project;
+  if (!ct || ct.layers.length === 0) return [];
 
   const single = ct.layers.length === 1;
   const usedByOthers = (project.ceilings ?? []).some(
@@ -1698,12 +1609,7 @@ function setCeilingThickness(
 
   if (single && !usedByOthers && ceiling.ceilingTypeId) {
     // Direkt die Schichtdicke des (exklusiven, einschichtigen) Deckentyps setzen.
-    return {
-      ...project,
-      ceilingTypes: (project.ceilingTypes ?? []).map((t) =>
-        t.id === ct.id ? { ...t, layers: [{ ...t.layers[0], thickness }] } : t,
-      ),
-    };
+    return patchItem(project, "ceilingTypes", ct.id, (t) => ({ ...t, layers: [{ ...t.layers[0], thickness }] }));
   }
 
   // Dedizierten einschichtigen Deckentyp erzeugen (erste Schicht klonen) und
@@ -1714,13 +1620,10 @@ function setCeilingThickness(
     name: t("default.ceilingTypeSingle", { thickness: thickness.toFixed(2) }),
     layers: [{ ...ct.layers[0], thickness }],
   };
-  return {
-    ...project,
-    ceilingTypes: [...(project.ceilingTypes ?? []), clone],
-    ceilings: (project.ceilings ?? []).map((c) =>
-      c.id === ceilingId ? { ...c, ceilingTypeId: id, thickness: undefined } : c,
-    ),
-  };
+  return [
+    ...addItems("ceilingTypes", [clone]),
+    ...patchItem(project, "ceilings", ceilingId, (c) => ({ ...c, ceilingTypeId: id, thickness: undefined })),
+  ];
 }
 
 // ── Resize (Skalierung auf Zielmaß um einen Anker) ───────────────────────────
@@ -1738,28 +1641,19 @@ function resizeElement(
   w: number,
   h: number,
   anchor: { fx: number; fy: number },
-): Project {
+): CoreOp[] {
   if (kind === "drawing2d") {
-    return {
-      ...project,
-      drawings2d: project.drawings2d.map((d) =>
-        d.id === id ? { ...d, geom: resizeGeom(d.geom, w, h, anchor) } : d,
-      ),
-    };
+    return patchItem(project, "drawings2d", id, (d) => ({ ...d, geom: resizeGeom(d.geom, w, h, anchor) }));
   }
-  return {
-    ...project,
-    walls: project.walls.map((wall) => {
-      if (wall.id !== id) return wall;
+  return patchItem(project, "walls", id, (wall) => {
       const box = bbox2([wall.start, wall.end]);
       const { ax, ay, sx, sy } = scaleAround(box, w, h, anchor);
       const apply = (p: Vec2): Vec2 => ({
         x: ax + (p.x - ax) * sx,
         y: ay + (p.y - ay) * sy,
       });
-      return { ...wall, start: apply(wall.start), end: apply(wall.end) };
-    }),
-  };
+    return { ...wall, start: apply(wall.start), end: apply(wall.end) };
+  });
 }
 
 /** bbox einer Punktliste. */
@@ -2107,16 +2001,13 @@ function moveGrip(
   pt: Vec2,
   /** Papier-Massstab (1:N) — nur für den Masszahl-Griff, s. `drawingVertices`. */
   scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
-): Project {
+): CoreOp[] {
   // Objekt-Sperre: gesperrte Elemente lassen sich anwählen, aber nicht
   // ziehen (s. Kommentar bei `onPlanSelect` in useMouseSelectionHandlers.ts).
-  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return project;
-  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return project;
+  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return [];
+  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return [];
   if (drawingId) {
-    return {
-      ...project,
-      drawings2d: project.drawings2d.map((d) => {
-        if (d.id !== drawingId) return d;
+    return patchItem(project, "drawings2d", drawingId, (d) => {
         const g = d.geom;
         if (g.shape === "line" || g.shape === "xline" || g.shape === "ray") {
           return { ...d, geom: index === 0 ? { ...g, a: pt } : { ...g, b: pt } };
@@ -2283,18 +2174,12 @@ function moveGrip(
           return { ...d, geom: { ...g, rx, ry } };
         }
         return d;
-      }),
-    };
+    });
   }
   if (wallId) {
-    return {
-      ...project,
-      walls: project.walls.map((w) =>
-        w.id === wallId ? { ...w, ...(index === 0 ? { start: pt } : { end: pt }) } : w,
-      ),
-    };
+    return patchItem(project, "walls", wallId, (w) => ({ ...w, ...(index === 0 ? { start: pt } : { end: pt }) }));
   }
-  return project;
+  return [];
 }
 
 /** Verschiebt das selektierte Element (2D-Element ODER Wand) um `delta` (parallel). */
@@ -2303,16 +2188,13 @@ function moveElementBy(
   drawingId: string | null,
   wallId: string | null,
   delta: Vec2,
-): Project {
+): CoreOp[] {
   // Objekt-Sperre: s. Kommentar in `moveGrip` oben.
-  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return project;
-  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return project;
+  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return [];
+  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return [];
   const mv = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
   if (drawingId) {
-    return {
-      ...project,
-      drawings2d: project.drawings2d.map((d) => {
-        if (d.id !== drawingId) return d;
+    return patchItem(project, "drawings2d", drawingId, (d) => {
         const g = d.geom;
         switch (g.shape) {
           case "line":
@@ -2343,18 +2225,12 @@ function moveElementBy(
           default:
             return d;
         }
-      }),
-    };
+    });
   }
   if (wallId) {
-    return {
-      ...project,
-      walls: project.walls.map((w) =>
-        w.id === wallId ? { ...w, start: mv(w.start), end: mv(w.end) } : w,
-      ),
-    };
+    return patchItem(project, "walls", wallId, (w) => ({ ...w, start: mv(w.start), end: mv(w.end) }));
   }
-  return project;
+  return [];
 }
 
 /**
@@ -2458,16 +2334,13 @@ function moveEdge(
   aIndex: number,
   bIndex: number,
   delta: Vec2,
-): Project {
+): CoreOp[] {
   // Objekt-Sperre: s. Kommentar in `moveGrip` oben.
-  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return project;
-  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return project;
+  if (drawingId && project.drawings2d.find((d) => d.id === drawingId)?.locked) return [];
+  if (wallId && project.walls.find((w) => w.id === wallId)?.locked) return [];
   const mv = (p: Vec2): Vec2 => ({ x: p.x + delta.x, y: p.y + delta.y });
   if (drawingId) {
-    return {
-      ...project,
-      drawings2d: project.drawings2d.map((d) => {
-        if (d.id !== drawingId) return d;
+    return patchItem(project, "drawings2d", drawingId, (d) => {
         const g = d.geom;
         if (g.shape === "line") {
           // Linie hat nur eine Kante [0,1] → das ganze Segment verschieben.
@@ -2497,19 +2370,13 @@ function moveEdge(
           return { ...d, geom: { ...g, min: { x: minX, y: minY }, max: { x: maxX, y: maxY } } };
         }
         return d;
-      }),
-    };
+    });
   }
   if (wallId) {
     // Wand: beide Enden gemeinsam → ganze Wand senkrecht verschieben.
-    return {
-      ...project,
-      walls: project.walls.map((w) =>
-        w.id === wallId ? { ...w, start: mv(w.start), end: mv(w.end) } : w,
-      ),
-    };
+    return patchItem(project, "walls", wallId, (w) => ({ ...w, start: mv(w.start), end: mv(w.end) }));
   }
-  return project;
+  return [];
 }
 
 // ── Immutable Tree-Helfer (verschoben aus App.tsx, 1:1) ──────────────────────

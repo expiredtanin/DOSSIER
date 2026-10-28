@@ -22,10 +22,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 /** Default-Ebene (Kategorie) für Öffnungen: „21" Türen/Fenster (Fallback: aktive). */
 const OPENING_CATEGORY = "21";
@@ -183,7 +184,7 @@ function posDraft(s: OpPos): ToolDraft {
 }
 
 /** Hängt eine Öffnung ans Projekt (immutabel). */
-function appendOpening(p: Project, s: OpPos, ctx: CommandContext): Project {
+function appendOpening(s: OpPos, ctx: CommandContext): CoreOp[] {
   const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
   const width = Math.max(0.1, Math.min(s.width, len));
   const position = Math.max(0, Math.min(s.posAlong, Math.max(0, len - width)));
@@ -208,8 +209,7 @@ function appendOpening(p: Project, s: OpPos, ctx: CommandContext): Project {
       ? { hinge: s.hinge, swing: s.side, openingDir: s.dir, swingAngle: s.swingAngle }
       : {}),
   };
-  const openings = p.openings ? [...p.openings, opening] : [opening];
-  return { ...p, openings };
+  return addItems("openings", [opening]);
 }
 
 const idle = (from?: OpState): [CommandState, CommandResult] => [
@@ -307,7 +307,7 @@ export const openingCommand: Command = {
     const ns: OpPos = { ...s, posAlong: proj.t, cursor: pt };
     return [
       idle(s)[0],
-      { draft: null, done: true, commit: (p) => appendOpening(p, ns, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendOpening(ns, ctx)) },
     ];
   },
 
@@ -325,7 +325,7 @@ export const openingCommand: Command = {
       const ns = s;
       return [
         idle(s)[0],
-        { draft: null, done: true, commit: (p) => appendOpening(p, ns, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendOpening(ns, ctx)) },
       ];
     }
     return idle(s);

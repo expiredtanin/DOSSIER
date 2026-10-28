@@ -10,7 +10,9 @@
 
 import type { Drawing2D } from "../../model/types";
 import { uniqueId } from "../../tools/types";
-import type { Command, CommandContext, CommandResult, CommandState, Project, Vec2 } from "../types";
+import type { Command, CommandContext, CommandResult, CommandState, Vec2 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 /** Default-Schrifthöhe eines frei platzierten Texts in Modell-Metern. */
 const DEFAULT_TEXT_HEIGHT_M = 0.25;
@@ -20,7 +22,7 @@ interface TextIdle extends CommandState {
 }
 type TextState = TextIdle;
 
-function appendEmptyText(p: Project, id: string, at: Vec2, ctx: CommandContext): Project {
+function appendEmptyText(id: string, at: Vec2, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id,
     type: "drawing2d",
@@ -28,7 +30,7 @@ function appendEmptyText(p: Project, id: string, at: Vec2, ctx: CommandContext):
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "text", at, text: "", height: DEFAULT_TEXT_HEIGHT_M, angle: 0 },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -54,7 +56,7 @@ export const textCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) => appendEmptyText(p, id, at, ctx),
+        commit: opsMutation(() => appendEmptyText(id, at, ctx)),
         focusDrawingId: id,
       },
     ];

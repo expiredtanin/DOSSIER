@@ -22,9 +22,10 @@ import type {
   CommandResult,
   CommandState,
   CmdOption,
-  Project,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 /** Default-Ebene (Kategorie) für Stützen: „50" Tragwerk (Fallback: aktive). */
 const COLUMN_CATEGORY = "50";
@@ -48,11 +49,9 @@ function currentProfile(): ColumnProfile {
 }
 
 /** Fügt die Stütze immutabel an `project.columns` an. */
-function appendColumn(
-  p: Project,
-  position: Vec2,
+function appendColumn(position: Vec2,
   ctx: CommandContext,
-): Project {
+): CoreOp[] {
   const height =
     ctx.level.floorHeight != null && ctx.level.floorHeight > 0
       ? ctx.level.floorHeight
@@ -67,7 +66,7 @@ function appendColumn(
     rotation: 0,
     height,
   };
-  return { ...p, columns: [...(p.columns ?? []), column] };
+  return addItems("columns", [column]);
 }
 
 interface ColState extends CommandState {
@@ -135,7 +134,7 @@ export const columnCommand: Command = {
     if (input.kind === "point") {
       return [
         { phase: "done", lastPoint: null } as ColState,
-        { draft: null, done: true, commit: (p) => appendColumn(p, input.point, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendColumn(input.point, ctx)) },
       ];
     }
     return [s, { draft: null }];

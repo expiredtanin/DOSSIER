@@ -36,6 +36,8 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation, patchItem } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
@@ -151,16 +153,11 @@ function offsetDraft(pts: Vec2[], offset: number, at: Vec2 | null): ToolDraft {
 }
 
 /** Committet eine Kette: neu anhängen (editId null) ODER dasselbe Element ersetzen. */
-function commitChain(p: Project, pts: Vec2[], offset: number, editId: string | null, ctx: CommandContext): Project {
+function commitChain(p: Project, pts: Vec2[], offset: number, editId: string | null, ctx: CommandContext): CoreOp[] {
   const cleaned = pts.filter((pt, i) => i === 0 || dist(pts[i - 1], pt) >= EPS);
-  if (cleaned.length < 2) return p; // zu wenig gültige Punkte → nichts committen/ändern
+  if (cleaned.length < 2) return []; // zu wenig gültige Punkte → nichts committen/ändern
   if (editId) {
-    return {
-      ...p,
-      drawings2d: p.drawings2d.map((d) =>
-        d.id === editId ? { ...d, geom: { shape: "dimension", pts: cleaned, offset } } : d,
-      ),
-    };
+    return patchItem(p, "drawings2d", editId, (d): Drawing2D => ({ ...d, geom: { shape: "dimension", pts: cleaned, offset } }));
   }
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
@@ -169,7 +166,7 @@ function commitChain(p: Project, pts: Vec2[], offset: number, editId: string | n
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "dimension", pts: cleaned, offset },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -237,7 +234,7 @@ export const dimensionCommand: Command = {
     const editId = s.editId;
     return [
       { phase: "start", lastPoint: null },
-      { draft: null, done: true, commit: (p) => commitChain(p, pts, offset, editId, ctx) },
+      { draft: null, done: true, commit: opsMutation((p) => commitChain(p, pts, offset, editId, ctx)) },
     ];
   },
 

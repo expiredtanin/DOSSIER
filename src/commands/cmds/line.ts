@@ -36,6 +36,8 @@ import type {
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -81,7 +83,7 @@ function lineDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
 }
 
 /** Hängt eine 2D-Linie ans Projekt (immutabel). Farbe/Strich erbt die Kategorie. */
-function appendLine(p: import("../types").Project, a: Vec2, b: Vec2, ctx: CommandContext) {
+function appendLine(a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -89,7 +91,7 @@ function appendLine(p: import("../types").Project, a: Vec2, b: Vec2, ctx: Comman
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "line", a, b },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 export const lineCommand: Command = {
@@ -117,7 +119,7 @@ export const lineCommand: Command = {
     }
     const a = s.a;
     const next: LineDrawing = { phase: "end", a: pt, cursor: pt, lastPoint: pt };
-    return [next, { draft: lineDraft(pt, pt), commit: (p) => appendLine(p, a, pt, ctx) }];
+    return [next, { draft: lineDraft(pt, pt), commit: opsMutation(() => appendLine(a, pt, ctx)) }];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => {

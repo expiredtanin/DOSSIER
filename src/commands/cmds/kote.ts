@@ -14,11 +14,12 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 type KoteKind = "okFertig" | "ukFertig" | "okRoh" | "ukRoh";
 const KIND_ORDER: KoteKind[] = ["okFertig", "ukFertig", "okRoh", "ukRoh"];
@@ -62,7 +63,7 @@ function valueDraft(at: Vec2, kind: KoteKind): ToolDraft {
   return { preview, vertices: [at] };
 }
 
-function appendKote(p: Project, at: Vec2, value: number, kind: KoteKind, ctx: CommandContext): Project {
+function appendKote(at: Vec2, value: number, kind: KoteKind, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -70,7 +71,7 @@ function appendKote(p: Project, at: Vec2, value: number, kind: KoteKind, ctx: Co
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "kote", at, value, kind, rotation: 0 },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -101,7 +102,7 @@ export const koteCommand: Command = {
     const { at, kind } = s;
     return [
       { phase: "point", lastPoint: null },
-      { draft: null, done: true, commit: (p) => appendKote(p, at, input.value, kind, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendKote(at, input.value, kind, ctx)) },
     ];
   },
 

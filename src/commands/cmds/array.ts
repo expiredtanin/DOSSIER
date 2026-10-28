@@ -23,7 +23,7 @@
 // wie move/copy). Leere Auswahl → No-op.
 
 import {
-  commitTransform,
+  transformMutation,
   hasTransformSelection,
   toTransformSel,
   transformPreview,
@@ -200,7 +200,7 @@ export const arrayCommand: Command = {
     const pts = kind === "polar" ? polarPts(base, segAngleDeg(base, target)) : [base, target];
     return [
       idle(kind)[0],
-      { draft: null, done: true, commit: (p) => commitTransform(p, toTransformSel(sel), op, pts, "array", lastCount) },
+      { draft: null, done: true, commit: transformMutation(toTransformSel(sel), op, pts, "array", lastCount) },
     ];
   },
 

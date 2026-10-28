@@ -13,10 +13,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const LENGTH_PRESETS = [0.5, 1, 2, 5, 10, 20, 50];
 let lastLength = 1;
@@ -59,7 +60,7 @@ function pointDraft(at: Vec2): ToolDraft {
   };
 }
 
-function appendScalebar(p: Project, at: Vec2, ctx: CommandContext): Project {
+function appendScalebar(at: Vec2, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -67,7 +68,7 @@ function appendScalebar(p: Project, at: Vec2, ctx: CommandContext): Project {
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "scalebar", at, segmentLength: lastLength, segments: lastSegments },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -96,7 +97,7 @@ export const scalebarCommand: Command = {
       return [s, { draft: null }];
     }
     if (input.kind !== "point") return [s, { draft: null }];
-    return [idle()[0], { draft: null, done: true, commit: (p) => appendScalebar(p, input.point, ctx) }];
+    return [idle()[0], { draft: null, done: true, commit: opsMutation(() => appendScalebar(input.point, ctx)) }];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => [state, { draft: pointDraft(point) }],

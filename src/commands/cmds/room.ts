@@ -31,10 +31,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -134,11 +135,10 @@ function defaultRoomName(ctx: CommandContext): string {
 }
 
 /** Hängt einen Raum ans Projekt (immutabel); entartete Umrisse werden verworfen. */
-function appendRoom(p: Project, boundary: Vec2[], ctx: CommandContext): Project {
-  if (boundary.length < 3 || polygonArea(boundary) < 1e-4) return p;
+function appendRoom(boundary: Vec2[], ctx: CommandContext): CoreOp[] {
+  if (boundary.length < 3 || polygonArea(boundary) < 1e-4) return [];
   const room = buildRoom(ctx, boundary);
-  const rooms = p.rooms ? [...p.rooms, room] : [room];
-  return { ...p, rooms };
+  return addItems("rooms", [room]);
 }
 
 // ── Zustand ──────────────────────────────────────────────────────────────────
@@ -254,7 +254,7 @@ export const roomCommand: Command = {
         const pts = s.points;
         return [
           { phase: "start", lastPoint: null, mode: s.mode } as RoomIdle,
-          { draft: null, done: true, commit: (p) => appendRoom(p, pts, ctx) },
+          { draft: null, done: true, commit: opsMutation(() => appendRoom(pts, ctx)) },
         ];
       }
       return [s, { draft: s.phase === "draw" ? manualDraft(s.points, s.cursor) : null }];
@@ -275,7 +275,7 @@ export const roomCommand: Command = {
       if (boundary && boundary.length >= 3) {
         return [
           { phase: "start", lastPoint: null, mode: "inside" } as RoomIdle,
-          { draft: null, done: true, commit: (p) => appendRoom(p, boundary, ctx) },
+          { draft: null, done: true, commit: opsMutation(() => appendRoom(boundary, ctx)) },
         ];
       }
       // Kein umschlossener Bereich getroffen → im Werkzeug bleiben (kein Commit).
@@ -298,7 +298,7 @@ export const roomCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null, mode: s.mode } as RoomIdle,
-        { draft: null, done: true, commit: (p) => appendRoom(p, pts, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendRoom(pts, ctx)) },
       ];
     }
     const last = s.points[s.points.length - 1];
@@ -329,7 +329,7 @@ export const roomCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null, mode: s.mode } as RoomIdle,
-        { draft: null, done: true, commit: (p) => appendRoom(p, pts, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendRoom(pts, ctx)) },
       ];
     }
     return idle(s.mode);

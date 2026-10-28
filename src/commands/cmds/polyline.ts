@@ -29,10 +29,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -200,13 +201,11 @@ function polyDraft(
 }
 
 /** Hängt eine 2D-Polylinie ans Projekt (immutabel). Farbe/Strich erbt die Kategorie. */
-function appendPolyline(
-  p: Project,
-  pts: Vec2[],
+function appendPolyline(pts: Vec2[],
   bulges: number[],
   closed: boolean,
   ctx: CommandContext,
-): Project {
+): CoreOp[] {
   // `bulge` nur mitschreiben, wenn wirklich ein Bogen dabei ist — ein reiner
   // Geradenzug bleibt damit bitgleich zu vorher (additives Feld).
   const hasArc = bulges.some((b) => Math.abs(b) > EPS);
@@ -219,7 +218,7 @@ function appendPolyline(
       ? { shape: "polyline", pts, closed, bulge: bulges.slice(0, closed ? pts.length : pts.length - 1) }
       : { shape: "polyline", pts, closed },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 /** Ruhezustand; behält den zuletzt gewählten Schließ-Modus bei. */
@@ -312,7 +311,7 @@ export const polylineCommand: Command = {
         const bl = [...s.bulges, closingBulge(s)];
         return [
           { phase: "start", lastPoint: null, closed: s.closed, arc: s.arc, tangent: s.tangent } as PolyIdle,
-          { draft: null, done: true, commit: (p) => appendPolyline(p, pts, bl, true, ctx) },
+          { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, bl, true, ctx)) },
         ];
       }
       return [
@@ -371,7 +370,7 @@ export const polylineCommand: Command = {
       const bl = [...s.bulges, newBulge];
       return [
         { phase: "start", lastPoint: null, closed: s.closed, arc: s.arc, tangent: s.tangent } as PolyIdle,
-        { draft: null, done: true, commit: (p) => appendPolyline(p, pts, bl, true, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, bl, true, ctx)) },
       ];
     }
     const points = [...s.points, pt];
@@ -411,7 +410,7 @@ export const polylineCommand: Command = {
       const bl = close ? [...s.bulges, closingBulge(s)] : s.bulges;
       return [
         { phase: "start", lastPoint: null, closed: s.closed, arc: s.arc, tangent: s.tangent } as PolyIdle,
-        { draft: null, done: true, commit: (p) => appendPolyline(p, pts, bl, close, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendPolyline(pts, bl, close, ctx)) },
       ];
     }
     return idle(s.closed, s.arc, s.tangent);

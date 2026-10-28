@@ -25,10 +25,11 @@ import type {
   CommandState,
   CmdOption,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const CLOSE_HIT = 0.08; // Modell-Meter: Klick nahe Startpunkt schließt den Zug
@@ -80,7 +81,7 @@ function splineDraft(points: Vec2[], cursor: Vec2 | null, closed: boolean, mode:
   return draft;
 }
 
-function appendSpline(p: Project, pts: Vec2[], closed: boolean, mode: CurveMode, ctx: CommandContext): Project {
+function appendSpline(pts: Vec2[], closed: boolean, mode: CurveMode, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -88,7 +89,7 @@ function appendSpline(p: Project, pts: Vec2[], closed: boolean, mode: CurveMode,
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "spline", pts, closed, mode },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (closed = false, curveMode: CurveMode = "fit"): [CommandState, CommandResult] => [
@@ -143,7 +144,7 @@ export const splineCommand: Command = {
         const pts = s.points;
         return [
           { phase: "start", lastPoint: null, closed: s.closed, curveMode: s.curveMode } as SplineIdle,
-          { draft: null, done: true, commit: (p) => appendSpline(p, pts, true, s.curveMode, ctx) },
+          { draft: null, done: true, commit: opsMutation(() => appendSpline(pts, true, s.curveMode, ctx)) },
         ];
       }
       return [s, { draft: splineDraft(s.points, s.cursor, s.closed, s.curveMode) }];
@@ -168,7 +169,7 @@ export const splineCommand: Command = {
       const pts = s.points;
       return [
         { phase: "start", lastPoint: null, closed: s.closed, curveMode: s.curveMode } as SplineIdle,
-        { draft: null, done: true, commit: (p) => appendSpline(p, pts, true, s.curveMode, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendSpline(pts, true, s.curveMode, ctx)) },
       ];
     }
     const points = [...s.points, pt];
@@ -197,7 +198,7 @@ export const splineCommand: Command = {
       const close = s.closed && pts.length >= 3;
       return [
         { phase: "start", lastPoint: null, closed: s.closed, curveMode: s.curveMode } as SplineIdle,
-        { draft: null, done: true, commit: (p) => appendSpline(p, pts, close, s.curveMode, ctx) },
+        { draft: null, done: true, commit: opsMutation(() => appendSpline(pts, close, s.curveMode, ctx)) },
       ];
     }
     return idle(s.closed, s.curveMode);

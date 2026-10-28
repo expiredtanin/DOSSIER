@@ -14,10 +14,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const PREVIEW_RADIUS = 0.3; // Modell-Meter, deckt sich mit DETAILREF_RADIUS_M (drawing2d.ts)
 const DEFAULT_LABEL = "A";
@@ -39,7 +40,7 @@ function pointDraft(at: Vec2): ToolDraft {
   return { preview, vertices: [at] };
 }
 
-function appendDetailRef(p: Project, at: Vec2, ctx: CommandContext): Project {
+function appendDetailRef(at: Vec2, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -47,7 +48,7 @@ function appendDetailRef(p: Project, at: Vec2, ctx: CommandContext): Project {
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "detailref", at, label: DEFAULT_LABEL },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (): [CommandState, CommandResult] => [
@@ -68,7 +69,7 @@ export const detailrefCommand: Command = {
     if (input.kind !== "point") return [s, { draft: null }];
     return [
       { phase: "point", lastPoint: null } as DetailRefIdle,
-      { draft: null, done: true, commit: (p) => appendDetailRef(p, input.point, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendDetailRef(input.point, ctx)) },
     ];
   },
 

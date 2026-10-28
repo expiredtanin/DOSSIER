@@ -30,11 +30,12 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
 import type { TranslationKey } from "../../i18n";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 
@@ -138,15 +139,13 @@ function axisMinorDraft(center: Vec2, major: Vec2, cursor: Vec2 | null): ToolDra
 
 // ── Commit ───────────────────────────────────────────────────────────────────
 
-function appendEllipse(
-  p: Project,
-  center: Vec2,
+function appendEllipse(center: Vec2,
   rx: number,
   ry: number,
   rotation: number,
   ctx: CommandContext,
-): Project {
-  if (rx < EPS || ry < EPS) return p;
+): CoreOp[] {
+  if (rx < EPS || ry < EPS) return [];
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -154,7 +153,7 @@ function appendEllipse(
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "ellipse", center, rx, ry, rotation },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 const idle = (method: EllipseMethod): [CommandState, CommandResult] => [
@@ -201,7 +200,7 @@ export const ellipseCommand: Command = {
         return [ns, { draft: boxDraft(pt, pt) }];
       }
       const { center, rx, ry } = ellipseFromCorners(s.p0, pt);
-      return [idle("box")[0], { draft: null, done: true, commit: (p) => appendEllipse(p, center, rx, ry, 0, ctx) }];
+      return [idle("box")[0], { draft: null, done: true, commit: opsMutation(() => appendEllipse(center, rx, ry, 0, ctx)) }];
     }
 
     // axis
@@ -221,7 +220,7 @@ export const ellipseCommand: Command = {
     const rotation = angleOf(center, major);
     return [
       idle("axis")[0],
-      { draft: null, done: true, commit: (p) => appendEllipse(p, center, rx, ry, rotation, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendEllipse(center, rx, ry, rotation, ctx)) },
     ];
   },
 

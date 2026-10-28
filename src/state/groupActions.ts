@@ -9,6 +9,10 @@ import type { Drawing2D, Group, Project } from "../model/types";
 import type { Plan, UnderlayGroup } from "../core";
 import { uniqueId } from "../tools/types";
 import type { Primitive } from "../core";
+import { applyOps } from "../core";
+import type { CoreOp } from "../core";
+import { itemsOf, patchItem } from "../core";
+import type { EntityCollection } from "../core";
 
 /** Mitglieds-IDs je Elementart — dieselbe Form wie `Group`, ohne `id`/`name`/`groupIds`. */
 export interface GroupMembership {
@@ -290,6 +294,56 @@ export function addNewElementsToActiveGroup(
     ...after,
     groups: (after.groups ?? []).map((x) => (x.id === activeId ? merged : x)),
   };
+}
+
+/** Liste je Mitgliedsart. */
+const COLLECTION_OF: Record<MemberKind, EntityCollection> = {
+  wallIds: "walls",
+  drawingIds: "drawings2d",
+  ceilingIds: "ceilings",
+  roomIds: "rooms",
+  stairIds: "stairs",
+  columnIds: "columns",
+  roofIds: "roofs",
+  openingIds: "openings",
+};
+
+/**
+ * Wie {@link addNewElementsToActiveGroup}, für eine Änderung als Ops ([K4] S3): die zusätzlichen
+ * Ops, die die neu eingefügten Elemente (`add`-Ops) der aktiven Gruppe zuschlagen — ohne Differenz
+ * über alle Listen. Leer ohne aktive Gruppe oder ohne neue Elemente.
+ */
+export function activeGroupOps(before: Project, ops: readonly CoreOp[], groupPath: string[]): CoreOp[] {
+  if (groupPath.length === 0) return [];
+  const addedIds = new Set<string>();
+  const touched = new Set<string>();
+  for (const op of ops) {
+    if (op.kind !== "add") continue;
+    touched.add(op.collection);
+    for (const e of op.items) addedIds.add(e.id);
+  }
+  if (addedIds.size === 0) return [];
+  const after = applyOps(before, ops);
+  const activeId = groupPath[groupPath.length - 1];
+  const g = (after.groups ?? []).find((x) => x.id === activeId);
+  if (!g) return [];
+  const added = { ...EMPTY_MEMBERSHIP };
+  for (const k of KEYS) {
+    const coll = COLLECTION_OF[k];
+    if (!touched.has(coll)) continue;
+    // Reihenfolge wie in der Liste (wie `newIds`); vorher vorhandene ids sind nie neu.
+    const existed = new Set<string>();
+    for (const e of itemsOf(before, coll)) {
+      const id = (e as { id: string }).id;
+      if (addedIds.has(id)) existed.add(id);
+    }
+    added[k] = itemsOf(after, coll)
+      .map((e) => (e as { id: string }).id)
+      .filter((id) => addedIds.has(id) && !existed.has(id));
+  }
+  if (KEYS.every((k) => added[k].length === 0)) return [];
+  const merged: Group = { ...g, ...mergeMembership(g, added) };
+  return patchItem(after, "groups", activeId, () => merged);
 }
 
 /**

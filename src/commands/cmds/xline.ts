@@ -14,10 +14,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -66,7 +67,7 @@ function xlineDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendXline(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): Project {
+function appendXline(a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -74,7 +75,7 @@ function appendXline(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): Project
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "xline", a, b },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 export const xlineCommand: Command = {
@@ -99,7 +100,7 @@ export const xlineCommand: Command = {
     const a = s.a;
     return [
       { phase: "start", lastPoint: null },
-      { draft: null, done: true, commit: (p) => appendXline(p, a, pt, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendXline(a, pt, ctx)) },
     ];
   },
 

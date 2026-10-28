@@ -14,10 +14,11 @@ import type {
   CommandResult,
   CommandState,
   DraftShape,
-  Project,
   ToolDraft,
   Vec2,
 } from "../types";
+import { addItems, opsMutation } from "../../core";
+import type { CoreOp } from "../../core";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -67,7 +68,7 @@ function rayDraft(a: Vec2, cursor: Vec2 | null): ToolDraft {
   return draft;
 }
 
-function appendRay(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): Project {
+function appendRay(a: Vec2, b: Vec2, ctx: CommandContext): CoreOp[] {
   const d: Drawing2D = {
     id: uniqueId("dr2d"),
     type: "drawing2d",
@@ -75,7 +76,7 @@ function appendRay(p: Project, a: Vec2, b: Vec2, ctx: CommandContext): Project {
     categoryCode: ctx.defaultCategoryCode,
     geom: { shape: "ray", a, b },
   };
-  return { ...p, drawings2d: [...p.drawings2d, d] };
+  return addItems("drawings2d", [d]);
 }
 
 export const rayCommand: Command = {
@@ -100,7 +101,7 @@ export const rayCommand: Command = {
     const a = s.a;
     return [
       { phase: "start", lastPoint: null },
-      { draft: null, done: true, commit: (p) => appendRay(p, a, pt, ctx) },
+      { draft: null, done: true, commit: opsMutation(() => appendRay(a, pt, ctx)) },
     ];
   },
 

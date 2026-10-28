@@ -11,11 +11,11 @@
 //
 // Die Auswahl kommt vorab über `ctx.selection` (erst selektieren, dann Befehl —
 // wie Move/Copy/Mirror). Gedreht wird über den bestehenden, getesteten
-// `commitTransform` (op:"rotate", mode:"move") — er bewegt das ORIGINAL, es
+// `transformMutation` (op:"rotate", mode:"move") — er bewegt das ORIGINAL, es
 // entsteht keine Kopie.
 
 import {
-  commitTransform,
+  transformMutation,
   hasTransformSelection,
   toTransformSel,
   transformPreview,
@@ -125,7 +125,7 @@ export const rotateCommand: Command = {
         {
           draft: null,
           done: true,
-          commit: (p) => commitTransform(p, toTransformSel(sel), "rotate", pts, "move", 1),
+          commit: transformMutation(toTransformSel(sel), "rotate", pts, "move", 1),
         },
       ];
     }
@@ -166,8 +166,7 @@ export const rotateCommand: Command = {
       {
         draft: null,
         done: true,
-        commit: (p) =>
-          commitTransform(p, toTransformSel(sel), "rotate", [center, ref, pt], "move", 1),
+        commit: transformMutation(toTransformSel(sel), "rotate", [center, ref, pt], "move", 1),
       },
     ];
   },
