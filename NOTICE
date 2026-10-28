@@ -15,3 +15,9 @@ earcutr (https://github.com/frewsxcv/earcutr), ISC License — Rust-Port von map
 csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan Wallace, MIT License
   Verfahren (BSP-Bäume, Ebenen-Teilung, clipTo/invert, Vereinigung/Differenz/Schnitt) in Rust neu
   geschrieben und angepasst: src-tauri/fileio/src/csg.rs (IFC-Import: Öffnungen, Boolesche Körper).
+
+laz (laz-rs, https://github.com/tmontaigu/laz-rs), Apache-2.0 — Rust-Port von LASzip (Martin Isenburg)
+  Abhängigkeit von src-tauri/fileio (LAZ-Dekompression der Punktwolken, [B9]), unverändert, ohne Feature "parallel".
+
+e57 (https://github.com/cry-inc/e57), MIT License, Copyright cry-inc
+  Abhängigkeit von src-tauri/fileio (E57-Punktwolken lesen, [B9]), unverändert.

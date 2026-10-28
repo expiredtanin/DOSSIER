@@ -29,3 +29,5 @@ export { checkSiteRules, allowedArea, multiPolygonArea, buildingFootprint, model
 export type { SiteCheck } from "../analysis/siteRules";
 export { encodeRenderScene } from "../plan/renderSceneBin";
 export { sampleProject } from "../model/sampleProject";
+export { readPointCloud, readPointCloudFlat, isPointCloudFile, DEFAULT_MAX_POINTS } from "../io/pointCloud";
+export type { PointCloudData, PointCloudOptions, PointCloudReport } from "../io/pointCloud";

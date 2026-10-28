@@ -291,7 +291,7 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 
 ## Priorität 4 — später
 
-Alle ○: [27] Punktwolken · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden) · [43] Verknüpfte
+Alle ○: [27] Punktwolken (Leser ✅ [B9], Anzeige/Modell offen) · [28] Phasen · [29] Bauteillisten (◐, Export vorhanden) · [43] Verknüpfte
 Modelle · [44] Aus Datei einfügen · [45] Favoriten · [68] Gelände mit Baugrube (= [T6]) · [71] U-Werte ·
 [72] Graue Energie KBOB · [73] eBKP-H · [74] SIA 500 · [75] Fluchtwege VKF · [83] Befehlspalette ·
 [84] Undo-Verlauf · [85] Makro-Rekorder · [86] Pipette · [87] Fang mit Begründung · [48] Web-Worker
@@ -419,7 +419,38 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
 - ○ **[B6] Wand unter Dach als Prismen zwischen Ebenen** (für [G2]). `walls.rs:413–472, 592–654`. · M
 - ○ **[B7] Dach-Verschneidung und Gauben in 2.5D** (für [G5]). · M · nach [B2]/[B6].
 - ○ **[B8] Bogenwände, schneller Weg** (für [T2]). · S/M–L
-- ○ **[B9] Punktwolken-Leser** (für [27]). · M
+- ✅ **[B9] Punktwolken-Leser** (für [27]). (28.10.) `src-tauri/fileio/src/pointcloud*.rs` + `web_pointcloud.rs`,
+  TS-Fassade `src/io/pointCloud.ts` (+ `pointCloud.worker.ts`, Web-Worker wie DWG), CLI `pointcloud-info`.
+  Formate: LAS 1.0–1.4 (Punktformate 0–10, eigener Leser), LAZ (Crate `laz` 0.13, Apache-2.0), E57 (Crate
+  `e57` 0.11, MIT, mehrere Scans + Pose, Kugel→kartesisch), PLY (ASCII/binär LE+BE), XYZ/PTS (Text);
+  Format wird am Inhalt erkannt. Ausgabe: `xyz` f32 RELATIV zu `origin` (f64, ganze Meter; in LV95 sonst
+  nur ~0,25 m f32-Auflösung), `rgb` (u8; 8-Bit-Werte in 16-Bit-Feldern werden erkannt), `intensity` (u16),
+  `classification` (ASPRS). Ausdünnen STREAMEND in Rust (`Sink`): Voxel-Kante und/oder Punktbudget (bei
+  Überschreiten wächst die Kante, die behaltenen Punkte werden neu gerastert) — Speicher nie über Budget;
+  Bounding-Box, Klassenhistogramm, Intensitätsbereich, EPSG (GeoKeys/WKT) und Zähler im Bericht beziehen
+  sich auf ALLE gelesenen Punkte. Kaputte/abgeschnittene Dateien → Fehler bzw. `truncated`, kein Panic
+  (Fuzz-artige Tests: jede Kürzung, jedes Kopfbyte). Tests: 25 Rust (synthetische Dateien im Test erzeugt,
+  LAZ per `laz`-Kompressor, E57 per `e57`-Writer) + 5 vitest.
+  - Zeiten (Linux-Container, **synthetische** 16-Mio.-Punkte-LAS, 448 MB, Gelände 0,25 m Raster): CLI
+    (Node+WASM) 2,3 s mit Budget 2 Mio., 1,3 s mit Voxel 1 m, 2,5 s unausgedünnt; nativ Rust 0,4–2 s.
+    Erster Wurf mit `HashSet` brauchte 22 s (SIMD-lose Hash-Tabelle im WASM) → eigene `CellSet`
+    (offene Adressierung, ein Multiplikations-Hash). Echte swissSURFACE3D-Kachel NICHT geladen
+    (`data.geo.admin.ch` vom Proxy gesperrt, 403); LAZ-Durchsatz an grossen Dateien nicht gemessen.
+  - Grenzen: die ganze Datei liegt im Speicher (WASM 4 GB, Eingabe wird einmal kopiert) — Dateien über
+    ~1,5 GB brauchen später blockweises Lesen (`File.slice` → Rust-Stromleser). LAZ 1.4 mit
+    Punktformat 6–10 (Layered) läuft über `laz`, nur synthetisch geprüft. E57-Bilder/Panoramen werden
+    ignoriert; E57-Kompression (Bitpack) nur soweit das Crate sie liest.
+  - **Vorschlag Anzeige/Modell für [27]** (nicht umgesetzt, Modell/Plan/render3d gesperrt): render3d kann
+    heute KEINE Punkte (`gpu.rs`: nur `TriangleList`/`LineList`-Pipelines, keine Punkt-Topologie) →
+    neue Pipeline `PointList` mit Instanz-Quads (feste Pixelgrösse, Tiefe, optional Farbe/Intensität/
+    Klassen-Palette), Eingabe `xyz`-f32-Puffer + `origin` als Modell-Versatz. Modell: `Project.pointClouds?:
+    PointCloudRef[]` mit `{ id, name, origin: [x,y,z], bbox, count, source: { fileName, format, epsg },
+    dataRef (Asset-/Datei-Schlüssel, NICHT die Punkte im .obp), visible, colorMode: "rgb"|"intensity"|
+    "class"|"height", pointSize, clip?: Polygon+Höhe }`; Punkte als Asset neben dem Projekt (IndexedDB/
+    Datei, Format = die flachen Puffer), neues Feld in `KNOWN_KEYS`; Änderungen über Ops. Georef:
+    `origin` gegen `projectGeoOrigin` verrechnen. Folge-Schritte: Import-Dialog (Voxel/Budget wählen,
+    Bericht zeigen), Schnitt-/Grundriss-Ansicht (Punkte in Scheibe als Punktwolke im Plan, [27]), Fang an
+    Punkten. UI-Texte dann über `t()`.
 - ◐ **[B10] Kleine Ideen ohne Code.** · je S
   - ○ `pat.rs`: `;%UNITS=` und `;%TYPE=MODEL|DRAFTING` — lohnt erst mit vollwertigen PAT-Mustern (alle
     Linienfamilien in allen Renderpfaden, M), heute nur Näherung diagonal/kreuz.

@@ -14,6 +14,8 @@
 //                                                  IFC als Kontext-Meshes ([B3]), mit --elements als echte
 //                                                  Bauteile ([B4]); Bericht als JSON auf stdout
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
+//   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
+//                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
@@ -29,6 +31,7 @@ import {
   buildPlanDwg,
   buildPlanDxfBinary,
   loadFileio,
+  readPointCloudFlat,
   readIfc,
   readIfcElements,
   ifcElementsToProject,
@@ -134,12 +137,48 @@ function out(args: Args, text: string | Uint8Array, defaultName: string): void {
   }
 }
 
+/** `pointcloud-info <datei> [--voxel m] [--max n]`: liest und dünnt aus, gibt den Bericht als JSON aus. */
+async function pointCloudInfo(args: Args, src: string | undefined): Promise<number> {
+  if (!src) fail("pointcloud-info: Datei fehlt (Aufruf: pointcloud-info <datei> [--voxel 0.05] [--max 2000000])");
+  setWasmBytesProvider(async (name) => {
+    const rel = WASM_FILES[name];
+    if (!rel) throw new Error(`unbekanntes WASM-Modul ${name}`);
+    return readFileSync(join(wasmDir(), rel));
+  });
+  await loadFileio();
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(src);
+  } catch (e) {
+    fail(`Datei nicht lesbar: ${src} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  const num = (k: string, d: number): number => {
+    const v = Number(args.flags.get(k) ?? d);
+    if (!Number.isFinite(v) || v < 0) fail(`--${k}: keine gültige Zahl`);
+    return v;
+  };
+  const t0 = performance.now();
+  let cloud;
+  try {
+    cloud = readPointCloudFlat(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), src, {
+      voxel: num("voxel", 0),
+      maxPoints: num("max", 2_000_000),
+    });
+  } catch (e) {
+    fail(`${src}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const ms = Math.round(performance.now() - t0);
+  process.stdout.write(JSON.stringify({ file: src, bytes: bytes.byteLength, ms, ...cloud.report }, null, 2) + "\n");
+  return 0;
+}
+
 export async function run(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const [file, command, ...rest] = args.positional;
+  if (file === "pointcloud-info") return pointCloudInfo(args, command);
   if (!file || !command) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun|model3d> [Optionen]\n",
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|schedule|kennzahlen|sun|model3d> [Optionen]\n       dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n",
     );
     return 2;
   }
