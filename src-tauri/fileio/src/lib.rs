@@ -22,6 +22,7 @@ pub mod ifc_semantic;
 pub mod ifc_export;
 pub mod csg;
 mod ifc_sweep;
+mod ifc_nurbs;
 
 use std::collections::HashMap;
 use std::io::Cursor;

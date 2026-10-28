@@ -332,6 +332,22 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   `plan/toWalls3d.ts::emitMeshes` setzt für Kontext-Meshes fest `IMPORTED_RGB`; Vorschlag: dort
   `obj.color` (über `hexToRgb`/255) nehmen, falls gesetzt (der Plan zeichnet nur Umrisse in der
   Ebenenfarbe). · M
+  (28.10., 4. Schritt, Freiform) IfcAdvancedBrep(+WithVoids)/IfcFaceSurface: Seiten auf Ebene, Zylinder,
+  Kegel, Kugel, Torus, (rationaler) B-Spline-Fläche mit Kanten aus IfcEdgeLoop/IfcEdgeCurve (Linie,
+  Polylinie, Kreis, B-Spline …, Kanten je Brep einmal zerlegt → dicht), getrimmt über den Parameterraum
+  (`fileio/src/ifc_nurbs.rs`: Projektion, Naht/Pol schliessen, eingeschränkte Delaunay-Triangulierung mit
+  crate spade, Raster nach Krümmung/Verdrillung, Nachverfeinern; Verfahren wie truck-meshalgo, eigener
+  Code, kein truck im fileio); IfcBSplineCurveWithKnots(+Rational) als Kurve (Profile, Leitkurven,
+  IfcTrimmedCurve); IfcGridPlacement (IFC2x3/4 und 4.3-Form); StartParam/EndParam der Sweeps
+  (Parameter der Leitkurve, IFC4.3 IfcLengthMeasure = Länge; ausserhalb des Bereichs → ganze Kurve).
+  Lesen in `fileio/src/ifc_brep.rs`. Gegencheck ifcopenshell: buildingSMART basin-/cube-advanced-brep
+  gleich (≤ 0.3 %), jetzt 77 von 81 Dateien (Sample-Test-Files 35/35, IFC4.3 42/46); grid-placement:
+  Stützen liegen auf den Rasterschnitten (ifcopenshell 0.9 liefert sie gar nicht). Neue synthetische
+  Fälle `io/testdata/ifc-freeform-cases.ifc` (Formelvolumen, ifcopenshell wo es sie kann; es übergeht
+  StartParam/EndParam absichtlich und scheitert an der nahtlosen Halbkugel). Offen: IFC4.3-Trassierung
+  (IfcAlignment/IfcGradientCurve/IfcLinearPlacement/IfcSectionedSolidHorizontal, 3 Dateien), Flächen
+  aus Kurven-Extrusion/-Rotation, IfcRectangularTrimmedSurface/IfcCurveBoundedPlane, komplexe
+  STEP-Instanzen (IFC2x3-NURBS); nur Linux-Container, nicht in der Tauri-App angesehen.
 - ◐ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3]. Stand 28.10.:
   Wahl im Import-Dialog (`ui/IfcImportDialog.tsx`: Kontext-Meshes = Standard | Bauteile), CLI
   `import-ifc … --elements`. Erkennung in Rust (`fileio/src/ifc_semantic.rs`, `import_ifc_elements`),

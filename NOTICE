@@ -12,6 +12,14 @@ i_overlay (https://github.com/iShape-Rust/iOverlay), MIT OR Apache-2.0
 earcutr (https://github.com/frewsxcv/earcutr), ISC License — Rust-Port von mapbox/earcut (ISC)
   Abhängigkeit von src-tauri/fileio (IFC-Import: Dreieckszerlegung von Profilen und Flächen), unverändert.
 
+spade (https://github.com/Stoeoef/spade), MIT OR Apache-2.0
+  Abhängigkeit von src-tauri/fileio (IFC-Import: eingeschränkte Delaunay-Triangulierung getrimmter
+  Freiformflächen), unverändert.
+
+truck (https://github.com/ricosjp/truck, truck-meshalgo src/tessellation/triangulation.rs), Apache-2.0
+  Nur das Verfahren (Rand in den Parameterraum projizieren, Rasterpunkte, eingeschränkte Delaunay-
+  Triangulierung, Auswahl innen) als Vorbild; eigener Code in src-tauri/fileio/src/ifc_nurbs.rs.
+
 csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan Wallace, MIT License
   Verfahren (BSP-Bäume, Ebenen-Teilung, clipTo/invert, Vereinigung/Differenz/Schnitt) in Rust neu
   geschrieben und angepasst: src-tauri/fileio/src/csg.rs (IFC-Import: Öffnungen, Boolesche Körper).

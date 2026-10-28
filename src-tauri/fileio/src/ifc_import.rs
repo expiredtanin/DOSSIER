@@ -7,25 +7,31 @@
 // Eigener Code (nichts aus BIMCraft `import.rs` übernommen; BIMCraft rechnet in mm, hier Meter).
 //
 // Unterstützt:
-//   - Platzierung: IfcLocalPlacement-Ketten mit IfcAxis2Placement3D/2D.
+//   - Platzierung: IfcLocalPlacement-Ketten mit IfcAxis2Placement3D/2D, IfcGridPlacement (Schnittpunkt
+//     der versetzten Rasterachsen, `ifc_brep.rs`).
 //   - Körper: IfcExtrudedAreaSolid, IfcFacetedBrep(+WithVoids), IfcShellBasedSurfaceModel,
 //     IfcFaceBasedSurfaceModel, IfcTriangulatedFaceSet, IfcPolygonalFaceSet, IfcMappedItem
 //     (IfcCartesianTransformationOperator3D, auch ungleichmässig), IfcBlock, IfcCsgSolid,
 //     IfcBooleanResult/IfcBooleanClippingResult (alle drei Operationen über BSP-CSG `csg.rs`; zweiter
 //     Operand auch IfcHalfSpaceSolid/IfcBoxedHalfSpace/IfcPolygonalBoundedHalfSpace auf IfcPlane),
 //     IfcRevolvedAreaSolid, IfcSweptDiskSolid(+Polygonal), IfcFixedReferenceSweptAreaSolid,
-//     IfcSurfaceCurveSweptAreaSolid auf Ebene (`ifc_sweep.rs`; StartParam/EndParam nicht ausgewertet).
+//     IfcSurfaceCurveSweptAreaSolid auf Ebene (`ifc_sweep.rs`; StartParam/EndParam als Parameter der
+//     Leitkurve bzw. IFC4.3-Länge), IfcAdvancedBrep(+WithVoids) und IfcFaceSurface mit Ebene, Zylinder,
+//     Kegel, Kugel, Torus und (rationaler) B-Spline-Fläche, getrimmt über den Parameterraum
+//     (`ifc_brep.rs` liest, `ifc_nurbs.rs` zerlegt).
 //   - Öffnungen: IfcRelVoidsElement — der Körper der IfcOpeningElement wird vom Wirt abgezogen (auch
 //     vom Teil eines Ganzen, z. B. Platten eines IfcRoof). Scheitert der Boolean → Öffnung gezählt
 //     und ausgelassen, Wirt bleibt ganz.
 //   - Profile: Arbitrary(+WithVoids), Rectangle(+Hollow, Rounded), Circle(+Hollow),
 //     I/L/U/T-Profil (mit Ausrundung, ohne Kantenradien/Neigungen), Derived, Composite.
 //   - Kurven (2D und räumlich): IfcPolyline, IfcIndexedPolyCurve (Linien + Bögen),
-//     IfcCompositeCurve, IfcTrimmedCurve auf Kreis/Ellipse/Linie, IfcCircle, IfcEllipse.
+//     IfcCompositeCurve, IfcTrimmedCurve auf Kreis/Ellipse/Linie/B-Spline, IfcCircle, IfcEllipse,
+//     IfcBSplineCurveWithKnots(+Rational).
 //   - Einheiten: IfcSIUnit mit Präfix, IfcConversionBasedUnit (Fuss, Zoll, Grad).
 //   - Farbe: IfcStyledItem (IfcSurfaceStyleRendering/Shading) am Körper, sonst am Material.
 //   - Geschoss: IfcRelContainedInSpatialStructure, aufwärts über IfcRelAggregates.
-// Übersprungen und gezählt: alles andere (z. B. IfcAdvancedBrep, B-Spline-Kurven, IfcSectionedSpine);
+// Übersprungen und gezählt: alles andere (z. B. IfcSectionedSpine, IFC4.3-Trassierung, Flächen aus
+// Extrusion/Rotation einer Kurve);
 // IfcOpeningElement/IfcSpace/IfcAnnotation/IfcGrid als Bauteile.
 //
 // Grenzen: Dateigrösse/Instanzen (`ifc_step`), Dreiecke gesamt, Verschachtelung von Mapped Items und
@@ -36,6 +42,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::csg;
 use crate::ifc_step::{self, Entity, StepFile, Value};
 use crate::ifc_sweep::{self, Frame};
+
+#[path = "ifc_brep.rs"]
+mod brep;
+use brep::nearest_param;
 
 /// Höchstzahl Dreiecke über alle Bauteile; darüber wird abgebrochen (`truncated`).
 pub const MAX_TRIANGLES: usize = 15_000_000;
@@ -114,7 +124,7 @@ impl Xf {
         Xf { r, t: add(t0, self.t) }
     }
     /// Umkehrabbildung; nicht umkehrbar → `None`.
-    fn inverse(&self) -> Option<Xf> {
+    pub(crate) fn inverse(&self) -> Option<Xf> {
         let d = self.det();
         if !(d.is_finite() && d.abs() > 1e-15) {
             return None;
@@ -520,6 +530,10 @@ pub(crate) struct Reader<'a> {
     active: HashSet<u64>,
     /// Restbudget an Element-Auswertungen (schützt vor exponentiellen DAGs).
     budget: usize,
+    /// Zerlegte Kanten (IfcEdgeCurve-id → Punkte vom Anfang zum Ende), von Nachbarseiten geteilt.
+    edge_cache: HashMap<u64, Vec<V3>>,
+    /// Rasterachse → IfcGrid (für IfcGridPlacement), beim ersten Bedarf gesammelt.
+    grid_axes: Option<HashMap<u64, u64>>,
 }
 
 impl<'a> Reader<'a> {
@@ -615,6 +629,16 @@ impl<'a> Reader<'a> {
                 Some(parent) if parent != id => self.object_placement(parent, depth + 1).then_after(&local),
                 _ => local,
             }
+        } else if e.ty == "IFCGRIDPLACEMENT" && depth < MAX_PLACEMENT_DEPTH {
+            // Vorläufig eintragen: Zyklen über das Raster enden bei der Identität.
+            self.placements.insert(id, Xf::IDENTITY);
+            match self.grid_placement(e, depth) {
+                Some(x) => x,
+                None => {
+                    self.skip("IFCGRIDPLACEMENT (unlesbar)");
+                    Xf::IDENTITY
+                }
+            }
         } else {
             if e.ty != "IFCLOCALPLACEMENT" {
                 let ty = e.ty.clone();
@@ -691,15 +715,27 @@ impl<'a> Reader<'a> {
 
     /// Kurve → Punktfolge (offen; Schlusspunkt kann dem Start entsprechen); 2D-Kurven mit z = 0.
     fn curve(&mut self, v: Option<&Value>, depth: usize) -> Option<Vec<V3>> {
+        Some(self.curve_t(v, depth)?.into_iter().map(|(_, p)| p).collect())
+    }
+
+    /// Kurve → (Parameter, Punkt)-Folge in der Parametrisierung der Kurve (für StartParam/EndParam):
+    /// Polylinie Punktnummer ab 0, Kreis/Ellipse Winkel in der Winkeleinheit der Datei, Linie t (Punkt
+    /// = Ort + t·Vektor), B-Spline Knotenparameter, IfcIndexedPolyCurve je Segment 1, zusammengesetzte
+    /// Kurven Segmente aneinander (je Länge ihres Parameterbereichs). Parameter steigen (Gegensinn: ab
+    /// Start gezählt).
+    fn curve_t(&mut self, v: Option<&Value>, depth: usize) -> Option<Vec<(f64, V3)>> {
         let (_, e) = self.ent_v(v)?;
         if depth > MAX_CURVE_DEPTH {
             return None;
         }
         match e.ty.as_str() {
-            "IFCPOLYLINE" => Some(e.arg(0)?.as_list()?.iter().filter_map(|v| self.point(Some(v))).take(MAX_LOOP_POINTS).collect()),
+            "IFCPOLYLINE" => Some(
+                e.arg(0)?.as_list()?.iter().filter_map(|v| self.point(Some(v))).take(MAX_LOOP_POINTS).enumerate().map(|(i, p)| (i as f64, p)).collect(),
+            ),
             "IFCINDEXEDPOLYCURVE" => self.indexed_poly_curve(e),
             "IFCCOMPOSITECURVE" => {
-                let mut out: Vec<V3> = Vec::new();
+                let mut out: Vec<(f64, V3)> = Vec::new();
+                let mut offset = 0.0;
                 for seg in e.arg(0)?.as_list()? {
                     let (_, s) = self.ent_v(Some(seg))?;
                     if !s.ty.ends_with("COMPOSITECURVESEGMENT") {
@@ -707,13 +743,18 @@ impl<'a> Reader<'a> {
                         return None;
                     }
                     let same = s.arg(1).and_then(|v| v.as_enum()) != Some("F");
-                    let mut pts = self.curve(s.arg(2), depth + 1)?;
+                    let mut pts = self.curve_t(s.arg(2), depth + 1)?;
                     if !same {
                         pts.reverse();
                     }
-                    if let (Some(l), Some(f)) = (out.last(), pts.first()) {
-                        if len(sub(*l, *f)) < 1e-9 {
-                            pts.remove(0);
+                    let (Some(f), Some(l)) = (pts.first().map(|x| x.0), pts.last().map(|x| x.0)) else { continue };
+                    let sign = if l >= f { 1.0 } else { -1.0 };
+                    let pts: Vec<(f64, V3)> = pts.into_iter().map(|(t, p)| (offset + (t - f) * sign, p)).collect();
+                    offset += (l - f).abs();
+                    let mut pts = pts.into_iter();
+                    if let (Some(last), Some(first)) = (out.last(), pts.as_slice().first()) {
+                        if len(sub(last.1, first.1)) < 1e-9 {
+                            pts.next();
                         }
                     }
                     out.extend(pts);
@@ -727,10 +768,17 @@ impl<'a> Reader<'a> {
             "IFCCIRCLE" | "IFCELLIPSE" => {
                 let (pl, rx, ry) = self.conic(e)?;
                 let n = arc_segments(std::f64::consts::TAU, rx.max(ry)).max(12);
+                let a = self.angle_scale;
                 Some((0..n).map(|i| {
                     let t = std::f64::consts::TAU * i as f64 / n as f64;
-                    pl.apply([rx * t.cos(), ry * t.sin(), 0.0])
+                    (t / a, pl.apply([rx * t.cos(), ry * t.sin(), 0.0]))
                 }).collect())
+            }
+            "IFCBSPLINECURVEWITHKNOTS" | "IFCRATIONALBSPLINECURVEWITHKNOTS" => {
+                let c = self.bspline_curve(e)?;
+                let (a, b) = c.domain();
+                let pts = c.sample(a, b);
+                (pts.len() >= 2).then_some(pts)
             }
             other => {
                 let other = other.to_string();
@@ -748,7 +796,7 @@ impl<'a> Reader<'a> {
         (rx > 0.0 && ry > 0.0).then_some((pl, rx, ry))
     }
 
-    fn indexed_poly_curve(&self, e: &Entity) -> Option<Vec<V3>> {
+    fn indexed_poly_curve(&self, e: &Entity) -> Option<Vec<(f64, V3)>> {
         let (_, pl) = self.ent_v(e.arg(0))?;
         if pl.ty != "IFCCARTESIANPOINTLIST2D" && pl.ty != "IFCCARTESIANPOINTLIST3D" {
             return None;
@@ -773,28 +821,37 @@ impl<'a> Reader<'a> {
         };
         let segs = match e.arg(1) {
             Some(Value::List(s)) => s,
-            _ => return Some(coords.clone()),
+            _ => return Some(coords.iter().enumerate().map(|(i, p)| (i as f64, *p)).collect()),
         };
-        let mut out: Vec<V3> = Vec::new();
-        let push = |out: &mut Vec<V3>, p: V3| {
-            if !out.last().is_some_and(|q| len(sub(*q, p)) < 1e-12) {
-                out.push(p);
+        let mut out: Vec<(f64, V3)> = Vec::new();
+        let push = |out: &mut Vec<(f64, V3)>, t: f64, p: V3| {
+            if !out.last().is_some_and(|q| len(sub(q.1, p)) < 1e-12) {
+                out.push((t, p));
             }
         };
+        // Parameter: je Liniensegment bzw. Bogen eine Einheit.
+        let mut t0 = 0.0;
         for s in segs {
             let Value::Typed(name, a) = s else { return None };
             let idx = a.first()?.as_list()?;
             match name.as_str() {
                 "IFCLINEINDEX" => {
-                    for i in idx {
-                        push(&mut out, at(i)?);
+                    for (k, i) in idx.iter().enumerate() {
+                        let t = if k == 0 { t0 } else { t0 + 1.0 };
+                        if k > 0 {
+                            t0 += 1.0;
+                        }
+                        push(&mut out, t, at(i)?);
                     }
                 }
                 "IFCARCINDEX" if idx.len() == 3 => {
                     let (p1, p2, p3) = (at(&idx[0])?, at(&idx[1])?, at(&idx[2])?);
-                    for p in arc3(p1, p2, p3) {
-                        push(&mut out, p);
+                    let arc = arc3(p1, p2, p3);
+                    let n = (arc.len() - 1).max(1) as f64;
+                    for (k, p) in arc.into_iter().enumerate() {
+                        push(&mut out, t0 + k as f64 / n, p);
                     }
+                    t0 += 1.0;
                 }
                 _ => return None,
             }
@@ -805,7 +862,7 @@ impl<'a> Reader<'a> {
         Some(out)
     }
 
-    fn trimmed_curve(&mut self, e: &Entity) -> Option<Vec<V3>> {
+    fn trimmed_curve(&mut self, e: &Entity) -> Option<Vec<(f64, V3)>> {
         let (_, basis) = self.ent_v(e.arg(0))?;
         let sense = e.arg(3).and_then(|v| v.as_enum()) != Some("F");
         let master_param = e.arg(4).and_then(|v| v.as_enum()) == Some("PARAMETER");
@@ -842,9 +899,10 @@ impl<'a> Reader<'a> {
                 let span = if sense { (a2 - a1).rem_euclid(tau) } else { -((a1 - a2).rem_euclid(tau)) };
                 let span = if span.abs() < 1e-12 { if sense { tau } else { -tau } } else { span };
                 let n = arc_segments(span, rx.max(ry));
+                let a = self.angle_scale;
                 Some((0..=n).map(|i| {
                     let t = a1 + span * i as f64 / n as f64;
-                    pl.apply([rx * t.cos(), ry * t.sin(), 0.0])
+                    (t / a, pl.apply([rx * t.cos(), ry * t.sin(), 0.0]))
                 }).collect())
             }
             "IFCLINE" => {
@@ -853,19 +911,36 @@ impl<'a> Reader<'a> {
                 let d = norm(self.direction(vec.arg(0))?)?;
                 let m = self.length(vec.arg(1)).unwrap_or(1.0);
                 let at = |t: f64| add(pnt, scale(d, m * t));
+                let par_of = |p: V3| if m.abs() > 1e-300 { dot(sub(p, pnt), d) / m } else { 0.0 };
                 let a = if master_param { p1.map(at).or(c1) } else { c1.or(p1.map(at)) }?;
                 let b = if master_param { p2.map(at).or(c2) } else { c2.or(p2.map(at)) }?;
-                Some(if sense { vec![a, b] } else { vec![b, a] })
+                let (ta, tb) = (par_of(a), par_of(b));
+                Some(if sense { vec![(ta, a), (tb, b)] } else { vec![(tb, b), (ta, a)] })
+            }
+            "IFCBSPLINECURVEWITHKNOTS" | "IFCRATIONALBSPLINECURVEWITHKNOTS" => {
+                let c = self.bspline_curve(basis)?;
+                let full = c.sample(c.domain().0, c.domain().1);
+                let t_of = |par: Option<f64>, pt: Option<V3>| -> Option<f64> {
+                    let from_pt = pt.and_then(|p| nearest_param(&full, p));
+                    if master_param { par.or(from_pt) } else { from_pt.or(par) }
+                };
+                let (t1, t2) = (t_of(p1, c1)?, t_of(p2, c2)?);
+                let (lo, hi) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
+                let mut pts = c.sample(lo, hi);
+                // Gegensinn bzw. vertauschte Grenzen: rückwärts.
+                if sense != (t1 <= t2) {
+                    pts.reverse();
+                }
+                (pts.len() >= 2).then_some(pts)
             }
             _ => {
-                // Andere Basiskurven (B-Splines, Klothoiden …) nicht unterstützt.
+                // Andere Basiskurven (Klothoiden …) nicht unterstützt.
                 let ty = basis.ty.clone();
                 self.skip(&ty);
                 None
             }
         }
     }
-
     // ---- Profile ---------------------------------------------------------------------------
 
     /// Profil → Flächen (je Fläche Ring 0 aussen, weitere Löcher) in Profil-Koordinaten.
@@ -1035,6 +1110,21 @@ impl<'a> Reader<'a> {
                     self.shell(v, out);
                 }
             }
+            "IFCADVANCEDBREP" | "IFCADVANCEDBREPWITHVOIDS" => {
+                // Freiform-Brep: Seiten auf Ebenen, Zylindern, Kegeln, Kugeln, Tori, B-Spline-Flächen.
+                let mut local = Mesh::default();
+                if let Some(v) = e.arg(0) {
+                    self.shell(v, &mut local);
+                }
+                for v in e.arg(1).and_then(|v| v.as_list()).unwrap_or(&[]) {
+                    self.shell(v, &mut local);
+                }
+                // Aussen- und Hohlräume sind in sich richtig orientiert; das Ganze nach aussen.
+                if signed_volume(&local.positions, &local.indices) < 0.0 {
+                    local.flip_all();
+                }
+                out.append(&local, &Xf::IDENTITY);
+            }
             "IFCSHELLBASEDSURFACEMODEL" | "IFCFACEBASEDSURFACEMODEL" => {
                 for v in e.arg(0).and_then(|v| v.as_list()).unwrap_or(&[]) {
                     self.shell(v, out);
@@ -1107,8 +1197,8 @@ impl<'a> Reader<'a> {
                 }
             }
             "IFCSWEPTDISKSOLID" | "IFCSWEPTDISKSOLIDPOLYGONAL" => {
-                // StartParam/EndParam und Ausrundungen (Polygonal) werden nicht ausgewertet.
-                let Some(path) = self.curve(e.arg(0), 0) else { return };
+                // Ausrundungen (Polygonal) werden nicht ausgewertet.
+                let Some(path) = self.sweep_path(e, 0, 3, 4) else { return };
                 let Some(r) = self.length(e.arg(1)).filter(|r| *r > 0.0) else { return };
                 let n = arc_segments(std::f64::consts::TAU, r).max(24);
                 let circle = |r: f64| -> Vec<V2> {
@@ -1127,10 +1217,10 @@ impl<'a> Reader<'a> {
                 out.append(&m, &Xf::IDENTITY);
             }
             "IFCFIXEDREFERENCESWEPTAREASOLID" | "IFCSURFACECURVESWEPTAREASOLID" => {
-                // Leitkurve im System von Position; StartParam/EndParam werden nicht ausgewertet.
+                // Leitkurve im System von Position, begrenzt durch StartParam/EndParam.
                 let Some(areas) = self.profile(e.arg(0), 0) else { return };
                 let pos = self.axis_placement(e.arg(1));
-                let Some(path) = self.curve(e.arg(2), 0) else { return };
+                let Some(path) = self.sweep_path(e, 2, 3, 4) else { return };
                 let frame = if e.ty == "IFCFIXEDREFERENCESWEPTAREASOLID" {
                     Frame::FixedX(self.direction(e.arg(5)).unwrap_or([1.0, 0.0, 0.0]))
                 } else {
@@ -1241,7 +1331,7 @@ impl<'a> Reader<'a> {
         let faces = sh.arg(0).and_then(|v| v.as_list()).unwrap_or(&[]);
         for f in faces {
             let Some((_, face)) = self.ent_v(Some(f)) else { continue };
-            if face.ty != "IFCFACE" && face.ty != "IFCFACESURFACE" {
+            if face.ty != "IFCFACE" && face.ty != "IFCFACESURFACE" && face.ty != "IFCADVANCEDFACE" {
                 continue;
             }
             let mut outer: Option<Vec<V3>> = None;
@@ -1249,23 +1339,35 @@ impl<'a> Reader<'a> {
             for b in face.arg(0).and_then(|v| v.as_list()).unwrap_or(&[]) {
                 let Some((_, bound)) = self.ent_v(Some(b)) else { continue };
                 let Some((_, lp)) = self.ent_v(bound.arg(0)) else { continue };
-                if lp.ty != "IFCPOLYLOOP" {
-                    let ty = lp.ty.clone();
-                    self.skip(&ty);
-                    continue;
-                }
-                let mut pts: Vec<V3> = lp
-                    .arg(0)
-                    .and_then(|v| v.as_list())
-                    .unwrap_or(&[])
-                    .iter()
-                    .take(MAX_LOOP_POINTS)
-                    .filter_map(|p| self.point(Some(p)))
-                    .collect();
-                pts.dedup_by(|a, b| len(sub(*a, *b)) < 1e-12);
-                if pts.len() > 1 && len(sub(pts[0], pts[pts.len() - 1])) < 1e-12 {
-                    pts.pop();
-                }
+                let mut pts: Vec<V3> = match lp.ty.as_str() {
+                    "IFCPOLYLOOP" => {
+                        let mut pts: Vec<V3> = lp
+                            .arg(0)
+                            .and_then(|v| v.as_list())
+                            .unwrap_or(&[])
+                            .iter()
+                            .take(MAX_LOOP_POINTS)
+                            .filter_map(|p| self.point(Some(p)))
+                            .collect();
+                        pts.dedup_by(|a, b| len(sub(*a, *b)) < 1e-12);
+                        if pts.len() > 1 && len(sub(pts[0], pts[pts.len() - 1])) < 1e-12 {
+                            pts.pop();
+                        }
+                        pts
+                    }
+                    "IFCEDGELOOP" => match self.edge_loop(lp) {
+                        Some(p) => p,
+                        None => {
+                            self.skip("IFCEDGELOOP (unlesbar)");
+                            continue;
+                        }
+                    },
+                    _ => {
+                        let ty = lp.ty.clone();
+                        self.skip(&ty);
+                        continue;
+                    }
+                };
                 if bound.arg(1).and_then(|v| v.as_enum()) == Some("F") {
                     pts.reverse();
                 }
@@ -1286,6 +1388,15 @@ impl<'a> Reader<'a> {
             };
             let mut rings = vec![outer];
             rings.extend(inner);
+            // Gekrümmte Trägerfläche (IfcAdvancedFace/IfcFaceSurface): über den Parameterraum.
+            if face.ty != "IFCFACE" {
+                if let Some(brep::FaceSurface::Curved(s)) = self.face_surface(face.arg(1)) {
+                    let same = face.arg(2).and_then(|v| v.as_enum()) != Some("F");
+                    if self.curved_face(&s, &rings, same, out) {
+                        continue;
+                    }
+                }
+            }
             triangulate3d(&rings, out);
         }
     }
@@ -1689,6 +1800,8 @@ pub fn import_ifc_opts(bytes: &[u8], elements: bool) -> Result<IfcImport, String
         simplified: 0,
         active: HashSet::new(),
         budget: MAX_ITEM_EVALS,
+        edge_cache: HashMap::new(),
+        grid_axes: None,
     };
     let mut result = IfcImport { schema: f.schema.clone(), length_scale: len_scale, parse_errors: f.errors, ..Default::default() };
 
@@ -2370,9 +2483,9 @@ ENDSEC;\nEND-ISO-10303-21;\n"
 
     #[test]
     fn unknown_items_are_counted() {
-        let body = "#44=IFCADVANCEDBREP(#45);#45=IFCCLOSEDSHELL(());";
+        let body = "#44=IFCSECTIONEDSPINE(#45,(),());";
         let r = import_ifc(file(METRE, body, "#44", "IFCWALL").as_bytes()).unwrap();
-        assert_eq!(r.skipped_items.get("IFCADVANCEDBREP"), Some(&1));
+        assert_eq!(r.skipped_items.get("IFCSECTIONEDSPINE"), Some(&1));
         assert_eq!(r.products_without_geometry, 1);
     }
 
@@ -2430,6 +2543,75 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         }
     }
 
+    /// Synthetische Freiform-Fälle (`src/io/testdata/ifc-freeform-cases.ifc`, erzeugt von Hand):
+    /// Volumen gegen Formel, Breps ohne Löcher zwischen den Seiten.
+    #[test]
+    fn freeform_cases_volumes_and_closed_breps() {
+        let src = include_str!("../../../src/io/testdata/ifc-freeform-cases.ifc");
+        let r = import_ifc(src.as_bytes()).unwrap();
+        assert!(r.skipped_items.is_empty(), "{:?}", r.skipped_items);
+        let pi = std::f64::consts::PI;
+        let want = [
+            ("1cyl", pi * 0.25 * 2.0, 0.01),
+            ("2dome", 2.0 / 3.0 * pi, 0.01),
+            ("3bspprofile", pi * 0.25, 0.005),
+            ("4twist", 2.0 / 3.0, 0.005),
+            ("5nurbscyl", pi * 0.25, 0.005),
+            // StartParam 0.5 … EndParam 1.5 der Polylinie: 2 m + 1.5 m.
+            ("6pipeparams", pi * 0.01 * 3.5, 0.02),
+            // Viertelkreis R = 2.
+            ("7pipearc", pi * 0.01 * pi, 0.02),
+            ("8pipenurbs", pi * 0.01 * 2.0 * pi, 0.02),
+        ];
+        assert_eq!(r.products.len(), want.len());
+        for (p, (name, v, rel)) in r.products.iter().zip(want) {
+            assert!(p.global_id.starts_with(name), "{}", p.global_id);
+            let got = vol(p);
+            assert!((got - v).abs() / v < rel, "{name}: {got} ≠ {v}");
+        }
+        // Geschlossen (auch mit T-Stössen, wo gerade Kanten fein geteilt sind): die Flächenvektoren
+        // aller Dreiecke heben sich auf.
+        for p in r.products.iter().filter(|p| ["1cyl", "2dome", "4twist", "5nurbscyl"].iter().any(|n| p.global_id.starts_with(n))) {
+            let at = |i: u32| {
+                let k = i as usize * 3;
+                [p.mesh.positions[k], p.mesh.positions[k + 1], p.mesh.positions[k + 2]]
+            };
+            let mut sum = [0.0; 3];
+            let mut total = 0.0;
+            for t in p.mesh.indices.chunks_exact(3) {
+                let n = cross(sub(at(t[1]), at(t[0])), sub(at(t[2]), at(t[0])));
+                sum = add(sum, n);
+                total += len(n);
+            }
+            assert!(len(sum) < 1e-9 * total, "{}: {sum:?}", p.global_id);
+        }
+    }
+
+    #[test]
+    fn grid_placement_at_axis_intersection() {
+        // Raster in (10, 0, 0) des Geschosses; U-Achse y = 2 (Gegensinn), V-Achse x = 3; Versatz 0.5
+        // (links der umgedrehten U-Achse = −y) und 0.25 (links der V-Achse = −x), z 1.
+        let body = "#40=IFCRECTANGLEPROFILEDEF(.AREA.,$,$,0.2,0.2);#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);\
+#50=IFCCARTESIANPOINT((0.,2.));#51=IFCCARTESIANPOINT((8.,2.));#52=IFCPOLYLINE((#50,#51));#53=IFCGRIDAXIS('1',#52,.F.);\
+#54=IFCCARTESIANPOINT((3.,-5.));#55=IFCCARTESIANPOINT((3.,5.));#56=IFCPOLYLINE((#54,#55));#57=IFCGRIDAXIS('A',#56,.T.);\
+#58=IFCCARTESIANPOINT((10.,0.,0.));#59=IFCAXIS2PLACEMENT3D(#58,$,$);#60=IFCLOCALPLACEMENT(#23,#59);\
+#61=IFCGRID('0grid',$,$,$,$,#60,$,(#53),(#57),$,$);\
+#62=IFCVIRTUALGRIDINTERSECTION((#53,#57),(0.5,0.25,1.));#63=IFCDIRECTION((0.,1.,0.));#64=IFCGRIDPLACEMENT(#62,#63);";
+        let src = file(METRE, body, "#41", "IFCCOLUMN").replace("$,'Teil',$,$,#30,", "$,'Teil',$,$,#64,");
+        let (r, p) = one(&src);
+        assert!(r.skipped_items.is_empty(), "{:?}", r.skipped_items);
+        let (lo, hi) = bbox(&p);
+        let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+        // x = 10 + 3 − 0.25, y = 2 − 0.5, z = 3 (Geschoss) + 1.
+        assert!(close(c[0], 12.75, 1e-9) && close(c[1], 1.5, 1e-9), "{c:?}");
+        assert!(close(lo[2], 4.0, 1e-9) && close(hi[2], 5.0, 1e-9));
+        assert!(close(vol(&p), 0.04, 1e-9));
+        // IFC4.3-Form (PlacementRelTo vorne) gibt dasselbe.
+        let src43 = src.replace("IFCGRIDPLACEMENT(#62,#63)", "IFCGRIDPLACEMENT(#60,#62,#63)");
+        let (_, q) = one(&src43);
+        assert_eq!(bbox(&q), (lo, hi));
+    }
+
     #[test]
     fn nonsense_never_panics() {
         assert!(import_ifc(b"").is_err());
@@ -2455,10 +2637,24 @@ ENDSEC;\nEND-ISO-10303-21;\n"
             "#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);#40=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,$,#42);#42=IFCINDEXEDPOLYCURVE(#43,(IFCARCINDEX((1,1,1)),IFCLINEINDEX((9))),$);#43=IFCCARTESIANPOINTLIST2D(((0.,0.)));",
             "#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.E308);#40=IFCCIRCLEPROFILEDEF(.AREA.,$,$,1.E308);",
             "#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);#40=IFCCIRCLEPROFILEDEF(.AREA.,$,$,1.E-300);",
+            // Freiform ([25]): kaputte B-Splines, Kanten, Flächen, Zyklen.
+            "#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);#40=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,$,#42);#42=IFCBSPLINECURVEWITHKNOTS(3,(#10,#21),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.);",
+            "#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);#40=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,$,#42);#42=IFCRATIONALBSPLINECURVEWITHKNOTS(1,(#10,#21),.UNSPECIFIED.,.F.,.F.,(2,2),(0.,1.),.UNSPECIFIED.,(1.,-1.));",
+            "#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);#40=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,$,#42);#42=IFCBSPLINECURVEWITHKNOTS(99999,(#10,#21),.UNSPECIFIED.,.F.,.F.,(1,1),(1.,0.),.UNSPECIFIED.);",
+            "#41=IFCADVANCEDBREP(#42);#42=IFCCLOSEDSHELL((#43));#43=IFCADVANCEDFACE((#44),#47,.T.);#44=IFCFACEOUTERBOUND(#45,.T.);#45=IFCEDGELOOP((#46));#46=IFCORIENTEDEDGE(*,*,#46,.T.);#47=IFCCYLINDRICALSURFACE(#13,1.);",
+            "#41=IFCADVANCEDBREP(#42);#42=IFCCLOSEDSHELL((#43));#43=IFCADVANCEDFACE((#44),#47,.T.);#44=IFCFACEOUTERBOUND(#45,.T.);#45=IFCEDGELOOP((#46));#46=IFCORIENTEDEDGE(*,*,#48,.T.);#48=IFCEDGECURVE(#49,#49,#50,.T.);#49=IFCVERTEXPOINT(#10);#50=IFCCIRCLE(#13,0.);#47=IFCSPHERICALSURFACE(#13,-1.);",
+            "#41=IFCADVANCEDBREP(#42);#42=IFCCLOSEDSHELL((#43));#43=IFCADVANCEDFACE((#44),#47,.T.);#44=IFCFACEOUTERBOUND(#45,.T.);#45=IFCEDGELOOP((#46));#46=IFCORIENTEDEDGE(*,*,#48,.T.);#48=IFCEDGECURVE(#49,#49,#50,.T.);#49=IFCVERTEXPOINT(#21);#50=IFCCIRCLE(#13,3.);#47=IFCBSPLINESURFACEWITHKNOTS(1,1,((#10,#21),(#21,#10)),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,0.),(0.,1.),.UNSPECIFIED.);",
+            "#41=IFCADVANCEDBREP(#42);#42=IFCCLOSEDSHELL((#43));#43=IFCADVANCEDFACE((#44),#47,.T.);#44=IFCFACEOUTERBOUND(#45,.T.);#45=IFCEDGELOOP((#46));#46=IFCORIENTEDEDGE(*,*,#48,.T.);#48=IFCEDGECURVE(#49,#49,#50,.T.);#49=IFCVERTEXPOINT(#21);#50=IFCCIRCLE(#13,1.E300);#47=IFCTOROIDALSURFACE(#13,1.,1.E300);",
+            "#41=IFCSWEPTDISKSOLID(#92,0.1,$,IFCLENGTHMEASURE(1.E300),-5.);",
+            "#41=IFCSWEPTDISKSOLID(#42,0.1,$,0.5,0.7);#42=IFCTRIMMEDCURVE(#43,(IFCPARAMETERVALUE(0.)),(#10),.F.,.PARAMETER.);#43=IFCBSPLINECURVEWITHKNOTS(1,(#10,#21),.UNSPECIFIED.,.F.,.F.,(2,2),(0.,1.),.UNSPECIFIED.);",
         ];
         for b in bad {
             let _ = import_ifc(file(METRE, b, "#41", "IFCWALL").as_bytes());
         }
+        // Raster-Platzierung mit Zyklus und kaputten Achsen.
+        let grid = file(METRE, "#40=IFCRECTANGLEPROFILEDEF(.AREA.,$,$,1.,1.);#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);#60=IFCGRIDPLACEMENT(#61,$);#61=IFCVIRTUALGRIDINTERSECTION((#62,#62),(1.,2.));#62=IFCGRIDAXIS('A',#92,.T.);#63=IFCGRID('g',$,$,$,$,#60,$,(#62),(#62),$,$);", "#41", "IFCWALL")
+            .replace("#94=IFCWALL('3aBcDeFgHiJkLmNoPqRsTu',$,'Teil',$,$,#30,", "#94=IFCWALL('3aBcDeFgHiJkLmNoPqRsTu',$,'Teil',$,$,#60,");
+        assert_eq!(import_ifc(grid.as_bytes()).unwrap().products.len(), 1);
         // Platzierungs-Zyklus.
         let cyc = file(METRE, "#40=IFCRECTANGLEPROFILEDEF(.AREA.,$,$,1.,1.);#41=IFCEXTRUDEDAREASOLID(#40,#13,#11,1.);", "#41", "IFCWALL")
             .replace("#14=IFCLOCALPLACEMENT($,#13);", "#14=IFCLOCALPLACEMENT(#30,#13);");
