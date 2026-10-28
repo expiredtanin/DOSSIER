@@ -438,11 +438,26 @@ describe("parseDxf — TEXT/MTEXT", () => {
     expect(t0.text).toBe("Hallo");
   });
 
-  it("MTEXT → Formatcodes gesäubert (\\P → Leerzeichen)", () => {
+  it("MTEXT → Formatcodes gesäubert, \\P = neue Zeile (je Zeile ein Text, oben links verankert)", () => {
     const res = parseDxf(dxf(mtextEnt(1, 2, 0.3, "Welt\\Pzeile2")));
-    expect(res.texts![0].text).toBe("Welt zeile2");
+    expect(res.texts!.map((t) => t.text)).toEqual(["Welt", "zeile2"]);
     expect(res.texts![0].at.x).toBeCloseTo(1, 9);
+    expect(res.texts![0].at.y).toBeCloseTo(2 - 0.3, 9);
+    expect(res.texts![1].at.y).toBeCloseTo(2 - 0.3 - 0.3 * (5 / 3), 9);
     expect(res.texts![0].height).toBeCloseTo(0.3, 9);
+  });
+
+  it("MTEXT: Schriftcodes, Stapel, \\~ und Sonderzeichen", () => {
+    const res = parseDxf(dxf(mtextEnt(0, 0, 0.2, "{\\fArial|b1;Fett}\\~\\H2x;gross \\S1/2; 12%%d")));
+    expect(res.texts!.map((t) => t.text)).toEqual(["Fett gross 1/2 12°"]);
+  });
+
+  it("TEXT zentriert: Anker ist der Ausrichtpunkt, Text beginnt links davon", () => {
+    const g = ["0", "TEXT", "8", "0", "10", "0", "20", "0", "30", "0", "40", "1", "72", "1", "11", "10", "21", "5", "31", "0", "1", "Mitte"];
+    const t = parseDxf(dxf(g)).texts![0];
+    expect(t.at.x).toBeLessThan(10);
+    expect(t.at.x).toBeGreaterThan(10 - 6);
+    expect(t.at.y).toBeCloseTo(5, 9);
   });
 
   it("leerer Text wird übersprungen", () => {
@@ -660,5 +675,43 @@ describe("parseDxf — SOLID/TRACE", () => {
     );
     expect(c.pts).toHaveLength(3);
     expect(c.filled).toBe(true);
+  });
+});
+
+describe("parseDxf — Papierbereich-Layouts und beschädigte Dateien", () => {
+  const withLayout = (): string => {
+    // Modellraum mit einer Linie; Layout „Plan A3" mit Linie + Text (Papier in mm, 72 = 1)
+    return [
+      "0", "SECTION", "2", "ENTITIES",
+      "0", "LINE", "8", "0", "10", "0", "20", "0", "30", "0", "11", "1", "21", "0", "31", "0",
+      "0", "ENDSEC", "0", "EOF",
+    ].join("\n");
+  };
+
+  it("ohne Layouts: leere Liste, Modellraum, nicht wiederhergestellt", () => {
+    const res = parseDxf(withLayout());
+    expect(res.layouts).toEqual([]);
+    expect(res.layout).toBeUndefined();
+    expect(res.recovered).toBe(false);
+  });
+
+  it("unbekanntes Layout → Fehler mit Meldung", () => {
+    expect(() => parseDxf(withLayout(), "", "Gibt es nicht")).toThrow(/nicht gefunden/);
+  });
+
+  it("leere/fremde Datei → verständliche Fehlermeldung statt Absturz", () => {
+    expect(() => parseDxf(new Uint8Array(0))).toThrow(/leer/);
+    expect(() => parseDxf("Dies ist ein Brief.\nMit Gruessen")).toThrow(/Keine DXF/);
+  });
+
+  it("abgeschnittene Datei → teilweise gelesen (recovered) oder Fehlermeldung, nie ein Absturz", () => {
+    const full = dxf(circle(1, 1, 0, 1), circle(2, 2, 0, 1), circle(3, 3, 0, 1));
+    const cut = full.slice(0, full.indexOf("EOF") - 30);
+    try {
+      const res = parseDxf(cut);
+      expect(res.contours[0].contours.length).toBeGreaterThan(0);
+    } catch (e) {
+      expect(String(e)).toMatch(/\S/);
+    }
   });
 });

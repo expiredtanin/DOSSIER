@@ -31,6 +31,15 @@ pub fn import_drawing(bytes: Vec<u8>) -> Result<ImportedDrawing, JsValue> {
     Ok(ImportedDrawing { geom, strings })
 }
 
+/// Wie [`import_drawing`], liest aber das Papierbereich-Layout `layout` statt des Modellraums
+/// (Layout-Namen stehen im Import-Ergebnis). Unbekannter Name → JS-Fehler mit den vorhandenen.
+#[wasm_bindgen]
+pub fn import_drawing_layout(bytes: Vec<u8>, layout: &str) -> Result<ImportedDrawing, JsValue> {
+    let data = crate::import::import_layout(bytes, layout).map_err(|e| JsValue::from_str(&e))?;
+    let (geom, strings) = crate::import::encode(&data);
+    Ok(ImportedDrawing { geom, strings })
+}
+
 /// Schnittstellen für das parallele Lesen einer grossen ASCII-DXF (`split::split_offsets`):
 /// `[entitiesStart, …, entitiesEnd]` als Byte-Offsets; leer = nicht teilen.
 #[wasm_bindgen]
