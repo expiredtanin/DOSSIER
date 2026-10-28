@@ -37,6 +37,7 @@ pub mod plan_stairs;
 pub mod plan_walls;
 pub mod opening_geom;
 pub mod plan_openings;
+pub mod plan_elevation;
 pub mod plan_misc;
 pub mod plan_section;
 pub mod curves;

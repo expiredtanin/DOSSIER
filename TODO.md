@@ -106,6 +106,7 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     nach Rust [K4] — vorher würde ein Rust-`Drawing2D` doppelt gepflegt. Danach: [K3c] Schnitt/Ansicht, [K3d] Aufräumen.
   - ◐ **[K3c] Schnitt und Ansicht** (`toSection`, `toElevation`, `meshSection`) im selben Puffer-Format.
     ✅ Schnitt-Bänder: Dominanz-Subtraktion, Verschmelzung, Rechteck-Vereinigung (`plan_section.rs`, 28.10.).
+    ✅ Ansicht: Verdeckungs-Clipping, Punkt-Verdeckung, Schlagschatten, XOR-Umriss (`plan_elevation.rs`, 28.10.).
   - ○ **[K3d] Aufräumen:** TS-Primitive-Erzeugung löschen, SVG/PDF/DXF-Export lesen den Puffer.
   Nachteile (bewusst): Übergang mit doppelter Datenhaltung, Format muss TS/Rust gleich bleiben
   (Versionsnummer + Hin-und-zurück-Tests), Text-Layout bleibt bis [K4] in TS.
