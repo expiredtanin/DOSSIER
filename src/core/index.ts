@@ -264,18 +264,10 @@ export {
 } from "../plan/planView/geometry";
 
 export {
+  type ClientMap,
   type OwnerField,
-  type OwnerIndex,
-  buildOwnerIndex,
-  ownedBy,
-} from "../plan/planView/ownerIndex";
-
-export {
-  buildSegmentIndex,
-  nearestSegment,
-  pointSegDist as pointSegDist__plan_planView_segmentIndex,
-  segmentsNear,
-} from "../plan/planView/segmentIndex";
+  PlanPickIndex,
+} from "../plan/planView/planPick";
 
 export {
   marqueeHitUnderlay,

@@ -95,7 +95,7 @@ export function planParts(plan: Plan, texts = false): PlanParts {
     at = r.end;
   }
   gap(prims.length);
-  const own: HoldableBuf | null = rest.length ? { bytes: encodePlanBuf(rest, { textJson: texts }), hold: 0 } : null;
+  const own: HoldableBuf | null = rest.length ? { bytes: encodePlanBuf(rest, { textJson: texts, hatchJson: false }), hold: 0 } : null;
   const segs: number[] = [];
   let gi = 0;
   let ri = 0;
@@ -128,8 +128,10 @@ export function greyedFlat(plan: Plan): Float64Array {
   return out;
 }
 
-/** Abschnitte mit den Kern-Nummern der Puffer (legt fehlende ab). */
-function heldSegs(parts: PlanParts, fresh: boolean): Float64Array {
+/**
+ * Abschnitte mit den Kern-Nummern der Puffer; legt fehlende ab (`fresh`: auch verdrängte).
+ */
+export function heldSegs(parts: PlanParts, fresh: boolean): Float64Array {
   const c = core();
   for (const b of parts.bufs) if (!b.hold || (fresh && !c.plan_buf_is_held(b.hold))) b.hold = c.plan_buf_hold(b.bytes);
   const s = new Float64Array(parts.segs.length);

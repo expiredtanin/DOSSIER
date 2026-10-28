@@ -184,6 +184,8 @@ export interface EncodeOptions {
    * einen Puffer nicht lesen. Standard `true`.
    */
   textJson?: boolean;
+  /** `false`: Schraffuren ohne JSON (nur das Hatch-Format, wie `lean`). Standard `true`. */
+  hatchJson?: boolean;
   /** Gruppen `[start, end)` in den Kopf schreiben. */
   groups?: ReadonlyArray<readonly [number, number]>;
   bounds?: readonly [number, number, number, number];
@@ -193,6 +195,7 @@ export interface EncodeOptions {
 export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions = {}): Uint8Array {
   const lean = opts.lean === true;
   const textJson = opts.textJson !== false;
+  const hatchJson = !lean && opts.hatchJson !== false;
   const strParts: string[] = [];
   const strTab = new F64Writer(64);
   const strIdx = new Map<string, number>();
@@ -217,7 +220,7 @@ export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions =
     let i = hatchIdx.get(h);
     if (i === undefined) {
       i = hatchIdx.size;
-      hatchW.push(lean ? -1 : str(JSON.stringify(h)));
+      hatchW.push(hatchJson ? str(JSON.stringify(h)) : -1);
       writeHatch(hatchW, h, str(h.color));
       hatchIdx.set(h, i);
     }

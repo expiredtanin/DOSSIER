@@ -33,6 +33,7 @@ mod curves;
 mod hatch;
 mod skeleton;
 mod plan_scene;
+mod plan_pick;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

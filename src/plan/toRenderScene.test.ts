@@ -29,8 +29,8 @@ describe("planToRenderScene (Kern)", () => {
   });
 
   it("näht unterdrückte Kanten zweier Polygone zu einem Ring", () => {
-    const a: Primitive = { kind: "polygon", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }], fill: "#eee", stroke: "#000", strokeWidthMm: 0.35, noStrokeEdges: [1] };
-    const b: Primitive = { kind: "polygon", pts: [{ x: 1, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 1, y: 1 }], fill: "#eee", stroke: "#000", strokeWidthMm: 0.35, noStrokeEdges: [3] };
+    const a: Primitive = { kind: "polygon", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }], fill: "#eee", stroke: "#000", strokeWidthMm: 0.35, noStrokeEdges: [1] } as Primitive;
+    const b: Primitive = { kind: "polygon", pts: [{ x: 1, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 1, y: 1 }], fill: "#eee", stroke: "#000", strokeWidthMm: 0.35, noStrokeEdges: [3] } as Primitive;
     const s = planToRenderScene(planOf([a, b]));
     expect(s.fills.length).toBe(2);
     expect(s.outlines.length).toBe(1);

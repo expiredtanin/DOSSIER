@@ -648,6 +648,23 @@ impl<'a> View<'a> {
         Some(out)
     }
 
+    /// Absoluter Wortindex des Eintrags `i` (Kopf `[tag, flags, pickKind, pickStr]`, danach die
+    /// festen Felder) — für Leser, die nur wenige Wörter brauchen ([`View::word`]).
+    pub(crate) fn rec_at(&self, i: usize) -> Option<usize> {
+        if i >= self.n_prims {
+            return None;
+        }
+        let off = whole(self.w.get(self.offsets_at + i)?)?;
+        let at = self.recs_at.checked_add(off)?;
+        (at < self.recs_end).then_some(at)
+    }
+
+    /// Wort `k` des `f64`-Teils (s. [`View::rec_at`]).
+    #[inline]
+    pub(crate) fn word(&self, k: usize) -> Option<f64> {
+        self.w.get(k)
+    }
+
     pub(crate) fn rec(&self, i: usize) -> Option<Rec> {
         if i >= self.n_prims {
             return None;

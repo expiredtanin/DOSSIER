@@ -60,6 +60,7 @@ pub mod curves;
 pub mod skeleton;
 pub mod plan_parts;
 pub mod plan_scene;
+pub mod plan_pick;
 
 #[cfg(feature = "web")]
 mod web;
