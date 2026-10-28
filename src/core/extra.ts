@@ -5,6 +5,7 @@ export { parseProjectFile, serializeProject, PROJECT_FORMAT_VERSION } from "../i
 export { exportIfcSpf } from "../export/exportIfc";
 export { buildPlanDxf } from "../export/exportDxf";
 export { buildPlanDwg } from "../export/exportDxf";
+export { buildPlanDxfBinary } from "../export/exportDxf";
 export { loadFileio } from "../engine/fileioWasm";
 export { readIfc, ifcToImportedMeshes } from "../io/ifcImport";
 export { projectGeoOrigin } from "../model/geoRebase";

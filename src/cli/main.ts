@@ -8,7 +8,7 @@
 //   dossier-cli <projekt.obp> plan [--level EG] [--scale 100] [--out eg.svg]
 //   dossier-cli <projekt.obp> section <Name> [--out schnitt.svg]       (braucht render3d-WASM)
 //   dossier-cli <projekt.obp> elevation <Name> [--out ansicht.svg]
-//   dossier-cli <projekt.obp> dxf|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary]|dwg|ifc|step|obj|stl|schedule|kennzahlen|sun [--level EG] [--out datei]
 //   dossier-cli <projekt.obp> import-ifc <datei.ifc> [--out neu.obp] [--group product|class]
 //                                                  IFC als Kontext-Meshes ([B3]); Bericht als JSON auf stdout
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildPlanDxf,
   buildPlanDwg,
+  buildPlanDxfBinary,
   loadFileio,
   readIfc,
   ifcToImportedMeshes,
@@ -221,7 +222,8 @@ export async function run(argv: string[]): Promise<number> {
       const world = projectToWorldCoords(project);
       const plan = generatePlan(world, lvl.id, allCodes);
       await loadFileio();
-      if (command === "dxf") out(args, buildPlanDxf(plan, world), `${lvl.name}.dxf`);
+      if (command === "dxf" && args.flags.has("binary")) out(args, buildPlanDxfBinary(plan, world), `${lvl.name}.dxf`);
+      else if (command === "dxf") out(args, buildPlanDxf(plan, world), `${lvl.name}.dxf`);
       else out(args, buildPlanDwg(plan, world), `${lvl.name}.dwg`);
       return 0;
     }

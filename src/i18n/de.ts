@@ -1703,6 +1703,7 @@ export const de = {
   "exportDxf.hatches.no": "Nur Umrisse",
   "exportDxf.format": "Format",
   "exportDxf.format.dxf": "DXF (AutoCAD 2018, Text)",
+  "exportDxf.format.dxfbin": "DXF binär (AutoCAD 2018, kompakt)",
   "exportDxf.format.dwg": "DWG (AutoCAD 2018)",
   "exportDxf.failed": "Export fehlgeschlagen",
   "exportDxf.unitsNote":

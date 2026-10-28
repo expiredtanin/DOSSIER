@@ -15,7 +15,14 @@ from ezdxf import recover
 
 
 def main(path: str) -> int:
-    doc, auditor = recover.readfile(path)
+    # recover.readfile liest nur ASCII; Binär-DXF ("AutoCAD Binary DXF") geht über readfile + Audit.
+    with open(path, "rb") as fh:
+        binary = fh.read(18) == b"AutoCAD Binary DXF"
+    if binary:
+        doc = ezdxf.readfile(path)
+        auditor = doc.audit()
+    else:
+        doc, auditor = recover.readfile(path)
     msp = doc.modelspace()
     entities = []
     for e in msp:
@@ -36,6 +43,17 @@ def main(path: str) -> int:
             item["paths"] = len(e.paths)
             item["pattern_lines"] = len(e.pattern.lines) if e.pattern else 0
             item["rgb"] = list(e.rgb) if e.dxf.hasattr("true_color") else None
+            g = e.gradient
+            item["gradient"] = (
+                {
+                    "name": g.name,
+                    "rotation": g.rotation,
+                    "color1": list(g.color1),
+                    "color2": list(g.color2),
+                }
+                if g is not None
+                else None
+            )
             first = e.paths[0] if len(e.paths) else None
             item["pts"] = [[v[0], v[1]] for v in first.vertices] if first is not None and hasattr(first, "vertices") else []
         elif t == "TEXT":

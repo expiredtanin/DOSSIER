@@ -411,16 +411,22 @@ Code-Übernahme Lizenz der Abhängigkeiten prüfen, Pflicht [51].
   Reihenfolge, Ebenen, Strichstärken, True-Color, Koordinaten ≤ 5e-7 m (Rundung des alten Writers auf 6 Stellen;
   neu volle f64). Neu: 2D-Texte als TEXT (fehlten bisher), CLI exportiert georeferenziert wie die App.
   Gegencheck ezdxf (`scripts/validate-dxf.py`, Test übersprungen ohne `pip install ezdxf`): 0 Auditor-Fehler.
-  Offen: Binär-DXF-Export.
+  - ✅ **Binär-DXF-Export** (28.10.): `export_dxf_binary` (acadrust `DxfWriter::new_binary`, R2018 UTF-8),
+    Dialog-Format „DXF binär“, CLI `dxf --binary`. Rundreise acadrust + ezdxf (gleiche Entitäten/Ebenen wie
+    ASCII, 0 Auditor-Fehler, kleiner als der Text). Offen: in AutoCAD/BricsCAD selbst nicht geöffnet.
+  - ✅ **Verlauf als echte Gradient-HATCH** (28.10.): `kind === "gradient"` → neuer Datensatz `REC_GRADIENT`
+    (`export.rs`): Name LINEAR/SPHERICAL, Farbstützen 0/1, Winkel = SVG-Richtung der Ansicht. ezdxf liest
+    Name, Rotation und beide Farben. Offen: Aussehen/Richtung in AutoCAD selbst ungeprüft (Winkel 0 =
+    Farbe 1 links angenommen); mehr als zwei Farbstützen kennt das Modell nicht.
   - ✅ **Export: echte HATCH-Entitäten** (28.10.): Schraffuren (`pattern` diagonal/Kreuz/Dämmung/frei, auch
     gestrichelt) und Vollfüllungen gehen als HATCH ins DXF/DWG statt als einzelne geklippte Linien: Rand =
     geschlossene Polylinienkante des Plan-Polygons, Musterzeilen aus Winkel und Linienabstand (Versatz schon
     gedreht, Strich-/Lückenfolge als `dash_lengths`), Vordergrundfarbe als True-Color, Ebene `HATCH`, vor dem
     Umriss gezeichnet (neuer flacher Datensatz `REC_HATCH`, `export.rs`). Zufallsstriche (`random`) haben
-    kein Musteräquivalent und bleiben Linien; Bild-/Verlauf-Schraffur wie bisher nur Umriss. Geprüft:
+    kein Musteräquivalent und bleiben Linien; Bild-Schraffur wie bisher nur Umriss (Verlauf: s. u.). Geprüft:
     acadrust-Rundreise DXF und DWG, ezdxf (Auditor 0 Fehler, Rand/Farbe/Musterzeilen), libredwg zählt gleiche
     Typen. Offen: Aussehen in AutoCAD/BricsCAD selbst nicht geprüft (Musterphase ab Ursprung bei
-    LV95-Koordinaten); Verlauf als echte Gradient-HATCH möglich (acadrust kann es), noch nicht umgesetzt.
+    LV95-Koordinaten); Verlauf siehe unten (jetzt Gradient-HATCH).
   - ✅ **DXF-Import in Rust** (28.10.): statt eigenem Tag-Reader acadrust (ASCII und Binär, R12–2018+,
     Code-Seiten) in `fileio/src/import.rs` → flacher f64-Puffer + String-Tabelle, dekodiert in
     `io/dxfParser.ts` (Rückgabetyp unverändert, neu `insUnits`). dxf-parser entfernt; Aufteilung grosser
