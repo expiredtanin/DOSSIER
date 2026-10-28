@@ -61,6 +61,7 @@ pub mod skeleton;
 pub mod plan_parts;
 pub mod plan_scene;
 pub mod plan_pick;
+pub mod snap;
 
 #[cfg(feature = "web")]
 mod web;

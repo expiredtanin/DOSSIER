@@ -30,7 +30,7 @@ const MAX_CELLS_PER_ITEM: f64 = 1024.0;
 
 /// Gleichförmiges Raster (CSR) über Bounding-Boxen; Einträge sind Index-Werte.
 #[derive(Default)]
-struct Grid {
+pub(crate) struct Grid {
     min_x: f64,
     min_y: f64,
     cell: f64,
@@ -149,13 +149,13 @@ impl Grid {
 /// Raster über Bounding-Boxen (Einträge mit nicht endlicher Box werden immer geprüft) — nur
 /// Vorauswahl, die genaue Prüfung macht der Aufrufer in Index-Reihenfolge.
 #[derive(Default)]
-struct BoxIndex {
+pub(crate) struct BoxIndex {
     grid: Option<Grid>,
     wild: Vec<u32>,
 }
 
 impl BoxIndex {
-    fn build(boxes: Vec<(u32, f64, f64, f64, f64)>) -> BoxIndex {
+    pub(crate) fn build(boxes: Vec<(u32, f64, f64, f64, f64)>) -> BoxIndex {
         let mut wild = Vec::new();
         let mut fin = Vec::with_capacity(boxes.len());
         let (mut a, mut b, mut c, mut d) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -176,7 +176,7 @@ impl BoxIndex {
     }
 
     /// Einträge, deren Box den Kreis `(x, y, r)` berühren kann — aufsteigend, ohne Doppel.
-    fn candidates(&self, x: f64, y: f64, r: f64) -> Vec<u32> {
+    pub(crate) fn candidates(&self, x: f64, y: f64, r: f64) -> Vec<u32> {
         let mut out = self.wild.clone();
         if let Some(g) = &self.grid {
             g.visit(x, y, r, |k| out.push(k));
@@ -188,7 +188,7 @@ impl BoxIndex {
 }
 
 /// Rand für Rundung bei Box-Tests: relativ zur Koordinatengrösse.
-fn pad(v: &[f64]) -> f64 {
+pub(crate) fn pad(v: &[f64]) -> f64 {
     1e-9 * (1.0 + v.iter().fold(0.0f64, |m, x| m.max(x.abs())))
 }
 

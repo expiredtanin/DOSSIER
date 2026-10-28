@@ -46,6 +46,14 @@ export {
 } from "../geometry/drawingIndex";
 
 export {
+  type SegSnapCand,
+  type SegSnapResult,
+  holdSnapSegments,
+  releaseSnapSegments,
+  snapOnSegments,
+} from "../geometry/snapSegments";
+
+export {
   mvGeom,
   reversesOrientation,
   scaleFactor,

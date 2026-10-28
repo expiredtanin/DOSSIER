@@ -34,6 +34,7 @@ mod hatch;
 mod skeleton;
 mod plan_scene;
 mod plan_pick;
+mod snap;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
