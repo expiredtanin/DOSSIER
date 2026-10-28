@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "node scripts/check.mjs",
+    "e2e": "playwright test",
     "build:render-png": "cargo build --release --features png --bin render_png --manifest-path src-tauri/render3d/Cargo.toml",
     "build:cli": "esbuild src/cli/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist-cli/dossier-cli.mjs --log-level=warning",
     "tauri": "tauri",
@@ -44,6 +45,7 @@
   },
   "devDependencies": {
     "@mlightcad/libredwg-web": "^0.7.17",
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",

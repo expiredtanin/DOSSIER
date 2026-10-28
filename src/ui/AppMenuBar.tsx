@@ -22,6 +22,11 @@ export interface AppMenuBarProps {
   /** Datei: Punktwolke importieren ([27]). */
   onImportPointCloud?: () => void;
   onImportMesh?: () => void;
+  /** Datei: Export-Dialoge (im Browser/Electron die einzige Quelle — das native Menü gibt es nur unter Tauri). */
+  onExportDxf?: () => void;
+  onExportIfc?: () => void;
+  onExportObj?: () => void;
+  onExportStl?: () => void;
 
   /** Bearbeiten: Undo/Redo (Store) + Löschen der aktuellen Auswahl. */
   onUndo: () => void;
@@ -58,6 +63,10 @@ export function AppMenuBar({
   onImport,
   onImportPointCloud,
   onImportMesh,
+  onExportDxf,
+  onExportIfc,
+  onExportObj,
+  onExportStl,
   onUndo,
   onRedo,
   canUndo,
@@ -86,6 +95,11 @@ export function AppMenuBar({
     { label: t("file.import"), onSelect: onImport },
     ...(onImportPointCloud ? [{ label: t("menu.native.importPointCloud"), onSelect: onImportPointCloud }] : []),
     ...(onImportMesh ? [{ label: t("menu.native.importMesh"), onSelect: onImportMesh }] : []),
+    ...(onExportDxf || onExportIfc || onExportObj || onExportStl ? [{ divider: true }] : []),
+    ...(onExportDxf ? [{ label: `${t("menu.native.export")}: DXF`, onSelect: onExportDxf }] : []),
+    ...(onExportIfc ? [{ label: `${t("menu.native.export")}: IFC`, onSelect: onExportIfc }] : []),
+    ...(onExportObj ? [{ label: `${t("menu.native.export")}: OBJ`, onSelect: onExportObj }] : []),
+    ...(onExportStl ? [{ label: `${t("menu.native.export")}: STL`, onSelect: onExportStl }] : []),
   ];
 
   const editItems: DropdownItem[] = [
