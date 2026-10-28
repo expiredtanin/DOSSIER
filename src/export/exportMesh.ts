@@ -1,7 +1,7 @@
-// OBJ-/STL-Export des 3D-Gebäudemodells als reines Dreiecks-Mesh. Pures Modul
-// (kein Datei-IO, kein WASM) — Architektur wie exportDxf.ts/exportSchedule.ts:
-// buildGroups() liest das Projekt und liefert reine Zahlen-Arrays, exportObj()/
-// exportStl() serialisieren sie synchron zu Text.
+// OBJ-/STL-/glTF-Export des 3D-Gebäudemodells als Dreiecks-Mesh. Seit [C4] (28.10.) schreibt Rust die
+// Datei (`src-tauri/fileio/src/mesh_export.rs`, Format-Modul pkgFileIo, vorher `await loadFileio()`):
+// buildScene() liest das Projekt und sammelt Dreiecke, Materialien und Geschosse flach, exportObj()/
+// exportStl()/exportGlb()/exportGltf() rufen den Schreiber synchron auf. Kein Datei-IO hier.
 //
 // TRIANGEL-QUELLE (bewusste v1-Entscheidung, siehe PENDENZEN):
 //   • Wände: pickGeometry() aus toWalls3d.ts liefert dieselben Schicht-Bänder,
@@ -41,23 +41,42 @@ import { pickGeometry } from "../plan/toWalls3d";
 import type { RWall } from "../plan/toWalls3d";
 import { wallCutMeshes, type CutMesh } from "../plan/wallMeshCut";
 import { triangulate } from "../plan/glPlan/glPlanCompile";
+import { emitOpeningMeshes } from "../plan/toWalls3d/openings";
+import { fileio } from "../engine/fileioWasm";
 
 /**
- * Eine Mesh-Gruppe (ein Bauteil-Vorkommen: Wand/Decke/Extrusion) mit LOKALEN
- * (0-basierten) Vertex-/Dreiecks-Indizes. `exportObj` verschiebt die Indizes
- * beim Serialisieren auf die globale, 1-basierte OBJ-Nummerierung; `exportStl`
- * braucht gar keine Indizes über Gruppen hinweg (STL ist unindiziert).
+ * Ein Teil-Mesh mit EINEM Material und LOKALEN (0-basierten) Vertex-/Dreiecks-Indizes. Der Rust-Schreiber
+ * (`mesh_export.rs`) verschiebt die Indizes beim Serialisieren auf die globale OBJ-Nummerierung.
  */
-interface MeshGroup {
-  name: string;
+interface MeshPrim {
+  /** Index in die Materialtabelle (`SceneBuilder.materials`), −1 = keins. */
+  material: number;
   /** Flaches Weltkoordinaten-Array (x,y,z, x,y,z, …), Meter, Y-up. */
   positions: number[];
   /** Dreiecks-Indizes (3 je Dreieck), 0-basiert relativ zu `positions`. */
   indices: number[];
 }
 
-function newGroup(name: string): MeshGroup {
-  return { name, positions: [], indices: [] };
+/** Eine Mesh-Gruppe = ein Bauteil-Vorkommen (Wand/Decke/Extrusion/Öffnungsteile) mit ≥ 1 Teil-Mesh. */
+interface MeshGroup {
+  name: string;
+  /** Bauteilart für glTF-`extras` ("wall", "slab", "extrusion", "glazing", "frame"). */
+  kind: string;
+  /** Bauteil-id im Modell ("" bei Sammelgruppen). */
+  id: string;
+  /** Index in `levels` oder −1. */
+  level: number;
+  prims: MeshPrim[];
+}
+
+function newGroup(name: string, kind: string, id: string, level: number): MeshGroup {
+  return { name, kind, id, level, prims: [] };
+}
+
+function newPrim(group: MeshGroup, material: number): MeshPrim {
+  const prim: MeshPrim = { material, positions: [], indices: [] };
+  group.prims.push(prim);
+  return prim;
 }
 
 /** OBJ-Gruppennamen dürfen keine Whitespaces/Sonderzeichen enthalten. */
@@ -90,7 +109,7 @@ const BOX_QUADS: Array<[number, number, number, number]> = [
  * Ohne Löcher bleibt es die klassische, geteilte 8-Ecken-Box ({@link pushWallBox})
  * (Joins/Gehrungen stecken schon in `start`/`end`).
  */
-function pushWall(group: MeshGroup, w: RWall, cut: CutMesh | undefined): void {
+function pushWall(group: MeshPrim, w: RWall, cut: CutMesh | undefined): void {
   if (cut) {
     const base = group.positions.length / 3;
     for (const p of cut.positions) group.positions.push(p);
@@ -105,7 +124,7 @@ function pushWall(group: MeshGroup, w: RWall, cut: CutMesh | undefined): void {
  * über Achse×Höhe×Dicke, OHNE Öffnungs-Ausschnitt (nur für lochlose Bänder, siehe
  * {@link pushWall}). Degenerierte Bänder (Länge/Höhe/Dicke ≤ 0) werden übersprungen.
  */
-function pushWallBox(group: MeshGroup, w: RWall): void {
+function pushWallBox(group: MeshPrim, w: RWall): void {
   const [sx, sy] = w.start;
   const [ex, ey] = w.end;
   const dx = ex - sx;
@@ -159,7 +178,7 @@ function signedAreaXY(pts: Vec2[]): number {
  * Seitenmantel-Normalen unabhängig von der Eingabe-Wicklung nach außen zeigen.
  */
 function pushPrism(
-  group: MeshGroup,
+  group: MeshPrim,
   outline: Vec2[],
   zBottom: number,
   zTop: number,
@@ -212,14 +231,86 @@ function pushPrism(
   }
 }
 
-/** Baut alle Mesh-Gruppen (Wände, Decken, Extrusionen) des Projekts. */
-function buildGroups(project: Project): MeshGroup[] {
+type Rgb = [number, number, number];
+
+/** Material der Szene: Farbe sRGB 0..1, `rgba[3]` < 1 = transparent (Glas). */
+interface SceneMaterial {
+  name: string;
+  rgba: [number, number, number, number];
+  metallic: number;
+  roughness: number;
+}
+
+/** Materialtabelle: gleiche Farbe + Name = ein Material. */
+class Materials {
+  readonly list: SceneMaterial[] = [];
+  private readonly byKey = new Map<string, number>();
+
+  get(name: string, rgb: Rgb, alpha = 1, metallic = 0, roughness = 0.9): number {
+    const key = `${name}|${rgb.join(",")}|${alpha}|${metallic}|${roughness}`;
+    let i = this.byKey.get(key);
+    if (i === undefined) {
+      i = this.list.length;
+      this.list.push({ name, rgba: [rgb[0], rgb[1], rgb[2], alpha], metallic, roughness });
+      this.byKey.set(key, i);
+    }
+    return i;
+  }
+}
+
+/** Die für den Rust-Schreiber gesammelte Szene. */
+interface MeshScene {
+  groups: MeshGroup[];
+  materials: SceneMaterial[];
+  levels: { id: string; name: string }[];
+}
+
+/** Standardfarbe der Extrusionen/Decken (wie `SLAB_RGB` in toWalls3d/shared.ts). */
+const SLAB_COLOR: Rgb = [0.86, 0.86, 0.88];
+/** Verglasung und Rahmenteile aus `emitOpeningMeshes` (Farben `PART_RGB` in toWalls3d/openings.ts). */
+const GLASS_COLOR: Rgb = [0.62, 0.76, 0.85];
+const OPENING_PART_NAMES: Array<[Rgb, string]> = [
+  [[0.85, 0.85, 0.83], "Blendrahmen"],
+  [[0.88, 0.88, 0.9], "Fluegelrahmen"],
+  [[0.8, 0.8, 0.78], "Fensterbank/Zarge"],
+  [[0.25, 0.27, 0.3], "Schwelle"],
+  [[0.93, 0.9, 0.85], "Tuerblatt"],
+];
+const sameRgb = (a: readonly number[], b: readonly number[]) => a.length === 3 && b.length === 3 && a.every((v, i) => Math.abs(v - b[i]) < 1e-9);
+
+/** Vorzeichen des Volumens eines Dreiecks-Meshes (Weltkoordinaten): < 0 = Wicklung zeigt nach innen. */
+function signedVolume(pos: readonly number[], idx: readonly number[]): number {
+  let v = 0;
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i] * 3;
+    const b = idx[i + 1] * 3;
+    const c = idx[i + 2] * 3;
+    v +=
+      pos[a] * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1]) -
+      pos[a + 1] * (pos[b] * pos[c + 2] - pos[b + 2] * pos[c]) +
+      pos[a + 2] * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
+  }
+  return v;
+}
+
+/**
+ * Baut alle Mesh-Gruppen (Wände, Decken, Extrusionen; mit `parts` zusätzlich Verglasung und
+ * Rahmenteile der Öffnungen) und die Materialtabelle. OBJ/STL bleiben beim Bestand (`parts` aus, nur
+ * Dreiecke, Materialien ungenutzt); glTF nimmt die Öffnungsteile mit, damit Fenster Glas haben.
+ */
+function buildScene(project: Project, parts: boolean): MeshScene {
   const groups: MeshGroup[] = [];
+  const mats = new Materials();
   const { walls, slabs } = pickGeometry(project);
+  const levels = project.drawingLevels.filter((l) => l.kind === "floor").map((l) => ({ id: l.id, name: l.name }));
+  const levelOf = (floorId: string | undefined): number => levels.findIndex((l) => l.id === floorId);
+  const componentName = (id: string | undefined, fallback: string): string =>
+    (id !== undefined && project.components.find((c) => c.id === id)?.name) || fallback;
 
   // Wände: alle Schicht-Bänder DERSELBEN Wand-Id in EINE Gruppe (mehrere
   // Materiallagen ergeben mehrere Boxen im selben Bauteil-Vorkommen).
   const wallGroups = new Map<string, MeshGroup>();
+  const wallFloor = new Map(project.walls.map((w) => [w.id, w.floorId]));
   // Loch-Ausschnitte aller gelochten Bänder in EINEM Kern-Aufruf.
   const holed = walls.filter((w) => w.holes && w.holes.length > 0);
   const cuts = new Map<RWall, CutMesh>();
@@ -227,18 +318,20 @@ function buildGroups(project: Project): MeshGroup[] {
   for (const w of walls) {
     let g = wallGroups.get(w.wallId);
     if (!g) {
-      g = newGroup(`Wand_${sanitizeName(w.wallId)}`);
+      g = newGroup(`Wand_${sanitizeName(w.wallId)}`, "wall", w.wallId, levelOf(wallFloor.get(w.wallId)));
       wallGroups.set(w.wallId, g);
       groups.push(g);
     }
-    pushWall(g, w, cuts.get(w));
+    const mat = mats.get(componentName(w.cut?.componentId, "Wand"), w.color);
+    pushWall(newPrim(g, mat), w, cuts.get(w));
   }
 
   // Decken: ein Prisma je Decke.
+  const ceilingFloor = new Map((project.ceilings ?? []).map((c) => [c.id, c.floorId]));
   for (const s of slabs) {
-    const g = newGroup(`Decke_${sanitizeName(s.ceilingId)}`);
+    const g = newGroup(`Decke_${sanitizeName(s.ceilingId)}`, "slab", s.ceilingId, levelOf(ceilingFloor.get(s.ceilingId)));
     const outline: Vec2[] = s.outline.map(([x, y]) => ({ x, y }));
-    pushPrism(g, outline, s.zBottom, s.zTop);
+    pushPrism(newPrim(g, mats.get(componentName(s.cut?.componentId, "Decke"), s.color)), outline, s.zBottom, s.zTop);
     groups.push(g);
   }
 
@@ -252,105 +345,128 @@ function buildGroups(project: Project): MeshGroup[] {
     } catch {
       // Geschoss nicht (mehr) auflösbar: bei UK 0 extrudieren (Fallback, wie toWalls3d).
     }
-    const g = newGroup(`Extrusion_${sanitizeName(solid.id)}`);
-    pushPrism(g, solid.points, baseZ, baseZ + solid.height, solid.taper ?? 0);
+    const g = newGroup(`Extrusion_${sanitizeName(solid.id)}`, "extrusion", solid.id, levelOf(solid.levelId));
+    pushPrism(newPrim(g, mats.get("Extrusion", SLAB_COLOR)), solid.points, baseZ, baseZ + solid.height, solid.taper ?? 0);
     groups.push(g);
   }
 
-  return groups.filter((g) => g.indices.length > 0);
+  if (parts) {
+    // Öffnungsteile haben keine Bauteil-id (emitOpeningMeshes liefert nur Quader mit Farbe): Glas und
+    // Rahmenteile je EIN Sammelknoten, die Quader je Material zu einem Teil-Mesh zusammengefasst.
+    const glazing = newGroup("Verglasung", "glazing", "", -1);
+    const frames = newGroup("Oeffnungsteile", "frame", "", -1);
+    const prims = new Map<string, MeshPrim>();
+    for (const m of emitOpeningMeshes(project, "mittel")) {
+      const glass = sameRgb(m.color, GLASS_COLOR);
+      const name = glass ? "Glas" : (OPENING_PART_NAMES.find(([c]) => sameRgb(c, m.color))?.[1] ?? "Oeffnungsteil");
+      const group = glass ? glazing : frames;
+      const key = `${glass}|${name}`;
+      let prim = prims.get(key);
+      if (!prim) {
+        // Glas transparent und glatt (BLEND), Rahmen matt.
+        const mat = glass ? mats.get(name, m.color, 0.35, 0, 0.05) : mats.get(name, m.color, 1, 0, 0.6);
+        prim = newPrim(group, mat);
+        prims.set(key, prim);
+      }
+      // Modell (x, y, z-hoch) → Welt (x, z, y); danach Wicklung so, dass das Volumen positiv ist.
+      const pos: number[] = [];
+      for (let i = 0; i + 2 < m.positions.length; i += 3) pos.push(m.positions[i], m.positions[i + 2], m.positions[i + 1]);
+      let idx = m.indices;
+      if (signedVolume(pos, idx) < 0) {
+        idx = [];
+        for (let i = 0; i + 2 < m.indices.length; i += 3) idx.push(m.indices[i], m.indices[i + 2], m.indices[i + 1]);
+      }
+      const base = prim.positions.length / 3;
+      for (const p of pos) prim.positions.push(p);
+      for (const i of idx) prim.indices.push(base + i);
+    }
+    for (const g of [glazing, frames]) if (g.prims.length > 0) groups.push(g);
+  }
+
+  return {
+    groups: groups.filter((g) => g.prims.some((p) => p.indices.length > 0)),
+    materials: mats.list,
+    levels,
+  };
 }
 
-/** Kompakte, verlustarme Zahlformatierung (bis 6 Nachkommastellen, ohne Nullen). */
-function fmt(v: number): string {
-  if (!Number.isFinite(v)) return "0.0";
-  const s = v.toFixed(6);
-  return s.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, ".0");
+// ── Flacher Puffer (Gegenstück zu src-tauri/fileio/src/mesh_export.rs, dort die Kodierung) ─────
+
+const FLAT_VERSION = 1;
+
+/** Kodiert die Szene als `[Zahlenpuffer, Zeichenketten durch \0 getrennt]`. */
+function encodeScene(scene: MeshScene, byLevel: boolean): [Float64Array, string] {
+  const nums: number[] = [FLAT_VERSION, byLevel ? 1 : 0];
+  const strings: string[] = [];
+  const str = (s: string): number => {
+    strings.push(s.replace(/\0/g, ""));
+    return strings.length - 1;
+  };
+  nums.push(scene.materials.length);
+  for (const m of scene.materials) nums.push(str(m.name), m.rgba[0], m.rgba[1], m.rgba[2], m.rgba[3], m.metallic, m.roughness);
+  nums.push(scene.levels.length);
+  for (const l of scene.levels) nums.push(str(l.id), str(l.name));
+  nums.push(scene.groups.length);
+  for (const g of scene.groups) {
+    nums.push(str(g.name), str(g.kind), str(g.id), g.level, g.prims.length);
+    for (const p of g.prims) {
+      nums.push(p.material, p.positions.length / 3);
+      for (let i = 0; i < p.positions.length; i++) nums.push(p.positions[i]);
+      nums.push(p.indices.length / 3);
+      for (let i = 0; i < p.indices.length; i++) nums.push(p.indices[i]);
+    }
+  }
+  return [new Float64Array(nums), strings.join("\0")];
+}
+
+/** Ruft eine Rust-Bindung; leeres Ergebnis (kaputter Puffer) wird zum Fehler mit dem Grund. */
+function write<T extends string | Uint8Array>(project: Project, parts: boolean, byLevel: boolean, run: (m: ReturnType<typeof fileio>, buf: Float64Array, strings: string) => T): T {
+  const m = fileio();
+  const [buf, strings] = encodeScene(buildScene(project, parts), byLevel);
+  const out = run(m, buf, strings);
+  if (out.length === 0) {
+    const why = m.export_mesh_check_flat(buf, strings);
+    throw new Error(`Mesh-Export fehlgeschlagen${why ? `: ${why}` : ""}`);
+  }
+  return out;
 }
 
 /**
- * Baut einen vollständigen Wavefront-OBJ-String des 3D-Gebäudemodells (Meter,
- * rechtshändig, Y-up — siehe Moduldoc). Ein `o`-Objekt je Bauteil-Vorkommen
- * (Wand/Decke/Extrusion). Leeres Projekt ⇒ gültige Datei nur mit Kopf-
- * Kommentaren, kein `v`/`f` (kein Crash).
+ * Baut einen vollständigen Wavefront-OBJ-String des 3D-Gebäudemodells (Meter, Y-up — siehe Moduldoc).
+ * Ein `o`-Objekt je Bauteil-Vorkommen (Wand/Decke/Extrusion). Leeres Projekt ⇒ gültige Datei nur mit
+ * Kopf-Kommentaren. Verlangt das geladene Format-Modul (`await loadFileio()`).
  */
 export function exportObj(project: Project): string {
-  const groups = buildGroups(project);
-  const lines: string[] = [
-    "# DOSSIER OBJ-Export - Dreiecks-Mesh des 3D-Gebaeudemodells",
-    "# Achsen: rechtshaendig, Y-up (Y = Hoehe ueber OKFF), wie der 3D-Viewer.",
-    "# Waende: Schicht-Baender mit oeffnungsgenau ausgeschnittenen Loechern (inkl. Laibungen).",
-    "# Decken/Extrusionen: Umriss-Prisma (Ear-Clipping-Triangulierung).",
-  ];
-  let offset = 0;
-  for (const g of groups) {
-    const vertCount = g.positions.length / 3;
-    if (vertCount === 0) continue;
-    lines.push(`o ${g.name}`);
-    for (let i = 0; i < g.positions.length; i += 3) {
-      lines.push(`v ${fmt(g.positions[i])} ${fmt(g.positions[i + 1])} ${fmt(g.positions[i + 2])}`);
-    }
-    for (let i = 0; i < g.indices.length; i += 3) {
-      const a = g.indices[i] + 1 + offset;
-      const b = g.indices[i + 1] + 1 + offset;
-      const c = g.indices[i + 2] + 1 + offset;
-      lines.push(`f ${a} ${b} ${c}`);
-    }
-    offset += vertCount;
-  }
-  return lines.join("\n") + "\n";
+  return write(project, false, false, (m, b, s) => m.export_mesh_obj_flat(b, s));
 }
 
 /**
- * Baut einen vollständigen ASCII-STL-String des 3D-Gebäudemodells (Meter,
- * dieselbe Achsen-Konvention wie {@link exportObj}). Jedes Dreieck trägt eine
- * aus dem Kreuzprodukt berechnete Facettennormale (konsistente Winding, siehe
- * `pushWallBox`/`pushPrism`). Leeres Projekt ⇒ gültiges leeres `solid`-Gerüst.
+ * Baut einen vollständigen ASCII-STL-String (Meter, dieselbe Achsen-Konvention wie {@link exportObj});
+ * je Dreieck eine Facettennormale. Leeres Projekt ⇒ gültiges leeres `solid`-Gerüst. Verlangt das
+ * geladene Format-Modul (`await loadFileio()`).
  */
 export function exportStl(project: Project): string {
-  const groups = buildGroups(project);
-  const lines: string[] = ["solid dossier"];
-  for (const g of groups) {
-    for (let i = 0; i < g.indices.length; i += 3) {
-      const ia = g.indices[i] * 3;
-      const ib = g.indices[i + 1] * 3;
-      const ic = g.indices[i + 2] * 3;
-      const ax = g.positions[ia];
-      const ay = g.positions[ia + 1];
-      const az = g.positions[ia + 2];
-      const bx = g.positions[ib];
-      const by = g.positions[ib + 1];
-      const bz = g.positions[ib + 2];
-      const cx = g.positions[ic];
-      const cy = g.positions[ic + 1];
-      const cz = g.positions[ic + 2];
-      const ux = bx - ax;
-      const uy = by - ay;
-      const uz = bz - az;
-      const vx = cx - ax;
-      const vy = cy - ay;
-      const vz = cz - az;
-      let nx = uy * vz - uz * vy;
-      let ny = uz * vx - ux * vz;
-      let nz = ux * vy - uy * vx;
-      const len = Math.hypot(nx, ny, nz);
-      if (len > 1e-12) {
-        nx /= len;
-        ny /= len;
-        nz /= len;
-      } else {
-        nx = 0;
-        ny = 0;
-        nz = 0;
-      }
-      lines.push(`facet normal ${fmt(nx)} ${fmt(ny)} ${fmt(nz)}`);
-      lines.push("outer loop");
-      lines.push(`vertex ${fmt(ax)} ${fmt(ay)} ${fmt(az)}`);
-      lines.push(`vertex ${fmt(bx)} ${fmt(by)} ${fmt(bz)}`);
-      lines.push(`vertex ${fmt(cx)} ${fmt(cy)} ${fmt(cz)}`);
-      lines.push("endloop");
-      lines.push("endfacet");
-    }
-  }
-  lines.push("endsolid dossier");
-  return lines.join("\n") + "\n";
+  return write(project, false, false, (m, b, s) => m.export_mesh_stl_flat(b, s));
+}
+
+/** Optionen des glTF-Exports. */
+export interface GltfOptions {
+  /** Geschoss als Eltern-Knoten der Bauteile (Standard: ja). */
+  byLevel?: boolean;
+}
+
+/**
+ * glTF 2.0 binär (GLB) für Blender, Twinmotion, Enscape, Web-Viewer. Ein Knoten je Bauteil (Name
+ * `Wand_<id>`/`Decke_<id>`/`Extrusion_<id>`, `extras` = Typ + id), PBR-Materialien mit der Farbe der
+ * Bauteilschicht, Verglasung transparent (`BLEND`), Geschosse als Eltern-Knoten. Meter; die Achsen
+ * folgen der glTF-Konvention (rechtshändig, Y-up): Modell (x, y, z-hoch) → (x, z, −y), Norden = −Z.
+ * Verlangt das geladene Format-Modul (`await loadFileio()`).
+ */
+export function exportGlb(project: Project, opts: GltfOptions = {}): Uint8Array {
+  return write(project, true, opts.byLevel ?? true, (m, b, s) => m.export_mesh_glb_flat(b, s));
+}
+
+/** Wie {@link exportGlb}, aber als `.gltf` (JSON, Puffer als Base64-Data-URI eingebettet). */
+export function exportGltf(project: Project, opts: GltfOptions = {}): string {
+  return write(project, true, opts.byLevel ?? true, (m, b, s) => m.export_mesh_gltf_flat(b, s));
 }

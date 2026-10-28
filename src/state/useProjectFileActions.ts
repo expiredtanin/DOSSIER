@@ -24,9 +24,9 @@ import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf } from "../export/exportIfc";
 import { loadFileio } from "../engine/fileioWasm";
 import { exportProjectStep } from "../export/exportStep";
-import { exportObj, exportStl } from "../export/exportMesh";
+import { exportGlb, exportObj, exportStl } from "../export/exportMesh";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
-import { saveTextFile } from "../native/saveFile";
+import { saveBinaryFile, saveTextFile } from "../native/saveFile";
 import {
   saveProjectFile,
   openProjectFileNative,
@@ -542,10 +542,15 @@ export function useProjectFileActions(
           .catch((e) => notify(`${t("ifc.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "obj":
-        downloadTextFile(exportObj(project), filename);
-        break;
       case "stl":
-        downloadTextFile(exportStl(project), filename);
+      case "glb":
+        // OBJ/STL/glTF schreibt Rust (Format-Modul pkgFileIo, wird beim ersten Export nachgeladen).
+        void loadFileio()
+          .then(() => {
+            if (format === "glb") void saveBinaryFile(exportGlb(project), filename, "model/gltf-binary");
+            else downloadTextFile(format === "obj" ? exportObj(project) : exportStl(project), filename);
+          })
+          .catch((e) => notify(`${t("mesh.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "step":
         // B-Rep via truck-WASM (asynchron): Körper, die truck nicht bauen kann, werden
@@ -567,6 +572,7 @@ export function useProjectFileActions(
   const onExportIfc = () => setExportSaveFormat("ifc");
   const onExportObj = () => setExportSaveFormat("obj");
   const onExportStl = () => setExportSaveFormat("stl");
+  const onExportGlb = () => setExportSaveFormat("glb");
   const onExportStep = () => setExportSaveFormat("step");
   // Unter Tauri: nativer Öffnen-Dialog (echter Pfad → Lock möglich). Im
   // Browser: verstecktes <input type=file> wie bisher (kein echter Pfad, also
@@ -690,6 +696,7 @@ export function useProjectFileActions(
     onExportIfc,
     onExportObj,
     onExportStl,
+    onExportGlb,
     onExportStep,
     onOpenProject,
     onProjectFileChosen,

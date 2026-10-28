@@ -1840,6 +1840,8 @@ export const en: Record<TranslationKey, string> = {
   "exportSave.fmt.ifc": "IFC (BIM)",
   "exportSave.fmt.obj": "OBJ (3D mesh)",
   "exportSave.fmt.stl": "STL (3D mesh)",
+  "exportSave.fmt.glb": "glTF 2.0 (GLB, 3D model)",
+  "mesh.export.failed": "Mesh export failed",
   "about.title": "About dossier",
   "about.version": "Version",
   "about.desc": "Open Source Computer Aided Architecture Design — 2D vector design plus standards-compliant drawings from a semantic building model.",

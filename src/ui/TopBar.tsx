@@ -76,6 +76,7 @@ export interface TopBarProps {
   onExportIfc: () => void;
   onExportObj: () => void;
   onExportStl: () => void;
+  onExportGlb?: () => void;
   onExportStep?: () => void;
 
   // Kamera-Settings (FOV), ZUSÄTZLICH zur bestehenden im „Ansichten"-Ribbon-

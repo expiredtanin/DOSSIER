@@ -245,9 +245,11 @@ export async function run(argv: string[]): Promise<number> {
       out(args, exportIfcSpf(project), `${project.name || "projekt"}.ifc`);
       return 0;
     case "obj":
+      await loadFileio();
       out(args, exportObj(project), `${project.name || "projekt"}.obj`);
       return 0;
     case "stl":
+      await loadFileio();
       out(args, exportStl(project), `${project.name || "projekt"}.stl`);
       return 0;
     case "kennzahlen": {
