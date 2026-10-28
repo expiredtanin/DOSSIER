@@ -275,6 +275,7 @@ export function useNativePlanRenderer(
         pxPerMeter > 0 ? Math.round(Math.log2(pxPerMeter)) : -Infinity,
         plan.greyedRanges,
         plan.underlay,
+        plan.bufRuns,
       );
     } catch (e) {
       console.warn('Tessellierung fehlgeschlagen:', e);

@@ -10,21 +10,28 @@
  * Füllungen ebenfalls vor Linien kamen und innerhalb beider die Primitiv-
  * Reihenfolge galt.
  *
- * Chunk-Grenzen sind INHALTSBASIERT (Hash der `drawingId`), nicht
- * positionsbasiert: wird vorn ein Element eingefügt, verschieben sich alle
- * Indizes dahinter, die Grenzen bleiben aber an denselben Elementen — nur der
- * betroffene Chunk ändert sich.
+ * Chunk-Grenzen sind INHALTSBASIERT (Hash der Element-Id: `drawingId`, sonst
+ * die Pick-Id wie `wallId`), nicht positionsbasiert: wird vorn ein Element
+ * eingefügt, verschieben sich alle Indizes dahinter, die Grenzen bleiben aber
+ * an denselben Elementen — nur der betroffene Chunk ändert sich.
  *
  * Wiederverwendung: ein Chunk gilt als unverändert, wenn jede seiner
  * Primitive dasselbe OBJEKT ist wie beim letzten Lauf (Referenzvergleich) und,
  * falls er zoomabhängige Primitive (Bögen/Kreise) enthält, der LOD-Bucket
  * gleich ist. Beim blossen Zoomen werden dadurch nur die (wenigen) Chunks mit
  * Bögen neu tesselliert.
+ *
+ * Kern-Primitive ([K3d]): Abschnitte, die unverändert aus einem Plan-Puffer des
+ * Kerns stammen (`Plan.bufRuns`), sind bei jeder Plan-Erzeugung neue Objekte —
+ * dort gilt statt der Objekt-Identität der INHALTS-HASH je Primitiv (vom Kern
+ * mitgeliefert), und kompiliert wird direkt aus dem Puffer
+ * (`compilePlanBufRange`), ohne die Objekte erneut zu kodieren.
  */
 
-import type { Primitive, UnderlayGroup } from '../generatePlan';
+import type { PlanBufRun, Primitive, UnderlayGroup } from '../generatePlan';
 import type { Drawing2D } from '../../model/types';
-import { compilePrimitivesToGpu } from './glPlanCompile';
+import type { DecodedPlanBuf } from '../planBuf';
+import { compilePlanBufRange, compilePrimitivesToGpu } from './glPlanCompile';
 import type { BufferGl, GpuGeometry } from './glPlanTypes';
 
 /** Ziel: im Mittel so viele Elemente (drawingIds) je Chunk = 2^BITS. */
@@ -45,10 +52,42 @@ function hashId(id: string): number {
   return h >>> 0;
 }
 
+type Ids = {
+  drawingId?: string;
+  wallId?: string;
+  openingId?: string;
+  stairId?: string;
+  ceilingId?: string;
+  roomId?: string;
+  columnId?: string;
+  roofId?: string;
+  extrudedSolidId?: string;
+  contextObjectId?: string;
+  sectionLineId?: string;
+};
+
+/** Element eines Primitivs für die Chunk-Grenzen: `drawingId`, sonst die Pick-Id des Bauteils. */
+function elemId(p: Primitive): string | undefined {
+  const q = p as Ids;
+  return (
+    q.drawingId ??
+    q.wallId ??
+    q.openingId ??
+    q.stairId ??
+    q.ceilingId ??
+    q.roomId ??
+    q.columnId ??
+    q.roofId ??
+    q.extrudedSolidId ??
+    q.contextObjectId ??
+    q.sectionLineId
+  );
+}
+
 /**
  * Index-Bereiche [start, end) der Chunks. `cuts` sind Indizes, an denen IMMER
  * geschnitten wird (Grenzen gedimmter Bereiche, damit ein Chunk entweder ganz
- * gedimmt ist oder gar nicht).
+ * gedimmt ist oder gar nicht; Grenzen der Kern-Abschnitte).
  */
 export function splitIntoChunks(
   prims: readonly Primitive[],
@@ -57,9 +96,9 @@ export function splitIntoChunks(
   const out: Array<[number, number]> = [];
   const mask = (1 << BOUNDARY_BITS) - 1;
   let start = 0;
-  let prevId: string | undefined = prims.length ? (prims[0] as { drawingId?: string }).drawingId : undefined;
+  let prevId: string | undefined = prims.length ? elemId(prims[0]) : undefined;
   for (let i = 1; i < prims.length; i++) {
-    const id = (prims[i] as { drawingId?: string }).drawingId;
+    const id = elemId(prims[i]);
     if (cuts.has(i)) {
       out.push([start, i]);
       start = i;
@@ -79,10 +118,46 @@ export function splitIntoChunks(
 }
 
 interface Chunk {
+  /** Primitive (Referenzvergleich) — leer bei Kern-Chunks, die `keys` tragen. */
   prims: Primitive[];
+  /** Inhalts-Hashes der Primitive eines Kern-Chunks (sonst null). */
+  keys: Float64Array | null;
   dynamic: boolean;
   bucket: number;
   geometry: GpuGeometry;
+}
+
+/** Ein geprüfter Kern-Abschnitt: `primitives[start..end)` = `buf.prims[from..]`. */
+interface Segment {
+  start: number;
+  end: number;
+  buf: DecodedPlanBuf;
+  from: number;
+}
+
+/**
+ * Kern-Abschnitte auf Objekt-Identität prüfen: nur Stellen, an denen noch genau das dekodierte
+ * Objekt steht (nicht ersetzt durch Abzugskörper, Dimmen, Strichstärken-Massstab), gelten.
+ */
+function verifiedSegments(primitives: readonly Primitive[], runs: readonly PlanBufRun[] | undefined): Segment[] {
+  const out: Segment[] = [];
+  for (const r of runs ?? []) {
+    if (!r.buf.hashes) continue;
+    const n = Math.min(r.to - r.from, primitives.length - r.at);
+    let k = 0;
+    while (k < n) {
+      while (k < n && primitives[r.at + k] !== r.buf.prims[r.from + k]) k++;
+      const k0 = k;
+      while (k < n && primitives[r.at + k] === r.buf.prims[r.from + k]) k++;
+      if (k > k0) out.push({ start: r.at + k0, end: r.at + k, buf: r.buf, from: r.from + k0 });
+    }
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+function sameKeys(a: Float64Array, b: Float64Array, offset: number): boolean {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[offset + i]) return false;
+  return true;
 }
 
 function disposeGeometry(gl: BufferGl, g: GpuGeometry): void {
@@ -229,35 +304,77 @@ export class GpuChunkCache {
     lodBucket: number,
     greyedRanges?: ReadonlyArray<[number, number]>,
     underlay?: readonly UnderlayGroup[],
+    /** Abschnitte aus Kern-Puffern (`Plan.bufRuns`): Inhalts-Hash statt Objekt-Identität. */
+    runs?: readonly PlanBufRun[],
   ): void {
     const cuts = new Set<number>();
     for (const [a, b] of greyedRanges ?? []) {
       cuts.add(a);
       cuts.add(b);
     }
-    // Aktuelle + vorherige Generation nach erstem Primitiv indizieren (Referenz-Identität).
+    const segs = verifiedSegments(primitives, runs);
+    for (const g of segs) {
+      cuts.add(g.start);
+      cuts.add(g.end);
+    }
+    // Aktuelle + vorherige Generation nach erstem Primitiv (Referenz) bzw. erstem Hash indizieren.
     const pool = [...this.chunks, ...this.previous];
-    const old = new Map<Primitive, Chunk[]>();
+    const old = new Map<unknown, Chunk[]>();
     for (const c of pool) {
-      if (!c.prims.length) continue;
-      const list = old.get(c.prims[0]);
+      const first = c.keys ? (c.keys.length ? c.keys[0] : undefined) : c.prims[0];
+      if (first === undefined) continue;
+      const list = old.get(first);
       if (list) list.push(c);
-      else old.set(c.prims[0], [c]);
+      else old.set(first, [c]);
     }
 
     const next: Chunk[] = [];
     const chunkStarts: number[] = [];
     const reused = new Set<Chunk>();
     let recompiled = 0;
+    let si = 0;
     for (const [start, end] of splitIntoChunks(primitives, cuts)) {
+      chunkStarts.push(start);
+      while (si < segs.length && segs[si].end <= start) si++;
+      const seg = si < segs.length && segs[si].start <= start && end <= segs[si].end ? segs[si] : null;
+      if (seg) {
+        // Kern-Chunk: Inhalts-Hashes vergleichen, direkt aus dem Puffer kompilieren.
+        const hashes = seg.buf.hashes!;
+        const from = seg.from + (start - seg.start);
+        const n = end - start;
+        const hit = old.get(hashes[from])?.find(
+          (c) =>
+            !reused.has(c) &&
+            c.keys !== null &&
+            c.keys.length === n &&
+            (!c.dynamic || c.bucket === lodBucket) &&
+            sameKeys(c.keys, hashes, from),
+        );
+        if (hit) {
+          reused.add(hit);
+          next.push(hit);
+          continue;
+        }
+        let dynamic = false;
+        for (let i = start; i < end && !dynamic; i++) dynamic = isLodDependent(primitives[i]);
+        next.push({
+          prims: [],
+          keys: hashes.slice(from, from + n),
+          dynamic,
+          bucket: lodBucket,
+          geometry: compilePlanBufRange(this.gl, seg.buf, from, from + n, pxPerMeter),
+        });
+        recompiled++;
+        continue;
+      }
       const hit = old.get(primitives[start])?.find(
         (c) =>
           !reused.has(c) &&
+          c.keys === null &&
           c.prims.length === end - start &&
           (!c.dynamic || c.bucket === lodBucket) &&
           sameRefs(c.prims, primitives, start),
       );
-      chunkStarts.push(start);
       if (hit) {
         reused.add(hit);
         next.push(hit);
@@ -266,6 +383,7 @@ export class GpuChunkCache {
       const slice = primitives.slice(start, end);
       next.push({
         prims: slice,
+        keys: null,
         dynamic: slice.some(isLodDependent),
         bucket: lodBucket,
         geometry: compilePrimitivesToGpu(this.gl, slice, pxPerMeter),

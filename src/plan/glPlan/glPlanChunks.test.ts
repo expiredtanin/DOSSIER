@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { Primitive, UnderlayGroup } from '../generatePlan';
-import type { Drawing2D } from '../../model/types';
+import { generatePlan } from '../generatePlan';
+import type { Drawing2D, Project } from '../../model/types';
+import { flattenCategories } from '../../model/types';
+import { bigSampleProject } from '../bigSampleProject.testing';
 import { GpuChunkCache, splitIntoChunks } from './glPlanChunks';
+import { compilePlanBufRange, compilePrimitivesToGpu } from './glPlanCompile';
 
 const line = (x: number, drawingId: string): Primitive => ({
   kind: 'line',
@@ -211,5 +215,85 @@ describe('GpuChunkCache: kompakte Unterlage', () => {
     expect(g[0].greyed).toBe(true); // unten, getönt
     expect(g[g.length - 1].greyed).toBeFalsy(); // oben, normal
     expect(g.length).toBe(3); // 1 unten + 1 Primitiv-Chunk + 1 oben
+  });
+});
+
+describe('GpuChunkCache: Kern-Abschnitte (Plan-Puffer v2, Inhalts-Hash)', () => {
+  const codes = (p: Project) => new Set(flattenCategories(p.layers).map((c) => c.code));
+  /** GL, das die hochgeladenen Daten mitschreibt. */
+  function recordingGl() {
+    const uploads: number[][] = [];
+    const gl = {
+      createBuffer: () => ({}),
+      bindBuffer: () => {},
+      bufferData: (_t: number, d: ArrayBufferView) => uploads.push(Array.from(new Uint8Array(d.buffer, d.byteOffset, d.byteLength))),
+      deleteBuffer: () => {},
+      ARRAY_BUFFER: 1,
+      ELEMENT_ARRAY_BUFFER: 2,
+      STATIC_DRAW: 3,
+    } as unknown as WebGL2RenderingContext;
+    return { gl, uploads };
+  }
+
+  it('neu erzeugter Plan (neue Objekte, gleicher Inhalt) kompiliert nichts neu', () => {
+    const p = bigSampleProject(4);
+    const { gl } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const a = generatePlan(p, 'eg', codes(p));
+    expect(a.bufRuns?.length).toBe(2);
+    cache.update(a.primitives, 90, 6, a.greyedRanges, a.underlay, a.bufRuns);
+    expect(cache.lastStats.recompiled).toBe(cache.lastStats.chunks);
+    const b = generatePlan(p, 'eg', codes(p));
+    expect(b.primitives[0]).not.toBe(a.primitives[0]);
+    cache.update(b.primitives, 90, 6, b.greyedRanges, b.underlay, b.bufRuns);
+    expect(cache.lastStats.recompiled).toBe(0);
+    // Ohne Abschnitte (Objekt-Identität) wäre alles neu.
+    const c = generatePlan(p, 'eg', codes(p));
+    cache.update(c.primitives, 90, 6, c.greyedRanges, c.underlay);
+    expect(cache.lastStats.recompiled).toBe(cache.lastStats.chunks);
+  });
+
+  it('eine verschobene Wand kompiliert nur wenige Chunks neu', () => {
+    const p = bigSampleProject(8);
+    const { gl } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const a = generatePlan(p, 'eg', codes(p));
+    cache.update(a.primitives, 90, 6, a.greyedRanges, a.underlay, a.bufRuns);
+    const total = cache.lastStats.chunks;
+    expect(total).toBeGreaterThan(8);
+    const walls = p.walls.slice();
+    walls[200] = { ...walls[200], end: { x: walls[200].end.x + 0.05, y: walls[200].end.y } };
+    const b = generatePlan({ ...p, walls }, 'eg', codes(p));
+    cache.update(b.primitives, 90, 6, b.greyedRanges, b.underlay, b.bufRuns);
+    expect(cache.lastStats.recompiled).toBeGreaterThan(0);
+    expect(cache.lastStats.recompiled).toBeLessThanOrEqual(3);
+  });
+
+  it('ersetzte Primitive (gedimmt geklont) fallen auf den Objekt-Weg zurück', () => {
+    const p = bigSampleProject(2);
+    const { gl } = makeGl();
+    const cache = new GpuChunkCache(gl);
+    const a = generatePlan(p, 'eg', codes(p));
+    const prims = a.primitives.slice();
+    prims[10] = { ...prims[10], greyed: true } as Primitive;
+    cache.update(prims, 90, 6, a.greyedRanges, a.underlay, a.bufRuns);
+    const n = cache.lastStats.chunks;
+    cache.update(prims, 90, 6, a.greyedRanges, a.underlay, a.bufRuns);
+    expect(cache.lastStats.recompiled).toBe(0);
+    expect(cache.lastStats.chunks).toBe(n);
+  });
+
+  it('direkt aus dem Puffer = über die Objekte (gleiche hochgeladene Daten)', () => {
+    const p = bigSampleProject(2);
+    const plan = generatePlan(p, 'eg', codes(p));
+    const run = plan.bufRuns![0];
+    for (const [from, to] of [[run.from, run.to], [run.from + 3, run.to - 5]]) {
+      const x = recordingGl();
+      const y = recordingGl();
+      compilePlanBufRange(x.gl, run.buf, from, to, 120);
+      compilePrimitivesToGpu(y.gl, run.buf.prims.slice(from, to), 120);
+      expect(x.uploads.length).toBeGreaterThan(2);
+      expect(x.uploads).toEqual(y.uploads);
+    }
   });
 });
