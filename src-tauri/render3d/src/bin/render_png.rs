@@ -3,12 +3,18 @@
 // Dient Referenzbildern und der Prüfung des 3D ohne Nutzer-App.
 //
 //   cargo run --release --features png --bin render_png -- modell.json aus.png [--view iso] [--style shaded] [--size 1200x800] [--target x,y,z] [--dist 12]
+//     [--points wolke.txt] [--point-size 3] [--point-color rgb|intensity|class|height]
+//
+// `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
+// Modell-Metern (x = Ost, y = Nord, z = Hoehe) — dieselbe Punkt-Pipeline wie im Browser-Viewport.
 //
 // `modell.json` ist das Modell wie `set_model` es bekommt (`dossier-cli … model3d`).
 
 use std::io::Write;
 
 use render3d::gpu::{RenderStyle, Renderer};
+use render3d::gpu_points::PointStyle;
+use render3d::points::{PointCloudCpu, PointColorMode};
 use render3d::math::preset_camera;
 use render3d::types::{CameraPreset, MeshInput, SlabInput, WallInput};
 use serde::Deserialize;
@@ -54,6 +60,46 @@ fn bounds(m: &ModelInput) -> Option<([f32; 3], [f32; 3])> {
         }
     }
     any.then_some((min, max))
+}
+
+/// Liest `x y z [r g b [i [k]]]` je Zeile (Leerzeichen/Komma/Semikolon); unlesbare Zeilen fallen weg.
+/// Attribute nur, wenn JEDE Zeile sie hat.
+fn read_points_txt(path: &str) -> Option<PointCloudCpu> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let (mut xyz, mut rgb, mut int, mut cls) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut all_rgb, mut all_int, mut all_cls) = (true, true, true);
+    for line in text.lines() {
+        let v: Vec<f64> = line
+            .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+            .filter(|s| !s.is_empty())
+            .map_while(|s| s.parse::<f64>().ok())
+            .collect();
+        if v.len() < 3 {
+            continue;
+        }
+        xyz.extend_from_slice(&[v[0] as f32, v[1] as f32, v[2] as f32]);
+        all_rgb &= v.len() >= 6;
+        all_int &= v.len() >= 7;
+        all_cls &= v.len() >= 8;
+        if v.len() >= 6 {
+            rgb.extend(v[3..6].iter().map(|c| c.clamp(0.0, 255.0) as u8));
+        }
+        if v.len() >= 7 {
+            int.push(v[6].clamp(0.0, 65535.0) as u16);
+        }
+        if v.len() >= 8 {
+            cls.push(v[7].clamp(0.0, 255.0) as u8);
+        }
+    }
+    let pick = |ok: bool, len: usize, want: usize| ok && len == want;
+    let n = xyz.len() / 3;
+    PointCloudCpu::from_raw(
+        &xyz,
+        if pick(all_rgb, rgb.len(), n * 3) { &rgb } else { &[] },
+        if pick(all_int, int.len(), n) { &int } else { &[] },
+        if pick(all_cls, cls.len(), n) { &cls } else { &[] },
+        [0.0; 3],
+    )
 }
 
 fn preset(name: &str) -> CameraPreset {
@@ -175,6 +221,18 @@ fn main() {
     let mut renderer = Renderer::new(&device, format);
     renderer.set_render_style(RenderStyle::from_str_or_shaded(&flag("--style", "shaded")));
     renderer.upload_model(&device, &model.walls, &model.slabs, &model.meshes);
+    let points_path = flag("--points", "");
+    if !points_path.is_empty() {
+        let cloud = read_points_txt(&points_path);
+        let n = cloud.as_ref().map_or(0, |c| c.len());
+        let style = PointStyle {
+            mode: PointColorMode::from_str_or_rgb(&flag("--point-color", "rgb")),
+            size_px: flag("--point-size", "3").parse().unwrap_or(3.0),
+            visible: true,
+        };
+        renderer.set_point_cloud(&device, 1, cloud, style);
+        eprintln!("Punktwolke: {n} Punkte aus {points_path}");
+    }
 
     let (target, dist) = match bounds(&model) {
         Some((min, max)) => {

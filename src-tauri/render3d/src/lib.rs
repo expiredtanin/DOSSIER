@@ -18,6 +18,7 @@ pub mod edges;
 pub mod grid;
 pub mod math;
 pub mod mesh;
+pub mod points;
 pub(crate) mod openings;
 pub mod roof_cut;
 pub mod section;
@@ -28,6 +29,8 @@ pub mod types;
 
 #[cfg(feature = "render")]
 pub mod gpu;
+#[cfg(feature = "render")]
+pub mod gpu_points;
 
 // Browser-Bindings (wasm32 + WebGPU), nur mit Feature "web". Setzt "render" voraus
 // (dieselbe GPU-Schicht wie das native Fenster), fuegt aber KEINE winit-Abhaengigkeit

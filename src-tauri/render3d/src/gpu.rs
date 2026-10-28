@@ -16,6 +16,8 @@ use crate::edges::{
     build_edge_adjacency, build_mesh_edges, build_silhouette_edges, EdgeAdj, EDGE_FLOATS_PER_VERTEX,
 };
 use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
+use crate::gpu_points::{PointRenderer, PointStyle};
+use crate::points::PointCloudCpu;
 use crate::math::{view_projection, Mat4};
 use crate::mesh::{
     build_free_wall_end_caps, build_scene_mesh, build_scene_mesh_textured, build_terrain_mesh,
@@ -388,6 +390,9 @@ pub struct Renderer {
     /// Farbformat des Render-Ziels (Surface), fuer die MSAA-Zwischentextur.
     color_format: wgpu::TextureFormat,
     globals: Globals,
+    /// Punktwolken ([27], `gpu_points.rs`): eigene Instanz-Quad-Pipeline, tiefengetestet im
+    /// selben Pass wie das Modell.
+    points: PointRenderer,
     /// Loeschfarbe (Hintergrund). Default heller Grauton wie die three.js-Sicht.
     pub clear_color: wgpu::Color,
 }
@@ -973,7 +978,11 @@ impl Renderer {
             }],
         });
 
+        let points =
+            PointRenderer::new(device, &bind_group_layout, color_format, DEPTH_FORMAT, SAMPLE_COUNT);
+
         Self {
+            points,
             pipeline,
             hidden_face_pipeline,
             grid_pipeline,
@@ -1020,6 +1029,43 @@ impl Renderer {
                 a: 1.0,
             },
         }
+    }
+
+    /// Setzt/ersetzt die Punktwolke `id` ([27]); `None` (unbrauchbare Eingabe) entfernt sie.
+    pub fn set_point_cloud(
+        &mut self,
+        device: &wgpu::Device,
+        id: u32,
+        cloud: Option<PointCloudCpu>,
+        style: PointStyle,
+    ) {
+        self.points.set_cloud(device, id, cloud, style);
+    }
+
+    /// Nur die Darstellung einer Punktwolke aendern (Farbmodus/Groesse/Sichtbarkeit).
+    /// `false`, wenn die Wolke unbekannt ist.
+    pub fn set_point_cloud_style(&mut self, queue: &wgpu::Queue, id: u32, style: PointStyle) -> bool {
+        self.points.set_style(queue, id, style)
+    }
+
+    /// Entfernt die Punktwolke `id` (unbekannt = nichts).
+    pub fn remove_point_cloud(&mut self, id: u32) {
+        self.points.remove(id);
+    }
+
+    /// Entfernt alle Punktwolken.
+    pub fn clear_point_clouds(&mut self) {
+        self.points.clear();
+    }
+
+    /// Punktzahl der Wolke `id` (0 = unbekannt).
+    pub fn point_cloud_len(&self, id: u32) -> usize {
+        self.points.point_count(id)
+    }
+
+    /// World-Bounding-Box aller sichtbaren Punktwolken.
+    pub fn point_cloud_bounds(&self) -> Option<([f32; 3], [f32; 3])> {
+        self.points.bounds()
     }
 
     /// Erzeugt das Mesh aus geflachten Waenden und laedt die Puffer hoch.
@@ -1713,6 +1759,9 @@ impl Renderer {
             }
         }
 
+        // Punktwolken: Viewport/Punktgroesse in die Uniforms (feste Pixelgroesse).
+        self.points.prepare(queue, (w, h));
+
         let depth_view = &self.depth.as_ref().unwrap().view;
         let msaa_view = &self.msaa.as_ref().unwrap().view;
 
@@ -1889,6 +1938,10 @@ impl Renderer {
                 pass.set_vertex_buffer(0, dl.vbo.slice(..));
                 pass.draw(0..dl.vertex_count, 0..1);
             }
+
+            // 2d) Punktwolken ([27]): Instanz-Quads, tiefengetestet gegen Modell/Unterlage —
+            //     stilunabhaengig (gemessene Bestandsdaten gehoeren in jede Darstellung).
+            self.points.draw(&mut pass, &self.bind_group);
 
             // 3) Bodengitter NACH dem Modell zeichnen (gemeinsamer Tiefenpuffer ->
             //    das Modell verdeckt das Gitter korrekt). Unabhaengig vom Stil, nur

@@ -414,11 +414,13 @@ fn vs_main(in : VsIn) -> VsOut {
 }
 
 // Ein AA-gekantetes Linienband entlang der Koordinate `s` (in Einheiten von
-// `spacing`): 1 auf der Linie, 0 dazwischen. `fwidth` glaettet blickwinkelrichtig.
-fn line_band(s : f32, half_s : f32) -> f32 {
+// `spacing`): 1 auf der Linie, 0 dazwischen. `fw` = fwidth von `s` glaettet blickwinkelrichtig;
+// vom Aufrufer VOR jeder Verzweigung berechnet (Ableitungen nur in uniformem Kontrollfluss —
+// Chrome/Tint verwirft den Shader sonst, und mit ihm den ganzen 3D-Pass).
+fn line_band(s : f32, half_s : f32, fw : f32) -> f32 {
     let frac = fract(s);
     let dist = min(frac, 1.0 - frac);
-    let aa = max(fwidth(s), 1e-5);
+    let aa = max(fw, 1e-5);
     return 1.0 - smoothstep(half_s, half_s + aa, dist);
 }
 
@@ -430,15 +432,6 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let pattern = i32(round(in.hatch.x));
     let angle   = in.hatch.y;
     let scale   = max(in.hatch.z, 0.05);
-
-    // none (0): leere (weisse) Schnittflaeche — wie „keine Schraffur" im 2D.
-    if (pattern == 0) {
-        return vec4<f32>(paper, 1.0);
-    }
-    // solid (1): Vollton (Poché) — z. B. Beton.
-    if (pattern == 1) {
-        return vec4<f32>(ink, 1.0);
-    }
 
     // Muster-Koordinaten: (u,v) in Modell-Metern, um `angle` gedreht. Konvention
     // wie die 2D-Schraffur (`hatchPreview.parallelLines`): `angle == 0` ergibt
@@ -461,28 +454,42 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let half    = max(in.hatch.w * 0.005, 0.0001);
     let half_s  = half / spacing;
 
+    // Alle Ableitungen hier, vor jeder Verzweigung nach `pattern` (uniformer Kontrollfluss).
+    let su = du / spacing;
+    let sv = dv / spacing;
+    let fw_u = fwidth(su);
+    let fw_v = fwidth(sv);
+    let cell = spacing * 2.0;
+    let tri = abs(fract(du / cell) - 0.5) * 2.0;   // 0..1 Dreieckswelle (Daemmung)
+    let fb = fract(dv / cell);
+    let fw_zig = fwidth(fb) + fwidth(tri);
+
+    // none (0): leere (weisse) Schnittflaeche — wie „keine Schraffur" im 2D.
+    if (pattern == 0) {
+        return vec4<f32>(paper, 1.0);
+    }
+    // solid (1): Vollton (Poché) — z. B. Beton.
+    if (pattern == 1) {
+        return vec4<f32>(ink, 1.0);
+    }
+
     var line = 0.0;
     if (pattern == 2) {
         // diagonal: EINE Linienschar quer zur Phasen-Achse (dv). angle==0 →
         // horizontal; `hatch.angle` (z. B. 45° bei Backstein) dreht sie wie im 2D.
-        line = line_band(dv / spacing, half_s);
+        line = line_band(sv, half_s, fw_v);
     } else if (pattern == 3) {
         // crosshatch: zwei Scharen ueber Kreuz (Phase dv + Phase du = +90°). Bei
         // angle==0 horizontal+vertikal, bei 45° (Beton) das gekippte Kreuz — wie 2D.
         line = max(
-            line_band(dv / spacing, half_s),
-            line_band(du / spacing, half_s)
+            line_band(sv, half_s, fw_v),
+            line_band(su, half_s, fw_u)
         );
     } else {
         // insulation (4, Daemmung): Zickzack. Die Quer-Position (dv) folgt einer
         // Dreieckswelle entlang der Lauf-Achse (du) — ein durchgehender Zickzack.
-        let cell = spacing * 2.0;
-        let a = du / cell;
-        let b = dv / cell;
-        let tri = abs(fract(a) - 0.5) * 2.0;   // 0..1 Dreieckswelle
-        let fb = fract(b);
         let d = min(abs(fb - tri), min(abs(fb - tri + 1.0), abs(fb - tri - 1.0)));
-        let aa = max(fwidth(fb) + fwidth(tri), 1e-5);
+        let aa = max(fw_zig, 1e-5);
         let hw = half / cell;
         line = 1.0 - smoothstep(hw, hw + aa, d);
     }
@@ -491,3 +498,20 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(color, 1.0);
 }
 "#;
+
+#[cfg(test)]
+mod uniformity_tests {
+    /// Chrome/Tint verwirft Ableitungen (`fwidth`) in nicht-uniformem Kontrollfluss — und mit dem
+    /// Cap-Shader die ganze Cap-Pipeline, deren Fehler den GESAMTEN 3D-Pass ungültig macht (28.10.
+    /// im Browser-Build gesehen). naga prüft das nicht; darum hier: jedes `fwidth` im Cap-Shader
+    /// steht vor der ersten Verzweigung nach `pattern` und nicht in einer Hilfsfunktion.
+    #[test]
+    fn cap_shader_derivatives_before_pattern_branches() {
+        let src = super::CAP_WGSL;
+        let fs = src.find("fn fs_main").expect("fs_main");
+        let first_branch = src[fs..].find("if (pattern").expect("Verzweigung") + fs;
+        for (i, _) in src.match_indices("fwidth(") {
+            assert!(i > fs && i < first_branch, "fwidth an Stelle {i} ausserhalb des uniformen Teils");
+        }
+    }
+}
