@@ -6,7 +6,9 @@
 // und damit auch Fangziele (anders als die gerasterte PDF-Unterlage aus `pdfImport.ts`, die bleibt).
 //
 // Ebenen: gruppiert nach Strichstärke (Papier-mm) und Farbe, z. B. „PDF 0.35 #000000"; gestrichelte
-// Linien mit „(- -)"; Flächen als „PDF Fläche #rrggbb" (Füllfarbe), Texte als „PDF Text #rrggbb".
+// Linien mit Muster in Papier-mm, z. B. „PDF 0.18 #ff0000 (Strich 0.9/0.6)" (daraus wird beim Import
+// ein Linienstil, s. `pdfLineStyles.ts`); Flächen als „PDF Fläche #rrggbb" (Füllfarbe), Texte als
+// „PDF Text #rrggbb". Kreise/Bögen aus Bézier-Folgen kommen als echte Kurven (`Contour.curve`) an.
 // Massstab: 1 pt = 25.4/72 mm Papier; Modell-Meter = pt × 25.4/72/1000 × Massstabszahl.
 
 import type { Contour, ContourSet, ImportedText } from "../model/types";
@@ -20,6 +22,16 @@ export const PT_TO_MM = 25.4 / 72;
 /** Gängige Massstäbe für den Import-Dialog. */
 export const PDF_SCALES = [1, 20, 50, 100, 200, 500, 1000] as const;
 
+/** Kreis oder Kreisbogen (pt, Radiant, CCW von `a0` nach `a1`), von Rust aus Bézier-Folgen erkannt. */
+export interface PdfVectorCurve {
+  kind: "circle" | "arc";
+  cx: number;
+  cy: number;
+  r: number;
+  a0: number;
+  a1: number;
+}
+
 export interface PdfVectorPath {
   /** Punkte in pt (angezeigte Seite, y nach oben). */
   pts: { x: number; y: number }[];
@@ -31,8 +43,10 @@ export interface PdfVectorPath {
   evenOdd: boolean;
   /** Linienbreite in pt (0 = Haarlinie). */
   lineWidth: number;
-  /** Strichmuster in pt (leer = durchgezogen). */
+  /** Strichmuster in pt (leer = durchgezogen, sonst gerade Länge: an/aus/an/aus …). */
   dash: number[];
+  /** Erkannter Kreis/Bogen; `pts` bleibt das tessellierte Vieleck. */
+  curve?: PdfVectorCurve;
 }
 
 export interface PdfVectorText {
@@ -93,7 +107,7 @@ export function decodePdfPage(geom: Float64Array, strings: readonly string[]): P
   let i = 0;
   const num = () => geom[i++];
   const str = () => strings[geom[i++]] ?? "";
-  if (num() !== 1) throw new Error("Unbekanntes PDF-Importformat (Version).");
+  if (num() !== 2) throw new Error("Unbekanntes PDF-Importformat (Version).");
   const pageCount = num();
   const pageIndex = num();
   const width = num();
@@ -116,6 +130,11 @@ export function decodePdfPage(geom: Float64Array, strings: readonly string[]): P
     const pts = new Array(np);
     for (let p = 0; p < np; p++) pts[p] = { x: geom[i + 2 * p], y: geom[i + 2 * p + 1] };
     i += 2 * np;
+    let curve: PdfVectorCurve | undefined;
+    if (flags & 16) {
+      curve = { kind: flags & 32 ? "circle" : "arc", cx: geom[i], cy: geom[i + 1], r: geom[i + 2], a0: geom[i + 3], a1: geom[i + 4] };
+      i += 5;
+    }
     paths.push({
       pts,
       closed: (flags & 1) !== 0,
@@ -124,6 +143,7 @@ export function decodePdfPage(geom: Float64Array, strings: readonly string[]): P
       evenOdd: (flags & 8) !== 0,
       lineWidth,
       dash,
+      ...(curve ? { curve } : {}),
     });
   }
   const texts: PdfVectorText[] = [];
@@ -145,10 +165,21 @@ export function pdfLineWeightMm(lineWidthPt: number): number {
   return Math.round(lineWidthPt * PT_TO_MM * 100) / 100;
 }
 
-/** Ebenenname einer gestrichenen Linie (Stärke + Farbe, gestrichelt markiert). */
+/** Strichmuster in Papier-mm (an/aus/an/aus …), auf 0.05 mm gerundet; Punkte (an = 0) bleiben 0. */
+export function pdfDashMm(dashPt: readonly number[]): number[] {
+  return dashPt.map((d) => Math.round((d * PT_TO_MM) / 0.05) * 0.05).map((d) => Math.round(d * 100) / 100);
+}
+
+/** Kurzschrift eines Strichmusters für Ebenen-/Stilnamen: „0.9/0.6". */
+export function pdfDashLabel(dashMm: readonly number[]): string {
+  return dashMm.map((d) => String(Math.round(d * 100) / 100)).join("/");
+}
+
+/** Ebenenname einer gestrichenen Linie (Stärke + Farbe, ggf. Strichmuster in Papier-mm). */
 export function pdfStrokeLayer(p: Pick<PdfVectorPath, "lineWidth" | "stroke" | "dash">): string {
   const lw = pdfLineWeightMm(p.lineWidth).toFixed(2);
-  return `PDF ${lw} ${p.stroke ?? "#000000"}${p.dash.length ? " (- -)" : ""}`;
+  const dash = p.dash.length ? ` (Strich ${pdfDashLabel(pdfDashMm(p.dash))})` : "";
+  return `PDF ${lw} ${p.stroke ?? "#000000"}${dash}`;
 }
 
 export interface PdfImportOptions {
@@ -167,6 +198,7 @@ export function pdfPageToImport(page: PdfVectorPage, scale: number, opts: PdfImp
   const layerColors: Record<string, string> = {};
   const layerLineWeights: Record<string, number> = {};
   const layerFillColors: Record<string, string> = {};
+  const layerDashes: Record<string, number[]> = {};
   const contours: Contour[] = [];
   const pageArea = page.width * page.height;
   const counts: Record<string, number> = {};
@@ -184,7 +216,13 @@ export function pdfPageToImport(page: PdfVectorPage, scale: number, opts: PdfImp
       const layer = pdfStrokeLayer(p);
       layerColors[layer] = p.stroke;
       layerLineWeights[layer] = Math.max(0.05, pdfLineWeightMm(p.lineWidth));
-      contours.push({ z: 0, pts: toM(p.pts), closed: p.closed, layer });
+      if (p.dash.length) layerDashes[layer] ??= pdfDashMm(p.dash);
+      const contour: Contour = { z: 0, pts: toM(p.pts), closed: p.closed, layer };
+      if (p.curve) {
+        const c = p.curve;
+        contour.curve = { kind: c.kind, cx: c.cx * k, cy: c.cy * k, r: c.r * k, a0: c.a0, a1: c.a1 };
+      }
+      contours.push(contour);
       counts.stroke = (counts.stroke ?? 0) + 1;
     }
   }
@@ -214,6 +252,7 @@ export function pdfPageToImport(page: PdfVectorPage, scale: number, opts: PdfImp
     layerColors,
     layerLineWeights,
     layerFillColors,
+    layerDashes,
     diagnostics: {
       entityCounts: { PATH: counts.stroke ?? 0, FILL: counts.fill ?? 0, TEXT: texts.length, IMAGE: page.images },
       total: page.paths.length + page.texts.length,

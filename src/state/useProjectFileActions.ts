@@ -21,6 +21,7 @@ import { buildDrawings } from "../ui/ImportDialog";
 import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings";
 import type { ImportDecision, PdfImportOptions } from "../ui/ImportDialog";
 import { isPdfFile, pdfPageToImport, readPdfVectorPage } from "../io/pdfVector";
+import { planDashLineStyles } from "../io/pdfLineStyles";
 import type { PdfVectorPage } from "../io/pdfVector";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf } from "../export/exportIfc";
@@ -297,6 +298,7 @@ export function useProjectFileActions(
       widthPt: page.width,
       heightPt: page.height,
       images: page.images,
+      preview: page,
     },
   });
 
@@ -693,12 +695,22 @@ export function useProjectFileActions(
         setProject((p) => ({ ...p, layers: [...p.layers, parent] }));
       }
     }
+    // PDF-Strichmuster ([76]): passenden Linienstil nehmen oder Strichmuster-Stil anlegen (vor den Zeichnungen).
+    const dashPlan = planDashLineStyles(decision.parsed.layerDashes, project.lineStyles);
+    if (dashPlan.created.length) {
+      const created = dashPlan.created;
+      setProject((p) => ({
+        ...p,
+        lineStyles: [...p.lineStyles, ...created.filter((c) => !p.lineStyles.some((l) => l.id === c.id))],
+      }));
+    }
     let drawings = buildDrawings(
       decision,
       levelId,
       project,
       activeCategoryCode,
       codeByLayer,
+      dashPlan.styleByLayer,
     );
     // Platzierung „viewCenter": den Gesamt-Umriss so verschieben, dass seine
     // Mitte auf die Mitte des aktuellen Ausschnitts fällt (sonst bleibt alles an

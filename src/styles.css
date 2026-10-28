@@ -8429,3 +8429,39 @@ body {
   line-height: 1.5;
   color: var(--ink-2);
 }
+
+/* PDF-Import: Zwei-Punkt-Kalibrierung ([76]) */
+.imp-cal {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.imp-cal-canvas {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.imp-cal-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.imp-cal-row .imp-note {
+  flex: 1 1 auto;
+}
+.imp-cal-small {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+.imp-cal-toggle {
+  align-self: flex-start;
+  padding: 5px 14px;
+  font-size: 12px;
+}
+.imp-cal-len {
+  flex: 0 0 9em;
+  width: 9em;
+}

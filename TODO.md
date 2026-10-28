@@ -278,9 +278,16 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
   Bézier tesselliert, Text mit ToUnicode). Import-Dialog fragt Seite + Massstab (1:1…1:1000, frei); Übernahme
   als 2D-Zeichnung über `dxfToDrawings` (Ebenen nach Strichstärke/Farbe, Flächenfarben) — damit fangbar.
   CLI `pdf-info`, `convert plan.pdf x.obp --scale 100 [--page n]`. Rasterunterlage („Bild/PDF") unverändert.
-  Offen: Zwei-Punkt-Kalibrierung (Strecke anklicken, wahre Länge), Strichmuster → Linienstil, Kreise/Bögen
-  aus Bézier erkennen, Form-/Clip-BBox beschneiden, Linienzeichnung im App-Canvas nur im Linux-Container
-  ohne WebGPU-Bild geprüft (Dialog + Text ja). · M
+  Ergänzt (28.10.): Kreise/Bögen aus Bézier-Folgen als echte `circle`/`arc` (Rust `pdf_geom.rs`,
+  Toleranz 0.4 % des Radius; Mittelpunkt/Quadranten fangbar; nur reine Bézier-Teilpfade — Rundungen in
+  Linienzügen, Ellipsen und angeschnittene Kreise bleiben Vieleck). Strichmuster (d, ExtGState /D) →
+  Linienstil: Muster in Papier-mm je Ebene, vorhandener Stil mit gleichem Muster (±15 %) oder neuer Stil
+  „PDF-Strich a/b mm" (`io/pdfLineStyles.ts`, Phase entfällt). Clips: W/W* (Rechteck exakt, Polygon für
+  Linien exakt, Flächen nur bei konvexem Clip exakt sonst an der Hüllbox), Form-/Seiten-BBox, Texte
+  ausserhalb entfallen. Dialog „PDF importieren" mit Zwei-Punkt-Kalibrierung (Vorschau, Fang, wahre Länge
+  → Massstab; `io/pdfCalibrate.ts`, `ui/PdfCalibrate.tsx`).
+  Offen: Muster/Schattierungen und Soft-Masks, Clip-Pfade mit Text (Tr 7), Kreise in Linienzügen
+  (Rundungen als Bogen abspalten), Strichphase; Kalibrierung nicht in der Tauri-App geprüft. · M
 - ○ **[77] Zauberstab.** · M
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).
