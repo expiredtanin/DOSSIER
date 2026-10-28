@@ -28,6 +28,21 @@ import {
 } from "../io/dxfToDrawings";
 import type { CategoryMode } from "../io/dxfToDrawings";
 import { Dropdown } from "./Dropdown";
+import { PDF_SCALES, PT_TO_MM } from "../io/pdfVector";
+
+/** Vektor-PDF ([76]): Seite und Massstab, nach denen `parsed` aus dem PDF abgeleitet wurde. */
+export interface PdfImportOptions {
+  pageCount: number;
+  /** 0-basiert. */
+  page: number;
+  /** Massstabszahl (100 = 1:100). */
+  scale: number;
+  /** Angezeigte Seitengrösse in pt. */
+  widthPt: number;
+  heightPt: number;
+  /** Bilder auf der Seite (werden nicht übernommen). */
+  images: number;
+}
 
 /** Strukturierte Import-Entscheidung, die der Dialog beim Bestätigen liefert. */
 export interface ImportDecision {
@@ -56,6 +71,7 @@ export interface ImportDecision {
  */
 function dxfProgressText(progress: string | undefined): string | null {
   if (!progress) return null;
+  if (progress === "pdf") return t("import.pdf.loading");
   if (progress === "structure") return t("import.loading.phase.structure");
   if (progress === "parse-single") return t("import.loading.phase.parseSingle");
   const m = /^parse-parallel:(\d+)$/.exec(progress);
@@ -112,6 +128,9 @@ export interface ImportDialogProps {
   onSelectLayout?: (layout: string | null) => void;
   /** Geparstes Ergebnis (null während Laden / bei DWG-Parse-Fehler). */
   parsed: DxfImportResult | null;
+  /** Vektor-PDF ([76]): Seite/Massstab; `onPdfChange` liest neu bzw. rechnet um. */
+  pdf?: PdfImportOptions;
+  onPdfChange?: (page: number, scale: number) => void;
   project: Project;
   activeCategoryCode: string;
   onImport: (decision: ImportDecision) => void;
@@ -126,6 +145,8 @@ export function ImportDialog({
   error,
   onSelectLayout,
   parsed,
+  pdf,
+  onPdfChange,
   project,
   activeCategoryCode,
   onImport,
@@ -174,6 +195,12 @@ export function ImportDialog({
   // Teil zu malen — sonst würde React den State-Update-Commit gar nicht mehr
   // vor dem Block zum Zug kommen lassen.
   const [applying, setApplying] = useState(false);
+  // Freier PDF-Massstab (Texteingabe „1:75" oder „75"), angewandt bei Enter/Verlassen.
+  const [customScaleText, setCustomScaleText] = useState("");
+  const applyCustomScale = () => {
+    const n = Number(customScaleText.trim().replace(/^1\s*:\s*/, ""));
+    if (pdf && onPdfChange && Number.isFinite(n) && n > 0) onPdfChange(pdf.page, n);
+  };
 
   const canImport =
     !isDwg && !loading && !applying && (hasDrawings || (hasMeshes && importMeshes));
@@ -290,6 +317,60 @@ export function ImportDialog({
                   </div>
                 )}
               </section>
+
+              {/* Vektor-PDF ([76]): Seite und Massstab (pt → m: 25.4/72 mm Papier × Massstab). */}
+              {pdf && onPdfChange && (
+                <section className="imp-section">
+                  <div className="imp-section-title">{t("import.pdf.heading")}</div>
+                  {pdf.pageCount > 1 && (
+                    <Dropdown
+                      value={String(pdf.page)}
+                      onChange={(v) => onPdfChange(Number(v), pdf.scale)}
+                      title={t("import.pdf.page")}
+                      options={Array.from({ length: pdf.pageCount }, (_, i) => ({
+                        value: String(i),
+                        label: t("import.pdf.pageOf", { n: i + 1, total: pdf.pageCount }),
+                      }))}
+                    />
+                  )}
+                  <Dropdown
+                    value={String(pdf.scale)}
+                    onChange={(v) => onPdfChange(pdf.page, Number(v))}
+                    title={t("import.pdf.scale")}
+                    triggerClassName="tb-dd-mono"
+                    options={[
+                      ...((PDF_SCALES as readonly number[]).includes(pdf.scale)
+                        ? []
+                        : [{ value: String(pdf.scale), label: `1:${pdf.scale}` }]),
+                      ...PDF_SCALES.map((n) => ({ value: String(n), label: `1:${n}` })),
+                    ]}
+                  />
+                  <div className="imp-scale-custom">
+                    <input
+                      className="imp-input"
+                      type="text"
+                      placeholder={t("import.pdf.scaleFree")}
+                      aria-label={t("import.pdf.scaleFree")}
+                      value={customScaleText}
+                      onChange={(e) => setCustomScaleText(e.target.value)}
+                      onBlur={applyCustomScale}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") applyCustomScale();
+                      }}
+                    />
+                  </div>
+                  <div className="imp-note">
+                    {t("import.pdf.size", {
+                      w: Math.round(pdf.widthPt * PT_TO_MM),
+                      h: Math.round(pdf.heightPt * PT_TO_MM),
+                      mw: ((pdf.widthPt * PT_TO_MM * pdf.scale) / 1000).toFixed(2),
+                      mh: ((pdf.heightPt * PT_TO_MM * pdf.scale) / 1000).toFixed(2),
+                    })}
+                  </div>
+                  {pdf.images > 0 && <div className="imp-note">{t("import.pdf.images", { n: pdf.images })}</div>}
+                  <div className="imp-dwg-hint">{t("import.pdf.note")}</div>
+                </section>
+              )}
 
               {/* Papierbereich: Layouts der Datei (Bericht) und, wenn möglich, eines statt des Modellraums lesen. */}
               {parsed?.layouts && parsed.layouts.length > 0 && (
@@ -493,12 +574,14 @@ export function buildDrawings(
   // vor dem Import) noch nicht kennt.
   const layerToCode = (layerName: string): string =>
     codeByLayer?.get(layerName) ?? byName.get(layerName.toLowerCase()) ?? activeCategoryCode;
+  const fillColors = decision.parsed.layerFillColors;
   const fromContours = contoursToDrawings(
     decision.parsed.contours,
     levelId,
     decision.categoryMode,
     activeCategoryCode,
     layerToCode,
+    fillColors ? (layer) => fillColors[layer] : undefined,
   );
   const fromTexts = textsToDrawings(
     decision.parsed.texts ?? [],

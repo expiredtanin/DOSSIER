@@ -35,3 +35,5 @@ export { contoursToDrawings, textsToDrawings, planImportCategories, distinctImpo
 export { emptyProject } from "../model/sampleProject";
 export { readPointCloud, readPointCloudFlat, isPointCloudFile, DEFAULT_MAX_POINTS } from "../io/pointCloud";
 export type { PointCloudData, PointCloudOptions, PointCloudReport } from "../io/pointCloud";
+export { readPdfVectorPage, pdfPageToImport, pdfPageInfo, pdfMetersPerPt, isPdfFile, PDF_SCALES } from "../io/pdfVector";
+export type { PdfVectorPage, PdfVectorPath, PdfVectorText } from "../io/pdfVector";

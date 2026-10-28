@@ -19,7 +19,9 @@ import { parseDxfAsync } from "../io/dxfParserAsync";
 import { beginBusy } from "./busyStore";
 import { buildDrawings } from "../ui/ImportDialog";
 import { distinctImportLayers, planImportCategories } from "../io/dxfToDrawings";
-import type { ImportDecision } from "../ui/ImportDialog";
+import type { ImportDecision, PdfImportOptions } from "../ui/ImportDialog";
+import { isPdfFile, pdfPageToImport, readPdfVectorPage } from "../io/pdfVector";
+import type { PdfVectorPage } from "../io/pdfVector";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf } from "../export/exportIfc";
 import { loadFileio } from "../engine/fileioWasm";
@@ -128,6 +130,8 @@ export type ImportDialogState = {
   progress?: string;
   /** Fehlermeldung des Format-Moduls (Datei leer, beschädigt, kein DXF/DWG …); `null`/fehlend = kein Fehler. */
   error?: string;
+  /** Vektor-PDF ([76]): Seite und Massstab, aus denen `parsed` abgeleitet ist. */
+  pdf?: PdfImportOptions;
 } | null;
 
 /** Meldung eines abgefangenen Fehlers (Rust-Fehler kommen als String, Worker-Fehler als Error). */
@@ -277,7 +281,58 @@ export function useProjectFileActions(
       });
   };
 
+  // Vektor-PDF ([76]): Bytes und zuletzt gelesene Seite — Massstabswechsel rechnet nur um, ein
+  // Seitenwechsel liest die Seite neu (Rust, synchron; das Format-Modul ist dann schon geladen).
+  const pdfSourceRef = useRef<{ fileName: string; bytes: Uint8Array; page: PdfVectorPage } | null>(null);
+
+  const pdfImportState = (fileName: string, page: PdfVectorPage, scale: number): ImportDialogState => ({
+    fileName,
+    isDwg: false,
+    parsed: pdfPageToImport(page, scale),
+    loading: false,
+    pdf: {
+      pageCount: page.pageCount,
+      page: page.pageIndex,
+      scale,
+      widthPt: page.width,
+      heightPt: page.height,
+      images: page.images,
+    },
+  });
+
+  const openPdfImport = (file: File) => {
+    pdfSourceRef.current = null;
+    setImportState({ fileName: file.name, isDwg: false, parsed: null, loading: true, progress: "pdf" });
+    void Promise.all([file.arrayBuffer(), loadFileio()])
+      .then(([buf]) => {
+        const bytes = new Uint8Array(buf);
+        const page = readPdfVectorPage(bytes, 0);
+        pdfSourceRef.current = { fileName: file.name, bytes, page };
+        setImportState(pdfImportState(file.name, page, 100));
+      })
+      .catch((err) => {
+        console.error("PDF-Import fehlgeschlagen:", err);
+        setImportState({ fileName: file.name, isDwg: false, parsed: { meshes: [], contours: [] }, loading: false, error: errorText(err) });
+      });
+  };
+
+  /** Import-Dialog: andere PDF-Seite oder anderer Massstab. */
+  const setImportPdfOptions = (pageIndex: number, scale: number) => {
+    const src = pdfSourceRef.current;
+    if (!src || !(scale > 0)) return;
+    try {
+      if (pageIndex !== src.page.pageIndex) src.page = readPdfVectorPage(src.bytes, pageIndex);
+      setImportState(pdfImportState(src.fileName, src.page, scale));
+    } catch (err) {
+      setImportState({ fileName: src.fileName, isDwg: false, parsed: { meshes: [], contours: [] }, loading: false, error: errorText(err) });
+    }
+  };
+
   const openImportForFile = (file: File) => {
+    if (isPdfFile(file.name)) {
+      openPdfImport(file);
+      return;
+    }
     const isDwg = /\.dwg$/i.test(file.name);
     importSourceRef.current = null;
     if (isDwg) {
@@ -630,6 +685,7 @@ export function useProjectFileActions(
         flattenCategories(project.layers),
         t("import.layers.parentName", { name: importParentName(decision) }),
         decision.parsed.layerColors,
+        decision.parsed.layerLineWeights,
       );
       codeByLayer = plan.codeByLayer;
       if (plan.parent) {
@@ -679,6 +735,7 @@ export function useProjectFileActions(
     pendingDiscard,
     setPendingDiscard,
     openImportForFile,
+    setImportPdfOptions,
     loadImportLayout,
     onSaveProject,
     onNewProject,

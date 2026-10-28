@@ -272,7 +272,15 @@ Reihenfolge = Abhängigkeiten. Neue Geometrie entsteht in Rust ([K]).
 - ○ **[38] Assoziative Bemassung.** · L · nach [10].
 - ○ **[39] Auswahl gehört zum Modell.** · M
 - ◐ **[40] Ansichten duplizieren.** Ebenen duplizieren vorhanden. · S
-- ○ **[76] Vektorfang auf PDF.** · M
+- ◐ **[76] Vektorfang auf PDF.** (28.10.) Rust `fileio/pdf_object.rs` + `pdf_vector.rs` (eigener Leser:
+  Querverweis-Tabelle/-Stream, Objekt-Streams, Flate/LZW/A85/AHx, Wiederherstellung kaputter xref,
+  verschlüsselt → Fehler; Content-Stream mit CTM, Farben, w/d, ExtGState /LW /D /CA /ca, Form-XObjects,
+  Bézier tesselliert, Text mit ToUnicode). Import-Dialog fragt Seite + Massstab (1:1…1:1000, frei); Übernahme
+  als 2D-Zeichnung über `dxfToDrawings` (Ebenen nach Strichstärke/Farbe, Flächenfarben) — damit fangbar.
+  CLI `pdf-info`, `convert plan.pdf x.obp --scale 100 [--page n]`. Rasterunterlage („Bild/PDF") unverändert.
+  Offen: Zwei-Punkt-Kalibrierung (Strecke anklicken, wahre Länge), Strichmuster → Linienstil, Kreise/Bögen
+  aus Bézier erkennen, Form-/Clip-BBox beschneiden, Linienzeichnung im App-Canvas nur im Linux-Container
+  ohne WebGPU-Bild geprüft (Dialog + Text ja). · M
 - ○ **[77] Zauberstab.** · M
 - ✅ **[78] Autotext im Plankopf.** Titelblock löst Projekt/Blatt/Massstab/Datum auf; Plannummer laufend
   oder `Layout.planNumber` (27.10.).

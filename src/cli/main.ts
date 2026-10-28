@@ -20,6 +20,9 @@
 //   dossier-cli <projekt.obp> model3d [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
+//   dossier-cli pdf-info <datei.pdf> [--page 1]    Vektor-PDF lesen ([76]): Seiten, Pfade, Texte, BBox (pt) als JSON
+//   dossier-cli convert plan.pdf plan.obp [--scale 100] [--page 1] [--no-text]
+//                                                  Vektor-PDF als 2D-Zeichnung (Ebenen nach Farbe/Strichstärke)
 //   dossier-cli <projekt.obp> mcp                  MCP-Server (stdio): project_info, query, render_svg, apply_ops, validate
 //   dossier-cli <projekt.obp> bench [--runs 10]      Zeitprofil der Ableitungen (ms je Aufruf)
 //
@@ -36,6 +39,9 @@ import {
   buildPlanDxfBinary,
   loadFileio,
   readPointCloudFlat,
+  readPdfVectorPage,
+  pdfPageToImport,
+  pdfPageInfo,
   readIfc,
   readIfcElements,
   ifcElementsToProject,
@@ -183,6 +189,43 @@ async function runBcfInfo(path: string | undefined): Promise<number> {
   return 0;
 }
 
+/** `--page n` (1-basiert) → Seitenindex (0-basiert). */
+function pageArg(args: Args): number {
+  const v = Number(args.flags.get("page") ?? 1);
+  if (!Number.isInteger(v) || v < 1) fail("--page: ganze Zahl ab 1");
+  return v - 1;
+}
+
+/** `pdf-info <datei.pdf> [--page 1]`: Seitenzahl, Pfade/Texte/Bilder, Umriss (pt) und Ebenen als JSON. */
+async function runPdfInfo(args: Args, path: string | undefined): Promise<number> {
+  if (!path) {
+    process.stderr.write("Aufruf: dossier-cli pdf-info <datei.pdf> [--page 1]\n");
+    return 2;
+  }
+  setWasmBytesProvider(async (name) => {
+    const rel = WASM_FILES[name];
+    if (!rel) throw new Error(`unbekanntes WASM-Modul ${name}`);
+    return readFileSync(join(wasmDir(), rel));
+  });
+  await loadFileio();
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(readFileSync(path));
+  } catch (e) {
+    fail(`Datei nicht lesbar: ${path} (${e instanceof Error ? e.message : String(e)})`);
+  }
+  const t0 = performance.now();
+  let page;
+  try {
+    page = readPdfVectorPage(bytes, pageArg(args));
+  } catch (e) {
+    fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const ms = Math.round(performance.now() - t0);
+  process.stdout.write(JSON.stringify({ file: path, bytes: bytes.byteLength, ms, ...pdfPageInfo(page) }, null, 2) + "\n");
+  return 0;
+}
+
 /** `pointcloud-info <datei> [--voxel m] [--max n]`: liest und dünnt aus, gibt den Bericht als JSON aus. */
 async function pointCloudInfo(args: Args, src: string | undefined): Promise<number> {
   if (!src) fail("pointcloud-info: Datei fehlt (Aufruf: pointcloud-info <datei> [--voxel 0.05] [--max 2000000])");
@@ -224,13 +267,15 @@ export async function run(argv: string[]): Promise<number> {
   const [file, command, ...rest] = args.positional;
   if (file === "bcf-info") return runBcfInfo(command);
   if (file === "pointcloud-info") return pointCloudInfo(args, command);
+  if (file === "pdf-info") return runPdfInfo(args, command);
   if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
       "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|step|obj|stl|glb|gltf|schedule|kennzahlen|sun|model3d> [Optionen]\n" +
-        "        dossier-cli convert <eingabe.dxf|dwg|ifc|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
+        "        dossier-cli convert <eingabe.dxf|dwg|ifc|pdf|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
         "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
-        "        dossier-cli bcf-info <datei.bcfzip>\n",
+        "        dossier-cli bcf-info <datei.bcfzip>\n" +
+        "        dossier-cli pdf-info <datei.pdf> [--page 1]\n",
     );
     return 2;
   }
@@ -286,9 +331,19 @@ async function importAny(path: string, args: Args): Promise<Project> {
   const fileName = path.split(/[\\/]/).pop() ?? path;
   const base: Project = { ...emptyProject, name: fileName.replace(/\.[^.]+$/, "") };
   if (ext === "ifc") return (await ifcInto(base, bytes, fileName, args)).next;
-  if (ext === "dxf" || ext === "dwg") {
+  if (ext === "dxf" || ext === "dwg" || ext === "pdf") {
     await loadFileio();
-    const parsed = parseDxf(bytes);
+    let parsed;
+    if (ext === "pdf") {
+      // Vektor-PDF ([76]): Massstab 1:--scale (Standard 100), Seite --page (Standard 1).
+      const scale = Number(args.flags.get("scale") ?? 100);
+      if (!Number.isFinite(scale) || scale <= 0) return fail("--scale: Massstabszahl > 0, z. B. 100 für 1:100");
+      try {
+        parsed = pdfPageToImport(readPdfVectorPage(bytes, pageArg(args)), scale, { texts: !args.flags.has("no-text") });
+      } catch (e) {
+        return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    } else parsed = parseDxf(bytes);
     const level = base.drawingLevels.find((l) => l.kind === "floor");
     if (!level) return fail("kein Geschoss für den Import");
     // Wie die App („DXF-Layer als Kategorien"): fehlende Layer als Unterkategorien einer neuen Elternkategorie.
@@ -297,17 +352,18 @@ async function importAny(path: string, args: Args): Promise<Project> {
       flattenAllCategories(base.layers),
       `Import ${fileName}`,
       parsed.layerColors,
+      parsed.layerLineWeights,
     );
     const layers = plan.parent ? [...base.layers, plan.parent] : base.layers;
     const fallback = base.layers[0].code;
     const toCode = (layer: string): string => plan.codeByLayer.get(layer) ?? fallback;
     const drawings = [
-      ...contoursToDrawings(parsed.contours, level.id, "byLayer", fallback, toCode),
+      ...contoursToDrawings(parsed.contours, level.id, "byLayer", fallback, toCode, (l) => parsed.layerFillColors?.[l]),
       ...textsToDrawings(parsed.texts ?? [], level.id, "byLayer", fallback, toCode),
     ];
     return applyOps(base, diffToOps(base, { ...base, layers, drawings2d: drawings, context: [...parsed.meshes] }));
   }
-  return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc)`);
+  return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, pdf)`);
 }
 
 /** `convert <eingabe> <ausgabe>`: Eingabe nach Endung lesen, Ausgabe nach Endung schreiben, dann `--cmd` ausführen. */

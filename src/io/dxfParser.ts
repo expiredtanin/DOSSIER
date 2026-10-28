@@ -43,6 +43,10 @@ export interface DxfImportResult {
   diagnostics?: ImportDiagnostics;
   /** Farbe je DXF-Layer (Hex) aus der LAYER-Tabelle — für neu angelegte Kategorien. */
   layerColors?: Record<string, string>;
+  /** Strichstärke je Layer in Papier-mm (PDF-Import [76]: aus der Linienbreite) — für neue Kategorien. */
+  layerLineWeights?: Record<string, number>;
+  /** Füllfarbe je Layer (PDF-Import [76]): gefüllte Konturen dieses Layers bekommen sie statt des Grau. */
+  layerFillColors?: Record<string, string>;
   /** `$INSUNITS` der Datei (0 = ohne Einheit, 4 = mm, 5 = cm, 6 = m …), roh wie gelesen. */
   insUnits?: number;
   /**

@@ -11,6 +11,7 @@
 import { useState } from "react";
 import type { DxfImportResult } from "../io/dxfParser";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
+import type { PdfImportOptions } from "../ui/ImportDialog";
 import type { TabId as ResourceTabId } from "../ui/ResourceManager";
 
 export function useDialogState() {
@@ -44,6 +45,8 @@ export function useDialogState() {
     progress?: string;
     // Fehlermeldung des Format-Moduls (Datei leer/beschädigt/kein DXF).
     error?: string;
+    // Vektor-PDF ([76]): Seite/Massstab, s. ImportDialog.tsx.
+    pdf?: PdfImportOptions;
   } | null>(null);
   // Modaler PDF-Export-Dialog (Grundriss → Vektor-PDF). true = offen.
   const [exportOpen, setExportOpen] = useState(false);
