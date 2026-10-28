@@ -174,7 +174,7 @@ Entscheid CLA vs. Verzicht auf Dual Licensing.
 
 ### Daten
 
-- ○ **[10] IDs und GUIDs trennen.** IFC-GUIDs werden deterministisch aus der ID gehasht. · M
+- ✅ **[10] IDs und GUIDs trennen.** IFC-GUIDs werden deterministisch aus Projekt-, Art- und Element-id gehasht (28.10., [B5]). · M
 - ○ **[11] Bibliothek per GUID.** · M
 
 ### Robustheit und Tests
@@ -317,15 +317,36 @@ Ganzes nicht WASM-tauglich (rayon, tempfile, SystemTime) — nur einzelne Module
   Revolved/SweptDisk; Farbe/GlobalId gelesen, aber `ImportedMesh` hat kein Feld dafür (GlobalId steht im
   Namen); Laden im Worker; nur Linux-Container/vitest, nicht in der Tauri-App geprüft. · M
 - ○ **[B4] IFC-Import zu echten Bauteilen** (zweite Stufe von [25]). · L · nach [B3].
-- ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 27.10.:
+- ◐ **[B5] IFC-Export nachziehen** (`exportIfc.ts`). Stand 28.10.:
   - ✅ Nicht-ASCII nach ISO 10303-21 (`\X2\`/`\X4\`).
   - ✅ Materialschichten: Wand-/Decken-/Dachtypen als IfcWallType/IfcSlabType/IfcRoofType mit
     IfcMaterialLayerSet, Exemplare über IfcRelDefinesByType (keine LayerSetUsage, Wand ist Mesh).
   - ✅ IfcSpace aus `Room` (Qto_SpaceBaseQuantities, SIA 416), IfcRoof, IfcColumn mit Material.
-  - ○ `IfcOpeningElement` + RelVoids/RelFills statt ausgeschnittener Meshes. · M
-  - ○ `Pset_*Common`. · S
-  - ○ Dauerhafte GUIDs (= [10]). · M
+  - ✅ `IfcOpeningElement` + RelVoids/RelFills statt ausgeschnittener Meshes. (28.10.) Wand als
+    ungeschnittene Extrusion (je Schicht-Band ein IfcExtrudedAreaSolid, SweptSolid), Öffnung als
+    Quader über die Wanddicke (+2 cm), Tür/Fenster im Öffnungs-Placement. Nur wenn exakt gleich wie
+    das 3D (`bandsMatchOpenings`: kein schräger Bandkopf, Löcher = Öffnungen); sonst (Wand unter
+    Dach, Laibungs-Rücksprung) bleibt das Mesh, Öffnung+Füllung trotzdem als Beziehung (zieht nichts
+    doppelt ab). Demo-Haus: 7 von 9 Wänden Extrusion; Volumen je Wand nach ifcopenshell = 3D-Mesh.
+  - ✅ `Pset_*Common`. (28.10.) Wall/Slab/Roof/Column/Door/Window/SpaceCommon nur mit Modellwerten:
+    Reference (Typname, Stützenprofil, Raumnummer), IsExternal (Dach; Raum aus SIA 416 AGF, IfcSpace
+    dann EXTERNAL), GlazingAreaFraction (Glastür). Gleicher Inhalt = ein Pset für alle Bauteile.
+  - ✅ Dauerhafte GUIDs (= [10]). (28.10.) 128-Bit-Hash (2× FNV-1a + fmix64, UUID v8) über
+    `<Projekt-id>/<Art>/<id>[/<Zusatz>]`; Rels/Typen/Psets/Eingliederung an Element-/Geschoss-/
+    Typ-ids statt STEP-Nummern. Tests: Rundreise stabil, eindeutig (Decke und Dach gleiche id),
+    unabhängig von anderen Bauteilen, projektübergreifend verschieden. GUIDs ändern sich einmalig
+    gegenüber Exporten vor dem 28.10.
   - ✅ Georeferenz [69].
+  - ○ Offen: IsExternal/LoadBearing/ThermalTransmittance für Wand/Decke/Tür/Fenster brauchen
+    Modellfelder (z. B. am Wandtyp tragend/aussen, λ je Bauteil → U-Wert). · S–M
+  - ○ Offen: IfcMaterialLayerSetUsage + Achs-Darstellung („Axis") an Extrusions-Wänden;
+    Tür/Fenster mit Rahmen/Blatt statt Box; Bogenwände als echte Kurve. · M
+  - ○ Offen: eigener IFC-Import ([B3]) zieht Öffnungen noch nicht ab → Rundreise des eigenen
+    Exports zeigt Extrusions-Wände ohne Löcher, bis [B4] (Test `ifcImport.test.ts` angepasst). · M
+  - ○ Folgepunkt: Export nach Rust (`src-tauri/fileio`, wie der Import) portieren; TS-Fassung
+    `exportIfc.ts` dann löschen. · L
+  - Geprüft nur im Linux-Container (vitest + ifcopenshell 0.9: 0 Befunde, Volumen), nicht in
+    Solibri/BIMcollab und nicht in der Tauri-App.
 - ○ **[B6] Wand unter Dach als Prismen zwischen Ebenen** (für [G2]). `walls.rs:413–472, 592–654`. · M
 - ○ **[B7] Dach-Verschneidung und Gauben in 2.5D** (für [G5]). · M · nach [B2]/[B6].
 - ○ **[B8] Bogenwände, schneller Weg** (für [T2]). · S/M–L

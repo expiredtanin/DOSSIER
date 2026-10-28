@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exportIfcSpf } from "../export/exportIfc";
+import { exportIfcSpf, ifcGuid } from "../export/exportIfc";
 import { sampleProject } from "../model/sampleProject";
 import { ceilingVerticalExtent } from "../model/wall";
 import { polygonArea } from "../geometry/roomArea";
@@ -75,15 +75,30 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
   it("Volumen je Wand = Volumen der Wand-Netze, je Decke = Fläche × Dicke", async () => {
     const { products } = await readIfc(bytesOf(ifc));
     // Wände: dieselben Ausschnitt-Netze wie der Export (Bänder je Wand).
+    // [B5]: einfache Wände kommen als ungeschnittene Extrusion + IfcOpeningElement; der Import zieht
+    // Öffnungen noch nicht ab ([B3] offen) → dort das Volumen der vollen Bänder.
     const bands = pickGeometry(sampleProject).walls;
-    const byWall = new Map<string, number>();
-    wallCutMeshes(bands).forEach((m, i) => {
-      byWall.set(bands[i].wallId, (byWall.get(bands[i].wallId) ?? 0) + Math.abs(volume(m.positions, m.indices)));
-    });
-    const wallsExpected = [...byWall.values()].sort((a, b) => a - b);
-    const wallsGot = products.filter((p) => p.ifcClass === "IfcWall").map(vol).sort((a, b) => a - b);
-    expect(wallsGot.length).toBe(wallsExpected.length);
-    wallsGot.forEach((v, i) => expect(relClose(v, wallsExpected[i], 1e-6), `${v} ≠ ${wallsExpected[i]}`).toBe(true));
+    const cut = new Map<string, number>();
+    const full = new Map<string, number>();
+    const add = (m: Map<string, number>, id: string, v: number) => m.set(id, (m.get(id) ?? 0) + Math.abs(v));
+    wallCutMeshes(bands).forEach((m, i) => add(cut, bands[i].wallId, volume(m.positions, m.indices)));
+    wallCutMeshes(bands.map((b) => ({ ...b, holes: [] }))).forEach((m, i) => add(full, bands[i].wallId, volume(m.positions, m.indices)));
+    const lines = new Map(ifc.split("\n").map((l) => [l.slice(0, l.indexOf("=")), l] as const));
+    const wallsGot = products.filter((p) => p.ifcClass === "IfcWall");
+    expect(wallsGot.length).toBe(sampleProject.walls.length);
+    let swept = 0;
+    for (const wall of sampleProject.walls) {
+      const p = wallsGot.find((g) => g.globalId === ifcGuid(`${sampleProject.id}/wall/${wall.id}`))!;
+      expect(p, wall.id).toBeDefined();
+      const wallLine = [...lines.values()].find((l) => l.includes(`=IFCWALL('${p.globalId}'`))!;
+      const shape = lines.get(/,(#\d+),\$,\$\);$/.exec(wallLine)![1])!;
+      const rep = lines.get(/\(\(?(#\d+)\)\);$/.exec(shape)![1])!;
+      const isSwept = rep.includes("'SweptSolid'");
+      if (isSwept) swept++;
+      const expected = (isSwept ? full : cut).get(wall.id)!;
+      expect(relClose(vol(p), expected, 1e-6), `${wall.id}: ${vol(p)} ≠ ${expected}`).toBe(true);
+    }
+    expect(swept).toBeGreaterThan(0);
 
     const slabsExpected = (sampleProject.ceilings ?? [])
       .filter((c) => c.outline.length >= 3)
