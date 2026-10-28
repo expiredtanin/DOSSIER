@@ -4,16 +4,14 @@
  * die schwächere per achsparalleler Rechteck-Subtraktion weg. Gleiche Priorität
  * koexistiert (kein Schnitt).
  *
- * Getestet ohne WASM:
- *  1. `subtractRect` direkt (Ecken-/Kanten-/Enthalten-/Kein-Overlap-Fälle).
- *  2. `subtractDominantBands` gegen den Nutzer-Testfall — ELEMENTÜBERGREIFEND:
+ * Getestet über den Rust-Kern (`plan_section.rs`):
+ *  `subtractDominantBands` gegen den Nutzer-Testfall — ELEMENTÜBERGREIFEND:
  *     ein Decken-Beton-Band (100) schneidet ein überlappendes Wand-Putz-Band
  *     (10) weg; Beton bleibt voll; gleiche Priorität koexistiert.
  */
 
 import { describe, it, expect } from "vitest";
 import {
-  subtractRect,
   subtractDominantBands,
   type Rect,
   type SectionCutPolygon,
@@ -22,14 +20,6 @@ import {
 /** Rechteck-Kurzform. */
 function r(uMin: number, uMax: number, vMin: number, vMax: number): Rect {
   return { uMin, uMax, vMin, vMax };
-}
-
-/** Rechteck einer Rest-Menge normalisieren (auf 1e-9 gerundet, sortiert) für stabile Vergleiche. */
-function norm(rects: Rect[]): Rect[] {
-  const round = (x: number) => Math.round(x * 1e9) / 1e9;
-  return rects
-    .map((x) => ({ uMin: round(x.uMin), uMax: round(x.uMax), vMin: round(x.vMin), vMax: round(x.vMax) }))
-    .sort((a, b) => a.uMin - b.uMin || a.vMin - b.vMin);
 }
 
 /** Ein achsparalleles Cut-Band mit joinPriority. */
@@ -82,50 +72,6 @@ function area(items: Array<Rect | SectionCutPolygon>): number {
     return s + (b.uMax - b.uMin) * (b.vMax - b.vMin);
   }, 0);
 }
-
-describe("subtractRect: achsparallele Rechteck-Subtraktion", () => {
-  it("kein Overlap → base unverändert", () => {
-    expect(norm(subtractRect(r(0, 1, 0, 1), r(2, 3, 2, 3)))).toEqual(norm([r(0, 1, 0, 1)]));
-  });
-
-  it("nur Kantenberührung (Fläche 0) → base unverändert", () => {
-    // cutter grenzt bei u=1 an, überlappt aber nicht.
-    expect(norm(subtractRect(r(0, 1, 0, 1), r(1, 2, 0, 1)))).toEqual(norm([r(0, 1, 0, 1)]));
-  });
-
-  it("cutter enthält base vollständig → leere Restmenge", () => {
-    expect(subtractRect(r(1, 2, 1, 2), r(0, 3, 0, 3))).toEqual([]);
-  });
-
-  it("cutter mittig in base → 4 Rest-Rechtecke, Flächenbilanz stimmt", () => {
-    const rest = subtractRect(r(0, 3, 0, 3), r(1, 2, 1, 2));
-    expect(rest).toHaveLength(4);
-    // 9 (base) − 1 (overlap) = 8.
-    expect(area(rest)).toBeCloseTo(8, 9);
-    // Rechtecke sind disjunkt: Summe der Einzelflächen = Gesamtfläche.
-    const sum = rest.reduce((s, x) => s + (x.uMax - x.uMin) * (x.vMax - x.vMin), 0);
-    expect(sum).toBeCloseTo(8, 9);
-  });
-
-  it("Ecküberlappung → 2 Rest-Rechtecke (L-Form)", () => {
-    // cutter überdeckt die obere-rechte Ecke von base.
-    const rest = subtractRect(r(0, 2, 0, 2), r(1, 3, 1, 3));
-    // overlap = [1,2]×[1,2] (Fläche 1). Rest = 4 − 1 = 3.
-    expect(area(rest)).toBeCloseTo(3, 9);
-    expect(norm(rest)).toEqual(
-      norm([
-        r(0, 1, 0, 2), // links, volle Höhe
-        r(1, 2, 0, 1), // mittlerer Streifen unten
-      ]),
-    );
-  });
-
-  it("Kantenüberlappung (cutter deckt einen Randstreifen) → 1 Rest-Rechteck", () => {
-    // cutter deckt den oberen Rand v∈[1,2] über die volle Breite.
-    const rest = subtractRect(r(0, 2, 0, 2), r(-1, 3, 1, 3));
-    expect(norm(rest)).toEqual(norm([r(0, 2, 0, 1)]));
-  });
-});
 
 describe("subtractDominantBands: stärkere Schicht schneidet schwächere", () => {
   it("Nutzer-Testfall ELEMENTÜBERGREIFEND: Decken-Beton(100) schneidet Wand-Putz(10) weg", () => {

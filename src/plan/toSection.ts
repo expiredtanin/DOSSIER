@@ -27,6 +27,7 @@ import { projectToModel3d } from "./toWalls3d";
 import { subtractVoidsInSection } from "./voids";
 import { appendBodySections, appendTerrainProfiles } from "./sectionExtras";
 import { loadEngine3d } from "../engine/engine3d";
+import { core } from "../engine/coreWasm";
 import {
   HATCH_INK,
   HATCH_PAPER,
@@ -582,8 +583,6 @@ function ceilingRepresentativePriority(project: Project, ceiling: Ceiling): numb
 // ── Schnitt-Boolean-Dominanz (achsparallele Rechteck-Subtraktion) ───────────
 // Kleine Toleranz für Überlappungs-/Rest-Rechtecke: Null-/Negativflächen und
 // Rest-Streifen dünner als EPS werden verworfen (Float-Rauschen der u-/v-Meter).
-const RECT_EPS = 1e-6;
-
 /** Achsparalleles Rechteck in (u, v)-Metern. */
 export interface Rect {
   uMin: number;
@@ -606,174 +605,49 @@ function rectOfBand(band: SectionCutPolygon): Rect | null {
 }
 
 /**
- * Rechteck-minus-Rechteck (beide achsparallel): `base` ohne die Überlappung mit
- * `cutter`, zerlegt in 0–4 disjunkte Rest-Rechtecke (links/rechts über die volle
- * Höhe, dann oben/unten im mittleren u-Streifen — überlappungsfrei). Kein echter
- * Überlapp (Fläche ≤ EPS in u oder v) ⇒ `base` bleibt ganz. Vollständige
- * Überdeckung ⇒ leere Liste. Rest-Streifen dünner als EPS werden verworfen.
- */
-export function subtractRect(base: Rect, cutter: Rect): Rect[] {
-  const oMinU = Math.max(base.uMin, cutter.uMin);
-  const oMaxU = Math.min(base.uMax, cutter.uMax);
-  const oMinV = Math.max(base.vMin, cutter.vMin);
-  const oMaxV = Math.min(base.vMax, cutter.vMax);
-  // Kein (nennenswerter) Überlapp — `base` unverändert.
-  if (oMaxU - oMinU <= RECT_EPS || oMaxV - oMinV <= RECT_EPS) return [base];
-
-  const out: Rect[] = [];
-  const push = (r: Rect) => {
-    if (r.uMax - r.uMin > RECT_EPS && r.vMax - r.vMin > RECT_EPS) out.push(r);
-  };
-  // Links / rechts der Überlappung, jeweils über die volle Basis-Höhe.
-  push({ uMin: base.uMin, uMax: oMinU, vMin: base.vMin, vMax: base.vMax });
-  push({ uMin: oMaxU, uMax: base.uMax, vMin: base.vMin, vMax: base.vMax });
-  // Unten / oben im mittleren u-Streifen (nur der von der Überlappung befreite Rest).
-  push({ uMin: oMinU, uMax: oMaxU, vMin: base.vMin, vMax: oMinV });
-  push({ uMin: oMinU, uMax: oMaxU, vMin: oMaxV, vMax: base.vMax });
-  return out;
-}
-
-/**
  * Globale Schnitt-Dominanz: für jedes Band wird die Rechteck-Überlappung ALLER
  * Bänder mit STRIKT höherer `joinPriority` subtrahiert (elementübergreifend —
  * z. B. schneidet ein Decken-Beton-Band 100 ein überlappendes Wand-Putz-Band 10
- * weg). Gleiche Priorität schneidet NICHT (koexistiert → durchgehende Fläche).
- * Bänder ohne `joinPriority` (unauflösbares Bauteil) nehmen weder als Basis noch
- * als Cutter teil und bleiben unverändert erhalten.
- *
- * Kanten: jedes emittierte Rest-Rechteck erhält in `generateSectionPlan` seine
- * eigene Schnitt-Umrisslinie (unverändert). An der Schnittkante fällt die
- * Rest-Rechteck-Kante mit der Kante des stärkeren Bands zusammen — das ist die
- * gewünschte Material-/Fugenlinie zwischen den Schichten; im Inneren einer
- * Schicht entstehen durch die überlappungsfreie Zerlegung keine falschen Kanten.
+ * weg). Gleiche Priorität schneidet NICHT. Bänder ohne `joinPriority` nehmen
+ * weder als Basis noch als Cutter teil. Danach verschmelzen angrenzende Bänder
+ * gleicher `componentId` + Priorität zu einem Körper (keine innere Trennlinie).
+ * Die Rechenarbeit liegt im Rust-Kern (`plan_section.rs`, [K3c]); hier nur
+ * Ein-/Ausgabe der Bänder samt Stil.
  */
 export function subtractDominantBands(bands: SectionCutPolygon[]): SectionCutPolygon[] {
-  const rects = bands.map(rectOfBand);
+  const ids = new Map<string, number>();
+  const b: number[] = [bands.length];
+  for (const band of bands) {
+    const r = rectOfBand(band);
+    let comp = -1;
+    if (band.componentId !== undefined) {
+      comp = ids.get(band.componentId) ?? ids.size;
+      ids.set(band.componentId, comp);
+    }
+    b.push(r ? 1 : 0, r?.uMin ?? 0, r?.uMax ?? 0, r?.vMin ?? 0, r?.vMax ?? 0,
+      band.joinPriority ?? Number.NaN, comp);
+  }
+  const f = core().section_dominant_bands_flat(Float64Array.from(b));
   const out: SectionCutPolygon[] = [];
-  for (let i = 0; i < bands.length; i++) {
-    const band = bands[i];
-    const base = rects[i];
-    const prio = band.joinPriority;
-    // Nicht-rechteckig oder ohne Priorität: unverändert durchreichen.
-    if (base === null || prio === undefined) {
-      out.push(band);
-      continue;
-    }
-    let pieces: Rect[] = [base];
-    for (let j = 0; j < bands.length && pieces.length > 0; j++) {
-      if (j === i) continue;
-      const otherPrio = bands[j].joinPriority;
-      const cutter = rects[j];
-      if (cutter === null || otherPrio === undefined || otherPrio <= prio) continue;
-      const next: Rect[] = [];
-      for (const p of pieces) next.push(...subtractRect(p, cutter));
-      pieces = next;
-    }
-    for (const p of pieces) out.push(bandFromRect(band, p));
-  }
-  // MERGE-Regel: nach der Dominanz-Subtraktion angrenzende/überlappende Bänder
-  // gleicher Komponente + Priorität zu einem Körper verschmelzen (keine innere
-  // Trennlinie durch gleichartiges Material). Die Subtraktion oben bleibt davon
-  // unberührt (bit-identisch) — hier werden nur gleichartige Reste vereinigt.
-  return mergeSameComponentBands(out);
-}
-
-/**
- * Union zweier achsparalleler Rechtecke, ABER NUR wenn das Ergebnis EXAKT wieder
- * ein Rechteck ist — sonst `null`. Zwei Fälle liefern eine rechteckige Union
- * (jeweils mit `RECT_EPS`-Toleranz):
- *   • Enthaltensein: eines liegt vollständig im anderen ⇒ das umschließende.
- *   • Achs-Deckung + Berührung: in einer Achse deckungsgleich (gleiche min/max)
- *     UND in der anderen berührend/überlappend (kein Spalt) ⇒ Bounding-Box.
- * Teil-/Eck-Überlappungen (Union wäre L-förmig) und Bänder mit Spalt liefern
- * `null` — sie dürfen NICHT verschmolzen werden (die Bounding-Box deckte sonst
- * leere Fläche ab). Genau die im Schnitt vorkommenden bündigen Rechtecke.
- */
-function rectUnionIfRect(a: Rect, b: Rect): Rect | null {
-  const E = RECT_EPS;
-  // Enthaltensein (inkl. Deckungsgleichheit): Union = umschließendes Rechteck.
-  const aInB =
-    b.uMin - a.uMin <= E && a.uMax - b.uMax <= E && b.vMin - a.vMin <= E && a.vMax - b.vMax <= E;
-  if (aInB) return { uMin: b.uMin, uMax: b.uMax, vMin: b.vMin, vMax: b.vMax };
-  const bInA =
-    a.uMin - b.uMin <= E && b.uMax - a.uMax <= E && a.vMin - b.vMin <= E && b.vMax - a.vMax <= E;
-  if (bInA) return { uMin: a.uMin, uMax: a.uMax, vMin: a.vMin, vMax: a.vMax };
-
-  const uAligned = Math.abs(a.uMin - b.uMin) <= E && Math.abs(a.uMax - b.uMax) <= E;
-  const vAligned = Math.abs(a.vMin - b.vMin) <= E && Math.abs(a.vMax - b.vMax) <= E;
-  // Berührung/Überlappung in der jeweils ANDEREN Achse (kein Spalt größer EPS).
-  const vTouch = a.vMax >= b.vMin - E && b.vMax >= a.vMin - E;
-  const uTouch = a.uMax >= b.uMin - E && b.uMax >= a.uMin - E;
-  if ((uAligned && vTouch) || (vAligned && uTouch)) {
-    return {
-      uMin: Math.min(a.uMin, b.uMin),
-      uMax: Math.max(a.uMax, b.uMax),
-      vMin: Math.min(a.vMin, b.vMin),
-      vMax: Math.max(a.vMax, b.vMax),
-    };
-  }
-  return null;
-}
-
-/**
- * MERGE-Phase der Schnitt-Dominanz (vgl. `resolveJoinPriority` "merge",
- * src/model/joins.ts): Bänder mit GLEICHER `componentId` UND gleicher
- * `joinPriority`, deren achsparallele Rechtecke sich berühren/überlappen und
- * eine rechteckige Union bilden (`rectUnionIfRect`), werden zu EINEM Band
- * zusammengefasst — so entsteht an der Berührkante keine innere Trennlinie durch
- * gleichartiges Material (z. B. zwei Backstein-Kerne, Beton-Decke an Beton-Wand).
- *
- * Bänder VERSCHIEDENER Komponenten (auch bei gleicher Priorität) bleiben
- * getrennt (coexist). Bänder ohne `componentId`/`joinPriority` oder ohne
- * Rechteck-Form nehmen nicht teil und werden unverändert durchgereicht — daher
- * ist die Phase für die bestehenden Dominanz-Tests (keine `componentId`) ein
- * No-op. Iterativ bis zum Fixpunkt (Ketten aus ≥3 Rechtecken verschmelzen
- * schrittweise); die Reihenfolge bleibt erhalten (das verschmolzene Rechteck
- * ersetzt das erste Band an seiner Position).
- */
-function mergeSameComponentBands(bands: SectionCutPolygon[]): SectionCutPolygon[] {
-  const out = bands.slice();
-  for (let merged = true; merged; ) {
-    merged = false;
-    for (let i = 0; i < out.length && !merged; i++) {
-      const bi = out[i];
-      if (bi.componentId === undefined || bi.joinPriority === undefined) continue;
-      const ri = rectOfBand(bi);
-      if (!ri) continue;
-      for (let j = i + 1; j < out.length; j++) {
-        const bj = out[j];
-        if (bj.componentId !== bi.componentId || bj.joinPriority !== bi.joinPriority) continue;
-        const rj = rectOfBand(bj);
-        if (!rj) continue;
-        const u = rectUnionIfRect(ri, rj);
-        if (!u) continue;
-        out[i] = bandFromRect(bi, u);
-        out.splice(j, 1);
-        merged = true; // Fixpunkt-Neustart: neu entstandene Nachbarschaften erfassen
-        break;
-      }
-    }
+  for (let k = 0, i = 1; k < f[0]; k++, i += 6) {
+    const src = bands[f[i]];
+    out.push(f[i + 1] === 0 ? src : {
+      component: src.component,
+      color: src.color,
+      pts: [
+        [f[i + 2], f[i + 5]],
+        [f[i + 3], f[i + 5]],
+        [f[i + 3], f[i + 4]],
+        [f[i + 2], f[i + 4]],
+      ],
+      fill: src.fill,
+      hatch: src.hatch,
+      joinPriority: src.joinPriority,
+      componentId: src.componentId,
+      sourceId: src.sourceId,
+    });
   }
   return out;
-}
-
-/** Erzeugt aus einem Rest-`Rect` ein Cut-Band, das Stil/Referenz von `src` erbt. */
-function bandFromRect(src: SectionCutPolygon, r: Rect): SectionCutPolygon {
-  return {
-    component: src.component,
-    color: src.color,
-    pts: [
-      [r.uMin, r.vMax],
-      [r.uMax, r.vMax],
-      [r.uMax, r.vMin],
-      [r.uMin, r.vMin],
-    ],
-    fill: src.fill,
-    hatch: src.hatch,
-    joinPriority: src.joinPriority,
-    componentId: src.componentId,
-    sourceId: src.sourceId,
-  };
 }
 
 /**
@@ -1384,69 +1258,19 @@ export function mergeMonolithCuts(
 /**
  * Äussere Umrisse der Vereinigung achsparalleler Rechtecke (Raster über alle
  * Kanten-Koordinaten, Randkanten verketten). Liefert je zusammenhängender
- * Fläche den Aussenring (CCW); Innenringe (Löcher) entfallen.
+ * Fläche den Aussenring (CCW); Innenringe (Löcher) entfallen. Rechnet der Kern.
  */
 export function unionRectOutlines(rects: Rect[]): Array<Array<[number, number]>> {
-  const xs = [...new Set(rects.flatMap((r) => [r.uMin, r.uMax]))].sort((a, b) => a - b);
-  const ys = [...new Set(rects.flatMap((r) => [r.vMin, r.vMax]))].sort((a, b) => a - b);
-  const nx = xs.length - 1;
-  const ny = ys.length - 1;
-  if (nx < 1 || ny < 1) return [];
-  const filled = (i: number, j: number): boolean => {
-    if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
-    const cx = (xs[i] + xs[i + 1]) / 2;
-    const cy = (ys[j] + ys[j + 1]) / 2;
-    return rects.some((r) => cx > r.uMin && cx < r.uMax && cy > r.vMin && cy < r.vMax);
-  };
-  const cell: boolean[][] = [];
-  for (let i = 0; i < nx; i++) {
-    cell.push([]);
-    for (let j = 0; j < ny; j++) cell[i].push(filled(i, j));
-  }
-  const at = (i: number, j: number) => i >= 0 && j >= 0 && i < nx && j < ny && cell[i][j];
-  // Gerichtete Randkanten (Fläche links → CCW), als Gitterpunkt-Paare.
-  const next = new Map<string, [number, number]>();
-  const key = (i: number, j: number) => `${i},${j}`;
-  for (let i = 0; i < nx; i++) {
-    for (let j = 0; j < ny; j++) {
-      if (!cell[i][j]) continue;
-      if (!at(i, j - 1)) next.set(key(i, j), [i + 1, j]); // unten, nach rechts
-      if (!at(i + 1, j)) next.set(key(i + 1, j), [i + 1, j + 1]); // rechts, nach oben
-      if (!at(i, j + 1)) next.set(key(i + 1, j + 1), [i, j + 1]); // oben, nach links
-      if (!at(i - 1, j)) next.set(key(i, j + 1), [i, j]); // links, nach unten
-    }
-  }
+  const b: number[] = [rects.length];
+  for (const r of rects) b.push(r.uMin, r.uMax, r.vMin, r.vMax);
+  const f = core().section_union_outlines_flat(Float64Array.from(b));
   const rings: Array<Array<[number, number]>> = [];
-  const used = new Set<string>();
-  for (const start of next.keys()) {
-    if (used.has(start)) continue;
+  let i = 1;
+  for (let k = 0; k < (f[0] ?? 0); k++) {
+    const count = f[i++];
     const ring: Array<[number, number]> = [];
-    let k = start;
-    while (!used.has(k)) {
-      used.add(k);
-      const [i, j] = k.split(",").map(Number);
-      ring.push([xs[i], ys[j]]);
-      const n = next.get(k);
-      if (!n) break;
-      k = key(n[0], n[1]);
-    }
-    // Kollineare Zwischenpunkte entfernen.
-    const simple = ring.filter((p, idx) => {
-      const a = ring[(idx + ring.length - 1) % ring.length];
-      const b = ring[(idx + 1) % ring.length];
-      return !((a[0] === p[0] && p[0] === b[0]) || (a[1] === p[1] && p[1] === b[1]));
-    });
-    if (simple.length >= 4 && signedArea(simple) > 0) rings.push(simple);
+    for (let j = 0; j < count; j++, i += 2) ring.push([f[i], f[i + 1]]);
+    rings.push(ring);
   }
   return rings;
-}
-
-function signedArea(ring: Array<[number, number]>): number {
-  let a = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const [x0, y0] = ring[i];
-    const [x1, y1] = ring[(i + 1) % ring.length];
-    a += x0 * y1 - x1 * y0;
-  }
-  return a / 2;
 }

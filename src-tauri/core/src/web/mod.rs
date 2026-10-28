@@ -29,6 +29,7 @@ mod plan_stairs;
 mod plan_walls;
 mod plan_openings;
 mod plan_misc;
+mod plan_section;
 mod curves;
 mod hatch;
 
