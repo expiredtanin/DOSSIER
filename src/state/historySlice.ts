@@ -34,8 +34,11 @@ export interface HistorySlice {
   redo: () => void;
   /** Verlauf leeren. */
   clearHistory: () => void;
-  /** Alle Projekt-Änderungen in `fn` werden EIN Undo-Schritt. */
-  groupChanges: (fn: () => void) => void;
+  /**
+   * Alle Projekt-Änderungen in `fn` werden EIN Undo-Schritt. Mit `coalesceKey` schliessen
+   * aufeinanderfolgende Gruppen mit gleichem Schlüssel (im Zeitfenster) an denselben Schritt an.
+   */
+  groupChanges: (fn: () => void, coalesceKey?: string) => void;
 }
 
 let doc: ProjectDocument | null = null;
@@ -82,9 +85,10 @@ export function createHistorySlice(api: StoreApi<HistorySlice & { project: Proje
       d.clearHistory();
       set(historyPatch(d));
     },
-    groupChanges: (fn) => {
+    groupChanges: (fn, coalesceKey) => {
       const d = storeDocument(get().project);
-      d.beginGroup();
+      if (coalesceKey) d.beginKeyedGroup(coalesceKey, Date.now());
+      else d.beginGroup();
       try {
         fn();
       } finally {

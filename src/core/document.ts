@@ -199,6 +199,15 @@ export class ProjectDocument {
     if (this.handle) core().doc_group_begin(this.handle);
   }
 
+  /**
+   * Wie {@link beginGroup}, mit `coalesceKey` (+ `now` in ms): aufeinanderfolgende Gruppen mit
+   * gleichem Schlüssel im Zeitfenster schliessen an denselben Undo-Schritt an (Griff-Zug, der je
+   * Mausschritt mehrere Elemente bewegt), [K4] S3.
+   */
+  beginKeyedGroup(coalesceKey: string, now: number): void {
+    if (this.handle) core().doc_group_begin_keyed(this.handle, coalesceKey, now);
+  }
+
   endGroup(): void {
     if (this.handle) core().doc_group_end(this.handle);
   }
