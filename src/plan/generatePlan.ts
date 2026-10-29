@@ -11,8 +11,9 @@
 // Wände mit Öffnungen, Treppen, Stützen, Extrusionen, Kontext, Schnittführung)
 // rechnet der Rust-Kern auf dem Projekt-Dokument (`src-tauri/core/src/plan/`,
 // Abfrage `planDomains`, [K3d]) und liefert fertige `Primitive` — auch die freie
-// 2D-Geometrie (`plan/drawings.rs`). In TS bleiben Schattenstudie und Baurecht,
-// die Abzugskörper (`voids.ts`), Mono und der Strichstärken-Massstab.
+// 2D-Geometrie (`plan/drawings.rs`), Schattenstudie und Baurecht, Abzugskörper, Mono und
+// Strichstärken-Massstab samt Ausmass (`plan/extras.rs`). `generatePlan` reicht nur noch
+// Sichtbarkeit (UI-Zustand) und Optionen weiter und setzt den Plan aus den Puffern zusammen.
 // Das `Primitive`-Vokabular und die Attribut-Auflösung für die übrigen TS-Pfade
 // leben in `generatePlan/shared.ts`.
 
@@ -38,7 +39,6 @@ import type { SectionOutput } from "./toSection";
 import {
   HATCH_INK,
   HATCH_PAPER,
-  MONO_INK,
   SHOW_ALL,
   resolveBackground,
   resolveForeground,
@@ -49,11 +49,7 @@ import {
   type HatchRender,
   type Primitive,
 } from "./generatePlan/shared";
-import { subtractVoidsInPlan, voidPrisms } from "./voids";
-import { isBufPiece, lazyPlan, piecesOf, planCount, planFields, type PlanPiece } from "./planLazy";
-import { addSunShadow } from "./generatePlan/sunShadow";
-import { addSiteRules, addSiteViolations } from "./generatePlan/siteRules";
-import { lineWeightFactor, scalePrimitiveWeights } from "./lineWeightScale";
+import { lazyPlan, piecesOf, planCount, planFields, type PlanPiece } from "./planLazy";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { layersStyleSig } from "./generatePlan/layerSig";
 
@@ -342,53 +338,36 @@ export function generatePlan(
   /**
    * Kompakte Linien-Unterlage statt dauerhafter 'line'-Primitive (s.
    * {@link UnderlayGroup}) — NUR für die interaktive GPU-Ansicht. Aus bei
-   * Export/mono (toMono mutiert Linienfarben).
+   * Export/mono (reiner Schwarz-Weiss-Plan ohne Unterlage).
    */
   compactUnderlay = false,
 ): Plan {
-  const primitives: Primitive[] = [];
-  // Schattenstudie zuunterst (projektglobal, nur im Geschoss nächst ±0.00).
-  if (includeGlobal) addSunShadow(primitives, project, floorId);
-  // Baurecht (Parzelle, zulässige Fläche, Verstösse), ebenfalls zuunterst.
-  if (includeGlobal) addSiteRules(primitives, project, floorId);
-  const underlayCount = primitives.length;
-  // Aktives Geschoss (für die Grundriss-Schnitthöhe der Treppen).
-  const floor = project.drawingLevels.find((z) => z.id === floorId);
   const compact = compactUnderlay && !mono && !forPrint;
-
-  // Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen, 2D-Zeichnungen und Extrusions-Umrisse
-  // rechnet der Kern auf dem Dokument ([K3d], `plan/{domains,walls,stairs,drawings}.rs`): Filter,
-  // Override-Regeln, Verschneidung, Stil und Raumstempel-Daten. Decken, Dächer und Räume liegen unter
-  // der Wand-Poché; Stützen folgen nach den Treppen, die 2D-Zeichnungen darüber, Extrusionen danach.
-  // Der Kern liefert alles in EINEM Plan-Puffer (Gruppen in dieser Reihenfolge); die Abschnitte
-  // merkt sich der Plan (`bufRuns`), damit die GPU sie direkt aus dem Puffer kompiliert.
-  // Mono färbt die gelesenen Primitive um (s. `toMono`): dann keine behaltenen Stücke.
-  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, !mono);
-  // Der Plan entsteht aus Stücken ([K3d], `planLazy.ts`): TS-Listen und Kern-Abschnitte; die
-  // Kern-Primitive werden erst gelesen, wenn ein Verbraucher sie als Objekte braucht.
-  const pieces: PlanPiece[] = [primitives];
+  // Den ganzen Grundriss rechnet der Kern auf dem Dokument ([K3d]/[K4], `plan/{domains,walls,stairs,
+  // drawings,extras}.rs`): Schattenstudie und Baurecht zuunterst, Decken, Dächer, Räume, Wände mit
+  // Öffnungen, Treppen, Stützen, 2D-Zeichnungen, Extrusions-Umrisse, Kontext und Schnittführung,
+  // die Baurechts-Verstösse zuoberst; dazu Abzugskörper, Schwarz-Weiss, Strichstärken nach Massstab
+  // und das Ausmass. Er liefert einen Plan-Puffer (Gruppen in dieser Reihenfolge) und die
+  // 2D-Zeichnungen in Stücken; der Plan liest die Primitive erst, wenn ein Verbraucher sie als
+  // Objekte braucht (`planLazy.ts`), die GPU kompiliert direkt aus den Puffern (`bufRuns`).
+  // Zeitpunkt der Schattenstudie: `Date` nimmt das Datum, wie es in der Datei steht (Ortszeit ohne Zone).
+  const study = project.sunStudy;
+  const sunWhen = includeGlobal && study?.show ? new Date(study.when).getTime() : NaN;
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen);
+  const pieces: PlanPiece[] = [];
   const pushGroups = (first: number, last: number): void => {
     const from = dom.buf.groups[first][0];
     const to = dom.buf.groups[last][1];
     if (to > from) pieces.push({ buf: dom.buf, from, to });
   };
-  // Decken, Dächer, Räume; Wände (Poché, Referenzlinie) mit ihren Öffnungs-Symbolen, je Wand
-  // nacheinander; Treppen; Stützen; 2D-Zeichnungen (über der Poché); extrudierte Körper
-  // (Footprint-Umriss); Kontext-Konturen und Schnittführungs-Symbole (projektglobal, nur beim
-  // aktiven Aufruf einer Mehrfach-Überlagerung).
-  // Die 2D-Zeichnungen kommen als eigene Puffer-Stücke (an Stelle der Gruppe 6, s. `planDomains`).
-  pushGroups(G_CEILINGS, G_COLUMNS);
+  // Die 2D-Zeichnungen kommen als eigene Puffer-Stücke an Stelle ihrer (leeren) Gruppe.
+  pushGroups(G_UNDER, G_COLUMNS);
   for (const c of dom.chunks) pieces.push({ buf: c, from: 0, to: c.count });
-  pushGroups(G_SOLIDS, G_SECTIONS);
+  pushGroups(G_SOLIDS, G_VIOLATIONS);
   // Kompakte Linien-Unterlage (s. {@link UnderlayGroup}): die Linien einfacher Zeichnungen fehlen
   // im Puffer und entstehen erst bei Bedarf, PRO KATEGORIE gruppiert — das Ein-/Ausblenden einer
   // Ebene entfernt dann nur deren Gruppe, die Chunks aller anderen Ebenen bleiben gültig.
   const underlay = compact ? underlayGroups(project, dom, scaleDenominator) : [];
-
-  // Baurechts-Verstösse über allem (Signal, soll nicht unter der Wand-Poché verschwinden).
-  const violations: Primitive[] = [];
-  if (includeGlobal) addSiteViolations(violations, project, floorId);
-  pieces.push(violations);
 
   // Georeferenzierte Luftbilder als Hintergrund-Ebenen (nur interaktive Ansicht,
   // nicht Teil der Vektor-Primitive) — im Mono-Modus ausgeblendet (reiner S/W-Plan).
@@ -405,79 +384,9 @@ export function generatePlan(
           opacity: o.opacity ?? 1,
           filters: o.filters,
         }));
-
-  // Strichstärken nach Massstab ([32], nur mit Projekt-Option): auf die fertigen Primitive und
-  // auf die Linien der kompakten Unterlage.
-  const lwf = lineWeightFactor(project, scaleDenominator);
-  const scaledUnderlay =
-    lwf === 1
-      ? underlay
-      : underlay.map((g) => ({
-          ...g,
-          ctx: [...g.ctx, lwf],
-          build: (ds: Drawing2D[]) => g.build(ds).map((p) => scalePrimitiveWeights(p, lwf)),
-          buildBuf: undefined,
-        }));
-  const rest = {
-    bounds: computeBounds(project, dom.buf.bounds, primitives.slice(0, underlayCount)),
-    backgroundImages,
-    ...(scaledUnderlay.length ? { underlay: scaledUnderlay } : {}),
-  };
-  const hasVoids = voidPrisms(project).length > 0;
-  // Ohne Abzugskörper, Mono und Strichstärken-Massstab bleibt der Plan lazy: die Kern-Primitive
-  // werden erst bei Bedarf gelesen.
-  if (!hasVoids && !mono && lwf === 1) return lazyPlan(rest, pieces);
-
-  // Sonst wie bisher als Liste: die Schritte unten verändern Primitive.
-  const all: Primitive[] = [];
-  const runs: PlanBufRun[] = [];
-  for (const pc of pieces) {
-    if (isBufPiece(pc)) {
-      runs.push({ at: all.length, buf: pc.buf, from: pc.from, to: pc.to });
-      for (let i = pc.from; i < pc.to; i++) all.push(pc.buf.prim(i));
-    } else for (const pr of pc) all.push(pr);
-  }
-  // Abzugskörper (Aussparungen/Durchbrüche): von Wand-/Stützen-/Decken-Poché abziehen.
-  // Ersetzte Primitive erkennt der GPU-Pfad selbst (Identität); verschiebt das Zerlegen die
-  // Indizes, werden die Kern-Abschnitte neu ausgerichtet. Die Baurechts-Verstösse liegen über
-  // allem und haben keine Bauteil-Id — das Abziehen lässt sie unverändert.
-  if (hasVoids && subtractVoidsInPlan(all, project, (floor?.baseElevation ?? 0) + (floor?.cutHeight ?? 1.0))) realignRuns(all, runs);
-
-  // Schwarz-Weiss (mono): nachträglich alle Farben auf reine Tinte zwingen.
-  // Element-/Kategorie-/Hatch-Farben werden ignoriert, Füllungen werden weiss,
-  // Musterlinien/Striche schwarz — so entsteht ein reiner S/W-Plan.
-  if (mono) toMono(all);
-
-  // Mono färbt die Objekte um, der Massstab ersetzt sie: dann gilt der Puffer nicht mehr.
-  const keepRuns = !mono && lwf === 1 && runs.length > 0;
-  return {
-    primitives: lwf === 1 ? all : all.map((p) => scalePrimitiveWeights(p, lwf)),
-    ...rest,
-    ...(keepRuns ? { bufRuns: runs } : {}),
-  };
-}
-
-/**
- * Kern-Abschnitte nach einem Umbau der Liste (Abzugskörper zerlegen Polygone) neu ausrichten:
- * jede noch vorhandene Folge unveränderter Puffer-Objekte wird ein eigener Abschnitt.
- */
-function realignRuns(primitives: readonly Primitive[], runs: PlanBufRun[]): void {
-  if (runs.length === 0) return;
-  const where = new Map<Primitive, [PlanBufRun, number]>();
-  for (const r of runs) for (let i = r.from; i < r.to; i++) where.set(r.buf.prims[i], [r, i]);
-  const out: PlanBufRun[] = [];
-  let cur: PlanBufRun | null = null;
-  for (let i = 0; i < primitives.length; i++) {
-    const w = where.get(primitives[i]);
-    if (w && cur && w[0].buf === cur.buf && w[1] === cur.to && i === cur.at + (cur.to - cur.from)) {
-      cur.to++;
-      continue;
-    }
-    cur = w ? { at: i, buf: w[0].buf, from: w[1], to: w[1] + 1 } : null;
-    if (cur) out.push(cur);
-  }
-  runs.length = 0;
-  for (const r of out) runs.push(r);
+  // Ausmass samt Schatten, Baurecht und Kontext (immer gesetzt, ohne Punkte 0,0–1,1).
+  const [minX, minY, maxX, maxY] = dom.buf.bounds ?? [0, 0, 1, 1];
+  return lazyPlan({ bounds: { minX, minY, maxX, maxY }, backgroundImages, ...(underlay.length ? { underlay } : {}) }, pieces);
 }
 
 /**
@@ -795,36 +704,6 @@ export function generateSectionPlan(
   return { primitives, bounds: { minX, minY, maxX, maxY } };
 }
 
-/**
- * Post-Pass für den Schwarz-Weiss-Modus: ersetzt alle Farb-Informationen der
- * Plan-Primitive durch einheitliche Tinte/Weiss. Wirkt in-place.
- * - Polygone: Füllung → weiss, Umriss → Tinte, Schraffur-Musterlinien → Tinte
- *   (Vollfüllung „solid" wird zu Weiss neutralisiert, damit keine Poché-Farbe).
- * - Linien: explizite Strichfarbe → Tinte (CSS-Klassen sind bereits neutral).
- * - Bögen tragen keine Farbe (rein CSS, neutral) → unverändert.
- */
-function toMono(primitives: Primitive[]): void {
-  for (const p of primitives) {
-    if (p.kind === "polygon") {
-      // SIA-Poché in mono: Vollmuster „solid" ist eine SCHWARZE Poché und bleibt
-      // schwarz (Schwarz bleibt Schwarz); jede andere Füllung wird weiß, die
-      // Linien-/Kreuzschraffur bleibt sichtbar, aber in Tinte.
-      if (p.hatch.pattern === "solid") {
-        p.hatch = { ...p.hatch, color: HATCH_INK };
-        p.fill = p.fill === "none" ? "none" : HATCH_INK;
-      } else {
-        if (p.hatch.pattern !== "none") p.hatch = { ...p.hatch, color: MONO_INK };
-        p.fill = p.fill === "none" ? "none" : "#ffffff";
-      }
-      p.stroke = MONO_INK;
-    } else if (p.kind === "line") {
-      p.color = MONO_INK;
-    } else if (p.kind === "text") {
-      p.color = MONO_INK;
-    }
-  }
-}
-
 /** Primitive der Kern-Domänen (`planDomains` in `queries.rs`) als gelesene Plan-Puffer v2. */
 interface DomainPrims {
   /** Haupt-Puffer: Gruppen wie `plan/domains.rs::GROUPS`, Gruppe 6 (2D-Zeichnungen) leer. */
@@ -835,12 +714,15 @@ interface DomainPrims {
   args: string;
 }
 
-/** Gruppen des Puffers (`plan/domains.rs::GROUPS`). */
-const G_CEILINGS = 0;
-const G_COLUMNS = 5;
-const G_SOLIDS = 7;
-const G_SECTIONS = 9;
-const N_GROUPS = 10;
+/**
+ * Gruppen des Puffers: Schatten/Baurecht, die Domänen (`plan/domains.rs::GROUPS`: Decken … Stützen,
+ * 2D-Zeichnungen — im Haupt-Puffer leer —, Körper, Kontext, Schnittlinien), Baurechts-Verstösse.
+ */
+const G_UNDER = 0;
+const G_COLUMNS = 6;
+const G_SOLIDS = 8;
+const G_VIOLATIONS = 11;
+const N_GROUPS = 12;
 
 /** Kennung der Antwort mit Zeichnungs-Stücken (`plan/domains.rs::MULTI_MAGIC`, "PLBm"). */
 const PLAN_MULTI_MAGIC = 1_347_175_021;
@@ -856,8 +738,9 @@ const MAX_CHUNK_STORES = 16;
 const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
 
 /**
- * Decken, Dächer, Räume, Wände mit Öffnungen, Treppen, Stützen, 2D-Zeichnungen, Extrusions-Umrisse
- * eines Geschosses und (mit `global`) Kontext-Konturen und Schnittführungs-Symbole aus dem Kern.
+ * Der Grundriss eines Geschosses aus dem Kern: Decken, Dächer, Räume, Wände mit Öffnungen, Treppen,
+ * Stützen, 2D-Zeichnungen, Extrusions-Umrisse und (mit `global`) Schatten, Baurecht, Kontext-Konturen
+ * und Schnittführungs-Symbole; Abzugskörper, Mono und Strichstärken-Massstab sind eingerechnet.
  * Sichtbarkeit und Darstellungsmodus (UI-Zustand) gehen als Code-Mengen mit: `show` = sichtbar und
  * gezeichnet, `grey` = gedimmt.
  */
@@ -872,8 +755,9 @@ function planDomains(
   scale: number,
   forPrint: boolean,
   compact: boolean,
-  /** Stücke vom letzten Aufruf wiederverwenden (gleiche Objekte). */
-  reuse = true,
+  mono: boolean,
+  /** Zeitpunkt der Schattenstudie (Unix-ms, NaN = keiner). */
+  sunWhen: number,
 ): DomainPrims {
   // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
   // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
@@ -885,16 +769,14 @@ function planDomains(
     show.push(c);
     if (d.greyed) grey.push(c);
   }
-  const args = JSON.stringify({ floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact });
-  const held = reuse ? chunkStores.get(args) : undefined;
+  const args = JSON.stringify({ floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact, mono, sunWhen: Number.isNaN(sunWhen) ? null : sunWhen });
+  const held = chunkStores.get(args);
   const query = held && held.size ? `${args.slice(0, -1)},"have":[${[...held.keys()].join(",")}]}` : args;
   const res = readPlanMulti(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], query), held);
   if (res.main.groups.length !== N_GROUPS) throw new Error("planDomains: unerwartete Gruppen im Plan-Puffer");
-  if (reuse) {
-    chunkStores.delete(args);
-    chunkStores.set(args, res.store);
-    if (chunkStores.size > MAX_CHUNK_STORES) chunkStores.delete(chunkStores.keys().next().value!);
-  }
+  chunkStores.delete(args);
+  chunkStores.set(args, res.store);
+  if (chunkStores.size > MAX_CHUNK_STORES) chunkStores.delete(chunkStores.keys().next().value!);
   return { buf: res.main, chunks: res.chunks, args };
 }
 
@@ -958,7 +840,7 @@ function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: nu
     return index.get(d);
   };
   // Alles, wovon `build` abhängt: ändert sich eine davon, werden die GPU-Chunks neu erzeugt.
-  const ctx = [project.lineStyles, project.hatches, layersStyleSig(project.layers), scaleDenominator, project.overrideRules];
+  const ctx = [project.lineStyles, project.hatches, layersStyleSig(project.layers), scaleDenominator, project.overrideRules, project.scaleLineWeights];
   const out: UnderlayGroup[] = [];
   let k = 1;
   for (let g = 0; g < f[0]; g++) {
@@ -987,43 +869,4 @@ function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: nu
  */
 export function drawingPrimitives(project: Project, d: Drawing2D, scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR): Primitive[] {
   return decodePlanBuf(documentFor(project).queryBin("drawingPrims", [scaleDenominator], JSON.stringify(d))).prims;
-}
-
-function computeBounds(
-  project: Project,
-  /** Ausmass der Kern-Domänen (Wand-Ecken, Decken, Räume, Dach-Traufen, Treppen, 2D-Zeichnungen), s. `planDomains`. */
-  domainBox: [number, number, number, number] | undefined = undefined,
-  /** Zusätzlich einzurahmende Primitive (Schatten, Parzelle), damit Druck/Einpassen sie ganz zeigen. */
-  extra: Primitive[] = [],
-) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  const acc = (p: Vec2) => {
-    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-  };
-  if (domainBox) {
-    acc({ x: domainBox[0], y: domainBox[1] });
-    acc({ x: domainBox[2], y: domainBox[3] });
-  }
-  for (const e of extra) {
-    if (e.kind === "polygon") e.pts.forEach(acc);
-    else if (e.kind === "line") { acc(e.a); acc(e.b); }
-  }
-  // GESAMTE Kontext-Schicht (Konturen, importierte Gebäude/Terrain, Luftbild)
-  // mit einrahmen, damit „Einpassen"/die Standard-Ansicht sie zeigt — sonst
-  // sässe die Ansicht bei einem reinen Kontext-Import (keine Wände) leer am
-  // Ursprung und der Import wäre „unsichtbar" (Nutzer-Report).
-  for (const obj of project.context ?? []) {
-    if (obj.type === "contourSet") {
-      for (const c of obj.contours) for (const p of c.pts) acc(p);
-    } else if (obj.type === "image") {
-      acc(obj.min);
-      acc(obj.max);
-    } else {
-      const pos = obj.positions;
-      for (let i = 0; i + 1 < pos.length; i += 3) acc({ x: pos[i], y: pos[i + 1] });
-    }
-  }
-  if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: 1, maxY: 1 };
-  return { minX, minY, maxX, maxY };
 }

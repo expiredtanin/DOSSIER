@@ -3,7 +3,7 @@ import type { Pair } from "../geometry/polygonBool";
 import { generatePlan } from "./generatePlan";
 import { sampleProject } from "../model/sampleProject";
 import type { ExtrudedSolid, Project } from "../model/types";
-import { keyhole, segmentOutside, subtractRings, subtractVoidsInSection, voidPrisms, voidSectionRects } from "./voids";
+import { keyhole, subtractRings, subtractVoidsInSection, voidPrisms, voidSectionRects } from "./voids";
 
 const sq = (x0: number, y0: number, x1: number, y1: number): Pair[] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 const area = (r: Pair[]) => Math.abs(r.reduce((s, p, i) => s + p[0] * r[(i + 1) % r.length][1] - r[(i + 1) % r.length][0] * p[1], 0) / 2);
@@ -43,10 +43,6 @@ describe("Abzugskoerper — Polygon-Kern", () => {
   it("keyhole haengt mehrere Loecher ein", () => {
     const k = keyhole([sq(0, 0, 10, 2), sq(1, 0.5, 2, 1.5).reverse(), sq(5, 0.5, 6, 1.5).reverse()]);
     expect(k.bridges).toHaveLength(4);
-  });
-  it("segmentOutside: Linie durch Quadrat in zwei Teile", () => {
-    const parts = segmentOutside({ x: 0, y: 0.5 }, { x: 4, y: 0.5 }, [sq(1, 0, 2, 1)]);
-    expect(parts.map(([a, b]) => [a, b])).toEqual([[0, 0.25], [0.5, 1]]);
   });
 });
 

@@ -77,9 +77,11 @@ pub struct DrawCache {
 pub struct RestEntry {
     /// (Stand aller Felder ausser [`NOT_FOR_REST`], Sichtbarkeit/Dimmen).
     pub sig: (u64, String),
-    /// Abschnitte in Puffer-Reihenfolge ohne die Zeichnungen.
+    /// Abschnitte in Puffer-Reihenfolge ohne die Zeichnungen (Zutaten unten, Domänen, Verstösse).
     pub groups: Vec<Segment>,
     pub bounds: [f64; 4],
+    /// Ausmass der Zutaten (Schatten, Baurecht, Kontext), s. `extras::extra_bounds`.
+    pub extra: [f64; 4],
 }
 
 #[derive(Debug)]
@@ -130,7 +132,7 @@ impl Clone for PlanCache {
 
 /// Schlüssel eines Argument-Satzes ohne Sichtbarkeit/Dimmen (die wirken je Element).
 pub fn ctx_key(a: &PlanArgs) -> String {
-    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact)
+    format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono)
 }
 
 /// Sichtbarkeit und Dimmen als vergleichbarer Text (Mengen sortiert).
@@ -210,10 +212,12 @@ pub(crate) mod tests {
     pub(crate) fn assembled(out: &PlanOut, store: &mut HashMap<u64, Vec<u8>>) -> (String, Vec<f64>, Vec<bool>, Option<[f64; 4]>) {
         let v = View::parse(&out.main).unwrap();
         let g = v.groups().unwrap();
-        assert_eq!(g.len(), 10);
-        assert_eq!(g[6].0, g[6].1, "Gruppe 6 im Haupt-Puffer leer");
+        // Gruppe der Zeichnungen (nach Schatten/Baurecht und Decken … Stützen).
+        assert_eq!(g.len(), 12);
+        let dg = 7;
+        assert_eq!(g[dg].0, g[dg].1, "Gruppe der Zeichnungen im Haupt-Puffer leer");
         let mut o = (vec![], vec![], vec![]);
-        range(&out.main, 0, g[6].0, &mut o);
+        range(&out.main, 0, g[dg].0, &mut o);
         let mut next = HashMap::new();
         for (k, b) in &out.chunks {
             let bytes = b.clone().unwrap_or_else(|| store.get(k).expect("Stück fehlt beim Aufrufer").clone());
@@ -221,7 +225,7 @@ pub(crate) mod tests {
             range(&bytes, 0, n, &mut o);
             next.insert(*k, bytes);
         }
-        range(&out.main, g[7].0, v.len(), &mut o);
+        range(&out.main, g[dg + 1].0, v.len(), &mut o);
         *store = next;
         (serde_json::to_string(&o.0).unwrap(), o.1, o.2, v.bounds())
     }
@@ -306,6 +310,8 @@ pub(crate) mod tests {
             "referenceLines": r.next() < 0.3, "global": r.next() < 0.7,
             "scale": ([100.0, 50.0, 200.0][r.below(3)]),
             "forPrint": r.next() < 0.2, "compact": r.next() < 0.4,
+            "mono": r.next() < 0.25,
+            "sunWhen": (if r.next() < 0.7 { json!(1_750_000_000_000.0 + r.next() * 3e10) } else { Value::Null }),
         });
         PlanArgs::parse([0.0, 1.0, 2.0][r.below(3)], &t.to_string()).unwrap()
     }
@@ -317,6 +323,17 @@ pub(crate) mod tests {
         base["blockDefs"] = json!([{"id": "blk", "name": "B", "geom2d": [
             {"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 1, "y": 0}},
             {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 0.3}]}]);
+        // Abzugskörper durch Wand und Decke, Schattenstudie, Baurecht, Strichstärken nach Massstab.
+        base["extrudedSolids"] = json!([
+            {"id": "v1", "type": "extrudedSolid", "levelId": "eg", "operation": "subtract", "height": 3,
+             "points": [{"x": 1, "y": -0.5}, {"x": 1.4, "y": -0.5}, {"x": 1.4, "y": 0.5}, {"x": 1, "y": 0.5}]},
+            {"id": "v2", "type": "extrudedSolid", "levelId": "eg", "operation": "subtract", "height": 0.5, "baseOffset": 2.6,
+             "points": [{"x": 3, "y": 1}, {"x": 3.6, "y": 1}, {"x": 3.6, "y": 2}, {"x": 3, "y": 2}]},
+            {"id": "s1", "type": "extrudedSolid", "levelId": "eg", "height": 2,
+             "points": [{"x": 7, "y": 0}, {"x": 9, "y": 0}, {"x": 9, "y": 2}, {"x": 7, "y": 2}]}]);
+        base["sunStudy"] = json!({"when": "2026-06-21T12:00:00Z", "show": true});
+        base["siteRules"] = json!({"parcel": [{"x": -3, "y": -3}, {"x": 8, "y": -3}, {"x": 8, "y": 7}, {"x": -3, "y": 7}], "defaultSetback": 2.5});
+        base["scaleLineWeights"] = json!(r.next() < 0.5);
         Document::from_json(&base.to_string()).unwrap()
     }
 

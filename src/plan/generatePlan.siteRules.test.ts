@@ -5,12 +5,13 @@
 
 import { describe, it, expect } from "vitest";
 import { generatePlan } from "./generatePlan";
-import { SITE_CLS } from "./generatePlan/siteRules";
 import { sampleProject } from "../model/sampleProject";
 import { flattenCategories } from "../model/types";
 import type { Project, SiteRules } from "../model/types";
 
 const ALL = new Set(flattenCategories(sampleProject.layers).map((c) => c.code));
+/** Erkennungsmerkmale des Baurechts (`core/src/plan/extras.rs`). */
+const SITE_CLS = { parcel: "site-parcel", allowed: "site-allowed", violationFill: "#d0342c" } as const;
 const site: SiteRules = {
   parcel: [{ x: -10, y: -10 }, { x: 20, y: -10 }, { x: 20, y: 20 }, { x: -10, y: 20 }],
   defaultSetback: 4,

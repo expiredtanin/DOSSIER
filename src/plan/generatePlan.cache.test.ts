@@ -79,7 +79,7 @@ describe("Inhalts-Hashes der 2D-Zeichnungen (GPU-Chunk-Cache)", () => {
     expect(hashes(p2, "A")).not.toEqual(hashes(p1, "A"));
   });
 
-  it("mono verändert Primitive in place, ohne den normalen Plan zu vergiften", () => {
+  it("mono (im Kern) lässt den normalen Plan unverändert", () => {
     const proj = project([draw("A", 0)]);
     const normal1 = generatePlan(proj, "eg", visible);
     generatePlan(proj, "eg", visible, undefined, "mittel", false, true);

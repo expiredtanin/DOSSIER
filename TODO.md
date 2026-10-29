@@ -333,6 +333,26 @@ truck (`trucksolid`) bleibt eigenes WASM-Modul (Panic-Isolation), wird vom Kern 
     20k Linien 31 → 6 ms / 63 → 7 ms; Kataster 150k 533 → 59 ms / 862 → 39 ms; Plan + WASM-Renderer nach Änderung katbig 90 →
     38 ms, Kataster 1,8 → 0,6 s. Erstes Öffnen 200 000 Zeichnungen (`doc_open`) 9,6 → 1,8 s, Speicher 953 → 840 MB.
     Nicht in der Tauri-App/im nativen Renderer angesehen.
+    ✅ (29.10.) **`generatePlan` ganz im Kern** ([K3a]/[K3d]/[K4]): `core/src/plan/extras.rs` rechnet Schattenstudie und Baurecht
+    (unterste Gruppe; Verstösse zuoberst), Abzugskörper (aus Wand-/Stützen-/Decken-Poché, über dieselben flachen Funktionen wie
+    vorher), Schwarz-Weiss und Strichstärken nach Massstab (beim Schreiben, `plan_buf::Writer::post`, auch für die kompakte
+    Unterlage `drawingLines`) und das Ausmass samt Kontext. `planDomains` liefert 12 Gruppen; `generatePlan` reicht nur noch
+    Sichtbarkeit, Optionen und den Zeitpunkt der Studie (`Date` in TS: Ortszeit wie bisher) weiter — der Plan bleibt immer lazy
+    und aus Kern-Puffern (auch mit Mono/Abzugskörpern/Massstab: GPU-Chunks aus dem Puffer, Stücke wiederverwendet). Gelöscht:
+    `generatePlan/{sunShadow,siteRules}.ts`, `lineWeightScale.ts`, `subtractVoidsInPlan`/`segmentOutside` (samt Bindung
+    `voids_segment_outside_flat`), `toMono`, `computeBounds`, `realignRuns`. Gleichheit (temporärer Test, gelöscht): 481 000
+    Primitive Feld für Feld (Zahlen per `Object.is`) samt Ausmass, Luftbildern, gedimmten Bereichen und Unterlage gegen die alte
+    TS-Fassung: Beispielprojekt alle Ebenen × 180 Varianten (Detail, Mono, global, Massstab 1:20–1:500, Druck, kompakt, Sichtbarkeit/
+    Dimmen zufällig, mit/ohne Studie und Strichstärken-Option), bigSample, 120 Zufallsprojekte mit Abzugskörpern, Stützen, Schatten
+    (auch ungültige Zeitpunkte, LV95-Anker), Baurecht (Baulinien, Höhe, `show: false`), Kontext; Kataster 30 000 Zeichnungen;
+    `generateVisibleLevelsPlan` stichprobenweise. CLI byte-gleich zum Stand vor beiden Schritten (96 Ausgaben: `plan` SVG 1:100/1:50,
+    JSON 1:100/1:200, `dxf` 1:100/1:50 für 16 Projekte, davon 7 mit Schatten/Baurecht/Abzugskörpern/Strichstärken). Messung
+    (CLI `bench`, unverändertes Projekt): 36 Häuser mit 40 Abzugskörpern, Studie und Baurecht 237 → 2,3 ms, Beispiel mit
+    Abzugskörpern 9 → 0,4 ms. Nicht in der Tauri-App angesehen.
+    Bleibt: `geometry/geomTransform.ts` (`mvGeom`/`scaleGeom`) in TS — die Werkzeuge (Verschieben/Drehen/Skalieren mit
+    Vorschau je Mausschritt, Ausrichten, Block definieren, Griffe) bilden mit Funktionen ab, die zwar affin sind, aber je Element
+    und Frame aufgerufen werden; über die Grenze müsste jede Zeichnungsform (18 Varianten) flach hin und zurück — das lohnt erst,
+    wenn die Werkzeuge selbst im Kern laufen ([K4] S3). Der Kern hat seine Fassung für Blöcke (`plan/drawings.rs::mv_geom`).
   - ◐ **S3 Änderungen kommen aus Rust**: Befehle (Zustandsautomaten, Werkzeuge) erzeugen Ops im Kern; Undo/Redo, Validierung
     (`validateOps`) und Gruppen/Ebenen-Logik wandern nach Rust; `diffToOps` entfällt, TS hält nur noch eine Leseansicht.
     **Erste Etappe (28.10.): Ops, Prüfung, Undo/Redo im Kern.** `core/src/ops.rs` (Op, Prüfung bitgleich zur TS-Fassung — gleiche

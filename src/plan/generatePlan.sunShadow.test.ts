@@ -5,12 +5,13 @@
 
 import { describe, it, expect } from "vitest";
 import { generatePlan } from "./generatePlan";
-import { SUN_SHADOW_FILL } from "./generatePlan/sunShadow";
 import { sampleProject } from "../model/sampleProject";
 import { flattenCategories } from "../model/types";
 import type { Project } from "../model/types";
 
 const ALL = new Set(flattenCategories(sampleProject.layers).map((c) => c.code));
+/** Füllfarbe der Schattenflächen (`core/src/plan/extras.rs::SUN_SHADOW_FILL`). */
+const SUN_SHADOW_FILL = "#3a4a66";
 
 const withStudy = (when: string, show = true): Project => ({ ...sampleProject, sunStudy: { when, show } });
 const shadows = (p: Project, floorId: string) =>

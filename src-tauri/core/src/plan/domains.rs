@@ -43,11 +43,16 @@ pub struct PlanArgs {
     pub for_print: bool,
     /// Kompakte Linien-Unterlage: Linien der einfachen Zeichnungen entstehen bei Bedarf (`drawings.rs`).
     pub compact: bool,
+    /// Schwarz-Weiss (`extras.rs`).
+    pub mono: bool,
+    /// Zeitpunkt der Schattenstudie (Unix-ms; fehlt/ungültig = kein Schatten).
+    pub sun_when: Option<f64>,
 }
 
 impl PlanArgs {
     /// `detail`: 0 grob, 1 mittel, 2 fein; `text`: `{"floor": id, "show": [code…], "grey": [code…],
-    /// "referenceLines": bool, "global": bool, "scale": N, "forPrint": bool, "compact": bool}`.
+    /// "referenceLines": bool, "global": bool, "scale": N, "forPrint": bool, "compact": bool,
+    /// "mono": bool, "sunWhen": ms | null}`.
     pub fn parse(detail: f64, text: &str) -> Result<PlanArgs, String> {
         let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("Plan-Argumente: {e}"))?;
         let set = |k: &str| -> HashSet<String> { v.get(k).and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default() };
@@ -65,6 +70,8 @@ impl PlanArgs {
             scale: v.get("scale").and_then(|b| b.as_f64()).unwrap_or(super::drawings::DEFAULT_SCALE_DENOMINATOR),
             for_print: v.get("forPrint").and_then(|b| b.as_bool()).unwrap_or(false),
             compact: v.get("compact").and_then(|b| b.as_bool()).unwrap_or(false),
+            mono: v.get("mono").and_then(|b| b.as_bool()).unwrap_or(false),
+            sun_when: v.get("sunWhen").and_then(|b| b.as_f64()),
         })
     }
 }
@@ -140,7 +147,7 @@ impl Bounds {
         b[2] = max(b[2], x);
         b[3] = max(b[3], y);
     }
-    fn get(&self) -> Option<[f64; 4]> {
+    pub(crate) fn get(&self) -> Option<[f64; 4]> {
         self.0[0].is_finite().then_some(self.0)
     }
     /// Rohwerte (auch ohne Punkte), s. [`Bounds::merge`].
@@ -562,8 +569,9 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims) {
     }
 }
 
-/// Reihenfolge der Gruppen im Plan-Puffer der Abfrage `planDomains`.
-pub const GROUPS: [&str; 10] = ["ceilings", "roofs", "rooms", "walls", "stairs", "columns", "drawings", "solids", "context", "sections"];
+/// Reihenfolge der Gruppen im Plan-Puffer der Abfrage `planDomains`: Schatten und Baurecht
+/// zuunterst, die Domänen, die Baurechts-Verstösse zuoberst (`extras.rs`).
+pub const GROUPS: [&str; 12] = ["under", "ceilings", "roofs", "rooms", "walls", "stairs", "columns", "drawings", "solids", "context", "sections", "violations"];
 
 /// Abfrage `planDomains` als Plan-Puffer v2 (s. `plan_buf.rs`): eine Gruppe je Domäne in der
 /// Reihenfolge [`GROUPS`], Ausmass im Kopf, Inhalts-Hashes für den GPU-Chunk-Cache. Die
@@ -574,6 +582,10 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     let mut bounds = Bounds::new();
     domains_before(&c, &mut d, &mut bounds)?;
     let mut w = crate::plan_buf::Writer::new(true);
+    w.post = super::extras::post_for(p, a);
+    let (under, violations) = extras_of(p, a);
+    group_refs(&mut w, &under);
+    apply_voids(p, a, &mut d);
     for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns] {
         w.group(g);
     }
@@ -581,11 +593,40 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     super::drawings::plan_drawings(&c, &mut super::drawings::Sink::new(super::drawings::Target::Buf(&mut w), super::drawings::Keep::All), &mut bounds)?;
     w.end_group(start);
     domains_after(&c, &mut d);
+    apply_voids(p, a, &mut d);
     for g in [&d.solids, &d.context, &d.sections] {
         w.group(g);
     }
-    w.bounds = bounds.get();
+    w.group(&violations);
+    w.bounds = Some(super::extras::plan_bounds(&bounds, &super::extras::extra_bounds(p, &under)));
     Ok(w.finish())
+}
+
+/// Schatten/Baurecht (unterste Gruppe, mit Strichmuster-Kennungen) und Verstösse (oberste); nur
+/// beim projektglobalen Aufruf (`global`).
+fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
+    if a.global {
+        super::extras::site_and_shadow(p, &a.floor, a.sun_when)
+    } else {
+        (Vec::new(), Vec::new())
+    }
+}
+
+/// Eine Gruppe aus Primitiven mit Strichmuster-Kennung.
+fn group_refs(w: &mut crate::plan_buf::Writer, prims: &[(Primitive, u32)]) {
+    let start = w.begin_group();
+    for (q, r) in prims {
+        w.push_ref(q, *r);
+    }
+    w.end_group(start);
+}
+
+/// Abzugskörper von allen Domänen-Listen abziehen (`extras::subtract_voids`).
+fn apply_voids(p: &Project, a: &PlanArgs, d: &mut DomainPrims) {
+    let z = super::extras::cut_z(p, &a.floor);
+    for g in [&mut d.ceilings, &mut d.roofs, &mut d.rooms, &mut d.walls, &mut d.stairs, &mut d.columns, &mut d.solids, &mut d.context, &mut d.sections] {
+        *g = super::extras::subtract_voids(std::mem::take(g), p, z);
+    }
 }
 
 /// Kennung der Antwort von `planDomains` mit Cache ("PLBm").
@@ -641,6 +682,7 @@ pub fn plan_domains_cached(p: &Project, revs: &crate::document::Revs, cache: &mu
     }
     let fresh = cc.tables.units_len() == 0;
     let mut w = Writer::with_tables(std::mem::take(&mut cc.tables), true);
+    w.post = super::extras::post_for(p, a);
     let r = assemble_cached(&c, revs, cc, &mut w, have);
     let (main, tables) = w.finish_keep();
     cc.tables = tables;
@@ -661,28 +703,38 @@ pub fn plan_domains_cached(p: &Project, revs: &crate::document::Revs, cache: &mu
 /// Cache bzw. neu (dann aufgenommen).
 fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache::CtxCache, w: &mut crate::plan_buf::Writer, have: &HashSet<u64>) -> Result<Vec<super::drawings::ChunkOut>, String> {
     use super::cache::{selection_sig, RestEntry, NOT_FOR_REST};
-    let sig = (revs.max_except(NOT_FOR_REST), selection_sig(c.a));
+    let sig = (revs.max_except(NOT_FOR_REST), format!("{}\u{3}{}", selection_sig(c.a), c.a.sun_when.unwrap_or(f64::NAN).to_bits()));
     if cc.rest.as_ref().is_some_and(|r| r.sig != sig) {
         cc.rest = None;
     }
     let mut bounds = Bounds::new();
-    let mut fresh: Option<(DomainPrims, Bounds)> = None;
+    // Neu zu erzeugen: Domänen-Listen (mit Strichmuster-Kennung), Ausmass der Domänen und der Zutaten.
+    let mut fresh: Option<(Vec<Vec<(Primitive, u32)>>, Bounds, Bounds)> = None;
     if cc.rest.is_none() {
         let mut d = DomainPrims::default();
         let mut b = Bounds::new();
         domains_before(c, &mut d, &mut b)?;
         domains_after(c, &mut d);
-        fresh = Some((d, b));
+        let (under, violations) = extras_of(c.p, c.a);
+        let extra = super::extras::extra_bounds(c.p, &under);
+        apply_voids(c.p, c.a, &mut d);
+        let plain = |g: Vec<Primitive>| g.into_iter().map(|q| (q, 0)).collect::<Vec<_>>();
+        let mut lists = vec![under];
+        for g in [d.ceilings, d.roofs, d.rooms, d.walls, d.stairs, d.columns, d.solids, d.context, d.sections] {
+            lists.push(plain(g));
+        }
+        lists.push(plain(violations));
+        fresh = Some((lists, b, extra));
     }
     let mut segs: Vec<crate::plan_buf::Segment> = Vec::new();
+    // Liste `k`: 0 Schatten/Baurecht, 1–9 Domänen (ohne Zeichnungen), 10 Verstösse.
     let put = |w: &mut crate::plan_buf::Writer, k: usize, segs: &mut Vec<crate::plan_buf::Segment>| {
         let start = w.begin_group();
         match (&fresh, &cc.rest) {
-            (Some((d, _)), _) => {
-                let g = [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.solids, &d.context, &d.sections][k];
+            (Some((lists, _, _)), _) => {
                 w.mark();
-                for x in g.iter() {
-                    w.push(x);
+                for (x, r) in lists[k].iter() {
+                    w.push_ref(x, *r);
                 }
                 segs.push(w.take_segment());
             }
@@ -691,7 +743,7 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         }
         w.end_group(start);
     };
-    for k in 0..6 {
+    for k in 0..7 {
         put(w, k, &mut segs);
     }
     // Gruppe 6 bleibt im Haupt-Puffer leer; die Zeichnungen kommen als Stücke.
@@ -705,17 +757,24 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         h ^ cc.drawings.sig.wrapping_mul(0xff51_afd7_ed55_8ccd)
     };
     let chunks = super::drawings::plan_drawings_chunked(c, revs.item_stamps("drawings2d").unwrap_or(&[]), &mut cc.drawings, salt, have, &mut bounds)?;
-    for k in 6..9 {
+    for k in 7..11 {
         put(w, k, &mut segs);
     }
-    match fresh {
-        Some((_, b)) => {
+    let extra = match fresh {
+        Some((_, b, extra)) => {
             bounds.merge(b.raw());
-            cc.rest = Some(RestEntry { sig, groups: segs, bounds: b.raw() });
+            cc.rest = Some(RestEntry { sig, groups: segs, bounds: b.raw(), extra: extra.raw() });
+            extra.raw()
         }
-        None => bounds.merge(cc.rest.as_ref().map_or(Bounds::new().raw(), |r| r.bounds)),
-    }
-    w.bounds = bounds.get();
+        None => {
+            let r = cc.rest.as_ref().expect("Cache vorhanden");
+            bounds.merge(r.bounds);
+            r.extra
+        }
+    };
+    let mut e = Bounds::new();
+    e.merge(extra);
+    w.bounds = Some(super::extras::plan_bounds(&bounds, &e));
     Ok(chunks)
 }
 
@@ -756,11 +815,15 @@ mod tests {
         let (prims, groups, bounds) = crate::plan_buf::decode(&buf).unwrap();
         assert_eq!(groups.len(), GROUPS.len());
         let lists = [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns, &d.drawings.prims, &d.solids, &d.context, &d.sections];
-        for ((a, b), l) in groups.iter().zip(lists) {
+        for ((a, b), l) in groups[1..11].iter().zip(lists) {
             assert_eq!(serde_json::to_string(&prims[*a..*b]).unwrap(), serde_json::to_string(l).unwrap());
         }
+        assert!(groups[0].0 == groups[0].1 && groups[11].0 == groups[11].1, "ohne Studie und Baurecht leer");
         assert!(!d.walls.is_empty() && !d.rooms.is_empty());
-        assert_eq!(bounds, d.bounds);
+        // Ausmass: Domänen und Kontext.
+        let mut db = Bounds::new();
+        db.merge(d.bounds.unwrap());
+        assert_eq!(bounds, Some(super::super::extras::plan_bounds(&db, &super::super::extras::extra_bounds(&p, &[]))));
     }
 
     #[test]

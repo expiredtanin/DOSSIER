@@ -1000,6 +1000,7 @@ struct ChainKey {
 }
 
 /// Eine Linie mit geliehenen Feldern (Felder wie `Primitive::Line`), s. [`Writer::line_ref`].
+#[derive(Clone, Copy)]
 pub struct LineRef<'a> {
     pub a: Vec2,
     pub b: Vec2,
@@ -1066,6 +1067,8 @@ pub struct Writer {
     pub bounds: Option<[f64; 4]>,
     /// Laufende Aufnahme eines Abschnitts ([`Writer::mark`] … [`Writer::take_segment`]).
     rec: Option<Recording>,
+    /// Nachbearbeitung jedes geschriebenen Primitivs (Schwarz-Weiss, Strichstärken-Faktor).
+    pub post: Option<crate::plan::extras::Post>,
 }
 
 /// Anfang und Merkposten eines aufgenommenen Abschnitts.
@@ -1196,6 +1199,7 @@ impl Writer {
             h: FNV_OFFSET,
             bounds: None,
             rec: None,
+            post: None,
         }
     }
 
@@ -1635,6 +1639,18 @@ impl Writer {
     /// Kennung): zwei Linien mit Muster-Liste setzen einen Linienzug nur bei gleicher Kennung fort
     /// (TS: dieselbe Array-Referenz), ohne Kennung nie.
     pub fn push_ref(&mut self, p: &Primitive, dash_ref: u32) {
+        // Linien bearbeitet `line_ref`.
+        if let Some(post) = self.post.filter(|q| q.active()) {
+            if !matches!(p, Primitive::Line { .. }) {
+                let mut q = p.clone();
+                post.apply(&mut q);
+                return self.push_ref_raw(&q, dash_ref);
+            }
+        }
+        self.push_ref_raw(p, dash_ref)
+    }
+
+    fn push_ref_raw(&mut self, p: &Primitive, dash_ref: u32) {
         match p {
             Primitive::Polygon {
                 pts,
@@ -1754,6 +1770,15 @@ impl Writer {
     /// Eine Linie aus geliehenen Feldern anhängen (wie [`Writer::push_ref`] mit `Primitive::Line`,
     /// ohne das Primitiv erst zu bauen — die 2D-Zeichnungen schreiben so direkt in den Puffer).
     pub fn line_ref(&mut self, l: &LineRef, dash_ref: u32) {
+        let posted;
+        let l = match self.post.filter(|q| q.active()) {
+            Some(q) => {
+                let (color, weight_mm) = q.line(l.color, l.weight_mm);
+                posted = LineRef { color, weight_mm, ..*l };
+                &posted
+            }
+            None => l,
+        };
         let plain = l.zigzag.is_none() && l.motif.is_none();
         let di = l.drawing_id.map(|s| self.intern(s).0);
         let ci = l.color.map(|s| self.intern(s).0);

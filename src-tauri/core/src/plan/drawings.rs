@@ -1228,6 +1228,7 @@ fn build_chunk<'a>(
     let base_key = part.iter().find_map(|(_, s, _)| owner.get(s).copied());
     let base = base_key.and_then(|k| old.get(&k).or_else(|| new.get(&k)));
     let mut w = Writer::with_tables(base.map_or_else(Default::default, |b| b.tables.clone()), true);
+    w.post = super::extras::post_for(c.p, c.a);
     let g = w.begin_group();
     w.begin_kept();
     if let Some(b) = base {
