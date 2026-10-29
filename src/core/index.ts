@@ -112,7 +112,6 @@ export {
   type PolylineVertexType,
   canSetVertexType,
   vertexTypeOf,
-  withVertexType,
 } from "../geometry/polylineVertexType";
 
 export {

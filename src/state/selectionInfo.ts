@@ -547,25 +547,8 @@ export function deriveSelection(
     columnId: selectedColumnId,
     roofId: selectedRoofId,
     contextObjectId: selectedContextObjectId,
-    // Lage in der Leseansicht (= Reihenfolge im Dokument): erspart dem Kern die lineare Suche.
-    at: {} as Record<string, number>,
   };
-  const P = project as unknown as Record<string, { id: string }[] | undefined>;
-  const hint = (list: string, id: string | null | undefined) => {
-    if (!id) return;
-    const i = (P[list] ?? []).findIndex((x) => x.id === id);
-    if (i >= 0) args.at[list] = i;
-  };
-  hint("context", selectedContextObjectId);
-  hint("drawings2d", selectedDrawingId);
-  hint("extrudedSolids", selectedExtrudedSolidId);
-  hint("columns", selectedColumnId);
-  hint("openings", selectedOpeningId);
-  hint("walls", selectedWallIds[0]);
-  hint("ceilings", selectedCeilingId);
-  hint("roofs", selectedRoofId);
-  hint("stairs", selectedStairId);
-  hint("rooms", selectedRoomId);
+  // Das Element sucht der Kern über den Positions-Index des Dokuments (keine lineare Suche).
   let sel: Selection | null;
   try {
     sel = documentFor(project).queryRootMarked<Selection | null>("selectionInfo", JSON.stringify(args));

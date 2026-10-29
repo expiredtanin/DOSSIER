@@ -28,6 +28,7 @@ export type GripRequest =
   | { op: "ceilingEdge" | "roomEdge"; id: string; a: number; b: number; delta: P }
   | { op: "insertPoint"; id: string; seg: number; pt: P }
   | { op: "deletePoint"; id: string; index: number }
+  | { op: "vertexType"; id: string; index: number; vertexType: "corner" | "arc" | "spline" }
   | { op: "wallThickness" | "ceilingThickness"; id: string; thickness: number; newId: string; newName: string };
 
 /** Punkt als Anfrage-Paar. */

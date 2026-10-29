@@ -8,9 +8,10 @@
 
 use crate::model::Project;
 pub use crate::ops::Op;
-use crate::ops::{has_dup, id_of, unique_ids, History};
+use crate::ops::{has_dup, id_of, unique_ids, History, Step};
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Default)]
@@ -28,9 +29,12 @@ pub struct Document {
     revs: Revs,
     /// Caches der Plan-Erzeugung (`plan::cache`), gültig über [`Revs`].
     plan_cache: crate::plan::cache::PlanCache,
-    /// id → Position je Liste über die Aufrufe hinweg (eine Änderung an einem Element einer grossen
-    /// Liste sucht dann nicht jedes Mal linear); jede Op ausser `replace` verwirft ihre Liste.
-    pos: PosCache,
+    /// id → Position je Liste über die Aufrufe hinweg (s. [`PosCache`]); in einer `RefCell`, damit auch
+    /// lesende Abfragen ([`Lookup`]) den Index bauen und nutzen.
+    pos: RefCell<PosCache>,
+    /// Je Op der zuletzt angewendeten Folge (Commit, Abgleich, Undo/Redo) die Position des von `replace`
+    /// getroffenen Elements: TS führt die Leseansicht damit ohne Suche nach ([`Document::last_hits`]).
+    last_hits: Vec<Option<usize>>,
 }
 
 /// Änderungsstände ([K4], Caches der Ableitungen): ein globaler Zähler; jede Op vergibt ihrem Feld
@@ -92,53 +96,91 @@ impl Revs {
         &self.items[key]
     }
 
-    /// Element-Stände nach einer Op auf der Liste nachführen (`before` = Länge vor der Op).
-    fn item_op(&mut self, op: &Op, before: usize, removed: Option<&[bool]>, hit: Option<usize>) {
-        let key = op.key();
+    /// Element-Stände nach einer Op auf der Liste `key` nachführen (`before` = Länge vor der Op).
+    fn item_op(&mut self, key: &str, shape: Shape, before: usize, removed: Option<&[bool]>, hit: Option<usize>) {
         self.touch(key);
         let Some(mut v) = self.items.remove(key) else { return };
         if v.len() != before {
             return;
         }
-        match op {
-            Op::Add { items, at, .. } => {
+        match shape {
+            Shape::Add { n, at } => {
                 let at = at.map_or(v.len(), |a| a.min(v.len()));
                 let start = self.counter;
-                self.counter += items.len() as u64;
-                v.splice(at..at, start + 1..=start + items.len() as u64);
+                self.counter += n as u64;
+                v.splice(at..at, start + 1..=start + n as u64);
             }
-            Op::Replace { .. } => match hit {
+            Shape::Replace => match hit {
                 Some(i) if i < v.len() => v[i] = self.next(),
                 Some(_) => return,
                 None => v.push(self.next()),
             },
-            Op::Remove { .. } => match removed {
+            Shape::Remove => match removed {
                 Some(keep) if keep.len() == v.len() => {
                     let mut k = keep.iter();
                     v.retain(|_| *k.next().unwrap_or(&false));
                 }
                 _ => return,
             },
-            Op::Reorder { .. } | Op::SetField { .. } => return,
+            Shape::Other => return,
         }
         self.items.insert(key.to_owned(), v);
     }
 }
 
-/// id → Position je Liste für die Dauer einer Op-Folge. Nur `replace` sucht darüber; jede andere Op
-/// auf der Liste verwirft den Eintrag. Erst die zweite Suche in derselben Liste baut den Index —
-/// ein einzelner Drag-Schritt bleibt bei der linearen Suche, Serien (Auswahl verschieben: hunderte
-/// `replace`) kosten so O(Liste + Ops) statt O(Liste · Ops). Gleiche Semantik wie `position`
-/// (erstes Vorkommen). Schlüssel ist ein Hash der id (keine Text-Kopien); jeder Treffer wird an der
-/// Liste nachgeprüft, bei einer Kollision sucht `find` linear.
-#[derive(Clone, Debug, Default)]
-struct PosCache(HashMap<String, PosEntry>);
+/// Art einer Op für die Element-Stände (die Op selbst ist beim Nachführen schon ins Dokument übergegangen).
+#[derive(Clone, Copy)]
+enum Shape {
+    Add { n: usize, at: Option<usize> },
+    Replace,
+    Remove,
+    Other,
+}
 
-#[derive(Clone, Debug)]
-enum PosEntry {
-    /// Einmal linear gesucht.
-    Once,
-    Built(HashMap<u64, usize>),
+impl Shape {
+    fn of(op: &Op) -> Shape {
+        match op {
+            Op::Add { items, at, .. } => Shape::Add { n: items.len(), at: *at },
+            Op::Replace { .. } => Shape::Replace,
+            Op::Remove { .. } => Shape::Remove,
+            Op::Reorder { .. } | Op::SetField { .. } => Shape::Other,
+        }
+    }
+}
+
+/// id → Position je Liste, über die Aufrufe hinweg im Dokument gehalten: `replace` (Commit, Undo/Redo)
+/// und die Abfragen, die ein Element per id suchen (Griffe, Objekt-Info, s. [`Lookup`]), finden es ab
+/// der ersten Suche über den Index statt linear (eine Änderung an einem Element einer grossen Liste
+/// kostete je Mausschritt eine lineare Suche im Kern und eine in TS). `add` am Ende führt den Index
+/// nach, jede andere Struktur-Op (`add` mitten hinein, `remove`, `reorder`, `setField`) verwirft ihn.
+/// Kleine Listen bleiben linear. Gleiche Semantik wie `position` (erstes Vorkommen). Schlüssel ist ein
+/// Hash der id (keine Text-Kopien); jeder Treffer wird an der Liste nachgeprüft, bei einer Kollision
+/// sucht `find` linear.
+#[derive(Clone, Debug, Default)]
+pub struct PosCache(HashMap<String, IdIndex>);
+
+/// Index id-Hash → Position einer Liste.
+type IdIndex = HashMap<u64, usize, std::hash::BuildHasherDefault<IdHasher>>;
+
+/// Ab dieser Länge baut `find` einen Index (darunter ist die lineare Suche billiger).
+const INDEX_MIN_LEN: usize = 32;
+
+/// Reicht den schon gestreuten id-Hash ([`id_hash`]) durch (kein zweites Hashen).
+#[derive(Default)]
+struct IdHasher(u64);
+
+impl std::hash::Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 = (self.0 ^ *b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.0 = n;
+    }
 }
 
 /// FNV-1a über die id.
@@ -152,38 +194,57 @@ impl PosCache {
         let Some(id) = id else {
             return linear(None);
         };
-        match self.0.get(collection) {
-            Some(PosEntry::Built(m)) => match m.get(&id_hash(id)) {
-                Some(&i) if list.get(i).and_then(id_of) == Some(id) => Some(i),
-                Some(_) => linear(Some(id)),
-                None => None,
-            },
-            Some(PosEntry::Once) => {
-                let mut m: HashMap<u64, usize> = HashMap::with_capacity(list.len());
-                for (i, e) in list.iter().enumerate() {
-                    if let Some(x) = id_of(e) {
-                        m.entry(id_hash(x)).or_insert(i);
-                    }
+        if list.len() < INDEX_MIN_LEN {
+            return linear(Some(id));
+        }
+        let m = self.0.entry(collection.to_owned()).or_insert_with(|| {
+            let mut m = IdIndex::with_capacity_and_hasher(list.len(), Default::default());
+            for (i, e) in list.iter().enumerate() {
+                if let Some(x) = id_of(e) {
+                    m.entry(id_hash(x)).or_insert(i);
                 }
-                self.0.insert(collection.to_owned(), PosEntry::Built(m));
-                self.find(collection, list, Some(id))
             }
-            None => {
-                self.0.insert(collection.to_owned(), PosEntry::Once);
-                linear(Some(id))
-            }
+            m
+        });
+        match m.get(&id_hash(id)) {
+            Some(&i) if list.get(i).and_then(id_of) == Some(id) => Some(i),
+            Some(_) => linear(Some(id)),
+            None => None,
         }
     }
 
-    /// Element `id` wurde an Position `at` angehängt (`replace` ohne Treffer).
+    /// Element `id` wurde an Position `at` angehängt (`replace` ohne Treffer, `add` am Ende).
     fn pushed(&mut self, collection: &str, id: Option<&str>, at: usize) {
-        if let (Some(PosEntry::Built(m)), Some(id)) = (self.0.get_mut(collection), id) {
+        if let (Some(m), Some(id)) = (self.0.get_mut(collection), id) {
             m.entry(id_hash(id)).or_insert(at);
         }
     }
 
     fn forget(&mut self, collection: &str) {
         self.0.remove(collection);
+    }
+}
+
+/// Elemente der Projekt-Wurzel per id finden: im Dokument über dessen Positions-Index ([`PosCache`]),
+/// sonst (Tests, Wurzel ohne Dokument) linear. Für Abfragen auf der rohen Wurzel (Griffe, Objekt-Info).
+pub struct Lookup<'a> {
+    pub root: &'a Map<String, Value>,
+    pos: Option<&'a RefCell<PosCache>>,
+}
+
+impl<'a> Lookup<'a> {
+    /// Ohne Index (lineare Suche).
+    pub fn plain(root: &'a Map<String, Value>) -> Self {
+        Lookup { root, pos: None }
+    }
+
+    /// Erstes Element mit `id` in der Liste `collection`.
+    pub fn find(&self, collection: &str, id: &str) -> Option<&'a Value> {
+        let list = self.root.get(collection).and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+        match self.pos {
+            Some(pos) => pos.borrow_mut().find(collection, list, Some(id)).map(|i| &list[i]),
+            None => list.iter().find(|e| id_of(e) == Some(id)),
+        }
     }
 }
 
@@ -204,7 +265,7 @@ impl Document {
         self.dirty.clear();
         self.dirty_items.clear();
         self.revs.reset();
-        self.pos = PosCache::default();
+        self.pos = RefCell::default();
         self.history.clear();
     }
 
@@ -277,6 +338,17 @@ impl Document {
         &self.root
     }
 
+    /// Je Op der zuletzt angewendeten Folge die Position des von `replace` getroffenen Elements (None =
+    /// keine `replace`-Op oder kein Treffer); nach einer Zurückweisung leer.
+    pub fn last_hits(&self) -> &[Option<usize>] {
+        &self.last_hits
+    }
+
+    /// Die Wurzel mit dem Positions-Index des Dokuments (Suche per id, s. [`Lookup`]).
+    pub fn lookup(&self) -> Lookup<'_> {
+        Lookup { root: &self.root, pos: Some(&self.pos) }
+    }
+
     pub fn field(&self, key: &str) -> Option<&Value> {
         self.root.get(key)
     }
@@ -290,60 +362,70 @@ impl Document {
     }
 
 
-    /// Wendet eine Op ohne Aufzeichnung an (Semantik wie `applyOps` in TS). Liefert bei `replace`
-    /// mit Treffer dessen Position; führt die Änderungsstände nach.
-    fn apply_raw(&mut self, op: &Op, pos: &mut PosCache) -> Option<usize> {
-        if !matches!(op, Op::Replace { .. }) {
-            pos.forget(op.key());
+    /// Wendet eine Op ohne Aufzeichnung an (Semantik wie `applyOps` in TS); die Op geht ins Dokument
+    /// über (keine Kopie). Liefert bei `replace` mit Treffer dessen Position; führt die Änderungsstände
+    /// nach.
+    fn apply_raw(&mut self, op: Op, pos: &mut PosCache) -> Option<usize> {
+        let key = op.key().to_owned();
+        let shape = Shape::of(&op);
+        // `add` am Ende einer vorhandenen Liste lässt die Positionen stehen (Index wird nachgeführt).
+        let current = self.root.get(&key).and_then(Value::as_array).map(Vec::len);
+        let appended = matches!(op, Op::Add { at, .. } if current.is_some_and(|n| at.is_none_or(|a| a >= n)));
+        if !matches!(op, Op::Replace { .. }) && !appended {
+            pos.forget(&key);
         }
-        let before = self.root.get(op.key()).and_then(Value::as_array).map_or(0, Vec::len);
+        let before = current.unwrap_or(0);
         let mut hit = None;
         let mut removed = None;
         match op {
             Op::SetField { key, value, at } => match value {
                 Some(v) => match at {
-                    Some(i) if !self.root.contains_key(key) => {
-                        let i = (*i).min(self.root.len());
-                        self.root.shift_insert(i, key.clone(), v.clone());
+                    Some(i) if !self.root.contains_key(&key) => {
+                        let i = i.min(self.root.len());
+                        self.root.shift_insert(i, key, v);
                     }
                     _ => {
-                        self.root.insert(key.clone(), v.clone());
+                        self.root.insert(key, v);
                     }
                 },
                 None => {
-                    self.root.shift_remove(key);
+                    self.root.shift_remove(&key);
                 }
             },
             Op::Add { collection, items, at } => {
-                let list = self.list_mut(collection);
+                let list = self.list_mut(&collection);
                 let at = at.map_or(list.len(), |a| a.min(list.len()));
-                list.splice(at..at, items.iter().cloned());
+                if appended {
+                    for (k, e) in items.iter().enumerate() {
+                        pos.pushed(&collection, id_of(e), at + k);
+                    }
+                }
+                list.splice(at..at, items);
             }
             Op::Replace { collection, entity } => {
-                let list = self.list_mut(collection);
-                let id = id_of(entity);
-                match pos.find(collection, list, id) {
+                let list = self.list_mut(&collection);
+                match pos.find(&collection, list, id_of(&entity)) {
                     Some(i) => {
-                        list[i] = entity.clone();
+                        list[i] = entity;
                         hit = Some(i);
                     }
                     None => {
-                        list.push(entity.clone());
-                        pos.pushed(collection, id, list.len() - 1);
+                        pos.pushed(&collection, id_of(&entity), list.len());
+                        list.push(entity);
                     }
                 }
             }
             Op::Remove { collection, ids } => {
                 let drop: HashSet<&str> = ids.iter().map(String::as_str).collect();
                 let tracked = self.revs.items.contains_key(collection.as_str());
-                let list = self.list_mut(collection);
+                let list = self.list_mut(&collection);
                 if tracked {
                     removed = Some(list.iter().map(|e| !id_of(e).is_some_and(|i| drop.contains(i))).collect::<Vec<bool>>());
                 }
                 list.retain(|e| !id_of(e).is_some_and(|i| drop.contains(i)));
             }
             Op::Reorder { collection, ids } => {
-                let list = std::mem::take(self.list_mut(collection));
+                let list = std::mem::take(self.list_mut(&collection));
                 let listed: HashSet<&str> = ids.iter().map(String::as_str).collect();
                 let mut by_id: HashMap<&str, &Value> = HashMap::new();
                 for e in &list {
@@ -354,44 +436,44 @@ impl Document {
                 }
                 let mut ordered: Vec<Value> = ids.iter().filter_map(|id| by_id.get(id.as_str()).map(|e| (*e).clone())).collect();
                 ordered.extend(list.iter().filter(|e| !id_of(e).is_some_and(|i| listed.contains(i))).cloned());
-                *self.list_mut(collection) = ordered;
+                *self.list_mut(&collection) = ordered;
             }
         }
-        self.revs.item_op(op, before, removed.as_deref(), hit);
+        self.revs.item_op(&key, shape, before, removed.as_deref(), hit);
         hit
     }
 
     /// Nach einer angenommenen Op: was die typisierte Sicht neu lesen muss (ein Element nach
     /// `replace` mit Treffer, sonst das Feld).
-    fn mark_dirty(&mut self, op: &Op, hit: Option<usize>) {
-        match (op, hit) {
-            (Op::Replace { collection, .. }, Some(i)) if self.typed.is_some() => self.dirty_items.push((collection.clone(), i)),
+    fn mark_dirty(&mut self, key: String, replace: bool, hit: Option<usize>) {
+        match hit {
+            Some(i) if replace && self.typed.is_some() => self.dirty_items.push((key, i)),
             _ => {
-                self.dirty.insert(op.key().to_owned());
+                self.dirty.insert(key);
             }
         }
     }
 
-    /// Wendet eine Op an und liefert (inverse Ops in Anwendungsreihenfolge, ob die Vorwärts-Op als
-    /// `add` aufzuzeichnen ist — `replace` ohne Treffer). Listen bekommen feine Inverse (`replace` ↔ altes Element, `add` ↔ `remove`,
+    /// Wendet eine Op an und liefert (inverse Ops in Anwendungsreihenfolge, Treffer-Position bei
+    /// `replace`). Listen bekommen feine Inverse (`replace` ↔ altes Element, `add` ↔ `remove`,
     /// `remove` ↔ `add` an den alten Positionen, `reorder` ↔ alte Reihenfolge), wo das exakt ist
     /// (`add`: ids neu und eindeutig; `reorder`: alle ids eindeutig); sonst (fehlendes Feld, kein
     /// Array, Alt-Doppelungen) wird das ganze Feld samt Position gesichert. Ohne Hash über die ganze
-    /// Liste — ein Drag-Schritt kostet nur das Suchen des Elements.
-    fn apply_recorded(&mut self, op: &Op, pos: &mut PosCache) -> (Vec<Op>, bool, Option<usize>) {
+    /// Liste — ein Drag-Schritt kostet nur das Suchen des Elements; das neue Element geht ohne Kopie
+    /// ins Dokument, das alte in die inverse Op.
+    fn apply_recorded(&mut self, op: Op, pos: &mut PosCache) -> (Vec<Op>, Option<usize>) {
         let key = op.key();
         let old = self.root.get(key);
         let snapshot = || {
             let at = self.root.keys().position(|k| k == key);
             Op::SetField { key: key.to_owned(), value: old.cloned(), at }
         };
-        let clean = match op {
+        let clean = match &op {
             Op::SetField { .. } => None,
             Op::Reorder { .. } => old.and_then(Value::as_array).filter(|a| a.iter().all(|e| id_of(e).is_some()) && unique_ids(a)),
             _ => old.and_then(Value::as_array),
         };
-        let mut as_add = false;
-        let inverse = match (op, clean) {
+        let inverse = match (&op, clean) {
             (_, None) => vec![snapshot()],
             (Op::Add { collection, items, .. }, Some(list)) => {
                 let mut new_ids: HashSet<&str> = HashSet::with_capacity(items.len());
@@ -406,17 +488,14 @@ impl Document {
             (Op::Replace { collection, entity }, Some(list)) => match pos.find(collection, list, id_of(entity)) {
                 Some(i) => {
                     // Direkt ersetzen (spart die zweite Suche in `apply_raw`).
-                    let list = self.root.get_mut(key).and_then(Value::as_array_mut).expect("Liste geprüft");
                     let n = list.len();
-                    let prev = std::mem::replace(&mut list[i], entity.clone());
-                    self.revs.item_op(op, n, None, Some(i));
-                    return (vec![Op::Replace { collection: collection.clone(), entity: prev }], false, Some(i));
+                    let Op::Replace { collection, entity } = op else { unreachable!() };
+                    let list = self.root.get_mut(&collection).and_then(Value::as_array_mut).expect("Liste geprüft");
+                    let prev = std::mem::replace(&mut list[i], entity);
+                    self.revs.item_op(&collection, Shape::Replace, n, None, Some(i));
+                    return (vec![Op::Replace { collection, entity: prev }], Some(i));
                 }
-                None => {
-                    // Aufgezeichnet als `add` (so trifft jedes aufgezeichnete `replace` ein vorhandenes Element).
-                    as_add = true;
-                    vec![Op::Remove { collection: collection.clone(), ids: vec![id_of(entity).unwrap_or("").to_owned()] }]
-                }
+                None => vec![Op::Remove { collection: collection.clone(), ids: vec![id_of(entity).unwrap_or("").to_owned()] }],
             },
             (Op::Remove { collection, ids }, Some(list)) => {
                 let drop: HashSet<&str> = ids.iter().map(String::as_str).collect();
@@ -440,116 +519,128 @@ impl Document {
             (Op::SetField { .. }, Some(_)) => unreachable!("setField hat keine Liste"),
         };
         let hit = self.apply_raw(op, pos);
-        (inverse, as_add, hit)
+        (inverse, hit)
     }
 
-    /// Wendet `ops` atomar an und prüft sie (`ops::validate`). Verstösse → `Err(Meldungen)`,
-    /// Dokument unverändert. Ok → (je Op: als `add` aufzuzeichnen, inverse Ops). `sanitize`: die Ops
-    /// können Nicht-endlich-Marken enthalten (s. `ops.rs`).
-    fn apply_checked(&mut self, ops: &[Op], sanitize: bool) -> Result<(Vec<bool>, Vec<Op>), Vec<String>> {
+    /// Wendet `ops` an und liefert die inversen Ops (Anwendungsreihenfolge), ohne Prüfung (Undo/Redo:
+    /// die Inverse eines Schritts ist der Gegenschritt).
+    fn apply_inverting(&mut self, ops: Vec<Op>) -> Vec<Op> {
+        let mut pos = self.pos.take();
+        self.last_hits.clear();
+        let mut inverses: Vec<Vec<Op>> = Vec::with_capacity(ops.len());
+        for op in ops {
+            let (key, replace) = (op.key().to_owned(), matches!(op, Op::Replace { .. }));
+            let (inv, hit) = self.apply_recorded(op, &mut pos);
+            self.mark_dirty(key, replace, hit);
+            self.last_hits.push(hit);
+            inverses.push(inv);
+        }
+        *self.pos.get_mut() = pos;
+        inverses.into_iter().rev().flatten().collect()
+    }
+
+    /// Wendet `ops` atomar an und prüft sie (`ops::validate`, Werte vor dem Anwenden, neue doppelte ids
+    /// danach — die Ops gehen ohne Kopie ins Dokument über). Verstösse → `Err(Meldungen)`, Dokument
+    /// unverändert. Ok → inverse Ops. `sanitize`: die Ops können Nicht-endlich-Marken enthalten
+    /// (s. `ops.rs`).
+    fn apply_checked(&mut self, ops: Vec<Op>, sanitize: bool) -> Result<Vec<Op>, Vec<String>> {
         // Alt-Doppelungen der Listen merken, in die eingefügt oder die gesetzt wird.
         let mut had_dup: HashSet<String> = HashSet::new();
-        for op in ops {
+        for op in &ops {
             if matches!(op, Op::Add { .. } | Op::SetField { .. }) && !had_dup.contains(op.key()) && has_dup(self.root.get(op.key())) {
                 had_dup.insert(op.key().to_owned());
             }
         }
-        let mut inverses: Vec<Vec<Op>> = Vec::with_capacity(ops.len());
-        let mut as_add: Vec<bool> = Vec::with_capacity(ops.len());
-        let mut hits: Vec<Option<usize>> = Vec::with_capacity(ops.len());
-        let mut pos = std::mem::take(&mut self.pos);
+        let had = |k: &str| had_dup.contains(k);
+        let n = ops.len();
+        let mut inverses: Vec<Vec<Op>> = Vec::with_capacity(n);
+        let mut hits: Vec<Option<usize>> = Vec::with_capacity(n);
+        // Je Op: Feld, ob `replace`, ob `add`, Befunde der Werte.
+        let mut info: Vec<(String, bool, bool, Vec<String>)> = Vec::with_capacity(n);
+        let mut pos = self.pos.take();
         for op in ops {
-            let (inv, add, hit) = self.apply_recorded(op, &mut pos);
+            let mut found = Vec::new();
+            crate::ops::value_problems(&op, &had, &mut found);
+            info.push((op.key().to_owned(), matches!(op, Op::Replace { .. }), matches!(op, Op::Add { .. }), found));
+            let (inv, hit) = self.apply_recorded(op, &mut pos);
             inverses.push(inv);
-            as_add.push(add);
             hits.push(hit);
         }
-        let problems = crate::ops::validate(&self.root, ops, &|k| had_dup.contains(k));
+        let mut problems = Vec::new();
+        let mut dup_checked: HashSet<&str> = HashSet::new();
+        for (key, _, add, found) in &mut info {
+            problems.append(found);
+            if *add && dup_checked.insert(key.as_str()) {
+                problems.extend(crate::ops::add_dup_problem(&self.root, key, &had));
+            }
+        }
         if !problems.is_empty() {
             // Nach der Rücknahme gilt keine gemerkte Position mehr sicher.
             let mut pos = PosCache::default();
-            for inv in inverses.iter().rev() {
+            for inv in inverses.into_iter().rev() {
                 for op in inv {
                     self.apply_raw(op, &mut pos);
                 }
             }
+            self.last_hits.clear();
             return Err(problems);
         }
-        self.pos = pos;
+        *self.pos.get_mut() = pos;
         if sanitize {
             // Angenommene Nicht-endlich-Marken (zu tief für die Prüfung) als null speichern.
-            let keys: HashSet<&str> = ops.iter().map(Op::key).collect();
+            let keys: HashSet<&str> = info.iter().map(|i| i.0.as_str()).collect();
             for k in keys {
                 if let Some(v) = self.root.get_mut(k) {
                     crate::ops::sanitize_non_finite(v);
                 }
             }
         }
-        for (op, hit) in ops.iter().zip(hits) {
-            self.mark_dirty(op, hit);
+        for ((key, replace, _, _), hit) in info.into_iter().zip(&hits) {
+            self.mark_dirty(key, replace, *hit);
         }
-        Ok((as_add, inverses.into_iter().rev().flatten().collect()))
+        self.last_hits = hits;
+        Ok(inverses.into_iter().rev().flatten().collect())
     }
 
     /// Wendet `ops` atomar an, ohne Verlauf (Abgleich des Spiegels). Verstösse (NaN, neue
     /// doppelte ids) → `Err(Meldungen)`, Dokument unverändert.
     pub fn apply(&mut self, ops: &[Op]) -> Result<(), Vec<String>> {
-        self.apply_checked(ops, false).map(|_| ())
+        self.apply_checked(ops.to_vec(), false).map(|_| ())
     }
 
-    /// Wie [`Document::apply`]; `sanitize` = die Ops können Nicht-endlich-Marken enthalten.
-    pub fn apply_marked(&mut self, ops: &[Op], sanitize: bool) -> Result<(), Vec<String>> {
+    /// Wie [`Document::apply`] (die Ops gehen ins Dokument über); `sanitize` = die Ops können
+    /// Nicht-endlich-Marken enthalten.
+    pub fn apply_marked(&mut self, ops: Vec<Op>, sanitize: bool) -> Result<(), Vec<String>> {
         self.apply_checked(ops, sanitize).map(|_| ())
     }
 
     /// Eine Benutzer-Änderung: anwenden, prüfen und als Undo-Schritt aufzeichnen (`key` =
-    /// `coalesceKey`, `now` = Zeit in ms für das Koaleszenz-Fenster). Die Ops gehen in den Verlauf
-    /// über (Redo) — das Dokument hält eigene Kopien, so wird jedes Element nur einmal kopiert.
+    /// `coalesceKey`, `now` = Zeit in ms für das Koaleszenz-Fenster). Die Ops gehen ohne Kopie ins
+    /// Dokument über; der Verlauf hält nur die inversen Ops (den Redo-Schritt liefert das Rückgängig-
+    /// machen selbst: die Inverse der Inversen, s. [`Document::undo`]).
     pub fn commit(&mut self, ops: Vec<Op>, key: Option<&str>, now: f64, sanitize: bool) -> Result<(), Vec<String>> {
-        let (as_add, inverse) = self.apply_checked(&ops, sanitize)?;
-        // Normalisiert: `replace` ohne Treffer wird als `add` aufgezeichnet (so trifft jedes
-        // aufgezeichnete `replace` ein vorhandenes Element, s. `ops::compact`).
-        let mut forward: Vec<Op> = ops
-            .into_iter()
-            .zip(as_add)
-            .map(|(op, add)| match op {
-                Op::Replace { collection, entity } if add => Op::Add { collection, items: vec![entity], at: None },
-                op => op,
-            })
-            .collect();
-        if sanitize {
-            // Angenommene Nicht-endlich-Marken auch im Verlauf als null.
-            crate::ops::sanitize_ops(&mut forward);
-        }
-        self.history.record(forward, inverse, key, now);
+        let inverse = self.apply_checked(ops, sanitize)?;
+        self.history.record(inverse, key, now);
         Ok(())
     }
 
-    fn apply_unchecked(&mut self, ops: &[Op]) {
-        let mut pos = std::mem::take(&mut self.pos);
-        for op in ops {
-            let hit = self.apply_raw(op, &mut pos);
-            self.mark_dirty(op, hit);
-        }
-        self.pos = pos;
-    }
-
     /// Einen Schritt zurück; liefert die angewendeten Ops (für die TS-Leseansicht), `None` = nichts.
+    /// Die dabei entstehenden Inversen sind der Redo-Schritt.
     pub fn undo(&mut self) -> Option<Vec<Op>> {
-        let step = self.history.pop_undo()?;
-        self.apply_unchecked(&step.inverse);
-        let ops = step.inverse.clone();
-        self.history.push_redo(step);
-        Some(ops)
+        let ops = self.history.pop_undo()?.ops;
+        let applied = ops.clone();
+        let redo = self.apply_inverting(ops);
+        self.history.push_redo(Step::new(redo));
+        Some(applied)
     }
 
     /// Einen Schritt vor; liefert die angewendeten Ops, `None` = nichts.
     pub fn redo(&mut self) -> Option<Vec<Op>> {
-        let step = self.history.pop_redo()?;
-        self.apply_unchecked(&step.forward);
-        let ops = step.forward.clone();
-        self.history.push_undo(step);
-        Some(ops)
+        let ops = self.history.pop_redo()?.ops;
+        let applied = ops.clone();
+        let undo = self.apply_inverting(ops);
+        self.history.push_undo(Step::new(undo));
+        Some(applied)
     }
 
     pub fn history(&self) -> &History {
@@ -890,6 +981,32 @@ mod tests {
             d.commit(ops(json!([{"kind":"setField","key":"blob","value":big.clone()}, {"kind":"setField","key":"i","value":i}])), None, i as f64 * 1000.0, false).unwrap();
         }
         assert!(d.history().bytes() <= 20_000 && d.history().undo_depth() < 20 && d.history().undo_depth() >= 1);
+    }
+
+    #[test]
+    #[ignore = "Messung: cargo test --release -- --ignored --nocapture"]
+    fn messung_grosse_polylinie() {
+        use std::time::Instant;
+        let pts: Vec<Value> = (0..5000).map(|k| json!({"x": k as f64 * 0.1, "y": (k as f64 / 50.0).sin()})).collect();
+        let mut drawings: Vec<Value> = (0..20000).map(|i| json!({"id": format!("d{i}"), "levelId": "eg", "geom": {"shape": "polyline", "closed": false, "pts": [{"x": i, "y": 1}, {"x": i + 1, "y": 2}]}})).collect();
+        drawings[19000] = json!({"id": "d19000", "levelId": "eg", "geom": {"shape": "polyline", "closed": false, "pts": pts}});
+        let mut d = Document::from_json(&json!({"id": "p", "drawings2d": drawings}).to_string()).unwrap();
+        let n = 30;
+        let (mut run, mut json, mut commit) = (0.0, 0.0, 0.0);
+        for k in 0..n {
+            let req: crate::grips::Request = serde_json::from_value(json!({"op": "moveGrip", "drawingId": "d19000", "index": 2500, "pt": [250.0 + (k % 5) as f64 * 0.01, 3], "scale": 100})).unwrap();
+            let t = Instant::now();
+            let res = crate::grips::run(&d.lookup(), &req).unwrap();
+            run += t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            let text = crate::grips::result_json(&res);
+            json += t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            d.commit(res.ops, Some("g"), k as f64, text.contains("\\u0001")).unwrap();
+            commit += t.elapsed().as_secs_f64();
+        }
+        let ms = |x: f64| x * 1e3 / n as f64;
+        eprintln!("Polylinie 5000 Punkte: Griff {:.2} ms, JSON {:.2} ms, Commit {:.2} ms", ms(run), ms(json), ms(commit));
     }
 
     #[test]

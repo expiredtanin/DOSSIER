@@ -62,7 +62,9 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
 }
 
 /// Abfragen auf der rohen Projekt-Wurzel (JSON-Baum, verlustfrei; Antwort JSON). `text`: Argument als Text/JSON.
-pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, text: &str) -> Result<String, String> {
+/// Elemente per id sucht `lk` (im Dokument über dessen Positions-Index).
+pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<String, String> {
+    let root = lk.root;
     match name {
         // Stiftsätze ([K4] S3, `pens.rs`): Ops statt Projekt-Kopien.
         "penRebakeOps" => json(&crate::pens::rebake_ops(root)),
@@ -101,13 +103,13 @@ pub fn run_root(root: &serde_json::Map<String, serde_json::Value>, name: &str, t
         // Griff-Änderungen ([K4] S3, `grips.rs`): `text` = JSON der Anfrage; Antwort `{ops, notice}` (ohne Commit).
         "gripOps" => {
             let req: crate::grips::Request = serde_json::from_str(text).map_err(|e| format!("gripOps: {e}"))?;
-            Ok(crate::grips::result_json(&crate::grips::run(root, &req)?))
+            Ok(crate::grips::result_json(&crate::grips::run(lk, &req)?))
         }
         // Objekt-Info der Auswahl ([K4] S3, `selection_info.rs`): `text` = JSON der gewählten ids je Art; Antwort
         // `Selection` (TS) oder null, Zahlen mit Nicht-endlich-Marken.
         "selectionInfo" => {
             let a: crate::selection_info::SelArgs = serde_json::from_str(text).map_err(|e| format!("selectionInfo: {e}"))?;
-            crate::selection_info::derive(root, &a).map(crate::selection_info::J::into_string)
+            crate::selection_info::derive(lk, &a).map(crate::selection_info::J::into_string)
         }
         // Bounding-Boxen von Zeichnungen (Ausrichten/Verteilen): `text` = JSON der ids.
         "drawingBBoxes" => {

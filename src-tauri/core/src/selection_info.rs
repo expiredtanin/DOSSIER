@@ -14,6 +14,7 @@
 //! Wo TS warf (unbekannter Wandtyp, Deckentyp oder Bauteil), kommt dieselbe Meldung als Fehler.
 //! Der B-Rep-Körper einer Extrusion (`spec`) bleibt in TS (truck-Pipeline, `plan/extrudedSolidSpec.ts`).
 
+use crate::document::Lookup;
 use crate::grips::{field, js_num, num_of, truthy, xy};
 use crate::jsmath::hypot2;
 use crate::jsnum;
@@ -40,9 +41,6 @@ pub struct SelArgs {
     pub column_id: Option<String>,
     pub roof_id: Option<String>,
     pub context_object_id: Option<String>,
-    /// Lage der Elemente in ihren Listen (Liste → Index), von der Leseansicht; der Kern prüft die id an
-    /// dieser Stelle und sucht sonst linear (die Suche über grosse Listen kostet je Element).
-    pub at: std::collections::HashMap<String, f64>,
 }
 
 // ── Hilfen ───────────────────────────────────────────────────────────────────
@@ -138,17 +136,6 @@ impl O {
 
 fn arr(v: Option<&Value>) -> &[Value] {
     v.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
-}
-
-/// Erstes Element mit `id` in einer Liste der Wurzel (`hint`: vermutete Lage, wird geprüft).
-fn find<'a>(root: &'a Map<String, Value>, list: &str, id: &str, hint: Option<f64>) -> Option<&'a Value> {
-    let l = arr(root.get(list));
-    if let Some(e) = hint.filter(|h| h.fract() == 0.0 && *h >= 0.0).and_then(|h| l.get(h as usize)) {
-        if id_of(e) == Some(id) {
-            return Some(e);
-        }
-    }
-    l.iter().find(|e| id_of(e) == Some(id))
 }
 
 /// Erstes Element, dessen Feld `key` gleich `val` ist (`===`; fehlend gleich fehlend).
@@ -433,43 +420,45 @@ fn effective(el: &Value, comp: Option<&Value>, cat: Option<&Value>) -> (Option<V
 // ── Abfrage ──────────────────────────────────────────────────────────────────
 
 /// Objekt-Info des ersten gewählten Elements (Vorrang wie `deriveSelection`); `Value::Null` = nichts.
-pub fn derive(root: &Map<String, Value>, a: &SelArgs) -> Result<J, String> {
+/// Gesucht wird über `lk` (im Dokument mit dessen Positions-Index, keine lineare Suche je Darstellung).
+pub fn derive(lk: &Lookup, a: &SelArgs) -> Result<J, String> {
     fn id(o: &Option<String>) -> Option<&str> {
         o.as_deref().filter(|s| !s.is_empty())
     }
+    let root = lk.root;
     if let Some(i) = id(&a.context_object_id) {
-        if let Some(o) = find(root, "context", i, a.at.get("context").copied()) {
+        if let Some(o) = lk.find("context", i) {
             return Ok(context_selection(root, o));
         }
     }
     if let Some(i) = id(&a.drawing_id) {
-        return Ok(find(root, "drawings2d", i, a.at.get("drawings2d").copied()).map_or(J::null(), |d| drawing_selection(root, d)));
+        return Ok(lk.find("drawings2d", i).map_or(J::null(), |d| drawing_selection(root, d)));
     }
     if let Some(i) = id(&a.extruded_solid_id) {
-        return Ok(find(root, "extrudedSolids", i, a.at.get("extrudedSolids").copied()).map_or(J::null(), |s| solid_selection(root, s)));
+        return Ok(lk.find("extrudedSolids", i).map_or(J::null(), |s| solid_selection(root, s)));
     }
     if let Some(i) = id(&a.column_id) {
-        return find(root, "columns", i, a.at.get("columns").copied()).map_or(Ok(J::null()), |c| column_selection(root, c));
+        return lk.find("columns", i).map_or(Ok(J::null()), |c| column_selection(root, c));
     }
     if let Some(i) = id(&a.opening_id) {
-        if let Some(o) = find(root, "openings", i, a.at.get("openings").copied()) {
-            return opening_selection(root, o);
+        if let Some(o) = lk.find("openings", i) {
+            return opening_selection(lk, o);
         }
     }
     if let Some(i) = a.wall_ids.first().filter(|s| !s.is_empty()) {
-        return find(root, "walls", i, a.at.get("walls").copied()).map_or(Ok(J::null()), |w| wall_selection(root, w));
+        return lk.find("walls", i).map_or(Ok(J::null()), |w| wall_selection(root, w));
     }
     if let Some(i) = id(&a.ceiling_id) {
-        return find(root, "ceilings", i, a.at.get("ceilings").copied()).map_or(Ok(J::null()), |c| ceiling_selection(root, c));
+        return lk.find("ceilings", i).map_or(Ok(J::null()), |c| ceiling_selection(root, c));
     }
     if let Some(i) = id(&a.roof_id) {
-        return find(root, "roofs", i, a.at.get("roofs").copied()).map_or(Ok(J::null()), |r| roof_selection(root, r));
+        return lk.find("roofs", i).map_or(Ok(J::null()), |r| roof_selection(root, r));
     }
     if let Some(i) = id(&a.stair_id) {
-        return find(root, "stairs", i, a.at.get("stairs").copied()).map_or(Ok(J::null()), |s| stair_selection(root, s));
+        return lk.find("stairs", i).map_or(Ok(J::null()), |s| stair_selection(root, s));
     }
     if let Some(i) = id(&a.room_id) {
-        return Ok(find(root, "rooms", i, a.at.get("rooms").copied()).map_or(J::null(), |r| room_selection(root, r)));
+        return Ok(lk.find("rooms", i).map_or(J::null(), |r| room_selection(root, r)));
     }
     Ok(J::null())
 }
@@ -698,16 +687,62 @@ fn roof_selection(root: &Map<String, Value>, r: &Value) -> Result<J, String> {
         .done())
 }
 
+/// Gemerkte Firsthöhen, Schlüssel = Inhalts-Hash (Dach-JSON + Traufhöhe); je Eintrag Dach, Traufhöhe,
+/// Firsthöhe (bei einem Treffer wird der Inhalt verglichen, nie veraltet).
+type RidgeCache = std::collections::HashMap<u64, Vec<(Value, u64, f64)>>;
+
+/// Höchstzahl gemerkter Firsthöhen (danach wird geleert).
+const RIDGE_CACHE_MAX: usize = 4096;
+
 thread_local! {
-    /// Zuletzt gerechnete Firsthöhen (Dach, Traufhöhe, Firsthöhe): die Objekt-Info fragt je Darstellung
-    /// neu, das Skelett eines Dachs kostet aber ein Vielfaches der übrigen Abfrage (TS merkte sich die
-    /// Geometrie je Dach-Objekt).
-    static RIDGE_CACHE: std::cell::RefCell<Vec<(Value, f64, f64)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Gerechnete Firsthöhen: die Objekt-Info fragt je Darstellung neu, das Skelett eines Dachs kostet aber
+    /// ein Vielfaches der übrigen Abfrage (TS merkte sich die Geometrie je Dach-Objekt). Nach Inhalt
+    /// gemerkt, damit auch das Hin- und Herwählen zwischen vielen Dächern trifft.
+    static RIDGE_CACHE: std::cell::RefCell<RidgeCache> = std::cell::RefCell::new(RidgeCache::new());
 }
 
-/// Firsthöhe über der Traufe (Dach-Geometrie des Kerns, `roof.rs`), gemerkt für die letzten Dächer.
+/// FNV-1a über einen JSON-Wert (Struktur, Schlüssel, Zahlen-Bits, Texte).
+fn value_hash(v: &Value, h: &mut u64) {
+    let mut put = |bytes: &[u8]| {
+        for b in bytes {
+            *h = (*h ^ *b as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    match v {
+        Value::Null => put(b"n"),
+        Value::Bool(b) => put(if *b { b"t" } else { b"f" }),
+        Value::Number(n) => {
+            put(b"#");
+            put(&n.as_f64().unwrap_or(f64::NAN).to_bits().to_le_bytes());
+        }
+        Value::String(s) => {
+            put(b"s");
+            put(s.as_bytes());
+            put(&[0]);
+        }
+        Value::Array(a) => {
+            put(b"[");
+            for x in a {
+                value_hash(x, h);
+            }
+            *h = (*h ^ b']' as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        Value::Object(m) => {
+            put(b"{");
+            for (k, x) in m {
+                *h = k.bytes().fold(*h, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3));
+                value_hash(x, h);
+            }
+            *h = (*h ^ b'}' as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
+/// Firsthöhe über der Traufe (Dach-Geometrie des Kerns, `roof.rs`), nach Inhalt gemerkt.
 fn roof_ridge_height(r: &Value, eaves: f64) -> Result<f64, String> {
-    let hit = RIDGE_CACHE.with(|c| c.borrow().iter().find(|(v, z, _)| z.to_bits() == eaves.to_bits() && v == r).map(|e| e.2));
+    let mut key = 0xcbf2_9ce4_8422_2325u64 ^ eaves.to_bits();
+    value_hash(r, &mut key);
+    let hit = RIDGE_CACHE.with(|c| c.borrow().get(&key).and_then(|l| l.iter().find(|(v, z, _)| *z == eaves.to_bits() && v == r).map(|e| e.2)));
     if let Some(h) = hit {
         return Ok(h);
     }
@@ -715,10 +750,10 @@ fn roof_ridge_height(r: &Value, eaves: f64) -> Result<f64, String> {
     let h = crate::roof::roof_geometry(&typed.params(), eaves).ridge_height;
     RIDGE_CACHE.with(|c| {
         let mut c = c.borrow_mut();
-        if c.len() >= 16 {
-            c.remove(0);
+        if c.len() >= RIDGE_CACHE_MAX {
+            c.clear();
         }
-        c.push((r.clone(), eaves, h));
+        c.entry(key).or_default().push((r.clone(), eaves.to_bits(), h));
     });
     Ok(h)
 }
@@ -768,12 +803,17 @@ fn roof_edges(r: &Value) -> J {
     J::arr(out)
 }
 
-fn opening_selection(root: &Map<String, Value>, o: &Value) -> Result<J, String> {
+fn opening_selection(lk: &Lookup, o: &Value) -> Result<J, String> {
     use crate::opening_geom::{opening_gap_quad, v, WallRef};
+    let root = lk.root;
     let cat = category(root, field(o, "categoryCode"));
     let color = color_of(o, cat, WALL_FALLBACK_COLOR);
     let weight = lw_or(None, cat, WALL_FALLBACK_MM);
-    let wall = find_by(arr(root.get("walls")), "id", field(o, "hostWallId"));
+    let host = field(o, "hostWallId");
+    let wall = match host.and_then(Value::as_str) {
+        Some(i) => lk.find("walls", i),
+        None => find_by(arr(root.get("walls")), "id", host),
+    };
     let floor = wall.and_then(|w| level(root, field(w, "floorId")));
     let mut quad = None;
     if let Some(w) = wall {
@@ -1213,7 +1253,7 @@ mod tests {
     }
 
     fn sel(r: &Map<String, Value>, a: Value) -> Result<Value, String> {
-        derive(r, &serde_json::from_value(a).unwrap()).map(|j| serde_json::from_str(&j.into_string()).unwrap())
+        derive(&Lookup::plain(r), &serde_json::from_value(a).unwrap()).map(|j| serde_json::from_str(&j.into_string()).unwrap())
     }
 
     #[test]

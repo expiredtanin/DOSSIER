@@ -234,7 +234,7 @@ export class ProjectDocument {
       }
       return { problems };
     }
-    const project = applyOps(base, ops);
+    const project = applyOps(base, ops, core().doc_last_hits(this.handle));
     this.mirror = project;
     return { project };
   }
@@ -253,7 +253,7 @@ export class ProjectDocument {
     const r = fromMarkedJson<{ ops: CoreOp[]; notice?: string } | { problems: string[] }>(out);
     if ("problems" in r) return r;
     if (r.ops.length === 0) return { project: base, ops: r.ops, notice: r.notice };
-    const project = applyOps(base, r.ops);
+    const project = applyOps(base, r.ops, core().doc_last_hits(this.handle));
     this.mirror = project;
     return { project, ops: r.ops, notice: r.notice };
   }
@@ -294,7 +294,7 @@ export class ProjectDocument {
     }
     const json = core()[fn](this.handle);
     if (!json) return null;
-    const project = applyOps(base, JSON.parse(json) as CoreOp[]);
+    const project = applyOps(base, JSON.parse(json) as CoreOp[], core().doc_last_hits(this.handle));
     this.mirror = project;
     return project;
   }

@@ -87,6 +87,7 @@ pub mod text_layout;
 pub mod plan_text;
 pub mod grips;
 pub mod selection_info;
+pub mod polyline_vertex;
 
 #[cfg(feature = "web")]
 mod web;

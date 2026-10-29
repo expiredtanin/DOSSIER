@@ -22,7 +22,7 @@ import {
   setField,
   setFieldIfChanged,
 } from "../core";
-import { withVertexType, type PolylineVertexType } from "../core";
+import type { PolylineVertexType } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import {
   addChildByCode,
@@ -218,7 +218,7 @@ export interface ProjectSlice {
   deleteDrawingPoint: (drawingId: string, index: number) => void;
   /**
    * Punkttyp eines Polylinien-Stützpunkts setzen (Eckpunkt/Bogenpunkt/Splinepunkt),
-   * s. `geometry/polylineVertexType.ts` — rechnet nur die Bulges der beiden
+   * im Kern (`polyline_vertex.rs`, Griff-Änderung `vertexType`) — rechnet nur die Bulges der beiden
    * anliegenden Segmente um.
    */
   setPolylineVertexType: (drawingId: string, index: number, type: PolylineVertexType) => void;
@@ -1037,15 +1037,7 @@ export function createProjectSlice(
       applyGrip({ op: "insertPoint", id: drawingId, seg: segIndex, pt: gripPt(pt) }),
 
     setPolylineVertexType: (drawingId, index, type) =>
-      applyChange((p) =>
-        patchItem(p, "drawings2d", drawingId, (d) => {
-          if (d.geom.shape !== "polyline" || d.locked) return d;
-          const g = d.geom;
-          const bulge = withVertexType(g, index, type);
-          const { bulge: _old, ...rest } = g;
-          return { ...d, geom: bulge.some((b) => b !== 0) ? { ...rest, bulge } : rest };
-        }),
-      ),
+      applyGrip({ op: "vertexType", id: drawingId, index, vertexType: type }),
 
     deleteDrawingPoint: (drawingId, index) => applyGrip({ op: "deletePoint", id: drawingId, index }),
 

@@ -128,3 +128,44 @@ describe("applyOps (schnelle Fassung) = Referenz", () => {
     expect(out.walls).toEqual([{ id: "a", z: 1 }, { id: "b" }, { id: "c" }]);
   });
 });
+
+describe("applyOps: id-Index über die Aufrufe hinweg", () => {
+  it("Ketten und Verzweigungen grosser Listen (geteilter Index) = Referenz", () => {
+    const walls = Array.from({ length: 200 }, (_, i) => ({ ...sampleProject.walls[0], id: `w${i}` }));
+    const big: Project = { ...sampleProject, walls, drawings2d: [] };
+    const r = rng(7);
+    const history: Project[] = [big];
+    for (let step = 0; step < 600; step++) {
+      // Meist auf dem letzten Stand weiter, manchmal auf einem älteren (Undo-Basis, fremde Projekte).
+      const base = r() < 0.7 ? history[history.length - 1] : history[Math.floor(r() * history.length)];
+      const ids = ["w0", "w5", "w199", "w150", `n${Math.floor(r() * 40)}`, `n${Math.floor(r() * 40)}`];
+      const ops: CoreOp[] = [];
+      for (let k = 0, n = 1 + Math.floor(r() * 4); k < n; k++) {
+        const x = r();
+        const id = ids[Math.floor(r() * ids.length)];
+        if (x < 0.6) ops.push({ kind: "replace", collection: "walls", entity: { id, v: step } });
+        else if (x < 0.8) ops.push({ kind: "add", collection: "walls", items: [{ id: `n${Math.floor(r() * 40)}` }] });
+        else if (x < 0.9) ops.push({ kind: "add", collection: "walls", items: [{ id }], at: Math.floor(r() * 300) });
+        else ops.push({ kind: "remove", collection: "walls", ids: [id] });
+      }
+      // Positions-Hinweise des Kerns (erstes Vorkommen, wie `Document::last_hits`): richtig, auf ein
+      // anderes Element, ausserhalb oder fehlend — das Ergebnis bleibt gleich.
+      let hits: number[] | undefined;
+      if (r() < 0.6) {
+        hits = [];
+        let cur = base;
+        for (const op of ops) {
+          const list = cur.walls as unknown as Entity[];
+          const first = op.kind === "replace" ? list.findIndex((e) => e.id === op.entity.id) : -1;
+          const other = list.findIndex((e, i) => i >= Math.floor(r() * list.length) && op.kind === "replace" && e.id !== op.entity.id);
+          const x = r();
+          hits.push(x < 0.6 ? first : x < 0.8 ? other : x < 0.9 ? list.length + 3 : -1);
+          cur = referenceApplyOps(cur, [op]);
+        }
+      }
+      const a = applyOps(base, ops, hits);
+      expect(JSON.stringify(a.walls)).toBe(JSON.stringify(referenceApplyOps(base, ops).walls));
+      history.push(a);
+    }
+  });
+});
